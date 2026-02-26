@@ -1,23 +1,184 @@
-import { queryFromD1, generateUUID } from './core';
+import { generateUUID } from './core';
 import { inferCharacterKind } from '@/lib/schemas';
+
+type DataCardType = 'character' | 'scenario' | 'history' | 'questionnaire';
+type DataCardSortBy = 'likes' | 'usage' | 'favorites' | 'created_at';
+
+type DataCardsRepoBundle = {
+  db: unknown;
+  countPublicDataCardsByNameType: (db: unknown, name: string, type: DataCardType) => Promise<number>;
+  insertDataCard: (
+    db: unknown,
+    input: {
+      id: string;
+      userId: number;
+      type: DataCardType;
+      name: string;
+      description: string;
+      data: string;
+      isPublic: number;
+      reviewStatus?: 'pending' | 'approved' | 'rejected';
+    },
+  ) => Promise<boolean>;
+  listUserDataCards: (
+    db: unknown,
+    input: { userId: number; search?: string; sortBy?: DataCardSortBy },
+  ) => Promise<any[]>;
+  updateDataCardByIdAndUser: (
+    db: unknown,
+    input: {
+      id: string;
+      userId: number;
+      name: string;
+      description: string;
+      isPublic?: number;
+      reviewStatus?: 'pending' | 'approved' | 'rejected';
+    },
+  ) => Promise<number>;
+  updateDataCardContentByIdAndUserWithChanges: (
+    db: unknown,
+    dataCardId: string,
+    userId: number,
+    dataJsonString: string,
+  ) => Promise<number>;
+  upsertDataCardUpdateByDataCardId: (
+    db: unknown,
+    input: {
+      id: string;
+      dataCardId: string;
+      userId: number;
+      payload: { name?: string; description?: string; data?: string };
+    },
+  ) => Promise<boolean>;
+  countUserUsedDataCardSlots: (db: unknown, userId: number) => Promise<number>;
+  getDataCardUpdateByDataCardId: (db: unknown, dataCardId: string) => Promise<any | null>;
+  deleteDataCardUpdateByDataCardId: (db: unknown, dataCardId: string) => Promise<void>;
+  softDeleteDataCardByIdAndUser: (db: unknown, cardId: string, userId: number) => Promise<number>;
+  permanentlyDeleteDataCardsByUserAndIds: (db: unknown, userId: number, ids: string[]) => Promise<number>;
+  listUserRecycleBinDataCards: (db: unknown, userId: number) => Promise<any[]>;
+  listUserRecycleBinDataCardIds: (db: unknown, userId: number) => Promise<string[]>;
+  restoreDataCardByIdAndUser: (db: unknown, cardId: string, userId: number) => Promise<number>;
+  hasDataCardOwnership: (db: unknown, cardId: string, userId: number) => Promise<boolean>;
+  getDataCardByIdWithAuthorAndTags: (
+    db: unknown,
+    input: { cardId: string; publicOnly: boolean },
+  ) => Promise<any | null>;
+  incrementPublicApprovedDataCardLikeCount: (db: unknown, cardId: string) => Promise<number>;
+  incrementPublicApprovedDataCardUsageCount: (db: unknown, cardId: string) => Promise<number>;
+  listPublicDataCardsWithFilters: (
+    db: unknown,
+    input: {
+      limit: number;
+      offset: number;
+      type?: DataCardType;
+      search?: string;
+      sortBy?: DataCardSortBy;
+      tagIds?: string[];
+      tagMatch?: 'any' | 'all';
+      author?: string;
+      minLikes?: number;
+      maxLikes?: number;
+      minUsage?: number;
+      maxUsage?: number;
+      minFavorites?: number;
+      maxFavorites?: number;
+      recommendedOnly?: boolean;
+      nativeOnly?: boolean;
+      nativeAllowedOnly?: boolean;
+    },
+  ) => Promise<any[]>;
+  getRandomPublicDataCardWithFilters: (
+    db: unknown,
+    input: {
+      type: DataCardType;
+      excludeIds?: string[];
+      minLikeCount?: number | null;
+      maxLikeCount?: number | null;
+      minUsageCount?: number | null;
+      maxUsageCount?: number | null;
+      minFavoriteCount?: number | null;
+      maxFavoriteCount?: number | null;
+    },
+  ) => Promise<any | null>;
+  getDataCardStatsRowsByIds: (db: unknown, ids: string[]) => Promise<Array<{ id: string; is_public: number; usage_count: number; like_count: number; favorite_count: number }>>;
+  listUserTopDataCardsByEngagement: (
+    db: unknown,
+    userId: number,
+    type: 'character' | 'scenario',
+    limit: number,
+  ) => Promise<UserTopDataCardRow[]>;
+  listUserProfileCardStatsRows: (
+    db: unknown,
+    userId: number,
+  ) => Promise<Array<{ type: DataCardType; data: string; is_public: number; like_count: number; favorite_count: number; usage_count: number }>>;
+};
+
+const readDataCardsRepoBundle = async (): Promise<DataCardsRepoBundle | null> => {
+  try {
+    const [{ getDrizzleDbFromRuntime }, repo] = await Promise.all([
+      import('@/lib/db/drizzle'),
+      import('@/lib/db/repositories/data-cards-core'),
+    ]);
+    const db = getDrizzleDbFromRuntime();
+    if (!db) return null;
+
+    return {
+      db,
+      countPublicDataCardsByNameType: repo.countPublicDataCardsByNameType as DataCardsRepoBundle['countPublicDataCardsByNameType'],
+      insertDataCard: repo.insertDataCard as DataCardsRepoBundle['insertDataCard'],
+      listUserDataCards: repo.listUserDataCards as DataCardsRepoBundle['listUserDataCards'],
+      updateDataCardByIdAndUser: repo.updateDataCardByIdAndUser as DataCardsRepoBundle['updateDataCardByIdAndUser'],
+      updateDataCardContentByIdAndUserWithChanges: repo.updateDataCardContentByIdAndUserWithChanges as DataCardsRepoBundle['updateDataCardContentByIdAndUserWithChanges'],
+      upsertDataCardUpdateByDataCardId: repo.upsertDataCardUpdateByDataCardId as DataCardsRepoBundle['upsertDataCardUpdateByDataCardId'],
+      countUserUsedDataCardSlots: repo.countUserUsedDataCardSlots as DataCardsRepoBundle['countUserUsedDataCardSlots'],
+      getDataCardUpdateByDataCardId: repo.getDataCardUpdateByDataCardId as DataCardsRepoBundle['getDataCardUpdateByDataCardId'],
+      deleteDataCardUpdateByDataCardId: repo.deleteDataCardUpdateByDataCardId as DataCardsRepoBundle['deleteDataCardUpdateByDataCardId'],
+      softDeleteDataCardByIdAndUser: repo.softDeleteDataCardByIdAndUser as DataCardsRepoBundle['softDeleteDataCardByIdAndUser'],
+      permanentlyDeleteDataCardsByUserAndIds: repo.permanentlyDeleteDataCardsByUserAndIds as DataCardsRepoBundle['permanentlyDeleteDataCardsByUserAndIds'],
+      listUserRecycleBinDataCards: repo.listUserRecycleBinDataCards as DataCardsRepoBundle['listUserRecycleBinDataCards'],
+      listUserRecycleBinDataCardIds: repo.listUserRecycleBinDataCardIds as DataCardsRepoBundle['listUserRecycleBinDataCardIds'],
+      restoreDataCardByIdAndUser: repo.restoreDataCardByIdAndUser as DataCardsRepoBundle['restoreDataCardByIdAndUser'],
+      hasDataCardOwnership: repo.hasDataCardOwnership as DataCardsRepoBundle['hasDataCardOwnership'],
+      getDataCardByIdWithAuthorAndTags: repo.getDataCardByIdWithAuthorAndTags as DataCardsRepoBundle['getDataCardByIdWithAuthorAndTags'],
+      incrementPublicApprovedDataCardLikeCount: repo.incrementPublicApprovedDataCardLikeCount as DataCardsRepoBundle['incrementPublicApprovedDataCardLikeCount'],
+      incrementPublicApprovedDataCardUsageCount: repo.incrementPublicApprovedDataCardUsageCount as DataCardsRepoBundle['incrementPublicApprovedDataCardUsageCount'],
+      listPublicDataCardsWithFilters: repo.listPublicDataCardsWithFilters as DataCardsRepoBundle['listPublicDataCardsWithFilters'],
+      getRandomPublicDataCardWithFilters: repo.getRandomPublicDataCardWithFilters as DataCardsRepoBundle['getRandomPublicDataCardWithFilters'],
+      getDataCardStatsRowsByIds: repo.getDataCardStatsRowsByIds as DataCardsRepoBundle['getDataCardStatsRowsByIds'],
+      listUserTopDataCardsByEngagement: repo.listUserTopDataCardsByEngagement as DataCardsRepoBundle['listUserTopDataCardsByEngagement'],
+      listUserProfileCardStatsRows: repo.listUserProfileCardStatsRows as DataCardsRepoBundle['listUserProfileCardStatsRows'],
+    };
+  } catch {
+    return null;
+  }
+};
+
+const normalizeIsPublicValue = (isPublic: boolean | number): number =>
+  typeof isPublic === 'number' ? Math.floor(isPublic) : isPublic ? 1 : 0;
+
+const withTagIds = (rows: any[]): any[] => {
+  return rows.map((row) => {
+    const raw = typeof row?.tag_ids === 'string' ? row.tag_ids : '';
+    const tagIds = raw
+      .split(',')
+      .map((id: string) => id.trim())
+      .filter(Boolean);
+    return { ...row, tagIds };
+  });
+};
 
 // 检查公开数据卡是否存在同名
 export async function checkPublicCardNameExists(
   name: string,
-  type: 'character' | 'scenario' | 'history' | 'questionnaire'
+  type: DataCardType,
 ): Promise<boolean> {
   try {
-    const result = await queryFromD1(
-      'SELECT COUNT(*) as count FROM data_cards WHERE name = ? AND type = ? AND is_public = 1 AND deleted_at IS NULL',
-      [name, type]
-    ) as any;
-    
-    if (result.success && result.result && result.result[0]?.results?.length > 0) {
-      return result.result[0].results[0].count > 0;
-    }
-    return false;
+    const bundle = await readDataCardsRepoBundle();
+    if (!bundle) return false;
+    const count = await bundle.countPublicDataCardsByNameType(bundle.db, name, type);
+    return count > 0;
   } catch (error) {
-    console.error("检查同名数据卡失败:", error);
+    console.error('检查同名数据卡失败:', error);
     return false;
   }
 }
@@ -26,47 +187,43 @@ export async function checkPublicCardNameExists(
 export async function createDataCardWithAuthor(
   userId: number,
   username: string,
-  type: 'character' | 'scenario' | 'history' | 'questionnaire',
+  type: DataCardType,
   name: string,
   description: string,
   data: string,
   isPublic: boolean | number = false,
-  reviewStatus: 'pending' | 'approved' // [v0.4.2 新增] 传入审查状态
+  reviewStatus: 'pending' | 'approved',
 ): Promise<{ success: boolean; id?: string; error?: string }> {
   try {
-    // 如果是公开卡，先检查是否有同名
-    // 暂时取消检查
-    // if (isPublic) {
-    //   const exists = await checkPublicCardNameExists(name, type);
-    //   if (exists) {
-    //     return { success: false, error: '已存在同名的公开数据卡，请修改名称' };
-    //   }
-    // }
-    
-    // 创建包含作者信息的数据对象
+    const bundle = await readDataCardsRepoBundle();
+    if (!bundle) return { success: false, error: '创建失败' };
+
     const dataWithAuthor = JSON.stringify({
       ...JSON.parse(data),
       _author: username,
-      _authorId: userId
+      _authorId: userId,
     });
-    
-    // 生成 UUID 作为主键
-    const uuid = generateUUID();
 
-    const normalizedPublic = typeof isPublic === 'number' ? Math.floor(isPublic) : (isPublic ? 1 : 0);
-    
-    const insertSql = normalizedPublic === 1
-      ? 'INSERT INTO data_cards (id, user_id, type, name, description, data, is_public, review_status, public_since) VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)'
-      : 'INSERT INTO data_cards (id, user_id, type, name, description, data, is_public, review_status, public_since) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)';
+    const id = generateUUID();
+    const normalizedPublic = normalizeIsPublicValue(isPublic);
 
-    const result = await queryFromD1(insertSql, [uuid, userId, type, name, description, dataWithAuthor, normalizedPublic, reviewStatus]) as any;
-    
-    if (result.success && result.result) {
-      return { success: true, id: uuid };
+    const ok = await bundle.insertDataCard(bundle.db, {
+      id,
+      userId,
+      type,
+      name,
+      description,
+      data: dataWithAuthor,
+      isPublic: normalizedPublic,
+      reviewStatus,
+    });
+
+    if (ok) {
+      return { success: true, id };
     }
     return { success: false, error: '创建失败' };
   } catch (error) {
-    console.error("创建数据卡失败:", error);
+    console.error('创建数据卡失败:', error);
     return { success: false, error: '创建数据卡失败' };
   }
 }
@@ -74,29 +231,32 @@ export async function createDataCardWithAuthor(
 // 创建数据卡（基础版，向后兼容）
 export async function createDataCard(
   userId: number,
-  type: 'character' | 'scenario' | 'history' | 'questionnaire',
+  type: DataCardType,
   name: string,
   description: string,
   data: string,
-  isPublic: boolean | number = false
+  isPublic: boolean | number = false,
 ): Promise<string | null> {
   try {
-    // 生成 UUID 作为主键
-    const uuid = generateUUID();
+    const bundle = await readDataCardsRepoBundle();
+    if (!bundle) return null;
 
-    const normalizedPublic = typeof isPublic === 'number' ? Math.floor(isPublic) : (isPublic ? 1 : 0);
-    
-    const insertSql = normalizedPublic === 1
-      ? 'INSERT INTO data_cards (id, user_id, type, name, description, data, is_public, public_since) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)'
-      : 'INSERT INTO data_cards (id, user_id, type, name, description, data, is_public, public_since) VALUES (?, ?, ?, ?, ?, ?, ?, NULL)';
-    const result = await queryFromD1(insertSql, [uuid, userId, type, name, description, data, normalizedPublic]) as any;
-    
-    if (result.success && result.result) {
-      return uuid;
-    }
-    return null;
+    const id = generateUUID();
+    const normalizedPublic = normalizeIsPublicValue(isPublic);
+
+    const ok = await bundle.insertDataCard(bundle.db, {
+      id,
+      userId,
+      type,
+      name,
+      description,
+      data,
+      isPublic: normalizedPublic,
+    });
+
+    return ok ? id : null;
   } catch (error) {
-    console.error("创建数据卡失败:", error);
+    console.error('创建数据卡失败:', error);
     return null;
   }
 }
@@ -105,61 +265,21 @@ export async function createDataCard(
 export async function getUserDataCards(
   userId: number,
   search?: string,
-  sortBy?: 'likes' | 'usage' | 'favorites' | 'created_at'
+  sortBy?: DataCardSortBy,
 ): Promise<any[]> {
   try {
-    let sql = `
-      SELECT dc.*, 
-             du.data AS pending_data, 
-             du.name AS pending_name, 
-             du.description AS pending_description, 
-             du.updated_at AS pending_updated_at,
-             (
-               SELECT group_concat(DISTINCT dct.tag_id)
-               FROM data_card_tags dct
-               WHERE dct.data_card_id = dc.id
-             ) AS tag_ids
-      FROM data_cards dc
-      LEFT JOIN data_card_updates du ON du.data_card_id = dc.id
-      WHERE dc.user_id = ? AND dc.deleted_at IS NULL`;
-    const params: any[] = [userId];
-    
-    if (search) {
-      // 注意：data_card_updates 也包含 name/description 字段，未加表前缀会触发“ambiguous column name”错误
-      sql += ' AND (dc.name LIKE ? OR dc.description LIKE ?)';
-      params.push(`%${search}%`, `%${search}%`);
-    }
-    
-    // 添加排序逻辑
-    let orderBy = 'updated_at DESC'; // 默认按更新时间排序
-    if (sortBy === 'likes') {
-      orderBy = 'like_count DESC, updated_at DESC';
-    } else if (sortBy === 'usage') {
-      orderBy = 'usage_count DESC, updated_at DESC';
-    } else if (sortBy === 'favorites') {
-      orderBy = 'favorite_count DESC, updated_at DESC';
-    } else if (sortBy === 'created_at') {
-      orderBy = 'created_at DESC';
-    }
-    
-    sql += ` ORDER BY ${orderBy}`;
-    
-    const result = await queryFromD1(sql, params) as any;
-    
-    if (result.success && result.result && result.result[0]?.results) {
-      const rows = result.result[0].results as any[];
-      return rows.map((row) => {
-        const raw = typeof row?.tag_ids === 'string' ? row.tag_ids : '';
-        const tagIds = raw
-          .split(',')
-          .map((id: string) => id.trim())
-          .filter(Boolean);
-        return { ...row, tagIds };
-      });
-    }
-    return [];
+    const bundle = await readDataCardsRepoBundle();
+    if (!bundle) return [];
+
+    const rows = await bundle.listUserDataCards(bundle.db, {
+      userId,
+      search,
+      sortBy,
+    });
+
+    return withTagIds(rows);
   } catch (error) {
-    console.error("获取数据卡失败:", error);
+    console.error('获取数据卡失败:', error);
     return [];
   }
 }
@@ -171,42 +291,24 @@ export async function updateDataCard(
   name: string,
   description: string,
   isPublic?: boolean | number,
-  reviewStatus?: 'pending' | 'approved' | 'rejected' // [v0.4.2 新增] 允许更新审查状态
+  reviewStatus?: 'pending' | 'approved' | 'rejected',
 ): Promise<boolean> {
   try {
-    let sql = 'UPDATE data_cards SET name = ?, description = ?, updated_at = CURRENT_TIMESTAMP';
-    const params: any[] = [name, description];
-    
-    if (isPublic !== undefined) {
-      const normalizedPublic = typeof isPublic === 'number' ? Math.floor(isPublic) : (isPublic ? 1 : 0);
-      sql += ', is_public = ?';
-      params.push(normalizedPublic);
+    const bundle = await readDataCardsRepoBundle();
+    if (!bundle) return false;
 
-      // 仅在公开状态发生变化时更新 public_since：
-      // - 变为公开（1）：记录 CURRENT_TIMESTAMP
-      // - 变为私有/封禁（!=1）：置空
-      // - 未变化：保持原值（避免更新名称/描述时误触发“连续公开时长”门槛）
-      sql += ', public_since = CASE WHEN is_public <> ? THEN (CASE WHEN ? = 1 THEN CURRENT_TIMESTAMP ELSE NULL END) ELSE public_since END';
-      params.push(normalizedPublic, normalizedPublic);
-    }
+    const changes = await bundle.updateDataCardByIdAndUser(bundle.db, {
+      id,
+      userId,
+      name,
+      description,
+      isPublic: isPublic === undefined ? undefined : normalizeIsPublicValue(isPublic),
+      reviewStatus,
+    });
 
-    // [v0.4.2 新增] 如果传入了 reviewStatus，则一并更新
-    if (reviewStatus) {
-        sql += ', review_status = ?';
-        params.push(reviewStatus);
-    }
-
-    sql += ' WHERE id = ? AND user_id = ? AND deleted_at IS NULL';
-    params.push(id, userId);
-    
-    const result = await queryFromD1(sql, params) as any;
-    
-    if (result.success && result.result && result.result[0]?.meta?.changes > 0) {
-      return true;
-    }
-    return false;
+    return changes > 0;
   } catch (error) {
-    console.error("更新数据卡失败:", error);
+    console.error('更新数据卡失败:', error);
     return false;
   }
 }
@@ -218,13 +320,17 @@ export async function updateDataCardContentByIdAndUser(
   dataJsonString: string,
 ): Promise<boolean> {
   try {
-    const result = (await queryFromD1(
-      'UPDATE data_cards SET data = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?',
-      [dataJsonString, id, userId],
-    )) as any;
+    const bundle = await readDataCardsRepoBundle();
+    if (!bundle) return false;
 
-    const changes = result?.result?.[0]?.meta?.changes ?? 0;
-    return Boolean(result?.success && changes > 0);
+    const changes = await bundle.updateDataCardContentByIdAndUserWithChanges(
+      bundle.db,
+      id,
+      userId,
+      dataJsonString,
+    );
+
+    return changes > 0;
   } catch (error) {
     console.error('更新数据卡内容失败:', error);
     return false;
@@ -235,44 +341,18 @@ export async function updateDataCardContentByIdAndUser(
 export async function upsertDataCardUpdate(
   dataCardId: string,
   userId: number,
-  payload: { name?: string; description?: string; data?: string }
+  payload: { name?: string; description?: string; data?: string },
 ): Promise<boolean> {
   try {
-    const existing = await queryFromD1(
-      'SELECT id FROM data_card_updates WHERE data_card_id = ?',
-      [dataCardId]
-    ) as any;
+    const bundle = await readDataCardsRepoBundle();
+    if (!bundle) return false;
 
-    const hasExisting = existing.success && existing.result?.[0]?.results?.length > 0;
-    const id = hasExisting ? existing.result[0].results[0].id : generateUUID();
-
-    const fields = ['data_card_id', 'user_id'];
-    const values: any[] = [dataCardId, userId];
-
-    if (payload.name !== undefined) {
-      fields.push('name');
-      values.push(payload.name);
-    }
-    if (payload.description !== undefined) {
-      fields.push('description');
-      values.push(payload.description);
-    }
-    if (payload.data !== undefined) {
-      fields.push('data');
-      values.push(payload.data);
-    }
-
-    if (!hasExisting) {
-      const placeholders = fields.map(() => '?').join(', ');
-      const sql = `INSERT INTO data_card_updates (id, ${fields.join(', ')}) VALUES (?, ${placeholders})`;
-      const result = await queryFromD1(sql, [id, ...values]) as any;
-      return result.success;
-    } else {
-      const setClauses = fields.map((f) => `${f} = ?`).join(', ');
-      const sql = `UPDATE data_card_updates SET ${setClauses}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`;
-      const result = await queryFromD1(sql, [...values, id]) as any;
-      return result.success && result.result?.[0]?.meta?.changes > 0;
-    }
+    return await bundle.upsertDataCardUpdateByDataCardId(bundle.db, {
+      id: generateUUID(),
+      dataCardId,
+      userId,
+      payload,
+    });
   } catch (error) {
     console.error('写入 data_card_updates 失败:', error);
     return false;
@@ -282,19 +362,9 @@ export async function upsertDataCardUpdate(
 // 计算用户已占用的槽位数量（热门卡片不计入）
 export async function getUserUsedSlots(userId: number): Promise<number> {
   try {
-    const result = await queryFromD1(
-      `SELECT COUNT(*) as count
-       FROM data_cards
-       WHERE user_id = ?
-         AND deleted_at IS NULL
-         AND NOT (favorite_count > 10 AND usage_count > 30)`,
-      [userId]
-    ) as any;
-
-    if (result.success && result.result && result.result[0]?.results?.length > 0) {
-      return result.result[0].results[0].count;
-    }
-    return 0;
+    const bundle = await readDataCardsRepoBundle();
+    if (!bundle) return 0;
+    return await bundle.countUserUsedDataCardSlots(bundle.db, userId);
   } catch (error) {
     console.error('获取已用槽位失败:', error);
     return 0;
@@ -304,15 +374,9 @@ export async function getUserUsedSlots(userId: number): Promise<number> {
 // 读取待审核更新
 export async function getDataCardUpdate(dataCardId: string): Promise<any | null> {
   try {
-    const result = await queryFromD1(
-      'SELECT * FROM data_card_updates WHERE data_card_id = ?',
-      [dataCardId]
-    ) as any;
-
-    if (result.success && result.result?.[0]?.results?.length > 0) {
-      return result.result[0].results[0];
-    }
-    return null;
+    const bundle = await readDataCardsRepoBundle();
+    if (!bundle) return null;
+    return await bundle.getDataCardUpdateByDataCardId(bundle.db, dataCardId);
   } catch (error) {
     console.error('获取 data_card_updates 失败:', error);
     return null;
@@ -322,11 +386,10 @@ export async function getDataCardUpdate(dataCardId: string): Promise<any | null>
 // 删除待审核更新
 export async function deleteDataCardUpdate(dataCardId: string): Promise<boolean> {
   try {
-    const result = await queryFromD1(
-      'DELETE FROM data_card_updates WHERE data_card_id = ?',
-      [dataCardId]
-    ) as any;
-    return result.success;
+    const bundle = await readDataCardsRepoBundle();
+    if (!bundle) return false;
+    await bundle.deleteDataCardUpdateByDataCardId(bundle.db, dataCardId);
+    return true;
   } catch (error) {
     console.error('删除 data_card_updates 失败:', error);
     return false;
@@ -336,17 +399,12 @@ export async function deleteDataCardUpdate(dataCardId: string): Promise<boolean>
 // 删除数据卡
 export async function deleteDataCard(id: string, userId: number): Promise<boolean> {
   try {
-    const result = await queryFromD1(
-      'UPDATE data_cards SET deleted_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ? AND deleted_at IS NULL',
-      [id, userId]
-    ) as any;
-
-    if (result.success && result.result && result.result[0]?.meta?.changes > 0) {
-      return true;
-    }
-    return false;
+    const bundle = await readDataCardsRepoBundle();
+    if (!bundle) return false;
+    const changes = await bundle.softDeleteDataCardByIdAndUser(bundle.db, id, userId);
+    return changes > 0;
   } catch (error) {
-    console.error("删除数据卡失败:", error);
+    console.error('删除数据卡失败:', error);
     return false;
   }
 }
@@ -358,18 +416,11 @@ export async function permanentlyDeleteDataCards(ids: string[], userId: number):
   }
 
   try {
-    const placeholders = ids.map(() => '?').join(',');
-    const result = await queryFromD1(
-      `DELETE FROM data_cards WHERE user_id = ? AND id IN (${placeholders})`,
-      [userId, ...ids]
-    ) as any;
-
-    if (result.success && result.result) {
-      return result.result[0]?.meta?.changes ?? 0;
-    }
-    return 0;
+    const bundle = await readDataCardsRepoBundle();
+    if (!bundle) return 0;
+    return await bundle.permanentlyDeleteDataCardsByUserAndIds(bundle.db, userId, ids);
   } catch (error) {
-    console.error("永久删除数据卡失败:", error);
+    console.error('永久删除数据卡失败:', error);
     return 0;
   }
 }
@@ -377,17 +428,11 @@ export async function permanentlyDeleteDataCards(ids: string[], userId: number):
 // 获取用户回收站中的数据卡
 export async function getUserRecycleBinCards(userId: number): Promise<any[]> {
   try {
-    const result = await queryFromD1(
-      'SELECT * FROM data_cards WHERE user_id = ? AND deleted_at IS NOT NULL ORDER BY deleted_at DESC',
-      [userId]
-    ) as any;
-
-    if (result.success && result.result && result.result[0]?.results) {
-      return result.result[0].results;
-    }
-    return [];
+    const bundle = await readDataCardsRepoBundle();
+    if (!bundle) return [];
+    return await bundle.listUserRecycleBinDataCards(bundle.db, userId);
   } catch (error) {
-    console.error("获取回收站数据卡失败:", error);
+    console.error('获取回收站数据卡失败:', error);
     return [];
   }
 }
@@ -395,17 +440,12 @@ export async function getUserRecycleBinCards(userId: number): Promise<any[]> {
 // 从回收站恢复数据卡
 export async function restoreDataCard(cardId: string, userId: number): Promise<boolean> {
   try {
-    const result = await queryFromD1(
-      'UPDATE data_cards SET deleted_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ? AND deleted_at IS NOT NULL',
-      [cardId, userId]
-    ) as any;
-
-    if (result.success && result.result && result.result[0]?.meta?.changes > 0) {
-      return true;
-    }
-    return false;
+    const bundle = await readDataCardsRepoBundle();
+    if (!bundle) return false;
+    const changes = await bundle.restoreDataCardByIdAndUser(bundle.db, cardId, userId);
+    return changes > 0;
   } catch (error) {
-    console.error("恢复数据卡失败:", error);
+    console.error('恢复数据卡失败:', error);
     return false;
   }
 }
@@ -413,25 +453,20 @@ export async function restoreDataCard(cardId: string, userId: number): Promise<b
 // 裁剪回收站，只保留最新的 keep 条目
 export async function pruneUserRecycleBin(userId: number, keep: number): Promise<string[]> {
   try {
-    const result = await queryFromD1(
-      'SELECT id FROM data_cards WHERE user_id = ? AND deleted_at IS NOT NULL ORDER BY deleted_at DESC',
-      [userId]
-    ) as any;
+    const bundle = await readDataCardsRepoBundle();
+    if (!bundle) return [];
 
-    if (!(result.success && result.result && result.result[0]?.results)) {
+    const ids = await bundle.listUserRecycleBinDataCardIds(bundle.db, userId);
+    const safeKeep = Math.max(0, Math.floor(keep));
+    if (ids.length <= safeKeep) {
       return [];
     }
 
-    const rows = result.result[0].results as Array<{ id: string }>;
-    if (rows.length <= keep) {
-      return [];
-    }
-
-    const idsToDelete = rows.slice(keep).map((row) => row.id);
-    await permanentlyDeleteDataCards(idsToDelete, userId);
+    const idsToDelete = ids.slice(safeKeep);
+    await bundle.permanentlyDeleteDataCardsByUserAndIds(bundle.db, userId, idsToDelete);
     return idsToDelete;
   } catch (error) {
-    console.error("裁剪回收站失败:", error);
+    console.error('裁剪回收站失败:', error);
     return [];
   }
 }
@@ -439,17 +474,11 @@ export async function pruneUserRecycleBin(userId: number, keep: number): Promise
 // 验证数据卡所有权
 export async function verifyCardOwnership(cardId: string, userId: number): Promise<boolean> {
   try {
-    const result = await queryFromD1(
-      'SELECT id FROM data_cards WHERE id = ? AND user_id = ?',
-      [cardId, userId]
-    ) as any;
-    
-    if (result.success && result.result && result.result[0]?.results?.length > 0) {
-      return true;
-    }
-    return false;
+    const bundle = await readDataCardsRepoBundle();
+    if (!bundle) return false;
+    return await bundle.hasDataCardOwnership(bundle.db, cardId, userId);
   } catch (error) {
-    console.error("验证数据卡所有权失败:", error);
+    console.error('验证数据卡所有权失败:', error);
     return false;
   }
 }
@@ -457,37 +486,24 @@ export async function verifyCardOwnership(cardId: string, userId: number): Promi
 // 通过ID获取单个数据卡（公开或私有）
 export async function getDataCardById(cardId: string, isPublic: boolean = false): Promise<any | null> {
   try {
-    let sql = `
-      SELECT dc.*, u.username,
-             (
-               SELECT group_concat(DISTINCT dct.tag_id)
-               FROM data_card_tags dct
-               WHERE dct.data_card_id = dc.id
-             ) AS tag_ids
-      FROM data_cards dc
-      JOIN users u ON dc.user_id = u.id
-      WHERE dc.id = ? AND dc.deleted_at IS NULL`;
-    const params: any[] = [cardId];
+    const bundle = await readDataCardsRepoBundle();
+    if (!bundle) return null;
 
-    // [v0.4.2 修改] 如果是查询公开卡，则必须是通过审查的
-    if (isPublic) {
-        sql += " AND dc.is_public = 1 AND dc.review_status = 'approved'";
-    }
-    
-    const result = await queryFromD1(sql, params) as any;
-    
-    if (result.success && result.result && result.result[0]?.results?.length > 0) {
-      const row = result.result[0].results[0] as any;
-      const raw = typeof row?.tag_ids === 'string' ? row.tag_ids : '';
-      const tagIds = raw
-        .split(',')
-        .map((id: string) => id.trim())
-        .filter(Boolean);
-      return { ...row, tagIds };
-    }
-    return null;
+    const row = await bundle.getDataCardByIdWithAuthorAndTags(bundle.db, {
+      cardId,
+      publicOnly: isPublic,
+    });
+    if (!row) return null;
+
+    const raw = typeof row?.tag_ids === 'string' ? row.tag_ids : '';
+    const tagIds = raw
+      .split(',')
+      .map((id: string) => id.trim())
+      .filter(Boolean);
+
+    return { ...row, tagIds };
   } catch (error) {
-    console.error("通过ID获取数据卡失败:", error);
+    console.error('通过ID获取数据卡失败:', error);
     return null;
   }
 }
@@ -495,14 +511,12 @@ export async function getDataCardById(cardId: string, isPublic: boolean = false)
 // 增加数据卡的点赞数
 export async function incrementDataCardLike(cardId: string): Promise<boolean> {
   try {
-    const result = await queryFromD1(
-      "UPDATE data_cards SET like_count = like_count + 1 WHERE id = ? AND is_public = 1 AND review_status = 'approved' AND deleted_at IS NULL",
-      [cardId]
-    ) as any;
-    
-    return result.success && result.result && result.result[0]?.meta?.changes > 0;
+    const bundle = await readDataCardsRepoBundle();
+    if (!bundle) return false;
+    const changes = await bundle.incrementPublicApprovedDataCardLikeCount(bundle.db, cardId);
+    return changes > 0;
   } catch (error) {
-    console.error("增加数据卡点赞数失败:", error);
+    console.error('增加数据卡点赞数失败:', error);
     return false;
   }
 }
@@ -510,36 +524,25 @@ export async function incrementDataCardLike(cardId: string): Promise<boolean> {
 // 增加数据卡的使用次数
 export async function incrementDataCardUsage(cardId: string): Promise<boolean> {
   try {
-    const result = await queryFromD1(
-      "UPDATE data_cards SET usage_count = usage_count + 1 WHERE id = ? AND is_public = 1 AND review_status = 'approved' AND deleted_at IS NULL",
-      [cardId]
-    ) as any;
-    
-    return result.success && result.result && result.result[0]?.meta?.changes > 0;
+    const bundle = await readDataCardsRepoBundle();
+    if (!bundle) return false;
+    const changes = await bundle.incrementPublicApprovedDataCardUsageCount(bundle.db, cardId);
+    return changes > 0;
   } catch (error) {
-    console.error("增加数据卡使用次数失败:", error);
+    console.error('增加数据卡使用次数失败:', error);
     return false;
   }
 }
 
 /**
  * 获取公开的数据卡列表，增加了完整的筛选功能。
- * @param author - 作者用户名 (精确匹配)
- * @param tagIds - 标签 ID 过滤（任一匹配）
- * @param tagMatch - 标签匹配模式（any/任一, all/全部）
- * @param minLikes - 最小点赞数
- * @param maxLikes - 最大点赞数
- * @param minUsage - 最少使用数
- * @param maxUsage - 最多使用数
- * @param nativeOnly - 仅返回原生数据卡（依赖 data_card_metrics.is_native = 1）
- * @param nativeAllowedOnly - 仅返回问卷中的“原生许可”数据（nativeAllowed=true）
  */
 export async function getPublicDataCards(
   limit: number = 20,
   offset: number = 0,
-  type?: 'character' | 'scenario' | 'history' | 'questionnaire',
+  type?: DataCardType,
   search?: string,
-  sortBy?: 'likes' | 'usage' | 'favorites' | 'created_at',
+  sortBy?: DataCardSortBy,
   tagIds?: string[],
   tagMatch?: 'any' | 'all',
   author?: string,
@@ -554,150 +557,41 @@ export async function getPublicDataCards(
   nativeAllowedOnly?: boolean,
 ): Promise<any[]> {
   try {
-    // 基础查询语句
-    let sql = `
-      SELECT dc.*, u.username,
-             (
-               SELECT group_concat(DISTINCT dct.tag_id)
-               FROM data_card_tags dct
-               WHERE dct.data_card_id = dc.id
-             ) AS tag_ids
-      FROM data_cards dc
-      JOIN users u ON dc.user_id = u.id
-      WHERE dc.is_public = 1 AND dc.review_status = 'approved' AND dc.deleted_at IS NULL`;
-    const params: any[] = [];
-    
-    // -- 动态构建 WHERE 子句 --
-    // 这是一个稳健的实践，可以根据传入的参数动态添加过滤条件
-    if (type) {
-      sql += ' AND dc.type = ?';
-      params.push(type);
-    }
-    if (search) {
-      sql += ' AND (dc.name LIKE ? OR dc.description LIKE ?)';
-      params.push(`%${search}%`, `%${search}%`);
-    }
-    if (Array.isArray(tagIds) && tagIds.length > 0) {
-      const uniq = Array.from(new Set(tagIds.map((id) => id.trim()).filter(Boolean)));
-      if (uniq.length > 0) {
-        const placeholders = uniq.map(() => '?').join(', ');
-        if (tagMatch === 'all') {
-          sql += ` AND (
-            SELECT COUNT(DISTINCT dct.tag_id)
-            FROM data_card_tags dct
-            WHERE dct.data_card_id = dc.id
-              AND dct.tag_id IN (${placeholders})
-          ) = ?`;
-          params.push(...uniq, uniq.length);
-        } else {
-          sql += ` AND EXISTS (
-            SELECT 1 FROM data_card_tags dct
-            WHERE dct.data_card_id = dc.id
-              AND dct.tag_id IN (${placeholders})
-          )`;
-          params.push(...uniq);
-        }
-      }
-    }
-    if (author) {
-      sql += ' AND u.username = ?';
-      params.push(author);
-    }
-    if (minLikes !== undefined && minLikes !== null) {
-      sql += ' AND dc.like_count >= ?';
-      params.push(minLikes);
-    }
-    if (maxLikes !== undefined && maxLikes !== null) {
-      sql += ' AND dc.like_count <= ?';
-      params.push(maxLikes);
-    }
-    if (minUsage !== undefined && minUsage !== null) {
-      sql += ' AND dc.usage_count >= ?';
-      params.push(minUsage);
-    }
-    if (maxUsage !== undefined && maxUsage !== null) {
-      sql += ' AND dc.usage_count <= ?';
-      params.push(maxUsage);
-    }
-    if (minFavorites !== undefined && minFavorites !== null) {
-      sql += ' AND dc.favorite_count >= ?';
-      params.push(minFavorites);
-    }
-    if (maxFavorites !== undefined && maxFavorites !== null) {
-      sql += ' AND dc.favorite_count <= ?';
-      params.push(maxFavorites);
-    }
-    if (recommendedOnly) {
-      sql += ' AND dc.is_recommended = 1';
-    }
-    if (nativeOnly) {
-      sql += ` AND EXISTS (
-        SELECT 1
-        FROM data_card_metrics dcm
-        WHERE dcm.data_card_id = dc.id
-          AND dcm.is_native = 1
-      )`;
-    }
-    if (nativeAllowedOnly) {
-      sql += ` AND dc.type = 'questionnaire'
-        AND (
-          CASE
-            WHEN json_valid(dc.data) = 1
-            THEN COALESCE(
-              json_extract(dc.data, '$.nativeAllowed'),
-              json_extract(dc.data, '$.native_allowed'),
-              0
-            )
-            ELSE 0
-          END
-        ) = 1`;
-    }
-    
-    // -- 排序逻辑 --
-    let orderBy = 'dc.created_at DESC'; // 默认按创建时间排序
-    if (sortBy === 'likes') {
-      orderBy = 'dc.like_count DESC, dc.created_at DESC';
-    } else if (sortBy === 'usage') {
-      orderBy = 'dc.usage_count DESC, dc.created_at DESC';
-    } else if (sortBy === 'favorites') {
-      orderBy = 'dc.favorite_count DESC, dc.created_at DESC';
-    }
+    const bundle = await readDataCardsRepoBundle();
+    if (!bundle) return [];
 
-    if (recommendedOnly && sortBy !== 'favorites') {
-      // 推荐列表默认按推荐时间倒序，其次按创建时间
-      orderBy = 'dc.updated_at DESC, dc.created_at DESC';
-    }
+    const rows = await bundle.listPublicDataCardsWithFilters(bundle.db, {
+      limit,
+      offset,
+      type,
+      search,
+      sortBy,
+      tagIds,
+      tagMatch,
+      author,
+      minLikes,
+      maxLikes,
+      minUsage,
+      maxUsage,
+      minFavorites,
+      maxFavorites,
+      recommendedOnly,
+      nativeOnly,
+      nativeAllowedOnly,
+    });
 
-    sql += ` ORDER BY ${orderBy} LIMIT ? OFFSET ?`;
-    params.push(limit, offset);
-    
-    const result = await queryFromD1(sql, params) as any;
-    
-    if (result.success && result.result && result.result[0]?.results) {
-      const rows = result.result[0].results as any[];
-      return rows.map((row) => {
-        const raw = typeof row?.tag_ids === 'string' ? row.tag_ids : '';
-        const tagIds = raw
-          .split(',')
-          .map((id: string) => id.trim())
-          .filter(Boolean);
-        return { ...row, tagIds };
-      });
-    }
-    return [];
+    return withTagIds(rows);
   } catch (error) {
-    console.error("获取公开数据卡失败:", error);
+    console.error('获取公开数据卡失败:', error);
     return [];
   }
 }
 
 /**
  * [新增] 从数据库中随机获取一个公开的数据卡。
- * @param type - 'character' 或 'scenario'，用于指定要获取的数据卡类型。
- * @returns {Promise<any | null>} 返回一个随机的数据卡对象，如果没有符合条件的则返回 null。
  */
 export async function getRandomPublicCard(
-  type: 'character' | 'scenario' | 'history' | 'questionnaire',
+  type: DataCardType,
   options?: {
     minLikeCount?: number | null;
     maxLikeCount?: number | null;
@@ -705,69 +599,32 @@ export async function getRandomPublicCard(
     maxUsageCount?: number | null;
     minFavoriteCount?: number | null;
     maxFavoriteCount?: number | null;
-  }
+  },
 ): Promise<any | null> {
   try {
-    // D1 数据库支持 RANDOM() 函数，这使得随机选择非常高效。
-    const params: any[] = [type];
-    let sql =
-      "SELECT dc.*, u.username FROM data_cards dc JOIN users u ON dc.user_id = u.id WHERE dc.is_public = 1 AND dc.type = ? AND dc.review_status = 'approved' AND dc.deleted_at IS NULL";
+    const bundle = await readDataCardsRepoBundle();
+    if (!bundle) return null;
 
-    const minLike = options?.minLikeCount;
-    const maxLike = options?.maxLikeCount;
-    const minUsage = options?.minUsageCount;
-    const maxUsage = options?.maxUsageCount;
-    const minFav = options?.minFavoriteCount;
-    const maxFav = options?.maxFavoriteCount;
-    if (typeof minLike === 'number' && Number.isFinite(minLike)) {
-      sql += ' AND dc.like_count >= ?';
-      params.push(Math.max(0, Math.floor(minLike)));
-    }
-    if (typeof maxLike === 'number' && Number.isFinite(maxLike)) {
-      sql += ' AND dc.like_count <= ?';
-      params.push(Math.max(0, Math.floor(maxLike)));
-    }
-    if (typeof minUsage === 'number' && Number.isFinite(minUsage)) {
-      sql += ' AND dc.usage_count >= ?';
-      params.push(Math.max(0, Math.floor(minUsage)));
-    }
-    if (typeof maxUsage === 'number' && Number.isFinite(maxUsage)) {
-      sql += ' AND dc.usage_count <= ?';
-      params.push(Math.max(0, Math.floor(maxUsage)));
-    }
-    if (typeof minFav === 'number' && Number.isFinite(minFav)) {
-      sql += ' AND dc.favorite_count >= ?';
-      params.push(Math.max(0, Math.floor(minFav)));
-    }
-    if (typeof maxFav === 'number' && Number.isFinite(maxFav)) {
-      sql += ' AND dc.favorite_count <= ?';
-      params.push(Math.max(0, Math.floor(maxFav)));
-    }
-
-    sql += ' ORDER BY RANDOM() LIMIT 1';
-
-    const result = await queryFromD1(sql, params) as any;
-    
-    // 检查查询是否成功，以及是否真的返回了结果
-    if (result.success && result.result && result.result[0]?.results?.length > 0) {
-      // 返回找到的第一个（也是唯一一个）结果
-      return result.result[0].results[0];
-    }
-    // 如果没有找到任何数据卡，则返回 null
-    return null;
+    return await bundle.getRandomPublicDataCardWithFilters(bundle.db, {
+      type,
+      minLikeCount: options?.minLikeCount,
+      maxLikeCount: options?.maxLikeCount,
+      minUsageCount: options?.minUsageCount,
+      maxUsageCount: options?.maxUsageCount,
+      minFavoriteCount: options?.minFavoriteCount,
+      maxFavoriteCount: options?.maxFavoriteCount,
+    });
   } catch (error) {
-    console.error("获取随机公开数据卡失败:", error);
-    // 在发生错误时也返回 null
+    console.error('获取随机公开数据卡失败:', error);
     return null;
   }
 }
 
 /**
  * [新增] 从数据库中随机获取一个公开的数据卡，并排除指定的 id 列表。
- * 说明：用于需要“抽取不重复公开卡”的场景（如 PVP 补牌）。
  */
 export async function getRandomPublicCardExcluding(
-  type: 'character' | 'scenario' | 'history' | 'questionnaire',
+  type: DataCardType,
   excludeIds: string[],
   options?: {
     minLikeCount?: number | null;
@@ -776,88 +633,42 @@ export async function getRandomPublicCardExcluding(
     maxUsageCount?: number | null;
     minFavoriteCount?: number | null;
     maxFavoriteCount?: number | null;
-  }
+  },
 ): Promise<any | null> {
   try {
-    const safeExcludeIds = [...new Set((excludeIds || []).filter((id) => typeof id === 'string' && id.trim()).map((id) => id.trim()))].slice(0, 800);
-    const params: any[] = [type];
-    let sql =
-      "SELECT dc.*, u.username FROM data_cards dc JOIN users u ON dc.user_id = u.id WHERE dc.is_public = 1 AND dc.type = ? AND dc.review_status = 'approved' AND dc.deleted_at IS NULL";
+    const bundle = await readDataCardsRepoBundle();
+    if (!bundle) return null;
 
-    const minLike = options?.minLikeCount;
-    const maxLike = options?.maxLikeCount;
-    const minUsage = options?.minUsageCount;
-    const maxUsage = options?.maxUsageCount;
-    const minFav = options?.minFavoriteCount;
-    const maxFav = options?.maxFavoriteCount;
-    if (typeof minLike === 'number' && Number.isFinite(minLike)) {
-      sql += ' AND dc.like_count >= ?';
-      params.push(Math.max(0, Math.floor(minLike)));
-    }
-    if (typeof maxLike === 'number' && Number.isFinite(maxLike)) {
-      sql += ' AND dc.like_count <= ?';
-      params.push(Math.max(0, Math.floor(maxLike)));
-    }
-    if (typeof minUsage === 'number' && Number.isFinite(minUsage)) {
-      sql += ' AND dc.usage_count >= ?';
-      params.push(Math.max(0, Math.floor(minUsage)));
-    }
-    if (typeof maxUsage === 'number' && Number.isFinite(maxUsage)) {
-      sql += ' AND dc.usage_count <= ?';
-      params.push(Math.max(0, Math.floor(maxUsage)));
-    }
-    if (typeof minFav === 'number' && Number.isFinite(minFav)) {
-      sql += ' AND dc.favorite_count >= ?';
-      params.push(Math.max(0, Math.floor(minFav)));
-    }
-    if (typeof maxFav === 'number' && Number.isFinite(maxFav)) {
-      sql += ' AND dc.favorite_count <= ?';
-      params.push(Math.max(0, Math.floor(maxFav)));
-    }
-
-    if (safeExcludeIds.length > 0) {
-      const placeholders = safeExcludeIds.map(() => '?').join(', ');
-      sql += ` AND dc.id NOT IN (${placeholders})`;
-      params.push(...safeExcludeIds);
-    }
-
-    sql += ' ORDER BY RANDOM() LIMIT 1';
-
-    const result = await queryFromD1(sql, params) as any;
-    if (result.success && result.result && result.result[0]?.results?.length > 0) {
-      return result.result[0].results[0];
-    }
-    return null;
+    return await bundle.getRandomPublicDataCardWithFilters(bundle.db, {
+      type,
+      excludeIds,
+      minLikeCount: options?.minLikeCount,
+      maxLikeCount: options?.maxLikeCount,
+      minUsageCount: options?.minUsageCount,
+      maxUsageCount: options?.maxUsageCount,
+      minFavoriteCount: options?.minFavoriteCount,
+      maxFavoriteCount: options?.maxFavoriteCount,
+    });
   } catch (error) {
-    console.error("获取随机公开数据卡（排除列表）失败:", error);
+    console.error('获取随机公开数据卡（排除列表）失败:', error);
     return null;
   }
 }
 
 export async function getDataCardStatsByIds(ids: string[]): Promise<Array<{ id: string; is_public: number; usage_count: number; like_count: number; favorite_count: number }>> {
   try {
-    const safeIds = [...new Set(ids.filter((id) => typeof id === 'string' && id.trim()).map((id) => id.trim()))];
-    if (safeIds.length <= 0) return [];
-
-    const placeholders = safeIds.map(() => '?').join(', ');
-    const result = await queryFromD1(
-      `SELECT id, is_public, usage_count, like_count, favorite_count FROM data_cards WHERE id IN (${placeholders})`,
-      safeIds
-    ) as any;
-
-    if (result.success && result.result && result.result[0]?.results) {
-      return result.result[0].results as Array<{ id: string; is_public: number; usage_count: number; like_count: number; favorite_count: number }>;
-    }
-    return [];
+    const bundle = await readDataCardsRepoBundle();
+    if (!bundle) return [];
+    return await bundle.getDataCardStatsRowsByIds(bundle.db, ids);
   } catch (error) {
-    console.error("批量读取数据卡统计失败:", error);
+    console.error('批量读取数据卡统计失败:', error);
     return [];
   }
 }
 
 export type UserTopDataCardRow = {
   id: string;
-  type: 'character' | 'scenario' | 'history' | 'questionnaire';
+  type: DataCardType;
   name: string;
   description: string | null;
   is_public: number;
@@ -865,41 +676,19 @@ export type UserTopDataCardRow = {
   usage_count: number;
   like_count: number;
   favorite_count: number;
-  created_at: string;
-  updated_at: string;
+  created_at: string | null;
+  updated_at: string | null;
 };
 
 export async function getUserTopDataCardsByEngagement(
   userId: number,
   type: 'character' | 'scenario',
-  limit: number
+  limit: number,
 ): Promise<UserTopDataCardRow[]> {
   try {
-    const safeLimit = Math.max(1, Math.min(10, Math.floor(limit)));
-    const result = (await queryFromD1(
-      `SELECT
-        id,
-        type,
-        name,
-        description,
-        is_public,
-        review_status,
-        usage_count,
-        like_count,
-        favorite_count,
-        created_at,
-        updated_at
-      FROM data_cards
-      WHERE user_id = ? AND type = ? AND deleted_at IS NULL
-      ORDER BY (usage_count + like_count + favorite_count) DESC, updated_at DESC
-      LIMIT ?`,
-      [userId, type, safeLimit]
-    )) as any;
-
-    if (result.success && result.result?.[0]?.results) {
-      return result.result[0].results as UserTopDataCardRow[];
-    }
-    return [];
+    const bundle = await readDataCardsRepoBundle();
+    if (!bundle) return [];
+    return await bundle.listUserTopDataCardsByEngagement(bundle.db, userId, type, limit);
   } catch (error) {
     console.error('读取用户热门数据卡失败:', error);
     return [];
@@ -942,22 +731,10 @@ export async function getUserProfileCardDataStats(userId: number): Promise<UserP
   };
 
   try {
-    const result = (await queryFromD1(
-      `SELECT type, data, is_public, like_count, favorite_count, usage_count
-       FROM data_cards
-       WHERE user_id = ? AND deleted_at IS NULL`,
-      [userId]
-    )) as any;
+    const bundle = await readDataCardsRepoBundle();
+    if (!bundle) return out;
 
-    const rows: Array<{
-      type: string;
-      data: string;
-      is_public: number;
-      like_count: number;
-      favorite_count: number;
-      usage_count: number;
-    }> = result?.result?.[0]?.results ?? [];
-
+    const rows = await bundle.listUserProfileCardStatsRows(bundle.db, userId);
     out.total = rows.length;
 
     for (const row of rows) {
@@ -1007,11 +784,11 @@ export function isDataCardBanned(card: any): boolean {
 }
 
 // 获取数据卡状态描述
-export function getDataCardStatus(card: any): { status: 'public' | 'private' | 'banned', label: string, color: string } {
+export function getDataCardStatus(card: any): { status: 'public' | 'private' | 'banned'; label: string; color: string } {
   if (!card) {
     return { status: 'private', label: '私有', color: 'gray' };
   }
-  
+
   if (card.is_public === -1) {
     return { status: 'banned', label: '封禁', color: 'red' };
   } else if (card.is_public === 1) {

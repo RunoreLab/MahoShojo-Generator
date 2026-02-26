@@ -1,139 +1,3 @@
-import { queryFromD1 } from './core';
-
-// 创建用户
-export async function createUser(username: string, email: string, authKey: string): Promise<number | null> {
-  try {
-    const result = await queryFromD1(
-      'INSERT INTO users (username, email, auth_key) VALUES (?, ?, ?)',
-      [username, email, authKey]
-    ) as any;
-    
-    if (result.success && result.result) {
-      return result.result[0]?.meta?.last_row_id || null;
-    }
-    return null;
-  } catch (error) {
-    console.error("创建用户失败:", error);
-    return null;
-  }
-}
-
-// 根据用户名查找用户
-export async function getUserByUsername(username: string): Promise<any> {
-  try {
-    const result = await queryFromD1(
-      'SELECT * FROM users WHERE username = ?',
-      [username]
-    ) as any;
-    
-    if (result.success && result.result && result.result[0]?.results?.length > 0) {
-      return result.result[0].results[0];
-    }
-    return null;
-  } catch (error) {
-    console.error("查找用户失败:", error);
-    return null;
-  }
-}
-
-// 根据邮箱查找用户
-export async function getUserByEmail(email: string): Promise<any> {
-  try {
-    const result = await queryFromD1(
-      'SELECT * FROM users WHERE email = ?',
-      [email]
-    ) as any;
-    
-    if (result.success && result.result && result.result[0]?.results?.length > 0) {
-      return result.result[0].results[0];
-    }
-    return null;
-  } catch (error) {
-    console.error("根据邮箱查找用户失败:", error);
-    return null;
-  }
-}
-
-// 根据用户 ID 查找用户
-export async function getUserById(userId: number): Promise<any> {
-  try {
-    const result = await queryFromD1(
-      'SELECT * FROM users WHERE id = ? LIMIT 1',
-      [userId]
-    ) as any;
-
-    if (result.success && result.result && result.result[0]?.results?.length > 0) {
-      return result.result[0].results[0];
-    }
-    return null;
-  } catch (error) {
-    console.error('根据用户ID查找用户失败:', error);
-    return null;
-  }
-}
-
-// 根据认证密钥查找用户
-export async function getUserByAuthKey(authKey: string): Promise<any> {
-  try {
-    const result = await queryFromD1(
-      'SELECT * FROM users WHERE auth_key = ?',
-      [authKey]
-    ) as any;
-    
-    if (result.success && result.result && result.result[0]?.results?.length > 0) {
-      return result.result[0].results[0];
-    }
-    return null;
-  } catch (error) {
-    console.error("查找用户失败:", error);
-    return null;
-  }
-}
-
-export async function verifyUserLogin(username: string, authKey: string): Promise<any> {
-  try {
-    const result = await queryFromD1(
-      'SELECT id, username, prefix FROM users WHERE username = ? AND auth_key = ?',
-      [username, authKey]
-    ) as any;
-    
-    if (result.success && result.result && result.result[0]?.results?.length > 0) {
-      const user = result.result[0].results[0];
-      // 更新最后登录时间
-      await queryFromD1(
-        'UPDATE users SET last_login_at = CURRENT_TIMESTAMP WHERE id = ?',
-        [user.id]
-      );
-      return user;
-    }
-    return null;
-  } catch (error) {
-    console.error("验证登录失败:", error);
-    return null;
-  }
-}
-
-// 重置用户登录密钥（用于找回流程）
-export async function updateUserAuthKey(userId: number, nextAuthKey: string): Promise<boolean> {
-  try {
-    const normalizedKey = typeof nextAuthKey === 'string' ? nextAuthKey.trim() : '';
-    if (!Number.isSafeInteger(userId) || userId <= 0 || !normalizedKey) {
-      return false;
-    }
-
-    const result = await queryFromD1(
-      'UPDATE users SET auth_key = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-      [normalizedKey, userId]
-    ) as any;
-
-    const changes = result?.result?.[0]?.meta?.changes ?? 0;
-    return Boolean(result?.success && changes > 0);
-  } catch (error) {
-    console.error('更新用户登录密钥失败:', error);
-    return false;
-  }
-}
-
 export type UserProfileRow = {
   signature: string | null;
   avatar_webp_base64: string | null;
@@ -148,17 +12,236 @@ export type UserProfileCardRow = {
   avatar_webp_base64: string | null;
 };
 
+type UsersRepoBundle = {
+  db: unknown;
+  createBusinessUser: (
+    db: unknown,
+    input: { username: string; email: string; authKey: string },
+  ) => Promise<any | null>;
+  getBusinessUserByUsername: (db: unknown, username: string) => Promise<any | null>;
+  getBusinessUserByEmail: (db: unknown, email: string) => Promise<any | null>;
+  getBusinessUserById: (db: unknown, userId: number) => Promise<any | null>;
+  getBusinessUserByAuthKey: (db: unknown, authKey: string) => Promise<any | null>;
+  verifyBusinessUserLoginByUsernameAndAuthKey: (
+    db: unknown,
+    username: string,
+    authKey: string,
+  ) => Promise<{ id: number; username: string; prefix: string | null } | null>;
+  touchBusinessUserLastLoginAt: (db: unknown, userId: number) => Promise<void>;
+  updateBusinessUserAuthKey: (db: unknown, userId: number, authKey: string) => Promise<any | null>;
+  getBusinessUserProfileCardById: (
+    db: unknown,
+    userId: number,
+  ) => Promise<{ id: number; username: string; prefix: string | null; createdAt: string | null; signature: string | null; avatarWebpBase64: string | null } | null>;
+  getBusinessUserProfileById: (
+    db: unknown,
+    userId: number,
+  ) => Promise<{ signature: string | null; avatarWebpBase64: string | null } | null>;
+  updateBusinessUserSignatureById: (
+    db: unknown,
+    userId: number,
+    signature: string | null,
+  ) => Promise<number>;
+  updateBusinessUserAvatarWebpBase64ById: (
+    db: unknown,
+    userId: number,
+    avatarWebpBase64: string | null,
+  ) => Promise<number>;
+  updateBusinessUserSlotCountById: (db: unknown, userId: number, slotCount: number) => Promise<number>;
+};
+
+const readUsersRepoBundle = async (): Promise<UsersRepoBundle | null> => {
+  try {
+    const [{ getDrizzleDbFromRuntime }, repo] = await Promise.all([
+      import('@/lib/db/drizzle'),
+      import('@/lib/db/repositories/business-users'),
+    ]);
+    const db = getDrizzleDbFromRuntime();
+    if (!db) return null;
+
+    return {
+      db,
+      createBusinessUser: repo.createBusinessUser as UsersRepoBundle['createBusinessUser'],
+      getBusinessUserByUsername: repo.getBusinessUserByUsername as UsersRepoBundle['getBusinessUserByUsername'],
+      getBusinessUserByEmail: repo.getBusinessUserByEmail as UsersRepoBundle['getBusinessUserByEmail'],
+      getBusinessUserById: repo.getBusinessUserById as UsersRepoBundle['getBusinessUserById'],
+      getBusinessUserByAuthKey: repo.getBusinessUserByAuthKey as UsersRepoBundle['getBusinessUserByAuthKey'],
+      verifyBusinessUserLoginByUsernameAndAuthKey: repo.verifyBusinessUserLoginByUsernameAndAuthKey as UsersRepoBundle['verifyBusinessUserLoginByUsernameAndAuthKey'],
+      touchBusinessUserLastLoginAt: repo.touchBusinessUserLastLoginAt as UsersRepoBundle['touchBusinessUserLastLoginAt'],
+      updateBusinessUserAuthKey: repo.updateBusinessUserAuthKey as UsersRepoBundle['updateBusinessUserAuthKey'],
+      getBusinessUserProfileCardById: repo.getBusinessUserProfileCardById as UsersRepoBundle['getBusinessUserProfileCardById'],
+      getBusinessUserProfileById: repo.getBusinessUserProfileById as UsersRepoBundle['getBusinessUserProfileById'],
+      updateBusinessUserSignatureById: repo.updateBusinessUserSignatureById as UsersRepoBundle['updateBusinessUserSignatureById'],
+      updateBusinessUserAvatarWebpBase64ById: repo.updateBusinessUserAvatarWebpBase64ById as UsersRepoBundle['updateBusinessUserAvatarWebpBase64ById'],
+      updateBusinessUserSlotCountById: repo.updateBusinessUserSlotCountById as UsersRepoBundle['updateBusinessUserSlotCountById'],
+    };
+  } catch {
+    return null;
+  }
+};
+
+const toNullableString = (value: unknown): string | null => (typeof value === 'string' ? value : null);
+
+const toInteger = (value: unknown): number | null => {
+  if (typeof value === 'number' && Number.isFinite(value)) return Math.trunc(value);
+  if (typeof value === 'string') {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return Math.trunc(parsed);
+  }
+  if (typeof value === 'boolean') return value ? 1 : 0;
+  return null;
+};
+
+const mapBusinessUserToLegacyRow = (row: any): any => {
+  if (!row || typeof row !== 'object') return null;
+
+  return {
+    id: toInteger(row.id),
+    username: typeof row.username === 'string' ? row.username : null,
+    email: typeof row.email === 'string' ? row.email : null,
+    auth_key: toNullableString(row.authKey),
+    prefix: toNullableString(row.prefix),
+    is_banned: toNullableString(row.isBanned),
+    is_admin: toInteger(row.isAdmin),
+    is_review_exempt: toInteger(row.isReviewExempt),
+    slot_count: toInteger(row.slotCount),
+    signature: toNullableString(row.signature),
+    avatar_webp_base64: toNullableString(row.avatarWebpBase64),
+    created_at: toNullableString(row.createdAt),
+    updated_at: toNullableString(row.updatedAt),
+    last_login_at: toNullableString(row.lastLoginAt),
+  };
+};
+
+// 创建用户
+export async function createUser(username: string, email: string, authKey: string): Promise<number | null> {
+  try {
+    const bundle = await readUsersRepoBundle();
+    if (!bundle) return null;
+
+    const row = await bundle.createBusinessUser(bundle.db, { username, email, authKey });
+    const userId = toInteger(row?.id);
+    return userId && userId > 0 ? userId : null;
+  } catch (error) {
+    console.error('创建用户失败:', error);
+    return null;
+  }
+}
+
+// 根据用户名查找用户
+export async function getUserByUsername(username: string): Promise<any> {
+  try {
+    const bundle = await readUsersRepoBundle();
+    if (!bundle) return null;
+    const row = await bundle.getBusinessUserByUsername(bundle.db, username);
+    return mapBusinessUserToLegacyRow(row);
+  } catch (error) {
+    console.error('查找用户失败:', error);
+    return null;
+  }
+}
+
+// 根据邮箱查找用户
+export async function getUserByEmail(email: string): Promise<any> {
+  try {
+    const bundle = await readUsersRepoBundle();
+    if (!bundle) return null;
+    const row = await bundle.getBusinessUserByEmail(bundle.db, email);
+    return mapBusinessUserToLegacyRow(row);
+  } catch (error) {
+    console.error('根据邮箱查找用户失败:', error);
+    return null;
+  }
+}
+
+// 根据用户 ID 查找用户
+export async function getUserById(userId: number): Promise<any> {
+  try {
+    const bundle = await readUsersRepoBundle();
+    if (!bundle) return null;
+    const row = await bundle.getBusinessUserById(bundle.db, userId);
+    return mapBusinessUserToLegacyRow(row);
+  } catch (error) {
+    console.error('根据用户ID查找用户失败:', error);
+    return null;
+  }
+}
+
+// 根据认证密钥查找用户
+export async function getUserByAuthKey(authKey: string): Promise<any> {
+  try {
+    const bundle = await readUsersRepoBundle();
+    if (!bundle) return null;
+    const row = await bundle.getBusinessUserByAuthKey(bundle.db, authKey);
+    return mapBusinessUserToLegacyRow(row);
+  } catch (error) {
+    console.error('查找用户失败:', error);
+    return null;
+  }
+}
+
+export async function verifyUserLogin(username: string, authKey: string): Promise<any> {
+  try {
+    const bundle = await readUsersRepoBundle();
+    if (!bundle) return null;
+
+    const user = await bundle.verifyBusinessUserLoginByUsernameAndAuthKey(bundle.db, username, authKey);
+    if (!user) return null;
+
+    await bundle.touchBusinessUserLastLoginAt(bundle.db, user.id);
+
+    return {
+      id: user.id,
+      username: user.username,
+      prefix: user.prefix,
+    };
+  } catch (error) {
+    console.error('验证登录失败:', error);
+    return null;
+  }
+}
+
+// 重置用户登录密钥（用于找回流程）
+export async function updateUserAuthKey(userId: number, nextAuthKey: string): Promise<boolean> {
+  try {
+    const normalizedKey = typeof nextAuthKey === 'string' ? nextAuthKey.trim() : '';
+    if (!Number.isSafeInteger(userId) || userId <= 0 || !normalizedKey) {
+      return false;
+    }
+
+    const bundle = await readUsersRepoBundle();
+    if (!bundle) return false;
+
+    const current = await bundle.getBusinessUserById(bundle.db, userId);
+    if (!current) return false;
+    if (typeof current.authKey === 'string' && current.authKey === normalizedKey) {
+      return false;
+    }
+
+    const updated = await bundle.updateBusinessUserAuthKey(bundle.db, userId, normalizedKey);
+    return Boolean(updated);
+  } catch (error) {
+    console.error('更新用户登录密钥失败:', error);
+    return false;
+  }
+}
+
 export async function getUserProfileCardRowByUserId(userId: number): Promise<UserProfileCardRow | null> {
   try {
-    const result = (await queryFromD1(
-      'SELECT id, username, prefix, created_at, signature, avatar_webp_base64 FROM users WHERE id = ? LIMIT 1',
-      [userId],
-    )) as any;
+    const bundle = await readUsersRepoBundle();
+    if (!bundle) return null;
 
-    if (result.success && result.result && result.result[0]?.results?.length > 0) {
-      return result.result[0].results[0] as UserProfileCardRow;
-    }
-    return null;
+    const row = await bundle.getBusinessUserProfileCardById(bundle.db, userId);
+    if (!row) return null;
+
+    return {
+      id: row.id,
+      username: row.username,
+      prefix: row.prefix,
+      created_at: row.createdAt ?? '',
+      signature: row.signature,
+      avatar_webp_base64: row.avatarWebpBase64,
+    };
   } catch (error) {
     console.error('获取用户资料卡信息失败:', error);
     return null;
@@ -167,15 +250,16 @@ export async function getUserProfileCardRowByUserId(userId: number): Promise<Use
 
 export async function getUserProfileByUserId(userId: number): Promise<UserProfileRow | null> {
   try {
-    const result = (await queryFromD1(
-      'SELECT signature, avatar_webp_base64 FROM users WHERE id = ? LIMIT 1',
-      [userId],
-    )) as any;
+    const bundle = await readUsersRepoBundle();
+    if (!bundle) return null;
 
-    if (result.success && result.result && result.result[0]?.results?.length > 0) {
-      return result.result[0].results[0] as UserProfileRow;
-    }
-    return null;
+    const row = await bundle.getBusinessUserProfileById(bundle.db, userId);
+    if (!row) return null;
+
+    return {
+      signature: row.signature,
+      avatar_webp_base64: row.avatarWebpBase64,
+    };
   } catch (error) {
     console.error('获取用户个人资料失败:', error);
     return null;
@@ -184,11 +268,10 @@ export async function getUserProfileByUserId(userId: number): Promise<UserProfil
 
 export async function updateUserSignature(userId: number, signature: string | null): Promise<boolean> {
   try {
-    const result = (await queryFromD1(
-      'UPDATE users SET signature = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-      [signature, userId],
-    )) as any;
-    return Boolean(result?.success);
+    const bundle = await readUsersRepoBundle();
+    if (!bundle) return false;
+    await bundle.updateBusinessUserSignatureById(bundle.db, userId, signature);
+    return true;
   } catch (error) {
     console.error('更新用户签名失败:', error);
     return false;
@@ -197,11 +280,10 @@ export async function updateUserSignature(userId: number, signature: string | nu
 
 export async function updateUserAvatarWebpBase64(userId: number, avatarWebpBase64: string | null): Promise<boolean> {
   try {
-    const result = (await queryFromD1(
-      'UPDATE users SET avatar_webp_base64 = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-      [avatarWebpBase64, userId],
-    )) as any;
-    return Boolean(result?.success);
+    const bundle = await readUsersRepoBundle();
+    if (!bundle) return false;
+    await bundle.updateBusinessUserAvatarWebpBase64ById(bundle.db, userId, avatarWebpBase64);
+    return true;
   } catch (error) {
     console.error('更新用户头像失败:', error);
     return false;
@@ -211,20 +293,16 @@ export async function updateUserAvatarWebpBase64(userId: number, avatarWebpBase6
 // 获取用户数据卡容量限制
 export async function getUserDataCardCapacity(userId: number, defaultCapacity: number): Promise<number> {
   try {
-    const result = await queryFromD1(
-      'SELECT slot_count FROM users WHERE id = ?',
-      [userId]
-    ) as any;
+    const bundle = await readUsersRepoBundle();
+    if (!bundle) return defaultCapacity;
 
-    if (result.success && result.result && result.result[0]?.results?.length > 0) {
-      const user = result.result[0].results[0];
-      const slotCount = user.slot_count;
-      // 如果 slot_count 为 0 或 null，使用默认值
-      return (slotCount && slotCount > 0) ? slotCount : defaultCapacity;
-    }
-    return defaultCapacity;
+    const user = await bundle.getBusinessUserById(bundle.db, userId);
+    if (!user) return defaultCapacity;
+
+    const slotCount = toInteger(user.slotCount);
+    return slotCount && slotCount > 0 ? slotCount : defaultCapacity;
   } catch (error) {
-    console.error("获取用户数据卡容量失败:", error);
+    console.error('获取用户数据卡容量失败:', error);
     return defaultCapacity;
   }
 }
@@ -232,28 +310,19 @@ export async function getUserDataCardCapacity(userId: number, defaultCapacity: n
 // 增加用户的槽位数量
 export async function increaseUserSlotCount(userId: number, increaseBy: number): Promise<boolean> {
   try {
-    // 先获取当前的 slot_count
-    const result = await queryFromD1(
-      'SELECT slot_count FROM users WHERE id = ?',
-      [userId]
-    ) as any;
+    const bundle = await readUsersRepoBundle();
+    if (!bundle) return false;
 
-    if (!result.success || !result.result || result.result[0]?.results?.length === 0) {
-      return false;
-    }
+    const user = await bundle.getBusinessUserById(bundle.db, userId);
+    if (!user) return false;
 
-    const currentSlotCount = result.result[0].results[0].slot_count || 0;
+    const currentSlotCount = toInteger(user.slotCount) ?? 0;
     const newSlotCount = currentSlotCount + increaseBy;
 
-    // 更新 slot_count
-    const updateResult = await queryFromD1(
-      'UPDATE users SET slot_count = ? WHERE id = ?',
-      [newSlotCount, userId]
-    ) as any;
-
-    return updateResult.success;
+    await bundle.updateBusinessUserSlotCountById(bundle.db, userId, newSlotCount);
+    return true;
   } catch (error) {
-    console.error("增加用户槽位数量失败:", error);
+    console.error('增加用户槽位数量失败:', error);
     return false;
   }
 }

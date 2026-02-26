@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { Download, Heart, Share, Info, Ban, AlertTriangle, Clock, XCircle, Star, BadgeCheck } from 'lucide-react';
 import { isCardLiked, addLikedCard } from '@/lib/localStorage';
-import { getDataCardStatus } from '@/lib/database/data-cards';
+import { getDataCardStatus } from '@/lib/data-card-status';
 import { TechBadge } from '@/components/ranking/TechBadge';
 import { TierBadge } from '@/components/ranking/TierBadge';
 import { buildTitleDisplay } from '@/lib/text';

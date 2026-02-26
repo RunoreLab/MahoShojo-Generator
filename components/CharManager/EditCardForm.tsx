@@ -1,6 +1,6 @@
 import React from 'react';
 import { AlertTriangle } from 'lucide-react';
-import { isDataCardBanned } from '../../lib/database/data-cards';
+import { isDataCardBanned } from '@/lib/data-card-status';
 import { inferTemplate, TEMPLATE_LABELS } from '@/lib/data-card-converter';
 import type { InferableTemplate } from '@/lib/data-card-converter';
 

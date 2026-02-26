@@ -16,9 +16,15 @@ export const users = sqliteTable('users', {
   email: text('email').notNull(),
   authKey: text('auth_key'),
   prefix: text('prefix'),
+  signature: text('signature'),
+  avatarWebpBase64: text('avatar_webp_base64'),
+  slotCount: integer('slot_count'),
   isBanned: text('is_banned'),
   isAdmin: integer('is_admin', { mode: 'boolean' }),
   isReviewExempt: integer('is_review_exempt', { mode: 'boolean' }),
+  lastLoginAt: text('last_login_at'),
+  createdAt: text('created_at'),
+  updatedAt: text('updated_at'),
 });
 
 export const dataCards = sqliteTable('data_cards', {
@@ -34,6 +40,7 @@ export const dataCards = sqliteTable('data_cards', {
   likeCount: integer('like_count'),
   favoriteCount: integer('favorite_count'),
   reviewStatus: text('review_status').$type<DataCardReviewStatus | null>(),
+  isRecommended: integer('is_recommended', { mode: 'boolean' }),
   createdAt: text('created_at'),
   updatedAt: text('updated_at'),
   deletedAt: text('deleted_at'),
