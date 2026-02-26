@@ -1,4 +1,5 @@
-import { updateUserAvatarWebpBase64 } from '@/lib/d1';
+import { getDrizzleDbFromRuntime } from '@/lib/db/drizzle';
+import { updateBusinessUserAvatarWebpBase64ById } from '@/lib/db/repositories/business-users';
 import { json, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
 
 export const runtime = 'edge';
@@ -76,6 +77,13 @@ async function compressAvatarToWebpBase64(file: File) {
 export default withPvpErrorBoundary(async function handler(req: Request): Promise<Response> {
   const auth = await requireAuthUser(req);
   if ('response' in auth) return auth.response;
+  const db = getDrizzleDbFromRuntime();
+  if (!db) return json({ error: '数据库不可用，请稍后重试' }, { status: 503 });
+
+  const saveAvatarBase64 = async (base64: string | null): Promise<boolean> => {
+    const changed = await updateBusinessUserAvatarWebpBase64ById(db, auth.user.id, base64);
+    return changed > 0;
+  };
 
   if (req.method === 'PUT') {
     const contentType = req.headers.get('content-type') || '';
@@ -91,7 +99,7 @@ export default withPvpErrorBoundary(async function handler(req: Request): Promis
       const base64 = stripWebpDataUrlPrefix(raw).replace(/\s+/g, '');
       if (!isProbablyBase64(base64)) return json({ error: '头像内容不是有效 base64' }, { status: 400 });
 
-      const ok = await updateUserAvatarWebpBase64(auth.user.id, base64);
+      const ok = await saveAvatarBase64(base64);
       if (!ok) return json({ error: '保存头像失败' }, { status: 500 });
 
       return json(
@@ -109,7 +117,7 @@ export default withPvpErrorBoundary(async function handler(req: Request): Promis
 
     try {
       const base64 = await compressAvatarToWebpBase64(file);
-      const ok = await updateUserAvatarWebpBase64(auth.user.id, base64);
+      const ok = await saveAvatarBase64(base64);
       if (!ok) return json({ error: '保存头像失败' }, { status: 500 });
 
       return json(
@@ -129,7 +137,7 @@ export default withPvpErrorBoundary(async function handler(req: Request): Promis
   }
 
   if (req.method === 'DELETE') {
-    const ok = await updateUserAvatarWebpBase64(auth.user.id, null);
+    const ok = await saveAvatarBase64(null);
     if (!ok) return json({ error: '清除头像失败' }, { status: 500 });
     return json({ success: true }, { headers: { 'Cache-Control': 'no-store' } });
   }

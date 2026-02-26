@@ -1,6 +1,8 @@
-import { getUserDataCardCapacity, getUserUsedSlots } from '@/lib/d1';
 import { requireAuthUser } from '@/lib/auth/server';
 import { config } from '@/lib/config';
+import { getDrizzleDbFromRuntime } from '@/lib/db/drizzle';
+import { getBusinessUserSlotCountById } from '@/lib/db/repositories/business-users';
+import { countUserUsedDataCardSlots } from '@/lib/db/repositories/data-cards-core';
 
 export const runtime = 'edge';
 
@@ -18,16 +20,20 @@ export default async function handler(req: Request): Promise<Response> {
   if ('response' in auth) return auth.response;
 
   try {
-    // 获取用户数据卡容量
-    const [capacity, usedSlots] = await Promise.all([
-      getUserDataCardCapacity(auth.user.id, config.DEFAULT_DATA_CARD_CAPACITY),
-      getUserUsedSlots(auth.user.id)
-    ]);
+    const db = getDrizzleDbFromRuntime();
+    const [slotCount, usedSlots] = db
+      ? await Promise.all([
+          getBusinessUserSlotCountById(db, auth.user.id),
+          countUserUsedDataCardSlots(db, auth.user.id),
+        ])
+      : [null, 0];
+
+    const capacity = typeof slotCount === 'number' && slotCount > 0 ? slotCount : config.DEFAULT_DATA_CARD_CAPACITY;
     
     return new Response(JSON.stringify({ 
       success: true, 
       capacity,
-      usedSlots
+      usedSlots,
     }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' }

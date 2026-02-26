@@ -48,6 +48,7 @@ type UsersRepoBundle = {
     avatarWebpBase64: string | null,
   ) => Promise<number>;
   updateBusinessUserSlotCountById: (db: unknown, userId: number, slotCount: number) => Promise<number>;
+  increaseBusinessUserSlotCountById: (db: unknown, userId: number, increaseBy: number) => Promise<number>;
 };
 
 const readUsersRepoBundle = async (): Promise<UsersRepoBundle | null> => {
@@ -74,6 +75,8 @@ const readUsersRepoBundle = async (): Promise<UsersRepoBundle | null> => {
       updateBusinessUserSignatureById: repo.updateBusinessUserSignatureById as UsersRepoBundle['updateBusinessUserSignatureById'],
       updateBusinessUserAvatarWebpBase64ById: repo.updateBusinessUserAvatarWebpBase64ById as UsersRepoBundle['updateBusinessUserAvatarWebpBase64ById'],
       updateBusinessUserSlotCountById: repo.updateBusinessUserSlotCountById as UsersRepoBundle['updateBusinessUserSlotCountById'],
+      increaseBusinessUserSlotCountById:
+        repo.increaseBusinessUserSlotCountById as UsersRepoBundle['increaseBusinessUserSlotCountById'],
     };
   } catch {
     return null;
@@ -313,13 +316,7 @@ export async function increaseUserSlotCount(userId: number, increaseBy: number):
     const bundle = await readUsersRepoBundle();
     if (!bundle) return false;
 
-    const user = await bundle.getBusinessUserById(bundle.db, userId);
-    if (!user) return false;
-
-    const currentSlotCount = toInteger(user.slotCount) ?? 0;
-    const newSlotCount = currentSlotCount + increaseBy;
-
-    const affected = await bundle.updateBusinessUserSlotCountById(bundle.db, userId, newSlotCount);
+    const affected = await bundle.increaseBusinessUserSlotCountById(bundle.db, userId, increaseBy);
     return affected > 0;
   } catch (error) {
     console.error('增加用户槽位数量失败:', error);

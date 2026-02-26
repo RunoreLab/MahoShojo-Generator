@@ -240,3 +240,23 @@ export const updateBusinessUserSlotCountById = async (
 
   return rows.length;
 };
+
+export const increaseBusinessUserSlotCountById = async (
+  db: AppDrizzleDb,
+  userId: number,
+  increaseBy: number,
+): Promise<number> => {
+  const delta = Math.max(0, Math.trunc(increaseBy));
+  const rows = await db
+    .update(users)
+    .set({
+      slotCount: sql`COALESCE(${users.slotCount}, 0) + ${delta}`,
+      updatedAt: sql`CURRENT_TIMESTAMP`,
+    })
+    .where(eq(users.id, userId))
+    .returning({
+      id: users.id,
+    });
+
+  return rows.length;
+};

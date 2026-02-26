@@ -163,6 +163,9 @@
 28. 当前 `pages/api` 中直接 `queryFromD1` 调用点已从 `17` 处下降至 `0` 处。  
 29. 修复用户资料相关“假成功”问题：`lib/database/users.ts` 的 `updateUserSignature`、`updateUserAvatarWebpBase64`、`increaseUserSlotCount` 现已按实际受影响行数返回结果，避免 0 行更新仍返回成功。  
 30. 补充 Auth 基础单测：新增 `tests/auth-recovery-and-cookie.test.ts`，覆盖恢复令牌格式/哈希稳定性与 Better Auth 会话 Cookie 识别。  
+31. 进一步完善用户槽位发放一致性：`lib/db/repositories/business-users.ts` 新增 `increaseBusinessUserSlotCountById`（数据库原子自增），`lib/database/users.ts` 的 `increaseUserSlotCount` 已切换为该原子路径，降低并发覆盖风险。  
+32. 已将用户资料与容量接口改为直接复用 Drizzle 仓储能力：`pages/api/me/profile.ts`、`pages/api/me/profile/avatar.ts`、`pages/api/user-capacity.ts` 不再依赖 `lib/d1` 包装层。  
+33. 已修复 `pages/api/redeem-code.ts` 的一致性缺陷：兑换流程改为单事务（消费兑换码 + 槽位发放 + sponsor 徽章授予）原子提交，避免“兑换码已消费但发放失败”的中间态。  
 
 受限项（当前本地环境）：
 
