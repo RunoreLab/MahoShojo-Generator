@@ -39,6 +39,17 @@ export const dataCards = sqliteTable('data_cards', {
   deletedAt: text('deleted_at'),
 });
 
+export const dataCardUpdates = sqliteTable('data_card_updates', {
+  id: text('id').primaryKey(),
+  dataCardId: text('data_card_id').notNull(),
+  userId: integer('user_id').notNull(),
+  name: text('name'),
+  description: text('description'),
+  data: text('data'),
+  createdAt: text('created_at'),
+  updatedAt: text('updated_at'),
+});
+
 export const dataCardMetrics = sqliteTable('data_card_metrics', {
   dataCardId: text('data_card_id').primaryKey(),
   techScore: integer('tech_score').notNull(),
