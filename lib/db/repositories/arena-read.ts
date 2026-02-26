@@ -387,6 +387,52 @@ export const getArenaRatingByEntity = async (
   };
 };
 
+export const listArenaPublicScepterEntities = async (
+  db: AppDrizzleDb,
+  queue: ArenaReadQueue,
+  options: {
+    minGames: number;
+    minRating: number;
+    limit: number;
+  },
+): Promise<Array<{ entityType: ArenaReadEntityType; entityId: string }>> => {
+  const minGames = Math.max(0, toInteger(options.minGames, 0));
+  const minRating = toInteger(options.minRating, 0);
+  const limit = normalizeLimit(options.limit, 1, 200);
+
+  const rows = await db
+    .select({
+      entityType: arenaRatings.entityType,
+      entityId: arenaRatings.entityId,
+    })
+    .from(arenaRatings)
+    .leftJoin(dataCards, and(eq(arenaRatings.entityType, 'data_card'), eq(dataCards.id, arenaRatings.entityId)))
+    .where(
+      and(
+        eq(arenaRatings.queue, queue),
+        gte(arenaRatings.games, minGames),
+        gte(arenaRatings.rating, minRating),
+        or(
+          eq(arenaRatings.entityType, 'preset'),
+          and(eq(arenaRatings.entityType, 'data_card'), buildPublicDataCardCondition(queue)),
+        ),
+      ),
+    )
+    .orderBy(
+      desc(arenaRatings.rating),
+      desc(arenaRatings.games),
+      desc(arenaRatings.updatedAt),
+      asc(arenaRatings.entityType),
+      asc(arenaRatings.entityId),
+    )
+    .limit(limit);
+
+  return rows.map((row) => ({
+    entityType: row.entityType === 'preset' ? 'preset' : 'data_card',
+    entityId: typeof row.entityId === 'string' ? row.entityId : '',
+  }));
+};
+
 export const getPresetArenaRatingsByEntityId = async (
   db: AppDrizzleDb,
   entityId: string,

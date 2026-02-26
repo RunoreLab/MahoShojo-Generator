@@ -7,3 +7,4 @@ export * from '@/lib/db/repositories/password-reset-tokens';
 export * from '@/lib/db/repositories/arena-read';
 export * from '@/lib/db/repositories/arena-legacy-stats';
 export * from '@/lib/db/repositories/data-card-review';
+export * from '@/lib/db/repositories/arena-ratings-write';

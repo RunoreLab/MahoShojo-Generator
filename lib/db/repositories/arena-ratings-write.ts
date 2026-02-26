@@ -1,0 +1,698 @@
+import { and, count, eq, gte, inArray, or, sql } from 'drizzle-orm';
+import type { AppDrizzleDb } from '@/lib/db/drizzle';
+import {
+  arenaRatingEvents,
+  arenaRatings,
+  battleReportGenerationCombatants,
+  battleReportGenerations,
+  dataCards,
+} from '@/lib/db/schema';
+
+export type ArenaRatingsQueue = 'strict' | 'free';
+export type ArenaRatingsEntityType = 'data_card' | 'preset';
+export type ArenaRatingEventStatus = 'pending' | 'applied' | 'skipped' | 'failed';
+
+export type ArenaRatingsEntity = {
+  entityType: ArenaRatingsEntityType;
+  entityId: string;
+};
+
+export type ArenaRatingsSnapshot = {
+  rating: number;
+  games: number;
+  wins: number;
+  losses: number;
+  draws: number;
+};
+
+export type ArenaEligibilitySnapshotRow = {
+  status: string | null;
+  mode: string | null;
+  userId: number | null;
+  ipAnonymized: string | null;
+  language: string | null;
+  selectedLevel: string | null;
+  hasScenario: number | null;
+  hasUserGuidance: number | null;
+  userGuidancePreview: string | null;
+  hasAdjudicationEvents: number | null;
+  readArenaHistory: number | null;
+  readCurrentState: number | null;
+  combatantCount: number | null;
+  winner: string | null;
+  extraJson: string | null;
+};
+
+export type BattleReportGenerationCombatantRow = {
+  generation_id: string;
+  sort_index: number;
+  name: string;
+  type: string | null;
+  template_id: string | null;
+  is_native: number | null;
+  is_preset: number | null;
+  team_id: number | null;
+  character_guidance: string | null;
+  data_card_id: string | null;
+  data_card_updated_at: string | null;
+  size_chars: number | null;
+  size_bytes: number | null;
+  created_at: string;
+};
+
+export type ArenaRatingEventInsertPayload = {
+  id: string;
+  generationId: string;
+  queue: ArenaRatingsQueue;
+  status: ArenaRatingEventStatus;
+  skipReason: string | null;
+  userId: number | null;
+  ipAnonymized: string | null;
+  pairKey: string;
+  a: ArenaRatingsEntity;
+  b: ArenaRatingsEntity;
+  winnerSlot: 0 | 1 | 2;
+  createdAtIso: string;
+  detailsJson?: Record<string, unknown> | null;
+};
+
+export type ArenaRatingEventStoredRow = {
+  id: string;
+  status: ArenaRatingEventStatus;
+  skip_reason: string | null;
+  details_json: string | null;
+  a_before_rating: number | null;
+  a_after_rating: number | null;
+  a_delta: number | null;
+  a_before_games: number | null;
+  a_after_games: number | null;
+  b_before_rating: number | null;
+  b_after_rating: number | null;
+  b_delta: number | null;
+  b_before_games: number | null;
+  b_after_games: number | null;
+};
+
+export type ArenaRatingEventComputedPayload = {
+  aBefore: ArenaRatingsSnapshot;
+  bBefore: ArenaRatingsSnapshot;
+  aAfter: ArenaRatingsSnapshot;
+  bAfter: ArenaRatingsSnapshot;
+  deltaA: number;
+  deltaB: number;
+  detailsJson: Record<string, unknown>;
+};
+
+const toInt = (value: unknown, fallback = 0): number => {
+  const n = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : NaN;
+  if (!Number.isFinite(n)) return fallback;
+  return Math.trunc(n);
+};
+
+const toNullableInt = (value: unknown): number | null => {
+  if (value == null) return null;
+  const n = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : NaN;
+  if (!Number.isFinite(n)) return null;
+  return Math.trunc(n);
+};
+
+const normalizeEntity = (entity: ArenaRatingsEntity): ArenaRatingsEntity => ({
+  entityType: entity.entityType === 'preset' ? 'preset' : 'data_card',
+  entityId: entity.entityId,
+});
+
+export const resetStrictArenaRatingForDataCard = async (
+  db: AppDrizzleDb,
+  dataCardId: string,
+  initialRating: number,
+  nowIso: string,
+): Promise<void> => {
+  const where = and(
+    eq(arenaRatings.entityType, 'data_card'),
+    eq(arenaRatings.entityId, dataCardId),
+    eq(arenaRatings.queue, 'strict'),
+  );
+
+  try {
+    await db
+      .update(arenaRatings)
+      .set({
+        rating: initialRating,
+        games: 0,
+        wins: 0,
+        losses: 0,
+        draws: 0,
+        lastDelta: null,
+        lastAppliedAt: null,
+        updatedAt: nowIso,
+      })
+      .where(where);
+  } catch {
+    await db
+      .update(arenaRatings)
+      .set({
+        rating: initialRating,
+        games: 0,
+        wins: 0,
+        losses: 0,
+        draws: 0,
+        updatedAt: nowIso,
+      })
+      .where(where);
+  }
+};
+
+export const countStrictAppliedEventsSince = async (
+  db: AppDrizzleDb,
+  userId: number,
+  sinceIso: string,
+): Promise<number> => {
+  const rows = await db
+    .select({ count: count() })
+    .from(arenaRatingEvents)
+    .where(
+      and(
+        eq(arenaRatingEvents.queue, 'strict'),
+        eq(arenaRatingEvents.status, 'applied'),
+        eq(arenaRatingEvents.userId, userId),
+        gte(arenaRatingEvents.createdAt, sinceIso),
+      ),
+    );
+
+  return Math.max(0, toInt(rows[0]?.count, 0));
+};
+
+export const getStrictQueueDataCardsByIds = async (
+  db: AppDrizzleDb,
+  dataCardIds: string[],
+): Promise<Array<{
+  id: string;
+  type: string | null;
+  isPublic: number | boolean | null;
+  reviewStatus: string | null;
+  deletedAt: string | null;
+}>> => {
+  const ids = Array.from(new Set(dataCardIds.map((id) => id.trim()).filter(Boolean)));
+  if (ids.length === 0) return [];
+
+  const rows = await db
+    .select({
+      id: dataCards.id,
+      type: dataCards.type,
+      isPublic: dataCards.isPublic,
+      reviewStatus: dataCards.reviewStatus,
+      deletedAt: dataCards.deletedAt,
+    })
+    .from(dataCards)
+    .where(inArray(dataCards.id, ids));
+
+  return rows.map((row) => ({
+    id: row.id,
+    type: row.type,
+    isPublic: row.isPublic,
+    reviewStatus: row.reviewStatus,
+    deletedAt: row.deletedAt,
+  }));
+};
+
+export const getArenaEligibilitySnapshotByGenerationId = async (
+  db: AppDrizzleDb,
+  generationId: string,
+): Promise<ArenaEligibilitySnapshotRow | null> => {
+  const rows = await db
+    .select({
+      status: battleReportGenerations.status,
+      mode: battleReportGenerations.mode,
+      userId: battleReportGenerations.userId,
+      ipAnonymized: battleReportGenerations.ipAnonymized,
+      language: battleReportGenerations.language,
+      selectedLevel: battleReportGenerations.selectedLevel,
+      hasScenario: battleReportGenerations.hasScenario,
+      hasUserGuidance: battleReportGenerations.hasUserGuidance,
+      userGuidancePreview: battleReportGenerations.userGuidancePreview,
+      hasAdjudicationEvents: battleReportGenerations.hasAdjudicationEvents,
+      readArenaHistory: battleReportGenerations.readArenaHistory,
+      readCurrentState: battleReportGenerations.readCurrentState,
+      combatantCount: battleReportGenerations.combatantCount,
+      winner: battleReportGenerations.winner,
+      extraJson: battleReportGenerations.extraJson,
+    })
+    .from(battleReportGenerations)
+    .where(eq(battleReportGenerations.id, generationId))
+    .limit(1);
+
+  const row = rows[0];
+  if (!row) return null;
+
+  return {
+    status: typeof row.status === 'string' ? row.status : null,
+    mode: typeof row.mode === 'string' ? row.mode : null,
+    userId: toNullableInt(row.userId),
+    ipAnonymized: typeof row.ipAnonymized === 'string' ? row.ipAnonymized : null,
+    language: typeof row.language === 'string' ? row.language : null,
+    selectedLevel: typeof row.selectedLevel === 'string' ? row.selectedLevel : null,
+    hasScenario: toNullableInt(row.hasScenario),
+    hasUserGuidance: toNullableInt(row.hasUserGuidance),
+    userGuidancePreview: typeof row.userGuidancePreview === 'string' ? row.userGuidancePreview : null,
+    hasAdjudicationEvents: toNullableInt(row.hasAdjudicationEvents),
+    readArenaHistory: toNullableInt(row.readArenaHistory),
+    readCurrentState: toNullableInt(row.readCurrentState),
+    combatantCount: toNullableInt(row.combatantCount),
+    winner: typeof row.winner === 'string' ? row.winner : null,
+    extraJson: typeof row.extraJson === 'string' ? row.extraJson : null,
+  };
+};
+
+export const listGenerationCombatantsByGenerationId = async (
+  db: AppDrizzleDb,
+  generationId: string,
+): Promise<BattleReportGenerationCombatantRow[]> => {
+  const rows = await db
+    .select({
+      generationId: battleReportGenerationCombatants.generationId,
+      sortIndex: battleReportGenerationCombatants.sortIndex,
+      name: battleReportGenerationCombatants.name,
+      type: battleReportGenerationCombatants.type,
+      templateId: battleReportGenerationCombatants.templateId,
+      isNative: battleReportGenerationCombatants.isNative,
+      isPreset: battleReportGenerationCombatants.isPreset,
+      teamId: battleReportGenerationCombatants.teamId,
+      characterGuidance: battleReportGenerationCombatants.characterGuidance,
+      dataCardId: battleReportGenerationCombatants.dataCardId,
+      dataCardUpdatedAt: battleReportGenerationCombatants.dataCardUpdatedAt,
+      sizeChars: battleReportGenerationCombatants.sizeChars,
+      sizeBytes: battleReportGenerationCombatants.sizeBytes,
+      createdAt: battleReportGenerationCombatants.createdAt,
+    })
+    .from(battleReportGenerationCombatants)
+    .where(eq(battleReportGenerationCombatants.generationId, generationId))
+    .orderBy(battleReportGenerationCombatants.sortIndex);
+
+  return rows.map((row) => ({
+    generation_id: row.generationId,
+    sort_index: toInt(row.sortIndex, 0),
+    name: row.name,
+    type: typeof row.type === 'string' ? row.type : null,
+    template_id: typeof row.templateId === 'string' ? row.templateId : null,
+    is_native: toNullableInt(row.isNative),
+    is_preset: toNullableInt(row.isPreset),
+    team_id: toNullableInt(row.teamId),
+    character_guidance: typeof row.characterGuidance === 'string' ? row.characterGuidance : null,
+    data_card_id: typeof row.dataCardId === 'string' ? row.dataCardId : null,
+    data_card_updated_at: typeof row.dataCardUpdatedAt === 'string' ? row.dataCardUpdatedAt : null,
+    size_chars: toNullableInt(row.sizeChars),
+    size_bytes: toNullableInt(row.sizeBytes),
+    created_at: row.createdAt,
+  }));
+};
+
+export const ensureArenaRatingsExist = async (
+  db: AppDrizzleDb,
+  queue: ArenaRatingsQueue,
+  entities: [ArenaRatingsEntity, ArenaRatingsEntity],
+  initialRating: number,
+  nowIso: string,
+): Promise<void> => {
+  const [a, b] = entities.map(normalizeEntity) as [ArenaRatingsEntity, ArenaRatingsEntity];
+  await db
+    .insert(arenaRatings)
+    .values([
+      {
+        entityType: a.entityType,
+        entityId: a.entityId,
+        queue,
+        rating: initialRating,
+        games: 0,
+        wins: 0,
+        losses: 0,
+        draws: 0,
+        createdAt: nowIso,
+        updatedAt: nowIso,
+      },
+      {
+        entityType: b.entityType,
+        entityId: b.entityId,
+        queue,
+        rating: initialRating,
+        games: 0,
+        wins: 0,
+        losses: 0,
+        draws: 0,
+        createdAt: nowIso,
+        updatedAt: nowIso,
+      },
+    ])
+    .onConflictDoNothing();
+};
+
+export const getArenaRatingsByEntitiesForQueue = async (
+  db: AppDrizzleDb,
+  queue: ArenaRatingsQueue,
+  entities: [ArenaRatingsEntity, ArenaRatingsEntity],
+): Promise<Array<ArenaRatingsEntity & ArenaRatingsSnapshot>> => {
+  const [a, b] = entities.map(normalizeEntity) as [ArenaRatingsEntity, ArenaRatingsEntity];
+  const rows = await db
+    .select({
+      entityType: arenaRatings.entityType,
+      entityId: arenaRatings.entityId,
+      rating: arenaRatings.rating,
+      games: arenaRatings.games,
+      wins: arenaRatings.wins,
+      losses: arenaRatings.losses,
+      draws: arenaRatings.draws,
+    })
+    .from(arenaRatings)
+    .where(
+      and(
+        eq(arenaRatings.queue, queue),
+        or(
+          and(eq(arenaRatings.entityType, a.entityType), eq(arenaRatings.entityId, a.entityId)),
+          and(eq(arenaRatings.entityType, b.entityType), eq(arenaRatings.entityId, b.entityId)),
+        ),
+      ),
+    );
+
+  return rows.map((row) => ({
+    entityType: row.entityType === 'preset' ? 'preset' : 'data_card',
+    entityId: row.entityId,
+    rating: toInt(row.rating, 0),
+    games: Math.max(0, toInt(row.games, 0)),
+    wins: Math.max(0, toInt(row.wins, 0)),
+    losses: Math.max(0, toInt(row.losses, 0)),
+    draws: Math.max(0, toInt(row.draws, 0)),
+  }));
+};
+
+export const hasRecentAppliedEventForPair = async (
+  db: AppDrizzleDb,
+  queue: ArenaRatingsQueue,
+  pairKey: string,
+  options: { userId: number } | { ipAnonymized: string },
+  sinceIso: string,
+): Promise<boolean> => {
+  const identityCondition =
+    'userId' in options
+      ? eq(arenaRatingEvents.userId, options.userId)
+      : eq(arenaRatingEvents.ipAnonymized, options.ipAnonymized);
+
+  const rows = await db
+    .select({ id: arenaRatingEvents.id })
+    .from(arenaRatingEvents)
+    .where(
+      and(
+        eq(arenaRatingEvents.queue, queue),
+        eq(arenaRatingEvents.status, 'applied'),
+        eq(arenaRatingEvents.pairKey, pairKey),
+        gte(arenaRatingEvents.createdAt, sinceIso),
+        identityCondition,
+      ),
+    )
+    .limit(1);
+
+  return rows.length > 0;
+};
+
+export const insertArenaRatingEvent = async (
+  db: AppDrizzleDb,
+  payload: ArenaRatingEventInsertPayload,
+): Promise<boolean> => {
+  const inserted = await db
+    .insert(arenaRatingEvents)
+    .values({
+      id: payload.id,
+      generationId: payload.generationId,
+      queue: payload.queue,
+      status: payload.status,
+      skipReason: payload.skipReason,
+      userId: payload.userId,
+      ipAnonymized: payload.ipAnonymized,
+      pairKey: payload.pairKey,
+      aEntityType: payload.a.entityType,
+      aEntityId: payload.a.entityId,
+      bEntityType: payload.b.entityType,
+      bEntityId: payload.b.entityId,
+      winnerSlot: payload.winnerSlot,
+      detailsJson: payload.detailsJson ? JSON.stringify(payload.detailsJson) : null,
+      createdAt: payload.createdAtIso,
+    })
+    .onConflictDoNothing({
+      target: arenaRatingEvents.id,
+    })
+    .returning({
+      id: arenaRatingEvents.id,
+    });
+
+  return inserted.length > 0;
+};
+
+export const getArenaRatingEventById = async (
+  db: AppDrizzleDb,
+  eventId: string,
+): Promise<ArenaRatingEventStoredRow | null> => {
+  const rows = await db
+    .select({
+      id: arenaRatingEvents.id,
+      status: arenaRatingEvents.status,
+      skip_reason: arenaRatingEvents.skipReason,
+      details_json: arenaRatingEvents.detailsJson,
+      a_before_rating: arenaRatingEvents.aBeforeRating,
+      a_after_rating: arenaRatingEvents.aAfterRating,
+      a_delta: arenaRatingEvents.aDelta,
+      a_before_games: arenaRatingEvents.aBeforeGames,
+      a_after_games: arenaRatingEvents.aAfterGames,
+      b_before_rating: arenaRatingEvents.bBeforeRating,
+      b_after_rating: arenaRatingEvents.bAfterRating,
+      b_delta: arenaRatingEvents.bDelta,
+      b_before_games: arenaRatingEvents.bBeforeGames,
+      b_after_games: arenaRatingEvents.bAfterGames,
+    })
+    .from(arenaRatingEvents)
+    .where(eq(arenaRatingEvents.id, eventId))
+    .limit(1);
+
+  const row = rows[0];
+  if (!row) return null;
+
+  return {
+    id: row.id,
+    status: row.status,
+    skip_reason: typeof row.skip_reason === 'string' ? row.skip_reason : null,
+    details_json: typeof row.details_json === 'string' ? row.details_json : null,
+    a_before_rating: toNullableInt(row.a_before_rating),
+    a_after_rating: toNullableInt(row.a_after_rating),
+    a_delta: toNullableInt(row.a_delta),
+    a_before_games: toNullableInt(row.a_before_games),
+    a_after_games: toNullableInt(row.a_after_games),
+    b_before_rating: toNullableInt(row.b_before_rating),
+    b_after_rating: toNullableInt(row.b_after_rating),
+    b_delta: toNullableInt(row.b_delta),
+    b_before_games: toNullableInt(row.b_before_games),
+    b_after_games: toNullableInt(row.b_after_games),
+  };
+};
+
+export const updateArenaRatingEventComputedFields = async (
+  db: AppDrizzleDb,
+  eventId: string,
+  computed: ArenaRatingEventComputedPayload,
+): Promise<boolean> => {
+  const updated = await db
+    .update(arenaRatingEvents)
+    .set({
+      aBeforeRating: computed.aBefore.rating,
+      aAfterRating: computed.aAfter.rating,
+      aDelta: computed.deltaA,
+      aBeforeGames: computed.aBefore.games,
+      aAfterGames: computed.aAfter.games,
+      bBeforeRating: computed.bBefore.rating,
+      bAfterRating: computed.bAfter.rating,
+      bDelta: computed.deltaB,
+      bBeforeGames: computed.bBefore.games,
+      bAfterGames: computed.bAfter.games,
+      detailsJson: JSON.stringify(computed.detailsJson),
+    })
+    .where(and(eq(arenaRatingEvents.id, eventId), eq(arenaRatingEvents.status, 'pending')))
+    .returning({
+      id: arenaRatingEvents.id,
+    });
+
+  return updated.length > 0;
+};
+
+export const markArenaRatingEventApplied = async (
+  db: AppDrizzleDb,
+  eventId: string,
+  appliedAtIso: string,
+): Promise<void> => {
+  await db
+    .update(arenaRatingEvents)
+    .set({
+      status: 'applied',
+      appliedAt: appliedAtIso,
+    })
+    .where(eq(arenaRatingEvents.id, eventId));
+};
+
+export const markArenaRatingEventStatus = async (
+  db: AppDrizzleDb,
+  eventId: string,
+  status: ArenaRatingEventStatus,
+  options?: { skipReason?: string | null },
+): Promise<void> => {
+  if (options && Object.prototype.hasOwnProperty.call(options, 'skipReason')) {
+    await db
+      .update(arenaRatingEvents)
+      .set({
+        status,
+        skipReason: sql`COALESCE(${options.skipReason ?? null}, ${arenaRatingEvents.skipReason})`,
+      })
+      .where(eq(arenaRatingEvents.id, eventId));
+    return;
+  }
+
+  await db
+    .update(arenaRatingEvents)
+    .set({ status })
+    .where(eq(arenaRatingEvents.id, eventId));
+};
+
+const CONFLICT_TOKEN = '__ARENA_RATINGS_CONFLICT__';
+
+const isConflictError = (error: unknown): boolean => {
+  return error instanceof Error && error.message === CONFLICT_TOKEN;
+};
+
+const buildRatingUpdateSet = (
+  nowIso: string,
+  after: ArenaRatingsSnapshot,
+  options: { includeDelta: boolean; delta: number },
+) => {
+  if (options.includeDelta) {
+    return {
+      rating: after.rating,
+      games: after.games,
+      wins: after.wins,
+      losses: after.losses,
+      draws: after.draws,
+      lastDelta: options.delta,
+      lastAppliedAt: nowIso,
+      updatedAt: nowIso,
+    } as const;
+  }
+
+  return {
+    rating: after.rating,
+    games: after.games,
+    wins: after.wins,
+    losses: after.losses,
+    draws: after.draws,
+    updatedAt: nowIso,
+  } as const;
+};
+
+export const applyArenaRatingsUpdateIfBothMatch = async (
+  db: AppDrizzleDb,
+  queue: ArenaRatingsQueue,
+  entities: [ArenaRatingsEntity, ArenaRatingsEntity],
+  computed: ArenaRatingEventComputedPayload,
+  appliedAtIso: string,
+): Promise<'applied' | 'already-applied' | 'conflict'> => {
+  const [aEntity, bEntity] = entities.map(normalizeEntity) as [ArenaRatingsEntity, ArenaRatingsEntity];
+
+  const runWithOption = async (includeDelta: boolean): Promise<'applied' | 'already-applied' | 'conflict'> => {
+    return db.transaction(async (tx) => {
+      const rows = await tx
+        .select({
+          entityType: arenaRatings.entityType,
+          entityId: arenaRatings.entityId,
+          rating: arenaRatings.rating,
+          games: arenaRatings.games,
+        })
+        .from(arenaRatings)
+        .where(
+          and(
+            eq(arenaRatings.queue, queue),
+            or(
+              and(eq(arenaRatings.entityType, aEntity.entityType), eq(arenaRatings.entityId, aEntity.entityId)),
+              and(eq(arenaRatings.entityType, bEntity.entityType), eq(arenaRatings.entityId, bEntity.entityId)),
+            ),
+          ),
+        );
+
+      const aRow = rows.find((row) => row.entityType === aEntity.entityType && row.entityId === aEntity.entityId);
+      const bRow = rows.find((row) => row.entityType === bEntity.entityType && row.entityId === bEntity.entityId);
+      if (!aRow || !bRow) return 'conflict';
+
+      const aRating = toInt(aRow.rating, 0);
+      const aGames = toInt(aRow.games, 0);
+      const bRating = toInt(bRow.rating, 0);
+      const bGames = toInt(bRow.games, 0);
+
+      if (
+        aRating === computed.aAfter.rating &&
+        aGames === computed.aAfter.games &&
+        bRating === computed.bAfter.rating &&
+        bGames === computed.bAfter.games
+      ) {
+        return 'already-applied';
+      }
+
+      if (
+        aRating !== computed.aBefore.rating ||
+        aGames !== computed.aBefore.games ||
+        bRating !== computed.bBefore.rating ||
+        bGames !== computed.bBefore.games
+      ) {
+        return 'conflict';
+      }
+
+      const updatedA = await tx
+        .update(arenaRatings)
+        .set(buildRatingUpdateSet(appliedAtIso, computed.aAfter, { includeDelta, delta: computed.deltaA }))
+        .where(
+          and(
+            eq(arenaRatings.queue, queue),
+            eq(arenaRatings.entityType, aEntity.entityType),
+            eq(arenaRatings.entityId, aEntity.entityId),
+            eq(arenaRatings.rating, computed.aBefore.rating),
+            eq(arenaRatings.games, computed.aBefore.games),
+          ),
+        )
+        .returning({
+          entityId: arenaRatings.entityId,
+        });
+
+      const updatedB = await tx
+        .update(arenaRatings)
+        .set(buildRatingUpdateSet(appliedAtIso, computed.bAfter, { includeDelta, delta: computed.deltaB }))
+        .where(
+          and(
+            eq(arenaRatings.queue, queue),
+            eq(arenaRatings.entityType, bEntity.entityType),
+            eq(arenaRatings.entityId, bEntity.entityId),
+            eq(arenaRatings.rating, computed.bBefore.rating),
+            eq(arenaRatings.games, computed.bBefore.games),
+          ),
+        )
+        .returning({
+          entityId: arenaRatings.entityId,
+        });
+
+      if (updatedA.length !== 1 || updatedB.length !== 1) {
+        throw new Error(CONFLICT_TOKEN);
+      }
+
+      return 'applied';
+    });
+  };
+
+  try {
+    return await runWithOption(true);
+  } catch (error) {
+    if (isConflictError(error)) return 'conflict';
+    return runWithOption(false).catch((legacyError) => {
+      if (isConflictError(legacyError)) return 'conflict';
+      throw legacyError;
+    });
+  }
+};

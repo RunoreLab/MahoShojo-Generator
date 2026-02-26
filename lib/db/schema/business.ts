@@ -112,6 +112,45 @@ export const arenaRatingEvents = sqliteTable('arena_rating_events', {
   appliedAt: text('applied_at'),
 });
 
+export const battleReportGenerations = sqliteTable('battle_report_generations', {
+  id: text('id').primaryKey(),
+  status: text('status'),
+  mode: text('mode'),
+  userId: integer('user_id'),
+  ipAnonymized: text('ip_anonymized'),
+  language: text('language'),
+  selectedLevel: text('selected_level'),
+  hasScenario: integer('has_scenario'),
+  hasUserGuidance: integer('has_user_guidance'),
+  userGuidancePreview: text('user_guidance_preview'),
+  hasAdjudicationEvents: integer('has_adjudication_events'),
+  readArenaHistory: integer('read_arena_history'),
+  readCurrentState: integer('read_current_state'),
+  combatantCount: integer('combatant_count'),
+  winner: text('winner'),
+  extraJson: text('extra_json'),
+  createdAt: text('created_at'),
+  updatedAt: text('updated_at'),
+});
+
+export const battleReportGenerationCombatants = sqliteTable('battle_report_generation_combatants', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  generationId: text('generation_id').notNull(),
+  sortIndex: integer('sort_index').notNull(),
+  name: text('name').notNull(),
+  type: text('type'),
+  templateId: text('template_id'),
+  isNative: integer('is_native'),
+  isPreset: integer('is_preset'),
+  teamId: integer('team_id'),
+  characterGuidance: text('character_guidance'),
+  dataCardId: text('data_card_id'),
+  dataCardUpdatedAt: text('data_card_updated_at'),
+  sizeChars: integer('size_chars'),
+  sizeBytes: integer('size_bytes'),
+  createdAt: text('created_at').notNull(),
+});
+
 export const characters = sqliteTable('characters', {
   name: text('name').primaryKey(),
   isPreset: integer('is_preset', { mode: 'boolean' }).notNull(),
