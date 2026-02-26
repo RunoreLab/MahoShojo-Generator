@@ -178,6 +178,7 @@
 43. 已完成 `season-soft-reset` 脚本下沉：新增 `lib/db/repositories/season-soft-reset.ts` + `lib/database/season-soft-reset.ts`，`scripts/season-soft-reset.ts` 已移除脚本内全部 `queryFromD1`/`readChanges` 直连并保持 legacy 列回退逻辑（`last_delta`/`last_applied_at`）；本批次已通过 `bun run lint`、`bun test`、`bun run build`。  
 44. 已完成 badge 发放批次下沉：新增 `lib/db/repositories/badges-granting.ts` + `lib/database/badges-granting.ts`，并迁移 `scripts/badge/upsert-reporter-badges.ts`、`scripts/badge/grant-sponsor.ts`、`scripts/badge/grant-excellent-reporter.ts`、`scripts/badge/grant-reporter-tiers.ts`、`scripts/badge/grant-season-s0-badges.ts`；当前脚本域 `queryFromD1` 调用点为 `0`（`rg "queryFromD1\\(" scripts -n` 本地统计）。  
 45. 已继续下沉基础设施调用并补测：`lib/database/core.ts` 新增 `queryD1Payload`（`queryFromD1` 保持兼容别名），`lib/db/d1-http-client.ts` 改为依赖 `queryD1Payload`；新增 `tests/badges-granting-repository.test.ts` 覆盖 `badges-granting` 仓储的字段归一化、分块批量授予与失败计数逻辑。当前非文档范围 `queryFromD1` 仅剩 `lib/database/core.ts` 中兼容导出定义 1 处，且本轮通过 `bun run lint`、`bun test`、`bun run build`。  
+46. 已补齐 `queryD1Payload` 基础单测：新增 `tests/database-core-query.test.ts`，覆盖成功请求（URL/headers/body 校验）、HTTP 非 2xx 报错、缺少 Cloudflare 环境变量报错与 `queryFromD1` 兼容别名行为；并在 `lib/database/core.ts` 对 `queryFromD1` 增加 `@deprecated` 标记（迁移目标明确为 `queryD1Payload`）。本轮通过 `bun run lint`、`bun test`（`438 pass`）与 `bun run build`。  
 
 受限项（当前本地环境）：
 

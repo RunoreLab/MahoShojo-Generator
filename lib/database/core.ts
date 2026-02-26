@@ -217,7 +217,9 @@ export async function queryD1Payload(sql: string, params: unknown[] = []): Promi
   }
 }
 
-// 向后兼容旧接口命名
+/**
+ * @deprecated 请改用 `queryD1Payload`。该函数仅保留为兼容层别名，后续会在完成全仓迁移后移除。
+ */
 export async function queryFromD1(sql: string, params: unknown[] = []): Promise<unknown> {
   return queryD1Payload(sql, params);
 }
