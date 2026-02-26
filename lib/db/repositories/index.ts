@@ -8,3 +8,6 @@ export * from '@/lib/db/repositories/arena-read';
 export * from '@/lib/db/repositories/arena-legacy-stats';
 export * from '@/lib/db/repositories/data-card-review';
 export * from '@/lib/db/repositories/arena-ratings-write';
+export * from '@/lib/db/repositories/data-card-metrics';
+export * from '@/lib/db/repositories/battle-report-generation-combatants';
+export * from '@/lib/db/repositories/battle-report-generations';
