@@ -192,8 +192,8 @@ async function query(sql: string, params: unknown[] = []): Promise<Response> {
   );
 }
 
-// 从 D1 数据库直接执行 SQL 语句
-export async function queryFromD1(sql: string, params: unknown[] = []): Promise<unknown> {
+// 从 D1 数据库直接执行 SQL 语句并返回 Cloudflare D1 HTTP payload
+export async function queryD1Payload(sql: string, params: unknown[] = []): Promise<unknown> {
   try {
     const response = await query(sql, params);
 
@@ -215,6 +215,11 @@ export async function queryFromD1(sql: string, params: unknown[] = []): Promise<
     console.error("从 D1 数据库查询失败:", error);
     throw error;
   }
+}
+
+// 向后兼容旧接口命名
+export async function queryFromD1(sql: string, params: unknown[] = []): Promise<unknown> {
+  return queryD1Payload(sql, params);
 }
 
 // 保存数据到 D1 数据库，使用自定义 32 位随机字符串 ID 并返回 ID

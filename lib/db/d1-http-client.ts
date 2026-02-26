@@ -1,6 +1,6 @@
 import 'server-only';
 
-import { queryFromD1 } from '@/lib/database/core';
+import { queryD1Payload } from '@/lib/database/core';
 
 type D1HttpApiError = {
   message?: unknown;
@@ -219,7 +219,7 @@ export const createHttpD1ClientFromEnv = (): unknown | null => {
   if (cached) return cached;
 
   const executor: SqlExecutor = async (sqlText, params) => {
-    const payload = await queryFromD1(sqlText, params);
+    const payload = await queryD1Payload(sqlText, params);
     return parseD1LikeStatementResult(payload, sqlText);
   };
 
