@@ -2,7 +2,10 @@
 
 import { loadEnvConfig } from '@next/env';
 
-import { queryFromD1 } from '@/lib/database/core';
+import {
+  listArenaRatedPublicCharacterCards,
+  listDataCardPayloadRowsByIds,
+} from '@/lib/database/data-card-tech-index';
 import { computeTechIndex } from '@/lib/metrics/techIndex';
 
 type EligibleRow = {
@@ -16,15 +19,6 @@ type CardRow = {
   id: string;
   name: string | null;
   data: string;
-};
-
-type D1RowsResult<T> = {
-  result?: Array<{ results?: T[] }>;
-};
-
-const readRows = <T,>(result: unknown): T[] => {
-  const rows = (result as D1RowsResult<T>)?.result?.[0]?.results;
-  return Array.isArray(rows) ? rows : [];
 };
 
 const parseArgs = (argv: string[]) => {
@@ -184,53 +178,18 @@ async function main() {
     throw new Error('缺少 Cloudflare D1 配置：CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID / D1_DATABASE_ID');
   }
 
-  const strictPublicSinceClause = `AND (
-    dc.public_since IS NULL
-    OR dc.public_since <= datetime('now', '-3 days')
-    OR (
-      dc.created_at IS NOT NULL
-      AND dc.public_since IS NOT NULL
-      AND ABS(strftime('%s', dc.public_since) - strftime('%s', dc.created_at)) <= 600
-    )
-  )`;
-
-  const topSql = `
-    SELECT
-      ar.entity_id as dataCardId,
-      ar.rating as rating,
-      ar.games as games,
-      ar.updated_at as updatedAt
-    FROM arena_ratings ar
-    LEFT JOIN data_cards dc
-      ON ar.entity_type = 'data_card' AND dc.id = ar.entity_id
-    WHERE ar.queue = 'strict'
-      AND ar.entity_type = 'data_card'
-      AND dc.id IS NOT NULL
-      AND dc.type = 'character'
-      AND dc.is_public = 1
-      AND dc.review_status = 'approved'
-      AND dc.deleted_at IS NULL
-      ${strictPublicSinceClause}
-      AND ar.games >= ?
-    ORDER BY ar.rating DESC, ar.games DESC, ar.updated_at DESC, ar.entity_id ASC
-    LIMIT ?
-  `;
-
-  const topRows = readRows<EligibleRow>(await queryFromD1(topSql, [opts.minGames, opts.limit]));
+  const topRows = (await listArenaRatedPublicCharacterCards({
+    queue: 'strict',
+    minGames: opts.minGames,
+    limit: opts.limit,
+  })) as EligibleRow[];
   const ids = topRows.map((row) => row.dataCardId).filter((id) => typeof id === 'string' && id.trim());
   if (!ids.length) {
     console.log(JSON.stringify({ ok: true, items: [], note: '没有符合条件的 strict 榜单数据。' }, null, 2));
     return;
   }
 
-  const placeholders = ids.map(() => '?').join(', ');
-  const cardsSql = `
-    SELECT id, name, data
-    FROM data_cards
-    WHERE id IN (${placeholders})
-      AND deleted_at IS NULL
-  `;
-  const cardRows = readRows<CardRow>(await queryFromD1(cardsSql, ids));
+  const cardRows = (await listDataCardPayloadRowsByIds(ids)) as CardRow[];
   const cardById = new Map(cardRows.map((row) => [row.id, row] as const));
 
   const items: Array<{

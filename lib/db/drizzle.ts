@@ -2,6 +2,7 @@ import 'server-only';
 import { getOptionalRequestContext } from '@cloudflare/next-on-pages';
 import { drizzle, type DrizzleD1Database } from 'drizzle-orm/d1';
 import * as schema from '@/lib/db/schema';
+import { createHttpD1ClientFromEnv } from '@/lib/db/d1-http-client';
 
 export type AppDrizzleDb = DrizzleD1Database<typeof schema>;
 
@@ -63,8 +64,18 @@ const readD1FromGlobal = (): DrizzleD1Client | null => {
   return candidate;
 };
 
+const readD1FromHttpEnv = (): DrizzleD1Client | null => {
+  try {
+    const candidate = createHttpD1ClientFromEnv();
+    if (!isD1LikeClient(candidate)) return null;
+    return candidate;
+  } catch {
+    return null;
+  }
+};
+
 export const getRuntimeD1Client = (): DrizzleD1Client | null => {
-  return readD1FromCloudflareContext() ?? readD1FromGlobal();
+  return readD1FromCloudflareContext() ?? readD1FromGlobal() ?? readD1FromHttpEnv();
 };
 
 export const getDrizzleDbFromRuntime = (): AppDrizzleDb | null => {

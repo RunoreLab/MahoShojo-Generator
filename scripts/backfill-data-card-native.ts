@@ -2,7 +2,11 @@
 
 import { loadEnvConfig } from '@next/env';
 
-import { queryFromD1 } from '@/lib/database/core';
+import {
+  countNativeBackfillCandidates,
+  listNativeBackfillCandidateBatch,
+  updateNativeFlagsByDataCardIds,
+} from '@/lib/database/data-card-tech-index';
 import { verifySignature } from '@/lib/signature';
 
 type DataCardType = 'character' | 'scenario' | 'history' | 'questionnaire';
@@ -25,17 +29,8 @@ type CandidateRow = {
   is_native: number | null;
 };
 
-type D1RowsResult<T> = {
-  result?: Array<{ results?: T[] }>;
-};
-
 const hasD1Config = (): boolean => {
   return Boolean(process.env.D1_DATABASE_ID && process.env.CLOUDFLARE_API_TOKEN && process.env.CLOUDFLARE_ACCOUNT_ID);
-};
-
-const readRows = <T,>(result: unknown): T[] => {
-  const rows = (result as D1RowsResult<T>)?.result?.[0]?.results;
-  return Array.isArray(rows) ? rows : [];
 };
 
 const parseArgs = (argv: string[]) => {
@@ -118,51 +113,31 @@ const mapWithConcurrency = async <T, R>(
   return results;
 };
 
-const buildBaseWhere = (options: CliOptions): { whereSql: string; params: unknown[] } => {
-  const conditions: string[] = ['dc.deleted_at IS NULL'];
-  const params: unknown[] = [];
-
-  if (options.type) {
-    conditions.push('dc.type = ?');
-    params.push(options.type);
-  }
-  if (options.publicOnly) conditions.push('dc.is_public = 1');
-  if (options.approvedOnly) conditions.push("dc.review_status = 'approved'");
-
-  conditions.push("(dc.data LIKE '%\"signature\"%' OR dcm.is_native = 1)");
-
-  return { whereSql: conditions.join(' AND '), params };
-};
-
 const countCandidates = async (options: CliOptions): Promise<number | null> => {
-  const { whereSql, params } = buildBaseWhere(options);
-  const result = (await queryFromD1(
-    `SELECT COUNT(*) as total
-     FROM data_cards dc
-     INNER JOIN data_card_metrics dcm ON dcm.data_card_id = dc.id
-     WHERE ${whereSql}
-       AND dc.id > ?`,
-    [...params, options.startAfterId],
-  )) as any;
-
-  const row = readRows<{ total?: unknown }>(result)[0];
-  const total = typeof row?.total === 'number' ? row.total : typeof row?.total === 'string' ? Number(row.total) : null;
-  return Number.isFinite(total) ? Math.max(0, Math.floor(total as number)) : null;
+  const total = await countNativeBackfillCandidates({
+    type: options.type,
+    publicOnly: options.publicOnly,
+    approvedOnly: options.approvedOnly,
+    startAfterId: options.startAfterId,
+  });
+  return Number.isFinite(total) ? Math.max(0, Math.floor(total)) : null;
 };
 
 const fetchCandidateBatch = async (options: CliOptions, afterId: string, limit: number): Promise<CandidateRow[]> => {
-  const { whereSql, params } = buildBaseWhere(options);
-  const result = await queryFromD1(
-    `SELECT dc.id as id, dc.data as data, dcm.is_native as is_native
-     FROM data_cards dc
-     INNER JOIN data_card_metrics dcm ON dcm.data_card_id = dc.id
-     WHERE ${whereSql}
-       AND dc.id > ?
-     ORDER BY dc.id
-     LIMIT ?`,
-    [...params, afterId, limit],
+  const rows = await listNativeBackfillCandidateBatch(
+    {
+      type: options.type,
+      publicOnly: options.publicOnly,
+      approvedOnly: options.approvedOnly,
+      startAfterId: afterId,
+    },
+    limit,
   );
-  return readRows<CandidateRow>(result);
+  return rows.map((row) => ({
+    id: row.id,
+    data: row.data,
+    is_native: row.isNative,
+  }));
 };
 
 type VerifyResult =
@@ -196,27 +171,7 @@ const updateIsNativeBatch = async (
   diffs: Array<{ id: string; isNative: boolean }>,
 ): Promise<void> => {
   if (diffs.length === 0) return;
-
-  const nowIso = new Date().toISOString();
-  const caseParts = diffs.map(() => 'WHEN ? THEN ?').join(' ');
-  const wherePlaceholders = diffs.map(() => '?').join(', ');
-
-  const params: unknown[] = [];
-  for (const diff of diffs) {
-    params.push(diff.id, diff.isNative ? 1 : 0);
-  }
-  params.push(nowIso);
-  for (const diff of diffs) {
-    params.push(diff.id);
-  }
-
-  await queryFromD1(
-    `UPDATE data_card_metrics
-     SET is_native = CASE data_card_id ${caseParts} ELSE is_native END,
-         updated_at = ?
-     WHERE data_card_id IN (${wherePlaceholders})`,
-    params,
-  );
+  await updateNativeFlagsByDataCardIds(diffs);
 };
 
 async function main() {

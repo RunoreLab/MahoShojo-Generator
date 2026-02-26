@@ -2,7 +2,10 @@
 
 import { loadEnvConfig } from '@next/env';
 
-import { queryFromD1 } from '@/lib/database/core';
+import {
+  listArenaRatedPublicCharacterCards,
+  listDataCardPayloadRowsByIds,
+} from '@/lib/database/data-card-tech-index';
 import { computeTechIndex } from '@/lib/metrics/techIndex';
 
 type Queue = 'strict' | 'free';
@@ -26,15 +29,6 @@ type Options = {
   seed: number;
   batchSize: number;
   topN: number;
-};
-
-type D1RowsResult<T> = {
-  result?: Array<{ results?: T[] }>;
-};
-
-const readRows = <T,>(result: unknown): T[] => {
-  const rows = (result as D1RowsResult<T>)?.result?.[0]?.results;
-  return Array.isArray(rows) ? rows : [];
 };
 
 const parsePositiveInt = (value: string | undefined, fallback: number): number => {
@@ -163,40 +157,10 @@ async function main() {
     throw new Error('缺少 Cloudflare D1 配置：CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID / D1_DATABASE_ID');
   }
 
-  const strictPublicSinceClause =
-    opts.queue === 'strict'
-      ? `AND (
-        dc.public_since IS NULL
-        OR dc.public_since <= datetime('now', '-3 days')
-        OR (
-          dc.created_at IS NOT NULL
-          AND dc.public_since IS NOT NULL
-          AND ABS(strftime('%s', dc.public_since) - strftime('%s', dc.created_at)) <= 600
-        )
-      )`
-      : '';
-
-  const eligibleSql = `
-    SELECT
-      ar.entity_id as dataCardId,
-      ar.rating as rating,
-      ar.games as games
-    FROM arena_ratings ar
-    LEFT JOIN data_cards dc
-      ON ar.entity_type = 'data_card' AND dc.id = ar.entity_id
-    WHERE ar.queue = ?
-      AND ar.entity_type = 'data_card'
-      AND dc.id IS NOT NULL
-      AND dc.type = 'character'
-      AND dc.is_public = 1
-      AND dc.review_status = 'approved'
-      AND dc.deleted_at IS NULL
-      ${strictPublicSinceClause}
-      AND ar.games >= ?
-    ORDER BY ar.rating DESC, ar.games DESC, ar.updated_at DESC, ar.entity_id ASC
-  `;
-
-  const eligibleRows = readRows<EligibleRow>(await queryFromD1(eligibleSql, [opts.queue, opts.minGames]));
+  const eligibleRows = (await listArenaRatedPublicCharacterCards({
+    queue: opts.queue,
+    minGames: opts.minGames,
+  })) as EligibleRow[];
   const eligible = eligibleRows
     .map((row) => ({
       dataCardId: typeof row.dataCardId === 'string' ? row.dataCardId : '',
@@ -215,14 +179,7 @@ async function main() {
 
   const cardRows: CardRow[] = [];
   for (const batchIds of chunk(sampleIds, opts.batchSize)) {
-    const placeholders = batchIds.map(() => '?').join(', ');
-    const sql = `
-      SELECT id, name, data
-      FROM data_cards
-      WHERE id IN (${placeholders})
-        AND deleted_at IS NULL
-    `;
-    const rows = readRows<CardRow>(await queryFromD1(sql, batchIds));
+    const rows = (await listDataCardPayloadRowsByIds(batchIds)) as CardRow[];
     cardRows.push(
       ...rows.filter((row) => typeof row.id === 'string' && typeof row.data === 'string' && row.id.trim())
     );

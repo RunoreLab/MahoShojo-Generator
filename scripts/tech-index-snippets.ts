@@ -2,16 +2,7 @@
 
 import { loadEnvConfig } from '@next/env';
 
-import { queryFromD1 } from '@/lib/database/core';
-
-type D1RowsResult<T> = {
-  result?: Array<{ results?: T[] }>;
-};
-
-const readSingleRow = <T,>(result: unknown): T | null => {
-  const row = (result as D1RowsResult<T>)?.result?.[0]?.results?.[0];
-  return row ? (row as T) : null;
-};
+import { getDataCardPayloadRowById } from '@/lib/database/data-card-tech-index';
 
 const parseArgs = (argv: string[]) => {
   const args = new Map<string, string>();
@@ -137,20 +128,7 @@ async function main() {
 
   const { id, limit } = parseArgs(process.argv.slice(2));
 
-  const row = readSingleRow<{
-    id: string;
-    name: string | null;
-    type: string;
-    data: string;
-  }>(
-    await queryFromD1(
-      `SELECT id, name, type, data
-       FROM data_cards
-       WHERE id = ?
-         AND deleted_at IS NULL`,
-      [id],
-    ),
-  );
+  const row = await getDataCardPayloadRowById(id);
 
   if (!row) {
     console.error('未找到数据卡:', id);

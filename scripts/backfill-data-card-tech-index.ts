@@ -2,7 +2,11 @@
 
 import { loadEnvConfig } from '@next/env';
 
-import { queryFromD1 } from '@/lib/database/core';
+import {
+  countTechIndexBackfillCandidates,
+  listTechIndexBackfillCandidateBatch,
+  listTechIndexBackfillCandidatesByIds,
+} from '@/lib/database/data-card-tech-index';
 import { upsertDataCardMetrics } from '@/lib/database/data-card-metrics';
 import { computeTechIndex } from '@/lib/metrics/techIndex';
 import { verifySignature } from '@/lib/signature';
@@ -30,24 +34,15 @@ type CandidateRow = {
   id: string;
   type: DataCardType;
   is_public: number;
-  review_status: 'pending' | 'approved' | 'rejected';
+  review_status: 'pending' | 'approved' | 'rejected' | null;
   updated_at: string;
   data: string;
   metrics_updated_at: string | null;
   metrics_is_native: number | null;
 };
 
-type D1RowsResult<T> = {
-  result?: Array<{ results?: T[] }>;
-};
-
 const hasD1Config = (): boolean => {
   return Boolean(process.env.D1_DATABASE_ID && process.env.CLOUDFLARE_API_TOKEN && process.env.CLOUDFLARE_ACCOUNT_ID);
-};
-
-const readRows = <T,>(result: unknown): T[] => {
-  const rows = (result as D1RowsResult<T>)?.result?.[0]?.results;
-  return Array.isArray(rows) ? rows : [];
 };
 
 const parseArgs = (argv: string[]) => {
@@ -144,62 +139,39 @@ const mapWithConcurrency = async <T, R>(
   return results;
 };
 
-const buildBaseWhere = (options: CliOptions): { whereSql: string; params: unknown[] } => {
-  const conditions: string[] = ['dc.deleted_at IS NULL'];
-  const params: unknown[] = [];
-
-  if (options.type) {
-    conditions.push('dc.type = ?');
-    params.push(options.type);
-  }
-  if (options.publicOnly) conditions.push('dc.is_public = 1');
-  if (options.approvedOnly) conditions.push("dc.review_status = 'approved'");
-
-  if (!options.force) {
-    conditions.push('(dcm.data_card_id IS NULL OR dcm.data_card_updated_at <> dc.updated_at)');
-  }
-
-  return { whereSql: conditions.join(' AND '), params };
-};
-
 const countCandidates = async (options: CliOptions): Promise<number | null> => {
-  const { whereSql, params } = buildBaseWhere(options);
-  const sql = `
-    SELECT COUNT(*) as total
-    FROM data_cards dc
-    LEFT JOIN data_card_metrics dcm ON dcm.data_card_id = dc.id
-    WHERE ${whereSql}
-      AND dc.id > ?
-  `;
-  const result = (await queryFromD1(sql, [...params, options.startAfterId])) as any;
-  const row = readRows<{ total?: unknown }>(result)[0];
-  const total = typeof row?.total === 'number' ? row.total : typeof row?.total === 'string' ? Number(row.total) : null;
-  return Number.isFinite(total) ? Math.max(0, Math.floor(total as number)) : null;
+  const total = await countTechIndexBackfillCandidates({
+    type: options.type,
+    publicOnly: options.publicOnly,
+    approvedOnly: options.approvedOnly,
+    force: options.force,
+    startAfterId: options.startAfterId,
+  });
+  return Number.isFinite(total) ? Math.max(0, Math.floor(total)) : null;
 };
 
 const fetchCandidateBatch = async (options: CliOptions, afterId: string, limit: number): Promise<CandidateRow[]> => {
-  const { whereSql, params } = buildBaseWhere(options);
+  const rows = await listTechIndexBackfillCandidateBatch(
+    {
+      type: options.type,
+      publicOnly: options.publicOnly,
+      approvedOnly: options.approvedOnly,
+      force: options.force,
+      startAfterId: afterId,
+    },
+    limit,
+  );
 
-  const sql = `
-    SELECT
-      dc.id,
-      dc.type,
-      dc.is_public,
-      dc.review_status,
-      dc.updated_at,
-      dc.data,
-      dcm.data_card_updated_at as metrics_updated_at,
-      dcm.is_native as metrics_is_native
-    FROM data_cards dc
-    LEFT JOIN data_card_metrics dcm ON dcm.data_card_id = dc.id
-    WHERE ${whereSql}
-      AND dc.id > ?
-    ORDER BY dc.id
-    LIMIT ?
-  `;
-
-  const result = await queryFromD1(sql, [...params, afterId, limit]);
-  return readRows<CandidateRow>(result);
+  return rows.map((row) => ({
+    id: row.id,
+    type: row.type,
+    is_public: row.isPublic,
+    review_status: row.reviewStatus,
+    updated_at: row.updatedAt,
+    data: row.data,
+    metrics_updated_at: row.metricsUpdatedAt,
+    metrics_is_native: row.metricsIsNative,
+  }));
 };
 
 type ProcessResult =
@@ -218,33 +190,31 @@ const chunkArray = <T,>(items: T[], chunkSize: number): T[][] => {
 const fetchCandidatesByIds = async (options: CliOptions, dataCardIds: string[]): Promise<CandidateRow[]> => {
   if (dataCardIds.length === 0) return [];
 
-  const forcedOptions: CliOptions = { ...options, force: true };
-  const { whereSql, params } = buildBaseWhere(forcedOptions);
-
   const chunks = chunkArray(dataCardIds, 200);
   const rows: CandidateRow[] = [];
 
   for (const ids of chunks) {
-    const placeholders = ids.map(() => '?').join(', ');
-    const sql = `
-      SELECT
-        dc.id,
-        dc.type,
-        dc.is_public,
-        dc.review_status,
-        dc.updated_at,
-        dc.data,
-        dcm.data_card_updated_at as metrics_updated_at,
-        dcm.is_native as metrics_is_native
-      FROM data_cards dc
-      LEFT JOIN data_card_metrics dcm ON dcm.data_card_id = dc.id
-      WHERE ${whereSql}
-        AND dc.id IN (${placeholders})
-      ORDER BY dc.id
-    `;
-
-    const result = await queryFromD1(sql, [...params, ...ids]);
-    rows.push(...readRows<CandidateRow>(result));
+    const chunkRows = await listTechIndexBackfillCandidatesByIds(
+      {
+        type: options.type,
+        publicOnly: options.publicOnly,
+        approvedOnly: options.approvedOnly,
+        force: true,
+      },
+      ids,
+    );
+    rows.push(
+      ...chunkRows.map((row) => ({
+        id: row.id,
+        type: row.type,
+        is_public: row.isPublic,
+        review_status: row.reviewStatus,
+        updated_at: row.updatedAt,
+        data: row.data,
+        metrics_updated_at: row.metricsUpdatedAt,
+        metrics_is_native: row.metricsIsNative,
+      })),
+    );
   }
 
   return rows;

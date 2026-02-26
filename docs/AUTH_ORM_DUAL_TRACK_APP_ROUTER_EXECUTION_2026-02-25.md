@@ -171,6 +171,7 @@
 36. 已完成第三批数据卡域导入迁移：`pages/api/data-cards.ts`、`pages/api/data-card-recycle.ts`、`pages/api/data-card-tags.ts` 已移除 `@/lib/d1` 依赖，改为直连 `lib/database/data-cards` 与 `lib/database/users`；当前 `pages/api` 中残余 `@/lib/d1` 直接引用为 `35` 处（本地工作区统计）。  
 37. 已完成第四批大规模 API 去聚合层迁移：`pages/api/pvp/*`、`pages/api/me/pvp*`、`pages/api/me/battle-reports*`、`pages/api/arena/generate*.ts`、`pages/api/generate-battle-story.ts` 全部改为直连 `lib/database/*` 对应子域（`pvp`、`battle-report-generations`、`battle-report-generation-combatants`、`large-objects`、`core`、`badges`、`users`、`data-cards`）；当前 `pages/api` 中 `@/lib/d1` 直接引用已降至 `0` 处（本地工作区统计）。  
 38. 已完成仓库级去聚合层清理：`lib/auth/*`、`lib/pvp/*`、`lib/arena/*`、`app/api/auth/*`、`scripts/*`、`tests/*` 中剩余 `@/lib/d1` 引用已迁至对应 `lib/database/*` 子域；当前仓库中 `@/lib/d1` 直接引用全局检索为 `0` 处（本地工作区统计）。  
+39. 已完成 `queryFromD1(...)` 深层下沉的首个脚本批次（tech-index/backfill）：新增 `lib/db/repositories/data-card-tech-index.ts`（Drizzle 仓储）与 `lib/database/data-card-tech-index.ts`（封装层），并新增 `lib/db/d1-http-client.ts` + `lib/db/drizzle.ts` 环境回退适配（脚本环境可从 Cloudflare API 凭据创建 D1-like Client）；已迁移脚本包括 `backfill-data-card-native.ts`、`backfill-data-card-tech-index.ts`、`tech-index-inspect.ts`、`tech-index-snippets.ts`、`tech-index-top-strict-cards.ts`、`tech-index-tune-strict-weights.ts`、`tech-index-strict-rating-audit.ts`，脚本内剩余 `queryFromD1` 调用点由 `73` 降至 `54`（本地工作区统计）。  
 
 受限项（当前本地环境）：
 
