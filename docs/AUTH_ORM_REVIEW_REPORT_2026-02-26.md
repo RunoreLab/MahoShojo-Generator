@@ -123,3 +123,111 @@
 仍需你在 Cloudflare 预发环境完成：
 
 1. 基于预发域名执行真实链路回归：登录/注册/verify/recover/reset、管理员/审核豁免权限路径验证。
+
+---
+
+## 八、Auth + ORM 迁移穿行测试补充（2026-02-26）
+
+### 8.1 数据来源与约束
+
+1. 由于线上 D1 读取存在过载现象（`D1 DB is overloaded`, code `7429`），本轮改用本地旧版备份作为源数据：`/tmp/mahoshojo_20251231.db`
+2. 目标库始终为测试 D1（`env.test`）。
+3. 生产库未执行任何写操作；测试写入仅发生在测试 D1。
+
+### 8.2 数据复制执行与结果（user_id <= 20 关联数据）
+
+执行脚本（新增/改造）：
+
+- `scripts/copy-prod-u20-data-to-test.mjs`
+
+核心命令：
+
+1. Dry-run：
+   - `node scripts/copy-prod-u20-data-to-test.mjs --source-sqlite /tmp/mahoshojo_20251231.db --target-env env.test --max-user-id 20`
+2. Apply：
+   - `node scripts/copy-prod-u20-data-to-test.mjs --source-sqlite /tmp/mahoshojo_20251231.db --target-env env.test --max-user-id 20 --apply`
+
+复制统计（22 张表，共 3667 行）：
+
+1. `d1_migrations`: 1
+2. `users`: 60
+3. `badges`: 13
+4. `data_cards`: 200
+5. `data_card_updates`: 0
+6. `decks`: 1
+7. `deck_cards`: 16
+8. `favorites`: 154
+9. `deck_favorites`: 1
+10. `battle_report_generations`: 710
+11. `battle_report_generation_combatants`: 1741
+12. `pvp_rooms`: 30
+13. `pvp_matches`: 7
+14. `pvp_rounds`: 43
+15. `pvp_match_players`: 18
+16. `pvp_room_players`: 42
+17. `pvp_room_hands`: 34
+18. `pvp_room_submissions`: 32
+19. `pvp_room_chat_messages`: 19
+20. `pvp_room_card_snapshots`: 295
+21. `pvp_round_choices`: 84
+22. `user_badges`: 166
+
+已通过 `wrangler d1 execute` 在测试库逐表复核，上述 22 表行数与复制统计一致。
+
+### 8.3 Auth + ORM 迁移穿行
+
+执行命令：
+
+- `HOME=$PWD/.home node scripts/d1-migrate-safe.mjs --database DB --remote --env production --env-file env.test`
+
+执行结果：
+
+1. `0000_auth_domain_bootstrap.sql` 已应用
+2. `0001_users_admin_flags.sql` 已应用（检测到缺失列并补齐）
+3. `0002_auth_password_reset_tokens.sql` 已应用
+4. 新增应用迁移数：3
+
+迁移后核验：
+
+1. 新表存在：
+   - `ba_user`
+   - `ba_session`
+   - `ba_account`
+   - `ba_verification`
+   - `user_auth_links`
+   - `auth_password_reset_tokens`
+2. `users` 表字段状态：
+   - `is_review_exempt` 存在，`NOT NULL DEFAULT 0`
+   - `is_admin` 存在，`NOT NULL DEFAULT 0`
+   - `users.is_admin IS NULL` 数量：0
+   - `users.is_review_exempt IS NULL` 数量：0
+3. 关键业务表迁移前后行数保持一致：
+   - `battle_report_generations`: 710
+   - `battle_report_generation_combatants`: 1741
+   - `pvp_rooms`: 30
+   - `pvp_matches`: 7
+   - `pvp_rounds`: 43
+   - `data_cards`: 200
+
+### 8.4 回归命令
+
+以下命令在当前分支均通过：
+
+1. `bun test`
+2. `bun run lint`
+3. `bun run build`
+4. `HOME=$PWD/.home bun run build:cf`
+
+### 8.5 本轮发现并处理的问题
+
+1. 本地 SQLite 大查询出现 `unable to open database file (14)`：
+   - 原因：复杂 CTE 触发临时文件路径问题。
+   - 处理：本地查询前强制 `PRAGMA temp_store=MEMORY`。
+2. 测试 D1 批量插入触发 `too many SQL variables`：
+   - 处理：将批量参数上限从 `600` 下调至 `90`。
+3. 测试 D1 远程模式执行 `PRAGMA integrity_check` 返回 `SQLITE_AUTH`：
+   - 处理：脚本对该场景降级为“记录并跳过”，不误判复制失败。
+
+### 8.6 合并评估结论（基于旧版备份穿行）
+
+在“旧版数据快照（2025-12-31）+ user_id<=20 关联子集”条件下，Auth + ORM 迁移穿行与构建回归均通过，未发现阻断本分支合并到生产分支的问题。
