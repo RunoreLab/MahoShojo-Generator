@@ -18,6 +18,8 @@
         "db:migrate:remote:prod": "node scripts/check-wrangler-d1-config.mjs && node scripts/d1-migrate-safe.mjs --database DB --remote --env production",
         "db:migrate:local:preview": "node scripts/check-wrangler-d1-config.mjs && node scripts/d1-migrate-safe.mjs --database DB --local --env preview",
         "db:migrate:remote:preview": "node scripts/check-wrangler-d1-config.mjs && node scripts/d1-migrate-safe.mjs --database DB --remote --env preview",
+        "db:status:remote:prod": "node scripts/check-wrangler-d1-config.mjs && node scripts/d1-release-status.mjs --database DB --remote --env production",
+        "db:status:remote:prod:ready": "node scripts/check-wrangler-d1-config.mjs && node scripts/d1-release-status.mjs --database DB --remote --env production --require-ready",
         "test": "bun test",
         "test:watch": "bun test --watch"
     },
