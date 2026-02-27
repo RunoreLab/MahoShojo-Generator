@@ -72,6 +72,25 @@ export const updateBusinessUserAuthKey = async (
   return getBusinessUserById(db, userId);
 };
 
+export const updateBusinessUserEmailById = async (
+  db: AppDrizzleDb,
+  userId: number,
+  email: string,
+): Promise<BusinessUserRow | null> => {
+  const normalizedEmail = typeof email === 'string' ? email.trim().toLowerCase() : '';
+  if (!normalizedEmail) return null;
+
+  await db
+    .update(users)
+    .set({
+      email: normalizedEmail,
+      updatedAt: sql`CURRENT_TIMESTAMP`,
+    })
+    .where(eq(users.id, userId));
+
+  return getBusinessUserById(db, userId);
+};
+
 export const verifyBusinessUserLoginByUsernameAndAuthKey = async (
   db: AppDrizzleDb,
   username: string,

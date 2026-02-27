@@ -2,47 +2,13 @@
 
 import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-
-import { authStorage } from '@/lib/auth';
-
-type AuthMigrationStatus = {
-  hasAuthLink: boolean;
-  authUserId: string | null;
-  hasPassword: boolean;
-  emailVerified: boolean;
-  authSource: 'better-auth-session' | 'legacy-bearer';
-  migrationRequired: boolean;
-  legacyOnly: boolean;
-};
-
-type AuthMigrationResponse = {
-  success: boolean;
-  status: AuthMigrationStatus;
-};
-
-const loadMigrationStatus = async (): Promise<AuthMigrationStatus> => {
-  const authHeader = await authStorage.getAuthHeader();
-  if (!authHeader) throw new Error('未登录');
-
-  const response = await fetch('/api/me/account/migration-status', {
-    method: 'GET',
-    headers: {
-      Authorization: authHeader,
-    },
-  });
-  const data = (await response.json().catch(() => ({}))) as Partial<AuthMigrationResponse> & { error?: string };
-  if (!response.ok || !data.success || !data.status) {
-    throw new Error(data.error || '读取迁移状态失败');
-  }
-
-  return data.status;
-};
+import { loadAuthMigrationStatus } from '@/components/me/authMigrationStatus';
 
 export function AuthMigrationPanel({ userId }: { userId: number | null }) {
   const query = useQuery({
     queryKey: ['me-auth-migration', userId],
     enabled: Boolean(userId),
-    queryFn: loadMigrationStatus,
+    queryFn: loadAuthMigrationStatus,
     staleTime: 20_000,
   });
 

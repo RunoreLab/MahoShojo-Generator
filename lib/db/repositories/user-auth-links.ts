@@ -16,6 +16,12 @@ export type AuthMigrationStatus = {
   emailVerified: boolean;
 };
 
+export type AuthUserProfileLite = {
+  id: string;
+  email: string;
+  emailVerified: boolean;
+};
+
 export const getUserAuthLinkByAuthUserId = async (
   db: AppDrizzleDb,
   authUserId: string,
@@ -99,5 +105,30 @@ export const getAuthMigrationStatusByBusinessUserId = async (
     authUserId: link.authUserId,
     hasPassword,
     emailVerified,
+  };
+};
+
+export const getAuthUserProfileByAuthUserId = async (
+  db: AppDrizzleDb,
+  authUserId: string,
+): Promise<AuthUserProfileLite | null> => {
+  const rows = await db
+    .select({
+      id: baUsers.id,
+      email: baUsers.email,
+      emailVerified: baUsers.emailVerified,
+    })
+    .from(baUsers)
+    .where(eq(baUsers.id, authUserId))
+    .limit(1);
+
+  const row = rows[0];
+  if (!row) return null;
+  if (typeof row.email !== 'string' || !row.email.trim()) return null;
+
+  return {
+    id: row.id,
+    email: row.email.trim().toLowerCase(),
+    emailVerified: Boolean(row.emailVerified),
   };
 };

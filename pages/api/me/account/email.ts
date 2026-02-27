@@ -1,0 +1,111 @@
+import {
+  appendSetCookieHeaders,
+  extractErrorMessage,
+  invokeBetterAuthSubrequest,
+  readJsonSafely,
+} from '@/lib/auth/better-auth-subrequest';
+import { getDrizzleDbFromRuntime } from '@/lib/db/drizzle';
+import { getBusinessUserById, updateBusinessUserEmailById } from '@/lib/db/repositories/business-users';
+import {
+  getAuthUserProfileByAuthUserId,
+  getUserAuthLinkByBusinessUserId,
+} from '@/lib/db/repositories/user-auth-links';
+import { json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
+
+export const runtime = 'edge';
+
+type ChangeEmailPayload = {
+  newEmail?: unknown;
+};
+
+const toNonEmptyString = (value: unknown): string | null => {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+};
+
+const isValidEmail = (email: string): boolean => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+
+const mapBetterAuthEmailError = (message: string): string => {
+  const normalized = message.trim().toUpperCase();
+  if (!normalized) return '修改邮箱失败，请稍后重试';
+  if (normalized.includes('USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL')) return '该邮箱已被占用';
+  if (normalized.includes('CHANGE EMAIL IS DISABLED')) return '当前环境暂未开启改绑邮箱';
+  if (normalized.includes('EMAIL IS THE SAME')) return '新邮箱不能与当前邮箱相同';
+  return message;
+};
+
+export default withPvpErrorBoundary(async function handler(req: Request): Promise<Response> {
+  if (req.method !== 'PUT') return json({ error: 'Method not allowed' }, { status: 405 });
+
+  const auth = await requireAuthUser(req);
+  if ('response' in auth) return auth.response;
+
+  if (auth.source === 'legacy-bearer') {
+    return json({ error: '你当前使用旧密钥登录，请先改用密码登录后再修改邮箱' }, { status: 409 });
+  }
+
+  const parsed = await readJson<ChangeEmailPayload>(req);
+  if ('response' in parsed) return parsed.response;
+
+  const email = toNonEmptyString(parsed.data.newEmail)?.toLowerCase() ?? null;
+  if (!email) return json({ error: '新邮箱不能为空' }, { status: 400 });
+  if (!isValidEmail(email)) return json({ error: '请输入有效的邮箱地址' }, { status: 400 });
+
+  const db = getDrizzleDbFromRuntime();
+  if (!db) return json({ error: '数据库不可用，请稍后重试' }, { status: 503 });
+
+  const businessUser = await getBusinessUserById(db, auth.user.id);
+  if (!businessUser) return json({ error: '用户不存在' }, { status: 404 });
+  if (businessUser.email?.toLowerCase() === email) {
+    return json({ error: '新邮箱不能与当前邮箱相同' }, { status: 400 });
+  }
+
+  const requestUrl = new URL(req.url);
+  const callbackURL = new URL('/me', requestUrl.origin).toString();
+  let response: Response;
+  try {
+    response = await invokeBetterAuthSubrequest({
+      req,
+      path: '/api/auth/change-email',
+      body: {
+        newEmail: email,
+        callbackURL,
+      },
+    });
+  } catch (error) {
+    console.error('[me/account/email] Better Auth 子请求失败:', error);
+    return json({ error: '改绑邮箱当前不可用，请稍后重试' }, { status: 503 });
+  }
+
+  const payload = await readJsonSafely<{ error?: string; message?: string }>(response);
+  if (!response.ok) {
+    const message = mapBetterAuthEmailError(extractErrorMessage(payload, '修改邮箱失败'));
+    return json({ error: message }, { status: response.status || 400 });
+  }
+
+  const link = await getUserAuthLinkByBusinessUserId(db, auth.user.id);
+  if (link) {
+    const authProfile = await getAuthUserProfileByAuthUserId(db, link.authUserId);
+    const syncEmail = authProfile?.email ?? email;
+    if (syncEmail !== businessUser.email.toLowerCase()) {
+      await updateBusinessUserEmailById(db, auth.user.id, syncEmail);
+    }
+  } else {
+    await updateBusinessUserEmailById(db, auth.user.id, email);
+  }
+
+  const headers = new Headers();
+  appendSetCookieHeaders(headers, response.headers);
+
+  return json(
+    {
+      success: true,
+      message: '邮箱更新请求已提交',
+      email,
+    },
+    {
+      headers,
+    },
+  );
+});

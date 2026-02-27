@@ -10,6 +10,7 @@ import Footer from '@/components/Footer';
 import { BattleReportCardModal } from '@/components/me/BattleReportCardModal';
 import { BattleReportDetailsModal } from '@/components/me/BattleReportDetailsModal';
 import { BattleReportsPanel } from '@/components/me/BattleReportsPanel';
+import { AccountSecurityPanel } from '@/components/me/AccountSecurityPanel';
 import { AuthMigrationPanel } from '@/components/me/AuthMigrationPanel';
 import { MeTabs } from '@/components/me/MeTabs';
 import { PvpMatchDetailsModal } from '@/components/me/PvpMatchDetailsModal';
@@ -133,18 +134,7 @@ export function MePage() {
               <div className="mt-4">
                 <AuthMigrationPanel userId={user?.id ?? null} />
                 <ProfileSettingsPanel userId={user?.id ?? null} />
-                <div className="mt-4">
-                  <div className="font-semibold mb-2">账号设置（预留）</div>
-                  <div className="rounded-xl border bg-white p-4 text-sm text-gray-700">
-                    <div className="mb-2">此区域将用于后续实现：</div>
-                    <ul className="list-disc list-inside space-y-1">
-                      <li>改绑邮箱</li>
-                      <li>修改密码</li>
-                      <li>修改用户名</li>
-                    </ul>
-                    <div className="text-xs text-gray-500 mt-2">当前版本仅预留入口，功能后续逐步上线。</div>
-                  </div>
-                </div>
+                <AccountSecurityPanel userId={user?.id ?? null} username={user?.username ?? null} />
               </div>
             ) : null}
           </div>

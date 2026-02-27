@@ -124,6 +124,12 @@ export const getBetterAuthInstance = (): BetterAuthInstance | null => {
     emailAndPassword: {
       enabled: true,
     },
+    user: {
+      changeEmail: {
+        enabled: true,
+        updateEmailWithoutVerification: true,
+      },
+    },
     session: {
       cookieCache: {
         enabled: true,
