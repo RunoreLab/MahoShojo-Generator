@@ -101,18 +101,25 @@ export const upsertLargeObjectByKindAndOwnerRef = async (
     nowIso: string;
   },
 ): Promise<void> => {
-  const existing = await db
-    .select({
-      id: largeObjects.id,
+  await db
+    .insert(largeObjects)
+    .values({
+      id: input.id,
+      kind: input.kind,
+      ownerRefId: input.ownerRefId,
+      ownerUserId: input.ownerUserId,
+      r2Key: input.r2Key,
+      bytes: input.bytes,
+      storedBytes: input.storedBytes,
+      sha256: input.sha256,
+      contentType: input.contentType,
+      contentEncoding: input.contentEncoding,
+      createdAt: input.nowIso,
+      updatedAt: input.nowIso,
     })
-    .from(largeObjects)
-    .where(and(eq(largeObjects.kind, input.kind), eq(largeObjects.ownerRefId, input.ownerRefId)))
-    .limit(1);
-
-  if (existing.length > 0) {
-    await db
-      .update(largeObjects)
-      .set({
+    .onConflictDoUpdate({
+      target: [largeObjects.kind, largeObjects.ownerRefId],
+      set: {
         ownerUserId: input.ownerUserId,
         r2Key: input.r2Key,
         bytes: input.bytes,
@@ -121,23 +128,6 @@ export const upsertLargeObjectByKindAndOwnerRef = async (
         contentType: input.contentType,
         contentEncoding: input.contentEncoding,
         updatedAt: input.nowIso,
-      })
-      .where(and(eq(largeObjects.kind, input.kind), eq(largeObjects.ownerRefId, input.ownerRefId)));
-    return;
-  }
-
-  await db.insert(largeObjects).values({
-    id: input.id,
-    kind: input.kind,
-    ownerRefId: input.ownerRefId,
-    ownerUserId: input.ownerUserId,
-    r2Key: input.r2Key,
-    bytes: input.bytes,
-    storedBytes: input.storedBytes,
-    sha256: input.sha256,
-    contentType: input.contentType,
-    contentEncoding: input.contentEncoding,
-    createdAt: input.nowIso,
-    updatedAt: input.nowIso,
-  });
+      },
+    });
 };
