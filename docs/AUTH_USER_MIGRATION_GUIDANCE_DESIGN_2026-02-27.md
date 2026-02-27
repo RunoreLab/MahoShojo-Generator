@@ -324,3 +324,16 @@
      - 发送密码重置邮件（桥接 Better Auth `/api/auth/request-password-reset`）；
      - 使用邮件令牌重置密码（桥接 Better Auth `/api/auth/reset-password`）；
      - `/me` 安全设置页增加“忘记当前密码（邮件重置）”操作区。
+11. 补齐迁移入口直达与 legacy 软阻断阈值
+   - 文件：
+     - `components/me/MePage.tsx`
+     - `pages/character-manager.tsx`
+   - 已落地能力：
+     - `/me` 支持通过 `?tab=settings` 自动切换到设置页签；
+     - 若 URL 中存在 `token`（重置密码场景）也会自动切到设置页签；
+     - `character-manager` 的迁移入口统一跳转到 `/me?tab=settings`；
+     - legacy 登录后“稍后处理”达到阈值（3 次）将触发软阻断，仅保留“去个人页迁移”入口。
+
+## 10. 暂缓项说明（本轮）
+
+1. “独立认领迁移入口（Claim Flow）”按当前迭代安排暂缓，不在本轮交付范围。

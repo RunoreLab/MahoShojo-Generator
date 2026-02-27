@@ -59,6 +59,7 @@ const NATIVE_PRESERVING_PATHS = new Set([
 // 为避免滥用该能力伪造“魔改原生卡”，当替换用的新基础名称过长时，允许替换，但会导致原生性丧失（保存时移除原生签名）。
 const NAME_REPLACE_NATIVE_MAX_CHARS = 32;
 const LEGACY_MIGRATION_DEFER_COUNT_STORAGE_KEY = 'mahoshojo_auth_migration_defer_count';
+const LEGACY_MIGRATION_SOFT_BLOCK_THRESHOLD = 3;
 
 const getDisplayCharCount = (text: string): number => {
     return Array.from((text ?? '').trim()).length;
@@ -465,8 +466,10 @@ const CharacterManagerPage: React.FC = () => {
         }
         return '账号迁移仍有未完成项，请前往个人页继续处理。';
     }, [authMigrationStatus]);
+    const isLegacyMigrationSoftBlocked = legacyMigrationDeferCount >= LEGACY_MIGRATION_SOFT_BLOCK_THRESHOLD;
 
     const handleDeferLegacyMigrationReminder = useCallback(() => {
+        if (legacyMigrationDeferCount >= LEGACY_MIGRATION_SOFT_BLOCK_THRESHOLD) return;
         const nextCount = legacyMigrationDeferCount + 1;
         setLegacyMigrationDeferCount(nextCount);
         if (typeof window !== 'undefined') {
@@ -1832,7 +1835,7 @@ const CharacterManagerPage: React.FC = () => {
                                                 ) : null}
                                                 <div className="mt-2 flex flex-wrap gap-2">
                                                     <Link
-                                                        href="/me"
+                                                        href="/me?tab=settings"
                                                         className="rounded bg-white px-2 py-1 text-[11px] text-yellow-900 hover:bg-yellow-100"
                                                     >
                                                         去个人页完成迁移
@@ -2447,16 +2450,23 @@ const CharacterManagerPage: React.FC = () => {
                                 ? `你已选择“稍后处理” ${legacyMigrationDeferCount} 次。`
                                 : '你还未处理过迁移提醒。'}
                         </p>
+                        {isLegacyMigrationSoftBlocked ? (
+                            <p className="mt-2 rounded-md border border-red-200 bg-red-50 px-2 py-1 text-xs text-red-700">
+                                你已多次选择“稍后处理”，本次登录需先完成迁移设置后再继续使用。
+                            </p>
+                        ) : null}
                         <div className="mt-4 flex justify-end gap-2">
-                            <button
-                                type="button"
-                                onClick={handleDeferLegacyMigrationReminder}
-                                className="rounded border border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50"
-                            >
-                                稍后处理
-                            </button>
+                            {!isLegacyMigrationSoftBlocked ? (
+                                <button
+                                    type="button"
+                                    onClick={handleDeferLegacyMigrationReminder}
+                                    className="rounded border border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50"
+                                >
+                                    稍后处理
+                                </button>
+                            ) : null}
                             <Link
-                                href="/me"
+                                href="/me?tab=settings"
                                 onClick={() => setShowLegacyMigrationReminderModal(false)}
                                 className="rounded bg-pink-600 px-3 py-1.5 text-sm text-white hover:bg-pink-700"
                             >

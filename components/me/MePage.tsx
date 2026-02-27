@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Head from 'next/head';
 import Link from 'next/link';
 import { useMutation } from '@tanstack/react-query';
@@ -21,9 +21,19 @@ import { ProfileSettingsPanel } from '@/components/me/ProfileSettingsPanel';
 import { authStorage } from '@/lib/auth';
 import { useAuth } from '@/lib/useAuth';
 
+type MeTab = 'reports' | 'pvp' | 'settings';
+
+const parseMeTabFromSearch = (search: string): MeTab | null => {
+  const params = new URLSearchParams(search);
+  const tab = params.get('tab');
+  if (tab === 'reports' || tab === 'pvp' || tab === 'settings') return tab;
+  if (params.get('token')) return 'settings';
+  return null;
+};
+
 export function MePage() {
   const { user, userBadges, isAuthenticated, loading } = useAuth();
-  const [tab, setTab] = useState<'reports' | 'pvp' | 'settings'>('reports');
+  const [tab, setTab] = useState<MeTab>('reports');
 
   const [activeReportId, setActiveReportId] = useState<string | null>(null);
   const [showReportDetails, setShowReportDetails] = useState(false);
@@ -35,6 +45,18 @@ export function MePage() {
   const [showCardModal, setShowCardModal] = useState(false);
 
   const [showProfileCardModal, setShowProfileCardModal] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const syncTabFromQuery = () => {
+      const nextTab = parseMeTabFromSearch(window.location.search);
+      if (nextTab) setTab(nextTab);
+    };
+
+    syncTabFromQuery();
+    window.addEventListener('popstate', syncTabFromQuery);
+    return () => window.removeEventListener('popstate', syncTabFromQuery);
+  }, []);
 
   const regenerateMutation = useMutation({
     mutationFn: async (generationId: string) => {
