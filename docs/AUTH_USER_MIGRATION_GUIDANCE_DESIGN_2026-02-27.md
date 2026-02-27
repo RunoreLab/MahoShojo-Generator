@@ -315,3 +315,12 @@
 9. 密码登录失败语义统一
    - 文件：`app/api/auth/login/handler.ts`
    - 对外统一返回“账号或密码错误”，避免按邮箱语义暴露标识类型。
+10. 补齐 `/api/me/account/password/forgot|reset` 业务桥接
+   - 文件：
+     - `pages/api/me/account/password/forgot.ts`
+     - `pages/api/me/account/password/reset.ts`
+     - `components/me/AccountSecurityPanel.tsx`
+   - 已落地能力：
+     - 发送密码重置邮件（桥接 Better Auth `/api/auth/request-password-reset`）；
+     - 使用邮件令牌重置密码（桥接 Better Auth `/api/auth/reset-password`）；
+     - `/me` 安全设置页增加“忘记当前密码（邮件重置）”操作区。
