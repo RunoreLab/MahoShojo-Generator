@@ -36,12 +36,14 @@
 
 ### 2.3 生产 D1 现状（只读核对）
 - `d1_migrations` 当前仅 1 条：`0001_create_comments_table.sql`
-- 待应用迁移（3 条）：
+- 待应用迁移（4 条）：
   - `0000_auth_domain_bootstrap.sql`
   - `0001_users_admin_flags.sql`
   - `0002_auth_password_reset_tokens.sql`
-- Auth 关键表当前不存在（0/6）：
+  - `0003_auth_audit_logs.sql`
+- Auth 关键表当前不存在（0/7）：
   - `ba_user`, `ba_session`, `ba_account`, `ba_verification`, `user_auth_links`, `auth_password_reset_tokens`
+  - `auth_audit_logs`
 - `users` 表关键列状态：
   - `is_review_exempt` 已存在
   - `is_admin` 缺失（将由 `0001_users_admin_flags.sql` 补齐）
@@ -134,7 +136,7 @@ node scripts/d1-release-status.mjs --database DB --remote --env production --env
 
 通过标准：
 - 待应用迁移 = 0
-- Auth 表覆盖 = 6/6
+- Auth 表覆盖 = 7/7
 - users 关键列覆盖 = 2/2（包含 `is_admin`）
 
 ### 步骤 F：可选回填（仅当存在已创建的 Better Auth 用户但未映射）
@@ -164,6 +166,18 @@ bun run backfill:user-auth-links:write
    - legacy key 登录仍可用（`mode=legacy`）。
 3. 业务接口抽样：
    - 至少抽测 3 个读接口 + 3 个写接口（含 `pages/api/*` 老入口）确保 Drizzle 仓储迁移无回归。
+4. 认证审计日志抽样（建议）：
+   - 触发至少一次登录成功、一次登录失败、一次密码/邮箱修改后，执行以下查询确认审计写入：
+
+```bash
+XDG_CONFIG_HOME=.home/.config npx --yes wrangler d1 execute DB \
+  --remote \
+  --env production \
+  --env-file .env \
+  --command "SELECT event_type, result_code, COUNT(*) AS cnt FROM auth_audit_logs WHERE created_at >= CAST(strftime('%s','now') AS INTEGER) - 3600 GROUP BY event_type, result_code ORDER BY cnt DESC LIMIT 20;"
+```
+
+   - 预期：可看到 `login_success/login_failed/password_set/password_change/email_change/register_success/register_failed` 等事件样本。
 
 ---
 

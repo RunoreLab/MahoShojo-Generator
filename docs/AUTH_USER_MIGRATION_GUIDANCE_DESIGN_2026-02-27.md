@@ -294,3 +294,14 @@
    - 新增用例覆盖：
      - legacy + 已映射 + 无密码 -> 可设置初始密码；
      - legacy + 无映射 + 无密码 -> 可通过设置密码认领迁移。
+6. 认证审计日志基础能力落地
+   - 新增表：`auth_audit_logs`（迁移文件：`drizzle/0003_auth_audit_logs.sql`）
+   - 新增仓储：`lib/db/repositories/auth-audit-logs.ts`
+   - 新增审计记录工具：`lib/auth/auth-audit.ts`
+   - 已接入链路：
+     - 注册：`app/api/auth/register/handler.ts`
+     - 登录（密码/legacy）：`app/api/auth/login/handler.ts`
+     - 设置初始密码：`pages/api/me/account/password/set.ts`
+     - 修改密码：`pages/api/me/account/password.ts`
+     - 修改邮箱：`pages/api/me/account/email.ts`
+   - 额外补齐：`users.registration_ip` 已纳入 Drizzle 模型，并在注册成功后尝试回填（仅空值时写入）。

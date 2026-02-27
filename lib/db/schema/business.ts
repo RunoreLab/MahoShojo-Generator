@@ -15,6 +15,7 @@ export const users = sqliteTable('users', {
   username: text('username').notNull(),
   email: text('email').notNull(),
   authKey: text('auth_key'),
+  registrationIp: text('registration_ip'),
   prefix: text('prefix'),
   signature: text('signature'),
   avatarWebpBase64: text('avatar_webp_base64'),

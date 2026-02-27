@@ -1,4 +1,5 @@
 import { issueActivityToken } from '@/lib/auth/activity-token';
+import { recordAuthAuditLog } from '@/lib/auth/auth-audit';
 import {
   appendSetCookieHeaders,
   extractErrorMessage,
@@ -13,7 +14,12 @@ import {
 import { getPasswordPolicySummaryMessage, validatePasswordPolicy } from '@/lib/auth/password-policy';
 import { getUserByEmail, getUserByUsername } from '@/lib/database/users';
 import { getDrizzleDbFromRuntime } from '@/lib/db/drizzle';
-import { getBusinessUserByEmail, getBusinessUserByUsername } from '@/lib/db/repositories/business-users';
+import {
+  getBusinessUserByEmail,
+  getBusinessUserByUsername,
+  setBusinessUserRegistrationIpIfEmpty,
+} from '@/lib/db/repositories/business-users';
+import { getClientIpFromHeaders } from '@/lib/arena/battle-report-log-utils';
 import { quickCheck } from '@/lib/sensitive-word-filter';
 import { verifyTurnstileToken } from '@/lib/turnstile';
 
@@ -69,6 +75,7 @@ type RegisterDeps = {
   getDrizzleDbFromRuntime: typeof getDrizzleDbFromRuntime;
   getBusinessUserByEmail: typeof getBusinessUserByEmail;
   getBusinessUserByUsername: typeof getBusinessUserByUsername;
+  setBusinessUserRegistrationIpIfEmpty: typeof setBusinessUserRegistrationIpIfEmpty;
   quickCheck: typeof quickCheck;
   verifyTurnstileToken: typeof verifyTurnstileToken;
 };
@@ -87,6 +94,7 @@ const defaultRegisterDeps: RegisterDeps = {
   getDrizzleDbFromRuntime,
   getBusinessUserByEmail,
   getBusinessUserByUsername,
+  setBusinessUserRegistrationIpIfEmpty,
   quickCheck,
   verifyTurnstileToken,
 };
@@ -102,11 +110,25 @@ const buildRegisterHandler = (deps: RegisterDeps): ((req: Request) => Promise<Re
 
     const existingUserByName = db ? await deps.getBusinessUserByUsername(db, username) : await deps.getUserByUsername(username);
     if (existingUserByName) {
+      await recordAuthAuditLog({
+        req,
+        eventType: 'register_failed',
+        authSource: 'better-auth',
+        identifierType: 'username',
+        resultCode: 'USERNAME_EXISTS',
+      });
       return json({ error: '用户名已存在' }, 409);
     }
 
     const existingUserByEmail = db ? await deps.getBusinessUserByEmail(db, email) : await deps.getUserByEmail(email);
     if (existingUserByEmail) {
+      await recordAuthAuditLog({
+        req,
+        eventType: 'register_failed',
+        authSource: 'better-auth',
+        identifierType: 'email',
+        resultCode: 'EMAIL_EXISTS',
+      });
       return json({ error: '邮箱已被注册' }, 409);
     }
 
@@ -122,6 +144,13 @@ const buildRegisterHandler = (deps: RegisterDeps): ((req: Request) => Promise<Re
     });
 
     if (!bridge.ok) {
+      await recordAuthAuditLog({
+        req,
+        eventType: 'register_failed',
+        authSource: 'better-auth',
+        resultCode: 'BRIDGE_UNAVAILABLE',
+        resultMessage: bridge.code,
+      });
       return json(
         {
           error: '密码注册当前不可用，请稍后重试。',
@@ -133,6 +162,13 @@ const buildRegisterHandler = (deps: RegisterDeps): ((req: Request) => Promise<Re
 
     const payload = await deps.readJsonSafely<BetterAuthSignUpPayload>(bridge.response);
     if (!bridge.response.ok) {
+      await recordAuthAuditLog({
+        req,
+        eventType: 'register_failed',
+        authSource: 'better-auth',
+        resultCode: 'REGISTER_REJECTED',
+        resultMessage: deps.extractErrorMessage(payload, '密码注册失败，请稍后重试'),
+      });
       return json(
         {
           error: deps.extractErrorMessage(payload, '密码注册失败，请稍后重试'),
@@ -143,6 +179,12 @@ const buildRegisterHandler = (deps: RegisterDeps): ((req: Request) => Promise<Re
 
     const authUserId = toNonEmptyString(payload?.user?.id);
     if (!authUserId) {
+      await recordAuthAuditLog({
+        req,
+        eventType: 'register_failed',
+        authSource: 'better-auth',
+        resultCode: 'AUTH_USER_ID_MISSING',
+      });
       return json({ error: '注册失败：未能解析会话用户标识' }, 500);
     }
 
@@ -156,18 +198,51 @@ const buildRegisterHandler = (deps: RegisterDeps): ((req: Request) => Promise<Re
     }
 
     if (!businessUser) {
+      await recordAuthAuditLog({
+        req,
+        eventType: 'register_failed',
+        authSource: 'better-auth',
+        authUserId,
+        resultCode: 'BUSINESS_LINK_MISSING',
+      });
       return json({ error: '注册成功，但用户映射尚未建立，请联系管理员处理。' }, 409);
     }
 
     const businessUserWithAuthKey = await deps.ensureBusinessUserLegacyAuthKey(businessUser);
     if (!businessUserWithAuthKey) {
+      await recordAuthAuditLog({
+        req,
+        eventType: 'register_failed',
+        authSource: 'better-auth',
+        businessUserId: businessUser.id,
+        authUserId,
+        resultCode: 'LEGACY_COMPAT_KEY_INIT_FAILED',
+      });
       return json({ error: '注册成功，但用户兼容凭证初始化失败，请稍后重试。' }, 500);
+    }
+
+    if (db) {
+      try {
+        await deps.setBusinessUserRegistrationIpIfEmpty(db, businessUserWithAuthKey.id, getClientIpFromHeaders(req.headers));
+      } catch (error) {
+        console.error('[auth/register] registration_ip 写入失败（已忽略）:', error);
+      }
     }
 
     const activityToken = await deps.issueActivityToken(businessUserWithAuthKey.id);
 
     const headers = new Headers();
     deps.appendSetCookieHeaders(headers, bridge.response.headers);
+
+    await recordAuthAuditLog({
+      req,
+      eventType: 'register_success',
+      authSource: 'better-auth',
+      businessUserId: businessUserWithAuthKey.id,
+      authUserId,
+      identifierType: 'email',
+      resultCode: 'SUCCESS',
+    });
 
     return json(
       {
@@ -199,6 +274,12 @@ const buildRegisterHandler = (deps: RegisterDeps): ((req: Request) => Promise<Re
       const turnstileToken = toNonEmptyString(payload.turnstileToken);
 
       if (!username || !emailInput || !password || !turnstileToken) {
+        await recordAuthAuditLog({
+          req,
+          eventType: 'register_failed',
+          authSource: 'better-auth',
+          resultCode: 'INVALID_PAYLOAD',
+        });
         return json({ error: '用户名、邮箱、密码和安全验证不能为空' }, 400);
       }
 
@@ -206,14 +287,34 @@ const buildRegisterHandler = (deps: RegisterDeps): ((req: Request) => Promise<Re
 
       const isTurnstileValid = await deps.verifyTurnstileToken(turnstileToken);
       if (!isTurnstileValid) {
+        await recordAuthAuditLog({
+          req,
+          eventType: 'register_failed',
+          authSource: 'better-auth',
+          resultCode: 'TURNSTILE_FAILED',
+        });
         return json({ error: '安全验证失败，请重新验证' }, 400);
       }
 
       if (username.length < 2 || username.length > 20) {
+        await recordAuthAuditLog({
+          req,
+          eventType: 'register_failed',
+          authSource: 'better-auth',
+          identifierType: 'username',
+          resultCode: 'USERNAME_INVALID',
+        });
         return json({ error: '用户名长度必须在2-20个字符之间' }, 400);
       }
 
       if (!isValidEmail(normalizedEmail)) {
+        await recordAuthAuditLog({
+          req,
+          eventType: 'register_failed',
+          authSource: 'better-auth',
+          identifierType: 'email',
+          resultCode: 'EMAIL_INVALID',
+        });
         return json({ error: '请输入有效的邮箱地址' }, 400);
       }
 
@@ -222,12 +323,27 @@ const buildRegisterHandler = (deps: RegisterDeps): ((req: Request) => Promise<Re
         email: normalizedEmail,
       });
       if (!passwordPolicy.ok) {
+        await recordAuthAuditLog({
+          req,
+          eventType: 'register_failed',
+          authSource: 'better-auth',
+          identifierType: 'email',
+          resultCode: 'PASSWORD_POLICY_FAILED',
+          resultMessage: getPasswordPolicySummaryMessage(passwordPolicy.issues) || '密码强度不足',
+        });
         return json({ error: getPasswordPolicySummaryMessage(passwordPolicy.issues) || '密码强度不足' }, 400);
       }
 
       try {
         const sensitiveCheck = await deps.quickCheck(username);
         if (sensitiveCheck.hasSensitiveWords) {
+          await recordAuthAuditLog({
+            req,
+            eventType: 'register_failed',
+            authSource: 'better-auth',
+            identifierType: 'username',
+            resultCode: 'USERNAME_SENSITIVE',
+          });
           return json({ error: '用户名包含不当内容，请重新输入' }, 400);
         }
       } catch (error) {
@@ -237,6 +353,12 @@ const buildRegisterHandler = (deps: RegisterDeps): ((req: Request) => Promise<Re
       return registerWithBetterAuth(req, username, normalizedEmail, password);
     } catch (error) {
       console.error('Registration error:', error);
+      await recordAuthAuditLog({
+        req,
+        eventType: 'register_failed',
+        authSource: 'better-auth',
+        resultCode: 'INTERNAL_ERROR',
+      });
       return json({ error: '注册失败，请稍后重试' }, 500);
     }
   };

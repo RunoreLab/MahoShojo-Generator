@@ -9,6 +9,7 @@ const REQUIRED_AUTH_TABLES = [
   'ba_verification',
   'user_auth_links',
   'auth_password_reset_tokens',
+  'auth_audit_logs',
 ];
 
 const REQUIRED_USERS_COLUMNS = ['is_admin', 'is_review_exempt'];

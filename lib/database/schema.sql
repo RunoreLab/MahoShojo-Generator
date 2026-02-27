@@ -72,6 +72,37 @@ CREATE INDEX IF NOT EXISTS auth_password_reset_tokens_user_id_expires_at_idx
 CREATE INDEX IF NOT EXISTS auth_password_reset_tokens_expires_at_idx
   ON auth_password_reset_tokens(expires_at);
 
+-- 认证审计日志
+-- 用于记录注册/登录/改密/改邮箱等认证关键操作，支撑风控与安全提醒能力。
+CREATE TABLE IF NOT EXISTS auth_audit_logs (
+  id TEXT PRIMARY KEY NOT NULL,
+  business_user_id INTEGER,
+  auth_user_id TEXT,
+  event_type TEXT NOT NULL,
+  auth_source TEXT NOT NULL,
+  identifier_type TEXT,
+  ip TEXT,
+  ip_anonymized TEXT,
+  user_agent TEXT,
+  result_code TEXT NOT NULL,
+  result_message TEXT,
+  metadata_json TEXT,
+  created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+  FOREIGN KEY (business_user_id) REFERENCES users(id) ON DELETE SET NULL,
+  FOREIGN KEY (auth_user_id) REFERENCES ba_user(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_auth_audit_logs_created_at
+  ON auth_audit_logs(created_at);
+CREATE INDEX IF NOT EXISTS idx_auth_audit_logs_event_type_created_at
+  ON auth_audit_logs(event_type, created_at);
+CREATE INDEX IF NOT EXISTS idx_auth_audit_logs_business_user_id_created_at
+  ON auth_audit_logs(business_user_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_auth_audit_logs_auth_user_id_created_at
+  ON auth_audit_logs(auth_user_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_auth_audit_logs_ip_anonymized_created_at
+  ON auth_audit_logs(ip_anonymized, created_at);
+
 -- 数据卡表
 CREATE TABLE IF NOT EXISTS data_cards (
   id TEXT PRIMARY KEY NOT NULL,  -- UUID 字符串作为主键

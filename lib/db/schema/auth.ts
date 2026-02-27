@@ -111,3 +111,35 @@ export const authPasswordResetTokens = sqliteTable(
     expiresAtIndex: index('auth_password_reset_tokens_expires_at_idx').on(table.expiresAt),
   }),
 );
+
+export const authAuditLogs = sqliteTable(
+  'auth_audit_logs',
+  {
+    id: text('id').primaryKey(),
+    businessUserId: integer('business_user_id').references(() => users.id, { onDelete: 'set null' }),
+    authUserId: text('auth_user_id').references(() => baUsers.id, { onDelete: 'set null' }),
+    eventType: text('event_type').notNull(),
+    authSource: text('auth_source').notNull(),
+    identifierType: text('identifier_type'),
+    ip: text('ip'),
+    ipAnonymized: text('ip_anonymized'),
+    userAgent: text('user_agent'),
+    resultCode: text('result_code').notNull(),
+    resultMessage: text('result_message'),
+    metadataJson: text('metadata_json'),
+    createdAt: integer('created_at').notNull().default(unixEpochNow),
+  },
+  (table) => ({
+    createdAtIndex: index('idx_auth_audit_logs_created_at').on(table.createdAt),
+    eventTypeCreatedAtIndex: index('idx_auth_audit_logs_event_type_created_at').on(table.eventType, table.createdAt),
+    businessUserCreatedAtIndex: index('idx_auth_audit_logs_business_user_id_created_at').on(
+      table.businessUserId,
+      table.createdAt,
+    ),
+    authUserCreatedAtIndex: index('idx_auth_audit_logs_auth_user_id_created_at').on(table.authUserId, table.createdAt),
+    ipAnonymizedCreatedAtIndex: index('idx_auth_audit_logs_ip_anonymized_created_at').on(
+      table.ipAnonymized,
+      table.createdAt,
+    ),
+  }),
+);

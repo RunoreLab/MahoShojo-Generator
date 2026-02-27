@@ -1,4 +1,5 @@
 export * from '@/lib/db/repositories/user-auth-links';
+export * from '@/lib/db/repositories/auth-audit-logs';
 export * from '@/lib/db/repositories/business-users';
 export * from '@/lib/db/repositories/arena-strict-preflight';
 export * from '@/lib/db/repositories/data-card-meta';

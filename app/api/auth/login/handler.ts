@@ -1,4 +1,5 @@
 import { issueActivityToken } from '@/lib/auth/activity-token';
+import { recordAuthAuditLog } from '@/lib/auth/auth-audit';
 import {
   appendSetCookieHeaders,
   extractErrorMessage,
@@ -114,8 +115,9 @@ const defaultLoginDeps: LoginDeps = {
 };
 
 const buildLoginHandler = (deps: LoginDeps): ((req: Request) => Promise<Response>) => {
-  const resolveEmailByIdentifier = async (identifier: string): Promise<string | null> => {
-    const parsed = parsePasswordIdentifier(identifier);
+  const resolveEmailByIdentifier = async (
+    parsed: { type: PasswordIdentifierType; value: string; userId: number | null },
+  ): Promise<string | null> => {
     if (parsed.type === 'email') {
       return parsed.value;
     }
@@ -130,13 +132,36 @@ const buildLoginHandler = (deps: LoginDeps): ((req: Request) => Promise<Response
     return toNonEmptyString(user?.email)?.toLowerCase() ?? null;
   };
 
-  const loginWithLegacyAuthKey = async (username: string, authKey: string): Promise<Response> => {
+  const toAuditSource = (mode: LoginMode): 'legacy' | 'better-auth' => (mode === 'legacy' ? 'legacy' : 'better-auth');
+
+  const toAuditIdentifierType = (type: PasswordIdentifierType): 'email' | 'username' | 'user-id' => {
+    if (type === 'user-id') return 'user-id';
+    if (type === 'username') return 'username';
+    return 'email';
+  };
+
+  const loginWithLegacyAuthKey = async (req: Request, username: string, authKey: string): Promise<Response> => {
     const user = await deps.verifyUserLogin(username, authKey);
     if (!user) {
+      await recordAuthAuditLog({
+        req,
+        eventType: 'login_failed',
+        authSource: 'legacy',
+        identifierType: 'username',
+        resultCode: 'INVALID_CREDENTIAL',
+      });
       return json({ error: '用户名或密钥错误' }, 401);
     }
 
     const activityToken = await deps.issueActivityToken(user.id);
+    await recordAuthAuditLog({
+      req,
+      eventType: 'login_success',
+      authSource: 'legacy',
+      businessUserId: user.id,
+      identifierType: 'username',
+      resultCode: 'SUCCESS',
+    });
     return json({
       success: true,
       authMode: 'legacy',
@@ -150,7 +175,12 @@ const buildLoginHandler = (deps: LoginDeps): ((req: Request) => Promise<Response
     });
   };
 
-  const loginWithBetterAuthPassword = async (req: Request, email: string, password: string): Promise<Response> => {
+  const loginWithBetterAuthPassword = async (
+    req: Request,
+    email: string,
+    password: string,
+    identifierType: PasswordIdentifierType,
+  ): Promise<Response> => {
     const bridge = await deps.invokeBetterAuthJsonEndpoint({
       path: '/api/auth/sign-in/email',
       body: {
@@ -162,6 +192,14 @@ const buildLoginHandler = (deps: LoginDeps): ((req: Request) => Promise<Response
     });
 
     if (!bridge.ok) {
+      await recordAuthAuditLog({
+        req,
+        eventType: 'login_failed',
+        authSource: 'better-auth',
+        identifierType: toAuditIdentifierType(identifierType),
+        resultCode: 'BRIDGE_UNAVAILABLE',
+        resultMessage: bridge.code,
+      });
       return json(
         {
           error: '密码登录当前不可用，请改用旧版密钥登录。',
@@ -173,6 +211,14 @@ const buildLoginHandler = (deps: LoginDeps): ((req: Request) => Promise<Response
 
     const payload = await deps.readJsonSafely<BetterAuthSignInPayload>(bridge.response);
     if (!bridge.response.ok) {
+      await recordAuthAuditLog({
+        req,
+        eventType: 'login_failed',
+        authSource: 'better-auth',
+        identifierType: toAuditIdentifierType(identifierType),
+        resultCode: 'INVALID_CREDENTIAL',
+        resultMessage: deps.extractErrorMessage(payload, '邮箱或密码错误'),
+      });
       return json(
         {
           error: deps.extractErrorMessage(payload, '邮箱或密码错误'),
@@ -183,6 +229,13 @@ const buildLoginHandler = (deps: LoginDeps): ((req: Request) => Promise<Response
 
     const authUserId = toNonEmptyString(payload?.user?.id);
     if (!authUserId) {
+      await recordAuthAuditLog({
+        req,
+        eventType: 'login_failed',
+        authSource: 'better-auth',
+        identifierType: toAuditIdentifierType(identifierType),
+        resultCode: 'AUTH_USER_ID_MISSING',
+      });
       return json({ error: '登录失败：未能解析会话用户标识' }, 500);
     }
 
@@ -196,11 +249,28 @@ const buildLoginHandler = (deps: LoginDeps): ((req: Request) => Promise<Response
     }
 
     if (!businessUser) {
+      await recordAuthAuditLog({
+        req,
+        eventType: 'login_failed',
+        authSource: 'better-auth',
+        authUserId,
+        identifierType: toAuditIdentifierType(identifierType),
+        resultCode: 'BUSINESS_LINK_MISSING',
+      });
       return json({ error: '登录成功，但用户映射尚未建立，请联系管理员处理。' }, 409);
     }
 
     const businessUserWithAuthKey = await deps.ensureBusinessUserLegacyAuthKey(businessUser);
     if (!businessUserWithAuthKey) {
+      await recordAuthAuditLog({
+        req,
+        eventType: 'login_failed',
+        authSource: 'better-auth',
+        businessUserId: businessUser.id,
+        authUserId,
+        identifierType: toAuditIdentifierType(identifierType),
+        resultCode: 'LEGACY_COMPAT_KEY_INIT_FAILED',
+      });
       return json({ error: '登录成功，但用户兼容凭证初始化失败，请稍后重试。' }, 500);
     }
 
@@ -208,6 +278,16 @@ const buildLoginHandler = (deps: LoginDeps): ((req: Request) => Promise<Response
 
     const headers = new Headers();
     deps.appendSetCookieHeaders(headers, bridge.response.headers);
+
+    await recordAuthAuditLog({
+      req,
+      eventType: 'login_success',
+      authSource: 'better-auth',
+      businessUserId: businessUserWithAuthKey.id,
+      authUserId,
+      identifierType: toAuditIdentifierType(identifierType),
+      resultCode: 'SUCCESS',
+    });
 
     return json(
       {
@@ -234,28 +314,55 @@ const buildLoginHandler = (deps: LoginDeps): ((req: Request) => Promise<Response
       const identifier = toNonEmptyString(payload.identifier) ?? toNonEmptyString(payload.username);
       const credential = toNonEmptyString(payload.credential) ?? toNonEmptyString(payload.authKey);
       const mode: LoginMode = payload.mode === 'legacy' ? 'legacy' : 'password';
+      const auditSource = toAuditSource(mode);
 
       if (!turnstileToken || !identifier || !credential) {
+        await recordAuthAuditLog({
+          req,
+          eventType: 'login_failed',
+          authSource: auditSource,
+          resultCode: 'INVALID_PAYLOAD',
+        });
         return json({ error: '登录信息和安全验证不能为空' }, 400);
       }
 
       const isTurnstileValid = await deps.verifyTurnstileToken(turnstileToken);
       if (!isTurnstileValid) {
+        await recordAuthAuditLog({
+          req,
+          eventType: 'login_failed',
+          authSource: auditSource,
+          resultCode: 'TURNSTILE_FAILED',
+        });
         return json({ error: '安全验证失败，请重新验证' }, 400);
       }
 
       if (mode === 'legacy') {
-        return loginWithLegacyAuthKey(identifier, credential);
+        return loginWithLegacyAuthKey(req, identifier, credential);
       }
 
-      const email = await resolveEmailByIdentifier(identifier);
+      const parsedIdentifier = parsePasswordIdentifier(identifier);
+      const email = await resolveEmailByIdentifier(parsedIdentifier);
       if (!email) {
+        await recordAuthAuditLog({
+          req,
+          eventType: 'login_failed',
+          authSource: 'better-auth',
+          identifierType: toAuditIdentifierType(parsedIdentifier.type),
+          resultCode: 'INVALID_CREDENTIAL',
+        });
         return json({ error: '账号或密码错误' }, 401);
       }
 
-      return loginWithBetterAuthPassword(req, email, credential);
+      return loginWithBetterAuthPassword(req, email, credential, parsedIdentifier.type);
     } catch (error) {
       console.error('Login error:', error);
+      await recordAuthAuditLog({
+        req,
+        eventType: 'login_failed',
+        authSource: 'unknown',
+        resultCode: 'INTERNAL_ERROR',
+      });
       return json({ error: '登录失败，请稍后重试' }, 500);
     }
   };

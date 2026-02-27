@@ -4,6 +4,7 @@ import {
   invokeBetterAuthSubrequest,
   readJsonSafely,
 } from '@/lib/auth/better-auth-subrequest';
+import { recordAuthAuditLog } from '@/lib/auth/auth-audit';
 import { getDrizzleDbFromRuntime } from '@/lib/db/drizzle';
 import { getBusinessUserById, updateBusinessUserEmailById } from '@/lib/db/repositories/business-users';
 import {
@@ -40,8 +41,16 @@ export default withPvpErrorBoundary(async function handler(req: Request): Promis
 
   const auth = await requireAuthUser(req);
   if ('response' in auth) return auth.response;
+  const auditSource = auth.source === 'legacy-bearer' ? 'legacy' : 'better-auth';
 
   if (auth.source === 'legacy-bearer') {
+    await recordAuthAuditLog({
+      req,
+      eventType: 'email_change',
+      authSource: auditSource,
+      businessUserId: auth.user.id,
+      resultCode: 'LEGACY_SESSION_BLOCKED',
+    });
     return json({ error: '你当前使用旧密钥登录，请先改用密码登录后再修改邮箱' }, { status: 409 });
   }
 
@@ -49,8 +58,27 @@ export default withPvpErrorBoundary(async function handler(req: Request): Promis
   if ('response' in parsed) return parsed.response;
 
   const email = toNonEmptyString(parsed.data.newEmail)?.toLowerCase() ?? null;
-  if (!email) return json({ error: '新邮箱不能为空' }, { status: 400 });
-  if (!isValidEmail(email)) return json({ error: '请输入有效的邮箱地址' }, { status: 400 });
+  if (!email) {
+    await recordAuthAuditLog({
+      req,
+      eventType: 'email_change',
+      authSource: auditSource,
+      businessUserId: auth.user.id,
+      resultCode: 'INVALID_PAYLOAD',
+    });
+    return json({ error: '新邮箱不能为空' }, { status: 400 });
+  }
+  if (!isValidEmail(email)) {
+    await recordAuthAuditLog({
+      req,
+      eventType: 'email_change',
+      authSource: auditSource,
+      businessUserId: auth.user.id,
+      identifierType: 'email',
+      resultCode: 'EMAIL_INVALID',
+    });
+    return json({ error: '请输入有效的邮箱地址' }, { status: 400 });
+  }
 
   const db = getDrizzleDbFromRuntime();
   if (!db) return json({ error: '数据库不可用，请稍后重试' }, { status: 503 });
@@ -58,6 +86,14 @@ export default withPvpErrorBoundary(async function handler(req: Request): Promis
   const businessUser = await getBusinessUserById(db, auth.user.id);
   if (!businessUser) return json({ error: '用户不存在' }, { status: 404 });
   if (businessUser.email?.toLowerCase() === email) {
+    await recordAuthAuditLog({
+      req,
+      eventType: 'email_change',
+      authSource: auditSource,
+      businessUserId: auth.user.id,
+      identifierType: 'email',
+      resultCode: 'EMAIL_SAME',
+    });
     return json({ error: '新邮箱不能与当前邮箱相同' }, { status: 400 });
   }
 
@@ -75,12 +111,29 @@ export default withPvpErrorBoundary(async function handler(req: Request): Promis
     });
   } catch (error) {
     console.error('[me/account/email] Better Auth 子请求失败:', error);
+    await recordAuthAuditLog({
+      req,
+      eventType: 'email_change',
+      authSource: auditSource,
+      businessUserId: auth.user.id,
+      identifierType: 'email',
+      resultCode: 'BRIDGE_UNAVAILABLE',
+    });
     return json({ error: '改绑邮箱当前不可用，请稍后重试' }, { status: 503 });
   }
 
   const payload = await readJsonSafely<{ error?: string; message?: string }>(response);
   if (!response.ok) {
     const message = mapBetterAuthEmailError(extractErrorMessage(payload, '修改邮箱失败'));
+    await recordAuthAuditLog({
+      req,
+      eventType: 'email_change',
+      authSource: auditSource,
+      businessUserId: auth.user.id,
+      identifierType: 'email',
+      resultCode: 'CHANGE_EMAIL_REJECTED',
+      resultMessage: message,
+    });
     return json({ error: message }, { status: response.status || 400 });
   }
 
@@ -97,6 +150,15 @@ export default withPvpErrorBoundary(async function handler(req: Request): Promis
 
   const headers = new Headers();
   appendSetCookieHeaders(headers, response.headers);
+
+  await recordAuthAuditLog({
+    req,
+    eventType: 'email_change',
+    authSource: auditSource,
+    businessUserId: auth.user.id,
+    identifierType: 'email',
+    resultCode: 'SUCCESS',
+  });
 
   return json(
     {

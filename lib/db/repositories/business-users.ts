@@ -91,6 +91,23 @@ export const updateBusinessUserEmailById = async (
   return getBusinessUserById(db, userId);
 };
 
+export const setBusinessUserRegistrationIpIfEmpty = async (
+  db: AppDrizzleDb,
+  userId: number,
+  registrationIp: string | null | undefined,
+): Promise<void> => {
+  const normalizedIp = typeof registrationIp === 'string' ? registrationIp.trim() : '';
+  if (!normalizedIp) return;
+
+  await db
+    .update(users)
+    .set({
+      registrationIp: normalizedIp,
+      updatedAt: sql`CURRENT_TIMESTAMP`,
+    })
+    .where(and(eq(users.id, userId), sql`(${users.registrationIp} IS NULL OR trim(${users.registrationIp}) = '')`));
+};
+
 export const verifyBusinessUserLoginByUsernameAndAuthKey = async (
   db: AppDrizzleDb,
   username: string,

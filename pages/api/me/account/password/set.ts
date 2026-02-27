@@ -4,6 +4,7 @@ import {
   invokeBetterAuthSubrequest,
   readJsonSafely,
 } from '@/lib/auth/better-auth-subrequest';
+import { recordAuthAuditLog } from '@/lib/auth/auth-audit';
 import { ensureAuthUserLink } from '@/lib/auth/user-auth-linking';
 import { getPasswordPolicySummaryMessage, validatePasswordPolicy } from '@/lib/auth/password-policy';
 import { getDrizzleDbFromRuntime } from '@/lib/db/drizzle';
@@ -72,12 +73,20 @@ export default withPvpErrorBoundary(async function handler(req: Request): Promis
 
   const auth = await requireAuthUser(req);
   if ('response' in auth) return auth.response;
+  const auditSource = auth.source === 'legacy-bearer' ? 'legacy' : 'better-auth';
 
   const parsed = await readJson<SetPasswordPayload>(req);
   if ('response' in parsed) return parsed.response;
 
   const newPassword = toNonEmptyString(parsed.data.newPassword);
   if (!newPassword) {
+    await recordAuthAuditLog({
+      req,
+      eventType: 'password_set',
+      authSource: auditSource,
+      businessUserId: auth.user.id,
+      resultCode: 'INVALID_PAYLOAD',
+    });
     return json({ error: '新密码不能为空' }, { status: 400 });
   }
 
@@ -93,11 +102,26 @@ export default withPvpErrorBoundary(async function handler(req: Request): Promis
     email: normalizedEmail,
   });
   if (!policy.ok) {
+    await recordAuthAuditLog({
+      req,
+      eventType: 'password_set',
+      authSource: auditSource,
+      businessUserId: auth.user.id,
+      resultCode: 'PASSWORD_POLICY_FAILED',
+      resultMessage: getPasswordPolicySummaryMessage(policy.issues) || '新密码强度不足',
+    });
     return json({ error: getPasswordPolicySummaryMessage(policy.issues) || '新密码强度不足' }, { status: 400 });
   }
 
   const currentStatus = await getAuthMigrationStatusByBusinessUserId(db, auth.user.id);
   if (currentStatus.hasPassword) {
+    await recordAuthAuditLog({
+      req,
+      eventType: 'password_set',
+      authSource: auditSource,
+      businessUserId: auth.user.id,
+      resultCode: 'ALREADY_HAS_PASSWORD',
+    });
     return json({ error: '当前账号已设置密码，请使用修改密码功能' }, { status: 409 });
   }
 
@@ -124,18 +148,43 @@ export default withPvpErrorBoundary(async function handler(req: Request): Promis
       });
     } catch (error) {
       console.error('[me/account/password/set] reset-password 子请求失败:', error);
+      await recordAuthAuditLog({
+        req,
+        eventType: 'password_set',
+        authSource: auditSource,
+        businessUserId: auth.user.id,
+        authUserId: currentStatus.authUserId,
+        resultCode: 'BRIDGE_UNAVAILABLE',
+      });
       return json({ error: '设置密码当前不可用，请稍后重试' }, { status: 503 });
     }
 
     const resetPayload = await readJsonSafely<{ error?: string; message?: string }>(resetResponse);
     if (!resetResponse.ok) {
       const message = mapSetPasswordError(extractErrorMessage(resetPayload, '设置密码失败'));
+      await recordAuthAuditLog({
+        req,
+        eventType: 'password_set',
+        authSource: auditSource,
+        businessUserId: auth.user.id,
+        authUserId: currentStatus.authUserId,
+        resultCode: 'RESET_PASSWORD_REJECTED',
+        resultMessage: message,
+      });
       return json({ error: message }, { status: resetResponse.status || 400 });
     }
 
     appendSetCookieHeaders(headers, resetResponse.headers);
   } else {
     if (!isValidEmail(normalizedEmail)) {
+      await recordAuthAuditLog({
+        req,
+        eventType: 'password_set',
+        authSource: auditSource,
+        businessUserId: auth.user.id,
+        identifierType: 'email',
+        resultCode: 'EMAIL_INVALID',
+      });
       return json({ error: '当前账号邮箱无效，请先更新邮箱后再设置密码' }, { status: 409 });
     }
 
@@ -153,12 +202,29 @@ export default withPvpErrorBoundary(async function handler(req: Request): Promis
       });
     } catch (error) {
       console.error('[me/account/password/set] sign-up/email 子请求失败:', error);
+      await recordAuthAuditLog({
+        req,
+        eventType: 'password_set',
+        authSource: auditSource,
+        businessUserId: auth.user.id,
+        identifierType: 'email',
+        resultCode: 'BRIDGE_UNAVAILABLE',
+      });
       return json({ error: '账号迁移认领当前不可用，请稍后重试' }, { status: 503 });
     }
 
     const signUpPayload = await readJsonSafely<BetterAuthSignUpPayload & { error?: string; message?: string }>(signUpResponse);
     if (!signUpResponse.ok) {
       const message = mapSetPasswordError(extractErrorMessage(signUpPayload, '账号迁移认领失败'));
+      await recordAuthAuditLog({
+        req,
+        eventType: 'password_set',
+        authSource: auditSource,
+        businessUserId: auth.user.id,
+        identifierType: 'email',
+        resultCode: 'SIGN_UP_REJECTED',
+        resultMessage: message,
+      });
       return json({ error: message }, { status: signUpResponse.status || 400 });
     }
 
@@ -171,6 +237,14 @@ export default withPvpErrorBoundary(async function handler(req: Request): Promis
         })
       : null;
     if (!linked) {
+      await recordAuthAuditLog({
+        req,
+        eventType: 'password_set',
+        authSource: auditSource,
+        businessUserId: auth.user.id,
+        authUserId: authUserId ?? null,
+        resultCode: 'BUSINESS_LINK_MISSING',
+      });
       return json({ error: '账号迁移映射建立失败，请稍后重试或联系管理员' }, { status: 409 });
     }
 
@@ -179,11 +253,28 @@ export default withPvpErrorBoundary(async function handler(req: Request): Promis
 
   const latestStatus = await getAuthMigrationStatusByBusinessUserId(db, auth.user.id);
   if (!latestStatus.hasPassword) {
+    await recordAuthAuditLog({
+      req,
+      eventType: 'password_set',
+      authSource: auditSource,
+      businessUserId: auth.user.id,
+      authUserId: latestStatus.authUserId,
+      resultCode: 'VERIFY_FAILED',
+    });
     return json({ error: '密码设置结果未生效，请稍后重试' }, { status: 500 });
   }
 
   const migrationRequired = !latestStatus.hasAuthLink || !latestStatus.hasPassword;
   const legacyOnly = auth.source === 'legacy-bearer' || migrationRequired;
+
+  await recordAuthAuditLog({
+    req,
+    eventType: 'password_set',
+    authSource: auditSource,
+    businessUserId: auth.user.id,
+    authUserId: latestStatus.authUserId,
+    resultCode: 'SUCCESS',
+  });
 
   return json(
     {
