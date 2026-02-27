@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm';
 import type { AppDrizzleDb } from '@/lib/db/drizzle';
-import { baAccounts, baUsers, userAuthLinks } from '@/lib/db/schema';
+import { baAccounts, baUsers, baVerifications, userAuthLinks } from '@/lib/db/schema';
 
 export type UserAuthLinkRow = typeof userAuthLinks.$inferSelect;
 
@@ -20,6 +20,13 @@ export type AuthUserProfileLite = {
   id: string;
   email: string;
   emailVerified: boolean;
+};
+
+export type CreateAuthResetPasswordVerificationInput = {
+  id: string;
+  token: string;
+  authUserId: string;
+  expiresAt: number;
 };
 
 export const getUserAuthLinkByAuthUserId = async (
@@ -131,4 +138,19 @@ export const getAuthUserProfileByAuthUserId = async (
     email: row.email.trim().toLowerCase(),
     emailVerified: Boolean(row.emailVerified),
   };
+};
+
+export const createAuthResetPasswordVerification = async (
+  db: AppDrizzleDb,
+  input: CreateAuthResetPasswordVerificationInput,
+): Promise<void> => {
+  const identifier = `reset-password:${input.token}`;
+  const expiresAt = Math.trunc(input.expiresAt);
+
+  await db.insert(baVerifications).values({
+    id: input.id,
+    identifier,
+    value: input.authUserId,
+    expiresAt,
+  });
 };

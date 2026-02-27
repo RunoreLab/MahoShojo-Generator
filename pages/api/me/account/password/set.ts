@@ -1,0 +1,204 @@
+import {
+  appendSetCookieHeaders,
+  extractErrorMessage,
+  invokeBetterAuthSubrequest,
+  readJsonSafely,
+} from '@/lib/auth/better-auth-subrequest';
+import { ensureAuthUserLink } from '@/lib/auth/user-auth-linking';
+import { getPasswordPolicySummaryMessage, validatePasswordPolicy } from '@/lib/auth/password-policy';
+import { getDrizzleDbFromRuntime } from '@/lib/db/drizzle';
+import { getBusinessUserById } from '@/lib/db/repositories/business-users';
+import {
+  createAuthResetPasswordVerification,
+  getAuthMigrationStatusByBusinessUserId,
+} from '@/lib/db/repositories/user-auth-links';
+import { json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
+
+export const runtime = 'edge';
+
+const RESET_TOKEN_TTL_SECONDS = 5 * 60;
+
+type SetPasswordPayload = {
+  newPassword?: unknown;
+};
+
+type BetterAuthSignUpPayload = {
+  user?: {
+    id?: unknown;
+    email?: unknown;
+    name?: unknown;
+  };
+};
+
+const toNonEmptyString = (value: unknown): string | null => {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+};
+
+const toEmail = (value: string): string => value.trim().toLowerCase();
+
+const isValidEmail = (email: string): boolean => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+
+const randomHex = (byteLength: number): string => {
+  const bytes = new Uint8Array(byteLength);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+};
+
+const createVerificationId = (): string => {
+  if (typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return `verify_${Date.now().toString(36)}_${randomHex(8)}`;
+};
+
+const createResetPasswordToken = (): string => randomHex(24);
+
+const mapSetPasswordError = (message: string): string => {
+  const normalized = message.trim().toUpperCase();
+  if (!normalized) return '设置密码失败，请稍后重试';
+  if (normalized.includes('PASSWORD_TOO_SHORT')) return '新密码长度不足';
+  if (normalized.includes('PASSWORD_TOO_LONG')) return '新密码长度过长';
+  if (normalized.includes('USER ALREADY HAS A PASSWORD')) return '当前账号已经设置过密码';
+  if (normalized.includes('USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL')) {
+    return '该邮箱已存在新版账号，请使用密码登录或找回密码完成迁移';
+  }
+  return message;
+};
+
+export default withPvpErrorBoundary(async function handler(req: Request): Promise<Response> {
+  if (req.method !== 'PUT') return json({ error: 'Method not allowed' }, { status: 405 });
+
+  const auth = await requireAuthUser(req);
+  if ('response' in auth) return auth.response;
+
+  const parsed = await readJson<SetPasswordPayload>(req);
+  if ('response' in parsed) return parsed.response;
+
+  const newPassword = toNonEmptyString(parsed.data.newPassword);
+  if (!newPassword) {
+    return json({ error: '新密码不能为空' }, { status: 400 });
+  }
+
+  const db = getDrizzleDbFromRuntime();
+  if (!db) return json({ error: '数据库不可用，请稍后重试' }, { status: 503 });
+
+  const businessUser = await getBusinessUserById(db, auth.user.id);
+  if (!businessUser) return json({ error: '用户不存在' }, { status: 404 });
+
+  const normalizedEmail = toEmail(businessUser.email);
+  const policy = validatePasswordPolicy(newPassword, {
+    username: auth.user.username,
+    email: normalizedEmail,
+  });
+  if (!policy.ok) {
+    return json({ error: getPasswordPolicySummaryMessage(policy.issues) || '新密码强度不足' }, { status: 400 });
+  }
+
+  const currentStatus = await getAuthMigrationStatusByBusinessUserId(db, auth.user.id);
+  if (currentStatus.hasPassword) {
+    return json({ error: '当前账号已设置密码，请使用修改密码功能' }, { status: 409 });
+  }
+
+  const headers = new Headers();
+  if (currentStatus.hasAuthLink && currentStatus.authUserId) {
+    const token = createResetPasswordToken();
+    const expiresAt = Math.floor(Date.now() / 1000) + RESET_TOKEN_TTL_SECONDS;
+    await createAuthResetPasswordVerification(db, {
+      id: createVerificationId(),
+      token,
+      authUserId: currentStatus.authUserId,
+      expiresAt,
+    });
+
+    let resetResponse: Response;
+    try {
+      resetResponse = await invokeBetterAuthSubrequest({
+        req,
+        path: '/api/auth/reset-password',
+        body: {
+          token,
+          newPassword,
+        },
+      });
+    } catch (error) {
+      console.error('[me/account/password/set] reset-password 子请求失败:', error);
+      return json({ error: '设置密码当前不可用，请稍后重试' }, { status: 503 });
+    }
+
+    const resetPayload = await readJsonSafely<{ error?: string; message?: string }>(resetResponse);
+    if (!resetResponse.ok) {
+      const message = mapSetPasswordError(extractErrorMessage(resetPayload, '设置密码失败'));
+      return json({ error: message }, { status: resetResponse.status || 400 });
+    }
+
+    appendSetCookieHeaders(headers, resetResponse.headers);
+  } else {
+    if (!isValidEmail(normalizedEmail)) {
+      return json({ error: '当前账号邮箱无效，请先更新邮箱后再设置密码' }, { status: 409 });
+    }
+
+    let signUpResponse: Response;
+    try {
+      signUpResponse = await invokeBetterAuthSubrequest({
+        req,
+        path: '/api/auth/sign-up/email',
+        body: {
+          name: auth.user.username,
+          email: normalizedEmail,
+          password: newPassword,
+          rememberMe: true,
+        },
+      });
+    } catch (error) {
+      console.error('[me/account/password/set] sign-up/email 子请求失败:', error);
+      return json({ error: '账号迁移认领当前不可用，请稍后重试' }, { status: 503 });
+    }
+
+    const signUpPayload = await readJsonSafely<BetterAuthSignUpPayload & { error?: string; message?: string }>(signUpResponse);
+    if (!signUpResponse.ok) {
+      const message = mapSetPasswordError(extractErrorMessage(signUpPayload, '账号迁移认领失败'));
+      return json({ error: message }, { status: signUpResponse.status || 400 });
+    }
+
+    const authUserId = toNonEmptyString(signUpPayload?.user?.id);
+    const linked = authUserId
+      ? await ensureAuthUserLink({
+          authUserId,
+          email: toNonEmptyString(signUpPayload?.user?.email) ?? normalizedEmail,
+          name: toNonEmptyString(signUpPayload?.user?.name) ?? auth.user.username,
+        })
+      : null;
+    if (!linked) {
+      return json({ error: '账号迁移映射建立失败，请稍后重试或联系管理员' }, { status: 409 });
+    }
+
+    appendSetCookieHeaders(headers, signUpResponse.headers);
+  }
+
+  const latestStatus = await getAuthMigrationStatusByBusinessUserId(db, auth.user.id);
+  if (!latestStatus.hasPassword) {
+    return json({ error: '密码设置结果未生效，请稍后重试' }, { status: 500 });
+  }
+
+  const migrationRequired = !latestStatus.hasAuthLink || !latestStatus.hasPassword;
+  const legacyOnly = auth.source === 'legacy-bearer' || migrationRequired;
+
+  return json(
+    {
+      success: true,
+      message:
+        auth.source === 'legacy-bearer'
+          ? '已设置登录密码。请重新使用密码登录，完成新版认证迁移。'
+          : '登录密码设置成功',
+      status: {
+        ...latestStatus,
+        authSource: auth.source,
+        migrationRequired,
+        legacyOnly,
+      },
+    },
+    { headers },
+  );
+});

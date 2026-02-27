@@ -18,7 +18,7 @@ export function AuthMigrationPanel({ userId }: { userId: number | null }) {
   const tip = useMemo(() => {
     if (!status) return '';
     if (!status.hasAuthLink) {
-      return '你的账号还未完成新版认证映射，请先完成一次密码登录。';
+      return '你的账号还未完成新版认证映射，请在下方账号安全设置中先设置登录密码，系统会自动完成认领迁移。';
     }
     if (!status.hasPassword) {
       return '你当前仍依赖旧版密钥登录。请尽快设置密码，避免未来旧版登录下线后无法直接登录。';

@@ -270,3 +270,27 @@
 2. 下一步落地“改密码/改邮箱 + 多标识登录 + 审计日志”。
 3. 对长期离线用户采用“一次性 legacy 认领迁移”，不要批量把旧密钥当新密码。
 
+---
+
+## 9. 落地进展补充（2026-02-27）
+
+本轮已补齐“老用户设置初始密码/认领迁移”关键缺口：
+
+1. 新增 `PUT /api/me/account/password/set`
+   - 适用于“未设置密码”的已登录用户（包含 legacy 登录态）。
+   - 已有 `user_auth_links` 的用户：通过一次性内部 reset token + Better Auth `/api/auth/reset-password` 完成设密。
+   - 未建立 `user_auth_links` 的用户：通过 Better Auth `/api/auth/sign-up/email` 进行认领，并在服务端补齐映射。
+2. 新增仓储能力 `createAuthResetPasswordVerification`
+   - 文件：`lib/db/repositories/user-auth-links.ts`
+   - 用于写入 Better Auth `ba_verification` 一次性重置凭证。
+3. 个人页安全设置补充迁移表单
+   - 文件：`components/me/AccountSecurityPanel.tsx`
+   - 新增“设置登录密码（迁移）”表单，支持 legacy 会话下完成迁移第一步。
+4. 迁移提醒文案修正
+   - 文件：`components/me/AuthMigrationPanel.tsx`
+   - 将“先完成一次密码登录”调整为“先设置登录密码并自动认领迁移”，避免对老用户给出不可执行提示。
+5. 测试补充
+   - 文件：`tests/me-account-auth-settings.test.ts`
+   - 新增用例覆盖：
+     - legacy + 已映射 + 无密码 -> 可设置初始密码；
+     - legacy + 无映射 + 无密码 -> 可通过设置密码认领迁移。
