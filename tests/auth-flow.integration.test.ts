@@ -646,6 +646,18 @@ describe('auth 全链路集成', () => {
     );
     expect(idLoginResp.status).toBe(200);
 
+    const wrongPasswordResp = await harness.loginPost(
+      postJsonRequest('https://example.com/api/auth/login', {
+        identifier: 'hikari',
+        credential: 'password-wrong',
+        mode: 'password',
+        turnstileToken: 'turnstile-ok',
+      }),
+    );
+    expect(wrongPasswordResp.status).toBe(401);
+    const wrongPasswordPayload = (await wrongPasswordResp.json()) as { error?: string };
+    expect(wrongPasswordPayload.error).toBe('账号或密码错误');
+
     const setCookie = loginResp.headers.get('set-cookie') ?? '';
     expect(setCookie).toContain('better-auth.session_token=');
     const cookieHeader = setCookie.split(';')[0] ?? '';

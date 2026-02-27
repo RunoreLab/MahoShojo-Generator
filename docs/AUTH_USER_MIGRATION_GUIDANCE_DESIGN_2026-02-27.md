@@ -305,3 +305,13 @@
      - 修改密码：`pages/api/me/account/password.ts`
      - 修改邮箱：`pages/api/me/account/email.ts`
    - 额外补齐：`users.registration_ip` 已纳入 Drizzle 模型，并在注册成功后尝试回填（仅空值时写入）。
+7. `character-manager` 顶部迁移触点补齐
+   - 文件：`pages/character-manager.tsx`
+   - 已接入 `migration-status` 状态读取，并在登录区顶部显示高曝光迁移提醒（映射/密码/邮箱验证状态）。
+8. legacy 登录后强提醒弹窗补齐
+   - 文件：`pages/character-manager.tsx`
+   - legacy 登录成功后弹出迁移提醒弹窗，支持“去个人页迁移”与“稍后处理”。
+   - “稍后处理”已加入本地计数（`mahoshojo_auth_migration_defer_count`），用于持续施压提醒。
+9. 密码登录失败语义统一
+   - 文件：`app/api/auth/login/handler.ts`
+   - 对外统一返回“账号或密码错误”，避免按邮箱语义暴露标识类型。

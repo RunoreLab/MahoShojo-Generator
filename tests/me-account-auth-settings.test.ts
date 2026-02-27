@@ -84,6 +84,8 @@ mock.module('@/lib/auth/better-auth-subrequest', () => ({
 
 mock.module('@/lib/db/drizzle', () => ({
   getDrizzleDbFromRuntime: () => ({ __mockDb: true }),
+  getRuntimeD1Client: () => null,
+  createDrizzleDb: () => ({ __mockDb: true }),
 }));
 
 mock.module('@/lib/db/repositories/business-users', () => ({

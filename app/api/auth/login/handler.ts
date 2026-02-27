@@ -211,19 +211,20 @@ const buildLoginHandler = (deps: LoginDeps): ((req: Request) => Promise<Response
 
     const payload = await deps.readJsonSafely<BetterAuthSignInPayload>(bridge.response);
     if (!bridge.response.ok) {
+      const upstreamMessage = deps.extractErrorMessage(payload, '邮箱或密码错误');
       await recordAuthAuditLog({
         req,
         eventType: 'login_failed',
         authSource: 'better-auth',
         identifierType: toAuditIdentifierType(identifierType),
         resultCode: 'INVALID_CREDENTIAL',
-        resultMessage: deps.extractErrorMessage(payload, '邮箱或密码错误'),
+        resultMessage: upstreamMessage,
       });
       return json(
         {
-          error: deps.extractErrorMessage(payload, '邮箱或密码错误'),
+          error: '账号或密码错误',
         },
-        bridge.response.status || 401,
+        401,
       );
     }
 

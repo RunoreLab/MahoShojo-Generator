@@ -20,6 +20,7 @@ import { JsonSizeIndicator } from '@/components/shared/JsonSizeIndicator';
 import { MainColor } from '@/lib/main-color';
 import { useAuth } from '@/lib/useAuth';
 import { dataCardApi, authStorage } from '@/lib/auth';
+import { loadAuthMigrationStatus, type AuthMigrationStatus } from '@/components/me/authMigrationStatus';
 
 // 引入 AdjudicatorEditor 和新类型
 import AdjudicatorEditor from '../components/AdjudicatorEditor';
@@ -57,6 +58,7 @@ const NATIVE_PRESERVING_PATHS = new Set([
 // “一键替换曾用名”用于批量替换数据中的名称引用。
 // 为避免滥用该能力伪造“魔改原生卡”，当替换用的新基础名称过长时，允许替换，但会导致原生性丧失（保存时移除原生签名）。
 const NAME_REPLACE_NATIVE_MAX_CHARS = 32;
+const LEGACY_MIGRATION_DEFER_COUNT_STORAGE_KEY = 'mahoshojo_auth_migration_defer_count';
 
 const getDisplayCharCount = (text: string): number => {
     return Array.from((text ?? '').trim()).length;
@@ -277,6 +279,11 @@ const CharacterManagerPage: React.FC = () => {
     // 账户系统相关状态
     const [showAuthModal, setShowAuthModal] = useState(false);
     const [authMessage, setAuthMessage] = useState<{ type: 'error' | 'success', text: string } | null>(null);
+    const [authMigrationStatus, setAuthMigrationStatus] = useState<AuthMigrationStatus | null>(null);
+    const [authMigrationLoading, setAuthMigrationLoading] = useState(false);
+    const [authMigrationError, setAuthMigrationError] = useState<string | null>(null);
+    const [showLegacyMigrationReminderModal, setShowLegacyMigrationReminderModal] = useState(false);
+    const [legacyMigrationDeferCount, setLegacyMigrationDeferCount] = useState(0);
 
     // 数据卡管理相关状态
     const [userDataCards, setUserDataCards] = useState<any[]>([]);
@@ -401,6 +408,73 @@ const CharacterManagerPage: React.FC = () => {
         }
     }, [isAuthenticated, loadUserBadges]);
 
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+        const raw = window.localStorage.getItem(LEGACY_MIGRATION_DEFER_COUNT_STORAGE_KEY);
+        const parsed = raw ? Number.parseInt(raw, 10) : 0;
+        if (Number.isSafeInteger(parsed) && parsed > 0) {
+            setLegacyMigrationDeferCount(parsed);
+        }
+    }, []);
+
+    const refreshAuthMigrationStatus = useCallback(async () => {
+        if (!isAuthenticated) {
+            setAuthMigrationStatus(null);
+            setAuthMigrationError(null);
+            setAuthMigrationLoading(false);
+            return;
+        }
+
+        setAuthMigrationLoading(true);
+        setAuthMigrationError(null);
+        try {
+            const status = await loadAuthMigrationStatus();
+            setAuthMigrationStatus(status);
+        } catch (error) {
+            setAuthMigrationStatus(null);
+            setAuthMigrationError(error instanceof Error ? error.message : '读取迁移状态失败');
+        } finally {
+            setAuthMigrationLoading(false);
+        }
+    }, [isAuthenticated]);
+
+    useEffect(() => {
+        if (!isAuthenticated) {
+            setAuthMigrationStatus(null);
+            setAuthMigrationError(null);
+            setAuthMigrationLoading(false);
+            setShowLegacyMigrationReminderModal(false);
+            return;
+        }
+        void refreshAuthMigrationStatus();
+    }, [isAuthenticated, refreshAuthMigrationStatus]);
+
+    const authMigrationHint = useMemo(() => {
+        if (!authMigrationStatus) return '';
+        if (!authMigrationStatus.hasAuthLink) {
+            return '检测到当前账号尚未完成新版账号映射。请前往个人页先设置登录密码，系统会自动完成认领迁移。';
+        }
+        if (!authMigrationStatus.hasPassword) {
+            return '检测到当前账号尚未设置密码。旧密钥登录后续会逐步下线，请尽快完成密码设置。';
+        }
+        if (authMigrationStatus.authSource === 'legacy-bearer') {
+            return '你本次使用的是旧密钥登录。建议尽快切换为密码登录，避免后续旧入口下线带来登录中断。';
+        }
+        if (!authMigrationStatus.emailVerified) {
+            return '账号已设置密码，但邮箱仍未验证。建议在个人页完成验证，便于后续找回与安全提醒。';
+        }
+        return '账号迁移仍有未完成项，请前往个人页继续处理。';
+    }, [authMigrationStatus]);
+
+    const handleDeferLegacyMigrationReminder = useCallback(() => {
+        const nextCount = legacyMigrationDeferCount + 1;
+        setLegacyMigrationDeferCount(nextCount);
+        if (typeof window !== 'undefined') {
+            window.localStorage.setItem(LEGACY_MIGRATION_DEFER_COUNT_STORAGE_KEY, String(nextCount));
+        }
+        setShowLegacyMigrationReminderModal(false);
+    }, [legacyMigrationDeferCount]);
+
     // 处理注册
     const handleRegister = async (username: string, email: string, turnstileToken: string, password: string) => {
         setAuthMessage(null);
@@ -414,6 +488,7 @@ const CharacterManagerPage: React.FC = () => {
         setMessage({ type: 'success', text: result.message || '注册成功，已自动登录！' });
         loadUserDataCards();
         loadUserBadges();
+        void refreshAuthMigrationStatus();
     };
 
     // 处理登录
@@ -433,8 +508,12 @@ const CharacterManagerPage: React.FC = () => {
                     ? '旧密钥登录成功。请尽快在个人页完成账号迁移并设置密码。'
                     : '密码登录成功！',
             });
+            if (mode === 'legacy') {
+                setShowLegacyMigrationReminderModal(true);
+            }
             loadUserDataCards();
             loadUserBadges();
+            void refreshAuthMigrationStatus();
         } else {
             setAuthMessage({ type: 'error', text: result.error || '登录失败' });
         }
@@ -442,6 +521,10 @@ const CharacterManagerPage: React.FC = () => {
 
     const handleLogout = useCallback(() => {
         logout();
+        setAuthMigrationStatus(null);
+        setAuthMigrationError(null);
+        setAuthMigrationLoading(false);
+        setShowLegacyMigrationReminderModal(false);
     }, [logout]);
 
     // 统一构建可上传的数据（处理原生性签名）
@@ -1715,7 +1798,7 @@ const CharacterManagerPage: React.FC = () => {
                             {/* 实验性警告 */}
                             <div className="flex mb-3 p-2 bg-yellow-50 border border-yellow-200 rounded text-xs text-yellow-800 text-left">
                                 <div className="mr-2">⚠️ </div>
-                                <div>目前，用户系统仍处于测试阶段，可能存在功能不稳定的情况，敬请谅解。同时请妥善保存您的登录密钥，之后会开启邮箱找回密钥的功能。</div>
+                                <div>用户系统仍处于测试阶段，可能存在功能不稳定的情况，敬请谅解。当前处于账号迁移期：你仍在使用旧密钥，请尽快在个人页完成迁移。</div>
                             </div>
                             {/* 账户状态显示区域 */}
                             <div className="mt-4 p-3 bg-pink-50 rounded-lg">
@@ -1723,6 +1806,48 @@ const CharacterManagerPage: React.FC = () => {
                                     <p className="text-sm text-gray-600">加载中...</p>
                                 ) : isAuthenticated ? (
                                     <div className="space-y-4">
+                                        {authMigrationLoading ? (
+                                            <div className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-800 text-left">
+                                                正在检查账号迁移状态...
+                                            </div>
+                                        ) : null}
+                                        {authMigrationError ? (
+                                            <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 text-left">
+                                                账号迁移状态读取失败：{authMigrationError}
+                                            </div>
+                                        ) : null}
+                                        {authMigrationStatus && (authMigrationStatus.migrationRequired || authMigrationStatus.legacyOnly) ? (
+                                            <div className="rounded-lg border border-yellow-200 bg-yellow-50 px-3 py-3 text-xs text-yellow-900 text-left">
+                                                <div className="font-semibold">账号迁移提醒</div>
+                                                <div className="mt-1">{authMigrationHint}</div>
+                                                <div className="mt-1 text-yellow-800">
+                                                    {!authMigrationStatus.hasAuthLink ? '未映射新版账号；' : '已映射新版账号；'}
+                                                    {!authMigrationStatus.hasPassword ? '未设置密码；' : '已设置密码；'}
+                                                    {authMigrationStatus.emailVerified ? '邮箱已验证。' : '邮箱未验证。'}
+                                                </div>
+                                                {legacyMigrationDeferCount > 0 ? (
+                                                    <div className="mt-1 text-yellow-800">
+                                                        你已选择“稍后处理” {legacyMigrationDeferCount} 次。
+                                                    </div>
+                                                ) : null}
+                                                <div className="mt-2 flex flex-wrap gap-2">
+                                                    <Link
+                                                        href="/me"
+                                                        className="rounded bg-white px-2 py-1 text-[11px] text-yellow-900 hover:bg-yellow-100"
+                                                    >
+                                                        去个人页完成迁移
+                                                    </Link>
+                                                    {authMigrationStatus.authSource === 'legacy-bearer' ? (
+                                                        <button
+                                                            onClick={() => setShowLegacyMigrationReminderModal(true)}
+                                                            className="rounded bg-white px-2 py-1 text-[11px] text-yellow-900 hover:bg-yellow-100"
+                                                        >
+                                                            查看迁移说明
+                                                        </button>
+                                                    ) : null}
+                                                </div>
+                                            </div>
+                                        ) : null}
                                         {/* 操作按钮行 */}
                                         <div className="flex items-center justify-between">
                                             <div className="font-semibold text-pink-800 leading-[28px]">
@@ -2309,6 +2434,38 @@ const CharacterManagerPage: React.FC = () => {
                     </div>
                 )}
             </div >
+
+            {showLegacyMigrationReminderModal ? (
+                <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/55 p-4">
+                    <div className="w-full max-w-md rounded-xl bg-white p-5 shadow-2xl">
+                        <h3 className="text-lg font-semibold text-gray-900">旧密钥登录迁移提醒</h3>
+                        <p className="mt-2 text-sm text-gray-700">
+                            你本次使用了旧密钥登录。为避免后续旧入口下线导致无法登录，请尽快在个人页完成“设置登录密码”迁移。
+                        </p>
+                        <p className="mt-2 text-xs text-gray-500">
+                            {legacyMigrationDeferCount > 0
+                                ? `你已选择“稍后处理” ${legacyMigrationDeferCount} 次。`
+                                : '你还未处理过迁移提醒。'}
+                        </p>
+                        <div className="mt-4 flex justify-end gap-2">
+                            <button
+                                type="button"
+                                onClick={handleDeferLegacyMigrationReminder}
+                                className="rounded border border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50"
+                            >
+                                稍后处理
+                            </button>
+                            <Link
+                                href="/me"
+                                onClick={() => setShowLegacyMigrationReminderModal(false)}
+                                className="rounded bg-pink-600 px-3 py-1.5 text-sm text-white hover:bg-pink-700"
+                            >
+                                去个人页迁移
+                            </Link>
+                        </div>
+                    </div>
+                </div>
+            ) : null}
 
             {/* 认证模态框 */}
             < AuthModal
