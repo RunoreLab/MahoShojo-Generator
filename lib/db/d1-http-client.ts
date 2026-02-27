@@ -1,6 +1,6 @@
 import 'server-only';
 
-import { queryD1Payload } from '@/lib/database/core';
+import { queryD1Payload, queryD1RawPayload } from '@/lib/database/core';
 
 type D1HttpApiError = {
   message?: unknown;
@@ -28,7 +28,16 @@ type D1LikeStatementResult = {
   error?: string;
 };
 
+type D1LikeRawStatementResult = {
+  success: boolean;
+  rows: unknown[][];
+  meta: Record<string, unknown>;
+  error?: string;
+  columnNames?: string[];
+};
+
 type SqlExecutor = (sql: string, params: unknown[]) => Promise<D1LikeStatementResult>;
+type SqlRawExecutor = (sql: string, params: unknown[]) => Promise<D1LikeRawStatementResult>;
 
 const clientCache = new Map<string, unknown>();
 
@@ -54,6 +63,34 @@ const normalizeRows = (value: unknown): D1LikeRow[] => {
   return out;
 };
 
+const normalizeRawRows = (value: unknown): unknown[][] => {
+  const rows = asArray(value);
+  const out: unknown[][] = [];
+
+  for (const row of rows) {
+    if (Array.isArray(row)) {
+      out.push(row);
+      continue;
+    }
+
+    const obj = asObject(row);
+    if (obj) {
+      out.push(Object.values(obj));
+    }
+  }
+
+  return out;
+};
+
+const inferColumnNames = (value: unknown): string[] => {
+  const rows = asArray(value);
+  if (rows.length === 0) return [];
+
+  const firstRowObj = asObject(rows[0]);
+  if (!firstRowObj) return [];
+  return Object.keys(firstRowObj);
+};
+
 const normalizeMeta = (value: unknown): Record<string, unknown> => {
   const meta = asObject(value);
   return meta ?? {};
@@ -74,7 +111,11 @@ const parseStatementError = (result: D1HttpApiResult): string => {
   return toErrorMessage(result.error);
 };
 
-const parseD1LikeStatementResult = (payload: unknown, sql: string): D1LikeStatementResult => {
+const parseD1StatementPayload = (payload: unknown, sql: string): {
+  results: unknown;
+  meta: Record<string, unknown>;
+  error?: string;
+} => {
   const envelope = asObject(payload) as D1HttpApiEnvelope | null;
   if (!envelope) {
     throw new Error('D1 HTTP 返回格式异常：payload 不是对象');
@@ -89,7 +130,6 @@ const parseD1LikeStatementResult = (payload: unknown, sql: string): D1LikeStatem
   const first = asObject(statementResults[0]) as D1HttpApiResult | null;
   if (!first) {
     return {
-      success: true,
       results: [],
       meta: {},
     };
@@ -102,10 +142,30 @@ const parseD1LikeStatementResult = (payload: unknown, sql: string): D1LikeStatem
 
   const statementError = parseStatementError(first);
   return {
-    success: true,
-    results: normalizeRows(first.results),
+    results: first.results,
     meta: normalizeMeta(first.meta),
     ...(statementError ? { error: statementError } : {}),
+  };
+};
+
+const parseD1LikeStatementResult = (payload: unknown, sql: string): D1LikeStatementResult => {
+  const parsed = parseD1StatementPayload(payload, sql);
+  return {
+    success: true,
+    results: normalizeRows(parsed.results),
+    meta: parsed.meta,
+    ...(parsed.error ? { error: parsed.error } : {}),
+  };
+};
+
+const parseD1LikeRawStatementResult = (payload: unknown, sql: string): D1LikeRawStatementResult => {
+  const parsed = parseD1StatementPayload(payload, sql);
+  return {
+    success: true,
+    rows: normalizeRawRows(parsed.results),
+    meta: parsed.meta,
+    ...(parsed.error ? { error: parsed.error } : {}),
+    columnNames: inferColumnNames(parsed.results),
   };
 };
 
@@ -113,11 +173,12 @@ class HttpD1PreparedStatement {
   constructor(
     private readonly sqlText: string,
     private readonly executor: SqlExecutor,
+    private readonly rawExecutor: SqlRawExecutor | null,
     private readonly params: unknown[] = [],
   ) {}
 
   bind(...params: unknown[]): HttpD1PreparedStatement {
-    return new HttpD1PreparedStatement(this.sqlText, this.executor, params);
+    return new HttpD1PreparedStatement(this.sqlText, this.executor, this.rawExecutor, params);
   }
 
   async run(): Promise<D1LikeStatementResult> {
@@ -140,6 +201,19 @@ class HttpD1PreparedStatement {
   }
 
   async raw(options?: { columnNames?: boolean }): Promise<unknown[][] | [string[], ...unknown[][]]> {
+    if (this.rawExecutor) {
+      const result = await this.rawExecutor(this.sqlText, this.params);
+      const rows = result.rows;
+      if (rows.length === 0) {
+        return options?.columnNames ? [[]] : [];
+      }
+
+      if (options?.columnNames) {
+        return [result.columnNames ?? [], ...rows];
+      }
+      return rows;
+    }
+
     const result = await this.executor(this.sqlText, this.params);
     const rows = result.results;
     if (rows.length === 0) {
@@ -171,10 +245,13 @@ const toBatchResult = async (statement: unknown): Promise<D1LikeStatementResult>
 };
 
 class HttpD1DatabaseClient {
-  constructor(private readonly executor: SqlExecutor) {}
+  constructor(
+    private readonly executor: SqlExecutor,
+    private readonly rawExecutor: SqlRawExecutor,
+  ) {}
 
   prepare(sqlText: string): HttpD1PreparedStatement {
-    return new HttpD1PreparedStatement(sqlText, this.executor);
+    return new HttpD1PreparedStatement(sqlText, this.executor, this.rawExecutor);
   }
 
   async batch(statements: unknown[]): Promise<D1LikeStatementResult[]> {
@@ -223,7 +300,12 @@ export const createHttpD1ClientFromEnv = (): unknown | null => {
     return parseD1LikeStatementResult(payload, sqlText);
   };
 
-  const client = new HttpD1DatabaseClient(executor);
+  const rawExecutor: SqlRawExecutor = async (sqlText, params) => {
+    const payload = await queryD1RawPayload(sqlText, params);
+    return parseD1LikeRawStatementResult(payload, sqlText);
+  };
+
+  const client = new HttpD1DatabaseClient(executor, rawExecutor);
   clientCache.set(cacheKey, client as unknown);
   return client as unknown;
 };

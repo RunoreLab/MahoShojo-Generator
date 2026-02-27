@@ -43,6 +43,14 @@ type BadgesRepoBundle = {
   listActiveBadgeDefinitions: (db: unknown) => Promise<BadgeDefinitionRow[]>;
 };
 
+type LegacyD1Payload = {
+  success?: boolean;
+  result?: Array<{
+    success?: boolean;
+    results?: unknown;
+  }>;
+};
+
 const readBadgesRepoBundle = async (): Promise<BadgesRepoBundle | null> => {
   try {
     const [{ getDrizzleDbFromRuntime }, repo] = await Promise.all([
@@ -88,6 +96,31 @@ const toInt = (value: unknown, fallback = 0): number => {
   return Math.trunc(n);
 };
 
+const toNullableString = (value: unknown): string | null => (typeof value === 'string' ? value : null);
+
+const asObject = (value: unknown): Record<string, unknown> | null =>
+  typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : null;
+
+const readLegacyRows = (payload: unknown): Record<string, unknown>[] => {
+  const envelope = asObject(payload) as LegacyD1Payload | null;
+  if (!envelope || envelope.success !== true) return [];
+  if (!Array.isArray(envelope.result) || envelope.result.length === 0) return [];
+
+  const first = asObject(envelope.result[0]) as { success?: boolean; results?: unknown } | null;
+  if (!first || first.success === false) return [];
+  if (!Array.isArray(first.results)) return [];
+
+  return first.results
+    .map((item) => asObject(item))
+    .filter((item): item is Record<string, unknown> => Boolean(item));
+};
+
+const executeLegacyQuery = async (sqlText: string, params: unknown[] = []): Promise<Record<string, unknown>[]> => {
+  const { queryFromD1 } = await import('./core');
+  const payload = await queryFromD1(sqlText, params);
+  return readLegacyRows(payload);
+};
+
 const mapJoinedRowToUserBadge = (row: UserBadgeJoinedRow): UserBadge => ({
   id: toInt(row.ub_id, 0),
   userId: toInt(row.user_id, 0),
@@ -122,6 +155,156 @@ const mapBadgeDefinitionRow = (row: BadgeDefinitionRow): BadgeDefinition => ({
   isActive: Boolean(row.is_active),
 });
 
+const mapLegacyJoinedRowToUserBadge = (row: Record<string, unknown>): UserBadge => {
+  const badgeId = toNullableString(row.badge_id) ?? '';
+  const badgeName = toNullableString(row.badge_name) ?? badgeId;
+
+  return {
+    id: toInt(row.ub_id, 0),
+    userId: toInt(row.user_id, 0),
+    badgeId,
+    isEquipped: Boolean(toInt(row.is_equipped, 0)),
+    displayOrder: toInt(row.display_order, 0),
+    obtainedAt: toNullableString(row.obtained_at) ?? '',
+    badge: {
+      id: badgeId,
+      name: badgeName,
+      description: toNullableString(row.badge_description) ?? undefined,
+      icon: parseJsonField<IconConfig>(toNullableString(row.badge_icon)) || { type: 'null', value: null },
+      textColor: parseJsonField<ColorConfig>(toNullableString(row.text_color)) || { type: 'solid', value: '#000000' },
+      backgroundColor:
+        parseJsonField<ColorConfig>(toNullableString(row.background_color)) || { type: 'solid', value: '#FFFFFF' },
+      borderColor: parseJsonField<ColorConfig>(toNullableString(row.border_color)),
+      rarity: toInt(row.rarity, 0),
+      sortOrder: toInt(row.sort_order, 0),
+      isActive: Boolean(toInt(row.is_active, 0)),
+    },
+  };
+};
+
+const mapLegacyBadgeDefinitionRow = (row: Record<string, unknown>): BadgeDefinition => ({
+  id: toNullableString(row.id) ?? '',
+  name: toNullableString(row.name) ?? '',
+  description: toNullableString(row.description) ?? undefined,
+  icon: parseJsonField<IconConfig>(toNullableString(row.icon)) || { type: 'emoji', value: '🏅' },
+  textColor: parseJsonField<ColorConfig>(toNullableString(row.text_color)) || { type: 'solid', value: '#000000' },
+  backgroundColor:
+    parseJsonField<ColorConfig>(toNullableString(row.background_color)) || { type: 'solid', value: '#FFFFFF' },
+  borderColor: parseJsonField<ColorConfig>(toNullableString(row.border_color)),
+  rarity: toInt(row.rarity, 0),
+  sortOrder: toInt(row.sort_order, 0),
+  isActive: Boolean(toInt(row.is_active, 0)),
+});
+
+const getUserBadgesLegacy = async (userId: number): Promise<UserBadge[]> => {
+  const rows = await executeLegacyQuery(
+    `
+      SELECT
+        ub.id as ub_id,
+        ub.user_id,
+        ub.badge_id,
+        ub.is_equipped,
+        ub.display_order,
+        ub.obtained_at,
+        b.id as badge_id,
+        b.name as badge_name,
+        b.description as badge_description,
+        b.icon as badge_icon,
+        b.text_color,
+        b.background_color,
+        b.border_color,
+        b.rarity,
+        b.sort_order,
+        b.is_active
+      FROM user_badges ub
+      JOIN badges b ON ub.badge_id = b.id
+      WHERE ub.user_id = ? AND b.is_active = 1
+      ORDER BY ub.is_equipped DESC, b.rarity DESC, b.sort_order ASC
+    `,
+    [userId],
+  );
+
+  return rows.map(mapLegacyJoinedRowToUserBadge);
+};
+
+const getUserRecentBadgesExcludingEquippedLegacy = async (userId: number, limit = 5): Promise<UserBadge[]> => {
+  const safeLimit = Math.max(1, Math.min(10, Math.floor(limit)));
+  const rows = await executeLegacyQuery(
+    `
+      SELECT
+        ub.id as ub_id,
+        ub.user_id,
+        ub.badge_id,
+        ub.is_equipped,
+        ub.display_order,
+        ub.obtained_at,
+        b.id as badge_id,
+        b.name as badge_name,
+        b.description as badge_description,
+        b.icon as badge_icon,
+        b.text_color,
+        b.background_color,
+        b.border_color,
+        b.rarity,
+        b.sort_order,
+        b.is_active
+      FROM user_badges ub
+      JOIN badges b ON ub.badge_id = b.id
+      WHERE ub.user_id = ? AND b.is_active = 1 AND ub.is_equipped = 0
+      ORDER BY ub.obtained_at DESC
+      LIMIT ?
+    `,
+    [userId, safeLimit],
+  );
+
+  return rows.map(mapLegacyJoinedRowToUserBadge);
+};
+
+const updateEquippedBadgesLegacy = async (userId: number, badgeIds: string[]): Promise<boolean> => {
+  const { queryFromD1 } = await import('./core');
+  const limitedBadgeIds = badgeIds.slice(0, 5);
+
+  await queryFromD1('UPDATE user_badges SET is_equipped = 0, display_order = 0 WHERE user_id = ?', [userId]);
+  for (let i = 0; i < limitedBadgeIds.length; i++) {
+    await queryFromD1(
+      `UPDATE user_badges
+       SET is_equipped = 1, display_order = ?
+       WHERE user_id = ? AND badge_id = ?`,
+      [i + 1, userId, limitedBadgeIds[i]],
+    );
+  }
+  return true;
+};
+
+const grantBadgeToUserLegacy = async (userId: number, badgeId: string): Promise<boolean> => {
+  const { queryFromD1 } = await import('./core');
+  await queryFromD1('INSERT OR IGNORE INTO user_badges (user_id, badge_id) VALUES (?, ?)', [userId, badgeId]);
+  return true;
+};
+
+const revokeBadgeFromUserLegacy = async (userId: number, badgeId: string): Promise<boolean> => {
+  const { queryFromD1 } = await import('./core');
+  await queryFromD1('DELETE FROM user_badges WHERE user_id = ? AND badge_id = ?', [userId, badgeId]);
+  return true;
+};
+
+const userHasBadgeLegacy = async (userId: number, badgeId: string): Promise<boolean> => {
+  const rows = await executeLegacyQuery('SELECT COUNT(*) as count FROM user_badges WHERE user_id = ? AND badge_id = ?', [
+    userId,
+    badgeId,
+  ]);
+
+  return toInt(rows[0]?.count, 0) > 0;
+};
+
+const getAllBadgesLegacy = async (): Promise<BadgeDefinition[]> => {
+  const rows = await executeLegacyQuery(
+    'SELECT * FROM badges WHERE is_active = 1 ORDER BY rarity DESC, sort_order ASC',
+    [],
+  );
+  return rows.map(mapLegacyBadgeDefinitionRow);
+};
+
 /**
  * 获取用户所有徽章（包含徽章定义）
  * @param userId 用户ID
@@ -130,13 +313,17 @@ const mapBadgeDefinitionRow = (row: BadgeDefinitionRow): BadgeDefinition => ({
 export async function getUserBadges(userId: number): Promise<UserBadge[]> {
   try {
     const bundle = await readBadgesRepoBundle();
-    if (!bundle) return [];
+    if (!bundle) return await getUserBadgesLegacy(userId);
 
     const rows = await bundle.listUserBadgesWithDefinitions(bundle.db, userId);
     return rows.map(mapJoinedRowToUserBadge);
   } catch (error) {
     console.error('获取用户徽章失败:', error);
-    return [];
+    try {
+      return await getUserBadgesLegacy(userId);
+    } catch {
+      return [];
+    }
   }
 }
 
@@ -161,13 +348,17 @@ export async function getUserEquippedBadges(userId: number): Promise<UserBadge[]
 export async function getUserRecentBadgesExcludingEquipped(userId: number, limit = 5): Promise<UserBadge[]> {
   try {
     const bundle = await readBadgesRepoBundle();
-    if (!bundle) return [];
+    if (!bundle) return await getUserRecentBadgesExcludingEquippedLegacy(userId, limit);
 
     const rows = await bundle.listRecentUserBadgesExcludingEquipped(bundle.db, userId, limit);
     return rows.map(mapJoinedRowToUserBadge);
   } catch (error) {
     console.error('获取用户最近徽章失败:', error);
-    return [];
+    try {
+      return await getUserRecentBadgesExcludingEquippedLegacy(userId, limit);
+    } catch {
+      return [];
+    }
   }
 }
 
@@ -180,7 +371,7 @@ export async function getUserRecentBadgesExcludingEquipped(userId: number, limit
 export async function updateEquippedBadges(userId: number, badgeIds: string[]): Promise<boolean> {
   try {
     const bundle = await readBadgesRepoBundle();
-    if (!bundle) return false;
+    if (!bundle) return await updateEquippedBadgesLegacy(userId, badgeIds);
 
     // 限制最多5个徽章
     const limitedBadgeIds = badgeIds.slice(0, 5);
@@ -196,7 +387,11 @@ export async function updateEquippedBadges(userId: number, badgeIds: string[]): 
     return true;
   } catch (error) {
     console.error('更新佩戴徽章失败:', error);
-    return false;
+    try {
+      return await updateEquippedBadgesLegacy(userId, badgeIds);
+    } catch {
+      return false;
+    }
   }
 }
 
@@ -209,13 +404,17 @@ export async function updateEquippedBadges(userId: number, badgeIds: string[]): 
 export async function grantBadgeToUser(userId: number, badgeId: string): Promise<boolean> {
   try {
     const bundle = await readBadgesRepoBundle();
-    if (!bundle) return false;
+    if (!bundle) return await grantBadgeToUserLegacy(userId, badgeId);
 
     await bundle.insertUserBadgeIgnore(bundle.db, userId, badgeId);
     return true;
   } catch (error) {
     console.error('授予徽章失败:', error);
-    return false;
+    try {
+      return await grantBadgeToUserLegacy(userId, badgeId);
+    } catch {
+      return false;
+    }
   }
 }
 
@@ -228,13 +427,17 @@ export async function grantBadgeToUser(userId: number, badgeId: string): Promise
 export async function revokeBadgeFromUser(userId: number, badgeId: string): Promise<boolean> {
   try {
     const bundle = await readBadgesRepoBundle();
-    if (!bundle) return false;
+    if (!bundle) return await revokeBadgeFromUserLegacy(userId, badgeId);
 
     await bundle.deleteUserBadge(bundle.db, userId, badgeId);
     return true;
   } catch (error) {
     console.error('撤销徽章失败:', error);
-    return false;
+    try {
+      return await revokeBadgeFromUserLegacy(userId, badgeId);
+    } catch {
+      return false;
+    }
   }
 }
 
@@ -247,13 +450,17 @@ export async function revokeBadgeFromUser(userId: number, badgeId: string): Prom
 export async function userHasBadge(userId: number, badgeId: string): Promise<boolean> {
   try {
     const bundle = await readBadgesRepoBundle();
-    if (!bundle) return false;
+    if (!bundle) return await userHasBadgeLegacy(userId, badgeId);
 
     const count = await bundle.countUserBadgesByBadgeId(bundle.db, userId, badgeId);
     return count > 0;
   } catch (error) {
     console.error('检查徽章拥有状态失败:', error);
-    return false;
+    try {
+      return await userHasBadgeLegacy(userId, badgeId);
+    } catch {
+      return false;
+    }
   }
 }
 
@@ -264,12 +471,16 @@ export async function userHasBadge(userId: number, badgeId: string): Promise<boo
 export async function getAllBadges(): Promise<BadgeDefinition[]> {
   try {
     const bundle = await readBadgesRepoBundle();
-    if (!bundle) return [];
+    if (!bundle) return await getAllBadgesLegacy();
 
     const rows = await bundle.listActiveBadgeDefinitions(bundle.db);
     return rows.map(mapBadgeDefinitionRow);
   } catch (error) {
     console.error('获取徽章列表失败:', error);
-    return [];
+    try {
+      return await getAllBadgesLegacy();
+    } catch {
+      return [];
+    }
   }
 }

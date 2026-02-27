@@ -2,7 +2,8 @@ type D1Config = {
   databaseId: string;
   apiToken: string;
   accountId: string;
-  databaseUrl: string;
+  queryUrl: string;
+  rawUrl: string;
 };
 
 const sleep = async (ms: number) => {
@@ -100,7 +101,8 @@ const getD1Config = (): D1Config | null => {
     databaseId,
     apiToken,
     accountId,
-    databaseUrl: `https://api.cloudflare.com/client/v4/accounts/${accountId}/d1/database/${databaseId}/query`,
+    queryUrl: `https://api.cloudflare.com/client/v4/accounts/${accountId}/d1/database/${databaseId}/query`,
+    rawUrl: `https://api.cloudflare.com/client/v4/accounts/${accountId}/d1/database/${databaseId}/raw`,
   };
 };
 
@@ -171,12 +173,15 @@ export function generateUUID(): string {
   ].join('-');
 }
 
+type D1QueryEndpoint = 'query' | 'raw';
+
 // 核心查询函数
-async function query(sql: string, params: unknown[] = []): Promise<Response> {
+async function query(sql: string, params: unknown[] = [], endpoint: D1QueryEndpoint = 'query'): Promise<Response> {
   const config = assertD1Config();
+  const targetUrl = endpoint === 'raw' ? config.rawUrl : config.queryUrl;
 
   return await fetchWithRetry(
-    config.databaseUrl,
+    targetUrl,
     {
       method: "POST",
       headers: {
@@ -195,7 +200,7 @@ async function query(sql: string, params: unknown[] = []): Promise<Response> {
 // 从 D1 数据库直接执行 SQL 语句并返回 Cloudflare D1 HTTP payload
 export async function queryD1Payload(sql: string, params: unknown[] = []): Promise<unknown> {
   try {
-    const response = await query(sql, params);
+    const response = await query(sql, params, 'query');
 
     if (!response.ok) {
       let extra = '';
@@ -213,6 +218,31 @@ export async function queryD1Payload(sql: string, params: unknown[] = []): Promi
     return result;
   } catch (error) {
     console.error("从 D1 数据库查询失败:", error);
+    throw error;
+  }
+}
+
+// 从 D1 数据库直接执行 SQL 语句并返回 Cloudflare D1 HTTP raw payload
+export async function queryD1RawPayload(sql: string, params: unknown[] = []): Promise<unknown> {
+  try {
+    const response = await query(sql, params, 'raw');
+
+    if (!response.ok) {
+      let extra = '';
+      try {
+        const text = await response.text();
+        const trimmed = typeof text === 'string' ? text.trim() : '';
+        if (trimmed) extra = ` - ${trimmed.slice(0, 800)}`;
+      } catch {
+        // ignore
+      }
+      throw new Error(`D1 API 错误: ${response.status} ${response.statusText}${extra}`);
+    }
+
+    const result = await response.json();
+    return result;
+  } catch (error) {
+    console.error("从 D1 数据库 raw 查询失败:", error);
     throw error;
   }
 }

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { queryD1Payload, queryFromD1 } from '@/lib/database/core';
+import { queryD1Payload, queryD1RawPayload, queryFromD1 } from '@/lib/database/core';
 
 type EnvSnapshot = {
   CLOUDFLARE_API_TOKEN?: string;
@@ -140,6 +140,39 @@ describe('database/core queryD1Payload', () => {
 
       const result = await queryFromD1('SELECT 1', []);
       expect(result).toEqual({ success: true, result: [{ alias: true }] });
+    } finally {
+      globalThis.fetch = originalFetch;
+      restoreEnvSnapshot(envSnapshot);
+    }
+  });
+
+  test('queryD1RawPayload 命中 /raw 端点并返回 JSON payload', async () => {
+    const envSnapshot = readEnvSnapshot();
+    const originalFetch = globalThis.fetch;
+
+    try {
+      setMinimalEnv();
+      let calledUrl = '';
+      let calledInit: RequestInit | undefined;
+
+      globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+        calledUrl = String(input);
+        calledInit = init;
+        return new Response(JSON.stringify({ success: true, result: [{ raw: true }] }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }) as typeof globalThis.fetch;
+
+      const result = await queryD1RawPayload('SELECT id, name FROM badges', []);
+      expect(result).toEqual({ success: true, result: [{ raw: true }] });
+      expect(calledUrl).toBe(
+        'https://api.cloudflare.com/client/v4/accounts/account_x/d1/database/db_x/raw',
+      );
+
+      const body = JSON.parse(String(calledInit?.body ?? '{}'));
+      expect(body.sql).toBe('SELECT id, name FROM badges');
+      expect(body.params).toEqual([]);
     } finally {
       globalThis.fetch = originalFetch;
       restoreEnvSnapshot(envSnapshot);
