@@ -88,8 +88,8 @@ export function useAuth() {
   };
 
   // 退出登录
-  const logout = () => {
-    authApi.logout();
+  const logout = async () => {
+    await authApi.logout();
     setUser(null);
     setUserBadges([]);
     setBadgesLoading(false);

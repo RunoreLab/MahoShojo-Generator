@@ -1,4 +1,5 @@
 import type { UserBadge } from '@/types/badge';
+import { signOutBetterAuthSession } from '@/lib/auth/logout';
 
 const STORAGE_KEY = 'mahoshojo_auth';
 const ENCRYPTION_KEY = 'mahoshojo_2024_secret_encryption_key';
@@ -296,7 +297,8 @@ export const authApi = {
   },
 
   // 退出登录
-  logout(): void {
+  async logout(): Promise<void> {
+    await signOutBetterAuthSession();
     authStorage.clearAuth();
   }
 };
