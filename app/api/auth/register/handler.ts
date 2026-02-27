@@ -10,8 +10,8 @@ import {
   ensureBusinessUserLegacyAuthKey,
   getLinkedBusinessUserByAuthUserId,
 } from '@/lib/auth/user-auth-linking';
-import { getSecureRandomValues } from '@/lib/crypto';
-import { createUser, getUserByEmail, getUserByUsername } from '@/lib/database/users';
+import { getPasswordPolicySummaryMessage, validatePasswordPolicy } from '@/lib/auth/password-policy';
+import { getUserByEmail, getUserByUsername } from '@/lib/database/users';
 import { getDrizzleDbFromRuntime } from '@/lib/db/drizzle';
 import { getBusinessUserByEmail, getBusinessUserByUsername } from '@/lib/db/repositories/business-users';
 import { quickCheck } from '@/lib/sensitive-word-filter';
@@ -64,8 +64,6 @@ type RegisterDeps = {
   ensureAuthUserLink: typeof ensureAuthUserLink;
   ensureBusinessUserLegacyAuthKey: typeof ensureBusinessUserLegacyAuthKey;
   getLinkedBusinessUserByAuthUserId: typeof getLinkedBusinessUserByAuthUserId;
-  getRandomValues: typeof getSecureRandomValues;
-  createUser: typeof createUser;
   getUserByEmail: typeof getUserByEmail;
   getUserByUsername: typeof getUserByUsername;
   getDrizzleDbFromRuntime: typeof getDrizzleDbFromRuntime;
@@ -84,8 +82,6 @@ const defaultRegisterDeps: RegisterDeps = {
   ensureAuthUserLink,
   ensureBusinessUserLegacyAuthKey,
   getLinkedBusinessUserByAuthUserId,
-  getRandomValues: getSecureRandomValues,
-  createUser,
   getUserByEmail,
   getUserByUsername,
   getDrizzleDbFromRuntime,
@@ -96,12 +92,6 @@ const defaultRegisterDeps: RegisterDeps = {
 };
 
 const buildRegisterHandler = (deps: RegisterDeps): ((req: Request) => Promise<Response>) => {
-  const generateAuthKey = async (): Promise<string> => {
-    const array = new Uint8Array(32);
-    deps.getRandomValues(array);
-    return Array.from(array, (byte) => byte.toString(16).padStart(2, '0')).join('');
-  };
-
   const registerWithBetterAuth = async (
     req: Request,
     username: string,
@@ -134,7 +124,7 @@ const buildRegisterHandler = (deps: RegisterDeps): ((req: Request) => Promise<Re
     if (!bridge.ok) {
       return json(
         {
-          error: '密码注册当前不可用，请稍后重试或改用旧版密钥注册。',
+          error: '密码注册当前不可用，请稍后重试。',
           code: bridge.code,
         },
         503,
@@ -199,42 +189,6 @@ const buildRegisterHandler = (deps: RegisterDeps): ((req: Request) => Promise<Re
     );
   };
 
-  const registerWithLegacyAuthKey = async (username: string, email: string): Promise<Response> => {
-    const existingUser = await deps.getUserByUsername(username);
-    if (existingUser) {
-      return json({ error: '用户名已存在' }, 409);
-    }
-
-    const existingEmail = await deps.getUserByEmail(email);
-    if (existingEmail) {
-      return json({ error: '邮箱已被注册' }, 409);
-    }
-
-    const authKey = await generateAuthKey();
-    const userId = await deps.createUser(username, email, authKey);
-
-    if (!userId) {
-      return json({ error: '创建用户失败' }, 500);
-    }
-
-    const activityToken = await deps.issueActivityToken(userId);
-
-    return json({
-      success: true,
-      authMode: 'legacy',
-      user: {
-        id: userId,
-        username,
-        prefix: null,
-      },
-      username,
-      email,
-      authKey,
-      activityToken: activityToken ?? null,
-      message: '注册成功！请妥善保存您的登录密钥',
-    });
-  };
-
   return async (req: Request): Promise<Response> => {
     try {
       const payload = (await req.json()) as RegisterPayload;
@@ -244,8 +198,8 @@ const buildRegisterHandler = (deps: RegisterDeps): ((req: Request) => Promise<Re
       const password = toNonEmptyString(payload.password);
       const turnstileToken = toNonEmptyString(payload.turnstileToken);
 
-      if (!username || !emailInput || !turnstileToken) {
-        return json({ error: '用户名、邮箱和安全验证不能为空' }, 400);
+      if (!username || !emailInput || !password || !turnstileToken) {
+        return json({ error: '用户名、邮箱、密码和安全验证不能为空' }, 400);
       }
 
       const normalizedEmail = normalizeEmail(emailInput);
@@ -263,8 +217,12 @@ const buildRegisterHandler = (deps: RegisterDeps): ((req: Request) => Promise<Re
         return json({ error: '请输入有效的邮箱地址' }, 400);
       }
 
-      if (password && password.length < 8) {
-        return json({ error: '密码长度至少需要 8 位' }, 400);
+      const passwordPolicy = validatePasswordPolicy(password, {
+        username,
+        email: normalizedEmail,
+      });
+      if (!passwordPolicy.ok) {
+        return json({ error: getPasswordPolicySummaryMessage(passwordPolicy.issues) || '密码强度不足' }, 400);
       }
 
       try {
@@ -276,11 +234,7 @@ const buildRegisterHandler = (deps: RegisterDeps): ((req: Request) => Promise<Re
         console.error('Sensitive word check failed:', error);
       }
 
-      if (password) {
-        return registerWithBetterAuth(req, username, normalizedEmail, password);
-      }
-
-      return registerWithLegacyAuthKey(username, normalizedEmail);
+      return registerWithBetterAuth(req, username, normalizedEmail, password);
     } catch (error) {
       console.error('Registration error:', error);
       return json({ error: '注册失败，请稍后重试' }, 500);

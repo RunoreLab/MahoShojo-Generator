@@ -277,7 +277,6 @@ const CharacterManagerPage: React.FC = () => {
     // 账户系统相关状态
     const [showAuthModal, setShowAuthModal] = useState(false);
     const [authMessage, setAuthMessage] = useState<{ type: 'error' | 'success', text: string } | null>(null);
-    const [generatedAuthKey, setGeneratedAuthKey] = useState<string | null>(null);
 
     // 数据卡管理相关状态
     const [userDataCards, setUserDataCards] = useState<any[]>([]);
@@ -403,21 +402,11 @@ const CharacterManagerPage: React.FC = () => {
     }, [isAuthenticated, loadUserBadges]);
 
     // 处理注册
-    const handleRegister = async (username: string, email: string, turnstileToken: string, password?: string) => {
+    const handleRegister = async (username: string, email: string, turnstileToken: string, password: string) => {
         setAuthMessage(null);
-        setGeneratedAuthKey(null);
         const result = await register(username, email, turnstileToken, password);
         if (!result.success) {
             setAuthMessage({ type: 'error', text: result.error || '注册失败' });
-            return;
-        }
-
-        const isLegacyRegister =
-            result.authMode === 'legacy' || (result.authMode == null && typeof result.authKey === 'string' && result.authKey.trim().length > 0);
-
-        if (isLegacyRegister && typeof result.authKey === 'string' && result.authKey.trim().length > 0) {
-            setGeneratedAuthKey(result.authKey);
-            setAuthMessage({ type: 'success', text: '注册成功！请复制并保存您的登录密钥。' });
             return;
         }
 
@@ -438,7 +427,12 @@ const CharacterManagerPage: React.FC = () => {
         const result = await login(identifier, credential, turnstileToken, mode);
         if (result.success) {
             setShowAuthModal(false);
-            setMessage({ type: 'success', text: mode === 'legacy' ? '登录成功！' : '密码登录成功！' });
+            setMessage({
+                type: 'success',
+                text: mode === 'legacy'
+                    ? '旧密钥登录成功。请尽快在个人页完成账号迁移并设置密码。'
+                    : '密码登录成功！',
+            });
             loadUserDataCards();
             loadUserBadges();
         } else {
@@ -2322,12 +2316,10 @@ const CharacterManagerPage: React.FC = () => {
                 onClose={() => {
                     setShowAuthModal(false);
                     setAuthMessage(null);
-                    setGeneratedAuthKey(null);
                 }}
                 onLogin={handleLogin}
                 onRegister={handleRegister}
                 authMessage={authMessage}
-                generatedAuthKey={generatedAuthKey}
             />
 
             {/* 数据卡管理模态框 */}

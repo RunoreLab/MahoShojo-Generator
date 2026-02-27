@@ -10,6 +10,7 @@ import Footer from '@/components/Footer';
 import { BattleReportCardModal } from '@/components/me/BattleReportCardModal';
 import { BattleReportDetailsModal } from '@/components/me/BattleReportDetailsModal';
 import { BattleReportsPanel } from '@/components/me/BattleReportsPanel';
+import { AuthMigrationPanel } from '@/components/me/AuthMigrationPanel';
 import { MeTabs } from '@/components/me/MeTabs';
 import { PvpMatchDetailsModal } from '@/components/me/PvpMatchDetailsModal';
 import { PvpMatchesPanel } from '@/components/me/PvpMatchesPanel';
@@ -130,6 +131,7 @@ export function MePage() {
 
             {tab === 'settings' ? (
               <div className="mt-4">
+                <AuthMigrationPanel userId={user?.id ?? null} />
                 <ProfileSettingsPanel userId={user?.id ?? null} />
                 <div className="mt-4">
                   <div className="font-semibold mb-2">账号设置（预留）</div>

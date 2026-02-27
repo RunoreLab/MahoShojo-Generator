@@ -10,12 +10,13 @@ import {
   ensureBusinessUserLegacyAuthKey,
   getLinkedBusinessUserByAuthUserId,
 } from '@/lib/auth/user-auth-linking';
-import { verifyUserLogin } from '@/lib/database/users';
+import { getUserById, getUserByUsername, verifyUserLogin } from '@/lib/database/users';
 import { verifyTurnstileToken } from '@/lib/turnstile';
 
 export const runtime = 'edge';
 
 type LoginMode = 'password' | 'legacy';
+type PasswordIdentifierType = 'email' | 'username' | 'user-id';
 
 type LoginPayload = {
   identifier?: string;
@@ -52,6 +53,36 @@ const isValidEmail = (email: string): boolean => {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 };
 
+const parsePasswordIdentifier = (
+  identifier: string,
+): { type: PasswordIdentifierType; value: string; userId: number | null } => {
+  const normalized = identifier.trim();
+  if (isValidEmail(normalized.toLowerCase())) {
+    return {
+      type: 'email',
+      value: normalized.toLowerCase(),
+      userId: null,
+    };
+  }
+
+  if (/^\d+$/.test(normalized)) {
+    const userId = Number(normalized);
+    if (Number.isSafeInteger(userId) && userId > 0) {
+      return {
+        type: 'user-id',
+        value: normalized,
+        userId,
+      };
+    }
+  }
+
+  return {
+    type: 'username',
+    value: normalized,
+    userId: null,
+  };
+};
+
 type LoginDeps = {
   issueActivityToken: typeof issueActivityToken;
   appendSetCookieHeaders: typeof appendSetCookieHeaders;
@@ -61,6 +92,8 @@ type LoginDeps = {
   ensureAuthUserLink: typeof ensureAuthUserLink;
   ensureBusinessUserLegacyAuthKey: typeof ensureBusinessUserLegacyAuthKey;
   getLinkedBusinessUserByAuthUserId: typeof getLinkedBusinessUserByAuthUserId;
+  getUserById: typeof getUserById;
+  getUserByUsername: typeof getUserByUsername;
   verifyUserLogin: typeof verifyUserLogin;
   verifyTurnstileToken: typeof verifyTurnstileToken;
 };
@@ -74,11 +107,29 @@ const defaultLoginDeps: LoginDeps = {
   ensureAuthUserLink,
   ensureBusinessUserLegacyAuthKey,
   getLinkedBusinessUserByAuthUserId,
+  getUserById,
+  getUserByUsername,
   verifyUserLogin,
   verifyTurnstileToken,
 };
 
 const buildLoginHandler = (deps: LoginDeps): ((req: Request) => Promise<Response>) => {
+  const resolveEmailByIdentifier = async (identifier: string): Promise<string | null> => {
+    const parsed = parsePasswordIdentifier(identifier);
+    if (parsed.type === 'email') {
+      return parsed.value;
+    }
+
+    if (parsed.type === 'username') {
+      const user = await deps.getUserByUsername(parsed.value);
+      return toNonEmptyString(user?.email)?.toLowerCase() ?? null;
+    }
+
+    if (!parsed.userId) return null;
+    const user = await deps.getUserById(parsed.userId);
+    return toNonEmptyString(user?.email)?.toLowerCase() ?? null;
+  };
+
   const loginWithLegacyAuthKey = async (username: string, authKey: string): Promise<Response> => {
     const user = await deps.verifyUserLogin(username, authKey);
     if (!user) {
@@ -197,12 +248,12 @@ const buildLoginHandler = (deps: LoginDeps): ((req: Request) => Promise<Response
         return loginWithLegacyAuthKey(identifier, credential);
       }
 
-      const normalizedEmail = identifier.toLowerCase();
-      if (!isValidEmail(normalizedEmail)) {
-        return json({ error: '密码登录请填写有效的邮箱地址' }, 400);
+      const email = await resolveEmailByIdentifier(identifier);
+      if (!email) {
+        return json({ error: '账号或密码错误' }, 401);
       }
 
-      return loginWithBetterAuthPassword(req, normalizedEmail, credential);
+      return loginWithBetterAuthPassword(req, email, credential);
     } catch (error) {
       console.error('Login error:', error);
       return json({ error: '登录失败，请稍后重试' }, 500);

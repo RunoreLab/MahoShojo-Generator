@@ -164,7 +164,7 @@ export const authStorage = {
 // API 请求工具函数
 export const authApi = {
   // 注册
-  async register(username: string, email: string, turnstileToken: string, password?: string): Promise<{
+  async register(username: string, email: string, turnstileToken: string, password: string): Promise<{
     success: boolean;
     authKey?: string;
     authMode?: 'better-auth' | 'legacy';

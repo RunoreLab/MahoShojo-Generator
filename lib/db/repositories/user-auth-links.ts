@@ -1,12 +1,19 @@
 import { eq } from 'drizzle-orm';
 import type { AppDrizzleDb } from '@/lib/db/drizzle';
-import { userAuthLinks } from '@/lib/db/schema';
+import { baAccounts, baUsers, userAuthLinks } from '@/lib/db/schema';
 
 export type UserAuthLinkRow = typeof userAuthLinks.$inferSelect;
 
 export type CreateUserAuthLinkInput = {
   authUserId: string;
   businessUserId: number;
+};
+
+export type AuthMigrationStatus = {
+  hasAuthLink: boolean;
+  authUserId: string | null;
+  hasPassword: boolean;
+  emailVerified: boolean;
 };
 
 export const getUserAuthLinkByAuthUserId = async (
@@ -53,4 +60,44 @@ export const upsertUserAuthLink = async (
     });
 
   return getUserAuthLinkByAuthUserId(db, input.authUserId);
+};
+
+export const getAuthMigrationStatusByBusinessUserId = async (
+  db: AppDrizzleDb,
+  businessUserId: number,
+): Promise<AuthMigrationStatus> => {
+  const link = await getUserAuthLinkByBusinessUserId(db, businessUserId);
+  if (!link) {
+    return {
+      hasAuthLink: false,
+      authUserId: null,
+      hasPassword: false,
+      emailVerified: false,
+    };
+  }
+
+  const authUserRows = await db
+    .select({
+      emailVerified: baUsers.emailVerified,
+    })
+    .from(baUsers)
+    .where(eq(baUsers.id, link.authUserId))
+    .limit(1);
+  const emailVerified = Boolean(authUserRows[0]?.emailVerified);
+
+  const credentialAccounts = await db
+    .select({
+      password: baAccounts.password,
+    })
+    .from(baAccounts)
+    .where(eq(baAccounts.userId, link.authUserId));
+
+  const hasPassword = credentialAccounts.some((row) => typeof row.password === 'string' && row.password.trim().length > 0);
+
+  return {
+    hasAuthLink: true,
+    authUserId: link.authUserId,
+    hasPassword,
+    emailVerified,
+  };
 };

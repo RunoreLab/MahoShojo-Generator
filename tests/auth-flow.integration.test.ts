@@ -382,11 +382,6 @@ const buildAuthHarness = async () => {
     ensureAuthUserLink,
     ensureBusinessUserLegacyAuthKey,
     getLinkedBusinessUserByAuthUserId,
-    getRandomValues: (values: Uint8Array) => {
-      for (let i = 0; i < values.length; i += 1) values[i] = (i * 17 + 11) % 256;
-      return values;
-    },
-    createUser: async (username: string, email: string, authKey: string) => createUser({ username, email, authKey }).id,
     getUserByEmail: async (email: string) => {
       const user = getUserByEmail(email);
       return user ? toLegacyUser(user) : null;
@@ -424,6 +419,14 @@ const buildAuthHarness = async () => {
     ensureAuthUserLink,
     ensureBusinessUserLegacyAuthKey,
     getLinkedBusinessUserByAuthUserId,
+    getUserById: async (userId: number) => {
+      const user = getUserById(userId);
+      return user ? toLegacyUser(user) : null;
+    },
+    getUserByUsername: async (username: string) => {
+      const user = getUserByUsername(username);
+      return user ? toLegacyUser(user) : null;
+    },
     verifyUserLogin,
     verifyTurnstileToken,
   });
@@ -564,6 +567,22 @@ const buildAuthHarness = async () => {
 };
 
 describe('auth 全链路集成', () => {
+  test('register 必须提供密码', async () => {
+    const harness = await buildAuthHarness();
+
+    const registerResp = await harness.registerPost(
+      postJsonRequest('https://example.com/api/auth/register', {
+        username: 'no-password-user',
+        email: 'no-password@example.com',
+        turnstileToken: 'turnstile-ok',
+      }),
+    );
+
+    expect(registerResp.status).toBe(400);
+    const payload = (await registerResp.json()) as { error?: string };
+    expect(payload.error).toContain('用户名、邮箱、密码和安全验证不能为空');
+  });
+
   test('register/login/verify/recover/reset 应串联成功并验证重置一次性', async () => {
     const harness = await buildAuthHarness();
 
@@ -606,6 +625,26 @@ describe('auth 全链路集成', () => {
     expect(loginPayload.success).toBeTrue();
     expect(loginPayload.authMode).toBe('better-auth');
     expect(loginPayload.user.id).toBe(registerPayload.user.id);
+
+    const usernameLoginResp = await harness.loginPost(
+      postJsonRequest('https://example.com/api/auth/login', {
+        identifier: 'hikari',
+        credential: 'password-123',
+        mode: 'password',
+        turnstileToken: 'turnstile-ok',
+      }),
+    );
+    expect(usernameLoginResp.status).toBe(200);
+
+    const idLoginResp = await harness.loginPost(
+      postJsonRequest('https://example.com/api/auth/login', {
+        identifier: String(registerPayload.user.id),
+        credential: 'password-123',
+        mode: 'password',
+        turnstileToken: 'turnstile-ok',
+      }),
+    );
+    expect(idLoginResp.status).toBe(200);
 
     const setCookie = loginResp.headers.get('set-cookie') ?? '';
     expect(setCookie).toContain('better-auth.session_token=');

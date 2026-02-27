@@ -54,7 +54,7 @@ export function useAuth() {
   }, []);
 
   // 注册
-  const register = async (username: string, email: string, turnstileToken: string, password?: string) => {
+  const register = async (username: string, email: string, turnstileToken: string, password: string) => {
     const result = await authApi.register(username, email, turnstileToken, password);
     if (result.success) {
       // 注册成功后自动验证登录

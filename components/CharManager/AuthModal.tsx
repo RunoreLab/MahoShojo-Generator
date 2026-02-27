@@ -1,6 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { quickCheck } from '@/lib/sensitive-word-filter';
+import {
+  PASSWORD_MIN_LENGTH,
+  evaluatePasswordStrength,
+  getPasswordPolicySummaryMessage,
+  getPasswordStrengthLabel,
+  validatePasswordPolicy,
+} from '@/lib/auth/password-policy';
 import TurnstileWidget, { TurnstileRef } from '../Turnstile';
 
 interface AuthModalProps {
@@ -12,16 +19,15 @@ interface AuthModalProps {
     turnstileToken: string,
     mode: 'password' | 'legacy',
   ) => Promise<void>;
-  onRegister: (username: string, email: string, turnstileToken: string, password?: string) => Promise<void>;
+  onRegister: (username: string, email: string, turnstileToken: string, password: string) => Promise<void>;
   authMessage: { type: 'error' | 'success'; text: string } | null;
-  generatedAuthKey: string | null;
 }
 
 type LoginMethod = 'password' | 'legacy';
 
 type AuthFormState = {
   username: string;
-  email: string;
+  identifier: string;
   authKey: string;
   password: string;
   confirmPassword: string;
@@ -29,10 +35,16 @@ type AuthFormState = {
 
 const EMPTY_FORM: AuthFormState = {
   username: '',
-  email: '',
+  identifier: '',
   authKey: '',
   password: '',
   confirmPassword: '',
+};
+
+const getStrengthBarClassName = (score: number): string => {
+  if (score >= 3) return 'bg-green-500';
+  if (score >= 2) return 'bg-yellow-500';
+  return 'bg-red-500';
 };
 
 export default function AuthModal({
@@ -41,17 +53,19 @@ export default function AuthModal({
   onLogin,
   onRegister,
   authMessage,
-  generatedAuthKey,
 }: AuthModalProps) {
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
   const [loginMethod, setLoginMethod] = useState<LoginMethod>('password');
   const [authForm, setAuthForm] = useState<AuthFormState>(EMPTY_FORM);
   const [turnstileToken, setTurnstileToken] = useState<string>('');
   const [usernameError, setUsernameError] = useState<string>('');
-  const [emailError, setEmailError] = useState<string>('');
+  const [identifierError, setIdentifierError] = useState<string>('');
   const [passwordError, setPasswordError] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const turnstileRef = useRef<TurnstileRef>(null);
+
+  const passwordStrength = evaluatePasswordStrength(authForm.password);
+  const passwordStrengthPercent = Math.round((passwordStrength.score / Math.max(1, passwordStrength.maxScore)) * 100);
 
   const resetCaptcha = () => {
     setTurnstileToken('');
@@ -65,7 +79,7 @@ export default function AuthModal({
       setAuthForm(EMPTY_FORM);
       setTurnstileToken('');
       setUsernameError('');
-      setEmailError('');
+      setIdentifierError('');
       setPasswordError('');
       setIsSubmitting(false);
     }
@@ -73,16 +87,16 @@ export default function AuthModal({
 
   const validateEmail = (email: string) => {
     if (!email.trim()) {
-      setEmailError('');
+      setIdentifierError('');
       return;
     }
 
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email)) {
-      setEmailError('请输入有效的邮箱地址');
+      setIdentifierError('请输入有效的邮箱地址');
       return;
     }
-    setEmailError('');
+    setIdentifierError('');
   };
 
   const validateUsername = async (username: string) => {
@@ -109,14 +123,23 @@ export default function AuthModal({
     }
   };
 
-  const validateRegisterPassword = (password: string, confirmPassword: string) => {
+  const validateRegisterPassword = (password: string, confirmPassword: string, username: string, email: string) => {
     if (!password && !confirmPassword) {
       setPasswordError('');
       return;
     }
 
-    if (password.length < 8) {
-      setPasswordError('密码至少需要 8 位字符');
+    if (!password) {
+      setPasswordError('请设置登录密码');
+      return;
+    }
+
+    const passwordPolicy = validatePasswordPolicy(password, {
+      username,
+      email,
+    });
+    if (!passwordPolicy.ok) {
+      setPasswordError(getPasswordPolicySummaryMessage(passwordPolicy.issues) || '密码不符合要求');
       return;
     }
 
@@ -130,11 +153,11 @@ export default function AuthModal({
 
   useEffect(() => {
     if (authMode === 'register') {
-      validateRegisterPassword(authForm.password, authForm.confirmPassword);
+      validateRegisterPassword(authForm.password, authForm.confirmPassword, authForm.username, authForm.identifier);
     } else {
       setPasswordError('');
     }
-  }, [authForm.password, authForm.confirmPassword, authMode]);
+  }, [authForm.password, authForm.confirmPassword, authForm.username, authForm.identifier, authMode]);
 
   useEffect(() => {
     if (authMessage && isSubmitting) {
@@ -151,25 +174,32 @@ export default function AuthModal({
     e.preventDefault();
     if (!turnstileToken) return;
 
-    if (authMode === 'register' && (usernameError || emailError || passwordError)) {
-      return;
+    if (authMode === 'register') {
+      const username = authForm.username.trim();
+      const email = authForm.identifier.trim();
+      const password = authForm.password;
+      const passwordPolicy = validatePasswordPolicy(password, { username, email });
+
+      if (!username || !email || !password) {
+        setPasswordError('请完整填写注册信息');
+        return;
+      }
+
+      if (usernameError || identifierError || passwordError || !passwordPolicy.ok) {
+        setPasswordError(getPasswordPolicySummaryMessage(passwordPolicy.issues) || passwordError);
+        return;
+      }
     }
 
     setIsSubmitting(true);
     try {
       if (authMode === 'register') {
-        const password = authForm.password.trim();
-        await onRegister(
-          authForm.username.trim(),
-          authForm.email.trim(),
-          turnstileToken,
-          password.length > 0 ? password : undefined,
-        );
+        await onRegister(authForm.username.trim(), authForm.identifier.trim(), turnstileToken, authForm.password);
         return;
       }
 
       if (loginMethod === 'password') {
-        await onLogin(authForm.email.trim(), authForm.password, turnstileToken, 'password');
+        await onLogin(authForm.identifier.trim(), authForm.password, turnstileToken, 'password');
         return;
       }
 
@@ -184,27 +214,23 @@ export default function AuthModal({
     setLoginMethod('password');
     setAuthForm(EMPTY_FORM);
     setUsernameError('');
-    setEmailError('');
+    setIdentifierError('');
     setPasswordError('');
     resetCaptcha();
   };
 
   const switchLoginMethod = (method: LoginMethod) => {
     setLoginMethod(method);
-    setEmailError('');
+    setIdentifierError('');
     setPasswordError('');
     resetCaptcha();
-  };
-
-  const handleTurnstileVerify = (token: string) => {
-    setTurnstileToken(token);
   };
 
   const canSubmit =
     Boolean(turnstileToken) &&
     !isSubmitting &&
-    !(authMode === 'login' && loginMethod === 'password' && Boolean(emailError)) &&
-    !(authMode === 'register' && (Boolean(usernameError) || Boolean(emailError) || Boolean(passwordError)));
+    !(authMode === 'register' && (!authForm.password || Boolean(usernameError) || Boolean(identifierError) || Boolean(passwordError))) &&
+    !(authMode === 'login' && loginMethod === 'password' && !authForm.identifier.trim());
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
@@ -216,12 +242,10 @@ export default function AuthModal({
         >
           ×
         </button>
-        <h2 className="mb-4 pr-8 text-xl font-bold">
-          {generatedAuthKey && authMode === 'register' ? '注册成功' : authMode === 'login' ? '登录' : '注册'}
-        </h2>
+        <h2 className="mb-4 pr-8 text-xl font-bold">{authMode === 'login' ? '登录' : '注册'}</h2>
 
         <div className="mb-3 rounded border border-yellow-200 bg-yellow-50 p-2 text-xs text-yellow-800">
-          <span className="font-medium">实验性功能：</span> 用户系统目前处于测试阶段，功能可能不稳定。
+          <span className="font-medium">迁移提示：</span> 新注册账号已强制使用密码登录，旧版密钥登录将逐步下线。
         </div>
 
         {authMessage ? (
@@ -234,178 +258,178 @@ export default function AuthModal({
           </div>
         ) : null}
 
-        {generatedAuthKey && authMode === 'register' ? (
-          <div className="mb-4">
-            <div className="mb-4 rounded border border-green-200 bg-green-50 p-4">
-              <p className="mb-2 text-sm font-semibold text-green-800">您的登录密钥（请立即复制保存）：</p>
-              <code className="block break-all rounded border border-green-300 bg-white p-2 text-xs">
-                {generatedAuthKey}
-              </code>
-              <p className="mt-2 text-xs text-red-600">请勿和他人分享，如果丢失则无法找回。</p>
-              <div className="mt-3 flex gap-2">
-                <button
-                  onClick={() => {
-                    navigator.clipboard.writeText(generatedAuthKey);
-                  }}
-                  className="flex-1 rounded bg-green-600 px-3 py-2 text-sm text-white hover:bg-green-700"
-                >
-                  复制密钥
-                </button>
-                <button
-                  onClick={onClose}
-                  className="flex-1 rounded bg-gray-600 px-3 py-2 text-sm text-white hover:bg-gray-700"
-                >
-                  关闭
-                </button>
-              </div>
-            </div>
-            <div className="text-center text-sm text-gray-600">请妥善保存您的登录密钥，下次登录时将需要使用。</div>
-          </div>
-        ) : (
-          <>
-            <form onSubmit={handleSubmit} className="space-y-4">
-              {authMode === 'login' ? (
-                <div className="grid grid-cols-2 gap-2 rounded-md bg-gray-100 p-1">
-                  <button
-                    type="button"
-                    onClick={() => switchLoginMethod('password')}
-                    className={`rounded px-2 py-2 text-sm font-medium ${
-                      loginMethod === 'password' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600'
-                    }`}
-                  >
-                    密码登录
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => switchLoginMethod('legacy')}
-                    className={`rounded px-2 py-2 text-sm font-medium ${
-                      loginMethod === 'legacy' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600'
-                    }`}
-                  >
-                    旧密钥登录
-                  </button>
-                </div>
-              ) : null}
-
-              {authMode === 'register' || loginMethod === 'legacy' ? (
-                <div>
-                  <label className="mb-1 block text-sm font-medium text-gray-700">用户名</label>
-                  <input
-                    type="text"
-                    value={authForm.username}
-                    onChange={(e) => {
-                      const value = e.target.value;
-                      setAuthForm((prev) => ({ ...prev, username: value }));
-                      if (authMode === 'register') {
-                        void validateUsername(value);
-                      } else {
-                        setUsernameError('');
-                      }
-                    }}
-                    className={`input-field ${usernameError ? 'border-red-300 focus:border-red-500' : ''}`}
-                    placeholder="请输入用户名"
-                    required={authMode === 'register' || loginMethod === 'legacy'}
-                  />
-                  {usernameError ? <p className="mt-1 text-sm text-red-600">{usernameError}</p> : null}
-                </div>
-              ) : null}
-
-              {authMode === 'register' || loginMethod === 'password' ? (
-                <div>
-                  <label className="mb-1 block text-sm font-medium text-gray-700">邮箱地址</label>
-                  <input
-                    type="email"
-                    value={authForm.email}
-                    onChange={(e) => {
-                      const value = e.target.value;
-                      setAuthForm((prev) => ({ ...prev, email: value }));
-                      validateEmail(value);
-                    }}
-                    className={`input-field ${emailError ? 'border-red-300 focus:border-red-500' : ''}`}
-                    placeholder="请输入邮箱地址"
-                    required={authMode === 'register' || loginMethod === 'password'}
-                  />
-                  {emailError ? <p className="mt-1 text-sm text-red-600">{emailError}</p> : null}
-                </div>
-              ) : null}
-
-              {authMode === 'register' || loginMethod === 'password' ? (
-                <div>
-                  <label className="mb-1 block text-sm font-medium text-gray-700">密码</label>
-                  <input
-                    type="password"
-                    value={authForm.password}
-                    onChange={(e) => {
-                      const value = e.target.value;
-                      setAuthForm((prev) => ({ ...prev, password: value }));
-                    }}
-                    className={`input-field ${passwordError ? 'border-red-300 focus:border-red-500' : ''}`}
-                    placeholder={authMode === 'register' ? '设置登录密码（可留空走旧版密钥注册）' : '请输入密码'}
-                    required={loginMethod === 'password' && authMode === 'login'}
-                    minLength={authMode === 'register' ? 0 : 8}
-                  />
-                </div>
-              ) : null}
-
-              {authMode === 'register' ? (
-                <div>
-                  <label className="mb-1 block text-sm font-medium text-gray-700">确认密码</label>
-                  <input
-                    type="password"
-                    value={authForm.confirmPassword}
-                    onChange={(e) => {
-                      const value = e.target.value;
-                      setAuthForm((prev) => ({ ...prev, confirmPassword: value }));
-                    }}
-                    className={`input-field ${passwordError ? 'border-red-300 focus:border-red-500' : ''}`}
-                    placeholder="再次输入密码（可留空）"
-                  />
-                  {passwordError ? <p className="mt-1 text-sm text-red-600">{passwordError}</p> : null}
-                  <p className="mt-1 text-xs text-gray-500">填写密码将使用新账号体系；留空则兼容旧版密钥注册。</p>
-                </div>
-              ) : null}
-
-              {authMode === 'login' && loginMethod === 'legacy' ? (
-                <div>
-                  <label className="mb-1 block text-sm font-medium text-gray-700">登录密钥</label>
-                  <input
-                    value={authForm.authKey}
-                    type="password"
-                    onChange={(e) => setAuthForm((prev) => ({ ...prev, authKey: e.target.value }))}
-                    className="input-field"
-                    placeholder="请输入您的登录密钥"
-                    required
-                  />
-                </div>
-              ) : null}
-
-              <div>
-                <label className="mb-2 block text-sm font-medium text-gray-700">安全验证</label>
-                <TurnstileWidget ref={turnstileRef} onVerify={handleTurnstileVerify} />
-              </div>
-
+        <form onSubmit={handleSubmit} className="space-y-4">
+          {authMode === 'login' ? (
+            <div className="grid grid-cols-2 gap-2 rounded-md bg-gray-100 p-1">
               <button
-                type="submit"
-                disabled={!canSubmit}
-                className={`generate-button w-full ${!canSubmit ? 'cursor-not-allowed opacity-50' : ''}`}
+                type="button"
+                onClick={() => switchLoginMethod('password')}
+                className={`rounded px-2 py-2 text-sm font-medium ${
+                  loginMethod === 'password' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600'
+                }`}
               >
-                {isSubmitting ? '验证中...' : authMode === 'login' ? '登录' : '注册'}
+                密码登录
               </button>
-            </form>
+              <button
+                type="button"
+                onClick={() => switchLoginMethod('legacy')}
+                className={`rounded px-2 py-2 text-sm font-medium ${
+                  loginMethod === 'legacy' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600'
+                }`}
+              >
+                旧密钥登录
+              </button>
+            </div>
+          ) : null}
 
-            <div className="mt-2 text-center text-sm text-gray-600">
-              {authMode === 'login' ? '还没有账号？' : '已有账号？'}
-              <button onClick={switchMode} className="ml-1 font-medium text-purple-600 hover:text-purple-700">
-                {authMode === 'login' ? '去注册' : '去登录'}
-              </button>
+          {authMode === 'register' || loginMethod === 'legacy' ? (
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700">用户名</label>
+              <input
+                type="text"
+                value={authForm.username}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  setAuthForm((prev) => ({ ...prev, username: value }));
+                  if (authMode === 'register') {
+                    void validateUsername(value);
+                  } else {
+                    setUsernameError('');
+                  }
+                }}
+                className={`input-field ${usernameError ? 'border-red-300 focus:border-red-500' : ''}`}
+                placeholder="请输入用户名"
+                required={authMode === 'register' || loginMethod === 'legacy'}
+              />
+              {usernameError ? <p className="mt-1 text-sm text-red-600">{usernameError}</p> : null}
             </div>
-            <div className="mt-2 text-center text-sm text-gray-600">
-              <Link href="/password-recovery" className="font-medium text-purple-600 hover:text-purple-700">
-                找回密钥
-              </Link>
+          ) : null}
+
+          {authMode === 'register' || loginMethod === 'password' ? (
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700">
+                {authMode === 'register' ? '邮箱地址' : '登录标识（邮箱 / 用户名 / ID）'}
+              </label>
+              <input
+                type={authMode === 'register' ? 'email' : 'text'}
+                value={authForm.identifier}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  setAuthForm((prev) => ({ ...prev, identifier: value }));
+                  if (authMode === 'register') {
+                    validateEmail(value);
+                  } else {
+                    setIdentifierError('');
+                  }
+                }}
+                className={`input-field ${identifierError ? 'border-red-300 focus:border-red-500' : ''}`}
+                placeholder={authMode === 'register' ? '请输入邮箱地址' : '请输入邮箱、用户名或用户 ID'}
+                required
+              />
+              {identifierError ? <p className="mt-1 text-sm text-red-600">{identifierError}</p> : null}
             </div>
-          </>
-        )}
+          ) : null}
+
+          {authMode === 'register' || loginMethod === 'password' ? (
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700">密码</label>
+              <input
+                type="password"
+                value={authForm.password}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  setAuthForm((prev) => ({ ...prev, password: value }));
+                }}
+                className={`input-field ${passwordError ? 'border-red-300 focus:border-red-500' : ''}`}
+                placeholder={authMode === 'register' ? '设置登录密码' : '请输入密码'}
+                required
+                minLength={PASSWORD_MIN_LENGTH}
+              />
+            </div>
+          ) : null}
+
+          {authMode === 'register' ? (
+            <div>
+              <div className="rounded-md border border-gray-200 bg-gray-50 p-3">
+                <div className="flex items-center justify-between text-xs text-gray-600">
+                  <span>密码强度</span>
+                  <span>
+                    {getPasswordStrengthLabel(passwordStrength.level)}（{passwordStrength.score}/{passwordStrength.maxScore}）
+                  </span>
+                </div>
+                <div className="mt-2 h-2 rounded-full bg-gray-200">
+                  <div
+                    className={`h-full rounded-full transition-all ${getStrengthBarClassName(passwordStrength.score)}`}
+                    style={{ width: `${passwordStrengthPercent}%` }}
+                  />
+                </div>
+                <div className="mt-2 grid grid-cols-2 gap-1 text-xs text-gray-600">
+                  <span>{passwordStrength.hasLowercase ? '✓' : '○'} 小写字母</span>
+                  <span>{passwordStrength.hasUppercase ? '✓' : '○'} 大写字母</span>
+                  <span>{passwordStrength.hasDigit ? '✓' : '○'} 数字</span>
+                  <span>{passwordStrength.hasSymbol ? '✓' : '○'} 符号</span>
+                </div>
+              </div>
+
+              <label className="mb-1 mt-3 block text-sm font-medium text-gray-700">确认密码</label>
+              <input
+                type="password"
+                value={authForm.confirmPassword}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  setAuthForm((prev) => ({ ...prev, confirmPassword: value }));
+                }}
+                className={`input-field ${passwordError ? 'border-red-300 focus:border-red-500' : ''}`}
+                placeholder="再次输入密码"
+                required
+                minLength={PASSWORD_MIN_LENGTH}
+              />
+              {passwordError ? <p className="mt-1 text-sm text-red-600">{passwordError}</p> : null}
+              <p className="mt-1 text-xs text-gray-500">
+                密码至少 {PASSWORD_MIN_LENGTH} 位，且需包含大写/小写/数字/符号中的至少 3 类。
+              </p>
+            </div>
+          ) : null}
+
+          {authMode === 'login' && loginMethod === 'legacy' ? (
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700">登录密钥</label>
+              <input
+                value={authForm.authKey}
+                type="password"
+                onChange={(e) => setAuthForm((prev) => ({ ...prev, authKey: e.target.value }))}
+                className="input-field"
+                placeholder="请输入您的登录密钥"
+                required
+              />
+            </div>
+          ) : null}
+
+          <div>
+            <label className="mb-2 block text-sm font-medium text-gray-700">安全验证</label>
+            <TurnstileWidget ref={turnstileRef} onVerify={setTurnstileToken} />
+          </div>
+
+          <button
+            type="submit"
+            disabled={!canSubmit}
+            className={`generate-button w-full ${!canSubmit ? 'cursor-not-allowed opacity-50' : ''}`}
+          >
+            {isSubmitting ? '验证中...' : authMode === 'login' ? '登录' : '注册'}
+          </button>
+        </form>
+
+        <div className="mt-2 text-center text-sm text-gray-600">
+          {authMode === 'login' ? '还没有账号？' : '已有账号？'}
+          <button onClick={switchMode} className="ml-1 font-medium text-purple-600 hover:text-purple-700">
+            {authMode === 'login' ? '去注册' : '去登录'}
+          </button>
+        </div>
+        <div className="mt-2 text-center text-sm text-gray-600">
+          <Link href="/password-recovery" className="font-medium text-purple-600 hover:text-purple-700">
+            找回密钥
+          </Link>
+        </div>
       </div>
     </div>
   );
