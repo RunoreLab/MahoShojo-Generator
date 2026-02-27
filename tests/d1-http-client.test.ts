@@ -52,10 +52,13 @@ describe('db/d1-http-client', () => {
               result: [
                 {
                   success: true,
-                  results: [
-                    [11, 'season_s0_hana', 'S0花牌', '在公测赛季（S0）中，任意角色严格排位达到「花牌」及以上段位。'],
-                    [12, 'season_s0_veteran', 'S0历战', '在公测赛季（S0）中，任意角色自由排位对局数超过 100 场。'],
-                  ],
+                  results: {
+                    columns: ['ub_id', 'badge_id', 'badge_name', 'badge_description'],
+                    rows: [
+                      [11, 'season_s0_hana', 'S0花牌', '在公测赛季（S0）中，任意角色严格排位达到「花牌」及以上段位。'],
+                      [12, 'season_s0_veteran', 'S0历战', '在公测赛季（S0）中，任意角色自由排位对局数超过 100 场。'],
+                    ],
+                  },
                   meta: { duration: 2 },
                 },
               ],
@@ -104,7 +107,17 @@ describe('db/d1-http-client', () => {
         .bind(42)
         .raw();
 
+      const rawRowsWithColumns = await client
+        .prepare('SELECT ub.id, b.id, b.name, b.description FROM user_badges ub JOIN badges b ON ub.badge_id = b.id')
+        .bind(42)
+        .raw({ columnNames: true });
+
       expect(rawRows).toEqual([
+        [11, 'season_s0_hana', 'S0花牌', '在公测赛季（S0）中，任意角色严格排位达到「花牌」及以上段位。'],
+        [12, 'season_s0_veteran', 'S0历战', '在公测赛季（S0）中，任意角色自由排位对局数超过 100 场。'],
+      ]);
+      expect(rawRowsWithColumns).toEqual([
+        ['ub_id', 'badge_id', 'badge_name', 'badge_description'],
         [11, 'season_s0_hana', 'S0花牌', '在公测赛季（S0）中，任意角色严格排位达到「花牌」及以上段位。'],
         [12, 'season_s0_veteran', 'S0历战', '在公测赛季（S0）中，任意角色自由排位对局数超过 100 场。'],
       ]);
@@ -116,7 +129,7 @@ describe('db/d1-http-client', () => {
         meta: { duration: 1 },
       });
 
-      expect(calls.raw).toHaveLength(1);
+      expect(calls.raw).toHaveLength(2);
       expect(calls.query).toHaveLength(1);
       expect(calls.raw[0]).toEqual({
         sql: 'SELECT ub.id, b.id, b.name, b.description FROM user_badges ub JOIN badges b ON ub.badge_id = b.id',

@@ -64,7 +64,8 @@ const normalizeRows = (value: unknown): D1LikeRow[] => {
 };
 
 const normalizeRawRows = (value: unknown): unknown[][] => {
-  const rows = asArray(value);
+  const root = asObject(value);
+  const rows = root ? asArray(root.rows) : asArray(value);
   const out: unknown[][] = [];
 
   for (const row of rows) {
@@ -83,7 +84,15 @@ const normalizeRawRows = (value: unknown): unknown[][] => {
 };
 
 const inferColumnNames = (value: unknown): string[] => {
-  const rows = asArray(value);
+  const root = asObject(value);
+  const columns = root ? asArray(root.columns) : [];
+  if (columns.length > 0) {
+    return columns
+      .map((item) => (typeof item === 'string' ? item : String(item)))
+      .filter((item) => item.length > 0);
+  }
+
+  const rows = root ? asArray(root.rows) : asArray(value);
   if (rows.length === 0) return [];
 
   const firstRowObj = asObject(rows[0]);
