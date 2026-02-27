@@ -3,6 +3,7 @@ import { recordAuthAuditLog } from '@/lib/auth/auth-audit';
 import {
   appendSetCookieHeaders,
   extractErrorMessage,
+  getBetterAuthBridgeAvailability,
   invokeBetterAuthJsonEndpoint,
   readJsonSafely,
 } from '@/lib/auth/better-auth-bridge';
@@ -85,8 +86,10 @@ const parsePasswordIdentifier = (
 };
 
 type LoginDeps = {
+  recordAuthAuditLog: typeof recordAuthAuditLog;
   issueActivityToken: typeof issueActivityToken;
   appendSetCookieHeaders: typeof appendSetCookieHeaders;
+  getBetterAuthBridgeAvailability: typeof getBetterAuthBridgeAvailability;
   extractErrorMessage: typeof extractErrorMessage;
   invokeBetterAuthJsonEndpoint: typeof invokeBetterAuthJsonEndpoint;
   readJsonSafely: typeof readJsonSafely;
@@ -100,8 +103,10 @@ type LoginDeps = {
 };
 
 const defaultLoginDeps: LoginDeps = {
+  recordAuthAuditLog,
   issueActivityToken,
   appendSetCookieHeaders,
+  getBetterAuthBridgeAvailability,
   extractErrorMessage,
   invokeBetterAuthJsonEndpoint,
   readJsonSafely,
@@ -143,7 +148,7 @@ const buildLoginHandler = (deps: LoginDeps): ((req: Request) => Promise<Response
   const loginWithLegacyAuthKey = async (req: Request, username: string, authKey: string): Promise<Response> => {
     const user = await deps.verifyUserLogin(username, authKey);
     if (!user) {
-      await recordAuthAuditLog({
+      await deps.recordAuthAuditLog({
         req,
         eventType: 'login_failed',
         authSource: 'legacy',
@@ -154,7 +159,7 @@ const buildLoginHandler = (deps: LoginDeps): ((req: Request) => Promise<Response
     }
 
     const activityToken = await deps.issueActivityToken(user.id);
-    await recordAuthAuditLog({
+    await deps.recordAuthAuditLog({
       req,
       eventType: 'login_success',
       authSource: 'legacy',
@@ -192,7 +197,7 @@ const buildLoginHandler = (deps: LoginDeps): ((req: Request) => Promise<Response
     });
 
     if (!bridge.ok) {
-      await recordAuthAuditLog({
+      await deps.recordAuthAuditLog({
         req,
         eventType: 'login_failed',
         authSource: 'better-auth',
@@ -212,7 +217,7 @@ const buildLoginHandler = (deps: LoginDeps): ((req: Request) => Promise<Response
     const payload = await deps.readJsonSafely<BetterAuthSignInPayload>(bridge.response);
     if (!bridge.response.ok) {
       const upstreamMessage = deps.extractErrorMessage(payload, '邮箱或密码错误');
-      await recordAuthAuditLog({
+      await deps.recordAuthAuditLog({
         req,
         eventType: 'login_failed',
         authSource: 'better-auth',
@@ -230,7 +235,7 @@ const buildLoginHandler = (deps: LoginDeps): ((req: Request) => Promise<Response
 
     const authUserId = toNonEmptyString(payload?.user?.id);
     if (!authUserId) {
-      await recordAuthAuditLog({
+      await deps.recordAuthAuditLog({
         req,
         eventType: 'login_failed',
         authSource: 'better-auth',
@@ -250,7 +255,7 @@ const buildLoginHandler = (deps: LoginDeps): ((req: Request) => Promise<Response
     }
 
     if (!businessUser) {
-      await recordAuthAuditLog({
+      await deps.recordAuthAuditLog({
         req,
         eventType: 'login_failed',
         authSource: 'better-auth',
@@ -263,7 +268,7 @@ const buildLoginHandler = (deps: LoginDeps): ((req: Request) => Promise<Response
 
     const businessUserWithAuthKey = await deps.ensureBusinessUserLegacyAuthKey(businessUser);
     if (!businessUserWithAuthKey) {
-      await recordAuthAuditLog({
+      await deps.recordAuthAuditLog({
         req,
         eventType: 'login_failed',
         authSource: 'better-auth',
@@ -280,7 +285,7 @@ const buildLoginHandler = (deps: LoginDeps): ((req: Request) => Promise<Response
     const headers = new Headers();
     deps.appendSetCookieHeaders(headers, bridge.response.headers);
 
-    await recordAuthAuditLog({
+    await deps.recordAuthAuditLog({
       req,
       eventType: 'login_success',
       authSource: 'better-auth',
@@ -318,7 +323,7 @@ const buildLoginHandler = (deps: LoginDeps): ((req: Request) => Promise<Response
       const auditSource = toAuditSource(mode);
 
       if (!turnstileToken || !identifier || !credential) {
-        await recordAuthAuditLog({
+        await deps.recordAuthAuditLog({
           req,
           eventType: 'login_failed',
           authSource: auditSource,
@@ -327,9 +332,29 @@ const buildLoginHandler = (deps: LoginDeps): ((req: Request) => Promise<Response
         return json({ error: '登录信息和安全验证不能为空' }, 400);
       }
 
+      if (mode === 'password') {
+        const availability = deps.getBetterAuthBridgeAvailability();
+        if (!availability.available) {
+          await deps.recordAuthAuditLog({
+            req,
+            eventType: 'login_failed',
+            authSource: 'better-auth',
+            resultCode: 'BRIDGE_UNAVAILABLE',
+            resultMessage: availability.code,
+          });
+          return json(
+            {
+              error: '密码登录当前不可用，请改用旧版密钥登录。',
+              code: availability.code,
+            },
+            503,
+          );
+        }
+      }
+
       const isTurnstileValid = await deps.verifyTurnstileToken(turnstileToken);
       if (!isTurnstileValid) {
-        await recordAuthAuditLog({
+        await deps.recordAuthAuditLog({
           req,
           eventType: 'login_failed',
           authSource: auditSource,
@@ -345,7 +370,7 @@ const buildLoginHandler = (deps: LoginDeps): ((req: Request) => Promise<Response
       const parsedIdentifier = parsePasswordIdentifier(identifier);
       const email = await resolveEmailByIdentifier(parsedIdentifier);
       if (!email) {
-        await recordAuthAuditLog({
+        await deps.recordAuthAuditLog({
           req,
           eventType: 'login_failed',
           authSource: 'better-auth',
@@ -358,7 +383,7 @@ const buildLoginHandler = (deps: LoginDeps): ((req: Request) => Promise<Response
       return loginWithBetterAuthPassword(req, email, credential, parsedIdentifier.type);
     } catch (error) {
       console.error('Login error:', error);
-      await recordAuthAuditLog({
+      await deps.recordAuthAuditLog({
         req,
         eventType: 'login_failed',
         authSource: 'unknown',

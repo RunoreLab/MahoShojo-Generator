@@ -374,8 +374,10 @@ const buildAuthHarness = async () => {
   };
 
   const registerPost = routes.createRegisterHandler({
+    recordAuthAuditLog: async () => {},
     issueActivityToken,
     appendSetCookieHeaders,
+    getBetterAuthBridgeAvailability: () => ({ available: true as const }),
     extractErrorMessage,
     invokeBetterAuthJsonEndpoint,
     readJsonSafely,
@@ -411,8 +413,10 @@ const buildAuthHarness = async () => {
   });
 
   const loginPost = routes.createLoginHandler({
+    recordAuthAuditLog: async () => {},
     issueActivityToken,
     appendSetCookieHeaders,
+    getBetterAuthBridgeAvailability: () => ({ available: true as const }),
     extractErrorMessage,
     invokeBetterAuthJsonEndpoint,
     readJsonSafely,

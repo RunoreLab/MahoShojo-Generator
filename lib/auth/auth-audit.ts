@@ -1,5 +1,5 @@
 import { anonymizeIp, getClientIpFromHeaders } from '@/lib/arena/battle-report-log-utils';
-import { createDrizzleDb, getRuntimeD1Client } from '@/lib/db/drizzle';
+import { createDrizzleDb, getRuntimeD1ClientWithoutHttpFallback } from '@/lib/db/drizzle';
 import { createAuthAuditLog } from '@/lib/db/repositories/auth-audit-logs';
 
 export type AuthAuditSource = 'better-auth' | 'legacy' | 'mixed' | 'unknown';
@@ -97,7 +97,7 @@ const toJsonString = (value: Record<string, unknown> | null | undefined): string
 };
 
 export const recordAuthAuditLog = async (input: RecordAuthAuditLogInput): Promise<void> => {
-  const runtimeClient = getRuntimeD1Client();
+  const runtimeClient = getRuntimeD1ClientWithoutHttpFallback();
   if (!runtimeClient) return;
 
   if (!(await ensureAuthAuditTableReady(runtimeClient))) return;

@@ -75,7 +75,22 @@ const readD1FromHttpEnv = (): DrizzleD1Client | null => {
 };
 
 export const getRuntimeD1Client = (): DrizzleD1Client | null => {
-  return readD1FromCloudflareContext() ?? readD1FromGlobal() ?? readD1FromHttpEnv();
+  return getRuntimeD1ClientWithOptions();
+};
+
+type RuntimeD1ClientOptions = {
+  allowHttpFallback?: boolean;
+};
+
+const getRuntimeD1ClientWithOptions = (options: RuntimeD1ClientOptions = {}): DrizzleD1Client | null => {
+  const boundClient = readD1FromCloudflareContext() ?? readD1FromGlobal();
+  if (boundClient) return boundClient;
+  if (options.allowHttpFallback === false) return null;
+  return readD1FromHttpEnv();
+};
+
+export const getRuntimeD1ClientWithoutHttpFallback = (): DrizzleD1Client | null => {
+  return getRuntimeD1ClientWithOptions({ allowHttpFallback: false });
 };
 
 export const getDrizzleDbFromRuntime = (): AppDrizzleDb | null => {

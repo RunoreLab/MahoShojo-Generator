@@ -3,6 +3,7 @@ import { recordAuthAuditLog } from '@/lib/auth/auth-audit';
 import {
   appendSetCookieHeaders,
   extractErrorMessage,
+  getBetterAuthBridgeAvailability,
   invokeBetterAuthJsonEndpoint,
   readJsonSafely,
 } from '@/lib/auth/better-auth-bridge';
@@ -62,8 +63,10 @@ const isValidEmail = (email: string): boolean => {
 };
 
 type RegisterDeps = {
+  recordAuthAuditLog: typeof recordAuthAuditLog;
   issueActivityToken: typeof issueActivityToken;
   appendSetCookieHeaders: typeof appendSetCookieHeaders;
+  getBetterAuthBridgeAvailability: typeof getBetterAuthBridgeAvailability;
   extractErrorMessage: typeof extractErrorMessage;
   invokeBetterAuthJsonEndpoint: typeof invokeBetterAuthJsonEndpoint;
   readJsonSafely: typeof readJsonSafely;
@@ -81,8 +84,10 @@ type RegisterDeps = {
 };
 
 const defaultRegisterDeps: RegisterDeps = {
+  recordAuthAuditLog,
   issueActivityToken,
   appendSetCookieHeaders,
+  getBetterAuthBridgeAvailability,
   extractErrorMessage,
   invokeBetterAuthJsonEndpoint,
   readJsonSafely,
@@ -110,7 +115,7 @@ const buildRegisterHandler = (deps: RegisterDeps): ((req: Request) => Promise<Re
 
     const existingUserByName = db ? await deps.getBusinessUserByUsername(db, username) : await deps.getUserByUsername(username);
     if (existingUserByName) {
-      await recordAuthAuditLog({
+      await deps.recordAuthAuditLog({
         req,
         eventType: 'register_failed',
         authSource: 'better-auth',
@@ -122,7 +127,7 @@ const buildRegisterHandler = (deps: RegisterDeps): ((req: Request) => Promise<Re
 
     const existingUserByEmail = db ? await deps.getBusinessUserByEmail(db, email) : await deps.getUserByEmail(email);
     if (existingUserByEmail) {
-      await recordAuthAuditLog({
+      await deps.recordAuthAuditLog({
         req,
         eventType: 'register_failed',
         authSource: 'better-auth',
@@ -144,7 +149,7 @@ const buildRegisterHandler = (deps: RegisterDeps): ((req: Request) => Promise<Re
     });
 
     if (!bridge.ok) {
-      await recordAuthAuditLog({
+      await deps.recordAuthAuditLog({
         req,
         eventType: 'register_failed',
         authSource: 'better-auth',
@@ -162,7 +167,7 @@ const buildRegisterHandler = (deps: RegisterDeps): ((req: Request) => Promise<Re
 
     const payload = await deps.readJsonSafely<BetterAuthSignUpPayload>(bridge.response);
     if (!bridge.response.ok) {
-      await recordAuthAuditLog({
+      await deps.recordAuthAuditLog({
         req,
         eventType: 'register_failed',
         authSource: 'better-auth',
@@ -179,7 +184,7 @@ const buildRegisterHandler = (deps: RegisterDeps): ((req: Request) => Promise<Re
 
     const authUserId = toNonEmptyString(payload?.user?.id);
     if (!authUserId) {
-      await recordAuthAuditLog({
+      await deps.recordAuthAuditLog({
         req,
         eventType: 'register_failed',
         authSource: 'better-auth',
@@ -198,7 +203,7 @@ const buildRegisterHandler = (deps: RegisterDeps): ((req: Request) => Promise<Re
     }
 
     if (!businessUser) {
-      await recordAuthAuditLog({
+      await deps.recordAuthAuditLog({
         req,
         eventType: 'register_failed',
         authSource: 'better-auth',
@@ -210,7 +215,7 @@ const buildRegisterHandler = (deps: RegisterDeps): ((req: Request) => Promise<Re
 
     const businessUserWithAuthKey = await deps.ensureBusinessUserLegacyAuthKey(businessUser);
     if (!businessUserWithAuthKey) {
-      await recordAuthAuditLog({
+      await deps.recordAuthAuditLog({
         req,
         eventType: 'register_failed',
         authSource: 'better-auth',
@@ -234,7 +239,7 @@ const buildRegisterHandler = (deps: RegisterDeps): ((req: Request) => Promise<Re
     const headers = new Headers();
     deps.appendSetCookieHeaders(headers, bridge.response.headers);
 
-    await recordAuthAuditLog({
+    await deps.recordAuthAuditLog({
       req,
       eventType: 'register_success',
       authSource: 'better-auth',
@@ -274,7 +279,7 @@ const buildRegisterHandler = (deps: RegisterDeps): ((req: Request) => Promise<Re
       const turnstileToken = toNonEmptyString(payload.turnstileToken);
 
       if (!username || !emailInput || !password || !turnstileToken) {
-        await recordAuthAuditLog({
+        await deps.recordAuthAuditLog({
           req,
           eventType: 'register_failed',
           authSource: 'better-auth',
@@ -285,19 +290,8 @@ const buildRegisterHandler = (deps: RegisterDeps): ((req: Request) => Promise<Re
 
       const normalizedEmail = normalizeEmail(emailInput);
 
-      const isTurnstileValid = await deps.verifyTurnstileToken(turnstileToken);
-      if (!isTurnstileValid) {
-        await recordAuthAuditLog({
-          req,
-          eventType: 'register_failed',
-          authSource: 'better-auth',
-          resultCode: 'TURNSTILE_FAILED',
-        });
-        return json({ error: '安全验证失败，请重新验证' }, 400);
-      }
-
       if (username.length < 2 || username.length > 20) {
-        await recordAuthAuditLog({
+        await deps.recordAuthAuditLog({
           req,
           eventType: 'register_failed',
           authSource: 'better-auth',
@@ -308,7 +302,7 @@ const buildRegisterHandler = (deps: RegisterDeps): ((req: Request) => Promise<Re
       }
 
       if (!isValidEmail(normalizedEmail)) {
-        await recordAuthAuditLog({
+        await deps.recordAuthAuditLog({
           req,
           eventType: 'register_failed',
           authSource: 'better-auth',
@@ -323,7 +317,7 @@ const buildRegisterHandler = (deps: RegisterDeps): ((req: Request) => Promise<Re
         email: normalizedEmail,
       });
       if (!passwordPolicy.ok) {
-        await recordAuthAuditLog({
+        await deps.recordAuthAuditLog({
           req,
           eventType: 'register_failed',
           authSource: 'better-auth',
@@ -334,10 +328,39 @@ const buildRegisterHandler = (deps: RegisterDeps): ((req: Request) => Promise<Re
         return json({ error: getPasswordPolicySummaryMessage(passwordPolicy.issues) || '密码强度不足' }, 400);
       }
 
+      const availability = deps.getBetterAuthBridgeAvailability();
+      if (!availability.available) {
+        await deps.recordAuthAuditLog({
+          req,
+          eventType: 'register_failed',
+          authSource: 'better-auth',
+          resultCode: 'BRIDGE_UNAVAILABLE',
+          resultMessage: availability.code,
+        });
+        return json(
+          {
+            error: '密码注册当前不可用，请稍后重试。',
+            code: availability.code,
+          },
+          503,
+        );
+      }
+
+      const isTurnstileValid = await deps.verifyTurnstileToken(turnstileToken);
+      if (!isTurnstileValid) {
+        await deps.recordAuthAuditLog({
+          req,
+          eventType: 'register_failed',
+          authSource: 'better-auth',
+          resultCode: 'TURNSTILE_FAILED',
+        });
+        return json({ error: '安全验证失败，请重新验证' }, 400);
+      }
+
       try {
         const sensitiveCheck = await deps.quickCheck(username);
         if (sensitiveCheck.hasSensitiveWords) {
-          await recordAuthAuditLog({
+          await deps.recordAuthAuditLog({
             req,
             eventType: 'register_failed',
             authSource: 'better-auth',
@@ -353,7 +376,7 @@ const buildRegisterHandler = (deps: RegisterDeps): ((req: Request) => Promise<Re
       return registerWithBetterAuth(req, username, normalizedEmail, password);
     } catch (error) {
       console.error('Registration error:', error);
-      await recordAuthAuditLog({
+      await deps.recordAuthAuditLog({
         req,
         eventType: 'register_failed',
         authSource: 'better-auth',

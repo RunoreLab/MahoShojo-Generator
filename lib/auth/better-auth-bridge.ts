@@ -12,6 +12,10 @@ export type BetterAuthBridgeResult =
   | { ok: true; response: Response }
   | { ok: false; code: BetterAuthBridgeUnavailableCode; message: string };
 
+export type BetterAuthBridgeAvailability =
+  | { available: true }
+  | { available: false; code: BetterAuthBridgeUnavailableCode; message: string };
+
 const DEFAULT_BETTER_AUTH_BASE_URL = 'http://localhost:3000';
 
 const resolveBetterAuthBaseURL = (): string => {
@@ -31,17 +35,13 @@ export const invokeBetterAuthJsonEndpoint = async (input: {
   body: unknown;
   sourceHeaders: Headers;
 }): Promise<BetterAuthBridgeResult> => {
-  const status = getBetterAuthBootstrapStatus();
-  if (status === 'disabled') {
-    return { ok: false, code: 'BETTER_AUTH_DISABLED', message: 'Better Auth 尚未启用' };
-  }
-
-  if (status === 'misconfigured') {
-    return { ok: false, code: 'BETTER_AUTH_MISCONFIGURED', message: 'Better Auth 配置不完整' };
-  }
-
-  if (!hasBetterAuthDatabaseBinding()) {
-    return { ok: false, code: 'BETTER_AUTH_DB_UNAVAILABLE', message: 'Better Auth 所需 D1 绑定不可用' };
+  const availability = getBetterAuthBridgeAvailability();
+  if (!availability.available) {
+    return {
+      ok: false,
+      code: availability.code,
+      message: availability.message,
+    };
   }
 
   const auth = getBetterAuthInstance();
@@ -80,6 +80,32 @@ export const invokeBetterAuthJsonEndpoint = async (input: {
     });
     return { ok: false, code: 'BETTER_AUTH_INIT_FAILED', message: 'Better Auth 请求执行失败' };
   }
+};
+
+export const getBetterAuthBridgeAvailability = (): BetterAuthBridgeAvailability => {
+  const status = getBetterAuthBootstrapStatus();
+  if (status === 'disabled') {
+    return { available: false, code: 'BETTER_AUTH_DISABLED', message: 'Better Auth 尚未启用' };
+  }
+
+  if (status === 'misconfigured') {
+    return { available: false, code: 'BETTER_AUTH_MISCONFIGURED', message: 'Better Auth 配置不完整' };
+  }
+
+  if (!hasBetterAuthDatabaseBinding()) {
+    return {
+      available: false,
+      code: 'BETTER_AUTH_DB_UNAVAILABLE',
+      message: 'Better Auth 所需 D1 绑定不可用',
+    };
+  }
+
+  const auth = getBetterAuthInstance();
+  if (!auth) {
+    return { available: false, code: 'BETTER_AUTH_INIT_FAILED', message: 'Better Auth 初始化失败' };
+  }
+
+  return { available: true };
 };
 
 export { appendSetCookieHeaders };
