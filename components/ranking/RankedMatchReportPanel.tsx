@@ -71,7 +71,6 @@ const formatIneligibleReasons = (reasons: string[]): string => {
     'ranked-match-unrankable': '参战者未登记为数据卡/预设',
     'ranked-match-user-mismatch': '排位匹配票据与账号不匹配',
     'language-not-zh-cn': '需简体中文',
-    'level-not-default': '等级非默认',
     'has-user-guidance': '存在故事引导',
     'season-user-guidance-missing': '缺少赛季故事引导',
     'season-user-guidance-mismatch': '故事引导不符合赛季规则',

@@ -150,7 +150,6 @@ const buildStrictIneligibleReasons = (snapshot: ArenaEligibilitySnapshot, combat
   if ((snapshot.mode ?? '').trim() !== requiredMode) reasons.push(requiredMode === 'classic' ? 'mode-not-classic' : 'mode-not-season');
   if (snapshot.userId == null) reasons.push('need-login');
   if ((snapshot.language ?? '').trim() !== 'zh-CN') reasons.push('language-not-zh-cn');
-  if (typeof snapshot.selectedLevel === 'string' && snapshot.selectedLevel.trim()) reasons.push('level-not-default');
   if (!isNewStrictPolicy && rankedMatchOk !== true) {
     if (rankedMatchReason) {
       const map: Record<string, string> = {

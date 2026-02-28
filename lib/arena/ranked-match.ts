@@ -22,7 +22,6 @@ export interface RankedMatchTicketV1 {
   opponent: RankedMatchEntity;
   config: {
     mode: 'classic';
-    selectedLevel: string | null;
     language: string | null;
     storyLength: string | null;
   };
@@ -66,9 +65,6 @@ const parseRankedMatchTicketV1 = (value: unknown): RankedMatchTicketV1 | null =>
   if (!isRankedMatchEntity(anyValue.opponent)) return null;
   if (!anyValue.config || typeof anyValue.config !== 'object') return null;
   if (anyValue.config.mode !== 'classic') return null;
-  if ('selectedLevel' in anyValue.config && anyValue.config.selectedLevel !== null && typeof anyValue.config.selectedLevel !== 'string') {
-    return null;
-  }
   if ('language' in anyValue.config && anyValue.config.language !== null && typeof anyValue.config.language !== 'string') {
     return null;
   }
@@ -89,7 +85,6 @@ export async function issueRankedMatchTicket(input: {
   player: RankedMatchEntity;
   opponent: RankedMatchEntity;
   mode: 'classic';
-  selectedLevel: string | null;
   language: string | null;
   storyLength: string | null;
   expiresInMs: number;
@@ -115,7 +110,6 @@ export async function issueRankedMatchTicket(input: {
     opponent: { entityType: input.opponent.entityType, entityId: input.opponent.entityId.trim() },
     config: {
       mode: input.mode,
-      selectedLevel: normalizeOptionalString(input.selectedLevel),
       language: normalizeOptionalString(input.language),
       storyLength: normalizeOptionalString(input.storyLength),
     },
@@ -172,7 +166,6 @@ export async function validateRankedMatchTicketForRequest(input: {
   userId: number | null;
   combatants: unknown;
   mode: unknown;
-  selectedLevel: unknown;
   language: unknown;
   storyLength: unknown;
   nowMs?: number;
@@ -273,16 +266,13 @@ export async function validateRankedMatchTicketForRequest(input: {
     };
   }
 
-  const normalizedSelectedLevel = normalizeOptionalString(input.selectedLevel);
   const normalizedLanguage = normalizeOptionalString(input.language);
   const normalizedStoryLength = normalizeOptionalString(input.storyLength);
 
-  const expectedSelectedLevel = normalizeOptionalString(ticket.config.selectedLevel);
   const expectedLanguage = normalizeOptionalString(ticket.config.language);
   const expectedStoryLength = normalizeOptionalString(ticket.config.storyLength);
 
   if (
-    normalizedSelectedLevel !== expectedSelectedLevel ||
     normalizedLanguage !== expectedLanguage ||
     normalizedStoryLength !== expectedStoryLength
   ) {
@@ -369,4 +359,3 @@ export const buildRankedMatchExtraJson = (result: RankedMatchValidationResult): 
     rankedMatchReason: result.ok ? null : result.reason,
   };
 };
-

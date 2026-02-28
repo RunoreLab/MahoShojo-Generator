@@ -181,7 +181,6 @@ export interface BattleStoreState {
   streamUpdateMetaDebug: StreamUpdateMetaDebug | null;
   latestAiImpacts: BattleAiImpact[] | null;
   storyLength: StoryLengthOption;
-  selectedLevel: string;
   selectedLanguage: string;
   /** 最近一次生成战报的 generationId（用于排位结算展示）。 */
   lastGenerationId: string | null;
@@ -213,7 +212,6 @@ export interface BattleStoreState {
   setStreamUpdateMetaDebug: (debug: StreamUpdateMetaDebug | null) => void;
   setLatestAiImpacts: (impacts: BattleAiImpact[] | null) => void;
   setStoryLength: (length: StoryLengthOption) => void;
-  setSelectedLevel: (level: string) => void;
   setSelectedLanguage: (language: string) => void;
   setLastGenerationId: (generationId: string | null) => void;
   updateSettings: (settings: Partial<BattleSettings>) => void;

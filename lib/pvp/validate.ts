@@ -236,8 +236,6 @@ export const parsePvpRules = (input: unknown): { rules: PvpRoomRules } | { error
   const generationMode =
     generationModeRaw === 'stream' || generationModeRaw === 'non-stream' ? (generationModeRaw as any) : DEFAULT_PVP_RULES.generationMode;
 
-  const selectedLevel = DEFAULT_PVP_RULES.selectedLevel;
-
   const userGuidanceRaw = typeof raw.userGuidance === 'string' ? raw.userGuidance : DEFAULT_PVP_RULES.userGuidance;
   const userGuidance = userGuidanceRaw.trim().slice(0, 200);
 
@@ -275,7 +273,6 @@ export const parsePvpRules = (input: unknown): { rules: PvpRoomRules } | { error
     readCurrentState,
     writeCurrentState,
     generationMode,
-    selectedLevel,
     userGuidance,
     storyLength,
     language,

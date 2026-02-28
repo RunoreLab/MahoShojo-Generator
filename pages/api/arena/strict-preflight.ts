@@ -132,7 +132,6 @@ export default async function handler(req: NextRequest) {
     const db = getDrizzleDbFromRuntime();
 
     const battleMode = trimString(body?.battleMode ?? body?.mode);
-    const selectedLevel = readString(body?.selectedLevel);
     const language = trimString(body?.language);
     const scenarioEnabled = readBoolean(body?.scenarioEnabled);
     const scenarioFileName = trimString(body?.scenarioFileName);
@@ -171,7 +170,6 @@ export default async function handler(req: NextRequest) {
     }
     if (!Array.isArray(combatants) || combatants.length !== 2) reasons.push('combatant-count-not-2');
     if (trimString(language) !== 'zh-CN') reasons.push('language-not-zh-cn');
-    if (trimString(selectedLevel)) reasons.push('level-not-default');
 
     const actualStoryGuidance = normalizeStrictStoryGuidance(userGuidance);
     if (seasonStrictRules.storyGuidance) {

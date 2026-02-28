@@ -646,9 +646,6 @@ export const isStrictEligible = (snapshot: ArenaEligibilitySnapshot, combatants:
   // 严格排位：语言必须为简体中文（zh-CN）。
   if ((snapshot.language ?? '').trim() !== 'zh-CN') return false;
 
-  // 严格排位：等级必须为默认/未指定（selected_level 为空或 NULL）。
-  if (typeof snapshot.selectedLevel === 'string' && snapshot.selectedLevel.trim()) return false;
-
   const requiredStoryGuidance = readExtraJsonString(snapshot.extraJson, 'seasonStoryGuidance');
   if (requiredStoryGuidance) {
     const actual = typeof snapshot.userGuidancePreview === 'string' ? snapshot.userGuidancePreview.trim() : '';

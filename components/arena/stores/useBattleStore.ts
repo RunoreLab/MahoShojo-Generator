@@ -71,7 +71,6 @@ export const useBattleStore = create<BattleStoreState>()(
       streamUpdateMetaDebug: null,
       latestAiImpacts: null,
       storyLength: 'default',
-      selectedLevel: '',
       selectedLanguage: 'zh-CN',
       lastGenerationId: null,
       settings: defaultSettings,
@@ -102,7 +101,6 @@ export const useBattleStore = create<BattleStoreState>()(
       setStreamUpdateMetaDebug: (debug) => set({ streamUpdateMetaDebug: debug }),
       setLatestAiImpacts: (impacts) => set({ latestAiImpacts: impacts }),
       setStoryLength: (storyLength) => set({ storyLength }),
-      setSelectedLevel: (selectedLevel) => set({ selectedLevel }),
       setSelectedLanguage: (selectedLanguage) => set({ selectedLanguage }),
       setLastGenerationId: (lastGenerationId) => set({ lastGenerationId }),
       updateSettings: (incoming) =>
@@ -340,7 +338,6 @@ export const useBattleStore = create<BattleStoreState>()(
         if ((persistedState as any)?.settings && typeof (persistedState as any).settings === 'object') {
           merged.settings = { ...currentState.settings, ...(persistedState as any).settings };
         }
-        merged.selectedLevel = '';
         return merged;
       },
       partialize: (state) => ({

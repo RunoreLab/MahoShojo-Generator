@@ -142,7 +142,6 @@ async function handler(req: NextRequest): Promise<Response> {
 	    // 用于在异常/提前返回时补齐 battle_report_generations 记录（避免“失败/敏感词拦截没有记录”）。
 	    let snapshotMode: string = 'classic';
 	    let snapshotLanguage: string | null = null;
-	    let snapshotSelectedLevel: string | null = null;
 	    let snapshotStoryLength: string | null = null;
 	    let snapshotPvpRoomId: string | null = null;
         let snapshotPvpMatchId: string | null = null;
@@ -216,7 +215,6 @@ async function handler(req: NextRequest): Promise<Response> {
 
 		        snapshotMode = typeof mode === 'string' ? mode : 'classic';
 		        snapshotLanguage = normalizeOptionalString(language);
-		        snapshotSelectedLevel = null;
 		        snapshotStoryLength = normalizeOptionalString(storyLength);
 
           const parsePvpContext = (value: unknown): { roomId: string; matchId: string; roundId: string } | null => {
@@ -490,7 +488,7 @@ async function handler(req: NextRequest): Promise<Response> {
 	                            scenarioDataCardId: typeof scenarioSourceDataCardId === 'string' ? scenarioSourceDataCardId : null,
 	                            scenarioDataCardUpdatedAt: typeof scenarioSourceDataCardUpdatedAt === 'string' ? scenarioSourceDataCardUpdatedAt : null,
 	                            language: snapshotLanguage,
-	                            selectedLevel: snapshotSelectedLevel,
+	                            selectedLevel: null,
 	                            storyLength: snapshotStoryLength,
 	                            pvpRoomId: snapshotPvpRoomId,
 	                            pvpMatchId: snapshotPvpMatchId,
@@ -1558,7 +1556,7 @@ async function handler(req: NextRequest): Promise<Response> {
 	                    userPrefix: user?.prefix ?? null,
 	                    mode: snapshotMode,
 	                    language: snapshotLanguage,
-	                    selectedLevel: snapshotSelectedLevel,
+	                    selectedLevel: null,
 	                    storyLength: snapshotStoryLength,
 	                    pvpRoomId: snapshotPvpRoomId,
 	                    pvpMatchId: snapshotPvpMatchId,

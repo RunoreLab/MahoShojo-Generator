@@ -140,7 +140,7 @@ describe('arena-ratings: 严格排位资格判定', () => {
 
   const baseCombatants: BattleReportGenerationCombatantRow[] = [buildCombatant('甲', null), buildCombatant('乙', null)];
 
-  test('满足：默认等级 + 不读叙事/历战/状态 + 简体中文', () => {
+  test('满足：不读叙事/历战/状态 + 简体中文', () => {
     expect(isStrictEligible(baseSnapshot, baseCombatants)).toBe(true);
   });
 
@@ -286,10 +286,6 @@ describe('arena-ratings: 严格排位资格判定', () => {
 
   test('不满足：语言非简体中文', () => {
     expect(isStrictEligible({ ...baseSnapshot, language: 'en' }, baseCombatants)).toBe(false);
-  });
-
-  test('不满足：等级非默认', () => {
-    expect(isStrictEligible({ ...baseSnapshot, selectedLevel: '花级' }, baseCombatants)).toBe(false);
   });
 
   test('不满足：extra_json 缺失 readNarrativeHistory（宁可漏算）', () => {

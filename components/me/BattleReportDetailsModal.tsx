@@ -30,7 +30,6 @@ type DetailResponse = {
     mode: string;
     scenarioTitle: string | null;
     language: string | null;
-    selectedLevel: string | null;
     storyLength: string | null;
     headline: string | null;
     winner: string | null;

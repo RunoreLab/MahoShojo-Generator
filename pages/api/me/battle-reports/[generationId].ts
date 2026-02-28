@@ -62,7 +62,6 @@ export default async function handler(req: Request): Promise<Response> {
       mode: record.mode,
       scenarioTitle: record.scenario_title,
       language: record.language,
-      selectedLevel: record.selected_level,
       storyLength: record.story_length,
       headline: record.headline,
       winner: record.winner,
@@ -88,4 +87,3 @@ export default async function handler(req: Request): Promise<Response> {
     })),
   });
 }
-

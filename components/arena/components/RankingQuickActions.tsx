@@ -78,7 +78,6 @@ const buildStrictSetupMissingReasons = (input: {
   scenarioFileName: string | null;
   rankableCombatants: CombatantData[];
   userGuidance: string;
-  selectedLevel: string;
   selectedLanguage: string;
   readArenaHistory: boolean;
   readCurrentState: boolean;
@@ -96,7 +95,6 @@ const buildStrictSetupMissingReasons = (input: {
   if (!input.isAuthenticated) reasons.push('需要先登录');
   if (input.battleMode !== input.requiredMode) reasons.push(`模式需为「${formatBattleModeLabel(input.requiredMode)}」`);
   if (input.rankableCombatants.length <= 0) reasons.push('需先选择 1 位可计分的参战角色（数据卡/预设）');
-  if (input.selectedLevel.trim()) reasons.push('等级需为「默认」');
   if (input.selectedLanguage !== 'zh-CN') reasons.push('生成语言需为「简体中文」');
 
   const actualStoryGuidance = normalizeStrictStoryGuidance(input.userGuidance);
@@ -198,7 +196,6 @@ const formatStrictReason = (code: string): string => {
     'dedup-user-pair': '短时间同一对手重复对局（严格去重）',
     'strict-check-failed': '严格计分检查失败（已降级为不计）',
     'language-not-zh-cn': '生成语言需为「简体中文」',
-    'level-not-default': '等级需为「默认」',
     'has-user-guidance': '需清空「故事引导」',
     'season-user-guidance-missing': '需填写赛季指定「故事引导」',
     'season-user-guidance-mismatch': '「故事引导」与赛季规则不一致',
@@ -241,8 +238,6 @@ export function RankingQuickActions() {
 
   const battleMode = useBattleSelector((state) => state.battleMode);
   const setBattleMode = useBattleSelector((state) => state.setBattleMode);
-  const selectedLevel = useBattleSelector((state) => state.selectedLevel);
-  const setSelectedLevel = useBattleSelector((state) => state.setSelectedLevel);
   const selectedLanguage = useBattleSelector((state) => state.selectedLanguage);
   const setSelectedLanguage = useBattleSelector((state) => state.setSelectedLanguage);
   const arenaFreeRankingEnabled = useBattleSelector((state) => state.arenaFreeRankingEnabled);
@@ -323,7 +318,6 @@ export function RankingQuickActions() {
         scenarioFileName: typeof scenario.fileName === 'string' ? scenario.fileName : null,
         rankableCombatants,
         userGuidance: settings.userGuidance,
-        selectedLevel,
         selectedLanguage,
         readArenaHistory: settings.readArenaHistory,
         readCurrentState: settings.readCurrentState,
@@ -348,7 +342,6 @@ export function RankingQuickActions() {
       scenario.content,
       scenario.fileName,
       selectedLanguage,
-      selectedLevel,
       seasonStrictRules.mode,
       seasonStrictRules.questionnaireLoreAllowed,
       seasonStrictRules.questionnaireLorePresetIds,
@@ -406,7 +399,6 @@ export function RankingQuickActions() {
     }
 
     setBattleMode(seasonStrictRules.mode);
-    setSelectedLevel('');
     setSelectedLanguage('zh-CN');
     updateSettings({
       userGuidance: seasonStrictRules.storyGuidance ? seasonStrictRules.storyGuidance : '',
@@ -580,7 +572,7 @@ export function RankingQuickActions() {
     }
 
     setError(
-      `✅ 已应用严格排位设置：${formatBattleModeLabel(seasonStrictRules.mode)}模式 / 默认等级 / 简体中文 / ${
+      `✅ 已应用严格排位设置：${formatBattleModeLabel(seasonStrictRules.mode)}模式 / 简体中文 / ${
         seasonStrictRules.storyGuidance ? '应用赛季故事引导' : '清空引导'
       } / 关闭读取 / 清空判定与行动引导${
         seasonRuleMessage ? ` / ${seasonRuleMessage}` : ''
@@ -605,7 +597,6 @@ export function RankingQuickActions() {
 
     return {
       battleMode,
-      selectedLevel,
       language: selectedLanguage,
       storyLength,
       scenarioEnabled: battleMode === 'scenario' && Boolean(scenario.content),
@@ -633,7 +624,6 @@ export function RankingQuickActions() {
     scenario.content,
     scenario.fileName,
     selectedLanguage,
-    selectedLevel,
     questionnaireLoreEnabled,
     questionnaireLoreIds,
     settings.readArenaHistory,
@@ -652,7 +642,6 @@ export function RankingQuickActions() {
     }
     if (combatants.length !== 2) reasons.push('combatant-count-not-2');
     if (selectedLanguage !== 'zh-CN') reasons.push('language-not-zh-cn');
-    if (selectedLevel.trim()) reasons.push('level-not-default');
 
     const actualStoryGuidance = normalizeStrictStoryGuidance(settings.userGuidance);
     if (seasonStrictRules.storyGuidance) {
@@ -716,7 +705,6 @@ export function RankingQuickActions() {
     scenario.content,
     scenario.fileName,
     selectedLanguage,
-    selectedLevel,
     questionnaireLoreEnabled,
     questionnaireLoreIds,
     seasonStrictRules.mode,
