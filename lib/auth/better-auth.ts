@@ -3,19 +3,9 @@ const BETTER_AUTH_SESSION_COOKIE_KEYS = [
   'better-auth.session_token',
 ] as const;
 
-export type BetterAuthBootstrapStatus = 'disabled' | 'misconfigured' | 'ready';
-
-const isTruthy = (value: string | undefined): boolean => {
-  if (!value) return false;
-  const normalized = value.trim().toLowerCase();
-  return normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on';
-};
-
-export const isBetterAuthEnabled = (): boolean => isTruthy(process.env.BETTER_AUTH_ENABLED);
+export type BetterAuthBootstrapStatus = 'misconfigured' | 'ready';
 
 export const getBetterAuthBootstrapStatus = (): BetterAuthBootstrapStatus => {
-  if (!isBetterAuthEnabled()) return 'disabled';
-
   const secret = process.env.BETTER_AUTH_SECRET?.trim() ?? '';
   if (!secret) return 'misconfigured';
 

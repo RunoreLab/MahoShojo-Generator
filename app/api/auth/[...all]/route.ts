@@ -14,16 +14,6 @@ const json = (payload: unknown, status = 200): Response =>
 const notReady = (): Response => {
   const status = getBetterAuthBootstrapStatus();
 
-  if (status === 'disabled') {
-    return json(
-      {
-        error: 'Better Auth 尚未启用',
-        code: 'BETTER_AUTH_DISABLED',
-      },
-      503,
-    );
-  }
-
   if (status === 'misconfigured') {
     return json(
       {

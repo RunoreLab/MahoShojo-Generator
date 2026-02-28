@@ -26,8 +26,7 @@
 - `wrangler.toml` 已配置 `env.production.d1_databases`，且 `check:wrangler:d1` 通过。
 - `.env` 已配置生产 D1 访问所需凭据项（`CLOUDFLARE_API_TOKEN`、`CLOUDFLARE_ACCOUNT_ID`、`D1_DATABASE_ID`）。
 - `.env` 中 `D1_DATABASE_ID` 与 `wrangler.toml` 的 production `database_id` 一致。
-- `.env` 当前**缺少** Better Auth 开关与关键变量：
-  - `BETTER_AUTH_ENABLED`
+- `.env` 当前**缺少** Better Auth 关键变量：
   - `BETTER_AUTH_SECRET`
   - `BETTER_AUTH_URL`
   - `BETTER_AUTH_TRUSTED_ORIGINS`
@@ -63,8 +62,7 @@
 
 #### 必填项（生产）
 
-1. Better Auth 开关与密钥：
-   - `BETTER_AUTH_ENABLED=true`
+1. Better Auth 密钥：
    - `BETTER_AUTH_SECRET=<长度至少 32 的随机字符串>`
 2. Better Auth 站点地址：
    - `BETTER_AUTH_URL=https://mahoshojo.colanns.me`
@@ -93,22 +91,20 @@
 
 #### 易错项（本次回归已命中）
 
-1. `BETTER_AUTH_ENABLED` 必须是 `true`（不要写成 `ture`）。
-2. `BETTER_AUTH_URL` 必须与实际访问域名一致且带 `https://`。
-3. `BETTER_AUTH_TRUSTED_ORIGINS` 必须覆盖实际前端来源，否则会出现 Cookie/会话异常。
-4. Turnstile 的 Site Key 与 Secret Key 必须同一套环境（生产/测试不可混用）。
+1. `BETTER_AUTH_URL` 必须与实际访问域名一致且带 `https://`。
+2. `BETTER_AUTH_TRUSTED_ORIGINS` 必须覆盖实际前端来源，否则会出现 Cookie/会话异常。
+3. Turnstile 的 Site Key 与 Secret Key 必须同一套环境（生产/测试不可混用）。
 
 #### 最小验收（生产域名）
 
-1. `POST https://mahoshojo.colanns.me/api/auth/register` 不再返回 `BETTER_AUTH_DISABLED / BETTER_AUTH_MISCONFIGURED / BETTER_AUTH_DB_UNAVAILABLE`。
+1. `POST https://mahoshojo.colanns.me/api/auth/register` 不再返回 `BETTER_AUTH_MISCONFIGURED / BETTER_AUTH_DB_UNAVAILABLE`。
 2. `POST https://mahoshojo.colanns.me/api/auth/login`（`mode=password`）可返回 `200` 并携带 `Set-Cookie: better-auth.session_token=...`。
 3. 携带该 Cookie 调用 `POST https://mahoshojo.colanns.me/api/auth/verify` 返回 `200` 且包含 `user.id`。
 
 ---
 
 1. 确认上线窗口与回滚负责人（代码 + 数据库双负责人）。
-2. 在 Cloudflare 生产环境设置/复核以下变量（若要启用 Better Auth）：
-   - `BETTER_AUTH_ENABLED=true`
+2. 在 Cloudflare 生产环境设置/复核以下 Better Auth 变量：
    - `BETTER_AUTH_SECRET=<长度足够的随机密钥>`
    - `BETTER_AUTH_URL=https://<生产域名>`
    - `BETTER_AUTH_TRUSTED_ORIGINS=https://<生产域名>[,https://<其他可信源>]`

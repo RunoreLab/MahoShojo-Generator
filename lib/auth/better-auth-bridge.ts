@@ -3,7 +3,6 @@ import { getBetterAuthInstance, hasBetterAuthDatabaseBinding } from '@/lib/auth/
 import { appendSetCookieHeaders } from '@/lib/auth/set-cookie';
 
 export type BetterAuthBridgeUnavailableCode =
-  | 'BETTER_AUTH_DISABLED'
   | 'BETTER_AUTH_MISCONFIGURED'
   | 'BETTER_AUTH_DB_UNAVAILABLE'
   | 'BETTER_AUTH_INIT_FAILED';
@@ -84,10 +83,6 @@ export const invokeBetterAuthJsonEndpoint = async (input: {
 
 export const getBetterAuthBridgeAvailability = (): BetterAuthBridgeAvailability => {
   const status = getBetterAuthBootstrapStatus();
-  if (status === 'disabled') {
-    return { available: false, code: 'BETTER_AUTH_DISABLED', message: 'Better Auth 尚未启用' };
-  }
-
   if (status === 'misconfigured') {
     return { available: false, code: 'BETTER_AUTH_MISCONFIGURED', message: 'Better Auth 配置不完整' };
   }
