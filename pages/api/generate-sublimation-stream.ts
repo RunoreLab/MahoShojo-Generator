@@ -12,6 +12,7 @@ import { createReasoningSseBridge, shouldUseClientSse } from '@/lib/stream/reaso
 import { recordUserActivityFromRequest } from '@/lib/user-activity/record';
 
 const log = getLogger('api-gen-sublimation-stream');
+const SUBLIMATION_USER_GUIDANCE_MAX_CHARS = 200;
 
 export const config = {
   runtime: 'edge',
@@ -144,7 +145,9 @@ async function handler(req: NextRequest): Promise<Response> {
     } = body ?? {};
     delete (originalCharacterData as any).questionnaireSelections;
 
-    const finalUserGuidance = typeof userGuidance === 'string' ? userGuidance.trim().slice(0, 4000) : '';
+    const finalUserGuidance = typeof userGuidance === 'string'
+      ? userGuidance.trim().slice(0, SUBLIMATION_USER_GUIDANCE_MAX_CHARS)
+      : '';
     const finalNarrativeHistory = typeof narrativeHistory === 'string' ? narrativeHistory.trim().slice(0, 8000) : '';
     const requestQuestionnaires = normalizeQuestionnaires(rawQuestionnaires);
     const loreText = buildQuestionnaireLoreText(requestQuestionnaires).trim();

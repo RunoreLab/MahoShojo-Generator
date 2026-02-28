@@ -27,6 +27,7 @@ import {
 import { GENERAL_CHARACTER_TEMPLATE_ID } from '@/lib/schemas/general-character';
 
 const log = getLogger('api-gen-sublimation');
+const SUBLIMATION_USER_GUIDANCE_MAX_CHARS = 200;
 
 export const config = {
   runtime: 'edge',
@@ -691,7 +692,9 @@ async function handler(req: NextRequest): Promise<Response> {
 	    const resolvedReadCurrentState = typeof readCurrentState === 'boolean' ? readCurrentState : true;
 	    const resolvedWriteCurrentState = typeof writeCurrentState === 'boolean' ? writeCurrentState : true;
 	    const resolvedAllowReshapeNames = typeof allowReshapeNames === 'boolean' ? allowReshapeNames : false;
-	    const normalizedUserGuidance = typeof userGuidance === 'string' ? userGuidance.trim() : '';
+	    const normalizedUserGuidance = typeof userGuidance === 'string'
+	      ? userGuidance.trim().slice(0, SUBLIMATION_USER_GUIDANCE_MAX_CHARS)
+	      : '';
 	    const finalUserGuidance = normalizedUserGuidance ? normalizedUserGuidance : null;
 	    const normalizedNarrativeHistory = typeof narrativeHistory === 'string' ? narrativeHistory.trim() : '';
 	    const finalNarrativeHistory = normalizedNarrativeHistory ? normalizedNarrativeHistory : null;

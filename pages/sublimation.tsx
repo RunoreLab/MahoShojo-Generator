@@ -190,6 +190,7 @@ const getDefaultTargetTemplate = (source: InferableTemplate): SupportedTargetTem
 
 const SUBLIMATION_STATE_PREF_KEY = 'sublimation-history-state-preferences-v1';
 const SUBLIMATION_PREFERENCE_KEY = 'mahoshojo.sublimation.preferences.v1';
+const SUBLIMATION_USER_GUIDANCE_MAX_CHARS = 200;
 
 
 const SublimationPage: React.FC = () => {
@@ -1546,8 +1547,8 @@ const SublimationPage: React.FC = () => {
                                     value={userGuidance}
                                     onChange={(e) => setUserGuidance(e.target.value)}
                                     className="input-field flex-1 min-w-[12rem]"
-                                    placeholder="输入关键词或一句话 (最多30字)"
-                                    maxLength={30}
+                                    placeholder={`输入关键词或一句话 (最多${SUBLIMATION_USER_GUIDANCE_MAX_CHARS}字)`}
+                                    maxLength={SUBLIMATION_USER_GUIDANCE_MAX_CHARS}
                                     autoComplete="new-password"
                                     autoCorrect="off"
                                     autoCapitalize="off"
