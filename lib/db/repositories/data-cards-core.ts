@@ -267,6 +267,10 @@ export const insertDataCard = async (
     data: input.data,
     isPublic: sql`${input.isPublic}`,
     publicSince: input.isPublic === 1 ? sql`CURRENT_TIMESTAMP` : null,
+    usageCount: 0,
+    likeCount: 0,
+    favoriteCount: 0,
+    isRecommended: false,
     createdAt: sql`CURRENT_TIMESTAMP`,
     updatedAt: sql`CURRENT_TIMESTAMP`,
   };
@@ -293,12 +297,23 @@ export const listUserDataCards = async (
     .set({
       createdAt: sql`COALESCE(${dataCards.createdAt}, ${dataCards.updatedAt}, CURRENT_TIMESTAMP)`,
       updatedAt: sql`COALESCE(${dataCards.updatedAt}, ${dataCards.createdAt}, CURRENT_TIMESTAMP)`,
+      usageCount: sql`COALESCE(${dataCards.usageCount}, 0)`,
+      likeCount: sql`COALESCE(${dataCards.likeCount}, 0)`,
+      favoriteCount: sql`COALESCE(${dataCards.favoriteCount}, 0)`,
+      isRecommended: sql`COALESCE(${dataCards.isRecommended}, 0)`,
     })
     .where(
       and(
         eq(dataCards.userId, input.userId),
         isNull(dataCards.deletedAt),
-        or(isNull(dataCards.createdAt), isNull(dataCards.updatedAt)),
+        or(
+          isNull(dataCards.createdAt),
+          isNull(dataCards.updatedAt),
+          isNull(dataCards.usageCount),
+          isNull(dataCards.likeCount),
+          isNull(dataCards.favoriteCount),
+          isNull(dataCards.isRecommended),
+        ),
       ),
     );
 
