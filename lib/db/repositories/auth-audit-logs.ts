@@ -1,3 +1,4 @@
+import { and, desc, eq, gte, sql } from 'drizzle-orm';
 import { randomUUID } from '@/lib/crypto';
 import type { AppDrizzleDb } from '@/lib/db/drizzle';
 import { authAuditLogs } from '@/lib/db/schema';
@@ -63,4 +64,140 @@ export const createAuthAuditLog = async (
   });
 
   return { id };
+};
+
+export type CountAuthAuditSuccessInput = {
+  eventType: string;
+  sinceEpochSeconds: number;
+  businessUserId?: number | null;
+  authUserId?: string | null;
+  ipAnonymized?: string | null;
+};
+
+export type GetLatestAuthAuditSuccessEpochInput = {
+  eventType: string;
+  businessUserId?: number | null;
+  authUserId?: string | null;
+  ipAnonymized?: string | null;
+};
+
+const toSafeInteger = (value: unknown): number => {
+  if (typeof value === 'number' && Number.isFinite(value)) return Math.max(0, Math.floor(value));
+  if (typeof value === 'string') {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return Math.max(0, Math.floor(parsed));
+  }
+  return 0;
+};
+
+const toSafeEpochSeconds = (value: unknown): number | null => {
+  if (typeof value === 'number' && Number.isFinite(value) && value >= 0) return Math.floor(value);
+  if (typeof value === 'string') {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed) && parsed >= 0) return Math.floor(parsed);
+  }
+  return null;
+};
+
+const normalizeOptionalPositiveInteger = (value: unknown): number | null => {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value)) return null;
+  if (value <= 0) return null;
+  return value;
+};
+
+const normalizeOptionalNonEmptyString = (value: unknown, maxLength = 128): string | null => {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  if (trimmed.length <= maxLength) return trimmed;
+  return trimmed.slice(0, maxLength);
+};
+
+const buildAuthAuditSuccessWhereClause = (input: {
+  eventType: string;
+  businessUserId?: number | null;
+  authUserId?: string | null;
+  ipAnonymized?: string | null;
+  sinceEpochSeconds?: number | null;
+}) => {
+  const eventType = normalizeOptionalNonEmptyString(input.eventType, 64);
+  if (!eventType) return null;
+
+  const conditions = [
+    eq(authAuditLogs.eventType, eventType),
+    eq(authAuditLogs.resultCode, 'SUCCESS'),
+  ] as Array<ReturnType<typeof eq> | ReturnType<typeof gte>>;
+
+  const businessUserId = normalizeOptionalPositiveInteger(input.businessUserId);
+  if (businessUserId !== null) {
+    conditions.push(eq(authAuditLogs.businessUserId, businessUserId));
+  }
+
+  const authUserId = normalizeOptionalNonEmptyString(input.authUserId, 128);
+  if (authUserId) {
+    conditions.push(eq(authAuditLogs.authUserId, authUserId));
+  }
+
+  const ipAnonymized = normalizeOptionalNonEmptyString(input.ipAnonymized, 128);
+  if (ipAnonymized) {
+    conditions.push(eq(authAuditLogs.ipAnonymized, ipAnonymized));
+  }
+
+  const sinceEpochSeconds = toSafeEpochSeconds(input.sinceEpochSeconds);
+  if (sinceEpochSeconds !== null) {
+    conditions.push(gte(authAuditLogs.createdAt, sinceEpochSeconds));
+  }
+
+  return and(...conditions);
+};
+
+export const countAuthAuditSuccessSince = async (
+  db: AppDrizzleDb,
+  input: CountAuthAuditSuccessInput,
+): Promise<number> => {
+  const whereClause = buildAuthAuditSuccessWhereClause({
+    eventType: input.eventType,
+    businessUserId: input.businessUserId,
+    authUserId: input.authUserId,
+    ipAnonymized: input.ipAnonymized,
+    sinceEpochSeconds: input.sinceEpochSeconds,
+  });
+
+  if (!whereClause) return 0;
+
+  const rows = await db
+    .select({
+      count: sql<number>`count(*)`,
+    })
+    .from(authAuditLogs)
+    .where(whereClause)
+    .limit(1);
+
+  return toSafeInteger(rows[0]?.count);
+};
+
+export const getLatestAuthAuditSuccessEpoch = async (
+  db: AppDrizzleDb,
+  input: GetLatestAuthAuditSuccessEpochInput,
+): Promise<number | null> => {
+  const whereClause = buildAuthAuditSuccessWhereClause({
+    eventType: input.eventType,
+    businessUserId: input.businessUserId,
+    authUserId: input.authUserId,
+    ipAnonymized: input.ipAnonymized,
+  });
+
+  if (!whereClause) return null;
+
+  const rows = await db
+    .select({
+      createdAt: authAuditLogs.createdAt,
+    })
+    .from(authAuditLogs)
+    .where(whereClause)
+    .orderBy(desc(authAuditLogs.createdAt))
+    .limit(1);
+
+  const latest = rows[0]?.createdAt;
+  return toSafeEpochSeconds(latest);
 };

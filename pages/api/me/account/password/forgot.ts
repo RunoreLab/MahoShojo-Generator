@@ -4,6 +4,7 @@ import {
   invokeBetterAuthSubrequest,
   readJsonSafely,
 } from '@/lib/auth/better-auth-subrequest';
+import { guardMailSendByAudit } from '@/lib/auth/mail-send-guard';
 import { recordAuthAuditLog } from '@/lib/auth/auth-audit';
 import { getDrizzleDbFromRuntime } from '@/lib/db/drizzle';
 import { getBusinessUserById } from '@/lib/db/repositories/business-users';
@@ -71,6 +72,51 @@ export default withPvpErrorBoundary(async function handler(req: Request): Promis
       resultCode: 'AUTH_LINK_MISSING',
     });
     return json({ error: '当前账号尚未完成新版映射，请先在账号安全设置中设置登录密码' }, { status: 409 });
+  }
+
+  const guard = await guardMailSendByAudit({
+    db,
+    req,
+    eventType: 'password_reset_request',
+    businessUserId: auth.user.id,
+    authUserId: authLink.authUserId,
+    minIntervalSeconds: 60,
+    maxPerUserWindow: {
+      windowSeconds: 30 * 60,
+      max: 3,
+    },
+    maxPerIpWindow: {
+      windowSeconds: 30 * 60,
+      max: 10,
+    },
+  });
+  if (!guard.allowed) {
+    await recordAuthAuditLog({
+      req,
+      eventType: 'password_reset_request',
+      authSource: auditSource,
+      businessUserId: auth.user.id,
+      authUserId: authLink.authUserId,
+      identifierType: 'email',
+      resultCode: 'RATE_LIMITED',
+      resultMessage: `reason=${guard.reason}`,
+      metadata: {
+        retryAfterSeconds: guard.retryAfterSeconds,
+      },
+    });
+
+    const headers = new Headers({
+      'Retry-After': String(Math.max(1, guard.retryAfterSeconds)),
+    });
+    return json(
+      {
+        error: `请求过于频繁，请在 ${Math.max(1, guard.retryAfterSeconds)} 秒后重试`,
+      },
+      {
+        status: 429,
+        headers,
+      },
+    );
   }
 
   const requestUrl = new URL(req.url);

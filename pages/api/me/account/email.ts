@@ -4,6 +4,7 @@ import {
   invokeBetterAuthSubrequest,
   readJsonSafely,
 } from '@/lib/auth/better-auth-subrequest';
+import { guardMailSendByAudit } from '@/lib/auth/mail-send-guard';
 import { recordAuthAuditLog } from '@/lib/auth/auth-audit';
 import { getDrizzleDbFromRuntime } from '@/lib/db/drizzle';
 import { getBusinessUserById, updateBusinessUserEmailById } from '@/lib/db/repositories/business-users';
@@ -95,6 +96,49 @@ export default withPvpErrorBoundary(async function handler(req: Request): Promis
       resultCode: 'EMAIL_SAME',
     });
     return json({ error: '新邮箱不能与当前邮箱相同' }, { status: 400 });
+  }
+
+  const guard = await guardMailSendByAudit({
+    db,
+    req,
+    eventType: 'email_change',
+    businessUserId: auth.user.id,
+    minIntervalSeconds: 30,
+    maxPerUserWindow: {
+      windowSeconds: 30 * 60,
+      max: 3,
+    },
+    maxPerIpWindow: {
+      windowSeconds: 30 * 60,
+      max: 12,
+    },
+  });
+  if (!guard.allowed) {
+    await recordAuthAuditLog({
+      req,
+      eventType: 'email_change',
+      authSource: auditSource,
+      businessUserId: auth.user.id,
+      identifierType: 'email',
+      resultCode: 'RATE_LIMITED',
+      resultMessage: `reason=${guard.reason}`,
+      metadata: {
+        retryAfterSeconds: guard.retryAfterSeconds,
+      },
+    });
+
+    const headers = new Headers({
+      'Retry-After': String(Math.max(1, guard.retryAfterSeconds)),
+    });
+    return json(
+      {
+        error: `请求过于频繁，请在 ${Math.max(1, guard.retryAfterSeconds)} 秒后重试`,
+      },
+      {
+        status: 429,
+        headers,
+      },
+    );
   }
 
   const requestUrl = new URL(req.url);

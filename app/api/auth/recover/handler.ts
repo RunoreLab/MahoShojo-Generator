@@ -1,4 +1,6 @@
 import { generateRecoveryToken, hashRecoveryToken, RECOVERY_TOKEN_TTL_SECONDS } from '@/lib/auth/recovery-token';
+import { guardMailSendByAudit } from '@/lib/auth/mail-send-guard';
+import { recordAuthAuditLog } from '@/lib/auth/auth-audit';
 import { getDrizzleDbFromRuntime } from '@/lib/db/drizzle';
 import { getBusinessUserByUsername } from '@/lib/db/repositories/business-users';
 import {
@@ -11,6 +13,7 @@ import { verifyTurnstileToken } from '@/lib/turnstile';
 export const runtime = 'edge';
 
 const GENERIC_MESSAGE = '如果您输入的信息正确，系统会向邮箱发送一次性重置链接，请在 15 分钟内完成重置。';
+const LEGACY_RECOVERY_EVENT_TYPE = 'legacy_password_recovery_request';
 
 const toNonEmptyString = (value: unknown): string | null => {
   if (typeof value !== 'string') return null;
@@ -113,6 +116,13 @@ const buildRecoverHandler = (deps: RecoverDeps): ((req: Request) => Promise<Resp
 
     const { username, email, turnstileToken } = payload;
     if (!username || !email || !turnstileToken) {
+      await recordAuthAuditLog({
+        req,
+        eventType: LEGACY_RECOVERY_EVENT_TYPE,
+        authSource: 'legacy',
+        identifierType: 'username',
+        resultCode: 'INVALID_PAYLOAD',
+      });
       return new Response(JSON.stringify({ success: false, error: '用户名、邮箱和验证码均不能为空' }), {
         status: 400,
         headers: { 'Content-Type': 'application/json' },
@@ -121,6 +131,13 @@ const buildRecoverHandler = (deps: RecoverDeps): ((req: Request) => Promise<Resp
 
     const isTurnstileValid = await deps.verifyTurnstileToken(turnstileToken);
     if (!isTurnstileValid) {
+      await recordAuthAuditLog({
+        req,
+        eventType: LEGACY_RECOVERY_EVENT_TYPE,
+        authSource: 'legacy',
+        identifierType: 'username',
+        resultCode: 'TURNSTILE_INVALID',
+      });
       return new Response(JSON.stringify({ success: false, error: '安全验证失败，请重新验证' }), {
         status: 400,
         headers: { 'Content-Type': 'application/json' },
@@ -146,9 +163,51 @@ const buildRecoverHandler = (deps: RecoverDeps): ((req: Request) => Promise<Resp
       const safeUsername = toNonEmptyString(legacyUser?.username) ?? normalizedUsername;
 
       if (userId && storedEmail === normalizedEmail) {
+        const guard = await guardMailSendByAudit({
+          db,
+          req,
+          eventType: LEGACY_RECOVERY_EVENT_TYPE,
+          businessUserId: userId,
+          minIntervalSeconds: 60,
+          maxPerUserWindow: {
+            windowSeconds: 30 * 60,
+            max: 3,
+          },
+          maxPerIpWindow: {
+            windowSeconds: 30 * 60,
+            max: 12,
+          },
+        });
+        if (!guard.allowed) {
+          await recordAuthAuditLog({
+            req,
+            eventType: LEGACY_RECOVERY_EVENT_TYPE,
+            authSource: 'legacy',
+            businessUserId: userId,
+            identifierType: 'email',
+            resultCode: 'RATE_LIMITED',
+            resultMessage: `reason=${guard.reason}`,
+            metadata: {
+              retryAfterSeconds: guard.retryAfterSeconds,
+            },
+          });
+          return new Response(JSON.stringify({ success: true, message: GENERIC_MESSAGE }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+
         const apiKey = deps.getResendApiKey()?.trim();
         if (!apiKey) {
           console.error('RESEND_API_KEY is not configured.');
+          await recordAuthAuditLog({
+            req,
+            eventType: LEGACY_RECOVERY_EVENT_TYPE,
+            authSource: 'legacy',
+            businessUserId: userId,
+            identifierType: 'email',
+            resultCode: 'MAIL_PROVIDER_MISCONFIGURED',
+          });
         } else {
           const rawToken = deps.generateRecoveryToken();
           const tokenHash = await deps.hashRecoveryToken(rawToken);
@@ -165,6 +224,14 @@ const buildRecoverHandler = (deps: RecoverDeps): ((req: Request) => Promise<Resp
 
           if (!tokenRow) {
             console.error('Create password reset token failed:', { userId });
+            await recordAuthAuditLog({
+              req,
+              eventType: LEGACY_RECOVERY_EVENT_TYPE,
+              authSource: 'legacy',
+              businessUserId: userId,
+              identifierType: 'email',
+              resultCode: 'TOKEN_CREATE_FAILED',
+            });
           } else {
             const requestUrl = new URL(req.url);
             const resetUrl = new URL('/password-recovery', requestUrl.origin);
@@ -180,9 +247,34 @@ const buildRecoverHandler = (deps: RecoverDeps): ((req: Request) => Promise<Resp
 
             if (!sent) {
               await deps.consumePasswordResetTokenById(db, tokenRow.id, nowEpochSeconds);
+              await recordAuthAuditLog({
+                req,
+                eventType: LEGACY_RECOVERY_EVENT_TYPE,
+                authSource: 'legacy',
+                businessUserId: userId,
+                identifierType: 'email',
+                resultCode: 'EMAIL_SEND_FAILED',
+              });
+            } else {
+              await recordAuthAuditLog({
+                req,
+                eventType: LEGACY_RECOVERY_EVENT_TYPE,
+                authSource: 'legacy',
+                businessUserId: userId,
+                identifierType: 'email',
+                resultCode: 'SUCCESS',
+              });
             }
           }
         }
+      } else {
+        await recordAuthAuditLog({
+          req,
+          eventType: LEGACY_RECOVERY_EVENT_TYPE,
+          authSource: 'legacy',
+          identifierType: 'email',
+          resultCode: 'USER_EMAIL_MISMATCH',
+        });
       }
 
       return new Response(JSON.stringify({ success: true, message: GENERIC_MESSAGE }), {
