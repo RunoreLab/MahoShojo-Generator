@@ -291,32 +291,6 @@ export const listUserDataCards = async (
   db: AppDrizzleDb,
   input: { userId: number; search?: string; sortBy?: DataCardSortBy },
 ): Promise<UserDataCardDbRow[]> => {
-  // 历史兼容：修复极少量 created_at/updated_at 为空的旧记录，避免“保存成功但列表按时间不可见”。
-  await db
-    .update(dataCards)
-    .set({
-      createdAt: sql`COALESCE(${dataCards.createdAt}, ${dataCards.updatedAt}, CURRENT_TIMESTAMP)`,
-      updatedAt: sql`COALESCE(${dataCards.updatedAt}, ${dataCards.createdAt}, CURRENT_TIMESTAMP)`,
-      usageCount: sql`COALESCE(${dataCards.usageCount}, 0)`,
-      likeCount: sql`COALESCE(${dataCards.likeCount}, 0)`,
-      favoriteCount: sql`COALESCE(${dataCards.favoriteCount}, 0)`,
-      isRecommended: sql`COALESCE(${dataCards.isRecommended}, 0)`,
-    })
-    .where(
-      and(
-        eq(dataCards.userId, input.userId),
-        isNull(dataCards.deletedAt),
-        or(
-          isNull(dataCards.createdAt),
-          isNull(dataCards.updatedAt),
-          isNull(dataCards.usageCount),
-          isNull(dataCards.likeCount),
-          isNull(dataCards.favoriteCount),
-          isNull(dataCards.isRecommended),
-        ),
-      ),
-    );
-
   const conditions: SQL[] = [eq(dataCards.userId, input.userId), isNull(dataCards.deletedAt)];
   if (input.search) {
     const keyword = `%${input.search}%`;
