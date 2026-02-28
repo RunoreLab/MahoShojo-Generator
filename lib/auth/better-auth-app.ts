@@ -112,12 +112,12 @@ const sendPasswordResetEmailByResend = async (payload: {
       body: JSON.stringify({
         from: '魔事院档案馆 <recovery@send.colanns.me>',
         to: [email],
-        subject: '魔法少女生成器 ~ 登录密钥重置链接',
+        subject: '魔法少女生成器 ~ 密码重置链接',
         html: `<p>您好 <strong>${displayName}</strong>,</p>
-<p>请点击下方一次性链接重置登录密钥：</p>
+<p>请点击下方一次性链接设置新密码：</p>
 <p><a href="${resetUrl}">${resetUrl}</a></p>
 <p>如果这不是您的操作，请忽略本邮件。</p>`,
-        text: `您好 ${displayName},\n\n请访问以下一次性链接重置登录密钥：\n${resetUrl}\n\n如果这不是您的操作，请忽略本邮件。`,
+        text: `您好 ${displayName},\n\n请访问以下一次性链接设置新密码：\n${resetUrl}\n\n如果这不是您的操作，请忽略本邮件。`,
       }),
     });
 

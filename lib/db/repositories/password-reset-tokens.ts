@@ -74,6 +74,30 @@ export const createPasswordResetToken = async (
   };
 };
 
+export const getActivePasswordResetTokenByHash = async (
+  db: AppDrizzleDb,
+  tokenHash: string,
+  nowEpochSeconds: number = Math.floor(Date.now() / 1000),
+): Promise<{ userId: number } | null> => {
+  const rows = await db
+    .select({
+      userId: authPasswordResetTokens.userId,
+    })
+    .from(authPasswordResetTokens)
+    .where(
+      and(
+        eq(authPasswordResetTokens.tokenHash, tokenHash),
+        isNull(authPasswordResetTokens.consumedAt),
+        gt(authPasswordResetTokens.expiresAt, nowEpochSeconds),
+      ),
+    )
+    .limit(1);
+
+  const row = rows[0];
+  if (!row) return null;
+  return { userId: row.userId };
+};
+
 export const consumePasswordResetTokenByHash = async (
   db: AppDrizzleDb,
   tokenHash: string,

@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import type { AppDrizzleDb } from '@/lib/db/drizzle';
 import { baAccounts, baUsers, baVerifications, userAuthLinks } from '@/lib/db/schema';
 
@@ -138,6 +138,47 @@ export const getAuthUserProfileByAuthUserId = async (
     email: row.email.trim().toLowerCase(),
     emailVerified: Boolean(row.emailVerified),
   };
+};
+
+export const getAuthUserProfileByEmail = async (
+  db: AppDrizzleDb,
+  email: string,
+): Promise<AuthUserProfileLite | null> => {
+  const normalizedEmail = typeof email === 'string' ? email.trim().toLowerCase() : '';
+  if (!normalizedEmail) return null;
+
+  const rows = await db
+    .select({
+      id: baUsers.id,
+      email: baUsers.email,
+      emailVerified: baUsers.emailVerified,
+    })
+    .from(baUsers)
+    .where(sql`lower(${baUsers.email}) = lower(${normalizedEmail})`)
+    .limit(1);
+
+  const row = rows[0];
+  if (!row) return null;
+  if (typeof row.email !== 'string' || !row.email.trim()) return null;
+
+  return {
+    id: row.id,
+    email: row.email.trim().toLowerCase(),
+    emailVerified: Boolean(row.emailVerified),
+  };
+};
+
+export const markAuthUserEmailVerifiedById = async (
+  db: AppDrizzleDb,
+  authUserId: string,
+): Promise<void> => {
+  await db
+    .update(baUsers)
+    .set({
+      emailVerified: true,
+      updatedAt: sql`(unixepoch())`,
+    })
+    .where(eq(baUsers.id, authUserId));
 };
 
 export const createAuthResetPasswordVerification = async (

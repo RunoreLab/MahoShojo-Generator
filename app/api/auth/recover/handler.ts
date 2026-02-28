@@ -79,12 +79,12 @@ const buildRecoverHandler = (deps: RecoverDeps): ((req: Request) => Promise<Resp
         body: JSON.stringify({
           from: '魔事院档案馆 <recovery@send.colanns.me>',
           to: [params.to],
-          subject: '魔法少女生成器 ~ 登录密钥重置链接',
+          subject: '魔法少女生成器 ~ 密码重置链接',
           html: `<p>您好 <strong>${params.username}</strong>,</p>
-<p>请点击下方一次性链接重置登录密钥（有效期 ${params.expiresInMinutes} 分钟，仅可使用一次）：</p>
+<p>请点击下方一次性链接设置新密码（有效期 ${params.expiresInMinutes} 分钟，仅可使用一次）：</p>
 <p><a href="${params.resetUrl}">${params.resetUrl}</a></p>
 <p>如果这不是您的操作，请忽略本邮件。</p>`,
-          text: `您好 ${params.username},\n\n请访问以下一次性链接重置登录密钥（有效期 ${params.expiresInMinutes} 分钟，仅可使用一次）：\n${params.resetUrl}\n\n如果这不是您的操作，请忽略本邮件。`,
+          text: `您好 ${params.username},\n\n请访问以下一次性链接设置新密码（有效期 ${params.expiresInMinutes} 分钟，仅可使用一次）：\n${params.resetUrl}\n\n如果这不是您的操作，请忽略本邮件。`,
         }),
       });
 

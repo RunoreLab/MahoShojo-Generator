@@ -17,7 +17,13 @@ type AuthAccount = {
   authUserId: string;
   email: string;
   name: string;
-  password: string;
+  password: string | null;
+  emailVerified: boolean;
+};
+
+type AuthResetPasswordVerification = {
+  authUserId: string;
+  expiresAt: number;
 };
 
 type ResetTokenRow = {
@@ -111,6 +117,8 @@ const buildAuthHarness = async () => {
     usersByEmail: new Map<string, number>(),
     usersByAuthUserId: new Map<string, number>(),
     authAccountsByEmail: new Map<string, AuthAccount>(),
+    authAccountsByAuthUserId: new Map<string, AuthAccount>(),
+    authResetPasswordVerificationsByToken: new Map<string, AuthResetPasswordVerification>(),
     sessions: new Map<string, string>(),
     resetTokensByHash: new Map<string, ResetTokenRow>(),
     resendRequests: [] as MailRequest[],
@@ -224,12 +232,15 @@ const buildAuthHarness = async () => {
       }
 
       const authUserId = `auth-user-${state.nextAuthUserSeq++}`;
-      state.authAccountsByEmail.set(email, {
+      const account: AuthAccount = {
         authUserId,
         email,
         name,
         password,
-      });
+        emailVerified: false,
+      };
+      state.authAccountsByEmail.set(email, account);
+      state.authAccountsByAuthUserId.set(authUserId, account);
 
       const headers = new Headers();
       headers.set('set-cookie', issueSessionCookie(authUserId));
@@ -273,6 +284,30 @@ const buildAuthHarness = async () => {
           headers,
         ),
       } as const;
+    }
+
+    if (path === '/api/auth/reset-password') {
+      const token = String(body.token ?? '').trim();
+      const newPassword = String(body.newPassword ?? '').trim();
+      if (!token || !newPassword) {
+        return { ok: true, response: createJsonResponse({ error: 'INVALID_PAYLOAD' }, 400) } as const;
+      }
+
+      const verification = state.authResetPasswordVerificationsByToken.get(token);
+      const nowEpochSeconds = Math.floor(state.nowMs / 1000);
+      if (!verification || verification.expiresAt <= nowEpochSeconds) {
+        return { ok: true, response: createJsonResponse({ error: 'INVALID_TOKEN' }, 400) } as const;
+      }
+
+      const account = state.authAccountsByAuthUserId.get(verification.authUserId);
+      if (!account) {
+        return { ok: true, response: createJsonResponse({ error: 'INVALID_TOKEN' }, 400) } as const;
+      }
+
+      account.password = newPassword;
+      state.authResetPasswordVerificationsByToken.delete(token);
+
+      return { ok: true, response: createJsonResponse({ success: true }, 200) } as const;
     }
 
     return {
@@ -363,15 +398,6 @@ const buildAuthHarness = async () => {
   const verifyTurnstileToken = async (token: string): Promise<boolean> => token === 'turnstile-ok';
 
   const hashRecoveryToken = async (token: string): Promise<string> => `hash:${token}`;
-
-  const normalizeLegacyAuthKey = (value: unknown): string | null => {
-    if (typeof value !== 'string') return null;
-    const normalized = value.trim();
-    if (!normalized) return null;
-    if (normalized.length < 16 || normalized.length > 128) return null;
-    if (/\s/.test(normalized)) return null;
-    return normalized;
-  };
 
   const registerPost = routes.createRegisterHandler({
     recordAuthAuditLog: async () => {},
@@ -536,8 +562,80 @@ const buildAuthHarness = async () => {
 
   const resetPost = routes.createRecoverResetHandler({
     hashRecoveryToken,
-    normalizeLegacyAuthKey,
     getDrizzleDbFromRuntime: () => ({ __mockDb: true }),
+    getBusinessUserById: async (_db: unknown, userId: number) => {
+      const user = getUserById(userId);
+      return user ? toBusinessUser(user) : null;
+    },
+    getAuthMigrationStatusByBusinessUserId: async (_db: unknown, userId: number) => {
+      const user = getUserById(userId);
+      if (!user || !user.authUserId) {
+        return {
+          hasAuthLink: false,
+          authUserId: null,
+          hasPassword: false,
+          emailVerified: false,
+        };
+      }
+
+      const account = state.authAccountsByAuthUserId.get(user.authUserId);
+      return {
+        hasAuthLink: true,
+        authUserId: user.authUserId,
+        hasPassword: Boolean(account?.password && account.password.trim().length > 0),
+        emailVerified: Boolean(account?.emailVerified),
+      };
+    },
+    getAuthUserProfileByEmail: async (_db: unknown, email: string) => {
+      const account = state.authAccountsByEmail.get(normalizeEmail(email));
+      if (!account) return null;
+      return {
+        id: account.authUserId,
+        email: account.email,
+        emailVerified: account.emailVerified,
+      };
+    },
+    getUserAuthLinkByAuthUserId: async (_db: unknown, authUserId: string) => {
+      const userId = state.usersByAuthUserId.get(authUserId);
+      if (!userId) return null;
+      return {
+        id: userId,
+        authUserId,
+        businessUserId: userId,
+        createdAt: 0,
+        updatedAt: 0,
+      };
+    },
+    upsertUserAuthLink: async (_db: unknown, input: { authUserId: string; businessUserId: number }) => {
+      const user = getUserById(input.businessUserId);
+      if (!user) return null;
+      attachAuthUser(input.authUserId, user);
+      return {
+        id: input.businessUserId,
+        authUserId: input.authUserId,
+        businessUserId: input.businessUserId,
+        createdAt: 0,
+        updatedAt: 0,
+      };
+    },
+    markAuthUserEmailVerifiedById: async (_db: unknown, authUserId: string) => {
+      const account = state.authAccountsByAuthUserId.get(authUserId);
+      if (account) account.emailVerified = true;
+    },
+    createAuthResetPasswordVerification: async (
+      _db: unknown,
+      input: { token: string; authUserId: string; expiresAt: number },
+    ) => {
+      state.authResetPasswordVerificationsByToken.set(input.token, {
+        authUserId: input.authUserId,
+        expiresAt: input.expiresAt,
+      });
+    },
+    getActivePasswordResetTokenByHash: async (_db: unknown, tokenHash: string, nowEpochSeconds: number) => {
+      const row = state.resetTokensByHash.get(tokenHash);
+      if (!row || row.consumedAt !== null || row.expiresAt <= nowEpochSeconds) return null;
+      return { userId: row.userId };
+    },
     consumePasswordResetTokenByHash: async (_db: unknown, tokenHash: string, nowEpochSeconds: number) => {
       const row = state.resetTokensByHash.get(tokenHash);
       if (!row || row.consumedAt !== null || row.expiresAt <= nowEpochSeconds) return null;
@@ -551,12 +649,23 @@ const buildAuthHarness = async () => {
         }
       }
     },
-    updateUserAuthKey: async (userId: number, newAuthKey: string) => {
-      const user = getUserById(userId);
-      if (!user) return false;
-      user.authKey = newAuthKey;
-      return true;
+    invokeBetterAuthSubrequest: async (input: { req: Request; path: string; body: unknown }) => {
+      const body = (input.body ?? {}) as Record<string, unknown>;
+      const result = await invokeBetterAuthJsonEndpoint({
+        path: input.path,
+        body,
+        sourceHeaders: input.req.headers,
+      });
+      if (!result.ok) {
+        throw new Error(result.message);
+      }
+      return result.response;
     },
+    readJsonSafely,
+    extractErrorMessage,
+    appendSetCookieHeaders,
+    createVerificationId: () => `verify-${state.nextResetSeq++}`,
+    createResetPasswordToken: () => `ba-reset-${state.nextResetSeq++}`,
     now: () => state.nowMs,
   });
 
@@ -708,11 +817,11 @@ describe('auth 全链路集成', () => {
     expect(harness.state.resendRequests).toHaveLength(1);
     expect(String(harness.state.resendRequests[0]?.payload.text ?? '')).toContain(harness.state.lastRecoveryToken);
 
-    const newAuthKey = 'new-legacy-auth-key-0001';
+    const newPassword = 'NewPass@2026';
     const resetResp = await harness.resetPost(
       postJsonRequest('https://example.com/api/auth/recover/reset', {
         token: harness.state.lastRecoveryToken,
-        newAuthKey,
+        newPassword,
       }),
     );
     expect(resetResp.status).toBe(200);
@@ -721,42 +830,46 @@ describe('auth 全链路集成', () => {
       message: string;
     };
     expect(resetPayload.success).toBeTrue();
-    expect(resetPayload.message).toContain('重置成功');
+    expect(resetPayload.message).toContain('设置成功');
 
     const replayResetResp = await harness.resetPost(
       postJsonRequest('https://example.com/api/auth/recover/reset', {
         token: harness.state.lastRecoveryToken,
-        newAuthKey: 'another-valid-key-0002',
+        newPassword: 'Another@2026',
       }),
     );
     expect(replayResetResp.status).toBe(400);
 
-    const oldLegacyLoginResp = await harness.loginPost(
+    const oldPasswordLoginResp = await harness.loginPost(
       postJsonRequest('https://example.com/api/auth/login', {
-        username: 'hikari',
-        authKey: oldAuthKey,
-        mode: 'legacy',
+        identifier: 'hikari@example.com',
+        credential: 'password-123',
+        mode: 'password',
         turnstileToken: 'turnstile-ok',
       }),
     );
-    expect(oldLegacyLoginResp.status).toBe(401);
+    expect(oldPasswordLoginResp.status).toBe(401);
 
-    const newLegacyLoginResp = await harness.loginPost(
+    const newPasswordLoginResp = await harness.loginPost(
       postJsonRequest('https://example.com/api/auth/login', {
-        username: 'hikari',
-        authKey: newAuthKey,
-        mode: 'legacy',
+        identifier: 'hikari@example.com',
+        credential: newPassword,
+        mode: 'password',
         turnstileToken: 'turnstile-ok',
       }),
     );
-    expect(newLegacyLoginResp.status).toBe(200);
-    const newLegacyPayload = (await newLegacyLoginResp.json()) as {
+    expect(newPasswordLoginResp.status).toBe(200);
+    const newPasswordPayload = (await newPasswordLoginResp.json()) as {
       success: boolean;
       authMode: string;
       user: { id: number; username: string };
     };
-    expect(newLegacyPayload.success).toBeTrue();
-    expect(newLegacyPayload.authMode).toBe('legacy');
-    expect(newLegacyPayload.user.id).toBe(registerPayload.user.id);
+    expect(newPasswordPayload.success).toBeTrue();
+    expect(newPasswordPayload.authMode).toBe('better-auth');
+    expect(newPasswordPayload.user.id).toBe(registerPayload.user.id);
+
+    const account = harness.state.authAccountsByEmail.get('hikari@example.com');
+    expect(account?.emailVerified).toBeTrue();
+    expect(account?.password).toBe(newPassword);
   });
 });

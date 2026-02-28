@@ -3,6 +3,7 @@ import Head from 'next/head';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
 import TurnstileWidget, { TurnstileRef } from '@/components/Turnstile';
+import { PASSWORD_MIN_LENGTH, getPasswordPolicySummaryMessage, validatePasswordPolicy } from '@/lib/auth/password-policy';
 
 interface RecoveryMessage {
   type: 'success' | 'error';
@@ -10,19 +11,7 @@ interface RecoveryMessage {
 }
 
 const REQUEST_SUCCESS_HINT = '如果您输入的信息正确，系统会向邮箱发送一次性重置链接，请在 15 分钟内完成重置。';
-const RESET_SUCCESS_HINT = '登录密钥已重置成功，请使用新密钥登录。';
-
-const generateAuthKeySuggestion = (): string => {
-  const bytes = new Uint8Array(32);
-  if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
-    crypto.getRandomValues(bytes);
-  } else {
-    for (let i = 0; i < bytes.length; i += 1) {
-      bytes[i] = Math.floor(Math.random() * 256);
-    }
-  }
-  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
-};
+const RESET_SUCCESS_HINT = '新密码设置成功，请使用密码登录。';
 
 const PasswordRecoveryPage = () => {
   const router = useRouter();
@@ -34,7 +23,7 @@ const PasswordRecoveryPage = () => {
   const isResetMode = resetToken.length > 0;
 
   const [requestForm, setRequestForm] = useState({ username: '', email: '' });
-  const [resetForm, setResetForm] = useState({ newAuthKey: '', confirmAuthKey: '' });
+  const [resetForm, setResetForm] = useState({ newPassword: '', confirmPassword: '' });
   const [turnstileToken, setTurnstileToken] = useState('');
   const [message, setMessage] = useState<RecoveryMessage | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -94,25 +83,24 @@ const PasswordRecoveryPage = () => {
     event.preventDefault();
     setMessage(null);
 
-    const newAuthKey = resetForm.newAuthKey.trim();
-    const confirmAuthKey = resetForm.confirmAuthKey.trim();
-    if (!newAuthKey || !confirmAuthKey) {
-      setMessage({ type: 'error', text: '请填写并确认新的登录密钥。' });
+    const newPassword = resetForm.newPassword.trim();
+    const confirmPassword = resetForm.confirmPassword.trim();
+    if (!newPassword || !confirmPassword) {
+      setMessage({ type: 'error', text: '请填写并确认新密码。' });
       return;
     }
 
-    if (newAuthKey !== confirmAuthKey) {
-      setMessage({ type: 'error', text: '两次输入的登录密钥不一致。' });
+    if (newPassword !== confirmPassword) {
+      setMessage({ type: 'error', text: '两次输入的密码不一致。' });
       return;
     }
 
-    if (newAuthKey.length < 16 || newAuthKey.length > 128) {
-      setMessage({ type: 'error', text: '登录密钥长度需在 16 到 128 个字符之间。' });
-      return;
-    }
-
-    if (/\s/.test(newAuthKey)) {
-      setMessage({ type: 'error', text: '登录密钥不能包含空白字符。' });
+    const policy = validatePasswordPolicy(newPassword);
+    if (!policy.ok) {
+      setMessage({
+        type: 'error',
+        text: getPasswordPolicySummaryMessage(policy.issues) || '新密码不符合安全要求。',
+      });
       return;
     }
 
@@ -125,7 +113,7 @@ const PasswordRecoveryPage = () => {
         },
         body: JSON.stringify({
           token: resetToken,
-          newAuthKey,
+          newPassword,
         }),
       });
 
@@ -135,7 +123,7 @@ const PasswordRecoveryPage = () => {
           type: 'success',
           text: data.message || RESET_SUCCESS_HINT,
         });
-        setResetForm({ newAuthKey: '', confirmAuthKey: '' });
+        setResetForm({ newPassword: '', confirmPassword: '' });
       } else {
         setMessage({
           type: 'error',
@@ -158,17 +146,17 @@ const PasswordRecoveryPage = () => {
   return (
     <>
       <Head>
-        <title>{isResetMode ? '设置新登录密钥' : '找回登录密钥'} - MahoShojo Generator</title>
+        <title>{isResetMode ? '设置新密码' : '找回密码'} - MahoShojo Generator</title>
       </Head>
       <div className="magic-background-white min-h-screen">
         <div className="container py-12">
           <div className="card max-w-lg mx-auto">
-            <h1 className="text-2xl font-bold text-center mb-4">{isResetMode ? '设置新登录密钥' : '找回登录密钥'}</h1>
+            <h1 className="text-2xl font-bold text-center mb-4">{isResetMode ? '设置新密码' : '找回密码'}</h1>
 
             {!isSuccess && (
               <p className="text-sm text-gray-600 text-center mb-6">
                 {isResetMode
-                  ? '请设置新的登录密钥。重置链接仅可使用一次，过期后请重新发起找回。'
+                  ? '请设置新的登录密码。重置链接仅可使用一次，过期后请重新发起找回。'
                   : '请输入注册用户名和邮箱，系统会发送一次性重置链接。'}
               </p>
             )}
@@ -202,45 +190,34 @@ const PasswordRecoveryPage = () => {
             ) : isResetMode ? (
               <form onSubmit={handleResetSubmit} className="space-y-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">新登录密钥</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">新密码</label>
                   <input
-                    type="text"
-                    value={resetForm.newAuthKey}
-                    onChange={(event) => setResetForm({ ...resetForm, newAuthKey: event.target.value })}
+                    type="password"
+                    value={resetForm.newPassword}
+                    onChange={(event) => setResetForm({ ...resetForm, newPassword: event.target.value })}
                     className="input-field"
-                    placeholder="请输入新的登录密钥"
+                    placeholder="请输入新密码"
                     required
-                    minLength={16}
+                    minLength={PASSWORD_MIN_LENGTH}
                     maxLength={128}
-                    autoComplete="off"
+                    autoComplete="new-password"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">确认新登录密钥</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">确认新密码</label>
                   <input
-                    type="text"
-                    value={resetForm.confirmAuthKey}
-                    onChange={(event) => setResetForm({ ...resetForm, confirmAuthKey: event.target.value })}
+                    type="password"
+                    value={resetForm.confirmPassword}
+                    onChange={(event) => setResetForm({ ...resetForm, confirmPassword: event.target.value })}
                     className="input-field"
-                    placeholder="请再次输入新的登录密钥"
+                    placeholder="请再次输入新密码"
                     required
-                    minLength={16}
+                    minLength={PASSWORD_MIN_LENGTH}
                     maxLength={128}
-                    autoComplete="off"
+                    autoComplete="new-password"
                   />
                 </div>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    const suggestion = generateAuthKeySuggestion();
-                    setResetForm({ newAuthKey: suggestion, confirmAuthKey: suggestion });
-                  }}
-                  className="w-full border border-blue-200 rounded-md py-2 text-sm text-blue-700 hover:bg-blue-50"
-                >
-                  自动生成安全密钥
-                </button>
 
                 <button
                   type="submit"
