@@ -174,6 +174,7 @@ export const insertDeckCardIgnore = async (
       cardNameSnapshot: payload.cardNameSnapshot,
       cardTypeSnapshot: payload.cardTypeSnapshot,
       sortOrder: payload.sortOrder,
+      createdAt: sql`CURRENT_TIMESTAMP`,
     })
     .onConflictDoNothing()
     .returning({

@@ -420,9 +420,12 @@ export const upsertDataCardUpdateByDataCardId = async (
     id: input.id,
     dataCardId: input.dataCardId,
     userId: input.userId,
+    createdAt: sql`CURRENT_TIMESTAMP`,
+    updatedAt: sql`CURRENT_TIMESTAMP`,
   };
   const updateValues: Record<string, unknown> = {
     userId: input.userId,
+    createdAt: sql`COALESCE(${dataCardUpdates.createdAt}, CURRENT_TIMESTAMP)`,
     updatedAt: sql`CURRENT_TIMESTAMP`,
   };
 

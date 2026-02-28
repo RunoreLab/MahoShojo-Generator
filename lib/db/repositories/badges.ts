@@ -205,6 +205,9 @@ export const insertUserBadgeIgnore = async (
     .values({
       userId,
       badgeId,
+      isEquipped: false,
+      displayOrder: 0,
+      obtainedAt: sql`CURRENT_TIMESTAMP`,
     })
     .onConflictDoNothing();
 };

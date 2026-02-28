@@ -1,4 +1,4 @@
-import { desc, eq } from 'drizzle-orm';
+import { desc, eq, sql } from 'drizzle-orm';
 import type { AppDrizzleDb } from '@/lib/db/drizzle';
 import { redemptionCodes } from '@/lib/db/schema';
 
@@ -44,6 +44,7 @@ export const insertRedemptionCodesBatch = async (
       rows.map((row) => ({
         code: row.code,
         slotCount: Math.max(0, Math.floor(row.slotCount)),
+        createdAt: sql`CURRENT_TIMESTAMP`,
       })),
     );
 };
@@ -56,6 +57,7 @@ export const insertRedemptionCode = async (
   await db.insert(redemptionCodes).values({
     code,
     slotCount: Math.max(0, Math.floor(slotCount)),
+    createdAt: sql`CURRENT_TIMESTAMP`,
   });
 };
 

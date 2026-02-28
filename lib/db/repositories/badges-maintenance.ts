@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, isNotNull, ne } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNotNull, ne, sql } from 'drizzle-orm';
 import type { AppDrizzleDb } from '@/lib/db/drizzle';
 import { badges, userBadges, users } from '@/lib/db/schema';
 
@@ -79,6 +79,7 @@ export const upsertBadgeDefinition = async (
       rarity: input.rarity,
       sortOrder: input.sortOrder,
       isActive: input.isActive,
+      createdAt: sql`CURRENT_TIMESTAMP`,
     })
     .onConflictDoUpdate({
       target: badges.id,
@@ -177,6 +178,7 @@ export const grantUserBadge = async (
       badgeId: input.badgeId,
       isEquipped: input.isEquipped,
       displayOrder: Math.max(0, Math.trunc(input.displayOrder)),
+      obtainedAt: sql`CURRENT_TIMESTAMP`,
     })
     .onConflictDoNothing();
 };

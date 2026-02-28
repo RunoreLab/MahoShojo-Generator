@@ -51,6 +51,8 @@ export const createBusinessUser = async (
       authKey: input.authKey,
       isAdmin: false,
       isReviewExempt: false,
+      createdAt: sql`CURRENT_TIMESTAMP`,
+      updatedAt: sql`CURRENT_TIMESTAMP`,
     });
   } catch {
     return null;

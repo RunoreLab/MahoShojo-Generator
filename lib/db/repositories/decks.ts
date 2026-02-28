@@ -104,6 +104,10 @@ export const insertDeck = async (
       name: payload.name,
       description: payload.description,
       isPublic: payload.isPublic,
+      likeCount: 0,
+      favoriteCount: 0,
+      createdAt: sql`CURRENT_TIMESTAMP`,
+      updatedAt: sql`CURRENT_TIMESTAMP`,
     })
     .returning({
       id: decks.id,
