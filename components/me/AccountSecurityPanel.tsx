@@ -1,6 +1,7 @@
 'use client';
 
 import { FormEvent, useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 
 import { loadAuthMigrationStatus } from '@/components/me/authMigrationStatus';
@@ -308,6 +309,9 @@ export function AccountSecurityPanel({ userId, username }: { userId: number | nu
     <div className="mt-4 rounded-2xl border bg-white p-4">
       <div className="font-semibold text-gray-900">账号安全设置</div>
       <div className="mt-1 text-xs text-gray-500">支持修改密码与邮箱。旧密钥登录用户请先完成账号迁移后再操作。</div>
+      <div className="mt-1 text-xs text-gray-500">
+        迁移步骤见 <Link href="/encyclopedia/auth-migration" className="underline underline-offset-2">账号迁移指南</Link>。
+      </div>
 
       {query.isLoading ? <div className="mt-3 text-sm text-gray-600">正在读取账号迁移状态...</div> : null}
       {query.isError ? (

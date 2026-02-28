@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo } from 'react';
+import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import { loadAuthMigrationStatus } from '@/components/me/authMigrationStatus';
 
@@ -58,6 +59,11 @@ export function AuthMigrationPanel({ userId }: { userId: number | null }) {
         {!status.hasAuthLink ? ' 未映射新版账号；' : ' 已映射新版账号；'}
         {!status.hasPassword ? ' 未设置密码；' : ' 已设置密码；'}
         {status.emailVerified ? ' 邮箱已验证。' : ' 邮箱未验证。'}
+      </div>
+      <div className="mt-2 text-xs">
+        <Link href="/encyclopedia/auth-migration" className="text-yellow-900 underline underline-offset-2">
+          查看迁移百科
+        </Link>
       </div>
     </div>
   );

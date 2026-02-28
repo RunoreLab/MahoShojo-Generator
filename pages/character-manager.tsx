@@ -1840,6 +1840,12 @@ const CharacterManagerPage: React.FC = () => {
                                                     >
                                                         去个人页完成迁移
                                                     </Link>
+                                                    <Link
+                                                        href="/encyclopedia/auth-migration"
+                                                        className="rounded bg-white px-2 py-1 text-[11px] text-yellow-900 hover:bg-yellow-100"
+                                                    >
+                                                        迁移百科
+                                                    </Link>
                                                     {authMigrationStatus.authSource === 'legacy-bearer' ? (
                                                         <button
                                                             onClick={() => setShowLegacyMigrationReminderModal(true)}
@@ -2445,6 +2451,9 @@ const CharacterManagerPage: React.FC = () => {
                         <p className="mt-2 text-sm text-gray-700">
                             你本次使用了旧密钥登录。为避免后续旧入口下线导致无法登录，请尽快在个人页完成“设置登录密码”迁移。
                         </p>
+                        <p className="mt-1 text-xs text-gray-500">
+                            迁移步骤可查看百科：/encyclopedia/auth-migration
+                        </p>
                         <p className="mt-2 text-xs text-gray-500">
                             {legacyMigrationDeferCount > 0
                                 ? `你已选择“稍后处理” ${legacyMigrationDeferCount} 次。`
@@ -2471,6 +2480,13 @@ const CharacterManagerPage: React.FC = () => {
                                 className="rounded bg-pink-600 px-3 py-1.5 text-sm text-white hover:bg-pink-700"
                             >
                                 去个人页迁移
+                            </Link>
+                            <Link
+                                href="/encyclopedia/auth-migration"
+                                onClick={() => setShowLegacyMigrationReminderModal(false)}
+                                className="rounded border border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50"
+                            >
+                                查看迁移百科
                             </Link>
                         </div>
                     </div>

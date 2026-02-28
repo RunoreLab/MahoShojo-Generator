@@ -55,6 +55,12 @@
 - 不登录也能体验大多数生成与对战功能（以页面提示为准）。
 - **登录后**，你才能把数据卡保存到云端、替换已有卡，并参与部分与排位相关的严格口径。
 
+### 我看到“账号迁移提醒”是什么意思？
+
+- v0.8.0 起，用户系统进入新认证体系迁移窗口。
+- 如果你还在使用旧密钥登录，请前往 `/me?tab=settings` 完成“设置登录密码（迁移）”。
+- 详细步骤见：`/encyclopedia/auth-migration`。
+
 ### 为什么会有冷却时间？
 
 为控制公共资源与滥用风险，部分生成有冷却时间。若你使用自备 API Key（在页面里选择自定义供应商并填写 Key），某些页面会有更短的冷却时间。
@@ -72,6 +78,7 @@
 - 角色组队：`/encyclopedia/character-party`
 - 酒馆生态联动（SillyTavern）：`/encyclopedia/tavern-ecosystem`
 - 档案馆（角色管理）：`/encyclopedia/archive`
+- 账号迁移指南：`/encyclopedia/auth-migration`
 - 竞技场：`/encyclopedia/arena`
 - 排位与排行榜：`/encyclopedia/ranking`
 - 引导 / 裁判事件 / 读写状态：`/encyclopedia/guidance`

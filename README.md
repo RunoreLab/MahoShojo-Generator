@@ -44,7 +44,7 @@
 - **个人中心**：展示战报、生成个人资料卡
 
 ### 云端与分享
-- **用户系统**：注册账户，云端保存角色数据
+- **用户系统**：注册/登录账户，云端保存角色数据（v0.8.0 起进入旧密钥迁移窗口）
 - **公开分享**：分享角色供他人使用，支持点赞和筛选
 - **数据卡管理**：可视化编辑器、回收站、徽章系统
 - **标签系统**：标签库分类与筛选
@@ -63,7 +63,7 @@
 
 ## 🚀 技术栈
 
-* **框架**: Next.js 15 (Pages Router), React 19
+* **框架**: Next.js 15（Pages Router 为主，局部 App Router）, React 19
 * **语言**: TypeScript
 * **运行时**: Bun (开发与构建), Cloudflare Pages/Workers (生产，Edge Runtime)
 * **数据库**: Cloudflare D1（主库）+ Cloudflare R2
@@ -163,6 +163,9 @@ bun run preview
 
 ```
 MahoShojo-Generator/
+├── app/                    # App Router（承载新版 auth 路由）
+│   └── api/
+│       └── auth/
 ├── pages/                   # 页面路由
 │   ├── index.tsx           # 主页
 │   ├── name.tsx            # 魔法少女生成
@@ -182,8 +185,10 @@ MahoShojo-Generator/
 ├── lib/                    # 核心逻辑
 │   ├── ai/                 # AI 集成
 │   ├── database/           # 数据库访问
+│   ├── db/                 # Drizzle schema/repositories
 │   ├── d1.ts               # Cloudflare D1
 │   └── signature.ts        # 数据签名
+├── drizzle/                # D1 迁移 SQL
 ├── components/             # UI 组件
 ├── public/                 # 静态资源
 │   ├── announcements.json  # 公告
