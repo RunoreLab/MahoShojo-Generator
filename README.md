@@ -133,6 +133,11 @@ bun run preview
 
 查看详细的开发进度和完成功能，请参阅 [CHANGELOG.md](./CHANGELOG.md)
 
+## 🧭 开发规范（关键）
+
+- 命名规范采用“分层统一 + 边界映射”，适用于全项目，不限于鉴权模块。
+- 详细说明见 [docs/NAMING_CONVENTIONS_2026-02-28.md](./docs/NAMING_CONVENTIONS_2026-02-28.md)。
+
 - [x] 核心 AI 生成系统
 - [x] 角色成长与竞技场系统
 - [x] 云端存储与用户系统

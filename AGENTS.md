@@ -19,6 +19,17 @@
 - 优先使用 `camelCase` 工具函数与具描述性的魔法少女状态枚举；如必须使用 `any`，需注明原因。
 - 通过 `@/*` 别名导入模块，避免深层相对路径；布局扩展优先利用 Tailwind 4 工具类与共享渐变样式。
 
+### 全局命名分层规范（强制）
+- 全局采用“分层统一 + 边界映射”策略：每一层内部只允许一种命名风格，跨层必须显式转换，禁止隐式透传。
+- 数据库/SQL/迁移脚本维持 `snake_case`（如 `is_review_exempt`）；TypeScript 业务层、服务层、组件层、API DTO 默认使用 `camelCase`（如 `isReviewExempt`）。
+- 类型名/接口名/枚举名使用 `PascalCase`；常量使用 `UPPER_SNAKE_CASE`。
+- 禁止在业务代码中直接消费数据库 `snake_case` 字段；必须在 repository/adapter/mapper 层完成转换后再进入业务逻辑。
+- 对外 API 响应默认输出 `camelCase`；若因历史兼容需要接收双风格字段，读取可兼容，写出必须收敛到单一 canonical 字段。
+- 同一对象中禁止长期并存语义等价的双字段。
+- 新增或修改跨层字段时，必须同步更新：schema、mapper、类型定义、API 契约与测试。
+- 每个关键边界 mapper 至少补 1 条回归测试，覆盖 snake/camel 输入兼容与 canonical 输出。
+- 如需详细规范与落地流程，见 `docs/NAMING_CONVENTIONS_2026-02-28.md`。
+
 ### API 的编写
 - 该项目部署在 Cloudflare 上，使用 Edge Runtime，请不要使用不兼容的库或者特性。
 - 可以参考 `/pages/api/auth/verify.ts` 的使用方法进行新的 API 的编写。
