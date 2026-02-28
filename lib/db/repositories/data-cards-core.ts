@@ -267,6 +267,8 @@ export const insertDataCard = async (
     data: input.data,
     isPublic: sql`${input.isPublic}`,
     publicSince: input.isPublic === 1 ? sql`CURRENT_TIMESTAMP` : null,
+    createdAt: sql`CURRENT_TIMESTAMP`,
+    updatedAt: sql`CURRENT_TIMESTAMP`,
   };
 
   if (input.reviewStatus) {
@@ -285,21 +287,40 @@ export const listUserDataCards = async (
   db: AppDrizzleDb,
   input: { userId: number; search?: string; sortBy?: DataCardSortBy },
 ): Promise<UserDataCardDbRow[]> => {
+  // 历史兼容：修复极少量 created_at/updated_at 为空的旧记录，避免“保存成功但列表按时间不可见”。
+  await db
+    .update(dataCards)
+    .set({
+      createdAt: sql`COALESCE(${dataCards.createdAt}, ${dataCards.updatedAt}, CURRENT_TIMESTAMP)`,
+      updatedAt: sql`COALESCE(${dataCards.updatedAt}, ${dataCards.createdAt}, CURRENT_TIMESTAMP)`,
+    })
+    .where(
+      and(
+        eq(dataCards.userId, input.userId),
+        isNull(dataCards.deletedAt),
+        or(isNull(dataCards.createdAt), isNull(dataCards.updatedAt)),
+      ),
+    );
+
   const conditions: SQL[] = [eq(dataCards.userId, input.userId), isNull(dataCards.deletedAt)];
   if (input.search) {
     const keyword = `%${input.search}%`;
     conditions.push(or(like(dataCards.name, keyword), like(dataCards.description, keyword))!);
   }
 
-  let orderBy: SQL[] = [desc(dataCards.updatedAt)];
+  const updatedSortKey = sql`COALESCE(${dataCards.updatedAt}, ${dataCards.createdAt})`;
+  const createdSortKey = sql`COALESCE(${dataCards.createdAt}, ${dataCards.updatedAt})`;
+  const rowIdSortKey = sql`rowid`;
+
+  let orderBy: SQL[] = [desc(updatedSortKey), desc(rowIdSortKey)];
   if (input.sortBy === 'likes') {
-    orderBy = [desc(dataCards.likeCount), desc(dataCards.updatedAt)];
+    orderBy = [desc(dataCards.likeCount), desc(updatedSortKey), desc(rowIdSortKey)];
   } else if (input.sortBy === 'usage') {
-    orderBy = [desc(dataCards.usageCount), desc(dataCards.updatedAt)];
+    orderBy = [desc(dataCards.usageCount), desc(updatedSortKey), desc(rowIdSortKey)];
   } else if (input.sortBy === 'favorites') {
-    orderBy = [desc(dataCards.favoriteCount), desc(dataCards.updatedAt)];
+    orderBy = [desc(dataCards.favoriteCount), desc(updatedSortKey), desc(rowIdSortKey)];
   } else if (input.sortBy === 'created_at') {
-    orderBy = [desc(dataCards.createdAt)];
+    orderBy = [desc(createdSortKey), desc(rowIdSortKey)];
   }
 
   const rows = await db
