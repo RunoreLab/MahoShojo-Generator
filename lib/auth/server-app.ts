@@ -75,14 +75,16 @@ const toAuthenticatedUser = (raw: unknown): AuthenticatedUser | null => {
   if (!id || !isNonEmptyString(record.username)) return null;
 
   const bannedField = record.is_banned ?? record.isBanned ?? null;
+  const adminField = record.is_admin ?? record.isAdmin;
+  const reviewExemptField = record.is_review_exempt ?? record.isReviewExempt;
 
   return {
     id,
     username: record.username.trim(),
     prefix: typeof record.prefix === 'string' || record.prefix === null ? (record.prefix as string | null) : undefined,
     is_banned: typeof bannedField === 'string' || bannedField === null ? (bannedField as string | null) : undefined,
-    is_admin: toOptionalInteger(record.is_admin),
-    is_review_exempt: toOptionalInteger(record.is_review_exempt),
+    is_admin: toOptionalInteger(adminField),
+    is_review_exempt: toOptionalInteger(reviewExemptField),
   };
 };
 
