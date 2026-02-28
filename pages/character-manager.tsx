@@ -1801,7 +1801,7 @@ const CharacterManagerPage: React.FC = () => {
                             {/* 实验性警告 */}
                             <div className="flex mb-3 p-2 bg-yellow-50 border border-yellow-200 rounded text-xs text-yellow-800 text-left">
                                 <div className="mr-2">⚠️ </div>
-                                <div>用户系统仍处于测试阶段，可能存在功能不稳定的情况，敬请谅解。当前处于账号迁移期：你仍在使用旧密钥，请尽快在个人页完成迁移。</div>
+                                <div>用户系统仍处于测试阶段，可能存在功能不稳定的情况，敬请谅解。当前处于账号迁移期，请尽快在个人页设置密码完成迁移。</div>
                             </div>
                             {/* 账户状态显示区域 */}
                             <div className="mt-4 p-3 bg-pink-50 rounded-lg">
