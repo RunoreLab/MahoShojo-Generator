@@ -74,6 +74,62 @@ const withTrustedOrigins = (): { trustedOrigins: string[] } | Record<string, nev
   return { trustedOrigins: origins };
 };
 
+const readResendApiKey = (): string | null => {
+  const raw = process.env.RESEND_API_KEY?.trim();
+  if (!raw) return null;
+  return raw;
+};
+
+const sendPasswordResetEmailByResend = async (payload: {
+  user?: { email?: unknown; name?: unknown };
+  url?: unknown;
+}): Promise<void> => {
+  const apiKey = readResendApiKey();
+  if (!apiKey) {
+    console.error('[auth][app] RESEND_API_KEY 未配置，已跳过密码重置邮件发送。');
+    return;
+  }
+
+  const email = toNonEmptyString(payload.user?.email)?.toLowerCase() ?? null;
+  const resetUrl = toNonEmptyString(payload.url);
+  if (!email || !resetUrl) {
+    console.error('[auth][app] 密码重置邮件参数不完整，已跳过发送。', {
+      hasEmail: Boolean(email),
+      hasResetUrl: Boolean(resetUrl),
+    });
+    return;
+  }
+
+  const displayName = toNonEmptyString(payload.user?.name) ?? email.split('@')[0] ?? '用户';
+
+  try {
+    const response = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        from: '魔事院档案馆 <recovery@send.colanns.me>',
+        to: [email],
+        subject: '魔法少女生成器 ~ 登录密钥重置链接',
+        html: `<p>您好 <strong>${displayName}</strong>,</p>
+<p>请点击下方一次性链接重置登录密钥：</p>
+<p><a href="${resetUrl}">${resetUrl}</a></p>
+<p>如果这不是您的操作，请忽略本邮件。</p>`,
+        text: `您好 ${displayName},\n\n请访问以下一次性链接重置登录密钥：\n${resetUrl}\n\n如果这不是您的操作，请忽略本邮件。`,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('[auth][app] Resend 发送密码重置邮件失败：', response.status, errorText);
+    }
+  } catch (error) {
+    console.error('[auth][app] Resend 发送密码重置邮件异常：', error);
+  }
+};
+
 const onBetterAuthUserCreated = async (user: { id?: unknown; email?: unknown; name?: unknown }): Promise<void> => {
   const authUserId = toNonEmptyString(user.id);
   if (!authUserId) return;
@@ -123,6 +179,15 @@ export const getBetterAuthInstance = (): BetterAuthInstance | null => {
     ...withTrustedOrigins(),
     emailAndPassword: {
       enabled: true,
+      sendResetPassword: async ({ user, url }) => {
+        await sendPasswordResetEmailByResend({
+          user: {
+            email: user?.email,
+            name: user?.name,
+          },
+          url,
+        });
+      },
     },
     user: {
       changeEmail: {
