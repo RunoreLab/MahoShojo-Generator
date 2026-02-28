@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 
@@ -59,19 +59,12 @@ export function AccountSecurityPanel({ userId, username }: { userId: number | nu
   const [setupConfirmPassword, setSetupConfirmPassword] = useState('');
   const [revokeOtherSessions, setRevokeOtherSessions] = useState(true);
   const [newEmail, setNewEmail] = useState('');
-  const [resetToken, setResetToken] = useState('');
-  const [resetNewPassword, setResetNewPassword] = useState('');
-  const [resetConfirmPassword, setResetConfirmPassword] = useState('');
   const [setupNotice, setSetupNotice] = useState<Notice>(null);
   const [passwordNotice, setPasswordNotice] = useState<Notice>(null);
   const [emailNotice, setEmailNotice] = useState<Notice>(null);
-  const [forgotNotice, setForgotNotice] = useState<Notice>(null);
-  const [resetNotice, setResetNotice] = useState<Notice>(null);
   const [isSubmittingSetupPassword, setIsSubmittingSetupPassword] = useState(false);
   const [isSubmittingPassword, setIsSubmittingPassword] = useState(false);
   const [isSubmittingEmail, setIsSubmittingEmail] = useState(false);
-  const [isSubmittingForgotPassword, setIsSubmittingForgotPassword] = useState(false);
-  const [isSubmittingResetPassword, setIsSubmittingResetPassword] = useState(false);
 
   const migrationStatus = query.data ?? null;
   const isLegacySession = migrationStatus?.authSource === 'legacy-bearer';
@@ -79,14 +72,11 @@ export function AccountSecurityPanel({ userId, username }: { userId: number | nu
   const canSetInitialPassword = Boolean(userId) && hasPassword === false;
   const canChangePassword = Boolean(userId) && !isLegacySession && hasPassword === true;
   const canChangeEmail = Boolean(userId) && !isLegacySession;
-  const canResetPasswordByEmail = Boolean(userId) && hasPassword === true;
 
   const strength = evaluatePasswordStrength(newPassword);
   const strengthPercent = Math.round((strength.score / Math.max(1, strength.maxScore)) * 100);
   const setupStrength = evaluatePasswordStrength(setupNewPassword);
   const setupStrengthPercent = Math.round((setupStrength.score / Math.max(1, setupStrength.maxScore)) * 100);
-  const resetStrength = evaluatePasswordStrength(resetNewPassword);
-  const resetStrengthPercent = Math.round((resetStrength.score / Math.max(1, resetStrength.maxScore)) * 100);
 
   const passwordPolicyError = useMemo(() => {
     if (!newPassword) return '';
@@ -107,24 +97,6 @@ export function AccountSecurityPanel({ userId, username }: { userId: number | nu
     if (policy.ok) return '';
     return getPasswordPolicySummaryMessage(policy.issues);
   }, [setupNewPassword, username]);
-
-  const resetPasswordPolicyError = useMemo(() => {
-    if (!resetNewPassword) return '';
-    const policy = validatePasswordPolicy(resetNewPassword, {
-      username: username ?? undefined,
-      email: undefined,
-    });
-    if (policy.ok) return '';
-    return getPasswordPolicySummaryMessage(policy.issues);
-  }, [resetNewPassword, username]);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const token = new URLSearchParams(window.location.search).get('token');
-    if (typeof token === 'string' && token.trim()) {
-      setResetToken(token.trim());
-    }
-  }, []);
 
   const handleSetInitialPasswordSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -235,68 +207,6 @@ export function AccountSecurityPanel({ userId, username }: { userId: number | nu
     }
   };
 
-  const handleRequestPasswordReset = async () => {
-    setForgotNotice(null);
-    setResetNotice(null);
-
-    setIsSubmittingForgotPassword(true);
-    try {
-      const result = await authedJson<{ success: boolean; message?: string }>(
-        '/api/me/account/password/forgot',
-        'POST',
-        {},
-      );
-      setForgotNotice({ type: 'success', text: result.message || '重置邮件已发送，请查收邮箱' });
-    } catch (error) {
-      setForgotNotice({ type: 'error', text: error instanceof Error ? error.message : '发送重置邮件失败' });
-    } finally {
-      setIsSubmittingForgotPassword(false);
-    }
-  };
-
-  const handleResetPasswordSubmit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    setResetNotice(null);
-
-    const normalizedToken = resetToken.trim();
-    if (!normalizedToken) {
-      setResetNotice({ type: 'error', text: '请填写邮件中的重置令牌' });
-      return;
-    }
-    if (!resetNewPassword || !resetConfirmPassword) {
-      setResetNotice({ type: 'error', text: '请完整填写新密码与确认密码' });
-      return;
-    }
-    if (resetNewPassword !== resetConfirmPassword) {
-      setResetNotice({ type: 'error', text: '两次输入的新密码不一致' });
-      return;
-    }
-    const policy = validatePasswordPolicy(resetNewPassword, {
-      username: username ?? undefined,
-      email: undefined,
-    });
-    if (!policy.ok) {
-      setResetNotice({ type: 'error', text: getPasswordPolicySummaryMessage(policy.issues) || '新密码强度不足' });
-      return;
-    }
-
-    setIsSubmittingResetPassword(true);
-    try {
-      const result = await authedJson<{ success: boolean; message?: string }>('/api/me/account/password/reset', 'POST', {
-        token: normalizedToken,
-        newPassword: resetNewPassword,
-      });
-      setResetNotice({ type: 'success', text: result.message || '密码重置成功' });
-      setResetNewPassword('');
-      setResetConfirmPassword('');
-      await query.refetch();
-    } catch (error) {
-      setResetNotice({ type: 'error', text: error instanceof Error ? error.message : '密码重置失败' });
-    } finally {
-      setIsSubmittingResetPassword(false);
-    }
-  };
-
   if (!userId) {
     return (
       <div className="rounded-2xl border bg-white p-4 text-sm text-gray-700">
@@ -332,7 +242,7 @@ export function AccountSecurityPanel({ userId, username }: { userId: number | nu
         </div>
       ) : null}
 
-      <div className="mt-4 grid gap-4 md:grid-cols-2">
+      <div className="mt-4 space-y-4">
         {canSetInitialPassword ? (
           <form onSubmit={handleSetInitialPasswordSubmit} className="rounded-xl border bg-gray-50 p-3">
             <div className="text-sm font-medium text-gray-900">设置登录密码（迁移）</div>
@@ -516,115 +426,6 @@ export function AccountSecurityPanel({ userId, username }: { userId: number | nu
               }`}
             >
               {emailNotice.text}
-            </div>
-          ) : null}
-        </form>
-      </div>
-
-      <div className="mt-4 rounded-xl border bg-gray-50 p-3">
-        <div className="text-sm font-medium text-gray-900">忘记当前密码（邮件重置）</div>
-        <div className="mt-1 text-xs text-gray-500">
-          当你忘记当前密码时，可向当前账号邮箱发送重置邮件。收到邮件后，复制令牌并在下方完成重置。
-        </div>
-        {!canResetPasswordByEmail ? (
-          <div className="mt-2 text-xs text-yellow-800">
-            当前账号尚未进入“可邮件重置”状态。请先完成密码迁移或切换到密码登录后再操作。
-          </div>
-        ) : null}
-
-        <button
-          type="button"
-          onClick={handleRequestPasswordReset}
-          disabled={!canResetPasswordByEmail || isSubmittingForgotPassword}
-          className="mt-3 rounded-lg border bg-white px-3 py-2 text-xs hover:bg-gray-100 disabled:opacity-50"
-        >
-          {isSubmittingForgotPassword ? '发送中...' : '发送重置邮件'}
-        </button>
-
-        {forgotNotice ? (
-          <div
-            className={`mt-2 rounded px-2 py-1 text-xs ${
-              forgotNotice.type === 'success'
-                ? 'border border-green-200 bg-green-50 text-green-700'
-                : forgotNotice.type === 'info'
-                  ? 'border border-blue-200 bg-blue-50 text-blue-700'
-                  : 'border border-red-200 bg-red-50 text-red-700'
-            }`}
-          >
-            {forgotNotice.text}
-          </div>
-        ) : null}
-
-        <form onSubmit={handleResetPasswordSubmit} className="mt-4 border-t border-gray-200 pt-3">
-          <div className="text-xs font-medium text-gray-700">使用重置令牌设置新密码</div>
-
-          <label className="mt-3 block text-xs text-gray-600">重置令牌</label>
-          <input
-            type="text"
-            className="input-field mt-1"
-            value={resetToken}
-            onChange={(event) => setResetToken(event.target.value)}
-            required
-            disabled={!canResetPasswordByEmail || isSubmittingResetPassword}
-          />
-
-          <label className="mt-3 block text-xs text-gray-600">新密码</label>
-          <input
-            type="password"
-            className="input-field mt-1"
-            value={resetNewPassword}
-            onChange={(event) => setResetNewPassword(event.target.value)}
-            required
-            minLength={PASSWORD_MIN_LENGTH}
-            disabled={!canResetPasswordByEmail || isSubmittingResetPassword}
-          />
-
-          <div className="mt-2 rounded-md border border-gray-200 bg-white p-2">
-            <div className="flex items-center justify-between text-[11px] text-gray-600">
-              <span>强度</span>
-              <span>
-                {getPasswordStrengthLabel(resetStrength.level)}（{resetStrength.score}/{resetStrength.maxScore}）
-              </span>
-            </div>
-            <div className="mt-1 h-1.5 rounded-full bg-gray-200">
-              <div
-                className={`h-full rounded-full transition-all ${getStrengthBarClassName(resetStrength.score)}`}
-                style={{ width: `${resetStrengthPercent}%` }}
-              />
-            </div>
-          </div>
-          {resetPasswordPolicyError ? <div className="mt-1 text-xs text-red-600">{resetPasswordPolicyError}</div> : null}
-
-          <label className="mt-3 block text-xs text-gray-600">确认新密码</label>
-          <input
-            type="password"
-            className="input-field mt-1"
-            value={resetConfirmPassword}
-            onChange={(event) => setResetConfirmPassword(event.target.value)}
-            required
-            minLength={PASSWORD_MIN_LENGTH}
-            disabled={!canResetPasswordByEmail || isSubmittingResetPassword}
-          />
-
-          <button
-            type="submit"
-            className="mt-3 rounded-lg border bg-white px-3 py-2 text-xs hover:bg-gray-100 disabled:opacity-50"
-            disabled={!canResetPasswordByEmail || isSubmittingResetPassword}
-          >
-            {isSubmittingResetPassword ? '提交中...' : '使用令牌重置密码'}
-          </button>
-
-          {resetNotice ? (
-            <div
-              className={`mt-2 rounded px-2 py-1 text-xs ${
-                resetNotice.type === 'success'
-                  ? 'border border-green-200 bg-green-50 text-green-700'
-                  : resetNotice.type === 'info'
-                    ? 'border border-blue-200 bg-blue-50 text-blue-700'
-                    : 'border border-red-200 bg-red-50 text-red-700'
-              }`}
-            >
-              {resetNotice.text}
             </div>
           ) : null}
         </form>
