@@ -124,18 +124,14 @@ mock.module('@/lib/auth/user-auth-linking', () => ({
 }));
 
 const loadHandlers = async () => {
-  const [passwordModule, passwordSetModule, passwordForgotModule, passwordResetModule, emailModule] = await Promise.all([
+  const [passwordModule, passwordSetModule, emailModule] = await Promise.all([
     import('@/pages/api/me/account/password'),
     import('@/pages/api/me/account/password/set'),
-    import('@/pages/api/me/account/password/forgot'),
-    import('@/pages/api/me/account/password/reset'),
     import('@/pages/api/me/account/email'),
   ]);
   return {
     passwordHandler: passwordModule.default as (req: Request) => Promise<Response>,
     passwordSetHandler: passwordSetModule.default as (req: Request) => Promise<Response>,
-    passwordForgotHandler: passwordForgotModule.default as (req: Request) => Promise<Response>,
-    passwordResetHandler: passwordResetModule.default as (req: Request) => Promise<Response>,
     emailHandler: emailModule.default as (req: Request) => Promise<Response>,
   };
 };
@@ -206,64 +202,6 @@ describe('me account auth settings api', () => {
     expect(response.status).toBe(400);
     const payload = (await response.json()) as { error?: string };
     expect(payload.error).toBe('当前密码错误，请重新输入');
-  });
-
-  test('可通过 forgot 接口请求密码重置邮件', async () => {
-    const { passwordForgotHandler } = await loadHandlers();
-    state.authSource = 'better-auth-session';
-    state.authLink = { authUserId: 'auth-user-1' };
-    state.businessUser = { id: 1, email: 'old@example.com' };
-    state.bridgeCalls = [];
-    state.bridgeResponsesByPath = {
-      '/api/auth/request-password-reset': createJsonResponse(
-        { status: true, message: 'If this email exists in our system, check your email for the reset link' },
-        200,
-      ),
-    };
-    state.bridgeResponse = createJsonResponse({ status: true }, 200);
-
-    const response = await passwordForgotHandler(
-      new Request('https://example.com/api/me/account/password/forgot', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({}),
-      }),
-    );
-
-    expect(response.status).toBe(200);
-    expect(state.bridgeCalls[0]?.path).toBe('/api/auth/request-password-reset');
-  });
-
-  test('可通过 reset 接口使用令牌重置密码', async () => {
-    const { passwordResetHandler } = await loadHandlers();
-    state.authSource = 'better-auth-session';
-    state.bridgeCalls = [];
-    state.bridgeResponsesByPath = {
-      '/api/auth/reset-password': createJsonResponse({ status: true }, 200),
-    };
-    state.bridgeResponse = createJsonResponse({ status: true }, 200);
-    state.migrationStatus = {
-      hasAuthLink: true,
-      authUserId: 'auth-user-1',
-      hasPassword: true,
-      emailVerified: false,
-    };
-    state.migrationStatusAfterUpdate = null;
-    state.migrationStatusReadCount = 0;
-
-    const response = await passwordResetHandler(
-      new Request('https://example.com/api/me/account/password/reset', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          token: 'reset-token-1',
-          newPassword: 'Aq!9xK2m',
-        }),
-      }),
-    );
-
-    expect(response.status).toBe(200);
-    expect(state.bridgeCalls[0]?.path).toBe('/api/auth/reset-password');
   });
 
   test('legacy 无密码用户可设置初始密码（已映射账号）', async () => {
