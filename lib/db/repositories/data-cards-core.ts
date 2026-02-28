@@ -325,17 +325,17 @@ export const listUserDataCards = async (
 
   const updatedSortKey = sql`COALESCE(${dataCards.updatedAt}, ${dataCards.createdAt})`;
   const createdSortKey = sql`COALESCE(${dataCards.createdAt}, ${dataCards.updatedAt})`;
-  const rowIdSortKey = sql`rowid`;
+  const idSortKey = dataCards.id;
 
-  let orderBy: SQL[] = [desc(updatedSortKey), desc(rowIdSortKey)];
+  let orderBy: SQL[] = [desc(updatedSortKey), desc(idSortKey)];
   if (input.sortBy === 'likes') {
-    orderBy = [desc(dataCards.likeCount), desc(updatedSortKey), desc(rowIdSortKey)];
+    orderBy = [desc(dataCards.likeCount), desc(updatedSortKey), desc(idSortKey)];
   } else if (input.sortBy === 'usage') {
-    orderBy = [desc(dataCards.usageCount), desc(updatedSortKey), desc(rowIdSortKey)];
+    orderBy = [desc(dataCards.usageCount), desc(updatedSortKey), desc(idSortKey)];
   } else if (input.sortBy === 'favorites') {
-    orderBy = [desc(dataCards.favoriteCount), desc(updatedSortKey), desc(rowIdSortKey)];
+    orderBy = [desc(dataCards.favoriteCount), desc(updatedSortKey), desc(idSortKey)];
   } else if (input.sortBy === 'created_at') {
-    orderBy = [desc(createdSortKey), desc(rowIdSortKey)];
+    orderBy = [desc(createdSortKey), desc(idSortKey)];
   }
 
   const rows = await db
