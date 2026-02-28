@@ -16,11 +16,8 @@ interface StoryOptionsProps {
 
 export function StoryOptions({ languages, afterUserGuidance }: StoryOptionsProps) {
   const useBattleSelector = <T,>(selector: (state: BattleStoreState) => T) => useBattleStore(selector);
-  const battleMode = useBattleSelector((state) => state.battleMode);
   const storyLength = useBattleSelector((state) => state.storyLength);
   const setStoryLength = useBattleSelector((state) => state.setStoryLength);
-  const selectedLevel = useBattleSelector((state) => state.selectedLevel);
-  const setSelectedLevel = useBattleSelector((state) => state.setSelectedLevel);
   const selectedLanguage = useBattleSelector((state) => state.selectedLanguage);
   const setSelectedLanguage = useBattleSelector((state) => state.setSelectedLanguage);
   const settings = useBattleSelector((state) => state.settings);
@@ -31,12 +28,9 @@ export function StoryOptions({ languages, afterUserGuidance }: StoryOptionsProps
   return (
     <>
       <StoryOptionsPanel
-        battleMode={battleMode}
         isGenerating={isGenerating}
         enableUserGuidance={appConfig.ENABLE_ARENA_USER_GUIDANCE}
         languages={languages}
-        selectedLevel={selectedLevel}
-        onSelectedLevelChange={(value) => setSelectedLevel(value)}
         userGuidance={settings.userGuidance}
         onUserGuidanceChange={(value) => updateSettings({ userGuidance: value })}
         afterUserGuidance={afterUserGuidance}

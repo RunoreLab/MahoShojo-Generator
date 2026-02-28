@@ -340,6 +340,7 @@ export const useBattleStore = create<BattleStoreState>()(
         if ((persistedState as any)?.settings && typeof (persistedState as any).settings === 'object') {
           merged.settings = { ...currentState.settings, ...(persistedState as any).settings };
         }
+        merged.selectedLevel = '';
         return merged;
       },
       partialize: (state) => ({
@@ -347,7 +348,6 @@ export const useBattleStore = create<BattleStoreState>()(
         generationMode: state.generationMode,
         arenaFreeRankingEnabled: state.arenaFreeRankingEnabled,
         storyLength: state.storyLength,
-        selectedLevel: state.selectedLevel,
         selectedLanguage: state.selectedLanguage,
         settings: state.settings,
       }),

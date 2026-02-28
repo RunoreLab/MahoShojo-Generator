@@ -402,7 +402,6 @@ export const useBattleEngine = () => {
   const scenario = useBattleSelector((state) => state.scenario);
   const auxScenarios = useBattleSelector((state) => state.auxScenarios);
   const selectedQuestionnaires = useBattleSelector((state) => state.selectedQuestionnaires);
-  const selectedLevel = useBattleSelector((state) => state.selectedLevel);
   const selectedLanguage = useBattleSelector((state) => state.selectedLanguage);
   const storyLength = useBattleSelector((state) => state.storyLength);
   const settings = useBattleSelector((state) => state.settings);
@@ -589,7 +588,6 @@ export const useBattleEngine = () => {
           sourceDataCardId: combatant.sourceDataCardId,
           sourceDataCardUpdatedAt: combatant.sourceDataCardUpdatedAt,
         })),
-        selectedLevel,
         mode: battleMode,
         arenaFreeRankingEnabled,
         userGuidance: settings.userGuidance,
@@ -1592,7 +1590,6 @@ export const useBattleEngine = () => {
     selectedQuestionnaires,
     userProviderConfig,
     settings,
-    selectedLevel,
     selectedLanguage,
     storyLength,
     adjudicationEvents,

@@ -379,7 +379,6 @@ async function resolveHandler(req: Request): Promise<Response> {
           isPreset: false,
           characterGuidance: p.characterGuidance ?? null,
         })),
-        selectedLevel: rules.selectedLevel,
         mode: rules.mode,
           ...(rules.mode === 'scenario' && scenarioPayload
             ? {

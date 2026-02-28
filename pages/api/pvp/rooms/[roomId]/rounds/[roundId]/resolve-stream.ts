@@ -435,7 +435,6 @@ async function resolveStreamHandler(req: Request): Promise<Response> {
         isPreset: false,
         characterGuidance: p.characterGuidance ?? null,
       })),
-      selectedLevel: rules.selectedLevel,
       mode: rules.mode,
       ...(rules.mode === 'scenario' && scenarioPayload
         ? {

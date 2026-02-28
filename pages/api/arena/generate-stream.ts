@@ -169,7 +169,6 @@ async function handler(req: NextRequest): Promise<Response> {
             const body = await req.json();
             const {
                 combatants,
-            selectedLevel,
             mode = 'classic',
             arenaFreeRankingEnabled,
             userGuidance,
@@ -217,7 +216,7 @@ async function handler(req: NextRequest): Promise<Response> {
 
 		        snapshotMode = typeof mode === 'string' ? mode : 'classic';
 		        snapshotLanguage = normalizeOptionalString(language);
-		        snapshotSelectedLevel = normalizeOptionalString(selectedLevel);
+		        snapshotSelectedLevel = null;
 		        snapshotStoryLength = normalizeOptionalString(storyLength);
 
           const parsePvpContext = (value: unknown): { roomId: string; matchId: string; roundId: string } | null => {
@@ -569,7 +568,6 @@ async function handler(req: NextRequest): Promise<Response> {
 	        const isStrictRankedMatchRequest =
 	            mode === 'classic'
 	            && String(language ?? '').trim() === 'zh-CN'
-	            && !String(selectedLevel ?? '').trim()
 	            && !String(userGuidance ?? '').trim()
 	            && !hasQuestionnaireLore
 	            && resolvedReadArenaHistory === false
@@ -587,7 +585,6 @@ async function handler(req: NextRequest): Promise<Response> {
 	            finalInternalGuidance,
             needsWorldviewWarning,
             language,
-            selectedLevel,
             mode,
             scenario,
             normalizedAuxScenarios,
@@ -791,7 +788,7 @@ async function handler(req: NextRequest): Promise<Response> {
                     scenarioDataCardId: typeof scenarioSourceDataCardId === 'string' ? scenarioSourceDataCardId : null,
                     scenarioDataCardUpdatedAt: typeof scenarioSourceDataCardUpdatedAt === 'string' ? scenarioSourceDataCardUpdatedAt : null,
 	                    language: normalizeOptionalString(language),
-	                    selectedLevel: normalizeOptionalString(selectedLevel),
+	                    selectedLevel: null,
 	                    storyLength: normalizeOptionalString(storyLength),
                     pvpRoomId: snapshotPvpRoomId,
                     pvpMatchId: snapshotPvpMatchId,

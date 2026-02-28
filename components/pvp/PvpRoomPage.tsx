@@ -782,11 +782,6 @@ export function PvpRoomPage() {
       return '历战记录读取条数需要在 1-999 之间';
     }
 
-    const selectedLevel = typeof (rulesDraft as any).selectedLevel === 'string' ? String((rulesDraft as any).selectedLevel).trim() : '';
-    if (selectedLevel && !['种级', '芽级', '叶级', '蕾级', '花级'].includes(selectedLevel)) {
-      return '等级不合法（需为 种级/芽级/叶级/蕾级/花级 或留空）';
-    }
-
     const storyLength = typeof (rulesDraft as any).storyLength === 'string' ? String((rulesDraft as any).storyLength).trim() : 'default';
     if (!['default', 'short', 'standard', 'detailed', 'long'].includes(storyLength)) {
       return '期望字数设置不合法';
@@ -2307,7 +2302,7 @@ export function PvpRoomPage() {
                     )}
                     {rules && (
                       <div className="mt-1 text-xs text-gray-600 whitespace-pre-wrap">
-                        生成设置：方式 {rules.generationMode === 'stream' ? '流式' : '非流式'}；历战 读 {String(rules.readArenaHistory)} / 写 {String(rules.writeArenaHistory)}；状态 读 {String(rules.readCurrentState)} / 写 {String(rules.writeCurrentState)}；等级 {rules.selectedLevel || '默认'}；引导 {rules.userGuidance?.trim() ? `“${rules.userGuidance.trim()}”` : '无'}；字数 {rules.storyLength || 'default'}；语言 {rules.language?.trim() || '默认'}
+                        生成设置：方式 {rules.generationMode === 'stream' ? '流式' : '非流式'}；历战 读 {String(rules.readArenaHistory)} / 写 {String(rules.writeArenaHistory)}；状态 读 {String(rules.readCurrentState)} / 写 {String(rules.writeCurrentState)}；引导 {rules.userGuidance?.trim() ? `“${rules.userGuidance.trim()}”` : '无'}；字数 {rules.storyLength || 'default'}；语言 {rules.language?.trim() || '默认'}
                       </div>
                     )}
                     {rules?.bestOf?.enabled && latestRound ? (
@@ -2999,13 +2994,10 @@ export function PvpRoomPage() {
 
                           <div className="mt-3">
                             <StoryOptionsPanel
-                              battleMode={rulesDraft.mode}
                               isGenerating={rulesMutation.isPending}
                               enableUserGuidance={appConfig.ENABLE_ARENA_USER_GUIDANCE}
                               languages={languagesQuery.data}
                               allowEmptyLanguage={true}
-                              selectedLevel={rulesDraft.selectedLevel}
-                              onSelectedLevelChange={(value) => setRulesDraft((r) => (r ? { ...r, selectedLevel: value } : r))}
                               userGuidance={rulesDraft.userGuidance}
                               onUserGuidanceChange={(value) => setRulesDraft((r) => (r ? { ...r, userGuidance: value } : r))}
                               afterUserGuidance={

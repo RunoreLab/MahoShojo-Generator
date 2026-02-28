@@ -9,24 +9,11 @@ export type LanguageOption = {
   name: string;
 };
 
-const battleLevels = [
-  { value: '', label: '默认 (AI自动分配)' },
-  { value: '种级', label: '种级 🌱' },
-  { value: '芽级', label: '芽级 🍃' },
-  { value: '叶级', label: '叶级 🌿' },
-  { value: '蕾级', label: '蕾级 🌸' },
-  { value: '花级', label: '花级 🌺' },
-];
-
 type Props = {
-  battleMode: string;
   isGenerating: boolean;
   enableUserGuidance: boolean;
   languages?: LanguageOption[];
   allowEmptyLanguage?: boolean;
-
-  selectedLevel: string;
-  onSelectedLevelChange: (value: string) => void;
 
   userGuidance: string;
   onUserGuidanceChange: (value: string) => void;
@@ -40,13 +27,10 @@ type Props = {
 };
 
 export function StoryOptionsPanel({
-  battleMode,
   isGenerating,
   enableUserGuidance,
   languages,
   allowEmptyLanguage = false,
-  selectedLevel,
-  onSelectedLevelChange,
   userGuidance,
   onUserGuidanceChange,
   afterUserGuidance,
@@ -70,29 +54,6 @@ export function StoryOptionsPanel({
 
   return (
     <>
-      {battleMode !== 'daily' && (
-        <div className="input-group">
-          <label htmlFor="level-select" className="input-label">
-            指定平均等级 (可选):
-          </label>
-          <select
-            id="level-select"
-            className="input-field"
-            style={{ cursor: 'pointer' }}
-            disabled={isGenerating}
-            value={selectedLevel}
-            onChange={(e) => onSelectedLevelChange(e.target.value)}
-          >
-            {battleLevels.map((level) => (
-              <option key={level.value} value={level.value}>
-                {level.label}
-              </option>
-            ))}
-          </select>
-          <p className="text-xs text-gray-500 mt-1">默认由 AI 根据角色强度自动分配，以保证战斗平衡和观赏性。</p>
-        </div>
-      )}
-
       {enableUserGuidance && (
         <div className="input-group">
           <label htmlFor="arena-story-guidance" className="input-label">

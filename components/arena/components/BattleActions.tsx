@@ -88,7 +88,6 @@ export function BattleActions() {
   const battleMode = useBattleSelector((state) => state.battleMode);
   const scenario = useBattleSelector((state) => state.scenario);
   const auxScenarios = useBattleSelector((state) => state.auxScenarios);
-  const selectedLevel = useBattleSelector((state) => state.selectedLevel);
   const selectedLanguage = useBattleSelector((state) => state.selectedLanguage);
   const storyLength = useBattleSelector((state) => state.storyLength);
   const settings = useBattleSelector((state) => state.settings);
@@ -185,7 +184,6 @@ export function BattleActions() {
 
     const payload: Record<string, unknown> = {
       mode: battleMode,
-      selectedLevel,
       language: selectedLanguage,
       storyLength,
       userGuidance: settings.userGuidance,

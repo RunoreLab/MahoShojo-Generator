@@ -137,7 +137,6 @@ const buildQuestionnaireLoreText = (questionnaires: RequestQuestionnaire[]): str
 	        const body = await req.json();
 	        const {
 	            combatants,
-	            selectedLevel,
             mode = 'classic',
             arenaFreeRankingEnabled,
             userGuidance,
@@ -313,7 +312,6 @@ const buildQuestionnaireLoreText = (questionnaires: RequestQuestionnaire[]): str
         const isStrictRankedMatchRequest =
             mode === 'classic'
             && String(language ?? '').trim() === 'zh-CN'
-            && !String(selectedLevel ?? '').trim()
             && !String(userGuidance ?? '').trim()
             && !hasQuestionnaireLore
             && resolvedReadArenaHistory === false
@@ -462,7 +460,6 @@ const buildQuestionnaireLoreText = (questionnaires: RequestQuestionnaire[]): str
                 null,
                 needsWorldviewWarning,
                 language,
-                selectedLevel,
                 mode,
                 scenario,
                 normalizedAuxScenarios,
@@ -649,7 +646,7 @@ const buildQuestionnaireLoreText = (questionnaires: RequestQuestionnaire[]): str
 	                scenarioDataCardId: typeof scenarioSourceDataCardId === 'string' ? scenarioSourceDataCardId : null,
 	                scenarioDataCardUpdatedAt: typeof scenarioSourceDataCardUpdatedAt === 'string' ? scenarioSourceDataCardUpdatedAt : null,
 	                language: normalizeOptionalString(language),
-	                selectedLevel: normalizeOptionalString(selectedLevel),
+	                selectedLevel: null,
 	                storyLength: normalizeOptionalString(storyLength),
                 readArenaHistory: typeof resolvedReadArenaHistory === 'boolean' ? resolvedReadArenaHistory : null,
                 arenaHistoryReadLimit: resolvedReadArenaHistory

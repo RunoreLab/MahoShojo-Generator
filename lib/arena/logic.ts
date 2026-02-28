@@ -230,7 +230,6 @@ export const createPromptBuilder = (
     internalGuidance: string | null,
     worldviewWarning: boolean,
     language: string,
-    selectedLevel: string | undefined,
     mode: string | undefined,
     scenario: any | null,
     auxScenarios: any[] | null,
@@ -385,10 +384,6 @@ export const createPromptBuilder = (
 
     finalPrompt += `请严格按照当前模式的逻辑进行创作。`;
 
-    if (selectedLevel && mode !== 'daily' && mode !== 'scenario') {
-        finalPrompt += `\n【等级指定】\n请将登场角色中魔法少女的平均等级设定为【${selectedLevel}】，并严格根据该等级的能力限制进行推演和描述。`;
-    }
-
     if (userGuidance) {
         finalPrompt += `\n\n【故事引导】\n请创作这样的故事： "${userGuidance}"`;
     }
@@ -422,7 +417,6 @@ export const createStreamPromptBuilder = (
     internalGuidance: string | null,
     worldviewWarning: boolean,
     language: string,
-    selectedLevel: string | undefined,
     mode: string | undefined,
     scenario: any | null,
     auxScenarios: any[] | null,
@@ -578,10 +572,6 @@ export const createStreamPromptBuilder = (
     }
 
     finalPrompt += `请严格按照当前模式的逻辑进行创作。`;
-
-    if (selectedLevel && mode !== 'daily' && mode !== 'scenario') {
-        finalPrompt += `\n【等级指定】\n请将登场角色中魔法少女的平均等级设定为【${selectedLevel}】，并严格根据该等级的能力限制进行推演和描述。`;
-    }
 
     if (userGuidance) {
         finalPrompt += `\n\n【故事引导】\n请创作这样的故事： "${userGuidance}"`;
