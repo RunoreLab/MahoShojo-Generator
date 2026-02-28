@@ -85,6 +85,7 @@ mock.module('@/lib/auth/better-auth-subrequest', () => ({
 mock.module('@/lib/db/drizzle', () => ({
   getDrizzleDbFromRuntime: () => ({ __mockDb: true }),
   getRuntimeD1Client: () => null,
+  getRuntimeD1ClientWithoutHttpFallback: () => null,
   createDrizzleDb: () => ({ __mockDb: true }),
 }));
 
@@ -182,6 +183,29 @@ describe('me account auth settings api', () => {
 
     expect(response.status).toBe(200);
     expect(state.bridgeCalls[0]?.path).toBe('/api/auth/change-password');
+  });
+
+  test('修改密码遇到英文 Invalid password 错误时会返回中文提示', async () => {
+    const { passwordHandler } = await loadHandlers();
+    state.authSource = 'better-auth-session';
+    state.bridgeCalls = [];
+    state.bridgeResponsesByPath = {};
+    state.bridgeResponse = createJsonResponse({ error: 'Invalid password' }, 400);
+
+    const response = await passwordHandler(
+      new Request('https://example.com/api/me/account/password', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          currentPassword: 'Wrong!Pass1',
+          newPassword: 'Aq!9xK2m',
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    const payload = (await response.json()) as { error?: string };
+    expect(payload.error).toBe('当前密码错误，请重新输入');
   });
 
   test('可通过 forgot 接口请求密码重置邮件', async () => {
