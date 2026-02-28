@@ -57,6 +57,55 @@
 
 ## 3. 上线前准备清单（必须完成）
 
+### 3.0 Auth 环境变量配置指南（生产站示例：`https://mahoshojo.colanns.me/`）
+
+> 适用场景：Cloudflare Pages 生产环境启用 Better Auth（密码注册/登录）。
+
+#### 必填项（生产）
+
+1. Better Auth 开关与密钥：
+   - `BETTER_AUTH_ENABLED=true`
+   - `BETTER_AUTH_SECRET=<长度至少 32 的随机字符串>`
+2. Better Auth 站点地址：
+   - `BETTER_AUTH_URL=https://mahoshojo.colanns.me`
+3. Better Auth 信任来源：
+   - `BETTER_AUTH_TRUSTED_ORIGINS=https://mahoshojo.colanns.me`
+   - 若生产同时使用 `www` 域名，请追加：`https://www.mahoshojo.colanns.me`
+4. 人机验证（前后端）：
+   - `NEXT_PUBLIC_TURNSTILE_SITE_KEY=<Turnstile Site Key>`
+   - `TURNSTILE_SECRET_KEY=<Turnstile Secret Key>`
+
+#### 推荐同时核对
+
+1. D1 访问凭据：
+   - `CLOUDFLARE_ACCOUNT_ID`
+   - `CLOUDFLARE_API_TOKEN`
+   - `D1_DATABASE_ID`
+2. 若使用邮件找回：
+   - `RESEND_API_KEY`
+
+#### Dashboard 配置步骤（建议）
+
+1. 打开 Cloudflare Dashboard → Pages → 本项目。
+2. 进入 `Settings -> Environment variables`。
+3. 在 `Production` 环境逐项新增/更新上述变量，保存后触发一次重新部署。
+4. 若 `Preview` 也要验证密码链路，同步在 `Preview` 环境设置一套对应值（`BETTER_AUTH_URL` 指向预发域名）。
+
+#### 易错项（本次回归已命中）
+
+1. `BETTER_AUTH_ENABLED` 必须是 `true`（不要写成 `ture`）。
+2. `BETTER_AUTH_URL` 必须与实际访问域名一致且带 `https://`。
+3. `BETTER_AUTH_TRUSTED_ORIGINS` 必须覆盖实际前端来源，否则会出现 Cookie/会话异常。
+4. Turnstile 的 Site Key 与 Secret Key 必须同一套环境（生产/测试不可混用）。
+
+#### 最小验收（生产域名）
+
+1. `POST https://mahoshojo.colanns.me/api/auth/register` 不再返回 `BETTER_AUTH_DISABLED / BETTER_AUTH_MISCONFIGURED / BETTER_AUTH_DB_UNAVAILABLE`。
+2. `POST https://mahoshojo.colanns.me/api/auth/login`（`mode=password`）可返回 `200` 并携带 `Set-Cookie: better-auth.session_token=...`。
+3. 携带该 Cookie 调用 `POST https://mahoshojo.colanns.me/api/auth/verify` 返回 `200` 且包含 `user.id`。
+
+---
+
 1. 确认上线窗口与回滚负责人（代码 + 数据库双负责人）。
 2. 在 Cloudflare 生产环境设置/复核以下变量（若要启用 Better Auth）：
    - `BETTER_AUTH_ENABLED=true`

@@ -49,6 +49,8 @@ export const createBusinessUser = async (
       username: input.username,
       email: input.email,
       authKey: input.authKey,
+      isAdmin: false,
+      isReviewExempt: false,
     });
   } catch {
     return null;
