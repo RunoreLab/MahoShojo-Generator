@@ -5,6 +5,7 @@ import {
   removeDeckFavorite,
 } from '@/lib/database/deck-favorites';
 import { requireAuthUser } from '@/lib/auth/server';
+import { mapDeckReadRows } from '@/lib/deck-read-mappers';
 
 export const runtime = 'edge';
 
@@ -26,7 +27,8 @@ export default async function handler(req: Request): Promise<Response> {
       }
 
       const decks = await getUserDeckFavorites(auth.user.id);
-      return new Response(JSON.stringify({ success: true, decks }), {
+      const mappedDecks = mapDeckReadRows(decks);
+      return new Response(JSON.stringify({ success: true, decks: mappedDecks }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' }
       });
@@ -108,4 +110,3 @@ export default async function handler(req: Request): Promise<Response> {
     headers: { 'Content-Type': 'application/json' }
   });
 }
-

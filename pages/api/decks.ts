@@ -3,6 +3,8 @@ import { getUserDataCardCapacity } from '@/lib/database/users';
 import { requireAuthUser } from '@/lib/auth/server';
 import { config } from '@/lib/config';
 import { quickCheck } from '@/lib/sensitive-word-filter';
+import { mapDeckReadRows } from '@/lib/deck-read-mappers';
+import { normalizeDeckVisibilityInput } from '@/lib/deck-write-mappers';
 
 export const runtime = 'edge';
 
@@ -20,8 +22,9 @@ export default async function handler(req: Request): Promise<Response> {
         getUserDataCardCapacity(userId, config.DEFAULT_DATA_CARD_CAPACITY),
         countUserDecks(userId)
       ]);
+      const mappedDecks = mapDeckReadRows(decks);
 
-      return new Response(JSON.stringify({ success: true, decks, capacity, deckCount }), {
+      return new Response(JSON.stringify({ success: true, decks: mappedDecks, capacity, deckCount }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' }
       });
@@ -36,7 +39,10 @@ export default async function handler(req: Request): Promise<Response> {
 
   if (req.method === 'POST') {
     try {
-      const { name, description, isPublic } = await req.json();
+      const body = await req.json();
+      const name = body?.name;
+      const description = body?.description;
+      const isPublic = body?.isPublic ?? body?.is_public;
       const normalizedName = typeof name === 'string' ? name.trim() : '';
       const normalizedDescription = typeof description === 'string' ? description.trim() : '';
 
@@ -67,8 +73,7 @@ export default async function handler(req: Request): Promise<Response> {
         });
       }
 
-      let normalizedPublic = typeof isPublic === 'number' ? isPublic : (isPublic ? 1 : 0);
-      if (!isAdmin && normalizedPublic === -1) normalizedPublic = 0;
+      const normalizedPublic = normalizeDeckVisibilityInput(isPublic, { allowBanned: isAdmin });
 
       const result = await createDeck(userId, normalizedName, normalizedDescription, normalizedPublic);
       if (!result.success) {
@@ -93,7 +98,11 @@ export default async function handler(req: Request): Promise<Response> {
 
   if (req.method === 'PUT') {
     try {
-      const { id, name, description, isPublic } = await req.json();
+      const body = await req.json();
+      const id = body?.id;
+      const name = body?.name;
+      const description = body?.description;
+      const isPublic = body?.isPublic ?? body?.is_public;
       const deckId = typeof id === 'string' ? id.trim() : '';
       if (!deckId) {
         return new Response(JSON.stringify({ error: '缺少卡组ID' }), {
@@ -106,9 +115,7 @@ export default async function handler(req: Request): Promise<Response> {
       if (typeof name === 'string') payload.name = name.trim();
       if (typeof description === 'string') payload.description = description.trim();
       if (isPublic !== undefined) {
-        let normalizedPublic = typeof isPublic === 'number' ? isPublic : (isPublic ? 1 : 0);
-        if (!isAdmin && normalizedPublic === -1) normalizedPublic = 0;
-        payload.isPublic = normalizedPublic;
+        payload.isPublic = normalizeDeckVisibilityInput(isPublic, { allowBanned: isAdmin });
       }
 
       const sensitiveWordResult = await quickCheck(`${payload.name || ''} ${payload.description || ''}`);
@@ -189,4 +196,3 @@ export default async function handler(req: Request): Promise<Response> {
     headers: { 'Content-Type': 'application/json' }
   });
 }
-

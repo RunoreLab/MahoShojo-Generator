@@ -2,6 +2,7 @@ import { getDeckCardsWithAccess } from '@/lib/database/deck-cards';
 import { getDeckById, getPublicDecks } from '@/lib/database/decks';
 import { getAuthUser } from '@/lib/auth/server';
 import { getDeckStatus } from '@/lib/deck-status';
+import { mapDeckReadRow, mapDeckReadRows } from '@/lib/deck-read-mappers';
 
 export const runtime = 'edge';
 
@@ -42,9 +43,10 @@ export default async function handler(req: Request): Promise<Response> {
       });
     }
 
+    const normalizedSortBy = sortByRaw === 'createdAt' ? 'created_at' : sortByRaw;
     const sortBy =
-      sortByRaw === 'likes' || sortByRaw === 'favorites' || sortByRaw === 'created_at'
-        ? sortByRaw
+      normalizedSortBy === 'likes' || normalizedSortBy === 'favorites' || normalizedSortBy === 'created_at'
+        ? normalizedSortBy
         : undefined;
 
     if (id) {
@@ -57,15 +59,17 @@ export default async function handler(req: Request): Promise<Response> {
       }
 
       const cards = await getDeckCardsWithAccess(id, viewer?.id);
+      const mappedDeck = mapDeckReadRow(deck);
 
-      return new Response(JSON.stringify({ success: true, deck, cards }), {
+      return new Response(JSON.stringify({ success: true, deck: mappedDeck, cards }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' }
       });
     }
 
     const decks = await getPublicDecks(limit, offset, search || undefined, sortBy);
-    return new Response(JSON.stringify({ success: true, decks }), {
+    const mappedDecks = mapDeckReadRows(decks);
+    return new Response(JSON.stringify({ success: true, decks: mappedDecks }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' }
     });

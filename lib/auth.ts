@@ -1,5 +1,6 @@
 import type { UserBadge } from '@/types/badge';
 import { signOutBetterAuthSession } from '@/lib/auth/logout';
+import { mapDeckDetailPayload, mapDeckListPayload } from '@/lib/deck-client-mappers';
 
 const STORAGE_KEY = 'mahoshojo_auth';
 const ENCRYPTION_KEY = 'mahoshojo_2024_secret_encryption_key';
@@ -613,7 +614,8 @@ export const deckApi = {
       });
 
       if (!response.ok) return null;
-      return response.json();
+      const data = await response.json();
+      return mapDeckListPayload(data);
     } catch (error) {
       console.error('Get my decks error:', error);
       return null;
@@ -691,7 +693,8 @@ export const deckApi = {
       });
 
       if (!response.ok) return null;
-      return response.json();
+      const data = await response.json();
+      return mapDeckDetailPayload(data);
     } catch (error) {
       console.error('Get deck cards error:', error);
       return null;
@@ -758,7 +761,9 @@ export const deckApi = {
     }
   },
 
-  async getPublicDecks(params: { limit: number; offset: number; search?: string; sortBy?: 'likes' | 'favorites' | 'created_at' }): Promise<any[]> {
+  async getPublicDecks(
+    params: { limit: number; offset: number; search?: string; sortBy?: 'likes' | 'favorites' | 'createdAt' | 'created_at' }
+  ): Promise<any[]> {
     try {
       const qs = new URLSearchParams();
       qs.set('limit', String(params.limit));
@@ -769,7 +774,7 @@ export const deckApi = {
       const response = await fetch(`/api/public-decks?${qs.toString()}`);
       if (!response.ok) return [];
       const data = await response.json();
-      return data.decks || [];
+      return mapDeckListPayload(data).decks;
     } catch (error) {
       console.error('Get public decks error:', error);
       return [];
@@ -780,7 +785,8 @@ export const deckApi = {
     try {
       const response = await fetch(`/api/public-decks?id=${encodeURIComponent(deckId)}`);
       if (!response.ok) return null;
-      return response.json();
+      const data = await response.json();
+      return mapDeckDetailPayload(data);
     } catch (error) {
       console.error('Get public deck detail error:', error);
       return null;
@@ -833,7 +839,7 @@ export const deckFavoritesApi = {
       });
       if (!response.ok) return [];
       const data = await response.json();
-      return data.decks || [];
+      return mapDeckListPayload(data).decks;
     } catch (error) {
       console.error('Get deck favorites error:', error);
       return [];
