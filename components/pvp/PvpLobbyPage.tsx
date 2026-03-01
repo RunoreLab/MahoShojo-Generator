@@ -17,6 +17,7 @@ import { ScenarioPresetGridPicker } from '@/components/ScenarioPresetGridPicker'
 import { useScenarioPresetQuery } from '@/components/arena/hooks/useArenaData';
 import { authStorage } from '@/lib/auth';
 import { inferTemplate } from '@/lib/data-card-converter';
+import { mapPublicDataCardRowToBattleSelectionPayload } from '@/lib/data-card-read-mappers';
 import { useAuth } from '@/lib/useAuth';
 import type { PvpRoomRules, PvpScenarioSelection } from '@/lib/pvp/types';
 import type { ScenarioPreset } from '@/lib/scenario-presets';
@@ -147,16 +148,8 @@ export function PvpLobbyPage() {
       if (!response.ok || !result?.success) {
         throw new Error(result?.error || '无法获取随机情景');
       }
-      const cardData = JSON.parse(result.card.data);
-      await handleSelectScenarioCard({
-        ...cardData,
-        _cardId: result.card.id,
-        _cardName: result.card.name,
-        _isPublic: result.card.is_public,
-        _updatedAt: result.card.updated_at,
-        _createdAt: result.card.created_at,
-        _author: result.card.username || '未知',
-      });
+      const payload = mapPublicDataCardRowToBattleSelectionPayload(result.card);
+      await handleSelectScenarioCard(payload);
     } catch (e) {
       setError(`❌ 随机匹配失败: ${e instanceof Error ? e.message : '未知错误'}`);
     } finally {

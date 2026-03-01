@@ -3,6 +3,7 @@
 import { useCallback } from 'react';
 
 import { inferTemplate } from '@/lib/data-card-converter';
+import { mapPublicDataCardRowToBattleSelectionPayload } from '@/lib/data-card-read-mappers';
 import { generateRandomCanshou, generateRandomMagicalGirl } from '@/lib/random-character-generator';
 
 import { useBattleStore } from '../stores/useBattleStore';
@@ -302,20 +303,8 @@ export const useBattleActions = () => {
         if (!response.ok || !result.success) {
           throw new Error(result.error || '无法获取随机数据');
         }
-        const cardData = JSON.parse(result.card.data);
-        await handleSelectDataCard({
-          ...cardData,
-          _cardId: result.card.id,
-          _cardName: result.card.name,
-          _cardDescription: result.card.description || '',
-          _isPublic: result.card.is_public,
-          _updatedAt: result.card.updated_at,
-          _createdAt: result.card.created_at,
-          _author: result.card.username || '未知',
-          _likeCount: typeof result.card.like_count === 'number' ? result.card.like_count : undefined,
-          _favoriteCount: typeof result.card.favorite_count === 'number' ? result.card.favorite_count : undefined,
-          _usageCount: typeof result.card.usage_count === 'number' ? result.card.usage_count : undefined,
-        });
+        const payload = mapPublicDataCardRowToBattleSelectionPayload(result.card);
+        await handleSelectDataCard(payload);
       } catch (error) {
         setError(`❌ 随机匹配失败: ${error instanceof Error ? error.message : '未知错误'}`);
       } finally {
@@ -443,23 +432,8 @@ export const useBattleActions = () => {
       if (!response.ok || !result.success) {
         throw new Error(result.error || '无法获取随机数据');
       }
-      const cardData = JSON.parse(result.card.data);
-      await handleToggleAuxScenarioDataCard(
-        {
-          ...cardData,
-          _cardId: result.card.id,
-          _cardName: result.card.name,
-          _cardDescription: result.card.description || '',
-          _isPublic: result.card.is_public,
-          _updatedAt: result.card.updated_at,
-          _createdAt: result.card.created_at,
-          _author: result.card.username || '未知',
-          _likeCount: typeof result.card.like_count === 'number' ? result.card.like_count : undefined,
-          _favoriteCount: typeof result.card.favorite_count === 'number' ? result.card.favorite_count : undefined,
-          _usageCount: typeof result.card.usage_count === 'number' ? result.card.usage_count : undefined,
-        },
-        true
-      );
+      const payload = mapPublicDataCardRowToBattleSelectionPayload(result.card);
+      await handleToggleAuxScenarioDataCard(payload, true);
     } catch (error) {
       setError(`❌ 随机匹配失败: ${error instanceof Error ? error.message : '未知错误'}`);
     } finally {

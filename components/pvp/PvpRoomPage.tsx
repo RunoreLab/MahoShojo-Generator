@@ -32,6 +32,7 @@ import { authStorage } from '@/lib/auth';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { useCooldown } from '@/lib/cooldown';
 import { inferTemplate } from '@/lib/data-card-converter';
+import { mapPublicDataCardRowToBattleSelectionPayload } from '@/lib/data-card-read-mappers';
 	import { config as appConfig } from '@/lib/config';
 	import { useAuth } from '@/lib/useAuth';
 	import { buildCustomProviderPayload, isUsingUserProvidedKey } from '@/lib/ai/custom-provider';
@@ -1783,16 +1784,8 @@ export function PvpRoomPage() {
       if (!response.ok || !result?.success) {
         throw new Error(result?.error || '无法获取随机情景');
       }
-      const cardData = JSON.parse(result.card.data);
-      await handleSelectScenarioCard({
-        ...cardData,
-        _cardId: result.card.id,
-        _cardName: result.card.name,
-        _isPublic: result.card.is_public,
-        _updatedAt: result.card.updated_at,
-        _createdAt: result.card.created_at,
-        _author: result.card.username || '未知',
-      });
+      const payload = mapPublicDataCardRowToBattleSelectionPayload(result.card);
+      await handleSelectScenarioCard(payload);
     } catch (e) {
       setError(`❌ 随机匹配失败: ${e instanceof Error ? e.message : '未知错误'}`);
     } finally {
@@ -2098,21 +2091,8 @@ export function PvpRoomPage() {
         });
       }
 
-      const card = data.card;
-      const parsed = JSON.parse(card.data);
-      handleSelectDataCardFromModal({
-        ...parsed,
-        _cardId: card.id,
-        _cardName: card.name,
-        _cardDescription: card.description || '',
-        _isPublic: Boolean(card.is_public === 1 || card.is_public === true),
-        _updatedAt: card.updated_at,
-        _createdAt: card.created_at,
-        _author: card.username || '未知',
-        _likeCount: typeof card.like_count === 'number' ? card.like_count : undefined,
-        _favoriteCount: typeof card.favorite_count === 'number' ? card.favorite_count : undefined,
-        _usageCount: typeof card.usage_count === 'number' ? card.usage_count : undefined,
-      });
+      const payload = mapPublicDataCardRowToBattleSelectionPayload(data.card);
+      handleSelectDataCardFromModal(payload);
     } catch (e) {
       setError(e instanceof Error ? e.message : '随机匹配失败');
     } finally {

@@ -15,6 +15,7 @@ import { buildSafeFileName } from '@/lib/client/fileName';
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
 import { useCooldown } from '@/lib/cooldown';
 import { inferTemplate, type InferableTemplate } from '@/lib/data-card-converter';
+import { mapPublicDataCardRowToBattleSelectionPayload } from '@/lib/data-card-read-mappers';
 import { computeTechIndex } from '@/lib/metrics/techIndex';
 import {
   buildArenaDefaultScenario,
@@ -789,20 +790,7 @@ export function TavernExportPanel() {
       }
 
       const card = result.card;
-      const json = typeof card?.data === 'string' ? JSON.parse(card.data) : card?.data;
-      const payload = {
-        ...(json && typeof json === 'object' ? json : {}),
-        _cardId: card.id,
-        _cardName: card.name,
-        _cardDescription: card.description || '',
-        _isPublic: card.is_public,
-        _updatedAt: card.updated_at,
-        _createdAt: card.created_at,
-        _author: card.username || '未知',
-        _likeCount: typeof card.like_count === 'number' ? card.like_count : undefined,
-        _favoriteCount: typeof card.favorite_count === 'number' ? card.favorite_count : undefined,
-        _usageCount: typeof card.usage_count === 'number' ? card.usage_count : undefined,
-      };
+      const payload = mapPublicDataCardRowToBattleSelectionPayload(card);
 
       await onCloudCardPicked(payload);
     } catch (error) {
@@ -825,20 +813,7 @@ export function TavernExportPanel() {
       }
 
       const card = result.card;
-      const json = typeof card?.data === 'string' ? JSON.parse(card.data) : card?.data;
-      const payload = {
-        ...(json && typeof json === 'object' ? json : {}),
-        _cardId: card.id,
-        _cardName: card.name,
-        _cardDescription: card.description || '',
-        _isPublic: card.is_public,
-        _updatedAt: card.updated_at,
-        _createdAt: card.created_at,
-        _author: card.username || '未知',
-        _likeCount: typeof card.like_count === 'number' ? card.like_count : undefined,
-        _favoriteCount: typeof card.favorite_count === 'number' ? card.favorite_count : undefined,
-        _usageCount: typeof card.usage_count === 'number' ? card.usage_count : undefined,
-      };
+      const payload = mapPublicDataCardRowToBattleSelectionPayload(card);
 
       onToggleScenarioPicked(payload, true);
     } catch (error) {
