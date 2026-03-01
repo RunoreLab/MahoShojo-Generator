@@ -36,6 +36,19 @@ export type DataCardSourceMeta = {
   dataCardAuthor?: string;
 };
 
+export type DataCardRuntimeSourceInfo = {
+  sourceDataCardId?: string;
+  sourceDataCardName?: string;
+  sourceDataCardDescription?: string;
+  sourceDataCardCreatedAt?: string;
+  sourceDataCardUpdatedAt?: string;
+  sourceIsPublic?: boolean;
+  sourceAuthor?: string;
+  sourceDataCardLikeCount?: number;
+  sourceDataCardFavoriteCount?: number;
+  sourceDataCardUsageCount?: number;
+};
+
 const toRecord = (value: unknown): Record<string, unknown> | null =>
   typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
 
@@ -95,6 +108,33 @@ export const mapDataCardSourceMeta = (rowInput: unknown): DataCardSourceMeta => 
     dataCardId: normalizeOptionalText(readString(row, ['_cardId', 'dataCardId', 'id'])),
     dataCardName: normalizeOptionalText(readString(row, ['_cardName', 'dataCardName', 'name'])),
     dataCardAuthor: normalizeOptionalText(readString(row, ['_author', 'dataCardAuthor', 'username', 'author'])),
+  };
+};
+
+export const mapDataCardRuntimeSourceInfo = (rowInput: unknown): DataCardRuntimeSourceInfo => {
+  const row = toRecord(rowInput) ?? {};
+  const sourceMeta = mapDataCardSourceMeta(row);
+
+  const numericVisibility = readNumber(row, ['_isPublic', 'is_public', 'isPublic']);
+  const boolVisibility = readBoolean(row, ['_isPublic', 'is_public', 'isPublic']);
+  const sourceIsPublic =
+    numericVisibility !== null
+      ? Math.floor(numericVisibility) === 1
+      : boolVisibility !== null
+        ? boolVisibility
+        : undefined;
+
+  return {
+    sourceDataCardId: sourceMeta.dataCardId,
+    sourceDataCardName: sourceMeta.dataCardName,
+    sourceDataCardDescription: readString(row, ['_cardDescription', 'description']) ?? undefined,
+    sourceDataCardCreatedAt: normalizeOptionalText(readString(row, ['_createdAt', 'created_at', 'createdAt'])),
+    sourceDataCardUpdatedAt: normalizeOptionalText(readString(row, ['_updatedAt', 'updated_at', 'updatedAt'])),
+    sourceIsPublic,
+    sourceAuthor: sourceMeta.dataCardAuthor,
+    sourceDataCardLikeCount: normalizeOptionalCounter(readNumber(row, ['_likeCount', 'like_count', 'likeCount'])),
+    sourceDataCardFavoriteCount: normalizeOptionalCounter(readNumber(row, ['_favoriteCount', 'favorite_count', 'favoriteCount'])),
+    sourceDataCardUsageCount: normalizeOptionalCounter(readNumber(row, ['_usageCount', 'usage_count', 'usageCount'])),
   };
 };
 

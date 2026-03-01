@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import {
   isPublicVisibility,
+  mapDataCardRuntimeSourceInfo,
   mapDataCardSourceMeta,
   mapPublicDataCardRowToBattleSelectionPayload,
   mapPublicDataCardRowToDetailsCard,
@@ -157,6 +158,52 @@ describe('data-card read mappers', () => {
       author: '',
     });
     expect(fromEmptyPayload).toEqual({});
+  });
+
+  test('mapDataCardRuntimeSourceInfo 兼容 internal/canonical/legacy 并归一 source* 字段', () => {
+    const runtimeInfo = mapDataCardRuntimeSourceInfo({
+      _cardId: 'card-1',
+      _cardName: '卡片一',
+      _cardDescription: '描述',
+      _createdAt: '2026-01-01T00:00:00.000Z',
+      _updatedAt: '2026-01-02T00:00:00.000Z',
+      _isPublic: 1,
+      _author: 'alice',
+      _likeCount: '10',
+      _favoriteCount: 6,
+      _usageCount: '3',
+    });
+    expect(runtimeInfo).toEqual({
+      sourceDataCardId: 'card-1',
+      sourceDataCardName: '卡片一',
+      sourceDataCardDescription: '描述',
+      sourceDataCardCreatedAt: '2026-01-01T00:00:00.000Z',
+      sourceDataCardUpdatedAt: '2026-01-02T00:00:00.000Z',
+      sourceIsPublic: true,
+      sourceAuthor: 'alice',
+      sourceDataCardLikeCount: 10,
+      sourceDataCardFavoriteCount: 6,
+      sourceDataCardUsageCount: 3,
+    });
+
+    const canonicalInfo = mapDataCardRuntimeSourceInfo({
+      dataCardId: 'card-2',
+      dataCardName: '卡片二',
+      dataCardAuthor: 'bob',
+      isPublic: false,
+      likeCount: 2,
+      favoriteCount: 4,
+      usageCount: 8,
+    });
+    expect(canonicalInfo).toEqual({
+      sourceDataCardId: 'card-2',
+      sourceDataCardName: '卡片二',
+      sourceIsPublic: false,
+      sourceAuthor: 'bob',
+      sourceDataCardLikeCount: 2,
+      sourceDataCardFavoriteCount: 4,
+      sourceDataCardUsageCount: 8,
+    });
   });
 
   test('visibility helper 在 -1/0/1 与 boolean 上语义稳定', () => {

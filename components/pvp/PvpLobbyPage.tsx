@@ -17,7 +17,7 @@ import { ScenarioPresetGridPicker } from '@/components/ScenarioPresetGridPicker'
 import { useScenarioPresetQuery } from '@/components/arena/hooks/useArenaData';
 import { authStorage } from '@/lib/auth';
 import { inferTemplate } from '@/lib/data-card-converter';
-import { mapPublicDataCardRowToBattleSelectionPayload } from '@/lib/data-card-read-mappers';
+import { mapDataCardRuntimeSourceInfo, mapPublicDataCardRowToBattleSelectionPayload } from '@/lib/data-card-read-mappers';
 import { useAuth } from '@/lib/useAuth';
 import type { PvpRoomRules, PvpScenarioSelection } from '@/lib/pvp/types';
 import type { ScenarioPreset } from '@/lib/scenario-presets';
@@ -112,28 +112,26 @@ export function PvpLobbyPage() {
 
   const handleSelectScenarioCard = async (cardData: any) => {
     const cleaned = removePrivateKeys(cardData);
+    const sourceInfo = mapDataCardRuntimeSourceInfo(cardData);
     const template = inferTemplate(cleaned);
     if (template !== 'scenario' && template !== 'general-scenario') {
       setError('❌ 请选择“情景”类型的数据卡。');
       return;
     }
-    const cardId = typeof cardData?._cardId === 'string' ? cardData._cardId.trim() : '';
+    const cardId = sourceInfo.sourceDataCardId ?? '';
     if (!cardId) {
       setError('❌ PVP 情景仅允许使用在线数据库中的情景数据卡。');
       return;
     }
-    const name = typeof cardData?._cardName === 'string'
-      ? cardData._cardName.trim()
-      : (typeof cleaned?.title === 'string' ? cleaned.title.trim() : '');
+    const fallbackName = typeof cleaned?.title === 'string' ? cleaned.title.trim() : '';
+    const name = sourceInfo.sourceDataCardName ?? fallbackName;
     setScenarioSelection({
       kind: 'data_card',
       id: cardId,
-      updatedAt: typeof cardData?._updatedAt === 'string' ? cardData._updatedAt : null,
+      updatedAt: sourceInfo.sourceDataCardUpdatedAt ?? null,
       name: name || null,
-      isPublic: typeof cardData?._isPublic === 'boolean'
-        ? cardData._isPublic
-        : (typeof cardData?._isPublic === 'number' ? cardData._isPublic === 1 : null),
-      author: typeof cardData?._author === 'string' ? cardData._author : null,
+      isPublic: typeof sourceInfo.sourceIsPublic === 'boolean' ? sourceInfo.sourceIsPublic : null,
+      author: sourceInfo.sourceAuthor ?? null,
     } satisfies PvpScenarioSelection);
     setError(null);
   };

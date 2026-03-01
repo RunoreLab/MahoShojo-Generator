@@ -3,7 +3,7 @@
 import { useCallback } from 'react';
 
 import { inferTemplate } from '@/lib/data-card-converter';
-import { mapPublicDataCardRowToBattleSelectionPayload } from '@/lib/data-card-read-mappers';
+import { mapDataCardRuntimeSourceInfo, mapPublicDataCardRowToBattleSelectionPayload } from '@/lib/data-card-read-mappers';
 import { generateRandomCanshou, generateRandomMagicalGirl } from '@/lib/random-character-generator';
 
 import { useBattleStore } from '../stores/useBattleStore';
@@ -193,25 +193,23 @@ export const useBattleActions = () => {
 
   const handleSelectDataCard = useCallback(
     async (cardData: any) => {
-      const sourceDataCardId = typeof cardData?._cardId === 'string' ? cardData._cardId : undefined;
-      const sourceDataCardName = typeof cardData?._cardName === 'string' ? cardData._cardName : undefined;
-      const sourceDataCardDescription =
-        typeof cardData?._cardDescription === 'string' ? cardData._cardDescription : undefined;
-      const sourceDataCardCreatedAt = typeof cardData?._createdAt === 'string' ? cardData._createdAt : undefined;
-      const sourceDataCardUpdatedAt = typeof cardData?._updatedAt === 'string' ? cardData._updatedAt : undefined;
-      const sourceIsPublic = typeof cardData?._isPublic === 'boolean'
-        ? cardData._isPublic
-        : (typeof cardData?._isPublic === 'number' ? cardData._isPublic === 1 : undefined);
-      const sourceAuthor = typeof cardData?._author === 'string' ? cardData._author : undefined;
-      const sourceDataCardLikeCount = typeof cardData?._likeCount === 'number' ? cardData._likeCount : undefined;
-      const sourceDataCardFavoriteCount =
-        typeof cardData?._favoriteCount === 'number' ? cardData._favoriteCount : undefined;
-      const sourceDataCardUsageCount = typeof cardData?._usageCount === 'number' ? cardData._usageCount : undefined;
+      const {
+        sourceDataCardId,
+        sourceDataCardName,
+        sourceDataCardDescription,
+        sourceDataCardCreatedAt,
+        sourceDataCardUpdatedAt,
+        sourceIsPublic,
+        sourceAuthor,
+        sourceDataCardLikeCount,
+        sourceDataCardFavoriteCount,
+        sourceDataCardUsageCount,
+      } = mapDataCardRuntimeSourceInfo(cardData);
 
       const cleanedCardData = removePrivateKeys(cardData);
       const resolvedName = getCombatantDisplayName(cleanedCardData);
       const inferredTemplate = inferTemplate(cleanedCardData);
-      const targetFilename = `${cardData._cardName || resolvedName}.json`;
+      const targetFilename = `${sourceDataCardName || resolvedName}.json`;
 
       // 检查是否已在加载中或已存在（防止重复点击）
       if (loadingCards.has(targetFilename)) {
@@ -231,7 +229,7 @@ export const useBattleActions = () => {
           const isNative = await verifyOrigin(cleanedCardData);
           setScenario({
             content: cleanedCardData,
-            fileName: `${cardData._cardName || resolvedName}.json`,
+            fileName: `${sourceDataCardName || resolvedName}.json`,
             isNative,
             sourceDataCardId,
             sourceDataCardDescription,
@@ -325,13 +323,13 @@ export const useBattleActions = () => {
         return;
       }
 
-      const sourceDataCardId = typeof cardData?._cardId === 'string' ? cardData._cardId : undefined;
-      const sourceDataCardName = typeof cardData?._cardName === 'string' ? cardData._cardName : undefined;
-      const sourceDataCardUpdatedAt = typeof cardData?._updatedAt === 'string' ? cardData._updatedAt : undefined;
-      const sourceIsPublic = typeof cardData?._isPublic === 'boolean'
-        ? cardData._isPublic
-        : (typeof cardData?._isPublic === 'number' ? cardData._isPublic === 1 : undefined);
-      const sourceAuthor = typeof cardData?._author === 'string' ? cardData._author : undefined;
+      const {
+        sourceDataCardId,
+        sourceDataCardName,
+        sourceDataCardUpdatedAt,
+        sourceIsPublic,
+        sourceAuthor,
+      } = mapDataCardRuntimeSourceInfo(cardData);
 
       const cleanedCardData = removePrivateKeys(cardData);
       const inferredTemplate = inferTemplate(cleanedCardData);
@@ -394,7 +392,7 @@ export const useBattleActions = () => {
 
   const handleToggleCombatantDataCard = useCallback(
     async (cardData: any, nextSelected: boolean) => {
-      const sourceDataCardId = typeof cardData?._cardId === 'string' ? cardData._cardId : '';
+      const sourceDataCardId = mapDataCardRuntimeSourceInfo(cardData).sourceDataCardId ?? '';
       if (!sourceDataCardId) return;
 
       if (!nextSelected) {

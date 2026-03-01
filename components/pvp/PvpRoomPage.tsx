@@ -32,7 +32,7 @@ import { authStorage } from '@/lib/auth';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { useCooldown } from '@/lib/cooldown';
 import { inferTemplate } from '@/lib/data-card-converter';
-import { mapPublicDataCardRowToBattleSelectionPayload } from '@/lib/data-card-read-mappers';
+import { mapDataCardRuntimeSourceInfo, mapPublicDataCardRowToBattleSelectionPayload } from '@/lib/data-card-read-mappers';
 	import { config as appConfig } from '@/lib/config';
 	import { useAuth } from '@/lib/useAuth';
 	import { buildCustomProviderPayload, isUsingUserProvidedKey } from '@/lib/ai/custom-provider';
@@ -1716,19 +1716,19 @@ export function PvpRoomPage() {
       return;
     }
     const cleaned = removePrivateKeys(cardData);
+    const sourceInfo = mapDataCardRuntimeSourceInfo(cardData);
     const template = inferTemplate(cleaned);
     if (template !== 'scenario' && template !== 'general-scenario') {
       setError('❌ 请选择“情景”类型的数据卡。');
       return;
     }
-    const cardId = typeof cardData?._cardId === 'string' ? cardData._cardId.trim() : '';
+    const cardId = sourceInfo.sourceDataCardId ?? '';
     if (!cardId) {
       setError('❌ PVP 情景仅允许使用在线数据库中的情景数据卡。');
       return;
     }
-    const name = typeof cardData?._cardName === 'string'
-      ? cardData._cardName.trim()
-      : (typeof cleaned?.title === 'string' ? cleaned.title.trim() : '');
+    const fallbackName = typeof cleaned?.title === 'string' ? cleaned.title.trim() : '';
+    const name = sourceInfo.sourceDataCardName ?? fallbackName;
 
     // 与 /arena 逻辑保持一致：当情景卡含有 adjudicationEvents 时，将其加入判定器并展示（用户可再编辑/删除）。
     // 注意：这里仅更新本地草稿（rulesDraft）；真正持久化仍以“保存情景/保存设置”为准。
@@ -1744,12 +1744,10 @@ export function PvpRoomPage() {
     setScenarioDraft({
       kind: 'data_card',
       id: cardId,
-      updatedAt: typeof cardData?._updatedAt === 'string' ? cardData._updatedAt : null,
+      updatedAt: sourceInfo.sourceDataCardUpdatedAt ?? null,
       name: name || null,
-      isPublic: typeof cardData?._isPublic === 'boolean'
-        ? cardData._isPublic
-        : (typeof cardData?._isPublic === 'number' ? cardData._isPublic === 1 : null),
-      author: typeof cardData?._author === 'string' ? cardData._author : null,
+      isPublic: typeof sourceInfo.sourceIsPublic === 'boolean' ? sourceInfo.sourceIsPublic : null,
+      author: sourceInfo.sourceAuthor ?? null,
     } satisfies PvpScenarioSelection);
     setError(warning);
   };
@@ -1966,26 +1964,22 @@ export function PvpRoomPage() {
 
     const cardRange = normalizePvpRoomCardRange(rules);
 
-    const id = typeof cardData?._cardId === 'string' ? cardData._cardId : '';
+    const sourceInfo = mapDataCardRuntimeSourceInfo(cardData);
+    const id = sourceInfo.sourceDataCardId ?? '';
     if (!id) {
       setError('选择失败：缺少数据卡 ID。');
       return;
     }
 
-    const name = typeof cardData?._cardName === 'string' && cardData._cardName ? cardData._cardName : '未命名';
-    const description = typeof cardData?._cardDescription === 'string' ? cardData._cardDescription : '';
-    const isPublic =
-      typeof cardData?._isPublic === 'boolean'
-        ? cardData._isPublic
-        : typeof cardData?._isPublic === 'number'
-          ? cardData._isPublic === 1
-          : false;
-    const updatedAt = typeof cardData?._updatedAt === 'string' ? cardData._updatedAt : null;
-    const createdAt = typeof cardData?._createdAt === 'string' ? cardData._createdAt : undefined;
-    const author = typeof cardData?._author === 'string' ? cardData._author : undefined;
-    const likeCount = typeof cardData?._likeCount === 'number' ? Math.floor(cardData._likeCount) : 0;
-    const favoriteCount = typeof cardData?._favoriteCount === 'number' ? Math.floor(cardData._favoriteCount) : 0;
-    const usageCount = typeof cardData?._usageCount === 'number' ? Math.floor(cardData._usageCount) : 0;
+    const name = sourceInfo.sourceDataCardName || '未命名';
+    const description = sourceInfo.sourceDataCardDescription ?? '';
+    const isPublic = sourceInfo.sourceIsPublic ?? false;
+    const updatedAt = sourceInfo.sourceDataCardUpdatedAt ?? null;
+    const createdAt = sourceInfo.sourceDataCardCreatedAt;
+    const author = sourceInfo.sourceAuthor;
+    const likeCount = sourceInfo.sourceDataCardLikeCount ?? 0;
+    const favoriteCount = sourceInfo.sourceDataCardFavoriteCount ?? 0;
+    const usageCount = sourceInfo.sourceDataCardUsageCount ?? 0;
 
     const payload = { ...(cardData || {}) } as Record<string, unknown>;
     delete payload._cardId;
@@ -2047,7 +2041,7 @@ export function PvpRoomPage() {
       return;
     }
 
-    const id = typeof cardData?._cardId === 'string' ? cardData._cardId : '';
+    const id = mapDataCardRuntimeSourceInfo(cardData).sourceDataCardId ?? '';
     if (!id) {
       setError('取消选择失败：缺少数据卡 ID。');
       return;

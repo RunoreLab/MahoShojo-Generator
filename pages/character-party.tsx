@@ -16,7 +16,7 @@ import { DatabaseSelector } from '@/components/arena/components/DatabaseSelector
 import { useAuth } from '@/lib/useAuth';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { randomUUID } from '@/lib/crypto';
-import { mapPublicDataCardRowToBattleSelectionPayload } from '@/lib/data-card-read-mappers';
+import { mapDataCardSourceMeta, mapPublicDataCardRowToBattleSelectionPayload } from '@/lib/data-card-read-mappers';
 import { COLOR_GRADIENTS, MainColor } from '@/lib/main-color';
 import { inferTemplate, TEMPLATE_LABELS, type InferableTemplate } from '@/lib/data-card-converter';
 import { mergeTeamDataCards, type TeamMergeOutputTemplate } from '@/lib/team/merge-team-cards';
@@ -415,8 +415,9 @@ export default function CharacterPartyPage() {
   const selectedDatabaseCardIdSet = useMemo(() => new Set(selectedDatabaseCardIds), [selectedDatabaseCardIds]);
 
   const handleSelectDatabaseCharacterCard = (cardData: any) => {
-    const rawName = typeof cardData?._cardName === 'string' ? cardData._cardName.trim() : '';
-    const cardId = typeof cardData?._cardId === 'string' ? cardData._cardId : '';
+    const sourceMeta = mapDataCardSourceMeta(cardData);
+    const rawName = sourceMeta.dataCardName ?? '';
+    const cardId = sourceMeta.dataCardId ?? '';
     const cleaned = removePrivateKeys(cardData);
     if (!isPlainObject(cleaned)) {
       setNotice({ type: 'error', text: '数据卡格式无效，无法加入队伍' });
@@ -439,7 +440,8 @@ export default function CharacterPartyPage() {
   };
 
   const handleToggleDatabaseCharacterCard = (cardData: any, nextSelected: boolean) => {
-    const cardId = typeof cardData?._cardId === 'string' ? cardData._cardId : '';
+    const sourceMeta = mapDataCardSourceMeta(cardData);
+    const cardId = sourceMeta.dataCardId ?? '';
     if (nextSelected) {
       handleSelectDatabaseCharacterCard(cardData);
       return;
@@ -447,7 +449,7 @@ export default function CharacterPartyPage() {
     if (!cardId) return;
     setCharacterPortraitAsset(null);
     setMembers((prev) => prev.filter((item) => item.dataCardId !== cardId));
-    const displayName = typeof cardData?._cardName === 'string' ? cardData._cardName.trim() : '';
+    const displayName = sourceMeta.dataCardName ?? '';
     setNotice({ type: 'info', text: displayName ? `已从队伍移除：${displayName}` : '已从队伍移除角色' });
   };
 
