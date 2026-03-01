@@ -556,40 +556,6 @@ export const markArenaRatingEventStatus = async (
     .where(eq(arenaRatingEvents.id, eventId));
 };
 
-const CONFLICT_TOKEN = '__ARENA_RATINGS_CONFLICT__';
-
-const isConflictError = (error: unknown): boolean => {
-  return error instanceof Error && error.message === CONFLICT_TOKEN;
-};
-
-const buildRatingUpdateSet = (
-  nowIso: string,
-  after: ArenaRatingsSnapshot,
-  options: { includeDelta: boolean; delta: number },
-) => {
-  if (options.includeDelta) {
-    return {
-      rating: after.rating,
-      games: after.games,
-      wins: after.wins,
-      losses: after.losses,
-      draws: after.draws,
-      lastDelta: options.delta,
-      lastAppliedAt: nowIso,
-      updatedAt: nowIso,
-    } as const;
-  }
-
-  return {
-    rating: after.rating,
-    games: after.games,
-    wins: after.wins,
-    losses: after.losses,
-    draws: after.draws,
-    updatedAt: nowIso,
-  } as const;
-};
-
 export const applyArenaRatingsUpdateIfBothMatch = async (
   db: AppDrizzleDb,
   queue: ArenaRatingsQueue,
@@ -598,100 +564,176 @@ export const applyArenaRatingsUpdateIfBothMatch = async (
   appliedAtIso: string,
 ): Promise<'applied' | 'already-applied' | 'conflict'> => {
   const [aEntity, bEntity] = entities.map(normalizeEntity) as [ArenaRatingsEntity, ArenaRatingsEntity];
+  const readCurrentRows = async () =>
+    db
+      .select({
+        entityType: arenaRatings.entityType,
+        entityId: arenaRatings.entityId,
+        rating: arenaRatings.rating,
+        games: arenaRatings.games,
+      })
+      .from(arenaRatings)
+      .where(
+        and(
+          eq(arenaRatings.queue, queue),
+          or(
+            and(eq(arenaRatings.entityType, aEntity.entityType), eq(arenaRatings.entityId, aEntity.entityId)),
+            and(eq(arenaRatings.entityType, bEntity.entityType), eq(arenaRatings.entityId, bEntity.entityId)),
+          ),
+        ),
+      );
 
   const runWithOption = async (includeDelta: boolean): Promise<'applied' | 'already-applied' | 'conflict'> => {
-    return db.transaction(async (tx) => {
-      const rows = await tx
-        .select({
-          entityType: arenaRatings.entityType,
-          entityId: arenaRatings.entityId,
-          rating: arenaRatings.rating,
-          games: arenaRatings.games,
-        })
-        .from(arenaRatings)
-        .where(
-          and(
-            eq(arenaRatings.queue, queue),
-            or(
-              and(eq(arenaRatings.entityType, aEntity.entityType), eq(arenaRatings.entityId, aEntity.entityId)),
-              and(eq(arenaRatings.entityType, bEntity.entityType), eq(arenaRatings.entityId, bEntity.entityId)),
-            ),
+    const rows = await readCurrentRows();
+
+    const aRow = rows.find((row) => row.entityType === aEntity.entityType && row.entityId === aEntity.entityId);
+    const bRow = rows.find((row) => row.entityType === bEntity.entityType && row.entityId === bEntity.entityId);
+    if (!aRow || !bRow) return 'conflict';
+
+    const aRating = toInt(aRow.rating, 0);
+    const aGames = toInt(aRow.games, 0);
+    const bRating = toInt(bRow.rating, 0);
+    const bGames = toInt(bRow.games, 0);
+
+    if (
+      aRating === computed.aAfter.rating &&
+      aGames === computed.aAfter.games &&
+      bRating === computed.bAfter.rating &&
+      bGames === computed.bAfter.games
+    ) {
+      return 'already-applied';
+    }
+
+    if (
+      aRating !== computed.aBefore.rating ||
+      aGames !== computed.aBefore.games ||
+      bRating !== computed.bBefore.rating ||
+      bGames !== computed.bBefore.games
+    ) {
+      return 'conflict';
+    }
+
+    const setPayload = includeDelta
+      ? {
+          rating: sql`CASE
+            WHEN ${arenaRatings.entityType} = ${aEntity.entityType} AND ${arenaRatings.entityId} = ${aEntity.entityId} THEN ${computed.aAfter.rating}
+            WHEN ${arenaRatings.entityType} = ${bEntity.entityType} AND ${arenaRatings.entityId} = ${bEntity.entityId} THEN ${computed.bAfter.rating}
+            ELSE ${arenaRatings.rating}
+          END`,
+          games: sql`CASE
+            WHEN ${arenaRatings.entityType} = ${aEntity.entityType} AND ${arenaRatings.entityId} = ${aEntity.entityId} THEN ${computed.aAfter.games}
+            WHEN ${arenaRatings.entityType} = ${bEntity.entityType} AND ${arenaRatings.entityId} = ${bEntity.entityId} THEN ${computed.bAfter.games}
+            ELSE ${arenaRatings.games}
+          END`,
+          wins: sql`CASE
+            WHEN ${arenaRatings.entityType} = ${aEntity.entityType} AND ${arenaRatings.entityId} = ${aEntity.entityId} THEN ${computed.aAfter.wins}
+            WHEN ${arenaRatings.entityType} = ${bEntity.entityType} AND ${arenaRatings.entityId} = ${bEntity.entityId} THEN ${computed.bAfter.wins}
+            ELSE ${arenaRatings.wins}
+          END`,
+          losses: sql`CASE
+            WHEN ${arenaRatings.entityType} = ${aEntity.entityType} AND ${arenaRatings.entityId} = ${aEntity.entityId} THEN ${computed.aAfter.losses}
+            WHEN ${arenaRatings.entityType} = ${bEntity.entityType} AND ${arenaRatings.entityId} = ${bEntity.entityId} THEN ${computed.bAfter.losses}
+            ELSE ${arenaRatings.losses}
+          END`,
+          draws: sql`CASE
+            WHEN ${arenaRatings.entityType} = ${aEntity.entityType} AND ${arenaRatings.entityId} = ${aEntity.entityId} THEN ${computed.aAfter.draws}
+            WHEN ${arenaRatings.entityType} = ${bEntity.entityType} AND ${arenaRatings.entityId} = ${bEntity.entityId} THEN ${computed.bAfter.draws}
+            ELSE ${arenaRatings.draws}
+          END`,
+          lastDelta: sql`CASE
+            WHEN ${arenaRatings.entityType} = ${aEntity.entityType} AND ${arenaRatings.entityId} = ${aEntity.entityId} THEN ${computed.deltaA}
+            WHEN ${arenaRatings.entityType} = ${bEntity.entityType} AND ${arenaRatings.entityId} = ${bEntity.entityId} THEN ${computed.deltaB}
+            ELSE ${arenaRatings.lastDelta}
+          END`,
+          lastAppliedAt: appliedAtIso,
+          updatedAt: appliedAtIso,
+        }
+      : {
+          rating: sql`CASE
+            WHEN ${arenaRatings.entityType} = ${aEntity.entityType} AND ${arenaRatings.entityId} = ${aEntity.entityId} THEN ${computed.aAfter.rating}
+            WHEN ${arenaRatings.entityType} = ${bEntity.entityType} AND ${arenaRatings.entityId} = ${bEntity.entityId} THEN ${computed.bAfter.rating}
+            ELSE ${arenaRatings.rating}
+          END`,
+          games: sql`CASE
+            WHEN ${arenaRatings.entityType} = ${aEntity.entityType} AND ${arenaRatings.entityId} = ${aEntity.entityId} THEN ${computed.aAfter.games}
+            WHEN ${arenaRatings.entityType} = ${bEntity.entityType} AND ${arenaRatings.entityId} = ${bEntity.entityId} THEN ${computed.bAfter.games}
+            ELSE ${arenaRatings.games}
+          END`,
+          wins: sql`CASE
+            WHEN ${arenaRatings.entityType} = ${aEntity.entityType} AND ${arenaRatings.entityId} = ${aEntity.entityId} THEN ${computed.aAfter.wins}
+            WHEN ${arenaRatings.entityType} = ${bEntity.entityType} AND ${arenaRatings.entityId} = ${bEntity.entityId} THEN ${computed.bAfter.wins}
+            ELSE ${arenaRatings.wins}
+          END`,
+          losses: sql`CASE
+            WHEN ${arenaRatings.entityType} = ${aEntity.entityType} AND ${arenaRatings.entityId} = ${aEntity.entityId} THEN ${computed.aAfter.losses}
+            WHEN ${arenaRatings.entityType} = ${bEntity.entityType} AND ${arenaRatings.entityId} = ${bEntity.entityId} THEN ${computed.bAfter.losses}
+            ELSE ${arenaRatings.losses}
+          END`,
+          draws: sql`CASE
+            WHEN ${arenaRatings.entityType} = ${aEntity.entityType} AND ${arenaRatings.entityId} = ${aEntity.entityId} THEN ${computed.aAfter.draws}
+            WHEN ${arenaRatings.entityType} = ${bEntity.entityType} AND ${arenaRatings.entityId} = ${bEntity.entityId} THEN ${computed.bAfter.draws}
+            ELSE ${arenaRatings.draws}
+          END`,
+          updatedAt: appliedAtIso,
+        };
+
+    const updatedRows = await db
+      .update(arenaRatings)
+      .set(setPayload)
+      .where(
+        and(
+          eq(arenaRatings.queue, queue),
+          or(
+            and(eq(arenaRatings.entityType, aEntity.entityType), eq(arenaRatings.entityId, aEntity.entityId)),
+            and(eq(arenaRatings.entityType, bEntity.entityType), eq(arenaRatings.entityId, bEntity.entityId)),
           ),
-        );
+          sql`(SELECT COUNT(*) FROM arena_ratings
+            WHERE queue = ${queue}
+              AND entity_type = ${aEntity.entityType}
+              AND entity_id = ${aEntity.entityId}
+              AND rating = ${computed.aBefore.rating}
+              AND games = ${computed.aBefore.games}) = 1`,
+          sql`(SELECT COUNT(*) FROM arena_ratings
+            WHERE queue = ${queue}
+              AND entity_type = ${bEntity.entityType}
+              AND entity_id = ${bEntity.entityId}
+              AND rating = ${computed.bBefore.rating}
+              AND games = ${computed.bBefore.games}) = 1`,
+        ),
+      )
+      .returning({
+        entityType: arenaRatings.entityType,
+        entityId: arenaRatings.entityId,
+      });
 
-      const aRow = rows.find((row) => row.entityType === aEntity.entityType && row.entityId === aEntity.entityId);
-      const bRow = rows.find((row) => row.entityType === bEntity.entityType && row.entityId === bEntity.entityId);
-      if (!aRow || !bRow) return 'conflict';
+    if (updatedRows.length === 2) return 'applied';
+    if (updatedRows.length > 0) return 'conflict';
 
-      const aRating = toInt(aRow.rating, 0);
-      const aGames = toInt(aRow.games, 0);
-      const bRating = toInt(bRow.rating, 0);
-      const bGames = toInt(bRow.games, 0);
+    const afterRows = await readCurrentRows();
+    const aAfterRow = afterRows.find((row) => row.entityType === aEntity.entityType && row.entityId === aEntity.entityId);
+    const bAfterRow = afterRows.find((row) => row.entityType === bEntity.entityType && row.entityId === bEntity.entityId);
+    if (!aAfterRow || !bAfterRow) return 'conflict';
 
-      if (
-        aRating === computed.aAfter.rating &&
-        aGames === computed.aAfter.games &&
-        bRating === computed.bAfter.rating &&
-        bGames === computed.bAfter.games
-      ) {
-        return 'already-applied';
-      }
+    const aAfterRating = toInt(aAfterRow.rating, 0);
+    const aAfterGames = toInt(aAfterRow.games, 0);
+    const bAfterRating = toInt(bAfterRow.rating, 0);
+    const bAfterGames = toInt(bAfterRow.games, 0);
+    if (
+      aAfterRating === computed.aAfter.rating &&
+      aAfterGames === computed.aAfter.games &&
+      bAfterRating === computed.bAfter.rating &&
+      bAfterGames === computed.bAfter.games
+    ) {
+      return 'already-applied';
+    }
 
-      if (
-        aRating !== computed.aBefore.rating ||
-        aGames !== computed.aBefore.games ||
-        bRating !== computed.bBefore.rating ||
-        bGames !== computed.bBefore.games
-      ) {
-        return 'conflict';
-      }
-
-      const updatedA = await tx
-        .update(arenaRatings)
-        .set(buildRatingUpdateSet(appliedAtIso, computed.aAfter, { includeDelta, delta: computed.deltaA }))
-        .where(
-          and(
-            eq(arenaRatings.queue, queue),
-            eq(arenaRatings.entityType, aEntity.entityType),
-            eq(arenaRatings.entityId, aEntity.entityId),
-            eq(arenaRatings.rating, computed.aBefore.rating),
-            eq(arenaRatings.games, computed.aBefore.games),
-          ),
-        )
-        .returning({
-          entityId: arenaRatings.entityId,
-        });
-
-      const updatedB = await tx
-        .update(arenaRatings)
-        .set(buildRatingUpdateSet(appliedAtIso, computed.bAfter, { includeDelta, delta: computed.deltaB }))
-        .where(
-          and(
-            eq(arenaRatings.queue, queue),
-            eq(arenaRatings.entityType, bEntity.entityType),
-            eq(arenaRatings.entityId, bEntity.entityId),
-            eq(arenaRatings.rating, computed.bBefore.rating),
-            eq(arenaRatings.games, computed.bBefore.games),
-          ),
-        )
-        .returning({
-          entityId: arenaRatings.entityId,
-        });
-
-      if (updatedA.length !== 1 || updatedB.length !== 1) {
-        throw new Error(CONFLICT_TOKEN);
-      }
-
-      return 'applied';
-    });
+    return 'conflict';
   };
 
   try {
     return await runWithOption(true);
-  } catch (error) {
-    if (isConflictError(error)) return 'conflict';
+  } catch {
     return runWithOption(false).catch((legacyError) => {
-      if (isConflictError(legacyError)) return 'conflict';
       throw legacyError;
     });
   }
