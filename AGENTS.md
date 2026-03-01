@@ -26,9 +26,12 @@
 - 禁止在业务代码中直接消费数据库 `snake_case` 字段；必须在 repository/adapter/mapper 层完成转换后再进入业务逻辑。
 - 对外 API 响应默认输出 `camelCase`；若因历史兼容需要接收双风格字段，读取可兼容，写出必须收敛到单一 canonical 字段。
 - 同一对象中禁止长期并存语义等价的双字段。
+- **内容层（数据卡 `data` JSON、流式/侧信道元数据）属于兼容协议层**：当前阶段字段**暂不重命名**，不建议发起全量 `snake_case -> camelCase` 改造。
+- 对内容层字段允许“兼容读取”，但写回必须遵循当前协议；`created_at/updated_at` 等历史字段视为稳定兼容字段。
+- 若未来必须改动内容层命名，必须先提供版本化迁移方案（含双读、灰度、监控、回滚），并补齐关键回归测试后再实施。
 - 新增或修改跨层字段时，必须同步更新：schema、mapper、类型定义、API 契约与测试。
 - 每个关键边界 mapper 至少补 1 条回归测试，覆盖 snake/camel 输入兼容与 canonical 输出。
-- 如需详细规范与落地流程，见 `docs/NAMING_CONVENTIONS_2026-02-28.md`。
+- 如需详细规范与落地流程，见 `docs/NAMING_CONVENTIONS_2026-02-28.md` 与 `docs/NAMING_MIGRATION_RISK_ANALYSIS_2026-03-01.md`。
 
 ### API 的编写
 - 该项目部署在 Cloudflare 上，使用 Edge Runtime，请不要使用不兼容的库或者特性。
