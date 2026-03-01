@@ -33,6 +33,7 @@ import { formatHttpErrorMessage } from '@/lib/client/httpError';
 import { authStorage } from '@/lib/auth';
 import { formatDateTime } from '@/lib/constants';
 import { formatNarrativeHistoryEntriesForReference, mergeNarrativeHistoryText } from '@/lib/narrative-history';
+import { mapDataCardSourceMeta } from '@/lib/data-card-read-mappers';
 import {
   normalizeQuestionnaireDefinition,
   parseQuestionnaireDataCardPayload,
@@ -735,6 +736,7 @@ const SublimationPage: React.FC = () => {
     const handleSelectQuestionnaireCard = (card: any) => {
         try {
             const rawData = parseQuestionnaireDataCardPayload(card);
+            const cardSourceMeta = mapDataCardSourceMeta(card);
 
             const fallbackKind = rawData?.kind === 'canshou' ? 'canshou' : 'magical-girl';
             const normalized = normalizeQuestionnaireDefinition(rawData, {
@@ -748,9 +750,7 @@ const SublimationPage: React.FC = () => {
             applyQuestionnaireSelection({
                 source: 'database',
                 questionnaire: normalized,
-                dataCardId: card?._cardId ?? card?.id,
-                dataCardName: card?._cardName ?? card?.name,
-                dataCardAuthor: card?._author ?? card?.username ?? card?.author,
+                ...cardSourceMeta,
             });
             setQuestionnairePickerError(null);
             setShowQuestionnairePicker(false);

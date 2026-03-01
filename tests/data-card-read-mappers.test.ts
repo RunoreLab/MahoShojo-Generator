@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import {
   isPublicVisibility,
+  mapDataCardSourceMeta,
   mapPublicDataCardRowToBattleSelectionPayload,
   mapPublicDataCardRowToDetailsCard,
   normalizePublicVisibilityValue,
@@ -110,6 +111,52 @@ describe('data-card read mappers', () => {
     expect(camelPayload._author).toBe('bob');
     expect(camelPayload._usageCount).toBe(33);
     expect(camelPayload.name).toBe('B');
+  });
+
+  test('mapDataCardSourceMeta 在 _字段 与历史字段上输出统一 canonical metadata', () => {
+    const fromInternalPayload = mapDataCardSourceMeta({
+      _cardId: 'internal-id',
+      _cardName: '内部名称',
+      _author: 'internal-author',
+      id: 'legacy-id',
+      name: 'legacy-name',
+      username: 'legacy-user',
+    });
+    expect(fromInternalPayload).toEqual({
+      dataCardId: 'internal-id',
+      dataCardName: '内部名称',
+      dataCardAuthor: 'internal-author',
+    });
+
+    const fromLegacyPayload = mapDataCardSourceMeta({
+      id: 'legacy-id',
+      name: 'legacy-name',
+      username: 'legacy-user',
+    });
+    expect(fromLegacyPayload).toEqual({
+      dataCardId: 'legacy-id',
+      dataCardName: 'legacy-name',
+      dataCardAuthor: 'legacy-user',
+    });
+
+    const fromCanonicalPayload = mapDataCardSourceMeta({
+      dataCardId: 'canonical-id',
+      dataCardName: 'canonical-name',
+      dataCardAuthor: 'canonical-author',
+    });
+    expect(fromCanonicalPayload).toEqual({
+      dataCardId: 'canonical-id',
+      dataCardName: 'canonical-name',
+      dataCardAuthor: 'canonical-author',
+    });
+
+    const fromEmptyPayload = mapDataCardSourceMeta({
+      _cardId: '  ',
+      id: '',
+      name: '  ',
+      author: '',
+    });
+    expect(fromEmptyPayload).toEqual({});
   });
 
   test('visibility helper 在 -1/0/1 与 boolean 上语义稳定', () => {

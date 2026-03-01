@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import BattleDataModal from '@/components/BattleDataModal';
 import DataCardDetailsModal from '@/components/DataCardDetailsModal';
 import { TokenIndicator } from '@/components/shared/TokenIndicator';
+import { mapDataCardSourceMeta } from '@/lib/data-card-read-mappers';
 import {
   normalizeQuestionnaireDefinition,
   parseQuestionnaireDataCardPayload,
@@ -90,6 +91,7 @@ export function QuestionnaireLorePanel() {
   const handleSelectQuestionnaireCard = useCallback((card: any) => {
     try {
       const rawData = parseQuestionnaireDataCardPayload(card);
+      const cardSourceMeta = mapDataCardSourceMeta(card);
       const fallbackKind = rawData?.kind === 'canshou' ? 'canshou' : 'magical-girl';
       const normalized = normalizeQuestionnaireDefinition(rawData, {
         fallbackKind,
@@ -102,9 +104,7 @@ export function QuestionnaireLorePanel() {
       addQuestionnaireSelection({
         source: 'database',
         questionnaire: normalized,
-        dataCardId: card?._cardId ?? card?.id,
-        dataCardName: card?._cardName ?? card?.name,
-        dataCardAuthor: card?._author ?? card?.username ?? card?.author,
+        ...cardSourceMeta,
       });
       setQuestionnairePickerError(null);
       setShowQuestionnairePicker(false);

@@ -30,6 +30,12 @@ export type BattleSelectionPayload = Record<string, unknown> & {
   _usageCount?: number;
 };
 
+export type DataCardSourceMeta = {
+  dataCardId?: string;
+  dataCardName?: string;
+  dataCardAuthor?: string;
+};
+
 const toRecord = (value: unknown): Record<string, unknown> | null =>
   typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
 
@@ -63,6 +69,11 @@ const normalizeOptionalCounter = (value: number | null): number | undefined => {
   return Math.max(0, Math.floor(value as number));
 };
 
+const normalizeOptionalText = (value: string | null): string | undefined => {
+  const trimmed = (value ?? '').trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+};
+
 const normalizeCardType = (raw: string | null): DataCardType => {
   if (raw === 'scenario' || raw === 'history' || raw === 'questionnaire') return raw;
   return 'character';
@@ -77,6 +88,15 @@ export const normalizePublicVisibilityValue = (source: Record<string, unknown>):
 };
 
 export const isPublicVisibility = (value: unknown): boolean => value === 1 || value === true;
+
+export const mapDataCardSourceMeta = (rowInput: unknown): DataCardSourceMeta => {
+  const row = toRecord(rowInput) ?? {};
+  return {
+    dataCardId: normalizeOptionalText(readString(row, ['_cardId', 'dataCardId', 'id'])),
+    dataCardName: normalizeOptionalText(readString(row, ['_cardName', 'dataCardName', 'name'])),
+    dataCardAuthor: normalizeOptionalText(readString(row, ['_author', 'dataCardAuthor', 'username', 'author'])),
+  };
+};
 
 const parseDataCardDataObject = (source: Record<string, unknown>): Record<string, unknown> => {
   const raw = source.data ?? source.dataJson ?? source.data_json ?? source.dataJSON ?? null;
@@ -129,14 +149,12 @@ export const mapPublicDataCardRowToDetailsCard = (
 export const mapPublicDataCardRowToBattleSelectionPayload = (rowInput: unknown): BattleSelectionPayload => {
   const row = toRecord(rowInput) ?? {};
   const dataObject = parseDataCardDataObject(row);
-  const cardId = readString(row, ['id']) ?? '';
-  const cardName = readString(row, ['name']) ?? '未命名数据卡';
+  const sourceMeta = mapDataCardSourceMeta(row);
+  const cardId = sourceMeta.dataCardId ?? '';
+  const cardName = sourceMeta.dataCardName ?? '未命名数据卡';
   const description = readString(row, ['description']) ?? '';
   const visibility = normalizePublicVisibilityValue(row);
-  const author =
-    (readString(row, ['username']) ?? '').trim() ||
-    (readString(row, ['author']) ?? '').trim() ||
-    '未知';
+  const author = sourceMeta.dataCardAuthor ?? '未知';
 
   return {
     ...dataObject,

@@ -44,6 +44,7 @@ import { AI_META_REQUEST_HEADER, AI_META_REQUEST_VALUE, readJsonWithAiMeta } fro
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
 import { getAnswerLimitInfo, isAnswerOverLimit, QUESTIONNAIRE_NATIVE_MAX_ANSWER_CHARS } from '@/lib/questionnaire-limits';
 import { authStorage } from '@/lib/auth';
+import { mapDataCardSourceMeta } from '@/lib/data-card-read-mappers';
 import {
   DETAILS_QUESTIONNAIRE_THEME,
   QuestionnaireQuestionPanel,
@@ -789,6 +790,7 @@ const DetailsPage: React.FC = () => {
   const handleSelectQuestionnaireCard = (card: any) => {
     try {
       const rawData = parseQuestionnaireDataCardPayload(card);
+      const cardSourceMeta = mapDataCardSourceMeta(card);
       const normalized = normalizeQuestionnaireDefinition(rawData, {
         fallbackKind: 'magical-girl',
         fallbackId: typeof rawData?.id === 'string' ? rawData.id : `magical-girl-card-${card?.id ?? ''}`,
@@ -799,9 +801,7 @@ const DetailsPage: React.FC = () => {
       applySelection({
         source: 'database',
         questionnaire: normalized,
-        dataCardId: card?._cardId ?? card?.id,
-        dataCardName: card?._cardName ?? card?.name,
-        dataCardAuthor: card?._author ?? card?.username ?? card?.author,
+        ...cardSourceMeta,
       });
       setQuestionnairePickerError(null);
       setShowQuestionnairePicker(false);
