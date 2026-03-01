@@ -1,6 +1,7 @@
 import { getDeckCardsWithAccess } from '@/lib/database/deck-cards';
 import { getDeckById, getPublicDecks } from '@/lib/database/decks';
 import { getAuthUser } from '@/lib/auth/server';
+import { getDeckStatus } from '@/lib/deck-status';
 
 export const runtime = 'edge';
 
@@ -48,7 +49,7 @@ export default async function handler(req: Request): Promise<Response> {
 
     if (id) {
       const deck = await getDeckById(id);
-      if (!deck || deck.is_public !== 1) {
+      if (!deck || getDeckStatus(deck).status !== 'public') {
         return new Response(JSON.stringify({ success: false, error: '卡组不存在' }), {
           status: 404,
           headers: { 'Content-Type': 'application/json' }

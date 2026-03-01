@@ -5,6 +5,7 @@ import {
   removeCardsFromDeck,
 } from '@/lib/database/deck-cards';
 import { getDeckById } from '@/lib/database/decks';
+import { getDeckStatus } from '@/lib/deck-status';
 import { getAuthUser, requireAuthUser } from '@/lib/auth/server';
 
 export const runtime = 'edge';
@@ -31,15 +32,8 @@ export default async function handler(req: Request): Promise<Response> {
       }
 
       const isOwner = viewer && deck.user_id === viewer.id;
-      const isPublic = deck.is_public === 1;
-      const isBanned = deck.is_public === -1;
-      if (!isOwner && !isPublic) {
-        return new Response(JSON.stringify({ error: '卡组不存在或无权访问' }), {
-          status: 404,
-          headers: { 'Content-Type': 'application/json' }
-        });
-      }
-      if (!isOwner && isBanned) {
+      const deckStatus = getDeckStatus(deck).status;
+      if (!isOwner && deckStatus !== 'public') {
         return new Response(JSON.stringify({ error: '卡组不存在或无权访问' }), {
           status: 404,
           headers: { 'Content-Type': 'application/json' }
@@ -159,4 +153,3 @@ export default async function handler(req: Request): Promise<Response> {
     headers: { 'Content-Type': 'application/json' }
   });
 }
-

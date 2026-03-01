@@ -1,23 +1,18 @@
 import { generateUUID } from './core';
+import {
+  getDeckStatus as getNormalizedDeckStatus,
+  getDeckVisibilityValue,
+  isDeckBanned as isDeckMarkedBanned,
+} from '@/lib/deck-status';
 
 export type DeckSortBy = 'likes' | 'favorites' | 'created_at';
 
 export function isDeckBanned(deck: any): boolean {
-  return deck && deck.is_public === -1;
+  return isDeckMarkedBanned(deck);
 }
 
 export function getDeckStatus(deck: any): { status: 'public' | 'private' | 'banned'; label: string; color: string } {
-  if (!deck) {
-    return { status: 'private', label: '私有', color: 'gray' };
-  }
-
-  if (deck.is_public === -1) {
-    return { status: 'banned', label: '封禁', color: 'red' };
-  }
-  if (deck.is_public === 1) {
-    return { status: 'public', label: '公开', color: 'green' };
-  }
-  return { status: 'private', label: '私有', color: 'gray' };
+  return getNormalizedDeckStatus(deck);
 }
 
 type DecksRepoBundle = {
@@ -89,7 +84,7 @@ export async function createDeck(
     const bundle = await readDecksRepoBundle();
     if (!bundle) return { success: false, error: '创建卡组失败' };
     const id = generateUUID();
-    const publicValue = typeof isPublic === 'number' ? isPublic : (isPublic ? 1 : 0);
+    const publicValue = getDeckVisibilityValue({ isPublic });
 
     const ok = await bundle.insertDeck(bundle.db, {
       id,
@@ -175,7 +170,7 @@ export async function updateDeck(
 
     if (payload.isPublic !== undefined) {
       fields.push('is_public = ?');
-      repoPayload.isPublic = typeof payload.isPublic === 'number' ? payload.isPublic : (payload.isPublic ? 1 : 0);
+      repoPayload.isPublic = getDeckVisibilityValue({ isPublic: payload.isPublic });
     }
 
     if (fields.length === 0) {
@@ -217,4 +212,3 @@ export async function incrementDeckLike(deckId: string): Promise<boolean> {
     return false;
   }
 }
-
