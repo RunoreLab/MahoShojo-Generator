@@ -31,6 +31,7 @@ import {
   type TopRatedCharacterCardRow,
 } from '@/lib/db/repositories/data-card-meta';
 import { json, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
+import { buildDefaultPvpUserSummary, mapPvpMatchPlayerRow, mapPvpMatchRow, mapPvpUserSummaryRow } from '@/lib/pvp/read-mappers';
 import type { UserBadge } from '@/types/badge';
 
 export const runtime = 'edge';
@@ -171,21 +172,21 @@ export default withPvpErrorBoundary(async function handler(req: Request): Promis
 
   const badgeLists = buildBadgeLists(allBadges);
 
-  const summary = pvpSummaries.find((s) => s.user_id === auth.user.id) ?? {
-    user_id: auth.user.id,
-    completed_matches: 0,
-    wins: 0,
-    losses: 0,
-    draws: 0,
-    aborted_matches: 0,
-    last_played_at: null,
-  };
+  const summary = (() => {
+    for (const row of pvpSummaries) {
+      const mapped = mapPvpUserSummaryRow(row, auth.user.id);
+      if (mapped.userId === auth.user.id) return mapped;
+    }
+    return buildDefaultPvpUserSummary(auth.user.id);
+  })();
 
-  const playersByMatchId = new Map<string, typeof pvp.players>();
+  const playersByMatchId = new Map<string, ReturnType<typeof mapPvpMatchPlayerRow>[]>();
   for (const row of pvp.players) {
-    const list = playersByMatchId.get(row.match_id) ?? [];
-    list.push(row);
-    playersByMatchId.set(row.match_id, list);
+    const mapped = mapPvpMatchPlayerRow(row);
+    if (!mapped.matchId) continue;
+    const list = playersByMatchId.get(mapped.matchId) ?? [];
+    list.push(mapped);
+    playersByMatchId.set(mapped.matchId, list);
   }
 
   const normalizeTopRatedRow = (row: TopRatedCharacterCardRow): UserTopDataCardRow => ({
@@ -362,21 +363,19 @@ export default withPvpErrorBoundary(async function handler(req: Request): Promis
     roundSummaryByMatchId.set(row.match_id, normalizeRoundSummary(row));
   }
 
-  const recentMatches: PvpMatchLite[] = pvp.matches.map((m) => ({
-    id: m.id,
-    roomId: m.room_id ?? null,
-    status: m.status,
-    startedAt: m.started_at,
-    endedAt: m.ended_at,
-    winnerUserId: m.winner_user_id,
-    players: (playersByMatchId.get(m.id) ?? []).map((p) => ({
-      userId: p.user_id,
-      seat: p.seat,
-      username: p.username ?? null,
-      prefix: p.user_prefix ?? null,
-    })),
-    roundSummary: roundSummaryByMatchId.get(m.id) ?? null,
-  }));
+  const recentMatches: PvpMatchLite[] = pvp.matches.map((m) => {
+    const mappedMatch = mapPvpMatchRow(m);
+    return {
+      ...mappedMatch,
+      players: (playersByMatchId.get(mappedMatch.id) ?? []).map((p) => ({
+        userId: p.userId,
+        seat: p.seat,
+        username: p.username,
+        prefix: p.prefix,
+      })),
+      roundSummary: roundSummaryByMatchId.get(mappedMatch.id) ?? null,
+    };
+  });
 
   return json(
     {
@@ -405,14 +404,7 @@ export default withPvpErrorBoundary(async function handler(req: Request): Promis
         battleReportsAll: { total: battleReportsAllTotal },
       },
       pvp: {
-        summary: {
-          completedMatches: summary.completed_matches ?? 0,
-          wins: summary.wins ?? 0,
-          losses: summary.losses ?? 0,
-          draws: summary.draws ?? 0,
-          abortedMatches: summary.aborted_matches ?? 0,
-          lastPlayedAt: summary.last_played_at ?? null,
-        },
+        summary,
         recentMatches,
       },
       recentBattleReports: reports,
