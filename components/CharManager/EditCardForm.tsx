@@ -1,6 +1,6 @@
 import React from 'react';
 import { AlertTriangle } from 'lucide-react';
-import { isDataCardBanned } from '@/lib/data-card-status';
+import { getDataCardStatus } from '@/lib/data-card-status';
 import { inferTemplate, TEMPLATE_LABELS } from '@/lib/data-card-converter';
 import type { InferableTemplate } from '@/lib/data-card-converter';
 
@@ -11,10 +11,12 @@ interface EditCardFormProps {
 }
 
 export default function EditCardForm({ card, onSave, onCancel }: EditCardFormProps) {
+  const cardStatus = getDataCardStatus(card).status;
+  const isBanned = cardStatus === 'banned';
   const [formData, setFormData] = React.useState({
     name: card.name,
     description: card.description || '',
-    isPublic: card.is_public === 1 // 只有值为1时才显示为选中
+    isPublic: cardStatus === 'public' // 只在公开状态下显示为选中
   });
 
   const templateType = React.useMemo<InferableTemplate>(() => {
@@ -27,8 +29,6 @@ export default function EditCardForm({ card, onSave, onCancel }: EditCardFormPro
   }, [card.data]);
 
   const templateLabel = templateType === 'unknown' ? '未知类型' : TEMPLATE_LABELS[templateType];
-
-  const isBanned = isDataCardBanned(card);
 
   return (
     <div className="border rounded-lg p-4">

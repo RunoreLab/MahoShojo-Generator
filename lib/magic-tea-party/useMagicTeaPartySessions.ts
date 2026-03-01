@@ -5,6 +5,7 @@ import { useRouter } from 'next/router';
 import type { UserAIProviderConfig } from '@/components/AiProviderSelector';
 import { randomUUID } from '@/lib/crypto';
 import { inferTemplate } from '@/lib/data-card-converter';
+import { mapDataCardRuntimeSourceInfo } from '@/lib/data-card-read-mappers';
 import { clearMagicTeaPartyDraft } from '@/lib/magic-tea-party/drafts';
 import { checkMagicTeaPartySensitiveText, maskMagicTeaPartyJsonValue } from '@/lib/magic-tea-party/import-safety';
 import { extractMagicTeaPartySideChannelsFromJsonl, parseMagicTeaPartyJsonl } from '@/lib/magic-tea-party/jsonl';
@@ -106,9 +107,10 @@ const stripMetaKeys = (payload: Record<string, unknown>): Record<string, unknown
 };
 
 const buildRoleFromDataCardPayload = (payload: any): MagicTeaPartyRole => {
-  const cardId = typeof payload?._cardId === 'string' ? payload._cardId : randomUUID();
-  const cardName = typeof payload?._cardName === 'string' ? payload._cardName : '角色';
-  const isPublic = Boolean(payload?._isPublic);
+  const sourceInfo = mapDataCardRuntimeSourceInfo(payload);
+  const cardId = sourceInfo.sourceDataCardId ?? randomUUID();
+  const cardName = sourceInfo.sourceDataCardName ?? '角色';
+  const isPublic = sourceInfo.sourceIsPublic === true;
   const card = stripMetaKeys(payload && typeof payload === 'object' ? payload : {});
   const template = inferTemplate(card);
 
@@ -132,9 +134,10 @@ const buildRoleFromDataCardPayload = (payload: any): MagicTeaPartyRole => {
 };
 
 const buildScenarioFromDataCardPayload = (payload: any): MagicTeaPartyScenario => {
-  const cardId = typeof payload?._cardId === 'string' ? payload._cardId : randomUUID();
-  const cardName = typeof payload?._cardName === 'string' ? payload._cardName : '情景';
-  const isPublic = Boolean(payload?._isPublic);
+  const sourceInfo = mapDataCardRuntimeSourceInfo(payload);
+  const cardId = sourceInfo.sourceDataCardId ?? randomUUID();
+  const cardName = sourceInfo.sourceDataCardName ?? '情景';
+  const isPublic = sourceInfo.sourceIsPublic === true;
   const card = stripMetaKeys(payload && typeof payload === 'object' ? payload : {});
 
   const title = typeof (card as any).title === 'string' ? (card as any).title.trim() : '';
@@ -744,7 +747,7 @@ export function useMagicTeaPartySessions(options: UseMagicTeaPartySessionsOption
   const onToggleRoleCard = useCallback(
     async (payload: any, nextSelected: boolean) => {
       if (!activeSession) return;
-      const dataCardId = typeof payload?._cardId === 'string' ? payload._cardId : '';
+      const dataCardId = mapDataCardRuntimeSourceInfo(payload).sourceDataCardId ?? '';
       const current = activeSession.roles ?? [];
       const exists = dataCardId ? current.some((r) => r.dataCardId === dataCardId) : false;
 
@@ -762,7 +765,7 @@ export function useMagicTeaPartySessions(options: UseMagicTeaPartySessionsOption
   const onToggleScenarioCard = useCallback(
     async (payload: any, nextSelected: boolean) => {
       if (!activeSession) return;
-      const dataCardId = typeof payload?._cardId === 'string' ? payload._cardId : '';
+      const dataCardId = mapDataCardRuntimeSourceInfo(payload).sourceDataCardId ?? '';
       if (!dataCardId) return;
 
       const currentMain = activeSession.scenario;

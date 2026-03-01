@@ -93,9 +93,9 @@ const normalizeCardType = (raw: string | null): DataCardType => {
 };
 
 export const normalizePublicVisibilityValue = (source: Record<string, unknown>): boolean | number => {
-  const numeric = readNumber(source, ['is_public', 'isPublic']);
+  const numeric = readNumber(source, ['is_public', 'isPublic', '_isPublic']);
   if (numeric !== null) return Math.floor(numeric);
-  const bool = readBoolean(source, ['is_public', 'isPublic']);
+  const bool = readBoolean(source, ['is_public', 'isPublic', '_isPublic']);
   if (bool !== null) return bool;
   return false;
 };
@@ -107,7 +107,7 @@ export const mapDataCardSourceMeta = (rowInput: unknown): DataCardSourceMeta => 
   return {
     dataCardId: normalizeOptionalText(readString(row, ['_cardId', 'dataCardId', 'id'])),
     dataCardName: normalizeOptionalText(readString(row, ['_cardName', 'dataCardName', 'name'])),
-    dataCardAuthor: normalizeOptionalText(readString(row, ['_author', 'dataCardAuthor', 'username', 'author'])),
+    dataCardAuthor: normalizeOptionalText(readString(row, ['_author', '_authorName', 'dataCardAuthor', 'username', 'author'])),
   };
 };
 

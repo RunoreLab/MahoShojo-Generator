@@ -140,6 +140,15 @@ describe('data-card read mappers', () => {
       dataCardAuthor: 'legacy-user',
     });
 
+    const fromAuthorNamePayload = mapDataCardSourceMeta({
+      _cardId: 'card-with-author-name',
+      _authorName: 'legacy-author-name',
+    });
+    expect(fromAuthorNamePayload).toEqual({
+      dataCardId: 'card-with-author-name',
+      dataCardAuthor: 'legacy-author-name',
+    });
+
     const fromCanonicalPayload = mapDataCardSourceMeta({
       dataCardId: 'canonical-id',
       dataCardName: 'canonical-name',
@@ -211,16 +220,22 @@ describe('data-card read mappers', () => {
     const privateValue = normalizePublicVisibilityValue({ is_public: 0 });
     const publicValue = normalizePublicVisibilityValue({ is_public: 1 });
     const boolPublic = normalizePublicVisibilityValue({ isPublic: true });
+    const internalPublic = normalizePublicVisibilityValue({ _isPublic: 1 });
+    const internalPrivate = normalizePublicVisibilityValue({ _isPublic: false });
 
     expect(hidden).toBe(-1);
     expect(privateValue).toBe(0);
     expect(publicValue).toBe(1);
     expect(boolPublic).toBe(true);
+    expect(internalPublic).toBe(1);
+    expect(internalPrivate).toBe(false);
 
     expect(isPublicVisibility(hidden)).toBe(false);
     expect(isPublicVisibility(privateValue)).toBe(false);
     expect(isPublicVisibility(publicValue)).toBe(true);
     expect(isPublicVisibility(boolPublic)).toBe(true);
+    expect(isPublicVisibility(internalPublic)).toBe(true);
+    expect(isPublicVisibility(internalPrivate)).toBe(false);
   });
 
   test('data 为空或不合法时抛出统一错误', () => {
