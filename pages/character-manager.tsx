@@ -21,6 +21,7 @@ import { MainColor } from '@/lib/main-color';
 import { useAuth } from '@/lib/useAuth';
 import { dataCardApi, authStorage } from '@/lib/auth';
 import { loadAuthMigrationStatus, type AuthMigrationStatus } from '@/components/me/authMigrationStatus';
+import { getDataCardVisibilityValue } from '@/lib/data-card-status';
 
 // 引入 AdjudicatorEditor 和新类型
 import AdjudicatorEditor from '../components/AdjudicatorEditor';
@@ -658,7 +659,7 @@ const CharacterManagerPage: React.FC = () => {
                     id: card.id,
                     name: card.name,
                     description: card.description,
-                    isPublic: card.is_public,
+                    isPublic: getDataCardVisibilityValue(card),
                 });
                 setShowHistoryCardEditor(true);
                 setShowDataCardsModal(false);
@@ -670,7 +671,7 @@ const CharacterManagerPage: React.FC = () => {
                     id: card.id,
                     name: card.name,
                     description: card.description,
-                    isPublic: card.is_public,
+                    isPublic: getDataCardVisibilityValue(card),
                 });
                 setMessage({ type: 'info', text: '已进入问卷数据卡兼容模式：建议前往 /questionnaire-editor 进行完整编辑。' });
                 setShowDataCardsModal(false);
@@ -761,7 +762,7 @@ const CharacterManagerPage: React.FC = () => {
                 id: card.id,
                 name: card.name,
                 description: card.description,
-                isPublic: card.is_public,
+                isPublic: getDataCardVisibilityValue(card),
             });
             setMessage({ type: 'info', text: '问卷数据卡请优先在 /questionnaire-editor 编辑；此处仅提供兼容替换能力。' });
             setShowDataCardsModal(false);
@@ -778,7 +779,7 @@ const CharacterManagerPage: React.FC = () => {
             const result = await dataCardApi.replaceCard(card.id, {
                 name: card.name,
                 description: card.description,
-                isPublic: card.is_public,
+                isPublic: getDataCardVisibilityValue(card),
                 data: payloadData,
             });
             if (result.success) {

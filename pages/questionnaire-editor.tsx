@@ -26,6 +26,7 @@ import { dataCardApi } from '@/lib/auth';
 import { useAuth } from '@/lib/useAuth';
 import { quickCheck } from '@/lib/sensitive-word-filter';
 import { config } from '@/lib/config';
+import { getDataCardStatus, getDataCardVisibilityValue } from '@/lib/data-card-status';
 
 type EditableSuggestionItem = {
   uid: string;
@@ -298,11 +299,11 @@ const QuestionnaireEditorPage: React.FC = () => {
     [recycleBinCards]
   );
   const privateQuestionnaireCount = useMemo(
-    () => questionnaireCards.filter((card) => card.is_public !== 1 && card.is_public !== -1).length,
+    () => questionnaireCards.filter((card) => getDataCardStatus(card).status === 'private').length,
     [questionnaireCards]
   );
   const publicQuestionnaireCount = useMemo(
-    () => questionnaireCards.filter((card) => card.is_public === 1).length,
+    () => questionnaireCards.filter((card) => getDataCardStatus(card).status === 'public').length,
     [questionnaireCards]
   );
   const pendingQuestionnaireCount = useMemo(
@@ -882,7 +883,7 @@ const QuestionnaireEditorPage: React.FC = () => {
     const result = await dataCardApi.replaceCard(card.id, {
       name: card.name,
       description: card.description,
-      isPublic: card.is_public,
+      isPublic: getDataCardVisibilityValue(card),
       data: questionnaireData,
     });
     if (result.success) {

@@ -7,12 +7,17 @@ import SortSelector from './SortSelector';
 import DataCardDetailsModal from './DataCardDetailsModal';
 import { useAuth } from '@/lib/useAuth';
 import { authStorage, dataCardApi, favoritesApi, deckApi } from '@/lib/auth';
-import { isPublicVisibility, mapPublicDataCardRowToBattleSelectionPayload } from '@/lib/data-card-read-mappers';
+import {
+  isPublicVisibility,
+  mapPublicDataCardRowToBattleSelectionPayload,
+  normalizePublicVisibilityValue,
+} from '@/lib/data-card-read-mappers';
 import { addUsedCard, isCardUsed } from '@/lib/localStorage';
 import { inferTemplate } from '@/lib/data-card-converter';
 import { buildTitleDisplay } from '@/lib/text';
 import { ChevronDown, Filter } from 'lucide-react';
 import DecksModal from './DecksModal';
+import { getDataCardStatus } from '@/lib/data-card-status';
 
 interface BattleDataModalProps {
   isOpen: boolean;
@@ -1532,7 +1537,7 @@ export default function BattleDataModal({
 	                                description: refHint ? `PVP 手牌（${sourceLabel}快照：${refHint}）` : `PVP 手牌（${sourceLabel}快照）`,
 	                                type: 'character',
 	                                data: typeof card.dataJson === 'string' ? card.dataJson : JSON.stringify(card.dataJson ?? {}),
-	                                is_public: true,
+	                                isPublic: true,
 	                                username: author,
 	                              });
 	                              setShowDetailsModal(true);
@@ -1609,7 +1614,7 @@ export default function BattleDataModal({
 	                        description={card.description}
 	                        type={card.type}
 	                        roleType={card.roleType}
-	                        isPublic={card.is_public}
+	                        isPublic={normalizePublicVisibilityValue(card)}
                           isSelected={isSelected}
 	                        reviewStatus={card.review_status}
 	                        usageCount={card.usage_count}
@@ -1692,7 +1697,7 @@ export default function BattleDataModal({
             description: selectedCard.description,
             type: selectedCard.type,
             data: selectedCard.data,
-            isPublic: selectedCard.is_public,
+            isPublic: getDataCardStatus(selectedCard).status === 'public',
             usageCount: selectedCard.usage_count,
             likeCount: selectedCard.like_count,
             favoriteCount: selectedCard.favorite_count,

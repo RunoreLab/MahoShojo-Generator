@@ -14,6 +14,13 @@ export function isDataCardBanned(card: any): boolean {
   return readVisibility(card) === -1;
 }
 
+export function getDataCardVisibilityValue(card: any): -1 | 0 | 1 {
+  const visibility = readVisibility(card);
+  if (visibility === -1) return -1;
+  if (visibility === 1 || visibility === true) return 1;
+  return 0;
+}
+
 export function getDataCardStatus(card: any): {
   status: 'public' | 'private' | 'banned';
   label: string;

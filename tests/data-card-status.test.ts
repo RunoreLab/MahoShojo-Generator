@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { getDataCardStatus, isDataCardBanned } from '@/lib/data-card-status';
+import { getDataCardStatus, getDataCardVisibilityValue, isDataCardBanned } from '@/lib/data-card-status';
 
 describe('data-card-status', () => {
   test('兼容 snake_case 与 camelCase 的可见性字段', () => {
@@ -25,5 +25,14 @@ describe('data-card-status', () => {
     expect(getDataCardStatus(null).status).toBe('private');
     expect(getDataCardStatus(undefined).status).toBe('private');
     expect(isDataCardBanned(null)).toBe(false);
+  });
+
+  test('getDataCardVisibilityValue 输出 canonical -1/0/1', () => {
+    expect(getDataCardVisibilityValue({ is_public: -1 })).toBe(-1);
+    expect(getDataCardVisibilityValue({ isPublic: 1 })).toBe(1);
+    expect(getDataCardVisibilityValue({ isPublic: true })).toBe(1);
+    expect(getDataCardVisibilityValue({ _isPublic: -1 })).toBe(-1);
+    expect(getDataCardVisibilityValue({ _isPublic: false })).toBe(0);
+    expect(getDataCardVisibilityValue({})).toBe(0);
   });
 });
