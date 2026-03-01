@@ -33,7 +33,12 @@ import { formatHttpErrorMessage } from '@/lib/client/httpError';
 import { authStorage } from '@/lib/auth';
 import { formatDateTime } from '@/lib/constants';
 import { formatNarrativeHistoryEntriesForReference, mergeNarrativeHistoryText } from '@/lib/narrative-history';
-import { normalizeQuestionnaireDefinition, type QuestionnaireDefinition, type QuestionnairePresetEntry } from '@/lib/questionnaires';
+import {
+  normalizeQuestionnaireDefinition,
+  parseQuestionnaireDataCardPayload,
+  type QuestionnaireDefinition,
+  type QuestionnairePresetEntry,
+} from '@/lib/questionnaires';
 import type { AIReasoningEnvelope } from '@/types/ai-reasoning';
 import {
 	    inferTemplate,
@@ -729,18 +734,7 @@ const SublimationPage: React.FC = () => {
 
     const handleSelectQuestionnaireCard = (card: any) => {
         try {
-            const rawPayload = card?.data ?? card?.dataJson ?? card?.data_json ?? card?.dataJSON ?? null;
-            let rawData: any = null;
-            if (rawPayload !== null && rawPayload !== undefined) {
-                rawData = typeof rawPayload === 'string' ? JSON.parse(rawPayload) : rawPayload;
-            } else if (card && typeof card === 'object') {
-                if (Array.isArray(card.questions)) {
-                    rawData = card;
-                } else if (card.questionnaire && Array.isArray(card.questionnaire.questions)) {
-                    rawData = card.questionnaire;
-                }
-            }
-            if (!rawData) throw new Error('问卷数据卡内容为空或格式不受支持');
+            const rawData = parseQuestionnaireDataCardPayload(card);
 
             const fallbackKind = rawData?.kind === 'canshou' ? 'canshou' : 'magical-girl';
             const normalized = normalizeQuestionnaireDefinition(rawData, {

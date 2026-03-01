@@ -20,6 +20,7 @@ import {
   compactQuestionnaireAnswerItems,
   formatQuestionnaireAnswers,
   normalizeQuestionnaireDefinition,
+  parseQuestionnaireDataCardPayload,
   normalizeUserAnswers,
   resolveQuestionnaireReferences,
   type QuestionnaireAnswerItem,
@@ -787,18 +788,7 @@ const DetailsPage: React.FC = () => {
 
   const handleSelectQuestionnaireCard = (card: any) => {
     try {
-      const rawPayload = card?.data ?? card?.dataJson ?? card?.data_json ?? card?.dataJSON ?? null;
-      let rawData: any = null;
-      if (rawPayload !== null && rawPayload !== undefined) {
-        rawData = typeof rawPayload === 'string' ? JSON.parse(rawPayload) : rawPayload;
-      } else if (card && typeof card === 'object') {
-        if (Array.isArray(card.questions)) {
-          rawData = card;
-        } else if (card.questionnaire && Array.isArray(card.questionnaire.questions)) {
-          rawData = card.questionnaire;
-        }
-      }
-      if (!rawData) throw new Error('问卷数据卡内容为空或格式不受支持');
+      const rawData = parseQuestionnaireDataCardPayload(card);
       const normalized = normalizeQuestionnaireDefinition(rawData, {
         fallbackKind: 'magical-girl',
         fallbackId: typeof rawData?.id === 'string' ? rawData.id : `magical-girl-card-${card?.id ?? ''}`,

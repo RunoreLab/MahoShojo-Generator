@@ -7,6 +7,7 @@ import DataCardDetailsModal from '@/components/DataCardDetailsModal';
 import { TokenIndicator } from '@/components/shared/TokenIndicator';
 import {
   normalizeQuestionnaireDefinition,
+  parseQuestionnaireDataCardPayload,
   type QuestionnairePresetEntry,
 } from '@/lib/questionnaires';
 
@@ -23,22 +24,6 @@ const formatLoreText = (selections: BattleStoreState['selectedQuestionnaires']):
     .filter((item) => Boolean(item.lore))
     .map((item) => `【设定来源：${item.title}】\n${item.lore}`);
   return blocks.length > 0 ? blocks.join('\n\n') : '';
-};
-
-const parseDataCardPayload = (card: any): any => {
-  const rawPayload = card?.data ?? card?.dataJson ?? card?.data_json ?? card?.dataJSON ?? null;
-  if (rawPayload !== null && rawPayload !== undefined) {
-    return typeof rawPayload === 'string' ? JSON.parse(rawPayload) : rawPayload;
-  }
-  if (card && typeof card === 'object') {
-    if (Array.isArray(card.questions)) {
-      return card;
-    }
-    if (card.questionnaire && Array.isArray(card.questionnaire.questions)) {
-      return card.questionnaire;
-    }
-  }
-  throw new Error('问卷数据卡内容为空或格式不受支持');
 };
 
 const requireLore = (questionnaire: { title?: string; loreMarkdown?: string | null | undefined }) => {
@@ -104,7 +89,7 @@ export function QuestionnaireLorePanel() {
 
   const handleSelectQuestionnaireCard = useCallback((card: any) => {
     try {
-      const rawData = parseDataCardPayload(card);
+      const rawData = parseQuestionnaireDataCardPayload(card);
       const fallbackKind = rawData?.kind === 'canshou' ? 'canshou' : 'magical-girl';
       const normalized = normalizeQuestionnaireDefinition(rawData, {
         fallbackKind,
