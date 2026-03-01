@@ -18,6 +18,13 @@ import {
 } from 'drizzle-orm';
 import type { AppDrizzleDb } from '@/lib/db/drizzle';
 import {
+  mapArenaRatingEventReadRow,
+  mapArenaRatingSnapshotRow,
+  type ArenaRatingEventReadRow,
+  type ArenaRatingSnapshotRow,
+} from '@/lib/db/repositories/arena-read-mappers';
+export type { ArenaRatingEventReadRow, ArenaRatingSnapshotRow } from '@/lib/db/repositories/arena-read-mappers';
+import {
   arenaRatingEvents,
   arenaRatings,
   battles,
@@ -69,35 +76,6 @@ type ArenaLeaderboardSelectRow = {
 
 export type ArenaLeaderboardRow = ArenaLeaderboardSelectRow & {
   tagIds: string[];
-};
-
-export type ArenaRatingSnapshotRow = {
-  queue: ArenaReadQueue;
-  entity_type: ArenaReadEntityType;
-  entity_id: string;
-  rating: number;
-  games: number;
-};
-
-export type ArenaRatingEventReadRow = {
-  queue: ArenaReadQueue;
-  status: 'pending' | 'applied' | 'skipped' | 'failed';
-  skip_reason: string | null;
-  details_json: string | null;
-  a_entity_type: ArenaReadEntityType;
-  a_entity_id: string;
-  b_entity_type: ArenaReadEntityType;
-  b_entity_id: string;
-  a_before_rating: number | null;
-  a_after_rating: number | null;
-  a_delta: number | null;
-  a_before_games: number | null;
-  a_after_games: number | null;
-  b_before_rating: number | null;
-  b_after_rating: number | null;
-  b_delta: number | null;
-  b_before_games: number | null;
-  b_after_games: number | null;
 };
 
 export type CharacterWinRateRankRow = {
@@ -505,26 +483,7 @@ export const getArenaRatingEventsByIds = async (
     .from(arenaRatingEvents)
     .where(inArray(arenaRatingEvents.id, ids));
 
-  return rows.map((row) => ({
-    queue: row.queue === 'free' ? 'free' : 'strict',
-    status: row.status,
-    skip_reason: typeof row.skip_reason === 'string' ? row.skip_reason : null,
-    details_json: typeof row.details_json === 'string' ? row.details_json : null,
-    a_entity_type: row.a_entity_type === 'preset' ? 'preset' : 'data_card',
-    a_entity_id: typeof row.a_entity_id === 'string' ? row.a_entity_id : '',
-    b_entity_type: row.b_entity_type === 'preset' ? 'preset' : 'data_card',
-    b_entity_id: typeof row.b_entity_id === 'string' ? row.b_entity_id : '',
-    a_before_rating: typeof row.a_before_rating === 'number' ? row.a_before_rating : null,
-    a_after_rating: typeof row.a_after_rating === 'number' ? row.a_after_rating : null,
-    a_delta: typeof row.a_delta === 'number' ? row.a_delta : null,
-    a_before_games: typeof row.a_before_games === 'number' ? row.a_before_games : null,
-    a_after_games: typeof row.a_after_games === 'number' ? row.a_after_games : null,
-    b_before_rating: typeof row.b_before_rating === 'number' ? row.b_before_rating : null,
-    b_after_rating: typeof row.b_after_rating === 'number' ? row.b_after_rating : null,
-    b_delta: typeof row.b_delta === 'number' ? row.b_delta : null,
-    b_before_games: typeof row.b_before_games === 'number' ? row.b_before_games : null,
-    b_after_games: typeof row.b_after_games === 'number' ? row.b_after_games : null,
-  }));
+  return rows.map((row) => mapArenaRatingEventReadRow(row as Record<string, unknown>));
 };
 
 export const getArenaRatingsByEntities = async (
@@ -571,13 +530,7 @@ export const getArenaRatingsByEntities = async (
     .from(arenaRatings)
     .where(and(inArray(arenaRatings.queue, normalizedQueues), entityCondition));
 
-  return rows.map((row) => ({
-    queue: row.queue === 'free' ? 'free' : 'strict',
-    entity_type: row.entity_type === 'preset' ? 'preset' : 'data_card',
-    entity_id: typeof row.entity_id === 'string' ? row.entity_id : '',
-    rating: toInteger(row.rating, 0),
-    games: Math.max(0, toInteger(row.games, 0)),
-  }));
+  return rows.map((row) => mapArenaRatingSnapshotRow(row as Record<string, unknown>));
 };
 
 export const listArenaLeaderboardRows = async (

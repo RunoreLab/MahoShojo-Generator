@@ -385,7 +385,7 @@ export default async function handler(req: NextRequest) {
 
     const ratingByKey = new Map<string, { queue: ApiQueue; rating: number; games: number; tier: string }>();
     ratingRows.forEach((row) => {
-      const key = `${row.queue}:${row.entity_type}:${row.entity_id}`;
+      const key = `${row.queue}:${row.entityType}:${row.entityId}`;
       const rating = typeof row.rating === 'number' ? row.rating : 0;
       const games = typeof row.games === 'number' ? row.games : 0;
       ratingByKey.set(key, { queue: row.queue, rating, games, tier: computeArenaBaseTier(rating, games) });
@@ -402,11 +402,11 @@ export default async function handler(req: NextRequest) {
       }
 
       const eventStatus = event.status;
-      const skipReason = typeof event.skip_reason === 'string' ? event.skip_reason : null;
-      const aKey = buildEntityKey({ entityType: event.a_entity_type, entityId: event.a_entity_id });
-      const bKey = buildEntityKey({ entityType: event.b_entity_type, entityId: event.b_entity_id });
+      const skipReason = typeof event.skipReason === 'string' ? event.skipReason : null;
+      const aKey = buildEntityKey({ entityType: event.aEntityType, entityId: event.aEntityId });
+      const bKey = buildEntityKey({ entityType: event.bEntityType, entityId: event.bEntityId });
       const parsedDetails = (() => {
-        const raw = typeof event.details_json === 'string' ? event.details_json.trim() : '';
+        const raw = typeof event.detailsJson === 'string' ? event.detailsJson.trim() : '';
         if (!raw) return null;
         try {
           const parsed = JSON.parse(raw);
@@ -436,10 +436,10 @@ export default async function handler(req: NextRequest) {
         if (!entityKey) return;
 
         if (entityKey === aKey) {
-          if (typeof event.a_after_rating === 'number') qr.rating = event.a_after_rating;
-          if (typeof event.a_after_games === 'number') qr.games = event.a_after_games;
+          if (typeof event.aAfterRating === 'number') qr.rating = event.aAfterRating;
+          if (typeof event.aAfterGames === 'number') qr.games = event.aAfterGames;
           if (typeof qr.rating === 'number' && typeof qr.games === 'number') qr.tier = computeArenaBaseTier(qr.rating, qr.games);
-          qr.delta = typeof event.a_delta === 'number' ? event.a_delta : null;
+          qr.delta = typeof event.aDelta === 'number' ? event.aDelta : null;
           const before = parsedDetails?.ranks?.a?.before;
           const after = parsedDetails?.ranks?.a?.after;
           if (typeof before === 'number' && typeof after === 'number') {
@@ -448,10 +448,10 @@ export default async function handler(req: NextRequest) {
           return;
         }
         if (entityKey === bKey) {
-          if (typeof event.b_after_rating === 'number') qr.rating = event.b_after_rating;
-          if (typeof event.b_after_games === 'number') qr.games = event.b_after_games;
+          if (typeof event.bAfterRating === 'number') qr.rating = event.bAfterRating;
+          if (typeof event.bAfterGames === 'number') qr.games = event.bAfterGames;
           if (typeof qr.rating === 'number' && typeof qr.games === 'number') qr.tier = computeArenaBaseTier(qr.rating, qr.games);
-          qr.delta = typeof event.b_delta === 'number' ? event.b_delta : null;
+          qr.delta = typeof event.bDelta === 'number' ? event.bDelta : null;
           const before = parsedDetails?.ranks?.b?.before;
           const after = parsedDetails?.ranks?.b?.after;
           if (typeof before === 'number' && typeof after === 'number') {
