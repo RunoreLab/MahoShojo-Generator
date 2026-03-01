@@ -769,11 +769,11 @@ async function handler(req: NextRequest): Promise<Response> {
         const reportJson = JSON.stringify(report);
         const outputBytes = new TextEncoder().encode(reportJson).length;
         const outputPreview = buildOutputPreviewForStorage(reportJson);
-            const shieldResult = applyShieldWords(outputPreview);
-            const outputSensitive = appConfig.ENABLE_SENSITIVE_WORD_FILTER
-                ? await quickCheck(outputPreview)
-                : { hasSensitiveWords: false };
-            const combatantsFallback = buildCombatantsFallbackForExtraJson(combatants);
+        const shieldResult = applyShieldWords(outputPreview);
+        const outputSensitive = appConfig.ENABLE_SENSITIVE_WORD_FILTER
+            ? await quickCheck(outputPreview)
+            : { hasSensitiveWords: false };
+        const combatantsFallback = buildCombatantsFallbackForExtraJson(combatants);
 
         const inputJson = JSON.stringify({
             combatants,

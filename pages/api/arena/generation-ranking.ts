@@ -300,6 +300,17 @@ export default async function handler(req: NextRequest) {
       : parseGenerationCombatantsFallback(generationId, snapshot.extraJson);
 
     if (!Array.isArray(combatants) || combatants.length !== 2) {
+      if (snapshot.combatantCount !== 2) {
+        const res: ApiResponse = {
+          success: true,
+          generationId,
+          state: 'ready',
+          snapshot,
+          participants: [],
+        };
+        return new Response(JSON.stringify(res), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+
       const res: ApiResponse = {
         success: true,
         generationId,
