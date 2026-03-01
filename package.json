@@ -6,6 +6,8 @@
         "dev": "next dev --turbopack",
         "dev:pretty": "next dev --turbopack | pino-pretty",
         "build": "next build",
+        "check:naming": "node scripts/check-naming-conventions.mjs --report-only",
+        "check:naming:strict": "node scripts/check-naming-conventions.mjs",
         "check:wrangler:d1": "node scripts/check-wrangler-d1-config.mjs",
         "build:cf": "node scripts/check-wrangler-d1-config.mjs && node scripts/build-cf.mjs",
         "preview": "npm run build:cf && wrangler pages dev .vercel/output/static",
