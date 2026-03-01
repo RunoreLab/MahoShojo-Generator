@@ -13,6 +13,7 @@ import {
   isFreeEligible,
   isStrictEligible,
   parseCombatantEntity,
+  parseGenerationCombatantsFallback,
   settleArenaRatingsForGeneration,
   type ArenaEntity,
   type ArenaEligibilitySnapshot,
@@ -293,8 +294,12 @@ export default async function handler(req: NextRequest) {
       return new Response(JSON.stringify(res), { status: 200, headers: { 'Content-Type': 'application/json' } });
     }
 
-    const combatants = await getBattleReportGenerationCombatantsByGenerationId(generationId);
-    if (!Array.isArray(combatants) || combatants.length === 0) {
+    const rawCombatants = await getBattleReportGenerationCombatantsByGenerationId(generationId);
+    const combatants = Array.isArray(rawCombatants) && rawCombatants.length === 2
+      ? rawCombatants
+      : parseGenerationCombatantsFallback(generationId, snapshot.extraJson);
+
+    if (!Array.isArray(combatants) || combatants.length !== 2) {
       const res: ApiResponse = {
         success: true,
         generationId,

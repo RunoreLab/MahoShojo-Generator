@@ -7,6 +7,7 @@ import {
   isFreeEligible,
   isStrictEligible,
   parseCombatantEntity,
+  parseGenerationCombatantsFallback,
   parseWinnerSlot,
   type ArenaEligibilitySnapshot,
   type ArenaRatingSnapshot,
@@ -414,5 +415,54 @@ describe('arena-ratings: 参战者 entity 解析', () => {
       })
     );
     expect(entity).toEqual({ entityType: 'data_card', entityId: 'dc_123' });
+  });
+});
+
+describe('arena-ratings: combatants fallback 解析', () => {
+  test('可从 extraJson.combatantsFallback 还原 2 名参战者', () => {
+    const rows = parseGenerationCombatantsFallback(
+      'gen_fallback_1',
+      JSON.stringify({
+        combatantsFallback: [
+          {
+            sortIndex: 1,
+            name: '乙',
+            type: 'canshou',
+            isNative: false,
+            isPreset: false,
+            teamId: 2,
+            characterGuidance: '后手反击',
+            dataCardId: 'dc_b',
+            dataCardUpdatedAt: '2026-03-01T00:00:00.000Z',
+          },
+          {
+            sortIndex: 0,
+            name: '雪绒',
+            type: 'magical-girl',
+            isNative: true,
+            isPreset: true,
+            templateId: 'M12_greatness_in_simplicity.json',
+            teamId: 1,
+            characterGuidance: '先手试探',
+          },
+        ],
+      }),
+    );
+
+    expect(rows).toHaveLength(2);
+    expect(rows[0]?.generation_id).toBe('gen_fallback_1');
+    expect(rows[0]?.sort_index).toBe(0);
+    expect(rows[0]?.name).toBe('雪绒');
+    expect(rows[0]?.template_id).toBe('M12_greatness_in_simplicity.json');
+    expect(rows[0]?.is_preset).toBe(1);
+    expect(rows[1]?.sort_index).toBe(1);
+    expect(rows[1]?.data_card_id).toBe('dc_b');
+    expect(rows[1]?.character_guidance).toBe('后手反击');
+  });
+
+  test('异常/缺失 extraJson 时返回空数组', () => {
+    expect(parseGenerationCombatantsFallback('gen_fallback_2', null)).toEqual([]);
+    expect(parseGenerationCombatantsFallback('gen_fallback_2', '{')).toEqual([]);
+    expect(parseGenerationCombatantsFallback('gen_fallback_2', JSON.stringify({}))).toEqual([]);
   });
 });

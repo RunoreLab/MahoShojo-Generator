@@ -295,13 +295,27 @@ export function buildCombatantsFallbackForExtraJson(combatants: unknown): Array<
   if (!Array.isArray(combatants) || combatants.length <= 0) return null;
 
   return combatants.map((c: any, index: number) => {
+    const isPreset = typeof c?.isPreset === 'boolean' ? c.isPreset : null;
+    const presetFilename =
+      isPreset === true && typeof c?.filename === 'string' && c.filename.trim()
+        ? c.filename.trim()
+        : null;
+    const templateId =
+      presetFilename || (typeof c?.data?.templateId === 'string' && c.data.templateId.trim() ? c.data.templateId.trim() : null);
+    const characterGuidance =
+      typeof c?.characterGuidance === 'string' && c.characterGuidance.trim()
+        ? c.characterGuidance.trim().slice(0, 100)
+        : null;
     const compacted = compactExtraJson({
       sortIndex: index,
       name: c?.data?.codename || c?.data?.name || null,
       type: typeof c?.type === 'string' ? c.type : null,
       isNative: typeof c?.isNative === 'boolean' ? c.isNative : null,
-      isPreset: typeof c?.isPreset === 'boolean' ? c.isPreset : null,
+      isPreset,
+      filename: presetFilename,
+      templateId,
       teamId: typeof c?.teamId === 'number' ? c.teamId : null,
+      characterGuidance,
       dataCardId: typeof c?.sourceDataCardId === 'string' ? c.sourceDataCardId : null,
       dataCardUpdatedAt: typeof c?.sourceDataCardUpdatedAt === 'string' ? c.sourceDataCardUpdatedAt : null,
     });

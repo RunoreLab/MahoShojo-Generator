@@ -570,6 +570,84 @@ export const parseCombatantEntity = (combatant: BattleReportGenerationCombatantR
   return null;
 };
 
+const toNullableIntegerLike = (value: unknown): number | null => {
+  if (typeof value === 'number' && Number.isFinite(value)) return Math.trunc(value);
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    const parsed = Number(trimmed);
+    if (Number.isFinite(parsed)) return Math.trunc(parsed);
+  }
+  return null;
+};
+
+const toNullableTinyIntLike = (value: unknown): number | null => {
+  if (typeof value === 'boolean') return value ? 1 : 0;
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === 'true') return 1;
+    if (normalized === 'false') return 0;
+  }
+  const numeric = toNullableIntegerLike(value);
+  if (numeric == null) return null;
+  return numeric === 0 ? 0 : 1;
+};
+
+const readFallbackTrimmedString = (value: unknown): string | null => {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+};
+
+export const parseGenerationCombatantsFallback = (
+  generationId: string,
+  extraJson: string | null,
+): BattleReportGenerationCombatantRow[] => {
+  if (typeof extraJson !== 'string' || !extraJson.trim()) return [];
+
+  try {
+    const parsed = JSON.parse(extraJson) as Record<string, unknown>;
+    const rawList = Array.isArray(parsed?.combatantsFallback) ? parsed.combatantsFallback : [];
+    if (rawList.length <= 0) return [];
+
+    const fallbackRows = rawList
+      .map((item, index) => {
+        const raw = item && typeof item === 'object' && !Array.isArray(item) ? (item as Record<string, unknown>) : {};
+        const sortIndex = toNullableIntegerLike(raw.sortIndex);
+        const name = readFallbackTrimmedString(raw.name);
+        const templateId =
+          readFallbackTrimmedString(raw.templateId) ??
+          readFallbackTrimmedString(raw.filename);
+
+        const row: BattleReportGenerationCombatantRow = {
+          generation_id: generationId,
+          sort_index: sortIndex ?? index,
+          name: name ?? templateId ?? `未知角色#${index + 1}`,
+          type: readFallbackTrimmedString(raw.type),
+          template_id: templateId,
+          is_native: toNullableTinyIntLike(raw.isNative),
+          is_preset: toNullableTinyIntLike(raw.isPreset),
+          team_id: toNullableIntegerLike(raw.teamId),
+          character_guidance: (() => {
+            const guidance = readFallbackTrimmedString(raw.characterGuidance);
+            return guidance ? guidance.slice(0, 100) : null;
+          })(),
+          data_card_id: readFallbackTrimmedString(raw.dataCardId),
+          data_card_updated_at: readFallbackTrimmedString(raw.dataCardUpdatedAt),
+          size_chars: null,
+          size_bytes: null,
+          created_at: new Date(0).toISOString(),
+        };
+        return row;
+      })
+      .sort((a, b) => a.sort_index - b.sort_index);
+
+    return fallbackRows;
+  } catch {
+    return [];
+  }
+};
+
 const readExtraJsonBoolean = (extraJson: string | null, key: string): boolean | null => {
   if (typeof extraJson !== 'string' || !extraJson.trim()) return null;
   try {
@@ -927,8 +1005,12 @@ export async function settleArenaRatingsForGeneration(
     if (snapshot.status !== 'completed') return;
     if (snapshot.combatantCount !== 2) return;
 
-    const combatants = await getGenerationCombatantsByGenerationId(generationId);
-    if (combatants.length !== 2) return;
+    let combatants = await getGenerationCombatantsByGenerationId(generationId);
+    if (combatants.length !== 2) {
+      const fallbackCombatants = parseGenerationCombatantsFallback(generationId, snapshot.extraJson);
+      if (fallbackCombatants.length !== 2) return;
+      combatants = fallbackCombatants;
+    }
 
     const entities = combatants.map(parseCombatantEntity);
     if (!entities[0] || !entities[1]) return;
