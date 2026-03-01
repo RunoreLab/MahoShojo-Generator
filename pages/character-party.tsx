@@ -16,6 +16,7 @@ import { DatabaseSelector } from '@/components/arena/components/DatabaseSelector
 import { useAuth } from '@/lib/useAuth';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { randomUUID } from '@/lib/crypto';
+import { mapPublicDataCardRowToBattleSelectionPayload } from '@/lib/data-card-read-mappers';
 import { COLOR_GRADIENTS, MainColor } from '@/lib/main-color';
 import { inferTemplate, TEMPLATE_LABELS, type InferableTemplate } from '@/lib/data-card-converter';
 import { mergeTeamDataCards, type TeamMergeOutputTemplate } from '@/lib/team/merge-team-cards';
@@ -463,17 +464,8 @@ export default function CharacterPartyPage() {
         throw new Error(result?.error || '无法获取随机角色');
       }
 
-      const cardData = JSON.parse(result.card.data);
-      handleSelectDatabaseCharacterCard({
-        ...cardData,
-        _cardId: result.card.id,
-        _cardName: result.card.name,
-        _cardDescription: result.card.description || '',
-        _isPublic: result.card.is_public,
-        _updatedAt: result.card.updated_at,
-        _createdAt: result.card.created_at,
-        _author: result.card.username || '未知',
-      });
+      const payload = mapPublicDataCardRowToBattleSelectionPayload(result.card);
+      handleSelectDatabaseCharacterCard(payload);
     } catch (error) {
       setNotice({ type: 'error', text: `随机匹配失败：${error instanceof Error ? error.message : '未知错误'}` });
     } finally {

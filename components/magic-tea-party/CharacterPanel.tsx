@@ -5,6 +5,7 @@ import { downloadBlob } from '@/lib/client/blobUrl';
 import { buildSafeFileName } from '@/lib/client/fileName';
 import { dataCardApi, deckApi } from '@/lib/auth';
 import { inferTemplate } from '@/lib/data-card-converter';
+import { mapPublicDataCardRowToBattleSelectionPayload } from '@/lib/data-card-read-mappers';
 import type { MagicTeaPartyRole, MagicTeaPartySession } from '@/lib/magic-tea-party/types';
 import { buildTitleDisplay } from '@/lib/text';
 import type { ArenaHistory, ArenaHistoryEntry, CharacterCurrentState } from '@/types/arena';
@@ -16,12 +17,6 @@ type MagicTeaPartyCharacterPanelProps = {
   onUpdateRoles: (roles: MagicTeaPartyRole[]) => void;
   onUpdatePlayerRole: (roleId: string | null) => void;
   onToggleRoleCard: (payload: unknown, nextSelected: boolean) => void | Promise<void>;
-};
-
-const parseDataCardPayload = (raw: unknown): any => {
-  if (typeof raw === 'string') return JSON.parse(raw);
-  if (raw && typeof raw === 'object') return raw;
-  throw new Error('数据卡内容为空或格式不受支持。');
 };
 
 const getRoleSourceLabel = (role: MagicTeaPartyRole): string => {
@@ -343,20 +338,7 @@ export function MagicTeaPartyCharacterPanel(props: MagicTeaPartyCharacterPanelPr
           const cardId = typeof card?.id === 'string' ? card.id : '';
           if (!cardId) continue;
 
-          const cardData = parseDataCardPayload(card.data);
-          const payload = {
-            ...cardData,
-            _cardId: card.id,
-            _cardName: card.name,
-            _cardDescription: card.description || '',
-            _isPublic: card.is_public,
-            _updatedAt: card.updated_at,
-            _createdAt: card.created_at,
-            _author: card.username || '未知',
-            _likeCount: typeof card.like_count === 'number' ? card.like_count : undefined,
-            _favoriteCount: typeof card.favorite_count === 'number' ? card.favorite_count : undefined,
-            _usageCount: typeof card.usage_count === 'number' ? card.usage_count : undefined,
-          };
+          const payload = mapPublicDataCardRowToBattleSelectionPayload(card);
 
           await onToggleRoleCard(payload, true);
           imported += 1;
