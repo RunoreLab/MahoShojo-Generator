@@ -4,7 +4,7 @@ import { requireAuthUser } from '@/lib/auth/server';
 import { config } from '@/lib/config';
 import { quickCheck } from '@/lib/sensitive-word-filter';
 import { mapDeckReadRows } from '@/lib/deck-read-mappers';
-import { normalizeDeckVisibilityInput } from '@/lib/deck-write-mappers';
+import { normalizeDeckVisibilityInput, readDeckVisibilityInput } from '@/lib/deck-write-mappers';
 
 export const runtime = 'edge';
 
@@ -42,7 +42,7 @@ export default async function handler(req: Request): Promise<Response> {
       const body = await req.json();
       const name = body?.name;
       const description = body?.description;
-      const isPublic = body?.isPublic ?? body?.is_public;
+      const isPublic = readDeckVisibilityInput(body);
       const normalizedName = typeof name === 'string' ? name.trim() : '';
       const normalizedDescription = typeof description === 'string' ? description.trim() : '';
 
@@ -102,7 +102,7 @@ export default async function handler(req: Request): Promise<Response> {
       const id = body?.id;
       const name = body?.name;
       const description = body?.description;
-      const isPublic = body?.isPublic ?? body?.is_public;
+      const isPublic = readDeckVisibilityInput(body);
       const deckId = typeof id === 'string' ? id.trim() : '';
       if (!deckId) {
         return new Response(JSON.stringify({ error: '缺少卡组ID' }), {

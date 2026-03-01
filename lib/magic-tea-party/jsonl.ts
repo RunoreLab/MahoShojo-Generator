@@ -5,6 +5,7 @@ import type {
   MagicTeaPartyUpdateDraft,
 } from '@/lib/magic-tea-party/types';
 import { parseMagicTeaPartyNoticePayload } from '@/lib/magic-tea-party/notice';
+import { mapMagicTeaPartyUpdateDraftCompat } from '@/lib/magic-tea-party/update-draft-mappers';
 import { jsonrepair } from 'jsonrepair';
 
 type ParseResult = {
@@ -282,26 +283,12 @@ const parseUpdatesPayload = (
 
   const drafts = draftsRaw
     .map((item: unknown): MagicTeaPartyUpdateDraft | null => {
-      const record = toRecord(item);
-      if (!record) return null;
-      const roleId = readString(record.roleId) || undefined;
-      const characterName = readString(record.characterName) || readString(record.character) || readString(record.name);
-      if (!characterName) return null;
-      const impact = readString(record.impact) || undefined;
-      const currentStateSummary =
-        readString(record.currentStateSummary) || readString(record.current_state_summary) || undefined;
-      const hasWinner = typeof record.hasWinner === 'boolean' ? record.hasWinner : undefined;
-      const winner = readString(record.winner) || undefined;
-      const draftMeta = toRecord(record.meta);
-      const mergedMeta = meta ? { ...(draftMeta ?? {}), ...meta } : draftMeta ?? undefined;
+      const mapped = mapMagicTeaPartyUpdateDraftCompat(item);
+      if (!mapped) return null;
+      const mergedMeta = meta ? { ...(mapped.meta ?? {}), ...meta } : mapped.meta ?? undefined;
       return {
-        ...(roleId ? { roleId } : {}),
-        characterName,
-        ...(impact ? { impact } : {}),
-        ...(currentStateSummary ? { currentStateSummary } : {}),
-        ...(typeof hasWinner === 'boolean' ? { hasWinner } : {}),
-        ...(winner ? { winner } : {}),
-        ...(mergedMeta ? { meta: mergedMeta } : {}),
+        ...mapped,
+        ...(mergedMeta ? { meta: mergedMeta as MagicTeaPartyUpdateDraft['meta'] } : {}),
       };
     })
     .filter((item): item is MagicTeaPartyUpdateDraft => Boolean(item));
