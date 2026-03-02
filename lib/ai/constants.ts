@@ -211,6 +211,16 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 label: 'DeepSeek R1',
                 description: 'DeepSeek 思考版本。'
             },
+            //{
+            //    value: 'qwen3.5-plus',
+            //    label: 'Qwen 3.5 Plus',
+            //    description: '通义千问 3.5 Plus，先进多模态开源旗舰模型，采用混合架构，能力强大。'
+            //},
+            {
+                value: 'qwen3',
+                label: 'Qwen 3',
+                description: '阿里旗下的通义千问 3，先进开源模型，能力强大。'
+            },
             {
                 value: 'kimi-k2',
                 label: 'Kimi K2',
@@ -352,6 +362,11 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 value: 'glm-4.6',
                 label: 'GLM-4.6',
                 description: '通用指令模型，适合中文对话、总结与结构化输出。'
+            },
+            {
+                value: 'qwen3.5-397b-a17b',
+                label: 'Qwen 3.5 397b',
+                description: '通义千问 3.5 397B，先进多模态开源旗舰模型，采用混合架构，能力强大。'
             },
             {
                 value: 'deepseek-ai/DeepSeek-V3.2',
@@ -519,6 +534,11 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 description: '中文场景表现稳定，适合结构化输出、改写与多轮对话。'
             },
             {
+                value: 'Qwen/Qwen3.5-plus',
+                label: 'Qwen 3.5 Plus',
+                description: '通义千问 3.5 Plus，先进多模态开源旗舰模型，采用混合架构，能力强大。'
+            },
+            {
                 value: 'Qwen/Qwen3-32B',
                 label: 'Qwen3-32B',
                 description: '响应速度与质量较均衡，适合高频交互与草稿生成。'
@@ -634,7 +654,7 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
             {
                 value: 'qwen-3.5-plus',
                 label: 'Qwen 3.5 Plus',
-                description: '先进多模态开源旗舰模型，采用混合架构，旨在实现高效的深度思考和强大的视觉理解能力。'
+                description: '通义千问 3.5 Plus，先进多模态开源旗舰模型，采用混合架构，能力强大。'
             },
             {
                 value: 'kimi-k2.5',
