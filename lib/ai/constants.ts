@@ -582,7 +582,7 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 description: 'Google 旗下上一代的最先进模型系列，性能略差但是速度很快，是魔法少女生成器默认使用的轻量模型。'
             },
             {
-                value: 'gemini-3.1-pro-preview',
+                value: 'gemini-3.1-pro',
                 label: 'Gemini 3.1 Pro (预览版)',
                 description: 'Google 最新一代的 Gemini 3.1 Pro 预览模型。'
             },
@@ -617,14 +617,29 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 description: 'Claude 系列旗舰，质量上限更高，适合长文本与复杂创作。'
             },
             {
-                value: 'DeepSeek-R1',
+                value: 'Grok-4',
+                label: 'Grok 4',
+                description: 'xAI 旗下通用模型，适合头脑风暴、创意发散与快速问答。'
+            },
+            {
+                value: 'deepseek-r1',
                 label: 'DeepSeek R1',
                 description: '推理强项模型，适合需要多步思考的分析、规划与推导场景。'
             },
             {
-                value: 'Grok-4',
-                label: 'Grok 4',
-                description: 'xAI 旗下通用模型，适合头脑风暴、创意发散与快速问答。'
+                value: 'deepseek-v3.2',
+                label: 'DeepSeek V3.2',
+                description: '深度求索旗下模型，旨在将高计算效率与最先进的推理和智能体性能相结合。'
+            },
+            {
+                value: 'qwen-3.5-plus',
+                label: 'Qwen 3.5 Plus',
+                description: '先进多模态开源旗舰模型，采用混合架构，旨在实现高效的深度思考和强大的视觉理解能力。'
+            },
+            {
+                value: 'kimi-k2.5',
+                label: 'Kimi K2.5',
+                description: 'Moonshot AI 旗下模型，在多模态和智能体能力方面实现了显著飞跃。'
             },
         ]
     },
