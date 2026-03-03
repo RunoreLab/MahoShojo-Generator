@@ -4,6 +4,7 @@ import {
   invokeBetterAuthSubrequest,
   readJsonSafely,
 } from '@/lib/auth/better-auth-subrequest';
+import { mapRecoverResetPasswordError, mapRecoverSignUpError } from '@/lib/auth/error-message';
 import { hashRecoveryToken } from '@/lib/auth/recovery-token';
 import { getPasswordPolicySummaryMessage, validatePasswordPolicy } from '@/lib/auth/password-policy';
 import { getDrizzleDbFromRuntime } from '@/lib/db/drizzle';
@@ -81,24 +82,6 @@ const createVerificationId = (): string => {
 };
 
 const createResetPasswordToken = (): string => randomHex(24);
-
-const mapBetterAuthResetPasswordError = (message: string): string => {
-  const normalized = message.trim().toUpperCase();
-  if (!normalized) return '设置新密码失败，请稍后重试';
-  if (normalized.includes('INVALID_TOKEN')) return '重置令牌无效或已过期，请重新发起找回流程';
-  if (normalized.includes('PASSWORD_TOO_SHORT')) return '新密码长度不足';
-  if (normalized.includes('PASSWORD_TOO_LONG')) return '新密码长度过长';
-  return message;
-};
-
-const mapBetterAuthSignUpError = (message: string): string => {
-  const normalized = message.trim().toUpperCase();
-  if (!normalized) return '账号迁移认领失败，请稍后重试';
-  if (normalized.includes('USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL')) {
-    return '该邮箱已存在新版账号，系统正在尝试关联后继续完成重置';
-  }
-  return message;
-};
 
 type ResetDeps = {
   hashRecoveryToken: typeof hashRecoveryToken;
@@ -243,7 +226,7 @@ const buildResetHandler = (deps: ResetDeps): ((req: Request) => Promise<Response
           if (!signUpResponse.ok) {
             const raceAuthUser = await deps.getAuthUserProfileByEmail(db, normalizedEmail);
             if (!raceAuthUser) {
-              const message = mapBetterAuthSignUpError(
+              const message = mapRecoverSignUpError(
                 deps.extractErrorMessage(signUpPayload, '账号迁移认领失败，请稍后重试'),
               );
               return json({ success: false, error: message }, signUpResponse.status || 400);
@@ -306,7 +289,7 @@ const buildResetHandler = (deps: ResetDeps): ((req: Request) => Promise<Response
 
         const resetPayload = await deps.readJsonSafely<BetterAuthResetPayload>(resetPasswordResponse);
         if (!resetPasswordResponse.ok) {
-          const message = mapBetterAuthResetPasswordError(
+          const message = mapRecoverResetPasswordError(
             deps.extractErrorMessage(resetPayload, '设置新密码失败，请稍后重试'),
           );
           return json({ success: false, error: message }, resetPasswordResponse.status || 400);

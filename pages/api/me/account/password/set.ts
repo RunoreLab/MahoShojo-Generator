@@ -4,6 +4,7 @@ import {
   invokeBetterAuthSubrequest,
   readJsonSafely,
 } from '@/lib/auth/better-auth-subrequest';
+import { mapSetPasswordError } from '@/lib/auth/error-message';
 import { recordAuthAuditLog } from '@/lib/auth/auth-audit';
 import { ensureAuthUserLink } from '@/lib/auth/user-auth-linking';
 import { getPasswordPolicySummaryMessage, validatePasswordPolicy } from '@/lib/auth/password-policy';
@@ -55,18 +56,6 @@ const createVerificationId = (): string => {
 };
 
 const createResetPasswordToken = (): string => randomHex(24);
-
-const mapSetPasswordError = (message: string): string => {
-  const normalized = message.trim().toUpperCase();
-  if (!normalized) return '设置密码失败，请稍后重试';
-  if (normalized.includes('PASSWORD_TOO_SHORT')) return '新密码长度不足';
-  if (normalized.includes('PASSWORD_TOO_LONG')) return '新密码长度过长';
-  if (normalized.includes('USER ALREADY HAS A PASSWORD')) return '当前账号已经设置过密码';
-  if (normalized.includes('USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL')) {
-    return '该邮箱已存在新版账号，请使用密码登录或找回密码完成迁移';
-  }
-  return message;
-};
 
 export default withPvpErrorBoundary(async function handler(req: Request): Promise<Response> {
   if (req.method !== 'PUT') return json({ error: 'Method not allowed' }, { status: 405 });

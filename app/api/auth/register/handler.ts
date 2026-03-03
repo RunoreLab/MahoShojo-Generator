@@ -7,6 +7,7 @@ import {
   invokeBetterAuthJsonEndpoint,
   readJsonSafely,
 } from '@/lib/auth/better-auth-bridge';
+import { mapRegisterError } from '@/lib/auth/error-message';
 import {
   ensureAuthUserLink,
   ensureBusinessUserLegacyAuthKey,
@@ -167,16 +168,17 @@ const buildRegisterHandler = (deps: RegisterDeps): ((req: Request) => Promise<Re
 
     const payload = await deps.readJsonSafely<BetterAuthSignUpPayload>(bridge.response);
     if (!bridge.response.ok) {
+      const mappedMessage = mapRegisterError(deps.extractErrorMessage(payload, '密码注册失败，请稍后重试'));
       await deps.recordAuthAuditLog({
         req,
         eventType: 'register_failed',
         authSource: 'better-auth',
         resultCode: 'REGISTER_REJECTED',
-        resultMessage: deps.extractErrorMessage(payload, '密码注册失败，请稍后重试'),
+        resultMessage: mappedMessage,
       });
       return json(
         {
-          error: deps.extractErrorMessage(payload, '密码注册失败，请稍后重试'),
+          error: mappedMessage,
         },
         bridge.response.status || 400,
       );

@@ -6,6 +6,7 @@ import {
 } from '@/lib/auth/better-auth-subrequest';
 import { guardMailSendByAudit } from '@/lib/auth/mail-send-guard';
 import { recordAuthAuditLog } from '@/lib/auth/auth-audit';
+import { mapChangeEmailError } from '@/lib/auth/error-message';
 import { getDrizzleDbFromRuntime } from '@/lib/db/drizzle';
 import { getBusinessUserById, updateBusinessUserEmailById } from '@/lib/db/repositories/business-users';
 import {
@@ -27,15 +28,6 @@ const toNonEmptyString = (value: unknown): string | null => {
 };
 
 const isValidEmail = (email: string): boolean => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-
-const mapBetterAuthEmailError = (message: string): string => {
-  const normalized = message.trim().toUpperCase();
-  if (!normalized) return '修改邮箱失败，请稍后重试';
-  if (normalized.includes('USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL')) return '该邮箱已被占用';
-  if (normalized.includes('CHANGE EMAIL IS DISABLED')) return '当前环境暂未开启改绑邮箱';
-  if (normalized.includes('EMAIL IS THE SAME')) return '新邮箱不能与当前邮箱相同';
-  return message;
-};
 
 export default withPvpErrorBoundary(async function handler(req: Request): Promise<Response> {
   if (req.method !== 'PUT') return json({ error: 'Method not allowed' }, { status: 405 });
@@ -168,7 +160,7 @@ export default withPvpErrorBoundary(async function handler(req: Request): Promis
 
   const payload = await readJsonSafely<{ error?: string; message?: string }>(response);
   if (!response.ok) {
-    const message = mapBetterAuthEmailError(extractErrorMessage(payload, '修改邮箱失败'));
+    const message = mapChangeEmailError(extractErrorMessage(payload, '修改邮箱失败'));
     await recordAuthAuditLog({
       req,
       eventType: 'email_change',

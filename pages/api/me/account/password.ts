@@ -5,6 +5,7 @@ import {
   readJsonSafely,
 } from '@/lib/auth/better-auth-subrequest';
 import { recordAuthAuditLog } from '@/lib/auth/auth-audit';
+import { mapChangePasswordError } from '@/lib/auth/error-message';
 import { getPasswordPolicySummaryMessage, validatePasswordPolicy } from '@/lib/auth/password-policy';
 import { getDrizzleDbFromRuntime } from '@/lib/db/drizzle';
 import { getBusinessUserById } from '@/lib/db/repositories/business-users';
@@ -27,28 +28,6 @@ const toNonEmptyString = (value: unknown): string | null => {
 const toBoolean = (value: unknown): boolean | undefined => {
   if (typeof value === 'boolean') return value;
   return undefined;
-};
-
-const containsChinese = (value: string): boolean => /[\u4e00-\u9fff]/.test(value);
-
-const isLikelyEnglishMessage = (value: string): boolean => /[A-Za-z]/.test(value) && !containsChinese(value);
-
-const mapBetterAuthPasswordError = (message: string): string => {
-  const normalized = message.trim().toUpperCase();
-  if (!normalized) return '修改密码失败，请稍后重试';
-  if (
-    normalized.includes('INVALID_PASSWORD') ||
-    normalized.includes('INVALID PASSWORD') ||
-    normalized.includes('INVALID_CREDENTIAL') ||
-    normalized.includes('INVALID CREDENTIAL')
-  ) {
-    return '当前密码错误，请重新输入';
-  }
-  if (normalized.includes('PASSWORD_TOO_SHORT')) return '新密码长度不足';
-  if (normalized.includes('PASSWORD_TOO_LONG')) return '新密码长度过长';
-  if (normalized.includes('CREDENTIAL_ACCOUNT_NOT_FOUND')) return '当前账号尚未设置密码，请先完成账号迁移';
-  if (isLikelyEnglishMessage(message)) return '修改密码失败，请检查输入后重试';
-  return message;
 };
 
 export default withPvpErrorBoundary(async function handler(req: Request): Promise<Response> {
@@ -132,7 +111,7 @@ export default withPvpErrorBoundary(async function handler(req: Request): Promis
 
   const payload = await readJsonSafely<{ error?: string; message?: string }>(response);
   if (!response.ok) {
-    const message = mapBetterAuthPasswordError(extractErrorMessage(payload, '修改密码失败'));
+    const message = mapChangePasswordError(extractErrorMessage(payload, '修改密码失败'));
     await recordAuthAuditLog({
       req,
       eventType: 'password_change',
