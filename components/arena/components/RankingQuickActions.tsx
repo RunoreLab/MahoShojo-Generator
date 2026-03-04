@@ -153,6 +153,7 @@ const pickNonBlacklistedModelForProvider = (providerId: string): string | null =
 
   const preferred: string[] = [
     'gemini-2.5-flash-lite',
+    'gemini-3.1-flash-lite-preview',
     'gemini-2.5-flash',
     'gemini-2.0-flash-lite',
     'gemini-2.0-flash',
@@ -160,6 +161,7 @@ const pickNonBlacklistedModelForProvider = (providerId: string): string | null =
     'gemini-3.1-pro-preview',
     'gemini-3-pro-preview',
     'google/gemini-2.5-flash-lite',
+    'google/gemini-3.1-flash-lite-preview',
     'google/gemini-2.5-flash',
     'google/gemini-2.0-flash-lite',
     'google/gemini-2.0-flash',

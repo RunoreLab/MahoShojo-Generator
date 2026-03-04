@@ -46,6 +46,11 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 description: 'Google 旗下最新一代的先进模型，现已提供尝鲜使用。'
             },
             {
+                value: 'gemini-3.1-flash-lite-preview',
+                label: 'Gemini 3.1 Flash Lite (预览版)',
+                description: 'Google 最新一代高速轻量模型，适合预算敏感与高并发生成场景。'
+            },
+            {
                 value: 'gemini-2.5-flash',
                 label: 'Gemini 2.5 Flash',
                 description: 'Google 旗下上一代的最先进模型系列，在性能和价格上十分均衡，也是魔法少女生成器默认使用的模型。'
@@ -120,6 +125,11 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 value: 'gemini-3-flash-preview',
                 label: 'Gemini 3.0 Flash',
                 description: 'Google 迄今为止最智能的模型系列的略轻量的模型，推荐流式使用。'
+            },
+            {
+                value: 'gemini-3.1-flash-lite-preview',
+                label: 'Gemini 3.1 Flash Lite (预览版)',
+                description: 'Google 最新一代高速轻量模型，适合预算敏感与高并发生成场景。'
             },
             {
                 value: 'gemini-2.5-pro',
@@ -263,6 +273,11 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 description: '标准模型（所有付费方案）。适合各类任务。'
             },
             {
+                value: 'gemini-3.1-flash-lite-preview',
+                label: 'Gemini 3.1 Flash Lite（标准）',
+                description: '标准模型（所有付费方案）。极高速、低成本，适合高频交互与批量生成。'
+            },
+            {
                 value: 'gemini-2.5-flash',
                 label: 'Gemini 2.5 Flash（标准）',
                 description: '标准模型（所有付费方案）。速度与质量均衡。'
@@ -317,6 +332,11 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 value: 'gemini-3-flash-preview',
                 label: 'Gemini 3.0 Flash',
                 description: 'Google 迄今为止最智能的模型系列的略轻量的模型，推荐流式使用。'
+            },
+            {
+                value: 'gemini-3.1-flash-lite-preview',
+                label: 'Gemini 3.1 Flash Lite (预览版)',
+                description: 'Google 最新一代高速轻量模型，适合预算敏感与高并发生成场景。'
             },
             {
                 value: 'gemini-2.5-pro',
@@ -438,6 +458,11 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 value: 'gemini-3-flash-preview',
                 label: 'Gemini 3.0 Flash (预览版)',
                 description: 'Google 旗下最新一代的先进模型，现已提供尝鲜使用。'
+            },
+            {
+                value: 'gemini-3.1-flash-lite-preview',
+                label: 'Gemini 3.1 Flash Lite (预览版)',
+                description: 'Google 最新一代高速轻量模型，适合预算敏感与高并发生成场景。'
             },
             {
                 value: 'gemini-2.5-pro',
@@ -572,6 +597,7 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
             { value: 'google/gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro (预览版)', description: 'Google 最新一代的 Gemini 3.1 Pro 预览模型。' },
             { value: 'google/gemini-3-pro-preview', label: 'Gemini 3.0 Pro (预览版)', description: 'Google 迄今为止最智能的模型系列，以先进的推理和联网搜索能力为基础。' },
             { value: 'google/gemini-3-flash-preview', label: 'Gemini 3.0 Flash (预览版)', description: 'Google 旗下最新一代的先进模型，现已提供尝鲜使用。' },
+            { value: 'google/gemini-3.1-flash-lite-preview', label: 'Gemini 3.1 Flash Lite (预览版)', description: 'Google 最新一代高速轻量模型，适合预算敏感与高并发生成场景。' },
             { value: 'google/gemini-2.5-pro', label: 'Gemini 2.5 Pro', description: 'Google 旗下上一代的最先进模型系列，性能很棒棒。' },
             { value: 'google/gemini-2.5-flash', label: 'Gemini 2.5 Flash', description: 'Google 旗下上一代的最先进模型系列，在性能和价格上十分均衡，也是魔法少女生成器默认使用的模型。' },
             { value: 'google/gemini-2.5-flash-lite', label: 'Gemini 2.5 Flash Lite', description: 'Google 旗下上一代的最先进模型系列，性能略差但是速度很快，是魔法少女生成器默认使用的轻量模型。' },
@@ -615,6 +641,11 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 value: 'gemini-3-flash',
                 label: 'Gemini 3.0 Flash (预览版)',
                 description: 'Google 旗下最新一代的先进模型，现已提供尝鲜使用。'
+            },
+            {
+                value: 'gemini-3.1-flash-lite-preview',
+                label: 'Gemini 3.1 Flash Lite (预览版)',
+                description: 'Google 最新一代高速轻量模型，适合预算敏感与高并发生成场景。'
             },
             {
                 value: 'GPT-5.2',
