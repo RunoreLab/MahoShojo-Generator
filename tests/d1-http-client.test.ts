@@ -145,4 +145,88 @@ describe('db/d1-http-client', () => {
       mock.restore();
     }
   });
+
+  test('batch() 应合并为单次 query 请求并按语句顺序返回结果', async () => {
+    const envSnapshot = readEnvSnapshot();
+    const originalFetch = globalThis.fetch;
+    const queryCalls: Array<{ sql: string; params: unknown[] }> = [];
+
+    try {
+      process.env.CLOUDFLARE_API_TOKEN = `token_${Date.now()}`;
+      process.env.CLOUDFLARE_ACCOUNT_ID = 'account_x';
+      process.env.D1_DATABASE_ID = 'db_x';
+
+      mock.module('server-only', () => ({}));
+      globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+        const body = JSON.parse(String(init?.body ?? '{}'));
+        queryCalls.push({
+          sql: String(body.sql ?? ''),
+          params: Array.isArray(body.params) ? body.params : [],
+        });
+
+        return new Response(
+          JSON.stringify({
+            success: true,
+            result: [
+              {
+                success: true,
+                results: [{ redeemed_slot_count: 3 }],
+                meta: { changes: 1 },
+              },
+              {
+                success: true,
+                results: [],
+                meta: { changes: 1 },
+              },
+              {
+                success: true,
+                results: [{ slot_count: 3 }],
+                meta: { changes: 1 },
+              },
+            ],
+          }),
+          {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        );
+      }) as typeof globalThis.fetch;
+
+      const { createHttpD1ClientFromEnv } = await import('@/lib/db/d1-http-client');
+      const client = createHttpD1ClientFromEnv() as {
+        prepare: (sql: string) => { bind: (...params: unknown[]) => unknown };
+        batch: (statements: unknown[]) => Promise<Array<{ results: Array<Record<string, unknown>> }>>;
+      } | null;
+
+      expect(client).not.toBeNull();
+      if (!client) return;
+
+      const results = await client.batch([
+        client
+          .prepare('UPDATE users SET slot_count = COALESCE(slot_count, 0) + ? WHERE id = ? RETURNING ? AS redeemed_slot_count')
+          .bind(3, 7, 3),
+        client
+          .prepare('INSERT OR IGNORE INTO user_badges (user_id, badge_id) VALUES (?, ?)')
+          .bind(7, 'sponsor'),
+        client
+          .prepare('DELETE FROM redemption_codes WHERE code = ? RETURNING slot_count AS slot_count')
+          .bind('ABC-123'),
+      ]);
+
+      expect(queryCalls).toHaveLength(1);
+      expect(queryCalls[0]?.sql).toContain('UPDATE users');
+      expect(queryCalls[0]?.sql).toContain('INSERT OR IGNORE INTO user_badges');
+      expect(queryCalls[0]?.sql).toContain('DELETE FROM redemption_codes');
+      expect(queryCalls[0]?.params).toEqual([3, 7, 3, 7, 'sponsor', 'ABC-123']);
+      expect(results).toEqual([
+        { success: true, results: [{ redeemed_slot_count: 3 }], meta: { changes: 1 } },
+        { success: true, results: [], meta: { changes: 1 } },
+        { success: true, results: [{ slot_count: 3 }], meta: { changes: 1 } },
+      ]);
+    } finally {
+      restoreEnvSnapshot(envSnapshot);
+      globalThis.fetch = originalFetch;
+      mock.restore();
+    }
+  });
 });

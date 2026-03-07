@@ -1,89 +1,153 @@
 import { requireAuthUser } from '@/lib/auth/server';
-import type { AppDrizzleDb } from '@/lib/db/drizzle';
-import { getDrizzleDbFromRuntime } from '@/lib/db/drizzle';
-import { countUserBadgesByBadgeId, insertUserBadgeIgnore } from '@/lib/db/repositories/badges';
-import { increaseBusinessUserSlotCountById } from '@/lib/db/repositories/business-users';
-import { consumeRedemptionCode } from '@/lib/db/repositories/redemption-codes';
+import { getRuntimeD1Client } from '@/lib/db/drizzle';
 
 export const runtime = 'edge';
 
-export default async function handler(req: Request): Promise<Response> {
-  // 只支持 POST 请求
-  if (req.method !== 'POST') {
-    return new Response(JSON.stringify({ error: 'Method not allowed' }), {
-      status: 405,
-      headers: { 'Content-Type': 'application/json' }
-    });
+type RedeemBatchResult = {
+  invalidCode: boolean;
+  slotCount: number;
+};
+
+type D1BatchStatementResult = {
+  results?: Array<Record<string, unknown>>;
+};
+
+type D1BatchPreparedStatement = {
+  bind: (...params: unknown[]) => unknown;
+};
+
+type D1BatchClient = {
+  prepare: (sqlText: string) => D1BatchPreparedStatement;
+  batch: (statements: unknown[]) => Promise<D1BatchStatementResult[]>;
+};
+
+type RedeemDeps = {
+  requireAuthUser: typeof requireAuthUser;
+  getRuntimeD1Client: typeof getRuntimeD1Client;
+};
+
+const defaultRedeemDeps: RedeemDeps = {
+  requireAuthUser,
+  getRuntimeD1Client,
+};
+
+const json = (payload: unknown, status = 200): Response =>
+  new Response(JSON.stringify(payload), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  });
+
+const isD1BatchClient = (value: unknown): value is D1BatchClient => {
+  if (!value || typeof value !== 'object') return false;
+  const record = value as Record<string, unknown>;
+  return typeof record.prepare === 'function' && typeof record.batch === 'function';
+};
+
+const toNonEmptyString = (value: unknown): string | null => {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+};
+
+const toInt = (value: unknown, fallback = 0): number => {
+  const n = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : Number.NaN;
+  if (!Number.isFinite(n)) return fallback;
+  return Math.trunc(n);
+};
+
+const executeRedeemBatch = async (
+  client: D1BatchClient,
+  userId: number,
+  code: string,
+): Promise<RedeemBatchResult> => {
+  const updateUserStatement = client
+    .prepare(`
+      UPDATE users
+      SET
+        slot_count = COALESCE(slot_count, 0) + COALESCE((SELECT slot_count FROM redemption_codes WHERE code = ?), 0),
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+        AND EXISTS (SELECT 1 FROM redemption_codes WHERE code = ?)
+      RETURNING COALESCE((SELECT slot_count FROM redemption_codes WHERE code = ?), 0) AS redeemed_slot_count
+    `)
+    .bind(code, userId, code, code);
+
+  const grantBadgeStatement = client
+    .prepare(`
+      INSERT OR IGNORE INTO user_badges (user_id, badge_id, obtained_at)
+      SELECT ?, ?, CURRENT_TIMESTAMP
+      WHERE EXISTS (SELECT 1 FROM redemption_codes WHERE code = ?)
+    `)
+    .bind(userId, 'sponsor', code);
+
+  const deleteCodeStatement = client
+    .prepare(`
+      DELETE FROM redemption_codes
+      WHERE code = ?
+      RETURNING slot_count AS slot_count
+    `)
+    .bind(code);
+
+  const results = await client.batch([updateUserStatement, grantBadgeStatement, deleteCodeStatement]);
+  const updatedRow = results[0]?.results?.[0] ?? null;
+  const deletedRow = results[2]?.results?.[0] ?? null;
+
+  if (!updatedRow || !deletedRow) {
+    return { invalidCode: true, slotCount: 0 };
   }
 
-  // 验证用户身份
-  const auth = await requireAuthUser(req);
-  if ('response' in auth) return auth.response;
+  const updatedSlotCount = Math.max(0, toInt(updatedRow.redeemed_slot_count, 0));
+  const deletedSlotCount = Math.max(0, toInt(deletedRow.slot_count, 0));
 
-  try {
-    const { code } = await req.json();
-
-    if (!code || typeof code !== 'string') {
-      return new Response(JSON.stringify({ error: '兑换码不能为空' }), {
-        status: 400,
-        headers: { 'Content-Type': 'application/json' }
-      });
-    }
-
-    const db = getDrizzleDbFromRuntime();
-    if (!db) {
-      return new Response(JSON.stringify({ error: '数据库不可用，请稍后重试' }), {
-        status: 503,
-        headers: { 'Content-Type': 'application/json' }
-      });
-    }
-
-    const normalizedCode = code.trim();
-    let slotCount = 0;
-    let invalidCode = false;
-
-    // 用事务保证：消费兑换码、增加槽位、授予赞助徽章必须原子提交，避免“码已消费但发放失败”
-    await db.transaction(async (txRaw) => {
-      const tx = txRaw as unknown as AppDrizzleDb;
-      const consumed = await consumeRedemptionCode(tx, normalizedCode);
-      if (!consumed) {
-        invalidCode = true;
-        return;
-      }
-
-      slotCount = Math.max(0, Math.floor(consumed.slot_count));
-      const updatedRows = await increaseBusinessUserSlotCountById(tx, auth.user.id, slotCount);
-      if (updatedRows <= 0) {
-        throw new Error('兑换失败：更新用户槽位时未命中记录');
-      }
-
-      const hasSponsorBadge = (await countUserBadgesByBadgeId(tx, auth.user.id, 'sponsor')) > 0;
-      if (!hasSponsorBadge) {
-        await insertUserBadgeIgnore(tx, auth.user.id, 'sponsor');
-      }
-    });
-
-    if (invalidCode) {
-      return new Response(JSON.stringify({ error: '兑换码无效或已被使用' }), {
-        status: 400,
-        headers: { 'Content-Type': 'application/json' }
-      });
-    }
-
-    return new Response(JSON.stringify({
-      success: true,
-      message: `兑换成功！获得 ${slotCount} 个槽位`,
-      slotCount
-    }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' }
-    });
-
-  } catch (error) {
-    console.error('Redeem code error:', error);
-    return new Response(JSON.stringify({ error: '兑换失败，请稍后重试' }), {
-      status: 500,
-      headers: { 'Content-Type': 'application/json' }
-    });
+  if (updatedSlotCount !== deletedSlotCount) {
+    throw new Error(`兑换结果不一致：updated=${updatedSlotCount}, deleted=${deletedSlotCount}`);
   }
-}
+
+  return {
+    invalidCode: false,
+    slotCount: deletedSlotCount,
+  };
+};
+
+export const createRedeemHandler = (overrides: Partial<RedeemDeps> = {}): ((req: Request) => Promise<Response>) => {
+  const deps: RedeemDeps = { ...defaultRedeemDeps, ...overrides };
+
+  return async (req: Request): Promise<Response> => {
+    if (req.method !== 'POST') {
+      return json({ error: 'Method not allowed' }, 405);
+    }
+
+    const auth = await deps.requireAuthUser(req);
+    if ('response' in auth) return auth.response;
+
+    try {
+      const payload = await req.json().catch(() => ({}));
+      const normalizedCode = toNonEmptyString((payload as { code?: unknown })?.code);
+
+      if (!normalizedCode) {
+        return json({ error: '兑换码不能为空' }, 400);
+      }
+
+      const runtimeClient = deps.getRuntimeD1Client();
+      if (!isD1BatchClient(runtimeClient)) {
+        return json({ error: '数据库不可用，请稍后重试' }, 503);
+      }
+
+      const { invalidCode, slotCount } = await executeRedeemBatch(runtimeClient, auth.user.id, normalizedCode);
+      if (invalidCode) {
+        return json({ error: '兑换码无效或已被使用' }, 400);
+      }
+
+      return json({
+        success: true,
+        message: `兑换成功！获得 ${slotCount} 个槽位`,
+        slotCount,
+      });
+    } catch (error) {
+      console.error('Redeem code error:', error);
+      return json({ error: '兑换失败，请稍后重试' }, 500);
+    }
+  };
+};
+
+export default createRedeemHandler();

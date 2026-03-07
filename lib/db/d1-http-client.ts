@@ -38,6 +38,12 @@ type D1LikeRawStatementResult = {
 
 type SqlExecutor = (sql: string, params: unknown[]) => Promise<D1LikeStatementResult>;
 type SqlRawExecutor = (sql: string, params: unknown[]) => Promise<D1LikeRawStatementResult>;
+type SqlBatchExecutor = (entries: BatchEntry[]) => Promise<D1LikeStatementResult[]>;
+
+type BatchEntry = {
+  sqlText: string;
+  params: unknown[];
+};
 
 const clientCache = new Map<string, unknown>();
 
@@ -178,6 +184,53 @@ const parseD1LikeRawStatementResult = (payload: unknown, sql: string): D1LikeRaw
   };
 };
 
+const parseD1LikeStatementBatchResult = (payload: unknown, entries: BatchEntry[]): D1LikeStatementResult[] => {
+  const envelope = asObject(payload) as D1HttpApiEnvelope | null;
+  if (!envelope) {
+    throw new Error('D1 HTTP 返回格式异常：payload 不是对象');
+  }
+
+  if (envelope.success === false) {
+    const message = parseEnvelopeError(envelope);
+    throw new Error(`D1 HTTP batch 执行失败: ${message || 'unknown error'}`);
+  }
+
+  const statementResults = asArray(envelope.result);
+  if (statementResults.length !== entries.length) {
+    throw new Error(`D1 HTTP batch 返回结果数量异常：expected=${entries.length}, actual=${statementResults.length}`);
+  }
+
+  return statementResults.map((item, index) => {
+    const result = asObject(item) as D1HttpApiResult | null;
+    const sql = entries[index]?.sqlText ?? '[unknown-sql]';
+    if (!result) {
+      throw new Error(`D1 HTTP batch 返回格式异常：第 ${index + 1} 条语句结果不是对象`);
+    }
+    if (result.success === false) {
+      const message = parseStatementError(result);
+      throw new Error(`D1 SQL batch 第 ${index + 1} 条执行失败: ${message || 'unknown error'}; sql=${sql.slice(0, 120)}`);
+    }
+
+    const statementError = parseStatementError(result);
+    return {
+      success: true,
+      results: normalizeRows(result.results),
+      meta: normalizeMeta(result.meta),
+      ...(statementError ? { error: statementError } : {}),
+    };
+  });
+};
+
+const normalizeBatchSqlText = (sqlText: string): string => sqlText.trim().replace(/;+\s*$/g, '');
+
+const buildBatchSqlText = (entries: BatchEntry[]): string => {
+  const statements = entries.map((entry) => normalizeBatchSqlText(entry.sqlText)).filter(Boolean);
+  if (statements.length === 0) {
+    throw new Error('D1 HTTP batch 至少需要一条 SQL 语句');
+  }
+  return `${statements.join(';\n')};`;
+};
+
 class HttpD1PreparedStatement {
   constructor(
     private readonly sqlText: string,
@@ -188,6 +241,13 @@ class HttpD1PreparedStatement {
 
   bind(...params: unknown[]): HttpD1PreparedStatement {
     return new HttpD1PreparedStatement(this.sqlText, this.executor, this.rawExecutor, params);
+  }
+
+  toBatchEntry(): BatchEntry {
+    return {
+      sqlText: this.sqlText,
+      params: [...this.params],
+    };
   }
 
   async run(): Promise<D1LikeStatementResult> {
@@ -257,6 +317,7 @@ class HttpD1DatabaseClient {
   constructor(
     private readonly executor: SqlExecutor,
     private readonly rawExecutor: SqlRawExecutor,
+    private readonly batchExecutor: SqlBatchExecutor,
   ) {}
 
   prepare(sqlText: string): HttpD1PreparedStatement {
@@ -264,6 +325,12 @@ class HttpD1DatabaseClient {
   }
 
   async batch(statements: unknown[]): Promise<D1LikeStatementResult[]> {
+    const allHttpPreparedStatements = statements.every((statement) => statement instanceof HttpD1PreparedStatement);
+    if (allHttpPreparedStatements) {
+      const entries = statements.map((statement) => (statement as HttpD1PreparedStatement).toBatchEntry());
+      return this.batchExecutor(entries);
+    }
+
     const results: D1LikeStatementResult[] = [];
     for (const statement of statements) {
       results.push(await toBatchResult(statement));
@@ -309,12 +376,19 @@ export const createHttpD1ClientFromEnv = (): unknown | null => {
     return parseD1LikeStatementResult(payload, sqlText);
   };
 
+  const batchExecutor: SqlBatchExecutor = async (entries) => {
+    const sqlText = buildBatchSqlText(entries);
+    const params = entries.flatMap((entry) => entry.params);
+    const payload = await queryD1Payload(sqlText, params);
+    return parseD1LikeStatementBatchResult(payload, entries);
+  };
+
   const rawExecutor: SqlRawExecutor = async (sqlText, params) => {
     const payload = await queryD1RawPayload(sqlText, params);
     return parseD1LikeRawStatementResult(payload, sqlText);
   };
 
-  const client = new HttpD1DatabaseClient(executor, rawExecutor);
+  const client = new HttpD1DatabaseClient(executor, rawExecutor, batchExecutor);
   clientCache.set(cacheKey, client as unknown);
   return client as unknown;
 };
