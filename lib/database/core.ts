@@ -176,7 +176,7 @@ export function generateUUID(): string {
 type D1QueryEndpoint = 'query' | 'raw';
 
 // 核心查询函数
-async function query(sql: string, params: unknown[] = [], endpoint: D1QueryEndpoint = 'query'): Promise<Response> {
+async function query(body: Record<string, unknown>, endpoint: D1QueryEndpoint = 'query'): Promise<Response> {
   const config = assertD1Config();
   const targetUrl = endpoint === 'raw' ? config.rawUrl : config.queryUrl;
 
@@ -188,10 +188,7 @@ async function query(sql: string, params: unknown[] = [], endpoint: D1QueryEndpo
         "Authorization": `Bearer ${config.apiToken}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        sql,
-        params,
-      }),
+      body: JSON.stringify(body),
     },
     { attempts: 5, baseDelayMs: 500, maxDelayMs: 8000 }
   );
@@ -200,7 +197,7 @@ async function query(sql: string, params: unknown[] = [], endpoint: D1QueryEndpo
 // 从 D1 数据库直接执行 SQL 语句并返回 Cloudflare D1 HTTP payload
 export async function queryD1Payload(sql: string, params: unknown[] = []): Promise<unknown> {
   try {
-    const response = await query(sql, params, 'query');
+    const response = await query({ sql, params }, 'query');
 
     if (!response.ok) {
       let extra = '';
@@ -222,10 +219,35 @@ export async function queryD1Payload(sql: string, params: unknown[] = []): Promi
   }
 }
 
+// 使用 Cloudflare D1 HTTP batch 载荷执行多条语句并返回 payload
+export async function queryD1BatchPayload(batch: Array<{ sql: string; params?: unknown[] }>): Promise<unknown> {
+  try {
+    const response = await query({ batch }, 'query');
+
+    if (!response.ok) {
+      let extra = '';
+      try {
+        const text = await response.text();
+        const trimmed = typeof text === 'string' ? text.trim() : '';
+        if (trimmed) extra = ` - ${trimmed.slice(0, 800)}`;
+      } catch {
+        // ignore
+      }
+      throw new Error(`D1 API 错误: ${response.status} ${response.statusText}${extra}`);
+    }
+
+    const result = await response.json();
+    return result;
+  } catch (error) {
+    console.error("从 D1 数据库 batch 查询失败:", error);
+    throw error;
+  }
+}
+
 // 从 D1 数据库直接执行 SQL 语句并返回 Cloudflare D1 HTTP raw payload
 export async function queryD1RawPayload(sql: string, params: unknown[] = []): Promise<unknown> {
   try {
-    const response = await query(sql, params, 'raw');
+    const response = await query({ sql, params }, 'raw');
 
     if (!response.ok) {
       let extra = '';
@@ -266,10 +288,10 @@ export async function createWithCustomId(data: string, table: string): Promise<s
     const customId = generateRandomId();
     const timestamp = new Date().toISOString();
     
-    const response = await query(
-      `INSERT INTO ${safeTable} (id, data, created_at, updated_at) VALUES (?, ?, ?, ?)`,
-      [customId, data, timestamp, timestamp]
-    );
+    const response = await query({
+      sql: `INSERT INTO ${safeTable} (id, data, created_at, updated_at) VALUES (?, ?, ?, ?)`,
+      params: [customId, data, timestamp, timestamp],
+    });
 
     if (!response.ok) {
       const errorText = await response.text();
@@ -300,10 +322,10 @@ export async function updateById(id: string, data: string, table: string): Promi
     const safeTable = assertSafeTableName(table);
     const timestamp = new Date().toISOString();
     
-    const response = await query(
-      `UPDATE ${safeTable} SET data = ?, updated_at = ? WHERE id = ?`,
-      [data, timestamp, id]
-    );
+    const response = await query({
+      sql: `UPDATE ${safeTable} SET data = ?, updated_at = ? WHERE id = ?`,
+      params: [data, timestamp, id],
+    });
 
     if (!response.ok) {
       const errorText = await response.text();
@@ -327,7 +349,7 @@ export async function updateById(id: string, data: string, table: string): Promi
 export async function getRecordById(id: string, table: string): Promise<unknown> {
   try {
     const safeTable = assertSafeTableName(table);
-    const response = await query(`SELECT * FROM ${safeTable} WHERE id = ?`, [id]);
+    const response = await query({ sql: `SELECT * FROM ${safeTable} WHERE id = ?`, params: [id] });
     if (response.ok) {
       const result = await response.json();
       if (result.result && result.result.length > 0) {
@@ -351,10 +373,10 @@ export async function saveToD1(data: unknown): Promise<boolean> {
 
     const timestamp = new Date().toISOString();
     const dataString = JSON.stringify(data);
-    const response = await query(
-      "INSERT INTO shojo (data, created_at) VALUES (?, ?)",
-      [dataString, timestamp]
-    );
+    const response = await query({
+      sql: "INSERT INTO shojo (data, created_at) VALUES (?, ?)",
+      params: [dataString, timestamp],
+    });
 
     if (!response.ok) {
       const errorText = await response.text();

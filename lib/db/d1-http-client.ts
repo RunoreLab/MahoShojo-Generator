@@ -1,6 +1,6 @@
 import 'server-only';
 
-import { queryD1Payload, queryD1RawPayload } from '@/lib/database/core';
+import { queryD1BatchPayload, queryD1Payload, queryD1RawPayload } from '@/lib/database/core';
 
 type D1HttpApiError = {
   message?: unknown;
@@ -223,14 +223,6 @@ const parseD1LikeStatementBatchResult = (payload: unknown, entries: BatchEntry[]
 
 const normalizeBatchSqlText = (sqlText: string): string => sqlText.trim().replace(/;+\s*$/g, '');
 
-const buildBatchSqlText = (entries: BatchEntry[]): string => {
-  const statements = entries.map((entry) => normalizeBatchSqlText(entry.sqlText)).filter(Boolean);
-  if (statements.length === 0) {
-    throw new Error('D1 HTTP batch 至少需要一条 SQL 语句');
-  }
-  return `${statements.join(';\n')};`;
-};
-
 class HttpD1PreparedStatement {
   constructor(
     private readonly sqlText: string,
@@ -377,9 +369,15 @@ export const createHttpD1ClientFromEnv = (): unknown | null => {
   };
 
   const batchExecutor: SqlBatchExecutor = async (entries) => {
-    const sqlText = buildBatchSqlText(entries);
-    const params = entries.flatMap((entry) => entry.params);
-    const payload = await queryD1Payload(sqlText, params);
+    if (entries.length === 0) {
+      throw new Error('D1 HTTP batch 至少需要一条 SQL 语句');
+    }
+    const payload = await queryD1BatchPayload(
+      entries.map((entry) => ({
+        sql: normalizeBatchSqlText(entry.sqlText),
+        params: [...entry.params],
+      })),
+    );
     return parseD1LikeStatementBatchResult(payload, entries);
   };
 

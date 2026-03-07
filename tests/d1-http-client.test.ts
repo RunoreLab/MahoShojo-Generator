@@ -149,7 +149,11 @@ describe('db/d1-http-client', () => {
   test('batch() 应合并为单次 query 请求并按语句顺序返回结果', async () => {
     const envSnapshot = readEnvSnapshot();
     const originalFetch = globalThis.fetch;
-    const queryCalls: Array<{ sql: string; params: unknown[] }> = [];
+    const queryCalls: Array<{
+      sql: string | null;
+      params: unknown[];
+      batch: Array<{ sql: string; params: unknown[] }>;
+    }> = [];
 
     try {
       process.env.CLOUDFLARE_API_TOKEN = `token_${Date.now()}`;
@@ -160,8 +164,14 @@ describe('db/d1-http-client', () => {
       globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
         const body = JSON.parse(String(init?.body ?? '{}'));
         queryCalls.push({
-          sql: String(body.sql ?? ''),
+          sql: typeof body.sql === 'string' ? body.sql : null,
           params: Array.isArray(body.params) ? body.params : [],
+          batch: Array.isArray(body.batch)
+            ? body.batch.map((item: Record<string, unknown>) => ({
+                sql: String(item?.sql ?? ''),
+                params: Array.isArray(item?.params) ? item.params : [],
+              }))
+            : [],
         });
 
         return new Response(
@@ -214,10 +224,22 @@ describe('db/d1-http-client', () => {
       ]);
 
       expect(queryCalls).toHaveLength(1);
-      expect(queryCalls[0]?.sql).toContain('UPDATE users');
-      expect(queryCalls[0]?.sql).toContain('INSERT OR IGNORE INTO user_badges');
-      expect(queryCalls[0]?.sql).toContain('DELETE FROM redemption_codes');
-      expect(queryCalls[0]?.params).toEqual([3, 7, 3, 7, 'sponsor', 'ABC-123']);
+      expect(queryCalls[0]?.sql).toBeNull();
+      expect(queryCalls[0]?.params).toEqual([]);
+      expect(queryCalls[0]?.batch).toEqual([
+        {
+          sql: 'UPDATE users SET slot_count = COALESCE(slot_count, 0) + ? WHERE id = ? RETURNING ? AS redeemed_slot_count',
+          params: [3, 7, 3],
+        },
+        {
+          sql: 'INSERT OR IGNORE INTO user_badges (user_id, badge_id) VALUES (?, ?)',
+          params: [7, 'sponsor'],
+        },
+        {
+          sql: 'DELETE FROM redemption_codes WHERE code = ? RETURNING slot_count AS slot_count',
+          params: ['ABC-123'],
+        },
+      ]);
       expect(results).toEqual([
         { success: true, results: [{ redeemed_slot_count: 3 }], meta: { changes: 1 } },
         { success: true, results: [], meta: { changes: 1 } },
