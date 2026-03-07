@@ -405,6 +405,11 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
         mode: 'json',
         models: [
             {
+                value: 'ubergarm/Qwen3.5-397B-A17B-GGUF',
+                label: '通义千问 3.5 297B ubergarm 版本',
+                description: '基于 imatrix 量化的通义千问 3.5 397B，先进多模态开源旗舰模型，采用混合架构，能力强大。'
+            },
+            {
                 value: 'Qwen/Qwen3-235B-A22B-Instruct-2507',
                 label: '通义千问 3 235B',
                 description: '旗舰级指令模型，擅长中文对话、写作与复杂指令，适合长文本与结构化任务。'
@@ -413,6 +418,11 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 value: 'ZhipuAI/GLM-5',
                 label: 'GLM-5',
                 description: '面向中文场景的新一代通用模型，适合复杂对话、改写与信息整理。'
+            },
+            {
+                value: 'ZhipuAI/GLM-4.7',
+                label: 'GLM-4.7',
+                description: '智谱旗下通用模型的更新版本，适合复杂指令、多轮对话与综合写作场景。'
             },
             {
                 value: 'ZhipuAI/GLM-4.6',
@@ -425,9 +435,9 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 description: '通用对话与推理模型，适合分析、总结与多轮交互。'
             },
             {
-                value: 'MiniMax/MiniMax-M2',
-                label: 'MiniMax-M2',
-                description: 'DeepSeek 最新版本。'
+                value: 'MiniMax/MiniMax-M2.5',
+                label: 'MiniMax-M2.5',
+                description: '稀宇科技 MiniMax 旗下开源模型，专为编码与智能体任务进行优化。'
             },
             {
                 value: 'moonshotai/Kimi-K2-Thinking',
