@@ -185,12 +185,9 @@ export function PvpLobbyPage() {
 
     setIsCreating(true);
     try {
-      const authHeader = await authStorage.getAuthHeader();
-      if (!authHeader) throw new Error('未登录');
-
-      const res = await fetch('/api/pvp/rooms', {
+      const res = await authStorage.fetch('/api/pvp/rooms', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: authHeader },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           rules,
           password: createPassword.trim() || undefined,
@@ -231,12 +228,8 @@ export function PvpLobbyPage() {
 
     setIsQuickMatching(true);
     try {
-      const authHeader = await authStorage.getAuthHeader();
-      if (!authHeader) throw new Error('未登录');
-
-      const res = await fetch('/api/pvp/rooms/quick-match', {
+      const res = await authStorage.fetch('/api/pvp/rooms/quick-match', {
         method: 'POST',
-        headers: { Authorization: authHeader },
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || '快速匹配失败');

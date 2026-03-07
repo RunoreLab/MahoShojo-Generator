@@ -60,11 +60,9 @@ export function MePage() {
 
   const regenerateMutation = useMutation({
     mutationFn: async (generationId: string) => {
-      const authHeader = await authStorage.getAuthHeader();
-      if (!authHeader) throw new Error('未登录');
-      const res = await fetch(`/api/me/battle-reports/${generationId}/regenerate`, {
+      const res = await authStorage.fetch(`/api/me/battle-reports/${generationId}/regenerate`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: authHeader },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({}),
       });
       const data = await res.json().catch(() => ({}));

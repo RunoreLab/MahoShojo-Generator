@@ -28,14 +28,10 @@ const getStrengthBarClassName = (score: number): string => {
 };
 
 const authedJson = async <T,>(path: string, method: 'PUT' | 'POST', body: Record<string, unknown>): Promise<T> => {
-  const authHeader = await authStorage.getAuthHeader();
-  if (!authHeader) throw new Error('未登录');
-
-  const response = await fetch(path, {
+  const response = await authStorage.fetch(path, {
     method,
     headers: {
       'Content-Type': 'application/json',
-      Authorization: authHeader,
     },
     body: JSON.stringify(body),
   });

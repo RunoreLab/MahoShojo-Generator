@@ -74,9 +74,7 @@ export function BattleReportDetailsModal({ isOpen, generationId, onClose, onRege
     queryKey: ['me', 'battle-reports', 'detail', generationId],
     enabled: Boolean(isOpen && generationId),
     queryFn: async (): Promise<DetailResponse> => {
-      const authHeader = await authStorage.getAuthHeader();
-      if (!authHeader) throw new Error('未登录');
-      const res = await fetch(`/api/me/battle-reports/${generationId}`, { headers: { Authorization: authHeader } });
+      const res = await authStorage.fetch(`/api/me/battle-reports/${generationId}`);
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || '加载战报详情失败');
       return data as DetailResponse;

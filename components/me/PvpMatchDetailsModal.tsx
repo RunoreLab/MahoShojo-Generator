@@ -65,9 +65,7 @@ export function PvpMatchDetailsModal({ isOpen, matchId, myUserId, onClose, onOpe
     queryKey: ['me', 'pvp', 'match-detail', matchId],
     enabled: Boolean(isOpen && matchId),
     queryFn: async (): Promise<MatchDetailResponse> => {
-      const authHeader = await authStorage.getAuthHeader();
-      if (!authHeader) throw new Error('未登录');
-      const res = await fetch(`/api/me/pvp/matches/${matchId}`, { headers: { Authorization: authHeader } });
+      const res = await authStorage.fetch(`/api/me/pvp/matches/${matchId}`);
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || '加载对局详情失败');
       return data as MatchDetailResponse;

@@ -409,20 +409,13 @@ export default function DataCardDetailsModal({
           return;
         }
 
-        const authHeader = await authStorage.getAuthHeader();
-        if (!authHeader) {
-          setSaveTagsError('未登录，无法保存标签');
-          return;
-        }
-
-        await fetchJson('/api/data-card-tags', {
+        await fetchJson('/api/data-card-tags', await authStorage.buildAuthenticatedRequestInit({
           method: 'PUT',
           headers: {
             'Content-Type': 'application/json',
-            Authorization: authHeader,
           },
           body: JSON.stringify({ dataCardId: card.id, tagIds: selectedTagIds }),
-        });
+        }));
       } else {
         if (!adminTagEditor) {
           setSaveTagsError('无权修改管理员/系统标签');

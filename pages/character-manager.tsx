@@ -377,17 +377,7 @@ const CharacterManagerPage: React.FC = () => {
     const loadUserBadges = useCallback(async () => {
         if (!isAuthenticated) return;
         try {
-            const authHeader = await authStorage.getAuthHeader();
-            if (!authHeader) {
-                setUserBadges([]);
-                return;
-            }
-
-            const response = await fetch('/api/badges/user', {
-                headers: {
-                    Authorization: authHeader
-                }
-            });
+            const response = await authStorage.fetch('/api/badges/user');
 
             if (!response.ok) {
                 setUserBadges([]);

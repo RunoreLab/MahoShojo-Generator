@@ -126,11 +126,7 @@ export function PvpRoomBrowserModal({ isOpen, onClose }: Props) {
     setError(null);
 
     try {
-      const authHeader = await authStorage.getAuthHeader();
-      if (!authHeader) throw new Error('未登录');
-
-      const res = await fetch(`/api/pvp/rooms/browse?${queryString}`, {
-        headers: { Authorization: authHeader },
+      const res = await authStorage.fetch(`/api/pvp/rooms/browse?${queryString}`, {
         signal: controller.signal,
       });
       const data = await res.json().catch(() => ({}));
@@ -214,17 +210,14 @@ export function PvpRoomBrowserModal({ isOpen, onClose }: Props) {
       setJoinBusyRoomId(room.roomId);
 
       try {
-        const authHeader = await authStorage.getAuthHeader();
-        if (!authHeader) throw new Error('未登录');
-
         const pwd = (joinPasswords[room.roomId] || '').trim();
         if (room.hasPassword && !pwd) {
           throw new Error('该房间需要口令，请先输入口令。');
         }
 
-        const res = await fetch(`/api/pvp/rooms/${room.roomId}/join`, {
+        const res = await authStorage.fetch(`/api/pvp/rooms/${room.roomId}/join`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: authHeader },
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ password: pwd || undefined }),
         });
         const data = await res.json().catch(() => ({}));
@@ -245,12 +238,8 @@ export function PvpRoomBrowserModal({ isOpen, onClose }: Props) {
     setError(null);
     setIsQuickMatching(true);
     try {
-      const authHeader = await authStorage.getAuthHeader();
-      if (!authHeader) throw new Error('未登录');
-
-      const res = await fetch('/api/pvp/rooms/quick-match', {
+      const res = await authStorage.fetch('/api/pvp/rooms/quick-match', {
         method: 'POST',
-        headers: { Authorization: authHeader },
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data?.error || '快速匹配失败');

@@ -18,14 +18,8 @@ type AuthMigrationResponse = {
 };
 
 export const loadAuthMigrationStatus = async (): Promise<AuthMigrationStatus> => {
-  const authHeader = await authStorage.getAuthHeader();
-  if (!authHeader) throw new Error('未登录');
-
-  const response = await fetch('/api/me/account/migration-status', {
+  const response = await authStorage.fetch('/api/me/account/migration-status', {
     method: 'GET',
-    headers: {
-      Authorization: authHeader,
-    },
   });
   const data = (await response.json().catch(() => ({}))) as Partial<AuthMigrationResponse> & { error?: string };
   if (!response.ok || !data.success || !data.status) {

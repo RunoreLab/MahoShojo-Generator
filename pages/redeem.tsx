@@ -38,7 +38,7 @@ const RedeemPage: React.FC = () => {
       });
 
       if (data.success) {
-        setMessage({ type: 'success', text: data.message });
+        setMessage({ type: 'success', text: data.message || '兑换成功' });
         setCode('');
         // 3秒后自动返回
         setTimeout(() => {

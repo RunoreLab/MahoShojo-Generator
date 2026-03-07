@@ -11,14 +11,7 @@ import type { UserBadge } from '@/types/badge';
  */
 export async function getUserBadges(): Promise<UserBadge[]> {
   try {
-    const authHeader = await authStorage.getAuthHeader();
-    if (!authHeader) {
-      return [];
-    }
-
-    const response = await fetch('/api/badges/user', {
-      headers: { 'Authorization': authHeader }
-    });
+    const response = await authStorage.fetch('/api/badges/user');
 
     if (response.ok) {
       const data = await response.json();
@@ -51,16 +44,10 @@ export async function getUserEquippedBadges(): Promise<UserBadge[]> {
  */
 export async function updateUserEquippedBadges(badgeIds: string[]): Promise<boolean> {
   try {
-    const authHeader = await authStorage.getAuthHeader();
-    if (!authHeader) {
-      return false;
-    }
-
-    const response = await fetch('/api/badges/equip', {
+    const response = await authStorage.fetch('/api/badges/equip', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': authHeader
       },
       body: JSON.stringify({ badgeIds })
     });

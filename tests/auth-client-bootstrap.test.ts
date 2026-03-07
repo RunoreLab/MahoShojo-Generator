@@ -121,4 +121,52 @@ describe('authStorage session bootstrap', () => {
       (globalThis as typeof globalThis & { localStorage?: unknown }).localStorage = previousLocalStorage;
     }
   });
+
+  test('兼容 bearer 缺失时，authStorage.fetch 仍应继续发起业务请求', async () => {
+    const previousWindow = (globalThis as typeof globalThis & { window?: unknown }).window;
+    const previousLocalStorage = (globalThis as typeof globalThis & { localStorage?: unknown }).localStorage;
+    const previousFetch = globalThis.fetch;
+
+    try {
+      (globalThis as typeof globalThis & { window?: unknown }).window = {};
+      (globalThis as typeof globalThis & { localStorage?: unknown }).localStorage = new LocalStorageMock();
+
+      const fetchMock = mock(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url === '/api/auth/verify') {
+          return new Response(JSON.stringify({ success: false, error: '未授权' }), {
+            status: 401,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+
+        expect(url).toBe('/api/redeem-code');
+        expect(init?.method).toBe('POST');
+        expect(init?.credentials).toBe('same-origin');
+        const headers = new Headers(init?.headers);
+        expect(headers.get('Authorization')).toBeNull();
+        expect(headers.get('Content-Type')).toBe('application/json');
+
+        return new Response(JSON.stringify({ success: true }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      });
+      globalThis.fetch = fetchMock as typeof fetch;
+
+      const response = await authStorage.fetch('/api/redeem-code', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: 'A3F8-E9C2-1D4B' }),
+      });
+
+      expect(response.ok).toBeTrue();
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    } finally {
+      authStorage.clearAuth();
+      globalThis.fetch = previousFetch;
+      (globalThis as typeof globalThis & { window?: unknown }).window = previousWindow;
+      (globalThis as typeof globalThis & { localStorage?: unknown }).localStorage = previousLocalStorage;
+    }
+  });
 });

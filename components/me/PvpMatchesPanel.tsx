@@ -61,9 +61,7 @@ export function PvpMatchesPanel({ isAuthenticated, myUserId, onOpenMatchDetails 
     queryKey: ['me', 'pvp', page, pageSize],
     enabled: Boolean(isAuthenticated),
     queryFn: async (): Promise<PvpResponse> => {
-      const authHeader = await authStorage.getAuthHeader();
-      if (!authHeader) throw new Error('未登录');
-      const res = await fetch(`/api/me/pvp?page=${page}&pageSize=${pageSize}`, { headers: { Authorization: authHeader } });
+      const res = await authStorage.fetch(`/api/me/pvp?page=${page}&pageSize=${pageSize}`);
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || '加载 PVP 战绩失败');
       return data as PvpResponse;
@@ -231,4 +229,3 @@ export function PvpMatchesPanel({ isAuthenticated, myUserId, onOpenMatchDetails 
     </div>
   );
 }
-

@@ -59,11 +59,7 @@ export function PvpSettlementCardModal({ isOpen, onClose, roomId }: Props) {
     queryKey: ['pvp', 'rooms', roomId, 'settlement-card'],
     enabled: isOpen && Boolean(roomId),
     queryFn: async (): Promise<ApiResponse> => {
-      const authHeader = await authStorage.getAuthHeader();
-      if (!authHeader) throw new Error('未登录');
-      const res = await fetch(`/api/pvp/rooms/${encodeURIComponent(roomId)}/settlement-card`, {
-        headers: { Authorization: authHeader },
-      });
+      const res = await authStorage.fetch(`/api/pvp/rooms/${encodeURIComponent(roomId)}/settlement-card`);
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error((data as any)?.error || '加载结算卡数据失败');
       return data as ApiResponse;

@@ -183,8 +183,6 @@ export function BattleReportsPanel({ isAuthenticated, onOpenDetails, onRegenerat
     queryKey: ['me', 'battle-reports', page, pageSize, status, mode, generationMode, pvpOnly, sort, search],
     enabled: Boolean(isAuthenticated),
     queryFn: async (): Promise<ListResponse> => {
-      const authHeader = await authStorage.getAuthHeader();
-      if (!authHeader) throw new Error('未登录');
       const params = new URLSearchParams({
         page: String(page),
         pageSize: String(pageSize),
@@ -196,9 +194,7 @@ export function BattleReportsPanel({ isAuthenticated, onOpenDetails, onRegenerat
       if (sort) params.set('sort', sort);
       if (search) params.set('q', search);
 
-      const res = await fetch(`/api/me/battle-reports?${params.toString()}`, {
-        headers: { Authorization: authHeader },
-      });
+      const res = await authStorage.fetch(`/api/me/battle-reports?${params.toString()}`);
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || '加载战报记录失败');
       return data as ListResponse;

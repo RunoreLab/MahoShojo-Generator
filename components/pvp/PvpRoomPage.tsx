@@ -336,11 +336,9 @@ export function PvpRoomPage() {
 
   const joinMutation = useMutation({
     mutationFn: async (payload: { password?: string }) => {
-      const authHeader = await authStorage.getAuthHeader();
-      if (!authHeader) throw new Error('未登录');
-      const res = await fetch(`/api/pvp/rooms/${roomId}/join`, {
+      const res = await authStorage.fetch(`/api/pvp/rooms/${roomId}/join`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: authHeader },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ password: payload.password || undefined }),
       });
       const { data } = await readJsonOrText(res);
@@ -387,9 +385,7 @@ export function PvpRoomPage() {
     enabled: Boolean(roomId && joined && isAuthenticated),
     refetchInterval: 1500,
     queryFn: async () => {
-      const authHeader = await authStorage.getAuthHeader();
-      if (!authHeader) throw new Error('未登录');
-      const res = await fetchWithTimeout(`/api/pvp/rooms/${roomId}`, { headers: { Authorization: authHeader } }, 8000);
+      const res = await fetchWithTimeout(`/api/pvp/rooms/${roomId}`, await authStorage.buildAuthenticatedRequestInit(), 8000);
       const { data } = await readJsonOrText(res);
       if (!res.ok) {
         const payload = (data || {}) as ApiErrorPayload;
@@ -562,11 +558,9 @@ export function PvpRoomPage() {
     enabled: Boolean(joined && isAuthenticated && userIdsForSummary.length > 0),
     staleTime: 10_000,
     queryFn: async () => {
-      const authHeader = await authStorage.getAuthHeader();
-      if (!authHeader) throw new Error('未登录');
-      const res = await fetch('/api/pvp/users/summary', {
+      const res = await authStorage.fetch('/api/pvp/users/summary', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: authHeader },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userIds: userIdsForSummary }),
       });
       const { data } = await readJsonOrText(res);
@@ -879,15 +873,13 @@ export function PvpRoomPage() {
 
   const leaveMutation = useMutation({
     mutationFn: async () => {
-      const authHeader = await authStorage.getAuthHeader();
-      if (!authHeader) throw new Error('未登录');
       const res = await fetchWithTimeout(
         `/api/pvp/rooms/${roomId}/leave`,
-        {
+        await authStorage.buildAuthenticatedRequestInit({
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: authHeader },
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({}),
-        },
+        }),
         15000,
       );
       const { data } = await readJsonOrText(res);
@@ -910,11 +902,9 @@ export function PvpRoomPage() {
 
   const roleMutation = useMutation({
     mutationFn: async (role: 'player' | 'spectator') => {
-      const authHeader = await authStorage.getAuthHeader();
-      if (!authHeader) throw new Error('未登录');
-      const res = await fetch(`/api/pvp/rooms/${roomId}/role`, {
+      const res = await authStorage.fetch(`/api/pvp/rooms/${roomId}/role`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: authHeader },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ expectedVersion: version, role }),
       });
       const { data } = await readJsonOrText(res);
@@ -944,17 +934,14 @@ export function PvpRoomPage() {
       }
       if (hasPrivateSelected && !acceptPrivateDisclosure) throw new Error('包含私有卡时必须勾选披露确认');
 
-      const authHeader = await authStorage.getAuthHeader();
-      if (!authHeader) throw new Error('未登录');
-
       const cards = selected.map((c) => {
         if (c.kind === 'preset') return { kind: 'preset', filename: c.filename };
         return { kind: 'data_card', id: c.id, updatedAt: c.updatedAt || undefined };
       });
 
-      const res = await fetch(`/api/pvp/rooms/${roomId}/submit`, {
+      const res = await authStorage.fetch(`/api/pvp/rooms/${roomId}/submit`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: authHeader },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           expectedVersion: version,
           cards,
@@ -985,11 +972,9 @@ export function PvpRoomPage() {
 
   const startMutation = useMutation({
     mutationFn: async () => {
-      const authHeader = await authStorage.getAuthHeader();
-      if (!authHeader) throw new Error('未登录');
-      const res = await fetch(`/api/pvp/rooms/${roomId}/start`, {
+      const res = await authStorage.fetch(`/api/pvp/rooms/${roomId}/start`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: authHeader },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ expectedVersion: version }),
       });
       const { data } = await readJsonOrText(res);
@@ -1011,11 +996,9 @@ export function PvpRoomPage() {
   const chooseMutation = useMutation({
     mutationFn: async (snapshotId: string) => {
       if (!latestRound?.id) throw new Error('当前回合不存在，请刷新');
-      const authHeader = await authStorage.getAuthHeader();
-      if (!authHeader) throw new Error('未登录');
-      const res = await fetch(`/api/pvp/rooms/${roomId}/rounds/${latestRound?.id}/choose`, {
+      const res = await authStorage.fetch(`/api/pvp/rooms/${roomId}/rounds/${latestRound?.id}/choose`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: authHeader },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           expectedVersion: version,
           snapshotId,
@@ -1050,8 +1033,6 @@ export function PvpRoomPage() {
   const resolveMutation = useMutation({
     mutationFn: async (payload?: { customProvider?: UserAIProviderConfig | null; force?: boolean }) => {
       if (!latestRound?.id) throw new Error('当前回合不存在，请刷新');
-      const authHeader = await authStorage.getAuthHeader();
-      if (!authHeader) throw new Error('未登录');
 
       const customProvider = buildCustomProviderPayload(payload?.customProvider ?? null);
       const shouldStream = rules?.generationMode === 'stream';
@@ -1059,15 +1040,15 @@ export function PvpRoomPage() {
       if (!shouldStream) {
         const res = await fetchWithTimeout(
           `/api/pvp/rooms/${roomId}/rounds/${latestRound?.id}/resolve`,
-          {
+          await authStorage.buildAuthenticatedRequestInit({
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', Authorization: authHeader },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               expectedVersion: version,
               ...(payload?.force ? { force: true } : {}),
               ...(customProvider ? { customProvider } : {}),
             }),
-          },
+          }),
           RESOLVE_REQUEST_TIMEOUT_MS,
         );
         const { data } = await readJsonOrText(res);
@@ -1089,15 +1070,15 @@ export function PvpRoomPage() {
       try {
         const res = await fetchWithTimeout(
           `/api/pvp/rooms/${roomId}/rounds/${latestRound?.id}/resolve-stream?format=sse`,
-          {
+          await authStorage.buildAuthenticatedRequestInit({
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', Authorization: authHeader, Accept: 'text/event-stream' },
+            headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
             body: JSON.stringify({
               expectedVersion: version,
               ...(payload?.force ? { force: true } : {}),
               ...(customProvider ? { customProvider } : {}),
             }),
-          },
+          }),
           RESOLVE_REQUEST_TIMEOUT_MS,
         );
 
@@ -1399,11 +1380,9 @@ export function PvpRoomPage() {
 
   const passwordMutation = useMutation({
     mutationFn: async (password: string) => {
-      const authHeader = await authStorage.getAuthHeader();
-      if (!authHeader) throw new Error('未登录');
-      const res = await fetch(`/api/pvp/rooms/${roomId}/password`, {
+      const res = await authStorage.fetch(`/api/pvp/rooms/${roomId}/password`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: authHeader },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ expectedVersion: version, password }),
       });
       const { data } = await readJsonOrText(res);
@@ -1424,11 +1403,9 @@ export function PvpRoomPage() {
 
   const permissionsMutation = useMutation({
     mutationFn: async (payload: { allowNonHostControl?: boolean; allowPlayerCharacterGuidance?: boolean; allowSpectators?: boolean; allowSpectatorChat?: boolean }) => {
-      const authHeader = await authStorage.getAuthHeader();
-      if (!authHeader) throw new Error('未登录');
-      const res = await fetch(`/api/pvp/rooms/${roomId}/permissions`, {
+      const res = await authStorage.fetch(`/api/pvp/rooms/${roomId}/permissions`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: authHeader },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ expectedVersion: version, ...payload }),
       });
       const { data } = await readJsonOrText(res);
@@ -1449,11 +1426,9 @@ export function PvpRoomPage() {
 
   const rulesMutation = useMutation({
     mutationFn: async (payload: { rules: PvpRoomRules; clearSubmissions?: boolean }) => {
-      const authHeader = await authStorage.getAuthHeader();
-      if (!authHeader) throw new Error('未登录');
-      const res = await fetch(`/api/pvp/rooms/${roomId}/rules`, {
+      const res = await authStorage.fetch(`/api/pvp/rooms/${roomId}/rules`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: authHeader },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           expectedVersion: version,
           rules: payload.rules,
@@ -1478,11 +1453,9 @@ export function PvpRoomPage() {
 
   const scenarioMutation = useMutation({
     mutationFn: async (payload: { selection: PvpScenarioSelection | null }) => {
-      const authHeader = await authStorage.getAuthHeader();
-      if (!authHeader) throw new Error('未登录');
-      const res = await fetch(`/api/pvp/rooms/${roomId}/rules`, {
+      const res = await authStorage.fetch(`/api/pvp/rooms/${roomId}/rules`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: authHeader },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           expectedVersion: version,
           rules: buildPvpScenarioRulesPatch({ mode: rulesDraft?.mode, selection: payload.selection ?? null }),
@@ -1575,11 +1548,9 @@ export function PvpRoomPage() {
 
   const restartMutation = useMutation({
     mutationFn: async () => {
-      const authHeader = await authStorage.getAuthHeader();
-      if (!authHeader) throw new Error('未登录');
-      const res = await fetch(`/api/pvp/rooms/${roomId}/restart`, {
+      const res = await authStorage.fetch(`/api/pvp/rooms/${roomId}/restart`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: authHeader },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ expectedVersion: version }),
       });
       const { data } = await readJsonOrText(res);
@@ -1601,15 +1572,13 @@ export function PvpRoomPage() {
   const confirmMutation = useMutation({
     mutationFn: async () => {
       if (!latestRound?.id) throw new Error('当前回合不存在，请刷新');
-      const authHeader = await authStorage.getAuthHeader();
-      if (!authHeader) throw new Error('未登录');
       const res = await fetchWithTimeout(
         `/api/pvp/rooms/${roomId}/rounds/${latestRound.id}/confirm`,
-        {
+        await authStorage.buildAuthenticatedRequestInit({
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: authHeader },
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ expectedVersion: version }),
-        },
+        }),
         15000,
       );
       const { data } = await readJsonOrText(res);
@@ -1631,11 +1600,9 @@ export function PvpRoomPage() {
   const startWinnerVoteMutation = useMutation({
     mutationFn: async () => {
       if (!latestRound?.id) throw new Error('当前回合不存在，请刷新');
-      const authHeader = await authStorage.getAuthHeader();
-      if (!authHeader) throw new Error('未登录');
-      const res = await fetch(`/api/pvp/rooms/${roomId}/rounds/${latestRound.id}/vote/start`, {
+      const res = await authStorage.fetch(`/api/pvp/rooms/${roomId}/rounds/${latestRound.id}/vote/start`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: authHeader },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ expectedVersion: version }),
       });
       const { data } = await readJsonOrText(res);
@@ -1657,11 +1624,9 @@ export function PvpRoomPage() {
   const submitWinnerVoteMutation = useMutation({
     mutationFn: async (choice: WinnerVoteChoice) => {
       if (!latestRound?.id) throw new Error('当前回合不存在，请刷新');
-      const authHeader = await authStorage.getAuthHeader();
-      if (!authHeader) throw new Error('未登录');
-      const res = await fetch(`/api/pvp/rooms/${roomId}/rounds/${latestRound.id}/vote/submit`, {
+      const res = await authStorage.fetch(`/api/pvp/rooms/${roomId}/rounds/${latestRound.id}/vote/submit`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: authHeader },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ expectedVersion: version, choice }),
       });
       const { data } = await readJsonOrText(res);
@@ -1683,11 +1648,9 @@ export function PvpRoomPage() {
   const finalizeWinnerVoteMutation = useMutation({
     mutationFn: async () => {
       if (!latestRound?.id) throw new Error('当前回合不存在，请刷新');
-      const authHeader = await authStorage.getAuthHeader();
-      if (!authHeader) throw new Error('未登录');
-      const res = await fetch(`/api/pvp/rooms/${roomId}/rounds/${latestRound.id}/vote/finalize`, {
+      const res = await authStorage.fetch(`/api/pvp/rooms/${roomId}/rounds/${latestRound.id}/vote/finalize`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: authHeader },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ expectedVersion: version }),
       });
       const { data } = await readJsonOrText(res);
@@ -1805,11 +1768,9 @@ export function PvpRoomPage() {
 
   const kickMutation = useMutation({
     mutationFn: async (targetUserId: number) => {
-      const authHeader = await authStorage.getAuthHeader();
-      if (!authHeader) throw new Error('未登录');
-      const res = await fetch(`/api/pvp/rooms/${roomId}/kick`, {
+      const res = await authStorage.fetch(`/api/pvp/rooms/${roomId}/kick`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: authHeader },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ expectedVersion: version, userId: targetUserId }),
       });
       const { data } = await readJsonOrText(res);
@@ -1830,11 +1791,9 @@ export function PvpRoomPage() {
 
   const forceActionMutation = useMutation({
     mutationFn: async (kind: 'submit' | 'choose' | 'confirm') => {
-      const authHeader = await authStorage.getAuthHeader();
-      if (!authHeader) throw new Error('未登录');
-      const res = await fetch(`/api/pvp/rooms/${roomId}/force`, {
+      const res = await authStorage.fetch(`/api/pvp/rooms/${roomId}/force`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: authHeader },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ expectedVersion: version, kind }),
       });
       const { data } = await readJsonOrText(res);
@@ -1855,11 +1814,9 @@ export function PvpRoomPage() {
 
   const addBotMutation = useMutation({
     mutationFn: async () => {
-      const authHeader = await authStorage.getAuthHeader();
-      if (!authHeader) throw new Error('未登录');
-      const res = await fetch(`/api/pvp/rooms/${roomId}/bots/add`, {
+      const res = await authStorage.fetch(`/api/pvp/rooms/${roomId}/bots/add`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: authHeader },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ expectedVersion: version }),
       });
       const { data } = await readJsonOrText(res);
@@ -1880,11 +1837,9 @@ export function PvpRoomPage() {
 
   const removeBotMutation = useMutation({
     mutationFn: async (botId: string) => {
-      const authHeader = await authStorage.getAuthHeader();
-      if (!authHeader) throw new Error('未登录');
-      const res = await fetch(`/api/pvp/rooms/${roomId}/bots/remove`, {
+      const res = await authStorage.fetch(`/api/pvp/rooms/${roomId}/bots/remove`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: authHeader },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ expectedVersion: version, botId }),
       });
       const { data } = await readJsonOrText(res);
