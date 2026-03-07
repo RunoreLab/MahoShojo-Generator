@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/router';
 import { useAuth } from '@/lib/useAuth';
 import { authStorage } from '@/lib/auth';
+import { submitRedeemCode } from '@/lib/client/redeem-code';
 import Footer from '@/components/Footer';
 
 const RedeemPage: React.FC = () => {
@@ -31,22 +32,10 @@ const RedeemPage: React.FC = () => {
 
     try {
       const authHeader = await authStorage.getAuthHeader();
-      if (!authHeader) {
-        setMessage({ type: 'error', text: '认证信息无效，请重新登录' });
-        setIsRedeeming(false);
-        return;
-      }
-
-      const response = await fetch('/api/redeem-code', {
-        method: 'POST',
-        headers: {
-          'Authorization': authHeader,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ code: code.trim() })
+      const { data } = await submitRedeemCode({
+        code,
+        authHeader,
       });
-
-      const data = await response.json();
 
       if (data.success) {
         setMessage({ type: 'success', text: data.message });
