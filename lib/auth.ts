@@ -77,6 +77,98 @@ const cryptoHelper = new CryptoHelper();
 let cachedEncryptedValue: string | null = null;
 let cachedAuthValue: AuthData | null = null;
 let cachedAuthPromise: Promise<AuthData | null> | null = null;
+let sessionBootstrapPromise: Promise<AuthData | null> | null = null;
+
+type VerifyAuthResponse = {
+  success: boolean;
+  authKey?: string | null;
+  user?: { id: number; username: string; prefix?: string | null };
+  badges?: UserBadge[];
+  activityToken?: string | null;
+};
+
+const normalizeAuthKey = (value: unknown): string | null => {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+};
+
+const normalizeActivityToken = (value: unknown): string | undefined =>
+  typeof value === 'string' && value.trim().length > 0 ? value : undefined;
+
+const readStoredAuthHeader = (auth: AuthData | null): string | null => {
+  const authKey = normalizeAuthKey(auth?.authKey);
+  return authKey ? `Bearer ${authKey}` : null;
+};
+
+const fetchVerifyAuthState = async (authHeader: string | null): Promise<VerifyAuthResponse> => {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+  if (authHeader) {
+    headers.Authorization = authHeader;
+  }
+
+  const response = await fetch('/api/auth/verify', {
+    method: 'POST',
+    headers,
+    credentials: 'include',
+  });
+
+  return (await response.json()) as VerifyAuthResponse;
+};
+
+const persistVerifyAuthState = async (
+  data: VerifyAuthResponse,
+  fallbackAuth: AuthData | null,
+): Promise<AuthData | null> => {
+  if (!data?.success || !data.user || typeof data.user.username !== 'string') {
+    return null;
+  }
+
+  const nextAuth: AuthData = {
+    username: data.user.username,
+  };
+
+  const authKey = normalizeAuthKey(data.authKey) ?? normalizeAuthKey(fallbackAuth?.authKey);
+  if (authKey) {
+    nextAuth.authKey = authKey;
+  }
+
+  if (typeof data.user.id === 'number' && Number.isSafeInteger(data.user.id) && data.user.id > 0) {
+    nextAuth.userId = data.user.id;
+  } else if (typeof fallbackAuth?.userId === 'number' && Number.isSafeInteger(fallbackAuth.userId) && fallbackAuth.userId > 0) {
+    nextAuth.userId = fallbackAuth.userId;
+  }
+
+  const activityToken = normalizeActivityToken(data.activityToken) ?? normalizeActivityToken(fallbackAuth?.activityToken);
+  if (activityToken) {
+    nextAuth.activityToken = activityToken;
+  }
+
+  await authStorage.setAuth(nextAuth);
+  return nextAuth;
+};
+
+const bootstrapAuthFromSession = async (): Promise<AuthData | null> => {
+  if (sessionBootstrapPromise) {
+    return await sessionBootstrapPromise;
+  }
+
+  sessionBootstrapPromise = (async () => {
+    const data = await fetchVerifyAuthState(null);
+    return persistVerifyAuthState(data, null);
+  })();
+
+  try {
+    return await sessionBootstrapPromise;
+  } catch (error) {
+    console.error('Session auth bootstrap error:', error);
+    return null;
+  } finally {
+    sessionBootstrapPromise = null;
+  }
+};
 
 export const authStorage = {
   // 加密存储认证信息
@@ -137,18 +229,22 @@ export const authStorage = {
     cachedEncryptedValue = null;
     cachedAuthValue = null;
     cachedAuthPromise = null;
+    sessionBootstrapPromise = null;
   },
 
   // 获取认证头
   async getAuthHeader(): Promise<string | null> {
     const auth = await this.getAuth();
-    const authKey = typeof auth?.authKey === 'string' ? auth.authKey.trim() : '';
-    return authKey ? `Bearer ${authKey}` : null;
+    const cachedHeader = readStoredAuthHeader(auth);
+    if (cachedHeader) return cachedHeader;
+
+    const bootstrappedAuth = await bootstrapAuthFromSession();
+    return readStoredAuthHeader(bootstrappedAuth);
   },
 
   // 获取“活跃统计”头（不依赖额外 D1 读取）
   async getActivityHeaders(): Promise<Record<string, string>> {
-    const auth = await this.getAuth();
+    const auth = (await this.getAuth()) ?? (await bootstrapAuthFromSession());
     if (!auth) return {};
 
     const headers: Record<string, string> = {};
@@ -261,34 +357,18 @@ export const authApi = {
   // 验证当前认证状态
   async verify(): Promise<{
     success: boolean;
+    authKey?: string | null;
     user?: { id: number; username: string; prefix?: string | null };
     badges?: UserBadge[];
     activityToken?: string | null;
   }> {
-    const authHeader = await authStorage.getAuthHeader();
+    const auth = await authStorage.getAuth();
+    const authHeader = readStoredAuthHeader(auth);
 
     try {
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
-      };
-      if (authHeader) {
-        headers.Authorization = authHeader;
-      }
-
-      const response = await fetch('/api/auth/verify', {
-        method: 'POST',
-        headers,
-        credentials: 'include',
-      });
-
-      const data = await response.json();
-      const auth = await authStorage.getAuth();
-      if (auth && data?.success && data?.user?.id) {
-        await authStorage.setAuth({
-          ...auth,
-          userId: typeof data.user.id === 'number' ? data.user.id : auth.userId,
-          activityToken: typeof data.activityToken === 'string' ? data.activityToken : auth.activityToken,
-        });
+      const data = await fetchVerifyAuthState(authHeader);
+      if (data?.success && data?.user?.id) {
+        await persistVerifyAuthState(data, auth);
       }
       return data;
     } catch (error) {

@@ -1,16 +1,31 @@
 import { issueActivityToken } from '@/lib/auth/activity-token';
 import { requireAuthUserForApp } from '@/lib/auth/server-app';
+import { ensureBusinessUserLegacyAuthKey } from '@/lib/auth/user-auth-linking';
+import { getBusinessUserById } from '@/lib/db/repositories/business-users';
+import { getDrizzleDbFromRuntime } from '@/lib/db/drizzle';
 
 export const runtime = 'edge';
 
 type VerifyDeps = {
   requireAuthUserForApp: typeof requireAuthUserForApp;
   issueActivityToken: typeof issueActivityToken;
+  getDrizzleDbFromRuntime: typeof getDrizzleDbFromRuntime;
+  getBusinessUserById: typeof getBusinessUserById;
+  ensureBusinessUserLegacyAuthKey: typeof ensureBusinessUserLegacyAuthKey;
 };
 
 const defaultVerifyDeps: VerifyDeps = {
   requireAuthUserForApp,
   issueActivityToken,
+  getDrizzleDbFromRuntime,
+  getBusinessUserById,
+  ensureBusinessUserLegacyAuthKey,
+};
+
+const toNonEmptyString = (value: unknown): string | null => {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
 };
 
 const buildVerifyHandler = (deps: VerifyDeps): ((req: Request) => Promise<Response>) => {
@@ -23,10 +38,15 @@ const buildVerifyHandler = (deps: VerifyDeps): ((req: Request) => Promise<Respon
 
       const user = auth.user;
       const activityToken = await deps.issueActivityToken(user.id);
+      const db = deps.getDrizzleDbFromRuntime();
+      const businessUser = db ? await deps.getBusinessUserById(db, user.id) : null;
+      const ensuredUser = businessUser ? await deps.ensureBusinessUserLegacyAuthKey(businessUser) : null;
+      const authKey = toNonEmptyString(ensuredUser?.authKey);
 
       return new Response(
         JSON.stringify({
           success: true,
+          authKey,
           user: {
             id: user.id,
             username: user.username,

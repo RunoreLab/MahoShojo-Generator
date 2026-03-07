@@ -463,6 +463,12 @@ const buildAuthHarness = async () => {
 
   const verifyPost = routes.createVerifyHandler({
     issueActivityToken,
+    getDrizzleDbFromRuntime: () => ({ __mockDb: true }),
+    getBusinessUserById: async (_db: unknown, userId: number) => {
+      const user = getUserById(userId);
+      return user ? toBusinessUser(user) : null;
+    },
+    ensureBusinessUserLegacyAuthKey,
     requireAuthUserForApp: async (req: Request) => {
       const cookieHeader = req.headers.get('cookie');
       const sessionToken =
@@ -786,10 +792,12 @@ describe('auth 全链路集成', () => {
     expect(verifyResp.status).toBe(200);
     const verifyPayload = (await verifyResp.json()) as {
       success: boolean;
+      authKey: string | null;
       user: { id: number; username: string };
       activityToken: string;
     };
     expect(verifyPayload.success).toBeTrue();
+    expect(verifyPayload.authKey).toBe(registerPayload.authKey);
     expect(verifyPayload.user.username).toBe('hikari');
     expect(verifyPayload.activityToken).toContain(`activity-${registerPayload.user.id}-`);
 
