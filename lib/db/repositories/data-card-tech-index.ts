@@ -68,6 +68,18 @@ export type DataCardPayloadRow = {
   updatedAt: string | null;
 };
 
+type D1BatchPreparedStatementLike = {
+  bind: (...params: unknown[]) => unknown;
+};
+
+type D1BatchClientLike = {
+  prepare: (sqlText: string) => D1BatchPreparedStatementLike;
+  batch: (statements: unknown[]) => Promise<unknown[]>;
+};
+
+const asRecord = (value: unknown): Record<string, unknown> | null =>
+  typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : null;
+
 const toInt = (value: unknown, fallback = 0): number => {
   const n = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : Number.NaN;
   if (!Number.isFinite(n)) return fallback;
@@ -96,6 +108,15 @@ const normalizeIds = (ids: string[]): string[] => {
 
 const normalizeStartAfterId = (value: string | undefined): string => {
   return typeof value === 'string' ? value.trim() : '';
+};
+
+const getD1BatchClient = (db: AppDrizzleDb): D1BatchClientLike => {
+  const client = (db as unknown as { $client?: unknown }).$client;
+  const candidate = asRecord(client);
+  if (typeof candidate?.prepare !== 'function' || typeof candidate?.batch !== 'function') {
+    throw new Error('Drizzle D1 client 不可用：未检测到 prepare/batch 方法');
+  }
+  return client as D1BatchClientLike;
 };
 
 const buildBaseCardConditions = (filter: {
@@ -191,17 +212,17 @@ export const updateNativeFlagsByDataCardIds = async (
     .filter((row) => row.id);
   if (updates.length === 0) return;
 
-  await db.transaction(async (tx) => {
-    for (const row of updates) {
-      await tx
-        .update(dataCardMetrics)
-        .set({
-          isNative: row.isNative,
-          updatedAt: nowIso,
-        })
-        .where(eq(dataCardMetrics.dataCardId, row.id));
-    }
-  });
+  const client = getD1BatchClient(db);
+  const statements = updates.map((row) =>
+    client
+      .prepare(`
+        UPDATE data_card_metrics
+        SET is_native = ?, updated_at = ?
+        WHERE data_card_id = ?
+      `)
+      .bind(row.isNative ? 1 : 0, nowIso, row.id),
+  );
+  await client.batch(statements);
 };
 
 export const countTechIndexBackfillCandidates = async (
@@ -371,4 +392,3 @@ export const getDataCardPayloadRowById = async (
   const rows = await listDataCardPayloadRowsByIds(db, [dataCardId]);
   return rows[0] ?? null;
 };
-

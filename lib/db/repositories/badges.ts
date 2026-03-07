@@ -310,9 +310,7 @@ export const runBadgeOpsTransaction = async (
   db: AppDrizzleDb,
   operation: (tx: AppDrizzleDb) => Promise<void>,
 ): Promise<void> => {
-  await db.transaction(async (tx) => {
-    await operation(tx as unknown as AppDrizzleDb);
-  });
+  await operation(db);
 };
 
 export const touchUserBadgeObtainedAtNow = async (
