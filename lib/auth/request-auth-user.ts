@@ -1,8 +1,7 @@
 import type { AuthenticatedUser } from '@/lib/auth/server';
 import { getAuthUser } from '@/lib/auth/server';
-import { hasBetterAuthSessionCookie } from '@/lib/auth/better-auth';
-import { ACTIVITY_TOKEN_HEADER, ACTIVITY_USER_ID_HEADER } from '@/lib/auth/activity-token';
-import { buildSubrequestAuthHeaders } from '@/lib/subrequest-auth';
+import { ACTIVITY_TOKEN_HEADER, verifyActivityToken } from '@/lib/auth/activity-token';
+import { getUserById } from '@/lib/database/users';
 
 type RequestAuthUserResolver = {
   getUser: () => Promise<AuthenticatedUser | null>;
@@ -55,12 +54,9 @@ const toOptionalStringOrNull = (value: unknown): string | null | undefined => {
   return undefined;
 };
 
-const parseVerifiedUser = (payload: unknown): AuthenticatedUser | null => {
-  if (!payload || typeof payload !== 'object') return null;
-  const userRecord = (payload as { user?: unknown }).user;
-  if (!userRecord || typeof userRecord !== 'object') return null;
-
-  const record = userRecord as Record<string, unknown>;
+const parseAuthUserRecord = (value: unknown): AuthenticatedUser | null => {
+  if (!value || typeof value !== 'object') return null;
+  const record = value as Record<string, unknown>;
   const id = toPositiveInteger(record.id);
   const username = typeof record.username === 'string' ? record.username.trim() : '';
   if (!id || !username) return null;
@@ -75,50 +71,15 @@ const parseVerifiedUser = (payload: unknown): AuthenticatedUser | null => {
   };
 };
 
-const copyHeader = (source: Headers, target: Headers, key: string): void => {
-  const value = source.get(key);
-  if (value && value.trim().length > 0) {
-    target.set(key, value);
-  }
-};
+const getAuthUserFromVerifiedActivityToken = async (req: Request): Promise<AuthenticatedUser | null> => {
+  const activityToken = req.headers.get(ACTIVITY_TOKEN_HEADER)?.trim() ?? '';
+  if (!activityToken) return null;
 
-const getSessionAuthUserFromVerifyRoute = async (req: Request): Promise<AuthenticatedUser | null> => {
-  const requestUrl = new URL(req.url);
-  const verifyUrl = new URL('/api/auth/verify', requestUrl.origin);
-  const headers = new Headers();
+  const verified = await verifyActivityToken(activityToken);
+  if (!verified) return null;
 
-  const subrequestAuthHeaders = buildSubrequestAuthHeaders(req);
-  for (const [key, value] of Object.entries(subrequestAuthHeaders)) {
-    headers.set(key, value);
-  }
-
-  copyHeader(req.headers, headers, 'cookie');
-  copyHeader(req.headers, headers, 'authorization');
-  copyHeader(req.headers, headers, 'origin');
-  copyHeader(req.headers, headers, 'referer');
-  copyHeader(req.headers, headers, 'user-agent');
-  copyHeader(req.headers, headers, 'x-forwarded-for');
-  copyHeader(req.headers, headers, 'x-real-ip');
-  copyHeader(req.headers, headers, 'cf-connecting-ip');
-  copyHeader(req.headers, headers, ACTIVITY_TOKEN_HEADER);
-  copyHeader(req.headers, headers, ACTIVITY_USER_ID_HEADER);
-
-  const response = await fetch(verifyUrl.toString(), {
-    method: 'POST',
-    headers,
-  });
-
-  if (!response.ok) return null;
-
-  const payload = await response.json().catch(() => null);
-  return parseVerifiedUser(payload);
-};
-
-const hasSessionAuthHint = (req: Request): boolean => {
-  if (hasBetterAuthSessionCookie(req)) return true;
-  if (req.headers.get(ACTIVITY_TOKEN_HEADER)?.trim()) return true;
-  if (req.headers.get(ACTIVITY_USER_ID_HEADER)?.trim()) return true;
-  return false;
+  const user = await getUserById(verified.userId);
+  return parseAuthUserRecord(user);
 };
 
 const resolveRequestAuthUser = async (req: Request): Promise<AuthenticatedUser | null> => {
@@ -127,11 +88,7 @@ const resolveRequestAuthUser = async (req: Request): Promise<AuthenticatedUser |
     return context.user;
   }
 
-  if (!hasSessionAuthHint(req) || hasBetterAuthSessionCookie(req)) {
-    return null;
-  }
-
-  return getSessionAuthUserFromVerifyRoute(req);
+  return getAuthUserFromVerifiedActivityToken(req);
 };
 
 export const createRequestAuthUserResolver = (req: Request): RequestAuthUserResolver => {
