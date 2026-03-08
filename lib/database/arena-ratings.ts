@@ -22,6 +22,8 @@ export interface ArenaRatingSnapshot {
   draws: number;
 }
 
+type ArenaRatingRangeSnapshot = Pick<ArenaRatingSnapshot, 'rating' | 'games'>;
+
 export interface ArenaEligibilitySnapshot {
   status: string | null;
   mode: string | null;
@@ -41,9 +43,12 @@ export interface ArenaEligibilitySnapshot {
 }
 
 export const INITIAL_RATING = 1000;
-export const STRICT_DEDUP_WINDOW_MS = 10 * 60 * 1000;
+export const STRICT_DEDUP_WINDOW_MS = 360 * 60 * 1000;
 export const FREE_DEDUP_WINDOW_MS = 10 * 60 * 1000;
-export const STRICT_DAILY_LIMIT = 80;
+export const STRICT_DAILY_LIMIT = 20;
+export const STRICT_SAME_PAIR_DAILY_LIMIT = 2;
+export const STRICT_LOW_GAMES_THRESHOLD = 10;
+export const STRICT_LOW_GAMES_MAX_ABS_DIFF = 400;
 
 const STRICT_MAX_ABS_DIFF_BY_TIER: Record<ArenaBaseTier, number> = {
   '无牌': 2000,
@@ -53,11 +58,45 @@ const STRICT_MAX_ABS_DIFF_BY_TIER: Record<ArenaBaseTier, number> = {
   '权杖': 1000,
 };
 
-const getStrictMaxAbsDiffForRatings = (a: ArenaRatingSnapshot, b: ArenaRatingSnapshot): number => {
+export const getStrictMaxAbsDiffForRatings = (a: ArenaRatingRangeSnapshot, b: ArenaRatingRangeSnapshot): number => {
   const aTier = computeArenaBaseTier(a.rating, a.games);
   const bTier = computeArenaBaseTier(b.rating, b.games);
   const pick = a.rating > b.rating ? aTier : b.rating > a.rating ? bTier : (a.games >= b.games ? aTier : bTier);
   return STRICT_MAX_ABS_DIFF_BY_TIER[pick] ?? 1000;
+};
+
+export type StrictRangeCheckResult = {
+  absDiff: number;
+  maxAbsDiff: number;
+  exceededBy: number;
+  aRating: number;
+  bRating: number;
+  aGames: number;
+  bGames: number;
+  lowGamesTightened: boolean;
+};
+
+export const getStrictRangeCheckResult = (
+  a: ArenaRatingRangeSnapshot,
+  b: ArenaRatingRangeSnapshot,
+): StrictRangeCheckResult | null => {
+  if (!shouldEnforceStrictRangeLimit(a, b)) return null;
+
+  const absDiff = Math.abs(a.rating - b.rating);
+  const baseMaxAbsDiff = getStrictMaxAbsDiffForRatings(a, b);
+  const lowGamesTightened = a.games < STRICT_LOW_GAMES_THRESHOLD || b.games < STRICT_LOW_GAMES_THRESHOLD;
+  const maxAbsDiff = lowGamesTightened ? Math.min(baseMaxAbsDiff, STRICT_LOW_GAMES_MAX_ABS_DIFF) : baseMaxAbsDiff;
+
+  return {
+    absDiff,
+    maxAbsDiff,
+    exceededBy: Math.max(0, absDiff - maxAbsDiff),
+    aRating: a.rating,
+    bRating: b.rating,
+    aGames: a.games,
+    bGames: b.games,
+    lowGamesTightened,
+  };
 };
 
 export type StrictDailyUsage = {
@@ -65,6 +104,17 @@ export type StrictDailyUsage = {
   used: number;
   limit: number;
   exceeded: boolean;
+};
+
+export type StrictPairUsage = {
+  daySinceIso: string;
+  windowSinceIso: string;
+  usedToday: number;
+  limit: number;
+  exceeded: boolean;
+  recentDeduped: boolean;
+  recentAppliedAtIso: string | null;
+  nextEligibleAtIso: string | null;
 };
 
 type ArenaRatingsRepoBundle = {
@@ -76,6 +126,13 @@ type ArenaRatingsRepoBundle = {
     nowIso: string,
   ) => Promise<void>;
   countStrictAppliedEventsSince: (db: unknown, userId: number, sinceIso: string) => Promise<number>;
+  getStrictUserPairAppliedStatsSince: (
+    db: unknown,
+    userId: number,
+    pairKey: string,
+    sinceIso: string,
+    daySinceIso: string,
+  ) => Promise<{ pairUsedToday: number; latestAppliedAt: string | null }>;
   getStrictQueueDataCardsByIds: (
     db: unknown,
     dataCardIds: string[],
@@ -160,6 +217,7 @@ const readArenaRatingsRepoBundle = async (): Promise<ArenaRatingsRepoBundle | nu
       db,
       resetStrictArenaRatingForDataCard: repo.resetStrictArenaRatingForDataCard as ArenaRatingsRepoBundle['resetStrictArenaRatingForDataCard'],
       countStrictAppliedEventsSince: repo.countStrictAppliedEventsSince as ArenaRatingsRepoBundle['countStrictAppliedEventsSince'],
+      getStrictUserPairAppliedStatsSince: repo.getStrictUserPairAppliedStatsSince as ArenaRatingsRepoBundle['getStrictUserPairAppliedStatsSince'],
       getStrictQueueDataCardsByIds: repo.getStrictQueueDataCardsByIds as ArenaRatingsRepoBundle['getStrictQueueDataCardsByIds'],
       getArenaEligibilitySnapshotByGenerationId: repo.getArenaEligibilitySnapshotByGenerationId as ArenaRatingsRepoBundle['getArenaEligibilitySnapshotByGenerationId'],
       listGenerationCombatantsByGenerationId: repo.listGenerationCombatantsByGenerationId as ArenaRatingsRepoBundle['listGenerationCombatantsByGenerationId'],
@@ -198,6 +256,20 @@ const startOfUtcDayIso = (): string => {
   return start.toISOString();
 };
 
+const pickEarlierIso = (aIso: string, bIso: string): string => {
+  const aMs = Date.parse(aIso);
+  const bMs = Date.parse(bIso);
+  if (Number.isFinite(aMs) && Number.isFinite(bMs)) return aMs <= bMs ? aIso : bIso;
+  return aIso <= bIso ? aIso : bIso;
+};
+
+const buildNextEligibleAtIso = (recentAppliedAtIso: string | null, windowMs: number): string | null => {
+  if (typeof recentAppliedAtIso !== 'string' || !recentAppliedAtIso.trim()) return null;
+  const appliedAtMs = Date.parse(recentAppliedAtIso);
+  if (!Number.isFinite(appliedAtMs)) return null;
+  return new Date(appliedAtMs + windowMs).toISOString();
+};
+
 export const getStrictDailyUsage = async (userId: number): Promise<StrictDailyUsage | null> => {
   if (!Number.isFinite(userId) || userId <= 0) return null;
   try {
@@ -213,6 +285,43 @@ export const getStrictDailyUsage = async (userId: number): Promise<StrictDailyUs
     };
   } catch (error) {
     console.warn('读取 strict 每日计分次数失败（降级为不限制）:', error);
+    return null;
+  }
+};
+
+export const getStrictPairUsage = async (userId: number, pairKey: string): Promise<StrictPairUsage | null> => {
+  const normalizedPairKey = typeof pairKey === 'string' ? pairKey.trim() : '';
+  if (!Number.isFinite(userId) || userId <= 0 || !normalizedPairKey) return null;
+
+  try {
+    const bundle = await readArenaRatingsRepoBundle();
+    if (!bundle) return null;
+
+    const daySinceIso = startOfUtcDayIso();
+    const windowSinceIso = new Date(Date.now() - STRICT_DEDUP_WINDOW_MS).toISOString();
+    const sinceIso = pickEarlierIso(daySinceIso, windowSinceIso);
+    const stats = await bundle.getStrictUserPairAppliedStatsSince(
+      bundle.db,
+      userId,
+      normalizedPairKey,
+      sinceIso,
+      daySinceIso,
+    );
+    const recentAppliedAtIso = stats.latestAppliedAt;
+    const recentDeduped = typeof recentAppliedAtIso === 'string' && recentAppliedAtIso >= windowSinceIso;
+
+    return {
+      daySinceIso,
+      windowSinceIso,
+      usedToday: stats.pairUsedToday,
+      limit: STRICT_SAME_PAIR_DAILY_LIMIT,
+      exceeded: stats.pairUsedToday >= STRICT_SAME_PAIR_DAILY_LIMIT,
+      recentDeduped,
+      recentAppliedAtIso,
+      nextEligibleAtIso: recentDeduped ? buildNextEligibleAtIso(recentAppliedAtIso, STRICT_DEDUP_WINDOW_MS) : null,
+    };
+  } catch (error) {
+    console.warn('读取 strict 对手组合计分使用情况失败（降级为不限制）:', { userId, pairKey: normalizedPairKey, error });
     return null;
   }
 };
@@ -1064,19 +1173,30 @@ export async function settleArenaRatingsForGeneration(
     let shouldApplyStrict = strictEligible;
 
     if (shouldApplyStrict && isNewStrictPolicy && snapshot.userId != null) {
-      const deduped = await hasRecentAppliedEventForPair(
-        'strict',
-        pairKey,
-        { userId: snapshot.userId },
-        STRICT_DEDUP_WINDOW_MS
-      );
-      if (deduped) {
+      const pairUsage = await getStrictPairUsage(snapshot.userId, pairKey);
+      if (pairUsage?.recentDeduped) {
         await insertArenaRatingEvent({
           id: buildArenaRatingEventId(generationId, 'strict'),
           generationId,
           queue: 'strict',
           status: 'skipped',
           skipReason: 'dedup-user-pair',
+          userId: snapshot.userId,
+          ipAnonymized: snapshot.ipAnonymized,
+          pairKey,
+          a: aEntity,
+          b: bEntity,
+          winnerSlot,
+        });
+        shouldApplyStrict = false;
+        strictEligible = false;
+      } else if (pairUsage?.exceeded) {
+        await insertArenaRatingEvent({
+          id: buildArenaRatingEventId(generationId, 'strict'),
+          generationId,
+          queue: 'strict',
+          status: 'skipped',
+          skipReason: 'pair-daily-limit',
           userId: snapshot.userId,
           ipAnonymized: snapshot.ipAnonymized,
           pairKey,
@@ -1186,17 +1306,13 @@ export async function settleArenaRatingsForGeneration(
 
         const involvesPreset = aEntity.entityType === 'preset' || bEntity.entityType === 'preset';
         if (!involvesPreset) {
-          const shouldCheckRange = shouldEnforceStrictRangeLimit(
+          const rangeCheck = getStrictRangeCheckResult(
             { rating: aCurrent.rating, games: aCurrent.games },
             { rating: bCurrent.rating, games: bCurrent.games },
           );
-          if (shouldCheckRange) {
-            const absDiff = Math.abs(aCurrent.rating - bCurrent.rating);
-            const maxAbsDiff = getStrictMaxAbsDiffForRatings(aCurrent, bCurrent);
-            if (absDiff > maxAbsDiff) {
-              await markArenaRatingEventStatus(eventId, 'skipped', { skipReason: 'strict-out-of-range' });
-              continue;
-            }
+          if (rangeCheck && rangeCheck.exceededBy > 0) {
+            await markArenaRatingEventStatus(eventId, 'skipped', { skipReason: 'strict-out-of-range' });
+            continue;
           }
         }
       }

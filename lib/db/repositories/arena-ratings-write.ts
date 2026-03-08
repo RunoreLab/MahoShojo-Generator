@@ -182,6 +182,40 @@ export const countStrictAppliedEventsSince = async (
   return Math.max(0, toInt(rows[0]?.count, 0));
 };
 
+export type StrictUserPairAppliedStats = {
+  pairUsedToday: number;
+  latestAppliedAt: string | null;
+};
+
+export const getStrictUserPairAppliedStatsSince = async (
+  db: AppDrizzleDb,
+  userId: number,
+  pairKey: string,
+  sinceIso: string,
+  daySinceIso: string,
+): Promise<StrictUserPairAppliedStats> => {
+  const rows = await db
+    .select({
+      pairUsedToday: sql<number>`COALESCE(SUM(CASE WHEN ${arenaRatingEvents.createdAt} >= ${daySinceIso} THEN 1 ELSE 0 END), 0)`,
+      latestAppliedAt: sql<string | null>`MAX(${arenaRatingEvents.createdAt})`,
+    })
+    .from(arenaRatingEvents)
+    .where(
+      and(
+        eq(arenaRatingEvents.queue, 'strict'),
+        eq(arenaRatingEvents.status, 'applied'),
+        eq(arenaRatingEvents.userId, userId),
+        eq(arenaRatingEvents.pairKey, pairKey),
+        gte(arenaRatingEvents.createdAt, sinceIso),
+      ),
+    );
+
+  return {
+    pairUsedToday: Math.max(0, toInt(rows[0]?.pairUsedToday, 0)),
+    latestAppliedAt: typeof rows[0]?.latestAppliedAt === 'string' ? rows[0].latestAppliedAt : null,
+  };
+};
+
 export const getStrictQueueDataCardsByIds = async (
   db: AppDrizzleDb,
   dataCardIds: string[],

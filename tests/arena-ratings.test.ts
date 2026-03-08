@@ -4,11 +4,16 @@ import {
   buildPairKey,
   computeEloUpdate,
   computeKFactor,
+  getStrictRangeCheckResult,
   isFreeEligible,
   isStrictEligible,
   parseCombatantEntity,
   parseGenerationCombatantsFallback,
   parseWinnerSlot,
+  STRICT_DAILY_LIMIT,
+  STRICT_DEDUP_WINDOW_MS,
+  STRICT_LOW_GAMES_MAX_ABS_DIFF,
+  STRICT_SAME_PAIR_DAILY_LIMIT,
   type ArenaEligibilitySnapshot,
   type ArenaRatingSnapshot,
 } from '@/lib/database/arena-ratings';
@@ -331,6 +336,54 @@ describe('arena-ratings: 严格排位资格判定', () => {
         baseCombatants,
       ),
     ).toBe(false);
+  });
+});
+
+describe('arena-ratings: 严格排位风控参数', () => {
+  test('严格排位每日上限已收紧为 20 局', () => {
+    expect(STRICT_DAILY_LIMIT).toBe(20);
+  });
+
+  test('严格排位同对手组合冷却窗已调整为 360 分钟', () => {
+    expect(STRICT_DEDUP_WINDOW_MS).toBe(360 * 60 * 1000);
+  });
+
+  test('严格排位同对手组合每日最多计 2 局', () => {
+    expect(STRICT_SAME_PAIR_DAILY_LIMIT).toBe(2);
+  });
+});
+
+describe('arena-ratings: strict 分差限制', () => {
+  test('低局数高段位对局会额外收紧 strict 分差上限', () => {
+    const result = getStrictRangeCheckResult(
+      { rating: 1300, games: 6 },
+      { rating: 1750, games: 8 },
+    );
+    expect(result).not.toBeNull();
+    expect(result?.lowGamesTightened).toBe(true);
+    expect(result?.maxAbsDiff).toBe(STRICT_LOW_GAMES_MAX_ABS_DIFF);
+    expect(result?.absDiff).toBe(450);
+    expect(result?.exceededBy).toBe(50);
+  });
+
+  test('高局数对局继续沿用原有 tier 分差上限', () => {
+    const result = getStrictRangeCheckResult(
+      { rating: 1300, games: 20 },
+      { rating: 1750, games: 20 },
+    );
+    expect(result).not.toBeNull();
+    expect(result?.lowGamesTightened).toBe(false);
+    expect(result?.maxAbsDiff).toBe(1000);
+    expect(result?.exceededBy).toBe(0);
+  });
+
+  test('低段位对局仍不触发 strict 分差限制', () => {
+    expect(
+      getStrictRangeCheckResult(
+        { rating: 1000, games: 8 },
+        { rating: 1180, games: 9 },
+      ),
+    ).toBeNull();
   });
 });
 

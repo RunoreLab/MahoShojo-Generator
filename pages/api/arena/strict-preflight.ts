@@ -2,12 +2,20 @@ import type { NextRequest } from 'next/server';
 
 import { createRequestAuthUserResolver } from '@/lib/auth/request-auth-user';
 import { isStrictRankedModelBlacklisted } from '@/lib/arena/ranked-model-policy';
-import { buildPairKey, getStrictDailyUsage, INITIAL_RATING, STRICT_DEDUP_WINDOW_MS, STRICT_DAILY_LIMIT } from '@/lib/database/arena-ratings';
-import { computeArenaBaseTier, type ArenaBaseTier } from '@/lib/arena/tier';
-import { shouldEnforceStrictRangeLimit } from '@/lib/arena/strict-range';
+import {
+  buildPairKey,
+  getStrictDailyUsage,
+  getStrictPairUsage,
+  getStrictRangeCheckResult,
+  INITIAL_RATING,
+  STRICT_DEDUP_WINDOW_MS,
+  STRICT_DAILY_LIMIT,
+  STRICT_SAME_PAIR_DAILY_LIMIT,
+  type StrictRangeCheckResult,
+} from '@/lib/database/arena-ratings';
 import { getDrizzleDbFromRuntime, type AppDrizzleDb } from '@/lib/db/drizzle';
 import { getDataCardMetaCardsByIds } from '@/lib/db/repositories/data-card-meta';
-import { getStrictArenaRatingsByEntities, hasAppliedStrictEventForUserPairSince } from '@/lib/db/repositories/arena-strict-preflight';
+import { getStrictArenaRatingsByEntities } from '@/lib/db/repositories/arena-strict-preflight';
 import { fetchCurrentSeasonFromOrigin } from '@/lib/seasons-config';
 import { deriveSeasonStrictRules } from '@/lib/seasons';
 
@@ -19,18 +27,21 @@ type ApiSuccessResponse = {
   success: true;
   willCount: boolean;
   reasons: string[];
-  range: {
-    absDiff: number;
-    maxAbsDiff: number;
-    exceededBy: number;
-    aRating: number;
-    bRating: number;
-  } | null;
+  range: StrictRangeCheckResult | null;
   daily: {
     used: number | null;
     limit: number;
     exceeded: boolean | null;
     sinceIso: string | null;
+  };
+  pair: {
+    used: number | null;
+    limit: number;
+    exceeded: boolean | null;
+    recentDeduped: boolean | null;
+    recentAppliedAtIso: string | null;
+    nextEligibleAtIso: string | null;
+    windowMinutes: number;
   };
 };
 
@@ -73,21 +84,6 @@ const parseArenaEntityFromCombatant = (value: unknown): ArenaEntity | null => {
   const dataCardId = typeof anyValue.sourceDataCardId === 'string' ? anyValue.sourceDataCardId.trim() : '';
   if (!dataCardId) return null;
   return { entityType: 'data_card', entityId: dataCardId };
-};
-
-const STRICT_MAX_ABS_DIFF_BY_TIER: Record<ArenaBaseTier, number> = {
-  '无牌': 2000,
-  '白牌': 1000,
-  '字牌': 900,
-  '花牌': 800,
-  '权杖': 1000,
-};
-
-const getStrictMaxAbsDiffForRatings = (a: { rating: number; games: number }, b: { rating: number; games: number }): number => {
-  const aTier = computeArenaBaseTier(a.rating, a.games);
-  const bTier = computeArenaBaseTier(b.rating, b.games);
-  const pick = a.rating > b.rating ? aTier : b.rating > a.rating ? bTier : (a.games >= b.games ? aTier : bTier);
-  return STRICT_MAX_ABS_DIFF_BY_TIER[pick] ?? 1000;
 };
 
 const validateStrictPublicDataCards = async (db: AppDrizzleDb, entities: ArenaEntity[]): Promise<
@@ -164,6 +160,7 @@ export default async function handler(req: NextRequest) {
 
     const reasons: string[] = [];
     let range: ApiSuccessResponse['range'] = null;
+    let pairUsage: Awaited<ReturnType<typeof getStrictPairUsage>> = null;
     if (!user?.id) reasons.push('need-login');
     if (battleMode !== seasonStrictRules.mode) {
       reasons.push(seasonStrictRules.mode === 'classic' ? 'mode-not-classic' : 'mode-not-season');
@@ -243,31 +240,22 @@ export default async function handler(req: NextRequest) {
 
             const involvesPreset = a.entityType === 'preset' || b.entityType === 'preset';
             if (!involvesPreset) {
-              const aSnapshot = { rating: aRating, games: aGames };
-              const bSnapshot = { rating: bRating, games: bGames };
-              const shouldCheckRange = shouldEnforceStrictRangeLimit(aSnapshot, bSnapshot);
-              if (shouldCheckRange) {
-                const absDiff = Math.abs(aRating - bRating);
-                const maxAbsDiff = getStrictMaxAbsDiffForRatings(aSnapshot, bSnapshot);
-                range = {
-                  absDiff,
-                  maxAbsDiff,
-                  exceededBy: Math.max(0, absDiff - maxAbsDiff),
-                  aRating,
-                  bRating,
-                };
-                if (absDiff > maxAbsDiff) {
-                  reasons.push('strict-out-of-range');
-                }
+              range = getStrictRangeCheckResult(
+                { rating: aRating, games: aGames },
+                { rating: bRating, games: bGames },
+              );
+              if (range && range.exceededBy > 0) {
+                reasons.push('strict-out-of-range');
               }
             }
 
             if (typeof user?.id === 'number') {
-              const sinceIso = new Date(Date.now() - STRICT_DEDUP_WINDOW_MS).toISOString();
               const pairKey = buildPairKey(a, b);
-              const hasRecentDedup = await hasAppliedStrictEventForUserPairSince(db, user.id, pairKey, sinceIso);
-              if (hasRecentDedup) {
+              pairUsage = await getStrictPairUsage(user.id, pairKey);
+              if (pairUsage?.recentDeduped) {
                 reasons.push('dedup-user-pair');
+              } else if (pairUsage?.exceeded) {
+                reasons.push('pair-daily-limit');
               }
             }
           } catch (error) {
@@ -294,6 +282,15 @@ export default async function handler(req: NextRequest) {
         limit: STRICT_DAILY_LIMIT,
         exceeded: dailyUsage?.exceeded ?? null,
         sinceIso: dailyUsage?.sinceIso ?? null,
+      },
+      pair: {
+        used: pairUsage?.usedToday ?? null,
+        limit: pairUsage?.limit ?? STRICT_SAME_PAIR_DAILY_LIMIT,
+        exceeded: pairUsage?.exceeded ?? null,
+        recentDeduped: pairUsage?.recentDeduped ?? null,
+        recentAppliedAtIso: pairUsage?.recentAppliedAtIso ?? null,
+        nextEligibleAtIso: pairUsage?.nextEligibleAtIso ?? null,
+        windowMinutes: Math.floor(STRICT_DEDUP_WINDOW_MS / 60000),
       },
     };
 

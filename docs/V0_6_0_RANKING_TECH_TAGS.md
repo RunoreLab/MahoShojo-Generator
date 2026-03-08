@@ -323,6 +323,18 @@ v0.6.0 推荐采用“事件先行”的两阶段：
 - strict：每日计分上限（例如 strict 每日最多 80 局）
 - free：因为允许匿名，建议至少做“弱风控”（例如按 `ip_anonymized + 对手组合` 限速），否则 free 更像“娱乐分”（可接受但需在 UI/百科中说明）
 
+#### 1.9.0 现行实现更新（2026-03-08）
+当前生产口径已经从“严格排位随机匹配”切换为“**自选对手 + 服务端反刷分**”。为避免在现行模式下被重复对局刷分，strict 现已落地以下规则：
+
+- strict：必须登录才计分
+- strict：**每日计分上限 20 局**
+- strict：**同一对手组合在 360 分钟内不计分**
+- strict：**同一对手组合每日最多计 2 局**
+- strict：若触发 `strict-out-of-range` 检查，且任一方 strict 对局数 `< 10`，则将允许分差进一步收紧到 **400**
+- free：继续沿用匿名弱风控（`ip_anonymized + pair_key` 时间窗去重）
+
+这些规则优先复用现有 `arena_rating_events` 索引与事件审计链路，不引入新的热路径写入。详细说明见 `docs/STRICT_RANKING_ANTI_ABUSE_2026-03-08.md`。
+
 #### 1.9.1 对手组合 key（pair_key）定义（必须统一）
 - `entityKey = "${entity_type}:${entity_id}"`（如：`data_card:xxxxxxxx` / `preset:homura.json`）
 - `pair_key = sort([entityKeyA, entityKeyB]).join('|')`
@@ -773,14 +785,14 @@ Request body（建议）：`{ dataCardId: string, tagIds: string[] }`
 
 1) 排位对象：数据卡 `data_cards.id`；预设用 `preset filename`。
 2) v0.6.0 先按 1v1 计分 MVP（`combatant_count = 2`）。
-3) strict：必须先进行「排位匹配」随机匹配对手，且必须登录才计分；free：不强制登录且仍允许自由挑对手。
+3) strict：当前为“登录后自选对手 + 服务端风控”才计分；free：不强制登录且仍允许自由挑对手。
 4) PVP 触发的战报：允许计入排位（仍需满足 strict/free eligibility；通常更偏向落在 free）。
 5) 平局：计入对局数，按 Elo 的 `S=0.5` 微调分数。
 6) strict 命中：同时更新 strict 与 free（strict ⊆ free）。
 7) free 天梯：`ip_anonymized IS NULL` 时不计分（为保证 strict ⊆ free，该条件已写入“基础资格”，使该局 strict/free 均跳过）。
 8) 计分允许包含私有卡，但公共榜过滤：仅展示 `data_cards.is_public=1 AND review_status='approved'` + 预设。
 9) 预设角色：出现在排行榜里（与数据库角色卡同榜展示）。
-10) strict 风控：10 分钟内匹配阶段尽量避免同对手组合（除非候选不足） + strict 每日计分上限 80 局（见 1.9）。
+10) strict 风控：当前已落地 360 分钟同对手组合冷却 + 同组合每日最多 2 局 + strict 每日计分上限 20 局；若任一方 strict 对局数 < 10，则进一步收紧 `strict-out-of-range` 分差上限（见 1.9）。
 11) 段位阈值：沿用本文默认（800/1000/1200/1500）；初始分 `initial_rating=1000`。
 12) Elo：允许双方 K 不同（非零和）。
 13) 标签库种子：以静态资源入库（推荐 `public/tags.seed.json`），通过脚本同步到 D1（见 3.3.3）。
