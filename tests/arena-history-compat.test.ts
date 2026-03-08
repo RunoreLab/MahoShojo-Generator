@@ -1,5 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 import { filterAndFormatHistory, formatNarrativeHistoryForPrompt } from '@/lib/arena/logic';
+import {
+  limitNarrativeHistoryEntriesForPrompt,
+  migrateLegacyNarrativeHistoryOrder,
+  moveNarrativeHistoryEntry,
+  reorderNarrativeHistoryEntries,
+  sortNarrativeHistoryEntries,
+} from '@/lib/narrative-history';
 
 describe('arena 历史命名兼容回归', () => {
   test('纯战斗过滤应兼容 user_guidance 字段', () => {
@@ -46,7 +53,7 @@ describe('arena 历史命名兼容回归', () => {
     expect(formatted).not.toContain('应被过滤');
   });
 
-  test('叙事历史排序应兼容 created_at/updated_at 字段', () => {
+  test('叙事历史应保留传入顺序，同时兼容 created_at/updated_at 字段', () => {
     const prompt = formatNarrativeHistoryForPrompt([
       {
         id: 'new',
@@ -68,6 +75,50 @@ describe('arena 历史命名兼容回归', () => {
     const newIndex = prompt.indexOf('新记录');
     expect(oldIndex).toBeGreaterThanOrEqual(0);
     expect(newIndex).toBeGreaterThanOrEqual(0);
-    expect(oldIndex).toBeLessThan(newIndex);
+    expect(newIndex).toBeLessThan(oldIndex);
+  });
+
+  test('旧版本地缓存迁移后应恢复为按创建时间从旧到新', () => {
+    const migrated = migrateLegacyNarrativeHistoryOrder([
+      {
+        id: 'new',
+        title: '新记录',
+        content: '这是较新的内容',
+        createdAt: '2026-03-01T12:00:00.000Z',
+        updatedAt: '2026-03-01T12:00:00.000Z',
+      },
+      {
+        id: 'old',
+        title: '旧记录',
+        content: '这是较旧的内容',
+        createdAt: '2026-03-01T08:00:00.000Z',
+        updatedAt: '2026-03-01T08:00:00.000Z',
+      },
+    ]);
+
+    expect(migrated.map((entry) => entry.id)).toEqual(['old', 'new']);
+  });
+
+  test('手动排序工具应支持拖拽换位与上下移动', () => {
+    const base = [
+      { id: 'a', title: 'A', content: 'A', createdAt: '2026-03-01T08:00:00.000Z', updatedAt: '2026-03-01T08:00:00.000Z' },
+      { id: 'b', title: 'B', content: 'B', createdAt: '2026-03-01T09:00:00.000Z', updatedAt: '2026-03-01T09:00:00.000Z' },
+      { id: 'c', title: 'C', content: 'C', createdAt: '2026-03-01T10:00:00.000Z', updatedAt: '2026-03-01T10:00:00.000Z' },
+    ];
+
+    expect(reorderNarrativeHistoryEntries(base, 'c', 'a').map((entry) => entry.id)).toEqual(['c', 'a', 'b']);
+    expect(moveNarrativeHistoryEntry(base, 'b', 'top').map((entry) => entry.id)).toEqual(['b', 'a', 'c']);
+    expect(moveNarrativeHistoryEntry(base, 'b', 'down').map((entry) => entry.id)).toEqual(['a', 'c', 'b']);
+  });
+
+  test('提示词读取条数应按当前提示词顺序截取末尾内容', () => {
+    const ordered = [
+      { id: 'a', title: 'A', content: 'A', createdAt: '2026-03-01T08:00:00.000Z', updatedAt: '2026-03-01T08:00:00.000Z' },
+      { id: 'b', title: 'B', content: 'B', createdAt: '2026-03-01T09:00:00.000Z', updatedAt: '2026-03-01T09:00:00.000Z' },
+      { id: 'c', title: 'C', content: 'C', createdAt: '2026-03-01T10:00:00.000Z', updatedAt: '2026-03-01T10:00:00.000Z' },
+    ];
+
+    expect(limitNarrativeHistoryEntriesForPrompt(ordered, 2).map((entry) => entry.id)).toEqual(['b', 'c']);
+    expect(sortNarrativeHistoryEntries(ordered, 'prompt_order').map((entry) => entry.id)).toEqual(['a', 'b', 'c']);
   });
 });

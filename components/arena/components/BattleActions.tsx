@@ -5,6 +5,7 @@ import { useState } from 'react';
 import { TokenIndicator } from '@/components/shared/TokenIndicator';
 import { formatDateTime } from '@/lib/constants';
 import { CollapsibleSection } from '@/components/shared/CollapsibleSection';
+import { limitNarrativeHistoryEntriesForPrompt } from '@/lib/narrative-history';
 
 import { useBattleStore } from '../stores/useBattleStore';
 import { useBattleEngine } from '../hooks/useBattleEngine';
@@ -167,16 +168,8 @@ export function BattleActions() {
 
     const narrativeHistoryPayload = settings.readNarrativeHistory
       ? (() => {
-        const sorted = [...narrativeEntries]
-          .filter((entry) => typeof entry?.content === 'string' && entry.content.trim())
-          .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
-
-        const limited =
-          narrativeHistoryReadLimitForEstimate === null
-            ? sorted
-            : typeof narrativeHistoryReadLimitForEstimate === 'number' && Number.isFinite(narrativeHistoryReadLimitForEstimate)
-              ? sorted.slice(Math.max(0, sorted.length - Math.max(1, Math.floor(narrativeHistoryReadLimitForEstimate))))
-              : sorted.slice(Math.max(0, sorted.length - 10));
+        const ordered = narrativeEntries.filter((entry) => typeof entry?.content === 'string' && entry.content.trim());
+        const limited = limitNarrativeHistoryEntriesForPrompt(ordered, narrativeHistoryReadLimitForEstimate);
 
         return limited.map((entry) => ({ title: entry.title, content: entry.content }));
       })()

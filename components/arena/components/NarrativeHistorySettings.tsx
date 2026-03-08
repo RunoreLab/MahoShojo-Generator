@@ -37,7 +37,7 @@ export function NarrativeHistorySettings({ value, onChange, disabled }: Props) {
           </label>
           {value.readNarrativeHistory && (
             <div className="mt-3 space-y-2">
-              <label className="block text-xs font-semibold text-gray-600">读取条数（最新）</label>
+              <label className="block text-xs font-semibold text-gray-600">读取条数（按提示词顺序取末尾）</label>
               <div className="flex items-center gap-2">
                 <input
                   type="number"
@@ -69,7 +69,7 @@ export function NarrativeHistorySettings({ value, onChange, disabled }: Props) {
         <fieldset className="border border-gray-200 rounded-lg p-3">
           <legend className="text-xs font-semibold text-gray-600 px-1">提示</legend>
           <p className="text-[11px] text-gray-600 mt-2">
-            开启读取后，系统会把叙事历史插入到提示词中（位于“角色定义”之后、“当前轮次指令”之前），便于模型看到完整剧情发展。
+            开启读取后，系统会把叙事历史插入到提示词中（位于“角色定义”之后、“当前轮次指令”之前）；你可以在“查看/编辑叙事历史”里手动调整注入顺序。
           </p>
           {value.readNarrativeHistory && value.readArenaHistory && (
             <p className="text-[11px] text-orange-600 mt-2">

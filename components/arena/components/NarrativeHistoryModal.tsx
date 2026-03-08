@@ -8,6 +8,12 @@ import SaveToCloudButton from '@/components/SaveToCloudButton';
 import { JsonSizeIndicator } from '@/components/shared/JsonSizeIndicator';
 import { formatDateTime } from '@/lib/constants';
 import { randomUUID } from '@/lib/crypto';
+import {
+  getPromptOrderedNarrativeHistoryEntries,
+  narrativeHistorySortLabelMap,
+  sortNarrativeHistoryEntries,
+  type NarrativeHistoryReorderDirection,
+} from '@/lib/narrative-history';
 import { quickCheck } from '@/lib/sensitive-word-filter';
 
 import { useNarrativeHistoryStore, type NarrativeHistorySort } from '../stores/useNarrativeHistoryStore';
@@ -16,41 +22,6 @@ import type { NarrativeHistoryDataCardV1, NarrativeHistoryEntry } from '@/types/
 type Props = {
   isOpen: boolean;
   onClose: () => void;
-};
-
-const sortLabelMap: Record<NarrativeHistorySort, string> = {
-  updated_desc: '最新更新优先',
-  updated_asc: '最早更新优先',
-  created_desc: '最新创建优先',
-  created_asc: '最早创建优先',
-};
-
-const sortEntries = (entries: NarrativeHistoryEntry[], sort: NarrativeHistorySort): NarrativeHistoryEntry[] => {
-  const list = [...entries];
-  const getTime = (value: string) => {
-    const time = Date.parse(value);
-    return Number.isFinite(time) ? time : 0;
-  };
-  list.sort((a, b) => {
-    const aCreated = getTime(a.createdAt);
-    const bCreated = getTime(b.createdAt);
-    const aUpdated = getTime(a.updatedAt);
-    const bUpdated = getTime(b.updatedAt);
-
-    switch (sort) {
-      case 'updated_asc':
-        return aUpdated - bUpdated;
-      case 'updated_desc':
-        return bUpdated - aUpdated;
-      case 'created_asc':
-        return aCreated - bCreated;
-      case 'created_desc':
-        return bCreated - aCreated;
-      default:
-        return bUpdated - aUpdated;
-    }
-  });
-  return list;
 };
 
 const parseTime = (value: unknown): string | null => {
@@ -100,13 +71,12 @@ const normalizeImportedEntries = (input: unknown): NarrativeHistoryEntry[] => {
 };
 
 const buildNarrativeHistoryCardPayload = (entries: NarrativeHistoryEntry[], lastUpdatedAt: string | null): NarrativeHistoryDataCardV1 => {
-  const sorted = [...entries].sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
   return {
     templateId: 'narrative-history',
     version: 1,
     title: '叙事历史',
     updatedAt: lastUpdatedAt ?? new Date().toISOString(),
-    entries: sorted,
+    entries: [...entries],
   };
 };
 
@@ -117,6 +87,8 @@ export function NarrativeHistoryModal({ isOpen, onClose }: Props) {
   const setSort = useNarrativeHistoryStore((state) => state.setSort);
   const appendEntry = useNarrativeHistoryStore((state) => state.appendEntry);
   const updateEntry = useNarrativeHistoryStore((state) => state.updateEntry);
+  const moveEntry = useNarrativeHistoryStore((state) => state.moveEntry);
+  const reorderEntries = useNarrativeHistoryStore((state) => state.reorderEntries);
   const deleteEntry = useNarrativeHistoryStore((state) => state.deleteEntry);
   const replaceAll = useNarrativeHistoryStore((state) => state.replaceAll);
   const clearAll = useNarrativeHistoryStore((state) => state.clear);
@@ -132,10 +104,16 @@ export function NarrativeHistoryModal({ isOpen, onClose }: Props) {
   const [showPasteImport, setShowPasteImport] = useState(false);
   const [pasteText, setPasteText] = useState('');
   const [showCloudImport, setShowCloudImport] = useState(false);
+  const [isReorderMode, setIsReorderMode] = useState(false);
+  const [draggingId, setDraggingId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const activeEntry = useMemo(() => entries.find((entry) => entry.id === activeId) ?? null, [entries, activeId]);
-  const sortedEntries = useMemo(() => sortEntries(entries, sort), [entries, sort]);
+  const promptOrderedEntries = useMemo(() => getPromptOrderedNarrativeHistoryEntries(entries), [entries]);
+  const sortedEntries = useMemo(
+    () => (isReorderMode ? promptOrderedEntries : sortNarrativeHistoryEntries(entries, sort)),
+    [entries, isReorderMode, promptOrderedEntries, sort]
+  );
   const historyCardData = useMemo(
     () => (entries.length > 0 ? buildNarrativeHistoryCardPayload(entries, lastUpdatedAt) : null),
     [entries, lastUpdatedAt]
@@ -151,6 +129,8 @@ export function NarrativeHistoryModal({ isOpen, onClose }: Props) {
     setShowPasteImport(false);
     setPasteText('');
     setShowCloudImport(false);
+    setIsReorderMode(false);
+    setDraggingId(null);
     onClose();
   };
 
@@ -181,6 +161,7 @@ export function NarrativeHistoryModal({ isOpen, onClose }: Props) {
   }, [view, activeId, activeEntry]);
 
   const handlePick = (entry: NarrativeHistoryEntry) => {
+    if (isReorderMode) return;
     setView('edit');
     setActiveId(entry.id);
     setDraftTitle(entry.title);
@@ -188,7 +169,24 @@ export function NarrativeHistoryModal({ isOpen, onClose }: Props) {
     setSaveHint(null);
   };
 
+  const handleMove = (entryId: string, direction: NarrativeHistoryReorderDirection) => {
+    moveEntry(entryId, direction);
+    setSaveHint('已更新 AI 提示词顺序。');
+  };
+
+  const handleDropOnEntry = (targetId: string) => {
+    if (!draggingId || draggingId === targetId) {
+      setDraggingId(null);
+      return;
+    }
+    reorderEntries(draggingId, targetId);
+    setDraggingId(null);
+    setSaveHint('已更新 AI 提示词顺序。');
+  };
+
   const handleStartCreate = () => {
+    setIsReorderMode(false);
+    setDraggingId(null);
     setView('create');
     setActiveId(null);
     setDraftTitle('');
@@ -428,15 +426,39 @@ export function NarrativeHistoryModal({ isOpen, onClose }: Props) {
                     className="input-field text-sm"
                     value={sort}
                     onChange={(e) => setSort(e.target.value as NarrativeHistorySort)}
+                    disabled={isReorderMode}
                   >
-                    {Object.entries(sortLabelMap).map(([value, label]) => (
+                    {Object.entries(narrativeHistorySortLabelMap).map(([value, label]) => (
                       <option key={value} value={value}>
                         {label}
                       </option>
                     ))}
                   </select>
+                  <button
+                    type="button"
+                    className={[
+                      'px-3 py-1.5 text-xs rounded transition-colors',
+                      isReorderMode
+                        ? 'bg-pink-600 text-white hover:bg-pink-700'
+                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200',
+                    ].join(' ')}
+                    onClick={() => {
+                      setIsReorderMode((prev) => !prev);
+                      setDraggingId(null);
+                      setSaveHint(null);
+                    }}
+                    disabled={entries.length < 2}
+                  >
+                    {isReorderMode ? '完成排序' : '编辑 AI 顺序'}
+                  </button>
                 </div>
               </div>
+
+              {isReorderMode && (
+                <div className="mt-3 rounded-lg border border-pink-200 bg-pink-50/60 px-3 py-2 text-xs text-pink-700">
+                  AI 提示词会按列表中的 1 → n 顺序注入；电脑端可拖动卡片，手机端可用“上移 / 下移 / 置顶 / 置底”按钮调整。
+                </div>
+              )}
 
               <div className="mt-3 flex flex-wrap items-center gap-2">
                 <button
@@ -487,7 +509,7 @@ export function NarrativeHistoryModal({ isOpen, onClose }: Props) {
                   type="button"
                   className="px-3 py-1.5 text-xs bg-red-100 text-red-700 rounded hover:bg-red-200 disabled:opacity-60"
                   onClick={handleClearAll}
-                  disabled={entries.length === 0 || isImporting}
+                  disabled={entries.length === 0 || isImporting || isReorderMode}
                 >
                   清空
                 </button>
@@ -560,22 +582,112 @@ export function NarrativeHistoryModal({ isOpen, onClose }: Props) {
               )}
 
               {importError && <div className="mt-2 text-xs text-red-600">{importError}</div>}
+              {saveHint && <div className="mt-2 text-xs text-gray-600">{saveHint}</div>}
 
               {sortedEntries.length === 0 ? (
                 <div className="mt-4 text-sm text-gray-500">尚无叙事历史。开启“战报后写入叙事历史”后会自动累积。</div>
               ) : (
                 <div className="mt-4 space-y-2">
-                  {sortedEntries.map((entry) => (
-                    <button
+                  {sortedEntries.map((entry, index) => (
+                    <div
                       key={entry.id}
-                      className="w-full text-left border border-gray-200 rounded-lg p-3 hover:border-pink-300 hover:bg-pink-50/40 transition-colors"
+                      role="button"
+                      tabIndex={0}
+                      draggable={isReorderMode}
+                      onDragStart={() => setDraggingId(entry.id)}
+                      onDragEnd={() => setDraggingId(null)}
+                      onDragOver={(event) => {
+                        if (!isReorderMode) return;
+                        event.preventDefault();
+                      }}
+                      onDrop={() => {
+                        if (!isReorderMode) return;
+                        handleDropOnEntry(entry.id);
+                      }}
+                      className={[
+                        'w-full text-left border rounded-lg p-3 transition-colors',
+                        isReorderMode
+                          ? draggingId === entry.id
+                            ? 'border-pink-300 bg-pink-100/70 opacity-70'
+                            : 'border-pink-200 bg-white hover:border-pink-300 hover:bg-pink-50/40'
+                          : 'border-gray-200 hover:border-pink-300 hover:bg-pink-50/40',
+                      ].join(' ')}
                       onClick={() => handlePick(entry)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault();
+                          handlePick(entry);
+                        }
+                      }}
                     >
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="font-semibold text-gray-800 truncate">{entry.title || '未命名战报'}</div>
-                        <div className="text-[11px] text-gray-500 shrink-0">{formatDateTime(entry.updatedAt)}</div>
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex min-w-0 flex-1 items-start gap-3">
+                          {isReorderMode ? (
+                            <div
+                              className="hidden md:flex mt-0.5 h-7 w-7 items-center justify-center rounded border border-pink-200 bg-pink-50 text-pink-500 cursor-grab"
+                              title="拖动以调整 AI 提示词顺序"
+                            >
+                              ⋮⋮
+                            </div>
+                          ) : null}
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2">
+                              <span className="inline-flex shrink-0 items-center rounded-full bg-gray-100 px-2 py-0.5 text-[11px] text-gray-600">
+                                #{promptOrderedEntries.findIndex((item) => item.id === entry.id) + 1}
+                              </span>
+                              <div className="font-semibold text-gray-800 truncate">{entry.title || '未命名战报'}</div>
+                            </div>
+                            {isReorderMode && (
+                              <div className="mt-1 text-[11px] text-gray-500">
+                                当前作为 AI 提示词中的第 {index + 1} 段参考内容。
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                        <div className="flex shrink-0 items-start gap-2">
+                          <div className="text-[11px] text-gray-500 pt-1">{formatDateTime(entry.updatedAt)}</div>
+                          {isReorderMode ? (
+                            <div
+                              className="flex flex-wrap items-center justify-end gap-1"
+                              onClick={(event) => event.stopPropagation()}
+                            >
+                              <button
+                                type="button"
+                                className="rounded bg-gray-100 px-2 py-1 text-[11px] text-gray-700 hover:bg-gray-200 disabled:opacity-50"
+                                onClick={() => handleMove(entry.id, 'top')}
+                                disabled={index === 0}
+                              >
+                                置顶
+                              </button>
+                              <button
+                                type="button"
+                                className="rounded bg-gray-100 px-2 py-1 text-[11px] text-gray-700 hover:bg-gray-200 disabled:opacity-50"
+                                onClick={() => handleMove(entry.id, 'up')}
+                                disabled={index === 0}
+                              >
+                                上移
+                              </button>
+                              <button
+                                type="button"
+                                className="rounded bg-gray-100 px-2 py-1 text-[11px] text-gray-700 hover:bg-gray-200 disabled:opacity-50"
+                                onClick={() => handleMove(entry.id, 'down')}
+                                disabled={index === sortedEntries.length - 1}
+                              >
+                                下移
+                              </button>
+                              <button
+                                type="button"
+                                className="rounded bg-gray-100 px-2 py-1 text-[11px] text-gray-700 hover:bg-gray-200 disabled:opacity-50"
+                                onClick={() => handleMove(entry.id, 'bottom')}
+                                disabled={index === sortedEntries.length - 1}
+                              >
+                                置底
+                              </button>
+                            </div>
+                          ) : null}
+                        </div>
                       </div>
-                    </button>
+                    </div>
                   ))}
                 </div>
               )}

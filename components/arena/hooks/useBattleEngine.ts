@@ -26,6 +26,7 @@ import { useNarrativeHistoryStore } from '../stores/useNarrativeHistoryStore';
 import { resolveApiErrorMessage } from '@/lib/client/apiError';
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
 import { appendReasoningDelta, normalizeReasoningSource, updateReasoningStatus } from '@/lib/ai/reasoning-normalizer';
+import { limitNarrativeHistoryEntriesForPrompt } from '@/lib/narrative-history';
 import type { AIReasoningSource } from '@/types/ai-reasoning';
 
 const sanitizeTextByShieldWords = (text: string): string => applyShieldWords(text).filteredText;
@@ -556,16 +557,10 @@ export const useBattleEngine = () => {
         : undefined;
       const narrativeHistoryForRequest = settings.readNarrativeHistory
         ? (() => {
-          const sorted = [...useNarrativeHistoryStore.getState().entries]
-            .filter((entry) => typeof entry?.content === 'string' && entry.content.trim())
-            .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
-
-          const limited =
-            narrativeHistoryReadLimit === null
-              ? sorted
-              : typeof narrativeHistoryReadLimit === 'number' && Number.isFinite(narrativeHistoryReadLimit)
-                ? sorted.slice(Math.max(0, sorted.length - Math.max(1, Math.floor(narrativeHistoryReadLimit))))
-                : sorted.slice(Math.max(0, sorted.length - 10));
+          const ordered = useNarrativeHistoryStore
+            .getState()
+            .entries.filter((entry) => typeof entry?.content === 'string' && entry.content.trim());
+          const limited = limitNarrativeHistoryEntriesForPrompt(ordered, narrativeHistoryReadLimit);
 
           return limited.map((entry) => ({
             title: entry.title,

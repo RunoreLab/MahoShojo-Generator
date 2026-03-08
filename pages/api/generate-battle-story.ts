@@ -337,11 +337,6 @@ async function handler(req: NextRequest): Promise<Response> {
             ? (() => {
                 const normalized = normalizeNarrativeHistoryForPrompt(narrativeHistory);
                 if (normalized.length === 0) return [];
-                const parseTime = (entry: NarrativeHistoryEntry): number => {
-                    const t = Date.parse(entry.createdAt || entry.updatedAt);
-                    return Number.isFinite(t) ? t : 0;
-                };
-                normalized.sort((a, b) => parseTime(a) - parseTime(b));
                 if (resolvedNarrativeHistoryReadLimit === Infinity) return normalized;
                 const sliceLimit = Math.max(1, Math.floor(resolvedNarrativeHistoryReadLimit));
                 return normalized.slice(Math.max(0, normalized.length - sliceLimit));
