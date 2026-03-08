@@ -405,9 +405,9 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
         mode: 'json',
         models: [
             {
-                value: 'ubergarm/Qwen3.5-397B-A17B-GGUF',
-                label: '通义千问 3.5 297B ubergarm 版本',
-                description: '基于 imatrix 量化的通义千问 3.5 397B，先进多模态开源旗舰模型，采用混合架构，能力强大。'
+                value: 'Qwen/Qwen3.5-397B-A17B',
+                label: '通义千问 3.5 397B',
+                description: '通义千问 3.5 的高规格版本，适合复杂中文写作、长文本与高约束结构化任务。'
             },
             {
                 value: 'Qwen/Qwen3-235B-A22B-Instruct-2507',
@@ -420,14 +420,9 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 description: '面向中文场景的新一代通用模型，适合复杂对话、改写与信息整理。'
             },
             {
-                value: 'ZhipuAI/GLM-4.7',
-                label: 'GLM-4.7',
-                description: '智谱旗下通用模型的更新版本，适合复杂指令、多轮对话与综合写作场景。'
-            },
-            {
-                value: 'ZhipuAI/GLM-4.6',
-                label: 'GLM-4.6',
-                description: '面向中文场景的通用模型，适合对话、改写与信息整理。'
+                value: 'ZhipuAI/GLM-4.7-Flash',
+                label: 'GLM-4.7 Flash',
+                description: '智谱旗下 GLM 4.7 快速版，适合复杂指令、多轮对话与较快响应场景。'
             },
             {
                 value: 'deepseek-ai/DeepSeek-V3.2',
@@ -440,9 +435,9 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 description: '稀宇科技 MiniMax 旗下开源模型，专为编码与智能体任务进行优化。'
             },
             {
-                value: 'moonshotai/Kimi-K2-Thinking',
-                label: 'Kimi K2 Thinking',
-                description: 'Moonshot 旗下的大模型，可以看出我懒得写描述了。'
+                value: 'moonshotai/Kimi-K2.5',
+                label: 'Kimi K2.5',
+                description: 'Moonshot 当前在魔搭可用的 Kimi 系列模型，适合中文创作、摘要与多轮指令跟随。'
             },
         ]
     },
