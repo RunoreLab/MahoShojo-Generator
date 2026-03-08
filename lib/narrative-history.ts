@@ -3,6 +3,7 @@ import type { NarrativeHistoryEntry } from '@/types/arena';
 export type NarrativeHistorySort = 'prompt_order' | 'updated_desc' | 'updated_asc' | 'created_desc' | 'created_asc';
 
 export type NarrativeHistoryReorderDirection = 'up' | 'down' | 'top' | 'bottom';
+export type NarrativeHistoryImportMode = 'append' | 'replace';
 
 export const narrativeHistorySortLabelMap: Record<NarrativeHistorySort, string> = {
   prompt_order: 'AI 提示词顺序',
@@ -10,6 +11,11 @@ export const narrativeHistorySortLabelMap: Record<NarrativeHistorySort, string> 
   updated_asc: '最早更新优先',
   created_desc: '最新创建优先',
   created_asc: '最早创建优先',
+};
+
+export const narrativeHistoryImportModeLabelMap: Record<NarrativeHistoryImportMode, string> = {
+  append: '追加到末尾',
+  replace: '覆盖现有',
 };
 
 type FormatNarrativeHistoryReferenceOptions = {
@@ -111,6 +117,78 @@ export const migrateLegacyNarrativeHistoryOrder = <T extends NarrativeHistoryEnt
   const list = getPromptOrderedNarrativeHistoryEntries(entries);
   list.sort((a, b) => getTime(a.createdAt || a.updatedAt) - getTime(b.createdAt || b.updatedAt));
   return list;
+};
+
+const isObjectRecord = (value: unknown): value is Record<string, unknown> =>
+  Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+
+const getNarrativeHistoryCardEntries = (value: unknown): unknown[] | null => {
+  if (!isObjectRecord(value)) return null;
+  if (Array.isArray(value.entries)) return value.entries;
+  if (value.templateId === 'narrative-history' && isObjectRecord(value.data) && Array.isArray(value.data.entries)) {
+    return value.data.entries;
+  }
+  return null;
+};
+
+export const extractNarrativeHistoryImportEntries = (input: unknown): { entries: unknown[]; groupCount: number } => {
+  const directEntries = getNarrativeHistoryCardEntries(input);
+  if (directEntries) {
+    return { entries: directEntries, groupCount: 1 };
+  }
+
+  if (!Array.isArray(input)) {
+    return { entries: [], groupCount: 0 };
+  }
+
+  const merged: unknown[] = [];
+  let groupCount = 0;
+
+  input.forEach((item) => {
+    const nestedEntries = getNarrativeHistoryCardEntries(item);
+    if (nestedEntries) {
+      groupCount += 1;
+      merged.push(...nestedEntries);
+      return;
+    }
+    merged.push(item);
+  });
+
+  return {
+    entries: merged,
+    groupCount: groupCount > 0 ? groupCount : (merged.length > 0 ? 1 : 0),
+  };
+};
+
+const buildUniqueNarrativeHistoryId = (candidateId: string, usedIds: Set<string>, fallbackIndex: number): string => {
+  const baseId = candidateId.trim() || `imported-${fallbackIndex + 1}`;
+  if (!usedIds.has(baseId)) {
+    usedIds.add(baseId);
+    return baseId;
+  }
+
+  let suffix = 2;
+  let nextId = `${baseId}::${suffix}`;
+  while (usedIds.has(nextId)) {
+    suffix += 1;
+    nextId = `${baseId}::${suffix}`;
+  }
+  usedIds.add(nextId);
+  return nextId;
+};
+
+export const mergeNarrativeHistoryEntries = <T extends NarrativeHistoryEntry>(
+  currentEntries: T[],
+  importedEntries: T[],
+  mode: NarrativeHistoryImportMode
+): T[] => {
+  const base = mode === 'replace' ? [] : getPromptOrderedNarrativeHistoryEntries(currentEntries);
+  const usedIds = new Set(base.map((entry) => entry.id));
+  const normalizedImported = importedEntries.map((entry, index) => ({
+    ...entry,
+    id: buildUniqueNarrativeHistoryId(typeof entry.id === 'string' ? entry.id : '', usedIds, index),
+  }));
+  return [...base, ...normalizedImported];
 };
 
 export const formatNarrativeHistoryEntriesForReference = (

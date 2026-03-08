@@ -1,7 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 import { filterAndFormatHistory, formatNarrativeHistoryForPrompt } from '@/lib/arena/logic';
 import {
+  extractNarrativeHistoryImportEntries,
   limitNarrativeHistoryEntriesForPrompt,
+  mergeNarrativeHistoryEntries,
   migrateLegacyNarrativeHistoryOrder,
   moveNarrativeHistoryEntry,
   reorderNarrativeHistoryEntries,
@@ -120,5 +122,40 @@ describe('arena 历史命名兼容回归', () => {
 
     expect(limitNarrativeHistoryEntriesForPrompt(ordered, 2).map((entry) => entry.id)).toEqual(['b', 'c']);
     expect(sortNarrativeHistoryEntries(ordered, 'prompt_order').map((entry) => entry.id)).toEqual(['a', 'b', 'c']);
+  });
+
+  test('应支持从多张叙事历史数据卡数组中提取并拼接 entries', () => {
+    const extracted = extractNarrativeHistoryImportEntries([
+      {
+        templateId: 'narrative-history',
+        version: 1,
+        entries: [{ id: 'a', title: 'A', content: 'A', createdAt: '2026-03-01T08:00:00.000Z', updatedAt: '2026-03-01T08:00:00.000Z' }],
+      },
+      {
+        templateId: 'narrative-history',
+        version: 1,
+        data: {
+          entries: [{ id: 'b', title: 'B', content: 'B', createdAt: '2026-03-01T09:00:00.000Z', updatedAt: '2026-03-01T09:00:00.000Z' }],
+        },
+      },
+    ] as any);
+
+    expect(extracted.groupCount).toBe(2);
+    expect(Array.isArray(extracted.entries)).toBe(true);
+    expect(extracted.entries).toHaveLength(2);
+  });
+
+  test('追加导入时应保留现有顺序，并自动处理重复 id', () => {
+    const current = [
+      { id: 'same', title: '旧条目', content: '旧', createdAt: '2026-03-01T08:00:00.000Z', updatedAt: '2026-03-01T08:00:00.000Z' },
+    ];
+    const imported = [
+      { id: 'same', title: '新条目 1', content: '新1', createdAt: '2026-03-01T09:00:00.000Z', updatedAt: '2026-03-01T09:00:00.000Z' },
+      { id: 'same', title: '新条目 2', content: '新2', createdAt: '2026-03-01T10:00:00.000Z', updatedAt: '2026-03-01T10:00:00.000Z' },
+    ];
+
+    const merged = mergeNarrativeHistoryEntries(current, imported, 'append');
+    expect(merged.map((entry) => entry.title)).toEqual(['旧条目', '新条目 1', '新条目 2']);
+    expect(new Set(merged.map((entry) => entry.id)).size).toBe(3);
   });
 });
