@@ -410,9 +410,29 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 description: '通义千问 3.5 的高规格版本，适合复杂中文写作、长文本与高约束结构化任务。'
             },
             {
+                value: 'Qwen/Qwen3.5-122B-A10B',
+                label: '通义千问 3.5 122B',
+                description: '通义千问 3.5 的 122B 参数版本。'
+            },
+            {
+                value: 'Qwen/Qwen3.5-35B-A3B',
+                label: '通义千问 3.5 35B',
+                description: '通义千问 3.5 的 35B 参数版本。'
+            },
+            {
+                value: 'Qwen/Qwen3.5-27B',
+                label: '通义千问 3.5 27B',
+                description: '通义千问 3.5 的 27B 参数版本。'
+            },
+            {
                 value: 'Qwen/Qwen3-235B-A22B-Instruct-2507',
-                label: '通义千问 3 235B',
+                label: '通义千问 3 235B（指令）',
                 description: '旗舰级指令模型，擅长中文对话、写作与复杂指令，适合长文本与结构化任务。'
+            },
+            {
+                value: 'Qwen/Qwen3-235B-A22B-Thinking-2507',
+                label: '通义千问 3 235B（思考）',
+                description: '通义千问 3 的思考版本，更擅长推理。'
             },
             {
                 value: 'ZhipuAI/GLM-5',
@@ -428,6 +448,16 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 value: 'deepseek-ai/DeepSeek-V3.2',
                 label: 'DeepSeek V3.2',
                 description: '通用对话与推理模型，适合分析、总结与多轮交互。'
+            },
+            {
+                value: 'deepseek-ai/DeepSeek-R1-0528',
+                label: 'DeepSeek R1',
+                description: '推理强项模型，适合需要多步思考的分析、规划与推导场景。'
+            },
+            {
+                value: 'LLM-Research/Llama-4-Maverick-17B-128E-Instruct',
+                label: 'Llama 4 Maverick 17B（指令）',
+                description: 'Meta 在 2025 年 4 月发布的开源多模态人工智能模型。'
             },
             {
                 value: 'MiniMax/MiniMax-M2.5',
