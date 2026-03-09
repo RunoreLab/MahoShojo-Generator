@@ -6,7 +6,7 @@ import {
   getPvpRoomPlayers,
   updatePvpRoomCas,
   updatePvpRoomMember,
-} from '@/lib/d1';
+} from '@/lib/database/pvp';
 import { parsePvpRoomInternalState } from '@/lib/pvp/bot/room';
 import { requiresPvpSubmissionPhase } from '@/lib/pvp/logic';
 import { getRoomIdFromRequestUrl } from '@/lib/pvp/route';

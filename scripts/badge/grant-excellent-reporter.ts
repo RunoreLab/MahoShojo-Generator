@@ -1,6 +1,10 @@
 #!/usr/bin/env bun
 
-import { queryFromD1 } from '@/lib/database/core';
+import {
+  countUsersWithPublicApprovedCards as countUsersWithPublicApprovedCardsFromRepo,
+  getUserSlotCountById,
+  listEligibleReporterUsers,
+} from '@/lib/database/badges-granting';
 import { grantBadgeToUser, userHasBadge } from '@/lib/database/badges';
 import { increaseUserSlotCount } from '@/lib/database/users';
 import { getReporterTierByBadgeId } from './reporter-rules';
@@ -21,68 +25,28 @@ interface EligibleUser {
 }
 
 async function countUsersWithPublicApprovedCards(): Promise<number> {
-  const sql = `
-    SELECT COUNT(DISTINCT user_id) AS count
-    FROM data_cards
-    WHERE is_public = 1
-      AND review_status = 'approved'
-  `;
-
-  const queryResult = await queryFromD1(sql, []);
-  const result = queryResult as { success?: boolean; result?: Array<{ results?: any[] }> };
-  if (!result.success || !result.result?.[0]?.results?.length) return 0;
-
-  return Number(result.result[0].results[0].count ?? 0) || 0;
+  return countUsersWithPublicApprovedCardsFromRepo();
 }
 
 async function findEligibleUsers(): Promise<EligibleUser[]> {
-  const sql = `
-    SELECT
-      dc.user_id,
-      u.username,
-      COUNT(dc.id) AS public_cards,
-      SUM(dc.like_count) AS total_likes,
-      SUM(dc.favorite_count) AS total_favorites,
-      SUM(dc.usage_count) AS total_usage
-    FROM data_cards dc
-    JOIN users u ON u.id = dc.user_id
-    WHERE dc.is_public = 1
-      AND dc.review_status = 'approved'
-    GROUP BY dc.user_id, u.username
-    HAVING SUM(dc.like_count) >= ?
-      AND SUM(dc.favorite_count) >= ?
-      AND SUM(dc.usage_count) >= ?
-  `;
+  const rows = await listEligibleReporterUsers({
+    minTotalLikes: EXCELLENT_REPORTER_TIER.minTotalLikes,
+    minTotalFavorites: EXCELLENT_REPORTER_TIER.minTotalFavorites,
+    minTotalUsage: EXCELLENT_REPORTER_TIER.minTotalUsage,
+  });
 
-  const queryResult = await queryFromD1(sql, [
-    EXCELLENT_REPORTER_TIER.minTotalLikes,
-    EXCELLENT_REPORTER_TIER.minTotalFavorites,
-    EXCELLENT_REPORTER_TIER.minTotalUsage,
-  ]);
-  const result = queryResult as { success?: boolean; result?: Array<{ results?: any[] }> };
-
-  if (!result.success || !result.result || !result.result[0]?.results) {
-    return [];
-  }
-
-  return result.result[0].results.map((row: any) => ({
-    user_id: row.user_id,
+  return rows.map((row) => ({
+    user_id: row.userId,
     username: row.username,
-    public_cards: Number(row.public_cards ?? 0) || 0,
-    total_likes: Number(row.total_likes ?? 0) || 0,
-    total_favorites: Number(row.total_favorites ?? 0) || 0,
-    total_usage: Number(row.total_usage ?? 0) || 0,
+    public_cards: row.publicCards,
+    total_likes: row.totalLikes,
+    total_favorites: row.totalFavorites,
+    total_usage: row.totalUsage,
   }));
 }
 
 async function getUserSlotCount(userId: number): Promise<number> {
-  const queryResult = await queryFromD1('SELECT slot_count FROM users WHERE id = ?', [userId]);
-  const result = queryResult as { success?: boolean; result?: Array<{ results?: Array<{ slot_count?: number | null }> }> };
-  if (!result.success || !result.result || !result.result[0]?.results?.length) {
-    return 0;
-  }
-  const value = result.result[0].results[0].slot_count;
-  return typeof value === 'number' && !Number.isNaN(value) ? value : 0;
+  return getUserSlotCountById(userId);
 }
 
 async function processUsers(users: EligibleUser[], dryRun: boolean) {

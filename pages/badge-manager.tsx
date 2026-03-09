@@ -27,15 +27,7 @@ export default function BadgeManager() {
   const loadUserBadges = async () => {
     try {
       setLoading(true);
-      const authHeader = await authStorage.getAuthHeader();
-      if (!authHeader) {
-        console.error('未找到认证信息');
-        return;
-      }
-
-      const response = await fetch('/api/badges/user', {
-        headers: { 'Authorization': authHeader }
-      });
+      const response = await authStorage.fetch('/api/badges/user');
 
       if (response.ok) {
         const data = await response.json();
@@ -57,17 +49,10 @@ export default function BadgeManager() {
   // 保存徽章佩戴设置
   const handleSaveEquippedBadges = async (equippedBadgeIds: string[]) => {
     try {
-      const authHeader = await authStorage.getAuthHeader();
-      if (!authHeader) {
-        alert('认证失败，请重新登录');
-        return;
-      }
-
-      const response = await fetch('/api/badges/equip', {
+      const response = await authStorage.fetch('/api/badges/equip', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': authHeader
         },
         body: JSON.stringify({ badgeIds: equippedBadgeIds })
       });

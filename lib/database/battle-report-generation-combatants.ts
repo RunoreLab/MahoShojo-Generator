@@ -1,5 +1,3 @@
-import { queryFromD1 } from './core';
-
 export interface BattleReportGenerationCombatantInsert {
   generationId: string;
   sortIndex: number;
@@ -16,57 +14,51 @@ export interface BattleReportGenerationCombatantInsert {
   sizeBytes?: number | null;
 }
 
+type CombatantsRepoBundle = {
+  db: unknown;
+  insertBattleReportGenerationCombatants: (
+    db: unknown,
+    combatants: BattleReportGenerationCombatantInsert[],
+    createdAtIso: string,
+  ) => Promise<boolean>;
+  listBattleReportGenerationCombatantsByGenerationId: (
+    db: unknown,
+    generationId: string,
+  ) => Promise<BattleReportGenerationCombatantRow[]>;
+};
+
+const readCombatantsRepoBundle = async (): Promise<CombatantsRepoBundle | null> => {
+  try {
+    const [{ getDrizzleDbFromRuntime }, repo] = await Promise.all([
+      import('@/lib/db/drizzle'),
+      import('@/lib/db/repositories/battle-report-generation-combatants'),
+    ]);
+    const db = getDrizzleDbFromRuntime();
+    if (!db) return null;
+
+    return {
+      db,
+      insertBattleReportGenerationCombatants: repo.insertBattleReportGenerationCombatants as CombatantsRepoBundle['insertBattleReportGenerationCombatants'],
+      listBattleReportGenerationCombatantsByGenerationId: repo.listBattleReportGenerationCombatantsByGenerationId as CombatantsRepoBundle['listBattleReportGenerationCombatantsByGenerationId'],
+    };
+  } catch {
+    return null;
+  }
+};
+
 export async function createBattleReportGenerationCombatants(
   combatants: BattleReportGenerationCombatantInsert[]
 ): Promise<{ ok: boolean; errorMessage?: string }> {
   try {
     if (!combatants.length) return { ok: true };
-    const nowIso = new Date().toISOString();
-
-    const valuesSql = combatants.map(() => `(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-      .join(', ');
-
-    const sql = `
-      INSERT INTO battle_report_generation_combatants (
-        generation_id,
-        sort_index,
-        name,
-        type,
-        template_id,
-        is_native,
-        is_preset,
-        team_id,
-        character_guidance,
-        data_card_id,
-        data_card_updated_at,
-        size_chars,
-        size_bytes,
-        created_at
-      ) VALUES ${valuesSql};
-    `;
-
-    const params: unknown[] = [];
-    for (const c of combatants) {
-      params.push(
-        c.generationId,
-        c.sortIndex,
-        c.name,
-        c.type ?? null,
-        c.templateId ?? null,
-        typeof c.isNative === 'boolean' ? (c.isNative ? 1 : 0) : null,
-        typeof c.isPreset === 'boolean' ? (c.isPreset ? 1 : 0) : null,
-        c.teamId ?? null,
-        c.characterGuidance ?? null,
-        c.dataCardId ?? null,
-        c.dataCardUpdatedAt ?? null,
-        c.sizeChars ?? null,
-        c.sizeBytes ?? null,
-        nowIso
-      );
-    }
-
-    const result = (await queryFromD1(sql, params)) as any;
-    return { ok: Boolean(result?.success) };
+    const bundle = await readCombatantsRepoBundle();
+    if (!bundle) return { ok: false, errorMessage: 'db-unavailable' };
+    const ok = await bundle.insertBattleReportGenerationCombatants(
+      bundle.db,
+      combatants,
+      new Date().toISOString(),
+    );
+    return { ok };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'unknown error';
     console.error('写入 battle_report_generation_combatants 失败:', { errorMessage, error });
@@ -95,14 +87,9 @@ export async function getBattleReportGenerationCombatantsByGenerationId(
   generationId: string
 ): Promise<BattleReportGenerationCombatantRow[]> {
   try {
-    const result = (await queryFromD1(
-      'SELECT * FROM battle_report_generation_combatants WHERE generation_id = ? ORDER BY sort_index ASC',
-      [generationId]
-    )) as any;
-    if (result.success && result.result?.[0]?.results) {
-      return result.result[0].results as BattleReportGenerationCombatantRow[];
-    }
-    return [];
+    const bundle = await readCombatantsRepoBundle();
+    if (!bundle) return [];
+    return await bundle.listBattleReportGenerationCombatantsByGenerationId(bundle.db, generationId);
   } catch (error) {
     console.error('读取 battle_report_generation_combatants 失败:', error);
     return [];

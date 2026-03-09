@@ -23,10 +23,12 @@ export {
 // 重新导出用户相关功能
 export {
   createUser,
+  getUserById,
   getUserByUsername,
   getUserByEmail,
   getUserByAuthKey,
   verifyUserLogin,
+  updateUserAuthKey,
   getUserProfileByUserId,
   getUserProfileCardRowByUserId,
   updateUserAvatarWebpBase64,
@@ -46,6 +48,7 @@ export {
   getUserTopDataCardsByEngagement,
   getUserProfileCardDataStats,
   updateDataCard,
+  updateDataCardContentByIdAndUser,
   deleteDataCard,
   getUserRecycleBinCards,
   restoreDataCard,

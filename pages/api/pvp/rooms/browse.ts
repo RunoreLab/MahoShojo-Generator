@@ -1,4 +1,4 @@
-import { getPvpRoomBrowseRows } from '@/lib/d1';
+import { getPvpRoomBrowseRows } from '@/lib/database/pvp';
 import { parsePvpRoomInternalState } from '@/lib/pvp/bot/room';
 import { canJoinPvpRoomFromBrowse, canSpectatePvpRoomFromBrowse } from '@/lib/pvp/room-browse';
 import { getPvpScenarioTitle, parsePvpScenarioSelection } from '@/lib/pvp/scenario';

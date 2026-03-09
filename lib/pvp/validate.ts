@@ -29,7 +29,6 @@ const safeTrim = (value: unknown, maxLen: number): string => {
   return trimmed.length > maxLen ? trimmed.slice(0, maxLen) : trimmed;
 };
 
-const allowedLevels = new Set(['', '种级', '芽级', '叶级', '蕾级', '花级']);
 const allowedStoryLengths = new Set(['default', 'short', 'standard', 'detailed', 'long']);
 
 const sanitizeAdjudicationEvents = (input: unknown): AdjudicatorEvent[] => {
@@ -237,9 +236,6 @@ export const parsePvpRules = (input: unknown): { rules: PvpRoomRules } | { error
   const generationMode =
     generationModeRaw === 'stream' || generationModeRaw === 'non-stream' ? (generationModeRaw as any) : DEFAULT_PVP_RULES.generationMode;
 
-  const selectedLevelRaw = typeof raw.selectedLevel === 'string' ? raw.selectedLevel : DEFAULT_PVP_RULES.selectedLevel;
-  const selectedLevel = allowedLevels.has(selectedLevelRaw.trim()) ? selectedLevelRaw.trim() : DEFAULT_PVP_RULES.selectedLevel;
-
   const userGuidanceRaw = typeof raw.userGuidance === 'string' ? raw.userGuidance : DEFAULT_PVP_RULES.userGuidance;
   const userGuidance = userGuidanceRaw.trim().slice(0, 200);
 
@@ -277,7 +273,6 @@ export const parsePvpRules = (input: unknown): { rules: PvpRoomRules } | { error
     readCurrentState,
     writeCurrentState,
     generationMode,
-    selectedLevel,
     userGuidance,
     storyLength,
     language,

@@ -105,12 +105,23 @@ describe('magic tea party jsonl parser', () => {
     const input = [
       '{"type":"narration","text":"雨夜的奶茶店。"}',
       '{"type":"summary","text":"世界状态：雨未停。","sections":{"世界状态":"雨未停"}}',
-      '{"type":"updates","drafts":[{"characterName":"星见澪","impact":"并肩作战"}],"meta":{"messageRange":{"fromMessageId":"m1","toMessageId":"m2","count":2}}}',
+      '{"type":"updates","drafts":[{"characterName":"星见澪","impact":"并肩作战"},{"character":"白露","current_state_summary":"呼吸平稳"}],"meta":{"messageRange":{"fromMessageId":"m1","toMessageId":"m2","count":2}}}',
     ].join('\n');
     const parsed = parseMagicTeaPartyJsonl(input);
     expect(parsed.segments.map((seg) => seg.type)).toEqual(['narration']);
     expect(parsed.summary?.text).toBe('世界状态：雨未停。');
     expect(parsed.updates?.[0]?.characterName).toBe('星见澪');
+    expect(parsed.updates?.[1]).toEqual({
+      characterName: '白露',
+      currentStateSummary: '呼吸平稳',
+      meta: {
+        messageRange: {
+          fromMessageId: 'm1',
+          toMessageId: 'm2',
+          count: 2,
+        },
+      },
+    });
     expect(parsed.updatesMeta?.messageRange).toMatchObject({ fromMessageId: 'm1', toMessageId: 'm2', count: 2 });
   });
 });

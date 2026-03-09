@@ -4,10 +4,16 @@ import {
   buildPairKey,
   computeEloUpdate,
   computeKFactor,
+  getStrictRangeCheckResult,
   isFreeEligible,
   isStrictEligible,
   parseCombatantEntity,
+  parseGenerationCombatantsFallback,
   parseWinnerSlot,
+  STRICT_DAILY_LIMIT,
+  STRICT_DEDUP_WINDOW_MS,
+  STRICT_LOW_GAMES_MAX_ABS_DIFF,
+  STRICT_SAME_PAIR_DAILY_LIMIT,
   type ArenaEligibilitySnapshot,
   type ArenaRatingSnapshot,
 } from '@/lib/database/arena-ratings';
@@ -140,7 +146,7 @@ describe('arena-ratings: 严格排位资格判定', () => {
 
   const baseCombatants: BattleReportGenerationCombatantRow[] = [buildCombatant('甲', null), buildCombatant('乙', null)];
 
-  test('满足：默认等级 + 不读叙事/历战/状态 + 简体中文', () => {
+  test('满足：不读叙事/历战/状态 + 简体中文', () => {
     expect(isStrictEligible(baseSnapshot, baseCombatants)).toBe(true);
   });
 
@@ -288,10 +294,6 @@ describe('arena-ratings: 严格排位资格判定', () => {
     expect(isStrictEligible({ ...baseSnapshot, language: 'en' }, baseCombatants)).toBe(false);
   });
 
-  test('不满足：等级非默认', () => {
-    expect(isStrictEligible({ ...baseSnapshot, selectedLevel: '花级' }, baseCombatants)).toBe(false);
-  });
-
   test('不满足：extra_json 缺失 readNarrativeHistory（宁可漏算）', () => {
     expect(isStrictEligible({ ...baseSnapshot, extraJson: JSON.stringify({ rankedMatchOk: true }) }, baseCombatants)).toBe(false);
     expect(isStrictEligible({ ...baseSnapshot, extraJson: null }, baseCombatants)).toBe(false);
@@ -334,6 +336,54 @@ describe('arena-ratings: 严格排位资格判定', () => {
         baseCombatants,
       ),
     ).toBe(false);
+  });
+});
+
+describe('arena-ratings: 严格排位风控参数', () => {
+  test('严格排位每日上限已收紧为 20 局', () => {
+    expect(STRICT_DAILY_LIMIT).toBe(20);
+  });
+
+  test('严格排位同对手组合冷却窗已调整为 360 分钟', () => {
+    expect(STRICT_DEDUP_WINDOW_MS).toBe(360 * 60 * 1000);
+  });
+
+  test('严格排位同对手组合每日最多计 2 局', () => {
+    expect(STRICT_SAME_PAIR_DAILY_LIMIT).toBe(2);
+  });
+});
+
+describe('arena-ratings: strict 分差限制', () => {
+  test('低局数高段位对局会额外收紧 strict 分差上限', () => {
+    const result = getStrictRangeCheckResult(
+      { rating: 1300, games: 6 },
+      { rating: 1750, games: 8 },
+    );
+    expect(result).not.toBeNull();
+    expect(result?.lowGamesTightened).toBe(true);
+    expect(result?.maxAbsDiff).toBe(STRICT_LOW_GAMES_MAX_ABS_DIFF);
+    expect(result?.absDiff).toBe(450);
+    expect(result?.exceededBy).toBe(50);
+  });
+
+  test('高局数对局继续沿用原有 tier 分差上限', () => {
+    const result = getStrictRangeCheckResult(
+      { rating: 1300, games: 20 },
+      { rating: 1750, games: 20 },
+    );
+    expect(result).not.toBeNull();
+    expect(result?.lowGamesTightened).toBe(false);
+    expect(result?.maxAbsDiff).toBe(1000);
+    expect(result?.exceededBy).toBe(0);
+  });
+
+  test('低段位对局仍不触发 strict 分差限制', () => {
+    expect(
+      getStrictRangeCheckResult(
+        { rating: 1000, games: 8 },
+        { rating: 1180, games: 9 },
+      ),
+    ).toBeNull();
   });
 });
 
@@ -418,5 +468,54 @@ describe('arena-ratings: 参战者 entity 解析', () => {
       })
     );
     expect(entity).toEqual({ entityType: 'data_card', entityId: 'dc_123' });
+  });
+});
+
+describe('arena-ratings: combatants fallback 解析', () => {
+  test('可从 extraJson.combatantsFallback 还原 2 名参战者', () => {
+    const rows = parseGenerationCombatantsFallback(
+      'gen_fallback_1',
+      JSON.stringify({
+        combatantsFallback: [
+          {
+            sortIndex: 1,
+            name: '乙',
+            type: 'canshou',
+            isNative: false,
+            isPreset: false,
+            teamId: 2,
+            characterGuidance: '后手反击',
+            dataCardId: 'dc_b',
+            dataCardUpdatedAt: '2026-03-01T00:00:00.000Z',
+          },
+          {
+            sortIndex: 0,
+            name: '雪绒',
+            type: 'magical-girl',
+            isNative: true,
+            isPreset: true,
+            templateId: 'M12_greatness_in_simplicity.json',
+            teamId: 1,
+            characterGuidance: '先手试探',
+          },
+        ],
+      }),
+    );
+
+    expect(rows).toHaveLength(2);
+    expect(rows[0]?.generation_id).toBe('gen_fallback_1');
+    expect(rows[0]?.sort_index).toBe(0);
+    expect(rows[0]?.name).toBe('雪绒');
+    expect(rows[0]?.template_id).toBe('M12_greatness_in_simplicity.json');
+    expect(rows[0]?.is_preset).toBe(1);
+    expect(rows[1]?.sort_index).toBe(1);
+    expect(rows[1]?.data_card_id).toBe('dc_b');
+    expect(rows[1]?.character_guidance).toBe('后手反击');
+  });
+
+  test('异常/缺失 extraJson 时返回空数组', () => {
+    expect(parseGenerationCombatantsFallback('gen_fallback_2', null)).toEqual([]);
+    expect(parseGenerationCombatantsFallback('gen_fallback_2', '{')).toEqual([]);
+    expect(parseGenerationCombatantsFallback('gen_fallback_2', JSON.stringify({}))).toEqual([]);
   });
 });

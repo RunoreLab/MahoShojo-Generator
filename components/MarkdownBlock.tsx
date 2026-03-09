@@ -10,6 +10,7 @@ import {
   isAllowedExternalMediaUrl,
   isLikelyAudioUrl,
   isLikelyVideoUrl,
+  resolveExternalMediaUrl,
 } from '@/lib/markdown/externalMedia';
 
 type MarkdownCodeProps = React.ComponentPropsWithoutRef<'code'> & ExtraProps & { inline?: boolean };
@@ -99,6 +100,8 @@ export function MarkdownBlock({ content, variant = 'dark', mode = 'compact', cla
       const isAudioAllowed = isAudioLink && isAllowedExternalMediaUrl(rawHref, 'audio');
       const isVideoAllowed = isVideoLink && isAllowedExternalMediaUrl(rawHref, 'video');
       const linkText = getLinkText(children) || '播放音频';
+      const resolvedAudioHref = isAudioLink ? resolveExternalMediaUrl(rawHref, 'audio') : normalizedHref;
+      const resolvedVideoHref = isVideoLink ? resolveExternalMediaUrl(rawHref, 'video') : normalizedHref;
 
       if (isAudioLink) {
         if (!isAudioAllowed) {
@@ -118,11 +121,11 @@ export function MarkdownBlock({ content, variant = 'dark', mode = 'compact', cla
             <audio
               controls
               preload="none"
-              src={normalizedHref}
+              src={resolvedAudioHref}
               className="h-8 max-w-full"
             />
             <a
-              href={normalizedHref}
+              href={resolvedAudioHref}
               target="_blank"
               rel="noopener noreferrer"
               className={`text-[11px] underline underline-offset-2 ${
@@ -156,11 +159,11 @@ export function MarkdownBlock({ content, variant = 'dark', mode = 'compact', cla
               controls
               preload="metadata"
               playsInline
-              src={normalizedHref}
+              src={resolvedVideoHref}
               className={`my-2 max-w-full rounded-md border ${borderClass}`}
             />
             <a
-              href={normalizedHref}
+              href={resolvedVideoHref}
               target="_blank"
               rel="noopener noreferrer"
               className={`text-[11px] underline underline-offset-2 ${
@@ -262,7 +265,7 @@ export function MarkdownBlock({ content, variant = 'dark', mode = 'compact', cla
       const isVideoLink = Boolean(rawSrc && isLikelyVideoUrl(rawSrc));
       if (isAudioLink) {
         const isAudioAllowed = isAllowedExternalMediaUrl(rawSrc, 'audio');
-        const normalizedSrc = rawSrc.startsWith('//') ? `https:${rawSrc}` : rawSrc;
+        const normalizedSrc = resolveExternalMediaUrl(rawSrc, 'audio');
         const audioLabel = typeof alt === 'string' && alt.trim() ? alt.trim() : '播放音频';
 
         if (!isAudioAllowed) {
@@ -296,7 +299,7 @@ export function MarkdownBlock({ content, variant = 'dark', mode = 'compact', cla
 
       if (isVideoLink) {
         const isVideoAllowed = isAllowedExternalMediaUrl(rawSrc, 'video');
-        const normalizedSrc = rawSrc.startsWith('//') ? `https:${rawSrc}` : rawSrc;
+        const normalizedSrc = resolveExternalMediaUrl(rawSrc, 'video');
         const videoLabel = typeof alt === 'string' && alt.trim() ? alt.trim() : '播放视频';
 
         if (!isVideoAllowed) {
@@ -335,6 +338,7 @@ export function MarkdownBlock({ content, variant = 'dark', mode = 'compact', cla
       }
 
       const isAllowed = isAllowedExternalMediaUrl(rawSrc, 'image');
+      const normalizedSrc = resolveExternalMediaUrl(rawSrc, 'image');
       if (!isAllowed) {
         return (
           <code
@@ -349,7 +353,7 @@ export function MarkdownBlock({ content, variant = 'dark', mode = 'compact', cla
 
       return (
         <img
-          src={src}
+          src={normalizedSrc}
           alt={typeof alt === 'string' ? alt : ''}
           title={typeof title === 'string' ? title : undefined}
           className={`my-2 max-w-full rounded-md border ${variant === 'light' ? 'border-gray-200' : 'border-white/10'}`}

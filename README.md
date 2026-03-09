@@ -44,7 +44,7 @@
 - **个人中心**：展示战报、生成个人资料卡
 
 ### 云端与分享
-- **用户系统**：注册账户，云端保存角色数据
+- **用户系统**：注册/登录账户，云端保存角色数据（v0.8.0 起进入旧密钥迁移窗口）
 - **公开分享**：分享角色供他人使用，支持点赞和筛选
 - **数据卡管理**：可视化编辑器、回收站、徽章系统
 - **标签系统**：标签库分类与筛选
@@ -63,7 +63,7 @@
 
 ## 🚀 技术栈
 
-* **框架**: Next.js 15 (Pages Router), React 19
+* **框架**: Next.js 15（Pages Router 为主，局部 App Router）, React 19
 * **语言**: TypeScript
 * **运行时**: Bun (开发与构建), Cloudflare Pages/Workers (生产，Edge Runtime)
 * **数据库**: Cloudflare D1（主库）+ Cloudflare R2
@@ -106,7 +106,7 @@ AI_PROVIDERS_CONFIG='[
     "name": "siliconflow_provider",
     "apiKey": "your_siliconflow_api_key_here",
     "baseUrl": "https://api.siliconflow.cn/v1",
-    "model": ["deepseek-ai/DeepSeek-V3.2", "zai-org/GLM-4.6", "Qwen/Qwen3-32B", "moonshotai/Kimi-K2-Instruct-0905"],
+    "model": ["deepseek-ai/DeepSeek-V3.2", "zai-org/GLM-5", "zai-org/GLM-4.6", "Qwen/Qwen3-32B", "moonshotai/Kimi-K2-Instruct-0905"],
     "type": "openai"
   }
 ]'
@@ -132,6 +132,11 @@ bun run preview
 ## 📋 路线图
 
 查看详细的开发进度和完成功能，请参阅 [CHANGELOG.md](./CHANGELOG.md)
+
+## 🧭 开发规范（关键）
+
+- 命名规范采用“分层统一 + 边界映射”，适用于全项目，不限于鉴权模块。
+- 详细说明见 [docs/NAMING_CONVENTIONS_2026-02-28.md](./docs/NAMING_CONVENTIONS_2026-02-28.md)。
 
 - [x] 核心 AI 生成系统
 - [x] 角色成长与竞技场系统
@@ -163,6 +168,9 @@ bun run preview
 
 ```
 MahoShojo-Generator/
+├── app/                    # App Router（承载新版 auth 路由）
+│   └── api/
+│       └── auth/
 ├── pages/                   # 页面路由
 │   ├── index.tsx           # 主页
 │   ├── name.tsx            # 魔法少女生成
@@ -182,8 +190,10 @@ MahoShojo-Generator/
 ├── lib/                    # 核心逻辑
 │   ├── ai/                 # AI 集成
 │   ├── database/           # 数据库访问
+│   ├── db/                 # Drizzle schema/repositories
 │   ├── d1.ts               # Cloudflare D1
 │   └── signature.ts        # 数据签名
+├── drizzle/                # D1 迁移 SQL
 ├── components/             # UI 组件
 ├── public/                 # 静态资源
 │   ├── announcements.json  # 公告

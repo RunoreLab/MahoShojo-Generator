@@ -1,4 +1,5 @@
-import { countPvpMatchesByUserId, getPvpMatchesByUserId, getPvpUserSummariesByUserIds } from '@/lib/d1';
+import { countPvpMatchesByUserId, getPvpMatchesByUserId, getPvpUserSummariesByUserIds } from '@/lib/database/pvp';
+import { buildDefaultPvpUserSummary, mapPvpMatchPlayerRow, mapPvpMatchRow, mapPvpUserSummaryRow } from '@/lib/pvp/read-mappers';
 import { json, requireAuthUser } from '@/lib/pvp/server';
 
 export const runtime = 'edge';
@@ -21,55 +22,45 @@ export default async function handler(req: Request): Promise<Response> {
   const offset = (page - 1) * pageSize;
 
   const summaries = await getPvpUserSummariesByUserIds([auth.user.id]);
-  const summary = summaries.find((s) => s.user_id === auth.user.id) ?? {
-    user_id: auth.user.id,
-    completed_matches: 0,
-    wins: 0,
-    losses: 0,
-    draws: 0,
-    aborted_matches: 0,
-    last_played_at: null,
-  };
+  const summary = (() => {
+    for (const row of summaries) {
+      const mapped = mapPvpUserSummaryRow(row, auth.user.id);
+      if (mapped.userId === auth.user.id) return mapped;
+    }
+    return buildDefaultPvpUserSummary(auth.user.id);
+  })();
 
   const [totalMatches, matchResult] = await Promise.all([
     countPvpMatchesByUserId(auth.user.id),
     getPvpMatchesByUserId(auth.user.id, pageSize, offset),
   ]);
   const { matches, players } = matchResult;
-  const playersByMatchId = new Map<string, typeof players>();
+  const playersByMatchId = new Map<string, ReturnType<typeof mapPvpMatchPlayerRow>[]>();
   for (const row of players) {
-    const list = playersByMatchId.get(row.match_id) ?? [];
-    list.push(row);
-    playersByMatchId.set(row.match_id, list);
+    const mapped = mapPvpMatchPlayerRow(row);
+    if (!mapped.matchId) continue;
+    const list = playersByMatchId.get(mapped.matchId) ?? [];
+    list.push(mapped);
+    playersByMatchId.set(mapped.matchId, list);
   }
 
   return json({
     success: true,
-    summary: {
-      completedMatches: summary.completed_matches ?? 0,
-      wins: summary.wins ?? 0,
-      losses: summary.losses ?? 0,
-      draws: summary.draws ?? 0,
-      abortedMatches: summary.aborted_matches ?? 0,
-      lastPlayedAt: summary.last_played_at ?? null,
-    },
+    summary,
     page,
     pageSize,
     totalMatches,
-    recentMatches: matches.map((m) => ({
-      id: m.id,
-      roomId: m.room_id ?? null,
-      status: m.status,
-      startedAt: m.started_at,
-      endedAt: m.ended_at,
-      winnerUserId: m.winner_user_id,
-      players: (playersByMatchId.get(m.id) ?? []).map((p) => ({
-        userId: p.user_id,
-        seat: p.seat,
-        username: p.username ?? null,
-        prefix: p.user_prefix ?? null,
-      })),
-    })),
+    recentMatches: matches.map((m) => {
+      const mappedMatch = mapPvpMatchRow(m);
+      return {
+        ...mappedMatch,
+        players: (playersByMatchId.get(mappedMatch.id) ?? []).map((p) => ({
+          userId: p.userId,
+          seat: p.seat,
+          username: p.username,
+          prefix: p.prefix,
+        })),
+      };
+    }),
   });
 }
-

@@ -1,10 +1,21 @@
 import type { NextRequest } from 'next/server';
 
-import { getUserByAuthKey, queryFromD1 } from '@/lib/d1';
+import { createRequestAuthUserResolver } from '@/lib/auth/request-auth-user';
 import { isStrictRankedModelBlacklisted } from '@/lib/arena/ranked-model-policy';
-import { buildPairKey, getStrictDailyUsage, INITIAL_RATING, STRICT_DEDUP_WINDOW_MS, STRICT_DAILY_LIMIT } from '@/lib/database/arena-ratings';
-import { computeArenaBaseTier, type ArenaBaseTier } from '@/lib/arena/tier';
-import { shouldEnforceStrictRangeLimit } from '@/lib/arena/strict-range';
+import {
+  buildPairKey,
+  getStrictDailyUsage,
+  getStrictPairUsage,
+  getStrictRangeCheckResult,
+  INITIAL_RATING,
+  STRICT_DEDUP_WINDOW_MS,
+  STRICT_DAILY_LIMIT,
+  STRICT_SAME_PAIR_DAILY_LIMIT,
+  type StrictRangeCheckResult,
+} from '@/lib/database/arena-ratings';
+import { getDrizzleDbFromRuntime, type AppDrizzleDb } from '@/lib/db/drizzle';
+import { getDataCardMetaCardsByIds } from '@/lib/db/repositories/data-card-meta';
+import { getStrictArenaRatingsByEntities } from '@/lib/db/repositories/arena-strict-preflight';
 import { fetchCurrentSeasonFromOrigin } from '@/lib/seasons-config';
 import { deriveSeasonStrictRules } from '@/lib/seasons';
 
@@ -16,18 +27,21 @@ type ApiSuccessResponse = {
   success: true;
   willCount: boolean;
   reasons: string[];
-  range: {
-    absDiff: number;
-    maxAbsDiff: number;
-    exceededBy: number;
-    aRating: number;
-    bRating: number;
-  } | null;
+  range: StrictRangeCheckResult | null;
   daily: {
     used: number | null;
     limit: number;
     exceeded: boolean | null;
     sinceIso: string | null;
+  };
+  pair: {
+    used: number | null;
+    limit: number;
+    exceeded: boolean | null;
+    recentDeduped: boolean | null;
+    recentAppliedAtIso: string | null;
+    nextEligibleAtIso: string | null;
+    windowMinutes: number;
   };
 };
 
@@ -72,45 +86,13 @@ const parseArenaEntityFromCombatant = (value: unknown): ArenaEntity | null => {
   return { entityType: 'data_card', entityId: dataCardId };
 };
 
-const readRows = <T,>(result: unknown): T[] => {
-  const rows = (result as any)?.result?.[0]?.results;
-  return Array.isArray(rows) ? (rows as T[]) : [];
-};
-
-const STRICT_MAX_ABS_DIFF_BY_TIER: Record<ArenaBaseTier, number> = {
-  '无牌': 2000,
-  '白牌': 1000,
-  '字牌': 900,
-  '花牌': 800,
-  '权杖': 1000,
-};
-
-const getStrictMaxAbsDiffForRatings = (a: { rating: number; games: number }, b: { rating: number; games: number }): number => {
-  const aTier = computeArenaBaseTier(a.rating, a.games);
-  const bTier = computeArenaBaseTier(b.rating, b.games);
-  const pick = a.rating > b.rating ? aTier : b.rating > a.rating ? bTier : (a.games >= b.games ? aTier : bTier);
-  return STRICT_MAX_ABS_DIFF_BY_TIER[pick] ?? 1000;
-};
-
-const validateStrictPublicDataCards = async (entities: ArenaEntity[]): Promise<
+const validateStrictPublicDataCards = async (db: AppDrizzleDb, entities: ArenaEntity[]): Promise<
   { ok: true } | { ok: false; reason: 'strict-not-public' | 'strict-not-approved' | 'strict-not-character' | 'strict-card-missing' }
 > => {
   const ids = entities.filter((e) => e.entityType === 'data_card').map((e) => e.entityId).filter(Boolean);
   if (ids.length <= 0) return { ok: true };
   try {
-    const result = await queryFromD1(
-      `SELECT id, type, is_public as isPublic, review_status as reviewStatus, deleted_at as deletedAt
-       FROM data_cards
-       WHERE id IN (${ids.map(() => '?').join(', ')})`,
-      ids
-    );
-    const rows = readRows<{
-      id: string;
-      type: string;
-      isPublic: number | boolean | null;
-      reviewStatus: string | null;
-      deletedAt: string | null;
-    }>(result);
+    const rows = await getDataCardMetaCardsByIds(db, ids);
     const byId = new Map<string, (typeof rows)[number]>();
     rows.forEach((row) => {
       const id = typeof row?.id === 'string' ? row.id.trim() : '';
@@ -120,10 +102,9 @@ const validateStrictPublicDataCards = async (entities: ArenaEntity[]): Promise<
 
     for (const id of ids) {
       const row = byId.get(id);
-      if (!row || row.deletedAt) return { ok: false, reason: 'strict-card-missing' };
+      if (!row) return { ok: false, reason: 'strict-card-missing' };
       if (row.type !== 'character') return { ok: false, reason: 'strict-not-character' };
-      const isPublic = row.isPublic === 1 || row.isPublic === true;
-      if (!isPublic) return { ok: false, reason: 'strict-not-public' };
+      if (!row.isPublic) return { ok: false, reason: 'strict-not-public' };
       if (row.reviewStatus !== 'approved') return { ok: false, reason: 'strict-not-approved' };
     }
 
@@ -144,9 +125,9 @@ export default async function handler(req: NextRequest) {
 
   try {
     const body = (await req.json()) as any;
+    const db = getDrizzleDbFromRuntime();
 
     const battleMode = trimString(body?.battleMode ?? body?.mode);
-    const selectedLevel = readString(body?.selectedLevel);
     const language = trimString(body?.language);
     const scenarioEnabled = readBoolean(body?.scenarioEnabled);
     const scenarioFileName = trimString(body?.scenarioFileName);
@@ -175,19 +156,17 @@ export default async function handler(req: NextRequest) {
     const customProvider = body?.customProvider && typeof body.customProvider === 'object' ? body.customProvider : null;
     const customModelId = trimString(customProvider?.modelId);
 
-    const authHeader = req.headers.get('authorization');
-    const authKey = authHeader?.startsWith('Bearer ') ? authHeader.substring(7).trim() : null;
-    const user = authKey ? await getUserByAuthKey(authKey) : null;
+    const user = await createRequestAuthUserResolver(req).getUser();
 
     const reasons: string[] = [];
     let range: ApiSuccessResponse['range'] = null;
+    let pairUsage: Awaited<ReturnType<typeof getStrictPairUsage>> = null;
     if (!user?.id) reasons.push('need-login');
     if (battleMode !== seasonStrictRules.mode) {
       reasons.push(seasonStrictRules.mode === 'classic' ? 'mode-not-classic' : 'mode-not-season');
     }
     if (!Array.isArray(combatants) || combatants.length !== 2) reasons.push('combatant-count-not-2');
     if (trimString(language) !== 'zh-CN') reasons.push('language-not-zh-cn');
-    if (trimString(selectedLevel)) reasons.push('level-not-default');
 
     const actualStoryGuidance = normalizeStrictStoryGuidance(userGuidance);
     if (seasonStrictRules.storyGuidance) {
@@ -242,25 +221,16 @@ export default async function handler(req: NextRequest) {
       const entities = (combatants as unknown[]).map(parseArenaEntityFromCombatant);
       if (entities.some((e) => e == null)) {
         reasons.push('combatants-unrankable');
+      } else if (!db) {
+        reasons.push('strict-check-failed');
       } else {
         const [a, b] = entities as [ArenaEntity, ArenaEntity];
-        const strictCardOk = await validateStrictPublicDataCards([a, b]);
+        const strictCardOk = await validateStrictPublicDataCards(db, [a, b]);
         if (!strictCardOk.ok) {
           reasons.push(strictCardOk.reason);
         } else {
           try {
-            const ratingResult = await queryFromD1(
-              `SELECT entity_type as entityType, entity_id as entityId, rating, games
-               FROM arena_ratings
-               WHERE queue = 'strict'
-                 AND (
-                   (entity_type = ? AND entity_id = ?)
-                   OR
-                   (entity_type = ? AND entity_id = ?)
-                 )`,
-              [a.entityType, a.entityId, b.entityType, b.entityId]
-            );
-            const ratingRows = readRows<{ entityType: 'data_card' | 'preset'; entityId: string; rating: number; games: number }>(ratingResult);
+            const ratingRows = await getStrictArenaRatingsByEntities(db, a, b);
             const aRow = ratingRows.find((r) => r.entityType === a.entityType && r.entityId === a.entityId);
             const bRow = ratingRows.find((r) => r.entityType === b.entityType && r.entityId === b.entityId);
             const aRating = typeof aRow?.rating === 'number' ? aRow.rating : INITIAL_RATING;
@@ -270,41 +240,22 @@ export default async function handler(req: NextRequest) {
 
             const involvesPreset = a.entityType === 'preset' || b.entityType === 'preset';
             if (!involvesPreset) {
-              const aSnapshot = { rating: aRating, games: aGames };
-              const bSnapshot = { rating: bRating, games: bGames };
-              const shouldCheckRange = shouldEnforceStrictRangeLimit(aSnapshot, bSnapshot);
-              if (shouldCheckRange) {
-                const absDiff = Math.abs(aRating - bRating);
-                const maxAbsDiff = getStrictMaxAbsDiffForRatings(aSnapshot, bSnapshot);
-                range = {
-                  absDiff,
-                  maxAbsDiff,
-                  exceededBy: Math.max(0, absDiff - maxAbsDiff),
-                  aRating,
-                  bRating,
-                };
-                if (absDiff > maxAbsDiff) {
-                  reasons.push('strict-out-of-range');
-                }
+              range = getStrictRangeCheckResult(
+                { rating: aRating, games: aGames },
+                { rating: bRating, games: bGames },
+              );
+              if (range && range.exceededBy > 0) {
+                reasons.push('strict-out-of-range');
               }
             }
 
             if (typeof user?.id === 'number') {
-              const sinceIso = new Date(Date.now() - STRICT_DEDUP_WINDOW_MS).toISOString();
               const pairKey = buildPairKey(a, b);
-              const dedupResult = await queryFromD1(
-                `SELECT 1
-                 FROM arena_rating_events
-                 WHERE queue = 'strict'
-                   AND status = 'applied'
-                   AND user_id = ?
-                   AND pair_key = ?
-                   AND created_at >= ?
-                 LIMIT 1`,
-                [user.id, pairKey, sinceIso]
-              );
-              if (readRows<unknown>(dedupResult).length > 0) {
+              pairUsage = await getStrictPairUsage(user.id, pairKey);
+              if (pairUsage?.recentDeduped) {
                 reasons.push('dedup-user-pair');
+              } else if (pairUsage?.exceeded) {
+                reasons.push('pair-daily-limit');
               }
             }
           } catch (error) {
@@ -331,6 +282,15 @@ export default async function handler(req: NextRequest) {
         limit: STRICT_DAILY_LIMIT,
         exceeded: dailyUsage?.exceeded ?? null,
         sinceIso: dailyUsage?.sinceIso ?? null,
+      },
+      pair: {
+        used: pairUsage?.usedToday ?? null,
+        limit: pairUsage?.limit ?? STRICT_SAME_PAIR_DAILY_LIMIT,
+        exceeded: pairUsage?.exceeded ?? null,
+        recentDeduped: pairUsage?.recentDeduped ?? null,
+        recentAppliedAtIso: pairUsage?.recentAppliedAtIso ?? null,
+        nextEligibleAtIso: pairUsage?.nextEligibleAtIso ?? null,
+        windowMinutes: Math.floor(STRICT_DEDUP_WINDOW_MS / 60000),
       },
     };
 

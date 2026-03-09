@@ -1,6 +1,7 @@
 import type { NextRequest } from 'next/server';
 
-import { getUserByAuthKey, verifyCardOwnership } from '@/lib/d1';
+import { verifyCardOwnership } from '@/lib/database/data-cards';
+import { requireAuthUser } from '@/lib/auth/server';
 import { replaceUserTagsForDataCard } from '@/lib/database/tags';
 
 export const config = {
@@ -20,22 +21,9 @@ export default async function handler(req: NextRequest) {
     });
   }
 
-  const authHeader = req.headers.get('authorization') ?? '';
-  const authKey = authHeader.startsWith('Bearer ') ? authHeader.slice('Bearer '.length).trim() : '';
-  if (!authKey) {
-    return new Response(JSON.stringify({ error: '未授权' }), {
-      status: 401,
-      headers: { 'Content-Type': 'application/json' },
-    });
-  }
-
-  const user = await getUserByAuthKey(authKey);
-  if (!user) {
-    return new Response(JSON.stringify({ error: '未授权' }), {
-      status: 401,
-      headers: { 'Content-Type': 'application/json' },
-    });
-  }
+  const auth = await requireAuthUser(req);
+  if ('response' in auth) return auth.response;
+  const user = auth.user;
 
   let body: PutBody;
   try {

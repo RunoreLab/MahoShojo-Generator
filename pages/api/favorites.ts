@@ -1,34 +1,23 @@
 import {
-  getUserByAuthKey,
   addFavorite,
   removeFavorite,
   getUserFavorites,
   getUserFavoriteIds
-} from '@/lib/d1';
+} from '@/lib/database/favorites';
+import { requireAuthUser } from '@/lib/auth/server';
 
 export const runtime = 'edge';
 
-interface AuthenticatedUser {
-  id: number;
-}
-
-async function getUserFromAuth(req: Request): Promise<AuthenticatedUser | null> {
-  const authHeader = req.headers.get('authorization');
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return null;
-  }
-
-  const authKey = authHeader.substring(7);
-  const user = await getUserByAuthKey(authKey);
-  return user ?? null;
-}
-
 export default async function handler(req: Request): Promise<Response> {
-  const user = await getUserFromAuth(req);
-  if (!user) {
-    return new Response(JSON.stringify({ success: false, error: '未授权' }), {
-      status: 401,
-      headers: { 'Content-Type': 'application/json' }
+  const auth = await requireAuthUser(req);
+  if ('response' in auth) {
+    const authPayload = await auth.response.clone().json().catch(() => null);
+    const authError = typeof (authPayload as { error?: unknown } | null)?.error === 'string'
+      ? ((authPayload as { error?: string }).error ?? '未授权')
+      : '未授权';
+    return new Response(JSON.stringify({ success: false, error: authError }), {
+      status: auth.response.status,
+      headers: { 'Content-Type': 'application/json' },
     });
   }
 
@@ -39,14 +28,14 @@ export default async function handler(req: Request): Promise<Response> {
       const idsOnly = url.searchParams.get('idsOnly') === '1';
 
       if (idsOnly) {
-        const favorites = await getUserFavoriteIds(user.id, type ?? undefined);
+        const favorites = await getUserFavoriteIds(auth.user.id, type ?? undefined);
         return new Response(JSON.stringify({ success: true, favorites }), {
           status: 200,
           headers: { 'Content-Type': 'application/json' }
         });
       }
 
-      const favorites = await getUserFavorites(user.id, type ?? undefined);
+      const favorites = await getUserFavorites(auth.user.id, type ?? undefined);
       return new Response(JSON.stringify({ success: true, favorites }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' }
@@ -62,7 +51,7 @@ export default async function handler(req: Request): Promise<Response> {
         });
       }
 
-      const result = await addFavorite(user.id, cardId);
+      const result = await addFavorite(auth.user.id, cardId);
 
       if (result.notFound) {
         return new Response(JSON.stringify({ success: false, error: '卡片不存在或不可收藏' }), {
@@ -91,7 +80,7 @@ export default async function handler(req: Request): Promise<Response> {
         });
       }
 
-      const result = await removeFavorite(user.id, cardId);
+      const result = await removeFavorite(auth.user.id, cardId);
 
       if (result.notFound) {
         return new Response(JSON.stringify({ success: false, error: '收藏不存在' }), {

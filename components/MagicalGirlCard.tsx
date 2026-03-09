@@ -1,12 +1,13 @@
 // components/MagicalGirlCard.tsx
 import React, { useRef, useState } from 'react';
-import { snapdom } from '@zumer/snapdom';
 import { ArenaHistory, ArenaHistoryEntry, CharacterCurrentState } from '@/types/arena';
 import { CurrentStatePanel } from '@/components/CurrentStatePanel';
 import { MarkdownBlock } from '@/components/MarkdownBlock';
-import { getSnapdomProxyUrl } from '@/lib/client/snapdomCapture';
+import { capturePngBlob } from '@/lib/client/snapdomCapture';
+import { createBlobUrl, downloadBlob } from '@/lib/client/blobUrl';
 import { GeneratedByUserBadge } from '@/components/shared/GeneratedByUserBadge';
 import { InlineField } from '@/components/shared/InlineField';
+import type { CharacterCardPortraitAsset } from '@/types/visual-asset';
 
 interface MagicalGirlCardProps {
   magicalGirl: {
@@ -53,6 +54,7 @@ interface MagicalGirlCardProps {
   onSaveImage?: (imageUrl: string) => void;
   imageSaveMode?: 'auto' | 'modal' | 'download';
   saveButtonLabel?: string;
+  portraitAsset?: CharacterCardPortraitAsset | null;
 }
 
 /**
@@ -167,10 +169,17 @@ const MagicalGirlCard: React.FC<MagicalGirlCardProps> = ({
   gradientStyle,
   onSaveImage,
   imageSaveMode = 'auto',
-  saveButtonLabel
+  saveButtonLabel,
+  portraitAsset = null,
 }) => {
   const resultRef = useRef<HTMLDivElement>(null);
   const [isHistoryVisible, setIsHistoryVisible] = useState(false);
+  const [isSavingImage, setIsSavingImage] = useState(false);
+  const portraitImageUrl = typeof portraitAsset?.imageUrl === 'string' ? portraitAsset.imageUrl.trim() : '';
+  const uploadedPortraitNote =
+    portraitAsset?.source === 'uploaded'
+      ? (typeof portraitAsset.note === 'string' && portraitAsset.note.trim() ? portraitAsset.note.trim() : '用户自行上传')
+      : '';
 
   /**
    * 对卡片内容进行截图，并根据 imageSaveMode 选择保存策略。
@@ -180,32 +189,31 @@ const MagicalGirlCard: React.FC<MagicalGirlCardProps> = ({
    */
   const handleSaveImage = async () => {
     if (!resultRef.current) return;
+    if (isSavingImage) return;
 
+    const saveButton = resultRef.current.querySelector('.save-button') as HTMLElement;
+    const logoPlaceholder = resultRef.current.querySelector('.logo-placeholder') as HTMLElement;
     try {
-      // 截图前隐藏按钮和显示Logo
-      const saveButton = resultRef.current.querySelector('.save-button') as HTMLElement;
-      const logoPlaceholder = resultRef.current.querySelector('.logo-placeholder') as HTMLElement;
-
+      setIsSavingImage(true);
       if (saveButton) saveButton.style.display = 'none';
       if (logoPlaceholder) logoPlaceholder.style.display = 'flex';
 
-      const result = await snapdom(resultRef.current, {
+      const blob = await capturePngBlob(resultRef.current, {
         scale: 1,
-        useProxy: getSnapdomProxyUrl(),
+        dprMax: 2,
+        fast: false,
+        exclude: ['audio', 'video'],
+        excludeMode: 'remove',
       });
-
-      // 截图后恢复按钮和隐藏Logo
-      if (saveButton) saveButton.style.display = 'block';
-      if (logoPlaceholder) logoPlaceholder.style.display = 'none';
-
-      const imgElement = await result.toPng();
-      const imageUrl = imgElement.src;
 
       const resolvedMode: 'modal' | 'download' = imageSaveMode === 'modal' || imageSaveMode === 'download'
         ? imageSaveMode
         : (/Mobi/i.test(window.navigator.userAgent) ? 'modal' : 'download');
+      const sanitizedTitle = magicalGirl.codename.replace(/[^a-z0-9\u4e00-\u9fa5]/gi, '_');
+      const filename = `魔法少女_${sanitizedTitle}.png`;
 
       if (resolvedMode === 'modal') {
+        const imageUrl = createBlobUrl(blob);
         if (onSaveImage) {
           onSaveImage(imageUrl);
         } else {
@@ -215,23 +223,15 @@ const MagicalGirlCard: React.FC<MagicalGirlCardProps> = ({
           }
         }
       } else {
-        const downloadLink = document.createElement('a');
-        downloadLink.href = imageUrl;
-        const sanitizedTitle = magicalGirl.codename.replace(/[^a-z0-9\u4e00-\u9fa5]/gi, '_');
-        downloadLink.download = `魔法少女_${sanitizedTitle}.png`;
-        document.body.appendChild(downloadLink);
-        downloadLink.click();
-        document.body.removeChild(downloadLink);
+        downloadBlob(blob, filename);
       }
     } catch (err) {
       alert('生成图片失败，请重试');
       console.error("Image generation failed:", err);
-      // 确保在出错时也恢复按钮
-      const saveButton = resultRef.current?.querySelector('.save-button') as HTMLElement;
-      const logoPlaceholder = resultRef.current?.querySelector('.logo-placeholder') as HTMLElement;
-
+    } finally {
       if (saveButton) saveButton.style.display = 'block';
       if (logoPlaceholder) logoPlaceholder.style.display = 'none';
+      setIsSavingImage(false);
     }
   };
 
@@ -245,6 +245,26 @@ const MagicalGirlCard: React.FC<MagicalGirlCardProps> = ({
         <div className="flex justify-center items-center" style={{ marginBottom: '1rem', background: 'transparent' }}>
           <img src="/questionnaire-title.svg" width={300} height={70} alt="Logo" style={{ display: 'block', background: 'transparent' }} />
         </div>
+
+        {portraitImageUrl && (
+          <div className="result-item" style={{ borderLeft: '4px solid #f9a8d4', background: 'rgba(0,0,0,0.2)' }}>
+            <div className="result-label">🖼️ 角色立绘</div>
+            <div className="result-value">
+              <img
+                src={portraitImageUrl}
+                alt={`${magicalGirl.codename || '角色'} 立绘`}
+                className="w-full max-h-[560px] object-contain rounded-lg border border-white/15 bg-black/15"
+                loading="eager"
+                decoding="async"
+              />
+              {uploadedPortraitNote && (
+                <p className="mt-2 text-[11px] text-gray-300 text-right">
+                  注：{uploadedPortraitNote}
+                </p>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* 基本信息 */}
         <div className="result-item">
@@ -410,8 +430,8 @@ const MagicalGirlCard: React.FC<MagicalGirlCardProps> = ({
           </div>
         )}
 
-        <button onClick={handleSaveImage} className="save-button">
-          {saveButtonLabel ?? '📱 保存为图片'}
+        <button onClick={handleSaveImage} className="save-button" disabled={isSavingImage}>
+          {isSavingImage ? '生成中...' : (saveButtonLabel ?? '📱 保存为图片')}
         </button>
 
         <div

@@ -196,13 +196,19 @@ async function handler(req: NextRequest): Promise<Response> {
       });
     }
 
-    const safetyResponse = await enforceTextSafety({
-      text: normalizedAnswers.map((item) => item.answer).join(' '),
-      log,
-      enableAiSafetyCheck: false,
-      sensitiveWordReason: '在问卷中使用了危险符文',
-    });
-    if (safetyResponse) return safetyResponse;
+    for (const answerItem of normalizedAnswers) {
+      const safetyResponse = await enforceTextSafety({
+        text: answerItem.answer,
+        log,
+        logMeta: {
+          questionId: answerItem.questionId,
+          questionnaireId: answerItem.questionnaireId,
+        },
+        enableAiSafetyCheck: false,
+        sensitiveWordReason: '在问卷中使用了危险符文',
+      });
+      if (safetyResponse) return safetyResponse;
+    }
 
     let customProviderOverride: AIProvider | null = null;
     let customProviderId: string | null = null;

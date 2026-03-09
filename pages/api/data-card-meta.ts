@@ -1,11 +1,18 @@
 import type { NextRequest } from 'next/server';
 
-import { getUserByAuthKey, queryFromD1 } from '@/lib/d1';
-import { computeTechIndex } from '@/lib/metrics/techIndex';
-import { verifySignature } from '@/lib/signature';
+import { getAuthUser } from '@/lib/auth/server';
+import { applyQueenTier, computeArenaBaseTier } from '@/lib/arena/tier';
+import { getDrizzleDbFromRuntime } from '@/lib/db/drizzle';
+import {
+  getArenaRatingsByDataCardId,
+  getDataCardMetaCardById,
+  getDataCardMetricsByDataCardId,
+  queryArenaPublicQueenEntityByQueue,
+} from '@/lib/db/repositories/data-card-meta';
 import { upsertDataCardMetrics } from '@/lib/database/data-card-metrics';
 import { getTagsForDataCard, type TagScope } from '@/lib/database/tags';
-import { applyQueenTier, computeArenaBaseTier, queryArenaPublicQueenEntity } from '@/lib/arena/tier';
+import { computeTechIndex } from '@/lib/metrics/techIndex';
+import { verifySignature } from '@/lib/signature';
 
 export const config = {
   runtime: 'edge',
@@ -44,79 +51,42 @@ type ApiMetrics = {
   isStale: boolean;
 };
 
-const readSingleRow = <T,>(result: any): T | null => {
-  const row = result?.result?.[0]?.results?.[0];
-  return row ? (row as T) : null;
-};
+const json = (payload: unknown, status = 200): Response =>
+  new Response(JSON.stringify(payload), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  });
 
 export default async function handler(req: NextRequest) {
   if (req.method !== 'GET') {
-    return new Response(JSON.stringify({ error: 'Method Not Allowed' }), {
-      status: 405,
-      headers: { 'Content-Type': 'application/json' },
-    });
+    return json({ error: 'Method Not Allowed' }, 405);
+  }
+
+  const db = getDrizzleDbFromRuntime();
+  if (!db) {
+    return json({ error: '数据库绑定不可用，请检查 Cloudflare D1 配置' }, 503);
   }
 
   const url = new URL(req.url);
   const dataCardId = (url.searchParams.get('dataCardId') ?? '').trim();
   if (!dataCardId) {
-    return new Response(JSON.stringify({ error: '缺少 dataCardId' }), {
-      status: 400,
-      headers: { 'Content-Type': 'application/json' },
-    });
+    return json({ error: '缺少 dataCardId' }, 400);
   }
 
   try {
-    const cardRow = readSingleRow<{
-      id: string;
-      user_id: number;
-      type: 'character' | 'scenario' | 'history' | 'questionnaire';
-      is_public: number;
-      review_status: 'pending' | 'approved' | 'rejected';
-      updated_at: string;
-      data: string;
-    }>(
-      await queryFromD1(
-        `SELECT id, user_id, type, is_public, review_status, updated_at, data
-         FROM data_cards
-         WHERE id = ?
-           AND deleted_at IS NULL`,
-        [dataCardId],
-      ),
-    );
-
+    const cardRow = await getDataCardMetaCardById(db, dataCardId);
     if (!cardRow) {
-      return new Response(JSON.stringify({ error: '数据卡不存在' }), {
-        status: 404,
-        headers: { 'Content-Type': 'application/json' },
-      });
+      return json({ error: '数据卡不存在' }, 404);
     }
 
-    const isPublicReadable = cardRow.is_public === 1 && cardRow.review_status === 'approved';
+    const isPublicReadable = cardRow.isPublic && cardRow.reviewStatus === 'approved';
     if (!isPublicReadable) {
-      const authHeader = req.headers.get('authorization') ?? '';
-      const authKey = authHeader.startsWith('Bearer ') ? authHeader.slice('Bearer '.length).trim() : '';
-      if (!authKey) {
-        return new Response(JSON.stringify({ error: '未授权' }), {
-          status: 401,
-          headers: { 'Content-Type': 'application/json' },
-        });
+      const auth = await getAuthUser(req);
+      if (!auth) {
+        return json({ error: '未授权' }, 401);
       }
-
-      const user = await getUserByAuthKey(authKey);
-      if (!user) {
-        return new Response(JSON.stringify({ error: '未授权' }), {
-          status: 401,
-          headers: { 'Content-Type': 'application/json' },
-        });
-      }
-
-      const isAdmin = Number((user as any).is_admin) === 1;
-      if (!isAdmin && user.id !== cardRow.user_id) {
-        return new Response(JSON.stringify({ error: '无权访问该数据卡' }), {
-          status: 403,
-          headers: { 'Content-Type': 'application/json' },
-        });
+      if (auth.user.id !== cardRow.userId) {
+        return json({ error: '无权访问该数据卡' }, 403);
       }
     }
 
@@ -137,27 +107,16 @@ export default async function handler(req: NextRequest) {
 
     let metrics: ApiMetrics | null = null;
     try {
-      const metricsRow = readSingleRow<{
-        tech_score: number;
-        tech_level: string;
-        is_native: number | null;
-        data_card_updated_at: string;
-      }>(
-        await queryFromD1(
-          `SELECT tech_score, tech_level, is_native, data_card_updated_at
-           FROM data_card_metrics
-           WHERE data_card_id = ?`,
-          [dataCardId],
-        ),
-      );
+      const metricsRow = await getDataCardMetricsByDataCardId(db, dataCardId);
+      const cardUpdatedAt = cardRow.updatedAt ?? new Date().toISOString();
+      const isStale = !metricsRow || metricsRow.dataCardUpdatedAt !== cardUpdatedAt;
 
-      const isStale = !metricsRow || metricsRow.data_card_updated_at !== cardRow.updated_at;
       if (!isStale && metricsRow) {
         metrics = {
-          techScore: metricsRow.tech_score,
-          techLevel: metricsRow.tech_level,
-          isNative: metricsRow.is_native === 1 ? true : metricsRow.is_native === 0 ? false : null,
-          dataCardUpdatedAt: metricsRow.data_card_updated_at,
+          techScore: metricsRow.techScore,
+          techLevel: metricsRow.techLevel,
+          isNative: metricsRow.isNative,
+          dataCardUpdatedAt: metricsRow.dataCardUpdatedAt,
           isStale: false,
         };
       } else {
@@ -177,7 +136,7 @@ export default async function handler(req: NextRequest) {
             techScore: tech.techScore,
             techLevel: tech.techLevel,
             isNative,
-            dataCardUpdatedAt: cardRow.updated_at,
+            dataCardUpdatedAt: cardUpdatedAt,
             isStale: true,
           };
 
@@ -193,7 +152,7 @@ export default async function handler(req: NextRequest) {
             techScore: tech.techScore,
             techLevel: tech.techLevel,
             isNative,
-            dataCardUpdatedAt: cardRow.updated_at,
+            dataCardUpdatedAt: cardUpdatedAt,
             detailsJson,
           });
 
@@ -212,12 +171,13 @@ export default async function handler(req: NextRequest) {
 
     const ratings: { strict: ApiRating | null; free: ApiRating | null } = { strict: null, free: null };
     try {
-      const queenByQueue = new Map<Queue, Promise<Awaited<ReturnType<typeof queryArenaPublicQueenEntity>> | null>>();
+      const queenByQueue = new Map<Queue, Promise<Awaited<ReturnType<typeof queryArenaPublicQueenEntityByQueue>>>>();
       const getQueen = (queue: Queue) => {
         const normalized: Queue = queue === 'free' ? 'free' : 'strict';
         const cached = queenByQueue.get(normalized);
         if (cached) return cached;
-        const promise = queryArenaPublicQueenEntity(queryFromD1, normalized).catch((error) => {
+
+        const promise = queryArenaPublicQueenEntityByQueue(db, normalized).catch((error) => {
           console.warn('读取女王段位失败（降级为无女王）:', error);
           return null;
         });
@@ -225,43 +185,7 @@ export default async function handler(req: NextRequest) {
         return promise;
       };
 
-      type RatingRow = {
-        queue: Queue;
-        rating: number;
-        games: number;
-        wins: number;
-        losses: number;
-        draws: number;
-        updated_at: string;
-        lastDelta?: number | null;
-        lastAppliedAt?: string | null;
-      };
-
-      const readRatingRows = async (): Promise<RatingRow[]> => {
-        try {
-          const res = (await queryFromD1(
-            `SELECT queue, rating, games, wins, losses, draws, updated_at, last_delta as lastDelta, last_applied_at as lastAppliedAt
-             FROM arena_ratings
-             WHERE entity_type = 'data_card'
-               AND entity_id = ?
-               AND queue IN ('strict', 'free')`,
-            [dataCardId],
-          )) as any;
-          return (res?.result?.[0]?.results ?? []) as RatingRow[];
-        } catch {
-          const res = (await queryFromD1(
-            `SELECT queue, rating, games, wins, losses, draws, updated_at
-             FROM arena_ratings
-             WHERE entity_type = 'data_card'
-               AND entity_id = ?
-               AND queue IN ('strict', 'free')`,
-            [dataCardId],
-          )) as any;
-          return (res?.result?.[0]?.results ?? []) as RatingRow[];
-        }
-      };
-
-      const rows = await readRatingRows();
+      const rows = await getArenaRatingsByDataCardId(db, dataCardId, ['strict', 'free']);
       for (const row of rows) {
         const queue: Queue = row.queue === 'free' ? 'free' : 'strict';
         const rating = typeof row.rating === 'number' ? row.rating : 0;
@@ -273,6 +197,7 @@ export default async function handler(req: NextRequest) {
         const lastDelta = cardRow.type === 'character' && typeof row.lastDelta === 'number' ? row.lastDelta : null;
         const lastAppliedAt =
           cardRow.type === 'character' && typeof row.lastAppliedAt === 'string' ? row.lastAppliedAt : null;
+
         const item: ApiRating = {
           queue,
           rating,
@@ -286,6 +211,7 @@ export default async function handler(req: NextRequest) {
           publicRank: null,
           publicTotal: null,
         };
+
         if (item.queue === 'strict') ratings.strict = item;
         else ratings.free = item;
       }
@@ -293,24 +219,15 @@ export default async function handler(req: NextRequest) {
       console.warn('读取排位失败（降级为 null）:', error);
     }
 
-    return new Response(
-      JSON.stringify({
-        success: true,
-        dataCardId,
-        tags,
-        metrics,
-        ratings,
-      }),
-      {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      },
-    );
+    return json({
+      success: true,
+      dataCardId,
+      tags,
+      metrics,
+      ratings,
+    });
   } catch (error) {
     console.error('读取 data-card-meta 失败:', error);
-    return new Response(JSON.stringify({ success: false, error: '无法加载数据卡指标' }), {
-      status: 500,
-      headers: { 'Content-Type': 'application/json' },
-    });
+    return json({ success: false, error: '无法加载数据卡指标' }, 500);
   }
 }

@@ -2,7 +2,10 @@
 
 import { loadEnvConfig } from '@next/env';
 
-import { queryFromD1 } from '@/lib/d1';
+import {
+  listArenaRatedPublicCharacterCards,
+  listDataCardPayloadRowsByIds,
+} from '@/lib/database/data-card-tech-index';
 import { computeTechIndex } from '@/lib/metrics/techIndex';
 
 type EligibleRow = {
@@ -14,15 +17,6 @@ type EligibleRow = {
 type CardRow = {
   id: string;
   data: string;
-};
-
-type D1RowsResult<T> = {
-  result?: Array<{ results?: T[] }>;
-};
-
-const readRows = <T,>(result: unknown): T[] => {
-  const rows = (result as D1RowsResult<T>)?.result?.[0]?.results;
-  return Array.isArray(rows) ? rows : [];
 };
 
 const rankValues = (values: number[]) => {
@@ -140,34 +134,10 @@ async function main() {
     throw new Error('缺少 Cloudflare D1 配置：CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID / D1_DATABASE_ID');
   }
 
-  const strictPublicSinceClause = `AND (
-    dc.public_since IS NULL
-    OR dc.public_since <= datetime('now', '-3 days')
-    OR (
-      dc.created_at IS NOT NULL
-      AND dc.public_since IS NOT NULL
-      AND ABS(strftime('%s', dc.public_since) - strftime('%s', dc.created_at)) <= 600
-    )
-  )`;
-
-  const eligibleSql = `
-    SELECT ar.entity_id as dataCardId, ar.rating as rating, ar.games as games
-    FROM arena_ratings ar
-    LEFT JOIN data_cards dc
-      ON ar.entity_type = 'data_card' AND dc.id = ar.entity_id
-    WHERE ar.queue = 'strict'
-      AND ar.entity_type = 'data_card'
-      AND dc.id IS NOT NULL
-      AND dc.type = 'character'
-      AND dc.is_public = 1
-      AND dc.review_status = 'approved'
-      AND dc.deleted_at IS NULL
-      ${strictPublicSinceClause}
-      AND ar.games >= ?
-    ORDER BY ar.rating DESC, ar.games DESC, ar.updated_at DESC, ar.entity_id ASC
-  `;
-
-  const eligibleRows = readRows<EligibleRow>(await queryFromD1(eligibleSql, [opts.minGames]));
+  const eligibleRows = (await listArenaRatedPublicCharacterCards({
+    queue: 'strict',
+    minGames: opts.minGames,
+  })) as EligibleRow[];
   const ids = eligibleRows
     .map((row) => (typeof row.dataCardId === 'string' ? row.dataCardId.trim() : ''))
     .filter(Boolean);
@@ -176,14 +146,7 @@ async function main() {
   const chunkSize = 80;
   for (let i = 0; i < ids.length; i += chunkSize) {
     const batchIds = ids.slice(i, i + chunkSize);
-    const placeholders = batchIds.map(() => '?').join(', ');
-    const cardsSql = `
-      SELECT id, data
-      FROM data_cards
-      WHERE id IN (${placeholders})
-        AND deleted_at IS NULL
-    `;
-    const cardRows = readRows<CardRow>(await queryFromD1(cardsSql, batchIds));
+    const cardRows = (await listDataCardPayloadRowsByIds(batchIds)) as CardRow[];
     for (const row of cardRows) {
       if (typeof row.id !== 'string') continue;
       if (typeof row.data !== 'string') continue;

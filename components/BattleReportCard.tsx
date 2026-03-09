@@ -13,6 +13,7 @@ import {
   isAllowedExternalMediaUrl,
   isLikelyAudioUrl,
   isLikelyVideoUrl,
+  resolveExternalMediaUrl,
 } from '@/lib/markdown/externalMedia';
 import { capturePngBlob } from '@/lib/client/snapdomCapture';
 import { createBlobUrl, downloadBlob } from '@/lib/client/blobUrl';
@@ -69,15 +70,24 @@ export interface NewsReport {
   adjudicationResults?: AdjudicationResult[];
 }
 
+export type BattleReportIllustrationSource = 'generated' | 'uploaded';
+
+export interface BattleReportIllustrationAsset {
+  imageUrl: string;
+  source: BattleReportIllustrationSource;
+  note?: string;
+}
+
 interface BattleReportCardProps {
   report: NewsReport;
   onSaveImage?: (imageUrl: string) => void;
   // 战斗模式，设为可选以兼容旧功能
   mode?: 'classic' | 'kizuna' | 'daily' | 'scenario';
   liveBody?: string;
+  illustrationAsset?: BattleReportIllustrationAsset | null;
 }
 
-const BattleReportCard: React.FC<BattleReportCardProps> = ({ report, onSaveImage, mode, liveBody }) => {
+const BattleReportCard: React.FC<BattleReportCardProps> = ({ report, onSaveImage, mode, liveBody, illustrationAsset }) => {
   const cardRef = useRef<HTMLDivElement>(null);
   const [isSavingImage, setIsSavingImage] = useState(false);
 
@@ -89,6 +99,11 @@ const BattleReportCard: React.FC<BattleReportCardProps> = ({ report, onSaveImage
   const officialWinner = (report.officialReport?.winner ?? '').trim();
   const officialConclusion = (report.officialReport?.conclusion ?? '').trimEnd();
   const reportReasoning = report.aiReasoning ?? null;
+  const illustrationImageUrl = typeof illustrationAsset?.imageUrl === 'string' ? illustrationAsset.imageUrl.trim() : '';
+  const uploadedIllustrationNote =
+    illustrationAsset?.source === 'uploaded'
+      ? (typeof illustrationAsset.note === 'string' && illustrationAsset.note.trim() ? illustrationAsset.note.trim() : '用户自行上传')
+      : '';
 
   const aiModel = typeof report.aiModel === 'string' ? report.aiModel.trim() : '';
   const aiUsage = report.aiUsage;
@@ -262,6 +277,8 @@ ${adjudicationMarkdown}
       const normalizedHref = rawHref.startsWith('//') ? `https:${rawHref}` : rawHref;
       const isAudioAllowed = isAudioLink && isAllowedExternalMediaUrl(rawHref, 'audio');
       const isVideoAllowed = isVideoLink && isAllowedExternalMediaUrl(rawHref, 'video');
+      const resolvedAudioHref = isAudioLink ? resolveExternalMediaUrl(rawHref, 'audio') : normalizedHref;
+      const resolvedVideoHref = isVideoLink ? resolveExternalMediaUrl(rawHref, 'video') : normalizedHref;
       const linkText =
         typeof children === 'string'
           ? children
@@ -280,9 +297,9 @@ ${adjudicationMarkdown}
 
         return (
           <span className="inline-flex max-w-full flex-col gap-1 align-middle">
-            <audio controls preload="none" src={normalizedHref} className="h-8 max-w-full" />
+            <audio controls preload="none" src={resolvedAudioHref} className="h-8 max-w-full" />
             <a
-              href={normalizedHref}
+              href={resolvedAudioHref}
               target="_blank"
               rel="noopener noreferrer"
               className="text-[11px] underline underline-offset-2 text-blue-200"
@@ -306,9 +323,9 @@ ${adjudicationMarkdown}
 
         return (
           <span className="inline-flex max-w-full flex-col gap-1 align-middle">
-            <video controls preload="metadata" playsInline src={normalizedHref} className="my-2 max-w-full rounded-md border border-white/15" />
+            <video controls preload="metadata" playsInline src={resolvedVideoHref} className="my-2 max-w-full rounded-md border border-white/15" />
             <a
-              href={normalizedHref}
+              href={resolvedVideoHref}
               target="_blank"
               rel="noopener noreferrer"
               className="text-[11px] underline underline-offset-2 text-blue-200"
@@ -394,7 +411,7 @@ ${adjudicationMarkdown}
       const isVideoLink = Boolean(rawSrc && isLikelyVideoUrl(rawSrc));
       if (isAudioLink) {
         const isAudioAllowed = isAllowedExternalMediaUrl(rawSrc, 'audio');
-        const normalizedSrc = rawSrc.startsWith('//') ? `https:${rawSrc}` : rawSrc;
+        const normalizedSrc = resolveExternalMediaUrl(rawSrc, 'audio');
         const audioLabel = typeof alt === 'string' && alt.trim() ? alt.trim() : '播放音频';
 
         if (!isAudioAllowed) {
@@ -422,7 +439,7 @@ ${adjudicationMarkdown}
 
       if (isVideoLink) {
         const isVideoAllowed = isAllowedExternalMediaUrl(rawSrc, 'video');
-        const normalizedSrc = rawSrc.startsWith('//') ? `https:${rawSrc}` : rawSrc;
+        const normalizedSrc = resolveExternalMediaUrl(rawSrc, 'video');
         const videoLabel = typeof alt === 'string' && alt.trim() ? alt.trim() : '播放视频';
 
         if (!isVideoAllowed) {
@@ -449,6 +466,7 @@ ${adjudicationMarkdown}
       }
 
       const isAllowed = isAllowedExternalMediaUrl(rawSrc, 'image');
+      const normalizedSrc = resolveExternalMediaUrl(rawSrc, 'image');
       if (!isAllowed) {
         return (
           <code className="font-mono text-xs bg-black/30 px-1 py-0.5 rounded text-pink-200 break-all">
@@ -459,7 +477,7 @@ ${adjudicationMarkdown}
 
       return (
         <img
-          src={src}
+          src={normalizedSrc}
           alt={typeof alt === 'string' ? alt : ''}
           title={typeof title === 'string' ? title : undefined}
           className="my-2 max-w-full rounded-md border border-white/15"
@@ -528,6 +546,26 @@ ${adjudicationMarkdown}
             compact
             defaultExpanded={false}
           />
+        )}
+
+        {illustrationImageUrl && (
+          <div className="result-item" style={{ borderLeft: '4px solid #f9a8d4', background: 'rgba(0,0,0,0.2)' }}>
+            <div className="result-label">🎨 战报插图</div>
+            <div className="result-value">
+              <img
+                src={illustrationImageUrl}
+                alt={`${headline} 插图`}
+                className="w-full max-h-[560px] object-contain rounded-lg border border-white/15 bg-black/15"
+                loading="eager"
+                decoding="async"
+              />
+              {uploadedIllustrationNote && (
+                <p className="mt-2 text-[11px] text-gray-300 text-right">
+                  注：{uploadedIllustrationNote}
+                </p>
+              )}
+            </div>
+          </div>
         )}
 
         <div className="result-item">

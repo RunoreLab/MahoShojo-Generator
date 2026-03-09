@@ -127,7 +127,6 @@ export interface PvpRoomRules {
   generationMode: PvpGenerationMode;
 
   /** 故事生成设置（与竞技场对齐；默认不指定/留空）。 */
-  selectedLevel: string;
   userGuidance: string;
   storyLength: PvpStoryLengthOption;
   /**

@@ -4,7 +4,7 @@ import {
   getPvpRoomById,
   getPvpRoomChatMessages,
   getPvpRoomMembers,
-} from '@/lib/d1';
+} from '@/lib/database/pvp';
 import { parsePvpRoomInternalState } from '@/lib/pvp/bot/room';
 import { validateAndBuildPvpChatMessage, normalizePvpChatSendBody } from '@/lib/pvp/chat';
 import { getRoomIdFromRequestUrl } from '@/lib/pvp/route';

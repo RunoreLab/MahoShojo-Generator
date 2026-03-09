@@ -6,6 +6,8 @@ import { config } from '@/lib/config';
 import { inferTemplate } from '@/lib/data-card-converter';
 import { isHotCard } from '@/lib/constants';
 import { authStorage } from '@/lib/auth';
+import { normalizePublicVisibilityValue } from '@/lib/data-card-read-mappers';
+import { getDataCardStatus } from '@/lib/data-card-status';
 import { ChevronDown, Filter } from 'lucide-react';
 
 interface DataCardsModalProps {
@@ -311,12 +313,10 @@ export default function DataCardsModal({
 
       // 公开状态筛选
       if (activeFilters.visibility) {
-        const isPublic = card.is_public === 1;
-        const isBanned = card.is_public === -1;
-        const isPrivate = !isPublic && !isBanned;
-        if (activeFilters.visibility === 'public' && !isPublic) return false;
-        if (activeFilters.visibility === 'private' && !isPrivate) return false;
-        if (activeFilters.visibility === 'banned' && !isBanned) return false;
+        const status = getDataCardStatus(card).status;
+        if (activeFilters.visibility === 'public' && status !== 'public') return false;
+        if (activeFilters.visibility === 'private' && status !== 'private') return false;
+        if (activeFilters.visibility === 'banned' && status !== 'banned') return false;
       }
 
       // 角色类型筛选（有值时自动限定为 character）
@@ -679,7 +679,7 @@ export default function DataCardsModal({
                           description={card.description}
                           type={card.type}
                           roleType={roleType}
-                          isPublic={card.is_public}
+                          isPublic={normalizePublicVisibilityValue(card)}
                           reviewStatus={card.review_status}
                           usageCount={card.usage_count}
                           likeCount={card.like_count}
@@ -762,7 +762,7 @@ export default function DataCardsModal({
             description: selectedCard.description,
             type: selectedCard.type,
             data: selectedCard.data,
-            isPublic: selectedCard.is_public,
+            isPublic: getDataCardStatus(selectedCard).status === 'public',
             usageCount: selectedCard.usage_count,
             likeCount: selectedCard.like_count,
             favoriteCount: selectedCard.favorite_count,

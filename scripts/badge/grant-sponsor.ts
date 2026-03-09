@@ -1,6 +1,9 @@
 #!/usr/bin/env bun
 
-import { queryFromD1 } from '@/lib/database/core';
+import {
+  listSponsorExcellentCandidates,
+  listSponsorSlotCandidates,
+} from '@/lib/database/badges-granting';
 import { grantBadgeToUser, userHasBadge } from '@/lib/database/badges';
 import { getReporterTierByBadgeId } from './reporter-rules';
 
@@ -11,15 +14,6 @@ const EXCELLENT_REPORTER_TIER = (() => {
   if (!tier) throw new Error('缺少优秀记者档位配置：excellent_reporter');
   return tier;
 })();
-
-const EXCELLENT_REPORTER_BADGE_EXISTS = `
-  EXISTS (
-    SELECT 1
-    FROM user_badges ub
-    WHERE ub.user_id = u.id
-      AND ub.badge_id = '${EXCELLENT_REPORTER_TIER.badgeId}'
-  )
-`;
 
 interface SlotCandidate {
   user_id: number;
@@ -55,64 +49,31 @@ function formatSources(sources: CandidateSource[]): string {
 }
 
 async function findUsersWithSlot(): Promise<SlotCandidate[]> {
-  const query = `
-    SELECT u.id AS user_id, u.username, u.slot_count
-    FROM users u
-    WHERE u.slot_count > 0
-      AND NOT (
-        u.slot_count <= ${EXCELLENT_REPORTER_TIER.slotIncrement} AND ${EXCELLENT_REPORTER_BADGE_EXISTS}
-      )
-  `;
-  const queryResult = await queryFromD1(query, []);
-  const result = queryResult as {
-    success?: boolean;
-    result?: Array<{ results?: Array<{ user_id?: number; username?: string; slot_count?: number | null }> }>;
-  };
+  const rows = await listSponsorSlotCandidates({
+    excellentBadgeId: EXCELLENT_REPORTER_TIER.badgeId,
+    maxSlotCountWithExcellent: EXCELLENT_REPORTER_TIER.slotIncrement,
+  });
 
-  if (!result.success || !result.result || !result.result[0]?.results) {
-    return [];
-  }
-
-  return result.result[0].results.map(row => ({
-    user_id: row.user_id ?? 0,
-    username: row.username ?? '',
-    slot_count: typeof row.slot_count === 'number' && !Number.isNaN(row.slot_count) ? row.slot_count : 0
+  return rows.map((row) => ({
+    user_id: row.userId,
+    username: row.username,
+    slot_count: row.slotCount,
   }));
 }
 
 async function findExcellentReporterUsers(): Promise<ExcellentCandidate[]> {
-  const query = `
-    SELECT
-      u.id AS user_id,
-      u.username,
-      u.slot_count,
-      COUNT(dc.id) AS public_cards
-    FROM users u
-    JOIN data_cards dc ON dc.user_id = u.id
-    WHERE dc.is_public = 1
-      AND dc.review_status = 'approved'
-    GROUP BY u.id, u.username, u.slot_count
-    HAVING SUM(dc.like_count) >= ${EXCELLENT_REPORTER_TIER.minTotalLikes}
-      AND SUM(dc.favorite_count) >= ${EXCELLENT_REPORTER_TIER.minTotalFavorites}
-      AND SUM(dc.usage_count) >= ${EXCELLENT_REPORTER_TIER.minTotalUsage}
-      AND u.slot_count > ${EXCELLENT_REPORTER_TIER.slotIncrement}
-  `;
+  const rows = await listSponsorExcellentCandidates({
+    minTotalLikes: EXCELLENT_REPORTER_TIER.minTotalLikes,
+    minTotalFavorites: EXCELLENT_REPORTER_TIER.minTotalFavorites,
+    minTotalUsage: EXCELLENT_REPORTER_TIER.minTotalUsage,
+    minSlotCountExclusive: EXCELLENT_REPORTER_TIER.slotIncrement,
+  });
 
-  const queryResult = await queryFromD1(query, []);
-  const result = queryResult as {
-    success?: boolean;
-    result?: Array<{ results?: Array<{ user_id?: number; username?: string; slot_count?: number | null; public_cards?: number | null }> }>;
-  };
-
-  if (!result.success || !result.result || !result.result[0]?.results) {
-    return [];
-  }
-
-  return result.result[0].results.map(row => ({
-    user_id: row.user_id ?? 0,
-    username: row.username ?? '',
-    slot_count: typeof row.slot_count === 'number' && !Number.isNaN(row.slot_count) ? row.slot_count : 0,
-    public_cards: typeof row.public_cards === 'number' && !Number.isNaN(row.public_cards) ? row.public_cards : 0
+  return rows.map((row) => ({
+    user_id: row.userId,
+    username: row.username,
+    slot_count: row.slotCount,
+    public_cards: row.publicCards,
   }));
 }
 

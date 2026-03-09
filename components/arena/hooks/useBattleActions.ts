@@ -3,6 +3,7 @@
 import { useCallback } from 'react';
 
 import { inferTemplate } from '@/lib/data-card-converter';
+import { mapDataCardRuntimeSourceInfo, mapPublicDataCardRowToBattleSelectionPayload } from '@/lib/data-card-read-mappers';
 import { generateRandomCanshou, generateRandomMagicalGirl } from '@/lib/random-character-generator';
 
 import { useBattleStore } from '../stores/useBattleStore';
@@ -10,6 +11,7 @@ import {
   AuxiliaryScenarioState,
   BattleStoreState,
   CombatantData,
+  isCombatantLimitReached,
   MAX_AUX_SCENARIOS,
   MAX_COMBATANTS,
   RandomCombatantPlaceholder,
@@ -174,7 +176,8 @@ export const useBattleActions = () => {
 
   const handleAddRandomPlaceholder = useCallback(
     (type: 'random-magical-girl' | 'random-canshou') => {
-      if (combatants.length >= MAX_COMBATANTS || isGenerating) {
+      if (isGenerating) return;
+      if (isCombatantLimitReached(combatants.length, MAX_COMBATANTS)) {
         setError(`最多只能选择 ${MAX_COMBATANTS} 位参战者。`);
         return;
       }
@@ -190,25 +193,23 @@ export const useBattleActions = () => {
 
   const handleSelectDataCard = useCallback(
     async (cardData: any) => {
-      const sourceDataCardId = typeof cardData?._cardId === 'string' ? cardData._cardId : undefined;
-      const sourceDataCardName = typeof cardData?._cardName === 'string' ? cardData._cardName : undefined;
-      const sourceDataCardDescription =
-        typeof cardData?._cardDescription === 'string' ? cardData._cardDescription : undefined;
-      const sourceDataCardCreatedAt = typeof cardData?._createdAt === 'string' ? cardData._createdAt : undefined;
-      const sourceDataCardUpdatedAt = typeof cardData?._updatedAt === 'string' ? cardData._updatedAt : undefined;
-      const sourceIsPublic = typeof cardData?._isPublic === 'boolean'
-        ? cardData._isPublic
-        : (typeof cardData?._isPublic === 'number' ? cardData._isPublic === 1 : undefined);
-      const sourceAuthor = typeof cardData?._author === 'string' ? cardData._author : undefined;
-      const sourceDataCardLikeCount = typeof cardData?._likeCount === 'number' ? cardData._likeCount : undefined;
-      const sourceDataCardFavoriteCount =
-        typeof cardData?._favoriteCount === 'number' ? cardData._favoriteCount : undefined;
-      const sourceDataCardUsageCount = typeof cardData?._usageCount === 'number' ? cardData._usageCount : undefined;
+      const {
+        sourceDataCardId,
+        sourceDataCardName,
+        sourceDataCardDescription,
+        sourceDataCardCreatedAt,
+        sourceDataCardUpdatedAt,
+        sourceIsPublic,
+        sourceAuthor,
+        sourceDataCardLikeCount,
+        sourceDataCardFavoriteCount,
+        sourceDataCardUsageCount,
+      } = mapDataCardRuntimeSourceInfo(cardData);
 
       const cleanedCardData = removePrivateKeys(cardData);
       const resolvedName = getCombatantDisplayName(cleanedCardData);
       const inferredTemplate = inferTemplate(cleanedCardData);
-      const targetFilename = `${cardData._cardName || resolvedName}.json`;
+      const targetFilename = `${sourceDataCardName || resolvedName}.json`;
 
       // 检查是否已在加载中或已存在（防止重复点击）
       if (loadingCards.has(targetFilename)) {
@@ -228,7 +229,7 @@ export const useBattleActions = () => {
           const isNative = await verifyOrigin(cleanedCardData);
           setScenario({
             content: cleanedCardData,
-            fileName: `${cardData._cardName || resolvedName}.json`,
+            fileName: `${sourceDataCardName || resolvedName}.json`,
             isNative,
             sourceDataCardId,
             sourceDataCardDescription,
@@ -246,7 +247,7 @@ export const useBattleActions = () => {
           return;
         }
 
-        if (combatants.length >= MAX_COMBATANTS) {
+        if (isCombatantLimitReached(combatants.length, MAX_COMBATANTS)) {
           setError(`❌ 最多只能添加 ${MAX_COMBATANTS} 位角色。`);
           return;
         }
@@ -288,7 +289,7 @@ export const useBattleActions = () => {
 
   const handleRandomMatch = useCallback(
     async (type: 'character' | 'scenario') => {
-      if (type === 'character' && combatants.length >= MAX_COMBATANTS) {
+      if (type === 'character' && isCombatantLimitReached(combatants.length, MAX_COMBATANTS)) {
         setError(`最多只能选择 ${MAX_COMBATANTS} 位参战者。`);
         return;
       }
@@ -300,20 +301,8 @@ export const useBattleActions = () => {
         if (!response.ok || !result.success) {
           throw new Error(result.error || '无法获取随机数据');
         }
-        const cardData = JSON.parse(result.card.data);
-        await handleSelectDataCard({
-          ...cardData,
-          _cardId: result.card.id,
-          _cardName: result.card.name,
-          _cardDescription: result.card.description || '',
-          _isPublic: result.card.is_public,
-          _updatedAt: result.card.updated_at,
-          _createdAt: result.card.created_at,
-          _author: result.card.username || '未知',
-          _likeCount: typeof result.card.like_count === 'number' ? result.card.like_count : undefined,
-          _favoriteCount: typeof result.card.favorite_count === 'number' ? result.card.favorite_count : undefined,
-          _usageCount: typeof result.card.usage_count === 'number' ? result.card.usage_count : undefined,
-        });
+        const payload = mapPublicDataCardRowToBattleSelectionPayload(result.card);
+        await handleSelectDataCard(payload);
       } catch (error) {
         setError(`❌ 随机匹配失败: ${error instanceof Error ? error.message : '未知错误'}`);
       } finally {
@@ -334,13 +323,13 @@ export const useBattleActions = () => {
         return;
       }
 
-      const sourceDataCardId = typeof cardData?._cardId === 'string' ? cardData._cardId : undefined;
-      const sourceDataCardName = typeof cardData?._cardName === 'string' ? cardData._cardName : undefined;
-      const sourceDataCardUpdatedAt = typeof cardData?._updatedAt === 'string' ? cardData._updatedAt : undefined;
-      const sourceIsPublic = typeof cardData?._isPublic === 'boolean'
-        ? cardData._isPublic
-        : (typeof cardData?._isPublic === 'number' ? cardData._isPublic === 1 : undefined);
-      const sourceAuthor = typeof cardData?._author === 'string' ? cardData._author : undefined;
+      const {
+        sourceDataCardId,
+        sourceDataCardName,
+        sourceDataCardUpdatedAt,
+        sourceIsPublic,
+        sourceAuthor,
+      } = mapDataCardRuntimeSourceInfo(cardData);
 
       const cleanedCardData = removePrivateKeys(cardData);
       const inferredTemplate = inferTemplate(cleanedCardData);
@@ -403,7 +392,7 @@ export const useBattleActions = () => {
 
   const handleToggleCombatantDataCard = useCallback(
     async (cardData: any, nextSelected: boolean) => {
-      const sourceDataCardId = typeof cardData?._cardId === 'string' ? cardData._cardId : '';
+      const sourceDataCardId = mapDataCardRuntimeSourceInfo(cardData).sourceDataCardId ?? '';
       if (!sourceDataCardId) return;
 
       if (!nextSelected) {
@@ -441,23 +430,8 @@ export const useBattleActions = () => {
       if (!response.ok || !result.success) {
         throw new Error(result.error || '无法获取随机数据');
       }
-      const cardData = JSON.parse(result.card.data);
-      await handleToggleAuxScenarioDataCard(
-        {
-          ...cardData,
-          _cardId: result.card.id,
-          _cardName: result.card.name,
-          _cardDescription: result.card.description || '',
-          _isPublic: result.card.is_public,
-          _updatedAt: result.card.updated_at,
-          _createdAt: result.card.created_at,
-          _author: result.card.username || '未知',
-          _likeCount: typeof result.card.like_count === 'number' ? result.card.like_count : undefined,
-          _favoriteCount: typeof result.card.favorite_count === 'number' ? result.card.favorite_count : undefined,
-          _usageCount: typeof result.card.usage_count === 'number' ? result.card.usage_count : undefined,
-        },
-        true
-      );
+      const payload = mapPublicDataCardRowToBattleSelectionPayload(result.card);
+      await handleToggleAuxScenarioDataCard(payload, true);
     } catch (error) {
       setError(`❌ 随机匹配失败: ${error instanceof Error ? error.message : '未知错误'}`);
     } finally {

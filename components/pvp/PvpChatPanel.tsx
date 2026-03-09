@@ -164,11 +164,8 @@ export function PvpChatPanel(props: {
     enabled: Boolean(props.roomId) && props.disabled !== true,
     refetchInterval: 1200,
     queryFn: async (): Promise<ChatMessage[]> => {
-      const authHeader = await authStorage.getAuthHeader();
-      if (!authHeader) throw new Error('未登录');
-      const res = await fetch(`/api/pvp/rooms/${props.roomId}/chat`, {
+      const res = await authStorage.fetch(`/api/pvp/rooms/${props.roomId}/chat`, {
         method: 'GET',
-        headers: { Authorization: authHeader },
       });
       const data = (await res.json()) as ChatResponse;
       if (!res.ok) {
@@ -203,17 +200,14 @@ export function PvpChatPanel(props: {
       if (!canSend) throw new Error('当前身份不可聊天');
       if (!emojiOk) throw new Error('仅允许发送通用表情符号（emoji）');
 
-      const authHeader = await authStorage.getAuthHeader();
-      if (!authHeader) throw new Error('未登录');
-
       const emoji = emojiInput.trim() || null;
       const phrase =
         textMode === 'phrase' && pattern && Object.keys(selections).length > 0 ? { patternId: pattern.id, selections } : null;
       const quickTextId = textMode === 'quick' ? selectedQuickId : null;
 
-      const res = await fetch(`/api/pvp/rooms/${props.roomId}/chat`, {
+      const res = await authStorage.fetch(`/api/pvp/rooms/${props.roomId}/chat`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: authHeader },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           phrase,
           quickTextId,

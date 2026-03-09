@@ -1,10 +1,10 @@
 'use client';
 
 import SaveToCloudButton from '@/components/SaveToCloudButton';
-import BattleReportCard, { NewsReport } from '@/components/BattleReportCard';
+import BattleReportCard, { NewsReport, type BattleReportIllustrationAsset } from '@/components/BattleReportCard';
 import StreamingBattleReportCard from '@/components/stream/StreamingBattleReportCard';
 
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useBattleStore } from '../stores/useBattleStore';
 import { useBattleEngine } from '../hooks/useBattleEngine';
 import { getCombatantDisplayName } from '../utils/characterValidator';
@@ -12,16 +12,18 @@ import { toBattleReportMarkdown } from '../utils/battleReportMarkdown';
 import { inferTemplate } from '@/lib/data-card-converter';
 import { precheckBattleReportForRedo } from '@/lib/arena/redo-updates';
 import { AdjudicationResult } from '@/types/arena';
-import { BattleStoreState, UpdatedCombatantData } from '../types';
+import { BattleStoreState, CombatantData, UpdatedCombatantData } from '../types';
 import { MarkdownBlock } from '@/components/MarkdownBlock';
 import { CollapsibleSection } from '@/components/shared/CollapsibleSection';
+import { JsonSizeIndicator } from '@/components/shared/JsonSizeIndicator';
+import { BattleIllustrationPanel } from './BattleIllustrationPanel';
 
 interface BattleResultProps {
   onSaveImage: (imageUrl: string) => void;
 }
 
 export function BattleResult({ onSaveImage }: BattleResultProps) {
-  const { handleRedoUpdates, isCooldown, remainingTime, isRedoingUpdates } = useBattleEngine();
+  const { handleRedoUpdates, handleApplyManualMetaUpdates, isCooldown, remainingTime, isRedoingUpdates } = useBattleEngine();
   const useBattleSelector = <T,>(selector: (state: BattleStoreState) => T) => useBattleStore(selector);
   const adjudicationResults = useBattleSelector((state) => state.adjudicationResults);
   const newsReport = useBattleSelector((state) => state.newsReport);
@@ -36,10 +38,16 @@ export function BattleResult({ onSaveImage }: BattleResultProps) {
   const streamReasoning = useBattleSelector((state) => state.streamReasoning);
   const streamUpdateMetaDebug = useBattleSelector((state) => state.streamUpdateMetaDebug);
   const isGenerating = useBattleSelector((state) => state.isGenerating);
+  const combatants = useBattleSelector((state) => state.combatants);
   const updatedCombatants = useBattleSelector((state) => state.updatedCombatants);
+  const latestAiImpacts = useBattleSelector((state) => state.latestAiImpacts);
+  const lastGenerationId = useBattleSelector((state) => state.lastGenerationId);
   const settings = useBattleSelector((state) => state.settings);
   const battleMode = useBattleSelector((state) => state.battleMode);
   const scenario = useBattleSelector((state) => state.scenario);
+  const [illustrationAsset, setIllustrationAsset] = useState<BattleReportIllustrationAsset | null>(null);
+  const [manualMetaInput, setManualMetaInput] = useState('');
+  const [manualMetaMessage, setManualMetaMessage] = useState<string | null>(null);
 
   const scenarioDisplayName = useMemo(() => {
     if (battleMode !== 'scenario') return undefined;
@@ -51,6 +59,16 @@ export function BattleResult({ onSaveImage }: BattleResultProps) {
   }, [battleMode, scenario.content, scenario.fileName]);
 
   const hasBattleReport = generationMode === 'stream' ? Boolean(streamingMarkdown) : Boolean(newsReport);
+  const shouldShowIllustrationPanel = hasBattleReport && !isGenerating;
+  const illustrationPanelKey = `${generationMode}:${lastGenerationId ?? 'no-id'}:${
+    generationMode === 'stream'
+      ? (streamingMarkdown ?? '').slice(0, 80)
+      : (newsReport?.headline ?? '')
+  }`;
+  const promptCombatants = useMemo(
+    () => combatants.filter((item): item is CombatantData => 'data' in item),
+    [combatants]
+  );
   const canWriteUpdates = settings.writeArenaHistory || settings.writeCurrentState;
   const reportMarkdownForRedo =
     generationMode === 'stream'
@@ -72,6 +90,13 @@ export function BattleResult({ onSaveImage }: BattleResultProps) {
       return '';
     }
   }, [streamUpdateMetaDebug?.meta]);
+  const manualMetaDefault = useMemo(() => {
+    if (streamMetaParsedJson) return streamMetaParsedJson;
+    if (typeof streamUpdateMetaDebug?.raw === 'string' && streamUpdateMetaDebug.raw.trim()) {
+      return streamUpdateMetaDebug.raw;
+    }
+    return '';
+  }, [streamMetaParsedJson, streamUpdateMetaDebug?.raw]);
 
   const downloadUpdatedJson = (characterData: any) => {
     const name = characterData.codename || characterData.name;
@@ -85,6 +110,35 @@ export function BattleResult({ onSaveImage }: BattleResultProps) {
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
+  };
+
+  useEffect(() => {
+    setIllustrationAsset(null);
+  }, [lastGenerationId]);
+
+  useEffect(() => {
+    if (!hasBattleReport) {
+      setIllustrationAsset(null);
+    }
+  }, [hasBattleReport]);
+
+  useEffect(() => {
+    setManualMetaInput(manualMetaDefault);
+    setManualMetaMessage(null);
+  }, [manualMetaDefault, lastGenerationId]);
+
+  const handleResetManualMetaInput = () => {
+    setManualMetaInput(manualMetaDefault);
+    setManualMetaMessage(manualMetaDefault ? '已恢复为当前解析结果。' : '当前暂无可恢复的解析结果。');
+  };
+
+  const handleApplyManualMeta = async () => {
+    const ok = await handleApplyManualMetaUpdates(manualMetaInput);
+    if (ok) {
+      setManualMetaMessage('手动修改已应用，角色更新完成。');
+    } else {
+      setManualMetaMessage('应用失败，请检查 JSON 与角色名是否完整匹配。');
+    }
   };
 
   return (
@@ -148,6 +202,7 @@ export function BattleResult({ onSaveImage }: BattleResultProps) {
               narrativeHistoryReadCount={streamNarrativeHistoryReadCount}
               aiReasoning={streamReasoning}
               isStreaming={isGenerating}
+              illustrationAsset={illustrationAsset}
             />
           </div>
         ) : null
@@ -157,8 +212,21 @@ export function BattleResult({ onSaveImage }: BattleResultProps) {
             report={newsReport as NewsReport}
             onSaveImage={onSaveImage}
             mode={battleMode}
+            illustrationAsset={illustrationAsset}
           />
         )
+      )}
+
+      {shouldShowIllustrationPanel && (
+        <BattleIllustrationPanel
+          key={illustrationPanelKey}
+          headline={generationMode === 'stream' ? null : (newsReport?.headline ?? null)}
+          reportBody={generationMode === 'stream' ? null : (newsReport?.article?.body ?? null)}
+          reportMarkdown={generationMode === 'stream' ? (streamingMarkdown ?? null) : null}
+          combatants={promptCombatants}
+          aiImpacts={latestAiImpacts}
+          onIllustrationAssetChange={setIllustrationAsset}
+        />
       )}
 
       {hasBattleReport && canWriteUpdates && (
@@ -222,6 +290,44 @@ export function BattleResult({ onSaveImage }: BattleResultProps) {
                         </div>
                       </div>
                     )}
+                    <div className="p-3 border border-gray-200 rounded-lg bg-white">
+                      <div className="font-medium text-gray-700">手动修正并应用</div>
+                      <div className="mt-1 text-xs text-gray-500">
+                        支持粘贴 JSON 对象/数组或 MAHOSHOJO_ARENA_META 注释。应用后会直接更新当前角色数据。
+                      </div>
+                      <textarea
+                        value={manualMetaInput}
+                        onChange={(event) => {
+                          setManualMetaInput(event.target.value);
+                          setManualMetaMessage(null);
+                        }}
+                        spellCheck={false}
+                        rows={12}
+                        className="mt-2 w-full rounded-lg border border-gray-300 bg-slate-950 text-slate-100 p-2 text-xs font-mono leading-relaxed focus:outline-none focus:ring-2 focus:ring-purple-400"
+                        placeholder={'{"version":1,"impacts":[{"characterName":"角色名","impact":"变化","currentStateSummary":"状态"}]}'}
+                      />
+                      {manualMetaMessage && (
+                        <div className="mt-2 text-xs text-gray-600">{manualMetaMessage}</div>
+                      )}
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        <button
+                          onClick={handleResetManualMetaInput}
+                          type="button"
+                          disabled={isGenerating || isRedoingUpdates}
+                          className="px-3 py-1.5 text-xs font-semibold text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                        >
+                          恢复当前解析结果
+                        </button>
+                        <button
+                          onClick={() => void handleApplyManualMeta()}
+                          type="button"
+                          disabled={isGenerating || isRedoingUpdates || !manualMetaInput.trim()}
+                          className="px-3 py-1.5 text-xs font-semibold text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                        >
+                          {isRedoingUpdates ? '应用中...' : '应用手动修改'}
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 </CollapsibleSection>
               )}
@@ -283,6 +389,11 @@ export function BattleResult({ onSaveImage }: BattleResultProps) {
                         style={{ backgroundColor: '#22c55e', backgroundImage: 'linear-gradient(to right, #22c55e, #16a34a)' }}
                       />
                     </div>
+                    <JsonSizeIndicator
+                      data={character}
+                      className="mt-2"
+                      warningText="⚠️ 接近云端 300KB 上限，保存/替换可能失败，请先精简数据。"
+                    />
                   </CollapsibleSection>
                 );
               })}

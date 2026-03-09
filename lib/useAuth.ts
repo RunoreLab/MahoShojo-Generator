@@ -29,24 +29,24 @@ export function useAuth() {
   // 初始化时验证登录状态
   useEffect(() => {
     const checkAuth = async () => {
-      const auth = await authStorage.getAuth();
-      if (auth) {
-        const result = await authApi.verify();
-        if (result.success && result.user) {
-          setUser(result.user);
-          if (Array.isArray(result.badges)) {
-            setUserBadges(result.badges);
-            setBadgesLoading(false);
-          } else {
-            await loadUserBadges();
-          }
+      const legacyAuth = await authStorage.getAuth();
+      const result = await authApi.verify();
+
+      if (result.success && result.user) {
+        setUser(result.user);
+        if (Array.isArray(result.badges)) {
+          setUserBadges(result.badges);
+          setBadgesLoading(false);
         } else {
+          await loadUserBadges();
+        }
+      } else {
+        if (legacyAuth) {
           authStorage.clearAuth();
         }
-      }
-      if (!auth) {
         setBadgesLoading(false);
       }
+
       setLoading(false);
     };
 
@@ -54,8 +54,8 @@ export function useAuth() {
   }, []);
 
   // 注册
-  const register = async (username: string, email: string, turnstileToken: string) => {
-    const result = await authApi.register(username, email, turnstileToken);
+  const register = async (username: string, email: string, turnstileToken: string, password: string) => {
+    const result = await authApi.register(username, email, turnstileToken, password);
     if (result.success) {
       // 注册成功后自动验证登录
       const verifyResult = await authApi.verify();
@@ -72,8 +72,13 @@ export function useAuth() {
   };
 
   // 登录
-  const login = async (username: string, authKey: string, turnstileToken: string) => {
-    const result = await authApi.login(username, authKey, turnstileToken);
+  const login = async (
+    identifier: string,
+    credential: string,
+    turnstileToken: string,
+    mode: 'password' | 'legacy' = 'password',
+  ) => {
+    const result = await authApi.login(identifier, credential, turnstileToken, mode);
     if (result.success && result.user) {
       setUser(result.user);
       // 加载用户徽章
@@ -83,8 +88,8 @@ export function useAuth() {
   };
 
   // 退出登录
-  const logout = () => {
-    authApi.logout();
+  const logout = async () => {
+    await authApi.logout();
     setUser(null);
     setUserBadges([]);
     setBadgesLoading(false);

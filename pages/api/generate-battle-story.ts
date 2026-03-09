@@ -20,13 +20,12 @@ import { createPromptBuilder, processAdjudicationChain } from '@/lib/arena/logic
 import { applyPostBattleUpdates, updateBattleStats } from '@/lib/arena/service';
 import {
     createBattleReportGenerationRecord,
-    createBattleReportGenerationCombatants,
-    generateUUID,
     updateBattleReportGenerationExtraJson,
     updateBattleReportGenerationCombatantsWriteResult,
     updateBattleReportGenerationOutputPreview,
-    getUserByAuthKey
-} from '@/lib/d1';
+} from '@/lib/database/battle-report-generations';
+import { createBattleReportGenerationCombatants } from '@/lib/database/battle-report-generation-combatants';
+import { generateUUID } from '@/lib/database/core';
 import { applyShieldWords } from '@/lib/shield-word-filter';
 import {
     anonymizeIp,
@@ -39,12 +38,11 @@ import {
 import { buildOutputPreviewForStorage } from '@/lib/arena/output-preview';
 import { settleArenaRatingsForGeneration } from '@/lib/database/arena-ratings';
 import { storeBattleReportGenerationOutputTextToR2 } from '@/lib/arena/battle-report-output-storage';
-import { fetchCurrentSeasonFromOrigin } from '@/lib/seasons-config';
-import { deriveSeasonStrictRules } from '@/lib/seasons';
 import { recordUserActivityFromRequest } from '@/lib/user-activity/record';
+import { createRequestAuthUserResolver } from '@/lib/auth/request-auth-user';
+import { createBattleReportWriteContext } from '@/lib/arena/battle-report-write-context';
 
 const log = getLogger('api-gen-battle-story');
-const MAX_COMBATANTS = 10;
 
 export const config = {
     runtime: 'edge',
@@ -55,7 +53,14 @@ interface BattleApiResponse {
     updatedCombatants: any[];
     adjudicationResults?: AdjudicationResult[];
     generationId?: string;
+    impacts?: BattleAiImpact[];
 }
+
+type BattleAiImpact = {
+    characterName: string;
+    impact?: string;
+    currentStateSummary?: string;
+};
 
 type RequestQuestionnaire = {
     id: string;
@@ -108,11 +113,15 @@ async function handler(req: NextRequest): Promise<Response> {
 
     const startedAtMs = Date.now();
     const startedAtIso = new Date(startedAtMs).toISOString();
+    const authUserResolver = createRequestAuthUserResolver(req);
+    const battleReportWriteContext = createBattleReportWriteContext({
+        requestUrl: req.url,
+        authUserResolver,
+    });
 
     // 用于在异常/提前返回时补齐 battle_report_generations 记录（避免“失败没有记录”）。
     let snapshotMode: string = 'classic';
     let snapshotLanguage: string | null = null;
-    let snapshotSelectedLevel: string | null = null;
     let snapshotStoryLength: string | null = null;
     let snapshotPvpRoomId: string | null = null;
     let snapshotPvpMatchId: string | null = null;
@@ -139,7 +148,6 @@ async function handler(req: NextRequest): Promise<Response> {
 	        const body = await req.json();
 	        const {
 	            combatants,
-	            selectedLevel,
             mode = 'classic',
             arenaFreeRankingEnabled,
             userGuidance,
@@ -180,7 +188,6 @@ async function handler(req: NextRequest): Promise<Response> {
 
 	        snapshotMode = typeof mode === 'string' ? mode : 'classic';
 	        snapshotLanguage = normalizeOptionalString(language);
-	        snapshotSelectedLevel = normalizeOptionalString(selectedLevel);
 	        snapshotStoryLength = normalizeOptionalString(storyLength);
 
         const parsePvpContext = (value: unknown): { roomId: string; matchId: string; roundId: string } | null => {
@@ -223,9 +230,7 @@ async function handler(req: NextRequest): Promise<Response> {
             const durationMs = Math.max(0, endedAtMs - startedAtMs);
             const ip = getClientIpFromHeaders(req.headers);
             const ipAnonymized = anonymizeIp(ip);
-            const authHeader = req.headers.get('authorization');
-            const authKey = authHeader?.startsWith('Bearer ') ? authHeader.substring(7).trim() : null;
-            const user = authKey ? await getUserByAuthKey(authKey) : null;
+            const user = await battleReportWriteContext.getAuthUser();
 
             const recordId = await createBattleReportGenerationRecord({
                 startedAt: startedAtIso,
@@ -253,7 +258,7 @@ async function handler(req: NextRequest): Promise<Response> {
                 scenarioDataCardId: typeof scenarioSourceDataCardId === 'string' ? scenarioSourceDataCardId : null,
                 scenarioDataCardUpdatedAt: typeof scenarioSourceDataCardUpdatedAt === 'string' ? scenarioSourceDataCardUpdatedAt : null,
                 language: snapshotLanguage,
-                selectedLevel: snapshotSelectedLevel,
+                selectedLevel: null,
                 storyLength: snapshotStoryLength,
                 combatantCount: Array.isArray(combatants) ? combatants.length : null,
                 hasScenario: Boolean(scenario),
@@ -335,11 +340,6 @@ async function handler(req: NextRequest): Promise<Response> {
             ? (() => {
                 const normalized = normalizeNarrativeHistoryForPrompt(narrativeHistory);
                 if (normalized.length === 0) return [];
-                const parseTime = (entry: NarrativeHistoryEntry): number => {
-                    const t = Date.parse(entry.createdAt || entry.updatedAt);
-                    return Number.isFinite(t) ? t : 0;
-                };
-                normalized.sort((a, b) => parseTime(a) - parseTime(b));
                 if (resolvedNarrativeHistoryReadLimit === Infinity) return normalized;
                 const sliceLimit = Math.max(1, Math.floor(resolvedNarrativeHistoryReadLimit));
                 return normalized.slice(Math.max(0, normalized.length - sliceLimit));
@@ -404,7 +404,6 @@ async function handler(req: NextRequest): Promise<Response> {
         const isStrictRankedMatchRequest =
             mode === 'classic'
             && String(language ?? '').trim() === 'zh-CN'
-            && !String(selectedLevel ?? '').trim()
             && !String(userGuidance ?? '').trim()
             && !hasQuestionnaireLore
             && resolvedReadArenaHistory === false
@@ -414,6 +413,7 @@ async function handler(req: NextRequest): Promise<Response> {
             && Array.isArray(combatants)
             && combatants.length === 2
             && combatants.every((c: any) => !String(c?.characterGuidance ?? '').trim());
+        const includeQuestionnaireAnswersInPrompt = !isStrictRankedMatchRequest;
         const shouldPreferLiteModelInStrict =
             isStrictRankedMatchRequest && !customProviderOverride && !shouldDisablePolling && !customModelOverride;
         const baseModelOverride = customModelOverride ?? (isDowngrade ? 'gemini-2.5-flash-lite' : undefined);
@@ -422,8 +422,8 @@ async function handler(req: NextRequest): Promise<Response> {
             : [baseModelOverride];
 
         const minParticipants = (mode === 'daily' || mode === 'scenario') ? 1 : 2;
-        if (!Array.isArray(combatants) || combatants.length < minParticipants || combatants.length > MAX_COMBATANTS) {
-            const errorMessage = `该模式需要 ${minParticipants} 到 ${MAX_COMBATANTS} 位角色`;
+        if (!Array.isArray(combatants) || combatants.length < minParticipants) {
+            const errorMessage = `该模式至少需要 ${minParticipants} 位角色`;
             return await writeFailedRecordIfNeeded({ statusCode: 400, message: errorMessage, stage: 'combatants-count' });
         }
 
@@ -522,12 +522,9 @@ async function handler(req: NextRequest): Promise<Response> {
                 const durationMs = Math.max(0, endedAtMs - startedAtMs);
                 const ip = getClientIpFromHeaders(req.headers);
                 const ipAnonymized = anonymizeIp(ip);
-                const authHeader = req.headers.get('authorization');
-                const authKey = authHeader?.startsWith('Bearer ') ? authHeader.substring(7).trim() : null;
-
                 const recordPromise = (async () => {
                     try {
-                        const user = authKey ? await getUserByAuthKey(authKey) : null;
+                        const user = await battleReportWriteContext.getAuthUser();
                         const recordId = await createBattleReportGenerationRecord({
                             startedAt: startedAtIso,
                             endedAt: endedAtIso,
@@ -554,7 +551,7 @@ async function handler(req: NextRequest): Promise<Response> {
                             scenarioDataCardId: typeof scenarioSourceDataCardId === 'string' ? scenarioSourceDataCardId : null,
                             scenarioDataCardUpdatedAt: typeof scenarioSourceDataCardUpdatedAt === 'string' ? scenarioSourceDataCardUpdatedAt : null,
                             language: snapshotLanguage,
-                            selectedLevel: snapshotSelectedLevel,
+                            selectedLevel: null,
                             storyLength: snapshotStoryLength,
                             readArenaHistory: typeof resolvedReadArenaHistory === 'boolean' ? resolvedReadArenaHistory : null,
                             arenaHistoryReadLimit: resolvedReadArenaHistory
@@ -638,7 +635,6 @@ async function handler(req: NextRequest): Promise<Response> {
                 resolvedInternalGuidance,
                 needsWorldviewWarning,
                 language,
-                selectedLevel,
                 mode,
                 scenario,
                 null,
@@ -651,7 +647,8 @@ async function handler(req: NextRequest): Promise<Response> {
                 adjudicationResults,
                 storyLength,
                 narrativeHistoryForPrompt,
-                loreText
+                loreText,
+                includeQuestionnaireAnswersInPrompt
             ),
             schema: battleReportSchema,
             taskName: `生成${mode}模式故事`,
@@ -692,8 +689,20 @@ async function handler(req: NextRequest): Promise<Response> {
         const narrativeHistoryReadCount = resolvedReadNarrativeHistory ? (narrativeHistoryForPrompt?.length ?? 0) : undefined;
 
         // 组合成完整的前端报告对象
-        const impactsFromAI = shouldRequestImpacts && Array.isArray((aiResult as any).impacts)
+        const impactsFromAI: BattleAiImpact[] = shouldRequestImpacts && Array.isArray((aiResult as any).impacts)
             ? (aiResult as any).impacts
+                .map((item: any) => {
+                    const characterName = typeof item?.characterName === 'string' ? item.characterName.trim() : '';
+                    if (!characterName) return null;
+                    const impact = typeof item?.impact === 'string' ? item.impact.trim() : '';
+                    const currentStateSummary = typeof item?.currentStateSummary === 'string' ? item.currentStateSummary.trim() : '';
+                    return {
+                        characterName,
+                        ...(impact ? { impact } : {}),
+                        ...(currentStateSummary ? { currentStateSummary } : {}),
+                    } satisfies BattleAiImpact;
+                })
+                .filter((item: BattleAiImpact | null): item is BattleAiImpact => Boolean(item))
             : [];
 
         const report: NewsReport = {
@@ -746,6 +755,7 @@ async function handler(req: NextRequest): Promise<Response> {
             updatedCombatants,
             adjudicationResults: adjudicationResults || undefined, // v0.4.0 新增
             generationId: recordId,
+            impacts: impactsFromAI.length > 0 ? impactsFromAI : undefined,
         };
 
         const endedAtMs = Date.now();
@@ -754,9 +764,6 @@ async function handler(req: NextRequest): Promise<Response> {
 
         const ip = getClientIpFromHeaders(req.headers);
         const ipAnonymized = anonymizeIp(ip);
-        const authHeader = req.headers.get('authorization');
-        const authKey = authHeader?.startsWith('Bearer ') ? authHeader.substring(7).trim() : null;
-
         const reportJson = JSON.stringify(report);
         const outputBytes = new TextEncoder().encode(reportJson).length;
         const outputPreview = buildOutputPreviewForStorage(reportJson);
@@ -764,6 +771,7 @@ async function handler(req: NextRequest): Promise<Response> {
         const outputSensitive = appConfig.ENABLE_SENSITIVE_WORD_FILTER
             ? await quickCheck(outputPreview)
             : { hasSensitiveWords: false };
+        const combatantsFallback = buildCombatantsFallbackForExtraJson(combatants);
 
         const inputJson = JSON.stringify({
             combatants,
@@ -774,9 +782,11 @@ async function handler(req: NextRequest): Promise<Response> {
         const inputBytes = new TextEncoder().encode(inputJson).length;
 
         const recordPromise = (async () => {
-            const user = authKey ? await getUserByAuthKey(authKey) : null;
-            const currentSeason = await fetchCurrentSeasonFromOrigin(new URL(req.url).origin);
-            const seasonStrictRules = deriveSeasonStrictRules(currentSeason);
+            const user = await battleReportWriteContext.getAuthUser();
+            const [currentSeason, seasonStrictRules] = await Promise.all([
+                battleReportWriteContext.getCurrentSeason(),
+                battleReportWriteContext.getSeasonStrictRules(),
+            ]);
 
             const normalizedScenarioFileName = (() => {
               if (typeof scenarioFileName !== 'string') return null;
@@ -815,7 +825,7 @@ async function handler(req: NextRequest): Promise<Response> {
                 scenarioDataCardId: typeof scenarioSourceDataCardId === 'string' ? scenarioSourceDataCardId : null,
                 scenarioDataCardUpdatedAt: typeof scenarioSourceDataCardUpdatedAt === 'string' ? scenarioSourceDataCardUpdatedAt : null,
 	                language: normalizeOptionalString(language),
-	                selectedLevel: normalizeOptionalString(selectedLevel),
+	                selectedLevel: null,
 	                storyLength: normalizeOptionalString(storyLength),
                 readArenaHistory: typeof resolvedReadArenaHistory === 'boolean' ? resolvedReadArenaHistory : null,
                 arenaHistoryReadLimit: resolvedReadArenaHistory
@@ -877,6 +887,7 @@ async function handler(req: NextRequest): Promise<Response> {
                                 : null)
                             : null,
 	                    narrativeHistoryReadCount: resolvedReadNarrativeHistory ? (narrativeHistoryForPrompt?.length ?? 0) : 0,
+                        combatantsFallback,
 	                }),
 	            });
 
@@ -987,12 +998,9 @@ async function handler(req: NextRequest): Promise<Response> {
         const durationMs = Math.max(0, endedAtMs - startedAtMs);
         const ip = getClientIpFromHeaders(req.headers);
         const ipAnonymized = anonymizeIp(ip);
-        const authHeader = req.headers.get('authorization');
-        const authKey = authHeader?.startsWith('Bearer ') ? authHeader.substring(7).trim() : null;
-
         const recordPromise = (async () => {
             try {
-                const user = authKey ? await getUserByAuthKey(authKey) : null;
+                const user = await battleReportWriteContext.getAuthUser();
                 const recordId = await createBattleReportGenerationRecord({
                     startedAt: startedAtIso,
                     endedAt: endedAtIso,
@@ -1012,7 +1020,7 @@ async function handler(req: NextRequest): Promise<Response> {
                     userPrefix: user?.prefix ?? null,
                     mode: snapshotMode,
                     language: snapshotLanguage,
-                    selectedLevel: snapshotSelectedLevel,
+                    selectedLevel: null,
                     storyLength: snapshotStoryLength,
                     pvpRoomId: snapshotPvpRoomId,
                     pvpMatchId: snapshotPvpMatchId,

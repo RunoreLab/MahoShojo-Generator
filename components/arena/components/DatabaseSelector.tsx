@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 
-import { MAX_COMBATANTS } from '../types';
+import { isCombatantLimitReached, MAX_COMBATANTS } from '../types';
 
 interface DatabaseSelectorProps {
   onOpenCharacterModal: () => void;
@@ -11,7 +11,7 @@ interface DatabaseSelectorProps {
   isGenerating: boolean;
   isMatching: 'character' | 'scenario' | null;
   combatantCount: number;
-  maxCombatants?: number;
+  maxCombatants?: number | null;
   className?: string;
   title?: string | null;
   layout?: 'row' | 'column';
@@ -39,14 +39,14 @@ export function DatabaseSelector({
       <div className={buttonsClassName}>
         <button
           onClick={onOpenCharacterModal}
-          disabled={isGenerating || combatantCount >= maxCombatants}
+          disabled={isGenerating || isCombatantLimitReached(combatantCount, maxCombatants)}
           className={`${buttonWidthClassName} px-4 py-2 bg-pink-500 text-white rounded hover:bg-pink-600 disabled:opacity-50 disabled:cursor-not-allowed text-sm`}
         >
           浏览在线角色库
         </button>
         <button
           onClick={onRandomMatchCharacter}
-          disabled={isGenerating || isMatching !== null || combatantCount >= maxCombatants}
+          disabled={isGenerating || isMatching !== null || isCombatantLimitReached(combatantCount, maxCombatants)}
           className={`${buttonWidthClassName} px-4 py-2 bg-purple-500 text-white rounded hover:bg-purple-600 disabled:opacity-50 disabled:cursor-not-allowed text-sm`}
         >
           {isMatching === 'character' ? '匹配中...' : '随机匹配角色'}

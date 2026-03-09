@@ -13,7 +13,7 @@ export interface PresetGridPickerProps {
   currentPage: number;
   onPageChange: (page: number) => void;
   disabled?: boolean;
-  maxSelected: number;
+  maxSelected?: number;
   selectedFilenames: string[];
   selectedCountOverride?: number;
   loadingFilename?: string | null;
@@ -35,6 +35,8 @@ export function PresetGridPicker({
   const totalPages = useMemo(() => Math.max(1, Math.ceil(presets.length / PRESETS_PER_PAGE)), [presets.length]);
   const paged = useMemo(() => presets.slice((currentPage - 1) * PRESETS_PER_PAGE, currentPage * PRESETS_PER_PAGE), [presets, currentPage]);
   const selectedCount = typeof selectedCountOverride === 'number' ? selectedCountOverride : selectedFilenames.length;
+  const hasSelectionLimit = typeof maxSelected === 'number' && Number.isFinite(maxSelected) && maxSelected > 0;
+  const selectedLimit = hasSelectionLimit ? maxSelected : null;
 
   return (
     <div className="mb-6">
@@ -45,7 +47,7 @@ export function PresetGridPicker({
         {paged.map((preset) => {
           const isSelected = selectedFilenames.includes(preset.filename);
           const isLoading = loadingFilename === preset.filename;
-          const itemDisabled = disabled || (!isSelected && selectedCount >= maxSelected);
+          const itemDisabled = disabled || (!isSelected && selectedLimit !== null && selectedCount >= selectedLimit);
           const bgColor =
             preset.type === 'canshou'
               ? isSelected

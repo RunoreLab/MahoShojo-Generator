@@ -1,4 +1,4 @@
-import { getRandomPublicCard } from '@/lib/d1';
+import { getRandomPublicCard } from '@/lib/database/data-cards';
 import { isPvpCombatantTypeAllowedByRange, isPvpDataCardStatsAllowedByRange, normalizePvpRoomCardRange } from '@/lib/pvp/card-range';
 import { inferPvpCombatantTypeFromJson } from '@/lib/pvp/logic';
 import { loadPresetCard } from '@/lib/pvp/preset';

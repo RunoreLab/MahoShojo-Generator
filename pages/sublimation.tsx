@@ -24,6 +24,7 @@ import { ErrorMessage } from '@/components/ErrorMessage';
 import { GenerationModeSwitcher, type GenerationMode } from '@/components/shared/GenerationModeSwitcher';
 import { ThemeImage } from '@/components/shared/ThemeImage';
 import { TokenIndicator } from '@/components/shared/TokenIndicator';
+import { JsonSizeIndicator } from '@/components/shared/JsonSizeIndicator';
 import { readTextAndReasoningStreamFromResponse } from '@/lib/stream/read-text-and-reasoning-stream';
 import { buildGeneralCharacterCardFromMarkdown } from '@/lib/stream/markdown-card';
 import { readJsonOrTextFromResponse, resolveApiErrorMessage } from '@/lib/client/apiError';
@@ -32,7 +33,13 @@ import { formatHttpErrorMessage } from '@/lib/client/httpError';
 import { authStorage } from '@/lib/auth';
 import { formatDateTime } from '@/lib/constants';
 import { formatNarrativeHistoryEntriesForReference, mergeNarrativeHistoryText } from '@/lib/narrative-history';
-import { normalizeQuestionnaireDefinition, type QuestionnaireDefinition, type QuestionnairePresetEntry } from '@/lib/questionnaires';
+import { mapDataCardSourceMeta } from '@/lib/data-card-read-mappers';
+import {
+  normalizeQuestionnaireDefinition,
+  parseQuestionnaireDataCardPayload,
+  type QuestionnaireDefinition,
+  type QuestionnairePresetEntry,
+} from '@/lib/questionnaires';
 import type { AIReasoningEnvelope } from '@/types/ai-reasoning';
 import {
 	    inferTemplate,
@@ -189,6 +196,7 @@ const getDefaultTargetTemplate = (source: InferableTemplate): SupportedTargetTem
 
 const SUBLIMATION_STATE_PREF_KEY = 'sublimation-history-state-preferences-v1';
 const SUBLIMATION_PREFERENCE_KEY = 'mahoshojo.sublimation.preferences.v1';
+const SUBLIMATION_USER_GUIDANCE_MAX_CHARS = 200;
 
 
 const SublimationPage: React.FC = () => {
@@ -727,18 +735,8 @@ const SublimationPage: React.FC = () => {
 
     const handleSelectQuestionnaireCard = (card: any) => {
         try {
-            const rawPayload = card?.data ?? card?.dataJson ?? card?.data_json ?? card?.dataJSON ?? null;
-            let rawData: any = null;
-            if (rawPayload !== null && rawPayload !== undefined) {
-                rawData = typeof rawPayload === 'string' ? JSON.parse(rawPayload) : rawPayload;
-            } else if (card && typeof card === 'object') {
-                if (Array.isArray(card.questions)) {
-                    rawData = card;
-                } else if (card.questionnaire && Array.isArray(card.questionnaire.questions)) {
-                    rawData = card.questionnaire;
-                }
-            }
-            if (!rawData) throw new Error('问卷数据卡内容为空或格式不受支持');
+            const rawData = parseQuestionnaireDataCardPayload(card);
+            const cardSourceMeta = mapDataCardSourceMeta(card);
 
             const fallbackKind = rawData?.kind === 'canshou' ? 'canshou' : 'magical-girl';
             const normalized = normalizeQuestionnaireDefinition(rawData, {
@@ -752,9 +750,7 @@ const SublimationPage: React.FC = () => {
             applyQuestionnaireSelection({
                 source: 'database',
                 questionnaire: normalized,
-                dataCardId: card?._cardId ?? card?.id,
-                dataCardName: card?._cardName ?? card?.name,
-                dataCardAuthor: card?._author ?? card?.username ?? card?.author,
+                ...cardSourceMeta,
             });
             setQuestionnairePickerError(null);
             setShowQuestionnairePicker(false);
@@ -1536,16 +1532,25 @@ const SublimationPage: React.FC = () => {
 
                         {/* 成长方向引导输入框 */}
                         <div className="input-group">
-                            <label htmlFor="user-guidance" className="input-label">成长方向引导 (可选)</label>
+                            <label htmlFor="sublimation-story-guidance" className="input-label">成长方向引导 (可选)</label>
                             <div className="flex flex-wrap items-center gap-2">
                                 <input
-                                    id="user-guidance"
+                                    id="sublimation-story-guidance"
+                                    name="sublimation_story_guidance"
                                     type="text"
                                     value={userGuidance}
                                     onChange={(e) => setUserGuidance(e.target.value)}
                                     className="input-field flex-1 min-w-[12rem]"
-                                    placeholder="输入关键词或一句话 (最多30字)"
-                                    maxLength={30}
+                                    placeholder={`输入关键词或一句话 (最多${SUBLIMATION_USER_GUIDANCE_MAX_CHARS}字)`}
+                                    maxLength={SUBLIMATION_USER_GUIDANCE_MAX_CHARS}
+                                    autoComplete="new-password"
+                                    autoCorrect="off"
+                                    autoCapitalize="off"
+                                    spellCheck={false}
+                                    data-form-type="other"
+                                    data-lpignore="true"
+                                    data-1p-ignore="true"
+                                    data-bwignore="true"
                                     disabled={isGenerating}
                                 />
                                 {userGuidance.trim() ? (
@@ -1851,6 +1856,10 @@ const SublimationPage: React.FC = () => {
                                             前往竞技场
                                         </Link>
                                     </div>
+                                    <JsonSizeIndicator
+                                        data={streamedGeneralCard}
+                                        warningText="⚠️ 接近云端 300KB 上限，保存/替换可能失败，请先精简数据。"
+                                    />
                                 </div>
                             )}
                         </>
@@ -1898,6 +1907,10 @@ const SublimationPage: React.FC = () => {
                                         前往竞技场
                                     </Link>
                                 </div>
+                                <JsonSizeIndicator
+                                    data={resultData.sublimatedData}
+                                    warningText="⚠️ 接近云端 300KB 上限，保存/替换可能失败，请先精简数据。"
+                                />
                             </div>
                         </>
                     )}

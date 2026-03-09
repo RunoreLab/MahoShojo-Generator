@@ -8,16 +8,19 @@ import Footer from '@/components/Footer';
 import MagicalGirlCard from '@/components/MagicalGirlCard';
 import CanshouCard from '@/components/CanshouCard';
 import GeneralCharacterCard from '@/components/GeneralCharacterCard';
+import { CharacterPortraitAssetPanel } from '@/components/shared/CharacterPortraitAssetPanel';
+import { JsonSizeIndicator } from '@/components/shared/JsonSizeIndicator';
 import SaveToCloudButton from '@/components/SaveToCloudButton';
-import TachieGenerator from '@/components/TachieGenerator';
 import { DatabaseSelector } from '@/components/arena/components/DatabaseSelector';
 
 import { useAuth } from '@/lib/useAuth';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { randomUUID } from '@/lib/crypto';
+import { mapDataCardSourceMeta, mapPublicDataCardRowToBattleSelectionPayload } from '@/lib/data-card-read-mappers';
 import { COLOR_GRADIENTS, MainColor } from '@/lib/main-color';
 import { inferTemplate, TEMPLATE_LABELS, type InferableTemplate } from '@/lib/data-card-converter';
 import { mergeTeamDataCards, type TeamMergeOutputTemplate } from '@/lib/team/merge-team-cards';
+import type { CharacterCardPortraitAsset } from '@/types/visual-asset';
 
 type Notice = { type: 'success' | 'error' | 'info'; text: string } | null;
 
@@ -136,6 +139,7 @@ export default function CharacterPartyPage() {
   const [savedImageUrl, setSavedImageUrl] = useState<string | null>(null);
 
   const [isTachieVisible, setIsTachieVisible] = useState(false);
+  const [characterPortraitAsset, setCharacterPortraitAsset] = useState<CharacterCardPortraitAsset | null>(null);
 
   const hasNonEmptySignature = (data: Record<string, unknown>): boolean =>
     typeof data.signature === 'string' && data.signature.trim().length > 0;
@@ -168,6 +172,7 @@ export default function CharacterPartyPage() {
     const displayName = (label && label.trim()) ? label.trim() : getDisplayNameFromData(payload);
 
     const shouldVerifyNative = hasNonEmptySignature(payload);
+    setCharacterPortraitAsset(null);
     setMembers((prev) => [
       ...prev,
       {
@@ -410,8 +415,9 @@ export default function CharacterPartyPage() {
   const selectedDatabaseCardIdSet = useMemo(() => new Set(selectedDatabaseCardIds), [selectedDatabaseCardIds]);
 
   const handleSelectDatabaseCharacterCard = (cardData: any) => {
-    const rawName = typeof cardData?._cardName === 'string' ? cardData._cardName.trim() : '';
-    const cardId = typeof cardData?._cardId === 'string' ? cardData._cardId : '';
+    const sourceMeta = mapDataCardSourceMeta(cardData);
+    const rawName = sourceMeta.dataCardName ?? '';
+    const cardId = sourceMeta.dataCardId ?? '';
     const cleaned = removePrivateKeys(cardData);
     if (!isPlainObject(cleaned)) {
       setNotice({ type: 'error', text: '数据卡格式无效，无法加入队伍' });
@@ -434,14 +440,16 @@ export default function CharacterPartyPage() {
   };
 
   const handleToggleDatabaseCharacterCard = (cardData: any, nextSelected: boolean) => {
-    const cardId = typeof cardData?._cardId === 'string' ? cardData._cardId : '';
+    const sourceMeta = mapDataCardSourceMeta(cardData);
+    const cardId = sourceMeta.dataCardId ?? '';
     if (nextSelected) {
       handleSelectDatabaseCharacterCard(cardData);
       return;
     }
     if (!cardId) return;
+    setCharacterPortraitAsset(null);
     setMembers((prev) => prev.filter((item) => item.dataCardId !== cardId));
-    const displayName = typeof cardData?._cardName === 'string' ? cardData._cardName.trim() : '';
+    const displayName = sourceMeta.dataCardName ?? '';
     setNotice({ type: 'info', text: displayName ? `已从队伍移除：${displayName}` : '已从队伍移除角色' });
   };
 
@@ -458,17 +466,8 @@ export default function CharacterPartyPage() {
         throw new Error(result?.error || '无法获取随机角色');
       }
 
-      const cardData = JSON.parse(result.card.data);
-      handleSelectDatabaseCharacterCard({
-        ...cardData,
-        _cardId: result.card.id,
-        _cardName: result.card.name,
-        _cardDescription: result.card.description || '',
-        _isPublic: result.card.is_public,
-        _updatedAt: result.card.updated_at,
-        _createdAt: result.card.created_at,
-        _author: result.card.username || '未知',
-      });
+      const payload = mapPublicDataCardRowToBattleSelectionPayload(result.card);
+      handleSelectDatabaseCharacterCard(payload);
     } catch (error) {
       setNotice({ type: 'error', text: `随机匹配失败：${error instanceof Error ? error.message : '未知错误'}` });
     } finally {
@@ -569,7 +568,10 @@ export default function CharacterPartyPage() {
                       type="button"
                       className="rounded-lg border border-gray-200 bg-white px-3 py-1 text-xs text-gray-700 hover:bg-gray-50 disabled:opacity-50"
                       disabled={members.length === 0}
-                      onClick={() => setMembers([])}
+                      onClick={() => {
+                        setCharacterPortraitAsset(null);
+                        setMembers([]);
+                      }}
                     >
                       清空队伍
                     </button>
@@ -638,7 +640,10 @@ export default function CharacterPartyPage() {
                                   <button
                                     type="button"
                                     className="rounded-lg border border-red-200 bg-red-50 px-2 py-1 text-xs font-semibold text-red-700 hover:bg-red-100"
-                                    onClick={() => setMembers((prev) => prev.filter((item) => item.id !== member.id))}
+                                    onClick={() => {
+                                      setCharacterPortraitAsset(null);
+                                      setMembers((prev) => prev.filter((item) => item.id !== member.id));
+                                    }}
                                   >
                                     移除
                                   </button>
@@ -693,16 +698,19 @@ export default function CharacterPartyPage() {
                       magicalGirl={mergedData as any}
                       gradientStyle={gradientStyle}
                       onSaveImage={handleSaveImageCallback}
+                      portraitAsset={characterPortraitAsset}
                     />
                   ) : mergedTemplate === 'canshou' ? (
                     <CanshouCard
                       canshou={mergedData as any}
                       onSaveImage={handleSaveImageCallback}
+                      portraitAsset={characterPortraitAsset}
                     />
                   ) : (
                     <GeneralCharacterCard
                       general={mergedData as any}
                       onSaveImage={handleSaveImageCallback}
+                      portraitAsset={characterPortraitAsset}
                     />
                   )}
                 </div>
@@ -752,6 +760,12 @@ export default function CharacterPartyPage() {
                         复制到剪贴板
                       </button>
                     </div>
+                    {members.length > 0 && (
+                      <JsonSizeIndicator
+                        data={mergedData}
+                        warningText="⚠️ 接近云端 300KB 上限，保存/替换可能失败，请先精简数据。"
+                      />
+                    )}
                     <details className="mt-4 rounded-xl border border-gray-200 bg-white/70 p-3 text-left">
                       <summary className="cursor-pointer text-sm font-semibold text-gray-700">查看合并后的 JSON（预览不含原生签名）</summary>
                       <pre className="mt-3 max-h-96 overflow-auto rounded-lg bg-gray-900 p-3 text-xs text-gray-100">
@@ -768,12 +782,15 @@ export default function CharacterPartyPage() {
                   <summary
                     className="cursor-pointer text-sm font-semibold text-pink-700"
                   >
-                    {isTachieVisible ? '▼' : '▶'} 生成立绘（LibLib / ModelScope，可选）
+                    {isTachieVisible ? '▼' : '▶'} 生成立绘并插入角色卡（可选）
                   </summary>
                   {isTachieVisible ? (
                     <div className="mt-3">
                       {tachiePrompt.trim() ? (
-                        <TachieGenerator prompt={tachiePrompt} />
+                        <CharacterPortraitAssetPanel
+                          prompt={tachiePrompt}
+                          onPortraitAssetChange={setCharacterPortraitAsset}
+                        />
                       ) : (
                         <div className="text-sm text-gray-600">未能从当前队伍卡中提取立绘提示词（通常需要外观字段）。</div>
                       )}

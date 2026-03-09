@@ -2,7 +2,8 @@ type D1Config = {
   databaseId: string;
   apiToken: string;
   accountId: string;
-  databaseUrl: string;
+  queryUrl: string;
+  rawUrl: string;
 };
 
 const sleep = async (ms: number) => {
@@ -100,7 +101,8 @@ const getD1Config = (): D1Config | null => {
     databaseId,
     apiToken,
     accountId,
-    databaseUrl: `https://api.cloudflare.com/client/v4/accounts/${accountId}/d1/database/${databaseId}/query`,
+    queryUrl: `https://api.cloudflare.com/client/v4/accounts/${accountId}/d1/database/${databaseId}/query`,
+    rawUrl: `https://api.cloudflare.com/client/v4/accounts/${accountId}/d1/database/${databaseId}/raw`,
   };
 };
 
@@ -171,31 +173,31 @@ export function generateUUID(): string {
   ].join('-');
 }
 
+type D1QueryEndpoint = 'query' | 'raw';
+
 // 核心查询函数
-async function query(sql: string, params: unknown[] = []): Promise<Response> {
+async function query(body: Record<string, unknown>, endpoint: D1QueryEndpoint = 'query'): Promise<Response> {
   const config = assertD1Config();
+  const targetUrl = endpoint === 'raw' ? config.rawUrl : config.queryUrl;
 
   return await fetchWithRetry(
-    config.databaseUrl,
+    targetUrl,
     {
       method: "POST",
       headers: {
         "Authorization": `Bearer ${config.apiToken}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        sql,
-        params,
-      }),
+      body: JSON.stringify(body),
     },
     { attempts: 5, baseDelayMs: 500, maxDelayMs: 8000 }
   );
 }
 
-// 从 D1 数据库直接执行 SQL 语句
-export async function queryFromD1(sql: string, params: unknown[] = []): Promise<unknown> {
+// 从 D1 数据库直接执行 SQL 语句并返回 Cloudflare D1 HTTP payload
+export async function queryD1Payload(sql: string, params: unknown[] = []): Promise<unknown> {
   try {
-    const response = await query(sql, params);
+    const response = await query({ sql, params }, 'query');
 
     if (!response.ok) {
       let extra = '';
@@ -217,6 +219,63 @@ export async function queryFromD1(sql: string, params: unknown[] = []): Promise<
   }
 }
 
+// 使用 Cloudflare D1 HTTP batch 载荷执行多条语句并返回 payload
+export async function queryD1BatchPayload(batch: Array<{ sql: string; params?: unknown[] }>): Promise<unknown> {
+  try {
+    const response = await query({ batch }, 'query');
+
+    if (!response.ok) {
+      let extra = '';
+      try {
+        const text = await response.text();
+        const trimmed = typeof text === 'string' ? text.trim() : '';
+        if (trimmed) extra = ` - ${trimmed.slice(0, 800)}`;
+      } catch {
+        // ignore
+      }
+      throw new Error(`D1 API 错误: ${response.status} ${response.statusText}${extra}`);
+    }
+
+    const result = await response.json();
+    return result;
+  } catch (error) {
+    console.error("从 D1 数据库 batch 查询失败:", error);
+    throw error;
+  }
+}
+
+// 从 D1 数据库直接执行 SQL 语句并返回 Cloudflare D1 HTTP raw payload
+export async function queryD1RawPayload(sql: string, params: unknown[] = []): Promise<unknown> {
+  try {
+    const response = await query({ sql, params }, 'raw');
+
+    if (!response.ok) {
+      let extra = '';
+      try {
+        const text = await response.text();
+        const trimmed = typeof text === 'string' ? text.trim() : '';
+        if (trimmed) extra = ` - ${trimmed.slice(0, 800)}`;
+      } catch {
+        // ignore
+      }
+      throw new Error(`D1 API 错误: ${response.status} ${response.statusText}${extra}`);
+    }
+
+    const result = await response.json();
+    return result;
+  } catch (error) {
+    console.error("从 D1 数据库 raw 查询失败:", error);
+    throw error;
+  }
+}
+
+/**
+ * @deprecated 请改用 `queryD1Payload`。该函数仅保留为兼容层别名，后续会在完成全仓迁移后移除。
+ */
+export async function queryFromD1(sql: string, params: unknown[] = []): Promise<unknown> {
+  return queryD1Payload(sql, params);
+}
+
 // 保存数据到 D1 数据库，使用自定义 32 位随机字符串 ID 并返回 ID
 export async function createWithCustomId(data: string, table: string): Promise<string | null> {
   try {
@@ -229,10 +288,10 @@ export async function createWithCustomId(data: string, table: string): Promise<s
     const customId = generateRandomId();
     const timestamp = new Date().toISOString();
     
-    const response = await query(
-      `INSERT INTO ${safeTable} (id, data, created_at, updated_at) VALUES (?, ?, ?, ?)`,
-      [customId, data, timestamp, timestamp]
-    );
+    const response = await query({
+      sql: `INSERT INTO ${safeTable} (id, data, created_at, updated_at) VALUES (?, ?, ?, ?)`,
+      params: [customId, data, timestamp, timestamp],
+    });
 
     if (!response.ok) {
       const errorText = await response.text();
@@ -263,10 +322,10 @@ export async function updateById(id: string, data: string, table: string): Promi
     const safeTable = assertSafeTableName(table);
     const timestamp = new Date().toISOString();
     
-    const response = await query(
-      `UPDATE ${safeTable} SET data = ?, updated_at = ? WHERE id = ?`,
-      [data, timestamp, id]
-    );
+    const response = await query({
+      sql: `UPDATE ${safeTable} SET data = ?, updated_at = ? WHERE id = ?`,
+      params: [data, timestamp, id],
+    });
 
     if (!response.ok) {
       const errorText = await response.text();
@@ -290,7 +349,7 @@ export async function updateById(id: string, data: string, table: string): Promi
 export async function getRecordById(id: string, table: string): Promise<unknown> {
   try {
     const safeTable = assertSafeTableName(table);
-    const response = await query(`SELECT * FROM ${safeTable} WHERE id = ?`, [id]);
+    const response = await query({ sql: `SELECT * FROM ${safeTable} WHERE id = ?`, params: [id] });
     if (response.ok) {
       const result = await response.json();
       if (result.result && result.result.length > 0) {
@@ -314,10 +373,10 @@ export async function saveToD1(data: unknown): Promise<boolean> {
 
     const timestamp = new Date().toISOString();
     const dataString = JSON.stringify(data);
-    const response = await query(
-      "INSERT INTO shojo (data, created_at) VALUES (?, ?)",
-      [dataString, timestamp]
-    );
+    const response = await query({
+      sql: "INSERT INTO shojo (data, created_at) VALUES (?, ?)",
+      params: [dataString, timestamp],
+    });
 
     if (!response.ok) {
       const errorText = await response.text();

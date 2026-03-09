@@ -41,6 +41,20 @@ describe('structured-json', () => {
     expect(result.data).toEqual({ ok: true, reason: null });
   });
 
+  it('repairs truncated root JSON tail after partially closed nested objects', () => {
+    const schema = z.object({
+      codename: z.string(),
+      analysis: z.object({ background: z.string() }),
+    });
+    const text =
+      '```json\n' +
+      '{"codename":"雪绒","magicConstruct":{},"wonderlandRule":{},"blooming":{},"analysis":{"background":"千日红在竞技场';
+    const result = parseStructuredJsonWithSchema(text, schema);
+    expect(result.data.codename).toBe('雪绒');
+    expect(result.data.analysis.background).toContain('千日红');
+    expect(result.telemetry.usedJsonRepair).toBe(true);
+  });
+
   it('chooses the first candidate that passes schema validation', () => {
     const schema = z.object({ a: z.number() });
     const text = '{"wrong": 1}\n{"a": 2}';
@@ -91,6 +105,52 @@ describe('structured-json', () => {
     expect(result.data).toEqual({ codename: 'X' });
     expect(result.telemetry.keyNormalization.attempted).toBe(true);
     expect(result.telemetry.keyNormalization.succeeded).toBe(true);
+  });
+
+  it('maps close key names by schema and removes original unknown key', () => {
+    const schema = z
+      .object({
+        current_state: z.object({
+          summary: z.string(),
+        }),
+      })
+      .strict();
+    const text = '{"current_stage":"普通人/未觉醒"}';
+    const result = parseStructuredJsonWithSchema(text, schema);
+    expect(result.data).toEqual({ current_state: { summary: '普通人/未觉醒' } });
+    expect(result.telemetry.keyNormalization.attempted).toBe(true);
+    expect(result.telemetry.schemaCoercion.attempted).toBe(true);
+    expect(result.telemetry.schemaCoercion.succeeded).toBe(true);
+  });
+
+  it('coerces nested object field from string using schema shape', () => {
+    const schema = z.object({
+      analysis: z.object({
+        background: z.object({
+          belief: z.string(),
+          bonds: z.string(),
+        }),
+      }),
+    });
+    const text = '{"analysis":{"background":"我会为伙伴战斗到底"}}';
+    const result = parseStructuredJsonWithSchema(text, schema);
+    expect(result.data.analysis.background).toEqual({
+      belief: '我会为伙伴战斗到底',
+      bonds: '',
+    });
+    expect(result.telemetry.schemaCoercion.attempted).toBe(true);
+    expect(result.telemetry.schemaCoercion.succeeded).toBe(true);
+  });
+
+  it('coerces array<object> into array<string> by extracting answer/value', () => {
+    const schema = z.object({
+      userAnswers: z.array(z.string()),
+    });
+    const text = '{"userAnswers":[{"question":"Q1","answer":"A1"},{"value":"A2"}]}';
+    const result = parseStructuredJsonWithSchema(text, schema);
+    expect(result.data.userAnswers).toEqual(['A1', 'A2']);
+    expect(result.telemetry.schemaCoercion.attempted).toBe(true);
+    expect(result.telemetry.schemaCoercion.succeeded).toBe(true);
   });
 
   it('builds a compact schema guide with optional markers', () => {

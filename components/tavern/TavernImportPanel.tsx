@@ -12,6 +12,7 @@ import SaveToCloudButton from '@/components/SaveToCloudButton';
 import TachieGenerator from '@/components/TachieGenerator';
 import { GenerationModeSwitcher, type GenerationMode } from '@/components/shared/GenerationModeSwitcher';
 import { ImagePreviewModal } from '@/components/shared/ImagePreviewModal';
+import { JsonSizeIndicator } from '@/components/shared/JsonSizeIndicator';
 import { OFFICIAL_KEY_MAX_AI_COOLDOWN_MS, USER_PROVIDED_KEY_COOLDOWN_MS } from '@/lib/ai/cooldowns';
 import { buildCustomProviderPayload, isUsingUserProvidedKey } from '@/lib/ai/custom-provider';
 import { authStorage } from '@/lib/auth';
@@ -1482,6 +1483,18 @@ export function TavernImportPanel() {
                           style={{ backgroundColor: '#22c55e', backgroundImage: 'linear-gradient(to right, #22c55e, #16a34a)' }}
                         />
                       </div>
+                      {cloudSavePreview && !('error' in cloudSavePreview) ? (
+                        <JsonSizeIndicator
+                          data={outputDataCard}
+                          estimatedBytes={cloudSavePreview.estimatedBytes}
+                          warningText="⚠️ 接近云端 300KB 上限，保存/替换可能失败，请先精简数据。"
+                        />
+                      ) : outputDataCard ? (
+                        <JsonSizeIndicator
+                          data={outputDataCard}
+                          warningText="⚠️ 接近云端 300KB 上限，保存/替换可能失败，请先精简数据。"
+                        />
+                      ) : null}
 
                       {jsonSaveMode === 'text' && outputJsonPayload ? (
                         <div className="mt-4 rounded-xl border border-pink-100 bg-white/60 p-3">

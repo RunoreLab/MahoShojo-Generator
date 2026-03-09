@@ -4,6 +4,11 @@ import { createPortal } from 'react-dom';
 import { useEffect, useMemo, useState } from 'react';
 
 import { formatDateTime } from '@/lib/constants';
+import {
+  getPromptOrderedNarrativeHistoryEntries,
+  narrativeHistorySortLabelMap,
+  sortNarrativeHistoryEntries,
+} from '@/lib/narrative-history';
 
 import { useNarrativeHistoryStore, type NarrativeHistorySort } from '../stores/useNarrativeHistoryStore';
 import type { NarrativeHistoryEntry } from '@/types/arena';
@@ -13,41 +18,6 @@ type Props = {
   onClose: () => void;
   initialSelectedIds?: string[];
   onConfirm: (entries: NarrativeHistoryEntry[]) => void;
-};
-
-const sortLabelMap: Record<NarrativeHistorySort, string> = {
-  updated_desc: '最新更新优先',
-  updated_asc: '最早更新优先',
-  created_desc: '最新创建优先',
-  created_asc: '最早创建优先',
-};
-
-const sortEntries = (entries: NarrativeHistoryEntry[], sort: NarrativeHistorySort): NarrativeHistoryEntry[] => {
-  const list = [...entries];
-  const getTime = (value: string) => {
-    const time = Date.parse(value);
-    return Number.isFinite(time) ? time : 0;
-  };
-  list.sort((a, b) => {
-    const aCreated = getTime(a.createdAt);
-    const bCreated = getTime(b.createdAt);
-    const aUpdated = getTime(a.updatedAt);
-    const bUpdated = getTime(b.updatedAt);
-
-    switch (sort) {
-      case 'updated_asc':
-        return aUpdated - bUpdated;
-      case 'updated_desc':
-        return bUpdated - aUpdated;
-      case 'created_asc':
-        return aCreated - bCreated;
-      case 'created_desc':
-        return bCreated - aCreated;
-      default:
-        return bUpdated - aUpdated;
-    }
-  });
-  return list;
 };
 
 const normalizeQuery = (value: string): string => value.trim().toLowerCase();
@@ -87,7 +57,14 @@ export function NarrativeHistoryPickerModal({ isOpen, onClose, initialSelectedId
     setQuery('');
   }, [isOpen, initialSelectedIds]);
 
-  const sortedEntries = useMemo(() => sortEntries(entries, sort), [entries, sort]);
+  const sortedEntries = useMemo(() => sortNarrativeHistoryEntries(entries, sort), [entries, sort]);
+  const promptOrderIndexMap = useMemo(() => {
+    const map = new Map<string, number>();
+    getPromptOrderedNarrativeHistoryEntries(entries).forEach((entry, index) => {
+      map.set(entry.id, index + 1);
+    });
+    return map;
+  }, [entries]);
 
   const filteredEntries = useMemo(() => {
     const q = normalizeQuery(query);
@@ -103,9 +80,8 @@ export function NarrativeHistoryPickerModal({ isOpen, onClose, initialSelectedId
 
   const selectedEntriesForConfirm = useMemo(() => {
     if (selectedCount === 0) return [];
-    const picked = entries.filter((entry) => Boolean(selectedIds[entry.id]));
-    // 用于参考的内容按时间顺序（旧 -> 新）更好读
-    return [...picked].sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
+    const picked = getPromptOrderedNarrativeHistoryEntries(entries).filter((entry) => Boolean(selectedIds[entry.id]));
+    return picked;
   }, [entries, selectedIds, selectedCount]);
 
   const toggleId = (id: string) => {
@@ -167,7 +143,7 @@ export function NarrativeHistoryPickerModal({ isOpen, onClose, initialSelectedId
             />
             <label className="text-xs text-gray-500">排序</label>
             <select className="input-field text-sm" value={sort} onChange={(e) => setSort(e.target.value as NarrativeHistorySort)}>
-              {Object.entries(sortLabelMap).map(([value, label]) => (
+              {Object.entries(narrativeHistorySortLabelMap).map(([value, label]) => (
                 <option key={value} value={value}>
                   {label}
                 </option>
@@ -191,7 +167,7 @@ export function NarrativeHistoryPickerModal({ isOpen, onClose, initialSelectedId
             </button>
           </div>
           <p className="text-[11px] text-gray-500">
-            提示：这里只会选择你浏览器里缓存的叙事历史（与竞技场页面共用同一份 localStorage 数据）。
+            提示：这里只会选择你浏览器里缓存的叙事历史（与竞技场页面共用同一份 localStorage 数据）；若选择“AI 提示词顺序”，确认后会按该顺序提供给模型。
           </p>
         </div>
 
@@ -222,7 +198,12 @@ export function NarrativeHistoryPickerModal({ isOpen, onClose, initialSelectedId
                     />
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between gap-2">
-                        <div className="text-sm font-semibold text-gray-800 truncate">{entry.title || '未命名战报'}</div>
+                        <div className="flex min-w-0 items-center gap-2">
+                          <span className="inline-flex shrink-0 items-center rounded-full bg-gray-100 px-2 py-0.5 text-[11px] text-gray-600">
+                            #{promptOrderIndexMap.get(entry.id) ?? 0}
+                          </span>
+                          <div className="text-sm font-semibold text-gray-800 truncate">{entry.title || '未命名战报'}</div>
+                        </div>
                         <div className="text-[11px] text-gray-500 shrink-0">{formatDateTime(entry.updatedAt || entry.createdAt)}</div>
                       </div>
                       <div className="mt-1 text-xs text-gray-500 line-clamp-2 whitespace-pre-wrap">
@@ -254,4 +235,3 @@ export function NarrativeHistoryPickerModal({ isOpen, onClose, initialSelectedId
 
   return createPortal(modal, document.body);
 }
-

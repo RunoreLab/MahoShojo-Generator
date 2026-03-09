@@ -39,6 +39,7 @@ import {
   maskMagicTeaPartyJsonValue,
   maskMagicTeaPartyText,
 } from '@/lib/magic-tea-party/import-safety';
+import { mapMagicTeaPartyUpdateDraftCompat } from '@/lib/magic-tea-party/update-draft-mappers';
 
 type ImportExportPanelProps = {
   activeSession: MagicTeaPartySession | null;
@@ -56,6 +57,8 @@ const ensureRecord = (value: unknown): Record<string, unknown> | null => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   return value as Record<string, unknown>;
 };
+
+const readString = (value: unknown): string => (typeof value === 'string' ? value : '').trim();
 
 const ensureArray = <T,>(value: unknown): T[] => (Array.isArray(value) ? (value as T[]) : []);
 
@@ -231,18 +234,16 @@ export function MagicTeaPartyImportExportPanel(props: ImportExportPanelProps) {
       if (!Array.isArray(value)) return undefined;
       const drafts = value
         .map((item) => {
-          const record = ensureRecord(item);
-          if (!record) return null;
-          const characterNameRaw =
-            readString(record.characterName) || readString(record.character) || readString(record.name);
-          const characterName = maskTextValue(characterNameRaw) ?? characterNameRaw;
+          const mapped = mapMagicTeaPartyUpdateDraftCompat(item);
+          if (!mapped) return null;
+          const characterName = maskTextValue(mapped.characterName) ?? mapped.characterName;
           if (!characterName) return null;
-          const impact = maskTextValue(record.impact);
-          const currentStateSummary = maskTextValue(record.currentStateSummary ?? record.current_state_summary);
-          const winner = maskTextValue(record.winner);
-          const roleId = typeof record.roleId === 'string' ? record.roleId : undefined;
-          const hasWinner = typeof record.hasWinner === 'boolean' ? record.hasWinner : undefined;
-          const meta = ensureRecord(record.meta) ?? undefined;
+          const impact = maskTextValue(mapped.impact);
+          const currentStateSummary = maskTextValue(mapped.currentStateSummary);
+          const winner = maskTextValue(mapped.winner);
+          const roleId = mapped.roleId;
+          const hasWinner = mapped.hasWinner;
+          const meta = ensureRecord(mapped.meta) ?? undefined;
           return {
             ...(roleId ? { roleId } : {}),
             characterName,
@@ -840,5 +841,3 @@ export function MagicTeaPartyImportExportPanel(props: ImportExportPanelProps) {
     </div>
   );
 }
-
-const readString = (value: unknown): string => (typeof value === 'string' ? value : '').trim();

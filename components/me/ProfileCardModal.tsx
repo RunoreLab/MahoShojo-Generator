@@ -45,9 +45,7 @@ export function ProfileCardModal({ isOpen, onClose }: Props) {
     queryKey: ['me', 'profile-card'],
     enabled: isOpen,
     queryFn: async (): Promise<ApiResponse> => {
-      const authHeader = await authStorage.getAuthHeader();
-      if (!authHeader) throw new Error('未登录');
-      const res = await fetch('/api/me/profile-card', { headers: { Authorization: authHeader } });
+      const res = await authStorage.fetch('/api/me/profile-card');
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error((data as any)?.error || '加载资料卡数据失败');
       return data as ApiResponse;

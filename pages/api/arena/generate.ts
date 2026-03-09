@@ -21,13 +21,12 @@ import { createPromptBuilder, processAdjudicationChain } from '@/lib/arena/logic
 import { applyPostBattleUpdates, updateBattleStats } from '@/lib/arena/service';
 import {
     createBattleReportGenerationRecord,
-    createBattleReportGenerationCombatants,
-    generateUUID,
     updateBattleReportGenerationExtraJson,
     updateBattleReportGenerationCombatantsWriteResult,
     updateBattleReportGenerationOutputPreview,
-    getUserByAuthKey
-} from '@/lib/d1';
+} from '@/lib/database/battle-report-generations';
+import { createBattleReportGenerationCombatants } from '@/lib/database/battle-report-generation-combatants';
+import { generateUUID } from '@/lib/database/core';
 import { applyShieldWords } from '@/lib/shield-word-filter';
 import {
     anonymizeIp,
@@ -40,12 +39,11 @@ import {
 import { buildOutputPreviewForStorage } from '@/lib/arena/output-preview';
 import { settleArenaRatingsForGeneration } from '@/lib/database/arena-ratings';
 import { storeBattleReportGenerationOutputTextToR2 } from '@/lib/arena/battle-report-output-storage';
-import { fetchCurrentSeasonFromOrigin } from '@/lib/seasons-config';
-import { deriveSeasonStrictRules } from '@/lib/seasons';
 import { recordUserActivityFromRequest } from '@/lib/user-activity/record';
+import { createRequestAuthUserResolver } from '@/lib/auth/request-auth-user';
+import { createBattleReportWriteContext } from '@/lib/arena/battle-report-write-context';
 
 const log = getLogger('api-gen-battle-story');
-const MAX_COMBATANTS = 10;
 
 export const config = {
     runtime: 'edge',
@@ -55,7 +53,14 @@ interface BattleApiResponse {
     report: NewsReport;
     updatedCombatants: any[];
     adjudicationResults?: AdjudicationResult[];
+    impacts?: BattleAiImpact[];
 }
+
+type BattleAiImpact = {
+    characterName: string;
+    impact?: string;
+    currentStateSummary?: string;
+};
 
 type RequestQuestionnaire = {
     id: string;
@@ -106,8 +111,13 @@ const buildQuestionnaireLoreText = (questionnaires: RequestQuestionnaire[]): str
 	        return new Response(JSON.stringify({ error: 'Method not allowed' }), { status: 405 });
 	    }
 
-	    const startedAtMs = Date.now();
-	    const startedAtIso = new Date(startedAtMs).toISOString();
+    const startedAtMs = Date.now();
+    const startedAtIso = new Date(startedAtMs).toISOString();
+    const authUserResolver = createRequestAuthUserResolver(req);
+    const battleReportWriteContext = createBattleReportWriteContext({
+        requestUrl: req.url,
+        authUserResolver,
+    });
 
 	    try {
 	        const normalizeOptionalString = (value: unknown): string | null => {
@@ -130,7 +140,6 @@ const buildQuestionnaireLoreText = (questionnaires: RequestQuestionnaire[]): str
 	        const body = await req.json();
 	        const {
 	            combatants,
-	            selectedLevel,
             mode = 'classic',
             arenaFreeRankingEnabled,
             userGuidance,
@@ -306,7 +315,6 @@ const buildQuestionnaireLoreText = (questionnaires: RequestQuestionnaire[]): str
         const isStrictRankedMatchRequest =
             mode === 'classic'
             && String(language ?? '').trim() === 'zh-CN'
-            && !String(selectedLevel ?? '').trim()
             && !String(userGuidance ?? '').trim()
             && !hasQuestionnaireLore
             && resolvedReadArenaHistory === false
@@ -316,6 +324,7 @@ const buildQuestionnaireLoreText = (questionnaires: RequestQuestionnaire[]): str
             && Array.isArray(combatants)
             && combatants.length === 2
             && combatants.every((c: any) => !String(c?.characterGuidance ?? '').trim());
+        const includeQuestionnaireAnswersInPrompt = !isStrictRankedMatchRequest;
         const shouldPreferLiteModelInStrict =
             isStrictRankedMatchRequest && !customProviderOverride && !shouldDisablePolling && !customModelOverride;
         const baseModelOverride = customModelOverride ?? (isDowngrade ? 'gemini-2.5-flash-lite' : undefined);
@@ -324,8 +333,8 @@ const buildQuestionnaireLoreText = (questionnaires: RequestQuestionnaire[]): str
             : [baseModelOverride];
 
         const minParticipants = (mode === 'daily' || mode === 'scenario') ? 1 : 2;
-        if (!Array.isArray(combatants) || combatants.length < minParticipants || combatants.length > MAX_COMBATANTS) {
-            const errorMessage = `该模式需要 ${minParticipants} 到 ${MAX_COMBATANTS} 位角色`;
+        if (!Array.isArray(combatants) || combatants.length < minParticipants) {
+            const errorMessage = `该模式至少需要 ${minParticipants} 位角色`;
             return new Response(JSON.stringify({ error: errorMessage }), { status: 400 });
         }
 
@@ -454,7 +463,6 @@ const buildQuestionnaireLoreText = (questionnaires: RequestQuestionnaire[]): str
                 null,
                 needsWorldviewWarning,
                 language,
-                selectedLevel,
                 mode,
                 scenario,
                 normalizedAuxScenarios,
@@ -467,7 +475,8 @@ const buildQuestionnaireLoreText = (questionnaires: RequestQuestionnaire[]): str
                 adjudicationResults,
                 storyLength,
                 narrativeHistoryForPrompt,
-                loreText
+                loreText,
+                includeQuestionnaireAnswersInPrompt
             ),
             schema: battleReportSchema,
             taskName: `生成${mode}模式故事`,
@@ -508,8 +517,20 @@ const buildQuestionnaireLoreText = (questionnaires: RequestQuestionnaire[]): str
         const narrativeHistoryReadCount = resolvedReadNarrativeHistory ? (narrativeHistoryForPrompt?.length ?? 0) : undefined;
 
         // 组合成完整的前端报告对象
-        const impactsFromAI = shouldRequestImpacts && Array.isArray((aiResult as any).impacts)
+        const impactsFromAI: BattleAiImpact[] = shouldRequestImpacts && Array.isArray((aiResult as any).impacts)
             ? (aiResult as any).impacts
+                .map((item: any) => {
+                    const characterName = typeof item?.characterName === 'string' ? item.characterName.trim() : '';
+                    if (!characterName) return null;
+                    const impact = typeof item?.impact === 'string' ? item.impact.trim() : '';
+                    const currentStateSummary = typeof item?.currentStateSummary === 'string' ? item.currentStateSummary.trim() : '';
+                    return {
+                        characterName,
+                        ...(impact ? { impact } : {}),
+                        ...(currentStateSummary ? { currentStateSummary } : {}),
+                    } satisfies BattleAiImpact;
+                })
+                .filter((item: BattleAiImpact | null): item is BattleAiImpact => Boolean(item))
             : [];
 
         const report: NewsReport = {
@@ -558,7 +579,8 @@ const buildQuestionnaireLoreText = (questionnaires: RequestQuestionnaire[]): str
         const apiResponse: BattleApiResponse = {
             report,
             updatedCombatants,
-            adjudicationResults: adjudicationResults || undefined // v0.4.0 新增
+            adjudicationResults: adjudicationResults || undefined, // v0.4.0 新增
+            impacts: impactsFromAI.length > 0 ? impactsFromAI : undefined,
         };
 
         // 生成成功：异步写入战报生成记录，不阻塞响应
@@ -568,9 +590,6 @@ const buildQuestionnaireLoreText = (questionnaires: RequestQuestionnaire[]): str
 
         const ip = getClientIpFromHeaders(req.headers);
         const ipAnonymized = anonymizeIp(ip);
-        const authHeader = req.headers.get('authorization');
-        const authKey = authHeader?.startsWith('Bearer ') ? authHeader.substring(7).trim() : null;
-
         const reportJson = JSON.stringify(report);
         const outputBytes = new TextEncoder().encode(reportJson).length;
         const outputPreview = buildOutputPreviewForStorage(reportJson);
@@ -578,6 +597,7 @@ const buildQuestionnaireLoreText = (questionnaires: RequestQuestionnaire[]): str
         const outputSensitive = appConfig.ENABLE_SENSITIVE_WORD_FILTER
             ? await quickCheck(outputPreview)
             : { hasSensitiveWords: false };
+        const combatantsFallback = buildCombatantsFallbackForExtraJson(combatants);
 
         const inputJson = JSON.stringify({
             combatants,
@@ -588,10 +608,12 @@ const buildQuestionnaireLoreText = (questionnaires: RequestQuestionnaire[]): str
         const inputBytes = new TextEncoder().encode(inputJson).length;
 
         const recordPromise = (async () => {
-            const user = authKey ? await getUserByAuthKey(authKey) : null;
+            const user = await battleReportWriteContext.getAuthUser();
             const recordId = generateUUID();
-            const currentSeason = await fetchCurrentSeasonFromOrigin(new URL(req.url).origin);
-            const seasonStrictRules = deriveSeasonStrictRules(currentSeason);
+            const [currentSeason, seasonStrictRules] = await Promise.all([
+                battleReportWriteContext.getCurrentSeason(),
+                battleReportWriteContext.getSeasonStrictRules(),
+            ]);
 
             const normalizedScenarioFileName = (() => {
               if (typeof scenarioFileName !== 'string') return null;
@@ -630,7 +652,7 @@ const buildQuestionnaireLoreText = (questionnaires: RequestQuestionnaire[]): str
 	                scenarioDataCardId: typeof scenarioSourceDataCardId === 'string' ? scenarioSourceDataCardId : null,
 	                scenarioDataCardUpdatedAt: typeof scenarioSourceDataCardUpdatedAt === 'string' ? scenarioSourceDataCardUpdatedAt : null,
 	                language: normalizeOptionalString(language),
-	                selectedLevel: normalizeOptionalString(selectedLevel),
+	                selectedLevel: null,
 	                storyLength: normalizeOptionalString(storyLength),
                 readArenaHistory: typeof resolvedReadArenaHistory === 'boolean' ? resolvedReadArenaHistory : null,
                 arenaHistoryReadLimit: resolvedReadArenaHistory
@@ -689,6 +711,7 @@ const buildQuestionnaireLoreText = (questionnaires: RequestQuestionnaire[]): str
                                 : null)
                             : null,
 	                    narrativeHistoryReadCount: resolvedReadNarrativeHistory ? (narrativeHistoryForPrompt?.length ?? 0) : 0,
+                        combatantsFallback,
 	                }),
 	            });
 

@@ -65,6 +65,14 @@ describe('error-help', () => {
     ).toBe('tachie-auth-errors');
   });
 
+  test('infer modelscope auth by aliyun real-name verified message', () => {
+    expect(
+      inferEncyclopediaSlugForError({
+        message: 'ModelScope 权限不足（HTTP 403）：To use API-Inference,please make sure your associated Aliyun account is real name verified.',
+      }),
+    ).toBe('tachie-auth-errors');
+  });
+
   test('infer liblib auth by signature error message', () => {
     expect(
       inferEncyclopediaSlugForError({

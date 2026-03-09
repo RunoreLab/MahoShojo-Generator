@@ -1,6 +1,6 @@
 // pages/api/public-data-cards.ts
 
-import { getPublicDataCards, getDataCardById } from '@/lib/d1';
+import { getDataCardById, getPublicDataCards } from '@/lib/database/data-cards';
 import { withEdgeCache } from '@/lib/edge-cache';
 
 export const runtime = 'edge';

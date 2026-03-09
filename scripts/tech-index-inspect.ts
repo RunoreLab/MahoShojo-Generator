@@ -2,17 +2,8 @@
 
 import { loadEnvConfig } from '@next/env';
 
-import { queryFromD1 } from '@/lib/d1';
+import { getDataCardPayloadRowById } from '@/lib/database/data-card-tech-index';
 import { computeTechIndex } from '@/lib/metrics/techIndex';
-
-type D1RowsResult<T> = {
-  result?: Array<{ results?: T[] }>;
-};
-
-const readSingleRow = <T,>(result: unknown): T | null => {
-  const row = (result as D1RowsResult<T>)?.result?.[0]?.results?.[0];
-  return row ? (row as T) : null;
-};
 
 const parseArgs = (argv: string[]) => {
   const args = new Map<string, string>();
@@ -44,21 +35,7 @@ async function main() {
 
   const { id } = parseArgs(process.argv.slice(2));
 
-  const row = readSingleRow<{
-    id: string;
-    name: string | null;
-    type: string;
-    data: string;
-    updated_at: string;
-  }>(
-    await queryFromD1(
-      `SELECT id, name, type, data, updated_at
-       FROM data_cards
-       WHERE id = ?
-         AND deleted_at IS NULL`,
-      [id],
-    ),
-  );
+  const row = await getDataCardPayloadRowById(id);
 
   if (!row) {
     console.error('未找到数据卡:', id);
@@ -78,7 +55,7 @@ async function main() {
     id: row.id,
     name: row.name ?? null,
     type: row.type,
-    updatedAt: row.updated_at,
+    updatedAt: row.updatedAt,
     techScore: tech.techScore,
     techLevel: tech.techLevel,
     raw: tech.raw,

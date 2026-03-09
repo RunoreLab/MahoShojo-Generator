@@ -1,4 +1,49 @@
-import { queryFromD1 } from './core';
+type DeckCardsRepoBundle = {
+  db: unknown;
+  listDeckCardsWithCardContextByDeckId: (db: unknown, deckId: string) => Promise<Array<any>>;
+  getDeckCardMaxSortOrder: (db: unknown, deckId: string) => Promise<number>;
+  listDataCardsForDeckMutationByIds: (db: unknown, cardIds: string[]) => Promise<Array<any>>;
+  insertDeckCardIgnore: (
+    db: unknown,
+    payload: {
+      deckId: string;
+      dataCardId: string;
+      cardNameSnapshot: string;
+      cardTypeSnapshot: string;
+      sortOrder: number;
+    },
+  ) => Promise<boolean>;
+  deleteDeckCardsByDeckIdAndCardIds: (db: unknown, deckId: string, cardIds: string[]) => Promise<number>;
+  isDeckOwnedByUser: (db: unknown, deckId: string, userId: number) => Promise<boolean>;
+  pruneDeckInaccessibleCardsByDeckId: (db: unknown, deckId: string, ownerUserId: number) => Promise<number>;
+  touchDeckUpdatedAt: (db: unknown, deckId: string) => Promise<void>;
+};
+
+const readDeckCardsRepoBundle = async (): Promise<DeckCardsRepoBundle | null> => {
+  try {
+    const [{ getDrizzleDbFromRuntime }, cardsRepo, decksRepo] = await Promise.all([
+      import('@/lib/db/drizzle'),
+      import('@/lib/db/repositories/deck-cards'),
+      import('@/lib/db/repositories/decks'),
+    ]);
+    const db = getDrizzleDbFromRuntime();
+    if (!db) return null;
+
+    return {
+      db,
+      listDeckCardsWithCardContextByDeckId: cardsRepo.listDeckCardsWithCardContextByDeckId as DeckCardsRepoBundle['listDeckCardsWithCardContextByDeckId'],
+      getDeckCardMaxSortOrder: cardsRepo.getDeckCardMaxSortOrder as DeckCardsRepoBundle['getDeckCardMaxSortOrder'],
+      listDataCardsForDeckMutationByIds: cardsRepo.listDataCardsForDeckMutationByIds as DeckCardsRepoBundle['listDataCardsForDeckMutationByIds'],
+      insertDeckCardIgnore: cardsRepo.insertDeckCardIgnore as DeckCardsRepoBundle['insertDeckCardIgnore'],
+      deleteDeckCardsByDeckIdAndCardIds: cardsRepo.deleteDeckCardsByDeckIdAndCardIds as DeckCardsRepoBundle['deleteDeckCardsByDeckIdAndCardIds'],
+      isDeckOwnedByUser: cardsRepo.isDeckOwnedByUser as DeckCardsRepoBundle['isDeckOwnedByUser'],
+      pruneDeckInaccessibleCardsByDeckId: cardsRepo.pruneDeckInaccessibleCardsByDeckId as DeckCardsRepoBundle['pruneDeckInaccessibleCardsByDeckId'],
+      touchDeckUpdatedAt: decksRepo.touchDeckUpdatedAt as DeckCardsRepoBundle['touchDeckUpdatedAt'],
+    };
+  } catch {
+    return null;
+  }
+};
 
 type DeckCardAccessibility = {
   isAccessible: boolean;
@@ -72,38 +117,9 @@ export async function getDeckCardsWithAccess(
   viewerUserId?: number
 ): Promise<Array<any>> {
   try {
-    const result = await queryFromD1(
-      `SELECT rel.deck_id,
-              rel.data_card_id,
-              rel.card_name_snapshot,
-              rel.card_type_snapshot,
-              rel.sort_order,
-              rel.created_at AS rel_created_at,
-
-              dc.id AS card_id,
-              dc.user_id AS card_user_id,
-              dc.type AS card_type,
-              dc.name AS card_name,
-              dc.description AS card_description,
-              dc.data AS card_data,
-              dc.is_public AS card_is_public,
-              dc.usage_count AS usage_count,
-              dc.like_count AS like_count,
-              dc.favorite_count AS favorite_count,
-              dc.review_status AS card_review_status,
-              dc.created_at AS card_created_at,
-              dc.updated_at AS card_updated_at,
-              dc.deleted_at AS card_deleted_at,
-              u.username AS username
-       FROM deck_cards rel
-       LEFT JOIN data_cards dc ON rel.data_card_id = dc.id
-       LEFT JOIN users u ON dc.user_id = u.id
-       WHERE rel.deck_id = ?
-       ORDER BY rel.sort_order ASC, rel.created_at ASC`,
-      [deckId]
-    ) as any;
-
-    const rows = result?.success && result.result?.[0]?.results ? result.result[0].results : [];
+    const bundle = await readDeckCardsRepoBundle();
+    if (!bundle) return [];
+    const rows = await bundle.listDeckCardsWithCardContextByDeckId(bundle.db, deckId);
 
     return rows.map((row: any) => {
       const access = resolveAccessibility(row, viewerUserId);
@@ -155,25 +171,14 @@ export async function addCardsToDeck(
   cardIds: string[]
 ): Promise<{ success: boolean; added: number; skipped: number; error?: string }> {
   try {
+    const bundle = await readDeckCardsRepoBundle();
+    if (!bundle) return { success: false, added: 0, skipped: 0, error: '服务器内部错误' };
     const safeIds = [...new Set((cardIds || []).filter((id) => typeof id === 'string' && id.trim()).map((id) => id.trim()))].slice(0, 100);
     if (safeIds.length === 0) return { success: true, added: 0, skipped: 0 };
 
-    // 获取当前最大排序
-    const maxResult = await queryFromD1(
-      'SELECT COALESCE(MAX(sort_order), 0) AS max_sort FROM deck_cards WHERE deck_id = ?',
-      [deckId]
-    ) as any;
-    const baseSort = Number(maxResult?.result?.[0]?.results?.[0]?.max_sort ?? 0) || 0;
+    const baseSort = await bundle.getDeckCardMaxSortOrder(bundle.db, deckId);
 
-    // 批量读取可加入的卡（必须是本人私有或公开+审核通过，且不在回收站）
-    const placeholders = safeIds.map(() => '?').join(', ');
-    const cardsResult = await queryFromD1(
-      `SELECT id, user_id, type, name, is_public, review_status, deleted_at
-       FROM data_cards
-       WHERE id IN (${placeholders})`,
-      safeIds
-    ) as any;
-    const cards = cardsResult?.success && cardsResult.result?.[0]?.results ? cardsResult.result[0].results : [];
+    const cards = await bundle.listDataCardsForDeckMutationByIds(bundle.db, safeIds);
     const cardMap = new Map<string, any>(cards.map((c: any) => [c.id, c]));
 
     let added = 0;
@@ -194,25 +199,22 @@ export async function addCardsToDeck(
         continue;
       }
 
-      const insertResult = await queryFromD1(
-        `INSERT OR IGNORE INTO deck_cards (deck_id, data_card_id, card_name_snapshot, card_type_snapshot, sort_order)
-         VALUES (?, ?, ?, ?, ?)`,
-        [deckId, cardId, card.name || '', card.type || '', baseSort + i + 1]
-      ) as any;
+      const inserted = await bundle.insertDeckCardIgnore(bundle.db, {
+        deckId,
+        dataCardId: cardId,
+        cardNameSnapshot: card.name || '',
+        cardTypeSnapshot: card.type || '',
+        sortOrder: baseSort + i + 1,
+      });
 
-      if (!(insertResult?.success)) {
-        return { success: false, added, skipped, error: '添加卡片失败' };
-      }
-
-      const changes = insertResult.result?.[0]?.meta?.changes ?? 0;
-      if (changes > 0) {
+      if (inserted) {
         added += 1;
       } else {
         skipped += 1;
       }
     }
 
-    await queryFromD1('UPDATE decks SET updated_at = CURRENT_TIMESTAMP WHERE id = ?', [deckId]);
+    await bundle.touchDeckUpdatedAt(bundle.db, deckId);
 
     return { success: true, added, skipped };
   } catch (error) {
@@ -227,26 +229,18 @@ export async function removeCardsFromDeck(
   cardIds: string[]
 ): Promise<{ success: boolean; removed: number; error?: string }> {
   try {
+    const bundle = await readDeckCardsRepoBundle();
+    if (!bundle) return { success: false, removed: 0, error: '服务器内部错误' };
     const safeIds = [...new Set((cardIds || []).filter((id) => typeof id === 'string' && id.trim()).map((id) => id.trim()))].slice(0, 200);
     if (safeIds.length === 0) return { success: true, removed: 0 };
 
-    const placeholders = safeIds.map(() => '?').join(', ');
-    const params = [deckId, ...safeIds, userId];
-    const result = await queryFromD1(
-      `DELETE FROM deck_cards
-       WHERE deck_id = ?
-         AND data_card_id IN (${placeholders})
-         AND EXISTS (SELECT 1 FROM decks d WHERE d.id = deck_cards.deck_id AND d.user_id = ?)`,
-      params
-    ) as any;
+    const isOwner = await bundle.isDeckOwnedByUser(bundle.db, deckId, userId);
+    const removed = isOwner
+      ? await bundle.deleteDeckCardsByDeckIdAndCardIds(bundle.db, deckId, safeIds)
+      : 0;
 
-    const changes = result?.result?.[0]?.meta?.changes ?? 0;
-    if (result?.success) {
-      await queryFromD1('UPDATE decks SET updated_at = CURRENT_TIMESTAMP WHERE id = ?', [deckId]);
-      return { success: true, removed: Number(changes) || 0 };
-    }
-
-    return { success: false, removed: 0, error: '移除失败' };
+    await bundle.touchDeckUpdatedAt(bundle.db, deckId);
+    return { success: true, removed };
   } catch (error) {
     console.error('移除卡组卡片失败:', error);
     return { success: false, removed: 0, error: '服务器内部错误' };
@@ -258,33 +252,17 @@ export async function pruneDeckInaccessibleCards(
   ownerUserId: number
 ): Promise<{ success: boolean; removed: number; error?: string }> {
   try {
-    // 仅允许卡组所有者执行清理
-    const ownerCheck = await queryFromD1('SELECT 1 FROM decks WHERE id = ? AND user_id = ? LIMIT 1', [deckId, ownerUserId]) as any;
-    const isOwner = !!ownerCheck?.result?.[0]?.results?.length;
+    const bundle = await readDeckCardsRepoBundle();
+    if (!bundle) return { success: false, removed: 0, error: '服务器内部错误' };
+
+    const isOwner = await bundle.isDeckOwnedByUser(bundle.db, deckId, ownerUserId);
     if (!isOwner) {
       return { success: false, removed: 0, error: '卡组不存在或无权访问' };
     }
 
-    const result = await queryFromD1(
-      `DELETE FROM deck_cards
-       WHERE deck_id = ?
-         AND NOT EXISTS (
-           SELECT 1
-           FROM data_cards dc
-           WHERE dc.id = deck_cards.data_card_id
-             AND dc.deleted_at IS NULL
-             AND (dc.user_id = ? OR (dc.is_public = 1 AND dc.review_status = 'approved'))
-         )`,
-      [deckId, ownerUserId]
-    ) as any;
-
-    const removed = Number(result?.result?.[0]?.meta?.changes ?? 0) || 0;
-    if (result?.success) {
-      await queryFromD1('UPDATE decks SET updated_at = CURRENT_TIMESTAMP WHERE id = ?', [deckId]);
-      return { success: true, removed };
-    }
-
-    return { success: false, removed: 0, error: '清理失败' };
+    const removed = await bundle.pruneDeckInaccessibleCardsByDeckId(bundle.db, deckId, ownerUserId);
+    await bundle.touchDeckUpdatedAt(bundle.db, deckId);
+    return { success: true, removed };
   } catch (error) {
     console.error('清理不可用卡片失败:', error);
     return { success: false, removed: 0, error: '服务器内部错误' };

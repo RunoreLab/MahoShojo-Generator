@@ -1,22 +1,35 @@
-import { useState, useRef } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import Head from 'next/head';
 import Link from 'next/link';
+import { useRouter } from 'next/router';
 import TurnstileWidget, { TurnstileRef } from '@/components/Turnstile';
+import { PASSWORD_MIN_LENGTH, getPasswordPolicySummaryMessage, validatePasswordPolicy } from '@/lib/auth/password-policy';
 
 interface RecoveryMessage {
   type: 'success' | 'error';
   text: string;
 }
 
+const REQUEST_SUCCESS_HINT = '如果您输入的信息正确，系统会向邮箱发送一次性重置链接，请在 15 分钟内完成重置。';
+const RESET_SUCCESS_HINT = '新密码设置成功，请使用密码登录。';
+
 const PasswordRecoveryPage = () => {
-  const [form, setForm] = useState({ username: '', email: '' });
+  const router = useRouter();
+  const resetToken = useMemo(() => {
+    const value = router.query.token;
+    if (Array.isArray(value)) return value[0] ?? '';
+    return typeof value === 'string' ? value.trim() : '';
+  }, [router.query.token]);
+  const isResetMode = resetToken.length > 0;
+
+  const [requestForm, setRequestForm] = useState({ username: '', email: '' });
+  const [resetForm, setResetForm] = useState({ newPassword: '', confirmPassword: '' });
   const [turnstileToken, setTurnstileToken] = useState('');
   const [message, setMessage] = useState<RecoveryMessage | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const turnstileRef = useRef<TurnstileRef>(null);
-  const successHint = '如果您输入的内容正确，密码则会发送到您的邮箱中。 \n 如果输入的内容不正确，则不会有密码发送。';
 
-  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+  const handleRequestSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
     if (!turnstileToken) {
@@ -31,34 +44,33 @@ const PasswordRecoveryPage = () => {
       const response = await fetch('/api/auth/recover', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          username: form.username.trim(),
-          email: form.email.trim(),
-          turnstileToken
-        })
+          username: requestForm.username.trim(),
+          email: requestForm.email.trim(),
+          turnstileToken,
+        }),
       });
 
       const data = await response.json();
-
       if (response.ok) {
         setMessage({
           type: 'success',
-          text: data.message || successHint
+          text: data.message || REQUEST_SUCCESS_HINT,
         });
-        setForm({ username: '', email: '' });
+        setRequestForm({ username: '', email: '' });
       } else {
         setMessage({
           type: 'error',
-          text: data.error || '请求失败，请稍后重试。'
+          text: data.error || '请求失败，请稍后重试。',
         });
       }
     } catch (error) {
       console.error('Recovery request failed:', error);
       setMessage({
         type: 'error',
-        text: '请求失败，请检查网络连接或稍后重试。'
+        text: '请求失败，请检查网络连接或稍后重试。',
       });
     } finally {
       setIsSubmitting(false);
@@ -67,28 +79,92 @@ const PasswordRecoveryPage = () => {
     }
   };
 
+  const handleResetSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setMessage(null);
+
+    const newPassword = resetForm.newPassword.trim();
+    const confirmPassword = resetForm.confirmPassword.trim();
+    if (!newPassword || !confirmPassword) {
+      setMessage({ type: 'error', text: '请填写并确认新密码。' });
+      return;
+    }
+
+    if (newPassword !== confirmPassword) {
+      setMessage({ type: 'error', text: '两次输入的密码不一致。' });
+      return;
+    }
+
+    const policy = validatePasswordPolicy(newPassword);
+    if (!policy.ok) {
+      setMessage({
+        type: 'error',
+        text: getPasswordPolicySummaryMessage(policy.issues) || '新密码不符合安全要求。',
+      });
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      const response = await fetch('/api/auth/recover/reset', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          token: resetToken,
+          newPassword,
+        }),
+      });
+
+      const data = await response.json();
+      if (response.ok) {
+        setMessage({
+          type: 'success',
+          text: data.message || RESET_SUCCESS_HINT,
+        });
+        setResetForm({ newPassword: '', confirmPassword: '' });
+      } else {
+        setMessage({
+          type: 'error',
+          text: data.error || '重置失败，请稍后重试。',
+        });
+      }
+    } catch (error) {
+      console.error('Recovery reset failed:', error);
+      setMessage({
+        type: 'error',
+        text: '请求失败，请检查网络连接或稍后重试。',
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   const isSuccess = message?.type === 'success';
 
   return (
     <>
       <Head>
-        <title>找回密码 - MahoShojo Generator</title>
+        <title>{isResetMode ? '设置新密码' : '找回密码'} - MahoShojo Generator</title>
       </Head>
       <div className="magic-background-white min-h-screen">
         <div className="container py-12">
           <div className="card max-w-lg mx-auto">
-            <h1 className="text-2xl font-bold text-center mb-4">找回密码</h1>
+            <h1 className="text-2xl font-bold text-center mb-4">{isResetMode ? '设置新密码' : '找回密码'}</h1>
+
             {!isSuccess && (
               <p className="text-sm text-gray-600 text-center mb-6">
-                请输入您注册时使用的用户名、邮箱，并完成验证码验证。
+                {isResetMode
+                  ? '请设置新的登录密码。重置链接仅可使用一次，过期后请重新发起找回。'
+                  : '请输入注册用户名和邮箱，系统会发送一次性重置链接。'}
               </p>
             )}
 
             {!isSuccess && message && (
               <div
-                className={`mb-6 p-3 rounded-md text-sm ${message.type === 'success'
-                  ? 'bg-blue-100 text-blue-800'
-                  : 'bg-red-100 text-red-700'
+                className={`mb-6 p-3 rounded-md text-sm ${
+                  message.type === 'success' ? 'bg-blue-100 text-blue-800' : 'bg-red-100 text-red-700'
                 }`}
               >
                 {message.text}
@@ -111,16 +187,54 @@ const PasswordRecoveryPage = () => {
                 </div>
                 <p className="text-base text-gray-700">{message?.text}</p>
               </div>
-            ) : (
-              <form onSubmit={handleSubmit} className="space-y-4">
+            ) : isResetMode ? (
+              <form onSubmit={handleResetSubmit} className="space-y-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    用户名
-                  </label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">新密码</label>
+                  <input
+                    type="password"
+                    value={resetForm.newPassword}
+                    onChange={(event) => setResetForm({ ...resetForm, newPassword: event.target.value })}
+                    className="input-field"
+                    placeholder="请输入新密码"
+                    required
+                    minLength={PASSWORD_MIN_LENGTH}
+                    maxLength={128}
+                    autoComplete="new-password"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">确认新密码</label>
+                  <input
+                    type="password"
+                    value={resetForm.confirmPassword}
+                    onChange={(event) => setResetForm({ ...resetForm, confirmPassword: event.target.value })}
+                    className="input-field"
+                    placeholder="请再次输入新密码"
+                    required
+                    minLength={PASSWORD_MIN_LENGTH}
+                    maxLength={128}
+                    autoComplete="new-password"
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className={`w-full generate-button ${isSubmitting ? 'opacity-50 cursor-not-allowed' : ''}`}
+                >
+                  {isSubmitting ? '提交中...' : '确认重置'}
+                </button>
+              </form>
+            ) : (
+              <form onSubmit={handleRequestSubmit} className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">用户名</label>
                   <input
                     type="text"
-                    value={form.username}
-                    onChange={(event) => setForm({ ...form, username: event.target.value })}
+                    value={requestForm.username}
+                    onChange={(event) => setRequestForm({ ...requestForm, username: event.target.value })}
                     className="input-field"
                     placeholder="请输入用户名"
                     required
@@ -129,13 +243,11 @@ const PasswordRecoveryPage = () => {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    邮箱地址
-                  </label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">邮箱地址</label>
                   <input
                     type="email"
-                    value={form.email}
-                    onChange={(event) => setForm({ ...form, email: event.target.value })}
+                    value={requestForm.email}
+                    onChange={(event) => setRequestForm({ ...requestForm, email: event.target.value })}
                     className="input-field"
                     placeholder="请输入邮箱地址"
                     required
@@ -143,21 +255,18 @@ const PasswordRecoveryPage = () => {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    验证码
-                  </label>
-                  <TurnstileWidget
-                    ref={turnstileRef}
-                    onVerify={setTurnstileToken}
-                  />
+                  <label className="block text-sm font-medium text-gray-700 mb-2">验证码</label>
+                  <TurnstileWidget ref={turnstileRef} onVerify={setTurnstileToken} />
                 </div>
 
                 <button
                   type="submit"
                   disabled={isSubmitting || !turnstileToken}
-                  className={`w-full generate-button ${isSubmitting || !turnstileToken ? 'opacity-50 cursor-not-allowed' : ''}`}
+                  className={`w-full generate-button ${
+                    isSubmitting || !turnstileToken ? 'opacity-50 cursor-not-allowed' : ''
+                  }`}
                 >
-                  {isSubmitting ? '提交中...' : '发送找回邮件'}
+                  {isSubmitting ? '提交中...' : '发送重置链接'}
                 </button>
               </form>
             )}

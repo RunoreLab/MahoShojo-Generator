@@ -4,6 +4,7 @@ import type { ComponentProps } from 'react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 import DataCardDetailsModal from '@/components/DataCardDetailsModal';
+import { mapPublicDataCardRowToDetailsCard } from '@/lib/data-card-read-mappers';
 import { PRESET_LIST } from '@/lib/presets';
 
 export type LeaderboardEntityDetailsTarget = {
@@ -20,8 +21,6 @@ type CacheEntry = {
   pendingNotice: string | null;
 };
 
-type PublicDataCardRow = Record<string, unknown>;
-
 const presetByFilename = new Map(PRESET_LIST.map((preset) => [preset.filename, preset]));
 
 const fetchJson = async <T,>(url: string, init?: RequestInit): Promise<T> => {
@@ -29,70 +28,6 @@ const fetchJson = async <T,>(url: string, init?: RequestInit): Promise<T> => {
   const json = (await res.json()) as T;
   if (!res.ok) throw new Error(`HTTP ${res.status}: ${JSON.stringify(json)}`);
   return json;
-};
-
-const readString = (value: unknown): string | null => (typeof value === 'string' ? value : null);
-const readNumber = (value: unknown): number | null => (typeof value === 'number' ? value : null);
-const readBoolean = (value: unknown): boolean | null => (typeof value === 'boolean' ? value : null);
-
-const normalizePublicCardRowToCard = (
-  row: PublicDataCardRow,
-  fallback: { id: string; name: string; author: string },
-): ComponentProps<typeof DataCardDetailsModal>['card'] => {
-  const id = readString(row.id) ?? fallback.id;
-  const name = (readString(row.name) ?? '').trim() || fallback.name;
-  const description = readString(row.description) ?? '';
-  const typeRaw = readString(row.type);
-  const type = typeRaw === 'scenario' || typeRaw === 'history' ? typeRaw : 'character';
-
-  const dataValue = row.data;
-  const data =
-    typeof dataValue === 'string'
-      ? dataValue
-      : JSON.stringify(dataValue ?? {}, null, 2);
-
-  const isPublic =
-    row.is_public === 1 ||
-    row.is_public === true ||
-    readBoolean(row.isPublic) === true;
-
-  const usageCount =
-    readNumber(row.usage_count) ??
-    readNumber(row.usageCount) ??
-    undefined;
-
-  const likeCount =
-    readNumber(row.like_count) ??
-    readNumber(row.likeCount) ??
-    undefined;
-
-  const favoriteCount =
-    readNumber(row.favorite_count) ??
-    readNumber(row.favoriteCount) ??
-    undefined;
-
-  const author =
-    (readString(row.username) ?? '').trim() ||
-    (readString(row.author) ?? '').trim() ||
-    fallback.author;
-
-  const createdAt = readString(row.created_at) ?? readString(row.createdAt) ?? undefined;
-  const updatedAt = readString(row.updated_at) ?? readString(row.updatedAt) ?? undefined;
-
-  return {
-    id,
-    name,
-    description,
-    type,
-    data,
-    isPublic,
-    usageCount,
-    likeCount,
-    favoriteCount,
-    author,
-    createdAt,
-    updatedAt,
-  };
 };
 
 export function LeaderboardEntityDetailsModal(props: {
@@ -142,7 +77,7 @@ export function LeaderboardEntityDetailsModal(props: {
     void (async () => {
       try {
         if (entity.entityType === 'data_card') {
-          const result = await fetchJson<{ success: boolean; card?: PublicDataCardRow; error?: string }>(
+          const result = await fetchJson<{ success: boolean; card?: Record<string, unknown>; error?: string }>(
             `/api/public-data-cards?id=${encodeURIComponent(entity.entityId)}`,
             { signal: controller.signal },
           );
@@ -151,7 +86,7 @@ export function LeaderboardEntityDetailsModal(props: {
             throw new Error(result.error ?? '无法读取数据卡');
           }
 
-          const card = normalizePublicCardRowToCard(result.card, {
+          const card = mapPublicDataCardRowToDetailsCard(result.card, {
             id: entity.entityId,
             name: entity.displayName,
             author:
@@ -275,4 +210,3 @@ export function LeaderboardEntityDetailsModal(props: {
     />
   );
 }
-

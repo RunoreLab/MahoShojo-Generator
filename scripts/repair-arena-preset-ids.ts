@@ -1,18 +1,12 @@
 import { loadEnvConfig } from '@next/env';
 
+import {
+  deletePresetArenaRatingByQueue,
+  hasPresetArenaRatingByQueue,
+  listInvalidPresetArenaRatings,
+  renamePresetArenaRatingByQueue,
+} from '@/lib/database/arena-maintenance';
 import { PRESET_LIST } from '@/lib/presets';
-
-type QueryFromD1 = (sql: string, params?: unknown[]) => Promise<unknown>;
-
-const readRows = <T>(result: unknown): T[] => {
-  const rows = (result as any)?.result?.[0]?.results;
-  return Array.isArray(rows) ? (rows as T[]) : [];
-};
-
-const hasChanges = (result: unknown): boolean => {
-  const changes = (result as any)?.result?.[0]?.meta?.changes;
-  return typeof changes === 'number' && Number.isFinite(changes) && changes > 0;
-};
 
 const parseArgs = (argv: string[]) => {
   const args = new Set(argv);
@@ -23,33 +17,13 @@ const parseArgs = (argv: string[]) => {
 
 const main = async () => {
   loadEnvConfig(process.cwd(), process.env.NODE_ENV !== 'production');
-  const { queryFromD1 } = (await import('../lib/d1')) as { queryFromD1: QueryFromD1 };
 
   const { apply } = parseArgs(process.argv.slice(2));
 
   const presetIds = PRESET_LIST.map((preset) => preset.filename);
   const presetNameToId = new Map(PRESET_LIST.map((preset) => [preset.name.trim(), preset.filename]));
 
-  const placeholders = presetIds.map(() => '?').join(', ');
-  const invalid = (await queryFromD1(
-    `SELECT entity_id as entityId, queue, rating, games, wins, losses, draws, updated_at as updatedAt
-     FROM arena_ratings
-     WHERE entity_type = 'preset'
-       AND entity_id NOT IN (${placeholders})
-     ORDER BY queue ASC, games DESC, updated_at DESC`,
-    presetIds
-  )) as any;
-
-  const rows = readRows<{
-    entityId: string;
-    queue: 'strict' | 'free';
-    rating: number;
-    games: number;
-    wins: number;
-    losses: number;
-    draws: number;
-    updatedAt: string;
-  }>(invalid);
+  const rows = await listInvalidPresetArenaRatings(presetIds);
 
   if (rows.length === 0) {
     console.log('[repair-arena-preset-ids] 未发现异常预设 ID。');
@@ -70,24 +44,19 @@ const main = async () => {
       continue;
     }
 
-    const exists = (await queryFromD1(
-      `SELECT 1 as ok
-       FROM arena_ratings
-       WHERE entity_type = 'preset' AND entity_id = ? AND queue = ?
-       LIMIT 1`,
-      [canonical, row.queue]
-    )) as any;
-    const canonicalExists = readRows<{ ok: number }>(exists).length > 0;
+    const canonicalExists = await hasPresetArenaRatingByQueue({
+      entityId: canonical,
+      queue: row.queue,
+    });
 
     if (canonicalExists) {
       console.log(`- 删除别名：queue=${row.queue} ${JSON.stringify(entityId)} -> ${canonical}（canonical 已存在）`);
       if (apply) {
-        const deleted = await queryFromD1(
-          `DELETE FROM arena_ratings
-           WHERE entity_type = 'preset' AND entity_id = ? AND queue = ?`,
-          [entityId, row.queue]
-        );
-        if (!hasChanges(deleted)) {
+        const deleted = await deletePresetArenaRatingByQueue({
+          entityId,
+          queue: row.queue,
+        });
+        if (deleted <= 0) {
           console.log(`  - 警告：删除未生效（可能已被并发修复）：queue=${row.queue} entityId=${JSON.stringify(entityId)}`);
         }
       }
@@ -96,13 +65,13 @@ const main = async () => {
 
     console.log(`- 迁移主键：queue=${row.queue} ${JSON.stringify(entityId)} -> ${canonical}`);
     if (apply) {
-      const updated = await queryFromD1(
-        `UPDATE arena_ratings
-         SET entity_id = ?, updated_at = ?
-         WHERE entity_type = 'preset' AND entity_id = ? AND queue = ?`,
-        [canonical, nowIso, entityId, row.queue]
-      );
-      if (!hasChanges(updated)) {
+      const updated = await renamePresetArenaRatingByQueue({
+        fromEntityId: entityId,
+        toEntityId: canonical,
+        queue: row.queue,
+        updatedAt: nowIso,
+      });
+      if (updated <= 0) {
         console.log(`  - 警告：更新未生效（可能已被并发修复）：queue=${row.queue} entityId=${JSON.stringify(entityId)}`);
       }
     }

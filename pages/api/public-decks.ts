@@ -1,20 +1,13 @@
-import { getDeckById, getDeckCardsWithAccess, getPublicDecks, getUserByAuthKey } from '@/lib/d1';
+import { getDeckCardsWithAccess } from '@/lib/database/deck-cards';
+import { getDeckById, getPublicDecks } from '@/lib/database/decks';
+import { getAuthUser } from '@/lib/auth/server';
+import { getDeckStatus } from '@/lib/deck-status';
+import { mapDeckReadRow, mapDeckReadRows } from '@/lib/deck-read-mappers';
 
 export const runtime = 'edge';
 
 const MAX_LIMIT = 100;
 const MAX_SEARCH_LENGTH = 200;
-
-type AuthenticatedUser = { id: number; username: string };
-
-async function getUserFromAuth(req: Request): Promise<AuthenticatedUser | null> {
-  const authHeader = req.headers.get('authorization');
-  if (!authHeader || !authHeader.startsWith('Bearer ')) return null;
-
-  const authKey = authHeader.substring(7);
-  const user = await getUserByAuthKey(authKey);
-  return user;
-}
 
 const readIntParam = (value: string | null, fallback: number) => {
   if (value == null) return fallback;
@@ -40,7 +33,7 @@ export default async function handler(req: Request): Promise<Response> {
     const limit = clamp(readIntParam(url.searchParams.get('limit'), 12), 1, MAX_LIMIT);
     const offset = Math.max(0, readIntParam(url.searchParams.get('offset'), 0));
 
-    const viewer = await getUserFromAuth(req);
+    const viewer = (await getAuthUser(req))?.user ?? null;
     const search = typeof searchRaw === 'string' ? searchRaw.trim() : '';
 
     if (search.length > MAX_SEARCH_LENGTH) {
@@ -50,14 +43,15 @@ export default async function handler(req: Request): Promise<Response> {
       });
     }
 
+    const normalizedSortBy = sortByRaw === 'createdAt' ? 'created_at' : sortByRaw;
     const sortBy =
-      sortByRaw === 'likes' || sortByRaw === 'favorites' || sortByRaw === 'created_at'
-        ? sortByRaw
+      normalizedSortBy === 'likes' || normalizedSortBy === 'favorites' || normalizedSortBy === 'created_at'
+        ? normalizedSortBy
         : undefined;
 
     if (id) {
       const deck = await getDeckById(id);
-      if (!deck || deck.is_public !== 1) {
+      if (!deck || getDeckStatus(deck).status !== 'public') {
         return new Response(JSON.stringify({ success: false, error: '卡组不存在' }), {
           status: 404,
           headers: { 'Content-Type': 'application/json' }
@@ -65,15 +59,17 @@ export default async function handler(req: Request): Promise<Response> {
       }
 
       const cards = await getDeckCardsWithAccess(id, viewer?.id);
+      const mappedDeck = mapDeckReadRow(deck);
 
-      return new Response(JSON.stringify({ success: true, deck, cards }), {
+      return new Response(JSON.stringify({ success: true, deck: mappedDeck, cards }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' }
       });
     }
 
     const decks = await getPublicDecks(limit, offset, search || undefined, sortBy);
-    return new Response(JSON.stringify({ success: true, decks }), {
+    const mappedDecks = mapDeckReadRows(decks);
+    return new Response(JSON.stringify({ success: true, decks: mappedDecks }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' }
     });

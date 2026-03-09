@@ -7,11 +7,17 @@ import SortSelector from './SortSelector';
 import DataCardDetailsModal from './DataCardDetailsModal';
 import { useAuth } from '@/lib/useAuth';
 import { authStorage, dataCardApi, favoritesApi, deckApi } from '@/lib/auth';
+import {
+  isPublicVisibility,
+  mapPublicDataCardRowToBattleSelectionPayload,
+  normalizePublicVisibilityValue,
+} from '@/lib/data-card-read-mappers';
 import { addUsedCard, isCardUsed } from '@/lib/localStorage';
 import { inferTemplate } from '@/lib/data-card-converter';
 import { buildTitleDisplay } from '@/lib/text';
 import { ChevronDown, Filter } from 'lucide-react';
 import DecksModal from './DecksModal';
+import { getDataCardStatus } from '@/lib/data-card-status';
 
 interface BattleDataModalProps {
   isOpen: boolean;
@@ -31,16 +37,6 @@ interface BattleDataModalProps {
 }
 
 type BattleDataTab = 'my' | 'public' | 'recommended' | 'favorites' | 'pvpHand';
-
-const parseDataCardPayload = (raw: unknown): any => {
-  if (typeof raw === 'string') {
-    return JSON.parse(raw);
-  }
-  if (raw && typeof raw === 'object') {
-    return raw;
-  }
-  throw new Error('数据卡内容为空或格式不受支持。');
-};
 
 const normalizeTagIds = (value: unknown): string[] => {
   const rawList: string[] = [];
@@ -691,22 +687,7 @@ export default function BattleDataModal({
         }
       }
 
-      // 解析数据卡的JSON内容
-      const cardData = parseDataCardPayload(card.data);
-
-      const payload = {
-        ...cardData,
-        _cardId: card.id,
-        _cardName: card.name,
-        _cardDescription: card.description || '',
-        _isPublic: card.is_public,
-        _updatedAt: card.updated_at,
-        _createdAt: card.created_at,
-        _author: card.username || '未知',
-        _likeCount: typeof card.like_count === 'number' ? card.like_count : undefined,
-        _favoriteCount: typeof card.favorite_count === 'number' ? card.favorite_count : undefined,
-        _usageCount: typeof card.usage_count === 'number' ? card.usage_count : undefined,
-      };
+      const payload = mapPublicDataCardRowToBattleSelectionPayload(card);
 
       if (selectionMode === 'multi') {
         if (canToggle) {
@@ -720,7 +701,7 @@ export default function BattleDataModal({
       }
 
       // 如果是公开卡片且未使用过，增加使用次数（仅在「加入」时触发）
-      if (nextSelected && card.is_public && !isCardUsed(card.id)) {
+      if (nextSelected && isPublicVisibility(payload._isPublic) && !isCardUsed(cardId)) {
         void (async () => {
           try {
             const response = await fetch('/api/data-card-stats', {
@@ -729,7 +710,7 @@ export default function BattleDataModal({
                 'Content-Type': 'application/json',
               },
               body: JSON.stringify({
-                cardId: card.id,
+                cardId,
                 type: 'usage'
               })
             });
@@ -738,7 +719,7 @@ export default function BattleDataModal({
               const result = await response.json();
               if (result.success) {
                 // 添加到本地存储
-                addUsedCard(card.id);
+                addUsedCard(cardId);
               }
             }
           } catch (error) {
@@ -777,20 +758,7 @@ export default function BattleDataModal({
         if (!cardId || nextSelectedIds.has(cardId)) continue;
 
         try {
-          const cardData = parseDataCardPayload(card.data);
-          const payload = {
-            ...cardData,
-            _cardId: card.id,
-            _cardName: card.name,
-            _cardDescription: card.description || '',
-            _isPublic: card.is_public,
-            _updatedAt: card.updated_at,
-            _createdAt: card.created_at,
-            _author: card.username || '未知',
-            _likeCount: typeof card.like_count === 'number' ? card.like_count : undefined,
-            _favoriteCount: typeof card.favorite_count === 'number' ? card.favorite_count : undefined,
-            _usageCount: typeof card.usage_count === 'number' ? card.usage_count : undefined,
-          };
+          const payload = mapPublicDataCardRowToBattleSelectionPayload(card);
 
           if (canToggle) {
             onToggleCard?.(payload, true);
@@ -801,7 +769,7 @@ export default function BattleDataModal({
           nextSelectedIds.add(cardId);
           remaining -= 1;
 
-          if (card.is_public && !isCardUsed(cardId)) {
+          if (isPublicVisibility(payload._isPublic) && !isCardUsed(cardId)) {
             void (async () => {
               try {
                 const response = await fetch('/api/data-card-stats', {
@@ -1569,7 +1537,7 @@ export default function BattleDataModal({
 	                                description: refHint ? `PVP 手牌（${sourceLabel}快照：${refHint}）` : `PVP 手牌（${sourceLabel}快照）`,
 	                                type: 'character',
 	                                data: typeof card.dataJson === 'string' ? card.dataJson : JSON.stringify(card.dataJson ?? {}),
-	                                is_public: true,
+	                                isPublic: true,
 	                                username: author,
 	                              });
 	                              setShowDetailsModal(true);
@@ -1646,7 +1614,7 @@ export default function BattleDataModal({
 	                        description={card.description}
 	                        type={card.type}
 	                        roleType={card.roleType}
-	                        isPublic={card.is_public}
+	                        isPublic={normalizePublicVisibilityValue(card)}
                           isSelected={isSelected}
 	                        reviewStatus={card.review_status}
 	                        usageCount={card.usage_count}
@@ -1729,7 +1697,7 @@ export default function BattleDataModal({
             description: selectedCard.description,
             type: selectedCard.type,
             data: selectedCard.data,
-            isPublic: selectedCard.is_public,
+            isPublic: getDataCardStatus(selectedCard).status === 'public',
             usageCount: selectedCard.usage_count,
             likeCount: selectedCard.like_count,
             favoriteCount: selectedCard.favorite_count,

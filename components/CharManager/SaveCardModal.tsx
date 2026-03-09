@@ -1,6 +1,7 @@
 import React, { useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { config } from '@/lib/config';
+import { JsonSizeIndicator } from '@/components/shared/JsonSizeIndicator';
 
 interface SaveCardModalProps {
   isOpen: boolean;
@@ -16,6 +17,7 @@ interface SaveCardModalProps {
   isSaving?: boolean;
   currentCardCount?: number;
   userCapacity?: number;
+  data?: unknown;
 }
 
 export default function SaveCardModal({
@@ -31,7 +33,8 @@ export default function SaveCardModal({
   error,
   isSaving = false,
   currentCardCount = 0,
-  userCapacity = config.DEFAULT_DATA_CARD_CAPACITY
+  userCapacity = config.DEFAULT_DATA_CARD_CAPACITY,
+  data
 }: SaveCardModalProps) {
   // 阻止背景滚动
   useEffect(() => {
@@ -144,6 +147,14 @@ export default function SaveCardModal({
             <div className="p-3 bg-yellow-50 border border-yellow-200 rounded text-sm text-yellow-800">
               ⚠️ 公开的数据卡将对所有用户可见
             </div>
+          )}
+
+          {data !== undefined && data !== null && (
+            <JsonSizeIndicator
+              data={data}
+              className="mt-0"
+              warningText="⚠️ 接近云端 300KB 上限，保存可能失败，请先精简数据。"
+            />
           )}
 
           <div className="flex gap-2">

@@ -1,29 +1,73 @@
-import { generateUUID, queryFromD1 } from './core';
+import { generateUUID } from './core';
+import {
+  getDeckStatus as getNormalizedDeckStatus,
+  getDeckVisibilityValue,
+  isDeckBanned as isDeckMarkedBanned,
+} from '@/lib/deck-status';
 
 export type DeckSortBy = 'likes' | 'favorites' | 'created_at';
 
 export function isDeckBanned(deck: any): boolean {
-  return deck && deck.is_public === -1;
+  return isDeckMarkedBanned(deck);
 }
 
 export function getDeckStatus(deck: any): { status: 'public' | 'private' | 'banned'; label: string; color: string } {
-  if (!deck) {
-    return { status: 'private', label: '私有', color: 'gray' };
-  }
-
-  if (deck.is_public === -1) {
-    return { status: 'banned', label: '封禁', color: 'red' };
-  }
-  if (deck.is_public === 1) {
-    return { status: 'public', label: '公开', color: 'green' };
-  }
-  return { status: 'private', label: '私有', color: 'gray' };
+  return getNormalizedDeckStatus(deck);
 }
+
+type DecksRepoBundle = {
+  db: unknown;
+  countDecksByUserId: (db: unknown, userId: number) => Promise<number>;
+  insertDeck: (
+    db: unknown,
+    payload: { id: string; userId: number; name: string; description: string; isPublic: number },
+  ) => Promise<boolean>;
+  listDecksByUserIdWithCardCount: (db: unknown, userId: number) => Promise<any[]>;
+  listPublicDecksWithAuthor: (
+    db: unknown,
+    params: { limit: number; offset: number; search?: string; sortBy?: DeckSortBy },
+  ) => Promise<any[]>;
+  getDeckByIdWithAuthor: (db: unknown, deckId: string) => Promise<any | null>;
+  updateDeckByIdOwnedByUser: (
+    db: unknown,
+    deckId: string,
+    userId: number,
+    payload: { name?: string; description?: string; isPublic?: number },
+  ) => Promise<number>;
+  deleteDeckByIdOwnedByUser: (db: unknown, deckId: string, userId: number) => Promise<number>;
+  incrementPublicDeckLikeCountById: (db: unknown, deckId: string) => Promise<number>;
+};
+
+const readDecksRepoBundle = async (): Promise<DecksRepoBundle | null> => {
+  try {
+    const [{ getDrizzleDbFromRuntime }, repo] = await Promise.all([
+      import('@/lib/db/drizzle'),
+      import('@/lib/db/repositories/decks'),
+    ]);
+    const db = getDrizzleDbFromRuntime();
+    if (!db) return null;
+
+    return {
+      db,
+      countDecksByUserId: repo.countDecksByUserId as DecksRepoBundle['countDecksByUserId'],
+      insertDeck: repo.insertDeck as DecksRepoBundle['insertDeck'],
+      listDecksByUserIdWithCardCount: repo.listDecksByUserIdWithCardCount as DecksRepoBundle['listDecksByUserIdWithCardCount'],
+      listPublicDecksWithAuthor: repo.listPublicDecksWithAuthor as DecksRepoBundle['listPublicDecksWithAuthor'],
+      getDeckByIdWithAuthor: repo.getDeckByIdWithAuthor as DecksRepoBundle['getDeckByIdWithAuthor'],
+      updateDeckByIdOwnedByUser: repo.updateDeckByIdOwnedByUser as DecksRepoBundle['updateDeckByIdOwnedByUser'],
+      deleteDeckByIdOwnedByUser: repo.deleteDeckByIdOwnedByUser as DecksRepoBundle['deleteDeckByIdOwnedByUser'],
+      incrementPublicDeckLikeCountById: repo.incrementPublicDeckLikeCountById as DecksRepoBundle['incrementPublicDeckLikeCountById'],
+    };
+  } catch {
+    return null;
+  }
+};
 
 export async function countUserDecks(userId: number): Promise<number> {
   try {
-    const result = await queryFromD1('SELECT COUNT(*) AS count FROM decks WHERE user_id = ?', [userId]) as any;
-    return Number(result?.result?.[0]?.results?.[0]?.count ?? 0) || 0;
+    const bundle = await readDecksRepoBundle();
+    if (!bundle) return 0;
+    return await bundle.countDecksByUserId(bundle.db, userId);
   } catch (error) {
     console.error('统计卡组数量失败:', error);
     return 0;
@@ -37,15 +81,19 @@ export async function createDeck(
   isPublic: boolean | number = 0
 ): Promise<{ success: boolean; id?: string; error?: string }> {
   try {
+    const bundle = await readDecksRepoBundle();
+    if (!bundle) return { success: false, error: '创建卡组失败' };
     const id = generateUUID();
-    const publicValue = typeof isPublic === 'number' ? isPublic : (isPublic ? 1 : 0);
+    const publicValue = getDeckVisibilityValue({ isPublic });
 
-    const result = await queryFromD1(
-      'INSERT INTO decks (id, user_id, name, description, is_public) VALUES (?, ?, ?, ?, ?)',
-      [id, userId, name, description, publicValue]
-    ) as any;
-
-    if (result?.success) {
+    const ok = await bundle.insertDeck(bundle.db, {
+      id,
+      userId,
+      name,
+      description,
+      isPublic: publicValue,
+    });
+    if (ok) {
       return { success: true, id };
     }
 
@@ -58,16 +106,9 @@ export async function createDeck(
 
 export async function getUserDecks(userId: number): Promise<any[]> {
   try {
-    const result = await queryFromD1(
-      `SELECT d.*,
-              (SELECT COUNT(*) FROM deck_cards dc WHERE dc.deck_id = d.id) AS card_count
-       FROM decks d
-       WHERE d.user_id = ?
-       ORDER BY d.updated_at DESC, d.created_at DESC`,
-      [userId]
-    ) as any;
-
-    return result?.success && result.result?.[0]?.results ? result.result[0].results : [];
+    const bundle = await readDecksRepoBundle();
+    if (!bundle) return [];
+    return await bundle.listDecksByUserIdWithCardCount(bundle.db, userId);
   } catch (error) {
     console.error('获取用户卡组失败:', error);
     return [];
@@ -81,33 +122,14 @@ export async function getPublicDecks(
   sortBy?: DeckSortBy
 ): Promise<any[]> {
   try {
-    let sql = `
-      SELECT d.*,
-             u.username,
-             (SELECT COUNT(*) FROM deck_cards dc WHERE dc.deck_id = d.id) AS card_count
-      FROM decks d
-      JOIN users u ON d.user_id = u.id
-      WHERE d.is_public = 1
-    `;
-    const params: any[] = [];
-
-    if (search) {
-      sql += ' AND (d.name LIKE ? OR d.description LIKE ?)';
-      params.push(`%${search}%`, `%${search}%`);
-    }
-
-    let orderBy = 'd.created_at DESC';
-    if (sortBy === 'likes') {
-      orderBy = 'd.like_count DESC, d.created_at DESC';
-    } else if (sortBy === 'favorites') {
-      orderBy = 'd.favorite_count DESC, d.created_at DESC';
-    }
-
-    sql += ` ORDER BY ${orderBy} LIMIT ? OFFSET ?`;
-    params.push(limit, offset);
-
-    const result = await queryFromD1(sql, params) as any;
-    return result?.success && result.result?.[0]?.results ? result.result[0].results : [];
+    const bundle = await readDecksRepoBundle();
+    if (!bundle) return [];
+    return await bundle.listPublicDecksWithAuthor(bundle.db, {
+      limit,
+      offset,
+      search,
+      sortBy,
+    });
   } catch (error) {
     console.error('获取公开卡组失败:', error);
     return [];
@@ -116,21 +138,9 @@ export async function getPublicDecks(
 
 export async function getDeckById(deckId: string): Promise<any | null> {
   try {
-    const result = await queryFromD1(
-      `SELECT d.*,
-              u.username,
-              (SELECT COUNT(*) FROM deck_cards dc WHERE dc.deck_id = d.id) AS card_count
-       FROM decks d
-       JOIN users u ON d.user_id = u.id
-       WHERE d.id = ?
-       LIMIT 1`,
-      [deckId]
-    ) as any;
-
-    if (result?.success && result.result?.[0]?.results?.length > 0) {
-      return result.result[0].results[0];
-    }
-    return null;
+    const bundle = await readDecksRepoBundle();
+    if (!bundle) return null;
+    return await bundle.getDeckByIdWithAuthor(bundle.db, deckId);
   } catch (error) {
     console.error('获取卡组失败:', error);
     return null;
@@ -143,33 +153,32 @@ export async function updateDeck(
   payload: { name?: string; description?: string; isPublic?: boolean | number }
 ): Promise<{ success: boolean; error?: string }> {
   try {
+    const bundle = await readDecksRepoBundle();
+    if (!bundle) return { success: false, error: '更新卡组失败' };
     const fields: string[] = [];
-    const params: any[] = [];
+    const repoPayload: { name?: string; description?: string; isPublic?: number } = {};
 
     if (payload.name !== undefined) {
       fields.push('name = ?');
-      params.push(payload.name);
+      repoPayload.name = payload.name;
     }
 
     if (payload.description !== undefined) {
       fields.push('description = ?');
-      params.push(payload.description);
+      repoPayload.description = payload.description;
     }
 
     if (payload.isPublic !== undefined) {
       fields.push('is_public = ?');
-      params.push(typeof payload.isPublic === 'number' ? payload.isPublic : (payload.isPublic ? 1 : 0));
+      repoPayload.isPublic = getDeckVisibilityValue({ isPublic: payload.isPublic });
     }
 
     if (fields.length === 0) {
       return { success: true };
     }
 
-    const sql = `UPDATE decks SET ${fields.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?`;
-    const result = await queryFromD1(sql, [...params, deckId, userId]) as any;
-
-    const changes = result?.result?.[0]?.meta?.changes ?? 0;
-    if (result?.success && changes > 0) {
+    const changed = await bundle.updateDeckByIdOwnedByUser(bundle.db, deckId, userId, repoPayload);
+    if (changed > 0) {
       return { success: true };
     }
 
@@ -182,9 +191,10 @@ export async function updateDeck(
 
 export async function deleteDeck(deckId: string, userId: number): Promise<boolean> {
   try {
-    const result = await queryFromD1('DELETE FROM decks WHERE id = ? AND user_id = ?', [deckId, userId]) as any;
-    const changes = result?.result?.[0]?.meta?.changes ?? 0;
-    return Boolean(result?.success && changes > 0);
+    const bundle = await readDecksRepoBundle();
+    if (!bundle) return false;
+    const changed = await bundle.deleteDeckByIdOwnedByUser(bundle.db, deckId, userId);
+    return changed > 0;
   } catch (error) {
     console.error('删除卡组失败:', error);
     return false;
@@ -193,16 +203,12 @@ export async function deleteDeck(deckId: string, userId: number): Promise<boolea
 
 export async function incrementDeckLike(deckId: string): Promise<boolean> {
   try {
-    const result = await queryFromD1(
-      'UPDATE decks SET like_count = like_count + 1 WHERE id = ? AND is_public = 1',
-      [deckId]
-    ) as any;
-
-    const changes = result?.result?.[0]?.meta?.changes ?? 0;
-    return Boolean(result?.success && changes > 0);
+    const bundle = await readDecksRepoBundle();
+    if (!bundle) return false;
+    const changed = await bundle.incrementPublicDeckLikeCountById(bundle.db, deckId);
+    return changed > 0;
   } catch (error) {
     console.error('点赞卡组失败:', error);
     return false;
   }
 }
-

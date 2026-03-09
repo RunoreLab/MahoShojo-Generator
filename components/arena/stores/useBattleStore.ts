@@ -6,6 +6,7 @@ import { createJSONStorage, persist } from 'zustand/middleware';
 import {
   BattleStoreState,
   BattleSettings,
+  isCombatantLimitReached,
   MAX_COMBATANTS,
   ScenarioState,
   MAX_AUX_SCENARIOS,
@@ -68,8 +69,8 @@ export const useBattleStore = create<BattleStoreState>()(
       streamNarrativeHistoryReadCount: null,
       streamReasoning: null,
       streamUpdateMetaDebug: null,
+      latestAiImpacts: null,
       storyLength: 'default',
-      selectedLevel: '',
       selectedLanguage: 'zh-CN',
       lastGenerationId: null,
       settings: defaultSettings,
@@ -98,8 +99,8 @@ export const useBattleStore = create<BattleStoreState>()(
       setStreamNarrativeHistoryReadCount: (count) => set({ streamNarrativeHistoryReadCount: count }),
       setStreamReasoning: (reasoning) => set({ streamReasoning: reasoning }),
       setStreamUpdateMetaDebug: (debug) => set({ streamUpdateMetaDebug: debug }),
+      setLatestAiImpacts: (impacts) => set({ latestAiImpacts: impacts }),
       setStoryLength: (storyLength) => set({ storyLength }),
-      setSelectedLevel: (selectedLevel) => set({ selectedLevel }),
       setSelectedLanguage: (selectedLanguage) => set({ selectedLanguage }),
       setLastGenerationId: (lastGenerationId) => set({ lastGenerationId }),
       updateSettings: (incoming) =>
@@ -112,7 +113,7 @@ export const useBattleStore = create<BattleStoreState>()(
 
       addCombatant: (combatant) =>
         set((state) => {
-          if (state.combatants.length >= MAX_COMBATANTS) {
+          if (isCombatantLimitReached(state.combatants.length, MAX_COMBATANTS)) {
             return state;
           }
           return { combatants: [...state.combatants, combatant] };
@@ -157,6 +158,7 @@ export const useBattleStore = create<BattleStoreState>()(
           streamNarrativeHistoryReadCount: null,
           streamReasoning: null,
           streamUpdateMetaDebug: null,
+          latestAiImpacts: null,
           lastGenerationId: null,
         }),
 
@@ -343,7 +345,6 @@ export const useBattleStore = create<BattleStoreState>()(
         generationMode: state.generationMode,
         arenaFreeRankingEnabled: state.arenaFreeRankingEnabled,
         storyLength: state.storyLength,
-        selectedLevel: state.selectedLevel,
         selectedLanguage: state.selectedLanguage,
         settings: state.settings,
       }),

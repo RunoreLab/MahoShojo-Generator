@@ -14,13 +14,7 @@ export type BetaAccessState = {
 };
 
 export async function fetchBetaAccessStats(): Promise<BetaAccessStats> {
-  const authHeader = await authStorage.getAuthHeader();
-  if (!authHeader) {
-    throw new Error('未登录');
-  }
-  const res = await fetch('/api/me/beta-access', {
-    headers: { Authorization: authHeader },
-  });
+  const res = await authStorage.fetch('/api/me/beta-access');
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     throw new Error((data as any)?.error || '加载内测权限数据失败');

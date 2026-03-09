@@ -13,7 +13,10 @@
  * - --max-tier=<badgeId> 仅发放到指定档位（包含该档位）。例如：--max-tier=excellent_reporter
  */
 
-import { queryFromD1 } from '@/lib/database/core';
+import {
+  countUsersWithPublicApprovedCards as countUsersWithPublicApprovedCardsFromRepo,
+  listUsersWithPublicApprovedCardTotals,
+} from '@/lib/database/badges-granting';
 import { grantBadgeToUser, userHasBadge } from '@/lib/database/badges';
 import { increaseUserSlotCount } from '@/lib/database/users';
 import { REPORTER_TIERS } from './reporter-rules';
@@ -52,42 +55,18 @@ function isUserQualifiedForTier(user: UserTotalsRow, tier: (typeof REPORTER_TIER
 }
 
 async function countUsersWithPublicApprovedCards(): Promise<number> {
-  const sql = `
-    SELECT COUNT(DISTINCT user_id) AS count
-    FROM data_cards
-    WHERE is_public = 1
-      AND review_status = 'approved'
-  `;
-  const res = await queryFromD1(sql, []);
-  const row = (res as any).result?.[0]?.results?.[0];
-  return Number(row?.count ?? 0) || 0;
+  return countUsersWithPublicApprovedCardsFromRepo();
 }
 
 async function loadUserTotals(): Promise<UserTotalsRow[]> {
-  const sql = `
-    SELECT
-      dc.user_id AS user_id,
-      u.username AS username,
-      COUNT(dc.id) AS public_cards,
-      SUM(dc.like_count) AS total_likes,
-      SUM(dc.favorite_count) AS total_favorites,
-      SUM(dc.usage_count) AS total_usage
-    FROM data_cards dc
-    JOIN users u ON u.id = dc.user_id
-    WHERE dc.is_public = 1
-      AND dc.review_status = 'approved'
-    GROUP BY dc.user_id, u.username
-  `;
-
-  const res = await queryFromD1(sql, []);
-  const rows = (res as any).result?.[0]?.results ?? [];
-  return rows.map((row: any) => ({
-    userId: Number(row.user_id ?? 0) || 0,
-    username: String(row.username ?? ''),
-    publicCards: Number(row.public_cards ?? 0) || 0,
-    totalLikes: Number(row.total_likes ?? 0) || 0,
-    totalFavorites: Number(row.total_favorites ?? 0) || 0,
-    totalUsage: Number(row.total_usage ?? 0) || 0,
+  const rows = await listUsersWithPublicApprovedCardTotals();
+  return rows.map((row) => ({
+    userId: row.userId,
+    username: row.username,
+    publicCards: row.publicCards,
+    totalLikes: row.totalLikes,
+    totalFavorites: row.totalFavorites,
+    totalUsage: row.totalUsage,
   }));
 }
 

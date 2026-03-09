@@ -1,4 +1,5 @@
-import { getUserByAuthKey, updateEquippedBadges } from '@/lib/d1';
+import { updateEquippedBadges } from '@/lib/database/badges';
+import { requireAuthUser } from '@/lib/auth/server';
 
 export const runtime = 'edge';
 
@@ -15,26 +16,8 @@ export default async function handler(req: Request): Promise<Response> {
   }
 
   try {
-    // 从请求头获取认证信息
-    const authHeader = req.headers.get('authorization');
-
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return new Response(JSON.stringify({ error: '未登录' }), {
-        status: 401,
-        headers: { 'Content-Type': 'application/json' }
-      });
-    }
-
-    const authKey = authHeader.substring(7);
-
-    // 验证用户
-    const user = await getUserByAuthKey(authKey);
-    if (!user) {
-      return new Response(JSON.stringify({ error: '认证失败' }), {
-        status: 401,
-        headers: { 'Content-Type': 'application/json' }
-      });
-    }
+    const auth = await requireAuthUser(req);
+    if ('response' in auth) return auth.response;
 
     // 解析请求体
     const body = await req.json();
@@ -56,7 +39,7 @@ export default async function handler(req: Request): Promise<Response> {
     }
 
     // 更新佩戴徽章
-    const success = await updateEquippedBadges(user.id, badgeIds);
+    const success = await updateEquippedBadges(auth.user.id, badgeIds);
 
     if (!success) {
       return new Response(JSON.stringify({ error: '更新失败' }), {

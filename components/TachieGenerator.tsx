@@ -324,6 +324,9 @@ export default function TachieGenerator({
               <div className="mt-2 text-xs text-gray-500">
                 可直接粘贴 Token；若误贴了 <code>Bearer </code> 前缀，系统会自动去除。
               </div>
+              <div className="mt-1 text-xs text-gray-500">
+                若报 401/403 且提示绑定阿里云或实名认证，请先到 ModelScope 账号设置完成后再重试。
+              </div>
             </div>
 
             <div className="input-group">

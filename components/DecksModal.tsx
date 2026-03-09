@@ -2,21 +2,22 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { deckApi, deckFavoritesApi, deckStatsApi, dataCardApi } from '@/lib/auth';
 import { addLikedDeck, getLikedDecks } from '@/lib/localStorage';
 import { buildTitleDisplay } from '@/lib/text';
+import { getDeckStatus, getDeckVisibilityValue } from '@/lib/deck-status';
 
 type DeckTab = 'my' | 'public' | 'favorites';
 
 type DeckRow = {
   id: string;
-  user_id: number;
+  userId: number;
   username?: string;
   name: string;
   description?: string | null;
-  is_public: number;
-  like_count?: number;
-  favorite_count?: number;
-  card_count?: number;
-  created_at?: string;
-  updated_at?: string;
+  isPublic: number;
+  likeCount?: number;
+  favoriteCount?: number;
+  cardCount?: number;
+  createdAt?: string | null;
+  updatedAt?: string | null;
 };
 
 type DeckCardEntry = {
@@ -35,9 +36,10 @@ interface DecksModalProps {
   onImportDeck: (deckId: string) => void;
 }
 
-const statusLabel = (isPublic: number): { label: string; className: string } => {
-  if (isPublic === -1) return { label: '封禁', className: 'bg-red-50 text-red-700 border-red-200' };
-  if (isPublic === 1) return { label: '公开', className: 'bg-green-50 text-green-700 border-green-200' };
+const statusLabel = (deck: unknown): { label: string; className: string } => {
+  const status = getDeckStatus(deck).status;
+  if (status === 'banned') return { label: '封禁', className: 'bg-red-50 text-red-700 border-red-200' };
+  if (status === 'public') return { label: '公开', className: 'bg-green-50 text-green-700 border-green-200' };
   return { label: '私有', className: 'bg-gray-50 text-gray-700 border-gray-200' };
 };
 
@@ -56,7 +58,7 @@ export default function DecksModal({ isOpen, onClose, onImportDeck }: DecksModal
   const [deckCount, setDeckCount] = useState<number | null>(null);
 
   const [publicSearch, setPublicSearch] = useState('');
-  const [publicSortBy, setPublicSortBy] = useState<'likes' | 'favorites' | 'created_at'>('created_at');
+  const [publicSortBy, setPublicSortBy] = useState<'likes' | 'favorites' | 'createdAt'>('createdAt');
   const [publicOffset, setPublicOffset] = useState(0);
   const publicLimit = 12;
   const [hasMorePublic, setHasMorePublic] = useState(true);
@@ -150,7 +152,7 @@ export default function DecksModal({ isOpen, onClose, onImportDeck }: DecksModal
         if (mode === 'edit') {
           setEditName(detail.deck?.name || '');
           setEditDescription(detail.deck?.description || '');
-          setEditIsPublic(typeof detail.deck?.is_public === 'number' ? detail.deck.is_public : 0);
+          setEditIsPublic(getDeckVisibilityValue(detail.deck) === 1 ? 1 : 0);
         }
       } finally {
         setLoading(false);
@@ -222,7 +224,7 @@ export default function DecksModal({ isOpen, onClose, onImportDeck }: DecksModal
       }
       await refreshMyDecks();
       showToast('已保存');
-      setDetailDeck((prev) => (prev ? { ...prev, name, description: editDescription, is_public: editIsPublic } : prev));
+      setDetailDeck((prev) => (prev ? { ...prev, name, description: editDescription, isPublic: editIsPublic } : prev));
     } finally {
       setLoading(false);
     }
@@ -322,7 +324,7 @@ export default function DecksModal({ isOpen, onClose, onImportDeck }: DecksModal
       setPublicDecks((prev) =>
         prev.map((d) =>
           d.id === deckId
-            ? { ...d, favorite_count: Math.max(0, (d.favorite_count || 0) + (isFav ? -1 : 1)) }
+            ? { ...d, favoriteCount: Math.max(0, (d.favoriteCount || 0) + (isFav ? -1 : 1)) }
             : d
         )
       );
@@ -358,7 +360,7 @@ export default function DecksModal({ isOpen, onClose, onImportDeck }: DecksModal
         next.add(deckId);
         return next;
       });
-      setPublicDecks((prev) => prev.map((d) => (d.id === deckId ? { ...d, like_count: (d.like_count || 0) + 1 } : d)));
+      setPublicDecks((prev) => prev.map((d) => (d.id === deckId ? { ...d, likeCount: (d.likeCount || 0) + 1 } : d)));
       try {
         const ok = await deckStatsApi.like(deckId);
         if (!ok) {
@@ -366,7 +368,7 @@ export default function DecksModal({ isOpen, onClose, onImportDeck }: DecksModal
         }
       } catch {
         setPublicDecks((prev) =>
-          prev.map((d) => (d.id === deckId ? { ...d, like_count: Math.max(0, (d.like_count || 0) - 1) } : d))
+          prev.map((d) => (d.id === deckId ? { ...d, likeCount: Math.max(0, (d.likeCount || 0) - 1) } : d))
         );
       }
     },
@@ -471,16 +473,16 @@ export default function DecksModal({ isOpen, onClose, onImportDeck }: DecksModal
                 <div className="min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
                     <h3 className="text-lg font-semibold break-words">{detailDeck.name || '未命名卡组'}</h3>
-                    <span className={`text-xs px-2 py-0.5 rounded-full border ${statusLabel(detailDeck.is_public).className}`}>
-                      {statusLabel(detailDeck.is_public).label}
+                    <span className={`text-xs px-2 py-0.5 rounded-full border ${statusLabel(detailDeck).className}`}>
+                      {statusLabel(detailDeck).label}
                     </span>
                     {detailDeck.username && <span className="text-xs text-gray-500">作者：{detailDeck.username}</span>}
                   </div>
                   {detailDeck.description && <p className="text-sm text-gray-600 mt-1 break-words">{detailDeck.description}</p>}
                   <div className="text-xs text-gray-500 mt-2 flex gap-3 flex-wrap">
-                    <span>卡片：{detailDeck.card_count ?? detailCards.length}</span>
-                    <span>点赞：{detailDeck.like_count ?? 0}</span>
-                    <span>收藏：{detailDeck.favorite_count ?? 0}</span>
+                    <span>卡片：{detailDeck.cardCount ?? detailCards.length}</span>
+                    <span>点赞：{detailDeck.likeCount ?? 0}</span>
+                    <span>收藏：{detailDeck.favoriteCount ?? 0}</span>
                   </div>
                 </div>
 
@@ -672,15 +674,15 @@ export default function DecksModal({ isOpen, onClose, onImportDeck }: DecksModal
                             <div className="min-w-0">
                               <div className="flex items-center gap-2 flex-wrap">
                                 <div className="font-semibold break-words">{d.name || '未命名卡组'}</div>
-                                <span className={`text-xs px-2 py-0.5 rounded-full border ${statusLabel(d.is_public).className}`}>
-                                  {statusLabel(d.is_public).label}
+                                <span className={`text-xs px-2 py-0.5 rounded-full border ${statusLabel(d).className}`}>
+                                  {statusLabel(d).label}
                                 </span>
                               </div>
                               {d.description && <div className="text-sm text-gray-600 mt-1 break-words">{d.description}</div>}
                               <div className="text-xs text-gray-500 mt-2 flex gap-3 flex-wrap">
-                                <span>卡片：{d.card_count ?? 0}</span>
-                                <span>点赞：{d.like_count ?? 0}</span>
-                                <span>收藏：{d.favorite_count ?? 0}</span>
+                                <span>卡片：{d.cardCount ?? 0}</span>
+                                <span>点赞：{d.likeCount ?? 0}</span>
+                                <span>收藏：{d.favoriteCount ?? 0}</span>
                               </div>
                             </div>
                             <div className="flex flex-col gap-2">
@@ -718,7 +720,7 @@ export default function DecksModal({ isOpen, onClose, onImportDeck }: DecksModal
                       className="input-field w-72"
                     />
                     <select value={publicSortBy} onChange={(e) => setPublicSortBy(e.target.value as any)} className="input-field">
-                      <option value="created_at">最新</option>
+                      <option value="createdAt">最新</option>
                       <option value="likes">最多点赞</option>
                       <option value="favorites">最多收藏</option>
                     </select>
@@ -745,9 +747,9 @@ export default function DecksModal({ isOpen, onClose, onImportDeck }: DecksModal
                               <div className="text-xs text-gray-500 mt-1">作者：{d.username || '未知'}</div>
                               {d.description && <div className="text-sm text-gray-600 mt-2 break-words">{d.description}</div>}
                               <div className="text-xs text-gray-500 mt-2 flex gap-3 flex-wrap">
-                                <span>卡片：{d.card_count ?? 0}</span>
-                                <span>点赞：{d.like_count ?? 0}</span>
-                                <span>收藏：{d.favorite_count ?? 0}</span>
+                                <span>卡片：{d.cardCount ?? 0}</span>
+                                <span>点赞：{d.likeCount ?? 0}</span>
+                                <span>收藏：{d.favoriteCount ?? 0}</span>
                               </div>
                             </div>
                             <div className="flex flex-col gap-2">
@@ -817,9 +819,9 @@ export default function DecksModal({ isOpen, onClose, onImportDeck }: DecksModal
                               <div className="text-xs text-gray-500 mt-1">作者：{d.username || '未知'}</div>
                               {d.description && <div className="text-sm text-gray-600 mt-2 break-words">{d.description}</div>}
                               <div className="text-xs text-gray-500 mt-2 flex gap-3 flex-wrap">
-                                <span>卡片：{d.card_count ?? 0}</span>
-                                <span>点赞：{d.like_count ?? 0}</span>
-                                <span>收藏：{d.favorite_count ?? 0}</span>
+                                <span>卡片：{d.cardCount ?? 0}</span>
+                                <span>点赞：{d.likeCount ?? 0}</span>
+                                <span>收藏：{d.favoriteCount ?? 0}</span>
                               </div>
                             </div>
                             <div className="flex flex-col gap-2">

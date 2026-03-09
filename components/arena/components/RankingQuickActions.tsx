@@ -21,6 +21,19 @@ type StrictRangeInfo = {
   exceededBy: number;
   aRating: number;
   bRating: number;
+  aGames?: number;
+  bGames?: number;
+  lowGamesTightened?: boolean;
+};
+
+type StrictPairInfo = {
+  used: number | null;
+  limit: number;
+  exceeded: boolean | null;
+  recentDeduped: boolean | null;
+  recentAppliedAtIso: string | null;
+  nextEligibleAtIso: string | null;
+  windowMinutes: number;
 };
 
 type StrictPreflightResponse =
@@ -34,6 +47,7 @@ type StrictPreflightResponse =
         exceeded: boolean | null;
         sinceIso: string | null;
       };
+      pair: StrictPairInfo;
       range?: StrictRangeInfo | null;
     }
   | { success: false; error: string };
@@ -78,7 +92,6 @@ const buildStrictSetupMissingReasons = (input: {
   scenarioFileName: string | null;
   rankableCombatants: CombatantData[];
   userGuidance: string;
-  selectedLevel: string;
   selectedLanguage: string;
   readArenaHistory: boolean;
   readCurrentState: boolean;
@@ -96,7 +109,6 @@ const buildStrictSetupMissingReasons = (input: {
   if (!input.isAuthenticated) reasons.push('需要先登录');
   if (input.battleMode !== input.requiredMode) reasons.push(`模式需为「${formatBattleModeLabel(input.requiredMode)}」`);
   if (input.rankableCombatants.length <= 0) reasons.push('需先选择 1 位可计分的参战角色（数据卡/预设）');
-  if (input.selectedLevel.trim()) reasons.push('等级需为「默认」');
   if (input.selectedLanguage !== 'zh-CN') reasons.push('生成语言需为「简体中文」');
 
   const actualStoryGuidance = normalizeStrictStoryGuidance(input.userGuidance);
@@ -155,16 +167,20 @@ const pickNonBlacklistedModelForProvider = (providerId: string): string | null =
 
   const preferred: string[] = [
     'gemini-2.5-flash-lite',
+    'gemini-3.1-flash-lite-preview',
     'gemini-2.5-flash',
     'gemini-2.0-flash-lite',
     'gemini-2.0-flash',
     'gemini-3-flash-preview',
+    'gemini-3.1-pro-preview',
     'gemini-3-pro-preview',
     'google/gemini-2.5-flash-lite',
+    'google/gemini-3.1-flash-lite-preview',
     'google/gemini-2.5-flash',
     'google/gemini-2.0-flash-lite',
     'google/gemini-2.0-flash',
     'google/gemini-3-flash-preview',
+    'google/gemini-3.1-pro-preview',
     'google/gemini-3-pro-preview',
   ];
 
@@ -193,10 +209,10 @@ const formatStrictReason = (code: string): string => {
     'strict-not-public': '严格排位仅允许公开角色卡',
     'strict-not-approved': '严格排位仅允许已审核通过的公开角色卡',
     'strict-out-of-range': '对手分差过大（不计严格排位）',
-    'dedup-user-pair': '短时间同一对手重复对局（严格去重）',
+    'dedup-user-pair': '同一对手组合仍处于计分冷却期（严格去重）',
+    'pair-daily-limit': '同一对手组合今日计分已达上限（严格去重）',
     'strict-check-failed': '严格计分检查失败（已降级为不计）',
     'language-not-zh-cn': '生成语言需为「简体中文」',
-    'level-not-default': '等级需为「默认」',
     'has-user-guidance': '需清空「故事引导」',
     'season-user-guidance-missing': '需填写赛季指定「故事引导」',
     'season-user-guidance-mismatch': '「故事引导」与赛季规则不一致',
@@ -214,22 +230,56 @@ const formatStrictReason = (code: string): string => {
   return map[code] ?? code;
 };
 
+const formatStrictTimeHint = (iso: string | null): string | null => {
+  if (typeof iso !== 'string' || !iso.trim()) return null;
+  const value = new Date(iso);
+  if (!Number.isFinite(value.getTime())) return null;
+  return new Intl.DateTimeFormat('zh-CN', {
+    timeZone: 'Asia/Shanghai',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(value);
+};
+
 const formatStrictReasonWithDetails = (
   code: string,
   range: StrictRangeInfo | null,
+  pair: StrictPairInfo | null,
 ): string => {
-  if (code !== 'strict-out-of-range') return formatStrictReason(code);
-  if (!range || typeof range !== 'object') return formatStrictReason(code);
+  if (code === 'strict-out-of-range') {
+    if (!range || typeof range !== 'object') return formatStrictReason(code);
 
-  const absDiff = Number.isFinite(range.absDiff) ? Math.max(0, Math.floor(range.absDiff)) : null;
-  const maxAbsDiff = Number.isFinite(range.maxAbsDiff) ? Math.max(0, Math.floor(range.maxAbsDiff)) : null;
-  if (absDiff == null || maxAbsDiff == null) return formatStrictReason(code);
+    const absDiff = Number.isFinite(range.absDiff) ? Math.max(0, Math.floor(range.absDiff)) : null;
+    const maxAbsDiff = Number.isFinite(range.maxAbsDiff) ? Math.max(0, Math.floor(range.maxAbsDiff)) : null;
+    if (absDiff == null || maxAbsDiff == null) return formatStrictReason(code);
 
-  const exceededBy = Math.max(0, absDiff - maxAbsDiff);
-  const aRating = Number.isFinite(range.aRating) ? Math.floor(range.aRating) : null;
-  const bRating = Number.isFinite(range.bRating) ? Math.floor(range.bRating) : null;
-  const ratings = aRating != null && bRating != null ? `；双方分 ${aRating} vs ${bRating}` : '';
-  return `对手分差过大：允许 ≤${maxAbsDiff}，当前差 ${absDiff}（超出 ${exceededBy}${ratings}）`;
+    const exceededBy = Math.max(0, absDiff - maxAbsDiff);
+    const aRating = Number.isFinite(range.aRating) ? Math.floor(range.aRating) : null;
+    const bRating = Number.isFinite(range.bRating) ? Math.floor(range.bRating) : null;
+    const ratings = aRating != null && bRating != null ? `；双方分 ${aRating} vs ${bRating}` : '';
+    const tightened = range.lowGamesTightened ? '；因低局数保护已额外收紧分差门槛' : '';
+    return `对手分差过大：允许 ≤${maxAbsDiff}，当前差 ${absDiff}（超出 ${exceededBy}${ratings}${tightened}）`;
+  }
+
+  if (code === 'dedup-user-pair') {
+    const nextEligibleText = formatStrictTimeHint(pair?.nextEligibleAtIso ?? null);
+    if (!pair || pair.windowMinutes <= 0) return formatStrictReason(code);
+    return nextEligibleText
+      ? `同一对手组合在 ${pair.windowMinutes} 分钟冷却期内重复对局，预计北京时间 ${nextEligibleText} 后恢复计分`
+      : `同一对手组合在 ${pair.windowMinutes} 分钟冷却期内重复对局（严格去重）`;
+  }
+
+  if (code === 'pair-daily-limit') {
+    if (pair?.used != null && Number.isFinite(pair.limit)) {
+      return `同一对手组合今日已计 ${pair.used}/${pair.limit} 局，今日不再计入严格排位`;
+    }
+    return formatStrictReason(code);
+  }
+
+  return formatStrictReason(code);
 };
 
 export function RankingQuickActions() {
@@ -239,8 +289,6 @@ export function RankingQuickActions() {
 
   const battleMode = useBattleSelector((state) => state.battleMode);
   const setBattleMode = useBattleSelector((state) => state.setBattleMode);
-  const selectedLevel = useBattleSelector((state) => state.selectedLevel);
-  const setSelectedLevel = useBattleSelector((state) => state.setSelectedLevel);
   const selectedLanguage = useBattleSelector((state) => state.selectedLanguage);
   const setSelectedLanguage = useBattleSelector((state) => state.setSelectedLanguage);
   const arenaFreeRankingEnabled = useBattleSelector((state) => state.arenaFreeRankingEnabled);
@@ -321,7 +369,6 @@ export function RankingQuickActions() {
         scenarioFileName: typeof scenario.fileName === 'string' ? scenario.fileName : null,
         rankableCombatants,
         userGuidance: settings.userGuidance,
-        selectedLevel,
         selectedLanguage,
         readArenaHistory: settings.readArenaHistory,
         readCurrentState: settings.readCurrentState,
@@ -346,7 +393,6 @@ export function RankingQuickActions() {
       scenario.content,
       scenario.fileName,
       selectedLanguage,
-      selectedLevel,
       seasonStrictRules.mode,
       seasonStrictRules.questionnaireLoreAllowed,
       seasonStrictRules.questionnaireLorePresetIds,
@@ -404,7 +450,6 @@ export function RankingQuickActions() {
     }
 
     setBattleMode(seasonStrictRules.mode);
-    setSelectedLevel('');
     setSelectedLanguage('zh-CN');
     updateSettings({
       userGuidance: seasonStrictRules.storyGuidance ? seasonStrictRules.storyGuidance : '',
@@ -578,7 +623,7 @@ export function RankingQuickActions() {
     }
 
     setError(
-      `✅ 已应用严格排位设置：${formatBattleModeLabel(seasonStrictRules.mode)}模式 / 默认等级 / 简体中文 / ${
+      `✅ 已应用严格排位设置：${formatBattleModeLabel(seasonStrictRules.mode)}模式 / 简体中文 / ${
         seasonStrictRules.storyGuidance ? '应用赛季故事引导' : '清空引导'
       } / 关闭读取 / 清空判定与行动引导${
         seasonRuleMessage ? ` / ${seasonRuleMessage}` : ''
@@ -603,7 +648,6 @@ export function RankingQuickActions() {
 
     return {
       battleMode,
-      selectedLevel,
       language: selectedLanguage,
       storyLength,
       scenarioEnabled: battleMode === 'scenario' && Boolean(scenario.content),
@@ -631,7 +675,6 @@ export function RankingQuickActions() {
     scenario.content,
     scenario.fileName,
     selectedLanguage,
-    selectedLevel,
     questionnaireLoreEnabled,
     questionnaireLoreIds,
     settings.readArenaHistory,
@@ -650,7 +693,6 @@ export function RankingQuickActions() {
     }
     if (combatants.length !== 2) reasons.push('combatant-count-not-2');
     if (selectedLanguage !== 'zh-CN') reasons.push('language-not-zh-cn');
-    if (selectedLevel.trim()) reasons.push('level-not-default');
 
     const actualStoryGuidance = normalizeStrictStoryGuidance(settings.userGuidance);
     if (seasonStrictRules.storyGuidance) {
@@ -714,7 +756,6 @@ export function RankingQuickActions() {
     scenario.content,
     scenario.fileName,
     selectedLanguage,
-    selectedLevel,
     questionnaireLoreEnabled,
     questionnaireLoreIds,
     seasonStrictRules.mode,
@@ -783,11 +824,19 @@ export function RankingQuickActions() {
         willCount: strictPreflight.willCount,
         reasons: strictPreflight.reasons,
         range: strictPreflight.range ?? null,
+        pair: strictPreflight.pair ?? null,
         daily: strictPreflight.daily,
         source: 'server' as const,
       };
     }
-    return { willCount: localStrictReasons.length === 0, reasons: localStrictReasons, range: null, daily: null, source: 'local' as const };
+    return {
+      willCount: localStrictReasons.length === 0,
+      reasons: localStrictReasons,
+      range: null,
+      pair: null,
+      daily: null,
+      source: 'local' as const,
+    };
   }, [localStrictReasons, strictPreflight]);
 
   const freeRankingToggleId = 'arena-free-ranking-enabled';
@@ -915,6 +964,18 @@ export function RankingQuickActions() {
                     今日严格 {strictIndicator.daily.used}/{strictIndicator.daily.limit}
                   </span>
                 ) : null}
+                {strictIndicator.source === 'server' && strictIndicator.pair?.used != null ? (
+                  <span
+                    className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-700"
+                    title={
+                      strictIndicator.pair.recentDeduped && strictIndicator.pair.nextEligibleAtIso
+                        ? `该对手组合处于 ${strictIndicator.pair.windowMinutes} 分钟冷却期，预计北京时间 ${formatStrictTimeHint(strictIndicator.pair.nextEligibleAtIso) ?? strictIndicator.pair.nextEligibleAtIso} 后恢复计分`
+                        : `同一对手组合今日已计 ${strictIndicator.pair.used}/${strictIndicator.pair.limit} 局`
+                    }
+                  >
+                    同组合 {strictIndicator.pair.used}/{strictIndicator.pair.limit}
+                  </span>
+                ) : null}
                 <span
                   className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold ${
                     strictCountReady ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'
@@ -933,7 +994,7 @@ export function RankingQuickActions() {
               <>
                 <div className="mt-2 text-xs text-gray-600">
                   {strictIndicator.reasons.length > 0
-                    ? `原因（${strictIndicator.reasons.length} 项）：${formatStrictReasonWithDetails(strictIndicator.reasons[0], strictIndicator.range)}`
+                    ? `原因（${strictIndicator.reasons.length} 项）：${formatStrictReasonWithDetails(strictIndicator.reasons[0], strictIndicator.range, strictIndicator.pair)}`
                     : '原因：未知（建议刷新页面或稍后重试）'}
                 </div>
                 {strictIndicator.reasons.length > 1 ? (
@@ -944,7 +1005,7 @@ export function RankingQuickActions() {
                     </summary>
                     <ul className="mt-2 list-disc space-y-1 pl-5 text-xs text-gray-700">
                       {strictIndicator.reasons.map((reason) => (
-                        <li key={reason}>{formatStrictReasonWithDetails(reason, strictIndicator.range)}</li>
+                        <li key={reason}>{formatStrictReasonWithDetails(reason, strictIndicator.range, strictIndicator.pair)}</li>
                       ))}
                     </ul>
                   </details>

@@ -6,7 +6,7 @@ import {
   getPvpRoomPlayers,
   updatePvpRoomCas,
   updatePvpRoomMember,
-} from '@/lib/d1';
+} from '@/lib/database/pvp';
 import { parsePvpRoomInternalState } from '@/lib/pvp/bot/room';
 import { PVP_ROOM_TTL_MS } from '@/lib/pvp/constants';
 import { DEFAULT_PVP_RULES } from '@/lib/pvp/defaults';

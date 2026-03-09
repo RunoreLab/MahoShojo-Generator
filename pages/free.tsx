@@ -9,7 +9,9 @@ import { ErrorMessage } from '@/components/ErrorMessage';
 import AiReasoningPanel from '@/components/ai/AiReasoningPanel';
 import SaveToCloudButton from '@/components/SaveToCloudButton';
 import { GenerationModeSwitcher, type GenerationMode } from '@/components/shared/GenerationModeSwitcher';
+import { CharacterPortraitAssetPanel } from '@/components/shared/CharacterPortraitAssetPanel';
 import { TokenIndicator } from '@/components/shared/TokenIndicator';
+import { JsonSizeIndicator } from '@/components/shared/JsonSizeIndicator';
 import { MarkdownBlock } from '@/components/MarkdownBlock';
 import MagicalGirlCard from '@/components/MagicalGirlCard';
 import CanshouCard from '@/components/CanshouCard';
@@ -28,6 +30,7 @@ import { AI_META_REQUEST_HEADER, AI_META_REQUEST_VALUE, readJsonWithAiMeta } fro
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
 import { authStorage } from '@/lib/auth';
 import type { AIReasoningEnvelope } from '@/types/ai-reasoning';
+import type { CharacterCardPortraitAsset } from '@/types/visual-asset';
 
 type FreeSchemaId = 'magical-girl' | 'canshou' | 'scenario' | 'general' | 'general-scenario';
 
@@ -167,6 +170,21 @@ const normalizeCanshouForCard = (input: unknown): any => {
   };
 };
 
+const buildGeneralPortraitPrompt = (name: string, content: string): string => {
+  const normalizedName = typeof name === 'string' ? name.trim() : '';
+  const normalizedContent = typeof content === 'string' ? content.trim() : '';
+  const head = normalizedContent.length > 800 ? normalizedContent.slice(0, 800) : normalizedContent;
+  const prefix = [normalizedName, head].filter(Boolean).join(', ');
+  return `${prefix ? `${prefix}, ` : ''}Xiabanmo, 二次元, 角色立绘`;
+};
+
+const buildCanshouPortraitPrompt = (input: Record<string, unknown>): string => {
+  const parts = [input.appearance, input.materialAndSkin, input.featuresAndAppendages]
+    .map((item) => (typeof item === 'string' ? item.trim() : ''))
+    .filter(Boolean);
+  return parts.join(', ');
+};
+
 const buildFieldGuideForUi = (schemaId: FreeSchemaId): string => {
   switch (schemaId) {
     case 'magical-girl':
@@ -235,6 +253,7 @@ export default function FreeGeneratorPage() {
   const [streamingMarkdown, setStreamingMarkdown] = useState<string | null>(null);
   const [streamedGeneralCard, setStreamedGeneralCard] = useState<any | null>(null);
   const [streamingReasoning, setStreamingReasoning] = useState<AIReasoningEnvelope | null>(null);
+  const [characterPortraitAsset, setCharacterPortraitAsset] = useState<CharacterCardPortraitAsset | null>(null);
 
   const [showFieldGuide, setShowFieldGuide] = useState(false);
   const [showLanguageSection, setShowLanguageSection] = useState(false);
@@ -472,6 +491,7 @@ export default function FreeGeneratorPage() {
     setStreamingMarkdown(null);
     setStreamedGeneralCard(null);
     setStreamingReasoning(null);
+    setCharacterPortraitAsset(null);
 
     try {
       const combinedForSafety = [prompt, ...attachments.map((item) => item.content)].filter((t) => t.trim()).join('\n\n');
@@ -594,27 +614,33 @@ export default function FreeGeneratorPage() {
     const fileName = `${kind === 'scenario' ? '数据卡_情景' : '数据卡_角色'}_${safeBase}.json`;
 
     return (
-      <div className="flex flex-col sm:flex-row gap-3 justify-center">
-        <button
-          onClick={() => downloadJson(data, fileName)}
-          className="generate-button flex-1"
-        >
-          下载 JSON
-        </button>
-        <SaveToCloudButton
+      <div className="space-y-2">
+        <div className="flex flex-col sm:flex-row gap-3 justify-center">
+          <button
+            onClick={() => downloadJson(data, fileName)}
+            className="generate-button flex-1"
+          >
+            下载 JSON
+          </button>
+          <SaveToCloudButton
+            data={data}
+            cardType={kind}
+            buttonText="保存到云端"
+            className="generate-button flex-1"
+            style={{ backgroundColor: '#22c55e', backgroundImage: 'linear-gradient(to right, #22c55e, #16a34a)' }}
+          />
+          <button
+            onClick={() => void copyToClipboard(data, kind === 'scenario' ? '情景卡' : '角色卡')}
+            className="generate-button flex-1"
+            style={{ backgroundColor: '#3b82f6', backgroundImage: 'linear-gradient(to right, #3b82f6, #2563eb)' }}
+          >
+            复制到剪贴板
+          </button>
+        </div>
+        <JsonSizeIndicator
           data={data}
-          cardType={kind}
-          buttonText="保存到云端"
-          className="generate-button flex-1"
-          style={{ backgroundColor: '#22c55e', backgroundImage: 'linear-gradient(to right, #22c55e, #16a34a)' }}
+          warningText="⚠️ 接近云端 300KB 上限，保存/替换可能失败，请先精简数据。"
         />
-        <button
-          onClick={() => void copyToClipboard(data, kind === 'scenario' ? '情景卡' : '角色卡')}
-          className="generate-button flex-1"
-          style={{ backgroundColor: '#3b82f6', backgroundImage: 'linear-gradient(to right, #3b82f6, #2563eb)' }}
-        >
-          复制到剪贴板
-        </button>
       </div>
     );
   };
@@ -646,17 +672,37 @@ export default function FreeGeneratorPage() {
               </p>
             </div>
           ) : (
-            <>
-              {(() => {
-                const markdown = streamingMarkdown ?? streamedGeneralCard?.content ?? '';
-                const { card } = buildGeneralCharacterCardFromMarkdown({ markdown, defaultName: '角色' });
-                return <GeneralCharacterCard general={card} isStreaming={submitting} />;
-              })()}
-              <AiReasoningPanel reasoning={streamingReasoning} status={streamingReasoning?.status ?? 'idle'} compact />
-              <p className="mt-3 text-xs text-gray-500 text-center">
-                提示：流式模式只输出 Markdown，再由前端转换为通用数据卡；自由生成产物不会包含签名，因此会被视为非原生。
-              </p>
-            </>
+            (() => {
+              const markdown = streamingMarkdown ?? streamedGeneralCard?.content ?? '';
+              const { card } = buildGeneralCharacterCardFromMarkdown({ markdown, defaultName: '角色' });
+              const promptForPortrait = buildGeneralPortraitPrompt(
+                typeof card.name === 'string' ? card.name : '',
+                markdown
+              );
+
+              return (
+                <>
+                  <GeneralCharacterCard
+                    general={card}
+                    isStreaming={submitting}
+                    portraitAsset={characterPortraitAsset}
+                  />
+                  <AiReasoningPanel reasoning={streamingReasoning} status={streamingReasoning?.status ?? 'idle'} compact />
+                  <div className="card !max-w-none">
+                    <div className="text-center">
+                      <h3 className="text-lg font-medium text-blue-900 mb-4">生成立绘</h3>
+                      <CharacterPortraitAssetPanel
+                        prompt={promptForPortrait}
+                        onPortraitAssetChange={setCharacterPortraitAsset}
+                      />
+                    </div>
+                  </div>
+                  <p className="mt-3 text-xs text-gray-500 text-center">
+                    提示：流式模式只输出 Markdown，再由前端转换为通用数据卡；自由生成产物不会包含签名，因此会被视为非原生。
+                  </p>
+                </>
+              );
+            })()
           )}
 
           {streamedGeneralCard && (
@@ -703,7 +749,17 @@ export default function FreeGeneratorPage() {
           <MagicalGirlCard
             magicalGirl={safe}
             gradientStyle="linear-gradient(135deg, #9775fa 0%, #b197fc 100%)"
+            portraitAsset={characterPortraitAsset}
           />
+          <div className="card !max-w-none">
+            <div className="text-center">
+              <h3 className="text-lg font-medium text-blue-900 mb-4">生成立绘</h3>
+              <CharacterPortraitAssetPanel
+                prompt={`${JSON.stringify(safe.appearance)} , Xiabanmo, 二次元, 魔法少女`}
+                onPortraitAssetChange={setCharacterPortraitAsset}
+              />
+            </div>
+          </div>
           <div className="card !max-w-none">
             <div className="text-center">
               <p className="text-xs text-gray-500 mb-3">
@@ -718,10 +774,20 @@ export default function FreeGeneratorPage() {
 
     if (schemaId === 'canshou') {
       const safe = normalizeCanshouForCard(resultData);
+      const promptForPortrait = buildCanshouPortraitPrompt(safe);
       return (
         <>
           {nonStreamReasoningNode}
-          <CanshouCard canshou={safe} />
+          <CanshouCard canshou={safe} portraitAsset={characterPortraitAsset} />
+          <div className="card !max-w-none">
+            <div className="text-center">
+              <h3 className="text-lg font-medium text-blue-900 mb-4">生成立绘</h3>
+              <CharacterPortraitAssetPanel
+                prompt={promptForPortrait}
+                onPortraitAssetChange={setCharacterPortraitAsset}
+              />
+            </div>
+          </div>
           <div className="card !max-w-none">
             <div className="text-center">
               <p className="text-xs text-gray-500 mb-3">
@@ -735,10 +801,23 @@ export default function FreeGeneratorPage() {
     }
 
     if (schemaId === 'general') {
+      const promptForPortrait = buildGeneralPortraitPrompt(
+        typeof resultData?.name === 'string' ? resultData.name : '',
+        typeof resultData?.content === 'string' ? resultData.content : ''
+      );
       return (
         <>
           {nonStreamReasoningNode}
-          <GeneralCharacterCard general={resultData} />
+          <GeneralCharacterCard general={resultData} portraitAsset={characterPortraitAsset} />
+          <div className="card !max-w-none">
+            <div className="text-center">
+              <h3 className="text-lg font-medium text-blue-900 mb-4">生成立绘</h3>
+              <CharacterPortraitAssetPanel
+                prompt={promptForPortrait}
+                onPortraitAssetChange={setCharacterPortraitAsset}
+              />
+            </div>
+          </div>
           <div className="card !max-w-none">
             <div className="text-center">
               {renderResultActions(resultData, 'character')}

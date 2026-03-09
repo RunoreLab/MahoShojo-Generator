@@ -8,7 +8,7 @@ import {
   upsertPvpRoomSubmission,
   upsertPvpRoundChoice,
   updatePvpRoomCas,
-} from '@/lib/d1';
+} from '@/lib/database/pvp';
 import { buildBotSubmissionPayload } from '@/lib/pvp/bot/submission';
 import { parsePvpRoomInternalState, stringifyPvpRoomInternalState } from '@/lib/pvp/bot/room';
 import { canForcePendingAction, computeLastPendingChooseAction, computeLastPendingConfirmAction, computeLastPendingSubmissionAction } from '@/lib/pvp/pending-action';

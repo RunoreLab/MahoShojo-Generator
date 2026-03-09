@@ -10,7 +10,7 @@ import {
   updatePvpRoomCas,
   updatePvpRound,
   upsertPvpRoomHand,
-} from '@/lib/d1';
+} from '@/lib/database/pvp';
 import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
 import { CustomProviderSchema } from '@/lib/arena/schemas';
 import { extractStreamUpdateMeta, stripStreamUpdateMetaComment } from '@/lib/arena/stream-meta';
@@ -435,7 +435,6 @@ async function resolveStreamHandler(req: Request): Promise<Response> {
         isPreset: false,
         characterGuidance: p.characterGuidance ?? null,
       })),
-      selectedLevel: rules.selectedLevel,
       mode: rules.mode,
       ...(rules.mode === 'scenario' && scenarioPayload
         ? {

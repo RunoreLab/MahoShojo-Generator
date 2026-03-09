@@ -1,6 +1,17 @@
 import { generateWithAI } from '@/lib/ai';
 import { config } from '@/lib/config';
-import { queryFromD1 } from '@/lib/d1';
+import type { AppDrizzleDb } from '@/lib/db/drizzle';
+import {
+  applyPendingPublicCardUpdateByUserId,
+  approvePendingPublicCardsByIds,
+  countPendingPublicCardsByUserId,
+  countPendingPublicCardUpdatesByUserId,
+  deletePendingCardUpdateByDataCardId,
+  listLatestPendingPublicCardsByUserId,
+  listLatestPendingPublicCardUpdatesByUserId,
+  type PendingDataCardUpdateReviewRow,
+} from '@/lib/db/repositories/data-card-review';
+import { getDataCardUpdatedAtById } from '@/lib/db/repositories/data-cards-write';
 import { getLogger } from '@/lib/logger';
 import { resetStrictArenaRatingForDataCard } from '@/lib/database/arena-ratings';
 import { computeTechIndex } from '@/lib/metrics/techIndex';
@@ -16,137 +27,22 @@ import {
 
 const log = getLogger('auto-data-card-review');
 
-type PendingDataCardRow = {
-  id: string;
-  name: string;
-  description: string | null;
-  data: string;
-};
-
-type PendingDataCardUpdateRow = {
-  updateId: string;
-  dataCardId: string;
-  name: string;
-  description: string | null;
-  data: string;
-  type: 'character' | 'scenario' | 'history' | 'questionnaire' | null;
-};
-
-const readInt = (value: unknown): number => {
-  if (typeof value === 'number' && Number.isFinite(value)) return Math.trunc(value);
-  if (typeof value === 'string' && value.trim() && Number.isFinite(Number(value))) return Math.trunc(Number(value));
-  return 0;
-};
-
-async function countPendingPublicCards(userId: number): Promise<number> {
-  const result = (await queryFromD1(
-    `SELECT COUNT(1) AS count
-     FROM data_cards
-     WHERE user_id = ?
-       AND is_public = 1
-       AND review_status = 'pending'
-       AND deleted_at IS NULL`,
-    [userId],
-  )) as any;
-  const row = result?.result?.[0]?.results?.[0];
-  return readInt(row?.count);
-}
-
-async function getLatestPendingPublicCards(userId: number, limit: number): Promise<PendingDataCardRow[]> {
-  if (limit <= 0) return [];
-  const result = (await queryFromD1(
-    `SELECT id, name, description, data
-     FROM data_cards
-     WHERE user_id = ?
-       AND is_public = 1
-       AND review_status = 'pending'
-       AND deleted_at IS NULL
-     ORDER BY updated_at DESC
-     LIMIT ?`,
-    [userId, limit],
-  )) as any;
-  const rows = result?.result?.[0]?.results;
-  return Array.isArray(rows) ? (rows as PendingDataCardRow[]) : [];
-}
-
-async function approvePendingPublicCards(userId: number, cardIds: string[]): Promise<number> {
-  const uniqueIds = Array.from(new Set(cardIds.map((id) => id.trim()).filter(Boolean)));
-  if (uniqueIds.length === 0) return 0;
-
-  const placeholders = uniqueIds.map(() => '?').join(', ');
-  const sql = `
-    UPDATE data_cards
-    SET review_status = 'approved', updated_at = CURRENT_TIMESTAMP
-    WHERE user_id = ?
-      AND id IN (${placeholders})
-      AND is_public = 1
-      AND review_status = 'pending'
-      AND deleted_at IS NULL
-  `;
-
-  const result = (await queryFromD1(sql, [userId, ...uniqueIds])) as any;
-  const changes = result?.result?.[0]?.meta?.changes;
-  return readInt(changes);
-}
-
-async function countPendingPublicCardUpdates(userId: number): Promise<number> {
-  const result = (await queryFromD1(
-    `SELECT COUNT(1) AS count
-     FROM data_card_updates du
-     JOIN data_cards dc ON dc.id = du.data_card_id
-     WHERE du.user_id = ?
-       AND dc.is_public = 1
-       AND dc.review_status = 'approved'
-       AND dc.deleted_at IS NULL`,
-    [userId],
-  )) as any;
-  const row = result?.result?.[0]?.results?.[0];
-  return readInt(row?.count);
-}
-
-async function getLatestPendingPublicCardUpdates(userId: number, limit: number): Promise<PendingDataCardUpdateRow[]> {
-  if (limit <= 0) return [];
-  const result = (await queryFromD1(
-    `SELECT du.id AS update_id,
-            du.data_card_id AS data_card_id,
-            du.name,
-            du.description,
-            du.data,
-            dc.type AS type
-     FROM data_card_updates du
-     JOIN data_cards dc ON dc.id = du.data_card_id
-     WHERE du.user_id = ?
-       AND dc.is_public = 1
-       AND dc.review_status = 'approved'
-       AND dc.deleted_at IS NULL
-     ORDER BY du.updated_at DESC
-     LIMIT ?`,
-    [userId, limit],
-  )) as any;
-  const rows = result?.result?.[0]?.results;
-  if (!Array.isArray(rows)) return [];
-  return rows.map((row: any) => ({
-    updateId: String(row.update_id),
-    dataCardId: String(row.data_card_id),
-    name: typeof row.name === 'string' ? row.name : '',
-    description: typeof row.description === 'string' ? row.description : null,
-    data: typeof row.data === 'string' ? row.data : '',
-    type: typeof row.type === 'string' ? row.type : null,
-  }));
-}
-
-async function getDataCardUpdatedAt(dataCardId: string): Promise<string | null> {
+const readDbOrNull = async (): Promise<AppDrizzleDb | null> => {
   try {
-    const result = await queryFromD1('SELECT updated_at FROM data_cards WHERE id = ?', [dataCardId]) as any;
-    const row = result?.result?.[0]?.results?.[0];
-    return typeof row?.updated_at === 'string' ? row.updated_at : null;
-  } catch (error) {
-    console.error('读取 data_cards.updated_at 失败:', error);
+    const { getDrizzleDbFromRuntime } = await import('@/lib/db/drizzle');
+    const db = getDrizzleDbFromRuntime();
+    if (!db) return null;
+    return db;
+  } catch {
     return null;
   }
-}
+};
 
-async function computeAndUpsertMetrics(dataCardId: string, dataJsonString: string): Promise<void> {
+async function computeAndUpsertMetrics(
+  db: AppDrizzleDb,
+  dataCardId: string,
+  dataJsonString: string,
+): Promise<void> {
   try {
     const jsonValue = JSON.parse(dataJsonString) as unknown;
     const tech = computeTechIndex(jsonValue);
@@ -154,7 +50,7 @@ async function computeAndUpsertMetrics(dataCardId: string, dataJsonString: strin
     const hasSignatureKey = Boolean(process.env.SIGNATURE_SECRET_KEY);
     const isNative = hasSignatureKey ? await verifySignature(jsonValue as any) : null;
 
-    const updatedAt = await getDataCardUpdatedAt(dataCardId);
+    const updatedAt = await getDataCardUpdatedAtById(db, dataCardId);
     if (!updatedAt) return;
 
     await upsertDataCardMetrics({
@@ -175,21 +71,25 @@ async function computeAndUpsertMetrics(dataCardId: string, dataJsonString: strin
   }
 }
 
-async function applyApprovedPublicCardUpdates(userId: number, updates: PendingDataCardUpdateRow[]): Promise<string[]> {
+async function applyApprovedPublicCardUpdates(
+  db: AppDrizzleDb,
+  userId: number,
+  updates: PendingDataCardUpdateReviewRow[],
+): Promise<string[]> {
   const appliedIds: string[] = [];
 
   for (const update of updates) {
     if (!update.dataCardId || !update.data) continue;
-    const result = (await queryFromD1(
-      'UPDATE data_cards SET name = ?, description = ?, data = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ? AND deleted_at IS NULL',
-      [update.name, update.description ?? '', update.data, update.dataCardId, userId],
-    )) as any;
+    const updated = await applyPendingPublicCardUpdateByUserId(db, userId, {
+      dataCardId: update.dataCardId,
+      name: update.name,
+      description: update.description,
+      data: update.data,
+    });
+    if (!updated) continue;
 
-    const changes = readInt(result?.result?.[0]?.meta?.changes);
-    if (changes <= 0) continue;
-
-    await queryFromD1('DELETE FROM data_card_updates WHERE data_card_id = ?', [update.dataCardId]);
-    const metricsPromise = computeAndUpsertMetrics(update.dataCardId, update.data);
+    await deletePendingCardUpdateByDataCardId(db, update.dataCardId);
+    const metricsPromise = computeAndUpsertMetrics(db, update.dataCardId, update.data);
     const resetStrictPromise =
       update.type === 'character'
         ? resetStrictArenaRatingForDataCard(update.dataCardId)
@@ -251,7 +151,12 @@ export async function autoReviewLatestPendingPublicDataCardsForUser(userId: numb
     return { ok: false, reviewedCount: 0, approvedCount: 0, approvedIds: [], usedModel: null, reason: 'disabled' };
   }
 
-  const pendingCount = await countPendingPublicCards(userId);
+  const db = await readDbOrNull();
+  if (!db) {
+    return { ok: false, reviewedCount: 0, approvedCount: 0, approvedIds: [], usedModel: null, reason: 'db-unavailable' };
+  }
+
+  const pendingCount = await countPendingPublicCardsByUserId(db, userId);
   if (autoReviewConfig.batch?.enabled) {
     const threshold = Math.max(1, Math.trunc(autoReviewConfig.batch.threshold ?? 1));
     if (pendingCount < threshold) {
@@ -271,7 +176,7 @@ export async function autoReviewLatestPendingPublicDataCardsForUser(userId: numb
     ? Math.max(1, Math.trunc(autoReviewConfig.batch.threshold ?? 1))
     : Math.max(1, lookback + 1);
 
-  const pendingCards = await getLatestPendingPublicCards(userId, limit);
+  const pendingCards = await listLatestPendingPublicCardsByUserId(db, userId, limit);
   if (pendingCards.length === 0) {
     return { ok: true, reviewedCount: 0, approvedCount: 0, approvedIds: [], usedModel: null, reason: 'no-pending' };
   }
@@ -297,7 +202,7 @@ export async function autoReviewLatestPendingPublicDataCardsForUser(userId: numb
     .filter((target) => suggestionById.get(target.id)?.suggestion === 'approved')
     .map((target) => target.id);
 
-  const approvedCount = await approvePendingPublicCards(userId, approvedIds);
+  const approvedCount = await approvePendingPublicCardsByIds(db, userId, approvedIds);
   if (approvedIds.length > 0) {
     log.info('自动审查通过并已更新状态', { userId, reviewed: targets.length, approvedIds, approvedCount, usedModel: ai.usedModel });
   } else {
@@ -319,7 +224,12 @@ export async function autoReviewLatestPendingPublicDataCardUpdatesForUser(userId
     return { ok: false, reviewedCount: 0, approvedCount: 0, approvedIds: [], usedModel: null, reason: 'disabled' };
   }
 
-  const pendingCount = await countPendingPublicCardUpdates(userId);
+  const db = await readDbOrNull();
+  if (!db) {
+    return { ok: false, reviewedCount: 0, approvedCount: 0, approvedIds: [], usedModel: null, reason: 'db-unavailable' };
+  }
+
+  const pendingCount = await countPendingPublicCardUpdatesByUserId(db, userId);
   if (autoReviewConfig.batch?.enabled) {
     const threshold = Math.max(1, Math.trunc(autoReviewConfig.batch.threshold ?? 1));
     if (pendingCount < threshold) {
@@ -339,7 +249,7 @@ export async function autoReviewLatestPendingPublicDataCardUpdatesForUser(userId
     ? Math.max(1, Math.trunc(autoReviewConfig.batch.threshold ?? 1))
     : Math.max(1, lookback + 1);
 
-  const pendingUpdates = await getLatestPendingPublicCardUpdates(userId, limit);
+  const pendingUpdates = await listLatestPendingPublicCardUpdatesByUserId(db, userId, limit);
   if (pendingUpdates.length === 0) {
     return { ok: true, reviewedCount: 0, approvedCount: 0, approvedIds: [], usedModel: null, reason: 'no-pending' };
   }
@@ -366,7 +276,7 @@ export async function autoReviewLatestPendingPublicDataCardUpdatesForUser(userId
     .map((target) => target.id);
 
   const approvedUpdates = pendingUpdates.filter((row) => approvedIds.includes(row.dataCardId));
-  const appliedIds = await applyApprovedPublicCardUpdates(userId, approvedUpdates);
+  const appliedIds = await applyApprovedPublicCardUpdates(db, userId, approvedUpdates);
   if (appliedIds.length > 0) {
     log.info('更新自动审查通过并已应用更新', { userId, reviewed: targets.length, approvedIds: appliedIds, usedModel: ai.usedModel });
   } else {

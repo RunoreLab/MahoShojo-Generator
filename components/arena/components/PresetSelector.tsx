@@ -6,7 +6,7 @@ import type { Preset } from '@/lib/presets';
 import { PresetGridPicker } from '@/components/PresetGridPicker';
 
 import { useBattleStore } from '../stores/useBattleStore';
-import { BattleStoreState, Combatant, MAX_COMBATANTS } from '../types';
+import { BattleStoreState, Combatant, hasCombatantLimit, MAX_COMBATANTS } from '../types';
 import { usePresetQuery } from '../hooks/useArenaData';
 import { validateCanshouData, validateMagicalGirlData } from '../utils/characterValidator';
 
@@ -22,6 +22,7 @@ export function PresetSelector() {
   const setError = useBattleSelector((state) => state.setError);
   const loadingPreset = useBattleSelector((state) => state.loadingPreset);
   const setLoadingPreset = useBattleSelector((state) => state.setLoadingPreset);
+  const maxSelected = hasCombatantLimit(MAX_COMBATANTS) ? MAX_COMBATANTS : undefined;
 
   const combatantFilenames = useMemo(
     () =>
@@ -92,7 +93,7 @@ export function PresetSelector() {
         currentPage={mgPage}
         onPageChange={setMgPage}
         disabled={isGenerating}
-        maxSelected={MAX_COMBATANTS}
+        maxSelected={maxSelected}
         selectedFilenames={combatantFilenames}
         loadingFilename={loadingPreset}
         onToggle={handleSelect}
@@ -103,7 +104,7 @@ export function PresetSelector() {
         currentPage={canshouPage}
         onPageChange={setCanshouPage}
         disabled={isGenerating}
-        maxSelected={MAX_COMBATANTS}
+        maxSelected={maxSelected}
         selectedFilenames={combatantFilenames}
         loadingFilename={loadingPreset}
         onToggle={handleSelect}

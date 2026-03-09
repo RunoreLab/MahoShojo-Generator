@@ -46,7 +46,6 @@ export const BattleSettingsSchema = z.object({
 });
 
 export const StoryPreferencesSchema = z.object({
-  selectedLevel: z.string(),
   selectedLanguage: z.string().min(1, '请选择语言'),
   userGuidance: z.string().max(200, '提示语不应超过 200 字').optional(),
 });

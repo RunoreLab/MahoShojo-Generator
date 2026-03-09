@@ -138,7 +138,6 @@ describe('pvp: parsePvpRules', () => {
     expect(parsed.rules.writeArenaHistory).toBe(false);
     expect(parsed.rules.readCurrentState).toBe(false);
     expect(parsed.rules.writeCurrentState).toBe(false);
-    expect(parsed.rules.selectedLevel).toBe('');
     expect(parsed.rules.userGuidance).toBe('');
     expect(parsed.rules.allowPlayerCharacterGuidance).toBe(false);
     expect(parsed.rules.storyLength).toBe('default');
@@ -148,7 +147,6 @@ describe('pvp: parsePvpRules', () => {
 
   test('非法“对局生成设置”回退/截断为安全值', () => {
     const parsed = parsePvpRules({
-      selectedLevel: 'nope',
       storyLength: 'x',
       language: 'x'.repeat(999),
       userGuidance: 'a'.repeat(999),
@@ -158,7 +156,6 @@ describe('pvp: parsePvpRules', () => {
     expect('error' in parsed).toBe(false);
     if ('error' in parsed) return;
 
-    expect(parsed.rules.selectedLevel).toBe(DEFAULT_PVP_RULES.selectedLevel);
     expect(parsed.rules.storyLength).toBe(DEFAULT_PVP_RULES.storyLength);
     expect(parsed.rules.language.length).toBeLessThanOrEqual(32);
     expect(parsed.rules.userGuidance.length).toBeLessThanOrEqual(200);

@@ -82,6 +82,14 @@ export const encyclopediaEntries: EncyclopediaEntry[] = [
     keywords: ['新手', '入口', '流程', '速查'],
   },
   {
+    slug: 'auth-migration',
+    title: '账号迁移指南（v0.8.0）',
+    summary: '旧密钥用户如何迁移到新版密码登录：状态说明、操作步骤与常见问题。',
+    markdownPath: '/encyclopedia/auth-migration.md',
+    categoryId: 'management',
+    keywords: ['账号迁移', '旧密钥', '密码登录', '/me', 'settings', 'auth migration'],
+  },
+  {
     slug: 'magic-tea-party',
     title: '魔法茶会（功能与快速开始）',
     summary: '长期剧情对话页：角色/情景自由组合，支持选项、摘要、角色更新与导入导出。',

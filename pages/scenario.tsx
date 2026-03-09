@@ -10,6 +10,7 @@ import SaveToCloudButton from '../components/SaveToCloudButton';
 import Footer from '../components/Footer';
 import AiProviderSelector, { UserAIProviderConfig } from '@/components/AiProviderSelector';
 import AiReasoningPanel from '@/components/ai/AiReasoningPanel';
+import { JsonSizeIndicator } from '@/components/shared/JsonSizeIndicator';
 import { ErrorMessage } from '@/components/ErrorMessage';
 import { EncyclopediaLinks } from '@/components/encyclopedia/EncyclopediaLinks';
 import { convertDataCard, createBlankDataCard } from '@/lib/data-card-converter';
@@ -522,6 +523,10 @@ const ScenarioPage: React.FC = () => {
                     复制到剪贴板
                   </button>
                 </div>
+                <JsonSizeIndicator
+                  data={resultData}
+                  warningText="⚠️ 接近云端 300KB 上限，保存/替换可能失败，请先精简数据。"
+                />
               </div>
             </>
           )}
@@ -593,6 +598,10 @@ const ScenarioPage: React.FC = () => {
                       复制到剪贴板
                     </button>
                   </div>
+                  <JsonSizeIndicator
+                    data={generalScenarioDraft}
+                    warningText="⚠️ 接近云端 300KB 上限，保存/替换可能失败，请先精简数据。"
+                  />
                 </>
               )}
 

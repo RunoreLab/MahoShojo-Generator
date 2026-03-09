@@ -1,4 +1,5 @@
-import { incrementDeckLike } from '@/lib/d1';
+import { getDrizzleDbFromRuntime } from '@/lib/db/drizzle';
+import { incrementPublicDeckLikeCountById } from '@/lib/db/repositories/decks';
 
 export const runtime = 'edge';
 
@@ -11,6 +12,14 @@ export default async function handler(req: Request): Promise<Response> {
   }
 
   try {
+    const db = getDrizzleDbFromRuntime();
+    if (!db) {
+      return new Response(JSON.stringify({ success: false, error: '数据库不可用，请稍后重试' }), {
+        status: 503,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+
     const { deckId, type } = await req.json();
 
     if (!deckId || type !== 'like') {
@@ -20,8 +29,8 @@ export default async function handler(req: Request): Promise<Response> {
       });
     }
 
-    const ok = await incrementDeckLike(deckId);
-    if (!ok) {
+    const changed = await incrementPublicDeckLikeCountById(db, deckId);
+    if (changed <= 0) {
       return new Response(JSON.stringify({ success: false, error: '点赞失败（卡组不存在或不可点赞）' }), {
         status: 400,
         headers: { 'Content-Type': 'application/json' }

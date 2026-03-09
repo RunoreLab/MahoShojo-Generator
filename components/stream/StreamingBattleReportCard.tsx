@@ -13,6 +13,7 @@ import {
     isAllowedExternalMediaUrl,
     isLikelyAudioUrl,
     isLikelyVideoUrl,
+    resolveExternalMediaUrl,
 } from '@/lib/markdown/externalMedia';
 import { capturePngBlob } from '@/lib/client/snapdomCapture';
 import { createBlobUrl, downloadBlob } from '@/lib/client/blobUrl';
@@ -20,6 +21,7 @@ import { GeneratedByUserBadge } from '@/components/shared/GeneratedByUserBadge';
 import AiReasoningPanel from '@/components/ai/AiReasoningPanel';
 import { extractHeuristicReasoningFromMarkdown } from '@/lib/ai/reasoning-normalizer';
 import type { AIReasoningEnvelope } from '@/types/ai-reasoning';
+import type { BattleReportIllustrationAsset } from '@/components/BattleReportCard';
 
 interface StreamingBattleReportCardProps {
     /** 流式输入的 Markdown 文本内容 */
@@ -53,6 +55,8 @@ interface StreamingBattleReportCardProps {
     aiReasoning?: AIReasoningEnvelope | null;
     /** 是否正在生成中（可选，用于显示加载光标等） */
     isStreaming?: boolean;
+    /** 战报插图（可选，支持生成图或用户上传图） */
+    illustrationAsset?: BattleReportIllustrationAsset | null;
 }
 
 const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
@@ -68,13 +72,19 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
     aiModel = null,
     narrativeHistoryReadCount = null,
     aiReasoning = null,
-    isStreaming = false
+    isStreaming = false,
+    illustrationAsset = null
 }) => {
     const cardRef = useRef<HTMLDivElement>(null);
     const [isSavingImage, setIsSavingImage] = useState(false);
     const headlineMatch = content.match(/^\s*#{1,3}\s*(.*)(?:\r?\n|$)/);
     const headline = headlineMatch ? headlineMatch[1].trim() : '';
     const markdownBody = headlineMatch && headline ? content.slice(headlineMatch[0].length).trimStart() : content;
+    const illustrationImageUrl = typeof illustrationAsset?.imageUrl === 'string' ? illustrationAsset.imageUrl.trim() : '';
+    const uploadedIllustrationNote =
+        illustrationAsset?.source === 'uploaded'
+            ? (typeof illustrationAsset.note === 'string' && illustrationAsset.note.trim() ? illustrationAsset.note.trim() : '用户自行上传')
+            : '';
     const aiReasoningText = typeof aiReasoning?.text === 'string' ? aiReasoning.text.trim() : '';
     const heuristicReasoning = !aiReasoningText ? extractHeuristicReasoningFromMarkdown(markdownBody) : null;
     const reasoningForPanel =
@@ -307,6 +317,8 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
             const normalizedHref = rawHref.startsWith('//') ? `https:${rawHref}` : rawHref;
             const isAudioAllowed = isAudioLink && isAllowedExternalMediaUrl(rawHref, 'audio');
             const isVideoAllowed = isVideoLink && isAllowedExternalMediaUrl(rawHref, 'video');
+            const resolvedAudioHref = isAudioLink ? resolveExternalMediaUrl(rawHref, 'audio') : normalizedHref;
+            const resolvedVideoHref = isVideoLink ? resolveExternalMediaUrl(rawHref, 'video') : normalizedHref;
             const linkText =
                 typeof children === 'string'
                     ? children
@@ -325,9 +337,9 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
 
                 return (
                     <span className="inline-flex max-w-full flex-col gap-1 align-middle">
-                        <audio controls preload="none" src={normalizedHref} className="h-8 max-w-full" />
+                        <audio controls preload="none" src={resolvedAudioHref} className="h-8 max-w-full" />
                         <a
-                            href={normalizedHref}
+                            href={resolvedAudioHref}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="text-[11px] underline underline-offset-2 text-blue-200"
@@ -351,9 +363,9 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
 
                 return (
                     <span className="inline-flex max-w-full flex-col gap-1 align-middle">
-                        <video controls preload="metadata" playsInline src={normalizedHref} className="my-2 max-w-full rounded-md border border-white/15" />
+                        <video controls preload="metadata" playsInline src={resolvedVideoHref} className="my-2 max-w-full rounded-md border border-white/15" />
                         <a
-                            href={normalizedHref}
+                            href={resolvedVideoHref}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="text-[11px] underline underline-offset-2 text-blue-200"
@@ -432,7 +444,7 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
             const isVideoLink = Boolean(rawSrc && isLikelyVideoUrl(rawSrc));
             if (isAudioLink) {
                 const isAudioAllowed = isAllowedExternalMediaUrl(rawSrc, 'audio');
-                const normalizedSrc = rawSrc.startsWith('//') ? `https:${rawSrc}` : rawSrc;
+                const normalizedSrc = resolveExternalMediaUrl(rawSrc, 'audio');
                 const audioLabel = typeof alt === 'string' && alt.trim() ? alt.trim() : '播放音频';
 
                 if (!isAudioAllowed) {
@@ -460,7 +472,7 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
 
             if (isVideoLink) {
                 const isVideoAllowed = isAllowedExternalMediaUrl(rawSrc, 'video');
-                const normalizedSrc = rawSrc.startsWith('//') ? `https:${rawSrc}` : rawSrc;
+                const normalizedSrc = resolveExternalMediaUrl(rawSrc, 'video');
                 const videoLabel = typeof alt === 'string' && alt.trim() ? alt.trim() : '播放视频';
 
                 if (!isVideoAllowed) {
@@ -487,6 +499,7 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
             }
 
             const isAllowed = isAllowedExternalMediaUrl(rawSrc, 'image');
+            const normalizedSrc = resolveExternalMediaUrl(rawSrc, 'image');
             if (!isAllowed) {
                 return (
                     <code className="font-mono text-xs bg-gray-800 px-1 py-0.5 rounded text-pink-200 break-all">
@@ -497,7 +510,7 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
 
             return (
                 <img
-                    src={src}
+                    src={normalizedSrc}
                     alt={typeof alt === 'string' ? alt : ''}
                     title={typeof title === 'string' ? title : undefined}
                     className="my-2 max-w-full rounded-md border border-white/15"
@@ -584,6 +597,24 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
                         compact
                         defaultExpanded={false}
                     />
+                )}
+
+                {illustrationImageUrl && (
+                    <div className="mt-4 border-l-4 border-pink-300 bg-black/20 p-3 rounded">
+                        <div className="text-sm font-semibold mb-2">🎨 战报插图</div>
+                        <img
+                            src={illustrationImageUrl}
+                            alt={`${headline || '战报'} 插图`}
+                            className="w-full max-h-[560px] object-contain rounded-lg border border-white/15 bg-black/15"
+                            loading="eager"
+                            decoding="async"
+                        />
+                        {uploadedIllustrationNote && (
+                            <p className="mt-2 text-[11px] text-gray-300 text-right">
+                                注：{uploadedIllustrationNote}
+                            </p>
+                        )}
+                    </div>
                 )}
 
                 {/* Markdown 内容渲染区域 */}

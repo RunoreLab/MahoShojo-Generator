@@ -1,4 +1,4 @@
-import { addPvpRoomPlayer, getPvpRoomById, getPvpRoomMembers, getPvpRoomPlayers, updatePvpRoomCas } from '@/lib/d1';
+import { addPvpRoomPlayer, getPvpRoomById, getPvpRoomMembers, getPvpRoomPlayers, updatePvpRoomCas } from '@/lib/database/pvp';
 import { parsePvpRoomInternalState } from '@/lib/pvp/bot/room';
 import { constantTimeEqual, hashJoinCode } from '@/lib/pvp/crypto';
 import { requiresPvpSubmissionPhase } from '@/lib/pvp/logic';

@@ -1,4 +1,4 @@
-import { getPvpRoomById, updatePvpRoomCas } from '@/lib/d1';
+import { getPvpRoomById, updatePvpRoomCas } from '@/lib/database/pvp';
 import { parsePvpRoomInternalState, stringifyPvpRoomInternalState } from '@/lib/pvp/bot/room';
 import { getRoomIdFromRequestUrl } from '@/lib/pvp/route';
 import { json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';

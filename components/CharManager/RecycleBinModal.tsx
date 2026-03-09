@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import DataCardDetailsModal from '../DataCardDetailsModal';
 import { buildTitleDisplay } from '@/lib/text';
+import { getDataCardStatus } from '@/lib/data-card-status';
 
 interface RecycleBinModalProps {
   isOpen: boolean;
@@ -134,7 +135,7 @@ export default function RecycleBinModal({
             description: selectedCard.description,
             type: selectedCard.type,
             data: selectedCard.data,
-            isPublic: selectedCard.is_public,
+            isPublic: getDataCardStatus(selectedCard).status === 'public',
             usageCount: selectedCard.usage_count,
             likeCount: selectedCard.like_count,
             author: selectedCard.parsedData?._author || '我',

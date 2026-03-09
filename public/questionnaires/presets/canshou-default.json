@@ -34,7 +34,7 @@
         "折叠",
         "渗漏"
       ],
-      "maxLength": 80
+      "maxLength": 180
     },
     {
       "id": "coreEmotion",
@@ -64,7 +64,7 @@
         "痛苦（用痛证明存在）",
         "混沌（只要更乱）"
       ],
-      "maxLength": 80
+      "maxLength": 180
     },
     {
       "id": "evolutionStage",
@@ -127,7 +127,7 @@
         "无定形（雾与影）",
         "几何体（不断折叠）"
       ],
-      "maxLength": 80
+      "maxLength": 180
     },
     {
       "id": "materialAndSkin",
@@ -210,7 +210,7 @@
         "魔法国度污染（规则碎片落入现实）",
         "未知（资料被抹除）"
       ],
-      "maxLength": 80
+      "maxLength": 180
     },
     {
       "id": "birthEnvironment",

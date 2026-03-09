@@ -1,17 +1,15 @@
-import { addCardsToDeck, getDeckById, getDeckCardsWithAccess, getUserByAuthKey, pruneDeckInaccessibleCards, removeCardsFromDeck } from '@/lib/d1';
+import {
+  addCardsToDeck,
+  getDeckCardsWithAccess,
+  pruneDeckInaccessibleCards,
+  removeCardsFromDeck,
+} from '@/lib/database/deck-cards';
+import { getDeckById } from '@/lib/database/decks';
+import { getDeckStatus } from '@/lib/deck-status';
+import { mapDeckReadRow } from '@/lib/deck-read-mappers';
+import { getAuthUser, requireAuthUser } from '@/lib/auth/server';
 
 export const runtime = 'edge';
-
-type AuthenticatedUser = { id: number; username: string };
-
-async function getUserFromAuth(req: Request): Promise<AuthenticatedUser | null> {
-  const authHeader = req.headers.get('authorization');
-  if (!authHeader || !authHeader.startsWith('Bearer ')) return null;
-
-  const authKey = authHeader.substring(7);
-  const user = await getUserByAuthKey(authKey);
-  return user;
-}
 
 export default async function handler(req: Request): Promise<Response> {
   if (req.method === 'GET') {
@@ -25,7 +23,7 @@ export default async function handler(req: Request): Promise<Response> {
         });
       }
 
-      const viewer = await getUserFromAuth(req);
+      const viewer = (await getAuthUser(req))?.user ?? null;
       const deck = await getDeckById(deckId);
       if (!deck) {
         return new Response(JSON.stringify({ error: '卡组不存在' }), {
@@ -34,16 +32,10 @@ export default async function handler(req: Request): Promise<Response> {
         });
       }
 
-      const isOwner = viewer && deck.user_id === viewer.id;
-      const isPublic = deck.is_public === 1;
-      const isBanned = deck.is_public === -1;
-      if (!isOwner && !isPublic) {
-        return new Response(JSON.stringify({ error: '卡组不存在或无权访问' }), {
-          status: 404,
-          headers: { 'Content-Type': 'application/json' }
-        });
-      }
-      if (!isOwner && isBanned) {
+      const mappedDeck = mapDeckReadRow(deck);
+      const isOwner = viewer && mappedDeck.userId === viewer.id;
+      const deckStatus = getDeckStatus(deck).status;
+      if (!isOwner && deckStatus !== 'public') {
         return new Response(JSON.stringify({ error: '卡组不存在或无权访问' }), {
           status: 404,
           headers: { 'Content-Type': 'application/json' }
@@ -51,7 +43,7 @@ export default async function handler(req: Request): Promise<Response> {
       }
 
       const cards = await getDeckCardsWithAccess(deckId, viewer?.id);
-      return new Response(JSON.stringify({ success: true, deck, cards }), {
+      return new Response(JSON.stringify({ success: true, deck: mappedDeck, cards }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' }
       });
@@ -64,13 +56,9 @@ export default async function handler(req: Request): Promise<Response> {
     }
   }
 
-  const user = await getUserFromAuth(req);
-  if (!user) {
-    return new Response(JSON.stringify({ error: '未授权' }), {
-      status: 401,
-      headers: { 'Content-Type': 'application/json' }
-    });
-  }
+  const auth = await requireAuthUser(req);
+  if ('response' in auth) return auth.response;
+  const user = auth.user;
 
   if (req.method === 'POST') {
     try {
@@ -84,7 +72,15 @@ export default async function handler(req: Request): Promise<Response> {
       }
 
       const deck = await getDeckById(deckId);
-      if (!deck || deck.user_id !== user.id) {
+      if (!deck) {
+        return new Response(JSON.stringify({ error: '卡组不存在或无权访问' }), {
+          status: 404,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+
+      const mappedDeck = mapDeckReadRow(deck);
+      if (mappedDeck.userId !== user.id) {
         return new Response(JSON.stringify({ error: '卡组不存在或无权访问' }), {
           status: 404,
           headers: { 'Content-Type': 'application/json' }
@@ -167,4 +163,3 @@ export default async function handler(req: Request): Promise<Response> {
     headers: { 'Content-Type': 'application/json' }
   });
 }
-

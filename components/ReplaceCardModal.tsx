@@ -2,6 +2,8 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { formatDateTime } from '@/lib/constants';
 import { buildTitleDisplay } from '@/lib/text';
+import { JsonSizeIndicator } from '@/components/shared/JsonSizeIndicator';
+import { getDataCardStatus, getDataCardVisibilityValue } from '@/lib/data-card-status';
 
 interface ReplaceCardModalProps {
   isOpen: boolean;
@@ -10,6 +12,7 @@ interface ReplaceCardModalProps {
   targetType: 'character' | 'scenario' | 'history' | 'questionnaire';
   onConfirm: (cardId: string, opts: { name?: string; description?: string; isPublic?: number }) => Promise<void>;
   isSaving?: boolean;
+  data?: unknown;
 }
 
 export default function ReplaceCardModal({
@@ -18,7 +21,8 @@ export default function ReplaceCardModal({
   cards,
   targetType,
   onConfirm,
-  isSaving = false
+  isSaving = false,
+  data
 }: ReplaceCardModalProps) {
   const filteredCards = useMemo(() => cards.filter((c) => c.type === targetType), [cards, targetType]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -42,7 +46,7 @@ export default function ReplaceCardModal({
     if (card) {
       setName(card.name || '');
       setDescription(card.description || '');
-      setIsPublic(card.is_public);
+      setIsPublic(getDataCardVisibilityValue(card));
     }
   }, [selectedId, filteredCards]);
 
@@ -72,6 +76,7 @@ export default function ReplaceCardModal({
             <div className="space-y-3 mb-4">
               {filteredCards.map((card) => {
                 const { display, full } = buildTitleDisplay(card.name || '未命名');
+                const cardStatus = getDataCardStatus(card);
                 return (
                   <label
                     key={card.id}
@@ -100,7 +105,7 @@ export default function ReplaceCardModal({
                       </div>
                       <p className="text-sm text-gray-600 line-clamp-2">{card.description}</p>
                       <p className="text-[11px] text-gray-500 mt-1">
-                        创建 {formatDateTime(card.created_at)} ｜ 更新 {formatDateTime(card.updated_at)} ｜ 公开状态：{card.is_public === 1 ? '公开' : '私有'}
+                        创建 {formatDateTime(card.created_at)} ｜ 更新 {formatDateTime(card.updated_at)} ｜ 公开状态：{cardStatus.label}
                       </p>
                     </div>
                   </label>
@@ -145,6 +150,14 @@ export default function ReplaceCardModal({
                   </label>
                 </div>
               </div>
+            )}
+
+            {data !== undefined && data !== null && (
+              <JsonSizeIndicator
+                data={data}
+                className="mt-0 mb-4"
+                warningText="⚠️ 接近云端 300KB 上限，替换可能失败，请先精简数据。"
+              />
             )}
 
             <div className="flex justify-end gap-2">

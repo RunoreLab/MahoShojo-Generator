@@ -5,16 +5,16 @@
  * 运行此脚本会在 badges 表中插入基础的徽章定义
  */
 
-import { queryFromD1 } from '../lib/database/core';
+import { listExistingBadgeIds, upsertBadgeDefinition } from '@/lib/database/badges-maintenance';
 
 interface BadgeDefinition {
   id: string;
   name: string;
   description: string;
-  icon: string; // JSON string
-  textColor: string; // JSON string
-  backgroundColor: string; // JSON string
-  borderColor?: string; // JSON string
+  icon: string;
+  textColor: string;
+  backgroundColor: string;
+  borderColor?: string;
   rarity: number;
   sortOrder: number;
 }
@@ -33,8 +33,8 @@ const BADGE_DEFINITIONS: BadgeDefinition[] = [
     backgroundColor: '{"type":"gradient","value":"linear-gradient(135deg, #f093fb, #f5576c)"}',
     borderColor: '{"type":"solid","value":"#E91E63"}',
     rarity: 80,
-    sortOrder: 2
-  }
+    sortOrder: 2,
+  },
 ];
 
 /**
@@ -42,15 +42,8 @@ const BADGE_DEFINITIONS: BadgeDefinition[] = [
  */
 async function badgeExists(badgeId: string): Promise<boolean> {
   try {
-    const result = await queryFromD1(
-      'SELECT COUNT(*) as count FROM badges WHERE id = ?',
-      [badgeId]
-    ) as any;
-
-    if (result.success && result.result && result.result[0]?.results?.length > 0) {
-      return result.result[0].results[0].count > 0;
-    }
-    return false;
+    const ids = await listExistingBadgeIds([badgeId]);
+    return ids.includes(badgeId);
   } catch (error) {
     console.error('检查徽章存在性失败:', error);
     return false;
@@ -62,23 +55,19 @@ async function badgeExists(badgeId: string): Promise<boolean> {
  */
 async function insertBadge(badge: BadgeDefinition): Promise<boolean> {
   try {
-    const result = await queryFromD1(
-      `INSERT INTO badges (id, name, description, icon, text_color, background_color, border_color, rarity, sort_order, is_active)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
-      [
-        badge.id,
-        badge.name,
-        badge.description,
-        badge.icon,
-        badge.textColor,
-        badge.backgroundColor,
-        badge.borderColor || null,
-        badge.rarity,
-        badge.sortOrder
-      ]
-    ) as any;
-
-    return result.success;
+    await upsertBadgeDefinition({
+      id: badge.id,
+      name: badge.name,
+      description: badge.description,
+      icon: badge.icon,
+      textColor: badge.textColor,
+      backgroundColor: badge.backgroundColor,
+      borderColor: badge.borderColor ?? null,
+      rarity: badge.rarity,
+      sortOrder: badge.sortOrder,
+      isActive: true,
+    });
+    return true;
   } catch (error) {
     console.error('插入徽章失败:', error);
     return false;
@@ -90,23 +79,19 @@ async function insertBadge(badge: BadgeDefinition): Promise<boolean> {
  */
 async function updateBadge(badge: BadgeDefinition): Promise<boolean> {
   try {
-    const result = await queryFromD1(
-      `UPDATE badges SET name = ?, description = ?, icon = ?, text_color = ?, background_color = ?,
-       border_color = ?, rarity = ?, sort_order = ? WHERE id = ?`,
-      [
-        badge.name,
-        badge.description,
-        badge.icon,
-        badge.textColor,
-        badge.backgroundColor,
-        badge.borderColor || null,
-        badge.rarity,
-        badge.sortOrder,
-        badge.id
-      ]
-    ) as any;
-
-    return result.success;
+    await upsertBadgeDefinition({
+      id: badge.id,
+      name: badge.name,
+      description: badge.description,
+      icon: badge.icon,
+      textColor: badge.textColor,
+      backgroundColor: badge.backgroundColor,
+      borderColor: badge.borderColor ?? null,
+      rarity: badge.rarity,
+      sortOrder: badge.sortOrder,
+      isActive: true,
+    });
+    return true;
   } catch (error) {
     console.error('更新徽章失败:', error);
     return false;
@@ -168,7 +153,7 @@ async function main() {
   }
 }
 
-main().catch(error => {
+main().catch((error) => {
   console.error('❌ 发生错误:', error);
   process.exit(1);
 });

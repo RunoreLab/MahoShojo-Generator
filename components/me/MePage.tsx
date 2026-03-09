@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Head from 'next/head';
 import Link from 'next/link';
 import { useMutation } from '@tanstack/react-query';
@@ -10,6 +10,8 @@ import Footer from '@/components/Footer';
 import { BattleReportCardModal } from '@/components/me/BattleReportCardModal';
 import { BattleReportDetailsModal } from '@/components/me/BattleReportDetailsModal';
 import { BattleReportsPanel } from '@/components/me/BattleReportsPanel';
+import { AccountSecurityPanel } from '@/components/me/AccountSecurityPanel';
+import { AuthMigrationPanel } from '@/components/me/AuthMigrationPanel';
 import { MeTabs } from '@/components/me/MeTabs';
 import { PvpMatchDetailsModal } from '@/components/me/PvpMatchDetailsModal';
 import { PvpMatchesPanel } from '@/components/me/PvpMatchesPanel';
@@ -19,9 +21,19 @@ import { ProfileSettingsPanel } from '@/components/me/ProfileSettingsPanel';
 import { authStorage } from '@/lib/auth';
 import { useAuth } from '@/lib/useAuth';
 
+type MeTab = 'reports' | 'pvp' | 'settings';
+
+const parseMeTabFromSearch = (search: string): MeTab | null => {
+  const params = new URLSearchParams(search);
+  const tab = params.get('tab');
+  if (tab === 'reports' || tab === 'pvp' || tab === 'settings') return tab;
+  if (params.get('token')) return 'settings';
+  return null;
+};
+
 export function MePage() {
   const { user, userBadges, isAuthenticated, loading } = useAuth();
-  const [tab, setTab] = useState<'reports' | 'pvp' | 'settings'>('reports');
+  const [tab, setTab] = useState<MeTab>('reports');
 
   const [activeReportId, setActiveReportId] = useState<string | null>(null);
   const [showReportDetails, setShowReportDetails] = useState(false);
@@ -34,13 +46,23 @@ export function MePage() {
 
   const [showProfileCardModal, setShowProfileCardModal] = useState(false);
 
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const syncTabFromQuery = () => {
+      const nextTab = parseMeTabFromSearch(window.location.search);
+      if (nextTab) setTab(nextTab);
+    };
+
+    syncTabFromQuery();
+    window.addEventListener('popstate', syncTabFromQuery);
+    return () => window.removeEventListener('popstate', syncTabFromQuery);
+  }, []);
+
   const regenerateMutation = useMutation({
     mutationFn: async (generationId: string) => {
-      const authHeader = await authStorage.getAuthHeader();
-      if (!authHeader) throw new Error('未登录');
-      const res = await fetch(`/api/me/battle-reports/${generationId}/regenerate`, {
+      const res = await authStorage.fetch(`/api/me/battle-reports/${generationId}/regenerate`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: authHeader },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({}),
       });
       const data = await res.json().catch(() => ({}));
@@ -130,19 +152,9 @@ export function MePage() {
 
             {tab === 'settings' ? (
               <div className="mt-4">
+                <AuthMigrationPanel userId={user?.id ?? null} />
                 <ProfileSettingsPanel userId={user?.id ?? null} />
-                <div className="mt-4">
-                  <div className="font-semibold mb-2">账号设置（预留）</div>
-                  <div className="rounded-xl border bg-white p-4 text-sm text-gray-700">
-                    <div className="mb-2">此区域将用于后续实现：</div>
-                    <ul className="list-disc list-inside space-y-1">
-                      <li>改绑邮箱</li>
-                      <li>修改密码</li>
-                      <li>修改用户名</li>
-                    </ul>
-                    <div className="text-xs text-gray-500 mt-2">当前版本仅预留入口，功能后续逐步上线。</div>
-                  </div>
-                </div>
+                <AccountSecurityPanel userId={user?.id ?? null} username={user?.username ?? null} />
               </div>
             ) : null}
           </div>

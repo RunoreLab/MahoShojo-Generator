@@ -1,5 +1,4 @@
-import { queryFromD1 } from './core';
-import { getBattleReportGenerationCombatantsByGenerationId, type BattleReportGenerationCombatantRow } from './battle-report-generation-combatants';
+import type { BattleReportGenerationCombatantRow } from './battle-report-generation-combatants';
 import { PRESET_LIST } from '@/lib/presets';
 import { isStrictRankedModelBlacklisted } from '@/lib/arena/ranked-model-policy';
 import { computeArenaBaseTier, type ArenaBaseTier } from '@/lib/arena/tier';
@@ -23,6 +22,8 @@ export interface ArenaRatingSnapshot {
   draws: number;
 }
 
+type ArenaRatingRangeSnapshot = Pick<ArenaRatingSnapshot, 'rating' | 'games'>;
+
 export interface ArenaEligibilitySnapshot {
   status: string | null;
   mode: string | null;
@@ -42,9 +43,12 @@ export interface ArenaEligibilitySnapshot {
 }
 
 export const INITIAL_RATING = 1000;
-export const STRICT_DEDUP_WINDOW_MS = 10 * 60 * 1000;
+export const STRICT_DEDUP_WINDOW_MS = 360 * 60 * 1000;
 export const FREE_DEDUP_WINDOW_MS = 10 * 60 * 1000;
-export const STRICT_DAILY_LIMIT = 80;
+export const STRICT_DAILY_LIMIT = 20;
+export const STRICT_SAME_PAIR_DAILY_LIMIT = 2;
+export const STRICT_LOW_GAMES_THRESHOLD = 10;
+export const STRICT_LOW_GAMES_MAX_ABS_DIFF = 400;
 
 const STRICT_MAX_ABS_DIFF_BY_TIER: Record<ArenaBaseTier, number> = {
   '无牌': 2000,
@@ -54,11 +58,45 @@ const STRICT_MAX_ABS_DIFF_BY_TIER: Record<ArenaBaseTier, number> = {
   '权杖': 1000,
 };
 
-const getStrictMaxAbsDiffForRatings = (a: ArenaRatingSnapshot, b: ArenaRatingSnapshot): number => {
+export const getStrictMaxAbsDiffForRatings = (a: ArenaRatingRangeSnapshot, b: ArenaRatingRangeSnapshot): number => {
   const aTier = computeArenaBaseTier(a.rating, a.games);
   const bTier = computeArenaBaseTier(b.rating, b.games);
   const pick = a.rating > b.rating ? aTier : b.rating > a.rating ? bTier : (a.games >= b.games ? aTier : bTier);
   return STRICT_MAX_ABS_DIFF_BY_TIER[pick] ?? 1000;
+};
+
+export type StrictRangeCheckResult = {
+  absDiff: number;
+  maxAbsDiff: number;
+  exceededBy: number;
+  aRating: number;
+  bRating: number;
+  aGames: number;
+  bGames: number;
+  lowGamesTightened: boolean;
+};
+
+export const getStrictRangeCheckResult = (
+  a: ArenaRatingRangeSnapshot,
+  b: ArenaRatingRangeSnapshot,
+): StrictRangeCheckResult | null => {
+  if (!shouldEnforceStrictRangeLimit(a, b)) return null;
+
+  const absDiff = Math.abs(a.rating - b.rating);
+  const baseMaxAbsDiff = getStrictMaxAbsDiffForRatings(a, b);
+  const lowGamesTightened = a.games < STRICT_LOW_GAMES_THRESHOLD || b.games < STRICT_LOW_GAMES_THRESHOLD;
+  const maxAbsDiff = lowGamesTightened ? Math.min(baseMaxAbsDiff, STRICT_LOW_GAMES_MAX_ABS_DIFF) : baseMaxAbsDiff;
+
+  return {
+    absDiff,
+    maxAbsDiff,
+    exceededBy: Math.max(0, absDiff - maxAbsDiff),
+    aRating: a.rating,
+    bRating: b.rating,
+    aGames: a.games,
+    bGames: b.games,
+    lowGamesTightened,
+  };
 };
 
 export type StrictDailyUsage = {
@@ -68,83 +106,149 @@ export type StrictDailyUsage = {
   exceeded: boolean;
 };
 
+export type StrictPairUsage = {
+  daySinceIso: string;
+  windowSinceIso: string;
+  usedToday: number;
+  limit: number;
+  exceeded: boolean;
+  recentDeduped: boolean;
+  recentAppliedAtIso: string | null;
+  nextEligibleAtIso: string | null;
+};
+
+type ArenaRatingsRepoBundle = {
+  db: unknown;
+  resetStrictArenaRatingForDataCard: (
+    db: unknown,
+    dataCardId: string,
+    initialRating: number,
+    nowIso: string,
+  ) => Promise<void>;
+  countStrictAppliedEventsSince: (db: unknown, userId: number, sinceIso: string) => Promise<number>;
+  getStrictUserPairAppliedStatsSince: (
+    db: unknown,
+    userId: number,
+    pairKey: string,
+    sinceIso: string,
+    daySinceIso: string,
+  ) => Promise<{ pairUsedToday: number; latestAppliedAt: string | null }>;
+  getStrictQueueDataCardsByIds: (
+    db: unknown,
+    dataCardIds: string[],
+  ) => Promise<Array<{
+    id: string;
+    type: string | null;
+    isPublic: number | boolean | null;
+    reviewStatus: string | null;
+    deletedAt: string | null;
+  }>>;
+  getArenaEligibilitySnapshotByGenerationId: (db: unknown, generationId: string) => Promise<ArenaEligibilitySnapshot | null>;
+  listGenerationCombatantsByGenerationId: (db: unknown, generationId: string) => Promise<BattleReportGenerationCombatantRow[]>;
+  ensureArenaRatingsExist: (
+    db: unknown,
+    queue: ArenaQueue,
+    entities: [ArenaEntity, ArenaEntity],
+    initialRating: number,
+    nowIso: string,
+  ) => Promise<void>;
+  getArenaRatingsByEntitiesForQueue: (
+    db: unknown,
+    queue: ArenaQueue,
+    entities: [ArenaEntity, ArenaEntity],
+  ) => Promise<Array<ArenaEntity & ArenaRatingSnapshot>>;
+  hasRecentAppliedEventForPair: (
+    db: unknown,
+    queue: ArenaQueue,
+    pairKey: string,
+    options: { userId: number } | { ipAnonymized: string },
+    sinceIso: string,
+  ) => Promise<boolean>;
+  insertArenaRatingEvent: (
+    db: unknown,
+    payload: {
+      id: string;
+      generationId: string;
+      queue: ArenaQueue;
+      status: ArenaRatingEventStatus;
+      skipReason: string | null;
+      userId: number | null;
+      ipAnonymized: string | null;
+      pairKey: string;
+      a: ArenaEntity;
+      b: ArenaEntity;
+      winnerSlot: WinnerSlot;
+      createdAtIso: string;
+      detailsJson?: Record<string, unknown> | null;
+    },
+  ) => Promise<boolean>;
+  getArenaRatingEventById: (db: unknown, eventId: string) => Promise<ArenaRatingEventRowForApply | null>;
+  updateArenaRatingEventComputedFields: (
+    db: unknown,
+    eventId: string,
+    computed: ArenaRatingEventComputedPayload,
+  ) => Promise<boolean>;
+  markArenaRatingEventApplied: (db: unknown, eventId: string, appliedAtIso: string) => Promise<void>;
+  markArenaRatingEventStatus: (
+    db: unknown,
+    eventId: string,
+    status: ArenaRatingEventStatus,
+    options?: { skipReason?: string | null },
+  ) => Promise<void>;
+  applyArenaRatingsUpdateIfBothMatch: (
+    db: unknown,
+    queue: ArenaQueue,
+    entities: [ArenaEntity, ArenaEntity],
+    computed: ArenaRatingEventComputedPayload,
+    appliedAtIso: string,
+  ) => Promise<'applied' | 'already-applied' | 'conflict'>;
+};
+
+const readArenaRatingsRepoBundle = async (): Promise<ArenaRatingsRepoBundle | null> => {
+  try {
+    const [{ getDrizzleDbFromRuntime }, repo] = await Promise.all([
+      import('@/lib/db/drizzle'),
+      import('@/lib/db/repositories/arena-ratings-write'),
+    ]);
+    const db = getDrizzleDbFromRuntime();
+    if (!db) return null;
+
+    return {
+      db,
+      resetStrictArenaRatingForDataCard: repo.resetStrictArenaRatingForDataCard as ArenaRatingsRepoBundle['resetStrictArenaRatingForDataCard'],
+      countStrictAppliedEventsSince: repo.countStrictAppliedEventsSince as ArenaRatingsRepoBundle['countStrictAppliedEventsSince'],
+      getStrictUserPairAppliedStatsSince: repo.getStrictUserPairAppliedStatsSince as ArenaRatingsRepoBundle['getStrictUserPairAppliedStatsSince'],
+      getStrictQueueDataCardsByIds: repo.getStrictQueueDataCardsByIds as ArenaRatingsRepoBundle['getStrictQueueDataCardsByIds'],
+      getArenaEligibilitySnapshotByGenerationId: repo.getArenaEligibilitySnapshotByGenerationId as ArenaRatingsRepoBundle['getArenaEligibilitySnapshotByGenerationId'],
+      listGenerationCombatantsByGenerationId: repo.listGenerationCombatantsByGenerationId as ArenaRatingsRepoBundle['listGenerationCombatantsByGenerationId'],
+      ensureArenaRatingsExist: repo.ensureArenaRatingsExist as ArenaRatingsRepoBundle['ensureArenaRatingsExist'],
+      getArenaRatingsByEntitiesForQueue: repo.getArenaRatingsByEntitiesForQueue as ArenaRatingsRepoBundle['getArenaRatingsByEntitiesForQueue'],
+      hasRecentAppliedEventForPair: repo.hasRecentAppliedEventForPair as ArenaRatingsRepoBundle['hasRecentAppliedEventForPair'],
+      insertArenaRatingEvent: repo.insertArenaRatingEvent as ArenaRatingsRepoBundle['insertArenaRatingEvent'],
+      getArenaRatingEventById: repo.getArenaRatingEventById as ArenaRatingsRepoBundle['getArenaRatingEventById'],
+      updateArenaRatingEventComputedFields: repo.updateArenaRatingEventComputedFields as ArenaRatingsRepoBundle['updateArenaRatingEventComputedFields'],
+      markArenaRatingEventApplied: repo.markArenaRatingEventApplied as ArenaRatingsRepoBundle['markArenaRatingEventApplied'],
+      markArenaRatingEventStatus: repo.markArenaRatingEventStatus as ArenaRatingsRepoBundle['markArenaRatingEventStatus'],
+      applyArenaRatingsUpdateIfBothMatch: repo.applyArenaRatingsUpdateIfBothMatch as ArenaRatingsRepoBundle['applyArenaRatingsUpdateIfBothMatch'],
+    };
+  } catch {
+    return null;
+  }
+};
+
 export async function resetStrictArenaRatingForDataCard(dataCardId: string): Promise<void> {
   const id = typeof dataCardId === 'string' ? dataCardId.trim() : '';
   if (!id) return;
 
   try {
+    const bundle = await readArenaRatingsRepoBundle();
+    if (!bundle) return;
     const nowIso = new Date().toISOString();
-    await (async () => {
-      try {
-        await queryFromD1(
-          `UPDATE arena_ratings
-           SET rating = ?, games = 0, wins = 0, losses = 0, draws = 0, last_delta = NULL, last_applied_at = NULL, updated_at = ?
-           WHERE entity_type = 'data_card'
-             AND entity_id = ?
-             AND queue = 'strict'`,
-          [INITIAL_RATING, nowIso, id]
-        );
-      } catch {
-        await queryFromD1(
-          `UPDATE arena_ratings
-           SET rating = ?, games = 0, wins = 0, losses = 0, draws = 0, updated_at = ?
-           WHERE entity_type = 'data_card'
-             AND entity_id = ?
-             AND queue = 'strict'`,
-          [INITIAL_RATING, nowIso, id]
-        );
-      }
-    })();
+    await bundle.resetStrictArenaRatingForDataCard(bundle.db, id, INITIAL_RATING, nowIso);
   } catch (error) {
     console.warn('重置严格排位分失败（降级为忽略）:', { dataCardId, error });
   }
 }
-
-export async function resetArenaRating(entity: ArenaEntity, queue: ArenaQueue | 'all' = 'all'): Promise<{ ok: boolean; error?: string }> {
-  const entityType = entity?.entityType;
-  const entityId = typeof entity?.entityId === 'string' ? entity.entityId.trim() : '';
-  if ((entityType !== 'data_card' && entityType !== 'preset') || !entityId) {
-    return { ok: false, error: '参数无效' };
-  }
-
-  const targetQueues: ArenaQueue[] = queue === 'all' ? ['strict', 'free'] : [queue];
-  try {
-    const nowIso = new Date().toISOString();
-    for (const q of targetQueues) {
-      await queryFromD1(
-        `INSERT INTO arena_ratings (
-           entity_type, entity_id, queue,
-           rating, games, wins, losses, draws,
-           created_at, updated_at
-         ) VALUES (?, ?, ?, ?, 0, 0, 0, 0, ?, ?)
-         ON CONFLICT(entity_type, entity_id, queue) DO UPDATE SET
-           rating = excluded.rating,
-           games = excluded.games,
-           wins = excluded.wins,
-           losses = excluded.losses,
-           draws = excluded.draws,
-           updated_at = excluded.updated_at`,
-        [entityType, entityId, q, INITIAL_RATING, nowIso, nowIso]
-      );
-    }
-    return { ok: true };
-  } catch (error) {
-    console.warn('重置 arena_ratings 失败（降级为忽略）:', { entity, queue, error });
-    return { ok: false, error: error instanceof Error ? error.message : '未知错误' };
-  }
-}
-
-const isFiniteInteger = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && Number.isInteger(value);
-
-const readD1Changes = (result: unknown): number => {
-  const changes = (result as any)?.result?.[0]?.meta?.changes;
-  return isFiniteInteger(changes) ? changes : 0;
-};
-
-const readD1Rows = <T>(result: unknown): T[] => {
-  const rows = (result as any)?.result?.[0]?.results;
-  return Array.isArray(rows) ? (rows as T[]) : [];
-};
 
 const startOfUtcDayIso = (): string => {
   const now = new Date();
@@ -152,22 +256,27 @@ const startOfUtcDayIso = (): string => {
   return start.toISOString();
 };
 
+const pickEarlierIso = (aIso: string, bIso: string): string => {
+  const aMs = Date.parse(aIso);
+  const bMs = Date.parse(bIso);
+  if (Number.isFinite(aMs) && Number.isFinite(bMs)) return aMs <= bMs ? aIso : bIso;
+  return aIso <= bIso ? aIso : bIso;
+};
+
+const buildNextEligibleAtIso = (recentAppliedAtIso: string | null, windowMs: number): string | null => {
+  if (typeof recentAppliedAtIso !== 'string' || !recentAppliedAtIso.trim()) return null;
+  const appliedAtMs = Date.parse(recentAppliedAtIso);
+  if (!Number.isFinite(appliedAtMs)) return null;
+  return new Date(appliedAtMs + windowMs).toISOString();
+};
+
 export const getStrictDailyUsage = async (userId: number): Promise<StrictDailyUsage | null> => {
   if (!Number.isFinite(userId) || userId <= 0) return null;
   try {
+    const bundle = await readArenaRatingsRepoBundle();
+    if (!bundle) return null;
     const sinceIso = startOfUtcDayIso();
-    const result = (await queryFromD1(
-      `SELECT COUNT(*) as count
-       FROM arena_rating_events
-       WHERE queue = 'strict'
-         AND status = 'applied'
-         AND user_id = ?
-         AND created_at >= ?`,
-      [userId, sinceIso]
-    )) as any;
-    const row = readD1Rows<{ count: number }>(result)[0];
-    const count = typeof row?.count === 'number' ? row.count : 0;
-    const used = Math.max(0, Math.floor(count));
+    const used = await bundle.countStrictAppliedEventsSince(bundle.db, userId, sinceIso);
     return {
       sinceIso,
       used,
@@ -176,6 +285,43 @@ export const getStrictDailyUsage = async (userId: number): Promise<StrictDailyUs
     };
   } catch (error) {
     console.warn('读取 strict 每日计分次数失败（降级为不限制）:', error);
+    return null;
+  }
+};
+
+export const getStrictPairUsage = async (userId: number, pairKey: string): Promise<StrictPairUsage | null> => {
+  const normalizedPairKey = typeof pairKey === 'string' ? pairKey.trim() : '';
+  if (!Number.isFinite(userId) || userId <= 0 || !normalizedPairKey) return null;
+
+  try {
+    const bundle = await readArenaRatingsRepoBundle();
+    if (!bundle) return null;
+
+    const daySinceIso = startOfUtcDayIso();
+    const windowSinceIso = new Date(Date.now() - STRICT_DEDUP_WINDOW_MS).toISOString();
+    const sinceIso = pickEarlierIso(daySinceIso, windowSinceIso);
+    const stats = await bundle.getStrictUserPairAppliedStatsSince(
+      bundle.db,
+      userId,
+      normalizedPairKey,
+      sinceIso,
+      daySinceIso,
+    );
+    const recentAppliedAtIso = stats.latestAppliedAt;
+    const recentDeduped = typeof recentAppliedAtIso === 'string' && recentAppliedAtIso >= windowSinceIso;
+
+    return {
+      daySinceIso,
+      windowSinceIso,
+      usedToday: stats.pairUsedToday,
+      limit: STRICT_SAME_PAIR_DAILY_LIMIT,
+      exceeded: stats.pairUsedToday >= STRICT_SAME_PAIR_DAILY_LIMIT,
+      recentDeduped,
+      recentAppliedAtIso,
+      nextEligibleAtIso: recentDeduped ? buildNextEligibleAtIso(recentAppliedAtIso, STRICT_DEDUP_WINDOW_MS) : null,
+    };
+  } catch (error) {
+    console.warn('读取 strict 对手组合计分使用情况失败（降级为不限制）:', { userId, pairKey: normalizedPairKey, error });
     return null;
   }
 };
@@ -533,6 +679,84 @@ export const parseCombatantEntity = (combatant: BattleReportGenerationCombatantR
   return null;
 };
 
+const toNullableIntegerLike = (value: unknown): number | null => {
+  if (typeof value === 'number' && Number.isFinite(value)) return Math.trunc(value);
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    const parsed = Number(trimmed);
+    if (Number.isFinite(parsed)) return Math.trunc(parsed);
+  }
+  return null;
+};
+
+const toNullableTinyIntLike = (value: unknown): number | null => {
+  if (typeof value === 'boolean') return value ? 1 : 0;
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === 'true') return 1;
+    if (normalized === 'false') return 0;
+  }
+  const numeric = toNullableIntegerLike(value);
+  if (numeric == null) return null;
+  return numeric === 0 ? 0 : 1;
+};
+
+const readFallbackTrimmedString = (value: unknown): string | null => {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+};
+
+export const parseGenerationCombatantsFallback = (
+  generationId: string,
+  extraJson: string | null,
+): BattleReportGenerationCombatantRow[] => {
+  if (typeof extraJson !== 'string' || !extraJson.trim()) return [];
+
+  try {
+    const parsed = JSON.parse(extraJson) as Record<string, unknown>;
+    const rawList = Array.isArray(parsed?.combatantsFallback) ? parsed.combatantsFallback : [];
+    if (rawList.length <= 0) return [];
+
+    const fallbackRows = rawList
+      .map((item, index) => {
+        const raw = item && typeof item === 'object' && !Array.isArray(item) ? (item as Record<string, unknown>) : {};
+        const sortIndex = toNullableIntegerLike(raw.sortIndex);
+        const name = readFallbackTrimmedString(raw.name);
+        const templateId =
+          readFallbackTrimmedString(raw.templateId) ??
+          readFallbackTrimmedString(raw.filename);
+
+        const row: BattleReportGenerationCombatantRow = {
+          generation_id: generationId,
+          sort_index: sortIndex ?? index,
+          name: name ?? templateId ?? `未知角色#${index + 1}`,
+          type: readFallbackTrimmedString(raw.type),
+          template_id: templateId,
+          is_native: toNullableTinyIntLike(raw.isNative),
+          is_preset: toNullableTinyIntLike(raw.isPreset),
+          team_id: toNullableIntegerLike(raw.teamId),
+          character_guidance: (() => {
+            const guidance = readFallbackTrimmedString(raw.characterGuidance);
+            return guidance ? guidance.slice(0, 100) : null;
+          })(),
+          data_card_id: readFallbackTrimmedString(raw.dataCardId),
+          data_card_updated_at: readFallbackTrimmedString(raw.dataCardUpdatedAt),
+          size_chars: null,
+          size_bytes: null,
+          created_at: new Date(0).toISOString(),
+        };
+        return row;
+      })
+      .sort((a, b) => a.sort_index - b.sort_index);
+
+    return fallbackRows;
+  } catch {
+    return [];
+  }
+};
+
 const readExtraJsonBoolean = (extraJson: string | null, key: string): boolean | null => {
   if (typeof extraJson !== 'string' || !extraJson.trim()) return null;
   try {
@@ -609,9 +833,6 @@ export const isStrictEligible = (snapshot: ArenaEligibilitySnapshot, combatants:
   // 严格排位：语言必须为简体中文（zh-CN）。
   if ((snapshot.language ?? '').trim() !== 'zh-CN') return false;
 
-  // 严格排位：等级必须为默认/未指定（selected_level 为空或 NULL）。
-  if (typeof snapshot.selectedLevel === 'string' && snapshot.selectedLevel.trim()) return false;
-
   const requiredStoryGuidance = readExtraJsonString(snapshot.extraJson, 'seasonStoryGuidance');
   if (requiredStoryGuidance) {
     const actual = typeof snapshot.userGuidancePreview === 'string' ? snapshot.userGuidancePreview.trim() : '';
@@ -685,20 +906,9 @@ const validateStrictPublicDataCardEntities = async (
   if (dataCardIds.length === 0) return { ok: true };
 
   try {
-    const result = (await queryFromD1(
-      `SELECT id, type, is_public as isPublic, review_status as reviewStatus, deleted_at as deletedAt
-       FROM data_cards
-       WHERE id IN (${dataCardIds.map(() => '?').join(', ')})`,
-      dataCardIds
-    )) as any;
-
-    const rows = readD1Rows<{
-      id: string;
-      type: string;
-      isPublic: number | boolean | null;
-      reviewStatus: string | null;
-      deletedAt: string | null;
-    }>(result);
+    const bundle = await readArenaRatingsRepoBundle();
+    if (!bundle) return { ok: false, skipReason: 'strict-card-missing' };
+    const rows = await bundle.getStrictQueueDataCardsByIds(bundle.db, dataCardIds);
 
     const byId = new Map<string, (typeof rows)[number]>();
     rows.forEach((row) => {
@@ -727,80 +937,40 @@ export async function getArenaEligibilitySnapshotByGenerationId(
   generationId: string
 ): Promise<ArenaEligibilitySnapshot | null> {
   try {
-    const result = (await queryFromD1(
-      `SELECT
-        status,
-        mode,
-        user_id as userId,
-        ip_anonymized as ipAnonymized,
-        language,
-        selected_level as selectedLevel,
-        has_scenario as hasScenario,
-        has_user_guidance as hasUserGuidance,
-        user_guidance_preview as userGuidancePreview,
-        has_adjudication_events as hasAdjudicationEvents,
-        read_arena_history as readArenaHistory,
-        read_current_state as readCurrentState,
-        combatant_count as combatantCount,
-        winner,
-        extra_json as extraJson
-      FROM battle_report_generations
-      WHERE id = ?`,
-      [generationId]
-    )) as any;
-
-    const rows = readD1Rows<ArenaEligibilitySnapshot>(result);
-    return rows[0] ?? null;
+    const bundle = await readArenaRatingsRepoBundle();
+    if (!bundle) return null;
+    return await bundle.getArenaEligibilitySnapshotByGenerationId(bundle.db, generationId);
   } catch (error) {
     console.error('读取 battle_report_generations 用于排位判定失败:', error);
     return null;
   }
 }
 
+const getGenerationCombatantsByGenerationId = async (
+  generationId: string,
+): Promise<BattleReportGenerationCombatantRow[]> => {
+  try {
+    const bundle = await readArenaRatingsRepoBundle();
+    if (!bundle) return [];
+    return await bundle.listGenerationCombatantsByGenerationId(bundle.db, generationId);
+  } catch (error) {
+    console.error('读取 battle_report_generation_combatants 失败:', error);
+    return [];
+  }
+};
+
 const ensureArenaRatingsExist = async (queue: ArenaQueue, entities: [ArenaEntity, ArenaEntity]): Promise<void> => {
+  const bundle = await readArenaRatingsRepoBundle();
+  if (!bundle) return;
   const nowIso = new Date().toISOString();
-  const [a, b] = entities;
-  await queryFromD1(
-    `INSERT OR IGNORE INTO arena_ratings (
-      entity_type, entity_id, queue,
-      rating, games, wins, losses, draws,
-      created_at, updated_at
-    ) VALUES
-      (?, ?, ?, ?, 0, 0, 0, 0, ?, ?),
-      (?, ?, ?, ?, 0, 0, 0, 0, ?, ?)`,
-    [
-      a.entityType, a.entityId, queue, INITIAL_RATING, nowIso, nowIso,
-      b.entityType, b.entityId, queue, INITIAL_RATING, nowIso, nowIso,
-    ]
-  );
+  await bundle.ensureArenaRatingsExist(bundle.db, queue, entities, INITIAL_RATING, nowIso);
 };
 
 const getArenaRatings = async (queue: ArenaQueue, entities: [ArenaEntity, ArenaEntity]): Promise<[ArenaRatingSnapshot, ArenaRatingSnapshot] | null> => {
+  const bundle = await readArenaRatingsRepoBundle();
+  if (!bundle) return null;
+  const rows = await bundle.getArenaRatingsByEntitiesForQueue(bundle.db, queue, entities);
   const [a, b] = entities;
-  const result = (await queryFromD1(
-    `SELECT
-      entity_type as entityType,
-      entity_id as entityId,
-      rating,
-      games,
-      wins,
-      losses,
-      draws
-    FROM arena_ratings
-    WHERE queue = ?
-      AND ((entity_type = ? AND entity_id = ?) OR (entity_type = ? AND entity_id = ?))`,
-    [queue, a.entityType, a.entityId, b.entityType, b.entityId]
-  )) as any;
-
-  const rows = readD1Rows<{
-    entityType: ArenaEntityType;
-    entityId: string;
-    rating: number;
-    games: number;
-    wins: number;
-    losses: number;
-    draws: number;
-  }>(result);
 
   const toSnapshot = (row: typeof rows[number] | undefined): ArenaRatingSnapshot => ({
     rating: typeof row?.rating === 'number' ? row.rating : INITIAL_RATING,
@@ -824,22 +994,10 @@ const hasRecentAppliedEventForPair = async (
   windowMs: number
 ): Promise<boolean> => {
   const sinceIso = new Date(Date.now() - windowMs).toISOString();
-  const baseSql =
-    `SELECT 1
-     FROM arena_rating_events
-     WHERE queue = ?
-       AND status = 'applied'
-       AND pair_key = ?
-       AND created_at >= ?
-       AND `;
-  const { sql, params } = 'userId' in options
-    ? { sql: `${baseSql} user_id = ? LIMIT 1`, params: [queue, pairKey, sinceIso, options.userId] }
-    : { sql: `${baseSql} ip_anonymized = ? LIMIT 1`, params: [queue, pairKey, sinceIso, options.ipAnonymized] };
-
   try {
-    const result = (await queryFromD1(sql, params)) as any;
-    const rows = readD1Rows<unknown>(result);
-    return rows.length > 0;
+    const bundle = await readArenaRatingsRepoBundle();
+    if (!bundle) return false;
+    return await bundle.hasRecentAppliedEventForPair(bundle.db, queue, pairKey, options, sinceIso);
   } catch (error) {
     console.error('查询排位风控去重失败:', error);
     return false;
@@ -862,47 +1020,17 @@ const insertArenaRatingEvent = async (
     detailsJson?: Record<string, unknown> | null;
   }
 ): Promise<boolean> => {
-  const nowIso = new Date().toISOString();
-  const detailsJson = payload.detailsJson ? JSON.stringify(payload.detailsJson) : null;
-
-  const result = (await queryFromD1(
-    `INSERT OR IGNORE INTO arena_rating_events (
-      id,
-      generation_id,
-      queue,
-      status,
-      skip_reason,
-      user_id,
-      ip_anonymized,
-      pair_key,
-      a_entity_type,
-      a_entity_id,
-      b_entity_type,
-      b_entity_id,
-      winner_slot,
-      details_json,
-      created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
-      payload.id,
-      payload.generationId,
-      payload.queue,
-      payload.status,
-      payload.skipReason,
-      payload.userId,
-      payload.ipAnonymized,
-      payload.pairKey,
-      payload.a.entityType,
-      payload.a.entityId,
-      payload.b.entityType,
-      payload.b.entityId,
-      payload.winnerSlot,
-      detailsJson,
-      nowIso,
-    ]
-  )) as any;
-
-  return readD1Changes(result) > 0;
+  try {
+    const bundle = await readArenaRatingsRepoBundle();
+    if (!bundle) return false;
+    return await bundle.insertArenaRatingEvent(bundle.db, {
+      ...payload,
+      createdAtIso: new Date().toISOString(),
+    });
+  } catch (error) {
+    console.error('写入 arena_rating_events 失败:', { eventId: payload.id, error });
+    return false;
+  }
 };
 
 interface ArenaRatingEventRowForApply {
@@ -924,29 +1052,9 @@ interface ArenaRatingEventRowForApply {
 
 const getArenaRatingEventById = async (eventId: string): Promise<ArenaRatingEventRowForApply | null> => {
   try {
-    const result = (await queryFromD1(
-      `SELECT
-        id,
-        status,
-        skip_reason,
-        details_json,
-        a_before_rating,
-        a_after_rating,
-        a_delta,
-        a_before_games,
-        a_after_games,
-        b_before_rating,
-        b_after_rating,
-        b_delta,
-        b_before_games,
-        b_after_games
-      FROM arena_rating_events
-      WHERE id = ?
-      LIMIT 1`,
-      [eventId]
-    )) as any;
-    const rows = readD1Rows<ArenaRatingEventRowForApply>(result);
-    return rows[0] ?? null;
+    const bundle = await readArenaRatingsRepoBundle();
+    if (!bundle) return null;
+    return await bundle.getArenaRatingEventById(bundle.db, eventId);
   } catch (error) {
     console.error('读取 arena_rating_events 失败:', { eventId, error });
     return null;
@@ -967,42 +1075,9 @@ const updateArenaRatingEventComputedFields = async (
   eventId: string,
   computed: ArenaRatingEventComputedPayload
 ): Promise<void> => {
-  const result = (await queryFromD1(
-    `UPDATE arena_rating_events
-     SET
-       a_before_rating = ?,
-       a_after_rating = ?,
-       a_delta = ?,
-       a_before_games = ?,
-       a_after_games = ?,
-       b_before_rating = ?,
-       b_after_rating = ?,
-       b_delta = ?,
-       b_before_games = ?,
-       b_after_games = ?,
-       details_json = ?
-     WHERE id = ?
-       AND status = 'pending'`,
-    [
-      computed.aBefore.rating,
-      computed.aAfter.rating,
-      computed.deltaA,
-      computed.aBefore.games,
-      computed.aAfter.games,
-      computed.bBefore.rating,
-      computed.bAfter.rating,
-      computed.deltaB,
-      computed.bBefore.games,
-      computed.bAfter.games,
-      JSON.stringify(computed.detailsJson),
-      eventId,
-    ]
-  )) as any;
-
-  const changes = readD1Changes(result);
-  if (changes <= 0) {
-    return;
-  }
+  const bundle = await readArenaRatingsRepoBundle();
+  if (!bundle) return;
+  await bundle.updateArenaRatingEventComputedFields(bundle.db, eventId, computed);
 };
 
 const markArenaRatingEventStatus = async (
@@ -1010,23 +1085,14 @@ const markArenaRatingEventStatus = async (
   status: ArenaRatingEventStatus,
   options?: { skipReason?: string | null }
 ): Promise<void> => {
-  const nowIso = new Date().toISOString();
+  const bundle = await readArenaRatingsRepoBundle();
+  if (!bundle) return;
   if (status === 'applied') {
-    await queryFromD1(
-      `UPDATE arena_rating_events
-       SET status = 'applied', applied_at = ?
-       WHERE id = ?`,
-      [nowIso, eventId]
-    );
+    await bundle.markArenaRatingEventApplied(bundle.db, eventId, new Date().toISOString());
     return;
   }
 
-  await queryFromD1(
-    `UPDATE arena_rating_events
-     SET status = ?, skip_reason = COALESCE(?, skip_reason)
-     WHERE id = ?`,
-    [status, options?.skipReason ?? null, eventId]
-  );
+  await bundle.markArenaRatingEventStatus(bundle.db, eventId, status, options);
 };
 
 const applyArenaRatingsUpdateIfBothMatch = async (
@@ -1034,200 +1100,9 @@ const applyArenaRatingsUpdateIfBothMatch = async (
   entities: [ArenaEntity, ArenaEntity],
   computed: ArenaRatingEventComputedPayload
 ): Promise<'applied' | 'already-applied' | 'conflict'> => {
-  const nowIso = new Date().toISOString();
-  const [aEntity, bEntity] = entities;
-
-  const matchGuardParams = [
-    queue,
-    aEntity.entityType, aEntity.entityId, computed.aBefore.rating, computed.aBefore.games,
-    bEntity.entityType, bEntity.entityId, computed.bBefore.rating, computed.bBefore.games,
-  ];
-
-  const ratingParams = [
-    aEntity.entityType, aEntity.entityId, computed.aAfter.rating,
-    bEntity.entityType, bEntity.entityId, computed.bAfter.rating,
-  ];
-  const gamesParams = [
-    aEntity.entityType, aEntity.entityId, computed.aAfter.games,
-    bEntity.entityType, bEntity.entityId, computed.bAfter.games,
-  ];
-  const winsParams = [
-    aEntity.entityType, aEntity.entityId, computed.aAfter.wins,
-    bEntity.entityType, bEntity.entityId, computed.bAfter.wins,
-  ];
-  const lossesParams = [
-    aEntity.entityType, aEntity.entityId, computed.aAfter.losses,
-    bEntity.entityType, bEntity.entityId, computed.bAfter.losses,
-  ];
-  const drawsParams = [
-    aEntity.entityType, aEntity.entityId, computed.aAfter.draws,
-    bEntity.entityType, bEntity.entityId, computed.bAfter.draws,
-  ];
-
-  const whereParams = [queue, aEntity.entityType, aEntity.entityId, bEntity.entityType, bEntity.entityId];
-
-  const paramsOld = [
-    ...matchGuardParams,
-    ...ratingParams,
-    ...gamesParams,
-    ...winsParams,
-    ...lossesParams,
-    ...drawsParams,
-    nowIso,
-    ...whereParams,
-  ];
-
-  const sqlOld = `WITH matched AS (
-      SELECT entity_type, entity_id
-      FROM arena_ratings
-      WHERE queue = ?
-        AND (
-          (entity_type = ? AND entity_id = ? AND rating = ? AND games = ?)
-          OR
-          (entity_type = ? AND entity_id = ? AND rating = ? AND games = ?)
-        )
-    )
-    UPDATE arena_ratings
-    SET
-      rating = CASE
-        WHEN entity_type = ? AND entity_id = ? THEN ?
-        WHEN entity_type = ? AND entity_id = ? THEN ?
-        ELSE rating
-      END,
-      games = CASE
-        WHEN entity_type = ? AND entity_id = ? THEN ?
-        WHEN entity_type = ? AND entity_id = ? THEN ?
-        ELSE games
-      END,
-      wins = CASE
-        WHEN entity_type = ? AND entity_id = ? THEN ?
-        WHEN entity_type = ? AND entity_id = ? THEN ?
-        ELSE wins
-      END,
-      losses = CASE
-        WHEN entity_type = ? AND entity_id = ? THEN ?
-        WHEN entity_type = ? AND entity_id = ? THEN ?
-        ELSE losses
-      END,
-      draws = CASE
-        WHEN entity_type = ? AND entity_id = ? THEN ?
-        WHEN entity_type = ? AND entity_id = ? THEN ?
-        ELSE draws
-      END,
-      updated_at = ?
-    WHERE queue = ?
-      AND (
-        (entity_type = ? AND entity_id = ?)
-        OR
-        (entity_type = ? AND entity_id = ?)
-      )
-      AND (SELECT COUNT(*) FROM matched) = 2`;
-
-  const lastDeltaParams = [
-    aEntity.entityType, aEntity.entityId, computed.deltaA,
-    bEntity.entityType, bEntity.entityId, computed.deltaB,
-  ];
-  const lastAppliedAtParams = [
-    aEntity.entityType, aEntity.entityId, nowIso,
-    bEntity.entityType, bEntity.entityId, nowIso,
-  ];
-
-  const paramsNew = [
-    ...matchGuardParams,
-    ...ratingParams,
-    ...gamesParams,
-    ...winsParams,
-    ...lossesParams,
-    ...drawsParams,
-    ...lastDeltaParams,
-    ...lastAppliedAtParams,
-    nowIso,
-    ...whereParams,
-  ];
-
-  const sqlNew = `WITH matched AS (
-      SELECT entity_type, entity_id
-      FROM arena_ratings
-      WHERE queue = ?
-        AND (
-          (entity_type = ? AND entity_id = ? AND rating = ? AND games = ?)
-          OR
-          (entity_type = ? AND entity_id = ? AND rating = ? AND games = ?)
-        )
-    )
-    UPDATE arena_ratings
-    SET
-      rating = CASE
-        WHEN entity_type = ? AND entity_id = ? THEN ?
-        WHEN entity_type = ? AND entity_id = ? THEN ?
-        ELSE rating
-      END,
-      games = CASE
-        WHEN entity_type = ? AND entity_id = ? THEN ?
-        WHEN entity_type = ? AND entity_id = ? THEN ?
-        ELSE games
-      END,
-      wins = CASE
-        WHEN entity_type = ? AND entity_id = ? THEN ?
-        WHEN entity_type = ? AND entity_id = ? THEN ?
-        ELSE wins
-      END,
-      losses = CASE
-        WHEN entity_type = ? AND entity_id = ? THEN ?
-        WHEN entity_type = ? AND entity_id = ? THEN ?
-        ELSE losses
-      END,
-      draws = CASE
-        WHEN entity_type = ? AND entity_id = ? THEN ?
-        WHEN entity_type = ? AND entity_id = ? THEN ?
-        ELSE draws
-      END,
-      last_delta = CASE
-        WHEN entity_type = ? AND entity_id = ? THEN ?
-        WHEN entity_type = ? AND entity_id = ? THEN ?
-        ELSE last_delta
-      END,
-      last_applied_at = CASE
-        WHEN entity_type = ? AND entity_id = ? THEN ?
-        WHEN entity_type = ? AND entity_id = ? THEN ?
-        ELSE last_applied_at
-      END,
-      updated_at = ?
-    WHERE queue = ?
-      AND (
-        (entity_type = ? AND entity_id = ?)
-        OR
-        (entity_type = ? AND entity_id = ?)
-      )
-      AND (SELECT COUNT(*) FROM matched) = 2`;
-
-  const runUpdate = async (sql: string, params: unknown[]): Promise<number> => {
-    const result = (await queryFromD1(sql, params)) as any;
-    return readD1Changes(result);
-  };
-
-  const changes = await (async () => {
-    try {
-      return await runUpdate(sqlNew, paramsNew);
-    } catch (error) {
-      console.warn('更新 arena_ratings.last_delta 失败（将回退到旧结构）:', error);
-      return await runUpdate(sqlOld, paramsOld);
-    }
-  })();
-  if (changes === 2) return 'applied';
-
-  const latest = await getArenaRatings(queue, entities);
-  if (!latest) return 'conflict';
-  const [aLatest, bLatest] = latest;
-  if (
-    aLatest.rating === computed.aAfter.rating &&
-    aLatest.games === computed.aAfter.games &&
-    bLatest.rating === computed.bAfter.rating &&
-    bLatest.games === computed.bAfter.games
-  ) {
-    return 'already-applied';
-  }
-  return 'conflict';
+  const bundle = await readArenaRatingsRepoBundle();
+  if (!bundle) return 'conflict';
+  return bundle.applyArenaRatingsUpdateIfBothMatch(bundle.db, queue, entities, computed, new Date().toISOString());
 };
 
 export async function settleArenaRatingsForGeneration(
@@ -1239,8 +1114,12 @@ export async function settleArenaRatingsForGeneration(
     if (snapshot.status !== 'completed') return;
     if (snapshot.combatantCount !== 2) return;
 
-    const combatants = await getBattleReportGenerationCombatantsByGenerationId(generationId);
-    if (combatants.length !== 2) return;
+    let combatants = await getGenerationCombatantsByGenerationId(generationId);
+    if (combatants.length !== 2) {
+      const fallbackCombatants = parseGenerationCombatantsFallback(generationId, snapshot.extraJson);
+      if (fallbackCombatants.length !== 2) return;
+      combatants = fallbackCombatants;
+    }
 
     const entities = combatants.map(parseCombatantEntity);
     if (!entities[0] || !entities[1]) return;
@@ -1294,19 +1173,30 @@ export async function settleArenaRatingsForGeneration(
     let shouldApplyStrict = strictEligible;
 
     if (shouldApplyStrict && isNewStrictPolicy && snapshot.userId != null) {
-      const deduped = await hasRecentAppliedEventForPair(
-        'strict',
-        pairKey,
-        { userId: snapshot.userId },
-        STRICT_DEDUP_WINDOW_MS
-      );
-      if (deduped) {
+      const pairUsage = await getStrictPairUsage(snapshot.userId, pairKey);
+      if (pairUsage?.recentDeduped) {
         await insertArenaRatingEvent({
           id: buildArenaRatingEventId(generationId, 'strict'),
           generationId,
           queue: 'strict',
           status: 'skipped',
           skipReason: 'dedup-user-pair',
+          userId: snapshot.userId,
+          ipAnonymized: snapshot.ipAnonymized,
+          pairKey,
+          a: aEntity,
+          b: bEntity,
+          winnerSlot,
+        });
+        shouldApplyStrict = false;
+        strictEligible = false;
+      } else if (pairUsage?.exceeded) {
+        await insertArenaRatingEvent({
+          id: buildArenaRatingEventId(generationId, 'strict'),
+          generationId,
+          queue: 'strict',
+          status: 'skipped',
+          skipReason: 'pair-daily-limit',
           userId: snapshot.userId,
           ipAnonymized: snapshot.ipAnonymized,
           pairKey,
@@ -1416,17 +1306,13 @@ export async function settleArenaRatingsForGeneration(
 
         const involvesPreset = aEntity.entityType === 'preset' || bEntity.entityType === 'preset';
         if (!involvesPreset) {
-          const shouldCheckRange = shouldEnforceStrictRangeLimit(
+          const rangeCheck = getStrictRangeCheckResult(
             { rating: aCurrent.rating, games: aCurrent.games },
             { rating: bCurrent.rating, games: bCurrent.games },
           );
-          if (shouldCheckRange) {
-            const absDiff = Math.abs(aCurrent.rating - bCurrent.rating);
-            const maxAbsDiff = getStrictMaxAbsDiffForRatings(aCurrent, bCurrent);
-            if (absDiff > maxAbsDiff) {
-              await markArenaRatingEventStatus(eventId, 'skipped', { skipReason: 'strict-out-of-range' });
-              continue;
-            }
+          if (rangeCheck && rangeCheck.exceededBy > 0) {
+            await markArenaRatingEventStatus(eventId, 'skipped', { skipReason: 'strict-out-of-range' });
+            continue;
           }
         }
       }

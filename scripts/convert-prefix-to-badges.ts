@@ -12,7 +12,12 @@
  * 注意：此脚本需要先在 badges 表中定义对应的徽章才能正常工作
  */
 
-import { queryFromD1 } from '../lib/database/core';
+import {
+  grantUserBadge,
+  hasUserBadge as hasUserBadgeByDb,
+  listActiveBadges,
+  listUsersWithPrefix,
+} from '@/lib/database/badges-maintenance';
 
 interface User {
   id: number;
@@ -23,11 +28,11 @@ interface User {
 interface Badge {
   id: string;
   name: string;
-  description: string;
-  icon: any;
-  textColor: any;
-  backgroundColor: any;
-  borderColor: any;
+  description: string | null;
+  icon: string;
+  textColor: string;
+  backgroundColor: string;
+  borderColor: string | null;
   rarity: number;
   sortOrder: number;
   isActive: boolean;
@@ -46,7 +51,7 @@ const PREFIX_TO_BADGE_MAP: Record<string, string> = {
   '群宝可梦大师': 'pokemon_master',
   '兄弟！不要乱搞了！': 'brother_calm_down',
   '无聊': 'bored',
-  '魔法主厨': 'magic_chef'
+  '魔法主厨': 'magic_chef',
 };
 
 /**
@@ -62,16 +67,16 @@ function parseTitleFromPrefix(prefix: string): string | null {
 
   // 1. 新格式（用 | 分割）
   if (prefix.includes('|')) {
-    const parts = prefix.split('|').map(p => p.trim());
+    const parts = prefix.split('|').map((p) => p.trim());
     if (parts.length >= 2) {
-      title = parts[1]; // 第二部分是头衔名称
+      title = parts[1];
     }
   }
   // 2. 旧格式（用 , 分割）
   else if (prefix.includes(',')) {
-    const parts = prefix.split(',').map(p => p.trim());
+    const parts = prefix.split(',').map((p) => p.trim());
     if (parts.length >= 1) {
-      title = parts[0]; // 第一部分是头衔名称
+      title = parts[0];
     }
   }
   // 3. 纯文本格式
@@ -106,15 +111,12 @@ function getBadgeIdByTitle(title: string): string | null {
  */
 async function getAllUsersWithPrefix(): Promise<User[]> {
   try {
-    const result = await queryFromD1(
-      'SELECT id, username, prefix FROM users WHERE prefix IS NOT NULL AND prefix != ""',
-      []
-    ) as any;
-
-    if (result.success && result.result && result.result[0]?.results) {
-      return result.result[0].results;
-    }
-    return [];
+    const rows = await listUsersWithPrefix();
+    return rows.map((row) => ({
+      id: row.id,
+      username: row.username,
+      prefix: row.prefix,
+    }));
   } catch (error) {
     console.error('获取用户头衔失败:', error);
     return [];
@@ -126,15 +128,19 @@ async function getAllUsersWithPrefix(): Promise<User[]> {
  */
 async function getAllAvailableBadges(): Promise<Badge[]> {
   try {
-    const result = await queryFromD1(
-      'SELECT id, name, description, icon, text_color, background_color, border_color, rarity, sort_order, is_active FROM badges WHERE is_active = 1',
-      []
-    ) as any;
-
-    if (result.success && result.result && result.result[0]?.results) {
-      return result.result[0].results;
-    }
-    return [];
+    const rows = await listActiveBadges();
+    return rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      description: row.description,
+      icon: row.icon,
+      textColor: row.textColor,
+      backgroundColor: row.backgroundColor,
+      borderColor: row.borderColor,
+      rarity: row.rarity,
+      sortOrder: row.sortOrder,
+      isActive: row.isActive,
+    }));
   } catch (error) {
     console.error('获取徽章列表失败:', error);
     return [];
@@ -146,15 +152,7 @@ async function getAllAvailableBadges(): Promise<Badge[]> {
  */
 async function userHasBadge(userId: number, badgeId: string): Promise<boolean> {
   try {
-    const result = await queryFromD1(
-      'SELECT COUNT(*) as count FROM user_badges WHERE user_id = ? AND badge_id = ?',
-      [userId, badgeId]
-    ) as any;
-
-    if (result.success && result.result && result.result[0]?.results?.length > 0) {
-      return result.result[0].results[0].count > 0;
-    }
-    return false;
+    return await hasUserBadgeByDb({ userId, badgeId });
   } catch (error) {
     console.error('检查徽章拥有状态失败:', error);
     return false;
@@ -166,12 +164,13 @@ async function userHasBadge(userId: number, badgeId: string): Promise<boolean> {
  */
 async function grantBadgeToUser(userId: number, badgeId: string, displayOrder: number = 0): Promise<boolean> {
   try {
-    const result = await queryFromD1(
-      'INSERT OR IGNORE INTO user_badges (user_id, badge_id, is_equipped, display_order) VALUES (?, ?, 1, ?)',
-      [userId, badgeId, displayOrder]
-    ) as any;
-
-    return result.success;
+    await grantUserBadge({
+      userId,
+      badgeId,
+      displayOrder,
+      isEquipped: true,
+    });
+    return true;
   } catch (error) {
     console.error('授予徽章失败:', error);
     return false;
@@ -215,7 +214,7 @@ async function generateConversionPreview(): Promise<void> {
       continue;
     }
 
-    const badge = badges.find(b => b.id === badgeId);
+    const badge = badges.find((b) => b.id === badgeId);
     if (!badge) {
       console.log(`❌ 用户 ${user.username} (${user.id}): 徽章 "${badgeId}" 不存在或未激活`);
       skipCount++;
@@ -276,7 +275,7 @@ async function executeConversion(): Promise<void> {
       continue;
     }
 
-    const badge = badges.find(b => b.id === badgeId);
+    const badge = badges.find((b) => b.id === badgeId);
     if (!badge) {
       console.log(`❌ 用户 ${user.username} (${user.id}): 徽章 "${badgeId}" 不存在或未激活`);
       failCount++;
@@ -332,7 +331,7 @@ async function main() {
   }
 }
 
-main().catch(error => {
+main().catch((error) => {
   console.error('❌ 发生错误:', error);
   process.exit(1);
 });

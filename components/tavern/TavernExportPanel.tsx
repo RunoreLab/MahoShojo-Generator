@@ -15,6 +15,7 @@ import { buildSafeFileName } from '@/lib/client/fileName';
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
 import { useCooldown } from '@/lib/cooldown';
 import { inferTemplate, type InferableTemplate } from '@/lib/data-card-converter';
+import { mapDataCardRuntimeSourceInfo, mapPublicDataCardRowToBattleSelectionPayload } from '@/lib/data-card-read-mappers';
 import { computeTechIndex } from '@/lib/metrics/techIndex';
 import {
   buildArenaDefaultScenario,
@@ -277,6 +278,12 @@ const safeStringArray = (value: unknown): string[] => {
   return value.filter((item): item is string => typeof item === 'string').map((item) => item.trim()).filter(Boolean);
 };
 
+const readCloudSourceCardId = (record: Record<string, unknown>): string => {
+  const internalId = safeString(record['_cardId']).trim();
+  if (internalId) return internalId;
+  return safeString(record['dataCardId']).trim();
+};
+
 const uniqueStrings = (items: string[]): string[] => {
   const seen = new Set<string>();
   const out: string[] = [];
@@ -312,7 +319,7 @@ const appendCreatorNotes = (base: string, block: string): string => {
 const buildCreatorNotesWithCloudDescription = (dataCard: unknown, baseCreatorNotes: string): string => {
   if (!isRecord(dataCard)) return baseCreatorNotes;
 
-  const cloudId = safeString(dataCard['_cardId']).trim();
+  const cloudId = readCloudSourceCardId(dataCard);
   if (!cloudId) return baseCreatorNotes;
 
   const cloudDescription = safeString(dataCard['_cardDescription']).trim();
@@ -478,17 +485,6 @@ const buildDefaultFieldsFromDataCard = (
   };
 };
 
-const parseBoolean = (value: unknown): boolean | undefined => {
-  if (typeof value === 'boolean') return value;
-  if (typeof value === 'number') return value === 1;
-  if (typeof value === 'string') {
-    const trimmed = value.trim().toLowerCase();
-    if (trimmed === 'true' || trimmed === '1') return true;
-    if (trimmed === 'false' || trimmed === '0') return false;
-  }
-  return undefined;
-};
-
 const fetchDataCardMeta = async (dataCardId: string): Promise<Extract<ApiMetaResponse, { success: true }> | null> => {
   if (!dataCardId) return null;
   try {
@@ -542,22 +538,22 @@ const verifyNativeSignature = async (dataCard: unknown): Promise<boolean> => {
 
 const buildExportMeta = async (dataCard: unknown): Promise<ExportMeta> => {
   const record = isRecord(dataCard) ? dataCard : {};
-  const dataCardId = safeString(record['_cardId']).trim();
+  const sourceInfo = mapDataCardRuntimeSourceInfo(record);
+  const dataCardId = readCloudSourceCardId(record);
   const source: ExportMeta['source'] = dataCardId ? 'database' : 'local';
 
   const meta: ExportMeta = {
     source,
     dataCardId: dataCardId || undefined,
-    dataCardName: safeString(record['_cardName']) || safeString(record['name']) || safeString(record['codename']) || undefined,
-    dataCardDescription:
-      safeString(record['_cardDescription']) || safeString(record['description']) || safeString(record['content']) || undefined,
-    author: safeString(record['_author']) || safeString(record['_authorName']) || undefined,
-    isPublic: parseBoolean(record['_isPublic']),
-    createdAt: safeString(record['_createdAt']) || undefined,
-    updatedAt: safeString(record['_updatedAt']) || undefined,
-    likeCount: typeof record['_likeCount'] === 'number' ? record['_likeCount'] : undefined,
-    favoriteCount: typeof record['_favoriteCount'] === 'number' ? record['_favoriteCount'] : undefined,
-    usageCount: typeof record['_usageCount'] === 'number' ? record['_usageCount'] : undefined,
+    dataCardName: sourceInfo.sourceDataCardName || safeString(record['codename']) || undefined,
+    dataCardDescription: sourceInfo.sourceDataCardDescription || safeString(record['content']) || undefined,
+    author: sourceInfo.sourceAuthor,
+    isPublic: sourceInfo.sourceIsPublic,
+    createdAt: sourceInfo.sourceDataCardCreatedAt,
+    updatedAt: sourceInfo.sourceDataCardUpdatedAt,
+    likeCount: sourceInfo.sourceDataCardLikeCount,
+    favoriteCount: sourceInfo.sourceDataCardFavoriteCount,
+    usageCount: sourceInfo.sourceDataCardUsageCount,
   };
 
   const apiMeta = dataCardId ? await fetchDataCardMeta(dataCardId) : null;
@@ -731,7 +727,8 @@ export function TavernExportPanel() {
 
   const onToggleScenarioPicked = (payload: any, nextSelected: boolean) => {
     try {
-      const sourceId = typeof payload?._cardId === 'string' ? payload._cardId : '';
+      const sourceInfo = mapDataCardRuntimeSourceInfo(payload);
+      const sourceId = sourceInfo.sourceDataCardId ?? '';
       if (!sourceId) return;
 
       if (!nextSelected) {
@@ -750,7 +747,7 @@ export function TavernExportPanel() {
       const fragment = buildTavernScenarioFragment(payload, { maxChars: 24_000 });
       if (!fragment) throw new Error('该数据卡无法识别为情景卡（支持：通用情景/情景问卷）');
 
-      const cardName = typeof payload?._cardName === 'string' ? payload._cardName : fragment.title;
+      const cardName = sourceInfo.sourceDataCardName || fragment.title;
 
       dispatch({
         type: 'addScenario',
@@ -789,20 +786,7 @@ export function TavernExportPanel() {
       }
 
       const card = result.card;
-      const json = typeof card?.data === 'string' ? JSON.parse(card.data) : card?.data;
-      const payload = {
-        ...(json && typeof json === 'object' ? json : {}),
-        _cardId: card.id,
-        _cardName: card.name,
-        _cardDescription: card.description || '',
-        _isPublic: card.is_public,
-        _updatedAt: card.updated_at,
-        _createdAt: card.created_at,
-        _author: card.username || '未知',
-        _likeCount: typeof card.like_count === 'number' ? card.like_count : undefined,
-        _favoriteCount: typeof card.favorite_count === 'number' ? card.favorite_count : undefined,
-        _usageCount: typeof card.usage_count === 'number' ? card.usage_count : undefined,
-      };
+      const payload = mapPublicDataCardRowToBattleSelectionPayload(card);
 
       await onCloudCardPicked(payload);
     } catch (error) {
@@ -825,20 +809,7 @@ export function TavernExportPanel() {
       }
 
       const card = result.card;
-      const json = typeof card?.data === 'string' ? JSON.parse(card.data) : card?.data;
-      const payload = {
-        ...(json && typeof json === 'object' ? json : {}),
-        _cardId: card.id,
-        _cardName: card.name,
-        _cardDescription: card.description || '',
-        _isPublic: card.is_public,
-        _updatedAt: card.updated_at,
-        _createdAt: card.created_at,
-        _author: card.username || '未知',
-        _likeCount: typeof card.like_count === 'number' ? card.like_count : undefined,
-        _favoriteCount: typeof card.favorite_count === 'number' ? card.favorite_count : undefined,
-        _usageCount: typeof card.usage_count === 'number' ? card.usage_count : undefined,
-      };
+      const payload = mapPublicDataCardRowToBattleSelectionPayload(card);
 
       onToggleScenarioPicked(payload, true);
     } catch (error) {

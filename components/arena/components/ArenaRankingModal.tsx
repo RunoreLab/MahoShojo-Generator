@@ -10,6 +10,10 @@ import { TierBadge } from '@/components/ranking/TierBadge';
 import { isCanonicalPublicLeaderboardQuery, upsertArenaRankCacheFromLeaderboard } from '@/lib/arena/rank-cache';
 import { computeArenaBaseTier, type ArenaBaseTier } from '@/lib/arena/tier';
 import { shouldEnforceStrictRangeLimit } from '@/lib/arena/strict-range';
+import {
+  isPublicVisibility,
+  mapPublicDataCardRowToBattleSelectionPayload,
+} from '@/lib/data-card-read-mappers';
 import { addUsedCard, isCardUsed } from '@/lib/localStorage';
 import { buildTitleDisplay } from '@/lib/text';
 import type { Preset } from '@/lib/presets';
@@ -19,7 +23,7 @@ import { formatSeasonTitle, getCurrentSeason } from '@/lib/seasons';
 import { useBattleActions } from '../hooks/useBattleActions';
 import { usePresetQuery } from '../hooks/useArenaData';
 import { useBattleStore } from '../stores/useBattleStore';
-import { BattleStoreState, CombatantData, MAX_COMBATANTS } from '../types';
+import { BattleStoreState, CombatantData, formatCombatantCount, isCombatantLimitReached, MAX_COMBATANTS } from '../types';
 import { validateCanshouData, validateMagicalGirlData } from '../utils/characterValidator';
 
 type Queue = 'strict' | 'free';
@@ -399,7 +403,7 @@ export function ArenaRankingModal(props: { isOpen: boolean; onClose: () => void 
     if (addingKey) return;
 
     const existingCombatantsCount = combatants.filter((c) => 'data' in c).length;
-    if (existingCombatantsCount >= MAX_COMBATANTS) {
+    if (isCombatantLimitReached(existingCombatantsCount, MAX_COMBATANTS)) {
       setError(`❌ 最多只能选择 ${MAX_COMBATANTS} 位参战者。`);
       return;
     }
@@ -409,32 +413,20 @@ export function ArenaRankingModal(props: { isOpen: boolean; onClose: () => void 
     try {
       if (item.entityType === 'data_card') {
         if (selectedDataCardIds.has(item.entityId)) return;
-        const result = await fetchJson<{ success: boolean; card?: any; error?: string }>(
+        const result = await fetchJson<{ success: boolean; card?: Record<string, unknown>; error?: string }>(
           `/api/public-data-cards?id=${encodeURIComponent(item.entityId)}`,
         );
         if (!result.success || !result.card) {
           throw new Error(result.error ?? '无法读取数据卡');
         }
 
-        const parsed = JSON.parse(result.card.data) as any;
-        await handleSelectDataCard({
-          ...parsed,
-          _cardId: result.card.id,
-          _cardName: result.card.name,
-          _cardDescription: result.card.description || '',
-          _isPublic: result.card.is_public,
-          _updatedAt: result.card.updated_at,
-          _createdAt: result.card.created_at,
-          _author: result.card.username || '未知',
-          _likeCount: typeof result.card.like_count === 'number' ? result.card.like_count : undefined,
-          _favoriteCount: typeof result.card.favorite_count === 'number' ? result.card.favorite_count : undefined,
-          _usageCount: typeof result.card.usage_count === 'number' ? result.card.usage_count : undefined,
-        });
+        const payload = mapPublicDataCardRowToBattleSelectionPayload(result.card);
+        await handleSelectDataCard(payload);
 
         // 排行榜入口加入参战时也要计入公开卡片的使用数。
         // 现有口径：同一浏览器仅记 1 次（localStorage 去重）。
-        const cardId = typeof result.card.id === 'string' ? result.card.id : '';
-        const isPublic = result.card.is_public === 1 || result.card.is_public === true;
+        const cardId = payload._cardId;
+        const isPublic = isPublicVisibility(payload._isPublic);
         const wasAdded = Boolean(
           cardId &&
           useBattleStore
@@ -967,7 +959,7 @@ export function ArenaRankingModal(props: { isOpen: boolean; onClose: () => void 
 
           <div className="mt-4 flex items-center justify-between gap-3 flex-wrap text-sm">
             <div className="text-gray-500">
-              已选择参战者：{combatants.filter((c) => 'data' in c).length}/{MAX_COMBATANTS}
+              已选择参战者：{formatCombatantCount(combatants.filter((c) => 'data' in c).length)}
             </div>
             <div className="flex items-center gap-2">
               <button

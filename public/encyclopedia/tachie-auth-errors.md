@@ -1,7 +1,7 @@
 # 立绘渠道鉴权与常见错误排查（LibLib / ModelScope）
 
 > 作者：[Colanns](https://github.com/colasama) / [末伏之夜](https://github.com/notuhao)  
-> 更新时间：2026-02-09
+> 更新时间：2026-02-10
 
 本条目统一覆盖立绘生成的两条渠道：
 
@@ -60,6 +60,22 @@
 3. 绑定完成后等待 1~3 分钟，再用同一 Token 重试
 4. 若仍失败，重新生成 Token 再测试一次
 
+#### ModelScope 重点子场景：`...Aliyun account is real name verified...`（HTTP 403）
+
+当你看到类似提示：
+
+- `To use API-Inference, please make sure your associated Aliyun account is real name verified.`
+- `ModelScope 权限不足（HTTP 403）`
+
+这通常表示**阿里云账号未完成实名认证**，所以 Token 虽然有效，但无权调用该能力。
+
+建议操作：
+
+1. 打开 ModelScope 账号设置页：`https://www.modelscope.cn/my/accountsettings`
+2. 按页面提示完成阿里云账号实名认证
+3. 实名通过后等待几分钟，再使用同一 Token 重试
+4. 若仍失败，重新生成 Token 并再次验证
+
 ### B. LibLib（Access Key / Secret Key）
 
 - 两个 Key 必须来自同一账号、同一应用配置
@@ -71,7 +87,7 @@
 ## 4) 除了 401，还常见哪些错误？
 
 - **400**：参数缺失/格式错误（如提示词为空）
-- **403**：权限不足（账号有 Key，但无该能力权限）
+- **403**：权限不足（常见于 ModelScope 未实名认证，或账号/能力权限受限）
 - **429**：触发限流，建议间隔重试
 - **5xx / 网络异常**：上游抖动或链路问题，短时间后重试
 - **任务失败但无图**：查询成功但 `taskStatus/generateStatus` 表示失败或未完成

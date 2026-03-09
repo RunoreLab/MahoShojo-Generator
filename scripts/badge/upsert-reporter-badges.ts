@@ -11,76 +11,48 @@
  * - bun run scripts/badge/upsert-reporter-badges.ts --dry-run
  */
 
-import { queryFromD1 } from '@/lib/database/core';
+import {
+  countBadgesById,
+  insertBadgeDefinition,
+  updateBadgeBasicStatus,
+  updateBadgeDefinition,
+} from '@/lib/database/badges-granting';
 import { REPORTER_BADGE_DEFINITIONS } from './reporter-rules';
 
 const LEGACY_DUPLICATE_BADGE_ID = 'great_journalist';
 
 async function badgeExists(id: string): Promise<boolean> {
-  const res = await queryFromD1('SELECT COUNT(*) as count FROM badges WHERE id = ?', [id]);
-  const row = (res as any).result?.[0]?.results?.[0];
-  return Number(row?.count ?? 0) > 0;
+  return (await countBadgesById(id)) > 0;
 }
 
 async function insertBadge(def: (typeof REPORTER_BADGE_DEFINITIONS)[number]): Promise<boolean> {
-  const res = await queryFromD1(
-    `INSERT INTO badges (
-      id,
-      name,
-      description,
-      icon,
-      text_color,
-      background_color,
-      border_color,
-      rarity,
-      sort_order,
-      is_active
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
-      def.id,
-      def.name,
-      def.description,
-      def.iconJson,
-      def.textColorJson,
-      def.backgroundColorJson,
-      def.borderColorJson ?? null,
-      def.rarity,
-      def.sortOrder,
-      def.isActive ? 1 : 0,
-    ],
-  );
-
-  return Boolean((res as any).success);
+  return insertBadgeDefinition({
+    id: def.id,
+    name: def.name,
+    description: def.description,
+    icon: def.iconJson,
+    textColor: def.textColorJson,
+    backgroundColor: def.backgroundColorJson,
+    borderColor: def.borderColorJson ?? null,
+    rarity: def.rarity,
+    sortOrder: def.sortOrder,
+    isActive: def.isActive,
+  });
 }
 
 async function updateBadge(def: (typeof REPORTER_BADGE_DEFINITIONS)[number]): Promise<boolean> {
-  const res = await queryFromD1(
-    `UPDATE badges SET
-      name = ?,
-      description = ?,
-      icon = ?,
-      text_color = ?,
-      background_color = ?,
-      border_color = ?,
-      rarity = ?,
-      sort_order = ?,
-      is_active = ?
-    WHERE id = ?`,
-    [
-      def.name,
-      def.description,
-      def.iconJson,
-      def.textColorJson,
-      def.backgroundColorJson,
-      def.borderColorJson ?? null,
-      def.rarity,
-      def.sortOrder,
-      def.isActive ? 1 : 0,
-      def.id,
-    ],
-  );
-
-  return Boolean((res as any).success);
+  return updateBadgeDefinition({
+    id: def.id,
+    name: def.name,
+    description: def.description,
+    icon: def.iconJson,
+    textColor: def.textColorJson,
+    backgroundColor: def.backgroundColorJson,
+    borderColor: def.borderColorJson ?? null,
+    rarity: def.rarity,
+    sortOrder: def.sortOrder,
+    isActive: def.isActive,
+  });
 }
 
 async function main() {
@@ -140,11 +112,13 @@ async function main() {
       if (dryRun) {
         console.log(`[dry-run] 将停用历史重复徽章：${LEGACY_DUPLICATE_BADGE_ID}`);
       } else {
-        const res = await queryFromD1(
-          `UPDATE badges SET name = ?, description = ?, is_active = 0 WHERE id = ?`,
-          ['优秀记者（停用）', '历史重复徽章（已停用），请使用 excellent_reporter。', LEGACY_DUPLICATE_BADGE_ID],
-        );
-        if ((res as any).success) {
+        const ok = await updateBadgeBasicStatus({
+          id: LEGACY_DUPLICATE_BADGE_ID,
+          name: '优秀记者（停用）',
+          description: '历史重复徽章（已停用），请使用 excellent_reporter。',
+          isActive: false,
+        });
+        if (ok) {
           console.log(`✅ 已停用历史重复徽章：${LEGACY_DUPLICATE_BADGE_ID}`);
           legacyDeactivated += 1;
         } else {

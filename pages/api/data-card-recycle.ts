@@ -1,45 +1,20 @@
 import {
-  getUserByAuthKey,
   getUserDataCards,
-  getUserDataCardCapacity,
   getUserRecycleBinCards,
   restoreDataCard,
   permanentlyDeleteDataCards
-} from '@/lib/d1';
+} from '@/lib/database/data-cards';
+import { getUserDataCardCapacity } from '@/lib/database/users';
+import { requireAuthUser } from '@/lib/auth/server';
 import { config } from '@/lib/config';
 
 export const runtime = 'edge';
 
-interface AuthenticatedUser {
-  id: number;
-  username: string;
-  is_review_exempt: number;
-  is_admin: number;
-}
-
-async function getUserFromAuth(req: Request): Promise<AuthenticatedUser | null> {
-  const authHeader = req.headers.get('authorization');
-
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return null;
-  }
-
-  const authKey = authHeader.substring(7);
-  const user = await getUserByAuthKey(authKey);
-
-  return user;
-}
-
 export default async function handler(req: Request): Promise<Response> {
-  const user = await getUserFromAuth(req);
-  if (!user) {
-    return new Response(JSON.stringify({ error: '未授权' }), {
-      status: 401,
-      headers: { 'Content-Type': 'application/json' }
-    });
-  }
+  const auth = await requireAuthUser(req);
+  if ('response' in auth) return auth.response;
 
-  const userId = user.id;
+  const userId = auth.user.id;
 
   try {
     switch (req.method) {

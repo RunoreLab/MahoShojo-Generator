@@ -9,24 +9,11 @@ export type LanguageOption = {
   name: string;
 };
 
-const battleLevels = [
-  { value: '', label: '默认 (AI自动分配)' },
-  { value: '种级', label: '种级 🌱' },
-  { value: '芽级', label: '芽级 🍃' },
-  { value: '叶级', label: '叶级 🌿' },
-  { value: '蕾级', label: '蕾级 🌸' },
-  { value: '花级', label: '花级 🌺' },
-];
-
 type Props = {
-  battleMode: string;
   isGenerating: boolean;
   enableUserGuidance: boolean;
   languages?: LanguageOption[];
   allowEmptyLanguage?: boolean;
-
-  selectedLevel: string;
-  onSelectedLevelChange: (value: string) => void;
 
   userGuidance: string;
   onUserGuidanceChange: (value: string) => void;
@@ -40,13 +27,10 @@ type Props = {
 };
 
 export function StoryOptionsPanel({
-  battleMode,
   isGenerating,
   enableUserGuidance,
   languages,
   allowEmptyLanguage = false,
-  selectedLevel,
-  onSelectedLevelChange,
   userGuidance,
   onUserGuidanceChange,
   afterUserGuidance,
@@ -70,41 +54,32 @@ export function StoryOptionsPanel({
 
   return (
     <>
-      {battleMode !== 'daily' && (
-        <div className="input-group">
-          <label htmlFor="level-select" className="input-label">
-            指定平均等级 (可选):
-          </label>
-          <select
-            id="level-select"
-            className="input-field"
-            style={{ cursor: 'pointer' }}
-            disabled={isGenerating}
-            value={selectedLevel}
-            onChange={(e) => onSelectedLevelChange(e.target.value)}
-          >
-            {battleLevels.map((level) => (
-              <option key={level.value} value={level.value}>
-                {level.label}
-              </option>
-            ))}
-          </select>
-          <p className="text-xs text-gray-500 mt-1">默认由 AI 根据角色强度自动分配，以保证战斗平衡和观赏性。</p>
-        </div>
-      )}
-
       {enableUserGuidance && (
         <div className="input-group">
-          <label htmlFor="user-guidance" className="input-label">
+          <label htmlFor="arena-story-guidance" className="input-label">
             故事方向引导 (可选)
           </label>
+          {/* 诱饵字段：优先吸收部分浏览器/系统的账号自动填充，避免误填到业务输入框 */}
+          <div className="sr-only" aria-hidden="true">
+            <input type="text" name="username" autoComplete="username" tabIndex={-1} readOnly />
+            <input type="password" name="password" autoComplete="current-password" tabIndex={-1} readOnly />
+          </div>
           <div className="flex flex-wrap items-center gap-2">
             <input
-              id="user-guidance"
+              id="arena-story-guidance"
+              name="arena_story_guidance"
               type="text"
               className="input-field flex-1 min-w-[12rem]"
               placeholder="输入关键词或一句话 (最多200字)"
               maxLength={200}
+              autoComplete="new-password"
+              autoCorrect="off"
+              autoCapitalize="off"
+              spellCheck={false}
+              data-form-type="other"
+              data-lpignore="true"
+              data-1p-ignore="true"
+              data-bwignore="true"
               disabled={isGenerating}
               value={userGuidance}
               onChange={(e) => onUserGuidanceChange(e.target.value)}

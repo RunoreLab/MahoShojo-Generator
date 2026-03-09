@@ -9,16 +9,19 @@ import { randomChooseOneHanaName } from '@/lib/random-choose-hana-name';
 import { config } from '@/lib/config';
 import { validateDataCard, ValidationResult } from '@/lib/schemas';
 import { randomUUID } from '@/lib/crypto';
-import TachieGenerator from '../components/TachieGenerator';
 import Footer from '../components/Footer';
 // 【新增】导入卡片组件和颜色配置
 import MagicalGirlCard from '../components/MagicalGirlCard';
 import CanshouCard from '../components/CanshouCard';
 import GeneralCharacterCard from '../components/GeneralCharacterCard';
+import { CharacterPortraitAssetPanel } from '@/components/shared/CharacterPortraitAssetPanel';
 import { ThemeImage } from '@/components/shared/ThemeImage';
+import { JsonSizeIndicator } from '@/components/shared/JsonSizeIndicator';
 import { MainColor } from '@/lib/main-color';
 import { useAuth } from '@/lib/useAuth';
 import { dataCardApi, authStorage } from '@/lib/auth';
+import { loadAuthMigrationStatus, type AuthMigrationStatus } from '@/components/me/authMigrationStatus';
+import { getDataCardVisibilityValue } from '@/lib/data-card-status';
 
 // 引入 AdjudicatorEditor 和新类型
 import AdjudicatorEditor from '../components/AdjudicatorEditor';
@@ -42,6 +45,7 @@ import {
     type DataCardTemplate,
     type InferableTemplate
 	} from '@/lib/data-card-converter';
+import type { CharacterCardPortraitAsset } from '@/types/visual-asset';
 
 
 // 定义允许保持原生性的可编辑字段 (顶级键) (SRS 3.7.3)
@@ -55,6 +59,8 @@ const NATIVE_PRESERVING_PATHS = new Set([
 // “一键替换曾用名”用于批量替换数据中的名称引用。
 // 为避免滥用该能力伪造“魔改原生卡”，当替换用的新基础名称过长时，允许替换，但会导致原生性丧失（保存时移除原生签名）。
 const NAME_REPLACE_NATIVE_MAX_CHARS = 32;
+const LEGACY_MIGRATION_DEFER_COUNT_STORAGE_KEY = 'mahoshojo_auth_migration_defer_count';
+const LEGACY_MIGRATION_SOFT_BLOCK_THRESHOLD = 3;
 
 const getDisplayCharCount = (text: string): number => {
     return Array.from((text ?? '').trim()).length;
@@ -275,7 +281,11 @@ const CharacterManagerPage: React.FC = () => {
     // 账户系统相关状态
     const [showAuthModal, setShowAuthModal] = useState(false);
     const [authMessage, setAuthMessage] = useState<{ type: 'error' | 'success', text: string } | null>(null);
-    const [generatedAuthKey, setGeneratedAuthKey] = useState<string | null>(null);
+    const [authMigrationStatus, setAuthMigrationStatus] = useState<AuthMigrationStatus | null>(null);
+    const [authMigrationLoading, setAuthMigrationLoading] = useState(false);
+    const [authMigrationError, setAuthMigrationError] = useState<string | null>(null);
+    const [showLegacyMigrationReminderModal, setShowLegacyMigrationReminderModal] = useState(false);
+    const [legacyMigrationDeferCount, setLegacyMigrationDeferCount] = useState(0);
 
     // 数据卡管理相关状态
     const [userDataCards, setUserDataCards] = useState<any[]>([]);
@@ -367,17 +377,7 @@ const CharacterManagerPage: React.FC = () => {
     const loadUserBadges = useCallback(async () => {
         if (!isAuthenticated) return;
         try {
-            const authHeader = await authStorage.getAuthHeader();
-            if (!authHeader) {
-                setUserBadges([]);
-                return;
-            }
-
-            const response = await fetch('/api/badges/user', {
-                headers: {
-                    Authorization: authHeader
-                }
-            });
+            const response = await authStorage.fetch('/api/badges/user');
 
             if (!response.ok) {
                 setUserBadges([]);
@@ -400,27 +400,114 @@ const CharacterManagerPage: React.FC = () => {
         }
     }, [isAuthenticated, loadUserBadges]);
 
-    // 处理注册
-    const handleRegister = async (username: string, email: string, turnstileToken: string) => {
-        setAuthMessage(null);
-        const result = await register(username, email, turnstileToken);
-        if (result.success && result.authKey) {
-            setGeneratedAuthKey(result.authKey);
-            setAuthMessage({ type: 'success', text: '注册成功！请复制并保存您的登录密钥。' });
-        } else {
-            setAuthMessage({ type: 'error', text: result.error || '注册失败' });
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+        const raw = window.localStorage.getItem(LEGACY_MIGRATION_DEFER_COUNT_STORAGE_KEY);
+        const parsed = raw ? Number.parseInt(raw, 10) : 0;
+        if (Number.isSafeInteger(parsed) && parsed > 0) {
+            setLegacyMigrationDeferCount(parsed);
         }
+    }, []);
+
+    const refreshAuthMigrationStatus = useCallback(async () => {
+        if (!isAuthenticated) {
+            setAuthMigrationStatus(null);
+            setAuthMigrationError(null);
+            setAuthMigrationLoading(false);
+            return;
+        }
+
+        setAuthMigrationLoading(true);
+        setAuthMigrationError(null);
+        try {
+            const status = await loadAuthMigrationStatus();
+            setAuthMigrationStatus(status);
+        } catch (error) {
+            setAuthMigrationStatus(null);
+            setAuthMigrationError(error instanceof Error ? error.message : '读取迁移状态失败');
+        } finally {
+            setAuthMigrationLoading(false);
+        }
+    }, [isAuthenticated]);
+
+    useEffect(() => {
+        if (!isAuthenticated) {
+            setAuthMigrationStatus(null);
+            setAuthMigrationError(null);
+            setAuthMigrationLoading(false);
+            setShowLegacyMigrationReminderModal(false);
+            return;
+        }
+        void refreshAuthMigrationStatus();
+    }, [isAuthenticated, refreshAuthMigrationStatus]);
+
+    const authMigrationHint = useMemo(() => {
+        if (!authMigrationStatus) return '';
+        if (!authMigrationStatus.hasAuthLink) {
+            return '检测到当前账号尚未完成新版账号映射。请前往个人页先设置登录密码，系统会自动完成认领迁移。';
+        }
+        if (!authMigrationStatus.hasPassword) {
+            return '检测到当前账号尚未设置密码。旧密钥登录后续会逐步下线，请尽快完成密码设置。';
+        }
+        if (authMigrationStatus.authSource === 'legacy-bearer') {
+            return '你本次使用的是旧密钥登录。建议尽快切换为密码登录，避免后续旧入口下线带来登录中断。';
+        }
+        if (!authMigrationStatus.emailVerified) {
+            return '账号已设置密码，但邮箱仍未验证。建议在个人页完成验证，便于后续找回与安全提醒。';
+        }
+        return '账号迁移仍有未完成项，请前往个人页继续处理。';
+    }, [authMigrationStatus]);
+    const isLegacyMigrationSoftBlocked = legacyMigrationDeferCount >= LEGACY_MIGRATION_SOFT_BLOCK_THRESHOLD;
+
+    const handleDeferLegacyMigrationReminder = useCallback(() => {
+        if (legacyMigrationDeferCount >= LEGACY_MIGRATION_SOFT_BLOCK_THRESHOLD) return;
+        const nextCount = legacyMigrationDeferCount + 1;
+        setLegacyMigrationDeferCount(nextCount);
+        if (typeof window !== 'undefined') {
+            window.localStorage.setItem(LEGACY_MIGRATION_DEFER_COUNT_STORAGE_KEY, String(nextCount));
+        }
+        setShowLegacyMigrationReminderModal(false);
+    }, [legacyMigrationDeferCount]);
+
+    // 处理注册
+    const handleRegister = async (username: string, email: string, turnstileToken: string, password: string) => {
+        setAuthMessage(null);
+        const result = await register(username, email, turnstileToken, password);
+        if (!result.success) {
+            setAuthMessage({ type: 'error', text: result.error || '注册失败' });
+            return;
+        }
+
+        setShowAuthModal(false);
+        setMessage({ type: 'success', text: result.message || '注册成功，已自动登录！' });
+        loadUserDataCards();
+        loadUserBadges();
+        void refreshAuthMigrationStatus();
     };
 
     // 处理登录
-    const handleLogin = async (username: string, authKey: string, turnstileToken: string) => {
+    const handleLogin = async (
+        identifier: string,
+        credential: string,
+        turnstileToken: string,
+        mode: 'password' | 'legacy',
+    ) => {
         setAuthMessage(null);
-        const result = await login(username, authKey, turnstileToken);
+        const result = await login(identifier, credential, turnstileToken, mode);
         if (result.success) {
             setShowAuthModal(false);
-            setMessage({ type: 'success', text: '登录成功！' });
+            setMessage({
+                type: 'success',
+                text: mode === 'legacy'
+                    ? '旧密钥登录成功。请尽快在个人页完成账号迁移并设置密码。'
+                    : '密码登录成功！',
+            });
+            if (mode === 'legacy') {
+                setShowLegacyMigrationReminderModal(true);
+            }
             loadUserDataCards();
             loadUserBadges();
+            void refreshAuthMigrationStatus();
         } else {
             setAuthMessage({ type: 'error', text: result.error || '登录失败' });
         }
@@ -428,6 +515,10 @@ const CharacterManagerPage: React.FC = () => {
 
     const handleLogout = useCallback(() => {
         logout();
+        setAuthMigrationStatus(null);
+        setAuthMigrationError(null);
+        setAuthMigrationLoading(false);
+        setShowLegacyMigrationReminderModal(false);
     }, [logout]);
 
     // 统一构建可上传的数据（处理原生性签名）
@@ -558,7 +649,7 @@ const CharacterManagerPage: React.FC = () => {
                     id: card.id,
                     name: card.name,
                     description: card.description,
-                    isPublic: card.is_public,
+                    isPublic: getDataCardVisibilityValue(card),
                 });
                 setShowHistoryCardEditor(true);
                 setShowDataCardsModal(false);
@@ -570,7 +661,7 @@ const CharacterManagerPage: React.FC = () => {
                     id: card.id,
                     name: card.name,
                     description: card.description,
-                    isPublic: card.is_public,
+                    isPublic: getDataCardVisibilityValue(card),
                 });
                 setMessage({ type: 'info', text: '已进入问卷数据卡兼容模式：建议前往 /questionnaire-editor 进行完整编辑。' });
                 setShowDataCardsModal(false);
@@ -661,7 +752,7 @@ const CharacterManagerPage: React.FC = () => {
                 id: card.id,
                 name: card.name,
                 description: card.description,
-                isPublic: card.is_public,
+                isPublic: getDataCardVisibilityValue(card),
             });
             setMessage({ type: 'info', text: '问卷数据卡请优先在 /questionnaire-editor 编辑；此处仅提供兼容替换能力。' });
             setShowDataCardsModal(false);
@@ -678,7 +769,7 @@ const CharacterManagerPage: React.FC = () => {
             const result = await dataCardApi.replaceCard(card.id, {
                 name: card.name,
                 description: card.description,
-                isPublic: card.is_public,
+                isPublic: getDataCardVisibilityValue(card),
                 data: payloadData,
             });
             if (result.success) {
@@ -803,6 +894,7 @@ const CharacterManagerPage: React.FC = () => {
     // [SRS 3.3] 立绘生成器相关状态
     const [isTachieVisible, setIsTachieVisible] = useState(false);
     const [tachiePrompt, setTachiePrompt] = useState('');
+    const [characterPortraitAsset, setCharacterPortraitAsset] = useState<CharacterCardPortraitAsset | null>(null);
 
     // [SRS 3.3.3] 动态生成立绘提示词
     useEffect(() => {
@@ -950,6 +1042,7 @@ const CharacterManagerPage: React.FC = () => {
         setIsLoading(true);
         setMessage(null);
         setHasLostNativeness(false);
+        setCharacterPortraitAsset(null);
 
         try {
             const data = JSON.parse(jsonText);
@@ -1050,6 +1143,7 @@ const CharacterManagerPage: React.FC = () => {
         const targetTemplate = value as DataCardTemplate;
 
         try {
+            setCharacterPortraitAsset(null);
             if (!characterData) {
                 const blank = createBlankDataCard(targetTemplate);
                 setCharacterData(blank);
@@ -1215,6 +1309,18 @@ const CharacterManagerPage: React.FC = () => {
 
         return sortedKeys.map(key => {
             const currentPath = path ? `${path}.${key}` : key;
+            const fieldId = `editor-field-${currentPath.replace(/\./g, '__').replace(/[^a-zA-Z0-9_-]/g, '_')}`;
+            const nonCredentialInputProps = {
+                name: 'maho-editor-field',
+                autoComplete: 'off',
+                autoCorrect: 'off',
+                autoCapitalize: 'off',
+                spellCheck: false,
+                'data-form-type': 'other',
+                'data-lpignore': 'true',
+                'data-1p-ignore': 'true',
+                'data-bwignore': 'true',
+            };
             // 过滤掉不应在表单中编辑的字段
             if (key.startsWith('_')) return null;
             if (key === 'signature' || key === 'isPreset' || key === 'arena_history' || key === 'current_state' || key === 'adjudicationEvents') return null;
@@ -1245,14 +1351,15 @@ const CharacterManagerPage: React.FC = () => {
                 if (isStringArray) {
                     return (
                         <div key={currentPath} className="mt-4">
-                            <label htmlFor={currentPath} className="block text-sm font-medium text-gray-700 capitalize">{key.replace(/([A-Z])/g, ' $1')}</label>
+                            <label htmlFor={fieldId} className="block text-sm font-medium text-gray-700 capitalize">{key.replace(/([A-Z])/g, ' $1')}</label>
                             <textarea
-                                id={currentPath}
+                                id={fieldId}
                                 value={value.join('\n')}
                                 onChange={(e) => handleFieldChange(currentPath, e.target.value.split('\n'))}
                                 rows={Math.max(3, value.length)} // 动态调整高度
                                 className={inputClassName}
                                 placeholder="每行输入一个项目"
+                                {...nonCredentialInputProps}
                             />
                             <p className="text-xs text-gray-500 mt-1">此字段为列表，请每行输入一个项目。</p>
                             {issueHint}
@@ -1262,9 +1369,9 @@ const CharacterManagerPage: React.FC = () => {
                 // 对于其他类型的数组（如对象数组），暂时以只读JSON形式显示，防止数据结构被破坏
                 return (
                     <div key={currentPath} className="mt-4">
-                        <label htmlFor={currentPath} className="block text-sm font-medium text-gray-700 capitalize">{key.replace(/([A-Z])/g, ' $1')} (只读)</label>
+                        <label htmlFor={fieldId} className="block text-sm font-medium text-gray-700 capitalize">{key.replace(/([A-Z])/g, ' $1')} (只读)</label>
                         <textarea
-                            id={currentPath}
+                            id={fieldId}
                             value={JSON.stringify(value, null, 2)}
                             readOnly
                             rows={5}
@@ -1289,15 +1396,16 @@ const CharacterManagerPage: React.FC = () => {
                 const rows = Math.min(30, Math.max(10, lineCount + 2));
                 return (
                     <div key={currentPath}>
-                        <label htmlFor={currentPath} className="block text-sm font-medium text-gray-700 capitalize">{key.replace(/([A-Z])/g, ' $1')}</label>
+                        <label htmlFor={fieldId} className="block text-sm font-medium text-gray-700 capitalize">{key.replace(/([A-Z])/g, ' $1')}</label>
                         <textarea
-                            id={currentPath}
+                            id={fieldId}
                             value={value}
                             onChange={(e) => handleFieldChange(currentPath, e.target.value)}
                             rows={rows}
                             className={inputClassName}
                             style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', overflowWrap: 'break-word' }}
                             wrap="soft"
+                            {...nonCredentialInputProps}
                         />
                         {issueHint}
                     </div>
@@ -1306,19 +1414,20 @@ const CharacterManagerPage: React.FC = () => {
 
             return (
                 <div key={currentPath}>
-                    <label htmlFor={currentPath} className="block text-sm font-medium text-gray-700 capitalize">{key.replace(/([A-Z])/g, ' $1')}</label>
+                    <label htmlFor={fieldId} className="block text-sm font-medium text-gray-700 capitalize">{key.replace(/([A-Z])/g, ' $1')}</label>
                     <div className="mt-1 flex items-center">
                         {typeof value === 'string' && value.length > 80 ?
-                            <textarea id={currentPath} value={value as string} onChange={(e) => handleFieldChange(currentPath, e.target.value)} rows={3} className={inputClassName} />
+                            <textarea id={fieldId} value={value as string} onChange={(e) => handleFieldChange(currentPath, e.target.value)} rows={3} className={inputClassName} {...nonCredentialInputProps} />
                             :
                             <input
                                 type="text"
-                                id={currentPath}
+                                id={fieldId}
                                 value={value as any}
                                 onChange={(e) => handleFieldChange(currentPath, e.target.value)}
                                 className={inputClassName}
                                 // 当字段为 codename 或 name 时，限制最大长度为20
                                 maxLength={(key === 'codename' || key === 'name') ? 20 : undefined}
+                                {...nonCredentialInputProps}
                             />
                         }
                         {currentPath === 'codename' && (
@@ -1683,7 +1792,7 @@ const CharacterManagerPage: React.FC = () => {
                             {/* 实验性警告 */}
                             <div className="flex mb-3 p-2 bg-yellow-50 border border-yellow-200 rounded text-xs text-yellow-800 text-left">
                                 <div className="mr-2">⚠️ </div>
-                                <div>目前，用户系统仍处于测试阶段，可能存在功能不稳定的情况，敬请谅解。同时请妥善保存您的登录密钥，之后会开启邮箱找回密钥的功能。</div>
+                                <div>用户系统仍处于测试阶段，可能存在功能不稳定的情况，敬请谅解。当前处于账号迁移期，请尽快在个人页设置密码完成迁移。</div>
                             </div>
                             {/* 账户状态显示区域 */}
                             <div className="mt-4 p-3 bg-pink-50 rounded-lg">
@@ -1691,6 +1800,54 @@ const CharacterManagerPage: React.FC = () => {
                                     <p className="text-sm text-gray-600">加载中...</p>
                                 ) : isAuthenticated ? (
                                     <div className="space-y-4">
+                                        {authMigrationLoading ? (
+                                            <div className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-800 text-left">
+                                                正在检查账号迁移状态...
+                                            </div>
+                                        ) : null}
+                                        {authMigrationError ? (
+                                            <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 text-left">
+                                                账号迁移状态读取失败：{authMigrationError}
+                                            </div>
+                                        ) : null}
+                                        {authMigrationStatus && (authMigrationStatus.migrationRequired || authMigrationStatus.legacyOnly) ? (
+                                            <div className="rounded-lg border border-yellow-200 bg-yellow-50 px-3 py-3 text-xs text-yellow-900 text-left">
+                                                <div className="font-semibold">账号迁移提醒</div>
+                                                <div className="mt-1">{authMigrationHint}</div>
+                                                <div className="mt-1 text-yellow-800">
+                                                    {!authMigrationStatus.hasAuthLink ? '未映射新版账号；' : '已映射新版账号；'}
+                                                    {!authMigrationStatus.hasPassword ? '未设置密码；' : '已设置密码；'}
+                                                    {authMigrationStatus.emailVerified ? '邮箱已验证。' : '邮箱未验证。'}
+                                                </div>
+                                                {legacyMigrationDeferCount > 0 ? (
+                                                    <div className="mt-1 text-yellow-800">
+                                                        你已选择“稍后处理” {legacyMigrationDeferCount} 次。
+                                                    </div>
+                                                ) : null}
+                                                <div className="mt-2 flex flex-wrap gap-2">
+                                                    <Link
+                                                        href="/me?tab=settings"
+                                                        className="rounded bg-white px-2 py-1 text-[11px] text-yellow-900 hover:bg-yellow-100"
+                                                    >
+                                                        去个人页完成迁移
+                                                    </Link>
+                                                    <Link
+                                                        href="/encyclopedia/auth-migration"
+                                                        className="rounded bg-white px-2 py-1 text-[11px] text-yellow-900 hover:bg-yellow-100"
+                                                    >
+                                                        迁移百科
+                                                    </Link>
+                                                    {authMigrationStatus.authSource === 'legacy-bearer' ? (
+                                                        <button
+                                                            onClick={() => setShowLegacyMigrationReminderModal(true)}
+                                                            className="rounded bg-white px-2 py-1 text-[11px] text-yellow-900 hover:bg-yellow-100"
+                                                        >
+                                                            查看迁移说明
+                                                        </button>
+                                                    ) : null}
+                                                </div>
+                                            </div>
+                                        ) : null}
                                         {/* 操作按钮行 */}
                                         <div className="flex items-center justify-between">
                                             <div className="font-semibold text-pink-800 leading-[28px]">
@@ -2017,13 +2174,20 @@ const CharacterManagerPage: React.FC = () => {
                                 <div className="mt-8 pt-4 border-t space-y-2">
                                     {isAuthenticated && characterData && (
                                         validationResult?.success ? (
-                                            <button
-                                                onClick={handleSaveAsDataCard}
-                                                className="generate-button w-full"
-                                                style={{ backgroundColor: '#10b981', backgroundImage: 'linear-gradient(to right, #10b981, #059669)' }}
-                                            >
-                                                保存到云端
-                                            </button>
+                                            <div className="space-y-2">
+                                                <button
+                                                    onClick={handleSaveAsDataCard}
+                                                    className="generate-button w-full"
+                                                    style={{ backgroundColor: '#10b981', backgroundImage: 'linear-gradient(to right, #10b981, #059669)' }}
+                                                >
+                                                    保存到云端
+                                                </button>
+                                                <JsonSizeIndicator
+                                                    data={characterData}
+                                                    className="mt-0"
+                                                    warningText="⚠️ 接近云端 300KB 上限，保存可能失败，请先精简数据。"
+                                                />
+                                            </div>
                                         ) : validationResult?.error && (
                                             <div className="w-full p-3 bg-red-50 border border-yellow-200 rounded-lg text-yellow-700 text-sm text-center">
                                                 该文件疑似包含额外字段，暂时不可上传云端 <br /> {validationResult?.error}
@@ -2036,7 +2200,7 @@ const CharacterManagerPage: React.FC = () => {
                                     <button onClick={() => handleSaveChanges('copy')} disabled={message?.type === 'error' || isLoading} className="generate-button w-full" style={{ backgroundColor: '#3b82f6', backgroundImage: 'linear-gradient(to right, #3b82f6, #2563eb)' }}>
                                         {isLoading ? '处理中...' : copiedStatus ? '已复制！' : '复制到剪贴板'}
                                     </button>
-                                    <button onClick={() => { setCharacterData(null); setPastedJson('') }} className="footer-link mt-4 w-full text-center">
+                                    <button onClick={() => { setCharacterData(null); setCharacterPortraitAsset(null); setPastedJson('') }} className="footer-link mt-4 w-full text-center">
                                         加载其他数据
                                     </button>
                                 </div>
@@ -2205,16 +2369,19 @@ const CharacterManagerPage: React.FC = () => {
                                         return `linear-gradient(135deg, ${colors.first} 0%, ${colors.second} 100%)`;
                                     })()}
                                     onSaveImage={handleSaveImageCallback}
+                                    portraitAsset={characterPortraitAsset}
                                 />
                             ) : currentTemplate === 'canshou' ? (
                                 <CanshouCard
                                     canshou={characterData}
                                     onSaveImage={handleSaveImageCallback}
+                                    portraitAsset={characterPortraitAsset}
                                 />
                             ) : (
                                 <GeneralCharacterCard
                                     general={characterData}
                                     onSaveImage={handleSaveImageCallback}
+                                    portraitAsset={characterPortraitAsset}
                                 />
                             )}
                         </div>
@@ -2231,7 +2398,10 @@ const CharacterManagerPage: React.FC = () => {
                             </button>
                             {isTachieVisible && characterData && (
                                 <div className="mt-4 pt-4 border-t">
-                                    <TachieGenerator prompt={tachiePrompt} />
+                                    <CharacterPortraitAssetPanel
+                                        prompt={tachiePrompt}
+                                        onPortraitAssetChange={setCharacterPortraitAsset}
+                                    />
                                 </div>
                             )}
                         </div>
@@ -2265,18 +2435,65 @@ const CharacterManagerPage: React.FC = () => {
                 )}
             </div >
 
+            {showLegacyMigrationReminderModal ? (
+                <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/55 p-4">
+                    <div className="w-full max-w-md rounded-xl bg-white p-5 shadow-2xl">
+                        <h3 className="text-lg font-semibold text-gray-900">旧密钥登录迁移提醒</h3>
+                        <p className="mt-2 text-sm text-gray-700">
+                            你本次使用了旧密钥登录。为避免后续旧入口下线导致无法登录，请尽快在个人页完成“设置登录密码”迁移。
+                        </p>
+                        <p className="mt-1 text-xs text-gray-500">
+                            迁移步骤可查看百科：/encyclopedia/auth-migration
+                        </p>
+                        <p className="mt-2 text-xs text-gray-500">
+                            {legacyMigrationDeferCount > 0
+                                ? `你已选择“稍后处理” ${legacyMigrationDeferCount} 次。`
+                                : '你还未处理过迁移提醒。'}
+                        </p>
+                        {isLegacyMigrationSoftBlocked ? (
+                            <p className="mt-2 rounded-md border border-red-200 bg-red-50 px-2 py-1 text-xs text-red-700">
+                                你已多次选择“稍后处理”，本次登录需先完成迁移设置后再继续使用。
+                            </p>
+                        ) : null}
+                        <div className="mt-4 flex justify-end gap-2">
+                            {!isLegacyMigrationSoftBlocked ? (
+                                <button
+                                    type="button"
+                                    onClick={handleDeferLegacyMigrationReminder}
+                                    className="rounded border border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50"
+                                >
+                                    稍后处理
+                                </button>
+                            ) : null}
+                            <Link
+                                href="/me?tab=settings"
+                                onClick={() => setShowLegacyMigrationReminderModal(false)}
+                                className="rounded bg-pink-600 px-3 py-1.5 text-sm text-white hover:bg-pink-700"
+                            >
+                                去个人页迁移
+                            </Link>
+                            <Link
+                                href="/encyclopedia/auth-migration"
+                                onClick={() => setShowLegacyMigrationReminderModal(false)}
+                                className="rounded border border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50"
+                            >
+                                查看迁移百科
+                            </Link>
+                        </div>
+                    </div>
+                </div>
+            ) : null}
+
             {/* 认证模态框 */}
             < AuthModal
                 isOpen={showAuthModal}
                 onClose={() => {
                     setShowAuthModal(false);
                     setAuthMessage(null);
-                    setGeneratedAuthKey(null);
                 }}
                 onLogin={handleLogin}
                 onRegister={handleRegister}
                 authMessage={authMessage}
-                generatedAuthKey={generatedAuthKey}
             />
 
             {/* 数据卡管理模态框 */}
@@ -2355,17 +2572,18 @@ const CharacterManagerPage: React.FC = () => {
                     setIsSavingCard(false);
                 }}
                 onSave={handleConfirmSaveCard}
-            name={newCardForm.name}
-            description={newCardForm.description}
-            isPublic={newCardForm.isPublic}
-            onNameChange={(value) => setNewCardForm({ ...newCardForm, name: value })}
-            onDescriptionChange={(value) => setNewCardForm({ ...newCardForm, description: value })}
-            onPublicChange={(value) => setNewCardForm({ ...newCardForm, isPublic: value })}
-            error={saveCardError}
-            isSaving={isSavingCard}
-            currentCardCount={userDataCards.length}
-            userCapacity={userCapacity}
-          />
+                data={characterData}
+                name={newCardForm.name}
+                description={newCardForm.description}
+                isPublic={newCardForm.isPublic}
+                onNameChange={(value) => setNewCardForm({ ...newCardForm, name: value })}
+                onDescriptionChange={(value) => setNewCardForm({ ...newCardForm, description: value })}
+                onPublicChange={(value) => setNewCardForm({ ...newCardForm, isPublic: value })}
+                error={saveCardError}
+                isSaving={isSavingCard}
+                currentCardCount={userDataCards.length}
+                userCapacity={userCapacity}
+            />
 
         </>
     );

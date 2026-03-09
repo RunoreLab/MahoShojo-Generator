@@ -1,4 +1,3 @@
-import { queryFromD1 } from '@/lib/d1';
 import { config as appConfig } from '@/lib/config';
 import { getLogger } from '@/lib/logger';
 import { NewsReport } from '@/components/BattleReportCard';
@@ -313,38 +312,28 @@ export const updateBattleStats = async (winnerName: string, participants: any[])
     if (!appConfig.SHOW_STAT_DATA) return;
 
     try {
-        const isCompetitiveMode = !winnerName.includes('、') && !winnerName.includes(',');
-
-        for (const participant of participants) {
-            const name = participant.data.codename || participant.data.name;
-            const isPreset = !!participant.data.isPreset;
-
-            const isWinner = isCompetitiveMode && name === winnerName && winnerName !== '平局';
-            const isLoser = isCompetitiveMode && name !== winnerName && winnerName !== '平局';
-
-            await queryFromD1(
-                "INSERT INTO characters (name, is_preset) VALUES (?, ?) ON CONFLICT(name) DO NOTHING;",
-                [name, isPreset ? 1 : 0]
-            );
-
-            let sql = 'UPDATE characters SET participations = participations + 1';
-
-            if (isWinner) {
-                sql += ', wins = wins + 1';
-            } else if (isLoser) {
-                sql += ', losses = losses + 1';
-            }
-
-            sql += ' WHERE name = ?;';
-
-            await queryFromD1(sql, [name]);
+        const [{ getDrizzleDbFromRuntime }, { recordBattleStats }] = await Promise.all([
+            import('@/lib/db/drizzle'),
+            import('@/lib/db/repositories/arena-legacy-stats'),
+        ]);
+        const db = getDrizzleDbFromRuntime();
+        if (!db) {
+            log.warn('统计写入已跳过：Drizzle 数据库绑定不可用');
+            return;
         }
 
-        const participantNames = participants.map(p => p.data.codename || p.data.name);
-        await queryFromD1(
-            "INSERT INTO battles (winner_name, participants_json, created_at) VALUES (?, ?, ?);",
-            [winnerName, JSON.stringify(participantNames), new Date().toISOString()]
-        );
+        const isCompetitiveMode = !winnerName.includes('、') && !winnerName.includes(',');
+        const statsParticipants = participants.map((participant) => {
+            const name = participant.data.codename || participant.data.name;
+            const isPreset = !!participant.data.isPreset;
+            return {
+                name,
+                isPreset,
+                isWinner: isCompetitiveMode && name === winnerName && winnerName !== '平局',
+                isLoser: isCompetitiveMode && name !== winnerName && winnerName !== '平局',
+            };
+        });
+        await recordBattleStats(db, winnerName, statsParticipants);
 
         log.info('成功更新事件统计数据到 D1');
     } catch (error) {

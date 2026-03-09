@@ -21,15 +21,7 @@ const AVATAR_WEBP_QUALITY = 0.82;
 const MAX_AVATAR_BASE64_LENGTH = 350_000;
 
 async function authedFetch(path: string, init?: RequestInit) {
-  const authHeader = await authStorage.getAuthHeader();
-  if (!authHeader) throw new Error('未登录');
-  const res = await fetch(path, {
-    ...init,
-    headers: {
-      ...(init?.headers ?? {}),
-      Authorization: authHeader,
-    },
-  });
+  const res = await authStorage.fetch(path, init);
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error((data as any)?.error || '请求失败');
   return data as any;
@@ -181,4 +173,3 @@ export function useMeProfile(userId: number | null) {
     refetch: () => profileQuery.refetch(),
   };
 }
-

@@ -30,14 +30,13 @@ import {
 import { getRandomJournalist } from '@/lib/random-choose-journalist';
 import {
     createBattleReportGenerationRecord,
-    createBattleReportGenerationCombatants,
     updateBattleReportGenerationExtraJson,
     updateBattleReportGenerationCombatantsWriteResult,
     updateBattleReportGenerationOutputPreview,
-    upsertLargeObjectByOwnerRef,
-    generateUUID,
-    getUserByAuthKey
-} from '@/lib/d1';
+} from '@/lib/database/battle-report-generations';
+import { createBattleReportGenerationCombatants } from '@/lib/database/battle-report-generation-combatants';
+import { upsertLargeObjectByOwnerRef } from '@/lib/database/large-objects';
+import { generateUUID } from '@/lib/database/core';
 import { applyShieldWords } from '@/lib/shield-word-filter';
 import {
     anonymizeIp,
@@ -50,16 +49,16 @@ import {
     compactExtraJson,
     normalizeUsage,
 } from '@/lib/arena/battle-report-log-utils';
-import { fetchCurrentSeasonFromOrigin } from '@/lib/seasons-config';
-import { deriveSeasonStrictRules } from '@/lib/seasons';
 import { createOutputPreviewCollector } from '@/lib/arena/output-preview';
 import { settleArenaRatingsForGeneration } from '@/lib/database/arena-ratings';
 import { storeBattleReportGenerationOutputStreamToR2 } from '@/lib/arena/battle-report-output-storage';
 import { deleteObject } from '@/lib/r2';
+import { createRequestAuthUserResolver } from '@/lib/auth/request-auth-user';
+import { buildBattleReportGenerationCombatantInserts } from '@/lib/arena/battle-report-record-utils';
+import { createBattleReportWriteContext } from '@/lib/arena/battle-report-write-context';
 	import { extractStreamUpdateMeta, findStreamUpdateMetaStart } from '@/lib/arena/stream-meta';
 
 const log = getLogger('api-gen-battle-stream');
-const MAX_COMBATANTS = 10;
 
 const isInterruptedStreamError = (error: unknown): boolean => {
     if (error instanceof StreamReadTimeoutError) return true;
@@ -129,6 +128,11 @@ async function handler(req: NextRequest): Promise<Response> {
 
 	    const startedAtMs = Date.now();
 	    const startedAtIso = new Date(startedAtMs).toISOString();
+    const authUserResolver = createRequestAuthUserResolver(req);
+    const battleReportWriteContext = createBattleReportWriteContext({
+        requestUrl: req.url,
+        authUserResolver,
+    });
     const requestUrl = new URL(req.url);
     const wantsSse =
         requestUrl.searchParams.get('format') === 'sse' ||
@@ -142,11 +146,34 @@ async function handler(req: NextRequest): Promise<Response> {
 	    // 用于在异常/提前返回时补齐 battle_report_generations 记录（避免“失败/敏感词拦截没有记录”）。
 	    let snapshotMode: string = 'classic';
 	    let snapshotLanguage: string | null = null;
-	    let snapshotSelectedLevel: string | null = null;
 	    let snapshotStoryLength: string | null = null;
 	    let snapshotPvpRoomId: string | null = null;
         let snapshotPvpMatchId: string | null = null;
         let snapshotPvpRoundId: string | null = null;
+        let snapshotCombatants: unknown[] = [];
+        let snapshotScenarioTitle: string | null = null;
+        let snapshotScenarioDataCardId: string | null = null;
+        let snapshotScenarioDataCardUpdatedAt: string | null = null;
+        let snapshotReadArenaHistory: boolean | null = null;
+        let snapshotArenaHistoryReadLimit: number | null = null;
+        let snapshotWriteArenaHistory: boolean | null = null;
+        let snapshotReadCurrentState: boolean | null = null;
+        let snapshotWriteCurrentState: boolean | null = null;
+        let snapshotReadNarrativeHistory: boolean | null = null;
+        let snapshotNarrativeHistoryReadLimit: number | null = null;
+        let snapshotNarrativeHistoryReadCount = 0;
+        let snapshotHasScenario: boolean | null = null;
+        let snapshotHasUserGuidance: boolean | null = null;
+        let snapshotHasAdjudicationEvents: boolean | null = null;
+        let snapshotHasTeams: boolean | null = null;
+        let snapshotUserGuidancePreview: string | null = null;
+        let snapshotAdjudicationEventsPreview: string | null = null;
+        let snapshotCustomProviderId: string | null = null;
+        let snapshotCustomModelId: string | null = null;
+	    let snapshotResolvedArenaFreeRankingEnabled: boolean | null = null;
+	    let snapshotQuestionnaireLoreIds: string[] = [];
+	    let snapshotHasQuestionnaireLore: boolean | null = null;
+        let snapshotGenerationId: string | null = null;
 
         try {
             const normalizeOptionalString = (value: unknown): string | null => {
@@ -169,7 +196,6 @@ async function handler(req: NextRequest): Promise<Response> {
             const body = await req.json();
             const {
                 combatants,
-            selectedLevel,
             mode = 'classic',
             arenaFreeRankingEnabled,
             userGuidance,
@@ -207,6 +233,18 @@ async function handler(req: NextRequest): Promise<Response> {
 	            const questionnaireLoreIds = normalizedQuestionnaires
 	                .filter((questionnaire) => typeof questionnaire.loreMarkdown === 'string' && Boolean(questionnaire.loreMarkdown.trim()))
 	                .map((questionnaire) => questionnaire.id);
+                snapshotCombatants = Array.isArray(combatants) ? combatants : [];
+                snapshotResolvedArenaFreeRankingEnabled = resolvedArenaFreeRankingEnabled;
+                snapshotScenarioTitle = typeof scenarioTitle === 'string'
+                    ? scenarioTitle.trim() || null
+                    : (typeof scenario?.title === 'string'
+                        ? scenario.title.trim()
+                        : (typeof scenario?.name === 'string' ? scenario.name.trim() : null));
+                snapshotScenarioDataCardId = typeof scenarioSourceDataCardId === 'string' ? scenarioSourceDataCardId : null;
+                snapshotScenarioDataCardUpdatedAt =
+                    typeof scenarioSourceDataCardUpdatedAt === 'string' ? scenarioSourceDataCardUpdatedAt : null;
+                snapshotQuestionnaireLoreIds = questionnaireLoreIds;
+                snapshotHasQuestionnaireLore = hasQuestionnaireLore;
 
 	          const normalizedAuxScenarios = Array.isArray(auxScenarios)
 	              ? auxScenarios.filter((item) => item && typeof item === 'object')
@@ -217,8 +255,15 @@ async function handler(req: NextRequest): Promise<Response> {
 
 		        snapshotMode = typeof mode === 'string' ? mode : 'classic';
 		        snapshotLanguage = normalizeOptionalString(language);
-		        snapshotSelectedLevel = normalizeOptionalString(selectedLevel);
 		        snapshotStoryLength = normalizeOptionalString(storyLength);
+                snapshotCustomProviderId =
+                    customProviderPayload && typeof customProviderPayload === 'object' && typeof customProviderPayload.providerId === 'string'
+                        ? customProviderPayload.providerId.trim() || null
+                        : null;
+                snapshotCustomModelId =
+                    customProviderPayload && typeof customProviderPayload === 'object' && typeof customProviderPayload.modelId === 'string'
+                        ? customProviderPayload.modelId.trim() || null
+                        : null;
 
           const parsePvpContext = (value: unknown): { roomId: string; matchId: string; roundId: string } | null => {
               if (!value || typeof value !== 'object') return null;
@@ -268,6 +313,22 @@ async function handler(req: NextRequest): Promise<Response> {
                 return 3;
             })()
             : 0;
+        snapshotReadArenaHistory = resolvedReadArenaHistory;
+        snapshotArenaHistoryReadLimit =
+            resolvedReadArenaHistory && Number.isFinite(resolvedHistoryReadLimit)
+                ? (resolvedHistoryReadLimit === Infinity ? null : resolvedHistoryReadLimit)
+                : null;
+        snapshotWriteArenaHistory = resolvedWriteArenaHistory;
+        snapshotReadCurrentState = resolvedReadCurrentState;
+        snapshotWriteCurrentState = resolvedWriteCurrentState;
+        snapshotReadNarrativeHistory = resolvedReadNarrativeHistory;
+        snapshotNarrativeHistoryReadLimit =
+            resolvedReadNarrativeHistory && Number.isFinite(resolvedNarrativeHistoryReadLimit)
+                ? (resolvedNarrativeHistoryReadLimit === Infinity ? null : resolvedNarrativeHistoryReadLimit)
+                : null;
+        snapshotHasScenario = Boolean(scenario);
+        snapshotHasAdjudicationEvents = Array.isArray(adjudicationEvents) && adjudicationEvents.length > 0;
+        snapshotHasTeams = Boolean(teams && typeof teams === 'object' && Object.keys(teams).length > 0);
 
         const normalizeNarrativeHistoryForPrompt = (input: unknown): NarrativeHistoryEntry[] => {
             if (!Array.isArray(input)) return [];
@@ -309,6 +370,7 @@ async function handler(req: NextRequest): Promise<Response> {
             })()
             : null;
         const narrativeHistoryReadCount = resolvedReadNarrativeHistory ? (narrativeHistoryForPrompt?.length ?? 0) : undefined;
+        snapshotNarrativeHistoryReadCount = resolvedReadNarrativeHistory ? (narrativeHistoryForPrompt?.length ?? 0) : 0;
 
         let customProviderOverride: AIProvider | null = null;
         let customProviderId: string | null = null;
@@ -367,8 +429,8 @@ async function handler(req: NextRequest): Promise<Response> {
             : {};
 
         const minParticipants = (mode === 'daily' || mode === 'scenario') ? 1 : 2;
-        if (!Array.isArray(combatants) || combatants.length < minParticipants || combatants.length > MAX_COMBATANTS) {
-            const errorMessage = `该模式需要 ${minParticipants} 到 ${MAX_COMBATANTS} 位角色`;
+        if (!Array.isArray(combatants) || combatants.length < minParticipants) {
+            const errorMessage = `该模式至少需要 ${minParticipants} 位角色`;
             return new Response(JSON.stringify({ error: errorMessage }), { status: 400 });
         }
 
@@ -392,6 +454,13 @@ async function handler(req: NextRequest): Promise<Response> {
         const inputsToCheck: { type: keyof SafetyCheckPolicy, content: string, isNative: boolean }[] = [];
 
         const finalUserGuidance = typeof userGuidance === 'string' ? userGuidance.trim().slice(0, 200) || null : null;
+        snapshotHasUserGuidance = Boolean(finalUserGuidance);
+        snapshotUserGuidancePreview = finalUserGuidance
+            ? buildContentPreview(finalUserGuidance, { headChars: 300, tailChars: 300 })
+            : null;
+        snapshotAdjudicationEventsPreview = Array.isArray(adjudicationEvents)
+            ? buildContentPreview(JSON.stringify(adjudicationEvents), { headChars: 300, tailChars: 300 })
+            : null;
         const characterGuidancesForReport =
             Array.isArray(combatants)
                 ? (combatants as any[])
@@ -462,12 +531,9 @@ async function handler(req: NextRequest): Promise<Response> {
 	                const durationMs = Math.max(0, endedAtMs - startedAtMs);
 	                const ip = getClientIpFromHeaders(req.headers);
 	                const ipAnonymized = anonymizeIp(ip);
-	                const authHeader = req.headers.get('authorization');
-	                const authKey = authHeader?.startsWith('Bearer ') ? authHeader.substring(7).trim() : null;
-
 	                const recordPromise = (async () => {
 	                    try {
-	                        const user = authKey ? await getUserByAuthKey(authKey) : null;
+	                        const user = await battleReportWriteContext.getAuthUser();
 	                        await createBattleReportGenerationRecord({
 	                            startedAt: startedAtIso,
 	                            endedAt: endedAtIso,
@@ -494,7 +560,7 @@ async function handler(req: NextRequest): Promise<Response> {
 	                            scenarioDataCardId: typeof scenarioSourceDataCardId === 'string' ? scenarioSourceDataCardId : null,
 	                            scenarioDataCardUpdatedAt: typeof scenarioSourceDataCardUpdatedAt === 'string' ? scenarioSourceDataCardUpdatedAt : null,
 	                            language: snapshotLanguage,
-	                            selectedLevel: snapshotSelectedLevel,
+	                            selectedLevel: null,
 	                            storyLength: snapshotStoryLength,
 	                            pvpRoomId: snapshotPvpRoomId,
 	                            pvpMatchId: snapshotPvpMatchId,
@@ -569,13 +635,26 @@ async function handler(req: NextRequest): Promise<Response> {
 	            default: magicalGirlFallbackQuestions,
 	        };
 
-        const prompt = createStreamPromptBuilder(
-            fallbackQuestions,
-            finalUserGuidance,
-            finalInternalGuidance,
+	        const isStrictRankedMatchRequest =
+	            mode === 'classic'
+	            && String(language ?? '').trim() === 'zh-CN'
+	            && !String(userGuidance ?? '').trim()
+	            && !hasQuestionnaireLore
+	            && resolvedReadArenaHistory === false
+	            && resolvedReadCurrentState === false
+	            && resolvedReadNarrativeHistory === false
+	            && (!Array.isArray(adjudicationEvents) || adjudicationEvents.length === 0)
+	            && Array.isArray(combatants)
+	            && combatants.length === 2
+	            && combatants.every((c: any) => !String(c?.characterGuidance ?? '').trim());
+	        const includeQuestionnaireAnswersInPrompt = !isStrictRankedMatchRequest;
+
+	        const prompt = createStreamPromptBuilder(
+	            fallbackQuestions,
+	            finalUserGuidance,
+	            finalInternalGuidance,
             needsWorldviewWarning,
             language,
-            selectedLevel,
             mode,
             scenario,
             normalizedAuxScenarios,
@@ -587,11 +666,12 @@ async function handler(req: NextRequest): Promise<Response> {
             resolvedWriteArenaHistory,
             resolvedWriteCurrentState,
             shouldForceStreamMeta,
-            adjudicationResults,
-            storyLength,
-            narrativeHistoryForPrompt,
-            loreText,
-        )({ combatants });
+	            adjudicationResults,
+	            storyLength,
+	            narrativeHistoryForPrompt,
+	            loreText,
+	            includeQuestionnaireAnswersInPrompt,
+	        )({ combatants });
 
         const aiTelemetry: NonNullable<GenerateWithAIOptions['telemetry']> = {};
         const reasoningEventQueue: RawReasoningStreamEvent[] = [];
@@ -608,21 +688,8 @@ async function handler(req: NextRequest): Promise<Response> {
                 }
                 : {}),
         };
-        const isStrictRankedMatchRequest =
-            mode === 'classic'
-            && String(language ?? '').trim() === 'zh-CN'
-            && !String(selectedLevel ?? '').trim()
-            && !String(userGuidance ?? '').trim()
-            && !hasQuestionnaireLore
-            && resolvedReadArenaHistory === false
-            && resolvedReadCurrentState === false
-            && resolvedReadNarrativeHistory === false
-            && (!Array.isArray(adjudicationEvents) || adjudicationEvents.length === 0)
-            && Array.isArray(combatants)
-            && combatants.length === 2
-            && combatants.every((c: any) => !String(c?.characterGuidance ?? '').trim());
-        const shouldPreferLiteModelInStrict =
-            isStrictRankedMatchRequest && !customProviderOverride && !shouldDisablePolling && !customModelOverride;
+	        const shouldPreferLiteModelInStrict =
+	            isStrictRankedMatchRequest && !customProviderOverride && !shouldDisablePolling && !customModelOverride;
         const modelOverrideFallbacks: Array<string | undefined> = customModelOverride
             ? [customModelOverride]
             : (shouldPreferLiteModelInStrict
@@ -675,7 +742,8 @@ async function handler(req: NextRequest): Promise<Response> {
 
         log.info('✅ 流式响应已生成，准备返回');
 
-        const generationId = generateUUID();
+	        const generationId = generateUUID();
+            snapshotGenerationId = generationId;
 
         const headers = new Headers(streamResponse.headers);
         try {
@@ -701,8 +769,6 @@ async function handler(req: NextRequest): Promise<Response> {
         // 包装流：一边转发给客户端，一边收集少量预览与统计信息；在完成/中断后异步写入 battle_report_generations。
         const ip = getClientIpFromHeaders(req.headers);
         const ipAnonymized = anonymizeIp(ip);
-        const authHeader = req.headers.get('authorization');
-        const authKey = authHeader?.startsWith('Bearer ') ? authHeader.substring(7).trim() : null;
         let r2UploadPromise: Promise<Awaited<ReturnType<typeof storeBattleReportGenerationOutputStreamToR2>>> | null = null;
 
         let outputBytes = 0;
@@ -737,11 +803,13 @@ async function handler(req: NextRequest): Promise<Response> {
             const previewSource = outputPreview;
 
             const recordPromise = (async () => {
-                const user = authKey ? await getUserByAuthKey(authKey) : null;
+                const user = await battleReportWriteContext.getAuthUser();
                 const usage = await resolvedUsagePromise;
                 const finishReason = await resolvedFinishReasonPromise;
-                const currentSeason = await fetchCurrentSeasonFromOrigin(new URL(req.url).origin);
-                const seasonStrictRules = deriveSeasonStrictRules(currentSeason);
+                const [currentSeason, seasonStrictRules] = await Promise.all([
+                    battleReportWriteContext.getCurrentSeason(),
+                    battleReportWriteContext.getSeasonStrictRules(),
+                ]);
 
                 const normalizedScenarioFileName = (() => {
                   if (typeof scenarioFileName !== 'string') return null;
@@ -757,6 +825,7 @@ async function handler(req: NextRequest): Promise<Response> {
                 const outputSensitive = appConfig.ENABLE_SENSITIVE_WORD_FILTER
                     ? await quickCheck(outputPreview)
                     : { hasSensitiveWords: false };
+                const combatantsFallback = buildCombatantsFallbackForExtraJson(combatants);
 
                 const inputJson = JSON.stringify({
                     combatants,
@@ -766,8 +835,34 @@ async function handler(req: NextRequest): Promise<Response> {
                 });
                 const inputBytes = new TextEncoder().encode(inputJson).length;
 
-                const createdId = await createBattleReportGenerationRecord({
-                    id: generationId,
+                    const extraJsonBase = compactExtraJson({
+                        errorMessage: normalizeErrorMessage(normalizedErrorMessage),
+                        finishReason,
+                        arenaFreeRankingEnabled: resolvedArenaFreeRankingEnabled,
+                        arenaStrictPolicy: '1+3:v1',
+                        seasonId: typeof currentSeason?.id === 'string' ? currentSeason.id : null,
+                        seasonMode: seasonStrictRules.mode !== 'classic' ? seasonStrictRules.mode : null,
+                        seasonStoryGuidance: seasonStrictRules.storyGuidance || null,
+                        seasonScenarioPreset: seasonStrictRules.scenarioPresetFilename ?? null,
+                        seasonQuestionnaireLoreAllowed: seasonStrictRules.questionnaireLoreAllowed ? true : null,
+                        questionnaireLoreEnabled: hasQuestionnaireLore ? true : null,
+                        seasonQuestionnaireLorePresetIds: seasonStrictRules.questionnaireLorePresetIds,
+                        questionnaireLoreIds,
+                        scenarioFileName: normalizedScenarioFileName,
+                        auxScenarioCount: auxScenarioCount > 0 ? auxScenarioCount : null,
+                        resolvedModelOverride: usedModelOverride ?? null,
+                        readNarrativeHistory: resolvedReadNarrativeHistory,
+                        narrativeHistoryReadLimit: resolvedReadNarrativeHistory
+                            ? (Number.isFinite(resolvedNarrativeHistoryReadLimit)
+                                ? (resolvedNarrativeHistoryReadLimit === Infinity ? null : resolvedNarrativeHistoryReadLimit)
+                                : null)
+                            : null,
+                        narrativeHistoryReadCount: resolvedReadNarrativeHistory ? (narrativeHistoryForPrompt?.length ?? 0) : 0,
+                        combatantsFallback,
+                    });
+
+	                const createdId = await createBattleReportGenerationRecord({
+	                    id: generationId,
                     startedAt: startedAtIso,
                     endedAt: endedAtIso,
                     durationMs,
@@ -793,7 +888,7 @@ async function handler(req: NextRequest): Promise<Response> {
                     scenarioDataCardId: typeof scenarioSourceDataCardId === 'string' ? scenarioSourceDataCardId : null,
                     scenarioDataCardUpdatedAt: typeof scenarioSourceDataCardUpdatedAt === 'string' ? scenarioSourceDataCardUpdatedAt : null,
 	                    language: normalizeOptionalString(language),
-	                    selectedLevel: normalizeOptionalString(selectedLevel),
+	                    selectedLevel: null,
 	                    storyLength: normalizeOptionalString(storyLength),
                     pvpRoomId: snapshotPvpRoomId,
                     pvpMatchId: snapshotPvpMatchId,
@@ -834,78 +929,31 @@ async function handler(req: NextRequest): Promise<Response> {
 	                    outputPreview,
 	                    outputHasSensitiveWords: Boolean((outputSensitive as any)?.hasSensitiveWords),
 	                    outputHasShieldWords: shieldResult.hasShieldWords,
-	                    extraJson: compactExtraJson({
-	                        errorMessage: normalizeErrorMessage(normalizedErrorMessage),
-                            finishReason,
-                            arenaFreeRankingEnabled: resolvedArenaFreeRankingEnabled,
-                            arenaStrictPolicy: '1+3:v1',
-                            seasonId: typeof currentSeason?.id === 'string' ? currentSeason.id : null,
-                            seasonMode: seasonStrictRules.mode !== 'classic' ? seasonStrictRules.mode : null,
-                            seasonStoryGuidance: seasonStrictRules.storyGuidance || null,
-                            seasonScenarioPreset: seasonStrictRules.scenarioPresetFilename ?? null,
-                            seasonQuestionnaireLoreAllowed: seasonStrictRules.questionnaireLoreAllowed ? true : null,
-                            questionnaireLoreEnabled: hasQuestionnaireLore ? true : null,
-                            seasonQuestionnaireLorePresetIds: seasonStrictRules.questionnaireLorePresetIds,
-                            questionnaireLoreIds,
-                            scenarioFileName: normalizedScenarioFileName,
-                            auxScenarioCount: auxScenarioCount > 0 ? auxScenarioCount : null,
-	                        resolvedModelOverride: usedModelOverride ?? null,
-	                        readNarrativeHistory: resolvedReadNarrativeHistory,
-                            narrativeHistoryReadLimit: resolvedReadNarrativeHistory
-                                ? (Number.isFinite(resolvedNarrativeHistoryReadLimit)
-                                    ? (resolvedNarrativeHistoryReadLimit === Infinity ? null : resolvedNarrativeHistoryReadLimit)
-                                    : null)
-                                : null,
-	                        narrativeHistoryReadCount: resolvedReadNarrativeHistory ? (narrativeHistoryForPrompt?.length ?? 0) : 0,
-	                    }),
-	                });
+		                    extraJson: extraJsonBase,
+		                });
 
-                if (createdId && Array.isArray(combatants) && normalizedStatus !== 'failed') {
-                    const toBytes = (value: string) => new TextEncoder().encode(value).length;
-                    const rows = combatants.map((c: any, index: number) => {
-                        const name = c?.data?.codename || c?.data?.name || `未知角色#${index + 1}`;
-                        const payload = typeof c?.data === 'object' ? JSON.stringify(c.data) : '';
-                        const characterGuidance =
-                            typeof c?.characterGuidance === 'string' ? c.characterGuidance.trim().slice(0, 100) : '';
-                        const isPreset = typeof c?.isPreset === 'boolean' ? c.isPreset : false;
-                        const presetFilename = isPreset && typeof c?.filename === 'string' ? c.filename.trim() : '';
-                        return {
-                            generationId: generationId,
-                            sortIndex: index,
-                            name,
-                            type: typeof c?.type === 'string' ? c.type : null,
-                            templateId: presetFilename || (typeof c?.data?.templateId === 'string' ? c.data.templateId : null),
-                            isNative: typeof c?.isNative === 'boolean' ? c.isNative : null,
-                            isPreset: isPreset ? true : null,
-                            teamId: typeof c?.teamId === 'number' ? c.teamId : null,
-                            characterGuidance: characterGuidance || null,
-                            dataCardId: typeof c?.sourceDataCardId === 'string' ? c.sourceDataCardId : null,
-                            dataCardUpdatedAt: typeof c?.sourceDataCardUpdatedAt === 'string' ? c.sourceDataCardUpdatedAt : null,
-                            sizeChars: payload ? payload.length : null,
-                            sizeBytes: payload ? toBytes(payload) : null,
-                        };
-                    });
-                    const combatantsWrite = await createBattleReportGenerationCombatants(rows);
-                    if (!combatantsWrite.ok) {
-                        log.warn('战报生成记录：角色明细写入失败', { recordId: generationId, errorMessage: combatantsWrite.errorMessage });
-                    }
+	                if (createdId) {
+	                    const rows = buildBattleReportGenerationCombatantInserts(generationId, combatants);
+	                    const combatantsWrite = await createBattleReportGenerationCombatants(rows);
+	                    if (!combatantsWrite.ok) {
+	                        log.warn('战报生成记录：角色明细写入失败', { recordId: generationId, errorMessage: combatantsWrite.errorMessage });
+	                    }
 	                    await updateBattleReportGenerationCombatantsWriteResult(generationId, {
 	                        ok: combatantsWrite.ok,
 	                        expectedRows: rows.length,
 	                        errorMessage: combatantsWrite.errorMessage ?? null,
 	                    });
 
-		                    if (!combatantsWrite.ok) {
-		                        await updateBattleReportGenerationExtraJson(
-		                            generationId,
-		                            compactExtraJson({
-		                                errorMessage: normalizeErrorMessage(normalizedErrorMessage),
-		                                combatantsFallbackReason: 'combatants-table-write-failed',
-		                                combatantsFallback: buildCombatantsFallbackForExtraJson(combatants),
-		                            })
-		                        );
-		                    }
-		                }
+			                    if (!combatantsWrite.ok) {
+			                        await updateBattleReportGenerationExtraJson(
+			                            generationId,
+			                            compactExtraJson({
+                                        ...(extraJsonBase ?? {}),
+			                                combatantsFallbackReason: 'combatants-table-write-failed',
+			                            })
+			                        );
+			                    }
+			                }
 
 	                    if (createdId) {
 	                        try {
@@ -1541,14 +1589,25 @@ async function handler(req: NextRequest): Promise<Response> {
             const statusForRecord: 'aborted' | 'failed' = isInterruptedStreamError(error) ? 'aborted' : 'failed';
 	        const ip = getClientIpFromHeaders(req.headers);
 	        const ipAnonymized = anonymizeIp(ip);
-	        const authHeader = req.headers.get('authorization');
-	        const authKey = authHeader?.startsWith('Bearer ') ? authHeader.substring(7).trim() : null;
-
 	        const recordPromise = (async () => {
 	            try {
-	                const user = authKey ? await getUserByAuthKey(authKey) : null;
-	                await createBattleReportGenerationRecord({
-	                    startedAt: startedAtIso,
+	                const user = await battleReportWriteContext.getAuthUser();
+                    const errorExtraJsonBase = compactExtraJson({
+                        errorMessage,
+                        stage: 'top-level-catch',
+                        status: statusForRecord,
+                        arenaFreeRankingEnabled: snapshotResolvedArenaFreeRankingEnabled,
+                        arenaStrictPolicy: '1+3:v1',
+                        questionnaireLoreEnabled: snapshotHasQuestionnaireLore ? true : null,
+                        questionnaireLoreIds: snapshotQuestionnaireLoreIds,
+                        readNarrativeHistory: snapshotReadNarrativeHistory,
+                        narrativeHistoryReadLimit: snapshotNarrativeHistoryReadLimit,
+                        narrativeHistoryReadCount: snapshotNarrativeHistoryReadCount,
+                        combatantsFallback: buildCombatantsFallbackForExtraJson(snapshotCombatants),
+                    });
+	                    const createdId = await createBattleReportGenerationRecord({
+                            id: snapshotGenerationId ?? undefined,
+		                    startedAt: startedAtIso,
 	                    endedAt: endedAtIso,
 	                    durationMs,
 	                    status: statusForRecord,
@@ -1565,18 +1624,50 @@ async function handler(req: NextRequest): Promise<Response> {
 	                    username: user?.username ?? null,
 	                    userPrefix: user?.prefix ?? null,
 	                    mode: snapshotMode,
+                        scenarioTitle: snapshotScenarioTitle,
+                        scenarioDataCardId: snapshotScenarioDataCardId,
+                        scenarioDataCardUpdatedAt: snapshotScenarioDataCardUpdatedAt,
 	                    language: snapshotLanguage,
-	                    selectedLevel: snapshotSelectedLevel,
+	                    selectedLevel: null,
 	                    storyLength: snapshotStoryLength,
 	                    pvpRoomId: snapshotPvpRoomId,
 	                    pvpMatchId: snapshotPvpMatchId,
 	                    pvpRoundId: snapshotPvpRoundId,
-	                    extraJson: {
-	                        errorMessage,
-	                        stage: 'top-level-catch',
-                            status: statusForRecord,
-	                    },
-	                });
+                        readArenaHistory: snapshotReadArenaHistory,
+                        arenaHistoryReadLimit: snapshotArenaHistoryReadLimit,
+                        writeArenaHistory: snapshotWriteArenaHistory,
+                        readCurrentState: snapshotReadCurrentState,
+                        writeCurrentState: snapshotWriteCurrentState,
+                        combatantCount: Array.isArray(snapshotCombatants) ? snapshotCombatants.length : null,
+                        hasScenario: snapshotHasScenario,
+                        hasUserGuidance: snapshotHasUserGuidance,
+                        hasAdjudicationEvents: snapshotHasAdjudicationEvents,
+                        hasTeams: snapshotHasTeams,
+                        userGuidancePreview: snapshotUserGuidancePreview,
+                        adjudicationEventsPreview: snapshotAdjudicationEventsPreview,
+                        customProviderId: snapshotCustomProviderId,
+                        customModelId: snapshotCustomModelId,
+		                    extraJson: errorExtraJsonBase,
+		                });
+
+                    if (createdId && Array.isArray(snapshotCombatants) && snapshotCombatants.length > 0) {
+                        const rows = buildBattleReportGenerationCombatantInserts(createdId, snapshotCombatants);
+                        const combatantsWrite = await createBattleReportGenerationCombatants(rows);
+                        await updateBattleReportGenerationCombatantsWriteResult(createdId, {
+                            ok: combatantsWrite.ok,
+                            expectedRows: rows.length,
+                            errorMessage: combatantsWrite.errorMessage ?? null,
+                        });
+	                        if (!combatantsWrite.ok) {
+	                            await updateBattleReportGenerationExtraJson(
+	                                createdId,
+	                                compactExtraJson({
+                                        ...(errorExtraJsonBase ?? {}),
+	                                    combatantsFallbackReason: 'combatants-table-write-failed',
+	                                })
+	                            );
+	                        }
+                    }
 	            } catch (writeError) {
 	                log.warn('战报生成记录：写入失败（顶层错误）', { writeError });
 	            }

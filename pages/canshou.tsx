@@ -20,6 +20,7 @@ import { ErrorMessage } from '@/components/ErrorMessage';
 import { EncyclopediaLinks } from '@/components/encyclopedia/EncyclopediaLinks';
 import { GenerationModeSwitcher, type GenerationMode } from '@/components/shared/GenerationModeSwitcher';
 import { TokenIndicator } from '@/components/shared/TokenIndicator';
+import { JsonSizeIndicator } from '@/components/shared/JsonSizeIndicator';
 import { ThemeImage } from '@/components/shared/ThemeImage';
 import {
   CANSHOU_QUESTIONNAIRE_THEME,
@@ -32,12 +33,14 @@ import { readJsonOrTextFromResponse, resolveApiErrorMessage } from '@/lib/client
 import { AI_META_REQUEST_HEADER, AI_META_REQUEST_VALUE, readJsonWithAiMeta } from '@/lib/client/read-json-with-ai-meta';
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
 import { authStorage } from '@/lib/auth';
+import { mapDataCardSourceMeta } from '@/lib/data-card-read-mappers';
 import {
   buildQuestionKey,
   buildQuestionnaireFlow,
   compactQuestionnaireAnswerItems,
   formatQuestionnaireAnswers,
   normalizeQuestionnaireDefinition,
+  parseQuestionnaireDataCardPayload,
   normalizeUserAnswers,
   resolveQuestionnaireReferences,
   type QuestionnaireAnswerItem,
@@ -690,18 +693,8 @@ const CanshouPage: React.FC = () => {
 
   const handleSelectQuestionnaireCard = (card: any) => {
     try {
-      const rawPayload = card?.data ?? card?.dataJson ?? card?.data_json ?? card?.dataJSON ?? null;
-      let rawData: any = null;
-      if (rawPayload !== null && rawPayload !== undefined) {
-        rawData = typeof rawPayload === 'string' ? JSON.parse(rawPayload) : rawPayload;
-      } else if (card && typeof card === 'object') {
-        if (Array.isArray(card.questions)) {
-          rawData = card;
-        } else if (card.questionnaire && Array.isArray(card.questionnaire.questions)) {
-          rawData = card.questionnaire;
-        }
-      }
-      if (!rawData) throw new Error('问卷数据卡内容为空或格式不受支持');
+      const rawData = parseQuestionnaireDataCardPayload(card);
+      const cardSourceMeta = mapDataCardSourceMeta(card);
       const normalized = normalizeQuestionnaireDefinition(rawData, {
         fallbackKind: 'canshou',
         fallbackId: typeof rawData?.id === 'string' ? rawData.id : `canshou-card-${card?.id ?? ''}`,
@@ -712,9 +705,7 @@ const CanshouPage: React.FC = () => {
       applySelection({
         source: 'database',
         questionnaire: normalized,
-        dataCardId: card?._cardId ?? card?.id,
-        dataCardName: card?._cardName ?? card?.name,
-        dataCardAuthor: card?._author ?? card?.username ?? card?.author,
+        ...cardSourceMeta,
       });
       setQuestionnairePickerError(null);
       setShowQuestionnairePicker(false);
@@ -1944,6 +1935,10 @@ const CanshouPage: React.FC = () => {
                             复制到剪贴板
                           </button>
                         </div>
+                        <JsonSizeIndicator
+                          data={streamedGeneralCard}
+                          warningText="⚠️ 接近云端 300KB 上限，保存/替换可能失败，请先精简数据。"
+                        />
                         <button
                           onClick={handleRegenerate}
                           disabled={submitting || isCooldown}
@@ -2061,6 +2056,12 @@ const CanshouPage: React.FC = () => {
                             </>
                           )}
                         </div>
+                        {resolvedResultPayload && (
+                          <JsonSizeIndicator
+                            data={resolvedResultPayload}
+                            warningText="⚠️ 接近云端 300KB 上限，保存/替换可能失败，请先精简数据。"
+                          />
+                        )}
                         <button
                           onClick={handleRegenerate}
                           disabled={submitting || isCooldown}

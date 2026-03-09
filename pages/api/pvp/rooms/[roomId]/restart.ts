@@ -1,4 +1,4 @@
-import { clearPvpRoomRuntimeState, getPvpRoomById, getPvpRoomPlayers, updatePvpRoomCas } from '@/lib/d1';
+import { clearPvpRoomRuntimeState, getPvpRoomById, getPvpRoomPlayers, updatePvpRoomCas } from '@/lib/database/pvp';
 import { clearPvpRoomRuntimeFromRulesJson, parsePvpRoomInternalState } from '@/lib/pvp/bot/room';
 import { requiresPvpSubmissionPhase } from '@/lib/pvp/logic';
 import { getRoomIdFromRequestUrl } from '@/lib/pvp/route';

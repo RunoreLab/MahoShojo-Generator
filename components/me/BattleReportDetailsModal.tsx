@@ -30,13 +30,16 @@ type DetailResponse = {
     mode: string;
     scenarioTitle: string | null;
     language: string | null;
-    selectedLevel: string | null;
     storyLength: string | null;
     headline: string | null;
     winner: string | null;
     outputPreview: string | null;
     hasPreview: boolean;
     contentBlocked: boolean;
+    canRegenerate: boolean;
+    outputSource: 'd1' | 'r2' | 'none';
+    outputReadError: string | null;
+    errorMessage: string | null;
     outputHasShieldWords: boolean;
     pvpRoomId: string | null;
     pvpMatchId: string | null;
@@ -75,9 +78,7 @@ export function BattleReportDetailsModal({ isOpen, generationId, onClose, onRege
     queryKey: ['me', 'battle-reports', 'detail', generationId],
     enabled: Boolean(isOpen && generationId),
     queryFn: async (): Promise<DetailResponse> => {
-      const authHeader = await authStorage.getAuthHeader();
-      if (!authHeader) throw new Error('未登录');
-      const res = await fetch(`/api/me/battle-reports/${generationId}`, { headers: { Authorization: authHeader } });
+      const res = await authStorage.fetch(`/api/me/battle-reports/${generationId}`);
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || '加载战报详情失败');
       return data as DetailResponse;
@@ -97,7 +98,11 @@ export function BattleReportDetailsModal({ isOpen, generationId, onClose, onRege
       footer={
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="text-xs text-gray-500">
-            {record?.contentBlocked ? '该记录包含敏感词，已禁止展示正文预览。' : '提示：详情仅用于回溯；建议及时下载战报卡片/Markdown。'}
+            {record?.contentBlocked
+              ? '该记录包含敏感词，已禁止展示正文预览。'
+              : record && !record.canRegenerate
+                ? '该记录当前没有可重生正文；可先查看失败原因或稍后重试。'
+                : '提示：详情仅用于回溯；建议及时下载战报卡片/Markdown。'}
           </div>
           <div className="flex items-center gap-2">
             {generationId ? (
@@ -105,7 +110,7 @@ export function BattleReportDetailsModal({ isOpen, generationId, onClose, onRege
                 type="button"
                 className="rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800 disabled:opacity-60"
                 onClick={() => onRegenerate(generationId)}
-                disabled={Boolean(isRegenerating)}
+                disabled={Boolean(isRegenerating) || Boolean(record && !record.canRegenerate)}
               >
                 {isRegenerating ? '生成中…' : '重生战报卡片'}
               </button>
@@ -135,6 +140,11 @@ export function BattleReportDetailsModal({ isOpen, generationId, onClose, onRege
               重新生成失败：{regenerateError}
             </div>
           ) : null}
+          {!regenerateError && record.errorMessage ? (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+              失败原因：{record.errorMessage}
+            </div>
+          ) : null}
           <div className="grid gap-3 rounded-xl border bg-white p-4 sm:grid-cols-2">
             <div className="text-sm">
               <div className="text-xs text-gray-500">状态</div>
@@ -162,6 +172,12 @@ export function BattleReportDetailsModal({ isOpen, generationId, onClose, onRege
               <div className="text-xs text-gray-500">PVP 关联</div>
               <div className="font-medium text-gray-900 break-all">
                 {record.pvpMatchId ? `match=${record.pvpMatchId}` : '无'}
+              </div>
+            </div>
+            <div className="text-sm">
+              <div className="text-xs text-gray-500">正文存储</div>
+              <div className="font-medium text-gray-900">
+                {record.outputSource === 'r2' ? 'R2 外部存储' : record.outputSource === 'd1' ? 'D1 预览' : '无正文'}
               </div>
             </div>
           </div>
@@ -212,6 +228,10 @@ export function BattleReportDetailsModal({ isOpen, generationId, onClose, onRege
             {record.contentBlocked ? (
               <div className="mt-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
                 该记录包含敏感词，已禁止浏览内容。
+              </div>
+            ) : record.outputReadError ? (
+              <div className="mt-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+                正文读取失败：{record.outputReadError}
               </div>
             ) : record.outputPreview ? (
               <pre className="mt-2 whitespace-pre-wrap rounded-lg border bg-gray-50 p-3 text-xs leading-relaxed text-gray-800">

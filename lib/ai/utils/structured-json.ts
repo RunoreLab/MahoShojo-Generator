@@ -204,42 +204,47 @@ const buildMissingRootObjectCandidates = (raw: string, schema: z.ZodTypeAny): Js
 const extractJsonCandidates = (raw: string): JsonCandidate[] => {
   const text = normalizeJsonishText(raw);
   const candidates: JsonCandidate[] = [];
+  const seen = new Set<string>();
+
+  const pushCandidate = (startIndex: number, endIndex: number) => {
+    if (startIndex < 0 || endIndex < startIndex) return;
+    const jsonText = text.slice(startIndex, endIndex + 1).trim();
+    if (!jsonText) return;
+    const key = `${startIndex}:${endIndex}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    candidates.push({ jsonText, startIndex, endIndex });
+  };
+
   let cursor = 0;
 
   for (let i = 0; i < 10; i++) {
     const span = findJsonishSpan(text, cursor);
     if (!span) break;
-    candidates.push({
-      jsonText: text.slice(span.start, span.end + 1).trim(),
-      startIndex: span.start,
-      endIndex: span.end,
-    });
+    pushCandidate(span.start, span.end);
     cursor = span.end + 1;
   }
 
-  // 兜底：尽量取首尾括号之间的大片段（有时配对扫描会被前置噪声干扰）
-  if (candidates.length === 0) {
-    const firstObj = text.indexOf('{');
-    const firstArr = text.indexOf('[');
-    const start =
-      firstObj === -1 ? firstArr : firstArr === -1 ? firstObj : Math.min(firstObj, firstArr);
+  const firstObj = text.indexOf('{');
+  const firstArr = text.indexOf('[');
+  const start =
+    firstObj === -1 ? firstArr : firstArr === -1 ? firstObj : Math.min(firstObj, firstArr);
 
-    const lastObj = text.lastIndexOf('}');
-    const lastArr = text.lastIndexOf(']');
-    const end = Math.max(lastObj, lastArr);
+  // 兜底 1：尽量取首尾括号之间的大片段（有时配对扫描会被前置噪声干扰）
+  const lastObj = text.lastIndexOf('}');
+  const lastArr = text.lastIndexOf(']');
+  const end = Math.max(lastObj, lastArr);
+  if (start !== -1 && end !== -1 && end > start) {
+    pushCandidate(start, end);
+  }
 
-    if (start !== -1 && end !== -1 && end > start) {
-      candidates.push({
-        jsonText: text.slice(start, end + 1).trim(),
-        startIndex: start,
-        endIndex: end,
-      });
-    } else if (start !== -1) {
-      candidates.push({
-        jsonText: text.slice(start).trim(),
-        startIndex: start,
-        endIndex: text.length - 1,
-      });
+  // 兜底 2：始终补一个“从首括号到文本末尾”的候选，覆盖：
+  // - 根对象尾部被截断，但前面已有部分子对象闭合（lastObj 可用但不代表根对象完整）
+  // - Markdown 围栏未闭合、尾部中断等场景
+  if (start !== -1) {
+    const tailEnd = text.length - 1;
+    if (tailEnd >= start && (end === -1 || tailEnd > end)) {
+      pushCandidate(start, tailEnd);
     }
   }
 
@@ -261,6 +266,7 @@ const formatZodIssues = (issues: z.ZodIssue[]): string => {
 };
 
 type KeyNormalizationAttempt = { attempted: boolean; succeeded: boolean };
+type SchemaCoercionAttempt = { attempted: boolean; succeeded: boolean };
 
 type UnwrapAttempt = {
   attempted: boolean;
@@ -270,8 +276,119 @@ type UnwrapAttempt = {
 };
 
 type ValidationResult<T> =
-  | { ok: true; data: T; keyNormalization: KeyNormalizationAttempt }
-  | { ok: false; keyNormalization: KeyNormalizationAttempt };
+  | { ok: true; data: T; keyNormalization: KeyNormalizationAttempt; schemaCoercion: SchemaCoercionAttempt }
+  | { ok: false; keyNormalization: KeyNormalizationAttempt; schemaCoercion: SchemaCoercionAttempt };
+
+const hasOwnKey = (record: Record<string, unknown>, key: string): boolean =>
+  Object.prototype.hasOwnProperty.call(record, key);
+
+const inspectSchema = (
+  schema: z.ZodTypeAny,
+): { core: z.ZodTypeAny; optional: boolean; nullable: boolean } => {
+  let current: z.ZodTypeAny = schema;
+  let optional = false;
+  let nullable = false;
+
+  for (let i = 0; i < 10; i++) {
+    const def: any = (current as any)?._def;
+    const typeName: ZodTypeName | undefined = def?.typeName;
+
+    if (typeName === z.ZodFirstPartyTypeKind.ZodOptional) {
+      optional = true;
+      current = def.innerType;
+      continue;
+    }
+    if (typeName === z.ZodFirstPartyTypeKind.ZodNullable) {
+      nullable = true;
+      current = def.innerType;
+      continue;
+    }
+    if (typeName === z.ZodFirstPartyTypeKind.ZodDefault) {
+      optional = true;
+      current = def.innerType;
+      continue;
+    }
+    if (typeName === z.ZodFirstPartyTypeKind.ZodEffects) {
+      current = def.schema;
+      continue;
+    }
+    break;
+  }
+
+  return { core: current, optional, nullable };
+};
+
+const levenshteinDistanceLimited = (a: string, b: string, maxDistance: number): number => {
+  const lenA = a.length;
+  const lenB = b.length;
+  if (Math.abs(lenA - lenB) > maxDistance) return maxDistance + 1;
+
+  let previousRow = new Array(lenB + 1).fill(0);
+  for (let j = 0; j <= lenB; j++) previousRow[j] = j;
+
+  for (let i = 1; i <= lenA; i++) {
+    const currentRow = new Array(lenB + 1).fill(0);
+    currentRow[0] = i;
+    let rowMin = currentRow[0];
+
+    for (let j = 1; j <= lenB; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      currentRow[j] = Math.min(
+        previousRow[j]! + 1,
+        currentRow[j - 1]! + 1,
+        previousRow[j - 1]! + cost,
+      );
+      if (currentRow[j]! < rowMin) rowMin = currentRow[j]!;
+    }
+
+    if (rowMin > maxDistance) return maxDistance + 1;
+    previousRow = currentRow;
+  }
+
+  return previousRow[lenB]!;
+};
+
+const findMatchingKeyBySchema = (
+  expectedKey: string,
+  record: Record<string, unknown>,
+  usedSourceKeys: Set<string>,
+): string | null => {
+  const variants = [expectedKey, toSnakeCase(expectedKey), toCamelCase(expectedKey)];
+  for (const variant of variants) {
+    if (usedSourceKeys.has(variant)) continue;
+    if (hasOwnKey(record, variant)) return variant;
+  }
+
+  const expectedCanonical = canonicalizeKey(expectedKey);
+  const exactCanonicalMatches = Object.keys(record).filter(
+    (key) => !usedSourceKeys.has(key) && canonicalizeKey(key) === expectedCanonical,
+  );
+  if (exactCanonicalMatches.length === 1) {
+    return exactCanonicalMatches[0]!;
+  }
+
+  const maxDistance = expectedCanonical.length <= 6 ? 1 : 2;
+  let best: { key: string; distance: number } | null = null;
+  let hasTie = false;
+
+  for (const sourceKey of Object.keys(record)) {
+    if (usedSourceKeys.has(sourceKey)) continue;
+    const sourceCanonical = canonicalizeKey(sourceKey);
+    if (!sourceCanonical || sourceCanonical[0] !== expectedCanonical[0]) continue;
+    const distance = levenshteinDistanceLimited(sourceCanonical, expectedCanonical, maxDistance);
+    if (distance > maxDistance) continue;
+
+    if (!best || distance < best.distance) {
+      best = { key: sourceKey, distance };
+      hasTie = false;
+      continue;
+    }
+    if (distance === best.distance) hasTie = true;
+  }
+
+  if (!best || hasTie) return null;
+  return best.key;
+};
 
 const normalizeKeysBySchema = (
   value: unknown,
@@ -320,28 +437,20 @@ const normalizeKeysBySchema = (
 
   let changed = false;
   const merged: Record<string, unknown> = { ...record };
+  const usedSourceKeys = new Set<string>();
 
   for (const [expectedKey, subSchema] of Object.entries(shape)) {
-    const variants = [expectedKey, toSnakeCase(expectedKey), toCamelCase(expectedKey)];
-    let foundKey: string | null = null;
-    for (const variant of variants) {
-      if (Object.prototype.hasOwnProperty.call(record, variant)) {
-        foundKey = variant;
-        break;
-      }
-    }
-    if (!foundKey) {
-      const expectedCanonical = canonicalizeKey(expectedKey);
-      const matches = Object.keys(record).filter((key) => canonicalizeKey(key) === expectedCanonical);
-      if (matches.length === 1) {
-        foundKey = matches[0]!;
-      }
-    }
+    const foundKey = findMatchingKeyBySchema(expectedKey, record, usedSourceKeys);
     if (!foundKey) continue;
+    usedSourceKeys.add(foundKey);
 
     const normalized = normalizeKeysBySchema(record[foundKey], subSchema as z.ZodTypeAny, depth + 1);
     if (foundKey !== expectedKey || normalized.changed) {
       merged[expectedKey] = normalized.value;
+      changed = true;
+    }
+    if (foundKey !== expectedKey && hasOwnKey(merged, foundKey)) {
+      delete merged[foundKey];
       changed = true;
     }
   }
@@ -349,23 +458,314 @@ const normalizeKeysBySchema = (
   return changed ? { value: merged, changed: true } : { value, changed: false };
 };
 
+const buildRequiredFallbackValue = (
+  schema: z.ZodTypeAny,
+  depth: number,
+): { hasValue: boolean; value?: unknown } => {
+  if (depth > 10) return { hasValue: false };
+
+  const inspected = inspectSchema(schema);
+  if (inspected.optional) return { hasValue: false };
+  if (inspected.nullable) return { hasValue: true, value: null };
+
+  const def: any = (inspected.core as any)?._def;
+  const typeName: ZodTypeName | undefined = def?.typeName;
+
+  if (typeName === z.ZodFirstPartyTypeKind.ZodString) return { hasValue: true, value: '' };
+  if (typeName === z.ZodFirstPartyTypeKind.ZodNumber) return { hasValue: true, value: 0 };
+  if (typeName === z.ZodFirstPartyTypeKind.ZodBoolean) return { hasValue: true, value: false };
+  if (typeName === z.ZodFirstPartyTypeKind.ZodArray) return { hasValue: true, value: [] };
+  if (typeName === z.ZodFirstPartyTypeKind.ZodRecord) return { hasValue: true, value: {} };
+
+  if (typeName === z.ZodFirstPartyTypeKind.ZodEnum) {
+    const values = Array.isArray(def?.values) ? def.values : [];
+    if (values.length > 0) return { hasValue: true, value: values[0] };
+  }
+
+  if (typeName === z.ZodFirstPartyTypeKind.ZodNativeEnum) {
+    const values = def?.values && typeof def.values === 'object' ? Object.values(def.values) : [];
+    const filtered = values.filter((v: unknown) => typeof v === 'string' || typeof v === 'number');
+    if (filtered.length > 0) return { hasValue: true, value: filtered[0] };
+  }
+
+  if (typeName === z.ZodFirstPartyTypeKind.ZodLiteral) {
+    return { hasValue: true, value: def?.value };
+  }
+
+  if (typeName === z.ZodFirstPartyTypeKind.ZodObject) {
+    const shape = typeof def.shape === 'function' ? def.shape() : {};
+    const out: Record<string, unknown> = {};
+    let hasAny = false;
+    for (const [key, subSchema] of Object.entries(shape)) {
+      const child = buildRequiredFallbackValue(subSchema as z.ZodTypeAny, depth + 1);
+      if (!child.hasValue) continue;
+      out[key] = child.value;
+      hasAny = true;
+    }
+    return hasAny ? { hasValue: true, value: out } : { hasValue: true, value: {} };
+  }
+
+  if (typeName === z.ZodFirstPartyTypeKind.ZodUnion) {
+    const options = Array.isArray(def?.options) ? def.options : [];
+    for (const option of options) {
+      const candidate = buildRequiredFallbackValue(option as z.ZodTypeAny, depth + 1);
+      if (!candidate.hasValue) continue;
+      const parsed = (option as z.ZodTypeAny).safeParse(candidate.value);
+      if (parsed.success) return { hasValue: true, value: parsed.data };
+    }
+  }
+
+  return { hasValue: false };
+};
+
+const coerceStringIntoObjectBySchema = (
+  text: string,
+  shape: Record<string, unknown>,
+  depth: number,
+): { value: unknown; changed: boolean } => {
+  const stringFields = Object.entries(shape)
+    .map(([key, subSchema]) => ({ key, schema: subSchema as z.ZodTypeAny, inspected: inspectSchema(subSchema as z.ZodTypeAny) }))
+    .filter(({ inspected }) => {
+      const def: any = (inspected.core as any)?._def;
+      return def?.typeName === z.ZodFirstPartyTypeKind.ZodString;
+    });
+
+  if (stringFields.length === 0) return { value: text, changed: false };
+
+  const preferred = stringFields.find((field) => !field.inspected.optional) ?? stringFields[0]!;
+  const out: Record<string, unknown> = { [preferred.key]: text.trim() };
+
+  for (const [key, subSchema] of Object.entries(shape)) {
+    if (key === preferred.key) continue;
+    const fallback = buildRequiredFallbackValue(subSchema as z.ZodTypeAny, depth + 1);
+    if (!fallback.hasValue) continue;
+    out[key] = fallback.value;
+  }
+
+  return { value: out, changed: true };
+};
+
+const coerceValueBySchema = (
+  value: unknown,
+  schema: z.ZodTypeAny,
+  depth: number,
+): { value: unknown; changed: boolean } => {
+  if (depth > 10) return { value, changed: false };
+  if (value == null) return { value, changed: false };
+
+  const inspected = inspectSchema(schema);
+  const def: any = (inspected.core as any)?._def;
+  const typeName: ZodTypeName | undefined = def?.typeName;
+
+  if (typeName === z.ZodFirstPartyTypeKind.ZodString) {
+    if (typeof value === 'string') return { value, changed: false };
+    if (typeof value === 'number' || typeof value === 'boolean') return { value: String(value), changed: true };
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      const record = value as Record<string, unknown>;
+      const candidates = ['answer', 'value', 'text', 'content', 'summary', 'message'];
+      for (const key of candidates) {
+        const candidate = record[key];
+        if (typeof candidate === 'string' && candidate.trim()) {
+          return { value: candidate, changed: true };
+        }
+      }
+      try {
+        return { value: JSON.stringify(value), changed: true };
+      } catch {
+        return { value, changed: false };
+      }
+    }
+    if (Array.isArray(value)) {
+      const asString = value
+        .map((item) => (typeof item === 'string' ? item : typeof item === 'number' || typeof item === 'boolean' ? String(item) : ''))
+        .filter((item) => item.length > 0)
+        .join(' / ');
+      if (asString) return { value: asString, changed: true };
+    }
+    return { value, changed: false };
+  }
+
+  if (typeName === z.ZodFirstPartyTypeKind.ZodNumber) {
+    if (typeof value === 'number') return { value, changed: false };
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      if (!trimmed) return { value, changed: false };
+      const parsed = Number(trimmed);
+      if (Number.isFinite(parsed)) return { value: parsed, changed: true };
+      return { value, changed: false };
+    }
+    if (typeof value === 'boolean') return { value: value ? 1 : 0, changed: true };
+    return { value, changed: false };
+  }
+
+  if (typeName === z.ZodFirstPartyTypeKind.ZodBoolean) {
+    if (typeof value === 'boolean') return { value, changed: false };
+    if (typeof value === 'number' && (value === 0 || value === 1)) return { value: value === 1, changed: true };
+    if (typeof value === 'string') {
+      const normalized = value.trim().toLowerCase();
+      if (normalized === 'true' || normalized === '1') return { value: true, changed: true };
+      if (normalized === 'false' || normalized === '0') return { value: false, changed: true };
+    }
+    return { value, changed: false };
+  }
+
+  if (typeName === z.ZodFirstPartyTypeKind.ZodEnum) {
+    if (typeof value !== 'string') return { value, changed: false };
+    const candidates: string[] = Array.isArray(def?.values) ? def.values : [];
+    const exact = candidates.find((item) => item === value);
+    if (exact) return { value, changed: false };
+    const normalizedInput = value.trim().toLowerCase();
+    const fuzzy = candidates.find((item) => item.toLowerCase() === normalizedInput);
+    if (fuzzy) return { value: fuzzy, changed: true };
+    return { value, changed: false };
+  }
+
+  if (typeName === z.ZodFirstPartyTypeKind.ZodLiteral) {
+    if (value === def?.value) return { value, changed: false };
+    if (typeof def?.value === 'string' && typeof value === 'string' && value.trim() === def.value) {
+      return { value: def.value, changed: true };
+    }
+    return { value, changed: false };
+  }
+
+  if (typeName === z.ZodFirstPartyTypeKind.ZodUnion) {
+    const options = Array.isArray(def?.options) ? def.options : [];
+    for (const option of options) {
+      const direct = (option as z.ZodTypeAny).safeParse(value);
+      if (direct.success) return { value, changed: false };
+    }
+    for (const option of options) {
+      const coerced = coerceValueBySchema(value, option as z.ZodTypeAny, depth + 1);
+      if (!coerced.changed) continue;
+      const parsed = (option as z.ZodTypeAny).safeParse(coerced.value);
+      if (parsed.success) return { value: parsed.data, changed: true };
+    }
+    return { value, changed: false };
+  }
+
+  if (typeName === z.ZodFirstPartyTypeKind.ZodArray) {
+    if (Array.isArray(value)) {
+      let changed = false;
+      const next = value.map((item) => {
+        const coerced = coerceValueBySchema(item, def.type, depth + 1);
+        if (coerced.changed) changed = true;
+        return coerced.value;
+      });
+      return changed ? { value: next, changed: true } : { value, changed: false };
+    }
+    const wrapped = coerceValueBySchema(value, def.type, depth + 1);
+    return { value: [wrapped.value], changed: true };
+  }
+
+  if (typeName === z.ZodFirstPartyTypeKind.ZodRecord) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return { value, changed: false };
+    const record = value as Record<string, unknown>;
+    const next: Record<string, unknown> = {};
+    let changed = false;
+    for (const [k, v] of Object.entries(record)) {
+      const coerced = coerceValueBySchema(v, def.valueType, depth + 1);
+      next[k] = coerced.value;
+      if (coerced.changed) changed = true;
+    }
+    return changed ? { value: next, changed: true } : { value, changed: false };
+  }
+
+  if (typeName === z.ZodFirstPartyTypeKind.ZodObject) {
+    const shape = typeof def.shape === 'function' ? def.shape() : {};
+
+    if (typeof value === 'string') {
+      return coerceStringIntoObjectBySchema(value, shape, depth + 1);
+    }
+
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return { value, changed: false };
+    const record = value as Record<string, unknown>;
+    const merged: Record<string, unknown> = { ...record };
+    const usedSourceKeys = new Set<string>();
+    let changed = false;
+    let touchedKeys = 0;
+
+    for (const [expectedKey, subSchema] of Object.entries(shape)) {
+      const foundKey = findMatchingKeyBySchema(expectedKey, record, usedSourceKeys);
+      if (!foundKey) continue;
+      usedSourceKeys.add(foundKey);
+      touchedKeys += 1;
+
+      const coerced = coerceValueBySchema(record[foundKey], subSchema as z.ZodTypeAny, depth + 1);
+      if (foundKey !== expectedKey || coerced.changed) {
+        merged[expectedKey] = coerced.value;
+        changed = true;
+      }
+      if (foundKey !== expectedKey && hasOwnKey(merged, foundKey)) {
+        delete merged[foundKey];
+        changed = true;
+      }
+    }
+
+    if (touchedKeys > 0 && depth > 0) {
+      for (const [expectedKey, subSchema] of Object.entries(shape)) {
+        if (hasOwnKey(merged, expectedKey)) continue;
+        const fallback = buildRequiredFallbackValue(subSchema as z.ZodTypeAny, depth + 1);
+        if (!fallback.hasValue) continue;
+        merged[expectedKey] = fallback.value;
+        changed = true;
+      }
+    }
+
+    return changed ? { value: merged, changed: true } : { value, changed: false };
+  }
+
+  return { value, changed: false };
+};
+
 const validateWithNormalization = <T>(value: unknown, schema: z.ZodSchema<T>): ValidationResult<T> => {
   const direct = schema.safeParse(value);
   if (direct.success) {
-    return { ok: true, data: direct.data, keyNormalization: { attempted: false, succeeded: false } };
+    return {
+      ok: true,
+      data: direct.data,
+      keyNormalization: { attempted: false, succeeded: false },
+      schemaCoercion: { attempted: false, succeeded: false },
+    };
   }
 
   const normalized = normalizeKeysBySchema(value, schema, 0);
-  if (!normalized.changed) {
-    return { ok: false, keyNormalization: { attempted: false, succeeded: false } };
+  if (normalized.changed) {
+    const retried = schema.safeParse(normalized.value);
+    if (retried.success) {
+      return {
+        ok: true,
+        data: retried.data,
+        keyNormalization: { attempted: true, succeeded: true },
+        schemaCoercion: { attempted: false, succeeded: false },
+      };
+    }
   }
 
-  const retried = schema.safeParse(normalized.value);
-  if (retried.success) {
-    return { ok: true, data: retried.data, keyNormalization: { attempted: true, succeeded: true } };
+  const source = normalized.changed ? normalized.value : value;
+  const coerced = coerceValueBySchema(source, schema, 0);
+  if (!coerced.changed) {
+    return {
+      ok: false,
+      keyNormalization: { attempted: normalized.changed, succeeded: false },
+      schemaCoercion: { attempted: false, succeeded: false },
+    };
   }
 
-  return { ok: false, keyNormalization: { attempted: true, succeeded: false } };
+  const retriedAfterCoercion = schema.safeParse(coerced.value);
+  if (retriedAfterCoercion.success) {
+    return {
+      ok: true,
+      data: retriedAfterCoercion.data,
+      keyNormalization: { attempted: normalized.changed, succeeded: false },
+      schemaCoercion: { attempted: true, succeeded: true },
+    };
+  }
+
+  return {
+    ok: false,
+    keyNormalization: { attempted: normalized.changed, succeeded: false },
+    schemaCoercion: { attempted: true, succeeded: false },
+  };
 };
 
 const tryUnwrapAndValidate = <T>(
@@ -373,7 +773,13 @@ const tryUnwrapAndValidate = <T>(
   schema: z.ZodSchema<T>,
   unwrapCandidates: readonly string[],
   textFieldCandidates: readonly string[],
-): { ok: true; data: T; unwrap: UnwrapAttempt; keyNormalization: KeyNormalizationAttempt } | { ok: false; unwrap: UnwrapAttempt } => {
+): {
+  ok: true;
+  data: T;
+  unwrap: UnwrapAttempt;
+  keyNormalization: KeyNormalizationAttempt;
+  schemaCoercion: SchemaCoercionAttempt;
+} | { ok: false; unwrap: UnwrapAttempt } => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return { ok: false, unwrap: { attempted: false, succeeded: false } };
   }
@@ -383,10 +789,23 @@ const tryUnwrapAndValidate = <T>(
   const validateInner = (
     inner: unknown,
     unwrap: UnwrapAttempt,
-  ): { ok: true; data: T; unwrap: UnwrapAttempt; keyNormalization: KeyNormalizationAttempt } | null => {
+  ): {
+    ok: true;
+    data: T;
+    unwrap: UnwrapAttempt;
+    keyNormalization: KeyNormalizationAttempt;
+    schemaCoercion: SchemaCoercionAttempt;
+  } | null => {
+    if (inner == null || typeof inner !== 'object') return null;
     const validated = validateWithNormalization(inner, schema);
     if (validated.ok) {
-      return { ok: true, data: validated.data, unwrap, keyNormalization: validated.keyNormalization };
+      return {
+        ok: true,
+        data: validated.data,
+        unwrap,
+        keyNormalization: validated.keyNormalization,
+        schemaCoercion: validated.schemaCoercion,
+      };
     }
     return null;
   };
@@ -394,7 +813,13 @@ const tryUnwrapAndValidate = <T>(
   const validateInnerText = (
     innerText: string,
     unwrap: UnwrapAttempt,
-  ): { ok: true; data: T; unwrap: UnwrapAttempt; keyNormalization: KeyNormalizationAttempt } | null => {
+  ): {
+    ok: true;
+    data: T;
+    unwrap: UnwrapAttempt;
+    keyNormalization: KeyNormalizationAttempt;
+    schemaCoercion: SchemaCoercionAttempt;
+  } | null => {
     if (!innerText.trim()) return null;
     try {
       const parsedInner = tryParseJson(innerText);
@@ -458,6 +883,7 @@ export type ParseStructuredJsonTelemetry = {
   usedJsonRepair: boolean;
   unwrapAttempt: UnwrapAttempt;
   keyNormalization: KeyNormalizationAttempt;
+  schemaCoercion: SchemaCoercionAttempt;
 };
 
 export function parseStructuredJsonWithSchema<T>(
@@ -508,6 +934,7 @@ export function parseStructuredJsonWithSchema<T>(
           usedJsonRepair,
           unwrapAttempt: { attempted: false, succeeded: false },
           keyNormalization: { attempted: false, succeeded: false },
+          schemaCoercion: { attempted: false, succeeded: false },
         },
       };
     }
@@ -523,6 +950,7 @@ export function parseStructuredJsonWithSchema<T>(
           usedJsonRepair,
           unwrapAttempt: unwrapped.unwrap,
           keyNormalization: unwrapped.keyNormalization,
+          schemaCoercion: unwrapped.schemaCoercion,
         },
       };
     }
@@ -538,6 +966,7 @@ export function parseStructuredJsonWithSchema<T>(
           usedJsonRepair,
           unwrapAttempt: { attempted: false, succeeded: false },
           keyNormalization: normalized.keyNormalization,
+          schemaCoercion: normalized.schemaCoercion,
         },
       };
     }

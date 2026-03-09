@@ -1,11 +1,13 @@
 import type { UserBadge } from '@/types/badge';
+import { signOutBetterAuthSession } from '@/lib/auth/logout';
+import { mapDeckDetailPayload, mapDeckListPayload } from '@/lib/deck-client-mappers';
 
 const STORAGE_KEY = 'mahoshojo_auth';
 const ENCRYPTION_KEY = 'mahoshojo_2024_secret_encryption_key';
 
 export interface AuthData {
   username: string;
-  authKey: string;
+  authKey?: string;
   userId?: number;
   activityToken?: string;
 }
@@ -75,6 +77,98 @@ const cryptoHelper = new CryptoHelper();
 let cachedEncryptedValue: string | null = null;
 let cachedAuthValue: AuthData | null = null;
 let cachedAuthPromise: Promise<AuthData | null> | null = null;
+let sessionBootstrapPromise: Promise<AuthData | null> | null = null;
+
+type VerifyAuthResponse = {
+  success: boolean;
+  authKey?: string | null;
+  user?: { id: number; username: string; prefix?: string | null };
+  badges?: UserBadge[];
+  activityToken?: string | null;
+};
+
+const normalizeAuthKey = (value: unknown): string | null => {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+};
+
+const normalizeActivityToken = (value: unknown): string | undefined =>
+  typeof value === 'string' && value.trim().length > 0 ? value : undefined;
+
+const readStoredAuthHeader = (auth: AuthData | null): string | null => {
+  const authKey = normalizeAuthKey(auth?.authKey);
+  return authKey ? `Bearer ${authKey}` : null;
+};
+
+const fetchVerifyAuthState = async (authHeader: string | null): Promise<VerifyAuthResponse> => {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+  if (authHeader) {
+    headers.Authorization = authHeader;
+  }
+
+  const response = await fetch('/api/auth/verify', {
+    method: 'POST',
+    headers,
+    credentials: 'include',
+  });
+
+  return (await response.json()) as VerifyAuthResponse;
+};
+
+const persistVerifyAuthState = async (
+  data: VerifyAuthResponse,
+  fallbackAuth: AuthData | null,
+): Promise<AuthData | null> => {
+  if (!data?.success || !data.user || typeof data.user.username !== 'string') {
+    return null;
+  }
+
+  const nextAuth: AuthData = {
+    username: data.user.username,
+  };
+
+  const authKey = normalizeAuthKey(data.authKey) ?? normalizeAuthKey(fallbackAuth?.authKey);
+  if (authKey) {
+    nextAuth.authKey = authKey;
+  }
+
+  if (typeof data.user.id === 'number' && Number.isSafeInteger(data.user.id) && data.user.id > 0) {
+    nextAuth.userId = data.user.id;
+  } else if (typeof fallbackAuth?.userId === 'number' && Number.isSafeInteger(fallbackAuth.userId) && fallbackAuth.userId > 0) {
+    nextAuth.userId = fallbackAuth.userId;
+  }
+
+  const activityToken = normalizeActivityToken(data.activityToken) ?? normalizeActivityToken(fallbackAuth?.activityToken);
+  if (activityToken) {
+    nextAuth.activityToken = activityToken;
+  }
+
+  await authStorage.setAuth(nextAuth);
+  return nextAuth;
+};
+
+const bootstrapAuthFromSession = async (): Promise<AuthData | null> => {
+  if (sessionBootstrapPromise) {
+    return await sessionBootstrapPromise;
+  }
+
+  sessionBootstrapPromise = (async () => {
+    const data = await fetchVerifyAuthState(null);
+    return persistVerifyAuthState(data, null);
+  })();
+
+  try {
+    return await sessionBootstrapPromise;
+  } catch (error) {
+    console.error('Session auth bootstrap error:', error);
+    return null;
+  } finally {
+    sessionBootstrapPromise = null;
+  }
+};
 
 export const authStorage = {
   // 加密存储认证信息
@@ -135,17 +229,22 @@ export const authStorage = {
     cachedEncryptedValue = null;
     cachedAuthValue = null;
     cachedAuthPromise = null;
+    sessionBootstrapPromise = null;
   },
 
   // 获取认证头
   async getAuthHeader(): Promise<string | null> {
     const auth = await this.getAuth();
-    return auth ? `Bearer ${auth.authKey}` : null;
+    const cachedHeader = readStoredAuthHeader(auth);
+    if (cachedHeader) return cachedHeader;
+
+    const bootstrappedAuth = await bootstrapAuthFromSession();
+    return readStoredAuthHeader(bootstrappedAuth);
   },
 
   // 获取“活跃统计”头（不依赖额外 D1 读取）
   async getActivityHeaders(): Promise<Record<string, string>> {
-    const auth = await this.getAuth();
+    const auth = (await this.getAuth()) ?? (await bootstrapAuthFromSession());
     if (!auth) return {};
 
     const headers: Record<string, string> = {};
@@ -156,15 +255,34 @@ export const authStorage = {
       headers['x-mahoshojo-user-id'] = String(auth.userId);
     }
     return headers;
+  },
+
+  async buildAuthenticatedRequestInit(init: RequestInit = {}): Promise<RequestInit> {
+    const headers = new Headers(init.headers ?? {});
+    const authHeader = await this.getAuthHeader();
+    if (authHeader && !headers.has('Authorization')) {
+      headers.set('Authorization', authHeader);
+    }
+
+    return {
+      ...init,
+      headers,
+      credentials: init.credentials ?? 'same-origin',
+    };
+  },
+
+  async fetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
+    return fetch(input, await this.buildAuthenticatedRequestInit(init));
   }
 };
 
 // API 请求工具函数
 export const authApi = {
   // 注册
-  async register(username: string, email: string, turnstileToken: string): Promise<{
+  async register(username: string, email: string, turnstileToken: string, password: string): Promise<{
     success: boolean;
     authKey?: string;
+    authMode?: 'better-auth' | 'legacy';
     message?: string;
     error?: string;
     user?: { id: number; username: string; prefix?: string | null };
@@ -174,18 +292,23 @@ export const authApi = {
       const response = await fetch('/api/auth/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, email, turnstileToken })
+        body: JSON.stringify({ username, email, password, turnstileToken })
       });
 
       const data = await response.json();
       
       if (response.ok && data.success) {
-        await authStorage.setAuth({
-          username,
-          authKey: data.authKey,
-          userId: typeof data.user?.id === 'number' ? data.user.id : undefined,
-          activityToken: typeof data.activityToken === 'string' ? data.activityToken : undefined,
-        });
+        const nextAuthKey = typeof data.authKey === 'string' && data.authKey.trim().length > 0 ? data.authKey.trim() : null;
+        if (nextAuthKey) {
+          await authStorage.setAuth({
+            username: typeof data.user?.username === 'string' ? data.user.username : username,
+            authKey: nextAuthKey,
+            userId: typeof data.user?.id === 'number' ? data.user.id : undefined,
+            activityToken: typeof data.activityToken === 'string' ? data.activityToken : undefined,
+          });
+        } else {
+          authStorage.clearAuth();
+        }
         return data;
       }
       
@@ -197,8 +320,15 @@ export const authApi = {
   },
 
   // 登录
-  async login(username: string, authKey: string, turnstileToken: string): Promise<{
+  async login(
+    identifier: string,
+    credential: string,
+    turnstileToken: string,
+    mode: 'password' | 'legacy' = 'password',
+  ): Promise<{
     success: boolean;
+    authMode?: 'better-auth' | 'legacy';
+    authKey?: string;
     user?: { id: number; username: string; prefix?: string | null };
     activityToken?: string | null;
     error?: string;
@@ -207,18 +337,31 @@ export const authApi = {
       const response = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, authKey, turnstileToken })
+        body: JSON.stringify({ identifier, credential, mode, turnstileToken })
       });
 
       const data = await response.json();
       
       if (response.ok && data.success) {
-        await authStorage.setAuth({
-          username,
-          authKey,
-          userId: typeof data.user?.id === 'number' ? data.user.id : undefined,
-          activityToken: typeof data.activityToken === 'string' ? data.activityToken : undefined,
-        });
+        const fromServerAuthKey = typeof data.authKey === 'string' && data.authKey.trim().length > 0 ? data.authKey.trim() : null;
+        const fallbackLegacyKey = mode === 'legacy' && credential.trim().length > 0 ? credential.trim() : null;
+        const persistedAuthKey = fromServerAuthKey ?? fallbackLegacyKey;
+
+        if (persistedAuthKey) {
+          await authStorage.setAuth({
+            username:
+              typeof data.user?.username === 'string'
+                ? data.user.username
+                : mode === 'legacy'
+                  ? identifier
+                  : '',
+            authKey: persistedAuthKey,
+            userId: typeof data.user?.id === 'number' ? data.user.id : undefined,
+            activityToken: typeof data.activityToken === 'string' ? data.activityToken : undefined,
+          });
+        } else {
+          authStorage.clearAuth();
+        }
         return data;
       }
       
@@ -232,32 +375,18 @@ export const authApi = {
   // 验证当前认证状态
   async verify(): Promise<{
     success: boolean;
+    authKey?: string | null;
     user?: { id: number; username: string; prefix?: string | null };
     badges?: UserBadge[];
     activityToken?: string | null;
   }> {
-    const authHeader = await authStorage.getAuthHeader();
-    if (!authHeader) {
-      return { success: false };
-    }
+    const auth = await authStorage.getAuth();
+    const authHeader = readStoredAuthHeader(auth);
 
     try {
-      const response = await fetch('/api/auth/verify', {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'Authorization': authHeader
-        }
-      });
-
-      const data = await response.json();
-      const auth = await authStorage.getAuth();
-      if (auth && data?.success && data?.user?.id) {
-        await authStorage.setAuth({
-          ...auth,
-          userId: typeof data.user.id === 'number' ? data.user.id : auth.userId,
-          activityToken: typeof data.activityToken === 'string' ? data.activityToken : auth.activityToken,
-        });
+      const data = await fetchVerifyAuthState(authHeader);
+      if (data?.success && data?.user?.id) {
+        await persistVerifyAuthState(data, auth);
       }
       return data;
     } catch (error) {
@@ -267,7 +396,8 @@ export const authApi = {
   },
 
   // 退出登录
-  logout(): void {
+  async logout(): Promise<void> {
+    await signOutBetterAuthSession();
     authStorage.clearAuth();
   }
 };
@@ -276,9 +406,6 @@ export const authApi = {
 export const dataCardApi = {
   // 获取所有数据卡
   async getCards(search?: string, sortBy?: 'likes' | 'usage' | 'favorites' | 'created_at'): Promise<any[]> {
-    const authHeader = await authStorage.getAuthHeader();
-    if (!authHeader) return [];
-
     try {
       const searchParams = new URLSearchParams();
       if (search) {
@@ -291,9 +418,7 @@ export const dataCardApi = {
       const queryString = searchParams.toString();
       const url = `/api/data-cards${queryString ? `?${queryString}` : ''}`;
       
-      const response = await fetch(url, {
-        headers: { 'Authorization': authHeader }
-      });
+      const response = await authStorage.fetch(url);
 
       if (response.ok) {
         const data = await response.json();
@@ -308,13 +433,8 @@ export const dataCardApi = {
 
   // 获取用户数据卡容量
   async getUserCapacity(): Promise<number | null> {
-    const authHeader = await authStorage.getAuthHeader();
-    if (!authHeader) return null;
-
     try {
-      const response = await fetch('/api/user-capacity', {
-        headers: { 'Authorization': authHeader }
-      });
+      const response = await authStorage.fetch('/api/user-capacity');
 
       if (response.ok) {
         const data = await response.json();
@@ -333,17 +453,11 @@ export const dataCardApi = {
     id?: number;
     error?: string;
   }> {
-    const authHeader = await authStorage.getAuthHeader();
-    if (!authHeader) {
-      return { success: false, error: '未登录' };
-    }
-
     try {
-      const response = await fetch('/api/data-cards', {
+      const response = await authStorage.fetch('/api/data-cards', {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
-          'Authorization': authHeader
         },
         body: JSON.stringify({ type, name, description, data, isPublic })
       });
@@ -361,17 +475,11 @@ export const dataCardApi = {
     success: boolean;
     error?: string;
   }> {
-    const authHeader = await authStorage.getAuthHeader();
-    if (!authHeader) {
-      return { success: false, error: '未登录' };
-    }
-
     try {
-      const response = await fetch('/api/data-cards', {
+      const response = await authStorage.fetch('/api/data-cards', {
         method: 'PUT',
         headers: { 
           'Content-Type': 'application/json',
-          'Authorization': authHeader
         },
         body: JSON.stringify({ id, name, description, isPublic })
       });
@@ -389,17 +497,11 @@ export const dataCardApi = {
     id: string,
     payload: { name?: string; description?: string; isPublic?: number; data: any }
   ): Promise<{ success: boolean; pendingReview?: boolean; error?: string }> {
-    const authHeader = await authStorage.getAuthHeader();
-    if (!authHeader) {
-      return { success: false, error: '未登录' };
-    }
-
     try {
-      const response = await fetch('/api/data-cards', {
+      const response = await authStorage.fetch('/api/data-cards', {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: authHeader
         },
         body: JSON.stringify({ id, ...payload })
       });
@@ -417,15 +519,9 @@ export const dataCardApi = {
     success: boolean;
     error?: string;
   }> {
-    const authHeader = await authStorage.getAuthHeader();
-    if (!authHeader) {
-      return { success: false, error: '未登录' };
-    }
-
     try {
-      const response = await fetch(`/api/data-cards?id=${id}`, {
+      const response = await authStorage.fetch(`/api/data-cards?id=${id}`, {
         method: 'DELETE',
-        headers: { 'Authorization': authHeader }
       });
 
       const result = await response.json();
@@ -438,13 +534,8 @@ export const dataCardApi = {
 
   // 获取回收站列表
   async getRecycleBin(): Promise<any[]> {
-    const authHeader = await authStorage.getAuthHeader();
-    if (!authHeader) return [];
-
     try {
-      const response = await fetch('/api/data-card-recycle', {
-        headers: { 'Authorization': authHeader }
-      });
+      const response = await authStorage.fetch('/api/data-card-recycle');
 
       if (response.ok) {
         const data = await response.json();
@@ -459,17 +550,11 @@ export const dataCardApi = {
 
   // 恢复回收站中的数据卡
   async restoreCard(id: string): Promise<{ success: boolean; error?: string }> {
-    const authHeader = await authStorage.getAuthHeader();
-    if (!authHeader) {
-      return { success: false, error: '未登录' };
-    }
-
     try {
-      const response = await fetch('/api/data-card-recycle', {
+      const response = await authStorage.fetch('/api/data-card-recycle', {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': authHeader
         },
         body: JSON.stringify({ id })
       });
@@ -487,15 +572,9 @@ export const dataCardApi = {
 
   // 永久删除回收站中的数据卡
   async deleteRecycleCard(id: string): Promise<{ success: boolean; error?: string }> {
-    const authHeader = await authStorage.getAuthHeader();
-    if (!authHeader) {
-      return { success: false, error: '未登录' };
-    }
-
     try {
-      const response = await fetch(`/api/data-card-recycle?id=${id}`, {
+      const response = await authStorage.fetch(`/api/data-card-recycle?id=${id}`, {
         method: 'DELETE',
-        headers: { 'Authorization': authHeader }
       });
 
       const result = await response.json();
@@ -512,9 +591,6 @@ export const dataCardApi = {
 
 export const favoritesApi = {
   async getFavorites(options?: { type?: 'character' | 'scenario' | 'history' | 'questionnaire'; idsOnly?: boolean }) {
-    const authHeader = await authStorage.getAuthHeader();
-    if (!authHeader) return { success: false, favorites: [] };
-
     const params = new URLSearchParams();
     if (options?.type) {
       params.append('type', options.type);
@@ -523,9 +599,7 @@ export const favoritesApi = {
       params.append('idsOnly', '1');
     }
 
-    const response = await fetch(`/api/favorites${params.size ? `?${params.toString()}` : ''}`, {
-      headers: { 'Authorization': authHeader }
-    });
+    const response = await authStorage.fetch(`/api/favorites${params.size ? `?${params.toString()}` : ''}`);
 
     if (!response.ok) {
       return { success: false, favorites: [] };
@@ -535,16 +609,10 @@ export const favoritesApi = {
   },
 
   async add(cardId: string) {
-    const authHeader = await authStorage.getAuthHeader();
-    if (!authHeader) {
-      return { success: false, error: '未登录' };
-    }
-
-    const response = await fetch('/api/favorites', {
+    const response = await authStorage.fetch('/api/favorites', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': authHeader
       },
       body: JSON.stringify({ cardId })
     });
@@ -553,16 +621,10 @@ export const favoritesApi = {
   },
 
   async remove(cardId: string) {
-    const authHeader = await authStorage.getAuthHeader();
-    if (!authHeader) {
-      return { success: false, error: '未登录' };
-    }
-
-    const response = await fetch('/api/favorites', {
+    const response = await authStorage.fetch('/api/favorites', {
       method: 'DELETE',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': authHeader
       },
       body: JSON.stringify({ cardId })
     });
@@ -573,16 +635,12 @@ export const favoritesApi = {
 
 export const deckApi = {
   async getMyDecks(): Promise<{ decks: any[]; capacity?: number; deckCount?: number } | null> {
-    const authHeader = await authStorage.getAuthHeader();
-    if (!authHeader) return null;
-
     try {
-      const response = await fetch('/api/decks', {
-        headers: { Authorization: authHeader }
-      });
+      const response = await authStorage.fetch('/api/decks');
 
       if (!response.ok) return null;
-      return response.json();
+      const data = await response.json();
+      return mapDeckListPayload(data);
     } catch (error) {
       console.error('Get my decks error:', error);
       return null;
@@ -590,15 +648,11 @@ export const deckApi = {
   },
 
   async createDeck(payload: { name: string; description?: string; isPublic?: number }): Promise<any | null> {
-    const authHeader = await authStorage.getAuthHeader();
-    if (!authHeader) return { success: false, error: '未登录' };
-
     try {
-      const response = await fetch('/api/decks', {
+      const response = await authStorage.fetch('/api/decks', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: authHeader
         },
         body: JSON.stringify(payload)
       });
@@ -615,15 +669,11 @@ export const deckApi = {
   },
 
   async updateDeck(deckId: string, payload: { name?: string; description?: string; isPublic?: number }): Promise<boolean> {
-    const authHeader = await authStorage.getAuthHeader();
-    if (!authHeader) return false;
-
     try {
-      const response = await fetch('/api/decks', {
+      const response = await authStorage.fetch('/api/decks', {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: authHeader
         },
         body: JSON.stringify({ id: deckId, ...payload })
       });
@@ -635,13 +685,9 @@ export const deckApi = {
   },
 
   async deleteDeck(deckId: string): Promise<boolean> {
-    const authHeader = await authStorage.getAuthHeader();
-    if (!authHeader) return false;
-
     try {
-      const response = await fetch(`/api/decks?id=${encodeURIComponent(deckId)}`, {
+      const response = await authStorage.fetch(`/api/decks?id=${encodeURIComponent(deckId)}`, {
         method: 'DELETE',
-        headers: { Authorization: authHeader }
       });
       return response.ok;
     } catch (error) {
@@ -651,16 +697,12 @@ export const deckApi = {
   },
 
   async getDeckCards(deckId: string): Promise<{ deck: any; cards: any[] } | null> {
-    const authHeader = await authStorage.getAuthHeader();
-    if (!authHeader) return null;
-
     try {
-      const response = await fetch(`/api/deck-cards?deckId=${encodeURIComponent(deckId)}`, {
-        headers: { Authorization: authHeader }
-      });
+      const response = await authStorage.fetch(`/api/deck-cards?deckId=${encodeURIComponent(deckId)}`);
 
       if (!response.ok) return null;
-      return response.json();
+      const data = await response.json();
+      return mapDeckDetailPayload(data);
     } catch (error) {
       console.error('Get deck cards error:', error);
       return null;
@@ -668,15 +710,11 @@ export const deckApi = {
   },
 
   async addDeckCards(deckId: string, cardIds: string[]): Promise<any | null> {
-    const authHeader = await authStorage.getAuthHeader();
-    if (!authHeader) return { success: false, error: '未登录' };
-
     try {
-      const response = await fetch('/api/deck-cards', {
+      const response = await authStorage.fetch('/api/deck-cards', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: authHeader
         },
         body: JSON.stringify({ deckId, cardIds })
       });
@@ -688,15 +726,11 @@ export const deckApi = {
   },
 
   async removeDeckCards(deckId: string, cardIds: string[]): Promise<boolean> {
-    const authHeader = await authStorage.getAuthHeader();
-    if (!authHeader) return false;
-
     try {
-      const response = await fetch('/api/deck-cards', {
+      const response = await authStorage.fetch('/api/deck-cards', {
         method: 'DELETE',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: authHeader
         },
         body: JSON.stringify({ deckId, cardIds })
       });
@@ -708,15 +742,11 @@ export const deckApi = {
   },
 
   async pruneInaccessible(deckId: string): Promise<any | null> {
-    const authHeader = await authStorage.getAuthHeader();
-    if (!authHeader) return { success: false, error: '未登录' };
-
     try {
-      const response = await fetch('/api/deck-cards', {
+      const response = await authStorage.fetch('/api/deck-cards', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: authHeader
         },
         body: JSON.stringify({ deckId, action: 'pruneInaccessible' })
       });
@@ -727,7 +757,9 @@ export const deckApi = {
     }
   },
 
-  async getPublicDecks(params: { limit: number; offset: number; search?: string; sortBy?: 'likes' | 'favorites' | 'created_at' }): Promise<any[]> {
+  async getPublicDecks(
+    params: { limit: number; offset: number; search?: string; sortBy?: 'likes' | 'favorites' | 'createdAt' | 'created_at' }
+  ): Promise<any[]> {
     try {
       const qs = new URLSearchParams();
       qs.set('limit', String(params.limit));
@@ -738,7 +770,7 @@ export const deckApi = {
       const response = await fetch(`/api/public-decks?${qs.toString()}`);
       if (!response.ok) return [];
       const data = await response.json();
-      return data.decks || [];
+      return mapDeckListPayload(data).decks;
     } catch (error) {
       console.error('Get public decks error:', error);
       return [];
@@ -749,7 +781,8 @@ export const deckApi = {
     try {
       const response = await fetch(`/api/public-decks?id=${encodeURIComponent(deckId)}`);
       if (!response.ok) return null;
-      return response.json();
+      const data = await response.json();
+      return mapDeckDetailPayload(data);
     } catch (error) {
       console.error('Get public deck detail error:', error);
       return null;
@@ -776,13 +809,8 @@ export const deckApi = {
 
 export const deckFavoritesApi = {
   async getFavoriteIds(): Promise<string[]> {
-    const authHeader = await authStorage.getAuthHeader();
-    if (!authHeader) return [];
-
     try {
-      const response = await fetch('/api/deck-favorites?idsOnly=1', {
-        headers: { Authorization: authHeader }
-      });
+      const response = await authStorage.fetch('/api/deck-favorites?idsOnly=1');
       if (!response.ok) return [];
       const data = await response.json();
       return data.ids || [];
@@ -793,16 +821,11 @@ export const deckFavoritesApi = {
   },
 
   async getFavorites(): Promise<any[]> {
-    const authHeader = await authStorage.getAuthHeader();
-    if (!authHeader) return [];
-
     try {
-      const response = await fetch('/api/deck-favorites', {
-        headers: { Authorization: authHeader }
-      });
+      const response = await authStorage.fetch('/api/deck-favorites');
       if (!response.ok) return [];
       const data = await response.json();
-      return data.decks || [];
+      return mapDeckListPayload(data).decks;
     } catch (error) {
       console.error('Get deck favorites error:', error);
       return [];
@@ -810,15 +833,11 @@ export const deckFavoritesApi = {
   },
 
   async addFavorite(deckId: string): Promise<boolean> {
-    const authHeader = await authStorage.getAuthHeader();
-    if (!authHeader) return false;
-
     try {
-      const response = await fetch('/api/deck-favorites', {
+      const response = await authStorage.fetch('/api/deck-favorites', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: authHeader
         },
         body: JSON.stringify({ deckId })
       });
@@ -830,15 +849,11 @@ export const deckFavoritesApi = {
   },
 
   async removeFavorite(deckId: string): Promise<boolean> {
-    const authHeader = await authStorage.getAuthHeader();
-    if (!authHeader) return false;
-
     try {
-      const response = await fetch('/api/deck-favorites', {
+      const response = await authStorage.fetch('/api/deck-favorites', {
         method: 'DELETE',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: authHeader
         },
         body: JSON.stringify({ deckId })
       });

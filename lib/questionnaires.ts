@@ -174,6 +174,46 @@ type QuestionLookup = {
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
+const QUESTIONNAIRE_CARD_PAYLOAD_KEYS = ['data', 'dataJson', 'data_json', 'dataJSON'] as const;
+const QUESTIONNAIRE_CARD_PAYLOAD_ERROR = '问卷数据卡内容为空或格式不受支持';
+
+const parseQuestionnairePayloadValue = (value: unknown): Record<string, unknown> => {
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) throw new Error(QUESTIONNAIRE_CARD_PAYLOAD_ERROR);
+    const parsed = JSON.parse(trimmed) as unknown;
+    if (!isRecord(parsed)) throw new Error(QUESTIONNAIRE_CARD_PAYLOAD_ERROR);
+    return parsed;
+  }
+  if (isRecord(value)) return value;
+  throw new Error(QUESTIONNAIRE_CARD_PAYLOAD_ERROR);
+};
+
+export const parseQuestionnaireDataCardPayload = (source: unknown): Record<string, unknown> => {
+  if (typeof source === 'string') {
+    return parseQuestionnairePayloadValue(source);
+  }
+  if (!isRecord(source)) {
+    throw new Error(QUESTIONNAIRE_CARD_PAYLOAD_ERROR);
+  }
+
+  for (const key of QUESTIONNAIRE_CARD_PAYLOAD_KEYS) {
+    const rawValue = source[key];
+    if (rawValue === null || rawValue === undefined) continue;
+    return parseQuestionnairePayloadValue(rawValue);
+  }
+
+  if (Array.isArray(source.questions)) {
+    return source;
+  }
+  const nestedQuestionnaire = source.questionnaire;
+  if (isRecord(nestedQuestionnaire) && Array.isArray(nestedQuestionnaire.questions)) {
+    return nestedQuestionnaire;
+  }
+
+  throw new Error(QUESTIONNAIRE_CARD_PAYLOAD_ERROR);
+};
+
 const isJumpRule = (value: unknown): value is QuestionnaireJumpRule =>
   isRecord(value) && 'when' in value;
 

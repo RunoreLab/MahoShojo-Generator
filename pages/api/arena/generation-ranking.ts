@@ -1,8 +1,10 @@
 import type { NextRequest } from 'next/server';
 
-import { queryFromD1 } from '@/lib/d1';
-import { applyQueenTier, computeArenaBaseTier, queryArenaPublicQueenEntity } from '@/lib/arena/tier';
+import { applyQueenTier, computeArenaBaseTier } from '@/lib/arena/tier';
 import { isStrictRankedModelBlacklisted } from '@/lib/arena/ranked-model-policy';
+import { getDrizzleDbFromRuntime } from '@/lib/db/drizzle';
+import { getArenaRatingEventsByIds, getArenaRatingsByEntities, type ArenaRatingEventReadRow } from '@/lib/db/repositories/arena-read';
+import { getDataCardMetricsByDataCardIds, queryArenaPublicQueenEntityByQueue } from '@/lib/db/repositories/data-card-meta';
 import { getBattleReportGenerationCombatantsByGenerationId, type BattleReportGenerationCombatantRow } from '@/lib/database/battle-report-generation-combatants';
 import {
   buildArenaRatingEventId,
@@ -11,6 +13,7 @@ import {
   isFreeEligible,
   isStrictEligible,
   parseCombatantEntity,
+  parseGenerationCombatantsFallback,
   settleArenaRatingsForGeneration,
   type ArenaEntity,
   type ArenaEligibilitySnapshot,
@@ -148,7 +151,6 @@ const buildStrictIneligibleReasons = (snapshot: ArenaEligibilitySnapshot, combat
   if ((snapshot.mode ?? '').trim() !== requiredMode) reasons.push(requiredMode === 'classic' ? 'mode-not-classic' : 'mode-not-season');
   if (snapshot.userId == null) reasons.push('need-login');
   if ((snapshot.language ?? '').trim() !== 'zh-CN') reasons.push('language-not-zh-cn');
-  if (typeof snapshot.selectedLevel === 'string' && snapshot.selectedLevel.trim()) reasons.push('level-not-default');
   if (!isNewStrictPolicy && rankedMatchOk !== true) {
     if (rankedMatchReason) {
       const map: Record<string, string> = {
@@ -240,11 +242,6 @@ const buildFreeIneligibleReasons = (snapshot: ArenaEligibilitySnapshot): string[
   return reasons;
 };
 
-const readRows = <T,>(result: any): T[] => {
-  const rows = result?.result?.[0]?.results;
-  return Array.isArray(rows) ? (rows as T[]) : [];
-};
-
 const buildDefaultQueueResult = (eligible: boolean, ineligibleReasons: string[]): ApiQueueResult => ({
   eligible,
   ineligibleReasons,
@@ -278,6 +275,14 @@ export default async function handler(req: NextRequest) {
   }
 
   try {
+    const db = getDrizzleDbFromRuntime();
+    if (!db) {
+      return new Response(JSON.stringify({ success: false, generationId, error: '数据库绑定不可用，请检查 Cloudflare D1 配置' } satisfies ApiResponse), {
+        status: 503,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
     const snapshot = await getArenaEligibilitySnapshotByGenerationId(generationId);
     if (!snapshot) {
       const res: ApiResponse = {
@@ -289,8 +294,23 @@ export default async function handler(req: NextRequest) {
       return new Response(JSON.stringify(res), { status: 200, headers: { 'Content-Type': 'application/json' } });
     }
 
-    const combatants = await getBattleReportGenerationCombatantsByGenerationId(generationId);
-    if (!Array.isArray(combatants) || combatants.length === 0) {
+    const rawCombatants = await getBattleReportGenerationCombatantsByGenerationId(generationId);
+    const combatants = Array.isArray(rawCombatants) && rawCombatants.length === 2
+      ? rawCombatants
+      : parseGenerationCombatantsFallback(generationId, snapshot.extraJson);
+
+    if (!Array.isArray(combatants) || combatants.length !== 2) {
+      if (snapshot.combatantCount !== 2) {
+        const res: ApiResponse = {
+          success: true,
+          generationId,
+          state: 'ready',
+          snapshot,
+          participants: [],
+        };
+        return new Response(JSON.stringify(res), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+
       const res: ApiResponse = {
         success: true,
         generationId,
@@ -333,79 +353,18 @@ export default async function handler(req: NextRequest) {
       .map((p) => (typeof p.dataCardId === 'string' ? p.dataCardId.trim() : ''))
       .filter(Boolean);
     if (dataCardIds.length > 0) {
-      const metricsRows = readRows<{ data_card_id: string; tech_score: number; tech_level: string }>(
-        await queryFromD1(
-          `SELECT data_card_id, tech_score, tech_level
-           FROM data_card_metrics
-           WHERE data_card_id IN (${dataCardIds.map(() => '?').join(', ')})`,
-          dataCardIds,
-        ),
-      );
-      const byId = new Map<string, { techScore: number | null; techLevel: string | null }>();
-      metricsRows.forEach((row) => {
-        if (!row) return;
-        const id = typeof row.data_card_id === 'string' ? row.data_card_id : '';
-        if (!id) return;
-        byId.set(id, {
-          techScore: typeof row.tech_score === 'number' ? row.tech_score : null,
-          techLevel: typeof row.tech_level === 'string' ? row.tech_level : null,
-        });
-      });
+      const byId = await getDataCardMetricsByDataCardIds(db, dataCardIds);
       participants.forEach((p) => {
         if (!p.dataCardId) return;
         const meta = byId.get(p.dataCardId);
         if (!meta) return;
-        p.techScore = meta.techScore;
-        p.techLevel = meta.techLevel;
+        p.techScore = typeof meta.techScore === 'number' ? meta.techScore : null;
+        p.techLevel = typeof meta.techLevel === 'string' ? meta.techLevel : null;
       });
     }
 
-    const readEventRows = async () =>
-      readRows<{
-      queue: ApiQueue;
-      status: 'pending' | 'applied' | 'skipped' | 'failed';
-      skip_reason: string | null;
-      details_json: string | null;
-      a_entity_type: 'data_card' | 'preset';
-      a_entity_id: string;
-      b_entity_type: 'data_card' | 'preset';
-      b_entity_id: string;
-      a_before_rating: number | null;
-      a_after_rating: number | null;
-      a_delta: number | null;
-      a_before_games: number | null;
-      a_after_games: number | null;
-      b_before_rating: number | null;
-      b_after_rating: number | null;
-      b_delta: number | null;
-      b_before_games: number | null;
-      b_after_games: number | null;
-    }>(
-        await queryFromD1(
-          `SELECT
-            queue,
-            status,
-            skip_reason,
-            details_json,
-            a_entity_type,
-            a_entity_id,
-            b_entity_type,
-            b_entity_id,
-            a_before_rating,
-            a_after_rating,
-            a_delta,
-            a_before_games,
-            a_after_games,
-            b_before_rating,
-            b_after_rating,
-            b_delta,
-            b_before_games,
-            b_after_games
-          FROM arena_rating_events
-          WHERE id IN (?, ?)`,
-          [buildArenaRatingEventId(generationId, 'strict'), buildArenaRatingEventId(generationId, 'free')],
-        ),
-      );
+    const readEventRows = async (): Promise<ArenaRatingEventReadRow[]> =>
+      getArenaRatingEventsByIds(db, [buildArenaRatingEventId(generationId, 'strict'), buildArenaRatingEventId(generationId, 'free')]);
 
     // 读取事件（可能尚未插入）
     let eventRows = await readEventRows();
@@ -438,27 +397,11 @@ export default async function handler(req: NextRequest) {
     const entitiesForRatings: ArenaEntity[] = participantEntities.filter((e): e is ArenaEntity => Boolean(e));
 
     // 读取当前分数（用于展示当前段位/分数；同时可在 pending/缺事件时作为回退）
-    const ratingRows = readRows<{
-      queue: ApiQueue;
-      entity_type: 'data_card' | 'preset';
-      entity_id: string;
-      rating: number;
-      games: number;
-    }>(
-      await queryFromD1(
-        `SELECT queue, entity_type, entity_id, rating, games
-         FROM arena_ratings
-         WHERE queue IN ('strict', 'free')
-           AND (
-             ${entitiesForRatings.map(() => `(entity_type = ? AND entity_id = ?)`).join(' OR ') || '1=0'}
-           )`,
-        entitiesForRatings.flatMap((e) => [e.entityType, e.entityId]),
-      ),
-    );
+    const ratingRows = await getArenaRatingsByEntities(db, entitiesForRatings, ['strict', 'free']);
 
     const ratingByKey = new Map<string, { queue: ApiQueue; rating: number; games: number; tier: string }>();
     ratingRows.forEach((row) => {
-      const key = `${row.queue}:${row.entity_type}:${row.entity_id}`;
+      const key = `${row.queue}:${row.entityType}:${row.entityId}`;
       const rating = typeof row.rating === 'number' ? row.rating : 0;
       const games = typeof row.games === 'number' ? row.games : 0;
       ratingByKey.set(key, { queue: row.queue, rating, games, tier: computeArenaBaseTier(rating, games) });
@@ -475,11 +418,11 @@ export default async function handler(req: NextRequest) {
       }
 
       const eventStatus = event.status;
-      const skipReason = typeof event.skip_reason === 'string' ? event.skip_reason : null;
-      const aKey = buildEntityKey({ entityType: event.a_entity_type, entityId: event.a_entity_id });
-      const bKey = buildEntityKey({ entityType: event.b_entity_type, entityId: event.b_entity_id });
+      const skipReason = typeof event.skipReason === 'string' ? event.skipReason : null;
+      const aKey = buildEntityKey({ entityType: event.aEntityType, entityId: event.aEntityId });
+      const bKey = buildEntityKey({ entityType: event.bEntityType, entityId: event.bEntityId });
       const parsedDetails = (() => {
-        const raw = typeof event.details_json === 'string' ? event.details_json.trim() : '';
+        const raw = typeof event.detailsJson === 'string' ? event.detailsJson.trim() : '';
         if (!raw) return null;
         try {
           const parsed = JSON.parse(raw);
@@ -509,10 +452,10 @@ export default async function handler(req: NextRequest) {
         if (!entityKey) return;
 
         if (entityKey === aKey) {
-          if (typeof event.a_after_rating === 'number') qr.rating = event.a_after_rating;
-          if (typeof event.a_after_games === 'number') qr.games = event.a_after_games;
+          if (typeof event.aAfterRating === 'number') qr.rating = event.aAfterRating;
+          if (typeof event.aAfterGames === 'number') qr.games = event.aAfterGames;
           if (typeof qr.rating === 'number' && typeof qr.games === 'number') qr.tier = computeArenaBaseTier(qr.rating, qr.games);
-          qr.delta = typeof event.a_delta === 'number' ? event.a_delta : null;
+          qr.delta = typeof event.aDelta === 'number' ? event.aDelta : null;
           const before = parsedDetails?.ranks?.a?.before;
           const after = parsedDetails?.ranks?.a?.after;
           if (typeof before === 'number' && typeof after === 'number') {
@@ -521,10 +464,10 @@ export default async function handler(req: NextRequest) {
           return;
         }
         if (entityKey === bKey) {
-          if (typeof event.b_after_rating === 'number') qr.rating = event.b_after_rating;
-          if (typeof event.b_after_games === 'number') qr.games = event.b_after_games;
+          if (typeof event.bAfterRating === 'number') qr.rating = event.bAfterRating;
+          if (typeof event.bAfterGames === 'number') qr.games = event.bAfterGames;
           if (typeof qr.rating === 'number' && typeof qr.games === 'number') qr.tier = computeArenaBaseTier(qr.rating, qr.games);
-          qr.delta = typeof event.b_delta === 'number' ? event.b_delta : null;
+          qr.delta = typeof event.bDelta === 'number' ? event.bDelta : null;
           const before = parsedDetails?.ranks?.b?.before;
           const after = parsedDetails?.ranks?.b?.after;
           if (typeof before === 'number' && typeof after === 'number') {
@@ -538,11 +481,11 @@ export default async function handler(req: NextRequest) {
     applyEventToParticipants('free');
 
     const [strictQueen, freeQueen] = await Promise.all([
-      queryArenaPublicQueenEntity(queryFromD1, 'strict').catch((error) => {
+      queryArenaPublicQueenEntityByQueue(db, 'strict').catch((error) => {
         console.warn('读取女王段位失败（降级为无女王）:', error);
         return null;
       }),
-      queryArenaPublicQueenEntity(queryFromD1, 'free').catch((error) => {
+      queryArenaPublicQueenEntityByQueue(db, 'free').catch((error) => {
         console.warn('读取女王段位失败（降级为无女王）:', error);
         return null;
       }),
