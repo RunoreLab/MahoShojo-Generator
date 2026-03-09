@@ -104,6 +104,7 @@ export type BattleReportGenerationRowLite = {
   output_preview: string | null;
   output_has_sensitive_words: number | null;
   output_has_shield_words: number | null;
+  extra_json: string | null;
   pvp_room_id: string | null;
   pvp_match_id: string | null;
   pvp_round_id: string | null;
@@ -203,6 +204,7 @@ const mapLiteRow = (row: {
   outputPreview: string | null;
   outputHasSensitiveWords: number | null;
   outputHasShieldWords: number | null;
+  extraJson: string | null;
   pvpRoomId: string | null;
   pvpMatchId: string | null;
   pvpRoundId: string | null;
@@ -235,6 +237,7 @@ const mapLiteRow = (row: {
   output_preview: row.outputPreview,
   output_has_sensitive_words: toIntOrNull(row.outputHasSensitiveWords),
   output_has_shield_words: toIntOrNull(row.outputHasShieldWords),
+  extra_json: row.extraJson,
   pvp_room_id: row.pvpRoomId,
   pvp_match_id: row.pvpMatchId,
   pvp_round_id: row.pvpRoundId,
@@ -373,6 +376,7 @@ export const getBattleReportGenerationByIdLite = async (
       outputPreview: battleReportGenerations.outputPreview,
       outputHasSensitiveWords: battleReportGenerations.outputHasSensitiveWords,
       outputHasShieldWords: battleReportGenerations.outputHasShieldWords,
+      extraJson: battleReportGenerations.extraJson,
       pvpRoomId: battleReportGenerations.pvpRoomId,
       pvpMatchId: battleReportGenerations.pvpMatchId,
       pvpRoundId: battleReportGenerations.pvpRoundId,
@@ -428,6 +432,7 @@ export const listBattleReportGenerationsByUserIdLite = async (
       outputPreview: battleReportGenerations.outputPreview,
       outputHasSensitiveWords: battleReportGenerations.outputHasSensitiveWords,
       outputHasShieldWords: battleReportGenerations.outputHasShieldWords,
+      extraJson: battleReportGenerations.extraJson,
       pvpRoomId: battleReportGenerations.pvpRoomId,
       pvpMatchId: battleReportGenerations.pvpMatchId,
       pvpRoundId: battleReportGenerations.pvpRoundId,

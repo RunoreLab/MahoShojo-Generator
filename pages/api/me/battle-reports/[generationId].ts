@@ -2,7 +2,12 @@ import {
   getBattleReportGenerationByIdLite,
   updateBattleReportGenerationOutputHasSensitiveWords,
 } from '@/lib/database/battle-report-generations';
+import {
+  extractBattleReportGenerationErrorMessage,
+  loadBattleReportGenerationOutputText,
+} from '@/lib/arena/battle-report-record-utils';
 import { getBattleReportGenerationCombatantsByGenerationId } from '@/lib/database/battle-report-generation-combatants';
+import { parseGenerationCombatantsFallback } from '@/lib/database/arena-ratings';
 import { isUserInPvpMatch } from '@/lib/database/pvp';
 import { json, requireAuthUser } from '@/lib/pvp/server';
 import { quickCheck } from '@/lib/sensitive-word-filter';
@@ -37,9 +42,14 @@ export default async function handler(req: Request): Promise<Response> {
   const canReadByPvp = record.pvp_match_id ? await isUserInPvpMatch(record.pvp_match_id, auth.user.id) : false;
   if (!isOwner && !canReadByPvp) return json({ error: '无权限' }, { status: 403 });
 
-  const combatants = await getBattleReportGenerationCombatantsByGenerationId(generationId);
+  const tableCombatants = await getBattleReportGenerationCombatantsByGenerationId(generationId);
+  const combatants = tableCombatants.length > 0 ? tableCombatants : parseGenerationCombatantsFallback(generationId, record.extra_json);
 
-  const outputPreview = typeof record.output_preview === 'string' ? record.output_preview : null;
+  const output = await loadBattleReportGenerationOutputText({
+    generationId: record.id,
+    outputPreview: record.output_preview,
+  });
+  const outputPreview = output.outputText || null;
   const hasPreviewText = Boolean(outputPreview && outputPreview.trim());
 
   let contentBlocked = record.output_has_sensitive_words === 1;
@@ -48,6 +58,9 @@ export default async function handler(req: Request): Promise<Response> {
     contentBlocked = Boolean(sensitiveCheck.hasSensitiveWords);
     await updateBattleReportGenerationOutputHasSensitiveWords(record.id, contentBlocked);
   }
+
+  const canRegenerate = output.hasStoredOutput && !output.readError && !contentBlocked;
+  const errorMessage = extractBattleReportGenerationErrorMessage(record.extra_json);
 
   return json({
     success: true,
@@ -68,6 +81,10 @@ export default async function handler(req: Request): Promise<Response> {
       outputPreview: contentBlocked ? null : outputPreview,
       hasPreview: Boolean(outputPreview && outputPreview.trim()) && !contentBlocked,
       contentBlocked,
+      canRegenerate,
+      outputSource: output.source,
+      outputReadError: output.readError,
+      errorMessage,
       outputHasShieldWords: Boolean(record.output_has_shield_words),
       pvpRoomId: record.pvp_room_id,
       pvpMatchId: record.pvp_match_id,

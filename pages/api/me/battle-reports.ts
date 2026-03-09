@@ -3,6 +3,7 @@ import {
   getBattleReportGenerationsByUserIdLite,
   type BattleReportGenerationsListFilter,
 } from '@/lib/database/battle-report-generations';
+import { extractBattleReportGenerationErrorMessage } from '@/lib/arena/battle-report-record-utils';
 import { json, requireAuthUser } from '@/lib/pvp/server';
 
 export const runtime = 'edge';
@@ -75,7 +76,9 @@ export default async function handler(req: Request): Promise<Response> {
       headline: r.headline,
       winner: r.winner,
       hasPreview: Boolean(outputPreview && outputPreview.trim()) && !contentBlocked,
+      canRegenerate: !contentBlocked && (r.status === 'completed' || Boolean(outputPreview && outputPreview.trim())),
       contentBlocked,
+      errorMessage: extractBattleReportGenerationErrorMessage(r.extra_json),
       outputHasShieldWords: Boolean(r.output_has_shield_words),
       pvpRoomId: r.pvp_room_id,
       pvpMatchId: r.pvp_match_id,
@@ -91,4 +94,3 @@ export default async function handler(req: Request): Promise<Response> {
     records,
   });
 }
-

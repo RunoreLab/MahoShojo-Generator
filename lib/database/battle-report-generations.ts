@@ -104,6 +104,7 @@ export interface BattleReportGenerationRowLite {
   output_preview: string | null;
   output_has_sensitive_words: number | null;
   output_has_shield_words: number | null;
+  extra_json: string | null;
   pvp_room_id: string | null;
   pvp_match_id: string | null;
   pvp_round_id: string | null;

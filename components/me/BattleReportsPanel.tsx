@@ -17,7 +17,9 @@ type BattleReportRecordSummary = {
   headline: string | null;
   winner: string | null;
   hasPreview: boolean;
+  canRegenerate: boolean;
   contentBlocked: boolean;
+  errorMessage: string | null;
   outputHasShieldWords: boolean;
   pvpRoomId: string | null;
   pvpMatchId: string | null;
@@ -463,13 +465,16 @@ export function BattleReportsPanel({ isAuthenticated, onOpenDetails, onRegenerat
                           type="button"
                           className="rounded-lg bg-gray-900 px-3 py-2 text-xs font-medium text-white hover:bg-gray-800 disabled:opacity-60"
                           onClick={() => onRegenerate(r.id)}
-                          disabled={isRegenerating}
-                          title="尽力复现并生成可下载的战报卡片"
+                          disabled={isRegenerating || !r.canRegenerate}
+                          title={r.canRegenerate ? '尽力复现并生成可下载的战报卡片' : (r.errorMessage || '当前没有可重生正文')}
                         >
                           {isRegenerating ? '生成中…' : '重生战报'}
                         </button>
                       </div>
                     </div>
+                    {!r.canRegenerate && r.errorMessage ? (
+                      <div className="mt-2 text-xs text-amber-700">失败原因：{r.errorMessage}</div>
+                    ) : null}
                   </div>
                 ))
               )}
