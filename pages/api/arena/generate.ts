@@ -39,10 +39,9 @@ import {
 import { buildOutputPreviewForStorage } from '@/lib/arena/output-preview';
 import { settleArenaRatingsForGeneration } from '@/lib/database/arena-ratings';
 import { storeBattleReportGenerationOutputTextToR2 } from '@/lib/arena/battle-report-output-storage';
-import { fetchCurrentSeasonFromOrigin } from '@/lib/seasons-config';
-import { deriveSeasonStrictRules } from '@/lib/seasons';
 import { recordUserActivityFromRequest } from '@/lib/user-activity/record';
 import { createRequestAuthUserResolver } from '@/lib/auth/request-auth-user';
+import { createBattleReportWriteContext } from '@/lib/arena/battle-report-write-context';
 
 const log = getLogger('api-gen-battle-story');
 
@@ -112,9 +111,13 @@ const buildQuestionnaireLoreText = (questionnaires: RequestQuestionnaire[]): str
 	        return new Response(JSON.stringify({ error: 'Method not allowed' }), { status: 405 });
 	    }
 
-	    const startedAtMs = Date.now();
-	    const startedAtIso = new Date(startedAtMs).toISOString();
+    const startedAtMs = Date.now();
+    const startedAtIso = new Date(startedAtMs).toISOString();
     const authUserResolver = createRequestAuthUserResolver(req);
+    const battleReportWriteContext = createBattleReportWriteContext({
+        requestUrl: req.url,
+        authUserResolver,
+    });
 
 	    try {
 	        const normalizeOptionalString = (value: unknown): string | null => {
@@ -605,10 +608,12 @@ const buildQuestionnaireLoreText = (questionnaires: RequestQuestionnaire[]): str
         const inputBytes = new TextEncoder().encode(inputJson).length;
 
         const recordPromise = (async () => {
-            const user = await authUserResolver.getUser();
+            const user = await battleReportWriteContext.getAuthUser();
             const recordId = generateUUID();
-            const currentSeason = await fetchCurrentSeasonFromOrigin(new URL(req.url).origin);
-            const seasonStrictRules = deriveSeasonStrictRules(currentSeason);
+            const [currentSeason, seasonStrictRules] = await Promise.all([
+                battleReportWriteContext.getCurrentSeason(),
+                battleReportWriteContext.getSeasonStrictRules(),
+            ]);
 
             const normalizedScenarioFileName = (() => {
               if (typeof scenarioFileName !== 'string') return null;

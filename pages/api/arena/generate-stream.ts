@@ -49,14 +49,13 @@ import {
     compactExtraJson,
     normalizeUsage,
 } from '@/lib/arena/battle-report-log-utils';
-import { fetchCurrentSeasonFromOrigin } from '@/lib/seasons-config';
-import { deriveSeasonStrictRules } from '@/lib/seasons';
 import { createOutputPreviewCollector } from '@/lib/arena/output-preview';
 import { settleArenaRatingsForGeneration } from '@/lib/database/arena-ratings';
 import { storeBattleReportGenerationOutputStreamToR2 } from '@/lib/arena/battle-report-output-storage';
 import { deleteObject } from '@/lib/r2';
 import { createRequestAuthUserResolver } from '@/lib/auth/request-auth-user';
 import { buildBattleReportGenerationCombatantInserts } from '@/lib/arena/battle-report-record-utils';
+import { createBattleReportWriteContext } from '@/lib/arena/battle-report-write-context';
 	import { extractStreamUpdateMeta, findStreamUpdateMetaStart } from '@/lib/arena/stream-meta';
 
 const log = getLogger('api-gen-battle-stream');
@@ -130,6 +129,10 @@ async function handler(req: NextRequest): Promise<Response> {
 	    const startedAtMs = Date.now();
 	    const startedAtIso = new Date(startedAtMs).toISOString();
     const authUserResolver = createRequestAuthUserResolver(req);
+    const battleReportWriteContext = createBattleReportWriteContext({
+        requestUrl: req.url,
+        authUserResolver,
+    });
     const requestUrl = new URL(req.url);
     const wantsSse =
         requestUrl.searchParams.get('format') === 'sse' ||
@@ -530,7 +533,7 @@ async function handler(req: NextRequest): Promise<Response> {
 	                const ipAnonymized = anonymizeIp(ip);
 	                const recordPromise = (async () => {
 	                    try {
-	                        const user = await authUserResolver.getUser();
+	                        const user = await battleReportWriteContext.getAuthUser();
 	                        await createBattleReportGenerationRecord({
 	                            startedAt: startedAtIso,
 	                            endedAt: endedAtIso,
@@ -800,11 +803,13 @@ async function handler(req: NextRequest): Promise<Response> {
             const previewSource = outputPreview;
 
             const recordPromise = (async () => {
-                const user = await authUserResolver.getUser();
+                const user = await battleReportWriteContext.getAuthUser();
                 const usage = await resolvedUsagePromise;
                 const finishReason = await resolvedFinishReasonPromise;
-                const currentSeason = await fetchCurrentSeasonFromOrigin(new URL(req.url).origin);
-                const seasonStrictRules = deriveSeasonStrictRules(currentSeason);
+                const [currentSeason, seasonStrictRules] = await Promise.all([
+                    battleReportWriteContext.getCurrentSeason(),
+                    battleReportWriteContext.getSeasonStrictRules(),
+                ]);
 
                 const normalizedScenarioFileName = (() => {
                   if (typeof scenarioFileName !== 'string') return null;
@@ -1586,7 +1591,7 @@ async function handler(req: NextRequest): Promise<Response> {
 	        const ipAnonymized = anonymizeIp(ip);
 	        const recordPromise = (async () => {
 	            try {
-	                const user = await authUserResolver.getUser();
+	                const user = await battleReportWriteContext.getAuthUser();
                     const errorExtraJsonBase = compactExtraJson({
                         errorMessage,
                         stage: 'top-level-catch',
