@@ -2,6 +2,7 @@ import {
   getAdminUserAnalyticsFrequency,
   getAdminUserAnalyticsComposition,
   getAdminUserAnalyticsOverview,
+  getAdminUserAnalyticsTrends,
   getAdminUserAnalyticsRetention,
   type AdminCohortGranularity,
   type AdminFrequencySample,
@@ -23,6 +24,7 @@ const parseSection = (value: string | null): AdminUserAnalyticsSection => {
   if (value === 'frequency') return 'frequency';
   if (value === 'retention') return 'retention';
   if (value === 'composition') return 'composition';
+  if (value === 'trends') return 'trends';
   return 'all';
 };
 
@@ -56,7 +58,7 @@ export default async function handler(req: NextRequest) {
   const cohort = parseCohort(url.searchParams.get('cohort'));
   const frequencyProfile = 'v20260209';
 
-  const ttlSeconds = section === 'overview' ? 60 : 120;
+  const ttlSeconds = section === 'overview' ? 60 : section === 'trends' ? 300 : 120;
   const cacheKey = `https://admin-user-analytics.internal/${section}?lookbackDays=${lookbackDays}&frequencySample=${frequencySample}&activeWindowDays=${activeWindowDays}&cohort=${cohort}&frequencyProfile=${frequencyProfile}`;
 
   return withEdgeCache(
@@ -126,7 +128,20 @@ export default async function handler(req: NextRequest) {
           );
         }
 
-        const [overview, frequency, retention, composition] = await Promise.all([
+        if (section === 'trends') {
+          const trends = await getAdminUserAnalyticsTrends(lookbackDays);
+          return new Response(
+            JSON.stringify({
+              success: true,
+              section,
+              stats: trends,
+              meta: { generatedAt, lookbackDays },
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } },
+          );
+        }
+
+        const [overview, frequency, retention, composition, trends] = await Promise.all([
           getAdminUserAnalyticsOverview(lookbackDays),
           getAdminUserAnalyticsFrequency({
             sample: frequencySample,
@@ -139,13 +154,14 @@ export default async function handler(req: NextRequest) {
             cohort,
             lookbackDays,
           }),
+          getAdminUserAnalyticsTrends(lookbackDays),
         ]);
 
         return new Response(
           JSON.stringify({
             success: true,
             section,
-            stats: { overview, frequency, retention, composition },
+            stats: { overview, frequency, retention, composition, trends },
             meta: { generatedAt, lookbackDays, frequencySample, activeWindowDays, cohort, frequencyProfile },
           }),
           { status: 200, headers: { 'Content-Type': 'application/json' } },

@@ -1,5 +1,5 @@
 import { AdminUserAccountPage } from '@/components/admin/user-account/AdminUserAccountPage';
 
-export default function AdminUserManagementRoute() {
+export default function AdminUsersRoute() {
   return <AdminUserAccountPage />;
 }

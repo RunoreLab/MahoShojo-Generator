@@ -1,5 +1,7 @@
 // lib/database/admin.ts
 
+import { getAdminPvpOverview } from './admin-pvp';
+import { getAdminUserAccountSummary } from './admin-user-accounts';
 import { queryFromD1 } from './core';
 
 /**
@@ -54,9 +56,21 @@ export type DashboardStats = {
   largeObjectsStoredBytesTotal: number;
   largeObjectsBattleReportOutputTotal: number;
   largeObjectsBattleReportOutputBytesTotal: number;
+
+  authLinkedUsersCount: number;
+  legacyOnlyUsersCount: number;
+  authEmailUnverifiedUsersCount: number;
+  authSuccess24h: number;
+  authFailure24h: number;
+
+  pvpOpenRoomsTotal: number;
+  pvpActiveRoomsTotal: number;
+  pvpStalledRoomsTotal: number;
+  pvpActiveMatchesTotal: number;
+  pvpMatches7dTotal: number;
 };
 
-export type DashboardStatsSection = 'core' | 'arena' | 'tags' | 'storage' | 'activity';
+export type DashboardStatsSection = 'core' | 'arena' | 'tags' | 'storage' | 'activity' | 'accounts' | 'pvp';
 
 export type DashboardStatsCore = Pick<
   DashboardStats,
@@ -112,6 +126,24 @@ export type DashboardStatsStorage = Pick<
   | 'largeObjectsStoredBytesTotal'
   | 'largeObjectsBattleReportOutputTotal'
   | 'largeObjectsBattleReportOutputBytesTotal'
+>;
+
+export type DashboardStatsAccounts = Pick<
+  DashboardStats,
+  | 'authLinkedUsersCount'
+  | 'legacyOnlyUsersCount'
+  | 'authEmailUnverifiedUsersCount'
+  | 'authSuccess24h'
+  | 'authFailure24h'
+>;
+
+export type DashboardStatsPvp = Pick<
+  DashboardStats,
+  | 'pvpOpenRoomsTotal'
+  | 'pvpActiveRoomsTotal'
+  | 'pvpStalledRoomsTotal'
+  | 'pvpActiveMatchesTotal'
+  | 'pvpMatches7dTotal'
 >;
 
 type D1Row = Record<string, unknown>;
@@ -412,13 +444,61 @@ export async function getDashboardStatsStorage(): Promise<DashboardStatsStorage>
   return stats;
 }
 
+export async function getDashboardStatsAccounts(): Promise<DashboardStatsAccounts> {
+  const stats: DashboardStatsAccounts = {
+    authLinkedUsersCount: 0,
+    legacyOnlyUsersCount: 0,
+    authEmailUnverifiedUsersCount: 0,
+    authSuccess24h: 0,
+    authFailure24h: 0,
+  };
+
+  try {
+    const summary = await getAdminUserAccountSummary();
+    stats.authLinkedUsersCount = summary.linkedUsers;
+    stats.legacyOnlyUsersCount = summary.legacyOnlyUsers;
+    stats.authEmailUnverifiedUsersCount = summary.emailUnverifiedUsers;
+    stats.authSuccess24h = summary.authSuccess24h;
+    stats.authFailure24h = summary.authFailure24h;
+  } catch (error) {
+    console.warn('[Admin] auth 后台统计未就绪，跳过账号统计:', error);
+  }
+
+  return stats;
+}
+
+export async function getDashboardStatsPvp(): Promise<DashboardStatsPvp> {
+  const stats: DashboardStatsPvp = {
+    pvpOpenRoomsTotal: 0,
+    pvpActiveRoomsTotal: 0,
+    pvpStalledRoomsTotal: 0,
+    pvpActiveMatchesTotal: 0,
+    pvpMatches7dTotal: 0,
+  };
+
+  try {
+    const overview = await getAdminPvpOverview();
+    stats.pvpOpenRoomsTotal = overview.openRooms;
+    stats.pvpActiveRoomsTotal = overview.activeRooms;
+    stats.pvpStalledRoomsTotal = overview.stalledRooms;
+    stats.pvpActiveMatchesTotal = overview.activeMatches;
+    stats.pvpMatches7dTotal = overview.matches7d;
+  } catch (error) {
+    console.warn('[Admin] PVP 后台统计未就绪，跳过 PVP 统计:', error);
+  }
+
+  return stats;
+}
+
 export async function getDashboardStats(): Promise<DashboardStats> {
-  const [core, arena, activity, tags, storage] = await Promise.all([
+  const [core, arena, activity, tags, storage, accounts, pvp] = await Promise.all([
     getDashboardStatsCore(),
     getDashboardStatsArena(),
     getDashboardStatsActivity(),
     getDashboardStatsTags(),
     getDashboardStatsStorage(),
+    getDashboardStatsAccounts(),
+    getDashboardStatsPvp(),
   ]);
 
   return {
@@ -427,6 +507,8 @@ export async function getDashboardStats(): Promise<DashboardStats> {
     ...activity,
     ...tags,
     ...storage,
+    ...accounts,
+    ...pvp,
   };
 }
 

@@ -2,9 +2,11 @@
 
 import {
   getDashboardStats,
+  getDashboardStatsAccounts,
   getDashboardStatsActivity,
   getDashboardStatsArena,
   getDashboardStatsCore,
+  getDashboardStatsPvp,
   getDashboardStatsStorage,
   getDashboardStatsTags,
   type DashboardStatsSection,
@@ -35,7 +37,9 @@ export default async function handler(req: NextRequest) {
       sectionRaw === 'arena' ||
       sectionRaw === 'tags' ||
       sectionRaw === 'storage' ||
-      sectionRaw === 'activity'
+      sectionRaw === 'activity' ||
+      sectionRaw === 'accounts' ||
+      sectionRaw === 'pvp'
         ? (sectionRaw as DashboardStatsSection)
         : 'all';
 
@@ -45,6 +49,8 @@ export default async function handler(req: NextRequest) {
       if (section === 'activity') return await getDashboardStatsActivity();
       if (section === 'tags') return await getDashboardStatsTags();
       if (section === 'storage') return await getDashboardStatsStorage();
+      if (section === 'accounts') return await getDashboardStatsAccounts();
+      if (section === 'pvp') return await getDashboardStatsPvp();
       return await getDashboardStats();
     })();
     

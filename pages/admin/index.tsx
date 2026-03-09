@@ -1,24 +1,31 @@
-// pages/admin/index.tsx
-
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import Head from 'next/head';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
-import { FileText, Users, FileCheck, UserCog, Clock, UserPlus, FilePlus, AlertTriangle, ShieldOff, Award, Tags, BarChart3, Activity, HardDrive, Trophy, Cpu, BookOpen, Database } from 'lucide-react';
+import {
+  Activity,
+  BarChart3,
+  BookOpen,
+  Clock,
+  Database,
+  FileCheck,
+  FileText,
+  HardDrive,
+  ShieldAlert,
+  ShieldCheck,
+  Tags,
+  Trophy,
+  UserCog,
+  UserPlus,
+  Users,
+} from 'lucide-react';
 
 import { encyclopediaEntries } from '@/lib/encyclopedia';
 
-/**
- * @fileoverview 后台管理系统的统一入口和数据仪表盘。
- * @description
- * 该页面现在具备以下功能：
- * 1. 在页面加载时，异步从新的API端点获取平台核心统计数据。
- * 2. 以信息卡片的形式直观展示这些数据，为管理员提供快速概览。
- * 3. 保留原有的四大管理模块入口，并优化了视觉样式。
- */
+type DashboardSection = 'core' | 'activity' | 'accounts' | 'arena' | 'pvp' | 'tags' | 'storage';
+type SectionStatus = 'idle' | 'loading' | 'loaded' | 'error';
 
-// 定义统计数据和单个统计卡片的类型
-interface DashboardStats {
+type DashboardStats = {
   totalUsers: number;
   totalDataCards: number;
   pendingReviewCount: number;
@@ -33,13 +40,7 @@ interface DashboardStats {
   activeUsers7d: number;
   activityTrackingOk: boolean;
   serverTimeIso: string;
-  d1NowUtc: string | null;
   d1NowLocal: string | null;
-  d1PageCount: number | null;
-  d1PageSize: number | null;
-  d1FreelistCount: number | null;
-  d1EstimatedFileBytes: number | null;
-  d1EstimatedUsedBytes: number | null;
 
   arenaRatingsStrictTotal: number;
   arenaRatingsFreeTotal: number;
@@ -59,180 +60,188 @@ interface DashboardStats {
   dataCardTagsTotal: number;
 
   largeObjectsTotal: number;
-  largeObjectsBytesTotal: number;
   largeObjectsStoredBytesTotal: number;
   largeObjectsBattleReportOutputTotal: number;
   largeObjectsBattleReportOutputBytesTotal: number;
-}
 
-interface StatCardProps {
+  authLinkedUsersCount: number;
+  legacyOnlyUsersCount: number;
+  authEmailUnverifiedUsersCount: number;
+  authSuccess24h: number;
+  authFailure24h: number;
+
+  pvpOpenRoomsTotal: number;
+  pvpActiveRoomsTotal: number;
+  pvpStalledRoomsTotal: number;
+  pvpActiveMatchesTotal: number;
+  pvpMatches7dTotal: number;
+};
+
+function StatCard(props: {
   title: string;
-  value: number | string;
+  value: string | number;
+  note?: string;
   icon: React.ElementType;
   color: string;
-  note?: string;
-}
-
-// 统计卡片组件
-const StatCard: React.FC<StatCardProps> = ({ title, value, icon: Icon, color, note }) => (
-  <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm flex flex-col justify-between">
-    <div>
-      <p className="text-gray-500 text-sm font-medium mb-2">{title}</p>
-      <div className="flex items-center gap-4">
-        <div className={`w-12 h-12 rounded-full flex items-center justify-center ${color}`}>
-          <Icon className="w-6 h-6 text-white" />
+}) {
+  const { title, value, note, icon: Icon, color } = props;
+  return (
+    <div className="rounded-2xl border border-white/70 bg-white/90 p-5 shadow-sm backdrop-blur">
+      <div className="mb-3 flex items-center gap-3">
+        <div className={`flex h-11 w-11 items-center justify-center rounded-full ${color}`}>
+          <Icon className="h-5 w-5 text-white" />
         </div>
         <div>
-          <p className="text-3xl font-bold text-gray-800">{value}</p>
+          <p className="text-sm font-medium text-slate-600">{title}</p>
+          <p className="text-2xl font-semibold text-slate-900">{value}</p>
         </div>
       </div>
+      {note ? <p className="text-xs leading-5 text-slate-500">{note}</p> : null}
     </div>
-    {note && <p className="text-xs text-gray-400 mt-3">{note}</p>}
-  </div>
-);
+  );
+}
 
+function ModuleCard(props: { href: string; title: string; description: string; tone: string; icon: React.ElementType; badge?: string }) {
+  const { href, title, description, tone, icon: Icon, badge } = props;
+  return (
+    <Link href={href} className={`group block rounded-2xl border ${tone} bg-white/85 p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md`}>
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <div className="flex h-11 w-11 items-center justify-center rounded-full bg-slate-900 text-white transition group-hover:scale-105">
+            <Icon className="h-5 w-5" />
+          </div>
+          <h3 className="text-lg font-semibold text-slate-900">{title}</h3>
+        </div>
+        {badge ? <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs text-slate-500">{badge}</span> : null}
+      </div>
+      <p className="text-sm leading-6 text-slate-600">{description}</p>
+    </Link>
+  );
+}
 
-const AdminHomePage: React.FC = () => {
+const formatPercent = (value: number): string => `${(Math.max(0, Math.min(1, value)) * 100).toFixed(1)}%`;
+
+const formatServerTime = (value: string | null | undefined): string => {
+  if (!value) return '—';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString('zh-CN', { hour12: false });
+};
+
+const formatBytes = (value: number | null | undefined): string => {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return '—';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let current = value;
+  let unitIndex = 0;
+  while (current >= 1024 && unitIndex < units.length - 1) {
+    current /= 1024;
+    unitIndex += 1;
+  }
+  return `${current.toFixed(unitIndex === 0 ? 0 : 2)} ${units[unitIndex]}`;
+};
+
+export default function AdminHomePage() {
   const router = useRouter();
-  // 定义存储统计数据和加载状态的state
-  type DashboardSection = 'core' | 'arena' | 'activity' | 'tags' | 'storage';
-  type SectionStatus = 'idle' | 'loading' | 'loaded' | 'error';
+  const controllersRef = useRef<Record<DashboardSection, AbortController | null>>({
+    core: null,
+    activity: null,
+    accounts: null,
+    arena: null,
+    pvp: null,
+    tags: null,
+    storage: null,
+  });
 
   const [stats, setStats] = useState<Partial<DashboardStats>>({});
   const [sectionStatus, setSectionStatus] = useState<Record<DashboardSection, SectionStatus>>({
     core: 'idle',
-    arena: 'idle',
     activity: 'idle',
+    accounts: 'idle',
+    arena: 'idle',
+    pvp: 'idle',
     tags: 'idle',
     storage: 'idle',
   });
   const [sectionError, setSectionError] = useState<Record<DashboardSection, string | null>>({
     core: null,
-    arena: null,
     activity: null,
+    accounts: null,
+    arena: null,
+    pvp: null,
     tags: null,
     storage: null,
   });
-
-  const [loading, setLoading] = useState(true); // 仅首屏核心统计
-  const [refreshing, setRefreshing] = useState(false); // 仅核心统计的定时刷新提示
-  const hasLoadedRef = useRef(false);
-  const controllersRef = useRef<Record<DashboardSection, AbortController | null>>({
-    core: null,
-    arena: null,
-    activity: null,
-    tags: null,
-    storage: null,
-  });
-  const [lastServerTimeIso, setLastServerTimeIso] = useState<string | null>(null);
-  const [lastD1NowLocal, setLastD1NowLocal] = useState<string | null>(null);
-
+  const [loading, setLoading] = useState(true);
   const [quickJumpTarget, setQuickJumpTarget] = useState<'user' | 'dataCard' | 'battleReport'>('user');
   const [quickJumpValue, setQuickJumpValue] = useState('');
   const [quickJumpError, setQuickJumpError] = useState<string | null>(null);
 
-  // 在组件挂载时通过useEffect获取数据
   useEffect(() => {
-    const abortInFlight = (section: DashboardSection) => {
+    const abort = (section: DashboardSection) => {
       controllersRef.current[section]?.abort();
       controllersRef.current[section] = null;
     };
 
-    const fetchSection = async (section: DashboardSection) => {
-      abortInFlight(section);
+    const loadSection = async (section: DashboardSection, initial = false) => {
+      abort(section);
       const controller = new AbortController();
       controllersRef.current[section] = controller;
-
-      const isInitialCore = section === 'core' && !hasLoadedRef.current;
       setSectionStatus((prev) => ({ ...prev, [section]: 'loading' }));
       setSectionError((prev) => ({ ...prev, [section]: null }));
-      if (section === 'core') {
-        if (isInitialCore) setLoading(true);
-        else setRefreshing(true);
-      }
 
       try {
-        const response = await fetch(`/api/admin/dashboard-stats?section=${encodeURIComponent(section)}`, {
+        const response = await fetch(`/api/admin/dashboard-stats?section=${section}`, {
           signal: controller.signal,
         });
-        if (!response.ok) {
-          throw new Error('获取统计数据失败');
+        const json = (await response.json()) as { success?: boolean; stats?: Partial<DashboardStats>; error?: string };
+        if (!response.ok || !json.success) {
+          throw new Error(json.error || `读取 ${section} 统计失败`);
         }
-        const data = await response.json();
-        if (data.success) {
-          const partial = (data.stats ?? {}) as Partial<DashboardStats>;
-          setStats((prev) => ({ ...prev, ...partial }));
-          if (section === 'core') {
-            setLastServerTimeIso(typeof partial.serverTimeIso === 'string' ? partial.serverTimeIso : null);
-            setLastD1NowLocal(typeof partial.d1NowLocal === 'string' ? partial.d1NowLocal : null);
-          }
-          setSectionStatus((prev) => ({ ...prev, [section]: 'loaded' }));
-        }
+        setStats((prev) => ({ ...prev, ...(json.stats ?? {}) }));
+        setSectionStatus((prev) => ({ ...prev, [section]: 'loaded' }));
       } catch (error) {
-        if (error instanceof Error && error.name === 'AbortError') return;
-        console.error(error);
+        if (controller.signal.aborted) return;
         setSectionStatus((prev) => ({ ...prev, [section]: 'error' }));
         setSectionError((prev) => ({ ...prev, [section]: error instanceof Error ? error.message : '未知错误' }));
       } finally {
         if (controllersRef.current[section] === controller) {
           controllersRef.current[section] = null;
         }
-        if (section === 'core') {
-          if (isInitialCore) {
-            hasLoadedRef.current = true;
-            setLoading(false);
-          }
-          setRefreshing(false);
+        if (section === 'core' && initial) {
+          setLoading(false);
         }
       }
     };
 
-    void fetchSection('core');
-    void fetchSection('arena');
-    void fetchSection('activity');
-    void fetchSection('tags');
-    const storageDelayTimer = setTimeout(() => void fetchSection('storage'), 1_200);
+    void loadSection('core', true);
+    void loadSection('activity');
+    void loadSection('accounts');
+    void loadSection('arena');
+    void loadSection('pvp');
+    void loadSection('tags');
+    const storageTimer = window.setTimeout(() => void loadSection('storage'), 1000);
 
-    // 为了让"服务器时间"与当日统计更接近实时，这里定时刷新（避免频繁请求）
-    const coreTimer = setInterval(() => void fetchSection('core'), 60_000);
-    const arenaTimer = setInterval(() => void fetchSection('arena'), 60_000);
-    const activityTimer = setInterval(() => void fetchSection('activity'), 10 * 60_000);
-    const tagsTimer = setInterval(() => void fetchSection('tags'), 5 * 60_000);
-    const storageTimer = setInterval(() => void fetchSection('storage'), 10 * 60_000);
+    const coreTimer = window.setInterval(() => void loadSection('core'), 60_000);
+    const accountsTimer = window.setInterval(() => void loadSection('accounts'), 2 * 60_000);
+    const arenaTimer = window.setInterval(() => void loadSection('arena'), 2 * 60_000);
+    const pvpTimer = window.setInterval(() => void loadSection('pvp'), 90_000);
+    const activityTimer = window.setInterval(() => void loadSection('activity'), 5 * 60_000);
+    const tagsTimer = window.setInterval(() => void loadSection('tags'), 5 * 60_000);
+    const storageRefreshTimer = window.setInterval(() => void loadSection('storage'), 10 * 60_000);
+    const controllerMap = controllersRef.current;
 
     return () => {
-      clearTimeout(storageDelayTimer);
-      clearInterval(coreTimer);
-      clearInterval(arenaTimer);
-      clearInterval(activityTimer);
-      clearInterval(tagsTimer);
-      clearInterval(storageTimer);
-      abortInFlight('core');
-      abortInFlight('arena');
-      abortInFlight('activity');
-      abortInFlight('tags');
-      abortInFlight('storage');
+      window.clearTimeout(storageTimer);
+      window.clearInterval(coreTimer);
+      window.clearInterval(accountsTimer);
+      window.clearInterval(arenaTimer);
+      window.clearInterval(pvpTimer);
+      window.clearInterval(activityTimer);
+      window.clearInterval(tagsTimer);
+      window.clearInterval(storageRefreshTimer);
+      (Object.keys(controllerMap) as DashboardSection[]).forEach(abort);
     };
   }, []);
-
-  const formatPercent = (rate: number) => `${(Math.max(0, Math.min(1, rate)) * 100).toFixed(1)}%`;
-  const formatServerTime = (iso: string | null) => {
-    if (!iso) return '—';
-    const date = new Date(iso);
-    if (Number.isNaN(date.getTime())) return iso;
-    return `${date.toISOString().replace('T', ' ').replace('Z', ' UTC')}`;
-  };
-  const formatBytes = (bytes: number | null | undefined) => {
-    if (typeof bytes !== 'number' || !Number.isFinite(bytes)) return '—';
-    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-    let v = bytes;
-    let u = 0;
-    while (v >= 1024 && u < units.length - 1) {
-      v /= 1024;
-      u += 1;
-    }
-    return `${v.toFixed(u === 0 ? 0 : 2)} ${units[u]}`;
-  };
 
   const handleQuickJump = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -243,108 +252,176 @@ const AdminHomePage: React.FC = () => {
     }
 
     setQuickJumpError(null);
-
     if (quickJumpTarget === 'user') {
-      await router.push({ pathname: '/admin/user-dashboard', query: { search: value } });
+      await router.push({ pathname: '/admin/users', query: { search: value } });
       return;
     }
-
     if (quickJumpTarget === 'dataCard') {
       await router.push({ pathname: '/admin/character-management', query: { id: value } });
       return;
     }
-
     await router.push({ pathname: '/admin/battle-report-generations', query: { id: value } });
   };
 
-  const arenaReady = sectionStatus.arena === 'loaded';
-  const activityReady = sectionStatus.activity === 'loaded';
-  const tagsReady = sectionStatus.tags === 'loaded';
-  const storageReady = sectionStatus.storage === 'loaded';
-
-  const leaderboardEligibleValue = arenaReady
-    ? `${stats.leaderboardEligibleStrictDataCardTotal ?? 0} / ${stats.leaderboardEligibleFreeDataCardTotal ?? 0}`
-    : sectionStatus.arena === 'error'
-      ? '—'
-      : '加载中…';
-
-  const publicApprovedCharacterCards = tagsReady ? (stats.publicApprovedCharacterCardsTotal ?? 0) : null;
-  const publicApprovedCharacterMetrics = tagsReady ? (stats.publicApprovedCharacterMetricsTotal ?? 0) : null;
-  const publicTechCoverageRate =
-    typeof publicApprovedCharacterCards === 'number' && publicApprovedCharacterCards > 0 && typeof publicApprovedCharacterMetrics === 'number'
-      ? publicApprovedCharacterMetrics / publicApprovedCharacterCards
-      : 0;
-  const publicTechCoverageValue = tagsReady
-    ? formatPercent(publicTechCoverageRate)
-    : sectionStatus.tags === 'error'
-      ? '—'
-      : '加载中…';
-
-  const activityTrackingOk = activityReady ? Boolean(stats.activityTrackingOk) : false;
-  const activeUsers24hValue = activityReady
-    ? activityTrackingOk
-      ? (stats.activeUsers24h ?? 0)
-      : '未启用'
-    : sectionStatus.activity === 'error'
-      ? '—'
-      : '加载中…';
-  const activeUsers7dValue = activityReady
-    ? activityTrackingOk
-      ? (stats.activeUsers7d ?? 0)
-      : '未启用'
-    : sectionStatus.activity === 'error'
-      ? '—'
-      : '加载中…';
-  const activeUsers7dRate =
-    activityReady && activityTrackingOk && typeof stats.activeUsers7d === 'number' && typeof stats.totalUsers === 'number' && stats.totalUsers > 0
+  const activityCoverage =
+    typeof stats.activeUsers7d === 'number' && typeof stats.totalUsers === 'number' && stats.totalUsers > 0
       ? stats.activeUsers7d / stats.totalUsers
       : 0;
+
+  const moduleGroups = [
+    {
+      title: '用户与账号',
+      items: [
+        {
+          href: '/admin/users',
+          title: '用户与账号',
+          description: '统一查看业务用户、Better Auth 建链、迁移状态、邮件验证与 Auth 安全审计。',
+          tone: 'border-sky-200 hover:border-sky-300',
+          icon: UserCog,
+          badge: '新结构',
+        },
+        {
+          href: '/admin/user-analytics',
+          title: '用户统计分析',
+          description: '查看用户规模、高频分层、留存与活跃构成；趋势与导出会在该页持续演进。',
+          tone: 'border-indigo-200 hover:border-indigo-300',
+          icon: BarChart3,
+        },
+        {
+          href: '/admin/badge-management',
+          title: '徽章管理',
+          description: '创建徽章、授予与撤销用户徽章，维护平台身份与荣誉体系。',
+          tone: 'border-amber-200 hover:border-amber-300',
+          icon: Trophy,
+        },
+      ],
+    },
+    {
+      title: '内容与审核',
+      items: [
+        {
+          href: '/admin/content-management',
+          title: '内容管理',
+          description: '审核数据卡、批量操作、AI 审查与待审核更新处理。',
+          tone: 'border-purple-200 hover:border-purple-300',
+          icon: FileCheck,
+        },
+        {
+          href: '/admin/character-management',
+          title: '角色管理',
+          description: '快速查看和编辑单个数据卡，处理具体内容问题。',
+          tone: 'border-pink-200 hover:border-pink-300',
+          icon: FileText,
+        },
+        {
+          href: '/admin/tag-management',
+          title: '标签库管理',
+          description: '维护 tags、tag_aliases 与标签绑定关系。',
+          tone: 'border-slate-200 hover:border-slate-300',
+          icon: Tags,
+        },
+      ],
+    },
+    {
+      title: '竞技场与排位',
+      items: [
+        {
+          href: '/admin/arena-ratings',
+          title: '排位运维',
+          description: '查看 strict / free 排位记录，处理积分、榜单与资格问题。',
+          tone: 'border-cyan-200 hover:border-cyan-300',
+          icon: Trophy,
+        },
+        {
+          href: '/admin/arena-rating-events',
+          title: '排位事件审计',
+          description: '检索 arena_rating_events，查看 before / delta / after 与 skip_reason。',
+          tone: 'border-rose-200 hover:border-rose-300',
+          icon: Activity,
+        },
+        {
+          href: '/admin/battle-report-generations',
+          title: '战报生成记录',
+          description: '跟踪战报生成、失败、中断与对象落库情况。',
+          tone: 'border-orange-200 hover:border-orange-300',
+          icon: FileText,
+        },
+      ],
+    },
+    {
+      title: 'PVP / 存储 / 运维',
+      items: [
+        {
+          href: '/admin/pvp',
+          title: 'PVP 只读后台',
+          description: '查看活跃房间、最近对局与卡死房间信号，当前版本不提供房间干预。',
+          tone: 'border-emerald-200 hover:border-emerald-300',
+          icon: ShieldCheck,
+          badge: '只读',
+        },
+        {
+          href: '/admin/large-objects',
+          title: '大对象管理',
+          description: '管理 large_objects / R2 索引，当前仍以战报正文对象为主。',
+          tone: 'border-teal-200 hover:border-teal-300',
+          icon: HardDrive,
+        },
+        {
+          href: '/admin/data-maintenance',
+          title: '数据库清理',
+          description: '按表与任务清理历史数据，为战报、PVP、排位与扩展子域做瘦身。',
+          tone: 'border-violet-200 hover:border-violet-300',
+          icon: Database,
+        },
+      ],
+    },
+  ];
 
   return (
     <>
       <Head>
         <title>管理后台 - MahoShojo Generator</title>
       </Head>
-      <div className="min-h-screen bg-gray-100 p-4 sm:p-6 md:p-8">
-        <div className="mx-auto max-w-6xl">
-          <div className="text-center mb-10">
-            <h1 className="text-4xl font-bold text-gray-800 tracking-tight">MahoShojo Generator</h1>
-            <p className="text-lg text-gray-500 mt-2">管理仪表盘</p>
+
+      <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(56,189,248,0.12),_transparent_34%),linear-gradient(180deg,_#f8fafc_0%,_#eef2ff_100%)] p-4 sm:p-6">
+        <div className="mx-auto max-w-7xl">
+          <div className="mb-8 flex flex-wrap items-end justify-between gap-4">
+            <div>
+              <p className="text-sm font-medium uppercase tracking-[0.22em] text-sky-700">Admin Console</p>
+              <h1 className="mt-2 text-4xl font-semibold tracking-tight text-slate-900">MahoShojo Generator</h1>
+              <p className="mt-2 text-sm text-slate-600">
+                后台首页已按领域重组为用户与账号、内容与审核、竞技场与排位、PVP、存储与资产、运维与清理。
+              </p>
+            </div>
+            <div className="rounded-2xl border border-white/70 bg-white/90 px-4 py-3 text-sm text-slate-600 shadow-sm backdrop-blur">
+              服务器时间：{formatServerTime(stats.serverTimeIso)}
+              {stats.d1NowLocal ? <span className="block text-xs text-slate-500">D1 local: {stats.d1NowLocal}</span> : null}
+            </div>
           </div>
 
-          <div className="mb-10 rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-            <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-              <div className="space-y-1">
-                <h2 className="text-sm font-semibold text-gray-800">快捷跳转</h2>
-                <p className="text-xs text-gray-500">支持用户（ID/用户名/邮箱）、数据卡 ID、战报 ID。</p>
+          <div className="mb-8 rounded-2xl border border-white/70 bg-white/90 p-5 shadow-sm backdrop-blur">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+              <div>
+                <h2 className="text-sm font-semibold text-slate-900">快捷跳转</h2>
+                <p className="mt-1 text-xs text-slate-500">支持用户（ID / 用户名 / 邮箱）、数据卡 ID、战报 ID。</p>
               </div>
-              <form onSubmit={handleQuickJump} className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
-                <label className="sr-only" htmlFor="quick-jump-target">
-                  跳转类型
-                </label>
+              <form onSubmit={handleQuickJump} className="flex w-full flex-col gap-2 sm:flex-row lg:w-auto">
                 <select
-                  id="quick-jump-target"
                   value={quickJumpTarget}
-                  onChange={(e) => setQuickJumpTarget(e.target.value as typeof quickJumpTarget)}
-                  className="h-9 rounded-md border border-gray-200 bg-white px-3 text-sm text-gray-700 shadow-sm focus:border-purple-300 focus:outline-none focus:ring-2 focus:ring-purple-200"
+                  onChange={(event) => setQuickJumpTarget(event.target.value as typeof quickJumpTarget)}
+                  className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700 shadow-sm"
                 >
                   <option value="user">用户</option>
                   <option value="dataCard">数据卡</option>
                   <option value="battleReport">战报</option>
                 </select>
-
-                <label className="sr-only" htmlFor="quick-jump-value">
-                  跳转目标
-                </label>
                 <input
-                  id="quick-jump-value"
                   value={quickJumpValue}
-                  onChange={(e) => setQuickJumpValue(e.target.value)}
-                  placeholder={quickJumpTarget === 'user' ? '例如：123 / alice / alice@example.com' : '粘贴 ID...'}
-                  className="h-9 w-full min-w-[16rem] flex-1 rounded-md border border-gray-200 bg-white px-3 text-sm text-gray-700 shadow-sm placeholder:text-gray-400 focus:border-purple-300 focus:outline-none focus:ring-2 focus:ring-purple-200 sm:w-72"
+                  onChange={(event) => setQuickJumpValue(event.target.value)}
+                  placeholder={quickJumpTarget === 'user' ? '例如：123 / alice / alice@example.com' : '请输入对象 ID'}
+                  className="h-10 min-w-[18rem] rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700 shadow-sm"
                 />
-
-                <button type="submit" className="admin-button-sm h-9 justify-center bg-gray-900 text-white hover:bg-gray-800">
+                <button type="submit" className="h-10 rounded-xl bg-slate-900 px-4 text-sm font-medium text-white hover:bg-slate-800">
                   跳转
                 </button>
               </form>
@@ -352,358 +429,167 @@ const AdminHomePage: React.FC = () => {
             {quickJumpError ? <p className="mt-2 text-xs text-red-600">{quickJumpError}</p> : null}
           </div>
 
-          {/* 数据统计卡片区域 */}
-          <div className="mb-10">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-semibold text-gray-700">平台概览</h2>
-              <div className="flex items-center gap-2 text-sm text-gray-500">
-                <Clock className="w-4 h-4" />
-                <span>
-                  服务器时间：{formatServerTime(lastServerTimeIso)}
-                  {lastD1NowLocal ? `（D1 local: ${lastD1NowLocal}）` : ''}
-                  {refreshing ? '（刷新中...）' : ''}
-                </span>
-              </div>
+          <div className="mb-8">
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="text-xl font-semibold text-slate-900">平台概览</h2>
+              {loading ? <span className="text-xs text-slate-500">正在加载核心统计…</span> : null}
             </div>
-            {loading ? (
-              <div className="text-center p-8 bg-white rounded-lg shadow-sm">加载中...</div>
-            ) : (
-              <div className="space-y-8">
-                <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-4">
-                  <StatCard title="待审查内容" value={stats?.pendingReviewCount ?? 0} icon={Clock} color="bg-yellow-500" note="需要管理员尽快处理" />
-                  <StatCard title="今日新增用户" value={stats?.newUsersToday ?? 0} icon={UserPlus} color="bg-green-500" />
-                  <StatCard title="今日新增档案" value={stats?.newDataCardsToday ?? 0} icon={FilePlus} color="bg-blue-500" />
-                  <StatCard
-                    title="今日战报生成"
-                    value={stats?.battleReportGenerationsToday ?? 0}
-                    icon={FileText}
-                    color="bg-purple-600"
-                    note={`中断/失败：${stats?.battleReportGenerationsAbortFailToday ?? 0}（${formatPercent(stats?.battleReportGenerationAbortFailRateToday ?? 0)}）`}
-                  />
-                  <StatCard
-                    title="活跃用户（24h）"
-                    value={activeUsers24hValue}
-                    icon={Activity}
-                    color="bg-fuchsia-600"
-                    note={activityTrackingOk ? '口径：已登录用户（touch）' : '需要执行 D1 schema 迁移：user_last_activity'}
-                  />
-                  <StatCard
-                    title="活跃用户（7d）"
-                    value={activeUsers7dValue}
-                    icon={Users}
-                    color="bg-violet-600"
-                    note={activityTrackingOk ? `占比：${formatPercent(activeUsers7dRate)}（基于用户总数）` : '需要执行 D1 schema 迁移：user_last_activity'}
-                  />
-                  <StatCard title="违规档案总数" value={stats?.bannedDataCardsCount ?? 0} icon={AlertTriangle} color="bg-red-500" />
-                  <StatCard title="用户总数" value={stats?.totalUsers ?? 0} icon={Users} color="bg-teal-500" />
-                  <StatCard title="档案总数" value={stats?.totalDataCards ?? 0} icon={FileText} color="bg-indigo-500" />
-                  <StatCard title="封禁用户数" value={stats?.bannedUsersCount ?? 0} icon={ShieldOff} color="bg-gray-600" />
-                </div>
 
-                <div>
-                  <h3 className="mb-4 text-lg font-semibold text-gray-700">排位与排行榜</h3>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-4">
-                    <StatCard
-                      title="排位记录（严格）"
-                      value={arenaReady ? (stats.arenaRatingsStrictTotal ?? 0) : sectionStatus.arena === 'error' ? '—' : '加载中…'}
-                      icon={BarChart3}
-                      color="bg-sky-600"
-                      note="arena_ratings / strict"
-                    />
-                    <StatCard
-                      title="排位记录（自由）"
-                      value={arenaReady ? (stats.arenaRatingsFreeTotal ?? 0) : sectionStatus.arena === 'error' ? '—' : '加载中…'}
-                      icon={BarChart3}
-                      color="bg-cyan-600"
-                      note="arena_ratings / free"
-                    />
-                    <StatCard
-                      title="待处理结算事件"
-                      value={arenaReady ? (stats.arenaRatingEventsPendingTotal ?? 0) : sectionStatus.arena === 'error' ? '—' : '加载中…'}
-                      icon={Clock}
-                      color="bg-amber-600"
-                      note="arena_rating_events / pending"
-                    />
-                    <StatCard
-                      title="今日结算事件"
-                      value={arenaReady ? (stats.arenaRatingEventsTodayTotal ?? 0) : sectionStatus.arena === 'error' ? '—' : '加载中…'}
-                      icon={Activity}
-                      color="bg-rose-600"
-                      note={
-                        arenaReady
-                          ? `应用：${stats.arenaRatingEventsAppliedTodayTotal ?? 0} · 跳过：${stats.arenaRatingEventsSkippedTodayTotal ?? 0} · 失败：${stats.arenaRatingEventsFailedTodayTotal ?? 0}`
-                          : sectionStatus.arena === 'error'
-                            ? sectionError.arena || '加载失败'
-                            : '加载中…'
-                      }
-                    />
-                    <StatCard title="公共榜候选（角色卡）" value={leaderboardEligibleValue} icon={Trophy} color="bg-yellow-600" note="严格 / 自由（公开+已审核+未删除）" />
-                  </div>
-                </div>
-
-                <div>
-                  <h3 className="mb-4 text-lg font-semibold text-gray-700">技术值 · 标签 · 百科</h3>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-4">
-                    <StatCard
-                      title="技术值覆盖（公共榜）"
-                      value={publicTechCoverageValue}
-                      icon={Cpu}
-                      color="bg-violet-600"
-                      note={
-                        tagsReady
-                          ? `已计算：${publicApprovedCharacterMetrics ?? 0} / ${publicApprovedCharacterCards ?? 0}`
-                          : sectionStatus.tags === 'error'
-                            ? sectionError.tags || '加载失败'
-                            : '加载中…'
-                      }
-                    />
-                    <StatCard
-                      title="可用标签"
-                      value={tagsReady ? (stats.activeTagsTotal ?? 0) : sectionStatus.tags === 'error' ? '—' : '加载中…'}
-                      icon={Tags}
-                      color="bg-slate-700"
-                      note="tags.is_active=1"
-                    />
-                    <StatCard
-                      title="标签别名"
-                      value={tagsReady ? (stats.tagAliasesTotal ?? 0) : sectionStatus.tags === 'error' ? '—' : '加载中…'}
-                      icon={Tags}
-                      color="bg-slate-600"
-                      note="tag_aliases"
-                    />
-                    <StatCard
-                      title="标签绑定"
-                      value={tagsReady ? (stats.dataCardTagsTotal ?? 0) : sectionStatus.tags === 'error' ? '—' : '加载中…'}
-                      icon={Tags}
-                      color="bg-slate-500"
-                      note="data_card_tags"
-                    />
-                    <StatCard title="百科条目" value={encyclopediaEntries.length} icon={BookOpen} color="bg-indigo-700" note="public/encyclopedia/*.md" />
-                  </div>
-                </div>
-
-                <div>
-                  <h3 className="mb-4 text-lg font-semibold text-gray-700">存储与大对象</h3>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-4">
-                    <StatCard
-                      title="R2 索引占用（估算）"
-                      value={
-                        storageReady
-                          ? formatBytes(stats.largeObjectsStoredBytesTotal ?? null)
-                          : sectionStatus.storage === 'error'
-                            ? '—'
-                            : sectionStatus.storage === 'idle'
-                              ? '稍后加载'
-                              : '加载中…'
-                      }
-                      icon={HardDrive}
-                      color="bg-emerald-700"
-                      note={
-                        storageReady
-                          ? `large_objects：${stats.largeObjectsTotal ?? 0} 条 · 战报正文：${stats.largeObjectsBattleReportOutputTotal ?? 0} 条`
-                          : sectionStatus.storage === 'error'
-                            ? sectionError.storage || '加载失败'
-                            : sectionStatus.storage === 'idle'
-                              ? '存储统计会在首屏后延迟加载'
-                              : '加载中…'
-                      }
-                    />
-                    <StatCard
-                      title="战报正文体积（原始）"
-                      value={
-                        storageReady
-                          ? formatBytes(stats.largeObjectsBattleReportOutputBytesTotal ?? null)
-                          : sectionStatus.storage === 'error'
-                            ? '—'
-                            : sectionStatus.storage === 'idle'
-                              ? '稍后加载'
-                              : '加载中…'
-                      }
-                      icon={FileText}
-                      color="bg-emerald-600"
-                      note="kind=battle_report_generation_output（未压缩估算）"
-                    />
-                  </div>
-                </div>
-              </div>
-            )}
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+              <StatCard
+                title="待审查内容"
+                value={loading ? '加载中…' : String(stats.pendingReviewCount ?? 0)}
+                note="包含待审卡片与待审核更新"
+                icon={Clock}
+                color="bg-amber-500"
+              />
+              <StatCard
+                title="今日新增用户"
+                value={loading ? '加载中…' : String(stats.newUsersToday ?? 0)}
+                note={`用户总数 ${stats.totalUsers ?? 0}`}
+                icon={UserPlus}
+                color="bg-emerald-600"
+              />
+              <StatCard
+                title="活跃用户（7d）"
+                value={stats.activityTrackingOk ? String(stats.activeUsers7d ?? 0) : '未启用'}
+                note={stats.activityTrackingOk ? `覆盖率 ${formatPercent(activityCoverage)}` : '需要 user_last_activity 支撑'}
+                icon={Users}
+                color="bg-violet-600"
+              />
+              <StatCard
+                title="今日战报生成"
+                value={String(stats.battleReportGenerationsToday ?? 0)}
+                note={`中断/失败 ${stats.battleReportGenerationsAbortFailToday ?? 0}（${formatPercent(stats.battleReportGenerationAbortFailRateToday ?? 0)}）`}
+                icon={FileText}
+                color="bg-fuchsia-600"
+              />
+              <StatCard
+                title="公共榜技术值覆盖"
+                value={
+                  typeof stats.publicApprovedCharacterCardsTotal === 'number' && stats.publicApprovedCharacterCardsTotal > 0
+                    ? formatPercent((stats.publicApprovedCharacterMetricsTotal ?? 0) / stats.publicApprovedCharacterCardsTotal)
+                    : '—'
+                }
+                note={`标签 ${stats.activeTagsTotal ?? 0} · 百科 ${encyclopediaEntries.length}`}
+                icon={BookOpen}
+                color="bg-indigo-600"
+              />
+            </div>
           </div>
-          
-          {/* 管理模块入口 */}
-          <div>
-            <h2 className="text-xl font-semibold text-gray-700 mb-4">管理工具</h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <Link href="/admin/content-management" legacyBehavior>
-                <a className="admin-card bg-purple-50 border-purple-200 hover:border-purple-400">
-                  <div className="flex items-center text-purple-700 mb-3">
-                    <FileCheck className="w-8 h-8" />
-                    <h2 className="text-xl font-semibold ml-3">内容管理</h2>
-                  </div>
-                  <p className="text-gray-600 text-sm">
-                    使用高级筛选、批量操作和AI辅助工具，对所有用户创建的角色与情景数据卡进行审查和管理。
-                  </p>
-                </a>
-              </Link>
 
-              <Link href="/admin/user-dashboard" legacyBehavior>
-                <a className="admin-card bg-blue-50 border-blue-200 hover:border-blue-400">
-                  <div className="flex items-center text-blue-700 mb-3">
-                    <UserCog className="w-8 h-8" />
-                    <h2 className="text-xl font-semibold ml-3">用户状态</h2>
-                  </div>
-                  <p className="text-gray-600 text-sm">
-                    使用高级筛选和批量操作工具，管理所有平台用户的状态与权限。
-                  </p>
-                </a>
-              </Link>
-
-              <Link href="/admin/character-management" legacyBehavior>
-                <a className="admin-card bg-pink-50 border-pink-200 hover:border-pink-400">
-                  <div className="flex items-center text-pink-700 mb-3">
-                    <FileText className="w-8 h-8" />
-                    <h2 className="text-xl font-semibold ml-3">角色管理</h2>
-                  </div>
-                  <p className="text-gray-600 text-sm">
-                    快速查看和编辑单个角色或情景数据卡的基础信息，例如名称、描述和公开状态。
-                  </p>
-                </a>
-              </Link>
-
-              <Link href="/admin/user-management" legacyBehavior>
-                <a className="admin-card bg-teal-50 border-teal-200 hover:border-teal-400">
-                  <div className="flex items-center text-teal-700 mb-3">
-                    <Users className="w-8 h-8" />
-                    <h2 className="text-xl font-semibold ml-3">用户管理</h2>
-                  </div>
-                  <p className="text-gray-600 text-sm">
-                    快速查看和编辑单个用户的基本信息，例如封禁状态、数据卡槽位和特殊头衔。
-                  </p>
-                </a>
-              </Link>
-
-              <Link href="/admin/user-analytics" legacyBehavior>
-                <a className="admin-card bg-indigo-50 border-indigo-200 hover:border-indigo-400">
-                  <div className="flex items-center text-indigo-700 mb-3">
-                    <BarChart3 className="w-8 h-8" />
-                    <h2 className="text-xl font-semibold ml-3">用户统计分析</h2>
-                  </div>
-                  <p className="text-gray-600 text-sm">
-                    查看活跃覆盖、生成频次分层与高频用户占比，支持 active7d / tracked / all 多口径切换。
-                  </p>
-                </a>
-              </Link>
-
-              <Link href="/admin/badge-management" legacyBehavior>
-                <a className="admin-card bg-amber-50 border-amber-200 hover:border-amber-400">
-                  <div className="flex items-center text-amber-700 mb-3">
-                    <Award className="w-8 h-8" />
-                    <h2 className="text-xl font-semibold ml-3">徽章管理</h2>
-                  </div>
-                  <p className="text-gray-600 text-sm">
-                    创建、编辑和删除徽章，为用户授予或撤销徽章，设计徽章样式和属性。
-                  </p>
-                </a>
-              </Link>
-
-              <Link href="/admin/tag-management" legacyBehavior>
-                <a className="admin-card bg-slate-50 border-slate-200 hover:border-slate-400">
-                  <div className="flex items-center text-slate-700 mb-3">
-                    <Tags className="w-8 h-8" />
-                    <h2 className="text-xl font-semibold ml-3">标签库管理</h2>
-                  </div>
-                  <p className="text-gray-600 text-sm">
-                    管理 tags / tag_aliases：新增、编辑、停用标签，以及维护同义词别名。
-                  </p>
-                </a>
-              </Link>
-
-              <Link href="/admin/battle-report-generations" legacyBehavior>
-                <a className="admin-card bg-orange-50 border-orange-200 hover:border-orange-400">
-                  <div className="flex items-center text-orange-700 mb-3">
-                    <FileText className="w-8 h-8" />
-                    <h2 className="text-xl font-semibold ml-3">战报生成记录</h2>
-                  </div>
-                  <p className="text-gray-600 text-sm">
-                    浏览、筛选、检索并导出战报生成记录，快速跳转到相关用户与角色卡的管理页面。
-                  </p>
-                </a>
-              </Link>
-
-              <Link href="/admin/arena-ratings" legacyBehavior>
-                <a className="admin-card bg-sky-50 border-sky-200 hover:border-sky-400">
-                  <div className="flex items-center text-sky-700 mb-3">
-                    <BarChart3 className="w-8 h-8" />
-                    <h2 className="text-xl font-semibold ml-3">排位运维</h2>
-                  </div>
-                  <p className="text-gray-600 text-sm">
-                    浏览并筛选 arena_ratings（strict/free），支持批量重置排位分，联动查看数据卡与技术值。
-                  </p>
-                </a>
-              </Link>
-
-              <Link href="/admin/arena-rating-events" legacyBehavior>
-                <a className="admin-card bg-rose-50 border-rose-200 hover:border-rose-400">
-                  <div className="flex items-center text-rose-700 mb-3">
-                    <Activity className="w-8 h-8" />
-                    <h2 className="text-xl font-semibold ml-3">排位事件审计</h2>
-                  </div>
-                  <p className="text-gray-600 text-sm">
-                    检索 arena_rating_events：查看每次结算的 before/delta/after、跳过原因与关联战报。
-                  </p>
-                </a>
-              </Link>
-
-              <Link href="/admin/large-objects" legacyBehavior>
-                <a className="admin-card bg-emerald-50 border-emerald-200 hover:border-emerald-400">
-                  <div className="flex items-center text-emerald-700 mb-3">
-                    <HardDrive className="w-8 h-8" />
-                    <h2 className="text-xl font-semibold ml-3">大对象管理</h2>
-                  </div>
-                  <p className="text-gray-600 text-sm">
-                    管理 large_objects 与 R2：筛选/检索大对象索引，生成下载链接，并支持清理索引与对象。
-                  </p>
-                </a>
-              </Link>
-
-              <Link href="/admin/data-maintenance" legacyBehavior>
-                <a className="admin-card bg-violet-50 border-violet-200 hover:border-violet-400">
-                  <div className="flex items-center text-violet-700 mb-3">
-                    <Database className="w-8 h-8" />
-                    <h2 className="text-xl font-semibold ml-3">数据库清理</h2>
-                  </div>
-                  <p className="text-gray-600 text-sm">
-                    按范围与字段预览并执行清理：支持截断、设空/默认、整行删除，适合战报/PVP/排位历史数据瘦身。
-                  </p>
-                </a>
-              </Link>
+          <div className="mb-8 grid gap-6 lg:grid-cols-2 xl:grid-cols-4">
+            <div className="rounded-2xl border border-white/70 bg-white/90 p-5 shadow-sm backdrop-blur">
+              <h3 className="mb-4 text-lg font-semibold text-slate-900">账号迁移</h3>
+              <div className="space-y-3">
+                <StatCard title="Legacy Only" value={String(stats.legacyOnlyUsersCount ?? 0)} icon={ShieldAlert} color="bg-rose-600" />
+                <StatCard title="已建链用户" value={String(stats.authLinkedUsersCount ?? 0)} icon={ShieldCheck} color="bg-sky-600" />
+                <StatCard title="邮箱未验证" value={String(stats.authEmailUnverifiedUsersCount ?? 0)} icon={Users} color="bg-amber-600" />
+                <StatCard
+                  title="Auth 24h 成功 / 失败"
+                  value={`${stats.authSuccess24h ?? 0} / ${stats.authFailure24h ?? 0}`}
+                  note="当前口径为 auth_audit_logs 审计事件"
+                  icon={Activity}
+                  color="bg-slate-700"
+                />
+              </div>
             </div>
-            
-            <div className="text-center mt-10">
-                <Link href="/" legacyBehavior>
-                    <a className="text-sm text-gray-500 hover:text-purple-600 hover:underline">
-                        返回应用首页
-                    </a>
-                </Link>
+
+            <div className="rounded-2xl border border-white/70 bg-white/90 p-5 shadow-sm backdrop-blur">
+              <h3 className="mb-4 text-lg font-semibold text-slate-900">竞技场与排位</h3>
+              <div className="space-y-3">
+                <StatCard title="严格 / 自由排位" value={`${stats.arenaRatingsStrictTotal ?? 0} / ${stats.arenaRatingsFreeTotal ?? 0}`} icon={Trophy} color="bg-cyan-600" />
+                <StatCard title="待处理结算事件" value={String(stats.arenaRatingEventsPendingTotal ?? 0)} icon={Clock} color="bg-amber-600" />
+                <StatCard
+                  title="今日结算事件"
+                  value={String(stats.arenaRatingEventsTodayTotal ?? 0)}
+                  note={`应用 ${stats.arenaRatingEventsAppliedTodayTotal ?? 0} · 跳过 ${stats.arenaRatingEventsSkippedTodayTotal ?? 0} · 失败 ${stats.arenaRatingEventsFailedTodayTotal ?? 0}`}
+                  icon={Activity}
+                  color="bg-rose-600"
+                />
+                <StatCard
+                  title="公共榜候选（角色卡）"
+                  value={`${stats.leaderboardEligibleStrictDataCardTotal ?? 0} / ${stats.leaderboardEligibleFreeDataCardTotal ?? 0}`}
+                  note="严格 / 自由"
+                  icon={BarChart3}
+                  color="bg-sky-700"
+                />
+              </div>
             </div>
+
+            <div className="rounded-2xl border border-white/70 bg-white/90 p-5 shadow-sm backdrop-blur">
+              <h3 className="mb-4 text-lg font-semibold text-slate-900">PVP 运行时</h3>
+              <div className="space-y-3">
+                <StatCard title="开放房间" value={String(stats.pvpOpenRoomsTotal ?? 0)} icon={Users} color="bg-emerald-600" />
+                <StatCard title="活跃房间" value={String(stats.pvpActiveRoomsTotal ?? 0)} icon={ShieldCheck} color="bg-teal-600" />
+                <StatCard title="进行中对局" value={String(stats.pvpActiveMatchesTotal ?? 0)} icon={Activity} color="bg-slate-700" />
+                <StatCard
+                  title="卡住房间信号"
+                  value={String(stats.pvpStalledRoomsTotal ?? 0)}
+                  note={`近 7 天对局 ${stats.pvpMatches7dTotal ?? 0}`}
+                  icon={ShieldAlert}
+                  color="bg-orange-600"
+                />
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-white/70 bg-white/90 p-5 shadow-sm backdrop-blur">
+              <h3 className="mb-4 text-lg font-semibold text-slate-900">存储与对象</h3>
+              <div className="space-y-3">
+                <StatCard title="large_objects 索引数" value={String(stats.largeObjectsTotal ?? 0)} icon={HardDrive} color="bg-emerald-700" />
+                <StatCard
+                  title="R2 索引占用"
+                  value={formatBytes(stats.largeObjectsStoredBytesTotal)}
+                  note={`战报正文对象 ${stats.largeObjectsBattleReportOutputTotal ?? 0} 条`}
+                  icon={Database}
+                  color="bg-emerald-600"
+                />
+                <StatCard
+                  title="战报正文原始体积"
+                  value={formatBytes(stats.largeObjectsBattleReportOutputBytesTotal)}
+                  icon={FileText}
+                  color="bg-cyan-700"
+                />
+                <StatCard
+                  title="标签 / 绑定 / 别名"
+                  value={`${stats.activeTagsTotal ?? 0} / ${stats.dataCardTagsTotal ?? 0} / ${stats.tagAliasesTotal ?? 0}`}
+                  icon={Tags}
+                  color="bg-slate-700"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-8">
+            {moduleGroups.map((group) => (
+              <section key={group.title}>
+                <h2 className="mb-4 text-xl font-semibold text-slate-900">{group.title}</h2>
+                <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                  {group.items.map((item) => (
+                    <ModuleCard key={item.href} {...item} />
+                  ))}
+                </div>
+              </section>
+            ))}
+          </div>
+
+          {(Object.values(sectionStatus) as SectionStatus[]).some((status) => status === 'error') ? (
+            <div className="mt-8 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+              部分统计读取失败：
+              {(['accounts', 'arena', 'pvp', 'tags', 'storage', 'activity', 'core'] as DashboardSection[])
+                .filter((section) => sectionStatus[section] === 'error')
+                .map((section) => `${section}(${sectionError[section] || '未知错误'})`)
+                .join('；')}
+            </div>
+          ) : null}
+
+          <div className="mt-10 text-center">
+            <Link href="/" className="text-sm text-slate-500 hover:text-sky-700 hover:underline">
+              返回应用首页
+            </Link>
           </div>
         </div>
       </div>
-      <style jsx>{`
-        .admin-card {
-          display: block;
-          padding: 1.5rem;
-          border-radius: 0.75rem;
-          border-width: 1px;
-          transition: all 0.3s ease-in-out;
-          transform: translateY(0);
-        }
-        .admin-card:hover {
-          transform: translateY(-4px);
-          box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.05), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
-        }
-      `}</style>
     </>
   );
-};
-
-export default AdminHomePage;
+}

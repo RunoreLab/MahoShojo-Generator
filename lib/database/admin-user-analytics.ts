@@ -1,6 +1,13 @@
+import {
+  buildTrendPoints,
+  buildUtcDateKeys,
+  type AdminUserAnalyticsTrendPoint,
+  type AnalyticsDateKey,
+  type DailyTrendAccumulator,
+} from '@/lib/admin/user-analytics-trends';
 import { queryFromD1 } from './core';
 
-export type AdminUserAnalyticsSection = 'overview' | 'frequency' | 'retention' | 'composition' | 'all';
+export type AdminUserAnalyticsSection = 'overview' | 'frequency' | 'retention' | 'composition' | 'trends' | 'all';
 export type AdminFrequencySample = 'active7d' | 'tracked' | 'all';
 export type AdminFrequencyProfile = 'v20260209';
 export type AdminCohortGranularity = 'week' | 'month';
@@ -108,9 +115,20 @@ export type AdminUserAnalyticsComposition = {
   activityTrackingOk: boolean;
 };
 
+export type AdminUserAnalyticsTrends = {
+  lookbackDays: number;
+  authAvailableFrom: string | null;
+  points: AdminUserAnalyticsTrendPoint[];
+};
+
 const readFirstRow = (result: unknown): Record<string, unknown> => {
   const row = (result as any)?.result?.[0]?.results?.[0];
   return row && typeof row === 'object' ? (row as Record<string, unknown>) : {};
+};
+
+const readRows = (result: unknown): Record<string, unknown>[] => {
+  const rows = (result as any)?.result?.[0]?.results;
+  return Array.isArray(rows) ? (rows as Record<string, unknown>[]) : [];
 };
 
 const readInt = (value: unknown): number => {
@@ -129,6 +147,13 @@ const readFloat = (value: unknown): number => {
     if (Number.isFinite(parsed)) return parsed;
   }
   return 0;
+};
+
+const toIsoFromEpochSeconds = (value: unknown): string | null => {
+  const seconds = readInt(value);
+  if (!Number.isFinite(seconds) || seconds <= 0) return null;
+  const date = new Date(seconds * 1000);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
 };
 
 const clampLookbackDays = (input?: number): number => {
@@ -816,5 +841,106 @@ export const getAdminUserAnalyticsComposition = async (options?: {
     }
   }
 
+  return output;
+};
+
+export const getAdminUserAnalyticsTrends = async (lookbackDaysInput?: number): Promise<AdminUserAnalyticsTrends> => {
+  const lookbackDays = clampLookbackDays(lookbackDaysInput);
+  const dates = buildUtcDateKeys(lookbackDays);
+  const firstDate = dates[0];
+  const windowStartIso = `${firstDate}T00:00:00.000Z`;
+
+  const output: AdminUserAnalyticsTrends = {
+    lookbackDays,
+    authAvailableFrom: null,
+    points: [],
+  };
+
+  const byDate: Record<string, DailyTrendAccumulator> = {};
+  const ensureDateBucket = (date: string): DailyTrendAccumulator => {
+    if (!byDate[date]) byDate[date] = {};
+    return byDate[date];
+  };
+
+  let baseTotalUsers = 0;
+
+  try {
+    const [baseUsersResult, userTrendResult, generationTrendResult, authTrendResult, authMinResult] = await Promise.all([
+      queryFromD1('SELECT COUNT(1) AS total_users_before_window FROM users WHERE created_at < ?', [windowStartIso]),
+      queryFromD1(
+        `SELECT
+           substr(created_at, 1, 10) AS metric_date,
+           COUNT(1) AS new_users
+         FROM users
+         WHERE created_at >= ?
+         GROUP BY substr(created_at, 1, 10)
+         ORDER BY metric_date ASC`,
+        [windowStartIso],
+      ),
+      queryFromD1(
+        `SELECT
+           substr(started_at, 1, 10) AS metric_date,
+           COUNT(1) AS generation_total,
+           COALESCE(SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END), 0) AS generation_completed,
+           COALESCE(SUM(CASE WHEN status = 'aborted' THEN 1 ELSE 0 END), 0) AS generation_aborted,
+           COALESCE(SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END), 0) AS generation_failed,
+           COUNT(DISTINCT CASE WHEN user_id IS NOT NULL THEN user_id END) AS generation_distinct_users
+         FROM battle_report_generations
+         WHERE started_at >= ?
+         GROUP BY substr(started_at, 1, 10)
+         ORDER BY metric_date ASC`,
+        [windowStartIso],
+      ),
+      queryFromD1(
+        `SELECT
+           strftime('%Y-%m-%d', created_at, 'unixepoch') AS metric_date,
+           COALESCE(SUM(CASE WHEN result_code = 'SUCCESS' THEN 1 ELSE 0 END), 0) AS auth_success,
+           COALESCE(SUM(CASE WHEN result_code != 'SUCCESS' THEN 1 ELSE 0 END), 0) AS auth_failure
+         FROM auth_audit_logs
+         WHERE created_at >= unixepoch(?)
+         GROUP BY strftime('%Y-%m-%d', created_at, 'unixepoch')
+         ORDER BY metric_date ASC`,
+        [windowStartIso],
+      ),
+      queryFromD1(
+        `SELECT
+           MIN(created_at) AS min_created_at
+         FROM auth_audit_logs`,
+      ),
+    ]);
+
+    baseTotalUsers = readInt(readFirstRow(baseUsersResult).total_users_before_window);
+
+    readRows(userTrendResult).forEach((row) => {
+      const metricDate = String(row.metric_date ?? '') as AnalyticsDateKey;
+      if (!metricDate) return;
+      ensureDateBucket(metricDate).newUsers = readInt(row.new_users);
+    });
+
+    readRows(generationTrendResult).forEach((row) => {
+      const metricDate = String(row.metric_date ?? '') as AnalyticsDateKey;
+      if (!metricDate) return;
+      const bucket = ensureDateBucket(metricDate);
+      bucket.generationTotal = readInt(row.generation_total);
+      bucket.generationCompleted = readInt(row.generation_completed);
+      bucket.generationAborted = readInt(row.generation_aborted);
+      bucket.generationFailed = readInt(row.generation_failed);
+      bucket.generationDistinctUsers = readInt(row.generation_distinct_users);
+    });
+
+    readRows(authTrendResult).forEach((row) => {
+      const metricDate = String(row.metric_date ?? '') as AnalyticsDateKey;
+      if (!metricDate) return;
+      const bucket = ensureDateBucket(metricDate);
+      bucket.authSuccess = readInt(row.auth_success);
+      bucket.authFailure = readInt(row.auth_failure);
+    });
+
+    output.authAvailableFrom = toIsoFromEpochSeconds(readFirstRow(authMinResult).min_created_at);
+  } catch (error) {
+    console.error('[AdminUserAnalytics] 读取趋势数据失败:', error);
+  }
+
+  output.points = buildTrendPoints(dates, baseTotalUsers, byDate);
   return output;
 };
