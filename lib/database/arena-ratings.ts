@@ -1,4 +1,5 @@
 import type { BattleReportGenerationCombatantRow } from './battle-report-generation-combatants';
+import { queryFromD1 } from './core';
 import { PRESET_LIST } from '@/lib/presets';
 import { isStrictRankedModelBlacklisted } from '@/lib/arena/ranked-model-policy';
 import { computeArenaBaseTier, type ArenaBaseTier } from '@/lib/arena/tier';
@@ -247,6 +248,45 @@ export async function resetStrictArenaRatingForDataCard(dataCardId: string): Pro
     await bundle.resetStrictArenaRatingForDataCard(bundle.db, id, INITIAL_RATING, nowIso);
   } catch (error) {
     console.warn('重置严格排位分失败（降级为忽略）:', { dataCardId, error });
+  }
+}
+
+export async function resetArenaRating(
+  entity: ArenaEntity,
+  queue: ArenaQueue | 'all',
+): Promise<{ ok: boolean; error?: string }> {
+  const entityType = entity?.entityType === 'preset' ? 'preset' : entity?.entityType === 'data_card' ? 'data_card' : null;
+  const entityId = typeof entity?.entityId === 'string' ? entity.entityId.trim() : '';
+  if (!entityType || !entityId) return { ok: false, error: '缺少 entityType 或 entityId' };
+
+  const whereParts = ['entity_type = ?', 'entity_id = ?'];
+  const params: unknown[] = [entityType, entityId];
+  if (queue === 'strict' || queue === 'free') {
+    whereParts.push('queue = ?');
+    params.push(queue);
+  }
+
+  try {
+    await queryFromD1(
+      `
+        UPDATE arena_ratings
+        SET
+          rating = ?,
+          games = 0,
+          wins = 0,
+          losses = 0,
+          draws = 0,
+          last_delta = NULL,
+          last_applied_at = NULL,
+          updated_at = ?
+        WHERE ${whereParts.join(' AND ')};
+      `,
+      [INITIAL_RATING, new Date().toISOString(), ...params],
+    );
+    return { ok: true };
+  } catch (error) {
+    console.error('resetArenaRating 失败:', error);
+    return { ok: false, error: error instanceof Error ? error.message : '重置排位失败' };
   }
 }
 

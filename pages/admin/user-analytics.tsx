@@ -162,7 +162,7 @@ type CsvCell = string | number | boolean | null | undefined;
 const formatPercent = (value: number): string => `${(Math.max(0, Math.min(1, value)) * 100).toFixed(1)}%`;
 const formatNumber = (value: number): string => (Number.isFinite(value) ? Math.round(value).toLocaleString('zh-CN') : '0');
 
-const normalizeIsoTimestamp = (value?: string): string => {
+const normalizeIsoTimestamp = (value?: string | null): string => {
   if (!value) return '';
   const parsed = new Date(value);
   return Number.isNaN(parsed.getTime()) ? value : parsed.toISOString();
@@ -519,7 +519,8 @@ export default function UserAnalyticsPage() {
     };
 
     const zipped = zipSync(entries, { level: 6 });
-    downloadBlob(new Blob([zipped], { type: 'application/zip' }), `user_analytics_bundle_${exportTimestamp}.zip`);
+    const zippedBytes = Uint8Array.from(zipped);
+    downloadBlob(new Blob([zippedBytes], { type: 'application/zip' }), `user_analytics_bundle_${exportTimestamp}.zip`);
   };
 
   const userGrowthChart = useMemo(() => {

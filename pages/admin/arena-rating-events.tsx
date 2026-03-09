@@ -144,6 +144,9 @@ export default function AdminArenaRatingEventsPage() {
               <Link href="/admin/arena-ratings" className="text-blue-600 hover:underline">
                 查看当前分
               </Link>
+              <Link href="/admin/arena-risk-audit" className="text-blue-600 hover:underline">
+                strict 风控审计
+              </Link>
               <button
                 onClick={() => void load(currentPage)}
                 className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"

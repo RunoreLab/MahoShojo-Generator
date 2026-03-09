@@ -1,5 +1,10 @@
 import { queryFromD1 } from './core';
 import type { BattleReportGenerationMode, BattleReportGenerationStatus } from './battle-report-generations';
+import { loadBattleReportGenerationOutputText } from '@/lib/arena/battle-report-record-utils';
+import {
+  getBattleReportOutputSource,
+  hasBattleReportStoredOutput,
+} from '@/lib/admin/battle-report-output-source';
 
 export interface AdminBattleReportGenerationListFilters {
   page?: number;
@@ -21,6 +26,7 @@ export interface AdminBattleReportGenerationListFilters {
 
   hasSensitiveWords?: boolean;
   hasShieldWords?: boolean;
+  outputSource?: 'd1' | 'r2' | 'none';
 
   search?: string;
 }
@@ -67,6 +73,10 @@ export interface AdminBattleReportGenerationListRow {
 
   combatant_names: string | null;
   combatant_card_ids: string | null;
+  output_source: 'd1' | 'r2' | 'none';
+  has_stored_output: number;
+  output_large_object_id: string | null;
+  output_r2_key: string | null;
 }
 
 export interface AdminBattleReportGenerationCombatantRow {
@@ -155,6 +165,16 @@ function buildWhereClause(filters: AdminBattleReportGenerationListFilters): { wh
 
   if (filters.hasShieldWords) {
     whereClauses.push('brg.output_has_shield_words = 1');
+  }
+
+  if (filters.outputSource === 'd1') {
+    whereClauses.push(`NULLIF(TRIM(COALESCE(brg.output_preview, '')), '') IS NOT NULL`);
+  } else if (filters.outputSource === 'r2') {
+    whereClauses.push(`NULLIF(TRIM(COALESCE(brg.output_preview, '')), '') IS NULL`);
+    whereClauses.push(`lo.id IS NOT NULL`);
+  } else if (filters.outputSource === 'none') {
+    whereClauses.push(`NULLIF(TRIM(COALESCE(brg.output_preview, '')), '') IS NULL`);
+    whereClauses.push(`lo.id IS NULL`);
   }
 
   if (filters.search) {
@@ -254,10 +274,24 @@ export async function getAdminBattleReportGenerations(
       brg.combatants_write_ok,
       brg.combatants_row_count,
       brg.combatants_write_error,
+      lo.id AS output_large_object_id,
+      lo.r2_key AS output_r2_key,
+      CASE
+        WHEN NULLIF(TRIM(COALESCE(brg.output_preview, '')), '') IS NOT NULL THEN 'd1'
+        WHEN lo.id IS NOT NULL THEN 'r2'
+        ELSE 'none'
+      END AS output_source,
+      CASE
+        WHEN NULLIF(TRIM(COALESCE(brg.output_preview, '')), '') IS NOT NULL OR lo.id IS NOT NULL THEN 1
+        ELSE 0
+      END AS has_stored_output,
       group_concat(c.name, ' / ') AS combatant_names,
       group_concat(c.data_card_id, ' / ') AS combatant_card_ids
     FROM battle_report_generations brg
     LEFT JOIN users u ON u.id = brg.user_id
+    LEFT JOIN large_objects lo
+      ON lo.kind = 'battle_report_generation_output'
+      AND lo.owner_ref_id = brg.id
     LEFT JOIN battle_report_generation_combatants c ON c.generation_id = brg.id
     ${whereSql}
     GROUP BY brg.id
@@ -268,6 +302,9 @@ export async function getAdminBattleReportGenerations(
   const countSql = `
     SELECT COUNT(brg.id) AS total
     FROM battle_report_generations brg
+    LEFT JOIN large_objects lo
+      ON lo.kind = 'battle_report_generation_output'
+      AND lo.owner_ref_id = brg.id
     ${whereSql};
   `;
 
@@ -290,9 +327,14 @@ export async function getAdminBattleReportGenerationDetail(id: string): Promise<
     SELECT
       brg.*,
       COALESCE(brg.username, u.username) AS username,
-      COALESCE(brg.user_prefix, u.prefix) AS user_prefix
+      COALESCE(brg.user_prefix, u.prefix) AS user_prefix,
+      lo.id AS output_large_object_id,
+      lo.r2_key AS output_r2_key
     FROM battle_report_generations brg
     LEFT JOIN users u ON u.id = brg.user_id
+    LEFT JOIN large_objects lo
+      ON lo.kind = 'battle_report_generation_output'
+      AND lo.owner_ref_id = brg.id
     WHERE brg.id = ?;
   `;
   const combatantsSql = `
@@ -319,6 +361,28 @@ export async function getAdminBattleReportGenerationDetail(id: string): Promise<
     } catch {
       // 忽略解析失败，保持原字符串
     }
+  }
+
+  const outputState = await loadBattleReportGenerationOutputText({
+    generationId: id,
+    outputPreview: (generation as any).output_preview,
+  });
+  (generation as any).output_source = getBattleReportOutputSource({
+    outputPreview: (generation as any).output_preview,
+    hasIndexedLargeObject: Boolean((generation as any).output_large_object_id),
+  });
+  (generation as any).has_stored_output = hasBattleReportStoredOutput({
+    outputPreview: (generation as any).output_preview,
+    hasIndexedLargeObject: Boolean((generation as any).output_large_object_id),
+  }) ? 1 : 0;
+  (generation as any).output_read_error = outputState.readError;
+  if (
+    outputState.source === 'r2' &&
+    typeof outputState.outputText === 'string' &&
+    outputState.outputText.trim() &&
+    !(typeof (generation as any).output_preview === 'string' && (generation as any).output_preview.trim())
+  ) {
+    (generation as any).output_preview = outputState.outputText;
   }
 
   return { generation, combatants };

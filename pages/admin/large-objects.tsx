@@ -1,9 +1,16 @@
 import Head from 'next/head';
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
-import { Download, RefreshCw, Trash2 } from 'lucide-react';
+import { Download, Image as ImageIcon, RefreshCw, Trash2 } from 'lucide-react';
 
 import { AdminTableScroll } from '@/components/admin/AdminTableScroll';
+import {
+  formatLargeObjectAssetFamily,
+  formatLargeObjectKindLabel,
+  getLargeObjectAssetFamily,
+  isLargeObjectPreviewableImage,
+  type LargeObjectAssetFamily,
+} from '@/lib/admin/large-object-insights';
 
 type LargeObjectRow = {
   id: string;
@@ -22,12 +29,56 @@ type LargeObjectRow = {
 };
 
 type ListResponse =
-  | { success: true; rows: LargeObjectRow[]; total: number; page: number; limit: number }
+  | {
+      success: true;
+      rows: LargeObjectRow[];
+      total: number;
+      page: number;
+      limit: number;
+      kindSummaries: Array<{
+        kind: string;
+        total: number;
+        bytes: number;
+        storedBytes: number;
+        lastCreatedAt: string | null;
+      }>;
+      familySummaries: Array<{
+        family: LargeObjectAssetFamily;
+        total: number;
+        bytes: number;
+        storedBytes: number;
+      }>;
+    }
   | { success: false; error?: string };
 
 type PresignResponse =
   | { success: true; row: LargeObjectRow; downloadUrl: string; expiresInSeconds: number }
   | { success: false; error?: string };
+
+type KindSummary = {
+  kind: string;
+  total: number;
+  bytes: number;
+  storedBytes: number;
+  lastCreatedAt: string | null;
+};
+
+type FamilySummary = {
+  family: LargeObjectAssetFamily;
+  total: number;
+  bytes: number;
+  storedBytes: number;
+};
+
+type LargeObjectFilters = {
+  kind: string;
+  family: 'all' | LargeObjectAssetFamily;
+  search: string;
+  ownerUserId: string;
+  dateFrom: string;
+  dateTo: string;
+  minBytes: string;
+};
 
 const fetchJson = async <T,>(url: string, init?: RequestInit): Promise<T> => {
   const res = await fetch(url, init);
@@ -55,6 +106,12 @@ const formatBytes = (bytes: number | null | undefined) => {
   return `${v.toFixed(u === 0 ? 0 : 2)} ${units[u]}`;
 };
 
+const familyBadgeClass = (family: LargeObjectAssetFamily) => {
+  if (family === 'image') return 'border-fuchsia-200 bg-fuchsia-50 text-fuchsia-700';
+  if (family === 'text') return 'border-cyan-200 bg-cyan-50 text-cyan-700';
+  return 'border-slate-200 bg-slate-50 text-slate-600';
+};
+
 export default function AdminLargeObjectsPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -62,12 +119,15 @@ export default function AdminLargeObjectsPage() {
   const [detailsVisible, setDetailsVisible] = useState(true);
 
   const [rows, setRows] = useState<LargeObjectRow[]>([]);
+  const [kindSummaries, setKindSummaries] = useState<KindSummary[]>([]);
+  const [familySummaries, setFamilySummaries] = useState<FamilySummary[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const limit = 50;
 
-  const [filters, setFilters] = useState({
+  const [filters, setFilters] = useState<LargeObjectFilters>({
     kind: '',
+    family: 'all' as 'all' | LargeObjectAssetFamily,
     search: '',
     ownerUserId: '',
     dateFrom: '',
@@ -82,29 +142,32 @@ export default function AdminLargeObjectsPage() {
   const [downloadError, setDownloadError] = useState<string | null>(null);
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
 
-  const buildParams = (nextPage: number) => {
+  const buildParams = (nextPage: number, nextFilters = filters) => {
     const params = new URLSearchParams();
     params.set('page', String(nextPage));
     params.set('limit', String(limit));
-    if (filters.kind.trim()) params.set('kind', filters.kind.trim());
-    if (filters.search.trim()) params.set('search', filters.search.trim());
-    if (filters.ownerUserId.trim()) params.set('ownerUserId', filters.ownerUserId.trim());
-    if (filters.dateFrom) params.set('dateFrom', filters.dateFrom);
-    if (filters.dateTo) params.set('dateTo', filters.dateTo);
-    if (filters.minBytes.trim()) params.set('minBytes', filters.minBytes.trim());
+    if (nextFilters.kind.trim()) params.set('kind', nextFilters.kind.trim());
+    if (nextFilters.family !== 'all') params.set('family', nextFilters.family);
+    if (nextFilters.search.trim()) params.set('search', nextFilters.search.trim());
+    if (nextFilters.ownerUserId.trim()) params.set('ownerUserId', nextFilters.ownerUserId.trim());
+    if (nextFilters.dateFrom) params.set('dateFrom', nextFilters.dateFrom);
+    if (nextFilters.dateTo) params.set('dateTo', nextFilters.dateTo);
+    if (nextFilters.minBytes.trim()) params.set('minBytes', nextFilters.minBytes.trim());
     return params;
   };
 
-  const load = async (nextPage = 1) => {
+  const load = async (nextPage = 1, nextFilters = filters) => {
     setLoading(true);
     setError(null);
     try {
-      const params = buildParams(nextPage);
+      const params = buildParams(nextPage, nextFilters);
       const json = await fetchJson<ListResponse>(`/api/admin/large-objects?${params.toString()}`);
       if (json.success !== true) throw new Error(json.error || '无法加载大对象列表');
       setRows(json.rows ?? []);
       setTotal(Number(json.total || 0));
       setPage(Number(json.page || nextPage));
+      setKindSummaries(json.kindSummaries ?? []);
+      setFamilySummaries(json.familySummaries ?? []);
       setSelectedId(null);
       setDownloadUrl(null);
       setDownloadError(null);
@@ -168,6 +231,15 @@ export default function AdminLargeObjectsPage() {
     return `/admin/battle-report-generations?id=${encodeURIComponent(id)}`;
   }, [selected]);
 
+  const selectedFamily = useMemo(
+    () => (selected ? getLargeObjectAssetFamily(selected.kind, selected.content_type) : null),
+    [selected],
+  );
+  const selectedPreviewableImage = useMemo(
+    () => (selected ? isLargeObjectPreviewableImage(selected.kind, selected.content_type) : false),
+    [selected],
+  );
+
   const copyText = async (text: string, label: string) => {
     try {
       await navigator.clipboard.writeText(text);
@@ -208,10 +280,84 @@ export default function AdminLargeObjectsPage() {
             </div>
           </div>
 
-          <h1 className="mb-4 text-2xl font-bold text-gray-800">大对象 / R2 索引管理（large_objects）</h1>
+          <h1 className="mb-2 text-2xl font-bold text-gray-800">大对象 / 资产工作台（large_objects）</h1>
+          <p className="mb-4 text-sm text-gray-600">
+            当前既能继续管理战报正文对象，也为后续插图、立绘等多 kind 资产预留统一视图。优先按资产家族与 kind 观察，而不是只把它当作战报 R2 索引表。
+          </p>
+
+          <div className="mb-4 grid gap-4 lg:grid-cols-[1.1fr_1.4fr]">
+            <div className="rounded-xl bg-white p-4 shadow-sm ring-1 ring-gray-100">
+              <div className="mb-3 text-sm font-semibold text-gray-800">资产家族分布</div>
+              <div className="grid gap-3 sm:grid-cols-3">
+                {familySummaries.map((summary) => (
+                  <button
+                    key={summary.family}
+                    type="button"
+                    onClick={() => {
+                      const nextFilters: LargeObjectFilters = {
+                        ...filters,
+                        family: filters.family === summary.family ? 'all' : summary.family,
+                      };
+                      setFilters(nextFilters);
+                      void load(1, nextFilters);
+                    }}
+                    className={`rounded-xl border px-4 py-3 text-left transition ${familyBadgeClass(summary.family)} ${
+                      filters.family === summary.family ? 'ring-2 ring-offset-1 ring-gray-300' : ''
+                    }`}
+                  >
+                    <div className="text-xs font-medium">{formatLargeObjectAssetFamily(summary.family)}</div>
+                    <div className="mt-2 text-lg font-semibold">{summary.total.toLocaleString('zh-CN')}</div>
+                    <div className="mt-1 text-xs opacity-80">存储 {formatBytes(summary.storedBytes)}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="rounded-xl bg-white p-4 shadow-sm ring-1 ring-gray-100">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <div className="text-sm font-semibold text-gray-800">Top kind</div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const nextFilters: LargeObjectFilters = { ...filters, kind: '' };
+                    setFilters(nextFilters);
+                    void load(1, nextFilters);
+                  }}
+                  className="text-xs text-teal-700 hover:underline"
+                >
+                  清空 kind 过滤
+                </button>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {kindSummaries.length ? (
+                  kindSummaries.map((summary) => (
+                    <button
+                      key={summary.kind}
+                      type="button"
+                      onClick={() => {
+                        const nextFilters: LargeObjectFilters = { ...filters, kind: summary.kind };
+                        setFilters(nextFilters);
+                        void load(1, nextFilters);
+                      }}
+                      className={`rounded-full border px-3 py-2 text-left text-xs transition ${
+                        filters.kind.trim() === summary.kind
+                          ? 'border-teal-300 bg-teal-50 text-teal-800'
+                          : 'border-gray-200 bg-gray-50 text-gray-700 hover:border-teal-200 hover:bg-teal-50'
+                      }`}
+                    >
+                      <div className="font-medium">{formatLargeObjectKindLabel(summary.kind)}</div>
+                      <div className="mt-1 opacity-80">{summary.total.toLocaleString('zh-CN')} 条 · {formatBytes(summary.storedBytes)}</div>
+                    </button>
+                  ))
+                ) : (
+                  <div className="text-sm text-gray-500">当前筛选范围内没有可展示的 kind。</div>
+                )}
+              </div>
+            </div>
+          </div>
 
           <div className="mb-4 rounded-xl bg-white p-4 shadow-sm ring-1 ring-gray-100">
-            <div className="grid gap-3 md:grid-cols-3 lg:grid-cols-6">
+            <div className="grid gap-3 md:grid-cols-3 lg:grid-cols-7">
               <input
                 className="input-field"
                 placeholder="类型 kind（可留空）"
@@ -222,6 +368,16 @@ export default function AdminLargeObjectsPage() {
                   void load(1);
                 }}
               />
+              <select
+                className="input-field"
+                value={filters.family}
+                onChange={(e) => setFilters((prev) => ({ ...prev, family: e.target.value as any }))}
+              >
+                <option value="all">全部资产家族</option>
+                <option value="text">文本对象</option>
+                <option value="image">图片资产</option>
+                <option value="other">其他对象</option>
+              </select>
               <input
                 className="input-field"
                 placeholder="搜索：owner_ref_id / r2_key / 用户名"
@@ -310,7 +466,7 @@ export default function AdminLargeObjectsPage() {
                 <table className="min-w-full w-max text-left text-sm text-gray-600">
                   <thead className="bg-gray-50 text-xs text-gray-600">
                   <tr>
-                    <th className="px-4 py-3 whitespace-nowrap">类型</th>
+                    <th className="px-4 py-3 whitespace-nowrap">类型 / 家族</th>
                     <th className="px-4 py-3 whitespace-nowrap">归属引用ID</th>
                     <th className="px-4 py-3 whitespace-nowrap">归属用户</th>
                     <th className="px-4 py-3 whitespace-nowrap">大小</th>
@@ -322,11 +478,21 @@ export default function AdminLargeObjectsPage() {
                     <tr
                       key={row.id}
                       className={`cursor-pointer hover:bg-gray-50 ${selectedId === row.id ? 'bg-emerald-50' : ''}`}
-                      onClick={() => setSelectedId(row.id)}
+                      onClick={() => {
+                        setSelectedId(row.id);
+                        setDownloadUrl(null);
+                        setDownloadError(null);
+                      }}
                     >
                       <td className="px-4 py-3">
-                        <div className="text-gray-800">{row.kind}</div>
+                        <div className="text-gray-800">{formatLargeObjectKindLabel(row.kind)}</div>
+                        <div className="mt-1">
+                          <span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] ${familyBadgeClass(getLargeObjectAssetFamily(row.kind, row.content_type))}`}>
+                            {formatLargeObjectAssetFamily(getLargeObjectAssetFamily(row.kind, row.content_type))}
+                          </span>
+                        </div>
                         <div className="mt-1 font-mono text-[11px] text-gray-500">{row.id}</div>
+                        <div className="mt-1 text-[11px] text-gray-400">{row.kind}</div>
                       </td>
 	                      <td className="px-4 py-3">
 	                        <div className="font-mono text-xs text-gray-700 truncate max-w-[20rem]" title={row.owner_ref_id}>
@@ -372,13 +538,17 @@ export default function AdminLargeObjectsPage() {
 	                      复制
 	                    </button>
 	                  </div>
-	                  <div>
-	                    <span className="text-gray-500">类型：</span>
-	                    {selected.kind}
-	                  </div>
-	                  <div className="flex items-start justify-between gap-3">
-	                    <div>
-	                      <span className="text-gray-500">归属引用ID：</span>
+                  <div>
+                    <span className="text-gray-500">类型：</span>
+                    {formatLargeObjectKindLabel(selected.kind)}
+                  </div>
+                  <div>
+                    <span className="text-gray-500">资产家族：</span>
+                    {selectedFamily ? formatLargeObjectAssetFamily(selectedFamily) : '—'}
+                  </div>
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <span className="text-gray-500">归属引用ID：</span>
 	                      <span className="font-mono text-xs break-all">{selected.owner_ref_id}</span>
 	                    </div>
 	                    <button
@@ -420,6 +590,21 @@ export default function AdminLargeObjectsPage() {
                       <Link href={maybeBattleReportLink} className="text-sm text-purple-600 hover:underline">
                         打开关联战报生成记录
                       </Link>
+                    </div>
+                  ) : null}
+
+                  {selectedPreviewableImage && downloadUrl ? (
+                    <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
+                      <div className="mb-2 flex items-center gap-2 text-sm font-medium text-gray-700">
+                        <ImageIcon className="h-4 w-4" />
+                        图片预览
+                      </div>
+                      {/* 这里直接消费 R2 预签名 URL，避免受 next/image 远端域名配置限制。 */}
+                      <img src={downloadUrl} alt={selected.kind} className="max-h-72 w-full rounded-lg object-contain bg-white" />
+                    </div>
+                  ) : selectedPreviewableImage ? (
+                    <div className="rounded-xl border border-dashed border-fuchsia-200 bg-fuchsia-50 p-3 text-xs text-fuchsia-700">
+                      该对象可直接图片预览。先点击“生成下载链接”，再在此处查看缩略预览。
                     </div>
                   ) : null}
 

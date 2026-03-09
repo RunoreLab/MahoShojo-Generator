@@ -14,6 +14,10 @@ import {
 } from 'lucide-react';
 
 import { AdminTableScroll } from '@/components/admin/AdminTableScroll';
+import {
+  formatBattleReportOutputSource,
+  type BattleReportOutputSource,
+} from '@/lib/admin/battle-report-output-source';
 
 type BattleReportGenerationStatus = 'completed' | 'aborted' | 'failed';
 type BattleReportGenerationMode = 'stream' | 'non-stream';
@@ -46,6 +50,10 @@ interface BattleReportGenerationListRow {
   combatants_write_error: string | null;
   combatant_names: string | null;
   combatant_card_ids: string | null;
+  output_source: BattleReportOutputSource;
+  has_stored_output: number;
+  output_large_object_id: string | null;
+  output_r2_key: string | null;
 }
 
 interface BattleReportGenerationDetailResponse {
@@ -98,6 +106,12 @@ function formatStatus(status: BattleReportGenerationStatus) {
   return '失败';
 }
 
+function outputSourceBadge(source: BattleReportOutputSource) {
+  if (source === 'd1') return 'bg-sky-100 text-sky-700 border-sky-200';
+  if (source === 'r2') return 'bg-indigo-100 text-indigo-700 border-indigo-200';
+  return 'bg-gray-100 text-gray-600 border-gray-200';
+}
+
 export default function BattleReportGenerationAdminPage() {
   const router = useRouter();
   const outputRequestIdRef = useRef<string | null>(null);
@@ -120,6 +134,7 @@ export default function BattleReportGenerationAdminPage() {
     endpoint: '',
     username: '',
     scenarioDataCardId: '',
+    outputSource: 'all' as 'all' | BattleReportOutputSource,
     dateFrom: '',
     dateTo: '',
     hasSensitiveWords: false,
@@ -152,6 +167,7 @@ export default function BattleReportGenerationAdminPage() {
     if (f.endpoint.trim()) params.set('endpoint', f.endpoint.trim());
     if (f.username.trim()) params.set('username', f.username.trim());
     if (f.scenarioDataCardId.trim()) params.set('scenarioDataCardId', f.scenarioDataCardId.trim());
+    if (f.outputSource !== 'all') params.set('outputSource', f.outputSource);
     if (f.dateFrom) params.set('dateFrom', f.dateFrom);
     if (f.dateTo) params.set('dateTo', f.dateTo);
     if (f.hasSensitiveWords) params.set('hasSensitiveWords', '1');
@@ -490,6 +506,20 @@ export default function BattleReportGenerationAdminPage() {
             </div>
 
             <div>
+              <label className="block text-sm text-gray-600 mb-1">正文来源</label>
+              <select
+                value={filters.outputSource}
+                onChange={(e) => setFilters(prev => ({ ...prev, outputSource: e.target.value as any }))}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-orange-500"
+              >
+                <option value="all">全部</option>
+                <option value="d1">D1 预览</option>
+                <option value="r2">R2 对象</option>
+                <option value="none">未存储</option>
+              </select>
+            </div>
+
+            <div>
               <label className="block text-sm text-gray-600 mb-1">日期（从）</label>
               <input
                 type="date"
@@ -546,6 +576,7 @@ export default function BattleReportGenerationAdminPage() {
                     endpoint: '',
                     username: '',
                     scenarioDataCardId: '',
+                    outputSource: 'all',
                     dateFrom: '',
                     dateTo: '',
                     hasSensitiveWords: false,
@@ -638,6 +669,7 @@ export default function BattleReportGenerationAdminPage() {
                   <th className="px-3 py-2 text-left">情景</th>
                   <th className="px-3 py-2 text-left">参战者</th>
                   <th className="px-3 py-2 text-left">标题 / 胜者</th>
+                  <th className="px-3 py-2 text-left whitespace-nowrap">正文来源</th>
                   <th className="px-3 py-2 text-left">耗时</th>
                   <th className="px-3 py-2 text-left whitespace-nowrap">Token（用量）</th>
                   <th className="px-3 py-2 text-left w-28">操作</th>
@@ -646,11 +678,11 @@ export default function BattleReportGenerationAdminPage() {
               <tbody className="divide-y divide-gray-200">
                 {loading ? (
                   <tr>
-                    <td colSpan={11} className="px-3 py-6 text-center text-gray-500">加载中...</td>
+                    <td colSpan={12} className="px-3 py-6 text-center text-gray-500">加载中...</td>
                   </tr>
                 ) : records.length === 0 ? (
                   <tr>
-                    <td colSpan={11} className="px-3 py-6 text-center text-gray-500">暂无记录</td>
+                    <td colSpan={12} className="px-3 py-6 text-center text-gray-500">暂无记录</td>
                   </tr>
                 ) : (
                   records.map((r) => (
@@ -681,7 +713,7 @@ export default function BattleReportGenerationAdminPage() {
                         {r.username ? (
                           <div className="flex items-center gap-2">
                             <User className="w-4 h-4 text-gray-400" />
-                            <Link href={`/admin/user-management?username=${encodeURIComponent(r.username)}`}>
+                            <Link href={`/admin/users?search=${encodeURIComponent(r.username)}`}>
                               <span className="text-purple-600 hover:underline cursor-pointer">{r.username}</span>
                             </Link>
                           </div>
@@ -724,6 +756,14 @@ export default function BattleReportGenerationAdminPage() {
                         </div>
                         <div className="text-xs text-gray-400 truncate max-w-56" title={r.winner || ''}>
                           {r.winner ? `胜者：${r.winner}` : '胜者：—'}
+                        </div>
+                      </td>
+                      <td className="px-3 py-2 whitespace-nowrap">
+                        <span className={`inline-flex items-center rounded border px-2 py-1 text-xs ${outputSourceBadge(r.output_source)}`}>
+                          {formatBattleReportOutputSource(r.output_source)}
+                        </span>
+                        <div className="mt-1 text-xs text-gray-400">
+                          {r.has_stored_output ? (r.output_large_object_id ? '已索引' : 'D1-only') : '无正文'}
                         </div>
                       </td>
                       <td className="px-3 py-2 whitespace-nowrap">{formatDuration(r.duration_ms)}</td>
@@ -804,7 +844,7 @@ export default function BattleReportGenerationAdminPage() {
                     <div className="flex justify-between gap-4"><span className="text-gray-500">用户</span><span>{detailData.generation.username ? String(detailData.generation.username) : '匿名'}</span></div>
                     {detailData.generation.username ? (
                       <div className="flex justify-end">
-                        <Link href={`/admin/user-management?username=${encodeURIComponent(String(detailData.generation.username))}`}>
+                        <Link href={`/admin/users?search=${encodeURIComponent(String(detailData.generation.username))}`}>
                           <span className="text-purple-600 hover:underline cursor-pointer text-sm">打开用户管理页</span>
                         </Link>
                       </div>
@@ -880,7 +920,7 @@ export default function BattleReportGenerationAdminPage() {
                     )}
                   </div>
 
-                  <div className="grid md:grid-cols-3 gap-4 text-sm mb-4">
+                  <div className="grid md:grid-cols-4 gap-4 text-sm mb-4">
                     <div className="bg-white border border-gray-200 rounded-lg p-3">
                       <div className="text-gray-500 text-xs mb-1">标题</div>
                       <div className="text-gray-800">{String(detailData.generation.headline || '—')}</div>
@@ -897,7 +937,26 @@ export default function BattleReportGenerationAdminPage() {
                         {!detailData.generation.output_has_sensitive_words && !detailData.generation.output_has_shield_words ? '—' : ''}
                       </div>
                     </div>
+                    <div className="bg-white border border-gray-200 rounded-lg p-3">
+                      <div className="text-gray-500 text-xs mb-1">正文来源 / 读取</div>
+                      <div className="text-gray-800">
+                        {formatBattleReportOutputSource((detailData.generation.output_source as BattleReportOutputSource) || 'none')}
+                      </div>
+                      <div className="mt-1 text-xs text-gray-500">
+                        {detailData.generation.output_read_error
+                          ? `读取失败：${String(detailData.generation.output_read_error)}`
+                          : detailData.generation.has_stored_output
+                            ? '读取正常'
+                            : '无正文对象'}
+                      </div>
+                    </div>
                   </div>
+
+                  {detailData.generation.output_read_error ? (
+                    <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                      R2 / D1 正文读取失败：{String(detailData.generation.output_read_error)}
+                    </div>
+                  ) : null}
 
                   <pre className="whitespace-pre-wrap text-xs bg-white border border-gray-200 rounded-lg p-3 max-h-80 overflow-auto">
                     {String(detailData.generation.output_preview || '—')}

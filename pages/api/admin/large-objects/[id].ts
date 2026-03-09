@@ -1,7 +1,7 @@
 import type { NextRequest } from 'next/server';
 
 import { deleteObject, generatePresignedUrl } from '@/lib/r2';
-import { deleteLargeObjectById, getLargeObjectById } from '@/lib/database/large-objects';
+import { deleteAdminLargeObjectById, getAdminLargeObjectById } from '@/lib/database/admin-large-objects';
 
 export const runtime = 'edge';
 
@@ -38,7 +38,7 @@ export default async function handler(req: NextRequest) {
       const presign = url.searchParams.get('presign') === '1';
       const expires = Math.max(30, Math.min(3600, parseIntParam(url.searchParams.get('expiresInSeconds'), 600)));
 
-      const row = await getLargeObjectById(id);
+      const row = await getAdminLargeObjectById(id);
       if (!row) {
         return new Response(JSON.stringify({ success: false, error: '记录不存在' }), {
           status: 404,
@@ -70,7 +70,7 @@ export default async function handler(req: NextRequest) {
       const url = new URL(req.url);
       const deleteR2Flag = url.searchParams.get('deleteR2') === '1';
 
-      const row = await getLargeObjectById(id);
+      const row = await getAdminLargeObjectById(id);
       if (!row) {
         return new Response(JSON.stringify({ success: false, error: '记录不存在' }), {
           status: 404,
@@ -88,7 +88,7 @@ export default async function handler(req: NextRequest) {
         }
       }
 
-      const deleted = await deleteLargeObjectById(id);
+      const deleted = await deleteAdminLargeObjectById(id);
       if (!deleted.ok) {
         return new Response(JSON.stringify({ success: false, error: deleted.error ?? '删除失败', r2Deleted, r2Error }), {
           status: 500,

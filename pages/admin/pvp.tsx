@@ -114,7 +114,8 @@ export default function AdminPvpPage() {
     void load();
   }, []);
 
-  const overview = data?.overview;
+  const successData = data?.success === true ? data : null;
+  const overview = successData?.overview;
 
   return (
     <>
@@ -179,8 +180,8 @@ export default function AdminPvpPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {data?.activeRooms.length ? (
-                      data.activeRooms.map((room) => (
+                    {successData?.activeRooms.length ? (
+                      successData.activeRooms.map((room) => (
                         <tr key={room.id}>
                           <td className="px-4 py-3 align-top">
                             <div className="font-medium text-slate-900">{room.id}</div>
@@ -233,8 +234,8 @@ export default function AdminPvpPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {data?.recentMatches.length ? (
-                      data.recentMatches.map((match) => (
+                    {successData?.recentMatches.length ? (
+                      successData.recentMatches.map((match) => (
                         <tr key={match.id}>
                           <td className="px-4 py-3 align-top">
                             <div className="font-medium text-slate-900">{match.id}</div>

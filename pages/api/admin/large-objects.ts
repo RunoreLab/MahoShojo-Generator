@@ -1,6 +1,7 @@
 import type { NextRequest } from 'next/server';
 
-import { listLargeObjects } from '@/lib/database/large-objects';
+import { listAdminLargeObjects } from '@/lib/database/admin-large-objects';
+import type { LargeObjectAssetFamily } from '@/lib/admin/large-object-insights';
 
 export const runtime = 'edge';
 
@@ -29,6 +30,9 @@ export default async function handler(req: NextRequest) {
     const ownerUserId = url.searchParams.get('ownerUserId');
     const minBytes = url.searchParams.get('minBytes');
     const maxBytes = url.searchParams.get('maxBytes');
+    const familyRaw = (url.searchParams.get('family') ?? '').trim();
+    const family: LargeObjectAssetFamily | undefined =
+      familyRaw === 'text' || familyRaw === 'image' || familyRaw === 'other' ? familyRaw : undefined;
 
     const filters = {
       page,
@@ -40,10 +44,11 @@ export default async function handler(req: NextRequest) {
       ...(ownerUserId ? { ownerUserId: parseIntParam(ownerUserId, NaN) } : {}),
       ...(minBytes ? { minBytes: parseIntParam(minBytes, NaN) } : {}),
       ...(maxBytes ? { maxBytes: parseIntParam(maxBytes, NaN) } : {}),
+      ...(family ? { family } : {}),
     } as const;
 
-    const { rows, total } = await listLargeObjects(filters);
-    return new Response(JSON.stringify({ success: true, rows, total, page, limit }), {
+    const { rows, total, kindSummaries, familySummaries } = await listAdminLargeObjects(filters);
+    return new Response(JSON.stringify({ success: true, rows, total, page, limit, kindSummaries, familySummaries }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
     });

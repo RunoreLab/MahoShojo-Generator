@@ -1,6 +1,6 @@
 import React, { useRef, useState, useEffect } from 'react';
 import { Search, Save, X, Database, Eye, Ban, CheckCircle, AlertTriangle, Calendar, User, Hash } from 'lucide-react';
-import { getDataCardStatus } from '@/lib/database/data-cards';
+import { getDataCardStatus } from '@/lib/data-card-status';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
 import DataCardDetailsModal from '@/components/DataCardDetailsModal';

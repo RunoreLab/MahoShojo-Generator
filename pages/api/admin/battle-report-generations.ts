@@ -38,6 +38,7 @@ export default async function handler(req: NextRequest) {
       mode: searchParams.get('mode') || undefined,
       generationMode: (searchParams.get('generationMode') as any) || undefined,
       endpoint: searchParams.get('endpoint') || undefined,
+      outputSource: (searchParams.get('outputSource') as any) || undefined,
 
       dateFrom: searchParams.get('dateFrom') || undefined,
       dateTo: searchParams.get('dateTo') || undefined,

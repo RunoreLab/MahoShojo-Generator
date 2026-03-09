@@ -340,9 +340,17 @@ export default function AdminHomePage() {
           icon: Activity,
         },
         {
+          href: '/admin/arena-risk-audit',
+          title: 'Strict 风控审计',
+          description: '聚合 strict 的 skip_reason、用户集中度与 pair 风险排行，作为反刷分观察面。',
+          tone: 'border-orange-200 hover:border-orange-300',
+          icon: ShieldAlert,
+          badge: 'Phase 2',
+        },
+        {
           href: '/admin/battle-report-generations',
           title: '战报生成记录',
-          description: '跟踪战报生成、失败、中断与对象落库情况。',
+          description: '跟踪战报生成、失败、中断，以及 D1 / R2 正文来源与读错状态。',
           tone: 'border-orange-200 hover:border-orange-300',
           icon: FileText,
         },
@@ -362,9 +370,10 @@ export default function AdminHomePage() {
         {
           href: '/admin/large-objects',
           title: '大对象管理',
-          description: '管理 large_objects / R2 索引，当前仍以战报正文对象为主。',
+          description: '管理 large_objects / R2 索引，并按多 kind 资产家族查看文本对象与图片资产。',
           tone: 'border-teal-200 hover:border-teal-300',
           icon: HardDrive,
+          badge: 'Phase 2',
         },
         {
           href: '/admin/data-maintenance',
