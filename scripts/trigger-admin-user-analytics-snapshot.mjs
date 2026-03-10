@@ -5,6 +5,7 @@ import nextEnv from '@next/env';
 const SNAPSHOT_TOKEN_HEADER = 'x-admin-user-analytics-snapshot-token';
 const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_RETRIES = 3;
+const METRIC_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
 const { loadEnvConfig } = nextEnv;
 loadEnvConfig(process.cwd(), true);
@@ -27,6 +28,9 @@ const parseArgs = (argv) => {
     url: '',
     token: '',
     dryRun: false,
+    metricDate: '',
+    backfillDays: 0,
+    skipCurrent: false,
     timeoutMs: DEFAULT_TIMEOUT_MS,
     retries: DEFAULT_RETRIES,
   };
@@ -45,9 +49,20 @@ const parseArgs = (argv) => {
       case '--dry-run':
         args.dryRun = true;
         break;
+      case '--metric-date':
+        args.metricDate = String(argv[index + 1] ?? '').trim();
+        index += 1;
+        break;
+      case '--backfill-days':
+        args.backfillDays = parsePositiveInteger(argv[index + 1], 0);
+        index += 1;
+        break;
+      case '--skip-current':
+        args.skipCurrent = true;
+        break;
       case '--help':
         console.log(`用法：
-  node scripts/trigger-admin-user-analytics-snapshot.mjs [--dry-run] [--url <url>] [--token <token>] [--timeout-ms <ms>] [--retries <n>]
+  node scripts/trigger-admin-user-analytics-snapshot.mjs [--dry-run] [--metric-date <YYYY-MM-DD>] [--backfill-days <n>] [--skip-current] [--url <url>] [--token <token>] [--timeout-ms <ms>] [--retries <n>]
 
 环境变量：
   ADMIN_USER_ANALYTICS_SNAPSHOT_URL
@@ -80,11 +95,14 @@ const parseArgs = (argv) => {
   if (!args.token) {
     throw new Error('缺少快照 token，请提供 --token 或环境变量 ADMIN_USER_ANALYTICS_SNAPSHOT_TOKEN');
   }
+  if (args.metricDate && !METRIC_DATE_PATTERN.test(args.metricDate)) {
+    throw new Error(`metricDate 非法：${args.metricDate}`);
+  }
 
   return args;
 };
 
-const buildSnapshotUrl = (rawUrl, dryRun) => {
+const buildSnapshotUrl = (rawUrl, args) => {
   let url;
   try {
     url = new URL(rawUrl);
@@ -92,10 +110,25 @@ const buildSnapshotUrl = (rawUrl, dryRun) => {
     throw new Error(`快照 URL 非法：${rawUrl}`);
   }
 
-  if (dryRun) {
+  if (args.dryRun) {
     url.searchParams.set('dryRun', '1');
   } else {
     url.searchParams.delete('dryRun');
+  }
+  if (args.metricDate) {
+    url.searchParams.set('metricDate', args.metricDate);
+  } else {
+    url.searchParams.delete('metricDate');
+  }
+  if (args.backfillDays > 0) {
+    url.searchParams.set('backfillDays', String(args.backfillDays));
+  } else {
+    url.searchParams.delete('backfillDays');
+  }
+  if (args.skipCurrent) {
+    url.searchParams.set('includeCurrent', '0');
+  } else {
+    url.searchParams.delete('includeCurrent');
   }
 
   return url;
@@ -143,7 +176,7 @@ const requestSnapshot = async ({ url, token, timeoutMs }) => {
 
 const run = async () => {
   const args = parseArgs(process.argv.slice(2));
-  const url = buildSnapshotUrl(args.url, args.dryRun);
+  const url = buildSnapshotUrl(args.url, args);
 
   let lastError = null;
   for (let attempt = 1; attempt <= args.retries; attempt += 1) {
@@ -170,6 +203,17 @@ const run = async () => {
             updatedAt:
               payload.snapshot && typeof payload.snapshot === 'object' && typeof payload.snapshot.updatedAt === 'string'
                 ? payload.snapshot.updatedAt
+                : null,
+            backfill:
+              payload.backfill && typeof payload.backfill === 'object'
+                ? {
+                    lookbackDays:
+                      typeof payload.backfill.lookbackDays === 'number' ? payload.backfill.lookbackDays : null,
+                    endMetricDate:
+                      typeof payload.backfill.endMetricDate === 'string' ? payload.backfill.endMetricDate : null,
+                    missingDates: Array.isArray(payload.backfill.missingDates) ? payload.backfill.missingDates : [],
+                    writtenDates: Array.isArray(payload.backfill.writtenDates) ? payload.backfill.writtenDates : [],
+                  }
                 : null,
           },
           null,

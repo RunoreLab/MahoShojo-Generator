@@ -2,6 +2,9 @@ export type AdminUserAnalyticsDailyFrequencySample = 'active7d' | 'tracked' | 'a
 
 export const ADMIN_USER_ANALYTICS_FREQUENCY_TREND_LOOKBACK_DAYS = 30;
 export const ADMIN_USER_ANALYTICS_FREQUENCY_PROFILE = 'v20260209' as const;
+export const ADMIN_USER_ANALYTICS_SNAPSHOT_BACKFILL_MAX_DAYS = 30;
+export const ADMIN_USER_ANALYTICS_SCHEDULED_SNAPSHOT_UTC_HOUR = 0;
+export const ADMIN_USER_ANALYTICS_SCHEDULED_SNAPSHOT_UTC_MINUTE = 5;
 
 export type AdminUserAnalyticsDailySnapshot = {
   metricDate: string;
@@ -56,6 +59,73 @@ export type AdminUserAnalyticsDailyFrequencyTrendPoint = {
   highPlusShare: number;
   veryHighPlusShare: number;
   extremeShare: number;
+};
+
+const UTC_DATE_KEY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
+const formatUtcDateKey = (date: Date): string => {
+  const year = date.getUTCFullYear();
+  const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(date.getUTCDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+export const normalizeAdminUserAnalyticsMetricDate = (value: string | null | undefined): string | null => {
+  const trimmed = typeof value === 'string' ? value.trim() : '';
+  if (!UTC_DATE_KEY_PATTERN.test(trimmed)) return null;
+  const date = new Date(`${trimmed}T00:00:00.000Z`);
+  if (Number.isNaN(date.getTime())) return null;
+  return formatUtcDateKey(date) === trimmed ? trimmed : null;
+};
+
+export const shiftAdminUserAnalyticsMetricDate = (metricDate: string, deltaDays: number): string => {
+  const normalized = normalizeAdminUserAnalyticsMetricDate(metricDate);
+  if (!normalized) {
+    throw new Error(`非法 metricDate：${metricDate}`);
+  }
+  const date = new Date(`${normalized}T00:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() + Math.trunc(deltaDays));
+  return formatUtcDateKey(date);
+};
+
+export const buildAdminUserAnalyticsScheduledSnapshotAt = (metricDate: string): Date => {
+  const normalized = normalizeAdminUserAnalyticsMetricDate(metricDate);
+  if (!normalized) {
+    throw new Error(`非法 metricDate：${metricDate}`);
+  }
+  return new Date(
+    `${normalized}T${String(ADMIN_USER_ANALYTICS_SCHEDULED_SNAPSHOT_UTC_HOUR).padStart(2, '0')}:${String(
+      ADMIN_USER_ANALYTICS_SCHEDULED_SNAPSHOT_UTC_MINUTE,
+    ).padStart(2, '0')}:00.000Z`,
+  );
+};
+
+export const buildAdminUserAnalyticsBackfillMetricDates = (
+  lookbackDays: number,
+  endMetricDate: string,
+): string[] => {
+  const normalizedEndDate = normalizeAdminUserAnalyticsMetricDate(endMetricDate);
+  if (!normalizedEndDate) {
+    throw new Error(`非法 endMetricDate：${endMetricDate}`);
+  }
+
+  const safeLookbackDays = Math.max(1, Math.min(ADMIN_USER_ANALYTICS_SNAPSHOT_BACKFILL_MAX_DAYS, Math.floor(lookbackDays)));
+  const dates: string[] = [];
+  for (let index = safeLookbackDays - 1; index >= 0; index -= 1) {
+    dates.push(shiftAdminUserAnalyticsMetricDate(normalizedEndDate, -index));
+  }
+  return dates;
+};
+
+export const findMissingAdminUserAnalyticsMetricDates = (
+  expectedMetricDates: string[],
+  existingMetricDates: string[],
+): string[] => {
+  const existing = new Set(existingMetricDates.map((value) => normalizeAdminUserAnalyticsMetricDate(value)).filter(Boolean));
+  return expectedMetricDates.filter((value) => {
+    const normalized = normalizeAdminUserAnalyticsMetricDate(value);
+    return Boolean(normalized) && !existing.has(normalized);
+  });
 };
 
 const readInt = (value: unknown): number => {

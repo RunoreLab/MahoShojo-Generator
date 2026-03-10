@@ -3,9 +3,11 @@
 import { loadEnvConfig } from '@next/env';
 
 import {
+  backfillAdminUserAnalyticsDailySnapshots,
   collectAdminUserAnalyticsDailySnapshot,
   recordAdminUserAnalyticsDailySnapshot,
 } from '@/lib/database/admin-user-analytics';
+import { normalizeAdminUserAnalyticsMetricDate } from '@/lib/admin/user-analytics-daily';
 
 const hasD1Config = (): boolean => {
   return Boolean(process.env.D1_DATABASE_ID && process.env.CLOUDFLARE_API_TOKEN && process.env.CLOUDFLARE_ACCOUNT_ID);
@@ -13,6 +15,23 @@ const hasD1Config = (): boolean => {
 
 const hasFlag = (flag: string): boolean => {
   return process.argv.slice(2).includes(flag);
+};
+
+const readArgValue = (flag: string): string => {
+  const args = process.argv.slice(2);
+  const index = args.indexOf(flag);
+  if (index < 0) return '';
+  return String(args[index + 1] ?? '').trim();
+};
+
+const parsePositiveIntegerArg = (flag: string): number | undefined => {
+  const raw = readArgValue(flag);
+  if (!raw) return undefined;
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    throw new Error(`${flag} 需要正整数`);
+  }
+  return parsed;
 };
 
 async function main() {
@@ -23,10 +42,40 @@ async function main() {
   }
 
   const dryRun = hasFlag('--dry-run');
+  const backfillDays = parsePositiveIntegerArg('--backfill-days');
+  const metricDateArg = readArgValue('--metric-date');
+  const metricDate = metricDateArg ? normalizeAdminUserAnalyticsMetricDate(metricDateArg) : null;
+  if (metricDateArg && !metricDate) {
+    throw new Error(`--metric-date 非法：${metricDateArg}`);
+  }
+  const skipCurrent = hasFlag('--skip-current');
   const snapshotAt = new Date();
 
+  const backfill = backfillDays
+    ? await backfillAdminUserAnalyticsDailySnapshots({
+        lookbackDays: backfillDays,
+        dryRun,
+      })
+    : null;
+
+  if (skipCurrent) {
+    console.log(
+      JSON.stringify(
+        {
+          success: true,
+          dryRun,
+          currentSnapshotSkipped: true,
+          backfill,
+        },
+        null,
+        2,
+      ),
+    );
+    return;
+  }
+
   if (dryRun) {
-    const snapshot = await collectAdminUserAnalyticsDailySnapshot(snapshotAt);
+    const snapshot = await collectAdminUserAnalyticsDailySnapshot(snapshotAt, metricDate ? { metricDate } : undefined);
     console.log(
       JSON.stringify(
         {
@@ -38,6 +87,7 @@ async function main() {
           coverageRate: snapshot.activityCoverageRate,
           frequencyTrendLookbackDays: snapshot.frequencyTrendLookbackDays,
           highPlusShareActive7d: snapshot.highPlusShareActive7d,
+          backfill,
         },
         null,
         2,
@@ -46,7 +96,7 @@ async function main() {
     return;
   }
 
-  const snapshot = await recordAdminUserAnalyticsDailySnapshot(snapshotAt);
+  const snapshot = await recordAdminUserAnalyticsDailySnapshot(snapshotAt, metricDate ? { metricDate } : undefined);
   console.log(
     JSON.stringify(
       {
@@ -62,6 +112,7 @@ async function main() {
         highPlusShareActive7d: snapshot.highPlusShareActive7d,
         highPlusShareTracked: snapshot.highPlusShareTracked,
         highPlusShareAll: snapshot.highPlusShareAll,
+        backfill,
       },
       null,
       2,

@@ -6,10 +6,16 @@ import {
   type DailyTrendAccumulator,
 } from '@/lib/admin/user-analytics-trends';
 import {
+  ADMIN_USER_ANALYTICS_SNAPSHOT_BACKFILL_MAX_DAYS,
   ADMIN_USER_ANALYTICS_FREQUENCY_PROFILE,
   ADMIN_USER_ANALYTICS_FREQUENCY_TREND_LOOKBACK_DAYS,
+  buildAdminUserAnalyticsBackfillMetricDates,
+  buildAdminUserAnalyticsScheduledSnapshotAt,
+  findMissingAdminUserAnalyticsMetricDates,
   getAdminUserAnalyticsDailyFrequencyTrendPoint,
   mapAdminUserAnalyticsDailySnapshotRow,
+  normalizeAdminUserAnalyticsMetricDate,
+  shiftAdminUserAnalyticsMetricDate,
   type AdminUserAnalyticsDailySnapshot,
   type AdminUserAnalyticsDailyFrequencySample,
 } from '@/lib/admin/user-analytics-daily';
@@ -221,13 +227,6 @@ const normalizeSample = (sample?: string): AdminFrequencySample => {
   return 'active7d';
 };
 
-const formatUtcDateKey = (date: Date): string => {
-  const year = date.getUTCFullYear();
-  const month = String(date.getUTCMonth() + 1).padStart(2, '0');
-  const day = String(date.getUTCDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-};
-
 const normalizeCohortGranularity = (input?: string): AdminCohortGranularity => {
   if (input === 'month') return 'month';
   return 'week';
@@ -313,8 +312,54 @@ export const ensureAdminUserAnalyticsDailyTable = async (): Promise<void> => {
   }
 };
 
+type AdminUserAnalyticsDailySnapshotCollectionOptions = {
+  metricDate?: string;
+};
+
+type AdminUserAnalyticsDailySnapshotWindow = {
+  metricDate: string;
+  snapshotAt: Date;
+  snapshotIso: string;
+  since24hIso: string;
+  since7dIso: string;
+  since30dIso: string;
+};
+
+export type AdminUserAnalyticsDailyBackfillResult = {
+  lookbackDays: number;
+  endMetricDate: string;
+  missingDates: string[];
+  writtenDates: string[];
+  approximateWindowMetrics: boolean;
+};
+
+const clampBackfillDays = (input?: number): number => {
+  if (!Number.isFinite(input)) return 7;
+  return Math.max(1, Math.min(ADMIN_USER_ANALYTICS_SNAPSHOT_BACKFILL_MAX_DAYS, Math.floor(input as number)));
+};
+
+const resolveAdminUserAnalyticsDailySnapshotWindow = (
+  snapshotAt = new Date(),
+  options?: AdminUserAnalyticsDailySnapshotCollectionOptions,
+): AdminUserAnalyticsDailySnapshotWindow => {
+  const explicitMetricDate = normalizeAdminUserAnalyticsMetricDate(options?.metricDate);
+  const effectiveSnapshotAt = explicitMetricDate ? buildAdminUserAnalyticsScheduledSnapshotAt(explicitMetricDate) : snapshotAt;
+  const snapshotIso = effectiveSnapshotAt.toISOString();
+  const metricDate = explicitMetricDate ?? snapshotIso.slice(0, 10);
+
+  return {
+    metricDate,
+    snapshotAt: effectiveSnapshotAt,
+    snapshotIso,
+    since24hIso: new Date(effectiveSnapshotAt.getTime() - 24 * 60 * 60 * 1000).toISOString(),
+    since7dIso: new Date(effectiveSnapshotAt.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString(),
+    since30dIso: new Date(effectiveSnapshotAt.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString(),
+  };
+};
+
 const getAdminUserAnalyticsFrequencySummary = async (
   sample: AdminFrequencySample,
+  snapshotAt?: Date,
 ): Promise<{
   sampleUsers: number;
   highPlusUsers: number;
@@ -328,6 +373,7 @@ const getAdminUserAnalyticsFrequencySummary = async (
     sample,
     profile: ADMIN_USER_ANALYTICS_FREQUENCY_PROFILE,
     lookbackDays: ADMIN_USER_ANALYTICS_FREQUENCY_TREND_LOOKBACK_DAYS,
+    snapshotAt,
   });
 
   return {
@@ -341,12 +387,12 @@ const getAdminUserAnalyticsFrequencySummary = async (
   };
 };
 
-export const collectAdminUserAnalyticsDailySnapshot = async (snapshotAt = new Date()): Promise<AdminUserAnalyticsDailySnapshot> => {
-  const metricDate = formatUtcDateKey(snapshotAt);
-  const snapshotIso = snapshotAt.toISOString();
-  const since24hIso = new Date(snapshotAt.getTime() - 24 * 60 * 60 * 1000).toISOString();
-  const since7dIso = new Date(snapshotAt.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
-  const since30dIso = new Date(snapshotAt.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString();
+export const collectAdminUserAnalyticsDailySnapshot = async (
+  snapshotAt = new Date(),
+  options?: AdminUserAnalyticsDailySnapshotCollectionOptions,
+): Promise<AdminUserAnalyticsDailySnapshot> => {
+  const snapshotWindow = resolveAdminUserAnalyticsDailySnapshotWindow(snapshotAt, options);
+  const { metricDate, snapshotAt: effectiveSnapshotAt, snapshotIso, since24hIso, since7dIso, since30dIso } = snapshotWindow;
 
   const snapshot: AdminUserAnalyticsDailySnapshot = {
     metricDate,
@@ -392,7 +438,9 @@ export const collectAdminUserAnalyticsDailySnapshot = async (snapshotAt = new Da
   };
 
   try {
-    const usersRow = readFirstRow(await queryFromD1('SELECT COUNT(1) AS total_users FROM users'));
+    const usersRow = readFirstRow(
+      await queryFromD1('SELECT COUNT(1) AS total_users FROM users WHERE created_at < ?', [snapshotIso]),
+    );
     snapshot.totalUsers = readInt(usersRow.total_users);
   } catch (error) {
     console.error('[AdminUserAnalytics] 构建日快照时读取用户总数失败:', error);
@@ -406,8 +454,9 @@ export const collectAdminUserAnalyticsDailySnapshot = async (snapshotAt = new Da
            COALESCE(SUM(CASE WHEN last_seen_at >= ? THEN 1 ELSE 0 END), 0) AS active_users_24h,
            COALESCE(SUM(CASE WHEN last_seen_at >= ? THEN 1 ELSE 0 END), 0) AS active_users_7d,
            COALESCE(SUM(CASE WHEN last_seen_at >= ? THEN 1 ELSE 0 END), 0) AS active_users_30d
-         FROM user_last_activity`,
-        [since24hIso, since7dIso, since30dIso],
+         FROM user_last_activity
+         WHERE last_seen_at < ?`,
+        [since24hIso, since7dIso, since30dIso, snapshotIso],
       ),
     );
     snapshot.trackedUsers = readInt(activityRow.tracked_users);
@@ -430,8 +479,8 @@ export const collectAdminUserAnalyticsDailySnapshot = async (snapshotAt = new Da
            COALESCE(SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END), 0) AS generation_failed_1d,
            COUNT(DISTINCT CASE WHEN user_id IS NOT NULL THEN user_id END) AS generation_distinct_users_1d
          FROM battle_report_generations
-         WHERE started_at >= ?`,
-        [since24hIso],
+         WHERE started_at >= ? AND started_at < ?`,
+        [since24hIso, snapshotIso],
       ),
     );
     snapshot.generationTotal1d = readInt(generationRow.generation_total_1d);
@@ -450,8 +499,8 @@ export const collectAdminUserAnalyticsDailySnapshot = async (snapshotAt = new Da
            COALESCE(SUM(CASE WHEN result_code = 'SUCCESS' THEN 1 ELSE 0 END), 0) AS auth_success_1d,
            COALESCE(SUM(CASE WHEN result_code != 'SUCCESS' THEN 1 ELSE 0 END), 0) AS auth_failed_1d
          FROM auth_audit_logs
-         WHERE created_at >= unixepoch(?)`,
-        [since24hIso],
+         WHERE created_at >= unixepoch(?) AND created_at < unixepoch(?)`,
+        [since24hIso, snapshotIso],
       ),
     );
     snapshot.authSuccess1d = readInt(authRow.auth_success_1d);
@@ -462,9 +511,9 @@ export const collectAdminUserAnalyticsDailySnapshot = async (snapshotAt = new Da
 
   try {
     const [active7dSummary, trackedSummary, allSummary] = await Promise.all([
-      getAdminUserAnalyticsFrequencySummary('active7d'),
-      getAdminUserAnalyticsFrequencySummary('tracked'),
-      getAdminUserAnalyticsFrequencySummary('all'),
+      getAdminUserAnalyticsFrequencySummary('active7d', effectiveSnapshotAt),
+      getAdminUserAnalyticsFrequencySummary('tracked', effectiveSnapshotAt),
+      getAdminUserAnalyticsFrequencySummary('all', effectiveSnapshotAt),
     ]);
 
     snapshot.sampleUsersActive7d = active7dSummary.sampleUsers;
@@ -500,10 +549,13 @@ export const collectAdminUserAnalyticsDailySnapshot = async (snapshotAt = new Da
   return snapshot;
 };
 
-export const recordAdminUserAnalyticsDailySnapshot = async (snapshotAt = new Date()): Promise<AdminUserAnalyticsDailySnapshot> => {
+export const recordAdminUserAnalyticsDailySnapshot = async (
+  snapshotAt = new Date(),
+  options?: AdminUserAnalyticsDailySnapshotCollectionOptions,
+): Promise<AdminUserAnalyticsDailySnapshot> => {
   await ensureAdminUserAnalyticsDailyTable();
 
-  const snapshot = await collectAdminUserAnalyticsDailySnapshot(snapshotAt);
+  const snapshot = await collectAdminUserAnalyticsDailySnapshot(snapshotAt, options);
   const params = [
     snapshot.metricDate,
     snapshot.totalUsers,
@@ -635,6 +687,57 @@ export const recordAdminUserAnalyticsDailySnapshot = async (snapshotAt = new Dat
   return snapshot;
 };
 
+const listAdminUserAnalyticsDailyMetricDates = async (
+  startMetricDate: string,
+  endMetricDate: string,
+): Promise<string[]> => {
+  const rows = readRows(
+    await queryFromD1(
+      `SELECT metric_date
+       FROM admin_user_analytics_daily
+       WHERE metric_date >= ? AND metric_date <= ?
+       ORDER BY metric_date ASC`,
+      [startMetricDate, endMetricDate],
+    ),
+  );
+
+  return rows
+    .map((row) => normalizeAdminUserAnalyticsMetricDate(String(row.metric_date ?? '')))
+    .filter((value): value is string => Boolean(value));
+};
+
+export const backfillAdminUserAnalyticsDailySnapshots = async (options?: {
+  lookbackDays?: number;
+  endMetricDate?: string;
+  dryRun?: boolean;
+}): Promise<AdminUserAnalyticsDailyBackfillResult> => {
+  await ensureAdminUserAnalyticsDailyTable();
+
+  const lookbackDays = clampBackfillDays(options?.lookbackDays);
+  const todayMetricDate = new Date().toISOString().slice(0, 10);
+  const defaultEndMetricDate = shiftAdminUserAnalyticsMetricDate(todayMetricDate, -1);
+  const endMetricDate = normalizeAdminUserAnalyticsMetricDate(options?.endMetricDate) ?? defaultEndMetricDate;
+  const candidateDates = buildAdminUserAnalyticsBackfillMetricDates(lookbackDays, endMetricDate);
+  const existingDates = await listAdminUserAnalyticsDailyMetricDates(candidateDates[0], endMetricDate);
+  const missingDates = findMissingAdminUserAnalyticsMetricDates(candidateDates, existingDates);
+  const writtenDates: string[] = [];
+
+  if (!options?.dryRun) {
+    for (const metricDate of missingDates) {
+      await recordAdminUserAnalyticsDailySnapshot(buildAdminUserAnalyticsScheduledSnapshotAt(metricDate), { metricDate });
+      writtenDates.push(metricDate);
+    }
+  }
+
+  return {
+    lookbackDays,
+    endMetricDate,
+    missingDates,
+    writtenDates,
+    approximateWindowMetrics: missingDates.length > 0,
+  };
+};
+
 export const getAdminUserAnalyticsOverview = async (lookbackDaysInput?: number): Promise<AdminUserAnalyticsOverview> => {
   const lookbackDays = clampLookbackDays(lookbackDaysInput);
   const now = Date.now();
@@ -728,11 +831,17 @@ export const getAdminUserAnalyticsOverview = async (lookbackDaysInput?: number):
   return output;
 };
 
-const buildFrequencySql = (sample: AdminFrequencySample, useActivityTable: boolean): { sql: string; paramsBuilder: (sinceLookbackIso: string, since7dIso: string) => unknown[] } => {
+const buildFrequencySql = (
+  sample: AdminFrequencySample,
+  useActivityTable: boolean,
+): {
+  sql: string;
+  paramsBuilder: (sinceLookbackIso: string, since7dIso: string, snapshotAtIso: string) => unknown[];
+} => {
   const sampleWhere = (() => {
     if (sample === 'all') return '1 = 1';
-    if (sample === 'tracked') return 'ub.last_seen_at IS NOT NULL';
-    return 'ub.last_seen_at >= ?';
+    if (sample === 'tracked') return 'ub.last_seen_at IS NOT NULL AND ub.last_seen_at < ?';
+    return 'ub.last_seen_at >= ? AND ub.last_seen_at < ?';
   })();
 
   const activityJoinSql = useActivityTable
@@ -747,7 +856,7 @@ const buildFrequencySql = (sample: AdminFrequencySample, useActivityTable: boole
         COUNT(1) AS total_count,
         COALESCE(SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END), 0) AS completed_count
       FROM battle_report_generations
-      WHERE user_id IS NOT NULL AND started_at >= ?
+      WHERE user_id IS NOT NULL AND started_at >= ? AND started_at < ?
       GROUP BY user_id
     ),
     user_base AS (
@@ -779,11 +888,14 @@ const buildFrequencySql = (sample: AdminFrequencySample, useActivityTable: boole
 
   return {
     sql,
-    paramsBuilder: (sinceLookbackIso: string, since7dIso: string) => {
+    paramsBuilder: (sinceLookbackIso: string, since7dIso: string, snapshotAtIso: string) => {
       if (sample === 'active7d') {
-        return [sinceLookbackIso, since7dIso];
+        return [sinceLookbackIso, snapshotAtIso, since7dIso, snapshotAtIso];
       }
-      return [sinceLookbackIso];
+      if (sample === 'tracked') {
+        return [sinceLookbackIso, snapshotAtIso, snapshotAtIso];
+      }
+      return [sinceLookbackIso, snapshotAtIso];
     },
   };
 };
@@ -792,13 +904,16 @@ export const getAdminUserAnalyticsFrequency = async (options?: {
   sample?: string;
   profile?: string;
   lookbackDays?: number;
+  snapshotAt?: Date;
 }): Promise<AdminUserAnalyticsFrequency> => {
   const sample = normalizeSample(options?.sample);
   const profile: AdminFrequencyProfile = ADMIN_USER_ANALYTICS_FREQUENCY_PROFILE;
   const lookbackDays = clampLookbackDays(options?.lookbackDays ?? 30);
-  const now = Date.now();
-  const sinceLookbackIso = new Date(now - lookbackDays * 24 * 60 * 60 * 1000).toISOString();
-  const since7dIso = new Date(now - 7 * 24 * 60 * 60 * 1000).toISOString();
+  const snapshotAt = options?.snapshotAt instanceof Date ? options.snapshotAt : new Date();
+  const snapshotAtMs = snapshotAt.getTime();
+  const snapshotAtIso = snapshotAt.toISOString();
+  const sinceLookbackIso = new Date(snapshotAtMs - lookbackDays * 24 * 60 * 60 * 1000).toISOString();
+  const since7dIso = new Date(snapshotAtMs - 7 * 24 * 60 * 60 * 1000).toISOString();
 
   const output: AdminUserAnalyticsFrequency = {
     sample,
@@ -819,7 +934,7 @@ export const getAdminUserAnalyticsFrequency = async (options?: {
 
   const runQuery = async (useActivityTable: boolean): Promise<void> => {
     const { sql, paramsBuilder } = buildFrequencySql(sample, useActivityTable);
-    const result = await queryFromD1(sql, paramsBuilder(sinceLookbackIso, since7dIso));
+    const result = await queryFromD1(sql, paramsBuilder(sinceLookbackIso, since7dIso, snapshotAtIso));
     const row = readFirstRow(result);
 
     const sampleUsers = readInt(row.sample_users);

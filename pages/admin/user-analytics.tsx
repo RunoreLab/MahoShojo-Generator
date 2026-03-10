@@ -312,6 +312,38 @@ export default function UserAnalyticsPage() {
     }
   }, [fetchData]);
 
+  const handleBackfillDailySnapshot = useCallback(async () => {
+    setSnapshotRunning(true);
+    setSnapshotMessage(null);
+    try {
+      const response = await fetch('/api/admin/user-analytics/snapshot?backfillDays=7&includeCurrent=0', {
+        method: 'POST',
+      });
+      const json = (await response.json()) as {
+        success?: boolean;
+        backfill?: { missingDates?: string[]; writtenDates?: string[] };
+        error?: string;
+      };
+      if (!response.ok || json.success !== true) {
+        throw new Error(json.error || '执行失败');
+      }
+      const writtenDates = Array.isArray(json.backfill?.writtenDates) ? json.backfill?.writtenDates ?? [] : [];
+      const missingDates = Array.isArray(json.backfill?.missingDates) ? json.backfill?.missingDates ?? [] : [];
+      if (writtenDates.length > 0) {
+        setSnapshotMessage(`已补齐 ${writtenDates.length} 天缺口：${writtenDates.join(', ')}（窗口型指标为 best-effort）`);
+      } else if (missingDates.length > 0) {
+        setSnapshotMessage(`检测到 ${missingDates.length} 天缺口，但本次未写入`);
+      } else {
+        setSnapshotMessage('近 7 天没有检测到缺失快照');
+      }
+      await fetchData(true);
+    } catch (runError) {
+      setSnapshotMessage(runError instanceof Error ? `补缺失快照失败：${runError.message}` : '补缺失快照失败');
+    } finally {
+      setSnapshotRunning(false);
+    }
+  }, [fetchData]);
+
   const overview = data?.stats.overview;
   const frequency = data?.stats.frequency;
   const retention = data?.stats.retention;
@@ -841,6 +873,14 @@ export default function UserAnalyticsPage() {
               </button>
               <button
                 type="button"
+                onClick={() => void handleBackfillDailySnapshot()}
+                className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm hover:bg-slate-50"
+              >
+                <RefreshCw className={`h-4 w-4 ${snapshotRunning ? 'animate-spin' : ''}`} />
+                补缺失快照
+              </button>
+              <button
+                type="button"
                 onClick={() => void fetchData(true)}
                 className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm hover:bg-slate-50"
               >
@@ -1057,7 +1097,8 @@ export default function UserAnalyticsPage() {
           <div className="mb-6 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
             窗口型趋势说明：当前仅基于 <code>admin_user_analytics_daily</code> 日快照记录，不引入 <code>user_activity_daily</code>。
             因此 24h / 7d / 30d 活跃、覆盖率与高频占比只从首个快照日开始显示，不对更早历史做严格回填。
-            平台若未配置定时调用，则需要手动点击“记录今日快照”或执行脚本 / 定时任务。
+            当前定时任务会自动尝试补齐最近 7 天缺口，但这些窗口型回补仍属于 best-effort。
+            平台若未配置定时调用，则需要手动点击“记录今日快照”/“补缺失快照”或执行脚本。
           </div>
 
           {frequency ? (

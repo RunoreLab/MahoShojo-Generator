@@ -298,6 +298,19 @@ CREATE TABLE IF NOT EXISTS user_activity_daily (
 1. 新增脚本或定时任务：每日 UTC 00:05 跑一次
 2. 后台提供“补齐缺失日期快照”按钮，仅用于运维
 
+### 4.4.1 2026-03-10 落地补充
+
+当前仓库已补充：
+
+1. GitHub Actions 定时触发脚本
+2. `/api/admin/user-analytics/snapshot` 的 token 校验入口
+3. 最近 7 天缺失日期自动补洞
+4. 后台手动“补缺失快照”入口
+
+详细运行方式与 token 设计说明见：
+
+- `docs/ADMIN_USER_ANALYTICS_SNAPSHOT_AUTOMATION_RUNBOOK_2026-03-10.md`
+
 ## 4.5 历史回填策略
 
 ### 可回填
@@ -320,6 +333,10 @@ CREATE TABLE IF NOT EXISTS user_activity_daily (
 因此页面必须显式标注：
 
 - “该趋势自 YYYY-MM-DD 起开始记录”
+
+补充说明：
+
+- 当前自动补洞已经落地，但对 `user_last_activity` 派生出的窗口型指标仍只能做 best-effort，不应宣传为严格历史回填。
 
 ---
 

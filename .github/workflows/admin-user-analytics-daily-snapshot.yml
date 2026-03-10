@@ -38,7 +38,7 @@ jobs:
           ADMIN_USER_ANALYTICS_SNAPSHOT_TOKEN: ${{ secrets.ADMIN_USER_ANALYTICS_SNAPSHOT_TOKEN }}
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.dry_run }}" = "true" ]; then
-            node scripts/trigger-admin-user-analytics-snapshot.mjs --dry-run
+            node scripts/trigger-admin-user-analytics-snapshot.mjs --dry-run --backfill-days 7
           else
-            node scripts/trigger-admin-user-analytics-snapshot.mjs
+            node scripts/trigger-admin-user-analytics-snapshot.mjs --backfill-days 7
           fi

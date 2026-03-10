@@ -1,10 +1,17 @@
 import { describe, expect, it } from 'bun:test';
 
 import {
+  ADMIN_USER_ANALYTICS_SCHEDULED_SNAPSHOT_UTC_HOUR,
+  ADMIN_USER_ANALYTICS_SCHEDULED_SNAPSHOT_UTC_MINUTE,
   ADMIN_USER_ANALYTICS_FREQUENCY_PROFILE,
   ADMIN_USER_ANALYTICS_FREQUENCY_TREND_LOOKBACK_DAYS,
+  buildAdminUserAnalyticsBackfillMetricDates,
+  buildAdminUserAnalyticsScheduledSnapshotAt,
+  findMissingAdminUserAnalyticsMetricDates,
   getAdminUserAnalyticsDailyFrequencyTrendPoint,
   mapAdminUserAnalyticsDailySnapshotRow,
+  normalizeAdminUserAnalyticsMetricDate,
+  shiftAdminUserAnalyticsMetricDate,
 } from '@/lib/admin/user-analytics-daily';
 
 describe('user analytics daily snapshot mapper', () => {
@@ -115,5 +122,32 @@ describe('user analytics daily snapshot mapper', () => {
 
     expect(snapshot.frequencyTrendLookbackDays).toBe(ADMIN_USER_ANALYTICS_FREQUENCY_TREND_LOOKBACK_DAYS);
     expect(snapshot.frequencyProfile).toBe(ADMIN_USER_ANALYTICS_FREQUENCY_PROFILE);
+  });
+
+  it('标准化 metricDate 并拒绝非法日期', () => {
+    expect(normalizeAdminUserAnalyticsMetricDate('2026-03-10')).toBe('2026-03-10');
+    expect(normalizeAdminUserAnalyticsMetricDate('2026-02-30')).toBeNull();
+    expect(normalizeAdminUserAnalyticsMetricDate('20260310')).toBeNull();
+  });
+
+  it('按定时任务约定构造补快照时间点并支持日期偏移', () => {
+    expect(shiftAdminUserAnalyticsMetricDate('2026-03-10', -2)).toBe('2026-03-08');
+
+    const scheduledAt = buildAdminUserAnalyticsScheduledSnapshotAt('2026-03-10');
+    expect(scheduledAt.toISOString()).toBe(
+      `2026-03-10T${String(ADMIN_USER_ANALYTICS_SCHEDULED_SNAPSHOT_UTC_HOUR).padStart(2, '0')}:${String(
+        ADMIN_USER_ANALYTICS_SCHEDULED_SNAPSHOT_UTC_MINUTE,
+      ).padStart(2, '0')}:00.000Z`,
+    );
+  });
+
+  it('按回补窗口找出缺失日期', () => {
+    const expectedDates = buildAdminUserAnalyticsBackfillMetricDates(4, '2026-03-10');
+    expect(expectedDates).toEqual(['2026-03-07', '2026-03-08', '2026-03-09', '2026-03-10']);
+
+    expect(findMissingAdminUserAnalyticsMetricDates(expectedDates, ['2026-03-07', '2026-03-09'])).toEqual([
+      '2026-03-08',
+      '2026-03-10',
+    ]);
   });
 });

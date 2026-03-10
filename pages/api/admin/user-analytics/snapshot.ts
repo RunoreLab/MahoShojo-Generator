@@ -1,7 +1,12 @@
 import type { NextRequest } from 'next/server';
 
+import {
+  ADMIN_USER_ANALYTICS_SNAPSHOT_BACKFILL_MAX_DAYS,
+  normalizeAdminUserAnalyticsMetricDate,
+} from '@/lib/admin/user-analytics-daily';
 import { createRequestAuthUserResolver } from '@/lib/auth/request-auth-user';
 import {
+  backfillAdminUserAnalyticsDailySnapshots,
   collectAdminUserAnalyticsDailySnapshot,
   recordAdminUserAnalyticsDailySnapshot,
 } from '@/lib/database/admin-user-analytics';
@@ -27,6 +32,12 @@ const isValidSnapshotToken = (req: Request): boolean => {
   return provided.length > 0 && provided === expected;
 };
 
+const parseBackfillDays = (value: string | null): number => {
+  const parsed = Number.parseInt((value || '').trim(), 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return 0;
+  return Math.max(1, Math.min(ADMIN_USER_ANALYTICS_SNAPSHOT_BACKFILL_MAX_DAYS, parsed));
+};
+
 export default async function handler(req: NextRequest) {
   if (req.method !== 'POST') {
     return new Response(JSON.stringify({ success: false, error: 'Method Not Allowed' }), { status: 405 });
@@ -43,11 +54,35 @@ export default async function handler(req: NextRequest) {
 
   const url = new URL(req.url);
   const dryRun = url.searchParams.get('dryRun') === '1';
+  const rawMetricDate = url.searchParams.get('metricDate');
+  const metricDate = rawMetricDate ? normalizeAdminUserAnalyticsMetricDate(rawMetricDate) : null;
+  if (rawMetricDate && !metricDate) {
+    return new Response(JSON.stringify({ success: false, error: 'metricDate 非法，必须为 YYYY-MM-DD' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+  const includeCurrent = metricDate ? true : url.searchParams.get('includeCurrent') !== '0';
+  const backfillDays = parseBackfillDays(url.searchParams.get('backfillDays'));
+  if (!includeCurrent && backfillDays <= 0) {
+    return new Response(JSON.stringify({ success: false, error: '未指定任何快照操作' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
 
   try {
-    const snapshot = dryRun
-      ? await collectAdminUserAnalyticsDailySnapshot(new Date())
-      : await recordAdminUserAnalyticsDailySnapshot(new Date());
+    const backfill = backfillDays > 0
+      ? await backfillAdminUserAnalyticsDailySnapshots({
+          lookbackDays: backfillDays,
+          dryRun,
+        })
+      : null;
+    const snapshot = includeCurrent
+      ? dryRun
+        ? await collectAdminUserAnalyticsDailySnapshot(new Date(), metricDate ? { metricDate } : undefined)
+        : await recordAdminUserAnalyticsDailySnapshot(new Date(), metricDate ? { metricDate } : undefined)
+      : null;
 
     return new Response(
       JSON.stringify({
@@ -55,6 +90,7 @@ export default async function handler(req: NextRequest) {
         dryRun,
         trigger: allowedByToken ? 'token' : 'admin-session',
         snapshot,
+        backfill,
       }),
       {
         status: 200,
