@@ -51,6 +51,10 @@ export default async function handler(req: NextRequest) {
       isRecommended: searchParams.get('isRecommended') as '0' | '1' | undefined,
       type: searchParams.get('type') as 'character' | 'scenario' | 'history' | 'questionnaire' | undefined,
       search: searchParams.get('search') || undefined,
+      hasPendingUpdate: searchParams.get('hasPendingUpdate') as '0' | '1' | undefined,
+      metricsState: searchParams.get('metricsState') as 'stale' | 'fresh' | 'missing' | undefined,
+      hasVisualAssets: searchParams.get('hasVisualAssets') as '0' | '1' | undefined,
+      sizeBucket: searchParams.get('sizeBucket') as 'warning' | 'overLimit' | undefined,
       includePendingUpdates: searchParams.get('includePendingUpdates') === '1',
     };
     

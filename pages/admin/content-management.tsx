@@ -8,6 +8,7 @@ import { debounce } from '@/lib/debounce';
 import DataCardDetailsModal from '@/components/DataCardDetailsModal';
 import { AdminTableScroll } from '@/components/admin/AdminTableScroll';
 import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
+import { MAX_DATA_CARD_BYTES, formatKilobytes } from '@/lib/data-card-size';
 
 // 定义数据卡类型接口
 interface DataCard {
@@ -30,6 +31,10 @@ interface DataCard {
   pending_update_description?: string | null;
   pending_update_data?: string | null;
   pending_update_created_at?: string | null;
+  size_bytes?: number | null;
+  size_chars?: number | null;
+  metrics_stale?: number | null;
+  has_visual_assets?: number | null;
 }
 
 interface AiTargetSnapshotItem {
@@ -65,6 +70,15 @@ const parseQuestionnaireNativeAllowed = (rawData: string | null | undefined): bo
   return false;
 };
 
+const SIZE_WARNING_THRESHOLD_BYTES = Math.floor(MAX_DATA_CARD_BYTES * 0.8);
+
+const formatSizeBadge = (bytes: number | null | undefined): string | null => {
+  if (typeof bytes !== 'number' || !Number.isFinite(bytes)) return null;
+  if (bytes >= MAX_DATA_CARD_BYTES) return `超预算 ${formatKilobytes(bytes)} KB`;
+  if (bytes >= SIZE_WARNING_THRESHOLD_BYTES) return `接近上限 ${formatKilobytes(bytes)} KB`;
+  return null;
+};
+
 const ContentManagementPage: React.FC = () => {
   const router = useRouter();
   const isComposingSearchRef = useRef(false);
@@ -84,6 +98,10 @@ const ContentManagementPage: React.FC = () => {
     isPublic: '',
     type: '',
     isRecommended: '',
+    hasPendingUpdate: '',
+    metricsState: '',
+    hasVisualAssets: '',
+    sizeBucket: '',
   });
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isExporting, setIsExporting] = useState(false);
@@ -181,6 +199,10 @@ const ContentManagementPage: React.FC = () => {
         isPublic: currentFilters.isPublic,
         type: currentFilters.type,
         isRecommended: currentFilters.isRecommended,
+        hasPendingUpdate: currentFilters.hasPendingUpdate,
+        metricsState: currentFilters.metricsState,
+        hasVisualAssets: currentFilters.hasVisualAssets,
+        sizeBucket: currentFilters.sizeBucket,
         includePendingUpdates: '1',
       });
       const response = await fetch(`/api/admin/data-cards?${params.toString()}`, { signal: abortController.signal });
@@ -211,6 +233,10 @@ const ContentManagementPage: React.FC = () => {
         isPublic: router.query.isPublic as string || '',
         type: router.query.type as string || '',
         isRecommended: router.query.isRecommended as string || '',
+        hasPendingUpdate: router.query.hasPendingUpdate as string || '',
+        metricsState: router.query.metricsState as string || '',
+        hasVisualAssets: router.query.hasVisualAssets as string || '',
+        sizeBucket: router.query.sizeBucket as string || '',
       };
       setFilters(newFilters);
       fetchData(newFilters);
@@ -240,6 +266,10 @@ const ContentManagementPage: React.FC = () => {
       if (newFilters.isPublic) query.isPublic = newFilters.isPublic;
       if (newFilters.type) query.type = newFilters.type;
       if (newFilters.isRecommended) query.isRecommended = newFilters.isRecommended;
+      if (newFilters.hasPendingUpdate) query.hasPendingUpdate = newFilters.hasPendingUpdate;
+      if (newFilters.metricsState) query.metricsState = newFilters.metricsState;
+      if (newFilters.hasVisualAssets) query.hasVisualAssets = newFilters.hasVisualAssets;
+      if (newFilters.sizeBucket) query.sizeBucket = newFilters.sizeBucket;
       
       router.push({ pathname: router.pathname, query }, undefined, { shallow: true });
   }, [router]);
@@ -931,7 +961,7 @@ ${JSON.stringify(cardsToCopy, null, 2)}
 
           {/* 筛选器区域 */}
           <div className="bg-white p-4 rounded-lg shadow-sm mb-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8 gap-4">
               <input
                 type="text"
                 name="search"
@@ -992,6 +1022,27 @@ ${JSON.stringify(cardsToCopy, null, 2)}
                 <option value="1">仅推荐</option>
                 <option value="0">未推荐</option>
               </select>
+              <select name="hasPendingUpdate" value={filters.hasPendingUpdate} onChange={handleFilterChange} className="input-field">
+                <option value="">更新状态</option>
+                <option value="1">仅更新待审核</option>
+                <option value="0">排除更新待审核</option>
+              </select>
+              <select name="metricsState" value={filters.metricsState} onChange={handleFilterChange} className="input-field">
+                <option value="">技术值状态</option>
+                <option value="stale">待重算 / 已过期</option>
+                <option value="fresh">已同步</option>
+                <option value="missing">缺失</option>
+              </select>
+              <select name="hasVisualAssets" value={filters.hasVisualAssets} onChange={handleFilterChange} className="input-field">
+                <option value="">视觉资产</option>
+                <option value="1">包含视觉资产</option>
+                <option value="0">不含视觉资产</option>
+              </select>
+              <select name="sizeBucket" value={filters.sizeBucket} onChange={handleFilterChange} className="input-field">
+                <option value="">JSON 体积</option>
+                <option value="warning">接近上限（≥80%）</option>
+                <option value="overLimit">超预算</option>
+              </select>
             </div>
           </div>
 
@@ -1043,6 +1094,9 @@ ${JSON.stringify(cardsToCopy, null, 2)}
                     const displayData = hasPendingUpdate ? (card.pending_update_data ?? card.data) : card.data;
                     const questionnaireNativeAllowed = card.type === 'questionnaire' ? parseQuestionnaireNativeAllowed(card.data) : false;
                     const canToggleQuestionnaireNative = card.type === 'questionnaire' && !hasPendingUpdate;
+                    const metricsStale = card.metrics_stale === 1;
+                    const hasVisualAssets = card.has_visual_assets === 1;
+                    const sizeBadgeText = formatSizeBadge(card.size_bytes);
 
                     return (
                       <tr key={card.id} className="bg-white border-b hover:bg-gray-50">
@@ -1089,6 +1143,29 @@ ${JSON.stringify(cardsToCopy, null, 2)}
                             )}
                           </button>
                           <div className="text-xs text-gray-500">by {card.username}</div>
+                          <div className="mt-1 flex flex-wrap gap-1">
+                            {hasVisualAssets && (
+                              <span className="inline-flex items-center px-2 py-0.5 text-[11px] rounded-full bg-fuchsia-100 text-fuchsia-700">
+                                含视觉资产
+                              </span>
+                            )}
+                            {metricsStale && (
+                              <span className="inline-flex items-center px-2 py-0.5 text-[11px] rounded-full bg-indigo-100 text-indigo-700">
+                                技术值待重算
+                              </span>
+                            )}
+                            {sizeBadgeText && (
+                              <span
+                                className={`inline-flex items-center px-2 py-0.5 text-[11px] rounded-full ${
+                                  (card.size_bytes ?? 0) >= MAX_DATA_CARD_BYTES
+                                    ? 'bg-red-100 text-red-700'
+                                    : 'bg-amber-100 text-amber-700'
+                                }`}
+                              >
+                                {sizeBadgeText}
+                              </span>
+                            )}
+                          </div>
                           {hasPendingUpdate && (
                             <div className="mt-1 flex items-center gap-2">
                               <span className="text-[11px] text-gray-500">原：{card.name}</span>
@@ -1150,9 +1227,16 @@ ${JSON.stringify(cardsToCopy, null, 2)}
                               }
 
                               return (
-                                  <p className="truncate" title={titleToShow}>
-                                      {contentToShow}
-                                  </p>
+                                  <div className="space-y-1">
+                                      <p className="truncate" title={titleToShow}>
+                                          {contentToShow}
+                                      </p>
+                                      <div className="text-[11px] text-gray-400">
+                                        {typeof card.size_bytes === 'number' && Number.isFinite(card.size_bytes)
+                                          ? `${formatKilobytes(card.size_bytes)} KB`
+                                          : '大小未知'}
+                                      </div>
+                                  </div>
                               );
                           })()}
                         </td>

@@ -2,6 +2,7 @@
 
 import { getAdminPvpOverview } from './admin-pvp';
 import { getAdminUserAccountSummary } from './admin-user-accounts';
+import { MAX_DATA_CARD_BYTES } from '@/lib/data-card-size';
 import { queryFromD1 } from './core';
 
 /**
@@ -527,6 +528,10 @@ export async function getAdminDataCards(filters: {
   isRecommended?: '0' | '1';
   type?: 'character' | 'scenario' | 'history' | 'questionnaire';
   search?: string; // 搜索名称、描述或作者名
+  hasPendingUpdate?: '0' | '1';
+  metricsState?: 'stale' | 'fresh' | 'missing';
+  hasVisualAssets?: '0' | '1';
+  sizeBucket?: 'warning' | 'overLimit';
   includePendingUpdates?: boolean; // 是否将待审核更新信息合并进列表
 }): Promise<{ cards: any[], total: number }> {
   const {
@@ -539,16 +544,51 @@ export async function getAdminDataCards(filters: {
     isRecommended,
     type,
     search,
+    hasPendingUpdate,
+    metricsState,
+    hasVisualAssets,
+    sizeBucket,
     includePendingUpdates = false,
   } = filters;
 
+  const sizeWarningThreshold = Math.floor(MAX_DATA_CARD_BYTES * 0.8);
   const offset = (page - 1) * limit;
   const whereClauses: string[] = [];
   const params: (string | number)[] = [];
 
+  const needsPendingUpdateJoin = includePendingUpdates || hasPendingUpdate === '0' || hasPendingUpdate === '1';
+  const effectiveDataSql = needsPendingUpdateJoin ? 'COALESCE(dcu.data, dc.data)' : 'dc.data';
+  const sizeBytesSql = `LENGTH(CAST(${effectiveDataSql} AS BLOB))`;
+  const sizeCharsSql = `LENGTH(${effectiveDataSql})`;
+  const loweredEffectiveDataSql = `LOWER(${effectiveDataSql})`;
+  const hasVisualAssetsSql = `CASE
+    WHEN ${loweredEffectiveDataSql} LIKE '%data:image/%'
+      OR ${loweredEffectiveDataSql} LIKE '%"portrait"%'
+      OR ${loweredEffectiveDataSql} LIKE '%"illustration"%'
+      OR ${loweredEffectiveDataSql} LIKE '%"avatar"%'
+      OR ${loweredEffectiveDataSql} LIKE '%"imageurl"%'
+      OR ${loweredEffectiveDataSql} LIKE '%"coverimage"%'
+      OR ${loweredEffectiveDataSql} LIKE '%"thumbnail"%'
+      OR ${loweredEffectiveDataSql} LIKE '%.png%'
+      OR ${loweredEffectiveDataSql} LIKE '%.jpg%'
+      OR ${loweredEffectiveDataSql} LIKE '%.jpeg%'
+      OR ${loweredEffectiveDataSql} LIKE '%.webp%'
+      OR ${loweredEffectiveDataSql} LIKE '%.gif%'
+      OR ${loweredEffectiveDataSql} LIKE '%.svg%'
+      OR ${loweredEffectiveDataSql} LIKE '%.avif%'
+    THEN 1
+    ELSE 0
+  END`;
+  const metricsStaleSql = `CASE
+    WHEN ${needsPendingUpdateJoin ? 'dcu.id IS NOT NULL' : '0 = 1'} THEN 1
+    WHEN dcm.data_card_id IS NULL THEN 1
+    WHEN COALESCE(dcm.data_card_updated_at, '') != COALESCE(dc.updated_at, '') THEN 1
+    ELSE 0
+  END`;
+
   // --- 动态构建 WHERE 子句 ---
   if (reviewStatus) {
-    if (includePendingUpdates && reviewStatus === 'pending') {
+    if (needsPendingUpdateJoin && reviewStatus === 'pending') {
       whereClauses.push("(dc.review_status = 'pending' OR dcu.id IS NOT NULL)");
     } else {
       whereClauses.push('dc.review_status = ?');
@@ -579,11 +619,35 @@ export async function getAdminDataCards(filters: {
       params.push(searchTerm, searchTerm, searchTerm, searchTerm);
     }
   }
+  if (hasPendingUpdate === '1') {
+    whereClauses.push('dcu.id IS NOT NULL');
+  } else if (hasPendingUpdate === '0') {
+    whereClauses.push('dcu.id IS NULL');
+  }
+  if (metricsState === 'stale') {
+    whereClauses.push(`(${metricsStaleSql}) = 1`);
+  } else if (metricsState === 'fresh') {
+    whereClauses.push(`(${metricsStaleSql}) = 0`);
+  } else if (metricsState === 'missing') {
+    whereClauses.push('dcm.data_card_id IS NULL');
+  }
+  if (hasVisualAssets === '1') {
+    whereClauses.push(`(${hasVisualAssetsSql}) = 1`);
+  } else if (hasVisualAssets === '0') {
+    whereClauses.push(`(${hasVisualAssetsSql}) = 0`);
+  }
+  if (sizeBucket === 'warning') {
+    whereClauses.push(`${sizeBytesSql} >= ? AND ${sizeBytesSql} < ?`);
+    params.push(sizeWarningThreshold, MAX_DATA_CARD_BYTES);
+  } else if (sizeBucket === 'overLimit') {
+    whereClauses.push(`${sizeBytesSql} >= ?`);
+    params.push(MAX_DATA_CARD_BYTES);
+  }
 
   const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
 
   // --- 分别构建数据查询和总数查询 ---
-  const pendingUpdateSelectSql = includePendingUpdates
+  const pendingUpdateSelectSql = needsPendingUpdateJoin
     ? `,
       dcu.id AS pending_update_id,
       dcu.name AS pending_update_name,
@@ -593,7 +657,7 @@ export async function getAdminDataCards(filters: {
     `
     : '';
 
-  const pendingUpdateJoinSql = includePendingUpdates
+  const pendingUpdateJoinSql = needsPendingUpdateJoin
     ? `LEFT JOIN (
         SELECT dcu.*
         FROM data_card_updates dcu
@@ -610,12 +674,20 @@ export async function getAdminDataCards(filters: {
       ) dcu ON dcu.data_card_id = dc.id`
     : '';
 
-  const countSelectSql = includePendingUpdates ? 'COUNT(DISTINCT dc.id) as total' : 'COUNT(dc.id) as total';
+  const countSelectSql = needsPendingUpdateJoin ? 'COUNT(DISTINCT dc.id) as total' : 'COUNT(dc.id) as total';
 
   const dataSql = `
-    SELECT dc.*, u.username ${pendingUpdateSelectSql}
+    SELECT
+      dc.*,
+      u.username,
+      ${sizeBytesSql} AS size_bytes,
+      ${sizeCharsSql} AS size_chars,
+      (${metricsStaleSql}) AS metrics_stale,
+      (${hasVisualAssetsSql}) AS has_visual_assets
+      ${pendingUpdateSelectSql}
     FROM data_cards dc
     JOIN users u ON dc.user_id = u.id
+    LEFT JOIN data_card_metrics dcm ON dcm.data_card_id = dc.id
     ${pendingUpdateJoinSql}
     ${whereSql}
     ORDER BY dc.${sortBy} ${sortOrder.toUpperCase()}
@@ -625,6 +697,7 @@ export async function getAdminDataCards(filters: {
     SELECT ${countSelectSql}
     FROM data_cards dc
     JOIN users u ON dc.user_id = u.id
+    LEFT JOIN data_card_metrics dcm ON dcm.data_card_id = dc.id
     ${pendingUpdateJoinSql}
     ${whereSql};
   `;
