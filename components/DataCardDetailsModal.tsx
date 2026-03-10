@@ -12,6 +12,7 @@ import {
   type DataCardVisualAssetKind,
   type DataCardVisualAssetSourceType,
 } from '@/lib/data-card-visual-assets';
+import { buildDataCardReviewDiff } from '@/lib/data-card-review-diff';
 
 type ApiTag = {
   id: string;
@@ -102,6 +103,18 @@ const getVisualAssetSourceTypeLabel = (sourceType: DataCardVisualAssetSourceType
   return '本地/相对路径';
 };
 
+const getDiffBadgeClass = (changeType: 'added' | 'removed' | 'changed'): string => {
+  if (changeType === 'added') return 'border-emerald-200 bg-emerald-50 text-emerald-700';
+  if (changeType === 'removed') return 'border-rose-200 bg-rose-50 text-rose-700';
+  return 'border-amber-200 bg-amber-50 text-amber-700';
+};
+
+const getDiffLabel = (changeType: 'added' | 'removed' | 'changed'): string => {
+  if (changeType === 'added') return '新增';
+  if (changeType === 'removed') return '删除';
+  return '修改';
+};
+
 interface DataCardDetailsModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -122,6 +135,12 @@ interface DataCardDetailsModalProps {
     createdAt?: string;
     updatedAt?: string;
   };
+  compareCard?: {
+    name: string;
+    description: string;
+    data: string;
+    updatedAt?: string;
+  } | null;
   pendingNotice?: string;
 }
 
@@ -129,6 +148,7 @@ export default function DataCardDetailsModal({
   isOpen,
   onClose,
   card,
+  compareCard = null,
   pendingNotice,
   metaCardId,
   isOwner = false,
@@ -481,6 +501,17 @@ export default function DataCardDetailsModal({
   }, [card.data]);
 
   const visualAssets = useMemo(() => extractDataCardVisualAssets(parsedData), [parsedData]);
+  const reviewDiff = useMemo(() => {
+    if (!compareCard) return null;
+    return buildDataCardReviewDiff({
+      originalName: compareCard.name,
+      originalDescription: compareCard.description,
+      originalData: compareCard.data,
+      updatedName: card.name,
+      updatedDescription: card.description,
+      updatedData: card.data,
+    });
+  }, [card.data, card.description, card.name, compareCard]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -593,6 +624,62 @@ export default function DataCardDetailsModal({
             <div className="rounded-lg border border-amber-200 bg-amber-50 text-amber-800 text-sm px-3 py-2">
               {pendingNotice}
             </div>
+          )}
+
+          {reviewDiff && (
+            <section className="space-y-3">
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <h3 className="font-medium text-gray-700 flex items-center gap-2">
+                  <span>待审更新差异</span>
+                </h3>
+                <div className="text-xs text-gray-500">
+                  共 {reviewDiff.total} 处变化
+                  {compareCard?.updatedAt ? ` · 原版更新于 ${formatDateTime(compareCard.updatedAt)}` : ''}
+                </div>
+              </div>
+
+              <div className="flex flex-wrap gap-2 text-xs">
+                <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-amber-700">
+                  修改 {reviewDiff.changed}
+                </span>
+                <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-emerald-700">
+                  新增 {reviewDiff.added}
+                </span>
+                <span className="rounded-full border border-rose-200 bg-rose-50 px-2 py-0.5 text-rose-700">
+                  删除 {reviewDiff.removed}
+                </span>
+              </div>
+
+              {reviewDiff.total > 0 ? (
+                <div className="max-h-96 space-y-3 overflow-auto rounded-lg border border-gray-200 bg-gray-50 p-3">
+                  {reviewDiff.entries.map((entry) => (
+                    <div key={`${entry.changeType}:${entry.path}`} className="rounded-lg border border-gray-200 bg-white p-3">
+                      <div className="mb-2 flex flex-wrap items-center gap-2">
+                        <span className={`rounded-full border px-2 py-0.5 text-[11px] ${getDiffBadgeClass(entry.changeType)}`}>
+                          {getDiffLabel(entry.changeType)}
+                        </span>
+                        <span className="text-sm font-medium text-gray-800">{entry.fieldLabel}</span>
+                        <code className="rounded bg-gray-100 px-2 py-0.5 text-[11px] text-gray-600">{entry.path}</code>
+                      </div>
+                      <div className="grid gap-2 md:grid-cols-2">
+                        <div className="rounded-lg border border-gray-200 bg-gray-50 p-2">
+                          <div className="mb-1 text-[11px] font-medium uppercase tracking-wide text-gray-500">原版</div>
+                          <pre className="whitespace-pre-wrap break-words text-xs text-gray-700">{entry.beforeValue}</pre>
+                        </div>
+                        <div className="rounded-lg border border-gray-200 bg-gray-50 p-2">
+                          <div className="mb-1 text-[11px] font-medium uppercase tracking-wide text-gray-500">待审版</div>
+                          <pre className="whitespace-pre-wrap break-words text-xs text-gray-700">{entry.afterValue}</pre>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="rounded-lg border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-sm text-gray-500">
+                  当前待审版本与线上版本没有检测到结构化差异。若仅修改了不可见字段，可继续在下方完整内容中复核。
+                </div>
+              )}
+            </section>
           )}
 
           <section className="space-y-2">

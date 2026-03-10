@@ -57,6 +57,13 @@ interface AiReviewResult {
     reason: string;
 }
 
+type CompareCardSnapshot = {
+  name: string;
+  description: string;
+  data: string;
+  updatedAt?: string;
+};
+
 const parseQuestionnaireNativeAllowed = (rawData: string | null | undefined): boolean => {
   if (!rawData) return false;
   try {
@@ -84,6 +91,7 @@ const ContentManagementPage: React.FC = () => {
   const isComposingSearchRef = useRef(false);
   const abortControllerRef = useRef<AbortController | null>(null);
   const [selectedCardDetails, setSelectedCardDetails] = useState<DataCard | null>(null);
+  const [selectedCompareCard, setSelectedCompareCard] = useState<CompareCardSnapshot | null>(null);
   const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false);
   const [detailsPendingNotice, setDetailsPendingNotice] = useState<string | undefined>(undefined);
 
@@ -319,8 +327,9 @@ const ContentManagementPage: React.FC = () => {
     setSelectedIds(newSelectedIds);
   };
 
-  const openDetailsModal = (card: DataCard, pendingNotice?: string) => {
+  const openDetailsModal = (card: DataCard, pendingNotice?: string, compareCard?: CompareCardSnapshot | null) => {
     setSelectedCardDetails(card);
+    setSelectedCompareCard(compareCard ?? null);
     setDetailsPendingNotice(pendingNotice);
     setIsDetailsModalOpen(true);
   };
@@ -338,15 +347,24 @@ const ContentManagementPage: React.FC = () => {
 
   const handleViewDetails = (card: DataCard) => {
     if (card.pending_update_id) {
-      openDetailsModal(buildCardFromPendingUpdate(card, 'update'), '这是用户提交的更新版本，审核通过后将覆盖线上版本。');
+      openDetailsModal(
+        buildCardFromPendingUpdate(card, 'update'),
+        '这是用户提交的更新版本，审核通过后将覆盖线上版本。',
+        {
+          name: card.name,
+          description: card.description,
+          data: card.data,
+          updatedAt: card.updated_at,
+        },
+      );
       return;
     }
-    openDetailsModal(card);
+    openDetailsModal(card, undefined, null);
   };
 
   const handleViewOriginalDetails = (card: DataCard) => {
     if (!card.pending_update_id) return;
-    openDetailsModal(buildCardFromPendingUpdate(card, 'original'), '这是当前线上版本（原版），用于对比参考。');
+    openDetailsModal(buildCardFromPendingUpdate(card, 'original'), '这是当前线上版本（原版），用于对比参考。', null);
   };
 
   const handleViewDetailsFromAiTarget = (targetId: string, variant: 'review' | 'original') => {
@@ -368,7 +386,8 @@ const ContentManagementPage: React.FC = () => {
               description: snapshot.originalDescription ?? baseCard.description,
               data: snapshot.originalData ?? baseCard.data,
             },
-            '这是当前线上版本（原版），用于对比参考。'
+            '这是当前线上版本（原版），用于对比参考。',
+            null,
           );
           return;
         }
@@ -381,7 +400,13 @@ const ContentManagementPage: React.FC = () => {
             data: snapshot.data,
             updated_at: baseCard.pending_update_created_at ?? baseCard.updated_at,
           },
-          '这是用户提交的更新版本，审核通过后将覆盖线上版本。'
+          '这是用户提交的更新版本，审核通过后将覆盖线上版本。',
+          {
+            name: snapshot.originalName ?? baseCard.name,
+            description: snapshot.originalDescription ?? baseCard.description,
+            data: snapshot.originalData ?? baseCard.data,
+            updatedAt: baseCard.updated_at,
+          },
         );
         return;
       }
@@ -392,7 +417,9 @@ const ContentManagementPage: React.FC = () => {
         name: snapshot.name,
         description: snapshot.description,
         data: snapshot.data,
-      }
+      },
+      undefined,
+      null,
     );
   };
 
@@ -1369,7 +1396,11 @@ ${JSON.stringify(cardsToCopy, null, 2)}
       {selectedCardDetails && (
         <DataCardDetailsModal
           isOpen={isDetailsModalOpen}
-          onClose={() => setIsDetailsModalOpen(false)}
+          onClose={() => {
+            setIsDetailsModalOpen(false);
+            setSelectedCompareCard(null);
+          }}
+          compareCard={selectedCompareCard}
           pendingNotice={detailsPendingNotice}
           adminTagEditor
           card={{

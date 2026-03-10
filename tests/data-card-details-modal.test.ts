@@ -73,4 +73,43 @@ describe('DataCardDetailsModal', () => {
     expect(html).toContain('portrait');
     expect(html).toContain('illustration');
   });
+
+  it('renders structured diff section when compareCard is provided', () => {
+    const html = renderToStaticMarkup(
+      React.createElement(DataCardDetailsModal, {
+        isOpen: true,
+        onClose: () => {},
+        compareCard: {
+          name: '旧名称',
+          description: '旧简介',
+          data: JSON.stringify({
+            profile: {
+              title: '旧标题',
+            },
+          }),
+          updatedAt: '2026-03-10T00:00:00.000Z',
+        },
+        card: {
+          id: 'c3',
+          name: '新名称',
+          description: '新简介',
+          type: 'character',
+          data: JSON.stringify({
+            profile: {
+              title: '新标题',
+            },
+          }),
+          isPublic: false,
+          author: 'tester',
+        },
+      }),
+    );
+
+    expect(html).toContain('待审更新差异');
+    expect(html).toContain('共 3 处变化');
+    expect(html).toContain('卡片名称');
+    expect(html).toContain('profile.title');
+    expect(html).toContain('旧标题');
+    expect(html).toContain('新标题');
+  });
 });
