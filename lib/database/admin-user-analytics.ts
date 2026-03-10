@@ -5,6 +5,14 @@ import {
   type AnalyticsDateKey,
   type DailyTrendAccumulator,
 } from '@/lib/admin/user-analytics-trends';
+import {
+  ADMIN_USER_ANALYTICS_FREQUENCY_PROFILE,
+  ADMIN_USER_ANALYTICS_FREQUENCY_TREND_LOOKBACK_DAYS,
+  getAdminUserAnalyticsDailyFrequencyTrendPoint,
+  mapAdminUserAnalyticsDailySnapshotRow,
+  type AdminUserAnalyticsDailySnapshot,
+  type AdminUserAnalyticsDailyFrequencySample,
+} from '@/lib/admin/user-analytics-daily';
 import { queryFromD1 } from './core';
 
 export type AdminUserAnalyticsSection = 'overview' | 'frequency' | 'retention' | 'composition' | 'trends' | 'all';
@@ -115,10 +123,39 @@ export type AdminUserAnalyticsComposition = {
   activityTrackingOk: boolean;
 };
 
+export type AdminUserAnalyticsActivityTrendPoint = {
+  date: string;
+  totalUsers: number;
+  trackedUsers: number;
+  untrackedUsers: number;
+  activeUsers24h: number;
+  activeUsers7d: number;
+  activeUsers30d: number;
+  activityCoverageRate: number;
+};
+
+export type AdminUserAnalyticsFrequencyTrendPoint = {
+  date: string;
+  sample: AdminFrequencySample;
+  sampleUsers: number;
+  highPlusUsers: number;
+  veryHighPlusUsers: number;
+  extremeUsers: number;
+  highPlusShare: number;
+  veryHighPlusShare: number;
+  extremeShare: number;
+};
+
 export type AdminUserAnalyticsTrends = {
   lookbackDays: number;
   authAvailableFrom: string | null;
+  activityAvailableFrom: string | null;
+  frequencyAvailableFrom: string | null;
+  frequencyTrendLookbackDays: number;
+  frequencyTrendProfile: AdminFrequencyProfile;
   points: AdminUserAnalyticsTrendPoint[];
+  activityPoints: AdminUserAnalyticsActivityTrendPoint[];
+  frequencyPoints: AdminUserAnalyticsFrequencyTrendPoint[];
 };
 
 const readFirstRow = (result: unknown): Record<string, unknown> => {
@@ -173,10 +210,22 @@ const isMissingActivityTableError = (error: unknown): boolean => {
   return message.includes('user_last_activity') && message.toLowerCase().includes('no such table');
 };
 
+const isMissingAdminUserAnalyticsDailyTableError = (error: unknown): boolean => {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes('admin_user_analytics_daily') && message.toLowerCase().includes('no such table');
+};
+
 const normalizeSample = (sample?: string): AdminFrequencySample => {
   if (sample === 'all') return 'all';
   if (sample === 'tracked') return 'tracked';
   return 'active7d';
+};
+
+const formatUtcDateKey = (date: Date): string => {
+  const year = date.getUTCFullYear();
+  const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(date.getUTCDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 };
 
 const normalizeCohortGranularity = (input?: string): AdminCohortGranularity => {
@@ -209,6 +258,381 @@ const quantileFromHistogram = (
     if (cumulative > target) return bucket.value;
   }
   return buckets[buckets.length - 1]?.value ?? 0;
+};
+
+const ADMIN_USER_ANALYTICS_DAILY_SCHEMA_STATEMENTS = [
+  `CREATE TABLE IF NOT EXISTS admin_user_analytics_daily (
+    metric_date TEXT PRIMARY KEY NOT NULL,
+    total_users INTEGER NOT NULL DEFAULT 0,
+    tracked_users INTEGER NOT NULL DEFAULT 0,
+    untracked_users INTEGER NOT NULL DEFAULT 0,
+    active_users_24h INTEGER NOT NULL DEFAULT 0,
+    active_users_7d INTEGER NOT NULL DEFAULT 0,
+    active_users_30d INTEGER NOT NULL DEFAULT 0,
+    activity_coverage_rate REAL NOT NULL DEFAULT 0,
+    generation_total_1d INTEGER NOT NULL DEFAULT 0,
+    generation_completed_1d INTEGER NOT NULL DEFAULT 0,
+    generation_aborted_1d INTEGER NOT NULL DEFAULT 0,
+    generation_failed_1d INTEGER NOT NULL DEFAULT 0,
+    generation_distinct_users_1d INTEGER NOT NULL DEFAULT 0,
+    auth_success_1d INTEGER NOT NULL DEFAULT 0,
+    auth_failed_1d INTEGER NOT NULL DEFAULT 0,
+    frequency_trend_lookback_days INTEGER NOT NULL DEFAULT 30,
+    frequency_profile TEXT NOT NULL DEFAULT 'v20260209',
+    sample_users_active7d INTEGER NOT NULL DEFAULT 0,
+    high_plus_users_active7d INTEGER NOT NULL DEFAULT 0,
+    very_high_plus_users_active7d INTEGER NOT NULL DEFAULT 0,
+    extreme_users_active7d INTEGER NOT NULL DEFAULT 0,
+    high_plus_share_active7d REAL NOT NULL DEFAULT 0,
+    very_high_plus_share_active7d REAL NOT NULL DEFAULT 0,
+    extreme_share_active7d REAL NOT NULL DEFAULT 0,
+    sample_users_tracked INTEGER NOT NULL DEFAULT 0,
+    high_plus_users_tracked INTEGER NOT NULL DEFAULT 0,
+    very_high_plus_users_tracked INTEGER NOT NULL DEFAULT 0,
+    extreme_users_tracked INTEGER NOT NULL DEFAULT 0,
+    high_plus_share_tracked REAL NOT NULL DEFAULT 0,
+    very_high_plus_share_tracked REAL NOT NULL DEFAULT 0,
+    extreme_share_tracked REAL NOT NULL DEFAULT 0,
+    sample_users_all INTEGER NOT NULL DEFAULT 0,
+    high_plus_users_all INTEGER NOT NULL DEFAULT 0,
+    very_high_plus_users_all INTEGER NOT NULL DEFAULT 0,
+    extreme_users_all INTEGER NOT NULL DEFAULT 0,
+    high_plus_share_all REAL NOT NULL DEFAULT 0,
+    very_high_plus_share_all REAL NOT NULL DEFAULT 0,
+    extreme_share_all REAL NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  );`,
+  `CREATE INDEX IF NOT EXISTS idx_admin_user_analytics_daily_updated_at
+     ON admin_user_analytics_daily(updated_at);`,
+];
+
+export const ensureAdminUserAnalyticsDailyTable = async (): Promise<void> => {
+  for (const sql of ADMIN_USER_ANALYTICS_DAILY_SCHEMA_STATEMENTS) {
+    await queryFromD1(sql);
+  }
+};
+
+const getAdminUserAnalyticsFrequencySummary = async (
+  sample: AdminFrequencySample,
+): Promise<{
+  sampleUsers: number;
+  highPlusUsers: number;
+  veryHighPlusUsers: number;
+  extremeUsers: number;
+  highPlusShare: number;
+  veryHighPlusShare: number;
+  extremeShare: number;
+}> => {
+  const frequency = await getAdminUserAnalyticsFrequency({
+    sample,
+    profile: ADMIN_USER_ANALYTICS_FREQUENCY_PROFILE,
+    lookbackDays: ADMIN_USER_ANALYTICS_FREQUENCY_TREND_LOOKBACK_DAYS,
+  });
+
+  return {
+    sampleUsers: frequency.sampleUsers,
+    highPlusUsers: frequency.highPlusUsers,
+    veryHighPlusUsers: frequency.veryHighPlusUsers,
+    extremeUsers: frequency.extremeUsers,
+    highPlusShare: frequency.highPlusShare,
+    veryHighPlusShare: frequency.veryHighPlusShare,
+    extremeShare: frequency.extremeShare,
+  };
+};
+
+export const collectAdminUserAnalyticsDailySnapshot = async (snapshotAt = new Date()): Promise<AdminUserAnalyticsDailySnapshot> => {
+  const metricDate = formatUtcDateKey(snapshotAt);
+  const snapshotIso = snapshotAt.toISOString();
+  const since24hIso = new Date(snapshotAt.getTime() - 24 * 60 * 60 * 1000).toISOString();
+  const since7dIso = new Date(snapshotAt.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
+  const since30dIso = new Date(snapshotAt.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString();
+
+  const snapshot: AdminUserAnalyticsDailySnapshot = {
+    metricDate,
+    totalUsers: 0,
+    trackedUsers: 0,
+    untrackedUsers: 0,
+    activeUsers24h: 0,
+    activeUsers7d: 0,
+    activeUsers30d: 0,
+    activityCoverageRate: 0,
+    generationTotal1d: 0,
+    generationCompleted1d: 0,
+    generationAborted1d: 0,
+    generationFailed1d: 0,
+    generationDistinctUsers1d: 0,
+    authSuccess1d: 0,
+    authFailed1d: 0,
+    frequencyTrendLookbackDays: ADMIN_USER_ANALYTICS_FREQUENCY_TREND_LOOKBACK_DAYS,
+    frequencyProfile: ADMIN_USER_ANALYTICS_FREQUENCY_PROFILE,
+    sampleUsersActive7d: 0,
+    highPlusUsersActive7d: 0,
+    veryHighPlusUsersActive7d: 0,
+    extremeUsersActive7d: 0,
+    highPlusShareActive7d: 0,
+    veryHighPlusShareActive7d: 0,
+    extremeShareActive7d: 0,
+    sampleUsersTracked: 0,
+    highPlusUsersTracked: 0,
+    veryHighPlusUsersTracked: 0,
+    extremeUsersTracked: 0,
+    highPlusShareTracked: 0,
+    veryHighPlusShareTracked: 0,
+    extremeShareTracked: 0,
+    sampleUsersAll: 0,
+    highPlusUsersAll: 0,
+    veryHighPlusUsersAll: 0,
+    extremeUsersAll: 0,
+    highPlusShareAll: 0,
+    veryHighPlusShareAll: 0,
+    extremeShareAll: 0,
+    createdAt: snapshotIso,
+    updatedAt: snapshotIso,
+  };
+
+  try {
+    const usersRow = readFirstRow(await queryFromD1('SELECT COUNT(1) AS total_users FROM users'));
+    snapshot.totalUsers = readInt(usersRow.total_users);
+  } catch (error) {
+    console.error('[AdminUserAnalytics] 构建日快照时读取用户总数失败:', error);
+  }
+
+  try {
+    const activityRow = readFirstRow(
+      await queryFromD1(
+        `SELECT
+           COUNT(1) AS tracked_users,
+           COALESCE(SUM(CASE WHEN last_seen_at >= ? THEN 1 ELSE 0 END), 0) AS active_users_24h,
+           COALESCE(SUM(CASE WHEN last_seen_at >= ? THEN 1 ELSE 0 END), 0) AS active_users_7d,
+           COALESCE(SUM(CASE WHEN last_seen_at >= ? THEN 1 ELSE 0 END), 0) AS active_users_30d
+         FROM user_last_activity`,
+        [since24hIso, since7dIso, since30dIso],
+      ),
+    );
+    snapshot.trackedUsers = readInt(activityRow.tracked_users);
+    snapshot.activeUsers24h = readInt(activityRow.active_users_24h);
+    snapshot.activeUsers7d = readInt(activityRow.active_users_7d);
+    snapshot.activeUsers30d = readInt(activityRow.active_users_30d);
+  } catch (error) {
+    if (!isMissingActivityTableError(error)) {
+      console.error('[AdminUserAnalytics] 构建日快照时读取活跃统计失败:', error);
+    }
+  }
+
+  try {
+    const generationRow = readFirstRow(
+      await queryFromD1(
+        `SELECT
+           COUNT(1) AS generation_total_1d,
+           COALESCE(SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END), 0) AS generation_completed_1d,
+           COALESCE(SUM(CASE WHEN status = 'aborted' THEN 1 ELSE 0 END), 0) AS generation_aborted_1d,
+           COALESCE(SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END), 0) AS generation_failed_1d,
+           COUNT(DISTINCT CASE WHEN user_id IS NOT NULL THEN user_id END) AS generation_distinct_users_1d
+         FROM battle_report_generations
+         WHERE started_at >= ?`,
+        [since24hIso],
+      ),
+    );
+    snapshot.generationTotal1d = readInt(generationRow.generation_total_1d);
+    snapshot.generationCompleted1d = readInt(generationRow.generation_completed_1d);
+    snapshot.generationAborted1d = readInt(generationRow.generation_aborted_1d);
+    snapshot.generationFailed1d = readInt(generationRow.generation_failed_1d);
+    snapshot.generationDistinctUsers1d = readInt(generationRow.generation_distinct_users_1d);
+  } catch (error) {
+    console.error('[AdminUserAnalytics] 构建日快照时读取战报统计失败:', error);
+  }
+
+  try {
+    const authRow = readFirstRow(
+      await queryFromD1(
+        `SELECT
+           COALESCE(SUM(CASE WHEN result_code = 'SUCCESS' THEN 1 ELSE 0 END), 0) AS auth_success_1d,
+           COALESCE(SUM(CASE WHEN result_code != 'SUCCESS' THEN 1 ELSE 0 END), 0) AS auth_failed_1d
+         FROM auth_audit_logs
+         WHERE created_at >= unixepoch(?)`,
+        [since24hIso],
+      ),
+    );
+    snapshot.authSuccess1d = readInt(authRow.auth_success_1d);
+    snapshot.authFailed1d = readInt(authRow.auth_failed_1d);
+  } catch (error) {
+    console.error('[AdminUserAnalytics] 构建日快照时读取 Auth 统计失败:', error);
+  }
+
+  try {
+    const [active7dSummary, trackedSummary, allSummary] = await Promise.all([
+      getAdminUserAnalyticsFrequencySummary('active7d'),
+      getAdminUserAnalyticsFrequencySummary('tracked'),
+      getAdminUserAnalyticsFrequencySummary('all'),
+    ]);
+
+    snapshot.sampleUsersActive7d = active7dSummary.sampleUsers;
+    snapshot.highPlusUsersActive7d = active7dSummary.highPlusUsers;
+    snapshot.veryHighPlusUsersActive7d = active7dSummary.veryHighPlusUsers;
+    snapshot.extremeUsersActive7d = active7dSummary.extremeUsers;
+    snapshot.highPlusShareActive7d = active7dSummary.highPlusShare;
+    snapshot.veryHighPlusShareActive7d = active7dSummary.veryHighPlusShare;
+    snapshot.extremeShareActive7d = active7dSummary.extremeShare;
+
+    snapshot.sampleUsersTracked = trackedSummary.sampleUsers;
+    snapshot.highPlusUsersTracked = trackedSummary.highPlusUsers;
+    snapshot.veryHighPlusUsersTracked = trackedSummary.veryHighPlusUsers;
+    snapshot.extremeUsersTracked = trackedSummary.extremeUsers;
+    snapshot.highPlusShareTracked = trackedSummary.highPlusShare;
+    snapshot.veryHighPlusShareTracked = trackedSummary.veryHighPlusShare;
+    snapshot.extremeShareTracked = trackedSummary.extremeShare;
+
+    snapshot.sampleUsersAll = allSummary.sampleUsers;
+    snapshot.highPlusUsersAll = allSummary.highPlusUsers;
+    snapshot.veryHighPlusUsersAll = allSummary.veryHighPlusUsers;
+    snapshot.extremeUsersAll = allSummary.extremeUsers;
+    snapshot.highPlusShareAll = allSummary.highPlusShare;
+    snapshot.veryHighPlusShareAll = allSummary.veryHighPlusShare;
+    snapshot.extremeShareAll = allSummary.extremeShare;
+  } catch (error) {
+    console.error('[AdminUserAnalytics] 构建日快照时读取高频分层失败:', error);
+  }
+
+  snapshot.untrackedUsers = Math.max(0, snapshot.totalUsers - snapshot.trackedUsers);
+  snapshot.activityCoverageRate = toRate(snapshot.trackedUsers, snapshot.totalUsers);
+
+  return snapshot;
+};
+
+export const recordAdminUserAnalyticsDailySnapshot = async (snapshotAt = new Date()): Promise<AdminUserAnalyticsDailySnapshot> => {
+  await ensureAdminUserAnalyticsDailyTable();
+
+  const snapshot = await collectAdminUserAnalyticsDailySnapshot(snapshotAt);
+  const params = [
+    snapshot.metricDate,
+    snapshot.totalUsers,
+    snapshot.trackedUsers,
+    snapshot.untrackedUsers,
+    snapshot.activeUsers24h,
+    snapshot.activeUsers7d,
+    snapshot.activeUsers30d,
+    snapshot.activityCoverageRate,
+    snapshot.generationTotal1d,
+    snapshot.generationCompleted1d,
+    snapshot.generationAborted1d,
+    snapshot.generationFailed1d,
+    snapshot.generationDistinctUsers1d,
+    snapshot.authSuccess1d,
+    snapshot.authFailed1d,
+    snapshot.frequencyTrendLookbackDays,
+    snapshot.frequencyProfile,
+    snapshot.sampleUsersActive7d,
+    snapshot.highPlusUsersActive7d,
+    snapshot.veryHighPlusUsersActive7d,
+    snapshot.extremeUsersActive7d,
+    snapshot.highPlusShareActive7d,
+    snapshot.veryHighPlusShareActive7d,
+    snapshot.extremeShareActive7d,
+    snapshot.sampleUsersTracked,
+    snapshot.highPlusUsersTracked,
+    snapshot.veryHighPlusUsersTracked,
+    snapshot.extremeUsersTracked,
+    snapshot.highPlusShareTracked,
+    snapshot.veryHighPlusShareTracked,
+    snapshot.extremeShareTracked,
+    snapshot.sampleUsersAll,
+    snapshot.highPlusUsersAll,
+    snapshot.veryHighPlusUsersAll,
+    snapshot.extremeUsersAll,
+    snapshot.highPlusShareAll,
+    snapshot.veryHighPlusShareAll,
+    snapshot.extremeShareAll,
+    snapshot.createdAt,
+    snapshot.updatedAt,
+  ];
+
+  await queryFromD1(
+    `INSERT INTO admin_user_analytics_daily (
+       metric_date,
+       total_users,
+       tracked_users,
+       untracked_users,
+       active_users_24h,
+       active_users_7d,
+       active_users_30d,
+       activity_coverage_rate,
+       generation_total_1d,
+       generation_completed_1d,
+       generation_aborted_1d,
+       generation_failed_1d,
+       generation_distinct_users_1d,
+       auth_success_1d,
+       auth_failed_1d,
+       frequency_trend_lookback_days,
+       frequency_profile,
+       sample_users_active7d,
+       high_plus_users_active7d,
+       very_high_plus_users_active7d,
+       extreme_users_active7d,
+       high_plus_share_active7d,
+       very_high_plus_share_active7d,
+       extreme_share_active7d,
+       sample_users_tracked,
+       high_plus_users_tracked,
+       very_high_plus_users_tracked,
+       extreme_users_tracked,
+       high_plus_share_tracked,
+       very_high_plus_share_tracked,
+       extreme_share_tracked,
+       sample_users_all,
+       high_plus_users_all,
+       very_high_plus_users_all,
+       extreme_users_all,
+       high_plus_share_all,
+       very_high_plus_share_all,
+       extreme_share_all,
+       created_at,
+       updated_at
+     ) VALUES (${new Array(params.length).fill('?').join(', ')})
+     ON CONFLICT(metric_date) DO UPDATE SET
+       total_users = excluded.total_users,
+       tracked_users = excluded.tracked_users,
+       untracked_users = excluded.untracked_users,
+       active_users_24h = excluded.active_users_24h,
+       active_users_7d = excluded.active_users_7d,
+       active_users_30d = excluded.active_users_30d,
+       activity_coverage_rate = excluded.activity_coverage_rate,
+       generation_total_1d = excluded.generation_total_1d,
+       generation_completed_1d = excluded.generation_completed_1d,
+       generation_aborted_1d = excluded.generation_aborted_1d,
+       generation_failed_1d = excluded.generation_failed_1d,
+       generation_distinct_users_1d = excluded.generation_distinct_users_1d,
+       auth_success_1d = excluded.auth_success_1d,
+       auth_failed_1d = excluded.auth_failed_1d,
+       frequency_trend_lookback_days = excluded.frequency_trend_lookback_days,
+       frequency_profile = excluded.frequency_profile,
+       sample_users_active7d = excluded.sample_users_active7d,
+       high_plus_users_active7d = excluded.high_plus_users_active7d,
+       very_high_plus_users_active7d = excluded.very_high_plus_users_active7d,
+       extreme_users_active7d = excluded.extreme_users_active7d,
+       high_plus_share_active7d = excluded.high_plus_share_active7d,
+       very_high_plus_share_active7d = excluded.very_high_plus_share_active7d,
+       extreme_share_active7d = excluded.extreme_share_active7d,
+       sample_users_tracked = excluded.sample_users_tracked,
+       high_plus_users_tracked = excluded.high_plus_users_tracked,
+       very_high_plus_users_tracked = excluded.very_high_plus_users_tracked,
+       extreme_users_tracked = excluded.extreme_users_tracked,
+       high_plus_share_tracked = excluded.high_plus_share_tracked,
+       very_high_plus_share_tracked = excluded.very_high_plus_share_tracked,
+       extreme_share_tracked = excluded.extreme_share_tracked,
+       sample_users_all = excluded.sample_users_all,
+       high_plus_users_all = excluded.high_plus_users_all,
+       very_high_plus_users_all = excluded.very_high_plus_users_all,
+       extreme_users_all = excluded.extreme_users_all,
+       high_plus_share_all = excluded.high_plus_share_all,
+       very_high_plus_share_all = excluded.very_high_plus_share_all,
+       extreme_share_all = excluded.extreme_share_all,
+       updated_at = excluded.updated_at`,
+    params,
+  );
+
+  return snapshot;
 };
 
 export const getAdminUserAnalyticsOverview = async (lookbackDaysInput?: number): Promise<AdminUserAnalyticsOverview> => {
@@ -370,7 +794,7 @@ export const getAdminUserAnalyticsFrequency = async (options?: {
   lookbackDays?: number;
 }): Promise<AdminUserAnalyticsFrequency> => {
   const sample = normalizeSample(options?.sample);
-  const profile: AdminFrequencyProfile = 'v20260209';
+  const profile: AdminFrequencyProfile = ADMIN_USER_ANALYTICS_FREQUENCY_PROFILE;
   const lookbackDays = clampLookbackDays(options?.lookbackDays ?? 30);
   const now = Date.now();
   const sinceLookbackIso = new Date(now - lookbackDays * 24 * 60 * 60 * 1000).toISOString();
@@ -844,8 +1268,12 @@ export const getAdminUserAnalyticsComposition = async (options?: {
   return output;
 };
 
-export const getAdminUserAnalyticsTrends = async (lookbackDaysInput?: number): Promise<AdminUserAnalyticsTrends> => {
-  const lookbackDays = clampLookbackDays(lookbackDaysInput);
+export const getAdminUserAnalyticsTrends = async (options?: {
+  lookbackDays?: number;
+  frequencySample?: string;
+}): Promise<AdminUserAnalyticsTrends> => {
+  const lookbackDays = clampLookbackDays(options?.lookbackDays);
+  const frequencySample = normalizeSample(options?.frequencySample) as AdminUserAnalyticsDailyFrequencySample;
   const dates = buildUtcDateKeys(lookbackDays);
   const firstDate = dates[0];
   const windowStartIso = `${firstDate}T00:00:00.000Z`;
@@ -853,7 +1281,13 @@ export const getAdminUserAnalyticsTrends = async (lookbackDaysInput?: number): P
   const output: AdminUserAnalyticsTrends = {
     lookbackDays,
     authAvailableFrom: null,
+    activityAvailableFrom: null,
+    frequencyAvailableFrom: null,
+    frequencyTrendLookbackDays: ADMIN_USER_ANALYTICS_FREQUENCY_TREND_LOOKBACK_DAYS,
+    frequencyTrendProfile: ADMIN_USER_ANALYTICS_FREQUENCY_PROFILE,
     points: [],
+    activityPoints: [],
+    frequencyPoints: [],
   };
 
   const byDate: Record<string, DailyTrendAccumulator> = {};
@@ -942,5 +1376,77 @@ export const getAdminUserAnalyticsTrends = async (lookbackDaysInput?: number): P
   }
 
   output.points = buildTrendPoints(dates, baseTotalUsers, byDate);
+
+  try {
+    const [dailyRowsResult, dailyMinResult] = await Promise.all([
+      queryFromD1(
+        `SELECT *
+         FROM admin_user_analytics_daily
+         WHERE metric_date >= ?
+         ORDER BY metric_date ASC`,
+        [firstDate],
+      ),
+      queryFromD1(
+        `SELECT MIN(metric_date) AS min_metric_date
+         FROM admin_user_analytics_daily`,
+      ),
+    ]);
+
+    const globalAvailableFrom = String(readFirstRow(dailyMinResult).min_metric_date ?? '').trim() || null;
+    const snapshots = readRows(dailyRowsResult).map(mapAdminUserAnalyticsDailySnapshotRow);
+
+    if (snapshots.length > 0) {
+      const inRangeAvailableFrom = snapshots[0]?.metricDate ?? null;
+      const visibleDates = dates.filter((date) => !inRangeAvailableFrom || date >= inRangeAvailableFrom);
+      const snapshotByDate = Object.fromEntries(snapshots.map((snapshot) => [snapshot.metricDate, snapshot]));
+
+      output.activityAvailableFrom = globalAvailableFrom;
+      output.frequencyAvailableFrom = globalAvailableFrom;
+      output.frequencyTrendLookbackDays =
+        snapshots[0]?.frequencyTrendLookbackDays ?? ADMIN_USER_ANALYTICS_FREQUENCY_TREND_LOOKBACK_DAYS;
+      output.frequencyTrendProfile =
+        (snapshots[0]?.frequencyProfile as AdminFrequencyProfile | undefined) ?? ADMIN_USER_ANALYTICS_FREQUENCY_PROFILE;
+
+      output.activityPoints = visibleDates.map((date) => {
+        const snapshot = snapshotByDate[date];
+        return {
+          date,
+          totalUsers: snapshot?.totalUsers ?? 0,
+          trackedUsers: snapshot?.trackedUsers ?? 0,
+          untrackedUsers: snapshot?.untrackedUsers ?? 0,
+          activeUsers24h: snapshot?.activeUsers24h ?? 0,
+          activeUsers7d: snapshot?.activeUsers7d ?? 0,
+          activeUsers30d: snapshot?.activeUsers30d ?? 0,
+          activityCoverageRate: snapshot?.activityCoverageRate ?? 0,
+        };
+      });
+
+      output.frequencyPoints = visibleDates.map((date) => {
+        const snapshot = snapshotByDate[date];
+        if (!snapshot) {
+          return {
+            date,
+            sample: frequencySample,
+            sampleUsers: 0,
+            highPlusUsers: 0,
+            veryHighPlusUsers: 0,
+            extremeUsers: 0,
+            highPlusShare: 0,
+            veryHighPlusShare: 0,
+            extremeShare: 0,
+          };
+        }
+        return getAdminUserAnalyticsDailyFrequencyTrendPoint(snapshot, frequencySample);
+      });
+    } else {
+      output.activityAvailableFrom = globalAvailableFrom;
+      output.frequencyAvailableFrom = globalAvailableFrom;
+    }
+  } catch (error) {
+    if (!isMissingAdminUserAnalyticsDailyTableError(error)) {
+      console.error('[AdminUserAnalytics] 读取窗口型趋势快照失败:', error);
+    }
+  }
+
   return output;
 };

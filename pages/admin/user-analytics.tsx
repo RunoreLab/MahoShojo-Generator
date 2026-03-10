@@ -129,10 +129,39 @@ type TrendPoint = {
   authFailure: number;
 };
 
+type ActivityTrendPoint = {
+  date: string;
+  totalUsers: number;
+  trackedUsers: number;
+  untrackedUsers: number;
+  activeUsers24h: number;
+  activeUsers7d: number;
+  activeUsers30d: number;
+  activityCoverageRate: number;
+};
+
+type FrequencyTrendPoint = {
+  date: string;
+  sample: 'active7d' | 'tracked' | 'all';
+  sampleUsers: number;
+  highPlusUsers: number;
+  veryHighPlusUsers: number;
+  extremeUsers: number;
+  highPlusShare: number;
+  veryHighPlusShare: number;
+  extremeShare: number;
+};
+
 type TrendStats = {
   lookbackDays: number;
   authAvailableFrom: string | null;
+  activityAvailableFrom: string | null;
+  frequencyAvailableFrom: string | null;
+  frequencyTrendLookbackDays: number;
+  frequencyTrendProfile: 'v20260209';
   points: TrendPoint[];
+  activityPoints: ActivityTrendPoint[];
+  frequencyPoints: FrequencyTrendPoint[];
 };
 
 type ApiResponse = {
@@ -292,6 +321,35 @@ export default function UserAnalyticsPage() {
     ]);
   }, [trends]);
 
+  const activityTrendRows = useMemo<Array<Array<CsvCell>>>(() => {
+    if (!trends) return [];
+    return trends.activityPoints.map((point) => [
+      point.date,
+      point.totalUsers,
+      point.trackedUsers,
+      point.untrackedUsers,
+      point.activeUsers24h,
+      point.activeUsers7d,
+      point.activeUsers30d,
+      (point.activityCoverageRate * 100).toFixed(2),
+    ]);
+  }, [trends]);
+
+  const frequencyTrendRows = useMemo<Array<Array<CsvCell>>>(() => {
+    if (!trends) return [];
+    return trends.frequencyPoints.map((point) => [
+      point.date,
+      point.sample,
+      point.sampleUsers,
+      point.highPlusUsers,
+      point.veryHighPlusUsers,
+      point.extremeUsers,
+      (point.highPlusShare * 100).toFixed(2),
+      (point.veryHighPlusShare * 100).toFixed(2),
+      (point.extremeShare * 100).toFixed(2),
+    ]);
+  }, [trends]);
+
   const handleExportOverviewSnapshotCsv = () => {
     if (!overview) return;
     const exportedAt = new Date();
@@ -347,6 +405,30 @@ export default function UserAnalyticsPage() {
     );
   };
 
+  const handleExportActivityTrendCsv = () => {
+    if (!trends) return;
+    const exportedAt = new Date();
+    const exportTimestamp = formatTimestampForFilename(exportedAt);
+    downloadCsvWithBom(
+      `activity_trends_daily_${lookbackDays}d_${exportTimestamp}.csv`,
+      [
+        'date',
+        'total_users',
+        'tracked_users',
+        'untracked_users',
+        'active_users_24h',
+        'active_users_7d',
+        'active_users_30d',
+        'activity_coverage_rate_percent',
+      ],
+      activityTrendRows,
+      [
+        ...exportContextMeta,
+        { key: 'activity_trend_available_from_utc', value: normalizeIsoTimestamp(trends.activityAvailableFrom) || 'unknown' },
+      ],
+    );
+  };
+
   const handleExportFrequencyCsv = () => {
     if (!frequency) return;
     const exportedAt = new Date();
@@ -363,6 +445,33 @@ export default function UserAnalyticsPage() {
         { key: 'high_plus_users', value: frequency.highPlusUsers },
         { key: 'very_high_plus_users', value: frequency.veryHighPlusUsers },
         { key: 'extreme_users', value: frequency.extremeUsers },
+      ],
+    );
+  };
+
+  const handleExportFrequencyTrendCsv = () => {
+    if (!trends) return;
+    const exportedAt = new Date();
+    const exportTimestamp = formatTimestampForFilename(exportedAt);
+    downloadCsvWithBom(
+      `frequency_trends_${frequencySample}_${lookbackDays}d_${exportTimestamp}.csv`,
+      [
+        'date',
+        'sample',
+        'sample_users',
+        'high_plus_users',
+        'very_high_plus_users',
+        'extreme_users',
+        'high_plus_share_percent',
+        'very_high_plus_share_percent',
+        'extreme_share_percent',
+      ],
+      frequencyTrendRows,
+      [
+        ...exportContextMeta,
+        { key: 'frequency_trend_available_from_utc', value: normalizeIsoTimestamp(trends.frequencyAvailableFrom) || 'unknown' },
+        { key: 'frequency_trend_lookback_days', value: trends.frequencyTrendLookbackDays },
+        { key: 'frequency_trend_profile', value: trends.frequencyTrendProfile },
       ],
     );
   };
@@ -480,6 +589,37 @@ export default function UserAnalyticsPage() {
       exportContextMeta,
     );
 
+    const activityTrendsCsv = buildCsvString(
+      [
+        'date',
+        'total_users',
+        'tracked_users',
+        'untracked_users',
+        'active_users_24h',
+        'active_users_7d',
+        'active_users_30d',
+        'activity_coverage_rate_percent',
+      ],
+      activityTrendRows,
+      exportContextMeta,
+    );
+
+    const frequencyTrendsCsv = buildCsvString(
+      [
+        'date',
+        'sample',
+        'sample_users',
+        'high_plus_users',
+        'very_high_plus_users',
+        'extreme_users',
+        'high_plus_share_percent',
+        'very_high_plus_share_percent',
+        'extreme_share_percent',
+      ],
+      frequencyTrendRows,
+      exportContextMeta,
+    );
+
     const retentionCsv = buildCsvString(
       ['window', 'eligible', 'retained', 'rate_percent'],
       retention.points.map((point) => [point.label, point.eligible, point.retained, (point.rate * 100).toFixed(2)]),
@@ -500,10 +640,16 @@ export default function UserAnalyticsPage() {
       activeWindowDays,
       cohort,
       authTrendAvailableFrom: trends.authAvailableFrom,
+      activityTrendAvailableFrom: trends.activityAvailableFrom,
+      frequencyTrendAvailableFrom: trends.frequencyAvailableFrom,
+      frequencyTrendLookbackDays: trends.frequencyTrendLookbackDays,
+      frequencyTrendProfile: trends.frequencyTrendProfile,
       files: [
         'overview_snapshot.csv',
         'overview_trends_daily.csv',
+        'activity_trends_daily.csv',
         'frequency_buckets.csv',
+        'frequency_trends.csv',
         'retention_points.csv',
         'composition_buckets.csv',
       ],
@@ -513,7 +659,9 @@ export default function UserAnalyticsPage() {
       'manifest.json': strToU8(JSON.stringify(manifest, null, 2)),
       'overview_snapshot.csv': strToU8(overviewSnapshotCsv),
       'overview_trends_daily.csv': strToU8(overviewTrendsCsv),
+      'activity_trends_daily.csv': strToU8(activityTrendsCsv),
       'frequency_buckets.csv': strToU8(frequencyCsv),
+      'frequency_trends.csv': strToU8(frequencyTrendsCsv),
       'retention_points.csv': strToU8(retentionCsv),
       'composition_buckets.csv': strToU8(compositionCsv),
     };
@@ -573,6 +721,76 @@ export default function UserAnalyticsPage() {
     );
   }, [trends]);
 
+  const activityWindowTrendChart = useMemo(() => {
+    if (!trends || trends.activityPoints.length <= 0) return null;
+    return (
+      <LineSeriesChart
+        labels={trends.activityPoints.map((point) => point.date)}
+        series={[
+          { key: 'active24h', label: '24h 活跃', color: '#0f766e', values: trends.activityPoints.map((point) => point.activeUsers24h) },
+          { key: 'active7d', label: '7d 活跃', color: '#0284c7', values: trends.activityPoints.map((point) => point.activeUsers7d) },
+          { key: 'active30d', label: '30d 活跃', color: '#7c3aed', values: trends.activityPoints.map((point) => point.activeUsers30d) },
+        ]}
+      />
+    );
+  }, [trends]);
+
+  const coverageTrendChart = useMemo(() => {
+    if (!trends || trends.activityPoints.length <= 0) return null;
+    return (
+      <LineSeriesChart
+        labels={trends.activityPoints.map((point) => point.date)}
+        series={[
+          {
+            key: 'coverageRate',
+            label: '追踪覆盖率',
+            color: '#ea580c',
+            values: trends.activityPoints.map((point) => Number((point.activityCoverageRate * 100).toFixed(2))),
+          },
+        ]}
+      />
+    );
+  }, [trends]);
+
+  const frequencyShareTrendChart = useMemo(() => {
+    if (!trends || trends.frequencyPoints.length <= 0) return null;
+    return (
+      <LineSeriesChart
+        labels={trends.frequencyPoints.map((point) => point.date)}
+        series={[
+          {
+            key: 'highPlus',
+            label: 'high+ (>=100)',
+            color: '#0284c7',
+            values: trends.frequencyPoints.map((point) => Number((point.highPlusShare * 100).toFixed(2))),
+          },
+          {
+            key: 'veryHighPlus',
+            label: 'very_high+ (>=500)',
+            color: '#7c3aed',
+            values: trends.frequencyPoints.map((point) => Number((point.veryHighPlusShare * 100).toFixed(2))),
+          },
+          {
+            key: 'extreme',
+            label: 'extreme (>=1000)',
+            color: '#e11d48',
+            values: trends.frequencyPoints.map((point) => Number((point.extremeShare * 100).toFixed(2))),
+          },
+        ]}
+      />
+    );
+  }, [trends]);
+
+  const activityTrendStartLabel = useMemo(() => {
+    if (!trends?.activityAvailableFrom) return null;
+    return new Date(trends.activityAvailableFrom).toLocaleDateString('zh-CN');
+  }, [trends?.activityAvailableFrom]);
+
+  const frequencyTrendStartLabel = useMemo(() => {
+    if (!trends?.frequencyAvailableFrom) return null;
+    return new Date(trends.frequencyAvailableFrom).toLocaleDateString('zh-CN');
+  }, [trends?.frequencyAvailableFrom]);
+
   return (
     <>
       <Head>
@@ -598,8 +816,8 @@ export default function UserAnalyticsPage() {
           <div className="mb-5 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
             <h1 className="text-3xl font-semibold text-slate-900">用户统计分析</h1>
             <p className="mt-2 text-sm leading-6 text-slate-600">
-              当前版本已补齐可回算的历史趋势、基础图表与分析包导出。按当前决策，窗口型活跃趋势暂不引入 <code>user_activity_daily</code>，
-              因此 24h / 7d / 30d 活跃只展示当前快照，不展示历史曲线。
+              当前版本已补齐可回算趋势、基础图表与分析包导出，并接入 <code>admin_user_analytics_daily</code> 日快照，
+              开始展示窗口型活跃、覆盖率与高频占比趋势。当前仍不引入 <code>user_activity_daily</code>，因此这些趋势只从首个快照日开始记录，不对更早历史做严格回填。
             </p>
 
             <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-5">
@@ -671,11 +889,19 @@ export default function UserAnalyticsPage() {
               </button>
               <button type="button" onClick={handleExportOverviewTrendCsv} className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700 hover:bg-slate-50" disabled={!trends}>
                 <Download className="h-3.5 w-3.5" />
-                导出趋势 CSV
+                导出总览趋势 CSV
+              </button>
+              <button type="button" onClick={handleExportActivityTrendCsv} className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700 hover:bg-slate-50" disabled={!trends || trends.activityPoints.length <= 0}>
+                <Download className="h-3.5 w-3.5" />
+                导出活跃趋势 CSV
               </button>
               <button type="button" onClick={handleExportFrequencyCsv} className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700 hover:bg-slate-50" disabled={!frequency}>
                 <Download className="h-3.5 w-3.5" />
                 导出分层 CSV
+              </button>
+              <button type="button" onClick={handleExportFrequencyTrendCsv} className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700 hover:bg-slate-50" disabled={!trends || trends.frequencyPoints.length <= 0}>
+                <Download className="h-3.5 w-3.5" />
+                导出高频趋势 CSV
               </button>
               <button type="button" onClick={handleExportRetentionCsv} className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700 hover:bg-slate-50" disabled={!retention}>
                 <Download className="h-3.5 w-3.5" />
@@ -750,11 +976,44 @@ export default function UserAnalyticsPage() {
                 </div>
                 {authTrendChart}
               </section>
+
+              <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                <div className="mb-4">
+                  <h2 className="text-lg font-semibold text-slate-900">活跃窗口趋势</h2>
+                  <p className="text-xs text-slate-500">
+                    基于 `admin_user_analytics_daily` 快照。{activityTrendStartLabel ? `趋势起始日期 ${activityTrendStartLabel}` : '当前还没有可用快照数据。'}
+                  </p>
+                </div>
+                {activityWindowTrendChart ? (
+                  activityWindowTrendChart
+                ) : (
+                  <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-10 text-center text-sm text-slate-500">
+                    当前窗口内暂无日快照，活跃趋势将在首次快照后显示。
+                  </div>
+                )}
+              </section>
+
+              <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                <div className="mb-4">
+                  <h2 className="text-lg font-semibold text-slate-900">覆盖率趋势</h2>
+                  <p className="text-xs text-slate-500">
+                    展示 tracked / total 覆盖率变化。{activityTrendStartLabel ? `趋势起始日期 ${activityTrendStartLabel}` : '当前还没有可用快照数据。'}
+                  </p>
+                </div>
+                {coverageTrendChart ? (
+                  coverageTrendChart
+                ) : (
+                  <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-10 text-center text-sm text-slate-500">
+                    当前窗口内暂无日快照，覆盖率趋势将在首次快照后显示。
+                  </div>
+                )}
+              </section>
             </div>
           ) : null}
 
           <div className="mb-6 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
-            窗口型趋势说明：按当前决策暂不上 <code>user_activity_daily</code>，因此 24h / 7d / 30d 活跃趋势、覆盖率趋势与高频占比趋势暂不回填历史，只保留当前快照与可回算趋势。
+            窗口型趋势说明：当前仅基于 <code>admin_user_analytics_daily</code> 日快照记录，不引入 <code>user_activity_daily</code>。
+            因此 24h / 7d / 30d 活跃、覆盖率与高频占比只从首个快照日开始显示，不对更早历史做严格回填。
           </div>
 
           {frequency ? (
@@ -773,6 +1032,21 @@ export default function UserAnalyticsPage() {
                 <StatCard title="high+ (≥100)" value={`${formatNumber(frequency.highPlusUsers)} · ${formatPercent(frequency.highPlusShare)}`} icon={TrendingUp} color="bg-sky-600" />
                 <StatCard title="very_high+ (≥500)" value={`${formatNumber(frequency.veryHighPlusUsers)} · ${formatPercent(frequency.veryHighPlusShare)}`} icon={TrendingUp} color="bg-violet-600" />
                 <StatCard title="extreme (≥1000)" value={`${formatNumber(frequency.extremeUsers)} · ${formatPercent(frequency.extremeShare)}`} icon={TrendingUp} color="bg-rose-600" />
+              </div>
+
+              <div className="mb-5 rounded-2xl border border-slate-200 p-4">
+                <h3 className="mb-2 text-sm font-semibold text-slate-900">高频占比趋势</h3>
+                <p className="mb-4 text-xs text-slate-500">
+                  当前按样本 {frequencySample} 展示，固定滚动 {trends?.frequencyTrendLookbackDays ?? 30} 天口径。
+                  {frequencyTrendStartLabel ? ` 趋势起始日期 ${frequencyTrendStartLabel}。` : ' 当前还没有可用快照数据。'}
+                </p>
+                {frequencyShareTrendChart ? (
+                  frequencyShareTrendChart
+                ) : (
+                  <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-10 text-center text-sm text-slate-500">
+                    当前窗口内暂无日快照，高频占比趋势将在首次快照后显示。
+                  </div>
+                )}
               </div>
 
               <div className="grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">

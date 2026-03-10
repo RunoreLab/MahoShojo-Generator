@@ -1,4 +1,4 @@
-import { index, integer, primaryKey, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
+import { index, integer, primaryKey, real, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
 
 export type DataCardType = 'character' | 'scenario' | 'history' | 'questionnaire';
 export type DataCardReviewStatus = 'pending' | 'approved' | 'rejected';
@@ -445,6 +445,51 @@ export const userLastActivity = sqliteTable('user_last_activity', {
   updatedAt: text('updated_at').notNull(),
 }, (table) => ({
   lastSeenAtIndex: index('idx_user_last_activity_last_seen_at').on(table.lastSeenAt),
+}));
+
+export const adminUserAnalyticsDaily = sqliteTable('admin_user_analytics_daily', {
+  metricDate: text('metric_date').primaryKey(),
+  totalUsers: integer('total_users').notNull().default(0),
+  trackedUsers: integer('tracked_users').notNull().default(0),
+  untrackedUsers: integer('untracked_users').notNull().default(0),
+  activeUsers24h: integer('active_users_24h').notNull().default(0),
+  activeUsers7d: integer('active_users_7d').notNull().default(0),
+  activeUsers30d: integer('active_users_30d').notNull().default(0),
+  activityCoverageRate: real('activity_coverage_rate').notNull().default(0),
+  generationTotal1d: integer('generation_total_1d').notNull().default(0),
+  generationCompleted1d: integer('generation_completed_1d').notNull().default(0),
+  generationAborted1d: integer('generation_aborted_1d').notNull().default(0),
+  generationFailed1d: integer('generation_failed_1d').notNull().default(0),
+  generationDistinctUsers1d: integer('generation_distinct_users_1d').notNull().default(0),
+  authSuccess1d: integer('auth_success_1d').notNull().default(0),
+  authFailed1d: integer('auth_failed_1d').notNull().default(0),
+  frequencyTrendLookbackDays: integer('frequency_trend_lookback_days').notNull().default(30),
+  frequencyProfile: text('frequency_profile').notNull().default('v20260209'),
+  sampleUsersActive7d: integer('sample_users_active7d').notNull().default(0),
+  highPlusUsersActive7d: integer('high_plus_users_active7d').notNull().default(0),
+  veryHighPlusUsersActive7d: integer('very_high_plus_users_active7d').notNull().default(0),
+  extremeUsersActive7d: integer('extreme_users_active7d').notNull().default(0),
+  highPlusShareActive7d: real('high_plus_share_active7d').notNull().default(0),
+  veryHighPlusShareActive7d: real('very_high_plus_share_active7d').notNull().default(0),
+  extremeShareActive7d: real('extreme_share_active7d').notNull().default(0),
+  sampleUsersTracked: integer('sample_users_tracked').notNull().default(0),
+  highPlusUsersTracked: integer('high_plus_users_tracked').notNull().default(0),
+  veryHighPlusUsersTracked: integer('very_high_plus_users_tracked').notNull().default(0),
+  extremeUsersTracked: integer('extreme_users_tracked').notNull().default(0),
+  highPlusShareTracked: real('high_plus_share_tracked').notNull().default(0),
+  veryHighPlusShareTracked: real('very_high_plus_share_tracked').notNull().default(0),
+  extremeShareTracked: real('extreme_share_tracked').notNull().default(0),
+  sampleUsersAll: integer('sample_users_all').notNull().default(0),
+  highPlusUsersAll: integer('high_plus_users_all').notNull().default(0),
+  veryHighPlusUsersAll: integer('very_high_plus_users_all').notNull().default(0),
+  extremeUsersAll: integer('extreme_users_all').notNull().default(0),
+  highPlusShareAll: real('high_plus_share_all').notNull().default(0),
+  veryHighPlusShareAll: real('very_high_plus_share_all').notNull().default(0),
+  extremeShareAll: real('extreme_share_all').notNull().default(0),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+}, (table) => ({
+  updatedAtIndex: index('idx_admin_user_analytics_daily_updated_at').on(table.updatedAt),
 }));
 
 export const largeObjects = sqliteTable('large_objects', {

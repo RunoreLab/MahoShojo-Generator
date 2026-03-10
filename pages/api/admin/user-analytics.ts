@@ -129,13 +129,16 @@ export default async function handler(req: NextRequest) {
         }
 
         if (section === 'trends') {
-          const trends = await getAdminUserAnalyticsTrends(lookbackDays);
+          const trends = await getAdminUserAnalyticsTrends({
+            lookbackDays,
+            frequencySample,
+          });
           return new Response(
             JSON.stringify({
               success: true,
               section,
               stats: trends,
-              meta: { generatedAt, lookbackDays },
+              meta: { generatedAt, lookbackDays, frequencySample },
             }),
             { status: 200, headers: { 'Content-Type': 'application/json' } },
           );
@@ -154,7 +157,10 @@ export default async function handler(req: NextRequest) {
             cohort,
             lookbackDays,
           }),
-          getAdminUserAnalyticsTrends(lookbackDays),
+          getAdminUserAnalyticsTrends({
+            lookbackDays,
+            frequencySample,
+          }),
         ]);
 
         return new Response(
