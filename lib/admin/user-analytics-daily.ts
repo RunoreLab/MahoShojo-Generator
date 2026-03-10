@@ -1,3 +1,6 @@
+// 生产分支约束：
+// 本文件仅供本地脚本与 GitHub Actions 复用统计辅助逻辑，
+// 不得在生产分支通过线上页面或线上 API 暴露任何 admin 入口。
 export type AdminUserAnalyticsDailyFrequencySample = 'active7d' | 'tracked' | 'all';
 
 export const ADMIN_USER_ANALYTICS_FREQUENCY_TREND_LOOKBACK_DAYS = 30;

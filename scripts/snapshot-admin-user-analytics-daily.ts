@@ -1,5 +1,8 @@
 #!/usr/bin/env bun
 
+// 生产分支约束：
+// 本脚本仅允许本地运维或 GitHub Actions 调用，
+// 不得被包装成线上页面、线上 API 或其他公网可访问入口。
 import { loadEnvConfig } from '@next/env';
 
 import {
@@ -7,11 +10,7 @@ import {
   collectAdminUserAnalyticsDailySnapshot,
   recordAdminUserAnalyticsDailySnapshot,
 } from '@/lib/database/admin-user-analytics';
-import {
-  assertAdminUserAnalyticsMetricDateNotFuture,
-  normalizeAdminUserAnalyticsMetricDate,
-  resolveAdminUserAnalyticsBackfillEndMetricDate,
-} from '@/lib/admin/user-analytics-daily';
+import { normalizeAdminUserAnalyticsMetricDate } from '@/lib/admin/user-analytics-daily';
 
 const hasD1Config = (): boolean => {
   return Boolean(process.env.D1_DATABASE_ID && process.env.CLOUDFLARE_API_TOKEN && process.env.CLOUDFLARE_ACCOUNT_ID);
@@ -48,27 +47,18 @@ async function main() {
   const dryRun = hasFlag('--dry-run');
   const backfillDays = parsePositiveIntegerArg('--backfill-days');
   const metricDateArg = readArgValue('--metric-date');
-  const metricDate = metricDateArg ? normalizeAdminUserAnalyticsMetricDate(metricDateArg) : null;
-  if (metricDateArg && !metricDate) {
+  if (metricDateArg && !normalizeAdminUserAnalyticsMetricDate(metricDateArg)) {
     throw new Error(`--metric-date 非法：${metricDateArg}`);
+  }
+  if (metricDateArg) {
+    throw new Error('生产分支禁止通过 --metric-date 回放或补写历史 admin 快照');
   }
   const skipCurrent = hasFlag('--skip-current');
   const snapshotAt = new Date();
-  if (metricDate) {
-    assertAdminUserAnalyticsMetricDateNotFuture(metricDate, snapshotAt, '--metric-date');
-  }
-  const backfillEndMetricDate = backfillDays
-    ? resolveAdminUserAnalyticsBackfillEndMetricDate({
-        metricDate,
-        skipCurrent,
-        referenceDate: snapshotAt,
-      })
-    : undefined;
 
   const backfill = backfillDays
     ? await backfillAdminUserAnalyticsDailySnapshots({
         lookbackDays: backfillDays,
-        endMetricDate: backfillEndMetricDate,
         dryRun,
       })
     : null;
@@ -90,7 +80,7 @@ async function main() {
   }
 
   if (dryRun) {
-    const snapshot = await collectAdminUserAnalyticsDailySnapshot(snapshotAt, metricDate ? { metricDate } : undefined);
+    const snapshot = await collectAdminUserAnalyticsDailySnapshot(snapshotAt);
     console.log(
       JSON.stringify(
         {
@@ -111,7 +101,7 @@ async function main() {
     return;
   }
 
-  const snapshot = await recordAdminUserAnalyticsDailySnapshot(snapshotAt, metricDate ? { metricDate } : undefined);
+  const snapshot = await recordAdminUserAnalyticsDailySnapshot(snapshotAt);
   console.log(
     JSON.stringify(
       {

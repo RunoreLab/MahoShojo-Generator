@@ -1,3 +1,6 @@
+// 生产分支约束：
+// 本文件仅供本地脚本与 GitHub Actions 读取/写入 admin_user_analytics_daily。
+// 禁止在生产分支新增任何 pages/admin/*、pages/api/admin/* 或其他线上入口来调用这些能力。
 import {
   buildTrendPoints,
   buildUtcDateKeys,
@@ -11,7 +14,6 @@ import {
   ADMIN_USER_ANALYTICS_FREQUENCY_TREND_LOOKBACK_DAYS,
   assertAdminUserAnalyticsMetricDateNotFuture,
   buildAdminUserAnalyticsBackfillMetricDates,
-  buildAdminUserAnalyticsScheduledSnapshotAt,
   findMissingAdminUserAnalyticsMetricDates,
   getAdminUserAnalyticsDailyFrequencyTrendPoint,
   mapAdminUserAnalyticsDailySnapshotRow,
@@ -163,6 +165,28 @@ export type AdminUserAnalyticsTrends = {
   points: AdminUserAnalyticsTrendPoint[];
   activityPoints: AdminUserAnalyticsActivityTrendPoint[];
   frequencyPoints: AdminUserAnalyticsFrequencyTrendPoint[];
+};
+
+export const buildAdminUserAnalyticsSnapshotTrendSeries = (
+  snapshots: AdminUserAnalyticsDailySnapshot[],
+  frequencySample: AdminFrequencySample,
+): {
+  activityPoints: AdminUserAnalyticsActivityTrendPoint[];
+  frequencyPoints: AdminUserAnalyticsFrequencyTrendPoint[];
+} => {
+  return {
+    activityPoints: snapshots.map((snapshot) => ({
+      date: snapshot.metricDate,
+      totalUsers: snapshot.totalUsers,
+      trackedUsers: snapshot.trackedUsers,
+      untrackedUsers: snapshot.untrackedUsers,
+      activeUsers24h: snapshot.activeUsers24h,
+      activeUsers7d: snapshot.activeUsers7d,
+      activeUsers30d: snapshot.activeUsers30d,
+      activityCoverageRate: snapshot.activityCoverageRate,
+    })),
+    frequencyPoints: snapshots.map((snapshot) => getAdminUserAnalyticsDailyFrequencyTrendPoint(snapshot, frequencySample)),
+  };
 };
 
 const readFirstRow = (result: unknown): Record<string, unknown> => {
@@ -331,6 +355,8 @@ export type AdminUserAnalyticsDailyBackfillResult = {
   endMetricDate: string;
   missingDates: string[];
   writtenDates: string[];
+  skippedDates: string[];
+  historicalBackfillUnsupported: boolean;
   approximateWindowMetrics: boolean;
 };
 
@@ -350,11 +376,11 @@ const resolveAdminUserAnalyticsDailySnapshotWindow = (
 ): AdminUserAnalyticsDailySnapshotWindow => {
   const explicitMetricDate = normalizeAdminUserAnalyticsMetricDate(options?.metricDate);
   if (explicitMetricDate) {
-    assertAdminUserAnalyticsMetricDateNotFuture(explicitMetricDate, snapshotAt);
+    throw new Error('生产分支禁止显式指定 metricDate 进行 admin 快照回放或补写');
   }
-  const effectiveSnapshotAt = explicitMetricDate ? buildAdminUserAnalyticsScheduledSnapshotAt(explicitMetricDate) : snapshotAt;
+  const effectiveSnapshotAt = snapshotAt;
   const snapshotIso = effectiveSnapshotAt.toISOString();
-  const metricDate = explicitMetricDate ?? snapshotIso.slice(0, 10);
+  const metricDate = snapshotIso.slice(0, 10);
 
   return {
     metricDate,
@@ -734,20 +760,18 @@ export const backfillAdminUserAnalyticsDailySnapshots = async (options?: {
   const existingDates = await listAdminUserAnalyticsDailyMetricDates(candidateDates[0], endMetricDate);
   const missingDates = findMissingAdminUserAnalyticsMetricDates(candidateDates, existingDates);
   const writtenDates: string[] = [];
-
-  if (!options?.dryRun) {
-    for (const metricDate of missingDates) {
-      await recordAdminUserAnalyticsDailySnapshot(buildAdminUserAnalyticsScheduledSnapshotAt(metricDate), { metricDate });
-      writtenDates.push(metricDate);
-    }
-  }
+  // user_last_activity 仅保存“最新一次活跃”，无法在生产分支安全重建历史日快照。
+  // 因此这里仅探测缺口，不补写历史日期，避免写入伪造的 0 值或失真的活跃指标。
+  const skippedDates = [...missingDates];
 
   return {
     lookbackDays,
     endMetricDate,
     missingDates,
     writtenDates,
-    approximateWindowMetrics: missingDates.length > 0,
+    skippedDates,
+    historicalBackfillUnsupported: skippedDates.length > 0,
+    approximateWindowMetrics: false,
   };
 };
 
@@ -881,6 +905,7 @@ const buildFrequencySql = (
       FROM users u
       ${activityJoinSql}
       LEFT JOIN generation_by_user g ON g.user_id = u.id
+      WHERE u.created_at IS NOT NULL AND u.created_at < ?
     )
     SELECT
       COUNT(1) AS sample_users,
@@ -903,12 +928,12 @@ const buildFrequencySql = (
     sql,
     paramsBuilder: (sinceLookbackIso: string, since7dIso: string, snapshotAtIso: string) => {
       if (sample === 'active7d') {
-        return [sinceLookbackIso, snapshotAtIso, since7dIso, snapshotAtIso];
+        return [sinceLookbackIso, snapshotAtIso, snapshotAtIso, since7dIso, snapshotAtIso];
       }
       if (sample === 'tracked') {
-        return [sinceLookbackIso, snapshotAtIso, snapshotAtIso];
+        return [sinceLookbackIso, snapshotAtIso, snapshotAtIso, snapshotAtIso];
       }
-      return [sinceLookbackIso, snapshotAtIso];
+      return [sinceLookbackIso, snapshotAtIso, snapshotAtIso];
     },
   };
 };
@@ -1524,9 +1549,7 @@ export const getAdminUserAnalyticsTrends = async (options?: {
     const snapshots = readRows(dailyRowsResult).map(mapAdminUserAnalyticsDailySnapshotRow);
 
     if (snapshots.length > 0) {
-      const inRangeAvailableFrom = snapshots[0]?.metricDate ?? null;
-      const visibleDates = dates.filter((date) => !inRangeAvailableFrom || date >= inRangeAvailableFrom);
-      const snapshotByDate = Object.fromEntries(snapshots.map((snapshot) => [snapshot.metricDate, snapshot]));
+      const snapshotSeries = buildAdminUserAnalyticsSnapshotTrendSeries(snapshots, frequencySample);
 
       output.activityAvailableFrom = globalAvailableFrom;
       output.frequencyAvailableFrom = globalAvailableFrom;
@@ -1534,38 +1557,8 @@ export const getAdminUserAnalyticsTrends = async (options?: {
         snapshots[0]?.frequencyTrendLookbackDays ?? ADMIN_USER_ANALYTICS_FREQUENCY_TREND_LOOKBACK_DAYS;
       output.frequencyTrendProfile =
         (snapshots[0]?.frequencyProfile as AdminFrequencyProfile | undefined) ?? ADMIN_USER_ANALYTICS_FREQUENCY_PROFILE;
-
-      output.activityPoints = visibleDates.map((date) => {
-        const snapshot = snapshotByDate[date];
-        return {
-          date,
-          totalUsers: snapshot?.totalUsers ?? 0,
-          trackedUsers: snapshot?.trackedUsers ?? 0,
-          untrackedUsers: snapshot?.untrackedUsers ?? 0,
-          activeUsers24h: snapshot?.activeUsers24h ?? 0,
-          activeUsers7d: snapshot?.activeUsers7d ?? 0,
-          activeUsers30d: snapshot?.activeUsers30d ?? 0,
-          activityCoverageRate: snapshot?.activityCoverageRate ?? 0,
-        };
-      });
-
-      output.frequencyPoints = visibleDates.map((date) => {
-        const snapshot = snapshotByDate[date];
-        if (!snapshot) {
-          return {
-            date,
-            sample: frequencySample,
-            sampleUsers: 0,
-            highPlusUsers: 0,
-            veryHighPlusUsers: 0,
-            extremeUsers: 0,
-            highPlusShare: 0,
-            veryHighPlusShare: 0,
-            extremeShare: 0,
-          };
-        }
-        return getAdminUserAnalyticsDailyFrequencyTrendPoint(snapshot, frequencySample);
-      });
+      output.activityPoints = snapshotSeries.activityPoints;
+      output.frequencyPoints = snapshotSeries.frequencyPoints;
     } else {
       output.activityAvailableFrom = globalAvailableFrom;
       output.frequencyAvailableFrom = globalAvailableFrom;

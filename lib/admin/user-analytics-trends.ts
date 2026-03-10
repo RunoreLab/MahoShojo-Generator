@@ -1,3 +1,6 @@
+// 生产分支约束：
+// 本文件仅供本地脚本与 GitHub Actions 复用趋势纯函数，
+// 不得在生产分支通过线上页面或线上 API 暴露任何 admin 入口。
 export type AnalyticsDateKey = `${number}-${number}-${number}`;
 
 export type DailyTrendAccumulator = {

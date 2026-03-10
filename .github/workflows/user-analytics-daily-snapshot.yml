@@ -1,3 +1,6 @@
+# 生产分支约束：
+# 本工作流只允许通过 GitHub Actions 触发本地脚本写入统计快照，
+# 不得在生产分支额外提供任何线上 admin 页面或 admin API 入口。
 name: User Analytics Daily Snapshot
 
 on:
@@ -10,17 +13,13 @@ on:
         required: false
         type: boolean
         default: false
-      metric_date:
-        description: '可选，指定 metricDate（YYYY-MM-DD）'
-        required: false
-        type: string
       backfill_days:
-        description: '回补最近 N 天缺失快照，默认 7'
+        description: '检查最近 N 天缺失快照，生产分支不补写历史日'
         required: false
         type: string
         default: '7'
       skip_current:
-        description: '仅回补，不记录当前日期快照'
+        description: '仅检查缺失快照，不记录本次即时快照'
         required: false
         type: boolean
         default: false
@@ -64,13 +63,11 @@ jobs:
           backfill_days="7"
           dry_run="false"
           skip_current="false"
-          metric_date=""
 
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             backfill_days="${{ inputs.backfill_days }}"
             dry_run="${{ inputs.dry_run }}"
             skip_current="${{ inputs.skip_current }}"
-            metric_date="${{ inputs.metric_date }}"
           fi
 
           if [ -z "${backfill_days}" ]; then
@@ -85,10 +82,6 @@ jobs:
 
           if [ "${skip_current}" = "true" ]; then
             args+=("--skip-current")
-          fi
-
-          if [ -n "${metric_date}" ]; then
-            args+=("--metric-date" "${metric_date}")
           fi
 
           bun scripts/snapshot-admin-user-analytics-daily.ts "${args[@]}"
