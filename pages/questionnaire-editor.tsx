@@ -887,7 +887,7 @@ const QuestionnaireEditorPage: React.FC = () => {
       data: questionnaireData,
     });
     if (result.success) {
-      flashMessage(result.pendingReview ? '✅ 更新已提交审核，审核通过后生效' : '✅ 问卷已替换');
+      flashMessage(result.message || (result.pendingReview ? '✅ 更新已提交审核，审核通过后生效' : '✅ 问卷已替换'));
       loadUserQuestionnaireCards();
     } else {
       setEditorError(result.error || '替换失败');

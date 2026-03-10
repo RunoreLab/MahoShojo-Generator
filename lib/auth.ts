@@ -450,8 +450,11 @@ export const dataCardApi = {
   // 创建数据卡
   async createCard(type: 'character' | 'scenario' | 'history' | 'questionnaire', name: string, description: string, data: any, isPublic: number = 0): Promise<{
     success: boolean;
-    id?: number;
+    id?: string;
     error?: string;
+    message?: string;
+    reviewStatus?: 'pending' | 'approved' | 'rejected';
+    visualAssetsRejected?: boolean;
   }> {
     try {
       const response = await authStorage.fetch('/api/data-cards', {
@@ -474,6 +477,9 @@ export const dataCardApi = {
   async updateCard(id: string, name: string, description: string, isPublic?: number): Promise<{
     success: boolean;
     error?: string;
+    message?: string;
+    reviewStatus?: 'pending' | 'approved' | 'rejected';
+    visualAssetsRejected?: boolean;
   }> {
     try {
       const response = await authStorage.fetch('/api/data-cards', {
@@ -496,7 +502,14 @@ export const dataCardApi = {
   async replaceCard(
     id: string,
     payload: { name?: string; description?: string; isPublic?: number; data: any }
-  ): Promise<{ success: boolean; pendingReview?: boolean; error?: string }> {
+  ): Promise<{
+    success: boolean;
+    pendingReview?: boolean;
+    error?: string;
+    message?: string;
+    reviewStatus?: 'pending' | 'approved' | 'rejected';
+    visualAssetsRejected?: boolean;
+  }> {
     try {
       const response = await authStorage.fetch('/api/data-cards', {
         method: 'PUT',

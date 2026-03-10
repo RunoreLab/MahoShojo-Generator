@@ -287,7 +287,7 @@ export function MagicTeaPartyCharacterPanel(props: MagicTeaPartyCharacterPanelPr
           };
           const nextRoles = roles.map((role) => (role.id === selectedRole.id ? nextRole : role));
           onUpdateRoles(nextRoles);
-          setCloudNotice('已保存到云端数据卡。');
+          setCloudNotice(result.message || '已保存到云端数据卡。');
         } else {
           const cardId = selectedRole.dataCardId;
           if (!cardId) {
@@ -308,7 +308,7 @@ export function MagicTeaPartyCharacterPanel(props: MagicTeaPartyCharacterPanelPr
           };
           const nextRoles = roles.map((role) => (role.id === selectedRole.id ? nextRole : role));
           onUpdateRoles(nextRoles);
-          setCloudNotice(result.pendingReview ? '已提交替换，正在审核。' : '云端数据卡已替换。');
+          setCloudNotice(result.message || (result.pendingReview ? '已提交替换，正在审核。' : '云端数据卡已替换。'));
         }
       } catch (err) {
         setCloudError(err instanceof Error ? err.message : '云端保存失败');

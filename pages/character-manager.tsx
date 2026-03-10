@@ -612,7 +612,10 @@ const CharacterManagerPage: React.FC = () => {
             );
 
             if (result.success) {
-                setMessage({ type: 'success', text: `数据卡保存成功！${newCardForm.isPublic === 1 ? '（公开）' : '（私有）'}` });
+                setMessage({
+                    type: 'success',
+                    text: result.message || `数据卡保存成功！${newCardForm.isPublic === 1 ? '（公开）' : '（私有）'}`
+                });
                 setShowSaveCardModal(false);
                 setNewCardForm({ name: '', description: '', isPublic: 0 });
                 setSaveCardError(null);
@@ -773,7 +776,10 @@ const CharacterManagerPage: React.FC = () => {
                 data: payloadData,
             });
             if (result.success) {
-                setMessage({ type: 'success', text: result.pendingReview ? '更新已提交审核，审核通过后生效' : '替换成功' });
+                setMessage({
+                    type: 'success',
+                    text: result.message || (result.pendingReview ? '更新已提交审核，审核通过后生效' : '替换成功')
+                });
                 loadUserDataCards();
                 loadUserBadges();
             } else {
@@ -807,7 +813,10 @@ const CharacterManagerPage: React.FC = () => {
             throw new Error(result.error || '替换失败');
         }
 
-        setMessage({ type: 'success', text: result.pendingReview ? '更新已提交审核，审核通过后生效' : '叙事历史数据卡已替换' });
+        setMessage({
+            type: 'success',
+            text: result.message || (result.pendingReview ? '更新已提交审核，审核通过后生效' : '叙事历史数据卡已替换')
+        });
         loadUserDataCards();
         loadUserBadges();
     };
@@ -2533,8 +2542,11 @@ const CharacterManagerPage: React.FC = () => {
                 }}
                 rawJson={questionnaireCompatRawJson}
                 targetCard={questionnaireCompatTargetCard}
-                onReplaceSuccess={(pendingReview) => {
-                    setMessage({ type: 'success', text: pendingReview ? '更新已提交审核，审核通过后生效' : '问卷数据卡已替换' });
+                onReplaceSuccess={(result) => {
+                    setMessage({
+                        type: 'success',
+                        text: result.message || (result.pendingReview ? '更新已提交审核，审核通过后生效' : '问卷数据卡已替换')
+                    });
                     loadUserDataCards();
                     loadUserBadges();
                 }}

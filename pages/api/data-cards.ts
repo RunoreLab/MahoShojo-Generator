@@ -5,6 +5,7 @@ import {
   deleteDataCard,
   pruneUserRecycleBin,
   upsertDataCardUpdate,
+  deleteDataCardUpdate,
   getDataCardById,
   getUserUsedSlots,
   updateDataCardContentByIdAndUser as updateDataCardContentByIdAndUserLegacy,
@@ -23,12 +24,25 @@ import { computeTechIndex } from '@/lib/metrics/techIndex';
 import { verifySignature } from '@/lib/signature';
 import { upsertDataCardMetrics } from '@/lib/database/data-card-metrics';
 import { resetStrictArenaRatingForDataCard } from '@/lib/database/arena-ratings';
+import { hasDataCardVisualAssets } from '@/lib/data-card-visual-assets';
 import {
   autoReviewLatestPendingPublicDataCardsForUser,
   autoReviewLatestPendingPublicDataCardUpdatesForUser
 } from '@/lib/review/auto-data-card-review';
 
 export const runtime = 'edge';
+
+const VISUAL_ASSET_REJECTED_CREATE_MESSAGE = '检测到视觉资产，数据卡已创建，但已标记为未通过审查。';
+const VISUAL_ASSET_REJECTED_UPDATE_MESSAGE = '检测到视觉资产，数据卡已更新，但已标记为未通过审查。';
+
+function tryParseDataCardJson(value: unknown): unknown | null {
+  if (typeof value !== 'string') return null;
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    return null;
+  }
+}
 
 async function getDataCardUpdatedAt(db: AppDrizzleDb | null, dataCardId: string): Promise<string | null> {
   if (!db) return null;
@@ -136,6 +150,7 @@ export default async function handler(req: Request): Promise<Response> {
         // 检查数据卡内容大小（写入数据库前，按 UTF-8 字节数计）
         let dataString: string;
         let dataWithAuthorString: string;
+        let visualAssetsRejected = false;
         try {
           const isPlainObject = (value: unknown): value is Record<string, unknown> =>
             typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -144,6 +159,7 @@ export default async function handler(req: Request): Promise<Response> {
               ? { ...data, nativeAllowed: false }
               : data;
 
+          visualAssetsRejected = hasDataCardVisualAssets(sanitizedPayload);
           dataString = JSON.stringify(sanitizedPayload);
           dataWithAuthorString = JSON.stringify({ ...(JSON.parse(dataString) as any), _author: user.username, _authorId: userId });
         } catch {
@@ -183,7 +199,7 @@ export default async function handler(req: Request): Promise<Response> {
         }
 
         // [v0.4.2 核心逻辑] 根据用户豁免状态决定审查状态
-        const reviewStatus = user.is_review_exempt === 1 ? 'approved' : 'pending';
+        const reviewStatus = visualAssetsRejected ? 'rejected' : (user.is_review_exempt === 1 ? 'approved' : 'pending');
         const normalizedPublic =
           typeof isPublic === 'number' ? Math.floor(isPublic) : (isPublic ? 1 : 0);
 
@@ -210,7 +226,10 @@ export default async function handler(req: Request): Promise<Response> {
         if (result.id) {
           const tasks: Promise<unknown>[] = [computeAndUpsertMetrics(db, result.id, dataWithAuthorString)];
           const shouldAutoReview =
-            config.DATA_CARD_AUTO_REVIEW?.enabled && normalizedPublic === 1 && reviewStatus === 'pending';
+            config.DATA_CARD_AUTO_REVIEW?.enabled &&
+            !visualAssetsRejected &&
+            normalizedPublic === 1 &&
+            reviewStatus === 'pending';
           if (shouldAutoReview) {
             tasks.push(autoReviewLatestPendingPublicDataCardsForUser(userId));
           }
@@ -227,7 +246,9 @@ export default async function handler(req: Request): Promise<Response> {
         return new Response(JSON.stringify({ 
           success: true, 
           id: result.id,
-          message: '数据卡创建成功' 
+          reviewStatus,
+          visualAssetsRejected,
+          message: visualAssetsRejected ? VISUAL_ASSET_REJECTED_CREATE_MESSAGE : '数据卡创建成功',
         }), {
           status: 201,
           headers: { 'Content-Type': 'application/json' }
@@ -266,6 +287,7 @@ export default async function handler(req: Request): Promise<Response> {
 
         let dataString: string | null = null;
         const dataChanged = data !== undefined;
+        let visualAssetsRejected = false;
         if (dataChanged) {
           const isPlainObject = (value: unknown): value is Record<string, unknown> =>
             typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -287,6 +309,7 @@ export default async function handler(req: Request): Promise<Response> {
               ? { ...data, nativeAllowed: preservedNativeAllowed === true }
               : data;
 
+          visualAssetsRejected = hasDataCardVisualAssets(nextPayload);
           try {
             dataString = JSON.stringify(nextPayload);
           } catch {
@@ -298,6 +321,10 @@ export default async function handler(req: Request): Promise<Response> {
 
           const dataSizeBytes = getUtf8ByteLength(dataString);
           if (dataSizeBytes > MAX_DATA_CARD_BYTES) return makePayloadTooLargeResponse(dataSizeBytes);
+        }
+
+        if (!dataChanged) {
+          visualAssetsRejected = hasDataCardVisualAssets(tryParseDataCardJson(currentCard.data));
         }
 
         // 敏感词检查：标题+描述+（可选）数据
@@ -323,20 +350,22 @@ export default async function handler(req: Request): Promise<Response> {
               : (isPublic ? 1 : 0);
         const shouldAutoReview =
           config.DATA_CARD_AUTO_REVIEW?.enabled &&
+          !visualAssetsRejected &&
           !isExempt &&
           !isAdmin &&
           normalizedPublicAfter === 1 &&
           currentCard.review_status === 'pending';
 
-        // 如果不需要审核（pending/rejected 或 豁免 / 管理员），直接更新主表
-        if (isPendingOrRejected || isExempt || isAdmin) {
+        // 如果不需要审核（pending/rejected 或 豁免 / 管理员），或检测到视觉资产需要直接打回，则直接更新主表
+        if (isPendingOrRejected || isExempt || isAdmin || visualAssetsRejected) {
+          const reviewStatusAfter = visualAssetsRejected ? 'rejected' : currentCard.review_status;
           const success = await updateDataCard(
             id,
             userId,
             name ?? currentCard.name,
             description ?? currentCard.description,
             isPublic,
-            currentCard.review_status
+            reviewStatusAfter
           );
 
           if (!success) {
@@ -378,6 +407,10 @@ export default async function handler(req: Request): Promise<Response> {
             }
           }
 
+          if (visualAssetsRejected) {
+            await deleteDataCardUpdate(id);
+          }
+
           if (!dataChanged && shouldAutoReview) {
             const executionContext = (req as any).context;
             const autoReviewPromise = autoReviewLatestPendingPublicDataCardsForUser(userId).then(() => undefined);
@@ -388,7 +421,12 @@ export default async function handler(req: Request): Promise<Response> {
             }
           }
 
-          return new Response(JSON.stringify({ success: true, message: '数据卡更新成功' }), {
+          return new Response(JSON.stringify({
+            success: true,
+            reviewStatus: reviewStatusAfter,
+            visualAssetsRejected,
+            message: visualAssetsRejected ? VISUAL_ASSET_REJECTED_UPDATE_MESSAGE : '数据卡更新成功'
+          }), {
             status: 200,
             headers: { 'Content-Type': 'application/json' }
           });
