@@ -7,7 +7,11 @@ import {
   collectAdminUserAnalyticsDailySnapshot,
   recordAdminUserAnalyticsDailySnapshot,
 } from '@/lib/database/admin-user-analytics';
-import { normalizeAdminUserAnalyticsMetricDate } from '@/lib/admin/user-analytics-daily';
+import {
+  assertAdminUserAnalyticsMetricDateNotFuture,
+  normalizeAdminUserAnalyticsMetricDate,
+  resolveAdminUserAnalyticsBackfillEndMetricDate,
+} from '@/lib/admin/user-analytics-daily';
 
 const hasD1Config = (): boolean => {
   return Boolean(process.env.D1_DATABASE_ID && process.env.CLOUDFLARE_API_TOKEN && process.env.CLOUDFLARE_ACCOUNT_ID);
@@ -50,10 +54,21 @@ async function main() {
   }
   const skipCurrent = hasFlag('--skip-current');
   const snapshotAt = new Date();
+  if (metricDate) {
+    assertAdminUserAnalyticsMetricDateNotFuture(metricDate, snapshotAt, '--metric-date');
+  }
+  const backfillEndMetricDate = backfillDays
+    ? resolveAdminUserAnalyticsBackfillEndMetricDate({
+        metricDate,
+        skipCurrent,
+        referenceDate: snapshotAt,
+      })
+    : undefined;
 
   const backfill = backfillDays
     ? await backfillAdminUserAnalyticsDailySnapshots({
         lookbackDays: backfillDays,
+        endMetricDate: backfillEndMetricDate,
         dryRun,
       })
     : null;

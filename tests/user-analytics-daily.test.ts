@@ -5,12 +5,15 @@ import {
   ADMIN_USER_ANALYTICS_SCHEDULED_SNAPSHOT_UTC_MINUTE,
   ADMIN_USER_ANALYTICS_FREQUENCY_PROFILE,
   ADMIN_USER_ANALYTICS_FREQUENCY_TREND_LOOKBACK_DAYS,
+  assertAdminUserAnalyticsMetricDateNotFuture,
   buildAdminUserAnalyticsBackfillMetricDates,
   buildAdminUserAnalyticsScheduledSnapshotAt,
   findMissingAdminUserAnalyticsMetricDates,
   getAdminUserAnalyticsDailyFrequencyTrendPoint,
+  isFutureAdminUserAnalyticsMetricDate,
   mapAdminUserAnalyticsDailySnapshotRow,
   normalizeAdminUserAnalyticsMetricDate,
+  resolveAdminUserAnalyticsBackfillEndMetricDate,
   shiftAdminUserAnalyticsMetricDate,
 } from '@/lib/admin/user-analytics-daily';
 
@@ -128,6 +131,31 @@ describe('user analytics daily snapshot mapper', () => {
     expect(normalizeAdminUserAnalyticsMetricDate('2026-03-10')).toBe('2026-03-10');
     expect(normalizeAdminUserAnalyticsMetricDate('2026-02-30')).toBeNull();
     expect(normalizeAdminUserAnalyticsMetricDate('20260310')).toBeNull();
+  });
+
+  it('拒绝未来 metricDate，并按显式日期推导回补结束日', () => {
+    const referenceDate = new Date('2026-03-10T12:00:00.000Z');
+
+    expect(isFutureAdminUserAnalyticsMetricDate('2026-03-11', referenceDate)).toBe(true);
+    expect(isFutureAdminUserAnalyticsMetricDate('2026-03-10', referenceDate)).toBe(false);
+    expect(() => assertAdminUserAnalyticsMetricDateNotFuture('2026-03-11', referenceDate)).toThrow(
+      /不能晚于 2026-03-10/,
+    );
+
+    expect(
+      resolveAdminUserAnalyticsBackfillEndMetricDate({
+        metricDate: '2026-03-10',
+        skipCurrent: false,
+        referenceDate,
+      }),
+    ).toBe('2026-03-09');
+    expect(
+      resolveAdminUserAnalyticsBackfillEndMetricDate({
+        metricDate: '2026-03-10',
+        skipCurrent: true,
+        referenceDate,
+      }),
+    ).toBe('2026-03-10');
   });
 
   it('按定时任务约定构造补快照时间点并支持日期偏移', () => {

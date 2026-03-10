@@ -63,7 +63,7 @@ export type AdminUserAnalyticsDailyFrequencyTrendPoint = {
 
 const UTC_DATE_KEY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
-const formatUtcDateKey = (date: Date): string => {
+export const formatAdminUserAnalyticsMetricDate = (date: Date): string => {
   const year = date.getUTCFullYear();
   const month = String(date.getUTCMonth() + 1).padStart(2, '0');
   const day = String(date.getUTCDate()).padStart(2, '0');
@@ -75,7 +75,55 @@ export const normalizeAdminUserAnalyticsMetricDate = (value: string | null | und
   if (!UTC_DATE_KEY_PATTERN.test(trimmed)) return null;
   const date = new Date(`${trimmed}T00:00:00.000Z`);
   if (Number.isNaN(date.getTime())) return null;
-  return formatUtcDateKey(date) === trimmed ? trimmed : null;
+  return formatAdminUserAnalyticsMetricDate(date) === trimmed ? trimmed : null;
+};
+
+export const isFutureAdminUserAnalyticsMetricDate = (metricDate: string, referenceDate = new Date()): boolean => {
+  const normalizedMetricDate = normalizeAdminUserAnalyticsMetricDate(metricDate);
+  if (!normalizedMetricDate) {
+    throw new Error(`非法 metricDate：${metricDate}`);
+  }
+
+  return normalizedMetricDate > formatAdminUserAnalyticsMetricDate(referenceDate);
+};
+
+export const assertAdminUserAnalyticsMetricDateNotFuture = (
+  metricDate: string,
+  referenceDate = new Date(),
+  label = 'metricDate',
+): string => {
+  const normalizedMetricDate = normalizeAdminUserAnalyticsMetricDate(metricDate);
+  if (!normalizedMetricDate) {
+    throw new Error(`${label} 非法：${metricDate}`);
+  }
+
+  const referenceMetricDate = formatAdminUserAnalyticsMetricDate(referenceDate);
+  if (normalizedMetricDate > referenceMetricDate) {
+    throw new Error(`${label} 不能晚于 ${referenceMetricDate}`);
+  }
+
+  return normalizedMetricDate;
+};
+
+export const resolveAdminUserAnalyticsBackfillEndMetricDate = (options?: {
+  metricDate?: string | null;
+  skipCurrent?: boolean;
+  referenceDate?: Date;
+}): string => {
+  const referenceDate = options?.referenceDate instanceof Date ? options.referenceDate : new Date();
+  const normalizedMetricDate = options?.metricDate
+    ? assertAdminUserAnalyticsMetricDateNotFuture(options.metricDate, referenceDate, 'metricDate')
+    : null;
+
+  if (!normalizedMetricDate) {
+    return shiftAdminUserAnalyticsMetricDate(formatAdminUserAnalyticsMetricDate(referenceDate), -1);
+  }
+
+  if (options?.skipCurrent) {
+    return normalizedMetricDate;
+  }
+
+  return shiftAdminUserAnalyticsMetricDate(normalizedMetricDate, -1);
 };
 
 export const shiftAdminUserAnalyticsMetricDate = (metricDate: string, deltaDays: number): string => {
@@ -85,7 +133,7 @@ export const shiftAdminUserAnalyticsMetricDate = (metricDate: string, deltaDays:
   }
   const date = new Date(`${normalized}T00:00:00.000Z`);
   date.setUTCDate(date.getUTCDate() + Math.trunc(deltaDays));
-  return formatUtcDateKey(date);
+  return formatAdminUserAnalyticsMetricDate(date);
 };
 
 export const buildAdminUserAnalyticsScheduledSnapshotAt = (metricDate: string): Date => {

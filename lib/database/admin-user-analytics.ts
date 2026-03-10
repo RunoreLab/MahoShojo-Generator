@@ -9,6 +9,7 @@ import {
   ADMIN_USER_ANALYTICS_SNAPSHOT_BACKFILL_MAX_DAYS,
   ADMIN_USER_ANALYTICS_FREQUENCY_PROFILE,
   ADMIN_USER_ANALYTICS_FREQUENCY_TREND_LOOKBACK_DAYS,
+  assertAdminUserAnalyticsMetricDateNotFuture,
   buildAdminUserAnalyticsBackfillMetricDates,
   buildAdminUserAnalyticsScheduledSnapshotAt,
   findMissingAdminUserAnalyticsMetricDates,
@@ -338,11 +339,19 @@ const clampBackfillDays = (input?: number): number => {
   return Math.max(1, Math.min(ADMIN_USER_ANALYTICS_SNAPSHOT_BACKFILL_MAX_DAYS, Math.floor(input as number)));
 };
 
+const toSnapshotSourceError = (source: string, error: unknown): Error => {
+  const message = error instanceof Error ? error.message : String(error);
+  return new Error(`${source} 查询失败: ${message}`);
+};
+
 const resolveAdminUserAnalyticsDailySnapshotWindow = (
   snapshotAt = new Date(),
   options?: AdminUserAnalyticsDailySnapshotCollectionOptions,
 ): AdminUserAnalyticsDailySnapshotWindow => {
   const explicitMetricDate = normalizeAdminUserAnalyticsMetricDate(options?.metricDate);
+  if (explicitMetricDate) {
+    assertAdminUserAnalyticsMetricDateNotFuture(explicitMetricDate, snapshotAt);
+  }
   const effectiveSnapshotAt = explicitMetricDate ? buildAdminUserAnalyticsScheduledSnapshotAt(explicitMetricDate) : snapshotAt;
   const snapshotIso = effectiveSnapshotAt.toISOString();
   const metricDate = explicitMetricDate ?? snapshotIso.slice(0, 10);
@@ -375,6 +384,10 @@ const getAdminUserAnalyticsFrequencySummary = async (
     lookbackDays: ADMIN_USER_ANALYTICS_FREQUENCY_TREND_LOOKBACK_DAYS,
     snapshotAt,
   });
+
+  if (!frequency.activityTrackingOk) {
+    throw new Error(`样本 ${sample} 缺少可靠的活跃追踪数据`);
+  }
 
   return {
     sampleUsers: frequency.sampleUsers,
@@ -443,7 +456,7 @@ export const collectAdminUserAnalyticsDailySnapshot = async (
     );
     snapshot.totalUsers = readInt(usersRow.total_users);
   } catch (error) {
-    console.error('[AdminUserAnalytics] 构建日快照时读取用户总数失败:', error);
+    throw toSnapshotSourceError('users', error);
   }
 
   try {
@@ -464,9 +477,7 @@ export const collectAdminUserAnalyticsDailySnapshot = async (
     snapshot.activeUsers7d = readInt(activityRow.active_users_7d);
     snapshot.activeUsers30d = readInt(activityRow.active_users_30d);
   } catch (error) {
-    if (!isMissingActivityTableError(error)) {
-      console.error('[AdminUserAnalytics] 构建日快照时读取活跃统计失败:', error);
-    }
+    throw toSnapshotSourceError('user_last_activity', error);
   }
 
   try {
@@ -489,7 +500,7 @@ export const collectAdminUserAnalyticsDailySnapshot = async (
     snapshot.generationFailed1d = readInt(generationRow.generation_failed_1d);
     snapshot.generationDistinctUsers1d = readInt(generationRow.generation_distinct_users_1d);
   } catch (error) {
-    console.error('[AdminUserAnalytics] 构建日快照时读取战报统计失败:', error);
+    throw toSnapshotSourceError('battle_report_generations', error);
   }
 
   try {
@@ -506,7 +517,7 @@ export const collectAdminUserAnalyticsDailySnapshot = async (
     snapshot.authSuccess1d = readInt(authRow.auth_success_1d);
     snapshot.authFailed1d = readInt(authRow.auth_failed_1d);
   } catch (error) {
-    console.error('[AdminUserAnalytics] 构建日快照时读取 Auth 统计失败:', error);
+    throw toSnapshotSourceError('auth_audit_logs', error);
   }
 
   try {
@@ -540,7 +551,7 @@ export const collectAdminUserAnalyticsDailySnapshot = async (
     snapshot.veryHighPlusShareAll = allSummary.veryHighPlusShare;
     snapshot.extremeShareAll = allSummary.extremeShare;
   } catch (error) {
-    console.error('[AdminUserAnalytics] 构建日快照时读取高频分层失败:', error);
+    throw toSnapshotSourceError('frequency_summary', error);
   }
 
   snapshot.untrackedUsers = Math.max(0, snapshot.totalUsers - snapshot.trackedUsers);
@@ -716,7 +727,9 @@ export const backfillAdminUserAnalyticsDailySnapshots = async (options?: {
   const lookbackDays = clampBackfillDays(options?.lookbackDays);
   const todayMetricDate = new Date().toISOString().slice(0, 10);
   const defaultEndMetricDate = shiftAdminUserAnalyticsMetricDate(todayMetricDate, -1);
-  const endMetricDate = normalizeAdminUserAnalyticsMetricDate(options?.endMetricDate) ?? defaultEndMetricDate;
+  const endMetricDate = options?.endMetricDate
+    ? assertAdminUserAnalyticsMetricDateNotFuture(options.endMetricDate, new Date(), 'endMetricDate')
+    : defaultEndMetricDate;
   const candidateDates = buildAdminUserAnalyticsBackfillMetricDates(lookbackDays, endMetricDate);
   const existingDates = await listAdminUserAnalyticsDailyMetricDates(candidateDates[0], endMetricDate);
   const missingDates = findMissingAdminUserAnalyticsMetricDates(candidateDates, existingDates);
