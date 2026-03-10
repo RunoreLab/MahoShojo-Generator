@@ -23,13 +23,19 @@ interface R2Result<T = undefined> {
     error?: string;
 }
 
-interface R2ObjectSummary {
+export interface R2ObjectSummary {
     key: string;
     size: number;
     lastModified?: string;
     etag?: string;
     storageClass?: string;
 }
+
+type R2ObjectListPage = {
+    objects: R2ObjectSummary[];
+    isTruncated: boolean;
+    nextContinuationToken: string | null;
+};
 
 const required = {
     accessKeyId: process.env.R2_ACCESS_KEY_ID,
@@ -225,7 +231,20 @@ export async function generatePresignedUrl(key: string, options: PresignOptions 
  * @param prefix 前缀，用于筛选对象（如 'test/' 会列出所有 test/ 开头的对象）
  * @returns 对象列表结果，包含对象键、大小、类型等
  */
-export const listObjects = async (prefix: string): Promise<R2Result<R2ObjectSummary[]>> => {
+const readXmlTagValue = (block: string, tag: string): string | null => {
+    const match = block.match(new RegExp(`<${tag}>([\\s\\S]*?)<\\/${tag}>`));
+    if (!match) return null;
+    return match[1]
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&amp;/g, '&')
+        .trim();
+};
+
+const listObjectsPage = async (
+    prefix: string,
+    options: { continuationToken?: string | null; maxKeys?: number } = {}
+): Promise<R2Result<R2ObjectListPage>> => {
     try {
         assertConfig();
         const sanitizedPrefix = prefix.replace(/^\/+/, '');
@@ -233,6 +252,12 @@ export const listObjects = async (prefix: string): Promise<R2Result<R2ObjectSumm
         url.searchParams.set('list-type', '2');
         if (sanitizedPrefix) {
             url.searchParams.set('prefix', sanitizedPrefix);
+        }
+        if (typeof options.maxKeys === 'number' && Number.isFinite(options.maxKeys) && options.maxKeys > 0) {
+            url.searchParams.set('max-keys', String(Math.floor(options.maxKeys)));
+        }
+        if (typeof options.continuationToken === 'string' && options.continuationToken.trim()) {
+            url.searchParams.set('continuation-token', options.continuationToken.trim());
         }
 
         const signed = await r2Client!.sign(url, { method: 'GET' });
@@ -245,34 +270,108 @@ export const listObjects = async (prefix: string): Promise<R2Result<R2ObjectSumm
 
         const xml = await response.text();
         const contentsRegex = /<Contents>([\s\S]*?)<\/Contents>/g;
-        const tagValue = (block: string, tag: string): string | null => {
-            const match = block.match(new RegExp(`<${tag}>([\\s\\S]*?)<\\/${tag}>`));
-            if (!match) return null;
-            return match[1]
-                .replace(/&lt;/g, '<')
-                .replace(/&gt;/g, '>')
-                .replace(/&amp;/g, '&')
-                .trim();
-        };
 
-        const data: R2ObjectSummary[] = [];
+        const objects: R2ObjectSummary[] = [];
         let match: RegExpExecArray | null;
         while ((match = contentsRegex.exec(xml)) !== null) {
             const block = match[1];
-            const key = tagValue(block, 'Key');
+            const key = readXmlTagValue(block, 'Key');
             if (!key) continue;
-            const sizeValue = tagValue(block, 'Size');
-            data.push({
+            const sizeValue = readXmlTagValue(block, 'Size');
+            objects.push({
                 key,
                 size: sizeValue ? parseInt(sizeValue, 10) : 0,
-                lastModified: tagValue(block, 'LastModified') || undefined,
-                etag: tagValue(block, 'ETag') || undefined,
-                storageClass: tagValue(block, 'StorageClass') || undefined,
+                lastModified: readXmlTagValue(block, 'LastModified') || undefined,
+                etag: readXmlTagValue(block, 'ETag') || undefined,
+                storageClass: readXmlTagValue(block, 'StorageClass') || undefined,
             });
         }
 
-        return { success: true, status: response.status, data };
+        const isTruncated = readXmlTagValue(xml, 'IsTruncated') === 'true';
+        const nextContinuationToken = readXmlTagValue(xml, 'NextContinuationToken');
+
+        return {
+            success: true,
+            status: response.status,
+            data: {
+                objects,
+                isTruncated,
+                nextContinuationToken: nextContinuationToken || null,
+            },
+        };
     } catch (error) {
         return { success: false, error: error instanceof Error ? error.message : '未知错误' };
     }
+};
+
+export const listObjects = async (prefix: string): Promise<R2Result<R2ObjectSummary[]>> => {
+    const result = await listObjectsPage(prefix);
+    if (!result.success) {
+        return {
+            success: false,
+            status: result.status,
+            error: result.error,
+        };
+    }
+    return {
+        success: true,
+        status: result.status,
+        data: result.data?.objects ?? [],
+    };
+};
+
+export const listAllObjects = async (
+    prefix: string,
+    options: { maxPages?: number; maxKeysPerPage?: number } = {}
+): Promise<R2Result<{ objects: R2ObjectSummary[]; truncated: boolean; pages: number }>> => {
+    const maxPages =
+        typeof options.maxPages === 'number' && Number.isFinite(options.maxPages)
+            ? Math.max(1, Math.floor(options.maxPages))
+            : 20;
+    const maxKeysPerPage =
+        typeof options.maxKeysPerPage === 'number' && Number.isFinite(options.maxKeysPerPage)
+            ? Math.max(1, Math.floor(options.maxKeysPerPage))
+            : 1000;
+
+    const objects: R2ObjectSummary[] = [];
+    let continuationToken: string | null = null;
+    let truncated = false;
+    let pages = 0;
+
+    for (let i = 0; i < maxPages; i += 1) {
+        const page = await listObjectsPage(prefix, { continuationToken, maxKeys: maxKeysPerPage });
+        if (!page.success) {
+            return {
+                success: false,
+                status: page.status,
+                error: page.error || 'R2 对象列表获取失败',
+            };
+        }
+
+        pages += 1;
+        objects.push(...(page.data?.objects ?? []));
+
+        if (!page.data?.isTruncated) {
+            truncated = false;
+            continuationToken = null;
+            break;
+        }
+
+        continuationToken = page.data.nextContinuationToken;
+        if (!continuationToken) {
+            truncated = false;
+            break;
+        }
+
+        truncated = true;
+    }
+
+    return {
+        success: true,
+        data: {
+            objects,
+            truncated,
+            pages,
+        },
+    };
 };
