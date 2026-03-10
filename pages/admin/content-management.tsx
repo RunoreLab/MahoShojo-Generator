@@ -1,69 +1,24 @@
-// pages/admin/content-management.tsx
-
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import Head from 'next/head';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
 import { debounce } from '@/lib/debounce';
-import DataCardDetailsModal from '@/components/DataCardDetailsModal';
-import { AdminTableScroll } from '@/components/admin/AdminTableScroll';
+import { ContentManagementActionBar } from '@/components/admin/content-management/ContentManagementActionBar';
+import { ContentManagementAiReviewModal } from '@/components/admin/content-management/ContentManagementAiReviewModal';
+import { getPublicStatusBadge, getReviewStatusBadge } from '@/components/admin/content-management/ContentManagementBadges';
+import { ContentManagementDetailsDialog } from '@/components/admin/content-management/ContentManagementDetailsDialog';
+import { ContentManagementFilters } from '@/components/admin/content-management/ContentManagementFilters';
+import { ContentManagementTable } from '@/components/admin/content-management/ContentManagementTable';
+import {
+  DEFAULT_CONTENT_MANAGEMENT_FILTERS,
+  type AiReviewResult,
+  type AiTargetSnapshotItem,
+  type CompareCardSnapshot,
+  type ContentManagementFilters as ContentManagementFiltersState,
+  type DataCard,
+} from '@/components/admin/content-management/shared';
 import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
 import { MAX_DATA_CARD_BYTES, formatKilobytes } from '@/lib/data-card-size';
-
-// 定义数据卡类型接口
-interface DataCard {
-  id: string;
-  name: string;
-  description: string;
-  data: string; // 确保 data 字段存在
-  type: 'character' | 'scenario' | 'history' | 'questionnaire';
-  is_public: -1 | 0 | 1;
-  review_status: 'pending' | 'approved' | 'rejected';
-  username: string;
-  like_count: number;
-  usage_count: number;
-  favorite_count: number;
-  is_recommended: number;
-  created_at: string;
-  updated_at: string;
-  pending_update_id?: string | null;
-  pending_update_name?: string | null;
-  pending_update_description?: string | null;
-  pending_update_data?: string | null;
-  pending_update_created_at?: string | null;
-  size_bytes?: number | null;
-  size_chars?: number | null;
-  metrics_stale?: number | null;
-  has_visual_assets?: number | null;
-}
-
-interface AiTargetSnapshotItem {
-  kind: 'card' | 'update';
-  cardId: string;
-  updateId?: string;
-  name: string;
-  description: string;
-  data: string;
-  originalName?: string;
-  originalDescription?: string;
-  originalData?: string;
-}
-
-// AI审查结果类型
-interface AiReviewResult {
-    id: string;
-    name: string;
-    suggestion: 'approved' | 'rejected';
-    reason: string;
-}
-
-type CompareCardSnapshot = {
-  name: string;
-  description: string;
-  data: string;
-  updatedAt?: string;
-};
-
 const parseQuestionnaireNativeAllowed = (rawData: string | null | undefined): boolean => {
   if (!rawData) return false;
   try {
@@ -98,19 +53,7 @@ const ContentManagementPage: React.FC = () => {
   const [dataCards, setDataCards] = useState<DataCard[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
-  const [filters, setFilters] = useState({
-    page: 1,
-    limit: 20,
-    search: '',
-    reviewStatus: '',
-    isPublic: '',
-    type: '',
-    isRecommended: '',
-    hasPendingUpdate: '',
-    metricsState: '',
-    hasVisualAssets: '',
-    sizeBucket: '',
-  });
+  const [filters, setFilters] = useState<ContentManagementFiltersState>(DEFAULT_CONTENT_MANAGEMENT_FILTERS);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isExporting, setIsExporting] = useState(false);
 
@@ -192,7 +135,7 @@ const ContentManagementPage: React.FC = () => {
     void fetchAvailableAiModels();
   }, [fetchAvailableAiModels]);
 
-  const fetchData = useCallback(async (currentFilters: typeof filters) => {
+  const fetchData = useCallback(async (currentFilters: ContentManagementFiltersState) => {
     setLoading(true);
     setSelectedIds(new Set());
     abortControllerRef.current?.abort();
@@ -266,7 +209,7 @@ const ContentManagementPage: React.FC = () => {
     }
   }, [aiReviewResults]); // 依赖项是 aiReviewResults
 
-  const updateUrl = useCallback((newFilters: typeof filters) => {
+  const updateUrl = useCallback((newFilters: ContentManagementFiltersState) => {
       const query: { [key: string]: any } = {};
       if (newFilters.page > 1) query.page = newFilters.page;
       if (newFilters.search.trim()) query.search = newFilters.search.trim();
@@ -954,24 +897,6 @@ ${JSON.stringify(cardsToCopy, null, 2)}
   };
 
   const totalPages = Math.ceil(total / filters.limit);
-  const getReviewStatusBadge = (status: DataCard['review_status']) => {
-      const map = {
-          pending: { text: '待审查', color: 'bg-yellow-100 text-yellow-800' },
-          approved: { text: '已通过', color: 'bg-green-100 text-green-800' },
-          rejected: { text: '未通过', color: 'bg-red-100 text-red-800' },
-      };
-      return <span className={`px-2 py-1 text-xs font-medium rounded-full ${map[status].color}`}>{map[status].text}</span>;
-  };
-  const getPublicStatusBadge = (status: DataCard['is_public']) => {
-      const map = {
-          '1': { text: '公开', color: 'bg-blue-100 text-blue-800' },
-          '0': { text: '私有', color: 'bg-gray-100 text-gray-800' },
-          '-1': { text: '封禁', color: 'bg-zinc-200 text-zinc-800 font-bold' },
-      };
-      const key = String(status);
-      return <span className={`px-2 py-1 text-xs font-medium rounded-full ${map[key as keyof typeof map].color}`}>{map[key as keyof typeof map].text}</span>;
-  };
-
   return (
     <>
       <Head>
@@ -986,439 +911,88 @@ ${JSON.stringify(cardsToCopy, null, 2)}
           </div>
           <h1 className="text-2xl font-bold text-gray-800 mb-4">内容档案管理</h1>
 
-          {/* 筛选器区域 */}
-          <div className="bg-white p-4 rounded-lg shadow-sm mb-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8 gap-4">
-              <input
-                type="text"
-                name="search"
-                defaultValue={router.query.search || ''} // 使用 router.query 初始化以避免UI跳动
-                onChange={handleFilterChange}
-                onCompositionStart={() => {
-                  isComposingSearchRef.current = true;
-                }}
-                onCompositionEnd={(e) => {
-                  isComposingSearchRef.current = false;
-                  const newFilters = { ...filters, search: e.currentTarget.value, page: 1 };
-                  setFilters(newFilters);
-                  debouncedUpdateUrl(newFilters);
-                }}
-                onKeyDown={(e) => {
-                  if (e.key !== 'Enter') return;
-                  if ((e.nativeEvent as unknown as { isComposing?: boolean }).isComposing || isComposingSearchRef.current) {
-                    e.preventDefault();
-                    return;
-                  }
-                  e.preventDefault();
-                  const newFilters = { ...filters, search: e.currentTarget.value, page: 1 };
-                  setFilters(newFilters);
-                  debouncedUpdateUrl.cancel();
-                  updateUrl(newFilters);
-                }}
-                onBlur={(e) => {
-                  if (isComposingSearchRef.current) return;
-                  const newFilters = { ...filters, search: e.currentTarget.value, page: 1 };
-                  setFilters(newFilters);
-                  debouncedUpdateUrl.cancel();
-                  updateUrl(newFilters);
-                }}
-                placeholder="搜索名称、描述、作者..."
-                className="input-field"
-              />
-              <select name="reviewStatus" value={filters.reviewStatus} onChange={handleFilterChange} className="input-field">
-                <option value="">所有审查状态</option>
-                <option value="pending">待审查</option>
-                <option value="approved">已通过</option>
-                <option value="rejected">未通过</option>
-              </select>
-              <select name="isPublic" value={filters.isPublic} onChange={handleFilterChange} className="input-field">
-                <option value="">所有公开状态</option>
-                <option value="1">公开</option>
-                <option value="0">私有</option>
-                <option value="-1">封禁</option>
-              </select>
-              <select name="type" value={filters.type} onChange={handleFilterChange} className="input-field">
-                <option value="">所有类型</option>
-                <option value="character">角色</option>
-                <option value="scenario">情景</option>
-                <option value="history">叙事历史</option>
-                <option value="questionnaire">问卷</option>
-              </select>
-              <select name="isRecommended" value={filters.isRecommended} onChange={handleFilterChange} className="input-field">
-                <option value="">推荐状态</option>
-                <option value="1">仅推荐</option>
-                <option value="0">未推荐</option>
-              </select>
-              <select name="hasPendingUpdate" value={filters.hasPendingUpdate} onChange={handleFilterChange} className="input-field">
-                <option value="">更新状态</option>
-                <option value="1">仅更新待审核</option>
-                <option value="0">排除更新待审核</option>
-              </select>
-              <select name="metricsState" value={filters.metricsState} onChange={handleFilterChange} className="input-field">
-                <option value="">技术值状态</option>
-                <option value="stale">待重算 / 已过期</option>
-                <option value="fresh">已同步</option>
-                <option value="missing">缺失</option>
-              </select>
-              <select name="hasVisualAssets" value={filters.hasVisualAssets} onChange={handleFilterChange} className="input-field">
-                <option value="">视觉资产</option>
-                <option value="1">包含视觉资产</option>
-                <option value="0">不含视觉资产</option>
-              </select>
-              <select name="sizeBucket" value={filters.sizeBucket} onChange={handleFilterChange} className="input-field">
-                <option value="">JSON 体积</option>
-                <option value="warning">接近上限（≥80%）</option>
-                <option value="overLimit">超预算</option>
-              </select>
-            </div>
-          </div>
+          <ContentManagementFilters
+            filters={filters}
+            setFilters={setFilters}
+            routerSearchValue={typeof router.query.search === 'string' ? router.query.search : ''}
+            isComposingSearchRef={isComposingSearchRef}
+            handleFilterChange={handleFilterChange}
+            updateUrl={updateUrl}
+            debouncedUpdateUrl={debouncedUpdateUrl}
+          />
 
-          {/* 操作栏 */}
-          <div className="bg-white p-4 rounded-lg shadow-sm mb-4 flex flex-wrap items-center gap-2">
-            <span className="text-sm text-gray-600 mr-4">选中 {selectedIds.size} / {dataCards.length} 项 (共 {total} 项)</span>
-            <div className="flex-grow flex flex-wrap gap-2">
-                <button onClick={() => handleBatchReviewWithUpdates('approve')} className="admin-button-sm bg-green-600 hover:bg-green-700 text-white">通过审查</button>
-                <button onClick={() => handleBatchReviewWithUpdates('reject')} className="admin-button-sm bg-red-600 hover:bg-red-700 text-white">拒绝审查</button>
-                <button onClick={() => handleBatchAction('set_public_status', 1)} className="admin-button-sm bg-blue-600 hover:bg-blue-700 text-white">设为公开</button>
-                <button onClick={() => handleBatchAction('set_public_status', 0)} className="admin-button-sm bg-gray-600 hover:bg-gray-700 text-white">设为私有</button>
-                <button onClick={() => handleBatchAction('set_public_status', -1)} className="admin-button-sm bg-zinc-700 hover:bg-zinc-800 text-white">设为封禁</button>
-                <button onClick={() => handleBatchAction('set_recommended', 1)} className="admin-button-sm bg-amber-500 hover:bg-amber-600 text-white">设为推荐</button>
-                <button onClick={() => handleBatchAction('set_recommended', 0)} className="admin-button-sm bg-amber-200 hover:bg-amber-300 text-amber-800">取消推荐</button>
-                <button onClick={handleRecomputeMetrics} className="admin-button-sm bg-indigo-700 hover:bg-indigo-800 text-white">重算技术值</button>
-                <button onClick={handleResetArenaRatings} className="admin-button-sm bg-rose-700 hover:bg-rose-800 text-white">重置排位（角色）</button>
-                <button onClick={handleExport} className="admin-button-sm bg-teal-600 hover:bg-teal-700 text-white disabled:opacity-50" disabled={isExporting || selectedIds.size === 0}>
-                  {isExporting ? '导出中...' : '导出选中项'}
-                </button>
-                <button onClick={handleOpenAiReview} className="admin-button-sm bg-indigo-600 hover:bg-indigo-700 text-white">AI 辅助审查</button>
-            </div>
-          </div>
-          
-          {/* 数据表格 */}
-          <AdminTableScroll withCard={false} className="bg-white rounded-lg shadow-sm">
-            <table className="min-w-full w-max text-sm text-left text-gray-500">
-              <thead className="text-xs text-gray-700 bg-gray-50">
-                <tr>
-                  <th scope="col" className="p-4"><input type="checkbox" onChange={handleSelectAll} checked={selectedIds.size === dataCards.length && dataCards.length > 0} /></th>
-                  <th scope="col" className="px-6 py-3">名称 / 作者</th>
-                  <th scope="col" className="px-6 py-3">类型</th>
-                  <th scope="col" className="px-6 py-3">公开状态</th>
-                  <th scope="col" className="px-6 py-3">审查状态</th>
-                  <th scope="col" className="px-6 py-3 whitespace-nowrap">点赞 / 收藏 / 使用</th>
-                  <th scope="col" className="px-6 py-3">内容预览</th>
-                  <th scope="col" className="px-6 py-3">更新时间</th>
-                </tr>
-              </thead>
-              <tbody>
-                {loading ? (
-                  <tr><td colSpan={8} className="text-center p-8">加载中...</td></tr>
-                ) : dataCards.length === 0 ? (
-                  <tr><td colSpan={8} className="text-center p-8">未找到符合条件的数据</td></tr>
-                ) : (
-                  dataCards.map(card => {
-                    const hasPendingUpdate = Boolean(card.pending_update_id);
-                    const displayName = hasPendingUpdate ? (card.pending_update_name ?? card.name) : card.name;
-                    const displayDescription = hasPendingUpdate ? (card.pending_update_description ?? card.description) : card.description;
-                    const displayData = hasPendingUpdate ? (card.pending_update_data ?? card.data) : card.data;
-                    const questionnaireNativeAllowed = card.type === 'questionnaire' ? parseQuestionnaireNativeAllowed(card.data) : false;
-                    const canToggleQuestionnaireNative = card.type === 'questionnaire' && !hasPendingUpdate;
-                    const metricsStale = card.metrics_stale === 1;
-                    const hasVisualAssets = card.has_visual_assets === 1;
-                    const sizeBadgeText = formatSizeBadge(card.size_bytes);
+          <ContentManagementActionBar
+            selectedCount={selectedIds.size}
+            currentPageCount={dataCards.length}
+            total={total}
+            isExporting={isExporting}
+            onApprove={() => handleBatchReviewWithUpdates('approve')}
+            onReject={() => handleBatchReviewWithUpdates('reject')}
+            onSetPublic={(value) => handleBatchAction('set_public_status', value)}
+            onSetRecommended={(value) => handleBatchAction('set_recommended', value)}
+            onRecomputeMetrics={handleRecomputeMetrics}
+            onResetArenaRatings={handleResetArenaRatings}
+            onExport={handleExport}
+            onOpenAiReview={handleOpenAiReview}
+          />
 
-                    return (
-                      <tr key={card.id} className="bg-white border-b hover:bg-gray-50">
-                        <td className="p-4">
-                          <input type="checkbox" onChange={() => handleSelectOne(card.id)} checked={selectedIds.has(card.id)} />
-                        </td>
-                        <td className="px-6 py-4">
-                          <button
-                            onClick={() => handleViewDetails(card)}
-                            className="font-medium text-purple-600 hover:underline text-left"
-                          >
-                            {displayName}
-                            {hasPendingUpdate && (
-                              <span className="ml-2 inline-flex items-center px-2 py-0.5 text-[11px] rounded-full bg-amber-100 text-amber-800">
-                                更新待审核
-                              </span>
-                            )}
-                            {!hasPendingUpdate && card.review_status === 'pending' && (
-                              <span className="ml-2 inline-flex items-center px-2 py-0.5 text-[11px] rounded-full bg-blue-100 text-blue-800">
-                                新建待审
-                              </span>
-                            )}
-                            {card.is_recommended === 1 && (
-                              <span className="ml-2 inline-flex items-center gap-1 px-2 py-0.5 text-[11px] rounded-full bg-amber-100 text-amber-700">
-                                <span>推荐</span>
-                              </span>
-                            )}
-                            {card.type === 'questionnaire' && (
-                              <button
-                                type="button"
-                                disabled={!canToggleQuestionnaireNative || nativeUpdatingId === card.id}
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  handleToggleQuestionnaireNative(card, !questionnaireNativeAllowed);
-                                }}
-                                className={`ml-2 inline-flex items-center gap-1 px-2 py-0.5 text-[11px] rounded-full border transition-colors ${questionnaireNativeAllowed
-                                  ? 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
-                                  : 'border-gray-200 bg-gray-100 text-gray-600 hover:bg-gray-200'
-                                } ${!canToggleQuestionnaireNative || nativeUpdatingId === card.id ? 'opacity-60 cursor-not-allowed' : ''}`}
-                                title={canToggleQuestionnaireNative ? '点击切换问卷原生许可' : '存在待审更新，暂不可切换'}
-                              >
-                                {questionnaireNativeAllowed ? '原生许可' : '非原生'}
-                              </button>
-                            )}
-                          </button>
-                          <div className="text-xs text-gray-500">by {card.username}</div>
-                          <div className="mt-1 flex flex-wrap gap-1">
-                            {hasVisualAssets && (
-                              <span className="inline-flex items-center px-2 py-0.5 text-[11px] rounded-full bg-fuchsia-100 text-fuchsia-700">
-                                含视觉资产
-                              </span>
-                            )}
-                            {metricsStale && (
-                              <span className="inline-flex items-center px-2 py-0.5 text-[11px] rounded-full bg-indigo-100 text-indigo-700">
-                                技术值待重算
-                              </span>
-                            )}
-                            {sizeBadgeText && (
-                              <span
-                                className={`inline-flex items-center px-2 py-0.5 text-[11px] rounded-full ${
-                                  (card.size_bytes ?? 0) >= MAX_DATA_CARD_BYTES
-                                    ? 'bg-red-100 text-red-700'
-                                    : 'bg-amber-100 text-amber-700'
-                                }`}
-                              >
-                                {sizeBadgeText}
-                              </span>
-                            )}
-                          </div>
-                          {hasPendingUpdate && (
-                            <div className="mt-1 flex items-center gap-2">
-                              <span className="text-[11px] text-gray-500">原：{card.name}</span>
-                              <button onClick={() => handleViewOriginalDetails(card)} className="text-[11px] text-gray-500 hover:text-gray-800 underline">
-                                看原版
-                              </button>
-                            </div>
-                          )}
-                        </td>
-                        <td className="px-6 py-4">
-                          {card.type === 'character'
-                            ? '角色'
-                            : card.type === 'scenario'
-                              ? '情景'
-                              : card.type === 'history'
-                                ? '叙事历史'
-                                : '问卷'}
-                        </td>
-                        <td className="px-6 py-4">{getPublicStatusBadge(card.is_public)}</td>
-                        <td className="px-6 py-4">
-                          <div className="space-y-1">
-                            {hasPendingUpdate && (
-                              <span className="inline-flex px-2 py-1 text-xs font-medium rounded-full bg-amber-100 text-amber-800">
-                                更新待审核
-                              </span>
-                            )}
-                            {getReviewStatusBadge(card.review_status)}
-                          </div>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          ❤️ {card.like_count} / ⭐ {card.favorite_count} / 📥 {card.usage_count}
-                        </td>
-                        <td className="px-6 py-4 text-xs text-gray-500 max-w-xs">
-                          {(() => {
-                              const defaultDescriptions = ['角色数据卡', '情景数据卡', '叙事历史数据卡', '问卷数据卡'];
-                              const normalizedDescription = (displayDescription || '').trim();
-                              const isMeaningfulDescription = normalizedDescription && !defaultDescriptions.includes(normalizedDescription);
-
-                              const contentToShow = (() => {
-                                if (isMeaningfulDescription) return normalizedDescription;
-                                if (card.type === 'history') {
-                                  try {
-                                    const parsed = displayData ? JSON.parse(displayData) : null;
-                                    const count = Array.isArray(parsed?.entries) ? parsed.entries.length : 0;
-                                    return `叙事历史（${count} 条）`;
-                                  } catch {
-                                    return '叙事历史（解析失败）';
-                                  }
-                                }
-                                return displayData || '';
-                              })();
-                              let titleToShow = contentToShow;
-                              try {
-                                  if (!isMeaningfulDescription && displayData) {
-                                      titleToShow = JSON.stringify(JSON.parse(displayData), null, 2);
-                                  }
-                              } catch (e) {
-                                console.error('❌ 发生解析错误:', e);
-                              }
-
-                              return (
-                                  <div className="space-y-1">
-                                      <p className="truncate" title={titleToShow}>
-                                          {contentToShow}
-                                      </p>
-                                      <div className="text-[11px] text-gray-400">
-                                        {typeof card.size_bytes === 'number' && Number.isFinite(card.size_bytes)
-                                          ? `${formatKilobytes(card.size_bytes)} KB`
-                                          : '大小未知'}
-                                      </div>
-                                  </div>
-                              );
-                          })()}
-                        </td>
-                        <td className="px-6 py-4">
-                          {hasPendingUpdate ? (
-                            <div className="space-y-0.5">
-                              <div className="text-sm text-gray-700">{new Date(card.pending_update_created_at || card.updated_at).toLocaleString()}</div>
-                              <div className="text-[11px] text-gray-500">更新提交</div>
-                            </div>
-                          ) : (
-                            new Date(card.updated_at).toLocaleString()
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          </AdminTableScroll>
-
-          {/* 分页 */}
-          {totalPages > 1 && (
-              <div className="flex justify-between items-center mt-4 text-sm">
-                  <button onClick={() => handlePageChange(filters.page - 1)} disabled={loading || filters.page <= 1} className="admin-button-sm">上一页</button>
-                  <span>第 {filters.page} / {totalPages} 页 (共 {total} 项)</span>
-                  <button onClick={() => handlePageChange(filters.page + 1)} disabled={loading || filters.page >= totalPages} className="admin-button-sm">下一页</button>
-              </div>
-          )}
+          <ContentManagementTable
+            dataCards={dataCards}
+            loading={loading}
+            selectedIds={selectedIds}
+            nativeUpdatingId={nativeUpdatingId}
+            total={total}
+            totalPages={totalPages}
+            filters={filters}
+            getReviewStatusBadge={getReviewStatusBadge}
+            getPublicStatusBadge={getPublicStatusBadge}
+            parseQuestionnaireNativeAllowed={parseQuestionnaireNativeAllowed}
+            formatSizeBadge={formatSizeBadge}
+            handleSelectAll={handleSelectAll}
+            handleSelectOne={handleSelectOne}
+            handleViewDetails={handleViewDetails}
+            handleViewOriginalDetails={handleViewOriginalDetails}
+            handleToggleQuestionnaireNative={handleToggleQuestionnaireNative}
+            handlePageChange={handlePageChange}
+          />
         </div>
       </div>
-      
-      {/* AI 辅助审查模态框 */}
-      {showAiReviewModal && (
-          <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
-              <div className="bg-white rounded-lg shadow-2xl max-w-4xl w-full max-h-[90vh] flex flex-col">
-                  <div className="flex justify-between items-center p-4 border-b">
-                      <h2 className="text-lg font-bold">AI 辅助审查</h2>
-                      <button onClick={() => setShowAiReviewModal(false)} className="text-gray-500 hover:text-gray-800 text-2xl">&times;</button>
-                  </div>
-                  <div className="flex-grow flex flex-col md:flex-row overflow-hidden">
-                      {/* 左侧控制与结果区 */}
-                      <div className="w-full md:w-1/2 flex flex-col border-r">
-                          <div className="p-4 space-y-4">
-                              <div className="flex items-center gap-4">
-                                  <div>
-                                      <label className="text-sm font-medium">单次处理数量</label>
-                                      <input type="number" value={aiBatchSize} onChange={e => setAiBatchSize(parseInt(e.target.value))} className="input-field w-24 mt-1" min="1" max="50" />
-                                  </div>
-                                  <div>
-                                    <label className="text-sm font-medium">使用模型</label>
-                                    <select value={aiModel} onChange={e => setAiModel(e.target.value)} className="input-field mt-1">
-                                      <option value="default">使用系统默认配置（推荐）</option>
-                                      {resolvedAiModels.map(modelId => (
-                                        <option key={modelId} value={modelId}>
-                                          {aiModelLabelMap.get(modelId) ?? modelId}
-                                        </option>
-                                      ))}
-                                    </select>
-                                    {availableAiModelsError && availableAiModels.length === 0 && (
-                                      <p className="text-[11px] text-amber-700 mt-1">模型列表获取失败，已回退到内置目录：{availableAiModelsError}</p>
-                                    )}
-                                  </div>
-                                  <button onClick={handleStartAiReview} disabled={isAiReviewing} className="admin-button-sm bg-indigo-600 hover:bg-indigo-700 text-white self-end">
-                                      {isAiReviewing ? '审查中...' : `开始审查`}
-                                  </button>
-                              </div>
-                              <p className="text-xs text-gray-500">
-                                若已在下方大列表中勾选内容，则优先审查勾选项；否则从当前列表中选取“新建待审 / 更新待审”最多 {aiBatchSize} 项。AI 给出“拒绝”不会自动勾选，需管理员确认。
-                              </p>
-                          </div>
-                          <div className="flex-grow overflow-y-auto p-4 border-t">
-                              {isAiReviewing && <div className="text-center">AI 正在努力分析中...</div>}
-                              {aiReviewResults.length === 0 && !isAiReviewing && <div className="text-center text-gray-500">暂无审查结果</div>}
-                              {aiReviewResults.length > 0 && (
-                                  <div className="space-y-2">
-                                      {aiReviewResults.map(res => (
-                                          <div key={res.id} className="p-3 bg-gray-50 rounded-lg border">
-                                              <p className="font-semibold">{res.name}</p>
-                                              <p className={`text-sm font-bold ${res.suggestion === 'approved' ? 'text-green-600' : 'text-red-600'}`}>AI建议: {res.suggestion === 'approved' ? '通过' : '拒绝'}</p>
-                                              <p className="text-xs text-gray-600 italic">理由: {res.reason}</p>
-                                              {aiTargetSnapshotById[res.id] && (
-                                                <div className="mt-2 flex flex-wrap gap-2">
-                                                  <button
-                                                    onClick={() => handleViewDetailsFromAiTarget(res.id, 'review')}
-                                                    className="admin-button-sm bg-gray-100 text-gray-700 hover:bg-gray-200"
-                                                  >
-                                                    {aiTargetSnapshotById[res.id].kind === 'update' ? '查看更新' : '查看详情'}
-                                                  </button>
-                                                  {aiTargetSnapshotById[res.id].kind === 'update' && (
-                                                    <button
-                                                      onClick={() => handleViewDetailsFromAiTarget(res.id, 'original')}
-                                                      className="admin-button-sm bg-gray-100 text-gray-700 hover:bg-gray-200"
-                                                    >
-                                                      看原版
-                                                    </button>
-                                                  )}
-                                                </div>
-                                              )}
-                                              <div className="mt-2 flex gap-2">
-                                                  <label className="flex items-center text-xs cursor-pointer"><input type="radio" name={`action-${res.id}`} onChange={() => handleMarkAction(res.id, 'approve')} checked={markedActions[res.id] === 'approve'}/><span className="ml-1">通过</span></label>
-                                                  <label className="flex items-center text-xs cursor-pointer"><input type="radio" name={`action-${res.id}`} onChange={() => handleMarkAction(res.id, 'reject')} checked={markedActions[res.id] === 'reject'}/><span className="ml-1">拒绝</span></label>
-                                              </div>
-                                          </div>
-                                      ))}
-                                  </div>
-                              )}
-                          </div>
-                      </div>
-                      {/* 右侧外部工作流 */}
-                      <div className="w-full md:w-1/2 flex flex-col">
-                          <div className="p-4">
-                              <h3 className="font-semibold mb-2">外部 AI 审查工作流</h3>
-                              <button onClick={handleCopyToClipboard} className="admin-button-sm bg-gray-700 hover:bg-gray-800 text-white w-full mb-2">1. 复制内容以供外部审查</button>
-                              {copyStatus && <p className="text-xs text-green-600 text-center mb-2">{copyStatus}</p>}
-                              <textarea value={externalReviewContent} onChange={e => setExternalReviewContent(e.target.value)} placeholder="2. 在此处粘贴外部 AI 返回的 JSON 数组结果（留空则尝试读取剪贴板）..." className="input-field w-full h-32 resize-y"></textarea>
-                              <button onClick={handleParseAndApply} className="admin-button-sm bg-blue-700 hover:bg-blue-800 text-white w-full mt-2">3. 解析并应用建议</button>
-                          </div>
-                      </div>
-                  </div>
-                  <div className="p-4 border-t flex justify-end">
-                      <button onClick={handleExecuteMarkedActions} disabled={Object.keys(markedActions).length === 0} className="admin-button-sm bg-green-700 hover:bg-green-800 text-white">
-                          执行所有已标记操作 ({Object.keys(markedActions).length})
-                      </button>
-                  </div>
-              </div>
-          </div>
-      )}
-      {/* 详情弹窗组件 */}
-      {selectedCardDetails && (
-        <DataCardDetailsModal
-          isOpen={isDetailsModalOpen}
-          onClose={() => {
-            setIsDetailsModalOpen(false);
-            setSelectedCompareCard(null);
-          }}
-          compareCard={selectedCompareCard}
-          pendingNotice={detailsPendingNotice}
-          adminTagEditor
-          card={{
-            id: selectedCardDetails.id,
-            name: selectedCardDetails.name,
-            description: selectedCardDetails.description,
-            type: selectedCardDetails.type,
-            data: selectedCardDetails.data,
-            isPublic: selectedCardDetails.is_public === 1,
-            usageCount: selectedCardDetails.usage_count,
-            likeCount: selectedCardDetails.like_count,
-            favoriteCount: selectedCardDetails.favorite_count,
-            author: selectedCardDetails.username,
-            createdAt: selectedCardDetails.created_at,
-            updatedAt: selectedCardDetails.updated_at
-          }}
-        />
-      )}
+
+      <ContentManagementAiReviewModal
+        isOpen={showAiReviewModal}
+        onClose={() => setShowAiReviewModal(false)}
+        aiBatchSize={aiBatchSize}
+        setAiBatchSize={setAiBatchSize}
+        aiModel={aiModel}
+        setAiModel={setAiModel}
+        resolvedAiModels={resolvedAiModels}
+        aiModelLabelMap={aiModelLabelMap}
+        availableAiModelsError={availableAiModelsError}
+        availableAiModels={availableAiModels}
+        isAiReviewing={isAiReviewing}
+        aiReviewResults={aiReviewResults}
+        markedActions={markedActions}
+        aiTargetSnapshotById={aiTargetSnapshotById}
+        externalReviewContent={externalReviewContent}
+        setExternalReviewContent={setExternalReviewContent}
+        copyStatus={copyStatus}
+        onStartAiReview={handleStartAiReview}
+        onCopyToClipboard={handleCopyToClipboard}
+        onParseAndApply={handleParseAndApply}
+        onExecuteMarkedActions={handleExecuteMarkedActions}
+        onMarkAction={handleMarkAction}
+        onViewDetailsFromAiTarget={handleViewDetailsFromAiTarget}
+      />
+      <ContentManagementDetailsDialog
+        selectedCardDetails={selectedCardDetails}
+        isOpen={isDetailsModalOpen}
+        onClose={() => {
+          setIsDetailsModalOpen(false);
+          setSelectedCompareCard(null);
+        }}
+        selectedCompareCard={selectedCompareCard}
+        detailsPendingNotice={detailsPendingNotice}
+      />
     </>
   );
 };
