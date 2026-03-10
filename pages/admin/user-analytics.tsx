@@ -248,7 +248,9 @@ export default function UserAnalyticsPage() {
   const [data, setData] = useState<ApiResponse | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [refreshing, setRefreshing] = useState<boolean>(false);
+  const [snapshotRunning, setSnapshotRunning] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  const [snapshotMessage, setSnapshotMessage] = useState<string | null>(null);
 
   const fetchUrl = useMemo(() => {
     const params = new URLSearchParams({
@@ -283,6 +285,31 @@ export default function UserAnalyticsPage() {
 
   useEffect(() => {
     void fetchData(false);
+  }, [fetchData]);
+
+  const handleRunDailySnapshot = useCallback(async () => {
+    setSnapshotRunning(true);
+    setSnapshotMessage(null);
+    try {
+      const response = await fetch('/api/admin/user-analytics/snapshot', {
+        method: 'POST',
+      });
+      const json = (await response.json()) as {
+        success?: boolean;
+        snapshot?: { metricDate?: string; updatedAt?: string };
+        error?: string;
+      };
+      if (!response.ok || json.success !== true) {
+        throw new Error(json.error || '执行失败');
+      }
+      const metricDate = typeof json.snapshot?.metricDate === 'string' ? json.snapshot.metricDate : 'unknown';
+      setSnapshotMessage(`已记录 ${metricDate} 的日快照`);
+      await fetchData(true);
+    } catch (runError) {
+      setSnapshotMessage(runError instanceof Error ? `记录快照失败：${runError.message}` : '记录快照失败');
+    } finally {
+      setSnapshotRunning(false);
+    }
   }, [fetchData]);
 
   const overview = data?.stats.overview;
@@ -803,14 +830,24 @@ export default function UserAnalyticsPage() {
             <Link href="/admin" className="text-sm text-sky-700 hover:underline">
               ← 返回管理后台主页
             </Link>
-            <button
-              type="button"
-              onClick={() => void fetchData(true)}
-              className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm hover:bg-slate-50"
-            >
-              <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
-              刷新
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => void handleRunDailySnapshot()}
+                className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm hover:bg-slate-50"
+              >
+                <Clock className={`h-4 w-4 ${snapshotRunning ? 'animate-spin' : ''}`} />
+                记录今日快照
+              </button>
+              <button
+                type="button"
+                onClick={() => void fetchData(true)}
+                className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm hover:bg-slate-50"
+              >
+                <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
+                刷新
+              </button>
+            </div>
           </div>
 
           <div className="mb-5 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -916,6 +953,12 @@ export default function UserAnalyticsPage() {
                 导出分析包 ZIP
               </button>
             </div>
+
+            {snapshotMessage ? (
+              <div className="mt-4 rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-800">
+                {snapshotMessage}
+              </div>
+            ) : null}
           </div>
 
           {loading && !data ? (
@@ -1014,6 +1057,7 @@ export default function UserAnalyticsPage() {
           <div className="mb-6 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
             窗口型趋势说明：当前仅基于 <code>admin_user_analytics_daily</code> 日快照记录，不引入 <code>user_activity_daily</code>。
             因此 24h / 7d / 30d 活跃、覆盖率与高频占比只从首个快照日开始显示，不对更早历史做严格回填。
+            平台若未配置定时调用，则需要手动点击“记录今日快照”或执行脚本 / 定时任务。
           </div>
 
           {frequency ? (

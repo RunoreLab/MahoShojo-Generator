@@ -1,0 +1,44 @@
+name: Admin User Analytics Daily Snapshot
+
+on:
+  schedule:
+    # 文档建议每日 UTC 00:05 跑一次
+    - cron: '5 0 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: '仅采集不写入 admin_user_analytics_daily'
+        required: false
+        type: boolean
+        default: false
+
+concurrency:
+  group: admin-user-analytics-daily-snapshot
+  cancel-in-progress: false
+
+jobs:
+  snapshot:
+    name: Trigger Daily Snapshot
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Trigger Admin Snapshot API
+        env:
+          ADMIN_USER_ANALYTICS_SNAPSHOT_URL: ${{ secrets.ADMIN_USER_ANALYTICS_SNAPSHOT_URL }}
+          ADMIN_USER_ANALYTICS_SNAPSHOT_TOKEN: ${{ secrets.ADMIN_USER_ANALYTICS_SNAPSHOT_TOKEN }}
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.dry_run }}" = "true" ]; then
+            node scripts/trigger-admin-user-analytics-snapshot.mjs --dry-run
+          else
+            node scripts/trigger-admin-user-analytics-snapshot.mjs
+          fi
