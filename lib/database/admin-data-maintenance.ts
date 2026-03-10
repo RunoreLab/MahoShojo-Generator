@@ -4,8 +4,18 @@ import { queryFromD1 } from './core';
 
 export type AdminDataCleanupTarget =
   | 'battle_report_generations'
+  | 'battle_report_generation_combatants'
   | 'arena_rating_events'
   | 'pvp_rounds'
+  | 'pvp_room_chat_messages'
+  | 'pvp_room_hands'
+  | 'pvp_room_submissions'
+  | 'pvp_room_card_snapshots'
+  | 'pvp_round_choices'
+  | 'auth_audit_logs'
+  | 'auth_password_reset_tokens'
+  | 'ba_verification'
+  | 'user_auth_links'
   | 'large_objects';
 
 export type AdminDataCleanupRiskLevel = 'low' | 'medium' | 'high';
@@ -87,10 +97,12 @@ type CleanupTargetDefinition = {
   idColumn: string;
   orderBy: string;
   dateColumn?: string;
+  dateColumnMode?: 'text' | 'unix';
   statusValues?: string[];
   queueValues?: Array<'strict' | 'free'>;
   supportsPvpOnly?: boolean;
   supportsKind?: boolean;
+  previewOnly?: boolean;
   fieldDefinitions: CleanupFieldDefinition[];
   sizeEstimateFields: string[];
 };
@@ -266,6 +278,18 @@ const cleanupTargetDefinitions: Record<AdminDataCleanupTarget, CleanupTargetDefi
       'cf_ray',
     ],
   },
+  battle_report_generation_combatants: {
+    target: 'battle_report_generation_combatants',
+    label: '战报参战者明细',
+    table: 'battle_report_generation_combatants',
+    idColumn: 'id',
+    orderBy: 'created_at DESC, id ASC',
+    dateColumn: 'created_at',
+    fieldDefinitions: [
+      { field: 'character_guidance', label: '角色引导文本', defaultValue: null },
+    ],
+    sizeEstimateFields: ['character_guidance'],
+  },
   arena_rating_events: {
     target: 'arena_rating_events',
     label: '排位事件',
@@ -281,6 +305,59 @@ const cleanupTargetDefinitions: Record<AdminDataCleanupTarget, CleanupTargetDefi
     ],
     sizeEstimateFields: ['details_json', 'skip_reason'],
   },
+  auth_audit_logs: {
+    target: 'auth_audit_logs',
+    label: '认证审计日志',
+    table: 'auth_audit_logs',
+    idColumn: 'id',
+    orderBy: 'created_at DESC, id ASC',
+    dateColumn: 'created_at',
+    dateColumnMode: 'unix',
+    fieldDefinitions: [
+      { field: 'metadata_json', label: '元数据 JSON', defaultValue: null },
+      { field: 'result_message', label: '结果消息', defaultValue: null },
+      { field: 'user_agent', label: 'User Agent', defaultValue: null },
+      { field: 'ip', label: '原始 IP', defaultValue: null },
+    ],
+    sizeEstimateFields: ['metadata_json', 'result_message', 'user_agent', 'ip'],
+  },
+  auth_password_reset_tokens: {
+    target: 'auth_password_reset_tokens',
+    label: '密码重置令牌',
+    table: 'auth_password_reset_tokens',
+    idColumn: 'id',
+    orderBy: 'created_at DESC, id ASC',
+    dateColumn: 'created_at',
+    dateColumnMode: 'unix',
+    fieldDefinitions: [
+      { field: 'requested_ip', label: '请求 IP', defaultValue: null },
+      { field: 'requested_user_agent', label: '请求 User Agent', defaultValue: null },
+    ],
+    sizeEstimateFields: ['requested_ip', 'requested_user_agent'],
+  },
+  ba_verification: {
+    target: 'ba_verification',
+    label: 'Better Auth 验证记录',
+    table: 'ba_verification',
+    idColumn: 'id',
+    orderBy: 'created_at DESC, id ASC',
+    dateColumn: 'created_at',
+    dateColumnMode: 'unix',
+    fieldDefinitions: [],
+    sizeEstimateFields: ['value', 'identifier'],
+  },
+  user_auth_links: {
+    target: 'user_auth_links',
+    label: '业务账号映射',
+    table: 'user_auth_links',
+    idColumn: 'id',
+    orderBy: 'created_at DESC, id ASC',
+    dateColumn: 'created_at',
+    dateColumnMode: 'unix',
+    previewOnly: true,
+    fieldDefinitions: [],
+    sizeEstimateFields: [],
+  },
   pvp_rounds: {
     target: 'pvp_rounds',
     label: 'PVP 回合记录',
@@ -295,6 +372,71 @@ const cleanupTargetDefinitions: Record<AdminDataCleanupTarget, CleanupTargetDefi
       { field: 'winner_name', label: '胜者名称', defaultValue: null },
     ],
     sizeEstimateFields: ['public_snapshot_json', 'result_json', 'winner_name'],
+  },
+  pvp_room_chat_messages: {
+    target: 'pvp_room_chat_messages',
+    label: 'PVP 房间聊天',
+    table: 'pvp_room_chat_messages',
+    idColumn: 'id',
+    orderBy: 'created_at DESC, id ASC',
+    dateColumn: 'created_at',
+    fieldDefinitions: [
+      { field: 'content_json', label: '消息内容 JSON', defaultValue: null },
+      { field: 'rendered_text', label: '渲染文本', defaultValue: null },
+      { field: 'sender_username', label: '发送者用户名', defaultValue: null },
+      { field: 'sender_prefix', label: '发送者前缀', defaultValue: null },
+    ],
+    sizeEstimateFields: ['content_json', 'rendered_text', 'sender_username', 'sender_prefix'],
+  },
+  pvp_room_hands: {
+    target: 'pvp_room_hands',
+    label: 'PVP 手牌缓存',
+    table: 'pvp_room_hands',
+    idColumn: 'rowid',
+    orderBy: 'updated_at DESC, rowid ASC',
+    dateColumn: 'updated_at',
+    fieldDefinitions: [
+      { field: 'hand_json', label: '手牌 JSON', defaultValue: null },
+    ],
+    sizeEstimateFields: ['hand_json'],
+  },
+  pvp_room_submissions: {
+    target: 'pvp_room_submissions',
+    label: 'PVP 提交缓存',
+    table: 'pvp_room_submissions',
+    idColumn: 'rowid',
+    orderBy: 'updated_at DESC, rowid ASC',
+    dateColumn: 'updated_at',
+    fieldDefinitions: [
+      { field: 'submission_json', label: '提交 JSON', defaultValue: null },
+    ],
+    sizeEstimateFields: ['submission_json'],
+  },
+  pvp_room_card_snapshots: {
+    target: 'pvp_room_card_snapshots',
+    label: 'PVP 卡牌快照',
+    table: 'pvp_room_card_snapshots',
+    idColumn: 'id',
+    orderBy: 'created_at DESC, id ASC',
+    dateColumn: 'created_at',
+    fieldDefinitions: [
+      { field: 'ref_json', label: '引用 JSON', defaultValue: null },
+      { field: 'data_json', label: '卡牌数据 JSON', defaultValue: null },
+      { field: 'name', label: '卡牌名称', defaultValue: null },
+    ],
+    sizeEstimateFields: ['ref_json', 'data_json', 'name'],
+  },
+  pvp_round_choices: {
+    target: 'pvp_round_choices',
+    label: 'PVP 回合出牌',
+    table: 'pvp_round_choices',
+    idColumn: 'rowid',
+    orderBy: 'updated_at DESC, rowid ASC',
+    dateColumn: 'updated_at',
+    fieldDefinitions: [
+      { field: 'choice_ref_json', label: '出牌引用 JSON', defaultValue: null },
+    ],
+    sizeEstimateFields: ['choice_ref_json'],
   },
   large_objects: {
     target: 'large_objects',
@@ -552,6 +694,13 @@ const normalizeScope = (targetDefinition: CleanupTargetDefinition, input: unknow
 };
 
 const normalizeActions = (targetDefinition: CleanupTargetDefinition, input: unknown): AdminDataCleanupAction[] => {
+  if (targetDefinition.previewOnly) {
+    if (Array.isArray(input) && input.length > 0) {
+      throw new Error(`${targetDefinition.target} 当前仅支持预览，不支持配置清理动作`);
+    }
+    return [];
+  }
+
   if (!Array.isArray(input) || input.length <= 0) {
     throw new Error('actions 不能为空');
   }
@@ -635,17 +784,26 @@ const normalizePlan = (input: AdminDataCleanupPlanInput): AdminDataCleanupPlan =
   };
 };
 
+const buildDateColumnExpr = (targetDefinition: CleanupTargetDefinition): string | null => {
+  if (!targetDefinition.dateColumn) return null;
+  if (targetDefinition.dateColumnMode === 'unix') {
+    return `DATE(${targetDefinition.dateColumn}, 'unixepoch')`;
+  }
+  return `DATE(${targetDefinition.dateColumn})`;
+};
+
 const buildWhereClause = (targetDefinition: CleanupTargetDefinition, scope: AdminDataCleanupScope): WhereClause => {
   const whereParts: string[] = [];
   const params: unknown[] = [];
   const warnings: string[] = [];
+  const dateColumnExpr = buildDateColumnExpr(targetDefinition);
 
-  if (scope.dateFrom && targetDefinition.dateColumn) {
-    whereParts.push(`DATE(${targetDefinition.dateColumn}) >= DATE(?)`);
+  if (scope.dateFrom && dateColumnExpr) {
+    whereParts.push(`${dateColumnExpr} >= DATE(?)`);
     params.push(scope.dateFrom);
   }
-  if (scope.dateTo && targetDefinition.dateColumn) {
-    whereParts.push(`DATE(${targetDefinition.dateColumn}) <= DATE(?)`);
+  if (scope.dateTo && dateColumnExpr) {
+    whereParts.push(`${dateColumnExpr} <= DATE(?)`);
     params.push(scope.dateTo);
   }
   if (scope.statusIn && scope.statusIn.length > 0 && targetDefinition.statusValues) {
@@ -669,9 +827,34 @@ const buildWhereClause = (targetDefinition: CleanupTargetDefinition, scope: Admi
     warnings.push('已自动排除 status=resolving 的回合，避免影响进行中结算。');
   }
 
+  if (
+    targetDefinition.target === 'pvp_room_chat_messages'
+    || targetDefinition.target === 'pvp_room_hands'
+    || targetDefinition.target === 'pvp_room_submissions'
+    || targetDefinition.target === 'pvp_room_card_snapshots'
+  ) {
+    whereParts.push(`room_id IN (SELECT id FROM pvp_rooms WHERE status = 'closed' OR phase IN ('finished', 'aborted', 'closed'))`);
+    warnings.push('已自动排除仍处于活跃阶段的 PVP 房间，仅允许清理已结束/关闭房间的运行时数据。');
+  }
+
+  if (targetDefinition.target === 'pvp_round_choices') {
+    whereParts.push(`round_id IN (SELECT id FROM pvp_rounds WHERE status IN ('completed', 'aborted'))`);
+    warnings.push('已自动排除未完成回合的出牌记录，避免影响进行中的 PVP 结算。');
+  }
+
   if (targetDefinition.target === 'arena_rating_events' && (!scope.statusIn || scope.statusIn.length <= 0)) {
     whereParts.push(`status != 'pending'`);
     warnings.push('已自动排除 pending 事件，避免影响排位队列结算。');
+  }
+
+  if (targetDefinition.target === 'auth_password_reset_tokens') {
+    whereParts.push(`(consumed_at IS NOT NULL OR expires_at < CAST(strftime('%s', 'now') AS INTEGER))`);
+    warnings.push('已自动排除仍有效且未消费的密码重置令牌。');
+  }
+
+  if (targetDefinition.target === 'ba_verification') {
+    whereParts.push(`expires_at < CAST(strftime('%s', 'now') AS INTEGER)`);
+    warnings.push('已自动排除未过期的 Better Auth 验证记录。');
   }
 
   const whereSql = whereParts.length > 0 ? `WHERE ${whereParts.join(' AND ')}` : '';
@@ -880,6 +1063,10 @@ const addPreviewWarnings = (
   const warnings: string[] = [];
   if (affectedRows <= 0) warnings.push('当前筛选范围未命中数据。');
 
+  if (targetDefinition.previewOnly) {
+    warnings.push('该目标当前仅支持只读预览，不支持执行清理动作。');
+  }
+
   const deleteRowsAction = actions.find((item): item is AdminDataCleanupDeleteRowsAction => item.type === 'delete_rows');
   if (deleteRowsAction) {
     warnings.push('你选择了 delete_rows（整行删除），该操作风险较高。');
@@ -888,6 +1075,9 @@ const addPreviewWarnings = (
     }
     if (targetDefinition.target === 'battle_report_generations') {
       warnings.push('删除战报记录会级联删除战报参战者与部分排位事件关联。');
+    }
+    if (targetDefinition.target === 'auth_password_reset_tokens' || targetDefinition.target === 'ba_verification') {
+      warnings.push('删除认证令牌后将无法继续对应的重置/验证流程，请确认已过期或已消费。');
     }
   }
 
@@ -1007,6 +1197,7 @@ export const getAdminDataCleanupTargetSchemas = () => {
     fieldDefinitions: item.fieldDefinitions,
     supportsKind: item.supportsKind === true,
     supportsPvpOnly: item.supportsPvpOnly === true,
+    previewOnly: item.previewOnly === true,
     queueValues: item.queueValues ?? [],
     statusValues: item.statusValues ?? [],
   }));
@@ -1401,6 +1592,9 @@ export async function executeAdminDataCleanup(input: {
 }): Promise<AdminDataCleanupExecutionResult> {
   const normalizedPlan = normalizePlan(input.plan);
   const targetDefinition = cleanupTargetDefinitions[normalizedPlan.target];
+  if (targetDefinition.previewOnly) {
+    throw new Error(`${targetDefinition.target} 当前仅支持预览，不支持执行`);
+  }
   const expectedPlanHash = await computePlanHash(normalizedPlan);
   const planHash = typeof input.planHash === 'string' ? input.planHash.trim() : '';
   if (!planHash || planHash !== expectedPlanHash) {

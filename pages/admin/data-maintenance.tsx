@@ -3,7 +3,21 @@ import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { History, Play, RefreshCw, Search, Trash2 } from 'lucide-react';
 
-type CleanupTarget = 'battle_report_generations' | 'arena_rating_events' | 'pvp_rounds' | 'large_objects';
+type CleanupTarget =
+  | 'battle_report_generations'
+  | 'battle_report_generation_combatants'
+  | 'arena_rating_events'
+  | 'auth_audit_logs'
+  | 'auth_password_reset_tokens'
+  | 'ba_verification'
+  | 'user_auth_links'
+  | 'pvp_rounds'
+  | 'pvp_room_chat_messages'
+  | 'pvp_room_hands'
+  | 'pvp_room_submissions'
+  | 'pvp_room_card_snapshots'
+  | 'pvp_round_choices'
+  | 'large_objects';
 type RiskLevel = 'low' | 'medium' | 'high';
 
 type ScopeState = {
@@ -27,6 +41,7 @@ type TargetSchema = {
   fieldDefinitions: FieldDefinition[];
   supportsKind: boolean;
   supportsPvpOnly: boolean;
+  previewOnly: boolean;
   queueValues: Array<'strict' | 'free'>;
   statusValues: string[];
 };
@@ -274,6 +289,40 @@ const cleanupPresets: CleanupPreset[] = [
       batchSize: 200,
     }),
   },
+  {
+    id: 'auth_audit_logs_slim_180d',
+    label: '认证审计 180 天脱敏',
+    description: '清理旧认证审计中的元数据、UA 与原始 IP。',
+    build: () => ({
+      target: 'auth_audit_logs',
+      scope: {
+        ...defaultScope,
+        dateTo: dateDaysAgo(180),
+      },
+      actions: [
+        { type: 'field', field: 'metadata_json', op: 'set_null_or_default', maxChars: 800, setMode: 'null' },
+        { type: 'field', field: 'user_agent', op: 'set_null_or_default', maxChars: 800, setMode: 'null' },
+        { type: 'field', field: 'ip', op: 'set_null_or_default', maxChars: 800, setMode: 'null' },
+      ],
+      maxRows: 20000,
+      batchSize: 500,
+    }),
+  },
+  {
+    id: 'pvp_submissions_delete_30d',
+    label: 'PVP 提交 30 天清理',
+    description: '删除已结束房间的旧提交缓存。',
+    build: () => ({
+      target: 'pvp_room_submissions',
+      scope: {
+        ...defaultScope,
+        dateTo: dateDaysAgo(30),
+      },
+      actions: [{ type: 'delete_rows', deleteR2: false }],
+      maxRows: 10000,
+      batchSize: 300,
+    }),
+  },
 ];
 
 const fieldActionToRequest = (action: ActionDraftField) => {
@@ -385,6 +434,7 @@ export default function AdminDataMaintenancePage() {
   const createDefaultActionForTarget = useCallback((nextTarget: CleanupTarget, schemaList: TargetSchema[]): ActionDraft[] => {
     const found = schemaList.find((item) => item.target === nextTarget);
     if (!found) return [];
+    if (found.previewOnly) return [];
     if (found.fieldDefinitions.length <= 0) {
       return [{ type: 'delete_rows', deleteR2: true }];
     }
@@ -900,6 +950,7 @@ export default function AdminDataMaintenancePage() {
                 className="rounded-md border border-gray-200 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50"
                 onClick={() => {
                   if (!selectedSchema) return;
+                  if (selectedSchema.previewOnly) return;
                   if (selectedSchema.fieldDefinitions.length > 0) {
                     setActions((prev) => [
                       ...prev,
@@ -916,177 +967,183 @@ export default function AdminDataMaintenancePage() {
                   }
                   invalidateRunState();
                 }}
-                disabled={!selectedSchema}
+                disabled={!selectedSchema || selectedSchema.previewOnly}
               >
                 + 添加动作
               </button>
             </div>
 
-            <div className="space-y-3">
-              {actions.map((action, index) => (
-                <div key={index} className="rounded-lg border border-gray-200 p-3">
-                  <div className="grid gap-3 md:grid-cols-5">
-                    <label className="text-sm">
-                      <span className="mb-1 block text-gray-600">动作类型</span>
-                      <select
-                        className="w-full rounded-md border border-gray-200 px-3 py-2 text-sm"
-                        value={action.type}
-                        onChange={(e) => {
-                          const nextType = e.target.value as ActionDraft['type'];
-                          setActions((prev) => {
-                            const next = [...prev];
-                            if (nextType === 'delete_rows') {
-                              next[index] = { type: 'delete_rows', deleteR2: true };
-                            } else {
-                              const field = selectedSchema?.fieldDefinitions[0]?.field ?? 'output_preview';
-                              next[index] = {
-                                type: 'field',
-                                field,
-                                op: 'truncate',
-                                maxChars: 800,
-                                setMode: 'null',
-                              };
-                            }
-                            return next;
-                          });
-                          invalidateRunState();
-                        }}
-                      >
-                        <option value="field">字段操作</option>
-                        <option value="delete_rows">整行删除</option>
-                      </select>
-                    </label>
+            {selectedSchema?.previewOnly ? (
+              <div className="rounded-md border border-sky-200 bg-sky-50 p-3 text-sm text-sky-700">
+                该目标当前仅支持只读预览，用于先观察命中行数与范围，不开放执行。
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {actions.map((action, index) => (
+                  <div key={index} className="rounded-lg border border-gray-200 p-3">
+                    <div className="grid gap-3 md:grid-cols-5">
+                      <label className="text-sm">
+                        <span className="mb-1 block text-gray-600">动作类型</span>
+                        <select
+                          className="w-full rounded-md border border-gray-200 px-3 py-2 text-sm"
+                          value={action.type}
+                          onChange={(e) => {
+                            const nextType = e.target.value as ActionDraft['type'];
+                            setActions((prev) => {
+                              const next = [...prev];
+                              if (nextType === 'delete_rows') {
+                                next[index] = { type: 'delete_rows', deleteR2: true };
+                              } else {
+                                const field = selectedSchema?.fieldDefinitions[0]?.field ?? 'output_preview';
+                                next[index] = {
+                                  type: 'field',
+                                  field,
+                                  op: 'truncate',
+                                  maxChars: 800,
+                                  setMode: 'null',
+                                };
+                              }
+                              return next;
+                            });
+                            invalidateRunState();
+                          }}
+                        >
+                          <option value="field">字段操作</option>
+                          <option value="delete_rows">整行删除</option>
+                        </select>
+                      </label>
 
-                    {action.type === 'field' ? (
-                      <>
-                        <label className="text-sm">
-                          <span className="mb-1 block text-gray-600">字段</span>
-                          <select
-                            className="w-full rounded-md border border-gray-200 px-3 py-2 text-sm"
-                            value={action.field}
-                            onChange={(e) => {
-                              setActions((prev) => {
-                                const next = [...prev];
-                                if (next[index]?.type !== 'field') return next;
-                                next[index] = { ...(next[index] as ActionDraftField), field: e.target.value };
-                                return next;
-                              });
-                              invalidateRunState();
-                            }}
-                          >
-                            {(selectedSchema?.fieldDefinitions ?? []).map((item) => (
-                              <option key={item.field} value={item.field}>
-                                {item.label}（{item.field}）
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-
-                        <label className="text-sm">
-                          <span className="mb-1 block text-gray-600">操作</span>
-                          <select
-                            className="w-full rounded-md border border-gray-200 px-3 py-2 text-sm"
-                            value={action.op}
-                            onChange={(e) => {
-                              const nextOp = e.target.value as ActionDraftField['op'];
-                              setActions((prev) => {
-                                const next = [...prev];
-                                if (next[index]?.type !== 'field') return next;
-                                next[index] = { ...(next[index] as ActionDraftField), op: nextOp };
-                                return next;
-                              });
-                              invalidateRunState();
-                            }}
-                          >
-                            <option value="truncate">截断压缩</option>
-                            <option value="set_null_or_default">设空/默认</option>
-                          </select>
-                        </label>
-
-                        {action.op === 'truncate' ? (
+                      {action.type === 'field' ? (
+                        <>
                           <label className="text-sm">
-                            <span className="mb-1 block text-gray-600">截断长度</span>
-                            <input
-                              type="number"
-                              min={1}
-                              max={200000}
-                              className="w-full rounded-md border border-gray-200 px-3 py-2 text-sm"
-                              value={action.maxChars}
-                              onChange={(e) => {
-                                const nextValue = Math.max(1, Math.min(200000, Number(e.target.value || 1)));
-                                setActions((prev) => {
-                                  const next = [...prev];
-                                  if (next[index]?.type !== 'field') return next;
-                                  next[index] = { ...(next[index] as ActionDraftField), maxChars: nextValue };
-                                  return next;
-                                });
-                                invalidateRunState();
-                              }}
-                            />
-                          </label>
-                        ) : (
-                          <label className="text-sm">
-                            <span className="mb-1 block text-gray-600">设值模式</span>
+                            <span className="mb-1 block text-gray-600">字段</span>
                             <select
                               className="w-full rounded-md border border-gray-200 px-3 py-2 text-sm"
-                              value={action.setMode}
+                              value={action.field}
                               onChange={(e) => {
-                                const nextMode = e.target.value as ActionDraftField['setMode'];
                                 setActions((prev) => {
                                   const next = [...prev];
                                   if (next[index]?.type !== 'field') return next;
-                                  next[index] = { ...(next[index] as ActionDraftField), setMode: nextMode };
+                                  next[index] = { ...(next[index] as ActionDraftField), field: e.target.value };
                                   return next;
                                 });
                                 invalidateRunState();
                               }}
                             >
-                              <option value="null">设为 NULL</option>
-                              <option value="empty">设为空字符串</option>
-                              <option value="default">设为默认值</option>
+                              {(selectedSchema?.fieldDefinitions ?? []).map((item) => (
+                                <option key={item.field} value={item.field}>
+                                  {item.label}（{item.field}）
+                                </option>
+                              ))}
                             </select>
                           </label>
-                        )}
-                      </>
-                    ) : (
-                      <label className="text-sm md:col-span-3 flex items-center gap-2 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-rose-700">
-                        <input
-                          type="checkbox"
-                          checked={action.deleteR2}
-                          onChange={(e) => {
-                            setActions((prev) => {
-                              const next = [...prev];
-                              if (next[index]?.type !== 'delete_rows') return next;
-                              next[index] = { type: 'delete_rows', deleteR2: e.target.checked };
-                              return next;
-                            });
-                            invalidateRunState();
-                          }}
-                          disabled={target !== 'large_objects'}
-                        />
-                        {target === 'large_objects' ? '删除索引时联动删除 R2 对象' : '将删除命中范围内的整行记录'}
-                      </label>
-                    )}
 
-                    <button
-                      className="inline-flex items-center justify-center rounded-md border border-gray-200 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
-                      onClick={() => {
-                        setActions((prev) => prev.filter((_, i) => i !== index));
-                        invalidateRunState();
-                      }}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
+                          <label className="text-sm">
+                            <span className="mb-1 block text-gray-600">操作</span>
+                            <select
+                              className="w-full rounded-md border border-gray-200 px-3 py-2 text-sm"
+                              value={action.op}
+                              onChange={(e) => {
+                                const nextOp = e.target.value as ActionDraftField['op'];
+                                setActions((prev) => {
+                                  const next = [...prev];
+                                  if (next[index]?.type !== 'field') return next;
+                                  next[index] = { ...(next[index] as ActionDraftField), op: nextOp };
+                                  return next;
+                                });
+                                invalidateRunState();
+                              }}
+                            >
+                              <option value="truncate">截断压缩</option>
+                              <option value="set_null_or_default">设空/默认</option>
+                            </select>
+                          </label>
+
+                          {action.op === 'truncate' ? (
+                            <label className="text-sm">
+                              <span className="mb-1 block text-gray-600">截断长度</span>
+                              <input
+                                type="number"
+                                min={1}
+                                max={200000}
+                                className="w-full rounded-md border border-gray-200 px-3 py-2 text-sm"
+                                value={action.maxChars}
+                                onChange={(e) => {
+                                  const nextValue = Math.max(1, Math.min(200000, Number(e.target.value || 1)));
+                                  setActions((prev) => {
+                                    const next = [...prev];
+                                    if (next[index]?.type !== 'field') return next;
+                                    next[index] = { ...(next[index] as ActionDraftField), maxChars: nextValue };
+                                    return next;
+                                  });
+                                  invalidateRunState();
+                                }}
+                              />
+                            </label>
+                          ) : (
+                            <label className="text-sm">
+                              <span className="mb-1 block text-gray-600">设值模式</span>
+                              <select
+                                className="w-full rounded-md border border-gray-200 px-3 py-2 text-sm"
+                                value={action.setMode}
+                                onChange={(e) => {
+                                  const nextMode = e.target.value as ActionDraftField['setMode'];
+                                  setActions((prev) => {
+                                    const next = [...prev];
+                                    if (next[index]?.type !== 'field') return next;
+                                    next[index] = { ...(next[index] as ActionDraftField), setMode: nextMode };
+                                    return next;
+                                  });
+                                  invalidateRunState();
+                                }}
+                              >
+                                <option value="null">设为 NULL</option>
+                                <option value="empty">设为空字符串</option>
+                                <option value="default">设为默认值</option>
+                              </select>
+                            </label>
+                          )}
+                        </>
+                      ) : (
+                        <label className="text-sm md:col-span-3 flex items-center gap-2 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-rose-700">
+                          <input
+                            type="checkbox"
+                            checked={action.deleteR2}
+                            onChange={(e) => {
+                              setActions((prev) => {
+                                const next = [...prev];
+                                if (next[index]?.type !== 'delete_rows') return next;
+                                next[index] = { type: 'delete_rows', deleteR2: e.target.checked };
+                                return next;
+                              });
+                              invalidateRunState();
+                            }}
+                            disabled={target !== 'large_objects'}
+                          />
+                          {target === 'large_objects' ? '删除索引时联动删除 R2 对象' : '将删除命中范围内的整行记录'}
+                        </label>
+                      )}
+
+                      <button
+                        className="inline-flex items-center justify-center rounded-md border border-gray-200 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                        onClick={() => {
+                          setActions((prev) => prev.filter((_, i) => i !== index));
+                          invalidateRunState();
+                        }}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
                   </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
 
             <div className="mt-4 flex items-center gap-3">
               <button
                 className="inline-flex items-center gap-2 rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
                 onClick={() => void doPreview()}
-                disabled={previewLoading || actions.length <= 0}
+                disabled={previewLoading || (!selectedSchema?.previewOnly && actions.length <= 0)}
               >
                 <Search className="h-4 w-4" />
                 {previewLoading ? '预览中...' : '预览影响'}
@@ -1198,12 +1255,13 @@ export default function AdminDataMaintenancePage() {
               <button
                 className="inline-flex items-center gap-2 rounded-md bg-rose-600 px-4 py-2 text-sm font-medium text-white hover:bg-rose-700 disabled:opacity-50"
                 onClick={() => void doExecute()}
-                disabled={!preview || executeLoading}
+                disabled={!preview || executeLoading || selectedSchema?.previewOnly}
               >
                 <Play className="h-4 w-4" />
-                {executeLoading ? '执行中...' : '执行清理'}
+                {selectedSchema?.previewOnly ? '该目标仅支持预览' : executeLoading ? '执行中...' : '执行清理'}
               </button>
               {!preview ? <span className="text-sm text-gray-500">请先完成预览。</span> : null}
+              {selectedSchema?.previewOnly ? <span className="text-sm text-sky-700">当前目标不开放执行。</span> : null}
               {executeError ? <span className="text-sm text-red-600">{executeError}</span> : null}
             </div>
 
