@@ -1,7 +1,7 @@
 import Head from 'next/head';
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
-import { Download, Image as ImageIcon, RefreshCw, Trash2 } from 'lucide-react';
+import { AlertTriangle, Download, Image as ImageIcon, RefreshCw, Trash2 } from 'lucide-react';
 
 import { AdminTableScroll } from '@/components/admin/AdminTableScroll';
 import {
@@ -48,6 +48,7 @@ type ListResponse =
         bytes: number;
         storedBytes: number;
       }>;
+      consistency: LargeObjectConsistencyReport;
     }
   | { success: false; error?: string };
 
@@ -68,6 +69,38 @@ type FamilySummary = {
   total: number;
   bytes: number;
   storedBytes: number;
+};
+
+type ConsistencySample = {
+  rowId: string | null;
+  kind: string;
+  ownerRefId: string | null;
+  ownerUserId: number | null;
+  ownerUsername: string | null;
+  r2Key: string;
+  createdAt: string | null;
+  updatedAt: string | null;
+  detail: string;
+  adminHref: string | null;
+};
+
+type ConsistencyBucket = {
+  count: number;
+  available: boolean;
+  samples: ConsistencySample[];
+};
+
+type LargeObjectConsistencyReport = {
+  generatedAt: string;
+  inspectedKinds: string[];
+  skippedKinds: string[];
+  indexedRowsInspected: number;
+  r2ObjectsInspected: number;
+  truncatedR2Scan: boolean;
+  notes: string[];
+  orphan: ConsistencyBucket;
+  dangling: ConsistencyBucket;
+  missingIndex: ConsistencyBucket;
 };
 
 type LargeObjectFilters = {
@@ -112,6 +145,19 @@ const familyBadgeClass = (family: LargeObjectAssetFamily) => {
   return 'border-slate-200 bg-slate-50 text-slate-600';
 };
 
+const consistencyCardClass = (count: number, available: boolean, tone: 'rose' | 'amber' | 'sky') => {
+  if (!available) return 'border-slate-200 bg-slate-50 text-slate-600';
+  if (count <= 0) return 'border-emerald-200 bg-emerald-50 text-emerald-700';
+  if (tone === 'rose') return 'border-rose-200 bg-rose-50 text-rose-700';
+  if (tone === 'amber') return 'border-amber-200 bg-amber-50 text-amber-700';
+  return 'border-sky-200 bg-sky-50 text-sky-700';
+};
+
+const issuePanelClass = (available: boolean) =>
+  available ? 'border-gray-200 bg-white' : 'border-slate-200 bg-slate-50';
+
+const formatIssueCount = (bucket: ConsistencyBucket) => (bucket.available ? bucket.count.toLocaleString('zh-CN') : '—');
+
 export default function AdminLargeObjectsPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -121,6 +167,7 @@ export default function AdminLargeObjectsPage() {
   const [rows, setRows] = useState<LargeObjectRow[]>([]);
   const [kindSummaries, setKindSummaries] = useState<KindSummary[]>([]);
   const [familySummaries, setFamilySummaries] = useState<FamilySummary[]>([]);
+  const [consistency, setConsistency] = useState<LargeObjectConsistencyReport | null>(null);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const limit = 50;
@@ -168,6 +215,7 @@ export default function AdminLargeObjectsPage() {
       setPage(Number(json.page || nextPage));
       setKindSummaries(json.kindSummaries ?? []);
       setFamilySummaries(json.familySummaries ?? []);
+      setConsistency(json.consistency ?? null);
       setSelectedId(null);
       setDownloadUrl(null);
       setDownloadError(null);
@@ -240,6 +288,36 @@ export default function AdminLargeObjectsPage() {
     [selected],
   );
 
+  const consistencyCards = useMemo(
+    () =>
+      consistency
+        ? [
+            {
+              key: 'orphan' as const,
+              title: 'Orphan 索引',
+              description: 'large_objects 仍在，但 battle_report_generations 主记录已经不存在。',
+              bucket: consistency.orphan,
+              tone: 'rose' as const,
+            },
+            {
+              key: 'dangling' as const,
+              title: 'Dangling 索引',
+              description: '索引仍在，但 R2 对象已缺失。仅覆盖战报正文前缀扫描。',
+              bucket: consistency.dangling,
+              tone: 'amber' as const,
+            },
+            {
+              key: 'missingIndex' as const,
+              title: 'Missing Index',
+              description: 'R2 对象仍在，但 large_objects 没有对应索引。仅覆盖战报正文前缀扫描。',
+              bucket: consistency.missingIndex,
+              tone: 'sky' as const,
+            },
+          ]
+        : [],
+    [consistency],
+  );
+
   const copyText = async (text: string, label: string) => {
     try {
       await navigator.clipboard.writeText(text);
@@ -284,6 +362,94 @@ export default function AdminLargeObjectsPage() {
           <p className="mb-4 text-sm text-gray-600">
             当前既能继续管理战报正文对象，也为后续插图、立绘等多 kind 资产预留统一视图。优先按资产家族与 kind 观察，而不是只把它当作战报 R2 索引表。
           </p>
+
+          {consistency ? (
+            <div className="mb-4 rounded-xl bg-white p-4 shadow-sm ring-1 ring-gray-100">
+              <div className="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
+                <div>
+                  <div className="text-sm font-semibold text-gray-800">一致性巡检</div>
+                  <p className="mt-1 text-xs text-gray-500">
+                    当前巡检范围固定为战报正文 kind，不受下方列表筛选影响。最近一次生成于 {formatIso(consistency.generatedAt)}。
+                  </p>
+                </div>
+                <div className="grid gap-1 text-xs text-gray-500 sm:grid-cols-2 lg:text-right">
+                  <div>已检索索引 {consistency.indexedRowsInspected.toLocaleString('zh-CN')} 条</div>
+                  <div>已扫描 R2 对象 {consistency.r2ObjectsInspected.toLocaleString('zh-CN')} 条</div>
+                  <div>已接入 kind：{consistency.inspectedKinds.map((kind) => formatLargeObjectKindLabel(kind)).join('、')}</div>
+                  <div>{consistency.truncatedR2Scan ? 'R2 扫描已截断' : 'R2 扫描完整'}</div>
+                </div>
+              </div>
+
+              <div className="mt-4 grid gap-3 md:grid-cols-3">
+                {consistencyCards.map((card) => (
+                  <div key={card.key} className={`rounded-xl border px-4 py-3 ${consistencyCardClass(card.bucket.count, card.bucket.available, card.tone)}`}>
+                    <div className="text-xs font-medium">{card.title}</div>
+                    <div className="mt-2 text-2xl font-semibold">{formatIssueCount(card.bucket)}</div>
+                    <div className="mt-2 text-xs opacity-90">{card.description}</div>
+                    {!card.bucket.available ? <div className="mt-2 text-xs opacity-80">当前环境无法完成该项扫描。</div> : null}
+                  </div>
+                ))}
+              </div>
+
+              {consistency.notes.length ? (
+                <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+                  <div className="mb-2 flex items-center gap-2 font-medium">
+                    <AlertTriangle className="h-4 w-4" />
+                    巡检说明
+                  </div>
+                  <div className="space-y-2">
+                    {consistency.notes.map((note) => (
+                      <div key={note}>{note}</div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+
+              <div className="mt-4 grid gap-4 lg:grid-cols-3">
+                {consistencyCards.map((card) => (
+                  <div key={`${card.key}-samples`} className={`rounded-xl border p-4 ${issuePanelClass(card.bucket.available)}`}>
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="text-sm font-semibold text-gray-800">{card.title} 样本</div>
+                      <div className="text-xs text-gray-500">
+                        {card.bucket.available ? `${card.bucket.samples.length}/${card.bucket.count}` : '不可用'}
+                      </div>
+                    </div>
+
+                    {!card.bucket.available ? (
+                      <div className="mt-3 text-sm text-slate-500">当前环境无法完成该项样本扫描。</div>
+                    ) : card.bucket.samples.length === 0 ? (
+                      <div className="mt-3 text-sm text-emerald-600">当前未发现该类问题。</div>
+                    ) : (
+                      <div className="mt-3 space-y-3">
+                        {card.bucket.samples.map((sample) => (
+                          <div key={`${card.key}-${sample.r2Key}-${sample.rowId ?? 'no-row'}`} className="rounded-lg border border-gray-200 bg-gray-50 p-3">
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0">
+                                <div className="text-xs font-medium text-gray-800">{formatLargeObjectKindLabel(sample.kind)}</div>
+                                <div className="mt-1 font-mono text-[11px] text-gray-600 break-all">{sample.r2Key}</div>
+                              </div>
+                              {sample.adminHref ? (
+                                <Link href={sample.adminHref} className="shrink-0 text-[11px] text-purple-600 hover:underline">
+                                  打开战报
+                                </Link>
+                              ) : null}
+                            </div>
+                            <div className="mt-2 text-[11px] text-gray-600">
+                              ownerRefId={sample.ownerRefId ?? '—'} · user={sample.ownerUsername ?? '—'} / {sample.ownerUserId ?? '—'}
+                            </div>
+                            <div className="mt-1 text-[11px] text-gray-500">
+                              创建 {formatIso(sample.createdAt)} · 更新 {formatIso(sample.updatedAt)}
+                            </div>
+                            <div className="mt-2 text-xs text-gray-700">{sample.detail}</div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
 
           <div className="mb-4 grid gap-4 lg:grid-cols-[1.1fr_1.4fr]">
             <div className="rounded-xl bg-white p-4 shadow-sm ring-1 ring-gray-100">

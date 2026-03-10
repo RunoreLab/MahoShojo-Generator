@@ -47,8 +47,8 @@ export default async function handler(req: NextRequest) {
       ...(family ? { family } : {}),
     } as const;
 
-    const { rows, total, kindSummaries, familySummaries } = await listAdminLargeObjects(filters);
-    return new Response(JSON.stringify({ success: true, rows, total, page, limit, kindSummaries, familySummaries }), {
+    const { rows, total, kindSummaries, familySummaries, consistency } = await listAdminLargeObjects(filters);
+    return new Response(JSON.stringify({ success: true, rows, total, page, limit, kindSummaries, familySummaries, consistency }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
     });
