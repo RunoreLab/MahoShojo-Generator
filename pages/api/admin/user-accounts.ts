@@ -15,6 +15,20 @@ const parseIntParam = (value: string | null, fallback: number): number => {
   return Number.isFinite(parsed) ? parsed : fallback;
 };
 
+const parseOptionalIntParam = (value: string | null): number | undefined => {
+  if (!value) return undefined;
+  const normalized = value.trim();
+  if (!normalized) return undefined;
+  const parsed = Number.parseInt(normalized, 10);
+  return Number.isFinite(parsed) ? parsed : undefined;
+};
+
+const parseOptionalDateParam = (value: string | null): string | undefined => {
+  if (!value) return undefined;
+  const normalized = value.trim();
+  return normalized ? normalized : undefined;
+};
+
 const parseActivity = (value: string | null): AdminUserAccountListFilters['activity'] => {
   if (value === '24h' || value === '7d' || value === '30d' || value === 'tracked' || value === 'untracked') {
     return value;
@@ -99,9 +113,19 @@ export default async function handler(req: NextRequest): Promise<Response> {
       page: parseIntParam(url.searchParams.get('page'), 1),
       limit: parseIntParam(url.searchParams.get('limit'), 20),
       search: (url.searchParams.get('search') ?? '').trim() || undefined,
+      regDateStart: parseOptionalDateParam(url.searchParams.get('regDateStart')),
+      regDateEnd: parseOptionalDateParam(url.searchParams.get('regDateEnd')),
+      loginDateStart: parseOptionalDateParam(url.searchParams.get('loginDateStart')),
+      loginDateEnd: parseOptionalDateParam(url.searchParams.get('loginDateEnd')),
+      activeDateStart: parseOptionalDateParam(url.searchParams.get('activeDateStart')),
+      activeDateEnd: parseOptionalDateParam(url.searchParams.get('activeDateEnd')),
       activity: parseActivity(url.searchParams.get('activity')),
       status: parseStatus(url.searchParams.get('status')),
       authState: parseAuthState(url.searchParams.get('authState')),
+      minPublicCards: parseOptionalIntParam(url.searchParams.get('minPublicCards')),
+      maxPublicCards: parseOptionalIntParam(url.searchParams.get('maxPublicCards')),
+      minBannedCards: parseOptionalIntParam(url.searchParams.get('minBannedCards')),
+      maxBannedCards: parseOptionalIntParam(url.searchParams.get('maxBannedCards')),
       sortBy: parseSortBy(url.searchParams.get('sortBy')),
       sortOrder: parseSortOrder(url.searchParams.get('sortOrder')),
     };

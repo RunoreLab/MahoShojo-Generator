@@ -123,6 +123,16 @@ type FilterState = {
   status: StatusFilter;
   activity: ActivityFilter;
   authState: AuthStateFilter;
+  regDateStart: string;
+  regDateEnd: string;
+  loginDateStart: string;
+  loginDateEnd: string;
+  activeDateStart: string;
+  activeDateEnd: string;
+  minPublicCards: string;
+  maxPublicCards: string;
+  minBannedCards: string;
+  maxBannedCards: string;
   sortBy: SortBy;
   sortOrder: SortOrder;
 };
@@ -138,6 +148,16 @@ const DEFAULT_FILTERS: FilterState = {
   status: '',
   activity: '',
   authState: '',
+  regDateStart: '',
+  regDateEnd: '',
+  loginDateStart: '',
+  loginDateEnd: '',
+  activeDateStart: '',
+  activeDateEnd: '',
+  minPublicCards: '',
+  maxPublicCards: '',
+  minBannedCards: '',
+  maxBannedCards: '',
   sortBy: 'createdAt',
   sortOrder: 'desc',
 };
@@ -150,6 +170,13 @@ const formatDateTime = (value: string | null | undefined): string => {
 };
 
 const formatNumber = (value: number): string => value.toLocaleString('zh-CN');
+
+const assignTrimmedQueryValue = (query: Record<string, string>, key: string, value: string) => {
+  const normalized = value.trim();
+  if (normalized) {
+    query[key] = normalized;
+  }
+};
 
 function SummaryCard(props: {
   title: string;
@@ -261,15 +288,57 @@ export function AdminUserAccountPage() {
 
   const buildQuery = (nextFilters: FilterState, nextPage: number, nextUsername?: string) => {
     const query: Record<string, string> = {};
-    if (nextFilters.search.trim()) query.search = nextFilters.search.trim();
+    assignTrimmedQueryValue(query, 'search', nextFilters.search);
     if (nextFilters.status) query.status = nextFilters.status;
     if (nextFilters.activity) query.activity = nextFilters.activity;
     if (nextFilters.authState) query.authState = nextFilters.authState;
+    assignTrimmedQueryValue(query, 'regDateStart', nextFilters.regDateStart);
+    assignTrimmedQueryValue(query, 'regDateEnd', nextFilters.regDateEnd);
+    assignTrimmedQueryValue(query, 'loginDateStart', nextFilters.loginDateStart);
+    assignTrimmedQueryValue(query, 'loginDateEnd', nextFilters.loginDateEnd);
+    assignTrimmedQueryValue(query, 'activeDateStart', nextFilters.activeDateStart);
+    assignTrimmedQueryValue(query, 'activeDateEnd', nextFilters.activeDateEnd);
+    assignTrimmedQueryValue(query, 'minPublicCards', nextFilters.minPublicCards);
+    assignTrimmedQueryValue(query, 'maxPublicCards', nextFilters.maxPublicCards);
+    assignTrimmedQueryValue(query, 'minBannedCards', nextFilters.minBannedCards);
+    assignTrimmedQueryValue(query, 'maxBannedCards', nextFilters.maxBannedCards);
     if (nextFilters.sortBy !== DEFAULT_FILTERS.sortBy) query.sortBy = nextFilters.sortBy;
     if (nextFilters.sortOrder !== DEFAULT_FILTERS.sortOrder) query.sortOrder = nextFilters.sortOrder;
     if (nextPage > 1) query.page = String(nextPage);
     if (nextUsername) query.username = nextUsername;
     return query;
+  };
+
+  const buildListParams = (nextFilters: FilterState, nextPage: number) => {
+    const params = new URLSearchParams();
+    params.set('page', String(nextPage));
+    params.set('limit', String(limit));
+    if (nextFilters.status) params.set('status', nextFilters.status);
+    if (nextFilters.activity) params.set('activity', nextFilters.activity);
+    if (nextFilters.authState) params.set('authState', nextFilters.authState);
+    if (nextFilters.sortBy) params.set('sortBy', nextFilters.sortBy);
+    if (nextFilters.sortOrder) params.set('sortOrder', nextFilters.sortOrder);
+
+    const assignParam = (key: string, value: string) => {
+      const normalized = value.trim();
+      if (normalized) {
+        params.set(key, normalized);
+      }
+    };
+
+    assignParam('search', nextFilters.search);
+    assignParam('regDateStart', nextFilters.regDateStart);
+    assignParam('regDateEnd', nextFilters.regDateEnd);
+    assignParam('loginDateStart', nextFilters.loginDateStart);
+    assignParam('loginDateEnd', nextFilters.loginDateEnd);
+    assignParam('activeDateStart', nextFilters.activeDateStart);
+    assignParam('activeDateEnd', nextFilters.activeDateEnd);
+    assignParam('minPublicCards', nextFilters.minPublicCards);
+    assignParam('maxPublicCards', nextFilters.maxPublicCards);
+    assignParam('minBannedCards', nextFilters.minBannedCards);
+    assignParam('maxBannedCards', nextFilters.maxBannedCards);
+
+    return params;
   };
 
   const loadList = async (nextFilters: FilterState, nextPage: number) => {
@@ -280,16 +349,7 @@ export function AdminUserAccountPage() {
     listAbortRef.current = controller;
 
     try {
-      const params = new URLSearchParams({
-        page: String(nextPage),
-        limit: String(limit),
-        search: nextFilters.search.trim(),
-        status: nextFilters.status,
-        activity: nextFilters.activity,
-        authState: nextFilters.authState,
-        sortBy: nextFilters.sortBy,
-        sortOrder: nextFilters.sortOrder,
-      });
+      const params = buildListParams(nextFilters, nextPage);
 
       const response = await fetch(`/api/admin/user-accounts?${params.toString()}`, { signal: controller.signal });
       const json = (await response.json()) as ListResponse;
@@ -349,6 +409,16 @@ export function AdminUserAccountPage() {
       status: typeof router.query.status === 'string' ? (router.query.status as StatusFilter) : '',
       activity: typeof router.query.activity === 'string' ? (router.query.activity as ActivityFilter) : '',
       authState: typeof router.query.authState === 'string' ? (router.query.authState as AuthStateFilter) : '',
+      regDateStart: typeof router.query.regDateStart === 'string' ? router.query.regDateStart : '',
+      regDateEnd: typeof router.query.regDateEnd === 'string' ? router.query.regDateEnd : '',
+      loginDateStart: typeof router.query.loginDateStart === 'string' ? router.query.loginDateStart : '',
+      loginDateEnd: typeof router.query.loginDateEnd === 'string' ? router.query.loginDateEnd : '',
+      activeDateStart: typeof router.query.activeDateStart === 'string' ? router.query.activeDateStart : '',
+      activeDateEnd: typeof router.query.activeDateEnd === 'string' ? router.query.activeDateEnd : '',
+      minPublicCards: typeof router.query.minPublicCards === 'string' ? router.query.minPublicCards : '',
+      maxPublicCards: typeof router.query.maxPublicCards === 'string' ? router.query.maxPublicCards : '',
+      minBannedCards: typeof router.query.minBannedCards === 'string' ? router.query.minBannedCards : '',
+      maxBannedCards: typeof router.query.maxBannedCards === 'string' ? router.query.maxBannedCards : '',
       sortBy: typeof router.query.sortBy === 'string' ? (router.query.sortBy as SortBy) : DEFAULT_FILTERS.sortBy,
       sortOrder: typeof router.query.sortOrder === 'string' ? (router.query.sortOrder as SortOrder) : DEFAULT_FILTERS.sortOrder,
     };
@@ -417,6 +487,23 @@ export function AdminUserAccountPage() {
   const clearFilters = async () => {
     setDraftFilters(DEFAULT_FILTERS);
     await pushRoute(DEFAULT_FILTERS, 1);
+  };
+
+  const updateActivityFilter = (value: ActivityFilter) => {
+    setDraftFilters((prev) => ({
+      ...prev,
+      activity: value,
+      activeDateStart: value ? '' : prev.activeDateStart,
+      activeDateEnd: value ? '' : prev.activeDateEnd,
+    }));
+  };
+
+  const updateActiveDateFilter = (key: 'activeDateStart' | 'activeDateEnd', value: string) => {
+    setDraftFilters((prev) => ({
+      ...prev,
+      [key]: value,
+      activity: value ? '' : prev.activity,
+    }));
   };
 
   const handleSelectAll = (checked: boolean) => {
@@ -586,7 +673,7 @@ export function AdminUserAccountPage() {
                 <span className="mb-1 block text-xs font-medium text-slate-600">活跃口径</span>
                 <select
                   value={draftFilters.activity}
-                  onChange={(event) => setDraftFilters((prev) => ({ ...prev, activity: event.target.value as ActivityFilter }))}
+                  onChange={(event) => updateActivityFilter(event.target.value as ActivityFilter)}
                   className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-200"
                 >
                   <option value="">全部</option>
@@ -632,6 +719,126 @@ export function AdminUserAccountPage() {
                   <option value="latestAuthEventAt:desc">最近 Auth 审计 新→旧</option>
                 </select>
               </label>
+            </div>
+
+            <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+              <label>
+                <span className="mb-1 block text-xs font-medium text-slate-600">公开卡片数范围</span>
+                <div className="flex gap-2">
+                  <input
+                    type="number"
+                    min="0"
+                    inputMode="numeric"
+                    value={draftFilters.minPublicCards}
+                    onChange={(event) => setDraftFilters((prev) => ({ ...prev, minPublicCards: event.target.value }))}
+                    placeholder="最少"
+                    className="w-1/2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-200"
+                  />
+                  <input
+                    type="number"
+                    min="0"
+                    inputMode="numeric"
+                    value={draftFilters.maxPublicCards}
+                    onChange={(event) => setDraftFilters((prev) => ({ ...prev, maxPublicCards: event.target.value }))}
+                    placeholder="最多"
+                    className="w-1/2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-200"
+                  />
+                </div>
+              </label>
+
+              <div>
+                <label className="block">
+                  <span className="mb-1 block text-xs font-medium text-slate-600">封禁卡片数范围</span>
+                  <div className="flex gap-2">
+                    <input
+                      type="number"
+                      min="0"
+                      inputMode="numeric"
+                      value={draftFilters.minBannedCards}
+                      onChange={(event) => setDraftFilters((prev) => ({ ...prev, minBannedCards: event.target.value }))}
+                      placeholder="最少"
+                      className="w-1/2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-200"
+                    />
+                    <input
+                      type="number"
+                      min="0"
+                      inputMode="numeric"
+                      value={draftFilters.maxBannedCards}
+                      onChange={(event) => setDraftFilters((prev) => ({ ...prev, maxBannedCards: event.target.value }))}
+                      placeholder="最多"
+                      className="w-1/2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-200"
+                    />
+                  </div>
+                </label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const nextFilters = { ...draftFilters, minBannedCards: '', maxBannedCards: '0' };
+                    setDraftFilters(nextFilters);
+                    void pushRoute(nextFilters, 1);
+                  }}
+                  className="mt-1 text-xs font-medium text-sky-700 hover:underline"
+                >
+                  快速筛选：无封禁卡
+                </button>
+              </div>
+
+              <label>
+                <span className="mb-1 block text-xs font-medium text-slate-600">注册时间范围</span>
+                <div className="flex gap-2">
+                  <input
+                    type="date"
+                    value={draftFilters.regDateStart}
+                    onChange={(event) => setDraftFilters((prev) => ({ ...prev, regDateStart: event.target.value }))}
+                    className="w-1/2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-200"
+                  />
+                  <input
+                    type="date"
+                    value={draftFilters.regDateEnd}
+                    onChange={(event) => setDraftFilters((prev) => ({ ...prev, regDateEnd: event.target.value }))}
+                    className="w-1/2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-200"
+                  />
+                </div>
+              </label>
+
+              <label>
+                <span className="mb-1 block text-xs font-medium text-slate-600">最近登录范围</span>
+                <div className="flex gap-2">
+                  <input
+                    type="date"
+                    value={draftFilters.loginDateStart}
+                    onChange={(event) => setDraftFilters((prev) => ({ ...prev, loginDateStart: event.target.value }))}
+                    className="w-1/2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-200"
+                  />
+                  <input
+                    type="date"
+                    value={draftFilters.loginDateEnd}
+                    onChange={(event) => setDraftFilters((prev) => ({ ...prev, loginDateEnd: event.target.value }))}
+                    className="w-1/2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-200"
+                  />
+                </div>
+              </label>
+
+              <div>
+                <label className="block">
+                  <span className="mb-1 block text-xs font-medium text-slate-600">最近活跃范围</span>
+                  <div className="flex gap-2">
+                    <input
+                      type="date"
+                      value={draftFilters.activeDateStart}
+                      onChange={(event) => updateActiveDateFilter('activeDateStart', event.target.value)}
+                      className="w-1/2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-200"
+                    />
+                    <input
+                      type="date"
+                      value={draftFilters.activeDateEnd}
+                      onChange={(event) => updateActiveDateFilter('activeDateEnd', event.target.value)}
+                      className="w-1/2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-200"
+                    />
+                  </div>
+                </label>
+                <p className="mt-1 text-xs text-slate-500">设置活跃日期范围后，会自动清空上方“活跃口径”快捷筛选。</p>
+              </div>
             </div>
 
             <div className="mt-4 flex flex-wrap items-center gap-2">

@@ -45,7 +45,7 @@
 
 | 领域 | 近 159 提交新增能力 | 当前后台覆盖 | 结论 |
 | --- | --- | --- | --- |
-| 用户与账号系统 | Better Auth、迁移状态、改密码/改邮箱、一次性重置密码、迁移提醒、安全审计日志、邮件发送防滥用 | 只有 `user-dashboard` / `user-management` / `user-analytics`，仍主要围绕 `users` 旧字段与内容创作统计 | **明显过时，需优先补齐** |
+| 用户与账号系统 | Better Auth、迁移状态、改密码/改邮箱、一次性重置密码、迁移提醒、安全审计日志、邮件发送防滥用 | 历史上只有 `user-dashboard` / `user-management` / `user-analytics`；现已收敛为 `/admin/users` + `/admin/user-analytics`，但当时仍主要围绕 `users` 旧字段与内容创作统计 | **明显过时，需优先补齐** |
 | 内容与数据卡 | 待审核更新、native 标记、tech index、JSON 体积、运行时 source info、视觉资产嵌入 | `content-management` 仍是后台里最接近现状的一页，但缺图像审阅、大小预算与来源元数据视图 | **部分跟上，仍需扩展** |
 | 排位与严格风控 | strict preflight、pair 冷却、pair 日上限、用户日上限、低局数额外分差保护 | `arena-ratings` / `arena-rating-events` 只能看结果，缺风控聚合与异常审计 | **部分跟上，缺关键观测层** |
 | 战报与外部化存储 | 战报正文落 R2、`large_objects` 索引、R2 兜底重读、失败落库补全 | `battle-report-generations` 与 `large-objects` 覆盖了“正文文本”主链路，但缺来源/错误/孤儿对象/多 kind 资产视图 | **可用但不完整** |
@@ -87,7 +87,7 @@
 
 ## 3.2 用户后台仍停留在旧 `users` 单表视角
 
-当前 `pages/admin/user-dashboard.tsx`、`pages/admin/user-management.tsx` 与 `lib/database/admin.ts` 读取的仍是：
+当时的 `pages/admin/user-dashboard.tsx`、`pages/admin/user-management.tsx` 与 `lib/database/admin.ts` 读取的仍是：
 
 - `username`
 - `email`
@@ -110,7 +110,7 @@
 
 建议更新点：
 
-1. 合并 `/admin/user-dashboard` 与 `/admin/user-management`，改成单页多标签的“用户与账号”页面。
+1. 合并旧 `/admin/user-dashboard` 与 `/admin/user-management`，收敛到单页多标签的 `/admin/users`。
 2. 页面标签建议至少拆成：
    - 基本信息
    - 认证状态
@@ -439,7 +439,7 @@
 原因：
 
 1. 这是近 159 提交里新增能力最多、且后台最落后的领域。
-2. 当前 `user-dashboard` / `user-management` 的信息含量已经明显不够。
+2. 当前 `/admin/users`（历史别名 `user-dashboard` / `user-management`）的信息含量已经明显不够。
 
 首批目标：
 

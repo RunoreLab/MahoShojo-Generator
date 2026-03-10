@@ -29,6 +29,16 @@ const nextConfig: NextConfig = {
         destination: '/details',
         permanent: false, // 使用 307 临时重定向
       },
+      {
+        source: '/admin/user-dashboard',
+        destination: '/admin/users',
+        permanent: false,
+      },
+      {
+        source: '/admin/user-management',
+        destination: '/admin/users',
+        permanent: false,
+      },
     ];
   },
 

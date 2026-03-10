@@ -4,7 +4,7 @@
 
 当前后台已具备：
 
-- 用户管理页：`/admin/user-dashboard`（筛选、批量操作、用户明细）
+- 用户管理页：`/admin/users`（历史别名：`/admin/user-dashboard`，含筛选、批量操作、用户明细）
 - 仪表盘概览：`/admin`（含 24h / 7d 活跃用户卡片）
 - 用户活动记录：`user_last_activity`（按 `user_id` 存最近活跃时间）
 
@@ -75,7 +75,7 @@
 
 ## 2. 页面方案对比与推荐
 
-## 2.1 方案 A：整合进 `/admin/user-dashboard`
+## 2.1 方案 A：整合进 `/admin/users`
 
 优点：
 
@@ -90,7 +90,7 @@
 
 优点：
 
-- 职责清晰：`user-dashboard` 做管理，`user-analytics` 做洞察。
+- 职责清晰：`/admin/users` 做管理，`/admin/user-analytics` 做洞察。
 - 可按模块分区加载（概览/留存/结构/价值），便于控读与缓存。
 - 后续可平滑扩展到 cohort 热力图、导出、预警。
 
@@ -108,7 +108,7 @@
 
 - 容量不足，只能放少量卡片，难承载完整用户分析。
 
-**结论：采用方案 B，并在 `/admin` 增加入口卡片，在 `/admin/user-dashboard` 增加“查看统计”跳转。**
+**结论：采用方案 B，并在 `/admin` 增加入口卡片，在 `/admin/users` 增加“查看统计”跳转。**
 
 ---
 
@@ -391,7 +391,7 @@ GROUP BY tenure_bucket;
 ## 5.3 跳转关系
 
 - `/admin` 增加“用户统计分析”入口卡片
-- `/admin/user-dashboard` 增加“查看用户统计分析”按钮（保持管理与分析联动）
+- `/admin/users` 增加“查看用户统计分析”按钮（保持管理与分析联动）
 
 ---
 
@@ -528,7 +528,7 @@ CREATE INDEX IF NOT EXISTS idx_user_activity_daily_date_user
 3. 页面明确展示口径与限制，不误导为“严格日留存”。
 4. `lookbackDays=180` 情况下接口响应可控（建议 P95 < 1.5s）。
 5. 统计接口具备参数校验与缓存，不出现明显 D1_ROWS_READ 异常增长。
-6. 与现有用户管理流程解耦：管理操作仍在 `/admin/user-dashboard`，分析在 `/admin/user-analytics`。
+6. 与现有用户管理流程解耦：管理操作仍在 `/admin/users`，分析在 `/admin/user-analytics`。
 
 ---
 
@@ -539,4 +539,4 @@ CREATE INDEX IF NOT EXISTS idx_user_activity_daily_date_user
 - 新增：`lib/database/admin-user-analytics.ts`
 - 可选：`types/admin-user-analytics.ts`
 - 修改：`pages/admin/index.tsx`（增加入口）
-- 修改：`pages/admin/user-dashboard.tsx`（增加跳转按钮）
+- 修改：`pages/admin/users.tsx`（增加跳转按钮；旧路由仅保留 redirect）

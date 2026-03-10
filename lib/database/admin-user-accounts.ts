@@ -4,9 +4,19 @@ export type AdminUserAccountListFilters = {
   page?: number;
   limit?: number;
   search?: string;
+  regDateStart?: string;
+  regDateEnd?: string;
+  loginDateStart?: string;
+  loginDateEnd?: string;
+  activeDateStart?: string;
+  activeDateEnd?: string;
   activity?: '24h' | '7d' | '30d' | 'tracked' | 'untracked';
   status?: 'normal' | 'banned' | 'exempt';
   authState?: 'linked' | 'unlinked' | 'legacyOnly' | 'passwordMissing' | 'emailUnverified' | 'migrationReady';
+  minPublicCards?: number;
+  maxPublicCards?: number;
+  minBannedCards?: number;
+  maxBannedCards?: number;
   sortBy?: 'createdAt' | 'lastLoginAt' | 'lastActiveAt' | 'latestAuthEventAt';
   sortOrder?: 'asc' | 'desc';
 };
@@ -174,7 +184,7 @@ const normalizeSortOrder = (value: string | undefined): NonNullable<AdminUserAcc
 
 const formatActivitySinceIso = (days: number): string => new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
 
-const buildWhereClause = (filters: AdminUserAccountListFilters): { whereSql: string; params: Array<string | number> } => {
+export const buildAdminUserAccountWhereClause = (filters: AdminUserAccountListFilters): { whereSql: string; params: Array<string | number> } => {
   const clauses: string[] = [];
   const params: Array<string | number> = [];
 
@@ -190,6 +200,26 @@ const buildWhereClause = (filters: AdminUserAccountListFilters): { whereSql: str
       clauses.push('(u.username LIKE ? OR u.email LIKE ? OR COALESCE(bau.email, \'\') LIKE ? OR COALESCE(ual.auth_user_id, \'\') LIKE ?)');
       params.push(searchTerm, searchTerm, searchTerm, searchTerm);
     }
+  }
+
+  if (filters.regDateStart?.trim()) {
+    clauses.push('DATE(u.created_at) >= DATE(?)');
+    params.push(filters.regDateStart.trim());
+  }
+
+  if (filters.regDateEnd?.trim()) {
+    clauses.push('DATE(u.created_at) <= DATE(?)');
+    params.push(filters.regDateEnd.trim());
+  }
+
+  if (filters.loginDateStart?.trim()) {
+    clauses.push('DATE(u.last_login_at) >= DATE(?)');
+    params.push(filters.loginDateStart.trim());
+  }
+
+  if (filters.loginDateEnd?.trim()) {
+    clauses.push('DATE(u.last_login_at) <= DATE(?)');
+    params.push(filters.loginDateEnd.trim());
   }
 
   if (filters.status === 'banned') {
@@ -215,6 +245,16 @@ const buildWhereClause = (filters: AdminUserAccountListFilters): { whereSql: str
     params.push(formatActivitySinceIso(30));
   }
 
+  if (filters.activeDateStart?.trim()) {
+    clauses.push('DATE(ula.last_seen_at) >= DATE(?)');
+    params.push(filters.activeDateStart.trim());
+  }
+
+  if (filters.activeDateEnd?.trim()) {
+    clauses.push('DATE(ula.last_seen_at) <= DATE(?)');
+    params.push(filters.activeDateEnd.trim());
+  }
+
   if (filters.authState === 'linked') {
     clauses.push('ual.auth_user_id IS NOT NULL');
   } else if (filters.authState === 'unlinked') {
@@ -227,6 +267,26 @@ const buildWhereClause = (filters: AdminUserAccountListFilters): { whereSql: str
     clauses.push('(ual.auth_user_id IS NOT NULL AND COALESCE(bau.email_verified, 0) = 0)');
   } else if (filters.authState === 'migrationReady') {
     clauses.push('(ual.auth_user_id IS NOT NULL AND COALESCE(acc.has_password, 0) = 1 AND COALESCE(bau.email_verified, 0) = 1)');
+  }
+
+  if (typeof filters.minPublicCards === 'number' && Number.isFinite(filters.minPublicCards)) {
+    clauses.push('COALESCE(card_stats.public_cards, 0) >= ?');
+    params.push(Math.max(0, Math.floor(filters.minPublicCards)));
+  }
+
+  if (typeof filters.maxPublicCards === 'number' && Number.isFinite(filters.maxPublicCards)) {
+    clauses.push('COALESCE(card_stats.public_cards, 0) <= ?');
+    params.push(Math.max(0, Math.floor(filters.maxPublicCards)));
+  }
+
+  if (typeof filters.minBannedCards === 'number' && Number.isFinite(filters.minBannedCards)) {
+    clauses.push('COALESCE(card_stats.banned_cards, 0) >= ?');
+    params.push(Math.max(0, Math.floor(filters.minBannedCards)));
+  }
+
+  if (typeof filters.maxBannedCards === 'number' && Number.isFinite(filters.maxBannedCards)) {
+    clauses.push('COALESCE(card_stats.banned_cards, 0) <= ?');
+    params.push(Math.max(0, Math.floor(filters.maxBannedCards)));
   }
 
   return {
@@ -312,7 +372,7 @@ export const listAdminUserAccounts = async (
   const sortOrder = normalizeSortOrder(filters.sortOrder).toUpperCase();
   const since24hEpoch = Math.floor(Date.now() / 1000) - 24 * 60 * 60;
   const since7dEpoch = Math.floor(Date.now() / 1000) - 7 * 24 * 60 * 60;
-  const { whereSql, params } = buildWhereClause(filters);
+  const { whereSql, params } = buildAdminUserAccountWhereClause(filters);
 
   const orderSql = (() => {
     if (sortBy === 'lastLoginAt') return `u.last_login_at ${sortOrder}, u.created_at DESC`;
