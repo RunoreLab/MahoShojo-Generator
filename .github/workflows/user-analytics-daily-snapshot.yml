@@ -1,0 +1,94 @@
+name: User Analytics Daily Snapshot
+
+on:
+  schedule:
+    - cron: '5 0 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: '仅采集不写入 admin_user_analytics_daily'
+        required: false
+        type: boolean
+        default: false
+      metric_date:
+        description: '可选，指定 metricDate（YYYY-MM-DD）'
+        required: false
+        type: string
+      backfill_days:
+        description: '回补最近 N 天缺失快照，默认 7'
+        required: false
+        type: string
+        default: '7'
+      skip_current:
+        description: '仅回补，不记录当前日期快照'
+        required: false
+        type: boolean
+        default: false
+
+concurrency:
+  group: user-analytics-daily-snapshot
+  cancel-in-progress: false
+
+jobs:
+  snapshot:
+    name: Capture Daily Snapshot
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      D1_DATABASE_ID: ${{ secrets.D1_DATABASE_ID }}
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install Dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Validate Required Secrets
+        run: |
+          set -euo pipefail
+          : "${CLOUDFLARE_API_TOKEN:?missing CLOUDFLARE_API_TOKEN secret}"
+          : "${CLOUDFLARE_ACCOUNT_ID:?missing CLOUDFLARE_ACCOUNT_ID secret}"
+          : "${D1_DATABASE_ID:?missing D1_DATABASE_ID secret}"
+
+      - name: Record User Analytics Snapshot
+        run: |
+          set -euo pipefail
+
+          backfill_days="7"
+          dry_run="false"
+          skip_current="false"
+          metric_date=""
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            backfill_days="${{ inputs.backfill_days }}"
+            dry_run="${{ inputs.dry_run }}"
+            skip_current="${{ inputs.skip_current }}"
+            metric_date="${{ inputs.metric_date }}"
+          fi
+
+          if [ -z "${backfill_days}" ]; then
+            backfill_days="7"
+          fi
+
+          args=("--backfill-days" "${backfill_days}")
+
+          if [ "${dry_run}" = "true" ]; then
+            args+=("--dry-run")
+          fi
+
+          if [ "${skip_current}" = "true" ]; then
+            args+=("--skip-current")
+          fi
+
+          if [ -n "${metric_date}" ]; then
+            args+=("--metric-date" "${metric_date}")
+          fi
+
+          bun scripts/snapshot-admin-user-analytics-daily.ts "${args[@]}"
