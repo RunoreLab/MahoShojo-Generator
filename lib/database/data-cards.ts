@@ -192,7 +192,7 @@ export async function createDataCardWithAuthor(
   description: string,
   data: string,
   isPublic: boolean | number = false,
-  reviewStatus: 'pending' | 'approved' | 'rejected',
+  reviewStatus: 'pending' | 'approved',
 ): Promise<{ success: boolean; id?: string; error?: string }> {
   try {
     const bundle = await readDataCardsRepoBundle();

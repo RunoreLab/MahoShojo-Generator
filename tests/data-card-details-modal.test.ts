@@ -41,36 +41,5 @@ describe('DataCardDetailsModal', () => {
     expect(html).toContain('<strong>加粗</strong>');
     expect(html).toContain('whitespace-pre-wrap');
   });
-
-  it('renders visual asset review section with proxied preview url', () => {
-    const data = {
-      portrait: 'https://assets.example.com/hero.webp',
-      illustration: 'data:image/png;base64,QUJDRA==',
-      profile: {
-        summary: '带插图的测试卡',
-      },
-    };
-
-    const html = renderToStaticMarkup(
-      React.createElement(DataCardDetailsModal, {
-        isOpen: true,
-        onClose: () => {},
-        card: {
-          id: 'c2',
-          name: '带图卡片',
-          description: '用于验证视觉资产审阅区',
-          type: 'character',
-          data: JSON.stringify(data),
-          isPublic: false,
-          author: 'tester',
-        },
-      }),
-    );
-
-    expect(html).toContain('视觉资产');
-    expect(html).toContain('共检测到 2 个图片资源');
-    expect(html).toContain('https://assets.example.com/hero.webp');
-    expect(html).toContain('portrait');
-    expect(html).toContain('illustration');
-  });
 });
+

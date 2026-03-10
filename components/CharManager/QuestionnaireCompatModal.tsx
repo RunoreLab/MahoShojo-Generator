@@ -17,7 +17,7 @@ interface QuestionnaireCompatModalProps {
   onClose: () => void;
   rawJson: string;
   targetCard: QuestionnaireCompatTargetCard | null;
-  onReplaceSuccess?: (result: { pendingReview: boolean; message?: string }) => void;
+  onReplaceSuccess?: (pendingReview: boolean) => void;
 }
 
 const tryPrettyJson = (raw: string): string => {
@@ -153,11 +153,8 @@ export default function QuestionnaireCompatModal({
         throw new Error(result.error || '替换失败');
       }
 
-      onReplaceSuccess?.({
-        pendingReview: Boolean(result.pendingReview),
-        message: result.message,
-      });
-      flashToast(result.message || (result.pendingReview ? '✅ 更新已提交审核，审核通过后生效' : '✅ 已替换问卷数据卡'));
+      onReplaceSuccess?.(Boolean(result.pendingReview));
+      flashToast(result.pendingReview ? '✅ 更新已提交审核，审核通过后生效' : '✅ 已替换问卷数据卡');
       onClose();
     } catch (e) {
       setError(e instanceof Error ? e.message : '替换失败');
@@ -256,3 +253,4 @@ export default function QuestionnaireCompatModal({
     </div>
   );
 }
+

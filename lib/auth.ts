@@ -452,9 +452,6 @@ export const dataCardApi = {
     success: boolean;
     id?: string;
     error?: string;
-    message?: string;
-    reviewStatus?: 'pending' | 'approved' | 'rejected';
-    visualAssetsRejected?: boolean;
   }> {
     try {
       const response = await authStorage.fetch('/api/data-cards', {
@@ -477,9 +474,6 @@ export const dataCardApi = {
   async updateCard(id: string, name: string, description: string, isPublic?: number): Promise<{
     success: boolean;
     error?: string;
-    message?: string;
-    reviewStatus?: 'pending' | 'approved' | 'rejected';
-    visualAssetsRejected?: boolean;
   }> {
     try {
       const response = await authStorage.fetch('/api/data-cards', {
@@ -502,14 +496,7 @@ export const dataCardApi = {
   async replaceCard(
     id: string,
     payload: { name?: string; description?: string; isPublic?: number; data: any }
-  ): Promise<{
-    success: boolean;
-    pendingReview?: boolean;
-    error?: string;
-    message?: string;
-    reviewStatus?: 'pending' | 'approved' | 'rejected';
-    visualAssetsRejected?: boolean;
-  }> {
+  ): Promise<{ success: boolean; pendingReview?: boolean; error?: string }> {
     try {
       const response = await authStorage.fetch('/api/data-cards', {
         method: 'PUT',

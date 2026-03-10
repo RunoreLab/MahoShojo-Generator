@@ -165,7 +165,7 @@ export default function SaveToCloudButton({
       });
 
       if (result.success) {
-        alert(result.message || (result.pendingReview ? '更新已提交审核，审核通过后生效' : '已替换成功'));
+        alert(result.pendingReview ? '更新已提交审核，审核通过后生效' : '已替换成功');
         setShowReplaceModal(false);
         loadUserDataCards();
       } else {
@@ -217,7 +217,7 @@ export default function SaveToCloudButton({
       );
 
       if (result.success) {
-        alert(result.message || `数据卡保存成功！${isPublic === 1 ? '（公开）' : '（私有）'}`);
+        alert(`数据卡保存成功！${isPublic === 1 ? '（公开）' : '（私有）'}`);
         setShowSaveModal(false);
         setCardName('');
         setCardDescription('');

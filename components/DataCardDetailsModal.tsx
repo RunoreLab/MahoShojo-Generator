@@ -7,11 +7,6 @@ import { authStorage } from '@/lib/auth';
 import { upsertArenaRankCacheFromMeta } from '@/lib/arena/rank-cache';
 import { TierBadge } from '@/components/ranking/TierBadge';
 import { buildTitleDisplay } from '@/lib/text';
-import {
-  extractDataCardVisualAssets,
-  type DataCardVisualAssetKind,
-  type DataCardVisualAssetSourceType,
-} from '@/lib/data-card-visual-assets';
 
 type ApiTag = {
   id: string;
@@ -77,31 +72,6 @@ const sanitizeDownloadFilename = (value: string) => {
   return trimmed.replace(/[\\/:*?"<>|\n\r\t]/g, '_');
 };
 
-const formatBytes = (value: number | null | undefined): string => {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return '大小未知';
-  const units = ['B', 'KB', 'MB', 'GB'];
-  let current = value;
-  let unitIndex = 0;
-  while (current >= 1024 && unitIndex < units.length - 1) {
-    current /= 1024;
-    unitIndex += 1;
-  }
-  return `${current.toFixed(unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
-};
-
-const getVisualAssetKindLabel = (kind: DataCardVisualAssetKind): string => {
-  if (kind === 'portrait') return '立绘';
-  if (kind === 'illustration') return '插图';
-  if (kind === 'avatar') return '头像';
-  return '图片';
-};
-
-const getVisualAssetSourceTypeLabel = (sourceType: DataCardVisualAssetSourceType): string => {
-  if (sourceType === 'dataUrl') return '内嵌 data URL';
-  if (sourceType === 'remote') return '远程 URL';
-  return '本地/相对路径';
-};
-
 interface DataCardDetailsModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -143,7 +113,6 @@ export default function DataCardDetailsModal({
   const metaRequestIdRef = useRef(0);
   const metaAbortRef = useRef<AbortController | null>(null);
   const [downloadError, setDownloadError] = useState<string | null>(null);
-  const [assetDimensions, setAssetDimensions] = useState<Record<string, { width: number; height: number }>>({});
 
   const [isEditingTags, setIsEditingTags] = useState(false);
   const [allTags, setAllTags] = useState<ApiTag[]>([]);
@@ -471,23 +440,14 @@ export default function DataCardDetailsModal({
     }
   }, [adminTagEditor, card.id, isOwner, selectedTagIds, tagScope]);
 
-  const parsedData = useMemo(() => {
-    try {
-      return JSON.parse(card.data) as Record<string, unknown>;
-    } catch (error) {
-      console.error('解析数据卡内容失败:', error);
-      return {};
-    }
-  }, [card.data]);
-
-  const visualAssets = useMemo(() => extractDataCardVisualAssets(parsedData), [parsedData]);
-
-  useEffect(() => {
-    if (!isOpen) return;
-    setAssetDimensions({});
-  }, [card.id, card.data, isOpen]);
-
   if (!isOpen) return null;
+
+  let parsedData: any = {};
+  try {
+    parsedData = JSON.parse(card.data);
+  } catch (error) {
+    console.error('解析数据卡内容失败:', error);
+  }
 
   // 递归渲染对象内容
   const renderObjectContent = (obj: any, level: number = 0): React.ReactNode => {
@@ -837,98 +797,6 @@ export default function DataCardDetailsModal({
               ) : null}
             </div>
           )}
-          </section>
-
-          <section className="space-y-3">
-            <div className="flex items-center justify-between gap-3 flex-wrap">
-              <h3 className="font-medium text-gray-700 flex items-center gap-2">
-                <span>视觉资产</span>
-              </h3>
-              <div className="text-xs text-gray-500">
-                {visualAssets.length > 0 ? `共检测到 ${visualAssets.length} 个图片资源` : '未检测到图片资源'}
-              </div>
-            </div>
-
-            {visualAssets.length > 0 ? (
-              <div className="grid gap-3 md:grid-cols-2">
-                {visualAssets.map((asset) => {
-                  const dimensions = assetDimensions[asset.id];
-                  return (
-                    <div key={asset.id} className="overflow-hidden rounded-lg border border-gray-200 bg-gray-50">
-                      <div className="aspect-[4/3] bg-gray-100">
-                        <img
-                          src={asset.previewUrl}
-                          alt={`${card.name} ${asset.keyPath}`}
-                          className="h-full w-full object-cover"
-                          loading="lazy"
-                          onLoad={(event) => {
-                            const target = event.currentTarget;
-                            if (!target.naturalWidth || !target.naturalHeight) return;
-                            setAssetDimensions((prev) => {
-                              const current = prev[asset.id];
-                              if (current?.width === target.naturalWidth && current?.height === target.naturalHeight) {
-                                return prev;
-                              }
-                              return {
-                                ...prev,
-                                [asset.id]: { width: target.naturalWidth, height: target.naturalHeight },
-                              };
-                            });
-                          }}
-                        />
-                      </div>
-                      <div className="space-y-2 p-3 text-xs text-gray-600">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="rounded-full border border-fuchsia-200 bg-fuchsia-50 px-2 py-0.5 text-fuchsia-700">
-                            {getVisualAssetKindLabel(asset.kind)}
-                          </span>
-                          <span className="rounded-full border border-gray-200 bg-white px-2 py-0.5 text-gray-700">
-                            {getVisualAssetSourceTypeLabel(asset.sourceType)}
-                          </span>
-                          {asset.mimeType ? (
-                            <span className="rounded-full border border-gray-200 bg-white px-2 py-0.5 text-gray-700">
-                              {asset.mimeType}
-                            </span>
-                          ) : null}
-                        </div>
-                        <div>
-                          <span className="font-medium text-gray-700">字段路径：</span>
-                          <code className="break-all rounded bg-white px-1 py-0.5 text-[11px] text-gray-700">{asset.keyPath}</code>
-                        </div>
-                        <div className="flex flex-wrap gap-x-4 gap-y-1">
-                          <span>预估大小：{formatBytes(asset.approxBytes)}</span>
-                          {dimensions ? <span>尺寸：{dimensions.width} × {dimensions.height}</span> : null}
-                        </div>
-                        <div className="space-y-1">
-                          <div className="font-medium text-gray-700">源地址</div>
-                          <code className="block break-all rounded bg-white px-2 py-1 text-[11px] text-gray-700">{asset.sourceUrl}</code>
-                        </div>
-                        {asset.previewUrl !== asset.sourceUrl ? (
-                          <div className="space-y-1">
-                            <div className="font-medium text-gray-700">预览代理</div>
-                            <code className="block break-all rounded bg-white px-2 py-1 text-[11px] text-gray-700">{asset.previewUrl}</code>
-                          </div>
-                        ) : null}
-                        <div>
-                          <a
-                            href={asset.previewUrl}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="text-blue-600 hover:underline"
-                          >
-                            在新标签页中打开
-                          </a>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            ) : (
-              <div className="rounded-lg border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-sm text-gray-500">
-                当前数据卡中没有识别到可预览的图片字段。若该卡使用了非常规协议字段，仍可在下方 JSON 详情中手动检查。
-              </div>
-            )}
           </section>
 
           <section className="space-y-2">
