@@ -361,11 +361,10 @@ export default function AdminHomePage() {
       items: [
         {
           href: '/admin/pvp',
-          title: 'PVP 只读后台',
-          description: '查看活跃房间、最近对局与卡死房间信号，当前版本不提供房间干预。',
+          title: 'PVP 后台',
+          description: '查看活跃房间、最近对局与卡死房间信号，支持导出和管理。',
           tone: 'border-emerald-200 hover:border-emerald-300',
           icon: ShieldCheck,
-          badge: '只读',
         },
         {
           href: '/admin/large-objects',
