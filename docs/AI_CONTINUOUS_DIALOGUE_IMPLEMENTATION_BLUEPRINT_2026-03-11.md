@@ -520,6 +520,12 @@ type BattleStoryChapterDigestEvent = {
 
 这样可以避免两套 promptBuilder 和两套解析逻辑。
 
+补充说明：
+
+- 当前第一批实现允许采用“`generate-next` 代理现有 `generate-stream`，并在代理层注入 `session_meta` / `chapter_digest`”的过渡方案
+- 该方案的目标是先把 battle story 入口低风险跑通
+- 等前端会话层稳定后，再评估是否把竞技场生成主链路进一步抽成共享 service，替代代理实现
+
 ---
 
 ## 7. 连续战报：章节摘要与 AI 摘要的调用时机

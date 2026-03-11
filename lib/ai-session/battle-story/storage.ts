@@ -66,6 +66,7 @@ export const createBattleStorySessionRecord = (input: {
   source: BattleStorySessionRecord['source'];
   seed: BattleStorySessionRecord['seed'];
   workingCombatants: unknown[];
+  lastChapterInputCombatants?: unknown[];
   sessionSummary?: string;
   summaryMeta?: BattleStorySessionRecord['summaryMeta'];
   branchOf?: BattleStorySessionRecord['branchOf'];
@@ -81,6 +82,9 @@ export const createBattleStorySessionRecord = (input: {
     source: input.source,
     seed: input.seed,
     workingCombatants: Array.isArray(input.workingCombatants) ? input.workingCombatants : [],
+    ...(Array.isArray(input.lastChapterInputCombatants)
+      ? { lastChapterInputCombatants: input.lastChapterInputCombatants }
+      : {}),
     ...(input.sessionSummary ? { sessionSummary: input.sessionSummary } : {}),
     ...(input.summaryMeta ? { summaryMeta: input.summaryMeta } : {}),
     ...(input.branchOf ? { branchOf: input.branchOf } : {}),

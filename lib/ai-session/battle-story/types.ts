@@ -64,6 +64,7 @@ export type BattleStorySessionRecord = {
   sessionSummary?: string;
   summaryMeta?: BattleStorySummaryMeta;
   lastChapterId?: string | null;
+  lastChapterInputCombatants?: unknown[];
   chapterCount: number;
   branchOf?: BattleStorySessionBranchOf;
   archivedAt?: number;

@@ -26,6 +26,7 @@ import { StoryOptions } from './components/StoryOptions';
 import { QuestionnaireLorePanel } from './components/QuestionnaireLorePanel';
 import { BattleActions } from './components/BattleActions';
 import { BattleResult } from './components/BattleResult';
+import { BattleStorySessionPanel } from './components/BattleStorySessionPanel';
 import { BattleModeSwitcher } from './components/BattleModeSwitcher';
 import { GenerationModeSwitcher } from './components/GenerationModeSwitcher';
 import { ArenaStatistics } from './components/ArenaStatistics';
@@ -375,6 +376,7 @@ export function ArenaPage() {
           </div>
 
           <BattleResult onSaveImage={handleSaveImage} />
+          <BattleStorySessionPanel />
 
           {appConfig.SHOW_STAT_DATA && (
             <ArenaStatistics stats={stats} isLoading={isLoadingStats} presetInfo={presetInfo} />
