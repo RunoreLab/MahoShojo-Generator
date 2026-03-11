@@ -468,7 +468,7 @@ export function BattleStorySessionPanel(props: {
                       : '章节预览'}
                   </div>
                   <div className="mt-1 text-xs text-gray-500">
-                    这里直接复用现有战报卡片渲染，可查看任意章节、下载 Markdown，并保存截图。
+                    可在此处查看任意章节、下载 Markdown，并保存截图。
                   </div>
                 </div>
                 <ChapterPreviewSection

@@ -178,12 +178,12 @@ export function ArenaPage() {
               </div>
             </div>
 
-            <div className="mt-6 grid gap-5 xl:grid-cols-[minmax(0,1.18fr)_minmax(360px,0.92fr)]">
+            <div className="mt-6 grid gap-5 xl:grid-cols-[minmax(320px,420px)_minmax(0,1fr)] 2xl:grid-cols-[minmax(340px,440px)_minmax(0,1fr)] xl:items-start">
               <div className="space-y-4">
                 <CollapsibleSection
                   title="🎴 预设角色（内置）"
-                  description={`已选 ${formatCombatantCount(presetCombatantCount, MAX_COMBATANTS)}（可选项，常用可展开）`}
-                  defaultOpen={false}
+                  description={`已选 ${formatCombatantCount(presetCombatantCount, MAX_COMBATANTS)}`}
+                  defaultOpen
                   disabled={isGenerating}
                   storageKey="arena.section.presetCharacters.open"
                 >
