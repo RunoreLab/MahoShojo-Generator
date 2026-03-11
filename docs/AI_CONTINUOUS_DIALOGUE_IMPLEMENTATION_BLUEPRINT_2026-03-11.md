@@ -105,6 +105,27 @@ components/CharManager/AiCardEditPanel.tsx
 
 第一期可以把 `pendingDraft` 内联在 session 记录里，不单独开表。
 
+## 3.4 建议索引与敏感信息边界
+
+建议索引：
+
+- `battleStorySessions.by_updatedAt`
+- `battleStorySessions.by_branch_session`（`branchOf.sessionId`）
+- `battleStoryChapters.by_session_index`（`[sessionId, index]`）
+- `battleStoryChapters.by_session_createdAt`（`[sessionId, createdAt]`）
+- `battleStoryChapters.by_sourceChapterId`
+- `cardEditSessions.by_updatedAt`
+- `cardEditSessions.by_template_updatedAt`（`[template, updatedAt]`）
+- `cardEditCheckpoints.by_session_createdAt`（`[sessionId, createdAt]`）
+
+敏感信息边界：
+
+- 不持久化 `customProvider.apiKey`
+- 不持久化任何 `Authorization` / 临时签名 / 上游原始响应头
+- session 只允许落 `providerId` / `modelId` / `providerMode` 这类可回显但不敏感的配置
+- 导出会话时默认剔除临时错误状态、`retryAfter`、调试信息与上游 request id
+- 连续角色卡编辑中的 `workingCard` 保留当前协议字段名，不在会话层做 `snake_case -> camelCase` 改造
+
 ---
 
 ## 4. 连续战报会话：数据结构
@@ -145,6 +166,12 @@ type BattleStorySessionRecord = {
   };
   workingCombatants: unknown[];
   sessionSummary?: string;
+  summaryMeta?: {
+    coveredUntilChapterIndex: number;
+    coveredChapterIds: string[];
+    refreshedAt: number;
+    mode: 'ai' | 'deterministic-fallback';
+  };
   lastChapterId?: string | null;
   chapterCount: number;
   branchOf?: {
@@ -163,7 +190,9 @@ type BattleStoryChapterRecord = {
   sessionId: string;
   index: number;
   action: 'start' | 'continue' | 'branch' | 'rewrite';
+  status: 'active' | 'superseded';
   sourceChapterId?: string | null;
+  supersededByChapterId?: string | null;
   generationId?: string | null;
   title: string;
   markdown: string;
@@ -190,6 +219,57 @@ type BattleStoryChapterRecord = {
 1. 添加新章节时，不必整条 session 全量重写
 2. 分支时只需要引用 `sourceChapterId`
 3. 后续导出整段故事时也更容易流式拼接
+
+## 4.4 动作语义与约束
+
+`action` 的含义需要在第一期就锁定，否则前后端会很容易做出互不兼容的实现。
+
+### `start`
+
+- 只允许用于空会话
+- 生成的章节固定为 `index = 1`
+- 生成成功后写入 `lastChapterId`
+
+### `continue`
+
+- 只允许基于当前会话的最新 `active` 章节继续
+- 新章节 `index = chapterCount + 1`
+- prompt 上下文包含 `sessionSummary + 最近窗口章节 + 最新 workingCombatants`
+
+### `branch`
+
+- `branch` 的目标 `sessionId` 必须是一个新的分支会话 id
+- 前端先在本地复制“分支点之前的 active 章节”和 `workingCombatants`
+- `sourceChapterId` 必填，表示从该章后开始分叉
+- 新分支会话应继承原会话的 `sessionSummary` 与 `summaryMeta`，但只覆盖到 `sourceChapterId` 所在位置
+- 分支后的首个新章节 `index = sourceChapter.index + 1`
+
+### `rewrite`
+
+- 第一期开严格约束：只允许重写“当前会话最后一章”
+- 旧章节标记为 `status = 'superseded'`
+- 新章节沿用相同 `index`
+- `sourceChapterId` 指向被重写章节
+- 若用户要改更早的中间章节，不做就地重写，改为引导用户创建分支会话
+
+这样做的原因是：中途重写老章节会让后续章节全部失去因果基础，第一期不值得承受这类复杂度。
+
+## 4.5 上下文编译预算
+
+连续战报不是把所有历史全文重新塞回模型，而是走固定编译策略：
+
+1. 固定种子层：初始角色、情景、问卷 Lore、生成设置
+2. 滚动记忆层：`sessionSummary` + 最近未摘要章节的 deterministic digest
+3. 最近窗口层：最多回放最近 2 章完整 Markdown
+4. 当前状态层：`workingCombatants`
+5. 本轮引导层：`userGuidance`
+
+建议初始预算：
+
+- 最近窗口最多 2 章
+- 单章回放正文建议截断到 6000 字符以内
+- `userGuidance` 建议服务端裁到 800 字符以内
+- 当最近窗口超限时，优先保留最新章节全文，较旧章节退化为 digest
 
 ---
 
@@ -322,6 +402,60 @@ data: {"chapterTitle":"...","winner":"...","officialConclusion":"...","bodyExcer
 
 这样客户端无需自己重复构造 deterministic 摘要。
 
+## 6.4.1 事件顺序与兼容约束
+
+为了尽量复用当前 [`pages/api/arena/generate-stream.ts`](/home/notuhao/code/MahoShojo-Generator/pages/api/arena/generate-stream.ts) 与 [`components/arena/hooks/useBattleEngine.ts`](/home/notuhao/code/MahoShojo-Generator/components/arena/hooks/useBattleEngine.ts) 的解析逻辑，建议新接口遵守以下顺序：
+
+1. `session_meta`：请求通过服务端限流后立即发送一次
+2. `markdown`：正文流式分块，多次
+3. `reasoning` / `reasoning_done`：完全沿用现有可选事件
+4. `telemetry`：沿用现有事件
+5. `meta` / `meta_error`：沿用现有角色更新元事件
+6. `chapter_digest`：在正文结束后发送一次
+7. `done`：最后发送一次
+
+失败顺序：
+
+1. `session_meta` 可选
+2. `error`
+3. `done`，且 `ok = false`
+
+客户端落库规则：
+
+- 收到 `markdown` 不代表章节可以持久化
+- 只有在收到 `done` 且 `ok = true` 后，才允许把 chapter、digest、workingCombatants 一起写入 IndexedDB
+- 若只有 `chapter_digest` 没有 `done`，仍视为失败，不落本地
+- 若 `meta_error` 出现，但正文和 digest 完整，允许继续保存章节，只是不写角色状态更新调试结果
+
+建议事件体：
+
+```ts
+type BattleStorySessionMetaEvent = {
+  sessionId: string;
+  chapterId: string;
+  chapterIndex: number;
+  action: 'start' | 'continue' | 'branch' | 'rewrite';
+  sourceChapterId?: string;
+  providerMode: 'system' | 'custom';
+  acceptedAt: number;
+};
+
+type BattleStoryChapterDigestEvent = {
+  chapterId: string;
+  sessionId: string;
+  chapterIndex: number;
+  chapterTitle: string;
+  winner?: string;
+  officialConclusion?: string;
+  bodyExcerpt?: string;
+  impactDigest?: Array<{
+    characterName: string;
+    impact?: string;
+    currentStateSummary?: string;
+  }>;
+};
+```
+
 ## 6.5 服务端实现建议
 
 不要在新 endpoint 内部再 `fetch('/api/arena/generate-stream')` 一层。  
@@ -348,6 +482,20 @@ data: {"chapterTitle":"...","winner":"...","officialConclusion":"...","bodyExcer
 ## 7.1 Deterministic 摘要
 
 在主战报成功后，同请求内直接生成，不额外调用模型。
+
+建议固定算法：
+
+- `chapterTitle`：优先取正文第一个 Markdown 标题；没有则回退为 `第 N 章`
+- `winner`：优先取解析出的 report / impacts；没有则留空
+- `officialConclusion`：优先取 report 中的官方结论；没有则取正文结尾第一句摘要
+- `bodyExcerpt`：去掉标题与系统注释后的纯文本前 160 到 240 字
+- `impactDigest`：按当前参战者顺序输出，不额外排序，不做模型改写
+
+建议约束：
+
+- `bodyExcerpt` 最多 240 字
+- `impactDigest` 最多保留 8 个对象
+- deterministic digest 必须可重复生成，不能依赖随机抽样
 
 ## 7.2 AI 会话摘要
 
@@ -395,6 +543,22 @@ type BattleStoryRefreshSummaryResponse = {
 
 - 由前端在主生成成功后按阈值判断是否调用
 - 调用失败不阻断主流程
+
+## 7.3 AI 摘要触发阈值
+
+本期直接定为以下策略，不再留作开放项：
+
+1. 满足以下任一条件时，前端在章节成功落本地后异步调用 `refresh-summary`
+2. 距离上次 AI 摘要后，新增 `active` 章节数 >= 3
+3. 自上次 AI 摘要后累计 deterministic digest 文本总长度 >= 1800 字符
+4. 当前会话首次达到 6 章且仍没有 `sessionSummary`
+
+补充约束：
+
+- 同一 session 的 `refresh-summary` 最短间隔 30 秒
+- 分支会话继承父会话摘要时，不立即强制重算；只在分支后新增章节达到阈值时再刷新
+- `refresh-summary` 输入只使用 `previousSummary + 未覆盖章节 digests`，不回放完整正文
+- 若 AI 摘要失败，保留旧摘要继续运行；必要时可把最近 1 到 2 章 deterministic digest 拼成临时 fallback summary
 
 ---
 
@@ -486,6 +650,38 @@ type StructuredCardDraftPayload = {
 
 对于数组字段，第一期直接整字段 `set` 新数组即可。
 
+## 9.2.1 字段补丁的安全边界
+
+第一期建议把补丁协议收紧，不做“任意路径可写”。
+
+约束如下：
+
+- `path` 使用点路径，如 `profile.title`、`battleStyle`
+- 不支持 `a[0].b` 这类数组索引写法
+- 数组若要修改，只允许对整个数组字段执行 `set`
+- 禁止修改 `signature`
+- 禁止修改系统拥有的元字段，如持久化 id、作者标记、审核标记、时间戳
+- 禁止出现 `__proto__`、`constructor`、`prototype` 等危险路径片段
+- `touchedPaths` 必须与 `ops` 中实际出现的 path 一致，且顺序稳定
+
+推荐服务端只生成“白名单路径”上的草案，真正应用前客户端再做一次二次校验。
+
+## 9.2.2 预览规则
+
+结构化卡不建议只给用户一大段 JSON。
+
+建议预览层输出：
+
+- 变更摘要：1 到 3 句自然语言
+- 字段列表：`path + before + after`
+- 校验预警：来自 `validateDataCard`
+- 原生性提示：明确告知会移除 `signature`
+
+如果某个字段值很长：
+
+- `before` / `after` 预览截断到 240 字
+- 完整值只在“展开详情”里看
+
 ## 9.3 通用卡：文档重写草案
 
 ```ts
@@ -498,6 +694,23 @@ type DocumentRewriteDraftPayload = {
 ```
 
 `general` / `general-scenario` 第一期开这个模式就够了，不必强行做 JSON Patch。
+
+## 9.3.1 文档重写模式的边界
+
+`general` / `general-scenario` 建议只开放以下能力：
+
+- 重写 `content`
+- 可选重写 `title`
+- 输出 Markdown diff 预览
+
+建议约束：
+
+- `nextContent` 不能为空
+- `nextContent` 建议限制在 40_000 字符以内
+- 若只改标题而不改正文，不走 `document-rewrite`，而是退回结构化 `field-patch`
+- diff 以“按行比较”为主，不追求复杂的词级最优 diff
+
+这样可以把实现复杂度控制在一个很稳的范围内，同时满足大多数“润色/扩写/删改情节卡文案”的真实需求。
 
 ---
 
@@ -568,6 +781,17 @@ type GenerateCardEditDraftResponse = {
 - 生成 checkpoint
 - 运行 `validateDataCard`
 
+## 10.5 Recent Messages 建议裁剪
+
+角色卡编辑接口里的 `recentMessages` 不应无限增长。
+
+建议：
+
+- 只发送最近 6 条消息
+- 更早历史通过 `sessionSummary` 表达
+- `assistant` 侧消息优先保存“上轮草案摘要”，而不是整卡 JSON
+- `userInstruction` 为空字符串时直接拒绝，不进入模型
+
 ---
 
 ## 11. 角色卡 AI 编辑：前端落点
@@ -630,14 +854,14 @@ type AiActionAuditLog = {
   id: string;
   actionType: string;
   userId?: number | null;
-  ip?: string | null;
   ipAnonymized?: string | null;
   sessionId?: string | null;
   providerMode: 'system' | 'custom';
-  resultCode: 'SUCCESS' | 'FAILED' | 'BLOCKED' | 'ABORTED';
+  resultCode: 'STARTED' | 'SUCCESS' | 'FAILED' | 'BLOCKED' | 'ABORTED';
   retryAfterSeconds?: number | null;
   metadataJson?: string | null;
   createdAt: string;
+  finishedAt?: string | null;
 };
 ```
 
@@ -646,6 +870,40 @@ type AiActionAuditLog = {
 - 语义不对
 - 后续查询维度不同
 - 不应把认证审计和 AI 行为审计混在一起
+
+## 12.2.1 建议 D1 Schema
+
+```sql
+CREATE TABLE IF NOT EXISTS ai_action_audit_logs (
+  id TEXT PRIMARY KEY,
+  action_type TEXT NOT NULL,
+  user_id INTEGER,
+  ip_anonymized TEXT,
+  session_id TEXT,
+  provider_mode TEXT NOT NULL,
+  result_code TEXT NOT NULL,
+  retry_after_seconds INTEGER,
+  metadata_json TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  finished_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_ai_action_logs_action_user_created
+  ON ai_action_audit_logs (action_type, user_id, created_at);
+
+CREATE INDEX IF NOT EXISTS idx_ai_action_logs_action_ip_created
+  ON ai_action_audit_logs (action_type, ip_anonymized, created_at);
+
+CREATE INDEX IF NOT EXISTS idx_ai_action_logs_action_session_created
+  ON ai_action_audit_logs (action_type, session_id, created_at);
+```
+
+实现建议：
+
+- 复用现有 IP 匿名化工具，不额外发明一套
+- `STARTED` 在请求通过限流并真正开始调用模型前写入
+- 完成后更新同一条记录为 `SUCCESS` / `FAILED` / `ABORTED`
+- 被限流拦截的请求单独写 `BLOCKED`
 
 ## 12.3 建议限流工具
 
@@ -658,7 +916,11 @@ type AiActionAuditLog = {
 ```ts
 type ConsumeAiActionRateLimitInput = {
   req: Request;
-  actionType: 'battle_story_session_continue' | 'battle_story_session_regenerate_chapter' | 'card_edit_session_generate_draft';
+  actionType:
+    | 'battle_story_session_continue'
+    | 'battle_story_session_regenerate_chapter'
+    | 'battle_story_session_refresh_summary'
+    | 'card_edit_session_generate_draft';
   sessionId?: string;
   providerMode: 'system' | 'custom';
   userId?: number | null;
@@ -668,6 +930,7 @@ type ConsumeAiActionRateLimitResult = {
   allowed: boolean;
   retryAfterSeconds: number;
   reason: 'cooldown' | 'burst_window' | 'ip_window' | 'user_window';
+  auditLogId?: string;
 };
 ```
 
@@ -676,6 +939,50 @@ type ConsumeAiActionRateLimitResult = {
 - `pages/api/arena/session/generate-next.ts`
 - `pages/api/arena/session/refresh-summary.ts`
 - `pages/api/data-cards/edit-draft.ts`
+
+## 12.4 限流判定顺序
+
+建议参考 [`lib/auth/mail-send-guard.ts`](/home/notuhao/code/MahoShojo-Generator/lib/auth/mail-send-guard.ts) 的“可查询审计”思路，但增加“先写 STARTED 再收尾更新”的并发保护。
+
+推荐顺序：
+
+1. 提取 `userId`、匿名化 IP、`sessionId`、`providerMode`
+2. 查询同 `actionType + sessionId` 是否存在过近的 `STARTED/SUCCESS/FAILED/ABORTED`
+3. 查询同 `actionType + userId` 的窗口计数
+4. 查询同 `actionType + ipAnonymized` 的窗口计数
+5. 若任一命中，则写入 `BLOCKED` 并返回 `429 + Retry-After`
+6. 若通过，则立即写入 `STARTED`
+7. 调模型
+8. 请求结束时更新为 `SUCCESS` / `FAILED` / `ABORTED`
+
+`STARTED` 必须计入冷却判断，否则并发双击会在第一条请求尚未完成时绕过最小间隔。
+
+## 12.5 建议初始阈值
+
+### 连续战报正文生成
+
+- 官方 Key：`minInterval = 120s`
+- 自带 Key：`minInterval = 3s`
+- 同 session burst：官方 `2 次 / 5 分钟`，自带 `8 次 / 5 分钟`
+- 同用户窗口：官方 `12 次 / 1 小时`，自带 `120 次 / 1 小时`
+- 同 IP 窗口：官方 `30 次 / 1 小时`，自带 `240 次 / 1 小时`
+
+### 连续战报摘要刷新
+
+- 官方 Key：`minInterval = 15s`
+- 自带 Key：`minInterval = 3s`
+- 同 session burst：`1 次 / 30 秒`
+- 同用户窗口：官方 `60 次 / 1 小时`，自带 `240 次 / 1 小时`
+
+### 角色卡草案生成
+
+- 官方 Key：`minInterval = 60s`
+- 自带 Key：`minInterval = 3s`
+- 同 session burst：官方 `3 次 / 10 分钟`，自带 `20 次 / 10 分钟`
+- 同用户窗口：官方 `30 次 / 1 小时`，自带 `180 次 / 1 小时`
+- 同 IP 窗口：官方 `60 次 / 1 小时`，自带 `300 次 / 1 小时`
+
+这些值属于第一期保守配置，上线后再依据真实转化、误伤率与成本做调参。
 
 ---
 
@@ -696,6 +1003,18 @@ type ConsumeAiActionRateLimitResult = {
 - 失败短冷却：3 秒
 
 前端收到 `429` 时，应优先使用服务端 `Retry-After` 覆盖本地剩余时间。
+
+## 13.1 冷却结果矩阵
+
+| 场景 | 前端冷却 | 服务端审计结果 |
+| --- | --- | --- |
+| 请求成功完成 | 完整冷却 | `STARTED -> SUCCESS` |
+| 请求被 `429` 拦截 | 使用 `Retry-After` 覆盖 | `BLOCKED` |
+| 服务端校验失败，模型尚未真正开始 | 短冷却 3 秒 | `FAILED` |
+| 流式过程中断，但请求已进入模型阶段 | 完整冷却 | `ABORTED` |
+| 用户主动取消，但模型已经开始生成 | 完整冷却 | `ABORTED` |
+
+这里故意把“已进入模型阶段”的中断统一视为会消耗一次正式机会，以避免通过取消重试绕开冷却。
 
 ---
 
