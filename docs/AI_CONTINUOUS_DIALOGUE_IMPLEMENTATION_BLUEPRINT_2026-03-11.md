@@ -3,12 +3,24 @@
 > 关联文档：`docs/AI_CONTINUOUS_DIALOGUE_DESIGN_2026-03-11.md`  
 > 目的：把上一份设计讨论稿进一步收敛为“可实施接口设计”，明确本地会话结构、建议文件落点、API DTO、冷却/限流实现与测试边界，供后续开发直接参考。
 
+> 2026-03-11 补充决策：
+>
+> - 当前进入开发任务拆解与首批落地的只有“连续战报会话”
+> - “角色卡 AI 连续编辑会话”保留设计，但暂缓实施
+> - 考虑 D1 读写配额，第一批实现暂不新增或变更服务端数据库结构
+> - 因此，第一批服务端冷却只做“无数据库结构变更”的软保护方案；D1 审计限流保留为后续增强目标
+
 ## 1. 实施范围
 
 本蓝图覆盖两条能力线：
 
 1. 连续战报会话
 2. 角色卡 AI 连续修改会话
+
+当前执行批次：
+
+- 进入开发任务拆解并优先落地：连续战报会话
+- 暂缓实施：角色卡 AI 连续修改会话
 
 本轮不做的内容：
 
@@ -20,7 +32,13 @@
 
 - local-first
 - 多请求会话化
-- 前端体验冷却 + 服务端真实限流
+- 前端体验冷却 + 服务端限流
+
+当前批次的限流解释：
+
+- 前端继续承担主要 UX 冷却
+- 服务端第一批只做无 DB schema 变更的软保护
+- 更强的持久化审计限流保留在后续版本评估
 
 ---
 
@@ -60,6 +78,33 @@ components/CharManager/AiCardEditPanel.tsx
 - `lib/arena/*` 继续负责战报生成业务
 - `lib/data-card-*` / `validateDataCard` 继续负责卡片合法性
 - `lib/ai-session/*` 只负责“会话”
+
+当前批次只需要真正创建以下文件：
+
+```txt
+lib/ai-session/storage.ts
+lib/ai-session/types.ts
+
+lib/ai-session/battle-story/types.ts
+lib/ai-session/battle-story/storage.ts
+lib/ai-session/battle-story/digest.ts
+lib/ai-session/battle-story/context.ts
+
+pages/api/arena/session/generate-next.ts
+pages/api/arena/session/refresh-summary.ts
+
+components/arena/hooks/useBattleStorySession.ts
+components/arena/components/BattleStorySessionPanel.tsx
+```
+
+以下文件保留为第二批角色卡编辑能力预留，不进入当前实施批次：
+
+```txt
+lib/ai-session/card-edit/*
+pages/api/data-cards/edit-draft.ts
+components/CharManager/useAiCardEditSession.ts
+components/CharManager/AiCardEditPanel.tsx
+```
 
 ---
 
@@ -833,15 +878,67 @@ type GenerateCardEditDraftResponse = {
 
 ---
 
-## 12. 服务端真实限流：建议实现
+## 12. 服务端限流：阶段化建议
 
-## 12.1 为什么不用 in-memory Map
+## 12.1 当前批次约束
+
+当前已确认约束：
+
+- 暂不新增或变更服务端数据库结构
+- 尽量避免为连续战报引入稳定性的额外 D1 读写负担
+- 但仍需要保留服务端侧的最基本滥用拦截能力
+
+因此，本节拆成两个层次：
+
+1. 第一批实际落地：无 DB schema 变更的软保护方案
+2. 后续增强目标：D1 审计限流方案
+
+## 12.2 第一批实际落地方案
+
+建议组合：
+
+1. 前端 `useCooldown` 继续负责主要 UX 冷却
+2. 新 endpoint 内部增加进程内 `Map` / token bucket 级别的轻量服务端保护
+3. 同一 `sessionId + actionType` 在短时间内重复请求时直接返回 `429`
+4. 服务端继续返回 `Retry-After`，前端收到后覆盖本地剩余时间
+5. `refresh-summary` 采用更严格的短窗口限制，避免摘要接口被频繁触发
+
+推荐键设计：
+
+- `battleStory:<providerMode>:<actionType>:<sessionId>`
+- `battleStoryIp:<providerMode>:<actionType>:<ip>`
+
+推荐初始保护阈值：
+
+- `generate-next`：
+  - 官方 Key：最短间隔 120 秒
+  - 自带 Key：最短间隔 3 秒
+  - 同 session 并发保护：同一时刻只允许 1 个进行中的生成
+- `refresh-summary`：
+  - 官方 Key：最短间隔 15 秒
+  - 自带 Key：最短间隔 3 秒
+  - 同 session 并发保护：同一时刻只允许 1 个进行中的摘要刷新
+
+实现参考：
+
+- 轻量 token bucket 可参考 [`pages/api/arena/leaderboard/search.ts`](/home/notuhao/code/MahoShojo-Generator/pages/api/arena/leaderboard/search.ts)
+- 前端冷却兼容逻辑可参考 [`components/arena/hooks/useBattleEngine.ts`](/home/notuhao/code/MahoShojo-Generator/components/arena/hooks/useBattleEngine.ts)
+
+限制说明：
+
+- 这是实例内软保护，不是跨实例、跨冷启动的强一致限流
+- 第一批只能做到“降低误触和明显滥用”，不能达到持久审计版的稳健程度
+- 若后续线上观测到滥用压力或成本压力明显升高，需要重新评估 D1 审计或平台侧限流能力
+
+## 12.3 为什么当前不直接采用持久化审计
 
 在 Cloudflare / Edge / Serverless 环境下，in-memory Map 只能做弱保护，不足以满足“稳健安全运行”的要求。
 
-因此，连续能力的服务端限流建议使用可持久查询的审计表。
+原本更理想的做法，是对连续能力使用可持久查询的审计表。
 
-## 12.2 建议新增表
+但当前由于 D1 读写配额顾虑，第一批不采用该方案，只保留为后续增强目标。
+
+## 12.4 后续增强目标：建议新增表
 
 建议新增：
 
@@ -871,7 +968,7 @@ type AiActionAuditLog = {
 - 后续查询维度不同
 - 不应把认证审计和 AI 行为审计混在一起
 
-## 12.2.1 建议 D1 Schema
+## 12.4.1 建议 D1 Schema
 
 ```sql
 CREATE TABLE IF NOT EXISTS ai_action_audit_logs (
@@ -905,7 +1002,7 @@ CREATE INDEX IF NOT EXISTS idx_ai_action_logs_action_session_created
 - 完成后更新同一条记录为 `SUCCESS` / `FAILED` / `ABORTED`
 - 被限流拦截的请求单独写 `BLOCKED`
 
-## 12.3 建议限流工具
+## 12.5 后续增强目标：建议限流工具
 
 建议新增：
 
@@ -940,7 +1037,7 @@ type ConsumeAiActionRateLimitResult = {
 - `pages/api/arena/session/refresh-summary.ts`
 - `pages/api/data-cards/edit-draft.ts`
 
-## 12.4 限流判定顺序
+## 12.6 后续增强目标：限流判定顺序
 
 建议参考 [`lib/auth/mail-send-guard.ts`](/home/notuhao/code/MahoShojo-Generator/lib/auth/mail-send-guard.ts) 的“可查询审计”思路，但增加“先写 STARTED 再收尾更新”的并发保护。
 
@@ -957,7 +1054,7 @@ type ConsumeAiActionRateLimitResult = {
 
 `STARTED` 必须计入冷却判断，否则并发双击会在第一条请求尚未完成时绕过最小间隔。
 
-## 12.5 建议初始阈值
+## 12.7 后续增强目标：建议初始阈值
 
 ### 连续战报正文生成
 
@@ -982,7 +1079,7 @@ type ConsumeAiActionRateLimitResult = {
 - 同用户窗口：官方 `30 次 / 1 小时`，自带 `180 次 / 1 小时`
 - 同 IP 窗口：官方 `60 次 / 1 小时`，自带 `300 次 / 1 小时`
 
-这些值属于第一期保守配置，上线后再依据真实转化、误伤率与成本做调参。
+这些值保留为“持久化审计版”的后续参考值，不属于当前第一批的硬性实施范围。
 
 ---
 
@@ -1006,7 +1103,12 @@ type ConsumeAiActionRateLimitResult = {
 
 ## 13.1 冷却结果矩阵
 
-| 场景 | 前端冷却 | 服务端审计结果 |
+说明：
+
+- 本表描述的是“当前第一批可实现的前端表现”
+- 若后续切换到 D1 审计限流，服务端内部状态机会比本表更细
+
+| 场景 | 前端冷却 | 服务端状态（概念） |
 | --- | --- | --- |
 | 请求成功完成 | 完整冷却 | `STARTED -> SUCCESS` |
 | 请求被 `429` 拦截 | 使用 `Retry-After` 覆盖 | `BLOCKED` |
@@ -1053,10 +1155,19 @@ type ConsumeAiActionRateLimitResult = {
 
 ## 15. 推荐落地顺序
 
-1. 先做 `lib/ai-session/*` 的本地存储与类型定义
-2. 做连续战报前端会话与 `generate-next` endpoint
-3. 做战报摘要与服务端限流
-4. 做角色卡编辑会话与 `edit-draft` endpoint
-5. 做客户端 draft 应用、diff 预览与 checkpoint
+当前批次：
 
-这条顺序能尽量复用现有竞技场链路，同时把复杂度最高的卡片编辑草案放在第二批，减少首批实现风险。
+1. 先做 `lib/ai-session/battle-story/*` 的本地存储与类型定义
+2. 做连续战报 `generate-next` endpoint
+3. 做战报摘要 `refresh-summary`
+4. 做连续战报前端会话 Hook 与最小 UI
+5. 做第一批软限流与冷却对齐
+6. 做 battle story 回归测试
+
+后续批次再做：
+
+1. 角色卡编辑会话与 `edit-draft` endpoint
+2. 客户端 draft 应用、diff 预览与 checkpoint
+3. D1 审计限流增强
+
+这条顺序能尽量复用现有竞技场链路，把“连续战报”先独立跑通，再评估角色卡编辑与持久化审计限流是否值得进入下一批。
