@@ -35,11 +35,13 @@ import { useBattleStore } from '../stores/useBattleStore';
 import { BattleStoreState, Combatant, CombatantData } from '../types';
 import { useBattleActions } from './useBattleActions';
 import {
+  BATTLE_STORY_SUMMARY_REFRESH_MIN_INTERVAL_MS,
   buildBattleStoryExportMarkdown,
   buildBattleStorySessionSeedSnapshot,
   cloneBattleStoryActiveChaptersForNewSession,
   mergeUpdatedCombatantsIntoWorkingCombatants,
   remapBattleStorySummaryMeta,
+  resolveBattleStoryRequestCooldownMs,
   resolveBattleStorySummaryRefreshPlan,
 } from '../utils/battleStorySession';
 
@@ -334,8 +336,10 @@ export function useBattleStorySession() {
       });
       if (!plan) return;
 
+      const now = Date.now();
       const retryAt = summaryRetryAtRef.current[sessionRecord.id] ?? 0;
-      if (retryAt > Date.now()) return;
+      if (retryAt > now) return;
+      summaryRetryAtRef.current[sessionRecord.id] = now + BATTLE_STORY_SUMMARY_REFRESH_MIN_INTERVAL_MS;
 
       try {
         setIsRefreshingSummary(true);
@@ -360,7 +364,10 @@ export function useBattleStorySession() {
         });
 
         if (response.status === 429) {
-          summaryRetryAtRef.current[sessionRecord.id] = Date.now() + readRetryAfterMs(response, 15_000);
+          summaryRetryAtRef.current[sessionRecord.id] = Math.max(
+            summaryRetryAtRef.current[sessionRecord.id] ?? 0,
+            Date.now() + readRetryAfterMs(response, 15_000)
+          );
           return;
         }
 
@@ -511,6 +518,10 @@ export function useBattleStorySession() {
       nextWorkingCombatants: Array<Record<string, unknown>>;
       warning?: string;
     }> => {
+      if (isCooldown) {
+        throw new Error(`冷却中，请等待 ${remainingTime} 秒后再继续。`);
+      }
+
       setActionError(null);
       setNotice(null);
       setIsGenerating(true);
@@ -519,12 +530,11 @@ export function useBattleStorySession() {
       setStreamReasoning(null);
       setStreamTelemetry({ aiModel: null, aiUsage: null });
       setStreamChapterIndex(input.chapterIndexHint ?? null);
+      let responseStatus: number | null = null;
+      let requestAccepted = false;
+      let cooldownHandled = false;
 
       try {
-        if (isCooldown) {
-          throw new Error(`冷却中，请等待 ${remainingTime} 秒后再继续。`);
-        }
-
         const response = await fetch('/api/arena/session/generate-next', {
           method: 'POST',
           headers: await buildRequestHeaders(true),
@@ -552,10 +562,12 @@ export function useBattleStorySession() {
             ...(customProviderPayload ? { customProvider: customProviderPayload } : {}),
           }),
         });
+        responseStatus = response.status;
 
         if (response.status === 429) {
           const retryAfterMs = readRetryAfterMs(response, cooldownMs);
           startCooldown(retryAfterMs);
+          cooldownHandled = true;
           const { payload } = await readJsonOrTextFromResponse(response);
           throw new Error(
             resolveApiErrorMessage({
@@ -566,6 +578,14 @@ export function useBattleStorySession() {
         }
 
         if (!response.ok) {
+          startCooldown(
+            resolveBattleStoryRequestCooldownMs({
+              fullCooldownMs: cooldownMs,
+              requestAccepted,
+              status: responseStatus,
+            })
+          );
+          cooldownHandled = true;
           const { payload } = await readJsonOrTextFromResponse(response);
           const serverMessage = resolveApiErrorMessage({
             payload,
@@ -581,6 +601,8 @@ export function useBattleStorySession() {
               : serverMessage
           );
         }
+
+        requestAccepted = true;
 
         let sessionMeta: Record<string, unknown> | null = null;
         let digestPayload: Record<string, unknown> | null = null;
@@ -700,6 +722,7 @@ export function useBattleStorySession() {
         });
 
         startCooldown();
+        cooldownHandled = true;
 
         return {
           markdown,
@@ -711,6 +734,19 @@ export function useBattleStorySession() {
           nextWorkingCombatants: updateResult.workingCombatants,
           ...(updateResult.warning ? { warning: updateResult.warning } : {}),
         };
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message.trim() : '';
+        const isLocalCooldownError = Boolean(errorMessage) && errorMessage.includes('冷却中');
+        if (!isLocalCooldownError && !cooldownHandled) {
+          startCooldown(
+            resolveBattleStoryRequestCooldownMs({
+              fullCooldownMs: cooldownMs,
+              requestAccepted,
+              status: responseStatus,
+            })
+          );
+        }
+        throw error;
       } finally {
         setIsGenerating(false);
         setGeneratingAction(null);

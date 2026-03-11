@@ -3,6 +3,7 @@ import { NextRequest } from 'next/server';
 
 import { buildBattleStoryPromptContext } from '@/lib/ai-session/battle-story/context';
 import { buildBattleStoryDeterministicDigest } from '@/lib/ai-session/battle-story/digest';
+import { validateBattleStoryGenerateNextInput } from '@/lib/ai-session/battle-story/generate-next';
 import { buildBattleStoryInternalGuidance } from '@/lib/ai-session/battle-story/prompts';
 import { resolveAiSessionProvider, parseAiSessionCustomProvider } from '@/lib/ai-session/provider';
 import { acquireAiSessionSoftRateLimit } from '@/lib/ai-session/rate-limit';
@@ -154,21 +155,6 @@ const buildUpstreamRequestBody = (payload: z.infer<typeof BattleStoryRequestSche
   return requestBody;
 };
 
-const resolveChapterIndex = (payload: z.infer<typeof BattleStoryRequestSchema>): number => {
-  if (typeof payload.chapterIndex === 'number') return payload.chapterIndex;
-
-  const recent = payload.chapterContext.recentChapters;
-  const latestIndex = recent.reduce((max, item) => Math.max(max, item.index), 0);
-  const sourceIndex = payload.sourceChapterId
-    ? (recent.find((item) => item.id === payload.sourceChapterId)?.index ?? null)
-    : null;
-
-  if (payload.action === 'start') return 1;
-  if (payload.action === 'rewrite') return (sourceIndex ?? latestIndex) || 1;
-  if (payload.action === 'branch') return (sourceIndex ?? latestIndex) + 1;
-  return latestIndex + 1;
-};
-
 export default async function handler(req: NextRequest): Promise<Response> {
   if (req.method !== 'POST') {
     return json({ error: 'Method not allowed' }, { status: 405 });
@@ -191,7 +177,20 @@ export default async function handler(req: NextRequest): Promise<Response> {
   }
 
   const payload = parsed.data;
-  const chapterIndex = resolveChapterIndex(payload);
+  const validation = validateBattleStoryGenerateNextInput({
+    action: payload.action,
+    sourceChapterId: payload.sourceChapterId,
+    chapterIndex: payload.chapterIndex,
+    recentChapters: payload.chapterContext.recentChapters.map((chapter) => ({
+      id: chapter.id,
+      index: chapter.index,
+    })),
+  });
+  if (!validation.ok) {
+    return json({ error: validation.error }, { status: 400 });
+  }
+
+  const chapterIndex = validation.chapterIndex;
   const promptContext = buildBattleStoryPromptContext({
     source: {
       mode: payload.seed.mode,

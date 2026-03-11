@@ -25,6 +25,9 @@ const normalizeText = (value: unknown): string => {
   return typeof value === 'string' ? value.trim() : '';
 };
 
+export const BATTLE_STORY_FAILURE_COOLDOWN_MS = 3_000;
+export const BATTLE_STORY_SUMMARY_REFRESH_MIN_INTERVAL_MS = 30_000;
+
 const isCombatantData = (combatant: Combatant): combatant is CombatantData => {
   return 'data' in combatant;
 };
@@ -65,6 +68,32 @@ export type BattleStorySummaryRefreshPlan = {
   previousSummary?: string;
   coveredUntilChapterIndex: number;
   digests: Array<BattleStoryDeterministicDigest & { chapterId: string; index: number }>;
+  trigger:
+    | 'pending-chapter-threshold'
+    | 'pending-digest-char-threshold'
+    | 'initial-summary-chapter-threshold';
+  pendingDigestChars: number;
+};
+
+const estimateBattleStoryDigestChars = (digest: BattleStoryDeterministicDigest): number => {
+  const impactChars = Array.isArray(digest.impactDigest)
+    ? digest.impactDigest.reduce((total, item) => {
+        return (
+          total +
+          normalizeText(item.characterName).length +
+          normalizeText(item.impact).length +
+          normalizeText(item.currentStateSummary).length
+        );
+      }, 0)
+    : 0;
+
+  return (
+    normalizeText(digest.chapterTitle).length +
+    normalizeText(digest.winner).length +
+    normalizeText(digest.officialConclusion).length +
+    normalizeText(digest.bodyExcerpt).length +
+    impactChars
+  );
 };
 
 export const buildBattleStorySessionSeedSnapshot = (input: {
@@ -190,22 +219,40 @@ export const resolveBattleStorySummaryRefreshPlan = (input: {
   session: BattleStorySessionRecord;
   chapters: BattleStoryChapterRecord[];
   minPendingChapters?: number;
+  minPendingDigestChars?: number;
+  firstSummaryChapterThreshold?: number;
   maxDigestCount?: number;
 }): BattleStorySummaryRefreshPlan | null => {
   const minPendingChapters = Math.max(1, Math.floor(input.minPendingChapters ?? 3));
+  const minPendingDigestChars = Math.max(1, Math.floor(input.minPendingDigestChars ?? 1800));
+  const firstSummaryChapterThreshold = Math.max(1, Math.floor(input.firstSummaryChapterThreshold ?? 6));
   const maxDigestCount = Math.max(1, Math.floor(input.maxDigestCount ?? 6));
   const activeChapters = input.chapters
     .filter((chapter) => chapter.status !== 'superseded')
     .sort((left, right) => left.index - right.index);
 
-  if (activeChapters.length < minPendingChapters) {
-    return null;
-  }
-
   const coveredUntil = input.session.summaryMeta?.coveredUntilChapterIndex ?? 0;
   const pending = activeChapters.filter((chapter) => chapter.index > coveredUntil);
 
-  if (pending.length < minPendingChapters) {
+  if (pending.length === 0) {
+    return null;
+  }
+
+  const pendingDigestChars = pending.reduce((total, chapter) => {
+    return total + estimateBattleStoryDigestChars(chapter.deterministicDigest);
+  }, 0);
+
+  const hasSessionSummary = Boolean(normalizeText(input.session.sessionSummary));
+  const trigger =
+    pending.length >= minPendingChapters
+      ? 'pending-chapter-threshold'
+      : pendingDigestChars >= minPendingDigestChars
+        ? 'pending-digest-char-threshold'
+        : (!hasSessionSummary && activeChapters.length >= firstSummaryChapterThreshold)
+          ? 'initial-summary-chapter-threshold'
+          : null;
+
+  if (!trigger) {
     return null;
   }
 
@@ -221,7 +268,26 @@ export const resolveBattleStorySummaryRefreshPlan = (input: {
     ...(input.session.sessionSummary ? { previousSummary: input.session.sessionSummary } : {}),
     coveredUntilChapterIndex: digestItems[digestItems.length - 1]!.index,
     digests: digestItems,
+    trigger,
+    pendingDigestChars,
   };
+};
+
+export const resolveBattleStoryRequestCooldownMs = (input: {
+  fullCooldownMs: number;
+  retryAfterMs?: number | null;
+  requestAccepted: boolean;
+  status?: number | null;
+}): number => {
+  if (input.status === 429) {
+    return Math.max(1, Math.floor(input.retryAfterMs ?? input.fullCooldownMs));
+  }
+
+  if (input.requestAccepted) {
+    return Math.max(1, Math.floor(input.fullCooldownMs));
+  }
+
+  return BATTLE_STORY_FAILURE_COOLDOWN_MS;
 };
 
 export const buildBattleStoryExportMarkdown = (

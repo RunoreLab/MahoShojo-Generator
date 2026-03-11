@@ -1,11 +1,13 @@
 import { describe, expect, test } from 'bun:test';
 
 import {
+  BATTLE_STORY_FAILURE_COOLDOWN_MS,
   buildBattleStoryExportMarkdown,
   buildBattleStorySessionSeedSnapshot,
   cloneBattleStoryActiveChaptersForNewSession,
   mergeUpdatedCombatantsIntoWorkingCombatants,
   remapBattleStorySummaryMeta,
+  resolveBattleStoryRequestCooldownMs,
   resolveBattleStorySummaryRefreshPlan,
 } from '@/components/arena/utils/battleStorySession';
 import { createBattleStoryChapterRecord, createBattleStorySessionRecord } from '@/lib/ai-session/battle-story/storage';
@@ -152,6 +154,118 @@ describe('battle story session utils', () => {
     expect(plan).not.toBeNull();
     expect(plan?.digests.map((item) => item.index)).toEqual([2, 3, 4]);
     expect(plan?.previousSummary).toBe('旧摘要');
+    expect(plan?.trigger).toBe('pending-chapter-threshold');
+  });
+
+  test('resolveBattleStorySummaryRefreshPlan 会在 digest 文本累计较长时提前触发摘要刷新', () => {
+    const session = createBattleStorySessionRecord({
+      title: '连续战报',
+      source: {
+        mode: 'classic',
+        language: 'zh-CN',
+        storyLength: 'standard',
+        generationMode: 'stream',
+      },
+      seed: {
+        combatants: [{ name: '白百合' }],
+        settings: {
+          readArenaHistory: true,
+          writeArenaHistory: true,
+          readCurrentState: true,
+          writeCurrentState: true,
+          readNarrativeHistory: false,
+          writeNarrativeHistory: false,
+        },
+      },
+      workingCombatants: [{ name: '白百合' }],
+      sessionSummary: '旧摘要',
+      summaryMeta: {
+        coveredUntilChapterIndex: 1,
+        coveredChapterIds: ['chapter-1'],
+        refreshedAt: 1,
+        mode: 'ai',
+      },
+    });
+
+    const chapters = [1, 2, 3].map((index) =>
+      createBattleStoryChapterRecord({
+        sessionId: session.id,
+        index,
+        action: index === 1 ? 'start' : 'continue',
+        title: `第${index}章`,
+        markdown: `# 第${index}章\n\n正文`,
+        reportJson: {},
+        deterministicDigest: {
+          chapterTitle: `第${index}章`,
+          bodyExcerpt: '摘要'.repeat(index === 1 ? 1 : 600),
+        },
+      })
+    );
+
+    chapters[0]!.id = 'chapter-1';
+
+    const plan = resolveBattleStorySummaryRefreshPlan({
+      session,
+      chapters,
+      minPendingChapters: 3,
+      minPendingDigestChars: 1800,
+    });
+
+    expect(plan).not.toBeNull();
+    expect(plan?.digests.map((item) => item.index)).toEqual([2, 3]);
+    expect(plan?.trigger).toBe('pending-digest-char-threshold');
+    expect((plan?.pendingDigestChars ?? 0) >= 1800).toBe(true);
+  });
+
+  test('resolveBattleStorySummaryRefreshPlan 会在首次达到章节阈值且暂无摘要时触发', () => {
+    const session = createBattleStorySessionRecord({
+      title: '连续战报',
+      source: {
+        mode: 'classic',
+        language: 'zh-CN',
+        storyLength: 'standard',
+        generationMode: 'stream',
+      },
+      seed: {
+        combatants: [{ name: '白百合' }],
+        settings: {
+          readArenaHistory: true,
+          writeArenaHistory: true,
+          readCurrentState: true,
+          writeCurrentState: true,
+          readNarrativeHistory: false,
+          writeNarrativeHistory: false,
+        },
+      },
+      workingCombatants: [{ name: '白百合' }],
+    });
+
+    const chapters = Array.from({ length: 6 }, (_, index) =>
+      createBattleStoryChapterRecord({
+        sessionId: session.id,
+        index: index + 1,
+        action: index === 0 ? 'start' : 'continue',
+        title: `第${index + 1}章`,
+        markdown: `# 第${index + 1}章\n\n正文`,
+        reportJson: {},
+        deterministicDigest: {
+          chapterTitle: `第${index + 1}章`,
+          bodyExcerpt: '短摘要',
+        },
+      })
+    );
+
+    const plan = resolveBattleStorySummaryRefreshPlan({
+      session,
+      chapters,
+      minPendingChapters: 10,
+      minPendingDigestChars: 9999,
+      firstSummaryChapterThreshold: 6,
+    });
+
+    expect(plan).not.toBeNull();
+    expect(plan?.digests).toHaveLength(6);
+    expect(plan?.trigger).toBe('initial-summary-chapter-threshold');
   });
 
   test('cloneBattleStoryActiveChaptersForNewSession 与 remapBattleStorySummaryMeta 会同步重映射章节 ID', () => {
@@ -263,5 +377,32 @@ describe('battle story session utils', () => {
     expect(exported).toContain('# 导出测试');
     expect(exported).toContain('## 会话摘要');
     expect(exported).toContain('这里是正文');
+  });
+
+  test('resolveBattleStoryRequestCooldownMs 会区分成功级、429 与早失败冷却', () => {
+    expect(
+      resolveBattleStoryRequestCooldownMs({
+        fullCooldownMs: 120_000,
+        requestAccepted: false,
+        status: 400,
+      })
+    ).toBe(BATTLE_STORY_FAILURE_COOLDOWN_MS);
+
+    expect(
+      resolveBattleStoryRequestCooldownMs({
+        fullCooldownMs: 120_000,
+        requestAccepted: true,
+        status: 500,
+      })
+    ).toBe(120_000);
+
+    expect(
+      resolveBattleStoryRequestCooldownMs({
+        fullCooldownMs: 120_000,
+        requestAccepted: false,
+        status: 429,
+        retryAfterMs: 9_000,
+      })
+    ).toBe(9_000);
   });
 });
