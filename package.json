@@ -16,8 +16,6 @@
         "db:generate": "drizzle-kit generate --config drizzle.config.ts",
         "backfill:user-auth-links:dry": "bun scripts/backfill-user-auth-links.ts --dry-run true --batch 200",
         "backfill:user-auth-links:write": "bun scripts/backfill-user-auth-links.ts --write --batch 200",
-        "snapshot:user-analytics:daily": "bun scripts/snapshot-admin-user-analytics-daily.ts",
-        "snapshot:user-analytics:backfill": "bun scripts/snapshot-admin-user-analytics-daily.ts --backfill-days 7 --skip-current",
         "db:migrate:local:prod": "node scripts/check-wrangler-d1-config.mjs && node scripts/d1-migrate-safe.mjs --database DB --local --env production",
         "db:migrate:remote:prod": "node scripts/check-wrangler-d1-config.mjs && node scripts/d1-migrate-safe.mjs --database DB --remote --env production",
         "db:migrate:local:preview": "node scripts/check-wrangler-d1-config.mjs && node scripts/d1-migrate-safe.mjs --database DB --local --env preview",
