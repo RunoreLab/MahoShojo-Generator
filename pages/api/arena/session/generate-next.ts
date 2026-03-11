@@ -88,10 +88,14 @@ const BattleStoryRequestSchema = z.object({
     language: z.string().default('zh-CN'),
     settings: z.object({
       readArenaHistory: z.boolean(),
+      readArenaHistoryLimit: z.number().int().min(1).max(999).optional(),
+      isArenaHistoryUnlimited: z.boolean().optional(),
       writeArenaHistory: z.boolean(),
       readCurrentState: z.boolean(),
       writeCurrentState: z.boolean(),
       readNarrativeHistory: z.boolean(),
+      readNarrativeHistoryLimit: z.number().int().min(1).max(999).optional(),
+      isNarrativeHistoryUnlimited: z.boolean().optional(),
       writeNarrativeHistory: z.boolean(),
     }),
   }),
@@ -136,11 +140,37 @@ const encodeSseEvent = (encoder: TextEncoder, event: string, payload: unknown): 
   return encoder.encode(`event: ${event}\ndata: ${JSON.stringify(payload ?? null)}\n\n`);
 };
 
+const resolveOptionalReadLimit = (input: {
+  enabled: boolean;
+  limit?: number;
+  unlimited?: boolean;
+  fallback: number;
+}): number | null | undefined => {
+  if (!input.enabled) return undefined;
+  if (input.unlimited === true) return null;
+  if (typeof input.limit === 'number' && Number.isFinite(input.limit)) {
+    return Math.max(1, Math.floor(input.limit));
+  }
+  return input.fallback;
+};
+
 export const buildUpstreamRequestBody = (
   payload: z.infer<typeof BattleStoryRequestSchema>,
   internalGuidance: string,
   customProvider: AiSessionCustomProvider | null
 ): Record<string, unknown> => {
+  const arenaHistoryReadLimit = resolveOptionalReadLimit({
+    enabled: payload.seed.settings.readArenaHistory,
+    limit: payload.seed.settings.readArenaHistoryLimit,
+    unlimited: payload.seed.settings.isArenaHistoryUnlimited,
+    fallback: 3,
+  });
+  const narrativeHistoryReadLimit = resolveOptionalReadLimit({
+    enabled: payload.seed.settings.readNarrativeHistory,
+    limit: payload.seed.settings.readNarrativeHistoryLimit,
+    unlimited: payload.seed.settings.isNarrativeHistoryUnlimited,
+    fallback: 10,
+  });
   const requestBody: Record<string, unknown> = {
     combatants: payload.chapterContext.workingCombatants,
     mode: payload.seed.mode,
@@ -150,10 +180,12 @@ export const buildUpstreamRequestBody = (
     auxScenarios: payload.seed.auxScenarios,
     language: payload.seed.language,
     readArenaHistory: payload.seed.settings.readArenaHistory,
+    arenaHistoryReadLimit,
     writeArenaHistory: payload.seed.settings.writeArenaHistory,
     readCurrentState: payload.seed.settings.readCurrentState,
     writeCurrentState: payload.seed.settings.writeCurrentState,
     readNarrativeHistory: payload.seed.settings.readNarrativeHistory,
+    narrativeHistoryReadLimit,
     writeNarrativeHistory: payload.seed.settings.writeNarrativeHistory,
     storyLength: payload.seed.storyLength,
     questionnaires: payload.seed.questionnaires,

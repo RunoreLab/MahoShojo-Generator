@@ -83,6 +83,10 @@ describe('battle story session utils', () => {
     expect(snapshot.seed.scenario).toEqual({ title: '废都决战' });
     expect(snapshot.seed.auxScenarios).toHaveLength(1);
     expect(snapshot.seed.questionnaires?.[0]?.loreMarkdown).toBe('角色关系与世界观');
+    expect(snapshot.seed.settings.readArenaHistoryLimit).toBe(3);
+    expect(snapshot.seed.settings.isArenaHistoryUnlimited).toBe(false);
+    expect(snapshot.seed.settings.readNarrativeHistoryLimit).toBe(10);
+    expect(snapshot.seed.settings.isNarrativeHistoryUnlimited).toBe(false);
     expect(snapshot.workingCombatants[0]?.characterGuidance).toBe('保护同伴');
   });
 
@@ -269,6 +273,65 @@ describe('battle story session utils', () => {
     expect(plan).not.toBeNull();
     expect(plan?.digests).toHaveLength(6);
     expect(plan?.trigger).toBe('initial-summary-chapter-threshold');
+  });
+
+  test('resolveBattleStorySummaryRefreshPlan 只推进连续已发送到摘要的章节覆盖范围', () => {
+    const session = createBattleStorySessionRecord({
+      title: '连续战报',
+      source: {
+        mode: 'classic',
+        language: 'zh-CN',
+        storyLength: 'standard',
+        generationMode: 'stream',
+      },
+      seed: {
+        combatants: [{ name: '白百合' }],
+        settings: {
+          readArenaHistory: true,
+          writeArenaHistory: true,
+          readCurrentState: true,
+          writeCurrentState: true,
+          readNarrativeHistory: false,
+          writeNarrativeHistory: false,
+        },
+      },
+      workingCombatants: [{ name: '白百合' }],
+      sessionSummary: '旧摘要',
+      summaryMeta: {
+        coveredUntilChapterIndex: 1,
+        coveredChapterIds: ['chapter-1'],
+        refreshedAt: 1,
+        mode: 'ai',
+      },
+    });
+
+    const chapters = [1, 2, 3, 4, 5].map((index) =>
+      createBattleStoryChapterRecord({
+        sessionId: session.id,
+        index,
+        action: index === 1 ? 'start' : 'continue',
+        title: `第${index}章`,
+        markdown: `# 第${index}章\n\n正文`,
+        reportJson: {},
+        deterministicDigest: {
+          chapterTitle: `第${index}章`,
+          bodyExcerpt: `摘要 ${index}`,
+        },
+      })
+    );
+
+    chapters[0]!.id = 'chapter-1';
+
+    const plan = resolveBattleStorySummaryRefreshPlan({
+      session,
+      chapters,
+      minPendingChapters: 2,
+      maxDigestCount: 2,
+    });
+
+    expect(plan).not.toBeNull();
+    expect(plan?.digests.map((item) => item.index)).toEqual([2, 3]);
+    expect(plan?.coveredUntilChapterIndex).toBe(3);
   });
 
   test('cloneBattleStoryActiveChaptersForNewSession 与 remapBattleStorySummaryMeta 会同步重映射章节 ID', () => {

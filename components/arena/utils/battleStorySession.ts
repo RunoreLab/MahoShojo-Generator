@@ -241,10 +241,14 @@ export const buildBattleStorySessionSeedSnapshot = (input: {
       })),
       settings: {
         readArenaHistory: input.settings.readArenaHistory,
+        readArenaHistoryLimit: input.settings.readArenaHistoryLimit,
+        isArenaHistoryUnlimited: input.settings.isArenaHistoryUnlimited,
         writeArenaHistory: input.settings.writeArenaHistory,
         readCurrentState: input.settings.readCurrentState,
         writeCurrentState: input.settings.writeCurrentState,
         readNarrativeHistory: input.settings.readNarrativeHistory,
+        readNarrativeHistoryLimit: input.settings.readNarrativeHistoryLimit,
+        isNarrativeHistoryUnlimited: input.settings.isNarrativeHistoryUnlimited,
         writeNarrativeHistory: input.settings.writeNarrativeHistory,
       },
     },
@@ -402,7 +406,7 @@ export const resolveBattleStorySummaryRefreshPlan = (input: {
     return null;
   }
 
-  const digestItems = pending.slice(-maxDigestCount).map((chapter) => ({
+  const digestItems = pending.slice(0, maxDigestCount).map((chapter) => ({
     chapterId: chapter.id,
     index: chapter.index,
     ...chapter.deterministicDigest,

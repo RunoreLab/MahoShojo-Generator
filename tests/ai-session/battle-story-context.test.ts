@@ -101,4 +101,50 @@ describe('battle story prompt context', () => {
     expect(result.recentWindow[0]?.truncated).toBe(true);
     expect(result.sections.find((section) => section.key === 'recent-window')?.text).toContain('[本章内容已按上下文预算截断]');
   });
+
+  test('会按读取设置过滤种子层与当前状态层中不该暴露的字段', () => {
+    const result = buildBattleStoryPromptContext({
+      seed: {
+        combatants: [
+          {
+            data: {
+              name: '晓雾',
+              arena_history: {
+                entries: [{ id: 1, title: '旧战报' }, { id: 2, title: '新战报' }],
+              },
+              current_state: { mood: '紧张' },
+            },
+          },
+        ],
+        settings: {
+          readArenaHistory: true,
+          readArenaHistoryLimit: 1,
+          isArenaHistoryUnlimited: false,
+          writeArenaHistory: false,
+          readCurrentState: false,
+          writeCurrentState: true,
+          readNarrativeHistory: false,
+          readNarrativeHistoryLimit: 10,
+          isNarrativeHistoryUnlimited: false,
+          writeNarrativeHistory: false,
+        },
+      },
+      workingCombatants: [
+        {
+          data: {
+            name: '晓雾',
+            arena_history: {
+              entries: [{ id: 1, title: '旧战报' }, { id: 2, title: '新战报' }],
+            },
+            current_state: { mood: '紧张' },
+          },
+        },
+      ],
+    });
+
+    expect(result.promptText).toContain('"arena_history"');
+    expect(result.promptText).toContain('"id": 2');
+    expect(result.promptText).not.toContain('"id": 1');
+    expect(result.promptText).not.toContain('"current_state"');
+  });
 });

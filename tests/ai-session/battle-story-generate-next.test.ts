@@ -93,10 +93,14 @@ describe('battle story generate-next validation', () => {
           language: 'zh-CN',
           settings: {
             readArenaHistory: true,
+            readArenaHistoryLimit: 5,
+            isArenaHistoryUnlimited: false,
             writeArenaHistory: true,
             readCurrentState: true,
             writeCurrentState: true,
-            readNarrativeHistory: false,
+            readNarrativeHistory: true,
+            readNarrativeHistoryLimit: 9,
+            isNarrativeHistoryUnlimited: false,
             writeNarrativeHistory: false,
           },
         },
@@ -115,6 +119,8 @@ describe('battle story generate-next validation', () => {
       modelId: 'gemini-2.5-flash',
       apiKey: 'sk-test',
     });
+    expect(body.arenaHistoryReadLimit).toBe(5);
+    expect(body.narrativeHistoryReadLimit).toBe(9);
     expect(body.forceStreamMeta).toBe(true);
   });
 });

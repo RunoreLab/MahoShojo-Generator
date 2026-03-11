@@ -2,12 +2,14 @@ import type {
   BattleStoryPromptChapterInput,
   BattleStoryPromptContextInput,
   BattleStoryPromptContextResult,
+  BattleStorySessionSettings,
   BattleStoryPromptWindowItem,
 } from '@/lib/ai-session/battle-story/types';
 
 const DEFAULT_MAX_RECENT_CHAPTERS = 2;
 const DEFAULT_MAX_FULL_CHAPTER_CHARS = 6000;
 const DEFAULT_MAX_USER_GUIDANCE_CHARS = 800;
+const DEFAULT_ARENA_HISTORY_LIMIT = 3;
 
 const normalizeText = (value: unknown): string => {
   return typeof value === 'string' ? value.trim() : '';
@@ -27,6 +29,59 @@ const safeJsonBlock = (value: unknown): string => {
   } catch {
     return '"[unserializable]"';
   }
+};
+
+const isRecord = (value: unknown): value is Record<string, unknown> => {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+};
+
+const resolveArenaHistoryReadLimit = (settings: BattleStorySessionSettings | null | undefined): number | null => {
+  if (!settings?.readArenaHistory) return 0;
+  if (settings.isArenaHistoryUnlimited === true) return null;
+  if (typeof settings.readArenaHistoryLimit === 'number' && Number.isFinite(settings.readArenaHistoryLimit)) {
+    return Math.max(1, Math.floor(settings.readArenaHistoryLimit));
+  }
+  return DEFAULT_ARENA_HISTORY_LIMIT;
+};
+
+const trimArenaHistoryForPrompt = (
+  history: unknown,
+  settings: BattleStorySessionSettings | null | undefined
+): unknown => {
+  const limit = resolveArenaHistoryReadLimit(settings);
+  if (limit === null || limit <= 0) return history;
+  if (!isRecord(history) || !Array.isArray(history.entries) || history.entries.length <= limit) {
+    return history;
+  }
+
+  return {
+    ...history,
+    entries: history.entries.slice(-limit),
+  };
+};
+
+const sanitizeCombatantPayloadForPrompt = (
+  value: unknown,
+  settings: BattleStorySessionSettings | null | undefined
+): unknown => {
+  if (!isRecord(value)) return value;
+
+  const clone: Record<string, unknown> = { ...value };
+  if ('data' in clone) {
+    clone.data = sanitizeCombatantPayloadForPrompt(clone.data, settings);
+  }
+
+  if (!settings?.readArenaHistory) {
+    delete clone.arena_history;
+  } else if ('arena_history' in clone) {
+    clone.arena_history = trimArenaHistoryForPrompt(clone.arena_history, settings);
+  }
+
+  if (!settings?.readCurrentState) {
+    delete clone.current_state;
+  }
+
+  return clone;
 };
 
 const buildDigestText = (chapter: BattleStoryPromptChapterInput): string => {
@@ -100,6 +155,18 @@ export const buildBattleStoryPromptContext = (
   input: BattleStoryPromptContextInput
 ): BattleStoryPromptContextResult => {
   const sections: BattleStoryPromptContextResult['sections'] = [];
+  const settings = input.seed?.settings;
+  const sanitizedSeed = input.seed
+    ? {
+        ...input.seed,
+        combatants: Array.isArray(input.seed.combatants)
+          ? input.seed.combatants.map((combatant) => sanitizeCombatantPayloadForPrompt(combatant, settings))
+          : [],
+      }
+    : input.seed;
+  const sanitizedWorkingCombatants = Array.isArray(input.workingCombatants)
+    ? input.workingCombatants.map((combatant) => sanitizeCombatantPayloadForPrompt(combatant, settings))
+    : [];
 
   if (input.source || input.seed) {
     sections.push({
@@ -107,16 +174,16 @@ export const buildBattleStoryPromptContext = (
       title: '固定种子层',
       text: safeJsonBlock({
         source: input.source ?? null,
-        seed: input.seed ?? null,
+        seed: sanitizedSeed ?? null,
       }),
     });
   }
 
-  if (Array.isArray(input.workingCombatants) && input.workingCombatants.length > 0) {
+  if (sanitizedWorkingCombatants.length > 0) {
     sections.push({
       key: 'current-state',
       title: '当前角色状态层',
-      text: safeJsonBlock(input.workingCombatants),
+      text: safeJsonBlock(sanitizedWorkingCombatants),
     });
   }
 

@@ -11,10 +11,14 @@ export type BattleStoryChapterStatus = 'active' | 'superseded';
 
 export type BattleStorySessionSettings = {
   readArenaHistory: boolean;
+  readArenaHistoryLimit?: number;
+  isArenaHistoryUnlimited?: boolean;
   writeArenaHistory: boolean;
   readCurrentState: boolean;
   writeCurrentState: boolean;
   readNarrativeHistory: boolean;
+  readNarrativeHistoryLimit?: number;
+  isNarrativeHistoryUnlimited?: boolean;
   writeNarrativeHistory: boolean;
 };
 
