@@ -160,6 +160,7 @@ export function BattleStorySessionPanel(props: {
     streamCardSnapshot,
     streamChapterIndex,
     isRefreshingSummary,
+    isDeletingSession,
     isCooldown,
     remainingTime,
     canStartFromArena,
@@ -169,6 +170,7 @@ export function BattleStorySessionPanel(props: {
     handleBranchSession,
     handleRewriteLastChapter,
     handleSelectSession,
+    handleDeleteSession,
     handleExportMarkdown,
   } = useBattleStorySession();
 
@@ -209,7 +211,7 @@ export function BattleStorySessionPanel(props: {
             <button
               type="button"
               onClick={() => void handleStartSession()}
-              disabled={isGenerating || isCooldown || !canStartFromArena}
+              disabled={isGenerating || isDeletingSession || isCooldown || !canStartFromArena}
               className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
               title={
                 isCooldown
@@ -224,7 +226,7 @@ export function BattleStorySessionPanel(props: {
             <button
               type="button"
               onClick={() => void handleContinueSession()}
-              disabled={isGenerating || isCooldown || !activeSession || !latestActiveChapter}
+              disabled={isGenerating || isDeletingSession || isCooldown || !activeSession || !latestActiveChapter}
               className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
               title={
                 isCooldown
@@ -239,7 +241,7 @@ export function BattleStorySessionPanel(props: {
             <button
               type="button"
               onClick={() => void handleBranchSession()}
-              disabled={isGenerating || isCooldown || !activeSession || !latestActiveChapter}
+              disabled={isGenerating || isDeletingSession || isCooldown || !activeSession || !latestActiveChapter}
               className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
               title={
                 isCooldown
@@ -254,7 +256,7 @@ export function BattleStorySessionPanel(props: {
             <button
               type="button"
               onClick={() => void handleRewriteLastChapter()}
-              disabled={isGenerating || isCooldown || !activeSession || !latestActiveChapter}
+              disabled={isGenerating || isDeletingSession || isCooldown || !activeSession || !latestActiveChapter}
               className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
               title={
                 isCooldown
@@ -269,10 +271,19 @@ export function BattleStorySessionPanel(props: {
             <button
               type="button"
               onClick={handleExportMarkdown}
-              disabled={!activeSession || activeChapterCount === 0}
+              disabled={!activeSession || activeChapterCount === 0 || isDeletingSession}
               className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
             >
               导出 Markdown
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleDeleteSession(activeSession?.id)}
+              disabled={isGenerating || isDeletingSession || !activeSession}
+              className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-60"
+              title={activeSession ? '删除当前选中的连续战报会话及其全部章节' : '请先选择一个会话'}
+            >
+              {isDeletingSession ? '正在删除会话...' : '删除当前会话'}
             </button>
           </div>
 
@@ -353,7 +364,7 @@ export function BattleStorySessionPanel(props: {
 
               <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-1">
                 <section className="rounded-2xl border border-gray-200 bg-white p-4">
-                  <div className="mb-3 text-sm font-semibold text-gray-800">最近会话</div>
+                  <div className="mb-3 text-sm font-semibold text-gray-800">本地会话</div>
                   {sessions.length === 0 ? (
                     <div className="text-sm text-gray-500">本地还没有连续战报会话。</div>
                   ) : (

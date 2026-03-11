@@ -194,6 +194,52 @@ export const listBattleStorySessions = async (options?: BattleStorySessionListOp
   return result;
 };
 
+export const deleteBattleStorySession = async (
+  sessionId: string
+): Promise<{ deletedSession: boolean; deletedChapterCount: number }> => {
+  const db = await openAiSessionDb();
+
+  return await new Promise<{ deletedSession: boolean; deletedChapterCount: number }>((resolve, reject) => {
+    const transaction = db.transaction(
+      [AI_SESSION_STORE_NAMES.battleStorySessions, AI_SESSION_STORE_NAMES.battleStoryChapters],
+      'readwrite'
+    );
+    const sessionStore = transaction.objectStore(AI_SESSION_STORE_NAMES.battleStorySessions);
+    const chapterStore = transaction.objectStore(AI_SESSION_STORE_NAMES.battleStoryChapters);
+    const chapterIndex = chapterStore.index('by_session_index');
+    const chapterCursorRequest = chapterIndex.openCursor(buildSessionRange(sessionId), 'next');
+
+    let deletedChapterCount = 0;
+    let deletedSession = false;
+
+    transaction.oncomplete = () => resolve({ deletedSession, deletedChapterCount });
+    transaction.onabort = () => reject(transaction.error ?? new Error('删除 battle story session 失败'));
+    transaction.onerror = () => reject(transaction.error ?? new Error('删除 battle story session 失败'));
+
+    chapterCursorRequest.onsuccess = () => {
+      const cursor = chapterCursorRequest.result;
+      if (!cursor) {
+        const deleteSessionRequest = sessionStore.delete(sessionId);
+        deleteSessionRequest.onsuccess = () => {
+          deletedSession = true;
+        };
+        deleteSessionRequest.onerror = () => {
+          reject(deleteSessionRequest.error ?? new Error('删除 battle story session 失败'));
+        };
+        return;
+      }
+
+      chapterStore.delete(cursor.primaryKey);
+      deletedChapterCount += 1;
+      cursor.continue();
+    };
+
+    chapterCursorRequest.onerror = () => {
+      reject(chapterCursorRequest.error ?? new Error('删除 battle story chapter 失败'));
+    };
+  });
+};
+
 export const putBattleStoryChapter = async (chapter: BattleStoryChapterRecord): Promise<void> => {
   const db = await openAiSessionDb();
   const transaction = db.transaction([AI_SESSION_STORE_NAMES.battleStoryChapters], 'readwrite');

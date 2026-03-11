@@ -6,6 +6,7 @@ import { buildCustomProviderPayload, isUsingUserProvidedKey } from '@/lib/ai/cus
 import {
   createBattleStoryChapterRecord,
   createBattleStorySessionRecord,
+  deleteBattleStorySession,
   getBattleStorySession,
   listBattleStoryChaptersBySession,
   listBattleStorySessions,
@@ -107,7 +108,7 @@ const buildProviderSource = (
     ...currentSource,
     providerMode: customProviderPayload.providerId === 'system' ? 'system' : 'custom',
     providerId: customProviderPayload.providerId,
-    ...(customProviderPayload.modelId ? { modelId: customProviderPayload.modelId } : {}),
+    modelId: customProviderPayload.modelId ?? undefined,
   };
 };
 
@@ -184,6 +185,7 @@ export function useBattleStorySession() {
   const [streamCardSnapshot, setStreamCardSnapshot] = useState<BattleStoryChapterCardSnapshot | null>(null);
   const [streamChapterIndex, setStreamChapterIndex] = useState<number | null>(null);
   const [isRefreshingSummary, setIsRefreshingSummary] = useState(false);
+  const [isDeletingSession, setIsDeletingSession] = useState(false);
 
   const activeSessionRef = useRef<BattleStorySessionRecord | null>(null);
   const chaptersRef = useRef<BattleStoryChapterRecord[]>([]);
@@ -274,7 +276,7 @@ export function useBattleStorySession() {
 
   const refreshSessionList = useCallback(async (): Promise<BattleStorySessionRecord[]> => {
     const nextSessions = await listBattleStorySessions({
-      limit: 12,
+      limit: 100,
       direction: 'prev',
     });
     setSessions(nextSessions);
@@ -1195,6 +1197,51 @@ export function useBattleStorySession() {
     [loadSession]
   );
 
+  const handleDeleteSession = useCallback(
+    async (sessionId?: string) => {
+      const targetId =
+        typeof sessionId === 'string' && sessionId.trim()
+          ? sessionId.trim()
+          : activeSessionRef.current?.id ?? null;
+      if (!targetId) {
+        setActionError('当前没有可删除的连续战报会话。');
+        return;
+      }
+
+      const targetSession =
+        sessions.find((session) => session.id === targetId) ??
+        (activeSessionRef.current?.id === targetId ? activeSessionRef.current : null);
+      const targetTitle = targetSession?.title?.trim() || '未命名连续战报';
+      if (typeof window !== 'undefined') {
+        const confirmed = window.confirm(
+          `确定删除《${targetTitle}》吗？这会一并删除该会话下的全部章节，且无法恢复。`
+        );
+        if (!confirmed) return;
+      }
+
+      setActionError(null);
+      setNotice(null);
+      setIsDeletingSession(true);
+
+      try {
+        await deleteBattleStorySession(targetId);
+        delete summaryRetryAtRef.current[targetId];
+
+        const nextSessions = await refreshSessionList();
+        if (activeSessionRef.current?.id === targetId) {
+          await loadSession(nextSessions[0]?.id ?? null);
+        }
+
+        setNotice(`已删除连续战报会话《${targetTitle}》。`);
+      } catch (error) {
+        setActionError(normalizeErrorMessage(error, '删除连续战报会话失败。'));
+      } finally {
+        setIsDeletingSession(false);
+      }
+    },
+    [loadSession, refreshSessionList, sessions]
+  );
+
   const handleExportMarkdown = useCallback(() => {
     const sessionRecord = activeSessionRef.current;
     const chapterRecords = chaptersRef.current;
@@ -1233,6 +1280,7 @@ export function useBattleStorySession() {
     streamCardSnapshot,
     streamChapterIndex,
     isRefreshingSummary,
+    isDeletingSession,
     isCooldown,
     remainingTime,
     canStartFromArena: arenaStartCheck.canStart,
@@ -1242,6 +1290,7 @@ export function useBattleStorySession() {
     handleBranchSession,
     handleRewriteLastChapter,
     handleSelectSession,
+    handleDeleteSession,
     handleExportMarkdown,
   };
 }
