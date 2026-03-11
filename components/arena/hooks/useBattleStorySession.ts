@@ -178,6 +178,7 @@ export function useBattleStorySession() {
   const [sessions, setSessions] = useState<BattleStorySessionRecord[]>([]);
   const [activeSession, setActiveSession] = useState<BattleStorySessionRecord | null>(null);
   const [chapters, setChapters] = useState<BattleStoryChapterRecord[]>([]);
+  const [pendingStartSession, setPendingStartSession] = useState<BattleStorySessionRecord | null>(null);
   const [selectedChapterId, setSelectedChapterId] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [generatingAction, setGeneratingAction] = useState<BattleStorySessionAction | null>(null);
@@ -223,6 +224,11 @@ export function useBattleStorySession() {
     if (!selectedChapterId) return latestActiveChapter;
     return chapters.find((chapter) => chapter.id === selectedChapterId) ?? latestActiveChapter;
   }, [chapters, latestActiveChapter, selectedChapterId]);
+
+  const displayActiveSession = pendingStartSession ?? activeSession;
+  const displayChapters = pendingStartSession ? [] : chapters;
+  const displayLatestActiveChapter = pendingStartSession ? null : latestActiveChapter;
+  const displaySelectedChapter = pendingStartSession ? null : selectedChapter;
 
   const arenaStartCheck = useMemo(() => {
     const minParticipants = battleMode === 'daily' || battleMode === 'scenario' ? 1 : 2;
@@ -868,6 +874,7 @@ export function useBattleStorySession() {
         workingCombatants: snapshot.workingCombatants,
         lastChapterInputCombatants: snapshot.workingCombatants,
       });
+      setPendingStartSession(sessionDraft);
 
       const generated = await runGeneration({
         sessionId: sessionDraft.id,
@@ -908,12 +915,14 @@ export function useBattleStorySession() {
       await putBattleStoryChapter(chapter);
       await refreshSessionList();
       await loadSession(sessionToSave.id);
+      setPendingStartSession(null);
       if (generated.warning) {
         setNotice(generated.warning);
       }
       void refreshSummaryIfNeeded(sessionToSave, [chapter]);
     } catch (error) {
       setActionError(normalizeErrorMessage(error, '创建连续战报会话失败。'));
+      setPendingStartSession(null);
     }
   }, [
     arenaStartCheck,
@@ -1268,10 +1277,10 @@ export function useBattleStorySession() {
     actionError,
     notice,
     sessions,
-    activeSession,
-    chapters,
-    latestActiveChapter,
-    selectedChapter,
+    activeSession: displayActiveSession,
+    chapters: displayChapters,
+    latestActiveChapter: displayLatestActiveChapter,
+    selectedChapter: displaySelectedChapter,
     selectedChapterId,
     setSelectedChapterId,
     isGenerating,

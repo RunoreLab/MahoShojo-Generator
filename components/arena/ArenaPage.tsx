@@ -149,7 +149,7 @@ export function ArenaPage() {
         <title>魔法少女竞技场 - MahoShojo Generator</title>
         <meta
           name="description"
-          content="上传魔法少女、残兽或通用角色的设定，生成她们之间的战斗或日常故事！"
+          content="选择角色卡，生成角色之间的战斗或日常故事！"
         />
       </Head>
       <div className="magic-background-white">
@@ -181,7 +181,7 @@ export function ArenaPage() {
             <div className="mt-6 grid gap-5 xl:grid-cols-[minmax(320px,420px)_minmax(0,1fr)] 2xl:grid-cols-[minmax(340px,440px)_minmax(0,1fr)] xl:items-start">
               <div className="space-y-4">
                 <CollapsibleSection
-                  title="🎴 预设角色（内置）"
+                  title="🎴 预设角色"
                   description={`已选 ${formatCombatantCount(presetCombatantCount, MAX_COMBATANTS)}`}
                   defaultOpen
                   disabled={isGenerating}
