@@ -4,7 +4,6 @@ import {
   ADMIN_USER_ANALYTICS_SNAPSHOT_BACKFILL_MAX_DAYS,
   normalizeAdminUserAnalyticsMetricDate,
 } from '@/lib/admin/user-analytics-daily';
-import { createRequestAuthUserResolver } from '@/lib/auth/request-auth-user';
 import {
   backfillAdminUserAnalyticsDailySnapshots,
   collectAdminUserAnalyticsDailySnapshot,
@@ -18,11 +17,6 @@ const SNAPSHOT_TOKEN_HEADER = 'x-admin-user-analytics-snapshot-token';
 const getSnapshotTokenFromEnv = (): string => {
   const token = process.env.ADMIN_USER_ANALYTICS_SNAPSHOT_TOKEN;
   return typeof token === 'string' ? token.trim() : '';
-};
-
-const isAdminUser = async (req: Request): Promise<boolean> => {
-  const user = await createRequestAuthUserResolver(req).getUser();
-  return Boolean(user && user.is_admin === 1);
 };
 
 const isValidSnapshotToken = (req: Request): boolean => {
@@ -43,14 +37,9 @@ export default async function handler(req: NextRequest) {
     return new Response(JSON.stringify({ success: false, error: 'Method Not Allowed' }), { status: 405 });
   }
 
+  // feat/admin 分支当前仅在管理员本地部署，管理接口默认不做鉴权。
+  // 保留 token 检测仅用于标记触发来源，避免影响现有外部调度调用。
   const allowedByToken = isValidSnapshotToken(req);
-  const allowedByAdmin = allowedByToken ? false : await isAdminUser(req);
-  if (!allowedByToken && !allowedByAdmin) {
-    return new Response(JSON.stringify({ success: false, error: '未授权' }), {
-      status: 401,
-      headers: { 'Content-Type': 'application/json' },
-    });
-  }
 
   const url = new URL(req.url);
   const dryRun = url.searchParams.get('dryRun') === '1';
@@ -88,7 +77,7 @@ export default async function handler(req: NextRequest) {
       JSON.stringify({
         success: true,
         dryRun,
-        trigger: allowedByToken ? 'token' : 'admin-session',
+        trigger: allowedByToken ? 'token' : 'open-admin',
         snapshot,
         backfill,
       }),
