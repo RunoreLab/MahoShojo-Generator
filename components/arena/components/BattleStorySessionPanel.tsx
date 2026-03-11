@@ -185,7 +185,16 @@ export function BattleStorySessionPanel(props: {
     `# 第 ${streamChapterIndex ?? '?'} 章\n\n正在等待模型返回正文...`;
 
   return (
-    <div className="card mt-6">
+    <div
+      className="relative left-1/2 mt-6 max-w-none -translate-x-1/2 rounded-[24px] border p-5 sm:p-6"
+      style={{
+        width: 'min(1180px, calc(100vw - 2rem))',
+        background: 'var(--app-surface-90)',
+        borderColor: 'var(--app-border-strong)',
+        boxShadow: 'var(--app-card-shadow)',
+        backdropFilter: 'blur(10px)',
+      }}
+    >
       <CollapsibleSection
         title="连续战报会话"
         description="本地 IndexedDB 持久化，可连续续写、分支和重写最后一章"
@@ -285,145 +294,196 @@ export function BattleStorySessionPanel(props: {
             <div className="rounded-lg bg-amber-50 px-4 py-3 text-sm text-amber-700">{notice}</div>
           ) : null}
 
-          <div className="grid gap-4 xl:grid-cols-3">
-            <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
-              <div className="text-sm font-semibold text-gray-800">
-                {activeSession ? activeSession.title : '当前未选择会话'}
-              </div>
-              <div className="mt-3 space-y-1 text-xs text-gray-600">
-                <div>会话更新时间：{activeSession ? formatDateTime(activeSession.updatedAt) : '—'}</div>
-                <div>章节数：{activeSession ? activeChapterCount : 0}</div>
-                <div>摘要状态：{activeSession ? summaryCoverageText : '—'}</div>
-                <div>模型通道：{formatProviderSource(activeSession)}</div>
-                <div>本地存储：仅当前浏览器可见</div>
-                {activeSession?.branchOf ? <div>分支来源：{activeSession.branchOf.sessionId}</div> : null}
-                {isRefreshingSummary ? <div>章节摘要正在后台刷新...</div> : null}
+          <div className="grid gap-5 xl:grid-cols-[minmax(300px,360px)_minmax(0,1fr)] xl:items-start">
+            <div className="space-y-4">
+              <section className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-semibold text-gray-800">当前会话元数据</div>
+                    <div className="mt-1 text-base font-semibold text-gray-900">
+                      {activeSession ? activeSession.title : '当前未选择会话'}
+                    </div>
+                  </div>
+                  {activeSession?.branchOf ? (
+                    <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700">
+                      分支会话
+                    </span>
+                  ) : null}
+                </div>
+                <div className="mt-4 space-y-2 text-sm text-gray-600">
+                  <div className="flex items-start justify-between gap-4">
+                    <span className="text-gray-500">会话更新时间</span>
+                    <span className="text-right text-gray-700">
+                      {activeSession ? formatDateTime(activeSession.updatedAt) : '—'}
+                    </span>
+                  </div>
+                  <div className="flex items-start justify-between gap-4">
+                    <span className="text-gray-500">章节数</span>
+                    <span className="text-right text-gray-700">{activeSession ? activeChapterCount : 0}</span>
+                  </div>
+                  <div className="flex items-start justify-between gap-4">
+                    <span className="text-gray-500">摘要状态</span>
+                    <span className="text-right text-gray-700">{activeSession ? summaryCoverageText : '—'}</span>
+                  </div>
+                  <div className="flex items-start justify-between gap-4">
+                    <span className="text-gray-500">模型通道</span>
+                    <span className="max-w-[16rem] text-right text-gray-700">
+                      {formatProviderSource(activeSession)}
+                    </span>
+                  </div>
+                  <div className="flex items-start justify-between gap-4">
+                    <span className="text-gray-500">本地存储</span>
+                    <span className="text-right text-gray-700">仅当前浏览器可见</span>
+                  </div>
+                  {activeSession?.branchOf ? (
+                    <div className="flex items-start justify-between gap-4">
+                      <span className="text-gray-500">分支来源</span>
+                      <span className="max-w-[16rem] break-all text-right text-gray-700">
+                        {activeSession.branchOf.sessionId}
+                      </span>
+                    </div>
+                  ) : null}
+                  {isRefreshingSummary ? (
+                    <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+                      章节摘要正在后台刷新...
+                    </div>
+                  ) : null}
+                </div>
+              </section>
+
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-1">
+                <section className="rounded-2xl border border-gray-200 bg-white p-4">
+                  <div className="mb-3 text-sm font-semibold text-gray-800">最近会话</div>
+                  {sessions.length === 0 ? (
+                    <div className="text-sm text-gray-500">本地还没有连续战报会话。</div>
+                  ) : (
+                    <div className="max-h-[320px] space-y-2 overflow-y-auto pr-1">
+                      {sessions.map((session) => {
+                        const isActive = session.id === activeSession?.id;
+                        return (
+                          <button
+                            key={session.id}
+                            type="button"
+                            onClick={() => void handleSelectSession(session.id)}
+                            className={`w-full rounded-xl border px-3 py-3 text-left transition-colors ${
+                              isActive
+                                ? 'border-emerald-300 bg-emerald-50'
+                                : 'border-gray-200 bg-white hover:bg-gray-50'
+                            }`}
+                          >
+                            <div className="text-sm font-medium text-gray-800">{session.title}</div>
+                            <div className="mt-1 text-xs text-gray-500">
+                              {formatDateTime(session.updatedAt)}｜{session.chapterCount} 章
+                              {session.branchOf ? '｜分支' : ''}
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </section>
+
+                <section className="rounded-2xl border border-gray-200 bg-white p-4">
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <div className="text-sm font-semibold text-gray-800">章节列表</div>
+                    {chapters.length > 0 ? (
+                      <div className="text-xs text-gray-500">共 {chapters.length} 章</div>
+                    ) : null}
+                  </div>
+                  {chapters.length === 0 ? (
+                    <div className="text-sm text-gray-500">创建首章后，这里会显示连续章节链。</div>
+                  ) : (
+                    <div className="max-h-[420px] space-y-2 overflow-y-auto pr-1">
+                      {chapters.map((chapter) => {
+                        const isSelected = selectedChapterId
+                          ? selectedChapterId === chapter.id
+                          : latestActiveChapter?.id === chapter.id;
+                        return (
+                          <button
+                            key={chapter.id}
+                            type="button"
+                            onClick={() => setSelectedChapterId(chapter.id)}
+                            className={`w-full rounded-xl border px-3 py-3 text-left transition-colors ${
+                              isSelected
+                                ? 'border-blue-300 bg-blue-50'
+                                : 'border-gray-200 bg-white hover:bg-gray-50'
+                            }`}
+                          >
+                            <div className="text-sm font-medium text-gray-800">
+                              第 {chapter.index} 章 · {chapter.title}
+                            </div>
+                            <div className="mt-1 text-xs text-gray-500">
+                              {actionLabelMap[chapter.action]}｜{formatDateTime(chapter.createdAt)}
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </section>
               </div>
             </div>
 
-            <div className="rounded-2xl border border-gray-200 bg-white p-4">
-              <div className="mb-2 text-sm font-semibold text-gray-800">最近会话</div>
-              {sessions.length === 0 ? (
-                <div className="text-sm text-gray-500">本地还没有连续战报会话。</div>
-              ) : (
-                <div className="space-y-2">
-                  {sessions.map((session) => {
-                    const isActive = session.id === activeSession?.id;
-                    return (
-                      <button
-                        key={session.id}
-                        type="button"
-                        onClick={() => void handleSelectSession(session.id)}
-                        className={`w-full rounded-xl border px-3 py-3 text-left transition-colors ${
-                          isActive
-                            ? 'border-emerald-300 bg-emerald-50'
-                            : 'border-gray-200 bg-white hover:bg-gray-50'
-                        }`}
-                      >
-                        <div className="text-sm font-medium text-gray-800">{session.title}</div>
-                        <div className="mt-1 text-xs text-gray-500">
-                          {formatDateTime(session.updatedAt)}｜{session.chapterCount} 章
-                          {session.branchOf ? '｜分支' : ''}
-                        </div>
-                      </button>
-                    );
-                  })}
+            <div className="min-w-0 space-y-4">
+              {isGenerating ? (
+                <div className="space-y-4">
+                  <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
+                    <div className="text-sm font-semibold text-emerald-800">
+                      正在生成
+                      {streamChapterIndex ? `第 ${streamChapterIndex} 章` : '新章节'}
+                      {generatingAction ? ` · ${actionLabelMap[generatingAction]}` : ''}
+                    </div>
+                    <div className="mt-1 text-xs text-emerald-700">
+                      章节正文、模型思考与流式元数据会在这里实时更新。
+                    </div>
+                  </div>
+                  <StreamingBattleReportCard
+                    content={liveCardContent}
+                    onSaveImage={onSaveImage}
+                    mode={activeSession?.source.mode}
+                    scenarioName={scenarioName}
+                    reporterInfo={streamCardSnapshot?.reporterInfo ?? null}
+                    userGuidance={streamCardSnapshot?.userGuidance ?? null}
+                    characterGuidances={streamCardSnapshot?.characterGuidances ?? null}
+                    adjudicationResults={streamCardSnapshot?.adjudicationResults ?? null}
+                    aiUsage={streamCardSnapshot?.aiUsage ?? null}
+                    aiModel={streamCardSnapshot?.aiModel ?? null}
+                    narrativeHistoryReadCount={streamCardSnapshot?.narrativeHistoryReadCount ?? null}
+                    aiReasoning={streamCardSnapshot?.aiReasoning ?? null}
+                    isStreaming
+                  />
+                  <BattleStoryMetaDebugPanel
+                    debug={streamMetaDebug}
+                    storageKey="arena.section.battleStorySession.liveMetaDebug.open"
+                    title="实时元数据"
+                  />
                 </div>
-              )}
-            </div>
+              ) : null}
 
-            <div className="rounded-2xl border border-gray-200 bg-white p-4">
-              <div className="mb-2 text-sm font-semibold text-gray-800">章节列表</div>
-              {chapters.length === 0 ? (
-                <div className="text-sm text-gray-500">创建首章后，这里会显示连续章节链。</div>
-              ) : (
-                <div className="max-h-[320px] space-y-2 overflow-y-auto pr-1">
-                  {chapters.map((chapter) => {
-                    const isSelected = selectedChapterId
-                      ? selectedChapterId === chapter.id
-                      : latestActiveChapter?.id === chapter.id;
-                    return (
-                      <button
-                        key={chapter.id}
-                        type="button"
-                        onClick={() => setSelectedChapterId(chapter.id)}
-                        className={`w-full rounded-xl border px-3 py-3 text-left transition-colors ${
-                          isSelected
-                            ? 'border-blue-300 bg-blue-50'
-                            : 'border-gray-200 bg-white hover:bg-gray-50'
-                        }`}
-                      >
-                        <div className="text-sm font-medium text-gray-800">
-                          第 {chapter.index} 章 · {chapter.title}
-                        </div>
-                        <div className="mt-1 text-xs text-gray-500">
-                          {actionLabelMap[chapter.action]}｜{formatDateTime(chapter.createdAt)}
-                        </div>
-                      </button>
-                    );
-                  })}
+              <div className="space-y-4">
+                <div className="rounded-2xl border border-gray-200 bg-white p-4">
+                  <div className="text-sm font-semibold text-gray-800">
+                    {selectedChapter
+                      ? `章节预览｜第 ${selectedChapter.index} 章 · ${selectedChapter.title}`
+                      : '章节预览'}
+                  </div>
+                  <div className="mt-1 text-xs text-gray-500">
+                    这里直接复用现有战报卡片渲染，可查看任意章节、下载 Markdown，并保存截图。
+                  </div>
                 </div>
-              )}
-            </div>
-          </div>
-
-          {isGenerating ? (
-            <div className="space-y-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
-              <div>
-                <div className="text-sm font-semibold text-emerald-800">
-                  正在生成
-                  {streamChapterIndex ? `第 ${streamChapterIndex} 章` : '新章节'}
-                  {generatingAction ? ` · ${actionLabelMap[generatingAction]}` : ''}
-                </div>
-                <div className="mt-1 text-xs text-emerald-700">
-                  章节正文、模型思考与流式元数据会在这里实时更新。
-                </div>
-              </div>
-              <StreamingBattleReportCard
-                content={liveCardContent}
-                onSaveImage={onSaveImage}
-                mode={activeSession?.source.mode}
-                scenarioName={scenarioName}
-                reporterInfo={streamCardSnapshot?.reporterInfo ?? null}
-                userGuidance={streamCardSnapshot?.userGuidance ?? null}
-                characterGuidances={streamCardSnapshot?.characterGuidances ?? null}
-                adjudicationResults={streamCardSnapshot?.adjudicationResults ?? null}
-                aiUsage={streamCardSnapshot?.aiUsage ?? null}
-                aiModel={streamCardSnapshot?.aiModel ?? null}
-                narrativeHistoryReadCount={streamCardSnapshot?.narrativeHistoryReadCount ?? null}
-                aiReasoning={streamCardSnapshot?.aiReasoning ?? null}
-                isStreaming
-              />
-              <BattleStoryMetaDebugPanel
-                debug={streamMetaDebug}
-                storageKey="arena.section.battleStorySession.liveMetaDebug.open"
-                title="实时元数据"
-              />
-            </div>
-          ) : null}
-
-          <div className="space-y-4 rounded-2xl border border-gray-200 bg-white p-4">
-            <div>
-              <div className="text-sm font-semibold text-gray-800">
-                {selectedChapter
-                  ? `章节预览｜第 ${selectedChapter.index} 章 · ${selectedChapter.title}`
-                  : '章节预览'}
-              </div>
-              <div className="mt-1 text-xs text-gray-500">
-                这里直接复用战报卡片展示，可查看任意章节、下载 Markdown，并保存截图。
+                <ChapterPreviewSection
+                  chapter={selectedChapter}
+                  snapshot={selectedChapterSnapshot}
+                  scenarioName={scenarioName}
+                  mode={activeSession?.source.mode}
+                  onSaveImage={onSaveImage}
+                />
+                <BattleStoryMetaDebugPanel
+                  debug={selectedMetaDebug}
+                  storageKey="arena.section.battleStorySession.selectedMetaDebug.open"
+                />
               </div>
             </div>
-            <ChapterPreviewSection
-              chapter={selectedChapter}
-              snapshot={selectedChapterSnapshot}
-              scenarioName={scenarioName}
-              mode={activeSession?.source.mode}
-              onSaveImage={onSaveImage}
-            />
-            <BattleStoryMetaDebugPanel
-              debug={selectedMetaDebug}
-              storageKey="arena.section.battleStorySession.selectedMetaDebug.open"
-            />
           </div>
         </div>
       </CollapsibleSection>
