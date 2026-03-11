@@ -153,13 +153,18 @@ export function ArenaPage() {
         />
       </Head>
       <div className="magic-background-white">
-        <div className="container">
+        <div className="arena-page-shell mx-auto w-full max-w-[1380px] px-4 pb-8 pt-6 sm:px-6 lg:px-8">
           <div
-            className="card"
-            style={{ border: '2px solid var(--app-border-strong)', background: 'var(--app-surface-90)' }}
+            className="rounded-[28px] border p-5 sm:p-6 xl:p-8"
+            style={{
+              borderColor: 'var(--app-border-strong)',
+              background: 'var(--app-surface-90)',
+              boxShadow: 'var(--app-card-shadow)',
+              backdropFilter: 'blur(10px)',
+            }}
           >
             <BattleHeader />
-            <div className="flex justify-end mt-2">
+            <div className="mt-3 flex flex-wrap items-center justify-end gap-3 text-sm">
               <div className="flex items-center gap-3 text-sm flex-wrap">
                 <button
                   onClick={() => setShowRankingModal(true)}
@@ -173,206 +178,200 @@ export function ArenaPage() {
               </div>
             </div>
 
-            <CollapsibleSection
-              title="🎴 预设角色（内置）"
-              description={`已选 ${formatCombatantCount(presetCombatantCount, MAX_COMBATANTS)}（可选项，常用可展开）`}
-              defaultOpen={false}
-              disabled={isGenerating}
-              storageKey="arena.section.presetCharacters.open"
-              className="mt-4"
-            >
-              <PresetSelector />
-            </CollapsibleSection>
-
-            <CollapsibleSection
-              title="🌐 在线角色库 / 随机匹配"
-              description={`当前已选 ${formatCombatantCount(combatants.length, MAX_COMBATANTS)}`}
-              defaultOpen
-              disabled={isGenerating}
-              storageKey="arena.section.characterDatabase.open"
-              className="mt-4"
-            >
-              <DatabaseSelector
-                className="!mb-0"
-                title={null}
-                onOpenCharacterModal={handleOpenCharacterDataModal}
-                onRandomMatchCharacter={() => handleRandomMatch('character')}
-                isAuthenticated={isAuthenticated}
-                isGenerating={isGenerating}
-                isMatching={isMatching}
-                combatantCount={combatants.length}
-              />
-              <div className="mt-1 text-xs text-gray-600">
-                提示：浏览在线角色库可选择公开/私有数据卡；随机匹配仅从公开角色库中抽取。
-              </div>
-            </CollapsibleSection>
-
-            <CollapsibleSection
-              title="📁 本地导入（上传 / 粘贴）"
-              description="支持上传多个 .json 或直接粘贴文本"
-              defaultOpen
-              disabled={isGenerating}
-              keepMounted
-              storageKey="arena.section.localImport.open"
-              className="mt-4"
-            >
-              <RosterUploader />
-            </CollapsibleSection>
-
-            <CollapsibleSection
-              title="👥 已选角色 / 分队"
-              description={`已选 ${formatCombatantCount(combatants.length, MAX_COMBATANTS)}`}
-              defaultOpen
-              disabled={isGenerating}
-              keepMounted
-              storageKey="arena.section.combatants.open"
-              className="mt-4"
-            >
-              <CombatantList onShowDetails={(combatant) => setSelectedCombatant(combatant)} />
-            </CollapsibleSection>
-
-            <CollapsibleSection
-              title="🎮 模式选择"
-              description="不同模式会影响输出风格与计分规则"
-              defaultOpen
-              disabled={isGenerating}
-              storageKey="arena.section.battleMode.open"
-              className="mt-4"
-            >
-              <BattleModeSwitcher />
-            </CollapsibleSection>
-
-            {battleMode === 'scenario' && (
-              <CollapsibleSection
-                title="🎭 情景设置"
-                description={scenarioSummary}
-                defaultOpen
-                autoOpen={scenario.content === null}
-                disabled={isGenerating}
-                keepMounted
-                storageKey="arena.section.scenario.open"
-                className="mt-4"
-              >
-                <ScenarioPanel
-                  onOpenScenarioModal={handleOpenScenarioDataModal}
-                  onRandomMatchScenario={() => handleRandomMatch('scenario')}
-                  onOpenAuxScenarioModal={handleOpenAuxScenarioDataModal}
-                  isAuthenticated={isAuthenticated}
-                />
-              </CollapsibleSection>
-            )}
-
-            <CollapsibleSection
-              title="🏁 排位与快速设置"
-              description="用于排位计分相关的一键检查/修复（高级）"
-              defaultOpen={false}
-              disabled={isGenerating}
-              keepMounted
-              storageKey="arena.section.rankingQuickActions.open"
-              className="mt-4"
-            >
-              <RankingQuickActions />
-            </CollapsibleSection>
-
-            <CollapsibleSection
-              title="⚙️ 读写设置（历战 / 当前状态 / 叙事历史）"
-              description="建议保留默认；上下文过长或失败时可在这里精简"
-              defaultOpen={false}
-              disabled={isGenerating}
-              keepMounted
-              storageKey="arena.section.battleSettings.open"
-              className="mt-4"
-            >
-              <BattleSettings />
-            </CollapsibleSection>
-
-            <CollapsibleSection
-              title="🧠 故事引导 / 裁判 / AI 模型"
-              description="这里的设置会直接影响生成风格与稳定性"
-              defaultOpen
-              disabled={isGenerating}
-              keepMounted
-              storageKey="arena.section.storyOptions.open"
-              className="mt-4"
-            >
-              <StoryOptions
-                languages={languages}
-                afterUserGuidance={(
-                  <>
-                    <QuestionnaireLorePanel />
-                    <AdjudicatorPanel />
-                  </>
-                )}
-              />
-            </CollapsibleSection>
-
-            <CollapsibleSection
-              title="⚡ 生成方式"
-              description="流式生成可边生成边阅读；非流式适合一次性结果"
-              defaultOpen={false}
-              disabled={isGenerating}
-              storageKey="arena.section.generationMode.open"
-              className="mt-4"
-            >
-              <GenerationModeSwitcher />
-            </CollapsibleSection>
-
-            <CollapsibleSection
-              title="🚀 开始生成"
-              description="确认设置后点击按钮生成战报"
-              collapsible={false}
-              className="mt-4"
-            >
-              <BattleActions />
-              {error && (
-                <ErrorMessage
-                  message={error}
-                  className={`p-4 rounded-md mt-3 text-sm ${
-                    error.startsWith('❌') ? 'bg-red-100 text-red-800' : 'bg-yellow-100 text-yellow-800'
-                  }`}
-                />
-              )}
-            </CollapsibleSection>
-
-            <CollapsibleSection
-              title="💬 社区"
-              description="QQ群 / 腾讯频道"
-              defaultOpen={false}
-              storageKey="arena.section.community.open"
-              className="mt-4"
-            >
-              <div className="text-center">
-                <div className="text-sm font-semibold">
-                  点击加入QQ群（任选其一）：
-                  <div className="text-sm text-blue-600 font-semibold">
-                    {qqGroups.map((group, index) => (
-                      <span key={group.groupCode}>
-                        {index > 0 ? ' / ' : ' '}
-                        <a
-                          href={group.joinUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="hover:underline"
-                          title={group.name}
-                        >
-                          {group.groupCode}
-                        </a>
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              </div>
-              <div className="text-center mt-3">
-                <a
-                  href="https://pd.qq.com/s/brisxifbl"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-sm text-blue-600 hover:underline font-semibold"
+            <div className="mt-6 grid gap-5 xl:grid-cols-[minmax(0,1.18fr)_minmax(360px,0.92fr)]">
+              <div className="space-y-4">
+                <CollapsibleSection
+                  title="🎴 预设角色（内置）"
+                  description={`已选 ${formatCombatantCount(presetCombatantCount, MAX_COMBATANTS)}（可选项，常用可展开）`}
+                  defaultOpen={false}
+                  disabled={isGenerating}
+                  storageKey="arena.section.presetCharacters.open"
                 >
-                  点击加入腾讯频道
-                </a>
+                  <PresetSelector />
+                </CollapsibleSection>
+
+                <CollapsibleSection
+                  title="🌐 在线角色库 / 随机匹配"
+                  description={`当前已选 ${formatCombatantCount(combatants.length, MAX_COMBATANTS)}`}
+                  defaultOpen
+                  disabled={isGenerating}
+                  storageKey="arena.section.characterDatabase.open"
+                >
+                  <DatabaseSelector
+                    className="!mb-0"
+                    title={null}
+                    onOpenCharacterModal={handleOpenCharacterDataModal}
+                    onRandomMatchCharacter={() => handleRandomMatch('character')}
+                    isAuthenticated={isAuthenticated}
+                    isGenerating={isGenerating}
+                    isMatching={isMatching}
+                    combatantCount={combatants.length}
+                  />
+                  <div className="mt-1 text-xs text-gray-600">
+                    提示：浏览在线角色库可选择公开/私有数据卡；随机匹配仅从公开角色库中抽取。
+                  </div>
+                </CollapsibleSection>
+
+                <CollapsibleSection
+                  title="📁 本地导入（上传 / 粘贴）"
+                  description="支持上传多个 .json 或直接粘贴文本"
+                  defaultOpen
+                  disabled={isGenerating}
+                  keepMounted
+                  storageKey="arena.section.localImport.open"
+                >
+                  <RosterUploader />
+                </CollapsibleSection>
+
+                <CollapsibleSection
+                  title="👥 已选角色 / 分队"
+                  description={`已选 ${formatCombatantCount(combatants.length, MAX_COMBATANTS)}`}
+                  defaultOpen
+                  disabled={isGenerating}
+                  keepMounted
+                  storageKey="arena.section.combatants.open"
+                >
+                  <CombatantList onShowDetails={(combatant) => setSelectedCombatant(combatant)} />
+                </CollapsibleSection>
               </div>
-            </CollapsibleSection>
+
+              <div className="space-y-4">
+                <CollapsibleSection
+                  title="🎮 模式选择"
+                  description="不同模式会影响输出风格与计分规则"
+                  defaultOpen
+                  disabled={isGenerating}
+                  storageKey="arena.section.battleMode.open"
+                >
+                  <BattleModeSwitcher />
+                </CollapsibleSection>
+
+                {battleMode === 'scenario' && (
+                  <CollapsibleSection
+                    title="🎭 情景设置"
+                    description={scenarioSummary}
+                    defaultOpen
+                    autoOpen={scenario.content === null}
+                    disabled={isGenerating}
+                    keepMounted
+                    storageKey="arena.section.scenario.open"
+                  >
+                    <ScenarioPanel
+                      onOpenScenarioModal={handleOpenScenarioDataModal}
+                      onRandomMatchScenario={() => handleRandomMatch('scenario')}
+                      onOpenAuxScenarioModal={handleOpenAuxScenarioDataModal}
+                      isAuthenticated={isAuthenticated}
+                    />
+                  </CollapsibleSection>
+                )}
+
+                <CollapsibleSection
+                  title="🏁 排位与快速设置"
+                  description="用于排位计分相关的一键检查/修复（高级）"
+                  defaultOpen={false}
+                  disabled={isGenerating}
+                  keepMounted
+                  storageKey="arena.section.rankingQuickActions.open"
+                >
+                  <RankingQuickActions />
+                </CollapsibleSection>
+
+                <CollapsibleSection
+                  title="⚙️ 读写设置（历战 / 当前状态 / 叙事历史）"
+                  description="建议保留默认；上下文过长或失败时可在这里精简"
+                  defaultOpen={false}
+                  disabled={isGenerating}
+                  keepMounted
+                  storageKey="arena.section.battleSettings.open"
+                >
+                  <BattleSettings />
+                </CollapsibleSection>
+
+                <CollapsibleSection
+                  title="🧠 故事引导 / 裁判 / AI 模型"
+                  description="这里的设置会直接影响生成风格与稳定性"
+                  defaultOpen
+                  disabled={isGenerating}
+                  keepMounted
+                  storageKey="arena.section.storyOptions.open"
+                >
+                  <StoryOptions
+                    languages={languages}
+                    afterUserGuidance={(
+                      <>
+                        <QuestionnaireLorePanel />
+                        <AdjudicatorPanel />
+                      </>
+                    )}
+                  />
+                </CollapsibleSection>
+
+                <CollapsibleSection
+                  title="⚡ 生成方式"
+                  description="流式生成可边生成边阅读；非流式适合一次性结果"
+                  defaultOpen={false}
+                  disabled={isGenerating}
+                  storageKey="arena.section.generationMode.open"
+                >
+                  <GenerationModeSwitcher />
+                </CollapsibleSection>
+
+                <CollapsibleSection
+                  title="🚀 开始生成"
+                  description="确认设置后点击按钮生成战报"
+                  collapsible={false}
+                >
+                  <BattleActions />
+                  {error && (
+                    <ErrorMessage
+                      message={error}
+                      className={`p-4 rounded-md mt-3 text-sm ${
+                        error.startsWith('❌') ? 'bg-red-100 text-red-800' : 'bg-yellow-100 text-yellow-800'
+                      }`}
+                    />
+                  )}
+                </CollapsibleSection>
+
+                <CollapsibleSection
+                  title="💬 社区"
+                  description="QQ群 / 腾讯频道"
+                  defaultOpen={false}
+                  storageKey="arena.section.community.open"
+                >
+                  <div className="text-center">
+                    <div className="text-sm font-semibold">
+                      点击加入QQ群（任选其一）：
+                      <div className="text-sm text-blue-600 font-semibold">
+                        {qqGroups.map((group, index) => (
+                          <span key={group.groupCode}>
+                            {index > 0 ? ' / ' : ' '}
+                            <a
+                              href={group.joinUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="hover:underline"
+                              title={group.name}
+                            >
+                              {group.groupCode}
+                            </a>
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="text-center mt-3">
+                    <a
+                      href="https://pd.qq.com/s/brisxifbl"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-sm text-blue-600 hover:underline font-semibold"
+                    >
+                      点击加入腾讯频道
+                    </a>
+                  </div>
+                </CollapsibleSection>
+              </div>
+            </div>
           </div>
 
           <BattleResult onSaveImage={handleSaveImage} />
