@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { validateBattleStoryGenerateNextInput } from '@/lib/ai-session/battle-story/generate-next';
+import { buildUpstreamRequestBody } from '@/pages/api/arena/session/generate-next';
 
 describe('battle story generate-next validation', () => {
   test('start 只允许空会话且固定首章索引', () => {
@@ -74,5 +75,46 @@ describe('battle story generate-next validation', () => {
       ok: false,
       error: 'rewrite 的 chapterIndex 必须为 3',
     });
+  });
+
+  test('buildUpstreamRequestBody 会把自定义 provider 原样透传给竞技场流式接口', () => {
+    const body = buildUpstreamRequestBody(
+      {
+        sessionId: 'session-1',
+        action: 'continue',
+        chapterContext: {
+          recentChapters: [],
+          workingCombatants: [{ data: { codename: '白百合' } }],
+        },
+        seed: {
+          combatants: [{ data: { codename: '白百合' } }],
+          mode: 'classic',
+          storyLength: 'standard',
+          language: 'zh-CN',
+          settings: {
+            readArenaHistory: true,
+            writeArenaHistory: true,
+            readCurrentState: true,
+            writeCurrentState: true,
+            readNarrativeHistory: false,
+            writeNarrativeHistory: false,
+          },
+        },
+        userGuidance: '继续推进剧情',
+      } as any,
+      '内部引导',
+      {
+        providerId: 'kourichat',
+        modelId: 'gemini-2.5-flash',
+        apiKey: 'sk-test',
+      }
+    );
+
+    expect(body.customProvider).toEqual({
+      providerId: 'kourichat',
+      modelId: 'gemini-2.5-flash',
+      apiKey: 'sk-test',
+    });
+    expect(body.forceStreamMeta).toBe(true);
   });
 });

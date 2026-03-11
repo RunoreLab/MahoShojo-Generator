@@ -5,7 +5,11 @@ import { buildBattleStoryPromptContext } from '@/lib/ai-session/battle-story/con
 import { buildBattleStoryDeterministicDigest } from '@/lib/ai-session/battle-story/digest';
 import { validateBattleStoryGenerateNextInput } from '@/lib/ai-session/battle-story/generate-next';
 import { buildBattleStoryInternalGuidance } from '@/lib/ai-session/battle-story/prompts';
-import { resolveAiSessionProvider, parseAiSessionCustomProvider } from '@/lib/ai-session/provider';
+import {
+  resolveAiSessionProvider,
+  parseAiSessionCustomProvider,
+  type AiSessionCustomProvider,
+} from '@/lib/ai-session/provider';
 import { acquireAiSessionSoftRateLimit } from '@/lib/ai-session/rate-limit';
 import { buildSubrequestAuthHeaders } from '@/lib/subrequest-auth';
 import { randomUUID } from '@/lib/crypto';
@@ -132,7 +136,11 @@ const encodeSseEvent = (encoder: TextEncoder, event: string, payload: unknown): 
   return encoder.encode(`event: ${event}\ndata: ${JSON.stringify(payload ?? null)}\n\n`);
 };
 
-const buildUpstreamRequestBody = (payload: z.infer<typeof BattleStoryRequestSchema>, internalGuidance: string): Record<string, unknown> => {
+export const buildUpstreamRequestBody = (
+  payload: z.infer<typeof BattleStoryRequestSchema>,
+  internalGuidance: string,
+  customProvider: AiSessionCustomProvider | null
+): Record<string, unknown> => {
   const requestBody: Record<string, unknown> = {
     combatants: payload.chapterContext.workingCombatants,
     mode: payload.seed.mode,
@@ -150,6 +158,7 @@ const buildUpstreamRequestBody = (payload: z.infer<typeof BattleStoryRequestSche
     storyLength: payload.seed.storyLength,
     questionnaires: payload.seed.questionnaires,
     forceStreamMeta: true,
+    ...(customProvider ? { customProvider } : {}),
   };
 
   return requestBody;
@@ -263,7 +272,7 @@ export default async function handler(req: NextRequest): Promise<Response> {
     const upstreamResponse = await fetch(upstreamUrl.toString(), {
       method: 'POST',
       headers: upstreamHeaders,
-      body: JSON.stringify(buildUpstreamRequestBody(payload, internalGuidance)),
+      body: JSON.stringify(buildUpstreamRequestBody(payload, internalGuidance, customProviderParsed.value)),
     });
 
     if (!upstreamResponse.ok || !upstreamResponse.body) {

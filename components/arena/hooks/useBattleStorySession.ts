@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import type { AIReasoningEnvelope } from '@/types/ai-reasoning';
 import { buildCustomProviderPayload, isUsingUserProvidedKey } from '@/lib/ai/custom-provider';
 import {
   createBattleStoryChapterRecord,
@@ -17,7 +16,9 @@ import {
 } from '@/lib/ai-session/battle-story/storage';
 import { buildBattleStoryDeterministicDigest } from '@/lib/ai-session/battle-story/digest';
 import type {
+  BattleStoryChapterCardSnapshot,
   BattleStoryChapterRecord,
+  BattleStoryCharacterGuidance,
   BattleStoryDeterministicDigest,
   BattleStorySessionAction,
   BattleStorySessionRecord,
@@ -40,6 +41,7 @@ import {
   buildBattleStorySessionSeedSnapshot,
   cloneBattleStoryActiveChaptersForNewSession,
   mergeUpdatedCombatantsIntoWorkingCombatants,
+  parseBattleStoryStreamMetaHeader,
   remapBattleStorySummaryMeta,
   resolveBattleStoryRequestCooldownMs,
   resolveBattleStorySummaryRefreshPlan,
@@ -47,11 +49,6 @@ import {
 
 const ACTIVE_SESSION_STORAGE_KEY = 'arena.battleStory.activeSessionId';
 const SUMMARY_REFRESH_MIN_PENDING_CHAPTERS = 3;
-
-type SessionTelemetryState = {
-  aiModel: string | null;
-  aiUsage: Record<string, unknown> | null;
-};
 
 const normalizeErrorMessage = (error: unknown, fallback: string): string => {
   if (error instanceof Error && error.message.trim()) return error.message.trim();
@@ -142,6 +139,29 @@ const readNumberField = (record: Record<string, unknown> | null, key: string): n
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
 };
 
+const extractChapterGuidancesFromWorkingCombatants = (
+  workingCombatants: Array<Record<string, unknown>>
+): BattleStoryCharacterGuidance[] | null => {
+  const normalized = workingCombatants
+    .map((combatant) => {
+      const data = combatant.data && typeof combatant.data === 'object'
+        ? (combatant.data as Record<string, unknown>)
+        : null;
+      const characterName =
+        (typeof data?.codename === 'string' && data.codename.trim() ? data.codename.trim() : '') ||
+        (typeof data?.name === 'string' && data.name.trim() ? data.name.trim() : '');
+      const guidance =
+        typeof combatant.characterGuidance === 'string' && combatant.characterGuidance.trim()
+          ? combatant.characterGuidance.trim()
+          : '';
+      if (!characterName || !guidance) return null;
+      return { characterName, guidance };
+    })
+    .filter((item): item is BattleStoryCharacterGuidance => Boolean(item));
+
+  return normalized.length > 0 ? normalized : null;
+};
+
 export function useBattleStorySession() {
   const useBattleSelector = <T,>(selector: (state: BattleStoreState) => T) => useBattleStore(selector);
   const combatants = useBattleSelector((state) => state.combatants);
@@ -161,11 +181,7 @@ export function useBattleStorySession() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [generatingAction, setGeneratingAction] = useState<BattleStorySessionAction | null>(null);
   const [streamingMarkdown, setStreamingMarkdown] = useState('');
-  const [streamReasoning, setStreamReasoning] = useState<AIReasoningEnvelope | null>(null);
-  const [streamTelemetry, setStreamTelemetry] = useState<SessionTelemetryState>({
-    aiModel: null,
-    aiUsage: null,
-  });
+  const [streamCardSnapshot, setStreamCardSnapshot] = useState<BattleStoryChapterCardSnapshot | null>(null);
   const [streamChapterIndex, setStreamChapterIndex] = useState<number | null>(null);
   const [isRefreshingSummary, setIsRefreshingSummary] = useState(false);
 
@@ -515,6 +531,7 @@ export function useBattleStorySession() {
       digest: BattleStoryDeterministicDigest;
       chapterIndex: number;
       generationId?: string | null;
+      cardSnapshot: BattleStoryChapterCardSnapshot | null;
       nextWorkingCombatants: Array<Record<string, unknown>>;
       warning?: string;
     }> => {
@@ -527,9 +544,15 @@ export function useBattleStorySession() {
       setIsGenerating(true);
       setGeneratingAction(input.action);
       setStreamingMarkdown('');
-      setStreamReasoning(null);
-      setStreamTelemetry({ aiModel: null, aiUsage: null });
       setStreamChapterIndex(input.chapterIndexHint ?? null);
+      const fallbackCharacterGuidances = extractChapterGuidancesFromWorkingCombatants(
+        input.workingCombatants
+      );
+      const fallbackCardSnapshot: BattleStoryChapterCardSnapshot = {
+        ...(input.userGuidance.trim() ? { userGuidance: input.userGuidance.trim() } : {}),
+        ...(fallbackCharacterGuidances ? { characterGuidances: fallbackCharacterGuidances } : {}),
+      };
+      setStreamCardSnapshot(Object.keys(fallbackCardSnapshot).length > 0 ? fallbackCardSnapshot : null);
       let responseStatus: number | null = null;
       let requestAccepted = false;
       let cooldownHandled = false;
@@ -609,21 +632,65 @@ export function useBattleStorySession() {
         let metaPayload: Record<string, unknown> | null = null;
         let donePayload: Record<string, unknown> | null = null;
         let sawDone = false;
+        let responseGenerationId: string | null = null;
+        let latestCardSnapshot: BattleStoryChapterCardSnapshot = { ...fallbackCardSnapshot };
+
+        const patchStreamCardSnapshot = (patch: Partial<BattleStoryChapterCardSnapshot>) => {
+          latestCardSnapshot = {
+            ...latestCardSnapshot,
+            ...patch,
+          };
+          setStreamCardSnapshot(
+            Object.keys(latestCardSnapshot).length > 0
+              ? { ...latestCardSnapshot }
+              : null
+          );
+        };
+
+        const headerMeta = parseBattleStoryStreamMetaHeader(
+          response.headers.get('x-mahoshojo-stream-meta')
+        );
+        responseGenerationId = headerMeta.generationId;
+        if (Object.keys(headerMeta.snapshot).length > 0) {
+          patchStreamCardSnapshot(headerMeta.snapshot);
+        }
 
         const result = await readTextAndReasoningStreamFromResponse(response, {
           label: '连续战报章节生成',
           onText: (text) => setStreamingMarkdown(text),
-          onReasoning: (reasoning) => setStreamReasoning(reasoning),
+          onReasoning: (reasoning) => {
+            patchStreamCardSnapshot({ aiReasoning: reasoning });
+          },
           onTelemetry: (payload) => {
-            setStreamTelemetry({
+            patchStreamCardSnapshot({
               aiModel: typeof payload.aiModel === 'string' ? payload.aiModel.trim() : null,
               aiUsage:
                 payload.usage && typeof payload.usage === 'object'
-                  ? (payload.usage as Record<string, unknown>)
+                  ? (payload.usage as BattleStoryChapterCardSnapshot['aiUsage'])
+                  : null,
+              narrativeHistoryReadCount:
+                typeof payload.narrativeHistoryReadCount === 'number'
+                  ? payload.narrativeHistoryReadCount
                   : null,
             });
           },
           onMeta: (payload) => {
+            patchStreamCardSnapshot({
+              streamUpdateMetaDebug: {
+                source: 'sse',
+                parseOk: payload.parseOk === true,
+                ...(typeof payload.error === 'string' ? { error: payload.error } : {}),
+                ...(typeof payload.raw === 'string' ? { raw: payload.raw } : {}),
+                ...(typeof payload.rawTruncated === 'boolean'
+                  ? { rawTruncated: payload.rawTruncated }
+                  : {}),
+                ...(payload.meta && typeof payload.meta === 'object'
+                  ? { meta: payload.meta as NonNullable<
+                      BattleStoryChapterCardSnapshot['streamUpdateMetaDebug']
+                    >['meta'] }
+                  : {}),
+              },
+            });
             if (payload.parseOk && payload.meta && typeof payload.meta === 'object') {
               metaPayload = payload.meta as Record<string, unknown>;
             }
@@ -631,6 +698,10 @@ export function useBattleStorySession() {
           onEvent: (event, payload) => {
             if (event === 'session_meta' && payload && typeof payload === 'object') {
               sessionMeta = payload as Record<string, unknown>;
+              const generationId = readStringField(sessionMeta, 'generationId');
+              if (generationId) {
+                responseGenerationId = generationId;
+              }
               const chapterIndex = readNumberField(sessionMeta, 'chapterIndex');
               if (chapterIndex) {
                 setStreamChapterIndex(chapterIndex);
@@ -729,8 +800,9 @@ export function useBattleStorySession() {
           reportJson,
           digest,
           chapterIndex,
-          generationId:
-            readStringField(sessionMeta, 'generationId'),
+          generationId: responseGenerationId ?? readStringField(sessionMeta, 'generationId'),
+          cardSnapshot:
+            Object.keys(latestCardSnapshot).length > 0 ? latestCardSnapshot : null,
           nextWorkingCombatants: updateResult.workingCombatants,
           ...(updateResult.warning ? { warning: updateResult.warning } : {}),
         };
@@ -814,6 +886,7 @@ export function useBattleStorySession() {
         title: generated.digest.chapterTitle,
         markdown: generated.markdown,
         reportJson: generated.reportJson,
+        cardSnapshot: generated.cardSnapshot ?? undefined,
         deterministicDigest: generated.digest,
         generationId: generated.generationId ?? undefined,
       });
@@ -889,6 +962,7 @@ export function useBattleStorySession() {
         title: generated.digest.chapterTitle,
         markdown: generated.markdown,
         reportJson: generated.reportJson,
+        cardSnapshot: generated.cardSnapshot ?? undefined,
         deterministicDigest: generated.digest,
         sourceChapterId: sessionRecord.lastChapterId ?? undefined,
         generationId: generated.generationId ?? undefined,
@@ -982,6 +1056,7 @@ export function useBattleStorySession() {
         title: generated.digest.chapterTitle,
         markdown: generated.markdown,
         reportJson: generated.reportJson,
+        cardSnapshot: generated.cardSnapshot ?? undefined,
         deterministicDigest: generated.digest,
         sourceChapterId: clonedLatestChapterId ?? undefined,
         generationId: generated.generationId ?? undefined,
@@ -1057,6 +1132,7 @@ export function useBattleStorySession() {
         title: generated.digest.chapterTitle,
         markdown: generated.markdown,
         reportJson: generated.reportJson,
+        cardSnapshot: generated.cardSnapshot ?? undefined,
         deterministicDigest: generated.digest,
         sourceChapterId: latestChapter.id,
         generationId: generated.generationId ?? undefined,
@@ -1154,8 +1230,7 @@ export function useBattleStorySession() {
     isGenerating,
     generatingAction,
     streamingMarkdown,
-    streamReasoning,
-    streamTelemetry,
+    streamCardSnapshot,
     streamChapterIndex,
     isRefreshingSummary,
     isCooldown,

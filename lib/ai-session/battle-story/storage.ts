@@ -100,6 +100,7 @@ export const createBattleStoryChapterRecord = (input: {
   title: string;
   markdown: string;
   reportJson: Record<string, unknown>;
+  cardSnapshot?: BattleStoryChapterRecord['cardSnapshot'];
   deterministicDigest: BattleStoryDeterministicDigest;
   sourceChapterId?: string | null;
   generationId?: string | null;
@@ -115,6 +116,7 @@ export const createBattleStoryChapterRecord = (input: {
     title: (input.title ?? '').trim() || input.deterministicDigest.chapterTitle || `第 ${input.index} 章`,
     markdown: input.markdown,
     reportJson: input.reportJson ?? {},
+    ...(input.cardSnapshot ? { cardSnapshot: input.cardSnapshot } : {}),
     deterministicDigest: input.deterministicDigest,
     createdAt: Date.now(),
   };

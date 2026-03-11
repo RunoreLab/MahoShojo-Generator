@@ -1,4 +1,7 @@
+import type { NormalizedStreamUpdateMeta } from '@/lib/arena/stream-meta';
 import type { AiSessionListOptions, AiSessionProviderMode } from '@/lib/ai-session/types';
+import type { AIReasoningEnvelope } from '@/types/ai-reasoning';
+import type { AdjudicationResult } from '@/types/arena';
 
 export type BattleStorySourceMode = 'classic' | 'kizuna' | 'daily' | 'scenario';
 export type BattleStoryLengthOption = 'default' | 'short' | 'standard' | 'detailed' | 'long';
@@ -84,6 +87,46 @@ export type BattleStoryDeterministicDigest = {
   impactDigest?: BattleStoryImpactDigestItem[];
 };
 
+export type BattleStoryReporterInfo = {
+  name: string;
+  publication: string;
+};
+
+export type BattleStoryCharacterGuidance = {
+  characterName: string;
+  guidance: string;
+};
+
+export type BattleStoryAiUsage = {
+  promptTokens?: number | null;
+  reasoningTokens?: number | null;
+  completionTokens?: number | null;
+  totalTokens?: number | null;
+  cachedTokens?: number | null;
+  [key: string]: unknown;
+};
+
+export type BattleStoryStreamUpdateMetaDebug = {
+  source: 'sse' | 'inline';
+  parseOk: boolean;
+  error?: string | null;
+  raw?: string | null;
+  rawTruncated?: boolean;
+  meta?: NormalizedStreamUpdateMeta | null;
+};
+
+export type BattleStoryChapterCardSnapshot = {
+  reporterInfo?: BattleStoryReporterInfo | null;
+  userGuidance?: string | null;
+  characterGuidances?: BattleStoryCharacterGuidance[] | null;
+  adjudicationResults?: AdjudicationResult[] | null;
+  aiUsage?: BattleStoryAiUsage | null;
+  aiModel?: string | null;
+  narrativeHistoryReadCount?: number | null;
+  aiReasoning?: AIReasoningEnvelope | null;
+  streamUpdateMetaDebug?: BattleStoryStreamUpdateMetaDebug | null;
+};
+
 export type BattleStoryChapterRecord = {
   id: string;
   sessionId: string;
@@ -96,6 +139,7 @@ export type BattleStoryChapterRecord = {
   title: string;
   markdown: string;
   reportJson: Record<string, unknown>;
+  cardSnapshot?: BattleStoryChapterCardSnapshot;
   deterministicDigest: BattleStoryDeterministicDigest;
   createdAt: number;
 };

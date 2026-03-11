@@ -376,7 +376,7 @@ export function ArenaPage() {
           </div>
 
           <BattleResult onSaveImage={handleSaveImage} />
-          <BattleStorySessionPanel />
+          <BattleStorySessionPanel onSaveImage={handleSaveImage} />
 
           {appConfig.SHOW_STAT_DATA && (
             <ArenaStatistics stats={stats} isLoading={isLoadingStats} presetInfo={presetInfo} />

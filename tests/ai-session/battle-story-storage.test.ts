@@ -43,6 +43,13 @@ describe('battle story storage helpers', () => {
       title: '',
       markdown: '# 第三章\n\n正文',
       reportJson: { headline: '第三章' },
+      cardSnapshot: {
+        reporterInfo: {
+          name: '阿尔法记者',
+          publication: '星光日报',
+        },
+        aiModel: 'gemini-2.5-flash',
+      },
       deterministicDigest: {
         chapterTitle: '第三章',
         bodyExcerpt: '正文',
@@ -58,5 +65,7 @@ describe('battle story storage helpers', () => {
     expect(chapter.title).toBe('第三章');
     expect(chapter.sourceChapterId).toBe('chapter-2');
     expect(chapter.generationId).toBe('generation-3');
+    expect(chapter.cardSnapshot?.reporterInfo?.publication).toBe('星光日报');
+    expect(chapter.cardSnapshot?.aiModel).toBe('gemini-2.5-flash');
   });
 });

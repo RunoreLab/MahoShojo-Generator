@@ -6,8 +6,11 @@ import {
   buildBattleStorySessionSeedSnapshot,
   cloneBattleStoryActiveChaptersForNewSession,
   mergeUpdatedCombatantsIntoWorkingCombatants,
+  parseBattleStoryStreamMetaHeader,
   remapBattleStorySummaryMeta,
+  resolveBattleStoryChapterCardSnapshot,
   resolveBattleStoryRequestCooldownMs,
+  resolveBattleStoryScenarioName,
   resolveBattleStorySummaryRefreshPlan,
 } from '@/components/arena/utils/battleStorySession';
 import { createBattleStoryChapterRecord, createBattleStorySessionRecord } from '@/lib/ai-session/battle-story/storage';
@@ -404,5 +407,76 @@ describe('battle story session utils', () => {
         retryAfterMs: 9_000,
       })
     ).toBe(9_000);
+  });
+
+  test('parseBattleStoryStreamMetaHeader 会提取可回显的章节卡片信息', () => {
+    const header = encodeURIComponent(
+      JSON.stringify({
+        generationId: 'gen-123',
+        reporterInfo: {
+          name: '白塔特派',
+          publication: '竞技场晨报',
+        },
+        userGuidance: '让这一章更像记者连线',
+        characterGuidances: [
+          { characterName: '白百合', guidance: '保护同伴' },
+        ],
+        ai: {
+          model: 'gemini-2.5-flash',
+        },
+      })
+    );
+
+    const parsed = parseBattleStoryStreamMetaHeader(header);
+    expect(parsed.generationId).toBe('gen-123');
+    expect(parsed.snapshot.reporterInfo?.publication).toBe('竞技场晨报');
+    expect(parsed.snapshot.userGuidance).toBe('让这一章更像记者连线');
+    expect(parsed.snapshot.characterGuidances?.[0]?.guidance).toBe('保护同伴');
+    expect(parsed.snapshot.aiModel).toBe('gemini-2.5-flash');
+  });
+
+  test('resolveBattleStoryScenarioName 与 resolveBattleStoryChapterCardSnapshot 会提供预览兜底数据', () => {
+    const session = createBattleStorySessionRecord({
+      title: '情景会话',
+      source: {
+        mode: 'scenario',
+        language: 'zh-CN',
+        storyLength: 'standard',
+        generationMode: 'stream',
+      },
+      seed: {
+        combatants: [{ name: '白百合' }],
+        scenario: { title: '废都决战' },
+        settings: {
+          readArenaHistory: true,
+          writeArenaHistory: true,
+          readCurrentState: true,
+          writeCurrentState: true,
+          readNarrativeHistory: false,
+          writeNarrativeHistory: false,
+        },
+      },
+      workingCombatants: [{ name: '白百合' }],
+    });
+
+    const chapter = createBattleStoryChapterRecord({
+      sessionId: session.id,
+      index: 1,
+      action: 'start',
+      title: '第一章',
+      markdown: '# 第一章\n\n正文',
+      reportJson: {
+        report: { headline: '第一章', winner: '白百合' },
+        impacts: [{ characterName: '白百合', impact: '守住阵线' }],
+      },
+      deterministicDigest: {
+        chapterTitle: '第一章',
+      },
+    });
+
+    expect(resolveBattleStoryScenarioName(session)).toBe('废都决战');
+    const snapshot = resolveBattleStoryChapterCardSnapshot(chapter);
+    expect(snapshot?.streamUpdateMetaDebug?.source).toBe('inline');
+    expect(snapshot?.streamUpdateMetaDebug?.meta?.report?.winner).toBe('白百合');
   });
 });

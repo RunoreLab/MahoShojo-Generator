@@ -2,11 +2,14 @@
 
 import { randomUUID } from '@/lib/crypto';
 import type {
+  BattleStoryChapterCardSnapshot,
   BattleStoryChapterRecord,
   BattleStoryDeterministicDigest,
+  BattleStoryReporterInfo,
   BattleStorySessionRecord,
   BattleStorySessionSeed,
   BattleStorySessionSource,
+  BattleStoryStreamUpdateMetaDebug,
   BattleStorySummaryMeta,
 } from '@/lib/ai-session/battle-story/types';
 
@@ -55,6 +58,79 @@ const buildScenarioTitle = (scenario: ScenarioState): string => {
     normalizeText((scenario.content as any)?.name) ||
     normalizeText(scenario.fileName).replace(/\.json$/i, '')
   );
+};
+
+const isRecord = (value: unknown): value is Record<string, unknown> => {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+};
+
+const normalizeReporterInfo = (value: unknown): BattleStoryReporterInfo | null => {
+  if (!isRecord(value)) return null;
+  const name = normalizeText(value.name);
+  const publication = normalizeText(value.publication);
+  if (!name || !publication) return null;
+  return { name, publication };
+};
+
+const normalizeCharacterGuidances = (
+  value: unknown
+): BattleStoryChapterCardSnapshot['characterGuidances'] | null => {
+  if (!Array.isArray(value)) return null;
+  const normalized = value
+    .map((item) => {
+      if (!isRecord(item)) return null;
+      const characterName = normalizeText(item.characterName);
+      const guidance = normalizeText(item.guidance);
+      if (!characterName || !guidance) return null;
+      return { characterName, guidance };
+    })
+    .filter((item): item is NonNullable<BattleStoryChapterCardSnapshot['characterGuidances']>[number] => Boolean(item));
+  return normalized.length > 0 ? normalized : null;
+};
+
+const normalizeAiUsage = (value: unknown): BattleStoryChapterCardSnapshot['aiUsage'] | null => {
+  if (!isRecord(value)) return null;
+  const normalized: NonNullable<BattleStoryChapterCardSnapshot['aiUsage']> = {};
+  const fields: Array<keyof NonNullable<BattleStoryChapterCardSnapshot['aiUsage']>> = [
+    'promptTokens',
+    'reasoningTokens',
+    'completionTokens',
+    'totalTokens',
+    'cachedTokens',
+  ];
+  for (const field of fields) {
+    const tokenValue = value[field];
+    if (typeof tokenValue === 'number' && Number.isFinite(tokenValue)) {
+      normalized[field] = tokenValue;
+    }
+  }
+  return Object.keys(normalized).length > 0 ? normalized : null;
+};
+
+const buildInlineMetaDebugFromReportJson = (
+  reportJson: Record<string, unknown>
+): BattleStoryStreamUpdateMetaDebug | null => {
+  const report = isRecord(reportJson.report) ? reportJson.report : null;
+  const impacts = Array.isArray(reportJson.impacts) ? reportJson.impacts : null;
+  if (!report && !impacts) return null;
+
+  return {
+    source: 'inline',
+    parseOk: true,
+    meta: {
+      ...(report ? { report } : {}),
+      ...(impacts ? { impacts: impacts as any } : {}),
+    },
+    raw: JSON.stringify(
+      {
+        ...(report ? { report } : {}),
+        ...(impacts ? { impacts } : {}),
+      },
+      null,
+      2
+    ),
+    rawTruncated: false,
+  };
 };
 
 export type BattleStoryArenaSeedSnapshot = {
@@ -174,6 +250,76 @@ export const buildBattleStorySessionSeedSnapshot = (input: {
     },
     workingCombatants,
     titleHint,
+  };
+};
+
+export const parseBattleStoryStreamMetaHeader = (
+  rawHeader: string | null | undefined
+): {
+  generationId: string | null;
+  snapshot: Partial<BattleStoryChapterCardSnapshot>;
+} => {
+  if (!rawHeader) {
+    return { generationId: null, snapshot: {} };
+  }
+
+  try {
+    const parsed = JSON.parse(decodeURIComponent(rawHeader));
+    const generationId =
+      typeof parsed?.generationId === 'string' && parsed.generationId.trim()
+        ? parsed.generationId.trim()
+        : null;
+    const reporterInfo = normalizeReporterInfo(parsed?.reporterInfo);
+    const userGuidance = normalizeText(parsed?.userGuidance) || null;
+    const characterGuidances = normalizeCharacterGuidances(parsed?.characterGuidances);
+    const aiModel =
+      typeof parsed?.ai?.model === 'string' && parsed.ai.model.trim()
+        ? parsed.ai.model.trim()
+        : null;
+    const adjudicationResults = Array.isArray(parsed?.adjudicationResults)
+      ? (parsed.adjudicationResults as BattleStoryChapterCardSnapshot['adjudicationResults'])
+      : null;
+
+    return {
+      generationId,
+      snapshot: {
+        ...(reporterInfo ? { reporterInfo } : {}),
+        ...(userGuidance ? { userGuidance } : {}),
+        ...(characterGuidances ? { characterGuidances } : {}),
+        ...(adjudicationResults ? { adjudicationResults } : {}),
+        ...(aiModel ? { aiModel } : {}),
+      },
+    };
+  } catch {
+    return { generationId: null, snapshot: {} };
+  }
+};
+
+export const resolveBattleStoryScenarioName = (
+  session: Pick<BattleStorySessionRecord, 'source' | 'seed'> | null | undefined
+): string | undefined => {
+  if (!session || session.source.mode !== 'scenario') return undefined;
+  if (!isRecord(session.seed.scenario)) return undefined;
+  const title = normalizeText(session.seed.scenario.title) || normalizeText(session.seed.scenario.name);
+  return title || undefined;
+};
+
+export const resolveBattleStoryChapterCardSnapshot = (
+  chapter: Pick<BattleStoryChapterRecord, 'cardSnapshot' | 'reportJson'> | null | undefined
+): BattleStoryChapterCardSnapshot | null => {
+  if (!chapter) return null;
+  const stored = chapter.cardSnapshot ?? null;
+  const inlineMeta = buildInlineMetaDebugFromReportJson(chapter.reportJson);
+
+  if (!stored && !inlineMeta) return null;
+
+  return {
+    ...(stored ?? {}),
+    ...(!stored?.reporterInfo ? {} : { reporterInfo: stored.reporterInfo }),
+    ...(!stored?.characterGuidances ? {} : { characterGuidances: stored.characterGuidances }),
+    ...(!stored?.adjudicationResults ? {} : { adjudicationResults: stored.adjudicationResults }),
+    ...(!stored?.aiUsage ? {} : { aiUsage: normalizeAiUsage(stored.aiUsage) ?? stored.aiUsage }),
+    ...(stored?.streamUpdateMetaDebug ? {} : inlineMeta ? { streamUpdateMetaDebug: inlineMeta } : {}),
   };
 };
 
