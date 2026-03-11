@@ -129,13 +129,21 @@ export function isGeneralScenario(data: unknown): data is GeneralScenarioData {
   if (!data || typeof data !== 'object') return false;
   const record = data as Record<string, unknown>;
 
-  if (record.templateId !== GENERAL_SCENARIO_TEMPLATE_ID) return false;
+  const hasExplicitTemplate = record.templateId === GENERAL_SCENARIO_TEMPLATE_ID;
+  const isTemplateLessLegacyGeneralScenario =
+    typeof record.templateId === 'undefined' &&
+    typeof record.title === 'string' &&
+    typeof record.content === 'string' &&
+    typeof record.name !== 'string';
+
+  // 兼容不规范通用情景卡：部分卡缺少 templateId，但仍使用 title + content 结构。
+  if (!hasExplicitTemplate && !isTemplateLessLegacyGeneralScenario) return false;
   if (typeof record.content !== 'string') return false;
 
   if (typeof record.title === 'string') return true;
 
   // 兼容旧版通用情景卡：name -> title（原地升级，便于后续逻辑统一读取 title）
-  if (typeof record.name === 'string') {
+  if (hasExplicitTemplate && typeof record.name === 'string') {
     record.title = record.name;
     delete record.name;
     return true;
