@@ -274,6 +274,14 @@ export const encyclopediaEntries: EncyclopediaEntry[] = [
     keywords: ['战报', '模式', '计分'],
   },
   {
+    slug: 'continuous-battle-story',
+    title: '连续战报会话（/arena）',
+    summary: '竞技场里的长线章节模式：新建首章、续写、分支、重写最后一章与本地持久化。',
+    markdownPath: '/encyclopedia/continuous-battle-story.md',
+    categoryId: 'gameplay',
+    keywords: ['连续战报', '续写', '分支', '重写', 'IndexedDB', '章节摘要'],
+  },
+  {
     slug: 'guidance',
     title: '引导 / 裁判事件 / 读写状态',
     summary: 'userGuidance、裁判事件、读写历战/状态栏对战报与计分的影响。',
