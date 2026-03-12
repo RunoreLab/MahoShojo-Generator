@@ -45,18 +45,9 @@ describe('battle story prompts', () => {
       chapterIndex: 5,
       chapterPlan: {
         totalChapters: 5,
-        source: 'user',
-        locked: false,
       },
       context: {
-        chapterPlanState: {
-          totalChapters: 5,
-          currentChapterIndex: 5,
-          isFinalChapter: true,
-          remainingChaptersIncludingCurrent: 1,
-          remainingChaptersAfterCurrent: 0,
-          positionLabel: '终章',
-        },
+        chapterPlanState: null,
         normalizedUserGuidance: '',
         recentWindow: [],
         sections: [],

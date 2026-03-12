@@ -65,4 +65,22 @@ describe('battle story chapter plan helpers', () => {
     expect(formatBattleStoryChapterProgress({ completedChapterCount: 3, chapterPlan })).toBe('3 / 5');
     expect(formatBattleStoryChapterPlanSource(chapterPlan)).toBe('情景卡固定');
   });
+
+  test('prompt state 解析接受仅含 totalChapters 的限制型 payload', () => {
+    const promptState = resolveBattleStoryPromptChapterPlanState({
+      chapterPlan: {
+        totalChapters: 6,
+      },
+      chapterIndex: 6,
+    });
+
+    expect(promptState).toEqual({
+      totalChapters: 6,
+      currentChapterIndex: 6,
+      isFinalChapter: true,
+      remainingChaptersIncludingCurrent: 1,
+      remainingChaptersAfterCurrent: 0,
+      positionLabel: '终章',
+    });
+  });
 });

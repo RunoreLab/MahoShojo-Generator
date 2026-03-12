@@ -58,8 +58,6 @@ describe('battle story prompt context', () => {
       },
       chapterPlan: {
         totalChapters: 5,
-        source: 'scenario',
-        locked: true,
       },
       chapterIndex: 3,
       workingCombatants: [{ name: '晓雾', current_state: { mood: '紧张' } }],
@@ -88,6 +86,7 @@ describe('battle story prompt context', () => {
     expect(result.normalizedUserGuidance.length).toBeLessThanOrEqual(120);
     expect(result.promptText).toContain('## 固定种子层');
     expect(result.promptText).toContain('## 章节规划层');
+    expect(result.promptText).toContain('当前要生成：第 3 章 / 共 5 章');
     expect(result.promptText).toContain('## 本轮用户引导层');
   });
 

@@ -97,14 +97,13 @@ export const resolveBattleStoryPromptChapterPlanState = (input: {
   chapterPlan?: BattleStoryChapterPlan | BattleStoryChapterPlanLimit | null;
   chapterIndex?: number;
 }): BattleStoryPromptChapterPlanState | null => {
-  const chapterPlan = normalizeBattleStoryChapterPlan(input.chapterPlan);
+  const totalChapters = resolveBattleStoryChapterPlanTotal(input.chapterPlan);
   const chapterIndex =
     typeof input.chapterIndex === 'number'
       ? Math.max(1, Math.floor(input.chapterIndex))
       : null;
-  if (!chapterPlan || !chapterIndex) return null;
+  if (!totalChapters || !chapterIndex) return null;
 
-  const totalChapters = chapterPlan.totalChapters;
   const isFinalChapter = chapterIndex >= totalChapters;
   const remainingChaptersIncludingCurrent = Math.max(1, totalChapters - chapterIndex + 1);
   const remainingChaptersAfterCurrent = Math.max(0, totalChapters - chapterIndex);
