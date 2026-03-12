@@ -507,7 +507,411 @@ type BattleStorySessionRecord = {
 
 ---
 
-## 8. 建议测试范围
+## 8. 更细的实现切片确认
+
+本节在上一版“推荐落地顺序”基础上，进一步细化为可实施切片，并把本轮补充讨论的两个要求一起纳入：
+
+1. 情景卡新增字段后，角色管理页也要允许编辑相关设置，且不影响原生性
+2. 内置预设中涉及固定章节/固定次数推进的卡，要补结构化字段
+
+## 8.1 切片 A：内容层协议与 schema 显式化
+
+目标：
+
+- 确定 `_battle_story` 的结构
+- 不只依赖 catch-all，而是让 schema 显式知道这个扩展字段
+
+建议修改：
+
+- [`lib/schemas/scenario.ts`](/home/notuhao/code/MahoShojo-Generator/lib/schemas/scenario.ts)
+- [`lib/schemas/general-scenario.ts`](/home/notuhao/code/MahoShojo-Generator/lib/schemas/general-scenario.ts)
+
+建议新增业务结构：
+
+```ts
+type ScenarioBattleStoryExtension = {
+  total_chapters: number;
+  plan_mode: 'suggested' | 'fixed';
+};
+```
+
+推荐做法：
+
+- 内容层继续使用 `_battle_story`
+- 但在 schema 中把 `_battle_story` 声明为显式 optional 字段
+- 不再完全依赖“因为 `_` 前缀允许，所以随便塞”
+
+这样做的好处：
+
+- 校验更严格
+- 编辑器更容易拿到明确类型
+- 后续补测试更直接
+
+## 8.2 切片 B：连续战报会话类型与请求 DTO 扩展
+
+目标：
+
+- 让本地会话和服务端生成请求都能感知章节规划
+
+建议修改：
+
+- [`lib/ai-session/battle-story/types.ts`](/home/notuhao/code/MahoShojo-Generator/lib/ai-session/battle-story/types.ts)
+- [`lib/ai-session/battle-story/context.ts`](/home/notuhao/code/MahoShojo-Generator/lib/ai-session/battle-story/context.ts)
+- [`lib/ai-session/battle-story/prompts.ts`](/home/notuhao/code/MahoShojo-Generator/lib/ai-session/battle-story/prompts.ts)
+- [`lib/ai-session/battle-story/generate-next.ts`](/home/notuhao/code/MahoShojo-Generator/lib/ai-session/battle-story/generate-next.ts)
+- [`pages/api/arena/session/generate-next.ts`](/home/notuhao/code/MahoShojo-Generator/pages/api/arena/session/generate-next.ts)
+
+建议新增业务层结构：
+
+```ts
+type BattleStoryChapterPlan = {
+  totalChapters: number;
+  source: 'user' | 'scenario';
+  locked: boolean;
+};
+```
+
+并补到：
+
+- `BattleStorySessionRecord.chapterPlan`
+- `BattleStoryPromptContextInput.chapterPlan`
+- `generate-next` request DTO
+
+这里有一个必须明确的现实约束：
+
+- 当前连续战报是 local-first
+- 服务端并不知道浏览器 IndexedDB 里的 session 内容
+
+因此 `generate-next` 不能假设自己能从服务端拿到 `chapterPlan`。  
+正确做法是：
+
+- 客户端在每次 `generate-next` 请求时，显式把 `chapterPlan` 一起带上
+
+推荐 DTO 形态：
+
+```ts
+chapterPlan?: {
+  totalChapters: number;
+}
+```
+
+首批不需要把 `source` / `locked` 全量透传给服务端。  
+服务端只需要知道：
+
+- 本次是否存在固定/建议总章节数
+- 当前 `chapterIndex` 是否越界
+
+## 8.3 切片 C：连续战报前端 UI 与计划来源合并
+
+目标：
+
+- 在不污染单次竞技场设置的前提下，让用户能设置章节数
+- 同时接收情景卡提供的默认/固定章节规划
+
+建议修改：
+
+- [`components/arena/hooks/useBattleStorySession.ts`](/home/notuhao/code/MahoShojo-Generator/components/arena/hooks/useBattleStorySession.ts)
+- [`components/arena/components/BattleStorySessionPanel.tsx`](/home/notuhao/code/MahoShojo-Generator/components/arena/components/BattleStorySessionPanel.tsx)
+
+建议实现：
+
+1. 在会话面板维护一个“待启动章节规划”状态
+2. 启动前根据以下优先级解析：
+   - 情景卡 `fixed`
+   - 用户手动设置
+   - 情景卡 `suggested`
+   - 无设置
+3. 启动会话时，把解析结果写入 `sessionDraft.chapterPlan`
+4. 会话开始后：
+   - 元数据显示 `已完成 / 总章数`
+   - `continue` / `branch` 按总章数判断是否禁用
+
+推荐新增一个纯函数 helper，而不是把优先级硬写在 Hook 内部：
+
+- `resolveBattleStoryInitialChapterPlan`
+
+文件位置可选：
+
+- `lib/ai-session/battle-story/plan.ts`
+- 或 [`components/arena/utils/battleStorySession.ts`](/home/notuhao/code/MahoShojo-Generator/components/arena/utils/battleStorySession.ts)
+
+更推荐前者，因为这属于会话业务逻辑，不是纯 UI 工具。
+
+## 8.4 切片 D：角色管理页支持编辑章节规划，且不破坏原生性
+
+目标：
+
+- 情景卡在档案馆中可视化编辑 `_battle_story`
+- 这类改动不应导致原生性丧失
+
+建议修改：
+
+- [`components/ScenarioEditor.tsx`](/home/notuhao/code/MahoShojo-Generator/components/ScenarioEditor.tsx)
+- [`pages/character-manager.tsx`](/home/notuhao/code/MahoShojo-Generator/pages/character-manager.tsx)
+
+当前代码现状必须注意：
+
+1. [`components/ScenarioEditor.tsx`](/home/notuhao/code/MahoShojo-Generator/components/ScenarioEditor.tsx) 没有章节规划编辑区
+2. [`pages/character-manager.tsx`](/home/notuhao/code/MahoShojo-Generator/pages/character-manager.tsx) 的通用 `renderFormFields()` 会直接隐藏所有 `_` 前缀字段
+3. 同文件里的原生性丧失判定，目前**没有**忽略 `_` 前缀字段
+4. 但 [`lib/signature.ts`](/home/notuhao/code/MahoShojo-Generator/lib/signature.ts) 在签名生成/校验时，默认**已经忽略所有 `_` 前缀字段**
+
+这意味着如果采用 `_battle_story`，角色管理页至少要同步做三件事：
+
+1. 在 `ScenarioEditor` 增加“连续战报章节规划”分组
+2. 对 `general-scenario` 也提供同样的编辑入口
+3. 把前端原生性比较逻辑同步到“忽略 `_battle_story`”
+
+这里推荐的具体策略不是“忽略所有未知字段”，而是：
+
+- **与签名语义保持一致，至少忽略 `_battle_story`**
+
+如果后续团队确认：
+
+- 所有 `_` 前缀字段都属于兼容协议/非实质内容层元数据
+
+那么前端原生性判定也可以直接统一为：
+
+- 忽略所有 `_` 前缀字段
+
+但无论选择哪一种，必须保证：
+
+- 前端原生性提示
+- 服务端签名校验
+
+两边语义一致，不能出现“前端提示会掉原生，实际签名仍有效”或者反过来的情况。
+
+## 8.5 切片 E：模板转换与字段保留策略
+
+目标：
+
+- 避免 `_battle_story` 在模板转换时被静默降级或吞掉
+
+建议修改：
+
+- [`lib/data-card-converter.ts`](/home/notuhao/code/MahoShojo-Generator/lib/data-card-converter.ts)
+
+当前现状：
+
+1. `sanitizeForConversion()` 不会删除 `_` 前缀字段
+2. 但 `convertToScenario()` / `convertToGeneralScenario()` 并没有把 `_battle_story` 当结构化字段保留
+3. 结果是 `_battle_story` 可能被当作 unmatched 内容并折叠进 `description` / `content`
+
+这对章节规划来说是不合适的，因为：
+
+- 它应该是可计算配置
+- 不是情景正文文案
+
+推荐保留规则：
+
+1. `scenario -> general-scenario`
+   - 保留 `_battle_story` 为结构化字段
+2. `general-scenario -> scenario`
+   - 保留 `_battle_story` 为结构化字段
+3. `scenario/general-scenario -> magical-girl/canshou/general`
+   - 直接丢弃 `_battle_story`
+   - 不转写进说明文字
+
+原因：
+
+- `_battle_story` 只对情景类卡有意义
+- 不应污染角色卡正文或分析字段
+
+## 8.6 切片 F：内置预设补标策略
+
+目标：
+
+- 只为“仓库中已经明确写出固定章节/固定次数推进”的预设补字段
+
+建议修改：
+
+- [`public/scenario-presets/S11_mayfly_bossfight_v1.json`](/home/notuhao/code/MahoShojo-Generator/public/scenario-presets/S11_mayfly_bossfight_v1.json)
+- 视需要同步更新说明文本：[`lib/scenario-presets.ts`](/home/notuhao/code/MahoShojo-Generator/lib/scenario-presets.ts)
+
+当前保守结论：
+
+### 应立即补标
+
+- `S11_mayfly_bossfight_v1.json`
+  - 原文已经明确写出“战斗部分的故事分为五次生成”
+  - 这是最明确、最低争议的 `fixed` 候选
+
+建议补：
+
+```json
+"_battle_story": {
+  "total_chapters": 5,
+  "plan_mode": "fixed"
+}
+```
+
+### 暂不补标
+
+- `S05_mirror_mundane_v2.json`
+  - 明确是长期循环 / 第 M 次经历
+  - 但不是固定总章节数
+- `S10_everyday_streaming_v3_1.json`
+  - 有阶段和多时间段推进
+  - 但不是固定总章节数
+- `S06_magical_girl_assessment_day.json`
+  - 是单次流程中的“两个阶段”
+  - 不是多章连续战报规划
+
+这批卡更适合未来讨论：
+
+- 阶段机
+- 回合/节点脚本
+- 非固定上限的长线推进
+
+不应在本次“章节数设置”切片里一起做。
+
+## 8.7 切片 G：文档与百科同步
+
+目标：
+
+- 避免后续用户只知道“连续战报支持续写”，却不知道“章节规划”是如何生效的
+
+建议后续同步更新：
+
+- [`public/encyclopedia/continuous-battle-story.md`](/home/notuhao/code/MahoShojo-Generator/public/encyclopedia/continuous-battle-story.md)
+- [`public/encyclopedia/scenario-advanced.md`](/home/notuhao/code/MahoShojo-Generator/public/encyclopedia/scenario-advanced.md)
+
+建议补充说明：
+
+- 用户如何设置总章节数
+- 情景卡固定章节数如何覆盖用户输入
+- 固定章节数达到后为何不能继续 append
+
+---
+
+## 9. `_` 前缀结构化扩展字段 vs 不带前缀字段
+
+本节专门回应本轮新增问题：
+
+- 新增带 `_` 前缀的结构化扩展字段
+- 与新增一个不带前缀的普通字段
+
+两种方式有什么区别，哪种更好？
+
+## 9.1 在当前仓库里的真实差异
+
+### 方案 1：使用 `_battle_story`
+
+现实表现：
+
+1. [`lib/schemas/scenario.ts`](/home/notuhao/code/MahoShojo-Generator/lib/schemas/scenario.ts) 当前已经允许 `_` 前缀附加字段
+2. [`lib/signature.ts`](/home/notuhao/code/MahoShojo-Generator/lib/signature.ts) 当前默认忽略所有 `_` 前缀字段参与签名
+3. 因而这类字段天然更接近“兼容协议/非实质元数据”
+
+### 方案 2：新增非前缀字段，例如 `battle_story`
+
+现实表现：
+
+1. `ScenarioSchema` 当前会把它当非法字段，必须改 allowedKeys
+2. 它会默认参与签名
+3. 在角色管理页里编辑它，默认会触发原生性丧失
+4. 任何转换器、校验器、说明文档都要把它当“正式业务字段”补齐
+
+也就是说，在当前代码基础上：
+
+- `_battle_story` 是顺着已有仓库约定走
+- `battle_story` 是在另起一条语义线
+
+## 9.2 使用 `_` 前缀的优点
+
+1. 与当前签名体系天然兼容  
+   这是最大的现实优势。项目已经把 `_` 前缀视为签名忽略域，这正好符合“章节规划设置不影响原生性”的目标。
+
+2. 与当前 schema 兼容成本更低  
+   即使暂时不显式入 schema，也不会立即被 `ScenarioSchema` 拒绝。
+
+3. 更容易表达“这是协议层扩展，不是正文内容的一部分”  
+   章节规划本质上更像运行时控制参数，而不是情景叙事本身。
+
+4. 避免顶层命名空间继续膨胀  
+   不会把 `title / description / elements / metadata` 这类正文层字段和控制字段混在一起。
+
+## 9.3 使用 `_` 前缀的缺点
+
+1. 现有通用编辑器通常会主动隐藏它  
+   当前 [`pages/character-manager.tsx`](/home/notuhao/code/MahoShojo-Generator/pages/character-manager.tsx) 的通用表单就直接过滤了 `_` 字段。
+
+2. 如果只靠 catch-all，不显式入 schema，会让类型信息模糊  
+   这也是为什么本设计推荐：
+   - 仍使用 `_battle_story`
+   - 但要显式写入 schema / 类型 / 编辑器
+
+3. 团队成员可能误把它理解为“私有字段，可以随便塞任意内容”  
+   因此需要在文档中明确：
+   - `_` 前缀字段属于兼容协议元数据
+   - 不应承载大量叙事正文或 prompt 语料
+
+## 9.4 使用非前缀字段的优点
+
+1. 语义更显眼  
+   看 JSON 的人第一眼就知道这是正式字段。
+
+2. 通用表单更容易自然显示  
+   不会被“隐藏 `_` 字段”的逻辑拦住。
+
+3. 如果未来确认这是内容层长期稳定主字段，表达会更直接
+
+## 9.5 使用非前缀字段的缺点
+
+1. 会直接进入签名语义  
+   这与“允许用户在角色管理页调整章节设置而不影响原生性”的目标相冲突。
+
+2. 当前 schema、转换器、编辑器、说明文档都要同步扩容  
+   改造面更大，而且更容易漏。
+
+3. 它会把“控制配置”误提升为“卡内容主结构”  
+   对当前项目的内容层边界来说，这不是最合适的抽象。
+
+## 9.6 推荐结论
+
+结合当前仓库现状，**更好的方式是：继续使用带 `_` 前缀的结构化扩展字段，但把它显式类型化，而不是只靠隐式 catch-all**。
+
+也就是推荐：
+
+```json
+"_battle_story": {
+  "total_chapters": 5,
+  "plan_mode": "fixed"
+}
+```
+
+而不推荐：
+
+```json
+"battle_story": {
+  "total_chapters": 5,
+  "plan_mode": "fixed"
+}
+```
+
+推荐理由不是抽象偏好，而是当前代码已经给出的现实基础：
+
+1. `_` 前缀字段默认不参与签名
+2. `_` 前缀字段当前已被 schema 接受
+3. 本需求明确希望“在角色管理页中允许用户调整章节设置，且不影响原生性”
+
+这三点叠加后，`_battle_story` 显然更贴合现状。
+
+## 9.7 需要同步声明的边界
+
+如果采用 `_battle_story`，建议在文档里明确约定：
+
+1. `_battle_story` 属于兼容协议元数据
+2. 它只承载小型、结构化、可计算的控制信息
+3. 它不承载长篇正文，不承载大量 prompt 文本
+4. 它在情景类卡之间应结构化保留
+5. 它在角色卡目标模板转换时应被主动丢弃
+
+这样可以避免 `_` 前缀被滥用成“万能垃圾桶”。
+
+---
+
+## 10. 建议测试范围
 
 后续实现时，至少补以下回归测试：
 
@@ -523,25 +927,34 @@ type BattleStorySessionRecord = {
 4. `scenario` 映射
    - `_battle_story.plan_mode = suggested`
    - `_battle_story.plan_mode = fixed`
-5. `export`
+5. `character-manager` 原生性
+   - 仅修改 `_battle_story` 不触发 `hasLostNativeness`
+6. `signature` 行为
+   - 修改 `_battle_story` 后 `verifySignature` 仍保持一致
+7. `data-card-converter`
+   - `scenario <-> general-scenario` 保留 `_battle_story`
+   - 转到角色模板时丢弃 `_battle_story`
+8. `export`
    - 有计划时输出 `3 / 5`
 
 ---
 
-## 9. 推荐落地顺序（后续实现时）
+## 11. 推荐落地顺序（后续实现时）
 
 1. 补 `chapterPlan` 类型与 session record
-2. 补情景卡 `_battle_story` 解析 mapper
-3. 在 `BattleStorySessionPanel` 增加“章节规划” UI
-4. 在 `context.ts` / `prompts.ts` 注入章节规划 prompt
-5. 在 `generate-next.ts` 增加计划章节数校验
-6. 更新导出头与会话元数据显示
-7. 为内置固定章节情景卡补结构化字段
-8. 补测试
+2. 补 `_battle_story` schema 与解析 mapper
+3. 调整 `character-manager` / `ScenarioEditor`，使 `_battle_story` 可编辑且不破坏原生性
+4. 补 `data-card-converter` 的 `_battle_story` 保留/丢弃策略
+5. 在 `BattleStorySessionPanel` 增加“章节规划” UI
+6. 在 `context.ts` / `prompts.ts` 注入章节规划 prompt
+7. 在 `generate-next.ts` 与请求 DTO 中增加计划章节数校验
+8. 更新导出头与会话元数据显示
+9. 为内置固定章节情景卡补结构化字段
+10. 补测试与百科文档
 
 ---
 
-## 10. 结论
+## 12. 结论
 
 本次需求最稳妥的设计，不是“多加一句 prompt”，而是：
 
