@@ -69,6 +69,7 @@ export const createBattleStorySessionRecord = (input: {
   lastChapterInputCombatants?: unknown[];
   sessionSummary?: string;
   summaryMeta?: BattleStorySessionRecord['summaryMeta'];
+  chapterPlan?: BattleStorySessionRecord['chapterPlan'];
   branchOf?: BattleStorySessionRecord['branchOf'];
 }): BattleStorySessionRecord => {
   const now = Date.now();
@@ -87,6 +88,7 @@ export const createBattleStorySessionRecord = (input: {
       : {}),
     ...(input.sessionSummary ? { sessionSummary: input.sessionSummary } : {}),
     ...(input.summaryMeta ? { summaryMeta: input.summaryMeta } : {}),
+    ...(input.chapterPlan ? { chapterPlan: input.chapterPlan } : {}),
     ...(input.branchOf ? { branchOf: input.branchOf } : {}),
     lastChapterId: null,
     chapterCount: 0,

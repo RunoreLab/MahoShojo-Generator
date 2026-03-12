@@ -5,6 +5,7 @@ import { buildBattleStoryPromptContext } from '@/lib/ai-session/battle-story/con
 import { buildBattleStoryDeterministicDigest } from '@/lib/ai-session/battle-story/digest';
 import { validateBattleStoryGenerateNextInput } from '@/lib/ai-session/battle-story/generate-next';
 import { buildBattleStoryInternalGuidance } from '@/lib/ai-session/battle-story/prompts';
+import { SCENARIO_BATTLE_STORY_MAX_TOTAL_CHAPTERS } from '@/lib/scenario-battle-story';
 import {
   resolveAiSessionProvider,
   parseAiSessionCustomProvider,
@@ -36,6 +37,9 @@ const BattleStoryRequestSchema = z.object({
   action: z.enum(['start', 'continue', 'branch', 'rewrite']),
   sourceChapterId: z.string().min(1).optional(),
   chapterIndex: z.number().int().positive().optional(),
+  chapterPlan: z.object({
+    totalChapters: z.number().int().min(1).max(SCENARIO_BATTLE_STORY_MAX_TOTAL_CHAPTERS),
+  }).optional(),
   chapterContext: z.object({
     sessionSummary: z.string().optional(),
     recentChapters: z
@@ -222,6 +226,7 @@ export default async function handler(req: NextRequest): Promise<Response> {
     action: payload.action,
     sourceChapterId: payload.sourceChapterId,
     chapterIndex: payload.chapterIndex,
+    chapterPlan: payload.chapterPlan,
     recentChapters: payload.chapterContext.recentChapters.map((chapter) => ({
       id: chapter.id,
       index: chapter.index,
@@ -249,6 +254,8 @@ export default async function handler(req: NextRequest): Promise<Response> {
       questionnaires: payload.seed.questionnaires ?? [],
       settings: payload.seed.settings,
     },
+    chapterPlan: payload.chapterPlan,
+    chapterIndex,
     workingCombatants: payload.chapterContext.workingCombatants,
     sessionSummary: payload.chapterContext.sessionSummary,
     recentChapters: payload.chapterContext.recentChapters,
@@ -259,6 +266,7 @@ export default async function handler(req: NextRequest): Promise<Response> {
     action: payload.action,
     chapterIndex,
     sourceChapterId: payload.sourceChapterId,
+    chapterPlan: payload.chapterPlan,
     context: promptContext,
   });
 

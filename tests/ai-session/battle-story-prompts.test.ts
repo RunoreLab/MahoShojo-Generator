@@ -12,7 +12,20 @@ describe('battle story prompts', () => {
       action: 'rewrite',
       chapterIndex: 4,
       sourceChapterId: 'chapter-4-old',
+      chapterPlan: {
+        totalChapters: 5,
+        source: 'scenario',
+        locked: true,
+      },
       context: {
+        chapterPlanState: {
+          totalChapters: 5,
+          currentChapterIndex: 4,
+          isFinalChapter: false,
+          remainingChaptersIncludingCurrent: 2,
+          remainingChaptersAfterCurrent: 1,
+          positionLabel: '终局前章',
+        },
         normalizedUserGuidance: '让结果更残酷',
         recentWindow: [],
         sections: [],
@@ -22,7 +35,37 @@ describe('battle story prompts', () => {
 
     expect(guidance).toContain('重写第 4 章');
     expect(guidance).toContain('chapter-4-old');
+    expect(guidance).toContain('本章不是终章');
     expect(guidance).toContain('前文中，晓雾已经重伤');
+  });
+
+  test('internal guidance 会在终章强调收束主线', () => {
+    const guidance = buildBattleStoryInternalGuidance({
+      action: 'continue',
+      chapterIndex: 5,
+      chapterPlan: {
+        totalChapters: 5,
+        source: 'user',
+        locked: false,
+      },
+      context: {
+        chapterPlanState: {
+          totalChapters: 5,
+          currentChapterIndex: 5,
+          isFinalChapter: true,
+          remainingChaptersIncludingCurrent: 1,
+          remainingChaptersAfterCurrent: 0,
+          positionLabel: '终章',
+        },
+        normalizedUserGuidance: '',
+        recentWindow: [],
+        sections: [],
+        promptText: '## 最近章节窗口层\n第四章停在崩塌前夜。',
+      },
+    });
+
+    expect(guidance).toContain('本章是终章');
+    expect(guidance).toContain('完成主线收束');
   });
 
   test('summary prompt 会整合已有摘要与新增 digests', () => {

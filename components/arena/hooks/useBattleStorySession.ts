@@ -16,7 +16,17 @@ import {
   updateBattleStorySession,
 } from '@/lib/ai-session/battle-story/storage';
 import { buildBattleStoryDeterministicDigest } from '@/lib/ai-session/battle-story/digest';
+import {
+  BattleStoryDraftChapterPlanMode,
+  formatBattleStoryChapterPlanSource,
+  formatBattleStoryChapterProgress,
+  isBattleStoryChapterPlanLimitReached,
+  normalizeBattleStoryTotalChapters,
+  resolveBattleStoryInitialChapterPlan,
+  willBattleStoryChapterExceedPlan,
+} from '@/lib/ai-session/battle-story/plan';
 import type {
+  BattleStoryChapterPlan,
   BattleStoryChapterCardSnapshot,
   BattleStoryChapterRecord,
   BattleStoryCharacterGuidance,
@@ -31,6 +41,7 @@ import { readJsonOrTextFromResponse, resolveApiErrorMessage } from '@/lib/client
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
 import { useCooldown } from '@/lib/cooldown';
 import { extractHeadlineFromMarkdown, extractWinnerFromText } from '@/lib/arena/battle-report-log-utils';
+import { readScenarioBattleStoryConfig } from '@/lib/scenario-battle-story';
 import { readTextAndReasoningStreamFromResponse } from '@/lib/stream/read-text-and-reasoning-stream';
 
 import { useBattleStore } from '../stores/useBattleStore';
@@ -49,6 +60,7 @@ import {
 } from '../utils/battleStorySession';
 
 const ACTIVE_SESSION_STORAGE_KEY = 'arena.battleStory.activeSessionId';
+const PENDING_CHAPTER_PLAN_STORAGE_KEY = 'arena.battleStory.pendingChapterPlan.v1';
 const SUMMARY_REFRESH_MIN_PENDING_CHAPTERS = 3;
 
 const normalizeErrorMessage = (error: unknown, fallback: string): string => {
@@ -76,6 +88,35 @@ const writeLocalStorageString = (key: string, value: string | null): void => {
     window.localStorage.setItem(key, value);
   } catch {
     // ignore
+  }
+};
+
+const parsePendingChapterPlanPreference = (
+  raw: string | null
+): { mode: BattleStoryDraftChapterPlanMode; totalChaptersInput: string } => {
+  if (!raw) {
+    return {
+      mode: 'auto',
+      totalChaptersInput: '',
+    };
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const mode =
+      parsed.mode === 'none'
+        ? 'none'
+        : parsed.mode === 'custom'
+          ? 'custom'
+          : 'auto';
+    const totalChaptersInput =
+      typeof parsed.totalChaptersInput === 'string' ? parsed.totalChaptersInput : '';
+    return { mode, totalChaptersInput };
+  } catch {
+    return {
+      mode: 'auto',
+      totalChaptersInput: '',
+    };
   }
 };
 
@@ -187,6 +228,8 @@ export function useBattleStorySession() {
   const [streamChapterIndex, setStreamChapterIndex] = useState<number | null>(null);
   const [isRefreshingSummary, setIsRefreshingSummary] = useState(false);
   const [isDeletingSession, setIsDeletingSession] = useState(false);
+  const [draftChapterPlanMode, setDraftChapterPlanMode] = useState<BattleStoryDraftChapterPlanMode>('auto');
+  const [draftChapterPlanInput, setDraftChapterPlanInput] = useState('');
 
   const activeSessionRef = useRef<BattleStorySessionRecord | null>(null);
   const chaptersRef = useRef<BattleStoryChapterRecord[]>([]);
@@ -214,6 +257,24 @@ export function useBattleStorySession() {
     chaptersRef.current = chapters;
   }, [chapters]);
 
+  useEffect(() => {
+    const persisted = parsePendingChapterPlanPreference(
+      readLocalStorageString(PENDING_CHAPTER_PLAN_STORAGE_KEY)
+    );
+    setDraftChapterPlanMode(persisted.mode);
+    setDraftChapterPlanInput(persisted.totalChaptersInput);
+  }, []);
+
+  useEffect(() => {
+    writeLocalStorageString(
+      PENDING_CHAPTER_PLAN_STORAGE_KEY,
+      JSON.stringify({
+        mode: draftChapterPlanMode,
+        totalChaptersInput: draftChapterPlanInput,
+      })
+    );
+  }, [draftChapterPlanInput, draftChapterPlanMode]);
+
   const latestActiveChapter = useMemo(() => {
     return chapters
       .filter((chapter) => chapter.status !== 'superseded')
@@ -229,6 +290,46 @@ export function useBattleStorySession() {
   const displayChapters = pendingStartSession ? [] : chapters;
   const displayLatestActiveChapter = pendingStartSession ? null : latestActiveChapter;
   const displaySelectedChapter = pendingStartSession ? null : selectedChapter;
+  const scenarioChapterPlanConfig = useMemo(
+    () => (battleMode === 'scenario' ? readScenarioBattleStoryConfig(scenario.content) : null),
+    [battleMode, scenario.content]
+  );
+  const draftChapterPlan = useMemo(
+    () =>
+      resolveBattleStoryInitialChapterPlan({
+        scenario: battleMode === 'scenario' ? scenario.content : null,
+        userSelectionMode: draftChapterPlanMode,
+        userDesiredTotalChapters: draftChapterPlanInput,
+      }),
+    [battleMode, draftChapterPlanInput, draftChapterPlanMode, scenario.content]
+  );
+  const draftChapterPlanInputError = useMemo(() => {
+    if (scenarioChapterPlanConfig?.planMode === 'fixed') return null;
+    if (draftChapterPlanMode !== 'custom') return null;
+    return normalizeBattleStoryTotalChapters(draftChapterPlanInput)
+      ? null
+      : '章节规划总数需为 1-20 的整数。';
+  }, [draftChapterPlanInput, draftChapterPlanMode, scenarioChapterPlanConfig?.planMode]);
+  const activeChapterPlanSourceLabel = useMemo(
+    () => formatBattleStoryChapterPlanSource(displayActiveSession?.chapterPlan),
+    [displayActiveSession?.chapterPlan]
+  );
+  const activeChapterProgressText = useMemo(
+    () =>
+      formatBattleStoryChapterProgress({
+        completedChapterCount: displayChapters.length,
+        chapterPlan: displayActiveSession?.chapterPlan,
+      }),
+    [displayActiveSession?.chapterPlan, displayChapters.length]
+  );
+  const hasReachedActiveChapterPlanLimit = useMemo(
+    () =>
+      isBattleStoryChapterPlanLimitReached({
+        chapterPlan: displayActiveSession?.chapterPlan,
+        completedChapterCount: displayChapters.length,
+      }),
+    [displayActiveSession?.chapterPlan, displayChapters.length]
+  );
 
   const arenaStartCheck = useMemo(() => {
     const minParticipants = battleMode === 'daily' || battleMode === 'scenario' ? 1 : 2;
@@ -260,6 +361,37 @@ export function useBattleStorySession() {
       reason: null,
     };
   }, [battleMode, combatants, scenario.content, userProviderConfig]);
+  const startSessionCheck = useMemo(() => {
+    if (!arenaStartCheck.canStart) {
+      return arenaStartCheck;
+    }
+    if (draftChapterPlanInputError) {
+      return {
+        canStart: false,
+        reason: draftChapterPlanInputError,
+      };
+    }
+    return {
+      canStart: true,
+      reason: null,
+    };
+  }, [arenaStartCheck, draftChapterPlanInputError]);
+  const continueDisabledReason = useMemo(() => {
+    if (!displayActiveSession) return '请先选择或创建会话';
+    if (!displayLatestActiveChapter) return '请先生成首章';
+    if (hasReachedActiveChapterPlanLimit) {
+      return `该会话已达到计划章节上限（共 ${displayActiveSession.chapterPlan?.totalChapters} 章）`;
+    }
+    return null;
+  }, [displayActiveSession, displayLatestActiveChapter, hasReachedActiveChapterPlanLimit]);
+  const branchDisabledReason = useMemo(() => {
+    if (!displayActiveSession) return '请先选择或创建会话';
+    if (!displayLatestActiveChapter) return '请先生成首章';
+    if (hasReachedActiveChapterPlanLimit) {
+      return `该会话已达到计划章节上限（共 ${displayActiveSession.chapterPlan?.totalChapters} 章）`;
+    }
+    return null;
+  }, [displayActiveSession, displayLatestActiveChapter, hasReachedActiveChapterPlanLimit]);
 
   const buildRequestHeaders = useCallback(
     async (acceptSse = false): Promise<Record<string, string>> => {
@@ -528,6 +660,7 @@ export function useBattleStorySession() {
       sourceChapterId?: string;
       source: BattleStorySessionSource;
       seed: BattleStorySessionSeed;
+      chapterPlan?: BattleStoryChapterPlan;
       workingCombatants: Array<Record<string, unknown>>;
       sessionSummary?: string;
       recentChapters: ReturnType<typeof buildChapterRequestWindow>;
@@ -574,6 +707,7 @@ export function useBattleStorySession() {
             action: input.action,
             ...(input.sourceChapterId ? { sourceChapterId: input.sourceChapterId } : {}),
             ...(typeof input.chapterIndexHint === 'number' ? { chapterIndex: input.chapterIndexHint } : {}),
+            ...(input.chapterPlan ? { chapterPlan: { totalChapters: input.chapterPlan.totalChapters } } : {}),
             chapterContext: {
               sessionSummary: input.sessionSummary,
               recentChapters: input.recentChapters,
@@ -844,8 +978,8 @@ export function useBattleStorySession() {
   );
 
   const handleStartSession = useCallback(async () => {
-    if (!arenaStartCheck.canStart) {
-      setActionError(arenaStartCheck.reason);
+    if (!startSessionCheck.canStart) {
+      setActionError(startSessionCheck.reason);
       return;
     }
 
@@ -873,6 +1007,7 @@ export function useBattleStorySession() {
         seed: snapshot.seed,
         workingCombatants: snapshot.workingCombatants,
         lastChapterInputCombatants: snapshot.workingCombatants,
+        chapterPlan: draftChapterPlan ?? undefined,
       });
       setPendingStartSession(sessionDraft);
 
@@ -881,6 +1016,7 @@ export function useBattleStorySession() {
         action: 'start',
         source: snapshot.source,
         seed: snapshot.seed,
+        chapterPlan: sessionDraft.chapterPlan,
         workingCombatants: snapshot.workingCombatants,
         recentChapters: [],
         sessionSummary: undefined,
@@ -925,13 +1061,14 @@ export function useBattleStorySession() {
       setPendingStartSession(null);
     }
   }, [
-    arenaStartCheck,
     customProviderPayload,
+    draftChapterPlan,
     handleResolveRandomPlaceholders,
     loadSession,
     refreshSessionList,
     refreshSummaryIfNeeded,
     runGeneration,
+    startSessionCheck,
   ]);
 
   const handleContinueSession = useCallback(async () => {
@@ -940,6 +1077,13 @@ export function useBattleStorySession() {
     const latestChapter = [...activeChapters].sort((left, right) => right.index - left.index)[0] ?? null;
     if (!sessionRecord || activeChapters.length === 0) {
       setActionError('当前没有可续写的连续战报会话。');
+      return;
+    }
+    if (willBattleStoryChapterExceedPlan({
+      chapterPlan: sessionRecord.chapterPlan,
+      nextChapterIndex: (latestChapter?.index ?? 0) + 1,
+    })) {
+      setActionError(`该会话已达到计划章节上限（共 ${sessionRecord.chapterPlan?.totalChapters} 章）`);
       return;
     }
 
@@ -951,6 +1095,7 @@ export function useBattleStorySession() {
         sourceChapterId: sessionRecord.lastChapterId ?? undefined,
         source: nextSource,
         seed: sessionRecord.seed,
+        chapterPlan: sessionRecord.chapterPlan,
         workingCombatants:
           Array.isArray(sessionRecord.workingCombatants) && sessionRecord.workingCombatants.length > 0
             ? (sessionRecord.workingCombatants as Array<Record<string, unknown>>)
@@ -1024,6 +1169,13 @@ export function useBattleStorySession() {
       setActionError('当前没有可分支的会话结尾。');
       return;
     }
+    if (willBattleStoryChapterExceedPlan({
+      chapterPlan: sessionRecord.chapterPlan,
+      nextChapterIndex: latestChapter.index + 1,
+    })) {
+      setActionError(`该会话已达到计划章节上限（共 ${sessionRecord.chapterPlan?.totalChapters} 章）`);
+      return;
+    }
 
     try {
       const nextSource = buildProviderSource(sessionRecord.source, customProviderPayload);
@@ -1035,6 +1187,7 @@ export function useBattleStorySession() {
         lastChapterInputCombatants: sessionRecord.workingCombatants,
         sessionSummary: sessionRecord.sessionSummary,
         summaryMeta: sessionRecord.summaryMeta,
+        chapterPlan: sessionRecord.chapterPlan,
         branchOf: {
           sessionId: sessionRecord.id,
           chapterId: latestChapter.id,
@@ -1047,6 +1200,7 @@ export function useBattleStorySession() {
         sourceChapterId: latestChapter.id,
         source: nextSource,
         seed: sessionRecord.seed,
+        chapterPlan: branchDraft.chapterPlan,
         workingCombatants: sessionRecord.workingCombatants as Array<Record<string, unknown>>,
         recentChapters: buildChapterRequestWindow(activeChapters),
         sessionSummary: sessionRecord.sessionSummary,
@@ -1129,6 +1283,7 @@ export function useBattleStorySession() {
         sourceChapterId: latestChapter.id,
         source: nextSource,
         seed: sessionRecord.seed,
+        chapterPlan: sessionRecord.chapterPlan,
         workingCombatants: rewriteInputCombatants,
         recentChapters: buildChapterRequestWindow(activeChapters),
         sessionSummary: sessionRecord.sessionSummary,
@@ -1292,8 +1447,19 @@ export function useBattleStorySession() {
     isDeletingSession,
     isCooldown,
     remainingTime,
-    canStartFromArena: arenaStartCheck.canStart,
-    startDisabledReason: arenaStartCheck.reason,
+    draftChapterPlanMode,
+    setDraftChapterPlanMode,
+    draftChapterPlanInput,
+    setDraftChapterPlanInput,
+    draftChapterPlan,
+    scenarioChapterPlanConfig,
+    activeChapterProgressText,
+    activeChapterPlanSourceLabel,
+    hasReachedActiveChapterPlanLimit,
+    canStartFromArena: startSessionCheck.canStart,
+    startDisabledReason: startSessionCheck.reason,
+    continueDisabledReason,
+    branchDisabledReason,
     handleStartSession,
     handleContinueSession,
     handleBranchSession,

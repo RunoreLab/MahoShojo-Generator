@@ -44,6 +44,43 @@ describe('battle story generate-next validation', () => {
     });
   });
 
+  test('达到计划章节上限后，不允许 continue 或 branch 追加新章', () => {
+    expect(
+      validateBattleStoryGenerateNextInput({
+        action: 'continue',
+        chapterPlan: {
+          totalChapters: 3,
+        },
+        recentChapters: [
+          { id: 'c1', index: 1 },
+          { id: 'c2', index: 2 },
+          { id: 'c3', index: 3 },
+        ],
+      })
+    ).toEqual({
+      ok: false,
+      error: '该会话已达到计划章节上限（共 3 章）',
+    });
+
+    expect(
+      validateBattleStoryGenerateNextInput({
+        action: 'branch',
+        sourceChapterId: 'c3',
+        chapterPlan: {
+          totalChapters: 3,
+        },
+        recentChapters: [
+          { id: 'c1', index: 1 },
+          { id: 'c2', index: 2 },
+          { id: 'c3', index: 3 },
+        ],
+      })
+    ).toEqual({
+      ok: false,
+      error: '该会话已达到计划章节上限（共 3 章）',
+    });
+  });
+
   test('rewrite 只允许最后一章且索引必须保持不变', () => {
     expect(
       validateBattleStoryGenerateNextInput({

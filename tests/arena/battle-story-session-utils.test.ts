@@ -542,4 +542,58 @@ describe('battle story session utils', () => {
     expect(snapshot?.streamUpdateMetaDebug?.source).toBe('inline');
     expect(snapshot?.streamUpdateMetaDebug?.meta?.report?.winner).toBe('白百合');
   });
+
+  test('buildBattleStoryExportMarkdown 会在有章节规划时输出章节进度', () => {
+    const session = createBattleStorySessionRecord({
+      title: '五章战报',
+      source: {
+        mode: 'scenario',
+        language: 'zh-CN',
+        storyLength: 'standard',
+        generationMode: 'stream',
+      },
+      seed: {
+        combatants: [{ name: '白百合' }],
+        settings: {
+          readArenaHistory: true,
+          writeArenaHistory: true,
+          readCurrentState: true,
+          writeCurrentState: true,
+          readNarrativeHistory: false,
+          writeNarrativeHistory: false,
+        },
+      },
+      workingCombatants: [{ name: '白百合' }],
+      chapterPlan: {
+        totalChapters: 5,
+        source: 'scenario',
+        locked: true,
+      },
+    });
+
+    const chapters = [1, 2].map((index) =>
+      createBattleStoryChapterRecord({
+        sessionId: session.id,
+        index,
+        action: index === 1 ? 'start' : 'continue',
+        title: `第${index}章`,
+        markdown: `# 第${index}章\n\n正文`,
+        reportJson: {},
+        deterministicDigest: {
+          chapterTitle: `第${index}章`,
+          bodyExcerpt: `摘要 ${index}`,
+        },
+      })
+    );
+
+    const markdown = buildBattleStoryExportMarkdown(
+      {
+        ...session,
+        chapterCount: 2,
+      },
+      chapters
+    );
+
+    expect(markdown).toContain('章节进度：2 / 5');
+  });
 });

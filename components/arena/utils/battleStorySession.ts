@@ -1,6 +1,7 @@
 'use client';
 
 import { randomUUID } from '@/lib/crypto';
+import { formatBattleStoryChapterProgress } from '@/lib/ai-session/battle-story/plan';
 import type {
   BattleStoryChapterCardSnapshot,
   BattleStoryChapterRecord,
@@ -451,7 +452,12 @@ export const buildBattleStoryExportMarkdown = (
   const header = [
     `# ${normalizeText(session.title) || '未命名连续战报'}`,
     '',
-    `> 模式：${session.source.mode}｜语言：${session.source.language}｜章节数：${activeChapters.length}`,
+    `> 模式：${session.source.mode}｜语言：${session.source.language}｜${
+      session.chapterPlan ? '章节进度' : '章节数'
+    }：${formatBattleStoryChapterProgress({
+      completedChapterCount: activeChapters.length,
+      chapterPlan: session.chapterPlan,
+    })}`,
     `> 会话 ID：${session.id}`,
   ];
 

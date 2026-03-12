@@ -1,8 +1,11 @@
 import type {
+  BattleStoryChapterPlan,
+  BattleStoryChapterPlanLimit,
   BattleStoryDeterministicDigest,
   BattleStoryPromptContextResult,
   BattleStorySessionAction,
 } from '@/lib/ai-session/battle-story/types';
+import { resolveBattleStoryPromptChapterPlanState } from '@/lib/ai-session/battle-story/plan';
 
 const normalizeText = (value: unknown): string => {
   return typeof value === 'string' ? value.trim() : '';
@@ -32,8 +35,20 @@ export const buildBattleStoryInternalGuidance = (params: {
   action: BattleStorySessionAction;
   chapterIndex: number;
   sourceChapterId?: string;
+  chapterPlan?: BattleStoryChapterPlan | BattleStoryChapterPlanLimit | null;
   context: BattleStoryPromptContextResult;
 }): string => {
+  const chapterPlanState =
+    params.context.chapterPlanState ??
+    resolveBattleStoryPromptChapterPlanState({
+      chapterPlan: params.chapterPlan,
+      chapterIndex: params.chapterIndex,
+    });
+  const chapterPlanInstruction = chapterPlanState
+    ? chapterPlanState.isFinalChapter
+      ? `本会话计划共 ${chapterPlanState.totalChapters} 章，当前正在生成第 ${chapterPlanState.currentChapterIndex} 章。本章是终章。请完成主线收束，交代主要冲突结果与角色余波，不要再强行留下“下一章继续”的空钩子。`
+      : `本会话计划共 ${chapterPlanState.totalChapters} 章，当前正在生成第 ${chapterPlanState.currentChapterIndex} 章。本章不是终章。请推进主线，但不要提前把整条故事直接写到最终结局；结尾需要留下可供下一章承接的明确变化、悬念或阶段结果。`
+    : '';
   const parts = [
     '你当前正在生成“连续战报会话”的一个章节。',
     '以下上下文全部属于既定事实，只能在此基础上继续发展，不得否定、覆盖或随意改写。',
@@ -42,6 +57,7 @@ export const buildBattleStoryInternalGuidance = (params: {
       chapterIndex: params.chapterIndex,
       sourceChapterId: params.sourceChapterId,
     }),
+    chapterPlanInstruction,
     '要求：延续角色当前状态、保留已经发生的关键结果、避免机械复述上下文、正文必须仍然是一份可独立阅读的战报。',
     params.context.promptText,
   ];

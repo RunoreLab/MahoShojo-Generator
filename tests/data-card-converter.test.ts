@@ -206,4 +206,56 @@ describe('data-card-converter', () => {
     expect(generalScenario.content).toContain('# scenario_type');
     expect(generalScenario.content).toContain('日常');
   });
+
+  it('preserves _battle_story when converting between scenario and general-scenario', () => {
+    const scenario = {
+      title: '朝生暮死',
+      description: '固定五章',
+      elements: {
+        scene: { time: '破晓前', place: '收容井', features: '静止水滴' },
+        roles: [],
+        events: '解除拘束',
+        atmosphere: '冷酷',
+        development: [],
+      },
+      _battle_story: {
+        total_chapters: 5,
+        plan_mode: 'fixed',
+      },
+    };
+
+    const { data: generalScenario } = convertDataCard(scenario, 'general-scenario', 'scenario');
+    expect((generalScenario as any)._battle_story).toEqual({
+      total_chapters: 5,
+      plan_mode: 'fixed',
+    });
+
+    const { data: structuredScenario } = convertDataCard(generalScenario, 'scenario', 'general-scenario');
+    expect((structuredScenario as any)._battle_story).toEqual({
+      total_chapters: 5,
+      plan_mode: 'fixed',
+    });
+  });
+
+  it('drops _battle_story when converting scenario into character-like templates', () => {
+    const scenario = {
+      title: '固定五章情景',
+      description: '不应污染角色卡',
+      elements: {
+        scene: { time: '夜', place: '塔顶', features: '风很大' },
+        roles: [],
+        events: '交锋',
+        atmosphere: '紧张',
+        development: [],
+      },
+      _battle_story: {
+        total_chapters: 5,
+        plan_mode: 'fixed',
+      },
+    };
+
+    const { data: generalCharacter } = convertDataCard(scenario, 'general', 'scenario');
+    expect((generalCharacter as any)._battle_story).toBeUndefined();
+    expect(generalCharacter.content).not.toContain('_battle_story');
+  });
 });

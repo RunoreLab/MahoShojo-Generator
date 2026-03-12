@@ -1,4 +1,5 @@
 import { z } from 'zod/v3';
+import { ScenarioBattleStoryExtensionSchema } from '@/lib/scenario-battle-story';
 
 export const GENERAL_SCENARIO_TEMPLATE_ID = '通用情景' as const;
 
@@ -33,6 +34,7 @@ export const GeneralScenarioSchema = z.preprocess(
     templateId: z.literal(GENERAL_SCENARIO_TEMPLATE_ID).default(GENERAL_SCENARIO_TEMPLATE_ID),
     title: z.string(),
     content: z.string(),
+    _battle_story: ScenarioBattleStoryExtensionSchema.optional(),
   }).catchall(z.unknown())
 );
 

@@ -56,6 +56,12 @@ describe('battle story prompt context', () => {
           writeNarrativeHistory: true,
         },
       },
+      chapterPlan: {
+        totalChapters: 5,
+        source: 'scenario',
+        locked: true,
+      },
+      chapterIndex: 3,
       workingCombatants: [{ name: '晓雾', current_state: { mood: '紧张' } }],
       sessionSummary: '前两章中，晓雾逐步掌握了战场主动权。',
       recentChapters: [
@@ -73,6 +79,7 @@ describe('battle story prompt context', () => {
 
     expect(result.sections.map((section) => section.key)).toEqual([
       'seed',
+      'chapter-plan',
       'current-state',
       'session-summary',
       'recent-window',
@@ -80,6 +87,7 @@ describe('battle story prompt context', () => {
     ]);
     expect(result.normalizedUserGuidance.length).toBeLessThanOrEqual(120);
     expect(result.promptText).toContain('## 固定种子层');
+    expect(result.promptText).toContain('## 章节规划层');
     expect(result.promptText).toContain('## 本轮用户引导层');
   });
 

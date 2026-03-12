@@ -1,4 +1,5 @@
 import type { BattleStorySessionAction } from '@/lib/ai-session/battle-story/types';
+import { willBattleStoryChapterExceedPlan } from '@/lib/ai-session/battle-story/plan';
 
 export type BattleStoryGenerateNextRecentChapter = {
   id: string;
@@ -9,6 +10,9 @@ export type BattleStoryGenerateNextValidationInput = {
   action: BattleStorySessionAction;
   sourceChapterId?: string;
   chapterIndex?: number;
+  chapterPlan?: {
+    totalChapters: number;
+  };
   recentChapters: BattleStoryGenerateNextRecentChapter[];
 };
 
@@ -59,6 +63,9 @@ export const validateBattleStoryGenerateNextInput = (
     if (input.sourceChapterId && input.sourceChapterId !== latestChapter.id) {
       return { ok: false, error: 'continue 只能基于当前会话的最后一章继续' };
     }
+    if (willBattleStoryChapterExceedPlan({ chapterPlan: input.chapterPlan, nextChapterIndex: expectedChapterIndex })) {
+      return { ok: false, error: `该会话已达到计划章节上限（共 ${input.chapterPlan?.totalChapters} 章）` };
+    }
     if (typeof input.chapterIndex === 'number' && input.chapterIndex !== expectedChapterIndex) {
       return { ok: false, error: `continue 的 chapterIndex 必须为 ${expectedChapterIndex}` };
     }
@@ -73,6 +80,9 @@ export const validateBattleStoryGenerateNextInput = (
       return { ok: false, error: 'branch 的 sourceChapterId 不在当前上下文中' };
     }
     const expectedChapterIndex = sourceChapter.index + 1;
+    if (willBattleStoryChapterExceedPlan({ chapterPlan: input.chapterPlan, nextChapterIndex: expectedChapterIndex })) {
+      return { ok: false, error: `该会话已达到计划章节上限（共 ${input.chapterPlan?.totalChapters} 章）` };
+    }
     if (typeof input.chapterIndex === 'number' && input.chapterIndex !== expectedChapterIndex) {
       return { ok: false, error: `branch 的 chapterIndex 必须为 ${expectedChapterIndex}` };
     }

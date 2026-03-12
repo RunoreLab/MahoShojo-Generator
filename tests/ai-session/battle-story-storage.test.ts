@@ -27,12 +27,22 @@ describe('battle story storage helpers', () => {
         },
       },
       workingCombatants: [{ name: '晓雾' }],
+      chapterPlan: {
+        totalChapters: 5,
+        source: 'scenario',
+        locked: true,
+      },
     });
 
     expect(session.id).toBeString();
     expect(session.title).toBe('未命名连续战报');
     expect(session.chapterCount).toBe(0);
     expect(session.lastChapterId).toBeNull();
+    expect(session.chapterPlan).toEqual({
+      totalChapters: 5,
+      source: 'scenario',
+      locked: true,
+    });
   });
 
   test('createBattleStoryChapterRecord 会生成 active 章节记录', () => {

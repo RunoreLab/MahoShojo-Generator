@@ -5,6 +5,7 @@ import type {
   BattleStorySessionSettings,
   BattleStoryPromptWindowItem,
 } from '@/lib/ai-session/battle-story/types';
+import { resolveBattleStoryPromptChapterPlanState } from '@/lib/ai-session/battle-story/plan';
 
 const DEFAULT_MAX_RECENT_CHAPTERS = 2;
 const DEFAULT_MAX_FULL_CHAPTER_CHARS = 6000;
@@ -155,6 +156,10 @@ export const buildBattleStoryPromptContext = (
   input: BattleStoryPromptContextInput
 ): BattleStoryPromptContextResult => {
   const sections: BattleStoryPromptContextResult['sections'] = [];
+  const chapterPlanState = resolveBattleStoryPromptChapterPlanState({
+    chapterPlan: input.chapterPlan,
+    chapterIndex: input.chapterIndex,
+  });
   const settings = input.seed?.settings;
   const sanitizedSeed = input.seed
     ? {
@@ -176,6 +181,19 @@ export const buildBattleStoryPromptContext = (
         source: input.source ?? null,
         seed: sanitizedSeed ?? null,
       }),
+    });
+  }
+
+  if (chapterPlanState) {
+    sections.push({
+      key: 'chapter-plan',
+      title: '章节规划层',
+      text: [
+        `计划总章节数：${chapterPlanState.totalChapters}`,
+        `当前要生成：第 ${chapterPlanState.currentChapterIndex} 章 / 共 ${chapterPlanState.totalChapters} 章`,
+        `本章定位：${chapterPlanState.positionLabel}`,
+        `剩余章节（含本章）：${chapterPlanState.remainingChaptersIncludingCurrent}`,
+      ].join('\n'),
     });
   }
 
@@ -236,6 +254,7 @@ export const buildBattleStoryPromptContext = (
     .join('\n\n');
 
   return {
+    chapterPlanState,
     normalizedUserGuidance,
     recentWindow,
     sections,

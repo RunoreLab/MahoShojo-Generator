@@ -8,6 +8,7 @@ export type BattleStoryLengthOption = 'default' | 'short' | 'standard' | 'detail
 export type BattleStoryGenerationMode = 'stream';
 export type BattleStorySessionAction = 'start' | 'continue' | 'branch' | 'rewrite';
 export type BattleStoryChapterStatus = 'active' | 'superseded';
+export type BattleStoryChapterPlanSource = 'user' | 'scenario';
 
 export type BattleStorySessionSettings = {
   readArenaHistory: boolean;
@@ -60,6 +61,14 @@ export type BattleStorySessionBranchOf = {
   chapterId: string;
 };
 
+export type BattleStoryChapterPlan = {
+  totalChapters: number;
+  source: BattleStoryChapterPlanSource;
+  locked: boolean;
+};
+
+export type BattleStoryChapterPlanLimit = Pick<BattleStoryChapterPlan, 'totalChapters'>;
+
 export type BattleStorySessionRecord = {
   id: string;
   title: string;
@@ -73,6 +82,7 @@ export type BattleStorySessionRecord = {
   lastChapterId?: string | null;
   lastChapterInputCombatants?: unknown[];
   chapterCount: number;
+  chapterPlan?: BattleStoryChapterPlan;
   branchOf?: BattleStorySessionBranchOf;
   archivedAt?: number;
 };
@@ -159,6 +169,7 @@ export type BattleStoryChapterListOptions = AiSessionListOptions & {
 
 export type BattleStoryPromptSectionKey =
   | 'seed'
+  | 'chapter-plan'
   | 'current-state'
   | 'session-summary'
   | 'recent-window'
@@ -190,6 +201,8 @@ export type BattleStoryPromptChapterInput = {
 export type BattleStoryPromptContextInput = {
   source?: Partial<BattleStorySessionSource>;
   seed?: BattleStorySessionSeed | null;
+  chapterPlan?: BattleStoryChapterPlan | BattleStoryChapterPlanLimit | null;
+  chapterIndex?: number;
   workingCombatants?: unknown[];
   sessionSummary?: string;
   recentChapters?: BattleStoryPromptChapterInput[];
@@ -200,8 +213,18 @@ export type BattleStoryPromptContextInput = {
 };
 
 export type BattleStoryPromptContextResult = {
+  chapterPlanState?: BattleStoryPromptChapterPlanState | null;
   normalizedUserGuidance: string;
   recentWindow: BattleStoryPromptWindowItem[];
   sections: BattleStoryPromptSection[];
   promptText: string;
+};
+
+export type BattleStoryPromptChapterPlanState = {
+  totalChapters: number;
+  currentChapterIndex: number;
+  isFinalChapter: boolean;
+  remainingChaptersIncludingCurrent: number;
+  remainingChaptersAfterCurrent: number;
+  positionLabel: string;
 };
