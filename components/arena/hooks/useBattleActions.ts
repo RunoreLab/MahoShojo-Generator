@@ -3,7 +3,11 @@
 import { useCallback } from 'react';
 
 import { inferTemplate } from '@/lib/data-card-converter';
-import { mapDataCardRuntimeSourceInfo, mapPublicDataCardRowToBattleSelectionPayload } from '@/lib/data-card-read-mappers';
+import {
+  mapDataCardRuntimeSourceInfo,
+  mapPublicDataCardRowToBattleSelectionPayload,
+  stripBattleSelectionTransportMeta,
+} from '@/lib/data-card-read-mappers';
 import { generateRandomCanshou, generateRandomMagicalGirl } from '@/lib/random-character-generator';
 
 import { useBattleStore } from '../stores/useBattleStore';
@@ -23,22 +27,6 @@ import {
 } from '../utils/characterValidator';
 import { parseCombatantsFromText } from '../utils/fileParser';
 import { ScenarioSchema } from '../utils/schemas';
-
-const removePrivateKeys = (obj: any): any => {
-  if (obj === null || typeof obj !== 'object') {
-    return obj;
-  }
-  if (Array.isArray(obj)) {
-    return obj.map(removePrivateKeys);
-  }
-  const cleaned: any = {};
-  for (const key of Object.keys(obj)) {
-    if (!key.startsWith('_')) {
-      cleaned[key] = removePrivateKeys(obj[key]);
-    }
-  }
-  return cleaned;
-};
 
 const verifyOrigin = async (payload: any): Promise<boolean> => {
   const response = await fetch('/api/verify-origin', {
@@ -206,7 +194,7 @@ export const useBattleActions = () => {
         sourceDataCardUsageCount,
       } = mapDataCardRuntimeSourceInfo(cardData);
 
-      const cleanedCardData = removePrivateKeys(cardData);
+      const cleanedCardData = stripBattleSelectionTransportMeta(cardData);
       const resolvedName = getCombatantDisplayName(cleanedCardData);
       const inferredTemplate = inferTemplate(cleanedCardData);
       const targetFilename = `${sourceDataCardName || resolvedName}.json`;
@@ -331,7 +319,7 @@ export const useBattleActions = () => {
         sourceAuthor,
       } = mapDataCardRuntimeSourceInfo(cardData);
 
-      const cleanedCardData = removePrivateKeys(cardData);
+      const cleanedCardData = stripBattleSelectionTransportMeta(cardData);
       const inferredTemplate = inferTemplate(cleanedCardData);
       if (inferredTemplate !== 'scenario' && inferredTemplate !== 'general-scenario') {
         setError('❌ 请选择“情景”类型的数据卡。');
