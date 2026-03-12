@@ -2,6 +2,7 @@
 
 > 关联文档：`docs/AI_CONTINUOUS_DIALOGUE_DESIGN_2026-03-11.md`  
 > 目的：把上一份设计讨论稿进一步收敛为“可实施接口设计”，明确本地会话结构、建议文件落点、API DTO、冷却/限流实现与测试边界，供后续开发直接参考。
+> 章节规划补充：`docs/AI_CONTINUOUS_DIALOGUE_CHAPTER_COUNT_DESIGN_2026-03-12.md`
 
 > 2026-03-11 补充决策：
 >
