@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AI_PROVIDER_CATALOG, type AIProviderOption } from '@/lib/ai/constants';
+import { maskApiKeyForDisplay } from '@/lib/client/mask-api-key';
 import Link from 'next/link';
 
 export interface UserAIProviderConfig {
@@ -150,15 +151,23 @@ const AiProviderSelector: React.FC<AiProviderSelectorProps> = ({
     const [selectedProviderId, setSelectedProviderId] = useState<string>(defaultProviderId);
     const [selectedModel, setSelectedModel] = useState<string>('');
     const [apiKey, setApiKey] = useState<string>('');
+    const [isEditingApiKey, setIsEditingApiKey] = useState<boolean>(false);
     const [isHydrated, setIsHydrated] = useState<boolean>(false);
     const onConfigChangeRef = useRef(onConfigChange);
     const lastEmittedConfigKeyRef = useRef<string>('');
 
     const activeProvider = providerOptions.find(provider => provider.id === selectedProviderId) ?? null;
+    const hasApiKey = apiKey.trim().length > 0;
+    const maskedApiKey = useMemo(() => maskApiKeyForDisplay(apiKey), [apiKey]);
+    const shouldShowMaskedApiKey = hasApiKey && !isEditingApiKey;
 
     useEffect(() => {
         onConfigChangeRef.current = onConfigChange;
     }, [onConfigChange]);
+
+    useEffect(() => {
+        setIsEditingApiKey(false);
+    }, [activeProvider?.id]);
 
     useEffect(() => {
         if (typeof window === 'undefined') {
@@ -381,11 +390,28 @@ const AiProviderSelector: React.FC<AiProviderSelectorProps> = ({
                         <div>
                             <label className="block text-xs font-semibold text-gray-600 mb-1">API Key</label>
                             <input
-                                className="input-field"
-                                placeholder="请输入该供应商的 API Key"
-                                value={apiKey}
+                                className="input-field font-mono"
+                                type={shouldShowMaskedApiKey ? 'text' : 'password'}
+                                placeholder={shouldShowMaskedApiKey ? '' : '请输入该供应商的 API Key'}
+                                value={shouldShowMaskedApiKey ? maskedApiKey : apiKey}
+                                readOnly={shouldShowMaskedApiKey}
+                                autoComplete="off"
+                                spellCheck={false}
+                                onFocus={() => {
+                                    if (hasApiKey) {
+                                        setIsEditingApiKey(true);
+                                    }
+                                }}
                                 onChange={(event) => setApiKey(event.target.value)}
+                                onBlur={(event) => {
+                                    if (event.target.value.trim()) {
+                                        setIsEditingApiKey(false);
+                                    }
+                                }}
                             />
+                            <p className="mt-1 text-xs text-gray-500">
+                                已默认隐藏完整 Key，仅显示前 6 位；点击输入框可直接修改。
+                            </p>
                             <p className="mt-1 text-xs text-gray-500">
                                 API Key 仅存储于本地浏览器；请求时会随 HTTPS 发送到边缘函数用于转发调用，不会写入数据库或日志。
                             </p>
