@@ -123,4 +123,51 @@ describe('问卷实例作用域', () => {
     expect(resolved[1]?.question.options).toEqual(['A', 'B']);
     expect(resolved[3]?.question.options).toEqual(['X', 'Y']);
   });
+
+  it('toEnd 只结束当前问卷实例，不会截断后续问卷', () => {
+    const items: TestQuestionItem[] = [
+      {
+        key: 'cloud::intro',
+        questionnaireId: 'cloud',
+        questionnaireScopeId: 'cloud',
+        question: {
+          id: 'intro',
+          question: '云端入口题',
+          jump: {
+            when: {
+              questionId: 'intro',
+              operator: 'equals',
+              value: '',
+            },
+            toEnd: true,
+          },
+        },
+      },
+      {
+        key: 'cloud::tail',
+        questionnaireId: 'cloud',
+        questionnaireScopeId: 'cloud',
+        question: {
+          id: 'tail',
+          question: '云端尾题',
+        },
+      },
+      {
+        key: 'preset::start',
+        questionnaireId: 'preset',
+        questionnaireScopeId: 'preset',
+        question: {
+          id: 'start',
+          question: '预设起始题',
+        },
+      },
+    ];
+
+    const result = buildQuestionnaireFlow(items as any, {});
+
+    expect(result.flow.map((item) => item.key)).toEqual([
+      'cloud::intro',
+      'preset::start',
+    ]);
+  });
 });

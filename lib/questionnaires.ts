@@ -449,6 +449,14 @@ export const buildQuestionnaireFlow = <T extends QuestionFlowItem>(
       }
       return null;
     };
+    const findNextVisibleOutsideScope = (startIndex: number, questionnaireScopeId: string) => {
+      for (let i = startIndex + 1; i < items.length; i += 1) {
+        const nextScopeId = items[i]?.questionnaireScopeId?.trim() || items[i]?.questionnaireId;
+        if (nextScopeId === questionnaireScopeId) continue;
+        if (visibleFlags[i]) return i;
+      }
+      return null;
+    };
 
     const firstIndex = findVisibleFromIndex(0);
     if (firstIndex === null) {
@@ -472,7 +480,13 @@ export const buildQuestionnaireFlow = <T extends QuestionFlowItem>(
       }
 
       const jumpTargetKey = resolveJumpTargetKey(item.question.jump, activeAnswers, lookup, item);
-      if (jumpTargetKey === 'END') break;
+      if (jumpTargetKey === 'END') {
+        const currentScopeId = item.questionnaireScopeId?.trim() || item.questionnaireId;
+        const nextIndex = findNextVisibleOutsideScope(index, currentScopeId);
+        if (nextIndex === null) break;
+        index = nextIndex;
+        continue;
+      }
 
       let nextIndex: number | null = null;
       if (jumpTargetKey) {
