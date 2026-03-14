@@ -162,11 +162,13 @@ export const buildQuestionKey = (questionnaireId: string | undefined, questionId
 type QuestionFlowItem = {
   key: string;
   questionnaireId: string;
+  questionnaireScopeId?: string;
   question: QuestionnaireQuestion;
 };
 
 type QuestionLookup = {
   keyByCompositeId: Map<string, string>;
+  keyByScopeCompositeId: Map<string, string>;
   keysByQuestionId: Map<string, string[]>;
   indexByKey: Map<string, number>;
 };
@@ -219,6 +221,7 @@ const isJumpRule = (value: unknown): value is QuestionnaireJumpRule =>
 
 const buildQuestionLookup = <T extends QuestionFlowItem>(items: T[]): QuestionLookup => {
   const keyByCompositeId = new Map<string, string>();
+  const keyByScopeCompositeId = new Map<string, string>();
   const keysByQuestionId = new Map<string, string[]>();
   const indexByKey = new Map<string, number>();
 
@@ -226,6 +229,11 @@ const buildQuestionLookup = <T extends QuestionFlowItem>(items: T[]): QuestionLo
     indexByKey.set(item.key, index);
     const questionId = item.question.id?.trim();
     if (!questionId) return;
+    const questionnaireScopeId = item.questionnaireScopeId?.trim() || item.questionnaireId;
+    const scopeComposite = `${questionnaireScopeId}::${questionId}`;
+    if (!keyByScopeCompositeId.has(scopeComposite)) {
+      keyByScopeCompositeId.set(scopeComposite, item.key);
+    }
     const composite = `${item.questionnaireId}::${questionId}`;
     if (!keyByCompositeId.has(composite)) {
       keyByCompositeId.set(composite, item.key);
@@ -235,16 +243,51 @@ const buildQuestionLookup = <T extends QuestionFlowItem>(items: T[]): QuestionLo
     keysByQuestionId.set(questionId, existing);
   });
 
-  return { keyByCompositeId, keysByQuestionId, indexByKey };
+  return { keyByCompositeId, keyByScopeCompositeId, keysByQuestionId, indexByKey };
 };
 
-const resolveKeyFromRef = (ref: QuestionnaireQuestionRef | undefined, lookup: QuestionLookup): string | null => {
+const resolveKeyFromRef = (
+  ref: QuestionnaireQuestionRef | undefined,
+  lookup: QuestionLookup,
+  sourceItem?: Pick<QuestionFlowItem, 'questionnaireId' | 'questionnaireScopeId'>
+): string | null => {
   if (!ref) return null;
+
+  const sourceCanonicalId = sourceItem?.questionnaireId?.trim() ?? '';
+  const sourceScopeId = sourceItem?.questionnaireScopeId?.trim() || sourceCanonicalId;
+  const resolveScopedComposite = (questionnaireId: string, questionId: string): string | null => {
+    const trimmedQuestionnaireId = questionnaireId.trim();
+    const trimmedQuestionId = questionId.trim();
+    if (!trimmedQuestionnaireId || !trimmedQuestionId) return null;
+
+    if (sourceScopeId && sourceCanonicalId && trimmedQuestionnaireId === sourceCanonicalId) {
+      const sourceScoped = lookup.keyByScopeCompositeId.get(`${sourceScopeId}::${trimmedQuestionId}`);
+      if (sourceScoped) return sourceScoped;
+    }
+
+    const directScoped = lookup.keyByScopeCompositeId.get(`${trimmedQuestionnaireId}::${trimmedQuestionId}`);
+    if (directScoped) return directScoped;
+
+    return lookup.keyByCompositeId.get(`${trimmedQuestionnaireId}::${trimmedQuestionId}`) ?? null;
+  };
+  const resolveQuestionIdInScope = (questionId: string): string | null => {
+    const trimmedQuestionId = questionId.trim();
+    if (!sourceScopeId || !trimmedQuestionId) return null;
+    return lookup.keyByScopeCompositeId.get(`${sourceScopeId}::${trimmedQuestionId}`) ?? null;
+  };
 
   if (typeof ref === 'string') {
     if (lookup.indexByKey.has(ref)) return ref;
-    if (lookup.keyByCompositeId.has(ref)) return lookup.keyByCompositeId.get(ref) ?? null;
-    const keys = lookup.keysByQuestionId.get(ref);
+    const trimmed = ref.trim();
+    const separatorIndex = trimmed.indexOf('::');
+    if (separatorIndex > 0) {
+      const scopedComposite = resolveScopedComposite(trimmed.slice(0, separatorIndex), trimmed.slice(separatorIndex + 2));
+      if (scopedComposite) return scopedComposite;
+    }
+    const scopedQuestion = resolveQuestionIdInScope(trimmed);
+    if (scopedQuestion) return scopedQuestion;
+    if (lookup.keyByCompositeId.has(trimmed)) return lookup.keyByCompositeId.get(trimmed) ?? null;
+    const keys = lookup.keysByQuestionId.get(trimmed);
     if (keys && keys.length === 1) return keys[0];
     return null;
   }
@@ -254,11 +297,13 @@ const resolveKeyFromRef = (ref: QuestionnaireQuestionRef | undefined, lookup: Qu
   }
 
   if (ref.questionnaireId && ref.questionId) {
-    const composite = `${ref.questionnaireId}::${ref.questionId}`;
-    if (lookup.keyByCompositeId.has(composite)) return lookup.keyByCompositeId.get(composite) ?? null;
+    const scopedComposite = resolveScopedComposite(ref.questionnaireId, ref.questionId);
+    if (scopedComposite) return scopedComposite;
   }
 
   if (ref.questionId) {
+    const scopedQuestion = resolveQuestionIdInScope(ref.questionId);
+    if (scopedQuestion) return scopedQuestion;
     const keys = lookup.keysByQuestionId.get(ref.questionId);
     if (keys && keys.length === 1) return keys[0];
   }
@@ -278,25 +323,26 @@ const evaluateCondition = (
   raw: QuestionnaireCondition | QuestionnaireCondition[] | undefined,
   answersByKey: Record<string, string>,
   lookup: QuestionLookup,
-  fallbackResult: boolean
+  fallbackResult: boolean,
+  sourceItem?: Pick<QuestionFlowItem, 'questionnaireId' | 'questionnaireScopeId'>
 ): boolean => {
   if (!raw) return true;
   const condition = Array.isArray(raw) ? { all: raw } : raw;
   if (!condition || typeof condition !== 'object') return fallbackResult;
 
   if (condition.not) {
-    return !evaluateCondition(condition.not, answersByKey, lookup, fallbackResult);
+    return !evaluateCondition(condition.not, answersByKey, lookup, fallbackResult, sourceItem);
   }
 
   if (Array.isArray(condition.all) && condition.all.length > 0) {
-    return condition.all.every((item) => evaluateCondition(item, answersByKey, lookup, fallbackResult));
+    return condition.all.every((item) => evaluateCondition(item, answersByKey, lookup, fallbackResult, sourceItem));
   }
 
   if (Array.isArray(condition.any) && condition.any.length > 0) {
-    return condition.any.some((item) => evaluateCondition(item, answersByKey, lookup, fallbackResult));
+    return condition.any.some((item) => evaluateCondition(item, answersByKey, lookup, fallbackResult, sourceItem));
   }
 
-  const key = resolveKeyFromRef(condition, lookup);
+  const key = resolveKeyFromRef(condition, lookup, sourceItem);
   if (!key) return fallbackResult;
   const answer = String(answersByKey[key] ?? '');
   const values = normalizeConditionValue(condition.value);
@@ -340,15 +386,16 @@ const normalizeJumpRules = (raw: QuestionnaireJumpRule | QuestionnaireJumpRule[]
 const resolveJumpTargetKey = (
   raw: QuestionnaireJumpRule | QuestionnaireJumpRule[] | undefined,
   answersByKey: Record<string, string>,
-  lookup: QuestionLookup
+  lookup: QuestionLookup,
+  sourceItem?: Pick<QuestionFlowItem, 'questionnaireId' | 'questionnaireScopeId'>
 ): string | 'END' | null => {
   const rules = normalizeJumpRules(raw);
   for (const rule of rules) {
     if (!rule || !rule.when) continue;
-    const matched = evaluateCondition(rule.when, answersByKey, lookup, false);
+    const matched = evaluateCondition(rule.when, answersByKey, lookup, false, sourceItem);
     if (!matched) continue;
     if (rule.toEnd) return 'END';
-    const targetKey = resolveKeyFromRef(rule.to, lookup);
+    const targetKey = resolveKeyFromRef(rule.to, lookup, sourceItem);
     if (targetKey) return targetKey;
   }
   return null;
@@ -360,8 +407,8 @@ export const resolveQuestionnaireReferences = <T extends QuestionFlowItem>(items
   return items.map((item) => {
     const sourceRef = item.question.optionsFrom;
     const suggestionsRef = item.question.suggestionsFrom;
-    const nextOptionsKey = resolveKeyFromRef(sourceRef, lookup);
-    const nextSuggestionsKey = resolveKeyFromRef(suggestionsRef, lookup);
+    const nextOptionsKey = resolveKeyFromRef(sourceRef, lookup, item);
+    const nextSuggestionsKey = resolveKeyFromRef(suggestionsRef, lookup, item);
     if (!nextOptionsKey && !nextSuggestionsKey) return item;
 
     const sourceOptions = nextOptionsKey ? items[lookup.indexByKey.get(nextOptionsKey) ?? -1]?.question.options : undefined;
@@ -389,7 +436,7 @@ export const buildQuestionnaireFlow = <T extends QuestionFlowItem>(
   const lookup = buildQuestionLookup(items);
 
   const computeFlow = (activeAnswers: Record<string, string>) => {
-    const visibleFlags = items.map((item) => evaluateCondition(item.question.displayIf, activeAnswers, lookup, true));
+    const visibleFlags = items.map((item) => evaluateCondition(item.question.displayIf, activeAnswers, lookup, true, item));
     const findNextVisibleIndex = (startIndex: number) => {
       for (let i = startIndex + 1; i < items.length; i += 1) {
         if (visibleFlags[i]) return i;
@@ -424,7 +471,7 @@ export const buildQuestionnaireFlow = <T extends QuestionFlowItem>(
         flow.push(item);
       }
 
-      const jumpTargetKey = resolveJumpTargetKey(item.question.jump, activeAnswers, lookup);
+      const jumpTargetKey = resolveJumpTargetKey(item.question.jump, activeAnswers, lookup, item);
       if (jumpTargetKey === 'END') break;
 
       let nextIndex: number | null = null;

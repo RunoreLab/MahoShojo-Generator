@@ -66,6 +66,7 @@ type QuestionnaireSelection = {
 type QuestionnaireContextItem = {
   key: string;
   questionnaireId: string;
+  questionnaireScopeId: string;
   questionnaireTitle: string;
   indexInQuestionnaire: number;
   question: QuestionnaireQuestion;
@@ -269,13 +270,17 @@ const CanshouPage: React.FC = () => {
 
   const questionnaireItems = useMemo<QuestionnaireContextItem[]>(() => {
     return selectedQuestionnaires.flatMap((selection) =>
-      selection.questionnaire.questions.map((question, index) => ({
-        key: buildQuestionKey(selection.selectionId ?? selection.questionnaire.id, question.id, index),
-        questionnaireId: selection.questionnaire.id,
-        questionnaireTitle: selection.questionnaire.title,
-        indexInQuestionnaire: index,
-        question,
-      }))
+      selection.questionnaire.questions.map((question, index) => {
+        const questionnaireScopeId = selection.selectionId ?? selection.questionnaire.id;
+        return {
+          key: buildQuestionKey(questionnaireScopeId, question.id, index),
+          questionnaireId: selection.questionnaire.id,
+          questionnaireScopeId,
+          questionnaireTitle: selection.questionnaire.title,
+          indexInQuestionnaire: index,
+          question,
+        };
+      })
     );
   }, [selectedQuestionnaires]);
 
