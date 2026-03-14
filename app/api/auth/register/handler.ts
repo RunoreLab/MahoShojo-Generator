@@ -1,4 +1,8 @@
 import { issueActivityToken } from '@/lib/auth/activity-token';
+import {
+  acquireAuthAttemptRateLimit,
+  buildAuthAttemptRateLimitResponse,
+} from '@/lib/auth/attempt-rate-limit';
 import { recordAuthAuditLog } from '@/lib/auth/auth-audit';
 import {
   appendSetCookieHeaders,
@@ -64,6 +68,8 @@ const isValidEmail = (email: string): boolean => {
 };
 
 type RegisterDeps = {
+  acquireAuthAttemptRateLimit: typeof acquireAuthAttemptRateLimit;
+  buildAuthAttemptRateLimitResponse: typeof buildAuthAttemptRateLimitResponse;
   recordAuthAuditLog: typeof recordAuthAuditLog;
   issueActivityToken: typeof issueActivityToken;
   appendSetCookieHeaders: typeof appendSetCookieHeaders;
@@ -85,6 +91,8 @@ type RegisterDeps = {
 };
 
 const defaultRegisterDeps: RegisterDeps = {
+  acquireAuthAttemptRateLimit,
+  buildAuthAttemptRateLimitResponse,
   recordAuthAuditLog,
   issueActivityToken,
   appendSetCookieHeaders,
@@ -346,6 +354,33 @@ const buildRegisterHandler = (deps: RegisterDeps): ((req: Request) => Promise<Re
           },
           503,
         );
+      }
+
+      const rateLimit = deps.acquireAuthAttemptRateLimit({
+        req,
+        actionType: 'register',
+        email: normalizedEmail,
+        username,
+      });
+      if (!rateLimit.allowed) {
+        await deps.recordAuthAuditLog({
+          req,
+          eventType: 'register_failed',
+          authSource: 'better-auth',
+          identifierType:
+            rateLimit.scope === 'email'
+              ? 'email'
+              : rateLimit.scope === 'username'
+                ? 'username'
+                : 'unknown',
+          resultCode: 'RATE_LIMITED',
+          resultMessage: `reason=${rateLimit.reason}`,
+          metadata: {
+            retryAfterSeconds: rateLimit.retryAfterSeconds,
+            scope: rateLimit.scope,
+          },
+        });
+        return deps.buildAuthAttemptRateLimitResponse(rateLimit);
       }
 
       const isTurnstileValid = await deps.verifyTurnstileToken(turnstileToken);

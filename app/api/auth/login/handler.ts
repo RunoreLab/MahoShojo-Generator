@@ -1,4 +1,8 @@
 import { issueActivityToken } from '@/lib/auth/activity-token';
+import {
+  acquireAuthAttemptRateLimit,
+  buildAuthAttemptRateLimitResponse,
+} from '@/lib/auth/attempt-rate-limit';
 import { recordAuthAuditLog } from '@/lib/auth/auth-audit';
 import {
   appendSetCookieHeaders,
@@ -86,6 +90,8 @@ const parsePasswordIdentifier = (
 };
 
 type LoginDeps = {
+  acquireAuthAttemptRateLimit: typeof acquireAuthAttemptRateLimit;
+  buildAuthAttemptRateLimitResponse: typeof buildAuthAttemptRateLimitResponse;
   recordAuthAuditLog: typeof recordAuthAuditLog;
   issueActivityToken: typeof issueActivityToken;
   appendSetCookieHeaders: typeof appendSetCookieHeaders;
@@ -103,6 +109,8 @@ type LoginDeps = {
 };
 
 const defaultLoginDeps: LoginDeps = {
+  acquireAuthAttemptRateLimit,
+  buildAuthAttemptRateLimitResponse,
   recordAuthAuditLog,
   issueActivityToken,
   appendSetCookieHeaders,
@@ -332,6 +340,14 @@ const buildLoginHandler = (deps: LoginDeps): ((req: Request) => Promise<Response
         return json({ error: '登录信息和安全验证不能为空' }, 400);
       }
 
+      const parsedIdentifier = mode === 'password' ? parsePasswordIdentifier(identifier) : null;
+      const auditIdentifierType =
+        mode === 'legacy'
+          ? 'username'
+          : parsedIdentifier
+            ? toAuditIdentifierType(parsedIdentifier.type)
+            : 'unknown';
+
       if (mode === 'password') {
         const availability = deps.getBetterAuthBridgeAvailability();
         if (!availability.available) {
@@ -352,6 +368,27 @@ const buildLoginHandler = (deps: LoginDeps): ((req: Request) => Promise<Response
         }
       }
 
+      const rateLimit = deps.acquireAuthAttemptRateLimit({
+        req,
+        actionType: 'login',
+        identifier,
+      });
+      if (!rateLimit.allowed) {
+        await deps.recordAuthAuditLog({
+          req,
+          eventType: 'login_failed',
+          authSource: auditSource,
+          identifierType: rateLimit.scope === 'identifier' ? auditIdentifierType : 'unknown',
+          resultCode: 'RATE_LIMITED',
+          resultMessage: `reason=${rateLimit.reason}`,
+          metadata: {
+            retryAfterSeconds: rateLimit.retryAfterSeconds,
+            scope: rateLimit.scope,
+          },
+        });
+        return deps.buildAuthAttemptRateLimitResponse(rateLimit);
+      }
+
       const isTurnstileValid = await deps.verifyTurnstileToken(turnstileToken);
       if (!isTurnstileValid) {
         await deps.recordAuthAuditLog({
@@ -367,20 +404,20 @@ const buildLoginHandler = (deps: LoginDeps): ((req: Request) => Promise<Response
         return loginWithLegacyAuthKey(req, identifier, credential);
       }
 
-      const parsedIdentifier = parsePasswordIdentifier(identifier);
-      const email = await resolveEmailByIdentifier(parsedIdentifier);
+      const safeParsedIdentifier = parsedIdentifier ?? parsePasswordIdentifier(identifier);
+      const email = await resolveEmailByIdentifier(safeParsedIdentifier);
       if (!email) {
         await deps.recordAuthAuditLog({
           req,
           eventType: 'login_failed',
           authSource: 'better-auth',
-          identifierType: toAuditIdentifierType(parsedIdentifier.type),
+          identifierType: toAuditIdentifierType(safeParsedIdentifier.type),
           resultCode: 'INVALID_CREDENTIAL',
         });
         return json({ error: '账号或密码错误' }, 401);
       }
 
-      return loginWithBetterAuthPassword(req, email, credential, parsedIdentifier.type);
+      return loginWithBetterAuthPassword(req, email, credential, safeParsedIdentifier.type);
     } catch (error) {
       console.error('Login error:', error);
       await deps.recordAuthAuditLog({
