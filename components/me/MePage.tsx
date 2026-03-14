@@ -41,7 +41,12 @@ export function MePage() {
   const [activeMatchId, setActiveMatchId] = useState<string | null>(null);
   const [showMatchDetails, setShowMatchDetails] = useState(false);
 
-  const [generated, setGenerated] = useState<{ report: NewsReport; generationId?: string; liveBody?: string } | null>(null);
+  const [generated, setGenerated] = useState<{
+    report: NewsReport;
+    generationId?: string;
+    generationMode?: string | null;
+    liveBody?: string;
+  } | null>(null);
   const [showCardModal, setShowCardModal] = useState(false);
 
   const [showProfileCardModal, setShowProfileCardModal] = useState(false);
@@ -67,7 +72,7 @@ export function MePage() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || '重新生成失败');
-      return data as { report: NewsReport; liveBody?: string; generationId?: string };
+      return data as { report: NewsReport; liveBody?: string; generationId?: string; generationMode?: string | null };
     },
     onSuccess: (data) => {
       setGenerated(data);
@@ -188,6 +193,7 @@ export function MePage() {
       <BattleReportCardModal
         isOpen={showCardModal}
         generationId={generated?.generationId ?? null}
+        generationMode={generated?.generationMode ?? null}
         report={generated?.report ?? null}
         liveBody={generated?.liveBody ?? null}
         onClose={() => setShowCardModal(false)}

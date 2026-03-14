@@ -4,6 +4,7 @@ import {
   extractStreamTelemetryMeta,
   extractStreamUpdateMeta,
   findStreamUpdateMetaStart,
+  stripAllStreamMetaComments,
   stripStreamUpdateMetaComment,
 } from '@/lib/arena/stream-meta';
 
@@ -250,6 +251,23 @@ describe('arena stream meta', () => {
     expect(extracted).not.toBeNull();
     expect(extracted!.strippedMarkdown.includes('MAHOSHOJO_TELEMETRY_META')).toBe(false);
     expect(extracted!.strippedMarkdown.includes('正文')).toBe(true);
+  });
+
+  test('stripAllStreamMetaComments removes update and telemetry blocks together', () => {
+    const md = [
+      '# 标题',
+      '',
+      '正文',
+      '',
+      '<!-- MAHOSHOJO_ARENA_META {"version":1,"report":{"headline":"标题","winner":"A"}} -->',
+      '',
+      '<!-- MAHOSHOJO_TELEMETRY_META {"version":1,"usage":{"promptTokens":1}} -->',
+    ].join('\n');
+
+    const stripped = stripAllStreamMetaComments(md);
+    expect(stripped.includes('正文')).toBe(true);
+    expect(stripped.includes('MAHOSHOJO_ARENA_META')).toBe(false);
+    expect(stripped.includes('MAHOSHOJO_TELEMETRY_META')).toBe(false);
   });
 
   test('findStreamUpdateMetaStart finds both comment and loose markers', () => {
