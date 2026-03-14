@@ -8,6 +8,7 @@ import { generateSignature } from '../../lib/signature'; // 导入签名工具
 import { recordUserActivityFromRequest } from '@/lib/user-activity/record';
 import { acquirePublicAiRateLimit, buildPublicAiRateLimitResponse } from '@/lib/ai/public-rate-limit';
 import { OFFICIAL_KEY_QUESTIONNAIRE_CHARACTER_COOLDOWN_MS } from '@/lib/ai/cooldowns';
+import { enforceTextSafety } from '@/lib/content-safety/server';
 
 const log = getLogger('api-gen-girl');
 
@@ -16,6 +17,13 @@ export const config = {
 };
 
 export type MainColor = (typeof MainColor)[keyof typeof MainColor];
+
+export const MAGICAL_GIRL_NAME_MAX_LENGTH = 300;
+
+const GenerateMagicalGirlRequestSchema = z.object({
+  name: z.string().trim().min(1).max(MAGICAL_GIRL_NAME_MAX_LENGTH),
+  language: z.string().trim().min(1).max(32).optional().default('zh-CN'),
+});
 
 // 定义魔法少女生成的 schema（排除 level 相关字段）
 const MagicalGirlGenerationSchema = z.object({
@@ -81,14 +89,15 @@ async function handler(
     });
   }
 
-  const { name, language = 'zh-CN' } = await req.json();
-
-  if (!name || typeof name !== 'string') {
-    return new Response(JSON.stringify({ error: 'Name is required' }), {
+  const parsedBody = GenerateMagicalGirlRequestSchema.safeParse(await req.json().catch(() => null));
+  if (!parsedBody.success) {
+    const hasTooLongName = parsedBody.error.issues.some((issue) => issue.path[0] === 'name' && issue.code === 'too_big');
+    return new Response(JSON.stringify({ error: hasTooLongName ? '名字太长啦，你怎么回事！' : 'Name is required' }), {
       status: 400,
       headers: { 'Content-Type': 'application/json' }
     });
   }
+  const { name, language } = parsedBody.data;
 
   const rateLimit = await acquirePublicAiRateLimit({
     req,
@@ -99,8 +108,22 @@ async function handler(
     return buildPublicAiRateLimitResponse(rateLimit);
   }
 
+  const safetyResponse = await enforceTextSafety({
+    text: name,
+    log,
+    logMeta: {
+      nameLength: name.length,
+      language,
+    },
+    enableAiSafetyCheck: false,
+    sensitiveWordReason: '使用危险符文',
+  });
+  if (safetyResponse) {
+    return safetyResponse;
+  }
+
   try {
-    const magicalGirlData = await generateMagicalGirlWithAI(name.trim(), language);
+    const magicalGirlData = await generateMagicalGirlWithAI(name, language);
     recordUserActivityFromRequest(req);
 
     // 为数据生成签名，并添加模板ID

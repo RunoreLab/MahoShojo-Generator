@@ -69,11 +69,19 @@
 - `pages/free.tsx`
 - `pages/sublimation.tsx`
 
+### 已继续落地的服务端 canonical 输入安全
+
+- `pages/api/generate-magical-girl.ts`
+  - 新增服务端请求体 canonical 解析（含 `trim`、名字长度上限、非法 JSON 兜底）
+  - 新增服务端 `enforceTextSafety(...)`，direct API 不再能绕过前端“逮捕”
+- `pages/api/generate-magical-girl-details.ts`
+  - 非流式问卷生成已与流式路由对齐，服务端会按 canonical 问卷答案逐条执行 `enforceTextSafety(...)`
+  - direct API 不再能通过切换到非流式路由绕过问卷输入安全检查
+
 ### 当前仍然保留的限制与剩余工作
 
 - 当前 public AI 限流仍是实例内 `Map`，不是跨实例、跨冷启动、跨边缘节点的强一致限流。
-- `/api/generate-magical-girl.ts` 的“前端逮捕 -> 服务端 canonical 输入安全”仍未完全补齐，direct API 仍需要补服务端文本安全闭环。
-- 上述补强需要部署到真实站点后，重新做线上复测，才能更新“部署现状”结论。
+- 上述限流与输入安全补强仍需部署到真实站点后，重新做线上复测，才能更新“部署现状”结论。
 
 ## 3. 真实部署站点实测记录
 
@@ -521,6 +529,7 @@ Turnstile 应保留，但不应是唯一保护。
 - 连续战报服务端软限流
   - `pages/api/arena/session/generate-next.ts`
   - `lib/ai-session/rate-limit.ts`
-- 当前仍需继续补强的公开生成链路
+- 本轮已继续补强的公开生成链路
   - `pages/api/generate-magical-girl.ts`
-  - 说明：当前主要剩余缺口是服务端 canonical 输入安全，而不是前端冷却
+  - `pages/api/generate-magical-girl-details.ts`
+  - 说明：direct API 现已命中服务端 canonical 输入安全，后续重点转向部署后复测与跨实例强一致限流

@@ -12,6 +12,7 @@ import { buildJsonResponseWithOptionalAiMeta } from '@/lib/ai/meta-response';
 import { acquirePublicAiRateLimit, buildPublicAiRateLimitResponse, inferPublicAiProviderMode } from '@/lib/ai/public-rate-limit';
 import { type AIProvider } from '@/lib/config';
 import { getDataCardById } from '@/lib/database/data-cards';
+import { enforceTextSafety } from '@/lib/content-safety/server';
 import { recordUserActivityFromRequest } from '@/lib/user-activity/record';
 import presetIndex from '@/public/questionnaires/presets/index.json';
 
@@ -475,14 +476,21 @@ async function handler(req: Request): Promise<Response> {
     });
   }
 
-  const body = await req.json();
-  const rawAnswers = body?.answers;
-  const rawQuestionnaires = body?.questionnaires;
-  const requestedNativeSignature = body?.allowNativeSignature === true;
-  const questionnaireSelections = normalizeQuestionnaireSelections(body?.questionnaireSelections);
+  const body = await req.json().catch(() => null);
+  if (!body || typeof body !== 'object') {
+    return new Response(JSON.stringify({ error: 'Invalid JSON body' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+  const requestBody = body as Record<string, unknown>;
+  const rawAnswers = requestBody.answers;
+  const rawQuestionnaires = requestBody.questionnaires;
+  const requestedNativeSignature = requestBody.allowNativeSignature === true;
+  const questionnaireSelections = normalizeQuestionnaireSelections(requestBody.questionnaireSelections);
   const requiredQuestionnaireIds = extractAnswerQuestionnaireIds(rawAnswers);
-  const language = body?.language ?? 'zh-CN';
-  const customProviderPayload = body?.customProvider;
+  const language = typeof requestBody.language === 'string' && requestBody.language.trim() ? requestBody.language.trim() : 'zh-CN';
+  const customProviderPayload = requestBody.customProvider;
 
   const requestQuestionnaires = normalizeQuestionnaires(rawQuestionnaires);
   let effectiveQuestionnaires = requestQuestionnaires;
@@ -531,7 +539,10 @@ async function handler(req: Request): Promise<Response> {
     if (customProviderPayload) {
       const parsedResult = CustomProviderSchema.safeParse(customProviderPayload);
       if (!parsedResult.success) {
-        log.warn('自定义 AI 供应商配置校验失败', { providerId: customProviderPayload?.providerId, issues: parsedResult.error.issues });
+        const providerId = customProviderPayload && typeof customProviderPayload === 'object' && typeof (customProviderPayload as { providerId?: unknown }).providerId === 'string'
+          ? (customProviderPayload as { providerId: string }).providerId
+          : undefined;
+        log.warn('自定义 AI 供应商配置校验失败', { providerId, issues: parsedResult.error.issues });
         return new Response(JSON.stringify({ error: '自定义 AI 供应商配置无效' }), { status: 400 });
       }
 
@@ -579,6 +590,20 @@ async function handler(req: Request): Promise<Response> {
       providerMode: inferPublicAiProviderMode(customProviderPayload),
     });
     if (!rateLimit.allowed) return buildPublicAiRateLimitResponse(rateLimit);
+
+    for (const answerItem of normalizedAnswers) {
+      const safetyResponse = await enforceTextSafety({
+        text: answerItem.answer,
+        log,
+        logMeta: {
+          questionId: answerItem.questionId,
+          questionnaireId: answerItem.questionnaireId,
+        },
+        enableAiSafetyCheck: false,
+        sensitiveWordReason: '在问卷中使用了危险符文',
+      });
+      if (safetyResponse) return safetyResponse;
+    }
 
     const shouldDisablePolling = customProviderId !== null && customProviderId !== 'system';
     // 直接调用AI生成，不再入队
