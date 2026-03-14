@@ -66,6 +66,10 @@ const gradientColors: Record<string, { first: string; second: string }> = {
 
 const NAME_PREFERENCE_KEY = 'mahoshojo.name.preferences.v1';
 
+type RateLimitError = Error & {
+  retryAfterSeconds?: number;
+};
+
 function seedRandom(str: string): number {
   let hash = 0;
   for (let i = 0; i < str.length; i++) {
@@ -114,8 +118,11 @@ async function generateMagicalGirl(inputName: string, language: string): Promise
       const error = payload && typeof payload === 'object' ? (payload as any) : null;
       // 处理不同的 HTTP 状态码
       if (response.status === 429) {
-        const retryAfter = error?.retryAfter || 60;
-        throw new Error(`请求过于频繁（HTTP 429）！请等待 ${retryAfter} 秒后再试。`);
+        const retryAfterRaw = error?.retryAfterSeconds ?? error?.retryAfter ?? response.headers.get('Retry-After') ?? 60;
+        const retryAfter = Math.max(1, Number.parseInt(String(retryAfterRaw), 10) || 60);
+        const rateLimitError = new Error(`请求过于频繁（HTTP 429）！请等待 ${retryAfter} 秒后再试。`) as RateLimitError;
+        rateLimitError.retryAfterSeconds = retryAfter;
+        throw rateLimitError;
       } else if (response.status === 524) {
         throw new Error('Cloudflare 超时（HTTP 524），请稍后重试。');
       } else {
@@ -217,6 +224,7 @@ export default function Name() {
     }
     setIsGenerating(true);
     setError(null);
+    let nextCooldownMs = 60000;
 
     try {
       const result = await generateMagicalGirl(inputName.trim(), selectedLanguage);
@@ -227,7 +235,12 @@ export default function Name() {
         const errorMessage = error.message;
         // 检查是否是 rate limit 错误
         if (errorMessage.includes('请求过于频繁')) {
-          setError('🚫 请求太频繁了！每2分钟只能生成一次魔法少女哦~请稍后再试吧！');
+          const retryAfterSeconds =
+            error && typeof (error as RateLimitError).retryAfterSeconds === 'number'
+              ? Math.max(1, Math.ceil((error as RateLimitError).retryAfterSeconds as number))
+              : 60;
+          nextCooldownMs = retryAfterSeconds * 1000;
+          setError(`🚫 请求太频繁了！请等待 ${retryAfterSeconds} 秒后再试吧~`);
         } else if (errorMessage.includes('网络')) {
           setError('🌐 网络连接有问题！请检查网络后重试~');
         } else {
@@ -238,7 +251,7 @@ export default function Name() {
       }
     } finally {
       setIsGenerating(false);
-      startCooldown();
+      startCooldown(nextCooldownMs);
     }
   };
 

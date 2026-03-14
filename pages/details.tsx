@@ -79,6 +79,10 @@ type JsonSaveMode = 'download' | 'text';
 type ImageSaveMode = 'download' | 'modal';
 type DeviceType = 'mobile' | 'desktop' | 'unknown';
 
+type RateLimitError = Error & {
+  retryAfterSeconds?: number;
+};
+
 interface MagicalGirlDetails {
   codename: string;
   appearance: {
@@ -1306,6 +1310,7 @@ const DetailsPage: React.FC = () => {
     setStreamingReasoning(null);
     setNonStreamReasoning(null);
     setCharacterPortraitAsset(null);
+    let nextCooldownMs = generatorCooldownMs;
 
     if (await checkSensitiveWordsForAnswers(finalAnswerItems)) return;
 
@@ -1378,8 +1383,11 @@ const DetailsPage: React.FC = () => {
           return;
         }
         else if (response.status === 429) {
-          const retryAfter = errorData?.retryAfter || 60;
-          throw new Error(`请求过于频繁（HTTP 429）！请等待 ${retryAfter} 秒后再试。`);
+          const retryAfterRaw = errorData?.retryAfterSeconds ?? errorData?.retryAfter ?? response.headers.get('Retry-After') ?? 60;
+          const retryAfter = Math.max(1, Number.parseInt(String(retryAfterRaw), 10) || 60);
+          const rateLimitError = new Error(`请求过于频繁（HTTP 429）！请等待 ${retryAfter} 秒后再试。`) as RateLimitError;
+          rateLimitError.retryAfterSeconds = retryAfter;
+          throw rateLimitError;
         } else if (response.status === 524) {
           throw new Error('Cloudflare 超时（HTTP 524），请稍后重试。');
         } else {
@@ -1467,7 +1475,11 @@ const DetailsPage: React.FC = () => {
 
         // 检查是否是 rate limit 错误
         if (errorMessage.includes('请求过于频繁')) {
-          const cooldownSeconds = Math.ceil(generatorCooldownMs / 1000);
+          const cooldownSeconds =
+            typeof (error as RateLimitError).retryAfterSeconds === 'number'
+              ? Math.max(1, Math.ceil((error as RateLimitError).retryAfterSeconds as number))
+              : Math.ceil(generatorCooldownMs / 1000);
+          nextCooldownMs = cooldownSeconds * 1000;
           setError(
             isUserCustomKey
               ? `🚫 自定义通道请求太频繁啦！每 ${cooldownSeconds} 秒生成一次就好～`
@@ -1484,7 +1496,7 @@ const DetailsPage: React.FC = () => {
     } finally {
       setSubmitting(false);
       // 依据当前通道实时覆盖冷却时间，确保自定义 AI 时降为 3 秒
-      startCooldown(generatorCooldownMs);
+      startCooldown(nextCooldownMs);
     }
   };
 

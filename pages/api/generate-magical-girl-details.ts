@@ -9,6 +9,7 @@ import { compactQuestionnaireAnswerItems, formatQuestionnaireAnswers, normalizeU
 import { getAnswerLimitInfo, isAnswerOverLimit } from '@/lib/questionnaire-limits';
 import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
 import { buildJsonResponseWithOptionalAiMeta } from '@/lib/ai/meta-response';
+import { acquirePublicAiRateLimit } from '@/lib/ai/public-rate-limit';
 import { type AIProvider } from '@/lib/config';
 import { getDataCardById } from '@/lib/database/data-cards';
 import { recordUserActivityFromRequest } from '@/lib/user-activity/record';
@@ -570,6 +571,30 @@ async function handler(req: Request): Promise<Response> {
           skipProbability: 0,
         };
       }
+    }
+
+    const rateLimit = await acquirePublicAiRateLimit({
+      req,
+      actionType: 'magical_girl_details_generate',
+      providerMode: customProviderId !== null && customProviderId !== 'system' ? 'custom' : 'system',
+    });
+    if (!rateLimit.allowed) {
+      return new Response(
+        JSON.stringify({
+          error: `请求过于频繁，请在 ${rateLimit.retryAfterSeconds} 秒后重试`,
+          reason: rateLimit.reason,
+          retryAfter: rateLimit.retryAfterSeconds,
+          retryAfterSeconds: rateLimit.retryAfterSeconds,
+        }),
+        {
+          status: 429,
+          headers: {
+            'Content-Type': 'application/json',
+            'Cache-Control': 'no-store',
+            'Retry-After': String(rateLimit.retryAfterSeconds),
+          },
+        }
+      );
     }
 
     const shouldDisablePolling = customProviderId !== null && customProviderId !== 'system';
