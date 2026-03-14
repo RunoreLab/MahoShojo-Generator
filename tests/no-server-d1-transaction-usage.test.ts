@@ -13,7 +13,11 @@ type TransactionViolation = {
 const repoRoot = process.cwd();
 const sourceRoots = ['app', 'components', 'lib', 'pages', 'scripts'];
 const sourceExtensions = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs']);
-const allowedTransactionFiles = new Set(['lib/magic-tea-party/storage.ts']);
+const allowedTransactionFiles = new Set([
+  // 仅允许浏览器端 IndexedDB 存储模块使用 transaction。
+  'lib/magic-tea-party/storage.ts',
+  'lib/ai-session/battle-story/storage.ts',
+]);
 
 const isObjectRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null;
