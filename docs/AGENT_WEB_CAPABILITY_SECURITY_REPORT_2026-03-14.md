@@ -14,9 +14,9 @@
 
 本次测试刻意保持低频和低风险：
 
-- 只做了 1 次匿名网页生成和 1 次匿名直调接口复测。
+- 只做了 1 次匿名网页生成、1 组 `/api/generate-magical-girl` 低频双击采样、1 次超长输入校验、1 次敏感词样本校验。
 - 只做了少量无效鉴权探测，不创建真实账号。
-- 不进行批量注册、不做高频压测、不提交敏感内容。
+- 不进行批量注册、不做高频压测、不提交持久化敏感内容。
 
 ## 2. 结论摘要
 
@@ -27,7 +27,21 @@
 - 仓库内已经继续完成“公开生成 canonical 限流 + 注册/登录应用层速率保护”的第 1 阶段补强，但都仍需部署后复测，且当前实现仍未达到跨实例强一致。
 - 结论上，当前项目已经具备“限制匿名 Agent 直接撞账号体系”的基础门槛，但距离“对 Agent 安全开放网站能力”还有明显差距，尤其是统一服务端限流、统一服务端安全校验、以及针对 Agent 的最小权限化能力边界还没有完全建立。
 
-## 2.1 仓库内补强进展（2026-03-14，本地代码已落地，待部署后复测）
+## 2.1 第 1 阶段补强后的线上采样复测（2026-03-14 第二轮）
+
+- `/api/generate-magical-girl` 已确认存在服务端 canonical 输入校验：
+  - 301 字名字会返回 `400` JSON：`{"error":"名字太长啦，你怎么回事！"}`
+  - 敏感词样本会返回 `400` JSON：`{"error":"输入内容不合规","shouldRedirect":true,"reason":"使用危险符文"}`
+- 这说明 `/name` 至少在本次抽样路径上，direct API 已不能再通过“绕过前端按钮”来绕过名字长度校验与敏感词“逮捕”。
+- 但在“合法输入连续直调”的复测里，当前线上先触发的是 Cloudflare 平台层 `1015`：
+  - 第二次请求返回 `429`
+  - `Retry-After: 10`
+  - `content-type: text/plain; charset=UTF-8`
+  - 响应体为 `error code: 1015`
+- 这说明真实站点已经存在平台层抗滥用保护，但本次没有观察到应用层 canonical JSON `429`；因此“应用层限流是否已稳定部署到线上”目前仍不能下结论，且应用层 / 平台层 / 前端的限流语义仍不一致。
+- 另外，公开 HTML 页面当前仍未看到 `Content-Security-Policy`、`Strict-Transport-Security`、`X-Frame-Options` / `frame-ancestors`、`Permissions-Policy` 等关键浏览器安全响应头；浏览器侧硬化仍明显不足。
+
+## 2.2 仓库内补强进展（2026-03-14，本地代码已落地，待部署后复测）
 
 以下内容是本次评估后在仓库内已经完成的补强，不代表 `https://mahoshojo.colanns.me/` 在本次实测时已经具备这些能力；线上仍需部署后再复测确认。
 
@@ -195,6 +209,83 @@
 - 该页面的冷却更多是“网页前端约束”，不是“服务端硬约束”。
 - 这类能力对 Agent 是开放的，而且可以被直接接口化调用。
 
+### 3.5 第 1 阶段补强后的追加采样复测
+
+本轮对 `/api/generate-magical-girl` 做了 3 组低频样本：
+
+#### 1) 服务端名字长度校验已在线可见
+
+- `POST /api/generate-magical-girl`
+  - 请求体：`name = 301` 个字符
+  - 返回：`400`
+  - 返回内容：`{"error":"名字太长啦，你怎么回事！"}`
+
+这说明：
+
+- `/name` 路由的 canonical 请求体解析与长度上限校验已在线上生效。
+- direct API 不能再绕过前端名字长度限制。
+
+#### 2) 服务端敏感词“逮捕”已在线可见
+
+- `POST /api/generate-magical-girl`
+  - 请求体：`name = 我来自中華帝國。`
+  - 返回：`400`
+  - 返回内容：`{"error":"输入内容不合规","shouldRedirect":true,"reason":"使用危险符文"}`
+
+这说明：
+
+- `/name` 路由至少在本次样本上，已经会在服务端执行输入安全检查。
+- direct API 不能再像早先那样，仅通过绕开前端按钮就跳过敏感词拦截。
+
+#### 3) 合法请求的重复直调目前先撞到 Cloudflare `1015`
+
+- 第 1 次合法请求：客户端 5 秒内未收到响应，`curl` 视角为 `000`
+- 紧接着第 2 次合法请求：
+  - 返回：`429`
+  - `Retry-After: 10`
+  - `content-type: text/plain; charset=UTF-8`
+  - 返回体：`error code: 1015`
+
+这说明：
+
+- 当前线上已经有平台层抗滥用保护，不再是完全“裸直调”。
+- 但本次观测到的是 Cloudflare 平台层 `429`，不是仓库里 `buildPublicAiRateLimitResponse(...)` 产出的 canonical JSON `429`。
+- 因此，应用层限流是否已真正上线，或是否被平台层更早拦截，本次仍无法完全区分。
+- 即使平台层保护存在，应用层 / 平台层 / 前端如果不统一，仍会带来调试、观测、审计与用户提示上的不一致。
+
+#### 4) 浏览器安全响应头仍有明显补强空间
+
+对 `/` 与 `/character-manager` 执行 `curl -I` 观察到：
+
+- 已有：
+  - `Referrer-Policy: strict-origin-when-cross-origin`
+  - `X-Content-Type-Options: nosniff`
+- 未观察到：
+  - `Content-Security-Policy`
+  - `Strict-Transport-Security`
+  - `X-Frame-Options`
+  - `Permissions-Policy`
+- 公开 HTML 响应当前带有：
+  - `Access-Control-Allow-Origin: *`
+
+这说明：
+
+- 当前浏览器侧仍缺少 clickjacking、防内联脚本滥用、HTTPS 强制与能力最小化等常规硬化。
+- `Access-Control-Allow-Origin: *` 出现在 HTML 页面上虽不等同于直接漏洞，但属于不必要的放宽，建议收敛。
+
+#### 5) 匿名页面自举会触发 `POST /api/auth/verify` 的 `401` 控制台噪声
+
+在首页与 `/character-manager` 的匿名浏览器实测里：
+
+- 页面加载会发起 `POST /api/auth/verify`
+- 未登录时返回 `401`
+- 浏览器控制台会出现失败日志
+
+这说明：
+
+- 这不是高危安全漏洞，但会增加匿名访问时的噪声与监控误报成本。
+- 若后续要建设 Agent 能力边界，最好让匿名态自举更安静、更显式。
+
 ## 4. Agent 能力范围判断
 
 下表区分三类 Agent：
@@ -296,31 +387,32 @@
 
 ### 当前仍然明显不足，或仅完成仓库内第 1 阶段补强的部分
 
-#### 1) 部分公共生成接口只有前端冷却，缺少等价服务端冷却
+#### 1) `/name` 的服务端输入安全已在线上可见，但“合法请求冷却”仍未观测到应用层 canonical `429`
 
-最明确的实例就是 `/name`：
+本次追加复测显示：
 
-- 前端页面 `pages/name.tsx` 使用 `useCooldown('generateMagicalGirlCooldown', 60000)`。
-- 但服务端 `pages/api/generate-magical-girl.ts` 明确移除了原有限流/队列逻辑。
-- 线上实测中，网页刚进入冷却后，直调接口仍然返回 `200` 且无 `Retry-After`。
-
-结论：
-
-- 当前“冷却”并不能阻止 direct API Agent。
-- 这与“Agent 不能绕过冷却”这一目标不一致。
-
-#### 2) 真实部署站点实测时，部分输入“逮捕”仍可被 direct API 绕过；仓库内已完成第 1 阶段修补
-
-本次线上实测对应的风险点仍然是 `/name`：
-
-- 线上实测当时，前端 `pages/name.tsx` 会先调用 `getSensitiveWordRedirectTarget(...)`。
-- 本次评估后的仓库代码里，`pages/api/generate-magical-girl.ts` 已补上 canonical 请求体解析与 `enforceTextSafety(...)`。
-- `pages/api/generate-magical-girl-details.ts` 的非流式问卷生成也已与流式路由对齐，补上服务端逐条输入安全检查。
+- `/api/generate-magical-girl` 对超长名字会直接返回 `400 JSON`
+- `/api/generate-magical-girl` 对敏感词样本会直接返回 `400 JSON`
+- 但对合法输入的重复直调，当前线上先出现的是 Cloudflare `1015`，不是应用层 JSON `429`
 
 结论：
 
-- “部分链路只靠前端逮捕”的判断对本次真实部署站点实测是成立的。
-- 但对当前仓库代码而言，这一缺口已经开始收敛；接下来的重点是部署后复测，确认 direct API 侧确实不能再绕过。
+- 不能再简单说 `/name` 仍是“只有前端逮捕”的状态；服务端输入安全已至少在抽样路径上生效。
+- 但“应用层 canonical 限流是否已在线稳定生效”仍没有在真实站点上被直接观测到。
+- 对 direct API Agent 而言，当前碰到的是“平台层 1015 + 前端本地冷却”的组合，而不是统一、可审计的应用层 `429` 契约。
+
+#### 2) 其他公开生成链路仍不能只凭本次 `/name` 抽样就默认视为全部补强完成
+
+本次线上采样只额外覆盖了 `/api/generate-magical-girl`：
+
+- 仓库代码里，`pages/api/generate-magical-girl-details.ts` 的非流式问卷生成已经补上服务端 canonical 安全检查。
+- 其他公开生成链路也已在本地代码接入 `lib/ai/public-rate-limit.ts` 与 `enforceTextSafety(...)`。
+- 但这并不等于线上所有路径都已经逐路验证通过。
+
+结论：
+
+- `/name` 的 direct API 绕过空间已明显收缩。
+- `/details`、`canshou`、`scenario`、`free`、`sublimation` 等路由仍应在部署后逐路抽样复测，而不是仅凭本地代码推断“全部已好”。
 
 #### 3) 截断 / 输出安全并不总是服务端硬边界
 
@@ -365,6 +457,34 @@
 
 - 这比纯前端冷却好很多。
 - 但如果目标是“强抗 Agent 滥用”，还不够。
+
+#### 6) 浏览器侧安全响应头仍明显不足
+
+本次真实站点响应头抽样显示：
+
+- 公开 HTML 页面尚未观察到 `Content-Security-Policy`
+- 尚未观察到 `Strict-Transport-Security`
+- 尚未观察到 `X-Frame-Options` 或等价的 `CSP frame-ancestors`
+- 尚未观察到 `Permissions-Policy`
+- HTML 页面当前带有 `Access-Control-Allow-Origin: *`
+
+结论：
+
+- 即使业务接口本身逐步加固，浏览器侧仍缺少 clickjacking、防脚本注入放大与 HTTPS 强制等基础硬化。
+- 这不会直接推翻现有鉴权结论，但会让公开页面在被嵌入、被利用浏览器能力或遭遇前端注入时的防线偏弱。
+
+#### 7) 密码恢复的速率保护仍未与注册 / 登录完全对齐
+
+从源码看：
+
+- `app/api/auth/recover/handler.ts` 已有 Turnstile 与基于审计日志的邮件发送保护。
+- 但它不是 `lib/auth/attempt-rate-limit.ts` 这一套“命中后优先 `429` 短路”的统一模型。
+- 其限速重点在“发邮件”阶段，而不是像注册 / 登录那样形成更早的统一应用层快失败。
+
+结论：
+
+- 当前实现已经能降低邮箱轰炸与枚举风险。
+- 但若目标是统一账号安全面，密码恢复仍建议纳入与注册 / 登录同一套应用层限速与审计口径。
 
 ### 5.2 诉求二：允许 Agent 有序、有限度地使用本项目网站服务
 
@@ -451,7 +571,8 @@
 - 仓库内已经完成第 1 阶段实例内 canonical 限流封装，并已接入主要公开生成路由。
 - 流式 / 非流式已经按业务动作收敛到同一 action key。
 - 前端主要公开生成页面也已对齐 `429` 与 `Retry-After`。
-- 但这还不是平台级强一致限流，部署后仍需继续补跨实例能力。
+- `/api/generate-magical-girl` 的线上追加采样里，尚未观察到应用层 JSON `429`，反而先观察到 Cloudflare `1015`。
+- 这说明当前除了“跨实例不强一致”之外，还存在“应用层 / 平台层限流语义不一致”的问题。
 
 已覆盖路径：
 
@@ -472,13 +593,15 @@
 - 返回明确 `429`
 - 返回 `Retry-After`
 - 维度至少包含 `ip + 会话/活动令牌 + 功能动作`
+- 应用层 `429` 与 Cloudflare / 平台层 `429` 的语义、响应体与可观测字段要尽量收敛
 - 将实例内状态继续升级到 D1 / Durable Object / Cloudflare 平台级限流
 
 推荐顺序：
 
 1. 已完成：实例内软限流统一封装
-2. 待完成：D1 / Durable Object / Cloudflare 平台级限流
-3. 待完成：异常行为审计与封禁联动
+2. 待完成：让真实部署先稳定观测到应用层 canonical `429`
+3. 待完成：D1 / Durable Object / Cloudflare 平台级限流
+4. 待完成：异常行为审计与封禁联动
 
 ### 第二优先级：把“逮捕”从前端体验逻辑收敛为服务端硬边界
 
@@ -488,7 +611,7 @@
 - 服务端必须有同等或更严格的 canonical 检查
 - 任何 direct API Agent 都不应因为绕开按钮而绕开安全检查
 
-其中 `/name` 是应优先修补的明显缺口。
+其中 `/name` 的服务端输入安全已在本次追加复测中得到验证，接下来应把同等抽样复测扩展到 `/details` 等其他公开链路。
 
 ### 第三优先级：把已落地的注册 / 登录限速升级为跨实例闭环
 
@@ -505,6 +628,8 @@
 - 让审计日志与封禁 / 额外冷却联动
 
 Turnstile 应保留，但不应是唯一保护。
+
+同时建议把密码恢复也纳入统一的应用层限速口径，而不是仅依赖邮件发送阶段的审计保护。
 
 ### 第四优先级：把“允许 Agent 使用”做成显式能力模型
 
@@ -525,7 +650,21 @@ Turnstile 应保留，但不应是唯一保护。
 - 审计日志
 - 可撤销能力
 
-### 第五优先级：对“截断 / 输出安全”明确边界位置
+### 第五优先级：补齐浏览器安全响应头与嵌入策略
+
+建议通过 `next.config.ts` 的 `headers()` 或 Cloudflare 平台配置，统一补齐：
+
+- `Content-Security-Policy`
+- `Strict-Transport-Security`
+- `X-Frame-Options`，或等价的 `CSP frame-ancestors`
+- `Permissions-Policy`
+
+同时建议：
+
+- 移除 HTML 页面的 `Access-Control-Allow-Origin: *`
+- 审视 `pages/_document.tsx` 中的内联脚本，必要时改为 nonce / hash 或外置脚本，以便真正落地 CSP
+
+### 第六优先级：对“截断 / 输出安全”明确边界位置
 
 建议明确一条原则：
 
@@ -542,8 +681,11 @@ Turnstile 应保留，但不应是唯一保护。
 
 - 就真实部署站点实测而言，本项目已经具备“阻止普通匿名 Agent 直接撞注册/登录与匿名 PVP 写操作”的基本能力。
 - 就真实部署站点实测而言，还不具备“全面阻止 Agent 绕过冷却、逮捕、截断”的一致性能力。
+- 就真实部署站点追加采样而言，`/api/generate-magical-girl` 的服务端 canonical 输入安全已经在线可见，direct API 已不能再绕过名字长度与抽样敏感词拦截。
+- 就真实部署站点追加采样而言，公共生成接口在重复合法直调时当前先触发的是 Cloudflare `1015`，而不是应用层 canonical JSON `429`；这说明平台层保护已经存在，但应用层限流的真实部署状态仍未被直接观测确认。
 - 就当前仓库实现而言，公共生成接口的“服务端 canonical 冷却”已完成第 1 阶段补强，能明显收缩 direct API 绕过前端冷却的空间，但尚未达到跨实例强一致水平。
 - 就当前仓库实现而言，注册/登录应用层速率保护也已落地，并且会在 Turnstile 前返回 `429` 短路后续鉴权链路，但同样尚未达到跨实例强一致水平。
+- 就浏览器侧边界而言，公开 HTML 页面当前仍缺少 CSP / HSTS / anti-frame 等关键安全响应头，这部分仍有明确补强空间。
 - 当前最现实的风险，不是 Agent 能不能打开网页，而是：
   - 它能否绕过前端按钮直接调用公共 AI 接口；
   - 它在拿到真实用户会话后是否拥有过大的默认能力。
@@ -567,6 +709,8 @@ Turnstile 应保留，但不应是唯一保护。
   - `lib/auth/attempt-rate-limit.ts`
   - `tests/auth-attempt-rate-limit.test.ts`
   - `tests/auth-handler-rate-limit.test.ts`
+- 前端会话自举与匿名 `401` 噪声
+  - `lib/auth.ts`
 - 前端冷却
   - `lib/cooldown.ts`
   - `pages/name.tsx`
@@ -594,6 +738,9 @@ Turnstile 应保留，但不应是唯一保护。
   - `pages/api/generate-scenario.ts`
   - `pages/api/generate-canshou.ts`
   - `pages/api/magic-tea-party/generate-stream.ts`
+- 密码恢复与邮件发送保护
+  - `app/api/auth/recover/handler.ts`
+  - `lib/auth/mail-send-guard.ts`
 - PVP 服务端保护
   - `pages/api/pvp/rooms/index.ts`
   - `pages/api/pvp/rooms/[roomId]/submit.ts`
@@ -601,6 +748,9 @@ Turnstile 应保留，但不应是唯一保护。
 - 连续战报服务端软限流
   - `pages/api/arena/session/generate-next.ts`
   - `lib/ai-session/rate-limit.ts`
+- 页面壳与响应头落点
+  - `next.config.ts`
+  - `pages/_document.tsx`
 - 本轮已继续补强的公开生成链路
   - `pages/api/generate-magical-girl.ts`
   - `pages/api/generate-magical-girl-details.ts`
