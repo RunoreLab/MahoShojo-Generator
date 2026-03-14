@@ -179,7 +179,7 @@ export function ArenaPage() {
             </div>
 
             <div className="mt-6 grid gap-5 xl:grid-cols-[minmax(320px,420px)_minmax(0,1fr)] 2xl:grid-cols-[minmax(340px,440px)_minmax(0,1fr)] xl:items-start">
-              <div className="space-y-4">
+              <div className="min-w-0 space-y-4">
                 <CollapsibleSection
                   title="🎴 预设角色"
                   description={`已选 ${formatCombatantCount(presetCombatantCount, MAX_COMBATANTS)}`}
@@ -235,7 +235,7 @@ export function ArenaPage() {
                 </CollapsibleSection>
               </div>
 
-              <div className="space-y-4">
+              <div className="min-w-0 space-y-4">
                 <CollapsibleSection
                   title="🎮 模式选择"
                   description="不同模式会影响输出风格与计分规则"

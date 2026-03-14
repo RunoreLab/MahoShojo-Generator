@@ -243,11 +243,11 @@ export function BattleActions() {
         storageKey="arena.section.generateAdvanced.open"
         className="mt-3"
       >
-        <div className="flex items-center justify-center gap-2 flex-wrap">
+        <div className="flex w-full items-center justify-center gap-2">
           <button
             type="button"
             onClick={() => setShowNarrativeModal(true)}
-            className="px-3 py-2 text-sm rounded-lg border border-gray-200 bg-white hover:bg-gray-50"
+            className="w-full max-w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm break-words whitespace-normal text-center hover:bg-gray-50 sm:w-auto"
             disabled={isGenerating}
             title="查看/编辑叙事历史记录"
           >
