@@ -2,6 +2,7 @@ import { z } from 'zod/v3';
 import { NextRequest } from 'next/server';
 
 import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
+import { acquirePublicAiRateLimit, buildPublicAiRateLimitResponse, inferPublicAiProviderMode } from '@/lib/ai/public-rate-limit';
 import { FREE_GENERATION_ATTACHMENT_LIMITS, formatReferenceAttachmentsForPrompt, type AITextAttachment } from '@/lib/ai/attachments';
 import { type AIProvider } from '@/lib/config';
 import { enforceTextSafety } from '@/lib/content-safety/server';
@@ -117,6 +118,13 @@ export default async function handler(req: NextRequest): Promise<Response> {
     }
 
     const { schema: schemaId, prompt: userPrompt, attachments, language, customProvider: customProviderPayload } = parsedBody.data;
+
+    const rateLimit = await acquirePublicAiRateLimit({
+      req,
+      actionType: 'free_generate',
+      providerMode: inferPublicAiProviderMode(customProviderPayload),
+    });
+    if (!rateLimit.allowed) return buildPublicAiRateLimitResponse(rateLimit);
 
     const combinedForSafety = [userPrompt, ...attachments.map((item) => item.content)].filter((t) => t.trim()).join('\n\n');
     const safetyText =

@@ -7,6 +7,7 @@ import { getLogger } from '@/lib/logger';
 import { type AIProvider } from '@/lib/config';
 import { enforceTextSafety } from '@/lib/content-safety/server';
 import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
+import { acquirePublicAiRateLimit, buildPublicAiRateLimitResponse, inferPublicAiProviderMode } from '@/lib/ai/public-rate-limit';
 import { generateWithStreamAI, LoadBalanceStrategy, type GenerateWithAIOptions } from '@/lib/stream/raw-ai';
 import { createReasoningSseBridge, shouldUseClientSse } from '@/lib/stream/reasoning-sse';
 import { buildScenarioMarkdownRequirements } from '@/lib/prompts/scenario';
@@ -49,6 +50,13 @@ async function handler(req: NextRequest): Promise<Response> {
         headers: { 'Content-Type': 'application/json' },
       });
     }
+
+    const rateLimit = await acquirePublicAiRateLimit({
+      req,
+      actionType: 'scenario_generate',
+      providerMode: inferPublicAiProviderMode(customProviderPayload),
+    });
+    if (!rateLimit.allowed) return buildPublicAiRateLimitResponse(rateLimit);
 
     const userInputText = Object.values(answers as Record<string, unknown>).join(' ');
 

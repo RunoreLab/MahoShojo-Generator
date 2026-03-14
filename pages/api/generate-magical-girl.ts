@@ -6,7 +6,7 @@ import { MainColor } from "../../lib/main-color";
 import { getLogger } from "../../lib/logger";
 import { generateSignature } from '../../lib/signature'; // 导入签名工具
 import { recordUserActivityFromRequest } from '@/lib/user-activity/record';
-import { acquirePublicAiRateLimit } from '@/lib/ai/public-rate-limit';
+import { acquirePublicAiRateLimit, buildPublicAiRateLimitResponse } from '@/lib/ai/public-rate-limit';
 import { OFFICIAL_KEY_QUESTIONNAIRE_CHARACTER_COOLDOWN_MS } from '@/lib/ai/cooldowns';
 
 const log = getLogger('api-gen-girl');
@@ -96,22 +96,7 @@ async function handler(
     providerMode: 'system',
   });
   if (!rateLimit.allowed) {
-    return new Response(
-      JSON.stringify({
-        error: `请求过于频繁，请在 ${rateLimit.retryAfterSeconds} 秒后重试`,
-        reason: rateLimit.reason,
-        retryAfter: rateLimit.retryAfterSeconds,
-        retryAfterSeconds: rateLimit.retryAfterSeconds,
-      }),
-      {
-        status: 429,
-        headers: {
-          'Content-Type': 'application/json',
-          'Cache-Control': 'no-store',
-          'Retry-After': String(rateLimit.retryAfterSeconds),
-        },
-      }
-    );
+    return buildPublicAiRateLimitResponse(rateLimit);
   }
 
   try {

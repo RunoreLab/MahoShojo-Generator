@@ -76,6 +76,10 @@ type JsonSaveMode = 'download' | 'text';
 type ImageSaveMode = 'download' | 'modal';
 type DeviceType = 'mobile' | 'desktop' | 'unknown';
 
+type RateLimitError = Error & {
+  retryAfterSeconds?: number;
+};
+
 type CanshouResultPayload = CanshouDetails & {
   templateId?: string;
   signature?: string | null;
@@ -1047,11 +1051,13 @@ const CanshouPage: React.FC = () => {
     }
     setSubmitting(true);
     setError(null);
-      setCanshouDetails(null);
-      setStreamingMarkdown(null);
-      setStreamedGeneralCard(null);
-      setStreamingReasoning(null);
-      setNonStreamReasoning(null);
+    setCanshouDetails(null);
+    setStreamingMarkdown(null);
+    setStreamedGeneralCard(null);
+    setStreamingReasoning(null);
+    setNonStreamReasoning(null);
+    let nextCooldownMs = generatorCooldownMs;
+    let shouldStartCooldown = false;
 
     try {
       const snapshot = answersSnapshot ?? answersByKey;
@@ -1136,6 +1142,13 @@ const CanshouPage: React.FC = () => {
           router.push('/arrested');
           return;
         }
+        if (response.status === 429) {
+          const retryAfterRaw = errorData?.retryAfterSeconds ?? errorData?.retryAfter ?? response.headers.get('Retry-After') ?? 60;
+          const retryAfter = Math.max(1, Number.parseInt(String(retryAfterRaw), 10) || 60);
+          const rateLimitError = new Error(`请求过于频繁（HTTP 429）！请等待 ${retryAfter} 秒后再试。`) as RateLimitError;
+          rateLimitError.retryAfterSeconds = retryAfter;
+          throw rateLimitError;
+        }
         const serverMessage = resolveApiErrorMessage({ payload, fallback: '生成失败' });
         throw new Error(formatHttpErrorMessage({ serverMessage, status: response.status, fallback: '生成失败' }));
       }
@@ -1166,7 +1179,7 @@ const CanshouPage: React.FC = () => {
         if (!allowNativeSignatureForSubmit) {
           setStreamedGeneralCard(cardWithAnswers);
           setError(null);
-          startCooldown();
+          shouldStartCooldown = true;
           return;
         }
 
@@ -1186,17 +1199,31 @@ const CanshouPage: React.FC = () => {
         if (!hasSignError) {
           setError(null);
         }
-        startCooldown();
+        shouldStartCooldown = true;
         return;
       }
 
       const { data: result, aiMeta } = await readJsonWithAiMeta<CanshouResultPayload>(response);
       setCanshouDetails(result);
       setNonStreamReasoning(aiMeta?.aiReasoning ?? null);
-      startCooldown();
+      shouldStartCooldown = true;
     } catch (err) {
-      setError(err instanceof Error ? `✨ 魔法失效了！${err.message}` : '发生未知错误');
+      if (typeof (err as RateLimitError).retryAfterSeconds === 'number') {
+        const cooldownSeconds = Math.max(1, Math.ceil((err as RateLimitError).retryAfterSeconds as number));
+        nextCooldownMs = cooldownSeconds * 1000;
+        shouldStartCooldown = true;
+        setError(
+          isUserCustomKey
+            ? `🚫 自定义通道请求太频繁啦！请等待 ${cooldownSeconds} 秒后再试。`
+            : `🚫 请求太频繁了！请等待 ${cooldownSeconds} 秒后再试。`
+        );
+      } else {
+        setError(err instanceof Error ? `✨ 魔法失效了！${err.message}` : '发生未知错误');
+      }
     } finally {
+      if (shouldStartCooldown) {
+        startCooldown(nextCooldownMs);
+      }
       setSubmitting(false);
     }
   };

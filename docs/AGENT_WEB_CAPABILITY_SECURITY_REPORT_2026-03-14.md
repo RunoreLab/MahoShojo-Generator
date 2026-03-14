@@ -26,6 +26,55 @@
 - 如果 Agent 拿到了真人会话 Cookie 或 legacy `authKey`，它在很多业务路径上就会拥有接近真人用户的同等权限。Turnstile 只保护登录/注册，不保护登录后的大多数业务操作。
 - 结论上，当前项目已经具备“限制匿名 Agent 直接撞账号体系”的基础门槛，但距离“对 Agent 安全开放网站能力”还有明显差距，尤其是统一服务端限流、统一服务端安全校验、以及针对 Agent 的最小权限化能力边界还没有完全建立。
 
+## 2.1 仓库内补强进展（2026-03-14，本地代码已落地，待部署后复测）
+
+以下内容是本次评估后在仓库内已经完成的补强，不代表 `https://mahoshojo.colanns.me/` 在本次实测时已经具备这些能力；线上仍需部署后再复测确认。
+
+### 已落地的服务端 canonical 限流 v1
+
+- 新增统一限流模块：`lib/ai/public-rate-limit.ts`
+- 标识维度：
+  - 优先使用已验证活动令牌（`activity token`）对应的用户身份
+  - 无活动令牌时退化为脱敏 IP
+  - 明确忽略裸 `x-mahoshojo-user-id`，避免伪造身份绕过
+- 冷却策略：
+  - 官方通道按公共生成动作使用 canonical 冷却
+  - 自定义通道统一收敛到 3 秒冷却
+- 模式收敛：
+  - 同一业务的流式 / 非流式接口共用同一 `actionType`
+  - 不能通过切换流式与非流式来绕过冷却
+
+### 已接入的公开生成路由
+
+- `pages/api/generate-magical-girl.ts`
+- `pages/api/generate-magical-girl-details.ts`
+- `pages/api/generate-magical-girl-details-stream.ts`
+- `pages/api/generate-canshou.ts`
+- `pages/api/generate-canshou-stream.ts`
+- `pages/api/generate-scenario.ts`
+- `pages/api/generate-scenario-stream.ts`
+- `pages/api/generate-free.ts`
+- `pages/api/generate-free-stream.ts`
+- `pages/api/generate-sublimation.ts`
+- `pages/api/generate-sublimation-stream.ts`
+
+### 已对齐的前端页面行为
+
+以下页面在收到服务端 `429` 时，会解析 `retryAfterSeconds` / `retryAfter` / `Retry-After`，并用服务端真实秒数覆盖本地冷却：
+
+- `pages/name.tsx`
+- `pages/details.tsx`
+- `pages/canshou.tsx`
+- `pages/scenario.tsx`
+- `pages/free.tsx`
+- `pages/sublimation.tsx`
+
+### 当前仍然保留的限制与剩余工作
+
+- 当前 public AI 限流仍是实例内 `Map`，不是跨实例、跨冷启动、跨边缘节点的强一致限流。
+- `/api/generate-magical-girl.ts` 的“前端逮捕 -> 服务端 canonical 输入安全”仍未完全补齐，direct API 仍需要补服务端文本安全闭环。
+- 上述补强需要部署到真实站点后，重新做线上复测，才能更新“部署现状”结论。
+
 ## 3. 真实部署站点实测记录
 
 ### 3.1 首页与公开页面
@@ -328,23 +377,39 @@
 
 ### 第一优先级：把“前端冷却”升级为“服务端 canonical 限流”
 
-建议覆盖至少以下路径：
+当前状态：
+
+- 仓库内已经完成第 1 阶段实例内 canonical 限流封装，并已接入主要公开生成路由。
+- 流式 / 非流式已经按业务动作收敛到同一 action key。
+- 前端主要公开生成页面也已对齐 `429` 与 `Retry-After`。
+- 但这还不是平台级强一致限流，部署后仍需继续补跨实例能力。
+
+已覆盖路径：
 
 - `/api/generate-magical-girl`
 - `/api/generate-magical-girl-details`
-- 其他仍主要依赖前端冷却的公开生成接口
+- `/api/generate-magical-girl-details-stream`
+- `/api/generate-canshou`
+- `/api/generate-canshou-stream`
+- `/api/generate-scenario`
+- `/api/generate-scenario-stream`
+- `/api/generate-free`
+- `/api/generate-free-stream`
+- `/api/generate-sublimation`
+- `/api/generate-sublimation-stream`
 
-最低要求：
+下一步最低要求：
 
 - 返回明确 `429`
 - 返回 `Retry-After`
 - 维度至少包含 `ip + 会话/活动令牌 + 功能动作`
+- 将实例内状态继续升级到 D1 / Durable Object / Cloudflare 平台级限流
 
 推荐顺序：
 
-1. 先做实例内软限流统一封装
-2. 再补 D1 / Durable Object / Cloudflare 平台级限流
-3. 最后再做异常行为审计
+1. 已完成：实例内软限流统一封装
+2. 待完成：D1 / Durable Object / Cloudflare 平台级限流
+3. 待完成：异常行为审计与封禁联动
 
 ### 第二优先级：把“逮捕”从前端体验逻辑收敛为服务端硬边界
 
@@ -400,8 +465,9 @@ Turnstile 应保留，但不应是唯一保护。
 
 截至 2026-03-14：
 
-- 本项目已经具备“阻止普通匿名 Agent 直接撞注册/登录与匿名 PVP 写操作”的基本能力。
-- 但还不具备“全面阻止 Agent 绕过冷却、逮捕、截断”的一致性能力。
+- 就真实部署站点实测而言，本项目已经具备“阻止普通匿名 Agent 直接撞注册/登录与匿名 PVP 写操作”的基本能力。
+- 就真实部署站点实测而言，还不具备“全面阻止 Agent 绕过冷却、逮捕、截断”的一致性能力。
+- 就当前仓库实现而言，公共生成接口的“服务端 canonical 冷却”已完成第 1 阶段补强，能明显收缩 direct API 绕过前端冷却的空间，但尚未达到跨实例强一致水平。
 - 当前最现实的风险，不是 Agent 能不能打开网页，而是：
   - 它能否绕过前端按钮直接调用公共 AI 接口；
   - 它在拿到真实用户会话后是否拥有过大的默认能力。
@@ -428,6 +494,20 @@ Turnstile 应保留，但不应是唯一保护。
   - `pages/scenario.tsx`
   - `pages/details.tsx`
   - `pages/canshou.tsx`
+  - `pages/sublimation.tsx`
+- 公共 AI 服务端 canonical 限流
+  - `lib/ai/public-rate-limit.ts`
+  - `pages/api/generate-magical-girl.ts`
+  - `pages/api/generate-magical-girl-details.ts`
+  - `pages/api/generate-magical-girl-details-stream.ts`
+  - `pages/api/generate-canshou.ts`
+  - `pages/api/generate-canshou-stream.ts`
+  - `pages/api/generate-scenario.ts`
+  - `pages/api/generate-scenario-stream.ts`
+  - `pages/api/generate-free.ts`
+  - `pages/api/generate-free-stream.ts`
+  - `pages/api/generate-sublimation.ts`
+  - `pages/api/generate-sublimation-stream.ts`
 - 服务端内容安全
   - `lib/content-safety/server.ts`
   - `pages/api/generate-free.ts`
@@ -441,6 +521,6 @@ Turnstile 应保留，但不应是唯一保护。
 - 连续战报服务端软限流
   - `pages/api/arena/session/generate-next.ts`
   - `lib/ai-session/rate-limit.ts`
-- 当前已确认存在缺口的公开生成接口
+- 当前仍需继续补强的公开生成链路
   - `pages/api/generate-magical-girl.ts`
-  - `pages/api/generate-magical-girl-details.ts`
+  - 说明：当前主要剩余缺口是服务端 canonical 输入安全，而不是前端冷却

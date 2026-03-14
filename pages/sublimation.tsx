@@ -94,6 +94,10 @@ type QuestionnaireSelection = {
     useLore?: boolean;
 };
 
+type RateLimitError = Error & {
+    retryAfterSeconds?: number;
+};
+
 // 递归提取对象中所有字符串值的函数
 const extractTextForCheck = (data: any): string => {
     let textContent = '';
@@ -919,6 +923,8 @@ const SublimationPage: React.FC = () => {
         setStreamedGeneralCard(null);
         setStreamingReasoning(null);
         setNonStreamReasoning(null);
+        let nextCooldownMs = sublimationCooldownMs;
+        let shouldStartCooldown = false;
 
 	        try {
                 const selectedArenaNarrativeEntryIds = new Set(
@@ -1019,6 +1025,13 @@ const SublimationPage: React.FC = () => {
                     });
                     return;
                 }
+                if (response.status === 429) {
+                    const retryAfterRaw = errorJson?.retryAfterSeconds ?? errorJson?.retryAfter ?? response.headers.get('Retry-After') ?? 60;
+                    const retryAfter = Math.max(1, Number.parseInt(String(retryAfterRaw), 10) || 60);
+                    const rateLimitError = new Error(`请求过于频繁（HTTP 429）！请等待 ${retryAfter} 秒后再试。`) as RateLimitError;
+                    rateLimitError.retryAfterSeconds = retryAfter;
+                    throw rateLimitError;
+                }
                 const serverMessage = resolveApiErrorMessage({ payload, fallback: '升华失败' });
                 throw new Error(formatHttpErrorMessage({ serverMessage, status: response.status, fallback: '升华失败' }));
             }
@@ -1076,7 +1089,7 @@ const SublimationPage: React.FC = () => {
                 if (!hasSignError) {
                     setError(null);
                 }
-                startCooldown();
+                shouldStartCooldown = true;
                 return;
             }
 
@@ -1086,12 +1099,26 @@ const SublimationPage: React.FC = () => {
             }
             setResultData(result);
             setNonStreamReasoning(aiMeta?.aiReasoning ?? null);
-            startCooldown();
+            shouldStartCooldown = true;
 
         } catch (err) {
-            const message = err instanceof Error ? err.message : '发生未知错误';
-            setError(`✨ 升华失败！${message}`);
+            if (typeof (err as RateLimitError).retryAfterSeconds === 'number') {
+                const cooldownSeconds = Math.max(1, Math.ceil((err as RateLimitError).retryAfterSeconds as number));
+                nextCooldownMs = cooldownSeconds * 1000;
+                shouldStartCooldown = true;
+                setError(
+                    isUserCustomKey
+                        ? `🚫 自定义通道请求太频繁啦！请等待 ${cooldownSeconds} 秒后再试。`
+                        : `🚫 请求太频繁了！请等待 ${cooldownSeconds} 秒后再试。`
+                );
+            } else {
+                const message = err instanceof Error ? err.message : '发生未知错误';
+                setError(`✨ 升华失败！${message}`);
+            }
         } finally {
+            if (shouldStartCooldown) {
+                startCooldown(nextCooldownMs);
+            }
             setIsGenerating(false);
         }
     };

@@ -5,6 +5,7 @@ import { getLogger } from '../../lib/logger';
 import { NextRequest } from 'next/server';
 import { generateSignature } from '../../lib/signature'; // 导入签名工具
 import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
+import { acquirePublicAiRateLimit, buildPublicAiRateLimitResponse, inferPublicAiProviderMode } from '@/lib/ai/public-rate-limit';
 import { buildJsonResponseWithOptionalAiMeta } from '@/lib/ai/meta-response';
 import { type AIProvider } from '@/lib/config';
 import { enforceTextSafety } from '@/lib/content-safety/server';
@@ -475,6 +476,13 @@ async function handler(req: NextRequest): Promise<Response> {
         headers: { 'Content-Type': 'application/json' },
       });
     }
+
+    const rateLimit = await acquirePublicAiRateLimit({
+      req,
+      actionType: 'canshou_generate',
+      providerMode: inferPublicAiProviderMode(customProviderPayload),
+    });
+    if (!rateLimit.allowed) return buildPublicAiRateLimitResponse(rateLimit);
 
     const overLimitAnswer = findOverLimitAnswer(normalizedAnswers, effectiveQuestionnaires);
     const allowNativeSignature = requestedNativeSignature === true && nativeAllowedByServer && !overLimitAnswer;

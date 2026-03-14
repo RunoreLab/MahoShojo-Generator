@@ -10,6 +10,7 @@ import type { GenerateWithAIOptions } from '@/lib/ai';
 import { type AIProvider } from '@/lib/config';
 import { enforceTextSafety } from '@/lib/content-safety/server';
 import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
+import { acquirePublicAiRateLimit, buildPublicAiRateLimitResponse, inferPublicAiProviderMode } from '@/lib/ai/public-rate-limit';
 import { buildScenarioCorePrinciples } from '@/lib/prompts/scenario';
 import { recordUserActivityFromRequest } from '@/lib/user-activity/record';
 
@@ -118,6 +119,13 @@ async function handler(req: NextRequest): Promise<Response> {
     if (!answers || typeof answers !== 'object' || Object.keys(answers).length === 0) {
       return new Response(JSON.stringify({ error: 'Answers object is required' }), { status: 400 });
     }
+
+    const rateLimit = await acquirePublicAiRateLimit({
+      req,
+      actionType: 'scenario_generate',
+      providerMode: inferPublicAiProviderMode(customProviderPayload),
+    });
+    if (!rateLimit.allowed) return buildPublicAiRateLimitResponse(rateLimit);
 
     // --- 安全检查流程 ---
     const userInputText = Object.values(answers).join(' ');

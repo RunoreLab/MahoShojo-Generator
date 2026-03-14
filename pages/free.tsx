@@ -65,6 +65,10 @@ const MAX_ATTACHMENT_CHARS_PER_FILE = FREE_GENERATION_ATTACHMENT_LIMITS.maxChars
 const MAX_ATTACHMENT_CHARS_TOTAL = FREE_GENERATION_ATTACHMENT_LIMITS.maxCharsTotal;
 const SENSITIVE_CHECK_MAX_CHARS = 50_000;
 
+type RateLimitError = Error & {
+  retryAfterSeconds?: number;
+};
+
 const formatBytes = (bytes: number): string => {
   if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
   const units = ['B', 'KB', 'MB', 'GB'];
@@ -492,6 +496,8 @@ export default function FreeGeneratorPage() {
     setStreamedGeneralCard(null);
     setStreamingReasoning(null);
     setCharacterPortraitAsset(null);
+    let nextCooldownMs = freeCooldownMs;
+    let shouldStartCooldown = false;
 
     try {
       const combinedForSafety = [prompt, ...attachments.map((item) => item.content)].filter((t) => t.trim()).join('\n\n');
@@ -556,6 +562,13 @@ export default function FreeGeneratorPage() {
           });
           return;
         }
+        if (response.status === 429) {
+          const retryAfterRaw = errorJson?.retryAfterSeconds ?? errorJson?.retryAfter ?? response.headers.get('Retry-After') ?? 60;
+          const retryAfter = Math.max(1, Number.parseInt(String(retryAfterRaw), 10) || 60);
+          const rateLimitError = new Error(`请求过于频繁（HTTP 429）！请等待 ${retryAfter} 秒后再试。`) as RateLimitError;
+          rateLimitError.retryAfterSeconds = retryAfter;
+          throw rateLimitError;
+        }
         const serverMessage = resolveApiErrorMessage({ payload, fallback: '生成失败' });
         throw new Error(formatHttpErrorMessage({ serverMessage, status: response.status, fallback: '生成失败' }));
       }
@@ -589,18 +602,32 @@ export default function FreeGeneratorPage() {
           setStreamedGeneralCard(card);
         }
 
-        startCooldown(freeCooldownMs);
+        shouldStartCooldown = true;
         return;
       }
 
       const { data, aiMeta } = await readJsonWithAiMeta<any>(response);
       setResultData(data);
       setNonStreamReasoning(aiMeta?.aiReasoning ?? null);
-      startCooldown(freeCooldownMs);
+      shouldStartCooldown = true;
     } catch (err) {
-      const message = err instanceof Error ? err.message : '发生未知错误';
-      setError(`✨ 生成失败！${message}`);
+      if (typeof (err as RateLimitError).retryAfterSeconds === 'number') {
+        const cooldownSeconds = Math.max(1, Math.ceil((err as RateLimitError).retryAfterSeconds as number));
+        nextCooldownMs = cooldownSeconds * 1000;
+        shouldStartCooldown = true;
+        setError(
+          isUserCustomKey
+            ? `🚫 自定义通道请求太频繁啦！请等待 ${cooldownSeconds} 秒后再试。`
+            : `🚫 请求太频繁了！请等待 ${cooldownSeconds} 秒后再试。`
+        );
+      } else {
+        const message = err instanceof Error ? err.message : '发生未知错误';
+        setError(`✨ 生成失败！${message}`);
+      }
     } finally {
+      if (shouldStartCooldown) {
+        startCooldown(nextCooldownMs);
+      }
       setSubmitting(false);
     }
   };

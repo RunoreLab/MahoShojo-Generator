@@ -8,6 +8,7 @@ import { formatQuestionnaireAnswers, normalizeUserAnswers, type QuestionnaireAns
 import { type AIProvider } from '@/lib/config';
 import { enforceTextSafety } from '@/lib/content-safety/server';
 import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
+import { acquirePublicAiRateLimit, buildPublicAiRateLimitResponse, inferPublicAiProviderMode } from '@/lib/ai/public-rate-limit';
 import { generateWithStreamAI, LoadBalanceStrategy, type GenerateWithAIOptions } from '@/lib/stream/raw-ai';
 import { createReasoningSseBridge, shouldUseClientSse } from '@/lib/stream/reasoning-sse';
 import { getRandomFlowers } from '@/lib/random-choose-hana-name';
@@ -195,6 +196,13 @@ async function handler(req: NextRequest): Promise<Response> {
         headers: { 'Content-Type': 'application/json' },
       });
     }
+
+    const rateLimit = await acquirePublicAiRateLimit({
+      req,
+      actionType: 'magical_girl_details_generate',
+      providerMode: inferPublicAiProviderMode(customProviderPayload),
+    });
+    if (!rateLimit.allowed) return buildPublicAiRateLimitResponse(rateLimit);
 
     for (const answerItem of normalizedAnswers) {
       const safetyResponse = await enforceTextSafety({

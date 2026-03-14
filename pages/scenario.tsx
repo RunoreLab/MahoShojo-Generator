@@ -45,6 +45,10 @@ const optionalFields = [
 
 const SCENARIO_PREFERENCE_KEY = 'mahoshojo.scenario.preferences.v1';
 
+type RateLimitError = Error & {
+  retryAfterSeconds?: number;
+};
+
 const ScenarioPage: React.FC = () => {
   const router = useRouter();
   const [answers, setAnswers] = useState<Record<string, string>>(
@@ -191,6 +195,8 @@ const ScenarioPage: React.FC = () => {
     setNonStreamReasoning(null);
     setResultData(null);
     setStreamingReasoning(null);
+    let nextCooldownMs = scenarioCooldownMs;
+    let shouldStartCooldown = false;
     if (generationMode === 'stream') {
       const blank = createBlankDataCard('general-scenario');
       setGeneralScenarioDraft({
@@ -257,6 +263,13 @@ const ScenarioPage: React.FC = () => {
           });
           return;
         }
+        if (response.status === 429) {
+          const retryAfterRaw = errorJson?.retryAfterSeconds ?? errorJson?.retryAfter ?? response.headers.get('Retry-After') ?? 60;
+          const retryAfter = Math.max(1, Number.parseInt(String(retryAfterRaw), 10) || 60);
+          const rateLimitError = new Error(`请求过于频繁（HTTP 429）！请等待 ${retryAfter} 秒后再试。`) as RateLimitError;
+          rateLimitError.retryAfterSeconds = retryAfter;
+          throw rateLimitError;
+        }
         const serverMessage = resolveApiErrorMessage({ payload, fallback: '生成失败' });
         throw new Error(formatHttpErrorMessage({ serverMessage, status: response.status, fallback: '生成失败' }));
       }
@@ -294,19 +307,33 @@ const ScenarioPage: React.FC = () => {
         }
 
         setGeneralScenarioDraft(signedCard);
-        startCooldown();
+        shouldStartCooldown = true;
         return;
       }
 
       const { data: result, aiMeta } = await readJsonWithAiMeta<any>(response);
       setResultData(result);
       setNonStreamReasoning(aiMeta?.aiReasoning ?? null);
-      startCooldown();
+      shouldStartCooldown = true;
 
     } catch (err) {
-      const message = err instanceof Error ? err.message : '发生未知错误';
-      setError(`✨ 剧本创作失败！${message}`);
+      if (typeof (err as RateLimitError).retryAfterSeconds === 'number') {
+        const cooldownSeconds = Math.max(1, Math.ceil((err as RateLimitError).retryAfterSeconds as number));
+        nextCooldownMs = cooldownSeconds * 1000;
+        shouldStartCooldown = true;
+        setError(
+          isUserCustomKey
+            ? `🚫 自定义通道请求太频繁啦！请等待 ${cooldownSeconds} 秒后再试。`
+            : `🚫 请求太频繁了！请等待 ${cooldownSeconds} 秒后再试。`
+        );
+      } else {
+        const message = err instanceof Error ? err.message : '发生未知错误';
+        setError(`✨ 剧本创作失败！${message}`);
+      }
     } finally {
+      if (shouldStartCooldown) {
+        startCooldown(nextCooldownMs);
+      }
       setIsGenerating(false);
     }
   };

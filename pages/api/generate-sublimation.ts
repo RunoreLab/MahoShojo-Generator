@@ -11,6 +11,7 @@ import canshouQuestionnaire from '../../public/questionnaires/presets/canshou-de
 import { config as appConfig, type AIProvider } from '../../lib/config';
 import { enforceTextSafety } from '@/lib/content-safety/server';
 import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
+import { acquirePublicAiRateLimit, buildPublicAiRateLimitResponse, inferPublicAiProviderMode } from '@/lib/ai/public-rate-limit';
 import { buildJsonResponseWithOptionalAiMeta } from '@/lib/ai/meta-response';
 import type { GenerateWithAIOptions } from '@/lib/ai';
 import { getDataCardById } from '@/lib/database/data-cards';
@@ -701,6 +702,13 @@ async function handler(req: NextRequest): Promise<Response> {
 	    const questionnaireSelections = normalizeQuestionnaireSelections(rawQuestionnaireSelections);
 	    const requestQuestionnaires = normalizeQuestionnaires(rawQuestionnaires);
 	    const requestLoreText = buildQuestionnaireLoreText(requestQuestionnaires);
+
+	    const rateLimit = await acquirePublicAiRateLimit({
+	      req,
+	      actionType: 'sublimation_generate',
+	      providerMode: inferPublicAiProviderMode(customProviderPayload),
+	    });
+	    if (!rateLimit.allowed) return buildPublicAiRateLimitResponse(rateLimit);
 
 	    // 安全检查
 	    const textToCheck = extractTextForCheck(originalCharacterData) + " " + normalizedUserGuidance + " " + normalizedNarrativeHistory + " " + requestLoreText;

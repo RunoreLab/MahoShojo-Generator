@@ -3,6 +3,7 @@ import { NextRequest } from 'next/server';
 
 import { generateWithAI, LoadBalanceStrategy, type GenerationConfig, type GenerateWithAIOptions } from '@/lib/ai';
 import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
+import { acquirePublicAiRateLimit, buildPublicAiRateLimitResponse, inferPublicAiProviderMode } from '@/lib/ai/public-rate-limit';
 import { FREE_GENERATION_ATTACHMENT_LIMITS, formatReferenceAttachmentsForPrompt, type AITextAttachment } from '@/lib/ai/attachments';
 import { buildJsonResponseWithOptionalAiMeta } from '@/lib/ai/meta-response';
 import { type AIProvider } from '@/lib/config';
@@ -332,6 +333,13 @@ export default async function handler(req: NextRequest): Promise<Response> {
     }
 
     const { schema: schemaId, prompt, attachments, language, customProvider: customProviderPayload } = parsedBody.data;
+
+    const rateLimit = await acquirePublicAiRateLimit({
+      req,
+      actionType: 'free_generate',
+      providerMode: inferPublicAiProviderMode(customProviderPayload),
+    });
+    if (!rateLimit.allowed) return buildPublicAiRateLimitResponse(rateLimit);
 
     // --- 安全检查流程（对齐其他生成接口）---
     const combinedForSafety = [prompt, ...attachments.map((item) => item.content)].filter((t) => t.trim()).join('\n\n');
