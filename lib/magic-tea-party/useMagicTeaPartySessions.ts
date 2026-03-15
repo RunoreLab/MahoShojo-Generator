@@ -451,9 +451,10 @@ export function useMagicTeaPartySessions(options: UseMagicTeaPartySessionsOption
   }, [activeSessionId, onGlobalError, refreshActiveSession]);
 
   const persistSession = useCallback(async (next: MagicTeaPartySession) => {
-    await putMagicTeaPartySession(next);
+    // 先同步更新 React 状态，避免受控输入在异步落盘后重放 value 导致光标跳到末尾。
     setActiveSession(next);
     setSessions((prev) => sortSessionsByUpdatedAtDesc([next, ...prev.filter((item) => item.id !== next.id)]));
+    await putMagicTeaPartySession(next);
   }, []);
 
   const createSession = useCallback(
