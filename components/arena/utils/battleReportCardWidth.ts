@@ -8,7 +8,7 @@ export const LEGACY_BATTLE_REPORT_CARD_WIDTH = 500;
 
 export const BATTLE_REPORT_CARD_WIDTH_PRESETS = [
   {
-    label: '旧版窄卡',
+    label: '旧版',
     description: '500px，复原大屏改版前的常见宽度',
     widthPx: LEGACY_BATTLE_REPORT_CARD_WIDTH,
   },

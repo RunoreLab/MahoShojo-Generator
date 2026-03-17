@@ -25,7 +25,6 @@ export function BattleReportCardWidthSettings({ value, onChange, disabled }: Pro
     <div className="input-group">
       <label className="input-label">战报卡片宽度</label>
       <fieldset className="border border-gray-200 rounded-lg p-3">
-        <legend className="text-xs font-semibold text-gray-600 px-1">显示与保存图片共用</legend>
         <div className="grid gap-3 md:grid-cols-2">
           <label className="flex items-start gap-2 rounded-lg border border-gray-200 bg-white p-3 text-sm text-gray-700">
             <input
@@ -38,7 +37,6 @@ export function BattleReportCardWidthSettings({ value, onChange, disabled }: Pro
             />
             <span>
               <span className="block font-semibold text-gray-800">自动宽度</span>
-              <span className="block text-xs text-gray-500">跟随竞技场结果区宽度，在大屏下尽量充分利用可用空间。</span>
             </span>
           </label>
 
@@ -58,7 +56,6 @@ export function BattleReportCardWidthSettings({ value, onChange, disabled }: Pro
             />
             <span>
               <span className="block font-semibold text-gray-800">手动指定宽度</span>
-              <span className="block text-xs text-gray-500">适合想固定截图版式的用户，小屏下仍会自动缩到可视宽度以内。</span>
             </span>
           </label>
         </div>
@@ -116,9 +113,6 @@ export function BattleReportCardWidthSettings({ value, onChange, disabled }: Pro
               </div>
             </div>
 
-            <p className="text-[11px] text-gray-500">
-              当前宽度会用于竞技场主战报，以及连续战报章节预览中的战报卡片；保存图片时也会沿用同一版式。
-            </p>
           </div>
         )}
       </fieldset>
