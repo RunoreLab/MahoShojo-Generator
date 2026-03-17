@@ -16,10 +16,12 @@ import { formatDateTime } from '@/lib/constants';
 import { SCENARIO_BATTLE_STORY_MAX_TOTAL_CHAPTERS } from '@/lib/scenario-battle-story';
 
 import { useBattleStorySession } from '../hooks/useBattleStorySession';
+import { useBattleStore } from '../stores/useBattleStore';
 import {
   resolveBattleStoryChapterCardSnapshot,
   resolveBattleStoryScenarioName,
 } from '../utils/battleStorySession';
+import { resolveBattleReportCardManualWidthPx } from '../utils/battleReportCardWidth';
 
 const actionLabelMap = {
   start: '首章',
@@ -107,8 +109,9 @@ function ChapterPreviewSection(props: {
   scenarioName?: string;
   mode?: BattleStorySessionRecord['source']['mode'];
   onSaveImage?: (imageUrl: string) => void;
+  cardWidthPx?: number | null;
 }) {
-  const { chapter, snapshot, scenarioName, mode, onSaveImage } = props;
+  const { chapter, snapshot, scenarioName, mode, onSaveImage, cardWidthPx } = props;
 
   if (!chapter) {
     return (
@@ -139,6 +142,7 @@ function ChapterPreviewSection(props: {
         aiModel={snapshot?.aiModel ?? null}
         narrativeHistoryReadCount={snapshot?.narrativeHistoryReadCount ?? null}
         aiReasoning={snapshot?.aiReasoning ?? null}
+        cardWidthPx={cardWidthPx}
       />
     </div>
   );
@@ -148,6 +152,7 @@ export function BattleStorySessionPanel(props: {
   onSaveImage?: (imageUrl: string) => void;
 }) {
   const { onSaveImage } = props;
+  const battleReportCardWidthPx = useBattleStore((state) => resolveBattleReportCardManualWidthPx(state.settings));
   const {
     isReady,
     storageError,
@@ -618,6 +623,7 @@ export function BattleStorySessionPanel(props: {
                     narrativeHistoryReadCount={streamCardSnapshot?.narrativeHistoryReadCount ?? null}
                     aiReasoning={streamCardSnapshot?.aiReasoning ?? null}
                     isStreaming
+                    cardWidthPx={battleReportCardWidthPx}
                   />
                   <BattleStoryMetaDebugPanel
                     debug={streamMetaDebug}
@@ -644,6 +650,7 @@ export function BattleStorySessionPanel(props: {
                   scenarioName={scenarioName}
                   mode={activeSession?.source.mode}
                   onSaveImage={onSaveImage}
+                  cardWidthPx={battleReportCardWidthPx}
                 />
                 <BattleStoryMetaDebugPanel
                   debug={selectedMetaDebug}

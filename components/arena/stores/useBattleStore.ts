@@ -11,6 +11,10 @@ import {
   ScenarioState,
   MAX_AUX_SCENARIOS,
 } from '../types';
+import {
+  DEFAULT_BATTLE_REPORT_CARD_WIDTH_MODE,
+  DEFAULT_BATTLE_REPORT_CARD_WIDTH_PX,
+} from '../utils/battleReportCardWidth';
 
 const defaultScenario: ScenarioState = {
   content: null,
@@ -31,6 +35,8 @@ const defaultSettings: BattleSettings = {
   writeNarrativeHistory: false,
   streamTransport: 'sse',
   userGuidance: '',
+  battleReportCardWidthMode: DEFAULT_BATTLE_REPORT_CARD_WIDTH_MODE,
+  battleReportCardWidthPx: DEFAULT_BATTLE_REPORT_CARD_WIDTH_PX,
 };
 
 const createStorage = (): Storage => {

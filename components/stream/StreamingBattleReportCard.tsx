@@ -57,6 +57,8 @@ interface StreamingBattleReportCardProps {
     isStreaming?: boolean;
     /** 战报插图（可选，支持生成图或用户上传图） */
     illustrationAsset?: BattleReportIllustrationAsset | null;
+    /** 手动指定卡片宽度（px）；为空时自动铺满容器。 */
+    cardWidthPx?: number | null;
 }
 
 const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
@@ -73,7 +75,8 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
     narrativeHistoryReadCount = null,
     aiReasoning = null,
     isStreaming = false,
-    illustrationAsset = null
+    illustrationAsset = null,
+    cardWidthPx = null
 }) => {
     const cardRef = useRef<HTMLDivElement>(null);
     const [isSavingImage, setIsSavingImage] = useState(false);
@@ -530,7 +533,10 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
                 color: 'white',
                 padding: '1.5rem',
                 borderRadius: '1rem',
-                maxWidth: '100%',
+                width: '100%',
+                maxWidth: cardWidthPx ? `${cardWidthPx}px` : '100%',
+                marginLeft: 'auto',
+                marginRight: 'auto',
                 overflow: 'hidden'
             }}
         >

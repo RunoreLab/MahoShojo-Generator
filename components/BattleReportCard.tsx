@@ -85,9 +85,10 @@ interface BattleReportCardProps {
   mode?: 'classic' | 'kizuna' | 'daily' | 'scenario';
   liveBody?: string;
   illustrationAsset?: BattleReportIllustrationAsset | null;
+  cardWidthPx?: number | null;
 }
 
-const BattleReportCard: React.FC<BattleReportCardProps> = ({ report, onSaveImage, mode, liveBody, illustrationAsset }) => {
+const BattleReportCard: React.FC<BattleReportCardProps> = ({ report, onSaveImage, mode, liveBody, illustrationAsset, cardWidthPx }) => {
   const cardRef = useRef<HTMLDivElement>(null);
   const [isSavingImage, setIsSavingImage] = useState(false);
 
@@ -492,7 +493,13 @@ ${adjudicationMarkdown}
     <div
       ref={cardRef}
       className="result-card"
-      style={{ background: 'linear-gradient(135deg, #434343 0%, #000000 100%)' }}
+      style={{
+        background: 'linear-gradient(135deg, #434343 0%, #000000 100%)',
+        width: '100%',
+        maxWidth: cardWidthPx ? `${cardWidthPx}px` : '100%',
+        marginLeft: 'auto',
+        marginRight: 'auto',
+      }}
     >
       <div className="result-content">
         <img src="/arena-white.svg" style={{ marginTop: '1rem' }} width={320} height={90} alt="魔法少女竞技场" className="feature-title-svg" />

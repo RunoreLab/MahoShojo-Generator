@@ -1,5 +1,9 @@
 import { z } from 'zod/v3';
 import { GENERAL_SCENARIO_TEMPLATE_ID } from '@/lib/schemas';
+import {
+  BATTLE_REPORT_CARD_WIDTH_MAX,
+  BATTLE_REPORT_CARD_WIDTH_MIN,
+} from './battleReportCardWidth';
 
 const StructuredScenarioSchema = z
   .object({
@@ -43,6 +47,8 @@ export const BattleSettingsSchema = z.object({
   isNarrativeHistoryUnlimited: z.boolean(),
   writeNarrativeHistory: z.boolean(),
   streamTransport: z.enum(['sse', 'plain-stream']).default('sse'),
+  battleReportCardWidthMode: z.enum(['auto', 'manual']).optional(),
+  battleReportCardWidthPx: z.number().min(BATTLE_REPORT_CARD_WIDTH_MIN).max(BATTLE_REPORT_CARD_WIDTH_MAX).optional(),
 });
 
 export const StoryPreferencesSchema = z.object({

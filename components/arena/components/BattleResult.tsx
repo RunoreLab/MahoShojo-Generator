@@ -17,6 +17,7 @@ import { MarkdownBlock } from '@/components/MarkdownBlock';
 import { CollapsibleSection } from '@/components/shared/CollapsibleSection';
 import { JsonSizeIndicator } from '@/components/shared/JsonSizeIndicator';
 import { BattleIllustrationPanel } from './BattleIllustrationPanel';
+import { resolveBattleReportCardManualWidthPx } from '../utils/battleReportCardWidth';
 
 interface BattleResultProps {
   onSaveImage: (imageUrl: string) => void;
@@ -48,6 +49,7 @@ export function BattleResult({ onSaveImage }: BattleResultProps) {
   const [illustrationAsset, setIllustrationAsset] = useState<BattleReportIllustrationAsset | null>(null);
   const [manualMetaInput, setManualMetaInput] = useState('');
   const [manualMetaMessage, setManualMetaMessage] = useState<string | null>(null);
+  const battleReportCardWidthPx = resolveBattleReportCardManualWidthPx(settings);
 
   const scenarioDisplayName = useMemo(() => {
     if (battleMode !== 'scenario') return undefined;
@@ -203,6 +205,7 @@ export function BattleResult({ onSaveImage }: BattleResultProps) {
               aiReasoning={streamReasoning}
               isStreaming={isGenerating}
               illustrationAsset={illustrationAsset}
+              cardWidthPx={battleReportCardWidthPx}
             />
           </div>
         ) : null
@@ -213,6 +216,7 @@ export function BattleResult({ onSaveImage }: BattleResultProps) {
             onSaveImage={onSaveImage}
             mode={battleMode}
             illustrationAsset={illustrationAsset}
+            cardWidthPx={battleReportCardWidthPx}
           />
         )
       )}
