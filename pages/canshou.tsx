@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
-import { useCooldown } from '../lib/cooldown';
+import { useProviderModeCooldown } from '../lib/cooldown';
 import Link from 'next/link';
 import CanshouCard, { CanshouDetails } from '../components/CanshouCard';
 import GeneralCharacterCard from '../components/GeneralCharacterCard';
@@ -15,6 +15,7 @@ import BattleDataModal from '@/components/BattleDataModal';
 import DataCardDetailsModal from '@/components/DataCardDetailsModal';
 import AiProviderSelector, { type UserAIProviderConfig } from '@/components/AiProviderSelector';
 import AiReasoningPanel from '@/components/ai/AiReasoningPanel';
+import { ProviderCooldownNotice } from '@/components/ai/ProviderCooldownNotice';
 import { parseBulkQuestionnaireAnswers } from '@/lib/questionnaire-bulk-parser';
 import { ErrorMessage } from '@/components/ErrorMessage';
 import { EncyclopediaLinks } from '@/components/encyclopedia/EncyclopediaLinks';
@@ -227,9 +228,14 @@ const CanshouPage: React.FC = () => {
   const [showLore, setShowLore] = useState(false);
   const [userProviderConfig, setUserProviderConfig] = useState<UserAIProviderConfig | null>(null);
   const isUserCustomKey = userProviderConfig?.providerId !== 'system' && !!userProviderConfig?.apiKey?.trim();
+  const providerCooldownMode = isUserCustomKey ? 'custom' : 'system';
   const generatorCooldownMs = isUserCustomKey ? 3000 : 60000;
-  const generatorCooldownKey = isUserCustomKey ? 'generateCanshouCooldown:custom' : 'generateCanshouCooldown:system';
-  const { isCooldown, startCooldown, remainingTime } = useCooldown(generatorCooldownKey, generatorCooldownMs);
+  const { isCooldown, startCooldown, remainingTime, otherRemainingTime } = useProviderModeCooldown({
+    baseKey: 'generateCanshouCooldown',
+    currentMode: providerCooldownMode,
+    systemDurationMs: 60000,
+    customDurationMs: 3000,
+  });
   const [bulkAnswers, setBulkAnswers] = useState(''); // 用于"一键填充"的textarea
   const [languages, setLanguages] = useState<{ code: string; name: string }[]>([]);
   const [selectedLanguage, setSelectedLanguage] = useState('zh-CN');
@@ -1962,6 +1968,11 @@ const CanshouPage: React.FC = () => {
                 <div className="my-4 bg-gray-50 rounded-lg p-3">
                   <AiProviderSelector onConfigChange={setUserProviderConfig} />
                   <p className="mt-2 text-xs text-gray-500">使用自有 API Key 可缩短冷却至 3 秒，便于批量迭代生成。</p>
+                  <ProviderCooldownNotice
+                    currentMode={providerCooldownMode}
+                    currentIsCooldown={isCooldown}
+                    otherRemainingTime={otherRemainingTime}
+                  />
                 </div>
 
                 <div className="my-4 bg-gray-100 rounded-lg p-3">

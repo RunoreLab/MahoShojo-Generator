@@ -7,6 +7,7 @@ import Footer from '@/components/Footer';
 import AiProviderSelector, { type UserAIProviderConfig } from '@/components/AiProviderSelector';
 import { ErrorMessage } from '@/components/ErrorMessage';
 import AiReasoningPanel from '@/components/ai/AiReasoningPanel';
+import { ProviderCooldownNotice } from '@/components/ai/ProviderCooldownNotice';
 import SaveToCloudButton from '@/components/SaveToCloudButton';
 import { GenerationModeSwitcher, type GenerationMode } from '@/components/shared/GenerationModeSwitcher';
 import { CharacterPortraitAssetPanel } from '@/components/shared/CharacterPortraitAssetPanel';
@@ -17,7 +18,7 @@ import MagicalGirlCard from '@/components/MagicalGirlCard';
 import CanshouCard from '@/components/CanshouCard';
 import GeneralCharacterCard from '@/components/GeneralCharacterCard';
 
-import { useCooldown } from '@/lib/cooldown';
+import { useProviderModeCooldown } from '@/lib/cooldown';
 import { getSensitiveWordRedirectTarget } from '@/lib/content-safety/client';
 import { readTextAndReasoningStreamFromResponse } from '@/lib/stream/read-text-and-reasoning-stream';
 import { buildGeneralCharacterCardFromMarkdown, buildGeneralScenarioCardFromMarkdown } from '@/lib/stream/markdown-card';
@@ -266,9 +267,14 @@ export default function FreeGeneratorPage() {
 
   const [userProviderConfig, setUserProviderConfig] = useState<UserAIProviderConfig | null>(null);
   const isUserCustomKey = isUsingUserProvidedKey(userProviderConfig);
+  const providerCooldownMode = isUserCustomKey ? 'custom' : 'system';
   const freeCooldownMs = isUserCustomKey ? USER_PROVIDED_KEY_COOLDOWN_MS : OFFICIAL_KEY_MAX_AI_COOLDOWN_MS;
-  const freeCooldownKey = isUserCustomKey ? 'freeCooldown:custom' : 'freeCooldown:system';
-  const { isCooldown, startCooldown, remainingTime } = useCooldown(freeCooldownKey, freeCooldownMs);
+  const { isCooldown, startCooldown, remainingTime, otherRemainingTime } = useProviderModeCooldown({
+    baseKey: 'freeCooldown',
+    currentMode: providerCooldownMode,
+    systemDurationMs: OFFICIAL_KEY_MAX_AI_COOLDOWN_MS,
+    customDurationMs: USER_PROVIDED_KEY_COOLDOWN_MS,
+  });
 
   const schemaOptionsForMode = useMemo(() => {
     if (generationMode === 'stream') {
@@ -1086,6 +1092,11 @@ export default function FreeGeneratorPage() {
                 <div className="my-2 bg-gray-50 rounded-lg p-3">
                   <AiProviderSelector onConfigChange={setUserProviderConfig} />
                   <p className="mt-2 text-xs text-gray-500">使用自有 API Key 可缩短冷却至 3 秒，便于批量迭代生成。</p>
+                  <ProviderCooldownNotice
+                    currentMode={providerCooldownMode}
+                    currentIsCooldown={isCooldown}
+                    otherRemainingTime={otherRemainingTime}
+                  />
                 </div>
 
                 <button

@@ -8,7 +8,7 @@ import MagicalGirlCard from '../components/MagicalGirlCard';
 import CanshouCard from '../components/CanshouCard';
 import GeneralCharacterCard from '../components/GeneralCharacterCard';
 import { getSensitiveWordRedirectTarget } from '@/lib/content-safety/client';
-import { useCooldown } from '../lib/cooldown';
+import { useProviderModeCooldown } from '../lib/cooldown';
 import { config as appConfig } from '../lib/config';
 import SaveToCloudButton from '../components/SaveToCloudButton';
 import Footer from '../components/Footer';
@@ -20,6 +20,7 @@ import { useNarrativeHistoryStore } from '@/components/arena/stores/useNarrative
 import { useAuth } from '@/lib/useAuth';
 import AiProviderSelector, { UserAIProviderConfig } from '@/components/AiProviderSelector';
 import AiReasoningPanel from '@/components/ai/AiReasoningPanel';
+import { ProviderCooldownNotice } from '@/components/ai/ProviderCooldownNotice';
 import { ErrorMessage } from '@/components/ErrorMessage';
 import { GenerationModeSwitcher, type GenerationMode } from '@/components/shared/GenerationModeSwitcher';
 import { ThemeImage } from '@/components/shared/ThemeImage';
@@ -250,9 +251,14 @@ const SublimationPage: React.FC = () => {
     const [isSourceNativeChecking, setIsSourceNativeChecking] = useState(false);
 
     const isUserCustomKey = userProviderConfig?.providerId !== 'system' && !!userProviderConfig?.apiKey?.trim();
+    const providerCooldownMode = isUserCustomKey ? 'custom' : 'system';
     const sublimationCooldownMs = isUserCustomKey ? 3000 : 60000;
-    const sublimationCooldownKey = isUserCustomKey ? 'sublimationCooldown:custom' : 'sublimationCooldown:system';
-    const { isCooldown, startCooldown, remainingTime } = useCooldown(sublimationCooldownKey, sublimationCooldownMs);
+    const { isCooldown, startCooldown, remainingTime, otherRemainingTime } = useProviderModeCooldown({
+        baseKey: 'sublimationCooldown',
+        currentMode: providerCooldownMode,
+        systemDurationMs: 60000,
+        customDurationMs: 3000,
+    });
     const [languages, setLanguages] = useState<{ code: string; name: string }[]>([]);
     const [selectedLanguage, setSelectedLanguage] = useState('zh-CN');
     const hasStoredSublimationPrefsRef = useRef(false);
@@ -1821,6 +1827,11 @@ const SublimationPage: React.FC = () => {
 
                         {/* 自定义 AI 模型选择 */}
                         <AiProviderSelector onConfigChange={setUserProviderConfig} />
+                        <ProviderCooldownNotice
+                            currentMode={providerCooldownMode}
+                            currentIsCooldown={isCooldown}
+                            otherRemainingTime={otherRemainingTime}
+                        />
 
                         {/* 成功提示信息 */}
                         {!isGenerating && generationMode === 'non-stream' && resultData && (

@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback } from 'react';
 
 const COOLDOWN_SYNC_EVENT = 'mahoshojo:cooldown-sync';
 
+export type ProviderCooldownMode = 'system' | 'custom';
+
 type CooldownSnapshot = {
   endTime: number | null;
   remainingTime: number;
@@ -10,6 +12,45 @@ type CooldownSnapshot = {
 type CooldownSyncDetail = {
   key: string;
   endTime: number | null;
+};
+
+type ProviderCooldownNoticeInput = {
+  currentMode: ProviderCooldownMode;
+  currentIsCooldown: boolean;
+  otherRemainingTime: number;
+};
+
+type UseProviderModeCooldownOptions = {
+  baseKey: string;
+  currentMode: ProviderCooldownMode;
+  systemDurationMs: number;
+  customDurationMs: number;
+};
+
+export const getOtherProviderCooldownMode = (mode: ProviderCooldownMode): ProviderCooldownMode =>
+  mode === 'custom' ? 'system' : 'custom';
+
+export const buildProviderCooldownStorageKey = (baseKey: string, mode: ProviderCooldownMode): string =>
+  `${baseKey}:${mode}`;
+
+const getProviderCooldownModeLabel = (mode: ProviderCooldownMode): string =>
+  mode === 'custom' ? '自定义通道' : '默认通道';
+
+export const getProviderCooldownNoticeText = ({
+  currentMode,
+  currentIsCooldown,
+  otherRemainingTime,
+}: ProviderCooldownNoticeInput): string | null => {
+  if (otherRemainingTime <= 0) return null;
+
+  const currentLabel = getProviderCooldownModeLabel(currentMode);
+  const otherLabel = getProviderCooldownModeLabel(getOtherProviderCooldownMode(currentMode));
+
+  if (currentIsCooldown) {
+    return `${otherLabel}也在冷却中 (${otherRemainingTime}s)。`;
+  }
+
+  return `${otherLabel}冷却中 (${otherRemainingTime}s)，当前${currentLabel}仍可使用。`;
 };
 
 const getLocalStorageItem = (key: string): number | null => {
@@ -162,4 +203,30 @@ export const useCooldown = (key: string, duration: number) => {
   const isCooldown = !isDevelopment && remainingTime > 0;
 
   return { isCooldown, startCooldown, remainingTime };
+};
+
+export const useProviderModeCooldown = ({
+  baseKey,
+  currentMode,
+  systemDurationMs,
+  customDurationMs,
+}: UseProviderModeCooldownOptions) => {
+  const systemCooldown = useCooldown(
+    buildProviderCooldownStorageKey(baseKey, 'system'),
+    systemDurationMs,
+  );
+  const customCooldown = useCooldown(
+    buildProviderCooldownStorageKey(baseKey, 'custom'),
+    customDurationMs,
+  );
+
+  const currentCooldown = currentMode === 'custom' ? customCooldown : systemCooldown;
+  const otherCooldown = currentMode === 'custom' ? systemCooldown : customCooldown;
+
+  return {
+    ...currentCooldown,
+    otherMode: getOtherProviderCooldownMode(currentMode),
+    otherIsCooldown: otherCooldown.isCooldown,
+    otherRemainingTime: otherCooldown.remainingTime,
+  };
 };

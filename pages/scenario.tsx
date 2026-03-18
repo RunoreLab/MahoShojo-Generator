@@ -5,11 +5,12 @@ import Head from 'next/head';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
 import { getSensitiveWordRedirectTarget } from '@/lib/content-safety/client';
-import { useCooldown } from '../lib/cooldown';
+import { useProviderModeCooldown } from '../lib/cooldown';
 import SaveToCloudButton from '../components/SaveToCloudButton';
 import Footer from '../components/Footer';
 import AiProviderSelector, { UserAIProviderConfig } from '@/components/AiProviderSelector';
 import AiReasoningPanel from '@/components/ai/AiReasoningPanel';
+import { ProviderCooldownNotice } from '@/components/ai/ProviderCooldownNotice';
 import { JsonSizeIndicator } from '@/components/shared/JsonSizeIndicator';
 import { ErrorMessage } from '@/components/ErrorMessage';
 import { EncyclopediaLinks } from '@/components/encyclopedia/EncyclopediaLinks';
@@ -66,9 +67,14 @@ const ScenarioPage: React.FC = () => {
 
   // 根据是否使用自定义 Key 动态调整冷却时间：官方 60s，自定义 3s
   const isUserCustomKey = userProviderConfig?.providerId !== 'system' && !!userProviderConfig?.apiKey?.trim();
+  const providerCooldownMode = isUserCustomKey ? 'custom' : 'system';
   const scenarioCooldownMs = isUserCustomKey ? 3000 : 60000;
-  const scenarioCooldownKey = isUserCustomKey ? 'scenarioCooldown:custom' : 'scenarioCooldown:system';
-  const { isCooldown, startCooldown, remainingTime } = useCooldown(scenarioCooldownKey, scenarioCooldownMs);
+  const { isCooldown, startCooldown, remainingTime, otherRemainingTime } = useProviderModeCooldown({
+    baseKey: 'scenarioCooldown',
+    currentMode: providerCooldownMode,
+    systemDurationMs: 60000,
+    customDurationMs: 3000,
+  });
   // 用于存储希望留空的字段的状态
   const [fieldsToKeepEmpty, setFieldsToKeepEmpty] = useState<string[]>([]);
   // 用于控制高级选项的显示/隐藏
@@ -472,6 +478,11 @@ const ScenarioPage: React.FC = () => {
               <p className="text-xs text-gray-500 mt-1">
                 若需使用自备模型，请先选择供应商与模型并填写对应 API Key。
               </p>
+              <ProviderCooldownNotice
+                currentMode={providerCooldownMode}
+                currentIsCooldown={isCooldown}
+                otherRemainingTime={otherRemainingTime}
+              />
             </div>
 
             {/* 多语言支持 */}

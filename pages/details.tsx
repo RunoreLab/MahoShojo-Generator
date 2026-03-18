@@ -5,7 +5,7 @@ import Head from 'next/head';
 import { useRouter } from 'next/router';
 import MagicalGirlCard from '../components/MagicalGirlCard';
 import GeneralCharacterCard from '../components/GeneralCharacterCard';
-import { useCooldown } from '../lib/cooldown';
+import { useProviderModeCooldown } from '../lib/cooldown';
 import { quickCheck } from '@/lib/sensitive-word-filter';
 import Link from 'next/link';
 import { generateRandomMagicalGirl } from '../lib/random-character-generator';
@@ -40,6 +40,7 @@ import { parseBulkQuestionnaireAnswers } from '@/lib/questionnaire-bulk-parser';
 import { ErrorMessage } from '@/components/ErrorMessage';
 import { EncyclopediaLinks } from '@/components/encyclopedia/EncyclopediaLinks';
 import { GenerationModeSwitcher, type GenerationMode } from '@/components/shared/GenerationModeSwitcher';
+import { ProviderCooldownNotice } from '@/components/ai/ProviderCooldownNotice';
 import { TokenIndicator } from '@/components/shared/TokenIndicator';
 import { JsonSizeIndicator } from '@/components/shared/JsonSizeIndicator';
 import { readTextAndReasoningStreamFromResponse } from '@/lib/stream/read-text-and-reasoning-stream';
@@ -265,9 +266,14 @@ const DetailsPage: React.FC = () => {
   const [showDetails, setShowDetails] = useState(false);
   const [userProviderConfig, setUserProviderConfig] = useState<UserAIProviderConfig | null>(null);
   const isUserCustomKey = userProviderConfig?.providerId !== 'system' && !!userProviderConfig?.apiKey?.trim();
+  const providerCooldownMode = isUserCustomKey ? 'custom' : 'system';
   const generatorCooldownMs = isUserCustomKey ? 3000 : 60000;
-  const generatorCooldownKey = isUserCustomKey ? 'generateDetailsCooldown:custom' : 'generateDetailsCooldown:system';
-  const { isCooldown, startCooldown, remainingTime } = useCooldown(generatorCooldownKey, generatorCooldownMs);
+  const { isCooldown, startCooldown, remainingTime, otherRemainingTime } = useProviderModeCooldown({
+    baseKey: 'generateDetailsCooldown',
+    currentMode: providerCooldownMode,
+    systemDurationMs: 60000,
+    customDurationMs: 3000,
+  });
   const [bulkAnswers, setBulkAnswers] = useState(''); // 用于"一键填充"的textarea
   const [showLanguageSection, setShowLanguageSection] = useState(false); // 控制生成语言区域的折叠状态
   const [showBulkFillSection, setShowBulkFillSection] = useState(false); // 控制一键填充区域的折叠状态
@@ -2171,6 +2177,11 @@ const DetailsPage: React.FC = () => {
                 <div className="my-4 bg-gray-50 rounded-lg p-3">
                   <AiProviderSelector onConfigChange={setUserProviderConfig} />
                   <p className="mt-2 text-xs text-gray-500">使用自有 API Key 可缩短冷却至 3 秒，便于批量迭代生成。</p>
+                  <ProviderCooldownNotice
+                    currentMode={providerCooldownMode}
+                    currentIsCooldown={isCooldown}
+                    otherRemainingTime={otherRemainingTime}
+                  />
                 </div>
 
                 {/* 批量回答问卷 */}

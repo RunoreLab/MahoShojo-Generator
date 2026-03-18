@@ -1,6 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 
-import { readCooldownSnapshot, subscribeCooldownKey, writeCooldownSnapshot } from '@/lib/cooldown';
+import {
+  getProviderCooldownNoticeText,
+  readCooldownSnapshot,
+  subscribeCooldownKey,
+  writeCooldownSnapshot,
+} from '@/lib/cooldown';
 
 class LocalStorageMock {
   private store = new Map<string, string>();
@@ -85,5 +90,31 @@ describe('cooldown 同页同步', () => {
       (globalThis as any).window = previousWindow;
       (globalThis as any).localStorage = previousLocalStorage;
     }
+  });
+
+  test('切换 provider 后仍可展示另一通道的冷却提示', () => {
+    expect(
+      getProviderCooldownNoticeText({
+        currentMode: 'custom',
+        currentIsCooldown: false,
+        otherRemainingTime: 42,
+      })
+    ).toBe('默认通道冷却中 (42s)，当前自定义通道仍可使用。');
+
+    expect(
+      getProviderCooldownNoticeText({
+        currentMode: 'system',
+        currentIsCooldown: true,
+        otherRemainingTime: 2,
+      })
+    ).toBe('自定义通道也在冷却中 (2s)。');
+
+    expect(
+      getProviderCooldownNoticeText({
+        currentMode: 'system',
+        currentIsCooldown: false,
+        otherRemainingTime: 0,
+      })
+    ).toBeNull();
   });
 });
