@@ -2,7 +2,11 @@ import type { NextConfig } from "next";
 
 import { buildStaticBrowserSecurityHeaders } from "./lib/security/browser-headers";
 
-const staticSecurityHeaders = buildStaticBrowserSecurityHeaders(process.env.NODE_ENV === 'production');
+const staticSecurityHeaders = buildStaticBrowserSecurityHeaders({
+  allowGoogleAnalytics: Boolean(process.env.NEXT_PUBLIC_GA_ID?.trim()),
+  allowTurnstile: true,
+  isProduction: process.env.NODE_ENV === 'production',
+});
 
 const nextConfig: NextConfig = {
   // 图片优化配置（Cloudflare Pages 不支持默认的图片优化）

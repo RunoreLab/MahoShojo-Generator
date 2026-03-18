@@ -5,13 +5,16 @@ import {
   buildPermissionsPolicy,
   buildStaticBrowserSecurityHeaders,
   getRequestProtocol,
-  isDocumentRequest,
   shouldRedirectToHttps,
 } from '@/lib/security/browser-headers';
 
 describe('browser security headers', () => {
-  test('静态安全头包含基础浏览器硬化项', () => {
-    const headers = buildStaticBrowserSecurityHeaders(true);
+  test('静态安全头包含基础浏览器硬化项与 CSP', () => {
+    const headers = buildStaticBrowserSecurityHeaders({
+      allowGoogleAnalytics: true,
+      allowTurnstile: true,
+      isProduction: true,
+    });
 
     expect(headers).toContainEqual({
       key: 'Strict-Transport-Security',
@@ -25,29 +28,39 @@ describe('browser security headers', () => {
       key: 'Permissions-Policy',
       value: buildPermissionsPolicy(),
     });
+    expect(headers).toContainEqual({
+      key: 'Content-Security-Policy',
+      value: buildContentSecurityPolicy({
+        allowGoogleAnalytics: true,
+        allowTurnstile: true,
+        isProduction: true,
+      }),
+    });
   });
 
-  test('CSP 会启用 anti-frame、nonce 脚本白名单与 HTTPS 升级', () => {
+  test('CSP 会启用 anti-frame、静态脚本白名单与 HTTPS 升级', () => {
     const policy = buildContentSecurityPolicy({
       allowGoogleAnalytics: true,
       allowTurnstile: true,
       isProduction: true,
-      nonce: 'test-nonce',
     });
 
     expect(policy).toContain(`frame-ancestors 'none'`);
-    expect(policy).toContain(`script-src 'self' 'nonce-test-nonce'`);
+    expect(policy).toContain(`script-src 'self' 'unsafe-inline'`);
     expect(policy).toContain('https://challenges.cloudflare.com');
     expect(policy).toContain('https://www.googletagmanager.com');
     expect(policy).toContain(`script-src-attr 'none'`);
     expect(policy).toContain('upgrade-insecure-requests');
   });
 
-  test('仅文档请求才会附加 nonce 型 CSP', () => {
-    expect(isDocumentRequest('/', new Headers({ Accept: 'text/html' }))).toBeTrue();
-    expect(isDocumentRequest('/api/data-cards', new Headers({ Accept: 'text/html' }))).toBeFalse();
-    expect(isDocumentRequest('/favicon.ico', new Headers({ Accept: 'text/html' }))).toBeFalse();
-    expect(isDocumentRequest('/languages.json', new Headers({ Accept: 'application/json' }))).toBeFalse();
+  test('开发环境 CSP 会保留 Next 开发调试所需的 unsafe-eval', () => {
+    const policy = buildContentSecurityPolicy({
+      allowGoogleAnalytics: false,
+      allowTurnstile: false,
+      isProduction: false,
+    });
+
+    expect(policy).toContain(`'unsafe-eval'`);
   });
 
   test('HTTPS 跳转会尊重代理协议头且放过本地开发地址', () => {

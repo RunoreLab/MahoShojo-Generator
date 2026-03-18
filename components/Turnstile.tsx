@@ -2,8 +2,6 @@
 import Script from 'next/script';
 import { useCallback, useEffect, useRef, useState, memo, useImperativeHandle, forwardRef } from 'react';
 
-import { useCspNonce } from '@/lib/client/csp-nonce';
-
 interface TurnstileWidgetProps {
     onVerify: (token: string) => void;
     //颜色
@@ -28,7 +26,6 @@ const TurnstileWidget = memo(forwardRef<TurnstileRef, TurnstileWidgetProps>(({
     const widgetIdRef = useRef<string | null>(null);
     const [isLoaded, setIsLoaded] = useState(false);
     const onVerifyRef = useRef(onVerify);
-    const nonce = useCspNonce();
 
     // 更新回调引用但不触发重新渲染
     useEffect(() => {
@@ -112,7 +109,6 @@ const TurnstileWidget = memo(forwardRef<TurnstileRef, TurnstileWidgetProps>(({
     return (
         <>
             <Script
-                nonce={nonce}
                 src="https://challenges.cloudflare.com/turnstile/v0/api.js"
                 onLoad={handleScriptLoad}
                 strategy="lazyOnload"

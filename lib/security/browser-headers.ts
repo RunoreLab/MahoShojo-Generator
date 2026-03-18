@@ -1,15 +1,12 @@
-export const NONCE_HEADER = 'x-nonce';
-
 type StaticHeader = {
   key: string;
   value: string;
 };
 
-type ContentSecurityPolicyOptions = {
+type BrowserSecurityHeaderOptions = {
   allowGoogleAnalytics?: boolean;
   allowTurnstile?: boolean;
   isProduction: boolean;
-  nonce: string;
 };
 
 const LOCAL_HOSTNAMES = new Set([
@@ -19,8 +16,6 @@ const LOCAL_HOSTNAMES = new Set([
   '[::1]',
   'localhost',
 ]);
-
-const PUBLIC_FILE_PATTERN = /\.[a-z0-9]+$/i;
 
 export function buildPermissionsPolicy(): string {
   return [
@@ -48,41 +43,8 @@ export function buildPermissionsPolicy(): string {
   ].join(', ');
 }
 
-export function buildStaticBrowserSecurityHeaders(isProduction: boolean): StaticHeader[] {
-  return [
-    ...(isProduction
-      ? [
-          {
-            key: 'Strict-Transport-Security',
-            value: 'max-age=31536000; includeSubDomains',
-          },
-        ]
-      : []),
-    {
-      key: 'Referrer-Policy',
-      value: 'strict-origin-when-cross-origin',
-    },
-    {
-      key: 'X-Content-Type-Options',
-      value: 'nosniff',
-    },
-    {
-      key: 'X-Frame-Options',
-      value: 'DENY',
-    },
-    {
-      key: 'Permissions-Policy',
-      value: buildPermissionsPolicy(),
-    },
-  ];
-}
-
-export function createNonce(): string {
-  return btoa(crypto.randomUUID());
-}
-
-export function buildContentSecurityPolicy(options: ContentSecurityPolicyOptions): string {
-  const scriptSources = [`'self'`, `'nonce-${options.nonce}'`];
+export function buildContentSecurityPolicy(options: BrowserSecurityHeaderOptions): string {
+  const scriptSources = [`'self'`, `'unsafe-inline'`];
   const connectSources = [`'self'`, 'https:', 'wss:'];
   const frameSources = [`'self'`];
 
@@ -126,16 +88,37 @@ export function buildContentSecurityPolicy(options: ContentSecurityPolicyOptions
   return directives.join('; ');
 }
 
-export function isDocumentRequest(pathname: string, headers: Headers): boolean {
-  if (pathname.startsWith('/_next/') || pathname.startsWith('/api/')) return false;
-  if (PUBLIC_FILE_PATTERN.test(pathname)) return false;
-
-  const secFetchDest = headers.get('sec-fetch-dest')?.toLowerCase();
-  if (secFetchDest === 'document') return true;
-  if (secFetchDest && secFetchDest !== 'empty') return false;
-
-  const accept = headers.get('accept')?.toLowerCase() ?? '';
-  return accept.includes('text/html');
+export function buildStaticBrowserSecurityHeaders(options: BrowserSecurityHeaderOptions): StaticHeader[] {
+  return [
+    ...(options.isProduction
+      ? [
+          {
+            key: 'Strict-Transport-Security',
+            value: 'max-age=31536000; includeSubDomains',
+          },
+        ]
+      : []),
+    {
+      key: 'Referrer-Policy',
+      value: 'strict-origin-when-cross-origin',
+    },
+    {
+      key: 'X-Content-Type-Options',
+      value: 'nosniff',
+    },
+    {
+      key: 'X-Frame-Options',
+      value: 'DENY',
+    },
+    {
+      key: 'Permissions-Policy',
+      value: buildPermissionsPolicy(),
+    },
+    {
+      key: 'Content-Security-Policy',
+      value: buildContentSecurityPolicy(options),
+    },
+  ];
 }
 
 export function isLocalHostname(hostname: string): boolean {
