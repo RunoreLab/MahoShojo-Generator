@@ -16,17 +16,22 @@ import BattleDataModal from '@/components/BattleDataModal';
 import DataCardDetailsModal from '@/components/DataCardDetailsModal';
 import {
   buildQuestionKey,
+  buildQuestionnaireAnswerLookup,
   buildQuestionnaireFlow,
+  collectStoredQuestionnaireAnswerItems,
   compactQuestionnaireAnswerItems,
   formatQuestionnaireAnswers,
   normalizeQuestionnaireDefinition,
   parseQuestionnaireDataCardPayload,
   normalizeUserAnswers,
+  resolveQuestionnaireAnswerTarget,
   resolveQuestionnaireReferences,
   type QuestionnaireAnswerItem,
+  type QuestionnaireAnswerMatchTarget,
   type QuestionnaireDefinition,
   type QuestionnairePresetEntry,
   type QuestionnaireQuestion,
+  type StoredQuestionnaireAnswerItem,
 } from '@/lib/questionnaires';
 import { persistArrestedBackup, type ArrestedBackupDraftItem, type ArrestedBackupTriggerSource } from '@/lib/arrested-backup';
 import AiProviderSelector, { type UserAIProviderConfig } from '@/components/AiProviderSelector';
@@ -231,6 +236,8 @@ const DetailsPage: React.FC = () => {
   const [pasteQuestionnaireText, setPasteQuestionnaireText] = useState('');
   const [pasteQuestionnaireError, setPasteQuestionnaireError] = useState<string | null>(null);
   const draftRestoredRef = useRef(false);
+  const previousQuestionTargetsRef = useRef<QuestionnaireAnswerMatchTarget[] | null>(null);
+  const previousQuestionTargetSignatureRef = useRef<string | null>(null);
   const currentQuestionKeyRef = useRef<string | null>(null);
   const transitionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const transitionEndTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -333,6 +340,28 @@ const DetailsPage: React.FC = () => {
   const resolvedQuestionItems = useMemo(
     () => resolveQuestionnaireReferences(questionnaireItems),
     [questionnaireItems]
+  );
+
+  const allQuestionTargets = useMemo<QuestionnaireAnswerMatchTarget[]>(
+    () => resolvedQuestionItems.map((item, index) => ({
+      key: item.key,
+      index,
+      question: item.question.question,
+      questionId: item.question.id,
+      questionnaireId: item.questionnaireId,
+      questionnaireTitle: item.questionnaireTitle,
+    })),
+    [resolvedQuestionItems]
+  );
+
+  const questionAnswerLookup = useMemo(
+    () => buildQuestionnaireAnswerLookup(allQuestionTargets),
+    [allQuestionTargets]
+  );
+
+  const questionTargetSignature = useMemo(
+    () => allQuestionTargets.map((item) => `${item.key}::${item.questionId ?? ''}::${item.question}`).join('\n'),
+    [allQuestionTargets]
   );
 
   const getQuestionnaireFlow = useCallback(
@@ -724,6 +753,34 @@ const DetailsPage: React.FC = () => {
     if (selectionReady) setLoading(false);
   }, [selectionReady]);
 
+  useEffect(() => {
+    const previousTargets = previousQuestionTargetsRef.current;
+    const previousSignature = previousQuestionTargetSignatureRef.current;
+    previousQuestionTargetsRef.current = allQuestionTargets;
+    previousQuestionTargetSignatureRef.current = questionTargetSignature;
+
+    if (!previousTargets || previousSignature === null || previousSignature === questionTargetSignature) {
+      return;
+    }
+
+    setAnswersByKey((prev) => {
+      const previousEntries = collectStoredQuestionnaireAnswerItems(previousTargets, prev);
+      if (previousEntries.length === 0) return {};
+
+      const nextAnswers: Record<string, string> = {};
+      previousEntries.forEach((entry, index) => {
+        const target = resolveQuestionnaireAnswerTarget(
+          questionAnswerLookup,
+          { ...entry, index },
+          { allowIndexFallback: false }
+        );
+        if (!target) return;
+        nextAnswers[target.key] = entry.answer;
+      });
+      return nextAnswers;
+    });
+  }, [allQuestionTargets, questionAnswerLookup, questionTargetSignature]);
+
   const applySelection = (selection: QuestionnaireSelection) => {
     const hasQuestions = selection.questionnaire.questions.length > 0;
     const hasLore = Boolean(selection.questionnaire.loreMarkdown?.trim());
@@ -890,7 +947,7 @@ const DetailsPage: React.FC = () => {
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    if (!mergedQuestions.length) return;
+    if (!allQuestionTargets.length) return;
     if (draftRestoredRef.current) return;
     draftRestoredRef.current = true;
 
@@ -899,33 +956,86 @@ const DetailsPage: React.FC = () => {
       if (!savedDraft) return;
       const parsed = JSON.parse(savedDraft);
       const nextAnswers: Record<string, string> = {};
+      const applyStoredEntry = (entry: StoredQuestionnaireAnswerItem, index: number, allowIndexFallback: boolean) => {
+        const answer = typeof entry.answer === 'string' ? entry.answer : '';
+        if (!answer.trim()) return;
+        const target = resolveQuestionnaireAnswerTarget(
+          questionAnswerLookup,
+          {
+            key: entry.key,
+            question: entry.question,
+            questionId: entry.questionId,
+            questionnaireId: entry.questionnaireId,
+            questionnaireTitle: entry.questionnaireTitle,
+            index,
+          },
+          { allowIndexFallback }
+        );
+        if (!target) return;
+        nextAnswers[target.key] = answer;
+      };
 
       if (Array.isArray(parsed)) {
         parsed.forEach((value, index) => {
-          const item = mergedQuestions[index];
-          if (!item) return;
           if (typeof value === 'string' && value.trim()) {
-            nextAnswers[item.key] = value;
+            const target = allQuestionTargets[index];
+            if (target) {
+              nextAnswers[target.key] = value;
+            }
+            return;
+          }
+          if (value && typeof value === 'object') {
+            const record = value as Record<string, unknown>;
+            applyStoredEntry({
+              key: typeof record.key === 'string' ? record.key : undefined,
+              question: typeof record.question === 'string' ? record.question : `问题 ${index + 1}`,
+              answer: typeof record.answer === 'string'
+                ? record.answer
+                : (typeof record.value === 'string' ? record.value : ''),
+              questionId: typeof record.questionId === 'string' ? record.questionId : undefined,
+              questionnaireId: typeof record.questionnaireId === 'string' ? record.questionnaireId : undefined,
+              questionnaireTitle: typeof record.questionnaireTitle === 'string' ? record.questionnaireTitle : undefined,
+            }, index, true);
           }
         });
       } else if (parsed && typeof parsed === 'object') {
-        const direct = (parsed as any).answersByKey;
+        const record = parsed as Record<string, unknown>;
+        const direct = record.answersByKey;
         if (direct && typeof direct === 'object') {
           Object.entries(direct as Record<string, unknown>).forEach(([key, value]) => {
-            if (typeof value === 'string' && value.trim()) {
+            if (typeof value === 'string' && value.trim() && questionAnswerLookup.byKey.has(key)) {
               nextAnswers[key] = value;
             }
           });
-        } else {
-          mergedQuestions.forEach((item, index) => {
+        }
+
+        const answerEntries = Array.isArray(record.answerEntries) ? record.answerEntries : [];
+        if (answerEntries.length > 0) {
+          answerEntries.forEach((value, index) => {
+            if (!value || typeof value !== 'object') return;
+            const entryRecord = value as Record<string, unknown>;
+            applyStoredEntry({
+              key: typeof entryRecord.key === 'string' ? entryRecord.key : undefined,
+              question: typeof entryRecord.question === 'string' ? entryRecord.question : `问题 ${index + 1}`,
+              answer: typeof entryRecord.answer === 'string'
+                ? entryRecord.answer
+                : (typeof entryRecord.value === 'string' ? entryRecord.value : ''),
+              questionId: typeof entryRecord.questionId === 'string' ? entryRecord.questionId : undefined,
+              questionnaireId: typeof entryRecord.questionnaireId === 'string' ? entryRecord.questionnaireId : undefined,
+              questionnaireTitle: typeof entryRecord.questionnaireTitle === 'string' ? entryRecord.questionnaireTitle : undefined,
+            }, index, false);
+          });
+        } else if (!direct || typeof direct !== 'object') {
+          allQuestionTargets.forEach((item, index) => {
             const candidates = [
-              item.question.id,
+              item.questionId,
               `${index}`,
               `${index + 1}`,
               `MG-${index + 1}`,
             ];
             for (const key of candidates) {
-              const value = (parsed as any)[key];
+              if (!key) continue;
+              const value = record[key];
               if (typeof value === 'string' && value.trim()) {
                 nextAnswers[item.key] = value;
                 break;
@@ -944,20 +1054,22 @@ const DetailsPage: React.FC = () => {
     } catch (e) {
       console.error("Failed to load answers from localStorage", e);
     }
-  }, [mergedQuestions]);
+  }, [allQuestionTargets, mergedQuestions, questionAnswerLookup]);
 
   useEffect(() => {
     try {
-      const hasAnswers = Object.values(answersByKey).some((value) => typeof value === 'string' && value.trim() !== '');
-      if (hasAnswers) {
-        const dataToSave = JSON.stringify({ version: 2, answersByKey });
+      const answerEntries = collectStoredQuestionnaireAnswerItems(allQuestionTargets, answersByKey);
+      if (answerEntries.length > 0) {
+        const dataToSave = JSON.stringify({ version: 3, answersByKey, answerEntries });
         localStorage.setItem(LOCAL_STORAGE_KEY, dataToSave);
         setAutoSaveTimestamp(Date.now());
+      } else {
+        localStorage.removeItem(LOCAL_STORAGE_KEY);
       }
     } catch (e) {
       console.error("Failed to save answers to localStorage", e);
     }
-  }, [answersByKey]);
+  }, [allQuestionTargets, answersByKey]);
 
   useEffect(() => {
     const currentKey = mergedQuestions[currentQuestionIndex]?.key;
@@ -1182,14 +1294,14 @@ const DetailsPage: React.FC = () => {
   };
 
   const handleBulkFill = () => {
-    if (mergedQuestions.length === 0) {
+    if (allQuestionTargets.length === 0) {
       setError('⚠️ 当前没有可填充的题目，请先选择问卷。');
       return;
     }
     const parsed = parseBulkQuestionnaireAnswers(bulkAnswers, {
-      expectedCount: mergedQuestions.length,
-      orderedQuestionIds: mergedQuestions.map((item) => item.question.id),
-      orderedQuestionKeys: mergedQuestions.map((item) => item.key),
+      expectedCount: allQuestionTargets.length,
+      orderedQuestionIds: allQuestionTargets.map((item) => item.questionId ?? ''),
+      orderedQuestionKeys: allQuestionTargets.map((item) => item.key),
     });
 
     if (parsed.entries.length === 0) {
@@ -1201,12 +1313,13 @@ const DetailsPage: React.FC = () => {
     let appliedCount = 0;
     let ignoredCount = 0;
     parsed.entries.forEach(entry => {
-      if (entry.index < 0 || entry.index >= mergedQuestions.length) {
-        ignoredCount += 1;
-        return;
-      }
-      const item = mergedQuestions[entry.index];
-      if (!item) {
+      const hasMetadata = Boolean(
+        entry.key || entry.question || entry.questionId || entry.questionnaireId || entry.questionnaireTitle
+      );
+      const target = hasMetadata
+        ? resolveQuestionnaireAnswerTarget(questionAnswerLookup, entry, { allowIndexFallback: false })
+        : mergedQuestions[entry.index] ?? null;
+      if (!target) {
         ignoredCount += 1;
         return;
       }
@@ -1215,7 +1328,7 @@ const DetailsPage: React.FC = () => {
         ignoredCount += 1;
         return;
       }
-      nextAnswers[item.key] = entry.value;
+      nextAnswers[target.key] = entry.value;
       appliedCount += 1;
     });
     setAnswersByKey(nextAnswers);

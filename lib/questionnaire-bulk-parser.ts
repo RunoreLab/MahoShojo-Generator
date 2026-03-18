@@ -3,6 +3,11 @@ export type BulkParseFormat = 'json' | 'qa' | 'paragraphs' | 'lines' | 'unknown'
 export type BulkParseEntry = {
   index: number;
   value: string;
+  key?: string;
+  question?: string;
+  questionId?: string;
+  questionnaireId?: string;
+  questionnaireTitle?: string;
 };
 
 export type BulkParseOptions = {
@@ -44,17 +49,19 @@ const stripListPrefix = (line: string) => {
 const matchQuestionLine = (line: string) => {
   const trimmed = line.trim();
   const match = trimmed.match(
-    /^(?:Q|问题|问)\s*(\d+)?\s*(?:[（(【\[][^）)】\]]*[）)】\]])?\s*[:：]/i
+    /^(?:Q|问题|问)\s*(\d+)?\s*(?:[（(【\[]\s*([^）)】\]]*)\s*[）)】\]])?\s*[:：]\s*(.*)$/i
   );
   if (!match) return null;
   const rawIndex = match[1]?.trim();
+  const questionnaireTitle = match[2]?.trim() || undefined;
+  const question = match[3]?.trim() || undefined;
   if (rawIndex) {
     const parsedIndex = Number(rawIndex);
     if (Number.isFinite(parsedIndex) && parsedIndex > 0) {
-      return { index: parsedIndex - 1 };
+      return { index: parsedIndex - 1, questionnaireTitle, question };
     }
   }
-  return { index: null as number | null };
+  return { index: null as number | null, questionnaireTitle, question };
 };
 
 const looksLikeQuestionLine = (line: string) => Boolean(matchQuestionLine(line));
@@ -70,6 +77,18 @@ const matchAnswerLine = (line: string) => {
   return null;
 };
 
+const toObjectBulkEntry = (value: Record<string, unknown>, index: number): BulkParseEntry => {
+  return {
+    index,
+    value: coerceToString(value.answer ?? value.value ?? '').trim(),
+    key: typeof value.key === 'string' ? value.key : undefined,
+    question: typeof value.question === 'string' ? value.question : undefined,
+    questionId: typeof value.questionId === 'string' ? value.questionId : undefined,
+    questionnaireId: typeof value.questionnaireId === 'string' ? value.questionnaireId : undefined,
+    questionnaireTitle: typeof value.questionnaireTitle === 'string' ? value.questionnaireTitle : undefined,
+  };
+};
+
 const parseFromJson = (raw: string, options: BulkParseOptions): BulkParseResult | null => {
   try {
     const parsed = JSON.parse(raw) as unknown;
@@ -77,9 +96,7 @@ const parseFromJson = (raw: string, options: BulkParseOptions): BulkParseResult 
     if (Array.isArray(parsed)) {
       const entries = parsed.map((value, index) => {
         if (value && typeof value === 'object') {
-          const record = value as Record<string, unknown>;
-          const answer = coerceToString(record.answer ?? record.value ?? '').trim();
-          return { index, value: answer };
+          return toObjectBulkEntry(value as Record<string, unknown>, index);
         }
         return { index, value: coerceToString(value).trim() };
       });
@@ -87,13 +104,11 @@ const parseFromJson = (raw: string, options: BulkParseOptions): BulkParseResult 
     }
 
     if (isPlainObject(parsed)) {
-      const directUserAnswers = parsed.userAnswers ?? parsed.answers ?? parsed.answerItems;
+      const directUserAnswers = parsed.answerEntries ?? parsed.userAnswers ?? parsed.answers ?? parsed.answerItems;
       if (Array.isArray(directUserAnswers)) {
         const entries = directUserAnswers.map((value, index) => {
           if (value && typeof value === 'object') {
-            const record = value as Record<string, unknown>;
-            const answer = coerceToString(record.answer ?? record.value ?? '').trim();
-            return { index, value: answer };
+            return toObjectBulkEntry(value as Record<string, unknown>, index);
           }
           return { index, value: coerceToString(value).trim() };
         });
@@ -166,13 +181,24 @@ const parseFromQaText = (raw: string): BulkParseResult | null => {
   let currentLines: string[] | null = null;
   let currentIndex: number | null = null;
   let pendingQuestionIndex: number | null = null;
+  let pendingQuestionText: string | undefined;
+  let pendingQuestionnaireTitle: string | undefined;
+  let currentQuestionText: string | undefined;
+  let currentQuestionnaireTitle: string | undefined;
 
   const flush = () => {
     if (!currentLines) return;
     const joined = currentLines.join('\n').replace(/\s+$/g, '').trim();
-    entries.push({ index: currentIndex ?? entries.length, value: joined });
+    entries.push({
+      index: currentIndex ?? entries.length,
+      value: joined,
+      question: currentQuestionText,
+      questionnaireTitle: currentQuestionnaireTitle,
+    });
     currentLines = null;
     currentIndex = null;
+    currentQuestionText = undefined;
+    currentQuestionnaireTitle = undefined;
   };
 
   for (const line of lines) {
@@ -180,6 +206,8 @@ const parseFromQaText = (raw: string): BulkParseResult | null => {
     if (questionMatch) {
       flush();
       pendingQuestionIndex = questionMatch.index;
+      pendingQuestionText = questionMatch.question;
+      pendingQuestionnaireTitle = questionMatch.questionnaireTitle;
       continue;
     }
 
@@ -188,7 +216,11 @@ const parseFromQaText = (raw: string): BulkParseResult | null => {
       flush();
       currentLines = [answerMatch.value];
       currentIndex = pendingQuestionIndex ?? entries.length;
+      currentQuestionText = pendingQuestionText;
+      currentQuestionnaireTitle = pendingQuestionnaireTitle;
       pendingQuestionIndex = null;
+      pendingQuestionText = undefined;
+      pendingQuestionnaireTitle = undefined;
       continue;
     }
 

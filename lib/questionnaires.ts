@@ -144,6 +144,10 @@ export interface QuestionnaireAnswerItem {
   questionnaireTitle?: string;
 }
 
+export type StoredQuestionnaireAnswerItem = QuestionnaireAnswerItem & {
+  key?: string;
+};
+
 export const compactQuestionnaireAnswerItems = (answers: QuestionnaireAnswerItem[]): QuestionnaireAnswerItem[] => {
   return answers.map((item) => {
     const compacted = { ...item };
@@ -157,6 +161,189 @@ export const buildQuestionKey = (questionnaireId: string | undefined, questionId
   const base = (questionId ?? '').trim() || `Q${index + 1}`;
   const prefix = (questionnaireId ?? '').trim();
   return prefix ? `${prefix}::${base}` : base;
+};
+
+export type QuestionnaireAnswerMatchTarget = {
+  key: string;
+  question: string;
+  index: number;
+  questionId?: string;
+  questionnaireId?: string;
+  questionnaireTitle?: string;
+};
+
+export type QuestionnaireAnswerMatchInput = {
+  key?: string;
+  question?: string;
+  index?: number;
+  questionId?: string;
+  questionnaireId?: string;
+  questionnaireTitle?: string;
+};
+
+export type QuestionnaireAnswerLookup<T extends QuestionnaireAnswerMatchTarget> = {
+  byKey: Map<string, T>;
+  byCompositeId: Map<string, T>;
+  byQuestionId: Map<string, T[]>;
+  byQuestionText: Map<string, T[]>;
+  ordered: T[];
+};
+
+const normalizeQuestionnaireMatchText = (value: string | undefined): string => {
+  if (typeof value !== 'string') return '';
+  return value
+    .normalize('NFKC')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+};
+
+const appendQuestionnaireLookupValue = <T,>(map: Map<string, T[]>, key: string, value: T) => {
+  if (!key) return;
+  const existing = map.get(key) ?? [];
+  existing.push(value);
+  map.set(key, existing);
+};
+
+export const buildQuestionnaireAnswerLookup = <T extends QuestionnaireAnswerMatchTarget>(
+  targets: T[]
+): QuestionnaireAnswerLookup<T> => {
+  const byKey = new Map<string, T>();
+  const byCompositeId = new Map<string, T>();
+  const byQuestionId = new Map<string, T[]>();
+  const byQuestionText = new Map<string, T[]>();
+  const ordered = [...targets];
+
+  ordered.forEach((target) => {
+    const key = target.key.trim();
+    if (key) {
+      byKey.set(key, target);
+    }
+
+    const questionId = target.questionId?.trim() ?? '';
+    if (questionId) {
+      appendQuestionnaireLookupValue(byQuestionId, questionId, target);
+      const questionnaireId = target.questionnaireId?.trim() ?? '';
+      if (questionnaireId) {
+        byCompositeId.set(`${questionnaireId}::${questionId}`, target);
+      }
+    }
+
+    const normalizedQuestion = normalizeQuestionnaireMatchText(target.question);
+    if (normalizedQuestion) {
+      appendQuestionnaireLookupValue(byQuestionText, normalizedQuestion, target);
+    }
+  });
+
+  return { byKey, byCompositeId, byQuestionId, byQuestionText, ordered };
+};
+
+const filterQuestionnaireAnswerCandidates = <T extends QuestionnaireAnswerMatchTarget>(
+  candidates: T[],
+  input: QuestionnaireAnswerMatchInput
+) => {
+  const normalizedQuestionnaireId = input.questionnaireId?.trim() ?? '';
+  const normalizedQuestionnaireTitle = normalizeQuestionnaireMatchText(input.questionnaireTitle);
+
+  let next = candidates;
+  if (normalizedQuestionnaireId) {
+    const filteredById = next.filter((candidate) => (candidate.questionnaireId?.trim() ?? '') === normalizedQuestionnaireId);
+    if (filteredById.length > 0) {
+      next = filteredById;
+    }
+  }
+  if (normalizedQuestionnaireTitle) {
+    const filteredByTitle = next.filter(
+      (candidate) => normalizeQuestionnaireMatchText(candidate.questionnaireTitle) === normalizedQuestionnaireTitle
+    );
+    if (filteredByTitle.length > 0) {
+      next = filteredByTitle;
+    }
+  }
+  return next;
+};
+
+const isQuestionnaireQuestionTextCompatible = <T extends QuestionnaireAnswerMatchTarget>(
+  candidate: T,
+  input: QuestionnaireAnswerMatchInput
+) => {
+  const normalizedQuestion = normalizeQuestionnaireMatchText(input.question);
+  if (!normalizedQuestion) return true;
+  return normalizeQuestionnaireMatchText(candidate.question) === normalizedQuestion;
+};
+
+const pickUniqueQuestionnaireAnswerCandidate = <T extends QuestionnaireAnswerMatchTarget>(candidates: T[]) => {
+  return candidates.length === 1 ? candidates[0] : null;
+};
+
+export const resolveQuestionnaireAnswerTarget = <T extends QuestionnaireAnswerMatchTarget>(
+  lookup: QuestionnaireAnswerLookup<T>,
+  input: QuestionnaireAnswerMatchInput,
+  options: { allowIndexFallback?: boolean } = {}
+): T | null => {
+  const trimmedKey = input.key?.trim() ?? '';
+  if (trimmedKey) {
+    const direct = lookup.byKey.get(trimmedKey) ?? null;
+    if (direct && isQuestionnaireQuestionTextCompatible(direct, input)) {
+      return direct;
+    }
+  }
+
+  const trimmedQuestionnaireId = input.questionnaireId?.trim() ?? '';
+  const trimmedQuestionId = input.questionId?.trim() ?? '';
+  if (trimmedQuestionnaireId && trimmedQuestionId) {
+    const composite = lookup.byCompositeId.get(`${trimmedQuestionnaireId}::${trimmedQuestionId}`) ?? null;
+    if (composite && isQuestionnaireQuestionTextCompatible(composite, input)) {
+      return composite;
+    }
+  }
+
+  if (trimmedQuestionId) {
+    const byIdCandidates = filterQuestionnaireAnswerCandidates(
+      lookup.byQuestionId.get(trimmedQuestionId) ?? [],
+      input
+    );
+    const textFilteredCandidates = normalizeQuestionnaireMatchText(input.question)
+      ? byIdCandidates.filter((candidate) => isQuestionnaireQuestionTextCompatible(candidate, input))
+      : byIdCandidates;
+    const byIdResolved = pickUniqueQuestionnaireAnswerCandidate(textFilteredCandidates);
+    if (byIdResolved) return byIdResolved;
+  }
+
+  const normalizedQuestion = normalizeQuestionnaireMatchText(input.question);
+  if (normalizedQuestion) {
+    const byQuestionCandidates = filterQuestionnaireAnswerCandidates(
+      lookup.byQuestionText.get(normalizedQuestion) ?? [],
+      input
+    );
+    const byQuestionResolved = pickUniqueQuestionnaireAnswerCandidate(byQuestionCandidates);
+    if (byQuestionResolved) return byQuestionResolved;
+  }
+
+  if (options.allowIndexFallback === true && typeof input.index === 'number') {
+    const target = lookup.ordered[input.index];
+    return target ?? null;
+  }
+
+  return null;
+};
+
+export const collectStoredQuestionnaireAnswerItems = <T extends QuestionnaireAnswerMatchTarget>(
+  targets: T[],
+  answersByKey: Record<string, string>
+): StoredQuestionnaireAnswerItem[] => {
+  return targets.flatMap((target) => {
+    const answer = answersByKey[target.key];
+    if (typeof answer !== 'string' || answer.trim().length === 0) return [];
+    return [{
+      key: target.key,
+      question: target.question,
+      answer,
+      questionId: target.questionId,
+      questionnaireId: target.questionnaireId,
+      questionnaireTitle: target.questionnaireTitle,
+    }];
+  });
 };
 
 type QuestionFlowItem = {

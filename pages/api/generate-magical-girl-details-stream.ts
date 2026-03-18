@@ -4,7 +4,13 @@ import { z } from 'zod/v3';
 import { NextRequest } from 'next/server';
 
 import { getLogger } from '@/lib/logger';
-import { formatQuestionnaireAnswers, normalizeUserAnswers, type QuestionnaireAnswerItem } from '@/lib/questionnaires';
+import {
+  buildQuestionnaireAnswerLookup,
+  formatQuestionnaireAnswers,
+  normalizeUserAnswers,
+  resolveQuestionnaireAnswerTarget,
+  type QuestionnaireAnswerItem,
+} from '@/lib/questionnaires';
 import { type AIProvider } from '@/lib/config';
 import { enforceTextSafety } from '@/lib/content-safety/server';
 import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
@@ -101,39 +107,47 @@ const buildQuestionnaireLoreText = (questionnaires: RequestQuestionnaire[]): str
   return blocks.length > 0 ? blocks.join('\n\n') : '';
 };
 
-type QuestionLookup = {
-  byId: Map<string, RequestQuestion & { questionnaireId: string; questionnaireTitle: string }>;
-  byCompositeId: Map<string, RequestQuestion & { questionnaireId: string; questionnaireTitle: string }>;
-  byQuestion: Map<string, RequestQuestion & { questionnaireId: string; questionnaireTitle: string }>;
-  ordered: Array<RequestQuestion & { questionnaireId: string; questionnaireTitle: string }>;
-};
-
-const buildQuestionLookup = (questionnaires: RequestQuestionnaire[]): QuestionLookup => {
-  const byId = new Map<string, RequestQuestion & { questionnaireId: string; questionnaireTitle: string }>();
-  const byCompositeId = new Map<string, RequestQuestion & { questionnaireId: string; questionnaireTitle: string }>();
-  const byQuestion = new Map<string, RequestQuestion & { questionnaireId: string; questionnaireTitle: string }>();
-  const ordered: Array<RequestQuestion & { questionnaireId: string; questionnaireTitle: string }> = [];
+const buildQuestionLookup = (questionnaires: RequestQuestionnaire[]) => {
+  const ordered: Array<RequestQuestion & {
+    key: string;
+    index: number;
+    questionId: string;
+    questionnaireId: string;
+    questionnaireTitle: string;
+  }> = [];
 
   questionnaires.forEach((questionnaire) => {
     questionnaire.questions.forEach((question) => {
-      const payload = {
+      ordered.push({
         ...question,
+        key: `${questionnaire.id}::${question.id}`,
+        index: ordered.length,
+        questionId: question.id,
         questionnaireId: questionnaire.id,
         questionnaireTitle: questionnaire.title,
-      };
-      ordered.push(payload);
-      byCompositeId.set(`${questionnaire.id}::${question.id}`, payload);
-      if (!byId.has(question.id)) {
-        byId.set(question.id, payload);
-      }
-      const textKey = question.question.trim();
-      if (textKey && !byQuestion.has(textKey)) {
-        byQuestion.set(textKey, payload);
-      }
+      });
     });
   });
 
-  return { byId, byCompositeId, byQuestion, ordered };
+  return buildQuestionnaireAnswerLookup(ordered);
+};
+
+const resolveLookupQuestion = (
+  lookup: ReturnType<typeof buildQuestionLookup>,
+  item: QuestionnaireAnswerItem,
+  index: number
+) => {
+  return resolveQuestionnaireAnswerTarget(
+    lookup,
+    {
+      question: item.question,
+      questionId: item.questionId,
+      questionnaireId: item.questionnaireId,
+      questionnaireTitle: item.questionnaireTitle,
+      index,
+    },
+    { allowIndexFallback: true }
+  );
 };
 
 const resolveAnswerItems = (
@@ -148,24 +162,12 @@ const resolveAnswerItems = (
   normalized.forEach((item, index) => {
     const answer = item.answer?.trim() ?? '';
     if (!answer) return;
-    let resolved = null as (RequestQuestion & { questionnaireId: string; questionnaireTitle: string }) | null;
-    if (item.questionnaireId && item.questionId) {
-      resolved = lookup.byCompositeId.get(`${item.questionnaireId}::${item.questionId}`) ?? null;
-    }
-    if (!resolved && item.questionId) {
-      resolved = lookup.byId.get(item.questionId) ?? null;
-    }
-    if (!resolved && item.question) {
-      resolved = lookup.byQuestion.get(item.question.trim()) ?? null;
-    }
-    if (!resolved && lookup.ordered[index]) {
-      resolved = lookup.ordered[index];
-    }
+    const resolved = resolveLookupQuestion(lookup, item, index);
     const question = item.question?.trim() || resolved?.question || `问题 ${index + 1}`;
     resolvedItems.push({
       question,
       answer,
-      questionId: item.questionId ?? resolved?.id,
+      questionId: item.questionId ?? resolved?.questionId,
       questionnaireId: item.questionnaireId ?? resolved?.questionnaireId,
       questionnaireTitle: item.questionnaireTitle ?? resolved?.questionnaireTitle,
     });

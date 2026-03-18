@@ -10,7 +10,14 @@ import { buildJsonResponseWithOptionalAiMeta } from '@/lib/ai/meta-response';
 import { type AIProvider } from '@/lib/config';
 import { enforceTextSafety } from '@/lib/content-safety/server';
 import { CANSHOU_LORE } from '@/lib/canshou-lore';
-import { compactQuestionnaireAnswerItems, formatQuestionnaireAnswers, normalizeUserAnswers, type QuestionnaireAnswerItem } from '@/lib/questionnaires';
+import {
+  buildQuestionnaireAnswerLookup,
+  compactQuestionnaireAnswerItems,
+  formatQuestionnaireAnswers,
+  normalizeUserAnswers,
+  resolveQuestionnaireAnswerTarget,
+  type QuestionnaireAnswerItem,
+} from '@/lib/questionnaires';
 import { getAnswerLimitInfo, isAnswerOverLimit } from '@/lib/questionnaire-limits';
 import { getDataCardById } from '@/lib/database/data-cards';
 import { recordUserActivityFromRequest } from '@/lib/user-activity/record';
@@ -299,39 +306,47 @@ const extractAnswerQuestionnaireIds = (rawAnswers: unknown): Set<string> => {
   return ids;
 };
 
-type QuestionLookup = {
-  byId: Map<string, RequestQuestion & { questionnaireId: string; questionnaireTitle: string }>;
-  byCompositeId: Map<string, RequestQuestion & { questionnaireId: string; questionnaireTitle: string }>;
-  byQuestion: Map<string, RequestQuestion & { questionnaireId: string; questionnaireTitle: string }>;
-  ordered: Array<RequestQuestion & { questionnaireId: string; questionnaireTitle: string }>;
-};
-
-const buildQuestionLookup = (questionnaires: RequestQuestionnaire[]): QuestionLookup => {
-  const byId = new Map<string, RequestQuestion & { questionnaireId: string; questionnaireTitle: string }>();
-  const byCompositeId = new Map<string, RequestQuestion & { questionnaireId: string; questionnaireTitle: string }>();
-  const byQuestion = new Map<string, RequestQuestion & { questionnaireId: string; questionnaireTitle: string }>();
-  const ordered: Array<RequestQuestion & { questionnaireId: string; questionnaireTitle: string }> = [];
+const buildQuestionLookup = (questionnaires: RequestQuestionnaire[]) => {
+  const ordered: Array<RequestQuestion & {
+    key: string;
+    index: number;
+    questionId: string;
+    questionnaireId: string;
+    questionnaireTitle: string;
+  }> = [];
 
   questionnaires.forEach((questionnaire) => {
     questionnaire.questions.forEach((question) => {
-      const payload = {
+      ordered.push({
         ...question,
+        key: `${questionnaire.id}::${question.id}`,
+        index: ordered.length,
+        questionId: question.id,
         questionnaireId: questionnaire.id,
         questionnaireTitle: questionnaire.title,
-      };
-      ordered.push(payload);
-      byCompositeId.set(`${questionnaire.id}::${question.id}`, payload);
-      if (!byId.has(question.id)) {
-        byId.set(question.id, payload);
-      }
-      const textKey = question.question.trim();
-      if (textKey && !byQuestion.has(textKey)) {
-        byQuestion.set(textKey, payload);
-      }
+      });
     });
   });
 
-  return { byId, byCompositeId, byQuestion, ordered };
+  return buildQuestionnaireAnswerLookup(ordered);
+};
+
+const resolveLookupQuestion = (
+  lookup: ReturnType<typeof buildQuestionLookup>,
+  item: QuestionnaireAnswerItem,
+  index: number
+) => {
+  return resolveQuestionnaireAnswerTarget(
+    lookup,
+    {
+      question: item.question,
+      questionId: item.questionId,
+      questionnaireId: item.questionnaireId,
+      questionnaireTitle: item.questionnaireTitle,
+      index,
+    },
+    { allowIndexFallback: true }
+  );
 };
 
 const resolveAnswerItems = (
@@ -348,27 +363,15 @@ const resolveAnswerItems = (
   normalized.forEach((item, index) => {
     const answer = item.answer?.trim() ?? '';
     if (!answer) return;
-    let resolved = null as (RequestQuestion & { questionnaireId: string; questionnaireTitle: string }) | null;
-    if (item.questionnaireId && item.questionId) {
-      resolved = lookup.byCompositeId.get(`${item.questionnaireId}::${item.questionId}`) ?? null;
-    }
-    if (!resolved && item.questionId) {
-      resolved = lookup.byId.get(item.questionId) ?? null;
-    }
-    if (!resolved && item.question) {
-      resolved = lookup.byQuestion.get(item.question.trim()) ?? null;
-    }
-    if (!resolved && lookup.ordered[index]) {
-      resolved = lookup.ordered[index];
-    }
+    const resolved = resolveLookupQuestion(lookup, item, index);
     if (preferResolved && !resolved) return;
     const question = preferResolved
-      ? (resolved as RequestQuestion & { questionnaireId: string; questionnaireTitle: string }).question
+      ? resolved!.question
       : item.question?.trim() || resolved?.question || `问题 ${index + 1}`;
     resolvedItems.push({
       question,
       answer,
-      questionId: preferResolved ? resolved!.id : item.questionId ?? resolved?.id,
+      questionId: preferResolved ? resolved!.questionId : item.questionId ?? resolved?.questionId,
       questionnaireId: preferResolved ? resolved!.questionnaireId : item.questionnaireId ?? resolved?.questionnaireId,
       questionnaireTitle: preferResolved ? resolved!.questionnaireTitle : item.questionnaireTitle ?? resolved?.questionnaireTitle,
     });
@@ -384,19 +387,7 @@ const findOverLimitAnswer = (
   const lookup = buildQuestionLookup(questionnaires);
   for (const [index, item] of items.entries()) {
     if (!item.answer) continue;
-    let resolved = null as (RequestQuestion & { questionnaireId: string; questionnaireTitle: string }) | null;
-    if (item.questionnaireId && item.questionId) {
-      resolved = lookup.byCompositeId.get(`${item.questionnaireId}::${item.questionId}`) ?? null;
-    }
-    if (!resolved && item.questionId) {
-      resolved = lookup.byId.get(item.questionId) ?? null;
-    }
-    if (!resolved && item.question) {
-      resolved = lookup.byQuestion.get(item.question.trim()) ?? null;
-    }
-    if (!resolved && lookup.ordered[index]) {
-      resolved = lookup.ordered[index];
-    }
+    const resolved = resolveLookupQuestion(lookup, item, index);
     if (!isAnswerOverLimit(item.answer, resolved?.maxLength ?? null)) continue;
     const limitInfo = getAnswerLimitInfo(resolved?.maxLength ?? null);
     const questionLabel = resolved?.question || item.question || `问题 ${index + 1}`;
