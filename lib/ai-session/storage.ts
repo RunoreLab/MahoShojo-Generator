@@ -31,6 +31,12 @@ const openAiSessionDbInternal = (): Promise<IDBDatabase> =>
         store.createIndex('by_sourceChapterId', 'sourceChapterId');
       }
 
+      if (!db.objectStoreNames.contains(AI_SESSION_STORE_NAMES.battleStoryCheckpoints)) {
+        const store = db.createObjectStore(AI_SESSION_STORE_NAMES.battleStoryCheckpoints, { keyPath: 'id' });
+        store.createIndex('by_session_boundary', ['sessionId', 'boundaryIndex'], { unique: true });
+        store.createIndex('by_session_createdAt', ['sessionId', 'createdAt']);
+      }
+
       if (!db.objectStoreNames.contains(AI_SESSION_STORE_NAMES.cardEditSessions)) {
         const store = db.createObjectStore(AI_SESSION_STORE_NAMES.cardEditSessions, { keyPath: 'id' });
         store.createIndex('by_updatedAt', 'updatedAt');

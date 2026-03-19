@@ -3,6 +3,7 @@
 import { randomUUID } from '@/lib/crypto';
 import { formatBattleStoryChapterProgress } from '@/lib/ai-session/battle-story/plan';
 import type {
+  BattleStoryCheckpointRecord,
   BattleStoryChapterCardSnapshot,
   BattleStoryChapterRecord,
   BattleStoryDeterministicDigest,
@@ -461,8 +462,16 @@ export const buildBattleStoryExportMarkdown = (
     `> 会话 ID：${session.id}`,
   ];
 
+  if (session.branchLabel) {
+    header.push(`> 分支标签：${session.branchLabel}`);
+  }
+
   if (session.branchOf?.sessionId && session.branchOf?.chapterId) {
-    header.push(`> 分支来源：${session.branchOf.sessionId} / ${session.branchOf.chapterId}`);
+    header.push(
+      `> 分支来源：${session.branchOf.sessionId} / ${session.branchOf.chapterId} / 第 ${session.branchOf.chapterIndex} 章${
+        session.branchOf.chapterTitle ? `《${session.branchOf.chapterTitle}》` : ''
+      }`
+    );
   }
   if (session.sessionSummary) {
     header.push('');
@@ -512,6 +521,37 @@ export const cloneBattleStoryActiveChaptersForNewSession = (input: {
     chapters: normalized,
     chapterIdMap,
   };
+};
+
+export const cloneBattleStoryCheckpointsForNewSession = (input: {
+  checkpoints: BattleStoryCheckpointRecord[];
+  newSessionId: string;
+  chapterIdMap: Map<string, string>;
+  maxBoundaryIndex?: number;
+}): BattleStoryCheckpointRecord[] => {
+  const maxBoundaryIndex =
+    typeof input.maxBoundaryIndex === 'number' && Number.isFinite(input.maxBoundaryIndex)
+      ? Math.max(0, Math.floor(input.maxBoundaryIndex))
+      : Number.MAX_SAFE_INTEGER;
+
+  return input.checkpoints
+    .filter((checkpoint) => checkpoint.boundaryIndex <= maxBoundaryIndex)
+    .sort((left, right) => left.boundaryIndex - right.boundaryIndex)
+    .map((checkpoint) => ({
+      ...checkpoint,
+      id: randomUUID(),
+      sessionId: input.newSessionId,
+      chapterId: checkpoint.chapterId ? (input.chapterIdMap.get(checkpoint.chapterId) ?? null) : null,
+    }));
+};
+
+export const buildBattleStoryBranchLabel = (input: {
+  chapterIndex: number;
+  chapterTitle?: string | null;
+}): string => {
+  const index = Math.max(1, Math.floor(input.chapterIndex));
+  const title = normalizeText(input.chapterTitle);
+  return title ? `从第 ${index} 章《${title}》分支` : `从第 ${index} 章分支`;
 };
 
 export const remapBattleStorySummaryMeta = (

@@ -59,6 +59,9 @@ export type BattleStorySummaryMeta = {
 export type BattleStorySessionBranchOf = {
   sessionId: string;
   chapterId: string;
+  chapterIndex: number;
+  chapterTitle?: string;
+  createdAt: number;
 };
 
 export type BattleStoryChapterPlan = {
@@ -72,6 +75,7 @@ export type BattleStoryChapterPlanLimit = Pick<BattleStoryChapterPlan, 'totalCha
 export type BattleStorySessionRecord = {
   id: string;
   title: string;
+  branchLabel?: string;
   createdAt: number;
   updatedAt: number;
   source: BattleStorySessionSource;
@@ -85,6 +89,15 @@ export type BattleStorySessionRecord = {
   chapterPlan?: BattleStoryChapterPlan;
   branchOf?: BattleStorySessionBranchOf;
   archivedAt?: number;
+};
+
+export type BattleStoryCheckpointRecord = {
+  id: string;
+  sessionId: string;
+  boundaryIndex: number;
+  chapterId?: string | null;
+  combatants: unknown[];
+  createdAt: number;
 };
 
 export type BattleStoryImpactDigestItem = {
@@ -166,6 +179,8 @@ export type BattleStorySessionListOptions = AiSessionListOptions & {
 export type BattleStoryChapterListOptions = AiSessionListOptions & {
   includeSuperseded?: boolean;
 };
+
+export type BattleStoryCheckpointListOptions = AiSessionListOptions;
 
 export type BattleStoryPromptSectionKey =
   | 'seed'

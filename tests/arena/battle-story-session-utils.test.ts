@@ -2,9 +2,11 @@ import { describe, expect, test } from 'bun:test';
 
 import {
   BATTLE_STORY_FAILURE_COOLDOWN_MS,
+  buildBattleStoryBranchLabel,
   buildBattleStoryExportMarkdown,
   buildBattleStorySessionSeedSnapshot,
   cloneBattleStoryActiveChaptersForNewSession,
+  cloneBattleStoryCheckpointsForNewSession,
   mergeUpdatedCombatantsIntoWorkingCombatants,
   parseBattleStoryStreamMetaHeader,
   remapBattleStorySummaryMeta,
@@ -13,7 +15,11 @@ import {
   resolveBattleStoryScenarioName,
   resolveBattleStorySummaryRefreshPlan,
 } from '@/components/arena/utils/battleStorySession';
-import { createBattleStoryChapterRecord, createBattleStorySessionRecord } from '@/lib/ai-session/battle-story/storage';
+import {
+  createBattleStoryChapterRecord,
+  createBattleStoryCheckpointRecord,
+  createBattleStorySessionRecord,
+} from '@/lib/ai-session/battle-story/storage';
 
 describe('battle story session utils', () => {
   test('buildBattleStorySessionSeedSnapshot 会从竞技场状态提取稳定 seed', () => {
@@ -403,6 +409,56 @@ describe('battle story session utils', () => {
     expect(remapped?.coveredChapterIds).toEqual(cloned.chapters.map((chapter) => chapter.id));
   });
 
+  test('cloneBattleStoryCheckpointsForNewSession 会同步重映射 chapterId 并保留边界顺序', () => {
+    const sourceChapters = [1, 2].map((index) =>
+      createBattleStoryChapterRecord({
+        sessionId: 'session-source',
+        index,
+        action: index === 1 ? 'start' : 'continue',
+        title: `第${index}章`,
+        markdown: `# 第${index}章\n\n正文`,
+        reportJson: {},
+        deterministicDigest: {
+          chapterTitle: `第${index}章`,
+        },
+      })
+    );
+    const cloned = cloneBattleStoryActiveChaptersForNewSession({
+      chapters: sourceChapters,
+      newSessionId: 'session-target',
+    });
+    const checkpoints = [
+      createBattleStoryCheckpointRecord({
+        sessionId: 'session-source',
+        boundaryIndex: 0,
+        combatants: [{ data: { codename: '白百合' } }],
+      }),
+      createBattleStoryCheckpointRecord({
+        sessionId: 'session-source',
+        boundaryIndex: 1,
+        chapterId: sourceChapters[0]?.id,
+        combatants: [{ data: { codename: '白百合', hp: 90 } }],
+      }),
+      createBattleStoryCheckpointRecord({
+        sessionId: 'session-source',
+        boundaryIndex: 2,
+        chapterId: sourceChapters[1]?.id,
+        combatants: [{ data: { codename: '白百合', hp: 60 } }],
+      }),
+    ];
+
+    const clonedCheckpoints = cloneBattleStoryCheckpointsForNewSession({
+      checkpoints,
+      newSessionId: 'session-target',
+      chapterIdMap: cloned.chapterIdMap,
+      maxBoundaryIndex: 2,
+    });
+
+    expect(clonedCheckpoints.map((item) => item.boundaryIndex)).toEqual([0, 1, 2]);
+    expect(clonedCheckpoints[1]?.chapterId).toBe(cloned.chapters[0]?.id);
+    expect(clonedCheckpoints[2]?.chapterId).toBe(cloned.chapters[1]?.id);
+  });
+
   test('buildBattleStoryExportMarkdown 会导出摘要与正文拼接结果', () => {
     const session = createBattleStorySessionRecord({
       title: '导出测试',
@@ -595,5 +651,58 @@ describe('battle story session utils', () => {
     );
 
     expect(markdown).toContain('章节进度：2 / 5');
+  });
+
+  test('buildBattleStoryBranchLabel 与导出头部会展示分支语义', () => {
+    const session = createBattleStorySessionRecord({
+      title: '分支会话',
+      branchLabel: buildBattleStoryBranchLabel({
+        chapterIndex: 3,
+        chapterTitle: '破晓前夜',
+      }),
+      source: {
+        mode: 'classic',
+        language: 'zh-CN',
+        storyLength: 'standard',
+        generationMode: 'stream',
+      },
+      seed: {
+        combatants: [{ name: '白百合' }],
+        settings: {
+          readArenaHistory: true,
+          writeArenaHistory: true,
+          readCurrentState: true,
+          writeCurrentState: true,
+          readNarrativeHistory: false,
+          writeNarrativeHistory: false,
+        },
+      },
+      workingCombatants: [{ name: '白百合' }],
+      branchOf: {
+        sessionId: 'session-root',
+        chapterId: 'chapter-3',
+        chapterIndex: 3,
+        chapterTitle: '破晓前夜',
+        createdAt: Date.now(),
+      },
+    });
+
+    const chapter = createBattleStoryChapterRecord({
+      sessionId: session.id,
+      index: 4,
+      action: 'branch',
+      title: '第四章',
+      markdown: '# 第四章\n\n正文',
+      reportJson: {},
+      deterministicDigest: {
+        chapterTitle: '第四章',
+      },
+    });
+
+    const markdown = buildBattleStoryExportMarkdown(session, [chapter]);
+
+    expect(session.branchLabel).toBe('从第 3 章《破晓前夜》分支');
+    expect(markdown).toContain('分支标签：从第 3 章《破晓前夜》分支');
+    expect(markdown).toContain('分支来源：session-root / chapter-3 / 第 3 章《破晓前夜》');
   });
 });

@@ -1,5 +1,7 @@
 'use client';
 
+import { useMemo, useState } from 'react';
+
 import { MarkdownBlock } from '@/components/MarkdownBlock';
 import { CollapsibleSection } from '@/components/shared/CollapsibleSection';
 import StreamingBattleReportCard from '@/components/stream/StreamingBattleReportCard';
@@ -15,6 +17,7 @@ import type {
 import { formatDateTime } from '@/lib/constants';
 import { SCENARIO_BATTLE_STORY_MAX_TOTAL_CHAPTERS } from '@/lib/scenario-battle-story';
 
+import { BattleStoryBranchChainModal } from './BattleStoryBranchChainModal';
 import { useBattleStorySession } from '../hooks/useBattleStorySession';
 import { useBattleStore } from '../stores/useBattleStore';
 import {
@@ -152,6 +155,7 @@ export function BattleStorySessionPanel(props: {
   onSaveImage?: (imageUrl: string) => void;
 }) {
   const { onSaveImage } = props;
+  const [showBranchChainModal, setShowBranchChainModal] = useState(false);
   const battleReportCardWidthPx = useBattleStore((state) => resolveBattleReportCardManualWidthPx(state.settings));
   const {
     isReady,
@@ -163,6 +167,7 @@ export function BattleStorySessionPanel(props: {
     chapters,
     latestActiveChapter,
     selectedChapter,
+    selectedChapterIsLatest,
     selectedChapterId,
     setSelectedChapterId,
     isGenerating,
@@ -187,10 +192,16 @@ export function BattleStorySessionPanel(props: {
     startDisabledReason,
     continueDisabledReason,
     branchDisabledReason,
+    selectedBranchDisabledReason,
+    selectedRewriteDisabledReason,
+    selectedDeleteDisabledReason,
     handleStartSession,
     handleContinueSession,
     handleBranchSession,
+    handleBranchSelectedChapter,
     handleRewriteLastChapter,
+    handleRewriteSelectedChapter,
+    handleDeleteSelectedChapter,
     handleSelectSession,
     handleDeleteSession,
     handleExportMarkdown,
@@ -212,6 +223,24 @@ export function BattleStorySessionPanel(props: {
   const liveCardContent =
     streamingMarkdown.trim() ||
     `# 第 ${streamChapterIndex ?? '?'} 章\n\n正在等待模型返回正文...`;
+  const selectedBranchButtonText = selectedChapter
+    ? `从第 ${selectedChapter.index} 章创建分支`
+    : '从所选章节创建分支';
+  const selectedRewriteButtonText = selectedChapter
+    ? (selectedChapterIsLatest ? '重写本章' : '重写本章并截断后续')
+    : '重写所选章节';
+  const selectedDeleteButtonText = selectedChapter
+    ? (selectedChapter.index === 1
+        ? '删除整个会话'
+        : selectedChapterIsLatest
+          ? '删除本章'
+          : '删除本章及后续')
+    : '删除所选章节';
+  const hasParentBranch = Boolean(activeSession?.branchOf?.sessionId);
+  const hasChildBranches = useMemo(
+    () => sessions.some((session) => session.branchOf?.sessionId === activeSession?.id),
+    [activeSession?.id, sessions]
+  );
 
   return (
     <div
@@ -455,7 +484,7 @@ export function BattleStorySessionPanel(props: {
                   </div>
                   {activeSession?.branchOf ? (
                     <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700">
-                      分支会话
+                      {activeSession.branchLabel || '分支会话'}
                     </span>
                   ) : null}
                 </div>
@@ -506,9 +535,30 @@ export function BattleStorySessionPanel(props: {
                   {activeSession?.branchOf ? (
                     <div className="flex items-start justify-between gap-4">
                       <span className="text-gray-500">分支来源</span>
-                      <span className="max-w-[16rem] break-all text-right text-gray-700">
-                        {activeSession.branchOf.sessionId}
+                      <span className="max-w-[16rem] text-right text-gray-700">
+                        {`第 ${activeSession.branchOf.chapterIndex} 章`}
+                        {activeSession.branchOf.chapterTitle ? `《${activeSession.branchOf.chapterTitle}》` : ''}
                       </span>
+                    </div>
+                  ) : null}
+                  {activeSession?.branchOf ? (
+                    <div className="flex items-start justify-between gap-4">
+                      <span className="text-gray-500">父会话 ID</span>
+                      <span className="max-w-[16rem] break-all text-right text-gray-700">{activeSession.branchOf.sessionId}</span>
+                    </div>
+                  ) : null}
+                  {activeSession && (hasParentBranch || hasChildBranches) ? (
+                    <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
+                      <div className="flex items-center justify-between gap-3">
+                        <span>当前会话存在分支链，可查看父链与子分支。</span>
+                        <button
+                          type="button"
+                          className="font-semibold text-emerald-800 hover:underline"
+                          onClick={() => setShowBranchChainModal(true)}
+                        >
+                          查看分支链
+                        </button>
+                      </div>
                     </div>
                   ) : null}
                   {isRefreshingSummary ? (
@@ -546,7 +596,7 @@ export function BattleStorySessionPanel(props: {
                                 completedChapterCount: session.chapterCount,
                                 chapterPlan: session.chapterPlan,
                               })}
-                              {session.branchOf ? '｜分支' : ''}
+                              {session.branchOf ? `｜${session.branchLabel || '分支'}` : ''}
                             </div>
                           </button>
                         );
@@ -644,6 +694,55 @@ export function BattleStorySessionPanel(props: {
                     可在此处查看任意章节、下载 Markdown，并保存截图。
                   </div>
                 </div>
+                {selectedChapter ? (
+                  <div className="rounded-2xl border border-gray-200 bg-white p-4">
+                    <div className="text-sm font-semibold text-gray-800">所选章节操作</div>
+                    <div className="mt-1 text-xs text-gray-500">
+                      如果想保留原路线，优先创建分支；中间章节重写或删除会截断其后续，本地会话链会改变，但服务端历史战报记录不会删除。
+                    </div>
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => void handleBranchSelectedChapter()}
+                        disabled={isGenerating || isDeletingSession || isCooldown || !selectedChapter || Boolean(selectedBranchDisabledReason)}
+                        className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+                        title={
+                          isCooldown
+                            ? `冷却中，请等待 ${remainingTime} 秒`
+                            : (selectedBranchDisabledReason ?? '以当前所选章节为锚点创建新分支会话')
+                        }
+                      >
+                        {isGenerating && generatingAction === 'branch'
+                          ? '正在创建分支...'
+                          : (isCooldown ? `冷却中 ${remainingTime}s` : selectedBranchButtonText)}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void handleRewriteSelectedChapter()}
+                        disabled={isGenerating || isDeletingSession || isCooldown || !selectedChapter || Boolean(selectedRewriteDisabledReason)}
+                        className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+                        title={
+                          isCooldown
+                            ? `冷却中，请等待 ${remainingTime} 秒`
+                            : (selectedRewriteDisabledReason ?? '重写当前所选章节；若不是最后一章，会同时截断后续')
+                        }
+                      >
+                        {isGenerating && generatingAction === 'rewrite'
+                          ? '正在重写章节...'
+                          : (isCooldown ? `冷却中 ${remainingTime}s` : selectedRewriteButtonText)}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void handleDeleteSelectedChapter()}
+                        disabled={isGenerating || isDeletingSession || !selectedChapter || Boolean(selectedDeleteDisabledReason)}
+                        className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-60"
+                        title={selectedDeleteDisabledReason ?? '删除当前所选章节；若不是最后一章，会同时删除其后续章节'}
+                      >
+                        {isDeletingSession ? '正在删除...' : selectedDeleteButtonText}
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
                 <ChapterPreviewSection
                   chapter={selectedChapter}
                   snapshot={selectedChapterSnapshot}
@@ -661,6 +760,15 @@ export function BattleStorySessionPanel(props: {
           </div>
         </div>
       </CollapsibleSection>
+      <BattleStoryBranchChainModal
+        isOpen={showBranchChainModal}
+        sessions={sessions}
+        activeSession={activeSession}
+        onSelectSession={(sessionId) => {
+          void handleSelectSession(sessionId);
+        }}
+        onClose={() => setShowBranchChainModal(false)}
+      />
     </div>
   );
 }

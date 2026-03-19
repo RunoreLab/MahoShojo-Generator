@@ -4,14 +4,20 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { buildCustomProviderPayload, isUsingUserProvidedKey } from '@/lib/ai/custom-provider';
 import {
+  createBattleStoryCheckpointRecord,
   createBattleStoryChapterRecord,
   createBattleStorySessionRecord,
+  deleteBattleStoryChaptersFromIndex,
+  deleteBattleStoryCheckpointsFromBoundary,
   deleteBattleStorySession,
   getBattleStorySession,
   listBattleStoryChaptersBySession,
+  listBattleStoryCheckpointsBySession,
   listBattleStorySessions,
   markBattleStoryChapterSuperseded,
   putBattleStoryChapter,
+  putBattleStoryCheckpoint,
+  putBattleStoryCheckpoints,
   putBattleStorySession,
   updateBattleStorySession,
 } from '@/lib/ai-session/battle-story/storage';
@@ -26,6 +32,7 @@ import {
   willBattleStoryChapterExceedPlan,
 } from '@/lib/ai-session/battle-story/plan';
 import type {
+  BattleStoryCheckpointRecord,
   BattleStoryChapterPlan,
   BattleStoryChapterCardSnapshot,
   BattleStoryChapterRecord,
@@ -49,9 +56,11 @@ import { BattleStoreState, Combatant, CombatantData } from '../types';
 import { useBattleActions } from './useBattleActions';
 import {
   BATTLE_STORY_SUMMARY_REFRESH_MIN_INTERVAL_MS,
+  buildBattleStoryBranchLabel,
   buildBattleStoryExportMarkdown,
   buildBattleStorySessionSeedSnapshot,
   cloneBattleStoryActiveChaptersForNewSession,
+  cloneBattleStoryCheckpointsForNewSession,
   mergeUpdatedCombatantsIntoWorkingCombatants,
   parseBattleStoryStreamMetaHeader,
   remapBattleStorySummaryMeta,
@@ -167,6 +176,98 @@ const buildChapterRequestWindow = (chapters: BattleStoryChapterRecord[]) => {
     }));
 };
 
+const sortBattleStoryChapters = (chapters: BattleStoryChapterRecord[]): BattleStoryChapterRecord[] =>
+  [...chapters].sort((left, right) => left.index - right.index);
+
+const getActiveBattleStoryChapters = (chapters: BattleStoryChapterRecord[]): BattleStoryChapterRecord[] =>
+  sortBattleStoryChapters(chapters.filter((chapter) => chapter.status !== 'superseded'));
+
+const getLatestBattleStoryChapter = (chapters: BattleStoryChapterRecord[]): BattleStoryChapterRecord | null =>
+  [...chapters].sort((left, right) => right.index - left.index)[0] ?? null;
+
+const sortBattleStoryCheckpoints = (
+  checkpoints: BattleStoryCheckpointRecord[]
+): BattleStoryCheckpointRecord[] => [...checkpoints].sort((left, right) => left.boundaryIndex - right.boundaryIndex);
+
+const getBattleStoryCheckpointForBoundary = (
+  checkpoints: BattleStoryCheckpointRecord[],
+  boundaryIndex: number
+): BattleStoryCheckpointRecord | null =>
+  checkpoints.find((checkpoint) => checkpoint.boundaryIndex === boundaryIndex) ?? null;
+
+const buildAnchoredChapterRequestWindow = (
+  chapters: BattleStoryChapterRecord[],
+  maxChapterIndex: number
+) => buildChapterRequestWindow(chapters.filter((chapter) => chapter.index <= maxChapterIndex));
+
+const resolveAnchoredSummaryState = (input: {
+  sessionSummary?: string;
+  summaryMeta?: BattleStorySessionRecord['summaryMeta'];
+  maxCoveredChapterIndex: number;
+  invalidateWhenCoveredAtOrBeyond?: boolean;
+}): {
+  sessionSummary?: string;
+  summaryMeta?: BattleStorySessionRecord['summaryMeta'];
+} => {
+  const coveredUntil = input.summaryMeta?.coveredUntilChapterIndex ?? 0;
+  const isUnsafe = input.invalidateWhenCoveredAtOrBeyond
+    ? coveredUntil >= input.maxCoveredChapterIndex
+    : coveredUntil > input.maxCoveredChapterIndex;
+  if (isUnsafe) {
+    return {
+      sessionSummary: undefined,
+      summaryMeta: undefined,
+    };
+  }
+  return {
+    sessionSummary: input.sessionSummary,
+    summaryMeta: input.summaryMeta,
+  };
+};
+
+const toRecordCombatantArray = (value: unknown): Array<Record<string, unknown>> | null => {
+  if (!Array.isArray(value)) return null;
+  const normalized = value.filter(
+    (item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object'
+  );
+  return normalized.length > 0 ? normalized : null;
+};
+
+const resolveChapterInputCombatants = (input: {
+  session: BattleStorySessionRecord;
+  checkpoints: BattleStoryCheckpointRecord[];
+  chapter: BattleStoryChapterRecord;
+  latestChapter: BattleStoryChapterRecord | null;
+}): Array<Record<string, unknown>> | null => {
+  const fromCheckpoint = toRecordCombatantArray(
+    getBattleStoryCheckpointForBoundary(input.checkpoints, Math.max(0, input.chapter.index - 1))?.combatants
+  );
+  if (fromCheckpoint) return fromCheckpoint;
+  if (input.chapter.index === 1) {
+    return toRecordCombatantArray(input.session.seed.combatants);
+  }
+  if (input.latestChapter && input.latestChapter.id === input.chapter.id) {
+    return toRecordCombatantArray(input.session.lastChapterInputCombatants);
+  }
+  return null;
+};
+
+const resolveChapterOutputCombatants = (input: {
+  session: BattleStorySessionRecord;
+  checkpoints: BattleStoryCheckpointRecord[];
+  chapter: BattleStoryChapterRecord;
+  latestChapter: BattleStoryChapterRecord | null;
+}): Array<Record<string, unknown>> | null => {
+  const fromCheckpoint = toRecordCombatantArray(
+    getBattleStoryCheckpointForBoundary(input.checkpoints, input.chapter.index)?.combatants
+  );
+  if (fromCheckpoint) return fromCheckpoint;
+  if (input.latestChapter && input.latestChapter.id === input.chapter.id) {
+    return toRecordCombatantArray(input.session.workingCombatants);
+  }
+  return null;
+};
+
 const isFatalStatus = (status: number): boolean => {
   return status >= 500 || status === 429 || status === 401 || status === 403;
 };
@@ -219,6 +320,7 @@ export function useBattleStorySession() {
   const [sessions, setSessions] = useState<BattleStorySessionRecord[]>([]);
   const [activeSession, setActiveSession] = useState<BattleStorySessionRecord | null>(null);
   const [chapters, setChapters] = useState<BattleStoryChapterRecord[]>([]);
+  const [checkpoints, setCheckpoints] = useState<BattleStoryCheckpointRecord[]>([]);
   const [pendingStartSession, setPendingStartSession] = useState<BattleStorySessionRecord | null>(null);
   const [selectedChapterId, setSelectedChapterId] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -233,6 +335,7 @@ export function useBattleStorySession() {
 
   const activeSessionRef = useRef<BattleStorySessionRecord | null>(null);
   const chaptersRef = useRef<BattleStoryChapterRecord[]>([]);
+  const checkpointsRef = useRef<BattleStoryCheckpointRecord[]>([]);
   const summaryRetryAtRef = useRef<Record<string, number>>({});
 
   const customProviderPayload = useMemo(
@@ -258,6 +361,10 @@ export function useBattleStorySession() {
   }, [chapters]);
 
   useEffect(() => {
+    checkpointsRef.current = checkpoints;
+  }, [checkpoints]);
+
+  useEffect(() => {
     const persisted = parsePendingChapterPlanPreference(
       readLocalStorageString(PENDING_CHAPTER_PLAN_STORAGE_KEY)
     );
@@ -276,9 +383,7 @@ export function useBattleStorySession() {
   }, [draftChapterPlanInput, draftChapterPlanMode]);
 
   const latestActiveChapter = useMemo(() => {
-    return chapters
-      .filter((chapter) => chapter.status !== 'superseded')
-      .sort((left, right) => right.index - left.index)[0] ?? null;
+    return getLatestBattleStoryChapter(getActiveBattleStoryChapters(chapters));
   }, [chapters]);
 
   const selectedChapter = useMemo(() => {
@@ -288,8 +393,29 @@ export function useBattleStorySession() {
 
   const displayActiveSession = pendingStartSession ?? activeSession;
   const displayChapters = pendingStartSession ? [] : chapters;
+  const displayCheckpoints = useMemo(
+    () => (pendingStartSession ? [] : checkpoints),
+    [checkpoints, pendingStartSession]
+  );
   const displayLatestActiveChapter = pendingStartSession ? null : latestActiveChapter;
   const displaySelectedChapter = pendingStartSession ? null : selectedChapter;
+  const selectedChapterIsLatest = Boolean(
+    displaySelectedChapter && displayLatestActiveChapter && displaySelectedChapter.id === displayLatestActiveChapter.id
+  );
+  const selectedChapterInputCheckpoint = useMemo(
+    () =>
+      displaySelectedChapter
+        ? getBattleStoryCheckpointForBoundary(displayCheckpoints, Math.max(0, displaySelectedChapter.index - 1))
+        : null,
+    [displayCheckpoints, displaySelectedChapter]
+  );
+  const selectedChapterOutputCheckpoint = useMemo(
+    () =>
+      displaySelectedChapter
+        ? getBattleStoryCheckpointForBoundary(displayCheckpoints, displaySelectedChapter.index)
+        : null,
+    [displayCheckpoints, displaySelectedChapter]
+  );
   const scenarioChapterPlanConfig = useMemo(
     () => (battleMode === 'scenario' ? readScenarioBattleStoryConfig(scenario.content) : null),
     [battleMode, scenario.content]
@@ -392,6 +518,38 @@ export function useBattleStorySession() {
     }
     return null;
   }, [displayActiveSession, displayLatestActiveChapter, hasReachedActiveChapterPlanLimit]);
+  const selectedBranchDisabledReason = useMemo(() => {
+    if (!displayActiveSession) return '请先选择或创建会话';
+    if (!displaySelectedChapter) return '请先选择章节';
+    if (
+      willBattleStoryChapterExceedPlan({
+        chapterPlan: displayActiveSession.chapterPlan,
+        nextChapterIndex: displaySelectedChapter.index + 1,
+      })
+    ) {
+      return `该章节之后已达到计划章节上限（共 ${displayActiveSession.chapterPlan?.totalChapters} 章）`;
+    }
+    if (!selectedChapterIsLatest && !selectedChapterOutputCheckpoint) {
+      return '该章节缺少“章末状态”快照，暂不支持从这里创建分支。';
+    }
+    return null;
+  }, [displayActiveSession, displaySelectedChapter, selectedChapterIsLatest, selectedChapterOutputCheckpoint]);
+  const selectedRewriteDisabledReason = useMemo(() => {
+    if (!displayActiveSession) return '请先选择或创建会话';
+    if (!displaySelectedChapter) return '请先选择章节';
+    if (!selectedChapterIsLatest && !selectedChapterInputCheckpoint) {
+      return '该章节缺少“章前输入状态”快照，暂不支持从这里重写。';
+    }
+    return null;
+  }, [displayActiveSession, displaySelectedChapter, selectedChapterInputCheckpoint, selectedChapterIsLatest]);
+  const selectedDeleteDisabledReason = useMemo(() => {
+    if (!displayActiveSession) return '请先选择或创建会话';
+    if (!displaySelectedChapter) return '请先选择章节';
+    if (!selectedChapterIsLatest && !selectedChapterInputCheckpoint) {
+      return '该章节缺少“回退状态”快照，暂不支持从这里删除。';
+    }
+    return null;
+  }, [displayActiveSession, displaySelectedChapter, selectedChapterInputCheckpoint, selectedChapterIsLatest]);
 
   const buildRequestHeaders = useCallback(
     async (acceptSse = false): Promise<Record<string, string>> => {
@@ -426,31 +584,39 @@ export function useBattleStorySession() {
       if (!sessionId) {
         setActiveSession(null);
         setChapters([]);
+        setCheckpoints([]);
         setSelectedChapterId(null);
         writeLocalStorageString(ACTIVE_SESSION_STORAGE_KEY, null);
         return;
       }
 
-      const [sessionRecord, chapterRecords] = await Promise.all([
+      const [sessionRecord, chapterRecords, checkpointRecords] = await Promise.all([
         getBattleStorySession(sessionId),
         listBattleStoryChaptersBySession(sessionId, {
           direction: 'next',
           limit: 200,
           includeSuperseded: false,
         }),
+        listBattleStoryCheckpointsBySession(sessionId, {
+          direction: 'next',
+          limit: 400,
+        }),
       ]);
 
       if (!sessionRecord) {
         setActiveSession(null);
         setChapters([]);
+        setCheckpoints([]);
         setSelectedChapterId(null);
         writeLocalStorageString(ACTIVE_SESSION_STORAGE_KEY, null);
         return;
       }
 
-      const sortedChapters = [...chapterRecords].sort((left, right) => left.index - right.index);
+      const sortedChapters = sortBattleStoryChapters(chapterRecords);
+      const sortedCheckpoints = sortBattleStoryCheckpoints(checkpointRecords);
       setActiveSession(sessionRecord);
       setChapters(sortedChapters);
+      setCheckpoints(sortedCheckpoints);
       setSelectedChapterId(sessionRecord.lastChapterId ?? sortedChapters[sortedChapters.length - 1]?.id ?? null);
       writeLocalStorageString(ACTIVE_SESSION_STORAGE_KEY, sessionRecord.id);
     },
@@ -1035,6 +1201,17 @@ export function useBattleStorySession() {
         deterministicDigest: generated.digest,
         generationId: generated.generationId ?? undefined,
       });
+      const initialCheckpoint = createBattleStoryCheckpointRecord({
+        sessionId: sessionDraft.id,
+        boundaryIndex: 0,
+        combatants: snapshot.workingCombatants,
+      });
+      const postChapterCheckpoint = createBattleStoryCheckpointRecord({
+        sessionId: sessionDraft.id,
+        boundaryIndex: generated.chapterIndex,
+        chapterId: chapter.id,
+        combatants: generated.nextWorkingCombatants,
+      });
 
       const sessionToSave: BattleStorySessionRecord = {
         ...sessionDraft,
@@ -1049,6 +1226,7 @@ export function useBattleStorySession() {
 
       await putBattleStorySession(sessionToSave);
       await putBattleStoryChapter(chapter);
+      await putBattleStoryCheckpoints([initialCheckpoint, postChapterCheckpoint]);
       await refreshSessionList();
       await loadSession(sessionToSave.id);
       setPendingStartSession(null);
@@ -1073,8 +1251,8 @@ export function useBattleStorySession() {
 
   const handleContinueSession = useCallback(async () => {
     const sessionRecord = activeSessionRef.current;
-    const activeChapters = chaptersRef.current.filter((chapter) => chapter.status !== 'superseded');
-    const latestChapter = [...activeChapters].sort((left, right) => right.index - left.index)[0] ?? null;
+    const activeChapters = getActiveBattleStoryChapters(chaptersRef.current);
+    const latestChapter = getLatestBattleStoryChapter(activeChapters);
     if (!sessionRecord || activeChapters.length === 0) {
       setActionError('当前没有可续写的连续战报会话。');
       return;
@@ -1125,6 +1303,14 @@ export function useBattleStorySession() {
       });
 
       await putBattleStoryChapter(chapter);
+      await putBattleStoryCheckpoint(
+        createBattleStoryCheckpointRecord({
+          sessionId: sessionRecord.id,
+          boundaryIndex: generated.chapterIndex,
+          chapterId: chapter.id,
+          combatants: generated.nextWorkingCombatants,
+        })
+      );
 
       const sessionToSave = await updateBattleStorySession(sessionRecord.id, (current) => ({
         ...current,
@@ -1136,12 +1322,10 @@ export function useBattleStorySession() {
         workingCombatants: generated.nextWorkingCombatants,
         lastChapterInputCombatants: previousWorkingCombatants,
         lastChapterId: chapter.id,
-        chapterCount: activeChapters.filter((item) => item.status !== 'superseded').length + 1,
+        chapterCount: activeChapters.length + 1,
         updatedAt: Date.now(),
       }));
-      const nextChapters = [...activeChapters.filter((item) => item.status !== 'superseded'), chapter].sort(
-        (left, right) => left.index - right.index
-      );
+      const nextChapters = sortBattleStoryChapters([...activeChapters, chapter]);
 
       await refreshSessionList();
       await loadSession(sessionRecord.id);
@@ -1160,59 +1344,114 @@ export function useBattleStorySession() {
     runGeneration,
   ]);
 
-  const handleBranchSession = useCallback(async () => {
+  const handleBranchFromChapter = useCallback(async (targetChapterId?: string | null) => {
     const sessionRecord = activeSessionRef.current;
-    const activeChapters = chaptersRef.current.filter((chapter) => chapter.status !== 'superseded');
-    const latestChapter = activeChapters.sort((left, right) => right.index - left.index)[0] ?? null;
+    const activeChapters = getActiveBattleStoryChapters(chaptersRef.current);
+    const checkpointRecords = sortBattleStoryCheckpoints(checkpointsRef.current);
+    const latestChapter = getLatestBattleStoryChapter(activeChapters);
+    const targetChapter = targetChapterId
+      ? activeChapters.find((chapter) => chapter.id === targetChapterId) ?? null
+      : latestChapter;
 
-    if (!sessionRecord || !latestChapter) {
-      setActionError('当前没有可分支的会话结尾。');
+    if (!sessionRecord || !targetChapter || !latestChapter) {
+      setActionError('当前没有可分支的章节。');
       return;
     }
-    if (willBattleStoryChapterExceedPlan({
-      chapterPlan: sessionRecord.chapterPlan,
-      nextChapterIndex: latestChapter.index + 1,
-    })) {
-      setActionError(`该会话已达到计划章节上限（共 ${sessionRecord.chapterPlan?.totalChapters} 章）`);
+    if (
+      willBattleStoryChapterExceedPlan({
+        chapterPlan: sessionRecord.chapterPlan,
+        nextChapterIndex: targetChapter.index + 1,
+      })
+    ) {
+      setActionError(`该章节之后已达到计划章节上限（共 ${sessionRecord.chapterPlan?.totalChapters} 章）`);
+      return;
+    }
+
+    const branchInputCombatants = resolveChapterOutputCombatants({
+      session: sessionRecord,
+      checkpoints: checkpointRecords,
+      chapter: targetChapter,
+      latestChapter,
+    });
+    if (!branchInputCombatants) {
+      setActionError('该章节缺少“章末状态”快照，暂不支持从这里创建分支。');
       return;
     }
 
     try {
       const nextSource = buildProviderSource(sessionRecord.source, customProviderPayload);
-      const branchDraft = createBattleStorySessionRecord({
-        title: `${sessionRecord.title || latestChapter.title}（分支）`,
-        source: nextSource,
-        seed: sessionRecord.seed,
-        workingCombatants: sessionRecord.workingCombatants,
-        lastChapterInputCombatants: sessionRecord.workingCombatants,
+      const prefixChapters = activeChapters.filter((chapter) => chapter.index <= targetChapter.index);
+      const summaryState = resolveAnchoredSummaryState({
         sessionSummary: sessionRecord.sessionSummary,
         summaryMeta: sessionRecord.summaryMeta,
+        maxCoveredChapterIndex: targetChapter.index,
+      });
+      const branchDraft = createBattleStorySessionRecord({
+        title: `${sessionRecord.title || targetChapter.title}（分支）`,
+        branchLabel: buildBattleStoryBranchLabel({
+          chapterIndex: targetChapter.index,
+          chapterTitle: targetChapter.title,
+        }),
+        source: nextSource,
+        seed: sessionRecord.seed,
+        workingCombatants: branchInputCombatants,
+        lastChapterInputCombatants: branchInputCombatants,
+        sessionSummary: summaryState.sessionSummary,
+        summaryMeta: summaryState.summaryMeta,
         chapterPlan: sessionRecord.chapterPlan,
         branchOf: {
           sessionId: sessionRecord.id,
-          chapterId: latestChapter.id,
+          chapterId: targetChapter.id,
+          chapterIndex: targetChapter.index,
+          ...(targetChapter.title ? { chapterTitle: targetChapter.title } : {}),
+          createdAt: Date.now(),
         },
       });
 
       const generated = await runGeneration({
         sessionId: branchDraft.id,
         action: 'branch',
-        sourceChapterId: latestChapter.id,
+        sourceChapterId: targetChapter.id,
         source: nextSource,
         seed: sessionRecord.seed,
         chapterPlan: branchDraft.chapterPlan,
-        workingCombatants: sessionRecord.workingCombatants as Array<Record<string, unknown>>,
-        recentChapters: buildChapterRequestWindow(activeChapters),
-        sessionSummary: sessionRecord.sessionSummary,
-        chapterIndexHint: latestChapter.index + 1,
+        workingCombatants: branchInputCombatants,
+        recentChapters: buildAnchoredChapterRequestWindow(prefixChapters, targetChapter.index),
+        sessionSummary: summaryState.sessionSummary,
+        chapterIndexHint: targetChapter.index + 1,
         userGuidance: useBattleStore.getState().settings.userGuidance,
       });
 
       const { chapters: clonedChapters, chapterIdMap } = cloneBattleStoryActiveChaptersForNewSession({
-        chapters: activeChapters,
+        chapters: prefixChapters,
         newSessionId: branchDraft.id,
       });
-      const clonedLatestChapterId = chapterIdMap.get(latestChapter.id) ?? null;
+      const clonedTargetChapterId = chapterIdMap.get(targetChapter.id) ?? null;
+      const clonedCheckpoints = cloneBattleStoryCheckpointsForNewSession({
+        checkpoints: checkpointRecords,
+        newSessionId: branchDraft.id,
+        chapterIdMap,
+        maxBoundaryIndex: targetChapter.index,
+      });
+      if (!getBattleStoryCheckpointForBoundary(clonedCheckpoints, 0)) {
+        clonedCheckpoints.unshift(
+          createBattleStoryCheckpointRecord({
+            sessionId: branchDraft.id,
+            boundaryIndex: 0,
+            combatants: sessionRecord.seed.combatants,
+          })
+        );
+      }
+      if (!getBattleStoryCheckpointForBoundary(clonedCheckpoints, targetChapter.index)) {
+        clonedCheckpoints.push(
+          createBattleStoryCheckpointRecord({
+            sessionId: branchDraft.id,
+            boundaryIndex: targetChapter.index,
+            chapterId: clonedTargetChapterId ?? undefined,
+            combatants: branchInputCombatants,
+          })
+        );
+      }
 
       const branchChapter = createBattleStoryChapterRecord({
         sessionId: branchDraft.id,
@@ -1223,8 +1462,14 @@ export function useBattleStorySession() {
         reportJson: generated.reportJson,
         cardSnapshot: generated.cardSnapshot ?? undefined,
         deterministicDigest: generated.digest,
-        sourceChapterId: clonedLatestChapterId ?? undefined,
+        sourceChapterId: clonedTargetChapterId ?? undefined,
         generationId: generated.generationId ?? undefined,
+      });
+      const branchCheckpoint = createBattleStoryCheckpointRecord({
+        sessionId: branchDraft.id,
+        boundaryIndex: generated.chapterIndex,
+        chapterId: branchChapter.id,
+        combatants: generated.nextWorkingCombatants,
       });
 
       const branchSession: BattleStorySessionRecord = {
@@ -1232,16 +1477,21 @@ export function useBattleStorySession() {
         title: branchDraft.title,
         summaryMeta: remapBattleStorySummaryMeta(branchDraft.summaryMeta, chapterIdMap),
         workingCombatants: generated.nextWorkingCombatants,
-        lastChapterInputCombatants: sessionRecord.workingCombatants,
+        lastChapterInputCombatants: branchInputCombatants,
         lastChapterId: branchChapter.id,
         chapterCount: clonedChapters.length + 1,
         updatedAt: Date.now(),
       };
 
       await putBattleStorySession(branchSession);
-      await Promise.all([...clonedChapters.map((chapter) => putBattleStoryChapter(chapter)), putBattleStoryChapter(branchChapter)]);
+      await Promise.all([
+        ...clonedChapters.map((chapter) => putBattleStoryChapter(chapter)),
+        putBattleStoryChapter(branchChapter),
+      ]);
+      await putBattleStoryCheckpoints(sortBattleStoryCheckpoints([...clonedCheckpoints, branchCheckpoint]));
 
-      const nextChapters = [...clonedChapters, branchChapter].sort((left, right) => left.index - right.index);
+      const nextChapters = sortBattleStoryChapters([...clonedChapters, branchChapter]);
+      delete summaryRetryAtRef.current[branchSession.id];
       await refreshSessionList();
       await loadSession(branchSession.id);
       if (generated.warning) {
@@ -1253,90 +1503,118 @@ export function useBattleStorySession() {
     }
   }, [customProviderPayload, loadSession, refreshSessionList, refreshSummaryIfNeeded, runGeneration]);
 
-  const handleRewriteLastChapter = useCallback(async () => {
-    const sessionRecord = activeSessionRef.current;
-    const activeChapters = chaptersRef.current.filter((chapter) => chapter.status !== 'superseded');
-    const latestChapter = activeChapters.sort((left, right) => right.index - left.index)[0] ?? null;
+  const handleBranchSession = useCallback(async () => {
+    const latestChapter = getLatestBattleStoryChapter(getActiveBattleStoryChapters(chaptersRef.current));
+    await handleBranchFromChapter(latestChapter?.id ?? null);
+  }, [handleBranchFromChapter]);
 
-    if (!sessionRecord || !latestChapter) {
+  const handleBranchSelectedChapter = useCallback(async () => {
+    await handleBranchFromChapter(selectedChapterId);
+  }, [handleBranchFromChapter, selectedChapterId]);
+
+  const handleRewriteChapter = useCallback(async (targetChapterId?: string | null) => {
+    const sessionRecord = activeSessionRef.current;
+    const activeChapters = getActiveBattleStoryChapters(chaptersRef.current);
+    const checkpointRecords = sortBattleStoryCheckpoints(checkpointsRef.current);
+    const latestChapter = getLatestBattleStoryChapter(activeChapters);
+    const targetChapter = targetChapterId
+      ? activeChapters.find((chapter) => chapter.id === targetChapterId) ?? null
+      : latestChapter;
+
+    if (!sessionRecord || !targetChapter || !latestChapter) {
       setActionError('当前没有可重写的章节。');
       return;
     }
 
-    const rewriteInputCombatants =
-      Array.isArray(sessionRecord.lastChapterInputCombatants) && sessionRecord.lastChapterInputCombatants.length > 0
-        ? (sessionRecord.lastChapterInputCombatants as Array<Record<string, unknown>>)
-        : activeChapters.length === 1
-          ? (sessionRecord.seed.combatants as Array<Record<string, unknown>>)
-          : null;
-
+    const rewriteInputCombatants = resolveChapterInputCombatants({
+      session: sessionRecord,
+      checkpoints: checkpointRecords,
+      chapter: targetChapter,
+      latestChapter,
+    });
     if (!rewriteInputCombatants) {
-      setActionError('该会话缺少“上一章输入状态”快照，暂时无法安全重写最后一章。');
+      setActionError('该章节缺少“章前输入状态”快照，暂时无法安全重写。');
       return;
     }
 
     try {
       const nextSource = buildProviderSource(sessionRecord.source, customProviderPayload);
+      const anchoredChapters = activeChapters.filter((chapter) => chapter.index <= targetChapter.index);
+      const summaryState = resolveAnchoredSummaryState({
+        sessionSummary: sessionRecord.sessionSummary,
+        summaryMeta: sessionRecord.summaryMeta,
+        maxCoveredChapterIndex: targetChapter.index,
+        invalidateWhenCoveredAtOrBeyond: true,
+      });
       const generated = await runGeneration({
         sessionId: sessionRecord.id,
         action: 'rewrite',
-        sourceChapterId: latestChapter.id,
+        sourceChapterId: targetChapter.id,
         source: nextSource,
         seed: sessionRecord.seed,
         chapterPlan: sessionRecord.chapterPlan,
         workingCombatants: rewriteInputCombatants,
-        recentChapters: buildChapterRequestWindow(activeChapters),
-        sessionSummary: sessionRecord.sessionSummary,
-        chapterIndexHint: latestChapter.index,
+        recentChapters: buildAnchoredChapterRequestWindow(anchoredChapters, targetChapter.index),
+        sessionSummary: summaryState.sessionSummary,
+        chapterIndexHint: targetChapter.index,
         userGuidance: useBattleStore.getState().settings.userGuidance,
       });
 
       const rewrittenChapter = createBattleStoryChapterRecord({
         sessionId: sessionRecord.id,
-        index: latestChapter.index,
+        index: targetChapter.index,
         action: 'rewrite',
         title: generated.digest.chapterTitle,
         markdown: generated.markdown,
         reportJson: generated.reportJson,
         cardSnapshot: generated.cardSnapshot ?? undefined,
         deterministicDigest: generated.digest,
-        sourceChapterId: latestChapter.id,
+        sourceChapterId: targetChapter.id,
         generationId: generated.generationId ?? undefined,
       });
 
       await markBattleStoryChapterSuperseded({
-        chapterId: latestChapter.id,
+        chapterId: targetChapter.id,
         supersededByChapterId: rewrittenChapter.id,
       });
-      await putBattleStoryChapter(rewrittenChapter);
-
-      const nextSession = await updateBattleStorySession(sessionRecord.id, (current) => {
-        const shouldClearSummary =
-          typeof current.summaryMeta?.coveredUntilChapterIndex === 'number'
-            ? current.summaryMeta.coveredUntilChapterIndex >= latestChapter.index
-            : false;
-
-        return {
-          ...current,
-          source: nextSource,
-          workingCombatants: generated.nextWorkingCombatants,
-          lastChapterInputCombatants: rewriteInputCombatants,
-          lastChapterId: rewrittenChapter.id,
-          ...(shouldClearSummary
-            ? {
-                sessionSummary: undefined,
-                summaryMeta: undefined,
-              }
-            : {}),
-          updatedAt: Date.now(),
-        };
+      if (targetChapter.index < latestChapter.index) {
+        await deleteBattleStoryChaptersFromIndex({
+          sessionId: sessionRecord.id,
+          startIndex: targetChapter.index + 1,
+        });
+      }
+      await deleteBattleStoryCheckpointsFromBoundary({
+        sessionId: sessionRecord.id,
+        startBoundaryIndex: targetChapter.index,
       });
+      await putBattleStoryChapter(rewrittenChapter);
+      await putBattleStoryCheckpoint(
+        createBattleStoryCheckpointRecord({
+          sessionId: sessionRecord.id,
+          boundaryIndex: rewrittenChapter.index,
+          chapterId: rewrittenChapter.id,
+          combatants: generated.nextWorkingCombatants,
+        })
+      );
 
-      const nextChapters = activeChapters
-        .filter((chapter) => chapter.id !== latestChapter.id)
-        .concat(rewrittenChapter)
-        .sort((left, right) => left.index - right.index);
+      const nextSession = await updateBattleStorySession(sessionRecord.id, (current) => ({
+        ...current,
+        source: nextSource,
+        workingCombatants: generated.nextWorkingCombatants,
+        lastChapterInputCombatants: rewriteInputCombatants,
+        lastChapterId: rewrittenChapter.id,
+        chapterCount: rewrittenChapter.index,
+        sessionSummary: summaryState.sessionSummary,
+        summaryMeta: summaryState.summaryMeta,
+        updatedAt: Date.now(),
+      }));
 
+      const nextChapters = sortBattleStoryChapters([
+        ...activeChapters.filter((chapter) => chapter.index < targetChapter.index),
+        rewrittenChapter,
+      ]);
+
+      delete summaryRetryAtRef.current[sessionRecord.id];
       await refreshSessionList();
       await loadSession(sessionRecord.id);
       if (generated.warning) {
@@ -1344,9 +1622,127 @@ export function useBattleStorySession() {
       }
       void refreshSummaryIfNeeded(nextSession, nextChapters);
     } catch (error) {
-      setActionError(normalizeErrorMessage(error, '重写最后一章失败。'));
+      setActionError(normalizeErrorMessage(error, '重写章节失败。'));
     }
   }, [customProviderPayload, loadSession, refreshSessionList, refreshSummaryIfNeeded, runGeneration]);
+
+  const handleRewriteLastChapter = useCallback(async () => {
+    const latestChapter = getLatestBattleStoryChapter(getActiveBattleStoryChapters(chaptersRef.current));
+    await handleRewriteChapter(latestChapter?.id ?? null);
+  }, [handleRewriteChapter]);
+
+  const handleRewriteSelectedChapter = useCallback(async () => {
+    await handleRewriteChapter(selectedChapterId);
+  }, [handleRewriteChapter, selectedChapterId]);
+
+  const handleDeleteSelectedChapter = useCallback(async () => {
+    const sessionRecord = activeSessionRef.current;
+    const activeChapters = getActiveBattleStoryChapters(chaptersRef.current);
+    const checkpointRecords = sortBattleStoryCheckpoints(checkpointsRef.current);
+    const latestChapter = getLatestBattleStoryChapter(activeChapters);
+    const targetChapter = selectedChapterId
+      ? activeChapters.find((chapter) => chapter.id === selectedChapterId) ?? null
+      : latestChapter;
+
+    if (!sessionRecord || !targetChapter || !latestChapter) {
+      setActionError('当前没有可删除的章节。');
+      return;
+    }
+
+    const remainingCount = Math.max(0, latestChapter.index - targetChapter.index + 1);
+    if (typeof window !== 'undefined') {
+      const confirmed = window.confirm(
+        targetChapter.index === 1
+          ? `确定删除第 1 章并清空整个会话吗？这会移除当前会话下的全部章节，本地章节会被删除，但服务端历史战报记录不会删除。`
+          : `确定删除第 ${targetChapter.index} 章及其后续 ${remainingCount - 1} 章吗？当前会话会回退到第 ${targetChapter.index - 1} 章结束状态。本地章节会被删除，但服务端历史战报记录不会删除。`
+      );
+      if (!confirmed) return;
+    }
+
+    if (targetChapter.index === 1) {
+      setIsDeletingSession(true);
+      try {
+        await deleteBattleStorySession(sessionRecord.id);
+        delete summaryRetryAtRef.current[sessionRecord.id];
+        const nextSessions = await refreshSessionList();
+        await loadSession(nextSessions[0]?.id ?? null);
+        setNotice(`已删除连续战报会话《${sessionRecord.title || '未命名连续战报'}》。`);
+      } catch (error) {
+        setActionError(normalizeErrorMessage(error, '删除连续战报会话失败。'));
+      } finally {
+        setIsDeletingSession(false);
+      }
+      return;
+    }
+
+    const revertCombatants = resolveChapterInputCombatants({
+      session: sessionRecord,
+      checkpoints: checkpointRecords,
+      chapter: targetChapter,
+      latestChapter,
+    });
+    if (!revertCombatants) {
+      setActionError('该章节缺少“回退状态”快照，暂时无法安全删除。');
+      return;
+    }
+
+    const previousChapter = activeChapters.find((chapter) => chapter.index === targetChapter.index - 1) ?? null;
+    if (!previousChapter) {
+      setActionError('未找到删除后的目标结尾章节。');
+      return;
+    }
+
+    const nextLastChapterInputCombatants = resolveChapterInputCombatants({
+      session: sessionRecord,
+      checkpoints: checkpointRecords,
+      chapter: previousChapter,
+      latestChapter,
+    });
+    const nextSummaryState = resolveAnchoredSummaryState({
+      sessionSummary: sessionRecord.sessionSummary,
+      summaryMeta: sessionRecord.summaryMeta,
+      maxCoveredChapterIndex: targetChapter.index,
+      invalidateWhenCoveredAtOrBeyond: true,
+    });
+
+    setIsDeletingSession(true);
+    try {
+      await deleteBattleStoryChaptersFromIndex({
+        sessionId: sessionRecord.id,
+        startIndex: targetChapter.index,
+      });
+      await deleteBattleStoryCheckpointsFromBoundary({
+        sessionId: sessionRecord.id,
+        startBoundaryIndex: targetChapter.index,
+      });
+
+      const nextSession = await updateBattleStorySession(sessionRecord.id, (current) => ({
+        ...current,
+        workingCombatants: revertCombatants,
+        lastChapterInputCombatants: nextLastChapterInputCombatants ?? undefined,
+        lastChapterId: previousChapter.id,
+        chapterCount: previousChapter.index,
+        sessionSummary: nextSummaryState.sessionSummary,
+        summaryMeta: nextSummaryState.summaryMeta,
+        updatedAt: Date.now(),
+      }));
+
+      const nextChapters = activeChapters.filter((chapter) => chapter.index < targetChapter.index);
+      delete summaryRetryAtRef.current[sessionRecord.id];
+      await refreshSessionList();
+      await loadSession(sessionRecord.id);
+      setNotice(
+        targetChapter.id === latestChapter.id
+          ? `已删除第 ${targetChapter.index} 章，当前会话回退到第 ${previousChapter.index} 章。`
+          : `已删除第 ${targetChapter.index} 章及其后续章节，当前会话回退到第 ${previousChapter.index} 章。`
+      );
+      void refreshSummaryIfNeeded(nextSession, nextChapters);
+    } catch (error) {
+      setActionError(normalizeErrorMessage(error, '删除章节失败。'));
+    } finally {
+      setIsDeletingSession(false);
+    }
+  }, [loadSession, refreshSessionList, refreshSummaryIfNeeded, selectedChapterId]);
 
   const handleSelectSession = useCallback(
     async (sessionId: string) => {
@@ -1436,6 +1832,7 @@ export function useBattleStorySession() {
     chapters: displayChapters,
     latestActiveChapter: displayLatestActiveChapter,
     selectedChapter: displaySelectedChapter,
+    selectedChapterIsLatest,
     selectedChapterId,
     setSelectedChapterId,
     isGenerating,
@@ -1460,10 +1857,16 @@ export function useBattleStorySession() {
     startDisabledReason: startSessionCheck.reason,
     continueDisabledReason,
     branchDisabledReason,
+    selectedBranchDisabledReason,
+    selectedRewriteDisabledReason,
+    selectedDeleteDisabledReason,
     handleStartSession,
     handleContinueSession,
     handleBranchSession,
+    handleBranchSelectedChapter,
     handleRewriteLastChapter,
+    handleRewriteSelectedChapter,
+    handleDeleteSelectedChapter,
     handleSelectSession,
     handleDeleteSession,
     handleExportMarkdown,

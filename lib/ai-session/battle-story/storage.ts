@@ -2,6 +2,8 @@ import { randomUUID } from '@/lib/crypto';
 import { openAiSessionDb, requestToPromise, transactionToPromise } from '@/lib/ai-session/storage';
 import { AI_SESSION_STORE_NAMES } from '@/lib/ai-session/types';
 import type {
+  BattleStoryCheckpointListOptions,
+  BattleStoryCheckpointRecord,
   BattleStoryChapterListOptions,
   BattleStoryChapterRecord,
   BattleStoryDeterministicDigest,
@@ -20,6 +22,10 @@ const normalizeLimit = (value: number | undefined, fallback = DEFAULT_LIST_LIMIT
 };
 
 const buildSessionRange = (sessionId: string): IDBKeyRange => {
+  return IDBKeyRange.bound([sessionId, 0], [sessionId, Number.MAX_SAFE_INTEGER]);
+};
+
+const buildCheckpointRange = (sessionId: string): IDBKeyRange => {
   return IDBKeyRange.bound([sessionId, 0], [sessionId, Number.MAX_SAFE_INTEGER]);
 };
 
@@ -63,6 +69,7 @@ const readByCursor = async <T>(
 
 export const createBattleStorySessionRecord = (input: {
   title: string;
+  branchLabel?: string;
   source: BattleStorySessionRecord['source'];
   seed: BattleStorySessionRecord['seed'];
   workingCombatants: unknown[];
@@ -78,6 +85,9 @@ export const createBattleStorySessionRecord = (input: {
   return {
     id: randomUUID(),
     title,
+    ...(typeof input.branchLabel === 'string' && input.branchLabel.trim()
+      ? { branchLabel: input.branchLabel.trim() }
+      : {}),
     createdAt: now,
     updatedAt: now,
     source: input.source,
@@ -94,6 +104,20 @@ export const createBattleStorySessionRecord = (input: {
     chapterCount: 0,
   };
 };
+
+export const createBattleStoryCheckpointRecord = (input: {
+  sessionId: string;
+  boundaryIndex: number;
+  combatants: unknown[];
+  chapterId?: string | null;
+}): BattleStoryCheckpointRecord => ({
+  id: randomUUID(),
+  sessionId: input.sessionId,
+  boundaryIndex: Math.max(0, Math.floor(input.boundaryIndex)),
+  ...(input.chapterId ? { chapterId: input.chapterId } : {}),
+  combatants: Array.isArray(input.combatants) ? input.combatants : [],
+  createdAt: Date.now(),
+});
 
 export const createBattleStoryChapterRecord = (input: {
   sessionId: string;
@@ -203,16 +227,23 @@ export const deleteBattleStorySession = async (
 
   return await new Promise<{ deletedSession: boolean; deletedChapterCount: number }>((resolve, reject) => {
     const transaction = db.transaction(
-      [AI_SESSION_STORE_NAMES.battleStorySessions, AI_SESSION_STORE_NAMES.battleStoryChapters],
+      [
+        AI_SESSION_STORE_NAMES.battleStorySessions,
+        AI_SESSION_STORE_NAMES.battleStoryChapters,
+        AI_SESSION_STORE_NAMES.battleStoryCheckpoints,
+      ],
       'readwrite'
     );
     const sessionStore = transaction.objectStore(AI_SESSION_STORE_NAMES.battleStorySessions);
     const chapterStore = transaction.objectStore(AI_SESSION_STORE_NAMES.battleStoryChapters);
+    const checkpointStore = transaction.objectStore(AI_SESSION_STORE_NAMES.battleStoryCheckpoints);
     const chapterIndex = chapterStore.index('by_session_index');
+    const checkpointIndex = checkpointStore.index('by_session_boundary');
     const chapterCursorRequest = chapterIndex.openCursor(buildSessionRange(sessionId), 'next');
 
     let deletedChapterCount = 0;
     let deletedSession = false;
+    let deletedCheckpoints = false;
 
     transaction.oncomplete = () => resolve({ deletedSession, deletedChapterCount });
     transaction.onabort = () => reject(transaction.error ?? new Error('删除 battle story session 失败'));
@@ -221,12 +252,28 @@ export const deleteBattleStorySession = async (
     chapterCursorRequest.onsuccess = () => {
       const cursor = chapterCursorRequest.result;
       if (!cursor) {
-        const deleteSessionRequest = sessionStore.delete(sessionId);
-        deleteSessionRequest.onsuccess = () => {
-          deletedSession = true;
-        };
-        deleteSessionRequest.onerror = () => {
-          reject(deleteSessionRequest.error ?? new Error('删除 battle story session 失败'));
+        if (!deletedCheckpoints) {
+          deletedCheckpoints = true;
+          const checkpointCursorRequest = checkpointIndex.openCursor(buildCheckpointRange(sessionId), 'next');
+          checkpointCursorRequest.onsuccess = () => {
+            const checkpointCursor = checkpointCursorRequest.result;
+            if (!checkpointCursor) {
+              const deleteSessionRequest = sessionStore.delete(sessionId);
+              deleteSessionRequest.onsuccess = () => {
+                deletedSession = true;
+              };
+              deleteSessionRequest.onerror = () => {
+                reject(deleteSessionRequest.error ?? new Error('删除 battle story session 失败'));
+              };
+              return;
+            }
+            checkpointStore.delete(checkpointCursor.primaryKey);
+            checkpointCursor.continue();
+          };
+          checkpointCursorRequest.onerror = () => {
+            reject(checkpointCursorRequest.error ?? new Error('删除 battle story checkpoint 失败'));
+          };
+          return;
         };
         return;
       }
@@ -249,6 +296,24 @@ export const putBattleStoryChapter = async (chapter: BattleStoryChapterRecord): 
   await transactionToPromise(transaction);
 };
 
+export const putBattleStoryCheckpoint = async (checkpoint: BattleStoryCheckpointRecord): Promise<void> => {
+  const db = await openAiSessionDb();
+  const transaction = db.transaction([AI_SESSION_STORE_NAMES.battleStoryCheckpoints], 'readwrite');
+  transaction.objectStore(AI_SESSION_STORE_NAMES.battleStoryCheckpoints).put(checkpoint);
+  await transactionToPromise(transaction);
+};
+
+export const putBattleStoryCheckpoints = async (checkpoints: BattleStoryCheckpointRecord[]): Promise<void> => {
+  if (!Array.isArray(checkpoints) || checkpoints.length === 0) return;
+  const db = await openAiSessionDb();
+  const transaction = db.transaction([AI_SESSION_STORE_NAMES.battleStoryCheckpoints], 'readwrite');
+  const store = transaction.objectStore(AI_SESSION_STORE_NAMES.battleStoryCheckpoints);
+  checkpoints.forEach((checkpoint) => {
+    store.put(checkpoint);
+  });
+  await transactionToPromise(transaction);
+};
+
 export const getBattleStoryChapter = async (chapterId: string): Promise<BattleStoryChapterRecord | null> => {
   const db = await openAiSessionDb();
   const transaction = db.transaction([AI_SESSION_STORE_NAMES.battleStoryChapters], 'readonly');
@@ -256,6 +321,21 @@ export const getBattleStoryChapter = async (chapterId: string): Promise<BattleSt
   const result = await requestToPromise(request);
   await transactionToPromise(transaction);
   return (result as BattleStoryChapterRecord | undefined) ?? null;
+};
+
+export const getBattleStoryCheckpointByBoundary = async (
+  sessionId: string,
+  boundaryIndex: number
+): Promise<BattleStoryCheckpointRecord | null> => {
+  const db = await openAiSessionDb();
+  const transaction = db.transaction([AI_SESSION_STORE_NAMES.battleStoryCheckpoints], 'readonly');
+  const index = transaction
+    .objectStore(AI_SESSION_STORE_NAMES.battleStoryCheckpoints)
+    .index('by_session_boundary');
+  const request = index.get([sessionId, Math.max(0, Math.floor(boundaryIndex))]);
+  const result = await requestToPromise(request);
+  await transactionToPromise(transaction);
+  return (result as BattleStoryCheckpointRecord | undefined) ?? null;
 };
 
 export const listBattleStoryChaptersBySession = async (
@@ -276,6 +356,27 @@ export const listBattleStoryChaptersBySession = async (
         if (options?.includeSuperseded) return true;
         return value.status !== 'superseded';
       },
+    }
+  );
+
+  await transactionToPromise(transaction);
+  return result;
+};
+
+export const listBattleStoryCheckpointsBySession = async (
+  sessionId: string,
+  options?: BattleStoryCheckpointListOptions
+): Promise<BattleStoryCheckpointRecord[]> => {
+  const db = await openAiSessionDb();
+  const transaction = db.transaction([AI_SESSION_STORE_NAMES.battleStoryCheckpoints], 'readonly');
+  const store = transaction.objectStore(AI_SESSION_STORE_NAMES.battleStoryCheckpoints);
+  const direction = options?.direction ?? 'next';
+  const query = buildCheckpointRange(sessionId);
+
+  const result = await readByCursor<BattleStoryCheckpointRecord>(
+    () => store.index('by_session_boundary').openCursor(query, direction),
+    {
+      limit: options?.limit,
     }
   );
 
@@ -327,5 +428,75 @@ export const markBattleStoryChapterSuperseded = async (input: {
     };
 
     request.onerror = () => reject(request.error ?? new Error('读取 battle story chapter 失败'));
+  });
+};
+
+export const deleteBattleStoryChaptersFromIndex = async (input: {
+  sessionId: string;
+  startIndex: number;
+}): Promise<number> => {
+  const db = await openAiSessionDb();
+
+  return await new Promise<number>((resolve, reject) => {
+    const transaction = db.transaction([AI_SESSION_STORE_NAMES.battleStoryChapters], 'readwrite');
+    const store = transaction.objectStore(AI_SESSION_STORE_NAMES.battleStoryChapters);
+    const index = store.index('by_session_index');
+    const request = index.openCursor(
+      IDBKeyRange.bound(
+        [input.sessionId, Math.max(1, Math.floor(input.startIndex))],
+        [input.sessionId, Number.MAX_SAFE_INTEGER]
+      ),
+      'next'
+    );
+    let deletedCount = 0;
+
+    transaction.oncomplete = () => resolve(deletedCount);
+    transaction.onabort = () => reject(transaction.error ?? new Error('删除 battle story chapters 失败'));
+    transaction.onerror = () => reject(transaction.error ?? new Error('删除 battle story chapters 失败'));
+
+    request.onsuccess = () => {
+      const cursor = request.result;
+      if (!cursor) return;
+      store.delete(cursor.primaryKey);
+      deletedCount += 1;
+      cursor.continue();
+    };
+
+    request.onerror = () => reject(request.error ?? new Error('读取 battle story chapter 游标失败'));
+  });
+};
+
+export const deleteBattleStoryCheckpointsFromBoundary = async (input: {
+  sessionId: string;
+  startBoundaryIndex: number;
+}): Promise<number> => {
+  const db = await openAiSessionDb();
+
+  return await new Promise<number>((resolve, reject) => {
+    const transaction = db.transaction([AI_SESSION_STORE_NAMES.battleStoryCheckpoints], 'readwrite');
+    const store = transaction.objectStore(AI_SESSION_STORE_NAMES.battleStoryCheckpoints);
+    const index = store.index('by_session_boundary');
+    const request = index.openCursor(
+      IDBKeyRange.bound(
+        [input.sessionId, Math.max(0, Math.floor(input.startBoundaryIndex))],
+        [input.sessionId, Number.MAX_SAFE_INTEGER]
+      ),
+      'next'
+    );
+    let deletedCount = 0;
+
+    transaction.oncomplete = () => resolve(deletedCount);
+    transaction.onabort = () => reject(transaction.error ?? new Error('删除 battle story checkpoints 失败'));
+    transaction.onerror = () => reject(transaction.error ?? new Error('删除 battle story checkpoints 失败'));
+
+    request.onsuccess = () => {
+      const cursor = request.result;
+      if (!cursor) return;
+      store.delete(cursor.primaryKey);
+      deletedCount += 1;
+      cursor.continue();
+    };
+
+    request.onerror = () => reject(request.error ?? new Error('读取 battle story checkpoint 游标失败'));
   });
 };
