@@ -1,9 +1,7 @@
 import type { NewsReport } from '@/components/BattleReportCard';
-import { extractHeadlineFromMarkdown, extractWinnerFromText } from '@/lib/arena/battle-report-log-utils';
-import { parseBattleReportFromMarkdown } from '@/lib/arena/redo-updates';
+import { summarizeStreamBattleReportPreview } from '@/lib/arena/stream-report-summary';
 import {
   extractStreamTelemetryMeta,
-  extractStreamUpdateMeta,
   stripAllStreamMetaComments,
 } from '@/lib/arena/stream-meta';
 
@@ -226,28 +224,20 @@ export async function hydrateBattleReportCardFromGenerationRecord(input: {
 
   // 2) 流式：复用原始 Markdown（liveBody），并从 telemetry 注释中提取 usage / narrativeHistoryReadCount。
   const telemetryExtracted = rawPreview ? await extractStreamTelemetryMeta(rawPreview) : null;
-  const updateMetaExtracted = rawPreview ? await extractStreamUpdateMeta(rawPreview) : null;
-  const stripped = stripAllStreamMetaComments(rawPreview);
-  const streamMetaReport = (updateMetaExtracted?.meta?.report ?? null) as
-    | { headline?: string; winner?: string }
-    | null;
-  const headlineFromUpdateMeta = typeof streamMetaReport?.headline === 'string' ? streamMetaReport.headline.trim() : '';
-  const winnerFromUpdateMeta = typeof streamMetaReport?.winner === 'string' ? streamMetaReport.winner.trim() : '';
-
-  const parsedFromMarkdown = stripped ? parseBattleReportFromMarkdown(stripped, typeof input.mode === 'string' ? input.mode : '') : null;
+  const streamSummary = await summarizeStreamBattleReportPreview({
+    preview: rawPreview,
+    mode: typeof input.mode === 'string' ? input.mode : '',
+  });
+  const stripped = streamSummary.strippedPreview || stripAllStreamMetaComments(rawPreview);
 
   const headline =
+    streamSummary.headline ||
     (typeof input.headline === 'string' && input.headline.trim()) ||
-    headlineFromUpdateMeta ||
-    parsedFromMarkdown?.headline ||
-    extractHeadlineFromMarkdown(stripped) ||
     '战报';
 
   const winner =
+    streamSummary.winner ||
     (typeof input.winner === 'string' && input.winner.trim()) ||
-    winnerFromUpdateMeta ||
-    parsedFromMarkdown?.winner ||
-    extractWinnerFromText(stripped) ||
     '未知';
 
   const { body, analysis } = extractBodyFromMarkdown(stripped);

@@ -83,12 +83,6 @@ export function extractHeadlineFromMarkdown(markdown: string | null | undefined)
 
 export function extractWinnerFromText(text: string | null | undefined): string | null {
   if (!text) return null;
-  const candidates = [
-    /胜利者\s*[:：]\s*([^\n\r]+)\s*/i,
-    /胜者\s*[:：]\s*([^\n\r]+)\s*/i,
-    /赢家\s*[:：]\s*([^\n\r]+)\s*/i,
-    /winner\s*[:：]\s*([^\n\r]+)\s*/i,
-  ];
 
   const stripWinnerText = (raw: string): string => {
     return raw
@@ -121,14 +115,14 @@ export function extractWinnerFromText(text: string | null | undefined): string |
     return out;
   };
 
-  const inlineHaystack = text.replace(/[`*~]/g, '');
-  for (const regex of candidates) {
-    const m = inlineHaystack.match(regex);
-    if (m?.[1]) {
-      const cleaned = stripWinnerText(stripMarkdownDecorations(m[1])).slice(0, 120);
-      return cleaned || null;
-    }
-  }
+  const extractWinnerFromInlineLabelLine = (rawLine: string): string | null => {
+    const cleanedLine = stripMarkdownDecorations(rawLine.trim());
+    if (!cleanedLine) return null;
+    const matched = cleanedLine.match(/^(?:胜利者|胜者|赢家|winner)\s*[:：]\s*(.+)$/i);
+    if (!matched?.[1]) return null;
+    const cleaned = stripWinnerText(stripMarkdownDecorations(matched[1])).slice(0, 120);
+    return cleaned || null;
+  };
 
   // 兼容常见 Markdown 战报格式：
   // ## 胜利者
@@ -156,6 +150,11 @@ export function extractWinnerFromText(text: string | null | undefined): string |
       const cleaned = stripWinnerText(stripMarkdownDecorations(raw)).slice(0, 120);
       return cleaned || null;
     }
+  }
+
+  for (const line of lines) {
+    const matched = extractWinnerFromInlineLabelLine(line);
+    if (matched) return matched;
   }
 
   return null;

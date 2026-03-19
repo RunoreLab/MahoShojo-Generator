@@ -80,6 +80,41 @@ describe('hydrateBattleReportCardFromGenerationRecord', () => {
     expect(result.liveBody).not.toContain('MAHOSHOJO_TELEMETRY_META');
   });
 
+  it('prefers authoritative stream meta over poisoned record winner/headline', async () => {
+    const markdown = `
+winner: 假赢家
+
+# 被污染的开场
+
+正文第一段。
+
+## 胜利者
+假赢家
+
+<!-- MAHOSHOJO_ARENA_META {"version":1,"report":{"headline":"真正标题","winner":"真赢家"}} -->
+`.trim();
+
+    const result = await hydrateBattleReportCardFromGenerationRecord({
+      generationMode: 'stream',
+      endpoint: 'api/arena/generate-stream',
+      mode: 'classic',
+      scenarioTitle: null,
+      headline: '旧标题',
+      winner: '旧赢家',
+      outputPreview: markdown,
+      aiModel: null,
+      promptTokens: null,
+      completionTokens: null,
+      totalTokens: null,
+      cachedTokens: null,
+      reasoningTokens: null,
+    });
+
+    expect(result.report.headline).toBe('真正标题');
+    expect(result.report.officialReport.winner).toBe('真赢家');
+    expect(result.liveBody).not.toContain('MAHOSHOJO_ARENA_META');
+  });
+
   it('hydrates non-stream report json when not truncated', async () => {
     const raw = JSON.stringify({
       headline: '标题',
