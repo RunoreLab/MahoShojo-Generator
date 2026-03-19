@@ -198,6 +198,7 @@ const CanshouPage: React.FC = () => {
   const [showPasteImport, setShowPasteImport] = useState(false);
   const [pasteQuestionnaireText, setPasteQuestionnaireText] = useState('');
   const [pasteQuestionnaireError, setPasteQuestionnaireError] = useState<string | null>(null);
+  const [draftRestoreReady, setDraftRestoreReady] = useState(false);
   const draftRestoredRef = useRef(false);
   const previousQuestionTargetsRef = useRef<QuestionnaireAnswerMatchTarget[] | null>(null);
   const previousQuestionTargetSignatureRef = useRef<string | null>(null);
@@ -1002,10 +1003,13 @@ const CanshouPage: React.FC = () => {
       }
     } catch (e) {
       console.error("Failed to load answers from localStorage", e);
+    } finally {
+      setDraftRestoreReady(true);
     }
   }, [allQuestionTargets, mergedQuestions, questionAnswerLookup]);
 
   useEffect(() => {
+    if (!draftRestoreReady || allQuestionTargets.length === 0) return;
     try {
       const answerEntries = collectStoredQuestionnaireAnswerItems(allQuestionTargets, answersByKey);
       if (answerEntries.length > 0) {
@@ -1018,7 +1022,7 @@ const CanshouPage: React.FC = () => {
     } catch (e) {
       console.error("Failed to save answers to localStorage", e);
     }
-  }, [allQuestionTargets, answersByKey]);
+  }, [allQuestionTargets, answersByKey, draftRestoreReady]);
 
   useEffect(() => {
     const currentKey = mergedQuestions[currentQuestionIndex]?.key;
