@@ -675,11 +675,6 @@ export function NarrativeHistoryModal({ isOpen, onClose }: Props) {
                               </span>
                               <div className="font-semibold text-gray-800 truncate">{entry.title || '未命名战报'}</div>
                             </div>
-                            {isReorderMode && (
-                              <div className="mt-1 text-[11px] text-gray-500">
-                                当前作为 AI 提示词中的第 {index + 1} 段参考内容。
-                              </div>
-                            )}
                           </div>
                         </div>
                         <div className="flex shrink-0 items-start gap-2">
