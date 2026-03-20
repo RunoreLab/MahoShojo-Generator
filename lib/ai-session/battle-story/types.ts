@@ -1,7 +1,7 @@
 import type { NormalizedStreamUpdateMeta } from '@/lib/arena/stream-meta';
 import type { AiSessionListOptions, AiSessionProviderMode } from '@/lib/ai-session/types';
 import type { AIReasoningEnvelope } from '@/types/ai-reasoning';
-import type { AdjudicationResult } from '@/types/arena';
+import type { AdjudicationResult, AdjudicatorEvent } from '@/types/arena';
 
 export type BattleStorySourceMode = 'classic' | 'kizuna' | 'daily' | 'scenario';
 export type BattleStoryLengthOption = 'default' | 'short' | 'standard' | 'detailed' | 'long';
@@ -36,6 +36,7 @@ export type BattleStorySessionSeed = {
   scenario?: Record<string, unknown> | null;
   auxScenarios?: Record<string, unknown>[];
   questionnaires?: BattleStoryQuestionnaireSeed[];
+  adjudicationEvents?: AdjudicatorEvent[];
   settings: BattleStorySessionSettings;
 };
 

@@ -125,6 +125,14 @@ describe('battle story generate-next validation', () => {
         },
         seed: {
           combatants: [{ data: { codename: '白百合' } }],
+          adjudicationEvents: [
+            {
+              id: 'event-1',
+              description: '决战前是否突发雷暴',
+              type: 'binary',
+              probability: 50,
+            },
+          ],
           mode: 'classic',
           storyLength: 'standard',
           language: 'zh-CN',
@@ -156,6 +164,14 @@ describe('battle story generate-next validation', () => {
       modelId: 'gemini-2.5-flash',
       apiKey: 'sk-test',
     });
+    expect(body.adjudicationEvents).toEqual([
+      {
+        id: 'event-1',
+        description: '决战前是否突发雷暴',
+        type: 'binary',
+        probability: 50,
+      },
+    ]);
     expect(body.arenaHistoryReadLimit).toBe(5);
     expect(body.narrativeHistoryReadLimit).toBe(9);
     expect(body.forceStreamMeta).toBe(true);

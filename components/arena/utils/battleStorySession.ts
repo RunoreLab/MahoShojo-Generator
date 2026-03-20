@@ -14,6 +14,7 @@ import type {
   BattleStoryStreamUpdateMetaDebug,
   BattleStorySummaryMeta,
 } from '@/lib/ai-session/battle-story/types';
+import type { AdjudicatorEvent } from '@/types/arena';
 
 import type {
   AuxiliaryScenarioState,
@@ -180,6 +181,7 @@ export const buildBattleStorySessionSeedSnapshot = (input: {
   scenario: ScenarioState;
   auxScenarios: AuxiliaryScenarioState[];
   selectedQuestionnaires: QuestionnaireSelection[];
+  adjudicationEvents: AdjudicatorEvent[];
   selectedLanguage: string;
   storyLength: StoryLengthOption;
   settings: BattleSettings;
@@ -241,6 +243,7 @@ export const buildBattleStorySessionSeedSnapshot = (input: {
               ? { loreMarkdown: selection.questionnaire.loreMarkdown }
               : {})),
       })),
+      adjudicationEvents: input.adjudicationEvents,
       settings: {
         readArenaHistory: input.settings.readArenaHistory,
         readArenaHistoryLimit: input.settings.readArenaHistoryLimit,

@@ -1159,6 +1159,7 @@ export function useBattleStorySession() {
         scenario: state.scenario,
         auxScenarios: state.auxScenarios,
         selectedQuestionnaires: state.selectedQuestionnaires,
+        adjudicationEvents: state.adjudicationEvents,
         selectedLanguage: state.selectedLanguage,
         storyLength: state.storyLength,
         settings: state.settings,

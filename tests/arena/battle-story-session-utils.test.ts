@@ -63,6 +63,14 @@ describe('battle story session utils', () => {
           },
         },
       ],
+      adjudicationEvents: [
+        {
+          id: 'event-1',
+          description: '暴雨是否在决战前降临',
+          type: 'binary',
+          probability: 65,
+        },
+      ],
       selectedLanguage: 'zh-CN',
       storyLength: 'long',
       settings: {
@@ -89,6 +97,14 @@ describe('battle story session utils', () => {
     expect(snapshot.seed.scenario).toEqual({ title: '废都决战' });
     expect(snapshot.seed.auxScenarios).toHaveLength(1);
     expect(snapshot.seed.questionnaires?.[0]?.loreMarkdown).toBe('角色关系与世界观');
+    expect(snapshot.seed.adjudicationEvents).toEqual([
+      {
+        id: 'event-1',
+        description: '暴雨是否在决战前降临',
+        type: 'binary',
+        probability: 65,
+      },
+    ]);
     expect(snapshot.seed.settings.readArenaHistoryLimit).toBe(3);
     expect(snapshot.seed.settings.isArenaHistoryUnlimited).toBe(false);
     expect(snapshot.seed.settings.readNarrativeHistoryLimit).toBe(10);
