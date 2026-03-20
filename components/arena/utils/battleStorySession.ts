@@ -2,6 +2,10 @@
 
 import { randomUUID } from '@/lib/crypto';
 import { formatBattleStoryChapterProgress } from '@/lib/ai-session/battle-story/plan';
+import {
+  buildAdjudicationRecordMarkdown,
+  hasAdjudicationRecordSection,
+} from '@/lib/adjudicator/presentation';
 import type {
   BattleStoryCheckpointRecord,
   BattleStoryChapterCardSnapshot,
@@ -483,7 +487,16 @@ export const buildBattleStoryExportMarkdown = (
   }
 
   const chapterBlocks = activeChapters
-    .map((chapter) => chapter.markdown.trim())
+    .map((chapter) => {
+      const baseMarkdown = chapter.markdown.trim();
+      const snapshot = resolveBattleStoryChapterCardSnapshot(chapter);
+      const adjudicationSection = hasAdjudicationRecordSection(baseMarkdown)
+        ? ''
+        : buildAdjudicationRecordMarkdown(snapshot?.adjudicationResults);
+
+      if (!adjudicationSection) return baseMarkdown;
+      return `${baseMarkdown}\n\n---\n\n${adjudicationSection}`;
+    })
     .filter(Boolean);
 
   return [...header, '', '---', '', chapterBlocks.join('\n\n---\n\n')]

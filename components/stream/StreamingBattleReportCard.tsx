@@ -15,6 +15,11 @@ import {
     isLikelyVideoUrl,
     resolveExternalMediaUrl,
 } from '@/lib/markdown/externalMedia';
+import {
+    buildAdjudicationRecordMarkdown,
+    hasAdjudicationRecordSection,
+    resolveAdjudicationOutcomeTone,
+} from '@/lib/adjudicator/presentation';
 import { capturePngBlob } from '@/lib/client/snapdomCapture';
 import { createBlobUrl, downloadBlob } from '@/lib/client/blobUrl';
 import { GeneratedByUserBadge } from '@/components/shared/GeneratedByUserBadge';
@@ -171,16 +176,9 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
             result = `${result.trim()}\n\n---\n\n## 角色行动引导\n${lines}\n`;
         }
 
-        const hasAdjudicationSection = /(^|\n)##\s*随机判定记录\s*(\n|$)/.test(result);
-        if (!hasAdjudicationSection && adjudicationResults && adjudicationResults.length > 0) {
-            const adjudicationMarkdown = adjudicationResults
-                .map((res) => {
-                    const prefix = ' '.repeat(res.depth * 2);
-                    return `${prefix}- **事件**: ${res.description}\n${prefix}  - **结果**: ${res.outcome} (${res.details})`;
-                })
-                .join('\n');
-
-            result = `${result.trim()}\n\n---\n\n## 随机判定记录\n${adjudicationMarkdown}\n`;
+        const adjudicationSection = buildAdjudicationRecordMarkdown(adjudicationResults);
+        if (!hasAdjudicationRecordSection(result) && adjudicationSection) {
+            result = `${result.trim()}\n\n---\n\n${adjudicationSection}\n`;
         }
 
         return result.trim();
@@ -670,29 +668,32 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
                     <div className="mt-4 border-l-4 border-green-400 bg-black/20 p-3 rounded">
                         <div className="text-sm font-semibold mb-2">🎲 随机判定记录</div>
                         <div className="space-y-2 text-sm">
-                            {adjudicationResults.map((result, index) => (
-                                <div key={index} style={{ marginLeft: `${result.depth * 16}px` }}>
-                                    <p className="opacity-90">
-                                        {result.depth > 0 && <span className="text-gray-400">↳ </span>}
-                                        <span className="font-semibold">{result.description}</span>
-                                    </p>
-                                    <p className="text-xs opacity-70">
-                                        判定结果:{' '}
-                                        <span
-                                            className={`font-bold ${
-                                                result.outcome === '成功' || result.outcome === '大成功'
-                                                    ? 'text-green-300'
-                                                    : result.outcome === '失败' || result.outcome === '大失败'
-                                                        ? 'text-red-300'
-                                                        : 'text-blue-300'
-                                            }`}
-                                        >
-                                            {result.outcome}
-                                        </span>{' '}
-                                        ({result.details})
-                                    </p>
-                                </div>
-                            ))}
+                            {adjudicationResults.map((result, index) => {
+                                const outcomeTone = resolveAdjudicationOutcomeTone(result.outcome);
+                                return (
+                                    <div key={index} style={{ marginLeft: `${result.depth * 16}px` }}>
+                                        <p className="opacity-90">
+                                            {result.depth > 0 && <span className="text-gray-400">↳ </span>}
+                                            <span className="font-semibold">{result.description}</span>
+                                        </p>
+                                        <p className="text-xs opacity-70">
+                                            判定结果:{' '}
+                                            <span
+                                                className={`font-bold ${
+                                                    outcomeTone === 'success'
+                                                        ? 'text-green-300'
+                                                        : outcomeTone === 'failure'
+                                                            ? 'text-red-300'
+                                                            : 'text-blue-300'
+                                                }`}
+                                            >
+                                                {result.outcome}
+                                            </span>{' '}
+                                            ({result.details})
+                                        </p>
+                                    </div>
+                                );
+                            })}
                         </div>
                     </div>
                 )}

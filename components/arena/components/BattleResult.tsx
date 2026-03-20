@@ -11,6 +11,7 @@ import { getCombatantDisplayName } from '../utils/characterValidator';
 import { toBattleReportMarkdown } from '../utils/battleReportMarkdown';
 import { inferTemplate } from '@/lib/data-card-converter';
 import { precheckBattleReportForRedo } from '@/lib/arena/redo-updates';
+import { resolveAdjudicationOutcomeTone } from '@/lib/adjudicator/presentation';
 import { AdjudicationResult } from '@/types/arena';
 import { BattleStoreState, CombatantData, UpdatedCombatantData } from '../types';
 import { MarkdownBlock } from '@/components/MarkdownBlock';
@@ -157,31 +158,34 @@ export function BattleResult({ onSaveImage }: BattleResultProps) {
             headerClassName="mb-3"
           >
             <div className="space-y-2">
-              {adjudicationResults.map((result: AdjudicationResult, index: number) => (
-                <div
-                  key={index}
-                  className="p-3 bg-gray-50 border border-gray-200 rounded-lg text-sm"
-                  style={{ marginLeft: `${result.depth * 20}px` }}
-                >
-                  {result.depth > 0 && <span className="text-gray-400">↳ </span>}
-                  <span className="font-semibold text-gray-700">{result.description}</span>
-                  <p className="text-gray-600 mt-1">
-                    判定结果:{' '}
-                    <span
-                      className={`font-bold ${
-                        result.outcome === '成功' || result.outcome === '大成功'
-                          ? 'text-green-600'
-                          : result.outcome === '失败' || result.outcome === '大失败'
-                            ? 'text-red-600'
-                            : 'text-blue-600'
-                      }`}
-                    >
-                      {result.outcome}
-                    </span>{' '}
-                    ({result.details})
-                  </p>
-                </div>
-              ))}
+              {adjudicationResults.map((result: AdjudicationResult, index: number) => {
+                const outcomeTone = resolveAdjudicationOutcomeTone(result.outcome);
+                return (
+                  <div
+                    key={index}
+                    className="p-3 bg-gray-50 border border-gray-200 rounded-lg text-sm"
+                    style={{ marginLeft: `${result.depth * 20}px` }}
+                  >
+                    {result.depth > 0 && <span className="text-gray-400">↳ </span>}
+                    <span className="font-semibold text-gray-700">{result.description}</span>
+                    <p className="text-gray-600 mt-1">
+                      判定结果:{' '}
+                      <span
+                        className={`font-bold ${
+                          outcomeTone === 'success'
+                            ? 'text-green-600'
+                            : outcomeTone === 'failure'
+                              ? 'text-red-600'
+                              : 'text-blue-600'
+                        }`}
+                      >
+                        {result.outcome}
+                      </span>{' '}
+                      ({result.details})
+                    </p>
+                  </div>
+                );
+              })}
             </div>
           </CollapsibleSection>
         </div>

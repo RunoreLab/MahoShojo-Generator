@@ -15,6 +15,10 @@ import {
   isLikelyVideoUrl,
   resolveExternalMediaUrl,
 } from '@/lib/markdown/externalMedia';
+import {
+  buildAdjudicationRecordMarkdown,
+  resolveAdjudicationOutcomeTone,
+} from '@/lib/adjudicator/presentation';
 import { capturePngBlob } from '@/lib/client/snapdomCapture';
 import { createBlobUrl, downloadBlob } from '@/lib/client/blobUrl';
 import { GeneratedByUserBadge } from '@/components/shared/GeneratedByUserBadge';
@@ -203,18 +207,14 @@ const BattleReportCard: React.FC<BattleReportCardProps> = ({ report, onSaveImage
 
   // 处理保存为Markdown文件
   const handleSaveMarkdown = () => {
-    // 3. [修改] 在Markdown中加入随机判定记录
-    const adjudicationMarkdown = report.adjudicationResults && report.adjudicationResults.length > 0
-        ? `
+    const adjudicationSection = buildAdjudicationRecordMarkdown(report.adjudicationResults);
+    const adjudicationMarkdown = adjudicationSection
+      ? `
 ---
 
-## 随机判定记录
-${report.adjudicationResults.map(res => {
-    const prefix = ' '.repeat(res.depth * 2); // 根据深度添加缩进
-    return `${prefix}- **事件**: ${res.description}\n${prefix}  - **结果**: ${res.outcome} (${res.details})`;
-}).join('\n')}
+${adjudicationSection}
 `
-        : '';
+      : '';
 
     const markdownContent = `
 # ${headline}
@@ -639,17 +639,26 @@ ${adjudicationMarkdown}
             <div className="result-item" style={{ borderLeft: '4px solid #4ade80', background: 'rgba(0,0,0,0.2)' }}>
                 <div className="result-label">🎲 随机判定记录</div>
                 <div className="result-value space-y-2 text-sm">
-                    {report.adjudicationResults.map((result, index) => (
+                    {report.adjudicationResults.map((result, index) => {
+                      const outcomeTone = resolveAdjudicationOutcomeTone(result.outcome);
+                      return (
                         <div key={index} style={{ marginLeft: `${result.depth * 16}px` }}>
-                            <p className="opacity-90">
-                                {result.depth > 0 && <span className="text-gray-400">↳ </span>}
-                                <span className="font-semibold">{result.description}</span>
-                            </p>
-                            <p className="text-xs opacity-70">
-                                判定结果: <span className={`font-bold ${result.outcome === '成功' ? 'text-green-400' : result.outcome === '失败' ? 'text-red-400' : 'text-blue-400'}`}>{result.outcome}</span> ({result.details})
-                            </p>
+                          <p className="opacity-90">
+                            {result.depth > 0 && <span className="text-gray-400">↳ </span>}
+                            <span className="font-semibold">{result.description}</span>
+                          </p>
+                          <p className="text-xs opacity-70">
+                            判定结果: <span className={`font-bold ${
+                              outcomeTone === 'success'
+                                ? 'text-green-400'
+                                : outcomeTone === 'failure'
+                                  ? 'text-red-400'
+                                  : 'text-blue-400'
+                            }`}>{result.outcome}</span> ({result.details})
+                          </p>
                         </div>
-                    ))}
+                      );
+                    })}
                 </div>
             </div>
         )}

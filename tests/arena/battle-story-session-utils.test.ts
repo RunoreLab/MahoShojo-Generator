@@ -517,6 +517,60 @@ describe('battle story session utils', () => {
     expect(exported).toContain('这里是正文');
   });
 
+  test('buildBattleStoryExportMarkdown 会补出章节卡片里的随机判定记录', () => {
+    const session = createBattleStorySessionRecord({
+      title: '导出随机判定',
+      source: {
+        mode: 'classic',
+        language: 'zh-CN',
+        storyLength: 'standard',
+        generationMode: 'stream',
+      },
+      seed: {
+        combatants: [{ name: '白百合' }],
+        settings: {
+          readArenaHistory: false,
+          writeArenaHistory: false,
+          readCurrentState: true,
+          writeCurrentState: true,
+          readNarrativeHistory: false,
+          writeNarrativeHistory: false,
+        },
+      },
+      workingCombatants: [{ name: '白百合' }],
+    });
+
+    const chapter = createBattleStoryChapterRecord({
+      sessionId: session.id,
+      index: 1,
+      action: 'start',
+      title: '第一章',
+      markdown: '# 第一章\n\n这里是正文',
+      reportJson: {},
+      cardSnapshot: {
+        adjudicationResults: [
+          {
+            depth: 0,
+            description: '暴雨是否在开战前降临',
+            type: 'binary',
+            roll: 7,
+            outcome: '大成功',
+            details: '掷骰(7) vs 成功率(65%)',
+          },
+        ],
+      },
+      deterministicDigest: {
+        chapterTitle: '第一章',
+      },
+    });
+
+    const exported = buildBattleStoryExportMarkdown(session, [chapter]);
+
+    expect(exported).toContain('## 随机判定记录');
+    expect(exported).toContain('暴雨是否在开战前降临');
+    expect(exported).toContain('大成功');
+  });
+
   test('resolveBattleStoryRequestCooldownMs 会区分成功级、429 与早失败冷却', () => {
     expect(
       resolveBattleStoryRequestCooldownMs({
