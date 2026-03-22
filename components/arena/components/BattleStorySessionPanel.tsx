@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from 'react';
 
+import { ProviderCooldownNotice } from '@/components/ai/ProviderCooldownNotice';
 import { MarkdownBlock } from '@/components/MarkdownBlock';
 import { CollapsibleSection } from '@/components/shared/CollapsibleSection';
 import StreamingBattleReportCard from '@/components/stream/StreamingBattleReportCard';
@@ -179,6 +180,8 @@ export function BattleStorySessionPanel(props: {
     isDeletingSession,
     isCooldown,
     remainingTime,
+    providerCooldownMode,
+    otherRemainingTime,
     draftChapterPlanMode,
     setDraftChapterPlanMode,
     draftChapterPlanInput,
@@ -453,6 +456,12 @@ export function BattleStorySessionPanel(props: {
               {isDeletingSession ? '正在删除会话...' : '删除当前会话'}
             </button>
           </div>
+          <ProviderCooldownNotice
+            currentMode={providerCooldownMode}
+            currentIsCooldown={isCooldown}
+            otherRemainingTime={otherRemainingTime}
+            className="mt-2 text-xs text-amber-700"
+          />
 
           {!isReady ? (
             <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-600">

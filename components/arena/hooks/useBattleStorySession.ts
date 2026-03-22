@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { buildCustomProviderPayload, isUsingUserProvidedKey } from '@/lib/ai/custom-provider';
+import { buildCustomProviderPayload } from '@/lib/ai/custom-provider';
 import {
   createBattleStoryCheckpointRecord,
   createBattleStoryChapterRecord,
@@ -46,7 +46,7 @@ import type {
 import { authStorage } from '@/lib/auth';
 import { readJsonOrTextFromResponse, resolveApiErrorMessage } from '@/lib/client/apiError';
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
-import { useCooldown } from '@/lib/cooldown';
+import { useProviderModeCooldown } from '@/lib/cooldown';
 import { extractHeadlineFromMarkdown, extractWinnerFromText } from '@/lib/arena/battle-report-log-utils';
 import { readScenarioBattleStoryConfig } from '@/lib/scenario-battle-story';
 import { readTextAndReasoningStreamFromResponse } from '@/lib/stream/read-text-and-reasoning-stream';
@@ -67,6 +67,10 @@ import {
   resolveBattleStoryRequestCooldownMs,
   resolveBattleStorySummaryRefreshPlan,
 } from '../utils/battleStorySession';
+import {
+  ARENA_PROVIDER_COOLDOWN_BASE_KEY,
+  resolveArenaProviderCooldownConfig,
+} from '../utils/providerCooldown';
 
 const ACTIVE_SESSION_STORAGE_KEY = 'arena.battleStory.activeSessionId';
 const PENDING_CHAPTER_PLAN_STORAGE_KEY = 'arena.battleStory.pendingChapterPlan.v1';
@@ -342,15 +346,19 @@ export function useBattleStorySession() {
     () => buildCustomProviderPayload(userProviderConfig),
     [userProviderConfig]
   );
-  const isUserCustomKey = useMemo(
-    () => isUsingUserProvidedKey(userProviderConfig),
+  const providerCooldownConfig = useMemo(
+    () => resolveArenaProviderCooldownConfig(userProviderConfig),
     [userProviderConfig]
   );
-  const cooldownStorageKey = isUserCustomKey
-    ? 'generateBattleCooldown:custom'
-    : 'generateBattleCooldown:system';
-  const cooldownMs = isUserCustomKey ? 3_000 : 120_000;
-  const { isCooldown, remainingTime, startCooldown } = useCooldown(cooldownStorageKey, cooldownMs);
+  const { currentMode: providerCooldownMode } = providerCooldownConfig;
+  const cooldownMs =
+    providerCooldownMode === 'custom'
+      ? providerCooldownConfig.customDurationMs
+      : providerCooldownConfig.systemDurationMs;
+  const { isCooldown, remainingTime, startCooldown, otherRemainingTime } = useProviderModeCooldown({
+    baseKey: ARENA_PROVIDER_COOLDOWN_BASE_KEY,
+    ...providerCooldownConfig,
+  });
 
   useEffect(() => {
     activeSessionRef.current = activeSession;
@@ -1845,6 +1853,8 @@ export function useBattleStorySession() {
     isDeletingSession,
     isCooldown,
     remainingTime,
+    providerCooldownMode,
+    otherRemainingTime,
     draftChapterPlanMode,
     setDraftChapterPlanMode,
     draftChapterPlanInput,

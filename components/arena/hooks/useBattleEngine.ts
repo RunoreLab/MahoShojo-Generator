@@ -5,7 +5,7 @@ import { useRouter } from 'next/router';
 
 import type { NewsReport } from '@/components/BattleReportCard';
 import { persistArrestedBackup, type ArrestedBackupDraftItem, type ArrestedBackupTriggerSource } from '@/lib/arrested-backup';
-import { useCooldown } from '@/lib/cooldown';
+import { useProviderModeCooldown } from '@/lib/cooldown';
 import { quickCheck } from '@/lib/sensitive-word-filter';
 import { applyShieldWords } from '@/lib/shield-word-filter';
 import { useBattleStore } from '../stores/useBattleStore';
@@ -28,6 +28,10 @@ import { formatHttpErrorMessage } from '@/lib/client/httpError';
 import { appendReasoningDelta, normalizeReasoningSource, updateReasoningStatus } from '@/lib/ai/reasoning-normalizer';
 import { limitNarrativeHistoryEntriesForPrompt } from '@/lib/narrative-history';
 import type { AIReasoningSource } from '@/types/ai-reasoning';
+import {
+  ARENA_PROVIDER_COOLDOWN_BASE_KEY,
+  resolveArenaProviderCooldownConfig,
+} from '../utils/providerCooldown';
 
 const sanitizeTextByShieldWords = (text: string): string => applyShieldWords(text).filteredText;
 
@@ -431,11 +435,12 @@ export const useBattleEngine = () => {
   const isRedoingUpdates = useBattleSelector((state) => state.isRedoingUpdates);
   const { handleResolveRandomPlaceholders } = useBattleActions();
 
-  const isUserCustomKey =
-    userProviderConfig?.providerId !== 'system' && Boolean(userProviderConfig?.apiKey?.trim());
-  const battleCooldownMs = isUserCustomKey ? 3000 : 120000;
-  const battleCooldownStorageKey = isUserCustomKey ? 'generateBattleCooldown:custom' : 'generateBattleCooldown:system';
-  const { isCooldown, startCooldown, remainingTime } = useCooldown(battleCooldownStorageKey, battleCooldownMs);
+  const providerCooldownConfig = resolveArenaProviderCooldownConfig(userProviderConfig);
+  const { currentMode: providerCooldownMode } = providerCooldownConfig;
+  const { isCooldown, startCooldown, remainingTime, otherRemainingTime } = useProviderModeCooldown({
+    baseKey: ARENA_PROVIDER_COOLDOWN_BASE_KEY,
+    ...providerCooldownConfig,
+  });
 
   const scenarioDisplayName = useMemo(() => {
     // 只有在情景模式下才需要展示情景标题，避免切换到其他模式后沿用上一次的情景小标题
@@ -1843,5 +1848,7 @@ export const useBattleEngine = () => {
     isRedoingUpdates,
     isCooldown,
     remainingTime,
+    providerCooldownMode,
+    otherRemainingTime,
   };
 };

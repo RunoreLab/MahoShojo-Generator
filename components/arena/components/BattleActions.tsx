@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 
+import { ProviderCooldownNotice } from '@/components/ai/ProviderCooldownNotice';
 import { TokenIndicator } from '@/components/shared/TokenIndicator';
 import { formatDateTime } from '@/lib/constants';
 import { CollapsibleSection } from '@/components/shared/CollapsibleSection';
@@ -83,7 +84,14 @@ const buttonTextMap: Record<string, string> = {
 };
 
 export function BattleActions() {
-  const { handleGenerate, isGenerating, isCooldown, remainingTime } = useBattleEngine();
+  const {
+    handleGenerate,
+    isGenerating,
+    isCooldown,
+    remainingTime,
+    providerCooldownMode,
+    otherRemainingTime,
+  } = useBattleEngine();
   const useBattleSelector = <T,>(selector: (state: BattleStoreState) => T) => useBattleStore(selector);
   const combatants = useBattleSelector((state) => state.combatants);
   const battleMode = useBattleSelector((state) => state.battleMode);
@@ -235,6 +243,12 @@ export function BattleActions() {
           {getButtonText()}
         </button>
       </div>
+      <ProviderCooldownNotice
+        currentMode={providerCooldownMode}
+        currentIsCooldown={isCooldown}
+        otherRemainingTime={otherRemainingTime}
+        className="mt-2 text-center text-xs text-amber-700"
+      />
 
       <CollapsibleSection
         title="高级：叙事历史 / 上下文估算"
