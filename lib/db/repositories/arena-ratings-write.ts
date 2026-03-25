@@ -933,8 +933,6 @@ export const applyArenaRatingsUpdateIfBothMatch = async (
             eq(arenaRatings.queue, 'strict'),
             eq(arenaRatings.entityType, entity.entityType),
             eq(arenaRatings.entityId, entity.entityId),
-            eq(arenaRatings.rating, after.rating),
-            eq(arenaRatings.games, after.games),
             sql`${buildTierRankSql(arenaRatings.seasonPeakTier)} < ${targetRank}`,
           ),
         );
@@ -945,30 +943,23 @@ export const applyArenaRatingsUpdateIfBothMatch = async (
     await updateSeasonPeakTier(bEntity, computed.bAfter, latestSeasonPeakTierB);
   };
 
-  try {
-    const result = await runWithOption(true);
-    if (result === 'applied') {
-      try {
-        await refreshStrictSeasonPeakTier();
-      } catch (error) {
-        console.warn('更新 strict 赛季最高段位失败（降级为忽略）:', error);
-      }
+  const shouldRefreshSeasonPeakTier = (result: 'applied' | 'already-applied' | 'conflict'): boolean =>
+    result === 'applied' || result === 'already-applied';
+
+  const finalizeWithSeasonPeakTierRefresh = async (
+    result: 'applied' | 'already-applied' | 'conflict',
+  ): Promise<'applied' | 'already-applied' | 'conflict'> => {
+    if (shouldRefreshSeasonPeakTier(result)) {
+      await refreshStrictSeasonPeakTier();
     }
     return result;
+  };
+
+  try {
+    const result = await runWithOption(true);
+    return finalizeWithSeasonPeakTierRefresh(result);
   } catch {
-    return runWithOption(false)
-      .then(async (result) => {
-        if (result === 'applied') {
-          try {
-            await refreshStrictSeasonPeakTier();
-          } catch (error) {
-            console.warn('更新 strict 赛季最高段位失败（降级为忽略）:', error);
-          }
-        }
-        return result;
-      })
-      .catch((legacyError) => {
-        throw legacyError;
-      });
+    const fallbackResult = await runWithOption(false);
+    return finalizeWithSeasonPeakTierRefresh(fallbackResult);
   }
 };
