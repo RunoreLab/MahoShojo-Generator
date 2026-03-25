@@ -72,6 +72,13 @@ type ArenaLeaderboardSelectRow = {
   techScore: number | null;
   techLevel: string | null;
   isNative: boolean | null;
+  seasonPeakRating: number | null;
+  seasonPeakGames: number | null;
+  seasonPeakAt: string | null;
+  seasonPeakTier: string | null;
+  seasonLowRating: number | null;
+  seasonLowGames: number | null;
+  seasonLowAt: string | null;
 };
 
 export type ArenaLeaderboardRow = ArenaLeaderboardSelectRow & {
@@ -292,6 +299,13 @@ const selectArenaLeaderboardRows = async (
       techScore: dataCardMetrics.techScore,
       techLevel: dataCardMetrics.techLevel,
       isNative: dataCardMetrics.isNative,
+      seasonPeakRating: arenaRatings.seasonPeakRating,
+      seasonPeakGames: arenaRatings.seasonPeakGames,
+      seasonPeakAt: arenaRatings.seasonPeakAt,
+      seasonPeakTier: arenaRatings.seasonPeakTier,
+      seasonLowRating: arenaRatings.seasonLowRating,
+      seasonLowGames: arenaRatings.seasonLowGames,
+      seasonLowAt: arenaRatings.seasonLowAt,
     })
     .from(arenaRatings)
     .leftJoin(dataCards, and(eq(arenaRatings.entityType, 'data_card'), eq(dataCards.id, arenaRatings.entityId)))
@@ -316,6 +330,13 @@ const selectArenaLeaderboardRows = async (
     techScore: typeof row.techScore === 'number' ? row.techScore : null,
     techLevel: typeof row.techLevel === 'string' ? row.techLevel : null,
     isNative: typeof row.isNative === 'boolean' ? row.isNative : null,
+    seasonPeakRating: typeof row.seasonPeakRating === 'number' ? toInteger(row.seasonPeakRating, 0) : null,
+    seasonPeakGames: typeof row.seasonPeakGames === 'number' ? toInteger(row.seasonPeakGames, 0) : null,
+    seasonPeakAt: typeof row.seasonPeakAt === 'string' ? row.seasonPeakAt : null,
+    seasonPeakTier: typeof row.seasonPeakTier === 'string' ? row.seasonPeakTier : null,
+    seasonLowRating: typeof row.seasonLowRating === 'number' ? toInteger(row.seasonLowRating, 0) : null,
+    seasonLowGames: typeof row.seasonLowGames === 'number' ? toInteger(row.seasonLowGames, 0) : null,
+    seasonLowAt: typeof row.seasonLowAt === 'string' ? row.seasonLowAt : null,
   }));
 
   const dataCardIds = normalizedRows

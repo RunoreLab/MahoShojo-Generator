@@ -4,8 +4,9 @@ import { PRESET_LIST } from '@/lib/presets';
 import { applyQueenTier, computeArenaBaseTier } from '@/lib/arena/tier';
 import { withEdgeCache } from '@/lib/edge-cache';
 import { getDrizzleDbFromRuntime } from '@/lib/db/drizzle';
-import { listArenaLeaderboardRows } from '@/lib/db/repositories/arena-read';
+import { type ArenaLeaderboardRow, listArenaLeaderboardRows } from '@/lib/db/repositories/arena-read';
 import { queryArenaPublicQueenEntityByQueue } from '@/lib/db/repositories/data-card-meta';
+import { buildStrictLeaderboardSeasonExtrema, type LeaderboardSeasonExtreme } from '@/lib/ranking/season-extrema';
 
 export const config = {
   runtime: 'edge',
@@ -33,6 +34,16 @@ type LeaderboardItem = {
   techLevel: string | null;
   isNative: boolean | null;
   tagIds: string[];
+  seasonPeak: LeaderboardSeasonExtreme | null;
+  seasonPeakTier: string | null;
+  seasonLow: LeaderboardSeasonExtreme | null;
+};
+
+type BuildLeaderboardItemFromRowOptions = {
+  queue: Queue;
+  rank: number;
+  presetNameByFilename: Map<string, string>;
+  isQueen: boolean;
 };
 
 const parseIntParam = (value: string | null, fallback: number) => {
@@ -56,6 +67,42 @@ const parseCommaList = (value: string | null): string[] => {
     .map((item) => item.trim())
     .filter(Boolean);
   return Array.from(new Set(parts));
+};
+
+export const buildLeaderboardItemFromRow = (
+  row: ArenaLeaderboardRow,
+  options: BuildLeaderboardItemFromRowOptions,
+): LeaderboardItem => {
+  const rating = typeof row.rating === 'number' ? row.rating : 0;
+  const games = typeof row.games === 'number' ? row.games : 0;
+  const baseTier = computeArenaBaseTier(rating, games);
+  const tier = applyQueenTier(baseTier, options.isQueen);
+  const seasonExtrema = buildStrictLeaderboardSeasonExtrema(options.queue, row);
+
+  const displayName = row.entityType === 'preset'
+    ? (options.presetNameByFilename.get(row.entityId) ?? row.entityId)
+    : (row.dataCardName ?? row.entityId);
+
+  return {
+    rank: options.rank,
+    entityType: row.entityType,
+    entityId: row.entityId,
+    displayName,
+    authorName: typeof row.authorName === 'string' ? row.authorName : null,
+    rating,
+    games,
+    wins: typeof row.wins === 'number' ? row.wins : 0,
+    losses: typeof row.losses === 'number' ? row.losses : 0,
+    draws: typeof row.draws === 'number' ? row.draws : 0,
+    tier,
+    techScore: typeof row.techScore === 'number' ? row.techScore : null,
+    techLevel: typeof row.techLevel === 'string' ? row.techLevel : null,
+    isNative: row.isNative === true ? true : row.isNative === false ? false : null,
+    tagIds: Array.isArray(row.tagIds) ? row.tagIds : [],
+    seasonPeak: seasonExtrema.seasonPeak,
+    seasonPeakTier: seasonExtrema.seasonPeakTier,
+    seasonLow: seasonExtrema.seasonLow,
+  };
 };
 
 export default async function handler(req: NextRequest) {
@@ -131,33 +178,13 @@ export default async function handler(req: NextRequest) {
       });
 
       const items: LeaderboardItem[] = rows.map((row, index) => {
-        const rating = typeof row.rating === 'number' ? row.rating : 0;
-        const games = typeof row.games === 'number' ? row.games : 0;
-        const baseTier = computeArenaBaseTier(rating, games);
         const isQueen = queen?.entityType === row.entityType && queen?.entityId === row.entityId;
-        const tier = applyQueenTier(baseTier, isQueen);
-
-        const displayName = row.entityType === 'preset'
-          ? (presetNameByFilename.get(row.entityId) ?? row.entityId)
-          : (row.dataCardName ?? row.entityId);
-
-        return {
+        return buildLeaderboardItemFromRow(row, {
+          queue,
           rank: offset + index + 1,
-          entityType: row.entityType,
-          entityId: row.entityId,
-          displayName,
-          authorName: typeof row.authorName === 'string' ? row.authorName : null,
-          rating,
-          games,
-          wins: typeof row.wins === 'number' ? row.wins : 0,
-          losses: typeof row.losses === 'number' ? row.losses : 0,
-          draws: typeof row.draws === 'number' ? row.draws : 0,
-          tier,
-          techScore: typeof row.techScore === 'number' ? row.techScore : null,
-          techLevel: typeof row.techLevel === 'string' ? row.techLevel : null,
-          isNative: row.isNative === true ? true : row.isNative === false ? false : null,
-          tagIds: Array.isArray(row.tagIds) ? row.tagIds : [],
-        };
+          presetNameByFilename,
+          isQueen,
+        });
       });
 
       return new Response(JSON.stringify({ success: true, items }), {
