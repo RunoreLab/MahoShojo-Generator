@@ -62,6 +62,19 @@ type CardRatingLite = {
   publicTotal: number | null;
 } | null;
 
+type TopRatedStrictSeasonExtremeLite = {
+  rating: number;
+  games: number;
+  tier: string;
+  occurredAt: string;
+} | null;
+
+type TopRatedStrictRatingLite = (Exclude<CardRatingLite, null> & {
+  seasonPeak: TopRatedStrictSeasonExtremeLite;
+  seasonPeakTier: string | null;
+  seasonLow: TopRatedStrictSeasonExtremeLite;
+}) | null;
+
 type CardRatingsLite = {
   strict: CardRatingLite;
 };
@@ -69,6 +82,13 @@ type CardRatingsLite = {
 type CharacterHighlight = CardLite & {
   metrics: CardMetricsLite;
   ratings: CardRatingsLite;
+};
+
+type TopRatedCharacterHighlight = CardLite & {
+  metrics: CardMetricsLite;
+  ratings: {
+    strict: TopRatedStrictRatingLite;
+  };
 };
 
 type PvpMatchLite = {
@@ -270,6 +290,13 @@ export default withPvpErrorBoundary(async function handler(req: Request): Promis
     queue: 'strict';
     rating: number;
     games: number;
+    seasonPeakRating: number | null;
+    seasonPeakGames: number | null;
+    seasonPeakAt: string | null;
+    seasonPeakTier: string | null;
+    seasonLowRating: number | null;
+    seasonLowGames: number | null;
+    seasonLowAt: string | null;
     updatedAt: string;
   };
 
@@ -286,6 +313,13 @@ export default withPvpErrorBoundary(async function handler(req: Request): Promis
           queue: 'strict',
           rating: row.rating,
           games: row.games,
+          seasonPeakRating: row.seasonPeakRating ?? null,
+          seasonPeakGames: row.seasonPeakGames ?? null,
+          seasonPeakAt: row.seasonPeakAt ?? null,
+          seasonPeakTier: row.seasonPeakTier ?? null,
+          seasonLowRating: row.seasonLowRating ?? null,
+          seasonLowGames: row.seasonLowGames ?? null,
+          seasonLowAt: row.seasonLowAt ?? null,
           updatedAt: row.updatedAt,
         };
         ratingsById.set(row.dataCardId, entry);
@@ -322,6 +356,40 @@ export default withPvpErrorBoundary(async function handler(req: Request): Promis
     return { rating: row.rating, games: row.games, tier, publicRank, publicTotal: null };
   };
 
+  const buildSeasonExtreme = (
+    rating: number | null | undefined,
+    games: number | null | undefined,
+    occurredAt: string | null | undefined,
+  ): TopRatedStrictSeasonExtremeLite => {
+    if (typeof rating !== 'number' || !Number.isFinite(rating)) return null;
+    if (typeof games !== 'number' || !Number.isFinite(games)) return null;
+    if (typeof occurredAt !== 'string' || occurredAt.trim().length === 0) return null;
+    return {
+      rating,
+      games,
+      occurredAt,
+      tier: computeArenaBaseTier(rating, games),
+    };
+  };
+
+  const normalizeSeasonPeakTier = (value: unknown): string | null => {
+    if (typeof value !== 'string') return null;
+    const normalized = value.trim();
+    return normalized.length > 0 ? normalized : null;
+  };
+
+  const buildTopRatedStrictRating = (row: RatingRow | undefined): TopRatedStrictRatingLite => {
+    const base = buildRating(row);
+    if (!base) return null;
+
+    return {
+      ...base,
+      seasonPeak: buildSeasonExtreme(row?.seasonPeakRating, row?.seasonPeakGames, row?.seasonPeakAt),
+      seasonPeakTier: normalizeSeasonPeakTier(row?.seasonPeakTier),
+      seasonLow: buildSeasonExtreme(row?.seasonLowRating, row?.seasonLowGames, row?.seasonLowAt),
+    };
+  };
+
   const mapCharacterHighlight = async (row: UserTopDataCardRow): Promise<CharacterHighlight> => {
     const base = mapCard(row);
     const metrics = metricsById.get(row.id) ?? null;
@@ -334,8 +402,20 @@ export default withPvpErrorBoundary(async function handler(req: Request): Promis
     };
   };
 
+  const mapTopRatedCharacterHighlight = async (row: UserTopDataCardRow): Promise<TopRatedCharacterHighlight> => {
+    const base = mapCard(row);
+    const metrics = metricsById.get(row.id) ?? null;
+    const ratingRows = ratingsById.get(row.id) ?? {};
+    const strict = buildTopRatedStrictRating(ratingRows.strict);
+    return {
+      ...base,
+      metrics,
+      ratings: { strict },
+    };
+  };
+
   const topCharacterHighlights = await Promise.all(topCharacterRows.map(mapCharacterHighlight));
-  const topRatedHighlight = topRatedRowResolved ? await mapCharacterHighlight(topRatedRowResolved) : null;
+  const topRatedHighlight = topRatedRowResolved ? await mapTopRatedCharacterHighlight(topRatedRowResolved) : null;
 
   const avatarDataUrl = userRow.avatar_webp_base64 ? `data:image/webp;base64,${userRow.avatar_webp_base64}` : null;
 

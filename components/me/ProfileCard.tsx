@@ -40,6 +40,19 @@ type CardRatingLite = {
   publicTotal: number | null;
 } | null;
 
+type TopRatedStrictSeasonExtremeLite = {
+  rating: number;
+  games: number;
+  tier: string;
+  occurredAt: string;
+} | null;
+
+type TopRatedStrictRatingLite = (Exclude<CardRatingLite, null> & {
+  seasonPeak: TopRatedStrictSeasonExtremeLite;
+  seasonPeakTier: string | null;
+  seasonLow: TopRatedStrictSeasonExtremeLite;
+}) | null;
+
 type CardRatingsLite = {
   strict: CardRatingLite;
 };
@@ -47,6 +60,13 @@ type CardRatingsLite = {
 type CharacterHighlight = CardLite & {
   metrics: CardMetricsLite;
   ratings: CardRatingsLite;
+};
+
+type TopRatedCharacterHighlight = CardLite & {
+  metrics: CardMetricsLite;
+  ratings: {
+    strict: TopRatedStrictRatingLite;
+  };
 };
 
 type PvpMatchLite = {
@@ -91,7 +111,7 @@ export type MeProfileCardPayload = {
   };
   topCards: {
     characters: CharacterHighlight[];
-    topRatedCharacter: CharacterHighlight | null;
+    topRatedCharacter: TopRatedCharacterHighlight | null;
     scenario: CardLite | null;
   };
   stats: {
@@ -210,6 +230,13 @@ const formatRankFraction = (rank: number | null | undefined, total: number | nul
   return safeTotal == null ? `#${safeRank}` : `#${safeRank}/${safeTotal}`;
 };
 
+const isTopRatedStrictRating = (
+  strict: CardRatingLite | TopRatedStrictRatingLite,
+): strict is Exclude<TopRatedStrictRatingLite, null> => {
+  if (!strict) return false;
+  return 'seasonPeak' in strict || 'seasonLow' in strict || 'seasonPeakTier' in strict;
+};
+
 const buildTokenBreakdownLabel = (report: BattleReportLite): string => {
   const total =
     typeof report.totalTokens === 'number' && Number.isFinite(report.totalTokens)
@@ -316,11 +343,23 @@ export function ProfileCard({
   const equippedBadges = (data.badges.equipped ?? []).slice(0, 5);
   const stats = data.stats;
 
-  const renderCharacterHighlight = (c: CharacterHighlight, keyPrefix: string) => {
+  const renderCharacterHighlight = (
+    c: CharacterHighlight | TopRatedCharacterHighlight,
+    keyPrefix: string,
+    options?: { showSeasonExtrema?: boolean },
+  ) => {
     const techLevel = c.metrics?.techLevel ?? null;
     const techScore = c.metrics?.techScore ?? null;
     const strict = c.ratings.strict;
     const isPublicLeaderboardEligible = c.isPublic && c.reviewStatus === 'approved';
+    const seasonDetails =
+      options?.showSeasonExtrema && isTopRatedStrictRating(strict)
+        ? {
+            peak: strict.seasonPeak,
+            peakTier: strict.seasonPeakTier,
+            low: strict.seasonLow,
+          }
+        : null;
 
     const strictLabel = (() => {
       if (!strict) return '无严格排位';
@@ -345,6 +384,35 @@ export function ProfileCard({
           {' · '}
           技术值 {techScore == null ? '—' : techScore}
         </div>
+        {seasonDetails ? (
+          <div className="mt-1 flex flex-col gap-0.5 text-[11px] text-white/80">
+            {seasonDetails.peak ? (
+              <div className="flex flex-wrap items-center gap-1">
+                <span>
+                  赛季最高 {formatCount(seasonDetails.peak.rating)}（<TierBadge tier={seasonDetails.peak.tier} className="mx-1 align-middle" />）
+                </span>
+                <span className="text-white/70" title={seasonDetails.peak.occurredAt}>
+                  {formatDateTime(seasonDetails.peak.occurredAt)}
+                </span>
+              </div>
+            ) : null}
+            {seasonDetails.low ? (
+              <div className="flex flex-wrap items-center gap-1">
+                <span>
+                  赛季最低 {formatCount(seasonDetails.low.rating)}（<TierBadge tier={seasonDetails.low.tier} className="mx-1 align-middle" />）
+                </span>
+                <span className="text-white/70" title={seasonDetails.low.occurredAt}>
+                  {formatDateTime(seasonDetails.low.occurredAt)}
+                </span>
+              </div>
+            ) : null}
+            {seasonDetails.peakTier ? (
+              <div>
+                赛季最高段位 <TierBadge tier={seasonDetails.peakTier} className="mx-1 align-middle" />
+              </div>
+            ) : null}
+          </div>
+        ) : null}
       </div>
     );
   };
@@ -508,7 +576,7 @@ export function ProfileCard({
               <div className="text-xs font-semibold text-white/85">排位最高角色卡（1）</div>
               <div className="mt-2 space-y-2">
                 {data.topCards.topRatedCharacter ? (
-                  renderCharacterHighlight(data.topCards.topRatedCharacter, 'top-rated')
+                  renderCharacterHighlight(data.topCards.topRatedCharacter, 'top-rated', { showSeasonExtrema: true })
                 ) : (
                   <div className="text-xs text-white/70">暂无排位记录</div>
                 )}
