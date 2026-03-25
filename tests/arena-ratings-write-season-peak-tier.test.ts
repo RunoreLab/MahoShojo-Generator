@@ -128,9 +128,10 @@ const buildComputed = (overrides?: Partial<TestComputed>): TestComputed => ({
 const createFakeDb = (params: {
   entities: [TestEntity, TestEntity];
   computed: TestComputed;
-  initialRows: [RatingRow, RatingRow];
+  initialRows: RatingRow[];
   enforcePromotionRatingGamesGuardFromWhere?: boolean;
   advanceRowsAfterMainUpdate?: (rows: Map<string, RatingRow>) => void;
+  promotionTargets?: TestEntity[];
   throwOnPromotion?: boolean;
 }) => {
   const rows = new Map<string, RatingRow>(params.initialRows.map((row) => [keyOf(row), cloneRow(row)]));
@@ -188,8 +189,11 @@ const createFakeDb = (params: {
                 throw new Error('promotion failed');
               }
 
-              const entity = params.entities[promotionCallIndex];
-              const after = promotionCallIndex === 0 ? params.computed.aAfter : params.computed.bAfter;
+              const entity = params.promotionTargets?.[promotionCallIndex] ?? params.entities[promotionCallIndex];
+              const after =
+                entity && entity.entityType === params.entities[0].entityType && entity.entityId === params.entities[0].entityId
+                  ? params.computed.aAfter
+                  : params.computed.bAfter;
               promotionCallIndex += 1;
               if (!entity) return [];
 
@@ -354,5 +358,43 @@ describe('arena-ratings-write season peak tier promotion', () => {
 
     expect(result).toBe('already-applied');
     expect(getRow(entities[0])?.seasonPeakTier).toBe('女王');
+  });
+
+  test('strict 结算后若当前女王不是参赛双方，也会提升当前女王的 seasonPeakTier', async () => {
+    const { applyArenaRatingsUpdateIfBothMatch } = await import('@/lib/db/repositories/arena-ratings-write');
+    const queenEntity: TestEntity = { entityType: 'data_card', entityId: 'card_queen' };
+    mockState.queen = queenEntity;
+
+    const computed = buildComputed({
+      aAfter: { rating: 1490, games: 20, wins: 12, losses: 8, draws: 0 },
+      bAfter: { rating: 1400, games: 20, wins: 10, losses: 10, draws: 0 },
+    });
+
+    const { db, getRow } = createFakeDb({
+      entities,
+      computed,
+      initialRows: [
+        buildStrictRow(entities[0], computed.aBefore, '花牌', nowIso),
+        buildStrictRow(entities[1], computed.bBefore, '花牌', nowIso),
+        buildStrictRow(
+          queenEntity,
+          { rating: 1570, games: 180, wins: 172, losses: 8, draws: 0 },
+          '权杖',
+          nowIso,
+        ),
+      ],
+      promotionTargets: [queenEntity],
+    });
+
+    const result = await applyArenaRatingsUpdateIfBothMatch(
+      db as Parameters<typeof applyArenaRatingsUpdateIfBothMatch>[0],
+      'strict',
+      entities,
+      computed,
+      appliedAtIso,
+    );
+
+    expect(result).toBe('applied');
+    expect(getRow(queenEntity)?.seasonPeakTier).toBe('女王');
   });
 });

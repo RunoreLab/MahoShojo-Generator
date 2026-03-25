@@ -904,10 +904,39 @@ export const applyArenaRatingsUpdateIfBothMatch = async (
   const refreshStrictSeasonPeakTier = async (): Promise<void> => {
     if (queue !== 'strict') return;
 
+    const readStrictRowForEntity = async (entity: ArenaRatingsEntity) => {
+      const rows = await db
+        .select({
+          entityType: arenaRatings.entityType,
+          entityId: arenaRatings.entityId,
+          rating: arenaRatings.rating,
+          games: arenaRatings.games,
+          seasonPeakTier: arenaRatings.seasonPeakTier,
+        })
+        .from(arenaRatings)
+        .where(
+          and(
+            eq(arenaRatings.queue, 'strict'),
+            eq(arenaRatings.entityType, entity.entityType),
+            eq(arenaRatings.entityId, entity.entityId),
+          ),
+        );
+
+      const row =
+        rows.find((item) => item.entityType === entity.entityType && item.entityId === entity.entityId) ?? rows[0];
+      if (!row) return null;
+
+      return {
+        rating: toInt(row.rating, 0),
+        games: toInt(row.games, 0),
+        seasonPeakTier: typeof row.seasonPeakTier === 'string' ? row.seasonPeakTier : null,
+      };
+    };
+
     const queen = await queryArenaPublicQueenEntityByQueue(db, 'strict', { bypassCache: true });
     const updateSeasonPeakTier = async (
       entity: ArenaRatingsEntity,
-      after: ArenaRatingsSnapshot,
+      after: Pick<ArenaRatingsSnapshot, 'rating' | 'games'>,
       existingSeasonPeakTier: string | null,
     ): Promise<void> => {
       const baseTier = computeArenaBaseTier(after.rating, after.games);
@@ -938,9 +967,20 @@ export const applyArenaRatingsUpdateIfBothMatch = async (
         );
     };
 
+    const queenIsParticipant =
+      queen &&
+      ((queen.entityType === aEntity.entityType && queen.entityId === aEntity.entityId) ||
+        (queen.entityType === bEntity.entityType && queen.entityId === bEntity.entityId));
+
+    // 女王可能因别人的对局结果被动变更，不一定在本局参赛双方里。
+    const queenTarget = !queen || queenIsParticipant ? null : await readStrictRowForEntity(queen);
+
     // 并发窗口说明：女王归属可能在缓存绕过查询与写回之间发生变化，当前实现保证单调递增，无法保证即时一致。
     await updateSeasonPeakTier(aEntity, computed.aAfter, latestSeasonPeakTierA);
     await updateSeasonPeakTier(bEntity, computed.bAfter, latestSeasonPeakTierB);
+    if (queen && queenTarget) {
+      await updateSeasonPeakTier(queen, queenTarget, queenTarget.seasonPeakTier);
+    }
   };
 
   const shouldRefreshSeasonPeakTier = (result: 'applied' | 'already-applied' | 'conflict'): boolean =>
