@@ -348,6 +348,26 @@ export const ensureArenaRatingsExist = async (
   nowIso: string,
 ): Promise<void> => {
   const [a, b] = entities.map(normalizeEntity) as [ArenaRatingsEntity, ArenaRatingsEntity];
+  const seasonDefaults =
+    queue === 'strict'
+      ? {
+          seasonPeakRating: initialRating,
+          seasonPeakGames: 0,
+          seasonPeakAt: nowIso,
+          seasonPeakTier: '无牌',
+          seasonLowRating: initialRating,
+          seasonLowGames: 0,
+          seasonLowAt: nowIso,
+        }
+      : {
+          seasonPeakRating: null,
+          seasonPeakGames: null,
+          seasonPeakAt: null,
+          seasonPeakTier: null,
+          seasonLowRating: null,
+          seasonLowGames: null,
+          seasonLowAt: null,
+        };
   await db
     .insert(arenaRatings)
     .values([
@@ -360,6 +380,7 @@ export const ensureArenaRatingsExist = async (
         wins: 0,
         losses: 0,
         draws: 0,
+        ...seasonDefaults,
         createdAt: nowIso,
         updatedAt: nowIso,
       },
@@ -372,6 +393,7 @@ export const ensureArenaRatingsExist = async (
         wins: 0,
         losses: 0,
         draws: 0,
+        ...seasonDefaults,
         createdAt: nowIso,
         updatedAt: nowIso,
       },

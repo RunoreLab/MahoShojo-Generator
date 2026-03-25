@@ -47,6 +47,13 @@ export type DataCardArenaRatingRow = {
   wins: number;
   losses: number;
   draws: number;
+  seasonPeakRating: number | null;
+  seasonPeakGames: number | null;
+  seasonPeakAt: string | null;
+  seasonPeakTier: string | null;
+  seasonLowRating: number | null;
+  seasonLowGames: number | null;
+  seasonLowAt: string | null;
   updatedAt: string;
   lastDelta: number | null;
   lastAppliedAt: string | null;
@@ -203,6 +210,13 @@ export const getArenaRatingsByDataCardId = async (
       wins: arenaRatings.wins,
       losses: arenaRatings.losses,
       draws: arenaRatings.draws,
+      seasonPeakRating: arenaRatings.seasonPeakRating,
+      seasonPeakGames: arenaRatings.seasonPeakGames,
+      seasonPeakAt: arenaRatings.seasonPeakAt,
+      seasonPeakTier: arenaRatings.seasonPeakTier,
+      seasonLowRating: arenaRatings.seasonLowRating,
+      seasonLowGames: arenaRatings.seasonLowGames,
+      seasonLowAt: arenaRatings.seasonLowAt,
       updatedAt: arenaRatings.updatedAt,
       lastDelta: arenaRatings.lastDelta,
       lastAppliedAt: arenaRatings.lastAppliedAt,
@@ -220,7 +234,25 @@ export const getArenaRatingsByDataCardId = async (
 export const getStrictArenaRatingsByDataCardIds = async (
   db: AppDrizzleDb,
   dataCardIds: string[],
-): Promise<Array<Pick<DataCardArenaRatingRow, 'dataCardId' | 'queue' | 'rating' | 'games' | 'updatedAt'>>> => {
+): Promise<
+  Array<
+    Pick<
+      DataCardArenaRatingRow,
+      | 'dataCardId'
+      | 'queue'
+      | 'rating'
+      | 'games'
+      | 'updatedAt'
+      | 'seasonPeakRating'
+      | 'seasonPeakGames'
+      | 'seasonPeakAt'
+      | 'seasonPeakTier'
+      | 'seasonLowRating'
+      | 'seasonLowGames'
+      | 'seasonLowAt'
+    >
+  >
+> => {
   if (dataCardIds.length === 0) return [];
 
   return db
@@ -230,6 +262,13 @@ export const getStrictArenaRatingsByDataCardIds = async (
       rating: arenaRatings.rating,
       games: arenaRatings.games,
       updatedAt: arenaRatings.updatedAt,
+      seasonPeakRating: arenaRatings.seasonPeakRating,
+      seasonPeakGames: arenaRatings.seasonPeakGames,
+      seasonPeakAt: arenaRatings.seasonPeakAt,
+      seasonPeakTier: arenaRatings.seasonPeakTier,
+      seasonLowRating: arenaRatings.seasonLowRating,
+      seasonLowGames: arenaRatings.seasonLowGames,
+      seasonLowAt: arenaRatings.seasonLowAt,
     })
     .from(arenaRatings)
     .where(
