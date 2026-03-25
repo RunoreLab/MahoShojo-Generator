@@ -70,6 +70,22 @@ describe('leaderboard season extrema helper', () => {
     expect(result.seasonLow).toBeNull();
   });
 
+  test('null raw input returns null extrema', () => {
+    const result = buildStrictLeaderboardSeasonExtrema('strict', null);
+
+    expect(result.seasonPeak).toBeNull();
+    expect(result.seasonPeakTier).toBeNull();
+    expect(result.seasonLow).toBeNull();
+  });
+
+  test('undefined raw input returns null extrema', () => {
+    const result = buildStrictLeaderboardSeasonExtrema('strict', undefined);
+
+    expect(result.seasonPeak).toBeNull();
+    expect(result.seasonPeakTier).toBeNull();
+    expect(result.seasonLow).toBeNull();
+  });
+
   test('seasonPeakTier can survive without seasonPeak when queue is strict', () => {
     const raw = {
       seasonPeakTier: '白牌',
