@@ -70,6 +70,13 @@ export type SeasonArchiveQueueSnapshot = {
   losses: number;
   draws: number;
   ratingUpdatedAt: string | null;
+  seasonPeakRating?: number | null;
+  seasonPeakGames?: number | null;
+  seasonPeakAt?: string | null;
+  seasonPeakTier?: string | null;
+  seasonLowRating?: number | null;
+  seasonLowGames?: number | null;
+  seasonLowAt?: string | null;
   /**
    * v2 历史归档曾在队列快照里写入 `rank/tier`（用于直接渲染 Top/Bottom）。
    * v3 起不再把“榜单视图”当作归档必需数据，这两个字段会在前端按当前口径计算。
