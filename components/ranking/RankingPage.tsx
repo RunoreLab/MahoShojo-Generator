@@ -1587,7 +1587,7 @@ export function RankingPage() {
 	                                        ) : null}
                                           {appliedFilters.queue === 'strict' &&
                                           (item.seasonPeak || item.seasonLow || item.seasonPeakTier) ? (
-                                            <div className="mt-2">
+                                            <div className="mt-2" data-season-extrema-block="1">
                                               <LeaderboardSeasonExtrema
                                                 seasonPeak={item.seasonPeak ?? null}
                                                 seasonPeakTier={item.seasonPeakTier ?? null}

@@ -131,7 +131,7 @@ describe('RankingPage season extrema mount', () => {
     mockedLeaderboardItems = [buildItem()];
     const html = renderToStaticMarkup(<RankingPage />);
 
-    expect(html).not.toContain('class="mt-2"');
+    expect(html).not.toContain('data-season-extrema-block="1"');
     expect(html).not.toContain('赛季最高段位');
   });
 
@@ -139,7 +139,7 @@ describe('RankingPage season extrema mount', () => {
     mockedLeaderboardItems = [buildItem({ seasonPeakTier: '女王' })];
     const html = renderToStaticMarkup(<RankingPage />);
 
-    expect(html).toContain('class="mt-2"');
+    expect(html).toContain('data-season-extrema-block="1"');
     expect(html).toContain('赛季最高段位');
     expect(html).toContain('女王');
   });
