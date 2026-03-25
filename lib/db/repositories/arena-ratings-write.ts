@@ -1,5 +1,14 @@
-import { and, count, eq, gte, inArray, or, sql } from 'drizzle-orm';
+import { and, count, eq, gte, inArray, or, sql, type SQL } from 'drizzle-orm';
+import {
+  compareArenaTier,
+  computeArenaBaseTier,
+  getArenaTierRank,
+  pickHigherArenaTier,
+  type ArenaTier,
+} from '@/lib/arena/tier';
+import { buildInitialStrictSeasonState, computeStrictSeasonExtremaAfterApplied } from '@/lib/database/arena-ratings';
 import type { AppDrizzleDb } from '@/lib/db/drizzle';
+import { queryArenaPublicQueenEntityByQueue } from '@/lib/db/repositories/data-card-meta';
 import {
   arenaRatingEvents,
   arenaRatings,
@@ -132,6 +141,7 @@ export const resetStrictArenaRatingForDataCard = async (
     eq(arenaRatings.entityId, dataCardId),
     eq(arenaRatings.queue, 'strict'),
   );
+  const seasonDefaults = buildInitialStrictSeasonState(initialRating, nowIso);
 
   try {
     await db
@@ -142,6 +152,13 @@ export const resetStrictArenaRatingForDataCard = async (
         wins: 0,
         losses: 0,
         draws: 0,
+        seasonPeakRating: seasonDefaults.seasonPeakRating,
+        seasonPeakGames: seasonDefaults.seasonPeakGames,
+        seasonPeakAt: seasonDefaults.seasonPeakAt,
+        seasonPeakTier: seasonDefaults.seasonPeakTier,
+        seasonLowRating: seasonDefaults.seasonLowRating,
+        seasonLowGames: seasonDefaults.seasonLowGames,
+        seasonLowAt: seasonDefaults.seasonLowAt,
         lastDelta: null,
         lastAppliedAt: null,
         updatedAt: nowIso,
@@ -156,6 +173,13 @@ export const resetStrictArenaRatingForDataCard = async (
         wins: 0,
         losses: 0,
         draws: 0,
+        seasonPeakRating: seasonDefaults.seasonPeakRating,
+        seasonPeakGames: seasonDefaults.seasonPeakGames,
+        seasonPeakAt: seasonDefaults.seasonPeakAt,
+        seasonPeakTier: seasonDefaults.seasonPeakTier,
+        seasonLowRating: seasonDefaults.seasonLowRating,
+        seasonLowGames: seasonDefaults.seasonLowGames,
+        seasonLowAt: seasonDefaults.seasonLowAt,
         updatedAt: nowIso,
       })
       .where(where);
@@ -350,15 +374,7 @@ export const ensureArenaRatingsExist = async (
   const [a, b] = entities.map(normalizeEntity) as [ArenaRatingsEntity, ArenaRatingsEntity];
   const seasonDefaults =
     queue === 'strict'
-      ? {
-          seasonPeakRating: initialRating,
-          seasonPeakGames: 0,
-          seasonPeakAt: nowIso,
-          seasonPeakTier: '无牌',
-          seasonLowRating: initialRating,
-          seasonLowGames: 0,
-          seasonLowAt: nowIso,
-        }
+      ? buildInitialStrictSeasonState(initialRating, nowIso)
       : {
           seasonPeakRating: null,
           seasonPeakGames: null,
@@ -620,6 +636,24 @@ export const applyArenaRatingsUpdateIfBothMatch = async (
   appliedAtIso: string,
 ): Promise<'applied' | 'already-applied' | 'conflict'> => {
   const [aEntity, bEntity] = entities.map(normalizeEntity) as [ArenaRatingsEntity, ArenaRatingsEntity];
+  const buildEntityCase = (column: SQL | {}, aValue: unknown, bValue: unknown): SQL =>
+    sql`CASE
+      WHEN ${arenaRatings.entityType} = ${aEntity.entityType} AND ${arenaRatings.entityId} = ${aEntity.entityId} THEN ${aValue}
+      WHEN ${arenaRatings.entityType} = ${bEntity.entityType} AND ${arenaRatings.entityId} = ${bEntity.entityId} THEN ${bValue}
+      ELSE ${column}
+    END`;
+  const buildTierRankSql = (value: SQL | {}): SQL<number> =>
+    sql`CASE ${value}
+      WHEN '无牌' THEN 0
+      WHEN '白牌' THEN 1
+      WHEN '字牌' THEN 2
+      WHEN '花牌' THEN 3
+      WHEN '权杖' THEN 4
+      WHEN '女王' THEN 5
+      ELSE -1
+    END`;
+  let latestSeasonPeakTierA: string | null = null;
+  let latestSeasonPeakTierB: string | null = null;
   const readCurrentRows = async () =>
     db
       .select({
@@ -627,6 +661,13 @@ export const applyArenaRatingsUpdateIfBothMatch = async (
         entityId: arenaRatings.entityId,
         rating: arenaRatings.rating,
         games: arenaRatings.games,
+        seasonPeakRating: arenaRatings.seasonPeakRating,
+        seasonPeakGames: arenaRatings.seasonPeakGames,
+        seasonPeakAt: arenaRatings.seasonPeakAt,
+        seasonPeakTier: arenaRatings.seasonPeakTier,
+        seasonLowRating: arenaRatings.seasonLowRating,
+        seasonLowGames: arenaRatings.seasonLowGames,
+        seasonLowAt: arenaRatings.seasonLowAt,
       })
       .from(arenaRatings)
       .where(
@@ -646,10 +687,46 @@ export const applyArenaRatingsUpdateIfBothMatch = async (
     const bRow = rows.find((row) => row.entityType === bEntity.entityType && row.entityId === bEntity.entityId);
     if (!aRow || !bRow) return 'conflict';
 
+    latestSeasonPeakTierA = typeof aRow.seasonPeakTier === 'string' ? aRow.seasonPeakTier : null;
+    latestSeasonPeakTierB = typeof bRow.seasonPeakTier === 'string' ? bRow.seasonPeakTier : null;
+
     const aRating = toInt(aRow.rating, 0);
     const aGames = toInt(aRow.games, 0);
     const bRating = toInt(bRow.rating, 0);
     const bGames = toInt(bRow.games, 0);
+
+    const aSeasonNext =
+      queue === 'strict'
+        ? computeStrictSeasonExtremaAfterApplied({
+            current: {
+              seasonPeakRating: toNullableInt(aRow.seasonPeakRating),
+              seasonPeakGames: toNullableInt(aRow.seasonPeakGames),
+              seasonPeakAt: typeof aRow.seasonPeakAt === 'string' ? aRow.seasonPeakAt : null,
+              seasonLowRating: toNullableInt(aRow.seasonLowRating),
+              seasonLowGames: toNullableInt(aRow.seasonLowGames),
+              seasonLowAt: typeof aRow.seasonLowAt === 'string' ? aRow.seasonLowAt : null,
+            },
+            afterRating: computed.aAfter.rating,
+            afterGames: computed.aAfter.games,
+            appliedAtIso,
+          })
+        : null;
+    const bSeasonNext =
+      queue === 'strict'
+        ? computeStrictSeasonExtremaAfterApplied({
+            current: {
+              seasonPeakRating: toNullableInt(bRow.seasonPeakRating),
+              seasonPeakGames: toNullableInt(bRow.seasonPeakGames),
+              seasonPeakAt: typeof bRow.seasonPeakAt === 'string' ? bRow.seasonPeakAt : null,
+              seasonLowRating: toNullableInt(bRow.seasonLowRating),
+              seasonLowGames: toNullableInt(bRow.seasonLowGames),
+              seasonLowAt: typeof bRow.seasonLowAt === 'string' ? bRow.seasonLowAt : null,
+            },
+            afterRating: computed.bAfter.rating,
+            afterGames: computed.bAfter.games,
+            appliedAtIso,
+          })
+        : null;
 
     if (
       aRating === computed.aAfter.rating &&
@@ -668,6 +745,42 @@ export const applyArenaRatingsUpdateIfBothMatch = async (
     ) {
       return 'conflict';
     }
+
+    const seasonPayload =
+      queue === 'strict' && aSeasonNext && bSeasonNext
+        ? {
+            seasonPeakRating: buildEntityCase(
+              arenaRatings.seasonPeakRating,
+              aSeasonNext.seasonPeakRating,
+              bSeasonNext.seasonPeakRating,
+            ),
+            seasonPeakGames: buildEntityCase(
+              arenaRatings.seasonPeakGames,
+              aSeasonNext.seasonPeakGames,
+              bSeasonNext.seasonPeakGames,
+            ),
+            seasonPeakAt: buildEntityCase(
+              arenaRatings.seasonPeakAt,
+              aSeasonNext.seasonPeakAt,
+              bSeasonNext.seasonPeakAt,
+            ),
+            seasonLowRating: buildEntityCase(
+              arenaRatings.seasonLowRating,
+              aSeasonNext.seasonLowRating,
+              bSeasonNext.seasonLowRating,
+            ),
+            seasonLowGames: buildEntityCase(
+              arenaRatings.seasonLowGames,
+              aSeasonNext.seasonLowGames,
+              bSeasonNext.seasonLowGames,
+            ),
+            seasonLowAt: buildEntityCase(
+              arenaRatings.seasonLowAt,
+              aSeasonNext.seasonLowAt,
+              bSeasonNext.seasonLowAt,
+            ),
+          }
+        : {};
 
     const setPayload = includeDelta
       ? {
@@ -701,6 +814,7 @@ export const applyArenaRatingsUpdateIfBothMatch = async (
             WHEN ${arenaRatings.entityType} = ${bEntity.entityType} AND ${arenaRatings.entityId} = ${bEntity.entityId} THEN ${computed.deltaB}
             ELSE ${arenaRatings.lastDelta}
           END`,
+          ...seasonPayload,
           lastAppliedAt: appliedAtIso,
           updatedAt: appliedAtIso,
         }
@@ -730,6 +844,7 @@ export const applyArenaRatingsUpdateIfBothMatch = async (
             WHEN ${arenaRatings.entityType} = ${bEntity.entityType} AND ${arenaRatings.entityId} = ${bEntity.entityId} THEN ${computed.bAfter.draws}
             ELSE ${arenaRatings.draws}
           END`,
+          ...seasonPayload,
           updatedAt: appliedAtIso,
         };
 
@@ -786,11 +901,74 @@ export const applyArenaRatingsUpdateIfBothMatch = async (
     return 'conflict';
   };
 
+  const refreshStrictSeasonPeakTier = async (): Promise<void> => {
+    if (queue !== 'strict') return;
+
+    const queen = await queryArenaPublicQueenEntityByQueue(db, 'strict', { bypassCache: true });
+    const updateSeasonPeakTier = async (
+      entity: ArenaRatingsEntity,
+      after: ArenaRatingsSnapshot,
+      existingSeasonPeakTier: string | null,
+    ): Promise<void> => {
+      const baseTier = computeArenaBaseTier(after.rating, after.games);
+      const isQueen =
+        queen && queen.entityType === entity.entityType && queen.entityId === entity.entityId && baseTier === '权杖';
+      const displayTier = isQueen ? '女王' : baseTier;
+      const normalizedSeasonPeakTier =
+        typeof existingSeasonPeakTier === 'string' && getArenaTierRank(existingSeasonPeakTier as ArenaTier) >= 0
+          ? (existingSeasonPeakTier as ArenaTier)
+          : null;
+      const targetTier = pickHigherArenaTier(normalizedSeasonPeakTier, displayTier);
+      if (!targetTier) return;
+      if (compareArenaTier(targetTier, normalizedSeasonPeakTier) <= 0) return;
+
+      const targetRank = getArenaTierRank(targetTier);
+      if (targetRank < 0) return;
+
+      await db
+        .update(arenaRatings)
+        .set({ seasonPeakTier: targetTier })
+        .where(
+          and(
+            eq(arenaRatings.queue, 'strict'),
+            eq(arenaRatings.entityType, entity.entityType),
+            eq(arenaRatings.entityId, entity.entityId),
+            eq(arenaRatings.rating, after.rating),
+            eq(arenaRatings.games, after.games),
+            sql`${buildTierRankSql(arenaRatings.seasonPeakTier)} < ${targetRank}`,
+          ),
+        );
+    };
+
+    // 并发窗口说明：女王归属可能在缓存绕过查询与写回之间发生变化，当前实现保证单调递增，无法保证即时一致。
+    await updateSeasonPeakTier(aEntity, computed.aAfter, latestSeasonPeakTierA);
+    await updateSeasonPeakTier(bEntity, computed.bAfter, latestSeasonPeakTierB);
+  };
+
   try {
-    return await runWithOption(true);
+    const result = await runWithOption(true);
+    if (result === 'applied') {
+      try {
+        await refreshStrictSeasonPeakTier();
+      } catch (error) {
+        console.warn('更新 strict 赛季最高段位失败（降级为忽略）:', error);
+      }
+    }
+    return result;
   } catch {
-    return runWithOption(false).catch((legacyError) => {
-      throw legacyError;
-    });
+    return runWithOption(false)
+      .then(async (result) => {
+        if (result === 'applied') {
+          try {
+            await refreshStrictSeasonPeakTier();
+          } catch (error) {
+            console.warn('更新 strict 赛季最高段位失败（降级为忽略）:', error);
+          }
+        }
+        return result;
+      })
+      .catch((legacyError) => {
+        throw legacyError;
+      });
   }
 };

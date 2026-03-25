@@ -341,10 +341,12 @@ const buildStrictPublicSinceClause = (): SQL =>
 export const queryArenaPublicQueenEntityByQueue = async (
   db: AppDrizzleDb,
   queue: ArenaQueue,
+  options?: { bypassCache?: boolean },
 ): Promise<ArenaEntityRef | null> => {
   const now = Date.now();
+  const bypassCache = options?.bypassCache === true;
   const cached = queenCache.get(queue);
-  if (cached && cached.expiresAt > now) return cached.value;
+  if (!bypassCache && cached && cached.expiresAt > now) return cached.value;
 
   const dataCardConditions: SQL[] = [
     isNotNull(dataCards.id),
