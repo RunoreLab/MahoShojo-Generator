@@ -6,11 +6,13 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 
 import { LeaderboardEntityDetailsModal, type LeaderboardEntityDetailsTarget } from '@/components/ranking/LeaderboardEntityDetailsModal';
+import { LeaderboardSeasonExtrema } from '@/components/ranking/LeaderboardSeasonExtrema';
 import { TechBadge } from '@/components/ranking/TechBadge';
 import { TierBadge } from '@/components/ranking/TierBadge';
 import { getArenaCachedRank, isCanonicalPublicLeaderboardQuery, upsertArenaRankCacheFromLeaderboard } from '@/lib/arena/rank-cache';
 import { ARENA_QUEEN_MIN_SCEPTER_COUNT, applyQueenTier, computeArenaBaseTier, isArenaScepterTier } from '@/lib/arena/tier';
 import { formatDateTime } from '@/lib/constants';
+import { buildStrictLeaderboardSeasonExtrema, type LeaderboardSeasonExtreme } from '@/lib/ranking/season-extrema';
 import type { SeasonArchive, SeasonsConfig, SeasonMeta } from '@/lib/seasons';
 import { formatSeasonTitle, formatYmdSlash, getCurrentSeason, seasonArchiveUrl } from '@/lib/seasons';
 import { getScenarioPresetByFilename } from '@/lib/scenario-presets';
@@ -54,6 +56,9 @@ type LeaderboardItem = {
   isNative: boolean | null;
   tagIds: string[];
   ratingUpdatedAt?: string | null;
+  seasonPeak?: LeaderboardSeasonExtreme | null;
+  seasonPeakTier?: string | null;
+  seasonLow?: LeaderboardSeasonExtreme | null;
 };
 
 type HistoryBaseItem = Omit<LeaderboardItem, 'rank' | 'tier'>;
@@ -390,6 +395,7 @@ export function RankingPage() {
 
       const snapshot = queue === 'free' ? entity.queues?.free : entity.queues?.strict;
       if (!snapshot) continue;
+      const extrema = queue === 'strict' ? buildStrictLeaderboardSeasonExtrema('strict', snapshot) : null;
 
       items.push({
         entityType,
@@ -406,6 +412,9 @@ export function RankingPage() {
         isNative: entity.isNative,
         tagIds: Array.isArray(entity.tagIds) ? entity.tagIds : [],
         ratingUpdatedAt: typeof snapshot.ratingUpdatedAt === 'string' ? snapshot.ratingUpdatedAt : null,
+        seasonPeak: queue === 'strict' ? extrema?.seasonPeak ?? null : null,
+        seasonPeakTier: queue === 'strict' ? extrema?.seasonPeakTier ?? null : null,
+        seasonLow: queue === 'strict' ? extrema?.seasonLow ?? null : null,
       });
     }
 
@@ -1576,6 +1585,15 @@ export function RankingPage() {
 	                                            ) : null}
 	                                          </div>
 	                                        ) : null}
+                                          {appliedFilters.queue === 'strict' ? (
+                                            <div className="mt-2">
+                                              <LeaderboardSeasonExtrema
+                                                seasonPeak={item.seasonPeak ?? null}
+                                                seasonPeakTier={item.seasonPeakTier ?? null}
+                                                seasonLow={item.seasonLow ?? null}
+                                              />
+                                            </div>
+                                          ) : null}
 	                                      </div>
 	                                    </td>
 	                                    <td className="px-4 py-3 pr-3"><TierBadge tier={item.tier} /></td>
