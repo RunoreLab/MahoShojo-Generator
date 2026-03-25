@@ -7,6 +7,7 @@ import Footer from '@/components/Footer';
 import AiProviderSelector, { type UserAIProviderConfig } from '@/components/AiProviderSelector';
 import { ErrorMessage } from '@/components/ErrorMessage';
 import AiReasoningPanel from '@/components/ai/AiReasoningPanel';
+import { ProviderCooldownNotice } from '@/components/ai/ProviderCooldownNotice';
 import SaveToCloudButton from '@/components/SaveToCloudButton';
 import { GenerationModeSwitcher, type GenerationMode } from '@/components/shared/GenerationModeSwitcher';
 import { CharacterPortraitAssetPanel } from '@/components/shared/CharacterPortraitAssetPanel';
@@ -17,7 +18,7 @@ import MagicalGirlCard from '@/components/MagicalGirlCard';
 import CanshouCard from '@/components/CanshouCard';
 import GeneralCharacterCard from '@/components/GeneralCharacterCard';
 
-import { useCooldown } from '@/lib/cooldown';
+import { useProviderModeCooldown } from '@/lib/cooldown';
 import { getSensitiveWordRedirectTarget } from '@/lib/content-safety/client';
 import { readTextAndReasoningStreamFromResponse } from '@/lib/stream/read-text-and-reasoning-stream';
 import { buildGeneralCharacterCardFromMarkdown, buildGeneralScenarioCardFromMarkdown } from '@/lib/stream/markdown-card';
@@ -64,6 +65,10 @@ const MAX_ATTACHMENT_BYTES_TOTAL = FREE_GENERATION_ATTACHMENT_LIMITS.maxBytesTot
 const MAX_ATTACHMENT_CHARS_PER_FILE = FREE_GENERATION_ATTACHMENT_LIMITS.maxCharsPerFile;
 const MAX_ATTACHMENT_CHARS_TOTAL = FREE_GENERATION_ATTACHMENT_LIMITS.maxCharsTotal;
 const SENSITIVE_CHECK_MAX_CHARS = 50_000;
+
+type RateLimitError = Error & {
+  retryAfterSeconds?: number;
+};
 
 const formatBytes = (bytes: number): string => {
   if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
@@ -262,9 +267,14 @@ export default function FreeGeneratorPage() {
 
   const [userProviderConfig, setUserProviderConfig] = useState<UserAIProviderConfig | null>(null);
   const isUserCustomKey = isUsingUserProvidedKey(userProviderConfig);
+  const providerCooldownMode = isUserCustomKey ? 'custom' : 'system';
   const freeCooldownMs = isUserCustomKey ? USER_PROVIDED_KEY_COOLDOWN_MS : OFFICIAL_KEY_MAX_AI_COOLDOWN_MS;
-  const freeCooldownKey = isUserCustomKey ? 'freeCooldown:custom' : 'freeCooldown:system';
-  const { isCooldown, startCooldown, remainingTime } = useCooldown(freeCooldownKey, freeCooldownMs);
+  const { isCooldown, startCooldown, remainingTime, otherRemainingTime } = useProviderModeCooldown({
+    baseKey: 'freeCooldown',
+    currentMode: providerCooldownMode,
+    systemDurationMs: OFFICIAL_KEY_MAX_AI_COOLDOWN_MS,
+    customDurationMs: USER_PROVIDED_KEY_COOLDOWN_MS,
+  });
 
   const schemaOptionsForMode = useMemo(() => {
     if (generationMode === 'stream') {
@@ -492,6 +502,8 @@ export default function FreeGeneratorPage() {
     setStreamedGeneralCard(null);
     setStreamingReasoning(null);
     setCharacterPortraitAsset(null);
+    let nextCooldownMs = freeCooldownMs;
+    let shouldStartCooldown = false;
 
     try {
       const combinedForSafety = [prompt, ...attachments.map((item) => item.content)].filter((t) => t.trim()).join('\n\n');
@@ -556,6 +568,13 @@ export default function FreeGeneratorPage() {
           });
           return;
         }
+        if (response.status === 429) {
+          const retryAfterRaw = errorJson?.retryAfterSeconds ?? errorJson?.retryAfter ?? response.headers.get('Retry-After') ?? 60;
+          const retryAfter = Math.max(1, Number.parseInt(String(retryAfterRaw), 10) || 60);
+          const rateLimitError = new Error(`请求过于频繁（HTTP 429）！请等待 ${retryAfter} 秒后再试。`) as RateLimitError;
+          rateLimitError.retryAfterSeconds = retryAfter;
+          throw rateLimitError;
+        }
         const serverMessage = resolveApiErrorMessage({ payload, fallback: '生成失败' });
         throw new Error(formatHttpErrorMessage({ serverMessage, status: response.status, fallback: '生成失败' }));
       }
@@ -589,18 +608,32 @@ export default function FreeGeneratorPage() {
           setStreamedGeneralCard(card);
         }
 
-        startCooldown(freeCooldownMs);
+        shouldStartCooldown = true;
         return;
       }
 
       const { data, aiMeta } = await readJsonWithAiMeta<any>(response);
       setResultData(data);
       setNonStreamReasoning(aiMeta?.aiReasoning ?? null);
-      startCooldown(freeCooldownMs);
+      shouldStartCooldown = true;
     } catch (err) {
-      const message = err instanceof Error ? err.message : '发生未知错误';
-      setError(`✨ 生成失败！${message}`);
+      if (typeof (err as RateLimitError).retryAfterSeconds === 'number') {
+        const cooldownSeconds = Math.max(1, Math.ceil((err as RateLimitError).retryAfterSeconds as number));
+        nextCooldownMs = cooldownSeconds * 1000;
+        shouldStartCooldown = true;
+        setError(
+          isUserCustomKey
+            ? `🚫 自定义通道请求太频繁啦！请等待 ${cooldownSeconds} 秒后再试。`
+            : `🚫 请求太频繁了！请等待 ${cooldownSeconds} 秒后再试。`
+        );
+      } else {
+        const message = err instanceof Error ? err.message : '发生未知错误';
+        setError(`✨ 生成失败！${message}`);
+      }
     } finally {
+      if (shouldStartCooldown) {
+        startCooldown(nextCooldownMs);
+      }
       setSubmitting(false);
     }
   };
@@ -1059,6 +1092,11 @@ export default function FreeGeneratorPage() {
                 <div className="my-2 bg-gray-50 rounded-lg p-3">
                   <AiProviderSelector onConfigChange={setUserProviderConfig} />
                   <p className="mt-2 text-xs text-gray-500">使用自有 API Key 可缩短冷却至 3 秒，便于批量迭代生成。</p>
+                  <ProviderCooldownNotice
+                    currentMode={providerCooldownMode}
+                    currentIsCooldown={isCooldown}
+                    otherRemainingTime={otherRemainingTime}
+                  />
                 </div>
 
                 <button

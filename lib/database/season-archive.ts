@@ -9,6 +9,13 @@ type SeasonArchiveLeaderboardRow = {
   losses: number;
   draws: number;
   ratingUpdatedAt: string | null;
+  seasonPeakRating: number | null;
+  seasonPeakGames: number | null;
+  seasonPeakAt: string | null;
+  seasonPeakTier: string | null;
+  seasonLowRating: number | null;
+  seasonLowGames: number | null;
+  seasonLowAt: string | null;
   dataCardName: string | null;
   dataCardDescription: string | null;
   authorName: string | null;

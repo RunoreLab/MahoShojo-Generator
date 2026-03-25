@@ -8,7 +8,7 @@ import MagicalGirlCard from '../components/MagicalGirlCard';
 import CanshouCard from '../components/CanshouCard';
 import GeneralCharacterCard from '../components/GeneralCharacterCard';
 import { getSensitiveWordRedirectTarget } from '@/lib/content-safety/client';
-import { useCooldown } from '../lib/cooldown';
+import { useProviderModeCooldown } from '../lib/cooldown';
 import { config as appConfig } from '../lib/config';
 import SaveToCloudButton from '../components/SaveToCloudButton';
 import Footer from '../components/Footer';
@@ -20,6 +20,7 @@ import { useNarrativeHistoryStore } from '@/components/arena/stores/useNarrative
 import { useAuth } from '@/lib/useAuth';
 import AiProviderSelector, { UserAIProviderConfig } from '@/components/AiProviderSelector';
 import AiReasoningPanel from '@/components/ai/AiReasoningPanel';
+import { ProviderCooldownNotice } from '@/components/ai/ProviderCooldownNotice';
 import { ErrorMessage } from '@/components/ErrorMessage';
 import { GenerationModeSwitcher, type GenerationMode } from '@/components/shared/GenerationModeSwitcher';
 import { ThemeImage } from '@/components/shared/ThemeImage';
@@ -92,6 +93,10 @@ type QuestionnaireSelection = {
     dataCardAuthor?: string;
     selectionId?: string;
     useLore?: boolean;
+};
+
+type RateLimitError = Error & {
+    retryAfterSeconds?: number;
 };
 
 // 递归提取对象中所有字符串值的函数
@@ -246,9 +251,14 @@ const SublimationPage: React.FC = () => {
     const [isSourceNativeChecking, setIsSourceNativeChecking] = useState(false);
 
     const isUserCustomKey = userProviderConfig?.providerId !== 'system' && !!userProviderConfig?.apiKey?.trim();
+    const providerCooldownMode = isUserCustomKey ? 'custom' : 'system';
     const sublimationCooldownMs = isUserCustomKey ? 3000 : 60000;
-    const sublimationCooldownKey = isUserCustomKey ? 'sublimationCooldown:custom' : 'sublimationCooldown:system';
-    const { isCooldown, startCooldown, remainingTime } = useCooldown(sublimationCooldownKey, sublimationCooldownMs);
+    const { isCooldown, startCooldown, remainingTime, otherRemainingTime } = useProviderModeCooldown({
+        baseKey: 'sublimationCooldown',
+        currentMode: providerCooldownMode,
+        systemDurationMs: 60000,
+        customDurationMs: 3000,
+    });
     const [languages, setLanguages] = useState<{ code: string; name: string }[]>([]);
     const [selectedLanguage, setSelectedLanguage] = useState('zh-CN');
     const hasStoredSublimationPrefsRef = useRef(false);
@@ -919,6 +929,8 @@ const SublimationPage: React.FC = () => {
         setStreamedGeneralCard(null);
         setStreamingReasoning(null);
         setNonStreamReasoning(null);
+        let nextCooldownMs = sublimationCooldownMs;
+        let shouldStartCooldown = false;
 
 	        try {
                 const selectedArenaNarrativeEntryIds = new Set(
@@ -1019,6 +1031,13 @@ const SublimationPage: React.FC = () => {
                     });
                     return;
                 }
+                if (response.status === 429) {
+                    const retryAfterRaw = errorJson?.retryAfterSeconds ?? errorJson?.retryAfter ?? response.headers.get('Retry-After') ?? 60;
+                    const retryAfter = Math.max(1, Number.parseInt(String(retryAfterRaw), 10) || 60);
+                    const rateLimitError = new Error(`请求过于频繁（HTTP 429）！请等待 ${retryAfter} 秒后再试。`) as RateLimitError;
+                    rateLimitError.retryAfterSeconds = retryAfter;
+                    throw rateLimitError;
+                }
                 const serverMessage = resolveApiErrorMessage({ payload, fallback: '升华失败' });
                 throw new Error(formatHttpErrorMessage({ serverMessage, status: response.status, fallback: '升华失败' }));
             }
@@ -1076,7 +1095,7 @@ const SublimationPage: React.FC = () => {
                 if (!hasSignError) {
                     setError(null);
                 }
-                startCooldown();
+                shouldStartCooldown = true;
                 return;
             }
 
@@ -1086,12 +1105,26 @@ const SublimationPage: React.FC = () => {
             }
             setResultData(result);
             setNonStreamReasoning(aiMeta?.aiReasoning ?? null);
-            startCooldown();
+            shouldStartCooldown = true;
 
         } catch (err) {
-            const message = err instanceof Error ? err.message : '发生未知错误';
-            setError(`✨ 升华失败！${message}`);
+            if (typeof (err as RateLimitError).retryAfterSeconds === 'number') {
+                const cooldownSeconds = Math.max(1, Math.ceil((err as RateLimitError).retryAfterSeconds as number));
+                nextCooldownMs = cooldownSeconds * 1000;
+                shouldStartCooldown = true;
+                setError(
+                    isUserCustomKey
+                        ? `🚫 自定义通道请求太频繁啦！请等待 ${cooldownSeconds} 秒后再试。`
+                        : `🚫 请求太频繁了！请等待 ${cooldownSeconds} 秒后再试。`
+                );
+            } else {
+                const message = err instanceof Error ? err.message : '发生未知错误';
+                setError(`✨ 升华失败！${message}`);
+            }
         } finally {
+            if (shouldStartCooldown) {
+                startCooldown(nextCooldownMs);
+            }
             setIsGenerating(false);
         }
     };
@@ -1794,6 +1827,11 @@ const SublimationPage: React.FC = () => {
 
                         {/* 自定义 AI 模型选择 */}
                         <AiProviderSelector onConfigChange={setUserProviderConfig} />
+                        <ProviderCooldownNotice
+                            currentMode={providerCooldownMode}
+                            currentIsCooldown={isCooldown}
+                            otherRemainingTime={otherRemainingTime}
+                        />
 
                         {/* 成功提示信息 */}
                         {!isGenerating && generationMode === 'non-stream' && resultData && (

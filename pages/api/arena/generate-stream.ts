@@ -42,8 +42,6 @@ import {
     anonymizeIp,
     buildCombatantsFallbackForExtraJson,
     buildContentPreview,
-    extractHeadlineFromMarkdown,
-    extractWinnerFromText,
     getClientIpFromHeaders,
     normalizeErrorMessage,
     compactExtraJson,
@@ -57,6 +55,7 @@ import { createRequestAuthUserResolver } from '@/lib/auth/request-auth-user';
 import { buildBattleReportGenerationCombatantInserts } from '@/lib/arena/battle-report-record-utils';
 import { createBattleReportWriteContext } from '@/lib/arena/battle-report-write-context';
 	import { extractStreamUpdateMeta, findStreamUpdateMetaStart } from '@/lib/arena/stream-meta';
+import { summarizeStreamBattleReportPreview } from '@/lib/arena/stream-report-summary';
 
 const log = getLogger('api-gen-battle-stream');
 
@@ -806,6 +805,10 @@ async function handler(req: NextRequest): Promise<Response> {
                 const user = await battleReportWriteContext.getAuthUser();
                 const usage = await resolvedUsagePromise;
                 const finishReason = await resolvedFinishReasonPromise;
+                const reportSummary = await summarizeStreamBattleReportPreview({
+                    preview: previewSource,
+                    mode: typeof mode === 'string' ? mode : 'classic',
+                });
                 const [currentSeason, seasonStrictRules] = await Promise.all([
                     battleReportWriteContext.getCurrentSeason(),
                     battleReportWriteContext.getSeasonStrictRules(),
@@ -917,8 +920,8 @@ async function handler(req: NextRequest): Promise<Response> {
                     aiProviderName: aiTelemetry.providerName ?? null,
                     aiProviderType: aiTelemetry.providerType ?? null,
                     aiModel: aiTelemetry.model ?? null,
-                    headline: extractHeadlineFromMarkdown(previewSource),
-                    winner: extractWinnerFromText(previewSource),
+                    headline: reportSummary.headline,
+                    winner: reportSummary.winner,
                     outputChars,
                     outputBytes,
                     promptTokens: usage?.promptTokens ?? null,

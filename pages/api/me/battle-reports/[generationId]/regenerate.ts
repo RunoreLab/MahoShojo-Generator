@@ -93,5 +93,11 @@ export default async function handler(req: Request): Promise<Response> {
     userGuidance,
   });
 
-  return json({ success: true, report: hydrated.report, liveBody: hydrated.liveBody, generationId });
+  return json({
+    success: true,
+    report: hydrated.report,
+    liveBody: hydrated.liveBody,
+    generationId,
+    generationMode: record.generation_mode,
+  });
 }

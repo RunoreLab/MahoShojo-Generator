@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
-import { useCooldown } from '../lib/cooldown';
+import { useProviderModeCooldown } from '../lib/cooldown';
 import Link from 'next/link';
 import CanshouCard, { CanshouDetails } from '../components/CanshouCard';
 import GeneralCharacterCard from '../components/GeneralCharacterCard';
@@ -15,6 +15,7 @@ import BattleDataModal from '@/components/BattleDataModal';
 import DataCardDetailsModal from '@/components/DataCardDetailsModal';
 import AiProviderSelector, { type UserAIProviderConfig } from '@/components/AiProviderSelector';
 import AiReasoningPanel from '@/components/ai/AiReasoningPanel';
+import { ProviderCooldownNotice } from '@/components/ai/ProviderCooldownNotice';
 import { parseBulkQuestionnaireAnswers } from '@/lib/questionnaire-bulk-parser';
 import { ErrorMessage } from '@/components/ErrorMessage';
 import { EncyclopediaLinks } from '@/components/encyclopedia/EncyclopediaLinks';
@@ -36,17 +37,22 @@ import { authStorage } from '@/lib/auth';
 import { mapDataCardSourceMeta } from '@/lib/data-card-read-mappers';
 import {
   buildQuestionKey,
+  buildQuestionnaireAnswerLookup,
   buildQuestionnaireFlow,
+  collectStoredQuestionnaireAnswerItems,
   compactQuestionnaireAnswerItems,
   formatQuestionnaireAnswers,
   normalizeQuestionnaireDefinition,
   parseQuestionnaireDataCardPayload,
   normalizeUserAnswers,
+  resolveQuestionnaireAnswerTarget,
   resolveQuestionnaireReferences,
   type QuestionnaireAnswerItem,
+  type QuestionnaireAnswerMatchTarget,
   type QuestionnaireDefinition,
   type QuestionnairePresetEntry,
   type QuestionnaireQuestion,
+  type StoredQuestionnaireAnswerItem,
 } from '@/lib/questionnaires';
 import { getAnswerLimitInfo, isAnswerOverLimit, QUESTIONNAIRE_NATIVE_MAX_ANSWER_CHARS } from '@/lib/questionnaire-limits';
 import type { AIReasoningEnvelope } from '@/types/ai-reasoning';
@@ -66,6 +72,7 @@ type QuestionnaireSelection = {
 type QuestionnaireContextItem = {
   key: string;
   questionnaireId: string;
+  questionnaireScopeId: string;
   questionnaireTitle: string;
   indexInQuestionnaire: number;
   question: QuestionnaireQuestion;
@@ -74,6 +81,10 @@ type QuestionnaireContextItem = {
 type JsonSaveMode = 'download' | 'text';
 type ImageSaveMode = 'download' | 'modal';
 type DeviceType = 'mobile' | 'desktop' | 'unknown';
+
+type RateLimitError = Error & {
+  retryAfterSeconds?: number;
+};
 
 type CanshouResultPayload = CanshouDetails & {
   templateId?: string;
@@ -187,7 +198,10 @@ const CanshouPage: React.FC = () => {
   const [showPasteImport, setShowPasteImport] = useState(false);
   const [pasteQuestionnaireText, setPasteQuestionnaireText] = useState('');
   const [pasteQuestionnaireError, setPasteQuestionnaireError] = useState<string | null>(null);
+  const [draftRestoreReady, setDraftRestoreReady] = useState(false);
   const draftRestoredRef = useRef(false);
+  const previousQuestionTargetsRef = useRef<QuestionnaireAnswerMatchTarget[] | null>(null);
+  const previousQuestionTargetSignatureRef = useRef<string | null>(null);
   const currentQuestionKeyRef = useRef<string | null>(null);
   const transitionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const transitionEndTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -215,9 +229,14 @@ const CanshouPage: React.FC = () => {
   const [showLore, setShowLore] = useState(false);
   const [userProviderConfig, setUserProviderConfig] = useState<UserAIProviderConfig | null>(null);
   const isUserCustomKey = userProviderConfig?.providerId !== 'system' && !!userProviderConfig?.apiKey?.trim();
+  const providerCooldownMode = isUserCustomKey ? 'custom' : 'system';
   const generatorCooldownMs = isUserCustomKey ? 3000 : 60000;
-  const generatorCooldownKey = isUserCustomKey ? 'generateCanshouCooldown:custom' : 'generateCanshouCooldown:system';
-  const { isCooldown, startCooldown, remainingTime } = useCooldown(generatorCooldownKey, generatorCooldownMs);
+  const { isCooldown, startCooldown, remainingTime, otherRemainingTime } = useProviderModeCooldown({
+    baseKey: 'generateCanshouCooldown',
+    currentMode: providerCooldownMode,
+    systemDurationMs: 60000,
+    customDurationMs: 3000,
+  });
   const [bulkAnswers, setBulkAnswers] = useState(''); // 用于"一键填充"的textarea
   const [languages, setLanguages] = useState<{ code: string; name: string }[]>([]);
   const [selectedLanguage, setSelectedLanguage] = useState('zh-CN');
@@ -269,19 +288,45 @@ const CanshouPage: React.FC = () => {
 
   const questionnaireItems = useMemo<QuestionnaireContextItem[]>(() => {
     return selectedQuestionnaires.flatMap((selection) =>
-      selection.questionnaire.questions.map((question, index) => ({
-        key: buildQuestionKey(selection.selectionId ?? selection.questionnaire.id, question.id, index),
-        questionnaireId: selection.questionnaire.id,
-        questionnaireTitle: selection.questionnaire.title,
-        indexInQuestionnaire: index,
-        question,
-      }))
+      selection.questionnaire.questions.map((question, index) => {
+        const questionnaireScopeId = selection.selectionId ?? selection.questionnaire.id;
+        return {
+          key: buildQuestionKey(questionnaireScopeId, question.id, index),
+          questionnaireId: selection.questionnaire.id,
+          questionnaireScopeId,
+          questionnaireTitle: selection.questionnaire.title,
+          indexInQuestionnaire: index,
+          question,
+        };
+      })
     );
   }, [selectedQuestionnaires]);
 
   const resolvedQuestionItems = useMemo(
     () => resolveQuestionnaireReferences(questionnaireItems),
     [questionnaireItems]
+  );
+
+  const allQuestionTargets = useMemo<QuestionnaireAnswerMatchTarget[]>(
+    () => resolvedQuestionItems.map((item, index) => ({
+      key: item.key,
+      index,
+      question: item.question.question,
+      questionId: item.question.id,
+      questionnaireId: item.questionnaireId,
+      questionnaireTitle: item.questionnaireTitle,
+    })),
+    [resolvedQuestionItems]
+  );
+
+  const questionAnswerLookup = useMemo(
+    () => buildQuestionnaireAnswerLookup(allQuestionTargets),
+    [allQuestionTargets]
+  );
+
+  const questionTargetSignature = useMemo(
+    () => allQuestionTargets.map((item) => `${item.key}::${item.questionId ?? ''}::${item.question}`).join('\n'),
+    [allQuestionTargets]
   );
 
   const getQuestionnaireFlow = useCallback(
@@ -619,6 +664,34 @@ const CanshouPage: React.FC = () => {
     if (selectionReady) setLoading(false);
   }, [selectionReady]);
 
+  useEffect(() => {
+    const previousTargets = previousQuestionTargetsRef.current;
+    const previousSignature = previousQuestionTargetSignatureRef.current;
+    previousQuestionTargetsRef.current = allQuestionTargets;
+    previousQuestionTargetSignatureRef.current = questionTargetSignature;
+
+    if (!previousTargets || previousSignature === null || previousSignature === questionTargetSignature) {
+      return;
+    }
+
+    setAnswersByKey((prev) => {
+      const previousEntries = collectStoredQuestionnaireAnswerItems(previousTargets, prev);
+      if (previousEntries.length === 0) return {};
+
+      const nextAnswers: Record<string, string> = {};
+      previousEntries.forEach((entry, index) => {
+        const target = resolveQuestionnaireAnswerTarget(
+          questionAnswerLookup,
+          { ...entry, index },
+          { allowIndexFallback: false }
+        );
+        if (!target) return;
+        nextAnswers[target.key] = entry.answer;
+      });
+      return nextAnswers;
+    });
+  }, [allQuestionTargets, questionAnswerLookup, questionTargetSignature]);
+
   const applySelection = (selection: QuestionnaireSelection) => {
     const hasQuestions = selection.questionnaire.questions.length > 0;
     const hasLore = Boolean(selection.questionnaire.loreMarkdown?.trim());
@@ -824,7 +897,7 @@ const CanshouPage: React.FC = () => {
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    if (!mergedQuestions.length) return;
+    if (!allQuestionTargets.length) return;
     if (draftRestoredRef.current) return;
     draftRestoredRef.current = true;
 
@@ -833,33 +906,86 @@ const CanshouPage: React.FC = () => {
       if (!savedDraft) return;
       const parsed = JSON.parse(savedDraft);
       const nextAnswers: Record<string, string> = {};
+      const applyStoredEntry = (entry: StoredQuestionnaireAnswerItem, index: number, allowIndexFallback: boolean) => {
+        const answer = typeof entry.answer === 'string' ? entry.answer : '';
+        if (!answer.trim()) return;
+        const target = resolveQuestionnaireAnswerTarget(
+          questionAnswerLookup,
+          {
+            key: entry.key,
+            question: entry.question,
+            questionId: entry.questionId,
+            questionnaireId: entry.questionnaireId,
+            questionnaireTitle: entry.questionnaireTitle,
+            index,
+          },
+          { allowIndexFallback }
+        );
+        if (!target) return;
+        nextAnswers[target.key] = answer;
+      };
 
       if (Array.isArray(parsed)) {
         parsed.forEach((value, index) => {
-          const item = mergedQuestions[index];
-          if (!item) return;
           if (typeof value === 'string' && value.trim()) {
-            nextAnswers[item.key] = value;
+            const target = allQuestionTargets[index];
+            if (target) {
+              nextAnswers[target.key] = value;
+            }
+            return;
+          }
+          if (value && typeof value === 'object') {
+            const record = value as Record<string, unknown>;
+            applyStoredEntry({
+              key: typeof record.key === 'string' ? record.key : undefined,
+              question: typeof record.question === 'string' ? record.question : `问题 ${index + 1}`,
+              answer: typeof record.answer === 'string'
+                ? record.answer
+                : (typeof record.value === 'string' ? record.value : ''),
+              questionId: typeof record.questionId === 'string' ? record.questionId : undefined,
+              questionnaireId: typeof record.questionnaireId === 'string' ? record.questionnaireId : undefined,
+              questionnaireTitle: typeof record.questionnaireTitle === 'string' ? record.questionnaireTitle : undefined,
+            }, index, true);
           }
         });
       } else if (parsed && typeof parsed === 'object') {
-        const direct = (parsed as any).answersByKey;
+        const record = parsed as Record<string, unknown>;
+        const direct = record.answersByKey;
         if (direct && typeof direct === 'object') {
           Object.entries(direct as Record<string, unknown>).forEach(([key, value]) => {
-            if (typeof value === 'string' && value.trim()) {
+            if (typeof value === 'string' && value.trim() && questionAnswerLookup.byKey.has(key)) {
               nextAnswers[key] = value;
             }
           });
-        } else {
-          mergedQuestions.forEach((item, index) => {
+        }
+
+        const answerEntries = Array.isArray(record.answerEntries) ? record.answerEntries : [];
+        if (answerEntries.length > 0) {
+          answerEntries.forEach((value, index) => {
+            if (!value || typeof value !== 'object') return;
+            const entryRecord = value as Record<string, unknown>;
+            applyStoredEntry({
+              key: typeof entryRecord.key === 'string' ? entryRecord.key : undefined,
+              question: typeof entryRecord.question === 'string' ? entryRecord.question : `问题 ${index + 1}`,
+              answer: typeof entryRecord.answer === 'string'
+                ? entryRecord.answer
+                : (typeof entryRecord.value === 'string' ? entryRecord.value : ''),
+              questionId: typeof entryRecord.questionId === 'string' ? entryRecord.questionId : undefined,
+              questionnaireId: typeof entryRecord.questionnaireId === 'string' ? entryRecord.questionnaireId : undefined,
+              questionnaireTitle: typeof entryRecord.questionnaireTitle === 'string' ? entryRecord.questionnaireTitle : undefined,
+            }, index, false);
+          });
+        } else if (!direct || typeof direct !== 'object') {
+          allQuestionTargets.forEach((item, index) => {
             const candidates = [
-              item.question.id,
+              item.questionId,
               `${index}`,
               `${index + 1}`,
               `CS-${index + 1}`,
             ];
             for (const key of candidates) {
-              const value = (parsed as any)[key];
+              if (!key) continue;
+              const value = record[key];
               if (typeof value === 'string' && value.trim()) {
                 nextAnswers[item.key] = value;
                 break;
@@ -877,21 +1003,26 @@ const CanshouPage: React.FC = () => {
       }
     } catch (e) {
       console.error("Failed to load answers from localStorage", e);
+    } finally {
+      setDraftRestoreReady(true);
     }
-  }, [mergedQuestions]);
+  }, [allQuestionTargets, mergedQuestions, questionAnswerLookup]);
 
   useEffect(() => {
+    if (!draftRestoreReady || allQuestionTargets.length === 0) return;
     try {
-      const hasAnswers = Object.values(answersByKey).some((value) => typeof value === 'string' && value.trim() !== '');
-      if (hasAnswers) {
-        const dataToSave = JSON.stringify({ version: 2, answersByKey });
+      const answerEntries = collectStoredQuestionnaireAnswerItems(allQuestionTargets, answersByKey);
+      if (answerEntries.length > 0) {
+        const dataToSave = JSON.stringify({ version: 3, answersByKey, answerEntries });
         localStorage.setItem(LOCAL_STORAGE_KEY, dataToSave);
         setAutoSaveTimestamp(Date.now());
+      } else {
+        localStorage.removeItem(LOCAL_STORAGE_KEY);
       }
     } catch (e) {
       console.error("Failed to save answers to localStorage", e);
     }
-  }, [answersByKey]);
+  }, [allQuestionTargets, answersByKey, draftRestoreReady]);
 
   useEffect(() => {
     const currentKey = mergedQuestions[currentQuestionIndex]?.key;
@@ -1042,11 +1173,13 @@ const CanshouPage: React.FC = () => {
     }
     setSubmitting(true);
     setError(null);
-      setCanshouDetails(null);
-      setStreamingMarkdown(null);
-      setStreamedGeneralCard(null);
-      setStreamingReasoning(null);
-      setNonStreamReasoning(null);
+    setCanshouDetails(null);
+    setStreamingMarkdown(null);
+    setStreamedGeneralCard(null);
+    setStreamingReasoning(null);
+    setNonStreamReasoning(null);
+    let nextCooldownMs = generatorCooldownMs;
+    let shouldStartCooldown = false;
 
     try {
       const snapshot = answersSnapshot ?? answersByKey;
@@ -1131,6 +1264,13 @@ const CanshouPage: React.FC = () => {
           router.push('/arrested');
           return;
         }
+        if (response.status === 429) {
+          const retryAfterRaw = errorData?.retryAfterSeconds ?? errorData?.retryAfter ?? response.headers.get('Retry-After') ?? 60;
+          const retryAfter = Math.max(1, Number.parseInt(String(retryAfterRaw), 10) || 60);
+          const rateLimitError = new Error(`请求过于频繁（HTTP 429）！请等待 ${retryAfter} 秒后再试。`) as RateLimitError;
+          rateLimitError.retryAfterSeconds = retryAfter;
+          throw rateLimitError;
+        }
         const serverMessage = resolveApiErrorMessage({ payload, fallback: '生成失败' });
         throw new Error(formatHttpErrorMessage({ serverMessage, status: response.status, fallback: '生成失败' }));
       }
@@ -1161,7 +1301,7 @@ const CanshouPage: React.FC = () => {
         if (!allowNativeSignatureForSubmit) {
           setStreamedGeneralCard(cardWithAnswers);
           setError(null);
-          startCooldown();
+          shouldStartCooldown = true;
           return;
         }
 
@@ -1181,17 +1321,31 @@ const CanshouPage: React.FC = () => {
         if (!hasSignError) {
           setError(null);
         }
-        startCooldown();
+        shouldStartCooldown = true;
         return;
       }
 
       const { data: result, aiMeta } = await readJsonWithAiMeta<CanshouResultPayload>(response);
       setCanshouDetails(result);
       setNonStreamReasoning(aiMeta?.aiReasoning ?? null);
-      startCooldown();
+      shouldStartCooldown = true;
     } catch (err) {
-      setError(err instanceof Error ? `✨ 魔法失效了！${err.message}` : '发生未知错误');
+      if (typeof (err as RateLimitError).retryAfterSeconds === 'number') {
+        const cooldownSeconds = Math.max(1, Math.ceil((err as RateLimitError).retryAfterSeconds as number));
+        nextCooldownMs = cooldownSeconds * 1000;
+        shouldStartCooldown = true;
+        setError(
+          isUserCustomKey
+            ? `🚫 自定义通道请求太频繁啦！请等待 ${cooldownSeconds} 秒后再试。`
+            : `🚫 请求太频繁了！请等待 ${cooldownSeconds} 秒后再试。`
+        );
+      } else {
+        setError(err instanceof Error ? `✨ 魔法失效了！${err.message}` : '发生未知错误');
+      }
     } finally {
+      if (shouldStartCooldown) {
+        startCooldown(nextCooldownMs);
+      }
       setSubmitting(false);
     }
   };
@@ -1250,14 +1404,14 @@ const CanshouPage: React.FC = () => {
   };
 
   const handleBulkFill = () => {
-    if (mergedQuestions.length === 0) {
+    if (allQuestionTargets.length === 0) {
       setError('⚠️ 当前没有可填充的题目，请先选择问卷。');
       return;
     }
     const parsed = parseBulkQuestionnaireAnswers(bulkAnswers, {
-      expectedCount: mergedQuestions.length,
-      orderedQuestionIds: mergedQuestions.map((item) => item.question.id),
-      orderedQuestionKeys: mergedQuestions.map((item) => item.key),
+      expectedCount: allQuestionTargets.length,
+      orderedQuestionIds: allQuestionTargets.map((item) => item.questionId ?? ''),
+      orderedQuestionKeys: allQuestionTargets.map((item) => item.key),
     });
 
     if (parsed.entries.length === 0) {
@@ -1269,12 +1423,13 @@ const CanshouPage: React.FC = () => {
     let appliedCount = 0;
     let ignoredCount = 0;
     parsed.entries.forEach(entry => {
-      if (entry.index < 0 || entry.index >= mergedQuestions.length) {
-        ignoredCount += 1;
-        return;
-      }
-      const item = mergedQuestions[entry.index];
-      if (!item) {
+      const hasMetadata = Boolean(
+        entry.key || entry.question || entry.questionId || entry.questionnaireId || entry.questionnaireTitle
+      );
+      const target = hasMetadata
+        ? resolveQuestionnaireAnswerTarget(questionAnswerLookup, entry, { allowIndexFallback: false })
+        : mergedQuestions[entry.index] ?? null;
+      if (!target) {
         ignoredCount += 1;
         return;
       }
@@ -1283,7 +1438,7 @@ const CanshouPage: React.FC = () => {
         ignoredCount += 1;
         return;
       }
-      newAnswers[item.key] = entry.value;
+      newAnswers[target.key] = entry.value;
       appliedCount += 1;
     });
     setAnswersByKey(newAnswers);
@@ -1817,6 +1972,11 @@ const CanshouPage: React.FC = () => {
                 <div className="my-4 bg-gray-50 rounded-lg p-3">
                   <AiProviderSelector onConfigChange={setUserProviderConfig} />
                   <p className="mt-2 text-xs text-gray-500">使用自有 API Key 可缩短冷却至 3 秒，便于批量迭代生成。</p>
+                  <ProviderCooldownNotice
+                    currentMode={providerCooldownMode}
+                    currentIsCooldown={isCooldown}
+                    otherRemainingTime={otherRemainingTime}
+                  />
                 </div>
 
                 <div className="my-4 bg-gray-100 rounded-lg p-3">

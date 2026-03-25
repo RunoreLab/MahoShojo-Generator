@@ -5,11 +5,12 @@ import Head from 'next/head';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
 import { getSensitiveWordRedirectTarget } from '@/lib/content-safety/client';
-import { useCooldown } from '../lib/cooldown';
+import { useProviderModeCooldown } from '../lib/cooldown';
 import SaveToCloudButton from '../components/SaveToCloudButton';
 import Footer from '../components/Footer';
 import AiProviderSelector, { UserAIProviderConfig } from '@/components/AiProviderSelector';
 import AiReasoningPanel from '@/components/ai/AiReasoningPanel';
+import { ProviderCooldownNotice } from '@/components/ai/ProviderCooldownNotice';
 import { JsonSizeIndicator } from '@/components/shared/JsonSizeIndicator';
 import { ErrorMessage } from '@/components/ErrorMessage';
 import { EncyclopediaLinks } from '@/components/encyclopedia/EncyclopediaLinks';
@@ -45,6 +46,10 @@ const optionalFields = [
 
 const SCENARIO_PREFERENCE_KEY = 'mahoshojo.scenario.preferences.v1';
 
+type RateLimitError = Error & {
+  retryAfterSeconds?: number;
+};
+
 const ScenarioPage: React.FC = () => {
   const router = useRouter();
   const [answers, setAnswers] = useState<Record<string, string>>(
@@ -62,9 +67,14 @@ const ScenarioPage: React.FC = () => {
 
   // 根据是否使用自定义 Key 动态调整冷却时间：官方 60s，自定义 3s
   const isUserCustomKey = userProviderConfig?.providerId !== 'system' && !!userProviderConfig?.apiKey?.trim();
+  const providerCooldownMode = isUserCustomKey ? 'custom' : 'system';
   const scenarioCooldownMs = isUserCustomKey ? 3000 : 60000;
-  const scenarioCooldownKey = isUserCustomKey ? 'scenarioCooldown:custom' : 'scenarioCooldown:system';
-  const { isCooldown, startCooldown, remainingTime } = useCooldown(scenarioCooldownKey, scenarioCooldownMs);
+  const { isCooldown, startCooldown, remainingTime, otherRemainingTime } = useProviderModeCooldown({
+    baseKey: 'scenarioCooldown',
+    currentMode: providerCooldownMode,
+    systemDurationMs: 60000,
+    customDurationMs: 3000,
+  });
   // 用于存储希望留空的字段的状态
   const [fieldsToKeepEmpty, setFieldsToKeepEmpty] = useState<string[]>([]);
   // 用于控制高级选项的显示/隐藏
@@ -191,6 +201,8 @@ const ScenarioPage: React.FC = () => {
     setNonStreamReasoning(null);
     setResultData(null);
     setStreamingReasoning(null);
+    let nextCooldownMs = scenarioCooldownMs;
+    let shouldStartCooldown = false;
     if (generationMode === 'stream') {
       const blank = createBlankDataCard('general-scenario');
       setGeneralScenarioDraft({
@@ -257,6 +269,13 @@ const ScenarioPage: React.FC = () => {
           });
           return;
         }
+        if (response.status === 429) {
+          const retryAfterRaw = errorJson?.retryAfterSeconds ?? errorJson?.retryAfter ?? response.headers.get('Retry-After') ?? 60;
+          const retryAfter = Math.max(1, Number.parseInt(String(retryAfterRaw), 10) || 60);
+          const rateLimitError = new Error(`请求过于频繁（HTTP 429）！请等待 ${retryAfter} 秒后再试。`) as RateLimitError;
+          rateLimitError.retryAfterSeconds = retryAfter;
+          throw rateLimitError;
+        }
         const serverMessage = resolveApiErrorMessage({ payload, fallback: '生成失败' });
         throw new Error(formatHttpErrorMessage({ serverMessage, status: response.status, fallback: '生成失败' }));
       }
@@ -294,19 +313,33 @@ const ScenarioPage: React.FC = () => {
         }
 
         setGeneralScenarioDraft(signedCard);
-        startCooldown();
+        shouldStartCooldown = true;
         return;
       }
 
       const { data: result, aiMeta } = await readJsonWithAiMeta<any>(response);
       setResultData(result);
       setNonStreamReasoning(aiMeta?.aiReasoning ?? null);
-      startCooldown();
+      shouldStartCooldown = true;
 
     } catch (err) {
-      const message = err instanceof Error ? err.message : '发生未知错误';
-      setError(`✨ 剧本创作失败！${message}`);
+      if (typeof (err as RateLimitError).retryAfterSeconds === 'number') {
+        const cooldownSeconds = Math.max(1, Math.ceil((err as RateLimitError).retryAfterSeconds as number));
+        nextCooldownMs = cooldownSeconds * 1000;
+        shouldStartCooldown = true;
+        setError(
+          isUserCustomKey
+            ? `🚫 自定义通道请求太频繁啦！请等待 ${cooldownSeconds} 秒后再试。`
+            : `🚫 请求太频繁了！请等待 ${cooldownSeconds} 秒后再试。`
+        );
+      } else {
+        const message = err instanceof Error ? err.message : '发生未知错误';
+        setError(`✨ 剧本创作失败！${message}`);
+      }
     } finally {
+      if (shouldStartCooldown) {
+        startCooldown(nextCooldownMs);
+      }
       setIsGenerating(false);
     }
   };
@@ -445,6 +478,11 @@ const ScenarioPage: React.FC = () => {
               <p className="text-xs text-gray-500 mt-1">
                 若需使用自备模型，请先选择供应商与模型并填写对应 API Key。
               </p>
+              <ProviderCooldownNotice
+                currentMode={providerCooldownMode}
+                currentIsCooldown={isCooldown}
+                otherRemainingTime={otherRemainingTime}
+              />
             </div>
 
             {/* 多语言支持 */}

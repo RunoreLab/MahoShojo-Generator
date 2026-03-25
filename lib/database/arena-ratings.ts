@@ -2,7 +2,7 @@ import type { BattleReportGenerationCombatantRow } from './battle-report-generat
 import { queryFromD1 } from './core';
 import { PRESET_LIST } from '@/lib/presets';
 import { isStrictRankedModelBlacklisted } from '@/lib/arena/ranked-model-policy';
-import { computeArenaBaseTier, type ArenaBaseTier } from '@/lib/arena/tier';
+import { computeArenaBaseTier, type ArenaBaseTier, type ArenaTier } from '@/lib/arena/tier';
 import { shouldEnforceStrictRangeLimit } from '@/lib/arena/strict-range';
 
 export type ArenaQueue = 'strict' | 'free';
@@ -50,6 +50,83 @@ export const STRICT_DAILY_LIMIT = 20;
 export const STRICT_SAME_PAIR_DAILY_LIMIT = 2;
 export const STRICT_LOW_GAMES_THRESHOLD = 10;
 export const STRICT_LOW_GAMES_MAX_ABS_DIFF = 400;
+
+export type StrictSeasonExtremaState = {
+  seasonPeakRating: number;
+  seasonPeakGames: number;
+  seasonPeakAt: string;
+  seasonLowRating: number;
+  seasonLowGames: number;
+  seasonLowAt: string;
+};
+
+export type StrictSeasonState = StrictSeasonExtremaState & {
+  seasonPeakTier: ArenaTier;
+};
+
+export const buildInitialStrictSeasonState = (initialRating: number, nowIso: string): StrictSeasonState => ({
+  seasonPeakRating: initialRating,
+  seasonPeakGames: 0,
+  seasonPeakAt: nowIso,
+  seasonPeakTier: '无牌',
+  seasonLowRating: initialRating,
+  seasonLowGames: 0,
+  seasonLowAt: nowIso,
+});
+
+type StrictSeasonExtremaSnapshot = {
+  seasonPeakRating: number | null;
+  seasonPeakGames: number | null;
+  seasonPeakAt: string | null;
+  seasonLowRating: number | null;
+  seasonLowGames: number | null;
+  seasonLowAt: string | null;
+};
+
+export const computeStrictSeasonExtremaAfterApplied = (input: {
+  current: StrictSeasonExtremaSnapshot;
+  afterRating: number;
+  afterGames: number;
+  appliedAtIso: string;
+}): StrictSeasonExtremaState => {
+  const { current, afterRating, afterGames, appliedAtIso } = input;
+
+  const currentPeakRating =
+    typeof current.seasonPeakRating === 'number' ? current.seasonPeakRating : null;
+  const currentPeakGames = typeof current.seasonPeakGames === 'number' ? current.seasonPeakGames : null;
+  const currentPeakAt = typeof current.seasonPeakAt === 'string' ? current.seasonPeakAt : null;
+  const currentLowRating =
+    typeof current.seasonLowRating === 'number' ? current.seasonLowRating : null;
+  const currentLowGames = typeof current.seasonLowGames === 'number' ? current.seasonLowGames : null;
+  const currentLowAt = typeof current.seasonLowAt === 'string' ? current.seasonLowAt : null;
+
+  const shouldRefreshPeak =
+    currentPeakRating == null ||
+    currentPeakGames == null ||
+    !currentPeakAt ||
+    afterRating > currentPeakRating;
+  const shouldRefreshLow =
+    currentLowRating == null ||
+    currentLowGames == null ||
+    !currentLowAt ||
+    afterRating < currentLowRating;
+
+  const nextPeakRating = shouldRefreshPeak ? afterRating : currentPeakRating ?? afterRating;
+  const nextPeakGames = shouldRefreshPeak ? afterGames : currentPeakGames ?? afterGames;
+  const nextPeakAt = shouldRefreshPeak ? appliedAtIso : currentPeakAt ?? appliedAtIso;
+  const nextLowRating = shouldRefreshLow ? afterRating : currentLowRating ?? afterRating;
+  const nextLowGames = shouldRefreshLow ? afterGames : currentLowGames ?? afterGames;
+  const nextLowAt = shouldRefreshLow ? appliedAtIso : currentLowAt ?? appliedAtIso;
+
+  return {
+    seasonPeakRating: nextPeakRating,
+    seasonPeakGames: nextPeakGames,
+    seasonPeakAt: nextPeakAt,
+    seasonLowRating: nextLowRating,
+    seasonLowGames: nextLowGames,
+    seasonLowAt: nextLowAt,
+  };
+};
 
 const STRICT_MAX_ABS_DIFF_BY_TIER: Record<ArenaBaseTier, number> = {
   '无牌': 2000,
@@ -205,7 +282,15 @@ type ArenaRatingsRepoBundle = {
   ) => Promise<'applied' | 'already-applied' | 'conflict'>;
 };
 
+let arenaRatingsRepoBundleForTests: ArenaRatingsRepoBundle | null = null;
+
+export const setArenaRatingsRepoBundleForTests = (bundle: ArenaRatingsRepoBundle | null): void => {
+  arenaRatingsRepoBundleForTests = bundle;
+};
+
 const readArenaRatingsRepoBundle = async (): Promise<ArenaRatingsRepoBundle | null> => {
+  if (arenaRatingsRepoBundleForTests) return arenaRatingsRepoBundleForTests;
+
   try {
     const [{ getDrizzleDbFromRuntime }, repo] = await Promise.all([
       import('@/lib/db/drizzle'),
@@ -1365,6 +1450,7 @@ export async function settleArenaRatingsForGeneration(
       const bDrawInc = winnerSlot === 0 ? 1 : 0;
 
       let computed: ArenaRatingEventComputedPayload | null = null;
+      let shouldPersistComputedFields = true;
 
       if (
         existingEvent &&
@@ -1384,37 +1470,45 @@ export async function settleArenaRatingsForGeneration(
           aCurrent.games === existingEvent.a_after_games &&
           bCurrent.rating === existingEvent.b_after_rating &&
           bCurrent.games === existingEvent.b_after_games;
-        if (alreadyApplied) {
-          await markArenaRatingEventStatus(eventId, 'applied');
-          continue;
-        }
 
         const matchesBefore =
           aCurrent.rating === existingEvent.a_before_rating &&
           aCurrent.games === existingEvent.a_before_games &&
           bCurrent.rating === existingEvent.b_before_rating &&
           bCurrent.games === existingEvent.b_before_games;
-        if (!matchesBefore) {
+        if (!alreadyApplied && !matchesBefore) {
           await markArenaRatingEventStatus(eventId, 'failed', { skipReason: 'rating-conflict' });
           continue;
         }
 
         computed = {
-          aBefore: aCurrent,
-          bBefore: bCurrent,
+          aBefore: {
+            rating: existingEvent.a_before_rating,
+            games: existingEvent.a_before_games,
+            wins: aCurrent.wins,
+            losses: aCurrent.losses,
+            draws: aCurrent.draws,
+          },
+          bBefore: {
+            rating: existingEvent.b_before_rating,
+            games: existingEvent.b_before_games,
+            wins: bCurrent.wins,
+            losses: bCurrent.losses,
+            draws: bCurrent.draws,
+          },
           aAfter: {
             rating: existingEvent.a_after_rating,
             games: existingEvent.a_after_games,
-            wins: aCurrent.wins + aWinInc,
-            losses: aCurrent.losses + aLossInc,
-            draws: aCurrent.draws + aDrawInc,
+            wins: alreadyApplied ? aCurrent.wins : aCurrent.wins + aWinInc,
+            losses: alreadyApplied ? aCurrent.losses : aCurrent.losses + aLossInc,
+            draws: alreadyApplied ? aCurrent.draws : aCurrent.draws + aDrawInc,
           },
           bAfter: {
             rating: existingEvent.b_after_rating,
             games: existingEvent.b_after_games,
-            wins: bCurrent.wins + bWinInc,
-            losses: bCurrent.losses + bLossInc,
-            draws: bCurrent.draws + bDrawInc,
+            wins: alreadyApplied ? bCurrent.wins : bCurrent.wins + bWinInc,
+            losses: alreadyApplied ? bCurrent.losses : bCurrent.losses + bLossInc,
+            draws: alreadyApplied ? bCurrent.draws : bCurrent.draws + bDrawInc,
           },
           deltaA: existingEvent.a_delta,
           deltaB: existingEvent.b_delta,
@@ -1423,6 +1517,7 @@ export async function settleArenaRatingsForGeneration(
             source: 'event-retry',
           },
         };
+        shouldPersistComputedFields = false;
       } else {
         const elo = computeEloUpdate(aCurrent, bCurrent, winnerSlot);
         const aAfter: ArenaRatingSnapshot = {
@@ -1459,7 +1554,9 @@ export async function settleArenaRatingsForGeneration(
         };
       }
 
-      await updateArenaRatingEventComputedFields(eventId, computed);
+      if (shouldPersistComputedFields) {
+        await updateArenaRatingEventComputedFields(eventId, computed);
+      }
 
       const applied = await applyArenaRatingsUpdateIfBothMatch(queue, [aEntity, bEntity], computed);
       if (applied === 'applied' || applied === 'already-applied') {

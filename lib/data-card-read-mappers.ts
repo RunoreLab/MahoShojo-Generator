@@ -49,6 +49,20 @@ export type DataCardRuntimeSourceInfo = {
   sourceDataCardUsageCount?: number;
 };
 
+const BATTLE_SELECTION_TRANSPORT_META_KEYS = new Set([
+  '_cardId',
+  '_cardName',
+  '_cardDescription',
+  '_isPublic',
+  '_updatedAt',
+  '_createdAt',
+  '_author',
+  '_authorName',
+  '_likeCount',
+  '_favoriteCount',
+  '_usageCount',
+]);
+
 const toRecord = (value: unknown): Record<string, unknown> | null =>
   typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
 
@@ -151,6 +165,23 @@ const parseDataCardDataObject = (source: Record<string, unknown>): Record<string
   const rawRecord = toRecord(raw);
   if (rawRecord) return rawRecord;
   throw new Error('数据卡内容为空或格式不受支持。');
+};
+
+export const stripBattleSelectionTransportMeta = <T>(input: T): T => {
+  if (Array.isArray(input)) {
+    return input.map((item) => stripBattleSelectionTransportMeta(item)) as T;
+  }
+  const record = toRecord(input);
+  if (!record) return input;
+
+  const cleaned: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(record)) {
+    if (BATTLE_SELECTION_TRANSPORT_META_KEYS.has(key)) {
+      continue;
+    }
+    cleaned[key] = stripBattleSelectionTransportMeta(value);
+  }
+  return cleaned as T;
 };
 
 export const mapPublicDataCardRowToDetailsCard = (

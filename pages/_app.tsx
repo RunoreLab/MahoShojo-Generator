@@ -1,3 +1,4 @@
+import { GoogleAnalytics } from '@next/third-parties/google';
 import type { AppProps } from 'next/app';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
@@ -5,19 +6,14 @@ import '@/styles/globals.css';
 import '@/styles/blue-theme.css';
 import '@/styles/gradient-buttons.css';
 import 'katex/dist/katex.min.css';
-import { GoogleAnalytics } from '@next/third-parties/google';
 import { ColorModeSwitcher } from '@/components/shared/ColorModeSwitcher';
-// 1. 引入新组件
 import AnnouncementTicker from '@/components/Announcement/AnnouncementTicker';
-
-// 如果需要统计，请取消注释并安装 @vercel/analytics
-// import { Analytics } from "@vercel/analytics/next";
 
 export default function App({ Component, pageProps }: AppProps) {
   const router = useRouter();
   const isDetailsPage = router.pathname === '/details' || router.pathname === '/canshou';
-  // 2. 增加一个判断，用于在逮捕页隐藏公告
   const isArrestedPage = router.pathname === '/arrested';
+  const gaId = process.env.NEXT_PUBLIC_GA_ID?.trim();
 
   return (
     <>
@@ -31,10 +27,8 @@ export default function App({ Component, pageProps }: AppProps) {
       <div className={isDetailsPage ? 'blue-theme' : ''}>
         <ColorModeSwitcher />
         <Component {...pageProps} />
-        {/* 3. 在此处添加公告组件，并根据页面路径进行条件渲染 */}
         {!isArrestedPage && <AnnouncementTicker />}
-        <GoogleAnalytics gaId={process.env.NEXT_PUBLIC_GA_ID || ''} />
-        {/* <Analytics /> */}
+        {gaId ? <GoogleAnalytics gaId={gaId} /> : null}
       </div>
     </>
   );

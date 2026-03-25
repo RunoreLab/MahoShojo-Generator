@@ -57,10 +57,6 @@ const sensitiveWordsConfig = {
     "5Lqk6YWN",
     // "6Imy5oOF",
     "5rer6I2h",
-    "57+75aKZ",
-    "56eR5a2m5LiK572R",
-    "5oyC5qKv5a2Q",
-    "R0ZX",
     // 新增违禁词
     "5LiL5L2T6auY5r2u",
     "54ix5ray",

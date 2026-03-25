@@ -6,6 +6,7 @@ import { ArenaDataSettingsPanel } from '@/components/shared/ArenaDataSettingsPan
 
 import { useBattleStore } from '../stores/useBattleStore';
 import { BattleStoreState, CombatantData } from '../types';
+import { BattleReportCardWidthSettings } from './BattleReportCardWidthSettings';
 import { NarrativeHistorySettings } from './NarrativeHistorySettings';
 
 export function BattleSettings() {
@@ -29,6 +30,7 @@ export function BattleSettings() {
         combatantCountForEstimate={readableCombatantCount}
       />
       <NarrativeHistorySettings value={settings} onChange={updateSettings} disabled={isGenerating} />
+      <BattleReportCardWidthSettings value={settings} onChange={updateSettings} disabled={isGenerating} />
     </>
   );
 }

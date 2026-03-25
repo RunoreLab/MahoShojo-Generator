@@ -30,6 +30,13 @@ export type SeasonArchiveLeaderboardRow = {
   losses: number;
   draws: number;
   ratingUpdatedAt: string | null;
+  seasonPeakRating: number | null;
+  seasonPeakGames: number | null;
+  seasonPeakAt: string | null;
+  seasonPeakTier: string | null;
+  seasonLowRating: number | null;
+  seasonLowGames: number | null;
+  seasonLowAt: string | null;
   dataCardName: string | null;
   dataCardDescription: string | null;
   authorName: string | null;
@@ -157,6 +164,13 @@ export const listSeasonArchiveLeaderboardRows = async (
       losses: sql<number>`MAX(${arenaRatings.losses})`,
       draws: sql<number>`MAX(${arenaRatings.draws})`,
       ratingUpdatedAt: updatedExpr,
+      seasonPeakRating: sql<number | null>`MAX(${arenaRatings.seasonPeakRating})`,
+      seasonPeakGames: sql<number | null>`MAX(${arenaRatings.seasonPeakGames})`,
+      seasonPeakAt: sql<string | null>`MAX(${arenaRatings.seasonPeakAt})`,
+      seasonPeakTier: sql<string | null>`MAX(${arenaRatings.seasonPeakTier})`,
+      seasonLowRating: sql<number | null>`MAX(${arenaRatings.seasonLowRating})`,
+      seasonLowGames: sql<number | null>`MAX(${arenaRatings.seasonLowGames})`,
+      seasonLowAt: sql<string | null>`MAX(${arenaRatings.seasonLowAt})`,
       dataCardName: sql<string | null>`MAX(${dataCards.name})`,
       dataCardDescription: sql<string | null>`MAX(${dataCards.description})`,
       authorId: sql<number | null>`MAX(${dataCards.userId})`,
@@ -197,6 +211,13 @@ export const listSeasonArchiveLeaderboardRows = async (
     losses: Math.max(0, toInteger(row.losses, 0)),
     draws: Math.max(0, toInteger(row.draws, 0)),
     ratingUpdatedAt: toNullableString(row.ratingUpdatedAt),
+    seasonPeakRating: toNullableInteger(row.seasonPeakRating),
+    seasonPeakGames: toNullableInteger(row.seasonPeakGames),
+    seasonPeakAt: toNullableString(row.seasonPeakAt),
+    seasonPeakTier: toNullableString(row.seasonPeakTier),
+    seasonLowRating: toNullableInteger(row.seasonLowRating),
+    seasonLowGames: toNullableInteger(row.seasonLowGames),
+    seasonLowAt: toNullableString(row.seasonLowAt),
     dataCardName: toNullableString(row.dataCardName),
     dataCardDescription: toNullableString(row.dataCardDescription),
     authorName: toNullableString(row.authorName),

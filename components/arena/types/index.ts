@@ -26,6 +26,7 @@ export type BattleMode = 'classic' | 'kizuna' | 'daily' | 'scenario';
 export type StoryLengthOption = 'default' | 'short' | 'standard' | 'detailed' | 'long';
 export type GenerationMode = 'non-stream' | 'stream';
 export type StreamTransportMode = 'sse' | 'plain-stream';
+export type BattleReportCardWidthMode = 'auto' | 'manual';
 
 export type QuestionnaireSelectionSource = 'preset' | 'upload' | 'database';
 
@@ -131,6 +132,8 @@ export interface BattleSettings {
   writeNarrativeHistory: boolean;
   streamTransport: StreamTransportMode;
   userGuidance: string;
+  battleReportCardWidthMode?: BattleReportCardWidthMode;
+  battleReportCardWidthPx?: number;
 }
 
 export interface LanguageOption {

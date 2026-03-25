@@ -15,6 +15,10 @@ import {
   isGeneralScenario,
   isScenarioCard
 } from './schemas';
+import {
+  readScenarioBattleStoryConfig,
+  toScenarioBattleStoryExtension,
+} from '@/lib/scenario-battle-story';
 
 const NON_SUBSTANTIVE_KEYS = new Set(['signature', 'templateId']);
 
@@ -168,7 +172,8 @@ const SCENARIO_META: Record<string, FieldMeta> = {
       created_at: { type: 'string' },
       signature: { type: 'string' }
     }
-  }
+  },
+  _battle_story: { type: 'unknown' }
 };
 
 const DEFAULT_MAGICAL_GIRL: MagicalGirlData = {
@@ -443,6 +448,7 @@ function convertToGeneral(data: any): AssignResult<GeneralCharacterData> {
   delete rest.name;
   delete rest.title;
   delete rest.templateId;
+  delete rest._battle_story;
 
   const content = toMarkdownContent(rest);
   const result: GeneralCharacterData = {
@@ -465,6 +471,7 @@ function convertToGeneral(data: any): AssignResult<GeneralCharacterData> {
 function convertToGeneralScenario(data: any, sourceTemplate: InferableTemplate): AssignResult<GeneralScenarioData> {
   const title = data?.title || data?.name || data?.codename || '未命名情景';
   const rest = { ...data };
+  const battleStoryExtension = toScenarioBattleStoryExtension(readScenarioBattleStoryConfig(data));
   delete rest.codename;
   delete rest.name;
   delete rest.title;
@@ -475,6 +482,7 @@ function convertToGeneralScenario(data: any, sourceTemplate: InferableTemplate):
   delete rest.arena_history;
   delete rest.current_state;
   delete rest.adjudicationEvents;
+  delete rest._battle_story;
 
   const markdownBase =
     (sourceTemplate === 'general' || sourceTemplate === 'general-scenario') && typeof data?.content === 'string'
@@ -490,6 +498,7 @@ function convertToGeneralScenario(data: any, sourceTemplate: InferableTemplate):
     templateId: GENERAL_SCENARIO_TEMPLATE_ID,
     title,
     content,
+    ...(battleStoryExtension ? { _battle_story: battleStoryExtension } : {}),
   };
 
   if (data?.adjudicationEvents) {
@@ -507,6 +516,7 @@ function convertToMagicalGirl(data: any, sourceTemplate: InferableTemplate): Ass
   delete source.codename;
   delete source.name;
   delete source.title;
+  delete source._battle_story;
   if (sourceTemplate === 'general' || sourceTemplate === 'general-scenario') {
     delete source.content;
   }
@@ -540,6 +550,7 @@ function convertToCanshou(data: any, sourceTemplate: InferableTemplate): AssignR
   delete source.codename;
   delete source.name;
   delete source.title;
+  delete source._battle_story;
   if (sourceTemplate === 'general' || sourceTemplate === 'general-scenario') {
     delete source.content;
   }
@@ -567,6 +578,7 @@ function convertToCanshou(data: any, sourceTemplate: InferableTemplate): AssignR
 function convertToScenario(data: any, sourceTemplate: InferableTemplate): AssignResult<ScenarioData> {
   const base: ScenarioData = JSON.parse(JSON.stringify(DEFAULT_SCENARIO));
   base.title = data?.title || data?.codename || data?.name || base.title;
+  const battleStoryExtension = toScenarioBattleStoryExtension(readScenarioBattleStoryConfig(data));
 
   const source = { ...data };
   delete source.codename;
@@ -576,6 +588,7 @@ function convertToScenario(data: any, sourceTemplate: InferableTemplate): Assign
   delete source.templateId;
   delete source.arena_history;
   delete source.current_state;
+  delete source._battle_story;
   if (sourceTemplate === 'general-scenario') {
     delete source.content;
   }
@@ -613,6 +626,9 @@ function convertToScenario(data: any, sourceTemplate: InferableTemplate): Assign
 
   if (data?.adjudicationEvents) {
     base.adjudicationEvents = JSON.parse(JSON.stringify(data.adjudicationEvents));
+  }
+  if (battleStoryExtension) {
+    (base as any)._battle_story = battleStoryExtension;
   }
 
   return { data: ScenarioSchema.parse(base), warnings: unmatched.length ? ['部分字段已合并至情景描述。'] : [] };

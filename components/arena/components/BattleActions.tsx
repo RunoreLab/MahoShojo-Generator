@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 
+import { ProviderCooldownNotice } from '@/components/ai/ProviderCooldownNotice';
 import { TokenIndicator } from '@/components/shared/TokenIndicator';
 import { formatDateTime } from '@/lib/constants';
 import { CollapsibleSection } from '@/components/shared/CollapsibleSection';
@@ -83,7 +84,14 @@ const buttonTextMap: Record<string, string> = {
 };
 
 export function BattleActions() {
-  const { handleGenerate, isGenerating, isCooldown, remainingTime } = useBattleEngine();
+  const {
+    handleGenerate,
+    isGenerating,
+    isCooldown,
+    remainingTime,
+    providerCooldownMode,
+    otherRemainingTime,
+  } = useBattleEngine();
   const useBattleSelector = <T,>(selector: (state: BattleStoreState) => T) => useBattleStore(selector);
   const combatants = useBattleSelector((state) => state.combatants);
   const battleMode = useBattleSelector((state) => state.battleMode);
@@ -235,6 +243,12 @@ export function BattleActions() {
           {getButtonText()}
         </button>
       </div>
+      <ProviderCooldownNotice
+        currentMode={providerCooldownMode}
+        currentIsCooldown={isCooldown}
+        otherRemainingTime={otherRemainingTime}
+        className="mt-2 text-center text-xs text-amber-700"
+      />
 
       <CollapsibleSection
         title="高级：叙事历史 / 上下文估算"
@@ -243,11 +257,11 @@ export function BattleActions() {
         storageKey="arena.section.generateAdvanced.open"
         className="mt-3"
       >
-        <div className="flex items-center justify-center gap-2 flex-wrap">
+        <div className="flex w-full items-center justify-center gap-2">
           <button
             type="button"
             onClick={() => setShowNarrativeModal(true)}
-            className="px-3 py-2 text-sm rounded-lg border border-gray-200 bg-white hover:bg-gray-50"
+            className="w-full max-w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm break-words whitespace-normal text-center hover:bg-gray-50 sm:w-auto"
             disabled={isGenerating}
             title="查看/编辑叙事历史记录"
           >

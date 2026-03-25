@@ -221,6 +221,11 @@ body {
   color: var(--app-text);
 }
 
+.arena-page-shell .card {
+  max-width: none;
+  margin-top: 1.5rem;
+}
+
 .title {
   text-align: center;
   font-size: 2rem;

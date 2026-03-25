@@ -1,5 +1,13 @@
 import type { NextConfig } from "next";
 
+import { buildStaticBrowserSecurityHeaders } from "./lib/security/browser-headers";
+
+const staticSecurityHeaders = buildStaticBrowserSecurityHeaders({
+  allowGoogleAnalytics: Boolean(process.env.NEXT_PUBLIC_GA_ID?.trim()),
+  allowTurnstile: true,
+  isProduction: process.env.NODE_ENV === 'production',
+});
+
 const nextConfig: NextConfig = {
   // 图片优化配置（Cloudflare Pages 不支持默认的图片优化）
   images: {
@@ -38,6 +46,24 @@ const nextConfig: NextConfig = {
         source: '/admin/user-management',
         destination: '/admin/users',
         permanent: false,
+      },
+    ];
+  },
+
+  async headers() {
+    return [
+      {
+        source: '/:path*',
+        headers: staticSecurityHeaders,
+      },
+      {
+        source: '/api/:path*',
+        headers: [
+          {
+            key: 'X-Robots-Tag',
+            value: 'noindex',
+          },
+        ],
       },
     ];
   },

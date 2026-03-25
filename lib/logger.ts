@@ -3,33 +3,30 @@ import pino from 'pino';
 // 创建 Pino 日志器配置
 const createLogger = () => {
   const isDev = process.env.NODE_ENV === 'development';
+  const level = process.env.LOG_LEVEL || (isDev ? 'debug' : 'info');
   const isEdge = process.env.NEXT_RUNTIME === 'edge';
 
   // Edge Runtime 环境配置
   if (isEdge) {
     return pino({
-      level: isDev ? 'debug' : 'info',
+      level,
       browser: {
-        write: (o: any) => {
-          console.log(JSON.stringify(o));
-        }
+        write: {
+          info: (o: any) => console.info(JSON.stringify(o)),
+          warn: (o: any) => console.warn(JSON.stringify(o)),
+          error: (o: any) => console.error(JSON.stringify(o)),
+          debug: (o: any) => console.debug(JSON.stringify(o)),
+        },
       }
     });
   }
 
   // Node.js 环境配置
+  // 说明：不要默认启用 pino-pretty transport。
+  // 这个仓库的 logger 还会被客户端 hook/Edge 相关链路间接引用，
+  // 在 Next.js/Turbopack 下让运行时再去解析 "pino-pretty" 容易直接触发 SSR 500。
   return pino({
-    level: process.env.LOG_LEVEL || (isDev ? 'debug' : 'info'),
-    transport: isDev ? {
-      target: 'pino-pretty',
-      options: {
-        colorize: true,
-        ignore: 'pid,hostname',
-        translateTime: 'HH:MM:ss',
-        messageFormat: '[{caller}] {msg}',
-        singleLine: false
-      }
-    } : undefined,
+    level,
     formatters: {
       level: (label: string) => {
         return { level: label };

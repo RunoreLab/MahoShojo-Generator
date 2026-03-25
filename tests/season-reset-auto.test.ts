@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { deriveSeasonResetAutoTuning } from '@/lib/arena/season-reset-auto';
+import { buildSeasonSoftResetUpdateSql } from '@/lib/db/repositories/season-soft-reset';
 
 describe('season-reset-auto: deriveSeasonResetAutoTuning', () => {
   test('基础约束：阈值与 factor 单调、合法', () => {
@@ -83,3 +84,30 @@ describe('season-reset-auto: deriveSeasonResetAutoTuning', () => {
   });
 });
 
+describe('season-reset-auto: queue=all helper seam', () => {
+  test('queue=all 语义通过 strict/free 双调用被约束：strict 重置 season，free 不写 season', () => {
+    const ratingExpr = 'CAST(ROUND(arena_ratings.rating) AS INTEGER)';
+    const ratingParams: unknown[] = [];
+    const nowIso = '2026-03-25T00:00:00.000Z';
+
+    const updates = (['strict', 'free'] as const).map((queue) =>
+      buildSeasonSoftResetUpdateSql({
+        queue,
+        ratingExpr,
+        ratingParams,
+        nowIso,
+        includeLegacyColumns: true,
+      })
+    );
+
+    const strictSql = updates[0]?.sql ?? '';
+    const freeSql = updates[1]?.sql ?? '';
+
+    expect(strictSql.includes('season_peak_rating')).toBeTrue();
+    expect(strictSql.includes("season_peak_tier = '无牌'")).toBeTrue();
+    expect(strictSql.includes('season_low_rating')).toBeTrue();
+    expect(freeSql.includes('season_peak_rating')).toBeFalse();
+    expect(freeSql.includes('season_peak_tier')).toBeFalse();
+    expect(freeSql.includes('season_low_rating')).toBeFalse();
+  });
+});

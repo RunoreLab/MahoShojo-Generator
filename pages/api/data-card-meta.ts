@@ -2,8 +2,9 @@ import type { NextRequest } from 'next/server';
 
 import { getAuthUser } from '@/lib/auth/server';
 import { applyQueenTier, computeArenaBaseTier } from '@/lib/arena/tier';
-import { getDrizzleDbFromRuntime } from '@/lib/db/drizzle';
 import {
+  type DataCardArenaRatingRow,
+  type DataCardMetaCardRow,
   getArenaRatingsByDataCardId,
   getDataCardMetaCardById,
   getDataCardMetricsByDataCardId,
@@ -29,7 +30,14 @@ type ApiTag = {
   isActive: boolean;
 };
 
-type ApiRating = {
+export type ApiRatingSeasonExtreme = {
+  rating: number;
+  games: number;
+  occurredAt: string;
+  tier: string;
+};
+
+export type ApiRating = {
   queue: Queue;
   rating: number;
   games: number;
@@ -41,6 +49,9 @@ type ApiRating = {
   lastAppliedAt: string | null;
   publicRank: number | null;
   publicTotal: number | null;
+  seasonPeak: ApiRatingSeasonExtreme | null;
+  seasonPeakTier: string | null;
+  seasonLow: ApiRatingSeasonExtreme | null;
 };
 
 type ApiMetrics = {
@@ -50,6 +61,70 @@ type ApiMetrics = {
   dataCardUpdatedAt: string;
   isStale: boolean;
 };
+
+type BuildApiRatingFromRowOptions = {
+  cardType: DataCardMetaCardRow['type'];
+  isQueen: boolean;
+};
+
+const ARENA_TIER_WHITELIST = new Set(['无牌', '白牌', '字牌', '花牌', '权杖', '女王']);
+
+const buildSeasonExtreme = (
+  rating: number | null,
+  games: number | null,
+  occurredAt: string | null,
+): ApiRatingSeasonExtreme | null => {
+  if (typeof rating !== 'number' || typeof games !== 'number' || typeof occurredAt !== 'string') return null;
+  return {
+    rating,
+    games,
+    occurredAt,
+    tier: computeArenaBaseTier(rating, games),
+  };
+};
+
+const normalizeSeasonPeakTier = (queue: Queue, seasonPeakTier: unknown): string | null => {
+  if (queue !== 'strict') return null;
+  if (typeof seasonPeakTier !== 'string') return null;
+  const normalized = seasonPeakTier.trim();
+  if (!normalized) return null;
+  return ARENA_TIER_WHITELIST.has(normalized) ? normalized : null;
+};
+
+export function buildApiRatingFromRow(
+  row: DataCardArenaRatingRow,
+  options: BuildApiRatingFromRowOptions,
+): ApiRating {
+  const queue: Queue = row.queue === 'free' ? 'free' : 'strict';
+  const rating = typeof row.rating === 'number' ? row.rating : 0;
+  const games = typeof row.games === 'number' ? row.games : 0;
+  const baseTier = computeArenaBaseTier(rating, games);
+  const tier = applyQueenTier(baseTier, options.isQueen);
+  const lastDelta = options.cardType === 'character' && typeof row.lastDelta === 'number' ? row.lastDelta : null;
+  const lastAppliedAt =
+    options.cardType === 'character' && typeof row.lastAppliedAt === 'string' ? row.lastAppliedAt : null;
+
+  const seasonPeak = queue === 'strict' ? buildSeasonExtreme(row.seasonPeakRating, row.seasonPeakGames, row.seasonPeakAt) : null;
+  const seasonPeakTier = normalizeSeasonPeakTier(queue, row.seasonPeakTier);
+  const seasonLow = queue === 'strict' ? buildSeasonExtreme(row.seasonLowRating, row.seasonLowGames, row.seasonLowAt) : null;
+
+  return {
+    queue,
+    rating,
+    games,
+    wins: typeof row.wins === 'number' ? row.wins : 0,
+    losses: typeof row.losses === 'number' ? row.losses : 0,
+    draws: typeof row.draws === 'number' ? row.draws : 0,
+    tier,
+    lastDelta,
+    lastAppliedAt,
+    publicRank: null,
+    publicTotal: null,
+    seasonPeak,
+    seasonPeakTier,
+    seasonLow,
+  };
+}
 
 const json = (payload: unknown, status = 200): Response =>
   new Response(JSON.stringify(payload), {
@@ -62,6 +137,7 @@ export default async function handler(req: NextRequest) {
     return json({ error: 'Method Not Allowed' }, 405);
   }
 
+  const { getDrizzleDbFromRuntime } = await import('@/lib/db/drizzle');
   const db = getDrizzleDbFromRuntime();
   if (!db) {
     return json({ error: '数据库绑定不可用，请检查 Cloudflare D1 配置' }, 503);
@@ -193,24 +269,7 @@ export default async function handler(req: NextRequest) {
         const baseTier = computeArenaBaseTier(rating, games);
         const queen = baseTier === '权杖' ? await getQueen(queue) : null;
         const isQueen = queen?.entityType === 'data_card' && queen?.entityId === dataCardId;
-        const tier = applyQueenTier(baseTier, isQueen);
-        const lastDelta = cardRow.type === 'character' && typeof row.lastDelta === 'number' ? row.lastDelta : null;
-        const lastAppliedAt =
-          cardRow.type === 'character' && typeof row.lastAppliedAt === 'string' ? row.lastAppliedAt : null;
-
-        const item: ApiRating = {
-          queue,
-          rating,
-          games,
-          wins: typeof row.wins === 'number' ? row.wins : 0,
-          losses: typeof row.losses === 'number' ? row.losses : 0,
-          draws: typeof row.draws === 'number' ? row.draws : 0,
-          tier,
-          lastDelta,
-          lastAppliedAt,
-          publicRank: null,
-          publicTotal: null,
-        };
+        const item = buildApiRatingFromRow(row, { cardType: cardRow.type, isQueen });
 
         if (item.queue === 'strict') ratings.strict = item;
         else ratings.free = item;

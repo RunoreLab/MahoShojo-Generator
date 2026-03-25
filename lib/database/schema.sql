@@ -652,6 +652,13 @@ CREATE TABLE IF NOT EXISTS arena_ratings (
   wins INTEGER NOT NULL DEFAULT 0,
   losses INTEGER NOT NULL DEFAULT 0,
   draws INTEGER NOT NULL DEFAULT 0,
+  season_peak_rating INTEGER,
+  season_peak_games INTEGER,
+  season_peak_at TEXT,
+  season_peak_tier TEXT,
+  season_low_rating INTEGER,
+  season_low_games INTEGER,
+  season_low_at TEXT,
   last_delta INTEGER,
   last_applied_at TEXT,
 

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 
-import DataCardDetailsModal from '@/components/DataCardDetailsModal';
+import DataCardDetailsModal, { StrictSeasonExtremaBlock } from '@/components/DataCardDetailsModal';
 
 describe('DataCardDetailsModal', () => {
   it('renders markdown strings with preserved line breaks', () => {
@@ -42,74 +42,66 @@ describe('DataCardDetailsModal', () => {
     expect(html).toContain('whitespace-pre-wrap');
   });
 
-  it('renders visual asset review section with proxied preview url', () => {
-    const data = {
-      portrait: 'https://assets.example.com/hero.webp',
-      illustration: 'data:image/png;base64,QUJDRA==',
-      profile: {
-        summary: '带插图的测试卡',
-      },
-    };
-
+  it('StrictSeasonExtremaBlock 展示 strict 赛季极值与最高段位', () => {
     const html = renderToStaticMarkup(
-      React.createElement(DataCardDetailsModal, {
-        isOpen: true,
-        onClose: () => {},
-        card: {
-          id: 'c2',
-          name: '带图卡片',
-          description: '用于验证视觉资产审阅区',
-          type: 'character',
-          data: JSON.stringify(data),
-          isPublic: false,
-          author: 'tester',
+      React.createElement(StrictSeasonExtremaBlock, {
+        strict: {
+          queue: 'strict',
+          rating: 1520,
+          games: 30,
+          wins: 18,
+          losses: 11,
+          draws: 1,
+          tier: '权杖',
+          lastDelta: 12,
+          lastAppliedAt: '2026-03-25T10:00:00.000Z',
+          publicRank: null,
+          publicTotal: null,
+          seasonPeak: {
+            rating: 1630,
+            games: 30,
+            occurredAt: '2026-03-21T10:00:00.000Z',
+            tier: '权杖',
+          },
+          seasonPeakTier: '女王',
+          seasonLow: {
+            rating: 980,
+            games: 6,
+            occurredAt: '2026-01-20T10:00:00.000Z',
+            tier: '白牌',
+          },
         },
       }),
     );
 
-    expect(html).toContain('视觉资产');
-    expect(html).toContain('共检测到 2 个图片资源');
-    expect(html).toContain('https://assets.example.com/hero.webp');
-    expect(html).toContain('portrait');
-    expect(html).toContain('illustration');
+    expect(html).toContain('赛季最高');
+    expect(html).toContain('赛季最低');
+    expect(html).toContain('赛季最高段位');
+    expect(html).toContain('女王');
   });
 
-  it('renders structured diff section when compareCard is provided', () => {
+  it('StrictSeasonExtremaBlock 在 season 信息全缺失时为空渲染', () => {
     const html = renderToStaticMarkup(
-      React.createElement(DataCardDetailsModal, {
-        isOpen: true,
-        onClose: () => {},
-        compareCard: {
-          name: '旧名称',
-          description: '旧简介',
-          data: JSON.stringify({
-            profile: {
-              title: '旧标题',
-            },
-          }),
-          updatedAt: '2026-03-10T00:00:00.000Z',
-        },
-        card: {
-          id: 'c3',
-          name: '新名称',
-          description: '新简介',
-          type: 'character',
-          data: JSON.stringify({
-            profile: {
-              title: '新标题',
-            },
-          }),
-          isPublic: false,
-          author: 'tester',
+      React.createElement(StrictSeasonExtremaBlock, {
+        strict: {
+          queue: 'strict',
+          rating: 1200,
+          games: 8,
+          wins: 4,
+          losses: 3,
+          draws: 1,
+          tier: '花牌',
+          lastDelta: null,
+          lastAppliedAt: null,
+          publicRank: null,
+          publicTotal: null,
+          seasonPeak: null,
+          seasonPeakTier: null,
+          seasonLow: null,
         },
       }),
     );
 
-    expect(html).toContain('待审更新差异');
-    expect(html).toContain('共 3 处变化');
-    expect(html).toContain('卡片名称');
-    expect(html).toContain('profile.title');
-    expect(html).toContain('旧标题');
-    expect(html).toContain('新标题');
+    expect(html).toBe('');
   });
 });

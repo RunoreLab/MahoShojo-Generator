@@ -1,90 +1,232 @@
-// lib/cooldown.ts
-
 import { useState, useEffect, useCallback } from 'react';
 
-const getLocalStorageItem = (key: string): number | null => {
-    if (typeof window === 'undefined') {
-        return null;
-    }
-    const item = localStorage.getItem(key);
-    return item ? parseInt(item, 10) : null;
+const COOLDOWN_SYNC_EVENT = 'mahoshojo:cooldown-sync';
+
+export type ProviderCooldownMode = 'system' | 'custom';
+
+type CooldownSnapshot = {
+  endTime: number | null;
+  remainingTime: number;
 };
 
-const setLocalStorageItem = (key: string, value: number) => {
-    if (typeof window === 'undefined') {
-        return;
-    }
-    localStorage.setItem(key, value.toString());
+type CooldownSyncDetail = {
+  key: string;
+  endTime: number | null;
+};
+
+type ProviderCooldownNoticeInput = {
+  currentMode: ProviderCooldownMode;
+  currentIsCooldown: boolean;
+  otherRemainingTime: number;
+};
+
+type UseProviderModeCooldownOptions = {
+  baseKey: string;
+  currentMode: ProviderCooldownMode;
+  systemDurationMs: number;
+  customDurationMs: number;
+};
+
+export const getOtherProviderCooldownMode = (mode: ProviderCooldownMode): ProviderCooldownMode =>
+  mode === 'custom' ? 'system' : 'custom';
+
+export const buildProviderCooldownStorageKey = (baseKey: string, mode: ProviderCooldownMode): string =>
+  `${baseKey}:${mode}`;
+
+const getProviderCooldownModeLabel = (mode: ProviderCooldownMode): string =>
+  mode === 'custom' ? '自定义通道' : '默认通道';
+
+export const getProviderCooldownNoticeText = ({
+  currentMode,
+  currentIsCooldown,
+  otherRemainingTime,
+}: ProviderCooldownNoticeInput): string | null => {
+  if (otherRemainingTime <= 0) return null;
+
+  const currentLabel = getProviderCooldownModeLabel(currentMode);
+  const otherLabel = getProviderCooldownModeLabel(getOtherProviderCooldownMode(currentMode));
+
+  if (currentIsCooldown) {
+    return `${otherLabel}也在冷却中 (${otherRemainingTime}s)。`;
+  }
+
+  return `${otherLabel}冷却中 (${otherRemainingTime}s)，当前${currentLabel}仍可使用。`;
+};
+
+const getLocalStorageItem = (key: string): number | null => {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+  const item = localStorage.getItem(key);
+  if (!item) return null;
+  const parsed = Number.parseInt(item, 10);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+const setLocalStorageItem = (key: string, value: number | null) => {
+  if (typeof window === 'undefined') {
+    return;
+  }
+  if (value === null) {
+    localStorage.removeItem(key);
+    return;
+  }
+  localStorage.setItem(key, value.toString());
+};
+
+const emitCooldownSync = (key: string, endTime: number | null) => {
+  if (typeof window === 'undefined' || typeof window.dispatchEvent !== 'function') {
+    return;
+  }
+
+  try {
+    const event = new CustomEvent<CooldownSyncDetail>(COOLDOWN_SYNC_EVENT, {
+      detail: { key, endTime },
+    });
+    window.dispatchEvent(event);
+  } catch {
+    // 忽略极端环境下不支持 CustomEvent 的情况
+  }
+};
+
+export const readCooldownSnapshot = (key: string): CooldownSnapshot => {
+  const endTime = getLocalStorageItem(key);
+  if (!endTime) {
+    return { endTime: null, remainingTime: 0 };
+  }
+
+  const remaining = endTime - Date.now();
+  if (remaining <= 0) {
+    setLocalStorageItem(key, null);
+    return { endTime: null, remainingTime: 0 };
+  }
+
+  return {
+    endTime,
+    remainingTime: Math.ceil(remaining / 1000),
+  };
+};
+
+export const writeCooldownSnapshot = (key: string, endTime: number | null): CooldownSnapshot => {
+  setLocalStorageItem(key, endTime);
+  emitCooldownSync(key, endTime);
+  return readCooldownSnapshot(key);
+};
+
+export const subscribeCooldownKey = (key: string, onChange: () => void): (() => void) => {
+  if (typeof window === 'undefined' || typeof window.addEventListener !== 'function') {
+    return () => {};
+  }
+
+  const handleSync = (event: Event) => {
+    const detail = (event as CustomEvent<CooldownSyncDetail>).detail;
+    if (detail?.key !== key) return;
+    onChange();
+  };
+
+  const handleStorage = (event: StorageEvent) => {
+    if (event.key !== null && event.key !== key) return;
+    onChange();
+  };
+
+  window.addEventListener(COOLDOWN_SYNC_EVENT, handleSync as EventListener);
+  window.addEventListener('storage', handleStorage);
+
+  return () => {
+    window.removeEventListener(COOLDOWN_SYNC_EVENT, handleSync as EventListener);
+    window.removeEventListener('storage', handleStorage);
+  };
 };
 
 export const useCooldown = (key: string, duration: number) => {
-    // 在开发环境中禁用 cooldown
-    const isDevelopment = process.env.NODE_ENV === 'development';
-    
-    const [cooldownEndTime, setCooldownEndTime] = useState<number | null>(() => 
-        isDevelopment ? null : getLocalStorageItem(key)
-    );
-    const [remainingTime, setRemainingTime] = useState<number>(0);
+  const isDevelopment = process.env.NODE_ENV === 'development';
 
-    // 当 key 变更时，重新同步本地存储的时间戳，避免沿用旧配置
-    useEffect(() => {
-        if (isDevelopment) return;
-        const storedEndTime = getLocalStorageItem(key);
-        setCooldownEndTime(storedEndTime);
-        
-        // [修复]：当切换 key 时，立即根据读取到的 storedEndTime 计算 remainingTime
-        // 避免在下一次 interval 触发前出现状态不同步（例如切换回一个正在冷却的 key 时显示未冷却）
-        if (!storedEndTime) {
-            setRemainingTime(0);
-        } else {
-            const now = Date.now();
-            const remaining = storedEndTime - now;
-            if (remaining <= 0) {
-                setRemainingTime(0);
-                // 如果读出来的已经是过期时间，顺便清理一下
-                localStorage.removeItem(key);
-                setCooldownEndTime(null);
-            } else {
-                setRemainingTime(Math.ceil(remaining / 1000));
-            }
-        }
-    }, [key, isDevelopment]);
+  const [cooldownEndTime, setCooldownEndTime] = useState<number | null>(() =>
+    isDevelopment ? null : readCooldownSnapshot(key).endTime
+  );
+  const [remainingTime, setRemainingTime] = useState<number>(() =>
+    isDevelopment ? 0 : readCooldownSnapshot(key).remainingTime
+  );
 
-    useEffect(() => {
-        if (isDevelopment || !cooldownEndTime) return;
+  const syncFromStorage = useCallback(() => {
+    if (isDevelopment) {
+      setCooldownEndTime(null);
+      setRemainingTime(0);
+      return;
+    }
 
-        const calculateRemainingTime = () => {
-            const now = Date.now();
-            const remaining = cooldownEndTime - now;
-            if (remaining <= 0) {
-                setRemainingTime(0);
-                setCooldownEndTime(null);
-                localStorage.removeItem(key);
-            } else {
-                setRemainingTime(Math.ceil(remaining / 1000));
-            }
-        };
+    const snapshot = readCooldownSnapshot(key);
+    setCooldownEndTime(snapshot.endTime);
+    setRemainingTime(snapshot.remainingTime);
+  }, [isDevelopment, key]);
 
-        // calculateRemainingTime(); 
+  useEffect(() => {
+    syncFromStorage();
+  }, [syncFromStorage]);
 
-        const interval = setInterval(calculateRemainingTime, 1000);
+  useEffect(() => {
+    if (isDevelopment) return;
+    return subscribeCooldownKey(key, syncFromStorage);
+  }, [isDevelopment, key, syncFromStorage]);
 
-        return () => clearInterval(interval);
-    }, [cooldownEndTime, key, isDevelopment]);
+  useEffect(() => {
+    if (isDevelopment || !cooldownEndTime) return;
 
-    const startCooldown = useCallback((overrideDuration?: number) => {
-        // 在开发环境中不启动 cooldown
-        if (isDevelopment) return;
-        
-        const effectiveDuration = typeof overrideDuration === 'number' ? overrideDuration : duration;
-        const endTime = Date.now() + effectiveDuration;
-        setLocalStorageItem(key, endTime);
-        setCooldownEndTime(endTime);
-        // start 时立即更新 UI，提升响应速度
-        setRemainingTime(Math.ceil(effectiveDuration / 1000));
-    }, [duration, key, isDevelopment]);
+    const calculateRemainingTime = () => {
+      const remaining = cooldownEndTime - Date.now();
+      if (remaining <= 0) {
+        writeCooldownSnapshot(key, null);
+        setCooldownEndTime(null);
+        setRemainingTime(0);
+      } else {
+        setRemainingTime(Math.ceil(remaining / 1000));
+      }
+    };
 
-    const isCooldown = !isDevelopment && remainingTime > 0;
+    calculateRemainingTime();
+    const interval = setInterval(calculateRemainingTime, 1000);
 
-    return { isCooldown, startCooldown, remainingTime };
+    return () => clearInterval(interval);
+  }, [cooldownEndTime, isDevelopment, key]);
+
+  const startCooldown = useCallback((overrideDuration?: number) => {
+    if (isDevelopment) return;
+
+    const rawDuration = typeof overrideDuration === 'number' ? overrideDuration : duration;
+    const effectiveDuration = Math.max(0, Math.floor(rawDuration));
+    const endTime = effectiveDuration > 0 ? Date.now() + effectiveDuration : null;
+    const snapshot = writeCooldownSnapshot(key, endTime);
+    setCooldownEndTime(snapshot.endTime);
+    setRemainingTime(snapshot.remainingTime);
+  }, [duration, isDevelopment, key]);
+
+  const isCooldown = !isDevelopment && remainingTime > 0;
+
+  return { isCooldown, startCooldown, remainingTime };
+};
+
+export const useProviderModeCooldown = ({
+  baseKey,
+  currentMode,
+  systemDurationMs,
+  customDurationMs,
+}: UseProviderModeCooldownOptions) => {
+  const systemCooldown = useCooldown(
+    buildProviderCooldownStorageKey(baseKey, 'system'),
+    systemDurationMs,
+  );
+  const customCooldown = useCooldown(
+    buildProviderCooldownStorageKey(baseKey, 'custom'),
+    customDurationMs,
+  );
+
+  const currentCooldown = currentMode === 'custom' ? customCooldown : systemCooldown;
+  const otherCooldown = currentMode === 'custom' ? systemCooldown : customCooldown;
+
+  return {
+    ...currentCooldown,
+    otherMode: getOtherProviderCooldownMode(currentMode),
+    otherIsCooldown: otherCooldown.isCooldown,
+    otherRemainingTime: otherCooldown.remainingTime,
+  };
 };

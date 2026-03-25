@@ -400,6 +400,17 @@ export function stripStreamUpdateMetaComment(markdown: string): StrippedStreamMe
   };
 }
 
+export function stripAllStreamMetaComments(markdown: string): string {
+  if (typeof markdown !== 'string' || !markdown) return '';
+
+  let current = markdown;
+  while (true) {
+    const stripped = stripStreamUpdateMetaComment(current);
+    if (!stripped) return current;
+    current = stripped.strippedMarkdown;
+  }
+}
+
 const extractBestJsonCandidate = (commentInner: string): string => {
   const text = normalizeJsonishText(commentInner).trim();
 

@@ -7,10 +7,10 @@ import {
   countSeasonArchiveEligibleRows,
   listSeasonArchiveLeaderboardRows,
 } from '@/lib/database/season-archive';
+import { buildSeasonArchiveQueueSnapshot } from '@/lib/season-archive/snapshot';
 import type {
   SeasonArchiveEntity,
   SeasonArchiveEntityRef,
-  SeasonArchiveQueueSnapshot,
   SeasonArchiveSnapshotPolicy,
   SeasonArchiveV3,
   SeasonsConfig,
@@ -29,6 +29,13 @@ type LeaderboardRow = {
   losses: number;
   draws: number;
   ratingUpdatedAt: string | null;
+  seasonPeakRating: number | null;
+  seasonPeakGames: number | null;
+  seasonPeakAt: string | null;
+  seasonPeakTier: string | null;
+  seasonLowRating: number | null;
+  seasonLowGames: number | null;
+  seasonLowAt: string | null;
   dataCardName: string | null;
   dataCardDescription: string | null;
   authorName: string | null;
@@ -191,22 +198,6 @@ const ensureEntity = (
   return existing;
 };
 
-const buildQueueSnapshot = (
-  row: LeaderboardRow,
-): SeasonArchiveQueueSnapshot => {
-  const rating = typeof row.rating === 'number' ? row.rating : 0;
-  const games = typeof row.games === 'number' ? row.games : 0;
-
-  return {
-    rating,
-    games,
-    wins: typeof row.wins === 'number' ? row.wins : 0,
-    losses: typeof row.losses === 'number' ? row.losses : 0,
-    draws: typeof row.draws === 'number' ? row.draws : 0,
-    ratingUpdatedAt: typeof row.ratingUpdatedAt === 'string' ? row.ratingUpdatedAt : null,
-  };
-};
-
 const ingestRows = async (
   rows: LeaderboardRow[],
   options: {
@@ -246,7 +237,7 @@ const ingestRows = async (
       tagIds,
     });
 
-    const snapshot = buildQueueSnapshot(row);
+    const snapshot = buildSeasonArchiveQueueSnapshot(options.queue, row);
     entity.queues[options.queue] = snapshot;
   });
 };

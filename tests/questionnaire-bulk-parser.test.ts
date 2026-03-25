@@ -14,6 +14,10 @@ describe('问卷答案粘贴解析器', () => {
     const result = parseBulkQuestionnaireAnswers(input, { expectedCount: 2 });
     expect(result.format).toBe('qa');
     expect(result.entries.map(entry => entry.value)).toEqual(['小红', '苹果']);
+    expect(result.entries[0]).toMatchObject({
+      question: '你叫什么？',
+      questionnaireTitle: '基础问卷',
+    });
   });
 
   it('能保留空答案以避免序号错位（Q/A）', () => {
@@ -70,6 +74,31 @@ describe('问卷答案粘贴解析器', () => {
     const result = parseBulkQuestionnaireAnswers(input);
     expect(result.format).toBe('json');
     expect(result.entries.map(entry => entry.value)).toEqual(['小红', '苹果']);
+  });
+
+  it('能保留 JSON 问卷答案对象中的匹配元数据', () => {
+    const input = JSON.stringify({
+      answerEntries: [
+        {
+          key: 'scope-1::MG-1',
+          question: '你叫什么？',
+          answer: '小红',
+          questionId: 'MG-1',
+          questionnaireId: 'mg-custom',
+          questionnaireTitle: '自定义问卷',
+        },
+      ],
+    });
+    const result = parseBulkQuestionnaireAnswers(input);
+    expect(result.format).toBe('json');
+    expect(result.entries[0]).toMatchObject({
+      key: 'scope-1::MG-1',
+      question: '你叫什么？',
+      value: '小红',
+      questionId: 'MG-1',
+      questionnaireId: 'mg-custom',
+      questionnaireTitle: '自定义问卷',
+    });
   });
 
   it('能按问题 id 映射 JSON 对象（如 MG-1/MG-2）', () => {

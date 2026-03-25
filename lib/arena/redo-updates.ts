@@ -38,6 +38,25 @@ const stripMarkdown = (text: string): string =>
     .replace(/^\s*[-*]\s+/, '')
     .trim();
 
+const extractInlineFieldValueFromLines = (
+  lines: string[],
+  labels: string[]
+): string => {
+  const labelPattern = labels.map((label) => label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+  const inlineRegex = new RegExp(`^(?:${labelPattern})\\s*[:：]\\s*(.+)$`, 'i');
+
+  for (const line of lines) {
+    const cleaned = stripMarkdown((line ?? '').trim()).replace(/[*~]/g, '').trim();
+    if (!cleaned) continue;
+    const matched = cleaned.match(inlineRegex);
+    if (!matched?.[1]) continue;
+    const value = stripMarkdown(matched[1]);
+    if (value) return value;
+  }
+
+  return '';
+};
+
 export const parseBattleReportFromMarkdown = (
   markdown: string,
   mode: string
@@ -79,12 +98,9 @@ export const parseBattleReportFromMarkdown = (
       winner = stripMarkdown(meaningful[0]);
     }
   } else {
-    const inlineMatch =
-      normalized.match(/(?:胜利者|获胜者|优胜者)[：:]\s*(.+)/) ??
-      (mode === 'daily' ? normalized.match(/参与(?:者|角色)[：:]\s*(.+)/) : null);
-    if (inlineMatch?.[1]) {
-      winner = stripMarkdown(inlineMatch[1]);
-    }
+    winner =
+      extractInlineFieldValueFromLines(lines, ['胜利者', '获胜者', '优胜者']) ||
+      (mode === 'daily' ? extractInlineFieldValueFromLines(lines, ['参与者', '参与角色']) : '');
   }
 
   if (!headline || !winner) return null;

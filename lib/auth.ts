@@ -450,7 +450,7 @@ export const dataCardApi = {
   // 创建数据卡
   async createCard(type: 'character' | 'scenario' | 'history' | 'questionnaire', name: string, description: string, data: any, isPublic: number = 0): Promise<{
     success: boolean;
-    id?: number;
+    id?: string;
     error?: string;
   }> {
     try {

@@ -34,6 +34,7 @@ import RecycleBinModal from '../components/CharManager/RecycleBinModal';
 import NarrativeHistoryCardEditorModal from '../components/CharManager/NarrativeHistoryCardEditorModal';
 import QuestionnaireCompatModal, { type QuestionnaireCompatTargetCard } from '../components/CharManager/QuestionnaireCompatModal';
 import ScenarioEditor from '../components/ScenarioEditor';
+import ScenarioBattleStoryPlanEditor from '@/components/ScenarioBattleStoryPlanEditor';
 import { UserWithTitle } from '@/components/UserTitle';
 import type { UserBadge } from '@/types/badge';
 import type { CharacterCurrentState, CurrentStateField, NarrativeHistoryDataCardV1 } from '@/types/arena';
@@ -988,6 +989,10 @@ const CharacterManagerPage: React.FC = () => {
 
                 if (currentPath === 'adjudicationEvents') {
                     // 内嵌随机事件完全豁免，增删改均不会破坏原生性
+                    continue;
+                }
+
+                if (key.startsWith('_')) {
                     continue;
                 }
 
@@ -2052,6 +2057,12 @@ const CharacterManagerPage: React.FC = () => {
                                     />
                                 ) : (
                                     <div className="space-y-4">
+                                        {currentTemplate === 'general-scenario' ? (
+                                            <ScenarioBattleStoryPlanEditor
+                                                data={characterData}
+                                                onChange={handleFieldChange}
+                                            />
+                                        ) : null}
                                         {renderFormFields(characterData)}
                                     </div>
                                 )}

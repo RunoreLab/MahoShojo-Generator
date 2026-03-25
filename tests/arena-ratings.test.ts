@@ -2,8 +2,10 @@ import { describe, expect, test } from 'bun:test';
 
 import {
   buildPairKey,
+  buildInitialStrictSeasonState,
   computeEloUpdate,
   computeKFactor,
+  computeStrictSeasonExtremaAfterApplied,
   getStrictRangeCheckResult,
   isFreeEligible,
   isStrictEligible,
@@ -17,6 +19,7 @@ import {
   type ArenaEligibilitySnapshot,
   type ArenaRatingSnapshot,
 } from '@/lib/database/arena-ratings';
+import { compareArenaTier, pickHigherArenaTier } from '@/lib/arena/tier';
 import type { BattleReportGenerationCombatantRow } from '@/lib/database/battle-report-generation-combatants';
 
 describe('arena-ratings: Elo / winner parse', () => {
@@ -105,6 +108,82 @@ describe('arena-ratings: Elo / winner parse', () => {
     const a = { entityType: 'data_card' as const, entityId: 'aaa' };
     const b = { entityType: 'preset' as const, entityId: 'bbb.json' };
     expect(buildPairKey(a, b)).toBe(buildPairKey(b, a));
+  });
+});
+
+describe('arena-ratings: season extrema / tier helpers', () => {
+  test('tier 比较：女王高于权杖', () => {
+    expect(compareArenaTier('女王', '权杖')).toBeGreaterThan(0);
+  });
+
+  test('season extrema：更高 afterRating 刷新 peak，不改 low', () => {
+    const nowIso = new Date(0).toISOString();
+    const appliedAtIso = new Date(1000).toISOString();
+    const current = {
+      seasonPeakRating: 1200,
+      seasonPeakGames: 4,
+      seasonPeakAt: nowIso,
+      seasonLowRating: 900,
+      seasonLowGames: 2,
+      seasonLowAt: nowIso,
+    };
+    const updated = computeStrictSeasonExtremaAfterApplied({
+      current,
+      afterRating: 1300,
+      afterGames: 5,
+      appliedAtIso,
+    });
+    expect(updated.seasonPeakRating).toBe(1300);
+    expect(updated.seasonPeakGames).toBe(5);
+    expect(updated.seasonPeakAt).toBe(appliedAtIso);
+    expect(updated.seasonLowRating).toBe(900);
+    expect(updated.seasonLowGames).toBe(2);
+    expect(updated.seasonLowAt).toBe(nowIso);
+  });
+
+  test('season extrema：更低 afterRating 刷新 low，不改 peak', () => {
+    const nowIso = new Date(0).toISOString();
+    const appliedAtIso = new Date(1000).toISOString();
+    const current = {
+      seasonPeakRating: 1200,
+      seasonPeakGames: 4,
+      seasonPeakAt: nowIso,
+      seasonLowRating: 900,
+      seasonLowGames: 2,
+      seasonLowAt: nowIso,
+    };
+    const updated = computeStrictSeasonExtremaAfterApplied({
+      current,
+      afterRating: 800,
+      afterGames: 5,
+      appliedAtIso,
+    });
+    expect(updated.seasonLowRating).toBe(800);
+    expect(updated.seasonLowGames).toBe(5);
+    expect(updated.seasonLowAt).toBe(appliedAtIso);
+    expect(updated.seasonPeakRating).toBe(1200);
+    expect(updated.seasonPeakGames).toBe(4);
+    expect(updated.seasonPeakAt).toBe(nowIso);
+  });
+
+  test('pickHigherArenaTier：花牌 < 权杖', () => {
+    expect(pickHigherArenaTier('花牌', '权杖')).toBe('权杖');
+  });
+
+  test('pickHigherArenaTier：权杖 < 女王', () => {
+    expect(pickHigherArenaTier('权杖', '女王')).toBe('女王');
+  });
+
+  test('buildInitialStrictSeasonState 返回默认 extrema 与 seasonPeakTier', () => {
+    const nowIso = new Date(0).toISOString();
+    const state = buildInitialStrictSeasonState(1000, nowIso);
+    expect(state.seasonPeakRating).toBe(1000);
+    expect(state.seasonPeakGames).toBe(0);
+    expect(state.seasonPeakAt).toBe(nowIso);
+    expect(state.seasonPeakTier).toBe('无牌');
+    expect(state.seasonLowRating).toBe(1000);
+    expect(state.seasonLowGames).toBe(0);
+    expect(state.seasonLowAt).toBe(nowIso);
   });
 });
 

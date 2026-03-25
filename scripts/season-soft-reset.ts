@@ -546,6 +546,9 @@ END`,
       });
     }
   }
+  if (targetQueues.includes('strict')) {
+    console.log('[season-soft-reset] strict season extrema 与赛季最高段位已同步重置为新赛季起始值');
+  }
 
   const after = await queryQueueStats(queue);
   console.log('[season-soft-reset] 重置后：', after);

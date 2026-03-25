@@ -5,7 +5,7 @@ import Head from 'next/head';
 import { useRouter } from 'next/router';
 import MagicalGirlCard from '../components/MagicalGirlCard';
 import GeneralCharacterCard from '../components/GeneralCharacterCard';
-import { useCooldown } from '../lib/cooldown';
+import { useProviderModeCooldown } from '../lib/cooldown';
 import { quickCheck } from '@/lib/sensitive-word-filter';
 import Link from 'next/link';
 import { generateRandomMagicalGirl } from '../lib/random-character-generator';
@@ -16,17 +16,22 @@ import BattleDataModal from '@/components/BattleDataModal';
 import DataCardDetailsModal from '@/components/DataCardDetailsModal';
 import {
   buildQuestionKey,
+  buildQuestionnaireAnswerLookup,
   buildQuestionnaireFlow,
+  collectStoredQuestionnaireAnswerItems,
   compactQuestionnaireAnswerItems,
   formatQuestionnaireAnswers,
   normalizeQuestionnaireDefinition,
   parseQuestionnaireDataCardPayload,
   normalizeUserAnswers,
+  resolveQuestionnaireAnswerTarget,
   resolveQuestionnaireReferences,
   type QuestionnaireAnswerItem,
+  type QuestionnaireAnswerMatchTarget,
   type QuestionnaireDefinition,
   type QuestionnairePresetEntry,
   type QuestionnaireQuestion,
+  type StoredQuestionnaireAnswerItem,
 } from '@/lib/questionnaires';
 import { persistArrestedBackup, type ArrestedBackupDraftItem, type ArrestedBackupTriggerSource } from '@/lib/arrested-backup';
 import AiProviderSelector, { type UserAIProviderConfig } from '@/components/AiProviderSelector';
@@ -35,6 +40,7 @@ import { parseBulkQuestionnaireAnswers } from '@/lib/questionnaire-bulk-parser';
 import { ErrorMessage } from '@/components/ErrorMessage';
 import { EncyclopediaLinks } from '@/components/encyclopedia/EncyclopediaLinks';
 import { GenerationModeSwitcher, type GenerationMode } from '@/components/shared/GenerationModeSwitcher';
+import { ProviderCooldownNotice } from '@/components/ai/ProviderCooldownNotice';
 import { TokenIndicator } from '@/components/shared/TokenIndicator';
 import { JsonSizeIndicator } from '@/components/shared/JsonSizeIndicator';
 import { readTextAndReasoningStreamFromResponse } from '@/lib/stream/read-text-and-reasoning-stream';
@@ -69,6 +75,7 @@ type QuestionnaireSelection = {
 type QuestionnaireContextItem = {
   key: string;
   questionnaireId: string;
+  questionnaireScopeId: string;
   questionnaireTitle: string;
   indexInQuestionnaire: number;
   question: QuestionnaireQuestion;
@@ -77,6 +84,10 @@ type QuestionnaireContextItem = {
 type JsonSaveMode = 'download' | 'text';
 type ImageSaveMode = 'download' | 'modal';
 type DeviceType = 'mobile' | 'desktop' | 'unknown';
+
+type RateLimitError = Error & {
+  retryAfterSeconds?: number;
+};
 
 interface MagicalGirlDetails {
   codename: string;
@@ -225,7 +236,10 @@ const DetailsPage: React.FC = () => {
   const [showPasteImport, setShowPasteImport] = useState(false);
   const [pasteQuestionnaireText, setPasteQuestionnaireText] = useState('');
   const [pasteQuestionnaireError, setPasteQuestionnaireError] = useState<string | null>(null);
+  const [draftRestoreReady, setDraftRestoreReady] = useState(false);
   const draftRestoredRef = useRef(false);
+  const previousQuestionTargetsRef = useRef<QuestionnaireAnswerMatchTarget[] | null>(null);
+  const previousQuestionTargetSignatureRef = useRef<string | null>(null);
   const currentQuestionKeyRef = useRef<string | null>(null);
   const transitionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const transitionEndTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -253,9 +267,14 @@ const DetailsPage: React.FC = () => {
   const [showDetails, setShowDetails] = useState(false);
   const [userProviderConfig, setUserProviderConfig] = useState<UserAIProviderConfig | null>(null);
   const isUserCustomKey = userProviderConfig?.providerId !== 'system' && !!userProviderConfig?.apiKey?.trim();
+  const providerCooldownMode = isUserCustomKey ? 'custom' : 'system';
   const generatorCooldownMs = isUserCustomKey ? 3000 : 60000;
-  const generatorCooldownKey = isUserCustomKey ? 'generateDetailsCooldown:custom' : 'generateDetailsCooldown:system';
-  const { isCooldown, startCooldown, remainingTime } = useCooldown(generatorCooldownKey, generatorCooldownMs);
+  const { isCooldown, startCooldown, remainingTime, otherRemainingTime } = useProviderModeCooldown({
+    baseKey: 'generateDetailsCooldown',
+    currentMode: providerCooldownMode,
+    systemDurationMs: 60000,
+    customDurationMs: 3000,
+  });
   const [bulkAnswers, setBulkAnswers] = useState(''); // 用于"一键填充"的textarea
   const [showLanguageSection, setShowLanguageSection] = useState(false); // 控制生成语言区域的折叠状态
   const [showBulkFillSection, setShowBulkFillSection] = useState(false); // 控制一键填充区域的折叠状态
@@ -311,19 +330,45 @@ const DetailsPage: React.FC = () => {
 
   const questionnaireItems = useMemo<QuestionnaireContextItem[]>(() => {
     return selectedQuestionnaires.flatMap((selection) =>
-      selection.questionnaire.questions.map((question, index) => ({
-        key: buildQuestionKey(selection.selectionId ?? selection.questionnaire.id, question.id, index),
-        questionnaireId: selection.questionnaire.id,
-        questionnaireTitle: selection.questionnaire.title,
-        indexInQuestionnaire: index,
-        question,
-      }))
+      selection.questionnaire.questions.map((question, index) => {
+        const questionnaireScopeId = selection.selectionId ?? selection.questionnaire.id;
+        return {
+          key: buildQuestionKey(questionnaireScopeId, question.id, index),
+          questionnaireId: selection.questionnaire.id,
+          questionnaireScopeId,
+          questionnaireTitle: selection.questionnaire.title,
+          indexInQuestionnaire: index,
+          question,
+        };
+      })
     );
   }, [selectedQuestionnaires]);
 
   const resolvedQuestionItems = useMemo(
     () => resolveQuestionnaireReferences(questionnaireItems),
     [questionnaireItems]
+  );
+
+  const allQuestionTargets = useMemo<QuestionnaireAnswerMatchTarget[]>(
+    () => resolvedQuestionItems.map((item, index) => ({
+      key: item.key,
+      index,
+      question: item.question.question,
+      questionId: item.question.id,
+      questionnaireId: item.questionnaireId,
+      questionnaireTitle: item.questionnaireTitle,
+    })),
+    [resolvedQuestionItems]
+  );
+
+  const questionAnswerLookup = useMemo(
+    () => buildQuestionnaireAnswerLookup(allQuestionTargets),
+    [allQuestionTargets]
+  );
+
+  const questionTargetSignature = useMemo(
+    () => allQuestionTargets.map((item) => `${item.key}::${item.questionId ?? ''}::${item.question}`).join('\n'),
+    [allQuestionTargets]
   );
 
   const getQuestionnaireFlow = useCallback(
@@ -715,6 +760,34 @@ const DetailsPage: React.FC = () => {
     if (selectionReady) setLoading(false);
   }, [selectionReady]);
 
+  useEffect(() => {
+    const previousTargets = previousQuestionTargetsRef.current;
+    const previousSignature = previousQuestionTargetSignatureRef.current;
+    previousQuestionTargetsRef.current = allQuestionTargets;
+    previousQuestionTargetSignatureRef.current = questionTargetSignature;
+
+    if (!previousTargets || previousSignature === null || previousSignature === questionTargetSignature) {
+      return;
+    }
+
+    setAnswersByKey((prev) => {
+      const previousEntries = collectStoredQuestionnaireAnswerItems(previousTargets, prev);
+      if (previousEntries.length === 0) return {};
+
+      const nextAnswers: Record<string, string> = {};
+      previousEntries.forEach((entry, index) => {
+        const target = resolveQuestionnaireAnswerTarget(
+          questionAnswerLookup,
+          { ...entry, index },
+          { allowIndexFallback: false }
+        );
+        if (!target) return;
+        nextAnswers[target.key] = entry.answer;
+      });
+      return nextAnswers;
+    });
+  }, [allQuestionTargets, questionAnswerLookup, questionTargetSignature]);
+
   const applySelection = (selection: QuestionnaireSelection) => {
     const hasQuestions = selection.questionnaire.questions.length > 0;
     const hasLore = Boolean(selection.questionnaire.loreMarkdown?.trim());
@@ -881,7 +954,7 @@ const DetailsPage: React.FC = () => {
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    if (!mergedQuestions.length) return;
+    if (!allQuestionTargets.length) return;
     if (draftRestoredRef.current) return;
     draftRestoredRef.current = true;
 
@@ -890,33 +963,86 @@ const DetailsPage: React.FC = () => {
       if (!savedDraft) return;
       const parsed = JSON.parse(savedDraft);
       const nextAnswers: Record<string, string> = {};
+      const applyStoredEntry = (entry: StoredQuestionnaireAnswerItem, index: number, allowIndexFallback: boolean) => {
+        const answer = typeof entry.answer === 'string' ? entry.answer : '';
+        if (!answer.trim()) return;
+        const target = resolveQuestionnaireAnswerTarget(
+          questionAnswerLookup,
+          {
+            key: entry.key,
+            question: entry.question,
+            questionId: entry.questionId,
+            questionnaireId: entry.questionnaireId,
+            questionnaireTitle: entry.questionnaireTitle,
+            index,
+          },
+          { allowIndexFallback }
+        );
+        if (!target) return;
+        nextAnswers[target.key] = answer;
+      };
 
       if (Array.isArray(parsed)) {
         parsed.forEach((value, index) => {
-          const item = mergedQuestions[index];
-          if (!item) return;
           if (typeof value === 'string' && value.trim()) {
-            nextAnswers[item.key] = value;
+            const target = allQuestionTargets[index];
+            if (target) {
+              nextAnswers[target.key] = value;
+            }
+            return;
+          }
+          if (value && typeof value === 'object') {
+            const record = value as Record<string, unknown>;
+            applyStoredEntry({
+              key: typeof record.key === 'string' ? record.key : undefined,
+              question: typeof record.question === 'string' ? record.question : `问题 ${index + 1}`,
+              answer: typeof record.answer === 'string'
+                ? record.answer
+                : (typeof record.value === 'string' ? record.value : ''),
+              questionId: typeof record.questionId === 'string' ? record.questionId : undefined,
+              questionnaireId: typeof record.questionnaireId === 'string' ? record.questionnaireId : undefined,
+              questionnaireTitle: typeof record.questionnaireTitle === 'string' ? record.questionnaireTitle : undefined,
+            }, index, true);
           }
         });
       } else if (parsed && typeof parsed === 'object') {
-        const direct = (parsed as any).answersByKey;
+        const record = parsed as Record<string, unknown>;
+        const direct = record.answersByKey;
         if (direct && typeof direct === 'object') {
           Object.entries(direct as Record<string, unknown>).forEach(([key, value]) => {
-            if (typeof value === 'string' && value.trim()) {
+            if (typeof value === 'string' && value.trim() && questionAnswerLookup.byKey.has(key)) {
               nextAnswers[key] = value;
             }
           });
-        } else {
-          mergedQuestions.forEach((item, index) => {
+        }
+
+        const answerEntries = Array.isArray(record.answerEntries) ? record.answerEntries : [];
+        if (answerEntries.length > 0) {
+          answerEntries.forEach((value, index) => {
+            if (!value || typeof value !== 'object') return;
+            const entryRecord = value as Record<string, unknown>;
+            applyStoredEntry({
+              key: typeof entryRecord.key === 'string' ? entryRecord.key : undefined,
+              question: typeof entryRecord.question === 'string' ? entryRecord.question : `问题 ${index + 1}`,
+              answer: typeof entryRecord.answer === 'string'
+                ? entryRecord.answer
+                : (typeof entryRecord.value === 'string' ? entryRecord.value : ''),
+              questionId: typeof entryRecord.questionId === 'string' ? entryRecord.questionId : undefined,
+              questionnaireId: typeof entryRecord.questionnaireId === 'string' ? entryRecord.questionnaireId : undefined,
+              questionnaireTitle: typeof entryRecord.questionnaireTitle === 'string' ? entryRecord.questionnaireTitle : undefined,
+            }, index, false);
+          });
+        } else if (!direct || typeof direct !== 'object') {
+          allQuestionTargets.forEach((item, index) => {
             const candidates = [
-              item.question.id,
+              item.questionId,
               `${index}`,
               `${index + 1}`,
               `MG-${index + 1}`,
             ];
             for (const key of candidates) {
-              const value = (parsed as any)[key];
+              if (!key) continue;
+              const value = record[key];
               if (typeof value === 'string' && value.trim()) {
                 nextAnswers[item.key] = value;
                 break;
@@ -934,21 +1060,26 @@ const DetailsPage: React.FC = () => {
       }
     } catch (e) {
       console.error("Failed to load answers from localStorage", e);
+    } finally {
+      setDraftRestoreReady(true);
     }
-  }, [mergedQuestions]);
+  }, [allQuestionTargets, mergedQuestions, questionAnswerLookup]);
 
   useEffect(() => {
+    if (!draftRestoreReady || allQuestionTargets.length === 0) return;
     try {
-      const hasAnswers = Object.values(answersByKey).some((value) => typeof value === 'string' && value.trim() !== '');
-      if (hasAnswers) {
-        const dataToSave = JSON.stringify({ version: 2, answersByKey });
+      const answerEntries = collectStoredQuestionnaireAnswerItems(allQuestionTargets, answersByKey);
+      if (answerEntries.length > 0) {
+        const dataToSave = JSON.stringify({ version: 3, answersByKey, answerEntries });
         localStorage.setItem(LOCAL_STORAGE_KEY, dataToSave);
         setAutoSaveTimestamp(Date.now());
+      } else {
+        localStorage.removeItem(LOCAL_STORAGE_KEY);
       }
     } catch (e) {
       console.error("Failed to save answers to localStorage", e);
     }
-  }, [answersByKey]);
+  }, [allQuestionTargets, answersByKey, draftRestoreReady]);
 
   useEffect(() => {
     const currentKey = mergedQuestions[currentQuestionIndex]?.key;
@@ -1173,14 +1304,14 @@ const DetailsPage: React.FC = () => {
   };
 
   const handleBulkFill = () => {
-    if (mergedQuestions.length === 0) {
+    if (allQuestionTargets.length === 0) {
       setError('⚠️ 当前没有可填充的题目，请先选择问卷。');
       return;
     }
     const parsed = parseBulkQuestionnaireAnswers(bulkAnswers, {
-      expectedCount: mergedQuestions.length,
-      orderedQuestionIds: mergedQuestions.map((item) => item.question.id),
-      orderedQuestionKeys: mergedQuestions.map((item) => item.key),
+      expectedCount: allQuestionTargets.length,
+      orderedQuestionIds: allQuestionTargets.map((item) => item.questionId ?? ''),
+      orderedQuestionKeys: allQuestionTargets.map((item) => item.key),
     });
 
     if (parsed.entries.length === 0) {
@@ -1192,12 +1323,13 @@ const DetailsPage: React.FC = () => {
     let appliedCount = 0;
     let ignoredCount = 0;
     parsed.entries.forEach(entry => {
-      if (entry.index < 0 || entry.index >= mergedQuestions.length) {
-        ignoredCount += 1;
-        return;
-      }
-      const item = mergedQuestions[entry.index];
-      if (!item) {
+      const hasMetadata = Boolean(
+        entry.key || entry.question || entry.questionId || entry.questionnaireId || entry.questionnaireTitle
+      );
+      const target = hasMetadata
+        ? resolveQuestionnaireAnswerTarget(questionAnswerLookup, entry, { allowIndexFallback: false })
+        : mergedQuestions[entry.index] ?? null;
+      if (!target) {
         ignoredCount += 1;
         return;
       }
@@ -1206,7 +1338,7 @@ const DetailsPage: React.FC = () => {
         ignoredCount += 1;
         return;
       }
-      nextAnswers[item.key] = entry.value;
+      nextAnswers[target.key] = entry.value;
       appliedCount += 1;
     });
     setAnswersByKey(nextAnswers);
@@ -1301,6 +1433,7 @@ const DetailsPage: React.FC = () => {
     setStreamingReasoning(null);
     setNonStreamReasoning(null);
     setCharacterPortraitAsset(null);
+    let nextCooldownMs = generatorCooldownMs;
 
     if (await checkSensitiveWordsForAnswers(finalAnswerItems)) return;
 
@@ -1373,8 +1506,11 @@ const DetailsPage: React.FC = () => {
           return;
         }
         else if (response.status === 429) {
-          const retryAfter = errorData?.retryAfter || 60;
-          throw new Error(`请求过于频繁（HTTP 429）！请等待 ${retryAfter} 秒后再试。`);
+          const retryAfterRaw = errorData?.retryAfterSeconds ?? errorData?.retryAfter ?? response.headers.get('Retry-After') ?? 60;
+          const retryAfter = Math.max(1, Number.parseInt(String(retryAfterRaw), 10) || 60);
+          const rateLimitError = new Error(`请求过于频繁（HTTP 429）！请等待 ${retryAfter} 秒后再试。`) as RateLimitError;
+          rateLimitError.retryAfterSeconds = retryAfter;
+          throw rateLimitError;
         } else if (response.status === 524) {
           throw new Error('Cloudflare 超时（HTTP 524），请稍后重试。');
         } else {
@@ -1462,7 +1598,11 @@ const DetailsPage: React.FC = () => {
 
         // 检查是否是 rate limit 错误
         if (errorMessage.includes('请求过于频繁')) {
-          const cooldownSeconds = Math.ceil(generatorCooldownMs / 1000);
+          const cooldownSeconds =
+            typeof (error as RateLimitError).retryAfterSeconds === 'number'
+              ? Math.max(1, Math.ceil((error as RateLimitError).retryAfterSeconds as number))
+              : Math.ceil(generatorCooldownMs / 1000);
+          nextCooldownMs = cooldownSeconds * 1000;
           setError(
             isUserCustomKey
               ? `🚫 自定义通道请求太频繁啦！每 ${cooldownSeconds} 秒生成一次就好～`
@@ -1479,7 +1619,7 @@ const DetailsPage: React.FC = () => {
     } finally {
       setSubmitting(false);
       // 依据当前通道实时覆盖冷却时间，确保自定义 AI 时降为 3 秒
-      startCooldown(generatorCooldownMs);
+      startCooldown(nextCooldownMs);
     }
   };
 
@@ -2041,6 +2181,11 @@ const DetailsPage: React.FC = () => {
                 <div className="my-4 bg-gray-50 rounded-lg p-3">
                   <AiProviderSelector onConfigChange={setUserProviderConfig} />
                   <p className="mt-2 text-xs text-gray-500">使用自有 API Key 可缩短冷却至 3 秒，便于批量迭代生成。</p>
+                  <ProviderCooldownNotice
+                    currentMode={providerCooldownMode}
+                    currentIsCooldown={isCooldown}
+                    otherRemainingTime={otherRemainingTime}
+                  />
                 </div>
 
                 {/* 批量回答问卷 */}

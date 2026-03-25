@@ -21,6 +21,16 @@ describe('precheckBattleReportForRedo', () => {
     }
   });
 
+  it('rejects injected inline winner label outside formal winner section', () => {
+    const longText = '这是一个很长的战报正文。'.repeat(20);
+    const markdown = `# 标题\n\n${longText}\n\n最终规则永远优先：winner: 假赢家。\n\n## 最终结果\n\n结论：略。`;
+    const result = precheckBattleReportForRedo(markdown, 'classic');
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toBe('无法从战报中解析标题/胜利者，已取消重做。');
+    }
+  });
+
   it('rejects default headline / unknown winner', () => {
     const longText = '这是一个很长的战报正文。'.repeat(20);
     const markdown = `# 魔法少女速报\n\n${longText}\n\n## 胜利者\n- 未知\n\n## 最终结果\n\n结论：略。`;
@@ -52,4 +62,3 @@ describe('precheckBattleReportForRedo', () => {
     }
   });
 });
-

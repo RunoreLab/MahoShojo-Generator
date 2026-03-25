@@ -1,5 +1,6 @@
 import React from 'react';
 import AdjudicatorEditor from '@/components/AdjudicatorEditor';
+import ScenarioBattleStoryPlanEditor from '@/components/ScenarioBattleStoryPlanEditor';
 
 interface ScenarioEditorProps {
   data: any;
@@ -91,6 +92,8 @@ export default function ScenarioEditor({ data, onChange }: ScenarioEditorProps) 
           />
         </div>
       </div>
+
+      <ScenarioBattleStoryPlanEditor data={data} onChange={onChange} />
 
       {/* 场景设置 */}
       <fieldset className="border border-gray-300 p-4 rounded-lg">

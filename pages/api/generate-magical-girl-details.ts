@@ -5,12 +5,21 @@ import { getRandomFlowers } from '../../lib/random-choose-hana-name';
 // import { saveToD1 } from '../../lib/d1';
 import { getLogger } from '../../lib/logger';
 import { generateSignature } from '../../lib/signature'; // 导入签名工具
-import { compactQuestionnaireAnswerItems, formatQuestionnaireAnswers, normalizeUserAnswers, type QuestionnaireAnswerItem } from '../../lib/questionnaires';
+import {
+  buildQuestionnaireAnswerLookup,
+  compactQuestionnaireAnswerItems,
+  formatQuestionnaireAnswers,
+  normalizeUserAnswers,
+  resolveQuestionnaireAnswerTarget,
+  type QuestionnaireAnswerItem,
+} from '../../lib/questionnaires';
 import { getAnswerLimitInfo, isAnswerOverLimit } from '@/lib/questionnaire-limits';
 import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
 import { buildJsonResponseWithOptionalAiMeta } from '@/lib/ai/meta-response';
+import { acquirePublicAiRateLimit, buildPublicAiRateLimitResponse, inferPublicAiProviderMode } from '@/lib/ai/public-rate-limit';
 import { type AIProvider } from '@/lib/config';
 import { getDataCardById } from '@/lib/database/data-cards';
+import { enforceTextSafety } from '@/lib/content-safety/server';
 import { recordUserActivityFromRequest } from '@/lib/user-activity/record';
 import presetIndex from '@/public/questionnaires/presets/index.json';
 
@@ -316,39 +325,47 @@ const extractAnswerQuestionnaireIds = (rawAnswers: unknown): Set<string> => {
   return ids;
 };
 
-type QuestionLookup = {
-  byId: Map<string, RequestQuestion & { questionnaireId: string; questionnaireTitle: string }>;
-  byCompositeId: Map<string, RequestQuestion & { questionnaireId: string; questionnaireTitle: string }>;
-  byQuestion: Map<string, RequestQuestion & { questionnaireId: string; questionnaireTitle: string }>;
-  ordered: Array<RequestQuestion & { questionnaireId: string; questionnaireTitle: string }>;
-};
-
-const buildQuestionLookup = (questionnaires: RequestQuestionnaire[]): QuestionLookup => {
-  const byId = new Map<string, RequestQuestion & { questionnaireId: string; questionnaireTitle: string }>();
-  const byCompositeId = new Map<string, RequestQuestion & { questionnaireId: string; questionnaireTitle: string }>();
-  const byQuestion = new Map<string, RequestQuestion & { questionnaireId: string; questionnaireTitle: string }>();
-  const ordered: Array<RequestQuestion & { questionnaireId: string; questionnaireTitle: string }> = [];
+const buildQuestionLookup = (questionnaires: RequestQuestionnaire[]) => {
+  const ordered: Array<RequestQuestion & {
+    key: string;
+    index: number;
+    questionId: string;
+    questionnaireId: string;
+    questionnaireTitle: string;
+  }> = [];
 
   questionnaires.forEach((questionnaire) => {
     questionnaire.questions.forEach((question) => {
-      const payload = {
+      ordered.push({
         ...question,
+        key: `${questionnaire.id}::${question.id}`,
+        index: ordered.length,
+        questionId: question.id,
         questionnaireId: questionnaire.id,
         questionnaireTitle: questionnaire.title,
-      };
-      ordered.push(payload);
-      byCompositeId.set(`${questionnaire.id}::${question.id}`, payload);
-      if (!byId.has(question.id)) {
-        byId.set(question.id, payload);
-      }
-      const textKey = question.question.trim();
-      if (textKey && !byQuestion.has(textKey)) {
-        byQuestion.set(textKey, payload);
-      }
+      });
     });
   });
 
-  return { byId, byCompositeId, byQuestion, ordered };
+  return buildQuestionnaireAnswerLookup(ordered);
+};
+
+const resolveLookupQuestion = (
+  lookup: ReturnType<typeof buildQuestionLookup>,
+  item: QuestionnaireAnswerItem,
+  index: number
+) => {
+  return resolveQuestionnaireAnswerTarget(
+    lookup,
+    {
+      question: item.question,
+      questionId: item.questionId,
+      questionnaireId: item.questionnaireId,
+      questionnaireTitle: item.questionnaireTitle,
+      index,
+    },
+    { allowIndexFallback: true }
+  );
 };
 
 const resolveAnswerItems = (
@@ -365,27 +382,15 @@ const resolveAnswerItems = (
   normalized.forEach((item, index) => {
     const answer = item.answer?.trim() ?? '';
     if (!answer) return;
-    let resolved = null as (RequestQuestion & { questionnaireId: string; questionnaireTitle: string }) | null;
-    if (item.questionnaireId && item.questionId) {
-      resolved = lookup.byCompositeId.get(`${item.questionnaireId}::${item.questionId}`) ?? null;
-    }
-    if (!resolved && item.questionId) {
-      resolved = lookup.byId.get(item.questionId) ?? null;
-    }
-    if (!resolved && item.question) {
-      resolved = lookup.byQuestion.get(item.question.trim()) ?? null;
-    }
-    if (!resolved && lookup.ordered[index]) {
-      resolved = lookup.ordered[index];
-    }
+    const resolved = resolveLookupQuestion(lookup, item, index);
     if (preferResolved && !resolved) return;
     const question = preferResolved
-      ? (resolved as RequestQuestion & { questionnaireId: string; questionnaireTitle: string }).question
+      ? resolved!.question
       : item.question?.trim() || resolved?.question || `问题 ${index + 1}`;
     resolvedItems.push({
       question,
       answer,
-      questionId: preferResolved ? resolved!.id : item.questionId ?? resolved?.id,
+      questionId: preferResolved ? resolved!.questionId : item.questionId ?? resolved?.questionId,
       questionnaireId: preferResolved ? resolved!.questionnaireId : item.questionnaireId ?? resolved?.questionnaireId,
       questionnaireTitle: preferResolved ? resolved!.questionnaireTitle : item.questionnaireTitle ?? resolved?.questionnaireTitle,
     });
@@ -401,19 +406,7 @@ const findOverLimitAnswer = (
   const lookup = buildQuestionLookup(questionnaires);
   for (const [index, item] of items.entries()) {
     if (!item.answer) continue;
-    let resolved = null as (RequestQuestion & { questionnaireId: string; questionnaireTitle: string }) | null;
-    if (item.questionnaireId && item.questionId) {
-      resolved = lookup.byCompositeId.get(`${item.questionnaireId}::${item.questionId}`) ?? null;
-    }
-    if (!resolved && item.questionId) {
-      resolved = lookup.byId.get(item.questionId) ?? null;
-    }
-    if (!resolved && item.question) {
-      resolved = lookup.byQuestion.get(item.question.trim()) ?? null;
-    }
-    if (!resolved && lookup.ordered[index]) {
-      resolved = lookup.ordered[index];
-    }
+    const resolved = resolveLookupQuestion(lookup, item, index);
     if (!isAnswerOverLimit(item.answer, resolved?.maxLength ?? null)) continue;
     const limitInfo = getAnswerLimitInfo(resolved?.maxLength ?? null);
     const questionLabel = resolved?.question || item.question || `问题 ${index + 1}`;
@@ -474,14 +467,21 @@ async function handler(req: Request): Promise<Response> {
     });
   }
 
-  const body = await req.json();
-  const rawAnswers = body?.answers;
-  const rawQuestionnaires = body?.questionnaires;
-  const requestedNativeSignature = body?.allowNativeSignature === true;
-  const questionnaireSelections = normalizeQuestionnaireSelections(body?.questionnaireSelections);
+  const body = await req.json().catch(() => null);
+  if (!body || typeof body !== 'object') {
+    return new Response(JSON.stringify({ error: 'Invalid JSON body' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+  const requestBody = body as Record<string, unknown>;
+  const rawAnswers = requestBody.answers;
+  const rawQuestionnaires = requestBody.questionnaires;
+  const requestedNativeSignature = requestBody.allowNativeSignature === true;
+  const questionnaireSelections = normalizeQuestionnaireSelections(requestBody.questionnaireSelections);
   const requiredQuestionnaireIds = extractAnswerQuestionnaireIds(rawAnswers);
-  const language = body?.language ?? 'zh-CN';
-  const customProviderPayload = body?.customProvider;
+  const language = typeof requestBody.language === 'string' && requestBody.language.trim() ? requestBody.language.trim() : 'zh-CN';
+  const customProviderPayload = requestBody.customProvider;
 
   const requestQuestionnaires = normalizeQuestionnaires(rawQuestionnaires);
   let effectiveQuestionnaires = requestQuestionnaires;
@@ -530,7 +530,10 @@ async function handler(req: Request): Promise<Response> {
     if (customProviderPayload) {
       const parsedResult = CustomProviderSchema.safeParse(customProviderPayload);
       if (!parsedResult.success) {
-        log.warn('自定义 AI 供应商配置校验失败', { providerId: customProviderPayload?.providerId, issues: parsedResult.error.issues });
+        const providerId = customProviderPayload && typeof customProviderPayload === 'object' && typeof (customProviderPayload as { providerId?: unknown }).providerId === 'string'
+          ? (customProviderPayload as { providerId: string }).providerId
+          : undefined;
+        log.warn('自定义 AI 供应商配置校验失败', { providerId, issues: parsedResult.error.issues });
         return new Response(JSON.stringify({ error: '自定义 AI 供应商配置无效' }), { status: 400 });
       }
 
@@ -570,6 +573,27 @@ async function handler(req: Request): Promise<Response> {
           skipProbability: 0,
         };
       }
+    }
+
+    const rateLimit = await acquirePublicAiRateLimit({
+      req,
+      actionType: 'magical_girl_details_generate',
+      providerMode: inferPublicAiProviderMode(customProviderPayload),
+    });
+    if (!rateLimit.allowed) return buildPublicAiRateLimitResponse(rateLimit);
+
+    for (const answerItem of normalizedAnswers) {
+      const safetyResponse = await enforceTextSafety({
+        text: answerItem.answer,
+        log,
+        logMeta: {
+          questionId: answerItem.questionId,
+          questionnaireId: answerItem.questionnaireId,
+        },
+        enableAiSafetyCheck: false,
+        sensitiveWordReason: '在问卷中使用了危险符文',
+      });
+      if (safetyResponse) return safetyResponse;
     }
 
     const shouldDisablePolling = customProviderId !== null && customProviderId !== 'system';

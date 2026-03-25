@@ -112,7 +112,7 @@ const AdjudicatorEditor: React.FC<AdjudicatorEditorProps> = ({
             onChainedEventChange: (newEvent: { event: AdjudicatorEvent } | undefined) => void,
             label: string
         ) => (
-            <div className="pl-4 mt-2 border-l-2 border-dashed border-gray-300">
+            <div className="min-w-0 pl-4 mt-2 border-l-2 border-dashed border-gray-300">
                 {chainedEvent ? (
                      <AdjudicatorEditor
                         events={[chainedEvent.event]}
@@ -129,7 +129,7 @@ const AdjudicatorEditor: React.FC<AdjudicatorEditorProps> = ({
                                 probability: 50
                             }
                         })}
-                        className="text-xs text-blue-600 hover:underline"
+                        className="max-w-full text-left text-xs text-blue-600 break-words whitespace-normal hover:underline"
                     >
                         + 添加【{label}】后续事件
                     </button>
@@ -138,16 +138,16 @@ const AdjudicatorEditor: React.FC<AdjudicatorEditorProps> = ({
         );
 
         return (
-            <div key={event.id} className="p-4 bg-gray-50 rounded-lg border border-gray-200 space-y-3">
+            <div key={event.id} className="min-w-0 space-y-3 rounded-lg border border-gray-200 bg-gray-50 p-4">
                 {/* 事件描述和删除按钮 */}
-                <div className="flex items-start gap-2">
+                <div className="flex min-w-0 items-start gap-2">
                     <span className="text-sm font-semibold text-gray-500 pt-2">{depth > 0 ? ' L' : ''} {index + 1}.</span>
                     <textarea
                         value={event.description}
                         onChange={(e) => handleEventChange(index, { ...event, description: e.target.value })}
                         placeholder={`输入事件描述 (例如：${depth > 0 ? 'TA是否躲开了攻击？' : '天空突然降下惊雷'})`}
                         rows={2}
-                        className="input-field flex-grow"
+                        className="input-field min-w-0 flex-1 resize-y"
                     />
                     <button onClick={() => deleteEvent(index)} className="text-red-500 hover:text-red-700 font-bold p-1 text-xl leading-none rounded-full hover:bg-red-100 flex-shrink-0 mt-1">
                         &times;
@@ -155,7 +155,7 @@ const AdjudicatorEditor: React.FC<AdjudicatorEditorProps> = ({
                 </div>
 
                 {/* 判定类型切换 */}
-                <div className="flex items-center gap-4 text-sm">
+                <div className="flex flex-wrap items-center gap-4 text-sm">
                     <label className="font-medium text-gray-700">判定类型:</label>
                     <div className="flex items-center gap-2">
                         <input type="radio" id={`type-binary-${event.id}`} name={`type-${event.id}`} value="binary" checked={event.type === 'binary'}
@@ -173,11 +173,11 @@ const AdjudicatorEditor: React.FC<AdjudicatorEditorProps> = ({
                 {event.type === 'binary' ? (
                     // 二元判定编辑器
                     <div>
-                        <div className="flex items-center gap-3">
+                        <div className="flex flex-wrap items-center gap-3">
                             <label className="text-sm font-medium text-gray-700">成功率:</label>
                             <input type="range" min="1" max="100" value={event.probability}
                                 onChange={(e) => handleEventChange(index, { ...event, probability: parseInt(e.target.value, 10) })}
-                                className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer" />
+                                className="h-2 min-w-0 flex-1 rounded-lg bg-gray-200 appearance-none cursor-pointer" />
                             <div className="relative w-24 flex-shrink-0">
                                 <input type="number" min="1" max="100" value={event.probability}
                                     onChange={(e) => handleEventChange(index, { ...event, probability: parseInt(e.target.value, 10) || 50 })}
@@ -191,17 +191,17 @@ const AdjudicatorEditor: React.FC<AdjudicatorEditorProps> = ({
                     </div>
                 ) : (
                     // 自定义结果编辑器
-                    <div className="space-y-2">
+                    <div className="min-w-0 space-y-2">
                         {(event.outcomes || []).map((outcome, oIndex) => (
-                            <div key={outcome.id} className="p-3 bg-white rounded border">
-                                <div className="flex items-center gap-2">
+                            <div key={outcome.id} className="min-w-0 rounded border bg-white p-3">
+                                <div className="flex min-w-0 flex-wrap items-center gap-2">
                                     <input type="text" value={outcome.name}
                                         onChange={(e) => {
                                             const newOutcomes = [...(event.outcomes || [])];
                                             newOutcomes[oIndex].name = e.target.value;
                                             handleEventChange(index, { ...event, outcomes: newOutcomes });
                                         }}
-                                        placeholder="结果名称" className="input-field flex-grow" />
+                                        placeholder="结果名称" className="input-field min-w-0 flex-1" />
                                     <div className="relative w-28 flex-shrink-0">
                                         <input type="number" value={outcome.probability}
                                             onChange={(e) => handleOutcomeProbabilityChange(oIndex, parseInt(e.target.value, 10) || 0)}
@@ -240,7 +240,7 @@ const AdjudicatorEditor: React.FC<AdjudicatorEditorProps> = ({
 
     // ---- 组件主渲染 ----
     return (
-        <div className="space-y-4" style={{ marginLeft: depth > 0 ? `${depth * 10}px` : '0' }}>
+        <div className="min-w-0 space-y-4" style={{ marginLeft: depth > 0 ? `${depth * 10}px` : '0' }}>
             {events.map((event, index) => renderEvent(event, index))}
             {/* 只有根编辑器 (depth=0) 才能添加新的根事件 */}
             {depth === 0 && (

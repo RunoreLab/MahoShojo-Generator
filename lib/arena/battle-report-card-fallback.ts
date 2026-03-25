@@ -1,7 +1,9 @@
 import type { NewsReport } from '@/components/BattleReportCard';
-import { extractHeadlineFromMarkdown, extractWinnerFromText } from '@/lib/arena/battle-report-log-utils';
-import { parseBattleReportFromMarkdown } from '@/lib/arena/redo-updates';
-import { extractStreamTelemetryMeta } from '@/lib/arena/stream-meta';
+import { summarizeStreamBattleReportPreview } from '@/lib/arena/stream-report-summary';
+import {
+  extractStreamTelemetryMeta,
+  stripAllStreamMetaComments,
+} from '@/lib/arena/stream-meta';
 
 const normalizeText = (value: unknown): string => (typeof value === 'string' ? value : '').replace(/\r\n/g, '\n');
 
@@ -222,20 +224,20 @@ export async function hydrateBattleReportCardFromGenerationRecord(input: {
 
   // 2) 流式：复用原始 Markdown（liveBody），并从 telemetry 注释中提取 usage / narrativeHistoryReadCount。
   const telemetryExtracted = rawPreview ? await extractStreamTelemetryMeta(rawPreview) : null;
-  const stripped = telemetryExtracted?.strippedMarkdown ?? rawPreview;
-
-  const parsedFromMarkdown = stripped ? parseBattleReportFromMarkdown(stripped, typeof input.mode === 'string' ? input.mode : '') : null;
+  const streamSummary = await summarizeStreamBattleReportPreview({
+    preview: rawPreview,
+    mode: typeof input.mode === 'string' ? input.mode : '',
+  });
+  const stripped = streamSummary.strippedPreview || stripAllStreamMetaComments(rawPreview);
 
   const headline =
+    streamSummary.headline ||
     (typeof input.headline === 'string' && input.headline.trim()) ||
-    parsedFromMarkdown?.headline ||
-    extractHeadlineFromMarkdown(stripped) ||
     '战报';
 
   const winner =
+    streamSummary.winner ||
     (typeof input.winner === 'string' && input.winner.trim()) ||
-    parsedFromMarkdown?.winner ||
-    extractWinnerFromText(stripped) ||
     '未知';
 
   const { body, analysis } = extractBodyFromMarkdown(stripped);
