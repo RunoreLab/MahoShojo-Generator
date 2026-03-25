@@ -227,4 +227,60 @@ describe('buildApiRatingFromRow', () => {
     expect(item.seasonPeakTier).toBeNull();
     expect(item.seasonLow).toBeNull();
   });
+
+  test('strict 在 isQueen=true 且基础段位为权杖时返回女王 tier', () => {
+    const item = buildApiRatingFromRow(
+      {
+        dataCardId: 'card_q',
+        queue: 'strict',
+        rating: 1700,
+        games: 20,
+        wins: 14,
+        losses: 5,
+        draws: 1,
+        seasonPeakRating: 1700,
+        seasonPeakGames: 20,
+        seasonPeakAt: '2026-03-24T10:00:00.000Z',
+        seasonPeakTier: '女王',
+        seasonLowRating: 1200,
+        seasonLowGames: 6,
+        seasonLowAt: '2026-01-24T10:00:00.000Z',
+        updatedAt: '2026-03-25T10:00:00.000Z',
+        lastDelta: 5,
+        lastAppliedAt: '2026-03-25T09:00:00.000Z',
+      },
+      { cardType: 'character', isQueen: true },
+    );
+
+    expect(item.tier).toBe('女王');
+  });
+
+  test('strict season 极值缺任一必要字段时降级为 null', () => {
+    const item = buildApiRatingFromRow(
+      {
+        dataCardId: 'card_3',
+        queue: 'strict',
+        rating: 1300,
+        games: 18,
+        wins: 9,
+        losses: 8,
+        draws: 1,
+        seasonPeakRating: 1500,
+        seasonPeakGames: null,
+        seasonPeakAt: '2026-03-12T10:00:00.000Z',
+        seasonPeakTier: '   ',
+        seasonLowRating: 700,
+        seasonLowGames: 5,
+        seasonLowAt: null,
+        updatedAt: '2026-03-25T10:00:00.000Z',
+        lastDelta: 2,
+        lastAppliedAt: '2026-03-25T09:00:00.000Z',
+      },
+      { cardType: 'character', isQueen: false },
+    );
+
+    expect(item.seasonPeak).toBeNull();
+    expect(item.seasonLow).toBeNull();
+    expect(item.seasonPeakTier).toBeNull();
+  });
 });

@@ -79,4 +79,29 @@ describe('DataCardDetailsModal', () => {
     expect(html).toContain('赛季最高段位');
     expect(html).toContain('女王');
   });
+
+  it('StrictSeasonExtremaBlock 在 season 信息全缺失时为空渲染', () => {
+    const html = renderToStaticMarkup(
+      React.createElement(StrictSeasonExtremaBlock, {
+        strict: {
+          queue: 'strict',
+          rating: 1200,
+          games: 8,
+          wins: 4,
+          losses: 3,
+          draws: 1,
+          tier: '花牌',
+          lastDelta: null,
+          lastAppliedAt: null,
+          publicRank: null,
+          publicTotal: null,
+          seasonPeak: null,
+          seasonPeakTier: null,
+          seasonLow: null,
+        },
+      }),
+    );
+
+    expect(html).toBe('');
+  });
 });

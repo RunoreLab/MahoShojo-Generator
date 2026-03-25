@@ -67,6 +67,8 @@ type BuildApiRatingFromRowOptions = {
   isQueen: boolean;
 };
 
+const ARENA_TIER_WHITELIST = new Set(['无牌', '白牌', '字牌', '花牌', '权杖', '女王']);
+
 const buildSeasonExtreme = (
   rating: number | null,
   games: number | null,
@@ -79,6 +81,14 @@ const buildSeasonExtreme = (
     occurredAt,
     tier: computeArenaBaseTier(rating, games),
   };
+};
+
+const normalizeSeasonPeakTier = (queue: Queue, seasonPeakTier: unknown): string | null => {
+  if (queue !== 'strict') return null;
+  if (typeof seasonPeakTier !== 'string') return null;
+  const normalized = seasonPeakTier.trim();
+  if (!normalized) return null;
+  return ARENA_TIER_WHITELIST.has(normalized) ? normalized : null;
 };
 
 export function buildApiRatingFromRow(
@@ -95,7 +105,7 @@ export function buildApiRatingFromRow(
     options.cardType === 'character' && typeof row.lastAppliedAt === 'string' ? row.lastAppliedAt : null;
 
   const seasonPeak = queue === 'strict' ? buildSeasonExtreme(row.seasonPeakRating, row.seasonPeakGames, row.seasonPeakAt) : null;
-  const seasonPeakTier = queue === 'strict' && typeof row.seasonPeakTier === 'string' ? row.seasonPeakTier : null;
+  const seasonPeakTier = normalizeSeasonPeakTier(queue, row.seasonPeakTier);
   const seasonLow = queue === 'strict' ? buildSeasonExtreme(row.seasonLowRating, row.seasonLowGames, row.seasonLowAt) : null;
 
   return {
