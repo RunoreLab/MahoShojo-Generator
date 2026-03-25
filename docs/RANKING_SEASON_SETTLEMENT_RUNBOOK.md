@@ -36,6 +36,7 @@ bun tsx scripts/season-archive.ts --season-id S0 --snapshot-only --require-db
 可选：
 - 调整范围：`--top 100 --bottom 50`（默认）或 `--full`
 - 生成后检查：`public/data/seasons/archive_S0.json`
+- strict 队列新增写入的赛季 extrema facts：`season-archive.ts` 生成的归档会在实体快照（`entities[].queues.strict`）写入严格排位的 `seasonPeak / seasonLow / seasonPeakTier` 所需字段（对应 `seasonPeakRating/seasonPeakGames/seasonPeakAt/seasonPeakTier/seasonLowRating/seasonLowGames/seasonLowAt`），用于 `/ranking` 历史赛季主视图展示；旧归档文件若缺失这些字段，主视图会自动降级为空，不影响列表加载。
 
 ### Step 2：正式归档（写入快照 + 把赛季标记为 history）
 
@@ -89,6 +90,8 @@ bun tsx scripts/season-soft-reset.ts --queue all --preview 10 --apply --require-
 ### Q1：为什么归档后详情弹窗内容和快照不一致？
 
 历史列表来自静态快照，但“角色详情弹窗”会读取**当前公开的**数据卡/预设文件；如果角色卡在赛季后被修改、下架、转私有，弹窗内容会漂移或无法加载。这是当前架构的已知权衡。
+
+补充：本轮（season extrema）仍不解决“历史赛季详情弹窗读取当前公开卡”的漂移问题，只保证历史赛季主视图能稳定展示 strict `seasonPeak / seasonLow / seasonPeakTier`（缺字段会自动降级为空，不影响列表加载）。
 
 ### Q2：我想历史赛季支持完整分页/筛选怎么办？
 
