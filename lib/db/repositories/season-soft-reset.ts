@@ -258,6 +258,64 @@ export const getSeasonSoftResetInactiveDaysValueAtOffset = async (
   return toFiniteNumber(rows[0]?.inactiveDays);
 };
 
+export const buildSeasonSoftResetUpdateSql = (
+  input: {
+    queue: SeasonSoftResetArenaQueue;
+    ratingExpr: string;
+    ratingParams: unknown[];
+    nowIso: string;
+    includeLegacyColumns: boolean;
+  },
+): { sql: string; params: unknown[] } => {
+  const legacyClauses = input.includeLegacyColumns
+    ? `last_delta = NULL,
+          last_applied_at = NULL,`
+    : '';
+
+  if (input.queue === 'strict') {
+    return {
+      sql: `UPDATE arena_ratings
+      SET rating = ${input.ratingExpr},
+          games = 0,
+          wins = 0,
+          losses = 0,
+          draws = 0,
+          ${legacyClauses}
+          season_peak_rating = ${input.ratingExpr},
+          season_peak_games = 0,
+          season_peak_at = ?,
+          season_peak_tier = '无牌',
+          season_low_rating = ${input.ratingExpr},
+          season_low_games = 0,
+          season_low_at = ?,
+          updated_at = ?
+      WHERE queue = ?;`,
+      params: [
+        ...input.ratingParams,
+        ...input.ratingParams,
+        input.nowIso,
+        ...input.ratingParams,
+        input.nowIso,
+        input.nowIso,
+        input.queue,
+      ],
+    };
+  }
+
+  return {
+    sql: `UPDATE arena_ratings
+      SET rating = ${input.ratingExpr},
+          games = 0,
+          wins = 0,
+          losses = 0,
+          draws = 0,
+          ${legacyClauses}
+          updated_at = ?
+      WHERE queue = ?;`,
+    params: [...input.ratingParams, input.nowIso, input.queue],
+  };
+};
+
 export const executeSeasonSoftResetQueueUpdate = async (
   db: AppDrizzleDb,
   input: {
@@ -268,26 +326,6 @@ export const executeSeasonSoftResetQueueUpdate = async (
     includeLegacyColumns: boolean;
   },
 ): Promise<number> => {
-  const baseSql = input.includeLegacyColumns
-    ? `UPDATE arena_ratings
-      SET rating = ${input.ratingExpr},
-          games = 0,
-          wins = 0,
-          losses = 0,
-          draws = 0,
-          last_delta = NULL,
-          last_applied_at = NULL,
-          updated_at = ?
-      WHERE queue = ?;`
-    : `UPDATE arena_ratings
-      SET rating = ${input.ratingExpr},
-          games = 0,
-          wins = 0,
-          losses = 0,
-          draws = 0,
-          updated_at = ?
-      WHERE queue = ?;`;
-
-  const params: unknown[] = [...input.ratingParams, input.nowIso, input.queue];
-  return executeRun(db, baseSql, params);
+  const update = buildSeasonSoftResetUpdateSql(input);
+  return executeRun(db, update.sql, update.params);
 };

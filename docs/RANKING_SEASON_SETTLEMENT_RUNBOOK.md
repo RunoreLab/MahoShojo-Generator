@@ -65,6 +65,8 @@ bun tsx scripts/season-soft-reset.ts --queue all --preview 10 --apply --require-
 
 说明：
 - 默认启用 auto tuning，会基于数据库统计推导“按场次/活跃度的回收力度”；如需完全手动，传入 `--no-auto`
+- strict 队列执行 soft reset 时，会同时把 `seasonPeakRating/seasonPeakGames/seasonPeakAt/seasonPeakTier/seasonLowRating/seasonLowGames/seasonLowAt` 重置到新赛季起始值语义（起始分 + 0 局 + 当前时间），其中 `seasonPeakTier` 固定重置为 `无牌`
+- free 队列第一版仍不写 season extrema 相关字段（保持原值/NULL，不做污染）
 - 更详细参数见：`bun tsx scripts/season-soft-reset.ts --help`
 
 ### Step 4：创建/切换新赛季（手动编辑静态配置）
@@ -95,4 +97,3 @@ bun tsx scripts/season-soft-reset.ts --queue all --preview 10 --apply --require-
 - 前端排序/筛选成本
 
 中长期方案是把 `season_id` 落到 DB（见 `docs/RANKING_SEASON_ARCHIVE_AUDIT_2026-02-05.md` 的长期建议）。
-
