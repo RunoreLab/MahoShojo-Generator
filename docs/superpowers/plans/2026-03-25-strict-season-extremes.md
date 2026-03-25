@@ -18,6 +18,8 @@
   - 为 `arenaRatings` 增加 strict 赛季极值字段
 - Modify: `lib/database/schema.sql`
   - 同步 SQLite DDL
+- Create: `drizzle/0005_strict_season_extrema.sql`
+  - 为线上 D1 增加 season extrema 列，并回填现存 strict 行
 - Modify: `lib/db/repositories/data-card-meta.ts`
   - 读取 `season_peak_* / season_low_*`
 - Modify: `lib/db/repositories/arena-ratings-write.ts`
@@ -66,6 +68,7 @@
 **Files:**
 - Modify: `lib/db/schema/business.ts`
 - Modify: `lib/database/schema.sql`
+- Create: `drizzle/0005_strict_season_extrema.sql`
 - Modify: `lib/db/repositories/data-card-meta.ts`
 - Test: `tests/data-card-meta-season-extrema.test.ts`
 
@@ -125,6 +128,40 @@ seasonLowAt: text('season_low_at'),
 
 - [ ] **Step 4: 扩展仓储读取结构**
 
+- [ ] **Step 4: 编写 D1 migration + strict 存量回填**
+
+创建 `drizzle/0005_strict_season_extrema.sql`：
+
+```sql
+ALTER TABLE arena_ratings ADD COLUMN season_peak_rating INTEGER;
+ALTER TABLE arena_ratings ADD COLUMN season_peak_games INTEGER;
+ALTER TABLE arena_ratings ADD COLUMN season_peak_at TEXT;
+ALTER TABLE arena_ratings ADD COLUMN season_low_rating INTEGER;
+ALTER TABLE arena_ratings ADD COLUMN season_low_games INTEGER;
+ALTER TABLE arena_ratings ADD COLUMN season_low_at TEXT;
+
+UPDATE arena_ratings
+SET
+  season_peak_rating = rating,
+  season_peak_games = games,
+  season_peak_at = updated_at,
+  season_low_rating = rating,
+  season_low_games = games,
+  season_low_at = updated_at
+WHERE queue = 'strict'
+  AND season_peak_rating IS NULL
+  AND season_low_rating IS NULL;
+```
+
+要求：
+
+- migration 文件必须进入 `drizzle/`
+- 回填只针对现存 `strict` 行
+- `free` 行维持 `NULL`
+- `WHERE ... IS NULL` 保证重复执行时不会覆盖后续真实 extrema
+
+- [ ] **Step 5: 扩展仓储读取结构**
+
 在 `lib/db/repositories/data-card-meta.ts` 中：
 
 - 给 `DataCardArenaRatingRow` 增加：
@@ -140,16 +177,32 @@ seasonLowAt: string | null;
 
 - 在 `getArenaRatingsByDataCardId(...)` 的 `select(...)` 中新增对应字段映射
 
-- [ ] **Step 5: 运行测试确认通过**
+- [ ] **Step 6: 运行测试确认通过**
 
 Run: `bun test tests/data-card-meta-season-extrema.test.ts`  
 Expected: PASS
 
-- [ ] **Step 6: 提交**
+- [ ] **Step 7: 预演 migration 执行命令**
+
+Run:
 
 ```bash
-git add lib/db/schema/business.ts lib/database/schema.sql lib/db/repositories/data-card-meta.ts tests/data-card-meta-season-extrema.test.ts
-git commit -m "feat: add strict season extrema schema"
+node scripts/d1-migrate-safe.mjs --database DB --remote --env production --env-file .env
+```
+
+Expected:
+
+- 新 migration `0005_strict_season_extrema.sql` 被识别
+- 线上/目标 D1 将新增 6 列
+- 现存 strict 行被初始化为 `rating/games/updated_at`
+
+若当前环境没有可用 D1 凭据，则在最终执行说明中明确“migration 命令未在本地实际执行”。
+
+- [ ] **Step 8: 提交**
+
+```bash
+git add lib/db/schema/business.ts lib/database/schema.sql drizzle/0005_strict_season_extrema.sql lib/db/repositories/data-card-meta.ts tests/data-card-meta-season-extrema.test.ts
+git commit -m "feat: add strict season extrema schema" -m "补充 strict 赛季最高/最低分字段、D1 migration 与基础仓储读取。"
 ```
 
 ---
@@ -259,7 +312,7 @@ Expected: PASS
 
 ```bash
 git add lib/db/repositories/arena-ratings-write.ts lib/database/arena-ratings.ts tests/arena-ratings.test.ts
-git commit -m "feat: track strict season extrema on rating updates"
+git commit -m "feat: track strict season extrema on rating updates" -m "为 strict 结算与重置链路补充赛季最高/最低分维护。"
 ```
 
 ---
@@ -330,7 +383,7 @@ Expected: PASS
 
 ```bash
 git add lib/db/repositories/season-soft-reset.ts scripts/season-soft-reset.ts docs/RANKING_SEASON_SETTLEMENT_RUNBOOK.md tests/season-reset.test.ts
-git commit -m "feat: reset strict season extrema during season soft reset"
+git commit -m "feat: reset strict season extrema during season soft reset" -m "让新赛季 soft reset 同步刷新 strict 赛季极值。"
 ```
 
 ---
@@ -432,7 +485,7 @@ Expected: PASS
 
 ```bash
 git add pages/api/data-card-meta.ts components/DataCardDetailsModal.tsx tests/data-card-meta-season-extrema.test.ts tests/data-card-details-modal.test.ts
-git commit -m "feat: expose strict season extrema in card details"
+git commit -m "feat: expose strict season extrema in card details" -m "在数据卡详情中展示 strict 赛季最高/最低分。"
 ```
 
 ---
@@ -522,7 +575,7 @@ Expected: PASS
 
 ```bash
 git add pages/api/me/profile-card.ts components/me/ProfileCard.tsx tests/profile-card-season-extrema.test.tsx
-git commit -m "feat: show strict season extrema on profile card"
+git commit -m "feat: show strict season extrema on profile card" -m "在个人资料卡的最高排位角色区域展示 strict 赛季极值。"
 ```
 
 ---
@@ -542,8 +595,9 @@ git commit -m "feat: show strict season extrema on profile card"
 
 在实现 PR 描述或附带文档中明确：
 
-- 存量行初始化为“当前 rating/games 即为 season peak/low”
-- 这不是历史精确回填
+- 已通过 `drizzle/0005_strict_season_extrema.sql` 对现存 strict 行做一次性初始化
+- 初始化口径为“当前 rating/games/updated_at 即为 season peak/low”
+- 这不是历史精确回填，而是从迁移时点开始可信追踪后续 extrema
 
 - [ ] **Step 2: 运行定向测试集**
 
@@ -574,7 +628,7 @@ If blocked: 在最终说明里明确未执行原因
 
 ```bash
 git add .
-git commit -m "feat: add strict season extrema display"
+git commit -m "feat: add strict season extrema display" -m "完成 strict 赛季最高/最低分的数据链路、展示与测试。"
 ```
 
 ---
@@ -593,4 +647,3 @@ git commit -m "feat: add strict season extrema display"
 ## 审核说明
 
 按 skill 原流程应派发 plan reviewer 子代理复审。当前会话未获得显式的子代理授权，因此本计划先以本地人工自审版本落盘；如需我继续走子代理复审，请直接明确说“允许你用 subagent review 这份 plan”。
-
