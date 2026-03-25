@@ -30,7 +30,8 @@
    - 本赛季 strict **最高分**
    - 本赛季 strict **最低分**
 4. “最低分”按 **本赛季真实出现过的最低 strict rating** 记录，不做“至少不低于赛季起始分”的保护性修饰
-5. 对应段位 **不直接落库**，展示时按当前段位规则换算
+5. `seasonPeakRating / seasonLowRating` 对应的基础段位仍可由 `rating + games` 按当前规则换算
+6. 额外记录 `seasonPeakTier`，含义是：**本赛季达到过的最高 strict 显示段位**，允许取值到 `女王`
 
 ---
 
@@ -48,18 +49,20 @@
 
 - 极值发生时的 `games`
 
-### 3.2 “女王”不能作为赛季极值段位回放
+### 3.2 “女王”不能由最高分直接倒推
 
 当前 `女王` 不是纯分数段位，而是“当前 public strict 榜首资格”衍生结果。  
 这意味着：
 
 - `seasonPeakRating + seasonPeakGames` 可以稳定推导出基础段位：`无牌 / 白牌 / 字牌 / 花牌 / 权杖`
-- 但**不能可靠回放历史时点是否为“女王”**
+- 但**不能可靠倒推出“本赛季是否曾达到女王”**
 
 因此本次设计规定：
 
-- `赛季最高/最低段位` 仅展示 **基础段位**
-- 不对极值额外推导 `女王`
+- `赛季最高分/最低分` 继续记录真实数值
+- `赛季最高分/最低分` 的基础段位仍可由 `rating + games` 推导
+- 另单独存 `seasonPeakTier`，用于表达“本赛季曾达到过的最高 strict 显示段位”，允许为 `女王`
+- **不新增 `seasonLowTier`**，避免赛季初 `games < 5` 导致大多数卡都落成 `无牌`，信息量过低
 
 当前 live rating 的当前段位仍可继续按现有逻辑使用 `applyQueenTier(...)`
 
@@ -122,6 +125,7 @@
 - `season_peak_rating INTEGER`
 - `season_peak_games INTEGER`
 - `season_peak_at TEXT`
+- `season_peak_tier TEXT`
 - `season_low_rating INTEGER`
 - `season_low_games INTEGER`
 - `season_low_at TEXT`
@@ -153,7 +157,7 @@ type ApiRatingSeasonExtreme = {
   rating: number;
   games: number;
   occurredAt: string;
-  tier: string; // 基础段位，不包含“女王”
+  tier: string; // 基础段位；若为 seasonPeak，仅表示“最高分对应的基础段位”
 };
 
 type ApiRating = {
@@ -169,6 +173,7 @@ type ApiRating = {
   publicRank: number | null;
   publicTotal: number | null;
   seasonPeak: ApiRatingSeasonExtreme | null;
+  seasonPeakTier: string | null; // 本赛季达到过的最高 strict 显示段位，可为“女王”
   seasonLow: ApiRatingSeasonExtreme | null;
 };
 ```
@@ -201,7 +206,12 @@ type ApiRating = {
 5. 若 `afterRating == seasonPeakRating`：
    - **不覆盖**
    - 保留首次达到该 peak 的时间
-6. low 同理：
+6. `seasonPeakTier` 记录“本赛季达到过的最高 strict 显示段位”：
+   - 先根据 `afterRating / afterGames` 计算基础段位
+   - 若该实体在本次结算后成为当前 public strict `女王`，则本次显示段位记为 `女王`
+   - 按顺序 `无牌 < 白牌 < 字牌 < 花牌 < 权杖 < 女王` 比较
+   - 若本次显示段位高于已存 `seasonPeakTier`，则更新
+7. low 同理：
    - `seasonLowRating IS NULL` 时初始化
    - `afterRating < seasonLowRating` 时更新
    - 相等时不覆盖
@@ -214,6 +224,13 @@ if queue == 'strict' and status == 'applied':
     seasonPeakRating = afterRating
     seasonPeakGames = afterGames
     seasonPeakAt = appliedAt
+
+  currentDisplayTier = currentBaseTier
+  if currentEntityIsStrictQueen:
+    currentDisplayTier = '女王'
+
+  if seasonPeakTier is null or currentDisplayTier outranks seasonPeakTier:
+    seasonPeakTier = currentDisplayTier
 
   if seasonLowRating is null or afterRating < seasonLowRating:
     seasonLowRating = afterRating
@@ -230,10 +247,12 @@ if queue == 'strict' and status == 'applied':
 为了保持语义一致，本次设计要求：
 
 - 在 strict rating 被重置时，**同时重置 season peak/low**
+- 同时把 `seasonPeakTier` 重置为 reset 后的当前显示段位（按当前规则通常为 `无牌`）
 - 重置值设为：
   - `seasonPeakRating = initialRating`
   - `seasonPeakGames = 0`
   - `seasonPeakAt = nowIso`
+  - `seasonPeakTier = '无牌'`
   - `seasonLowRating = initialRating`
   - `seasonLowGames = 0`
   - `seasonLowAt = nowIso`
@@ -257,6 +276,7 @@ if queue == 'strict' and status == 'applied':
 即：
 
 - `season_peak_* = reset 后 rating / 0 / now`
+- `season_peak_tier = '无牌'`
 - `season_low_* = reset 后 rating / 0 / now`
 
 理由：
@@ -282,6 +302,7 @@ if queue == 'strict' and status == 'applied':
   - `season_peak_rating = rating`
   - `season_peak_games = games`
   - `season_peak_at = updated_at`
+  - `season_peak_tier = 按当前 rating + games 推导出的基础段位`
   - `season_low_rating = rating`
   - `season_low_games = games`
   - `season_low_at = updated_at`
@@ -322,7 +343,7 @@ if queue == 'strict' and status == 'applied':
 
 扩展：
 
-- `topRatedCharacter.ratings.strict` 增加 `seasonPeak` / `seasonLow`
+- `topRatedCharacter.ratings.strict` 增加 `seasonPeak` / `seasonLow` / `seasonPeakTier`
 - `topCards.characters[*].ratings.strict` 第一版 **可不扩**
 
 原因：
@@ -350,6 +371,7 @@ if queue == 'strict' and status == 'applied':
 ```text
 严格 1260（花牌，Δ+18）
 赛季最高 1332（花牌）
+赛季最高段位 女王
 赛季最低 987（白牌）
 ```
 
@@ -397,6 +419,7 @@ if queue == 'strict' and status == 'applied':
 ```text
 当前 strict：1260（花牌）
 赛季最高：1332（花牌）
+赛季最高段位：女王
 赛季最低：987（白牌）
 ```
 
@@ -414,7 +437,7 @@ if queue == 'strict' and status == 'applied':
 1. `free` 的赛季 high/low
 2. 最近排位记录/防守记录
 3. 排行榜行级展示赛季 high/low
-4. 赛季 high/low 的“女王”回放
+4. `seasonLowTier`
 5. 新建独立赛季统计表
 
 ---
@@ -433,9 +456,11 @@ if queue == 'strict' and status == 'applied':
 1. strict applied 时首次初始化 peak/low
 2. strict 胜利抬高 peak
 3. strict 失败刷新 low
-4. free applied 不影响 strict season extrema
-5. equal peak/equal low 不覆盖时间
-6. `computeArenaBaseTier(seasonPeakRating, seasonPeakGames)` 的换算符合预期
+4. strict 达到更高显示段位时刷新 `seasonPeakTier`
+5. strict 成为 `女王` 时刷新 `seasonPeakTier='女王'`
+6. free applied 不影响 strict season extrema
+7. equal peak/equal low 不覆盖时间
+8. `computeArenaBaseTier(seasonPeakRating, seasonPeakGames)` 的换算符合预期
 
 ### 11.2 API 测试
 
@@ -485,5 +510,4 @@ if queue == 'strict' and status == 'applied':
 并且必须记住两个实现细节：
 
 1. **要同时记录 `games`，否则段位换算不准**
-2. **历史极值不回放“女王”，只回放基础段位**
-
+2. **`seasonPeakTier` 单独承载“本赛季达到过的最高 strict 显示段位”，可记录 `女王`**
