@@ -8,6 +8,7 @@ import {
   getArenaRatingsByDataCardId as getArenaRatingsByDataCardIdReader,
   getStrictArenaRatingsByDataCardIds,
 } from '@/lib/db/repositories/data-card-meta';
+import { buildApiRatingFromRow } from '@/pages/api/data-card-meta';
 
 describe('data-card meta season extrema schema', () => {
   test('arena_ratings 季度极值字段名保持 snake_case', () => {
@@ -155,5 +156,75 @@ describe('data-card meta season extrema schema', () => {
     expect(content.includes("WHERE queue = 'strict'")).toBe(true);
     expect(content.includes('season_peak_tier = CASE')).toBe(true);
     expect(content.includes("queue = 'free'")).toBe(false);
+  });
+});
+
+describe('buildApiRatingFromRow', () => {
+  test('strict 返回 seasonPeak / seasonPeakTier / seasonLow', () => {
+    const item = buildApiRatingFromRow(
+      {
+        dataCardId: 'card_1',
+        queue: 'strict',
+        rating: 1320,
+        games: 18,
+        wins: 10,
+        losses: 7,
+        draws: 1,
+        seasonPeakRating: 1600,
+        seasonPeakGames: 28,
+        seasonPeakAt: '2026-03-20T10:00:00.000Z',
+        seasonPeakTier: '女王',
+        seasonLowRating: 900,
+        seasonLowGames: 6,
+        seasonLowAt: '2026-02-01T10:00:00.000Z',
+        updatedAt: '2026-03-25T10:00:00.000Z',
+        lastDelta: 8,
+        lastAppliedAt: '2026-03-25T09:00:00.000Z',
+      },
+      { cardType: 'character', isQueen: false },
+    );
+
+    expect(item.seasonPeak).toEqual({
+      rating: 1600,
+      games: 28,
+      occurredAt: '2026-03-20T10:00:00.000Z',
+      tier: '权杖',
+    });
+    expect(item.seasonPeakTier).toBe('女王');
+    expect(item.seasonLow).toEqual({
+      rating: 900,
+      games: 6,
+      occurredAt: '2026-02-01T10:00:00.000Z',
+      tier: '白牌',
+    });
+  });
+
+  test('free 的 seasonPeak / seasonPeakTier / seasonLow 全为 null', () => {
+    const item = buildApiRatingFromRow(
+      {
+        dataCardId: 'card_2',
+        queue: 'free',
+        rating: 1200,
+        games: 18,
+        wins: 9,
+        losses: 8,
+        draws: 1,
+        seasonPeakRating: 1550,
+        seasonPeakGames: 22,
+        seasonPeakAt: '2026-03-12T10:00:00.000Z',
+        seasonPeakTier: '权杖',
+        seasonLowRating: 700,
+        seasonLowGames: 5,
+        seasonLowAt: '2026-01-15T10:00:00.000Z',
+        updatedAt: '2026-03-25T10:00:00.000Z',
+        lastDelta: 2,
+        lastAppliedAt: '2026-03-25T09:00:00.000Z',
+      },
+      { cardType: 'character', isQueen: false },
+    );
+
+    expect(item.seasonPeak).toBeNull();
+    expect(item.seasonPeakTier).toBeNull();
+    expect(item.seasonLow).toBeNull();
   });
 });

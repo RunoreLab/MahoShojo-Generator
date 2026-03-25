@@ -37,6 +37,16 @@ type ApiRating = {
   lastAppliedAt: string | null;
   publicRank: number | null;
   publicTotal: number | null;
+  seasonPeak: ApiRatingSeasonExtreme | null;
+  seasonPeakTier: string | null;
+  seasonLow: ApiRatingSeasonExtreme | null;
+};
+
+type ApiRatingSeasonExtreme = {
+  rating: number;
+  games: number;
+  occurredAt: string;
+  tier: string;
 };
 
 type ApiMetaResponse =
@@ -52,6 +62,48 @@ type ApiMetaResponse =
 type ApiTagsResponse =
   | { success: true; tags: ApiTag[] }
   | { success: false; error?: string };
+
+export function StrictSeasonExtremaBlock({ strict }: { strict: ApiRating }) {
+  const peak = strict.seasonPeak;
+  const low = strict.seasonLow;
+  const peakTier = strict.seasonPeakTier;
+
+  if (!peak && !low && !peakTier) return null;
+
+  return (
+    <div className="flex flex-col gap-1 text-[11px] text-gray-600">
+      {peak && (
+        <div className="flex flex-wrap items-center gap-1">
+          <span>
+            赛季最高 {peak.rating}（
+            <TierBadge tier={peak.tier} className="mx-1 align-middle" />
+            ）
+          </span>
+          <span className="text-[10px] text-gray-400" title={peak.occurredAt}>
+            {formatDateTime(peak.occurredAt)}
+          </span>
+        </div>
+      )}
+      {low && (
+        <div className="flex flex-wrap items-center gap-1">
+          <span>
+            赛季最低 {low.rating}（
+            <TierBadge tier={low.tier} className="mx-1 align-middle" />
+            ）
+          </span>
+          <span className="text-[10px] text-gray-400" title={low.occurredAt}>
+            {formatDateTime(low.occurredAt)}
+          </span>
+        </div>
+      )}
+      {peakTier && (
+        <div>
+          赛季最高段位 <TierBadge tier={peakTier} className="mx-1 align-middle" />
+        </div>
+      )}
+    </div>
+  );
+}
 
 const fetchJson = async <T,>(url: string, init?: RequestInit): Promise<T> => {
   const res = await fetch(url, init);
@@ -620,46 +672,49 @@ export default function DataCardDetailsModal({
                         原生：{meta.metrics?.isNative == null ? '未知' : meta.metrics.isNative ? '是' : '否'}
                       </span>
                       {card.type === 'character' && (
-                        <span>
-                          排位：
-                          {meta.ratings.strict ? (
-                            <span
-                              title={
-                                meta.ratings.strict.lastDelta != null && meta.ratings.strict.lastAppliedAt
-                                  ? `最近变动：Δ${formatSignedDelta(meta.ratings.strict.lastDelta)} @ ${formatDateTime(meta.ratings.strict.lastAppliedAt)}`
-                                  : undefined
-                              }
-                            >
-                              严格 {meta.ratings.strict.rating}（
-                              <TierBadge tier={meta.ratings.strict.tier} className="mx-1 align-middle" />
-                              {meta.ratings.strict.lastDelta != null ? (
-                                <span>，Δ{formatSignedDelta(meta.ratings.strict.lastDelta)}</span>
-                              ) : null}
-                              ）
-                            </span>
-                          ) : (
-                            '严格 —'
-                          )}
-                          {' / '}
-                          {meta.ratings.free ? (
-                            <span
-                              title={
-                                meta.ratings.free.lastDelta != null && meta.ratings.free.lastAppliedAt
-                                  ? `最近变动：Δ${formatSignedDelta(meta.ratings.free.lastDelta)} @ ${formatDateTime(meta.ratings.free.lastAppliedAt)}`
-                                  : undefined
-                              }
-                            >
-                              自由 {meta.ratings.free.rating}（
-                              <TierBadge tier={meta.ratings.free.tier} className="mx-1 align-middle" />
-                              {meta.ratings.free.lastDelta != null ? (
-                                <span>，Δ{formatSignedDelta(meta.ratings.free.lastDelta)}</span>
-                              ) : null}
-                              ）
-                            </span>
-                          ) : (
-                            '自由 —'
-                          )}
-                        </span>
+                        <div className="flex flex-col gap-1">
+                          <span>
+                            排位：
+                            {meta.ratings.strict ? (
+                              <span
+                                title={
+                                  meta.ratings.strict.lastDelta != null && meta.ratings.strict.lastAppliedAt
+                                    ? `最近变动：Δ${formatSignedDelta(meta.ratings.strict.lastDelta)} @ ${formatDateTime(meta.ratings.strict.lastAppliedAt)}`
+                                    : undefined
+                                }
+                              >
+                                严格 {meta.ratings.strict.rating}（
+                                <TierBadge tier={meta.ratings.strict.tier} className="mx-1 align-middle" />
+                                {meta.ratings.strict.lastDelta != null ? (
+                                  <span>，Δ{formatSignedDelta(meta.ratings.strict.lastDelta)}</span>
+                                ) : null}
+                                ）
+                              </span>
+                            ) : (
+                              '严格 —'
+                            )}
+                            {' / '}
+                            {meta.ratings.free ? (
+                              <span
+                                title={
+                                  meta.ratings.free.lastDelta != null && meta.ratings.free.lastAppliedAt
+                                    ? `最近变动：Δ${formatSignedDelta(meta.ratings.free.lastDelta)} @ ${formatDateTime(meta.ratings.free.lastAppliedAt)}`
+                                    : undefined
+                                }
+                              >
+                                自由 {meta.ratings.free.rating}（
+                                <TierBadge tier={meta.ratings.free.tier} className="mx-1 align-middle" />
+                                {meta.ratings.free.lastDelta != null ? (
+                                  <span>，Δ{formatSignedDelta(meta.ratings.free.lastDelta)}</span>
+                                ) : null}
+                                ）
+                              </span>
+                            ) : (
+                              '自由 —'
+                            )}
+                          </span>
+                          {meta.ratings.strict && <StrictSeasonExtremaBlock strict={meta.ratings.strict} />}
+                        </div>
                       )}
                     </div>
 
