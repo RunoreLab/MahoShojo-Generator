@@ -1,4 +1,4 @@
-import { and, count, eq, gte, inArray, or, sql, type SQL } from 'drizzle-orm';
+import { and, count, eq, gte, inArray, or, sql, type AnyColumn, type SQL } from 'drizzle-orm';
 import {
   compareArenaTier,
   computeArenaBaseTier,
@@ -636,13 +636,13 @@ export const applyArenaRatingsUpdateIfBothMatch = async (
   appliedAtIso: string,
 ): Promise<'applied' | 'already-applied' | 'conflict'> => {
   const [aEntity, bEntity] = entities.map(normalizeEntity) as [ArenaRatingsEntity, ArenaRatingsEntity];
-  const buildEntityCase = (column: SQL | {}, aValue: unknown, bValue: unknown): SQL =>
+  const buildEntityCase = (column: SQL | AnyColumn, aValue: unknown, bValue: unknown): SQL =>
     sql`CASE
       WHEN ${arenaRatings.entityType} = ${aEntity.entityType} AND ${arenaRatings.entityId} = ${aEntity.entityId} THEN ${aValue}
       WHEN ${arenaRatings.entityType} = ${bEntity.entityType} AND ${arenaRatings.entityId} = ${bEntity.entityId} THEN ${bValue}
       ELSE ${column}
     END`;
-  const buildTierRankSql = (value: SQL | {}): SQL<number> =>
+  const buildTierRankSql = (value: SQL | AnyColumn): SQL<number> =>
     sql`CASE ${value}
       WHEN '无牌' THEN 0
       WHEN '白牌' THEN 1

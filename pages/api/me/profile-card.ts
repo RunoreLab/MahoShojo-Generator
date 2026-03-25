@@ -75,6 +75,21 @@ type TopRatedStrictRatingLite = (Exclude<CardRatingLite, null> & {
   seasonLow: TopRatedStrictSeasonExtremeLite;
 }) | null;
 
+export type TopRatedStrictRatingRow = {
+  dataCardId: string;
+  queue: 'strict';
+  rating: number;
+  games: number;
+  seasonPeakRating: number | null;
+  seasonPeakGames: number | null;
+  seasonPeakAt: string | null;
+  seasonPeakTier: string | null;
+  seasonLowRating: number | null;
+  seasonLowGames: number | null;
+  seasonLowAt: string | null;
+  updatedAt: string;
+};
+
 type CardRatingsLite = {
   strict: CardRatingLite;
 };
@@ -118,6 +133,8 @@ type BattleReportLite = {
   contentBlocked: boolean;
 };
 
+const ARENA_TIER_WHITELIST = new Set(['无牌', '白牌', '字牌', '花牌', '权杖', '女王']);
+
 function clampInt(value: unknown): number | null {
   const n = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : NaN;
   if (!Number.isFinite(n)) return null;
@@ -152,6 +169,49 @@ function normalizeRoundSummary(row: PvpMatchRoundOutcomeSummary): { total: numbe
   const losses = clampInt(record.losses) ?? 0;
   const draws = clampInt(record.draws) ?? 0;
   return { total, wins, losses, draws };
+}
+
+function buildSeasonExtreme(
+  rating: number | null | undefined,
+  games: number | null | undefined,
+  occurredAt: string | null | undefined,
+): TopRatedStrictSeasonExtremeLite {
+  if (typeof rating !== 'number' || !Number.isFinite(rating)) return null;
+  if (typeof games !== 'number' || !Number.isFinite(games)) return null;
+  if (typeof occurredAt !== 'string' || occurredAt.trim().length === 0) return null;
+  return {
+    rating,
+    games,
+    occurredAt,
+    tier: computeArenaBaseTier(rating, games),
+  };
+}
+
+function normalizeSeasonPeakTier(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const normalized = value.trim();
+  if (!normalized) return null;
+  return ARENA_TIER_WHITELIST.has(normalized) ? normalized : null;
+}
+
+export function buildTopRatedStrictRating(
+  row: TopRatedStrictRatingRow | undefined,
+  options: { isQueen: boolean; publicRank: number | null; publicTotal?: number | null },
+): TopRatedStrictRatingLite {
+  if (!row) return null;
+  if (typeof row.rating !== 'number' || typeof row.games !== 'number') return null;
+
+  const baseTier = computeArenaBaseTier(row.rating, row.games);
+  return {
+    rating: row.rating,
+    games: row.games,
+    tier: applyQueenTier(baseTier, options.isQueen),
+    publicRank: options.publicRank,
+    publicTotal: options.publicTotal ?? null,
+    seasonPeak: buildSeasonExtreme(row.seasonPeakRating, row.seasonPeakGames, row.seasonPeakAt),
+    seasonPeakTier: normalizeSeasonPeakTier(row.seasonPeakTier),
+    seasonLow: buildSeasonExtreme(row.seasonLowRating, row.seasonLowGames, row.seasonLowAt),
+  };
 }
 
 export default withPvpErrorBoundary(async function handler(req: Request): Promise<Response> {
@@ -285,20 +345,7 @@ export default withPvpErrorBoundary(async function handler(req: Request): Promis
     }
   }
 
-  type RatingRow = {
-    dataCardId: string;
-    queue: 'strict';
-    rating: number;
-    games: number;
-    seasonPeakRating: number | null;
-    seasonPeakGames: number | null;
-    seasonPeakAt: string | null;
-    seasonPeakTier: string | null;
-    seasonLowRating: number | null;
-    seasonLowGames: number | null;
-    seasonLowAt: string | null;
-    updatedAt: string;
-  };
+  type RatingRow = TopRatedStrictRatingRow;
 
   const ratingsById = new Map<string, { strict?: RatingRow }>();
   if (characterHighlightIds.length > 0 && db) {
@@ -356,40 +403,6 @@ export default withPvpErrorBoundary(async function handler(req: Request): Promis
     return { rating: row.rating, games: row.games, tier, publicRank, publicTotal: null };
   };
 
-  const buildSeasonExtreme = (
-    rating: number | null | undefined,
-    games: number | null | undefined,
-    occurredAt: string | null | undefined,
-  ): TopRatedStrictSeasonExtremeLite => {
-    if (typeof rating !== 'number' || !Number.isFinite(rating)) return null;
-    if (typeof games !== 'number' || !Number.isFinite(games)) return null;
-    if (typeof occurredAt !== 'string' || occurredAt.trim().length === 0) return null;
-    return {
-      rating,
-      games,
-      occurredAt,
-      tier: computeArenaBaseTier(rating, games),
-    };
-  };
-
-  const normalizeSeasonPeakTier = (value: unknown): string | null => {
-    if (typeof value !== 'string') return null;
-    const normalized = value.trim();
-    return normalized.length > 0 ? normalized : null;
-  };
-
-  const buildTopRatedStrictRating = (row: RatingRow | undefined): TopRatedStrictRatingLite => {
-    const base = buildRating(row);
-    if (!base) return null;
-
-    return {
-      ...base,
-      seasonPeak: buildSeasonExtreme(row?.seasonPeakRating, row?.seasonPeakGames, row?.seasonPeakAt),
-      seasonPeakTier: normalizeSeasonPeakTier(row?.seasonPeakTier),
-      seasonLow: buildSeasonExtreme(row?.seasonLowRating, row?.seasonLowGames, row?.seasonLowAt),
-    };
-  };
-
   const mapCharacterHighlight = async (row: UserTopDataCardRow): Promise<CharacterHighlight> => {
     const base = mapCard(row);
     const metrics = metricsById.get(row.id) ?? null;
@@ -406,7 +419,10 @@ export default withPvpErrorBoundary(async function handler(req: Request): Promis
     const base = mapCard(row);
     const metrics = metricsById.get(row.id) ?? null;
     const ratingRows = ratingsById.get(row.id) ?? {};
-    const strict = buildTopRatedStrictRating(ratingRows.strict);
+    const strict = buildTopRatedStrictRating(ratingRows.strict, {
+      isQueen: strictQueen?.entityType === 'data_card' && strictQueen?.entityId === row.id,
+      publicRank: strictTop300RankByDataCardId.get(row.id) ?? null,
+    });
     return {
       ...base,
       metrics,
