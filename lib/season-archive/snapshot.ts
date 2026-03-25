@@ -1,4 +1,5 @@
 import type { SeasonArchiveQueueSnapshot } from '@/lib/seasons';
+import { normalizeStrictSeasonPeakTier } from '@/lib/ranking/season-extrema';
 
 type SeasonArchiveQueue = 'strict' | 'free';
 
@@ -29,7 +30,26 @@ const toNullableNumber = (value: unknown): number | null => {
 };
 
 const toNullableString = (value: unknown): string | null => {
-  return typeof value === 'string' ? value : null;
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  return trimmed;
+};
+
+const buildSeasonExtremeTuple = (
+  rating: unknown,
+  games: unknown,
+  occurredAt: unknown,
+): { rating: number; games: number; occurredAt: string } | null => {
+  const normalizedRating = toNullableNumber(rating);
+  const normalizedGames = toNullableNumber(games);
+  const normalizedOccurredAt = toNullableString(occurredAt);
+  if (normalizedRating == null || normalizedGames == null || normalizedOccurredAt == null) return null;
+  return {
+    rating: normalizedRating,
+    games: normalizedGames,
+    occurredAt: normalizedOccurredAt,
+  };
 };
 
 export const buildSeasonArchiveQueueSnapshot = (
@@ -47,14 +67,18 @@ export const buildSeasonArchiveQueueSnapshot = (
 
   if (queue !== 'strict') return base;
 
+  const peak = buildSeasonExtremeTuple(row.seasonPeakRating, row.seasonPeakGames, row.seasonPeakAt);
+  const low = buildSeasonExtremeTuple(row.seasonLowRating, row.seasonLowGames, row.seasonLowAt);
+  const seasonPeakTier = peak ? normalizeStrictSeasonPeakTier('strict', row.seasonPeakTier) : null;
+
   return {
     ...base,
-    seasonPeakRating: toNullableNumber(row.seasonPeakRating),
-    seasonPeakGames: toNullableNumber(row.seasonPeakGames),
-    seasonPeakAt: toNullableString(row.seasonPeakAt),
-    seasonPeakTier: toNullableString(row.seasonPeakTier),
-    seasonLowRating: toNullableNumber(row.seasonLowRating),
-    seasonLowGames: toNullableNumber(row.seasonLowGames),
-    seasonLowAt: toNullableString(row.seasonLowAt),
+    seasonPeakRating: peak?.rating ?? null,
+    seasonPeakGames: peak?.games ?? null,
+    seasonPeakAt: peak?.occurredAt ?? null,
+    seasonPeakTier: seasonPeakTier ?? null,
+    seasonLowRating: low?.rating ?? null,
+    seasonLowGames: low?.games ?? null,
+    seasonLowAt: low?.occurredAt ?? null,
   };
 };
