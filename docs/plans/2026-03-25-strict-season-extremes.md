@@ -1,4 +1,4 @@
-# Strict 赛季最高/最低分与赛季最高段位 Implementation Plan
+# Strict 赛季最高/最低分与赛季最高段位实施方案
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
