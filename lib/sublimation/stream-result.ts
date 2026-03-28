@@ -138,15 +138,47 @@ const extractSectionSummary = (lines: string[]): string | null => {
   return candidates.join(' ').slice(0, 200);
 };
 
+const extractHeadingStyleEvent = (
+  lines: string[],
+): { title: string | null; impact: string | null } => {
+  for (let i = 0; i < lines.length; i += 1) {
+    const current = lines[i]?.trim() ?? '';
+    const headingMatch = current.match(/^#{3,6}\s*(.+)$/);
+    if (!headingMatch?.[1]) continue;
+
+    const title = clampOneLine(headingMatch[1], 160) || null;
+    if (!title) continue;
+
+    const impactLines: string[] = [];
+    for (let cursor = i + 1; cursor < lines.length; cursor += 1) {
+      const candidate = lines[cursor]?.trim() ?? '';
+      if (!candidate) continue;
+      if (/^#{1,6}\s+/.test(candidate)) break;
+      const cleaned = clampOneLine(candidate, 200);
+      if (cleaned) impactLines.push(cleaned);
+    }
+
+    return {
+      title,
+      impact: impactLines.length > 0 ? impactLines.join(' ').slice(0, 200) : null,
+    };
+  }
+
+  return { title: null, impact: null };
+};
+
 export const extractSublimationEventFromMarkdown = (
   markdown: string,
   fallbackName: string | null | undefined,
 ): SublimationEvent => {
   const sectionLines = findSublimationSectionLines(markdown);
+  const headingStyle = extractHeadingStyleEvent(sectionLines);
   const title =
+    headingStyle.title ??
     extractLabeledInlineValue(sectionLines, ['事件标题', '升华标题', '标题', 'title']) ??
     extractLabeledBlockValue(sectionLines, ['事件标题', '升华标题', '标题', 'title']);
   const impact =
+    headingStyle.impact ??
     extractLabeledInlineValue(sectionLines, ['影响', '变化', '结果', 'impact', 'effect']) ??
     extractLabeledBlockValue(sectionLines, ['影响', '变化', '结果', 'impact', 'effect']) ??
     extractSectionSummary(sectionLines);

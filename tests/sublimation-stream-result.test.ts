@@ -25,16 +25,16 @@ describe('sublimation stream result', () => {
       '# 白百合「晨曦之刃」',
       '',
       '## 升华事件',
-      '- 标题：于灰烬中重燃',
-      '- 影响：她重建了对伙伴的信任，并重塑了战斗风格。',
+      '### 曙光重燃',
+      '她在旧伤与败北中重新理解了守护的意义。',
       '',
       '## 设定更新',
       '其余正文……',
     ].join('\n');
 
     const event = extractSublimationEventFromMarkdown(markdown, '白百合');
-    expect(event.title).toBe('于灰烬中重燃');
-    expect(event.impact).toBe('她重建了对伙伴的信任，并重塑了战斗风格。');
+    expect(event.title).toBe('曙光重燃');
+    expect(event.impact).toBe('她在旧伤与败北中重新理解了守护的意义。');
   });
 
   test('buildStreamedSublimationResultCard: keep-all 时保留历史/当前状态并清除旧签名', () => {
