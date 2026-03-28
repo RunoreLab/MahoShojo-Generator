@@ -62,6 +62,26 @@ const clampOneLine = (value: string, max = 120): string => {
   return normalized.length > max ? normalized.slice(0, max) : normalized;
 };
 
+const TITLE_LABELS = ['事件标题', '升华标题', '标题', 'title'];
+const IMPACT_LABELS = ['影响', '变化', '结果', 'impact', 'effect'];
+
+const normalizeLabelText = (value: string): string =>
+  stripMarkdownDecorations(value).replace(/[:：]/g, '').replace(/\s+/g, '').toLowerCase();
+
+const isLabelText = (value: string, labels: string[]): boolean => {
+  const normalized = normalizeLabelText(value);
+  return labels.some((label) => normalizeLabelText(label) === normalized);
+};
+
+const parseHeadingLine = (line: string): { level: number; text: string } | null => {
+  const match = line.trim().match(/^(#{1,6})\s*(.+)$/);
+  if (!match?.[1] || !match[2]) return null;
+  return {
+    level: match[1].length,
+    text: stripMarkdownDecorations(match[2]),
+  };
+};
+
 const findSublimationSectionLines = (markdown: string): string[] => {
   const lines = markdown.split(/\r?\n/);
   for (let i = 0; i < lines.length; i += 1) {
@@ -102,23 +122,48 @@ const extractLabeledInlineValue = (lines: string[], labels: string[]): string | 
   return null;
 };
 
-const extractLabeledBlockValue = (lines: string[], labels: string[]): string | null => {
-  const escaped = labels.map((label) => label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
-  const headingOnlyPattern = new RegExp(
-    `^(?:[-*+]\\s*)?(?:#{1,6}\\s*)?(?:${escaped.join('|')})\\s*$`,
-    'i',
-  );
+const isStandaloneLabelLine = (line: string, labels: string[]): boolean => {
+  const trimmed = line.trim();
+  if (!trimmed) return false;
 
-  for (let i = 0; i < lines.length; i += 1) {
-    const current = lines[i]?.trim() ?? '';
-    if (!headingOnlyPattern.test(current)) continue;
-    for (let cursor = i + 1; cursor < lines.length; cursor += 1) {
-      const candidate = lines[cursor]?.trim() ?? '';
-      if (!candidate) continue;
-      if (/^#{1,6}\s+/.test(candidate)) break;
-      const value = clampOneLine(candidate, 160);
-      if (value) return value;
+  const heading = parseHeadingLine(trimmed);
+  if (heading) {
+    return isLabelText(heading.text, labels);
+  }
+
+  const plain = trimmed.match(/^(?:[-*+]\s*)?(.+?)\s*[:：]?\s*$/);
+  if (!plain?.[1]) return false;
+  return isLabelText(plain[1], labels);
+};
+
+const isAnyStandaloneLabelLine = (line: string): boolean =>
+  isStandaloneLabelLine(line, TITLE_LABELS) || isStandaloneLabelLine(line, IMPACT_LABELS);
+
+const collectFollowingParagraphValue = (lines: string[], startIndex: number): string | null => {
+  const chunks: string[] = [];
+  for (let i = startIndex; i < lines.length; i += 1) {
+    const trimmed = lines[i]?.trim() ?? '';
+    if (!trimmed) {
+      if (chunks.length > 0) break;
+      continue;
     }
+    if (parseHeadingLine(trimmed)) break;
+    if (isAnyStandaloneLabelLine(trimmed)) {
+      if (chunks.length > 0) break;
+      continue;
+    }
+    const cleaned = clampOneLine(trimmed, 200);
+    if (cleaned) chunks.push(cleaned);
+  }
+  return chunks.length > 0 ? chunks.join(' ').slice(0, 200) : null;
+};
+
+const extractLabeledBlockValue = (lines: string[], labels: string[]): string | null => {
+  for (let i = 0; i < lines.length; i += 1) {
+    const current = lines[i] ?? '';
+    if (!isStandaloneLabelLine(current, labels)) continue;
+    const value = collectFollowingParagraphValue(lines, i + 1);
+    if (value) return value;
   }
 
   return null;
@@ -142,25 +187,19 @@ const extractHeadingStyleEvent = (
   lines: string[],
 ): { title: string | null; impact: string | null } => {
   for (let i = 0; i < lines.length; i += 1) {
-    const current = lines[i]?.trim() ?? '';
-    const headingMatch = current.match(/^#{3,6}\s*(.+)$/);
-    if (!headingMatch?.[1]) continue;
-
-    const title = clampOneLine(headingMatch[1], 160) || null;
-    if (!title) continue;
-
-    const impactLines: string[] = [];
-    for (let cursor = i + 1; cursor < lines.length; cursor += 1) {
-      const candidate = lines[cursor]?.trim() ?? '';
-      if (!candidate) continue;
-      if (/^#{1,6}\s+/.test(candidate)) break;
-      const cleaned = clampOneLine(candidate, 200);
-      if (cleaned) impactLines.push(cleaned);
+    const heading = parseHeadingLine(lines[i] ?? '');
+    if (!heading || heading.level < 3) continue;
+    if (isLabelText(heading.text, TITLE_LABELS) || isLabelText(heading.text, IMPACT_LABELS)) {
+      continue;
     }
+
+    const title = clampOneLine(heading.text, 160) || null;
+    if (!title) continue;
+    const impact = collectFollowingParagraphValue(lines, i + 1);
 
     return {
       title,
-      impact: impactLines.length > 0 ? impactLines.join(' ').slice(0, 200) : null,
+      impact,
     };
   }
 
@@ -172,15 +211,19 @@ export const extractSublimationEventFromMarkdown = (
   fallbackName: string | null | undefined,
 ): SublimationEvent => {
   const sectionLines = findSublimationSectionLines(markdown);
+  const inlineTitle = extractLabeledInlineValue(sectionLines, TITLE_LABELS);
+  const inlineImpact = extractLabeledInlineValue(sectionLines, IMPACT_LABELS);
+  const blockTitle = extractLabeledBlockValue(sectionLines, TITLE_LABELS);
+  const blockImpact = extractLabeledBlockValue(sectionLines, IMPACT_LABELS);
   const headingStyle = extractHeadingStyleEvent(sectionLines);
   const title =
-    headingStyle.title ??
-    extractLabeledInlineValue(sectionLines, ['事件标题', '升华标题', '标题', 'title']) ??
-    extractLabeledBlockValue(sectionLines, ['事件标题', '升华标题', '标题', 'title']);
+    inlineTitle ??
+    blockTitle ??
+    headingStyle.title;
   const impact =
+    inlineImpact ??
+    blockImpact ??
     headingStyle.impact ??
-    extractLabeledInlineValue(sectionLines, ['影响', '变化', '结果', 'impact', 'effect']) ??
-    extractLabeledBlockValue(sectionLines, ['影响', '变化', '结果', 'impact', 'effect']) ??
     extractSectionSummary(sectionLines);
 
   const normalizedFallbackName = clampOneLine(fallbackName ?? '', 60);

@@ -37,6 +37,46 @@ describe('sublimation stream result', () => {
     expect(event.impact).toBe('她在旧伤与败北中重新理解了守护的意义。');
   });
 
+  test('extractSublimationEventFromMarkdown: 支持“### 标题 / ### 影响”块标签结构', () => {
+    const markdown = [
+      '# 白百合「晨曦之刃」',
+      '',
+      '## 升华事件',
+      '### 标题',
+      '曙光重燃',
+      '',
+      '### 影响',
+      '她在旧伤与败北中重新理解了守护的意义。',
+      '',
+      '## 设定更新',
+      '其余正文……',
+    ].join('\n');
+
+    const event = extractSublimationEventFromMarkdown(markdown, '白百合');
+    expect(event.title).toBe('曙光重燃');
+    expect(event.impact).toBe('她在旧伤与败北中重新理解了守护的意义。');
+  });
+
+  test('extractSublimationEventFromMarkdown: 支持“标题：/影响：”换行值结构', () => {
+    const markdown = [
+      '# 白百合「晨曦之刃」',
+      '',
+      '## 升华事件',
+      '标题：',
+      '曙光重燃',
+      '',
+      '影响：',
+      '她在旧伤与败北中重新理解了守护的意义。',
+      '',
+      '## 设定更新',
+      '其余正文……',
+    ].join('\n');
+
+    const event = extractSublimationEventFromMarkdown(markdown, '白百合');
+    expect(event.title).toBe('曙光重燃');
+    expect(event.impact).toBe('她在旧伤与败北中重新理解了守护的意义。');
+  });
+
   test('buildStreamedSublimationResultCard: keep-all 时保留历史/当前状态并清除旧签名', () => {
     const markdown = [
       '# 白百合「晨曦之刃」',
