@@ -218,6 +218,7 @@ export interface BattleStoreState {
   setSelectedLanguage: (language: string) => void;
   setLastGenerationId: (generationId: string | null) => void;
   updateSettings: (settings: Partial<BattleSettings>) => void;
+  applyBattleLiteDefaults: () => void;
 
   addCombatant: (combatant: Combatant) => void;
   removeCombatant: (identifier: string) => void;
