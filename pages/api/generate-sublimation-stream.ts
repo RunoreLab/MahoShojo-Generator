@@ -141,9 +141,11 @@ async function handler(req: NextRequest): Promise<Response> {
       customProvider: customProviderPayload,
       targetTemplate,
       sourceTemplate,
+      arenaHistoryRetentionStrategy: _arenaHistoryRetentionStrategy,
       questionnaires: rawQuestionnaires,
       ...originalCharacterData
     } = body ?? {};
+    void _arenaHistoryRetentionStrategy;
     delete (originalCharacterData as any).questionnaireSelections;
 
     const finalUserGuidance = typeof userGuidance === 'string'

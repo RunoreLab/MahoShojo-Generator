@@ -28,6 +28,8 @@ import { TokenIndicator } from '@/components/shared/TokenIndicator';
 import { JsonSizeIndicator } from '@/components/shared/JsonSizeIndicator';
 import { readTextAndReasoningStreamFromResponse } from '@/lib/stream/read-text-and-reasoning-stream';
 import { buildGeneralCharacterCardFromMarkdown } from '@/lib/stream/markdown-card';
+import { buildStreamedSublimationResultCard } from '@/lib/sublimation/stream-result';
+import { DEFAULT_ARENA_HISTORY_RETENTION_STRATEGY } from '@/lib/sublimation/arena-history';
 import { readJsonOrTextFromResponse, resolveApiErrorMessage } from '@/lib/client/apiError';
 import { AI_META_REQUEST_HEADER, AI_META_REQUEST_VALUE, readJsonWithAiMeta } from '@/lib/client/read-json-with-ai-meta';
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
@@ -955,6 +957,7 @@ const SublimationPage: React.FC = () => {
 
             const allowedFieldSet = new Set(currentFieldsConfig.map(item => item.id));
             const filteredFieldsToPreserve = fieldsToPreserve.filter(field => allowedFieldSet.has(field));
+            const arenaHistoryRetentionStrategy = DEFAULT_ARENA_HISTORY_RETENTION_STRATEGY;
 
             const payload: Record<string, any> = {
                 ...characterData,
@@ -969,6 +972,7 @@ const SublimationPage: React.FC = () => {
                 writeArenaHistory,
                 readCurrentState,
                 writeCurrentState,
+                arenaHistoryRetentionStrategy,
                 customProvider: (
                     userProviderConfig
                     && (userProviderConfig.apiKey || userProviderConfig.providerId === 'system')
@@ -1070,10 +1074,23 @@ const SublimationPage: React.FC = () => {
                         ? '残兽'
                         : '角色';
 
-                const { card } = buildGeneralCharacterCardFromMarkdown({
+                const card = buildStreamedSublimationResultCard({
                     markdown,
+                    originalCharacterData: characterData,
                     fallbackName,
                     defaultName,
+                    writeArenaHistory,
+                    retentionStrategy: arenaHistoryRetentionStrategy,
+                    finalUserGuidance: userGuidance.trim() || null,
+                    hasNarrativeHistory: Boolean(finalNarrativeHistoryText.trim()),
+                    hasQuestionnaireLore: Boolean(questionnaireLoreText.trim()),
+                    hasNonNativeQuestionnaireLore: selectedQuestionnaires.some((selection) =>
+                        selection.useLore !== false
+                        && Boolean(selection.questionnaire.loreMarkdown?.trim())
+                        && selection.questionnaire.nativeAllowed !== true
+                    ),
+                    questionnaireSelectionCount: selectedQuestionnaires.length,
+                    isNative: isSourceNative === true,
                 });
 
                 let signedCard = card;
