@@ -25,7 +25,8 @@ import {
   type DataCardTemplate,
   type InferableTemplate
 } from '@/lib/data-card-converter';
-import { GENERAL_CHARACTER_TEMPLATE_ID } from '@/lib/schemas/general-character';
+import { normalizeArenaHistoryRetentionStrategy } from '@/lib/sublimation/arena-history';
+import { buildFinalSublimationData } from '@/lib/sublimation/finalize';
 
 const log = getLogger('api-gen-sublimation');
 const SUBLIMATION_USER_GUIDANCE_MAX_CHARS = 200;
@@ -635,30 +636,6 @@ ${rulesText}
 // 3. 辅助函数
 // =================================================================
 
-function isObject(item: any): boolean {
-  return (item && typeof item === 'object' && !Array.isArray(item));
-}
-
-/**
- * 安全地深度合并两个对象。源对象的属性会覆盖目标对象的属性。
- * @param target - 目标对象，将被覆盖。
- * @param source - 源对象，提供更新数据。
- * @returns {any} 返回一个合并后的新对象。
- */
-function safeDeepMerge(target: any, source: any): any {
-  const output = { ...target };
-  if (isObject(target) && isObject(source)) {
-    Object.keys(source).forEach(key => {
-      if (isObject(source[key]) && key in target && isObject(target[key])) {
-        output[key] = safeDeepMerge(target[key], source[key]);
-      } else {
-        output[key] = source[key];
-      }
-    });
-  }
-  return output;
-}
-
 // =================================================================
 // 4. API Handler
 // =================================================================
@@ -684,10 +661,13 @@ async function handler(req: NextRequest): Promise<Response> {
 	      writeArenaHistory,
 	      readCurrentState,
 	      writeCurrentState,
+        arenaHistoryRetentionStrategy,
 	      questionnaireSelections: rawQuestionnaireSelections,
 	      questionnaires: rawQuestionnaires,
 	      ...originalCharacterData
 	    } = body;
+      const resolvedArenaHistoryRetentionStrategy =
+        normalizeArenaHistoryRetentionStrategy(arenaHistoryRetentionStrategy);
 	    const resolvedReadArenaHistory = typeof readArenaHistory === 'boolean' ? readArenaHistory : true;
 	    const resolvedWriteArenaHistory = typeof writeArenaHistory === 'boolean' ? writeArenaHistory : true;
 	    const resolvedReadCurrentState = typeof readCurrentState === 'boolean' ? readCurrentState : true;
@@ -886,117 +866,23 @@ async function handler(req: NextRequest): Promise<Response> {
     }
 
     // --- 数据整合与签名 ---
-    // 1. 创建目标模板的数据副本作为基础
-    const sublimatedData: any = JSON.parse(JSON.stringify(baseOutputData));
-
-    // 1.1 确保 templateId 存在且符合目标模板
-    if (!sublimatedData.templateId) {
-      sublimatedData.templateId = targetTemplate === 'magical-girl'
-        ? '魔法少女/心之花/魔法少女（问卷生成）'
-        : targetTemplate === 'canshou'
-          ? '魔法少女/心之花/残兽（问卷生成）'
-          : GENERAL_CHARACTER_TEMPLATE_ID;
-      log.info('为升华结果补充了目标模板的 templateId', { targetTemplate });
-    }
-
-    // 2. 合并 AI 生成的新数据
-    Object.assign(sublimatedData, safeDeepMerge(sublimatedData, updatedDataFromAI));
-
-    // 3. 重新应用不可变字段，确保模板关键字段不会被修改
-    if (targetTemplate === 'magical-girl' && !resolvedAllowReshapeNames) {
-      const baseMagicName = baseOutputData?.magicConstruct?.name;
-      const baseWonderlandName = baseOutputData?.wonderlandRule?.name;
-      const baseBloomingName = baseOutputData?.blooming?.name;
-      if (baseMagicName && sublimatedData.magicConstruct) {
-        sublimatedData.magicConstruct.name = baseMagicName;
-      }
-      if (baseWonderlandName && sublimatedData.wonderlandRule) {
-        sublimatedData.wonderlandRule.name = baseWonderlandName;
-      }
-      if (baseBloomingName && sublimatedData.blooming) {
-        sublimatedData.blooming.name = baseBloomingName;
-      }
-    }
-
-    if (resolvedWriteArenaHistory) {
-      const historyEntriesFromSource = Array.isArray(originalCharacterData?.arena_history?.entries)
-        ? [...originalCharacterData.arena_history.entries]
-        : (Array.isArray(sublimatedData?.arena_history?.entries) ? [...sublimatedData.arena_history.entries] : []);
-
-      const sublimationHistoryEntries = historyEntriesFromSource.filter((entry: any) => entry?.type === 'sublimation');
-      const participantsName = targetTemplate === 'magical-girl'
-        ? sublimatedData.codename
-        : sublimatedData.name;
-
-      const lastEntryId = sublimationHistoryEntries.reduce((maxId: number, entry: any) => {
-        const numericId = typeof entry?.id === 'number'
-          ? entry.id
-          : Number(entry?.id);
-        return Number.isFinite(numericId) ? Math.max(maxId, numericId as number) : maxId;
-      }, 0);
-
-      sublimationHistoryEntries.push({
-        id: lastEntryId + 1,
-        type: 'sublimation',
-        title: aiResult.sublimationEvent.title,
-        participants: participantsName ? [participantsName] : [],
-        winner: participantsName ?? '未知角色',
-        impact: aiResult.sublimationEvent.impact,
-        metadata: {
-          user_guidance: finalUserGuidance,
-          scenario_title: null,
-          non_native_data_involved: !isNative || !!finalUserGuidance || hasNarrativeHistory || hasNonNativeQuestionnaireLore,
-          questionnaire_lore_used: hasQuestionnaireLore,
-          questionnaire_selection_count: questionnaireSelections.length,
-        }
-      });
-
-      const nowISO = new Date().toISOString();
-      const existingAttributes = originalCharacterData?.arena_history?.attributes
-        || sublimatedData?.arena_history?.attributes
-        || {};
-      const ensureWorldLineId = () => {
-        if (existingAttributes.world_line_id) return existingAttributes.world_line_id;
-        if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-          return crypto.randomUUID();
-        }
-        return `world-${Math.random().toString(16).slice(2, 10)}`;
-      };
-
-      const previousCountRaw = (existingAttributes as any).sublimation_count;
-      const previousCount = typeof previousCountRaw === 'number'
-        ? previousCountRaw
-        : Number(previousCountRaw ?? 0) || 0;
-
-      sublimatedData.arena_history = {
-        attributes: {
-          world_line_id: ensureWorldLineId(),
-          created_at: existingAttributes.created_at ?? nowISO,
-          updated_at: nowISO,
-          sublimation_count: previousCount + 1,
-          last_sublimation_at: nowISO
-        },
-        entries: sublimationHistoryEntries
-      };
-    } else if (originalCharacterData?.arena_history) {
-      sublimatedData.arena_history = JSON.parse(JSON.stringify(originalCharacterData.arena_history));
-    }
-
-    if (resolvedWriteCurrentState) {
-      if (sublimatedData.current_state) {
-        const preservedFields = Array.isArray(originalCharacterData?.current_state?.fields)
-          ? JSON.parse(JSON.stringify(originalCharacterData.current_state.fields))
-          : Array.isArray(sublimatedData.current_state.fields)
-            ? JSON.parse(JSON.stringify(sublimatedData.current_state.fields))
-            : [];
-        sublimatedData.current_state.fields = preservedFields;
-        sublimatedData.current_state.updated_at = new Date().toISOString();
-      }
-    } else if (originalCharacterData?.current_state) {
-      sublimatedData.current_state = JSON.parse(JSON.stringify(originalCharacterData.current_state));
-    } else {
-      delete sublimatedData.current_state;
-    }
+    const sublimatedData: any = buildFinalSublimationData({
+      originalCharacterData,
+      baseOutputData,
+      updatedDataFromAI,
+      targetTemplate,
+      allowReshapeNames: resolvedAllowReshapeNames,
+      writeArenaHistory: resolvedWriteArenaHistory,
+      writeCurrentState: resolvedWriteCurrentState,
+      arenaHistoryRetentionStrategy: resolvedArenaHistoryRetentionStrategy,
+      sublimationEvent: aiResult.sublimationEvent,
+      finalUserGuidance,
+      hasNarrativeHistory,
+      hasQuestionnaireLore,
+      hasNonNativeQuestionnaireLore,
+      questionnaireSelectionCount: questionnaireSelections.length,
+      isNative,
+    });
 
     // 5. 签名逻辑
     // shouldSign 已在生成前计算（并纳入问卷设定 Lore 的原生许可判定）
