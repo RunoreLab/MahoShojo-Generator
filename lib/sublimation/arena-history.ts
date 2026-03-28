@@ -70,7 +70,7 @@ const canonicalizeEntryIds = (
     const copied = { ...entry };
     const raw = copied.id;
     const numeric = typeof raw === 'number' ? raw : Number(raw);
-    if (Number.isFinite(numeric) && !usedIds.has(numeric)) {
+    if (Number.isFinite(numeric) && Number.isInteger(numeric) && numeric >= 1 && !usedIds.has(numeric)) {
       const finalId = numeric;
       copied.id = finalId;
       if (finalId > currentMax) currentMax = finalId;

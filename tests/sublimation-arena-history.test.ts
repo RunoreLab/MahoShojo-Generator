@@ -147,6 +147,37 @@ describe('sublimation arena history retention', () => {
     expect(result.entries.map((item: any) => item.id)).toEqual([10, 11, 12]);
     expect(typeof result.entries[2]?.id).toBe('number');
   });
+ 
+  test('脏 id（空串/负数/小数）会重新分配正整数且 new entry 等于最大 + 1', () => {
+    const dirtyEntries = {
+      ...sourceHistory,
+      entries: [
+        { id: '', type: 'sublimation', title: '脏一' },
+        { id: -3, type: 'sublimation', title: '脏二' },
+        { id: '1.5', type: 'sublimation', title: '脏三' },
+      ],
+    };
+
+    const result = applySublimationArenaHistoryStrategy({
+      sourceArenaHistory: dirtyEntries,
+      strategy: 'keep-sublimation-only',
+      newEntry: buildSublimationHistoryEntry({
+        title: '二转',
+        impact: '完成蜕变',
+        participantsName: '白百合',
+        finalUserGuidance: null,
+        hasQuestionnaireLore: false,
+        questionnaireSelectionCount: 0,
+        nonNativeDataInvolved: false,
+      }),
+      nowISO: '2026-03-28T10:00:00.000Z',
+      createWorldLineId: () => 'world-new',
+    });
+
+    const ids = result.entries.map((item: any) => item.id);
+    expect(ids.every((id) => Number.isInteger(id) && id >= 1)).toBe(true);
+    expect(result.entries[result.entries.length - 1]?.id).toBe(4);
+  });
 
   test('newEntry 非对象仍能返回条目且 id 为 number', () => {
     const result = applySublimationArenaHistoryStrategy({
