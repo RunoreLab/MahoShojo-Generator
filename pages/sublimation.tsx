@@ -26,10 +26,15 @@ import { GenerationModeSwitcher, type GenerationMode } from '@/components/shared
 import { ThemeImage } from '@/components/shared/ThemeImage';
 import { TokenIndicator } from '@/components/shared/TokenIndicator';
 import { JsonSizeIndicator } from '@/components/shared/JsonSizeIndicator';
+import { SublimationArenaHistoryStrategyFieldset } from '@/components/shared/SublimationArenaHistoryStrategyFieldset';
 import { readTextAndReasoningStreamFromResponse } from '@/lib/stream/read-text-and-reasoning-stream';
 import { buildGeneralCharacterCardFromMarkdown } from '@/lib/stream/markdown-card';
 import { buildStreamedSublimationResultCard } from '@/lib/sublimation/stream-result';
 import { DEFAULT_ARENA_HISTORY_RETENTION_STRATEGY } from '@/lib/sublimation/arena-history';
+import {
+  readSublimationStatePreferences,
+  writeSublimationStatePreferences,
+} from '@/lib/sublimation/preferences';
 import { readJsonOrTextFromResponse, resolveApiErrorMessage } from '@/lib/client/apiError';
 import { AI_META_REQUEST_HEADER, AI_META_REQUEST_VALUE, readJsonWithAiMeta } from '@/lib/client/read-json-with-ai-meta';
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
@@ -249,6 +254,9 @@ const SublimationPage: React.FC = () => {
     const [writeArenaHistory, setWriteArenaHistory] = useState(true);
     const [readCurrentState, setReadCurrentState] = useState(true);
     const [writeCurrentState, setWriteCurrentState] = useState(true);
+    const [arenaHistoryRetentionStrategy, setArenaHistoryRetentionStrategy] = useState(
+        DEFAULT_ARENA_HISTORY_RETENTION_STRATEGY,
+    );
     const [isSourceNative, setIsSourceNative] = useState<boolean | null>(null);
     const [isSourceNativeChecking, setIsSourceNativeChecking] = useState(false);
 
@@ -452,29 +460,24 @@ const SublimationPage: React.FC = () => {
 
     useEffect(() => {
         if (typeof window === 'undefined') return;
-        try {
-            const saved = window.localStorage.getItem(SUBLIMATION_STATE_PREF_KEY);
-            if (!saved) return;
-            const parsed = JSON.parse(saved);
-            if (typeof parsed.readArenaHistory === 'boolean') setReadArenaHistory(parsed.readArenaHistory);
-            if (typeof parsed.writeArenaHistory === 'boolean') setWriteArenaHistory(parsed.writeArenaHistory);
-            if (typeof parsed.readCurrentState === 'boolean') setReadCurrentState(parsed.readCurrentState);
-            if (typeof parsed.writeCurrentState === 'boolean') setWriteCurrentState(parsed.writeCurrentState);
-        } catch (error) {
-            console.warn('Failed to load sublimation preferences', error);
-        }
+        const restored = readSublimationStatePreferences(window.localStorage, SUBLIMATION_STATE_PREF_KEY);
+        setReadArenaHistory(restored.readArenaHistory);
+        setWriteArenaHistory(restored.writeArenaHistory);
+        setReadCurrentState(restored.readCurrentState);
+        setWriteCurrentState(restored.writeCurrentState);
+        setArenaHistoryRetentionStrategy(restored.arenaHistoryRetentionStrategy);
     }, []);
 
     useEffect(() => {
         if (typeof window === 'undefined') return;
-        const payload = {
+        writeSublimationStatePreferences(window.localStorage, SUBLIMATION_STATE_PREF_KEY, {
             readArenaHistory,
             writeArenaHistory,
             readCurrentState,
             writeCurrentState,
-        };
-        window.localStorage.setItem(SUBLIMATION_STATE_PREF_KEY, JSON.stringify(payload));
-    }, [readArenaHistory, writeArenaHistory, readCurrentState, writeCurrentState]);
+            arenaHistoryRetentionStrategy,
+        });
+    }, [readArenaHistory, writeArenaHistory, readCurrentState, writeCurrentState, arenaHistoryRetentionStrategy]);
 
     useEffect(() => {
         if (typeof window === 'undefined') return;
@@ -957,7 +960,6 @@ const SublimationPage: React.FC = () => {
 
             const allowedFieldSet = new Set(currentFieldsConfig.map(item => item.id));
             const filteredFieldsToPreserve = fieldsToPreserve.filter(field => allowedFieldSet.has(field));
-            const arenaHistoryRetentionStrategy = DEFAULT_ARENA_HISTORY_RETENTION_STRATEGY;
 
             const payload: Record<string, any> = {
                 ...characterData,
@@ -1706,30 +1708,15 @@ const SublimationPage: React.FC = () => {
                         <div className="input-group">
                             <label className="input-label">资料读写策略</label>
                             <div className="grid gap-4 md:grid-cols-2">
-                                <fieldset className="border border-gray-200 rounded-lg p-3">
-                                    <legend className="text-xs font-semibold text-gray-600 px-1">历战记录</legend>
-                                    <label className="flex items-center text-sm text-gray-700 mt-2">
-                                        <input
-                                            type="checkbox"
-                                            className="h-4 w-4 mr-2 text-purple-600 border-gray-300 rounded"
-                                            checked={readArenaHistory}
-                                            onChange={(e) => setReadArenaHistory(e.target.checked)}
-                                            disabled={isGenerating}
-                                        />
-                                        升华时读取
-                                    </label>
-                                    <label className="flex items-center text-sm text-gray-700 mt-2">
-                                        <input
-                                            type="checkbox"
-                                            className="h-4 w-4 mr-2 text-purple-600 border-gray-300 rounded"
-                                            checked={writeArenaHistory}
-                                            onChange={(e) => setWriteArenaHistory(e.target.checked)}
-                                            disabled={isGenerating}
-                                        />
-                                        升华后写入
-                                    </label>
-                                    <p className="text-[11px] text-gray-500 mt-1">关闭读取后，仅根据设定与引导完成升华；关闭写入后，本次升华不会新增历史条目。</p>
-                                </fieldset>
+                                <SublimationArenaHistoryStrategyFieldset
+                                    readArenaHistory={readArenaHistory}
+                                    writeArenaHistory={writeArenaHistory}
+                                    retentionStrategy={arenaHistoryRetentionStrategy}
+                                    disabled={isGenerating}
+                                    onReadArenaHistoryChange={setReadArenaHistory}
+                                    onWriteArenaHistoryChange={setWriteArenaHistory}
+                                    onRetentionStrategyChange={setArenaHistoryRetentionStrategy}
+                                />
                                 <fieldset className="border border-gray-200 rounded-lg p-3">
                                     <legend className="text-xs font-semibold text-gray-600 px-1">当前状态</legend>
                                     <label className="flex items-center text-sm text-gray-700 mt-2">
@@ -1889,6 +1876,9 @@ const SublimationPage: React.FC = () => {
                                     <AiReasoningPanel reasoning={streamingReasoning} status={streamingReasoning?.status ?? 'idle'} compact />
                                     <p className="mt-3 text-xs text-gray-500 text-center">
                                         提示：流式模式生成的是通用角色卡（Markdown），不保证与目标模板字段一一对应。
+                                    </p>
+                                    <p className="mt-1 text-xs text-gray-500 text-center">
+                                        下载/保存的 JSON 已按所选历战策略写回；页面预览不展示这部分历史元数据。
                                     </p>
                                 </div>
                             )}
