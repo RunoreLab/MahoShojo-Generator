@@ -6,6 +6,7 @@ import {
   buildSublimationHistoryEntry,
   normalizeArenaHistoryRetentionStrategy,
 } from '@/lib/sublimation/arena-history';
+import type { ArenaHistoryRetentionStrategy } from '@/lib/sublimation/arena-history';
 
 const sourceHistory = {
   attributes: {
@@ -65,6 +66,30 @@ describe('sublimation arena history retention', () => {
     });
 
     expect(result.attributes.world_line_id).toBe('world-old');
+    expect(result.entries.map((item: any) => item.type)).toEqual(['sublimation', 'sublimation']);
+    expect(result.entries[1]?.metadata?.user_guidance).toBe('朝守护方向成长');
+  });
+
+  test('运行时非法策略会退回 keep-sublimation-only', () => {
+    const result = applySublimationArenaHistoryStrategy({
+      sourceArenaHistory: sourceHistory,
+      strategy: ('  ???  ' as ArenaHistoryRetentionStrategy),
+      newEntry: buildSublimationHistoryEntry({
+        title: '二转',
+        impact: '完成蜕变',
+        participantsName: '白百合',
+        finalUserGuidance: '朝守护方向成长',
+        hasQuestionnaireLore: true,
+        questionnaireSelectionCount: 2,
+        nonNativeDataInvolved: true,
+      }),
+      nowISO: '2026-03-28T10:00:00.000Z',
+      createWorldLineId: () => 'world-new',
+    });
+
+    expect(result.attributes.world_line_id).toBe('world-old');
+    expect(result.entries).toHaveLength(2);
+    expect(result.entries[0]?.id).toBe(8);
     expect(result.entries.map((item: any) => item.type)).toEqual(['sublimation', 'sublimation']);
     expect(result.entries[1]?.metadata?.user_guidance).toBe('朝守护方向成长');
   });

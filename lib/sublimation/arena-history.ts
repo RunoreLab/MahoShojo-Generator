@@ -85,11 +85,12 @@ export const applySublimationArenaHistoryStrategy = (
   const history = toRecord(input.sourceArenaHistory);
   const attributes = toRecord(history.attributes);
   const sourceEntries = readEntries(history.entries);
+  const normalizedStrategy = normalizeArenaHistoryRetentionStrategy(input.strategy);
 
   const retainedEntries =
-    input.strategy === 'keep-all'
+    normalizedStrategy === 'keep-all'
       ? cloneJson(sourceEntries)
-      : input.strategy === 'keep-sublimation-only'
+      : normalizedStrategy === 'keep-sublimation-only'
         ? cloneJson(sourceEntries.filter((entry) => entry.type === 'sublimation'))
         : [];
 
@@ -99,7 +100,7 @@ export const applySublimationArenaHistoryStrategy = (
   };
 
   const nextAttributes =
-    input.strategy === 'reset-all'
+    normalizedStrategy === 'reset-all'
       ? {
           world_line_id: createWorldLineId(),
           created_at: input.nowISO,
