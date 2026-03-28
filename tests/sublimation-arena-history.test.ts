@@ -94,6 +94,59 @@ describe('sublimation arena history retention', () => {
     expect(result.entries[1]?.metadata?.user_guidance).toBe('朝守护方向成长');
   });
 
+  test('非 reset 策略保留 created_at，其余属性基于 nowISO', () => {
+    const now = '2026-03-28T10:00:00.000Z';
+    const result = applySublimationArenaHistoryStrategy({
+      sourceArenaHistory: sourceHistory,
+      strategy: 'keep-all',
+      newEntry: buildSublimationHistoryEntry({
+        title: '二转',
+        impact: '完成蜕变',
+        participantsName: '白百合',
+        finalUserGuidance: null,
+        hasQuestionnaireLore: false,
+        questionnaireSelectionCount: 0,
+        nonNativeDataInvolved: false,
+      }),
+      nowISO: now,
+      createWorldLineId: () => 'world-new',
+    });
+
+    expect(result.attributes.created_at).toBe(sourceHistory.attributes.created_at);
+    expect(result.attributes.updated_at).toBe(now);
+    expect(result.attributes.last_sublimation_at).toBe(now);
+    expect(result.attributes.sublimation_count).toBe(sourceHistory.attributes.sublimation_count + 1);
+  });
+
+  test('新 id 应基于依旧保留的升华记录最大 id', () => {
+    const sourceWithLargeBattleId = {
+      ...sourceHistory,
+      entries: [
+        { id: 100, type: 'battle', title: '准备战斗' },
+        { id: '10', type: 'sublimation', title: '一转', impact: '觉醒' },
+        { id: 'abc', type: 'sublimation', title: '觉醒后', impact: '增强' },
+      ],
+    };
+
+    const result = applySublimationArenaHistoryStrategy({
+      sourceArenaHistory: sourceWithLargeBattleId,
+      strategy: 'keep-sublimation-only',
+      newEntry: buildSublimationHistoryEntry({
+        title: '二转',
+        impact: '完成蜕变',
+        participantsName: '白百合',
+        finalUserGuidance: null,
+        hasQuestionnaireLore: false,
+        questionnaireSelectionCount: 0,
+        nonNativeDataInvolved: false,
+      }),
+      nowISO: '2026-03-28T10:00:00.000Z',
+      createWorldLineId: () => 'world-new',
+    });
+
+    expect(result.entries.map((item: any) => item.id)).toEqual([ '10', 'abc', 11 ]);
+  });
+
   test('reset-all: 仅保留本次升华记录并重置世界线', () => {
     const result = applySublimationArenaHistoryStrategy({
       sourceArenaHistory: sourceHistory,

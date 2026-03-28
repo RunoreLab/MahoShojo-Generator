@@ -32,7 +32,7 @@ type SublimationHistoryEntryInput = {
 
 type ApplySublimationArenaHistoryStrategyInput = {
   sourceArenaHistory: unknown;
-  strategy: ArenaHistoryRetentionStrategy;
+  strategy: unknown;
   newEntry: Record<string, unknown>;
   nowISO: string;
   createWorldLineId?: () => string;
@@ -47,7 +47,9 @@ const cloneJson = <T>(value: T): T => JSON.parse(JSON.stringify(value));
 
 const readEntries = (value: unknown): Array<Record<string, unknown>> => {
   if (!Array.isArray(value)) return [];
-  return value.filter((item) => item && typeof item === 'object') as Array<Record<string, unknown>>;
+  return value.filter((item) => item && typeof item === 'object' && !Array.isArray(item)) as Array<
+    Record<string, unknown>
+  >;
 };
 
 const getNextEntryId = (entries: Array<Record<string, unknown>>): number => {
