@@ -3,6 +3,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   DEFAULT_SUBLIMATION_STATE_PREFERENCES,
   readSublimationStatePreferences,
+  writeSublimationStatePreferences,
 } from '@/lib/sublimation/preferences';
 import { DEFAULT_ARENA_HISTORY_RETENTION_STRATEGY } from '@/lib/sublimation/arena-history';
 
@@ -22,6 +23,15 @@ const createStorage = (initial: Record<string, string> = {}): TestStorage => {
 };
 
 describe('sublimation state preferences', () => {
+  test('缺省存储时回退到 DEFAULT_SUBLIMATION_STATE_PREFERENCES', () => {
+    const key = 'sublimation-history-state-preferences-v1';
+    const storage = createStorage();
+
+    const result = readSublimationStatePreferences(storage, key);
+
+    expect(result).toEqual(DEFAULT_SUBLIMATION_STATE_PREFERENCES);
+  });
+
   test('旧存储缺少 arenaHistoryRetentionStrategy 时回退到默认策略', () => {
     const key = 'sublimation-history-state-preferences-v1';
     const storage = createStorage({
@@ -72,5 +82,26 @@ describe('sublimation state preferences', () => {
     const result = readSublimationStatePreferences(storage, key);
 
     expect(result).toEqual(DEFAULT_SUBLIMATION_STATE_PREFERENCES);
+  });
+
+  test('writeSublimationStatePreferences 写入后可读回 arenaHistoryRetentionStrategy', () => {
+    const key = 'sublimation-history-state-preferences-v1';
+    const storage = createStorage();
+    const nextValue = {
+      readArenaHistory: false,
+      writeArenaHistory: true,
+      readCurrentState: false,
+      writeCurrentState: true,
+      arenaHistoryRetentionStrategy: 'reset-all' as const,
+    };
+
+    writeSublimationStatePreferences(storage, key, nextValue);
+    const result = readSublimationStatePreferences(storage, key);
+
+    expect(result.arenaHistoryRetentionStrategy).toBe('reset-all');
+    expect(result.readArenaHistory).toBe(false);
+    expect(result.writeArenaHistory).toBe(true);
+    expect(result.readCurrentState).toBe(false);
+    expect(result.writeCurrentState).toBe(true);
   });
 });
