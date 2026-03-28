@@ -118,7 +118,7 @@ describe('sublimation arena history retention', () => {
     expect(result.attributes.sublimation_count).toBe(sourceHistory.attributes.sublimation_count + 1);
   });
 
-  test('新 id 应基于依旧保留的升华记录最大 id', () => {
+  test('新 id 应基于依旧保留的升华记录最大 id，且都 canonical 为数字', () => {
     const sourceWithLargeBattleId = {
       ...sourceHistory,
       entries: [
@@ -144,7 +144,21 @@ describe('sublimation arena history retention', () => {
       createWorldLineId: () => 'world-new',
     });
 
-    expect(result.entries.map((item: any) => item.id)).toEqual([ '10', 'abc', 11 ]);
+    expect(result.entries.map((item: any) => item.id)).toEqual([10, 11, 12]);
+    expect(typeof result.entries[2]?.id).toBe('number');
+  });
+
+  test('newEntry 非对象仍能返回条目且 id 为 number', () => {
+    const result = applySublimationArenaHistoryStrategy({
+      sourceArenaHistory: sourceHistory,
+      strategy: 'keep-all',
+      newEntry: null,
+      nowISO: '2026-03-28T10:00:00.000Z',
+      createWorldLineId: () => 'world-new',
+    });
+
+    expect(result.entries).toHaveLength(3);
+    expect(typeof result.entries[2]?.id).toBe('number');
   });
 
   test('reset-all: 仅保留本次升华记录并重置世界线', () => {

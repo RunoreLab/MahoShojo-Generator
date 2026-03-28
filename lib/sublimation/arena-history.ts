@@ -33,7 +33,7 @@ type SublimationHistoryEntryInput = {
 type ApplySublimationArenaHistoryStrategyInput = {
   sourceArenaHistory: unknown;
   strategy: unknown;
-  newEntry: Record<string, unknown>;
+  newEntry: unknown;
   nowISO: string;
   createWorldLineId?: () => string;
 };
@@ -52,12 +52,36 @@ const readEntries = (value: unknown): Array<Record<string, unknown>> => {
   >;
 };
 
-const getNextEntryId = (entries: Array<Record<string, unknown>>): number => {
-  return entries.reduce((max, entry) => {
-    const raw = entry.id;
+const canonicalizeEntryIds = (
+  entries: Array<Record<string, unknown>>,
+): { entries: Array<Record<string, unknown>>; maxId: number } => {
+  const canonical: Array<Record<string, unknown>> = [];
+  const usedIds = new Set<number>();
+  let currentMax = 0;
+
+  const assignNextId = () => {
+    const next = currentMax + 1;
+    currentMax = next;
+    usedIds.add(next);
+    return next;
+  };
+
+  for (const entry of entries) {
+    const copied = { ...entry };
+    const raw = copied.id;
     const numeric = typeof raw === 'number' ? raw : Number(raw);
-    return Number.isFinite(numeric) ? Math.max(max, numeric) : max;
-  }, 0) + 1;
+    if (Number.isFinite(numeric) && !usedIds.has(numeric)) {
+      const finalId = numeric;
+      copied.id = finalId;
+      if (finalId > currentMax) currentMax = finalId;
+      usedIds.add(finalId);
+    } else {
+      copied.id = assignNextId();
+    }
+    canonical.push(copied);
+  }
+
+  return { entries: canonical, maxId: currentMax };
 };
 
 export const normalizeArenaHistoryRetentionStrategy = (value: unknown): ArenaHistoryRetentionStrategy => {
@@ -96,9 +120,11 @@ export const applySublimationArenaHistoryStrategy = (
         ? cloneJson(sourceEntries.filter((entry) => entry.type === 'sublimation'))
         : [];
 
+  const canonicalRetained = canonicalizeEntryIds(retainedEntries);
+  const safeNewEntry = cloneJson(toRecord(input.newEntry));
   const nextEntry = {
-    ...cloneJson(input.newEntry),
-    id: getNextEntryId(retainedEntries),
+    ...safeNewEntry,
+    id: canonicalRetained.maxId + 1,
   };
 
   const nextAttributes =
@@ -129,6 +155,6 @@ export const applySublimationArenaHistoryStrategy = (
 
   return {
     attributes: nextAttributes,
-    entries: [...retainedEntries, nextEntry],
+    entries: [...canonicalRetained.entries, nextEntry],
   };
 };
