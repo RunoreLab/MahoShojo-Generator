@@ -14,6 +14,8 @@ type Props = {
   enableUserGuidance: boolean;
   languages?: LanguageOption[];
   allowEmptyLanguage?: boolean;
+  showStoryLength?: boolean;
+  showLanguage?: boolean;
 
   userGuidance: string;
   onUserGuidanceChange: (value: string) => void;
@@ -31,6 +33,8 @@ export function StoryOptionsPanel({
   enableUserGuidance,
   languages,
   allowEmptyLanguage = false,
+  showStoryLength = true,
+  showLanguage = true,
   userGuidance,
   onUserGuidanceChange,
   afterUserGuidance,
@@ -101,43 +105,47 @@ export function StoryOptionsPanel({
 
       {afterUserGuidance}
 
-      <div className="input-group">
-        <label className="input-label">期望字数</label>
-        <div className="flex flex-wrap gap-2">
-          {storyOptions.map((option) => (
-            <button
-              key={option.value}
-              onClick={() => onStoryLengthChange(option.value)}
-              disabled={isGenerating}
-              className={`px-3 py-1.5 text-xs font-semibold rounded-full transition-colors ${
-                storyLength === option.value ? 'bg-pink-500 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-              }`}
-            >
-              {option.label}
-            </button>
-          ))}
+      {showStoryLength ? (
+        <div className="input-group">
+          <label className="input-label">期望字数</label>
+          <div className="flex flex-wrap gap-2">
+            {storyOptions.map((option) => (
+              <button
+                key={option.value}
+                onClick={() => onStoryLengthChange(option.value)}
+                disabled={isGenerating}
+                className={`px-3 py-1.5 text-xs font-semibold rounded-full transition-colors ${
+                  storyLength === option.value ? 'bg-pink-500 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                }`}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
         </div>
-      </div>
+      ) : null}
 
-      <div className="input-group">
-        <label htmlFor="language-select" className="input-label">
-          <img src="/globe.svg" alt="Language" className="inline-block w-4 h-4 mr-2" />
-          生成语言
-        </label>
-        <select
-          id="language-select"
-          className="input-field"
-          disabled={isGenerating}
-          value={selectedLanguage}
-          onChange={(e) => onSelectedLanguageChange(e.target.value)}
-        >
-          {normalizedLanguages.map((lang) => (
-            <option key={lang.code || '__default__'} value={lang.code}>
-              {lang.name}
-            </option>
-          ))}
-        </select>
-      </div>
+      {showLanguage ? (
+        <div className="input-group">
+          <label htmlFor="language-select" className="input-label">
+            <img src="/globe.svg" alt="Language" className="inline-block w-4 h-4 mr-2" />
+            生成语言
+          </label>
+          <select
+            id="language-select"
+            className="input-field"
+            disabled={isGenerating}
+            value={selectedLanguage}
+            onChange={(e) => onSelectedLanguageChange(e.target.value)}
+          >
+            {normalizedLanguages.map((lang) => (
+              <option key={lang.code || '__default__'} value={lang.code}>
+                {lang.name}
+              </option>
+            ))}
+          </select>
+        </div>
+      ) : null}
     </>
   );
 }

@@ -2,13 +2,11 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Head from 'next/head';
-import Link from 'next/link';
 
 import BattleDataModal from '@/components/BattleDataModal';
 import DataCardDetailsModal from '@/components/DataCardDetailsModal';
 import Footer from '@/components/Footer';
 import { ErrorMessage } from '@/components/ErrorMessage';
-import { qqGroups } from '@/lib/communityGroups';
 import { useAuth } from '@/lib/useAuth';
 import { config as appConfig } from '@/lib/config';
 import type { Preset } from '@/lib/presets';
@@ -43,6 +41,9 @@ import {
 import { useBattleActions } from './hooks/useBattleActions';
 import { usePresetQuery, useLanguagesQuery, useStatsQuery } from './hooks/useArenaData';
 import { ArenaRankingModal } from './components/ArenaRankingModal';
+import { ArenaCommunitySection } from './shared/ArenaCommunitySection';
+import { ArenaPageLinks } from './shared/ArenaPageLinks';
+import { ArenaRankingLinks } from './shared/ArenaRankingLinks';
 
 export function ArenaPage() {
   const { isAuthenticated } = useAuth();
@@ -164,18 +165,9 @@ export function ArenaPage() {
             }}
           >
             <BattleHeader />
-            <div className="mt-3 flex flex-wrap items-center justify-end gap-3 text-sm">
-              <div className="flex items-center gap-3 text-sm flex-wrap">
-                <button
-                  onClick={() => setShowRankingModal(true)}
-                  className="text-blue-600 hover:underline font-semibold"
-                >
-                  快速查看排行榜
-                </button>
-                <Link href="/ranking" className="text-blue-600 hover:underline">
-                  进入排行榜页
-                </Link>
-              </div>
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-3 text-sm">
+              <ArenaRankingLinks onOpenRankingModal={() => setShowRankingModal(true)} />
+              <ArenaPageLinks variant="full" />
             </div>
 
             <div className="mt-6 grid gap-5 xl:grid-cols-[minmax(320px,420px)_minmax(0,1fr)] 2xl:grid-cols-[minmax(340px,440px)_minmax(0,1fr)] xl:items-start">
@@ -338,37 +330,7 @@ export function ArenaPage() {
                   defaultOpen={false}
                   storageKey="arena.section.community.open"
                 >
-                  <div className="text-center">
-                    <div className="text-sm font-semibold">
-                      点击加入QQ群（任选其一）：
-                      <div className="text-sm text-blue-600 font-semibold">
-                        {qqGroups.map((group, index) => (
-                          <span key={group.groupCode}>
-                            {index > 0 ? ' / ' : ' '}
-                            <a
-                              href={group.joinUrl}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="hover:underline"
-                              title={group.name}
-                            >
-                              {group.groupCode}
-                            </a>
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="text-center mt-3">
-                    <a
-                      href="https://pd.qq.com/s/brisxifbl"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-sm text-blue-600 hover:underline font-semibold"
-                    >
-                      点击加入腾讯频道
-                    </a>
-                  </div>
+                  <ArenaCommunitySection />
                 </CollapsibleSection>
               </div>
             </div>
