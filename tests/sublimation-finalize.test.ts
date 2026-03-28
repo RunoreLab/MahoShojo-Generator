@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { buildFinalSublimationData } from '@/lib/sublimation/finalize';
+import { GENERAL_CHARACTER_TEMPLATE_ID } from '@/lib/schemas/general-character';
 
 const BASE_TEMPLATE_ID = '魔法少女/心之花/魔法少女（问卷生成）';
 const NOW_ISO = '2026-03-28T12:34:56.000Z';
@@ -114,5 +115,50 @@ describe('buildFinalSublimationData', () => {
 
     expect('arena_history' in result).toBe(false);
     expect(result.templateId).toBe(BASE_TEMPLATE_ID);
+  });
+
+  test('writeArenaHistory=false + writeCurrentState=false 且原卡为 null 时，阻断 AI 注入并删除字段', () => {
+    const input = createBaseInput();
+    input.writeArenaHistory = false;
+    input.writeCurrentState = false;
+    input.originalCharacterData.arena_history = null;
+    input.originalCharacterData.current_state = null;
+    input.updatedDataFromAI.arena_history = {
+      attributes: { world_line_id: 'world-ai' },
+      entries: [{ id: 77, type: 'battle', title: '注入历史', impact: '不应出现' }],
+    };
+    input.updatedDataFromAI.current_state = {
+      summary: '注入状态',
+      fields: [{ label: '体力', type: 'number', value: 999 }],
+    };
+
+    const result = buildFinalSublimationData(input);
+
+    expect('arena_history' in result).toBe(false);
+    expect('current_state' in result).toBe(false);
+  });
+
+  test('allowReshapeNames=false 时恢复魔法少女不可变名称字段', () => {
+    const input = createBaseInput();
+    input.updatedDataFromAI.magicConstruct = { name: 'AI 魔装名' };
+    input.updatedDataFromAI.wonderlandRule = { name: 'AI 奇境名' };
+    input.updatedDataFromAI.blooming = { name: 'AI 繁开名' };
+
+    const result = buildFinalSublimationData(input);
+
+    expect(result.magicConstruct.name).toBe(input.baseOutputData.magicConstruct.name);
+    expect(result.wonderlandRule.name).toBe(input.baseOutputData.wonderlandRule.name);
+    expect(result.blooming.name).toBe(input.baseOutputData.blooming.name);
+  });
+
+  test('baseOutputData 缺少 templateId 时，按 targetTemplate 回填 templateId', () => {
+    const input = createBaseInput();
+    delete input.baseOutputData.templateId;
+    delete input.updatedDataFromAI.templateId;
+    input.targetTemplate = 'general';
+
+    const result = buildFinalSublimationData(input);
+
+    expect(result.templateId).toBe(GENERAL_CHARACTER_TEMPLATE_ID);
   });
 });

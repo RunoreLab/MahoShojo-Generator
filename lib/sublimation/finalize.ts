@@ -51,9 +51,6 @@ function safeDeepMerge(target: any, source: any): any {
   return output;
 }
 
-const hasOwn = (value: unknown, key: string): boolean =>
-  Boolean(value && typeof value === 'object' && Object.prototype.hasOwnProperty.call(value, key));
-
 const resolveTargetTemplateId = (targetTemplate: SupportedTargetTemplate): string => {
   if (targetTemplate === 'magical-girl') return '魔法少女/心之花/魔法少女（问卷生成）';
   if (targetTemplate === 'canshou') return '魔法少女/心之花/残兽（问卷生成）';
@@ -120,7 +117,10 @@ export const buildFinalSublimationData = (input: BuildFinalSublimationDataInput)
       nowISO,
       createWorldLineId: input.createWorldLineId,
     });
-  } else if (hasOwn(input.originalCharacterData, 'arena_history')) {
+  } else if (
+    typeof input.originalCharacterData?.arena_history !== 'undefined' &&
+    input.originalCharacterData.arena_history !== null
+  ) {
     sublimatedData.arena_history = cloneJson(input.originalCharacterData.arena_history);
   } else {
     delete sublimatedData.arena_history;
@@ -142,7 +142,10 @@ export const buildFinalSublimationData = (input: BuildFinalSublimationDataInput)
       sublimatedData.current_state.fields = preservedFields;
       sublimatedData.current_state.updated_at = nowISO;
     }
-  } else if (hasOwn(input.originalCharacterData, 'current_state')) {
+  } else if (
+    typeof input.originalCharacterData?.current_state !== 'undefined' &&
+    input.originalCharacterData.current_state !== null
+  ) {
     sublimatedData.current_state = cloneJson(input.originalCharacterData.current_state);
   } else {
     delete sublimatedData.current_state;
