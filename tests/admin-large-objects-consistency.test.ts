@@ -1,4 +1,5 @@
 import { describe, expect, mock, test } from 'bun:test';
+import * as actualR2 from '@/lib/r2';
 
 const toD1Result = (rows: Array<Record<string, unknown>>) => ({
   result: [{ results: rows }],
@@ -43,10 +44,19 @@ mock.module('@/lib/database/core', () => ({
 }));
 
 mock.module('@/lib/r2', () => ({
+  ...actualR2,
   listAllObjects: async () => state.r2Result,
 }));
 
 describe('admin large objects consistency report', () => {
+  test('mock 仅覆盖 listAllObjects，不应丢失其他 R2 导出', async () => {
+    const r2 = await import('@/lib/r2');
+
+    expect(typeof r2.listAllObjects).toBe('function');
+    expect(typeof r2.getObjectText).toBe('function');
+    expect(typeof r2.deleteObject).toBe('function');
+  });
+
   test('同时识别 orphan / dangling / missing-index，并标记未接入 kind', async () => {
     state.kindRows = [{ kind: 'battle_report_generation_output' }, { kind: 'portrait' }];
     state.indexedRows = [
