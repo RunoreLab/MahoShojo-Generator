@@ -283,11 +283,11 @@ export const encyclopediaEntries: EncyclopediaEntry[] = [
   },
   {
     slug: 'guidance',
-    title: '引导 / 裁判事件 / 读写状态',
-    summary: 'userGuidance、裁判事件、读写历战/状态栏对战报与计分的影响。',
+    title: '引导 / 判定事件 / 读写状态',
+    summary: 'userGuidance、判定事件、读写历战/状态栏对战报与计分的影响。',
     markdownPath: '/encyclopedia/guidance.md',
     categoryId: 'gameplay',
-    keywords: ['userGuidance', '裁判', '历战记录', '状态栏'],
+    keywords: ['userGuidance', '判定', '历战记录', '状态栏'],
   },
   {
     slug: 'ranking',

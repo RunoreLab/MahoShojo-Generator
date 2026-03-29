@@ -317,7 +317,7 @@ export const createPromptBuilder = (
     }
 
     if (internalGuidance) {
-        finalPrompt += `## 【系统裁判规则】\n${internalGuidance.trim()}\n\n`;
+        finalPrompt += `## 【系统判定规则】\n${internalGuidance.trim()}\n\n`;
     }
 
     const trimmedLoreText = typeof loreText === 'string' ? loreText.trim() : '';
@@ -506,7 +506,7 @@ export const createStreamPromptBuilder = (
     }
 
     if (internalGuidance) {
-        finalPrompt += `## 【系统裁判规则】\n${internalGuidance.trim()}\n\n`;
+        finalPrompt += `## 【系统判定规则】\n${internalGuidance.trim()}\n\n`;
     }
 
     const trimmedLoreText = typeof loreText === 'string' ? loreText.trim() : '';

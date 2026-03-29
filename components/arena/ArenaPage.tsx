@@ -280,7 +280,7 @@ export function ArenaPage() {
                 </CollapsibleSection>
 
                 <CollapsibleSection
-                  title="🧠 故事引导 / 裁判 / AI 模型"
+                  title="🧠 故事引导 / 判定 / AI 模型"
                   description="这里的设置会直接影响生成风格与稳定性"
                   defaultOpen
                   disabled={isGenerating}

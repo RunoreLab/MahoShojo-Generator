@@ -351,7 +351,7 @@ export function BattleActions({
   - 生成语言
   - 期望字数
   - 问卷 Lore
-  - 裁判
+  - 判定
 
 ```tsx
 export function BattleLiteStoryOptions() {
@@ -637,7 +637,7 @@ git commit -m "feat: link arena full page with battle lite page"
   - 生成语言
   - 轻量模型开关
   - 问卷 Lore
-  - 裁判编辑器
+  - 判定编辑器
   - 辅助情景
   - 排位快捷设置
   - 高级读写设置

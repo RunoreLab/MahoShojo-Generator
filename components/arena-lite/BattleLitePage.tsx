@@ -110,7 +110,7 @@ export function BattleLitePage() {
         <title>魔法少女竞技场（简洁版） - MahoShojo Generator</title>
         <meta
           name="description"
-          content="面向新用户的简洁单列竞技场页：更轻量地选择角色、情景并开始生成战报。"
+          content="简洁单列竞技场页：更轻量地选择角色、情景并开始生成战报。"
         />
       </Head>
 
@@ -217,7 +217,7 @@ export function BattleLitePage() {
 
               <CollapsibleSection
                 title="🧠 故事方向引导 / AI 提供商"
-                description="保留故事方向引导与自定义 AI 提供商，其余高级项交给完整版"
+                description="如需其他高级项请前往完整版竞技场"
                 defaultOpen
                 disabled={isGenerating}
                 keepMounted
