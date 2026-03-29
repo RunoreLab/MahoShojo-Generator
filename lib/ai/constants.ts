@@ -182,6 +182,11 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 description: '智谱旗下新一代通用模型，综合能力更强，适合复杂指令、多轮对话与高质量创作。'
             },
             {
+                value: 'glm-5.1',
+                label: 'GLM-5.1',
+                description: '智谱旗下新一代通用模型，综合能力更强，适合复杂指令、多轮对话与高质量创作。'
+            },
+            {
                 value: 'glm-4.5',
                 label: 'GLM-4.5',
                 description: '智谱旗下的通用对话与内容创作模型，适合轻量日常任务。'
@@ -379,6 +384,11 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 description: '智谱新一代通用模型，适合中文对话、总结与结构化输出。'
             },
             {
+                value: 'glm-5.1',
+                label: 'GLM-5.1',
+                description: '智谱旗下新一代通用模型，综合能力更强，适合复杂指令、多轮对话与高质量创作。'
+            },
+            {
                 value: 'glm-4.6',
                 label: 'GLM-4.6',
                 description: '通用指令模型，适合中文对话、总结与结构化输出。'
@@ -438,6 +448,11 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 value: 'ZhipuAI/GLM-5',
                 label: 'GLM-5',
                 description: '面向中文场景的新一代通用模型，适合复杂对话、改写与信息整理。'
+            },
+            {
+                value: 'ZhipuAI/GLM-5.1',
+                label: 'GLM-5.1',
+                description: '智谱旗下新一代通用模型，综合能力更强，适合复杂指令、多轮对话与高质量创作。'
             },
             {
                 value: 'ZhipuAI/GLM-4.7-Flash',
@@ -587,6 +602,11 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 value: 'zai-org/GLM-5',
                 label: 'GLM-5',
                 description: '中文场景综合能力更强，适合复杂指令、结构化输出与多轮对话。'
+            },
+            {
+                value: 'zai-org/GLM-5.1',
+                label: 'GLM-5.1',
+                description: '智谱旗下新一代通用模型，综合能力更强，适合复杂指令、多轮对话与高质量创作。'
             },
             {
                 value: 'zai-org/GLM-4.6',
