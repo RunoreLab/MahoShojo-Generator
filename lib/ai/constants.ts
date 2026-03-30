@@ -599,14 +599,19 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 description: '偏推理的思考模型，适合复杂规划、多步分析与高约束任务。'
             },
             {
-                value: 'zai-org/GLM-5',
+                value: 'Pro/zai-org/GLM-5',
                 label: 'GLM-5',
                 description: '中文场景综合能力更强，适合复杂指令、结构化输出与多轮对话。'
             },
             {
-                value: 'zai-org/GLM-5.1',
+                value: 'Pro/zai-org/GLM-5.1',
                 label: 'GLM-5.1',
                 description: '智谱旗下新一代通用模型，综合能力更强，适合复杂指令、多轮对话与高质量创作。'
+            },
+            {
+                value: 'Pro/zai-org/GLM-4.7',
+                label: 'GLM-4.7',
+                description: '中文场景表现稳定，适合结构化输出、改写与多轮对话。'
             },
             {
                 value: 'zai-org/GLM-4.6',
