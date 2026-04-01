@@ -24,5 +24,33 @@ describe('creator build rules', () => {
     expect(preset.supportedTemplates).toEqual(['general', 'magical-girl']);
     expect(typeof preset.allowStandalone).toBe('boolean');
     expect(preset.projectionPolicy).toBe('primary-structured');
+    expect(preset.mainRuleEligible).toBe(true);
+    expect(
+      preset.blocks.some((block) => block.id === 'powerLevel/select' && block.type === 'select')
+    ).toBe(true);
+    expect(
+      preset.blocks.some(
+        (block) => block.id === 'coreAttributes/point-buy' && block.type === 'point-buy'
+      )
+    ).toBe(true);
+    expect(
+      preset.blocks.some(
+        (block) => block.id === 'specialties/multi-select' && block.type === 'multi-select'
+      )
+    ).toBe(true);
+    expect(
+      preset.blocks.some(
+        (block) => block.id === 'derivedStats/derived' && block.type === 'derived'
+      )
+    ).toBe(true);
+    expect(
+      preset.blocks.some((block) => block.id === 'ruleNotice/section' && block.type === 'section')
+    ).toBe(true);
+  });
+
+  test('loads throw when preset missing', () => {
+    expect(() => loadBuildRulePresetById('missing-id')).toThrow(
+      /Build rule preset "missing-id" is not available/
+    );
   });
 });
