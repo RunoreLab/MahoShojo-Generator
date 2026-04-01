@@ -92,3 +92,20 @@ export function loadBuildRulePresetById(presetId: string): BuildRulePreset {
 
   return clonePreset(preset);
 }
+
+export function tryLoadBuildRulePresetById(presetId: string): BuildRulePreset | null {
+  const preset = PRESET_MAP[presetId];
+  if (!preset) {
+    return null;
+  }
+  return clonePreset(preset);
+}
+
+export function normalizeBuildRuleBlockKey(blockId: string): string {
+  const trimmed = String(blockId ?? '').trim();
+  if (!trimmed) {
+    return '';
+  }
+  const [logicalKey] = trimmed.split('/');
+  return logicalKey?.trim() ?? '';
+}
