@@ -32,9 +32,16 @@ const derivedIndex = PRESET_REGISTRY.map((preset) => ({
 })) as BuildRulePresetIndex;
 
 const rawIndex = presetIndexJson as RawPresetIndex;
+const rawIndexObject = Array.isArray(rawIndex)
+  ? null
+  : (rawIndex as {
+      presets?: BuildRulePresetIndex;
+    });
 const fileIndexEntries: BuildRulePresetIndex = Array.isArray(rawIndex)
   ? rawIndex
-  : rawIndex.presets ?? [];
+  : Array.isArray(rawIndexObject?.presets)
+    ? rawIndexObject.presets
+    : [];
 
 const fileIndexLookup = new Map<string, BuildRulePresetIndexEntry>();
 fileIndexEntries.forEach((entry) => {

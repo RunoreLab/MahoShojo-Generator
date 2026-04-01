@@ -1,6 +1,6 @@
 import type { BuildRulePreset } from './types';
 
-import { normalizeBuildRuleBlockKey, loadBuildRulePresetById } from './build-rules';
+import { loadBuildRulePresetById, normalizeBuildRuleBlockKey } from './build-rules';
 
 const CORE_ATTRIBUTE_KEYS = ['STR', 'CON', 'AGI', 'MAG', 'WILL', 'PER', 'CHM'] as const;
 type CoreAttributeKey = (typeof CORE_ATTRIBUTE_KEYS)[number];
@@ -18,7 +18,7 @@ const POWER_LEVEL_SPECIALTY_LIMITS: Record<string, { maxSelections: number; budg
 };
 
 const SPECIALTY_COST: Record<string, number> = {
-  'magic-burst': 1,
+  'magic-burst': 2,
 };
 
 type ValidationIssueCode =
@@ -39,14 +39,17 @@ export interface BuildRuleValidationSummary {
   missingRequiredBlockKeys: string[];
 }
 
+export type BuildRuleBlockResults = Record<string, unknown>;
+
 export interface EvaluateBuildRuleStateParams {
-  presetId: string;
-  input: Record<string, unknown>;
+  ruleId: string;
+  inputs: Record<string, unknown>;
 }
 
 export interface BuildRuleRuntimeResult {
-  presetId: string;
-  normalizedInput: Record<string, unknown>;
+  ruleId: string;
+  version: string;
+  blockResults: BuildRuleBlockResults;
   derived: Record<string, number>;
   validationSummary: BuildRuleValidationSummary;
 }
@@ -94,7 +97,6 @@ const parseCoreAttributes = (
 
   const raw = value as Record<string, unknown>;
   const parsed = {} as Record<CoreAttributeKey, number>;
-
   for (const key of CORE_ATTRIBUTE_KEYS) {
     const maybeNumber = raw[key];
     if (typeof maybeNumber !== 'number' || Number.isNaN(maybeNumber)) {
@@ -102,7 +104,6 @@ const parseCoreAttributes = (
     }
     parsed[key] = maybeNumber;
   }
-
   return { attributes: parsed, invalid: false };
 };
 
@@ -130,37 +131,43 @@ const parseSpecialties = (
 
 const getSpecialtyCost = (specialty: string): number => SPECIALTY_COST[specialty] ?? 1;
 
-export function evaluateBuildRuleState(params: EvaluateBuildRuleStateParams): BuildRuleRuntimeResult {
-  const preset = loadBuildRulePresetById(params.presetId);
-  const input = params.input ?? {};
-  const issues: BuildRuleValidationIssue[] = [];
+const pushIssue = (issues: BuildRuleValidationIssue[], issue: BuildRuleValidationIssue): void => {
+  issues.push(issue);
+};
 
-  const powerLevelRaw = getRawInputValue(input, preset, 'powerLevel');
+export function evaluateBuildRuleState(params: EvaluateBuildRuleStateParams): BuildRuleRuntimeResult {
+  const preset = loadBuildRulePresetById(params.ruleId);
+  const inputs = params.inputs ?? {};
+  const issues: BuildRuleValidationIssue[] = [];
+  const blockResults: BuildRuleBlockResults = {};
+
+  const powerLevelRaw = getRawInputValue(inputs, preset, 'powerLevel');
   const powerLevel = coerceString(powerLevelRaw);
   if (!powerLevel) {
-    issues.push({
+    pushIssue(issues, {
       code: 'required-missing',
       blockKey: 'powerLevel',
       message: 'powerLevel is required.',
     });
   } else if (!POWER_LEVEL_ATTRIBUTE_BUDGET[powerLevel]) {
-    issues.push({
+    pushIssue(issues, {
       code: 'invalid-value',
       blockKey: 'powerLevel',
       message: `Unsupported powerLevel: ${powerLevel}.`,
     });
   }
+  blockResults.powerLevel = powerLevel;
 
-  const coreAttributesRaw = getRawInputValue(input, preset, 'coreAttributes');
+  const coreAttributesRaw = getRawInputValue(inputs, preset, 'coreAttributes');
   const parsedCoreAttributes = parseCoreAttributes(coreAttributesRaw);
   if (coreAttributesRaw === undefined) {
-    issues.push({
+    pushIssue(issues, {
       code: 'required-missing',
       blockKey: 'coreAttributes',
       message: 'coreAttributes is required.',
     });
   } else if (parsedCoreAttributes.invalid) {
-    issues.push({
+    pushIssue(issues, {
       code: 'invalid-value',
       blockKey: 'coreAttributes',
       message: 'coreAttributes must contain numeric STR/CON/AGI/MAG/WILL/PER/CHM.',
@@ -171,7 +178,7 @@ export function evaluateBuildRuleState(params: EvaluateBuildRuleStateParams): Bu
     const totalAttributes = sumCoreAttributes(parsedCoreAttributes.attributes);
     const maxBudget = POWER_LEVEL_ATTRIBUTE_BUDGET[powerLevel];
     if (totalAttributes > maxBudget) {
-      issues.push({
+      pushIssue(issues, {
         code: 'budget-exceeded',
         blockKey: 'coreAttributes',
         message: `coreAttributes point-buy exceeds budget: ${totalAttributes}/${maxBudget}.`,
@@ -179,10 +186,12 @@ export function evaluateBuildRuleState(params: EvaluateBuildRuleStateParams): Bu
     }
   }
 
-  const specialtiesRaw = getRawInputValue(input, preset, 'specialties');
+  blockResults.coreAttributes = parsedCoreAttributes.attributes;
+
+  const specialtiesRaw = getRawInputValue(inputs, preset, 'specialties');
   const parsedSpecialties = parseSpecialties(specialtiesRaw);
   if (parsedSpecialties.invalid) {
-    issues.push({
+    pushIssue(issues, {
       code: 'invalid-value',
       blockKey: 'specialties',
       message: 'specialties must be a string array.',
@@ -190,7 +199,7 @@ export function evaluateBuildRuleState(params: EvaluateBuildRuleStateParams): Bu
   } else if (powerLevel && parsedSpecialties.specialties) {
     const limits = POWER_LEVEL_SPECIALTY_LIMITS[powerLevel] ?? POWER_LEVEL_SPECIALTY_LIMITS.seed;
     if (parsedSpecialties.specialties.length > limits.maxSelections) {
-      issues.push({
+      pushIssue(issues, {
         code: 'selection-count',
         blockKey: 'specialties',
         message: `specialties exceeds max selections: ${parsedSpecialties.specialties.length}/${limits.maxSelections}.`,
@@ -201,13 +210,15 @@ export function evaluateBuildRuleState(params: EvaluateBuildRuleStateParams): Bu
       0
     );
     if (usedBudget > limits.budget) {
-      issues.push({
+      pushIssue(issues, {
         code: 'budget-exceeded',
         blockKey: 'specialties',
         message: `specialties budget exceeds limit: ${usedBudget}/${limits.budget}.`,
       });
     }
   }
+
+  blockResults.specialties = parsedSpecialties.specialties ?? null;
 
   const attributes = parsedCoreAttributes.attributes;
   const derived =
@@ -227,15 +238,10 @@ export function evaluateBuildRuleState(params: EvaluateBuildRuleStateParams): Bu
       .map((issue) => issue.blockKey),
   };
 
-  const normalizedInput: Record<string, unknown> = {
-    powerLevel,
-    coreAttributes: attributes,
-    specialties: parsedSpecialties.specialties ?? null,
-  };
-
   return {
-    presetId: params.presetId,
-    normalizedInput,
+    ruleId: params.ruleId,
+    version: preset.version,
+    blockResults,
     derived,
     validationSummary,
   };
