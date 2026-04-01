@@ -1,12 +1,6 @@
 #!/usr/bin/env bun
 
-import {
-  countUsersWithPublicApprovedCards as countUsersWithPublicApprovedCardsFromRepo,
-  getUserSlotCountById,
-  listEligibleReporterUsers,
-} from '@/lib/database/badges-granting';
-import { grantBadgeToUser, userHasBadge } from '@/lib/database/badges';
-import { increaseUserSlotCount } from '@/lib/database/users';
+import { runGrantExcellentReporter } from '@/lib/automation/badges/grant-excellent-reporter';
 import { getReporterTierByBadgeId } from './reporter-rules';
 
 const EXCELLENT_REPORTER_TIER = (() => {
@@ -14,108 +8,6 @@ const EXCELLENT_REPORTER_TIER = (() => {
   if (!tier) throw new Error('缺少优秀记者档位配置：excellent_reporter');
   return tier;
 })();
-
-interface EligibleUser {
-  user_id: number;
-  username: string;
-  public_cards: number;
-  total_likes: number;
-  total_favorites: number;
-  total_usage: number;
-}
-
-async function countUsersWithPublicApprovedCards(): Promise<number> {
-  return countUsersWithPublicApprovedCardsFromRepo();
-}
-
-async function findEligibleUsers(): Promise<EligibleUser[]> {
-  const rows = await listEligibleReporterUsers({
-    minTotalLikes: EXCELLENT_REPORTER_TIER.minTotalLikes,
-    minTotalFavorites: EXCELLENT_REPORTER_TIER.minTotalFavorites,
-    minTotalUsage: EXCELLENT_REPORTER_TIER.minTotalUsage,
-  });
-
-  return rows.map((row) => ({
-    user_id: row.userId,
-    username: row.username,
-    public_cards: row.publicCards,
-    total_likes: row.totalLikes,
-    total_favorites: row.totalFavorites,
-    total_usage: row.totalUsage,
-  }));
-}
-
-async function getUserSlotCount(userId: number): Promise<number> {
-  return getUserSlotCountById(userId);
-}
-
-async function processUsers(users: EligibleUser[], dryRun: boolean) {
-  const summary = {
-    totalUsers: users.length,
-    badgeGranted: 0,
-    slotIncreased: 0,
-    skipped: 0,
-    errors: 0,
-    dryRun
-  };
-
-  for (const user of users) {
-    try {
-      const alreadyHasBadge = await userHasBadge(user.user_id, EXCELLENT_REPORTER_TIER.badgeId);
-      const beforeSlot = await getUserSlotCount(user.user_id);
-
-      if (dryRun) {
-        if (alreadyHasBadge) {
-          summary.skipped += 1;
-          console.log(
-            `[dry-run] 用户 ${user.username} (ID: ${user.user_id}) 已拥有徽章，跳过授予和槽位增加`
-          );
-        } else {
-          summary.badgeGranted += 1;
-          summary.slotIncreased += 1;
-          console.log(
-            `[dry-run] 用户 ${user.username} (ID: ${user.user_id}) 将被授予徽章，槽位 ${beforeSlot} -> ${beforeSlot + EXCELLENT_REPORTER_TIER.slotIncrement}`
-          );
-        }
-        continue;
-      }
-
-      if (alreadyHasBadge) {
-        summary.skipped += 1;
-        console.log(
-          `用户 ${user.username} (ID: ${user.user_id}) 已拥有徽章，跳过授予和槽位变更`
-        );
-        continue;
-      }
-
-      const granted = await grantBadgeToUser(user.user_id, EXCELLENT_REPORTER_TIER.badgeId);
-      if (!granted) {
-        summary.errors += 1;
-        console.error(`授予用户 ${user.username} (ID: ${user.user_id}) 徽章失败，已跳过槽位增加`);
-        continue;
-      }
-
-      summary.badgeGranted += 1;
-
-      const increased = await increaseUserSlotCount(user.user_id, EXCELLENT_REPORTER_TIER.slotIncrement);
-      if (increased) {
-        summary.slotIncreased += 1;
-        const afterSlot = await getUserSlotCount(user.user_id);
-        console.log(
-          `用户 ${user.username} (ID: ${user.user_id}) 已处理：授予徽章，槽位 ${beforeSlot} -> ${afterSlot}`
-        );
-      } else {
-        summary.errors += 1;
-        console.error(`用户 ${user.username} (ID: ${user.user_id}) 槽位增加失败`);
-      }
-    } catch (error) {
-      summary.errors += 1;
-      console.error(`处理用户 ${user.username} (ID: ${user.user_id}) 时出错:`, error);
-    }
-  }
-
-  return summary;
-}
 
 async function main() {
   const args = process.argv.slice(2);
@@ -130,21 +22,23 @@ async function main() {
   console.log(`奖励：授予徽章 + 槽位 +${EXCELLENT_REPORTER_TIER.slotIncrement}`);
 
   try {
-    const totalPublicUsers = await countUsersWithPublicApprovedCards();
-    const eligibleUsers = await findEligibleUsers();
-    const ratio = totalPublicUsers > 0 ? eligibleUsers.length / totalPublicUsers : 0;
-    console.log(`公开且通过审查的发卡用户：${totalPublicUsers}`);
-    console.log(`本轮符合优秀记者条件的用户：${eligibleUsers.length}（占比 ${(ratio * 100).toFixed(1)}%）`);
+    const result = await runGrantExcellentReporter({
+      dryRun,
+      logger: console,
+      verbose: true,
+    });
+    const ratio =
+      result.summary.totalPublicUsers > 0 ? result.summary.eligibleUsers / result.summary.totalPublicUsers : 0;
+    console.log(`公开且通过审查的发卡用户：${result.summary.totalPublicUsers}`);
+    console.log(`本轮符合优秀记者条件的用户：${result.summary.eligibleUsers}（占比 ${(ratio * 100).toFixed(1)}%）`);
 
-    if (eligibleUsers.length === 0) {
+    if (result.summary.eligibleUsers === 0) {
       console.log('没有符合条件的用户，脚本结束。');
       return;
     }
 
-    const summary = await processUsers(eligibleUsers, dryRun);
-
     console.log('处理完成。');
-    console.table(summary);
+    console.table(result.summary);
 
     if (dryRun) {
       console.log('Dry-run 模式：未对数据库进行任何修改。');
