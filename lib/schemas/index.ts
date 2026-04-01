@@ -1,4 +1,10 @@
 import { CanshouSchema, type CanshouData } from './canshou';
+import {
+  BuildStateSchema,
+  CreationInputsSchema,
+  type BuildState,
+  type CreationInputs,
+} from './creator-metadata';
 import { MagicalGirlSchema, type MagicalGirlData } from './magical-girl';
 import { ScenarioSchema, type ScenarioData } from './scenario';
 import {
@@ -320,10 +326,21 @@ export {
   CanshouSchema,
   MagicalGirlSchema,
   ScenarioSchema,
+  CreationInputsSchema,
+  BuildStateSchema,
   GeneralCharacterSchema,
   GeneralScenarioSchema,
   NarrativeHistorySchema,
   GENERAL_CHARACTER_TEMPLATE_ID,
   GENERAL_SCENARIO_TEMPLATE_ID,
 };
-export type { CanshouData, MagicalGirlData, GeneralCharacterData, ScenarioData, GeneralScenarioData, NarrativeHistoryData };
+export type {
+  CanshouData,
+  MagicalGirlData,
+  GeneralCharacterData,
+  ScenarioData,
+  GeneralScenarioData,
+  NarrativeHistoryData,
+  CreationInputs,
+  BuildState,
+};
