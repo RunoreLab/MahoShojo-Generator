@@ -1,3 +1,5 @@
+import type { BuildRuleRuntimeResult } from './build-rule-runtime';
+import type { ProjectBuildRulesForPromptResult } from './build-rule-projection';
 import type { CreatorTemplateId } from './templates';
 
 export type BuildRuleBlock = Readonly<{
@@ -29,3 +31,32 @@ export interface BuildRulePresetIndexEntry {
 }
 
 export type BuildRulePresetIndex = readonly BuildRulePresetIndexEntry[];
+
+export interface CreatorQuestionnaireRef {
+  questionnaireId: string;
+  title?: string;
+  [key: string]: unknown;
+}
+
+export interface CreatorQuestionnaireAnswer {
+  questionnaireId?: string;
+  question?: string;
+  answer?: string;
+  [key: string]: unknown;
+}
+
+export interface CreatorRequestInput {
+  template: CreatorTemplateId;
+  freeformBrief?: string | null;
+  questionnaires: CreatorQuestionnaireRef[];
+  questionnaireAnswers?: CreatorQuestionnaireAnswer[];
+  buildRules: BuildRuleRuntimeResult[];
+  primaryRuleId?: string | null;
+}
+
+export interface CreatorPromptInput {
+  template: CreatorTemplateId;
+  userIntent: string;
+  questionnaireSummary: string;
+  buildRuleProjection: ProjectBuildRulesForPromptResult;
+}
