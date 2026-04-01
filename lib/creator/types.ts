@@ -1,31 +1,31 @@
 import type { CreatorTemplateId } from './templates';
 
-export type BuildRuleBlock = {
+export type BuildRuleBlock = Readonly<{
   id: string;
   type: string;
   label?: string;
   description?: string;
   hint?: string;
   [key: string]: unknown;
-};
+}>;
 
 export interface BuildRulePreset {
-  id: string;
-  version: string;
-  title?: string;
-  supportedTemplates: CreatorTemplateId[];
-  allowStandalone: boolean;
-  mainRuleEligible: boolean;
-  projectionPolicy: 'primary-structured' | 'reference-only';
-  aiPromptHint?: string;
-  uiSummary?: string;
-  blocks: BuildRuleBlock[];
+  readonly id: string;
+  readonly version: string;
+  readonly title?: string;
+  readonly supportedTemplates: readonly CreatorTemplateId[];
+  readonly allowStandalone: boolean;
+  readonly mainRuleEligible: boolean;
+  readonly projectionPolicy: 'primary-structured' | 'reference-only';
+  readonly aiPromptHint?: string;
+  readonly uiSummary?: string;
+  readonly blocks: readonly BuildRuleBlock[];
 }
 
 export interface BuildRulePresetIndexEntry {
-  id: string;
-  title: string;
-  version: string;
+  readonly id: string;
+  readonly title: string;
+  readonly version: string;
 }
 
-export type BuildRulePresetIndex = BuildRulePresetIndexEntry[];
+export type BuildRulePresetIndex = readonly BuildRulePresetIndexEntry[];

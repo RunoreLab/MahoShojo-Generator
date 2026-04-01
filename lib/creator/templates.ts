@@ -8,12 +8,10 @@ export const CREATOR_TEMPLATE_IDS = [
 
 export type CreatorTemplateId = (typeof CREATOR_TEMPLATE_IDS)[number];
 
-export const CREATOR_STREAM_TEMPLATE_IDS: readonly CreatorTemplateId[] = [
-  'general',
-  'general-scenario',
-];
+export const CREATOR_STREAM_TEMPLATE_IDS = ['general', 'general-scenario'] as const;
+export type CreatorStreamTemplateId = (typeof CREATOR_STREAM_TEMPLATE_IDS)[number];
 
 export const isCreatorStreamTemplate = (
   templateId: CreatorTemplateId | string
-): templateId is CreatorTemplateId =>
-  CREATOR_STREAM_TEMPLATE_IDS.includes(templateId as CreatorTemplateId);
+): templateId is CreatorStreamTemplateId =>
+  CREATOR_STREAM_TEMPLATE_IDS.includes(templateId as CreatorStreamTemplateId);

@@ -22,7 +22,7 @@ describe('creator build rules', () => {
 
     const preset = loadBuildRulePresetById('arena-trpg-lite');
     expect(preset.supportedTemplates).toEqual(['general', 'magical-girl']);
-    expect(typeof preset.allowStandalone).toBe('boolean');
+    expect(preset.allowStandalone).toBe(true);
     expect(preset.projectionPolicy).toBe('primary-structured');
     expect(preset.mainRuleEligible).toBe(true);
     expect(
