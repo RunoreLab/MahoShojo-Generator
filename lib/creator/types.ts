@@ -1,5 +1,3 @@
-import type { BuildRuleRuntimeResult } from './build-rule-runtime';
-import type { ProjectBuildRulesForPromptResult } from './build-rule-projection';
 import type { CreatorTemplateId } from './templates';
 
 export type BuildRuleBlock = Readonly<{
@@ -32,6 +30,46 @@ export interface BuildRulePreset {
   readonly aiPromptHint?: string;
   readonly uiSummary?: string;
   readonly blocks: readonly BuildRuleBlock[];
+}
+
+export interface BuildRuleValidationBudgetSummary {
+  attributePointsUsed: number;
+  attributePointsLimit: number | null;
+  specialtyPointsUsed: number;
+  specialtyPointsLimit: number | null;
+}
+
+export interface BuildRuleValidationSummary {
+  valid: boolean;
+  issues: string[];
+  missingRequiredBlockKeys: string[];
+  budget?: BuildRuleValidationBudgetSummary;
+}
+
+export interface BuildRuleRuntimeResult {
+  ruleId: string;
+  version: string;
+  blockResults: Record<string, unknown>;
+  derived: Record<string, number>;
+  validationSummary: BuildRuleValidationSummary;
+}
+
+export interface ProjectedBuildRuleForPrompt {
+  ruleId: string;
+  template: CreatorTemplateId;
+  facts: {
+    ruleId: string;
+    version: string;
+    blockResults: Record<string, unknown>;
+    derived: Record<string, number>;
+    validationSummary: BuildRuleValidationSummary;
+  };
+  summary: string;
+}
+
+export interface ProjectBuildRulesForPromptResult {
+  primary: ProjectedBuildRuleForPrompt | null;
+  references: ProjectedBuildRuleForPrompt[];
 }
 
 export interface CreatorQuestionnaireRef {
