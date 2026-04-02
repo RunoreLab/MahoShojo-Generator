@@ -226,6 +226,29 @@ body {
   margin-top: 1.5rem;
 }
 
+.creator-workbench-shell .container {
+  max-width: none;
+  padding: 0;
+}
+
+.creator-workbench-shell .card {
+  max-width: none;
+  margin-top: 1rem;
+}
+
+.creator-workbench-shell .result-card,
+.creator-workbench-shell .title-container {
+  max-width: none;
+}
+
+@media (min-width: 1024px) {
+  .creator-workbench-shell .creator-workbench-sidebar {
+    position: sticky;
+    top: 24px;
+    align-self: start;
+  }
+}
+
 .title {
   text-align: center;
   font-size: 2rem;
