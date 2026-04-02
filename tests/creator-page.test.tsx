@@ -9,6 +9,7 @@ import { FreeformBriefPanel } from '@/components/creator/FreeformBriefPanel';
 import { TemplateSelector } from '@/components/creator/TemplateSelector';
 import { evaluateBuildRuleState } from '@/lib/creator/build-rule-runtime';
 import { loadBuildRulePresetById, loadBuildRulePresetIndex } from '@/lib/creator/build-rules';
+import { isCreatorTemplateSupportedInGenerationMode } from '@/lib/creator/templates';
 
 test('TemplateSelector 显示 5 个模板并标出流式边界', () => {
   const html = renderToStaticMarkup(
@@ -101,4 +102,8 @@ test('BuildSummaryPanel 展示属性预算、专长预算与派生值', () => {
   expect(html).toContain('Radiance');
   expect(html).toContain('属性点');
   expect(html).toContain('专长点');
+});
+
+test('general-scenario 模板允许流式创作模式', () => {
+  expect(isCreatorTemplateSupportedInGenerationMode('stream', 'general-scenario')).toBe(true);
 });

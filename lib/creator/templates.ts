@@ -50,11 +50,23 @@ export const CREATOR_TEMPLATE_OPTIONS: readonly CreatorTemplateOption[] = [
 
 export const CREATOR_STREAM_TEMPLATE_IDS = ['general', 'general-scenario'] as const;
 export type CreatorStreamTemplateId = (typeof CREATOR_STREAM_TEMPLATE_IDS)[number];
+export type CreatorGenerationMode = 'stream' | 'non-stream';
 
 export const isCreatorStreamTemplate = (
   templateId: CreatorTemplateId | string
 ): templateId is CreatorStreamTemplateId =>
   CREATOR_STREAM_TEMPLATE_IDS.includes(templateId as CreatorStreamTemplateId);
+
+export const isCreatorTemplateSupportedInGenerationMode = (
+  generationMode: CreatorGenerationMode,
+  templateId: CreatorTemplateId | string
+): boolean => {
+  if (generationMode === 'stream') {
+    return isCreatorStreamTemplate(templateId);
+  }
+
+  return templateId === 'magical-girl';
+};
 
 export const getCreatorTemplateOptionById = (
   templateId: CreatorTemplateId | string

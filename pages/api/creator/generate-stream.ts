@@ -241,13 +241,6 @@ async function handler(req: NextRequest): Promise<Response> {
     const buildRules = normalizeBuildRules(rawBuildRules);
     const primaryRuleId = typeof rawPrimaryRuleId === 'string' && rawPrimaryRuleId.trim() ? rawPrimaryRuleId.trim() : null;
 
-    if (normalizedAnswers.length === 0) {
-      return new Response(JSON.stringify({ error: 'Answers array is required' }), {
-        status: 400,
-        headers: { 'Content-Type': 'application/json' },
-      });
-    }
-
     const creatorRequestInput: CreatorRequestInput = {
       template,
       freeformBrief: typeof freeformBrief === 'string' ? freeformBrief : null,

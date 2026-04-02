@@ -62,7 +62,7 @@ import { FreeformBriefPanel } from '@/components/creator/FreeformBriefPanel';
 import { BuildRulePicker } from '@/components/creator/BuildRulePicker';
 import { BuildRulePanel } from '@/components/creator/BuildRulePanel';
 import { BuildSummaryPanel } from '@/components/creator/BuildSummaryPanel';
-import { isCreatorStreamTemplate, type CreatorTemplateId } from '@/lib/creator/templates';
+import { isCreatorTemplateSupportedInGenerationMode, type CreatorTemplateId } from '@/lib/creator/templates';
 import { createDefaultBuildRuleInputs, loadBuildRulePresetIndex, tryLoadBuildRulePresetById } from '@/lib/creator/build-rules';
 import { evaluateBuildRuleState } from '@/lib/creator/build-rule-runtime';
 import type { AIReasoningEnvelope } from '@/types/ai-reasoning';
@@ -1437,12 +1437,12 @@ const DetailsPage: React.FC = () => {
     }
 
     const snapshot = answersSnapshot ?? answersByKey;
-    if (generationMode === 'stream' && (!isCreatorStreamTemplate(creatorTemplate) || creatorTemplate !== 'general')) {
-      setError('⚠️ 当前仅支持【通用角色卡（Markdown）】使用流式创作。');
-      return;
-    }
-    if (generationMode === 'non-stream' && creatorTemplate !== 'magical-girl') {
-      setError('⚠️ 当前非流式创作仅接通【魔法少女（结构化）】。其余模板将在后续任务中继续接线。');
+    if (!isCreatorTemplateSupportedInGenerationMode(generationMode, creatorTemplate)) {
+      if (generationMode === 'stream') {
+        setError('⚠️ 当前仅支持【通用角色卡（Markdown）】与【通用情景卡（Markdown）】使用流式创作。');
+      } else {
+        setError('⚠️ 当前非流式创作仅接通【魔法少女（结构化）】。其余模板将在后续任务中继续接线。');
+      }
       return;
     }
     const finalAnswerItems: QuestionnaireAnswerItem[] = [];
@@ -1459,8 +1459,14 @@ const DetailsPage: React.FC = () => {
       });
     });
 
-    if (finalAnswerItems.length === 0) {
-      setError('⚠️ 请至少填写一题后再生成');
+    if (finalAnswerItems.length === 0 && buildRuleRuntimeResults.length === 0 && !freeformBrief.trim()) {
+      setError('⚠️ 请至少填写一题，或补充自由说明，或提供规则车卡后再生成。');
+      return;
+    }
+
+    const invalidBuildRule = buildRuleRuntimeResults.find((rule) => rule.validationSummary.valid !== true) ?? null;
+    if (invalidBuildRule) {
+      setError('⚠️ 当前规则车卡存在未解决的配点或必填项问题，请先修正后再生成。');
       return;
     }
 
@@ -1485,6 +1491,8 @@ const DetailsPage: React.FC = () => {
       }
       : undefined;
 
+    if (await checkSensitiveWordsForAnswers(finalAnswerItems)) return;
+
     setSubmitting(true);
     setError(null);
     setMagicalGirlDetails(null);
@@ -1494,8 +1502,6 @@ const DetailsPage: React.FC = () => {
     setNonStreamReasoning(null);
     setCharacterPortraitAsset(null);
     let nextCooldownMs = generatorCooldownMs;
-
-    if (await checkSensitiveWordsForAnswers(finalAnswerItems)) return;
 
     try {
       console.log('提交答案:', finalAnswerItems);

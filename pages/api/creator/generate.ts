@@ -553,13 +553,6 @@ async function handler(req: Request): Promise<Response> {
     preferResolvedQuestionText: nativeAllowedByServer,
   });
 
-  if (normalizedAnswers.length === 0) {
-    return new Response(JSON.stringify({ error: 'Answers array is required' }), {
-      status: 400,
-      headers: { 'Content-Type': 'application/json' }
-    });
-  }
-
   const overLimitAnswer = findOverLimitAnswer(normalizedAnswers, effectiveQuestionnaires);
   const allowNativeSignature = requestedNativeSignature && nativeAllowedByServer && !overLimitAnswer;
   if (overLimitAnswer) {

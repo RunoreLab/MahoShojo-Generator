@@ -154,4 +154,26 @@ describe('creator server', () => {
       )
     ).toThrow('PRIMARY_RULE_INELIGIBLE');
   });
+
+  test('规则快照 validationSummary 无效时拒绝请求', () => {
+    expect(() =>
+      validateCreatorRequest({
+        template: 'general',
+        freeformBrief: 'x',
+        questionnaires: [],
+        questionnaireAnswers: [],
+        buildRules: [
+          {
+            ...arenaRule,
+            validationSummary: {
+              valid: false,
+              issues: ['属性点超出预算：已使用 320 / 上限 280'],
+              missingRequiredBlockKeys: [],
+            },
+          },
+        ],
+        primaryRuleId: 'arena-trpg-lite',
+      })
+    ).toThrow('RULE_VALIDATION_FAILED');
+  });
 });

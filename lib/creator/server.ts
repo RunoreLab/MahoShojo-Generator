@@ -1,4 +1,4 @@
-import type { BuildRulePreset, CreatorPromptInput, CreatorRequestInput } from './types';
+import type { BuildRulePreset, BuildRuleRuntimeResult, CreatorPromptInput, CreatorRequestInput } from './types';
 
 import { projectBuildRulesForPrompt } from './build-rule-projection';
 import { buildCreatorUserIntent, summarizeQuestionnaires } from './prompt';
@@ -17,6 +17,18 @@ const getBuildRulePresetOrThrow = (
     throw new Error(`BUILD_RULE_PRESET_NOT_FOUND:${ruleId}`);
   }
   return preset;
+};
+
+const hasBuildRuleValidationErrors = (rule: BuildRuleRuntimeResult): boolean => {
+  const validationSummary = rule.validationSummary;
+  const issues = Array.isArray(validationSummary?.issues)
+    ? validationSummary.issues.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+    : [];
+  const missingRequiredBlockKeys = Array.isArray(validationSummary?.missingRequiredBlockKeys)
+    ? validationSummary.missingRequiredBlockKeys.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+    : [];
+
+  return validationSummary?.valid !== true || issues.length > 0 || missingRequiredBlockKeys.length > 0;
 };
 
 export function validateCreatorRequest(
@@ -41,6 +53,10 @@ export function validateCreatorRequest(
   }
 
   for (const rule of buildRules) {
+    if (hasBuildRuleValidationErrors(rule)) {
+      throw new Error('RULE_VALIDATION_FAILED');
+    }
+
     const preset = getBuildRulePresetOrThrow(rule.ruleId, options.resolvePreset);
     if (!preset.supportedTemplates.includes(input.template)) {
       throw new Error('RULE_TEMPLATE_UNSUPPORTED');
