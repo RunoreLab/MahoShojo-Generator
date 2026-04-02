@@ -11,10 +11,20 @@ export type BuildRuleBlock = Readonly<{
   [key: string]: unknown;
 }>;
 
+export interface BuildRulePresetIndexEntry {
+  readonly id: string;
+  readonly title: string;
+  readonly version: string;
+  readonly description?: string;
+}
+
+export type BuildRulePresetIndex = readonly BuildRulePresetIndexEntry[];
+
 export interface BuildRulePreset {
   readonly id: string;
   readonly version: string;
   readonly title?: string;
+  readonly description?: string;
   readonly supportedTemplates: readonly CreatorTemplateId[];
   readonly allowStandalone: boolean;
   readonly mainRuleEligible: boolean;
@@ -23,14 +33,6 @@ export interface BuildRulePreset {
   readonly uiSummary?: string;
   readonly blocks: readonly BuildRuleBlock[];
 }
-
-export interface BuildRulePresetIndexEntry {
-  readonly id: string;
-  readonly title: string;
-  readonly version: string;
-}
-
-export type BuildRulePresetIndex = readonly BuildRulePresetIndexEntry[];
 
 export interface CreatorQuestionnaireRef {
   questionnaireId: string;
