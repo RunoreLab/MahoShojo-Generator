@@ -9,7 +9,6 @@ import { useProviderModeCooldown } from '../lib/cooldown';
 import { quickCheck } from '@/lib/sensitive-word-filter';
 import Link from 'next/link';
 import SaveToCloudButton from '../components/SaveToCloudButton';
-import Footer from '../components/Footer';
 import QuestionNavigator from '../components/QuestionNavigator';
 import BattleDataModal from '@/components/BattleDataModal';
 import DataCardDetailsModal from '@/components/DataCardDetailsModal';
@@ -60,11 +59,8 @@ import { FreeformBriefPanel } from '@/components/creator/FreeformBriefPanel';
 import { BuildRulePicker } from '@/components/creator/BuildRulePicker';
 import { BuildRulePanel } from '@/components/creator/BuildRulePanel';
 import { BuildSummaryPanel } from '@/components/creator/BuildSummaryPanel';
-import { CreatorMainStage } from '@/components/creator/CreatorMainStage';
-import { CreatorOverviewCard } from '@/components/creator/CreatorOverviewCard';
 import { CreatorQuestionnaireSidebarPanel } from '@/components/creator/CreatorQuestionnaireSidebarPanel';
-import { CreatorSidebar } from '@/components/creator/CreatorSidebar';
-import { CreatorWorkbenchLayout } from '@/components/creator/CreatorWorkbenchLayout';
+import { CreatorWorkbenchPage } from '@/components/creator/CreatorWorkbenchPage';
 import { MarkdownBlock } from '@/components/MarkdownBlock';
 import { CREATOR_PAGE_COPY } from '@/lib/creator/page-copy';
 import {
@@ -1919,7 +1915,72 @@ const DetailsPage: React.FC = () => {
     </div>
   );
 
-  const renderWorkbenchPage = useCallback(({
+  const creatorOverlayContent = (
+    <>
+      <BattleDataModal
+        isOpen={showQuestionnairePicker}
+        onClose={() => {
+          setShowQuestionnairePicker(false);
+          setQuestionnairePickerError(null);
+        }}
+        selectedType="questionnaire"
+        initialTab="public"
+        titleOverride="选择云端问卷"
+        onSelectCard={handleSelectQuestionnaireCard}
+        externalError={questionnairePickerError}
+      />
+
+      {questionnaireDetailsCard && (
+        <DataCardDetailsModal
+          isOpen={showQuestionnaireDetailsModal}
+          onClose={() => {
+            setShowQuestionnaireDetailsModal(false);
+            setQuestionnaireDetailsCard(null);
+          }}
+          card={{
+            id: questionnaireDetailsCard.id,
+            name: questionnaireDetailsCard.name,
+            description: questionnaireDetailsCard.description,
+            type: 'questionnaire',
+            data: questionnaireDetailsCard.data,
+            isPublic: questionnaireDetailsCard.isPublic,
+            author: questionnaireDetailsCard.author,
+          }}
+        />
+      )}
+
+      {showImageModal && savedImageUrl && (
+        <div
+          className="fixed inset-0 flex items-center justify-center bg-black"
+          style={{ backgroundColor: 'rgba(0, 0, 0, 0.7)', paddingLeft: '2rem', paddingRight: '2rem', zIndex: 1000 }}
+        >
+          <div className="relative max-h-[80vh] w-full max-w-lg overflow-auto rounded-lg bg-white">
+            <div className="sticky top-0 z-10 flex justify-end bg-white/95 p-2 backdrop-blur">
+              <button
+                onClick={() => setShowImageModal(false)}
+                aria-label="关闭"
+                className="text-3xl leading-none text-gray-500 hover:text-gray-700"
+              >
+                ×
+              </button>
+            </div>
+            <div className="px-4 pb-4">
+              <p className="mt-2 text-center text-sm text-gray-600">💫 长按图片保存到相册</p>
+              <div className="flex flex-col items-center p-2">
+                <img
+                  src={savedImageUrl}
+                  alt="魔法少女详细档案"
+                  className="mx-auto h-auto w-1/2 rounded-lg"
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+
+  const renderWorkbenchPage = ({
     sidebarStage,
     mainStage,
     mainTitle,
@@ -1951,41 +2012,26 @@ const DetailsPage: React.FC = () => {
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <link rel="icon" href="/favicon.ico" />
       </Head>
-      <div className="magic-background">
-        <CreatorWorkbenchLayout
-          layoutMode={layoutMode}
-          sidebar={
-            <CreatorSidebar
-              key={sidebarResetKey(sidebarStage)}
-              layoutMode={layoutMode}
-              stage={sidebarStage}
-              overview={(
-                <CreatorOverviewCard
-                  stageLabel={overviewStageLabel}
-                  progressLabel={progressLabel}
-                  templateLabel={currentTemplateLabel}
-                  primaryRuleLabel={currentRuleLabel}
-                  nativeHint={nativeHint}
-                />
-              )}
-              configuration={configuration}
-              questionnaire={questionnaire}
-              advanced={advanced}
-            />
-          }
-          main={<CreatorMainStage stage={mainStage} title={mainTitle} content={mainContent} />}
-        />
-        {showFooter ? <Footer textWhite={true} /> : null}
-      </div>
+      <CreatorWorkbenchPage
+        layoutMode={layoutMode}
+        sidebarResetKey={sidebarResetKey(sidebarStage)}
+        sidebarStage={sidebarStage}
+        mainStage={mainStage}
+        overviewStageLabel={overviewStageLabel}
+        progressLabel={progressLabel}
+        templateLabel={currentTemplateLabel}
+        primaryRuleLabel={currentRuleLabel}
+        nativeHint={nativeHint}
+        configuration={configuration}
+        questionnaire={questionnaire}
+        advanced={advanced}
+        mainTitle={mainTitle}
+        mainContent={mainContent}
+        showFooter={showFooter}
+        overlayContent={creatorOverlayContent}
+      />
     </>
-  ), [
-    buildPlaceholderPanel,
-    creatorConfigurationPanel,
-    currentRuleLabel,
-    currentTemplateLabel,
-    layoutMode,
-    sidebarResetKey,
-  ]);
+  );
 
 
   if (loading) {
@@ -2527,7 +2573,7 @@ const DetailsPage: React.FC = () => {
             progressLabel={`问题 ${currentQuestionIndex + 1} / ${mergedQuestions.length}`}
             progressPercent={progressPercent}
             progressExtra={autoSaveTimestamp ? (
-              <span className="text-xs text-gray-400">已自动保存于 {new Date(autoSaveTimestamp).toLocaleTimeString()}</span>
+              <span className="text-xs text-gray-400">已自动保存于 {new Date(autoSaveTimestamp!).toLocaleTimeString()}</span>
             ) : null}
             questionText={currentQuestion?.question || '未加载题目'}
             questionnaireTitle={currentQuestionnaireTitle}
@@ -2571,7 +2617,7 @@ const DetailsPage: React.FC = () => {
 
           {error && (
             <div className="mt-4">
-              <ErrorMessage message={error} />
+              <ErrorMessage message={error!} />
             </div>
           )}
           {isQuestionnaireNativeAllowed && hasOverLimitAnswer && (
@@ -2603,18 +2649,11 @@ const DetailsPage: React.FC = () => {
     });
   }
 
-  return (
+  const creatorResultMainContent = (
     <>
-      <Head>
-        <title>{CREATOR_PAGE_COPY.headTitle}</title>
-        <meta name="description" content={CREATOR_PAGE_COPY.metaDescription} />
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <link rel="icon" href="/favicon.ico" />
-      </Head>
-
-      <div className="magic-background">
-        <div className="container">
-          <div className="card">
+      {/* TODO(creator-workbench): 删除迁移期保留的旧窄版 JSX；当前不参与渲染。 */}
+      {false && (
+        <>
             <div className="flex justify-center items-center mb-4">
               <div className="inline-flex flex-col items-center rounded-2xl border border-sky-200 bg-white/80 px-6 py-4 shadow-sm">
                 <span className="text-[11px] font-semibold uppercase tracking-[0.35em] text-sky-500">
@@ -2658,13 +2697,13 @@ const DetailsPage: React.FC = () => {
                   />
                   {primaryBuildRulePreset ? (
                     <BuildRulePanel
-                      preset={primaryBuildRulePreset}
-                      inputs={buildRuleInputsById[primaryBuildRulePreset.id] ?? createDefaultBuildRuleInputs(primaryBuildRulePreset.id)}
-                      onChange={(nextInputs) => handleBuildRuleInputsChange(primaryBuildRulePreset.id, nextInputs)}
+                      preset={primaryBuildRulePreset!}
+                      inputs={buildRuleInputsById[primaryBuildRulePreset!.id] ?? createDefaultBuildRuleInputs(primaryBuildRulePreset!.id)}
+                      onChange={(nextInputs) => handleBuildRuleInputsChange(primaryBuildRulePreset!.id, nextInputs)}
                     />
                   ) : null}
                   {primaryBuildRuleRuntimeResult ? (
-                    <BuildSummaryPanel runtimeResult={primaryBuildRuleRuntimeResult} />
+                    <BuildSummaryPanel runtimeResult={primaryBuildRuleRuntimeResult!} />
                   ) : null}
                 </div>
                 <EncyclopediaLinks
@@ -2929,7 +2968,7 @@ const DetailsPage: React.FC = () => {
                   progressLabel={`问题 ${currentQuestionIndex + 1} / ${mergedQuestions.length}`}
                   progressPercent={progressPercent}
                   progressExtra={autoSaveTimestamp ? (
-                    <span className="text-xs text-gray-400">已自动保存于 {new Date(autoSaveTimestamp).toLocaleTimeString()}</span>
+                    <span className="text-xs text-gray-400">已自动保存于 {new Date(autoSaveTimestamp!).toLocaleTimeString()}</span>
                   ) : null}
                   questionText={currentQuestion?.question || '未加载题目'}
                   questionnaireTitle={currentQuestionnaireTitle}
@@ -3101,7 +3140,7 @@ const DetailsPage: React.FC = () => {
 
                 {/* 错误信息显示 */}
                 {error && (
-                  <ErrorMessage message={error} />
+                  <ErrorMessage message={error!} />
                 )}
                 {isQuestionnaireNativeAllowed && hasOverLimitAnswer && (
                   <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-700">
@@ -3129,9 +3168,10 @@ const DetailsPage: React.FC = () => {
                 </div>
               </>
             )}
-          </div>
+        </>
+      )}
 
-          {/* 流式：通用角色卡（Markdown） */}
+      {/* 流式：通用角色卡（Markdown） */}
           {generationMode === 'stream' && (streamingMarkdown !== null || streamedGeneralCard) && (
             <>
               {streamedGeneralCardForDisplay && (
@@ -3404,75 +3444,24 @@ const DetailsPage: React.FC = () => {
             </>
           )}
 
-          <Footer textWhite={true} />
-        </div>
-
-        <BattleDataModal
-          isOpen={showQuestionnairePicker}
-          onClose={() => {
-            setShowQuestionnairePicker(false);
-            setQuestionnairePickerError(null);
-          }}
-          selectedType="questionnaire"
-          initialTab="public"
-          titleOverride="选择云端问卷"
-          onSelectCard={handleSelectQuestionnaireCard}
-          externalError={questionnairePickerError}
-        />
-
-        {questionnaireDetailsCard && (
-          <DataCardDetailsModal
-            isOpen={showQuestionnaireDetailsModal}
-            onClose={() => {
-              setShowQuestionnaireDetailsModal(false);
-              setQuestionnaireDetailsCard(null);
-            }}
-            card={{
-              id: questionnaireDetailsCard.id,
-              name: questionnaireDetailsCard.name,
-              description: questionnaireDetailsCard.description,
-              type: 'questionnaire',
-              data: questionnaireDetailsCard.data,
-              isPublic: questionnaireDetailsCard.isPublic,
-              author: questionnaireDetailsCard.author,
-            }}
-          />
-        )}
-
-        {/* Image Modal */}
-        {showImageModal && savedImageUrl && (
-          <div className="fixed inset-0 bg-black flex items-center justify-center"
-            style={{ backgroundColor: 'rgba(0, 0, 0, 0.7)', paddingLeft: '2rem', paddingRight: '2rem', zIndex: 1000 }}
-          >
-            <div className="bg-white rounded-lg max-w-lg w-full max-h-[80vh] overflow-auto relative">
-              <div className="sticky top-0 z-10 bg-white/95 backdrop-blur flex justify-end p-2">
-                <button
-                  onClick={() => setShowImageModal(false)}
-                  aria-label="关闭"
-                  className="text-gray-500 hover:text-gray-700 text-3xl leading-none"
-                >
-                  ×
-                </button>
-              </div>
-              <div className="px-4 pb-4">
-                <p className="text-center text-sm text-gray-600" style={{ marginTop: '0.5rem' }}>
-                  💫 长按图片保存到相册
-                </p>
-                <div className="items-center flex flex-col" style={{ padding: '0.5rem' }}>
-                  <img
-                    src={savedImageUrl}
-                    alt="魔法少女详细档案"
-                    className="w-1/2 h-auto rounded-lg mx-auto"
-                  />
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-      </div>
     </>
   );
+
+  return renderWorkbenchPage({
+    sidebarStage: 'result',
+    mainStage: 'result',
+    mainContent: creatorResultMainContent,
+    overviewStageLabel: '创作完成',
+    progressLabel: `共 ${mergedQuestions.length} 题，已进入结果阶段`,
+    nativeHint: !isQuestionnaireNativeAllowed
+      ? '当前问卷未获得原生许可'
+      : hasOverLimitAnswer
+        ? `已有 ${overLimitItems.length} 条答案超过字数上限`
+        : '本次结果仍具备原生性',
+    questionnaire: questionnaireSidebarPanel,
+    advanced: advancedSidebarPanel,
+    showFooter: true,
+  });
 };
 
 export default DetailsPage;

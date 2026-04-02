@@ -61,7 +61,7 @@ export const isCreatorStreamTemplate = (
 export const isCreatorTemplateSupportedInGenerationMode = (
   generationMode: CreatorGenerationMode,
   templateId: CreatorTemplateId | string
-): boolean => {
+): templateId is CreatorTemplateId => {
   if (generationMode === 'stream') {
     return isCreatorStreamTemplate(templateId);
   }
