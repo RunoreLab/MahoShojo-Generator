@@ -55,6 +55,12 @@ export interface BuildRuleRuntimeResult {
   validationSummary: BuildRuleValidationSummary;
 }
 
+export interface BuildRuleRequestInput {
+  ruleId: string;
+  version?: string | null;
+  inputs: Record<string, unknown>;
+}
+
 export interface ProjectedBuildRuleForPrompt {
   ruleId: string;
   template: CreatorTemplateId;

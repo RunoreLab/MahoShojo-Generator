@@ -7,6 +7,7 @@ import { BuildRulePicker } from '@/components/creator/BuildRulePicker';
 import { BuildSummaryPanel } from '@/components/creator/BuildSummaryPanel';
 import { FreeformBriefPanel } from '@/components/creator/FreeformBriefPanel';
 import { TemplateSelector } from '@/components/creator/TemplateSelector';
+import { CREATOR_PAGE_COPY } from '@/lib/creator/page-copy';
 import { evaluateBuildRuleState } from '@/lib/creator/build-rule-runtime';
 import { loadBuildRulePresetById, loadBuildRulePresetIndex } from '@/lib/creator/build-rules';
 import { isCreatorTemplateSupportedInGenerationMode } from '@/lib/creator/templates';
@@ -106,4 +107,12 @@ test('BuildSummaryPanel 展示属性预算、专长预算与派生值', () => {
 
 test('general-scenario 模板允许流式创作模式', () => {
   expect(isCreatorTemplateSupportedInGenerationMode('stream', 'general-scenario')).toBe(true);
+});
+
+test('creator 页文案不再沿用旧 details 问卷措辞', () => {
+  expect(CREATOR_PAGE_COPY.headTitle).toBe('创作工房');
+  expect(CREATOR_PAGE_COPY.heroTitle).toContain('从问卷、规则与补充说明生成角色或情景');
+  expect(CREATOR_PAGE_COPY.headTitle).not.toContain('奇妙妖精大调查');
+  expect(CREATOR_PAGE_COPY.heroTitle).not.toContain('魔法少女道路上的潜力和表现');
+  expect(CREATOR_PAGE_COPY.heroBody).not.toContain('《下班，然后变成魔法少女》');
 });

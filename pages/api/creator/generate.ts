@@ -22,6 +22,7 @@ import { getDataCardById } from '@/lib/database/data-cards';
 import { enforceTextSafety } from '@/lib/content-safety/server';
 import { recordUserActivityFromRequest } from '@/lib/user-activity/record';
 import presetIndex from '@/public/questionnaires/presets/index.json';
+import { resolveBuildRuleRuntimeResultsFromRequest } from '@/lib/creator/build-rule-request';
 import { buildCreatorPromptInput, validateCreatorRequest } from '@/lib/creator/server';
 import { CREATOR_TEMPLATE_IDS, type CreatorTemplateId } from '@/lib/creator/templates';
 import type { BuildRuleRuntimeResult, CreatorPromptInput, CreatorRequestInput } from '@/lib/creator/types';
@@ -112,15 +113,6 @@ const normalizeCreatorTemplate = (raw: unknown): CreatorTemplateId => {
   return CREATOR_TEMPLATE_IDS.includes(candidate as CreatorTemplateId)
     ? (candidate as CreatorTemplateId)
     : 'magical-girl';
-};
-
-const normalizeBuildRules = (raw: unknown): BuildRuleRuntimeResult[] => {
-  if (!Array.isArray(raw)) return [];
-  return raw.filter((item): item is BuildRuleRuntimeResult => {
-    if (!item || typeof item !== 'object') return false;
-    const record = item as Record<string, unknown>;
-    return typeof record.ruleId === 'string' && typeof record.version === 'string';
-  });
 };
 
 const buildCreatorPromptText = (creatorPromptInput: CreatorPromptInput): string => {
@@ -522,7 +514,6 @@ async function handler(req: Request): Promise<Response> {
   const customProviderPayload = requestBody.customProvider;
   const template = normalizeCreatorTemplate(requestBody.template);
   const freeformBrief = typeof requestBody.freeformBrief === 'string' ? requestBody.freeformBrief : null;
-  const buildRules = normalizeBuildRules(requestBody.buildRules);
   const primaryRuleId = typeof requestBody.primaryRuleId === 'string' && requestBody.primaryRuleId.trim()
     ? requestBody.primaryRuleId.trim()
     : null;
@@ -559,20 +550,22 @@ async function handler(req: Request): Promise<Response> {
     log.info('问卷答案超过字数上限，已取消原生签名', overLimitAnswer);
   }
 
-  const creatorRequestInput: CreatorRequestInput = {
-    template,
-    freeformBrief,
-    questionnaires: effectiveQuestionnaires.map((questionnaire) => ({
-      questionnaireId: questionnaire.id,
-      title: questionnaire.title,
-    })),
-    questionnaireAnswers: normalizedAnswers,
-    buildRules,
-    primaryRuleId,
-  };
-
+  let buildRules: BuildRuleRuntimeResult[] = [];
+  let creatorRequestInput: CreatorRequestInput;
   let creatorPromptInput: CreatorPromptInput;
   try {
+    buildRules = resolveBuildRuleRuntimeResultsFromRequest(requestBody.buildRules);
+    creatorRequestInput = {
+      template,
+      freeformBrief,
+      questionnaires: effectiveQuestionnaires.map((questionnaire) => ({
+        questionnaireId: questionnaire.id,
+        title: questionnaire.title,
+      })),
+      questionnaireAnswers: normalizedAnswers,
+      buildRules,
+      primaryRuleId,
+    };
     validateCreatorRequest(creatorRequestInput);
     creatorPromptInput = buildCreatorPromptInput(creatorRequestInput);
   } catch (error) {

@@ -50,10 +50,12 @@ const getSpecialtyMap = (ruleId: string): Map<string, SpecialtyPromptMeta> => {
 };
 
 const buildRuleSummary = (template: CreatorTemplateId, rule: BuildRuleRuntimeResult): string => {
-  const powerLevel = typeof rule.blockResults.powerLevel === 'string' ? rule.blockResults.powerLevel : 'seed';
-  const attributes = isRecord(rule.blockResults.coreAttributes) ? rule.blockResults.coreAttributes : {};
-  const specialties = Array.isArray(rule.blockResults.specialties)
-    ? rule.blockResults.specialties.filter((item): item is string => typeof item === 'string')
+  const blockResults = isRecord(rule.blockResults) ? rule.blockResults : {};
+  const derived = isRecord(rule.derived) ? rule.derived : {};
+  const powerLevel = typeof blockResults.powerLevel === 'string' ? blockResults.powerLevel : 'seed';
+  const attributes = isRecord(blockResults.coreAttributes) ? blockResults.coreAttributes : {};
+  const specialties = Array.isArray(blockResults.specialties)
+    ? blockResults.specialties.filter((item): item is string => typeof item === 'string')
     : [];
   const specialtyMap = getSpecialtyMap(rule.ruleId);
   const specialtyLabels = specialties.map((specialtyId) => specialtyMap.get(specialtyId)?.label ?? specialtyId);
@@ -63,7 +65,7 @@ const buildRuleSummary = (template: CreatorTemplateId, rule: BuildRuleRuntimeRes
     `模板：${template}`,
     `力量层级：${powerLevel}`,
     `属性：STR ${attributes.STR ?? '-'} / CON ${attributes.CON ?? '-'} / AGI ${attributes.AGI ?? '-'} / MAG ${attributes.MAG ?? '-'} / WILL ${attributes.WILL ?? '-'} / PER ${attributes.PER ?? '-'} / CHM ${attributes.CHM ?? '-'}`,
-    `衍生值：HP ${rule.derived.HP ?? '-'} / MP ${rule.derived.MP ?? '-'} / Radiance ${rule.derived.Radiance ?? '-'}`,
+    `衍生值：HP ${derived.HP ?? '-'} / MP ${derived.MP ?? '-'} / Radiance ${derived.Radiance ?? '-'}`,
     `专长：${specialtyLabels.length > 0 ? specialtyLabels.join('、') : '未选择'}`,
     budget
       ? `预算：属性点 ${budget.attributePointsUsed}/${budget.attributePointsLimit ?? '无限'}；专长点 ${budget.specialtyPointsUsed}/${budget.specialtyPointsLimit ?? '无限'}`

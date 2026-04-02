@@ -1,4 +1,4 @@
-// pages/details.tsx
+// pages/creator.tsx
 
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import Head from 'next/head';
@@ -8,7 +8,6 @@ import GeneralCharacterCard from '../components/GeneralCharacterCard';
 import { useProviderModeCooldown } from '../lib/cooldown';
 import { quickCheck } from '@/lib/sensitive-word-filter';
 import Link from 'next/link';
-import { generateRandomMagicalGirl } from '../lib/random-character-generator';
 import SaveToCloudButton from '../components/SaveToCloudButton';
 import Footer from '../components/Footer';
 import QuestionNavigator from '../components/QuestionNavigator';
@@ -44,7 +43,6 @@ import { ProviderCooldownNotice } from '@/components/ai/ProviderCooldownNotice';
 import { TokenIndicator } from '@/components/shared/TokenIndicator';
 import { JsonSizeIndicator } from '@/components/shared/JsonSizeIndicator';
 import { readTextAndReasoningStreamFromResponse } from '@/lib/stream/read-text-and-reasoning-stream';
-import { buildGeneralCharacterCardFromMarkdown } from '@/lib/stream/markdown-card';
 import { readJsonOrTextFromResponse, resolveApiErrorMessage } from '@/lib/client/apiError';
 import { AI_META_REQUEST_HEADER, AI_META_REQUEST_VALUE, readJsonWithAiMeta } from '@/lib/client/read-json-with-ai-meta';
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
@@ -62,9 +60,14 @@ import { FreeformBriefPanel } from '@/components/creator/FreeformBriefPanel';
 import { BuildRulePicker } from '@/components/creator/BuildRulePicker';
 import { BuildRulePanel } from '@/components/creator/BuildRulePanel';
 import { BuildSummaryPanel } from '@/components/creator/BuildSummaryPanel';
+import { MarkdownBlock } from '@/components/MarkdownBlock';
+import { CREATOR_PAGE_COPY } from '@/lib/creator/page-copy';
 import { isCreatorTemplateSupportedInGenerationMode, type CreatorTemplateId } from '@/lib/creator/templates';
 import { createDefaultBuildRuleInputs, loadBuildRulePresetIndex, tryLoadBuildRulePresetById } from '@/lib/creator/build-rules';
+import { reconcileCreatorBuildRuleSelection } from '@/lib/creator/build-rule-selection';
 import { evaluateBuildRuleState } from '@/lib/creator/build-rule-runtime';
+import { GENERAL_SCENARIO_TEMPLATE_ID } from '@/lib/schemas/general-scenario';
+import { buildCreatorStreamCardFromMarkdown, finalizeCreatorStreamCard } from '@/lib/creator/stream-result';
 import type { AIReasoningEnvelope } from '@/types/ai-reasoning';
 import type { CharacterCardPortraitAsset } from '@/types/visual-asset';
 
@@ -286,7 +289,6 @@ const DetailsPage: React.FC = () => {
   const [bulkAnswers, setBulkAnswers] = useState(''); // 用于"一键填充"的textarea
   const [showLanguageSection, setShowLanguageSection] = useState(false); // 控制生成语言区域的折叠状态
   const [showBulkFillSection, setShowBulkFillSection] = useState(false); // 控制一键填充区域的折叠状态
-  const [isGenerating, setIsGenerating] = useState(false);
   const [autoSaveTimestamp, setAutoSaveTimestamp] = useState<number | null>(null);
   const [showAnswerReview, setShowAnswerReview] = useState(false);
   const [deviceType, setDeviceType] = useState<DeviceType>('unknown');
@@ -324,6 +326,40 @@ const DetailsPage: React.FC = () => {
     () => buildRuleRuntimeResults.find((rule) => rule.ruleId === primaryBuildRuleId) ?? null,
     [buildRuleRuntimeResults, primaryBuildRuleId]
   );
+  const buildRuleRequestPayload = useMemo(
+    () =>
+      selectedBuildRuleIds.flatMap((ruleId) => {
+        const preset = tryLoadBuildRulePresetById(ruleId);
+        if (!preset) return [];
+        return [
+          {
+            ruleId: preset.id,
+            version: preset.version,
+            inputs: buildRuleInputsById[ruleId] ?? createDefaultBuildRuleInputs(ruleId),
+          },
+        ];
+      }),
+    [selectedBuildRuleIds, buildRuleInputsById]
+  );
+
+  useEffect(() => {
+    const nextSelection = reconcileCreatorBuildRuleSelection({
+      template: creatorTemplate,
+      selectedRuleIds: selectedBuildRuleIds,
+      primaryRuleId: primaryBuildRuleId,
+    });
+
+    const isSameSelected =
+      nextSelection.selectedRuleIds.length === selectedBuildRuleIds.length
+      && nextSelection.selectedRuleIds.every((ruleId, index) => ruleId === selectedBuildRuleIds[index]);
+
+    if (!isSameSelected) {
+      setSelectedBuildRuleIds(nextSelection.selectedRuleIds);
+    }
+    if (nextSelection.primaryRuleId !== primaryBuildRuleId) {
+      setPrimaryBuildRuleId(nextSelection.primaryRuleId);
+    }
+  }, [creatorTemplate, selectedBuildRuleIds, primaryBuildRuleId]);
 
   // 多语言支持
   const [languages, setLanguages] = useState<{ code: string; name: string }[]>([]);
@@ -507,28 +543,58 @@ const DetailsPage: React.FC = () => {
     };
   }, [magicalGirlDetails, answerItems, questionnaireItems]);
 
+  const streamFallbackLabel = useMemo(() => {
+    const trimmedBrief = freeformBrief.trim();
+    if (creatorTemplate === 'general-scenario') {
+      return trimmedBrief || answerItems[0]?.answer || '';
+    }
+    return answerItems[0]?.answer || trimmedBrief;
+  }, [creatorTemplate, freeformBrief, answerItems]);
+
   const streamedGeneralCardForDisplay = useMemo(() => {
     if (generationMode !== 'stream') return null;
     const markdown = streamingMarkdown ?? streamedGeneralCard?.content ?? null;
     if (markdown === null) return null;
 
-    const fallbackName = answerItems[0]?.answer ?? '';
-    const { card } = buildGeneralCharacterCardFromMarkdown({
+    return buildCreatorStreamCardFromMarkdown({
+      template: creatorTemplate === 'general-scenario' ? 'general-scenario' : 'general',
       markdown,
-      fallbackName,
-      defaultName: '魔法少女',
+      fallbackLabel: streamFallbackLabel,
     });
-    return card;
-  }, [generationMode, streamingMarkdown, streamedGeneralCard, answerItems]);
+  }, [generationMode, creatorTemplate, streamingMarkdown, streamedGeneralCard, streamFallbackLabel]);
 
   const streamPortraitPrompt = useMemo(() => {
     if (generationMode !== 'stream') return '';
-    const name = typeof streamedGeneralCardForDisplay?.name === 'string' ? streamedGeneralCardForDisplay.name.trim() : '';
+    const name = streamedGeneralCardForDisplay
+      && 'name' in streamedGeneralCardForDisplay
+      && typeof streamedGeneralCardForDisplay.name === 'string'
+      ? streamedGeneralCardForDisplay.name.trim()
+      : '';
     const contentRaw = (streamingMarkdown ?? streamedGeneralCard?.content ?? '').trim();
     const contentHead = contentRaw.length > 800 ? contentRaw.slice(0, 800) : contentRaw;
     const prefix = [name, contentHead].filter(Boolean).join(', ');
     return `${prefix ? `${prefix}, ` : ''}Xiabanmo, 二次元, 角色立绘`;
   }, [generationMode, streamedGeneralCardForDisplay, streamingMarkdown, streamedGeneralCard]);
+
+  const isScenarioStreamResult = useMemo(() => {
+    return creatorTemplate === 'general-scenario'
+      || streamedGeneralCardForDisplay?.templateId === GENERAL_SCENARIO_TEMPLATE_ID
+      || streamedGeneralCard?.templateId === GENERAL_SCENARIO_TEMPLATE_ID;
+  }, [creatorTemplate, streamedGeneralCardForDisplay, streamedGeneralCard]);
+
+  const streamedScenarioCardForDisplay = useMemo(() => {
+    if (streamedGeneralCardForDisplay && 'title' in streamedGeneralCardForDisplay) {
+      return streamedGeneralCardForDisplay;
+    }
+    return null;
+  }, [streamedGeneralCardForDisplay]);
+
+  const streamedCharacterCardForDisplay = useMemo(() => {
+    if (streamedGeneralCardForDisplay && 'name' in streamedGeneralCardForDisplay) {
+      return streamedGeneralCardForDisplay;
+    }
+    return null;
+  }, [streamedGeneralCardForDisplay]);
 
   useEffect(() => {
     fetch('/languages.json')
@@ -1274,8 +1340,8 @@ const DetailsPage: React.FC = () => {
     return [
       {
         id: 'questionnaire-answers',
-        label: '魔法少女问卷答案',
-        filename: 'magical-girl-answers.json',
+        label: '创作问卷答案',
+        filename: 'creator-questionnaire-answers.json',
         content: {
           answers: answerItems,
           questionnaires: selectedQuestionnaires.map((selection) => selection.questionnaire),
@@ -1302,7 +1368,7 @@ const DetailsPage: React.FC = () => {
         if (backupItems.length > 0) {
           persistArrestedBackup({
             triggerSource: 'output',
-            origin: options.origin || 'details',
+            origin: options.origin || 'creator',
             reason: options.reason,
             items: backupItems,
           });
@@ -1410,7 +1476,7 @@ const DetailsPage: React.FC = () => {
     const questionnaireLabel = selectedTitles.length > 0 ? selectedTitles.join(' + ') : '';
 
     const lines: string[] = [];
-    lines.push('【魔法少女问卷答案备份】');
+    lines.push('【创作问卷答案备份】');
     lines.push(`导出时间：${now.toLocaleString()}`);
     lines.push(`已填写：${answered.length} / ${mergedQuestions.length}`);
     if (questionnaireLabel) lines.push(`问卷：${questionnaireLabel}`);
@@ -1559,7 +1625,7 @@ const DetailsPage: React.FC = () => {
           allowNativeSignature: allowNativeSignatureForSubmit,
           language: selectedLanguage,
           customProvider: customProviderPayload,
-          buildRules: buildRuleRuntimeResults,
+          buildRules: buildRuleRequestPayload,
           primaryRuleId: primaryBuildRuleId,
         }),
       });
@@ -1600,30 +1666,28 @@ const DetailsPage: React.FC = () => {
 
         setStreamingMarkdown('');
         const { text: markdown } = await readTextAndReasoningStreamFromResponse(response, {
-          label: '魔法少女角色卡（流式）',
+          label: creatorTemplate === 'general-scenario' ? '通用情景卡（流式）' : '通用角色卡（流式）',
           onText: (text) => setStreamingMarkdown(text),
           onReasoning: (reasoning) => setStreamingReasoning(reasoning),
         });
 
         if (await checkSensitiveWords(markdown, {
           source: 'output',
-          origin: 'details-stream',
+          origin: 'creator-stream',
           reason: '使用危险符文',
           backupItems: buildAnswerBackupItems(),
         })) return;
 
-        const fallbackName = finalAnswerItems[0]?.answer ?? '';
-        const { card } = buildGeneralCharacterCardFromMarkdown({
+        const cardWithAnswers = finalizeCreatorStreamCard({
+          template: creatorTemplate === 'general-scenario' ? 'general-scenario' : 'general',
           markdown,
-          fallbackName,
-          defaultName: '魔法少女',
-        });
-        const cardWithAnswers = {
-          ...card,
+          fallbackLabel: creatorTemplate === 'general-scenario'
+            ? freeformBrief.trim() || finalAnswerItems[0]?.answer || ''
+            : finalAnswerItems[0]?.answer || freeformBrief.trim(),
           userAnswers: compactAnswerItems,
           creationInputs: creatorRequestPayload,
           ...(creatorBuildState ? { buildState: creatorBuildState } : {}),
-        };
+        });
         if (!allowNativeSignatureForSubmit) {
           setStreamedGeneralCard(cardWithAnswers);
           setError(null);
@@ -1686,7 +1750,7 @@ const DetailsPage: React.FC = () => {
           setError(`✨ 魔法失效了！${errorMessage}`);
         }
       } else {
-        setError('✨ 魔法失效了！生成详情时发生未知错误，请重试');
+        setError('✨ 魔法失效了！生成结果时发生未知错误，请重试');
       }
     } finally {
       setSubmitting(false);
@@ -1710,10 +1774,11 @@ const DetailsPage: React.FC = () => {
     const blob = new Blob([jsonPayload], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
-    const rawName = (data?.codename || data?.name || '未命名角色').toString();
+    const rawName = (data?.title || data?.codename || data?.name || '未命名结果').toString();
     const sanitizedName = rawName.replace(/[^a-z0-9\u4e00-\u9fa5]/gi, '_').slice(0, 80) || 'data';
+    const filenamePrefix = data?.templateId === '通用情景' ? '通用情景' : '通用角色';
     link.href = url;
-    link.download = `通用魔法少女角色_${sanitizedName}.json`;
+    link.download = `${filenamePrefix}_${sanitizedName}.json`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -1725,7 +1790,7 @@ const DetailsPage: React.FC = () => {
     try {
       if (!navigator.clipboard) throw new Error('clipboard-not-available');
       await navigator.clipboard.writeText(JSON.stringify(data, null, 2));
-      alert('✅ 通用角色卡 JSON 已复制到剪贴板');
+      alert(`✅ ${data?.templateId === GENERAL_SCENARIO_TEMPLATE_ID ? '通用情景卡' : '通用角色卡'} JSON 已复制到剪贴板`);
     } catch (err) {
       console.error('复制 JSON 失败：', err);
       alert('⚠️ 复制失败，请手动长按选择 JSON 内容后复制。');
@@ -1883,8 +1948,8 @@ const DetailsPage: React.FC = () => {
   return (
     <>
       <Head>
-        <title>魔法少女调查问卷 ~ 奇妙妖精大调查</title>
-        <meta name="description" content="回答问卷，生成您的专属魔法少女" />
+        <title>{CREATOR_PAGE_COPY.headTitle}</title>
+        <meta name="description" content={CREATOR_PAGE_COPY.metaDescription} />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <link rel="icon" href="/favicon.ico" />
       </Head>
@@ -1892,9 +1957,15 @@ const DetailsPage: React.FC = () => {
       <div className="magic-background">
         <div className="container">
           <div className="card">
-            {/* Logo */}
-            <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', marginBottom: '1rem' }}>
-              <img src="/questionnaire-logo.svg" width={250} height={160} alt="Questionnaire Logo" />
+            <div className="flex justify-center items-center mb-4">
+              <div className="inline-flex flex-col items-center rounded-2xl border border-sky-200 bg-white/80 px-6 py-4 shadow-sm">
+                <span className="text-[11px] font-semibold uppercase tracking-[0.35em] text-sky-500">
+                  {CREATOR_PAGE_COPY.badge}
+                </span>
+                <span className="mt-2 text-3xl font-bold text-slate-900">
+                  {CREATOR_PAGE_COPY.headTitle}
+                </span>
+              </div>
             </div>
 
             {showIntroduction ? (
@@ -1903,13 +1974,13 @@ const DetailsPage: React.FC = () => {
                 <div className="mb-6 leading-relaxed text-gray-800"
                   style={{ lineHeight: '1.5', marginTop: '3rem', marginBottom: '4rem' }}
                 >
-                  你在魔法少女道路上的潜力和表现将会如何？<br />
-                  <p className="mt-4 text-sm text-gray-500 italic">本测试设定来源于小说《下班，然后变成魔法少女》</p>
+                  <p className="text-2xl font-semibold text-slate-900">{CREATOR_PAGE_COPY.heroTitle}</p>
+                  <p className="mt-4 text-base text-slate-600">{CREATOR_PAGE_COPY.heroBody}</p>
                 </div>
                 {/* 注意事项 */}
                 <div className="mb-6 p-3 bg-yellow-100 border-l-4 border-yellow-500 text-yellow-800 text-sm text-left rounded-r-lg">
-                  <p className="font-bold">⚠️ 注意事项</p>
-                  <p className="mt-1">请勿在问卷中输入任何真实的隐私信息，或任何不适宜、攻击性、不符合公序良俗的内容。所有回答将被用于生成虚拟角色，并且将会被储存在角色信息中。</p>
+                  <p className="font-bold">{CREATOR_PAGE_COPY.noticeTitle}</p>
+                  <p className="mt-1">{CREATOR_PAGE_COPY.noticeBody}</p>
                 </div>
                 <div className="mb-6 space-y-4 text-left">
                   <TemplateSelector
@@ -1950,29 +2021,6 @@ const DetailsPage: React.FC = () => {
                     className="generate-button text-lg flex-1"
                   >
                     开始回答问卷
-                  </button>
-                  <button
-                    onClick={() => {
-                      setIsGenerating(true);
-                      setError(null);
-                      try {
-                        // 直接同步调用，移除 await
-                        const data = generateRandomMagicalGirl();
-                        setMagicalGirlDetails(data);
-                        setCharacterPortraitAsset(null);
-                        setShowIntroduction(false);
-                      } catch (err) {
-                        console.error('随机生成失败: ', err);
-                        setError('随机生成失败，请稍后再试。');
-                      } finally {
-                        setIsGenerating(false);
-                      }
-                    }}
-                    disabled={isGenerating}
-                    className="generate-button text-lg flex-1"
-                    style={{ background: 'linear-gradient(to right, #22c55e, #16a34a)' }}
-                  >
-                    {isGenerating ? '生成中...' : '快速随机生成'}
                   </button>
                 </div>
 
@@ -2307,7 +2355,9 @@ const DetailsPage: React.FC = () => {
                   />
                   <div className="text-xs text-gray-600 mt-2">
                     {generationMode === 'stream'
-                      ? '提示：选择流式生成后，将实时输出 Markdown，并生成【通用角色卡】（templateId=通用角色）。代号/名字会尝试从输出中解析，失败则回退到你填写的名字或“魔法少女”。'
+                      ? creatorTemplate === 'general-scenario'
+                        ? '提示：选择流式生成后，将实时输出 Markdown，并生成【通用情景卡】（templateId=通用情景）。标题会优先从 Markdown 标题或“标题：...”字段解析，失败则回退到你的补充说明。'
+                        : '提示：选择流式生成后，将实时输出 Markdown，并生成【通用角色卡】（templateId=通用角色）。代号/名字会尝试从输出中解析，失败则回退到你的答案或补充说明。'
                       : '提示：非流式生成会返回结构化的魔法少女数据卡（适合保存为模板/用于升华等），但需要等待生成结束一次性返回。'}
                   </div>
                 </div>
@@ -2399,7 +2449,7 @@ const DetailsPage: React.FC = () => {
                 <QuestionnaireAnswerExportPanel
                   variant="light"
                   title="生成前备份问卷答案"
-                  filenameBase="魔法少女问卷_答案备份"
+                  filenameBase="创作问卷_答案备份"
                   hasContent={answerItems.length > 0}
                   buildContent={buildAnswerExportText}
                   disabled={submitting || isTransitioning || isCooldown}
@@ -2423,39 +2473,73 @@ const DetailsPage: React.FC = () => {
             <>
               {streamedGeneralCardForDisplay && (
                 <>
-                  <GeneralCharacterCard
-                    general={streamedGeneralCardForDisplay}
-                    isStreaming={submitting}
-                    onSaveImage={handleSaveImage}
-                    imageSaveMode={imageSaveMode}
-                    saveButtonLabel={imageSaveButtonLabel}
-                    portraitAsset={characterPortraitAsset}
-                  />
                   <AiReasoningPanel reasoning={streamingReasoning} status={streamingReasoning?.status ?? 'idle'} compact />
-                  <div className="card" style={{ marginTop: '1rem' }}>
-                    <div className="text-center">
-                      <h3 className="text-lg font-medium text-blue-900" style={{ marginBottom: '1rem' }}>生成立绘</h3>
-                      <CharacterPortraitAssetPanel
-                        prompt={streamPortraitPrompt}
-                        onPortraitAssetChange={setCharacterPortraitAsset}
-                      />
+                  {isScenarioStreamResult ? (
+                    <div className="card" style={{ marginTop: '1rem' }}>
+                      <h2 className="text-2xl font-bold text-center mb-4">
+                        {streamedScenarioCardForDisplay
+                          && typeof streamedScenarioCardForDisplay.title === 'string'
+                          && streamedScenarioCardForDisplay.title.trim()
+                          ? streamedScenarioCardForDisplay.title.trim()
+                          : '通用情景卡（流式）'}
+                      </h2>
+                      <div className="rounded-lg bg-gray-50 p-4 border border-gray-200">
+                        {streamingMarkdown ? (
+                          <MarkdownBlock content={streamingMarkdown} variant="light" mode="article" />
+                        ) : submitting ? (
+                          <div className="text-sm text-gray-500 text-center">正在启动流式生成…</div>
+                        ) : (
+                          <div className="text-sm text-gray-500 text-center">生成结果将显示在此处</div>
+                        )}
+                      </div>
                     </div>
-                  </div>
+                  ) : (
+                    <>
+                      <GeneralCharacterCard
+                        general={streamedCharacterCardForDisplay ?? {
+                          name: '角色',
+                          content: streamingMarkdown ?? streamedGeneralCard?.content ?? '',
+                        }}
+                        isStreaming={submitting}
+                        onSaveImage={handleSaveImage}
+                        imageSaveMode={imageSaveMode}
+                        saveButtonLabel={imageSaveButtonLabel}
+                        portraitAsset={characterPortraitAsset}
+                      />
+                      <div className="card" style={{ marginTop: '1rem' }}>
+                        <div className="text-center">
+                          <h3 className="text-lg font-medium text-blue-900" style={{ marginBottom: '1rem' }}>生成立绘</h3>
+                          <CharacterPortraitAssetPanel
+                            prompt={streamPortraitPrompt}
+                            onPortraitAssetChange={setCharacterPortraitAsset}
+                          />
+                        </div>
+                      </div>
+                    </>
+                  )}
                 </>
               )}
 
               {streamedGeneralCard && (
                 <>
+                  {streamedGeneralCard.templateId === GENERAL_SCENARIO_TEMPLATE_ID && (
+                    <div className="card" style={{ marginTop: '1rem' }}>
+                      <h3 className="text-lg font-semibold text-gray-800 mb-3">通用情景卡 JSON</h3>
+                      <div className="rounded-lg bg-gray-100 p-4 border border-gray-200 font-mono text-xs overflow-x-auto">
+                        <pre>{JSON.stringify(streamedGeneralCard, null, 2)}</pre>
+                      </div>
+                    </div>
+                  )}
                   <div className="card" style={{ marginTop: '1rem' }}>
                     <div className="text-center">
                       <h3 className="text-lg font-medium text-gray-800" style={{ marginBottom: '1rem' }}>后续操作</h3>
                       <div className="flex flex-col sm:flex-row gap-3 justify-center">
                         <button onClick={() => downloadStreamedGeneralCard(streamedGeneralCard)} className="generate-button flex-1">
-                          下载通用角色卡
+                          {streamedGeneralCard.templateId === GENERAL_SCENARIO_TEMPLATE_ID ? '下载通用情景卡' : '下载通用角色卡'}
                         </button>
                         <SaveToCloudButton
                           data={streamedGeneralCard}
-                          cardType="character"
+                          cardType={streamedGeneralCard.templateId === GENERAL_SCENARIO_TEMPLATE_ID ? 'scenario' : 'character'}
                           buttonText="保存到云端"
                           className="generate-button flex-1"
                           style={{ backgroundColor: '#22c55e', backgroundImage: 'linear-gradient(to right, #22c55e, #16a34a)' }}
@@ -2475,7 +2559,9 @@ const DetailsPage: React.FC = () => {
                       <div className="mt-2 pt-6 border-t border-gray-200">
                         <p className="text-sm text-gray-600 mb-2">保存好你的档案了吗？</p>
                         <Link href="/battle" className="footer-link text-lg text-purple-600">
-                          前往竞技场，让她大闹一场！→
+                          {streamedGeneralCard.templateId === GENERAL_SCENARIO_TEMPLATE_ID
+                            ? '前往竞技场，试试把这个情景投入故事吧！→'
+                            : '前往竞技场，让她大闹一场！→'}
                         </Link>
                       </div>
                     </div>

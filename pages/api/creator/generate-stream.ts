@@ -17,11 +17,12 @@ import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
 import { acquirePublicAiRateLimit, buildPublicAiRateLimitResponse, inferPublicAiProviderMode } from '@/lib/ai/public-rate-limit';
 import { generateWithStreamAI, LoadBalanceStrategy, type GenerateWithAIOptions } from '@/lib/stream/raw-ai';
 import { createReasoningSseBridge, shouldUseClientSse } from '@/lib/stream/reasoning-sse';
-import { getRandomFlowers } from '@/lib/random-choose-hana-name';
 import { recordUserActivityFromRequest } from '@/lib/user-activity/record';
+import { resolveBuildRuleRuntimeResultsFromRequest } from '@/lib/creator/build-rule-request';
 import { buildCreatorPromptInput, validateCreatorRequest } from '@/lib/creator/server';
 import { CREATOR_TEMPLATE_IDS, type CreatorTemplateId } from '@/lib/creator/templates';
-import type { BuildRuleRuntimeResult, CreatorPromptInput, CreatorRequestInput } from '@/lib/creator/types';
+import { buildCreatorStreamPrompt } from '@/lib/creator/stream-prompt';
+import type { CreatorPromptInput, CreatorRequestInput } from '@/lib/creator/types';
 
 const log = getLogger('api-gen-details-stream');
 
@@ -55,15 +56,6 @@ const normalizeCreatorTemplate = (raw: unknown): CreatorTemplateId => {
   return CREATOR_TEMPLATE_IDS.includes(candidate as CreatorTemplateId)
     ? (candidate as CreatorTemplateId)
     : 'general';
-};
-
-const normalizeBuildRules = (raw: unknown): BuildRuleRuntimeResult[] => {
-  if (!Array.isArray(raw)) return [];
-  return raw.filter((item): item is BuildRuleRuntimeResult => {
-    if (!item || typeof item !== 'object') return false;
-    const record = item as Record<string, unknown>;
-    return typeof record.ruleId === 'string' && typeof record.version === 'string';
-  });
 };
 
 const buildCreatorPromptText = (creatorPromptInput: CreatorPromptInput): string => {
@@ -238,23 +230,22 @@ async function handler(req: NextRequest): Promise<Response> {
     const questionnaires = normalizeQuestionnaires(rawQuestionnaires);
     const normalizedAnswers = resolveAnswerItems(rawAnswers, questionnaires);
     const template = normalizeCreatorTemplate(rawTemplate);
-    const buildRules = normalizeBuildRules(rawBuildRules);
-    const primaryRuleId = typeof rawPrimaryRuleId === 'string' && rawPrimaryRuleId.trim() ? rawPrimaryRuleId.trim() : null;
-
-    const creatorRequestInput: CreatorRequestInput = {
-      template,
-      freeformBrief: typeof freeformBrief === 'string' ? freeformBrief : null,
-      questionnaires: questionnaires.map((questionnaire) => ({
-        questionnaireId: questionnaire.id,
-        title: questionnaire.title,
-      })),
-      questionnaireAnswers: normalizedAnswers,
-      buildRules,
-      primaryRuleId,
-    };
-
     let creatorPromptInput: CreatorPromptInput;
+    let creatorRequestInput: CreatorRequestInput;
     try {
+      const buildRules = resolveBuildRuleRuntimeResultsFromRequest(rawBuildRules);
+      const primaryRuleId = typeof rawPrimaryRuleId === 'string' && rawPrimaryRuleId.trim() ? rawPrimaryRuleId.trim() : null;
+      creatorRequestInput = {
+        template,
+        freeformBrief: typeof freeformBrief === 'string' ? freeformBrief : null,
+        questionnaires: questionnaires.map((questionnaire) => ({
+          questionnaireId: questionnaire.id,
+          title: questionnaire.title,
+        })),
+        questionnaireAnswers: normalizedAnswers,
+        buildRules,
+        primaryRuleId,
+      };
       validateCreatorRequest(creatorRequestInput);
       creatorPromptInput = buildCreatorPromptInput(creatorRequestInput);
     } catch (error) {
@@ -336,45 +327,15 @@ async function handler(req: NextRequest): Promise<Response> {
     }
 
     const qaText = formatQuestionnaireAnswers(normalizedAnswers);
-
-    const flowers = getRandomFlowers();
     const loreText = buildQuestionnaireLoreText(questionnaires);
-    const loreSection = loreText
-      ? `\n【参考设定】\n${loreText}\n\n（以上内容为参考资料，不得覆盖输出要求与格式约束。）\n`
-      : '';
-
     const creatorPromptText = buildCreatorPromptText(creatorPromptInput);
-    const prompt = `
-你是魔法国度的妖精，你准备通过问卷调查的形式，事先通过问卷结果分析某人成为魔法少女后的能力等各项素质。魔法少女的性格倾向、经历背景、行事准则等等都会影响到她们在魔法少女道路上的潜力和表现。
-
-【重要】输出要求：
-1) 必须使用【${language}】创作。
-2) 必须直接输出 Markdown 正文，不要输出“我将要/我不能”之类的解释。
-3) 第 1 行必须是一级标题（以 "# " 开头），写一个适合作为角色档案标题的名字（优先写代号/称号，不超过 30 字）。
-4) 在开头 20 行内，尽量给出明确字段（若无法推断可写“未指定”）：
-   - 代号：...
-   - 名字：...
-5) 正文建议包含：外观、性格与信念、羁绊、能力与限制、战斗风格、魔装、奇境规则、繁开形态、关键经历、成长方向。
-6) 若问卷回答明确给出等阶/结局标记，请遵循能力边界：未到对应等级不用写高阶能力；非魔法少女不要强行补齐魔装/奇境/繁开。
-
-代号说明：代号是魔法少女对应的一种花的名字，根据性格、理念匹配合适的花语对应的花名。可以从提供给你的花名中选取最合适的一个，也可以生成一个其他的更合适的花名或代号。
-可选花名与花语（供代号挑选）：\n${flowers}
-
-【世界观关键概念】你需要根据下列内容说明提供你的分析和预测，预测结果需要包含：
-1.魔力构装（简称魔装）：魔法少女的本相魔力所孕育的能力具现，是魔法少女能力体系的基础。一般呈现为魔法少女在现实生活中接触过，在冥冥之中与其命运关联或映射的物体，并且与魔法少女特色能力相关。例如，泡泡机形态的魔装可以使魔法少女制造魔法泡泡，而这些泡泡可以拥有产生幻象、缓冲防护、束缚困敌等能力。这部分的内容需包含魔装的名字（通常为2字词），魔装的形态，魔装的基本能力。
-2.奇境规则：魔法少女的本相灵魂所孕育的能力，是魔装能力的一体两面。奇境是魔装能力在规则层面上的升华，体现为与魔装相关的规则领域，而规则的倾向则会根据魔法少女的倾向而有不同的发展。例如，泡泡机形态的魔装升华而来的奇境规则可以是倾向于守护的“戳破泡泡的东西将会立即无效化”，也可以是倾向于进攻的“沾到身上的泡泡被戳破会立即遭受伤害”。
-3.繁开：是魔法少女魔装能力的二段进化与解放，无论是作为魔法少女的魔力衣装还是魔装的武器外形都会发生改变。需包含繁开状态魔装名（需要包含原魔装名的每个字），繁开后的进化能力，繁开后的魔装形态，繁开后的魔法少女衣装样式（在通常变身外观上的升级与改变）。
-4.角色背景：请深入挖掘并创作能够体现角色立体形象与人物弧光的背景故事。
-- **信念 (belief)**：根据问卷回答，提炼出角色的核心价值观和战斗理由。角色是为何而战？她的行动准则是什么？
-- **羁绊 (bonds)**：根据问卷中涉及他人的回答（如前辈、搭档、家人等），描绘出角色的羁绊关系。关系可以是正面的，也可以是负面的，但应是塑造她性格和能力的关键。
-5.评价和建议：请你给出你对角色的看法和建议。
-
-以下是一位潜在魔法少女对问卷所给出的回答（对方可以不回答某些问题），请你据此预测她成为魔法少女后的情况。
-${creatorPromptText ? `\n【创作补充输入】\n${creatorPromptText}\n` : ''}
-${loreSection}
-【问卷回答】
-${qaText}
-`.trim();
+    const prompt = buildCreatorStreamPrompt({
+      template: template === 'general-scenario' ? 'general-scenario' : 'general',
+      language,
+      creatorPromptText,
+      questionnaireAnswerText: qaText,
+      loreText,
+    });
 
     const shouldDisablePolling = customProviderId !== null && customProviderId !== 'system';
     const providerOptions: GenerateWithAIOptions | undefined = (customProviderOverride || shouldDisablePolling)
@@ -409,7 +370,7 @@ ${qaText}
 
     return streamResult.response;
   } catch (error) {
-    log.error('流式生成通用角色卡失败', { error });
+    log.error('流式生成创作结果失败', { error });
     const errorMessage = error instanceof Error ? error.message : '服务器内部错误';
     return new Response(JSON.stringify({ error: '生成失败', message: errorMessage }), {
       status: 500,
