@@ -90,7 +90,7 @@ export function BuildRulePanel({
           {coreAttributesBlock.description ? (
             <p className="mt-1 text-xs leading-5 text-slate-600">{coreAttributesBlock.description}</p>
           ) : null}
-          <div className="mt-3 grid gap-3 md:grid-cols-2">
+          <div className="mt-3 grid gap-3">
             {Array.isArray(coreAttributesBlock.fields)
               ? coreAttributesBlock.fields.filter(isRecord).map((field: Record<string, unknown>) => {
                   const fieldId = typeof field.id === 'string' ? field.id : '';
