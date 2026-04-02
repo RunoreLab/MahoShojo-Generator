@@ -24,7 +24,11 @@ import { recordUserActivityFromRequest } from '@/lib/user-activity/record';
 import presetIndex from '@/public/questionnaires/presets/index.json';
 import { resolveBuildRuleRuntimeResultsFromRequest } from '@/lib/creator/build-rule-request';
 import { buildCreatorPromptInput, validateCreatorRequest } from '@/lib/creator/server';
-import { CREATOR_TEMPLATE_IDS, type CreatorTemplateId } from '@/lib/creator/templates';
+import {
+  CREATOR_TEMPLATE_IDS,
+  isCreatorTemplateSupportedInGenerationMode,
+  type CreatorTemplateId,
+} from '@/lib/creator/templates';
 import type { BuildRuleRuntimeResult, CreatorPromptInput, CreatorRequestInput } from '@/lib/creator/types';
 
 const log = getLogger('api-gen-details');
@@ -566,6 +570,9 @@ async function handler(req: Request): Promise<Response> {
       buildRules,
       primaryRuleId,
     };
+    if (!isCreatorTemplateSupportedInGenerationMode('non-stream', template)) {
+      throw new Error('CREATOR_TEMPLATE_MODE_UNSUPPORTED');
+    }
     validateCreatorRequest(creatorRequestInput);
     creatorPromptInput = buildCreatorPromptInput(creatorRequestInput);
   } catch (error) {
@@ -646,6 +653,19 @@ async function handler(req: Request): Promise<Response> {
         },
         enableAiSafetyCheck: false,
         sensitiveWordReason: '在问卷中使用了危险符文',
+      });
+      if (safetyResponse) return safetyResponse;
+    }
+    if (creatorPromptInput.userIntent) {
+      const safetyResponse = await enforceTextSafety({
+        text: creatorPromptInput.userIntent,
+        log,
+        logMeta: {
+          source: 'freeformBrief',
+          template,
+        },
+        enableAiSafetyCheck: false,
+        sensitiveWordReason: '在自由补充说明中使用了危险符文',
       });
       if (safetyResponse) return safetyResponse;
     }

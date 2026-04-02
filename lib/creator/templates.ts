@@ -51,6 +51,7 @@ export const CREATOR_TEMPLATE_OPTIONS: readonly CreatorTemplateOption[] = [
 export const CREATOR_STREAM_TEMPLATE_IDS = ['general', 'general-scenario'] as const;
 export type CreatorStreamTemplateId = (typeof CREATOR_STREAM_TEMPLATE_IDS)[number];
 export type CreatorGenerationMode = 'stream' | 'non-stream';
+export const DEFAULT_CREATOR_GENERATION_MODE: CreatorGenerationMode = 'stream';
 
 export const isCreatorStreamTemplate = (
   templateId: CreatorTemplateId | string
@@ -66,6 +67,27 @@ export const isCreatorTemplateSupportedInGenerationMode = (
   }
 
   return templateId === 'magical-girl';
+};
+
+export const getDefaultCreatorTemplateForGenerationMode = (
+  generationMode: CreatorGenerationMode
+): CreatorTemplateId => {
+  if (generationMode === 'stream') {
+    return 'general';
+  }
+
+  return 'magical-girl';
+};
+
+export const normalizeCreatorTemplateForGenerationMode = (
+  generationMode: CreatorGenerationMode,
+  templateId: CreatorTemplateId | string
+): CreatorTemplateId => {
+  if (isCreatorTemplateSupportedInGenerationMode(generationMode, templateId)) {
+    return templateId;
+  }
+
+  return getDefaultCreatorTemplateForGenerationMode(generationMode);
 };
 
 export const getCreatorTemplateOptionById = (

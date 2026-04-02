@@ -14,7 +14,7 @@ describe('creator endpoints', () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          template: 'general',
+          template: 'magical-girl',
           freeformBrief: '请写成冷淡的观察记录体。',
           answers: [],
           questionnaires: [],

@@ -62,7 +62,13 @@ import { BuildRulePanel } from '@/components/creator/BuildRulePanel';
 import { BuildSummaryPanel } from '@/components/creator/BuildSummaryPanel';
 import { MarkdownBlock } from '@/components/MarkdownBlock';
 import { CREATOR_PAGE_COPY } from '@/lib/creator/page-copy';
-import { isCreatorTemplateSupportedInGenerationMode, type CreatorTemplateId } from '@/lib/creator/templates';
+import {
+  DEFAULT_CREATOR_GENERATION_MODE,
+  getDefaultCreatorTemplateForGenerationMode,
+  isCreatorTemplateSupportedInGenerationMode,
+  normalizeCreatorTemplateForGenerationMode,
+  type CreatorTemplateId,
+} from '@/lib/creator/templates';
 import { createDefaultBuildRuleInputs, loadBuildRulePresetIndex, tryLoadBuildRulePresetById } from '@/lib/creator/build-rules';
 import { reconcileCreatorBuildRuleSelection } from '@/lib/creator/build-rule-selection';
 import { evaluateBuildRuleState } from '@/lib/creator/build-rule-runtime';
@@ -294,8 +300,10 @@ const DetailsPage: React.FC = () => {
   const [deviceType, setDeviceType] = useState<DeviceType>('unknown');
   const [imageSaveMode, setImageSaveMode] = useState<ImageSaveMode>('download');
   const [jsonSaveMode, setJsonSaveMode] = useState<JsonSaveMode>('download');
-  const [generationMode, setGenerationMode] = useState<GenerationMode>('non-stream');
-  const [creatorTemplate, setCreatorTemplate] = useState<CreatorTemplateId>('general');
+  const [generationMode, setGenerationMode] = useState<GenerationMode>(DEFAULT_CREATOR_GENERATION_MODE);
+  const [creatorTemplate, setCreatorTemplate] = useState<CreatorTemplateId>(
+    getDefaultCreatorTemplateForGenerationMode(DEFAULT_CREATOR_GENERATION_MODE)
+  );
   const [freeformBrief, setFreeformBrief] = useState('');
   const [selectedBuildRuleIds, setSelectedBuildRuleIds] = useState<string[]>(['arena-trpg-lite']);
   const [primaryBuildRuleId, setPrimaryBuildRuleId] = useState<string | null>('arena-trpg-lite');
@@ -622,6 +630,9 @@ const DetailsPage: React.FC = () => {
       const parsed = JSON.parse(saved);
       if (parsed?.generationMode === 'stream' || parsed?.generationMode === 'non-stream') {
         setGenerationMode(parsed.generationMode);
+        setCreatorTemplate((currentTemplate) =>
+          normalizeCreatorTemplateForGenerationMode(parsed.generationMode, currentTemplate)
+        );
       }
       if (typeof parsed?.selectedLanguage === 'string') {
         setSelectedLanguage(parsed.selectedLanguage);
@@ -2351,7 +2362,12 @@ const DetailsPage: React.FC = () => {
                     value={generationMode}
                     disabled={submitting}
                     helper={false}
-                    onChange={(mode) => setGenerationMode(mode)}
+                    onChange={(mode) => {
+                      setGenerationMode(mode);
+                      setCreatorTemplate((currentTemplate) =>
+                        normalizeCreatorTemplateForGenerationMode(mode, currentTemplate)
+                      );
+                    }}
                   />
                   <div className="text-xs text-gray-600 mt-2">
                     {generationMode === 'stream'
