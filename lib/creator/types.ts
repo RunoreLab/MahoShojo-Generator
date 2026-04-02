@@ -1,6 +1,5 @@
-import type { BuildRuleRuntimeResult } from './build-rule-runtime';
-import type { ProjectBuildRulesForPromptResult } from './build-rule-projection';
 import type { CreatorTemplateId } from './templates';
+import type { QuestionnaireAnswerItem } from '@/lib/questionnaires';
 
 export type BuildRuleBlock = Readonly<{
   id: string;
@@ -11,10 +10,20 @@ export type BuildRuleBlock = Readonly<{
   [key: string]: unknown;
 }>;
 
+export interface BuildRulePresetIndexEntry {
+  readonly id: string;
+  readonly title: string;
+  readonly version: string;
+  readonly description?: string;
+}
+
+export type BuildRulePresetIndex = readonly BuildRulePresetIndexEntry[];
+
 export interface BuildRulePreset {
   readonly id: string;
   readonly version: string;
   readonly title?: string;
+  readonly description?: string;
   readonly supportedTemplates: readonly CreatorTemplateId[];
   readonly allowStandalone: boolean;
   readonly mainRuleEligible: boolean;
@@ -24,26 +33,52 @@ export interface BuildRulePreset {
   readonly blocks: readonly BuildRuleBlock[];
 }
 
-export interface BuildRulePresetIndexEntry {
-  readonly id: string;
-  readonly title: string;
-  readonly version: string;
+export interface BuildRuleValidationBudgetSummary {
+  attributePointsUsed: number;
+  attributePointsLimit: number | null;
+  specialtyPointsUsed: number;
+  specialtyPointsLimit: number | null;
 }
 
-export type BuildRulePresetIndex = readonly BuildRulePresetIndexEntry[];
+export interface BuildRuleValidationSummary {
+  valid: boolean;
+  issues: string[];
+  missingRequiredBlockKeys: string[];
+  budget?: BuildRuleValidationBudgetSummary;
+}
+
+export interface BuildRuleRuntimeResult {
+  ruleId: string;
+  version: string;
+  blockResults: Record<string, unknown>;
+  derived: Record<string, number>;
+  validationSummary: BuildRuleValidationSummary;
+}
+
+export interface ProjectedBuildRuleForPrompt {
+  ruleId: string;
+  template: CreatorTemplateId;
+  facts: {
+    ruleId: string;
+    version: string;
+    blockResults: Record<string, unknown>;
+    derived: Record<string, number>;
+    validationSummary: BuildRuleValidationSummary;
+  };
+  summary: string;
+}
+
+export interface ProjectBuildRulesForPromptResult {
+  primary: ProjectedBuildRuleForPrompt | null;
+  references: ProjectedBuildRuleForPrompt[];
+}
 
 export interface CreatorQuestionnaireRef {
   questionnaireId: string;
   title?: string;
-  [key: string]: unknown;
 }
 
-export interface CreatorQuestionnaireAnswer {
-  questionnaireId?: string;
-  question?: string;
-  answer?: string;
-  [key: string]: unknown;
-}
+export type CreatorQuestionnaireAnswer = QuestionnaireAnswerItem;
 
 export interface CreatorRequestInput {
   template: CreatorTemplateId;

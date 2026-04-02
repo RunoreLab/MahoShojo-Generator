@@ -57,6 +57,14 @@ import {
 } from '@/components/questionnaire/QuestionnaireQuestionPanel';
 import { QuestionnaireAnswerExportPanel } from '@/components/questionnaire/QuestionnaireAnswerExportPanel';
 import { CharacterPortraitAssetPanel } from '@/components/shared/CharacterPortraitAssetPanel';
+import { TemplateSelector } from '@/components/creator/TemplateSelector';
+import { FreeformBriefPanel } from '@/components/creator/FreeformBriefPanel';
+import { BuildRulePicker } from '@/components/creator/BuildRulePicker';
+import { BuildRulePanel } from '@/components/creator/BuildRulePanel';
+import { BuildSummaryPanel } from '@/components/creator/BuildSummaryPanel';
+import { isCreatorStreamTemplate, type CreatorTemplateId } from '@/lib/creator/templates';
+import { createDefaultBuildRuleInputs, loadBuildRulePresetIndex, tryLoadBuildRulePresetById } from '@/lib/creator/build-rules';
+import { evaluateBuildRuleState } from '@/lib/creator/build-rule-runtime';
 import type { AIReasoningEnvelope } from '@/types/ai-reasoning';
 import type { CharacterCardPortraitAsset } from '@/types/visual-asset';
 
@@ -285,11 +293,37 @@ const DetailsPage: React.FC = () => {
   const [imageSaveMode, setImageSaveMode] = useState<ImageSaveMode>('download');
   const [jsonSaveMode, setJsonSaveMode] = useState<JsonSaveMode>('download');
   const [generationMode, setGenerationMode] = useState<GenerationMode>('non-stream');
+  const [creatorTemplate, setCreatorTemplate] = useState<CreatorTemplateId>('general');
+  const [freeformBrief, setFreeformBrief] = useState('');
+  const [selectedBuildRuleIds, setSelectedBuildRuleIds] = useState<string[]>(['arena-trpg-lite']);
+  const [primaryBuildRuleId, setPrimaryBuildRuleId] = useState<string | null>('arena-trpg-lite');
+  const [buildRuleInputsById, setBuildRuleInputsById] = useState<Record<string, Record<string, unknown>>>(() => ({
+    'arena-trpg-lite': createDefaultBuildRuleInputs('arena-trpg-lite'),
+  }));
   const [streamingMarkdown, setStreamingMarkdown] = useState<string | null>(null);
   const [streamedGeneralCard, setStreamedGeneralCard] = useState<any | null>(null);
   const [streamingReasoning, setStreamingReasoning] = useState<AIReasoningEnvelope | null>(null);
   const [nonStreamReasoning, setNonStreamReasoning] = useState<AIReasoningEnvelope | null>(null);
   const [characterPortraitAsset, setCharacterPortraitAsset] = useState<CharacterCardPortraitAsset | null>(null);
+  const buildRulePresetIndex = useMemo(() => loadBuildRulePresetIndex(), []);
+  const primaryBuildRulePreset = useMemo(
+    () => (primaryBuildRuleId ? tryLoadBuildRulePresetById(primaryBuildRuleId) : null),
+    [primaryBuildRuleId]
+  );
+  const buildRuleRuntimeResults = useMemo(
+    () =>
+      selectedBuildRuleIds.map((ruleId) =>
+        evaluateBuildRuleState({
+          ruleId,
+          inputs: buildRuleInputsById[ruleId] ?? createDefaultBuildRuleInputs(ruleId),
+        })
+      ),
+    [selectedBuildRuleIds, buildRuleInputsById]
+  );
+  const primaryBuildRuleRuntimeResult = useMemo(
+    () => buildRuleRuntimeResults.find((rule) => rule.ruleId === primaryBuildRuleId) ?? null,
+    [buildRuleRuntimeResults, primaryBuildRuleId]
+  );
 
   // 多语言支持
   const [languages, setLanguages] = useState<{ code: string; name: string }[]>([]);
@@ -1403,6 +1437,14 @@ const DetailsPage: React.FC = () => {
     }
 
     const snapshot = answersSnapshot ?? answersByKey;
+    if (generationMode === 'stream' && (!isCreatorStreamTemplate(creatorTemplate) || creatorTemplate !== 'general')) {
+      setError('⚠️ 当前仅支持【通用角色卡（Markdown）】使用流式创作。');
+      return;
+    }
+    if (generationMode === 'non-stream' && creatorTemplate !== 'magical-girl') {
+      setError('⚠️ 当前非流式创作仅接通【魔法少女（结构化）】。其余模板将在后续任务中继续接线。');
+      return;
+    }
     const finalAnswerItems: QuestionnaireAnswerItem[] = [];
     mergedQuestions.forEach((item) => {
       const raw = snapshot[item.key];
@@ -1424,6 +1466,24 @@ const DetailsPage: React.FC = () => {
 
     const overLimitForSubmit = buildOverLimitItems(snapshot);
     const allowNativeSignatureForSubmit = isQuestionnaireNativeAllowed && overLimitForSubmit.length === 0;
+    const compactAnswerItems = compactQuestionnaireAnswerItems(finalAnswerItems);
+    const creatorRequestPayload = {
+      template: creatorTemplate,
+      freeformBrief,
+      questionnaires: selectedQuestionnaires.map((selection) => ({
+        questionnaireId: selection.questionnaire.id,
+        title: selection.questionnaire.title,
+      })),
+      questionnaireAnswers: compactAnswerItems,
+      buildRules: buildRuleRuntimeResults,
+      ...(primaryBuildRuleId ? { primaryRuleId: primaryBuildRuleId } : {}),
+    };
+    const creatorBuildState = buildRuleRuntimeResults.length > 0
+      ? {
+        ...(primaryBuildRuleId ? { primaryRuleId: primaryBuildRuleId } : {}),
+        rules: buildRuleRuntimeResults,
+      }
+      : undefined;
 
     setSubmitting(true);
     setError(null);
@@ -1450,8 +1510,8 @@ const DetailsPage: React.FC = () => {
       } : undefined;
 
       const endpoint = generationMode === 'stream'
-        ? '/api/generate-magical-girl-details-stream?format=sse'
-        : '/api/generate-magical-girl-details';
+        ? '/api/creator/generate-stream?format=sse'
+        : '/api/creator/generate';
 
       const activityHeaders = await authStorage.getActivityHeaders();
       const requestHeaders: Record<string, string> = {
@@ -1467,6 +1527,8 @@ const DetailsPage: React.FC = () => {
         method: 'POST',
         headers: requestHeaders,
         body: JSON.stringify({
+          template: creatorTemplate,
+          freeformBrief,
           answers: finalAnswerItems,
           questionnaireSelections: selectedQuestionnaires.map((selection) => ({
             source: selection.source,
@@ -1491,6 +1553,8 @@ const DetailsPage: React.FC = () => {
           allowNativeSignature: allowNativeSignatureForSubmit,
           language: selectedLanguage,
           customProvider: customProviderPayload,
+          buildRules: buildRuleRuntimeResults,
+          primaryRuleId: primaryBuildRuleId,
         }),
       });
 
@@ -1550,7 +1614,9 @@ const DetailsPage: React.FC = () => {
         });
         const cardWithAnswers = {
           ...card,
-          userAnswers: compactQuestionnaireAnswerItems(finalAnswerItems),
+          userAnswers: compactAnswerItems,
+          creationInputs: creatorRequestPayload,
+          ...(creatorBuildState ? { buildState: creatorBuildState } : {}),
         };
         if (!allowNativeSignatureForSubmit) {
           setStreamedGeneralCard(cardWithAnswers);
@@ -1663,6 +1729,42 @@ const DetailsPage: React.FC = () => {
   const handleStartQuestionnaire = () => {
     setShowIntroduction(false);
   };
+
+  const handleToggleBuildRule = useCallback((ruleId: string) => {
+    setSelectedBuildRuleIds((current) => {
+      if (current.includes(ruleId)) {
+        const next = current.filter((item) => item !== ruleId);
+        setPrimaryBuildRuleId((previousPrimaryRuleId) => {
+          if (previousPrimaryRuleId !== ruleId) return previousPrimaryRuleId;
+          return next[0] ?? null;
+        });
+        return next;
+      }
+
+      setBuildRuleInputsById((currentInputs) => ({
+        ...currentInputs,
+        [ruleId]: currentInputs[ruleId] ?? createDefaultBuildRuleInputs(ruleId),
+      }));
+      setPrimaryBuildRuleId((previousPrimaryRuleId) => previousPrimaryRuleId ?? ruleId);
+      return [...current, ruleId];
+    });
+  }, []);
+
+  const handleSelectPrimaryBuildRule = useCallback((ruleId: string) => {
+    setPrimaryBuildRuleId(ruleId);
+    setSelectedBuildRuleIds((current) => (current.includes(ruleId) ? current : [...current, ruleId]));
+    setBuildRuleInputsById((currentInputs) => ({
+      ...currentInputs,
+      [ruleId]: currentInputs[ruleId] ?? createDefaultBuildRuleInputs(ruleId),
+    }));
+  }, []);
+
+  const handleBuildRuleInputsChange = useCallback((ruleId: string, nextInputs: Record<string, unknown>) => {
+    setBuildRuleInputsById((currentInputs) => ({
+      ...currentInputs,
+      [ruleId]: nextInputs,
+    }));
+  }, []);
 
 
   if (loading) {
@@ -1802,6 +1904,33 @@ const DetailsPage: React.FC = () => {
                 <div className="mb-6 p-3 bg-yellow-100 border-l-4 border-yellow-500 text-yellow-800 text-sm text-left rounded-r-lg">
                   <p className="font-bold">⚠️ 注意事项</p>
                   <p className="mt-1">请勿在问卷中输入任何真实的隐私信息，或任何不适宜、攻击性、不符合公序良俗的内容。所有回答将被用于生成虚拟角色，并且将会被储存在角色信息中。</p>
+                </div>
+                <div className="mb-6 space-y-4 text-left">
+                  <TemplateSelector
+                    value={creatorTemplate}
+                    onChange={setCreatorTemplate}
+                  />
+                  <FreeformBriefPanel
+                    value={freeformBrief}
+                    onChange={setFreeformBrief}
+                  />
+                  <BuildRulePicker
+                    presets={buildRulePresetIndex}
+                    selectedRuleIds={selectedBuildRuleIds}
+                    primaryRuleId={primaryBuildRuleId}
+                    onToggleRule={handleToggleBuildRule}
+                    onSelectPrimaryRule={handleSelectPrimaryBuildRule}
+                  />
+                  {primaryBuildRulePreset ? (
+                    <BuildRulePanel
+                      preset={primaryBuildRulePreset}
+                      inputs={buildRuleInputsById[primaryBuildRulePreset.id] ?? createDefaultBuildRuleInputs(primaryBuildRulePreset.id)}
+                      onChange={(nextInputs) => handleBuildRuleInputsChange(primaryBuildRulePreset.id, nextInputs)}
+                    />
+                  ) : null}
+                  {primaryBuildRuleRuntimeResult ? (
+                    <BuildSummaryPanel runtimeResult={primaryBuildRuleRuntimeResult} />
+                  ) : null}
                 </div>
                 <EncyclopediaLinks
                   items={[

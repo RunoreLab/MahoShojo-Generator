@@ -1,0 +1,10 @@
+{
+  "presets": [
+    {
+      "id": "arena-trpg-lite",
+      "title": "魔法少女竞技场 TRPG 简化角色卡",
+      "version": "1.0.0",
+      "description": "基于核心属性、力量层级、基础能力模块与派生值的轻量车卡规则。"
+    }
+  ]
+}

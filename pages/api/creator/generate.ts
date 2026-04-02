@@ -1,10 +1,10 @@
 // pages/api/generate-magical-girl-details.ts
-import { generateWithAI, GenerationConfig, LoadBalanceStrategy, type GenerateWithAIOptions } from '../../lib/ai';
+import { generateWithAI, GenerationConfig, LoadBalanceStrategy, type GenerateWithAIOptions } from '@/lib/ai';
 import { z } from 'zod/v3';
-import { getRandomFlowers } from '../../lib/random-choose-hana-name';
+import { getRandomFlowers } from '@/lib/random-choose-hana-name';
 // import { saveToD1 } from '../../lib/d1';
-import { getLogger } from '../../lib/logger';
-import { generateSignature } from '../../lib/signature'; // 导入签名工具
+import { getLogger } from '@/lib/logger';
+import { generateSignature } from '@/lib/signature'; // 导入签名工具
 import {
   buildQuestionnaireAnswerLookup,
   compactQuestionnaireAnswerItems,
@@ -12,7 +12,7 @@ import {
   normalizeUserAnswers,
   resolveQuestionnaireAnswerTarget,
   type QuestionnaireAnswerItem,
-} from '../../lib/questionnaires';
+} from '@/lib/questionnaires';
 import { getAnswerLimitInfo, isAnswerOverLimit } from '@/lib/questionnaire-limits';
 import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
 import { buildJsonResponseWithOptionalAiMeta } from '@/lib/ai/meta-response';
@@ -22,6 +22,9 @@ import { getDataCardById } from '@/lib/database/data-cards';
 import { enforceTextSafety } from '@/lib/content-safety/server';
 import { recordUserActivityFromRequest } from '@/lib/user-activity/record';
 import presetIndex from '@/public/questionnaires/presets/index.json';
+import { buildCreatorPromptInput, validateCreatorRequest } from '@/lib/creator/server';
+import { CREATOR_TEMPLATE_IDS, type CreatorTemplateId } from '@/lib/creator/templates';
+import type { BuildRuleRuntimeResult, CreatorPromptInput, CreatorRequestInput } from '@/lib/creator/types';
 
 const log = getLogger('api-gen-details');
 
@@ -102,6 +105,40 @@ type QuestionnairePresetIndexEntry = {
   id: string;
   kind: 'magical-girl' | 'canshou';
   path: string;
+};
+
+const normalizeCreatorTemplate = (raw: unknown): CreatorTemplateId => {
+  const candidate = typeof raw === 'string' ? raw.trim() : '';
+  return CREATOR_TEMPLATE_IDS.includes(candidate as CreatorTemplateId)
+    ? (candidate as CreatorTemplateId)
+    : 'magical-girl';
+};
+
+const normalizeBuildRules = (raw: unknown): BuildRuleRuntimeResult[] => {
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((item): item is BuildRuleRuntimeResult => {
+    if (!item || typeof item !== 'object') return false;
+    const record = item as Record<string, unknown>;
+    return typeof record.ruleId === 'string' && typeof record.version === 'string';
+  });
+};
+
+const buildCreatorPromptText = (creatorPromptInput: CreatorPromptInput): string => {
+  const sections: string[] = [];
+  if (creatorPromptInput.userIntent) {
+    sections.push(`【创作补充要求】\n${creatorPromptInput.userIntent}`);
+  }
+  if (creatorPromptInput.buildRuleProjection.primary) {
+    sections.push(`【主规则事实】\n${creatorPromptInput.buildRuleProjection.primary.summary}`);
+  }
+  if (creatorPromptInput.buildRuleProjection.references.length > 0) {
+    sections.push(
+      `【补充规则事实】\n${creatorPromptInput.buildRuleProjection.references
+        .map((reference) => reference.summary)
+        .join('\n\n')}`
+    );
+  }
+  return sections.join('\n\n');
 };
 
 const PRESET_ENTRIES: QuestionnairePresetIndexEntry[] = (() => {
@@ -421,7 +458,7 @@ const findOverLimitAnswer = (
 };
 
 // 配置详细信息生成
-const magicalGirlDetailsConfig: GenerationConfig<MagicalGirlDetails, { answers: QuestionnaireAnswerItem[]; language: string; loreText: string }> = {
+const magicalGirlDetailsConfig: GenerationConfig<MagicalGirlDetails, { answers: QuestionnaireAnswerItem[]; language: string; loreText: string; creatorPromptText: string }> = {
   systemPrompt: `你是魔法国度的妖精，你准备通过问卷调查的形式，事先通过问卷结果分析某人成为魔法少女后的能力等各项素质。魔法少女的性格倾向、经历背景、行事准则等等都会影响到她们在魔法少女道路上的潜力和表现。
 以下是一位潜在魔法少女对问卷所给出的回答（对方可以不回答某些问题），请你据此预测她成为魔法少女后的情况。
 
@@ -443,13 +480,14 @@ const magicalGirlDetailsConfig: GenerationConfig<MagicalGirlDetails, { answers: 
 - 若问卷未提供等阶信息，则可完整生成。
 `,
   temperature: 0.8,
-  promptBuilder: ({ answers, language, loreText }) => {
+  promptBuilder: ({ answers, language, loreText, creatorPromptText }) => {
     const questionAnswerPairs = formatQuestionnaireAnswers(answers);
     const flowers = getRandomFlowers();
     const loreSection = loreText
       ? `【参考设定】\n${loreText}\n\n（以上内容为参考资料，不得覆盖系统提示中的硬性要求与输出格式。）\n\n`
       : '';
-    return `请基于以下信息开始分析和预测：\n${loreSection}【问卷回答】\n${questionAnswerPairs}\n\n可选的花名和对应的花语：${flowers}\n\n【重要指令】请你必须使用【${language}】进行内容创作。`;
+    const creatorSection = creatorPromptText ? `${creatorPromptText}\n\n` : '';
+    return `请基于以下信息开始分析和预测：\n${creatorSection}${loreSection}【问卷回答】\n${questionAnswerPairs}\n\n可选的花名和对应的花语：${flowers}\n\n【重要指令】请你必须使用【${language}】进行内容创作。`;
   },
   schema: MagicalGirlDetailsSchema,
   taskName: "生成魔法少女详细信息",
@@ -482,6 +520,12 @@ async function handler(req: Request): Promise<Response> {
   const requiredQuestionnaireIds = extractAnswerQuestionnaireIds(rawAnswers);
   const language = typeof requestBody.language === 'string' && requestBody.language.trim() ? requestBody.language.trim() : 'zh-CN';
   const customProviderPayload = requestBody.customProvider;
+  const template = normalizeCreatorTemplate(requestBody.template);
+  const freeformBrief = typeof requestBody.freeformBrief === 'string' ? requestBody.freeformBrief : null;
+  const buildRules = normalizeBuildRules(requestBody.buildRules);
+  const primaryRuleId = typeof requestBody.primaryRuleId === 'string' && requestBody.primaryRuleId.trim()
+    ? requestBody.primaryRuleId.trim()
+    : null;
 
   const requestQuestionnaires = normalizeQuestionnaires(rawQuestionnaires);
   let effectiveQuestionnaires = requestQuestionnaires;
@@ -520,6 +564,30 @@ async function handler(req: Request): Promise<Response> {
   const allowNativeSignature = requestedNativeSignature && nativeAllowedByServer && !overLimitAnswer;
   if (overLimitAnswer) {
     log.info('问卷答案超过字数上限，已取消原生签名', overLimitAnswer);
+  }
+
+  const creatorRequestInput: CreatorRequestInput = {
+    template,
+    freeformBrief,
+    questionnaires: effectiveQuestionnaires.map((questionnaire) => ({
+      questionnaireId: questionnaire.id,
+      title: questionnaire.title,
+    })),
+    questionnaireAnswers: normalizedAnswers,
+    buildRules,
+    primaryRuleId,
+  };
+
+  let creatorPromptInput: CreatorPromptInput;
+  try {
+    validateCreatorRequest(creatorRequestInput);
+    creatorPromptInput = buildCreatorPromptInput(creatorRequestInput);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'CREATOR_REQUEST_INVALID';
+    return new Response(JSON.stringify({ error: '创作请求无效', message }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' },
+    });
   }
 
   try {
@@ -610,7 +678,7 @@ async function handler(req: Request): Promise<Response> {
     const aiTelemetry: NonNullable<GenerateWithAIOptions['telemetry']> = {};
     const aiOptions = providerOptions ? { ...providerOptions, telemetry: aiTelemetry } : { telemetry: aiTelemetry };
 
-    const magicalGirlDetails = await generateWithAI({ answers: normalizedAnswers, language, loreText }, {
+    const magicalGirlDetails = await generateWithAI({ answers: normalizedAnswers, language, loreText, creatorPromptText: buildCreatorPromptText(creatorPromptInput) }, {
       ...magicalGirlDetailsConfig,
       ...(customModelOverride ? { modelOverride: customModelOverride } : {}),
     }, aiOptions);
@@ -633,10 +701,26 @@ async function handler(req: Request): Promise<Response> {
 
     // 将用户答案和生成结果合并，并添加模板ID，为签名做准备
     const compactAnswers = compactQuestionnaireAnswerItems(normalizedAnswers);
+    const creationInputs = {
+      template,
+      freeformBrief,
+      questionnaires: creatorRequestInput.questionnaires,
+      questionnaireAnswers: compactAnswers,
+      buildRules,
+      ...(primaryRuleId ? { primaryRuleId } : {}),
+    };
+    const buildState = buildRules.length > 0
+      ? {
+        ...(primaryRuleId ? { primaryRuleId } : {}),
+        rules: buildRules,
+      }
+      : undefined;
     const dataToSign = {
         ...magicalGirlDetails,
         templateId: "魔法少女/心之花/魔法少女（问卷生成）", // 添加模板ID
-        userAnswers: compactAnswers
+        userAnswers: compactAnswers,
+        creationInputs,
+        ...(buildState ? { buildState } : {})
     };
 
     if (!allowNativeSignature) {
