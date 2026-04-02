@@ -62,7 +62,7 @@ import { FreeformBriefPanel } from '@/components/creator/FreeformBriefPanel';
 import { BuildRulePicker } from '@/components/creator/BuildRulePicker';
 import { BuildRulePanel } from '@/components/creator/BuildRulePanel';
 import { BuildSummaryPanel } from '@/components/creator/BuildSummaryPanel';
-import type { CreatorTemplateId } from '@/lib/creator/templates';
+import { isCreatorStreamTemplate, type CreatorTemplateId } from '@/lib/creator/templates';
 import { createDefaultBuildRuleInputs, loadBuildRulePresetIndex, tryLoadBuildRulePresetById } from '@/lib/creator/build-rules';
 import { evaluateBuildRuleState } from '@/lib/creator/build-rule-runtime';
 import type { AIReasoningEnvelope } from '@/types/ai-reasoning';
@@ -1437,6 +1437,14 @@ const DetailsPage: React.FC = () => {
     }
 
     const snapshot = answersSnapshot ?? answersByKey;
+    if (generationMode === 'stream' && (!isCreatorStreamTemplate(creatorTemplate) || creatorTemplate !== 'general')) {
+      setError('⚠️ 当前仅支持【通用角色卡（Markdown）】使用流式创作。');
+      return;
+    }
+    if (generationMode === 'non-stream' && creatorTemplate !== 'magical-girl') {
+      setError('⚠️ 当前非流式创作仅接通【魔法少女（结构化）】。其余模板将在后续任务中继续接线。');
+      return;
+    }
     const finalAnswerItems: QuestionnaireAnswerItem[] = [];
     mergedQuestions.forEach((item) => {
       const raw = snapshot[item.key];
@@ -1458,6 +1466,24 @@ const DetailsPage: React.FC = () => {
 
     const overLimitForSubmit = buildOverLimitItems(snapshot);
     const allowNativeSignatureForSubmit = isQuestionnaireNativeAllowed && overLimitForSubmit.length === 0;
+    const compactAnswerItems = compactQuestionnaireAnswerItems(finalAnswerItems);
+    const creatorRequestPayload = {
+      template: creatorTemplate,
+      freeformBrief,
+      questionnaires: selectedQuestionnaires.map((selection) => ({
+        questionnaireId: selection.questionnaire.id,
+        title: selection.questionnaire.title,
+      })),
+      questionnaireAnswers: compactAnswerItems,
+      buildRules: buildRuleRuntimeResults,
+      ...(primaryBuildRuleId ? { primaryRuleId: primaryBuildRuleId } : {}),
+    };
+    const creatorBuildState = buildRuleRuntimeResults.length > 0
+      ? {
+        ...(primaryBuildRuleId ? { primaryRuleId: primaryBuildRuleId } : {}),
+        rules: buildRuleRuntimeResults,
+      }
+      : undefined;
 
     setSubmitting(true);
     setError(null);
@@ -1484,8 +1510,8 @@ const DetailsPage: React.FC = () => {
       } : undefined;
 
       const endpoint = generationMode === 'stream'
-        ? '/api/generate-magical-girl-details-stream?format=sse'
-        : '/api/generate-magical-girl-details';
+        ? '/api/creator/generate-stream?format=sse'
+        : '/api/creator/generate';
 
       const activityHeaders = await authStorage.getActivityHeaders();
       const requestHeaders: Record<string, string> = {
@@ -1501,6 +1527,8 @@ const DetailsPage: React.FC = () => {
         method: 'POST',
         headers: requestHeaders,
         body: JSON.stringify({
+          template: creatorTemplate,
+          freeformBrief,
           answers: finalAnswerItems,
           questionnaireSelections: selectedQuestionnaires.map((selection) => ({
             source: selection.source,
@@ -1525,6 +1553,8 @@ const DetailsPage: React.FC = () => {
           allowNativeSignature: allowNativeSignatureForSubmit,
           language: selectedLanguage,
           customProvider: customProviderPayload,
+          buildRules: buildRuleRuntimeResults,
+          primaryRuleId: primaryBuildRuleId,
         }),
       });
 
@@ -1584,7 +1614,9 @@ const DetailsPage: React.FC = () => {
         });
         const cardWithAnswers = {
           ...card,
-          userAnswers: compactQuestionnaireAnswerItems(finalAnswerItems),
+          userAnswers: compactAnswerItems,
+          creationInputs: creatorRequestPayload,
+          ...(creatorBuildState ? { buildState: creatorBuildState } : {}),
         };
         if (!allowNativeSignatureForSubmit) {
           setStreamedGeneralCard(cardWithAnswers);

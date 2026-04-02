@@ -1,8 +1,8 @@
 import { loadBuildRulePresetById, tryLoadBuildRulePresetById } from './build-rules';
+import type { CreatorTemplateId } from './templates';
 
 import type {
   BuildRuleRuntimeResult,
-  CreatorTemplateId,
   ProjectBuildRulesForPromptResult,
   ProjectedBuildRuleForPrompt,
 } from './types';

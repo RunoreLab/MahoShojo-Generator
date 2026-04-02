@@ -70,7 +70,7 @@ export function BuildRulePanel({
             {Array.isArray(powerLevelBlock.options)
               ? powerLevelBlock.options
                   .filter(isRecord)
-                  .map((option) => {
+                  .map((option: Record<string, unknown>) => {
                     const value = typeof option.value === 'string' ? option.value : '';
                     const label = typeof option.label === 'string' ? option.label : value;
                     return (
@@ -92,7 +92,7 @@ export function BuildRulePanel({
           ) : null}
           <div className="mt-3 grid gap-3 md:grid-cols-2">
             {Array.isArray(coreAttributesBlock.fields)
-              ? coreAttributesBlock.fields.filter(isRecord).map((field) => {
+              ? coreAttributesBlock.fields.filter(isRecord).map((field: Record<string, unknown>) => {
                   const fieldId = typeof field.id === 'string' ? field.id : '';
                   const label = typeof field.label === 'string' ? field.label : fieldId;
                   const description = typeof field.description === 'string' ? field.description : '';
@@ -126,7 +126,7 @@ export function BuildRulePanel({
           ) : null}
           <div className="mt-3 space-y-4">
             {Array.isArray(specialtiesBlock.groups)
-              ? specialtiesBlock.groups.filter(isRecord).map((group) => {
+              ? specialtiesBlock.groups.filter(isRecord).map((group: Record<string, unknown>) => {
                   const groupId = typeof group.id === 'string' ? group.id : '';
                   const groupLabel = typeof group.label === 'string' ? group.label : groupId;
                   return (
@@ -134,7 +134,7 @@ export function BuildRulePanel({
                       <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">{groupLabel}</div>
                       <div className="mt-2 grid gap-2">
                         {Array.isArray(group.items)
-                          ? group.items.filter(isRecord).map((item) => {
+                          ? group.items.filter(isRecord).map((item: Record<string, unknown>) => {
                               const itemId = typeof item.id === 'string' ? item.id : '';
                               const label = typeof item.label === 'string' ? item.label : itemId;
                               const description = typeof item.description === 'string' ? item.description : '';

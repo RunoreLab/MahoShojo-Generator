@@ -1,4 +1,5 @@
 import type { CreatorTemplateId } from './templates';
+import type { QuestionnaireAnswerItem } from '@/lib/questionnaires';
 
 export type BuildRuleBlock = Readonly<{
   id: string;
@@ -75,15 +76,9 @@ export interface ProjectBuildRulesForPromptResult {
 export interface CreatorQuestionnaireRef {
   questionnaireId: string;
   title?: string;
-  [key: string]: unknown;
 }
 
-export interface CreatorQuestionnaireAnswer {
-  questionnaireId?: string;
-  question?: string;
-  answer?: string;
-  [key: string]: unknown;
-}
+export type CreatorQuestionnaireAnswer = QuestionnaireAnswerItem;
 
 export interface CreatorRequestInput {
   template: CreatorTemplateId;
