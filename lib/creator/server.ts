@@ -1,5 +1,16 @@
+import type {
+  BuildRuleRuntimeResult,
+  BuildRuleValidationIssue,
+} from './build-rule-runtime';
 import type { BuildRulePreset, CreatorPromptInput, CreatorRequestInput } from './types';
 
+import type {
+  BuildState,
+  CreationInputs,
+  CreatorBuildRuleSnapshot,
+} from '@/lib/schemas/creator-metadata';
+
+import { BuildStateSchema, CreationInputsSchema } from '@/lib/schemas/creator-metadata';
 import { projectBuildRulesForPrompt } from './build-rule-projection';
 import { buildCreatorUserIntent, summarizeQuestionnaires } from './prompt';
 import { tryLoadBuildRulePresetById } from './build-rules';
@@ -7,6 +18,55 @@ import { tryLoadBuildRulePresetById } from './build-rules';
 interface CreatorServerOptions {
   resolvePreset?: (ruleId: string) => BuildRulePreset | null;
 }
+
+export interface CreatorGenerationArtifacts {
+  prompt: string;
+  creationInputs: CreationInputs;
+  buildState?: BuildState;
+}
+
+export interface NormalizedCreatorRequestError {
+  code: string;
+  ruleId?: string;
+}
+
+const KNOWN_CREATOR_REQUEST_ERROR_CODES = new Set([
+  'FREEFORM_BRIEF_REQUIRED',
+  'PRIMARY_RULE_REQUIRED',
+  'PRIMARY_RULE_NOT_SELECTED',
+  'RULE_TEMPLATE_UNSUPPORTED',
+  'QUESTIONNAIRE_REQUIRED_FOR_RULE',
+  'PRIMARY_RULE_INELIGIBLE',
+]);
+
+const BUILD_RULE_VALIDATION_ISSUE_CODES = new Set<BuildRuleValidationIssue['code']>([
+  'required-missing',
+  'budget-exceeded',
+  'selection-count',
+  'invalid-value',
+]);
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const normalizeValidationIssue = (value: unknown): BuildRuleValidationIssue | null => {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const code = typeof value.code === 'string' ? value.code : null;
+  const blockKey = typeof value.blockKey === 'string' ? value.blockKey : null;
+  const message = typeof value.message === 'string' ? value.message : null;
+  if (!code || !blockKey || !message || !BUILD_RULE_VALIDATION_ISSUE_CODES.has(code as BuildRuleValidationIssue['code'])) {
+    return null;
+  }
+
+  return {
+    code: code as BuildRuleValidationIssue['code'],
+    blockKey,
+    message,
+  };
+};
 
 const getBuildRulePresetOrThrow = (
   ruleId: string,
@@ -58,6 +118,59 @@ export function validateCreatorRequest(
   }
 }
 
+const buildCreationInputs = (input: CreatorRequestInput): CreationInputs =>
+  CreationInputsSchema.parse({
+    template: input.template,
+    freeformBrief: input.freeformBrief ?? null,
+    questionnaires: input.questionnaires ?? [],
+    questionnaireAnswers: input.questionnaireAnswers ?? [],
+    buildRules: input.buildRules ?? [],
+    primaryRuleId: input.primaryRuleId ?? null,
+  });
+
+const buildPersistedBuildState = (input: CreatorRequestInput): BuildState | undefined => {
+  const buildRules = input.buildRules ?? [];
+  if (buildRules.length === 0) {
+    return undefined;
+  }
+
+  return BuildStateSchema.parse({
+    primaryRuleId: input.primaryRuleId ?? null,
+    rules: buildRules,
+  });
+};
+
+const formatProjectionFacts = (
+  label: string,
+  projection: NonNullable<CreatorPromptInput['buildRuleProjection']['primary']>,
+  resolvePreset?: (ruleId: string) => BuildRulePreset | null
+): string => {
+  const sections = [`### ${label}`];
+  const preset = resolvePreset?.(projection.ruleId) ?? tryLoadBuildRulePresetById(projection.ruleId);
+  if (preset?.title) {
+    sections.push(`规则名称：${preset.title}`);
+  }
+  if (preset?.aiPromptHint?.trim()) {
+    sections.push(`规则提示：${preset.aiPromptHint.trim()}`);
+  }
+  sections.push(
+    '```json',
+    JSON.stringify(
+      {
+        ruleId: projection.ruleId,
+        version: projection.version,
+        projectionPolicy: projection.projectionPolicy,
+        promptLayer: projection.promptLayer,
+        facts: projection.facts,
+      },
+      null,
+      2
+    ),
+    '```'
+  );
+  return sections.join('\n');
+};
+
 export function buildCreatorPromptInput(
   input: CreatorRequestInput,
   options: CreatorServerOptions = {}
@@ -79,4 +192,136 @@ export function buildCreatorPromptInput(
       resolveRuleProjectionPolicy: resolveProjectionPolicy,
     }),
   };
+}
+
+export function renderCreatorPrompt(
+  input: CreatorPromptInput,
+  options: CreatorServerOptions = {}
+): string {
+  const sections = [
+    `你将为模板「${input.template}」生成最终内容。`,
+    '请综合下面的多源输入进行创作，不要在结果中暴露“问卷摘要”“规则投影”“程序维护”等工程术语。',
+    '输入优先级：1. 主规则固定事实（若存在，不得改写或重算） 2. 用户自由说明 3. 问卷摘要 4. 参考规则。',
+  ];
+
+  if (input.userIntent) {
+    sections.push(`## 用户自由说明\n${input.userIntent}`);
+  }
+
+  if (input.questionnaireSummary) {
+    sections.push(`## 问卷摘要\n${input.questionnaireSummary}`);
+  }
+
+  if (input.buildRuleProjection.primary) {
+    sections.push(
+      '## 主规则固定事实\n以下内容为程序给出的权威事实，必须遵守，不得擅自改写数值、缺失项或约束关系。',
+      formatProjectionFacts('主规则', input.buildRuleProjection.primary, options.resolvePreset)
+    );
+  }
+
+  if (input.buildRuleProjection.references.length > 0) {
+    const referenceSections = input.buildRuleProjection.references.map((projection, index) =>
+      formatProjectionFacts(`参考规则 ${index + 1}`, projection, options.resolvePreset)
+    );
+    sections.push(
+      '## 参考规则\n以下内容只作为补充上下文，可用于世界观、风格、限制或灵感，不得覆盖主规则固定事实。',
+      referenceSections.join('\n\n')
+    );
+  }
+
+  sections.push(
+    '## 输出约束\n- 把所有输入整合成最终模板内容。\n- 若用户自由说明与问卷摘要冲突，以用户自由说明的风格与偏好为准。\n- 若任意输入与主规则固定事实冲突，以主规则固定事实为准。'
+  );
+
+  return sections.join('\n\n').trim();
+}
+
+export function buildCreatorGenerationArtifacts(
+  input: CreatorRequestInput,
+  options: CreatorServerOptions = {}
+): CreatorGenerationArtifacts {
+  const promptInput = buildCreatorPromptInput(input, options);
+  const buildState = buildPersistedBuildState(input);
+
+  return {
+    prompt: renderCreatorPrompt(promptInput, options),
+    creationInputs: buildCreationInputs(input),
+    ...(buildState ? { buildState } : {}),
+  };
+}
+
+export function normalizeCreatorBuildRules(
+  buildRules: CreatorBuildRuleSnapshot[] = []
+): BuildRuleRuntimeResult[] {
+  return buildRules.map((rule) => {
+    const rawValidationSummary = isRecord(rule.validationSummary)
+      ? rule.validationSummary
+      : {};
+    const issues = Array.isArray(rawValidationSummary.issues)
+      ? rawValidationSummary.issues
+          .map((issue) => normalizeValidationIssue(issue))
+          .filter((issue): issue is BuildRuleValidationIssue => issue !== null)
+      : [];
+    const missingRequiredBlockKeys = Array.isArray(
+      rawValidationSummary.missingRequiredBlockKeys
+    )
+      ? rawValidationSummary.missingRequiredBlockKeys.filter(
+          (value): value is string => typeof value === 'string' && value.trim().length > 0
+        )
+      : [];
+    const derived: Record<string, number> = isRecord(rule.derived)
+      ? Object.entries(rule.derived).reduce<Record<string, number>>(
+          (acc, [key, value]) => {
+            if (typeof value === 'number' && Number.isFinite(value)) {
+              acc[key] = value;
+            }
+            return acc;
+          },
+          {}
+        )
+      : {};
+
+    return {
+      ruleId: rule.ruleId,
+      version:
+        typeof rule.version === 'string' && rule.version.trim()
+          ? rule.version
+          : 'unknown',
+      blockResults: isRecord(rule.blockResults) ? rule.blockResults : {},
+      derived,
+      validationSummary: {
+        valid:
+          typeof rawValidationSummary.valid === 'boolean'
+            ? rawValidationSummary.valid
+            : issues.length === 0 && missingRequiredBlockKeys.length === 0,
+        issues,
+        missingRequiredBlockKeys,
+      },
+    };
+  });
+}
+
+export function normalizeCreatorRequestError(
+  error: unknown
+): NormalizedCreatorRequestError | null {
+  if (!(error instanceof Error)) {
+    return null;
+  }
+
+  if (KNOWN_CREATOR_REQUEST_ERROR_CODES.has(error.message)) {
+    return {
+      code: error.message,
+    };
+  }
+
+  const buildRulePresetPrefix = 'BUILD_RULE_PRESET_NOT_FOUND:';
+  if (error.message.startsWith(buildRulePresetPrefix)) {
+    const ruleId = error.message.slice(buildRulePresetPrefix.length).trim();
+    return {
+      code: 'BUILD_RULE_PRESET_NOT_FOUND',
+      ...(ruleId ? { ruleId } : {}),
+    };
+  }
+
+  return null;
 }
