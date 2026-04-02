@@ -62,6 +62,7 @@ import { BuildRulePanel } from '@/components/creator/BuildRulePanel';
 import { BuildSummaryPanel } from '@/components/creator/BuildSummaryPanel';
 import { CreatorMainStage } from '@/components/creator/CreatorMainStage';
 import { CreatorOverviewCard } from '@/components/creator/CreatorOverviewCard';
+import { CreatorQuestionnaireSidebarPanel } from '@/components/creator/CreatorQuestionnaireSidebarPanel';
 import { CreatorSidebar } from '@/components/creator/CreatorSidebar';
 import { CreatorWorkbenchLayout } from '@/components/creator/CreatorWorkbenchLayout';
 import { MarkdownBlock } from '@/components/MarkdownBlock';
@@ -614,6 +615,12 @@ const DetailsPage: React.FC = () => {
     }
     return null;
   }, [streamedGeneralCardForDisplay]);
+  const hasCreatorResult = useMemo(() => {
+    if (generationMode === 'stream') {
+      return streamingMarkdown !== null || streamedGeneralCard !== null;
+    }
+    return magicalGirlDetails !== null;
+  }, [generationMode, magicalGirlDetails, streamedGeneralCard, streamingMarkdown]);
 
   useEffect(() => {
     fetch('/languages.json')
@@ -2131,6 +2138,467 @@ const DetailsPage: React.FC = () => {
       overviewStageLabel: '准备中',
       progressLabel: '尚未开始答题',
       nativeHint: '开始答题后显示原生性与限制提示',
+      showFooter: true,
+    });
+  }
+
+  const questionnaireSettingsPanel = (
+    <div className="rounded-xl border border-indigo-100 bg-indigo-50/70 p-4 text-sm">
+      <button
+        type="button"
+        onClick={() => setShowQuestionnaireSettings(!showQuestionnaireSettings)}
+        className="flex w-full items-center justify-between font-semibold text-indigo-700"
+      >
+        <span>问卷设置</span>
+        <span>{showQuestionnaireSettings ? '▲' : '▼'}</span>
+      </button>
+      {showQuestionnaireSettings && (
+        <div className="mt-3 space-y-3 text-xs text-slate-600">
+          <p>你可以选择预设、上传或从云端问卷库挑选。多问卷只影响题目顺序；设定（Lore）可单独启用/禁用。</p>
+          <div className="flex flex-wrap items-center gap-3">
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={allowMultipleQuestionnaires}
+                onChange={(e) => setAllowMultipleQuestionnaires(e.target.checked)}
+              />
+              允许同时回答多份问卷
+            </label>
+            {!allowMultipleQuestionnaires && (
+              <span className="text-[11px] text-slate-500">关闭时：仅允许 1 份可作答问卷，但仍可叠加纯设定卡。</span>
+            )}
+            {!isQuestionnaireNativeAllowed && (
+              <span className="text-rose-500">提示：当前问卷未获得原生许可，生成结果将不具备原生性。</span>
+            )}
+            {isQuestionnaireNativeAllowed && hasOverLimitAnswer && (
+              <span className="text-amber-600">提示：已有答案超过字数上限（原生统一上限 {QUESTIONNAIRE_NATIVE_MAX_ANSWER_CHARS} 字），生成结果将不具备原生性。</span>
+            )}
+          </div>
+          <div className="space-y-2">
+            <div className="text-[11px] font-semibold text-slate-500">可作答问卷（题目）</div>
+            {answerableSelections.length === 0 ? (
+              <div className="rounded-lg border border-indigo-100 bg-white px-3 py-2 text-[11px] text-slate-500">
+                暂无可作答问卷
+              </div>
+            ) : (
+              answerableSelections.map((selection) => {
+                const selectionId = selection.selectionId ?? selection.questionnaire.id;
+                const hasLore = Boolean(selection.questionnaire.loreMarkdown?.trim());
+                const loreStatus = hasLore ? (selection.useLore !== false ? ' · 设定：启用' : ' · 设定：关闭') : '';
+                return (
+                  <div key={selectionId} className="flex items-center justify-between rounded-lg border border-indigo-100 bg-white px-3 py-2">
+                    <div>
+                      <div className="font-semibold text-indigo-700">{selection.questionnaire.title}</div>
+                      <div className="text-[11px] text-gray-500">
+                        来源：{selection.source === 'preset' ? '预设' : selection.source === 'upload' ? '本地上传' : '云端问卷'}
+                        {selection.dataCardAuthor ? ` · 作者：${selection.dataCardAuthor}` : ''}
+                        {selection.questionnaire.nativeAllowed ? ' · 原生许可' : ' · 非原生'}
+                        {loreStatus}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <button
+                        type="button"
+                        onClick={() => handleOpenQuestionnaireDetails(selection)}
+                        className="text-xs text-indigo-600 hover:underline"
+                      >
+                        详情
+                      </button>
+                      <button
+                        type="button"
+                        disabled={shouldDisableRemove}
+                        onClick={() => handleRemoveSelection(selectionId)}
+                        className={`text-xs ${shouldDisableRemove ? 'text-gray-300' : 'text-rose-500 hover:underline'}`}
+                      >
+                        移除
+                      </button>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+          <div className="space-y-2">
+            <div className="text-[11px] font-semibold text-slate-500">设定（Lore）注入</div>
+            {loreSelections.length === 0 ? (
+              <div className="rounded-lg border border-indigo-100 bg-white px-3 py-2 text-[11px] text-slate-500">
+                暂无设定来源
+              </div>
+            ) : (
+              loreSelections.map((selection) => {
+                const selectionId = selection.selectionId ?? selection.questionnaire.id;
+                const isLoreOnly = selection.questionnaire.questions.length === 0;
+                return (
+                  <div key={selectionId} className="flex items-center justify-between rounded-lg border border-indigo-100 bg-white px-3 py-2">
+                    <div>
+                      <div className="font-semibold text-indigo-700">{selection.questionnaire.title}</div>
+                      <div className="text-[11px] text-gray-500">
+                        来源：{selection.source === 'preset' ? '预设' : selection.source === 'upload' ? '本地上传' : '云端问卷'}
+                        {selection.dataCardAuthor ? ` · 作者：${selection.dataCardAuthor}` : ''}
+                        {selection.questionnaire.nativeAllowed ? ' · 原生许可' : ' · 非原生'}
+                        {isLoreOnly ? ' · 仅设定' : ' · 来自问卷'}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <label className="flex items-center gap-2 text-[11px] text-indigo-700">
+                        <input
+                          type="checkbox"
+                          checked={selection.useLore !== false}
+                          onChange={(e) => handleToggleSelectionLore(selectionId, e.target.checked)}
+                        />
+                        使用设定
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => handleOpenQuestionnaireDetails(selection)}
+                        className="text-xs text-indigo-600 hover:underline"
+                      >
+                        详情
+                      </button>
+                      {isLoreOnly && (
+                        <button
+                          type="button"
+                          disabled={shouldDisableRemove}
+                          onClick={() => handleRemoveSelection(selectionId)}
+                          className={`text-xs ${shouldDisableRemove ? 'text-gray-300' : 'text-rose-500 hover:underline'}`}
+                        >
+                          移除
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <select
+              className="input-field text-xs"
+              onChange={(e) => {
+                if (e.target.value) {
+                  void handleAddPreset(e.target.value);
+                  e.currentTarget.value = '';
+                }
+              }}
+              defaultValue=""
+            >
+              <option value="" disabled>选择预设问卷</option>
+              {presetEntries.map((preset) => (
+                <option key={preset.id} value={preset.id}>{preset.title}</option>
+              ))}
+            </select>
+            <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1 text-xs font-medium text-indigo-700 hover:border-indigo-300 hover:bg-indigo-100">
+              上传问卷 JSON
+              <input
+                type="file"
+                accept="application/json"
+                onChange={(e) => void handleUploadQuestionnaire(e.target.files?.[0] ?? null)}
+                className="hidden"
+              />
+            </label>
+            <button
+              type="button"
+              onClick={() => {
+                setQuestionnairePickerError(null);
+                setShowQuestionnairePicker(true);
+              }}
+              className="rounded-lg border border-indigo-200 bg-white px-3 py-1 text-xs text-indigo-600 hover:border-indigo-400"
+            >
+              从云端问卷库选择
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setPasteQuestionnaireError(null);
+                setShowPasteImport((prev) => !prev);
+              }}
+              className="rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1 text-xs text-indigo-700 hover:border-indigo-300 hover:bg-indigo-100"
+            >
+              {showPasteImport ? '收起粘贴导入' : '粘贴导入 JSON'}
+            </button>
+            <Link href="/questionnaire-editor" className="text-xs text-indigo-600 hover:underline">
+              打开问卷编辑器
+            </Link>
+          </div>
+          {showPasteImport && (
+            <div className="rounded-lg border border-indigo-100 bg-white p-3 text-xs text-slate-600">
+              <label className="text-xs text-slate-500">粘贴问卷 JSON</label>
+              <textarea
+                value={pasteQuestionnaireText}
+                onChange={(e) => setPasteQuestionnaireText(e.target.value)}
+                placeholder="在此粘贴问卷 JSON"
+                className="input-field mt-2 h-28"
+                rows={6}
+              />
+              <div className="mt-2 flex items-center justify-between">
+                <button
+                  type="button"
+                  onClick={handlePasteQuestionnaireImport}
+                  className="rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1 text-xs text-indigo-700 hover:border-indigo-300 hover:bg-indigo-100"
+                >
+                  解析并载入
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPasteQuestionnaireText('');
+                    setPasteQuestionnaireError(null);
+                  }}
+                  className="text-xs text-slate-500 hover:text-slate-700"
+                >
+                  清空
+                </button>
+              </div>
+              {pasteQuestionnaireError && (
+                <p className="mt-2 text-rose-500">{pasteQuestionnaireError}</p>
+              )}
+            </div>
+          )}
+          {questionnaireLoadError && (
+            <p className="text-rose-500">{questionnaireLoadError}</p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+
+  const answerReviewPanel = (
+    <div className="rounded-xl border border-blue-200 bg-blue-50 p-3">
+      <button
+        onClick={() => setShowAnswerReview(!showAnswerReview)}
+        className="flex w-full items-center justify-between text-left text-sm font-semibold text-blue-700"
+      >
+        <span>答案概览</span>
+        <span>{showAnswerReview ? '▲' : '▼'}</span>
+      </button>
+      {showAnswerReview && (
+        <div className="mt-3 max-h-56 space-y-2 overflow-y-auto pr-1 text-sm">
+          {mergedQuestions.map((item, index) => (
+            <div key={`answer-review-${item.key}`} className="rounded-lg bg-white/90 p-3 shadow-sm">
+              <div className="text-xs font-semibold text-pink-600">Q{index + 1}</div>
+              <div className="mt-1 text-xs text-gray-500">
+                {item.questionnaireTitle ? `(${item.questionnaireTitle}) ` : ''}{item.question.question}
+              </div>
+              <div className="mt-2 whitespace-pre-wrap text-gray-800">
+                {answersByKey[item.key] && answersByKey[item.key].trim().length > 0
+                  ? answersByKey[item.key]
+                  : <span className="text-gray-400">尚未填写</span>}
+              </div>
+              <div className="mt-2 text-right">
+                <button
+                  type="button"
+                  onClick={() => handleNavigateToQuestion(index)}
+                  className="text-xs text-pink-500 hover:underline"
+                >
+                  编辑此题
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+
+  const questionnaireSidebarPanel = (
+    <CreatorQuestionnaireSidebarPanel
+      navigator={(
+        <QuestionNavigator
+          items={navigatorItems}
+          currentIndex={currentQuestionIndex}
+          onNavigate={handleNavigateToQuestion}
+          isAnswered={(index) => {
+            const key = mergedQuestions[index]?.key;
+            return key ? Boolean(answersByKey[key]?.trim()) : false;
+          }}
+          theme="pink"
+        />
+      )}
+      settings={questionnaireSettingsPanel}
+      answerReview={answerReviewPanel}
+    />
+  );
+
+  const advancedSidebarPanel = (
+    <div className="space-y-4">
+      <TokenIndicator
+        text={tokenEstimateText}
+        warningText="⚠️ 预计问卷回答较长，可能更易超时/失败。可尝试精简答案或减少问卷数量。"
+      />
+      <div className="rounded-lg bg-gray-100 p-3">
+        <button
+          onClick={() => setShowLanguageSection(!showLanguageSection)}
+          className="flex w-full items-center justify-between text-left font-medium text-gray-700 hover:text-blue-600"
+        >
+          <span>生成语言</span>
+          <span className="ml-2">{showLanguageSection ? '▼' : '▶'}</span>
+        </button>
+        {showLanguageSection && (
+          <div className="mt-3">
+            <select
+              id="language-select"
+              value={selectedLanguage}
+              onChange={(e) => setSelectedLanguage(e.target.value)}
+              className="input-field"
+              disabled={submitting}
+            >
+              {languages.map((lang) => (
+                <option key={lang.code} value={lang.code}>{lang.name}</option>
+              ))}
+            </select>
+          </div>
+        )}
+      </div>
+      <div className="rounded-lg bg-gray-100 p-3">
+        <GenerationModeSwitcher
+          label="生成方式"
+          value={generationMode}
+          disabled={submitting}
+          helper={false}
+          onChange={(mode) => {
+            setGenerationMode(mode);
+            setCreatorTemplate((currentTemplate) =>
+              normalizeCreatorTemplateForGenerationMode(mode, currentTemplate)
+            );
+          }}
+        />
+        <div className="mt-2 text-xs text-gray-600">
+          {generationMode === 'stream'
+            ? creatorTemplate === 'general-scenario'
+              ? '提示：选择流式生成后，将实时输出 Markdown，并生成【通用情景卡】（templateId=通用情景）。标题会优先从 Markdown 标题或“标题：...”字段解析，失败则回退到你的补充说明。'
+              : '提示：选择流式生成后，将实时输出 Markdown，并生成【通用角色卡】（templateId=通用角色）。代号/名字会尝试从输出中解析，失败则回退到你的答案或补充说明。'
+            : '提示：非流式生成会返回结构化的魔法少女数据卡（适合保存为模板/用于升华等），但需要等待生成结束一次性返回。'}
+        </div>
+      </div>
+      <div className="rounded-lg bg-gray-50 p-3">
+        <AiProviderSelector onConfigChange={setUserProviderConfig} />
+        <p className="mt-2 text-xs text-gray-500">使用自有 API Key 可缩短冷却至 3 秒，便于批量迭代生成。</p>
+        <ProviderCooldownNotice
+          currentMode={providerCooldownMode}
+          currentIsCooldown={isCooldown}
+          otherRemainingTime={otherRemainingTime}
+        />
+      </div>
+      <div className="rounded-lg bg-gray-100 p-3">
+        <button
+          onClick={() => setShowBulkFillSection(!showBulkFillSection)}
+          className="flex w-full items-center justify-between text-left font-medium text-gray-700 hover:text-blue-600"
+        >
+          <span>一键填充答案</span>
+          <span className="ml-2">{showBulkFillSection ? '▼' : '▶'}</span>
+        </button>
+        {showBulkFillSection && (
+          <div className="mt-3">
+            <textarea
+              id="bulk-answers"
+              value={bulkAnswers}
+              onChange={(e) => setBulkAnswers(e.target.value)}
+              placeholder="在此处粘贴所有答案：支持每行一个、Q/A 复制内容、编号列表、JSON。"
+              className="input-field h-20"
+              rows={4}
+            />
+            <div className="mt-2 flex items-center justify-between">
+              <button onClick={handleBulkFill} className="text-sm text-blue-600 hover:underline">填充</button>
+              <button onClick={handleClearDraft} className="text-sm text-red-600 hover:underline">清空存档</button>
+            </div>
+          </div>
+        )}
+      </div>
+      <QuestionnaireAnswerExportPanel
+        variant="light"
+        title="生成前备份问卷答案"
+        filenameBase="创作问卷_答案备份"
+        hasContent={answerItems.length > 0}
+        buildContent={buildAnswerExportText}
+        disabled={submitting || isTransitioning || isCooldown}
+      />
+    </div>
+  );
+
+  if (!hasCreatorResult) {
+    return renderWorkbenchPage({
+      sidebarStage: 'questionnaire',
+      mainStage: 'questionnaire',
+      mainTitle: currentQuestionnaireTitle || `问题 ${currentQuestionIndex + 1} / ${mergedQuestions.length}`,
+      mainContent: (
+        <>
+          <QuestionnaireQuestionPanel
+            theme={DETAILS_QUESTIONNAIRE_THEME}
+            progressLabel={`问题 ${currentQuestionIndex + 1} / ${mergedQuestions.length}`}
+            progressPercent={progressPercent}
+            progressExtra={autoSaveTimestamp ? (
+              <span className="text-xs text-gray-400">已自动保存于 {new Date(autoSaveTimestamp).toLocaleTimeString()}</span>
+            ) : null}
+            questionText={currentQuestion?.question || '未加载题目'}
+            questionnaireTitle={currentQuestionnaireTitle}
+            noticeText="请基于您构想的虚拟角色身份回答，并确保内容符合公序良俗，请勿使用任何真实信息。"
+            helperText={currentQuestion?.helperText}
+            isRequired={isCurrentRequired}
+            skipText="本题可跳过，不作答将不会记录"
+            quickOptions={fallbackQuickOptions}
+            quickOptionDisabled={submitting || isTransitioning || isCooldown}
+            onQuickOption={handleQuickOption}
+            options={currentQuestion?.options}
+            optionsHintText={optionsHintText}
+            onOptionSelect={handleQuickOption}
+            suggestions={suggestionPool}
+            onSuggestionSelect={handleSuggestionFill}
+            showTextInput={showTextInput}
+            answer={currentAnswer}
+            onAnswerChange={handleCurrentAnswerChange}
+            placeholder={currentQuestion?.placeholder ?? '请输入您的答案（建议控制在适中长度）'}
+            answerLength={currentAnswerLength}
+            maxLength={currentMaxLength}
+            limitLabel={currentLimitLabel}
+            showLimitLabel={currentLimitInfo.source !== 'none' && Boolean(currentMaxLength)}
+            isOverLimit={isCurrentOverLimit}
+            overLimitText={overLimitText}
+            isTransitioning={isTransitioning}
+            transitionClassName="transition-all duration-300 ease-out"
+            transitionStyle={{
+              opacity: isTransitioning ? 0 : 1,
+              transform: isTransitioning ? 'translateX(-16px)' : 'translateX(0)',
+            }}
+            prevLabel="返回上题"
+            nextButtonContent={nextButtonContent}
+            onPrev={handlePreviousQuestion}
+            onNext={handleNext}
+            disablePrev={currentQuestionIndex === 0 || submitting || isTransitioning || isCooldown}
+            disableNext={submitting || isTransitioning || isCooldown || (isCurrentRequired && currentAnswer.trim().length === 0)}
+            prevButtonClass="generate-button w-1/4"
+            nextButtonClass="generate-button"
+          />
+
+          {error && (
+            <div className="mt-4">
+              <ErrorMessage message={error} />
+            </div>
+          )}
+          {isQuestionnaireNativeAllowed && hasOverLimitAnswer && (
+            <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-700">
+              ⚠️ 已有 {overLimitItems.length} 条答案超过字数上限，继续提交将导致生成内容丧失原生性。
+            </div>
+          )}
+
+          <div className="text-center" style={{ marginTop: '1rem' }}>
+            <button
+              onClick={() => router.push('/')}
+              className="footer-link"
+            >
+              返回首页
+            </button>
+          </div>
+        </>
+      ),
+      overviewStageLabel: '答题中',
+      progressLabel: `问题 ${currentQuestionIndex + 1} / ${mergedQuestions.length}`,
+      nativeHint: !isQuestionnaireNativeAllowed
+        ? '当前问卷未获得原生许可'
+        : hasOverLimitAnswer
+          ? `已有 ${overLimitItems.length} 条答案超过字数上限`
+          : '当前仍具备原生性',
+      questionnaire: questionnaireSidebarPanel,
+      advanced: advancedSidebarPanel,
       showFooter: true,
     });
   }

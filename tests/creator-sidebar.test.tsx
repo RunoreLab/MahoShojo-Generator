@@ -3,6 +3,7 @@ import { expect, test } from 'bun:test';
 import { renderToStaticMarkup } from 'react-dom/server';
 
 import { CreatorOverviewCard } from '@/components/creator/CreatorOverviewCard';
+import { CreatorQuestionnaireSidebarPanel } from '@/components/creator/CreatorQuestionnaireSidebarPanel';
 import { CreatorSidebar } from '@/components/creator/CreatorSidebar';
 
 test('CreatorOverviewCard 输出阶段、进度、模板与主规则摘要', () => {
@@ -42,4 +43,18 @@ test('CreatorSidebar 在 mobile + questionnaire 阶段默认展开概况与问�
   expect(html).toContain('创作配置');
   expect(html).toContain('问卷与作答');
   expect(html).toContain('高级生成');
+});
+
+test('CreatorQuestionnaireSidebarPanel 收拢问卷设置与答案概览', () => {
+  const html = renderToStaticMarkup(
+    <CreatorQuestionnaireSidebarPanel
+      navigator={<div>题目导航</div>}
+      settings={<div>问卷设置</div>}
+      answerReview={<div>答案概览</div>}
+    />
+  );
+
+  expect(html).toContain('题目导航');
+  expect(html).toContain('问卷设置');
+  expect(html).toContain('答案概览');
 });
