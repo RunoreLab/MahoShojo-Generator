@@ -59,7 +59,12 @@ import { QuestionnaireAnswerExportPanel } from '@/components/questionnaire/Quest
 import { CharacterPortraitAssetPanel } from '@/components/shared/CharacterPortraitAssetPanel';
 import { TemplateSelector } from '@/components/creator/TemplateSelector';
 import { FreeformBriefPanel } from '@/components/creator/FreeformBriefPanel';
+import { BuildRulePicker } from '@/components/creator/BuildRulePicker';
+import { BuildRulePanel } from '@/components/creator/BuildRulePanel';
+import { BuildSummaryPanel } from '@/components/creator/BuildSummaryPanel';
 import type { CreatorTemplateId } from '@/lib/creator/templates';
+import { createDefaultBuildRuleInputs, loadBuildRulePresetIndex, tryLoadBuildRulePresetById } from '@/lib/creator/build-rules';
+import { evaluateBuildRuleState } from '@/lib/creator/build-rule-runtime';
 import type { AIReasoningEnvelope } from '@/types/ai-reasoning';
 import type { CharacterCardPortraitAsset } from '@/types/visual-asset';
 
@@ -290,11 +295,35 @@ const DetailsPage: React.FC = () => {
   const [generationMode, setGenerationMode] = useState<GenerationMode>('non-stream');
   const [creatorTemplate, setCreatorTemplate] = useState<CreatorTemplateId>('general');
   const [freeformBrief, setFreeformBrief] = useState('');
+  const [selectedBuildRuleIds, setSelectedBuildRuleIds] = useState<string[]>(['arena-trpg-lite']);
+  const [primaryBuildRuleId, setPrimaryBuildRuleId] = useState<string | null>('arena-trpg-lite');
+  const [buildRuleInputsById, setBuildRuleInputsById] = useState<Record<string, Record<string, unknown>>>(() => ({
+    'arena-trpg-lite': createDefaultBuildRuleInputs('arena-trpg-lite'),
+  }));
   const [streamingMarkdown, setStreamingMarkdown] = useState<string | null>(null);
   const [streamedGeneralCard, setStreamedGeneralCard] = useState<any | null>(null);
   const [streamingReasoning, setStreamingReasoning] = useState<AIReasoningEnvelope | null>(null);
   const [nonStreamReasoning, setNonStreamReasoning] = useState<AIReasoningEnvelope | null>(null);
   const [characterPortraitAsset, setCharacterPortraitAsset] = useState<CharacterCardPortraitAsset | null>(null);
+  const buildRulePresetIndex = useMemo(() => loadBuildRulePresetIndex(), []);
+  const primaryBuildRulePreset = useMemo(
+    () => (primaryBuildRuleId ? tryLoadBuildRulePresetById(primaryBuildRuleId) : null),
+    [primaryBuildRuleId]
+  );
+  const buildRuleRuntimeResults = useMemo(
+    () =>
+      selectedBuildRuleIds.map((ruleId) =>
+        evaluateBuildRuleState({
+          ruleId,
+          inputs: buildRuleInputsById[ruleId] ?? createDefaultBuildRuleInputs(ruleId),
+        })
+      ),
+    [selectedBuildRuleIds, buildRuleInputsById]
+  );
+  const primaryBuildRuleRuntimeResult = useMemo(
+    () => buildRuleRuntimeResults.find((rule) => rule.ruleId === primaryBuildRuleId) ?? null,
+    [buildRuleRuntimeResults, primaryBuildRuleId]
+  );
 
   // 多语言支持
   const [languages, setLanguages] = useState<{ code: string; name: string }[]>([]);
@@ -1669,6 +1698,42 @@ const DetailsPage: React.FC = () => {
     setShowIntroduction(false);
   };
 
+  const handleToggleBuildRule = useCallback((ruleId: string) => {
+    setSelectedBuildRuleIds((current) => {
+      if (current.includes(ruleId)) {
+        const next = current.filter((item) => item !== ruleId);
+        setPrimaryBuildRuleId((previousPrimaryRuleId) => {
+          if (previousPrimaryRuleId !== ruleId) return previousPrimaryRuleId;
+          return next[0] ?? null;
+        });
+        return next;
+      }
+
+      setBuildRuleInputsById((currentInputs) => ({
+        ...currentInputs,
+        [ruleId]: currentInputs[ruleId] ?? createDefaultBuildRuleInputs(ruleId),
+      }));
+      setPrimaryBuildRuleId((previousPrimaryRuleId) => previousPrimaryRuleId ?? ruleId);
+      return [...current, ruleId];
+    });
+  }, []);
+
+  const handleSelectPrimaryBuildRule = useCallback((ruleId: string) => {
+    setPrimaryBuildRuleId(ruleId);
+    setSelectedBuildRuleIds((current) => (current.includes(ruleId) ? current : [...current, ruleId]));
+    setBuildRuleInputsById((currentInputs) => ({
+      ...currentInputs,
+      [ruleId]: currentInputs[ruleId] ?? createDefaultBuildRuleInputs(ruleId),
+    }));
+  }, []);
+
+  const handleBuildRuleInputsChange = useCallback((ruleId: string, nextInputs: Record<string, unknown>) => {
+    setBuildRuleInputsById((currentInputs) => ({
+      ...currentInputs,
+      [ruleId]: nextInputs,
+    }));
+  }, []);
+
 
   if (loading) {
     return (
@@ -1817,6 +1882,23 @@ const DetailsPage: React.FC = () => {
                     value={freeformBrief}
                     onChange={setFreeformBrief}
                   />
+                  <BuildRulePicker
+                    presets={buildRulePresetIndex}
+                    selectedRuleIds={selectedBuildRuleIds}
+                    primaryRuleId={primaryBuildRuleId}
+                    onToggleRule={handleToggleBuildRule}
+                    onSelectPrimaryRule={handleSelectPrimaryBuildRule}
+                  />
+                  {primaryBuildRulePreset ? (
+                    <BuildRulePanel
+                      preset={primaryBuildRulePreset}
+                      inputs={buildRuleInputsById[primaryBuildRulePreset.id] ?? createDefaultBuildRuleInputs(primaryBuildRulePreset.id)}
+                      onChange={(nextInputs) => handleBuildRuleInputsChange(primaryBuildRulePreset.id, nextInputs)}
+                    />
+                  ) : null}
+                  {primaryBuildRuleRuntimeResult ? (
+                    <BuildSummaryPanel runtimeResult={primaryBuildRuleRuntimeResult} />
+                  ) : null}
                 </div>
                 <EncyclopediaLinks
                   items={[

@@ -26,3 +26,37 @@ export function loadBuildRulePresetById(id: string): BuildRulePreset {
   }
   return preset;
 }
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+export function createDefaultBuildRuleInputs(ruleId: string): Record<string, unknown> {
+  const preset = loadBuildRulePresetById(ruleId) as unknown as Record<string, unknown>;
+  const budgets = isRecord(preset.budgets) ? preset.budgets : null;
+  const attributePointsByLevel = budgets && isRecord(budgets.attributePointsByLevel)
+    ? (budgets.attributePointsByLevel as Record<string, unknown>)
+    : null;
+  const seedBudgetRaw = attributePointsByLevel?.seed;
+  const seedBudget = typeof seedBudgetRaw === 'number' && Number.isFinite(seedBudgetRaw) ? Math.trunc(seedBudgetRaw) : 280;
+
+  const blocks = Array.isArray(preset.blocks) ? preset.blocks : [];
+  const coreAttributesBlock = blocks.find((item) => isRecord(item) && item.id === 'coreAttributes');
+  const fields =
+    coreAttributesBlock && isRecord(coreAttributesBlock) && Array.isArray(coreAttributesBlock.fields)
+      ? coreAttributesBlock.fields.filter(isRecord)
+      : [];
+  const attributeFieldIds = fields
+    .map((field) => (typeof field.id === 'string' ? field.id.trim() : ''))
+    .filter(Boolean);
+
+  const defaultAttributeValue = attributeFieldIds.length > 0 ? Math.floor(seedBudget / attributeFieldIds.length) : 40;
+  const coreAttributes = Object.fromEntries(
+    attributeFieldIds.map((fieldId) => [fieldId, defaultAttributeValue])
+  );
+
+  return {
+    powerLevel: 'seed',
+    coreAttributes,
+    specialties: [],
+  };
+}
