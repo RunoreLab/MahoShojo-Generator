@@ -60,6 +60,7 @@ import { BuildRulePicker } from '@/components/creator/BuildRulePicker';
 import { BuildRulePanel } from '@/components/creator/BuildRulePanel';
 import { BuildSummaryPanel } from '@/components/creator/BuildSummaryPanel';
 import { CreatorQuestionnaireSidebarPanel } from '@/components/creator/CreatorQuestionnaireSidebarPanel';
+import { CreatorResultStageContent } from '@/components/creator/CreatorResultStageContent';
 import { CreatorWorkbenchPage } from '@/components/creator/CreatorWorkbenchPage';
 import { MarkdownBlock } from '@/components/MarkdownBlock';
 import { CREATOR_PAGE_COPY } from '@/lib/creator/page-copy';
@@ -74,6 +75,11 @@ import {
 import { createDefaultBuildRuleInputs, loadBuildRulePresetIndex, tryLoadBuildRulePresetById } from '@/lib/creator/build-rules';
 import { reconcileCreatorBuildRuleSelection } from '@/lib/creator/build-rule-selection';
 import { evaluateBuildRuleState } from '@/lib/creator/build-rule-runtime';
+import {
+  hasCreatorWorkbenchResult,
+  normalizeCreatorStreamingMarkdown,
+  subscribeToMediaQueryChange,
+} from '@/lib/creator/workbench';
 import { GENERAL_SCENARIO_TEMPLATE_ID } from '@/lib/schemas/general-scenario';
 import { buildCreatorStreamCardFromMarkdown, finalizeCreatorStreamCard } from '@/lib/creator/stream-result';
 import type { AIReasoningEnvelope } from '@/types/ai-reasoning';
@@ -567,9 +573,14 @@ const DetailsPage: React.FC = () => {
     return answerItems[0]?.answer || trimmedBrief;
   }, [creatorTemplate, freeformBrief, answerItems]);
 
+  const normalizedStreamingMarkdown = useMemo(
+    () => normalizeCreatorStreamingMarkdown(streamingMarkdown),
+    [streamingMarkdown]
+  );
+
   const streamedGeneralCardForDisplay = useMemo(() => {
     if (generationMode !== 'stream') return null;
-    const markdown = streamingMarkdown ?? streamedGeneralCard?.content ?? null;
+    const markdown = normalizedStreamingMarkdown ?? streamedGeneralCard?.content ?? null;
     if (markdown === null) return null;
 
     return buildCreatorStreamCardFromMarkdown({
@@ -577,7 +588,7 @@ const DetailsPage: React.FC = () => {
       markdown,
       fallbackLabel: streamFallbackLabel,
     });
-  }, [generationMode, creatorTemplate, streamingMarkdown, streamedGeneralCard, streamFallbackLabel]);
+  }, [generationMode, creatorTemplate, normalizedStreamingMarkdown, streamedGeneralCard, streamFallbackLabel]);
 
   const streamPortraitPrompt = useMemo(() => {
     if (generationMode !== 'stream') return '';
@@ -586,11 +597,11 @@ const DetailsPage: React.FC = () => {
       && typeof streamedGeneralCardForDisplay.name === 'string'
       ? streamedGeneralCardForDisplay.name.trim()
       : '';
-    const contentRaw = (streamingMarkdown ?? streamedGeneralCard?.content ?? '').trim();
+    const contentRaw = (normalizedStreamingMarkdown ?? streamedGeneralCard?.content ?? '').trim();
     const contentHead = contentRaw.length > 800 ? contentRaw.slice(0, 800) : contentRaw;
     const prefix = [name, contentHead].filter(Boolean).join(', ');
     return `${prefix ? `${prefix}, ` : ''}Xiabanmo, 二次元, 角色立绘`;
-  }, [generationMode, streamedGeneralCardForDisplay, streamingMarkdown, streamedGeneralCard]);
+  }, [generationMode, streamedGeneralCardForDisplay, normalizedStreamingMarkdown, streamedGeneralCard]);
 
   const isScenarioStreamResult = useMemo(() => {
     return creatorTemplate === 'general-scenario'
@@ -611,11 +622,14 @@ const DetailsPage: React.FC = () => {
     }
     return null;
   }, [streamedGeneralCardForDisplay]);
+
   const hasCreatorResult = useMemo(() => {
-    if (generationMode === 'stream') {
-      return streamingMarkdown !== null || streamedGeneralCard !== null;
-    }
-    return magicalGirlDetails !== null;
+    return hasCreatorWorkbenchResult({
+      generationMode,
+      magicalGirlDetails,
+      streamingMarkdown,
+      streamedGeneralCard,
+    });
   }, [generationMode, magicalGirlDetails, streamedGeneralCard, streamingMarkdown]);
 
   useEffect(() => {
@@ -630,8 +644,7 @@ const DetailsPage: React.FC = () => {
     const mediaQuery = window.matchMedia('(max-width: 1023px)');
     const syncLayoutMode = () => setLayoutMode(mediaQuery.matches ? 'mobile' : 'desktop');
     syncLayoutMode();
-    mediaQuery.addEventListener('change', syncLayoutMode);
-    return () => mediaQuery.removeEventListener('change', syncLayoutMode);
+    return subscribeToMediaQueryChange(mediaQuery, syncLayoutMode);
   }, []);
 
   useEffect(() => {
@@ -2561,81 +2574,83 @@ const DetailsPage: React.FC = () => {
     </div>
   );
 
+  const questionnaireEditorMainContent = (
+    <>
+      <QuestionnaireQuestionPanel
+        theme={DETAILS_QUESTIONNAIRE_THEME}
+        progressLabel={`问题 ${currentQuestionIndex + 1} / ${mergedQuestions.length}`}
+        progressPercent={progressPercent}
+        progressExtra={autoSaveTimestamp ? (
+          <span className="text-xs text-gray-400">已自动保存于 {new Date(autoSaveTimestamp!).toLocaleTimeString()}</span>
+        ) : null}
+        questionText={currentQuestion?.question || '未加载题目'}
+        questionnaireTitle={currentQuestionnaireTitle}
+        noticeText="请基于您构想的虚拟角色身份回答，并确保内容符合公序良俗，请勿使用任何真实信息。"
+        helperText={currentQuestion?.helperText}
+        isRequired={isCurrentRequired}
+        skipText="本题可跳过，不作答将不会记录"
+        quickOptions={fallbackQuickOptions}
+        quickOptionDisabled={submitting || isTransitioning || isCooldown}
+        onQuickOption={handleQuickOption}
+        options={currentQuestion?.options}
+        optionsHintText={optionsHintText}
+        onOptionSelect={handleQuickOption}
+        suggestions={suggestionPool}
+        onSuggestionSelect={handleSuggestionFill}
+        showTextInput={showTextInput}
+        answer={currentAnswer}
+        onAnswerChange={handleCurrentAnswerChange}
+        placeholder={currentQuestion?.placeholder ?? '请输入您的答案（建议控制在适中长度）'}
+        answerLength={currentAnswerLength}
+        maxLength={currentMaxLength}
+        limitLabel={currentLimitLabel}
+        showLimitLabel={currentLimitInfo.source !== 'none' && Boolean(currentMaxLength)}
+        isOverLimit={isCurrentOverLimit}
+        overLimitText={overLimitText}
+        isTransitioning={isTransitioning}
+        transitionClassName="transition-all duration-300 ease-out"
+        transitionStyle={{
+          opacity: isTransitioning ? 0 : 1,
+          transform: isTransitioning ? 'translateX(-16px)' : 'translateX(0)',
+        }}
+        prevLabel="返回上题"
+        nextButtonContent={nextButtonContent}
+        onPrev={handlePreviousQuestion}
+        onNext={handleNext}
+        disablePrev={currentQuestionIndex === 0 || submitting || isTransitioning || isCooldown}
+        disableNext={submitting || isTransitioning || isCooldown || (isCurrentRequired && currentAnswer.trim().length === 0)}
+        prevButtonClass="generate-button w-1/4"
+        nextButtonClass="generate-button"
+      />
+
+      {error && (
+        <div className="mt-4">
+          <ErrorMessage message={error!} />
+        </div>
+      )}
+      {isQuestionnaireNativeAllowed && hasOverLimitAnswer && (
+        <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-700">
+          ⚠️ 已有 {overLimitItems.length} 条答案超过字数上限，继续提交将导致生成内容丧失原生性。
+        </div>
+      )}
+
+      <div className="text-center" style={{ marginTop: '1rem' }}>
+        <button
+          onClick={() => router.push('/')}
+          className="footer-link"
+        >
+          返回首页
+        </button>
+      </div>
+    </>
+  );
+
   if (!hasCreatorResult) {
     return renderWorkbenchPage({
       sidebarStage: 'questionnaire',
       mainStage: 'questionnaire',
       mainTitle: currentQuestionnaireTitle || `问题 ${currentQuestionIndex + 1} / ${mergedQuestions.length}`,
-      mainContent: (
-        <>
-          <QuestionnaireQuestionPanel
-            theme={DETAILS_QUESTIONNAIRE_THEME}
-            progressLabel={`问题 ${currentQuestionIndex + 1} / ${mergedQuestions.length}`}
-            progressPercent={progressPercent}
-            progressExtra={autoSaveTimestamp ? (
-              <span className="text-xs text-gray-400">已自动保存于 {new Date(autoSaveTimestamp!).toLocaleTimeString()}</span>
-            ) : null}
-            questionText={currentQuestion?.question || '未加载题目'}
-            questionnaireTitle={currentQuestionnaireTitle}
-            noticeText="请基于您构想的虚拟角色身份回答，并确保内容符合公序良俗，请勿使用任何真实信息。"
-            helperText={currentQuestion?.helperText}
-            isRequired={isCurrentRequired}
-            skipText="本题可跳过，不作答将不会记录"
-            quickOptions={fallbackQuickOptions}
-            quickOptionDisabled={submitting || isTransitioning || isCooldown}
-            onQuickOption={handleQuickOption}
-            options={currentQuestion?.options}
-            optionsHintText={optionsHintText}
-            onOptionSelect={handleQuickOption}
-            suggestions={suggestionPool}
-            onSuggestionSelect={handleSuggestionFill}
-            showTextInput={showTextInput}
-            answer={currentAnswer}
-            onAnswerChange={handleCurrentAnswerChange}
-            placeholder={currentQuestion?.placeholder ?? '请输入您的答案（建议控制在适中长度）'}
-            answerLength={currentAnswerLength}
-            maxLength={currentMaxLength}
-            limitLabel={currentLimitLabel}
-            showLimitLabel={currentLimitInfo.source !== 'none' && Boolean(currentMaxLength)}
-            isOverLimit={isCurrentOverLimit}
-            overLimitText={overLimitText}
-            isTransitioning={isTransitioning}
-            transitionClassName="transition-all duration-300 ease-out"
-            transitionStyle={{
-              opacity: isTransitioning ? 0 : 1,
-              transform: isTransitioning ? 'translateX(-16px)' : 'translateX(0)',
-            }}
-            prevLabel="返回上题"
-            nextButtonContent={nextButtonContent}
-            onPrev={handlePreviousQuestion}
-            onNext={handleNext}
-            disablePrev={currentQuestionIndex === 0 || submitting || isTransitioning || isCooldown}
-            disableNext={submitting || isTransitioning || isCooldown || (isCurrentRequired && currentAnswer.trim().length === 0)}
-            prevButtonClass="generate-button w-1/4"
-            nextButtonClass="generate-button"
-          />
-
-          {error && (
-            <div className="mt-4">
-              <ErrorMessage message={error!} />
-            </div>
-          )}
-          {isQuestionnaireNativeAllowed && hasOverLimitAnswer && (
-            <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-700">
-              ⚠️ 已有 {overLimitItems.length} 条答案超过字数上限，继续提交将导致生成内容丧失原生性。
-            </div>
-          )}
-
-          <div className="text-center" style={{ marginTop: '1rem' }}>
-            <button
-              onClick={() => router.push('/')}
-              className="footer-link"
-            >
-              返回首页
-            </button>
-          </div>
-        </>
-      ),
+      mainContent: questionnaireEditorMainContent,
       overviewStageLabel: '答题中',
       progressLabel: `问题 ${currentQuestionIndex + 1} / ${mergedQuestions.length}`,
       nativeHint: !isQuestionnaireNativeAllowed
@@ -2649,7 +2664,7 @@ const DetailsPage: React.FC = () => {
     });
   }
 
-  const creatorResultMainContent = (
+  const creatorResultPanels = (
     <>
       {/* TODO(creator-workbench): 删除迁移期保留的旧窄版 JSX；当前不参与渲染。 */}
       {false && (
@@ -3445,6 +3460,13 @@ const DetailsPage: React.FC = () => {
           )}
 
     </>
+  );
+
+  const creatorResultMainContent = (
+    <CreatorResultStageContent
+      questionnaireEditor={mergedQuestions.length > 0 ? questionnaireEditorMainContent : undefined}
+      resultContent={creatorResultPanels}
+    />
   );
 
   return renderWorkbenchPage({
