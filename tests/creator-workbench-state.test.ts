@@ -1,6 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 
-import { hasCreatorWorkbenchResult, subscribeToMediaQueryChange } from '@/lib/creator/workbench';
+import * as creatorWorkbench from '@/lib/creator/workbench';
+
+const {
+  hasCreatorWorkbenchResult,
+  subscribeToMediaQueryChange,
+} = creatorWorkbench;
 
 describe('creator workbench state', () => {
   test('流式空缓冲区不应被视为已生成结果', () => {
@@ -34,6 +39,87 @@ describe('creator workbench state', () => {
         streamedGeneralCard: { templateId: '通用角色' },
       })
     ).toBe(true);
+  });
+
+  test('流式结果阶段未完成时不应显示创作完成文案', () => {
+    const result = (creatorWorkbench as any).buildCreatorResultOverview?.({
+      isSubmitting: true,
+      snapshot: {
+        generationMode: 'stream',
+        template: 'general',
+        templateLabel: '通用角色卡（Markdown）',
+        primaryRuleLabel: '魔法少女竞技场 TRPG 简化角色卡',
+        questionCount: 12,
+        nativeAllowed: true,
+        overLimitCount: 0,
+        streamFallbackLabel: '测试角色',
+      },
+      result: null,
+    });
+
+    expect(result).toEqual({
+      stageLabel: '创作进行中',
+      progressLabel: '共 12 题，结果仍在生成中',
+      nativeHint: '当前提交满足原生条件，完成签名后将具备原生性',
+    });
+  });
+
+  test('签名失败后的结果阶段提示应明确降级为非原生', () => {
+    const result = (creatorWorkbench as any).buildCreatorResultOverview?.({
+      isSubmitting: false,
+      snapshot: {
+        generationMode: 'stream',
+        template: 'general',
+        templateLabel: '通用角色卡（Markdown）',
+        primaryRuleLabel: '魔法少女竞技场 TRPG 简化角色卡',
+        questionCount: 12,
+        nativeAllowed: true,
+        overLimitCount: 0,
+        streamFallbackLabel: '测试角色',
+      },
+      result: {
+        templateId: '通用角色',
+        content: '# 测试角色',
+      },
+    });
+
+    expect(result).toEqual({
+      stageLabel: '创作完成',
+      progressLabel: '共 12 题，已进入结果阶段',
+      nativeHint: '原生性签名失败，当前展示结果已降级为非原生',
+    });
+  });
+
+  test('已有结果时应继续使用提交时的模板与规则快照', () => {
+    const result = (creatorWorkbench as any).resolveCreatorWorkbenchDisplayState?.({
+      currentGenerationMode: 'stream',
+      currentTemplate: 'general-scenario',
+      currentTemplateLabel: '通用情景卡（Markdown）',
+      currentPrimaryRuleLabel: '另一条规则',
+      currentQuestionCount: 18,
+      currentStreamFallbackLabel: '新的标题提示',
+      snapshot: {
+        generationMode: 'stream',
+        template: 'general',
+        templateLabel: '通用角色卡（Markdown）',
+        primaryRuleLabel: '魔法少女竞技场 TRPG 简化角色卡',
+        questionCount: 12,
+        nativeAllowed: true,
+        overLimitCount: 0,
+        streamFallbackLabel: '初始角色名',
+      },
+    });
+
+    expect(result).toEqual({
+      generationMode: 'stream',
+      template: 'general',
+      templateLabel: '通用角色卡（Markdown）',
+      primaryRuleLabel: '魔法少女竞技场 TRPG 简化角色卡',
+      questionCount: 12,
+      nativeAllowed: true,
+      overLimitCount: 0,
+      streamFallbackLabel: '初始角色名',
+    });
   });
 
   test('matchMedia 优先使用 addEventListener/removeEventListener', () => {
