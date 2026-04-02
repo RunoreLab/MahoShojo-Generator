@@ -14,6 +14,7 @@ export interface CreatorDraftPayload {
   selectedRuleIds: string[];
   primaryRuleId: string | null;
   ruleInputs: Record<string, Record<string, unknown>>;
+  questionnaireSelections?: Array<Record<string, unknown>>;
   questionnairePresetIds?: string[];
   questionnaireAnswersByKey?: Record<string, string>;
   currentQuestionIndex?: number;
@@ -28,6 +29,7 @@ interface CreatorDraftPayloadInput {
   selectedRuleIds: unknown;
   primaryRuleId: unknown;
   ruleInputs: unknown;
+  questionnaireSelections?: unknown;
   questionnairePresetIds?: unknown;
   questionnaireAnswersByKey?: unknown;
   currentQuestionIndex?: unknown;
@@ -102,11 +104,29 @@ const normalizeAnswersByKey = (
   }, {});
 };
 
+const normalizeQuestionnaireSelections = (
+  value: unknown
+): Array<Record<string, unknown>> => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .filter(
+      (item): item is Record<string, unknown> =>
+        typeof item === 'object' && item !== null && !Array.isArray(item)
+    )
+    .map((item) => ({ ...item }));
+};
+
 export function buildCreatorDraftPayload(
   input: CreatorDraftPayloadInput
 ): CreatorDraftPayload {
   const selectedRuleIds = normalizeSelectedRuleIds(input.selectedRuleIds);
   const ruleInputs = normalizeRuleInputs(input.ruleInputs);
+  const questionnaireSelections = normalizeQuestionnaireSelections(
+    input.questionnaireSelections
+  );
   const questionnairePresetIds = normalizeSelectedRuleIds(
     input.questionnairePresetIds
   );
@@ -136,6 +156,9 @@ export function buildCreatorDraftPayload(
     ruleInputs,
   };
 
+  if (questionnaireSelections.length > 0) {
+    payload.questionnaireSelections = questionnaireSelections;
+  }
   if (questionnairePresetIds.length > 0) {
     payload.questionnairePresetIds = questionnairePresetIds;
   }
@@ -167,6 +190,7 @@ export function parseCreatorDraftPayload(
       primaryRuleId:
         typeof record.primaryRuleId === 'string' ? record.primaryRuleId : null,
       ruleInputs: record.ruleInputs,
+      questionnaireSelections: record.questionnaireSelections,
       questionnairePresetIds: record.questionnairePresetIds,
       questionnaireAnswersByKey: record.questionnaireAnswersByKey,
       currentQuestionIndex: record.currentQuestionIndex,

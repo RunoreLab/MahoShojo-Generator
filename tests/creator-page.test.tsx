@@ -28,6 +28,8 @@ describe('pages/creator', () => {
 
     expect(html).toContain('输出模板');
     expect(html).toContain('问卷输入');
+    expect(html).toContain('上传问卷 JSON');
+    expect(html).toContain('粘贴导入 JSON');
     expect(html).toContain('自由文本补充');
     expect(html).toContain('车卡规则');
     expect(html).toContain('Arena TRPG Lite');

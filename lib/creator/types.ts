@@ -34,12 +34,16 @@ export type BuildRulePresetIndex = readonly BuildRulePresetIndexEntry[];
 
 export interface CreatorQuestionnaireRef {
   questionnaireId: string;
+  questionnaireSourceId?: string;
   title?: string;
   [key: string]: unknown;
 }
 
 export interface CreatorQuestionnaireAnswer {
   questionnaireId?: string;
+  questionnaireSourceId?: string;
+  questionnaireTitle?: string;
+  questionId?: string;
   question?: string;
   answer?: string;
   [key: string]: unknown;

@@ -24,7 +24,11 @@ const summarizeQuestionnaireAnswers = (answers: CreatorQuestionnaireAnswer[]): s
 
   return answers
     .map((answer, index) => {
-      const label = answer.questionnaireId ?? `问卷 ${index + 1}`;
+      const label =
+        (typeof answer.questionnaireTitle === 'string' &&
+        answer.questionnaireTitle.trim().length > 0
+          ? answer.questionnaireTitle.trim()
+          : answer.questionnaireId) ?? `问卷 ${index + 1}`;
       const question = typeof answer.question === 'string' ? answer.question.trim() : '';
       const content = typeof answer.answer === 'string' ? answer.answer.trim() : '';
       if (question && content) {

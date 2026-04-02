@@ -41,6 +41,8 @@ import {
   buildCreatorQuestionnaireAnswerItems,
   buildCreatorQuestionnaireItems,
   buildCreatorQuestionnaireRequestData,
+  createCreatorQuestionnaireSelectionFromParsed,
+  removeCreatorQuestionnaireAnswersForSelection,
   type CreatorQuestionnaireSelection,
 } from '@/lib/creator/questionnaires';
 import { isCreatorStreamTemplate, type CreatorTemplateId } from '@/lib/creator/templates';
@@ -51,7 +53,6 @@ import {
 } from '@/lib/stream/markdown-card';
 import {
   buildQuestionnaireFlow,
-  normalizeQuestionnaireDefinition,
   resolveQuestionnaireReferences,
   type QuestionnairePresetEntry,
 } from '@/lib/questionnaires';
@@ -212,6 +213,8 @@ export default function CreatorPage(props: {
   const [questionnairePresetEntries, setQuestionnairePresetEntries] = useState<
     QuestionnairePresetEntry[]
   >([]);
+  const [questionnairePresetIndexReady, setQuestionnairePresetIndexReady] =
+    useState(false);
   const [selectedQuestionnaires, setSelectedQuestionnaires] = useState<
     CreatorQuestionnaireSelection[]
   >([]);
@@ -223,7 +226,14 @@ export default function CreatorPage(props: {
   const [questionnaireLoadError, setQuestionnaireLoadError] = useState<string | null>(
     null
   );
+  const [showPasteQuestionnaireImport, setShowPasteQuestionnaireImport] =
+    useState(false);
+  const [pasteQuestionnaireText, setPasteQuestionnaireText] = useState('');
+  const [pasteQuestionnaireError, setPasteQuestionnaireError] = useState<string | null>(
+    null
+  );
   const [pendingQuestionnaireDraft, setPendingQuestionnaireDraft] = useState<{
+    questionnaireSelections?: Array<Record<string, unknown>>;
     presetIds: string[];
     answersByKey: Record<string, string>;
     currentQuestionIndex: number;
@@ -298,22 +308,60 @@ export default function CreatorPage(props: {
     }
 
     const data = await response.json();
-    const normalized = normalizeQuestionnaireDefinition(data, {
+    return createCreatorQuestionnaireSelectionFromParsed({
+      source: 'preset',
+      parsed: data,
       fallbackId: presetEntry.id,
       fallbackKind: presetEntry.kind,
       fallbackTitle: presetEntry.title,
+      nativeAllowed: true,
+      presetId: presetEntry.id,
     });
-    if (!normalized) {
-      throw new Error('预设问卷解析失败');
+  }, []);
+
+  const createQuestionnaireSelectionSuffix = useCallback(() => {
+    if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+      return crypto.randomUUID();
     }
 
-    return {
-      source: 'preset',
-      presetId: presetEntry.id,
-      selectionId: normalized.id,
-      questionnaire: normalized,
-    };
+    return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
   }, []);
+
+  const appendQuestionnaireSelection = useCallback(
+    (selection: CreatorQuestionnaireSelection) => {
+      setSelectedQuestionnaires((current) => {
+        if (
+          selection.presetId &&
+          current.some((item) => item.presetId === selection.presetId)
+        ) {
+          return current;
+        }
+
+        const usedSelectionIds = new Set<string>();
+        current.forEach((item) => {
+          const existingId = item.selectionId.trim() || item.questionnaire.id;
+          if (existingId) {
+            usedSelectionIds.add(existingId);
+          }
+        });
+
+        const baseId = selection.questionnaire.id || 'creator-questionnaire';
+        let nextSelectionId = selection.selectionId.trim() || baseId;
+        if (usedSelectionIds.has(nextSelectionId)) {
+          nextSelectionId = `${baseId}::${createQuestionnaireSelectionSuffix()}`;
+        }
+
+        return [...current, { ...selection, selectionId: nextSelectionId }];
+      });
+
+      setQuestionnaireLoadError(null);
+      setPasteQuestionnaireError(null);
+      setPasteQuestionnaireText('');
+      setShowPasteQuestionnaireImport(false);
+      setError(null);
+    },
+    [createQuestionnaireSelectionSuffix]
+  );
 
   useEffect(() => {
     if (!isCreatorStreamTemplate(template) && generationMode === 'stream') {
@@ -334,11 +382,12 @@ export default function CreatorPage(props: {
           ? (data.presets as QuestionnairePresetEntry[])
           : [];
         setQuestionnairePresetEntries(list);
+        setQuestionnairePresetIndexReady(true);
       })
       .catch(() => {
         if (cancelled) return;
         setQuestionnaireLoadError('加载问卷预设列表失败');
-        setDraftRestoreReady(true);
+        setQuestionnairePresetIndexReady(true);
       });
 
     return () => {
@@ -378,8 +427,10 @@ export default function CreatorPage(props: {
       setPrimaryRuleId(nextPrimaryRuleId);
       setRuleInputs(parsedDraft.ruleInputs);
       const nextPendingQuestionnaireDraft =
+        (parsedDraft.questionnaireSelections?.length ?? 0) > 0 ||
         (parsedDraft.questionnairePresetIds?.length ?? 0) > 0
           ? {
+          questionnaireSelections: parsedDraft.questionnaireSelections ?? [],
           presetIds: parsedDraft.questionnairePresetIds ?? [],
           answersByKey: parsedDraft.questionnaireAnswersByKey ?? {},
           currentQuestionIndex: parsedDraft.currentQuestionIndex ?? 0,
@@ -397,7 +448,7 @@ export default function CreatorPage(props: {
   }, [presetLookup]);
 
   useEffect(() => {
-    if (!pendingQuestionnaireDraft || questionnairePresetEntries.length === 0) {
+    if (!pendingQuestionnaireDraft || !questionnairePresetIndexReady) {
       return;
     }
 
@@ -406,7 +457,46 @@ export default function CreatorPage(props: {
     void (async () => {
       try {
         const nextSelections: CreatorQuestionnaireSelection[] = [];
+        for (const rawSelection of pendingQuestionnaireDraft.questionnaireSelections ?? []) {
+          const source =
+            rawSelection.source === 'upload' || rawSelection.source === 'preset'
+              ? rawSelection.source
+              : 'preset';
+          const rawQuestionnaire = readRecord(rawSelection.questionnaire);
+          nextSelections.push(
+            createCreatorQuestionnaireSelectionFromParsed({
+              source,
+              parsed: rawSelection.questionnaire,
+              fallbackKind: 'magical-girl',
+              fallbackId:
+                typeof rawQuestionnaire.id === 'string'
+                  ? rawQuestionnaire.id
+                  : 'creator-questionnaire',
+              fallbackTitle:
+                typeof rawQuestionnaire.title === 'string'
+                  ? rawQuestionnaire.title
+                  : '未命名问卷',
+              nativeAllowed:
+                source === 'preset'
+                  ? typeof rawQuestionnaire.nativeAllowed === 'boolean'
+                    ? Boolean(rawQuestionnaire.nativeAllowed)
+                    : true
+                  : false,
+              presetId:
+                typeof rawSelection.presetId === 'string'
+                  ? rawSelection.presetId
+                  : null,
+              selectionId:
+                typeof rawSelection.selectionId === 'string'
+                  ? rawSelection.selectionId
+                  : null,
+            })
+          );
+        }
         for (const presetId of pendingQuestionnaireDraft.presetIds) {
+          if (nextSelections.some((selection) => selection.presetId === presetId)) {
+            continue;
+          }
           const presetEntry = questionnairePresetEntries.find(
             (entry) => entry.id === presetId
           );
@@ -435,7 +525,12 @@ export default function CreatorPage(props: {
     return () => {
       cancelled = true;
     };
-  }, [loadQuestionnaireSelectionFromPreset, pendingQuestionnaireDraft, questionnairePresetEntries]);
+  }, [
+    loadQuestionnaireSelectionFromPreset,
+    pendingQuestionnaireDraft,
+    questionnairePresetEntries,
+    questionnairePresetIndexReady,
+  ]);
 
   useEffect(() => {
     if (!draftRestoreReady || typeof window === 'undefined') {
@@ -450,9 +545,15 @@ export default function CreatorPage(props: {
         selectedRuleIds,
         primaryRuleId,
         ruleInputs,
+        questionnaireSelections: selectedQuestionnaires.map((selection) => ({
+          source: selection.source,
+          presetId: selection.presetId,
+          selectionId: selection.selectionId,
+          questionnaire: selection.questionnaire,
+        })),
         questionnairePresetIds: selectedQuestionnaires.map(
           (selection) => selection.presetId
-        ),
+        ).filter((presetId): presetId is string => typeof presetId === 'string'),
         questionnaireAnswersByKey,
         currentQuestionIndex,
       });
@@ -517,7 +618,7 @@ export default function CreatorPage(props: {
     try {
       setQuestionnaireLoadError(null);
       const selection = await loadQuestionnaireSelectionFromPreset(presetEntry);
-      setSelectedQuestionnaires((current) => [...current, selection]);
+      appendQuestionnaireSelection(selection);
     } catch (caughtError) {
       setQuestionnaireLoadError(
         caughtError instanceof Error ? caughtError.message : '加载预设问卷失败'
@@ -525,18 +626,77 @@ export default function CreatorPage(props: {
     }
   };
 
+  const handleUploadQuestionnaire = async (file: File | null) => {
+    if (!file) {
+      return;
+    }
+
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text);
+      const selection = createCreatorQuestionnaireSelectionFromParsed({
+        source: 'upload',
+        parsed,
+        fallbackKind: 'magical-girl',
+        fallbackId:
+          typeof parsed?.id === 'string'
+            ? parsed.id
+            : 'creator-questionnaire-upload',
+        fallbackTitle:
+          typeof parsed?.title === 'string'
+            ? parsed.title
+            : file.name.replace(/\.[^.]+$/, ''),
+        nativeAllowed: false,
+      });
+      appendQuestionnaireSelection(selection);
+    } catch (caughtError) {
+      setQuestionnaireLoadError(
+        caughtError instanceof Error ? caughtError.message : '问卷文件解析失败'
+      );
+    }
+  };
+
+  const handlePasteQuestionnaireImport = () => {
+    if (!pasteQuestionnaireText.trim()) {
+      setPasteQuestionnaireError('请先粘贴问卷 JSON');
+      return;
+    }
+
+    try {
+      const parsed = JSON.parse(pasteQuestionnaireText);
+      const selection = createCreatorQuestionnaireSelectionFromParsed({
+        source: 'upload',
+        parsed,
+        fallbackKind: 'magical-girl',
+        fallbackId:
+          typeof parsed?.id === 'string'
+            ? parsed.id
+            : 'creator-questionnaire-paste',
+        fallbackTitle:
+          typeof parsed?.title === 'string' ? parsed.title : '未命名问卷',
+        nativeAllowed: false,
+      });
+      appendQuestionnaireSelection(selection);
+    } catch (caughtError) {
+      setPasteQuestionnaireError(
+        caughtError instanceof Error ? caughtError.message : '问卷 JSON 解析失败'
+      );
+    }
+  };
+
   const handleRemoveQuestionnaire = (selectionId: string) => {
+    const selection = selectedQuestionnaires.find(
+      (item) => item.selectionId === selectionId
+    );
+
     setSelectedQuestionnaires((current) =>
       current.filter((selection) => selection.selectionId !== selectionId)
     );
-    setQuestionnaireAnswersByKey((current) =>
-      Object.fromEntries(
-        Object.entries(current).filter(
-          ([key]) =>
-            !key.startsWith(`${selectionId}::`) && key !== selectionId
-        )
-      )
-    );
+    if (selection) {
+      setQuestionnaireAnswersByKey((current) =>
+        removeCreatorQuestionnaireAnswersForSelection(current, selection)
+      );
+    }
     setError(null);
   };
 
@@ -1012,8 +1172,8 @@ export default function CreatorPage(props: {
                 <div className="mt-6 rounded-3xl border border-gray-200 bg-white p-5">
                   <label className="input-label">问卷输入</label>
                   <p className="text-sm leading-7 text-gray-600">
-                    这里复用 `/details` 的问卷定义、跳题与题目渲染能力，但先只接预设问卷，
-                    保持 creator 页面最小可用，不把上传、云端库和 Lore 开关一次性塞进来。
+                    这里复用 `/details` 的问卷定义、跳题与题目渲染能力，当前支持预设问卷、
+                    上传问卷 JSON 与粘贴导入 JSON；云端问卷库与 Lore 开关仍按后续计划推进。
                   </p>
 
                   <div className="mt-4 flex flex-wrap items-center gap-3">
@@ -1037,11 +1197,78 @@ export default function CreatorPage(props: {
                         </option>
                       ))}
                     </select>
+                    <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-pink-200 bg-pink-50 px-3 py-1 text-xs font-medium text-pink-700 hover:border-pink-300 hover:bg-pink-100">
+                      上传问卷 JSON
+                      <input
+                        type="file"
+                        accept="application/json"
+                        onChange={(event) => {
+                          void handleUploadQuestionnaire(
+                            event.target.files?.[0] ?? null
+                          );
+                          event.currentTarget.value = '';
+                        }}
+                        className="hidden"
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPasteQuestionnaireError(null);
+                        setShowPasteQuestionnaireImport((current) => !current);
+                      }}
+                      className="rounded-lg border border-pink-200 bg-pink-50 px-3 py-1 text-xs text-pink-700 hover:border-pink-300 hover:bg-pink-100"
+                    >
+                      {showPasteQuestionnaireImport
+                        ? '收起粘贴导入'
+                        : '粘贴导入 JSON'}
+                    </button>
                     <span className="text-xs text-gray-500">
                       已选 {selectedQuestionnaires.length} 份问卷，已填写{' '}
                       {questionnaireAnswerItems.length} 条答案。
                     </span>
                   </div>
+
+                  {showPasteQuestionnaireImport ? (
+                    <div className="mt-4 rounded-2xl border border-pink-100 bg-pink-50/40 p-4 text-xs text-gray-600">
+                      <label className="text-xs text-gray-500">
+                        粘贴问卷 JSON
+                      </label>
+                      <textarea
+                        value={pasteQuestionnaireText}
+                        onChange={(event) =>
+                          setPasteQuestionnaireText(event.target.value)
+                        }
+                        placeholder="在此粘贴问卷 JSON"
+                        className="input-field mt-2 h-28"
+                        rows={6}
+                      />
+                      <div className="mt-3 flex items-center justify-between gap-3">
+                        <button
+                          type="button"
+                          onClick={handlePasteQuestionnaireImport}
+                          className="rounded-lg border border-pink-200 bg-white px-3 py-1 text-xs text-pink-700 hover:border-pink-300"
+                        >
+                          解析并载入
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setPasteQuestionnaireText('');
+                            setPasteQuestionnaireError(null);
+                          }}
+                          className="text-xs text-gray-500 hover:text-gray-700"
+                        >
+                          清空
+                        </button>
+                      </div>
+                      {pasteQuestionnaireError ? (
+                        <p className="mt-2 text-rose-500">
+                          {pasteQuestionnaireError}
+                        </p>
+                      ) : null}
+                    </div>
+                  ) : null}
 
                   {questionnaireLoadError ? (
                     <div className="mt-4">
@@ -1057,8 +1284,11 @@ export default function CreatorPage(props: {
                           className="flex items-center justify-between rounded-2xl border border-pink-100 bg-pink-50/60 px-4 py-3"
                         >
                           <div>
-                            <div className="text-sm font-semibold text-pink-700">
-                              {selection.questionnaire.title}
+                            <div className="flex flex-wrap items-center gap-2 text-sm font-semibold text-pink-700">
+                              <span>{selection.questionnaire.title}</span>
+                              <span className="rounded-full bg-white/80 px-2 py-0.5 text-[11px] font-medium text-pink-500">
+                                {selection.source === 'preset' ? '预设' : '导入'}
+                              </span>
                             </div>
                             <div className="text-xs text-gray-500">
                               题目数：{selection.questionnaire.questions.length}
@@ -1078,7 +1308,7 @@ export default function CreatorPage(props: {
 
                   {selectedQuestionnaires.length === 0 ? (
                     <div className="mt-4 rounded-2xl border border-dashed border-gray-200 bg-gray-50/70 p-4 text-sm text-gray-500">
-                      你可以在这里追加一份或多份预设问卷，让创作页同时吸收背景、人格、世界观和事件线索。
+                      你可以在这里追加预设问卷，或直接上传 / 粘贴问卷 JSON，让创作页同时吸收背景、人格、世界观和事件线索。
                     </div>
                   ) : mergedQuestions.length === 0 ? (
                     <div className="mt-4 rounded-2xl border border-dashed border-gray-200 bg-gray-50/70 p-4 text-sm text-gray-500">
