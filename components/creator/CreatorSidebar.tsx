@@ -7,7 +7,7 @@ type CreatorSidebarProps = {
   stage: 'intro' | 'questionnaire' | 'result';
   overview: ReactNode;
   configuration: ReactNode;
-  questionnaire: ReactNode;
+  buildRules?: ReactNode;
   advanced: ReactNode;
 };
 
@@ -15,19 +15,19 @@ const MOBILE_OPEN_BY_STAGE = {
   intro: {
     overview: true,
     configuration: true,
-    questionnaire: false,
-    advanced: false,
+    buildRules: false,
+    advanced: true,
   },
   questionnaire: {
     overview: true,
     configuration: false,
-    questionnaire: true,
+    buildRules: false,
     advanced: false,
   },
   result: {
     overview: true,
     configuration: false,
-    questionnaire: false,
+    buildRules: false,
     advanced: false,
   },
 } as const;
@@ -37,7 +37,7 @@ export function CreatorSidebar({
   stage,
   overview,
   configuration,
-  questionnaire,
+  buildRules,
   advanced,
 }: CreatorSidebarProps) {
   const isMobile = layoutMode === 'mobile';
@@ -55,11 +55,13 @@ export function CreatorSidebar({
           {configuration}
         </CollapsibleSection>
       </div>
-      <div data-group="questionnaire" data-default-open={String(isMobile ? defaults.questionnaire : true)}>
-        <CollapsibleSection title="问卷与作答" defaultOpen={isMobile ? defaults.questionnaire : true} keepMounted>
-          {questionnaire}
-        </CollapsibleSection>
-      </div>
+      {buildRules ? (
+        <div data-group="build-rules" data-default-open={String(isMobile ? defaults.buildRules : true)}>
+          <CollapsibleSection title="车卡规则" defaultOpen={isMobile ? defaults.buildRules : true} keepMounted>
+            {buildRules}
+          </CollapsibleSection>
+        </div>
+      ) : null}
       <div data-group="advanced" data-default-open={String(isMobile ? defaults.advanced : false)}>
         <CollapsibleSection title="高级生成" defaultOpen={isMobile ? defaults.advanced : false} keepMounted>
           {advanced}

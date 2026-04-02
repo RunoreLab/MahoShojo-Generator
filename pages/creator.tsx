@@ -54,6 +54,7 @@ import {
 } from '@/components/questionnaire/QuestionnaireQuestionPanel';
 import { QuestionnaireAnswerExportPanel } from '@/components/questionnaire/QuestionnaireAnswerExportPanel';
 import { CharacterPortraitAssetPanel } from '@/components/shared/CharacterPortraitAssetPanel';
+import { CollapsibleSection } from '@/components/shared/CollapsibleSection';
 import { TemplateSelector } from '@/components/creator/TemplateSelector';
 import { FreeformBriefPanel } from '@/components/creator/FreeformBriefPanel';
 import { BuildRulePicker } from '@/components/creator/BuildRulePicker';
@@ -1954,15 +1955,6 @@ const DetailsPage: React.FC = () => {
     [layoutMode]
   );
 
-  const buildPlaceholderPanel = useCallback(
-    (text: string) => (
-      <div className="rounded-2xl border border-slate-200 bg-white/90 p-4 text-sm leading-6 text-slate-600 shadow-sm">
-        {text}
-      </div>
-    ),
-    []
-  );
-
   const creatorConfigurationPanel = (
     <div className="space-y-4">
       <TemplateSelector
@@ -1973,6 +1965,11 @@ const DetailsPage: React.FC = () => {
         value={freeformBrief}
         onChange={setFreeformBrief}
       />
+    </div>
+  );
+
+  const creatorBuildRulesPanel = (
+    <div className="space-y-4">
       <BuildRulePicker
         presets={buildRulePresetIndex}
         selectedRuleIds={selectedBuildRuleIds}
@@ -1993,278 +1990,10 @@ const DetailsPage: React.FC = () => {
     </div>
   );
 
-  const creatorOverlayContent = (
-    <>
-      <BattleDataModal
-        isOpen={showQuestionnairePicker}
-        onClose={() => {
-          setShowQuestionnairePicker(false);
-          setQuestionnairePickerError(null);
-        }}
-        selectedType="questionnaire"
-        initialTab="public"
-        titleOverride="选择云端问卷"
-        onSelectCard={handleSelectQuestionnaireCard}
-        externalError={questionnairePickerError}
-      />
-
-      {questionnaireDetailsCard && (
-        <DataCardDetailsModal
-          isOpen={showQuestionnaireDetailsModal}
-          onClose={() => {
-            setShowQuestionnaireDetailsModal(false);
-            setQuestionnaireDetailsCard(null);
-          }}
-          card={{
-            id: questionnaireDetailsCard.id,
-            name: questionnaireDetailsCard.name,
-            description: questionnaireDetailsCard.description,
-            type: 'questionnaire',
-            data: questionnaireDetailsCard.data,
-            isPublic: questionnaireDetailsCard.isPublic,
-            author: questionnaireDetailsCard.author,
-          }}
-        />
-      )}
-
-      {showImageModal && savedImageUrl && (
-        <div
-          className="fixed inset-0 flex items-center justify-center bg-black"
-          style={{ backgroundColor: 'rgba(0, 0, 0, 0.7)', paddingLeft: '2rem', paddingRight: '2rem', zIndex: 1000 }}
-        >
-          <div className="relative max-h-[80vh] w-full max-w-lg overflow-auto rounded-lg bg-white">
-            <div className="sticky top-0 z-10 flex justify-end bg-white/95 p-2 backdrop-blur">
-              <button
-                onClick={() => setShowImageModal(false)}
-                aria-label="关闭"
-                className="text-3xl leading-none text-gray-500 hover:text-gray-700"
-              >
-                ×
-              </button>
-            </div>
-            <div className="px-4 pb-4">
-              <p className="mt-2 text-center text-sm text-gray-600">💫 长按图片保存到相册</p>
-              <div className="flex flex-col items-center p-2">
-                <img
-                  src={savedImageUrl}
-                  alt="魔法少女详细档案"
-                  className="mx-auto h-auto w-1/2 rounded-lg"
-                />
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-    </>
-  );
-
-  const renderWorkbenchPage = ({
-    sidebarStage,
-    mainStage,
-    mainTitle,
-    mainContent,
-    overviewStageLabel,
-    progressLabel,
-    nativeHint,
-    configuration = creatorConfigurationPanel,
-    questionnaire = buildPlaceholderPanel('开始答题后，这里会显示题目导航、问卷设置和答案概览。'),
-    advanced = buildPlaceholderPanel('进入答题阶段后，这里会承接生成方式、语言、AI 提供商和备份导出等设置。'),
-    showFooter = false,
-  }: {
-    sidebarStage: 'intro' | 'questionnaire' | 'result';
-    mainStage: 'status' | 'intro' | 'questionnaire' | 'result';
-    mainTitle?: string;
-    mainContent: React.ReactNode;
-    overviewStageLabel: string;
-    progressLabel: string;
-    nativeHint: string;
-    configuration?: React.ReactNode;
-    questionnaire?: React.ReactNode;
-    advanced?: React.ReactNode;
-    showFooter?: boolean;
-  }) => (
-    <>
-      <Head>
-        <title>{CREATOR_PAGE_COPY.headTitle}</title>
-        <meta name="description" content={CREATOR_PAGE_COPY.metaDescription} />
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <link rel="icon" href="/favicon.ico" />
-      </Head>
-      <CreatorWorkbenchPage
-        layoutMode={layoutMode}
-        sidebarResetKey={sidebarResetKey(sidebarStage)}
-        sidebarStage={sidebarStage}
-        mainStage={mainStage}
-        overviewStageLabel={overviewStageLabel}
-        progressLabel={progressLabel}
-        templateLabel={creatorDisplayState.templateLabel}
-        primaryRuleLabel={creatorDisplayState.primaryRuleLabel}
-        nativeHint={nativeHint}
-        configuration={configuration}
-        questionnaire={questionnaire}
-        advanced={advanced}
-        mainTitle={mainTitle}
-        mainContent={mainContent}
-        showFooter={showFooter}
-        overlayContent={creatorOverlayContent}
-      />
-    </>
-  );
-
-
-  if (loading) {
-    return renderWorkbenchPage({
-      sidebarStage: 'intro',
-      mainStage: 'status',
-      mainContent: <div className="text-center text-lg">加载中...</div>,
-      overviewStageLabel: '初始化中',
-      progressLabel: '正在加载创作工房',
-      nativeHint: '加载完成后显示原生性提示',
-    });
-  }
-
-  if (resolvedQuestionItems.length === 0) {
-    const hasLore = selectedQuestionnaires.some((selection) => Boolean(selection.questionnaire.loreMarkdown?.trim()));
-    return renderWorkbenchPage({
-      sidebarStage: 'questionnaire',
-      mainStage: 'status',
-      mainContent: (
-        <div className="space-y-4 text-center">
-          <div className="error-message">
-            {hasLore
-              ? '当前所选问卷仅包含设定（无题目），请在“问卷设置”中再添加一份有题目的问卷。'
-              : '加载问卷失败'}
-          </div>
-          <div className="text-xs text-gray-500">
-            关闭“允许同时回答多份问卷”时，也可以叠加纯设定卡；但你仍需要至少一份有题目的问卷用于作答。
-          </div>
-          {hasLore && (
-            <div className="flex flex-col items-center justify-center gap-2">
-              <button
-                type="button"
-                className="generate-button"
-                onClick={() => {
-                  setSelectedQuestionnaires([]);
-                  setSelectionReady(false);
-                  setLoading(true);
-                }}
-              >
-                恢复默认问卷
-              </button>
-              <Link href="/questionnaire-editor" className="text-xs text-indigo-600 hover:underline">
-                打开问卷编辑器
-              </Link>
-            </div>
-          )}
-        </div>
-      ),
-      overviewStageLabel: '问卷不可用',
-      progressLabel: '暂无可作答题目',
-      nativeHint: hasLore ? '请补充至少一份有题目的问卷' : '请检查问卷加载与选择结果',
-    });
-  }
-  if (mergedQuestions.length === 0) {
-    return renderWorkbenchPage({
-      sidebarStage: 'questionnaire',
-      mainStage: 'status',
-      mainContent: <div className="error-message">当前没有可作答的题目，请检查问卷条件设置</div>,
-      overviewStageLabel: '题目不可用',
-      progressLabel: '当前题目流为空',
-      nativeHint: '请检查问卷条件与跳题设置',
-    });
-  }
-
-  const isLastQuestion = currentQuestionIndex === mergedQuestions.length - 1;
-  const currentQuestionItem = mergedQuestions[currentQuestionIndex];
-  const currentQuestion = currentQuestionItem?.question;
-  const currentQuestionnaireTitle = currentQuestionItem?.questionnaireTitle ?? '';
-  const currentLimitInfo = getAnswerLimitInfo(currentQuestion?.maxLength ?? null);
-  const currentMaxLength = currentLimitInfo.limit;
-  const currentAnswerLength = currentAnswer.trim().length;
-  const isCurrentOverLimit = Boolean(currentMaxLength && currentAnswerLength > currentMaxLength);
-  const currentLimitLabel = currentLimitInfo.source === 'question'
-    ? `题目上限 ${currentMaxLength} 字`
-    : currentLimitInfo.source === 'global'
-      ? `原生统一上限 ${currentMaxLength} 字`
-      : '不限';
-  const quickSuggestions = currentQuestion?.suggestions ?? [];
-  const hasOptions = (currentQuestion?.options?.length ?? 0) > 0;
-  const allowCustomInput = currentQuestion?.allowCustom !== false;
-  const isCurrentRequired = currentQuestion?.required === true;
-  const showTextInput = allowCustomInput || !hasOptions;
   const navigatorItems = mergedQuestions.map((item) => ({
     id: item.key,
-    label: item.questionnaireTitle ? `${item.question.question} · ${item.questionnaireTitle}` : item.question.question
+    label: item.questionnaireTitle ? `${item.question.question} · ${item.questionnaireTitle}` : item.question.question,
   }));
-  const progressPercent = Math.round(((currentQuestionIndex + 1) / mergedQuestions.length) * 100);
-  const fallbackQuickOptions = allowCustomInput ? ['还没想好', '不想回答'] : [];
-  const suggestionPool = showTextInput ? quickSuggestions.filter(Boolean) : [];
-  const nextButtonLabel = isCooldown
-    ? `请等待 ${remainingTime} 秒`
-    : submitting
-      ? '提交中...'
-      : isLastQuestion
-        ? (isCurrentRequired || currentAnswer.trim() ? '提交' : '跳过并提交')
-        : (!isCurrentRequired && !currentAnswer.trim() ? '跳过并继续' : '下一题');
-  const optionsHintText = allowCustomInput
-    ? '推荐选项（点击后自动跳转下一题，也可继续补充文本）'
-    : '推荐选项（点击后自动跳转下一题，本题仅可从选项中选择）';
-  const overLimitText = `⚠️ 已超过${currentLimitLabel}，继续提交将导致生成内容丧失原生性。`;
-  const nextButtonContent = submitting ? (
-    <span className="flex items-center justify-center">
-      <svg className="animate-spin h-4 w-4 text-white" style={{ marginLeft: '-0.25rem', marginRight: '0.5rem' }} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-      </svg>
-      提交中...
-    </span>
-  ) : nextButtonLabel;
-
-  if (showIntroduction) {
-    return renderWorkbenchPage({
-      sidebarStage: 'intro',
-      mainStage: 'intro',
-      mainTitle: CREATOR_PAGE_COPY.headTitle,
-      mainContent: (
-        <div className="text-center">
-          <div className="mb-6 leading-relaxed text-gray-800" style={{ lineHeight: '1.5', marginTop: '3rem', marginBottom: '4rem' }}>
-            <p className="text-2xl font-semibold text-slate-900">{CREATOR_PAGE_COPY.heroTitle}</p>
-            <p className="mt-4 text-base text-slate-600">{CREATOR_PAGE_COPY.heroBody}</p>
-          </div>
-          <div className="mb-6 rounded-r-lg border-l-4 border-yellow-500 bg-yellow-100 p-3 text-left text-sm text-yellow-800">
-            <p className="font-bold">{CREATOR_PAGE_COPY.noticeTitle}</p>
-            <p className="mt-1">{CREATOR_PAGE_COPY.noticeBody}</p>
-          </div>
-          <EncyclopediaLinks
-            items={[
-              { slug: 'character-generator', text: '百科：角色生成入口说明' },
-              { slug: 'archive', text: '百科：档案馆（角色管理）' },
-            ]}
-          />
-          <div className="mt-6 flex flex-col justify-center gap-4 sm:flex-row">
-            <button
-              onClick={handleStartQuestionnaire}
-              className="generate-button text-lg flex-1"
-            >
-              开始回答问卷
-            </button>
-          </div>
-          <div className="text-center" style={{ marginTop: '2rem' }}>
-            <button
-              onClick={() => router.push('/')}
-              className="footer-link"
-            >
-              返回首页
-            </button>
-          </div>
-        </div>
-      ),
-      overviewStageLabel: '准备中',
-      progressLabel: '尚未开始答题',
-      nativeHint: '开始答题后显示原生性与限制提示',
-      showFooter: true,
-    });
-  }
 
   const questionnaireSettingsPanel = (
     <div className="rounded-xl border border-indigo-100 bg-indigo-50/70 p-4 text-sm">
@@ -2524,7 +2253,7 @@ const DetailsPage: React.FC = () => {
     </div>
   );
 
-  const questionnaireSidebarPanel = (
+  const questionnaireWorkspacePanel = (
     <CreatorQuestionnaireSidebarPanel
       navigator={(
         <QuestionNavigator
@@ -2541,6 +2270,12 @@ const DetailsPage: React.FC = () => {
       settings={questionnaireSettingsPanel}
       answerReview={answerReviewPanel}
     />
+  );
+
+  const creatorQuestionnaireTopPanel = (
+    <CollapsibleSection title="问卷与作答" defaultOpen keepMounted>
+      {questionnaireWorkspacePanel}
+    </CollapsibleSection>
   );
 
   const advancedSidebarPanel = (
@@ -2639,6 +2374,278 @@ const DetailsPage: React.FC = () => {
     </div>
   );
 
+  const creatorOverlayContent = (
+    <>
+      <BattleDataModal
+        isOpen={showQuestionnairePicker}
+        onClose={() => {
+          setShowQuestionnairePicker(false);
+          setQuestionnairePickerError(null);
+        }}
+        selectedType="questionnaire"
+        initialTab="public"
+        titleOverride="选择云端问卷"
+        onSelectCard={handleSelectQuestionnaireCard}
+        externalError={questionnairePickerError}
+      />
+
+      {questionnaireDetailsCard && (
+        <DataCardDetailsModal
+          isOpen={showQuestionnaireDetailsModal}
+          onClose={() => {
+            setShowQuestionnaireDetailsModal(false);
+            setQuestionnaireDetailsCard(null);
+          }}
+          card={{
+            id: questionnaireDetailsCard.id,
+            name: questionnaireDetailsCard.name,
+            description: questionnaireDetailsCard.description,
+            type: 'questionnaire',
+            data: questionnaireDetailsCard.data,
+            isPublic: questionnaireDetailsCard.isPublic,
+            author: questionnaireDetailsCard.author,
+          }}
+        />
+      )}
+
+      {showImageModal && savedImageUrl && (
+        <div
+          className="fixed inset-0 flex items-center justify-center bg-black"
+          style={{ backgroundColor: 'rgba(0, 0, 0, 0.7)', paddingLeft: '2rem', paddingRight: '2rem', zIndex: 1000 }}
+        >
+          <div className="relative max-h-[80vh] w-full max-w-lg overflow-auto rounded-lg bg-white">
+            <div className="sticky top-0 z-10 flex justify-end bg-white/95 p-2 backdrop-blur">
+              <button
+                onClick={() => setShowImageModal(false)}
+                aria-label="关闭"
+                className="text-3xl leading-none text-gray-500 hover:text-gray-700"
+              >
+                ×
+              </button>
+            </div>
+            <div className="px-4 pb-4">
+              <p className="mt-2 text-center text-sm text-gray-600">💫 长按图片保存到相册</p>
+              <div className="flex flex-col items-center p-2">
+                <img
+                  src={savedImageUrl}
+                  alt="魔法少女详细档案"
+                  className="mx-auto h-auto w-1/2 rounded-lg"
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+
+  const renderWorkbenchPage = ({
+    sidebarStage,
+    mainStage,
+    mainTitle,
+    mainContent,
+    overviewStageLabel,
+    progressLabel,
+    nativeHint,
+    configuration = creatorConfigurationPanel,
+    buildRules = creatorBuildRulesPanel,
+    advanced = advancedSidebarPanel,
+    mainTopContent = creatorQuestionnaireTopPanel,
+    showFooter = false,
+  }: {
+    sidebarStage: 'intro' | 'questionnaire' | 'result';
+    mainStage: 'status' | 'intro' | 'questionnaire' | 'result';
+    mainTitle?: string;
+    mainContent: React.ReactNode;
+    overviewStageLabel: string;
+    progressLabel: string;
+    nativeHint: string;
+    configuration?: React.ReactNode;
+    buildRules?: React.ReactNode;
+    advanced?: React.ReactNode;
+    mainTopContent?: React.ReactNode;
+    showFooter?: boolean;
+  }) => (
+    <>
+      <Head>
+        <title>{CREATOR_PAGE_COPY.headTitle}</title>
+        <meta name="description" content={CREATOR_PAGE_COPY.metaDescription} />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <link rel="icon" href="/favicon.ico" />
+      </Head>
+      <CreatorWorkbenchPage
+        layoutMode={layoutMode}
+        sidebarResetKey={sidebarResetKey(sidebarStage)}
+        sidebarStage={sidebarStage}
+        mainStage={mainStage}
+        overviewStageLabel={overviewStageLabel}
+        progressLabel={progressLabel}
+        templateLabel={creatorDisplayState.templateLabel}
+        primaryRuleLabel={creatorDisplayState.primaryRuleLabel}
+        nativeHint={nativeHint}
+        configuration={configuration}
+        buildRules={buildRules}
+        advanced={advanced}
+        mainTopContent={mainTopContent}
+        mainTitle={mainTitle}
+        mainContent={mainContent}
+        showFooter={showFooter}
+        overlayContent={creatorOverlayContent}
+      />
+    </>
+  );
+
+
+  if (loading) {
+    return renderWorkbenchPage({
+      sidebarStage: 'intro',
+      mainStage: 'status',
+      mainContent: <div className="text-center text-lg">加载中...</div>,
+      overviewStageLabel: '初始化中',
+      progressLabel: '正在加载创作工房',
+      nativeHint: '加载完成后显示原生性提示',
+    });
+  }
+
+  if (resolvedQuestionItems.length === 0) {
+    const hasLore = selectedQuestionnaires.some((selection) => Boolean(selection.questionnaire.loreMarkdown?.trim()));
+    return renderWorkbenchPage({
+      sidebarStage: 'questionnaire',
+      mainStage: 'status',
+      mainContent: (
+        <div className="space-y-4 text-center">
+          <div className="error-message">
+            {hasLore
+              ? '当前所选问卷仅包含设定（无题目），请在“问卷设置”中再添加一份有题目的问卷。'
+              : '加载问卷失败'}
+          </div>
+          <div className="text-xs text-gray-500">
+            关闭“允许同时回答多份问卷”时，也可以叠加纯设定卡；但你仍需要至少一份有题目的问卷用于作答。
+          </div>
+          {hasLore && (
+            <div className="flex flex-col items-center justify-center gap-2">
+              <button
+                type="button"
+                className="generate-button"
+                onClick={() => {
+                  setSelectedQuestionnaires([]);
+                  setSelectionReady(false);
+                  setLoading(true);
+                }}
+              >
+                恢复默认问卷
+              </button>
+              <Link href="/questionnaire-editor" className="text-xs text-indigo-600 hover:underline">
+                打开问卷编辑器
+              </Link>
+            </div>
+          )}
+        </div>
+      ),
+      overviewStageLabel: '问卷不可用',
+      progressLabel: '暂无可作答题目',
+      nativeHint: hasLore ? '请补充至少一份有题目的问卷' : '请检查问卷加载与选择结果',
+    });
+  }
+  if (mergedQuestions.length === 0) {
+    return renderWorkbenchPage({
+      sidebarStage: 'questionnaire',
+      mainStage: 'status',
+      mainContent: <div className="error-message">当前没有可作答的题目，请检查问卷条件设置</div>,
+      overviewStageLabel: '题目不可用',
+      progressLabel: '当前题目流为空',
+      nativeHint: '请检查问卷条件与跳题设置',
+    });
+  }
+
+  const isLastQuestion = currentQuestionIndex === mergedQuestions.length - 1;
+  const currentQuestionItem = mergedQuestions[currentQuestionIndex];
+  const currentQuestion = currentQuestionItem?.question;
+  const currentQuestionnaireTitle = currentQuestionItem?.questionnaireTitle ?? '';
+  const currentLimitInfo = getAnswerLimitInfo(currentQuestion?.maxLength ?? null);
+  const currentMaxLength = currentLimitInfo.limit;
+  const currentAnswerLength = currentAnswer.trim().length;
+  const isCurrentOverLimit = Boolean(currentMaxLength && currentAnswerLength > currentMaxLength);
+  const currentLimitLabel = currentLimitInfo.source === 'question'
+    ? `题目上限 ${currentMaxLength} 字`
+    : currentLimitInfo.source === 'global'
+      ? `原生统一上限 ${currentMaxLength} 字`
+      : '不限';
+  const quickSuggestions = currentQuestion?.suggestions ?? [];
+  const hasOptions = (currentQuestion?.options?.length ?? 0) > 0;
+  const allowCustomInput = currentQuestion?.allowCustom !== false;
+  const isCurrentRequired = currentQuestion?.required === true;
+  const showTextInput = allowCustomInput || !hasOptions;
+  const progressPercent = Math.round(((currentQuestionIndex + 1) / mergedQuestions.length) * 100);
+  const fallbackQuickOptions = allowCustomInput ? ['还没想好', '不想回答'] : [];
+  const suggestionPool = showTextInput ? quickSuggestions.filter(Boolean) : [];
+  const nextButtonLabel = isCooldown
+    ? `请等待 ${remainingTime} 秒`
+    : submitting
+      ? '提交中...'
+      : isLastQuestion
+        ? (isCurrentRequired || currentAnswer.trim() ? '提交' : '跳过并提交')
+        : (!isCurrentRequired && !currentAnswer.trim() ? '跳过并继续' : '下一题');
+  const optionsHintText = allowCustomInput
+    ? '推荐选项（点击后自动跳转下一题，也可继续补充文本）'
+    : '推荐选项（点击后自动跳转下一题，本题仅可从选项中选择）';
+  const overLimitText = `⚠️ 已超过${currentLimitLabel}，继续提交将导致生成内容丧失原生性。`;
+  const nextButtonContent = submitting ? (
+    <span className="flex items-center justify-center">
+      <svg className="animate-spin h-4 w-4 text-white" style={{ marginLeft: '-0.25rem', marginRight: '0.5rem' }} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+      </svg>
+      提交中...
+    </span>
+  ) : nextButtonLabel;
+
+  if (showIntroduction) {
+    return renderWorkbenchPage({
+      sidebarStage: 'intro',
+      mainStage: 'intro',
+      mainTitle: CREATOR_PAGE_COPY.headTitle,
+      mainContent: (
+        <div className="text-center">
+          <div className="mb-6 leading-relaxed text-gray-800" style={{ lineHeight: '1.5', marginTop: '3rem', marginBottom: '4rem' }}>
+            <p className="text-2xl font-semibold text-slate-900">{CREATOR_PAGE_COPY.heroTitle}</p>
+            <p className="mt-4 text-base text-slate-600">{CREATOR_PAGE_COPY.heroBody}</p>
+          </div>
+          <div className="mb-6 rounded-r-lg border-l-4 border-yellow-500 bg-yellow-100 p-3 text-left text-sm text-yellow-800">
+            <p className="font-bold">{CREATOR_PAGE_COPY.noticeTitle}</p>
+            <p className="mt-1">{CREATOR_PAGE_COPY.noticeBody}</p>
+          </div>
+          <EncyclopediaLinks
+            items={[
+              { slug: 'character-generator', text: '百科：角色生成入口说明' },
+              { slug: 'archive', text: '百科：档案馆（角色管理）' },
+            ]}
+          />
+          <div className="mt-6 flex flex-col justify-center gap-4 sm:flex-row">
+            <button
+              onClick={handleStartQuestionnaire}
+              className="generate-button text-lg flex-1"
+            >
+              开始回答问卷
+            </button>
+          </div>
+          <div className="text-center" style={{ marginTop: '2rem' }}>
+            <button
+              onClick={() => router.push('/')}
+              className="footer-link"
+            >
+              返回首页
+            </button>
+          </div>
+        </div>
+      ),
+      overviewStageLabel: '准备中',
+      progressLabel: '尚未开始答题',
+      nativeHint: '开始答题后显示原生性与限制提示',
+      showFooter: true,
+    });
+  }
+
   const questionnaireEditorMainContent = (
     <>
       <QuestionnaireQuestionPanel
@@ -2723,7 +2730,6 @@ const DetailsPage: React.FC = () => {
         : hasOverLimitAnswer
           ? `已有 ${overLimitItems.length} 条答案超过字数上限`
           : '当前仍具备原生性',
-      questionnaire: questionnaireSidebarPanel,
       advanced: advancedSidebarPanel,
       showFooter: true,
     });
@@ -3021,7 +3027,6 @@ const DetailsPage: React.FC = () => {
     overviewStageLabel: creatorResultOverview.stageLabel,
     progressLabel: creatorResultOverview.progressLabel,
     nativeHint: creatorResultOverview.nativeHint,
-    questionnaire: questionnaireSidebarPanel,
     advanced: advancedSidebarPanel,
     showFooter: true,
   });

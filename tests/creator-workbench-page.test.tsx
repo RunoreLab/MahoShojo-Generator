@@ -17,8 +17,9 @@ test('CreatorWorkbenchPage 在 result 阶段仍输出工作台壳与 overlay 内
       primaryRuleLabel="魔法少女竞技场 TRPG 简化角色卡"
       nativeHint="当前仍具备原生性"
       configuration={<div>配置内容</div>}
-      questionnaire={<div>问卷内容</div>}
+      buildRules={<div>规则内容</div>}
       advanced={<div>高级内容</div>}
+      mainTopContent={<div>问卷与作答</div>}
       mainContent={<div>结果主区</div>}
       showFooter
       overlayContent={<div>弹层内容</div>}
@@ -28,6 +29,9 @@ test('CreatorWorkbenchPage 在 result 阶段仍输出工作台壳与 overlay 内
   expect(html).toContain('creator-workbench-shell');
   expect(html).toContain('data-creator-sidebar-stage="result"');
   expect(html).toContain('data-creator-stage="result"');
+  expect(html).toContain('规则内容');
+  expect(html).toContain('问卷与作答');
+  expect(html.indexOf('问卷与作答')).toBeLessThan(html.indexOf('结果主区'));
   expect(html).toContain('结果主区');
   expect(html).toContain('弹层内容');
 });

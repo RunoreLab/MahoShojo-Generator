@@ -18,8 +18,9 @@ type CreatorWorkbenchPageProps = {
   primaryRuleLabel: string;
   nativeHint: string;
   configuration: ReactNode;
-  questionnaire: ReactNode;
+  buildRules?: ReactNode;
   advanced: ReactNode;
+  mainTopContent?: ReactNode;
   mainTitle?: string;
   mainContent: ReactNode;
   showFooter?: boolean;
@@ -37,8 +38,9 @@ export function CreatorWorkbenchPage({
   primaryRuleLabel,
   nativeHint,
   configuration,
-  questionnaire,
+  buildRules,
   advanced,
+  mainTopContent,
   mainTitle,
   mainContent,
   showFooter = false,
@@ -63,11 +65,11 @@ export function CreatorWorkbenchPage({
               />
             )}
             configuration={configuration}
-            questionnaire={questionnaire}
+            buildRules={buildRules}
             advanced={advanced}
           />
         )}
-        main={<CreatorMainStage stage={mainStage} title={mainTitle} content={mainContent} />}
+        main={<CreatorMainStage stage={mainStage} title={mainTitle} topContent={mainTopContent} content={mainContent} />}
       />
       {showFooter ? <Footer textWhite={true} /> : null}
       {overlayContent}

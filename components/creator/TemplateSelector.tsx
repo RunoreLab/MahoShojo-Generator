@@ -15,7 +15,7 @@ export function TemplateSelector({ value, onChange, disabled = false }: Template
           先决定本次要生成哪种卡片。模板决定结果结构，也决定是否支持流式输出。
         </p>
       </div>
-      <div className="grid gap-3 md:grid-cols-2">
+      <div className="grid grid-cols-1 gap-3">
         {CREATOR_TEMPLATE_OPTIONS.map((option) => {
           const isActive = option.id === value;
           const isStreamable = isCreatorStreamTemplate(option.id);

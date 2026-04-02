@@ -1,10 +1,11 @@
 type CreatorMainStageProps = {
   stage: 'status' | 'intro' | 'questionnaire' | 'result';
   title?: string;
+  topContent?: React.ReactNode;
   content: React.ReactNode;
 };
 
-export function CreatorMainStage({ stage, title, content }: CreatorMainStageProps) {
+export function CreatorMainStage({ stage, title, topContent, content }: CreatorMainStageProps) {
   return (
     <section
       className="rounded-[28px] border p-5 sm:p-6 xl:p-8"
@@ -15,6 +16,7 @@ export function CreatorMainStage({ stage, title, content }: CreatorMainStageProp
         backdropFilter: 'blur(10px)',
       }}
     >
+      {topContent ? <div className="mb-5">{topContent}</div> : null}
       {title ? <div className="mb-4 text-xl font-semibold text-slate-900">{title}</div> : null}
       <div data-creator-stage={stage}>{content}</div>
     </section>

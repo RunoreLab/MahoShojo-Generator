@@ -31,6 +31,7 @@ test('TemplateSelector 显示 5 个模板并标出流式边界', () => {
   expect(html).toContain('情景（结构化）');
   expect(html).toContain('通用情景卡（Markdown）');
   expect(html).toContain('支持流式');
+  expect(html).not.toContain('md:grid-cols-2');
 });
 
 test('FreeformBriefPanel 渲染自由补充说明输入区', () => {
@@ -141,15 +142,24 @@ test('creator workbench 组合同时暴露左栏与主区标题', () => {
           stage="intro"
           overview={<div>概况内容</div>}
           configuration={<div>配置内容</div>}
-          questionnaire={<div>问卷内容</div>}
+          buildRules={<div>规则内容</div>}
           advanced={<div>高级内容</div>}
         />
       }
-      main={<CreatorMainStage stage="intro" title={CREATOR_PAGE_COPY.headTitle} content={<div>开始创作</div>} />}
+      main={(
+        <CreatorMainStage
+          stage="intro"
+          title={CREATOR_PAGE_COPY.headTitle}
+          topContent={<div>问卷与作答</div>}
+          content={<div>开始创作</div>}
+        />
+      )}
     />
   );
 
   expect(html).toContain(CREATOR_PAGE_COPY.headTitle);
   expect(html).toContain('创作概况');
+  expect(html).toContain('车卡规则');
+  expect(html).toContain('问卷与作答');
   expect(html).toContain('开始创作');
 });
