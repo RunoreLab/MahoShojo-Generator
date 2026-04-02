@@ -60,11 +60,16 @@ import { FreeformBriefPanel } from '@/components/creator/FreeformBriefPanel';
 import { BuildRulePicker } from '@/components/creator/BuildRulePicker';
 import { BuildRulePanel } from '@/components/creator/BuildRulePanel';
 import { BuildSummaryPanel } from '@/components/creator/BuildSummaryPanel';
+import { CreatorMainStage } from '@/components/creator/CreatorMainStage';
+import { CreatorOverviewCard } from '@/components/creator/CreatorOverviewCard';
+import { CreatorSidebar } from '@/components/creator/CreatorSidebar';
+import { CreatorWorkbenchLayout } from '@/components/creator/CreatorWorkbenchLayout';
 import { MarkdownBlock } from '@/components/MarkdownBlock';
 import { CREATOR_PAGE_COPY } from '@/lib/creator/page-copy';
 import {
   DEFAULT_CREATOR_GENERATION_MODE,
   getDefaultCreatorTemplateForGenerationMode,
+  getCreatorTemplateOptionById,
   isCreatorTemplateSupportedInGenerationMode,
   normalizeCreatorTemplateForGenerationMode,
   type CreatorTemplateId,
@@ -298,6 +303,7 @@ const DetailsPage: React.FC = () => {
   const [autoSaveTimestamp, setAutoSaveTimestamp] = useState<number | null>(null);
   const [showAnswerReview, setShowAnswerReview] = useState(false);
   const [deviceType, setDeviceType] = useState<DeviceType>('unknown');
+  const [layoutMode, setLayoutMode] = useState<'desktop' | 'mobile'>('desktop');
   const [imageSaveMode, setImageSaveMode] = useState<ImageSaveMode>('download');
   const [jsonSaveMode, setJsonSaveMode] = useState<JsonSaveMode>('download');
   const [generationMode, setGenerationMode] = useState<GenerationMode>(DEFAULT_CREATOR_GENERATION_MODE);
@@ -334,6 +340,11 @@ const DetailsPage: React.FC = () => {
     () => buildRuleRuntimeResults.find((rule) => rule.ruleId === primaryBuildRuleId) ?? null,
     [buildRuleRuntimeResults, primaryBuildRuleId]
   );
+  const currentTemplateLabel = useMemo(
+    () => getCreatorTemplateOptionById(creatorTemplate)?.label ?? creatorTemplate,
+    [creatorTemplate]
+  );
+  const currentRuleLabel = primaryBuildRulePreset?.title?.trim() || '未启用主规则';
   const buildRuleRequestPayload = useMemo(
     () =>
       selectedBuildRuleIds.flatMap((ruleId) => {
@@ -609,6 +620,15 @@ const DetailsPage: React.FC = () => {
       .then(res => res.json())
       .then(data => setLanguages(data))
       .catch(err => console.error("Failed to load languages:", err));
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
+    const mediaQuery = window.matchMedia('(max-width: 1023px)');
+    const syncLayoutMode = () => setLayoutMode(mediaQuery.matches ? 'mobile' : 'desktop');
+    syncLayoutMode();
+    mediaQuery.addEventListener('change', syncLayoutMode);
+    return () => mediaQuery.removeEventListener('change', syncLayoutMode);
   }, []);
 
   useEffect(() => {
@@ -1848,66 +1868,179 @@ const DetailsPage: React.FC = () => {
     }));
   }, []);
 
+  const sidebarResetKey = useCallback(
+    (stage: 'intro' | 'questionnaire' | 'result') => (layoutMode === 'mobile' ? `mobile-${stage}` : 'desktop'),
+    [layoutMode]
+  );
+
+  const buildPlaceholderPanel = useCallback(
+    (text: string) => (
+      <div className="rounded-2xl border border-slate-200 bg-white/90 p-4 text-sm leading-6 text-slate-600 shadow-sm">
+        {text}
+      </div>
+    ),
+    []
+  );
+
+  const creatorConfigurationPanel = (
+    <div className="space-y-4">
+      <TemplateSelector
+        value={creatorTemplate}
+        onChange={setCreatorTemplate}
+      />
+      <FreeformBriefPanel
+        value={freeformBrief}
+        onChange={setFreeformBrief}
+      />
+      <BuildRulePicker
+        presets={buildRulePresetIndex}
+        selectedRuleIds={selectedBuildRuleIds}
+        primaryRuleId={primaryBuildRuleId}
+        onToggleRule={handleToggleBuildRule}
+        onSelectPrimaryRule={handleSelectPrimaryBuildRule}
+      />
+      {primaryBuildRulePreset ? (
+        <BuildRulePanel
+          preset={primaryBuildRulePreset}
+          inputs={buildRuleInputsById[primaryBuildRulePreset.id] ?? createDefaultBuildRuleInputs(primaryBuildRulePreset.id)}
+          onChange={(nextInputs) => handleBuildRuleInputsChange(primaryBuildRulePreset.id, nextInputs)}
+        />
+      ) : null}
+      {primaryBuildRuleRuntimeResult ? (
+        <BuildSummaryPanel runtimeResult={primaryBuildRuleRuntimeResult} />
+      ) : null}
+    </div>
+  );
+
+  const renderWorkbenchPage = useCallback(({
+    sidebarStage,
+    mainStage,
+    mainTitle,
+    mainContent,
+    overviewStageLabel,
+    progressLabel,
+    nativeHint,
+    configuration = creatorConfigurationPanel,
+    questionnaire = buildPlaceholderPanel('开始答题后，这里会显示题目导航、问卷设置和答案概览。'),
+    advanced = buildPlaceholderPanel('进入答题阶段后，这里会承接生成方式、语言、AI 提供商和备份导出等设置。'),
+    showFooter = false,
+  }: {
+    sidebarStage: 'intro' | 'questionnaire' | 'result';
+    mainStage: 'status' | 'intro' | 'questionnaire' | 'result';
+    mainTitle?: string;
+    mainContent: React.ReactNode;
+    overviewStageLabel: string;
+    progressLabel: string;
+    nativeHint: string;
+    configuration?: React.ReactNode;
+    questionnaire?: React.ReactNode;
+    advanced?: React.ReactNode;
+    showFooter?: boolean;
+  }) => (
+    <>
+      <Head>
+        <title>{CREATOR_PAGE_COPY.headTitle}</title>
+        <meta name="description" content={CREATOR_PAGE_COPY.metaDescription} />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <link rel="icon" href="/favicon.ico" />
+      </Head>
+      <div className="magic-background">
+        <CreatorWorkbenchLayout
+          layoutMode={layoutMode}
+          sidebar={
+            <CreatorSidebar
+              key={sidebarResetKey(sidebarStage)}
+              layoutMode={layoutMode}
+              stage={sidebarStage}
+              overview={(
+                <CreatorOverviewCard
+                  stageLabel={overviewStageLabel}
+                  progressLabel={progressLabel}
+                  templateLabel={currentTemplateLabel}
+                  primaryRuleLabel={currentRuleLabel}
+                  nativeHint={nativeHint}
+                />
+              )}
+              configuration={configuration}
+              questionnaire={questionnaire}
+              advanced={advanced}
+            />
+          }
+          main={<CreatorMainStage stage={mainStage} title={mainTitle} content={mainContent} />}
+        />
+        {showFooter ? <Footer textWhite={true} /> : null}
+      </div>
+    </>
+  ), [
+    buildPlaceholderPanel,
+    creatorConfigurationPanel,
+    currentRuleLabel,
+    currentTemplateLabel,
+    layoutMode,
+    sidebarResetKey,
+  ]);
+
 
   if (loading) {
-    return (
-      <div className="magic-background">
-        <div className="container">
-          <div className="card">
-            <div className="text-center text-lg">加载中...</div>
-          </div>
-        </div>
-      </div>
-    );
+    return renderWorkbenchPage({
+      sidebarStage: 'intro',
+      mainStage: 'status',
+      mainContent: <div className="text-center text-lg">加载中...</div>,
+      overviewStageLabel: '初始化中',
+      progressLabel: '正在加载创作工房',
+      nativeHint: '加载完成后显示原生性提示',
+    });
   }
 
   if (resolvedQuestionItems.length === 0) {
     const hasLore = selectedQuestionnaires.some((selection) => Boolean(selection.questionnaire.loreMarkdown?.trim()));
-    return (
-      <div className="magic-background">
-        <div className="container">
-          <div className="card">
-            <div className="error-message">
-              {hasLore
-                ? '当前所选问卷仅包含设定（无题目），请在“问卷设置”中再添加一份有题目的问卷。'
-                : '加载问卷失败'}
-            </div>
-            <div className="mt-2 text-center text-xs text-gray-500">
-              关闭“允许同时回答多份问卷”时，也可以叠加纯设定卡；但你仍需要至少一份有题目的问卷用于作答。
-            </div>
-            {hasLore && (
-              <div className="mt-4 flex flex-col items-center justify-center gap-2">
-                <button
-                  type="button"
-                  className="generate-button"
-                  onClick={() => {
-                    setSelectedQuestionnaires([]);
-                    setSelectionReady(false);
-                    setLoading(true);
-                  }}
-                >
-                  恢复默认问卷
-                </button>
-                <Link href="/questionnaire-editor" className="text-xs text-indigo-600 hover:underline">
-                  打开问卷编辑器
-                </Link>
-              </div>
-            )}
+    return renderWorkbenchPage({
+      sidebarStage: 'questionnaire',
+      mainStage: 'status',
+      mainContent: (
+        <div className="space-y-4 text-center">
+          <div className="error-message">
+            {hasLore
+              ? '当前所选问卷仅包含设定（无题目），请在“问卷设置”中再添加一份有题目的问卷。'
+              : '加载问卷失败'}
           </div>
+          <div className="text-xs text-gray-500">
+            关闭“允许同时回答多份问卷”时，也可以叠加纯设定卡；但你仍需要至少一份有题目的问卷用于作答。
+          </div>
+          {hasLore && (
+            <div className="flex flex-col items-center justify-center gap-2">
+              <button
+                type="button"
+                className="generate-button"
+                onClick={() => {
+                  setSelectedQuestionnaires([]);
+                  setSelectionReady(false);
+                  setLoading(true);
+                }}
+              >
+                恢复默认问卷
+              </button>
+              <Link href="/questionnaire-editor" className="text-xs text-indigo-600 hover:underline">
+                打开问卷编辑器
+              </Link>
+            </div>
+          )}
         </div>
-      </div>
-    );
+      ),
+      overviewStageLabel: '问卷不可用',
+      progressLabel: '暂无可作答题目',
+      nativeHint: hasLore ? '请补充至少一份有题目的问卷' : '请检查问卷加载与选择结果',
+    });
   }
   if (mergedQuestions.length === 0) {
-    return (
-      <div className="magic-background">
-        <div className="container">
-          <div className="card">
-            <div className="error-message">当前没有可作答的题目，请检查问卷条件设置</div>
-          </div>
-        </div>
-      </div>
-    );
+    return renderWorkbenchPage({
+      sidebarStage: 'questionnaire',
+      mainStage: 'status',
+      mainContent: <div className="error-message">当前没有可作答的题目，请检查问卷条件设置</div>,
+      overviewStageLabel: '题目不可用',
+      progressLabel: '当前题目流为空',
+      nativeHint: '请检查问卷条件与跳题设置',
+    });
   }
 
   const isLastQuestion = currentQuestionIndex === mergedQuestions.length - 1;
@@ -1955,6 +2088,52 @@ const DetailsPage: React.FC = () => {
       提交中...
     </span>
   ) : nextButtonLabel;
+
+  if (showIntroduction) {
+    return renderWorkbenchPage({
+      sidebarStage: 'intro',
+      mainStage: 'intro',
+      mainTitle: CREATOR_PAGE_COPY.headTitle,
+      mainContent: (
+        <div className="text-center">
+          <div className="mb-6 leading-relaxed text-gray-800" style={{ lineHeight: '1.5', marginTop: '3rem', marginBottom: '4rem' }}>
+            <p className="text-2xl font-semibold text-slate-900">{CREATOR_PAGE_COPY.heroTitle}</p>
+            <p className="mt-4 text-base text-slate-600">{CREATOR_PAGE_COPY.heroBody}</p>
+          </div>
+          <div className="mb-6 rounded-r-lg border-l-4 border-yellow-500 bg-yellow-100 p-3 text-left text-sm text-yellow-800">
+            <p className="font-bold">{CREATOR_PAGE_COPY.noticeTitle}</p>
+            <p className="mt-1">{CREATOR_PAGE_COPY.noticeBody}</p>
+          </div>
+          <EncyclopediaLinks
+            items={[
+              { slug: 'character-generator', text: '百科：角色生成入口说明' },
+              { slug: 'archive', text: '百科：档案馆（角色管理）' },
+            ]}
+          />
+          <div className="mt-6 flex flex-col justify-center gap-4 sm:flex-row">
+            <button
+              onClick={handleStartQuestionnaire}
+              className="generate-button text-lg flex-1"
+            >
+              开始回答问卷
+            </button>
+          </div>
+          <div className="text-center" style={{ marginTop: '2rem' }}>
+            <button
+              onClick={() => router.push('/')}
+              className="footer-link"
+            >
+              返回首页
+            </button>
+          </div>
+        </div>
+      ),
+      overviewStageLabel: '准备中',
+      progressLabel: '尚未开始答题',
+      nativeHint: '开始答题后显示原生性与限制提示',
+      showFooter: true,
+    });
+  }
 
   return (
     <>

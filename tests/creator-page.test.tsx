@@ -6,6 +6,9 @@ import { BuildRulePanel } from '@/components/creator/BuildRulePanel';
 import { BuildRulePicker } from '@/components/creator/BuildRulePicker';
 import { BuildSummaryPanel } from '@/components/creator/BuildSummaryPanel';
 import { FreeformBriefPanel } from '@/components/creator/FreeformBriefPanel';
+import { CreatorMainStage } from '@/components/creator/CreatorMainStage';
+import { CreatorSidebar } from '@/components/creator/CreatorSidebar';
+import { CreatorWorkbenchLayout } from '@/components/creator/CreatorWorkbenchLayout';
 import { TemplateSelector } from '@/components/creator/TemplateSelector';
 import { CREATOR_PAGE_COPY } from '@/lib/creator/page-copy';
 import { evaluateBuildRuleState } from '@/lib/creator/build-rule-runtime';
@@ -126,4 +129,27 @@ test('creator 默认模板与生成模式组合始终受支持', () => {
   expect(isCreatorTemplateSupportedInGenerationMode('stream', streamDefault)).toBe(true);
   expect(normalizeCreatorTemplateForGenerationMode('stream', 'magical-girl')).toBe('general');
   expect(normalizeCreatorTemplateForGenerationMode('non-stream', 'general')).toBe('magical-girl');
+});
+
+test('creator workbench 组合同时暴露左栏与主区标题', () => {
+  const html = renderToStaticMarkup(
+    <CreatorWorkbenchLayout
+      layoutMode="desktop"
+      sidebar={
+        <CreatorSidebar
+          layoutMode="desktop"
+          stage="intro"
+          overview={<div>概况内容</div>}
+          configuration={<div>配置内容</div>}
+          questionnaire={<div>问卷内容</div>}
+          advanced={<div>高级内容</div>}
+        />
+      }
+      main={<CreatorMainStage stage="intro" title={CREATOR_PAGE_COPY.headTitle} content={<div>开始创作</div>} />}
+    />
+  );
+
+  expect(html).toContain(CREATOR_PAGE_COPY.headTitle);
+  expect(html).toContain('创作概况');
+  expect(html).toContain('开始创作');
 });
