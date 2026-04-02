@@ -8,9 +8,21 @@ const arenaRule = {
   version: '1.0.0',
   blockResults: {
     powerLevel: 'seed',
+    coreAttributes: {
+      STR: 12,
+      CON: 18,
+      AGI: 10,
+      MAG: 16,
+      WILL: 20,
+      PER: 8,
+      CHM: 6,
+    },
+    specialties: ['magic-burst'],
   },
   derived: {
     HP: 3,
+    MP: 4,
+    Radiance: 4,
   },
   validationSummary: {
     valid: true,
@@ -224,6 +236,34 @@ describe('creator server', () => {
       )
     ).toThrow('PRIMARY_RULE_INELIGIBLE');
   });
+
+  test('规则 runtime 非法时拒绝请求', () => {
+    expect(() =>
+      validateCreatorRequest({
+        template: 'general',
+        freeformBrief: 'x',
+        questionnaires: [],
+        questionnaireAnswers: [],
+        buildRules: [
+          {
+            ...arenaRule,
+            validationSummary: {
+              valid: false,
+              issues: [
+                {
+                  code: 'required-missing' as const,
+                  blockKey: 'coreAttributes',
+                  message: 'coreAttributes is required.',
+                },
+              ],
+              missingRequiredBlockKeys: ['coreAttributes'],
+            },
+          },
+        ],
+        primaryRuleId: 'arena-trpg-lite',
+      })
+    ).toThrow('BUILD_RULE_VALIDATION_FAILED');
+  });
 });
 
 describe('creator api handlers', () => {
@@ -321,6 +361,91 @@ describe('creator api handlers', () => {
     expect(response.status).toBe(400);
     expect(await response.json()).toEqual({
       error: 'RULE_TEMPLATE_UNSUPPORTED',
+    });
+    expect(handlerState.freeCalls).toHaveLength(0);
+  });
+
+  test('creator non-stream 会基于 blockResults 重算规则结果，而不是信任客户端 derived', async () => {
+    const { default: handler } = await import('@/pages/api/creator/generate');
+    const response = await handler(
+      new Request('https://example.com/api/creator/generate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          [AI_META_REQUEST_HEADER]: 'true',
+        },
+        body: JSON.stringify({
+          template: 'general',
+          freeformBrief: '写一个沉默的图书管理员',
+          questionnaires: [],
+          questionnaireAnswers: [],
+          buildRules: [
+            {
+              ...arenaRule,
+              derived: {
+                HP: 999,
+                MP: 999,
+                Radiance: 999,
+              },
+            },
+          ],
+          primaryRuleId: 'arena-trpg-lite',
+        }),
+      })
+    );
+
+    expect(response.status).toBe(200);
+    const payload = (await response.json()) as {
+      data?: {
+        buildState?: {
+          rules?: Array<{ derived?: Record<string, number> }>;
+        };
+      };
+    };
+    expect(payload.data?.buildState?.rules?.[0]?.derived).toEqual({
+      HP: 3,
+      MP: 4,
+      Radiance: 4,
+    });
+    expect(String(handlerState.freeCalls[0]?.body.prompt ?? '')).toContain('"HP": 3');
+    expect(String(handlerState.freeCalls[0]?.body.prompt ?? '')).not.toContain('999');
+  });
+
+  test('creator non-stream 对无效 blockResults 返回结构化错误并阻止下游生成', async () => {
+    const { default: handler } = await import('@/pages/api/creator/generate');
+    const response = await handler(
+      new Request('https://example.com/api/creator/generate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          template: 'general',
+          freeformBrief: '写一个沉默的图书管理员',
+          questionnaires: [],
+          questionnaireAnswers: [],
+          buildRules: [
+            {
+              ...arenaRule,
+              blockResults: {
+                powerLevel: 'seed',
+              },
+              derived: {
+                HP: 999,
+                MP: 999,
+                Radiance: 999,
+              },
+            },
+          ],
+          primaryRuleId: 'arena-trpg-lite',
+        }),
+      })
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: 'BUILD_RULE_VALIDATION_FAILED',
+      ruleId: 'arena-trpg-lite',
     });
     expect(handlerState.freeCalls).toHaveLength(0);
   });

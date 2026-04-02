@@ -1,8 +1,9 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Head from 'next/head';
 import Link from 'next/link';
 
 import CanshouCard from '@/components/CanshouCard';
+import QuestionNavigator from '@/components/QuestionNavigator';
 import { BuildRulePanel } from '@/components/creator/BuildRulePanel';
 import { BuildRulePicker } from '@/components/creator/BuildRulePicker';
 import { BuildSummaryPanel } from '@/components/creator/BuildSummaryPanel';
@@ -16,19 +17,44 @@ import Footer from '@/components/Footer';
 import GeneralCharacterCard from '@/components/GeneralCharacterCard';
 import GeneralScenarioCard from '@/components/GeneralScenarioCard';
 import MagicalGirlCard from '@/components/MagicalGirlCard';
+import SaveToCloudButton from '@/components/SaveToCloudButton';
+import {
+  DETAILS_QUESTIONNAIRE_THEME,
+  QuestionnaireQuestionPanel,
+} from '@/components/questionnaire/QuestionnaireQuestionPanel';
+import { JsonSizeIndicator } from '@/components/shared/JsonSizeIndicator';
 import { GenerationModeSwitcher, type GenerationMode } from '@/components/shared/GenerationModeSwitcher';
 import { AI_META_REQUEST_HEADER, AI_META_REQUEST_VALUE, readJsonWithAiMeta } from '@/lib/client/read-json-with-ai-meta';
 import { resolveApiErrorMessage, readJsonOrTextFromResponse } from '@/lib/client/apiError';
+import { downloadBlob } from '@/lib/client/blobUrl';
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
 import { authStorage } from '@/lib/auth';
+import { getCreatorClientValidationMessage } from '@/lib/creator/client-validation';
 import { evaluateBuildRuleState, type BuildRuleRuntimeResult } from '@/lib/creator/build-rule-runtime';
 import { loadBuildRulePresetById, loadBuildRulePresetIndex } from '@/lib/creator/build-rules';
+import {
+  CREATOR_DRAFT_STORAGE_KEY,
+  buildCreatorDraftPayload,
+  parseCreatorDraftPayload,
+} from '@/lib/creator/draft';
+import {
+  buildCreatorQuestionnaireAnswerItems,
+  buildCreatorQuestionnaireItems,
+  buildCreatorQuestionnaireRequestData,
+  type CreatorQuestionnaireSelection,
+} from '@/lib/creator/questionnaires';
 import { isCreatorStreamTemplate, type CreatorTemplateId } from '@/lib/creator/templates';
 import { readTextAndReasoningStreamFromResponse } from '@/lib/stream/read-text-and-reasoning-stream';
 import {
   buildGeneralCharacterCardFromMarkdown,
   buildGeneralScenarioCardFromMarkdown,
 } from '@/lib/stream/markdown-card';
+import {
+  buildQuestionnaireFlow,
+  normalizeQuestionnaireDefinition,
+  resolveQuestionnaireReferences,
+  type QuestionnairePresetEntry,
+} from '@/lib/questionnaires';
 
 const TEMPLATE_OPTIONS: readonly CreatorTemplateOption[] = [
   {
@@ -83,6 +109,42 @@ const readRecord = (value: unknown): Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : {};
+
+const getCreatorResultKind = (
+  template: CreatorTemplateId
+): 'character' | 'scenario' =>
+  template === 'scenario' || template === 'general-scenario'
+    ? 'scenario'
+    : 'character';
+
+const sanitizeDownloadSegment = (value: string, fallback: string): string => {
+  const sanitized = value
+    .replace(/[^a-z0-9\u4e00-\u9fa5]/gi, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 80);
+
+  return sanitized || fallback;
+};
+
+const getCreatorResultDownloadFileName = (
+  template: CreatorTemplateId,
+  data: Record<string, unknown>
+): string => {
+  const kind = getCreatorResultKind(template);
+  const rawName =
+    kind === 'scenario'
+      ? (typeof data.title === 'string' ? data.title : '')
+      : typeof data.codename === 'string'
+        ? data.codename
+        : (typeof data.name === 'string' ? data.name : '');
+  const safeName = sanitizeDownloadSegment(
+    rawName,
+    kind === 'scenario' ? '自定义情景' : '自定义角色'
+  );
+
+  return `${kind === 'scenario' ? '数据卡_情景' : '数据卡_角色'}_${safeName}.json`;
+};
 
 export const extractMissingBuildRulePresetIds = (
   value: unknown,
@@ -146,6 +208,26 @@ export default function CreatorPage(props: {
   const [streamedResult, setStreamedResult] =
     useState<Record<string, unknown> | null>(null);
   const [streamingMarkdown, setStreamingMarkdown] = useState('');
+  const [draftRestoreReady, setDraftRestoreReady] = useState(false);
+  const [questionnairePresetEntries, setQuestionnairePresetEntries] = useState<
+    QuestionnairePresetEntry[]
+  >([]);
+  const [selectedQuestionnaires, setSelectedQuestionnaires] = useState<
+    CreatorQuestionnaireSelection[]
+  >([]);
+  const [questionnaireAnswersByKey, setQuestionnaireAnswersByKey] = useState<
+    Record<string, string>
+  >({});
+  const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
+  const [currentQuestionAnswer, setCurrentQuestionAnswer] = useState('');
+  const [questionnaireLoadError, setQuestionnaireLoadError] = useState<string | null>(
+    null
+  );
+  const [pendingQuestionnaireDraft, setPendingQuestionnaireDraft] = useState<{
+    presetIds: string[];
+    answersByKey: Record<string, string>;
+    currentQuestionIndex: number;
+  } | null>(null);
 
   const presetIndex = useMemo(() => loadBuildRulePresetIndex(), []);
   const presets = useMemo(
@@ -177,12 +259,375 @@ export default function CreatorPage(props: {
       ),
     [ruleInputs, selectedPresets]
   );
+  const questionnaireItems = useMemo(
+    () => buildCreatorQuestionnaireItems(selectedQuestionnaires),
+    [selectedQuestionnaires]
+  );
+  const resolvedQuestionnaireItems = useMemo(
+    () => resolveQuestionnaireReferences(questionnaireItems),
+    [questionnaireItems]
+  );
+  const { flow: mergedQuestions } = useMemo(
+    () =>
+      buildQuestionnaireFlow(resolvedQuestionnaireItems, questionnaireAnswersByKey),
+    [questionnaireAnswersByKey, resolvedQuestionnaireItems]
+  );
+  const questionnaireAnswerItems = useMemo(
+    () =>
+      buildCreatorQuestionnaireAnswerItems(
+        mergedQuestions,
+        questionnaireAnswersByKey
+      ),
+    [mergedQuestions, questionnaireAnswersByKey]
+  );
+  const questionnaireRequestData = useMemo(
+    () =>
+      buildCreatorQuestionnaireRequestData(
+        selectedQuestionnaires,
+        questionnaireAnswerItems
+      ),
+    [questionnaireAnswerItems, selectedQuestionnaires]
+  );
+
+  const loadQuestionnaireSelectionFromPreset = useCallback(async (
+    presetEntry: QuestionnairePresetEntry
+  ): Promise<CreatorQuestionnaireSelection> => {
+    const response = await fetch(presetEntry.path);
+    if (!response.ok) {
+      throw new Error('加载预设问卷失败');
+    }
+
+    const data = await response.json();
+    const normalized = normalizeQuestionnaireDefinition(data, {
+      fallbackId: presetEntry.id,
+      fallbackKind: presetEntry.kind,
+      fallbackTitle: presetEntry.title,
+    });
+    if (!normalized) {
+      throw new Error('预设问卷解析失败');
+    }
+
+    return {
+      source: 'preset',
+      presetId: presetEntry.id,
+      selectionId: normalized.id,
+      questionnaire: normalized,
+    };
+  }, []);
 
   useEffect(() => {
     if (!isCreatorStreamTemplate(template) && generationMode === 'stream') {
       setGenerationMode('non-stream');
     }
   }, [generationMode, template]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    let cancelled = false;
+
+    void fetch('/questionnaires/presets/index.json')
+      .then((response) => response.json())
+      .then((data) => {
+        if (cancelled) return;
+        const list = Array.isArray(data?.presets)
+          ? (data.presets as QuestionnairePresetEntry[])
+          : [];
+        setQuestionnairePresetEntries(list);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setQuestionnaireLoadError('加载问卷预设列表失败');
+        setDraftRestoreReady(true);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    try {
+      const savedDraft = window.localStorage.getItem(CREATOR_DRAFT_STORAGE_KEY);
+      if (!savedDraft) {
+        setDraftRestoreReady(true);
+        return;
+      }
+
+      const parsedDraft = parseCreatorDraftPayload(savedDraft);
+      if (!parsedDraft) {
+        setDraftRestoreReady(true);
+        return;
+      }
+
+      const nextSelectedRuleIds = parsedDraft.selectedRuleIds.filter(
+        (ruleId) => Boolean(presetLookup[ruleId])
+      );
+      const nextPrimaryRuleId =
+        parsedDraft.primaryRuleId &&
+        nextSelectedRuleIds.includes(parsedDraft.primaryRuleId)
+          ? parsedDraft.primaryRuleId
+          : null;
+
+      setTemplate(parsedDraft.template);
+      setGenerationMode(parsedDraft.generationMode);
+      setFreeformBrief(parsedDraft.freeformBrief);
+      setSelectedRuleIds(nextSelectedRuleIds);
+      setPrimaryRuleId(nextPrimaryRuleId);
+      setRuleInputs(parsedDraft.ruleInputs);
+      const nextPendingQuestionnaireDraft =
+        (parsedDraft.questionnairePresetIds?.length ?? 0) > 0
+          ? {
+          presetIds: parsedDraft.questionnairePresetIds ?? [],
+          answersByKey: parsedDraft.questionnaireAnswersByKey ?? {},
+          currentQuestionIndex: parsedDraft.currentQuestionIndex ?? 0,
+        }
+          : null;
+
+      setPendingQuestionnaireDraft(nextPendingQuestionnaireDraft);
+      if (!nextPendingQuestionnaireDraft) {
+        setDraftRestoreReady(true);
+      }
+    } catch {
+      // localStorage 可能不可用或内容损坏，忽略
+      setDraftRestoreReady(true);
+    }
+  }, [presetLookup]);
+
+  useEffect(() => {
+    if (!pendingQuestionnaireDraft || questionnairePresetEntries.length === 0) {
+      return;
+    }
+
+    let cancelled = false;
+
+    void (async () => {
+      try {
+        const nextSelections: CreatorQuestionnaireSelection[] = [];
+        for (const presetId of pendingQuestionnaireDraft.presetIds) {
+          const presetEntry = questionnairePresetEntries.find(
+            (entry) => entry.id === presetId
+          );
+          if (!presetEntry) {
+            continue;
+          }
+          nextSelections.push(
+            await loadQuestionnaireSelectionFromPreset(presetEntry)
+          );
+        }
+
+        if (cancelled) return;
+        setSelectedQuestionnaires(nextSelections);
+        setQuestionnaireAnswersByKey(pendingQuestionnaireDraft.answersByKey);
+        setCurrentQuestionIndex(pendingQuestionnaireDraft.currentQuestionIndex);
+      } catch {
+        if (cancelled) return;
+        setQuestionnaireLoadError('恢复问卷草稿失败');
+      } finally {
+        if (cancelled) return;
+        setPendingQuestionnaireDraft(null);
+        setDraftRestoreReady(true);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [loadQuestionnaireSelectionFromPreset, pendingQuestionnaireDraft, questionnairePresetEntries]);
+
+  useEffect(() => {
+    if (!draftRestoreReady || typeof window === 'undefined') {
+      return;
+    }
+
+    try {
+      const payload = buildCreatorDraftPayload({
+        template,
+        generationMode,
+        freeformBrief,
+        selectedRuleIds,
+        primaryRuleId,
+        ruleInputs,
+        questionnairePresetIds: selectedQuestionnaires.map(
+          (selection) => selection.presetId
+        ),
+        questionnaireAnswersByKey,
+        currentQuestionIndex,
+      });
+      window.localStorage.setItem(
+        CREATOR_DRAFT_STORAGE_KEY,
+        JSON.stringify(payload)
+      );
+    } catch {
+      // localStorage 可能不可用，忽略
+    }
+  }, [
+    draftRestoreReady,
+    freeformBrief,
+    generationMode,
+    currentQuestionIndex,
+    primaryRuleId,
+    questionnaireAnswersByKey,
+    ruleInputs,
+    selectedRuleIds,
+    selectedQuestionnaires,
+    template,
+  ]);
+
+  useEffect(() => {
+    if (mergedQuestions.length === 0) {
+      if (currentQuestionIndex !== 0) {
+        setCurrentQuestionIndex(0);
+      }
+      if (currentQuestionAnswer !== '') {
+        setCurrentQuestionAnswer('');
+      }
+      return;
+    }
+
+    if (currentQuestionIndex >= mergedQuestions.length) {
+      setCurrentQuestionIndex(mergedQuestions.length - 1);
+      return;
+    }
+
+    const currentKey = mergedQuestions[currentQuestionIndex]?.key;
+    const nextAnswer = currentKey ? questionnaireAnswersByKey[currentKey] ?? '' : '';
+    if (nextAnswer !== currentQuestionAnswer) {
+      setCurrentQuestionAnswer(nextAnswer);
+    }
+  }, [
+    currentQuestionAnswer,
+    currentQuestionIndex,
+    mergedQuestions,
+    questionnaireAnswersByKey,
+  ]);
+
+  const handleAddQuestionnairePreset = async (presetId: string) => {
+    const presetEntry = questionnairePresetEntries.find((entry) => entry.id === presetId);
+    if (!presetEntry) {
+      return;
+    }
+
+    if (selectedQuestionnaires.some((selection) => selection.presetId === presetId)) {
+      return;
+    }
+
+    try {
+      setQuestionnaireLoadError(null);
+      const selection = await loadQuestionnaireSelectionFromPreset(presetEntry);
+      setSelectedQuestionnaires((current) => [...current, selection]);
+    } catch (caughtError) {
+      setQuestionnaireLoadError(
+        caughtError instanceof Error ? caughtError.message : '加载预设问卷失败'
+      );
+    }
+  };
+
+  const handleRemoveQuestionnaire = (selectionId: string) => {
+    setSelectedQuestionnaires((current) =>
+      current.filter((selection) => selection.selectionId !== selectionId)
+    );
+    setQuestionnaireAnswersByKey((current) =>
+      Object.fromEntries(
+        Object.entries(current).filter(
+          ([key]) =>
+            !key.startsWith(`${selectionId}::`) && key !== selectionId
+        )
+      )
+    );
+    setError(null);
+  };
+
+  const commitCurrentQuestionnaireAnswer = (override?: string) => {
+    const item = mergedQuestions[currentQuestionIndex];
+    if (!item) {
+      return questionnaireAnswersByKey;
+    }
+
+    const rawValue = override ?? currentQuestionAnswer;
+    const nextAnswers = { ...questionnaireAnswersByKey };
+    if (rawValue.trim()) {
+      nextAnswers[item.key] = rawValue;
+    } else {
+      delete nextAnswers[item.key];
+    }
+    return nextAnswers;
+  };
+
+  const handleQuestionnaireAnswerChange = (value: string) => {
+    setCurrentQuestionAnswer(value);
+    setError(null);
+
+    const item = mergedQuestions[currentQuestionIndex];
+    if (!item) {
+      return;
+    }
+
+    setQuestionnaireAnswersByKey((current) => {
+      const nextAnswers = { ...current };
+      if (value.trim()) {
+        nextAnswers[item.key] = value;
+      } else {
+        delete nextAnswers[item.key];
+      }
+      return nextAnswers;
+    });
+  };
+
+  const handleQuestionnaireNext = () => {
+    const item = mergedQuestions[currentQuestionIndex];
+    if (!item) {
+      return;
+    }
+
+    if (item.question.required === true && currentQuestionAnswer.trim().length === 0) {
+      setError('请先完成当前问卷问题，再继续创作。');
+      return;
+    }
+
+    const nextAnswers = commitCurrentQuestionnaireAnswer();
+    setQuestionnaireAnswersByKey(nextAnswers);
+    setError(null);
+
+    if (currentQuestionIndex < mergedQuestions.length - 1) {
+      setCurrentQuestionIndex(currentQuestionIndex + 1);
+    }
+  };
+
+  const handleQuestionnairePrev = () => {
+    if (currentQuestionIndex === 0) {
+      return;
+    }
+
+    const nextAnswers = commitCurrentQuestionnaireAnswer();
+    setQuestionnaireAnswersByKey(nextAnswers);
+    setCurrentQuestionIndex(currentQuestionIndex - 1);
+    setError(null);
+  };
+
+  const handleQuestionnaireQuickOption = (value: string) => {
+    setCurrentQuestionAnswer(value);
+    const nextAnswers = commitCurrentQuestionnaireAnswer(value);
+    setQuestionnaireAnswersByKey(nextAnswers);
+    setError(null);
+
+    if (currentQuestionIndex < mergedQuestions.length - 1) {
+      setCurrentQuestionIndex(currentQuestionIndex + 1);
+    }
+  };
+
+  const handleNavigateQuestionnaire = (index: number) => {
+    if (index < 0 || index >= mergedQuestions.length || index === currentQuestionIndex) {
+      return;
+    }
+
+    const nextAnswers = commitCurrentQuestionnaireAnswer();
+    setQuestionnaireAnswersByKey(nextAnswers);
+    setCurrentQuestionIndex(index);
+    setError(null);
+  };
 
   useEffect(() => {
     const compatibleRuleIds = selectedRuleIds.filter((ruleId) => {
@@ -262,6 +707,11 @@ export default function CreatorPage(props: {
   };
 
   const handleGenerate = async () => {
+    if (clientValidationMessage) {
+      setError(clientValidationMessage);
+      return;
+    }
+
     setSubmitting(true);
     setError(null);
     setResultData(null);
@@ -278,8 +728,8 @@ export default function CreatorPage(props: {
       const requestBody = {
         template,
         freeformBrief,
-        questionnaires: [],
-        questionnaireAnswers: [],
+        questionnaires: questionnaireRequestData.questionnaires,
+        questionnaireAnswers: questionnaireRequestData.questionnaireAnswers,
         buildRules,
         ...(buildRules.length > 0 ? { primaryRuleId } : {}),
       };
@@ -385,10 +835,85 @@ export default function CreatorPage(props: {
   const displayedResult = generationMode === 'stream'
     ? streamedResult ?? liveStreamPreview
     : resultData;
+  const resultActionData = generationMode === 'stream' ? streamedResult : resultData;
+  const clientValidationMessage = useMemo(
+    () =>
+      getCreatorClientValidationMessage({
+        template,
+        freeformBrief,
+        questionnaires: questionnaireRequestData.questionnaires,
+        questionnaireAnswers: questionnaireRequestData.questionnaireAnswers,
+        buildRules,
+        primaryRuleId,
+      }),
+    [
+      buildRules,
+      freeformBrief,
+      primaryRuleId,
+      questionnaireRequestData.questionnaireAnswers,
+      questionnaireRequestData.questionnaires,
+      template,
+    ]
+  );
   const missingPresetIds = useMemo(
     () => extractMissingBuildRulePresetIds(displayedResult, presetLookup),
     [displayedResult, presetLookup]
   );
+  const currentQuestionItem = mergedQuestions[currentQuestionIndex] ?? null;
+  const currentQuestion = currentQuestionItem?.question ?? null;
+  const currentQuestionnaireTitle = currentQuestionItem?.questionnaireTitle ?? '';
+  const hasQuestionOptions = (currentQuestion?.options?.length ?? 0) > 0;
+  const allowCustomQuestionInput = currentQuestion?.allowCustom !== false;
+  const showQuestionTextInput = allowCustomQuestionInput || !hasQuestionOptions;
+  const questionnaireNavigatorItems = mergedQuestions.map((item) => ({
+    id: item.key,
+    label: item.questionnaireTitle
+      ? `${item.question.question} · ${item.questionnaireTitle}`
+      : item.question.question,
+  }));
+  const questionnaireProgressPercent =
+    mergedQuestions.length > 0
+      ? Math.round(((currentQuestionIndex + 1) / mergedQuestions.length) * 100)
+      : 0;
+  const questionnaireQuickOptions = allowCustomQuestionInput
+    ? ['还没想好', '不想回答']
+    : [];
+  const questionnaireSuggestions = showQuestionTextInput
+    ? currentQuestion?.suggestions?.filter(Boolean) ?? []
+    : [];
+  const questionnaireOptionsHintText = allowCustomQuestionInput
+    ? '推荐选项（点击后会填入答案，也可继续补充文本）'
+    : '本题仅可从选项中选择';
+  const questionnaireNextButtonLabel =
+    mergedQuestions.length === 0
+      ? '问卷未就绪'
+      : currentQuestionIndex === mergedQuestions.length - 1
+        ? '完成当前问卷'
+        : currentQuestion?.required === true || currentQuestionAnswer.trim()
+          ? '下一题'
+          : '跳过并继续';
+
+  const handleDownloadResult = (data: Record<string, unknown>) => {
+    const blob = new Blob([JSON.stringify(data, null, 2)], {
+      type: 'application/json',
+    });
+    downloadBlob(blob, getCreatorResultDownloadFileName(template, data));
+  };
+
+  const handleCopyResult = async (data: Record<string, unknown>) => {
+    const label = getCreatorResultKind(template) === 'scenario' ? '情景卡' : '角色卡';
+
+    try {
+      if (!navigator.clipboard) {
+        throw new Error('clipboard-not-available');
+      }
+
+      await navigator.clipboard.writeText(JSON.stringify(data, null, 2));
+      alert(`✅ 已复制${label} JSON 到剪贴板`);
+    } catch {
+      alert('⚠️ 复制失败，请手动选择 JSON 内容后复制。');
+    }
+  };
 
   const renderResult = () => {
     if (!displayedResult) {
@@ -487,9 +1012,129 @@ export default function CreatorPage(props: {
                 <div className="mt-6 rounded-3xl border border-gray-200 bg-white p-5">
                   <label className="input-label">问卷输入</label>
                   <p className="text-sm leading-7 text-gray-600">
-                    第一阶段先保留明确入口与文案边界。这里后续会接入 `/details` 现有问卷选择与答案编辑逻辑，
-                    目前先让规则与自由文本闭环工作，不把问卷状态硬塞进新的大页面。
+                    这里复用 `/details` 的问卷定义、跳题与题目渲染能力，但先只接预设问卷，
+                    保持 creator 页面最小可用，不把上传、云端库和 Lore 开关一次性塞进来。
                   </p>
+
+                  <div className="mt-4 flex flex-wrap items-center gap-3">
+                    <select
+                      className="input-field text-sm"
+                      defaultValue=""
+                      onChange={(event) => {
+                        if (!event.target.value) {
+                          return;
+                        }
+                        void handleAddQuestionnairePreset(event.target.value);
+                        event.currentTarget.value = '';
+                      }}
+                    >
+                      <option value="" disabled>
+                        选择预设问卷
+                      </option>
+                      {questionnairePresetEntries.map((presetEntry) => (
+                        <option key={presetEntry.id} value={presetEntry.id}>
+                          {presetEntry.title}
+                        </option>
+                      ))}
+                    </select>
+                    <span className="text-xs text-gray-500">
+                      已选 {selectedQuestionnaires.length} 份问卷，已填写{' '}
+                      {questionnaireAnswerItems.length} 条答案。
+                    </span>
+                  </div>
+
+                  {questionnaireLoadError ? (
+                    <div className="mt-4">
+                      <ErrorMessage message={questionnaireLoadError} />
+                    </div>
+                  ) : null}
+
+                  {selectedQuestionnaires.length > 0 ? (
+                    <div className="mt-4 space-y-3">
+                      {selectedQuestionnaires.map((selection) => (
+                        <div
+                          key={selection.selectionId}
+                          className="flex items-center justify-between rounded-2xl border border-pink-100 bg-pink-50/60 px-4 py-3"
+                        >
+                          <div>
+                            <div className="text-sm font-semibold text-pink-700">
+                              {selection.questionnaire.title}
+                            </div>
+                            <div className="text-xs text-gray-500">
+                              题目数：{selection.questionnaire.questions.length}
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveQuestionnaire(selection.selectionId)}
+                            className="text-xs text-rose-500 hover:underline"
+                          >
+                            移除
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+
+                  {selectedQuestionnaires.length === 0 ? (
+                    <div className="mt-4 rounded-2xl border border-dashed border-gray-200 bg-gray-50/70 p-4 text-sm text-gray-500">
+                      你可以在这里追加一份或多份预设问卷，让创作页同时吸收背景、人格、世界观和事件线索。
+                    </div>
+                  ) : mergedQuestions.length === 0 ? (
+                    <div className="mt-4 rounded-2xl border border-dashed border-gray-200 bg-gray-50/70 p-4 text-sm text-gray-500">
+                      当前选中的问卷没有可作答题目，或所有题目都被条件隐藏了。
+                    </div>
+                  ) : (
+                    <div className="mt-5 space-y-4">
+                      {mergedQuestions.length > 1 ? (
+                        <QuestionNavigator
+                          items={questionnaireNavigatorItems}
+                          currentIndex={currentQuestionIndex}
+                          onNavigate={handleNavigateQuestionnaire}
+                          isAnswered={(index) => {
+                            const key = mergedQuestions[index]?.key;
+                            return Boolean(
+                              key &&
+                                questionnaireAnswersByKey[key] &&
+                                questionnaireAnswersByKey[key].trim().length > 0
+                            );
+                          }}
+                        />
+                      ) : null}
+
+                      <QuestionnaireQuestionPanel
+                        theme={DETAILS_QUESTIONNAIRE_THEME}
+                        progressLabel={`问题 ${currentQuestionIndex + 1} / ${mergedQuestions.length}`}
+                        progressPercent={questionnaireProgressPercent}
+                        questionText={currentQuestion?.question ?? '未加载题目'}
+                        questionnaireTitle={currentQuestionnaireTitle}
+                        noticeText="问卷答案会在提交时整理为 creator 输入摘要，与自由文本和车卡规则一起参与生成。"
+                        helperText={currentQuestion?.helperText}
+                        isRequired={currentQuestion?.required === true}
+                        skipText="本题可跳过，不作答则不会进入 creator 的问卷摘要。"
+                        quickOptions={questionnaireQuickOptions}
+                        onQuickOption={handleQuestionnaireQuickOption}
+                        options={currentQuestion?.options}
+                        optionsHintText={questionnaireOptionsHintText}
+                        onOptionSelect={handleQuestionnaireQuickOption}
+                        suggestions={questionnaireSuggestions}
+                        onSuggestionSelect={handleQuestionnaireAnswerChange}
+                        showTextInput={showQuestionTextInput}
+                        answer={currentQuestionAnswer}
+                        onAnswerChange={handleQuestionnaireAnswerChange}
+                        placeholder={currentQuestion?.placeholder ?? '请输入问卷答案'}
+                        answerLength={currentQuestionAnswer.trim().length}
+                        prevLabel="返回上题"
+                        nextButtonContent={questionnaireNextButtonLabel}
+                        onPrev={handleQuestionnairePrev}
+                        onNext={handleQuestionnaireNext}
+                        disablePrev={currentQuestionIndex === 0}
+                        disableNext={currentQuestion?.required === true && currentQuestionAnswer.trim().length === 0}
+                        prevButtonClass="generate-button w-1/4"
+                        nextButtonClass="generate-button"
+                      />
+                    </div>
+                  )}
                 </div>
 
                 <div className="mt-6">
@@ -549,19 +1194,23 @@ export default function CreatorPage(props: {
                   <button
                     type="button"
                     onClick={() => void handleGenerate()}
-                    disabled={
-                      submitting ||
-                      (!freeformBrief.trim() && buildRules.length === 0)
-                    }
+                    disabled={submitting || clientValidationMessage !== null}
                     className="generate-button"
                   >
                     {submitting ? '生成中…' : '开始创作'}
                   </button>
-                  <p className="text-xs text-gray-500">
-                    当前请求会调用 `/api/creator/generate`
-                    {generationMode === 'stream' ? '-stream' : ''}
-                    ，并把已选规则的 runtime 结果注入后端。
-                  </p>
+                  <div className="space-y-1">
+                    <p className="text-xs text-gray-500">
+                      当前请求会调用 `/api/creator/generate`
+                      {generationMode === 'stream' ? '-stream' : ''}
+                      ，并把已选规则的 runtime 结果交给后端重算与兜底校验。
+                    </p>
+                    {clientValidationMessage ? (
+                      <p className="text-xs text-amber-700">
+                        当前不可提交：{clientValidationMessage}
+                      </p>
+                    ) : null}
+                  </div>
                 </div>
               </div>
             </section>
@@ -589,6 +1238,51 @@ export default function CreatorPage(props: {
                   </div>
                 ) : null}
                 <div className="mt-5">{renderResult()}</div>
+                {resultActionData && missingPresetIds.length === 0 ? (
+                  <div className="mt-6 rounded-3xl border border-gray-200 bg-white p-5">
+                    <div className="text-center">
+                      <h3 className="text-lg font-medium text-gray-900">
+                        后续操作
+                      </h3>
+                      <div className="mt-4 flex flex-col justify-center gap-3 sm:flex-row">
+                        <button
+                          type="button"
+                          onClick={() => handleDownloadResult(resultActionData)}
+                          className="generate-button flex-1"
+                        >
+                          下载 JSON
+                        </button>
+                        <SaveToCloudButton
+                          data={resultActionData}
+                          cardType={getCreatorResultKind(template)}
+                          buttonText="保存到云端"
+                          className="generate-button flex-1"
+                          style={{
+                            backgroundColor: '#22c55e',
+                            backgroundImage:
+                              'linear-gradient(to right, #22c55e, #16a34a)',
+                          }}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => void handleCopyResult(resultActionData)}
+                          className="generate-button flex-1"
+                          style={{
+                            backgroundColor: '#3b82f6',
+                            backgroundImage:
+                              'linear-gradient(to right, #3b82f6, #2563eb)',
+                          }}
+                        >
+                          复制到剪贴板
+                        </button>
+                      </div>
+                      <JsonSizeIndicator
+                        data={resultActionData}
+                        warningText="⚠️ 接近云端 300KB 上限，保存/替换可能失败，请先精简数据。"
+                      />
+                    </div>
+                  </div>
+                ) : null}
               </div>
             </section>
           </div>

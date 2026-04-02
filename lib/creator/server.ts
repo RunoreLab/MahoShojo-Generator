@@ -1,7 +1,4 @@
-import type {
-  BuildRuleRuntimeResult,
-  BuildRuleValidationIssue,
-} from './build-rule-runtime';
+import { evaluateBuildRuleState, type BuildRuleRuntimeResult } from './build-rule-runtime';
 import type { BuildRulePreset, CreatorPromptInput, CreatorRequestInput } from './types';
 
 import type {
@@ -37,36 +34,11 @@ const KNOWN_CREATOR_REQUEST_ERROR_CODES = new Set([
   'RULE_TEMPLATE_UNSUPPORTED',
   'QUESTIONNAIRE_REQUIRED_FOR_RULE',
   'PRIMARY_RULE_INELIGIBLE',
-]);
-
-const BUILD_RULE_VALIDATION_ISSUE_CODES = new Set<BuildRuleValidationIssue['code']>([
-  'required-missing',
-  'budget-exceeded',
-  'selection-count',
-  'invalid-value',
+  'BUILD_RULE_VALIDATION_FAILED',
 ]);
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
-
-const normalizeValidationIssue = (value: unknown): BuildRuleValidationIssue | null => {
-  if (!isRecord(value)) {
-    return null;
-  }
-
-  const code = typeof value.code === 'string' ? value.code : null;
-  const blockKey = typeof value.blockKey === 'string' ? value.blockKey : null;
-  const message = typeof value.message === 'string' ? value.message : null;
-  if (!code || !blockKey || !message || !BUILD_RULE_VALIDATION_ISSUE_CODES.has(code as BuildRuleValidationIssue['code'])) {
-    return null;
-  }
-
-  return {
-    code: code as BuildRuleValidationIssue['code'],
-    blockKey,
-    message,
-  };
-};
 
 const getBuildRulePresetOrThrow = (
   ruleId: string,
@@ -115,6 +87,11 @@ export function validateCreatorRequest(
     if (!primaryPreset.mainRuleEligible) {
       throw new Error('PRIMARY_RULE_INELIGIBLE');
     }
+  }
+
+  const invalidRule = buildRules.find((rule) => !rule.validationSummary.valid);
+  if (invalidRule) {
+    throw new Error(`BUILD_RULE_VALIDATION_FAILED:${invalidRule.ruleId}`);
   }
 }
 
@@ -253,52 +230,12 @@ export function buildCreatorGenerationArtifacts(
 export function normalizeCreatorBuildRules(
   buildRules: CreatorBuildRuleSnapshot[] = []
 ): BuildRuleRuntimeResult[] {
-  return buildRules.map((rule) => {
-    const rawValidationSummary = isRecord(rule.validationSummary)
-      ? rule.validationSummary
-      : {};
-    const issues = Array.isArray(rawValidationSummary.issues)
-      ? rawValidationSummary.issues
-          .map((issue) => normalizeValidationIssue(issue))
-          .filter((issue): issue is BuildRuleValidationIssue => issue !== null)
-      : [];
-    const missingRequiredBlockKeys = Array.isArray(
-      rawValidationSummary.missingRequiredBlockKeys
-    )
-      ? rawValidationSummary.missingRequiredBlockKeys.filter(
-          (value): value is string => typeof value === 'string' && value.trim().length > 0
-        )
-      : [];
-    const derived: Record<string, number> = isRecord(rule.derived)
-      ? Object.entries(rule.derived).reduce<Record<string, number>>(
-          (acc, [key, value]) => {
-            if (typeof value === 'number' && Number.isFinite(value)) {
-              acc[key] = value;
-            }
-            return acc;
-          },
-          {}
-        )
-      : {};
-
-    return {
+  return buildRules.map((rule) =>
+    evaluateBuildRuleState({
       ruleId: rule.ruleId,
-      version:
-        typeof rule.version === 'string' && rule.version.trim()
-          ? rule.version
-          : 'unknown',
-      blockResults: isRecord(rule.blockResults) ? rule.blockResults : {},
-      derived,
-      validationSummary: {
-        valid:
-          typeof rawValidationSummary.valid === 'boolean'
-            ? rawValidationSummary.valid
-            : issues.length === 0 && missingRequiredBlockKeys.length === 0,
-        issues,
-        missingRequiredBlockKeys,
-      },
-    };
-  });
+      inputs: isRecord(rule.blockResults) ? rule.blockResults : {},
+    })
+  );
 }
 
 export function normalizeCreatorRequestError(
@@ -319,6 +256,15 @@ export function normalizeCreatorRequestError(
     const ruleId = error.message.slice(buildRulePresetPrefix.length).trim();
     return {
       code: 'BUILD_RULE_PRESET_NOT_FOUND',
+      ...(ruleId ? { ruleId } : {}),
+    };
+  }
+
+  const buildRuleValidationPrefix = 'BUILD_RULE_VALIDATION_FAILED:';
+  if (error.message.startsWith(buildRuleValidationPrefix)) {
+    const ruleId = error.message.slice(buildRuleValidationPrefix.length).trim();
+    return {
+      code: 'BUILD_RULE_VALIDATION_FAILED',
       ...(ruleId ? { ruleId } : {}),
     };
   }
