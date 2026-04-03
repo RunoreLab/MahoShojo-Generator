@@ -17,6 +17,18 @@ type BuildRulePanelProps = {
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
+const getStringArrayValue = (value: unknown): string[] =>
+  Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
+
+const getNumberGroupValue = (value: unknown): Record<string, unknown> => (isRecord(value) ? value : {});
+
+const getNumericDefaultValue = (block: Record<string, unknown>, field: Record<string, unknown>): number => {
+  if (typeof field.defaultValue === 'number' && Number.isFinite(field.defaultValue)) {
+    return Math.trunc(field.defaultValue);
+  }
+  return block.type === 'point-buy' ? 40 : 0;
+};
+
 export function BuildRulePanel({
   preset,
   inputs,
@@ -24,17 +36,7 @@ export function BuildRulePanel({
   onChange,
   disabled = false,
 }: BuildRulePanelProps) {
-  const blocks = Array.isArray(preset.blocks) ? preset.blocks : [];
-  const powerLevelBlock = blocks.find((block) => block.id === 'powerLevel');
-  const coreAttributesBlock = blocks.find((block) => block.id === 'coreAttributes');
-  const specialtiesBlock = blocks.find((block) => block.id === 'specialties');
-  const ruleNoticeBlock = blocks.find((block) => block.id === 'ruleNotice');
-
-  const coreAttributes = isRecord(inputs.coreAttributes) ? inputs.coreAttributes : {};
-  const selectedSpecialties = Array.isArray(inputs.specialties)
-    ? inputs.specialties.filter((item): item is string => typeof item === 'string')
-    : [];
-  const powerLevel = typeof inputs.powerLevel === 'string' ? inputs.powerLevel : 'seed';
+  const blocks = Array.isArray(preset.blocks) ? preset.blocks.filter(isRecord) : [];
   const budget = runtimeResult?.validationSummary.budget ?? null;
   const issues = runtimeResult?.validationSummary.issues ?? [];
   const attributeBudgetIssue = issues.find((issue) => issue.includes('属性点超出预算')) ?? null;
@@ -47,53 +49,289 @@ export function BuildRulePanel({
     attributePointsUsed !== null && attributePointsLimit !== null && attributePointsUsed > attributePointsLimit;
   const specialtyOverBudget =
     specialtyPointsUsed !== null && specialtyPointsLimit !== null && specialtyPointsUsed > specialtyPointsLimit;
-
-  const specialtyCostById = new Map<string, number>();
-  if (specialtiesBlock && Array.isArray(specialtiesBlock.groups)) {
-    specialtiesBlock.groups.filter(isRecord).forEach((group: Record<string, unknown>) => {
-      if (!Array.isArray(group.items)) return;
-      group.items.filter(isRecord).forEach((item: Record<string, unknown>) => {
-        const itemId = typeof item.id === 'string' ? item.id : '';
-        if (!itemId) return;
-        specialtyCostById.set(itemId, typeof item.cost === 'number' ? item.cost : 0);
-      });
-    });
-  }
-
   const specialtyRemainingPoints =
     specialtyPointsUsed !== null && specialtyPointsLimit !== null
       ? specialtyPointsLimit - specialtyPointsUsed
       : null;
 
-  const updateCoreAttribute = (fieldId: string, nextValue: number) => {
+  const updateGroupField = (blockId: string, fieldId: string, nextValue: number) => {
+    const currentGroup = getNumberGroupValue(inputs[blockId]);
     onChange({
       ...inputs,
-      coreAttributes: {
-        ...coreAttributes,
+      [blockId]: {
+        ...currentGroup,
         [fieldId]: nextValue,
       },
     });
   };
 
-  const toggleSpecialty = (specialtyId: string) => {
-    const checked = selectedSpecialties.includes(specialtyId);
-    const specialtyCost = specialtyCostById.get(specialtyId) ?? 0;
+  const updateSelectField = (blockId: string, nextValue: string) => {
+    onChange({
+      ...inputs,
+      [blockId]: nextValue,
+    });
+  };
+
+  const toggleMultiSelectItem = (
+    blockId: string,
+    itemId: string,
+    itemCost: number,
+    budgeted: boolean
+  ) => {
+    const currentItems = getStringArrayValue(inputs[blockId]);
+    const checked = currentItems.includes(itemId);
     const wouldExceedBudget =
-      !checked
+      budgeted
+      && !checked
       && specialtyPointsUsed !== null
       && specialtyPointsLimit !== null
-      && specialtyPointsUsed + specialtyCost > specialtyPointsLimit;
+      && specialtyPointsUsed + itemCost > specialtyPointsLimit;
+
     if (wouldExceedBudget) {
       return;
     }
 
-    const nextSpecialties = selectedSpecialties.includes(specialtyId)
-      ? selectedSpecialties.filter((item) => item !== specialtyId)
-      : [...selectedSpecialties, specialtyId];
     onChange({
       ...inputs,
-      specialties: nextSpecialties,
+      [blockId]: checked ? currentItems.filter((item) => item !== itemId) : [...currentItems, itemId],
     });
+  };
+
+  const renderSelectBlock = (block: Record<string, unknown>) => {
+    const blockId = typeof block.id === 'string' ? block.id : '';
+    const options = Array.isArray(block.options) ? block.options.filter(isRecord) : [];
+    const fallbackValue =
+      typeof block.defaultValue === 'string'
+        ? block.defaultValue
+        : (typeof options[0]?.value === 'string' ? options[0].value : '');
+    const value = typeof inputs[blockId] === 'string' ? inputs[blockId] as string : fallbackValue;
+
+    return (
+      <div
+        key={blockId}
+        data-creator-surface="subpanel"
+        className={joinCreatorClassNames(CREATOR_SUBPANEL_SURFACE_CLASS, 'mb-4 p-4')}
+      >
+        <h4 className="text-sm font-semibold text-slate-900">{block.label ?? blockId}</h4>
+        {typeof block.description === 'string' ? (
+          <p className="mt-1 text-xs leading-5 text-slate-600">{block.description}</p>
+        ) : null}
+        <select
+          data-creator-control="field"
+          className={joinCreatorClassNames(CREATOR_INPUT_CLASS, 'mt-3')}
+          value={value}
+          disabled={disabled}
+          onChange={(event) => updateSelectField(blockId, event.target.value)}
+        >
+          {options.map((option) => {
+            const optionValue = typeof option.value === 'string' ? option.value : '';
+            const optionLabel = typeof option.label === 'string' ? option.label : optionValue;
+            return (
+              <option key={optionValue} value={optionValue}>
+                {optionLabel}
+              </option>
+            );
+          })}
+        </select>
+      </div>
+    );
+  };
+
+  const renderNumericBlock = (block: Record<string, unknown>) => {
+    const blockId = typeof block.id === 'string' ? block.id : '';
+    const fields = Array.isArray(block.fields) ? block.fields.filter(isRecord) : [];
+    const groupValue = getNumberGroupValue(inputs[blockId]);
+    const isArenaPointBuy = block.type === 'point-buy' && blockId === 'coreAttributes';
+
+    return (
+      <div
+        key={blockId}
+        data-creator-surface="subpanel"
+        className={`mb-4 rounded-2xl border p-4 ${
+          isArenaPointBuy && attributeOverBudget
+            ? 'border-rose-300 bg-rose-50/60'
+            : 'border-[var(--app-border)] bg-[var(--app-surface-80)]'
+        }`}
+        data-core-attributes-budget-state={isArenaPointBuy ? (attributeOverBudget ? 'over-budget' : 'within-budget') : undefined}
+      >
+        <h4 className="text-sm font-semibold text-slate-900">{block.label ?? blockId}</h4>
+        {typeof block.description === 'string' ? (
+          <p className="mt-1 text-xs leading-5 text-slate-600">{block.description}</p>
+        ) : null}
+        {isArenaPointBuy && attributePointsUsed !== null ? (
+          <div
+            className={`mt-3 rounded-xl border px-3 py-2 text-xs leading-5 ${
+              attributeOverBudget
+                ? 'border-rose-200 bg-rose-50 text-rose-700'
+                : 'border-slate-200 bg-white text-slate-600'
+            }`}
+          >
+            <div className="font-medium">
+              属性点：{attributePointsUsed} / {attributePointsLimit ?? '无限'}
+            </div>
+            {attributeOverBudget && attributePointsLimit !== null ? (
+              <p className="mt-1">
+                {attributeBudgetIssue ?? '属性点超出预算'}，已超出 {attributePointsUsed - attributePointsLimit} 点上限。
+              </p>
+            ) : (
+              <p className="mt-1">当前分配已即时同步到预算统计。</p>
+            )}
+          </div>
+        ) : null}
+        <div className={`mt-3 grid gap-3 ${block.type === 'number-group' ? 'md:grid-cols-2' : ''}`}>
+          {fields.map((field) => {
+            const fieldId = typeof field.id === 'string' ? field.id : '';
+            const label = typeof field.label === 'string' ? field.label : fieldId;
+            const description = typeof field.description === 'string' ? field.description : '';
+            const defaultValue = getNumericDefaultValue(block, field);
+            const value = typeof groupValue[fieldId] === 'number' ? groupValue[fieldId] as number : defaultValue;
+            const min =
+              block.type === 'point-buy'
+                ? (typeof block.minPerStat === 'number' ? block.minPerStat : 10)
+                : (typeof field.min === 'number' ? field.min : undefined);
+            const max =
+              block.type === 'point-buy'
+                ? (typeof block.maxPerStat === 'number' ? block.maxPerStat : 80)
+                : (typeof field.max === 'number' ? field.max : undefined);
+
+            return (
+              <label
+                key={fieldId}
+                data-creator-surface="subpanel"
+                className={joinCreatorClassNames(CREATOR_SUBPANEL_SURFACE_CLASS, 'p-3')}
+              >
+                <span className="block text-sm font-semibold text-slate-900">{label}</span>
+                {description ? <span className="mt-1 block text-xs leading-5 text-slate-600">{description}</span> : null}
+                <input
+                  data-creator-control="field"
+                  type="number"
+                  min={min}
+                  max={max}
+                  disabled={disabled}
+                  aria-invalid={isArenaPointBuy ? attributeOverBudget : undefined}
+                  value={value}
+                  onChange={(event) => updateGroupField(blockId, fieldId, Number(event.target.value))}
+                  className={joinCreatorClassNames(CREATOR_INPUT_CLASS, 'mt-3')}
+                />
+              </label>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+
+  const renderMultiSelectBlock = (block: Record<string, unknown>) => {
+    const blockId = typeof block.id === 'string' ? block.id : '';
+    const selectedItems = getStringArrayValue(inputs[blockId]);
+    const isBudgetedSpecialties = blockId === 'specialties';
+    const groups = Array.isArray(block.groups) ? block.groups.filter(isRecord) : [];
+
+    return (
+      <div
+        key={blockId}
+        data-creator-surface="subpanel"
+        className={`mb-4 rounded-2xl border p-4 ${
+          isBudgetedSpecialties && specialtyOverBudget
+            ? 'border-rose-300 bg-rose-50/60'
+            : 'border-[var(--app-border)] bg-[var(--app-surface-80)]'
+        }`}
+      >
+        <h4 className="text-sm font-semibold text-slate-900">{block.label ?? blockId}</h4>
+        {typeof block.description === 'string' ? (
+          <p className="mt-1 text-xs leading-5 text-slate-600">{block.description}</p>
+        ) : null}
+        {isBudgetedSpecialties && specialtyPointsUsed !== null ? (
+          <div
+            className={`mt-3 rounded-xl border px-3 py-2 text-xs leading-5 ${
+              specialtyOverBudget
+                ? 'border-rose-200 bg-rose-50 text-rose-700'
+                : 'border-slate-200 bg-white text-slate-600'
+            }`}
+          >
+            <div className="font-medium">
+              专长点：{specialtyPointsUsed} / {specialtyPointsLimit ?? '无限'}
+            </div>
+            {specialtyOverBudget ? (
+              <p className="mt-1">{specialtyBudgetIssue ?? '专长点超出预算'}</p>
+            ) : specialtyRemainingPoints !== null ? (
+              <p className="mt-1">剩余 {Math.max(0, specialtyRemainingPoints)} 点，可直接选择预算内专长。</p>
+            ) : (
+              <p className="mt-1">当前规则不限制专长总预算。</p>
+            )}
+          </div>
+        ) : null}
+        <div className="mt-3 space-y-4">
+          {groups.map((group) => {
+            const groupId = typeof group.id === 'string' ? group.id : '';
+            const groupLabel = typeof group.label === 'string' ? group.label : groupId;
+            const items = Array.isArray(group.items) ? group.items.filter(isRecord) : [];
+
+            return (
+              <div key={groupId}>
+                <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">{groupLabel}</div>
+                <div className="mt-2 grid gap-2">
+                  {items.map((item) => {
+                    const itemId = typeof item.id === 'string' ? item.id : '';
+                    const label = typeof item.label === 'string' ? item.label : itemId;
+                    const description = typeof item.description === 'string' ? item.description : '';
+                    const cost = typeof item.cost === 'number' ? item.cost : 0;
+                    const checked = selectedItems.includes(itemId);
+                    const disabledByBudget =
+                      isBudgetedSpecialties
+                      && !checked
+                      && specialtyPointsUsed !== null
+                      && specialtyPointsLimit !== null
+                      && specialtyPointsUsed + cost > specialtyPointsLimit;
+
+                    return (
+                      <label
+                        key={itemId}
+                        data-creator-surface="subpanel"
+                        data-specialty-id={isBudgetedSpecialties ? itemId : undefined}
+                        data-specialty-budget-state={isBudgetedSpecialties ? (disabledByBudget ? 'insufficient' : 'available') : undefined}
+                        className={`rounded-xl border px-3 py-2 text-sm ${
+                          checked
+                            ? 'border-violet-300 bg-[var(--app-surface-80)] ring-1 ring-violet-400/25'
+                            : disabledByBudget
+                              ? 'border-[var(--app-border)] bg-[var(--app-surface-70)] text-slate-400'
+                              : 'border-[var(--app-border)] bg-[var(--app-surface-95)]'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-3">
+                          <span className={`font-medium ${disabledByBudget ? 'text-slate-500' : 'text-slate-900'}`}>{label}</span>
+                          <div className="flex items-center gap-2 text-xs text-slate-600">
+                            {isBudgetedSpecialties ? <span>{cost} 点</span> : null}
+                            {disabledByBudget ? <span className="text-rose-600">点数不足</span> : null}
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              disabled={disabled || disabledByBudget}
+                              onChange={() => toggleMultiSelectItem(blockId, itemId, cost, isBudgetedSpecialties)}
+                            />
+                          </div>
+                        </div>
+                        {description ? <p className="mt-1 text-xs leading-5 text-slate-600">{description}</p> : null}
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+
+  const renderSectionBlock = (block: Record<string, unknown>) => {
+    if (typeof block.description !== 'string') return null;
+    return (
+      <div key={typeof block.id === 'string' ? block.id : 'section'} className="rounded-2xl border border-amber-200 bg-amber-50/80 p-4 text-xs leading-6 text-amber-900">
+        <div className="font-semibold">{typeof block.label === 'string' ? block.label : '规则说明'}</div>
+        <p className="mt-1">{block.description}</p>
+      </div>
+    );
   };
 
   return (
@@ -106,204 +344,22 @@ export function BuildRulePanel({
         {preset.description ? <p className="mt-1 text-xs leading-5 text-slate-600">{preset.description}</p> : null}
       </div>
 
-      {powerLevelBlock ? (
-        <div
-          data-creator-surface="subpanel"
-          className={joinCreatorClassNames(CREATOR_SUBPANEL_SURFACE_CLASS, 'mb-4 p-4')}
-        >
-          <h4 className="text-sm font-semibold text-slate-900">{powerLevelBlock.label ?? '力量层级'}</h4>
-          {powerLevelBlock.description ? (
-            <p className="mt-1 text-xs leading-5 text-slate-600">{powerLevelBlock.description}</p>
-          ) : null}
-          <select
-            data-creator-control="field"
-            className={joinCreatorClassNames(CREATOR_INPUT_CLASS, 'mt-3')}
-            value={powerLevel}
-            disabled={disabled}
-            onChange={(event) => onChange({ ...inputs, powerLevel: event.target.value })}
-          >
-            {Array.isArray(powerLevelBlock.options)
-              ? powerLevelBlock.options
-                  .filter(isRecord)
-                  .map((option: Record<string, unknown>) => {
-                    const value = typeof option.value === 'string' ? option.value : '';
-                    const label = typeof option.label === 'string' ? option.label : value;
-                    return (
-                      <option key={value} value={value}>
-                        {label}
-                      </option>
-                    );
-                  })
-              : null}
-          </select>
-        </div>
-      ) : null}
-
-      {coreAttributesBlock ? (
-        <div
-          data-creator-surface="subpanel"
-          className={`mb-4 rounded-2xl border p-4 ${
-            attributeOverBudget ? 'border-rose-300 bg-rose-50/60' : 'border-[var(--app-border)] bg-[var(--app-surface-80)]'
-          }`}
-          data-core-attributes-budget-state={attributeOverBudget ? 'over-budget' : 'within-budget'}
-        >
-          <h4 className="text-sm font-semibold text-slate-900">{coreAttributesBlock.label ?? '核心属性'}</h4>
-          {coreAttributesBlock.description ? (
-            <p className="mt-1 text-xs leading-5 text-slate-600">{coreAttributesBlock.description}</p>
-          ) : null}
-          {attributePointsUsed !== null ? (
-            <div
-              className={`mt-3 rounded-xl border px-3 py-2 text-xs leading-5 ${
-                attributeOverBudget
-                  ? 'border-rose-200 bg-rose-50 text-rose-700'
-                  : 'border-slate-200 bg-white text-slate-600'
-              }`}
-            >
-              <div className="font-medium">
-                属性点：{attributePointsUsed} / {attributePointsLimit ?? '无限'}
-              </div>
-              {attributeOverBudget && attributePointsLimit !== null ? (
-                <p className="mt-1">
-                  {attributeBudgetIssue ?? '属性点超出预算'}，已超出 {attributePointsUsed - attributePointsLimit} 点上限。
-                </p>
-              ) : (
-                <p className="mt-1">当前分配已即时同步到预算统计。</p>
-              )}
-            </div>
-          ) : null}
-          <div className="mt-3 grid gap-3">
-            {Array.isArray(coreAttributesBlock.fields)
-              ? coreAttributesBlock.fields.filter(isRecord).map((field: Record<string, unknown>) => {
-                  const fieldId = typeof field.id === 'string' ? field.id : '';
-                  const label = typeof field.label === 'string' ? field.label : fieldId;
-                  const description = typeof field.description === 'string' ? field.description : '';
-                  const value = typeof coreAttributes[fieldId] === 'number' ? (coreAttributes[fieldId] as number) : 40;
-                  return (
-                    <label
-                      key={fieldId}
-                      data-creator-surface="subpanel"
-                      className={joinCreatorClassNames(CREATOR_SUBPANEL_SURFACE_CLASS, 'p-3')}
-                    >
-                      <span className="block text-sm font-semibold text-slate-900">{label}</span>
-                      {description ? <span className="mt-1 block text-xs leading-5 text-slate-600">{description}</span> : null}
-                      <input
-                        data-creator-control="field"
-                        type="number"
-                        min={typeof coreAttributesBlock.minPerStat === 'number' ? coreAttributesBlock.minPerStat : 10}
-                        max={typeof coreAttributesBlock.maxPerStat === 'number' ? coreAttributesBlock.maxPerStat : 80}
-                        disabled={disabled}
-                        aria-invalid={attributeOverBudget}
-                        value={value}
-                        onChange={(event) => updateCoreAttribute(fieldId, Number(event.target.value))}
-                        className={joinCreatorClassNames(CREATOR_INPUT_CLASS, 'mt-3')}
-                      />
-                    </label>
-                  );
-                })
-              : null}
-          </div>
-        </div>
-      ) : null}
-
-      {specialtiesBlock ? (
-        <div
-          data-creator-surface="subpanel"
-          className={`mb-4 rounded-2xl border p-4 ${
-            specialtyOverBudget ? 'border-rose-300 bg-rose-50/60' : 'border-[var(--app-border)] bg-[var(--app-surface-80)]'
-          }`}
-        >
-          <h4 className="text-sm font-semibold text-slate-900">{specialtiesBlock.label ?? '基础能力专长'}</h4>
-          {specialtiesBlock.description ? (
-            <p className="mt-1 text-xs leading-5 text-slate-600">{specialtiesBlock.description}</p>
-          ) : null}
-          {specialtyPointsUsed !== null ? (
-            <div
-              className={`mt-3 rounded-xl border px-3 py-2 text-xs leading-5 ${
-                specialtyOverBudget
-                  ? 'border-rose-200 bg-rose-50 text-rose-700'
-                  : 'border-slate-200 bg-white text-slate-600'
-              }`}
-            >
-              <div className="font-medium">
-                专长点：{specialtyPointsUsed} / {specialtyPointsLimit ?? '无限'}
-              </div>
-              {specialtyOverBudget ? (
-                <p className="mt-1">{specialtyBudgetIssue ?? '专长点超出预算'}</p>
-              ) : specialtyRemainingPoints !== null ? (
-                <p className="mt-1">剩余 {Math.max(0, specialtyRemainingPoints)} 点，可直接选择预算内专长。</p>
-              ) : (
-                <p className="mt-1">当前规则不限制专长总预算。</p>
-              )}
-            </div>
-          ) : null}
-          <div className="mt-3 space-y-4">
-            {Array.isArray(specialtiesBlock.groups)
-              ? specialtiesBlock.groups.filter(isRecord).map((group: Record<string, unknown>) => {
-                  const groupId = typeof group.id === 'string' ? group.id : '';
-                  const groupLabel = typeof group.label === 'string' ? group.label : groupId;
-                  return (
-                    <div key={groupId}>
-                      <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">{groupLabel}</div>
-                      <div className="mt-2 grid gap-2">
-                        {Array.isArray(group.items)
-                          ? group.items.filter(isRecord).map((item: Record<string, unknown>) => {
-                              const itemId = typeof item.id === 'string' ? item.id : '';
-                              const label = typeof item.label === 'string' ? item.label : itemId;
-                              const description = typeof item.description === 'string' ? item.description : '';
-                              const cost = typeof item.cost === 'number' ? item.cost : 0;
-                              const checked = selectedSpecialties.includes(itemId);
-                              const disabledByBudget =
-                                !checked
-                                && specialtyPointsUsed !== null
-                                && specialtyPointsLimit !== null
-                                && specialtyPointsUsed + cost > specialtyPointsLimit;
-                              return (
-                                <label
-                                  key={itemId}
-                                  data-creator-surface="subpanel"
-                                  data-specialty-id={itemId}
-                                  data-specialty-budget-state={disabledByBudget ? 'insufficient' : 'available'}
-                                  className={`rounded-xl border px-3 py-2 text-sm ${
-                                    checked
-                                      ? 'border-violet-300 bg-[var(--app-surface-80)] ring-1 ring-violet-400/25'
-                                      : disabledByBudget
-                                        ? 'border-[var(--app-border)] bg-[var(--app-surface-70)] text-slate-400'
-                                        : 'border-[var(--app-border)] bg-[var(--app-surface-95)]'
-                                  }`}
-                                >
-                                  <div className="flex items-center justify-between gap-3">
-                                    <span className={`font-medium ${disabledByBudget ? 'text-slate-500' : 'text-slate-900'}`}>{label}</span>
-                                    <div className="flex items-center gap-2 text-xs text-slate-600">
-                                      <span>{cost} 点</span>
-                                      {disabledByBudget ? <span className="text-rose-600">点数不足</span> : null}
-                                      <input
-                                        type="checkbox"
-                                        checked={checked}
-                                        disabled={disabled || disabledByBudget}
-                                        onChange={() => toggleSpecialty(itemId)}
-                                      />
-                                    </div>
-                                  </div>
-                                  {description ? <p className="mt-1 text-xs leading-5 text-slate-600">{description}</p> : null}
-                                </label>
-                              );
-                            })
-                          : null}
-                      </div>
-                    </div>
-                  );
-                })
-              : null}
-          </div>
-        </div>
-      ) : null}
-
-      {ruleNoticeBlock && ruleNoticeBlock.description ? (
-        <div className="rounded-2xl border border-amber-200 bg-amber-50/80 p-4 text-xs leading-6 text-amber-900">
-          <div className="font-semibold">{ruleNoticeBlock.label ?? '规则说明'}</div>
-          <p className="mt-1">{ruleNoticeBlock.description}</p>
-        </div>
-      ) : null}
+      {blocks.map((block) => {
+        switch (block.type) {
+          case 'select':
+            return renderSelectBlock(block);
+          case 'point-buy':
+          case 'stat-array':
+          case 'number-group':
+            return renderNumericBlock(block);
+          case 'multi-select':
+            return renderMultiSelectBlock(block);
+          case 'section':
+            return renderSectionBlock(block);
+          default:
+            return null;
+        }
+      })}
     </section>
   );
 }

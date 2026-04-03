@@ -13,7 +13,7 @@ import { CreatorWorkbenchLayout } from '@/components/creator/CreatorWorkbenchLay
 import { TemplateSelector } from '@/components/creator/TemplateSelector';
 import { CREATOR_PAGE_COPY } from '@/lib/creator/page-copy';
 import { evaluateBuildRuleState } from '@/lib/creator/build-rule-runtime';
-import { loadBuildRulePresetById, loadBuildRulePresetIndex } from '@/lib/creator/build-rules';
+import { createDefaultBuildRuleInputs, loadBuildRulePresetById, loadBuildRulePresetIndex } from '@/lib/creator/build-rules';
 import {
   DEFAULT_CREATOR_GENERATION_MODE,
   getDefaultCreatorTemplateForGenerationMode,
@@ -65,6 +65,22 @@ test('BuildRulePicker 展示可选规则与主规则入口', () => {
   expect(html).toContain('data-creator-surface="subpanel"');
 });
 
+test('BuildRulePicker 展示 arena / dnd / coc 三套规则', () => {
+  const html = renderToStaticMarkup(
+    <BuildRulePicker
+      presets={loadBuildRulePresetIndex()}
+      selectedRuleIds={['dnd-5e-lite']}
+      primaryRuleId="dnd-5e-lite"
+      onToggleRule={() => {}}
+      onSelectPrimaryRule={() => {}}
+    />
+  );
+
+  expect(html).toContain('魔法少女竞技场 TRPG 简化角色卡');
+  expect(html).toContain('DND 5e 经典角色卡');
+  expect(html).toContain('CoC 7e 经典调查员卡');
+});
+
 test('BuildRulePanel 渲染力量层级、属性与基础能力专长', () => {
   const preset = loadBuildRulePresetById('arena-trpg-lite');
   const html = renderToStaticMarkup(
@@ -96,6 +112,21 @@ test('BuildRulePanel 渲染力量层级、属性与基础能力专长', () => {
   expect(html).toContain('data-creator-control="field"');
 });
 
+test('BuildRulePanel 能渲染 stat-array 与 number-group', () => {
+  const preset = loadBuildRulePresetById('dnd-5e-lite');
+  const html = renderToStaticMarkup(
+    <BuildRulePanel
+      preset={preset}
+      inputs={createDefaultBuildRuleInputs('dnd-5e-lite')}
+      onChange={() => {}}
+    />
+  );
+
+  expect(html).toContain('力量');
+  expect(html).toContain('护甲等级');
+  expect(html).toContain('data-creator-control="field"');
+});
+
 test('BuildSummaryPanel 展示属性预算、专长预算与派生值', () => {
   const runtimeResult = evaluateBuildRuleState({
     ruleId: 'arena-trpg-lite',
@@ -124,6 +155,38 @@ test('BuildSummaryPanel 展示属性预算、专长预算与派生值', () => {
   expect(html).toContain('专长点');
   expect(html).toContain('data-creator-surface="panel"');
   expect(html).toContain('data-creator-surface="subpanel"');
+});
+
+test('BuildSummaryPanel 能展示 DND 的熟练加值与施法类型摘要', () => {
+  const runtimeResult = evaluateBuildRuleState({
+    ruleId: 'dnd-5e-lite',
+    inputs: {
+      level: '5',
+      class: 'wizard',
+      lineage: 'high-elf',
+      abilityScores: {
+        STR: 8,
+        DEX: 14,
+        CON: 14,
+        INT: 18,
+        WIS: 12,
+        CHA: 10,
+      },
+      combatProfile: {
+        armorClass: 15,
+        hitPoints: 32,
+        speed: 30,
+        passivePerception: 11,
+      },
+    },
+  });
+
+  const html = renderToStaticMarkup(
+    <BuildSummaryPanel runtimeResult={runtimeResult} />
+  );
+
+  expect(html).toContain('熟练加值');
+  expect(html).toContain('完整施法');
 });
 
 test('BuildRulePanel 在专长预算不足时禁用超预算的未选专长', () => {

@@ -9,9 +9,95 @@ type BuildSummaryPanelProps = {
   runtimeResult: BuildRuleRuntimeResult;
 };
 
+type SummaryItem = {
+  key: string;
+  label: string;
+  value: string;
+};
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const formatSignedNumber = (value: unknown): string => {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return '-';
+  return value > 0 ? `+${Math.trunc(value)}` : `${Math.trunc(value)}`;
+};
+
+const translateSpellcastingKind = (value: unknown): string => {
+  switch (value) {
+    case 'full':
+      return '完整施法';
+    case 'half':
+      return '半施法';
+    case 'pact':
+      return '契约施法';
+    case 'none':
+      return '无施法';
+    default:
+      return typeof value === 'string' && value.trim() ? value.trim() : '-';
+  }
+};
+
+const buildSummaryItems = (runtimeResult: BuildRuleRuntimeResult): SummaryItem[] => {
+  const derived = isRecord(runtimeResult.derived) ? runtimeResult.derived : {};
+
+  if (runtimeResult.ruleId === 'dnd-5e-lite') {
+    const abilityModifiers = isRecord(derived.abilityModifiers) ? derived.abilityModifiers : {};
+    return [
+      {
+        key: 'proficiencyBonus',
+        label: '熟练加值',
+        value: formatSignedNumber(derived.proficiencyBonus),
+      },
+      {
+        key: 'hitDie',
+        label: '命中骰',
+        value: typeof derived.hitDie === 'string' ? derived.hitDie : '-',
+      },
+      {
+        key: 'spellcastingKind',
+        label: '施法类型',
+        value: translateSpellcastingKind(derived.spellcastingKind),
+      },
+      {
+        key: 'abilityModifiers',
+        label: '能力调整值',
+        value: ['STR', 'DEX', 'CON', 'INT', 'WIS', 'CHA']
+          .map((abilityKey) => `${abilityKey} ${formatSignedNumber(abilityModifiers[abilityKey])}`)
+          .join(' / '),
+      },
+    ];
+  }
+
+  if (runtimeResult.ruleId === 'coc-7e-lite') {
+    return [
+      { key: 'SAN', label: 'SAN', value: `${derived.SAN ?? '-'}` },
+      { key: 'HP', label: 'HP', value: `${derived.HP ?? '-'}` },
+      { key: 'MP', label: 'MP', value: `${derived.MP ?? '-'}` },
+      { key: 'Build', label: 'Build', value: `${derived.Build ?? '-'}` },
+      { key: 'DamageBonus', label: 'Damage Bonus', value: `${derived.DamageBonus ?? '-'}` },
+    ];
+  }
+
+  return [
+    { key: 'HP', label: 'HP', value: `${derived.HP ?? '-'}` },
+    { key: 'MP', label: 'MP', value: `${derived.MP ?? '-'}` },
+    { key: 'Radiance', label: 'Radiance', value: `${derived.Radiance ?? '-'}` },
+  ];
+};
+
 export function BuildSummaryPanel({ runtimeResult }: BuildSummaryPanelProps) {
   const budget = runtimeResult.validationSummary.budget;
   const issues = runtimeResult.validationSummary.issues;
+  const summaryItems = buildSummaryItems(runtimeResult);
+  const shouldShowBudget =
+    !!budget
+    && (
+      budget.attributePointsUsed > 0
+      || budget.specialtyPointsUsed > 0
+      || budget.attributePointsLimit !== null
+      || budget.specialtyPointsLimit !== null
+    );
 
   return (
     <section
@@ -24,21 +110,15 @@ export function BuildSummaryPanel({ runtimeResult }: BuildSummaryPanelProps) {
       </div>
 
       <div className="grid gap-3 md:grid-cols-3">
-        <div data-creator-surface="subpanel" className={joinCreatorClassNames(CREATOR_SUBPANEL_SURFACE_CLASS, 'p-3')}>
-          <div className="text-xs text-slate-500">HP</div>
-          <div className="mt-1 text-lg font-semibold text-slate-900">{runtimeResult.derived.HP ?? '-'}</div>
-        </div>
-        <div data-creator-surface="subpanel" className={joinCreatorClassNames(CREATOR_SUBPANEL_SURFACE_CLASS, 'p-3')}>
-          <div className="text-xs text-slate-500">MP</div>
-          <div className="mt-1 text-lg font-semibold text-slate-900">{runtimeResult.derived.MP ?? '-'}</div>
-        </div>
-        <div data-creator-surface="subpanel" className={joinCreatorClassNames(CREATOR_SUBPANEL_SURFACE_CLASS, 'p-3')}>
-          <div className="text-xs text-slate-500">Radiance</div>
-          <div className="mt-1 text-lg font-semibold text-slate-900">{runtimeResult.derived.Radiance ?? '-'}</div>
-        </div>
+        {summaryItems.map((item) => (
+          <div key={item.key} data-creator-surface="subpanel" className={joinCreatorClassNames(CREATOR_SUBPANEL_SURFACE_CLASS, 'p-3')}>
+            <div className="text-xs text-slate-500">{item.label}</div>
+            <div className="mt-1 text-lg font-semibold text-slate-900 break-words">{item.value}</div>
+          </div>
+        ))}
       </div>
 
-      {budget ? (
+      {shouldShowBudget ? (
         <div className="mt-4 grid gap-3 md:grid-cols-2">
           <div
             data-creator-surface="subpanel"
