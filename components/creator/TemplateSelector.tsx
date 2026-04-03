@@ -37,7 +37,7 @@ export function TemplateSelector({ value, onChange, disabled = false }: Template
               onClick={() => onChange(option.id)}
               className={joinCreatorClassNames(
                 isActive ? CREATOR_SUBPANEL_ACTIVE_CLASS : CREATOR_SUBPANEL_SURFACE_CLASS,
-                isActive ? 'border-sky-400' : 'hover:border-sky-300 hover:bg-[var(--app-surface-95)]',
+                isActive ? 'border-sky-400' : 'hover:border-sky-300 hover:bg-[var(--creator-subpanel-emphasis-bg)]',
                 'px-4 py-3 text-left transition',
                 disabled && 'cursor-not-allowed opacity-60'
               )}
@@ -49,7 +49,7 @@ export function TemplateSelector({ value, onChange, disabled = false }: Template
                     'rounded-full border px-2 py-0.5 text-[11px] font-medium',
                     isStreamable
                       ? 'border-emerald-200 bg-emerald-100 text-emerald-700'
-                      : 'border-[var(--app-border)] bg-[var(--app-surface-70)] text-[color:var(--app-text-subtle)]'
+                      : 'border-[var(--creator-subpanel-border)] bg-[var(--creator-subpanel-muted-bg)] text-[color:var(--app-text-subtle)]'
                   )}
                 >
                   {isStreamable ? '支持流式' : '仅非流式'}

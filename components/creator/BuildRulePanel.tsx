@@ -152,7 +152,7 @@ export function BuildRulePanel({
         className={`mb-4 rounded-2xl border p-4 ${
           isArenaPointBuy && attributeOverBudget
             ? 'border-rose-300 bg-rose-50/60'
-            : 'border-[var(--app-border)] bg-[var(--app-surface-80)]'
+            : 'border-[var(--creator-subpanel-border)] bg-[var(--creator-subpanel-bg)]'
         }`}
         data-core-attributes-budget-state={isArenaPointBuy ? (attributeOverBudget ? 'over-budget' : 'within-budget') : undefined}
       >
@@ -237,7 +237,7 @@ export function BuildRulePanel({
         className={`mb-4 rounded-2xl border p-4 ${
           isBudgetedSpecialties && specialtyOverBudget
             ? 'border-rose-300 bg-rose-50/60'
-            : 'border-[var(--app-border)] bg-[var(--app-surface-80)]'
+            : 'border-[var(--creator-subpanel-border)] bg-[var(--creator-subpanel-bg)]'
         }`}
       >
         <h4 className="text-sm font-semibold text-slate-900">{blockLabel}</h4>
@@ -295,10 +295,10 @@ export function BuildRulePanel({
                         data-specialty-budget-state={isBudgetedSpecialties ? (disabledByBudget ? 'insufficient' : 'available') : undefined}
                         className={`rounded-xl border px-3 py-2 text-sm ${
                           checked
-                            ? 'border-violet-300 bg-[var(--app-surface-80)] ring-1 ring-violet-400/25'
+                            ? 'border-violet-300 bg-[var(--creator-subpanel-bg)] ring-1 ring-violet-400/25'
                             : disabledByBudget
-                              ? 'border-[var(--app-border)] bg-[var(--app-surface-70)] text-slate-400'
-                              : 'border-[var(--app-border)] bg-[var(--app-surface-95)]'
+                              ? 'border-[var(--creator-subpanel-border)] bg-[var(--creator-subpanel-muted-bg)] text-slate-400'
+                              : 'border-[var(--creator-subpanel-border)] bg-[var(--creator-subpanel-emphasis-bg)]'
                         }`}
                       >
                         <div className="flex items-center justify-between gap-3">

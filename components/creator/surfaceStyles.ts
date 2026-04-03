@@ -2,11 +2,11 @@ export const joinCreatorClassNames = (...classNames: Array<string | false | null
   classNames.filter(Boolean).join(' ');
 
 export const CREATOR_PANEL_SURFACE_CLASS = joinCreatorClassNames(
-  'rounded-2xl border border-[var(--app-border-strong)] bg-[var(--app-surface-90)] p-4 shadow-sm'
+  'rounded-2xl border border-[var(--creator-panel-border)] bg-[var(--creator-panel-bg)] p-4 shadow-sm'
 );
 
 export const CREATOR_SUBPANEL_SURFACE_CLASS = joinCreatorClassNames(
-  'rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-80)]'
+  'rounded-2xl border border-[var(--creator-subpanel-border)] bg-[var(--creator-subpanel-bg)]'
 );
 
 export const CREATOR_SUBPANEL_ACTIVE_CLASS = joinCreatorClassNames(
@@ -15,7 +15,7 @@ export const CREATOR_SUBPANEL_ACTIVE_CLASS = joinCreatorClassNames(
 );
 
 export const CREATOR_INPUT_CLASS = joinCreatorClassNames(
-  'w-full rounded-xl border border-[var(--app-input-border)] bg-[var(--app-input-bg)]',
+  'w-full rounded-xl border border-[var(--creator-input-border)] bg-[var(--creator-input-bg)]',
   'px-3 py-2 text-sm text-[color:var(--app-text)] outline-none transition',
   'placeholder:text-[color:var(--app-text-subtle)]'
 );

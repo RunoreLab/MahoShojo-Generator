@@ -122,7 +122,7 @@ export function BuildSummaryPanel({ runtimeResult }: BuildSummaryPanelProps) {
         <div className="mt-4 grid gap-3 md:grid-cols-2">
           <div
             data-creator-surface="subpanel"
-            className={joinCreatorClassNames(CREATOR_SUBPANEL_SURFACE_CLASS, 'bg-[var(--app-surface-95)] p-3 text-sm text-slate-700')}
+            className={joinCreatorClassNames(CREATOR_SUBPANEL_SURFACE_CLASS, 'bg-[var(--creator-subpanel-emphasis-bg)] p-3 text-sm text-slate-700')}
           >
             <div className="font-medium text-slate-900">属性点</div>
             <div className="mt-1">
@@ -131,7 +131,7 @@ export function BuildSummaryPanel({ runtimeResult }: BuildSummaryPanelProps) {
           </div>
           <div
             data-creator-surface="subpanel"
-            className={joinCreatorClassNames(CREATOR_SUBPANEL_SURFACE_CLASS, 'bg-[var(--app-surface-95)] p-3 text-sm text-slate-700')}
+            className={joinCreatorClassNames(CREATOR_SUBPANEL_SURFACE_CLASS, 'bg-[var(--creator-subpanel-emphasis-bg)] p-3 text-sm text-slate-700')}
           >
             <div className="font-medium text-slate-900">专长点</div>
             <div className="mt-1">

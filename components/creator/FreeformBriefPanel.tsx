@@ -40,7 +40,7 @@ export function FreeformBriefPanel({
           CREATOR_INPUT_CLASS,
           'mt-2 min-h-28 rounded-2xl px-4 py-3 shadow-inner',
           'focus:border-amber-300 focus:ring-2 focus:ring-amber-100',
-          disabled && 'cursor-not-allowed disabled:bg-[var(--app-surface-70)]'
+          disabled && 'cursor-not-allowed disabled:bg-[var(--creator-subpanel-muted-bg)]'
         )}
       />
     </section>
