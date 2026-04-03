@@ -107,7 +107,7 @@ const getSpecialtyMap = (ruleId: string): Map<string, SpecialtyPromptMeta> => {
 const buildArenaRuleSummary = (template: CreatorTemplateId, rule: BuildRuleRuntimeResult): string => {
   const blockResults = isRecord(rule.blockResults) ? rule.blockResults : {};
   const derived = isRecord(rule.derived) ? rule.derived : {};
-  const powerLevel = typeof blockResults.powerLevel === 'string' ? blockResults.powerLevel : 'seed';
+  const powerLevel = getSelectOptionLabel(rule.ruleId, 'powerLevel', blockResults.powerLevel);
   const attributes = isRecord(blockResults.coreAttributes) ? blockResults.coreAttributes : {};
   const specialties = Array.isArray(blockResults.specialties)
     ? blockResults.specialties.filter((item): item is string => typeof item === 'string')

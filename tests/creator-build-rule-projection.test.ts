@@ -127,6 +127,7 @@ describe('creator build-rule projection', () => {
     expect(projection.primary?.template).toBe('general');
     expect(projection.primary?.facts.derived.HP).toBe(8);
     expect(projection.primary?.summary).toContain('力量层级');
+    expect(projection.primary?.summary).toContain('种（Seed）');
     expect(projection.primary?.summary).toContain('魔弹');
   });
 

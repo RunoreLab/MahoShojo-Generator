@@ -37,13 +37,13 @@
       "description": "决定本角色当前所在的成长阶段，并影响属性预算与专长预算。",
       "defaultValue": "seed",
       "options": [
-        { "value": "seed", "label": "种（Seed）" },
-        { "value": "sprout", "label": "芽（Sprout）" },
-        { "value": "leaf", "label": "叶（Leaf）" },
-        { "value": "bud", "label": "蕾（Bud）" },
-        { "value": "flower", "label": "花（Flower）" },
-        { "value": "gemScepter", "label": "宝石权杖（Gem Scepter）" },
-        { "value": "unlimited", "label": "无限制（调试/自由创作）" }
+        { "value": "seed", "label": "种（Seed）", "meta": { "attributePoints": 280, "specialtyPoints": 4 } },
+        { "value": "sprout", "label": "芽（Sprout）", "meta": { "attributePoints": 285, "specialtyPoints": 5 } },
+        { "value": "leaf", "label": "叶（Leaf）", "meta": { "attributePoints": 290, "specialtyPoints": 6 } },
+        { "value": "bud", "label": "蕾（Bud）", "meta": { "attributePoints": 300, "specialtyPoints": 8 } },
+        { "value": "flower", "label": "花（Flower）", "meta": { "attributePoints": 310, "specialtyPoints": 10 } },
+        { "value": "gemScepter", "label": "宝石权杖（Gem Scepter）", "meta": { "attributePoints": 325, "specialtyPoints": 13 } },
+        { "value": "unlimited", "label": "无限制（调试/自由创作）", "meta": { "attributePoints": null, "specialtyPoints": null } }
       ]
     },
     {

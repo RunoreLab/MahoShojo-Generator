@@ -52,4 +52,15 @@ describe('creator build rules', () => {
     expect(preset.blocks.some((block) => block.id === 'occupation')).toBe(true);
     expect(preset.blocks.some((block) => block.id === 'derivedStats')).toBe(true);
   });
+
+  test('arena-trpg-lite 的力量层级选项带有预算 meta', () => {
+    const preset = loadBuildRulePresetById('arena-trpg-lite');
+    const powerLevelBlock = preset.blocks.find((block) => block.id === 'powerLevel');
+    const seedOption = powerLevelBlock?.options?.find((option) => option.value === 'seed');
+
+    expect(seedOption?.meta).toEqual({
+      attributePoints: 280,
+      specialtyPoints: 4,
+    });
+  });
 });
