@@ -35,7 +35,7 @@ const buildContextSections = ({
 
 const buildGeneralCharacterPrompt = (input: BuildCreatorStreamPromptInput): string => {
   return `
-你将根据【创作约束】、【参考设定】与【问卷回答】生成一份【通用角色卡】的正文内容。
+你将根据【创作约束】、【参考设定】与【问卷回答】生成一份【角色卡】的正文内容。
 
 输出要求：
 1) 必须使用【${input.language}】创作。
@@ -53,7 +53,7 @@ ${buildContextSections(input)}
 
 const buildGeneralScenarioPrompt = (input: BuildCreatorStreamPromptInput): string => {
   return `
-你将根据【创作约束】、【参考设定】与【问卷回答】生成一份【通用情景卡】的正文内容。
+你将根据【创作约束】、【参考设定】与【问卷回答】生成一份【情景卡】的正文内容。
 
 输出要求：
 1) 必须使用【${input.language}】创作。
