@@ -2695,6 +2695,7 @@ const DetailsPage: React.FC = () => {
           </div>
           <EncyclopediaLinks
             items={[
+              { slug: 'creator', text: '百科：创作工房使用说明' },
               { slug: 'character-generator', text: '百科：角色生成入口说明' },
               { slug: 'archive', text: '百科：档案馆（角色管理）' },
             ]}
