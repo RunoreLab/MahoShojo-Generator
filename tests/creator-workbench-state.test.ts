@@ -4,11 +4,12 @@ import * as creatorWorkbench from '@/lib/creator/workbench';
 
 const {
   hasCreatorWorkbenchResult,
+  resolveCreatorStreamingDisplayMarkdown,
   subscribeToMediaQueryChange,
 } = creatorWorkbench;
 
 describe('creator workbench state', () => {
-  test('流式空缓冲区不应被视为已生成结果', () => {
+  test('流式生成一启动即应切入结果阶段', () => {
     expect(
       hasCreatorWorkbenchResult({
         generationMode: 'stream',
@@ -16,7 +17,16 @@ describe('creator workbench state', () => {
         streamingMarkdown: '',
         streamedGeneralCard: null,
       })
-    ).toBe(false);
+    ).toBe(true);
+  });
+
+  test('流式展示 Markdown 在启动阶段应保留空字符串', () => {
+    expect(
+      resolveCreatorStreamingDisplayMarkdown({
+        streamingMarkdown: '',
+        streamedGeneralCard: null,
+      })
+    ).toBe('');
   });
 
   test('流式收到正文后应切入结果阶段', () => {

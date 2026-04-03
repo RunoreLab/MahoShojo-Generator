@@ -79,6 +79,7 @@ import {
   buildCreatorResultOverview,
   hasCreatorWorkbenchResult,
   normalizeCreatorStreamingMarkdown,
+  resolveCreatorStreamingDisplayMarkdown,
   resolveCreatorWorkbenchDisplayState,
   subscribeToMediaQueryChange,
   type CreatorWorkbenchSnapshot,
@@ -582,6 +583,11 @@ const DetailsPage: React.FC = () => {
     [streamingMarkdown]
   );
 
+  const streamingDisplayMarkdown = useMemo(
+    () => resolveCreatorStreamingDisplayMarkdown({ streamingMarkdown, streamedGeneralCard }),
+    [streamingMarkdown, streamedGeneralCard]
+  );
+
   const hasStreamCreatorResult = useMemo(() => {
     return hasCreatorWorkbenchResult({
       generationMode: 'stream',
@@ -634,7 +640,7 @@ const DetailsPage: React.FC = () => {
 
   const streamedGeneralCardForDisplay = useMemo(() => {
     if (!hasStreamCreatorResult || creatorDisplayState.generationMode !== 'stream') return null;
-    const markdown = normalizedStreamingMarkdown ?? streamedGeneralCard?.content ?? null;
+    const markdown = streamingDisplayMarkdown;
     if (markdown === null) return null;
 
     return buildCreatorStreamCardFromMarkdown({
@@ -642,7 +648,7 @@ const DetailsPage: React.FC = () => {
       markdown,
       fallbackLabel: creatorDisplayState.streamFallbackLabel,
     });
-  }, [hasStreamCreatorResult, creatorDisplayState, normalizedStreamingMarkdown, streamedGeneralCard]);
+  }, [hasStreamCreatorResult, creatorDisplayState, streamingDisplayMarkdown]);
 
   const streamPortraitPrompt = useMemo(() => {
     if (!hasStreamCreatorResult || creatorDisplayState.generationMode !== 'stream') return '';

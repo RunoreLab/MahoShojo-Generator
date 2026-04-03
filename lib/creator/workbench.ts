@@ -39,14 +39,26 @@ export const normalizeCreatorStreamingMarkdown = (streamingMarkdown: string | nu
   return streamingMarkdown.trim().length > 0 ? streamingMarkdown : null;
 };
 
+export const resolveCreatorStreamingDisplayMarkdown = ({
+  streamingMarkdown,
+  streamedGeneralCard,
+}: Pick<CreatorWorkbenchResultInput, 'streamingMarkdown' | 'streamedGeneralCard'>): string | null => {
+  if (typeof streamingMarkdown === 'string') {
+    return streamingMarkdown;
+  }
+
+  if (typeof streamedGeneralCard?.content === 'string') {
+    return streamedGeneralCard.content;
+  }
+
+  return streamedGeneralCard != null ? '' : null;
+};
+
 export const hasStreamingCreatorResult = ({
   streamingMarkdown,
   streamedGeneralCard,
 }: Pick<CreatorWorkbenchResultInput, 'streamingMarkdown' | 'streamedGeneralCard'>): boolean => {
-  if (streamedGeneralCard != null) {
-    return true;
-  }
-  return normalizeCreatorStreamingMarkdown(streamingMarkdown) !== null;
+  return resolveCreatorStreamingDisplayMarkdown({ streamingMarkdown, streamedGeneralCard }) !== null;
 };
 
 export const hasCreatorWorkbenchResult = ({
