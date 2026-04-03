@@ -775,6 +775,47 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
         ]
     },
     {
+        id: 'nvidia',
+        name: '英伟达 NVIDIA',
+        description: 'NVIDIA Build 官方 OpenAI 兼容通道，老黄特供开源模型。',
+        docsUrl: 'https://build.nvidia.com/',
+        baseUrl: 'https://integrate.api.nvidia.com/v1',
+        type: 'openai',
+        mode: 'auto',
+        models: [
+            {
+                value: 'google/gemma-4-31b-it',
+                label: 'Gemma 4 31B IT',
+                description: 'Gemma 4 主力档位，在 NVIDIA 通道下可作为高质量开源创作模型。'
+            },
+            {
+                value: 'google/gemma-3-27b-it',
+                label: 'Gemma 3 27B IT',
+                description: '中高配 Gemma 3，适合兼顾速度、成本与结构化输出稳定性。'
+            },
+            {
+                value: 'deepseek-ai/deepseek-v3.2',
+                label: 'DeepSeek V3.2',
+                description: 'DeepSeek 主力模型，适合中文写作、整理与通用分析。'
+            },
+            {
+                value: 'qwen/qwen3.5-397b-a17b',
+                label: 'Qwen 3.5 397B',
+                description: 'Qwen 3.5 大档位，适合高质量内容生成与复杂指令。'
+            },
+            {
+                value: 'qwen/qwen3.5-122b-a10b',
+                label: 'Qwen 3.5 122B',
+                description: 'Qwen 3.5 中高档位，适合作为更均衡的中文创作选择。'
+            },
+            {
+                value: 'moonshotai/kimi-k2.5',
+                label: 'Kimi K2.5',
+                description: 'Kimi 模型，适合创意发散、设定撰写与长文本续写。'
+            },
+        ]
+    },
+    {
         id: 'mystery',
         name: '魔法国度',
         description: '神秘渠道，不定时放送。',
