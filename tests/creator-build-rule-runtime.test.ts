@@ -163,4 +163,36 @@ describe('creator build-rule runtime', () => {
       CHA: 0,
     });
   });
+
+  test('coc-7e-lite 计算 SAN / HP / MP / Build / Damage Bonus', () => {
+    const result = evaluateBuildRuleState({
+      ruleId: 'coc-7e-lite',
+      inputs: {
+        eraTone: 'classic-1920s',
+        occupation: 'detective',
+        coreAttributes: {
+          STR: 60,
+          CON: 55,
+          SIZ: 65,
+          DEX: 70,
+          APP: 50,
+          INT: 75,
+          POW: 60,
+          EDU: 80,
+        },
+        secondaryInputs: {
+          luck: 50,
+          creditRating: 40,
+          age: 32,
+        },
+        signatureSkills: ['spot-hidden', 'psychology', 'firearms'],
+      },
+    });
+
+    expect(result.derived.SAN).toBe(60);
+    expect(result.derived.HP).toBe(12);
+    expect(result.derived.MP).toBe(12);
+    expect(result.derived.Build).toBeDefined();
+    expect(result.derived.DamageBonus).toBeDefined();
+  });
 });

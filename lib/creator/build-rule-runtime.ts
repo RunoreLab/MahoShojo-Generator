@@ -72,6 +72,16 @@ const asIntegerLike = (value: unknown): number | null => {
   return null;
 };
 
+const resolveCocBuildAndDamageBonus = (strength: number, size: number): { build: number; damageBonus: string } => {
+  const total = strength + size;
+  if (total <= 64) return { build: -2, damageBonus: '-2' };
+  if (total <= 84) return { build: -1, damageBonus: '-1' };
+  if (total <= 124) return { build: 0, damageBonus: '0' };
+  if (total <= 164) return { build: 1, damageBonus: '1d4' };
+  if (total <= 204) return { build: 2, damageBonus: '1d6' };
+  return { build: 3, damageBonus: '2d6' };
+};
+
 const getPowerLevel = (preset: Record<string, unknown>, rawValue: unknown): string => {
   const powerLevelBlock = getBlock(preset, 'powerLevel');
   if (!powerLevelBlock) return 'seed';
@@ -377,6 +387,20 @@ const evaluateGenericBuildRuleState = (
     derived.abilityModifiers = abilityModifiers;
     derived.hitDie = typeof classMeta?.hitDie === 'string' ? classMeta.hitDie : null;
     derived.spellcastingKind = typeof classMeta?.spellcastingKind === 'string' ? classMeta.spellcastingKind : 'none';
+  }
+  if (ruleId === 'coc-7e-lite') {
+    const coreAttributes = isRecord(blockResults.coreAttributes) ? blockResults.coreAttributes : {};
+    const strength = asFiniteInteger(coreAttributes.STR) ?? 0;
+    const constitution = asFiniteInteger(coreAttributes.CON) ?? 0;
+    const size = asFiniteInteger(coreAttributes.SIZ) ?? 0;
+    const power = asFiniteInteger(coreAttributes.POW) ?? 0;
+    const { build, damageBonus } = resolveCocBuildAndDamageBonus(strength, size);
+
+    derived.SAN = power;
+    derived.HP = Math.floor((constitution + size) / 10);
+    derived.MP = Math.floor(power / 5);
+    derived.Build = build;
+    derived.DamageBonus = damageBonus;
   }
 
   return {

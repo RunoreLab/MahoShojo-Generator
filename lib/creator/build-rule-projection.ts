@@ -33,6 +33,31 @@ const getSelectOptionLabel = (ruleId: string, blockId: string, value: unknown): 
   return isRecord(option) && typeof option.label === 'string' ? option.label.trim() : value;
 };
 
+const getMultiSelectLabels = (ruleId: string, blockId: string, values: unknown): string[] => {
+  const preset = tryLoadBuildRulePresetById(ruleId) as unknown as Record<string, unknown> | null;
+  if (!preset || !Array.isArray(values)) return [];
+  const blocks = Array.isArray(preset.blocks) ? preset.blocks : [];
+  const block = blocks.find((item) => isRecord(item) && item.id === blockId);
+  if (!isRecord(block) || !Array.isArray(block.groups)) return [];
+
+  const labelMap = new Map<string, string>();
+  block.groups
+    .filter(isRecord)
+    .flatMap((group) => (Array.isArray(group.items) ? group.items : []))
+    .filter(isRecord)
+    .forEach((item) => {
+      const itemId = typeof item.id === 'string' ? item.id.trim() : '';
+      const itemLabel = typeof item.label === 'string' ? item.label.trim() : itemId;
+      if (itemId) {
+        labelMap.set(itemId, itemLabel);
+      }
+    });
+
+  return values
+    .filter((item): item is string => typeof item === 'string')
+    .map((item) => labelMap.get(item) ?? item);
+};
+
 const formatSignedNumber = (value: unknown): string => {
   if (typeof value !== 'number' || !Number.isFinite(value)) return '-';
   return value > 0 ? `+${Math.trunc(value)}` : `${Math.trunc(value)}`;
@@ -123,9 +148,31 @@ const buildDndRuleSummary = (template: CreatorTemplateId, rule: BuildRuleRuntime
     .join('\n');
 };
 
+const buildCocRuleSummary = (template: CreatorTemplateId, rule: BuildRuleRuntimeResult): string => {
+  const blockResults = isRecord(rule.blockResults) ? rule.blockResults : {};
+  const derived = isRecord(rule.derived) ? rule.derived : {};
+  const coreAttributes = isRecord(blockResults.coreAttributes) ? blockResults.coreAttributes : {};
+  const secondaryInputs = isRecord(blockResults.secondaryInputs) ? blockResults.secondaryInputs : {};
+  const signatureSkills = getMultiSelectLabels(rule.ruleId, 'signatureSkills', blockResults.signatureSkills);
+
+  return [
+    `模板：${template}`,
+    `年代：${getSelectOptionLabel(rule.ruleId, 'eraTone', blockResults.eraTone)} / 职业：${getSelectOptionLabel(rule.ruleId, 'occupation', blockResults.occupation)}`,
+    `属性：STR ${coreAttributes.STR ?? '-'} / CON ${coreAttributes.CON ?? '-'} / SIZ ${coreAttributes.SIZ ?? '-'} / DEX ${coreAttributes.DEX ?? '-'} / APP ${coreAttributes.APP ?? '-'} / INT ${coreAttributes.INT ?? '-'} / POW ${coreAttributes.POW ?? '-'} / EDU ${coreAttributes.EDU ?? '-'}`,
+    `补充：Luck ${secondaryInputs.luck ?? '-'} / Credit Rating ${secondaryInputs.creditRating ?? '-'} / Age ${secondaryInputs.age ?? '-'}`,
+    `派生：SAN ${derived.SAN ?? '-'} / HP ${derived.HP ?? '-'} / MP ${derived.MP ?? '-'} / Build ${derived.Build ?? '-'} / Damage Bonus ${derived.DamageBonus ?? '-'}`,
+    `技能倾向：${signatureSkills.length > 0 ? signatureSkills.join('、') : '未选择'}`,
+  ]
+    .filter(Boolean)
+    .join('\n');
+};
+
 const buildRuleSummary = (template: CreatorTemplateId, rule: BuildRuleRuntimeResult): string => {
   if (rule.ruleId === 'dnd-5e-lite') {
     return buildDndRuleSummary(template, rule);
+  }
+  if (rule.ruleId === 'coc-7e-lite') {
+    return buildCocRuleSummary(template, rule);
   }
 
   return buildArenaRuleSummary(template, rule);

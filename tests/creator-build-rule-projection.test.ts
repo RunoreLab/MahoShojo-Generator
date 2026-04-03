@@ -78,6 +78,43 @@ const dndRuntimeResult = {
   },
 } as const;
 
+const cocRuntimeResult = {
+  ruleId: 'coc-7e-lite',
+  version: '1.0.0',
+  blockResults: {
+    eraTone: 'classic-1920s',
+    occupation: 'detective',
+    coreAttributes: {
+      STR: 60,
+      CON: 55,
+      SIZ: 65,
+      DEX: 70,
+      APP: 50,
+      INT: 75,
+      POW: 60,
+      EDU: 80,
+    },
+    secondaryInputs: {
+      luck: 50,
+      creditRating: 40,
+      age: 32,
+    },
+    signatureSkills: ['spot-hidden', 'psychology', 'firearms'],
+  },
+  derived: {
+    SAN: 60,
+    HP: 12,
+    MP: 12,
+    Build: 1,
+    DamageBonus: '1d4',
+  },
+  validationSummary: {
+    valid: true,
+    issues: [],
+    missingRequiredBlockKeys: [],
+  },
+} as const;
+
 describe('creator build-rule projection', () => {
   test('主规则投影保留结构化事实与中文摘要', () => {
     const projection = projectBuildRulesForPrompt({
@@ -124,5 +161,18 @@ describe('creator build-rule projection', () => {
     expect(projection.primary?.summary).toContain('等级');
     expect(projection.primary?.summary).toContain('法师');
     expect(projection.primary?.summary).toContain('完整施法');
+  });
+
+  test('coc-7e-lite 主规则摘要包含年代、职业与理智值', () => {
+    const projection = projectBuildRulesForPrompt({
+      template: 'general',
+      primaryRuleId: 'coc-7e-lite',
+      rules: [cocRuntimeResult],
+      resolveRuleProjectionPolicy: () => 'primary-structured',
+    });
+
+    expect(projection.primary?.summary).toContain('1920s');
+    expect(projection.primary?.summary).toContain('侦探');
+    expect(projection.primary?.summary).toContain('SAN');
   });
 });
