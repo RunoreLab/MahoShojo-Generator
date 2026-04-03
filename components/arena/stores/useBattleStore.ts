@@ -14,7 +14,6 @@ import {
 import {
   DEFAULT_BATTLE_REPORT_CARD_WIDTH_MODE,
   DEFAULT_BATTLE_REPORT_CARD_WIDTH_PX,
-  LEGACY_BATTLE_REPORT_CARD_WIDTH,
 } from '../utils/battleReportCardWidth';
 
 const defaultScenario: ScenarioState = {
@@ -115,29 +114,6 @@ export const useBattleStore = create<BattleStoreState>()(
           settings: {
             ...state.settings,
             ...incoming,
-          },
-        })),
-      applyBattleLiteDefaults: () =>
-        set((state) => ({
-          selectedLanguage: 'zh-CN',
-          storyLength: 'default',
-          arenaFreeRankingEnabled: false,
-          auxScenarios: [],
-          selectedQuestionnaires: [],
-          settings: {
-            ...state.settings,
-            readArenaHistory: true,
-            readArenaHistoryLimit: 3,
-            isArenaHistoryUnlimited: false,
-            writeArenaHistory: true,
-            readCurrentState: true,
-            writeCurrentState: true,
-            readNarrativeHistory: false,
-            readNarrativeHistoryLimit: 10,
-            isNarrativeHistoryUnlimited: false,
-            writeNarrativeHistory: false,
-            battleReportCardWidthMode: 'manual',
-            battleReportCardWidthPx: LEGACY_BATTLE_REPORT_CARD_WIDTH,
           },
         })),
 

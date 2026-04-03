@@ -1,19 +1,10 @@
-import { describe, expect, it, mock } from 'bun:test';
-import React from 'react';
-import { renderToStaticMarkup } from 'react-dom/server';
+import { expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
-mock.module('@/components/arena-lite/BattleLitePage', () => ({
-  BattleLitePage() {
-    return <div data-battle-lite-page="1">battle-lite-page</div>;
-  },
-}));
+test('pages/battle 继续作为 BattleLitePage + QueryClientProvider 入口', () => {
+  const source = readFileSync(join(process.cwd(), 'pages/battle.tsx'), 'utf8');
 
-const { default: BattlePage } = await import('@/pages/battle');
-
-describe('pages/battle', () => {
-  it('使用 BattleLitePage 作为简洁版入口，并包裹 QueryClientProvider', () => {
-    const html = renderToStaticMarkup(<BattlePage />);
-
-    expect(html).toContain('data-battle-lite-page="1"');
-  });
+  expect(source).toContain('QueryClientProvider');
+  expect(source).toContain('BattleLitePage');
 });

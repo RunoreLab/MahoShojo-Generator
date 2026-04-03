@@ -35,8 +35,10 @@ import { ArenaPageLinks } from '@/components/arena/shared/ArenaPageLinks';
 import { ArenaRankingLinks } from '@/components/arena/shared/ArenaRankingLinks';
 
 import { BattleLiteHeader } from './BattleLiteHeader';
+import { BattleLiteInheritedContextNotice } from './BattleLiteInheritedContextNotice';
 import { BattleLiteScenarioSection } from './BattleLiteScenarioSection';
 import { BattleLiteStoryOptions } from './BattleLiteStoryOptions';
+import { buildBattleLiteInheritedSummary } from './battle-lite-inherited-summary';
 
 export function BattleLitePage() {
   const { isAuthenticated } = useAuth();
@@ -49,11 +51,16 @@ export function BattleLitePage() {
 
   const combatants = useBattleStore((state: BattleStoreState) => state.combatants);
   const scenario = useBattleStore((state: BattleStoreState) => state.scenario);
+  const auxScenarios = useBattleStore((state: BattleStoreState) => state.auxScenarios);
+  const selectedQuestionnaires = useBattleStore((state: BattleStoreState) => state.selectedQuestionnaires);
+  const adjudicationEvents = useBattleStore((state: BattleStoreState) => state.adjudicationEvents);
   const battleMode = useBattleStore((state: BattleStoreState) => state.battleMode);
   const isGenerating = useBattleStore((state: BattleStoreState) => state.isGenerating);
   const isMatching = useBattleStore((state: BattleStoreState) => state.isMatching);
   const error = useBattleStore((state: BattleStoreState) => state.error);
-  const applyBattleLiteDefaults = useBattleStore((state: BattleStoreState) => state.applyBattleLiteDefaults);
+  const storyLength = useBattleStore((state: BattleStoreState) => state.storyLength);
+  const selectedLanguage = useBattleStore((state: BattleStoreState) => state.selectedLanguage);
+  const settings = useBattleStore((state: BattleStoreState) => state.settings);
 
   const { handleSelectDataCard, handleRandomMatch, handleToggleCombatantDataCard } = useBattleActions();
 
@@ -77,6 +84,21 @@ export function BattleLitePage() {
     return typeof scenario?.sourceDataCardId === 'string' && scenario.sourceDataCardId ? [scenario.sourceDataCardId] : [];
   }, [scenario?.sourceDataCardId]);
 
+  const inheritedSummary = useMemo(
+    () =>
+      buildBattleLiteInheritedSummary({
+        battleMode,
+        scenario,
+        storyLength,
+        selectedLanguage,
+        settings,
+        auxScenarios,
+        selectedQuestionnaires,
+        adjudicationEvents,
+      }),
+    [adjudicationEvents, auxScenarios, battleMode, scenario, selectedLanguage, selectedQuestionnaires, settings, storyLength],
+  );
+
   const handleOpenCharacterDataModal = () => {
     setDataModalType('character');
     setShowBattleDataModal(true);
@@ -91,10 +113,6 @@ export function BattleLitePage() {
     setSavedImageUrl(imageUrl);
     setShowImageModal(true);
   };
-
-  useEffect(() => {
-    applyBattleLiteDefaults();
-  }, [applyBattleLiteDefaults]);
 
   useEffect(() => {
     return () => {
@@ -241,6 +259,7 @@ export function BattleLitePage() {
                 description="确认设置后点击按钮生成战报"
                 collapsible={false}
               >
+                <BattleLiteInheritedContextNotice summary={inheritedSummary} />
                 <BattleActions showAdvancedUtilities={false} />
                 {error ? (
                   <ErrorMessage

@@ -2,13 +2,14 @@ import { beforeEach, describe, expect, test } from 'bun:test';
 
 import { useBattleStore } from '@/components/arena/stores/useBattleStore';
 
-describe('battle lite defaults', () => {
+describe('battle lite shared store contract', () => {
   beforeEach(() => {
     useBattleStore.setState((state) => ({
       ...state,
       selectedLanguage: 'en-US',
       storyLength: 'long',
       arenaFreeRankingEnabled: true,
+      adjudicationEvents: [{ id: 'evt-1', label: '判定事件' } as any],
       selectedQuestionnaires: [
         {
           source: 'database',
@@ -35,24 +36,18 @@ describe('battle lite defaults', () => {
         writeNarrativeHistory: true,
         battleReportCardWidthMode: 'manual',
         battleReportCardWidthPx: 920,
-        userGuidance: '保留这个字段',
       },
     }));
   });
 
-  test('applyBattleLiteDefaults 会把隐藏高级项收敛到简洁页默认值', () => {
-    useBattleStore.getState().applyBattleLiteDefaults();
-    const state = useBattleStore.getState();
+  test('shared store 不再暴露 applyBattleLiteDefaults', () => {
+    const state = useBattleStore.getState() as Record<string, unknown>;
 
-    expect(state.selectedLanguage).toBe('zh-CN');
-    expect(state.storyLength).toBe('default');
-    expect(state.arenaFreeRankingEnabled).toBe(false);
-    expect(state.selectedQuestionnaires).toEqual([]);
-    expect(state.auxScenarios).toEqual([]);
-    expect(state.settings.readNarrativeHistory).toBe(false);
-    expect(state.settings.writeNarrativeHistory).toBe(false);
-    expect(state.settings.battleReportCardWidthMode).toBe('manual');
-    expect(state.settings.battleReportCardWidthPx).toBe(500);
-    expect(state.settings.userGuidance).toBe('保留这个字段');
+    expect('applyBattleLiteDefaults' in state).toBe(false);
+    expect(state.selectedLanguage).toBe('en-US');
+    expect(state.storyLength).toBe('long');
+    expect(Array.isArray(state.auxScenarios)).toBe(true);
+    expect(Array.isArray(state.selectedQuestionnaires)).toBe(true);
+    expect(Array.isArray(state.adjudicationEvents)).toBe(true);
   });
 });
