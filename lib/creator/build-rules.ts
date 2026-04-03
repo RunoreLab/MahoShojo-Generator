@@ -48,10 +48,12 @@ const getPointBuyDefaultValue = (preset: Record<string, unknown>, fieldCount: nu
 export function createDefaultBuildRuleInputs(ruleId: string): Record<string, unknown> {
   const preset = loadBuildRulePresetById(ruleId) as unknown as Record<string, unknown>;
   const blocks = Array.isArray(preset.blocks) ? preset.blocks : [];
-  const defaults = blocks.flatMap((block) => {
-    if (!isRecord(block)) return [];
+  const defaults: Array<[string, unknown]> = [];
+
+  for (const block of blocks) {
+    if (!isRecord(block)) continue;
     const blockId = typeof block.id === 'string' ? block.id.trim() : '';
-    if (!blockId) return [];
+    if (!blockId) continue;
 
     if (block.type === 'select') {
       const defaultValue = typeof block.defaultValue === 'string' && block.defaultValue.trim()
@@ -62,11 +64,13 @@ export function createDefaultBuildRuleInputs(ruleId: string): Record<string, unk
               .map((option) => (typeof option.value === 'string' ? option.value.trim() : ''))
               .find(Boolean) ?? ''
           : '';
-      return [[blockId, defaultValue]] as const;
+      defaults.push([blockId, defaultValue]);
+      continue;
     }
 
     if (block.type === 'multi-select') {
-      return [[blockId, []]] as const;
+      defaults.push([blockId, []]);
+      continue;
     }
 
     if (block.type === 'point-buy' || block.type === 'stat-array' || block.type === 'number-group') {
@@ -82,11 +86,10 @@ export function createDefaultBuildRuleInputs(ruleId: string): Record<string, unk
           return [fieldId, fieldDefaultValue];
         })
       );
-      return [[blockId, groupValue]] as const;
+      defaults.push([blockId, groupValue]);
+      continue;
     }
-
-    return [];
-  });
+  }
 
   return Object.fromEntries(defaults);
 }

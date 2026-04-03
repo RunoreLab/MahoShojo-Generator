@@ -18,6 +18,41 @@ const arenaRule = {
   },
 } as const;
 
+const dndRule = {
+  ruleId: 'dnd-5e-lite',
+  version: '1.0.0',
+  blockResults: {
+    level: '5',
+    class: 'wizard',
+    lineage: 'high-elf',
+  },
+  derived: {
+    proficiencyBonus: 3,
+  },
+  validationSummary: {
+    valid: true,
+    issues: [],
+    missingRequiredBlockKeys: [],
+  },
+} as const;
+
+const cocRule = {
+  ruleId: 'coc-7e-lite',
+  version: '1.0.0',
+  blockResults: {
+    eraTone: 'classic-1920s',
+    occupation: 'detective',
+  },
+  derived: {
+    SAN: 60,
+  },
+  validationSummary: {
+    valid: true,
+    issues: [],
+    missingRequiredBlockKeys: [],
+  },
+} as const;
+
 const resolvePreset = (ruleId: string) => {
   if (ruleId === 'requires-questionnaire-rule') {
     return {
@@ -109,6 +144,32 @@ describe('creator server', () => {
         questionnaireAnswers: [],
         buildRules: [arenaRule],
         primaryRuleId: 'arena-trpg-lite',
+      })
+    ).toThrow('RULE_TEMPLATE_UNSUPPORTED');
+  });
+
+  test('dnd-5e-lite 在 scenario 模板下被拒绝', () => {
+    expect(() =>
+      validateCreatorRequest({
+        template: 'scenario',
+        freeformBrief: 'x',
+        questionnaires: [],
+        questionnaireAnswers: [],
+        buildRules: [dndRule],
+        primaryRuleId: 'dnd-5e-lite',
+      })
+    ).toThrow('RULE_TEMPLATE_UNSUPPORTED');
+  });
+
+  test('coc-7e-lite 在 general-scenario 模板下被拒绝', () => {
+    expect(() =>
+      validateCreatorRequest({
+        template: 'general-scenario',
+        freeformBrief: 'x',
+        questionnaires: [],
+        questionnaireAnswers: [],
+        buildRules: [cocRule],
+        primaryRuleId: 'coc-7e-lite',
       })
     ).toThrow('RULE_TEMPLATE_UNSUPPORTED');
   });

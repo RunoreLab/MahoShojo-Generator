@@ -99,6 +99,7 @@ export function BuildRulePanel({
 
   const renderSelectBlock = (block: Record<string, unknown>) => {
     const blockId = typeof block.id === 'string' ? block.id : '';
+    const blockLabel = typeof block.label === 'string' ? block.label : blockId;
     const options = Array.isArray(block.options) ? block.options.filter(isRecord) : [];
     const fallbackValue =
       typeof block.defaultValue === 'string'
@@ -112,7 +113,7 @@ export function BuildRulePanel({
         data-creator-surface="subpanel"
         className={joinCreatorClassNames(CREATOR_SUBPANEL_SURFACE_CLASS, 'mb-4 p-4')}
       >
-        <h4 className="text-sm font-semibold text-slate-900">{block.label ?? blockId}</h4>
+        <h4 className="text-sm font-semibold text-slate-900">{blockLabel}</h4>
         {typeof block.description === 'string' ? (
           <p className="mt-1 text-xs leading-5 text-slate-600">{block.description}</p>
         ) : null}
@@ -139,6 +140,7 @@ export function BuildRulePanel({
 
   const renderNumericBlock = (block: Record<string, unknown>) => {
     const blockId = typeof block.id === 'string' ? block.id : '';
+    const blockLabel = typeof block.label === 'string' ? block.label : blockId;
     const fields = Array.isArray(block.fields) ? block.fields.filter(isRecord) : [];
     const groupValue = getNumberGroupValue(inputs[blockId]);
     const isArenaPointBuy = block.type === 'point-buy' && blockId === 'coreAttributes';
@@ -154,7 +156,7 @@ export function BuildRulePanel({
         }`}
         data-core-attributes-budget-state={isArenaPointBuy ? (attributeOverBudget ? 'over-budget' : 'within-budget') : undefined}
       >
-        <h4 className="text-sm font-semibold text-slate-900">{block.label ?? blockId}</h4>
+        <h4 className="text-sm font-semibold text-slate-900">{blockLabel}</h4>
         {typeof block.description === 'string' ? (
           <p className="mt-1 text-xs leading-5 text-slate-600">{block.description}</p>
         ) : null}
@@ -223,6 +225,7 @@ export function BuildRulePanel({
 
   const renderMultiSelectBlock = (block: Record<string, unknown>) => {
     const blockId = typeof block.id === 'string' ? block.id : '';
+    const blockLabel = typeof block.label === 'string' ? block.label : blockId;
     const selectedItems = getStringArrayValue(inputs[blockId]);
     const isBudgetedSpecialties = blockId === 'specialties';
     const groups = Array.isArray(block.groups) ? block.groups.filter(isRecord) : [];
@@ -237,7 +240,7 @@ export function BuildRulePanel({
             : 'border-[var(--app-border)] bg-[var(--app-surface-80)]'
         }`}
       >
-        <h4 className="text-sm font-semibold text-slate-900">{block.label ?? blockId}</h4>
+        <h4 className="text-sm font-semibold text-slate-900">{blockLabel}</h4>
         {typeof block.description === 'string' ? (
           <p className="mt-1 text-xs leading-5 text-slate-600">{block.description}</p>
         ) : null}
