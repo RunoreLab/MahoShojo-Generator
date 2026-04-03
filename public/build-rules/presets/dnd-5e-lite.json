@@ -1,0 +1,119 @@
+{
+  "id": "dnd-5e-lite",
+  "version": "1.0.0",
+  "title": "DND 5e 经典角色卡",
+  "description": "基于经典 5e 等级、职业、族裔、六维与战斗摘要的轻量车卡规则。",
+  "supportedTemplates": ["general", "magical-girl"],
+  "allowStandalone": true,
+  "mainRuleEligible": true,
+  "projectionPolicy": "primary-structured",
+  "uiSummary": "适用于经典 DND 风格角色设定，覆盖等级、职业、族裔、六维与战斗摘要。",
+  "aiPromptHint": "以下字段代表角色在 DND 5e 语境下的确定事实，请优先尊重等级、职业、族裔、六维属性与战斗摘要。",
+  "blocks": [
+    {
+      "id": "level",
+      "type": "select",
+      "label": "等级",
+      "description": "决定熟练加值与职业成长阶段。",
+      "defaultValue": "1",
+      "options": [
+        { "value": "1", "label": "1 级" },
+        { "value": "2", "label": "2 级" },
+        { "value": "3", "label": "3 级" },
+        { "value": "4", "label": "4 级" },
+        { "value": "5", "label": "5 级" },
+        { "value": "6", "label": "6 级" },
+        { "value": "7", "label": "7 级" },
+        { "value": "8", "label": "8 级" },
+        { "value": "9", "label": "9 级" },
+        { "value": "10", "label": "10 级" },
+        { "value": "11", "label": "11 级" },
+        { "value": "12", "label": "12 级" },
+        { "value": "13", "label": "13 级" },
+        { "value": "14", "label": "14 级" },
+        { "value": "15", "label": "15 级" },
+        { "value": "16", "label": "16 级" },
+        { "value": "17", "label": "17 级" },
+        { "value": "18", "label": "18 级" },
+        { "value": "19", "label": "19 级" },
+        { "value": "20", "label": "20 级" }
+      ]
+    },
+    {
+      "id": "class",
+      "type": "select",
+      "label": "职业",
+      "description": "选择角色的核心职业原型。",
+      "defaultValue": "fighter",
+      "options": [
+        { "value": "fighter", "label": "战士", "meta": { "hitDie": "d10", "spellcastingKind": "none", "primaryAbilities": ["STR", "DEX"], "savingThrowProficiencies": ["STR", "CON"] } },
+        { "value": "wizard", "label": "法师", "meta": { "hitDie": "d6", "spellcastingKind": "full", "primaryAbilities": ["INT"], "savingThrowProficiencies": ["INT", "WIS"] } },
+        { "value": "rogue", "label": "游荡者", "meta": { "hitDie": "d8", "spellcastingKind": "none", "primaryAbilities": ["DEX"], "savingThrowProficiencies": ["DEX", "INT"] } },
+        { "value": "cleric", "label": "牧师", "meta": { "hitDie": "d8", "spellcastingKind": "full", "primaryAbilities": ["WIS"], "savingThrowProficiencies": ["WIS", "CHA"] } },
+        { "value": "bard", "label": "吟游诗人", "meta": { "hitDie": "d8", "spellcastingKind": "full", "primaryAbilities": ["CHA"], "savingThrowProficiencies": ["DEX", "CHA"] } },
+        { "value": "ranger", "label": "游侠", "meta": { "hitDie": "d10", "spellcastingKind": "half", "primaryAbilities": ["DEX", "WIS"], "savingThrowProficiencies": ["STR", "DEX"] } },
+        { "value": "paladin", "label": "圣武士", "meta": { "hitDie": "d10", "spellcastingKind": "half", "primaryAbilities": ["STR", "CHA"], "savingThrowProficiencies": ["WIS", "CHA"] } },
+        { "value": "warlock", "label": "邪术师", "meta": { "hitDie": "d8", "spellcastingKind": "pact", "primaryAbilities": ["CHA"], "savingThrowProficiencies": ["WIS", "CHA"] } },
+        { "value": "sorcerer", "label": "术士", "meta": { "hitDie": "d6", "spellcastingKind": "full", "primaryAbilities": ["CHA"], "savingThrowProficiencies": ["CON", "CHA"] } },
+        { "value": "druid", "label": "德鲁伊", "meta": { "hitDie": "d8", "spellcastingKind": "full", "primaryAbilities": ["WIS"], "savingThrowProficiencies": ["INT", "WIS"] } },
+        { "value": "monk", "label": "武僧", "meta": { "hitDie": "d8", "spellcastingKind": "none", "primaryAbilities": ["DEX", "WIS"], "savingThrowProficiencies": ["STR", "DEX"] } },
+        { "value": "barbarian", "label": "野蛮人", "meta": { "hitDie": "d12", "spellcastingKind": "none", "primaryAbilities": ["STR", "CON"], "savingThrowProficiencies": ["STR", "CON"] } }
+      ]
+    },
+    {
+      "id": "lineage",
+      "type": "select",
+      "label": "族裔 / 血统",
+      "description": "记录角色的经典族裔或血统身份。",
+      "defaultValue": "human",
+      "options": [
+        { "value": "human", "label": "人类" },
+        { "value": "high-elf", "label": "高等精灵" },
+        { "value": "wood-elf", "label": "木精灵" },
+        { "value": "dwarf", "label": "矮人" },
+        { "value": "halfling", "label": "半身人" },
+        { "value": "dragonborn", "label": "龙裔" },
+        { "value": "tiefling", "label": "提夫林" },
+        { "value": "half-elf", "label": "半精灵" }
+      ]
+    },
+    {
+      "id": "abilityScores",
+      "type": "stat-array",
+      "label": "六维属性",
+      "description": "直接填写角色的最终六维属性值。",
+      "fields": [
+        { "id": "STR", "label": "力量", "min": 1, "max": 30, "defaultValue": 10 },
+        { "id": "DEX", "label": "敏捷", "min": 1, "max": 30, "defaultValue": 10 },
+        { "id": "CON", "label": "体质", "min": 1, "max": 30, "defaultValue": 10 },
+        { "id": "INT", "label": "智力", "min": 1, "max": 30, "defaultValue": 10 },
+        { "id": "WIS", "label": "感知", "min": 1, "max": 30, "defaultValue": 10 },
+        { "id": "CHA", "label": "魅力", "min": 1, "max": 30, "defaultValue": 10 }
+      ]
+    },
+    {
+      "id": "combatProfile",
+      "type": "number-group",
+      "label": "战斗摘要",
+      "description": "填写当前角色最常用的战斗相关最终值。",
+      "fields": [
+        { "id": "armorClass", "label": "护甲等级", "min": 0, "max": 99, "defaultValue": 10 },
+        { "id": "hitPoints", "label": "生命值", "min": 1, "max": 999, "defaultValue": 8 },
+        { "id": "speed", "label": "移动速度", "min": 0, "max": 120, "defaultValue": 30 },
+        { "id": "passivePerception", "label": "被动察觉", "min": 0, "max": 99, "defaultValue": 10 }
+      ]
+    },
+    {
+      "id": "derivedStats",
+      "type": "derived",
+      "label": "派生摘要",
+      "description": "运行时会根据等级、职业与六维生成熟练加值、能力调整值等摘要。"
+    },
+    {
+      "id": "ruleNotice",
+      "type": "section",
+      "label": "规则说明",
+      "description": "本版只覆盖等级、职业、族裔、六维与战斗摘要，不覆盖子职业、装备栏、专长和完整法术列表。"
+    }
+  ]
+}

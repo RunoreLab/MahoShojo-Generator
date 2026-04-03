@@ -28,4 +28,28 @@ describe('creator build rules', () => {
     expect(preset.allowStandalone).toBe(true);
     expect(preset.mainRuleEligible).toBe(true);
   });
+
+  test('规则索引包含 arena / dnd / coc 三套预设', () => {
+    const index = loadBuildRulePresetIndex();
+
+    expect(index.map((item) => item.id)).toEqual([
+      'arena-trpg-lite',
+      'dnd-5e-lite',
+      'coc-7e-lite',
+    ]);
+  });
+
+  test('dnd-5e-lite 声明 stat-array 与 number-group block', () => {
+    const preset = loadBuildRulePresetById('dnd-5e-lite');
+
+    expect(preset.blocks.some((block) => block.type === 'stat-array')).toBe(true);
+    expect(preset.blocks.some((block) => block.type === 'number-group')).toBe(true);
+  });
+
+  test('coc-7e-lite 声明 occupation 与 derivedStats block', () => {
+    const preset = loadBuildRulePresetById('coc-7e-lite');
+
+    expect(preset.blocks.some((block) => block.id === 'occupation')).toBe(true);
+    expect(preset.blocks.some((block) => block.id === 'derivedStats')).toBe(true);
+  });
 });

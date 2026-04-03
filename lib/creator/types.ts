@@ -1,12 +1,40 @@
 import type { CreatorTemplateId } from './templates';
 import type { QuestionnaireAnswerItem } from '@/lib/questionnaires';
 
+export type BuildRuleBlockType =
+  | 'select'
+  | 'point-buy'
+  | 'multi-select'
+  | 'derived'
+  | 'section'
+  | 'stat-array'
+  | 'number-group';
+
+export type BuildRuleOption = Readonly<{
+  value: string;
+  label: string;
+  description?: string;
+  meta?: Record<string, unknown>;
+}>;
+
+export type BuildRuleField = Readonly<{
+  id: string;
+  label: string;
+  description?: string;
+  min?: number;
+  max?: number;
+  defaultValue?: number;
+}>;
+
 export type BuildRuleBlock = Readonly<{
   id: string;
-  type: string;
+  type: BuildRuleBlockType;
   label?: string;
   description?: string;
   hint?: string;
+  defaultValue?: string;
+  options?: readonly BuildRuleOption[];
+  fields?: readonly BuildRuleField[];
   [key: string]: unknown;
 }>;
 

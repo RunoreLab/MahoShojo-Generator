@@ -1,5 +1,7 @@
 import presetIndexJson from '@/public/build-rules/presets/index.json';
 import arenaTrpgLiteJson from '@/public/build-rules/presets/arena-trpg-lite.json';
+import coc7eLiteJson from '@/public/build-rules/presets/coc-7e-lite.json';
+import dnd5eLiteJson from '@/public/build-rules/presets/dnd-5e-lite.json';
 
 import type { BuildRulePreset, BuildRulePresetIndex } from './types';
 
@@ -7,6 +9,8 @@ const BUILD_RULE_PRESET_INDEX = presetIndexJson.presets as BuildRulePresetIndex;
 
 const BUILD_RULE_PRESET_MAP: Record<string, BuildRulePreset> = {
   'arena-trpg-lite': arenaTrpgLiteJson as BuildRulePreset,
+  'dnd-5e-lite': dnd5eLiteJson as BuildRulePreset,
+  'coc-7e-lite': coc7eLiteJson as BuildRulePreset,
 };
 
 export function loadBuildRulePresetIndex(): BuildRulePresetIndex {

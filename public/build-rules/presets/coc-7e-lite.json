@@ -1,0 +1,114 @@
+{
+  "id": "coc-7e-lite",
+  "version": "1.0.0",
+  "title": "CoC 7e 经典调查员卡",
+  "description": "基于经典 CoC 7e 年代、职业、八维属性与理智生存摘要的轻量车卡规则。",
+  "supportedTemplates": ["general", "magical-girl"],
+  "allowStandalone": true,
+  "mainRuleEligible": true,
+  "projectionPolicy": "primary-structured",
+  "uiSummary": "适用于经典调查员或克系角色设定，覆盖年代、职业、八维属性与 SAN/HP/MP 摘要。",
+  "aiPromptHint": "以下字段代表角色在 CoC 7e 语境下的确定事实，请优先尊重年代、职业、八维属性与理智生存相关数值。",
+  "blocks": [
+    {
+      "id": "eraTone",
+      "type": "select",
+      "label": "年代 / 风格",
+      "description": "决定调查员所处的主要时代氛围。",
+      "defaultValue": "classic-1920s",
+      "options": [
+        { "value": "classic-1920s", "label": "经典 1920s" },
+        { "value": "modern", "label": "现代" },
+        { "value": "pulp", "label": "Pulp 冒险" },
+        { "value": "occult-heavy", "label": "重神秘学氛围" }
+      ]
+    },
+    {
+      "id": "occupation",
+      "type": "select",
+      "label": "职业",
+      "description": "选择调查员最核心的职业身份。",
+      "defaultValue": "detective",
+      "options": [
+        { "value": "detective", "label": "侦探", "meta": { "tone": "善于调查与追踪线索", "signatureSkills": ["spot-hidden", "psychology", "firearms"] } },
+        { "value": "journalist", "label": "记者", "meta": { "tone": "擅长采访、追问与挖掘隐情", "signatureSkills": ["library-use", "persuade", "spot-hidden"] } },
+        { "value": "doctor", "label": "医生", "meta": { "tone": "擅长医学判断与生理救治", "signatureSkills": ["medicine", "psychology", "library-use"] } },
+        { "value": "professor", "label": "教授", "meta": { "tone": "学术背景深厚，擅长研究与考据", "signatureSkills": ["library-use", "occult", "psychology"] } },
+        { "value": "antiquarian", "label": "古董商", "meta": { "tone": "熟悉旧物、来历与收藏圈层", "signatureSkills": ["library-use", "persuade", "occult"] } },
+        { "value": "artist", "label": "艺术家", "meta": { "tone": "感受力强，善于观察与表达", "signatureSkills": ["spot-hidden", "persuade", "psychology"] } },
+        { "value": "criminal", "label": "罪犯", "meta": { "tone": "熟悉灰色地带、人情网络与规避风险", "signatureSkills": ["stealth", "fighting", "firearms"] } },
+        { "value": "dilettante", "label": "业余爱好者", "meta": { "tone": "资源充足，兴趣广泛，行动自由", "signatureSkills": ["persuade", "library-use", "spot-hidden"] } },
+        { "value": "occultist", "label": "神秘学者", "meta": { "tone": "熟悉仪式、符号与超自然传说", "signatureSkills": ["occult", "library-use", "psychology"] } }
+      ]
+    },
+    {
+      "id": "coreAttributes",
+      "type": "stat-array",
+      "label": "八维属性",
+      "description": "直接填写调查员的最终属性值。",
+      "fields": [
+        { "id": "STR", "label": "力量", "min": 0, "max": 99, "defaultValue": 50 },
+        { "id": "CON", "label": "体质", "min": 0, "max": 99, "defaultValue": 50 },
+        { "id": "SIZ", "label": "体型", "min": 0, "max": 99, "defaultValue": 50 },
+        { "id": "DEX", "label": "敏捷", "min": 0, "max": 99, "defaultValue": 50 },
+        { "id": "APP", "label": "外貌", "min": 0, "max": 99, "defaultValue": 50 },
+        { "id": "INT", "label": "智力", "min": 0, "max": 99, "defaultValue": 50 },
+        { "id": "POW", "label": "意志", "min": 0, "max": 99, "defaultValue": 50 },
+        { "id": "EDU", "label": "教育", "min": 0, "max": 99, "defaultValue": 50 }
+      ]
+    },
+    {
+      "id": "secondaryInputs",
+      "type": "number-group",
+      "label": "补充数值",
+      "description": "记录 Luck、信用评级与年龄等补充信息。",
+      "fields": [
+        { "id": "luck", "label": "幸运", "min": 0, "max": 99, "defaultValue": 50 },
+        { "id": "creditRating", "label": "信用评级", "min": 0, "max": 99, "defaultValue": 40 },
+        { "id": "age", "label": "年龄", "min": 15, "max": 120, "defaultValue": 28 }
+      ]
+    },
+    {
+      "id": "signatureSkills",
+      "type": "multi-select",
+      "label": "代表性技能倾向",
+      "description": "选择最能体现调查员风格的代表性技能。",
+      "groups": [
+        {
+          "id": "core-investigation",
+          "label": "核心调查",
+          "items": [
+            { "id": "library-use", "label": "图书馆使用", "cost": 1 },
+            { "id": "spot-hidden", "label": "侦查", "cost": 1 },
+            { "id": "psychology", "label": "心理学", "cost": 1 },
+            { "id": "persuade", "label": "说服", "cost": 1 }
+          ]
+        },
+        {
+          "id": "danger-response",
+          "label": "危险应对",
+          "items": [
+            { "id": "firearms", "label": "射击", "cost": 1 },
+            { "id": "fighting", "label": "格斗", "cost": 1 },
+            { "id": "stealth", "label": "潜行", "cost": 1 },
+            { "id": "medicine", "label": "医学", "cost": 1 },
+            { "id": "mechanical-repair", "label": "机械维修", "cost": 1 },
+            { "id": "occult", "label": "神秘学", "cost": 1 }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "derivedStats",
+      "type": "derived",
+      "label": "派生摘要",
+      "description": "运行时会根据八维属性生成 SAN、HP、MP、Build 与伤害加值摘要。"
+    },
+    {
+      "id": "ruleNotice",
+      "type": "section",
+      "label": "规则说明",
+      "description": "本版只覆盖年代、职业、八维属性与理智生存摘要，不覆盖完整技能点分配、武器明细和神话书管理。"
+    }
+  ]
+}
