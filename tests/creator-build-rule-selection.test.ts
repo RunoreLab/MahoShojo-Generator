@@ -24,4 +24,15 @@ describe('creator build-rule selection', () => {
     expect(result.selectedRuleIds).toEqual(['arena-trpg-lite']);
     expect(result.primaryRuleId).toBe('arena-trpg-lite');
   });
+
+  test('切到 canshou 时保留兼容的预设规则', () => {
+    const result = reconcileCreatorBuildRuleSelection({
+      template: 'canshou',
+      selectedRuleIds: ['dnd-5e-lite', 'coc-7e-lite'],
+      primaryRuleId: 'coc-7e-lite',
+    });
+
+    expect(result.selectedRuleIds).toEqual(['dnd-5e-lite', 'coc-7e-lite']);
+    expect(result.primaryRuleId).toBe('coc-7e-lite');
+  });
 });

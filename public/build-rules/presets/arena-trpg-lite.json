@@ -3,11 +3,11 @@
   "version": "1.0.0",
   "title": "魔法少女竞技场 TRPG 简化角色卡",
   "description": "基于《魔法少女竞技场 TRPG》核心属性、力量层级、基础能力模块与派生值的轻量车卡规则。",
-  "supportedTemplates": ["general", "magical-girl"],
+  "supportedTemplates": ["general", "magical-girl", "canshou"],
   "allowStandalone": true,
   "mainRuleEligible": true,
   "projectionPolicy": "primary-structured",
-  "uiSummary": "适用于通用角色卡与魔法少女结构化卡；包含力量层级、七维属性、基础能力专长与 HP/MP/光辉值派生。",
+  "uiSummary": "适用于魔法少女世界观下的角色；包含力量层级、七维属性、基础能力专长与 HP/MP/光辉值派生。",
   "aiPromptHint": "请把规则输入当作确定事实处理：力量层级、属性、派生值与已选专长不得被自由改写；freeformBrief 只调整风格和叙事重点。",
   "budgets": {
     "attributePointsByLevel": {

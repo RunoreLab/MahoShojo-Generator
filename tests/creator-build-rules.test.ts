@@ -28,12 +28,18 @@ describe('creator build rules', () => {
     expect(index.some((item) => item.id === 'arena-trpg-lite')).toBe(true);
   });
 
-  test('arena-trpg-lite 只支持 general / magical-girl 且声明 primary-structured', async () => {
+  test('arena-trpg-lite 支持 general / magical-girl / canshou 且声明 primary-structured', async () => {
     const preset = await loadBuildRulePresetById('arena-trpg-lite');
-    expect(preset.supportedTemplates).toEqual(['general', 'magical-girl']);
+    expect(preset.supportedTemplates).toEqual(['general', 'magical-girl', 'canshou']);
     expect(preset.projectionPolicy).toBe('primary-structured');
     expect(preset.allowStandalone).toBe(true);
     expect(preset.mainRuleEligible).toBe(true);
+  });
+
+  test('三套规则预设都声明支持 canshou 模板', () => {
+    expect(loadBuildRulePresetById('arena-trpg-lite').supportedTemplates).toContain('canshou');
+    expect(loadBuildRulePresetById('dnd-5e-lite').supportedTemplates).toContain('canshou');
+    expect(loadBuildRulePresetById('coc-7e-lite').supportedTemplates).toContain('canshou');
   });
 
   test('规则索引包含 arena / dnd / coc 三套预设', () => {

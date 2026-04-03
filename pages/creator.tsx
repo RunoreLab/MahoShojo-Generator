@@ -90,6 +90,10 @@ import {
   type CreatorWorkbenchSnapshot,
 } from '@/lib/creator/workbench';
 import { GENERAL_SCENARIO_TEMPLATE_ID } from '@/lib/schemas/general-scenario';
+import {
+  getStructuredCreatorResultFollowUp,
+  type StructuredCreatorTemplateId,
+} from '@/lib/creator/result-follow-up';
 import { buildCreatorStreamCardFromMarkdown, finalizeCreatorStreamCard } from '@/lib/creator/stream-result';
 import type { AIReasoningEnvelope } from '@/types/ai-reasoning';
 import type { CharacterCardPortraitAsset } from '@/types/visual-asset';
@@ -164,23 +168,52 @@ interface MagicalGirlDetails {
   signature?: string;
   userAnswers?: QuestionnaireAnswerItem[] | string[] | Record<string, string>;
 }
+
+interface CanshouDetails {
+  name: string;
+  coreConcept: string;
+  coreEmotion: string;
+  evolutionStage: string;
+  appearance: string;
+  materialAndSkin: string;
+  featuresAndAppendages: string;
+  attackMethod: string;
+  specialAbility: string;
+  origin: string;
+  birthEnvironment: string;
+  researcherNotes: string;
+  templateId?: string;
+  signature?: string;
+  userAnswers?: QuestionnaireAnswerItem[] | string[] | Record<string, string>;
+}
+
+type StructuredCreatorResult = MagicalGirlDetails | CanshouDetails;
+
+const isStructuredCreatorTemplate = (
+  template: CreatorTemplateId,
+): template is StructuredCreatorTemplateId => template === 'magical-girl' || template === 'canshou';
+
 interface SaveJsonButtonProps {
-  data: MagicalGirlDetails;
+  template: StructuredCreatorTemplateId;
+  data: StructuredCreatorResult;
   mode: JsonSaveMode;
   recommendedMode: JsonSaveMode;
 }
 
-const SaveJsonButton: React.FC<SaveJsonButtonProps> = ({ data, mode, recommendedMode }) => {
+const SaveJsonButton: React.FC<SaveJsonButtonProps> = ({ template, data, mode, recommendedMode }) => {
   const [copyStatus, setCopyStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const jsonPayload = useMemo(() => JSON.stringify(data, null, 2), [data]);
+  const followUp = useMemo(
+    () => getStructuredCreatorResultFollowUp(template, data),
+    [template, data]
+  );
 
   const downloadJson = () => {
     const blob = new Blob([jsonPayload], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    const sanitizedCodename = data.codename?.replace(/[^a-z0-9\u4e00-\u9fa5]/gi, '_') || 'data';
-    link.download = `魔法少女_${sanitizedCodename}.json`;
+    link.download = followUp.downloadFileName;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -220,7 +253,7 @@ const SaveJsonButton: React.FC<SaveJsonButtonProps> = ({ data, mode, recommended
             : '实验功能：部分移动端浏览器也支持直接下载，如失败请切换到复制模式'}
         </p>
         <button onClick={downloadJson} className="generate-button w-full">
-          {recommendedMode === 'download' ? '💾 下载设定文件' : '🧪 尝试直接下载 JSON'}
+          {recommendedMode === 'download' ? followUp.downloadButtonText : '🧪 尝试直接下载 JSON'}
         </button>
       </div>
     );
@@ -293,7 +326,7 @@ const DetailsPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [isTransitioning, setIsTransitioning] = useState(false);
-  const [magicalGirlDetails, setMagicalGirlDetails] = useState<MagicalGirlDetails | null>(null);
+  const [magicalGirlDetails, setMagicalGirlDetails] = useState<StructuredCreatorResult | null>(null);
   const [showImageModal, setShowImageModal] = useState(false);
   const [savedImageUrl, setSavedImageUrl] = useState<string | null>(null);
   const [showIntroduction, setShowIntroduction] = useState(true);
@@ -647,6 +680,15 @@ const DetailsPage: React.FC = () => {
     hasStreamCreatorResult,
     creatorResultSnapshot,
   ]);
+
+  const nonStreamStructuredTemplate = useMemo<StructuredCreatorTemplateId | null>(() => {
+    return isStructuredCreatorTemplate(creatorDisplayState.template) ? creatorDisplayState.template : null;
+  }, [creatorDisplayState.template]);
+
+  const nonStreamResultFollowUp = useMemo(() => {
+    if (!resolvedResultPayload || !nonStreamStructuredTemplate) return null;
+    return getStructuredCreatorResultFollowUp(nonStreamStructuredTemplate, resolvedResultPayload);
+  }, [resolvedResultPayload, nonStreamStructuredTemplate]);
 
   const streamedGeneralCardForDisplay = useMemo(() => {
     if (!hasStreamCreatorResult || creatorDisplayState.generationMode !== 'stream') return null;
@@ -1906,7 +1948,7 @@ const DetailsPage: React.FC = () => {
         return;
       }
 
-      const { data: result, aiMeta } = await readJsonWithAiMeta<MagicalGirlDetails>(response);
+      const { data: result, aiMeta } = await readJsonWithAiMeta<StructuredCreatorResult>(response);
       console.log('生成结果:', result);
       // 加入后置生成敏感词检测
       if (await checkSensitiveWords(JSON.stringify(result), {
@@ -2962,49 +3004,51 @@ const DetailsPage: React.FC = () => {
                   <p className="text-xs text-gray-400 text-center">提示：偏好设置已保存到浏览器，刷新后仍会保留；切换不会丢失生成结果。</p>
                 </div>
               </div>
-              {/* 关键解释抽屉 点击展开 点击关闭 */}
-              <div className="card" style={{ marginTop: '1rem' }}>
-                <div className="text-center">
-                  <button
-                    onClick={() => setShowDetails(!showDetails)}
-                    className="text-lg font-medium text-blue-900 hover:text-blue-700 transition-colors duration-200"
-                    style={{ background: 'none', border: 'none', cursor: 'pointer' }}
-                  >
-                    {showDetails ? '点击收起设定说明' : '点击展开设定说明'} {showDetails ? '▼' : '▶'}
-                  </button>
-                  {showDetails && (
-                    <div className="text-left" style={{ marginTop: '1rem' }}>
-                      <div className="mb-4">
-                        <h4 className="font-medium text-blue-800 mb-2">1. 魔力构装（简称魔装）</h4>
-                        <p className="text-sm text-gray-700 leading-relaxed">
-                          魔法少女的本相魔力所孕育的能力具现，是魔法少女能力体系的基础。一般呈现为魔法少女在现实生活中接触过，在冥冥之中与其命运关联或映射的物体，并且与魔法少女特色能力相关。例如，泡泡机形态的魔装可以使魔法少女制造魔法泡泡，而这些泡泡可以拥有产生幻象、缓冲防护、束缚困敌等能力。这部分的内容需包含魔装的名字（通常为2字词），魔装的形态，魔装的基本能力。
-                        </p>
+              {nonStreamStructuredTemplate === 'magical-girl' && (
+                <div className="card" style={{ marginTop: '1rem' }}>
+                  <div className="text-center">
+                    <button
+                      onClick={() => setShowDetails(!showDetails)}
+                      className="text-lg font-medium text-blue-900 hover:text-blue-700 transition-colors duration-200"
+                      style={{ background: 'none', border: 'none', cursor: 'pointer' }}
+                    >
+                      {showDetails ? '点击收起设定说明' : '点击展开设定说明'} {showDetails ? '▼' : '▶'}
+                    </button>
+                    {showDetails && (
+                      <div className="text-left" style={{ marginTop: '1rem' }}>
+                        <div className="mb-4">
+                          <h4 className="font-medium text-blue-800 mb-2">1. 魔力构装（简称魔装）</h4>
+                          <p className="text-sm text-gray-700 leading-relaxed">
+                            魔法少女的本相魔力所孕育的能力具现，是魔法少女能力体系的基础。一般呈现为魔法少女在现实生活中接触过，在冥冥之中与其命运关联或映射的物体，并且与魔法少女特色能力相关。例如，泡泡机形态的魔装可以使魔法少女制造魔法泡泡，而这些泡泡可以拥有产生幻象、缓冲防护、束缚困敌等能力。这部分的内容需包含魔装的名字（通常为2字词），魔装的形态，魔装的基本能力。
+                          </p>
+                        </div>
+                        <div className="mb-4">
+                          <h4 className="font-medium text-blue-800 mb-2">2. 奇境规则</h4>
+                          <p className="text-sm text-gray-700 leading-relaxed">
+                            魔法少女的本相灵魂所孕育的能力，是魔装能力的一体两面。奇境是魔装能力在规则层面上的升华，体现为与魔装相关的规则领域，而规则的倾向则会根据魔法少女的倾向而有不同的发展。例如，泡泡机形态的魔装升华而来的奇境规则可以是倾向于守护的&ldquo;戳破泡泡的东西将会立即无效化&rdquo;，也可以是倾向于进攻的&ldquo;沾到身上的泡泡被戳破会立即遭受伤害&rdquo;。
+                          </p>
+                        </div>
+                        <div className="mb-4">
+                          <h4 className="font-medium text-blue-800 mb-2">3. 繁开</h4>
+                          <p className="text-sm text-gray-700 leading-relaxed">
+                            是魔法少女魔装能力的二段进化与解放，无论是作为魔法少女的魔力衣装还是魔装的武器外形都会发生改变。需包含繁开状态魔装名（需要包含原魔装名的每个字），繁开后的进化能力，繁开后的魔装形态，繁开后的魔法少女衣装样式（在通常变身外观上的升级与改变）。
+                          </p>
+                        </div>
                       </div>
-                      <div className="mb-4">
-                        <h4 className="font-medium text-blue-800 mb-2">2. 奇境规则</h4>
-                        <p className="text-sm text-gray-700 leading-relaxed">
-                          魔法少女的本相灵魂所孕育的能力，是魔装能力的一体两面。奇境是魔装能力在规则层面上的升华，体现为与魔装相关的规则领域，而规则的倾向则会根据魔法少女的倾向而有不同的发展。例如，泡泡机形态的魔装升华而来的奇境规则可以是倾向于守护的&ldquo;戳破泡泡的东西将会立即无效化&rdquo;，也可以是倾向于进攻的&ldquo;沾到身上的泡泡被戳破会立即遭受伤害&rdquo;。
-                        </p>
-                      </div>
-                      <div className="mb-4">
-                        <h4 className="font-medium text-blue-800 mb-2">3. 繁开</h4>
-                        <p className="text-sm text-gray-700 leading-relaxed">
-                          是魔法少女魔装能力的二段进化与解放，无论是作为魔法少女的魔力衣装还是魔装的武器外形都会发生改变。需包含繁开状态魔装名（需要包含原魔装名的每个字），繁开后的进化能力，繁开后的魔装形态，繁开后的魔法少女衣装样式（在通常变身外观上的升级与改变）。
-                        </p>
-                      </div>
-                    </div>
-                  )}
+                    )}
+                  </div>
                 </div>
-              </div>
+              )}
 
               {/* 保存原始数据按钮 */}
               <div className="card" style={{ marginTop: '1rem' }}>
                 <div className="text-center">
-                  <h3 className="text-lg font-medium text-blue-900" style={{ marginBottom: '1rem' }}>保存人物设定</h3>
+                  <h3 className="text-lg font-medium text-blue-900" style={{ marginBottom: '1rem' }}>保存设定文件</h3>
                   <div className="flex flex-col sm:flex-row gap-3 justify-center">
-                    {resolvedResultPayload && (
+                    {resolvedResultPayload && nonStreamStructuredTemplate && (
                       <>
                         <SaveJsonButton
+                          template={nonStreamStructuredTemplate}
                           data={resolvedResultPayload}
                           mode={jsonSaveMode}
                           recommendedMode={recommendedJsonMode}
@@ -3029,7 +3073,7 @@ const DetailsPage: React.FC = () => {
                       保存好你的设定文件了吗？
                     </p>
                     <Link href="/battle" className="footer-link text-lg text-blue-600">
-                      前往竞技场，开始战斗！→
+                      {nonStreamResultFollowUp?.battleLinkText ?? '前往竞技场，开始战斗！→'}
                     </Link>
                   </div>
                 </div>
@@ -3040,7 +3084,7 @@ const DetailsPage: React.FC = () => {
                 <div className="text-center">
                   <h3 className="text-lg font-medium text-blue-900" style={{ marginBottom: '1rem' }}>生成立绘</h3>
                   <CharacterPortraitAssetPanel
-                    prompt={`${JSON.stringify(magicalGirlDetails.appearance)} , Xiabanmo, 二次元, 魔法少女`}
+                    prompt={nonStreamResultFollowUp?.portraitPrompt ?? ''}
                     onPortraitAssetChange={setCharacterPortraitAsset}
                   />
                 </div>

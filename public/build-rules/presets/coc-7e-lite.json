@@ -3,11 +3,11 @@
   "version": "1.0.0",
   "title": "CoC 7e 经典调查员卡",
   "description": "基于经典 CoC 7e 年代、职业、八维属性与理智生存摘要的轻量车卡规则。",
-  "supportedTemplates": ["general", "magical-girl"],
+  "supportedTemplates": ["general", "magical-girl", "canshou"],
   "allowStandalone": true,
   "mainRuleEligible": true,
   "projectionPolicy": "primary-structured",
-  "uiSummary": "适用于经典调查员或克系角色设定，覆盖年代、职业、八维属性与 SAN/HP/MP 摘要。",
+  "uiSummary": "适用于经典调查员或克系风格的角色，覆盖年代、职业、八维属性与 SAN/HP/MP 摘要。",
   "aiPromptHint": "以下字段代表角色在 CoC 7e 语境下的确定事实，请优先尊重年代、职业、八维属性与理智生存相关数值。",
   "blocks": [
     {

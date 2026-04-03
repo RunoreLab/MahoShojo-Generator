@@ -380,22 +380,54 @@ const buildRuleSections = (snapshot: NormalizedRuleSnapshot): CharacterParameter
     .filter((section): section is CharacterParameterRuleSection => section !== null);
 };
 
+const resolveMissingBlockLabel = (ruleId: string, blockId: string): string => {
+  const preset = tryLoadBuildRulePresetById(ruleId);
+  if (preset) {
+    const matchedBlock = preset.blocks
+      .filter(isRecord)
+      .find((block) => {
+        const candidateId = typeof block.id === 'string' ? block.id.trim() : '';
+        return candidateId === blockId;
+      });
+    if (matchedBlock && typeof matchedBlock.label === 'string' && matchedBlock.label.trim()) {
+      return matchedBlock.label.trim();
+    }
+  }
+
+  return getFriendlyLabel(blockId);
+};
+
+const buildValidationIssues = (snapshot: NormalizedRuleSnapshot): string[] => {
+  const issues = snapshot.validationSummary.issues
+    .map((issue) => issue.trim())
+    .filter((issue) => issue.length > 0);
+  const missingBlockIssues = snapshot.validationSummary.missingRequiredBlockKeys
+    .map((blockId) => blockId.trim())
+    .filter((blockId) => blockId.length > 0)
+    .map((blockId) => `缺少必填块：${resolveMissingBlockLabel(snapshot.ruleId, blockId)}`);
+
+  return [...issues, ...missingBlockIssues];
+};
+
 const buildRuleView = (snapshot: NormalizedRuleSnapshot): CharacterParameterRuleView | null => {
   const preset = tryLoadBuildRulePresetById(snapshot.ruleId);
   const sections = buildRuleSections(snapshot);
   if (sections.length === 0) return null;
 
-  const issues = snapshot.validationSummary.issues.filter((issue) => issue.trim().length > 0);
+  const issues = buildValidationIssues(snapshot);
+  const hasValidationFailure = snapshot.validationSummary.valid === false;
   return {
     ruleId: snapshot.ruleId,
     title: preset?.title?.trim() || snapshot.ruleId,
     version: snapshot.version,
     sections,
-    valid: snapshot.validationSummary.valid !== false && issues.length === 0,
+    valid: !hasValidationFailure && issues.length === 0,
     statusLabel:
-      snapshot.validationSummary.valid !== false && issues.length === 0
+      !hasValidationFailure && issues.length === 0
         ? '规则校验通过'
-        : `存在 ${issues.length} 条规则问题`,
+        : issues.length > 0
+          ? `存在 ${issues.length} 条规则问题`
+          : '规则校验未通过',
     issues,
   };
 };

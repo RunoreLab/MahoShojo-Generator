@@ -3,11 +3,11 @@
   "version": "1.0.0",
   "title": "DND 5e 经典角色卡",
   "description": "基于经典 5e 等级、职业、族裔、六维与战斗摘要的轻量车卡规则。",
-  "supportedTemplates": ["general", "magical-girl"],
+  "supportedTemplates": ["general", "magical-girl", "canshou"],
   "allowStandalone": true,
   "mainRuleEligible": true,
   "projectionPolicy": "primary-structured",
-  "uiSummary": "适用于经典 DND 风格角色设定，覆盖等级、职业、族裔、六维与战斗摘要。",
+  "uiSummary": "适用于经典 DND 5e 风格的角色，覆盖等级、职业、族裔、六维与战斗摘要。",
   "aiPromptHint": "以下字段代表角色在 DND 5e 语境下的确定事实，请优先尊重等级、职业、族裔、六维属性与战斗摘要。",
   "blocks": [
     {

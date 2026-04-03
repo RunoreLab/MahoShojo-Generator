@@ -107,4 +107,38 @@ describe('character parameter view', () => {
       })
     ).toBeNull();
   });
+
+  test('missingRequiredBlockKeys 会并入问题列表并反映到状态文案', () => {
+    const view = buildCharacterParameterView({
+      buildState: {
+        primaryRuleId: 'dnd-5e-lite',
+        rules: [
+          {
+            ruleId: 'dnd-5e-lite',
+            version: '1.0.0',
+            blockResults: {
+              level: '5',
+              class: 'wizard',
+              lineage: 'high-elf',
+            },
+            derived: {},
+            validationSummary: {
+              valid: false,
+              issues: [],
+              missingRequiredBlockKeys: ['abilityScores', 'combatProfile'],
+            },
+          },
+        ],
+      },
+    });
+
+    const currentRule = view?.sources[0]?.rules[0];
+    expect(currentRule).toBeDefined();
+    expect(currentRule?.valid).toBe(false);
+    expect(currentRule?.statusLabel).toBe('存在 2 条规则问题');
+    expect(currentRule?.issues).toEqual([
+      '缺少必填块：六维属性',
+      '缺少必填块：战斗摘要',
+    ]);
+  });
 });

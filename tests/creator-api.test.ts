@@ -174,6 +174,19 @@ describe('creator server', () => {
     ).toThrow('RULE_TEMPLATE_UNSUPPORTED');
   });
 
+  test('三套规则在 canshou 模板下可通过服务端模板校验', () => {
+    expect(() =>
+      validateCreatorRequest({
+        template: 'canshou',
+        freeformBrief: 'x',
+        questionnaires: [],
+        questionnaireAnswers: [],
+        buildRules: [arenaRule, dndRule, cocRule],
+        primaryRuleId: 'arena-trpg-lite',
+      })
+    ).not.toThrow();
+  });
+
   test('allowStandalone=false 的规则缺少问卷时拒绝请求', () => {
     expect(() =>
       validateCreatorRequest(
