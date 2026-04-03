@@ -9,6 +9,8 @@ type BuildCreatorStreamCardInput = {
   template: CreatorStreamTemplateId;
   markdown: string;
   fallbackLabel?: string | null;
+  creationInputs?: Record<string, unknown>;
+  buildState?: Record<string, unknown>;
 };
 
 type FinalizeCreatorStreamCardInput = BuildCreatorStreamCardInput & {
@@ -21,20 +23,33 @@ export function buildCreatorStreamCardFromMarkdown({
   template,
   markdown,
   fallbackLabel,
+  creationInputs,
+  buildState,
 }: BuildCreatorStreamCardInput) {
+  const creatorMetadata = {
+    ...(typeof creationInputs === 'undefined' ? {} : { creationInputs }),
+    ...(typeof buildState === 'undefined' ? {} : { buildState }),
+  };
+
   if (template === 'general-scenario') {
-    return buildGeneralScenarioCardFromMarkdown({
-      markdown,
-      fallbackTitle: fallbackLabel,
-      defaultTitle: '情景',
-    }).card;
+    return {
+      ...buildGeneralScenarioCardFromMarkdown({
+        markdown,
+        fallbackTitle: fallbackLabel,
+        defaultTitle: '情景',
+      }).card,
+      ...creatorMetadata,
+    };
   }
 
-  return buildGeneralCharacterCardFromMarkdown({
-    markdown,
-    fallbackName: fallbackLabel,
-    defaultName: '角色',
-  }).card;
+  return {
+    ...buildGeneralCharacterCardFromMarkdown({
+      markdown,
+      fallbackName: fallbackLabel,
+      defaultName: '角色',
+    }).card,
+    ...creatorMetadata,
+  };
 }
 
 export function finalizeCreatorStreamCard({
@@ -50,9 +65,9 @@ export function finalizeCreatorStreamCard({
       template,
       markdown,
       fallbackLabel,
+      creationInputs,
+      buildState,
     }),
     ...(typeof userAnswers === 'undefined' ? {} : { userAnswers }),
-    creationInputs,
-    ...(buildState ? { buildState } : {}),
   };
 }

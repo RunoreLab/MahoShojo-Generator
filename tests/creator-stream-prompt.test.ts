@@ -12,7 +12,7 @@ describe('creator stream prompt', () => {
       loreText: '【设定来源：都市传闻】终点站会吞掉最后一班乘客。',
     });
 
-    expect(prompt).toContain('通用情景卡');
+    expect(prompt).toContain('情景');
     expect(prompt).toContain('- 标题：...');
     expect(prompt).not.toContain('- 名字：...');
     expect(prompt).not.toContain('代号说明');

@@ -647,8 +647,10 @@ const DetailsPage: React.FC = () => {
       template: creatorDisplayState.template === 'general-scenario' ? 'general-scenario' : 'general',
       markdown,
       fallbackLabel: creatorDisplayState.streamFallbackLabel,
+      creationInputs: streamedGeneralCard?.creationInputs,
+      buildState: streamedGeneralCard?.buildState,
     });
-  }, [hasStreamCreatorResult, creatorDisplayState, streamingDisplayMarkdown]);
+  }, [hasStreamCreatorResult, creatorDisplayState, streamingDisplayMarkdown, streamedGeneralCard]);
 
   const streamPortraitPrompt = useMemo(() => {
     if (!hasStreamCreatorResult || creatorDisplayState.generationMode !== 'stream') return '';
