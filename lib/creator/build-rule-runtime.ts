@@ -35,13 +35,20 @@ const getBlock = (preset: Record<string, unknown>, blockId: string): Record<stri
   return isRecord(block) ? block : null;
 };
 
-const getPowerLevel = (preset: Record<string, unknown>, rawValue: unknown): string => {
-  const powerLevelBlock = getBlock(preset, 'powerLevel');
-  const options = Array.isArray(powerLevelBlock?.options) ? powerLevelBlock.options : [];
+const getBlocks = (preset: Record<string, unknown>): Record<string, unknown>[] => {
+  const blocks = Array.isArray(preset.blocks) ? preset.blocks : [];
+  return blocks.filter(isRecord);
+};
+
+const getSelectValue = (block: Record<string, unknown>, rawValue: unknown): string => {
+  const options = Array.isArray(block.options) ? block.options : [];
   const defaultValue =
-    typeof powerLevelBlock?.defaultValue === 'string' && powerLevelBlock.defaultValue.trim()
-      ? powerLevelBlock.defaultValue.trim()
-      : 'seed';
+    typeof block.defaultValue === 'string' && block.defaultValue.trim()
+      ? block.defaultValue.trim()
+      : options
+          .filter(isRecord)
+          .map((item) => (typeof item.value === 'string' ? item.value.trim() : ''))
+          .find(Boolean) ?? '';
   const allowed = new Set(
     options
       .filter(isRecord)
@@ -49,7 +56,14 @@ const getPowerLevel = (preset: Record<string, unknown>, rawValue: unknown): stri
       .filter(Boolean)
   );
   const candidate = typeof rawValue === 'string' ? rawValue.trim() : '';
+
   return candidate && allowed.has(candidate) ? candidate : defaultValue;
+};
+
+const getPowerLevel = (preset: Record<string, unknown>, rawValue: unknown): string => {
+  const powerLevelBlock = getBlock(preset, 'powerLevel');
+  if (!powerLevelBlock) return 'seed';
+  return getSelectValue(powerLevelBlock, rawValue) || 'seed';
 };
 
 const getCoreAttributeFields = (preset: Record<string, unknown>): PresetField[] => {
@@ -170,6 +184,91 @@ const normalizeSpecialties = (
   return { normalized, issues, used };
 };
 
+const normalizeNumericGroupBlock = (
+  block: Record<string, unknown>,
+  rawValue: unknown
+): {
+  normalized: Record<string, number>;
+  issues: string[];
+  missingRequiredBlockKeys: string[];
+} => {
+  const blockId = typeof block.id === 'string' ? block.id.trim() : 'unknown-block';
+  const fields = Array.isArray(block.fields) ? block.fields.filter(isRecord) : [];
+  const rawRecord = isRecord(rawValue) ? rawValue : null;
+
+  const normalized: Record<string, number> = {};
+  const issues: string[] = [];
+  const missingRequiredBlockKeys: string[] = [];
+
+  if (!rawRecord) {
+    missingRequiredBlockKeys.push(blockId);
+    issues.push(`缺少 ${blockId} 输入`);
+  }
+
+  for (const field of fields) {
+    const fieldId = typeof field.id === 'string' ? field.id.trim() : '';
+    if (!fieldId) continue;
+
+    const value = rawRecord ? asFiniteInteger(rawRecord[fieldId]) : null;
+    const min = asFiniteInteger(field.min);
+    const max = asFiniteInteger(field.max);
+
+    if (value === null) {
+      normalized[fieldId] = 0;
+      if (rawRecord) {
+        issues.push(`${blockId}.${fieldId} 缺失或不是有效数字`);
+      }
+      continue;
+    }
+
+    normalized[fieldId] = value;
+
+    if (min !== null && value < min) {
+      issues.push(`${blockId}.${fieldId} 低于允许范围（最小 ${min}）`);
+    }
+    if (max !== null && value > max) {
+      issues.push(`${blockId}.${fieldId} 超出允许范围（最大 ${max}）`);
+    }
+  }
+
+  return { normalized, issues, missingRequiredBlockKeys };
+};
+
+const normalizeGenericMultiSelectBlock = (
+  block: Record<string, unknown>,
+  rawValue: unknown
+): {
+  normalized: string[];
+  issues: string[];
+} => {
+  const blockId = typeof block.id === 'string' ? block.id.trim() : 'multi-select';
+  const groups = Array.isArray(block.groups) ? block.groups : [];
+  const allowedValues = new Set(
+    groups
+      .filter(isRecord)
+      .flatMap((group) => (Array.isArray(group.items) ? group.items : []))
+      .filter(isRecord)
+      .map((item) => (typeof item.id === 'string' ? item.id.trim() : ''))
+      .filter(Boolean)
+  );
+  const rawList = Array.isArray(rawValue) ? rawValue : [];
+  const normalized = Array.from(
+    new Set(
+      rawList
+        .map((item) => (typeof item === 'string' ? item.trim() : ''))
+        .filter(Boolean)
+    )
+  );
+  const issues = normalized
+    .filter((item) => !allowedValues.has(item))
+    .map((item) => `${blockId} 中存在未知选项：${item}`);
+
+  return {
+    normalized: normalized.filter((item) => allowedValues.has(item)),
+    issues,
+  };
+};
+
 const getBudgetLimit = (
   preset: Record<string, unknown>,
   tableKey: 'attributePointsByLevel' | 'specialtyPointsByLevel',
@@ -213,8 +312,62 @@ const buildValidationSummary = (args: {
   };
 };
 
+const evaluateGenericBuildRuleState = (
+  preset: Record<string, unknown>,
+  ruleId: string,
+  inputs: Record<string, unknown>
+): BuildRuleRuntimeResult => {
+  const blockResults: Record<string, unknown> = {};
+  const issues: string[] = [];
+  const missingRequiredBlockKeys: string[] = [];
+
+  for (const block of getBlocks(preset)) {
+    const blockId = typeof block.id === 'string' ? block.id.trim() : '';
+    if (!blockId) continue;
+
+    if (block.type === 'select') {
+      blockResults[blockId] = getSelectValue(block, inputs[blockId]);
+      continue;
+    }
+
+    if (block.type === 'stat-array' || block.type === 'number-group') {
+      const normalizedBlock = normalizeNumericGroupBlock(block, inputs[blockId]);
+      blockResults[blockId] = normalizedBlock.normalized;
+      issues.push(...normalizedBlock.issues);
+      missingRequiredBlockKeys.push(...normalizedBlock.missingRequiredBlockKeys);
+      continue;
+    }
+
+    if (block.type === 'multi-select') {
+      const normalizedBlock = normalizeGenericMultiSelectBlock(block, inputs[blockId]);
+      blockResults[blockId] = normalizedBlock.normalized;
+      issues.push(...normalizedBlock.issues);
+      continue;
+    }
+  }
+
+  return {
+    ruleId,
+    version: typeof preset.version === 'string' ? preset.version : '1.0.0',
+    blockResults,
+    derived: {},
+    validationSummary: buildValidationSummary({
+      issues,
+      missingRequiredBlockKeys,
+      attributePointsUsed: 0,
+      attributePointsLimit: null,
+      specialtyPointsUsed: 0,
+      specialtyPointsLimit: null,
+    }),
+  };
+};
+
 export function evaluateBuildRuleState({ ruleId, inputs }: BuildRuleRuntimeInput): BuildRuleRuntimeResult {
   const preset = loadBuildRulePresetById(ruleId) as unknown as Record<string, unknown>;
+  if (ruleId !== 'arena-trpg-lite') {
+    return evaluateGenericBuildRuleState(preset, ruleId, inputs);
+  }
+
   const powerLevel = getPowerLevel(preset, inputs.powerLevel);
 
   const coreAttributes = normalizeCoreAttributes(preset, inputs.coreAttributes);

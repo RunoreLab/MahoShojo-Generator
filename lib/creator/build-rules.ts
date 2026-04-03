@@ -34,8 +34,7 @@ export function loadBuildRulePresetById(id: string): BuildRulePreset {
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
-export function createDefaultBuildRuleInputs(ruleId: string): Record<string, unknown> {
-  const preset = loadBuildRulePresetById(ruleId) as unknown as Record<string, unknown>;
+const getPointBuyDefaultValue = (preset: Record<string, unknown>, fieldCount: number): number => {
   const budgets = isRecord(preset.budgets) ? preset.budgets : null;
   const attributePointsByLevel = budgets && isRecord(budgets.attributePointsByLevel)
     ? (budgets.attributePointsByLevel as Record<string, unknown>)
@@ -43,24 +42,51 @@ export function createDefaultBuildRuleInputs(ruleId: string): Record<string, unk
   const seedBudgetRaw = attributePointsByLevel?.seed;
   const seedBudget = typeof seedBudgetRaw === 'number' && Number.isFinite(seedBudgetRaw) ? Math.trunc(seedBudgetRaw) : 280;
 
+  return fieldCount > 0 ? Math.floor(seedBudget / fieldCount) : 40;
+};
+
+export function createDefaultBuildRuleInputs(ruleId: string): Record<string, unknown> {
+  const preset = loadBuildRulePresetById(ruleId) as unknown as Record<string, unknown>;
   const blocks = Array.isArray(preset.blocks) ? preset.blocks : [];
-  const coreAttributesBlock = blocks.find((item) => isRecord(item) && item.id === 'coreAttributes');
-  const fields =
-    coreAttributesBlock && isRecord(coreAttributesBlock) && Array.isArray(coreAttributesBlock.fields)
-      ? coreAttributesBlock.fields.filter(isRecord)
-      : [];
-  const attributeFieldIds = fields
-    .map((field) => (typeof field.id === 'string' ? field.id.trim() : ''))
-    .filter(Boolean);
+  const defaults = blocks.flatMap((block) => {
+    if (!isRecord(block)) return [];
+    const blockId = typeof block.id === 'string' ? block.id.trim() : '';
+    if (!blockId) return [];
 
-  const defaultAttributeValue = attributeFieldIds.length > 0 ? Math.floor(seedBudget / attributeFieldIds.length) : 40;
-  const coreAttributes = Object.fromEntries(
-    attributeFieldIds.map((fieldId) => [fieldId, defaultAttributeValue])
-  );
+    if (block.type === 'select') {
+      const defaultValue = typeof block.defaultValue === 'string' && block.defaultValue.trim()
+        ? block.defaultValue.trim()
+        : Array.isArray(block.options)
+          ? block.options
+              .filter(isRecord)
+              .map((option) => (typeof option.value === 'string' ? option.value.trim() : ''))
+              .find(Boolean) ?? ''
+          : '';
+      return [[blockId, defaultValue]] as const;
+    }
 
-  return {
-    powerLevel: 'seed',
-    coreAttributes,
-    specialties: [],
-  };
+    if (block.type === 'multi-select') {
+      return [[blockId, []]] as const;
+    }
+
+    if (block.type === 'point-buy' || block.type === 'stat-array' || block.type === 'number-group') {
+      const fields = Array.isArray(block.fields) ? block.fields.filter(isRecord) : [];
+      const defaultValue = block.type === 'point-buy' ? getPointBuyDefaultValue(preset, fields.length) : 0;
+      const groupValue = Object.fromEntries(
+        fields.map((field) => {
+          const fieldId = typeof field.id === 'string' ? field.id.trim() : '';
+          const fieldDefaultValue =
+            typeof field.defaultValue === 'number' && Number.isFinite(field.defaultValue)
+              ? Math.trunc(field.defaultValue)
+              : defaultValue;
+          return [fieldId, fieldDefaultValue];
+        })
+      );
+      return [[blockId, groupValue]] as const;
+    }
+
+    return [];
+  });
+
+  return Object.fromEntries(defaults);
 }

@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
+import { createDefaultBuildRuleInputs } from '@/lib/creator/build-rules';
 import { evaluateBuildRuleState } from '@/lib/creator/build-rule-runtime';
 
 describe('creator build-rule runtime', () => {
@@ -93,5 +94,38 @@ describe('creator build-rule runtime', () => {
     expect(result.validationSummary.valid).toBe(true);
     expect(result.validationSummary.budget?.attributePointsLimit).toBeNull();
     expect(result.validationSummary.budget?.specialtyPointsLimit).toBeNull();
+  });
+
+  test('dnd 默认输入包含 level / class / lineage / abilityScores / combatProfile', () => {
+    const inputs = createDefaultBuildRuleInputs('dnd-5e-lite');
+
+    expect(inputs.level).toBe('1');
+    expect(typeof inputs.class).toBe('string');
+    expect(typeof inputs.lineage).toBe('string');
+    expect(typeof inputs.abilityScores).toBe('object');
+    expect(typeof inputs.combatProfile).toBe('object');
+  });
+
+  test('coc 默认输入包含 eraTone / occupation / coreAttributes / secondaryInputs', () => {
+    const inputs = createDefaultBuildRuleInputs('coc-7e-lite');
+
+    expect(typeof inputs.eraTone).toBe('string');
+    expect(typeof inputs.occupation).toBe('string');
+    expect(typeof inputs.coreAttributes).toBe('object');
+    expect(typeof inputs.secondaryInputs).toBe('object');
+  });
+
+  test('缺少 stat-array 输入时会生成 block 级问题摘要', () => {
+    const result = evaluateBuildRuleState({
+      ruleId: 'dnd-5e-lite',
+      inputs: {
+        level: '1',
+        class: 'fighter',
+        lineage: 'human',
+      },
+    });
+
+    expect(result.validationSummary.valid).toBe(false);
+    expect(result.validationSummary.issues.some((issue) => issue.includes('abilityScores'))).toBe(true);
   });
 });
