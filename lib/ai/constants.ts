@@ -777,11 +777,12 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
     {
         id: 'nvidia',
         name: '英伟达 NVIDIA',
-        description: 'NVIDIA Build 官方 OpenAI 兼容通道，老黄特供开源模型。',
+        description: 'NVIDIA Build 官方 OpenAI 兼容通道，老黄特供开源模型。优先收录可免费试用、口碑较好的文本与推理模型。',
         docsUrl: 'https://build.nvidia.com/',
         baseUrl: 'https://integrate.api.nvidia.com/v1',
         type: 'openai',
         mode: 'auto',
+
         models: [
             {
                 value: 'google/gemma-4-31b-it',
@@ -799,6 +800,11 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 description: 'DeepSeek 主力模型，适合中文写作、整理与通用分析。'
             },
             {
+                value: 'deepseek-ai/deepseek-v3.1-terminus',
+                label: 'DeepSeek V3.1 Terminus',
+                description: '通用能力均衡，适合中文写作、整理、总结与结构化任务。'
+            },
+            {
                 value: 'qwen/qwen3.5-397b-a17b',
                 label: 'Qwen 3.5 397B',
                 description: 'Qwen 3.5 大档位，适合高质量内容生成与复杂指令。'
@@ -812,6 +818,61 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 value: 'moonshotai/kimi-k2.5',
                 label: 'Kimi K2.5',
                 description: 'Kimi 模型，适合创意发散、设定撰写与长文本续写。'
+            },
+            {
+                value: 'moonshotai/kimi-k2-instruct',
+                label: 'Kimi K2 Instruct',
+                description: '长文本、创意写作和中文表达都很强，适合人设与剧情生成。'
+            },
+            {
+                value: 'mistralai/mistral-large-3-675b-instruct-2512',
+                label: 'Mistral Large 3 675B',
+                description: '高质量通用旗舰，适合复杂指令、长文本和高要求创作。'
+            },
+            {
+                value: 'qwen/qwq-32b',
+                label: 'QwQ 32B',
+                description: '偏推理与思考，适合复杂约束、分析和多步生成。'
+            },
+            {
+                value: 'z-ai/glm4.7',
+                label: 'GLM 4.7',
+                description: '中文场景表现稳定，适合角色设定、续写与问答。'
+            },
+            {
+                value: 'bytedance/seed-oss-36b-instruct',
+                label: 'Seed OSS 36B Instruct',
+                description: '字节系开源指令模型，适合通用写作和多轮对话。'
+            },
+            {
+                value: 'mistralai/magistral-small-2506',
+                label: 'Magistral Small',
+                description: '较轻量的推理模型，适合需要思考链但不想太慢的任务。'
+            },
+            {
+                value: 'mistralai/mistral-nemotron',
+                label: 'Mistral Nemotron',
+                description: '通用性与稳定性不错，适合作为均衡备用选项。'
+            },
+            {
+                value: 'microsoft/phi-4-mini-flash-reasoning',
+                label: 'Phi 4 Mini Flash Reasoning',
+                description: '小而快的 reasoning 模型，适合预算敏感和高频调用。'
+            },
+            {
+                value: 'tiiuae/falcon3-7b-instruct',
+                label: 'Falcon 3 7B Instruct',
+                description: '轻量通用模型，适合草稿、改写和低成本尝试。'
+            },
+            {
+                value: 'mistralai/mistral-7b-instruct-v0.2',
+                label: 'Mistral 7B Instruct',
+                description: '经典轻量指令模型，适合基础聊天、润色和短文本生成。'
+            },
+            {
+                value: 'nvidia/nemotron-mini-4b-instruct',
+                label: 'Nemotron Mini 4B Instruct',
+                description: '超轻量模型，适合低门槛试用与简短结构化输出。'
             },
         ]
     },
