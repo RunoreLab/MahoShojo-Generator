@@ -60,6 +60,18 @@ const getSelectValue = (block: Record<string, unknown>, rawValue: unknown): stri
   return candidate && allowed.has(candidate) ? candidate : defaultValue;
 };
 
+const getSelectedOption = (block: Record<string, unknown>, value: string): Record<string, unknown> | null => {
+  const options = Array.isArray(block.options) ? block.options : [];
+  const option = options.find((item) => isRecord(item) && item.value === value);
+  return isRecord(option) ? option : null;
+};
+
+const asIntegerLike = (value: unknown): number | null => {
+  if (typeof value === 'number' && Number.isFinite(value)) return Math.trunc(value);
+  if (typeof value === 'string' && /^\d+$/.test(value.trim())) return Number.parseInt(value.trim(), 10);
+  return null;
+};
+
 const getPowerLevel = (preset: Record<string, unknown>, rawValue: unknown): string => {
   const powerLevelBlock = getBlock(preset, 'powerLevel');
   if (!powerLevelBlock) return 'seed';
@@ -346,11 +358,32 @@ const evaluateGenericBuildRuleState = (
     }
   }
 
+  const derived: Record<string, unknown> = {};
+  if (ruleId === 'dnd-5e-lite') {
+    const level = asIntegerLike(blockResults.level) ?? 1;
+    const classBlock = getBlock(preset, 'class');
+    const selectedClass = classBlock && typeof blockResults.class === 'string'
+      ? getSelectedOption(classBlock, blockResults.class)
+      : null;
+    const classMeta = selectedClass && isRecord(selectedClass.meta) ? selectedClass.meta : null;
+    const abilityScores = isRecord(blockResults.abilityScores) ? blockResults.abilityScores : {};
+    const abilityModifiers = Object.fromEntries(
+      ['STR', 'DEX', 'CON', 'INT', 'WIS', 'CHA'].map((abilityKey) => {
+        const score = asFiniteInteger(abilityScores[abilityKey]) ?? 0;
+        return [abilityKey, Math.floor((score - 10) / 2)];
+      })
+    );
+    derived.proficiencyBonus = Math.ceil(level / 4) + 1;
+    derived.abilityModifiers = abilityModifiers;
+    derived.hitDie = typeof classMeta?.hitDie === 'string' ? classMeta.hitDie : null;
+    derived.spellcastingKind = typeof classMeta?.spellcastingKind === 'string' ? classMeta.spellcastingKind : 'none';
+  }
+
   return {
     ruleId,
     version: typeof preset.version === 'string' ? preset.version : '1.0.0',
     blockResults,
-    derived: {},
+    derived,
     validationSummary: buildValidationSummary({
       issues,
       missingRequiredBlockKeys,

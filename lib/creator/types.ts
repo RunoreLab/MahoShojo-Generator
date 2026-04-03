@@ -79,7 +79,7 @@ export interface BuildRuleRuntimeResult {
   ruleId: string;
   version: string;
   blockResults: Record<string, unknown>;
-  derived: Record<string, number>;
+  derived: Record<string, unknown>;
   validationSummary: BuildRuleValidationSummary;
 }
 
@@ -96,7 +96,7 @@ export interface ProjectedBuildRuleForPrompt {
     ruleId: string;
     version: string;
     blockResults: Record<string, unknown>;
-    derived: Record<string, number>;
+    derived: Record<string, unknown>;
     validationSummary: BuildRuleValidationSummary;
   };
   summary: string;

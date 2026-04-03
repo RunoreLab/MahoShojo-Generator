@@ -23,6 +23,36 @@ type SpecialtyPromptMeta = {
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
+const getSelectOptionLabel = (ruleId: string, blockId: string, value: unknown): string => {
+  const preset = tryLoadBuildRulePresetById(ruleId) as unknown as Record<string, unknown> | null;
+  if (!preset || typeof value !== 'string') return typeof value === 'string' ? value : '-';
+  const blocks = Array.isArray(preset.blocks) ? preset.blocks : [];
+  const block = blocks.find((item) => isRecord(item) && item.id === blockId);
+  if (!isRecord(block) || !Array.isArray(block.options)) return value;
+  const option = block.options.find((item) => isRecord(item) && item.value === value);
+  return isRecord(option) && typeof option.label === 'string' ? option.label.trim() : value;
+};
+
+const formatSignedNumber = (value: unknown): string => {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return '-';
+  return value > 0 ? `+${Math.trunc(value)}` : `${Math.trunc(value)}`;
+};
+
+const translateSpellcastingKind = (value: unknown): string => {
+  switch (value) {
+    case 'full':
+      return '完整施法';
+    case 'half':
+      return '半施法';
+    case 'pact':
+      return '契约施法';
+    case 'none':
+      return '无施法';
+    default:
+      return typeof value === 'string' && value.trim() ? value.trim() : '无施法';
+  }
+};
+
 const getSpecialtyMap = (ruleId: string): Map<string, SpecialtyPromptMeta> => {
   const preset = tryLoadBuildRulePresetById(ruleId) as unknown as Record<string, unknown> | null;
   if (!preset) return new Map();
@@ -49,7 +79,7 @@ const getSpecialtyMap = (ruleId: string): Map<string, SpecialtyPromptMeta> => {
   return specialtyMap;
 };
 
-const buildRuleSummary = (template: CreatorTemplateId, rule: BuildRuleRuntimeResult): string => {
+const buildArenaRuleSummary = (template: CreatorTemplateId, rule: BuildRuleRuntimeResult): string => {
   const blockResults = isRecord(rule.blockResults) ? rule.blockResults : {};
   const derived = isRecord(rule.derived) ? rule.derived : {};
   const powerLevel = typeof blockResults.powerLevel === 'string' ? blockResults.powerLevel : 'seed';
@@ -73,6 +103,32 @@ const buildRuleSummary = (template: CreatorTemplateId, rule: BuildRuleRuntimeRes
   ]
     .filter(Boolean)
     .join('\n');
+};
+
+const buildDndRuleSummary = (template: CreatorTemplateId, rule: BuildRuleRuntimeResult): string => {
+  const blockResults = isRecord(rule.blockResults) ? rule.blockResults : {};
+  const derived = isRecord(rule.derived) ? rule.derived : {};
+  const abilityScores = isRecord(blockResults.abilityScores) ? blockResults.abilityScores : {};
+  const combatProfile = isRecord(blockResults.combatProfile) ? blockResults.combatProfile : {};
+  const abilityModifiers = isRecord(derived.abilityModifiers) ? derived.abilityModifiers : {};
+
+  return [
+    `模板：${template}`,
+    `等级：${getSelectOptionLabel(rule.ruleId, 'level', blockResults.level)} / 职业：${getSelectOptionLabel(rule.ruleId, 'class', blockResults.class)} / 族裔：${getSelectOptionLabel(rule.ruleId, 'lineage', blockResults.lineage)}`,
+    `属性：STR ${abilityScores.STR ?? '-'} (${formatSignedNumber(abilityModifiers.STR)}) / DEX ${abilityScores.DEX ?? '-'} (${formatSignedNumber(abilityModifiers.DEX)}) / CON ${abilityScores.CON ?? '-'} (${formatSignedNumber(abilityModifiers.CON)}) / INT ${abilityScores.INT ?? '-'} (${formatSignedNumber(abilityModifiers.INT)}) / WIS ${abilityScores.WIS ?? '-'} (${formatSignedNumber(abilityModifiers.WIS)}) / CHA ${abilityScores.CHA ?? '-'} (${formatSignedNumber(abilityModifiers.CHA)})`,
+    `战斗：AC ${combatProfile.armorClass ?? '-'} / HP ${combatProfile.hitPoints ?? '-'} / Speed ${combatProfile.speed ?? '-'} / Passive Perception ${combatProfile.passivePerception ?? '-'}`,
+    `派生：熟练加值 ${formatSignedNumber(derived.proficiencyBonus)} / 命中骰 ${typeof derived.hitDie === 'string' ? derived.hitDie : '-'} / ${translateSpellcastingKind(derived.spellcastingKind)}`,
+  ]
+    .filter(Boolean)
+    .join('\n');
+};
+
+const buildRuleSummary = (template: CreatorTemplateId, rule: BuildRuleRuntimeResult): string => {
+  if (rule.ruleId === 'dnd-5e-lite') {
+    return buildDndRuleSummary(template, rule);
+  }
+
+  return buildArenaRuleSummary(template, rule);
 };
 
 const toProjectedRule = (

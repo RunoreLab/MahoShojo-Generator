@@ -128,4 +128,39 @@ describe('creator build-rule runtime', () => {
     expect(result.validationSummary.valid).toBe(false);
     expect(result.validationSummary.issues.some((issue) => issue.includes('abilityScores'))).toBe(true);
   });
+
+  test('dnd-5e-lite 计算六维调整值与熟练加值', () => {
+    const result = evaluateBuildRuleState({
+      ruleId: 'dnd-5e-lite',
+      inputs: {
+        level: '5',
+        class: 'wizard',
+        lineage: 'high-elf',
+        abilityScores: {
+          STR: 8,
+          DEX: 14,
+          CON: 14,
+          INT: 18,
+          WIS: 12,
+          CHA: 10,
+        },
+        combatProfile: {
+          armorClass: 15,
+          hitPoints: 32,
+          speed: 30,
+          passivePerception: 11,
+        },
+      },
+    });
+
+    expect(result.derived.proficiencyBonus).toBe(3);
+    expect(result.derived.abilityModifiers).toEqual({
+      STR: -1,
+      DEX: 2,
+      CON: 2,
+      INT: 4,
+      WIS: 1,
+      CHA: 0,
+    });
+  });
 });

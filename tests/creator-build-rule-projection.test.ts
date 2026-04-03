@@ -36,6 +36,48 @@ const runtimeResult = {
   },
 } as const;
 
+const dndRuntimeResult = {
+  ruleId: 'dnd-5e-lite',
+  version: '1.0.0',
+  blockResults: {
+    level: '5',
+    class: 'wizard',
+    lineage: 'high-elf',
+    abilityScores: {
+      STR: 8,
+      DEX: 14,
+      CON: 14,
+      INT: 18,
+      WIS: 12,
+      CHA: 10,
+    },
+    combatProfile: {
+      armorClass: 15,
+      hitPoints: 32,
+      speed: 30,
+      passivePerception: 11,
+    },
+  },
+  derived: {
+    proficiencyBonus: 3,
+    abilityModifiers: {
+      STR: -1,
+      DEX: 2,
+      CON: 2,
+      INT: 4,
+      WIS: 1,
+      CHA: 0,
+    },
+    hitDie: 'd6',
+    spellcastingKind: 'full',
+  },
+  validationSummary: {
+    valid: true,
+    issues: [],
+    missingRequiredBlockKeys: [],
+  },
+} as const;
+
 describe('creator build-rule projection', () => {
   test('主规则投影保留结构化事实与中文摘要', () => {
     const projection = projectBuildRulesForPrompt({
@@ -69,5 +111,18 @@ describe('creator build-rule projection', () => {
     expect(projection.primary?.facts.ruleId).toBe('arena-trpg-lite');
     expect(projection.references).toHaveLength(1);
     expect(projection.references[0]?.ruleId).toBe('reference-only-rule');
+  });
+
+  test('dnd-5e-lite 主规则摘要包含等级、职业与施法类型', () => {
+    const projection = projectBuildRulesForPrompt({
+      template: 'general',
+      primaryRuleId: 'dnd-5e-lite',
+      rules: [dndRuntimeResult],
+      resolveRuleProjectionPolicy: () => 'primary-structured',
+    });
+
+    expect(projection.primary?.summary).toContain('等级');
+    expect(projection.primary?.summary).toContain('法师');
+    expect(projection.primary?.summary).toContain('完整施法');
   });
 });
