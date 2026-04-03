@@ -29,6 +29,29 @@ describe('creator endpoints', () => {
     expect(payload.error).toBe('自定义 AI 供应商配置无效');
   });
 
+  test('非流式 creator API 允许 canshou 模板仅凭 freeformBrief 进入后续校验', async () => {
+    const { default: handler } = await import('@/pages/api/creator/generate');
+    const response = await handler(
+      new Request('https://example.com/api/creator/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          template: 'canshou',
+          freeformBrief: '请写成冷静的研究记录体。',
+          answers: [],
+          questionnaires: [],
+          questionnaireSelections: [],
+          customProvider: {},
+        }),
+      }),
+    );
+
+    const payload = (await response.json()) as { error?: string; message?: string };
+    expect(response.status).toBe(400);
+    expect(payload.error).toBe('自定义 AI 供应商配置无效');
+    expect(payload.message).toBeUndefined();
+  });
+
   test('非流式 creator API 拒绝伪造的规则运行时快照', async () => {
     const { default: handler } = await import('@/pages/api/creator/generate');
     const response = await handler(

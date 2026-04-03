@@ -66,7 +66,7 @@ export const isCreatorTemplateSupportedInGenerationMode = (
     return isCreatorStreamTemplate(templateId);
   }
 
-  return templateId === 'magical-girl';
+  return templateId === 'magical-girl' || templateId === 'canshou';
 };
 
 export const getDefaultCreatorTemplateForGenerationMode = (

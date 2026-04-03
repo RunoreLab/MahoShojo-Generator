@@ -1,7 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 
 import { loadBuildRulePresetById, loadBuildRulePresetIndex } from '@/lib/creator/build-rules';
-import { CREATOR_TEMPLATE_IDS, isCreatorStreamTemplate } from '@/lib/creator/templates';
+import {
+  CREATOR_TEMPLATE_IDS,
+  isCreatorStreamTemplate,
+  isCreatorTemplateSupportedInGenerationMode,
+} from '@/lib/creator/templates';
 
 describe('creator build rules', () => {
   test('creator 模板枚举与 stream 边界固定', () => {
@@ -14,6 +18,9 @@ describe('creator build rules', () => {
     ]);
     expect(isCreatorStreamTemplate('general')).toBe(true);
     expect(isCreatorStreamTemplate('scenario')).toBe(false);
+    expect(isCreatorTemplateSupportedInGenerationMode('non-stream', 'magical-girl')).toBe(true);
+    expect(isCreatorTemplateSupportedInGenerationMode('non-stream', 'canshou')).toBe(true);
+    expect(isCreatorTemplateSupportedInGenerationMode('non-stream', 'general')).toBe(false);
   });
 
   test('arena-trpg-lite 出现在规则预设索引中', async () => {

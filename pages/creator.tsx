@@ -3,7 +3,6 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
-import MagicalGirlCard from '../components/MagicalGirlCard';
 import GeneralCharacterCard from '../components/GeneralCharacterCard';
 import { useProviderModeCooldown } from '../lib/cooldown';
 import { quickCheck } from '@/lib/sensitive-word-filter';
@@ -61,6 +60,7 @@ import { BuildSummaryPanel } from '@/components/creator/BuildSummaryPanel';
 import { CreatorAdvancedSidebarPanel } from '@/components/creator/CreatorAdvancedSidebarPanel';
 import { CreatorQuestionnaireSidebarPanel } from '@/components/creator/CreatorQuestionnaireSidebarPanel';
 import { CreatorResultStageContent } from '@/components/creator/CreatorResultStageContent';
+import { CreatorStructuredResultCard } from '@/components/creator/CreatorStructuredResultCard';
 import { CreatorWorkbenchPage } from '@/components/creator/CreatorWorkbenchPage';
 import { MarkdownBlock } from '@/components/MarkdownBlock';
 import { CREATOR_PAGE_COPY } from '@/lib/creator/page-copy';
@@ -74,6 +74,11 @@ import {
 } from '@/lib/creator/templates';
 import { createDefaultBuildRuleInputs, loadBuildRulePresetIndex, tryLoadBuildRulePresetById } from '@/lib/creator/build-rules';
 import { reconcileCreatorBuildRuleSelection } from '@/lib/creator/build-rule-selection';
+import {
+  filterCreatorQuestionnairePresetEntries,
+  pickDefaultCreatorQuestionnairePresetEntry,
+  reconcileQuestionnaireSelectionsForTemplate,
+} from '@/lib/creator/questionnaire-template';
 import { evaluateBuildRuleState } from '@/lib/creator/build-rule-runtime';
 import {
   buildCreatorResultOverview,
@@ -352,6 +357,11 @@ const DetailsPage: React.FC = () => {
     () => getCreatorTemplateOptionById(creatorTemplate)?.label ?? creatorTemplate,
     [creatorTemplate]
   );
+  const visiblePresetEntries = useMemo(
+    () => filterCreatorQuestionnairePresetEntries(creatorTemplate, presetEntries),
+    [creatorTemplate, presetEntries]
+  );
+  const questionnaireFallbackKind = creatorTemplate === 'canshou' ? 'canshou' : 'magical-girl';
   const currentRuleLabel = primaryBuildRulePreset?.title?.trim() || '未启用主规则';
   const buildRuleRequestPayload = useMemo(
     () =>
@@ -904,8 +914,7 @@ const DetailsPage: React.FC = () => {
         if (!response.ok) throw new Error('加载预设问卷索引失败');
         const data = await response.json();
         const list = Array.isArray(data?.presets) ? (data.presets as QuestionnairePresetEntry[]) : [];
-        const filtered = list.filter((item) => item.kind === 'magical-girl');
-        if (!cancelled) setPresetEntries(filtered);
+        if (!cancelled) setPresetEntries(list);
       } catch (error) {
         console.error('加载预设问卷失败:', error);
         if (!cancelled) {
@@ -929,7 +938,7 @@ const DetailsPage: React.FC = () => {
     if (presetEntries.length === 0) return;
     let cancelled = false;
     const loadDefaultPreset = async () => {
-      const defaultPreset = presetEntries.find((item) => item.isDefault) ?? presetEntries[0];
+      const defaultPreset = pickDefaultCreatorQuestionnairePresetEntry(creatorTemplate, presetEntries);
       if (!defaultPreset) {
         if (!cancelled) setSelectionReady(true);
         return;
@@ -963,7 +972,72 @@ const DetailsPage: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [ensureSelectionId, presetEntries, selectedQuestionnaires.length, selectionReady]);
+  }, [creatorTemplate, ensureSelectionId, presetEntries, selectedQuestionnaires.length, selectionReady]);
+
+  useEffect(() => {
+    if (creatorTemplate !== 'canshou' || presetEntries.length === 0) {
+      return;
+    }
+
+    const currentAnswerableSelection = selectedQuestionnaires.find(
+      (selection) => selection.questionnaire.questions.length > 0
+    );
+    if (currentAnswerableSelection?.questionnaire.kind === 'canshou') {
+      return;
+    }
+
+    const defaultPreset = pickDefaultCreatorQuestionnairePresetEntry('canshou', presetEntries);
+    if (!defaultPreset) return;
+
+    let cancelled = false;
+    const replaceAnswerableSelections = async () => {
+      try {
+        const response = await fetch(defaultPreset.path);
+        if (!response.ok) throw new Error('加载残兽默认问卷失败');
+        const data = await response.json();
+        const nativeAllowed = typeof (data as any)?.nativeAllowed === 'boolean' ? Boolean((data as any).nativeAllowed) : true;
+        const normalized = normalizeQuestionnaireDefinition(data, {
+          fallbackId: defaultPreset.id,
+          fallbackKind: defaultPreset.kind,
+          fallbackTitle: defaultPreset.title,
+          nativeAllowed,
+        });
+        if (!normalized || cancelled) return;
+
+        setSelectedQuestionnaires((currentSelections) => {
+          const usedSelectionIds = new Set<string>();
+          currentSelections
+            .filter((selection) => selection.questionnaire.questions.length === 0)
+            .forEach((selection) => {
+              const existingId = selection.selectionId || selection.questionnaire.id;
+              if (existingId) usedSelectionIds.add(existingId);
+            });
+
+          const replacementSelection = ensureSelectionId(
+            { source: 'preset', questionnaire: normalized },
+            usedSelectionIds
+          );
+
+          return reconcileQuestionnaireSelectionsForTemplate({
+            template: 'canshou',
+            selections: currentSelections,
+            replacementSelection,
+          });
+        });
+        setCurrentQuestionIndex(0);
+      } catch (error) {
+        console.error('切换残兽默认问卷失败:', error);
+        if (!cancelled) {
+          setQuestionnaireLoadError('📋 残兽默认问卷加载失败，请刷新页面重试');
+        }
+      }
+    };
+
+    void replaceAnswerableSelections();
+    return () => {
+      cancelled = true;
+    };
+  }, [creatorTemplate, ensureSelectionId, presetEntries, selectedQuestionnaires]);
 
   useEffect(() => {
     if (selectionReady) setLoading(false);
@@ -1074,8 +1148,8 @@ const DetailsPage: React.FC = () => {
       const rawData = parseQuestionnaireDataCardPayload(card);
       const cardSourceMeta = mapDataCardSourceMeta(card);
       const normalized = normalizeQuestionnaireDefinition(rawData, {
-        fallbackKind: 'magical-girl',
-        fallbackId: typeof rawData?.id === 'string' ? rawData.id : `magical-girl-card-${card?.id ?? ''}`,
+        fallbackKind: questionnaireFallbackKind,
+        fallbackId: typeof rawData?.id === 'string' ? rawData.id : `${questionnaireFallbackKind}-card-${card?.id ?? ''}`,
         fallbackTitle: typeof rawData?.title === 'string' ? rawData.title : card?.name || '未命名问卷',
         nativeAllowed: typeof rawData?.nativeAllowed === 'boolean' ? rawData.nativeAllowed : false,
       });
@@ -1098,8 +1172,8 @@ const DetailsPage: React.FC = () => {
       const text = await file.text();
       const parsed = JSON.parse(text);
       const normalized = normalizeQuestionnaireDefinition(parsed, {
-        fallbackKind: 'magical-girl',
-        fallbackId: typeof parsed?.id === 'string' ? parsed.id : 'magical-girl-upload',
+        fallbackKind: questionnaireFallbackKind,
+        fallbackId: typeof parsed?.id === 'string' ? parsed.id : `${questionnaireFallbackKind}-upload`,
         fallbackTitle: typeof parsed?.title === 'string' ? parsed.title : file.name.replace(/\.[^.]+$/, ''),
         nativeAllowed: false,
       });
@@ -1123,8 +1197,8 @@ const DetailsPage: React.FC = () => {
     try {
       const parsed = JSON.parse(pasteQuestionnaireText);
       const normalized = normalizeQuestionnaireDefinition(parsed, {
-        fallbackKind: 'magical-girl',
-        fallbackId: typeof parsed?.id === 'string' ? parsed.id : 'magical-girl-paste',
+        fallbackKind: questionnaireFallbackKind,
+        fallbackId: typeof parsed?.id === 'string' ? parsed.id : `${questionnaireFallbackKind}-paste`,
         fallbackTitle: typeof parsed?.title === 'string' ? parsed.title : '未命名问卷',
         nativeAllowed: false,
       });
@@ -1141,7 +1215,7 @@ const DetailsPage: React.FC = () => {
   };
 
   const handleAddPreset = async (presetId: string) => {
-    const preset = presetEntries.find((item) => item.id === presetId);
+    const preset = visiblePresetEntries.find((item) => item.id === presetId);
     if (!preset) return;
     try {
       const response = await fetch(preset.path);
@@ -2144,8 +2218,12 @@ const DetailsPage: React.FC = () => {
               defaultValue=""
             >
               <option value="" disabled>选择预设问卷</option>
-              {presetEntries.map((preset) => (
-                <option key={preset.id} value={preset.id}>{preset.title}</option>
+              {visiblePresetEntries.map((preset) => (
+                <option key={preset.id} value={preset.id}>
+                  {(creatorTemplate === 'general' || creatorTemplate === 'general-scenario')
+                    ? `${preset.kind === 'canshou' ? '残兽' : '魔法少女'} · ${preset.title}`
+                    : preset.title}
+                </option>
               ))}
             </select>
             <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1 text-xs font-medium text-indigo-700 hover:border-indigo-300 hover:bg-indigo-100">
@@ -2800,12 +2878,12 @@ const DetailsPage: React.FC = () => {
             </>
           )}
 
-          {/* 非流式：魔法少女详细信息结果 */}
+          {/* 非流式：结构化角色结果 */}
           {hasNonStreamCreatorResult && magicalGirlDetails && (
             <>
-              <MagicalGirlCard
-                magicalGirl={magicalGirlDetails}
-                gradientStyle="linear-gradient(135deg, #9775fa 0%, #b197fc 100%)"
+              <CreatorStructuredResultCard
+                template={creatorDisplayState.template}
+                result={magicalGirlDetails}
                 onSaveImage={handleSaveImage}
                 imageSaveMode={imageSaveMode}
                 saveButtonLabel={imageSaveButtonLabel}
