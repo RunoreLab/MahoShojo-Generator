@@ -57,6 +57,7 @@ import {
 } from '@/components/questionnaire/QuestionnaireQuestionPanel';
 import { QuestionnaireAnswerExportPanel } from '@/components/questionnaire/QuestionnaireAnswerExportPanel';
 import { CharacterPortraitAssetPanel } from '@/components/shared/CharacterPortraitAssetPanel';
+import { CreatorEntryLink } from '@/components/shared/CreatorEntryLink';
 import type { AIReasoningEnvelope } from '@/types/ai-reasoning';
 import type { CharacterCardPortraitAsset } from '@/types/visual-asset';
 
@@ -1839,6 +1840,9 @@ const DetailsPage: React.FC = () => {
                   >
                     {isGenerating ? '生成中...' : '快速随机生成'}
                   </button>
+                </div>
+                <div className="mt-4 text-center">
+                  <CreatorEntryLink />
                 </div>
 
                 {/* 返回首页链接 */}
