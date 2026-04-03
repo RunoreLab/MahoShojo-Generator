@@ -34,4 +34,16 @@ describe('ai-provider-catalog', () => {
 
     expect(errors).toEqual([]);
   });
+
+  it('已有 Gemma 模型目录包含新的 Gemma 4 模型', () => {
+    const providerIds = ['system', 'google-cloudflare'];
+
+    for (const providerId of providerIds) {
+      const provider = AI_PROVIDER_CATALOG.find(item => item.id === providerId);
+      const modelValues = provider?.models.map(model => model.value) ?? [];
+
+      expect(modelValues).toContain('gemma-4-31b-it');
+      expect(modelValues).toContain('gemma-4-26b-a4b-it');
+    }
+  });
 });

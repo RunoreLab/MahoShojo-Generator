@@ -76,6 +76,16 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 description: 'Google 旗下的上两代模型，但是真的好快！'
             },
             {
+                value: 'gemma-4-31b-it',
+                label: 'Gemma 4 31B IT',
+                description: '较新的 Gemma 4 指令模型（31B），适合作为高优先级的 Gemma 备用选择。'
+            },
+            {
+                value: 'gemma-4-26b-a4b-it',
+                label: 'Gemma 4 26B A4B IT',
+                description: '较新的 Gemma 4 指令模型（26B A4B），建议先作为可选备用通道使用。'
+            },
+            {
                 value: 'gemma-3-27b-it',
                 label: 'Gemma 3 27B IT',
                 description: '更便宜但也更弱的 Gemma 3 指令模型（27B），建议仅作为流式输出的备用选择。'
@@ -538,6 +548,16 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 value: 'gemini-2.0-flash-lite',
                 label: 'Gemini 2.0 Flash Lite',
                 description: 'Google 早前的轻量版快速模型，速度极快，适合预算敏感或高并发场景。'
+            },
+            {
+                value: 'gemma-4-31b-it',
+                label: 'Gemma 4 31B IT',
+                description: '较新的 Gemma 4 指令模型（31B），适合作为高优先级的 Gemma 备用选择。'
+            },
+            {
+                value: 'gemma-4-26b-a4b-it',
+                label: 'Gemma 4 26B A4B IT',
+                description: '较新的 Gemma 4 指令模型（26B A4B），建议先作为可选备用通道使用。'
             },
             {
                 value: 'gemma-3-27b-it',

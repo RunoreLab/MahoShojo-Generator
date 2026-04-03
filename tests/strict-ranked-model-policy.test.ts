@@ -6,6 +6,7 @@ import { isStrictRankedModelBlacklisted, STRICT_RANKED_MODEL_FALLBACKS } from '@
 describe('ranked-model-policy: strict ranked', () => {
   test('严格排位默认模型回退名单顺序稳定，并与数据卡自动预审查一致', () => {
     expect(Array.from(STRICT_RANKED_MODEL_FALLBACKS)).toEqual([
+      'gemma-4-31b-it',
       'gemma-3-27b-it',
       'gemini-2.5-flash-lite',
       'glm-4.7',

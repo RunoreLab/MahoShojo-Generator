@@ -136,7 +136,9 @@
 - Gemini 3.0 Pro
 - Deepseek v3.2
 
-稳定轻量模型，遭遇黄字报错时可以手动切换重试：
+稳定备用模型，遭遇黄字报错时可以手动切换重试：
+- Gemma 4 31B IT
+- Gemma 4 26B A4B IT
 - Gemma 3 27B IT (仅流式)
 - Gemini 2.5 Flash Lite
 
