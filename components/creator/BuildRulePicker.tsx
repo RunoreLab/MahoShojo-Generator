@@ -1,4 +1,10 @@
 import type { BuildRulePresetIndex } from '@/lib/creator/types';
+import {
+  CREATOR_PANEL_SURFACE_CLASS,
+  CREATOR_SUBPANEL_ACTIVE_CLASS,
+  CREATOR_SUBPANEL_SURFACE_CLASS,
+  joinCreatorClassNames,
+} from '@/components/creator/surfaceStyles';
 
 type BuildRulePickerProps = {
   presets: BuildRulePresetIndex;
@@ -18,7 +24,10 @@ export function BuildRulePicker({
   disabled = false,
 }: BuildRulePickerProps) {
   return (
-    <section className="rounded-2xl border border-violet-100 bg-white/85 p-4 shadow-sm">
+    <section
+      data-creator-surface="panel"
+      className={CREATOR_PANEL_SURFACE_CLASS}
+    >
       <div className="mb-3">
         <h3 className="text-base font-semibold text-violet-900">车卡规则</h3>
         <p className="mt-1 text-xs leading-5 text-slate-600">
@@ -32,9 +41,12 @@ export function BuildRulePicker({
           return (
             <div
               key={preset.id}
-              className={`rounded-2xl border px-4 py-3 ${
-                isSelected ? 'border-violet-300 bg-violet-50/70' : 'border-slate-200 bg-white'
-              }`}
+              data-creator-surface="subpanel"
+              className={joinCreatorClassNames(
+                isSelected ? CREATOR_SUBPANEL_ACTIVE_CLASS : CREATOR_SUBPANEL_SURFACE_CLASS,
+                isSelected ? 'border-violet-300' : '',
+                'px-4 py-3'
+              )}
             >
               <div className="flex items-start justify-between gap-3">
                 <div>

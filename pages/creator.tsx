@@ -32,14 +32,12 @@ import {
   type StoredQuestionnaireAnswerItem,
 } from '@/lib/questionnaires';
 import { persistArrestedBackup, type ArrestedBackupDraftItem, type ArrestedBackupTriggerSource } from '@/lib/arrested-backup';
-import AiProviderSelector, { type UserAIProviderConfig } from '@/components/AiProviderSelector';
+import { type UserAIProviderConfig } from '@/components/AiProviderSelector';
 import AiReasoningPanel from '@/components/ai/AiReasoningPanel';
 import { parseBulkQuestionnaireAnswers } from '@/lib/questionnaire-bulk-parser';
 import { ErrorMessage } from '@/components/ErrorMessage';
 import { EncyclopediaLinks } from '@/components/encyclopedia/EncyclopediaLinks';
-import { GenerationModeSwitcher, type GenerationMode } from '@/components/shared/GenerationModeSwitcher';
-import { ProviderCooldownNotice } from '@/components/ai/ProviderCooldownNotice';
-import { TokenIndicator } from '@/components/shared/TokenIndicator';
+import { type GenerationMode } from '@/components/shared/GenerationModeSwitcher';
 import { JsonSizeIndicator } from '@/components/shared/JsonSizeIndicator';
 import { readTextAndReasoningStreamFromResponse } from '@/lib/stream/read-text-and-reasoning-stream';
 import { readJsonOrTextFromResponse, resolveApiErrorMessage } from '@/lib/client/apiError';
@@ -60,6 +58,7 @@ import { FreeformBriefPanel } from '@/components/creator/FreeformBriefPanel';
 import { BuildRulePicker } from '@/components/creator/BuildRulePicker';
 import { BuildRulePanel } from '@/components/creator/BuildRulePanel';
 import { BuildSummaryPanel } from '@/components/creator/BuildSummaryPanel';
+import { CreatorAdvancedSidebarPanel } from '@/components/creator/CreatorAdvancedSidebarPanel';
 import { CreatorQuestionnaireSidebarPanel } from '@/components/creator/CreatorQuestionnaireSidebarPanel';
 import { CreatorResultStageContent } from '@/components/creator/CreatorResultStageContent';
 import { CreatorWorkbenchPage } from '@/components/creator/CreatorWorkbenchPage';
@@ -2281,89 +2280,39 @@ const DetailsPage: React.FC = () => {
 
   const advancedSidebarPanel = (
     <div className="space-y-4">
-      <TokenIndicator
-        text={tokenEstimateText}
-        warningText="⚠️ 预计问卷回答较长，可能更易超时/失败。可尝试精简答案或减少问卷数量。"
-      />
-      <div className="rounded-lg bg-gray-100 p-3">
-        <button
-          onClick={() => setShowLanguageSection(!showLanguageSection)}
-          className="flex w-full items-center justify-between text-left font-medium text-gray-700 hover:text-blue-600"
-        >
-          <span>生成语言</span>
-          <span className="ml-2">{showLanguageSection ? '▼' : '▶'}</span>
-        </button>
-        {showLanguageSection && (
-          <div className="mt-3">
-            <select
-              id="language-select"
-              value={selectedLanguage}
-              onChange={(e) => setSelectedLanguage(e.target.value)}
-              className="input-field"
-              disabled={submitting}
-            >
-              {languages.map((lang) => (
-                <option key={lang.code} value={lang.code}>{lang.name}</option>
-              ))}
-            </select>
-          </div>
-        )}
-      </div>
-      <div className="rounded-lg bg-gray-100 p-3">
-        <GenerationModeSwitcher
-          label="生成方式"
-          value={generationMode}
-          disabled={submitting}
-          helper={false}
-          onChange={(mode) => {
-            setGenerationMode(mode);
-            setCreatorTemplate((currentTemplate) =>
-              normalizeCreatorTemplateForGenerationMode(mode, currentTemplate)
-            );
-          }}
-        />
-        <div className="mt-2 text-xs text-gray-600">
-          {generationMode === 'stream'
+      <CreatorAdvancedSidebarPanel
+        tokenEstimateText={tokenEstimateText}
+        selectedLanguage={selectedLanguage}
+        languages={languages}
+        showLanguageSection={showLanguageSection}
+        onToggleLanguageSection={() => setShowLanguageSection(!showLanguageSection)}
+        onChangeLanguage={setSelectedLanguage}
+        generationMode={generationMode}
+        submitting={submitting}
+        onChangeGenerationMode={(mode) => {
+          setGenerationMode(mode);
+          setCreatorTemplate((currentTemplate) =>
+            normalizeCreatorTemplateForGenerationMode(mode, currentTemplate)
+          );
+        }}
+        generationHint={
+          generationMode === 'stream'
             ? creatorTemplate === 'general-scenario'
               ? '提示：选择流式生成后，将实时输出 Markdown，并生成【通用情景卡】（templateId=通用情景）。标题会优先从 Markdown 标题或“标题：...”字段解析，失败则回退到你的补充说明。'
               : '提示：选择流式生成后，将实时输出 Markdown，并生成【通用角色卡】（templateId=通用角色）。代号/名字会尝试从输出中解析，失败则回退到你的答案或补充说明。'
-            : '提示：非流式生成会返回结构化的魔法少女数据卡（适合保存为模板/用于升华等），但需要等待生成结束一次性返回。'}
-        </div>
-      </div>
-      <div className="rounded-lg bg-gray-50 p-3">
-        <AiProviderSelector onConfigChange={setUserProviderConfig} />
-        <p className="mt-2 text-xs text-gray-500">使用自有 API Key 可缩短冷却至 3 秒，便于批量迭代生成。</p>
-        <ProviderCooldownNotice
-          currentMode={providerCooldownMode}
-          currentIsCooldown={isCooldown}
-          otherRemainingTime={otherRemainingTime}
-        />
-      </div>
-      <div className="rounded-lg bg-gray-100 p-3">
-        <button
-          onClick={() => setShowBulkFillSection(!showBulkFillSection)}
-          className="flex w-full items-center justify-between text-left font-medium text-gray-700 hover:text-blue-600"
-        >
-          <span>一键填充答案</span>
-          <span className="ml-2">{showBulkFillSection ? '▼' : '▶'}</span>
-        </button>
-        {showBulkFillSection && (
-          <div className="mt-3">
-            <textarea
-              id="bulk-answers"
-              value={bulkAnswers}
-              onChange={(e) => setBulkAnswers(e.target.value)}
-              placeholder="在此处粘贴所有答案：支持每行一个、Q/A 复制内容、编号列表、JSON。"
-              className="input-field h-20"
-              rows={4}
-            />
-            <div className="mt-2 flex items-center justify-between">
-              <button onClick={handleBulkFill} className="text-sm text-blue-600 hover:underline">填充</button>
-              <button onClick={handleClearDraft} className="text-sm text-red-600 hover:underline">清空存档</button>
-            </div>
-          </div>
-        )}
-      </div>
+            : '提示：非流式生成会返回结构化的魔法少女数据卡（适合保存为模板/用于升华等），但需要等待生成结束一次性返回。'
+        }
+        onConfigChange={setUserProviderConfig}
+        providerCooldownMode={providerCooldownMode}
+        isCooldown={isCooldown}
+        otherRemainingTime={otherRemainingTime}
+        showBulkFillSection={showBulkFillSection}
+        onToggleBulkFillSection={() => setShowBulkFillSection(!showBulkFillSection)}
+        bulkAnswers={bulkAnswers}
+        onChangeBulkAnswers={setBulkAnswers}
+        onBulkFill={handleBulkFill}
+        onClearDraft={handleClearDraft}
+      />
       <QuestionnaireAnswerExportPanel
         variant="light"
         title="生成前备份问卷答案"

@@ -1,4 +1,10 @@
 import type { BuildRulePreset, BuildRuleRuntimeResult } from '@/lib/creator/types';
+import {
+  CREATOR_INPUT_CLASS,
+  CREATOR_PANEL_SURFACE_CLASS,
+  CREATOR_SUBPANEL_SURFACE_CLASS,
+  joinCreatorClassNames,
+} from '@/components/creator/surfaceStyles';
 
 type BuildRulePanelProps = {
   preset: BuildRulePreset;
@@ -91,20 +97,27 @@ export function BuildRulePanel({
   };
 
   return (
-    <section className="rounded-2xl border border-violet-100 bg-white/85 p-4 shadow-sm">
+    <section
+      data-creator-surface="panel"
+      className={CREATOR_PANEL_SURFACE_CLASS}
+    >
       <div className="mb-4">
         <h3 className="text-base font-semibold text-violet-900">{preset.title}</h3>
         {preset.description ? <p className="mt-1 text-xs leading-5 text-slate-600">{preset.description}</p> : null}
       </div>
 
       {powerLevelBlock ? (
-        <div className="mb-4 rounded-2xl border border-slate-200 p-4">
+        <div
+          data-creator-surface="subpanel"
+          className={joinCreatorClassNames(CREATOR_SUBPANEL_SURFACE_CLASS, 'mb-4 p-4')}
+        >
           <h4 className="text-sm font-semibold text-slate-900">{powerLevelBlock.label ?? '力量层级'}</h4>
           {powerLevelBlock.description ? (
             <p className="mt-1 text-xs leading-5 text-slate-600">{powerLevelBlock.description}</p>
           ) : null}
           <select
-            className="mt-3 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
+            data-creator-control="field"
+            className={joinCreatorClassNames(CREATOR_INPUT_CLASS, 'mt-3')}
             value={powerLevel}
             disabled={disabled}
             onChange={(event) => onChange({ ...inputs, powerLevel: event.target.value })}
@@ -128,8 +141,9 @@ export function BuildRulePanel({
 
       {coreAttributesBlock ? (
         <div
+          data-creator-surface="subpanel"
           className={`mb-4 rounded-2xl border p-4 ${
-            attributeOverBudget ? 'border-rose-300 bg-rose-50/60' : 'border-slate-200'
+            attributeOverBudget ? 'border-rose-300 bg-rose-50/60' : 'border-[var(--app-border)] bg-[var(--app-surface-80)]'
           }`}
           data-core-attributes-budget-state={attributeOverBudget ? 'over-budget' : 'within-budget'}
         >
@@ -165,10 +179,15 @@ export function BuildRulePanel({
                   const description = typeof field.description === 'string' ? field.description : '';
                   const value = typeof coreAttributes[fieldId] === 'number' ? (coreAttributes[fieldId] as number) : 40;
                   return (
-                    <label key={fieldId} className="rounded-xl border border-slate-200 bg-slate-50/70 p-3">
+                    <label
+                      key={fieldId}
+                      data-creator-surface="subpanel"
+                      className={joinCreatorClassNames(CREATOR_SUBPANEL_SURFACE_CLASS, 'p-3')}
+                    >
                       <span className="block text-sm font-semibold text-slate-900">{label}</span>
                       {description ? <span className="mt-1 block text-xs leading-5 text-slate-600">{description}</span> : null}
                       <input
+                        data-creator-control="field"
                         type="number"
                         min={typeof coreAttributesBlock.minPerStat === 'number' ? coreAttributesBlock.minPerStat : 10}
                         max={typeof coreAttributesBlock.maxPerStat === 'number' ? coreAttributesBlock.maxPerStat : 80}
@@ -176,7 +195,7 @@ export function BuildRulePanel({
                         aria-invalid={attributeOverBudget}
                         value={value}
                         onChange={(event) => updateCoreAttribute(fieldId, Number(event.target.value))}
-                        className="mt-3 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
+                        className={joinCreatorClassNames(CREATOR_INPUT_CLASS, 'mt-3')}
                       />
                     </label>
                   );
@@ -188,8 +207,9 @@ export function BuildRulePanel({
 
       {specialtiesBlock ? (
         <div
+          data-creator-surface="subpanel"
           className={`mb-4 rounded-2xl border p-4 ${
-            specialtyOverBudget ? 'border-rose-300 bg-rose-50/60' : 'border-slate-200'
+            specialtyOverBudget ? 'border-rose-300 bg-rose-50/60' : 'border-[var(--app-border)] bg-[var(--app-surface-80)]'
           }`}
         >
           <h4 className="text-sm font-semibold text-slate-900">{specialtiesBlock.label ?? '基础能力专长'}</h4>
@@ -240,14 +260,15 @@ export function BuildRulePanel({
                               return (
                                 <label
                                   key={itemId}
+                                  data-creator-surface="subpanel"
                                   data-specialty-id={itemId}
                                   data-specialty-budget-state={disabledByBudget ? 'insufficient' : 'available'}
                                   className={`rounded-xl border px-3 py-2 text-sm ${
                                     checked
-                                      ? 'border-violet-300 bg-violet-50'
+                                      ? 'border-violet-300 bg-[var(--app-surface-80)] ring-1 ring-violet-400/25'
                                       : disabledByBudget
-                                        ? 'border-slate-200 bg-slate-100 text-slate-400'
-                                        : 'border-slate-200 bg-white'
+                                        ? 'border-[var(--app-border)] bg-[var(--app-surface-70)] text-slate-400'
+                                        : 'border-[var(--app-border)] bg-[var(--app-surface-95)]'
                                   }`}
                                 >
                                   <div className="flex items-center justify-between gap-3">

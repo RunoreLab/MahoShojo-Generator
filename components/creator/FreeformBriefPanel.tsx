@@ -1,3 +1,9 @@
+import {
+  CREATOR_INPUT_CLASS,
+  CREATOR_PANEL_SURFACE_CLASS,
+  joinCreatorClassNames,
+} from '@/components/creator/surfaceStyles';
+
 type FreeformBriefPanelProps = {
   value: string;
   onChange: (nextValue: string) => void;
@@ -10,7 +16,10 @@ export function FreeformBriefPanel({
   disabled = false,
 }: FreeformBriefPanelProps) {
   return (
-    <section className="rounded-2xl border border-amber-100 bg-white/85 p-4 shadow-sm">
+    <section
+      data-creator-surface="panel"
+      className={CREATOR_PANEL_SURFACE_CLASS}
+    >
       <div className="mb-3">
         <h3 className="text-base font-semibold text-amber-900">自由补充说明</h3>
         <p className="mt-1 text-xs leading-5 text-slate-600">
@@ -22,11 +31,17 @@ export function FreeformBriefPanel({
       </label>
       <textarea
         id="creator-freeform-brief"
+        data-creator-control="textarea"
         value={value}
         disabled={disabled}
         onChange={(event) => onChange(event.target.value)}
         placeholder="例如：写成冷淡但克制的口吻；强调战斗机动与高压炮击；不要出现现实隐私信息。"
-        className="mt-2 min-h-28 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 shadow-inner outline-none transition focus:border-amber-300 focus:ring-2 focus:ring-amber-100 disabled:cursor-not-allowed disabled:bg-slate-50"
+        className={joinCreatorClassNames(
+          CREATOR_INPUT_CLASS,
+          'mt-2 min-h-28 rounded-2xl px-4 py-3 shadow-inner',
+          'focus:border-amber-300 focus:ring-2 focus:ring-amber-100',
+          disabled && 'cursor-not-allowed disabled:bg-[var(--app-surface-70)]'
+        )}
       />
     </section>
   );

@@ -5,6 +5,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { BuildRulePanel } from '@/components/creator/BuildRulePanel';
 import { BuildRulePicker } from '@/components/creator/BuildRulePicker';
 import { BuildSummaryPanel } from '@/components/creator/BuildSummaryPanel';
+import { CreatorAdvancedSidebarPanel } from '@/components/creator/CreatorAdvancedSidebarPanel';
 import { FreeformBriefPanel } from '@/components/creator/FreeformBriefPanel';
 import { CreatorMainStage } from '@/components/creator/CreatorMainStage';
 import { CreatorSidebar } from '@/components/creator/CreatorSidebar';
@@ -32,6 +33,8 @@ test('TemplateSelector 显示 5 个模板并标出流式边界', () => {
   expect(html).toContain('通用情景卡（Markdown）');
   expect(html).toContain('支持流式');
   expect(html).not.toContain('md:grid-cols-2');
+  expect(html).toContain('data-creator-surface="panel"');
+  expect(html).toContain('data-creator-surface="subpanel"');
 });
 
 test('FreeformBriefPanel 渲染自由补充说明输入区', () => {
@@ -41,6 +44,8 @@ test('FreeformBriefPanel 渲染自由补充说明输入区', () => {
 
   expect(html).toContain('自由补充说明');
   expect(html).toContain('创作要求');
+  expect(html).toContain('data-creator-surface="panel"');
+  expect(html).toContain('data-creator-control="textarea"');
 });
 
 test('BuildRulePicker 展示可选规则与主规则入口', () => {
@@ -56,6 +61,8 @@ test('BuildRulePicker 展示可选规则与主规则入口', () => {
 
   expect(html).toContain('魔法少女竞技场 TRPG 简化角色卡');
   expect(html).toContain('主规则');
+  expect(html).toContain('data-creator-surface="panel"');
+  expect(html).toContain('data-creator-surface="subpanel"');
 });
 
 test('BuildRulePanel 渲染力量层级、属性与基础能力专长', () => {
@@ -84,6 +91,9 @@ test('BuildRulePanel 渲染力量层级、属性与基础能力专长', () => {
   expect(html).toContain('核心属性');
   expect(html).toContain('基础能力专长');
   expect(html).toContain('魔弹');
+  expect(html).toContain('data-creator-surface="panel"');
+  expect(html).toContain('data-creator-surface="subpanel"');
+  expect(html).toContain('data-creator-control="field"');
 });
 
 test('BuildSummaryPanel 展示属性预算、专长预算与派生值', () => {
@@ -112,6 +122,8 @@ test('BuildSummaryPanel 展示属性预算、专长预算与派生值', () => {
   expect(html).toContain('Radiance');
   expect(html).toContain('属性点');
   expect(html).toContain('专长点');
+  expect(html).toContain('data-creator-surface="panel"');
+  expect(html).toContain('data-creator-surface="subpanel"');
 });
 
 test('BuildRulePanel 在专长预算不足时禁用超预算的未选专长', () => {
@@ -180,6 +192,42 @@ test('BuildRulePanel 在属性超预算时于属性区立即显示错误提示',
   expect(html).toContain('data-core-attributes-budget-state="over-budget"');
   expect(html).toContain('属性点超出预算');
   expect(html).toContain('已超出 280 点上限');
+});
+
+test('CreatorAdvancedSidebarPanel 使用统一的工作台子卡片外观', () => {
+  const html = renderToStaticMarkup(
+    <CreatorAdvancedSidebarPanel
+      tokenEstimateText="一段示例输入"
+      selectedLanguage="zh-CN"
+      languages={[
+        { code: 'zh-CN', name: '简体中文' },
+        { code: 'en', name: 'English' },
+      ]}
+      showLanguageSection
+      onToggleLanguageSection={() => {}}
+      onChangeLanguage={() => {}}
+      generationMode="stream"
+      submitting={false}
+      onChangeGenerationMode={() => {}}
+      generationHint="提示：这里显示生成方式说明。"
+      onConfigChange={() => {}}
+      providerCooldownMode="system"
+      isCooldown={false}
+      otherRemainingTime={0}
+      showBulkFillSection
+      onToggleBulkFillSection={() => {}}
+      bulkAnswers=""
+      onChangeBulkAnswers={() => {}}
+      onBulkFill={() => {}}
+      onClearDraft={() => {}}
+    />
+  );
+
+  expect(html).toContain('data-creator-advanced-card="language"');
+  expect(html).toContain('data-creator-advanced-card="generation-mode"');
+  expect(html).toContain('data-creator-advanced-card="provider"');
+  expect(html).toContain('data-creator-advanced-card="bulk-fill"');
+  expect(html).toContain('data-creator-surface="subpanel"');
 });
 
 test('general-scenario 模板允许流式创作模式', () => {
