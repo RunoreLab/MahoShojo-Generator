@@ -21,7 +21,7 @@ export const sanitizeStoryPromptValue = (
 
   const sanitized: Record<string, unknown> = {};
   for (const [key, rawValue] of Object.entries(value)) {
-    if (key === 'creationInputs') {
+    if (key === 'creationInputs' || key === 'isPreset') {
       continue;
     }
     if (!options.readArenaHistory && key === 'arena_history') {

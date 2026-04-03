@@ -226,6 +226,48 @@ describe('arena prompt builder', () => {
     expect(prompt).not.toContain('should-not-appear');
   });
 
+  it('普通 battle prompt 不会暴露结构化预设角色的 isPreset 标记', () => {
+    const builder = createPromptBuilder(
+      { magicalGirl: ['Q1'], default: ['Q1'] },
+      null,
+      null,
+      false,
+      'zh-CN',
+      'classic',
+      null,
+      null,
+      undefined,
+      undefined,
+      false,
+      0,
+      false,
+      false,
+      null,
+      undefined,
+      null,
+      null,
+      false,
+    );
+
+    const prompt = builder({
+      combatants: [
+        {
+          type: 'magical-girl',
+          data: {
+            codename: '霜镜',
+            isPreset: true,
+            analysis: {
+              personalityAnalysis: '冷静',
+            },
+          },
+        },
+      ],
+    });
+
+    expect(prompt).toContain('霜镜');
+    expect(prompt).not.toContain('"isPreset"');
+  });
+
   it('流式 prompt 也会对通用角色采用相同的角色参数注入规则', () => {
     const builder = createStreamPromptBuilder(
       { default: ['Q1'] },
@@ -276,5 +318,49 @@ describe('arena prompt builder', () => {
     expect(prompt).not.toContain('creationInputs');
     expect(prompt).not.toContain('buildState');
     expect(prompt).not.toContain('should-not-appear');
+  });
+
+  it('流式 battle prompt 同样不会暴露结构化预设角色的 isPreset 标记', () => {
+    const builder = createStreamPromptBuilder(
+      { magicalGirl: ['Q1'], default: ['Q1'] },
+      null,
+      null,
+      false,
+      'zh-CN',
+      'classic',
+      null,
+      null,
+      undefined,
+      undefined,
+      false,
+      0,
+      false,
+      false,
+      false,
+      false,
+      null,
+      undefined,
+      null,
+      null,
+      false,
+    );
+
+    const prompt = builder({
+      combatants: [
+        {
+          type: 'magical-girl',
+          data: {
+            codename: '霜镜',
+            isPreset: true,
+            analysis: {
+              personalityAnalysis: '冷静',
+            },
+          },
+        },
+      ],
+    });
+
+    expect(prompt).toContain('霜镜');
+    expect(prompt).not.toContain('"isPreset"');
   });
 });
