@@ -154,4 +154,55 @@ describe('battle story prompt context', () => {
     expect(result.promptText).not.toContain('"id": 1');
     expect(result.promptText).not.toContain('"current_state"');
   });
+
+  test('连续战报上下文会忽略 creationInputs，并将 buildState 表述为角色参数', () => {
+    const result = buildBattleStoryPromptContext({
+      seed: {
+        combatants: [
+          {
+            data: {
+              name: '巡夜人',
+              content: '守望街区的人。',
+              creationInputs: {
+                buildRules: [{ ruleId: 'should-not-appear' }],
+              },
+              buildState: {
+                primaryRuleId: 'dnd-5e-lite',
+                rules: [{ ruleId: 'dnd-5e-lite' }],
+              },
+            },
+          },
+        ],
+        settings: {
+          readArenaHistory: false,
+          writeArenaHistory: true,
+          readCurrentState: false,
+          writeCurrentState: true,
+          readNarrativeHistory: false,
+          writeNarrativeHistory: false,
+        },
+      },
+      workingCombatants: [
+        {
+          data: {
+            name: '巡夜人',
+            content: '守望街区的人。',
+            creationInputs: {
+              buildRules: [{ ruleId: 'should-not-appear' }],
+            },
+            buildState: {
+              primaryRuleId: 'arena-trpg-lite',
+              rules: [{ ruleId: 'arena-trpg-lite' }],
+            },
+          },
+        },
+      ],
+    });
+
+    expect(result.promptText).toContain('角色参数');
+    expect(result.promptText).toContain('arena-trpg-lite');
+    expect(result.promptText).not.toContain('creationInputs');
+    expect(result.promptText).not.toContain('buildState');
+    expect(result.promptText).not.toContain('should-not-appear');
+  });
 });
