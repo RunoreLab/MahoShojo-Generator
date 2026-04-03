@@ -2731,15 +2731,6 @@ const DetailsPage: React.FC = () => {
                         saveButtonLabel={imageSaveButtonLabel}
                         portraitAsset={characterPortraitAsset}
                       />
-                      <div className="card" style={{ marginTop: '1rem' }}>
-                        <div className="text-center">
-                          <h3 className="text-lg font-medium text-blue-900" style={{ marginBottom: '1rem' }}>生成立绘</h3>
-                          <CharacterPortraitAssetPanel
-                            prompt={streamPortraitPrompt}
-                            onPortraitAssetChange={setCharacterPortraitAsset}
-                          />
-                        </div>
-                      </div>
                     </>
                   )}
                 </>
@@ -2791,6 +2782,17 @@ const DetailsPage: React.FC = () => {
                       </div>
                     </div>
                   </div>
+                  {streamedGeneralCard.templateId !== GENERAL_SCENARIO_TEMPLATE_ID && (
+                    <div className="card" style={{ marginTop: '1rem' }}>
+                      <div className="text-center">
+                        <h3 className="text-lg font-medium text-blue-900" style={{ marginBottom: '1rem' }}>生成立绘</h3>
+                        <CharacterPortraitAssetPanel
+                          prompt={streamPortraitPrompt}
+                          onPortraitAssetChange={setCharacterPortraitAsset}
+                        />
+                      </div>
+                    </div>
+                  )}
                 </>
               )}
             </>
