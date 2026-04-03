@@ -1981,6 +1981,7 @@ const DetailsPage: React.FC = () => {
         <BuildRulePanel
           preset={primaryBuildRulePreset}
           inputs={buildRuleInputsById[primaryBuildRulePreset.id] ?? createDefaultBuildRuleInputs(primaryBuildRulePreset.id)}
+          runtimeResult={primaryBuildRuleRuntimeResult}
           onChange={(nextInputs) => handleBuildRuleInputsChange(primaryBuildRulePreset.id, nextInputs)}
         />
       ) : null}

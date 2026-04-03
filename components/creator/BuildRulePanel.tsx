@@ -1,8 +1,9 @@
-import type { BuildRulePreset } from '@/lib/creator/types';
+import type { BuildRulePreset, BuildRuleRuntimeResult } from '@/lib/creator/types';
 
 type BuildRulePanelProps = {
   preset: BuildRulePreset;
   inputs: Record<string, unknown>;
+  runtimeResult?: BuildRuleRuntimeResult | null;
   onChange: (nextInputs: Record<string, unknown>) => void;
   disabled?: boolean;
 };
@@ -13,6 +14,7 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 export function BuildRulePanel({
   preset,
   inputs,
+  runtimeResult = null,
   onChange,
   disabled = false,
 }: BuildRulePanelProps) {
@@ -27,6 +29,35 @@ export function BuildRulePanel({
     ? inputs.specialties.filter((item): item is string => typeof item === 'string')
     : [];
   const powerLevel = typeof inputs.powerLevel === 'string' ? inputs.powerLevel : 'seed';
+  const budget = runtimeResult?.validationSummary.budget ?? null;
+  const issues = runtimeResult?.validationSummary.issues ?? [];
+  const attributeBudgetIssue = issues.find((issue) => issue.includes('属性点超出预算')) ?? null;
+  const specialtyBudgetIssue = issues.find((issue) => issue.includes('专长点超出预算')) ?? null;
+  const attributePointsUsed = budget?.attributePointsUsed ?? null;
+  const attributePointsLimit = budget?.attributePointsLimit ?? null;
+  const specialtyPointsUsed = budget?.specialtyPointsUsed ?? null;
+  const specialtyPointsLimit = budget?.specialtyPointsLimit ?? null;
+  const attributeOverBudget =
+    attributePointsUsed !== null && attributePointsLimit !== null && attributePointsUsed > attributePointsLimit;
+  const specialtyOverBudget =
+    specialtyPointsUsed !== null && specialtyPointsLimit !== null && specialtyPointsUsed > specialtyPointsLimit;
+
+  const specialtyCostById = new Map<string, number>();
+  if (specialtiesBlock && Array.isArray(specialtiesBlock.groups)) {
+    specialtiesBlock.groups.filter(isRecord).forEach((group: Record<string, unknown>) => {
+      if (!Array.isArray(group.items)) return;
+      group.items.filter(isRecord).forEach((item: Record<string, unknown>) => {
+        const itemId = typeof item.id === 'string' ? item.id : '';
+        if (!itemId) return;
+        specialtyCostById.set(itemId, typeof item.cost === 'number' ? item.cost : 0);
+      });
+    });
+  }
+
+  const specialtyRemainingPoints =
+    specialtyPointsUsed !== null && specialtyPointsLimit !== null
+      ? specialtyPointsLimit - specialtyPointsUsed
+      : null;
 
   const updateCoreAttribute = (fieldId: string, nextValue: number) => {
     onChange({
@@ -39,6 +70,17 @@ export function BuildRulePanel({
   };
 
   const toggleSpecialty = (specialtyId: string) => {
+    const checked = selectedSpecialties.includes(specialtyId);
+    const specialtyCost = specialtyCostById.get(specialtyId) ?? 0;
+    const wouldExceedBudget =
+      !checked
+      && specialtyPointsUsed !== null
+      && specialtyPointsLimit !== null
+      && specialtyPointsUsed + specialtyCost > specialtyPointsLimit;
+    if (wouldExceedBudget) {
+      return;
+    }
+
     const nextSpecialties = selectedSpecialties.includes(specialtyId)
       ? selectedSpecialties.filter((item) => item !== specialtyId)
       : [...selectedSpecialties, specialtyId];
@@ -85,10 +127,35 @@ export function BuildRulePanel({
       ) : null}
 
       {coreAttributesBlock ? (
-        <div className="mb-4 rounded-2xl border border-slate-200 p-4">
+        <div
+          className={`mb-4 rounded-2xl border p-4 ${
+            attributeOverBudget ? 'border-rose-300 bg-rose-50/60' : 'border-slate-200'
+          }`}
+          data-core-attributes-budget-state={attributeOverBudget ? 'over-budget' : 'within-budget'}
+        >
           <h4 className="text-sm font-semibold text-slate-900">{coreAttributesBlock.label ?? '核心属性'}</h4>
           {coreAttributesBlock.description ? (
             <p className="mt-1 text-xs leading-5 text-slate-600">{coreAttributesBlock.description}</p>
+          ) : null}
+          {attributePointsUsed !== null ? (
+            <div
+              className={`mt-3 rounded-xl border px-3 py-2 text-xs leading-5 ${
+                attributeOverBudget
+                  ? 'border-rose-200 bg-rose-50 text-rose-700'
+                  : 'border-slate-200 bg-white text-slate-600'
+              }`}
+            >
+              <div className="font-medium">
+                属性点：{attributePointsUsed} / {attributePointsLimit ?? '无限'}
+              </div>
+              {attributeOverBudget && attributePointsLimit !== null ? (
+                <p className="mt-1">
+                  {attributeBudgetIssue ?? '属性点超出预算'}，已超出 {attributePointsUsed - attributePointsLimit} 点上限。
+                </p>
+              ) : (
+                <p className="mt-1">当前分配已即时同步到预算统计。</p>
+              )}
+            </div>
           ) : null}
           <div className="mt-3 grid gap-3">
             {Array.isArray(coreAttributesBlock.fields)
@@ -106,6 +173,7 @@ export function BuildRulePanel({
                         min={typeof coreAttributesBlock.minPerStat === 'number' ? coreAttributesBlock.minPerStat : 10}
                         max={typeof coreAttributesBlock.maxPerStat === 'number' ? coreAttributesBlock.maxPerStat : 80}
                         disabled={disabled}
+                        aria-invalid={attributeOverBudget}
                         value={value}
                         onChange={(event) => updateCoreAttribute(fieldId, Number(event.target.value))}
                         className="mt-3 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
@@ -119,10 +187,34 @@ export function BuildRulePanel({
       ) : null}
 
       {specialtiesBlock ? (
-        <div className="mb-4 rounded-2xl border border-slate-200 p-4">
+        <div
+          className={`mb-4 rounded-2xl border p-4 ${
+            specialtyOverBudget ? 'border-rose-300 bg-rose-50/60' : 'border-slate-200'
+          }`}
+        >
           <h4 className="text-sm font-semibold text-slate-900">{specialtiesBlock.label ?? '基础能力专长'}</h4>
           {specialtiesBlock.description ? (
             <p className="mt-1 text-xs leading-5 text-slate-600">{specialtiesBlock.description}</p>
+          ) : null}
+          {specialtyPointsUsed !== null ? (
+            <div
+              className={`mt-3 rounded-xl border px-3 py-2 text-xs leading-5 ${
+                specialtyOverBudget
+                  ? 'border-rose-200 bg-rose-50 text-rose-700'
+                  : 'border-slate-200 bg-white text-slate-600'
+              }`}
+            >
+              <div className="font-medium">
+                专长点：{specialtyPointsUsed} / {specialtyPointsLimit ?? '无限'}
+              </div>
+              {specialtyOverBudget ? (
+                <p className="mt-1">{specialtyBudgetIssue ?? '专长点超出预算'}</p>
+              ) : specialtyRemainingPoints !== null ? (
+                <p className="mt-1">剩余 {Math.max(0, specialtyRemainingPoints)} 点，可直接选择预算内专长。</p>
+              ) : (
+                <p className="mt-1">当前规则不限制专长总预算。</p>
+              )}
+            </div>
           ) : null}
           <div className="mt-3 space-y-4">
             {Array.isArray(specialtiesBlock.groups)
@@ -140,21 +232,33 @@ export function BuildRulePanel({
                               const description = typeof item.description === 'string' ? item.description : '';
                               const cost = typeof item.cost === 'number' ? item.cost : 0;
                               const checked = selectedSpecialties.includes(itemId);
+                              const disabledByBudget =
+                                !checked
+                                && specialtyPointsUsed !== null
+                                && specialtyPointsLimit !== null
+                                && specialtyPointsUsed + cost > specialtyPointsLimit;
                               return (
                                 <label
                                   key={itemId}
+                                  data-specialty-id={itemId}
+                                  data-specialty-budget-state={disabledByBudget ? 'insufficient' : 'available'}
                                   className={`rounded-xl border px-3 py-2 text-sm ${
-                                    checked ? 'border-violet-300 bg-violet-50' : 'border-slate-200 bg-white'
+                                    checked
+                                      ? 'border-violet-300 bg-violet-50'
+                                      : disabledByBudget
+                                        ? 'border-slate-200 bg-slate-100 text-slate-400'
+                                        : 'border-slate-200 bg-white'
                                   }`}
                                 >
                                   <div className="flex items-center justify-between gap-3">
-                                    <span className="font-medium text-slate-900">{label}</span>
+                                    <span className={`font-medium ${disabledByBudget ? 'text-slate-500' : 'text-slate-900'}`}>{label}</span>
                                     <div className="flex items-center gap-2 text-xs text-slate-600">
                                       <span>{cost} 点</span>
+                                      {disabledByBudget ? <span className="text-rose-600">点数不足</span> : null}
                                       <input
                                         type="checkbox"
                                         checked={checked}
-                                        disabled={disabled}
+                                        disabled={disabled || disabledByBudget}
                                         onChange={() => toggleSpecialty(itemId)}
                                       />
                                     </div>

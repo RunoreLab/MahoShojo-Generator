@@ -114,6 +114,74 @@ test('BuildSummaryPanel 展示属性预算、专长预算与派生值', () => {
   expect(html).toContain('专长点');
 });
 
+test('BuildRulePanel 在专长预算不足时禁用超预算的未选专长', () => {
+  const preset = loadBuildRulePresetById('arena-trpg-lite');
+  const inputs = {
+    powerLevel: 'seed',
+    coreAttributes: {
+      STR: 40,
+      CON: 40,
+      AGI: 40,
+      MAG: 40,
+      WILL: 40,
+      PER: 40,
+      CHM: 40,
+    },
+    specialties: ['magic-bullet', 'mana-impact', 'body-enhancement', 'hover'],
+  };
+  const runtimeResult = evaluateBuildRuleState({
+    ruleId: 'arena-trpg-lite',
+    inputs,
+  });
+
+  const html = renderToStaticMarkup(
+    <BuildRulePanel
+      preset={preset}
+      inputs={inputs}
+      runtimeResult={runtimeResult}
+      onChange={() => {}}
+    />
+  );
+
+  expect(html).toContain('data-specialty-id="magic-shield"');
+  expect(html).toContain('data-specialty-budget-state="insufficient"');
+  expect(html).toContain('点数不足');
+});
+
+test('BuildRulePanel 在属性超预算时于属性区立即显示错误提示', () => {
+  const preset = loadBuildRulePresetById('arena-trpg-lite');
+  const inputs = {
+    powerLevel: 'seed',
+    coreAttributes: {
+      STR: 80,
+      CON: 80,
+      AGI: 80,
+      MAG: 80,
+      WILL: 80,
+      PER: 80,
+      CHM: 80,
+    },
+    specialties: [],
+  };
+  const runtimeResult = evaluateBuildRuleState({
+    ruleId: 'arena-trpg-lite',
+    inputs,
+  });
+
+  const html = renderToStaticMarkup(
+    <BuildRulePanel
+      preset={preset}
+      inputs={inputs}
+      runtimeResult={runtimeResult}
+      onChange={() => {}}
+    />
+  );
+
+  expect(html).toContain('data-core-attributes-budget-state="over-budget"');
+  expect(html).toContain('属性点超出预算');
+  expect(html).toContain('已超出 280 点上限');
+});
+
 test('general-scenario 模板允许流式创作模式', () => {
   expect(isCreatorTemplateSupportedInGenerationMode('stream', 'general-scenario')).toBe(true);
 });
