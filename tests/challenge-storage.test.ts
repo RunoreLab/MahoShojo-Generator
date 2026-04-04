@@ -476,4 +476,89 @@ describe('challenge storage', () => {
     expect(checkpointCount).toBe(0);
     expect(unlockCount).toBe(1);
   });
+
+  test('deleteChallengeRunCascade 会在首个 await 前排队 run 删除请求，避免事务失活', async () => {
+    await putChallengeRun({
+      id: 'run-delete-order',
+      worldPresetId: 'arena',
+      status: 'failed',
+      snapshotSeed: 'snap-delete-order',
+      runSeed: 'run-seed-delete-order',
+      usedBootstrapReroll: false,
+      playerSnapshot: null,
+      runState: null,
+      currentStateDigest: null,
+      currentNodeId: null,
+      visitedNodeCount: 0,
+      lastResolvedNodeId: null,
+      lastCheckpointId: null,
+      startedAt: 10,
+      updatedAt: 20,
+      finishedAt: 30,
+    });
+
+    const db = await openChallengeDb();
+    const originalTransaction = db.transaction.bind(db);
+
+    Object.defineProperty(db, 'transaction', {
+      configurable: true,
+      value: ((...args: Parameters<IDBDatabase['transaction']>) => {
+        const transaction = originalTransaction(...args);
+        const [storeNames, mode] = args;
+        const targetStores = Array.isArray(storeNames) ? storeNames : [storeNames];
+        const isChallengeDeleteTransaction =
+          mode === 'readwrite'
+          && targetStores.includes(AI_SESSION_STORE_NAMES.challengeRuns)
+          && targetStores.includes(AI_SESSION_STORE_NAMES.challengeNodes)
+          && targetStores.includes(AI_SESSION_STORE_NAMES.challengeCheckpoints);
+
+        if (!isChallengeDeleteTransaction) {
+          return transaction;
+        }
+
+        let becameInactive = false;
+        queueMicrotask(() => {
+          becameInactive = true;
+        });
+
+        const originalObjectStore = transaction.objectStore.bind(transaction);
+        Object.defineProperty(transaction, 'objectStore', {
+          configurable: true,
+          value: ((...storeArgs: Parameters<IDBTransaction['objectStore']>) => {
+            const store = originalObjectStore(...storeArgs);
+            if (storeArgs[0] !== AI_SESSION_STORE_NAMES.challengeRuns) {
+              return store;
+            }
+
+            const originalDelete = store.delete.bind(store);
+            Object.defineProperty(store, 'delete', {
+              configurable: true,
+              value: ((key: IDBValidKey) => {
+                if (becameInactive) {
+                  throw new DOMException('Transaction is inactive', 'TransactionInactiveError');
+                }
+                return originalDelete(key);
+              }) as typeof store.delete,
+            });
+
+            return store;
+          }) as typeof transaction.objectStore,
+        });
+
+        return transaction;
+      }) as typeof db.transaction,
+    });
+
+    try {
+      await deleteChallengeRunCascade('run-delete-order');
+    } finally {
+      Object.defineProperty(db, 'transaction', {
+        configurable: true,
+        value: originalTransaction,
+      });
+    }
+
+    const deleted = await getChallengeRun('run-delete-order');
+    expect(deleted).toBeNull();
+  });
 });

@@ -75,6 +75,16 @@ const getRateLimitRule = (
     };
   }
 
+  if (actionType === 'challenge_node_adjudicate') {
+    return {
+      // Challenge AI adjudication intentionally shares the same official-key budget as arena battle reports.
+      cooldownMs: isSystem ? OFFICIAL_KEY_ARENA_BATTLE_REPORT_COOLDOWN_MS : USER_PROVIDED_KEY_COOLDOWN_MS,
+      bucketCapacity: isSystem ? 3 : 30,
+      bucketWindowMs: 10 * 60_000,
+      disallowConcurrent: true,
+    };
+  }
+
   return {
     cooldownMs: isSystem ? OFFICIAL_KEY_ARENA_BATTLE_REPORT_COOLDOWN_MS : USER_PROVIDED_KEY_COOLDOWN_MS,
     bucketCapacity: isSystem ? 3 : 30,

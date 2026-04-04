@@ -286,6 +286,32 @@ describe('challenge page', () => {
     expect(requestedUrl).toContain('sourceMode=preset-only');
   });
 
+  test('resolveEncounterForNode 在敌人候选接口失败时会回退到本地占位敌人', async () => {
+    const { resolveEncounterForNode } = await import('@/components/challenge/hooks/useChallengeController');
+
+    const runState = createAcceptedRunState();
+    const originalWarn = console.warn;
+    console.warn = () => undefined;
+
+    let result;
+    try {
+      result = await resolveEncounterForNode(runState, 'L1-N1', {
+        fetcher: async () =>
+          new Response(JSON.stringify({ error: 'upstream failed' }), {
+            status: 500,
+            headers: { 'Content-Type': 'application/json' },
+          }),
+      });
+    } finally {
+      console.warn = originalWarn;
+    }
+
+    expect(result.enemySourceMode).toBe('local-placeholder');
+    expect(result.encounter.enemySnapshot?.sourceId).toContain('arena-placeholder:');
+    expect(result.encounter.enemySnapshot?.strengthTier).toBe('common');
+    expect(result.nextRunState.worldState?.runFlags ?? []).not.toContain('preset_only_enemy_mode');
+  });
+
   test('deriveChallengeResumeState 会优先恢复 entered 节点的冻结快照与输入草稿', async () => {
     const { deriveChallengeResumeState } = await import('@/components/challenge/hooks/useChallengeController');
 

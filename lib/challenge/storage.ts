@@ -279,11 +279,16 @@ export const deleteChallengeRunCascade = async (runId: string): Promise<void> =>
   const nodeIndex = transaction.objectStore(AI_SESSION_STORE_NAMES.challengeNodes).index('by_run_visitIndex');
   const checkpointIndex = transaction.objectStore(AI_SESSION_STORE_NAMES.challengeCheckpoints).index('by_run_seq');
 
-  await Promise.all([
-    deleteByCursor(nodeIndex, IDBKeyRange.bound([runId, 0], [runId, Number.MAX_SAFE_INTEGER])),
-    deleteByCursor(checkpointIndex, IDBKeyRange.bound([runId, 0], [runId, Number.MAX_SAFE_INTEGER])),
-  ]);
+  const deleteNodesPromise = deleteByCursor(
+    nodeIndex,
+    IDBKeyRange.bound([runId, 0], [runId, Number.MAX_SAFE_INTEGER])
+  );
+  const deleteCheckpointsPromise = deleteByCursor(
+    checkpointIndex,
+    IDBKeyRange.bound([runId, 0], [runId, Number.MAX_SAFE_INTEGER])
+  );
+  const deleteRunPromise = requestToPromise(runStore.delete(runId));
 
-  runStore.delete(runId);
+  await Promise.all([deleteNodesPromise, deleteCheckpointsPromise, deleteRunPromise]);
   await transactionToPromise(transaction);
 };

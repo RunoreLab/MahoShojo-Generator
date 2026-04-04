@@ -210,7 +210,7 @@ type ResolveEncounterForNodeOptions = {
 type ResolveEncounterForNodeResult = {
   nextRunState: RunStateV1;
   encounter: EncounterSnapshotV1;
-  enemySourceMode: 'remote' | 'preset-only' | null;
+  enemySourceMode: 'remote' | 'preset-only' | 'local-placeholder' | null;
 };
 
 type ChallengeEnemyCandidatesApiPayload = {
@@ -272,7 +272,7 @@ const resolveBattleEnemySnapshot = async (
   nodeType: Extract<ChallengeNodeType, 'battle' | 'elite' | 'boss'>,
   nodeId: string,
   options: ResolveEncounterForNodeOptions = {}
-): Promise<{ enemySnapshot: EnemySnapshotV1; resolvedSourceMode: 'remote' | 'preset-only' }> => {
+): Promise<{ enemySnapshot: EnemySnapshotV1; resolvedSourceMode: 'remote' | 'preset-only' | 'local-placeholder' }> => {
   const sourceMode = runState.worldState?.runFlags.includes('preset_only_enemy_mode') ? 'preset-only' : 'online-first';
   const search = new URLSearchParams({
     worldId: runState.worldPresetId,
@@ -285,25 +285,39 @@ const resolveBattleEnemySnapshot = async (
     search.set('runSeed', runState.runSeed.trim());
   }
 
-  const response = await (options.fetcher ?? fetch)(
-    `${options.enemyCandidatesApiPath ?? '/api/challenge/enemy-candidates'}?${search.toString()}`,
-    {
-      method: 'GET',
-      headers: {
-        Accept: 'application/json',
-      },
+  try {
+    const response = await (options.fetcher ?? fetch)(
+      `${options.enemyCandidatesApiPath ?? '/api/challenge/enemy-candidates'}?${search.toString()}`,
+      {
+        method: 'GET',
+        headers: {
+          Accept: 'application/json',
+        },
+      }
+    );
+    const payload = await readEnemyCandidatesPayload(response);
+    const picked =
+      payload.candidates[hashString(`${runState.runSeed ?? 'no-seed'}:${nodeId}:${nodeType}`) % payload.candidates.length];
+    if (!picked) {
+      throw new Error(`CHALLENGE_ENEMY_CANDIDATE_NOT_FOUND:${nodeId}`);
     }
-  );
-  const payload = await readEnemyCandidatesPayload(response);
-  const picked = payload.candidates[hashString(`${runState.runSeed ?? 'no-seed'}:${nodeId}:${nodeType}`) % payload.candidates.length];
-  if (!picked) {
-    throw new Error(`CHALLENGE_ENEMY_CANDIDATE_NOT_FOUND:${nodeId}`);
-  }
 
-  return {
-    enemySnapshot: picked,
-    resolvedSourceMode: payload.resolvedSourceMode,
-  };
+    return {
+      enemySnapshot: picked,
+      resolvedSourceMode: payload.resolvedSourceMode,
+    };
+  } catch (error) {
+    console.warn('challenge enemy candidate resolution fell back to local placeholder', {
+      nodeId,
+      nodeType,
+      sourceMode,
+      error,
+    });
+    return {
+      enemySnapshot: buildPlaceholderEnemy(runState, nodeType, nodeId),
+      resolvedSourceMode: 'local-placeholder',
+    };
+  }
 };
 
 const buildEventEncounterSnapshot = (runState: RunStateV1, nodeId: string): EncounterSnapshotV1 => ({

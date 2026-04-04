@@ -73,4 +73,56 @@ describe('ai session soft rate limit', () => {
     });
     expect(second.allowed).toBe(true);
   });
+
+  test('challenge_node_adjudicate 对 system provider 保持战报级冷却策略', () => {
+    __resetAiSessionSoftRateLimitForTest();
+    const req = buildRequest('3.3.3.3');
+
+    const first = acquireAiSessionSoftRateLimit({
+      req,
+      actionType: 'challenge_node_adjudicate',
+      sessionId: 'challenge-run-a',
+      providerMode: 'system',
+      nowMs: 1_000,
+    });
+    expect(first.allowed).toBe(true);
+    if (first.allowed) first.release();
+
+    const second = acquireAiSessionSoftRateLimit({
+      req,
+      actionType: 'challenge_node_adjudicate',
+      sessionId: 'challenge-run-a',
+      providerMode: 'system',
+      nowMs: 61_000,
+    });
+    expect(second.allowed).toBe(false);
+    if (!second.allowed) {
+      expect(second.reason).toBe('session_cooldown');
+      expect(second.retryAfterSeconds).toBeGreaterThanOrEqual(59);
+    }
+  });
+
+  test('challenge_node_adjudicate 对 custom provider 保持短冷却策略', () => {
+    __resetAiSessionSoftRateLimitForTest();
+    const req = buildRequest('4.4.4.4');
+
+    const first = acquireAiSessionSoftRateLimit({
+      req,
+      actionType: 'challenge_node_adjudicate',
+      sessionId: 'challenge-run-b',
+      providerMode: 'custom',
+      nowMs: 1_000,
+    });
+    expect(first.allowed).toBe(true);
+    if (first.allowed) first.release();
+
+    const second = acquireAiSessionSoftRateLimit({
+      req,
+      actionType: 'challenge_node_adjudicate',
+      sessionId: 'challenge-run-b',
+      providerMode: 'custom',
+      nowMs: 4_500,
+    });
+    expect(second.allowed).toBe(true);
+  });
 });
