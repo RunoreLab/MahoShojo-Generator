@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 
 import { ChallengeBootstrapPanel } from '@/components/challenge/ChallengeBootstrapPanel';
@@ -8,9 +9,24 @@ import { ChallengeMapPage } from '@/components/challenge/ChallengeMapPage';
 import { ChallengeSummaryPage } from '@/components/challenge/ChallengeSummaryPage';
 import { NodeResolutionPanel } from '@/components/challenge/NodeResolutionPanel';
 import { useChallengeController } from '@/components/challenge/hooks/useChallengeController';
+import { ImagePreviewModal } from '@/components/shared/ImagePreviewModal';
 
-export function ChallengePage() {
-  const controller = useChallengeController();
+export type ChallengePageController = ReturnType<typeof useChallengeController>;
+
+export function ChallengePageView({ controller }: { controller: ChallengePageController }) {
+  const [showImageModal, setShowImageModal] = useState(false);
+  const [savedImageUrl, setSavedImageUrl] = useState<string | null>(null);
+
+  const handleSaveImage = (imageUrl: string) => {
+    setSavedImageUrl(imageUrl);
+    setShowImageModal(true);
+  };
+
+  useEffect(() => {
+    if (controller.stage === 'node') return;
+    setShowImageModal(false);
+    setSavedImageUrl(null);
+  }, [controller.stage]);
 
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(255,237,244,0.95),_rgba(255,255,255,0.98)_55%,_rgba(250,246,255,1))] text-slate-900">
@@ -97,6 +113,9 @@ export function ChallengePage() {
               selectedRecommendedActionId={controller.selectedRecommendedActionId}
               recommendedActions={controller.recommendedActions}
               viewMode={controller.nodeViewMode}
+              enemyDisplayState={controller.enemyDisplayState}
+              storyCardState={controller.storyCardState}
+              onSaveImage={handleSaveImage}
               onRecommendedActionChange={controller.setSelectedRecommendedActionId}
               onSelectOption={controller.setSelectedOptionId}
               onNoteChange={controller.setNote}
@@ -116,6 +135,20 @@ export function ChallengePage() {
           ) : null}
         </main>
       </div>
+
+      <ImagePreviewModal
+        isOpen={showImageModal}
+        imageUrl={savedImageUrl}
+        onClose={() => {
+          setShowImageModal(false);
+          setSavedImageUrl(null);
+        }}
+      />
     </div>
   );
+}
+
+export function ChallengePage() {
+  const controller = useChallengeController();
+  return <ChallengePageView controller={controller} />;
 }

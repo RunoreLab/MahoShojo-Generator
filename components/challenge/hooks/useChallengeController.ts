@@ -15,6 +15,7 @@ import {
   resolveChallengeNodeWithStreamingFallback,
   resolveNodeExecutionMode,
 } from '@/components/challenge/hooks/useChallengeStreamResolution';
+import type { ChallengeStoryCardState } from '@/components/challenge/ChallengeStoryCardSection';
 import {
   deleteChallengeRunCascade,
   getChallengeRun,
@@ -40,6 +41,7 @@ import type {
 } from '@/lib/challenge/types';
 import { getChallengeWorldPreset } from '@/lib/challenge/world-registry';
 import { buildArenaBootstrapSnapshot } from '@/lib/challenge/worlds/arena/bootstrap';
+import { resolveChallengeEnemyDisplay, type ChallengeEnemyDisplayState } from '@/lib/challenge/enemy-display';
 import type { ChallengeRecommendedAction } from '@/components/challenge/NodeResolutionPanel';
 
 export type ChallengeStage = 'lobby' | 'bootstrap' | 'map' | 'node' | 'summary';
@@ -217,6 +219,35 @@ type ChallengeEnemyCandidatesApiPayload = {
   success?: boolean;
   resolvedSourceMode?: 'remote' | 'preset-only';
   candidates?: EnemySnapshotV1[];
+};
+
+type ChallengePublicDataCardApiPayload = {
+  success?: boolean;
+  card?: unknown;
+};
+
+const fetchChallengePublicCardById = async (cardId: string): Promise<unknown | null> => {
+  const normalizedId = cardId.trim();
+  if (!normalizedId) return null;
+
+  try {
+    const response = await fetch(`/api/public-data-cards?id=${encodeURIComponent(normalizedId)}`, {
+      method: 'GET',
+      headers: {
+        Accept: 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      return null;
+    }
+
+    const payload = (await response.json().catch(() => null)) as ChallengePublicDataCardApiPayload | null;
+    return payload?.success ? payload.card ?? null : null;
+  } catch (error) {
+    console.warn('challenge enemy display failed to fetch public card', { cardId: normalizedId, error });
+    return null;
+  }
 };
 
 const isBattleNodeType = (
@@ -709,6 +740,8 @@ export function useChallengeController() {
   const [selectedOptionId, setSelectedOptionId] = useState('');
   const [selectedRecommendedActionId, setSelectedRecommendedActionId] = useState(battleRecommendedActions[0]?.id ?? '');
   const [latestStoryText, setLatestStoryText] = useState('');
+  const [enemyDisplayState, setEnemyDisplayState] = useState<ChallengeEnemyDisplayState | null>(null);
+  const [storyCardState, setStoryCardState] = useState<ChallengeStoryCardState | null>(null);
   const [latestNodeSummary, setLatestNodeSummary] = useState('');
   const [summaryText, setSummaryText] = useState('');
   const mountedRef = useRef(true);
@@ -775,6 +808,58 @@ export function useChallengeController() {
   );
 
   useEffect(() => {
+    if (stage !== 'node' || !currentEncounter || !isBattleNodeType(currentEncounter.kind)) {
+      setEnemyDisplayState(null);
+      return;
+    }
+
+    let cancelled = false;
+    const enemySnapshot = currentEncounter.enemySnapshot ?? null;
+    const encounterNodeId = currentEncounter.nodeId;
+
+    setEnemyDisplayState({
+      status: 'loading',
+      template: null,
+      card: null,
+      message: '正在解析敌方角色卡...',
+      sourceMeta: {
+        sourceType: enemySnapshot?.sourceType ?? 'preset',
+        sourceId: enemySnapshot?.sourceId ?? '',
+        isFallback: false,
+      },
+    });
+
+    void resolveChallengeEnemyDisplay({
+      enemySnapshot,
+      fetchPublicCardById: fetchChallengePublicCardById,
+    }).then((nextState) => {
+      if (!mountedRef.current || cancelled) return;
+      setEnemyDisplayState(nextState);
+    }).catch((error) => {
+      if (!mountedRef.current || cancelled) return;
+      console.warn('challenge enemy display resolution failed', {
+        nodeId: encounterNodeId,
+        error,
+      });
+      setEnemyDisplayState({
+        status: 'error',
+        template: null,
+        card: null,
+        message: '敌方角色卡解析失败，请继续结算或稍后重试。',
+        sourceMeta: {
+          sourceType: enemySnapshot?.sourceType ?? 'preset',
+          sourceId: enemySnapshot?.sourceId ?? '',
+          isFallback: false,
+        },
+      });
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentEncounter, stage]);
+
+  useEffect(() => {
     if (stage !== 'node' || nodeViewMode !== 'input' || !activeNodeRecord) return;
 
     const currentDraft = readDraftPlayerInput(activeNodeRecord.playerInput, activeNodeRecord.encounterSnapshot as EncounterSnapshotV1);
@@ -824,6 +909,8 @@ export function useChallengeController() {
     setSelectedOptionId('');
     setSelectedRecommendedActionId(battleRecommendedActions[0]?.id ?? '');
     setLatestStoryText('');
+    setEnemyDisplayState(null);
+    setStoryCardState(null);
   };
 
   const loadDemoCard = (): void => {
@@ -977,6 +1064,8 @@ export function useChallengeController() {
       setActiveNodeRecord(resumeState.activeNodeRecord);
       setNodeViewMode(resumeState.nodeViewMode);
       setLatestStoryText('');
+      setStoryCardState(null);
+      setEnemyDisplayState(null);
       setNote(resumeState.note);
       setSelectedOptionId(resumeState.selectedOptionId);
       setSelectedRecommendedActionId(resumeState.selectedRecommendedActionId);
@@ -1065,6 +1154,8 @@ export function useChallengeController() {
       setSelectedRecommendedActionId(nextSelectedRecommendedActionId);
       setNote('');
       setLatestStoryText('');
+      setStoryCardState(null);
+      setEnemyDisplayState(null);
       setStage('node');
       await refreshRecentRuns();
     } catch (enterError) {
@@ -1119,6 +1210,7 @@ export function useChallengeController() {
     setError(null);
     setIsResolving(true);
     setLatestStoryText('');
+    setStoryCardState(null);
     let resolutionAbortController: AbortController | null = null;
 
     try {
@@ -1176,6 +1268,12 @@ export function useChallengeController() {
               return;
             }
             setLatestStoryText(streamingText);
+            setStoryCardState({
+              markdown: streamingText,
+              reasoning: null,
+              telemetry: null,
+              finalSource: 'ai',
+            });
           },
           onStreamError: (streamError) => {
             console.warn('challenge stream resolution fell back to local system result', streamError);
@@ -1225,6 +1323,12 @@ export function useChallengeController() {
         }
 
         setLatestStoryText(resolution.storyMarkdown);
+        setStoryCardState({
+          markdown: resolution.storyMarkdown,
+          reasoning: resolution.reasoning,
+          telemetry: resolution.telemetry,
+          finalSource: resolution.finalSource,
+        });
         setLatestNodeSummary(
           buildNodeSummaryText({
             encounter: currentEncounter,
@@ -1363,6 +1467,8 @@ export function useChallengeController() {
     selectedOptionId,
     selectedRecommendedActionId,
     latestStoryText,
+    enemyDisplayState,
+    storyCardState,
     latestNodeSummary,
     summaryText,
     recommendedActions,

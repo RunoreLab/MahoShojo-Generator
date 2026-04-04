@@ -1,3 +1,6 @@
+import { ChallengeEnemyCardSection } from '@/components/challenge/ChallengeEnemyCardSection';
+import { ChallengeStoryCardSection, type ChallengeStoryCardState } from '@/components/challenge/ChallengeStoryCardSection';
+import type { ChallengeEnemyDisplayState } from '@/lib/challenge/enemy-display';
 import type { EncounterSnapshotV1 } from '@/lib/challenge/types';
 
 export type ChallengeRecommendedAction = {
@@ -15,6 +18,9 @@ type NodeResolutionPanelProps = {
   selectedRecommendedActionId: string;
   recommendedActions?: ChallengeRecommendedAction[];
   viewMode?: 'input' | 'result';
+  enemyDisplayState?: ChallengeEnemyDisplayState | null;
+  storyCardState?: ChallengeStoryCardState | null;
+  onSaveImage?: (imageUrl: string) => void;
   onRecommendedActionChange: (value: string) => void;
   onSelectOption: (value: string) => void;
   onNoteChange: (value: string) => void;
@@ -54,6 +60,9 @@ export function NodeResolutionPanel({
   selectedRecommendedActionId,
   recommendedActions,
   viewMode = 'input',
+  enemyDisplayState = null,
+  storyCardState = null,
+  onSaveImage,
   onRecommendedActionChange,
   onSelectOption,
   onNoteChange,
@@ -61,18 +70,44 @@ export function NodeResolutionPanel({
   onBackToMap,
 }: NodeResolutionPanelProps) {
   const actions = recommendedActions?.length ? recommendedActions : defaultBattleRecommendedActions;
+  const isBattleNode = encounter.kind === 'battle' || encounter.kind === 'elite' || encounter.kind === 'boss';
   const showFreeIntent = encounter.inputMode === 'free-intent'
     || encounter.inputMode === 'choice-plus-note'
     || encounter.inputMode === 'recommended-action-plus-free-intent';
+  const resolvedStoryCardState = storyCardState
+    ?? (latestStoryText.trim()
+      ? {
+        markdown: latestStoryText,
+        reasoning: null,
+        telemetry: null,
+        finalSource: 'ai',
+      }
+      : null);
 
   if (viewMode === 'result') {
     return (
       <section className="rounded-[28px] border border-slate-200 bg-white/90 p-6 shadow-[0_16px_48px_rgba(148,163,184,0.10)]">
         <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Resolution</p>
         <h2 className="mt-3 text-2xl font-semibold text-slate-900">{getNodeTitle(encounter)}</h2>
-        <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
-          <p className="text-sm leading-7 text-slate-700">{latestStoryText || '本节点已结算。'}</p>
-        </div>
+        {isBattleNode ? (
+          <p className="mt-2 text-sm leading-6 text-slate-600">
+            {`已整理${encounter.enemySnapshot?.displayName ?? '当前对手'}的角色卡，可继续查看并导出图片。`}
+          </p>
+        ) : null}
+        {isBattleNode ? (
+          <ChallengeEnemyCardSection state={enemyDisplayState} onSaveImage={onSaveImage} />
+        ) : null}
+        {resolvedStoryCardState ? (
+          <ChallengeStoryCardSection
+            state={resolvedStoryCardState}
+            isResolving={false}
+            onSaveImage={onSaveImage}
+          />
+        ) : (
+          <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+            <p className="text-sm leading-7 text-slate-700">{latestStoryText || '本节点已结算。'}</p>
+          </div>
+        )}
         <div className="mt-5">
           <button
             type="button"
@@ -93,9 +128,11 @@ export function NodeResolutionPanel({
           <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Node</p>
           <h2 className="mt-3 text-2xl font-semibold text-slate-900">{getNodeTitle(encounter)}</h2>
           <p className="mt-2 text-sm leading-6 text-slate-600">
-            {encounter.enemySnapshot
-              ? `对手：${encounter.enemySnapshot.displayName} · ${encounter.enemySnapshot.promptSummary}`
-              : '这是一个纯本地系统节点。'}
+            {isBattleNode
+              ? `已整理${encounter.enemySnapshot?.displayName ?? '当前对手'}的角色卡，可直接查看并导出图片。`
+              : encounter.enemySnapshot
+                ? `对手：${encounter.enemySnapshot.displayName} · ${encounter.enemySnapshot.promptSummary}`
+                : '这是一个纯本地系统节点。'}
           </p>
         </div>
         {encounter.enemySnapshot ? (
@@ -105,7 +142,11 @@ export function NodeResolutionPanel({
         ) : null}
       </div>
 
-      {encounter.kind === 'battle' || encounter.kind === 'elite' || encounter.kind === 'boss' ? (
+      {isBattleNode ? (
+        <ChallengeEnemyCardSection state={enemyDisplayState} onSaveImage={onSaveImage} />
+      ) : null}
+
+      {isBattleNode ? (
         <div className="mt-6 grid gap-4 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
           <article className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
             <h3 className="text-sm font-medium text-slate-900">推荐动作</h3>
@@ -207,16 +248,12 @@ export function NodeResolutionPanel({
         </div>
       ) : null}
 
-      {latestStoryText ? (
-        <div className="mt-6 rounded-2xl border border-amber-200 bg-amber-50/80 px-4 py-4">
-          <div className="flex items-center justify-between gap-3">
-            <h3 className="text-sm font-medium text-slate-900">实时战报</h3>
-            {isResolving ? (
-              <span className="text-xs font-medium text-amber-700">流式生成中</span>
-            ) : null}
-          </div>
-          <p className="mt-3 whitespace-pre-wrap text-sm leading-7 text-slate-700">{latestStoryText}</p>
-        </div>
+      {resolvedStoryCardState ? (
+        <ChallengeStoryCardSection
+          state={resolvedStoryCardState}
+          isResolving={isResolving}
+          onSaveImage={onSaveImage}
+        />
       ) : null}
 
       <div className="mt-6 flex flex-wrap items-center gap-3">
