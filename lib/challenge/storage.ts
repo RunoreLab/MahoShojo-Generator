@@ -41,6 +41,22 @@ export const putChallengeUnlock = async (record: ChallengeUnlockRecord): Promise
   await putChallengeRecord(AI_SESSION_STORE_NAMES.challengeUnlocks, record);
 };
 
+export const getChallengeUnlockByKey = async (input: {
+  worldPresetId: string;
+  unlockType: string;
+  unlockKey: string;
+}): Promise<ChallengeUnlockRecord | null> => {
+  const db = await openChallengeDb();
+  const transaction = db.transaction([AI_SESSION_STORE_NAMES.challengeUnlocks], 'readonly');
+  const request = transaction
+    .objectStore(AI_SESSION_STORE_NAMES.challengeUnlocks)
+    .index('by_unlock_key')
+    .get([input.worldPresetId, input.unlockType, input.unlockKey]);
+  const result = await requestToPromise(request);
+  await transactionToPromise(transaction);
+  return (result as ChallengeUnlockRecord | undefined) ?? null;
+};
+
 export const getChallengeRun = async (runId: string): Promise<ChallengeRunRecord | null> => {
   const db = await openChallengeDb();
   const transaction = db.transaction([AI_SESSION_STORE_NAMES.challengeRuns], 'readonly');
@@ -192,6 +208,41 @@ export const getLatestChallengeCheckpoint = async (runId: string): Promise<Chall
     IDBKeyRange.bound([runId, 0], [runId, Number.MAX_SAFE_INTEGER]),
   );
 
+export const listChallengeUnlocksByWorld = async (
+  worldPresetId: string,
+  options?: { limit?: number }
+): Promise<ChallengeUnlockRecord[]> => {
+  const db = await openChallengeDb();
+  const transaction = db.transaction([AI_SESSION_STORE_NAMES.challengeUnlocks], 'readonly');
+  const index = transaction.objectStore(AI_SESSION_STORE_NAMES.challengeUnlocks).index('by_world_createdAt');
+  const limit =
+    typeof options?.limit === 'number' ? normalizeLimit(options.limit) : Number.POSITIVE_INFINITY;
+
+  const items = await new Promise<ChallengeUnlockRecord[]>((resolve, reject) => {
+    const output: ChallengeUnlockRecord[] = [];
+    const request = index.openCursor(
+      IDBKeyRange.bound([worldPresetId, 0], [worldPresetId, Number.MAX_SAFE_INTEGER]),
+      'prev'
+    );
+
+    request.onsuccess = () => {
+      const cursor = request.result;
+      if (!cursor || output.length >= limit) {
+        resolve(output);
+        return;
+      }
+
+      output.push(cursor.value as ChallengeUnlockRecord);
+      cursor.continue();
+    };
+
+    request.onerror = () => reject(request.error ?? new Error('读取 challenge unlocks 失败'));
+  });
+
+  await transactionToPromise(transaction);
+  return items;
+};
+
 const deleteByCursor = async (
   index: IDBIndex,
   range: IDBKeyRange,
@@ -220,7 +271,6 @@ export const deleteChallengeRunCascade = async (runId: string): Promise<void> =>
       AI_SESSION_STORE_NAMES.challengeRuns,
       AI_SESSION_STORE_NAMES.challengeNodes,
       AI_SESSION_STORE_NAMES.challengeCheckpoints,
-      AI_SESSION_STORE_NAMES.challengeUnlocks,
     ],
     'readwrite'
   );
@@ -228,12 +278,10 @@ export const deleteChallengeRunCascade = async (runId: string): Promise<void> =>
   const runStore = transaction.objectStore(AI_SESSION_STORE_NAMES.challengeRuns);
   const nodeIndex = transaction.objectStore(AI_SESSION_STORE_NAMES.challengeNodes).index('by_run_visitIndex');
   const checkpointIndex = transaction.objectStore(AI_SESSION_STORE_NAMES.challengeCheckpoints).index('by_run_seq');
-  const unlockIndex = transaction.objectStore(AI_SESSION_STORE_NAMES.challengeUnlocks).index('by_run_createdAt');
 
   await Promise.all([
     deleteByCursor(nodeIndex, IDBKeyRange.bound([runId, 0], [runId, Number.MAX_SAFE_INTEGER])),
     deleteByCursor(checkpointIndex, IDBKeyRange.bound([runId, 0], [runId, Number.MAX_SAFE_INTEGER])),
-    deleteByCursor(unlockIndex, IDBKeyRange.bound([runId, 0], [runId, Number.MAX_SAFE_INTEGER])),
   ]);
 
   runStore.delete(runId);

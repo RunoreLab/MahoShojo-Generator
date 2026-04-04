@@ -391,7 +391,7 @@ describe('challenge storage', () => {
     expect(latestNode?.visitIndex).toBe(2);
   });
 
-  test('deleteChallengeRunCascade 会删除 run 及其关联 node/checkpoint/unlock', async () => {
+  test('deleteChallengeRunCascade 会删除 run 及其关联 node/checkpoint，但保留长期解锁', async () => {
     await putChallengeRun({
       id: 'run-4',
       worldPresetId: 'arena',
@@ -474,6 +474,6 @@ describe('challenge storage', () => {
     expect(runRecord).toBeUndefined();
     expect(nodeCount).toBe(0);
     expect(checkpointCount).toBe(0);
-    expect(unlockCount).toBe(0);
+    expect(unlockCount).toBe(1);
   });
 });

@@ -1,9 +1,10 @@
-import type { RunStateV1 } from '@/lib/challenge/types';
+import type { ChallengeUnlockRecord, RunStateV1 } from '@/lib/challenge/types';
 
 type ChallengeSummaryPageProps = {
   worldTitle: string;
   runState: RunStateV1;
   summaryText: string;
+  newUnlocks?: ChallengeUnlockRecord[];
   onBackToLobby: () => void;
 };
 
@@ -22,6 +23,7 @@ export function ChallengeSummaryPage({
   worldTitle,
   runState,
   summaryText,
+  newUnlocks = [],
   onBackToLobby,
 }: ChallengeSummaryPageProps) {
   return (
@@ -58,6 +60,23 @@ export function ChallengeSummaryPage({
       <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
         <p className="text-sm leading-7 text-slate-700">{summaryText}</p>
       </div>
+
+      {newUnlocks.length > 0 ? (
+        <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50/80 px-4 py-4">
+          <div className="flex items-center justify-between gap-3">
+            <h3 className="text-sm font-medium text-slate-900">本轮新解锁</h3>
+            <span className="text-xs text-amber-700">{newUnlocks.length} 项</span>
+          </div>
+          <div className="mt-3 space-y-3">
+            {newUnlocks.map((item) => (
+              <article key={item.id} className="rounded-2xl border border-amber-100 bg-white/80 px-4 py-3">
+                <p className="text-sm font-medium text-slate-900">{item.title}</p>
+                <p className="mt-1 text-xs leading-6 text-slate-600">{item.description}</p>
+              </article>
+            ))}
+          </div>
+        </div>
+      ) : null}
 
       <div className="mt-6">
         <button

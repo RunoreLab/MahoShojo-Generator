@@ -12,8 +12,12 @@ test('ArenaPageLinks 为简洁版和完整版输出正确入口', () => {
 
   expect(liteHtml).toContain('/arena');
   expect(liteHtml).toContain('进入完整版竞技场');
+  expect(liteHtml).toContain('/challenge');
+  expect(liteHtml).toContain('进入挑战模式');
   expect(fullHtml).toContain('/battle');
   expect(fullHtml).toContain('切换到简洁版');
+  expect(fullHtml).toContain('/challenge');
+  expect(fullHtml).toContain('进入挑战模式');
 });
 
 test('ArenaRankingLinks 输出排行榜入口文案', () => {

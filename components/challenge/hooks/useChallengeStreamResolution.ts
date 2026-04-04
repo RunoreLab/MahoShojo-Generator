@@ -4,10 +4,11 @@ import { stripStreamUpdateMetaComment } from '@/lib/arena/stream-meta';
 import { finalizeNodeResolution } from '@/lib/challenge/progression';
 import {
   buildChallengeResolverEnvelope,
+  buildSystemFallbackResolution,
   validateAdjudicationAgainstEnvelope,
   type ChallengePlayerInputV1,
 } from '@/lib/challenge/resolver-envelope';
-import { extractChallengeAdjudicationMeta } from '@/lib/challenge/stream-meta';
+import { appendChallengeAdjudicationMeta, extractChallengeAdjudicationMeta } from '@/lib/challenge/stream-meta';
 import type {
   ChallengeNodeRecord,
   EncounterSnapshotV1,
@@ -34,6 +35,12 @@ const sanitizeStreamingMarkdown = (markdown: string): string => {
   return stripped?.strippedMarkdown ?? markdown;
 };
 
+const isAbortLikeError = (error: unknown): boolean => {
+  if (error instanceof DOMException && error.name === 'AbortError') return true;
+  if (!error || typeof error !== 'object') return false;
+  return (error as { name?: unknown }).name === 'AbortError';
+};
+
 const readErrorMessage = async (response: Response): Promise<string> => {
   const contentType = (response.headers.get('content-type') || '').toLowerCase();
   if (contentType.includes('application/json')) {
@@ -58,6 +65,7 @@ export type RunChallengeStreamResolutionInput = {
   apiPath?: string;
   customProvider?: unknown;
   fetcher?: typeof fetch;
+  signal?: AbortSignal;
   onText?: (text: string) => void;
 };
 
@@ -72,6 +80,78 @@ export type RunChallengeStreamResolutionResult = {
   runRecordPatch: ReturnType<typeof finalizeNodeResolution>['runRecordPatch'];
   reasoning: Awaited<ReturnType<typeof readTextAndReasoningStreamFromResponse>>['reasoning'];
   telemetry: Awaited<ReturnType<typeof readTextAndReasoningStreamFromResponse>>['telemetry'];
+};
+
+export type ResolveChallengeNodeWithStreamingFallbackResult = RunChallengeStreamResolutionResult & {
+  finalSource: 'ai' | 'system-fallback';
+  fallbackReason: string | null;
+};
+
+export const isChallengeStreamAbortError = (error: unknown): boolean => isAbortLikeError(error);
+
+const buildChallengeSystemFallbackResult = (
+  input: RunChallengeStreamResolutionInput & {
+    fallbackReason: string;
+  }
+): ResolveChallengeNodeWithStreamingFallbackResult => {
+  const activeRunState =
+    input.runState.currentNodeId === input.encounter.nodeId
+      ? input.runState
+      : {
+        ...input.runState,
+        currentNodeId: input.encounter.nodeId,
+      };
+
+  const resolverEnvelope = buildChallengeResolverEnvelope({
+    runState: activeRunState,
+    encounter: input.encounter,
+    playerInput: input.playerInput,
+  });
+  const fallback = buildSystemFallbackResolution({
+    runState: activeRunState,
+    encounter: input.encounter,
+    playerInput: input.playerInput,
+    resolverEnvelope,
+  });
+  const adjudication = validateAdjudicationAgainstEnvelope(resolverEnvelope, fallback.adjudication);
+  const finalized = finalizeNodeResolution(activeRunState, {
+    ...adjudication,
+    rewardOptions: input.encounter.rewardOptions,
+  });
+  const storyMarkdownWithMeta = appendChallengeAdjudicationMeta(fallback.storyMarkdown, fallback.adjudication);
+
+  return {
+    finalSource: 'system-fallback',
+    fallbackReason: input.fallbackReason,
+    storyMarkdown: fallback.storyMarkdown,
+    storyMarkdownWithMeta,
+    adjudication,
+    resolverEnvelope,
+    nextRunState: finalized.nextRunState,
+    checkpoints: finalized.checkpoints,
+    nodeRecord: {
+      ...input.baseNodeRecord,
+      ...finalized.nodeRecordPatch,
+      encounterSnapshot: input.encounter,
+      playerInput: {
+        recommendedActionId: input.playerInput.recommendedActionId ?? '',
+        optionId: input.playerInput.optionId ?? '',
+        note: input.playerInput.note ?? '',
+      },
+      resolverEnvelope,
+      storyText: fallback.storyMarkdown,
+    },
+    runRecordPatch: finalized.runRecordPatch,
+    reasoning: null,
+    telemetry: null,
+  };
+};
+
+const shouldFallbackForStreamError = (error: unknown): boolean => {
+  if (isAbortLikeError(error)) return false;
+  const status = typeof error === 'object' && error !== null ? (error as { status?: unknown }).status : undefined;
+  if (typeof status !== 'number') return true;
+  return status >= 500;
 };
 
 export async function runChallengeStreamResolution(
@@ -93,6 +173,7 @@ export async function runChallengeStreamResolution(
         'Content-Type': 'application/json',
         Accept: 'text/event-stream',
       },
+      signal: input.signal,
       body: JSON.stringify({
         runState: activeRunState,
         encounter: input.encounter,
@@ -102,7 +183,9 @@ export async function runChallengeStreamResolution(
     });
 
   if (!response.ok) {
-    throw new Error(await readErrorMessage(response));
+    const error = new Error(await readErrorMessage(response));
+    (error as Error & { status?: number }).status = response.status;
+    throw error;
   }
 
   const streamResult = await readTextAndReasoningStreamFromResponse(response, {
@@ -156,4 +239,30 @@ export async function runChallengeStreamResolution(
     reasoning: streamResult.reasoning,
     telemetry: streamResult.telemetry,
   };
+}
+
+export async function resolveChallengeNodeWithStreamingFallback(
+  input: RunChallengeStreamResolutionInput & {
+    onStreamError?: (error: Error) => void;
+  }
+): Promise<ResolveChallengeNodeWithStreamingFallbackResult> {
+  try {
+    const result = await runChallengeStreamResolution(input);
+    return {
+      ...result,
+      finalSource: 'ai',
+      fallbackReason: null,
+    };
+  } catch (error) {
+    if (!shouldFallbackForStreamError(error)) {
+      throw error;
+    }
+
+    const normalizedError = error instanceof Error ? error : new Error('挑战流式裁定失败。');
+    input.onStreamError?.(normalizedError);
+    return buildChallengeSystemFallbackResult({
+      ...input,
+      fallbackReason: normalizedError.message,
+    });
+  }
 }

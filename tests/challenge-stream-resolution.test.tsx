@@ -162,6 +162,74 @@ describe('challenge stream resolution', () => {
     expect(result.nodeRecord.resolverEnvelope).toBeTruthy();
   });
 
+  test('runChallengeStreamResolution 会把 signal 透传给 fetcher', async () => {
+    const { runChallengeStreamResolution } = await import('@/components/challenge/hooks/useChallengeStreamResolution');
+
+    const controller = new AbortController();
+    const encounter = createEncounter('battle');
+    let receivedSignal: AbortSignal | null = null;
+
+    await runChallengeStreamResolution({
+      runState: createRunState('battle'),
+      encounter,
+      playerInput: {
+        recommendedActionId: 'bait-counter',
+        note: '先观察，再抓反击窗口。',
+      },
+      baseNodeRecord: createEnteredNodeRecord(encounter),
+      signal: controller.signal,
+      fetcher: async (_input, init) => {
+        receivedSignal = init?.signal ?? null;
+        return new Response(
+          [
+            encodeSse('markdown', {
+              chunk:
+                '雾灯顺着雪绒的呼吸差切入。\n<!-- MAHOSHOJO_ARENA_META {"version":1,"adjudication":{"outcome":"victory","trackDeltas":{"hp":-10,"radiance":-6},"addStatuses":[],"removeStatuses":["exposed"],"rewardOptionId":null,"summary":"雾灯稳稳收下胜势。"}} -->',
+            }),
+            encodeSse('done', { ok: true }),
+          ].join(''),
+          {
+            headers: { 'content-type': 'text/event-stream; charset=utf-8' },
+          }
+        );
+      },
+    });
+
+    expect(receivedSignal).toBe(controller.signal);
+  });
+
+  test('resolveChallengeNodeWithStreamingFallback 会在流式请求失败时回退到本地系统结算', async () => {
+    const { resolveChallengeNodeWithStreamingFallback } = await import(
+      '@/components/challenge/hooks/useChallengeStreamResolution'
+    );
+
+    const encounter = createEncounter('battle');
+    const streamErrors: string[] = [];
+
+    const result = await resolveChallengeNodeWithStreamingFallback({
+      runState: createRunState('battle'),
+      encounter,
+      playerInput: {
+        recommendedActionId: 'bait-counter',
+        note: '先观察，再抓反击窗口。',
+      },
+      baseNodeRecord: createEnteredNodeRecord(encounter),
+      fetcher: async () => {
+        throw new Error('network unavailable');
+      },
+      onStreamError: (error) => {
+        streamErrors.push(error.message);
+      },
+    });
+
+    expect(result.finalSource).toBe('system-fallback');
+    expect(result.fallbackReason).toBe('network unavailable');
+    expect(result.storyMarkdown).toContain('雾灯');
+    expect(result.storyMarkdown.includes('MAHOSHOJO_ARENA_META')).toBe(false);
+    expect(result.nodeRecord.storyText).toBe(result.storyMarkdown);
+    expect(streamErrors).toEqual(['network unavailable']);
+  });
+
   test('choice-only 事件继续走本地 effect patch，choice-plus-note / free-intent 才走流式裁定', async () => {
     const { resolveNodeExecutionMode } = await import('@/components/challenge/hooks/useChallengeStreamResolution');
 

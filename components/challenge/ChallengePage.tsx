@@ -54,6 +54,7 @@ export function ChallengePage() {
             <ChallengeLobby
               worldTitle={controller.worldTitle}
               recentRuns={controller.recentRuns}
+              unlocks={controller.allUnlocks}
               isLoadingRecentRuns={controller.isLoadingRecentRuns}
               cardJsonText={controller.cardJsonText}
               inputError={controller.inputError}
@@ -109,6 +110,7 @@ export function ChallengePage() {
               worldTitle={controller.worldTitle}
               runState={controller.runState}
               summaryText={controller.summaryText}
+              newUnlocks={controller.newUnlocks}
               onBackToLobby={controller.backToLobby}
             />
           ) : null}

@@ -339,4 +339,38 @@ describe('challenge page', () => {
     expect(html).toContain('已完成节点 8');
     expect(html).toContain('返回大厅');
   });
+
+  test('ChallengeSummaryPage 会展示本轮新解锁', async () => {
+    const { ChallengeSummaryPage } = await import('@/components/challenge/ChallengeSummaryPage');
+    const runState = {
+      ...createAcceptedRunState(),
+      status: 'completed' as const,
+      visitedNodeCount: 8,
+    };
+
+    const html = renderToStaticMarkup(
+      <ChallengeSummaryPage
+        worldTitle="魔法少女竞技场"
+        runState={runState}
+        summaryText="雾灯成功穿过整轮赛程。"
+        newUnlocks={[
+          {
+            id: 'unlock-1',
+            worldPresetId: 'arena',
+            runId: 'run-page-1',
+            unlockType: 'start-persistent-item-option',
+            unlockKey: 'arena.start_persistent_item_option.starlit-ribbon',
+            title: '起始奇物：星辉缎带',
+            description: '首次通关后解锁的起始奇物候选。',
+            sourceNodeId: null,
+            createdAt: 200,
+          },
+        ]}
+        onBackToLobby={() => {}}
+      />
+    );
+
+    expect(html).toContain('本轮新解锁');
+    expect(html).toContain('星辉缎带');
+  });
 });

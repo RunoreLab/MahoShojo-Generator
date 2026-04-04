@@ -16,9 +16,159 @@ export const runtime = 'edge';
 
 const log = getLogger('api-challenge-adjudicate-stream');
 
+const TrackValueSchema = z.object({
+  current: z.number().finite(),
+  max: z.number().finite().nullable(),
+});
+
+const PlayerSnapshotSchema = z.object({
+  version: z.literal(1),
+  sourceType: z.enum(['preset', 'local-card', 'public-card']),
+  sourceId: z.string().min(1),
+  displayName: z.string().min(1),
+  snapshotSeed: z.string().min(1),
+  strengthTier: z.enum(['common', 'elite', 'boss']),
+  baseTrackSnapshot: z.record(TrackValueSchema),
+  combatProfile: z.record(z.unknown()),
+  tags: z.array(z.string()),
+  promptSummary: z.string(),
+});
+
+const WorldStateSchema = z.object({
+  version: z.literal(1),
+  schemaId: z.string().min(1),
+  tracks: z.record(TrackValueSchema),
+  temporaryStatuses: z.array(z.string()),
+  runFlags: z.array(z.string()),
+  persistentItemIds: z.array(z.string()),
+  consumableIds: z.array(z.string()),
+});
+
+const MapNodeSchema = z.object({
+  version: z.literal(1),
+  nodeId: z.string().min(1),
+  layer: z.number().int().nonnegative(),
+  nodeType: z.enum(['battle', 'elite', 'event', 'rest', 'shop', 'boss']),
+  visibility: z.enum(['summary', 'focused', 'resolved']),
+  riskHint: z.enum(['low', 'mid', 'high']),
+  rewardHint: z.enum(['low', 'mid', 'high']),
+  encounterRef: z.string().min(1),
+});
+
+const MapEdgeSchema = z.object({
+  version: z.literal(1),
+  edgeId: z.string().min(1),
+  fromNodeId: z.string().min(1),
+  toNodeId: z.string().min(1),
+});
+
+const MapStateSchema = z.object({
+  version: z.literal(1),
+  rootNodeId: z.string().min(1),
+  totalLayers: z.number().int().positive(),
+  bossNodeId: z.string().min(1),
+  nodes: z.array(MapNodeSchema),
+  edges: z.array(MapEdgeSchema),
+});
+
+const PendingRewardChoiceSchema = z.object({
+  selectionMode: z.enum(['auto', 'choose-one']),
+  rewardOptionIds: z.array(z.string()),
+  sourceNodeId: z.string().min(1),
+});
+
+const RunStateSchema = z.object({
+  version: z.literal(1),
+  runId: z.string().min(1),
+  worldPresetId: z.string().min(1),
+  runSeed: z.string().nullable(),
+  status: z.enum(['bootstrapping', 'in_progress', 'completed', 'failed', 'abandoned']),
+  playerSnapshot: PlayerSnapshotSchema.nullable(),
+  worldState: WorldStateSchema.nullable(),
+  mapState: MapStateSchema.nullable(),
+  pendingRewardChoice: PendingRewardChoiceSchema.nullable(),
+  currentNodeId: z.string().nullable(),
+  visitedNodeCount: z.number().int().nonnegative(),
+  checkpointSeq: z.number().int().nonnegative(),
+  usedBootstrapReroll: z.boolean(),
+  startedAt: z.number().finite(),
+  updatedAt: z.number().finite(),
+});
+
+const RewardOptionSchema = z.object({
+  version: z.literal(1),
+  rewardOptionId: z.string().min(1),
+  kind: z.enum([
+    'adjust_track',
+    'add_consumable',
+    'add_persistent_item',
+    'add_status',
+    'clear_negative_status',
+  ]),
+  label: z.string().min(1),
+  payload: z.object({
+    trackId: z.string().optional(),
+    amount: z.number().finite().optional(),
+    itemId: z.string().optional(),
+    statusId: z.string().optional(),
+    clearCount: z.number().finite().optional(),
+  }),
+});
+
+const EffectPatchSchema = z.object({
+  version: z.literal(1),
+  trackDeltas: z.record(z.number().finite()),
+  addStatuses: z.array(z.string()),
+  removeStatuses: z.array(z.string()),
+  rewardSelectionMode: z.enum(['none', 'auto', 'choose-one']),
+  rewardOptionIds: z.array(z.string()),
+});
+
+const EventOptionSchema = z.object({
+  version: z.literal(1),
+  optionId: z.string().min(1),
+  label: z.string().min(1),
+  notePolicy: z.enum(['none', 'optional', 'required']),
+  effectPatch: EffectPatchSchema,
+  disabled: z.boolean().optional(),
+});
+
+const ShopOfferSchema = z.object({
+  version: z.literal(1),
+  offerId: z.string().min(1),
+  price: z.number().finite(),
+  reward: RewardOptionSchema.extend({
+    kind: z.enum(['add_consumable', 'add_persistent_item', 'add_status', 'clear_negative_status']),
+  }),
+  disabled: z.boolean().optional(),
+});
+
+const EnemySnapshotSchema = z.object({
+  version: z.literal(1),
+  sourceType: z.enum(['preset', 'public-card', 'season-entity']),
+  sourceId: z.string().min(1),
+  displayName: z.string().min(1),
+  strengthTier: z.enum(['common', 'elite', 'boss']),
+  combatProfile: z.record(z.unknown()),
+  tags: z.array(z.string()),
+  promptSummary: z.string(),
+});
+
+const EncounterSchema = z.object({
+  version: z.literal(1),
+  nodeId: z.string().min(1),
+  templateId: z.string().min(1),
+  kind: z.enum(['battle', 'elite', 'event', 'rest', 'shop', 'boss']),
+  inputMode: z.enum(['choice-only', 'choice-plus-note', 'free-intent', 'recommended-action-plus-free-intent']),
+  enemySnapshot: EnemySnapshotSchema.nullable(),
+  rewardOptions: z.array(RewardOptionSchema),
+  eventOptions: z.array(EventOptionSchema),
+  shopOffers: z.array(ShopOfferSchema),
+});
+
 const RequestBodySchema = z.object({
-  runState: z.unknown(),
-  encounter: z.unknown(),
+  runState: RunStateSchema,
+  encounter: EncounterSchema,
   playerInput: z
     .object({
       recommendedActionId: z.string().optional(),
@@ -39,10 +189,6 @@ const json = (payload: unknown, init?: ResponseInit): Response =>
       ...(init?.headers ?? {}),
     },
   });
-
-const isRecord = (value: unknown): value is Record<string, unknown> => {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-};
 
 const mapReasoningEvents = (events: RawReasoningStreamEvent[]): Array<{ event: string; payload: unknown }> => {
   const output: Array<{ event: string; payload: unknown }> = [];
@@ -213,6 +359,15 @@ const defaultAdjudicateChallengeRequest: HandlerDeps['adjudicateChallengeRequest
             }
           );
         },
+        onAttemptError: (error, context) => {
+          log.warn('挑战流式裁定 attempt 失败，准备重试或降级', {
+            error,
+            runId: context.runState.runId,
+            nodeId: context.encounter.nodeId,
+            nodeType: context.encounter.kind,
+            attemptIndex: context.attemptIndex,
+          });
+        },
       }
     );
 
@@ -240,14 +395,11 @@ export const createChallengeAdjudicateStreamHandler = (
       }
 
       const { runState, encounter, playerInput, customProvider } = parsed.data;
-      if (!isRecord(runState) || !isRecord(encounter)) {
-        return json({ error: '请求参数无效' }, { status: 400 });
-      }
 
       const result = await deps.adjudicateChallengeRequest({
         req,
-        runState: runState as unknown as RunStateV1,
-        encounter: encounter as unknown as EncounterSnapshotV1,
+        runState: runState as RunStateV1,
+        encounter: encounter as EncounterSnapshotV1,
         playerInput: playerInput ?? {},
         customProvider,
       });

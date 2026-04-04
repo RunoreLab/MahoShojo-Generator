@@ -127,6 +127,7 @@ describe('challenge resolver envelope', () => {
 
   test('当首轮与次轮 meta 校验都失败时，会降级为系统 fallback 结算', async () => {
     const { adjudicateChallengeNode } = await import('@/lib/challenge/server/adjudicate-stream');
+    const attemptErrors: string[] = [];
 
     const result = await adjudicateChallengeNode(
       {
@@ -144,12 +145,16 @@ describe('challenge resolver envelope', () => {
             '<!-- MAHOSHOJO_ARENA_META {"version":1,"adjudication":{"outcome":"victory","trackDeltas":{"hp":-999},"addStatuses":[],"removeStatuses":[],"rewardOptionId":null,"summary":"越界"}} -->',
           ].join('\n'),
         }),
+        onAttemptError: (error) => {
+          attemptErrors.push(error.message);
+        },
       }
     );
 
     expect(result.finalSource).toBe('system-fallback');
     expect(result.adjudication.outcome).toBeDefined();
     expect(result.storyMarkdown.includes('MAHOSHOJO_ARENA_META')).toBe(false);
+    expect(attemptErrors).toHaveLength(2);
   });
 
   test('校验通过后的 AI 裁定会先应用 clamp 后的 trackDeltas，再同步 run status 与 checkpoint', async () => {

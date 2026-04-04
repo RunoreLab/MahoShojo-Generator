@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { randomUUID } from '@/lib/crypto';
 import {
@@ -10,7 +10,11 @@ import {
   finalizeNodeResolution,
   resolveSystemNode,
 } from '@/lib/challenge/progression';
-import { resolveNodeExecutionMode, runChallengeStreamResolution } from '@/components/challenge/hooks/useChallengeStreamResolution';
+import {
+  isChallengeStreamAbortError,
+  resolveChallengeNodeWithStreamingFallback,
+  resolveNodeExecutionMode,
+} from '@/components/challenge/hooks/useChallengeStreamResolution';
 import {
   deleteChallengeRunCascade,
   getChallengeRun,
@@ -22,10 +26,12 @@ import {
   putChallengeRun,
   updateChallengeRun,
 } from '@/lib/challenge/storage';
+import { grantChallengeUnlocks, listChallengeUnlocksByWorld } from '@/lib/challenge/unlocks';
 import type {
   ChallengeNodeRecord,
   ChallengeNodeType,
   ChallengeRunRecord,
+  ChallengeUnlockRecord,
   EncounterSnapshotV1,
   EnemySnapshotV1,
   PlayerSnapshotV1,
@@ -508,6 +514,8 @@ export function useChallengeController() {
   const worldPreset = getChallengeWorldPreset('arena');
   const [stage, setStage] = useState<ChallengeStage>('lobby');
   const [recentRuns, setRecentRuns] = useState<ChallengeRunRecord[]>([]);
+  const [allUnlocks, setAllUnlocks] = useState<ChallengeUnlockRecord[]>([]);
+  const [newUnlocks, setNewUnlocks] = useState<ChallengeUnlockRecord[]>([]);
   const [isLoadingRecentRuns, setIsLoadingRecentRuns] = useState(false);
   const [isBusy, setIsBusy] = useState(false);
   const [isResolving, setIsResolving] = useState(false);
@@ -526,21 +534,62 @@ export function useChallengeController() {
   const [latestStoryText, setLatestStoryText] = useState('');
   const [latestNodeSummary, setLatestNodeSummary] = useState('');
   const [summaryText, setSummaryText] = useState('');
+  const mountedRef = useRef(true);
+  const activeResolutionAbortRef = useRef<AbortController | null>(null);
+  const activeResolutionIdRef = useRef(0);
+
+  const mergeUnlockRecords = (
+    current: ChallengeUnlockRecord[],
+    incoming: ChallengeUnlockRecord[]
+  ): ChallengeUnlockRecord[] => {
+    const keyed = new Map<string, ChallengeUnlockRecord>();
+
+    for (const item of [...incoming, ...current]) {
+      keyed.set(`${item.worldPresetId}:${item.unlockType}:${item.unlockKey}`, item);
+    }
+
+    return [...keyed.values()].sort((left, right) => right.createdAt - left.createdAt);
+  };
 
   const refreshRecentRuns = async (): Promise<void> => {
     setIsLoadingRecentRuns(true);
     try {
       const runs = await listChallengeRuns({ limit: 8 });
+      if (!mountedRef.current) return;
       setRecentRuns(runs);
     } catch (storageError) {
-      setError(storageError instanceof Error ? storageError.message : '读取本地挑战存档失败。');
+      if (mountedRef.current) {
+        setError(storageError instanceof Error ? storageError.message : '读取本地挑战存档失败。');
+      }
     } finally {
-      setIsLoadingRecentRuns(false);
+      if (mountedRef.current) {
+        setIsLoadingRecentRuns(false);
+      }
+    }
+  };
+
+  const refreshChallengeUnlocks = async (): Promise<void> => {
+    try {
+      const unlocks = await listChallengeUnlocksByWorld('arena');
+      if (!mountedRef.current) return;
+      setAllUnlocks(unlocks);
+    } catch (unlockError) {
+      if (mountedRef.current) {
+        setError(unlockError instanceof Error ? unlockError.message : '读取本地解锁失败。');
+      }
     }
   };
 
   useEffect(() => {
+    mountedRef.current = true;
     void refreshRecentRuns();
+    void refreshChallengeUnlocks();
+
+    return () => {
+      mountedRef.current = false;
+      activeResolutionAbortRef.current?.abort();
+      activeResolutionAbortRef.current = null;
+    };
   }, []);
 
   const recommendedActions = useMemo(
@@ -589,6 +638,8 @@ export function useChallengeController() {
   ]);
 
   const resetNodeStageState = (): void => {
+    activeResolutionAbortRef.current?.abort();
+    activeResolutionAbortRef.current = null;
     setCurrentEncounter(null);
     setActiveNodeRecord(null);
     setNodeViewMode('input');
@@ -623,6 +674,7 @@ export function useChallengeController() {
       };
 
       setBootstrapDraft(draft);
+      setNewUnlocks([]);
       setActiveRunRecord(null);
       setActiveNodeRecord(null);
       setRunState(null);
@@ -702,6 +754,7 @@ export function useChallengeController() {
       setActiveRunRecord(nextRecord);
       setRunState(accepted.runState);
       setBootstrapDraft(null);
+      setNewUnlocks([]);
       setLatestNodeSummary('地图已冻结，可以从第一层开始规划路线。');
       setStage('map');
       await refreshRecentRuns();
@@ -717,6 +770,7 @@ export function useChallengeController() {
     setActiveRunRecord(null);
     setActiveNodeRecord(null);
     setRunState(null);
+    setNewUnlocks([]);
     setStage('lobby');
   };
 
@@ -751,6 +805,7 @@ export function useChallengeController() {
       setSelectedRecommendedActionId(resumeState.selectedRecommendedActionId);
       setLatestNodeSummary(resumeState.latestNodeSummary);
       setSummaryText(resumeState.summaryText);
+      setNewUnlocks([]);
       setStage(resumeState.stage);
     } catch (resumeError) {
       setError(resumeError instanceof Error ? resumeError.message : '恢复挑战失败。');
@@ -769,6 +824,7 @@ export function useChallengeController() {
         setBootstrapDraft(null);
         resetNodeStageState();
         setSummaryText('');
+        setNewUnlocks([]);
         setStage('lobby');
       }
       await refreshRecentRuns();
@@ -873,15 +929,19 @@ export function useChallengeController() {
       updatedAt: Date.now(),
     }));
 
+    if (!mountedRef.current) return;
     setActiveRunRecord(nextRecord);
     setRunState(input.nextRunState);
   };
 
   const resolveCurrentNode = async (): Promise<void> => {
     if (!runState || !currentEncounter || !activeRunRecord) return;
+    const resolutionRequestId = activeResolutionIdRef.current + 1;
+    activeResolutionIdRef.current = resolutionRequestId;
     setError(null);
     setIsResolving(true);
     setLatestStoryText('');
+    let resolutionAbortController: AbortController | null = null;
 
     try {
       const inputValidationError = validateEncounterInput({
@@ -915,7 +975,11 @@ export function useChallengeController() {
       };
 
       if (resolveNodeExecutionMode(currentEncounter) === 'ai') {
-        const resolution = await runChallengeStreamResolution({
+        activeResolutionAbortRef.current?.abort();
+        resolutionAbortController = new AbortController();
+        activeResolutionAbortRef.current = resolutionAbortController;
+
+        const resolution = await resolveChallengeNodeWithStreamingFallback({
           runState,
           encounter: currentEncounter,
           playerInput: {
@@ -924,11 +988,33 @@ export function useChallengeController() {
             note,
           },
           baseNodeRecord,
+          signal: resolutionAbortController.signal,
           onText: (streamingText) => {
+            if (
+              !mountedRef.current
+              || resolutionAbortController?.signal.aborted
+              || activeResolutionIdRef.current !== resolutionRequestId
+            ) {
+              return;
+            }
             setLatestStoryText(streamingText);
           },
+          onStreamError: (streamError) => {
+            console.warn('challenge stream resolution fell back to local system result', streamError);
+          },
         });
+        if (
+          !mountedRef.current
+          || resolutionAbortController.signal.aborted
+          || activeResolutionIdRef.current !== resolutionRequestId
+        ) {
+          return;
+        }
         const nextRunState = clearCurrentNodeForMap(resolution.nextRunState);
+        const fallbackNotice =
+          resolution.finalSource === 'system-fallback'
+            ? `AI 流式裁定未完成（${resolution.fallbackReason ?? '未知原因'}），已自动改用本地系统结算。`
+            : '';
 
         await persistResolvedNode({
           encounter: currentEncounter,
@@ -938,6 +1024,27 @@ export function useChallengeController() {
           runRecordPatch: resolution.runRecordPatch,
           storyText: resolution.storyMarkdown,
         });
+        if (!mountedRef.current || activeResolutionIdRef.current !== resolutionRequestId) {
+          return;
+        }
+
+        try {
+          const grantedUnlocks = await grantChallengeUnlocks({
+            runId: activeRunRecord.id,
+            worldPresetId: 'arena',
+            runState: nextRunState,
+            nodeRecord: resolution.nodeRecord,
+          });
+          if (mountedRef.current && activeResolutionIdRef.current === resolutionRequestId) {
+            setNewUnlocks((current) => mergeUnlockRecords(current, grantedUnlocks));
+          }
+          await refreshChallengeUnlocks();
+        } catch (unlockError) {
+          console.warn('challenge unlock grant failed after resolution', unlockError);
+        }
+        if (!mountedRef.current || activeResolutionIdRef.current !== resolutionRequestId) {
+          return;
+        }
 
         setLatestStoryText(resolution.storyMarkdown);
         setLatestNodeSummary(
@@ -945,12 +1052,16 @@ export function useChallengeController() {
             encounter: currentEncounter,
             outcomeLabel: getAdjudicationOutcomeLabel(resolution.adjudication.outcome),
             storyText: resolution.storyMarkdown,
-          })
+          }) + (fallbackNotice ? ` ${fallbackNotice}` : '')
         );
         setActiveNodeRecord(null);
 
         if (nextRunState.status === 'completed' || nextRunState.status === 'failed') {
-          setSummaryText(buildFinishedSummaryText(nextRunState, resolution.storyMarkdown));
+          setSummaryText(
+            fallbackNotice
+              ? `${fallbackNotice}\n\n${buildFinishedSummaryText(nextRunState, resolution.storyMarkdown)}`
+              : buildFinishedSummaryText(nextRunState, resolution.storyMarkdown)
+          );
           resetNodeStageState();
           setStage('summary');
         } else {
@@ -977,6 +1088,27 @@ export function useChallengeController() {
           runRecordPatch: result.runRecordPatch,
           storyText,
         });
+        if (!mountedRef.current || activeResolutionIdRef.current !== resolutionRequestId) {
+          return;
+        }
+
+        try {
+          const grantedUnlocks = await grantChallengeUnlocks({
+            runId: activeRunRecord.id,
+            worldPresetId: 'arena',
+            runState: nextRunState,
+            nodeRecord,
+          });
+          if (mountedRef.current && activeResolutionIdRef.current === resolutionRequestId) {
+            setNewUnlocks((current) => mergeUnlockRecords(current, grantedUnlocks));
+          }
+          await refreshChallengeUnlocks();
+        } catch (unlockError) {
+          console.warn('challenge unlock grant failed after system resolution', unlockError);
+        }
+        if (!mountedRef.current || activeResolutionIdRef.current !== resolutionRequestId) {
+          return;
+        }
 
         setLatestStoryText(storyText);
         setLatestNodeSummary(
@@ -999,9 +1131,19 @@ export function useChallengeController() {
 
       await refreshRecentRuns();
     } catch (resolveError) {
-      setError(resolveError instanceof Error ? resolveError.message : '节点结算失败。');
+      if (isChallengeStreamAbortError(resolveError)) {
+        return;
+      }
+      if (mountedRef.current && activeResolutionIdRef.current === resolutionRequestId) {
+        setError(resolveError instanceof Error ? resolveError.message : '节点结算失败。');
+      }
     } finally {
-      setIsResolving(false);
+      if (resolutionAbortController && activeResolutionAbortRef.current === resolutionAbortController) {
+        activeResolutionAbortRef.current = null;
+      }
+      if (mountedRef.current && activeResolutionIdRef.current === resolutionRequestId) {
+        setIsResolving(false);
+      }
     }
   };
 
@@ -1017,8 +1159,10 @@ export function useChallengeController() {
     setBootstrapDraft(null);
     resetNodeStageState();
     setSummaryText('');
+    setNewUnlocks([]);
     setStage('lobby');
     void refreshRecentRuns();
+    void refreshChallengeUnlocks();
   };
 
   return {
@@ -1027,6 +1171,8 @@ export function useChallengeController() {
     error,
     inputError,
     recentRuns,
+    allUnlocks,
+    newUnlocks,
     isLoadingRecentRuns,
     isBusy,
     isResolving,

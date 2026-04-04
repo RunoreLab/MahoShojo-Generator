@@ -212,6 +212,14 @@ export const adjudicateChallengeNode = async (
   input: AdjudicateChallengeNodeInput,
   options: {
     generateAttempt: GenerateChallengeAttempt;
+    onAttemptError?: (
+      error: Error,
+      context: {
+        attemptIndex: number;
+        runState: RunStateV1;
+        encounter: EncounterSnapshotV1;
+      }
+    ) => void;
   }
 ): Promise<AdjudicateChallengeNodeResult> => {
   const workingRunState =
@@ -273,7 +281,13 @@ export const adjudicateChallengeNode = async (
         runRecordPatch: finalized.runRecordPatch,
         generation: attempt.generation ?? null,
       };
-    } catch {
+    } catch (error) {
+      const normalizedError = error instanceof Error ? error : new Error('挑战节点 AI 裁定失败');
+      options.onAttemptError?.(normalizedError, {
+        attemptIndex,
+        runState: workingRunState,
+        encounter: input.encounter,
+      });
       continue;
     }
   }
