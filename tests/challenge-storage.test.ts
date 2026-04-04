@@ -5,6 +5,8 @@ import { __resetAiSessionDbForTest, requestToPromise, transactionToPromise } fro
 import {
   deleteChallengeRunCascade,
   getChallengeRun,
+  getLatestChallengeCheckpoint,
+  getLatestChallengeNodeForRun,
   listChallengeRuns,
   openChallengeDb,
   putChallengeCheckpoint,
@@ -322,6 +324,71 @@ describe('challenge storage', () => {
     expect(nodeRecord).toMatchObject({ runId: 'run-5', status: 'entered' });
     expect(checkpointRecord).toMatchObject({ runId: 'run-5', kind: 'node_resolved' });
     expect(unlockRecord).toMatchObject({ runId: 'run-5', unlockType: 'enemy-log' });
+  });
+
+  test('getLatestChallengeCheckpoint 与 getLatestChallengeNodeForRun 会返回同 run 的最新记录', async () => {
+    await putChallengeCheckpoint({
+      id: 'checkpoint-old',
+      runId: 'run-latest',
+      seq: 1,
+      kind: 'bootstrap_accepted',
+      snapshot: {
+        runState: null,
+        playerSnapshot: null,
+        lastResolvedNodeId: null,
+      },
+      createdAt: 10,
+    });
+    await putChallengeCheckpoint({
+      id: 'checkpoint-new',
+      runId: 'run-latest',
+      seq: 2,
+      kind: 'node_resolved',
+      snapshot: {
+        runState: null,
+        playerSnapshot: null,
+        lastResolvedNodeId: 'L1-N1',
+      },
+      createdAt: 20,
+    });
+    await putChallengeNode({
+      id: 'node-old',
+      runId: 'run-latest',
+      nodeId: 'L1-N1',
+      visitIndex: 1,
+      nodeType: 'battle',
+      status: 'entered',
+      encounterSnapshot: null,
+      playerInput: null,
+      resolverEnvelope: null,
+      adjudicationResultDigest: null,
+      storyText: null,
+      createdAt: 11,
+      resolvedAt: null,
+    });
+    await putChallengeNode({
+      id: 'node-new',
+      runId: 'run-latest',
+      nodeId: 'L1-N1',
+      visitIndex: 2,
+      nodeType: 'event',
+      status: 'entered',
+      encounterSnapshot: null,
+      playerInput: null,
+      resolverEnvelope: null,
+      adjudicationResultDigest: null,
+      storyText: null,
+      createdAt: 21,
+      resolvedAt: null,
+    });
+
+    const latestCheckpoint = await getLatestChallengeCheckpoint('run-latest');
+    const latestNode = await getLatestChallengeNodeForRun('run-latest');
+
+    expect(latestCheckpoint?.id).toBe('checkpoint-new');
+    expect(latestCheckpoint?.seq).toBe(2);
+    expect(latestNode?.id).toBe('node-new');
+    expect(latestNode?.visitIndex).toBe(2);
   });
 
   test('deleteChallengeRunCascade 会删除 run 及其关联 node/checkpoint/unlock', async () => {

@@ -154,6 +154,44 @@ export const listChallengeRuns = async (options?: {
     .slice(0, limit);
 };
 
+const getLatestByIndex = async <T>(
+  storeName: string,
+  indexName: string,
+  range: IDBKeyRange,
+): Promise<T | null> => {
+  const db = await openChallengeDb();
+  const transaction = db.transaction([storeName], 'readonly');
+  const index = transaction.objectStore(storeName).index(indexName);
+
+  const result = await new Promise<T | null>((resolve, reject) => {
+    const request = index.openCursor(range, 'prev');
+
+    request.onsuccess = () => {
+      const cursor = request.result;
+      resolve(cursor ? (cursor.value as T) : null);
+    };
+
+    request.onerror = () => reject(request.error ?? new Error('读取最新 challenge 记录失败'));
+  });
+
+  await transactionToPromise(transaction);
+  return result;
+};
+
+export const getLatestChallengeNodeForRun = async (runId: string): Promise<ChallengeNodeRecord | null> =>
+  await getLatestByIndex<ChallengeNodeRecord>(
+    AI_SESSION_STORE_NAMES.challengeNodes,
+    'by_run_createdAt',
+    IDBKeyRange.bound([runId, 0], [runId, Number.MAX_SAFE_INTEGER]),
+  );
+
+export const getLatestChallengeCheckpoint = async (runId: string): Promise<ChallengeCheckpointRecord | null> =>
+  await getLatestByIndex<ChallengeCheckpointRecord>(
+    AI_SESSION_STORE_NAMES.challengeCheckpoints,
+    'by_run_seq',
+    IDBKeyRange.bound([runId, 0], [runId, Number.MAX_SAFE_INTEGER]),
+  );
+
 const deleteByCursor = async (
   index: IDBIndex,
   range: IDBKeyRange,
