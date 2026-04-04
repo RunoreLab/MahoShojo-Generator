@@ -47,6 +47,31 @@ const openAiSessionDbInternal = (): Promise<IDBDatabase> =>
         const store = db.createObjectStore(AI_SESSION_STORE_NAMES.cardEditCheckpoints, { keyPath: 'id' });
         store.createIndex('by_session_createdAt', ['sessionId', 'createdAt']);
       }
+
+      if (!db.objectStoreNames.contains(AI_SESSION_STORE_NAMES.challengeRuns)) {
+        const store = db.createObjectStore(AI_SESSION_STORE_NAMES.challengeRuns, { keyPath: 'id' });
+        store.createIndex('by_status_updatedAt', ['status', 'updatedAt']);
+        store.createIndex('by_world_startedAt', ['worldPresetId', 'startedAt']);
+      }
+
+      if (!db.objectStoreNames.contains(AI_SESSION_STORE_NAMES.challengeNodes)) {
+        const store = db.createObjectStore(AI_SESSION_STORE_NAMES.challengeNodes, { keyPath: 'id' });
+        store.createIndex('by_run_visitIndex', ['runId', 'visitIndex'], { unique: true });
+        store.createIndex('by_run_createdAt', ['runId', 'createdAt']);
+      }
+
+      if (!db.objectStoreNames.contains(AI_SESSION_STORE_NAMES.challengeCheckpoints)) {
+        const store = db.createObjectStore(AI_SESSION_STORE_NAMES.challengeCheckpoints, { keyPath: 'id' });
+        store.createIndex('by_run_seq', ['runId', 'seq'], { unique: true });
+        store.createIndex('by_run_kind_createdAt', ['runId', 'kind', 'createdAt']);
+      }
+
+      if (!db.objectStoreNames.contains(AI_SESSION_STORE_NAMES.challengeUnlocks)) {
+        const store = db.createObjectStore(AI_SESSION_STORE_NAMES.challengeUnlocks, { keyPath: 'id' });
+        store.createIndex('by_world_createdAt', ['worldPresetId', 'createdAt']);
+        store.createIndex('by_unlock_key', ['worldPresetId', 'unlockType', 'unlockKey'], { unique: true });
+        store.createIndex('by_run_createdAt', ['runId', 'createdAt']);
+      }
     };
 
     request.onsuccess = () => resolve(request.result);
@@ -60,6 +85,19 @@ export const openAiSessionDb = async (): Promise<IDBDatabase> => {
 
   dbPromise = openAiSessionDbInternal();
   return dbPromise;
+};
+
+export const __resetAiSessionDbForTest = async (): Promise<void> => {
+  if (!dbPromise) return;
+
+  try {
+    const db = await dbPromise;
+    db.close();
+  } catch {
+    // ignore test cleanup failures
+  } finally {
+    dbPromise = null;
+  }
 };
 
 export const requestToPromise = async <T>(request: IDBRequest<T>): Promise<T> =>

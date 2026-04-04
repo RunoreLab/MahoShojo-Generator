@@ -79,6 +79,7 @@
         "drizzle-kit": "^0.31.9",
         "eslint": "^9",
         "eslint-config-next": "15.3.2",
+        "fake-indexeddb": "^6.2.5",
         "shadcn": "^3.5.2",
         "tailwindcss": "^4",
         "tw-animate-css": "^1.3.0",
