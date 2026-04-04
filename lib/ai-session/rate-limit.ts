@@ -4,7 +4,8 @@ import { anonymizeIp, getClientIpFromHeaders } from '@/lib/arena/battle-report-l
 export type AiSessionRateLimitAction =
   | 'battle_story_session_continue'
   | 'battle_story_session_regenerate_chapter'
-  | 'battle_story_session_refresh_summary';
+  | 'battle_story_session_refresh_summary'
+  | 'challenge_node_adjudicate';
 
 type TokenBucketState = {
   tokens: number;
