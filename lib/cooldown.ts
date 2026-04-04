@@ -14,6 +14,8 @@ type CooldownSyncDetail = {
   endTime: number | null;
 };
 
+type CooldownStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
+
 type ProviderCooldownNoticeInput = {
   currentMode: ProviderCooldownMode;
   currentIsCooldown: boolean;
@@ -36,6 +38,28 @@ export const buildProviderCooldownStorageKey = (baseKey: string, mode: ProviderC
 const getProviderCooldownModeLabel = (mode: ProviderCooldownMode): string =>
   mode === 'custom' ? '自定义通道' : '默认通道';
 
+const getCooldownStorage = (): CooldownStorage | null => {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  try {
+    const storage = globalThis.localStorage;
+    if (
+      !storage
+      || typeof storage.getItem !== 'function'
+      || typeof storage.setItem !== 'function'
+      || typeof storage.removeItem !== 'function'
+    ) {
+      return null;
+    }
+
+    return storage;
+  } catch {
+    return null;
+  }
+};
+
 export const getProviderCooldownNoticeText = ({
   currentMode,
   currentIsCooldown,
@@ -54,24 +78,26 @@ export const getProviderCooldownNoticeText = ({
 };
 
 const getLocalStorageItem = (key: string): number | null => {
-  if (typeof window === 'undefined') {
+  const storage = getCooldownStorage();
+  if (!storage) {
     return null;
   }
-  const item = localStorage.getItem(key);
+  const item = storage.getItem(key);
   if (!item) return null;
   const parsed = Number.parseInt(item, 10);
   return Number.isFinite(parsed) ? parsed : null;
 };
 
 const setLocalStorageItem = (key: string, value: number | null) => {
-  if (typeof window === 'undefined') {
+  const storage = getCooldownStorage();
+  if (!storage) {
     return;
   }
   if (value === null) {
-    localStorage.removeItem(key);
+    storage.removeItem(key);
     return;
   }
-  localStorage.setItem(key, value.toString());
+  storage.setItem(key, value.toString());
 };
 
 const emitCooldownSync = (key: string, endTime: number | null) => {

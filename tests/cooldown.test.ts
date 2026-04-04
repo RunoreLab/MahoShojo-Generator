@@ -92,6 +92,24 @@ describe('cooldown 同页同步', () => {
     }
   });
 
+  test('window 存在但 localStorage 缺失时应安全退化为空快照', () => {
+    const previousWindow = (globalThis as any).window;
+    const previousLocalStorage = (globalThis as any).localStorage;
+
+    try {
+      (globalThis as any).window = {};
+      delete (globalThis as any).localStorage;
+
+      expect(readCooldownSnapshot('arena.missing-storage.cooldown')).toEqual({
+        endTime: null,
+        remainingTime: 0,
+      });
+    } finally {
+      (globalThis as any).window = previousWindow;
+      (globalThis as any).localStorage = previousLocalStorage;
+    }
+  });
+
   test('切换 provider 后仍可展示另一通道的冷却提示', () => {
     expect(
       getProviderCooldownNoticeText({

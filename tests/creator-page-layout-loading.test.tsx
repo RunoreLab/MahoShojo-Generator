@@ -1,9 +1,15 @@
 import { expect, mock, test } from 'bun:test';
 import React from 'react';
-import { renderToStaticMarkup } from 'react-dom/server';
+import { renderToStaticMarkup } from 'react-dom/server.node';
 
 test('pages/creator 的 loading 分支也进入工作台壳', async () => {
+  const previousWindow = (globalThis as typeof globalThis & { window?: unknown }).window;
+
   try {
+    (globalThis as typeof globalThis & { window?: unknown }).window = {
+      location: { href: 'http://localhost/creator' },
+    };
+
     mock.module('next/head', () => ({
       default: function HeadMock({ children }: { children?: React.ReactNode }) {
         return <>{children}</>;
@@ -48,5 +54,6 @@ test('pages/creator 的 loading 分支也进入工作台壳', async () => {
     expect(html).toContain('creator-workbench-shell');
   } finally {
     mock.restore();
+    (globalThis as typeof globalThis & { window?: unknown }).window = previousWindow;
   }
 });
