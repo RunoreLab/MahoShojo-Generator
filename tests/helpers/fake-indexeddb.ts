@@ -1,11 +1,11 @@
 import 'fake-indexeddb/auto';
 
 type GlobalWithWindow = typeof globalThis & {
-  window?: typeof globalThis;
+  window?: Window & typeof globalThis;
 };
 
-const globalWithWindow = globalThis as GlobalWithWindow;
+const globalWithWindow = globalThis as unknown as GlobalWithWindow;
 
 if (!globalWithWindow.window) {
-  globalWithWindow.window = globalWithWindow;
+  globalWithWindow.window = globalThis as unknown as Window & typeof globalThis;
 }
