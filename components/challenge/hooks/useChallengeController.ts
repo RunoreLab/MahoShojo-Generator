@@ -10,6 +10,7 @@ import {
   finalizeNodeResolution,
   resolveSystemNode,
 } from '@/lib/challenge/progression';
+import { resolveNodeExecutionMode, runChallengeStreamResolution } from '@/components/challenge/hooks/useChallengeStreamResolution';
 import {
   deleteChallengeRunCascade,
   getChallengeRun,
@@ -326,82 +327,45 @@ const buildSystemStoryText = (encounter: EncounterSnapshotV1, selectedOptionId: 
   return '本节点按照默认系统逻辑完成了结算。';
 };
 
-const buildBattleResolution = (
-  runState: RunStateV1,
-  encounter: EncounterSnapshotV1,
-  selectedRecommendedActionId: string,
-  note: string
-) => {
-  const noteText = note.trim();
-  const enemyName = encounter.enemySnapshot?.displayName ?? '未知对手';
-  const playerName = runState.playerSnapshot?.displayName ?? '挑战者';
-  let score = 1;
+const getAdjudicationOutcomeLabel = (outcome: 'victory' | 'costly_victory' | 'defeat'): string => {
+  if (outcome === 'defeat') return '败退';
+  if (outcome === 'victory') return '顺利取胜';
+  return '险胜';
+};
 
-  const strengthTier = runState.playerSnapshot?.strengthTier;
-  if (strengthTier === 'elite') score += 1;
-  if (strengthTier === 'boss') score += 2;
-
-  if (encounter.kind === 'elite') score -= 1;
-  if (encounter.kind === 'boss') score -= 2;
-
-  if (selectedRecommendedActionId === 'bait-counter') score += 1;
-  if (selectedRecommendedActionId === 'focus-barrier' && encounter.kind === 'boss') score += 1;
-  if (selectedRecommendedActionId === 'advance-pressure' && encounter.kind === 'boss') score -= 1;
-
-  if (noteText.includes('观察') || noteText.includes('诱导') || noteText.includes('睡眠') || noteText.includes('试探')) {
-    score += 1;
-  }
-  if (noteText.includes('硬拼') || noteText.includes('鲁莽') || noteText.includes('正面强冲')) {
-    score -= 1;
-  }
-  if ((runState.playerSnapshot?.tags ?? []).includes('谨慎') && selectedRecommendedActionId === 'bait-counter') {
-    score += 1;
+const validateEncounterInput = (input: {
+  encounter: EncounterSnapshotV1;
+  selectedOptionId: string;
+  selectedRecommendedActionId: string;
+  note: string;
+}): string | null => {
+  if (input.encounter.kind === 'battle' || input.encounter.kind === 'elite' || input.encounter.kind === 'boss') {
+    if (!input.selectedRecommendedActionId.trim()) {
+      return '请先选择一个推荐动作。';
+    }
+    return null;
   }
 
-  const outcome: 'victory' | 'costly_victory' | 'defeat' =
-    score >= 2 ? 'victory' : score >= 0 ? 'costly_victory' : 'defeat';
+  if (input.encounter.kind === 'shop') {
+    return null;
+  }
 
-  const deltasByKind = {
-    battle: {
-      victory: { hp: -10, radiance: -8, currency: 10 },
-      costly_victory: { hp: -18, radiance: -12, currency: 14 },
-      defeat: { hp: -40, radiance: -18, currency: 0 },
-    },
-    elite: {
-      victory: { hp: -16, radiance: -12, currency: 18 },
-      costly_victory: { hp: -25, radiance: -18, currency: 22 },
-      defeat: { hp: -55, radiance: -25, currency: 0 },
-    },
-    boss: {
-      victory: { hp: -24, radiance: -20, currency: 30 },
-      costly_victory: { hp: -32, radiance: -24, currency: 36 },
-      defeat: { hp: -80, radiance: -32, currency: 0 },
-    },
-  } as const;
+  if (input.encounter.eventOptions.length > 0 && !input.selectedOptionId.trim()) {
+    return '请先选择一个处理方案。';
+  }
 
-  const deltas = deltasByKind[encounter.kind as 'battle' | 'elite' | 'boss'][outcome];
-  const actionLabel = battleRecommendedActions.find((item) => item.id === selectedRecommendedActionId)?.label ?? '临场应对';
-  const storyText =
-    outcome === 'defeat'
-      ? `${playerName}尝试以“${actionLabel}”压住${enemyName}的节奏，但在拉扯中逐渐失去稳定性，最终被对手抓住空档击溃。`
-      : `${playerName}以“${actionLabel}”作为主轴应对${enemyName}，${noteText ? `并补上“${noteText}”这一临场判断，` : ''}最终${outcome === 'victory' ? '稳稳夺下了胜势' : '以较大代价拿下了胜利'}。`;
+  const selectedOption = input.encounter.eventOptions.find((item) => item.optionId === input.selectedOptionId);
+  const trimmedNote = input.note.trim();
 
-  return {
-    adjudication: {
-      outcome,
-      trackDeltas: deltas,
-      addStatuses: outcome === 'costly_victory' ? ['fatigued'] : outcome === 'defeat' ? ['shaken'] : [],
-      removeStatuses: selectedRecommendedActionId === 'focus-barrier' ? ['exposed'] : [],
-      rewardSelectionMode: 'none' as const,
-      rewardOptionIds: [],
-    },
-    storyText,
-    summaryText: buildNodeSummaryText({
-      encounter,
-      outcomeLabel: outcome === 'defeat' ? '败退' : outcome === 'victory' ? '顺利取胜' : '险胜',
-      storyText,
-    }),
-  };
+  if (input.encounter.inputMode === 'free-intent' && !trimmedNote) {
+    return '该节点需要输入自由意图后才能结算。';
+  }
+
+  if (selectedOption?.notePolicy === 'required' && !trimmedNote) {
+    return '当前方案需要补充说明后才能结算。';
+  }
+
+  return null;
 };
 
 const readDraftPlayerInput = (
@@ -917,8 +881,19 @@ export function useChallengeController() {
     if (!runState || !currentEncounter || !activeRunRecord) return;
     setError(null);
     setIsResolving(true);
+    setLatestStoryText('');
 
     try {
+      const inputValidationError = validateEncounterInput({
+        encounter: currentEncounter,
+        selectedOptionId,
+        selectedRecommendedActionId,
+        note,
+      });
+      if (inputValidationError) {
+        throw new Error(inputValidationError);
+      }
+
       const baseNodeRecord: ChallengeNodeRecord = {
         id: activeNodeRecord?.id ?? randomUUID(),
         runId: activeRunRecord.id,
@@ -939,30 +914,43 @@ export function useChallengeController() {
         resolvedAt: Date.now(),
       };
 
-      if (currentEncounter.kind === 'battle' || currentEncounter.kind === 'elite' || currentEncounter.kind === 'boss') {
-        const resolution = buildBattleResolution(runState, currentEncounter, selectedRecommendedActionId, note);
-        const result = finalizeNodeResolution(runState, resolution.adjudication);
-        const nextRunState = clearCurrentNodeForMap(result.nextRunState);
-        const nodeRecord: ChallengeNodeRecord = {
-          ...baseNodeRecord,
-          storyText: resolution.storyText,
-        };
+      if (resolveNodeExecutionMode(currentEncounter) === 'ai') {
+        const resolution = await runChallengeStreamResolution({
+          runState,
+          encounter: currentEncounter,
+          playerInput: {
+            recommendedActionId: selectedRecommendedActionId,
+            optionId: selectedOptionId,
+            note,
+          },
+          baseNodeRecord,
+          onText: (streamingText) => {
+            setLatestStoryText(streamingText);
+          },
+        });
+        const nextRunState = clearCurrentNodeForMap(resolution.nextRunState);
 
         await persistResolvedNode({
           encounter: currentEncounter,
-          nodeRecord,
+          nodeRecord: resolution.nodeRecord,
           nextRunState,
-          checkpoints: result.checkpoints,
-          runRecordPatch: result.runRecordPatch,
-          storyText: resolution.storyText,
+          checkpoints: resolution.checkpoints,
+          runRecordPatch: resolution.runRecordPatch,
+          storyText: resolution.storyMarkdown,
         });
 
-        setLatestStoryText(resolution.storyText);
-        setLatestNodeSummary(resolution.summaryText);
+        setLatestStoryText(resolution.storyMarkdown);
+        setLatestNodeSummary(
+          buildNodeSummaryText({
+            encounter: currentEncounter,
+            outcomeLabel: getAdjudicationOutcomeLabel(resolution.adjudication.outcome),
+            storyText: resolution.storyMarkdown,
+          })
+        );
         setActiveNodeRecord(null);
 
         if (nextRunState.status === 'completed' || nextRunState.status === 'failed') {
-          setSummaryText(buildFinishedSummaryText(nextRunState, resolution.storyText));
+          setSummaryText(buildFinishedSummaryText(nextRunState, resolution.storyMarkdown));
           resetNodeStageState();
           setStage('summary');
         } else {

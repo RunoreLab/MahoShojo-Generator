@@ -294,6 +294,29 @@ describe('challenge page', () => {
     expect(html).toContain('提交结算');
   });
 
+  test('NodeResolutionPanel 在结算中会显示流式正文预览', async () => {
+    const { NodeResolutionPanel } = await import('@/components/challenge/NodeResolutionPanel');
+
+    const html = renderToStaticMarkup(
+      <NodeResolutionPanel
+        encounter={createBattleEncounter()}
+        latestStoryText="雾灯先稳住脚步，正在读取雪绒的换气节奏。"
+        isResolving
+        note="先观察，再抓窗口。"
+        selectedOptionId=""
+        selectedRecommendedActionId="bait-counter"
+        onRecommendedActionChange={() => {}}
+        onSelectOption={() => {}}
+        onNoteChange={() => {}}
+        onResolve={() => {}}
+        onBackToMap={() => {}}
+      />
+    );
+
+    expect(html).toContain('结算中...');
+    expect(html).toContain('雾灯先稳住脚步');
+  });
+
   test('ChallengeSummaryPage 显示本轮结果与返回大厅入口', async () => {
     const { ChallengeSummaryPage } = await import('@/components/challenge/ChallengeSummaryPage');
     const runState = {

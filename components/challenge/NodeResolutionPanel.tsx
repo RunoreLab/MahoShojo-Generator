@@ -207,6 +207,18 @@ export function NodeResolutionPanel({
         </div>
       ) : null}
 
+      {latestStoryText ? (
+        <div className="mt-6 rounded-2xl border border-amber-200 bg-amber-50/80 px-4 py-4">
+          <div className="flex items-center justify-between gap-3">
+            <h3 className="text-sm font-medium text-slate-900">实时战报</h3>
+            {isResolving ? (
+              <span className="text-xs font-medium text-amber-700">流式生成中</span>
+            ) : null}
+          </div>
+          <p className="mt-3 whitespace-pre-wrap text-sm leading-7 text-slate-700">{latestStoryText}</p>
+        </div>
+      ) : null}
+
       <div className="mt-6 flex flex-wrap items-center gap-3">
         <button
           type="button"
