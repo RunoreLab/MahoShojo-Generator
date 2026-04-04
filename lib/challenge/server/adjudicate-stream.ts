@@ -68,6 +68,11 @@ export type ChallengeAttemptResult = {
   generation?: ChallengeGenerationMetadata | null;
 };
 
+export type ChallengeStreamAttemptResult = {
+  response: Response;
+  generation?: ChallengeGenerationMetadata | null;
+};
+
 export type GenerateChallengeAttempt = (input: {
   runState: RunStateV1;
   encounter: EncounterSnapshotV1;
@@ -166,7 +171,7 @@ ${formatRewardRules(input.resolverEnvelope, input.encounter)}
 `.trim();
 };
 
-export const generateChallengeAttemptFromStreamAi = async (
+export const generateChallengeAttemptStreamFromAi = async (
   input: {
     runState: RunStateV1;
     encounter: EncounterSnapshotV1;
@@ -177,8 +182,9 @@ export const generateChallengeAttemptFromStreamAi = async (
   options?: {
     providerOptions?: GenerateWithAIOptions;
     modelOverride?: string | null;
+    onReasoningEvent?: (event: RawReasoningStreamEvent) => void;
   }
-): Promise<ChallengeAttemptResult> => {
+): Promise<ChallengeStreamAttemptResult> => {
   const reasoningEvents: RawReasoningStreamEvent[] = [];
   const telemetry: NonNullable<GenerateWithAIOptions['telemetry']> = {};
 
@@ -194,17 +200,38 @@ export const generateChallengeAttemptFromStreamAi = async (
       telemetry,
       onReasoningEvent: (event) => {
         reasoningEvents.push(event);
+        options?.onReasoningEvent?.(event);
       },
     }
   );
 
   return {
-    markdown: await streamResult.response.text(),
+    response: streamResult.response,
     generation: {
       usagePromise: streamResult.usagePromise,
       aiModel: telemetry.model ?? options?.modelOverride ?? null,
       reasoningEvents,
     },
+  };
+};
+
+export const generateChallengeAttemptFromStreamAi = async (
+  input: {
+    runState: RunStateV1;
+    encounter: EncounterSnapshotV1;
+    playerInput: ChallengePlayerInputV1;
+    resolverEnvelope: ChallengeResolverEnvelopeV1;
+    attemptIndex: number;
+  },
+  options?: {
+    providerOptions?: GenerateWithAIOptions;
+    modelOverride?: string | null;
+  }
+): Promise<ChallengeAttemptResult> => {
+  const streamAttempt = await generateChallengeAttemptStreamFromAi(input, options);
+  return {
+    markdown: await streamAttempt.response.text(),
+    generation: streamAttempt.generation ?? null,
   };
 };
 

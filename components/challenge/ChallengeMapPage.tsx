@@ -1,5 +1,5 @@
 import { getChallengeResourcePresentation, getChallengeWorldPreset } from '@/lib/challenge/world-registry';
-import type { ChallengeNodeType, ChallengeWorldId, RunStateV1 } from '@/lib/challenge/types';
+import type { ChallengeNodeType, ChallengeWorldId, NodeVisibility, RunStateV1 } from '@/lib/challenge/types';
 import { getSelectableNodeIdsForMap } from '@/components/challenge/hooks/useChallengeController';
 
 type ChallengeMapPageProps = {
@@ -18,11 +18,13 @@ const nodeTypeLabelMap: Record<ChallengeNodeType, string> = {
   boss: 'Boss',
 };
 
-const visibilityLabelMap = {
-  summary: '未接触',
-  focused: '可进入',
-  resolved: '已完成',
-} as const;
+const getVisibilityLabel = (input: { visibility: NodeVisibility; canEnter: boolean }): string => {
+  if (input.visibility === 'resolved') return '已完成';
+  if (input.visibility === 'focused') {
+    return input.canEnter ? '可进入' : '前方可见';
+  }
+  return '未接触';
+};
 
 const formatRunStatus = (status: RunStateV1['status']): string => {
   switch (status) {
@@ -118,7 +120,9 @@ export function ChallengeMapPage({
                     <p className="text-xs uppercase tracking-[0.18em] text-slate-500">{node.nodeId}</p>
                     <p className="mt-2 text-base font-semibold text-slate-900">{nodeTypeLabelMap[node.nodeType]}</p>
                   </div>
-                  <span className="rounded-full bg-white px-3 py-1 text-xs text-slate-500">{visibilityLabelMap[node.visibility]}</span>
+                  <span className="rounded-full bg-white px-3 py-1 text-xs text-slate-500">
+                    {getVisibilityLabel({ visibility: node.visibility, canEnter })}
+                  </span>
                 </div>
 
                 <div className="mt-3 space-y-1 text-sm text-slate-600">

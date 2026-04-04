@@ -200,6 +200,112 @@ const buildPlaceholderEnemy = (runState: RunStateV1, nodeType: ChallengeNodeType
   };
 };
 
+type ChallengeFetchLike = (input: string, init?: RequestInit) => Promise<Response>;
+
+type ResolveEncounterForNodeOptions = {
+  fetcher?: ChallengeFetchLike;
+  enemyCandidatesApiPath?: string;
+};
+
+type ResolveEncounterForNodeResult = {
+  nextRunState: RunStateV1;
+  encounter: EncounterSnapshotV1;
+  enemySourceMode: 'remote' | 'preset-only' | null;
+};
+
+type ChallengeEnemyCandidatesApiPayload = {
+  success?: boolean;
+  resolvedSourceMode?: 'remote' | 'preset-only';
+  candidates?: EnemySnapshotV1[];
+};
+
+const isBattleNodeType = (
+  nodeType: ChallengeNodeType
+): nodeType is Extract<ChallengeNodeType, 'battle' | 'elite' | 'boss'> =>
+  nodeType === 'battle' || nodeType === 'elite' || nodeType === 'boss';
+
+const getEnemyTierForNode = (
+  nodeType: Extract<ChallengeNodeType, 'battle' | 'elite' | 'boss'>
+): EnemySnapshotV1['strengthTier'] => {
+  if (nodeType === 'boss') return 'boss';
+  if (nodeType === 'elite') return 'elite';
+  return 'common';
+};
+
+const appendRunFlag = (runState: RunStateV1, flag: string): RunStateV1 => {
+  if (!runState.worldState || runState.worldState.runFlags.includes(flag)) return runState;
+
+  return {
+    ...runState,
+    worldState: {
+      ...runState.worldState,
+      runFlags: [...runState.worldState.runFlags, flag],
+    },
+  };
+};
+
+const readEnemyCandidatesPayload = async (
+  response: Response
+): Promise<{ resolvedSourceMode: 'remote' | 'preset-only'; candidates: EnemySnapshotV1[] }> => {
+  if (!response.ok) {
+    throw new Error('获取挑战敌人候选失败。');
+  }
+
+  const payload = (await response.json().catch(() => null)) as ChallengeEnemyCandidatesApiPayload | null;
+  const resolvedSourceMode =
+    payload?.resolvedSourceMode === 'preset-only' || payload?.resolvedSourceMode === 'remote'
+      ? payload.resolvedSourceMode
+      : null;
+
+  if (!resolvedSourceMode || !Array.isArray(payload?.candidates) || payload.candidates.length === 0) {
+    throw new Error('挑战敌人候选为空。');
+  }
+
+  return {
+    resolvedSourceMode,
+    candidates: payload.candidates,
+  };
+};
+
+const resolveBattleEnemySnapshot = async (
+  runState: RunStateV1,
+  nodeType: Extract<ChallengeNodeType, 'battle' | 'elite' | 'boss'>,
+  nodeId: string,
+  options: ResolveEncounterForNodeOptions = {}
+): Promise<{ enemySnapshot: EnemySnapshotV1; resolvedSourceMode: 'remote' | 'preset-only' }> => {
+  const sourceMode = runState.worldState?.runFlags.includes('preset_only_enemy_mode') ? 'preset-only' : 'online-first';
+  const search = new URLSearchParams({
+    worldId: runState.worldPresetId,
+    tier: getEnemyTierForNode(nodeType),
+    sourceMode,
+    limit: '6',
+  });
+
+  if (typeof runState.runSeed === 'string' && runState.runSeed.trim()) {
+    search.set('runSeed', runState.runSeed.trim());
+  }
+
+  const response = await (options.fetcher ?? fetch)(
+    `${options.enemyCandidatesApiPath ?? '/api/challenge/enemy-candidates'}?${search.toString()}`,
+    {
+      method: 'GET',
+      headers: {
+        Accept: 'application/json',
+      },
+    }
+  );
+  const payload = await readEnemyCandidatesPayload(response);
+  const picked = payload.candidates[hashString(`${runState.runSeed ?? 'no-seed'}:${nodeId}:${nodeType}`) % payload.candidates.length];
+  if (!picked) {
+    throw new Error(`CHALLENGE_ENEMY_CANDIDATE_NOT_FOUND:${nodeId}`);
+  }
+
+  return {
+    enemySnapshot: picked,
+    resolvedSourceMode: payload.resolvedSourceMode,
+  };
+};
+
 const buildEventEncounterSnapshot = (runState: RunStateV1, nodeId: string): EncounterSnapshotV1 => ({
   version: 1,
   nodeId,
@@ -244,18 +350,73 @@ const buildEventEncounterSnapshot = (runState: RunStateV1, nodeId: string): Enco
 const buildBattleEncounterSnapshot = (
   runState: RunStateV1,
   nodeType: Extract<ChallengeNodeType, 'battle' | 'elite' | 'boss'>,
-  nodeId: string
+  nodeId: string,
+  enemySnapshot: EnemySnapshotV1
 ): EncounterSnapshotV1 => ({
   version: 1,
   nodeId,
   templateId: `arena-${nodeType}-${nodeId}`,
   kind: nodeType,
   inputMode: 'recommended-action-plus-free-intent',
-  enemySnapshot: buildPlaceholderEnemy(runState, nodeType, nodeId),
+  enemySnapshot,
   rewardOptions: [],
   eventOptions: [],
   shopOffers: [],
 });
+
+export const resolveEncounterForNode = async (
+  runState: RunStateV1,
+  nodeId: string,
+  options: ResolveEncounterForNodeOptions = {}
+): Promise<ResolveEncounterForNodeResult> => {
+  const node = getNodeById(runState, nodeId);
+  if (!node) {
+    throw new Error(`CHALLENGE_NODE_NOT_FOUND:${nodeId}`);
+  }
+
+  const runStateWithCurrentNode = {
+    ...runState,
+    currentNodeId: nodeId,
+  };
+
+  switch (node.nodeType) {
+    case 'rest':
+      return {
+        nextRunState: runStateWithCurrentNode,
+        encounter: buildRestEncounterSnapshot(runStateWithCurrentNode),
+        enemySourceMode: null,
+      };
+    case 'shop':
+      return {
+        nextRunState: runStateWithCurrentNode,
+        encounter: buildShopEncounterSnapshot(runStateWithCurrentNode),
+        enemySourceMode: null,
+      };
+    case 'event':
+      return {
+        nextRunState: runStateWithCurrentNode,
+        encounter: buildEventEncounterSnapshot(runStateWithCurrentNode, nodeId),
+        enemySourceMode: null,
+      };
+    default: {
+      if (!isBattleNodeType(node.nodeType)) {
+        throw new Error(`CHALLENGE_NODE_TYPE_UNSUPPORTED:${node.nodeType}`);
+      }
+
+      const resolvedEnemy = await resolveBattleEnemySnapshot(runStateWithCurrentNode, node.nodeType, nodeId, options);
+      const nextRunState =
+        resolvedEnemy.resolvedSourceMode === 'preset-only'
+          ? appendRunFlag(runStateWithCurrentNode, 'preset_only_enemy_mode')
+          : runStateWithCurrentNode;
+
+      return {
+        nextRunState,
+        encounter: buildBattleEncounterSnapshot(nextRunState, node.nodeType, nodeId, resolvedEnemy.enemySnapshot),
+        enemySourceMode: resolvedEnemy.resolvedSourceMode,
+      };
+    }
+  }
+};
 
 const buildEncounterForNode = (runState: RunStateV1, nodeId: string): EncounterSnapshotV1 => {
   const node = getNodeById(runState, nodeId);
@@ -275,11 +436,13 @@ const buildEncounterForNode = (runState: RunStateV1, nodeId: string): EncounterS
       return buildShopEncounterSnapshot(runStateWithCurrentNode);
     case 'event':
       return buildEventEncounterSnapshot(runStateWithCurrentNode, nodeId);
-    case 'elite':
-    case 'boss':
-    case 'battle':
     default:
-      return buildBattleEncounterSnapshot(runStateWithCurrentNode, node.nodeType as 'battle' | 'elite' | 'boss', nodeId);
+      return buildBattleEncounterSnapshot(
+        runStateWithCurrentNode,
+        node.nodeType as 'battle' | 'elite' | 'boss',
+        nodeId,
+        buildPlaceholderEnemy(runStateWithCurrentNode, node.nodeType, nodeId)
+      );
   }
 };
 
@@ -847,14 +1010,15 @@ export function useChallengeController() {
         currentNodeId: nodeId,
         updatedAt: Date.now(),
       };
-      const encounter = buildEncounterForNode(nextRunState, nodeId);
+      const resolvedEncounter = await resolveEncounterForNode(nextRunState, nodeId);
+      const encounter = resolvedEncounter.encounter;
       const nextSelectedOptionId = getDefaultOptionId(encounter);
       const nextSelectedRecommendedActionId = battleRecommendedActions[0]?.id ?? '';
       const enteredNodeRecord: ChallengeNodeRecord = {
         id: randomUUID(),
         runId: activeRunRecord.id,
-        nodeId,
-        visitIndex: runState.visitedNodeCount + 1,
+        nodeId: encounter.nodeId,
+        visitIndex: resolvedEncounter.nextRunState.visitedNodeCount + 1,
         nodeType: encounter.kind,
         status: 'entered',
         encounterSnapshot: encounter,
@@ -873,14 +1037,14 @@ export function useChallengeController() {
       await putChallengeNode(enteredNodeRecord);
       const nextRecord = await updateChallengeRun(activeRunRecord.id, (current) => ({
         ...current,
-        runState: nextRunState,
-        currentNodeId: nodeId,
-        updatedAt: Date.now(),
+        runState: resolvedEncounter.nextRunState,
+        currentNodeId: resolvedEncounter.nextRunState.currentNodeId,
+        updatedAt: resolvedEncounter.nextRunState.updatedAt,
       }));
 
       setActiveRunRecord(nextRecord);
       setActiveNodeRecord(enteredNodeRecord);
-      setRunState(nextRunState);
+      setRunState(resolvedEncounter.nextRunState);
       setCurrentEncounter(encounter);
       setNodeViewMode('input');
       setSelectedOptionId(nextSelectedOptionId);

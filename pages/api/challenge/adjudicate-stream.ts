@@ -1,15 +1,17 @@
 import { z } from 'zod/v3';
 
-import { normalizeUsage } from '@/lib/arena/battle-report-log-utils';
 import { parseAiSessionCustomProvider, resolveAiSessionProvider } from '@/lib/ai-session/provider';
 import { acquireAiSessionSoftRateLimit } from '@/lib/ai-session/rate-limit';
-import { adjudicateChallengeNode, generateChallengeAttemptFromStreamAi } from '@/lib/challenge/server/adjudicate-stream';
-import type { ChallengePlayerInputV1 } from '@/lib/challenge/resolver-envelope';
+import {
+  adjudicateChallengeNode,
+  generateChallengeAttemptFromStreamAi,
+  generateChallengeAttemptStreamFromAi,
+} from '@/lib/challenge/server/adjudicate-stream';
+import { buildChallengeResolverEnvelope, type ChallengePlayerInputV1 } from '@/lib/challenge/resolver-envelope';
 import type { EncounterSnapshotV1, RunStateV1 } from '@/lib/challenge/types';
 import { enforceTextSafety } from '@/lib/content-safety/server';
 import { getLogger } from '@/lib/logger';
-import { encodeSseEvent, shouldUseClientSse } from '@/lib/stream/reasoning-sse';
-import type { RawReasoningStreamEvent } from '@/lib/stream/raw-ai';
+import { createReasoningSseBridge, shouldUseClientSse } from '@/lib/stream/reasoning-sse';
 import { recordUserActivityFromRequest } from '@/lib/user-activity/record';
 
 export const runtime = 'edge';
@@ -190,85 +192,6 @@ const json = (payload: unknown, init?: ResponseInit): Response =>
     },
   });
 
-const mapReasoningEvents = (events: RawReasoningStreamEvent[]): Array<{ event: string; payload: unknown }> => {
-  const output: Array<{ event: string; payload: unknown }> = [];
-  let sawReasoningDone = false;
-  let hasReasoningText = false;
-
-  for (const event of events) {
-    if (event.type === 'reasoning-start') {
-      output.push({
-        event: 'reasoning',
-        payload: { source: 'sdk', status: 'thinking', chunk: '' },
-      });
-      continue;
-    }
-    if (event.type === 'reasoning-delta') {
-      const chunk = typeof event.text === 'string' ? event.text : '';
-      if (chunk.trim()) hasReasoningText = true;
-      output.push({
-        event: 'reasoning',
-        payload: { source: 'sdk', status: 'thinking', chunk },
-      });
-      continue;
-    }
-    if (event.type === 'reasoning-end') {
-      sawReasoningDone = true;
-      output.push({
-        event: 'reasoning_done',
-        payload: { source: 'sdk', status: hasReasoningText ? 'done' : 'unavailable' },
-      });
-    }
-  }
-
-  if (!sawReasoningDone) {
-    output.push({
-      event: 'reasoning_done',
-      payload: { source: 'sdk', status: hasReasoningText ? 'done' : 'unavailable' },
-    });
-  }
-
-  return output;
-};
-
-const buildBufferedSseResponse = async (result: Awaited<ReturnType<typeof adjudicateChallengeNode>>): Promise<Response> => {
-  const usage = await result.generation?.usagePromise?.catch(() => null);
-  const normalizedUsage = normalizeUsage(usage);
-
-  const body = new ReadableStream<Uint8Array>({
-    start(controller) {
-      const bufferedReasoningEvents = mapReasoningEvents(result.generation?.reasoningEvents ?? []);
-      for (const event of bufferedReasoningEvents) {
-        controller.enqueue(encodeSseEvent(event.event, event.payload));
-      }
-
-      controller.enqueue(encodeSseEvent('markdown', { chunk: result.storyMarkdownWithMeta }));
-
-      if (normalizedUsage || result.generation?.aiModel || result.finalSource) {
-        controller.enqueue(
-          encodeSseEvent('telemetry', {
-            version: 1,
-            ...(result.generation?.aiModel ? { aiModel: result.generation.aiModel } : {}),
-            ...(normalizedUsage ? { usage: normalizedUsage } : {}),
-            finalSource: result.finalSource,
-          })
-        );
-      }
-
-      controller.enqueue(encodeSseEvent('done', { ok: true, finalSource: result.finalSource }));
-      controller.close();
-    },
-  });
-
-  return new Response(body, {
-    status: 200,
-    headers: {
-      'content-type': 'text/event-stream; charset=utf-8',
-      'cache-control': 'no-store',
-    },
-  });
-};
-
 type ChallengeAdjudicateRequestInput = {
   req: Request;
   runState: RunStateV1;
@@ -281,9 +204,10 @@ type HandlerDeps = {
   adjudicateChallengeRequest: (
     input: ChallengeAdjudicateRequestInput
   ) => Promise<Awaited<ReturnType<typeof adjudicateChallengeNode>>>;
+  streamChallengeRequest: (input: ChallengeAdjudicateRequestInput) => Promise<Response>;
 };
 
-const defaultAdjudicateChallengeRequest: HandlerDeps['adjudicateChallengeRequest'] = async (input) => {
+const prepareChallengeAdjudicateRequest = async (input: ChallengeAdjudicateRequestInput) => {
   const customProviderParsed = parseAiSessionCustomProvider(input.customProvider);
   if (!customProviderParsed.ok) {
     throw new Error(customProviderParsed.error);
@@ -336,6 +260,60 @@ const defaultAdjudicateChallengeRequest: HandlerDeps['adjudicateChallengeRequest
     throw error;
   }
 
+  return {
+    providerResolved: providerResolved.value,
+    rateLimit,
+  };
+};
+
+const wrapStreamResponseWithCleanup = (response: Response, onFinally: () => void): Response => {
+  const reader = response.body?.getReader() ?? null;
+  if (!reader) {
+    onFinally();
+    return response;
+  }
+
+  let finished = false;
+  const finalize = () => {
+    if (finished) return;
+    finished = true;
+    onFinally();
+  };
+
+  const body = new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      try {
+        const { done, value } = await reader.read();
+        if (done) {
+          finalize();
+          controller.close();
+          return;
+        }
+        if (value) controller.enqueue(value);
+      } catch (error) {
+        finalize();
+        controller.error(error);
+      }
+    },
+    cancel(reason) {
+      finalize();
+      try {
+        return reader.cancel(reason);
+      } catch {
+        return undefined;
+      }
+    },
+  });
+
+  return new Response(body, {
+    status: response.status,
+    headers: response.headers,
+  });
+};
+
+const defaultAdjudicateChallengeRequest: HandlerDeps['adjudicateChallengeRequest'] = async (input) => {
+  const prepared = await prepareChallengeAdjudicateRequest(input);
+
   try {
     const result = await adjudicateChallengeNode(
       {
@@ -354,8 +332,8 @@ const defaultAdjudicateChallengeRequest: HandlerDeps['adjudicateChallengeRequest
               attemptIndex,
             },
             {
-              providerOptions: providerResolved.value.providerOptions,
-              modelOverride: providerResolved.value.modelId,
+              providerOptions: prepared.providerResolved.providerOptions,
+              modelOverride: prepared.providerResolved.modelId,
             }
           );
         },
@@ -374,13 +352,60 @@ const defaultAdjudicateChallengeRequest: HandlerDeps['adjudicateChallengeRequest
     recordUserActivityFromRequest(input.req);
     return result;
   } finally {
-    rateLimit.release();
+    prepared.rateLimit.release();
+  }
+};
+
+const defaultStreamChallengeRequest: HandlerDeps['streamChallengeRequest'] = async (input) => {
+  const prepared = await prepareChallengeAdjudicateRequest(input);
+  const reasoningBridge = createReasoningSseBridge('挑战节点流式裁定');
+  const activeRunState =
+    input.runState.currentNodeId === input.encounter.nodeId
+      ? input.runState
+      : {
+          ...input.runState,
+          currentNodeId: input.encounter.nodeId,
+        };
+
+  try {
+    const resolverEnvelope = buildChallengeResolverEnvelope({
+      runState: activeRunState,
+      encounter: input.encounter,
+      playerInput: input.playerInput,
+    });
+    const streamAttempt = await generateChallengeAttemptStreamFromAi(
+      {
+        runState: activeRunState,
+        encounter: input.encounter,
+        playerInput: input.playerInput,
+        resolverEnvelope,
+        attemptIndex: 0,
+      },
+      {
+        providerOptions: prepared.providerResolved.providerOptions,
+        modelOverride: prepared.providerResolved.modelId,
+        onReasoningEvent: reasoningBridge.onReasoningEvent,
+      }
+    );
+
+    recordUserActivityFromRequest(input.req);
+    return wrapStreamResponseWithCleanup(
+      reasoningBridge.toResponse(streamAttempt.response, {
+        usagePromise: streamAttempt.generation?.usagePromise,
+        aiModel: streamAttempt.generation?.aiModel,
+      }),
+      () => prepared.rateLimit.release()
+    );
+  } catch (error) {
+    prepared.rateLimit.release();
+    throw error;
   }
 };
 
 export const createChallengeAdjudicateStreamHandler = (
   deps: HandlerDeps = {
     adjudicateChallengeRequest: defaultAdjudicateChallengeRequest,
+    streamChallengeRequest: defaultStreamChallengeRequest,
   }
 ) => {
   return async function handler(req: Request): Promise<Response> {
@@ -395,18 +420,21 @@ export const createChallengeAdjudicateStreamHandler = (
       }
 
       const { runState, encounter, playerInput, customProvider } = parsed.data;
-
-      const result = await deps.adjudicateChallengeRequest({
+      const requestInput = {
         req,
         runState: runState as RunStateV1,
         encounter: encounter as EncounterSnapshotV1,
         playerInput: playerInput ?? {},
         customProvider,
-      });
+      };
 
       if (shouldUseClientSse(req)) {
-        return buildBufferedSseResponse(result);
+        return await deps.streamChallengeRequest(requestInput);
       }
+
+      const result = await deps.adjudicateChallengeRequest({
+        ...requestInput,
+      });
 
       return json({
         success: true,

@@ -159,6 +159,133 @@ describe('challenge page', () => {
     expect(getSelectableNodeIdsForMap(advancedRunState)).toEqual(['L2-N1', 'L2-N2']);
   });
 
+  test('ChallengeMapPage 不会把 focused 但不可选的前瞻节点标成可进入', async () => {
+    const { ChallengeMapPage } = await import('@/components/challenge/ChallengeMapPage');
+    const { getSelectableNodeIdsForMap } = await import('@/components/challenge/hooks/useChallengeController');
+
+    const initialRunState = createAcceptedRunState();
+    const advancedRunState = {
+      ...initialRunState,
+      visitedNodeCount: 1,
+      mapState: initialRunState.mapState ? advanceMapVisibility(initialRunState.mapState, 'L1-N1') : null,
+    };
+
+    const html = renderToStaticMarkup(
+      <ChallengeMapPage
+        worldTitle="魔法少女竞技场"
+        runState={advancedRunState}
+        latestNodeSummary="上一节点：平稳推进"
+        onEnterNode={() => {}}
+      />
+    );
+
+    const enterableBadgeCount = (html.match(/>可进入</g) ?? []).length;
+    expect(enterableBadgeCount).toBe(getSelectableNodeIdsForMap(advancedRunState).length);
+    expect(html).toContain('前方可见');
+  });
+
+  test('resolveEncounterForNode 会通过敌人候选接口冻结 battle 敌人快照，并在降级后写入 preset_only_enemy_mode', async () => {
+    const { resolveEncounterForNode } = await import('@/components/challenge/hooks/useChallengeController');
+
+    const runState = createAcceptedRunState();
+    let requestedUrl = '';
+
+    const result = await resolveEncounterForNode(runState, 'L1-N1', {
+      fetcher: async (input) => {
+        requestedUrl = typeof input === 'string' ? input : input.toString();
+        return new Response(
+          JSON.stringify({
+            success: true,
+            worldId: 'arena',
+            tier: 'common',
+            resolvedSourceMode: 'preset-only',
+            candidates: [
+              {
+                version: 1,
+                sourceType: 'public-card',
+                sourceId: 'remote-card-a',
+                displayName: '远端对手 A',
+                strengthTier: 'common',
+                combatProfile: {},
+                tags: ['common', 'tempo'],
+                promptSummary: '远端候选 A',
+              },
+              {
+                version: 1,
+                sourceType: 'preset',
+                sourceId: 'preset-b',
+                displayName: '远端对手 B',
+                strengthTier: 'common',
+                combatProfile: {},
+                tags: ['common', 'control'],
+                promptSummary: '远端候选 B',
+              },
+            ],
+          }),
+          {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          }
+        );
+      },
+    });
+
+    expect(requestedUrl).toContain('/api/challenge/enemy-candidates');
+    expect(requestedUrl).toContain('sourceMode=online-first');
+    expect(result.enemySourceMode).toBe('preset-only');
+    expect(result.encounter.enemySnapshot?.displayName).toContain('远端对手');
+    expect(result.encounter.enemySnapshot?.sourceId).not.toContain('arena-placeholder');
+    expect(result.nextRunState.worldState?.runFlags).toContain('preset_only_enemy_mode');
+  });
+
+  test('resolveEncounterForNode 在 run flag 已降级后会固定请求 preset-only 敌人来源', async () => {
+    const { resolveEncounterForNode } = await import('@/components/challenge/hooks/useChallengeController');
+
+    const baseRunState = createAcceptedRunState();
+    const runState = {
+      ...baseRunState,
+      worldState: baseRunState.worldState
+        ? {
+            ...baseRunState.worldState,
+            runFlags: [...baseRunState.worldState.runFlags, 'preset_only_enemy_mode'],
+          }
+        : null,
+    };
+
+    let requestedUrl = '';
+    await resolveEncounterForNode(runState, 'L1-N2', {
+      fetcher: async (input) => {
+        requestedUrl = typeof input === 'string' ? input : input.toString();
+        return new Response(
+          JSON.stringify({
+            success: true,
+            worldId: 'arena',
+            tier: 'common',
+            resolvedSourceMode: 'preset-only',
+            candidates: [
+              {
+                version: 1,
+                sourceType: 'preset',
+                sourceId: 'preset-only-candidate',
+                displayName: '本地预设对手',
+                strengthTier: 'common',
+                combatProfile: {},
+                tags: ['common'],
+                promptSummary: '本地预设候选',
+              },
+            ],
+          }),
+          {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          }
+        );
+      },
+    });
+
+    expect(requestedUrl).toContain('sourceMode=preset-only');
+  });
+
   test('deriveChallengeResumeState 会优先恢复 entered 节点的冻结快照与输入草稿', async () => {
     const { deriveChallengeResumeState } = await import('@/components/challenge/hooks/useChallengeController');
 
