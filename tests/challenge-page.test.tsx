@@ -103,6 +103,9 @@ describe('challenge page', () => {
     expect(html).toContain('本轮挑战');
     expect(html).toContain('魔法少女竞技场');
     expect(html).toContain('继续挑战');
+    expect(html).toContain('在线角色库 / 随机匹配');
+    expect(html).toContain('本地导入');
+    expect(html).toContain('高级 JSON 编辑');
   });
 
   test('ChallengeBootstrapPanel 显示竞技场快照摘要与一次免费重掷', async () => {

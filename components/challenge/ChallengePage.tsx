@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 
+import BattleDataModal from '@/components/BattleDataModal';
 import { ChallengeBootstrapPanel } from '@/components/challenge/ChallengeBootstrapPanel';
 import { ChallengeLobby } from '@/components/challenge/ChallengeLobby';
 import { ChallengeMapPage } from '@/components/challenge/ChallengeMapPage';
@@ -10,12 +11,20 @@ import { ChallengeSummaryPage } from '@/components/challenge/ChallengeSummaryPag
 import { NodeResolutionPanel } from '@/components/challenge/NodeResolutionPanel';
 import { useChallengeController } from '@/components/challenge/hooks/useChallengeController';
 import { ImagePreviewModal } from '@/components/shared/ImagePreviewModal';
+import { useAuth } from '@/lib/useAuth';
 
 export type ChallengePageController = ReturnType<typeof useChallengeController>;
 
-export function ChallengePageView({ controller }: { controller: ChallengePageController }) {
+export function ChallengePageView({
+  controller,
+  isAuthenticated = false,
+}: {
+  controller: ChallengePageController;
+  isAuthenticated?: boolean;
+}) {
   const [showImageModal, setShowImageModal] = useState(false);
   const [savedImageUrl, setSavedImageUrl] = useState<string | null>(null);
+  const [showBattleDataModal, setShowBattleDataModal] = useState(false);
 
   const handleSaveImage = (imageUrl: string) => {
     setSavedImageUrl(imageUrl);
@@ -26,6 +35,11 @@ export function ChallengePageView({ controller }: { controller: ChallengePageCon
     if (controller.stage === 'node') return;
     setShowImageModal(false);
     setSavedImageUrl(null);
+  }, [controller.stage]);
+
+  useEffect(() => {
+    if (controller.stage === 'lobby') return;
+    setShowBattleDataModal(false);
   }, [controller.stage]);
 
   return (
@@ -72,11 +86,24 @@ export function ChallengePageView({ controller }: { controller: ChallengePageCon
               recentRuns={controller.recentRuns}
               unlocks={controller.allUnlocks}
               isLoadingRecentRuns={controller.isLoadingRecentRuns}
-              cardJsonText={controller.cardJsonText}
-              inputError={controller.inputError}
+              isAuthenticated={isAuthenticated}
               isSubmitting={controller.isBusy}
-              onCardJsonChange={controller.setCardJsonText}
+              isMatching={controller.isMatching}
+              entrantSummary={controller.selectedEntrantSummary}
+              rawEditorText={controller.rawEditorText}
+              localImportError={controller.localImportError}
+              editorError={controller.editorError}
+              isEditorDirty={controller.isEditorDirty}
+              advancedEditorRevealToken={controller.advancedEditorRevealToken}
+              onRawEditorTextChange={controller.setRawEditorText}
+              onApplyEditorText={() => void controller.applyEditorText()}
+              onOpenCharacterPicker={() => setShowBattleDataModal(true)}
+              onRandomMatchEntrant={() => void controller.randomMatchEntrant()}
+              onImportEntrantFile={(file) => void controller.importEntrantFromFile(file)}
+              onImportEntrantText={(text) => void controller.importEntrantFromText(text)}
               onLoadDemoCard={controller.loadDemoCard}
+              onClearEntrant={controller.clearEntrantCard}
+              onRevealAdvancedEditor={controller.revealAdvancedEditor}
               onPrepareChallenge={() => void controller.prepareChallenge()}
               onResumeRun={(runId) => void controller.resumeRun(runId)}
               onDeleteRun={(runId) => void controller.deleteRun(runId)}
@@ -144,11 +171,20 @@ export function ChallengePageView({ controller }: { controller: ChallengePageCon
           setSavedImageUrl(null);
         }}
       />
+
+      <BattleDataModal
+        isOpen={showBattleDataModal}
+        onClose={() => setShowBattleDataModal(false)}
+        onSelectCard={(card) => void controller.selectEntrantFromDataCard(card)}
+        selectedType="character"
+        selectionMode="single"
+      />
     </div>
   );
 }
 
 export function ChallengePage() {
   const controller = useChallengeController();
-  return <ChallengePageView controller={controller} />;
+  const { isAuthenticated } = useAuth();
+  return <ChallengePageView controller={controller} isAuthenticated={isAuthenticated} />;
 }
