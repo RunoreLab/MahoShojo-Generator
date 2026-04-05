@@ -126,8 +126,6 @@ const arenaDemoCard = {
   },
 };
 
-const arenaDemoCardText = JSON.stringify(arenaDemoCard, null, 2);
-
 const SOURCE_MODE_LABELS: Record<ChallengeEntrantSourceMode, string> = {
   demo: '试玩示例',
   database: '数据库选择',
@@ -977,7 +975,7 @@ export function useChallengeController() {
     setEditorError(null);
   };
 
-  const syncImportedEntrant = (card: Record<string, unknown>, sourceMode: Exclude<ChallengeEntrantSourceMode, 'manual-json'>) => {
+  const syncImportedEntrant = (card: Record<string, unknown>, sourceMode: ChallengeEntrantSourceMode) => {
     const editorText = stringifyCharacterCardForEditor(card);
     setEntrantDraft({
       entrantCards: [card],
