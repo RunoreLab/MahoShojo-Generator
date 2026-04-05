@@ -19,6 +19,7 @@ type ChallengeLobbyProps = {
   isMatching: 'character' | null;
   entrantSummary: ChallengeEntrantSummary | null;
   rawEditorText: string;
+  selectionError: string | null;
   localImportError: string | null;
   editorError: string | null;
   isEditorDirty: boolean;
@@ -47,6 +48,7 @@ export function ChallengeLobby({
   isMatching,
   entrantSummary,
   rawEditorText,
+  selectionError,
   localImportError,
   editorError,
   isEditorDirty,
@@ -132,9 +134,10 @@ export function ChallengeLobby({
               isAuthenticated={isAuthenticated}
               isGenerating={isSubmitting}
               isMatching={isMatching}
-              combatantCount={entrantSummary ? 1 : 0}
-              maxCombatants={1}
+              combatantCount={0}
+              maxCombatants={null}
             />
+            {selectionError ? <p className="mt-3 text-sm text-red-600">{selectionError}</p> : null}
           </CollapsibleSection>
 
           <CollapsibleSection

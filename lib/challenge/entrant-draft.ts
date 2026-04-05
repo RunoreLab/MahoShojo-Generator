@@ -1,4 +1,8 @@
-import { type ChallengeEntrantSourceMode, stringifyCharacterCardForEditor } from '@/lib/challenge/entrant-import';
+import {
+  createChallengeEntrantError,
+  type ChallengeEntrantSourceMode,
+  stringifyCharacterCardForEditor,
+} from '@/lib/challenge/entrant-import';
 
 export type ChallengeEntrantDraftState = {
   entrantCards: Record<string, unknown>[];
@@ -7,6 +11,16 @@ export type ChallengeEntrantDraftState = {
   lastAppliedEditorText: string;
   isEditorDirty: boolean;
 };
+
+export function createEmptyEntrantDraft(): ChallengeEntrantDraftState {
+  return {
+    entrantCards: [],
+    sourceMode: null,
+    rawEditorText: '',
+    lastAppliedEditorText: '',
+    isEditorDirty: false,
+  };
+}
 
 export function createDraftFromImportedCard(
   card: Record<string, unknown>,
@@ -70,6 +84,10 @@ export async function resolveSourceCardForPrepare(
       draft,
       sourceCard: currentCard,
     };
+  }
+
+  if (!draft.rawEditorText.trim()) {
+    throw createChallengeEntrantError('entrant-required');
   }
 
   const nextDraft = await applyEditorTextToDraft(

@@ -26,8 +26,33 @@ export type ChallengeEntrantImportResult = {
   editorText: string;
 };
 
-const SINGLE_CARD_ONLY_ERROR = 'challenge 当前只支持单卡入场';
-const JSON_PARSE_ERROR = '角色卡 JSON 解析失败，请检查格式后重试';
+export const SINGLE_CARD_ONLY_ERROR = 'challenge 当前只支持单卡入场';
+export const JSON_PARSE_ERROR = '角色卡 JSON 解析失败，请检查格式后重试';
+export const ENTRANT_REQUIRED_ERROR = '请先选择、导入或粘贴一张角色卡';
+
+export type ChallengeEntrantErrorCode = 'single-card-only' | 'json-parse' | 'entrant-required';
+
+export class ChallengeEntrantError extends Error {
+  code: ChallengeEntrantErrorCode;
+
+  constructor(code: ChallengeEntrantErrorCode, message: string) {
+    super(message);
+    this.name = 'ChallengeEntrantError';
+    this.code = code;
+    Object.setPrototypeOf(this, ChallengeEntrantError.prototype);
+  }
+}
+
+export const createChallengeEntrantError = (
+  code: ChallengeEntrantErrorCode,
+  message = code === 'single-card-only' ? SINGLE_CARD_ONLY_ERROR : code === 'json-parse' ? JSON_PARSE_ERROR : ENTRANT_REQUIRED_ERROR,
+): ChallengeEntrantError => new ChallengeEntrantError(code, message);
+
+export const isChallengeEntrantError = (
+  error: unknown,
+  code?: ChallengeEntrantErrorCode
+): error is ChallengeEntrantError =>
+  error instanceof ChallengeEntrantError && (typeof code === 'undefined' || error.code === code);
 
 const toRecord = (value: unknown): Record<string, unknown> | null =>
   typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
@@ -43,12 +68,12 @@ const isLikelyJsonlObjects = (text: string): boolean => {
 
 const assertSingleCardRecord = (value: unknown): Record<string, unknown> => {
   if (Array.isArray(value)) {
-    throw new Error(SINGLE_CARD_ONLY_ERROR);
+    throw createChallengeEntrantError('single-card-only');
   }
 
   const record = toRecord(value);
   if (!record) {
-    throw new Error(JSON_PARSE_ERROR);
+    throw createChallengeEntrantError('json-parse');
   }
 
   return record;
@@ -96,25 +121,29 @@ export async function fetchRandomCharacterCard(
   return buildEntrantImportResult(mapPublicDataCardRowToBattleSelectionPayload(payload.card), 'random');
 }
 
-export async function parseSingleCharacterCardFromText(text: string): Promise<Record<string, unknown>> {
+export function parseSingleCharacterCardFromTextSync(text: string): Record<string, unknown> {
   const trimmed = text.trim();
   if (!trimmed) {
-    throw new Error(JSON_PARSE_ERROR);
+    throw createChallengeEntrantError('json-parse');
   }
 
   try {
     return assertSingleCardRecord(JSON.parse(trimmed));
   } catch (error) {
-    if (error instanceof Error && error.message === SINGLE_CARD_ONLY_ERROR) {
+    if (isChallengeEntrantError(error, 'single-card-only')) {
       throw error;
     }
 
     if (/}\s*{/.test(trimmed) || isLikelyJsonlObjects(trimmed)) {
-      throw new Error(SINGLE_CARD_ONLY_ERROR);
+      throw createChallengeEntrantError('single-card-only');
     }
 
-    throw new Error(JSON_PARSE_ERROR);
+    throw createChallengeEntrantError('json-parse');
   }
+}
+
+export async function parseSingleCharacterCardFromText(text: string): Promise<Record<string, unknown>> {
+  return parseSingleCharacterCardFromTextSync(text);
 }
 
 export function stringifyCharacterCardForEditor(card: unknown): string {

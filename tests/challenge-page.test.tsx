@@ -96,6 +96,42 @@ const createBattleEncounter = (): EncounterSnapshotV1 => ({
 });
 
 describe('challenge page', () => {
+  test('prepare 错误会按 code 分流到 selection / editor / global', async () => {
+    const { getChallengePrepareErrorTarget } = await import('@/components/challenge/hooks/useChallengeController');
+    const { createChallengeEntrantError } = await import('@/lib/challenge/entrant-import');
+
+    expect(getChallengePrepareErrorTarget(createChallengeEntrantError('entrant-required'))).toBe('selection');
+    expect(getChallengePrepareErrorTarget(createChallengeEntrantError('json-parse'))).toBe('editor');
+    expect(getChallengePrepareErrorTarget(createChallengeEntrantError('single-card-only'))).toBe('editor');
+    expect(getChallengePrepareErrorTarget(new Error('其他错误'))).toBe('global');
+  });
+
+  test('useChallengeController 初始不会预载试玩示例角色', async () => {
+    const { useChallengeController } = await import('@/components/challenge/hooks/useChallengeController');
+
+    function ControllerSnapshot() {
+      const controller = useChallengeController();
+      return (
+        <pre>
+          {JSON.stringify({
+            entrantCards: controller.entrantCards,
+            sourceMode: controller.sourceMode,
+            selectedEntrantSummary: controller.selectedEntrantSummary,
+            rawEditorText: controller.rawEditorText,
+          })}
+        </pre>
+      );
+    }
+
+    const html = renderToStaticMarkup(<ControllerSnapshot />);
+
+    expect(html).toContain('&quot;entrantCards&quot;:[]');
+    expect(html).toContain('&quot;sourceMode&quot;:null');
+    expect(html).toContain('&quot;selectedEntrantSummary&quot;:null');
+    expect(html).toContain('&quot;rawEditorText&quot;:&quot;&quot;');
+    expect(html).not.toContain('雾灯');
+  });
+
   test('路由首屏显示本轮挑战与世界入口，且 SSR 渲染路径不会因本地存储崩溃', async () => {
     const { default: Challenge } = await import('@/pages/challenge');
     const html = renderToStaticMarkup(<Challenge />);

@@ -91,6 +91,7 @@ export function ChallengePageView({
               isMatching={controller.isMatching}
               entrantSummary={controller.selectedEntrantSummary}
               rawEditorText={controller.rawEditorText}
+              selectionError={controller.selectionError}
               localImportError={controller.localImportError}
               editorError={controller.editorError}
               isEditorDirty={controller.isEditorDirty}

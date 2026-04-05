@@ -30,6 +30,7 @@ test('ChallengePageView 在战斗节点会透传敌方角色卡区与战报卡�
     stage: 'node',
     worldTitle: '魔法少女竞技场',
     error: null,
+    selectionError: null,
     localImportError: null,
     editorError: null,
     recentRuns: [],

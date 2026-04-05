@@ -3,6 +3,18 @@ import { describe, expect, mock, test } from 'bun:test';
 import type { ChallengeEntrantDraftState } from '@/lib/challenge/entrant-draft';
 
 describe('challenge entrant draft', () => {
+  test('createEmptyEntrantDraft 会返回未选择角色的空草稿', async () => {
+    const { createEmptyEntrantDraft } = await import('@/lib/challenge/entrant-draft');
+
+    expect(createEmptyEntrantDraft()).toEqual({
+      entrantCards: [],
+      sourceMode: null,
+      rawEditorText: '',
+      lastAppliedEditorText: '',
+      isEditorDirty: false,
+    });
+  });
+
   test('非编辑来源写入角色卡后会重置 dirty 状态', async () => {
     const { createDraftFromImportedCard } = await import('@/lib/challenge/entrant-draft');
 
@@ -80,5 +92,23 @@ describe('challenge entrant draft', () => {
 
     expect(result.sourceCard).toEqual({ codename: '初次入场' });
     expect(result.draft.entrantCards).toEqual([{ codename: '初次入场' }]);
+  });
+
+  test('dirty editorText 解析失败时，不会覆盖既有 entrantCards 和 sourceMode', async () => {
+    const { createDraftFromImportedCard, markEditorTextChanged, resolveSourceCardForPrepare } = await import(
+      '@/lib/challenge/entrant-draft'
+    );
+
+    const draft = markEditorTextChanged(
+      createDraftFromImportedCard({ codename: '雾灯' }, 'database'),
+      '{"codename":"夜纱"'
+    );
+
+    await expect(
+      resolveSourceCardForPrepare(draft, async (text) => JSON.parse(text) as Record<string, unknown>)
+    ).rejects.toThrow();
+
+    expect(draft.entrantCards).toEqual([{ codename: '雾灯' }]);
+    expect(draft.sourceMode).toBe('database');
   });
 });

@@ -38,7 +38,7 @@ export function ChallengeEntrantSummaryCard({
             {summary.templateLabel} · {summary.sourceModeLabel}
           </p>
           <p className="mt-2 text-xs text-slate-500">
-            {summary.isReadyForBootstrap ? '当前可直接生成 challenge 快照。' : '当前角色卡尚未达到 challenge bootstrap 条件。'}
+            {summary.bootstrapStatusMessage}
           </p>
         </div>
         <span
