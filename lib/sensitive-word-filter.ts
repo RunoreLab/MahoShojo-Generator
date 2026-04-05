@@ -83,7 +83,6 @@ const sensitiveWordsConfig = {
     "5Y+X5a2V",
     "5YKs5oOF",
     // 侮辱性词汇
-    "5rue57qz",
     "5pSv6YKj",
     // 涉政人物
     "546L5rSq5paH",
