@@ -3,6 +3,7 @@ import type {
   EncounterSnapshotV1,
   RewardSelectionModeV1,
   RunStateV1,
+  StrengthTier,
 } from '@/lib/challenge/types';
 import type { ChallengeAdjudicationOutcome, ChallengeAdjudicationResultV1 } from '@/lib/challenge/stream-meta';
 
@@ -26,7 +27,6 @@ export type ChallengeResolverEnvelopeV1 = {
   nodeId: string;
   nodeType: SupportedAiNodeType;
   outcomeSet: ChallengeAdjudicationOutcome[];
-  recommendedOutcome: ChallengeAdjudicationOutcome;
   trackDeltaRanges: ChallengeTrackDeltaRangeV1[];
   allowedAddStatuses: string[];
   allowedRemoveStatuses: string[];
@@ -74,7 +74,7 @@ const TRACK_RANGE_PRESETS: Record<
 };
 
 const FALLBACK_DELTAS: Record<
-  Extract<SupportedAiNodeType, 'battle' | 'elite' | 'boss'>,
+  SupportedAiNodeType,
   Record<ChallengeAdjudicationOutcome, Record<string, number>>
 > = {
   battle: {
@@ -91,6 +91,11 @@ const FALLBACK_DELTAS: Record<
     victory: { hp: -24, radiance: -20, currency: 30 },
     costly_victory: { hp: -32, radiance: -24, currency: 36 },
     defeat: { hp: -80, radiance: -32, currency: 0 },
+  },
+  event: {
+    victory: { hp: -6, radiance: -2, currency: 10 },
+    costly_victory: { hp: -12, radiance: -6, currency: 6 },
+    defeat: { hp: -20, radiance: -18, currency: -6 },
   },
 };
 
@@ -114,36 +119,70 @@ const resolveRewardSelectionMode = (encounter: EncounterSnapshotV1): RewardSelec
   throw new Error('CHALLENGE_REWARD_OPTIONS_UNSUPPORTED');
 };
 
-const inferRecommendedOutcome = (
-  runState: RunStateV1,
-  encounter: EncounterSnapshotV1,
-  playerInput: ChallengePlayerInputV1
-): ChallengeAdjudicationOutcome => {
-  if (encounter.kind === 'event') return 'costly_victory';
+const resolveStrengthTierScore = (value: StrengthTier) => {
+  if (value === 'elite') return 1;
+  if (value === 'boss') return 2;
+  return 0;
+};
 
-  let score = 1;
-  const strengthTier = runState.playerSnapshot?.strengthTier;
-  if (strengthTier === 'elite') score += 1;
-  if (strengthTier === 'boss') score += 2;
-
-  if (encounter.kind === 'elite') score -= 1;
-  if (encounter.kind === 'boss') score -= 2;
-
-  if (playerInput.recommendedActionId === 'bait-counter') score += 1;
-  if (playerInput.recommendedActionId === 'focus-barrier' && encounter.kind === 'boss') score += 1;
-  if (playerInput.recommendedActionId === 'advance-pressure' && encounter.kind === 'boss') score -= 1;
-
-  const note = playerInput.note?.trim() ?? '';
-  if (/(观察|诱导|睡眠|试探|稳住|节奏)/.test(note)) score += 1;
-  if (/(硬拼|鲁莽|正面强冲|蛮冲)/.test(note)) score -= 1;
-
-  if ((runState.playerSnapshot?.tags ?? []).includes('谨慎') && playerInput.recommendedActionId === 'bait-counter') {
-    score += 1;
+const resolveTrackRatioState = (
+  value: { current: number; max: number | null } | undefined,
+  thresholds: { high: number; low: number }
+): { state: 'high' | 'mid' | 'low'; score: number } | null => {
+  if (!value || typeof value.current !== 'number' || typeof value.max !== 'number' || value.max <= 0) {
+    return null;
   }
 
-  if (score >= 2) return 'victory';
-  if (score >= 0) return 'costly_victory';
-  return 'defeat';
+  const ratio = value.current / value.max;
+  if (ratio >= thresholds.high) return { state: 'high', score: 1 };
+  if (ratio < thresholds.low) return { state: 'low', score: -1 };
+  return { state: 'mid', score: 0 };
+};
+
+const resolveNegativeStatusPenalty = (statuses: string[] | undefined): number => {
+  const weights: Record<string, number> = {
+    fatigued: 1,
+    exposed: 1,
+    shaken: 2,
+  };
+  const total = (statuses ?? []).reduce((sum, statusId) => sum + (weights[statusId] ?? 0), 0);
+  return Math.min(total, 2);
+};
+
+const resolveFallbackOutcome = (
+  runState: RunStateV1,
+  encounter: EncounterSnapshotV1
+): ChallengeAdjudicationOutcome => {
+  const playerTier = runState.playerSnapshot?.strengthTier;
+  const enemyTier = encounter.enemySnapshot?.strengthTier;
+  const tracks = runState.worldState?.tracks ?? {};
+  const hpState = resolveTrackRatioState(tracks.hp, { high: 0.6, low: 0.35 });
+  const radianceState = resolveTrackRatioState(tracks.radiance, { high: 0.5, low: 0.25 });
+
+  if (!playerTier || !enemyTier || !hpState || !radianceState) {
+    return 'costly_victory';
+  }
+
+  const tierDiff = resolveStrengthTierScore(playerTier) - resolveStrengthTierScore(enemyTier);
+  const resourceScore = hpState.score + radianceState.score - resolveNegativeStatusPenalty(runState.worldState?.temporaryStatuses);
+  const advantageScore = tierDiff * 2 + resourceScore;
+
+  if (encounter.kind === 'boss') {
+    if (hpState.state === 'low') return 'defeat';
+    if (advantageScore >= 4 && hpState.state === 'high' && radianceState.state !== 'low') return 'victory';
+    if (advantageScore <= -1) return 'defeat';
+    return 'costly_victory';
+  }
+
+  if (encounter.kind === 'elite') {
+    if (advantageScore >= 3) return 'victory';
+    if (advantageScore <= -2) return 'defeat';
+    return 'costly_victory';
+  }
+
+  if (advantageScore >= 2) return 'victory';
+  if (advantageScore <= -2) return 'defeat';
+  return 'costly_victory';
 };
 
 const resolveTrackDeltaRanges = (
@@ -222,7 +261,6 @@ export const buildChallengeResolverEnvelope = (input: {
     nodeId: input.encounter.nodeId,
     nodeType: input.encounter.kind,
     outcomeSet: ['victory', 'costly_victory', 'defeat'],
-    recommendedOutcome: inferRecommendedOutcome(input.runState, input.encounter, input.playerInput),
     trackDeltaRanges: resolveTrackDeltaRanges(input.runState, input.encounter.kind),
     allowedAddStatuses: [...ARENA_STATUS_ALLOWLIST],
     allowedRemoveStatuses: normalizeStatuses([
@@ -298,10 +336,9 @@ export const buildSystemFallbackResolution = (input: {
   storyMarkdown: string;
   adjudication: ChallengeAdjudicationResultV1;
 } => {
-  const supportedNodeType = input.encounter.kind === 'event' ? 'battle' : input.encounter.kind;
-  const outcome = inferRecommendedOutcome(input.runState, input.encounter, input.playerInput);
+  const outcome = resolveFallbackOutcome(input.runState, input.encounter);
   const deltas =
-    FALLBACK_DELTAS[supportedNodeType as keyof typeof FALLBACK_DELTAS]?.[outcome]
+    FALLBACK_DELTAS[input.encounter.kind]?.[outcome]
     ?? FALLBACK_DELTAS.battle.costly_victory;
 
   const actionLabel = input.playerInput.recommendedActionId?.trim() || '临场应对';
@@ -315,7 +352,7 @@ export const buildSystemFallbackResolution = (input: {
       : outcome === 'defeat'
         ? ['shaken']
         : [];
-  const removeStatuses = actionLabel === 'focus-barrier' ? ['exposed'] : [];
+  const removeStatuses: string[] = [];
 
   const rewardOptionId =
     input.resolverEnvelope.rewardSelectionMode === 'auto'

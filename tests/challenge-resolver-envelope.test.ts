@@ -98,7 +98,49 @@ const createEncounter = (
   shopOffers: [],
 });
 
+const createEventEncounter = (): EncounterSnapshotV1 => ({
+  version: 1,
+  nodeId: 'L1-N1',
+  templateId: 'arena-event-L1-N1',
+  kind: 'event',
+  inputMode: 'free-intent',
+  enemySnapshot: null,
+  rewardOptions: [],
+  eventOptions: [],
+  shopOffers: [],
+});
+
+const createWorldStateTracks = (input?: Partial<RunStateV1['worldState']>): NonNullable<RunStateV1['worldState']> => ({
+  version: 1,
+  schemaId: 'arena-v1',
+  tracks: {
+    hp: { current: 20, max: 100 },
+    radiance: { current: 40, max: 100 },
+    currency: { current: 18, max: null },
+  },
+  temporaryStatuses: ['exposed'],
+  runFlags: [],
+  persistentItemIds: [],
+  consumableIds: [],
+  ...input,
+});
+
 describe('challenge resolver envelope', () => {
+  test('buildChallengeResolverEnvelope 不再输出 recommendedOutcome', async () => {
+    const { buildChallengeResolverEnvelope } = await import('@/lib/challenge/resolver-envelope');
+
+    const envelope = buildChallengeResolverEnvelope({
+      runState: createRunState('battle'),
+      encounter: createEncounter('battle'),
+      playerInput: {
+        recommendedActionId: 'bait-counter',
+        note: '先观察，再动手。',
+      },
+    });
+
+    expect(envelope).not.toHaveProperty('recommendedOutcome');
+  });
+
   test('validateAdjudicationAgainstEnvelope 会拒绝越界的 track delta 与非法状态', async () => {
     const { buildChallengeResolverEnvelope, validateAdjudicationAgainstEnvelope } = await import(
       '@/lib/challenge/resolver-envelope'
@@ -123,6 +165,287 @@ describe('challenge resolver envelope', () => {
         summary: '越界结果',
       })
     ).toThrow('超出 envelope');
+  });
+
+  test('system fallback 完整 adjudication 不受 note 文本变化影响', async () => {
+    const { buildChallengeResolverEnvelope, buildSystemFallbackResolution } = await import('@/lib/challenge/resolver-envelope');
+
+    const runState = createRunState('battle');
+    const encounter = createEncounter('battle');
+
+    const resolveAdjudication = (note: string) => {
+      const playerInput = { recommendedActionId: 'bait-counter', note };
+      const resolverEnvelope = buildChallengeResolverEnvelope({ runState, encounter, playerInput });
+      return buildSystemFallbackResolution({ runState, encounter, playerInput, resolverEnvelope }).adjudication;
+    };
+
+    expect(resolveAdjudication('先观察再出手')).toEqual(resolveAdjudication('鲁莽正面强冲'));
+    expect(resolveAdjudication('先观察再出手')).toEqual(resolveAdjudication('稳住节奏后再诱导'));
+  });
+
+  test('system fallback 完整 adjudication 不受 recommendedActionId 变化影响', async () => {
+    const { buildChallengeResolverEnvelope, buildSystemFallbackResolution } = await import('@/lib/challenge/resolver-envelope');
+
+    const runState = createRunState('boss');
+    const encounter = createEncounter('boss');
+
+    const resolveAdjudication = (recommendedActionId: string) => {
+      const playerInput = { recommendedActionId, note: '保持阵型。' };
+      const resolverEnvelope = buildChallengeResolverEnvelope({ runState, encounter, playerInput });
+      return buildSystemFallbackResolution({ runState, encounter, playerInput, resolverEnvelope }).adjudication;
+    };
+
+    expect(resolveAdjudication('advance-pressure')).toEqual(resolveAdjudication('focus-barrier'));
+  });
+
+  test('system fallback 在缺少敌方快照或关键 track 时会保守回落到 costly_victory', async () => {
+    const { buildChallengeResolverEnvelope, buildSystemFallbackResolution } = await import('@/lib/challenge/resolver-envelope');
+
+    const resolveOutcome = (input: { runState: RunStateV1; encounter: EncounterSnapshotV1 }) => {
+      const playerInput = {
+        recommendedActionId: 'bait-counter',
+        note: '先观察再出手。',
+      };
+      const resolverEnvelope = buildChallengeResolverEnvelope({
+        runState: input.runState,
+        encounter: input.encounter,
+        playerInput,
+      });
+      return buildSystemFallbackResolution({
+        runState: input.runState,
+        encounter: input.encounter,
+        playerInput,
+        resolverEnvelope,
+      }).adjudication.outcome;
+    };
+
+    expect(
+      resolveOutcome({
+        runState: createRunState('battle'),
+        encounter: {
+          ...createEncounter('battle'),
+          enemySnapshot: null,
+        },
+      })
+    ).toBe('costly_victory');
+
+    expect(
+      resolveOutcome({
+        runState: createRunState('elite', {
+          worldState: {
+            ...createRunState('elite').worldState!,
+            tracks: {
+              radiance: { current: 40, max: 100 },
+              currency: { current: 18, max: null },
+            },
+          },
+        }),
+        encounter: createEncounter('elite'),
+      })
+    ).toBe('costly_victory');
+
+    expect(
+      resolveOutcome({
+        runState: createRunState('boss', {
+          worldState: {
+            ...createRunState('boss').worldState!,
+            tracks: {
+              hp: { current: 20, max: 100 },
+              currency: { current: 18, max: null },
+            },
+          },
+        }),
+        encounter: createEncounter('boss'),
+      })
+    ).toBe('costly_victory');
+
+    expect(
+      resolveOutcome({
+        runState: createRunState('event'),
+        encounter: createEventEncounter(),
+      })
+    ).toBe('costly_victory');
+  });
+
+  test('system fallback 会按 deterministic 评分表给出 battle/elite/boss/event outcome', async () => {
+    const { buildChallengeResolverEnvelope, buildSystemFallbackResolution } = await import('@/lib/challenge/resolver-envelope');
+
+    const resolveOutcome = (input: { runState: RunStateV1; encounter: EncounterSnapshotV1 }) => {
+      const playerInput = {
+        recommendedActionId: 'bait-counter',
+        note: '无论怎么写都不该影响 deterministic fallback。',
+      };
+      const resolverEnvelope = buildChallengeResolverEnvelope({
+        runState: input.runState,
+        encounter: input.encounter,
+        playerInput,
+      });
+      return buildSystemFallbackResolution({
+        runState: input.runState,
+        encounter: input.encounter,
+        playerInput,
+        resolverEnvelope,
+      }).adjudication.outcome;
+    };
+
+    expect(
+      resolveOutcome({
+        runState: createRunState('battle', {
+          playerSnapshot: {
+            ...createPlayerSnapshot(),
+            strengthTier: 'boss',
+          },
+          worldState: createWorldStateTracks({
+            tracks: {
+              hp: { current: 90, max: 100 },
+              radiance: { current: 70, max: 100 },
+              currency: { current: 18, max: null },
+            },
+            temporaryStatuses: [],
+          }),
+        }),
+        encounter: createEncounter('battle'),
+      })
+    ).toBe('victory');
+
+    expect(
+      resolveOutcome({
+        runState: createRunState('battle', {
+          worldState: createWorldStateTracks({
+            tracks: {
+              hp: { current: 18, max: 100 },
+              radiance: { current: 10, max: 100 },
+              currency: { current: 18, max: null },
+            },
+            temporaryStatuses: ['shaken'],
+          }),
+        }),
+        encounter: {
+          ...createEncounter('battle'),
+          enemySnapshot: {
+            ...createEncounter('battle').enemySnapshot!,
+            strengthTier: 'boss',
+          },
+        },
+      })
+    ).toBe('defeat');
+
+    expect(
+      resolveOutcome({
+        runState: createRunState('elite', {
+          playerSnapshot: {
+            ...createPlayerSnapshot(),
+            strengthTier: 'elite',
+          },
+          worldState: createWorldStateTracks({
+            tracks: {
+              hp: { current: 55, max: 100 },
+              radiance: { current: 40, max: 100 },
+              currency: { current: 18, max: null },
+            },
+            temporaryStatuses: [],
+          }),
+        }),
+        encounter: createEncounter('elite'),
+      })
+    ).toBe('costly_victory');
+
+    expect(
+      resolveOutcome({
+        runState: createRunState('boss', {
+          playerSnapshot: {
+            ...createPlayerSnapshot(),
+            strengthTier: 'boss',
+          },
+          worldState: createWorldStateTracks({
+            tracks: {
+              hp: { current: 20, max: 100 },
+              radiance: { current: 90, max: 100 },
+              currency: { current: 18, max: null },
+            },
+            temporaryStatuses: [],
+          }),
+        }),
+        encounter: createEncounter('boss'),
+      })
+    ).toBe('defeat');
+
+    expect(
+      resolveOutcome({
+        runState: createRunState('event', {
+          worldState: createWorldStateTracks({
+            tracks: {
+              hp: { current: 90, max: 100 },
+              radiance: { current: 90, max: 100 },
+              currency: { current: 18, max: null },
+            },
+            temporaryStatuses: [],
+          }),
+        }),
+        encounter: {
+          ...createEventEncounter(),
+          enemySnapshot: {
+            version: 1,
+            sourceType: 'preset',
+            sourceId: 'enemy-event-1',
+            displayName: '镜砂',
+            strengthTier: 'common',
+            combatProfile: {},
+            tags: ['event'],
+            promptSummary: '擅长制造错位感。',
+          },
+        },
+      })
+    ).toBe('victory');
+  });
+
+  test('event fallback 在 defeat 路径下仍必须落在 event envelope 范围内', async () => {
+    const { buildChallengeResolverEnvelope, buildSystemFallbackResolution, validateAdjudicationAgainstEnvelope } = await import(
+      '@/lib/challenge/resolver-envelope'
+    );
+
+    const runState = createRunState('event', {
+      worldState: createWorldStateTracks({
+        tracks: {
+          hp: { current: 10, max: 100 },
+          radiance: { current: 10, max: 100 },
+          currency: { current: 18, max: null },
+        },
+        temporaryStatuses: ['shaken'],
+      }),
+    });
+    const encounter: EncounterSnapshotV1 = {
+      ...createEventEncounter(),
+      enemySnapshot: {
+        version: 1,
+        sourceType: 'preset',
+        sourceId: 'enemy-event-2',
+        displayName: '夜纱',
+        strengthTier: 'boss',
+        combatProfile: {},
+        tags: ['event'],
+        promptSummary: '擅长诱导与误导。',
+      },
+    };
+    const playerInput = {
+      recommendedActionId: 'bait-counter',
+      note: '保持观察。',
+    };
+
+    const resolverEnvelope = buildChallengeResolverEnvelope({
+      runState,
+      encounter,
+      playerInput,
+    });
+    const fallback = buildSystemFallbackResolution({
+      runState,
+      encounter,
+      playerInput,
+      resolverEnvelope,
+    });
+
+    expect(fallback.adjudication.outcome).toBe('defeat');
+    expect(() => validateAdjudicationAgainstEnvelope(resolverEnvelope, fallback.adjudication)).not.toThrow();
   });
 
   test('当首轮与次轮 meta 校验都失败时，会降级为系统 fallback 结算', async () => {
