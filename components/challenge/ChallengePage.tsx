@@ -106,6 +106,7 @@ export function ChallengePageView({
               onClearEntrant={controller.clearEntrantCard}
               onRevealAdvancedEditor={controller.revealAdvancedEditor}
               onPrepareChallenge={() => void controller.prepareChallenge()}
+              onUserProviderConfigChange={controller.setUserProviderConfig}
               onResumeRun={(runId) => void controller.resumeRun(runId)}
               onDeleteRun={(runId) => void controller.deleteRun(runId)}
             />
@@ -144,6 +145,7 @@ export function ChallengePageView({
               enemyDisplayState={controller.enemyDisplayState}
               storyCardState={controller.storyCardState}
               onSaveImage={handleSaveImage}
+              onUserProviderConfigChange={controller.setUserProviderConfig}
               onRecommendedActionChange={controller.setSelectedRecommendedActionId}
               onSelectOption={controller.setSelectedOptionId}
               onNoteChange={controller.setNote}

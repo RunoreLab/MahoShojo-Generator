@@ -32,6 +32,7 @@ describe('challenge lobby', () => {
         onClearEntrant={() => {}}
         onRevealAdvancedEditor={() => {}}
         onPrepareChallenge={() => {}}
+        onUserProviderConfigChange={() => {}}
         onResumeRun={() => {}}
         onDeleteRun={() => {}}
       />
@@ -40,6 +41,8 @@ describe('challenge lobby', () => {
     expect(html).toContain('在线角色库 / 随机匹配');
     expect(html).toContain('本地导入');
     expect(html).toContain('高级 JSON 编辑');
+    expect(html).toContain('AI 裁定模型');
+    expect(html).toContain('自定义 AI 能力提供商');
     expect(html).toContain('浏览在线角色库');
     expect(html).toContain('还没有选中挑战者');
   });
@@ -77,6 +80,7 @@ describe('challenge lobby', () => {
         onClearEntrant={() => {}}
         onRevealAdvancedEditor={() => {}}
         onPrepareChallenge={() => {}}
+        onUserProviderConfigChange={() => {}}
         onResumeRun={() => {}}
         onDeleteRun={() => {}}
       />
@@ -114,6 +118,7 @@ describe('challenge lobby', () => {
         onClearEntrant={() => {}}
         onRevealAdvancedEditor={() => {}}
         onPrepareChallenge={() => {}}
+        onUserProviderConfigChange={() => {}}
         onResumeRun={() => {}}
         onDeleteRun={() => {}}
       />

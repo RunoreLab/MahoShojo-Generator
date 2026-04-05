@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 
+import type { UserAIProviderConfig } from '@/components/AiProviderSelector';
 import { randomUUID } from '@/lib/crypto';
 import { inferTemplate, TEMPLATE_LABELS } from '@/lib/data-card-converter';
 import {
@@ -17,6 +18,7 @@ import {
   resolveNodeExecutionMode,
 } from '@/components/challenge/hooks/useChallengeStreamResolution';
 import type { ChallengeStoryCardState } from '@/components/challenge/ChallengeStoryCardSection';
+import { buildCustomProviderPayload } from '@/lib/ai/custom-provider';
 import {
   deleteChallengeRunCascade,
   getChallengeRun,
@@ -861,9 +863,14 @@ export function useChallengeController() {
   const [storyCardState, setStoryCardState] = useState<ChallengeStoryCardState | null>(null);
   const [latestNodeSummary, setLatestNodeSummary] = useState('');
   const [summaryText, setSummaryText] = useState('');
+  const [userProviderConfig, setUserProviderConfig] = useState<UserAIProviderConfig | null>(null);
   const mountedRef = useRef(true);
   const activeResolutionAbortRef = useRef<AbortController | null>(null);
   const activeResolutionIdRef = useRef(0);
+  const customProviderPayload = useMemo(
+    () => buildCustomProviderPayload(userProviderConfig),
+    [userProviderConfig]
+  );
 
   const mergeUnlockRecords = (
     current: ChallengeUnlockRecord[],
@@ -1487,6 +1494,10 @@ export function useChallengeController() {
       };
 
       if (resolveNodeExecutionMode(currentEncounter) === 'ai') {
+        if (userProviderConfig?.providerId !== 'system' && !userProviderConfig?.apiKey?.trim()) {
+          throw new Error('当前自定义 AI 提供商缺少 API Key，请先补全后再结算。');
+        }
+
         activeResolutionAbortRef.current?.abort();
         resolutionAbortController = new AbortController();
         activeResolutionAbortRef.current = resolutionAbortController;
@@ -1499,6 +1510,7 @@ export function useChallengeController() {
             optionId: selectedOptionId,
             note,
           },
+          ...(customProviderPayload ? { customProvider: customProviderPayload } : {}),
           baseNodeRecord,
           signal: resolutionAbortController.signal,
           onText: (streamingText) => {
@@ -1727,6 +1739,7 @@ export function useChallengeController() {
     recommendedActions,
     setCardJsonText: setRawEditorText,
     setRawEditorText,
+    setUserProviderConfig,
     applyEditorText,
     clearEntrantCard,
     selectEntrantFromDataCard,

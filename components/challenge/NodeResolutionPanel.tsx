@@ -1,3 +1,4 @@
+import AiProviderSelector from '@/components/AiProviderSelector';
 import { ChallengeEnemyCardSection } from '@/components/challenge/ChallengeEnemyCardSection';
 import { ChallengeStoryCardSection, type ChallengeStoryCardState } from '@/components/challenge/ChallengeStoryCardSection';
 import type { ChallengeEnemyDisplayState } from '@/lib/challenge/enemy-display';
@@ -21,6 +22,7 @@ type NodeResolutionPanelProps = {
   enemyDisplayState?: ChallengeEnemyDisplayState | null;
   storyCardState?: ChallengeStoryCardState | null;
   onSaveImage?: (imageUrl: string) => void;
+  onUserProviderConfigChange: Parameters<typeof AiProviderSelector>[0]['onConfigChange'];
   onRecommendedActionChange: (value: string) => void;
   onSelectOption: (value: string) => void;
   onNoteChange: (value: string) => void;
@@ -63,6 +65,7 @@ export function NodeResolutionPanel({
   enemyDisplayState = null,
   storyCardState = null,
   onSaveImage,
+  onUserProviderConfigChange,
   onRecommendedActionChange,
   onSelectOption,
   onNoteChange,
@@ -71,6 +74,8 @@ export function NodeResolutionPanel({
 }: NodeResolutionPanelProps) {
   const actions = recommendedActions?.length ? recommendedActions : defaultBattleRecommendedActions;
   const isBattleNode = encounter.kind === 'battle' || encounter.kind === 'elite' || encounter.kind === 'boss';
+  const usesAiResolution =
+    isBattleNode || (encounter.kind === 'event' && encounter.inputMode !== 'choice-only');
   const showFreeIntent = encounter.inputMode === 'free-intent'
     || encounter.inputMode === 'choice-plus-note'
     || encounter.inputMode === 'recommended-action-plus-free-intent';
@@ -244,6 +249,22 @@ export function NodeResolutionPanel({
                 </span>
               </label>
             ))}
+          </div>
+        </div>
+      ) : null}
+
+      {usesAiResolution ? (
+        <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+          <h3 className="text-sm font-medium text-slate-900">AI 裁定模型</h3>
+          <p className="mt-2 text-sm leading-6 text-slate-600">
+            当前节点会调用 AI 生成裁定文本。你可以在这里切换模型或提供商，设置会与
+            {' '}
+            <span className="font-medium text-slate-800">/arena</span>
+            {' '}
+            共用。
+          </p>
+          <div className="mt-4">
+            <AiProviderSelector onConfigChange={onUserProviderConfigChange} />
           </div>
         </div>
       ) : null}

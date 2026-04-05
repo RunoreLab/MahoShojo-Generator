@@ -51,6 +51,7 @@ describe('challenge node display', () => {
           sourceMeta: { sourceType: 'season-entity', sourceId: 'enemy-1', isFallback: true },
         }}
         storyCardState={null}
+        onUserProviderConfigChange={() => {}}
         onRecommendedActionChange={() => {}}
         onSelectOption={() => {}}
         onNoteChange={() => {}}
@@ -84,6 +85,7 @@ describe('challenge node display', () => {
           sourceMeta: { sourceType: 'preset', sourceId: 'preset-snowy', isFallback: false },
         }}
         storyCardState={null}
+        onUserProviderConfigChange={() => {}}
         onRecommendedActionChange={() => {}}
         onSelectOption={() => {}}
         onNoteChange={() => {}}
@@ -116,6 +118,7 @@ describe('challenge node display', () => {
           telemetry: null,
           finalSource: 'ai',
         }}
+        onUserProviderConfigChange={() => {}}
         onRecommendedActionChange={() => {}}
         onSelectOption={() => {}}
         onNoteChange={() => {}}
@@ -158,6 +161,7 @@ describe('challenge node display', () => {
           telemetry: null,
           finalSource: 'ai',
         }}
+        onUserProviderConfigChange={() => {}}
         onRecommendedActionChange={() => {}}
         onSelectOption={() => {}}
         onNoteChange={() => {}}

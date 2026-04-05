@@ -198,6 +198,49 @@ describe('challenge stream resolution', () => {
     expect(receivedSignal).toBe(controller.signal);
   });
 
+  test('runChallengeStreamResolution 会把 customProvider 透传给挑战裁定接口', async () => {
+    const { runChallengeStreamResolution } = await import('@/components/challenge/hooks/useChallengeStreamResolution');
+
+    const encounter = createEncounter('battle');
+    let receivedBody: Record<string, unknown> | null = null;
+
+    await runChallengeStreamResolution({
+      runState: createRunState('battle'),
+      encounter,
+      playerInput: {
+        recommendedActionId: 'advance-pressure',
+        note: '主动前压，试探对方换招节奏。',
+      },
+      baseNodeRecord: createEnteredNodeRecord(encounter),
+      customProvider: {
+        providerId: 'system',
+        modelId: 'gemini-2.5-flash',
+        apiKey: '',
+      },
+      fetcher: async (_input, init) => {
+        receivedBody = init?.body ? JSON.parse(String(init.body)) : null;
+        return new Response(
+          [
+            encodeSse('markdown', {
+              chunk:
+                '雾灯抓住先手持续施压。\n<!-- MAHOSHOJO_ARENA_META {"version":1,"adjudication":{"outcome":"victory","trackDeltas":{"hp":-8,"radiance":-5},"addStatuses":[],"removeStatuses":["exposed"],"rewardOptionId":null,"summary":"雾灯抢下了节奏。"}} -->',
+            }),
+            encodeSse('done', { ok: true }),
+          ].join(''),
+          {
+            headers: { 'content-type': 'text/event-stream; charset=utf-8' },
+          }
+        );
+      },
+    });
+
+    expect(receivedBody?.customProvider).toEqual({
+      providerId: 'system',
+      modelId: 'gemini-2.5-flash',
+      apiKey: '',
+    });
+  });
+
   test('resolveChallengeNodeWithStreamingFallback 会在流式请求失败时回退到本地系统结算', async () => {
     const { resolveChallengeNodeWithStreamingFallback } = await import(
       '@/components/challenge/hooks/useChallengeStreamResolution'

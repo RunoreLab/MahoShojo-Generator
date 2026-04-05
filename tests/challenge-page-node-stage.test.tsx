@@ -75,6 +75,7 @@ test('ChallengePageView 在战斗节点会透传敌方角色卡区与战报卡�
     summaryText: '',
     recommendedActions: [],
     setRawEditorText: (_value: string) => {},
+    setUserProviderConfig: () => {},
     applyEditorText: async () => {},
     clearEntrantCard: () => {},
     selectEntrantFromDataCard: async () => {},
@@ -101,5 +102,6 @@ test('ChallengePageView 在战斗节点会透传敌方角色卡区与战报卡�
   const html = renderToStaticMarkup(<ChallengePageView controller={controller} />);
 
   expect(html).toContain('敌方角色卡');
+  expect(html).toContain('自定义 AI 能力提供商');
   expect(html).toContain('下载记录');
 });

@@ -142,6 +142,8 @@ describe('challenge page', () => {
     expect(html).toContain('在线角色库 / 随机匹配');
     expect(html).toContain('本地导入');
     expect(html).toContain('高级 JSON 编辑');
+    expect(html).toContain('AI 裁定模型');
+    expect(html).toContain('自定义 AI 能力提供商');
   });
 
   test('ChallengeBootstrapPanel 显示竞技场快照摘要与一次免费重掷', async () => {
@@ -472,6 +474,7 @@ describe('challenge page', () => {
         note=""
         selectedOptionId=""
         selectedRecommendedActionId="advance-pressure"
+        onUserProviderConfigChange={() => {}}
         onRecommendedActionChange={() => {}}
         onSelectOption={() => {}}
         onNoteChange={() => {}}
@@ -497,6 +500,7 @@ describe('challenge page', () => {
         note="先观察，再抓窗口。"
         selectedOptionId=""
         selectedRecommendedActionId="bait-counter"
+        onUserProviderConfigChange={() => {}}
         onRecommendedActionChange={() => {}}
         onSelectOption={() => {}}
         onNoteChange={() => {}}

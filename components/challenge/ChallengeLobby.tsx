@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 
+import AiProviderSelector from '@/components/AiProviderSelector';
 import { DatabaseSelector } from '@/components/arena/components/DatabaseSelector';
 import { ChallengeCardImportPanel } from '@/components/challenge/ChallengeCardImportPanel';
 import { ChallengeEntrantSummaryCard } from '@/components/challenge/ChallengeEntrantSummaryCard';
@@ -34,6 +35,7 @@ type ChallengeLobbyProps = {
   onClearEntrant: () => void;
   onRevealAdvancedEditor: () => void;
   onPrepareChallenge: () => void;
+  onUserProviderConfigChange: Parameters<typeof AiProviderSelector>[0]['onConfigChange'];
   onResumeRun: (runId: string) => void;
   onDeleteRun: (runId: string) => void;
 };
@@ -63,6 +65,7 @@ export function ChallengeLobby({
   onClearEntrant,
   onRevealAdvancedEditor,
   onPrepareChallenge,
+  onUserProviderConfigChange,
   onResumeRun,
   onDeleteRun,
 }: ChallengeLobbyProps) {
@@ -153,6 +156,25 @@ export function ChallengeLobby({
               onImportFile={onImportEntrantFile}
               onImportText={onImportEntrantText}
             />
+          </CollapsibleSection>
+
+          <CollapsibleSection
+            title="AI 裁定模型"
+            description="与竞技场共用本地模型和提供商设置，后续 AI 节点可在节点页继续调整"
+            defaultOpen
+            keepMounted
+            storageKey="challenge.section.aiProvider.open"
+          >
+            <div className="space-y-3">
+              <p className="text-sm leading-6 text-slate-600">
+                战斗节点与需要文本裁定的事件节点会直接读取这里的模型设置。该配置会与
+                {' '}
+                <span className="font-medium text-slate-800">/arena</span>
+                {' '}
+                共用同一份本地持久化记录。
+              </p>
+              <AiProviderSelector onConfigChange={onUserProviderConfigChange} />
+            </div>
           </CollapsibleSection>
 
           <CollapsibleSection
