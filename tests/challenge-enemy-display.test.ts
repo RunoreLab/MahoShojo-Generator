@@ -61,6 +61,36 @@ describe('challenge enemy display', () => {
     expect((result.card as { name?: string } | null)?.name).toBe('公开卡敌人');
   });
 
+  test('resolvedSourceCardLite 存在时会优先复用 sidecar，不再二次 fetch public card', async () => {
+    const { resolveChallengeEnemyDisplay } = await import('@/lib/challenge/enemy-display');
+
+    const result = await resolveChallengeEnemyDisplay({
+      enemySnapshot: {
+        ...baseEnemySnapshot,
+        sourceType: 'public-card',
+        sourceId: 'card-sidecar-1',
+      },
+      resolvedSourceCardLite: {
+        id: 'card-sidecar-1',
+        name: '侧载敌人',
+        data: JSON.stringify({
+          templateId: GENERAL_CHARACTER_TEMPLATE_ID,
+          name: '侧载敌人',
+          content: '这是一张通过 sidecar 直接复用的通用角色卡。',
+        }),
+        updatedAt: '2026-04-05T12:00:00.000Z',
+      },
+      fetchPublicCardById: async () => {
+        throw new Error('should not fetch');
+      },
+    });
+
+    expect(result.status).toBe('resolved');
+    expect(result.template).toBe('general');
+    expect(result.sourceMeta.isFallback).toBe(false);
+    expect((result.card as { name?: string } | null)?.name).toBe('侧载敌人');
+  });
+
   test('season-entity 补查成功时复用原卡模板', async () => {
     const { resolveChallengeEnemyDisplay } = await import('@/lib/challenge/enemy-display');
 

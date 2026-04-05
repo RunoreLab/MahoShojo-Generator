@@ -13,6 +13,7 @@ type HandlerDeps = {
     sourceMode: 'online-first' | 'preset-only';
     runSeed?: string | null;
     limit?: number;
+    selectionSeed?: string | null;
     baseUrl: string;
   }) => Promise<ResolveChallengeEnemyCandidatesResult>;
 };
@@ -29,40 +30,39 @@ const parseLimit = (value: string | null): number => {
   return Math.max(1, Math.min(12, Math.floor(parsed)));
 };
 
+const errorJson = (status: number, error: string): Response =>
+  new Response(JSON.stringify({ success: false, error }), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  });
+
 export const createChallengeEnemyCandidatesHandler = (
   deps: HandlerDeps = {
     resolveChallengeEnemyCandidates,
-  }
+  },
 ) => {
   return async function handler(req: Request): Promise<Response> {
     if (req.method !== 'GET') {
-      return new Response(JSON.stringify({ error: 'Method not allowed' }), {
-        status: 405,
-        headers: { 'Content-Type': 'application/json' },
-      });
+      return errorJson(405, 'Method not allowed');
     }
 
     try {
       const url = new URL(req.url);
       const worldId = (url.searchParams.get('worldId') ?? 'arena') as ChallengeWorldId;
       if (worldId !== 'arena') {
-        return new Response(JSON.stringify({ error: '暂不支持该挑战世界' }), {
-          status: 400,
-          headers: { 'Content-Type': 'application/json' },
-        });
+        return errorJson(400, '暂不支持该挑战世界');
       }
 
       const tier = parseTier(url.searchParams.get('tier'));
       if (!tier) {
-        return new Response(JSON.stringify({ error: '无效的敌人强度档位' }), {
-          status: 400,
-          headers: { 'Content-Type': 'application/json' },
-        });
+        return errorJson(400, '无效的敌人强度档位');
       }
 
       const sourceMode = url.searchParams.get('sourceMode') === 'preset-only' ? 'preset-only' : 'online-first';
       const runSeedRaw = url.searchParams.get('runSeed');
       const runSeed = typeof runSeedRaw === 'string' && runSeedRaw.trim() ? runSeedRaw.trim() : null;
+      const selectionSeedRaw = url.searchParams.get('selectionSeed');
+      const selectionSeed = typeof selectionSeedRaw === 'string' && selectionSeedRaw.trim() ? selectionSeedRaw.trim() : null;
       const limit = parseLimit(url.searchParams.get('limit'));
 
       const result = await deps.resolveChallengeEnemyCandidates({
@@ -71,8 +71,26 @@ export const createChallengeEnemyCandidatesHandler = (
         sourceMode,
         runSeed,
         limit,
+        selectionSeed,
         baseUrl: url.origin,
       });
+
+      if (result.mode === 'selection') {
+        return new Response(
+          JSON.stringify({
+            success: true,
+            worldId: result.worldId,
+            tier: result.tier,
+            resolvedSourceMode: result.resolvedSourceMode,
+            enemySnapshot: result.enemySnapshot,
+            resolvedSourceCardLite: result.resolvedSourceCardLite,
+          }),
+          {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        );
+      }
 
       return new Response(
         JSON.stringify({
@@ -85,14 +103,11 @@ export const createChallengeEnemyCandidatesHandler = (
         {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
-        }
+        },
       );
     } catch (error) {
       console.error('获取挑战敌人候选失败:', error);
-      return new Response(JSON.stringify({ error: '获取挑战敌人候选失败' }), {
-        status: 500,
-        headers: { 'Content-Type': 'application/json' },
-      });
+      return errorJson(500, '获取挑战敌人候选失败');
     }
   };
 };

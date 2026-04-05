@@ -240,28 +240,17 @@ describe('challenge page', () => {
             worldId: 'arena',
             tier: 'common',
             resolvedSourceMode: 'preset-only',
-            candidates: [
-              {
-                version: 1,
-                sourceType: 'public-card',
-                sourceId: 'remote-card-a',
-                displayName: '远端对手 A',
-                strengthTier: 'common',
-                combatProfile: {},
-                tags: ['common', 'tempo'],
-                promptSummary: '远端候选 A',
-              },
-              {
-                version: 1,
-                sourceType: 'preset',
-                sourceId: 'preset-b',
-                displayName: '远端对手 B',
-                strengthTier: 'common',
-                combatProfile: {},
-                tags: ['common', 'control'],
-                promptSummary: '远端候选 B',
-              },
-            ],
+            enemySnapshot: {
+              version: 1,
+              sourceType: 'preset',
+              sourceId: 'preset-b',
+              displayName: '远端对手 B',
+              strengthTier: 'common',
+              combatProfile: {},
+              tags: ['common', 'control'],
+              promptSummary: '远端候选 B',
+            },
+            resolvedSourceCardLite: null,
           }),
           {
             status: 200,
@@ -273,10 +262,54 @@ describe('challenge page', () => {
 
     expect(requestedUrl).toContain('/api/challenge/enemy-candidates');
     expect(requestedUrl).toContain('sourceMode=online-first');
+    expect(requestedUrl).toContain('selectionSeed=');
     expect(result.enemySourceMode).toBe('preset-only');
     expect(result.encounter.enemySnapshot?.displayName).toContain('远端对手');
     expect(result.encounter.enemySnapshot?.sourceId).not.toContain('arena-placeholder');
     expect(result.nextRunState.worldState?.runFlags).toContain('preset_only_enemy_mode');
+  });
+
+  test('resolveEncounterForNode 会拒绝 public-card + null sidecar 的 selection payload，并回退到本地占位敌人', async () => {
+    const { resolveEncounterForNode } = await import('@/components/challenge/hooks/useChallengeController');
+
+    const runState = createAcceptedRunState();
+    const originalWarn = console.warn;
+    console.warn = () => undefined;
+
+    let result;
+    try {
+      result = await resolveEncounterForNode(runState, 'L1-N1', {
+        fetcher: async () =>
+          new Response(
+            JSON.stringify({
+              success: true,
+              worldId: 'arena',
+              tier: 'common',
+              resolvedSourceMode: 'remote',
+              enemySnapshot: {
+                version: 1,
+                sourceType: 'public-card',
+                sourceId: 'public-card-without-sidecar',
+                displayName: '坏 payload 对手',
+                strengthTier: 'common',
+                combatProfile: {},
+                tags: ['common'],
+                promptSummary: '这个 payload 不应被客户端接受。',
+              },
+              resolvedSourceCardLite: null,
+            }),
+            {
+              status: 200,
+              headers: { 'Content-Type': 'application/json' },
+            }
+          ),
+      });
+    } finally {
+      console.warn = originalWarn;
+    }
+
+    expect(result.enemySourceMode).toBe('local-placeholder');
+    expect(result.encounter.enemySnapshot?.sourceId).toContain('arena-placeholder:');
   });
 
   test('resolveEncounterForNode 在 run flag 已降级后会固定请求 preset-only 敌人来源', async () => {
@@ -303,18 +336,17 @@ describe('challenge page', () => {
             worldId: 'arena',
             tier: 'common',
             resolvedSourceMode: 'preset-only',
-            candidates: [
-              {
-                version: 1,
-                sourceType: 'preset',
-                sourceId: 'preset-only-candidate',
-                displayName: '本地预设对手',
-                strengthTier: 'common',
-                combatProfile: {},
-                tags: ['common'],
-                promptSummary: '本地预设候选',
-              },
-            ],
+            enemySnapshot: {
+              version: 1,
+              sourceType: 'preset',
+              sourceId: 'preset-only-candidate',
+              displayName: '本地预设对手',
+              strengthTier: 'common',
+              combatProfile: {},
+              tags: ['common'],
+              promptSummary: '本地预设候选',
+            },
+            resolvedSourceCardLite: null,
           }),
           {
             status: 200,
@@ -325,6 +357,7 @@ describe('challenge page', () => {
     });
 
     expect(requestedUrl).toContain('sourceMode=preset-only');
+    expect(requestedUrl).toContain('selectionSeed=');
   });
 
   test('resolveEncounterForNode 在敌人候选接口失败时会回退到本地占位敌人', async () => {

@@ -164,6 +164,13 @@ export interface EnemySnapshotV1 {
   promptSummary: string;
 }
 
+export interface ChallengeResolvedSourceCardLite {
+  id: string;
+  name: string;
+  data: string;
+  updatedAt: string | null;
+}
+
 export interface EncounterSnapshotV1 {
   version: 1;
   nodeId: string;

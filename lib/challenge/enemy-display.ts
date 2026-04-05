@@ -1,8 +1,11 @@
-import { inferTemplate } from '@/lib/data-card-converter';
+import {
+  inferChallengeRenderableTemplate,
+  isChallengeRenderableSourceCard,
+} from '@/lib/challenge/source-card-renderability';
 import { getBundledPresetData } from '@/lib/pvp/preset-bundled';
 import { GENERAL_CHARACTER_TEMPLATE_ID } from '@/lib/schemas/general-character';
 
-import type { EnemySnapshotV1 } from '@/lib/challenge/types';
+import type { ChallengeResolvedSourceCardLite, EnemySnapshotV1 } from '@/lib/challenge/types';
 
 export type ChallengeEnemyDisplayTemplate = 'magical-girl' | 'canshou' | 'general';
 
@@ -20,6 +23,7 @@ export type ChallengeEnemyDisplayState = {
 
 type ResolveChallengeEnemyDisplayInput = {
   enemySnapshot: EnemySnapshotV1 | null;
+  resolvedSourceCardLite?: ChallengeResolvedSourceCardLite | null;
   fetchPublicCardById: (id: string) => Promise<unknown | null>;
 };
 
@@ -59,30 +63,7 @@ const parseCardPayload = (input: unknown): Record<string, unknown> | null => {
 
 const pickCharacterTemplate = (card: Record<string, unknown> | null): ChallengeEnemyDisplayTemplate | null => {
   if (!card) return null;
-  const template = inferTemplate(card);
-  if (template === 'magical-girl' || template === 'canshou' || template === 'general') {
-    return template;
-  }
-  return null;
-};
-
-const isRenderableMagicalGirlCardPayload = (card: Record<string, unknown>): boolean =>
-  safeString(card.codename).length > 0
-  && isRecord(card.appearance)
-  && isRecord(card.magicConstruct)
-  && isRecord(card.wonderlandRule)
-  && isRecord(card.blooming)
-  && isRecord(card.analysis);
-
-const isRenderableChallengeTemplateCard = (
-  template: ChallengeEnemyDisplayTemplate,
-  card: Record<string, unknown>
-): boolean => {
-  if (template === 'magical-girl') {
-    return isRenderableMagicalGirlCardPayload(card);
-  }
-
-  return true;
+  return inferChallengeRenderableTemplate(card);
 };
 
 const buildCombatProfileSummary = (combatProfile: Record<string, unknown>): string => {
@@ -139,8 +120,22 @@ export const buildChallengeEnemyFallbackCard = (enemySnapshot: EnemySnapshotV1):
 
 const loadEnemySourceCard = async (
   enemySnapshot: EnemySnapshotV1,
+  resolvedSourceCardLite: ChallengeResolvedSourceCardLite | null | undefined,
   fetchPublicCardById: ResolveChallengeEnemyDisplayInput['fetchPublicCardById']
 ): Promise<Record<string, unknown> | null> => {
+  if (
+    enemySnapshot.sourceType === 'public-card'
+    && resolvedSourceCardLite
+    && resolvedSourceCardLite.id === enemySnapshot.sourceId
+  ) {
+    return parseCardPayload({
+      id: resolvedSourceCardLite.id,
+      name: resolvedSourceCardLite.name,
+      data: resolvedSourceCardLite.data,
+      updatedAt: resolvedSourceCardLite.updatedAt,
+    });
+  }
+
   if (enemySnapshot.sourceType === 'preset') {
     return parseCardPayload(getBundledPresetData(enemySnapshot.sourceId));
   }
@@ -177,9 +172,9 @@ export async function resolveChallengeEnemyDisplay(
     };
   }
 
-  const sourceCard = await loadEnemySourceCard(enemySnapshot, input.fetchPublicCardById);
+  const sourceCard = await loadEnemySourceCard(enemySnapshot, input.resolvedSourceCardLite, input.fetchPublicCardById);
   const template = pickCharacterTemplate(sourceCard);
-  if (sourceCard && template && isRenderableChallengeTemplateCard(template, sourceCard)) {
+  if (sourceCard && template && isChallengeRenderableSourceCard(sourceCard)) {
     return {
       status: 'resolved',
       template,

@@ -32,6 +32,7 @@ import {
 } from '@/lib/challenge/storage';
 import { grantChallengeUnlocks, listChallengeUnlocksByWorld } from '@/lib/challenge/unlocks';
 import type {
+  ChallengeResolvedSourceCardLite,
   ChallengeNodeRecord,
   ChallengeNodeType,
   ChallengeRunRecord,
@@ -328,12 +329,14 @@ type ResolveEncounterForNodeResult = {
   nextRunState: RunStateV1;
   encounter: EncounterSnapshotV1;
   enemySourceMode: 'remote' | 'preset-only' | 'local-placeholder' | null;
+  enemySourceCardLite: ChallengeResolvedSourceCardLite | null;
 };
 
 type ChallengeEnemyCandidatesApiPayload = {
   success?: boolean;
   resolvedSourceMode?: 'remote' | 'preset-only';
-  candidates?: EnemySnapshotV1[];
+  enemySnapshot?: EnemySnapshotV1;
+  resolvedSourceCardLite?: ChallengeResolvedSourceCardLite | null;
 };
 
 type ChallengePublicDataCardApiPayload = {
@@ -390,9 +393,27 @@ const appendRunFlag = (runState: RunStateV1, flag: string): RunStateV1 => {
   };
 };
 
+const isResolvedSourceCardLitePayload = (value: unknown): value is ChallengeResolvedSourceCardLite => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return false;
+  }
+
+  const record = value as Record<string, unknown>;
+  return (
+    typeof record.id === 'string'
+    && typeof record.name === 'string'
+    && typeof record.data === 'string'
+    && (typeof record.updatedAt === 'string' || record.updatedAt === null)
+  );
+};
+
 const readEnemyCandidatesPayload = async (
   response: Response
-): Promise<{ resolvedSourceMode: 'remote' | 'preset-only'; candidates: EnemySnapshotV1[] }> => {
+): Promise<{
+  resolvedSourceMode: 'remote' | 'preset-only';
+  enemySnapshot: EnemySnapshotV1;
+  resolvedSourceCardLite: ChallengeResolvedSourceCardLite | null;
+}> => {
   if (!response.ok) {
     throw new Error('获取挑战敌人候选失败。');
   }
@@ -403,14 +424,42 @@ const readEnemyCandidatesPayload = async (
       ? payload.resolvedSourceMode
       : null;
 
-  if (!resolvedSourceMode || !Array.isArray(payload?.candidates) || payload.candidates.length === 0) {
+  if (!resolvedSourceMode || !payload?.enemySnapshot) {
     throw new Error('挑战敌人候选为空。');
   }
 
-  return {
-    resolvedSourceMode,
-    candidates: payload.candidates,
-  };
+  if (resolvedSourceMode === 'preset-only' && payload.enemySnapshot.sourceType !== 'preset') {
+    throw new Error('preset-only 挑战敌人 payload 非法。');
+  }
+
+  if (payload.enemySnapshot.sourceType === 'preset') {
+    if (payload.resolvedSourceCardLite != null) {
+      throw new Error('preset 敌人不应携带 sidecar。');
+    }
+
+    return {
+      resolvedSourceMode,
+      enemySnapshot: payload.enemySnapshot,
+      resolvedSourceCardLite: null,
+    };
+  }
+
+  if (payload.enemySnapshot.sourceType === 'public-card') {
+    if (
+      !isResolvedSourceCardLitePayload(payload.resolvedSourceCardLite)
+      || payload.resolvedSourceCardLite.id !== payload.enemySnapshot.sourceId
+    ) {
+      throw new Error('public-card 敌人 sidecar 缺失或不匹配。');
+    }
+
+    return {
+      resolvedSourceMode,
+      enemySnapshot: payload.enemySnapshot,
+      resolvedSourceCardLite: payload.resolvedSourceCardLite,
+    };
+  }
+
+  throw new Error('selection 模式不支持该敌人来源类型。');
 };
 
 const resolveBattleEnemySnapshot = async (
@@ -418,7 +467,11 @@ const resolveBattleEnemySnapshot = async (
   nodeType: Extract<ChallengeNodeType, 'battle' | 'elite' | 'boss'>,
   nodeId: string,
   options: ResolveEncounterForNodeOptions = {}
-): Promise<{ enemySnapshot: EnemySnapshotV1; resolvedSourceMode: 'remote' | 'preset-only' | 'local-placeholder' }> => {
+): Promise<{
+  enemySnapshot: EnemySnapshotV1;
+  resolvedSourceMode: 'remote' | 'preset-only' | 'local-placeholder';
+  enemySourceCardLite: ChallengeResolvedSourceCardLite | null;
+}> => {
   const sourceMode = runState.worldState?.runFlags.includes('preset_only_enemy_mode') ? 'preset-only' : 'online-first';
   const search = new URLSearchParams({
     worldId: runState.worldPresetId,
@@ -430,6 +483,7 @@ const resolveBattleEnemySnapshot = async (
   if (typeof runState.runSeed === 'string' && runState.runSeed.trim()) {
     search.set('runSeed', runState.runSeed.trim());
   }
+  search.set('selectionSeed', `${runState.runSeed ?? 'no-seed'}:${nodeId}:${nodeType}`);
 
   try {
     const response = await (options.fetcher ?? fetch)(
@@ -442,15 +496,11 @@ const resolveBattleEnemySnapshot = async (
       }
     );
     const payload = await readEnemyCandidatesPayload(response);
-    const picked =
-      payload.candidates[hashString(`${runState.runSeed ?? 'no-seed'}:${nodeId}:${nodeType}`) % payload.candidates.length];
-    if (!picked) {
-      throw new Error(`CHALLENGE_ENEMY_CANDIDATE_NOT_FOUND:${nodeId}`);
-    }
 
     return {
-      enemySnapshot: picked,
+      enemySnapshot: payload.enemySnapshot,
       resolvedSourceMode: payload.resolvedSourceMode,
+      enemySourceCardLite: payload.resolvedSourceCardLite,
     };
   } catch (error) {
     console.warn('challenge enemy candidate resolution fell back to local placeholder', {
@@ -462,6 +512,7 @@ const resolveBattleEnemySnapshot = async (
     return {
       enemySnapshot: buildPlaceholderEnemy(runState, nodeType, nodeId),
       resolvedSourceMode: 'local-placeholder',
+      enemySourceCardLite: null,
     };
   }
 };
@@ -545,18 +596,21 @@ export const resolveEncounterForNode = async (
         nextRunState: runStateWithCurrentNode,
         encounter: buildRestEncounterSnapshot(runStateWithCurrentNode),
         enemySourceMode: null,
+        enemySourceCardLite: null,
       };
     case 'shop':
       return {
         nextRunState: runStateWithCurrentNode,
         encounter: buildShopEncounterSnapshot(runStateWithCurrentNode),
         enemySourceMode: null,
+        enemySourceCardLite: null,
       };
     case 'event':
       return {
         nextRunState: runStateWithCurrentNode,
         encounter: buildEventEncounterSnapshot(runStateWithCurrentNode, nodeId),
         enemySourceMode: null,
+        enemySourceCardLite: null,
       };
     default: {
       if (!isBattleNodeType(node.nodeType)) {
@@ -573,6 +627,7 @@ export const resolveEncounterForNode = async (
         nextRunState,
         encounter: buildBattleEncounterSnapshot(nextRunState, node.nodeType, nodeId, resolvedEnemy.enemySnapshot),
         enemySourceMode: resolvedEnemy.resolvedSourceMode,
+        enemySourceCardLite: resolvedEnemy.enemySourceCardLite,
       };
     }
   }
@@ -854,6 +909,7 @@ export function useChallengeController() {
   const [activeNodeRecord, setActiveNodeRecord] = useState<ChallengeNodeRecord | null>(null);
   const [runState, setRunState] = useState<RunStateV1 | null>(null);
   const [currentEncounter, setCurrentEncounter] = useState<EncounterSnapshotV1 | null>(null);
+  const [currentEnemySourceCardLite, setCurrentEnemySourceCardLite] = useState<ChallengeResolvedSourceCardLite | null>(null);
   const [nodeViewMode, setNodeViewMode] = useState<'input' | 'result'>('input');
   const [note, setNote] = useState('');
   const [selectedOptionId, setSelectedOptionId] = useState('');
@@ -972,6 +1028,7 @@ export function useChallengeController() {
 
     void resolveChallengeEnemyDisplay({
       enemySnapshot,
+      resolvedSourceCardLite: currentEnemySourceCardLite,
       fetchPublicCardById: fetchChallengePublicCardById,
     }).then((nextState) => {
       if (!mountedRef.current || cancelled) return;
@@ -998,7 +1055,7 @@ export function useChallengeController() {
     return () => {
       cancelled = true;
     };
-  }, [currentEncounter, stage]);
+  }, [currentEncounter, currentEnemySourceCardLite, stage]);
 
   useEffect(() => {
     if (stage !== 'node' || nodeViewMode !== 'input' || !activeNodeRecord) return;
@@ -1044,6 +1101,7 @@ export function useChallengeController() {
     activeResolutionAbortRef.current?.abort();
     activeResolutionAbortRef.current = null;
     setCurrentEncounter(null);
+    setCurrentEnemySourceCardLite(null);
     setActiveNodeRecord(null);
     setNodeViewMode('input');
     setNote('');
@@ -1283,6 +1341,7 @@ export function useChallengeController() {
     setActiveRunRecord(null);
     setActiveNodeRecord(null);
     setRunState(null);
+    setCurrentEnemySourceCardLite(null);
     setNewUnlocks([]);
     setStage('lobby');
   };
@@ -1310,6 +1369,7 @@ export function useChallengeController() {
       setActiveRunRecord(storedRun);
       setRunState(resumeState.runState);
       setCurrentEncounter(resumeState.currentEncounter);
+      setCurrentEnemySourceCardLite(null);
       setActiveNodeRecord(resumeState.activeNodeRecord);
       setNodeViewMode(resumeState.nodeViewMode);
       setLatestStoryText('');
@@ -1398,6 +1458,7 @@ export function useChallengeController() {
       setActiveNodeRecord(enteredNodeRecord);
       setRunState(resolvedEncounter.nextRunState);
       setCurrentEncounter(encounter);
+      setCurrentEnemySourceCardLite(resolvedEncounter.enemySourceCardLite);
       setNodeViewMode('input');
       setSelectedOptionId(nextSelectedOptionId);
       setSelectedRecommendedActionId(nextSelectedRecommendedActionId);

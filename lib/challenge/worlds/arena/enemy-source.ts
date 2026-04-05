@@ -1,4 +1,11 @@
-import type { EnemySnapshotV1, StrengthTier } from '@/lib/challenge/types';
+import {
+  type ChallengeResolvedSourceCardLite,
+  type EnemySnapshotV1,
+  type StrengthTier,
+} from '@/lib/challenge/types';
+import {
+  isChallengeRenderableSourceCard,
+} from '@/lib/challenge/source-card-renderability';
 import { buildArenaBootstrapSnapshot } from '@/lib/challenge/worlds/arena/bootstrap';
 import { getBundledPresetData } from '@/lib/pvp/preset-bundled';
 
@@ -23,13 +30,21 @@ export type ResolveArenaEnemyCandidatesInput = {
   limit?: number;
 };
 
+type RankedEntityWindowInput = {
+  tier: StrengthTier;
+  limit: number;
+  offset: number;
+  runSeed?: string | null;
+};
+
 type ArenaEnemySourceDeps = {
+  loadRankedEntityWindow?: (input: RankedEntityWindowInput) => Promise<RankedArenaEntity[]>;
+  loadPublicCardsByIds?: (ids: string[]) => Promise<Map<string, unknown>>;
   loadRankedEntities?: (input: {
     tier: StrengthTier;
     limit: number;
     runSeed?: string | null;
   }) => Promise<RankedArenaEntity[]>;
-  loadPublicCardById?: (entityId: string) => Promise<unknown | null>;
   loadPresetById?: (entityId: string) => Promise<unknown | null> | unknown | null;
   loadPresetPool?: (input: { tier: StrengthTier; limit: number }) => Promise<ArenaEnemyPoolEntry[]> | ArenaEnemyPoolEntry[];
 };
@@ -37,6 +52,7 @@ type ArenaEnemySourceDeps = {
 export type ResolveArenaEnemyCandidatesResult = {
   resolvedSourceMode: ArenaEnemyResolvedSourceMode;
   candidates: EnemySnapshotV1[];
+  resolvedSourceCardsById: Map<string, ChallengeResolvedSourceCardLite>;
 };
 
 export type SelectArenaEnemySnapshotInput = ResolveArenaEnemyCandidatesInput & {
@@ -46,9 +62,11 @@ export type SelectArenaEnemySnapshotInput = ResolveArenaEnemyCandidatesInput & {
 export type SelectArenaEnemySnapshotResult = {
   resolvedSourceMode: ArenaEnemyResolvedSourceMode;
   enemySnapshot: EnemySnapshotV1;
+  resolvedSourceCardLite: ChallengeResolvedSourceCardLite | null;
 };
 
 const DEFAULT_CANDIDATE_LIMIT = 6;
+const DEFAULT_MINIMUM_REMOTE_CANDIDATES = 3;
 
 const DEFAULT_PRESET_POOL_IDS: Record<StrengthTier, string[]> = {
   common: ['M02_white_rose.json', 'M03_little_brocade.json', 'M06_sparrow.json', 'M90_goose.json'],
@@ -65,7 +83,7 @@ const readPowerLevel = (card: Record<string, unknown>): string => {
   const buildState = isRecord(card.buildState) ? card.buildState : null;
   const buildStateRules = Array.isArray(buildState?.rules) ? buildState.rules : [];
   const matchedBuildStateRule = buildStateRules.find(
-    (item) => isRecord(item) && safeString(item.ruleId) === 'arena-trpg-lite'
+    (item) => isRecord(item) && safeString(item.ruleId) === 'arena-trpg-lite',
   );
   if (isRecord(matchedBuildStateRule) && isRecord(matchedBuildStateRule.blockResults)) {
     return safeString(matchedBuildStateRule.blockResults.powerLevel);
@@ -74,7 +92,7 @@ const readPowerLevel = (card: Record<string, unknown>): string => {
   const creationInputs = isRecord(card.creationInputs) ? card.creationInputs : null;
   const creationRules = Array.isArray(creationInputs?.buildRules) ? creationInputs.buildRules : [];
   const matchedCreationRule = creationRules.find(
-    (item) => isRecord(item) && safeString(item.ruleId) === 'arena-trpg-lite'
+    (item) => isRecord(item) && safeString(item.ruleId) === 'arena-trpg-lite',
   );
   if (isRecord(matchedCreationRule) && isRecord(matchedCreationRule.blockResults)) {
     return safeString(matchedCreationRule.blockResults.powerLevel);
@@ -131,12 +149,12 @@ const unwrapArenaCardPayload = (input: unknown): Record<string, unknown> | null 
 };
 
 const isEnemySnapshot = (value: unknown): value is EnemySnapshotV1 =>
-  isRecord(value) &&
-  value.version === 1 &&
-  (value.sourceType === 'preset' || value.sourceType === 'public-card' || value.sourceType === 'season-entity') &&
-  typeof value.sourceId === 'string' &&
-  typeof value.displayName === 'string' &&
-  (value.strengthTier === 'common' || value.strengthTier === 'elite' || value.strengthTier === 'boss');
+  isRecord(value)
+  && value.version === 1
+  && (value.sourceType === 'preset' || value.sourceType === 'public-card' || value.sourceType === 'season-entity')
+  && typeof value.sourceId === 'string'
+  && typeof value.displayName === 'string'
+  && (value.strengthTier === 'common' || value.strengthTier === 'elite' || value.strengthTier === 'boss');
 
 const rebuildTierTagList = (tags: string[], strengthTier: StrengthTier): string[] => {
   const filtered = tags.filter((tag) => tag !== 'common' && tag !== 'elite' && tag !== 'boss');
@@ -155,7 +173,7 @@ const normalizeArenaEnemySnapshot = (
     sourceId: string;
     targetTier: StrengthTier;
     displayNameHint?: string | null;
-  }
+  },
 ): EnemySnapshotV1 | null => {
   if (isEnemySnapshot(raw)) {
     const nextPromptSummary = normalizePromptSummaryTier(raw.promptSummary, raw.strengthTier, input.targetTier);
@@ -186,7 +204,10 @@ const normalizeArenaEnemySnapshot = (
     snapshotSeed: `challenge-enemy:${input.sourceId || safeString(normalizedCard.id) || 'unknown'}`,
   });
   const strengthTier = input.targetTier;
-  const displayName = bootstrap.playerSnapshot.displayName || safeString(input.displayNameHint) || safeString(normalizedCard.codename) || input.sourceId;
+  const displayName = bootstrap.playerSnapshot.displayName
+    || safeString(input.displayNameHint)
+    || safeString(normalizedCard.codename)
+    || input.sourceId;
 
   return {
     version: 1,
@@ -199,37 +220,8 @@ const normalizeArenaEnemySnapshot = (
     promptSummary: normalizePromptSummaryTier(
       bootstrap.playerSnapshot.promptSummary,
       deriveStrengthTierFromPowerLevel(readPowerLevel(normalizedCard)) ?? bootstrap.playerSnapshot.strengthTier,
-      strengthTier
+      strengthTier,
     ),
-  };
-};
-
-const buildSeasonEntitySnapshot = (
-  entity: RankedArenaEntity,
-  targetTier: StrengthTier
-): EnemySnapshotV1 | null => {
-  const displayName = safeString(entity.displayName);
-  const sourceId = safeString(entity.entityId);
-  if (!displayName || !sourceId) return null;
-
-  const promptParts = [`${displayName}的赛季对手快照`, `强度档：${targetTier}`];
-  if (typeof entity.rating === 'number' && Number.isFinite(entity.rating)) {
-    promptParts.push(`排位分：${entity.rating}`);
-  }
-  const tierLabel = safeString(entity.tierLabel);
-  if (tierLabel) promptParts.push(`排位段：${tierLabel}`);
-  const description = safeString(entity.description);
-  if (description) promptParts.push(`简介：${description}`);
-
-  return {
-    version: 1,
-    sourceType: 'season-entity',
-    sourceId,
-    displayName,
-    strengthTier: targetTier,
-    combatProfile: {},
-    tags: [targetTier, 'season-ranked'],
-    promptSummary: promptParts.join('；'),
   };
 };
 
@@ -275,39 +267,9 @@ const loadDefaultPresetPool = async (input: { tier: StrengthTier; limit: number 
   return pool;
 };
 
-const normalizeRankedEntity = async (
-  entity: RankedArenaEntity,
-  input: { targetTier: StrengthTier; loadPublicCardById?: ArenaEnemySourceDeps['loadPublicCardById']; loadPresetById?: ArenaEnemySourceDeps['loadPresetById'] }
-): Promise<EnemySnapshotV1 | null> => {
-  if (entity.entityType === 'data_card') {
-    const card = input.loadPublicCardById ? await input.loadPublicCardById(entity.entityId) : null;
-    if (card) {
-      return normalizeArenaEnemySnapshot(card, {
-        sourceType: 'public-card',
-        sourceId: entity.entityId,
-        targetTier: input.targetTier,
-        displayNameHint: entity.displayName,
-      });
-    }
-    return buildSeasonEntitySnapshot(entity, input.targetTier);
-  }
-
-  const preset = input.loadPresetById ? await input.loadPresetById(entity.entityId) : null;
-  if (preset) {
-    return normalizeArenaEnemySnapshot(preset, {
-      sourceType: 'preset',
-      sourceId: entity.entityId,
-      targetTier: input.targetTier,
-      displayNameHint: entity.displayName,
-    });
-  }
-
-  return buildSeasonEntitySnapshot(entity, input.targetTier);
-};
-
 const normalizePresetPool = async (
   entries: ArenaEnemyPoolEntry[],
-  input: { targetTier: StrengthTier }
+  input: { targetTier: StrengthTier },
 ): Promise<EnemySnapshotV1[]> => {
   const normalized = await Promise.all(
     entries.map(async (entry, index) => {
@@ -322,52 +284,215 @@ const normalizePresetPool = async (
 
       const cardPayload = unwrapArenaCardPayload(entry);
       if (!cardPayload) return null;
-      const sourceId = safeString(cardPayload.id) || safeString(cardPayload.sourceId) || `arena-preset-${input.targetTier}-${index + 1}`;
+      const sourceId = safeString(cardPayload.id)
+        || safeString(cardPayload.sourceId)
+        || `arena-preset-${input.targetTier}-${index + 1}`;
       return normalizeArenaEnemySnapshot(cardPayload, {
-        sourceType: cardPayload.isPreset === true ? 'preset' : 'preset',
+        sourceType: 'preset',
         sourceId,
         targetTier: input.targetTier,
       });
-    })
+    }),
   );
 
   return normalized.filter((candidate): candidate is EnemySnapshotV1 => candidate !== null);
 };
 
+type ResolvedSourceCardEnvelope = {
+  lite: ChallengeResolvedSourceCardLite;
+  payload: Record<string, unknown>;
+};
+
+const readSourceCardUpdatedAt = (value: unknown): string | null => {
+  if (!isRecord(value)) return null;
+  const updatedAt = value.updatedAt;
+  if (typeof updatedAt === 'string') return updatedAt;
+  const legacyUpdatedAt = value.updated_at;
+  return typeof legacyUpdatedAt === 'string' ? legacyUpdatedAt : null;
+};
+
+const readSourceCardName = (entityId: string, raw: Record<string, unknown>, payload: Record<string, unknown>): string =>
+  safeString(raw.name)
+  || safeString(payload.name)
+  || safeString(payload.codename)
+  || safeString(raw.id)
+  || safeString(payload.id)
+  || entityId;
+
+const buildResolvedSourceCardEnvelope = (
+  entityId: string,
+  input: unknown,
+): ResolvedSourceCardEnvelope | null => {
+  const payload = unwrapArenaCardPayload(input);
+  if (!payload) return null;
+
+  const raw = isRecord(input) ? input : payload;
+  const rawData = raw.data;
+  const serializedData = typeof rawData === 'string' ? rawData : JSON.stringify(payload);
+  if (!serializedData) return null;
+
+  return {
+    lite: {
+      id: safeString(raw.id) || entityId,
+      name: readSourceCardName(entityId, raw, payload),
+      data: serializedData,
+      updatedAt: readSourceCardUpdatedAt(raw),
+    },
+    payload,
+  };
+};
+
+const getFirstWindowLimit = (limit: number): number => Math.min(Math.max(limit * 3, 12), 18);
+
+const getSecondWindowLimit = (limit: number): number => Math.min(Math.max(limit * 2, 6), 12);
+
+const getMinimumRemoteCandidateCount = (): number => DEFAULT_MINIMUM_REMOTE_CANDIDATES;
+
+const getLoadRankedEntityWindow = (
+  deps: ArenaEnemySourceDeps,
+): ArenaEnemySourceDeps['loadRankedEntityWindow'] | null => {
+  if (deps.loadRankedEntityWindow) return deps.loadRankedEntityWindow;
+  if (!deps.loadRankedEntities) return null;
+
+  return async ({ tier, limit, offset, runSeed }) => {
+    if (offset > 0) return [];
+    return deps.loadRankedEntities?.({ tier, limit, runSeed }) ?? [];
+  };
+};
+
+const getLoadPublicCardsByIds = (
+  deps: ArenaEnemySourceDeps,
+): ((ids: string[]) => Promise<Map<string, ResolvedSourceCardEnvelope>>) | null => {
+  if (!deps.loadPublicCardsByIds) return null;
+
+  return async (ids) => {
+    const rawMap = await deps.loadPublicCardsByIds?.(ids);
+    const normalized = new Map<string, ResolvedSourceCardEnvelope>();
+    rawMap?.forEach((value, key) => {
+      const envelope = buildResolvedSourceCardEnvelope(key, value);
+      if (envelope) normalized.set(key, envelope);
+    });
+    return normalized;
+  };
+};
+
+const resolveRemoteArenaCandidates = async (
+  input: ResolveArenaEnemyCandidatesInput,
+  deps: ArenaEnemySourceDeps,
+  limit: number,
+): Promise<{
+  candidates: EnemySnapshotV1[];
+  resolvedSourceCardsById: Map<string, ChallengeResolvedSourceCardLite>;
+}> => {
+  const loadRankedEntityWindow = getLoadRankedEntityWindow(deps);
+  if (!loadRankedEntityWindow) {
+    return {
+      candidates: [],
+      resolvedSourceCardsById: new Map(),
+    };
+  }
+
+  const loadPublicCardsByIds = getLoadPublicCardsByIds(deps);
+  const resolvedSourceCardsById = new Map<string, ChallengeResolvedSourceCardLite>();
+  const remoteCandidates: EnemySnapshotV1[] = [];
+  const windowConfigs = [
+    { limit: getFirstWindowLimit(limit), offset: 0 },
+    { limit: getSecondWindowLimit(limit), offset: getFirstWindowLimit(limit) },
+  ];
+
+  for (const [index, windowConfig] of windowConfigs.entries()) {
+    if (index > 0 && dedupeEnemySnapshots(remoteCandidates).length >= limit) {
+      break;
+    }
+
+    const rankedEntities = await loadRankedEntityWindow({
+      tier: input.tier,
+      limit: windowConfig.limit,
+      offset: windowConfig.offset,
+      runSeed: input.runSeed,
+    });
+
+    if (!Array.isArray(rankedEntities) || rankedEntities.length === 0) {
+      continue;
+    }
+
+    const presetEntities = rankedEntities.filter((entity) => entity.entityType === 'preset');
+    const dataCardEntities = rankedEntities.filter((entity) => entity.entityType === 'data_card');
+    const presetsById = new Map<string, unknown>();
+
+    await Promise.all(
+      presetEntities.map(async (entity) => {
+        const preset = await (deps.loadPresetById ?? loadDefaultPresetById)(entity.entityId);
+        if (preset) presetsById.set(entity.entityId, preset);
+      }),
+    );
+
+    const dataCardIds = Array.from(new Set(dataCardEntities.map((entity) => entity.entityId).filter(Boolean)));
+    const envelopesById =
+      loadPublicCardsByIds && dataCardIds.length > 0
+        ? await loadPublicCardsByIds(dataCardIds)
+        : new Map<string, ResolvedSourceCardEnvelope>();
+
+    for (const entity of rankedEntities) {
+      if (entity.entityType === 'preset') {
+        const preset = presetsById.get(entity.entityId);
+        if (!preset) continue;
+        const snapshot = normalizeArenaEnemySnapshot(preset, {
+          sourceType: 'preset',
+          sourceId: entity.entityId,
+          targetTier: input.tier,
+          displayNameHint: entity.displayName,
+        });
+        if (snapshot) remoteCandidates.push(snapshot);
+        continue;
+      }
+
+      const envelope = envelopesById.get(entity.entityId);
+      if (!envelope) continue;
+      if (!isChallengeRenderableSourceCard(envelope.payload)) continue;
+
+      const snapshot = normalizeArenaEnemySnapshot(envelope.payload, {
+        sourceType: 'public-card',
+        sourceId: entity.entityId,
+        targetTier: input.tier,
+        displayNameHint: entity.displayName,
+      });
+      if (!snapshot) continue;
+
+      remoteCandidates.push(snapshot);
+      resolvedSourceCardsById.set(entity.entityId, envelope.lite);
+    }
+  }
+
+  return {
+    candidates: dedupeEnemySnapshots(remoteCandidates).slice(0, limit),
+    resolvedSourceCardsById,
+  };
+};
+
 export const resolveArenaEnemyCandidates = async (
   input: ResolveArenaEnemyCandidatesInput,
-  deps: ArenaEnemySourceDeps = {}
+  deps: ArenaEnemySourceDeps = {},
 ): Promise<ResolveArenaEnemyCandidatesResult> => {
   const limit = Math.max(1, Math.min(12, Math.floor(input.limit ?? DEFAULT_CANDIDATE_LIMIT)));
 
-  if (input.sourceMode !== 'preset-only' && deps.loadRankedEntities) {
+  if (input.sourceMode !== 'preset-only') {
     try {
-      const rankedEntities = await deps.loadRankedEntities({
-        tier: input.tier,
-        limit,
-        runSeed: input.runSeed,
-      });
-
-      const remoteCandidates = (
-        await Promise.all(
-          rankedEntities.map((entity) =>
-            normalizeRankedEntity(entity, {
-              targetTier: input.tier,
-              loadPublicCardById: deps.loadPublicCardById,
-              loadPresetById: deps.loadPresetById ?? loadDefaultPresetById,
-            })
-          )
-        )
-      ).filter((candidate): candidate is EnemySnapshotV1 => candidate !== null);
-
-      const dedupedRemoteCandidates = dedupeEnemySnapshots(remoteCandidates).slice(0, limit);
-      if (dedupedRemoteCandidates.length > 0) {
+      const remoteResult = await resolveRemoteArenaCandidates(input, deps, limit);
+      const safeRemoteCandidates = remoteResult.candidates.filter(
+        (candidate) =>
+          candidate.sourceType !== 'public-card' || remoteResult.resolvedSourceCardsById.has(candidate.sourceId),
+      );
+      if (safeRemoteCandidates.length >= getMinimumRemoteCandidateCount()) {
         return {
           resolvedSourceMode: 'remote',
-          candidates: dedupedRemoteCandidates,
+          candidates: safeRemoteCandidates,
+          resolvedSourceCardsById: remoteResult.resolvedSourceCardsById,
         };
       }
-    } catch {}
+    } catch {
+      // keep preset-only fallback behavior
+    }
   }
 
   const presetEntries = await (deps.loadPresetPool ?? loadDefaultPresetPool)({
@@ -377,22 +502,29 @@ export const resolveArenaEnemyCandidates = async (
   const presetCandidates = dedupeEnemySnapshots(
     await normalizePresetPool(Array.isArray(presetEntries) ? presetEntries : [], {
       targetTier: input.tier,
-    })
+    }),
   ).slice(0, limit);
 
   return {
     resolvedSourceMode: 'preset-only',
     candidates: presetCandidates,
+    resolvedSourceCardsById: new Map(),
   };
 };
 
 export const selectArenaEnemySnapshot = async (
   input: SelectArenaEnemySnapshotInput,
-  deps: ArenaEnemySourceDeps = {}
+  deps: ArenaEnemySourceDeps = {},
 ): Promise<SelectArenaEnemySnapshotResult> => {
   const result = await resolveArenaEnemyCandidates(input, deps);
   const seed = safeString(input.selectionSeed) || safeString(input.runSeed) || `arena:${input.tier}`;
-  const candidate = result.candidates[hashStringToUint32(seed) % result.candidates.length];
+  const startIndex = hashStringToUint32(seed) % result.candidates.length;
+  const candidate = Array.from({ length: result.candidates.length }, (_, index) => {
+    const nextIndex = (startIndex + index) % result.candidates.length;
+    return result.candidates[nextIndex];
+  }).find(
+    (item) => item && (item.sourceType !== 'public-card' || result.resolvedSourceCardsById.has(item.sourceId)),
+  );
 
   if (!candidate) {
     throw new Error(`ARENA_ENEMY_CANDIDATE_NOT_FOUND:${input.tier}`);
@@ -401,5 +533,8 @@ export const selectArenaEnemySnapshot = async (
   return {
     resolvedSourceMode: result.resolvedSourceMode,
     enemySnapshot: candidate,
+    resolvedSourceCardLite: candidate.sourceType === 'public-card'
+      ? (result.resolvedSourceCardsById.get(candidate.sourceId) ?? null)
+      : null,
   };
 };
