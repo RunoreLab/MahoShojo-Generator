@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { randomUUID } from '@/lib/crypto';
+import { inferTemplate, TEMPLATE_LABELS } from '@/lib/data-card-converter';
 import {
   acceptBootstrapSnapshot,
   buildRestEncounterSnapshot,
@@ -42,9 +43,30 @@ import type {
 import { getChallengeWorldPreset } from '@/lib/challenge/world-registry';
 import { buildArenaBootstrapSnapshot } from '@/lib/challenge/worlds/arena/bootstrap';
 import { resolveChallengeEnemyDisplay, type ChallengeEnemyDisplayState } from '@/lib/challenge/enemy-display';
+import {
+  createChallengeEntrantFromSelection,
+  fetchRandomCharacterCard,
+  parseSingleCharacterCardFromText,
+  stringifyCharacterCardForEditor,
+  type ChallengeEntrantSourceMode,
+} from '@/lib/challenge/entrant-import';
+import {
+  applyEditorTextToDraft,
+  createDraftFromImportedCard,
+  markEditorTextChanged,
+  resolveSourceCardForPrepare,
+  type ChallengeEntrantDraftState,
+} from '@/lib/challenge/entrant-draft';
 import type { ChallengeRecommendedAction } from '@/components/challenge/NodeResolutionPanel';
 
 export type ChallengeStage = 'lobby' | 'bootstrap' | 'map' | 'node' | 'summary';
+
+export type ChallengeEntrantSummary = {
+  displayName: string;
+  templateLabel: string;
+  sourceModeLabel: string;
+  isReadyForBootstrap: boolean;
+};
 
 type BootstrapDraft = {
   runId: string;
@@ -106,6 +128,15 @@ const arenaDemoCard = {
 
 const arenaDemoCardText = JSON.stringify(arenaDemoCard, null, 2);
 
+const SOURCE_MODE_LABELS: Record<ChallengeEntrantSourceMode, string> = {
+  demo: '试玩示例',
+  database: '数据库选择',
+  random: '随机匹配',
+  file: '文件导入',
+  paste: '文本粘贴',
+  'manual-json': '高级 JSON',
+};
+
 const arenaEnemyPool: Array<Pick<EnemySnapshotV1, 'displayName' | 'tags' | 'promptSummary'>> = [
   {
     displayName: '雪绒',
@@ -162,10 +193,20 @@ const createChallengeRunRecord = (draft: BootstrapDraft): ChallengeRunRecord => 
   finishedAt: null,
 });
 
-const parseCardJsonInput = (value: string): unknown => {
-  const trimmed = value.trim();
-  if (!trimmed) return arenaDemoCard;
-  return JSON.parse(trimmed);
+const createInitialEntrantDraft = (): ChallengeEntrantDraftState => createDraftFromImportedCard(arenaDemoCard, 'demo');
+
+const getEntrantDisplayName = (card: unknown): string => {
+  const record = typeof card === 'object' && card !== null ? (card as Record<string, unknown>) : null;
+  if (!record) return '未命名角色';
+
+  for (const key of ['codename', 'name', 'title']) {
+    const value = record[key];
+    if (typeof value === 'string' && value.trim()) {
+      return value.trim();
+    }
+  }
+
+  return '未命名角色';
 };
 
 const getNodeById = (runState: RunStateV1, nodeId: string) => runState.mapState?.nodes.find((node) => node.nodeId === nodeId) ?? null;
@@ -726,10 +767,13 @@ export function useChallengeController() {
   const [newUnlocks, setNewUnlocks] = useState<ChallengeUnlockRecord[]>([]);
   const [isLoadingRecentRuns, setIsLoadingRecentRuns] = useState(false);
   const [isBusy, setIsBusy] = useState(false);
+  const [isMatching, setIsMatching] = useState<'character' | null>(null);
   const [isResolving, setIsResolving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [inputError, setInputError] = useState<string | null>(null);
-  const [cardJsonText, setCardJsonText] = useState(arenaDemoCardText);
+  const [localImportError, setLocalImportError] = useState<string | null>(null);
+  const [editorError, setEditorError] = useState<string | null>(null);
+  const [advancedEditorRevealToken, setAdvancedEditorRevealToken] = useState(0);
+  const [entrantDraft, setEntrantDraft] = useState<ChallengeEntrantDraftState>(() => createInitialEntrantDraft());
   const [bootstrapDraft, setBootstrapDraft] = useState<BootstrapDraft | null>(null);
   const [activeRunRecord, setActiveRunRecord] = useState<ChallengeRunRecord | null>(null);
   const [activeNodeRecord, setActiveNodeRecord] = useState<ChallengeNodeRecord | null>(null);
@@ -806,6 +850,21 @@ export function useChallengeController() {
     () => (currentEncounter && ['battle', 'elite', 'boss'].includes(currentEncounter.kind) ? battleRecommendedActions : []),
     [currentEncounter]
   );
+  const selectedEntrantSummary = useMemo<ChallengeEntrantSummary | null>(() => {
+    const currentCard = entrantDraft.entrantCards[0];
+    if (!currentCard) return null;
+
+    const template = inferTemplate(currentCard);
+    const templateLabel = template in TEMPLATE_LABELS ? TEMPLATE_LABELS[template as keyof typeof TEMPLATE_LABELS] : '未识别模板';
+    const sourceMode = entrantDraft.sourceMode;
+
+    return {
+      displayName: getEntrantDisplayName(currentCard),
+      templateLabel,
+      sourceModeLabel: sourceMode ? SOURCE_MODE_LABELS[sourceMode] : '未知来源',
+      isReadyForBootstrap: true,
+    };
+  }, [entrantDraft.entrantCards, entrantDraft.sourceMode]);
 
   useEffect(() => {
     if (stage !== 'node' || !currentEncounter || !isBattleNodeType(currentEncounter.kind)) {
@@ -913,17 +972,108 @@ export function useChallengeController() {
     setStoryCardState(null);
   };
 
+  const setRawEditorText = (value: string): void => {
+    setEntrantDraft((current) => markEditorTextChanged(current, value));
+    setEditorError(null);
+  };
+
+  const syncImportedEntrant = (card: Record<string, unknown>, sourceMode: Exclude<ChallengeEntrantSourceMode, 'manual-json'>) => {
+    const editorText = stringifyCharacterCardForEditor(card);
+    setEntrantDraft({
+      entrantCards: [card],
+      sourceMode,
+      rawEditorText: editorText,
+      lastAppliedEditorText: editorText,
+      isEditorDirty: false,
+    });
+    setLocalImportError(null);
+    setEditorError(null);
+  };
+
   const loadDemoCard = (): void => {
-    setCardJsonText(arenaDemoCardText);
-    setInputError(null);
+    syncImportedEntrant(arenaDemoCard, 'demo');
+  };
+
+  const applyEditorText = async (): Promise<void> => {
+    setEditorError(null);
+    try {
+      const nextDraft = await applyEditorTextToDraft(entrantDraft, parseSingleCharacterCardFromText);
+      if (!mountedRef.current) return;
+      setEntrantDraft(nextDraft);
+    } catch (applyError) {
+      if (!mountedRef.current) return;
+      setEditorError(applyError instanceof Error ? applyError.message : '应用编辑内容失败。');
+    }
+  };
+
+  const clearEntrantCard = (): void => {
+    setEntrantDraft({
+      entrantCards: [],
+      sourceMode: null,
+      rawEditorText: '',
+      lastAppliedEditorText: '',
+      isEditorDirty: false,
+    });
+    setLocalImportError(null);
+    setEditorError(null);
+  };
+
+  const selectEntrantFromDataCard = async (selection: unknown): Promise<void> => {
+    const imported = createChallengeEntrantFromSelection(selection);
+    syncImportedEntrant(imported.card, imported.sourceMode);
+  };
+
+  const randomMatchEntrant = async (): Promise<void> => {
+    setIsMatching('character');
+    setLocalImportError(null);
+    try {
+      const imported = await fetchRandomCharacterCard();
+      if (!mountedRef.current) return;
+      syncImportedEntrant(imported.card, imported.sourceMode);
+    } catch (matchError) {
+      if (!mountedRef.current) return;
+      setLocalImportError(matchError instanceof Error ? matchError.message : '随机匹配角色失败。');
+    } finally {
+      if (mountedRef.current) {
+        setIsMatching(null);
+      }
+    }
+  };
+
+  const importEntrantFromFile = async (file: File): Promise<void> => {
+    try {
+      const text = await file.text();
+      const card = await parseSingleCharacterCardFromText(text);
+      if (!mountedRef.current) return;
+      syncImportedEntrant(card, 'file');
+    } catch (importError) {
+      if (!mountedRef.current) return;
+      setLocalImportError(importError instanceof Error ? importError.message : '文件导入失败。');
+    }
+  };
+
+  const importEntrantFromText = async (text: string): Promise<void> => {
+    try {
+      const card = await parseSingleCharacterCardFromText(text);
+      if (!mountedRef.current) return;
+      syncImportedEntrant(card, 'paste');
+    } catch (importError) {
+      if (!mountedRef.current) return;
+      setLocalImportError(importError instanceof Error ? importError.message : '粘贴文本导入失败。');
+    }
+  };
+
+  const revealAdvancedEditor = (): void => {
+    setAdvancedEditorRevealToken((current) => current + 1);
   };
 
   const prepareChallenge = async (): Promise<void> => {
     setError(null);
-    setInputError(null);
+    setEditorError(null);
     setIsBusy(true);
     try {
-      const sourceCard = parseCardJsonInput(cardJsonText);
+      const resolvedDraft = await resolveSourceCardForPrepare(entrantDraft, parseSingleCharacterCardFromText);
+      const sourceCard = resolvedDraft.sourceCard;
       const snapshotSeed = randomUUID();
       const startedAt = Date.now();
       const snapshot = buildArenaBootstrapSnapshot(sourceCard, { snapshotSeed });
@@ -937,6 +1087,7 @@ export function useChallengeController() {
         startedAt,
       };
 
+      setEntrantDraft(resolvedDraft.draft);
       setBootstrapDraft(draft);
       setNewUnlocks([]);
       setActiveRunRecord(null);
@@ -944,10 +1095,14 @@ export function useChallengeController() {
       setRunState(null);
       setStage('bootstrap');
     } catch (prepareError) {
-      if (prepareError instanceof SyntaxError) {
-        setInputError('角色卡 JSON 解析失败，请检查格式后重试。');
+      const message = prepareError instanceof Error ? prepareError.message : '生成竞技场快照失败。';
+      if (
+        message === '角色卡 JSON 解析失败，请检查格式后重试。'
+        || message === 'challenge 当前只支持单卡入场'
+      ) {
+        setEditorError(message);
       } else {
-        setError(prepareError instanceof Error ? prepareError.message : '生成竞技场快照失败。');
+        setError(message);
       }
     } finally {
       setIsBusy(false);
@@ -1451,14 +1606,24 @@ export function useChallengeController() {
     stage,
     worldTitle: worldPreset.title,
     error,
-    inputError,
+    inputError: editorError ?? localImportError,
+    localImportError,
+    editorError,
     recentRuns,
     allUnlocks,
     newUnlocks,
     isLoadingRecentRuns,
     isBusy,
+    isMatching,
     isResolving,
-    cardJsonText,
+    cardJsonText: entrantDraft.rawEditorText,
+    entrantCards: entrantDraft.entrantCards,
+    sourceMode: entrantDraft.sourceMode,
+    rawEditorText: entrantDraft.rawEditorText,
+    lastAppliedEditorText: entrantDraft.lastAppliedEditorText,
+    isEditorDirty: entrantDraft.isEditorDirty,
+    selectedEntrantSummary,
+    advancedEditorRevealToken,
     bootstrapDraft,
     runState,
     currentEncounter,
@@ -1472,7 +1637,15 @@ export function useChallengeController() {
     latestNodeSummary,
     summaryText,
     recommendedActions,
-    setCardJsonText,
+    setCardJsonText: setRawEditorText,
+    setRawEditorText,
+    applyEditorText,
+    clearEntrantCard,
+    selectEntrantFromDataCard,
+    randomMatchEntrant,
+    importEntrantFromFile,
+    importEntrantFromText,
+    revealAdvancedEditor,
     setNote,
     setSelectedOptionId,
     setSelectedRecommendedActionId,
