@@ -1,6 +1,14 @@
-import { describe, expect, test } from 'bun:test';
+import { beforeEach, describe, expect, test } from 'bun:test';
 
+import '@/tests/helpers/fake-indexeddb';
+
+import { __resetAiSessionDbForTest } from '@/lib/ai-session/storage';
+import { AI_SESSION_DB_NAME } from '@/lib/ai-session/types';
 import type { EnemySnapshotV1 } from '@/lib/challenge/types';
+import {
+  clearPublicCardMemoryCacheForTest,
+  writePublicCardCacheFromSidecar,
+} from '@/lib/public-card-cache/shared-loader';
 import { GENERAL_CHARACTER_TEMPLATE_ID } from '@/lib/schemas/general-character';
 
 const baseEnemySnapshot: EnemySnapshotV1 = {
@@ -21,6 +29,17 @@ const baseEnemySnapshot: EnemySnapshotV1 = {
 };
 
 describe('challenge enemy display', () => {
+  beforeEach(async () => {
+    clearPublicCardMemoryCacheForTest();
+    await __resetAiSessionDbForTest();
+    await new Promise<void>((resolve, reject) => {
+      const request = indexedDB.deleteDatabase(AI_SESSION_DB_NAME);
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error ?? new Error('deleteDatabase failed'));
+      request.onblocked = () => resolve();
+    });
+  });
+
   test('preset 原卡存在时返回结构化模板展示', async () => {
     const { resolveChallengeEnemyDisplay } = await import('@/lib/challenge/enemy-display');
 
@@ -89,6 +108,62 @@ describe('challenge enemy display', () => {
     expect(result.template).toBe('general');
     expect(result.sourceMeta.isFallback).toBe(false);
     expect((result.card as { name?: string } | null)?.name).toBe('侧载敌人');
+  });
+
+  test('没有 resolvedSourceCardLite 但共享缓存已有卡时，会复用共享缓存而不是网络 fetch', async () => {
+    const { fetchChallengePublicCardById } = await import('@/components/challenge/hooks/useChallengeController');
+    const { resolveChallengeEnemyDisplay } = await import('@/lib/challenge/enemy-display');
+
+    await writePublicCardCacheFromSidecar({
+      id: 'card-shared-cache-1',
+      name: '共享缓存敌人',
+      data: JSON.stringify({
+        templateId: GENERAL_CHARACTER_TEMPLATE_ID,
+        name: '共享缓存敌人',
+        content: '这是一张来自共享缓存的通用角色卡。',
+      }),
+      updatedAt: '2026-04-05T12:00:00.000Z',
+    });
+    clearPublicCardMemoryCacheForTest();
+
+    let networkFetchCount = 0;
+    const result = await resolveChallengeEnemyDisplay({
+      enemySnapshot: {
+        ...baseEnemySnapshot,
+        sourceType: 'public-card',
+        sourceId: 'card-shared-cache-1',
+      },
+      fetchPublicCardById: (id) =>
+        fetchChallengePublicCardById(id, {
+          fetcher: async () => {
+            networkFetchCount += 1;
+            return new Response(
+              JSON.stringify({
+                success: true,
+                card: {
+                  id: 'card-shared-cache-1',
+                  name: '不应再命中的网络卡',
+                  data: JSON.stringify({
+                    templateId: GENERAL_CHARACTER_TEMPLATE_ID,
+                    name: '不应再命中的网络卡',
+                    content: '这条内容不应被读取。',
+                  }),
+                },
+              }),
+              {
+                status: 200,
+                headers: { 'Content-Type': 'application/json' },
+              },
+            );
+          },
+        }),
+    });
+
+    expect(result.status).toBe('resolved');
+    expect(result.template).toBe('general');
+    expect(result.sourceMeta.isFallback).toBe(false);
+    expect((result.card as { name?: string } | null)?.name).toBe('共享缓存敌人');
+    expect(networkFetchCount).toBe(0);
   });
 
   test('season-entity 补查成功时复用原卡模板', async () => {

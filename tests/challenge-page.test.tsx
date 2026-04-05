@@ -1,11 +1,16 @@
 import React from 'react';
-import { describe, expect, test } from 'bun:test';
+import { beforeEach, describe, expect, test } from 'bun:test';
 import { renderToStaticMarkup } from 'react-dom/server';
 
+import '@/tests/helpers/fake-indexeddb';
+
+import { __resetAiSessionDbForTest } from '@/lib/ai-session/storage';
+import { AI_SESSION_DB_NAME } from '@/lib/ai-session/types';
 import { advanceMapVisibility } from '@/lib/challenge/map';
 import { acceptBootstrapSnapshot } from '@/lib/challenge/progression';
 import type { ChallengeCheckpointRecord, ChallengeNodeRecord, ChallengeRunRecord, EncounterSnapshotV1 } from '@/lib/challenge/types';
 import { buildArenaBootstrapSnapshot } from '@/lib/challenge/worlds/arena/bootstrap';
+import { clearPublicCardMemoryCacheForTest } from '@/lib/public-card-cache/shared-loader';
 
 const mockCharacterCard = {
   id: 'card-mist-lamp',
@@ -96,6 +101,17 @@ const createBattleEncounter = (): EncounterSnapshotV1 => ({
 });
 
 describe('challenge page', () => {
+  beforeEach(async () => {
+    clearPublicCardMemoryCacheForTest();
+    await __resetAiSessionDbForTest();
+    await new Promise<void>((resolve, reject) => {
+      const request = indexedDB.deleteDatabase(AI_SESSION_DB_NAME);
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error ?? new Error('deleteDatabase failed'));
+      request.onblocked = () => resolve();
+    });
+  });
+
   test('prepare 错误会按 code 分流到 selection / editor / global', async () => {
     const { getChallengePrepareErrorTarget } = await import('@/components/challenge/hooks/useChallengeController');
     const { createChallengeEntrantError } = await import('@/lib/challenge/entrant-import');
@@ -384,6 +400,78 @@ describe('challenge page', () => {
     expect(result.encounter.enemySnapshot?.sourceId).toContain('arena-placeholder:');
     expect(result.encounter.enemySnapshot?.strengthTier).toBe('common');
     expect(result.nextRunState.worldState?.runFlags ?? []).not.toContain('preset_only_enemy_mode');
+  });
+
+  test('selection sidecar 会写入共享缓存，并让后续 public-card fallback 命中缓存而不再请求单卡 API', async () => {
+    const { fetchChallengePublicCardById, resolveEncounterForNode } = await import('@/components/challenge/hooks/useChallengeController');
+
+    const runState = createAcceptedRunState();
+    const sidecar = {
+      id: 'card-selection-cache-1',
+      name: '共享侧载敌人',
+      data: JSON.stringify({
+        templateId: '通用角色',
+        name: '共享侧载敌人',
+        content: '这张卡来自 selection sidecar。',
+      }),
+      updatedAt: '2026-04-05T12:00:00.000Z',
+    } as const;
+
+    const resolved = await resolveEncounterForNode(runState, 'L1-N1', {
+      fetcher: async () =>
+        new Response(
+          JSON.stringify({
+            success: true,
+            worldId: 'arena',
+            tier: 'common',
+            resolvedSourceMode: 'remote',
+            enemySnapshot: {
+              version: 1,
+              sourceType: 'public-card',
+              sourceId: sidecar.id,
+              displayName: sidecar.name,
+              strengthTier: 'common',
+              combatProfile: {},
+              tags: ['common'],
+              promptSummary: '来自 selection sidecar 的对手。',
+            },
+            resolvedSourceCardLite: sidecar,
+          }),
+          {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        ),
+    });
+
+    expect(resolved.enemySourceCardLite?.id).toBe(sidecar.id);
+
+    clearPublicCardMemoryCacheForTest();
+
+    let networkFetchCount = 0;
+    const card = await fetchChallengePublicCardById(sidecar.id, {
+      fetcher: async () => {
+        networkFetchCount += 1;
+        return new Response(
+          JSON.stringify({
+            success: true,
+            card: {
+              id: sidecar.id,
+              name: '不应再次命中的网络卡',
+              data: sidecar.data,
+              updated_at: sidecar.updatedAt,
+            },
+          }),
+          {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        );
+      },
+    });
+
+    expect((card as { name?: string } | null)?.name).toBe(sidecar.name);
+    expect(networkFetchCount).toBe(0);
   });
 
   test('deriveChallengeResumeState 会优先恢复 entered 节点的冻结快照与输入草稿', async () => {

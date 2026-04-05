@@ -8,7 +8,7 @@ export type AiSessionListOptions = {
 };
 
 export const AI_SESSION_DB_NAME = 'ai-continuous-dialogue:v1';
-export const AI_SESSION_DB_VERSION = 3;
+export const AI_SESSION_DB_VERSION = 4;
 
 export const AI_SESSION_STORE_NAMES = {
   battleStorySessions: 'battleStorySessions',
@@ -20,6 +20,7 @@ export const AI_SESSION_STORE_NAMES = {
   challengeNodes: 'challenge_nodes',
   challengeCheckpoints: 'challenge_checkpoints',
   challengeUnlocks: 'challenge_unlocks',
+  publicCardCache: 'public_card_cache',
 } as const;
 
 export type AiSessionStoreName = (typeof AI_SESSION_STORE_NAMES)[keyof typeof AI_SESSION_STORE_NAMES];

@@ -34,11 +34,14 @@ describe('challenge storage', () => {
     expect(db.objectStoreNames.contains('challenge_nodes')).toBe(true);
     expect(db.objectStoreNames.contains('challenge_checkpoints')).toBe(true);
     expect(db.objectStoreNames.contains('challenge_unlocks')).toBe(true);
+    expect(db.objectStoreNames.contains(AI_SESSION_STORE_NAMES.publicCardCache)).toBe(true);
 
     const runStore = db.transaction('challenge_runs', 'readonly').objectStore('challenge_runs');
     const nodeStore = db.transaction('challenge_nodes', 'readonly').objectStore('challenge_nodes');
     const checkpointStore = db.transaction('challenge_checkpoints', 'readonly').objectStore('challenge_checkpoints');
     const unlockStore = db.transaction('challenge_unlocks', 'readonly').objectStore('challenge_unlocks');
+    const publicCardCacheStore = db.transaction(AI_SESSION_STORE_NAMES.publicCardCache, 'readonly')
+      .objectStore(AI_SESSION_STORE_NAMES.publicCardCache);
 
     expect(runStore.keyPath).toBe('id');
     expect(runStore.indexNames.contains('by_status_updatedAt')).toBe(true);
@@ -48,6 +51,9 @@ describe('challenge storage', () => {
     expect(nodeStore.index('by_run_visitIndex').unique).toBe(true);
     expect(checkpointStore.index('by_run_seq').unique).toBe(true);
     expect(unlockStore.index('by_unlock_key').unique).toBe(true);
+    expect(publicCardCacheStore.indexNames.contains('by_expiresAt')).toBe(true);
+    expect(publicCardCacheStore.indexNames.contains('by_lastAccessedAt')).toBe(true);
+    expect(publicCardCacheStore.indexNames.contains('by_cacheKind_lastAccessedAt')).toBe(true);
 
     await putChallengeRun({
       id: 'run-1',

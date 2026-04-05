@@ -64,6 +64,11 @@ import {
   type ChallengeEntrantDraftState,
 } from '@/lib/challenge/entrant-draft';
 import type { ChallengeRecommendedAction } from '@/components/challenge/NodeResolutionPanel';
+import {
+  getPublicCardByIdWithSharedCache,
+  writePublicCardCacheFromSidecar,
+} from '@/lib/public-card-cache/shared-loader';
+import { fetchPublicDataCardRowById } from '@/lib/public-card-cache/public-data-card-api';
 
 export type ChallengeStage = 'lobby' | 'bootstrap' | 'map' | 'node' | 'summary';
 
@@ -339,33 +344,36 @@ type ChallengeEnemyCandidatesApiPayload = {
   resolvedSourceCardLite?: ChallengeResolvedSourceCardLite | null;
 };
 
-type ChallengePublicDataCardApiPayload = {
-  success?: boolean;
-  card?: unknown;
+type FetchChallengePublicCardByIdOptions = {
+  fetcher?: ChallengeFetchLike;
+  getNowMs?: () => number;
 };
 
-const fetchChallengePublicCardById = async (cardId: string): Promise<unknown | null> => {
+export const fetchChallengePublicCardById = async (
+  cardId: string,
+  options: FetchChallengePublicCardByIdOptions = {},
+): Promise<unknown | null> => {
   const normalizedId = cardId.trim();
   if (!normalizedId) return null;
 
-  try {
-    const response = await fetch(`/api/public-data-cards?id=${encodeURIComponent(normalizedId)}`, {
-      method: 'GET',
-      headers: {
-        Accept: 'application/json',
-      },
-    });
+  const result = await getPublicCardByIdWithSharedCache({
+    id: normalizedId,
+    fetcher: async (id) => {
+      const fetchResult = await fetchPublicDataCardRowById(id, { fetcher: options.fetcher });
+      if (fetchResult.kind === 'error') {
+        console.warn('challenge enemy display failed to fetch public card', {
+          cardId: id,
+          errorKind: fetchResult.errorKind,
+          statusCode: fetchResult.statusCode,
+          error: fetchResult.error,
+        });
+      }
+      return fetchResult;
+    },
+    getNowMs: options.getNowMs,
+  });
 
-    if (!response.ok) {
-      return null;
-    }
-
-    const payload = (await response.json().catch(() => null)) as ChallengePublicDataCardApiPayload | null;
-    return payload?.success ? payload.card ?? null : null;
-  } catch (error) {
-    console.warn('challenge enemy display failed to fetch public card', { cardId: normalizedId, error });
-    return null;
-  }
+  return result.card;
 };
 
 const isBattleNodeType = (
@@ -618,6 +626,9 @@ export const resolveEncounterForNode = async (
       }
 
       const resolvedEnemy = await resolveBattleEnemySnapshot(runStateWithCurrentNode, node.nodeType, nodeId, options);
+      if (resolvedEnemy.enemySourceCardLite) {
+        await writePublicCardCacheFromSidecar(resolvedEnemy.enemySourceCardLite).catch(() => undefined);
+      }
       const nextRunState =
         resolvedEnemy.resolvedSourceMode === 'preset-only'
           ? appendRunFlag(runStateWithCurrentNode, 'preset_only_enemy_mode')

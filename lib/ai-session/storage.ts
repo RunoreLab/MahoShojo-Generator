@@ -72,6 +72,13 @@ const openAiSessionDbInternal = (): Promise<IDBDatabase> =>
         store.createIndex('by_unlock_key', ['worldPresetId', 'unlockType', 'unlockKey'], { unique: true });
         store.createIndex('by_run_createdAt', ['runId', 'createdAt']);
       }
+
+      if (!db.objectStoreNames.contains(AI_SESSION_STORE_NAMES.publicCardCache)) {
+        const store = db.createObjectStore(AI_SESSION_STORE_NAMES.publicCardCache, { keyPath: 'id' });
+        store.createIndex('by_expiresAt', 'expiresAtMs');
+        store.createIndex('by_lastAccessedAt', 'lastAccessedAtMs');
+        store.createIndex('by_cacheKind_lastAccessedAt', ['cacheKind', 'lastAccessedAtMs']);
+      }
     };
 
     request.onsuccess = () => resolve(request.result);
