@@ -257,6 +257,25 @@ describe('challenge page', () => {
     expect(html).toContain('前方可见');
   });
 
+  test('ChallengeMapPage 默认详情区展示首个可进入节点，并显示风险与收益提示', async () => {
+    const { ChallengeMapPage } = await import('@/components/challenge/ChallengeMapPage');
+    const runState = createAcceptedRunState();
+
+    const html = renderToStaticMarkup(
+      <ChallengeMapPage
+        worldTitle="魔法少女竞技场"
+        runState={runState}
+        latestNodeSummary="上一节点：平稳推进"
+        onEnterNode={() => {}}
+      />
+    );
+
+    expect(html).toContain('节点情报');
+    expect(html).toContain('风险评估');
+    expect(html).toContain('潜在收益');
+    expect(html).toContain('L1-N1');
+  });
+
   test('resolveEncounterForNode 会通过敌人候选接口冻结 battle 敌人快照，并在降级后写入 preset_only_enemy_mode', async () => {
     const { resolveEncounterForNode } = await import('@/components/challenge/hooks/useChallengeController');
 
