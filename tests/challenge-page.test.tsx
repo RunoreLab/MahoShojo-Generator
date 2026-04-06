@@ -187,7 +187,7 @@ describe('challenge page', () => {
     expect(html).not.toContain('Bootstrap');
   });
 
-  test('ChallengeMapPage 显示 14 个节点与当前状态摘要', async () => {
+  test('ChallengeMapPage 渲染挑战沙盘、图例与节点详情区，而不是节点卡片网格', async () => {
     const { ChallengeMapPage } = await import('@/components/challenge/ChallengeMapPage');
     const runState = createAcceptedRunState();
 
@@ -202,16 +202,20 @@ describe('challenge page', () => {
 
     expect(html).toContain('挑战地图');
     expect(html).toContain('地图总览');
-    expect(html).toContain('路线概览');
+    expect(html).toContain('挑战沙盘');
+    expect(html).toContain('地图图例');
+    expect(html).toContain('节点情报');
     expect(html).toContain('节点总数 14');
     expect(html).toContain('当前状态');
     expect(html).toContain('L1-N1');
+    expect(html).toContain('进入节点');
     expect(html).toContain('首领战');
-    expect(html).toContain('风险：中');
-    expect(html).toContain('收益：中');
+    expect(html).not.toContain('14 节点路径图');
     expect(html).not.toContain('Map');
     expect(html).not.toContain('Route');
     expect(html).not.toContain('Boss');
+    expect(html).not.toContain('Legend');
+    expect(html).not.toContain('Detail');
   });
 
   test('地图可进入节点只允许当前路径的下一层，不允许跳层', async () => {
