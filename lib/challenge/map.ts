@@ -155,13 +155,16 @@ const assignSpecialNodeTypes = (nodes: MapNodeV1[], seed: string): MapNodeV1[] =
   return next;
 };
 
-const buildEdges = (): MapEdgeV1[] => {
-  const pairs: Array<[string, string]> = [
-    [ROOT_NODE_ID, 'L1-N1'],
-    [ROOT_NODE_ID, 'L1-N2'],
-    ['L1-N1', 'L2-N1'],
-    ['L1-N1', 'L2-N2'],
-    ['L1-N2', 'L2-N2'],
+const EDGE_TEMPLATE_PREFIX: Array<[string, string]> = [
+  [ROOT_NODE_ID, 'L1-N1'],
+  [ROOT_NODE_ID, 'L1-N2'],
+  ['L1-N1', 'L2-N1'],
+  ['L1-N1', 'L2-N2'],
+  ['L1-N2', 'L2-N2'],
+];
+
+const EDGE_TEMPLATE_SUFFIXES: Array<Array<[string, string]>> = [
+  [
     ['L2-N1', 'L3-N1'],
     ['L2-N2', 'L3-N1'],
     ['L2-N2', 'L3-N2'],
@@ -177,7 +180,48 @@ const buildEdges = (): MapEdgeV1[] => {
     ['L6-N1', 'L7-N1'],
     ['L6-N2', 'L7-N1'],
     ['L7-N1', 'L8-N1'],
-  ];
+  ],
+  [
+    ['L2-N1', 'L3-N1'],
+    ['L2-N1', 'L3-N2'],
+    ['L2-N2', 'L3-N2'],
+    ['L3-N1', 'L4-N1'],
+    ['L3-N2', 'L4-N1'],
+    ['L3-N2', 'L4-N2'],
+    ['L4-N1', 'L5-N1'],
+    ['L4-N1', 'L5-N2'],
+    ['L4-N2', 'L5-N2'],
+    ['L5-N1', 'L6-N1'],
+    ['L5-N2', 'L6-N1'],
+    ['L5-N2', 'L6-N2'],
+    ['L6-N1', 'L7-N1'],
+    ['L6-N2', 'L7-N1'],
+    ['L7-N1', 'L8-N1'],
+  ],
+  [
+    ['L2-N1', 'L3-N1'],
+    ['L2-N2', 'L3-N1'],
+    ['L2-N2', 'L3-N2'],
+    ['L3-N1', 'L4-N1'],
+    ['L3-N2', 'L4-N1'],
+    ['L3-N2', 'L4-N2'],
+    ['L4-N1', 'L5-N1'],
+    ['L4-N1', 'L5-N2'],
+    ['L4-N2', 'L5-N2'],
+    ['L5-N1', 'L6-N1'],
+    ['L5-N1', 'L6-N2'],
+    ['L5-N2', 'L6-N1'],
+    ['L6-N1', 'L7-N1'],
+    ['L6-N2', 'L7-N1'],
+    ['L7-N1', 'L8-N1'],
+  ],
+];
+
+const pickEdgeTemplateIndex = (seed: string): number =>
+  Array.from(seed).reduce((total, char) => total + char.charCodeAt(0), 0) % EDGE_TEMPLATE_SUFFIXES.length;
+
+const buildEdges = (seed: string): MapEdgeV1[] => {
+  const pairs = [...EDGE_TEMPLATE_PREFIX, ...EDGE_TEMPLATE_SUFFIXES[pickEdgeTemplateIndex(seed)]];
 
   return pairs.map(([fromNodeId, toNodeId], index) => ({
     version: 1,
@@ -218,7 +262,7 @@ export const generateChallengeMap = (input: { runSeed: string; worldPresetId: st
     totalLayers: TOTAL_LAYERS,
     bossNodeId: 'L8-N1',
     nodes,
-    edges: buildEdges(),
+    edges: buildEdges(seed),
   };
 
   return advanceMapVisibility(baseMap, ROOT_NODE_ID);
