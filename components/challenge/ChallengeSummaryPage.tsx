@@ -28,7 +28,7 @@ export function ChallengeSummaryPage({
 }: ChallengeSummaryPageProps) {
   return (
     <section className="rounded-[28px] border border-indigo-200/70 bg-white/90 p-6 shadow-[0_18px_54px_rgba(99,102,241,0.12)]">
-      <p className="text-xs font-semibold uppercase tracking-[0.24em] text-indigo-500">Summary</p>
+      <p className="text-xs font-semibold uppercase tracking-[0.24em] text-indigo-500">结算摘要</p>
       <div className="mt-3 flex flex-wrap items-start justify-between gap-4">
         <div>
           <h2 className="text-2xl font-semibold text-slate-900">本轮挑战结算</h2>
@@ -49,11 +49,11 @@ export function ChallengeSummaryPage({
         </article>
         <article className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
           <p className="text-xs uppercase tracking-[0.18em] text-slate-500">剩余生命</p>
-          <p className="mt-2 text-2xl font-semibold text-slate-900">{runState.worldState?.tracks.hp.current ?? 'N/A'}</p>
+          <p className="mt-2 text-2xl font-semibold text-slate-900">{runState.worldState?.tracks.hp.current ?? '暂无'}</p>
         </article>
         <article className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
           <p className="text-xs uppercase tracking-[0.18em] text-slate-500">剩余光辉</p>
-          <p className="mt-2 text-2xl font-semibold text-slate-900">{runState.worldState?.tracks.radiance.current ?? 'N/A'}</p>
+          <p className="mt-2 text-2xl font-semibold text-slate-900">{runState.worldState?.tracks.radiance.current ?? '暂无'}</p>
         </article>
       </div>
 

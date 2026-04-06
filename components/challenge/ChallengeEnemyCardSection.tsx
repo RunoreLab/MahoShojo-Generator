@@ -20,7 +20,7 @@ export function ChallengeEnemyCardSection({
     <section className="mt-6 rounded-[28px] border border-slate-200 bg-slate-50/80 p-4 shadow-[0_10px_30px_rgba(148,163,184,0.10)]">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Enemy Card</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">敌方档案</p>
           <h3 className="mt-2 text-xl font-semibold text-slate-900">敌方角色卡</h3>
         </div>
         {state.message ? (

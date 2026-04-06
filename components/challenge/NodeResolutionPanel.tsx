@@ -1,6 +1,7 @@
 import AiProviderSelector from '@/components/AiProviderSelector';
 import { ChallengeEnemyCardSection } from '@/components/challenge/ChallengeEnemyCardSection';
 import { ChallengeStoryCardSection, type ChallengeStoryCardState } from '@/components/challenge/ChallengeStoryCardSection';
+import { formatStrengthTierLabel } from '@/lib/challenge/display-text';
 import type { ChallengeEnemyDisplayState } from '@/lib/challenge/enemy-display';
 import type { EncounterSnapshotV1 } from '@/lib/challenge/types';
 
@@ -47,7 +48,7 @@ const getNodeTitle = (encounter: EncounterSnapshotV1): string => {
     case 'shop':
       return '商店节点';
     case 'boss':
-      return 'Boss 节点';
+      return '首领节点';
     default:
       return '战斗节点';
   }
@@ -92,7 +93,7 @@ export function NodeResolutionPanel({
   if (viewMode === 'result') {
     return (
       <section className="rounded-[28px] border border-slate-200 bg-white/90 p-6 shadow-[0_16px_48px_rgba(148,163,184,0.10)]">
-        <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Resolution</p>
+        <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">结算结果</p>
         <h2 className="mt-3 text-2xl font-semibold text-slate-900">{getNodeTitle(encounter)}</h2>
         {isBattleNode ? (
           <p className="mt-2 text-sm leading-6 text-slate-600">
@@ -130,7 +131,7 @@ export function NodeResolutionPanel({
     <section className="rounded-[28px] border border-slate-200 bg-white/90 p-6 shadow-[0_16px_48px_rgba(148,163,184,0.10)]">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Node</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">当前节点</p>
           <h2 className="mt-3 text-2xl font-semibold text-slate-900">{getNodeTitle(encounter)}</h2>
           <p className="mt-2 text-sm leading-6 text-slate-600">
             {isBattleNode
@@ -142,7 +143,7 @@ export function NodeResolutionPanel({
         </div>
         {encounter.enemySnapshot ? (
           <span className="rounded-full bg-rose-50 px-3 py-1 text-xs font-medium text-rose-700">
-            危险等级：{encounter.enemySnapshot.strengthTier}
+            危险等级：{formatStrengthTierLabel(encounter.enemySnapshot.strengthTier)}
           </span>
         ) : null}
       </div>

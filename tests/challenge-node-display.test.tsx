@@ -61,6 +61,10 @@ describe('challenge node display', () => {
     );
 
     expect(html).toContain('敌方角色卡');
+    expect(html).toContain('当前节点');
+    expect(html).toContain('危险等级：标准');
+    expect(html).not.toContain('Node');
+    expect(html).not.toContain('common');
     expect(html).not.toContain('对手：雪绒 ·');
   });
 
@@ -172,6 +176,8 @@ describe('challenge node display', () => {
 
     expect(html).toContain('敌方角色卡');
     expect(html).toContain('下载记录');
+    expect(html).toContain('结算结果');
+    expect(html).not.toContain('Resolution');
     expect(html).not.toContain('本节点已结算。');
   });
 });

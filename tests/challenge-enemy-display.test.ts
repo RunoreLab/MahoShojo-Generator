@@ -213,10 +213,11 @@ describe('challenge enemy display', () => {
 
     const content = (result.card as { content?: string } | null)?.content ?? '';
     expect(content).toContain('擅长高速游走与试探。');
-    expect(content).toContain('common');
+    expect(content).toContain('标准');
     expect(content).toContain('tempo');
     expect(content).toContain('powerLevel');
     expect(content).toContain('该卡为挑战快照，不代表完整原始数据卡');
+    expect(content).not.toContain('强度档：common');
   });
 
   test('未知模板时回退为通用角色卡快照', async () => {

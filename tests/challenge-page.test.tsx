@@ -153,6 +153,7 @@ describe('challenge page', () => {
     const html = renderToStaticMarkup(<Challenge />);
 
     expect(html).toContain('本轮挑战');
+    expect(html).toContain('挑战模式');
     expect(html).toContain('魔法少女竞技场');
     expect(html).toContain('继续挑战');
     expect(html).toContain('在线角色库 / 随机匹配');
@@ -160,6 +161,7 @@ describe('challenge page', () => {
     expect(html).toContain('高级 JSON 编辑');
     expect(html).toContain('AI 裁定模型');
     expect(html).toContain('自定义 AI 能力提供商');
+    expect(html).not.toContain('Challenge Mode');
   });
 
   test('ChallengeBootstrapPanel 显示竞技场快照摘要与一次免费重掷', async () => {
@@ -181,6 +183,8 @@ describe('challenge page', () => {
     expect(html).toContain('一次免费重掷');
     expect(html).toContain('战斗定位');
     expect(html).toContain('关键动作倾向');
+    expect(html).toContain('标准级');
+    expect(html).not.toContain('Bootstrap');
   });
 
   test('ChallengeMapPage 显示 14 个节点与当前状态摘要', async () => {
@@ -197,9 +201,17 @@ describe('challenge page', () => {
     );
 
     expect(html).toContain('挑战地图');
+    expect(html).toContain('地图总览');
+    expect(html).toContain('路线概览');
     expect(html).toContain('节点总数 14');
     expect(html).toContain('当前状态');
     expect(html).toContain('L1-N1');
+    expect(html).toContain('首领战');
+    expect(html).toContain('风险：中');
+    expect(html).toContain('收益：中');
+    expect(html).not.toContain('Map');
+    expect(html).not.toContain('Route');
+    expect(html).not.toContain('Boss');
   });
 
   test('地图可进入节点只允许当前路径的下一层，不允许跳层', async () => {

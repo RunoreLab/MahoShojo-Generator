@@ -2,6 +2,10 @@ import {
   inferChallengeRenderableTemplate,
   isChallengeRenderableSourceCard,
 } from '@/lib/challenge/source-card-renderability';
+import {
+  formatEnemySourceTypeLabel,
+  formatStrengthTierLabel,
+} from '@/lib/challenge/display-text';
 import { getBundledPresetData } from '@/lib/pvp/preset-bundled';
 import { GENERAL_CHARACTER_TEMPLATE_ID } from '@/lib/schemas/general-character';
 
@@ -107,7 +111,8 @@ export const buildChallengeEnemyFallbackCard = (enemySnapshot: EnemySnapshotV1):
       enemySnapshot.promptSummary || '暂无额外摘要。',
       '',
       '## 快照信息',
-      `- 强度档：${enemySnapshot.strengthTier}`,
+      `- 强度档：${formatStrengthTierLabel(enemySnapshot.strengthTier)}`,
+      `- 来源：${formatEnemySourceTypeLabel(enemySnapshot.sourceType)}`,
       `- 标签：${tags}`,
       '',
       '## 战斗参数快照',

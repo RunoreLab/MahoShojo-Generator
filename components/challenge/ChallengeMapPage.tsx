@@ -1,5 +1,6 @@
 import { getChallengeResourcePresentation, getChallengeWorldPreset } from '@/lib/challenge/world-registry';
 import type { ChallengeNodeType, ChallengeWorldId, NodeVisibility, RunStateV1 } from '@/lib/challenge/types';
+import { formatChallengeNodeTypeLabel, formatMapHintLabel } from '@/lib/challenge/display-text';
 import { getSelectableNodeIdsForMap } from '@/components/challenge/hooks/useChallengeController';
 
 type ChallengeMapPageProps = {
@@ -7,15 +8,6 @@ type ChallengeMapPageProps = {
   runState: RunStateV1;
   latestNodeSummary: string;
   onEnterNode: (nodeId: string) => void;
-};
-
-const nodeTypeLabelMap: Record<ChallengeNodeType, string> = {
-  battle: '普通战斗',
-  elite: '精英战',
-  event: '事件',
-  rest: '休整',
-  shop: '商店',
-  boss: 'Boss',
 };
 
 const getVisibilityLabel = (input: { visibility: NodeVisibility; canEnter: boolean }): string => {
@@ -64,7 +56,7 @@ export function ChallengeMapPage({
   return (
     <div className="grid gap-5 xl:grid-cols-[minmax(300px,0.85fr)_minmax(0,1.15fr)]">
       <aside className="rounded-[28px] border border-slate-200 bg-white/90 p-6 shadow-[0_16px_48px_rgba(148,163,184,0.10)]">
-        <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Map</p>
+        <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">地图总览</p>
         <h2 className="mt-3 text-2xl font-semibold text-slate-900">挑战地图</h2>
         <p className="mt-2 text-sm leading-6 text-slate-600">{worldTitle} 的首版固定图谱已经冻结，可在可见节点之间选择推进路线。</p>
 
@@ -84,7 +76,7 @@ export function ChallengeMapPage({
                 <div key={track.trackId} className="flex items-center justify-between gap-3 text-sm text-slate-600">
                   <span>{track.label}</span>
                   <span className="font-medium text-slate-900">
-                    {currentTrack ? `${currentTrack.current}${currentTrack.max === null ? '' : ` / ${currentTrack.max}`}` : 'N/A'}
+                    {currentTrack ? `${currentTrack.current}${currentTrack.max === null ? '' : ` / ${currentTrack.max}`}` : '暂无'}
                   </span>
                 </div>
               );
@@ -101,7 +93,7 @@ export function ChallengeMapPage({
       <section className="rounded-[28px] border border-rose-200/60 bg-white/90 p-6 shadow-[0_18px_54px_rgba(244,114,182,0.12)]">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-rose-500">Route</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-rose-500">路线概览</p>
             <h3 className="mt-2 text-2xl font-semibold text-slate-900">14 节点路径图</h3>
           </div>
           <p className="text-sm text-slate-500">仅可进入标记为“可进入”的节点。</p>
@@ -118,7 +110,7 @@ export function ChallengeMapPage({
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <p className="text-xs uppercase tracking-[0.18em] text-slate-500">{node.nodeId}</p>
-                    <p className="mt-2 text-base font-semibold text-slate-900">{nodeTypeLabelMap[node.nodeType]}</p>
+                    <p className="mt-2 text-base font-semibold text-slate-900">{formatChallengeNodeTypeLabel(node.nodeType as ChallengeNodeType)}</p>
                   </div>
                   <span className="rounded-full bg-white px-3 py-1 text-xs text-slate-500">
                     {getVisibilityLabel({ visibility: node.visibility, canEnter })}
@@ -127,8 +119,8 @@ export function ChallengeMapPage({
 
                 <div className="mt-3 space-y-1 text-sm text-slate-600">
                   <p>层数：L{node.layer}</p>
-                  <p>风险：{node.riskHint}</p>
-                  <p>收益：{node.rewardHint}</p>
+                  <p>风险：{formatMapHintLabel(node.riskHint)}</p>
+                  <p>收益：{formatMapHintLabel(node.rewardHint)}</p>
                 </div>
 
                 <button

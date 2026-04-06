@@ -1,4 +1,8 @@
 import type { PlayerSnapshotV1 } from '@/lib/challenge/types';
+import {
+  formatPlayerSourceTypeLabel,
+  formatStrengthTierLevelLabel,
+} from '@/lib/challenge/display-text';
 
 type ChallengeBootstrapPanelProps = {
   worldTitle: string;
@@ -21,17 +25,6 @@ const readCombatProfileText = (playerSnapshot: PlayerSnapshotV1, key: string): s
   return null;
 };
 
-const formatStrengthTier = (value: PlayerSnapshotV1['strengthTier']): string => {
-  switch (value) {
-    case 'boss':
-      return 'Boss 级';
-    case 'elite':
-      return '精英级';
-    default:
-      return '标准级';
-  }
-};
-
 export function ChallengeBootstrapPanel({
   worldTitle,
   playerSnapshot,
@@ -46,7 +39,7 @@ export function ChallengeBootstrapPanel({
 
   return (
     <section className="rounded-[28px] border border-amber-200/70 bg-white/90 p-6 shadow-[0_18px_54px_rgba(251,191,36,0.14)]">
-      <p className="text-xs font-semibold uppercase tracking-[0.24em] text-amber-500">Bootstrap</p>
+      <p className="text-xs font-semibold uppercase tracking-[0.24em] text-amber-500">快照确认</p>
       <div className="mt-3 flex flex-wrap items-start justify-between gap-4">
         <div>
           <h2 className="text-2xl font-semibold text-slate-900">竞技场快照确认</h2>
@@ -55,7 +48,7 @@ export function ChallengeBootstrapPanel({
           </p>
         </div>
         <span className="rounded-full bg-amber-50 px-3 py-1 text-xs font-medium text-amber-700">
-          {formatStrengthTier(playerSnapshot.strengthTier)}
+          {formatStrengthTierLevelLabel(playerSnapshot.strengthTier)}
         </span>
       </div>
 
@@ -63,11 +56,11 @@ export function ChallengeBootstrapPanel({
         <article className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
           <p className="text-xs uppercase tracking-[0.18em] text-slate-500">角色</p>
           <p className="mt-2 text-lg font-semibold text-slate-900">{playerSnapshot.displayName}</p>
-          <p className="mt-1 text-sm text-slate-500">来源：{playerSnapshot.sourceType}</p>
+          <p className="mt-1 text-sm text-slate-500">来源：{formatPlayerSourceTypeLabel(playerSnapshot.sourceType)}</p>
         </article>
         <article className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
           <p className="text-xs uppercase tracking-[0.18em] text-slate-500">战斗定位</p>
-          <p className="mt-2 text-sm leading-6 text-slate-700">{powerLevel || formatStrengthTier(playerSnapshot.strengthTier)}</p>
+          <p className="mt-2 text-sm leading-6 text-slate-700">{powerLevel || formatStrengthTierLevelLabel(playerSnapshot.strengthTier)}</p>
         </article>
         <article className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
           <p className="text-xs uppercase tracking-[0.18em] text-slate-500">关键属性倾向</p>

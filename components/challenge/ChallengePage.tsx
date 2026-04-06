@@ -48,7 +48,7 @@ export function ChallengePageView({
         <header className="rounded-[28px] border border-rose-200/70 bg-white/85 px-6 py-5 shadow-[0_20px_60px_rgba(244,114,182,0.12)] backdrop-blur">
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div className="space-y-2">
-              <p className="text-xs font-semibold uppercase tracking-[0.28em] text-rose-500">Challenge Mode</p>
+              <p className="text-xs font-semibold uppercase tracking-[0.28em] text-rose-500">挑战模式</p>
               <div>
                 <h1 className="text-3xl font-semibold text-slate-900">本轮挑战</h1>
                 <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
