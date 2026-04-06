@@ -276,6 +276,27 @@ describe('challenge page', () => {
     expect(html).toContain('L1-N1');
   });
 
+  test('ChallengeMapPage 保留地图总览侧栏，并提供移动端横向容器与纯中文文案', async () => {
+    const { ChallengeMapPage } = await import('@/components/challenge/ChallengeMapPage');
+    const runState = createAcceptedRunState();
+
+    const html = renderToStaticMarkup(
+      <ChallengeMapPage
+        worldTitle="魔法少女竞技场"
+        runState={runState}
+        latestNodeSummary="上一节点：平稳推进"
+        onEnterNode={() => {}}
+      />
+    );
+
+    expect(html).toContain('地图总览');
+    expect(html).toContain('地图图例');
+    expect(html).toContain('节点情报');
+    expect(html).toContain('overflow-x-auto');
+    expect(html).not.toContain('Legend');
+    expect(html).not.toContain('Detail');
+  });
+
   test('resolveEncounterForNode 会通过敌人候选接口冻结 battle 敌人快照，并在降级后写入 preset_only_enemy_mode', async () => {
     const { resolveEncounterForNode } = await import('@/components/challenge/hooks/useChallengeController');
 

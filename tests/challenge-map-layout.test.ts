@@ -76,4 +76,15 @@ describe('challenge map layout', () => {
 
     expect(layout.selectedNodeId).toBe('L2-N1');
   });
+
+  test('没有可进入或已完成节点时，会回落到首个 focused 节点', () => {
+    const mapState = generateChallengeMap({ runSeed: 'layout-focused', worldPresetId: 'arena' });
+    const layout = buildChallengeMapLayout({
+      mapState,
+      selectableNodeIds: [],
+      selectedNodeId: null,
+    });
+
+    expect(layout.selectedNodeId).toBe('L1-N1');
+  });
 });
