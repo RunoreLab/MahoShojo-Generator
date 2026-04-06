@@ -73,8 +73,10 @@ const TRACK_RANGE_PRESETS: Record<
   },
 };
 
+type FallbackDeltaNodeType = Extract<SupportedAiNodeType, 'battle' | 'elite' | 'boss'>;
+
 const FALLBACK_DELTAS: Record<
-  SupportedAiNodeType,
+  FallbackDeltaNodeType,
   Record<ChallengeAdjudicationOutcome, Record<string, number>>
 > = {
   battle: {
@@ -91,11 +93,6 @@ const FALLBACK_DELTAS: Record<
     victory: { hp: -24, radiance: -20, currency: 30 },
     costly_victory: { hp: -32, radiance: -24, currency: 36 },
     defeat: { hp: -80, radiance: -32, currency: 0 },
-  },
-  event: {
-    victory: { hp: -6, radiance: -2, currency: 10 },
-    costly_victory: { hp: -12, radiance: -6, currency: 6 },
-    defeat: { hp: -20, radiance: -18, currency: -6 },
   },
 };
 
@@ -224,6 +221,27 @@ const buildFallbackSummary = (input: {
   return `${input.playerName}在与${input.enemyName}的对抗中失手，被迫吞下败局。`;
 };
 
+const resolveFallbackDeltaNodeType = (nodeType: SupportedAiNodeType): FallbackDeltaNodeType => {
+  return nodeType === 'event' ? 'battle' : nodeType;
+};
+
+const clampTrackDeltasToEnvelope = (
+  trackDeltas: Record<string, number>,
+  resolverEnvelope: ChallengeResolverEnvelopeV1
+): Record<string, number> => {
+  const rangeMap = new Map(resolverEnvelope.trackDeltaRanges.map((item) => [item.trackId, item]));
+
+  return Object.fromEntries(
+    Object.entries(trackDeltas).flatMap(([trackId, delta]) => {
+      const range = rangeMap.get(trackId);
+      if (!range) return [];
+
+      const clamped = Math.min(range.max, Math.max(range.min, delta));
+      return [[trackId, clamped] as const];
+    })
+  );
+};
+
 const buildFallbackStory = (input: {
   playerName: string;
   enemyName: string;
@@ -337,9 +355,11 @@ export const buildSystemFallbackResolution = (input: {
   adjudication: ChallengeAdjudicationResultV1;
 } => {
   const outcome = resolveFallbackOutcome(input.runState, input.encounter);
-  const deltas =
-    FALLBACK_DELTAS[input.encounter.kind]?.[outcome]
-    ?? FALLBACK_DELTAS.battle.costly_victory;
+  const fallbackNodeType = resolveFallbackDeltaNodeType(input.resolverEnvelope.nodeType);
+  const deltas = clampTrackDeltasToEnvelope(
+    FALLBACK_DELTAS[fallbackNodeType]?.[outcome] ?? FALLBACK_DELTAS.battle.costly_victory,
+    input.resolverEnvelope
+  );
 
   const actionLabel = input.playerInput.recommendedActionId?.trim() || '临场应对';
   const playerName = input.runState.playerSnapshot?.displayName ?? '挑战者';

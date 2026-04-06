@@ -134,9 +134,9 @@ const removeEntryFromMemory = (id: string): void => {
   publicCardMemoryCache.delete(id);
 };
 
-const touchEntryAccess = (entry: PublicCardCacheEntry, nowMs: number): PublicCardCacheEntry => {
+const touchEntryAccess = <TEntry extends PublicCardCacheEntry>(entry: TEntry, nowMs: number): TEntry => {
   const lastAccessedAtMs = Math.max(entry.lastAccessedAtMs, nowMs);
-  const touchedEntry = { ...entry, lastAccessedAtMs } satisfies PublicCardCacheEntry;
+  const touchedEntry = { ...entry, lastAccessedAtMs } as TEntry;
   writeEntryToMemory(touchedEntry);
   if (lastAccessedAtMs !== entry.lastAccessedAtMs) {
     void touchPublicCardCacheRecord(entry.id, lastAccessedAtMs).catch(() => undefined);

@@ -399,7 +399,7 @@ describe('challenge resolver envelope', () => {
     ).toBe('victory');
   });
 
-  test('event fallback 在 defeat 路径下仍必须落在 event envelope 范围内', async () => {
+  test('event fallback 在 defeat 路径下会复用 battle preset，并裁到 event envelope 范围内', async () => {
     const { buildChallengeResolverEnvelope, buildSystemFallbackResolution, validateAdjudicationAgainstEnvelope } = await import(
       '@/lib/challenge/resolver-envelope'
     );
@@ -445,6 +445,11 @@ describe('challenge resolver envelope', () => {
     });
 
     expect(fallback.adjudication.outcome).toBe('defeat');
+    expect(fallback.adjudication.trackDeltas).toEqual({
+      hp: -20,
+      radiance: -18,
+      currency: 0,
+    });
     expect(() => validateAdjudicationAgainstEnvelope(resolverEnvelope, fallback.adjudication)).not.toThrow();
   });
 
