@@ -31,7 +31,7 @@ export function GlobalTopBar({ pathname }: GlobalTopBarProps) {
         >
           {logoLoadFailed ? null : (
             <img
-              src="/logo.svg"
+              src="/favicon.svg"
               alt="MahoShojo"
               width={132}
               height={32}
