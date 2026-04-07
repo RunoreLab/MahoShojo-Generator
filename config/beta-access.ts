@@ -1,4 +1,4 @@
-export type BetaAccessFeatureId = 'magic-tea-party' | 'magic-tavern' | 'tachie';
+export type BetaAccessFeatureId = 'magic-tea-party' | 'magic-tavern' | 'tachie' | 'challenge';
 
 export type BetaAccessRequirement =
   | {
@@ -74,6 +74,21 @@ const tachieRequirements: BetaAccessRequirementGroup = {
   ],
 };
 
+const challengeRequirements: BetaAccessRequirementGroup = {
+  allOf: [
+    {
+      type: 'publicUsage',
+      min: 1000,
+      label: '公开卡累计使用量 ≥ 1000',
+    },
+    {
+      type: 'publicFavorites',
+      min: 100,
+      label: '公开卡累计收藏量 ≥ 100',
+    },
+  ],
+};
+
 export const betaAccessConfig: {
   showRequirementsByDefault: boolean;
   features: Record<BetaAccessFeatureId, BetaAccessFeatureConfig>;
@@ -103,6 +118,14 @@ export const betaAccessConfig: {
       href: '/tachie',
       showRequirements: true,
       requirements: tachieRequirements,
+    },
+    challenge: {
+      id: 'challenge',
+      title: '肉鸽挑战',
+      summary: '挑战模式仍在内测中，仅向已完成足够数据卡验证的创作者开放。',
+      href: '/challenge',
+      showRequirements: true,
+      requirements: challengeRequirements,
     },
   },
 };

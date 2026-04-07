@@ -148,9 +148,9 @@ describe('challenge page', () => {
     expect(html).not.toContain('雾灯');
   });
 
-  test('路由首屏显示本轮挑战与世界入口，且 SSR 渲染路径不会因本地存储崩溃', async () => {
-    const { default: Challenge } = await import('@/pages/challenge');
-    const html = renderToStaticMarkup(<Challenge />);
+  test('ChallengePage 首屏显示本轮挑战与世界入口，且 SSR 渲染路径不会因本地存储崩溃', async () => {
+    const { ChallengePage } = await import('@/components/challenge/ChallengePage');
+    const html = renderToStaticMarkup(<ChallengePage />);
 
     expect(html).toContain('本轮挑战');
     expect(html).toContain('挑战模式');
