@@ -119,7 +119,7 @@ export const buildChallengeAdjudicationPrompt = (input: {
       : '';
 
   return `
-你是“魔法少女竞技场”的本轮挑战裁定器。请根据双方快照、当前资源、玩家输入与 resolver envelope，生成一段 Markdown 战斗正文，并在末尾追加唯一一段隐藏结构化尾注。
+请根据双方快照、当前资源、玩家输入与 resolver envelope，生成一段战斗故事，并在末尾追加唯一一段隐藏结构化尾注。
 ${retryNotice}
 硬性输出规则：
 1. 只输出 Markdown 正文，然后紧接一段 HTML 注释尾注；不要输出解释、不要输出额外 JSON 代码块。

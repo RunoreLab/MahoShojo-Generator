@@ -14,9 +14,6 @@ export function ArenaPageLinks({ variant, className }: ArenaPageLinksProps) {
         <Link href="/arena" className={className ?? 'text-blue-600 hover:underline font-semibold'}>
           进入完整版竞技场
         </Link>
-        <Link href="/challenge" className={className ?? 'text-blue-600 hover:underline font-semibold'}>
-          进入挑战模式
-        </Link>
       </div>
     );
   }
@@ -25,9 +22,6 @@ export function ArenaPageLinks({ variant, className }: ArenaPageLinksProps) {
     <div className="flex flex-wrap items-center gap-3">
       <Link href="/battle" className={className ?? 'text-blue-600 hover:underline font-semibold'}>
         切换到简洁版
-      </Link>
-      <Link href="/challenge" className={className ?? 'text-blue-600 hover:underline font-semibold'}>
-        进入挑战模式
       </Link>
     </div>
   );
