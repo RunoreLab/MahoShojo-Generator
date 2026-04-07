@@ -84,6 +84,8 @@
   --app-result-card-bg: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   --app-footer-link: #ff6b6b;
   --app-footer-link-hover: #ee5a6f;
+  --global-topbar-height: 56px;
+  --global-topbar-z-index: 40;
 }
 
 @media (prefers-color-scheme: dark) {

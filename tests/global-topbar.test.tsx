@@ -87,6 +87,59 @@ describe('topbar leaf components', () => {
   });
 });
 
+describe('GlobalTopBar', () => {
+  beforeEach(() => {
+    authState = {
+      user: null,
+      userBadges: [],
+      loading: false,
+      isAuthenticated: false,
+      logout: async () => undefined,
+    };
+  });
+
+  test('renders logo, grouped nav, theme, messages, and user entry', async () => {
+    const { GlobalTopBar } = await import('@/components/navigation/GlobalTopBar');
+    const html = renderToStaticMarkup(<GlobalTopBar pathname="/battle" />);
+
+    expect(html).toContain('MahoShojo');
+    expect(html).toContain('href="/"');
+    expect(html).toContain('创作');
+    expect(html).toContain('竞技');
+    expect(html).toContain('角色');
+    expect(html).toContain('百科');
+    expect(html).toContain('简洁竞技场');
+    expect(html).toContain('完整竞技场');
+    expect(html).toContain('外观');
+    expect(html).toContain('消息');
+    expect(html).toContain('登录 / 注册');
+  });
+
+  test('marks only covered active group while keeping non-covered targets as links', async () => {
+    const { GlobalTopBar } = await import('@/components/navigation/GlobalTopBar');
+    const html = renderToStaticMarkup(<GlobalTopBar pathname="/creator" />);
+
+    expect(html).toContain('data-active-group="creative"');
+    expect(html).toContain('href="/ranking"');
+    expect(html).toContain('href="/encyclopedia"');
+    expect(html).toContain('href="/name"');
+  });
+
+  test('mobile drawer markup contains grouped navigation and close controls', async () => {
+    const { TopBarMobileDrawer } = await import('@/components/navigation/TopBarMobileDrawer');
+    const html = renderToStaticMarkup(
+      <TopBarMobileDrawer isOpen={true} activeGroupId="battle" onClose={() => undefined} />,
+    );
+
+    expect(html).toContain('role="dialog"');
+    expect(html).toContain('移动端导航');
+    expect(html).toContain('关闭导航');
+    expect(html).toContain('创作');
+    expect(html).toContain('竞技');
+    expect(html).toContain('排行榜');
+  });
+});
+
 afterAll(() => {
   mock.restore();
 });
