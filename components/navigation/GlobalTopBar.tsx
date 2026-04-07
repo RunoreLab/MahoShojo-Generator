@@ -76,24 +76,24 @@ export function GlobalTopBar({ pathname }: GlobalTopBarProps) {
           })}
         </nav>
 
-        <div className="ml-auto hidden items-center gap-2 md:flex">
+        <div className="ml-auto flex items-center gap-2">
           <TopBarThemeMenu />
-          <TopBarMessagePlaceholder />
-          <TopBarUserMenu />
-        </div>
-
-        <div className="ml-auto flex items-center gap-2 md:hidden">
-          <TopBarThemeMenu />
-          <TopBarMessagePlaceholder />
-          <button
-            type="button"
-            aria-label="打开导航菜单"
-            aria-expanded={isMobileOpen}
-            onClick={() => setIsMobileOpen(true)}
-            className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/50 bg-white/70 text-gray-800 shadow-sm backdrop-blur dark:border-slate-600/60 dark:bg-slate-900/70 dark:text-slate-100"
-          >
-            <Menu className="h-5 w-5" aria-hidden="true" />
-          </button>
+          <div className="hidden items-center gap-2 md:flex">
+            <TopBarMessagePlaceholder />
+            <TopBarUserMenu />
+          </div>
+          <div className="flex items-center gap-2 md:hidden">
+            <TopBarMessagePlaceholder />
+            <button
+              type="button"
+              aria-label="打开导航菜单"
+              aria-expanded={isMobileOpen}
+              onClick={() => setIsMobileOpen(true)}
+              className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/50 bg-white/70 text-gray-800 shadow-sm backdrop-blur dark:border-slate-600/60 dark:bg-slate-900/70 dark:text-slate-100"
+            >
+              <Menu className="h-5 w-5" aria-hidden="true" />
+            </button>
+          </div>
         </div>
       </div>
 

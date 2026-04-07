@@ -171,6 +171,13 @@ describe('GlobalTopBar', () => {
     expect(html).not.toContain('role="menu"');
     expect(html).not.toContain('aria-haspopup="menu"');
   });
+
+  test('renders one shared theme menu instance across breakpoints', async () => {
+    const { GlobalTopBar } = await import('@/components/navigation/GlobalTopBar');
+    const html = renderToStaticMarkup(<GlobalTopBar pathname="/arena" />);
+
+    expect(html.match(/aria-label="外观设置"/g)?.length ?? 0).toBe(1);
+  });
 });
 
 afterAll(() => {
