@@ -138,6 +138,17 @@ describe('GlobalTopBar', () => {
     expect(html).toContain('竞技');
     expect(html).toContain('排行榜');
   });
+
+  test('topbar navigation exposes aria labels and menu markers', async () => {
+    const { GlobalTopBar } = await import('@/components/navigation/GlobalTopBar');
+    const html = renderToStaticMarkup(<GlobalTopBar pathname="/arena" />);
+
+    expect(html).toContain('aria-label="全站主导航"');
+    expect(html).toContain('aria-haspopup="menu"');
+    expect(html).toContain('aria-label="外观设置"');
+    expect(html).toContain('aria-label="消息功能敬请期待"');
+    expect(html).toContain('aria-label="打开导航菜单"');
+  });
 });
 
 afterAll(() => {
