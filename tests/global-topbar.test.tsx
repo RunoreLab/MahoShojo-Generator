@@ -238,6 +238,17 @@ describe('GlobalTopBar', () => {
 
     expect(html.match(/aria-label="消息中心"/g)?.length ?? 0).toBe(1);
   });
+
+  test('mobile drawer renders outside the sticky header container', async () => {
+    const { GlobalTopBar } = await import('@/components/navigation/GlobalTopBar');
+    const html = renderToStaticMarkup(<GlobalTopBar pathname="/arena" defaultMobileOpen={true} />);
+
+    const headerEndIndex = html.indexOf('</header>');
+    const drawerDialogIndex = html.indexOf('role="dialog"');
+
+    expect(headerEndIndex).toBeGreaterThan(-1);
+    expect(drawerDialogIndex).toBeGreaterThan(headerEndIndex);
+  });
 });
 
 afterAll(() => {
