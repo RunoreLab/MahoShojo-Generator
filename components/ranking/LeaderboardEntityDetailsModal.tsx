@@ -38,6 +38,7 @@ export const loadLeaderboardEntityDetails = async (
     const result = await getPublicCardByIdWithSharedCache({
       id: entity.entityId,
       fetcher: (id) => fetchPublicDataCardRowById(id, { fetcher: options.fetcher }),
+      allowedRecordSources: ['public-data-card-api'],
       getNowMs: options.getNowMs,
     });
 

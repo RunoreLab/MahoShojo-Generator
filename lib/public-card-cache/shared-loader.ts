@@ -144,6 +144,20 @@ const touchEntryAccess = <TEntry extends PublicCardCacheEntry>(entry: TEntry, no
   return touchedEntry;
 };
 
+const isAllowedRecordSource = (
+  entry: PublicCardCacheRecord,
+  allowedSources: readonly PublicCardCacheRecord['source'][] | undefined,
+): boolean => !allowedSources || allowedSources.includes(entry.source);
+
+const shouldBypassCardEntryForSource = (
+  entry: PublicCardCacheEntry,
+  state: 'fresh' | 'stale' | 'expired' | 'negative',
+  allowedSources: readonly PublicCardCacheRecord['source'][] | undefined,
+): entry is PublicCardCacheRecord =>
+  entry.cacheKind === 'card'
+  && (state === 'fresh' || state === 'stale')
+  && !isAllowedRecordSource(entry, allowedSources);
+
 const persistEntry = async (entry: PublicCardCacheEntry, nowMs: number): Promise<void> => {
   try {
     await putPublicCardCacheRecord(entry);
@@ -341,6 +355,7 @@ export const getPublicCardByIdWithSharedCache = async (input: {
   id: string;
   fetcher?: (id: string) => Promise<PublicCardFetchResult>;
   backgroundRevalidate?: boolean;
+  allowedRecordSources?: readonly PublicCardCacheRecord['source'][];
   nowMs?: number;
   getNowMs?: () => number;
 }): Promise<{
@@ -366,14 +381,22 @@ export const getPublicCardByIdWithSharedCache = async (input: {
         source: 'negative-cache',
       };
     }
-    if (state === 'fresh' && memoryEntry.cacheKind === 'card') {
+    if (
+      state === 'fresh'
+      && memoryEntry.cacheKind === 'card'
+      && isAllowedRecordSource(memoryEntry, input.allowedRecordSources)
+    ) {
       const touchedEntry = touchEntryAccess(memoryEntry, nowMs);
       return {
         card: toCardPayload(touchedEntry),
         source: 'memory',
       };
     }
-    if (state === 'stale' && memoryEntry.cacheKind === 'card') {
+    if (
+      state === 'stale'
+      && memoryEntry.cacheKind === 'card'
+      && isAllowedRecordSource(memoryEntry, input.allowedRecordSources)
+    ) {
       const touchedEntry = touchEntryAccess(memoryEntry, nowMs);
       if (input.backgroundRevalidate !== false) {
         revalidateInBackground(normalizedId, nowMs, input.fetcher, input.getNowMs);
@@ -384,7 +407,9 @@ export const getPublicCardByIdWithSharedCache = async (input: {
       };
     }
 
-    removeEntryFromMemory(normalizedId);
+    if (!shouldBypassCardEntryForSource(memoryEntry, state, input.allowedRecordSources)) {
+      removeEntryFromMemory(normalizedId);
+    }
   }
 
   let indexedDbEntry: PublicCardCacheEntry | null = null;
@@ -408,7 +433,11 @@ export const getPublicCardByIdWithSharedCache = async (input: {
       };
     }
 
-    if (state === 'fresh' && indexedDbEntry.cacheKind === 'card') {
+    if (
+      state === 'fresh'
+      && indexedDbEntry.cacheKind === 'card'
+      && isAllowedRecordSource(indexedDbEntry, input.allowedRecordSources)
+    ) {
       const touchedEntry: PublicCardCacheRecord = {
         ...indexedDbEntry,
         lastAccessedAtMs: nowMs,
@@ -421,7 +450,11 @@ export const getPublicCardByIdWithSharedCache = async (input: {
       };
     }
 
-    if (state === 'stale' && indexedDbEntry.cacheKind === 'card') {
+    if (
+      state === 'stale'
+      && indexedDbEntry.cacheKind === 'card'
+      && isAllowedRecordSource(indexedDbEntry, input.allowedRecordSources)
+    ) {
       const touchedEntry: PublicCardCacheRecord = {
         ...indexedDbEntry,
         lastAccessedAtMs: nowMs,
@@ -437,7 +470,9 @@ export const getPublicCardByIdWithSharedCache = async (input: {
       };
     }
 
-    void deleteEntryEverywhere(normalizedId);
+    if (!shouldBypassCardEntryForSource(indexedDbEntry, state, input.allowedRecordSources)) {
+      void deleteEntryEverywhere(normalizedId);
+    }
   }
 
   if (!input.fetcher) {

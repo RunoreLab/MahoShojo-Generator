@@ -228,6 +228,7 @@ export interface ChallengeNodeRecord {
   nodeType: ChallengeNodeType;
   status: ChallengeNodeStatus;
   encounterSnapshot: EncounterSnapshotV1 | null;
+  enemySourceCardLite?: ChallengeResolvedSourceCardLite | null;
   playerInput: unknown | null;
   resolverEnvelope: unknown | null;
   adjudicationResultDigest: string | null;

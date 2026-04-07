@@ -806,6 +806,7 @@ export const deriveChallengeResumeState = (input: {
   selectedRecommendedActionId: string;
   latestNodeSummary: string;
   summaryText: string;
+  currentEnemySourceCardLite: ChallengeResolvedSourceCardLite | null;
   activeNodeRecord: ChallengeNodeRecord | null;
 } => {
   const checkpointRunState = (input.latestCheckpoint?.snapshot.runState as RunStateV1 | null) ?? null;
@@ -823,6 +824,7 @@ export const deriveChallengeResumeState = (input: {
       selectedRecommendedActionId: battleRecommendedActions[0]?.id ?? '',
       latestNodeSummary: '',
       summaryText: '',
+      currentEnemySourceCardLite: null,
       activeNodeRecord: null,
     };
   }
@@ -847,6 +849,7 @@ export const deriveChallengeResumeState = (input: {
       selectedRecommendedActionId: playerInput.selectedRecommendedActionId,
       latestNodeSummary: `已恢复至 ${input.latestNodeRecord.nodeId} 的待结算节点。`,
       summaryText: '',
+      currentEnemySourceCardLite: input.latestNodeRecord.enemySourceCardLite ?? null,
       activeNodeRecord: input.latestNodeRecord,
     };
   }
@@ -862,6 +865,7 @@ export const deriveChallengeResumeState = (input: {
       selectedRecommendedActionId: battleRecommendedActions[0]?.id ?? '',
       latestNodeSummary: `已恢复本地挑战：上次推进到 ${input.runRecord.lastResolvedNodeId ?? '终局'}。`,
       summaryText: buildFinishedSummaryText(effectiveRunState, '你重新回顾了这一轮的最终记录。'),
+      currentEnemySourceCardLite: null,
       activeNodeRecord: null,
     };
   }
@@ -880,6 +884,7 @@ export const deriveChallengeResumeState = (input: {
       selectedRecommendedActionId: playerInput.selectedRecommendedActionId,
       latestNodeSummary: `已恢复至 ${effectiveRunState.currentNodeId} 的待结算节点。`,
       summaryText: '',
+      currentEnemySourceCardLite: null,
       activeNodeRecord: null,
     };
   }
@@ -895,6 +900,7 @@ export const deriveChallengeResumeState = (input: {
     selectedRecommendedActionId: battleRecommendedActions[0]?.id ?? '',
     latestNodeSummary: `已恢复本地挑战：上次推进到 ${input.latestCheckpoint?.snapshot.lastResolvedNodeId ?? input.runRecord.lastResolvedNodeId ?? '起点前'}。`,
     summaryText: '',
+    currentEnemySourceCardLite: null,
     activeNodeRecord: null,
   };
 };
@@ -1380,7 +1386,7 @@ export function useChallengeController() {
       setActiveRunRecord(storedRun);
       setRunState(resumeState.runState);
       setCurrentEncounter(resumeState.currentEncounter);
-      setCurrentEnemySourceCardLite(null);
+      setCurrentEnemySourceCardLite(resumeState.currentEnemySourceCardLite);
       setActiveNodeRecord(resumeState.activeNodeRecord);
       setNodeViewMode(resumeState.nodeViewMode);
       setLatestStoryText('');
@@ -1445,6 +1451,7 @@ export function useChallengeController() {
         nodeType: encounter.kind,
         status: 'entered',
         encounterSnapshot: encounter,
+        enemySourceCardLite: resolvedEncounter.enemySourceCardLite,
         playerInput: {
           recommendedActionId: nextSelectedRecommendedActionId,
           optionId: nextSelectedOptionId,
@@ -1553,6 +1560,7 @@ export function useChallengeController() {
         nodeType: activeNodeRecord?.nodeType ?? currentEncounter.kind,
         status: 'resolved',
         encounterSnapshot: currentEncounter,
+        enemySourceCardLite: activeNodeRecord?.enemySourceCardLite ?? currentEnemySourceCardLite,
         playerInput: {
           recommendedActionId: selectedRecommendedActionId,
           optionId: selectedOptionId,

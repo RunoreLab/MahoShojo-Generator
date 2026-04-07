@@ -532,6 +532,16 @@ describe('challenge page', () => {
 
   test('deriveChallengeResumeState 会优先恢复 entered 节点的冻结快照与输入草稿', async () => {
     const { deriveChallengeResumeState } = await import('@/components/challenge/hooks/useChallengeController');
+    const sidecar = {
+      id: 'card-sidecar-resume-1',
+      name: '冻结敌人',
+      data: JSON.stringify({
+        templateId: '通用角色',
+        name: '冻结敌人',
+        content: '# 冻结敌人',
+      }),
+      updatedAt: '2026-04-05T12:00:00.000Z',
+    };
 
     const runState = {
       ...createAcceptedRunState(),
@@ -568,6 +578,7 @@ describe('challenge page', () => {
         optionId: '',
         note: '先观察她的起手，再抓回合差。',
       },
+      enemySourceCardLite: sidecar,
       resolverEnvelope: null,
       adjudicationResultDigest: null,
       storyText: null,
@@ -585,6 +596,7 @@ describe('challenge page', () => {
     expect(resumeState.currentEncounter?.nodeId).toBe('L1-N1');
     expect(resumeState.note).toBe('先观察她的起手，再抓回合差。');
     expect(resumeState.selectedRecommendedActionId).toBe('bait-counter');
+    expect(resumeState.currentEnemySourceCardLite).toEqual(sidecar);
   });
 
   test('deriveChallengeResumeState 会在 run record 落后时优先采用最新 checkpoint 快照', async () => {

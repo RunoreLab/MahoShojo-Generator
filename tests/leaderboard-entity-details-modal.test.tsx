@@ -4,7 +4,10 @@ import '@/tests/helpers/fake-indexeddb';
 
 import { __resetAiSessionDbForTest } from '@/lib/ai-session/storage';
 import { AI_SESSION_DB_NAME } from '@/lib/ai-session/types';
-import { clearPublicCardMemoryCacheForTest } from '@/lib/public-card-cache/shared-loader';
+import {
+  clearPublicCardMemoryCacheForTest,
+  writePublicCardCacheFromSidecar,
+} from '@/lib/public-card-cache/shared-loader';
 
 describe('LeaderboardEntityDetailsModal', () => {
   beforeEach(async () => {
@@ -79,5 +82,72 @@ describe('LeaderboardEntityDetailsModal', () => {
     expect(second.card.author).toBe('真实作者');
     expect(second.card.likeCount).toBe(34);
     expect(second.pendingNotice).toBe(entity.pendingNotice);
+  });
+
+  test('data_card 详情不会把 challenge sidecar 当作完整 public-data-card 详情', async () => {
+    const { loadLeaderboardEntityDetails } = await import('@/components/ranking/LeaderboardEntityDetailsModal');
+
+    await writePublicCardCacheFromSidecar({
+      id: 'card-details-sidecar',
+      name: '冻结挑战侧载',
+      data: JSON.stringify({
+        templateId: '通用角色',
+        name: '冻结挑战侧载',
+        content: '# 冻结挑战侧载',
+      }),
+      updatedAt: '2026-04-05T12:00:00.000Z',
+    });
+    clearPublicCardMemoryCacheForTest();
+
+    let fetchCount = 0;
+    const entry = await loadLeaderboardEntityDetails(
+      {
+        entityType: 'data_card',
+        entityId: 'card-details-sidecar',
+        displayName: '排行榜展示名',
+        authorName: '排行榜作者',
+      },
+      {
+        fetcher: async (input) => {
+          if (!input.startsWith('/api/public-data-cards?id=')) {
+            throw new Error(`unexpected fetch: ${input}`);
+          }
+
+          fetchCount += 1;
+          return new Response(
+            JSON.stringify({
+              success: true,
+              card: {
+                id: 'card-details-sidecar',
+                name: 'API 完整详情',
+                description: '来自 API 的完整详情简介',
+                type: 'character',
+                data: JSON.stringify({
+                  templateId: '通用角色',
+                  name: 'API 完整详情',
+                  content: '# API 完整详情',
+                }),
+                is_public: 1,
+                username: '真实作者',
+                usage_count: 12,
+                like_count: 34,
+                favorite_count: 56,
+                created_at: '2026-04-05T10:00:00.000Z',
+                updated_at: '2026-04-05T12:00:00.000Z',
+              },
+            }),
+            {
+              status: 200,
+              headers: { 'Content-Type': 'application/json' },
+            },
+          );
+        },
+      },
+    );
+
+    expect(fetchCount).toBe(1);
+    expect(entry.card.name).toBe('API 完整详情');
+    expect(entry.card.description).toBe('来自 API 的完整详情简介');
+    expect(entry.card.author).toBe('真实作者');
   });
 });
