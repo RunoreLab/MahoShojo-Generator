@@ -24,3 +24,4 @@ export * from '@/lib/db/repositories/badges';
 export * from '@/lib/db/repositories/redemption-codes';
 export * from '@/lib/db/repositories/large-objects';
 export * from '@/lib/db/repositories/user-activity';
+export * from '@/lib/db/repositories/messages';

@@ -14,6 +14,13 @@ let topBarProfileState = {
   avatarDataUrl: null as string | null,
 };
 
+let topBarMessagesState = {
+  unreadTotal: 0,
+  loading: false,
+  error: null as string | null,
+  refresh: async () => undefined,
+};
+
 mock.module('next/link', () => ({
   default: function LinkMock({
     children,
@@ -40,6 +47,10 @@ mock.module('@/components/navigation/useTopBarProfile', () => ({
   useTopBarProfile: () => topBarProfileState,
 }));
 
+mock.module('@/components/navigation/useTopBarMessages', () => ({
+  useTopBarMessages: () => topBarMessagesState,
+}));
+
 describe('topbar leaf components', () => {
   beforeEach(() => {
     authState = {
@@ -52,16 +63,26 @@ describe('topbar leaf components', () => {
     topBarProfileState = {
       avatarDataUrl: null,
     };
+    topBarMessagesState = {
+      unreadTotal: 0,
+      loading: false,
+      error: null,
+      refresh: async () => undefined,
+    };
   });
 
-  test('message placeholder is disabled and does not render unread data', async () => {
-    const { TopBarMessagePlaceholder } = await import('@/components/navigation/TopBarMessagePlaceholder');
-    const html = renderToStaticMarkup(<TopBarMessagePlaceholder />);
+  test('message entry links to the message center and renders unread data', async () => {
+    topBarMessagesState = {
+      ...topBarMessagesState,
+      unreadTotal: 5,
+    };
+    const { TopBarMessageButton } = await import('@/components/navigation/TopBarMessageButton');
+    const html = renderToStaticMarkup(<TopBarMessageButton isAuthenticated={true} userId={7} />);
 
     expect(html).toContain('消息');
-    expect(html).toContain('敬请期待');
-    expect(html).toContain('disabled');
-    expect(html).not.toContain('未读');
+    expect(html).toContain('href="/messages"');
+    expect(html).toContain('5');
+    expect(html).not.toContain('disabled');
   });
 
   test('theme menu renders the existing color mode options', async () => {
@@ -162,6 +183,7 @@ describe('GlobalTopBar', () => {
     expect(html).toContain('完整竞技场');
     expect(html).toContain('外观');
     expect(html).toContain('消息');
+    expect(html).toContain('href="/messages"');
     expect(html).toContain('登录 / 注册');
   });
 
@@ -197,7 +219,7 @@ describe('GlobalTopBar', () => {
     expect(html).toContain('aria-label="返回首页"');
     expect(html).toContain('aria-label="全站主导航"');
     expect(html).toContain('aria-label="外观设置"');
-    expect(html).toContain('aria-label="消息功能敬请期待"');
+    expect(html).toContain('aria-label="消息中心"');
     expect(html).toContain('aria-label="打开导航菜单"');
     expect(html).not.toContain('role="menu"');
     expect(html).not.toContain('aria-haspopup="menu"');

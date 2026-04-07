@@ -53,11 +53,11 @@ function Page() {
 
 describe('App topbar coverage', () => {
   test('covered route renders global topbar before page content', async () => {
-    pathname = '/battle';
+    pathname = '/messages';
     const { default: App } = await import('@/pages/_app');
     const html = renderToStaticMarkup(<App Component={Page} pageProps={{}} router={{} as never} />);
 
-    expect(html).toContain('data-global-topbar="/battle"');
+    expect(html).toContain('data-global-topbar="/messages"');
     expect(html.indexOf('GlobalTopBar')).toBeLessThan(html.indexOf('页面内容'));
   });
 

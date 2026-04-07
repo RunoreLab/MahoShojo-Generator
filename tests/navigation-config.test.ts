@@ -18,6 +18,7 @@ describe('navigation config', () => {
       '/character-manager',
       '/me',
       '/pvp',
+      '/messages',
     ]);
 
     for (const path of TOPBAR_COVERED_ROUTES) {
@@ -49,6 +50,7 @@ describe('navigation config', () => {
     expect(targets).toContainEqual(['/scenario', false]);
     expect(targets).toContainEqual(['/sublimation', false]);
     expect(targets).toContainEqual(['/battle', true]);
+    expect(targets.map(([href]) => href)).not.toContain('/messages');
   });
 
   test('route group metadata covers navigation targets but coverage controls active topbar display', () => {
@@ -68,5 +70,6 @@ describe('navigation config', () => {
     expect(getNavGroupForPath('/encyclopedia/site-guide')?.id).toBe('knowledge');
     expect(getTopbarCoverage('/ranking')).toEqual({ isCovered: false, activeGroupId: null });
     expect(getTopbarCoverage('/battle')).toEqual({ isCovered: true, activeGroupId: 'battle' });
+    expect(getTopbarCoverage('/messages')).toEqual({ isCovered: true, activeGroupId: null });
   });
 });

@@ -21,6 +21,7 @@ export const TOPBAR_COVERED_ROUTES = [
   '/character-manager',
   '/me',
   '/pvp',
+  '/messages',
 ] as const;
 
 export const NAV_GROUPS: NavGroup[] = [

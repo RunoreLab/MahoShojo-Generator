@@ -3,7 +3,8 @@ import Link from 'next/link';
 import { Menu, Sparkles } from 'lucide-react';
 
 import { getTopbarCoverage, NAV_GROUPS } from '@/lib/navigation';
-import { TopBarMessagePlaceholder } from '@/components/navigation/TopBarMessagePlaceholder';
+import { useAuth } from '@/lib/useAuth';
+import { TopBarMessageButton } from '@/components/navigation/TopBarMessageButton';
 import { TopBarMobileDrawer } from '@/components/navigation/TopBarMobileDrawer';
 import { TopBarThemeMenu } from '@/components/navigation/TopBarThemeMenu';
 import { TopBarUserMenu } from '@/components/navigation/TopBarUserMenu';
@@ -16,6 +17,7 @@ export function GlobalTopBar({ pathname }: GlobalTopBarProps) {
   const [isMobileOpen, setIsMobileOpen] = useState(false);
   const [logoLoadFailed, setLogoLoadFailed] = useState(false);
   const { activeGroupId } = getTopbarCoverage(pathname);
+  const { isAuthenticated, user } = useAuth();
 
   return (
     <header
@@ -99,11 +101,11 @@ export function GlobalTopBar({ pathname }: GlobalTopBarProps) {
         <div className="ml-auto flex items-center gap-2">
           <TopBarThemeMenu />
           <div className="hidden items-center gap-2 md:flex">
-            <TopBarMessagePlaceholder />
+            <TopBarMessageButton isAuthenticated={isAuthenticated} userId={user?.id ?? null} />
             <TopBarUserMenu />
           </div>
           <div className="flex items-center gap-2 md:hidden">
-            <TopBarMessagePlaceholder />
+            <TopBarMessageButton isAuthenticated={isAuthenticated} userId={user?.id ?? null} />
             <button
               type="button"
               aria-label="打开导航菜单"

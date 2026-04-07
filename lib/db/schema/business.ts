@@ -1,3 +1,4 @@
+import { sql } from 'drizzle-orm';
 import { index, integer, primaryKey, real, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
 
 export type DataCardType = 'character' | 'scenario' | 'history' | 'questionnaire';
@@ -5,6 +6,10 @@ export type DataCardReviewStatus = 'pending' | 'approved' | 'rejected';
 export type ArenaRatingEntityType = 'data_card' | 'preset';
 export type ArenaRatingQueue = 'strict' | 'free';
 export type ArenaRatingEventStatus = 'pending' | 'applied' | 'skipped' | 'failed';
+export type SiteMessageType = 'service' | 'maintenance' | 'activity' | 'policy' | 'issue' | 'generic';
+export type UserMessageChannel = 'system' | 'admin';
+export type UserMessageType = 'moderation' | 'reputation' | 'account' | 'generic';
+export type MessagePriority = 'low' | 'normal' | 'high';
 
 /**
  * 业务主用户表（映射现有 users）
@@ -45,6 +50,82 @@ export const dataCards = sqliteTable('data_cards', {
   createdAt: text('created_at'),
   updatedAt: text('updated_at'),
   deletedAt: text('deleted_at'),
+});
+
+export const siteMessages = sqliteTable(
+  'site_messages',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    messageType: text('message_type').$type<SiteMessageType>().notNull(),
+    templateKey: text('template_key').notNull(),
+    payloadJson: text('payload_json').notNull().default('{}'),
+    titleText: text('title_text'),
+    bodyText: text('body_text'),
+    actionUrl: text('action_url'),
+    priority: text('priority').$type<MessagePriority>().notNull().default('normal'),
+    expiresAt: text('expires_at'),
+    createdByUserId: integer('created_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    activeIdIndex: index('idx_site_messages_active_id').on(table.id, table.expiresAt),
+    createdAtIndex: index('idx_site_messages_created_at').on(table.createdAt),
+  }),
+);
+
+export const userMessages = sqliteTable(
+  'user_messages',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    recipientUserId: integer('recipient_user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    actorUserId: integer('actor_user_id').references(() => users.id, { onDelete: 'set null' }),
+    channel: text('channel').$type<UserMessageChannel>().notNull().default('system'),
+    messageType: text('message_type').$type<UserMessageType>().notNull(),
+    templateKey: text('template_key').notNull(),
+    payloadJson: text('payload_json').notNull().default('{}'),
+    titleText: text('title_text'),
+    bodyText: text('body_text'),
+    actionUrl: text('action_url'),
+    sourceEntityType: text('source_entity_type'),
+    sourceEntityId: text('source_entity_id'),
+    priority: text('priority').$type<MessagePriority>().notNull().default('normal'),
+    readAt: text('read_at'),
+    archivedAt: text('archived_at'),
+    expiresAt: text('expires_at'),
+    createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    recipientInboxIndex: index('idx_user_messages_recipient_inbox').on(
+      table.recipientUserId,
+      table.archivedAt,
+      table.readAt,
+      table.id,
+    ),
+    recipientCreatedAtIndex: index('idx_user_messages_recipient_created_at').on(
+      table.recipientUserId,
+      table.createdAt,
+    ),
+    recipientSourceIndex: index('idx_user_messages_recipient_source').on(
+      table.recipientUserId,
+      table.sourceEntityType,
+      table.sourceEntityId,
+    ),
+    expiresAtIndex: index('idx_user_messages_expires_at').on(table.expiresAt),
+  }),
+);
+
+export const userMessageState = sqliteTable('user_message_state', {
+  userId: integer('user_id')
+    .primaryKey()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  lastReadSiteMessageId: integer('last_read_site_message_id').notNull().default(0),
+  lastSummaryReadAt: text('last_summary_read_at'),
+  createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
 });
 
 export const favorites = sqliteTable(
