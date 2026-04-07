@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, test } from 'bun:test';
 import {
   clearTopBarMessagesMemoryCacheForTests,
   getTopBarMessagesStateSnapshot,
+  resolveTopBarMessagesStateForRender,
   setTopBarMessagesMemoryCacheForTests,
 } from '@/components/navigation/useTopBarMessages';
 
@@ -19,6 +20,33 @@ describe('topbar messages snapshot', () => {
 
     expect(getTopBarMessagesStateSnapshot(7, true).unreadTotal).toBe(12);
     expect(getTopBarMessagesStateSnapshot(8, true)).toMatchObject({
+      unreadTotal: 0,
+      loading: true,
+      error: null,
+    });
+  });
+
+  test('stale hook state does not leak unread count across user switch render', () => {
+    setTopBarMessagesMemoryCacheForTests(7, {
+      unreadTotal: 12,
+      fetchedAt: Date.now(),
+    });
+
+    expect(
+      resolveTopBarMessagesStateForRender(
+        {
+          ownerUserId: 7,
+          enabled: true,
+          unreadTotal: 12,
+          loading: false,
+          error: null,
+        },
+        8,
+        true,
+      ),
+    ).toMatchObject({
+      ownerUserId: 8,
+      enabled: true,
       unreadTotal: 0,
       loading: true,
       error: null,

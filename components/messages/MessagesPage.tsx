@@ -77,6 +77,32 @@ export const isMessagesPageStateForViewer = (
   effectiveUserId: number | null,
 ): boolean => stateOwnerUserId === effectiveUserId;
 
+export const resolveMessagesPageDataRequests = ({
+  isAuthenticated,
+  listResult,
+  summaryResult,
+}: {
+  isAuthenticated: boolean;
+  listResult: PromiseSettledResult<MessageListDto>;
+  summaryResult: PromiseSettledResult<MessageSummaryDto | null>;
+}): { listPayload: MessageListDto; summaryPayload: MessageSummaryDto | null } => {
+  if (listResult.status !== 'fulfilled') {
+    throw listResult.reason;
+  }
+
+  if (!isAuthenticated || summaryResult.status !== 'fulfilled') {
+    return {
+      listPayload: listResult.value,
+      summaryPayload: null,
+    };
+  }
+
+  return {
+    listPayload: listResult.value,
+    summaryPayload: summaryResult.value,
+  };
+};
+
 export const getMessagesPageEmptyStateCopy = (filter: MessageFilter, isAuthenticated: boolean): string => {
   if (!isAuthenticated) {
     return '暂无全站通知';
@@ -133,8 +159,15 @@ export function MessagesPage({
     setState((current) => ({ ...current, loading: true, error: null }));
     try {
       const params = new URLSearchParams({ filter: requestFilter, limit: '20' });
-      const listPayload = await request<MessageListDto>(`/api/messages?${params.toString()}`);
-      const summaryPayload = effectiveIsAuthenticated ? await request<MessageSummaryDto>('/api/messages/summary') : null;
+      const [listResult, summaryResult] = await Promise.allSettled([
+        request<MessageListDto>(`/api/messages?${params.toString()}`),
+        effectiveIsAuthenticated ? request<MessageSummaryDto>('/api/messages/summary') : Promise.resolve(null),
+      ]);
+      const { listPayload, summaryPayload } = resolveMessagesPageDataRequests({
+        isAuthenticated: effectiveIsAuthenticated,
+        listResult,
+        summaryResult,
+      });
 
       if (pageDataRequestIdRef.current !== requestId || effectiveUserIdRef.current !== requestUserId) {
         return;

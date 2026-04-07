@@ -243,6 +243,44 @@ describe('messages page UI', () => {
     expect(isMessagesPageStateForViewer(7, null)).toBe(false);
   });
 
+  test('summary failure preserves successful message list payload for authenticated users', async () => {
+    const { resolveMessagesPageDataRequests } = await import('@/components/messages/MessagesPage');
+    const listPayload = {
+      messages: [
+        {
+          id: 'user:9',
+          scope: 'user',
+          numericId: 9,
+          messageType: 'moderation',
+          templateKey: 'user.moderation.data_card_rejected',
+          title: '审核未通过',
+          body: '请修改后重新提交。',
+          actionUrl: '/character-manager',
+          priority: 'high',
+          isRead: false,
+          readAt: null,
+          createdAt: '2026-04-07T10:00:00.000Z',
+        },
+      ],
+      nextCursor: null,
+      filter: 'all',
+      appliedFilter: 'all',
+      fetchedAt: '2026-04-07T10:00:00.000Z',
+      isAuthenticated: true,
+    } as const;
+
+    expect(
+      resolveMessagesPageDataRequests({
+        isAuthenticated: true,
+        listResult: { status: 'fulfilled', value: listPayload },
+        summaryResult: { status: 'rejected', reason: new Error('summary:503') },
+      }),
+    ).toEqual({
+      listPayload,
+      summaryPayload: null,
+    });
+  });
+
   test('empty-state copy follows the active filter semantics', async () => {
     const { getMessagesPageEmptyStateCopy } = await import('@/components/messages/MessagesPage');
 

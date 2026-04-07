@@ -15,6 +15,14 @@ type CachedSummary = {
   fetchedAt: number;
 };
 
+type TopBarMessagesRenderState = {
+  ownerUserId: number | null;
+  enabled: boolean;
+  unreadTotal: number;
+  loading: boolean;
+  error: string | null;
+};
+
 const memoryCache = new Map<number, CachedSummary>();
 
 const canUseWindow = (): boolean => typeof window !== 'undefined';
@@ -84,6 +92,31 @@ export const getTopBarMessagesStateSnapshot = (
   };
 };
 
+const createTopBarMessagesRenderState = (
+  userId: number | null,
+  enabled: boolean,
+): TopBarMessagesRenderState => {
+  const snapshot = getTopBarMessagesStateSnapshot(userId, enabled);
+  return {
+    ownerUserId: userId,
+    enabled,
+    unreadTotal: snapshot.unreadTotal,
+    loading: snapshot.loading,
+    error: snapshot.error,
+  };
+};
+
+export const resolveTopBarMessagesStateForRender = (
+  state: TopBarMessagesRenderState,
+  userId: number | null,
+  enabled: boolean,
+): TopBarMessagesRenderState => {
+  if (state.ownerUserId === userId && state.enabled === enabled) {
+    return state;
+  }
+  return createTopBarMessagesRenderState(userId, enabled);
+};
+
 export const setTopBarMessagesMemoryCacheForTests = (userId: number, value: CachedSummary) => {
   memoryCache.set(userId, value);
 };
@@ -98,38 +131,41 @@ export function useTopBarMessages(userId: number | null, enabled: boolean): {
   error: string | null;
   refresh: () => Promise<void>;
 } {
-  const snapshot = getTopBarMessagesStateSnapshot(userId, enabled);
-  const [unreadTotal, setUnreadTotal] = useState<number>(snapshot.unreadTotal);
-  const [loading, setLoading] = useState<boolean>(snapshot.loading);
-  const [error, setError] = useState<string | null>(null);
+  const [state, setState] = useState<TopBarMessagesRenderState>(() =>
+    createTopBarMessagesRenderState(userId, enabled),
+  );
+  const renderState = resolveTopBarMessagesStateForRender(state, userId, enabled);
 
   useEffect(() => {
-    const nextSnapshot = getTopBarMessagesStateSnapshot(userId, enabled);
-    setUnreadTotal(nextSnapshot.unreadTotal);
-    setLoading(nextSnapshot.loading);
-    setError(nextSnapshot.error);
+    setState(createTopBarMessagesRenderState(userId, enabled));
   }, [enabled, userId]);
 
   useEffect(() => {
     if (!enabled || !userId) {
-      setUnreadTotal(0);
-      setLoading(false);
-      setError(null);
+      setState(createTopBarMessagesRenderState(userId, enabled));
       return;
     }
 
     let cancelled = false;
+    const updateState = (patch: Partial<TopBarMessagesRenderState>) => {
+      setState((current) => {
+        if (current.ownerUserId !== userId || current.enabled !== enabled) {
+          return current;
+        }
+        return { ...current, ...patch };
+      });
+    };
 
     const applyCached = (next: CachedSummary) => {
       memoryCache.set(userId, next);
       writeSessionCache(userId, next);
       if (!cancelled) {
-        setUnreadTotal(next.unreadTotal);
+        updateState({ unreadTotal: next.unreadTotal });
       }
     };
 
     const refresh = async () => {
-      setLoading(true);
+      updateState({ loading: true });
       try {
         const response = await authStorage.fetch('/api/messages/summary', {
           method: 'GET',
@@ -144,15 +180,15 @@ export function useTopBarMessages(userId: number | null, enabled: boolean): {
           fetchedAt: Date.now(),
         });
         if (!cancelled) {
-          setError(null);
+          updateState({ error: null });
         }
       } catch {
         if (!cancelled) {
-          setError('消息摘要加载失败');
+          updateState({ error: '消息摘要加载失败' });
         }
       } finally {
         if (!cancelled) {
-          setLoading(false);
+          updateState({ loading: false });
         }
       }
     };
@@ -160,9 +196,9 @@ export function useTopBarMessages(userId: number | null, enabled: boolean): {
     void (async () => {
       const nextCached = readCachedSummary(userId);
       if (nextCached) {
-        setUnreadTotal(nextCached.unreadTotal);
+        updateState({ unreadTotal: nextCached.unreadTotal });
         if (isCacheFresh(nextCached)) {
-          setLoading(false);
+          updateState({ loading: false });
           return;
         }
       }
@@ -192,23 +228,32 @@ export function useTopBarMessages(userId: number | null, enabled: boolean): {
   }, [enabled, userId]);
 
   return {
-    unreadTotal,
-    loading,
-    error,
+    unreadTotal: renderState.unreadTotal,
+    loading: renderState.loading,
+    error: renderState.error,
     refresh: async () => {
       if (!enabled || !userId) {
-        setUnreadTotal(0);
-        setLoading(false);
-        setError(null);
+        setState(createTopBarMessagesRenderState(userId, enabled));
         return;
       }
 
+      setState((current) => {
+        if (current.ownerUserId !== userId || current.enabled !== enabled) {
+          return current;
+        }
+        return { ...current, loading: true };
+      });
       const response = await authStorage.fetch('/api/messages/summary', {
         method: 'GET',
         cache: 'no-store',
       });
       if (!response.ok) {
-        setError('消息摘要加载失败');
+        setState((current) => {
+          if (current.ownerUserId !== userId || current.enabled !== enabled) {
+            return current;
+          }
+          return { ...current, error: '消息摘要加载失败', loading: false };
+        });
         return;
       }
       const payload = (await response.json().catch(() => null)) as MessagesSummaryResponse | null;
@@ -218,9 +263,17 @@ export function useTopBarMessages(userId: number | null, enabled: boolean): {
       };
       memoryCache.set(userId, nextCache);
       writeSessionCache(userId, nextCache);
-      setUnreadTotal(nextCache.unreadTotal);
-      setError(null);
-      setLoading(false);
+      setState((current) => {
+        if (current.ownerUserId !== userId || current.enabled !== enabled) {
+          return current;
+        }
+        return {
+          ...current,
+          unreadTotal: nextCache.unreadTotal,
+          error: null,
+          loading: false,
+        };
+      });
     },
   };
 }
