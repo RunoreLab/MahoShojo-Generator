@@ -416,6 +416,72 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
         ]
     },
     {
+        id: 'nova-cervus',
+        name: '鹿鹿 API',
+        description: '鹿鹿 API 为用户提供了国内外广泛的模型库，主要是按次计费，适合按可用性挑选单模型通道。',
+        docsUrl: 'https://nova.cervus.top/register?aff=i0uQ',
+        baseUrl: 'https://nova.cervus.top/v1',
+        type: 'openai',
+        mode: 'json',
+        models: [
+            {
+                value: '[鹿鹿10]gemini-3.1-pro-preview',
+                label: 'Gemini 3.1 Pro（按次）',
+                description: '鹿鹿当前可选的 Gemini 3.1 Pro 按次档之一，适合复杂指令、高质量创作与长文本任务。'
+            },
+            {
+                value: '[鹿鹿10]gemini-3-pro-preview',
+                label: 'Gemini 3.0 Pro（按次）',
+                description: '较稳定的 Gemini 3.0 Pro 按次通道，适合综合写作、推理与结构化生成。'
+            },
+            {
+                value: '[鹿鹿2]gemini-3-flash-preview',
+                label: 'Gemini 3.0 Flash（按次）',
+                description: '鹿鹿的 Gemini 3.0 Flash 档位，适合高频交互与流式生成。'
+            },
+            {
+                value: '[鹿鹿10]gemini-2.5-pro',
+                label: 'Gemini 2.5 Pro（按次）',
+                description: '鹿鹿的 Gemini 2.5 Pro 按次通道，适合质量优先的文本生成场景。'
+            },
+            {
+                value: '[鹿鹿5]gemini-2.5-pro-preview-06-05',
+                label: 'Gemini 2.5 Pro（按量）',
+                description: '鹿鹿的 Gemini 2.5 Pro 按量通道，适合质量优先的文本生成场景。'
+            },
+            {
+                value: '[鹿鹿2]gemini-2.5-flash',
+                label: 'Gemini 2.5 Flash（按次）',
+                description: 'Gemini 2.5 Flash 的按次通道，适合作为均衡速度与成本的常用选择。'
+            },
+            {
+                value: '[鹿鹿14]claude-sonnet-4-6',
+                label: 'Claude Sonnet 4.6（按次）',
+                description: '鹿鹿的 Claude Sonnet 4.6 档位，适合稳健写作与长文本整理。'
+            },
+            {
+                value: '[鹿鹿14]claude-sonnet-4-5-20250929',
+                label: 'Claude Sonnet 4.5（按次）',
+                description: '鹿鹿的 Claude Sonnet 4.5 按次档，状态波动较大，建议作为备用通道。'
+            },
+            {
+                value: '[鹿鹿14]claude-opus-4-6',
+                label: 'Claude Opus 4.6（按次）',
+                description: 'Claude Opus 4.6 的按次通道，适合复杂创作与高要求任务。'
+            },
+            {
+                value: '[鹿鹿1]deepseek/deepseek-r1-0528:free',
+                label: 'DeepSeek R1（免费）',
+                description: '鹿鹿提供的 DeepSeek 免费试用档，实时状态通常不稳定，适合作为低成本备用入口。'
+            },
+            {
+                value: '[鹿鹿1]qwen/qwen3-next-80b-a3b-instruct:free',
+                label: 'Qwen3 Next 80B（免费）',
+                description: '鹿鹿提供的 Qwen3 免费试用档，适合低成本尝试，但实时可用性较弱。'
+            },
+        ]
+    },
+    {
         id: 'modelscope',
         name: '魔搭 Modelscope',
         description: '阿里云旗下专注于人工智能领域的开源模型平台，提供针对国内大模型的免费推理服务。',
