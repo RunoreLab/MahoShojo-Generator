@@ -85,6 +85,25 @@ describe('topbar leaf components', () => {
     expect(html).toContain('角色管理');
     expect(html).toContain('退出登录');
   });
+
+  test('mobile user menu expands actions inline for touch navigation', async () => {
+    authState = {
+      ...authState,
+      user: { id: 7, username: '小圆' },
+      isAuthenticated: true,
+    };
+    const { TopBarUserMenu } = await import('@/components/navigation/TopBarUserMenu');
+    const html = renderToStaticMarkup(
+      <TopBarUserMenu variant="mobile" onNavigate={() => undefined} />,
+    );
+
+    expect(html).toContain('小圆');
+    expect(html).toContain('账户快捷入口');
+    expect(html).toContain('个人页');
+    expect(html).toContain('角色管理');
+    expect(html).toContain('退出登录');
+    expect(html).not.toContain('aria-haspopup="menu"');
+  });
 });
 
 describe('GlobalTopBar', () => {
@@ -137,17 +156,20 @@ describe('GlobalTopBar', () => {
     expect(html).toContain('创作');
     expect(html).toContain('竞技');
     expect(html).toContain('排行榜');
+    expect(html).toContain('登录 / 注册');
   });
 
-  test('topbar navigation exposes aria labels and menu markers', async () => {
+  test('topbar navigation exposes accessible labels without unsupported menu roles', async () => {
     const { GlobalTopBar } = await import('@/components/navigation/GlobalTopBar');
     const html = renderToStaticMarkup(<GlobalTopBar pathname="/arena" />);
 
+    expect(html).toContain('aria-label="返回首页"');
     expect(html).toContain('aria-label="全站主导航"');
-    expect(html).toContain('aria-haspopup="menu"');
     expect(html).toContain('aria-label="外观设置"');
     expect(html).toContain('aria-label="消息功能敬请期待"');
     expect(html).toContain('aria-label="打开导航菜单"');
+    expect(html).not.toContain('role="menu"');
+    expect(html).not.toContain('aria-haspopup="menu"');
   });
 });
 

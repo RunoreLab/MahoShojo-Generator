@@ -25,6 +25,7 @@ export function GlobalTopBar({ pathname }: GlobalTopBarProps) {
       <div className="mx-auto flex min-h-[var(--global-topbar-height)] w-full max-w-screen-2xl items-center gap-3 px-3 sm:px-4 lg:px-6">
         <Link
           href="/"
+          aria-label="返回首页"
           className="inline-flex min-w-0 items-center gap-2 rounded-full px-2 py-1.5 text-gray-900 transition hover:bg-white/70 dark:text-slate-100 dark:hover:bg-slate-900"
         >
           <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-pink-500 via-rose-400 to-sky-400 text-white shadow-sm">
@@ -41,35 +42,34 @@ export function GlobalTopBar({ pathname }: GlobalTopBarProps) {
               <div key={group.id} className="group relative">
                 <button
                   type="button"
-                  aria-haspopup="menu"
                   className={
                     active
-                      ? 'h-9 rounded-full bg-pink-600 px-4 text-sm font-semibold text-white shadow-sm'
-                      : 'h-9 rounded-full px-4 text-sm font-semibold text-gray-700 transition hover:bg-white/75 dark:text-slate-100 dark:hover:bg-slate-900'
+                      ? 'h-9 rounded-full bg-pink-600 px-4 text-sm font-semibold text-white shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pink-200'
+                      : 'h-9 rounded-full px-4 text-sm font-semibold text-gray-700 transition hover:bg-white/75 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pink-200 dark:text-slate-100 dark:hover:bg-slate-900'
                   }
                 >
                   {group.label}
                 </button>
                 <div
-                  role="menu"
                   aria-label={`${group.label}导航`}
-                  className="invisible absolute left-0 top-full z-[45] mt-2 min-w-56 rounded-2xl border border-white/60 bg-white/95 p-2 opacity-0 shadow-xl backdrop-blur transition group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100 dark:border-slate-600/60 dark:bg-slate-950/95"
+                  className="invisible absolute left-0 top-full z-[45] min-w-56 pt-2 opacity-0 transition group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100"
                 >
-                  {group.items.map((item) => (
-                    <Link
-                      key={item.href}
-                      role="menuitem"
-                      href={item.href}
-                      className="block rounded-xl px-3 py-2 text-sm text-gray-800 hover:bg-pink-50 dark:text-slate-100 dark:hover:bg-slate-800"
-                    >
-                      <span className="font-medium">{item.label}</span>
-                      {item.description ? (
-                        <span className="mt-0.5 block text-xs text-gray-500 dark:text-slate-400">
-                          {item.description}
-                        </span>
-                      ) : null}
-                    </Link>
-                  ))}
+                  <div className="rounded-2xl border border-white/60 bg-white/95 p-2 shadow-xl backdrop-blur dark:border-slate-600/60 dark:bg-slate-950/95">
+                    {group.items.map((item) => (
+                      <Link
+                        key={item.href}
+                        href={item.href}
+                        className="block rounded-xl px-3 py-2 text-sm text-gray-800 hover:bg-pink-50 dark:text-slate-100 dark:hover:bg-slate-800"
+                      >
+                        <span className="font-medium">{item.label}</span>
+                        {item.description ? (
+                          <span className="mt-0.5 block text-xs text-gray-500 dark:text-slate-400">
+                            {item.description}
+                          </span>
+                        ) : null}
+                      </Link>
+                    ))}
+                  </div>
                 </div>
               </div>
             );

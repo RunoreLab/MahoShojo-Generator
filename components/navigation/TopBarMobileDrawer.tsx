@@ -4,6 +4,7 @@ import { X } from 'lucide-react';
 
 import type { NavGroupId } from '@/lib/navigation';
 import { NAV_GROUPS } from '@/lib/navigation';
+import { TopBarUserMenu } from '@/components/navigation/TopBarUserMenu';
 
 interface TopBarMobileDrawerProps {
   isOpen: boolean;
@@ -104,6 +105,13 @@ export function TopBarMobileDrawer({
             </section>
           ))}
         </nav>
+
+        <div className="mt-6 border-t border-gray-200 pt-4 dark:border-slate-800">
+          <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-slate-400">
+            账户
+          </div>
+          <TopBarUserMenu variant="mobile" onNavigate={onClose} />
+        </div>
       </div>
     </div>
   );
