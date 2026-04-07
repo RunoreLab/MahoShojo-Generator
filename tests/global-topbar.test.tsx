@@ -10,6 +10,10 @@ let authState = {
   logout: async () => undefined,
 };
 
+let topBarProfileState = {
+  avatarDataUrl: null as string | null,
+};
+
 mock.module('next/link', () => ({
   default: function LinkMock({
     children,
@@ -32,6 +36,10 @@ mock.module('@/lib/useAuth', () => ({
   useAuth: () => authState,
 }));
 
+mock.module('@/components/navigation/useTopBarProfile', () => ({
+  useTopBarProfile: () => topBarProfileState,
+}));
+
 describe('topbar leaf components', () => {
   beforeEach(() => {
     authState = {
@@ -40,6 +48,9 @@ describe('topbar leaf components', () => {
       loading: false,
       isAuthenticated: false,
       logout: async () => undefined,
+    };
+    topBarProfileState = {
+      avatarDataUrl: null,
     };
   });
 
@@ -84,6 +95,23 @@ describe('topbar leaf components', () => {
     expect(html).toContain('个人页');
     expect(html).toContain('角色管理');
     expect(html).toContain('退出登录');
+  });
+
+  test('logged in user menu renders avatar image when profile has avatar', async () => {
+    authState = {
+      ...authState,
+      user: { id: 7, username: '小圆' },
+      isAuthenticated: true,
+    };
+    topBarProfileState = {
+      avatarDataUrl: 'data:image/webp;base64,topbar-avatar',
+    };
+    const { TopBarUserMenu } = await import('@/components/navigation/TopBarUserMenu');
+    const html = renderToStaticMarkup(<TopBarUserMenu />);
+
+    expect(html).toContain('src="data:image/webp;base64,topbar-avatar"');
+    expect(html).toContain('alt="小圆的头像"');
+    expect(html).not.toContain('>小<');
   });
 
   test('mobile user menu expands actions inline for touch navigation', async () => {

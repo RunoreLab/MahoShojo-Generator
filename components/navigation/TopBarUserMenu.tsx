@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { LogOut, UserRound } from 'lucide-react';
 
 import { useAuth } from '@/lib/useAuth';
+import { useTopBarProfile } from '@/components/navigation/useTopBarProfile';
 
 interface TopBarUserMenuProps {
   variant?: 'desktop' | 'mobile';
@@ -10,8 +11,33 @@ interface TopBarUserMenuProps {
 
 const getInitial = (username: string): string => username.trim().slice(0, 1) || 'U';
 
+function TopBarAvatar({
+  avatarDataUrl,
+  username,
+  size,
+}: {
+  avatarDataUrl: string | null;
+  username: string;
+  size: 'desktop' | 'mobile';
+}) {
+  const sizeClassName = size === 'mobile' ? 'h-9 w-9 text-sm' : 'h-6 w-6 text-xs';
+
+  return (
+    <span
+      className={`inline-flex ${sizeClassName} shrink-0 items-center justify-center overflow-hidden rounded-full bg-pink-600 font-bold text-white`}
+    >
+      {avatarDataUrl ? (
+        <img src={avatarDataUrl} alt={`${username}的头像`} className="h-full w-full object-cover" />
+      ) : (
+        getInitial(username)
+      )}
+    </span>
+  );
+}
+
 export function TopBarUserMenu({ variant = 'desktop', onNavigate }: TopBarUserMenuProps) {
   const { user, loading, isAuthenticated, logout } = useAuth();
+  const { avatarDataUrl } = useTopBarProfile(user?.id ?? null, isAuthenticated);
 
   if (loading) {
     return (
@@ -47,9 +73,7 @@ export function TopBarUserMenu({ variant = 'desktop', onNavigate }: TopBarUserMe
     return (
       <div className="space-y-2">
         <div className="flex items-center gap-3 rounded-2xl border border-white/60 bg-white/70 px-3 py-3 shadow-sm dark:border-slate-700/60 dark:bg-slate-900/70">
-          <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-pink-600 text-sm font-bold text-white">
-            {getInitial(user.username)}
-          </span>
+          <TopBarAvatar avatarDataUrl={avatarDataUrl} username={user.username} size="mobile" />
           <div className="min-w-0">
             <div className="truncate text-sm font-semibold text-gray-900 dark:text-slate-100">
               {user.username}
@@ -95,9 +119,7 @@ export function TopBarUserMenu({ variant = 'desktop', onNavigate }: TopBarUserMe
         type="button"
         className="inline-flex h-9 items-center gap-2 rounded-full border border-white/50 bg-white/70 px-2.5 pr-3 text-sm font-medium text-gray-800 shadow-sm backdrop-blur transition hover:bg-white/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pink-200 dark:border-slate-600/60 dark:bg-slate-900/70 dark:text-slate-100"
       >
-        <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-pink-600 text-xs font-bold text-white">
-          {getInitial(user.username)}
-        </span>
+        <TopBarAvatar avatarDataUrl={avatarDataUrl} username={user.username} size="desktop" />
         <span className="max-w-24 truncate">{user.username}</span>
       </button>
       <div
