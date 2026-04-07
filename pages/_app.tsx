@@ -6,13 +6,15 @@ import '@/styles/globals.css';
 import '@/styles/blue-theme.css';
 import '@/styles/gradient-buttons.css';
 import 'katex/dist/katex.min.css';
-import { ColorModeSwitcher } from '@/components/shared/ColorModeSwitcher';
 import AnnouncementTicker from '@/components/Announcement/AnnouncementTicker';
+import { GlobalTopBar } from '@/components/navigation/GlobalTopBar';
+import { isTopbarCoveredPath } from '@/lib/navigation';
 
 export default function App({ Component, pageProps }: AppProps) {
   const router = useRouter();
   const isDetailsPage = router.pathname === '/details' || router.pathname === '/canshou';
   const isArrestedPage = router.pathname === '/arrested';
+  const shouldShowTopbar = isTopbarCoveredPath(router.pathname);
   const gaId = process.env.NEXT_PUBLIC_GA_ID?.trim();
 
   return (
@@ -25,7 +27,7 @@ export default function App({ Component, pageProps }: AppProps) {
       </Head>
 
       <div className={isDetailsPage ? 'blue-theme' : ''}>
-        <ColorModeSwitcher />
+        {shouldShowTopbar ? <GlobalTopBar pathname={router.pathname} /> : null}
         <Component {...pageProps} />
         {!isArrestedPage && <AnnouncementTicker />}
         {gaId ? <GoogleAnalytics gaId={gaId} /> : null}
