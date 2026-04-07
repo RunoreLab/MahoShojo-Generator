@@ -231,6 +231,13 @@ describe('GlobalTopBar', () => {
 
     expect(html.match(/aria-label="外观设置"/g)?.length ?? 0).toBe(1);
   });
+
+  test('renders one shared message entry instance across breakpoints', async () => {
+    const { GlobalTopBar } = await import('@/components/navigation/GlobalTopBar');
+    const html = renderToStaticMarkup(<GlobalTopBar pathname="/arena" />);
+
+    expect(html.match(/aria-label="消息中心"/g)?.length ?? 0).toBe(1);
+  });
 });
 
 afterAll(() => {

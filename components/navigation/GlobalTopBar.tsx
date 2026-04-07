@@ -100,12 +100,11 @@ export function GlobalTopBar({ pathname }: GlobalTopBarProps) {
 
         <div className="ml-auto flex items-center gap-2">
           <TopBarThemeMenu />
+          <TopBarMessageButton isAuthenticated={isAuthenticated} userId={user?.id ?? null} />
           <div className="hidden items-center gap-2 md:flex">
-            <TopBarMessageButton isAuthenticated={isAuthenticated} userId={user?.id ?? null} />
             <TopBarUserMenu />
           </div>
           <div className="flex items-center gap-2 md:hidden">
-            <TopBarMessageButton isAuthenticated={isAuthenticated} userId={user?.id ?? null} />
             <button
               type="button"
               aria-label="打开导航菜单"
