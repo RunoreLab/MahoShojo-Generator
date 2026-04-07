@@ -122,6 +122,9 @@ describe('GlobalTopBar', () => {
     const html = renderToStaticMarkup(<GlobalTopBar pathname="/battle" />);
 
     expect(html).toContain('MahoShojo');
+    expect(html).toContain('src="/logo.svg"');
+    expect(html).toContain('data-logo-fallback="true"');
+    expect(html).toContain('data-logo-fallback="true" class="hidden');
     expect(html).toContain('href="/"');
     expect(html).toContain('创作');
     expect(html).toContain('竞技');

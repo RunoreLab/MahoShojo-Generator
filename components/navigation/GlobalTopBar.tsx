@@ -14,6 +14,7 @@ interface GlobalTopBarProps {
 
 export function GlobalTopBar({ pathname }: GlobalTopBarProps) {
   const [isMobileOpen, setIsMobileOpen] = useState(false);
+  const [logoLoadFailed, setLogoLoadFailed] = useState(false);
   const { activeGroupId } = getTopbarCoverage(pathname);
 
   return (
@@ -28,10 +29,29 @@ export function GlobalTopBar({ pathname }: GlobalTopBarProps) {
           aria-label="返回首页"
           className="inline-flex min-w-0 items-center gap-2 rounded-full px-2 py-1.5 text-gray-900 transition hover:bg-white/70 dark:text-slate-100 dark:hover:bg-slate-900"
         >
-          <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-pink-500 via-rose-400 to-sky-400 text-white shadow-sm">
-            <Sparkles className="h-4 w-4" aria-hidden="true" />
+          {logoLoadFailed ? null : (
+            <img
+              src="/logo.svg"
+              alt="MahoShojo"
+              width={132}
+              height={32}
+              onError={() => setLogoLoadFailed(true)}
+              className="h-8 w-auto shrink-0"
+            />
+          )}
+          <span
+            data-logo-fallback="true"
+            className={
+              logoLoadFailed
+                ? 'inline-flex min-w-0 items-center gap-2'
+                : 'hidden min-w-0 items-center gap-2'
+            }
+          >
+            <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-pink-500 via-rose-400 to-sky-400 text-white shadow-sm">
+              <Sparkles className="h-4 w-4" aria-hidden="true" />
+            </span>
+            <span className="hidden min-w-0 text-sm font-bold tracking-wide sm:inline">MahoShojo</span>
           </span>
-          <span className="hidden min-w-0 text-sm font-bold tracking-wide sm:inline">MahoShojo</span>
         </Link>
 
         <nav className="hidden items-center gap-1 md:flex" aria-label="全站主导航">
