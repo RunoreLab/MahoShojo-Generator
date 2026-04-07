@@ -83,8 +83,8 @@ const challengeRequirements: BetaAccessRequirementGroup = {
     },
     {
       type: 'publicFavorites',
-      min: 100,
-      label: '公开卡累计收藏量 ≥ 100',
+      min: 200,
+      label: '公开卡累计收藏量 ≥ 200',
     },
   ],
 };
@@ -122,7 +122,7 @@ export const betaAccessConfig: {
     challenge: {
       id: 'challenge',
       title: '肉鸽挑战',
-      summary: '挑战模式仍在内测中，仅向已完成足够数据卡验证的创作者开放。',
+      summary: '尚未完成的挑战之路，唯有足够强大的挑战者方能踏足。',
       href: '/challenge',
       showRequirements: true,
       requirements: challengeRequirements,
