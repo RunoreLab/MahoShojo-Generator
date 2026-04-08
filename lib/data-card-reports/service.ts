@@ -40,6 +40,8 @@ type DataCardReportsRepository = {
   getActiveReportByCaseAndReporter: typeof repo.getActiveReportByCaseAndReporter;
   createReport: typeof repo.createReport;
   updateActiveReportForReporter: typeof repo.updateActiveReportForReporter;
+  createReportSubmissionEvent: typeof repo.createReportSubmissionEvent;
+  countReportSubmissionEventsByReporterSince: typeof repo.countReportSubmissionEventsByReporterSince;
   replaceReportReferences: typeof repo.replaceReportReferences;
   listReportReferencesByReport: typeof repo.listReportReferencesByReport;
   listActiveReportsByCase: typeof repo.listActiveReportsByCase;
@@ -135,6 +137,9 @@ const toRepo = (): DataCardReportsRepository => ({
   getActiveReportByCaseAndReporter: (innerDb, input) => repo.getActiveReportByCaseAndReporter(innerDb, input),
   createReport: (innerDb, input) => repo.createReport(innerDb, input),
   updateActiveReportForReporter: (innerDb, input) => repo.updateActiveReportForReporter(innerDb, input),
+  createReportSubmissionEvent: (innerDb, input) => repo.createReportSubmissionEvent(innerDb, input),
+  countReportSubmissionEventsByReporterSince: (innerDb, input) =>
+    repo.countReportSubmissionEventsByReporterSince(innerDb, input),
   replaceReportReferences: (innerDb, input) => repo.replaceReportReferences(innerDb, input),
   listReportReferencesByReport: (innerDb, reportId) => repo.listReportReferencesByReport(innerDb, reportId),
   listActiveReportsByCase: (innerDb, caseId) => repo.listActiveReportsByCase(innerDb, caseId),
@@ -198,12 +203,11 @@ const previewDetails = (details: string | null): string | null => {
   return details.length <= 80 ? details : `${details.slice(0, 80)}…`;
 };
 
+const formatReferenceSummaryItem = (referenceType: string, labelSnapshot: string): string =>
+  referenceType === 'public_data_card' ? `引用公开数据卡：${labelSnapshot}` : `引用百科：${labelSnapshot}`;
+
 const buildReferenceSummary = (references: ResolvedReferenceSnapshot[]): string[] =>
-  references.map((reference) =>
-    reference.referenceType === 'public_data_card'
-      ? `引用公开数据卡：${reference.labelSnapshot}`
-      : `引用百科：${reference.labelSnapshot}`,
-  );
+  references.map((reference) => formatReferenceSummaryItem(reference.referenceType, reference.labelSnapshot));
 
 const buildEvidenceSummary = (input: {
   reasonCode: string;
@@ -236,6 +240,13 @@ const parseEvidenceSummary = (payloadJson: string): {
   }
 };
 
+const canonicalizeReferenceIdentity = (
+  references: Array<{ referenceType: string; referenceId: string; note: string | null }>,
+): string[] =>
+  references
+    .map((reference) => JSON.stringify([reference.referenceType, reference.referenceId, reference.note ?? null]))
+    .sort();
+
 const hasMatchingReportReferences = (
   currentReferences: Array<{
     referenceType: string;
@@ -247,17 +258,24 @@ const hasMatchingReportReferences = (
 ): boolean => {
   if (currentReferences.length !== normalizedReferences.length) return false;
 
-  return normalizedReferences.every((reference, index) => {
-    const currentReference = currentReferences[index];
-    if (!currentReference) return false;
+  const currentCanonical = canonicalizeReferenceIdentity(currentReferences);
+  const normalizedCanonical = canonicalizeReferenceIdentity(normalizedReferences);
 
-    return (
-      currentReference.referenceType === reference.referenceType &&
-      currentReference.referenceId === reference.referenceId &&
-      (currentReference.note ?? null) === reference.note &&
-      currentReference.sortOrder === reference.sortOrder
-    );
-  });
+  return normalizedCanonical.every((referenceKey, index) => currentCanonical[index] === referenceKey);
+};
+
+type AggregatedCaseEvidenceSummary = {
+  reasonLabels: string[];
+  referenceSummary: string[];
+  detailsPreview: string | null;
+};
+
+const aggregateDetailsPreview = (detailsPreviews: Array<string | null | undefined>): string | null => {
+  const uniqueDetails = Array.from(
+    new Set(detailsPreviews.filter((details): details is string => typeof details === 'string' && details.length > 0)),
+  );
+  if (uniqueDetails.length === 0) return null;
+  return previewDetails(uniqueDetails.join('；'));
 };
 
 const toReportReferenceWriteInput = (
@@ -328,7 +346,7 @@ export async function rateLimitDataCardReportSubmission(
     }
   }
 
-  const lastHourCount = await repo.countReportsUpdatedByReporterSince(db, {
+  const lastHourCount = await repo.countReportSubmissionEventsByReporterSince(db, {
     reporterUserId: input.reporterUserId,
     since: subtractWindowFromIso(now, 60 * 60 * 1000),
   });
@@ -336,7 +354,7 @@ export async function rateLimitDataCardReportSubmission(
     return { allowed: false };
   }
 
-  const lastDayCount = await repo.countReportsUpdatedByReporterSince(db, {
+  const lastDayCount = await repo.countReportSubmissionEventsByReporterSince(db, {
     reporterUserId: input.reporterUserId,
     since: subtractWindowFromIso(now, 24 * 60 * 60 * 1000),
   });
@@ -387,6 +405,40 @@ const createDataCardReportsService = (deps: DataCardReportsServiceDeps) => {
       caseId: input.caseId,
       isSelfRemediationCandidate: isCandidate,
       selfRemediationDetectedAt: isCandidate ? input.currentTargetCardUpdatedAt : null,
+    };
+  };
+
+  const buildAggregatedCaseEvidenceSummary = async (
+    db: AppDrizzleDb,
+    activeReports: Awaited<ReturnType<typeof deps.repo.listActiveReportsByCase>>,
+  ): Promise<AggregatedCaseEvidenceSummary> => {
+    const summaries = await Promise.all(
+      activeReports.map(async (report) => {
+        const parsedSummary = parseEvidenceSummary(
+          typeof report.evidenceSummaryJson === 'string' ? report.evidenceSummaryJson : '{}',
+        );
+        const referenceSummary =
+          parsedSummary.referenceSummary.length > 0
+            ? parsedSummary.referenceSummary
+            : (
+                await deps.repo.listReportReferencesByReport(db, report.id)
+              ).map((reference) => formatReferenceSummaryItem(reference.referenceType, reference.labelSnapshot));
+
+        return {
+          reasonLabels:
+            parsedSummary.reasonLabels.length > 0
+              ? parsedSummary.reasonLabels
+              : [getDataCardReportReasonLabel(report.reasonCode)],
+          referenceSummary,
+          detailsPreview: parsedSummary.detailsPreview ?? previewDetails(report.details),
+        };
+      }),
+    );
+
+    return {
+      reasonLabels: Array.from(new Set(summaries.flatMap((summary) => summary.reasonLabels))),
+      referenceSummary: Array.from(new Set(summaries.flatMap((summary) => summary.referenceSummary))),
+      detailsPreview: aggregateDetailsPreview(summaries.map((summary) => summary.detailsPreview)),
     };
   };
 
@@ -452,35 +504,7 @@ const createDataCardReportsService = (deps: DataCardReportsServiceDeps) => {
       });
       const myReferences = myReport ? await deps.repo.listReportReferencesByReport(db, myReport.id) : [];
       const activeReports = await deps.repo.listActiveReportsByCase(db, openCase.id);
-
-      const aggregatedReasonLabels = Array.from(
-        new Set(
-          activeReports.flatMap((report) => {
-            const summary = parseEvidenceSummary(report.evidenceSummaryJson);
-            return summary.reasonLabels.length > 0
-              ? summary.reasonLabels
-              : [getDataCardReportReasonLabel(report.reasonCode)];
-          }),
-        ),
-      );
-      const aggregatedReferenceSummary = Array.from(
-        new Set(
-          (
-            await Promise.all(
-              activeReports.map(async (report) => {
-                const summary = parseEvidenceSummary(report.evidenceSummaryJson);
-                if (summary.referenceSummary.length > 0) return summary.referenceSummary;
-                const refs = await deps.repo.listReportReferencesByReport(db, report.id);
-                return refs.map((reference) =>
-                  reference.referenceType === 'public_data_card'
-                    ? `引用公开数据卡：${reference.labelSnapshot}`
-                    : `引用百科：${reference.labelSnapshot}`,
-                );
-              }),
-            )
-          ).flat(),
-        ),
-      );
+      const caseEvidenceSummary = await buildAggregatedCaseEvidenceSummary(db, activeReports);
 
       return {
         canReport: true,
@@ -502,8 +526,8 @@ const createDataCardReportsService = (deps: DataCardReportsServiceDeps) => {
         caseSummary: {
           caseId: openCase.id,
           reportCount: activeReports.length,
-          reasonLabels: aggregatedReasonLabels,
-          referenceSummary: aggregatedReferenceSummary,
+          reasonLabels: caseEvidenceSummary.reasonLabels,
+          referenceSummary: caseEvidenceSummary.referenceSummary,
         },
       };
     },
@@ -689,6 +713,17 @@ const createDataCardReportsService = (deps: DataCardReportsServiceDeps) => {
         throw new DataCardReportsServiceUnavailableError('更新举报失败');
       }
 
+      if (submissionDecision === 'created' || submissionDecision === 'updated') {
+        await deps.repo.createReportSubmissionEvent(db, {
+          id: deps.idFactory(),
+          caseId: openCase.id,
+          reportId: reportRow.id,
+          reporterUserId: input.reporterUserId,
+          submissionDecision,
+          now,
+        });
+      }
+
       if (isDuplicatePayload) {
         const currentReferences = await deps.repo.listReportReferencesByReport(db, reportRow.id);
         if (!hasMatchingReportReferences(currentReferences, normalizedReferences)) {
@@ -712,10 +747,11 @@ const createDataCardReportsService = (deps: DataCardReportsServiceDeps) => {
 
       let creatorNotified = false;
       if (!openCase.creatorNotifiedAt) {
-        const notificationEvidenceSummary =
-          evidenceSummary ??
-          parseEvidenceSummary(typeof reportRow.evidenceSummaryJson === 'string' ? reportRow.evidenceSummaryJson : '{}');
-        const reportCount = await deps.repo.countActiveReportsByCase(db, openCase.id);
+        const notificationActiveReports = await deps.repo.listActiveReportsByCase(db, openCase.id);
+        const activeReportsForNotification =
+          notificationActiveReports.length > 0 ? notificationActiveReports : [reportRow];
+        const notificationEvidenceSummary = await buildAggregatedCaseEvidenceSummary(db, activeReportsForNotification);
+        const reportCount = activeReportsForNotification.length;
         creatorNotified = await deps.repo.markReportCaseCreatorNotified(db, {
           caseId: openCase.id,
           notifiedAt: now,
@@ -812,6 +848,18 @@ export function createDataCardReportsServiceForTests(
       createReport: deps.repo?.createReport ?? (() => missing('createReport')),
       updateActiveReportForReporter:
         deps.repo?.updateActiveReportForReporter ?? (() => missing('updateActiveReportForReporter')),
+      createReportSubmissionEvent:
+        deps.repo?.createReportSubmissionEvent ??
+        (async (_db, input) => ({
+          id: input.id,
+          caseId: input.caseId,
+          reportId: input.reportId,
+          reporterUserId: input.reporterUserId,
+          submissionDecision: input.submissionDecision,
+          createdAt: input.now,
+        })),
+      countReportSubmissionEventsByReporterSince:
+        deps.repo?.countReportSubmissionEventsByReporterSince ?? (async () => 0),
       replaceReportReferences: deps.repo?.replaceReportReferences ?? (() => missing('replaceReportReferences')),
       listReportReferencesByReport:
         deps.repo?.listReportReferencesByReport ?? (async () => []),

@@ -3,7 +3,7 @@ import { join } from 'node:path';
 
 import { describe, expect, test } from 'bun:test';
 
-import { reportCases, reportReferences, reports } from '@/lib/db/schema';
+import { reportCases, reportReferences, reportSubmissionEvents, reports } from '@/lib/db/schema';
 
 describe('data card reports schema contract', () => {
   test('exports report tables with canonical snake_case columns', () => {
@@ -18,13 +18,16 @@ describe('data card reports schema contract', () => {
     expect(reportReferences.referenceType.name).toBe('reference_type');
     expect(reportReferences.referenceId.name).toBe('reference_id');
     expect(reportReferences.sortOrder.name).toBe('sort_order');
+
+    expect(reportSubmissionEvents.reporterUserId.name).toBe('reporter_user_id');
+    expect(reportSubmissionEvents.submissionDecision.name).toBe('submission_decision');
   });
 
-  test('migration creates the reporter updated_at index used by rate limiting', () => {
-    const migrationPath = join(process.cwd(), 'drizzle/0007_data_card_reports.sql');
+  test('migration creates immutable submission events used by rate limiting', () => {
+    const migrationPath = join(process.cwd(), 'drizzle/0008_report_submission_events.sql');
     const content = readFileSync(migrationPath, 'utf8');
 
-    expect(content.includes('CREATE INDEX IF NOT EXISTS idx_reports_reporter_updated_at')).toBe(true);
-    expect(content.includes('ON reports(reporter_user_id, updated_at')).toBe(true);
+    expect(content.includes('CREATE TABLE IF NOT EXISTS report_submission_events')).toBe(true);
+    expect(content.includes('CREATE INDEX IF NOT EXISTS idx_report_submission_events_reporter_created_at')).toBe(true);
   });
 });

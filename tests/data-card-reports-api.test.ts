@@ -19,7 +19,9 @@ describe('data card reports API', () => {
   test('GET capability returns canReport false for logged out viewer without requiring mutation auth', async () => {
     const handler = createDataCardReportsHandler({
       getAuthUser: async () => null,
-      getDb: () => null,
+      getDb: () => {
+        throw new Error('logged out capability should not resolve db');
+      },
       getDataCardReportCapability: async () => ({
         canReport: false,
         reportDisabledReason: '登录后可举报',

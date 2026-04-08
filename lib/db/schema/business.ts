@@ -18,6 +18,7 @@ export type ReportResolutionCode =
   | 'no_violation'
   | 'malicious_report';
 export type ReportStatus = 'active' | 'withdrawn';
+export type ReportSubmissionDecision = 'created' | 'updated';
 export type ReportReferenceType = 'public_data_card' | 'encyclopedia_entry';
 
 /**
@@ -120,6 +121,30 @@ export const reports = sqliteTable(
     reporterStatusCreatedIndex: index('idx_reports_reporter_status_created').on(
       table.reporterUserId,
       table.status,
+      table.createdAt,
+    ),
+  }),
+);
+
+export const reportSubmissionEvents = sqliteTable(
+  'report_submission_events',
+  {
+    id: text('id').primaryKey(),
+    caseId: text('case_id')
+      .notNull()
+      .references(() => reportCases.id, { onDelete: 'cascade' }),
+    reportId: text('report_id')
+      .notNull()
+      .references(() => reports.id, { onDelete: 'cascade' }),
+    reporterUserId: integer('reporter_user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    submissionDecision: text('submission_decision').$type<ReportSubmissionDecision>().notNull(),
+    createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    reporterCreatedAtIndex: index('idx_report_submission_events_reporter_created_at').on(
+      table.reporterUserId,
       table.createdAt,
     ),
   }),

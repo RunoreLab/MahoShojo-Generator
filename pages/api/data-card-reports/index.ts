@@ -109,9 +109,10 @@ export const createDataCardReportsHandler =
 
       try {
         const auth = await (deps.getAuthUser ?? defaultDeps.getAuthUser)(req);
+        const viewerUserId = auth?.user.id ?? null;
         const payload = await (deps.getDataCardReportCapability ?? defaultDeps.getDataCardReportCapability)({
-          db: await resolveDb(deps),
-          viewerUserId: auth?.user.id ?? null,
+          db: viewerUserId == null ? null : await resolveDb(deps),
+          viewerUserId,
           targetEntityId,
         });
         return json(payload, { headers: { 'Cache-Control': 'no-store' } });

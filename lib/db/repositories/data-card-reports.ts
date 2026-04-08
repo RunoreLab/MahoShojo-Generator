@@ -1,8 +1,13 @@
 import { and, asc, count, eq, gte, inArray, isNull, sql } from 'drizzle-orm';
 
 import type { AppDrizzleDb } from '@/lib/db/drizzle';
-import { reportCases, reportReferences, reports } from '@/lib/db/schema';
-import type { ReportCaseStatus, ReportReferenceType, ReportStatus } from '@/lib/db/schema/business';
+import { reportCases, reportReferences, reportSubmissionEvents, reports } from '@/lib/db/schema';
+import type {
+  ReportCaseStatus,
+  ReportReferenceType,
+  ReportStatus,
+  ReportSubmissionDecision,
+} from '@/lib/db/schema/business';
 
 export type ReportCaseRow = {
   id: string;
@@ -50,6 +55,15 @@ export type ReportReferenceRow = {
   createdAt: string;
 };
 
+export type ReportSubmissionEventRow = {
+  id: string;
+  caseId: string;
+  reportId: string;
+  reporterUserId: number;
+  submissionDecision: ReportSubmissionDecision;
+  createdAt: string;
+};
+
 export type CreateReportCaseInput = {
   id: string;
   targetEntityType: 'data_card';
@@ -86,6 +100,15 @@ export type CreateReportReferenceInput = {
   urlSnapshot: string | null;
   note: string | null;
   sortOrder: number;
+};
+
+export type CreateReportSubmissionEventInput = {
+  id: string;
+  caseId: string;
+  reportId: string;
+  reporterUserId: number;
+  submissionDecision: ReportSubmissionDecision;
+  now: string;
 };
 
 const openCaseStatuses: ReportCaseStatus[] = ['open', 'under_review'];
@@ -257,14 +280,38 @@ export async function countActiveReportsByCase(db: AppDrizzleDb, caseId: string)
   return Math.max(0, Number(rows[0]?.count ?? 0));
 }
 
-export async function countReportsUpdatedByReporterSince(
+export async function createReportSubmissionEvent(
+  db: AppDrizzleDb,
+  input: CreateReportSubmissionEventInput,
+): Promise<ReportSubmissionEventRow> {
+  const rows = await db
+    .insert(reportSubmissionEvents)
+    .values({
+      id: input.id,
+      caseId: input.caseId,
+      reportId: input.reportId,
+      reporterUserId: input.reporterUserId,
+      submissionDecision: input.submissionDecision,
+      createdAt: input.now,
+    })
+    .returning();
+
+  return rows[0]!;
+}
+
+export async function countReportSubmissionEventsByReporterSince(
   db: AppDrizzleDb,
   input: { reporterUserId: number; since: string },
 ): Promise<number> {
   const rows = await db
     .select({ count: count() })
-    .from(reports)
-    .where(and(eq(reports.reporterUserId, input.reporterUserId), gte(reports.updatedAt, input.since)));
+    .from(reportSubmissionEvents)
+    .where(
+      and(
+        eq(reportSubmissionEvents.reporterUserId, input.reporterUserId),
+        gte(reportSubmissionEvents.createdAt, input.since),
+      ),
+    );
 
   return Math.max(0, Number(rows[0]?.count ?? 0));
 }

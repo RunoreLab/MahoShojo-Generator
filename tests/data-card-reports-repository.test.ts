@@ -5,8 +5,10 @@ import { drizzle } from 'drizzle-orm/bun-sqlite';
 import type { AppDrizzleDb } from '@/lib/db/drizzle';
 import * as schema from '@/lib/db/schema';
 import {
+  countReportSubmissionEventsByReporterSince,
   createReport,
   createReportCase,
+  createReportSubmissionEvent,
   getActiveReportByCaseAndReporter,
   getOpenReportCaseByTarget,
   listReportReferencesByReport,
@@ -109,6 +111,16 @@ describe('data card reports repository', () => {
       CREATE UNIQUE INDEX idx_reports_case_reporter_active
         ON reports(case_id, reporter_user_id)
         WHERE status = 'active';
+      CREATE TABLE report_submission_events (
+        id TEXT PRIMARY KEY,
+        case_id TEXT NOT NULL,
+        report_id TEXT NOT NULL,
+        reporter_user_id INTEGER NOT NULL,
+        submission_decision TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX idx_report_submission_events_reporter_created_at
+        ON report_submission_events(reporter_user_id, created_at DESC);
       CREATE TABLE report_references (
         id TEXT PRIMARY KEY,
         report_id TEXT NOT NULL,
@@ -209,5 +221,39 @@ describe('data card reports repository', () => {
       ['encyclopedia_entry', 'community-rules', 0],
       ['public_data_card', 'card-2', 1],
     ]);
+  });
+
+  test('counts immutable submission events by reporter and window', async () => {
+    await createReportCaseFixture();
+    await createReportFixture();
+
+    await createReportSubmissionEvent(db, {
+      id: 'event-1',
+      caseId: 'case-1',
+      reportId: 'report-1',
+      reporterUserId: 7,
+      submissionDecision: 'created',
+      now: '2026-04-08T09:40:00.000Z',
+    });
+    await createReportSubmissionEvent(db, {
+      id: 'event-2',
+      caseId: 'case-1',
+      reportId: 'report-1',
+      reporterUserId: 7,
+      submissionDecision: 'updated',
+      now: '2026-04-08T10:10:00.000Z',
+    });
+
+    const countSinceHour = await countReportSubmissionEventsByReporterSince(db, {
+      reporterUserId: 7,
+      since: '2026-04-08T09:30:00.000Z',
+    });
+    const countSinceTen = await countReportSubmissionEventsByReporterSince(db, {
+      reporterUserId: 7,
+      since: '2026-04-08T10:00:00.000Z',
+    });
+
+    expect(countSinceHour).toBe(2);
+    expect(countSinceTen).toBe(1);
   });
 });

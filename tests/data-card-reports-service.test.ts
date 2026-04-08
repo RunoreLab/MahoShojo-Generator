@@ -247,6 +247,85 @@ describe('data card reports service', () => {
     ]);
   });
 
+  test('same normalized payload with reordered references stays side-effect free', async () => {
+    let replaceCalled = false;
+    let resolveCalled = false;
+    const existingHash = await buildNormalizedReportPayloadHash({
+      targetEntityId: 'card-1',
+      reasonCode: 'plagiarism',
+      details: '说明',
+      references: [
+        { referenceType: 'encyclopedia_entry', referenceId: 'community-rules', note: '规则', sortOrder: 0 },
+        { referenceType: 'public_data_card', referenceId: 'card-2', note: '对照', sortOrder: 1 },
+      ],
+    });
+    const service = buildService({
+      repo: {
+        getOpenReportCaseByTarget: async () => ({
+          id: 'case-1',
+          targetEntityType: 'data_card',
+          targetEntityId: 'card-1',
+          targetUserId: 2,
+          status: 'open',
+          creatorNotifiedAt: now,
+          creatorNotifiedReportCount: 1,
+        }),
+        getActiveReportByCaseAndReporter: async () => ({
+          id: 'report-1',
+          caseId: 'case-1',
+          reporterUserId: 7,
+          evidenceSummaryJson: '{}',
+          normalizedPayloadHash: existingHash,
+          status: 'active',
+        }),
+        listReportReferencesByReport: async () => [
+          {
+            id: 'ref-1',
+            reportId: 'report-1',
+            referenceType: 'encyclopedia_entry',
+            referenceId: 'community-rules',
+            labelSnapshot: '社区守则',
+            urlSnapshot: '/encyclopedia/community-rules',
+            note: '规则',
+            sortOrder: 0,
+            createdAt: now,
+          },
+          {
+            id: 'ref-2',
+            reportId: 'report-1',
+            referenceType: 'public_data_card',
+            referenceId: 'card-2',
+            labelSnapshot: '对照卡',
+            urlSnapshot: '/character-manager?dataCardId=card-2',
+            note: '对照',
+            sortOrder: 1,
+            createdAt: now,
+          },
+        ],
+        replaceReportReferences: async () => {
+          replaceCalled = true;
+        },
+      },
+      resolveReferenceSnapshots: async () => {
+        resolveCalled = true;
+        return [];
+      },
+    });
+
+    const result = await service.submitDataCardReport({
+      ...makeSubmitInput(7),
+      references: [
+        { referenceType: 'public_data_card', referenceId: 'card-2', note: '对照' },
+        { referenceType: 'encyclopedia_entry', referenceId: 'community-rules', note: '规则' },
+        { referenceType: 'public_data_card', referenceId: 'card-2', note: '重复但应被归一化忽略' },
+      ],
+    });
+
+    expect(result.submissionDecision).toBe('noop_duplicate_payload');
+    expect(resolveCalled).toBe(false);
+    expect(replaceCalled).toBe(false);
+  });
+
   test('same payload retry can resend creator notification after a partial write failure', async () => {
     const openCase = {
       id: 'case-1',
@@ -379,6 +458,106 @@ describe('data card reports service', () => {
       actorUserId: null,
       sourceEntityType: 'report_case',
       templateKey: 'user.moderation.data_card_reported',
+    });
+  });
+
+  test('first creator notification aggregates the whole active case summary', async () => {
+    const messages: any[] = [];
+    const createdReportEvidenceSummary = {
+      reasonLabels: ['疑似抄袭'],
+      referenceSummary: ['引用公开数据卡：白百合'],
+      detailsPreview: '能力结构高度近似。',
+    };
+    const otherReportEvidenceSummary = {
+      reasonLabels: ['骚扰或仇恨内容'],
+      referenceSummary: ['引用百科：社区守则'],
+      detailsPreview: '存在针对性辱骂。',
+    };
+    const service = buildService({
+      repo: {
+        getOpenReportCaseByTarget: async () => ({
+          id: 'case-1',
+          targetEntityType: 'data_card',
+          targetEntityId: 'card-1',
+          targetUserId: 2,
+          status: 'open',
+          creatorNotifiedAt: null,
+          creatorNotifiedReportCount: 0,
+        }),
+        getActiveReportByCaseAndReporter: async () => null,
+        createReport: async (input: any) => ({
+          id: 'report-1',
+          ...input,
+          status: 'active',
+          evidenceSummaryJson: JSON.stringify(createdReportEvidenceSummary),
+        }),
+        replaceReportReferences: async () => {},
+        listActiveReportsByCase: async () => [
+          {
+            id: 'report-1',
+            caseId: 'case-1',
+            reporterUserId: 7,
+            reasonCode: 'plagiarism',
+            details: '能力结构高度近似。',
+            status: 'active',
+            evidenceSummaryJson: JSON.stringify(createdReportEvidenceSummary),
+            normalizedPayloadHash: 'hash-1',
+            targetNameSnapshot: '公开卡',
+            targetDescriptionSnapshot: '描述',
+            targetDataSnapshot: '{"name":"公开卡"}',
+            targetUpdatedAtSnapshot: targetCard.updated_at,
+            createdAt: now,
+            updatedAt: now,
+            withdrawnAt: null,
+          },
+          {
+            id: 'report-2',
+            caseId: 'case-1',
+            reporterUserId: 8,
+            reasonCode: 'harassment_or_hate',
+            details: '存在针对性辱骂。',
+            status: 'active',
+            evidenceSummaryJson: JSON.stringify(otherReportEvidenceSummary),
+            normalizedPayloadHash: 'hash-2',
+            targetNameSnapshot: '公开卡',
+            targetDescriptionSnapshot: '描述',
+            targetDataSnapshot: '{"name":"公开卡"}',
+            targetUpdatedAtSnapshot: targetCard.updated_at,
+            createdAt: now,
+            updatedAt: now,
+            withdrawnAt: null,
+          },
+        ],
+        countActiveReportsByCase: async () => 2,
+        markReportCaseCreatorNotified: async () => true,
+      },
+      resolveReferenceSnapshots: async () => [
+        {
+          referenceType: 'public_data_card',
+          referenceId: 'card-2',
+          labelSnapshot: '白百合',
+          urlSnapshot: '/character-manager?dataCardId=card-2',
+          note: null,
+          sortOrder: 0,
+        },
+      ],
+      createUserMessageEntry: async (input: any) => {
+        messages.push(input);
+        return { id: 9 };
+      },
+    });
+
+    const result = await service.submitDataCardReport({
+      ...makeSubmitInput(7, '能力结构高度近似。'),
+      references: [{ referenceType: 'public_data_card', referenceId: 'card-2' }],
+    });
+
+    expect(result.creatorNotified).toBe(true);
+    expect(messages).toHaveLength(1);
+    expect(messages[0].payload).toMatchObject({
+      reportCount: 2,
+      reasonLabels: ['疑似抄袭', '骚扰或仇恨内容'],
+      referenceSummary: ['引用公开数据卡：白百合', '引用百科：社区守则'],
     });
   });
 
