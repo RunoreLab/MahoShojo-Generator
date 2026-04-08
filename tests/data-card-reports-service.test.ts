@@ -311,6 +311,85 @@ describe('data card reports service', () => {
     ]);
   });
 
+  test('concurrent duplicate submission only records one immutable submission event', async () => {
+    const openCase = {
+      id: 'case-1',
+      targetEntityType: 'data_card',
+      targetEntityId: 'card-1',
+      targetUserId: 2,
+      status: 'open',
+      creatorNotifiedAt: now,
+      creatorNotifiedReportCount: 1,
+    };
+    let activeReport: any = null;
+    let notifyFirstEventWriteStarted = () => {};
+    const firstEventWriteStarted = new Promise<void>((resolve) => {
+      notifyFirstEventWriteStarted = resolve;
+    });
+    let releaseFirstEventWrite = () => {};
+    const firstEventWriteMayContinue = new Promise<void>((resolve) => {
+      releaseFirstEventWrite = resolve;
+    });
+    let firstEventBlocked = false;
+    const writtenEvents = new Map<string, any>();
+    const service = buildService({
+      repo: {
+        getOpenReportCaseByTarget: async () => openCase,
+        getActiveReportByCaseAndReporter: async () => activeReport,
+        createReport: async (_db: any, input: any) => {
+          activeReport = {
+            ...input,
+            id: 'report-1',
+            status: 'active',
+            createdAt: input.now,
+            updatedAt: input.now,
+          };
+          return activeReport;
+        },
+        updateActiveReportForReporter: async () => {
+          throw new Error('should not update concurrent identical payload');
+        },
+        createReportSubmissionEvent: async (_db: any, input: any) => {
+          if (!firstEventBlocked) {
+            firstEventBlocked = true;
+            notifyFirstEventWriteStarted();
+            await firstEventWriteMayContinue;
+          }
+          const existing = writtenEvents.get(input.id);
+          if (existing) {
+            return existing;
+          }
+          const row = { ...input, createdAt: input.now };
+          writtenEvents.set(input.id, row);
+          return row;
+        },
+        getLatestReportSubmissionEventByReport: async (_db: any, reportId: string) =>
+          Array.from(writtenEvents.values()).find((event) => event.reportId === reportId) ?? null,
+        listReportReferencesByReport: async () => [],
+        replaceReportReferences: async () => {},
+        countActiveReportsByCase: async () => 1,
+        markReportCaseCreatorNotified: async () => false,
+      },
+    });
+
+    const firstSubmission = service.submitDataCardReport(makeSubmitInput(7));
+    await firstEventWriteStarted;
+
+    const secondResult = await service.submitDataCardReport(makeSubmitInput(7));
+    releaseFirstEventWrite();
+    const firstResult = await firstSubmission;
+
+    expect(firstResult.submissionDecision).toBe('created');
+    expect(secondResult.submissionDecision).toBe('noop_duplicate_payload');
+    expect(Array.from(writtenEvents.values())).toEqual([
+      expect.objectContaining({
+        reportId: 'report-1',
+        reporterUserId: 7,
+        submissionDecision: 'created',
+      }),
+    ]);
+  });
+
   test('same normalized payload with reordered references stays side-effect free', async () => {
     let replaceCalled = false;
     let resolveCalled = false;

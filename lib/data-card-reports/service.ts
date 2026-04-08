@@ -338,6 +338,28 @@ const inferSubmissionEventRepairDecision = (
   latestSubmissionEvent: { createdAt: string } | null,
 ): 'created' | 'updated' => (latestSubmissionEvent ? 'updated' : 'created');
 
+const buildReportSubmissionEventStableId = (input: {
+  reportId: string;
+  submissionDecision: 'created' | 'updated';
+  normalizedPayloadHash: string | null | undefined;
+  reportCreatedAt: string | null | undefined;
+  reportUpdatedAt: string | null | undefined;
+  fallbackNow: string;
+}): string => {
+  const reportVersionAt =
+    input.submissionDecision === 'created'
+      ? input.reportCreatedAt ?? input.reportUpdatedAt ?? input.fallbackNow
+      : input.reportUpdatedAt ?? input.reportCreatedAt ?? input.fallbackNow;
+
+  return [
+    'report_submission_event',
+    input.reportId,
+    input.submissionDecision,
+    reportVersionAt,
+    input.normalizedPayloadHash ?? 'missing_payload_hash',
+  ].join(':');
+};
+
 export async function screenDataCardReportSubmission(input: {
   reporterUserId: number;
   targetEntityId: string;
@@ -757,7 +779,14 @@ const createDataCardReportsService = (deps: DataCardReportsServiceDeps) => {
 
       if (submissionDecision === 'created' || submissionDecision === 'updated') {
         await deps.repo.createReportSubmissionEvent(db, {
-          id: deps.idFactory(),
+          id: buildReportSubmissionEventStableId({
+            reportId: reportRow.id,
+            submissionDecision,
+            normalizedPayloadHash: reportRow.normalizedPayloadHash,
+            reportCreatedAt: reportRow.createdAt,
+            reportUpdatedAt: reportRow.updatedAt,
+            fallbackNow: now,
+          }),
           caseId: openCase.id,
           reportId: reportRow.id,
           reporterUserId: input.reporterUserId,
@@ -773,12 +802,20 @@ const createDataCardReportsService = (deps: DataCardReportsServiceDeps) => {
             latestSubmissionEvent,
           })
         ) {
+          const repairDecision = inferSubmissionEventRepairDecision(latestSubmissionEvent);
           await deps.repo.createReportSubmissionEvent(db, {
-            id: deps.idFactory(),
+            id: buildReportSubmissionEventStableId({
+              reportId: reportRow.id,
+              submissionDecision: repairDecision,
+              normalizedPayloadHash: reportRow.normalizedPayloadHash,
+              reportCreatedAt: reportRow.createdAt,
+              reportUpdatedAt: reportRow.updatedAt,
+              fallbackNow: now,
+            }),
             caseId: openCase.id,
             reportId: reportRow.id,
             reporterUserId: input.reporterUserId,
-            submissionDecision: inferSubmissionEventRepairDecision(latestSubmissionEvent),
+            submissionDecision: repairDecision,
             now,
           });
         }

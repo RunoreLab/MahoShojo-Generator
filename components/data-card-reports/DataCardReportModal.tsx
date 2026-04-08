@@ -27,10 +27,24 @@ const serializeReferences = (
     .map((reference) => reference.referenceId)
     .join('\n');
 
+const buildReferenceNoteKey = (
+  referenceType: DataCardReportReferenceType,
+  referenceId: string,
+): string => `${referenceType}:${referenceId}`;
+
+const buildExistingReferenceNoteMap = (references: NormalizedReportReference[]): Map<string, string | null> =>
+  new Map(
+    references.map((reference) => [
+      buildReferenceNoteKey(reference.referenceType, reference.referenceId),
+      reference.note ?? null,
+    ]),
+  );
+
 const parseReferenceIds = (
   value: string,
   referenceType: DataCardReportReferenceType,
   startOrder: number,
+  existingNoteByReference: Map<string, string | null>,
 ): NormalizedReportReference[] =>
   Array.from(
     new Set(
@@ -42,9 +56,25 @@ const parseReferenceIds = (
   ).map((referenceId, index) => ({
     referenceType,
     referenceId,
-    note: null,
+    note: existingNoteByReference.get(buildReferenceNoteKey(referenceType, referenceId)) ?? null,
     sortOrder: startOrder + index,
   }));
+
+export const buildReportReferencesFromModalFields = (input: {
+  initialReferences: NormalizedReportReference[];
+  publicDataCardRefs: string;
+  encyclopediaRefs: string;
+}): NormalizedReportReference[] => {
+  const existingNoteByReference = buildExistingReferenceNoteMap(input.initialReferences);
+  const publicRefs = parseReferenceIds(input.publicDataCardRefs, 'public_data_card', 0, existingNoteByReference);
+  const encyclopediaRefs = parseReferenceIds(
+    input.encyclopediaRefs,
+    'encyclopedia_entry',
+    publicRefs.length,
+    existingNoteByReference,
+  );
+  return [...publicRefs, ...encyclopediaRefs];
+};
 
 export function DataCardReportModal({
   isOpen,
@@ -165,12 +195,14 @@ export function DataCardReportModal({
           <button
             type="button"
             onClick={() => {
-              const publicRefs = parseReferenceIds(publicDataCardRefs, 'public_data_card', 0);
-              const encyclopedia = parseReferenceIds(encyclopediaRefs, 'encyclopedia_entry', publicRefs.length);
               onSubmit({
                 reasonCode,
                 details: details.trim() ? details.trim() : null,
-                references: [...publicRefs, ...encyclopedia],
+                references: buildReportReferencesFromModalFields({
+                  initialReferences: initialReport?.references ?? [],
+                  publicDataCardRefs,
+                  encyclopediaRefs,
+                }),
               });
             }}
             className="rounded-xl bg-pink-600 px-4 py-2 text-sm font-medium text-white hover:bg-pink-700 disabled:bg-pink-300"

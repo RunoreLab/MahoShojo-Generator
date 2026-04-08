@@ -294,9 +294,21 @@ export async function createReportSubmissionEvent(
       submissionDecision: input.submissionDecision,
       createdAt: input.now,
     })
+    .onConflictDoNothing()
     .returning();
 
-  return rows[0]!;
+  if (rows[0]) {
+    return rows[0];
+  }
+
+  const existingRow = await db.query.reportSubmissionEvents.findFirst({
+    where: eq(reportSubmissionEvents.id, input.id),
+  });
+  if (!existingRow) {
+    throw new Error('report submission event insert did not return a row');
+  }
+
+  return existingRow;
 }
 
 export async function getLatestReportSubmissionEventByReport(

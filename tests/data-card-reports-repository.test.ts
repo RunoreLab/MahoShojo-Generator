@@ -258,6 +258,35 @@ describe('data card reports repository', () => {
     expect(countSinceTen).toBe(1);
   });
 
+  test('createReportSubmissionEvent is idempotent for the same logical submission event id', async () => {
+    await createReportCaseFixture();
+    await createReportFixture();
+
+    const first = await createReportSubmissionEvent(db, {
+      id: 'submission:report-1:created:2026-04-08T10:20:00.000Z:hash-a',
+      caseId: 'case-1',
+      reportId: 'report-1',
+      reporterUserId: 7,
+      submissionDecision: 'created',
+      now,
+    });
+    const second = await createReportSubmissionEvent(db, {
+      id: 'submission:report-1:created:2026-04-08T10:20:00.000Z:hash-a',
+      caseId: 'case-1',
+      reportId: 'report-1',
+      reporterUserId: 7,
+      submissionDecision: 'created',
+      now,
+    });
+    const count = await countReportSubmissionEventsByReporterSince(db, {
+      reporterUserId: 7,
+      since: '2026-04-08T10:00:00.000Z',
+    });
+
+    expect(second).toEqual(first);
+    expect(count).toBe(1);
+  });
+
   test('returns the latest submission event for a report', async () => {
     await createReportCaseFixture();
     await createReportFixture();
