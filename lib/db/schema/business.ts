@@ -10,6 +10,15 @@ export type SiteMessageType = 'service' | 'maintenance' | 'activity' | 'policy' 
 export type UserMessageChannel = 'system' | 'admin';
 export type UserMessageType = 'moderation' | 'reputation' | 'account' | 'generic';
 export type MessagePriority = 'low' | 'normal' | 'high';
+export type ReportCaseStatus = 'open' | 'under_review' | 'resolved' | 'dismissed';
+export type ReportResolutionCode =
+  | 'self_remediated'
+  | 'content_removed'
+  | 'confirmed_violation'
+  | 'no_violation'
+  | 'malicious_report';
+export type ReportStatus = 'active' | 'withdrawn';
+export type ReportReferenceType = 'public_data_card' | 'encyclopedia_entry';
 
 /**
  * 业务主用户表（映射现有 users）
@@ -51,6 +60,98 @@ export const dataCards = sqliteTable('data_cards', {
   updatedAt: text('updated_at'),
   deletedAt: text('deleted_at'),
 });
+
+export const reportCases = sqliteTable(
+  'report_cases',
+  {
+    id: text('id').primaryKey(),
+    targetEntityType: text('target_entity_type').notNull(),
+    targetEntityId: text('target_entity_id').notNull(),
+    targetUserId: integer('target_user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    status: text('status').$type<ReportCaseStatus>().notNull(),
+    resolutionCode: text('resolution_code').$type<ReportResolutionCode | null>(),
+    creatorNotifiedAt: text('creator_notified_at'),
+    creatorNotifiedReportCount: integer('creator_notified_report_count').notNull().default(0),
+    latestReportedAt: text('latest_reported_at').notNull(),
+    targetCardUpdatedAtAtNotice: text('target_card_updated_at_at_notice'),
+    closedAt: text('closed_at'),
+    createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    targetOpenUnique: uniqueIndex('idx_report_cases_target_open')
+      .on(table.targetEntityType, table.targetEntityId)
+      .where(sql`${table.status} IN ('open', 'under_review')`),
+    statusLatestIndex: index('idx_report_cases_status_latest').on(table.status, table.latestReportedAt),
+  }),
+);
+
+export const reports = sqliteTable(
+  'reports',
+  {
+    id: text('id').primaryKey(),
+    caseId: text('case_id')
+      .notNull()
+      .references(() => reportCases.id, { onDelete: 'cascade' }),
+    reporterUserId: integer('reporter_user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    reasonCode: text('reason_code').notNull(),
+    details: text('details'),
+    status: text('status').$type<ReportStatus>().notNull(),
+    evidenceSummaryJson: text('evidence_summary_json').notNull().default('{}'),
+    normalizedPayloadHash: text('normalized_payload_hash').notNull(),
+    targetNameSnapshot: text('target_name_snapshot').notNull(),
+    targetDescriptionSnapshot: text('target_description_snapshot'),
+    targetDataSnapshot: text('target_data_snapshot').notNull(),
+    targetUpdatedAtSnapshot: text('target_updated_at_snapshot'),
+    createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+    withdrawnAt: text('withdrawn_at'),
+  },
+  (table) => ({
+    caseReporterActiveUnique: uniqueIndex('idx_reports_case_reporter_active')
+      .on(table.caseId, table.reporterUserId)
+      .where(sql`${table.status} = 'active'`),
+    caseStatusCreatedIndex: index('idx_reports_case_status_created').on(table.caseId, table.status, table.createdAt),
+    reporterStatusCreatedIndex: index('idx_reports_reporter_status_created').on(
+      table.reporterUserId,
+      table.status,
+      table.createdAt,
+    ),
+  }),
+);
+
+export const reportReferences = sqliteTable(
+  'report_references',
+  {
+    id: text('id').primaryKey(),
+    reportId: text('report_id')
+      .notNull()
+      .references(() => reports.id, { onDelete: 'cascade' }),
+    referenceType: text('reference_type').$type<ReportReferenceType>().notNull(),
+    referenceId: text('reference_id').notNull(),
+    labelSnapshot: text('label_snapshot').notNull(),
+    urlSnapshot: text('url_snapshot'),
+    note: text('note'),
+    sortOrder: integer('sort_order').notNull().default(0),
+    createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    reportSortIndex: index('idx_report_references_report_sort').on(
+      table.reportId,
+      table.sortOrder,
+      table.createdAt,
+    ),
+    reportTargetUnique: uniqueIndex('idx_report_references_report_target_unique').on(
+      table.reportId,
+      table.referenceType,
+      table.referenceId,
+    ),
+  }),
+);
 
 export const siteMessages = sqliteTable(
   'site_messages',

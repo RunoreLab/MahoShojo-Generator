@@ -30,6 +30,15 @@ const pick = (payload: Record<string, unknown>, ...keys: string[]): string | nul
   return null;
 };
 
+const pickStringList = (payload: Record<string, unknown>, key: string): string[] => {
+  const value = payload[key];
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((item): item is string => typeof item === 'string')
+    .map((item) => item.trim())
+    .filter(Boolean);
+};
+
 const withFallback = (
   rendered: Partial<TemplateRenderOutput>,
   input: TemplateRenderInput,
@@ -140,6 +149,34 @@ const templateRenderers: Record<string, (input: TemplateRenderInput) => Template
       input,
       { title: '公开卡获得推荐', body: '你的公开卡已进入热门或推荐列表。' },
     ),
+  'user.moderation.data_card_reported': (input) => {
+    const cardName = pick(input.payload, 'dataCardName');
+    const reasons = pickStringList(input.payload, 'reasonLabels');
+    const references = pickStringList(input.payload, 'referenceSummary');
+    const details = pick(input.payload, 'detailsPreview');
+    const reportCount = input.payload.reportCount;
+    const reportCountText =
+      typeof reportCount === 'number' && Number.isFinite(reportCount) && reportCount > 0
+        ? `当前累计有效举报 ${Math.trunc(reportCount)} 条。`
+        : null;
+
+    return withFallback(
+      {
+        title: cardName ? `数据卡被举报：${cardName}` : '数据卡被举报',
+        body: [
+          '你的公开数据卡收到举报，请自查并按需修订。',
+          reasons.length > 0 ? `理由：${reasons.join('；')}` : null,
+          references.length > 0 ? references.join('；') : null,
+          details ? `补充说明：${details}` : null,
+          reportCountText,
+        ]
+          .filter(Boolean)
+          .join('\n'),
+      },
+      input,
+      { title: '数据卡被举报', body: '你的公开数据卡收到举报，请自查并按需修订。' },
+    );
+  },
   'user.generic.notice': (input) =>
     withFallback({}, input, { title: '系统通知', body: '你有一条新的定向通知。' }),
 };

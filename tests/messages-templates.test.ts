@@ -26,4 +26,24 @@ describe('message templates', () => {
 
     expect(result).toEqual({ title: '手写标题', body: '手写正文' });
   });
+
+  test('renders anonymous data card report notification without reporter identity', () => {
+    const rendered = renderMessageTemplate({
+      templateKey: 'user.moderation.data_card_reported',
+      payload: {
+        dataCardName: '雪沫',
+        reasonLabels: ['疑似抄袭'],
+        referenceSummary: ['引用公开数据卡：白百合'],
+        detailsPreview: '能力结构高度近似。',
+        reportCount: 2,
+      },
+      titleText: null,
+      bodyText: null,
+    });
+
+    expect(rendered.title).toContain('雪沫');
+    expect(rendered.body).toContain('疑似抄袭');
+    expect(rendered.body).toContain('引用公开数据卡');
+    expect(rendered.body).not.toContain('举报人');
+  });
 });

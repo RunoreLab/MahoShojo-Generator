@@ -104,4 +104,25 @@ describe('DataCardDetailsModal', () => {
 
     expect(html).toBe('');
   });
+
+  it('cloud public data card details render more actions entry for reporting', () => {
+    const html = renderToStaticMarkup(
+      React.createElement(DataCardDetailsModal, {
+        isOpen: true,
+        onClose: () => {},
+        metaCardId: '00000000-0000-4000-8000-000000000001',
+        card: {
+          id: '00000000-0000-4000-8000-000000000001',
+          name: '公开卡',
+          description: '用于举报入口测试',
+          type: 'character',
+          data: JSON.stringify({ name: '公开卡' }),
+          isPublic: true,
+          author: 'tester',
+        },
+      }),
+    );
+
+    expect(html).toContain('更多');
+  });
 });
