@@ -1,4 +1,4 @@
-import { and, asc, count, eq, inArray, isNull, sql } from 'drizzle-orm';
+import { and, asc, count, eq, gte, inArray, isNull, sql } from 'drizzle-orm';
 
 import type { AppDrizzleDb } from '@/lib/db/drizzle';
 import { reportCases, reportReferences, reports } from '@/lib/db/schema';
@@ -253,6 +253,18 @@ export async function countActiveReportsByCase(db: AppDrizzleDb, caseId: string)
     .select({ count: count() })
     .from(reports)
     .where(and(eq(reports.caseId, caseId), eq(reports.status, 'active')));
+
+  return Math.max(0, Number(rows[0]?.count ?? 0));
+}
+
+export async function countReportsUpdatedByReporterSince(
+  db: AppDrizzleDb,
+  input: { reporterUserId: number; since: string },
+): Promise<number> {
+  const rows = await db
+    .select({ count: count() })
+    .from(reports)
+    .where(and(eq(reports.reporterUserId, input.reporterUserId), gte(reports.updatedAt, input.since)));
 
   return Math.max(0, Number(rows[0]?.count ?? 0));
 }

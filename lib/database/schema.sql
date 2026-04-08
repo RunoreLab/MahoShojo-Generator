@@ -267,6 +267,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_reports_case_reporter_active
 CREATE INDEX IF NOT EXISTS idx_reports_case_status_created
   ON reports(case_id, status, created_at DESC);
 
+CREATE INDEX IF NOT EXISTS idx_reports_reporter_updated_at
+  ON reports(reporter_user_id, updated_at DESC);
+
 CREATE INDEX IF NOT EXISTS idx_reports_reporter_status_created
   ON reports(reporter_user_id, status, created_at DESC);
 

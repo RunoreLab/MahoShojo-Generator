@@ -118,6 +118,10 @@ export class DataCardReportForbiddenError extends Error {
   }
 }
 
+const DATA_CARD_REPORT_RATE_LIMIT_PER_HOUR = 3;
+const DATA_CARD_REPORT_RATE_LIMIT_PER_DAY = 10;
+const DATA_CARD_REPORT_SAME_TARGET_COOLDOWN_MS = 60 * 1000;
+
 const requireDb = (db: DataCardReportsServiceDb): AppDrizzleDb => {
   if (!db) {
     throw new DataCardReportsServiceUnavailableError('举报服务当前不可用');
@@ -231,6 +235,79 @@ const parseEvidenceSummary = (payloadJson: string): {
     return { reasonLabels: [], referenceSummary: [], detailsPreview: null };
   }
 };
+
+const subtractWindowFromIso = (now: string, windowMs: number): string => {
+  const baseMs = Date.parse(now);
+  if (!Number.isFinite(baseMs)) {
+    return new Date(Date.now() - windowMs).toISOString();
+  }
+  return new Date(baseMs - windowMs).toISOString();
+};
+
+const isWithinCooldown = (updatedAt: string | null | undefined, now: string, cooldownMs: number): boolean => {
+  if (!updatedAt) return false;
+  const updatedAtMs = Date.parse(updatedAt);
+  const nowMs = Date.parse(now);
+  if (!Number.isFinite(updatedAtMs) || !Number.isFinite(nowMs)) return false;
+  return nowMs - updatedAtMs >= 0 && nowMs - updatedAtMs < cooldownMs;
+};
+
+export async function screenDataCardReportSubmission(input: {
+  reporterUserId: number;
+  targetEntityId: string;
+  reasonCode: string;
+  details: string | null;
+}): Promise<{ allowed: boolean }> {
+  const normalizedDetails = normalizeDataCardReportDetails(input.details);
+
+  if (input.reasonCode === 'rule_violation_other' && !normalizedDetails) {
+    return { allowed: false };
+  }
+
+  return { allowed: true };
+}
+
+export async function rateLimitDataCardReportSubmission(
+  db: AppDrizzleDb,
+  input: {
+    reporterUserId: number;
+    targetEntityId: string;
+    now?: string;
+  },
+): Promise<{ allowed: boolean }> {
+  const now = input.now ?? new Date().toISOString();
+  const openCase = await repo.getOpenReportCaseByTarget(db, {
+    targetEntityType: 'data_card',
+    targetEntityId: input.targetEntityId,
+  });
+  if (openCase) {
+    const activeReport = await repo.getActiveReportByCaseAndReporter(db, {
+      caseId: openCase.id,
+      reporterUserId: input.reporterUserId,
+    });
+    if (isWithinCooldown(activeReport?.updatedAt, now, DATA_CARD_REPORT_SAME_TARGET_COOLDOWN_MS)) {
+      return { allowed: false };
+    }
+  }
+
+  const lastHourCount = await repo.countReportsUpdatedByReporterSince(db, {
+    reporterUserId: input.reporterUserId,
+    since: subtractWindowFromIso(now, 60 * 60 * 1000),
+  });
+  if (lastHourCount >= DATA_CARD_REPORT_RATE_LIMIT_PER_HOUR) {
+    return { allowed: false };
+  }
+
+  const lastDayCount = await repo.countReportsUpdatedByReporterSince(db, {
+    reporterUserId: input.reporterUserId,
+    since: subtractWindowFromIso(now, 24 * 60 * 60 * 1000),
+  });
+  if (lastDayCount >= DATA_CARD_REPORT_RATE_LIMIT_PER_DAY) {
+    return { allowed: false };
+  }
+
+  return { allowed: true };
+}
 
 const createDataCardReportsService = (deps: DataCardReportsServiceDeps) => {
   const getEligibleTargetCard = async (
@@ -515,34 +592,54 @@ const createDataCardReportsService = (deps: DataCardReportsServiceDeps) => {
         }
       }
 
-      const reportRow = existingActiveReport
-        ? await deps.repo.updateActiveReportForReporter(db, {
-            caseId: openCase.id,
-            reporterUserId: input.reporterUserId,
-            reasonCode: input.reasonCode,
-            details: normalizedDetails,
-            evidenceSummaryJson: JSON.stringify(evidenceSummary),
-            normalizedPayloadHash: payloadHash,
-            targetNameSnapshot: targetCard.name,
-            targetDescriptionSnapshot: targetCard.description,
-            targetDataSnapshot: targetCard.data,
-            targetUpdatedAtSnapshot: targetCard.updated_at,
-            now,
-          })
-        : await deps.repo.createReport(db, {
+      const reportWriteInput = {
+        caseId: openCase.id,
+        reporterUserId: input.reporterUserId,
+        reasonCode: input.reasonCode,
+        details: normalizedDetails,
+        evidenceSummaryJson: JSON.stringify(evidenceSummary),
+        normalizedPayloadHash: payloadHash,
+        targetNameSnapshot: targetCard.name,
+        targetDescriptionSnapshot: targetCard.description,
+        targetDataSnapshot: targetCard.data,
+        targetUpdatedAtSnapshot: targetCard.updated_at,
+        now,
+      };
+
+      let submissionDecision: SubmitDataCardReportResult['submissionDecision'] = existingActiveReport ? 'updated' : 'created';
+      let reportRow = existingActiveReport
+        ? await deps.repo.updateActiveReportForReporter(db, reportWriteInput)
+        : null;
+
+      if (!existingActiveReport) {
+        try {
+          reportRow = await deps.repo.createReport(db, {
             id: deps.idFactory(),
+            ...reportWriteInput,
+          });
+        } catch (error) {
+          const concurrentActiveReport = await deps.repo.getActiveReportByCaseAndReporter(db, {
             caseId: openCase.id,
             reporterUserId: input.reporterUserId,
-            reasonCode: input.reasonCode,
-            details: normalizedDetails,
-            evidenceSummaryJson: JSON.stringify(evidenceSummary),
-            normalizedPayloadHash: payloadHash,
-            targetNameSnapshot: targetCard.name,
-            targetDescriptionSnapshot: targetCard.description,
-            targetDataSnapshot: targetCard.data,
-            targetUpdatedAtSnapshot: targetCard.updated_at,
-            now,
           });
+          if (!concurrentActiveReport) {
+            throw error;
+          }
+
+          if (concurrentActiveReport.normalizedPayloadHash === payloadHash) {
+            return {
+              submissionDecision: 'noop_duplicate_payload',
+              caseId: openCase.id,
+              reportId: concurrentActiveReport.id,
+              creatorNotified: false,
+            };
+          }
+
+          existingActiveReport = concurrentActiveReport;
+          submissionDecision = 'updated';
+          reportRow = await deps.repo.updateActiveReportForReporter(db, reportWriteInput);
+        }
+      }
 
       if (!reportRow) {
         throw new DataCardReportsServiceUnavailableError('更新举报失败');
@@ -604,7 +701,7 @@ const createDataCardReportsService = (deps: DataCardReportsServiceDeps) => {
       }
 
       return {
-        submissionDecision: existingActiveReport ? 'updated' : 'created',
+        submissionDecision,
         caseId: openCase.id,
         reportId: reportRow.id,
         creatorNotified,
@@ -694,7 +791,7 @@ export async function getDataCardReportCapability(input: {
     getTargetCard: resolveTargetCard,
     resolveReferenceSnapshots,
     rateLimit: async () => ({ allowed: true }),
-    screenSubmission: async () => ({ allowed: true }),
+    screenSubmission: screenDataCardReportSubmission,
     createUserMessageEntry,
   }).getDataCardReportCapability(input);
 }
@@ -706,8 +803,9 @@ export async function submitDataCardReport(input: SubmitDataCardReportInput) {
     repo: toRepo(),
     getTargetCard: resolveTargetCard,
     resolveReferenceSnapshots,
-    rateLimit: async () => ({ allowed: true }),
-    screenSubmission: async () => ({ allowed: true }),
+    rateLimit: ({ reporterUserId, targetEntityId }) =>
+      rateLimitDataCardReportSubmission(requireDb(input.db), { reporterUserId, targetEntityId }),
+    screenSubmission: screenDataCardReportSubmission,
     createUserMessageEntry,
   }).submitDataCardReport(input);
 }
@@ -720,7 +818,7 @@ export async function withdrawDataCardReport(input: WithdrawDataCardReportInput)
     getTargetCard: resolveTargetCard,
     resolveReferenceSnapshots,
     rateLimit: async () => ({ allowed: true }),
-    screenSubmission: async () => ({ allowed: true }),
+    screenSubmission: screenDataCardReportSubmission,
     createUserMessageEntry,
   }).withdrawDataCardReport(input);
 }

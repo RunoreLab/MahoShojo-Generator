@@ -94,13 +94,31 @@ export function normalizeDataCardReportReferences(input: unknown[]): NormalizedR
   return normalized;
 }
 
+const compareCanonicalText = (a: string | null, b: string | null): number => {
+  const left = a ?? '';
+  const right = b ?? '';
+  if (left < right) return -1;
+  if (left > right) return 1;
+  return 0;
+};
+
 const canonicalizeReferencesForHash = (references: NormalizedReportReference[]): NormalizedReportReference[] =>
   normalizeDataCardReportReferences(
-    references.map((reference) => ({
-      referenceType: reference.referenceType,
-      referenceId: reference.referenceId,
-      note: reference.note,
-    })),
+    references
+      .map((reference) => ({
+        referenceType: reference.referenceType,
+        referenceId: reference.referenceId,
+        note: reference.note,
+      }))
+      .sort((left, right) => {
+        const byType = compareCanonicalText(left.referenceType, right.referenceType);
+        if (byType !== 0) return byType;
+
+        const byId = compareCanonicalText(left.referenceId, right.referenceId);
+        if (byId !== 0) return byId;
+
+        return compareCanonicalText(left.note, right.note);
+      }),
   );
 
 export async function buildNormalizedReportPayloadHash(input: {

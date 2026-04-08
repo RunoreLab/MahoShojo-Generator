@@ -37,6 +37,29 @@ describe('data card report normalization', () => {
     expect(a).toBe(b);
   });
 
+  test('treats reordered references as the same normalized payload hash', async () => {
+    const a = await buildNormalizedReportPayloadHash({
+      targetEntityId: 'card-1',
+      reasonCode: 'plagiarism',
+      details: '说明',
+      references: [
+        { referenceType: 'encyclopedia_entry', referenceId: 'community-rules', note: '规则依据', sortOrder: 0 },
+        { referenceType: 'public_data_card', referenceId: 'card-a', note: '对照卡', sortOrder: 1 },
+      ],
+    });
+    const b = await buildNormalizedReportPayloadHash({
+      targetEntityId: 'card-1',
+      reasonCode: 'plagiarism',
+      details: '说明',
+      references: [
+        { referenceType: 'public_data_card', referenceId: 'card-a', note: '对照卡', sortOrder: 0 },
+        { referenceType: 'encyclopedia_entry', referenceId: 'community-rules', note: '规则依据', sortOrder: 1 },
+      ],
+    });
+
+    expect(a).toBe(b);
+  });
+
   test('extracts public data card id from pasted links', () => {
     const refs = normalizeDataCardReportReferences([
       {

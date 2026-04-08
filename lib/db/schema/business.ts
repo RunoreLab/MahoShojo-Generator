@@ -116,6 +116,7 @@ export const reports = sqliteTable(
       .on(table.caseId, table.reporterUserId)
       .where(sql`${table.status} = 'active'`),
     caseStatusCreatedIndex: index('idx_reports_case_status_created').on(table.caseId, table.status, table.createdAt),
+    reporterUpdatedAtIndex: index('idx_reports_reporter_updated_at').on(table.reporterUserId, table.updatedAt),
     reporterStatusCreatedIndex: index('idx_reports_reporter_status_created').on(
       table.reporterUserId,
       table.status,

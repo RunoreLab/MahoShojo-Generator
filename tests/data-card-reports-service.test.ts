@@ -323,6 +323,118 @@ describe('data card reports service', () => {
     expect(updateCalled).toBe(true);
   });
 
+  test('reuses concurrent active report creation as noop when payload hash already matches', async () => {
+    let createReportAttempted = false;
+    let replaceCalled = false;
+    let updateCalled = false;
+    const payloadHash = await buildNormalizedReportPayloadHash({
+      targetEntityId: 'card-1',
+      reasonCode: 'plagiarism',
+      details: '说明',
+      references: [],
+    });
+    const service = buildService({
+      repo: {
+        getOpenReportCaseByTarget: async () => ({
+          id: 'case-1',
+          targetEntityType: 'data_card',
+          targetEntityId: 'card-1',
+          targetUserId: 2,
+          status: 'open',
+          creatorNotifiedAt: now,
+          creatorNotifiedReportCount: 1,
+        }),
+        getActiveReportByCaseAndReporter: async () =>
+          createReportAttempted
+            ? {
+                id: 'report-1',
+                caseId: 'case-1',
+                reporterUserId: 7,
+                normalizedPayloadHash: payloadHash,
+                status: 'active',
+              }
+            : null,
+        createReport: async () => {
+          createReportAttempted = true;
+          throw new Error('UNIQUE constraint failed: reports.case_id, reports.reporter_user_id');
+        },
+        updateActiveReportForReporter: async () => {
+          updateCalled = true;
+          throw new Error('should not update after duplicate payload conflict');
+        },
+        replaceReportReferences: async () => {
+          replaceCalled = true;
+        },
+        countActiveReportsByCase: async () => 1,
+        markReportCaseCreatorNotified: async () => false,
+      },
+    });
+
+    const result = await service.submitDataCardReport(makeSubmitInput(7));
+
+    expect(result).toEqual({
+      submissionDecision: 'noop_duplicate_payload',
+      caseId: 'case-1',
+      reportId: 'report-1',
+      creatorNotified: false,
+    });
+    expect(updateCalled).toBe(false);
+    expect(replaceCalled).toBe(false);
+  });
+
+  test('updates concurrent active report after insert conflict when payload differs', async () => {
+    let createReportAttempted = false;
+    let replaceCalled = false;
+    let updateCalled = false;
+    const service = buildService({
+      repo: {
+        getOpenReportCaseByTarget: async () => ({
+          id: 'case-1',
+          targetEntityType: 'data_card',
+          targetEntityId: 'card-1',
+          targetUserId: 2,
+          status: 'open',
+          creatorNotifiedAt: now,
+          creatorNotifiedReportCount: 1,
+        }),
+        getActiveReportByCaseAndReporter: async () =>
+          createReportAttempted
+            ? {
+                id: 'report-1',
+                caseId: 'case-1',
+                reporterUserId: 7,
+                normalizedPayloadHash: 'old-hash',
+                status: 'active',
+              }
+            : null,
+        createReport: async () => {
+          createReportAttempted = true;
+          throw new Error('UNIQUE constraint failed: reports.case_id, reports.reporter_user_id');
+        },
+        updateActiveReportForReporter: async (_db: any, input: any) => {
+          updateCalled = true;
+          return { id: 'report-1', ...input, status: 'active' };
+        },
+        replaceReportReferences: async () => {
+          replaceCalled = true;
+        },
+        countActiveReportsByCase: async () => 1,
+        markReportCaseCreatorNotified: async () => false,
+      },
+    });
+
+    const result = await service.submitDataCardReport(makeSubmitInput(7, '新的说明'));
+
+    expect(result).toEqual({
+      submissionDecision: 'updated',
+      caseId: 'case-1',
+      reportId: 'report-1',
+      creatorNotified: false,
+    });
+    expect(updateCalled).toBe(true);
+    expect(replaceCalled).toBe(true);
+  });
+
   test('sends creator notification only after winning notification flag claim', async () => {
     const messages: any[] = [];
     const service = buildService({
