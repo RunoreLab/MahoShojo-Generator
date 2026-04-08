@@ -2,7 +2,10 @@ import { describe, expect, test } from 'bun:test';
 
 import {
   InvalidDataCardReportReferenceError,
+  MAX_DATA_CARD_REPORT_DETAILS_LENGTH,
+  MAX_DATA_CARD_REPORT_REFERENCE_NOTE_LENGTH,
   buildNormalizedReportPayloadHash,
+  normalizeDataCardReportDetails,
   normalizeDataCardReportReferences,
 } from '@/lib/data-card-reports/normalization';
 
@@ -97,6 +100,24 @@ describe('data card report normalization', () => {
     ]);
 
     expect(refs[0]?.referenceId).toBe('00000000-0000-4000-8000-000000000001');
+  });
+
+  test('rejects oversized details', () => {
+    expect(() => normalizeDataCardReportDetails('a'.repeat(MAX_DATA_CARD_REPORT_DETAILS_LENGTH + 1))).toThrow(
+      `补充说明不能超过 ${MAX_DATA_CARD_REPORT_DETAILS_LENGTH} 个字符`,
+    );
+  });
+
+  test('rejects oversized reference notes', () => {
+    expect(() =>
+      normalizeDataCardReportReferences([
+        {
+          referenceType: 'encyclopedia_entry',
+          referenceId: 'community-rules',
+          note: 'a'.repeat(MAX_DATA_CARD_REPORT_REFERENCE_NOTE_LENGTH + 1),
+        },
+      ]),
+    ).toThrow(InvalidDataCardReportReferenceError);
   });
 
   test('rejects more than five unique references instead of truncating silently', () => {

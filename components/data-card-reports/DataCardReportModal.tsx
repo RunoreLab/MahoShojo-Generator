@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 
+import { normalizePublicDataCardReferenceId } from '@/lib/data-card-reports/public-reference-id';
 import type {
   DataCardReportDraft,
   DataCardReportReasonOption,
@@ -50,7 +51,9 @@ const parseReferenceIds = (
     new Set(
       value
         .split('\n')
-        .map((item) => item.trim())
+        .map((item) =>
+          referenceType === 'public_data_card' ? normalizePublicDataCardReferenceId(item) : item.trim(),
+        )
         .filter(Boolean),
     ),
   ).map((referenceId, index) => ({

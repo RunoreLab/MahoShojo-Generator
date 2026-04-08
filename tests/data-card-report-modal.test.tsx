@@ -70,4 +70,28 @@ describe('DataCardReportModal', () => {
       },
     ]);
   });
+
+  test('preserves existing public data card notes when the same card is pasted as a link', () => {
+    const references = buildReportReferencesFromModalFields({
+      initialReferences: [
+        {
+          referenceType: 'public_data_card',
+          referenceId: '00000000-0000-4000-8000-000000000001',
+          note: '对照卡备注',
+          sortOrder: 0,
+        },
+      ],
+      publicDataCardRefs: 'https://example.test/character-manager?dataCardId=00000000-0000-4000-8000-000000000001',
+      encyclopediaRefs: '',
+    });
+
+    expect(references).toEqual([
+      {
+        referenceType: 'public_data_card',
+        referenceId: '00000000-0000-4000-8000-000000000001',
+        note: '对照卡备注',
+        sortOrder: 0,
+      },
+    ]);
+  });
 });

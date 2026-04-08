@@ -6,6 +6,7 @@ import { getEncyclopediaEntry } from '@/lib/encyclopedia';
 import { createUserMessageEntry } from '@/lib/messages/service';
 import {
   buildNormalizedReportPayloadHash,
+  InvalidDataCardReportDetailsError,
   InvalidDataCardReportReferenceError,
   normalizeDataCardReportDetails,
   normalizeDataCardReportReferences,
@@ -605,16 +606,19 @@ const createDataCardReportsService = (deps: DataCardReportsServiceDeps) => {
       const targetCard = await getEligibleTargetCard(db, input.targetEntityId, input.reporterUserId);
 
       let normalizedReferences: NormalizedReportReference[];
+      let normalizedDetails: string | null;
       try {
         normalizedReferences = normalizeDataCardReportReferences(input.references);
+        normalizedDetails = normalizeDataCardReportDetails(input.details);
       } catch (error) {
-        if (error instanceof InvalidDataCardReportReferenceError) {
+        if (
+          error instanceof InvalidDataCardReportReferenceError ||
+          error instanceof InvalidDataCardReportDetailsError
+        ) {
           throw new DataCardReportValidationError(error.message);
         }
         throw error;
       }
-
-      const normalizedDetails = normalizeDataCardReportDetails(input.details);
       const payloadHash = await buildNormalizedReportPayloadHash({
         targetEntityId: input.targetEntityId,
         reasonCode: input.reasonCode,

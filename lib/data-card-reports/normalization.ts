@@ -3,13 +3,23 @@ import type {
   NormalizedReportReference,
 } from '@/lib/data-card-reports/types';
 import { getEncyclopediaEntry } from '@/lib/encyclopedia';
+import { normalizePublicDataCardReferenceId } from '@/lib/data-card-reports/public-reference-id';
 
 export const MAX_DATA_CARD_REPORT_REFERENCES = 5;
+export const MAX_DATA_CARD_REPORT_DETAILS_LENGTH = 2000;
+export const MAX_DATA_CARD_REPORT_REFERENCE_NOTE_LENGTH = 500;
 
 export class InvalidDataCardReportReferenceError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'InvalidDataCardReportReferenceError';
+  }
+}
+
+export class InvalidDataCardReportDetailsError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'InvalidDataCardReportDetailsError';
   }
 }
 
@@ -19,38 +29,23 @@ export const isDataCardReportReferenceType = (value: unknown): value is DataCard
 export const normalizeDataCardReportDetails = (value: string | null | undefined): string | null => {
   if (typeof value !== 'string') return null;
   const normalized = value.replace(/\r\n/g, '\n').trim();
-  return normalized.length > 0 ? normalized : null;
+  if (normalized.length === 0) return null;
+  if (normalized.length > MAX_DATA_CARD_REPORT_DETAILS_LENGTH) {
+    throw new InvalidDataCardReportDetailsError(`补充说明不能超过 ${MAX_DATA_CARD_REPORT_DETAILS_LENGTH} 个字符`);
+  }
+  return normalized;
 };
 
 const normalizeReferenceNote = (value: unknown): string | null => {
   if (typeof value !== 'string') return null;
   const normalized = value.replace(/\r\n/g, '\n').trim();
-  return normalized.length > 0 ? normalized : null;
-};
-
-const UUID_PATTERN = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
-
-const normalizePublicDataCardReferenceId = (value: string): string => {
-  const trimmed = value.trim();
-  const uuidMatch = trimmed.match(UUID_PATTERN);
-  if (uuidMatch?.[0]) {
-    return uuidMatch[0].toLowerCase();
+  if (normalized.length === 0) return null;
+  if (normalized.length > MAX_DATA_CARD_REPORT_REFERENCE_NOTE_LENGTH) {
+    throw new InvalidDataCardReportReferenceError(
+      `引用备注不能超过 ${MAX_DATA_CARD_REPORT_REFERENCE_NOTE_LENGTH} 个字符`,
+    );
   }
-
-  try {
-    const url = new URL(trimmed, 'https://mahoshojo.local');
-    const queryId =
-      url.searchParams.get('dataCardId') ??
-      url.searchParams.get('cardId') ??
-      url.searchParams.get('metaCardId');
-    if (queryId && UUID_PATTERN.test(queryId)) {
-      return queryId.match(UUID_PATTERN)![0].toLowerCase();
-    }
-  } catch {
-    // ignore invalid URL parse
-  }
-
-  return trimmed;
+  return normalized;
 };
 
 const normalizeEncyclopediaReferenceId = (value: string): string => {

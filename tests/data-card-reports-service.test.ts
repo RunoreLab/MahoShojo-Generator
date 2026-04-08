@@ -1,5 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 
+import {
+  MAX_DATA_CARD_REPORT_DETAILS_LENGTH,
+  MAX_DATA_CARD_REPORT_REFERENCE_NOTE_LENGTH,
+} from '@/lib/data-card-reports/normalization';
 import { buildNormalizedReportPayloadHash } from '@/lib/data-card-reports/normalization';
 import { createDataCardReportsServiceForTests } from '@/lib/data-card-reports/service';
 import type { DataCardReportSubmissionDecision } from '@/lib/data-card-reports/types';
@@ -124,6 +128,49 @@ describe('data card reports service', () => {
 
     expect(result.submissionDecision).toBe('updated');
     expect(updateCalled).toBe(true);
+  });
+
+  test('rejects oversized details before touching report repositories', async () => {
+    let repoTouched = false;
+    const service = buildService({
+      repo: {
+        getOpenReportCaseByTarget: async () => {
+          repoTouched = true;
+          return null;
+        },
+      },
+    });
+
+    await expect(
+      service.submitDataCardReport(makeSubmitInput(7, 'a'.repeat(MAX_DATA_CARD_REPORT_DETAILS_LENGTH + 1))),
+    ).rejects.toThrow(`补充说明不能超过 ${MAX_DATA_CARD_REPORT_DETAILS_LENGTH} 个字符`);
+    expect(repoTouched).toBe(false);
+  });
+
+  test('rejects oversized reference notes before touching report repositories', async () => {
+    let repoTouched = false;
+    const service = buildService({
+      repo: {
+        getOpenReportCaseByTarget: async () => {
+          repoTouched = true;
+          return null;
+        },
+      },
+    });
+
+    await expect(
+      service.submitDataCardReport({
+        ...makeSubmitInput(7),
+        references: [
+          {
+            referenceType: 'encyclopedia_entry',
+            referenceId: 'community-rules',
+            note: 'a'.repeat(MAX_DATA_CARD_REPORT_REFERENCE_NOTE_LENGTH + 1),
+          },
+        ],
+      }),
+    ).rejects.toThrow(`引用备注不能超过 ${MAX_DATA_CARD_REPORT_REFERENCE_NOTE_LENGTH} 个字符`);
+    expect(repoTouched).toBe(false);
   });
 
   test('same user same normalized payload returns noop and does not count rate limit', async () => {
