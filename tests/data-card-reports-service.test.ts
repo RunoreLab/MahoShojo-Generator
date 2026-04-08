@@ -149,9 +149,12 @@ describe('data card reports service', () => {
           id: 'report-1',
           caseId: 'case-1',
           reporterUserId: 7,
+          evidenceSummaryJson: '{}',
           normalizedPayloadHash: existingHash,
           status: 'active',
         }),
+        listReportReferencesByReport: async () => [],
+        replaceReportReferences: async () => {},
       },
       rateLimit: async () => {
         rateLimitCalled = true;
@@ -163,6 +166,152 @@ describe('data card reports service', () => {
 
     expect(result.submissionDecision).toBe('noop_duplicate_payload');
     expect(rateLimitCalled).toBe(false);
+  });
+
+  test('same payload retry repairs missing references after a partial write failure', async () => {
+    let activeReport: any = null;
+    let replaceAttempts = 0;
+    const writtenReferences: any[] = [];
+    const service = buildService({
+      repo: {
+        getOpenReportCaseByTarget: async () => ({
+          id: 'case-1',
+          targetEntityType: 'data_card',
+          targetEntityId: 'card-1',
+          targetUserId: 2,
+          status: 'open',
+          creatorNotifiedAt: now,
+          creatorNotifiedReportCount: 1,
+        }),
+        getActiveReportByCaseAndReporter: async () => activeReport,
+        createReport: async (_db: any, input: any) => {
+          activeReport = { ...input, id: 'report-1', status: 'active' };
+          return activeReport;
+        },
+        updateActiveReportForReporter: async () => {
+          throw new Error('should not update same payload retry');
+        },
+        listReportReferencesByReport: async () => writtenReferences,
+        replaceReportReferences: async (_db: any, input: any) => {
+          replaceAttempts += 1;
+          writtenReferences.splice(0, writtenReferences.length);
+          if (replaceAttempts === 1) {
+            throw new Error('transient references failure');
+          }
+          writtenReferences.push(
+            ...input.references.map((reference: any) => ({
+              referenceType: reference.referenceType,
+              referenceId: reference.referenceId,
+              note: reference.note,
+              sortOrder: reference.sortOrder,
+            })),
+          );
+        },
+        countActiveReportsByCase: async () => 1,
+      },
+      resolveReferenceSnapshots: async () => [
+        {
+          referenceType: 'encyclopedia_entry',
+          referenceId: 'community-rules',
+          labelSnapshot: '社区守则',
+          urlSnapshot: '/encyclopedia/community-rules',
+          note: '需要核对',
+          sortOrder: 0,
+        },
+      ],
+    });
+
+    const submitInput = {
+      ...makeSubmitInput(7),
+      references: [{ referenceType: 'encyclopedia_entry' as const, referenceId: 'community-rules', note: '需要核对' }],
+    };
+
+    await expect(service.submitDataCardReport(submitInput)).rejects.toThrow('transient references failure');
+
+    const result = await service.submitDataCardReport(submitInput);
+
+    expect(result).toEqual({
+      submissionDecision: 'noop_duplicate_payload',
+      caseId: 'case-1',
+      reportId: 'report-1',
+      creatorNotified: false,
+    });
+    expect(replaceAttempts).toBe(2);
+    expect(writtenReferences).toEqual([
+      {
+        referenceType: 'encyclopedia_entry',
+        referenceId: 'community-rules',
+        note: '需要核对',
+        sortOrder: 0,
+      },
+    ]);
+  });
+
+  test('same payload retry can resend creator notification after a partial write failure', async () => {
+    const openCase = {
+      id: 'case-1',
+      targetEntityType: 'data_card',
+      targetEntityId: 'card-1',
+      targetUserId: 2,
+      status: 'open',
+      creatorNotifiedAt: null,
+      creatorNotifiedReportCount: 0,
+    };
+    let activeReport: any = null;
+    let markAttempts = 0;
+    let clearAttempts = 0;
+    let messageAttempts = 0;
+    const service = buildService({
+      repo: {
+        getOpenReportCaseByTarget: async () => openCase,
+        getActiveReportByCaseAndReporter: async () => activeReport,
+        createReport: async (_db: any, input: any) => {
+          activeReport = { ...input, id: 'report-1', status: 'active' };
+          return activeReport;
+        },
+        updateActiveReportForReporter: async () => {
+          throw new Error('should not update same payload retry');
+        },
+        listReportReferencesByReport: async () => [],
+        replaceReportReferences: async () => {},
+        countActiveReportsByCase: async () => 1,
+        markReportCaseCreatorNotified: async (_db: any, input: any) => {
+          markAttempts += 1;
+          if (openCase.creatorNotifiedAt) return false;
+          openCase.creatorNotifiedAt = input.notifiedAt;
+          openCase.creatorNotifiedReportCount = input.reportCount;
+          return true;
+        },
+        clearReportCaseCreatorNotified: async (_db: any, input: any) => {
+          clearAttempts += 1;
+          if (openCase.creatorNotifiedAt !== input.notifiedAt) return false;
+          openCase.creatorNotifiedAt = null;
+          openCase.creatorNotifiedReportCount = 0;
+          return true;
+        },
+      },
+      createUserMessageEntry: async () => {
+        messageAttempts += 1;
+        if (messageAttempts === 1) {
+          throw new Error('message write failed');
+        }
+        return { id: 9 };
+      },
+    });
+
+    await expect(service.submitDataCardReport(makeSubmitInput(7))).rejects.toThrow('message write failed');
+
+    const result = await service.submitDataCardReport(makeSubmitInput(7));
+
+    expect(result).toEqual({
+      submissionDecision: 'noop_duplicate_payload',
+      caseId: 'case-1',
+      reportId: 'report-1',
+      creatorNotified: true,
+    });
+    expect(markAttempts).toBe(2);
+    expect(clearAttempts).toBe(1);
+    expect(messageAttempts).toBe(2);
   });
 
   test('changed payload that fails rate limit returns 429-facing decision and does not write', async () => {

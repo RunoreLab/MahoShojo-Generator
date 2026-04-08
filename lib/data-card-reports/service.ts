@@ -236,6 +236,44 @@ const parseEvidenceSummary = (payloadJson: string): {
   }
 };
 
+const hasMatchingReportReferences = (
+  currentReferences: Array<{
+    referenceType: string;
+    referenceId: string;
+    note: string | null;
+    sortOrder: number;
+  }>,
+  normalizedReferences: NormalizedReportReference[],
+): boolean => {
+  if (currentReferences.length !== normalizedReferences.length) return false;
+
+  return normalizedReferences.every((reference, index) => {
+    const currentReference = currentReferences[index];
+    if (!currentReference) return false;
+
+    return (
+      currentReference.referenceType === reference.referenceType &&
+      currentReference.referenceId === reference.referenceId &&
+      (currentReference.note ?? null) === reference.note &&
+      currentReference.sortOrder === reference.sortOrder
+    );
+  });
+};
+
+const toReportReferenceWriteInput = (
+  idFactory: () => string,
+  referenceSnapshots: ResolvedReferenceSnapshot[],
+) =>
+  referenceSnapshots.map((reference) => ({
+    id: idFactory(),
+    referenceType: reference.referenceType,
+    referenceId: reference.referenceId,
+    labelSnapshot: reference.labelSnapshot,
+    urlSnapshot: reference.urlSnapshot,
+    note: reference.note,
+    sortOrder: reference.sortOrder,
+  }));
+
 const subtractWindowFromIso = (now: string, windowMs: number): string => {
   const baseMs = Date.parse(now);
   if (!Number.isFinite(baseMs)) {
@@ -506,55 +544,61 @@ const createDataCardReportsService = (deps: DataCardReportsServiceDeps) => {
             reporterUserId: input.reporterUserId,
           })
         : null;
+      const now = deps.now();
+      let submissionDecision: SubmitDataCardReportResult['submissionDecision'] = existingActiveReport ? 'updated' : 'created';
+      let reportRow = existingActiveReport;
+      let isDuplicatePayload = false;
+      let shouldReplaceReferences = false;
+      let referenceSnapshots: ResolvedReferenceSnapshot[] | null = null;
+      let evidenceSummary: ReturnType<typeof buildEvidenceSummary> | null = null;
 
       if (existingActiveReport && existingActiveReport.normalizedPayloadHash === payloadHash) {
-        return {
-          submissionDecision: 'noop_duplicate_payload',
-          caseId: openCase?.id ?? null,
-          reportId: existingActiveReport.id,
-          creatorNotified: false,
-        };
+        submissionDecision = 'noop_duplicate_payload';
+        isDuplicatePayload = true;
+        shouldReplaceReferences = false;
       }
 
-      const rateLimit = await deps.rateLimit({
-        reporterUserId: input.reporterUserId,
-        targetEntityId: input.targetEntityId,
-      });
-      if (!rateLimit.allowed) {
-        return {
-          submissionDecision: 'rejected_rate_limited',
-          caseId: null,
-          reportId: null,
-          creatorNotified: false,
-        };
-      }
+      if (!isDuplicatePayload) {
+        const rateLimit = await deps.rateLimit({
+          reporterUserId: input.reporterUserId,
+          targetEntityId: input.targetEntityId,
+        });
+        if (!rateLimit.allowed) {
+          return {
+            submissionDecision: 'rejected_rate_limited',
+            caseId: null,
+            reportId: null,
+            creatorNotified: false,
+          };
+        }
 
-      const screening = await deps.screenSubmission({
-        reporterUserId: input.reporterUserId,
-        targetEntityId: input.targetEntityId,
-        reasonCode: input.reasonCode,
-        details: normalizedDetails,
-      });
-      if (!screening.allowed) {
-        return {
-          submissionDecision: 'rejected_screened',
-          caseId: null,
-          reportId: null,
-          creatorNotified: false,
-        };
-      }
+        const screening = await deps.screenSubmission({
+          reporterUserId: input.reporterUserId,
+          targetEntityId: input.targetEntityId,
+          reasonCode: input.reasonCode,
+          details: normalizedDetails,
+        });
+        if (!screening.allowed) {
+          return {
+            submissionDecision: 'rejected_screened',
+            caseId: null,
+            reportId: null,
+            creatorNotified: false,
+          };
+        }
 
-      const referenceSnapshots = await deps.resolveReferenceSnapshots({
-        db,
-        targetEntityId: input.targetEntityId,
-        references: normalizedReferences,
-      });
-      const evidenceSummary = buildEvidenceSummary({
-        reasonCode: input.reasonCode,
-        references: referenceSnapshots,
-        details: normalizedDetails,
-      });
-      const now = deps.now();
+        referenceSnapshots = await deps.resolveReferenceSnapshots({
+          db,
+          targetEntityId: input.targetEntityId,
+          references: normalizedReferences,
+        });
+        evidenceSummary = buildEvidenceSummary({
+          reasonCode: input.reasonCode,
+          references: referenceSnapshots,
+          details: normalizedDetails,
+        });
+        shouldReplaceReferences = true;
+      }
 
       if (!openCase) {
         try {
@@ -582,62 +626,62 @@ const createDataCardReportsService = (deps: DataCardReportsServiceDeps) => {
           caseId: openCase.id,
           reporterUserId: input.reporterUserId,
         });
-        if (existingActiveReport && existingActiveReport.normalizedPayloadHash === payloadHash) {
-          return {
-            submissionDecision: 'noop_duplicate_payload',
-            caseId: openCase.id,
-            reportId: existingActiveReport.id,
-            creatorNotified: false,
-          };
+        reportRow = existingActiveReport;
+        if (existingActiveReport) {
+          submissionDecision = 'updated';
+          if (existingActiveReport.normalizedPayloadHash === payloadHash) {
+            submissionDecision = 'noop_duplicate_payload';
+            isDuplicatePayload = true;
+            shouldReplaceReferences = false;
+          }
         }
       }
 
-      const reportWriteInput = {
-        caseId: openCase.id,
-        reporterUserId: input.reporterUserId,
-        reasonCode: input.reasonCode,
-        details: normalizedDetails,
-        evidenceSummaryJson: JSON.stringify(evidenceSummary),
-        normalizedPayloadHash: payloadHash,
-        targetNameSnapshot: targetCard.name,
-        targetDescriptionSnapshot: targetCard.description,
-        targetDataSnapshot: targetCard.data,
-        targetUpdatedAtSnapshot: targetCard.updated_at,
-        now,
-      };
+      if (!isDuplicatePayload) {
+        const reportWriteInput = {
+          caseId: openCase.id,
+          reporterUserId: input.reporterUserId,
+          reasonCode: input.reasonCode,
+          details: normalizedDetails,
+          evidenceSummaryJson: JSON.stringify(evidenceSummary),
+          normalizedPayloadHash: payloadHash,
+          targetNameSnapshot: targetCard.name,
+          targetDescriptionSnapshot: targetCard.description,
+          targetDataSnapshot: targetCard.data,
+          targetUpdatedAtSnapshot: targetCard.updated_at,
+          now,
+        };
 
-      let submissionDecision: SubmitDataCardReportResult['submissionDecision'] = existingActiveReport ? 'updated' : 'created';
-      let reportRow = existingActiveReport
-        ? await deps.repo.updateActiveReportForReporter(db, reportWriteInput)
-        : null;
+        reportRow = existingActiveReport
+          ? await deps.repo.updateActiveReportForReporter(db, reportWriteInput)
+          : null;
 
-      if (!existingActiveReport) {
-        try {
-          reportRow = await deps.repo.createReport(db, {
-            id: deps.idFactory(),
-            ...reportWriteInput,
-          });
-        } catch (error) {
-          const concurrentActiveReport = await deps.repo.getActiveReportByCaseAndReporter(db, {
-            caseId: openCase.id,
-            reporterUserId: input.reporterUserId,
-          });
-          if (!concurrentActiveReport) {
-            throw error;
-          }
-
-          if (concurrentActiveReport.normalizedPayloadHash === payloadHash) {
-            return {
-              submissionDecision: 'noop_duplicate_payload',
+        if (!existingActiveReport) {
+          try {
+            reportRow = await deps.repo.createReport(db, {
+              id: deps.idFactory(),
+              ...reportWriteInput,
+            });
+          } catch (error) {
+            const concurrentActiveReport = await deps.repo.getActiveReportByCaseAndReporter(db, {
               caseId: openCase.id,
-              reportId: concurrentActiveReport.id,
-              creatorNotified: false,
-            };
-          }
+              reporterUserId: input.reporterUserId,
+            });
+            if (!concurrentActiveReport) {
+              throw error;
+            }
 
-          existingActiveReport = concurrentActiveReport;
-          submissionDecision = 'updated';
-          reportRow = await deps.repo.updateActiveReportForReporter(db, reportWriteInput);
+            if (concurrentActiveReport.normalizedPayloadHash === payloadHash) {
+              reportRow = concurrentActiveReport;
+              submissionDecision = 'noop_duplicate_payload';
+              isDuplicatePayload = true;
+              shouldReplaceReferences = false;
+            } else {
+              existingActiveReport = concurrentActiveReport;
+              submissionDecision = 'updated';
+              reportRow = await deps.repo.updateActiveReportForReporter(db, reportWriteInput);
+            }
+          }
         }
       }
 
@@ -645,22 +689,33 @@ const createDataCardReportsService = (deps: DataCardReportsServiceDeps) => {
         throw new DataCardReportsServiceUnavailableError('更新举报失败');
       }
 
-      await deps.repo.replaceReportReferences(db, {
-        reportId: reportRow.id,
-        references: referenceSnapshots.map((reference) => ({
-          id: deps.idFactory(),
-          referenceType: reference.referenceType,
-          referenceId: reference.referenceId,
-          labelSnapshot: reference.labelSnapshot,
-          urlSnapshot: reference.urlSnapshot,
-          note: reference.note,
-          sortOrder: reference.sortOrder,
-        })),
-      });
+      if (isDuplicatePayload) {
+        const currentReferences = await deps.repo.listReportReferencesByReport(db, reportRow.id);
+        if (!hasMatchingReportReferences(currentReferences, normalizedReferences)) {
+          referenceSnapshots =
+            referenceSnapshots ??
+            (await deps.resolveReferenceSnapshots({
+              db,
+              targetEntityId: input.targetEntityId,
+              references: normalizedReferences,
+            }));
+          shouldReplaceReferences = true;
+        }
+      }
+
+      if (shouldReplaceReferences && referenceSnapshots !== null) {
+        await deps.repo.replaceReportReferences(db, {
+          reportId: reportRow.id,
+          references: toReportReferenceWriteInput(deps.idFactory, referenceSnapshots),
+        });
+      }
 
       let creatorNotified = false;
-      const reportCount = await deps.repo.countActiveReportsByCase(db, openCase.id);
       if (!openCase.creatorNotifiedAt) {
+        const notificationEvidenceSummary =
+          evidenceSummary ??
+          parseEvidenceSummary(typeof reportRow.evidenceSummaryJson === 'string' ? reportRow.evidenceSummaryJson : '{}');
+        const reportCount = await deps.repo.countActiveReportsByCase(db, openCase.id);
         creatorNotified = await deps.repo.markReportCaseCreatorNotified(db, {
           caseId: openCase.id,
           notifiedAt: now,
@@ -679,9 +734,9 @@ const createDataCardReportsService = (deps: DataCardReportsServiceDeps) => {
               payload: {
                 dataCardId: targetCard.id,
                 dataCardName: targetCard.name,
-                reasonLabels: evidenceSummary.reasonLabels,
-                referenceSummary: evidenceSummary.referenceSummary,
-                detailsPreview: evidenceSummary.detailsPreview,
+                reasonLabels: notificationEvidenceSummary.reasonLabels,
+                referenceSummary: notificationEvidenceSummary.referenceSummary,
+                detailsPreview: notificationEvidenceSummary.detailsPreview,
                 reportCount,
                 updatedAfterNotice: false,
               },

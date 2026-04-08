@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
 import { describe, expect, test } from 'bun:test';
 
 import { reportCases, reportReferences, reports } from '@/lib/db/schema';
@@ -15,5 +18,13 @@ describe('data card reports schema contract', () => {
     expect(reportReferences.referenceType.name).toBe('reference_type');
     expect(reportReferences.referenceId.name).toBe('reference_id');
     expect(reportReferences.sortOrder.name).toBe('sort_order');
+  });
+
+  test('migration creates the reporter updated_at index used by rate limiting', () => {
+    const migrationPath = join(process.cwd(), 'drizzle/0007_data_card_reports.sql');
+    const content = readFileSync(migrationPath, 'utf8');
+
+    expect(content.includes('CREATE INDEX IF NOT EXISTS idx_reports_reporter_updated_at')).toBe(true);
+    expect(content.includes('ON reports(reporter_user_id, updated_at')).toBe(true);
   });
 });
