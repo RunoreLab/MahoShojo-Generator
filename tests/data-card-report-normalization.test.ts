@@ -20,6 +20,17 @@ describe('data card report normalization', () => {
     ]);
   });
 
+  test('canonicalizes encyclopedia alias slugs before deduplication', () => {
+    const refs = normalizeDataCardReportReferences([
+      { referenceType: 'encyclopedia_entry', referenceId: 'modelscope-auth-401', note: '第一次' },
+      { referenceType: 'encyclopedia_entry', referenceId: 'tachie-auth-errors', note: '第二次' },
+    ]);
+
+    expect(refs).toEqual([
+      { referenceType: 'encyclopedia_entry', referenceId: 'tachie-auth-errors', note: '第一次', sortOrder: 0 },
+    ]);
+  });
+
   test('uses normalized references and details for stable payload hash', async () => {
     const a = await buildNormalizedReportPayloadHash({
       targetEntityId: 'card-1',
@@ -58,6 +69,23 @@ describe('data card report normalization', () => {
     });
 
     expect(a).toBe(b);
+  });
+
+  test('treats encyclopedia alias and canonical slug as the same normalized payload hash', async () => {
+    const aliasHash = await buildNormalizedReportPayloadHash({
+      targetEntityId: 'card-1',
+      reasonCode: 'plagiarism',
+      details: '说明',
+      references: [{ referenceType: 'encyclopedia_entry', referenceId: 'modelscope-auth-401', note: '规则依据' }],
+    });
+    const canonicalHash = await buildNormalizedReportPayloadHash({
+      targetEntityId: 'card-1',
+      reasonCode: 'plagiarism',
+      details: '说明',
+      references: [{ referenceType: 'encyclopedia_entry', referenceId: 'tachie-auth-errors', note: '规则依据' }],
+    });
+
+    expect(aliasHash).toBe(canonicalHash);
   });
 
   test('extracts public data card id from pasted links', () => {

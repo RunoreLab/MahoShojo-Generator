@@ -1,4 +1,4 @@
-import { and, asc, count, eq, gte, inArray, isNull, sql } from 'drizzle-orm';
+import { and, asc, count, desc, eq, gte, inArray, isNull, sql } from 'drizzle-orm';
 
 import type { AppDrizzleDb } from '@/lib/db/drizzle';
 import { reportCases, reportReferences, reportSubmissionEvents, reports } from '@/lib/db/schema';
@@ -297,6 +297,18 @@ export async function createReportSubmissionEvent(
     .returning();
 
   return rows[0]!;
+}
+
+export async function getLatestReportSubmissionEventByReport(
+  db: AppDrizzleDb,
+  reportId: string,
+): Promise<ReportSubmissionEventRow | null> {
+  const row = await db.query.reportSubmissionEvents.findFirst({
+    where: eq(reportSubmissionEvents.reportId, reportId),
+    orderBy: [desc(reportSubmissionEvents.createdAt), desc(reportSubmissionEvents.id)],
+  });
+
+  return row ?? null;
 }
 
 export async function countReportSubmissionEventsByReporterSince(

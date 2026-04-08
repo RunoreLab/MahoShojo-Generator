@@ -247,6 +247,70 @@ describe('data card reports service', () => {
     ]);
   });
 
+  test('same payload retry repairs missing submission event after a partial write failure', async () => {
+    let activeReport: any = null;
+    let eventAttempts = 0;
+    const writtenEvents: any[] = [];
+    const service = buildService({
+      repo: {
+        getOpenReportCaseByTarget: async () => ({
+          id: 'case-1',
+          targetEntityType: 'data_card',
+          targetEntityId: 'card-1',
+          targetUserId: 2,
+          status: 'open',
+          creatorNotifiedAt: now,
+          creatorNotifiedReportCount: 1,
+        }),
+        getActiveReportByCaseAndReporter: async () => activeReport,
+        createReport: async (_db: any, input: any) => {
+          activeReport = {
+            ...input,
+            id: 'report-1',
+            status: 'active',
+            createdAt: input.now,
+            updatedAt: input.now,
+          };
+          return activeReport;
+        },
+        updateActiveReportForReporter: async () => {
+          throw new Error('should not update same payload retry');
+        },
+        createReportSubmissionEvent: async (_db: any, input: any) => {
+          eventAttempts += 1;
+          if (eventAttempts === 1) {
+            throw new Error('transient submission event failure');
+          }
+          writtenEvents.push({ ...input, createdAt: input.now });
+          return { ...input, createdAt: input.now };
+        },
+        listReportReferencesByReport: async () => [],
+        replaceReportReferences: async () => {},
+        countActiveReportsByCase: async () => 1,
+      },
+    });
+
+    await expect(service.submitDataCardReport(makeSubmitInput(7))).rejects.toThrow('transient submission event failure');
+
+    const result = await service.submitDataCardReport(makeSubmitInput(7));
+
+    expect(result).toEqual({
+      submissionDecision: 'noop_duplicate_payload',
+      caseId: 'case-1',
+      reportId: 'report-1',
+      creatorNotified: false,
+    });
+    expect(eventAttempts).toBe(2);
+    expect(writtenEvents).toEqual([
+      expect.objectContaining({
+        caseId: 'case-1',
+        reportId: 'report-1',
+        reporterUserId: 7,
+        submissionDecision: 'created',
+      }),
+    ]);
+  });
+
   test('same normalized payload with reordered references stays side-effect free', async () => {
     let replaceCalled = false;
     let resolveCalled = false;
@@ -391,6 +455,62 @@ describe('data card reports service', () => {
     expect(markAttempts).toBe(2);
     expect(clearAttempts).toBe(1);
     expect(messageAttempts).toBe(2);
+  });
+
+  test('falls back to recreating the active report when concurrent update loses the row', async () => {
+    let activeReport: any = {
+      id: 'report-1',
+      caseId: 'case-1',
+      reporterUserId: 7,
+      normalizedPayloadHash: 'old-hash',
+      status: 'active',
+      updatedAt: '2026-04-08T10:00:00.000Z',
+    };
+    let createCalled = false;
+    let updateAttempts = 0;
+    const service = buildService({
+      repo: {
+        getOpenReportCaseByTarget: async () => ({
+          id: 'case-1',
+          targetEntityType: 'data_card',
+          targetEntityId: 'card-1',
+          targetUserId: 2,
+          status: 'open',
+          creatorNotifiedAt: now,
+          creatorNotifiedReportCount: 1,
+        }),
+        getActiveReportByCaseAndReporter: async () => activeReport,
+        updateActiveReportForReporter: async () => {
+          updateAttempts += 1;
+          activeReport = null;
+          return null;
+        },
+        createReport: async (_db: any, input: any) => {
+          createCalled = true;
+          activeReport = {
+            ...input,
+            id: 'report-2',
+            status: 'active',
+            createdAt: input.now,
+            updatedAt: input.now,
+          };
+          return activeReport;
+        },
+        replaceReportReferences: async () => {},
+        countActiveReportsByCase: async () => 1,
+      },
+    });
+
+    const result = await service.submitDataCardReport(makeSubmitInput(7, '新的说明'));
+
+    expect(result).toEqual({
+      submissionDecision: 'created',
+      caseId: 'case-1',
+      reportId: 'report-2',
+      creatorNotified: false,
+    });
+    expect(updateAttempts).toBe(1);
+    expect(createCalled).toBe(true);
   });
 
   test('changed payload that fails rate limit returns 429-facing decision and does not write', async () => {

@@ -41,6 +41,7 @@ type DataCardReportsRepository = {
   createReport: typeof repo.createReport;
   updateActiveReportForReporter: typeof repo.updateActiveReportForReporter;
   createReportSubmissionEvent: typeof repo.createReportSubmissionEvent;
+  getLatestReportSubmissionEventByReport: typeof repo.getLatestReportSubmissionEventByReport;
   countReportSubmissionEventsByReporterSince: typeof repo.countReportSubmissionEventsByReporterSince;
   replaceReportReferences: typeof repo.replaceReportReferences;
   listReportReferencesByReport: typeof repo.listReportReferencesByReport;
@@ -123,6 +124,7 @@ export class DataCardReportForbiddenError extends Error {
 const DATA_CARD_REPORT_RATE_LIMIT_PER_HOUR = 3;
 const DATA_CARD_REPORT_RATE_LIMIT_PER_DAY = 10;
 const DATA_CARD_REPORT_SAME_TARGET_COOLDOWN_MS = 60 * 1000;
+const MAX_REPORT_WRITE_ATTEMPTS = 4;
 
 const requireDb = (db: DataCardReportsServiceDb): AppDrizzleDb => {
   if (!db) {
@@ -138,6 +140,8 @@ const toRepo = (): DataCardReportsRepository => ({
   createReport: (innerDb, input) => repo.createReport(innerDb, input),
   updateActiveReportForReporter: (innerDb, input) => repo.updateActiveReportForReporter(innerDb, input),
   createReportSubmissionEvent: (innerDb, input) => repo.createReportSubmissionEvent(innerDb, input),
+  getLatestReportSubmissionEventByReport: (innerDb, reportId) =>
+    repo.getLatestReportSubmissionEventByReport(innerDb, reportId),
   countReportSubmissionEventsByReporterSince: (innerDb, input) =>
     repo.countReportSubmissionEventsByReporterSince(innerDb, input),
   replaceReportReferences: (innerDb, input) => repo.replaceReportReferences(innerDb, input),
@@ -307,6 +311,32 @@ const isWithinCooldown = (updatedAt: string | null | undefined, now: string, coo
   if (!Number.isFinite(updatedAtMs) || !Number.isFinite(nowMs)) return false;
   return nowMs - updatedAtMs >= 0 && nowMs - updatedAtMs < cooldownMs;
 };
+
+const shouldRepairMissingSubmissionEvent = (input: {
+  reportCreatedAt: string | null | undefined;
+  reportUpdatedAt: string | null | undefined;
+  latestSubmissionEvent: { createdAt: string } | null;
+}): boolean => {
+  const reportWriteAtMs = Date.parse(input.reportUpdatedAt ?? input.reportCreatedAt ?? '');
+  if (!Number.isFinite(reportWriteAtMs)) {
+    return false;
+  }
+
+  if (!input.latestSubmissionEvent) {
+    return true;
+  }
+
+  const latestEventAtMs = Date.parse(input.latestSubmissionEvent.createdAt);
+  if (!Number.isFinite(latestEventAtMs)) {
+    return false;
+  }
+
+  return latestEventAtMs < reportWriteAtMs;
+};
+
+const inferSubmissionEventRepairDecision = (
+  latestSubmissionEvent: { createdAt: string } | null,
+): 'created' | 'updated' => (latestSubmissionEvent ? 'updated' : 'created');
 
 export async function screenDataCardReportSubmission(input: {
   reporterUserId: number;
@@ -662,6 +692,7 @@ const createDataCardReportsService = (deps: DataCardReportsServiceDeps) => {
       }
 
       if (!isDuplicatePayload) {
+        reportRow = null;
         const reportWriteInput = {
           caseId: openCase.id,
           reporterUserId: input.reporterUserId,
@@ -676,12 +707,24 @@ const createDataCardReportsService = (deps: DataCardReportsServiceDeps) => {
           now,
         };
 
-        reportRow = existingActiveReport
-          ? await deps.repo.updateActiveReportForReporter(db, reportWriteInput)
-          : null;
+        let reportWriteAttempts = 0;
+        while (!reportRow && !isDuplicatePayload && reportWriteAttempts < MAX_REPORT_WRITE_ATTEMPTS) {
+          reportWriteAttempts += 1;
 
-        if (!existingActiveReport) {
+          if (existingActiveReport) {
+            submissionDecision = 'updated';
+            reportRow = await deps.repo.updateActiveReportForReporter(db, reportWriteInput);
+            if (reportRow) {
+              break;
+            }
+
+            existingActiveReport = null;
+            submissionDecision = 'created';
+            continue;
+          }
+
           try {
+            submissionDecision = 'created';
             reportRow = await deps.repo.createReport(db, {
               id: deps.idFactory(),
               ...reportWriteInput,
@@ -700,11 +743,10 @@ const createDataCardReportsService = (deps: DataCardReportsServiceDeps) => {
               submissionDecision = 'noop_duplicate_payload';
               isDuplicatePayload = true;
               shouldReplaceReferences = false;
-            } else {
-              existingActiveReport = concurrentActiveReport;
-              submissionDecision = 'updated';
-              reportRow = await deps.repo.updateActiveReportForReporter(db, reportWriteInput);
+              break;
             }
+
+            existingActiveReport = concurrentActiveReport;
           }
         }
       }
@@ -722,6 +764,24 @@ const createDataCardReportsService = (deps: DataCardReportsServiceDeps) => {
           submissionDecision,
           now,
         });
+      } else if (submissionDecision === 'noop_duplicate_payload') {
+        const latestSubmissionEvent = await deps.repo.getLatestReportSubmissionEventByReport(db, reportRow.id);
+        if (
+          shouldRepairMissingSubmissionEvent({
+            reportCreatedAt: reportRow.createdAt,
+            reportUpdatedAt: reportRow.updatedAt,
+            latestSubmissionEvent,
+          })
+        ) {
+          await deps.repo.createReportSubmissionEvent(db, {
+            id: deps.idFactory(),
+            caseId: openCase.id,
+            reportId: reportRow.id,
+            reporterUserId: input.reporterUserId,
+            submissionDecision: inferSubmissionEventRepairDecision(latestSubmissionEvent),
+            now,
+          });
+        }
       }
 
       if (isDuplicatePayload) {
@@ -858,6 +918,8 @@ export function createDataCardReportsServiceForTests(
           submissionDecision: input.submissionDecision,
           createdAt: input.now,
         })),
+      getLatestReportSubmissionEventByReport:
+        deps.repo?.getLatestReportSubmissionEventByReport ?? (async () => null),
       countReportSubmissionEventsByReporterSince:
         deps.repo?.countReportSubmissionEventsByReporterSince ?? (async () => 0),
       replaceReportReferences: deps.repo?.replaceReportReferences ?? (() => missing('replaceReportReferences')),

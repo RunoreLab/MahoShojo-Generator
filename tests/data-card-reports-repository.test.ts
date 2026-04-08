@@ -10,6 +10,7 @@ import {
   createReportCase,
   createReportSubmissionEvent,
   getActiveReportByCaseAndReporter,
+  getLatestReportSubmissionEventByReport,
   getOpenReportCaseByTarget,
   listReportReferencesByReport,
   replaceReportReferences,
@@ -255,5 +256,36 @@ describe('data card reports repository', () => {
 
     expect(countSinceHour).toBe(2);
     expect(countSinceTen).toBe(1);
+  });
+
+  test('returns the latest submission event for a report', async () => {
+    await createReportCaseFixture();
+    await createReportFixture();
+
+    await createReportSubmissionEvent(db, {
+      id: 'event-1',
+      caseId: 'case-1',
+      reportId: 'report-1',
+      reporterUserId: 7,
+      submissionDecision: 'created',
+      now: '2026-04-08T09:40:00.000Z',
+    });
+    await createReportSubmissionEvent(db, {
+      id: 'event-2',
+      caseId: 'case-1',
+      reportId: 'report-1',
+      reporterUserId: 7,
+      submissionDecision: 'updated',
+      now: '2026-04-08T10:10:00.000Z',
+    });
+
+    const latestEvent = await getLatestReportSubmissionEventByReport(db, 'report-1');
+
+    expect(latestEvent).toMatchObject({
+      id: 'event-2',
+      reportId: 'report-1',
+      submissionDecision: 'updated',
+      createdAt: '2026-04-08T10:10:00.000Z',
+    });
   });
 });

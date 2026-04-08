@@ -2,6 +2,7 @@ import type {
   DataCardReportReferenceType,
   NormalizedReportReference,
 } from '@/lib/data-card-reports/types';
+import { getEncyclopediaEntry } from '@/lib/encyclopedia';
 
 export const MAX_DATA_CARD_REPORT_REFERENCES = 5;
 
@@ -52,6 +53,11 @@ const normalizePublicDataCardReferenceId = (value: string): string => {
   return trimmed;
 };
 
+const normalizeEncyclopediaReferenceId = (value: string): string => {
+  const trimmed = value.trim();
+  return getEncyclopediaEntry(trimmed)?.slug ?? trimmed;
+};
+
 const parseReference = (value: unknown): Omit<NormalizedReportReference, 'sortOrder'> => {
   if (!value || typeof value !== 'object') {
     throw new InvalidDataCardReportReferenceError('引用必须是对象');
@@ -71,7 +77,7 @@ const parseReference = (value: unknown): Omit<NormalizedReportReference, 'sortOr
     referenceId:
       record.referenceType === 'public_data_card'
         ? normalizePublicDataCardReferenceId(record.referenceId)
-        : record.referenceId.trim(),
+        : normalizeEncyclopediaReferenceId(record.referenceId),
     note: normalizeReferenceNote(record.note),
   };
 };
