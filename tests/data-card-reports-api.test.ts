@@ -13,6 +13,11 @@ const auth = {
   source: 'better-auth-session' as const,
 };
 
+const bannedAuth = {
+  user: { id: 8, username: 'banned-hana', is_banned: '2026-04-08T09:00:00.000Z' },
+  source: 'better-auth-session' as const,
+};
+
 const jsonBody = async <T>(response: Response): Promise<T> => (await response.json()) as T;
 
 describe('data card reports API', () => {
@@ -69,6 +74,39 @@ describe('data card reports API', () => {
     expect(payload.hasOpenCase).toBe(true);
     expect(payload.reasons[0].code).toBe('plagiarism');
     expect(payload.caseSummary.caseId).toBe('case-1');
+  });
+
+  test('GET capability returns disabled payload for banned viewer without calling service', async () => {
+    const handler = createDataCardReportsHandler({
+      getAuthUser: async () => bannedAuth,
+      getDb: () => {
+        throw new Error('banned capability should not resolve db');
+      },
+      getDataCardReportCapability: async () => {
+        throw new Error('service should not be called for banned viewer');
+      },
+    });
+
+    const response = await handler(new Request('https://example.test/api/data-card-reports?dataCardId=card-1'));
+    const payload = await jsonBody<{
+      canReport: boolean;
+      reportDisabledReason: string | null;
+      hasOpenCase: boolean;
+      myActiveReport: null;
+      reasons: Array<{ code: string }>;
+      caseSummary: null;
+    }>(response);
+
+    expect(response.status).toBe(200);
+    expect(payload).toMatchObject({
+      canReport: false,
+      reportDisabledReason: '账号已被封禁',
+      hasOpenCase: false,
+      myActiveReport: null,
+      caseSummary: null,
+    });
+    expect(payload.reasons.length).toBeGreaterThan(0);
+    expect(payload.reasons[0]?.code).toBe('plagiarism');
   });
 
   test('POST submit requires login', async () => {

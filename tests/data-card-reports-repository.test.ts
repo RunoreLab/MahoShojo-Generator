@@ -13,6 +13,7 @@ import {
   getLatestReportSubmissionEventByReport,
   getOpenReportCaseByTarget,
   listReportReferencesByReport,
+  markReportCaseCreatorNotified,
   replaceReportReferences,
   updateActiveReportForReporter,
 } from '@/lib/db/repositories/data-card-reports';
@@ -316,5 +317,39 @@ describe('data card reports repository', () => {
       submissionDecision: 'updated',
       createdAt: '2026-04-08T10:10:00.000Z',
     });
+  });
+
+  test('markReportCaseCreatorNotified stores the active report count at claim time', async () => {
+    await createReportCaseFixture();
+    await createReportFixture();
+    await createReport(db, {
+      id: 'report-2',
+      caseId: 'case-1',
+      reporterUserId: 8,
+      reasonCode: 'harassment_or_hate',
+      details: '并发举报',
+      evidenceSummaryJson: '{}',
+      normalizedPayloadHash: 'hash-b',
+      targetNameSnapshot: '公开卡',
+      targetDescriptionSnapshot: '描述',
+      targetDataSnapshot: '{"name":"公开卡"}',
+      targetUpdatedAtSnapshot: '2026-04-08T10:00:00.000Z',
+      now: '2026-04-08T10:21:00.000Z',
+    });
+
+    const claimed = await markReportCaseCreatorNotified(db, {
+      caseId: 'case-1',
+      notifiedAt: '2026-04-08T10:22:00.000Z',
+      reportCount: 1,
+      targetCardUpdatedAtAtNotice: '2026-04-08T10:00:00.000Z',
+    });
+    const row = await getOpenReportCaseByTarget(db, {
+      targetEntityType: 'data_card',
+      targetEntityId: 'card-1',
+    });
+
+    expect(claimed).toBe(true);
+    expect(row?.creatorNotifiedAt).toBe('2026-04-08T10:22:00.000Z');
+    expect(row?.creatorNotifiedReportCount).toBe(2);
   });
 });

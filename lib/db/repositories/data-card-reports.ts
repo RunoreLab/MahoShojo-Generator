@@ -398,7 +398,11 @@ export async function markReportCaseCreatorNotified(
     .update(reportCases)
     .set({
       creatorNotifiedAt: input.notifiedAt,
-      creatorNotifiedReportCount: input.reportCount,
+      creatorNotifiedReportCount: sql<number>`(
+        SELECT COUNT(*) FROM ${reports}
+        WHERE ${reports.caseId} = ${reportCases.id}
+          AND ${reports.status} = 'active'
+      )`,
       targetCardUpdatedAtAtNotice: input.targetCardUpdatedAtAtNotice,
       updatedAt: input.notifiedAt,
     })

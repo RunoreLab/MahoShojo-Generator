@@ -7,6 +7,7 @@ import {
   type DataCardReportsServiceDb,
   submitDataCardReport,
 } from '@/lib/data-card-reports/service';
+import { DATA_CARD_REPORT_REASONS } from '@/lib/data-card-reports/reasons';
 
 export const runtime = 'edge';
 
@@ -39,6 +40,9 @@ const getTargetEntityIdFromQuery = (req: Request): string => {
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const isBannedAuthContext = (auth: Awaited<ReturnType<typeof getAuthUser>> | null): boolean =>
+  typeof auth?.user.is_banned === 'string' && auth.user.is_banned.trim().length > 0;
 
 const parseSubmitBody = async (
   req: Request,
@@ -109,6 +113,19 @@ export const createDataCardReportsHandler =
 
       try {
         const auth = await (deps.getAuthUser ?? defaultDeps.getAuthUser)(req);
+        if (isBannedAuthContext(auth)) {
+          return json(
+            {
+              canReport: false,
+              reportDisabledReason: '账号已被封禁',
+              hasOpenCase: false,
+              myActiveReport: null,
+              reasons: DATA_CARD_REPORT_REASONS,
+              caseSummary: null,
+            },
+            { headers: { 'Cache-Control': 'no-store' } },
+          );
+        }
         const viewerUserId = auth?.user.id ?? null;
         const payload = await (deps.getDataCardReportCapability ?? defaultDeps.getDataCardReportCapability)({
           db: viewerUserId == null ? null : await resolveDb(deps),

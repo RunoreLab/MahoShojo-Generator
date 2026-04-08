@@ -125,6 +125,7 @@ const DATA_CARD_REPORT_RATE_LIMIT_PER_HOUR = 3;
 const DATA_CARD_REPORT_RATE_LIMIT_PER_DAY = 10;
 const DATA_CARD_REPORT_SAME_TARGET_COOLDOWN_MS = 60 * 1000;
 const MAX_REPORT_WRITE_ATTEMPTS = 4;
+const SQLITE_UTC_TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?:\.\d+)?$/;
 
 const requireDb = (db: DataCardReportsServiceDb): AppDrizzleDb => {
   if (!db) {
@@ -297,17 +298,27 @@ const toReportReferenceWriteInput = (
   }));
 
 const subtractWindowFromIso = (now: string, windowMs: number): string => {
-  const baseMs = Date.parse(now);
+  const baseMs = parseTimestampMs(now);
   if (!Number.isFinite(baseMs)) {
     return new Date(Date.now() - windowMs).toISOString();
   }
   return new Date(baseMs - windowMs).toISOString();
 };
 
+const parseTimestampMs = (value: string | null | undefined): number => {
+  if (!value) return Number.NaN;
+
+  if (SQLITE_UTC_TIMESTAMP_PATTERN.test(value)) {
+    return Date.parse(value.replace(' ', 'T') + 'Z');
+  }
+
+  return Date.parse(value);
+};
+
 const isWithinCooldown = (updatedAt: string | null | undefined, now: string, cooldownMs: number): boolean => {
   if (!updatedAt) return false;
-  const updatedAtMs = Date.parse(updatedAt);
-  const nowMs = Date.parse(now);
+  const updatedAtMs = parseTimestampMs(updatedAt);
+  const nowMs = parseTimestampMs(now);
   if (!Number.isFinite(updatedAtMs) || !Number.isFinite(nowMs)) return false;
   return nowMs - updatedAtMs >= 0 && nowMs - updatedAtMs < cooldownMs;
 };
@@ -317,7 +328,7 @@ const shouldRepairMissingSubmissionEvent = (input: {
   reportUpdatedAt: string | null | undefined;
   latestSubmissionEvent: { createdAt: string } | null;
 }): boolean => {
-  const reportWriteAtMs = Date.parse(input.reportUpdatedAt ?? input.reportCreatedAt ?? '');
+  const reportWriteAtMs = parseTimestampMs(input.reportUpdatedAt ?? input.reportCreatedAt ?? '');
   if (!Number.isFinite(reportWriteAtMs)) {
     return false;
   }
@@ -326,7 +337,7 @@ const shouldRepairMissingSubmissionEvent = (input: {
     return true;
   }
 
-  const latestEventAtMs = Date.parse(input.latestSubmissionEvent.createdAt);
+  const latestEventAtMs = parseTimestampMs(input.latestSubmissionEvent.createdAt);
   if (!Number.isFinite(latestEventAtMs)) {
     return false;
   }
@@ -447,11 +458,12 @@ const createDataCardReportsService = (deps: DataCardReportsServiceDeps) => {
     targetCardUpdatedAtAtNotice: string | null;
     currentTargetCardUpdatedAt: string | null;
   }) => {
-    const remediationBaseline = input.targetCardUpdatedAtAtNotice ?? input.creatorNotifiedAt;
+    const remediationBaselineMs = parseTimestampMs(input.targetCardUpdatedAtAtNotice ?? input.creatorNotifiedAt);
+    const currentTargetCardUpdatedAtMs = parseTimestampMs(input.currentTargetCardUpdatedAt);
     const isCandidate =
-      remediationBaseline != null &&
-      input.currentTargetCardUpdatedAt != null &&
-      input.currentTargetCardUpdatedAt > remediationBaseline;
+      Number.isFinite(remediationBaselineMs) &&
+      Number.isFinite(currentTargetCardUpdatedAtMs) &&
+      currentTargetCardUpdatedAtMs > remediationBaselineMs;
 
     return {
       caseId: input.caseId,
@@ -844,18 +856,19 @@ const createDataCardReportsService = (deps: DataCardReportsServiceDeps) => {
 
       let creatorNotified = false;
       if (!openCase.creatorNotifiedAt) {
-        const notificationActiveReports = await deps.repo.listActiveReportsByCase(db, openCase.id);
-        const activeReportsForNotification =
-          notificationActiveReports.length > 0 ? notificationActiveReports : [reportRow];
-        const notificationEvidenceSummary = await buildAggregatedCaseEvidenceSummary(db, activeReportsForNotification);
-        const reportCount = activeReportsForNotification.length;
+        const claimedReportCount = await deps.repo.countActiveReportsByCase(db, openCase.id);
         creatorNotified = await deps.repo.markReportCaseCreatorNotified(db, {
           caseId: openCase.id,
           notifiedAt: now,
-          reportCount,
+          reportCount: claimedReportCount,
           targetCardUpdatedAtAtNotice: targetCard.updated_at,
         });
         if (creatorNotified) {
+          const notificationActiveReports = await deps.repo.listActiveReportsByCase(db, openCase.id);
+          const activeReportsForNotification =
+            notificationActiveReports.length > 0 ? notificationActiveReports : [reportRow];
+          const notificationEvidenceSummary = await buildAggregatedCaseEvidenceSummary(db, activeReportsForNotification);
+          const reportCount = activeReportsForNotification.length;
           try {
             await deps.createUserMessageEntry({
               db,

@@ -760,6 +760,121 @@ describe('data card reports service', () => {
     });
   });
 
+  test('first creator notification recomputes case summary after winning notification claim', async () => {
+    const messages: any[] = [];
+    const createdReportEvidenceSummary = {
+      reasonLabels: ['疑似抄袭'],
+      referenceSummary: ['引用公开数据卡：白百合'],
+      detailsPreview: '能力结构高度近似。',
+    };
+    const concurrentReportEvidenceSummary = {
+      reasonLabels: ['骚扰或仇恨内容'],
+      referenceSummary: ['引用百科：社区守则'],
+      detailsPreview: '存在针对性辱骂。',
+    };
+    let notificationClaimed = false;
+    const service = buildService({
+      repo: {
+        getOpenReportCaseByTarget: async () => ({
+          id: 'case-1',
+          targetEntityType: 'data_card',
+          targetEntityId: 'card-1',
+          targetUserId: 2,
+          status: 'open',
+          creatorNotifiedAt: null,
+          creatorNotifiedReportCount: 0,
+        }),
+        getActiveReportByCaseAndReporter: async () => null,
+        createReport: async (input: any) => ({
+          id: 'report-1',
+          ...input,
+          status: 'active',
+          evidenceSummaryJson: JSON.stringify(createdReportEvidenceSummary),
+        }),
+        replaceReportReferences: async () => {},
+        listActiveReportsByCase: async () =>
+          notificationClaimed
+            ? [
+                {
+                  id: 'report-1',
+                  caseId: 'case-1',
+                  reporterUserId: 7,
+                  reasonCode: 'plagiarism',
+                  details: '能力结构高度近似。',
+                  status: 'active',
+                  evidenceSummaryJson: JSON.stringify(createdReportEvidenceSummary),
+                  normalizedPayloadHash: 'hash-1',
+                  targetNameSnapshot: '公开卡',
+                  targetDescriptionSnapshot: '描述',
+                  targetDataSnapshot: '{"name":"公开卡"}',
+                  targetUpdatedAtSnapshot: targetCard.updated_at,
+                  createdAt: now,
+                  updatedAt: now,
+                  withdrawnAt: null,
+                },
+                {
+                  id: 'report-2',
+                  caseId: 'case-1',
+                  reporterUserId: 8,
+                  reasonCode: 'harassment_or_hate',
+                  details: '存在针对性辱骂。',
+                  status: 'active',
+                  evidenceSummaryJson: JSON.stringify(concurrentReportEvidenceSummary),
+                  normalizedPayloadHash: 'hash-2',
+                  targetNameSnapshot: '公开卡',
+                  targetDescriptionSnapshot: '描述',
+                  targetDataSnapshot: '{"name":"公开卡"}',
+                  targetUpdatedAtSnapshot: targetCard.updated_at,
+                  createdAt: now,
+                  updatedAt: now,
+                  withdrawnAt: null,
+                },
+              ]
+            : [
+                {
+                  id: 'report-1',
+                  caseId: 'case-1',
+                  reporterUserId: 7,
+                  reasonCode: 'plagiarism',
+                  details: '能力结构高度近似。',
+                  status: 'active',
+                  evidenceSummaryJson: JSON.stringify(createdReportEvidenceSummary),
+                  normalizedPayloadHash: 'hash-1',
+                  targetNameSnapshot: '公开卡',
+                  targetDescriptionSnapshot: '描述',
+                  targetDataSnapshot: '{"name":"公开卡"}',
+                  targetUpdatedAtSnapshot: targetCard.updated_at,
+                  createdAt: now,
+                  updatedAt: now,
+                  withdrawnAt: null,
+                },
+              ],
+        countActiveReportsByCase: async () => (notificationClaimed ? 2 : 1),
+        markReportCaseCreatorNotified: async () => {
+          notificationClaimed = true;
+          return true;
+        },
+      },
+      createUserMessageEntry: async (input: any) => {
+        messages.push(input);
+        return { id: 9 };
+      },
+    });
+
+    const result = await service.submitDataCardReport({
+      ...makeSubmitInput(7, '能力结构高度近似。'),
+      references: [{ referenceType: 'public_data_card', referenceId: 'card-2' }],
+    });
+
+    expect(result.creatorNotified).toBe(true);
+    expect(messages).toHaveLength(1);
+    expect(messages[0].payload).toMatchObject({
+      reportCount: 2,
+      reasonLabels: ['疑似抄袭', '骚扰或仇恨内容'],
+      referenceSummary: ['引用公开数据卡：白百合', '引用百科：社区守则'],
+    });
+  });
+
   test('create report case falls back to existing open case when insert hits concurrent unique conflict', async () => {
     let lookupCount = 0;
     const service = buildService({
@@ -1059,6 +1174,23 @@ describe('data card reports service', () => {
       caseId: 'case-1',
       isSelfRemediationCandidate: true,
       selfRemediationDetectedAt: '2026-04-08T10:40:00.000Z',
+    });
+  });
+
+  test('parses mixed SQLite and ISO timestamps when notice snapshot updatedAt is unavailable', () => {
+    const service = buildService();
+
+    const dto = service.buildSelfRemediationCandidateDto({
+      caseId: 'case-1',
+      creatorNotifiedAt: '2026-04-08T10:20:00.000Z',
+      targetCardUpdatedAtAtNotice: null,
+      currentTargetCardUpdatedAt: '2026-04-08 10:40:00',
+    });
+
+    expect(dto).toEqual({
+      caseId: 'case-1',
+      isSelfRemediationCandidate: true,
+      selfRemediationDetectedAt: '2026-04-08 10:40:00',
     });
   });
 });
