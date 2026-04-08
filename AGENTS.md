@@ -34,7 +34,6 @@
 
 ### API 的编写
 - 该项目部署在 Cloudflare 上，使用 Edge Runtime，请不要使用不兼容的库或者特性。
-- 可以参考 `/pages/api/auth/verify.ts` 的使用方法进行新的 API 的编写。
 
 ### 测试规范
 - 测试脚本逻辑基于 `bun` 的测试能力执行，请不要使用其他测试框架的代码。
