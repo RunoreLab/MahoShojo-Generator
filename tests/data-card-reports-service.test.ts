@@ -268,8 +268,95 @@ describe('data card reports service', () => {
     expect(result.submissionDecision).toBe('created');
   });
 
-  test('does not mark case notified before creator message is written successfully', async () => {
+  test('reuses reporter active report after concurrent case creation is adopted', async () => {
+    let lookupCount = 0;
+    let createReportCalled = false;
+    let updateCalled = false;
+    const activeReport = {
+      id: 'report-1',
+      caseId: 'case-1',
+      reporterUserId: 7,
+      normalizedPayloadHash: 'old-hash',
+      status: 'active',
+    };
+    const service = buildService({
+      repo: {
+        getOpenReportCaseByTarget: async () => {
+          lookupCount += 1;
+          return lookupCount >= 2
+            ? {
+                id: 'case-1',
+                targetEntityType: 'data_card',
+                targetEntityId: 'card-1',
+                targetUserId: 2,
+                status: 'open',
+                creatorNotifiedAt: now,
+                creatorNotifiedReportCount: 1,
+              }
+            : null;
+        },
+        createReportCase: async () => {
+          throw new Error('UNIQUE constraint failed: report_cases.target_entity_type, report_cases.target_entity_id');
+        },
+        getActiveReportByCaseAndReporter: async (_db: any, input: any) =>
+          input.caseId === 'case-1' ? activeReport : null,
+        createReport: async () => {
+          createReportCalled = true;
+          throw new Error('should not create duplicate report');
+        },
+        updateActiveReportForReporter: async (_db: any, input: any) => {
+          updateCalled = true;
+          return { id: 'report-1', ...input, status: 'active' };
+        },
+        replaceReportReferences: async () => {},
+        countActiveReportsByCase: async () => 1,
+        markReportCaseCreatorNotified: async () => false,
+      },
+    });
+
+    const result = await service.submitDataCardReport(makeSubmitInput(7, '新的说明'));
+
+    expect(result.caseId).toBe('case-1');
+    expect(result.reportId).toBe('report-1');
+    expect(result.submissionDecision).toBe('updated');
+    expect(createReportCalled).toBe(false);
+    expect(updateCalled).toBe(true);
+  });
+
+  test('sends creator notification only after winning notification flag claim', async () => {
+    const messages: any[] = [];
+    const service = buildService({
+      repo: {
+        getOpenReportCaseByTarget: async () => ({
+          id: 'case-1',
+          targetEntityType: 'data_card',
+          targetEntityId: 'card-1',
+          targetUserId: 2,
+          status: 'open',
+          creatorNotifiedAt: null,
+          creatorNotifiedReportCount: 0,
+        }),
+        getActiveReportByCaseAndReporter: async () => null,
+        createReport: async (input: any) => ({ id: input.id, ...input, status: 'active' }),
+        replaceReportReferences: async () => {},
+        countActiveReportsByCase: async () => 1,
+        markReportCaseCreatorNotified: async () => false,
+      },
+      createUserMessageEntry: async (input: any) => {
+        messages.push(input);
+        return { id: 9 };
+      },
+    });
+
+    const result = await service.submitDataCardReport(makeSubmitInput(7));
+
+    expect(result.creatorNotified).toBe(false);
+    expect(messages).toHaveLength(0);
+  });
+
+  test('rolls back claimed notification flag when creator message write fails', async () => {
     let markCalled = false;
+    let clearCalled = false;
     const service = buildService({
       repo: {
         getOpenReportCaseByTarget: async () => null,
@@ -287,6 +374,10 @@ describe('data card reports service', () => {
           markCalled = true;
           return true;
         },
+        clearReportCaseCreatorNotified: async () => {
+          clearCalled = true;
+          return true;
+        },
       },
       createUserMessageEntry: async () => {
         throw new Error('message write failed');
@@ -294,7 +385,8 @@ describe('data card reports service', () => {
     });
 
     await expect(service.submitDataCardReport(makeSubmitInput(7))).rejects.toThrow('message write failed');
-    expect(markCalled).toBe(false);
+    expect(markCalled).toBe(true);
+    expect(clearCalled).toBe(true);
   });
 
   test('builds self-remediation candidate DTO from current card updatedAt and notice snapshot', () => {

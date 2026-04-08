@@ -37,6 +37,9 @@ const getTargetEntityIdFromQuery = (req: Request): string => {
   return url.searchParams.get('dataCardId')?.trim() ?? '';
 };
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
 const parseSubmitBody = async (
   req: Request,
 ): Promise<
@@ -50,13 +53,18 @@ const parseSubmitBody = async (
 > => {
   const payload = await readJson<Record<string, unknown>>(req);
   if ('response' in payload) return payload;
+  if (!isRecord(payload.data)) {
+    return { response: json({ error: '请求体格式无效' }, { status: 400 }) };
+  }
+
+  const body = payload.data;
 
   const targetEntityId =
-    (typeof payload.data.targetEntityId === 'string' ? payload.data.targetEntityId : null) ??
-    (typeof payload.data.dataCardId === 'string' ? payload.data.dataCardId : null);
-  const reasonCode = typeof payload.data.reasonCode === 'string' ? payload.data.reasonCode : '';
-  const details = typeof payload.data.details === 'string' ? payload.data.details : null;
-  const references = Array.isArray(payload.data.references) ? payload.data.references : [];
+    (typeof body.targetEntityId === 'string' ? body.targetEntityId : null) ??
+    (typeof body.dataCardId === 'string' ? body.dataCardId : null);
+  const reasonCode = typeof body.reasonCode === 'string' ? body.reasonCode : '';
+  const details = typeof body.details === 'string' ? body.details : null;
+  const references = Array.isArray(body.references) ? body.references : [];
 
   if (!targetEntityId || targetEntityId.trim().length === 0) {
     return { response: json({ error: '缺少目标数据卡 ID' }, { status: 400 }) };

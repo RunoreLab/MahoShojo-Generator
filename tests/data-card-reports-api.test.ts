@@ -148,6 +148,26 @@ describe('data card reports API', () => {
     expect(await jsonBody<{ error: string }>(response)).toEqual({ error: '举报理由无效' });
   });
 
+  test('POST submit rejects non-object JSON body with 400 instead of throwing', async () => {
+    const handler = createDataCardReportsHandler({
+      requireAuthUser: async () => auth,
+      getDb: () => ({ db: true }),
+      submitDataCardReport: async () => {
+        throw new Error('service should not be called');
+      },
+    });
+
+    const response = await handler(
+      new Request('https://example.test/api/data-card-reports', {
+        method: 'POST',
+        body: JSON.stringify(null),
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(await jsonBody<{ error: string }>(response)).toEqual({ error: '请求体格式无效' });
+  });
+
   test('POST submit returns 429 for rejected_rate_limited', async () => {
     const handler = createDataCardReportsHandler({
       requireAuthUser: async () => auth,
@@ -245,6 +265,26 @@ describe('data card reports API', () => {
 
     expect(response.status).toBe(200);
     expect(await jsonBody(response)).toEqual({ withdrawn: true, caseDismissed: true });
+  });
+
+  test('POST withdraw rejects non-object JSON body with 400 instead of throwing', async () => {
+    const handler = createDataCardReportWithdrawHandler({
+      requireAuthUser: async () => auth,
+      getDb: () => ({ db: true }),
+      withdrawDataCardReport: async () => {
+        throw new Error('service should not be called');
+      },
+    });
+
+    const response = await handler(
+      new Request('https://example.test/api/data-card-reports/withdraw', {
+        method: 'POST',
+        body: JSON.stringify([]),
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(await jsonBody<{ error: string }>(response)).toEqual({ error: '请求体格式无效' });
   });
 
   test('POST submit returns 503 when service db is unavailable', async () => {

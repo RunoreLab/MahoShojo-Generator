@@ -47,6 +47,7 @@ type DataCardReportsRepository = {
   withdrawActiveReportByReporter: typeof repo.withdrawActiveReportByReporter;
   dismissCaseIfNoActiveReports: typeof repo.dismissCaseIfNoActiveReports;
   markReportCaseCreatorNotified: typeof repo.markReportCaseCreatorNotified;
+  clearReportCaseCreatorNotified: typeof repo.clearReportCaseCreatorNotified;
 };
 
 export type DataCardReportsServiceDeps = {
@@ -137,6 +138,7 @@ const toRepo = (): DataCardReportsRepository => ({
   withdrawActiveReportByReporter: (innerDb, input) => repo.withdrawActiveReportByReporter(innerDb, input),
   dismissCaseIfNoActiveReports: (innerDb, input) => repo.dismissCaseIfNoActiveReports(innerDb, input),
   markReportCaseCreatorNotified: (innerDb, input) => repo.markReportCaseCreatorNotified(innerDb, input),
+  clearReportCaseCreatorNotified: (innerDb, input) => repo.clearReportCaseCreatorNotified(innerDb, input),
 });
 
 const resolveTargetCard = async (db: AppDrizzleDb, cardId: string): Promise<DataCardByIdDbRow | null> =>
@@ -421,7 +423,7 @@ const createDataCardReportsService = (deps: DataCardReportsServiceDeps) => {
         targetEntityType: 'data_card',
         targetEntityId: input.targetEntityId,
       });
-      const existingActiveReport = openCase
+      let existingActiveReport = openCase
         ? await deps.repo.getActiveReportByCaseAndReporter(db, {
             caseId: openCase.id,
             reporterUserId: input.reporterUserId,
@@ -498,6 +500,21 @@ const createDataCardReportsService = (deps: DataCardReportsServiceDeps) => {
         }
       }
 
+      if (!existingActiveReport) {
+        existingActiveReport = await deps.repo.getActiveReportByCaseAndReporter(db, {
+          caseId: openCase.id,
+          reporterUserId: input.reporterUserId,
+        });
+        if (existingActiveReport && existingActiveReport.normalizedPayloadHash === payloadHash) {
+          return {
+            submissionDecision: 'noop_duplicate_payload',
+            caseId: openCase.id,
+            reportId: existingActiveReport.id,
+            creatorNotified: false,
+          };
+        }
+      }
+
       const reportRow = existingActiveReport
         ? await deps.repo.updateActiveReportForReporter(db, {
             caseId: openCase.id,
@@ -547,33 +564,43 @@ const createDataCardReportsService = (deps: DataCardReportsServiceDeps) => {
       let creatorNotified = false;
       const reportCount = await deps.repo.countActiveReportsByCase(db, openCase.id);
       if (!openCase.creatorNotifiedAt) {
-        await deps.createUserMessageEntry({
-          db,
-          recipientUserId: targetCard.user_id,
-          actorUserId: null,
-          channel: 'system',
-          messageType: 'moderation',
-          templateKey: 'user.moderation.data_card_reported',
-          payload: {
-            dataCardId: targetCard.id,
-            dataCardName: targetCard.name,
-            reasonLabels: evidenceSummary.reasonLabels,
-            referenceSummary: evidenceSummary.referenceSummary,
-            detailsPreview: evidenceSummary.detailsPreview,
-            reportCount,
-            updatedAfterNotice: false,
-          },
-          actionUrl: '/character-manager',
-          sourceEntityType: 'report_case',
-          sourceEntityId: openCase.id,
-          priority: 'high',
-        });
         creatorNotified = await deps.repo.markReportCaseCreatorNotified(db, {
           caseId: openCase.id,
           notifiedAt: now,
           reportCount,
           targetCardUpdatedAtAtNotice: targetCard.updated_at,
         });
+        if (creatorNotified) {
+          try {
+            await deps.createUserMessageEntry({
+              db,
+              recipientUserId: targetCard.user_id,
+              actorUserId: null,
+              channel: 'system',
+              messageType: 'moderation',
+              templateKey: 'user.moderation.data_card_reported',
+              payload: {
+                dataCardId: targetCard.id,
+                dataCardName: targetCard.name,
+                reasonLabels: evidenceSummary.reasonLabels,
+                referenceSummary: evidenceSummary.referenceSummary,
+                detailsPreview: evidenceSummary.detailsPreview,
+                reportCount,
+                updatedAfterNotice: false,
+              },
+              actionUrl: '/character-manager',
+              sourceEntityType: 'report_case',
+              sourceEntityId: openCase.id,
+              priority: 'high',
+            });
+          } catch (error) {
+            await deps.repo.clearReportCaseCreatorNotified(db, {
+              caseId: openCase.id,
+              notifiedAt: now,
+            });
+            throw error;
+          }
+        }
       }
 
       return {
@@ -644,6 +671,8 @@ export function createDataCardReportsServiceForTests(
         deps.repo?.dismissCaseIfNoActiveReports ?? (() => missing('dismissCaseIfNoActiveReports')),
       markReportCaseCreatorNotified:
         deps.repo?.markReportCaseCreatorNotified ?? (async () => false),
+      clearReportCaseCreatorNotified:
+        deps.repo?.clearReportCaseCreatorNotified ?? (async () => false),
     },
     getTargetCard: deps.getTargetCard ?? (async () => missing('getTargetCard')),
     resolveReferenceSnapshots: deps.resolveReferenceSnapshots ?? (async () => missing('resolveReferenceSnapshots')),

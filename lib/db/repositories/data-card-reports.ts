@@ -325,6 +325,24 @@ export async function markReportCaseCreatorNotified(
   return rows.length > 0;
 }
 
+export async function clearReportCaseCreatorNotified(
+  db: AppDrizzleDb,
+  input: { caseId: string; notifiedAt: string },
+): Promise<boolean> {
+  const rows = await db
+    .update(reportCases)
+    .set({
+      creatorNotifiedAt: null,
+      creatorNotifiedReportCount: 0,
+      targetCardUpdatedAtAtNotice: null,
+      updatedAt: input.notifiedAt,
+    })
+    .where(and(eq(reportCases.id, input.caseId), eq(reportCases.creatorNotifiedAt, input.notifiedAt)))
+    .returning({ id: reportCases.id });
+
+  return rows.length > 0;
+}
+
 export async function touchReportCaseLatestReportedAt(
   db: AppDrizzleDb,
   input: { caseId: string; now: string },

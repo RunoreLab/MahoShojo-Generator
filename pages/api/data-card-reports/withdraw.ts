@@ -26,6 +26,9 @@ const defaultDeps: HandlerDeps = {
 const resolveDb = async (deps: Partial<HandlerDeps>): Promise<DataCardReportsServiceDb> =>
   (deps.getDb ? await deps.getDb() : await defaultDeps.getDb());
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
 const toErrorResponse = (error: unknown): Response | null => {
   if (error instanceof DataCardReportValidationError) {
     return json({ error: error.message }, { status: 400 });
@@ -48,10 +51,15 @@ export const createDataCardReportWithdrawHandler =
 
     const payload = await readJson<Record<string, unknown>>(req);
     if ('response' in payload) return payload.response;
+    if (!isRecord(payload.data)) {
+      return json({ error: '请求体格式无效' }, { status: 400 });
+    }
+
+    const body = payload.data;
 
     const targetEntityId =
-      (typeof payload.data.targetEntityId === 'string' ? payload.data.targetEntityId : null) ??
-      (typeof payload.data.dataCardId === 'string' ? payload.data.dataCardId : null);
+      (typeof body.targetEntityId === 'string' ? body.targetEntityId : null) ??
+      (typeof body.dataCardId === 'string' ? body.dataCardId : null);
     if (!targetEntityId || targetEntityId.trim().length === 0) {
       return json({ error: '缺少目标数据卡 ID' }, { status: 400 });
     }
