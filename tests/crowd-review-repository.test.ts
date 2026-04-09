@@ -330,6 +330,41 @@ describe('crowd review repository', () => {
     expect(actionable.map((row) => row.id)).toEqual(['assignment-1']);
   });
 
+  test('does not return assigned rows from concluded rounds as active assignments', async () => {
+    await createCrowdReviewRound(db, {
+      id: 'round-closed',
+      reportCaseId: 'case-1',
+      status: 'concluded',
+      openedAt: '2026-04-08T10:20:00.000Z',
+      deadlineAt: '2026-04-08T11:20:00.000Z',
+      extensionCount: 0,
+      minValidVotes: 3,
+      resultCode: 'violation',
+      resultSummaryJson: '{}',
+      now: '2026-04-08T10:20:00.000Z',
+    });
+    await createCrowdReviewAssignment(db, {
+      id: 'assignment-closed',
+      crowdReviewRoundId: 'round-closed',
+      inspectorUserId: 7,
+      status: 'assigned',
+      assignedAt: '2026-04-08T10:22:00.000Z',
+      expiresAt: '2026-04-08T10:52:00.000Z',
+      completedAt: null,
+      decision: null,
+      decisionNote: null,
+      postVoteSummaryJson: '{}',
+      postVoteSummarySeenAt: null,
+      now: '2026-04-08T10:22:00.000Z',
+    });
+
+    const active = await getActiveAssignmentByInspector(db, 7);
+    const actionable = await listActionableAssignmentsByInspector(db, 7);
+
+    expect(active).toBeNull();
+    expect(actionable).toHaveLength(0);
+  });
+
   test('returns the latest completed assignment for current-case recovery after refresh', async () => {
     await createCrowdReviewRound(db, {
       id: 'round-1',

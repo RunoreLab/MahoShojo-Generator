@@ -298,6 +298,9 @@ const selectAssignableCase = (
 const isFinalAssignmentStatus = (status: string): status is 'voted' | 'abstained' | 'expired' | 'revoked' =>
   status === 'voted' || status === 'abstained' || status === 'expired' || status === 'revoked';
 
+const isActiveRoundStatus = (status: string): status is (typeof ACTIVE_ROUND_STATUSES)[number] =>
+  ACTIVE_ROUND_STATUSES.includes(status as (typeof ACTIVE_ROUND_STATUSES)[number]);
+
 const addMs = (iso: string, ms: number): string => new Date(new Date(iso).getTime() + ms).toISOString();
 
 const isUniqueConstraintError = (error: unknown): error is Error =>
@@ -568,6 +571,52 @@ const createCrowdReviewService = (deps: CrowdReviewServiceDeps) => {
     }
   };
 
+  const syncFinalizedRoundAssignments = async (
+    db: AppDrizzleDb,
+    assignments: ServiceAssignmentRow[],
+    summary: CrowdReviewPostVoteSummaryDto,
+    now: string,
+  ) => {
+    const finalSummaryJson = JSON.stringify(summary);
+
+    await Promise.all(
+      assignments.map(async (assignment) => {
+        if (assignment.status === 'voted' || assignment.status === 'abstained') {
+          await deps.repo.updateAssignmentPostVoteSummary(db, {
+            assignmentId: assignment.id,
+            userId: assignment.inspectorUserId,
+            postVoteSummaryJson: finalSummaryJson,
+            now,
+          });
+          return;
+        }
+
+        if (assignment.status !== 'assigned') {
+          return;
+        }
+
+        const revokedSummary = buildAssignmentReplaySummary({
+          ...assignment,
+          status: 'revoked',
+          decision: null,
+          postVoteSummaryJson: '{}',
+          roundStatus: summary.roundStatus,
+          roundResultCode: summary.resultCode,
+        });
+
+        await deps.repo.finalizeAssignment(db, {
+          assignmentId: assignment.id,
+          userId: assignment.inspectorUserId,
+          status: 'revoked',
+          decision: null,
+          note: null,
+          postVoteSummaryJson: JSON.stringify(revokedSummary),
+          now,
+        });
+      }),
+    );
+  };
+
   const resolveAssignmentSummary = async (
     db: AppDrizzleDb,
     round: CrowdReviewRoundRow,
@@ -582,6 +631,19 @@ const createCrowdReviewService = (deps: CrowdReviewServiceDeps) => {
     ).length;
     const abstainCount = assignments.filter((item) => item.status === 'abstained').length;
     const validVotes = violationVotes + noViolationVotes;
+
+    if (!isActiveRoundStatus(round.status)) {
+      return (
+        parseSummaryJson(round.resultSummaryJson) ??
+        buildPostVoteSummary({
+          roundStatus: round.status,
+          resultCode: round.resultCode,
+          validViolationVotes: violationVotes,
+          validNoViolationVotes: noViolationVotes,
+          abstainCount,
+        })
+      );
+    }
 
     if (new Date(round.deadlineAt).getTime() > new Date(now).getTime() || validVotes < round.minValidVotes) {
       return buildPostVoteSummary({
@@ -635,6 +697,7 @@ const createCrowdReviewService = (deps: CrowdReviewServiceDeps) => {
         now,
         updateReportCaseResolution: deps.repo.updateReportCaseResolution,
       });
+      await syncFinalizedRoundAssignments(db, assignments, summary, now);
       return summary;
     }
 
@@ -660,6 +723,7 @@ const createCrowdReviewService = (deps: CrowdReviewServiceDeps) => {
       now,
       updateReportCaseResolution: deps.repo.updateReportCaseResolution,
     });
+    await syncFinalizedRoundAssignments(db, assignments, summary, now);
     return summary;
   };
 
@@ -848,6 +912,56 @@ const createCrowdReviewService = (deps: CrowdReviewServiceDeps) => {
         };
       }
 
+      const round = await deps.repo.getRoundById(db, assignment.crowdReviewRoundId);
+      if (!round) {
+        throw new CrowdReviewNotFoundError('众查轮次不存在');
+      }
+
+      const now = deps.now();
+      if (!isActiveRoundStatus(round.status)) {
+        const revokedSummary = buildAssignmentReplaySummary({
+          ...assignment,
+          status: 'revoked',
+          decision: null,
+          postVoteSummaryJson: '{}',
+          roundStatus: round.status,
+          roundResultCode: round.resultCode,
+        });
+        const revoked = await deps.repo.finalizeAssignment(db, {
+          assignmentId: assignment.id,
+          userId: input.userId,
+          status: 'revoked',
+          decision: null,
+          note: null,
+          postVoteSummaryJson: JSON.stringify(revokedSummary),
+          now,
+        });
+        if (!revoked) {
+          const latest = await deps.repo.getAssignmentByIdForInspector(db, {
+            assignmentId: input.assignmentId,
+            userId: input.userId,
+          });
+          if (latest && isFinalAssignmentStatus(latest.status)) {
+            return {
+              assignmentId: latest.id,
+              assignmentStatus: latest.status,
+              decision: latest.decision,
+              postVoteSummary: buildAssignmentReplaySummary(latest),
+              idempotentReplay: true,
+            };
+          }
+          throw new CrowdReviewConflictError('派单状态已变化，请刷新后重试');
+        }
+
+        return {
+          assignmentId: assignment.id,
+          assignmentStatus: 'revoked',
+          decision: null,
+          postVoteSummary: revokedSummary,
+          idempotentReplay: false,
+        };
+      }
+
       const nextStatus = input.decision === 'abstain' ? 'abstained' : 'voted';
       const finalized = await deps.repo.finalizeAssignment(db, {
         assignmentId: assignment.id,
@@ -856,24 +970,19 @@ const createCrowdReviewService = (deps: CrowdReviewServiceDeps) => {
         decision: input.decision,
         note: input.note,
         postVoteSummaryJson: '{}',
-        now: deps.now(),
+        now,
       });
       if (!finalized) {
         throw new CrowdReviewConflictError('派单状态已变化，请刷新后重试');
       }
 
-      const round = await deps.repo.getRoundById(db, assignment.crowdReviewRoundId);
-      if (!round) {
-        throw new CrowdReviewNotFoundError('众查轮次不存在');
-      }
-
       const assignments = await deps.repo.listAssignmentsByRound(db, round.id);
-      const postVoteSummary = await resolveAssignmentSummary(db, round, assignments, deps.now());
+      const postVoteSummary = await resolveAssignmentSummary(db, round, assignments, now);
       await deps.repo.updateAssignmentPostVoteSummary(db, {
         assignmentId: assignment.id,
         userId: input.userId,
         postVoteSummaryJson: JSON.stringify(postVoteSummary),
-        now: deps.now(),
+        now,
       });
 
       return {

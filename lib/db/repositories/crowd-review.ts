@@ -195,11 +195,35 @@ export async function getActiveAssignmentByInspector(
   db: AppDrizzleDb,
   userId: number,
 ): Promise<CrowdReviewAssignmentRow | null> {
-  const row = await db.query.crowdReviewAssignments.findFirst({
-    where: and(eq(crowdReviewAssignments.inspectorUserId, userId), eq(crowdReviewAssignments.status, 'assigned')),
-  });
+  const rows = await db
+    .select({
+      id: crowdReviewAssignments.id,
+      crowdReviewRoundId: crowdReviewAssignments.crowdReviewRoundId,
+      inspectorUserId: crowdReviewAssignments.inspectorUserId,
+      status: crowdReviewAssignments.status,
+      assignedAt: crowdReviewAssignments.assignedAt,
+      expiresAt: crowdReviewAssignments.expiresAt,
+      completedAt: crowdReviewAssignments.completedAt,
+      decision: crowdReviewAssignments.decision,
+      decisionNote: crowdReviewAssignments.decisionNote,
+      postVoteSummaryJson: crowdReviewAssignments.postVoteSummaryJson,
+      postVoteSummarySeenAt: crowdReviewAssignments.postVoteSummarySeenAt,
+      createdAt: crowdReviewAssignments.createdAt,
+      updatedAt: crowdReviewAssignments.updatedAt,
+    })
+    .from(crowdReviewAssignments)
+    .innerJoin(crowdReviewRounds, eq(crowdReviewRounds.id, crowdReviewAssignments.crowdReviewRoundId))
+    .where(
+      and(
+        eq(crowdReviewAssignments.inspectorUserId, userId),
+        eq(crowdReviewAssignments.status, 'assigned'),
+        inArray(crowdReviewRounds.status, ACTIVE_ROUND_STATUSES),
+      ),
+    )
+    .orderBy(asc(crowdReviewAssignments.assignedAt), asc(crowdReviewAssignments.id))
+    .limit(1);
 
-  return row ?? null;
+  return rows[0] ?? null;
 }
 
 export async function getLatestCompletedAssignmentByInspector(
