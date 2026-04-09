@@ -7,6 +7,7 @@ import {
   getActiveAssignmentByInspector as getActiveAssignmentByInspectorRow,
   getAssignmentByIdForInspector as getAssignmentByIdForInspectorRow,
   getInspectorState as getInspectorStateRow,
+  getLatestCompletedAssignmentByInspector as getLatestCompletedAssignmentByInspectorRow,
   getRoundById as getRoundByIdRow,
   listAssignmentsByRound as listAssignmentsByRoundRows,
   listAssignableCases as listAssignableCasesRows,
@@ -75,6 +76,10 @@ type ServiceAssignmentRow = CrowdReviewAssignmentRow & {
 type CrowdReviewServiceRepo = {
   getInspectorState: (db: AppDrizzleDb, userId: number) => Promise<CrowdReviewInspectorRow | null>;
   getActiveAssignmentByInspector: (db: AppDrizzleDb, userId: number) => Promise<ServiceAssignmentRow | null>;
+  getLatestCompletedAssignmentByInspector: (
+    db: AppDrizzleDb,
+    userId: number,
+  ) => Promise<ServiceAssignmentRow | null>;
   listAssignableCases: (db: AppDrizzleDb, userId: number) => Promise<CrowdReviewCaseCandidate[]>;
   getActiveRoundByReportCaseId: (db: AppDrizzleDb, reportCaseId: string) => Promise<CrowdReviewRoundRow | null>;
   createCrowdReviewRound: (db: AppDrizzleDb, input: CreateCrowdReviewRoundInput) => Promise<CrowdReviewRoundRow>;
@@ -139,7 +144,7 @@ type CrowdReviewServiceRepo = {
 export type CrowdReviewServiceDeps = {
   now: () => string;
   idFactory: () => string;
-  hasInspectorBadge: (db: AppDrizzleDb | null, userId: number) => Promise<boolean>;
+  hasInspectorBadge: (db: AppDrizzleDb, userId: number) => Promise<boolean>;
   repo: CrowdReviewServiceRepo;
 };
 
@@ -305,6 +310,60 @@ const isActiveRoundUniqueConflict = (error: unknown): boolean =>
     error.message.includes('crowd_review_rounds.report_case_id')
   );
 
+const isAssignmentUniqueConflict = (error: unknown): boolean =>
+  isUniqueConstraintError(error) &&
+  (
+    error.message.includes('idx_crowd_review_assignments_active_inspector') ||
+    error.message.includes('idx_crowd_review_assignments_round_inspector') ||
+    error.message.includes('crowd_review_assignments.inspector_user_id') ||
+    error.message.includes('crowd_review_assignments.crowd_review_round_id')
+  );
+
+const buildAssignmentReplaySummary = (assignment: ServiceAssignmentRow): CrowdReviewPostVoteSummaryDto => {
+  const persisted = parseSummaryJson(assignment.postVoteSummaryJson);
+  if (persisted) {
+    return persisted;
+  }
+
+  if (assignment.status === 'expired') {
+    return {
+      roundStatus: assignment.roundStatus ?? 'active',
+      resultCode:
+        assignment.roundResultCode === 'violation' ||
+        assignment.roundResultCode === 'no_violation' ||
+        assignment.roundResultCode === 'tie' ||
+        assignment.roundResultCode === 'escalated' ||
+        assignment.roundResultCode === 'admin_override'
+          ? assignment.roundResultCode
+          : null,
+      summaryText: '该派单已过期，本次提交未计入结果，也不会记录投票。',
+    };
+  }
+
+  if (assignment.status === 'revoked') {
+    return {
+      roundStatus: assignment.roundStatus ?? 'active',
+      resultCode:
+        assignment.roundResultCode === 'violation' ||
+        assignment.roundResultCode === 'no_violation' ||
+        assignment.roundResultCode === 'tie' ||
+        assignment.roundResultCode === 'escalated' ||
+        assignment.roundResultCode === 'admin_override'
+          ? assignment.roundResultCode
+          : null,
+      summaryText: '该派单已被撤销，本次提交未计入结果，也不会记录投票。',
+    };
+  }
+
+  return buildPostVoteSummary({
+    roundStatus: assignment.roundStatus ?? 'active',
+    resultCode: assignment.roundResultCode ?? null,
+    validViolationVotes: 0,
+    validNoViolationVotes: 0,
+    abstainCount: assignment.status === 'abstained' ? 1 : 0,
+  });
+};
+
 const toReasonLabel = (reasonCode: string): string =>
   isDataCardReportReasonCode(reasonCode) ? getDataCardReportReasonLabel(reasonCode) : reasonCode;
 
@@ -387,6 +446,8 @@ const createRuntimeRepo = (): CrowdReviewServiceRepo => ({
   getInspectorState: (db, userId) => getInspectorStateRow(db, userId),
   getActiveAssignmentByInspector: async (db, userId) =>
     hydrateAssignmentForRuntime(db, await getActiveAssignmentByInspectorRow(db, userId)),
+  getLatestCompletedAssignmentByInspector: async (db, userId) =>
+    hydrateAssignmentForRuntime(db, await getLatestCompletedAssignmentByInspectorRow(db, userId)),
   listAssignableCases: (db, userId) => listAssignableCasesRows(db, userId),
   getActiveRoundByReportCaseId: async (db, reportCaseId) =>
     (
@@ -464,7 +525,8 @@ const createCrowdReviewService = (deps: CrowdReviewServiceDeps) => {
       };
     }
 
-    const hasBadge = await deps.hasInspectorBadge(db, userId);
+    const innerDb = requireDb(db);
+    const hasBadge = await deps.hasInspectorBadge(innerDb, userId);
     if (!hasBadge) {
       return {
         eligible: false,
@@ -473,7 +535,6 @@ const createCrowdReviewService = (deps: CrowdReviewServiceDeps) => {
       };
     }
 
-    const innerDb = requireDb(db);
     const inspector = await deps.repo.getInspectorState(innerDb, userId);
     if (!inspector) {
       return {
@@ -691,24 +752,40 @@ const createCrowdReviewService = (deps: CrowdReviewServiceDeps) => {
           })()
         ).id;
 
-      const assignment = await deps.repo.createCrowdReviewAssignment(db, {
-        id: deps.idFactory(),
-        crowdReviewRoundId: roundId,
-        inspectorUserId: input.userId,
-        status: 'assigned',
-        assignedAt: deps.now(),
-        expiresAt: addMs(deps.now(), ROUND_EXTENSION_MS / 2),
-        completedAt: null,
-        decision: null,
-        decisionNote: null,
-        postVoteSummaryJson: '{}',
-        postVoteSummarySeenAt: null,
-        now: deps.now(),
-      });
+      const assignmentResult = await (async () => {
+        try {
+          const assignment = await deps.repo.createCrowdReviewAssignment(db, {
+            id: deps.idFactory(),
+            crowdReviewRoundId: roundId,
+            inspectorUserId: input.userId,
+            status: 'assigned',
+            assignedAt: deps.now(),
+            expiresAt: addMs(deps.now(), ROUND_EXTENSION_MS / 2),
+            completedAt: null,
+            decision: null,
+            decisionNote: null,
+            postVoteSummaryJson: '{}',
+            postVoteSummarySeenAt: null,
+            now: deps.now(),
+          });
+          return { assignment, createdNewAssignment: true };
+        } catch (error) {
+          if (!isAssignmentUniqueConflict(error)) {
+            throw error;
+          }
+
+          const currentAssignment = await deps.repo.getActiveAssignmentByInspector(db, input.userId);
+          if (!currentAssignment) {
+            throw new CrowdReviewConflictError('派单状态已变化，请刷新后重试');
+          }
+
+          return { assignment: currentAssignment, createdNewAssignment: false };
+        }
+      })();
 
       return {
-        createdNewAssignment: true,
-        currentCase: mapAssignmentToCurrentCase(assignment, {
+        createdNewAssignment: assignmentResult.createdNewAssignment,
+        currentCase: mapAssignmentToCurrentCase(assignmentResult.assignment, {
           reportCaseId: selected.reportCaseId,
           targetEntityId: selected.targetEntityId,
           targetSnapshot: null,
@@ -731,7 +808,12 @@ const createCrowdReviewService = (deps: CrowdReviewServiceDeps) => {
       }
 
       const current = await deps.repo.getActiveAssignmentByInspector(db, input.userId);
-      return current ? mapAssignmentToCurrentCase(current) : null;
+      if (current) {
+        return mapAssignmentToCurrentCase(current);
+      }
+
+      const latestCompleted = await deps.repo.getLatestCompletedAssignmentByInspector(db, input.userId);
+      return latestCompleted ? mapAssignmentToCurrentCase(latestCompleted) : null;
     },
 
     async submitCrowdReviewDecision(input: {
@@ -760,16 +842,8 @@ const createCrowdReviewService = (deps: CrowdReviewServiceDeps) => {
         return {
           assignmentId: assignment.id,
           assignmentStatus: assignment.status,
-          decision: (assignment.decision ?? input.decision) as CrowdReviewDecision,
-          postVoteSummary:
-            parseSummaryJson(assignment.postVoteSummaryJson) ??
-            buildPostVoteSummary({
-              roundStatus: assignment.roundStatus ?? 'active',
-              resultCode: assignment.roundResultCode ?? null,
-              validViolationVotes: 0,
-              validNoViolationVotes: 0,
-              abstainCount: assignment.status === 'abstained' ? 1 : 0,
-            }),
+          decision: assignment.decision,
+          postVoteSummary: buildAssignmentReplaySummary(assignment),
           idempotentReplay: true,
         };
       }
@@ -889,6 +963,9 @@ export function createCrowdReviewServiceForTests(
       getInspectorState: deps.repo?.getInspectorState ?? (async () => missing('getInspectorState')),
       getActiveAssignmentByInspector:
         deps.repo?.getActiveAssignmentByInspector ?? (async () => missing('getActiveAssignmentByInspector')),
+      getLatestCompletedAssignmentByInspector:
+        deps.repo?.getLatestCompletedAssignmentByInspector ??
+        (async () => missing('getLatestCompletedAssignmentByInspector')),
       listAssignableCases: deps.repo?.listAssignableCases ?? (async () => missing('listAssignableCases')),
       getActiveRoundByReportCaseId:
         deps.repo?.getActiveRoundByReportCaseId ?? (async () => missing('getActiveRoundByReportCaseId')),
@@ -917,7 +994,6 @@ const defaultService = createCrowdReviewService({
   now: () => new Date().toISOString(),
   idFactory: () => crypto.randomUUID(),
   hasInspectorBadge: async (db, userId) => {
-    if (!db) return false;
     const count = await countUserBadgesByBadgeId(db, userId, CROWD_REVIEW_INSPECTOR_BADGE_ID);
     return count > 0;
   },

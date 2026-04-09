@@ -3,6 +3,8 @@ import { describe, expect, test } from 'bun:test';
 import {
   createCrowdReviewServiceForTests,
   CrowdReviewConflictError,
+  CrowdReviewServiceUnavailableError,
+  getCrowdReviewSummary,
 } from '@/lib/crowd-review/service';
 
 const now = '2026-04-08T12:00:00.000Z';
@@ -94,6 +96,7 @@ const buildService = (
         updatedAt: now,
       }),
       getActiveAssignmentByInspector: async () => null,
+      getLatestCompletedAssignmentByInspector: async () => null,
       listAssignableCases: async () => [],
       createCrowdReviewRound: async () => makeRoundRow(),
       createCrowdReviewAssignment: async () => makeAssignmentRow(),
@@ -120,6 +123,7 @@ const buildService = (
         updatedAt: now,
       }),
       getActiveAssignmentByInspector: async () => null,
+      getLatestCompletedAssignmentByInspector: async () => null,
       listAssignableCases: async () => [],
       createCrowdReviewRound: async () => makeRoundRow(),
       createCrowdReviewAssignment: async () => makeAssignmentRow(),
@@ -137,6 +141,12 @@ const buildService = (
   });
 
 describe('crowd review service', () => {
+  test('exported summary rejects authenticated requests when db runtime is unavailable', async () => {
+    await expect(getCrowdReviewSummary({ db: null, userId: 7 })).rejects.toBeInstanceOf(
+      CrowdReviewServiceUnavailableError,
+    );
+  });
+
   test('summary reports ineligible when user lacks inspector badge even if authenticated', async () => {
     const service = buildService({
       hasInspectorBadge: async () => false,
@@ -201,6 +211,44 @@ describe('crowd review service', () => {
     expect(result.createdNewAssignment).toBe(false);
     expect(result.currentCase.assignmentId).toBe('assignment-1');
     expect(createAssignmentCalled).toBe(false);
+  });
+
+  test('assign returns the concurrent active assignment when duplicate creation loses the race', async () => {
+    let activeLookupCount = 0;
+    const service = buildService({
+      repo: {
+        getActiveAssignmentByInspector: async () => {
+          activeLookupCount += 1;
+          return activeLookupCount === 1
+            ? null
+            : makeAssignmentRow({
+                id: 'assignment-race',
+                crowdReviewRoundId: 'round-race',
+                reportCaseId: 'case-race',
+                targetEntityId: 'card-race',
+              });
+        },
+        listAssignableCases: async () => [
+          {
+            reportCaseId: 'case-race',
+            targetEntityId: 'card-race',
+            targetUserId: 12,
+            reporterUserIds: [10],
+            assignedInspectorUserIds: [],
+            existingRoundId: 'round-race',
+          },
+        ],
+        createCrowdReviewAssignment: async () => {
+          throw new Error('UNIQUE constraint failed: idx_crowd_review_assignments_active_inspector');
+        },
+      },
+    });
+
+    const result = await service.assignCrowdReviewCurrentCase({ db: {} as never, userId: 7 });
+
+    expect(result.createdNewAssignment).toBe(false);
+    expect(result.currentCase.assignmentId).toBe('assignment-race');
+    expect(result.currentCase.assignmentStatus).toBe('assigned');
   });
 
   test('assign skips reporter, target author, and already-assigned inspectors', async () => {
@@ -551,6 +599,33 @@ describe('crowd review service', () => {
     expect(result.assignmentStatus).toBe('voted');
   });
 
+  test('submit replay does not invent a decision for expired assignments that never recorded a vote', async () => {
+    const service = buildService({
+      repo: {
+        getAssignmentByIdForInspector: async () =>
+          makeAssignmentRow({
+            status: 'expired',
+            decision: null,
+            completedAt: now,
+            postVoteSummaryJson: '{}',
+          }),
+      },
+    });
+
+    const result = await service.submitCrowdReviewDecision({
+      db: {} as never,
+      userId: 7,
+      assignmentId: 'assignment-1',
+      decision: 'violation',
+      note: null,
+    });
+
+    expect(result.idempotentReplay).toBe(true);
+    expect(result.assignmentStatus).toBe('expired');
+    expect(result.decision).toBeNull();
+    expect(result.postVoteSummary.summaryText).toContain('未计入');
+  });
+
   test('submit throws conflict when assignment state changes before finalize succeeds', async () => {
     const service = buildService({
       repo: {
@@ -607,6 +682,28 @@ describe('crowd review service', () => {
     expect(result.createdNewAssignment).toBe(true);
     expect(result.currentCase.caseId).toBe('round-race');
     expect(assignmentRoundId).toBe('round-race');
+  });
+
+  test('current-case falls back to the latest completed assignment when no active assignment exists', async () => {
+    const service = buildService({
+      repo: {
+        getActiveAssignmentByInspector: async () => null,
+        getLatestCompletedAssignmentByInspector: async () =>
+          makeAssignmentRow({
+            status: 'voted',
+            decision: 'violation',
+            completedAt: now,
+            postVoteSummaryJson:
+              '{"roundStatus":"concluded","resultCode":"violation","summaryText":"当前轮次已形成“支持违规”结果。"}',
+          }),
+      },
+    });
+
+    const currentCase = await service.getCrowdReviewCurrentCase({ db: {} as never, userId: 7 });
+
+    expect(currentCase).not.toBeNull();
+    expect(currentCase?.assignmentStatus).toBe('voted');
+    expect(currentCase?.postVoteSummary?.summaryText).toContain('支持违规');
   });
 
   test('submit persists computed post-vote summary for later idempotent replay', async () => {

@@ -202,6 +202,21 @@ export async function getActiveAssignmentByInspector(
   return row ?? null;
 }
 
+export async function getLatestCompletedAssignmentByInspector(
+  db: AppDrizzleDb,
+  userId: number,
+): Promise<CrowdReviewAssignmentRow | null> {
+  const row = await db.query.crowdReviewAssignments.findFirst({
+    where: and(
+      eq(crowdReviewAssignments.inspectorUserId, userId),
+      inArray(crowdReviewAssignments.status, ['voted', 'abstained', 'expired', 'revoked']),
+    ),
+    orderBy: [desc(crowdReviewAssignments.updatedAt), desc(crowdReviewAssignments.id)],
+  });
+
+  return row ?? null;
+}
+
 export async function getAssignmentByIdForInspector(
   db: AppDrizzleDb,
   input: { assignmentId: string; userId: number },

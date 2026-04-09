@@ -60,7 +60,7 @@ export type CrowdReviewHistoryDto = {
 export type SubmitCrowdReviewDecisionResult = {
   assignmentId: string;
   assignmentStatus: CrowdReviewAssignmentStatus;
-  decision: CrowdReviewDecision;
+  decision: CrowdReviewDecision | null;
   postVoteSummary: CrowdReviewPostVoteSummaryDto;
   idempotentReplay: boolean;
 };

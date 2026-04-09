@@ -8,6 +8,7 @@ import {
   createCrowdReviewAssignment,
   createCrowdReviewRound,
   getActiveAssignmentByInspector,
+  getLatestCompletedAssignmentByInspector,
   getInspectorState,
   listActionableAssignmentsByInspector,
   upsertCrowdReviewInspectorState,
@@ -327,5 +328,65 @@ describe('crowd review repository', () => {
 
     expect(active?.id).toBe('assignment-1');
     expect(actionable.map((row) => row.id)).toEqual(['assignment-1']);
+  });
+
+  test('returns the latest completed assignment for current-case recovery after refresh', async () => {
+    await createCrowdReviewRound(db, {
+      id: 'round-1',
+      reportCaseId: 'case-1',
+      status: 'concluded',
+      openedAt: '2026-04-08T10:20:00.000Z',
+      deadlineAt: '2026-04-08T11:20:00.000Z',
+      extensionCount: 0,
+      minValidVotes: 3,
+      resultCode: 'violation',
+      resultSummaryJson: '{}',
+      now: '2026-04-08T10:20:00.000Z',
+    });
+    await createCrowdReviewRound(db, {
+      id: 'round-2',
+      reportCaseId: 'case-2',
+      status: 'concluded',
+      openedAt: '2026-04-08T10:21:00.000Z',
+      deadlineAt: '2026-04-08T11:21:00.000Z',
+      extensionCount: 0,
+      minValidVotes: 3,
+      resultCode: 'no_violation',
+      resultSummaryJson: '{}',
+      now: '2026-04-08T10:21:00.000Z',
+    });
+    await createCrowdReviewAssignment(db, {
+      id: 'assignment-1',
+      crowdReviewRoundId: 'round-1',
+      inspectorUserId: 7,
+      status: 'voted',
+      assignedAt: '2026-04-08T10:22:00.000Z',
+      expiresAt: '2026-04-08T10:52:00.000Z',
+      completedAt: '2026-04-08T10:24:00.000Z',
+      decision: 'violation',
+      decisionNote: null,
+      postVoteSummaryJson: '{}',
+      postVoteSummarySeenAt: '2026-04-08T10:24:00.000Z',
+      now: '2026-04-08T10:24:00.000Z',
+    });
+    await createCrowdReviewAssignment(db, {
+      id: 'assignment-2',
+      crowdReviewRoundId: 'round-2',
+      inspectorUserId: 7,
+      status: 'expired',
+      assignedAt: '2026-04-08T10:25:00.000Z',
+      expiresAt: '2026-04-08T10:55:00.000Z',
+      completedAt: '2026-04-08T10:26:00.000Z',
+      decision: null,
+      decisionNote: null,
+      postVoteSummaryJson: '{}',
+      postVoteSummarySeenAt: null,
+      now: '2026-04-08T10:26:00.000Z',
+    });
+
+    const latestCompleted = await getLatestCompletedAssignmentByInspector(db, 7);
+
+    expect(latestCompleted?.id).toBe('assignment-2');
+    expect(latestCompleted?.status).toBe('expired');
   });
 });

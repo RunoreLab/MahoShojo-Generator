@@ -3,6 +3,31 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 
 describe('investigation page', () => {
+  test('eligible inspectors still attempt current-case recovery after refresh without an active assignment', async () => {
+    const { shouldFetchCurrentCaseOnLoad } = await import('@/components/investigation/InvestigationPage');
+
+    expect(
+      shouldFetchCurrentCaseOnLoad('authenticated', {
+        eligible: true,
+        inspectorStatus: 'active',
+        statusReason: null,
+        hasCurrentAssignment: false,
+        hasCrowdReviewPending: false,
+        entryUrl: '/investigation',
+      }),
+    ).toBe(true);
+    expect(
+      shouldFetchCurrentCaseOnLoad('anonymous', {
+        eligible: true,
+        inspectorStatus: 'active',
+        statusReason: null,
+        hasCurrentAssignment: true,
+        hasCrowdReviewPending: true,
+        entryUrl: '/investigation',
+      }),
+    ).toBe(false);
+  });
+
   test('renders login-required state for anonymous viewers', async () => {
     const { InvestigationPage } = await import('@/components/investigation/InvestigationPage');
     const html = renderToStaticMarkup(

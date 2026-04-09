@@ -46,6 +46,11 @@ const isCompletedCurrentCase = (currentCase: CrowdReviewCurrentCaseDto | null): 
     currentCase.assignmentStatus === 'revoked'
   );
 
+export const shouldFetchCurrentCaseOnLoad = (
+  authState: InvestigationAuthState,
+  summary: CrowdReviewSummaryDto | null,
+): boolean => authState === 'authenticated' && summary?.eligible === true;
+
 export function InvestigationPage({
   initialStateOverride,
 }: {
@@ -99,7 +104,7 @@ export function InvestigationPage({
       const summary = (await summaryResponse.json()) as CrowdReviewSummaryDto;
       let currentCase: CrowdReviewCurrentCaseDto | null = null;
 
-      if (effectiveAuthState === 'authenticated' && summary.eligible && summary.hasCurrentAssignment) {
+      if (shouldFetchCurrentCaseOnLoad(effectiveAuthState, summary)) {
         const currentResponse = await authStorage.fetch('/api/crowd-review/current', {
           method: 'GET',
           cache: 'no-store',
