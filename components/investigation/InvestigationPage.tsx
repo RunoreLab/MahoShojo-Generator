@@ -36,6 +36,16 @@ const readErrorMessage = async (response: Response, fallback: string): Promise<s
   return fallback;
 };
 
+const isCompletedCurrentCase = (currentCase: CrowdReviewCurrentCaseDto | null): boolean =>
+  currentCase != null &&
+  currentCase.postVoteSummary != null &&
+  (
+    currentCase.assignmentStatus === 'voted' ||
+    currentCase.assignmentStatus === 'abstained' ||
+    currentCase.assignmentStatus === 'expired' ||
+    currentCase.assignmentStatus === 'revoked'
+  );
+
 export function InvestigationPage({
   initialStateOverride,
 }: {
@@ -127,6 +137,37 @@ export function InvestigationPage({
     void loadPageData();
   }, [isStaticOverride, loadPageData]);
 
+  const refreshSummaryAfterCaseCompletion = useCallback(async () => {
+    if (isStaticOverride || effectiveAuthState !== 'authenticated') {
+      return;
+    }
+
+    try {
+      const summaryResponse = await authStorage.fetch('/api/crowd-review/summary', {
+        method: 'GET',
+        cache: 'no-store',
+      });
+
+      if (!summaryResponse.ok) {
+        throw new Error(await readErrorMessage(summaryResponse, '调查院状态加载失败'));
+      }
+
+      const summary = (await summaryResponse.json()) as CrowdReviewSummaryDto;
+      setState((current) => ({
+        ...current,
+        authState: effectiveAuthState,
+        summary,
+        currentCase: summary.hasCurrentAssignment ? current.currentCase : (isCompletedCurrentCase(current.currentCase) ? current.currentCase : null),
+        error: null,
+      }));
+    } catch (refreshError) {
+      setState((current) => ({
+        ...current,
+        error: refreshError instanceof Error ? refreshError.message : '调查院状态加载失败',
+      }));
+    }
+  }, [effectiveAuthState, isStaticOverride]);
+
   const handleAssignCurrentCase = async () => {
     if (isStaticOverride || effectiveAuthState !== 'authenticated') {
       return;
@@ -188,6 +229,10 @@ export function InvestigationPage({
       ...current,
       currentCase: nextCase,
     }));
+
+    if (isCompletedCurrentCase(nextCase)) {
+      void refreshSummaryAfterCaseCompletion();
+    }
   };
 
   const summary = state.summary;
@@ -204,7 +249,8 @@ export function InvestigationPage({
     summary != null &&
     summary.eligible &&
     summary.inspectorStatus === 'active' &&
-    !state.currentCase;
+    !summary.hasCurrentAssignment &&
+    (!state.currentCase || isCompletedCurrentCase(state.currentCase));
 
   return (
     <main className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(251,191,36,0.16),_transparent_34%),linear-gradient(180deg,_#fffbeb_0%,_#fff7ed_34%,_#f8fafc_100%)] px-4 py-8 text-gray-900 dark:bg-[radial-gradient(circle_at_top,_rgba(245,158,11,0.12),_transparent_30%),linear-gradient(180deg,_#020617_0%,_#111827_48%,_#0f172a_100%)] dark:text-slate-100 sm:px-6 lg:px-8">

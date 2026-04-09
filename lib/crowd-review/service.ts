@@ -16,6 +16,7 @@ import {
 } from '@/lib/db/repositories/crowd-review';
 import {
   crowdReviewAssignments,
+  crowdReviewRounds,
   dataCards,
   reportCases,
   reportReferences,
@@ -45,6 +46,7 @@ import type {
 export const CROWD_REVIEW_ENTRY_URL = '/investigation' as const;
 export const CROWD_REVIEW_INSPECTOR_BADGE_ID = 'crowd_review_inspector' as const;
 const ROUND_EXTENSION_MS = 60 * 60 * 1000;
+const ACTIVE_ROUND_STATUSES = ['pending_dispatch', 'active', 'waiting_more_votes'] as const;
 
 type CrowdReviewCaseCandidate = {
   reportCaseId: string;
@@ -74,6 +76,7 @@ type CrowdReviewServiceRepo = {
   getInspectorState: (db: AppDrizzleDb, userId: number) => Promise<CrowdReviewInspectorRow | null>;
   getActiveAssignmentByInspector: (db: AppDrizzleDb, userId: number) => Promise<ServiceAssignmentRow | null>;
   listAssignableCases: (db: AppDrizzleDb, userId: number) => Promise<CrowdReviewCaseCandidate[]>;
+  getActiveRoundByReportCaseId: (db: AppDrizzleDb, reportCaseId: string) => Promise<CrowdReviewRoundRow | null>;
   createCrowdReviewRound: (db: AppDrizzleDb, input: CreateCrowdReviewRoundInput) => Promise<CrowdReviewRoundRow>;
   createCrowdReviewAssignment: (
     db: AppDrizzleDb,
@@ -84,6 +87,7 @@ type CrowdReviewServiceRepo = {
     input: { assignmentId: string; userId: number },
   ) => Promise<ServiceAssignmentRow | null>;
   getRoundById: (db: AppDrizzleDb, roundId: string) => Promise<CrowdReviewRoundRow | null>;
+  listExpiredRounds: (db: AppDrizzleDb, now: string) => Promise<CrowdReviewRoundRow[]>;
   listAssignmentsByRound: (db: AppDrizzleDb, roundId: string) => Promise<ServiceAssignmentRow[]>;
   finalizeAssignment: (
     db: AppDrizzleDb,
@@ -291,6 +295,16 @@ const isFinalAssignmentStatus = (status: string): status is 'voted' | 'abstained
 
 const addMs = (iso: string, ms: number): string => new Date(new Date(iso).getTime() + ms).toISOString();
 
+const isUniqueConstraintError = (error: unknown): error is Error =>
+  error instanceof Error && /unique constraint/i.test(error.message);
+
+const isActiveRoundUniqueConflict = (error: unknown): boolean =>
+  isUniqueConstraintError(error) &&
+  (
+    error.message.includes('idx_crowd_review_rounds_report_case_active') ||
+    error.message.includes('crowd_review_rounds.report_case_id')
+  );
+
 const toReasonLabel = (reasonCode: string): string =>
   isDataCardReportReasonCode(reasonCode) ? getDataCardReportReasonLabel(reasonCode) : reasonCode;
 
@@ -374,12 +388,33 @@ const createRuntimeRepo = (): CrowdReviewServiceRepo => ({
   getActiveAssignmentByInspector: async (db, userId) =>
     hydrateAssignmentForRuntime(db, await getActiveAssignmentByInspectorRow(db, userId)),
   listAssignableCases: (db, userId) => listAssignableCasesRows(db, userId),
+  getActiveRoundByReportCaseId: async (db, reportCaseId) =>
+    (
+      await db.query.crowdReviewRounds.findFirst({
+        where: and(
+          eq(crowdReviewRounds.reportCaseId, reportCaseId),
+          inArray(crowdReviewRounds.status, [...ACTIVE_ROUND_STATUSES]),
+        ),
+        orderBy: [asc(crowdReviewRounds.openedAt), asc(crowdReviewRounds.id)],
+      })
+    ) ?? null,
   createCrowdReviewRound: (db, input) => createCrowdReviewRoundRow(db, input),
   createCrowdReviewAssignment: async (db, input) =>
     hydrateAssignmentForRuntime(db, await createCrowdReviewAssignmentRow(db, input)) as Promise<ServiceAssignmentRow>,
   getAssignmentByIdForInspector: async (db, input) =>
     hydrateAssignmentForRuntime(db, await getAssignmentByIdForInspectorRow(db, input)),
   getRoundById: (db, roundId) => getRoundByIdRow(db, roundId),
+  listExpiredRounds: (db, now) =>
+    db
+      .select()
+      .from(crowdReviewRounds)
+      .where(
+        and(
+          inArray(crowdReviewRounds.status, [...ACTIVE_ROUND_STATUSES]),
+          lte(crowdReviewRounds.deadlineAt, now),
+        ),
+      )
+      .orderBy(asc(crowdReviewRounds.deadlineAt), asc(crowdReviewRounds.id)),
   listAssignmentsByRound: async (db, roundId) => {
     const rows = await listAssignmentsByRoundRows(db, roundId);
     return await Promise.all(rows.map((row) => hydrateAssignmentForRuntime(db, row))) as ServiceAssignmentRow[];
@@ -462,13 +497,21 @@ const createCrowdReviewService = (deps: CrowdReviewServiceDeps) => {
 
   const advanceExpiredState = async (db: AppDrizzleDb | null) => {
     if (!db) return;
-    await deps.repo.advanceExpiredState(db, deps.now());
+    const now = deps.now();
+    await deps.repo.advanceExpiredState(db, now);
+
+    const expiredRounds = await deps.repo.listExpiredRounds(db, now);
+    for (const round of expiredRounds) {
+      const assignments = await deps.repo.listAssignmentsByRound(db, round.id);
+      await resolveAssignmentSummary(db, round, assignments, now);
+    }
   };
 
   const resolveAssignmentSummary = async (
     db: AppDrizzleDb,
     round: CrowdReviewRoundRow,
     assignments: ServiceAssignmentRow[],
+    now: string,
   ) => {
     const violationVotes = assignments.filter(
       (item) => item.status === 'voted' && item.decision === 'violation',
@@ -479,7 +522,7 @@ const createCrowdReviewService = (deps: CrowdReviewServiceDeps) => {
     const abstainCount = assignments.filter((item) => item.status === 'abstained').length;
     const validVotes = violationVotes + noViolationVotes;
 
-    if (new Date(round.deadlineAt).getTime() > new Date(deps.now()).getTime() || validVotes < round.minValidVotes) {
+    if (new Date(round.deadlineAt).getTime() > new Date(now).getTime() || validVotes < round.minValidVotes) {
       return buildPostVoteSummary({
         roundStatus: round.status,
         resultCode: round.resultCode,
@@ -499,7 +542,7 @@ const createCrowdReviewService = (deps: CrowdReviewServiceDeps) => {
           extensionCount: round.extensionCount + 1,
           resultCode: null,
           resultSummaryJson: '{}',
-          now: deps.now(),
+          now,
         });
         return buildPostVoteSummary({
           roundStatus: nextRoundStatus,
@@ -522,13 +565,13 @@ const createCrowdReviewService = (deps: CrowdReviewServiceDeps) => {
         status: 'escalated',
         resultCode: 'escalated',
         resultSummaryJson: JSON.stringify(summary),
-        now: deps.now(),
+        now,
       });
       await applyCrowdReviewRoundResultToReportCase({
         db,
         reportCaseId: round.reportCaseId,
         roundResult: 'escalated',
-        now: deps.now(),
+        now,
         updateReportCaseResolution: deps.repo.updateReportCaseResolution,
       });
       return summary;
@@ -547,13 +590,13 @@ const createCrowdReviewService = (deps: CrowdReviewServiceDeps) => {
       status: 'concluded',
       resultCode,
       resultSummaryJson: JSON.stringify(summary),
-      now: deps.now(),
+      now,
     });
     await applyCrowdReviewRoundResultToReportCase({
       db,
       reportCaseId: round.reportCaseId,
       roundResult: resultCode,
-      now: deps.now(),
+      now,
       updateReportCaseResolution: deps.repo.updateReportCaseResolution,
     });
     return summary;
@@ -618,18 +661,34 @@ const createCrowdReviewService = (deps: CrowdReviewServiceDeps) => {
       const roundId =
         selected.existingRoundId ??
         (
-          await deps.repo.createCrowdReviewRound(db, {
-            id: deps.idFactory(),
-            reportCaseId: selected.reportCaseId,
-            status: 'pending_dispatch',
-            openedAt: deps.now(),
-            deadlineAt: addMs(deps.now(), ROUND_EXTENSION_MS),
-            extensionCount: 0,
-            minValidVotes: 3,
-            resultCode: null,
-            resultSummaryJson: '{}',
-            now: deps.now(),
-          })
+          await (async () => {
+            const now = deps.now();
+
+            try {
+              return await deps.repo.createCrowdReviewRound(db, {
+                id: deps.idFactory(),
+                reportCaseId: selected.reportCaseId,
+                status: 'pending_dispatch',
+                openedAt: now,
+                deadlineAt: addMs(now, ROUND_EXTENSION_MS),
+                extensionCount: 0,
+                minValidVotes: 3,
+                resultCode: null,
+                resultSummaryJson: '{}',
+                now,
+              });
+            } catch (error) {
+              if (!isActiveRoundUniqueConflict(error)) {
+                throw error;
+              }
+
+              const existingRound = await deps.repo.getActiveRoundByReportCaseId(db, selected.reportCaseId);
+              if (!existingRound) {
+                throw new CrowdReviewConflictError('案件轮次已变化，请刷新后重试');
+              }
+              return existingRound;
+            }
+          })()
         ).id;
 
       const assignment = await deps.repo.createCrowdReviewAssignment(db, {
@@ -735,7 +794,7 @@ const createCrowdReviewService = (deps: CrowdReviewServiceDeps) => {
       }
 
       const assignments = await deps.repo.listAssignmentsByRound(db, round.id);
-      const postVoteSummary = await resolveAssignmentSummary(db, round, assignments);
+      const postVoteSummary = await resolveAssignmentSummary(db, round, assignments, deps.now());
       await deps.repo.updateAssignmentPostVoteSummary(db, {
         assignmentId: assignment.id,
         userId: input.userId,
@@ -831,12 +890,15 @@ export function createCrowdReviewServiceForTests(
       getActiveAssignmentByInspector:
         deps.repo?.getActiveAssignmentByInspector ?? (async () => missing('getActiveAssignmentByInspector')),
       listAssignableCases: deps.repo?.listAssignableCases ?? (async () => missing('listAssignableCases')),
+      getActiveRoundByReportCaseId:
+        deps.repo?.getActiveRoundByReportCaseId ?? (async () => missing('getActiveRoundByReportCaseId')),
       createCrowdReviewRound: deps.repo?.createCrowdReviewRound ?? (async () => missing('createCrowdReviewRound')),
       createCrowdReviewAssignment:
         deps.repo?.createCrowdReviewAssignment ?? (async () => missing('createCrowdReviewAssignment')),
       getAssignmentByIdForInspector:
         deps.repo?.getAssignmentByIdForInspector ?? (async () => missing('getAssignmentByIdForInspector')),
       getRoundById: deps.repo?.getRoundById ?? (async () => missing('getRoundById')),
+      listExpiredRounds: deps.repo?.listExpiredRounds ?? (async () => []),
       listAssignmentsByRound: deps.repo?.listAssignmentsByRound ?? (async () => missing('listAssignmentsByRound')),
       finalizeAssignment: deps.repo?.finalizeAssignment ?? (async () => missing('finalizeAssignment')),
       updateAssignmentPostVoteSummary:

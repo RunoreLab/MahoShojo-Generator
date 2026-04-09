@@ -1,5 +1,6 @@
 import {
   assignCrowdReviewCurrentCase,
+  CrowdReviewConflictError,
   CrowdReviewForbiddenError,
   CrowdReviewNotFoundError,
   CrowdReviewServiceUnavailableError,
@@ -31,6 +32,9 @@ const toErrorResponse = (error: unknown): Response | null => {
   }
   if (error instanceof CrowdReviewNotFoundError) {
     return json({ error: error.message }, { status: 404 });
+  }
+  if (error instanceof CrowdReviewConflictError) {
+    return json({ error: error.message }, { status: 409 });
   }
   if (error instanceof CrowdReviewServiceUnavailableError) {
     return json({ error: error.message }, { status: 503 });

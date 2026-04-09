@@ -122,4 +122,52 @@ describe('investigation page', () => {
     expect(html).toContain('弃权');
     expect(html).not.toContain('有效票');
   });
+
+  test('renders assignable state again after a completed case is kept for post-vote summary', async () => {
+    const { InvestigationPage } = await import('@/components/investigation/InvestigationPage');
+    const html = renderToStaticMarkup(
+      <InvestigationPage
+        initialStateOverride={{
+          authState: 'authenticated',
+          summary: {
+            eligible: true,
+            inspectorStatus: 'active',
+            statusReason: null,
+            hasCurrentAssignment: false,
+            hasCrowdReviewPending: true,
+            entryUrl: '/investigation',
+          },
+          currentCase: {
+            assignmentId: 'assignment-1',
+            assignmentStatus: 'voted',
+            assignedAt: '2026-04-08T12:00:00.000Z',
+            expiresAt: '2026-04-08T12:30:00.000Z',
+            caseId: 'round-1',
+            reportCaseId: 'case-1',
+            targetEntityType: 'data_card',
+            targetEntityId: 'card-1',
+            targetSnapshot: { name: '公开卡', description: '描述' },
+            reportSummary: {
+              reasonLabels: ['疑似抄袭'],
+              details: ['文本高度近似'],
+              references: ['引用公开数据卡：对照卡'],
+            },
+            ruleHints: ['投票前不会展示票况'],
+            availableDecisions: ['violation', 'no_violation', 'abstain'],
+            postVoteSummary: {
+              roundStatus: 'concluded',
+              resultCode: 'violation',
+              summaryText: '当前轮次已形成“支持违规”结果。',
+            },
+          },
+          loading: false,
+          error: null,
+        }}
+      />,
+    );
+
+    expect(html).toContain('当前没有已领取案件');
+    expect(html).toContain('领取当前案件');
+    expect(html).toContain('本次提交已记录');
+  });
 });

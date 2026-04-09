@@ -431,6 +431,69 @@ describe('crowd review service', () => {
     expect(advanceCalls).toBe(1);
   });
 
+  test('summary settles overdue rounds that already reached minimum valid votes', async () => {
+    const writes: Array<Record<string, unknown>> = [];
+    const service = buildService({
+      repo: {
+        listExpiredRounds: async () => [
+          makeRoundRow({
+            id: 'round-expired',
+            reportCaseId: 'case-expired',
+            deadlineAt: '2026-04-08T11:00:00.000Z',
+            minValidVotes: 2,
+          }),
+        ],
+        listAssignmentsByRound: async (_db, roundId) =>
+          roundId === 'round-expired'
+            ? [
+                makeAssignmentRow({
+                  id: 'assignment-expired-1',
+                  crowdReviewRoundId: 'round-expired',
+                  reportCaseId: 'case-expired',
+                  status: 'voted',
+                  decision: 'violation',
+                }),
+                makeAssignmentRow({
+                  id: 'assignment-expired-2',
+                  crowdReviewRoundId: 'round-expired',
+                  reportCaseId: 'case-expired',
+                  inspectorUserId: 8,
+                  status: 'voted',
+                  decision: 'violation',
+                }),
+              ]
+            : [],
+        updateRound: async (_db, input) => {
+          writes.push({ type: 'round', ...input });
+          return true;
+        },
+        updateReportCaseResolution: async (_db, input) => {
+          writes.push({ type: 'reportCase', ...input });
+          return true;
+        },
+      } as any,
+    });
+
+    await service.getCrowdReviewSummary({ db: {} as never, userId: 7 });
+
+    expect(writes).toContainEqual(
+      expect.objectContaining({
+        type: 'round',
+        roundId: 'round-expired',
+        status: 'concluded',
+        resultCode: 'violation',
+      }),
+    );
+    expect(writes).toContainEqual(
+      expect.objectContaining({
+        type: 'reportCase',
+        reportCaseId: 'case-expired',
+        status: 'resolved',
+        resolutionCode: 'confirmed_violation',
+      }),
+    );
+  });
+
   test('summary reports pending work when assignable cases exist without current assignment', async () => {
     const service = buildService({
       repo: {
@@ -504,6 +567,46 @@ describe('crowd review service', () => {
         note: null,
       }),
     ).rejects.toBeInstanceOf(CrowdReviewConflictError);
+  });
+
+  test('assign adopts the concurrent active round after create-round unique conflict', async () => {
+    let assignmentRoundId: string | null = null;
+    const service = buildService({
+      repo: {
+        listAssignableCases: async () => [
+          {
+            reportCaseId: 'case-race',
+            targetEntityId: 'card-race',
+            targetUserId: 12,
+            reporterUserIds: [10],
+            assignedInspectorUserIds: [],
+            existingRoundId: null,
+          },
+        ],
+        createCrowdReviewRound: async () => {
+          throw new Error('UNIQUE constraint failed: crowd_review_rounds.report_case_id');
+        },
+        getActiveRoundByReportCaseId: async (_db, reportCaseId) =>
+          reportCaseId === 'case-race'
+            ? makeRoundRow({ id: 'round-race', reportCaseId })
+            : null,
+        createCrowdReviewAssignment: async (_db, input) => {
+          assignmentRoundId = input.crowdReviewRoundId;
+          return makeAssignmentRow({
+            id: input.id,
+            crowdReviewRoundId: input.crowdReviewRoundId,
+            reportCaseId: 'case-race',
+            targetEntityId: 'card-race',
+          });
+        },
+      } as any,
+    });
+
+    const result = await service.assignCrowdReviewCurrentCase({ db: {} as never, userId: 7 });
+
+    expect(result.createdNewAssignment).toBe(true);
+    expect(result.currentCase.caseId).toBe('round-race');
+    expect(assignmentRoundId).toBe('round-race');
   });
 
   test('submit persists computed post-vote summary for later idempotent replay', async () => {

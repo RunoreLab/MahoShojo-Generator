@@ -105,6 +105,25 @@ describe('crowd review API', () => {
     expect(payload.currentCase.assignmentId).toBe('assignment-1');
   });
 
+  test('POST /api/crowd-review/current/assign returns 409 when assignment state changed concurrently', async () => {
+    const handler = createCrowdReviewCurrentAssignHandler({
+      requireAuthUser: async () => auth,
+      getDb: () => ({ db: true }),
+      assignCrowdReviewCurrentCase: async () => {
+        throw new CrowdReviewConflictError('案件已被其他巡查使领取，请刷新后重试');
+      },
+    });
+
+    const response = await handler(
+      new Request('https://example.test/api/crowd-review/current/assign', {
+        method: 'POST',
+        body: JSON.stringify({}),
+      }),
+    );
+
+    expect(response.status).toBe(409);
+  });
+
   test('GET /api/crowd-review/current returns 404 when no current assignment exists', async () => {
     const handler = createCrowdReviewCurrentHandler({
       requireAuthUser: async () => auth,
