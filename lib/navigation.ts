@@ -22,6 +22,7 @@ export const TOPBAR_COVERED_ROUTES = [
   '/me',
   '/pvp',
   '/messages',
+  '/investigation',
 ] as const;
 
 export const NAV_GROUPS: NavGroup[] = [
@@ -113,6 +114,12 @@ export const NAV_GROUPS: NavGroup[] = [
     id: 'knowledge',
     label: '百科',
     items: [
+      {
+        label: '调查院',
+        href: '/investigation',
+        description: '公开数据卡众查与当前案件处理入口',
+        isTopbarCovered: true,
+      },
       {
         label: '百科目录',
         href: '/encyclopedia',

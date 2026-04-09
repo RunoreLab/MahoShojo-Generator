@@ -1,5 +1,6 @@
 import { getAuthUser, json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
 import {
+  DataCardReportConflictError,
   DataCardReportForbiddenError,
   DataCardReportsServiceUnavailableError,
   DataCardReportValidationError,
@@ -95,6 +96,9 @@ const toErrorResponse = (error: unknown): Response | null => {
   }
   if (error instanceof DataCardReportForbiddenError) {
     return json({ error: error.message }, { status: 403 });
+  }
+  if (error instanceof DataCardReportConflictError) {
+    return json({ error: error.message }, { status: 409 });
   }
   if (error instanceof DataCardReportsServiceUnavailableError) {
     return json({ error: error.message }, { status: 503 });

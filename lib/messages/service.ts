@@ -34,6 +34,17 @@ type MessagesRepository = {
 export type MessagesServiceDeps = {
   now: () => string;
   repo: MessagesRepository;
+  getCrowdReviewPromptSummary?: (input: {
+    db?: AppDrizzleDb | null;
+    userId: number;
+  }) => Promise<{
+    hasCrowdReviewPending: boolean;
+    crowdReviewPrompt: {
+      title: string;
+      body: string;
+      actionUrl: string;
+    } | null;
+  }>;
 };
 
 export type MessageServiceDb = AppDrizzleDb | null;
@@ -177,6 +188,8 @@ const createMessagesService = (deps: MessagesServiceDeps) => {
           latest: null,
           fetchedAt: now,
           isAuthenticated: false,
+          hasCrowdReviewPending: false,
+          crowdReviewPrompt: null,
         };
       }
 
@@ -204,6 +217,15 @@ const createMessagesService = (deps: MessagesServiceDeps) => {
         ...latestUserRows.map(buildPreviewFromUser),
       ].sort(compareMessageSortKeys);
 
+      const crowdReviewSummary = deps.getCrowdReviewPromptSummary
+        ? await deps.getCrowdReviewPromptSummary({ userId: input.userId }).catch((error) => {
+            if (error instanceof Error && error.name === 'CrowdReviewServiceUnavailableError') {
+              return { hasCrowdReviewPending: false, crowdReviewPrompt: null };
+            }
+            throw error;
+          })
+        : { hasCrowdReviewPending: false, crowdReviewPrompt: null };
+
       return {
         unreadTotal: siteUnread + directUnread,
         siteUnread,
@@ -211,6 +233,8 @@ const createMessagesService = (deps: MessagesServiceDeps) => {
         latest: latestCandidates[0] ?? null,
         fetchedAt: now,
         isAuthenticated: true,
+        hasCrowdReviewPending: crowdReviewSummary.hasCrowdReviewPending,
+        crowdReviewPrompt: crowdReviewSummary.crowdReviewPrompt,
       };
     },
 
@@ -419,6 +443,7 @@ export function createMessagesServiceForTests(
   deps: {
     now?: () => string;
     repo?: Partial<MessagesRepository>;
+    getCrowdReviewPromptSummary?: MessagesServiceDeps['getCrowdReviewPromptSummary'];
   },
 ): MessagesService {
   const now = deps.now ?? (() => new Date().toISOString());
@@ -446,6 +471,7 @@ export function createMessagesServiceForTests(
       updateSiteMessageExpiry: testRepo?.updateSiteMessageExpiry ?? (() => missing('updateSiteMessageExpiry')),
       expireSiteMessageNow: testRepo?.expireSiteMessageNow ?? (() => missing('expireSiteMessageNow')),
     },
+    getCrowdReviewPromptSummary: deps.getCrowdReviewPromptSummary,
   });
 }
 
@@ -463,6 +489,25 @@ export async function getMessageSummary(input: {
   return createMessagesService({
     now: () => input.now ?? new Date().toISOString(),
     repo: toRepo(requireDb(input.db)),
+    getCrowdReviewPromptSummary: async ({ userId }) => {
+      const { getCrowdReviewSummary } = await import('@/lib/crowd-review/service');
+      const summary = await getCrowdReviewSummary({
+        db: input.db,
+        userId,
+      });
+      if (!summary.hasCrowdReviewPending) {
+        return { hasCrowdReviewPending: false, crowdReviewPrompt: null };
+      }
+
+      return {
+        hasCrowdReviewPending: true,
+        crowdReviewPrompt: {
+          title: '调查院有新的可处理案件',
+          body: '你有新的众查案件待处理，前往调查院查看',
+          actionUrl: '/investigation',
+        },
+      };
+    },
   }).getSummary({ userId: input.userId });
 }
 

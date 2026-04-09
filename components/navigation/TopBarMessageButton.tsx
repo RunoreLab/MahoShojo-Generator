@@ -4,7 +4,7 @@ import { Bell } from 'lucide-react';
 import { useTopBarMessages } from '@/components/navigation/useTopBarMessages';
 
 export function TopBarMessageButton({ isAuthenticated, userId }: { isAuthenticated: boolean; userId: number | null }) {
-  const { unreadTotal, loading } = useTopBarMessages(userId, isAuthenticated);
+  const { unreadTotal, hasCrowdReviewPending } = useTopBarMessages(userId, isAuthenticated);
   const displayUnread = unreadTotal > 99 ? '99+' : String(unreadTotal);
 
   return (
@@ -24,7 +24,7 @@ export function TopBarMessageButton({ isAuthenticated, userId }: { isAuthenticat
           <span className="sr-only">{`${unreadTotal} 条未读`}</span>
         </>
       ) : null}
-      {isAuthenticated && loading && unreadTotal === 0 ? (
+      {isAuthenticated && unreadTotal === 0 && hasCrowdReviewPending ? (
         <span className="inline-flex h-2 w-2 rounded-full bg-pink-400" aria-hidden="true" />
       ) : null}
     </Link>

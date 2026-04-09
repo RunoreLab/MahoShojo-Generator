@@ -20,6 +20,18 @@ export type ReportResolutionCode =
 export type ReportStatus = 'active' | 'withdrawn';
 export type ReportSubmissionDecision = 'created' | 'updated';
 export type ReportReferenceType = 'public_data_card' | 'encyclopedia_entry';
+export type CrowdReviewInspectorStatus = 'active' | 'suspended' | 'revoked';
+export type InspectorDisciplineEventType = 'grant' | 'suspend' | 'revoke' | 'restore' | 'warning';
+export type CrowdReviewRoundStatus =
+  | 'pending_dispatch'
+  | 'active'
+  | 'waiting_more_votes'
+  | 'concluded'
+  | 'escalated'
+  | 'cancelled';
+export type CrowdReviewResultCode = 'violation' | 'no_violation' | 'tie' | 'escalated' | 'admin_override';
+export type CrowdReviewAssignmentStatus = 'assigned' | 'voted' | 'abstained' | 'expired' | 'revoked';
+export type CrowdReviewDecision = 'violation' | 'no_violation' | 'abstain';
 
 /**
  * 业务主用户表（映射现有 users）
@@ -175,6 +187,110 @@ export const reportReferences = sqliteTable(
       table.reportId,
       table.referenceType,
       table.referenceId,
+    ),
+  }),
+);
+
+export const crowdReviewInspectors = sqliteTable('crowd_review_inspectors', {
+  userId: integer('user_id')
+    .primaryKey()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  status: text('status').$type<CrowdReviewInspectorStatus>().notNull(),
+  suspendedUntil: text('suspended_until'),
+  statusReasonCode: text('status_reason_code'),
+  statusReasonDetail: text('status_reason_detail'),
+  updatedByUserId: integer('updated_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+  createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
+export const inspectorDisciplineEvents = sqliteTable(
+  'inspector_discipline_events',
+  {
+    id: text('id').primaryKey(),
+    userId: integer('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    eventType: text('event_type').$type<InspectorDisciplineEventType>().notNull(),
+    reasonCode: text('reason_code'),
+    reasonDetail: text('reason_detail'),
+    sourceEntityType: text('source_entity_type'),
+    sourceEntityId: text('source_entity_id'),
+    createdByUserId: integer('created_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    userCreatedAtIndex: index('idx_inspector_discipline_events_user_created_at').on(table.userId, table.createdAt),
+    eventTypeCreatedAtIndex: index('idx_inspector_discipline_events_type_created_at').on(
+      table.eventType,
+      table.createdAt,
+    ),
+  }),
+);
+
+export const crowdReviewRounds = sqliteTable(
+  'crowd_review_rounds',
+  {
+    id: text('id').primaryKey(),
+    reportCaseId: text('report_case_id')
+      .notNull()
+      .references(() => reportCases.id, { onDelete: 'cascade' }),
+    status: text('status').$type<CrowdReviewRoundStatus>().notNull(),
+    openedAt: text('opened_at').notNull(),
+    deadlineAt: text('deadline_at').notNull(),
+    extensionCount: integer('extension_count').notNull().default(0),
+    minValidVotes: integer('min_valid_votes').notNull(),
+    resultCode: text('result_code').$type<CrowdReviewResultCode | null>(),
+    resultSummaryJson: text('result_summary_json').notNull().default('{}'),
+    createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    reportCaseActiveUnique: uniqueIndex('idx_crowd_review_rounds_report_case_active')
+      .on(table.reportCaseId)
+      .where(sql`${table.status} IN ('pending_dispatch', 'active', 'waiting_more_votes')`),
+    statusDeadlineIndex: index('idx_crowd_review_rounds_status_deadline').on(table.status, table.deadlineAt),
+  }),
+);
+
+export const crowdReviewAssignments = sqliteTable(
+  'crowd_review_assignments',
+  {
+    id: text('id').primaryKey(),
+    crowdReviewRoundId: text('crowd_review_round_id')
+      .notNull()
+      .references(() => crowdReviewRounds.id, { onDelete: 'cascade' }),
+    inspectorUserId: integer('inspector_user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    status: text('status').$type<CrowdReviewAssignmentStatus>().notNull(),
+    assignedAt: text('assigned_at').notNull(),
+    expiresAt: text('expires_at').notNull(),
+    completedAt: text('completed_at'),
+    decision: text('decision').$type<CrowdReviewDecision | null>(),
+    decisionNote: text('decision_note'),
+    postVoteSummaryJson: text('post_vote_summary_json').notNull().default('{}'),
+    postVoteSummarySeenAt: text('post_vote_summary_seen_at'),
+    createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    activeInspectorUnique: uniqueIndex('idx_crowd_review_assignments_active_inspector')
+      .on(table.inspectorUserId)
+      .where(sql`${table.status} = 'assigned'`),
+    roundInspectorUnique: uniqueIndex('idx_crowd_review_assignments_round_inspector').on(
+      table.crowdReviewRoundId,
+      table.inspectorUserId,
+    ),
+    inspectorStatusExpiresIndex: index('idx_crowd_review_assignments_inspector_status_expires').on(
+      table.inspectorUserId,
+      table.status,
+      table.expiresAt,
+    ),
+    roundStatusAssignedIndex: index('idx_crowd_review_assignments_round_status_assigned').on(
+      table.crowdReviewRoundId,
+      table.status,
+      table.assignedAt,
     ),
   }),
 );

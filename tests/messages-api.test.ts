@@ -26,11 +26,18 @@ describe('messages API', () => {
     });
 
     const response = await handler(new Request('https://example.test/api/messages/summary'));
-    const payload = await jsonBody<{ unreadTotal: number; isAuthenticated: boolean }>(response);
+    const payload = await jsonBody<{
+      unreadTotal: number;
+      isAuthenticated: boolean;
+      hasCrowdReviewPending: boolean;
+      crowdReviewPrompt: null;
+    }>(response);
 
     expect(response.status).toBe(200);
     expect(payload.unreadTotal).toBe(0);
     expect(payload.isAuthenticated).toBe(false);
+    expect(payload.hasCrowdReviewPending).toBe(false);
+    expect(payload.crowdReviewPrompt).toBeNull();
   });
 
   test('GET messages uses default limit=20 when query omits limit', async () => {
@@ -218,5 +225,33 @@ describe('messages API', () => {
       markedUserMessageCount: 2,
       advancedSiteCursorTo: 9,
     });
+  });
+
+  test('messages summary includes crowd review prompt fields without creating user messages', async () => {
+    const handler = createMessagesSummaryHandler({
+      getAuthUser: async () => auth,
+      getDb: () => ({ db: true }),
+      getMessageSummary: async () => ({
+        unreadTotal: 0,
+        siteUnread: 0,
+        directUnread: 0,
+        latest: null,
+        fetchedAt: '2026-04-08T12:00:00.000Z',
+        isAuthenticated: true,
+        hasCrowdReviewPending: true,
+        crowdReviewPrompt: {
+          title: '调查院有新的可处理案件',
+          body: '你有新的众查案件待处理，前往调查院查看',
+          actionUrl: '/investigation',
+        },
+      }),
+    });
+
+    const response = await handler(new Request('https://example.test/api/messages/summary'));
+    const payload = await jsonBody<any>(response);
+
+    expect(response.status).toBe(200);
+    expect(payload.hasCrowdReviewPending).toBe(true);
+    expect(payload.crowdReviewPrompt.actionUrl).toBe('/investigation');
   });
 });

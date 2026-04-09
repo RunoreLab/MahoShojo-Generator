@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 
 import { MessageCard } from '@/components/messages/MessageCard';
+import { CrowdReviewPromptCard } from '@/components/messages/CrowdReviewPromptCard';
 import { MessageFilters } from '@/components/messages/MessageFilters';
 import { authStorage } from '@/lib/auth';
 import { useAuth } from '@/lib/useAuth';
@@ -371,6 +372,10 @@ export function MessagesPage({
           <section className="rounded-3xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700 dark:border-rose-500/40 dark:bg-rose-950/40 dark:text-rose-200">
             {state.error}
           </section>
+        ) : null}
+
+        {visibleSummary?.crowdReviewPrompt ? (
+          <CrowdReviewPromptCard prompt={visibleSummary.crowdReviewPrompt} />
         ) : null}
 
         <section className="grid gap-4">

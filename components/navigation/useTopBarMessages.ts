@@ -8,10 +8,12 @@ const TOPBAR_MESSAGES_UPDATED_EVENT = 'mahoshojo:messages-updated';
 
 type MessagesSummaryResponse = {
   unreadTotal?: unknown;
+  hasCrowdReviewPending?: unknown;
 };
 
 type CachedSummary = {
   unreadTotal: number;
+  hasCrowdReviewPending: boolean;
   fetchedAt: number;
 };
 
@@ -19,6 +21,7 @@ type TopBarMessagesRenderState = {
   ownerUserId: number | null;
   enabled: boolean;
   unreadTotal: number;
+  hasCrowdReviewPending: boolean;
   loading: boolean;
   error: string | null;
 };
@@ -29,6 +32,8 @@ const canUseWindow = (): boolean => typeof window !== 'undefined';
 
 const normalizeUnreadTotal = (value: unknown): number =>
   typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.trunc(value) : 0;
+
+const normalizeHasCrowdReviewPending = (value: unknown): boolean => value === true;
 
 export const getTopBarMessagesCacheKey = (userId: number): string => `${TOPBAR_MESSAGES_CACHE_KEY}:${userId}`;
 
@@ -46,7 +51,11 @@ const readSessionCache = (userId: number): CachedSummary | null => {
     if (typeof parsed.unreadTotal !== 'number' || typeof parsed.fetchedAt !== 'number') {
       return null;
     }
-    return parsed as CachedSummary;
+    return {
+      unreadTotal: parsed.unreadTotal,
+      hasCrowdReviewPending: normalizeHasCrowdReviewPending(parsed.hasCrowdReviewPending),
+      fetchedAt: parsed.fetchedAt,
+    };
   } catch {
     return null;
   }
@@ -83,10 +92,11 @@ const isCacheFresh = (cached: CachedSummary | null): boolean =>
 export const getTopBarMessagesStateSnapshot = (
   userId: number | null,
   enabled: boolean,
-): { unreadTotal: number; loading: boolean; error: string | null } => {
+): { unreadTotal: number; hasCrowdReviewPending: boolean; loading: boolean; error: string | null } => {
   const cached = enabled && userId ? readCachedSummary(userId) : null;
   return {
     unreadTotal: cached?.unreadTotal ?? 0,
+    hasCrowdReviewPending: cached?.hasCrowdReviewPending ?? false,
     loading: Boolean(enabled && userId && !isCacheFresh(cached)),
     error: null,
   };
@@ -101,6 +111,7 @@ const createTopBarMessagesRenderState = (
     ownerUserId: userId,
     enabled,
     unreadTotal: snapshot.unreadTotal,
+    hasCrowdReviewPending: snapshot.hasCrowdReviewPending,
     loading: snapshot.loading,
     error: snapshot.error,
   };
@@ -117,8 +128,15 @@ export const resolveTopBarMessagesStateForRender = (
   return createTopBarMessagesRenderState(userId, enabled);
 };
 
-export const setTopBarMessagesMemoryCacheForTests = (userId: number, value: CachedSummary) => {
-  memoryCache.set(userId, value);
+export const setTopBarMessagesMemoryCacheForTests = (
+  userId: number,
+  value: Pick<CachedSummary, 'unreadTotal' | 'fetchedAt'> & Partial<Pick<CachedSummary, 'hasCrowdReviewPending'>>,
+) => {
+  memoryCache.set(userId, {
+    unreadTotal: value.unreadTotal,
+    hasCrowdReviewPending: value.hasCrowdReviewPending ?? false,
+    fetchedAt: value.fetchedAt,
+  });
 };
 
 export const clearTopBarMessagesMemoryCacheForTests = () => {
@@ -127,6 +145,7 @@ export const clearTopBarMessagesMemoryCacheForTests = () => {
 
 export function useTopBarMessages(userId: number | null, enabled: boolean): {
   unreadTotal: number;
+  hasCrowdReviewPending: boolean;
   loading: boolean;
   error: string | null;
   refresh: () => Promise<void>;
@@ -160,7 +179,10 @@ export function useTopBarMessages(userId: number | null, enabled: boolean): {
       memoryCache.set(userId, next);
       writeSessionCache(userId, next);
       if (!cancelled) {
-        updateState({ unreadTotal: next.unreadTotal });
+        updateState({
+          unreadTotal: next.unreadTotal,
+          hasCrowdReviewPending: next.hasCrowdReviewPending,
+        });
       }
     };
 
@@ -177,6 +199,7 @@ export function useTopBarMessages(userId: number | null, enabled: boolean): {
         const payload = (await response.json().catch(() => null)) as MessagesSummaryResponse | null;
         applyCached({
           unreadTotal: normalizeUnreadTotal(payload?.unreadTotal),
+          hasCrowdReviewPending: normalizeHasCrowdReviewPending(payload?.hasCrowdReviewPending),
           fetchedAt: Date.now(),
         });
         if (!cancelled) {
@@ -196,7 +219,10 @@ export function useTopBarMessages(userId: number | null, enabled: boolean): {
     void (async () => {
       const nextCached = readCachedSummary(userId);
       if (nextCached) {
-        updateState({ unreadTotal: nextCached.unreadTotal });
+        updateState({
+          unreadTotal: nextCached.unreadTotal,
+          hasCrowdReviewPending: nextCached.hasCrowdReviewPending,
+        });
         if (isCacheFresh(nextCached)) {
           updateState({ loading: false });
           return;
@@ -229,6 +255,7 @@ export function useTopBarMessages(userId: number | null, enabled: boolean): {
 
   return {
     unreadTotal: renderState.unreadTotal,
+    hasCrowdReviewPending: renderState.hasCrowdReviewPending,
     loading: renderState.loading,
     error: renderState.error,
     refresh: async () => {
@@ -259,6 +286,7 @@ export function useTopBarMessages(userId: number | null, enabled: boolean): {
       const payload = (await response.json().catch(() => null)) as MessagesSummaryResponse | null;
       const nextCache = {
         unreadTotal: normalizeUnreadTotal(payload?.unreadTotal),
+        hasCrowdReviewPending: normalizeHasCrowdReviewPending(payload?.hasCrowdReviewPending),
         fetchedAt: Date.now(),
       };
       memoryCache.set(userId, nextCache);
@@ -270,6 +298,7 @@ export function useTopBarMessages(userId: number | null, enabled: boolean): {
         return {
           ...current,
           unreadTotal: nextCache.unreadTotal,
+          hasCrowdReviewPending: nextCache.hasCrowdReviewPending,
           error: null,
           loading: false,
         };

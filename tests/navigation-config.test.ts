@@ -19,6 +19,7 @@ describe('navigation config', () => {
       '/me',
       '/pvp',
       '/messages',
+      '/investigation',
     ]);
 
     for (const path of TOPBAR_COVERED_ROUTES) {
@@ -71,5 +72,6 @@ describe('navigation config', () => {
     expect(getTopbarCoverage('/ranking')).toEqual({ isCovered: false, activeGroupId: null });
     expect(getTopbarCoverage('/battle')).toEqual({ isCovered: true, activeGroupId: 'battle' });
     expect(getTopbarCoverage('/messages')).toEqual({ isCovered: true, activeGroupId: null });
+    expect(getTopbarCoverage('/investigation')).toEqual({ isCovered: true, activeGroupId: 'knowledge' });
   });
 });

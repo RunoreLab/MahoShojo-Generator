@@ -1,5 +1,6 @@
 import { json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
 import {
+  DataCardReportConflictError,
   DataCardReportsServiceUnavailableError,
   DataCardReportValidationError,
   type DataCardReportsServiceDb,
@@ -32,6 +33,9 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 const toErrorResponse = (error: unknown): Response | null => {
   if (error instanceof DataCardReportValidationError) {
     return json({ error: error.message }, { status: 400 });
+  }
+  if (error instanceof DataCardReportConflictError) {
+    return json({ error: error.message }, { status: 409 });
   }
   if (error instanceof DataCardReportsServiceUnavailableError) {
     return json({ error: error.message }, { status: 503 });

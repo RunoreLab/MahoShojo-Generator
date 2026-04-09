@@ -37,6 +37,8 @@ export const createMessagesSummaryHandler =
           latest: null,
           fetchedAt: new Date().toISOString(),
           isAuthenticated: false,
+          hasCrowdReviewPending: false,
+          crowdReviewPrompt: null,
         },
         { headers: { 'Cache-Control': 'no-store' } },
       );

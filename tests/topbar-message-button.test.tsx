@@ -28,4 +28,23 @@ describe('TopBarMessageButton', () => {
     expect(html).toContain('12');
     expect(html).toContain('消息');
   });
+
+  test('renders dot-only state when unreadTotal is 0 and hasCrowdReviewPending is true', async () => {
+    const { clearTopBarMessagesMemoryCacheForTests, setTopBarMessagesMemoryCacheForTests } = await import(
+      '@/components/navigation/useTopBarMessages'
+    );
+    clearTopBarMessagesMemoryCacheForTests();
+    setTopBarMessagesMemoryCacheForTests(7, {
+      unreadTotal: 0,
+      hasCrowdReviewPending: true,
+      fetchedAt: Date.now(),
+    });
+
+    const { TopBarMessageButton } = await import('@/components/navigation/TopBarMessageButton');
+    const html = renderToStaticMarkup(<TopBarMessageButton isAuthenticated={true} userId={7} />);
+
+    expect(html).toContain('href="/messages"');
+    expect(html).toContain('消息');
+    expect(html).toContain('bg-pink-400');
+  });
 });

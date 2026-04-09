@@ -130,6 +130,25 @@ describe('data card reports service', () => {
     expect(updateCalled).toBe(true);
   });
 
+  test('rejects report mutation once the open case has entered crowd review', async () => {
+    const service = buildService({
+      repo: {
+        getOpenReportCaseByTarget: async () => ({
+          id: 'case-1',
+          targetEntityType: 'data_card',
+          targetEntityId: 'card-1',
+          targetUserId: 2,
+          status: 'under_review',
+          creatorNotifiedAt: now,
+          creatorNotifiedReportCount: 1,
+        }),
+        hasActiveCrowdReviewRoundForCase: async () => true,
+      },
+    });
+
+    await expect(service.submitDataCardReport(makeSubmitInput(7))).rejects.toThrow('已进入众查');
+  });
+
   test('rejects oversized details before touching report repositories', async () => {
     let repoTouched = false;
     const service = buildService({
@@ -1239,5 +1258,30 @@ describe('data card reports service', () => {
       isSelfRemediationCandidate: true,
       selfRemediationDetectedAt: '2026-04-08 10:40:00',
     });
+  });
+
+  test('rejects withdrawal once the open case has entered crowd review', async () => {
+    const service = buildService({
+      repo: {
+        getOpenReportCaseByTarget: async () => ({
+          id: 'case-1',
+          targetEntityType: 'data_card',
+          targetEntityId: 'card-1',
+          targetUserId: 2,
+          status: 'under_review',
+          creatorNotifiedAt: now,
+          creatorNotifiedReportCount: 1,
+        }),
+        hasActiveCrowdReviewRoundForCase: async () => true,
+      },
+    });
+
+    await expect(
+      service.withdrawDataCardReport({
+        db: {} as never,
+        reporterUserId: 7,
+        targetEntityId: 'card-1',
+      }),
+    ).rejects.toThrow('已进入众查');
   });
 });

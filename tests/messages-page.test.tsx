@@ -112,6 +112,8 @@ describe('messages page UI', () => {
             latest: null,
             fetchedAt: '2026-04-07T10:00:00.000Z',
             isAuthenticated: true,
+            hasCrowdReviewPending: false,
+            crowdReviewPrompt: null,
           },
         }}
       />,
@@ -155,6 +157,8 @@ describe('messages page UI', () => {
           latest: null,
           fetchedAt: '2026-04-07T10:00:00.000Z',
           isAuthenticated: true,
+          hasCrowdReviewPending: false,
+          crowdReviewPrompt: null,
         },
         error: 'old error',
       },
@@ -221,6 +225,8 @@ describe('messages page UI', () => {
           latest: null,
           fetchedAt: '2026-04-07T10:00:00.000Z',
           isAuthenticated: true,
+          hasCrowdReviewPending: false,
+          crowdReviewPrompt: null,
         },
         error: 'old error',
       },
@@ -288,5 +294,38 @@ describe('messages page UI', () => {
     expect(getMessagesPageEmptyStateCopy('unread', true)).toBe('没有未读消息');
     expect(getMessagesPageEmptyStateCopy('site', true)).toBe('暂无全站通知');
     expect(getMessagesPageEmptyStateCopy('direct', true)).toBe('暂无定向消息');
+  });
+
+  test('renders crowd review prompt card above the list when summary includes prompt data', async () => {
+    const { MessagesPage } = await import('@/components/messages/MessagesPage');
+    const html = renderToStaticMarkup(
+      <MessagesPage
+        initialStateOverride={{
+          isAuthenticated: true,
+          filter: 'all',
+          appliedFilter: 'all',
+          messages: [],
+          nextCursor: null,
+          loading: false,
+          summary: {
+            unreadTotal: 0,
+            siteUnread: 0,
+            directUnread: 0,
+            latest: null,
+            fetchedAt: '2026-04-07T10:00:00.000Z',
+            isAuthenticated: true,
+            hasCrowdReviewPending: true,
+            crowdReviewPrompt: {
+              title: '调查院有新的可处理案件',
+              body: '你有新的众查案件待处理，前往调查院查看',
+              actionUrl: '/investigation',
+            },
+          },
+        }}
+      />,
+    );
+
+    expect(html).toContain('调查院有新的可处理案件');
+    expect(html).toContain('href="/investigation"');
   });
 });

@@ -27,6 +27,12 @@ export type MessageSummaryDto = {
   latest: MessagePreviewDto | null;
   fetchedAt: string;
   isAuthenticated: boolean;
+  hasCrowdReviewPending: boolean;
+  crowdReviewPrompt: {
+    title: string;
+    body: string;
+    actionUrl: string;
+  } | null;
 };
 
 export type MessageListDto = {

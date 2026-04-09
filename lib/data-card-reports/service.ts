@@ -1,4 +1,5 @@
 import type { AppDrizzleDb } from '@/lib/db/drizzle';
+import { hasActiveCrowdReviewRoundForCase } from '@/lib/db/repositories/crowd-review';
 import type { DataCardByIdDbRow } from '@/lib/db/repositories/data-cards-core';
 import { getDataCardByIdWithAuthorAndTags } from '@/lib/db/repositories/data-cards-core';
 import * as repo from '@/lib/db/repositories/data-card-reports';
@@ -52,6 +53,7 @@ type DataCardReportsRepository = {
   dismissCaseIfNoActiveReports: typeof repo.dismissCaseIfNoActiveReports;
   markReportCaseCreatorNotified: typeof repo.markReportCaseCreatorNotified;
   clearReportCaseCreatorNotified: typeof repo.clearReportCaseCreatorNotified;
+  hasActiveCrowdReviewRoundForCase: (db: AppDrizzleDb, caseId: string) => Promise<boolean>;
 };
 
 export type DataCardReportsServiceDeps = {
@@ -122,6 +124,13 @@ export class DataCardReportForbiddenError extends Error {
   }
 }
 
+export class DataCardReportConflictError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'DataCardReportConflictError';
+  }
+}
+
 const DATA_CARD_REPORT_RATE_LIMIT_PER_HOUR = 3;
 const DATA_CARD_REPORT_RATE_LIMIT_PER_DAY = 10;
 const DATA_CARD_REPORT_SAME_TARGET_COOLDOWN_MS = 60 * 1000;
@@ -154,6 +163,7 @@ const toRepo = (): DataCardReportsRepository => ({
   dismissCaseIfNoActiveReports: (innerDb, input) => repo.dismissCaseIfNoActiveReports(innerDb, input),
   markReportCaseCreatorNotified: (innerDb, input) => repo.markReportCaseCreatorNotified(innerDb, input),
   clearReportCaseCreatorNotified: (innerDb, input) => repo.clearReportCaseCreatorNotified(innerDb, input),
+  hasActiveCrowdReviewRoundForCase: (innerDb, caseId) => hasActiveCrowdReviewRoundForCase(innerDb, caseId),
 });
 
 const resolveTargetCard = async (db: AppDrizzleDb, cardId: string): Promise<DataCardByIdDbRow | null> =>
@@ -630,6 +640,12 @@ const createDataCardReportsService = (deps: DataCardReportsServiceDeps) => {
         targetEntityType: 'data_card',
         targetEntityId: input.targetEntityId,
       });
+      if (openCase) {
+        const hasActiveCrowdReview = await deps.repo.hasActiveCrowdReviewRoundForCase(db, openCase.id);
+        if (hasActiveCrowdReview) {
+          throw new DataCardReportConflictError('该举报案件已进入众查，当前不可再修改举报材料');
+        }
+      }
       let existingActiveReport = openCase
         ? await deps.repo.getActiveReportByCaseAndReporter(db, {
             caseId: openCase.id,
@@ -923,6 +939,11 @@ const createDataCardReportsService = (deps: DataCardReportsServiceDeps) => {
         return { withdrawn: false, caseDismissed: false };
       }
 
+      const hasActiveCrowdReview = await deps.repo.hasActiveCrowdReviewRoundForCase(db, openCase.id);
+      if (hasActiveCrowdReview) {
+        throw new DataCardReportConflictError('该举报案件已进入众查，当前不可撤回举报');
+      }
+
       const withdrawn = await deps.repo.withdrawActiveReportByReporter(db, {
         caseId: openCase.id,
         reporterUserId: input.reporterUserId,
@@ -989,6 +1010,8 @@ export function createDataCardReportsServiceForTests(
         deps.repo?.markReportCaseCreatorNotified ?? (async () => false),
       clearReportCaseCreatorNotified:
         deps.repo?.clearReportCaseCreatorNotified ?? (async () => false),
+      hasActiveCrowdReviewRoundForCase:
+        deps.repo?.hasActiveCrowdReviewRoundForCase ?? (async () => false),
     },
     getTargetCard: deps.getTargetCard ?? (async () => missing('getTargetCard')),
     resolveReferenceSnapshots: deps.resolveReferenceSnapshots ?? (async () => missing('resolveReferenceSnapshots')),
