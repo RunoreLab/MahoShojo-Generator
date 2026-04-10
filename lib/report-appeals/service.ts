@@ -49,6 +49,7 @@ type ReportAppealsRepository = {
   getAppealableCaseForUser: typeof repo.getAppealableCaseForUser;
   getLatestNonWithdrawnAppealByCaseSnapshot: typeof repo.getLatestNonWithdrawnAppealByCaseSnapshot;
   getActiveAppealByCase: typeof repo.getActiveAppealByCase;
+  getLatestActiveAppealByTargetForUser: typeof repo.getLatestActiveAppealByTargetForUser;
   createReportAppeal: typeof repo.createReportAppeal;
   replaceReportAppealReferences: typeof repo.replaceReportAppealReferences;
   getReportAppealByIdForAppellant: typeof repo.getReportAppealByIdForAppellant;
@@ -432,6 +433,48 @@ const buildEvidenceSummaryJson = (references: ResolvedAppealReferenceSnapshot[])
       sortOrder: reference.sortOrder,
     })),
   });
+
+const buildOwnerModerationSummaryForCase = async (
+  deps: ReportAppealsServiceDeps,
+  db: AppDrizzleDb,
+  input: { userId: number; reportCaseId: string },
+): Promise<DataCardOwnerModerationSummaryDto | null> => {
+  const reportCase = await deps.repo.getAppealableCaseForUser(db, {
+    reportCaseId: input.reportCaseId,
+    userId: input.userId,
+  });
+  if (!reportCase) {
+    return null;
+  }
+
+  const existingAppeal = await deps.repo.getLatestNonWithdrawnAppealByCaseSnapshot(db, {
+    reportCaseId: reportCase.id,
+    caseUpdatedAtSnapshot: reportCase.updatedAt,
+  });
+  const canAppeal =
+    reportCase.status === 'resolved' &&
+    isAppealableFinalResolutionCode(reportCase.resolutionCode) &&
+    existingAppeal == null;
+
+  return {
+    latestCaseId: reportCase.id,
+    status: reportCase.status,
+    resolutionCode: reportCase.resolutionCode,
+    canAppeal,
+    activeAppealId: existingAppeal?.id ?? null,
+    activeAppealStatus: existingAppeal?.status ?? null,
+    appealEntryUrl: buildOwnerModerationAppealEntryUrl({
+      reportCaseId: reportCase.id,
+      canAppeal,
+      existingAppealId: existingAppeal?.id ?? null,
+    }),
+    statusSummary: buildAppealStatusSummary({
+      resolutionCode: reportCase.resolutionCode,
+      existingAppealStatus: existingAppeal?.status ?? null,
+      existingAppealId: existingAppeal?.id ?? null,
+    }),
+  };
+};
 
 const createReportAppealsService = (deps: ReportAppealsServiceDeps) => ({
   async getReportAppealEntry(input: {
@@ -893,41 +936,30 @@ const createReportAppealsService = (deps: ReportAppealsServiceDeps) => ({
     reportCaseId: string;
   }): Promise<DataCardOwnerModerationSummaryDto | null> {
     const db = requireDb(input.db);
-    const reportCase = await deps.repo.getAppealableCaseForUser(db, {
-      reportCaseId: input.reportCaseId,
+    return await buildOwnerModerationSummaryForCase(deps, db, {
       userId: input.userId,
+      reportCaseId: input.reportCaseId,
     });
-    if (!reportCase) {
+  },
+
+  async getActiveOwnerModerationSummaryByTarget(input: {
+    db: ReportAppealsServiceDb;
+    userId: number;
+    targetEntityId: string;
+  }): Promise<DataCardOwnerModerationSummaryDto | null> {
+    const db = requireDb(input.db);
+    const activeAppeal = await deps.repo.getLatestActiveAppealByTargetForUser(db, {
+      userId: input.userId,
+      targetEntityId: input.targetEntityId,
+    });
+    if (!activeAppeal) {
       return null;
     }
 
-    const existingAppeal = await deps.repo.getLatestNonWithdrawnAppealByCaseSnapshot(db, {
-      reportCaseId: reportCase.id,
-      caseUpdatedAtSnapshot: reportCase.updatedAt,
+    return await buildOwnerModerationSummaryForCase(deps, db, {
+      userId: input.userId,
+      reportCaseId: activeAppeal.reportCaseId,
     });
-    const canAppeal =
-      reportCase.status === 'resolved' &&
-      isAppealableFinalResolutionCode(reportCase.resolutionCode) &&
-      existingAppeal == null;
-
-    return {
-      latestCaseId: reportCase.id,
-      status: reportCase.status,
-      resolutionCode: reportCase.resolutionCode,
-      canAppeal,
-      activeAppealId: existingAppeal?.id ?? null,
-      activeAppealStatus: existingAppeal?.status ?? null,
-      appealEntryUrl: buildOwnerModerationAppealEntryUrl({
-        reportCaseId: reportCase.id,
-        canAppeal,
-        existingAppealId: existingAppeal?.id ?? null,
-      }),
-      statusSummary: buildAppealStatusSummary({
-        resolutionCode: reportCase.resolutionCode,
-        existingAppealStatus: existingAppeal?.status ?? null,
-        existingAppealId: existingAppeal?.id ?? null,
-      }),
-    };
   },
 });
 
@@ -946,6 +978,8 @@ export function createReportAppealsServiceForTests(
       getLatestNonWithdrawnAppealByCaseSnapshot:
         deps.repo?.getLatestNonWithdrawnAppealByCaseSnapshot ?? (async () => null),
       getActiveAppealByCase: deps.repo?.getActiveAppealByCase ?? (async () => null),
+      getLatestActiveAppealByTargetForUser:
+        deps.repo?.getLatestActiveAppealByTargetForUser ?? (async () => null),
       createReportAppeal: deps.repo?.createReportAppeal ?? (async () => missing('createReportAppeal')),
       replaceReportAppealReferences: deps.repo?.replaceReportAppealReferences ?? (async () => undefined),
       getReportAppealByIdForAppellant: deps.repo?.getReportAppealByIdForAppellant ?? (async () => null),
@@ -975,6 +1009,7 @@ const defaultService = createReportAppealsService({
     getAppealableCaseForUser: repo.getAppealableCaseForUser,
     getLatestNonWithdrawnAppealByCaseSnapshot: repo.getLatestNonWithdrawnAppealByCaseSnapshot,
     getActiveAppealByCase: repo.getActiveAppealByCase,
+    getLatestActiveAppealByTargetForUser: repo.getLatestActiveAppealByTargetForUser,
     createReportAppeal: repo.createReportAppeal,
     replaceReportAppealReferences: repo.replaceReportAppealReferences,
     getReportAppealByIdForAppellant: repo.getReportAppealByIdForAppellant,
@@ -1078,4 +1113,12 @@ export async function getOwnerModerationSummary(input: {
   reportCaseId: string;
 }): Promise<DataCardOwnerModerationSummaryDto | null> {
   return defaultService.getOwnerModerationSummary(input);
+}
+
+export async function getActiveOwnerModerationSummaryByTarget(input: {
+  db: ReportAppealsServiceDb;
+  userId: number;
+  targetEntityId: string;
+}): Promise<DataCardOwnerModerationSummaryDto | null> {
+  return defaultService.getActiveOwnerModerationSummaryByTarget(input);
 }

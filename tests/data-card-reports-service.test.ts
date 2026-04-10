@@ -185,6 +185,92 @@ describe('data card reports service', () => {
     expect(capability.ownerModerationSummary?.latestCaseId).toBe('case-removed');
   });
 
+  test('getDataCardReportCapability prefers the in-flight owner appeal summary over a newer report case', async () => {
+    const service = buildService({
+      repo: {
+        getLatestReportCaseByTarget: async () => ({
+          id: 'case-new',
+          targetEntityType: 'data_card',
+          targetEntityId: 'card-1',
+          targetUserId: 2,
+          status: 'under_review',
+          resolutionCode: null,
+          creatorNotifiedAt: null,
+          creatorNotifiedReportCount: 1,
+          latestReportedAt: now,
+          targetCardUpdatedAtAtNotice: null,
+          resolutionNotifiedAt: null,
+          resolutionNotifiedCaseUpdatedAt: null,
+          closedAt: null,
+          createdAt: now,
+          updatedAt: now,
+        }),
+      } as any,
+      getOwnerModerationSummary: async ({ reportCaseId }: { reportCaseId: string }) =>
+        reportCaseId === 'case-new'
+          ? {
+              latestCaseId: 'case-new',
+              status: 'under_review',
+              resolutionCode: null,
+              canAppeal: false,
+              activeAppealId: null,
+              activeAppealStatus: null,
+              appealEntryUrl: null,
+              statusSummary: '当前处理结果暂不可申诉。',
+            }
+          : null,
+      getActiveOwnerModerationSummaryByTarget: async () => ({
+        latestCaseId: 'case-old',
+        status: 'resolved',
+        resolutionCode: 'confirmed_violation',
+        canAppeal: false,
+        activeAppealId: 'appeal-1',
+        activeAppealStatus: 'submitted',
+        appealEntryUrl: '/report-appeals?appealId=appeal-1',
+        statusSummary: '该处理结果的申诉正在处理中，可查看当前状态。',
+      }),
+    } as any);
+
+    const capability = await service.getDataCardReportCapability({
+      db: {} as never,
+      viewerUserId: 2,
+      targetEntityId: 'card-1',
+    });
+
+    expect(capability.canReport).toBe(false);
+    expect(capability.ownerModerationSummary?.latestCaseId).toBe('case-old');
+    expect(capability.ownerModerationSummary?.activeAppealId).toBe('appeal-1');
+  });
+
+  test('getDataCardReportCapability reports crowd-review frozen cases as non-reportable', async () => {
+    const service = buildService({
+      repo: {
+        getOpenReportCaseByTarget: async () => ({
+          id: 'case-1',
+          targetEntityType: 'data_card',
+          targetEntityId: 'card-1',
+          targetUserId: 2,
+          status: 'under_review',
+          creatorNotifiedAt: now,
+          creatorNotifiedReportCount: 1,
+        }),
+        getActiveReportByCaseAndReporter: async () => null,
+        listActiveReportsByCase: async () => [],
+        hasActiveCrowdReviewRoundForCase: async () => true,
+      },
+    });
+
+    const capability = await service.getDataCardReportCapability({
+      db: {} as never,
+      viewerUserId: 7,
+      targetEntityId: 'card-1',
+    });
+
+    expect(capability.canReport).toBe(false);
+    expect(capability.reportDisabledReason).toContain('已进入众查');
+    expect(capability.hasOpenCase).toBe(true);
+  });
+
   test('same user changed payload updates active report after passing screening', async () => {
     let updateCalled = false;
     const service = buildService({

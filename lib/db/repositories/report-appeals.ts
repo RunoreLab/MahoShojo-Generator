@@ -213,6 +213,23 @@ export async function getActiveAppealByCase(db: AppDrizzleDb, reportCaseId: stri
   return row ?? null;
 }
 
+export async function getLatestActiveAppealByTargetForUser(
+  db: AppDrizzleDb,
+  input: { userId: number; targetEntityId: string },
+): Promise<ReportAppealRow | null> {
+  const row = await db.query.reportAppeals.findFirst({
+    where: and(
+      eq(reportAppeals.appellantUserId, input.userId),
+      eq(reportAppeals.targetEntityType, 'data_card'),
+      eq(reportAppeals.targetEntityId, input.targetEntityId),
+      inArray(reportAppeals.status, ['submitted', 'under_review']),
+    ),
+    orderBy: [desc(reportAppeals.createdAt), desc(reportAppeals.id)],
+  });
+
+  return row ?? null;
+}
+
 export async function createReportAppeal(
   db: AppDrizzleDb,
   input: CreateReportAppealInput,

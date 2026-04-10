@@ -233,6 +233,35 @@ describe('crowd review repository', () => {
     ).rejects.toThrow('案件状态已变化');
   });
 
+  test('createCrowdReviewRound does not persist a round when the report case is no longer editable', async () => {
+    exec(`
+      UPDATE report_cases
+      SET status = 'dismissed', updated_at = '2026-04-08T10:18:00.000Z', closed_at = '2026-04-08T10:18:00.000Z'
+      WHERE id = 'case-2';
+    `);
+
+    await expect(
+      createCrowdReviewRound(db, {
+        id: 'round-stale',
+        reportCaseId: 'case-2',
+        status: 'active',
+        openedAt: '2026-04-08T10:20:00.000Z',
+        deadlineAt: '2026-04-08T11:20:00.000Z',
+        extensionCount: 0,
+        minValidVotes: 3,
+        resultCode: null,
+        resultSummaryJson: '{}',
+        now: '2026-04-08T10:20:00.000Z',
+      }),
+    ).rejects.toThrow('案件状态已变化');
+
+    const round = await db.query.crowdReviewRounds.findFirst({
+      where: (fields, { eq }) => eq(fields.id, 'round-stale'),
+    });
+
+    expect(round).toBeUndefined();
+  });
+
   test('enforces one active assignment per inspector at a time', async () => {
     await createCrowdReviewRound(db, {
       id: 'round-1',

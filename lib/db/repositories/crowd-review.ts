@@ -280,7 +280,11 @@ export async function createCrowdReviewRound(
           created_at,
           updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+        FROM report_cases
+        WHERE id = ?
+          AND status = 'under_review'
+          AND updated_at = ?
         RETURNING
           id,
           report_case_id AS reportCaseId,
@@ -305,6 +309,8 @@ export async function createCrowdReviewRound(
         input.resultCode,
         input.resultSummaryJson,
         input.now,
+        input.now,
+        input.reportCaseId,
         input.now,
       ],
     },

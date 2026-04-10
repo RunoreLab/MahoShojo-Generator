@@ -17,7 +17,10 @@ import {
   getDataCardReportReasonLabel,
   isDataCardReportReasonCode,
 } from '@/lib/data-card-reports/reasons';
-import { getOwnerModerationSummary } from '@/lib/report-appeals/service';
+import {
+  getActiveOwnerModerationSummaryByTarget,
+  getOwnerModerationSummary,
+} from '@/lib/report-appeals/service';
 import type {
   DataCardReportCapabilityDto,
   DataCardReportDraft,
@@ -82,6 +85,7 @@ export type DataCardReportsServiceDeps = {
   }) => Promise<{ allowed: boolean }>;
   createUserMessageEntry: typeof createUserMessageEntry;
   getOwnerModerationSummary: typeof getOwnerModerationSummary;
+  getActiveOwnerModerationSummaryByTarget: typeof getActiveOwnerModerationSummaryByTarget;
 };
 
 export type SubmitDataCardReportInput = {
@@ -554,19 +558,31 @@ const createDataCardReportsService = (deps: DataCardReportsServiceDeps) => {
       }
 
       const db = requireDb(input.db);
-      const targetCard = await deps.getTargetCard(db, input.targetEntityId);
-      if (!targetCard) {
+      const resolveOwnerModerationSummary = async (): Promise<DataCardReportCapabilityDto['ownerModerationSummary']> => {
+        const activeAppealSummary = await deps.getActiveOwnerModerationSummaryByTarget({
+          db,
+          userId: input.viewerUserId!,
+          targetEntityId: input.targetEntityId,
+        });
+        if (activeAppealSummary) {
+          return activeAppealSummary;
+        }
+
         const latestCase = await deps.repo.getLatestReportCaseByTarget(db, {
           targetEntityType: 'data_card',
           targetEntityId: input.targetEntityId,
         });
-        const ownerModerationSummary = latestCase
+        return latestCase
           ? await deps.getOwnerModerationSummary({
               db,
-              userId: input.viewerUserId,
+              userId: input.viewerUserId!,
               reportCaseId: latestCase.id,
             })
           : null;
+      };
+      const targetCard = await deps.getTargetCard(db, input.targetEntityId);
+      if (!targetCard) {
+        const ownerModerationSummary = await resolveOwnerModerationSummary();
         return {
           canReport: false,
           reportDisabledReason: '该数据卡当前不可举报',
@@ -579,17 +595,7 @@ const createDataCardReportsService = (deps: DataCardReportsServiceDeps) => {
       }
 
       if (targetCard.user_id === input.viewerUserId) {
-        const latestCase = await deps.repo.getLatestReportCaseByTarget(db, {
-          targetEntityType: 'data_card',
-          targetEntityId: input.targetEntityId,
-        });
-        const ownerModerationSummary = latestCase
-          ? await deps.getOwnerModerationSummary({
-              db,
-              userId: input.viewerUserId,
-              reportCaseId: latestCase.id,
-            })
-          : null;
+        const ownerModerationSummary = await resolveOwnerModerationSummary();
         return {
           canReport: false,
           reportDisabledReason: '不能举报自己的公开数据卡',
@@ -624,10 +630,13 @@ const createDataCardReportsService = (deps: DataCardReportsServiceDeps) => {
       const myReferences = myReport ? await deps.repo.listReportReferencesByReport(db, myReport.id) : [];
       const activeReports = await deps.repo.listActiveReportsByCase(db, openCase.id);
       const caseEvidenceSummary = await buildAggregatedCaseEvidenceSummary(db, activeReports);
+      const hasActiveCrowdReview = await deps.repo.hasActiveCrowdReviewRoundForCase(db, openCase.id);
 
       return {
-        canReport: true,
-        reportDisabledReason: null,
+        canReport: !hasActiveCrowdReview,
+        reportDisabledReason: hasActiveCrowdReview
+          ? '该举报案件已进入众查，当前不可再修改举报材料'
+          : null,
         hasOpenCase: true,
         myActiveReport: myReport
           ? {
@@ -1135,6 +1144,8 @@ export function createDataCardReportsServiceForTests(
     screenSubmission: deps.screenSubmission ?? (async () => ({ allowed: true })),
     createUserMessageEntry: deps.createUserMessageEntry ?? (async () => ({ id: null })),
     getOwnerModerationSummary: deps.getOwnerModerationSummary ?? (async () => null),
+    getActiveOwnerModerationSummaryByTarget:
+      deps.getActiveOwnerModerationSummaryByTarget ?? (async () => null),
   });
 }
 
@@ -1153,6 +1164,7 @@ export async function getDataCardReportCapability(input: {
     screenSubmission: screenDataCardReportSubmission,
     createUserMessageEntry,
     getOwnerModerationSummary,
+    getActiveOwnerModerationSummaryByTarget,
   }).getDataCardReportCapability(input);
 }
 
@@ -1168,6 +1180,7 @@ export async function submitDataCardReport(input: SubmitDataCardReportInput) {
     screenSubmission: screenDataCardReportSubmission,
     createUserMessageEntry,
     getOwnerModerationSummary,
+    getActiveOwnerModerationSummaryByTarget,
   }).submitDataCardReport(input);
 }
 
@@ -1182,5 +1195,6 @@ export async function withdrawDataCardReport(input: WithdrawDataCardReportInput)
     screenSubmission: screenDataCardReportSubmission,
     createUserMessageEntry,
     getOwnerModerationSummary,
+    getActiveOwnerModerationSummaryByTarget,
   }).withdrawDataCardReport(input);
 }
