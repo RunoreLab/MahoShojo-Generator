@@ -364,6 +364,33 @@ describe('report appeals service', () => {
     ).rejects.toBeInstanceOf(ReportAppealUnprocessableError);
   });
 
+  test('submit rejects unsupported referenceType values', async () => {
+    let createCalled = false;
+    const service = buildService({
+      repo: {
+        getAppealableCaseForUser: async () => makeCaseRow(),
+        createReportAppeal: async () => {
+          createCalled = true;
+          return makeAppealRow();
+        },
+      },
+    });
+
+    await expect(
+      service.submitReportAppeal({
+        db: {} as never,
+        userId: 2,
+        reportCaseId: 'case-1',
+        caseUpdatedAtSnapshot: '2026-04-10T01:20:00.000Z',
+        appealReasonCode: 'missing_context',
+        details: '补充说明',
+        references: [{ referenceType: 'foo' as any, referenceId: 'community-rules', note: '规则依据' }],
+      }),
+    ).rejects.toThrow('引用类型无效');
+
+    expect(createCalled).toBe(false);
+  });
+
   test('withdraw only works for appellant before resolution', async () => {
     const service = buildService({
       repo: {

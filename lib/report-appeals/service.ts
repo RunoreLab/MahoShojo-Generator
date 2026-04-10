@@ -125,6 +125,9 @@ const reportAppealResolutionCodeSet = new Set<ReportAppealResolutionCode>([
   'reopened_under_review',
 ]);
 
+const isReportReferenceType = (value: unknown): value is ReportReferenceType =>
+  value === 'public_data_card' || value === 'encyclopedia_entry';
+
 const requireDb = (db: ReportAppealsServiceDb): AppDrizzleDb => {
   if (!db) {
     throw new ReportAppealServiceUnavailableError('申诉服务当前不可用');
@@ -144,6 +147,14 @@ const normalizeAppealDetails = (details: string): string => {
     throw new ReportAppealValidationError('申诉说明不能为空');
   }
   return normalized;
+};
+
+const validateAppealReferences = (references: ReportAppealReferenceDraft[]): void => {
+  for (const reference of references) {
+    if (!isReportReferenceType(reference?.referenceType)) {
+      throw new ReportAppealValidationError('引用类型无效');
+    }
+  }
 };
 
 const buildResolutionLabel = (resolutionCode: ReportResolutionCode | ReportAppealResolutionCode | null): string => {
@@ -393,6 +404,7 @@ const createReportAppealsService = (deps: ReportAppealsServiceDeps) => ({
     if (!reportAppealReasonCodeSet.has(input.appealReasonCode)) {
       throw new ReportAppealValidationError('申诉理由无效');
     }
+    validateAppealReferences(input.references);
 
     const db = requireDb(input.db);
     const reportCase = await resolveAppealCaseOrThrow(deps, db, {
