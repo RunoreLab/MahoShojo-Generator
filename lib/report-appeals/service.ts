@@ -259,6 +259,20 @@ const buildAppealStatusSummary = (input: {
   return '当前处理结果暂不可申诉。';
 };
 
+const buildOwnerModerationAppealEntryUrl = (input: {
+  reportCaseId: string;
+  canAppeal: boolean;
+  existingAppealId: string | null;
+}): string | null => {
+  if (input.existingAppealId) {
+    return `/report-appeals?appealId=${encodeURIComponent(input.existingAppealId)}`;
+  }
+  if (input.canAppeal) {
+    return `/report-appeals?reportCaseId=${encodeURIComponent(input.reportCaseId)}`;
+  }
+  return null;
+};
+
 const resolveAppealCaseOrThrow = async (
   deps: ReportAppealsServiceDeps,
   db: AppDrizzleDb,
@@ -816,18 +830,23 @@ const createReportAppealsService = (deps: ReportAppealsServiceDeps) => ({
       reportCaseId: reportCase.id,
       caseUpdatedAtSnapshot: reportCase.updatedAt,
     });
+    const canAppeal =
+      reportCase.status === 'resolved' &&
+      isAppealableFinalResolutionCode(reportCase.resolutionCode) &&
+      existingAppeal == null;
 
     return {
       latestCaseId: reportCase.id,
       status: reportCase.status,
       resolutionCode: reportCase.resolutionCode,
-      canAppeal:
-        reportCase.status === 'resolved' &&
-        isAppealableFinalResolutionCode(reportCase.resolutionCode) &&
-        existingAppeal == null,
+      canAppeal,
       activeAppealId: existingAppeal?.id ?? null,
       activeAppealStatus: existingAppeal?.status ?? null,
-      appealEntryUrl: `/report-appeals?reportCaseId=${encodeURIComponent(reportCase.id)}`,
+      appealEntryUrl: buildOwnerModerationAppealEntryUrl({
+        reportCaseId: reportCase.id,
+        canAppeal,
+        existingAppealId: existingAppeal?.id ?? null,
+      }),
       statusSummary: buildAppealStatusSummary({
         resolutionCode: reportCase.resolutionCode,
         existingAppealStatus: existingAppeal?.status ?? null,

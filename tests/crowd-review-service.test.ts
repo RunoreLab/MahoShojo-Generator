@@ -796,6 +796,27 @@ describe('crowd review service', () => {
     expect(currentCase?.postVoteSummary?.summaryText).toContain('支持违规');
   });
 
+  test('current-case replay hydrates expired assignments with a synthetic post-vote summary', async () => {
+    const service = buildService({
+      repo: {
+        getActiveAssignmentByInspector: async () => null,
+        getLatestCompletedAssignmentByInspector: async () =>
+          makeAssignmentRow({
+            status: 'expired',
+            decision: null,
+            completedAt: now,
+            postVoteSummaryJson: '{}',
+          }),
+      },
+    });
+
+    const currentCase = await service.getCrowdReviewCurrentCase({ db: {} as never, userId: 7 });
+
+    expect(currentCase).not.toBeNull();
+    expect(currentCase?.assignmentStatus).toBe('expired');
+    expect(currentCase?.postVoteSummary?.summaryText).toContain('未计入');
+  });
+
   test('submit persists computed post-vote summary for later idempotent replay', async () => {
     let persistedSummaryJson = '{}';
     let finalized = false;
@@ -876,6 +897,85 @@ describe('crowd review service', () => {
     ).rejects.toThrow('notify failed');
 
     expect(attempts).toBe(2);
+  });
+
+  test('submit replay retries report-case notification after an earlier deciding vote exhausted retries', async () => {
+    let finalized = false;
+    let persistedSummaryJson = '{}';
+    let notifyAttempts = 0;
+    const service = buildService({
+      repo: {
+        getAssignmentByIdForInspector: async () =>
+          finalized
+            ? makeAssignmentRow({
+                status: 'voted',
+                decision: 'violation',
+                completedAt: now,
+                postVoteSummaryJson: persistedSummaryJson,
+              })
+            : makeAssignmentRow(),
+        getRoundById: async () => makeRoundRow(),
+        listAssignmentsByRound: async () => [
+          finalized
+            ? makeAssignmentRow({
+                status: 'voted',
+                decision: 'violation',
+                completedAt: now,
+                postVoteSummaryJson: persistedSummaryJson,
+              })
+            : makeAssignmentRow(),
+          makeAssignmentRow({
+            id: 'assignment-2',
+            inspectorUserId: 8,
+            status: 'voted',
+            decision: 'violation',
+            completedAt: now,
+            postVoteSummaryJson:
+              '{"roundStatus":"concluded","resultCode":"violation","summaryText":"当前轮次已形成“支持违规”结果。"}',
+          }),
+        ],
+        finalizeAssignment: async (_db, input) => {
+          finalized = true;
+          persistedSummaryJson = input.postVoteSummaryJson;
+          return true;
+        },
+        updateAssignmentPostVoteSummary: async (_db, input) => {
+          persistedSummaryJson = input.postVoteSummaryJson;
+          return true;
+        },
+        updateRound: async () => true,
+      },
+      notifyReportCaseResolutionIfNeeded: async () => {
+        notifyAttempts += 1;
+        if (notifyAttempts < 3) {
+          throw new Error('notify failed');
+        }
+        return true;
+      },
+    });
+
+    await expect(
+      service.submitCrowdReviewDecision({
+        db: {} as never,
+        userId: 7,
+        assignmentId: 'assignment-1',
+        decision: 'violation',
+        note: null,
+      }),
+    ).rejects.toThrow('notify failed');
+
+    const replay = await service.submitCrowdReviewDecision({
+      db: {} as never,
+      userId: 7,
+      assignmentId: 'assignment-1',
+      decision: 'violation',
+      note: null,
+    });
+
+    expect(replay.idempotentReplay).toBe(true);
+    expect(replay.assignmentStatus).toBe('voted');
+    expect(replay.postVoteSummary.resultCode).toBe('violation');
+    expect(notifyAttempts).toBe(3);
   });
 
   test('submit replay loads stored round summary when finalized assignment still has empty summary json', async () => {

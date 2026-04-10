@@ -109,6 +109,46 @@ describe('report appeals service', () => {
     expect(fixed.eligible).toBe(true);
   });
 
+  test('owner moderation summary omits appeal entry URL for non-appealable cases without active appeal', async () => {
+    const service = buildService({
+      repo: {
+        getAppealableCaseForUser: async () => makeCaseRow({ status: 'under_review', resolutionCode: null }),
+        getLatestNonWithdrawnAppealByCaseSnapshot: async () => null,
+      },
+    });
+
+    const result = await service.getOwnerModerationSummary({
+      db: {} as never,
+      userId: 2,
+      reportCaseId: 'case-1',
+    });
+
+    expect(result).not.toBeNull();
+    expect(result?.canAppeal).toBe(false);
+    expect(result?.appealEntryUrl).toBeNull();
+    expect(result?.statusSummary).toContain('暂不可申诉');
+  });
+
+  test('owner moderation summary points to appeal detail when an appeal already exists', async () => {
+    const service = buildService({
+      repo: {
+        getAppealableCaseForUser: async () => makeCaseRow(),
+        getLatestNonWithdrawnAppealByCaseSnapshot: async () => makeAppealRow(),
+      },
+    });
+
+    const result = await service.getOwnerModerationSummary({
+      db: {} as never,
+      userId: 2,
+      reportCaseId: 'case-1',
+    });
+
+    expect(result).not.toBeNull();
+    expect(result?.canAppeal).toBe(false);
+    expect(result?.activeAppealId).toBe('appeal-1');
+    expect(result?.appealEntryUrl).toBe('/report-appeals?appealId=appeal-1');
+  });
+
   test('submit reuses existing non-withdrawn appeal for the same case snapshot instead of creating a duplicate', async () => {
     let createCalled = false;
     const service = buildService({

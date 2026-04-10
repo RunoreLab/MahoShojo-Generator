@@ -429,6 +429,36 @@ const isAssignmentUniqueConflict = (error: unknown): boolean =>
     error.message.includes('crowd_review_assignments.crowd_review_round_id')
   );
 
+const shouldNotifyResolvedViolationReplay = (summary: CrowdReviewPostVoteSummaryDto): boolean =>
+  summary.roundStatus === 'concluded' && summary.resultCode === 'violation';
+
+const retryReportCaseResolutionNotification = async (input: {
+  db: AppDrizzleDb;
+  reportCaseId: string;
+  notify?: (input: { db: AppDrizzleDb | null; reportCaseId: string }) => Promise<boolean>;
+}): Promise<void> => {
+  if (!input.notify) {
+    return;
+  }
+
+  let lastError: unknown = null;
+  for (let attempt = 0; attempt < REPORT_CASE_RESOLUTION_NOTIFY_ATTEMPTS; attempt += 1) {
+    try {
+      await input.notify({
+        db: input.db,
+        reportCaseId: input.reportCaseId,
+      });
+      return;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  if (lastError) {
+    throw lastError;
+  }
+};
+
 const buildAssignmentReplaySummary = (assignment: ServiceAssignmentRow): CrowdReviewPostVoteSummaryDto => {
   const persisted = parseSummaryJson(assignment.postVoteSummaryJson);
   if (persisted) {
@@ -811,6 +841,32 @@ const createCrowdReviewService = (deps: CrowdReviewServiceDeps) => {
     });
   };
 
+  const mapReplayAssignmentToCurrentCase = async (db: AppDrizzleDb, assignment: ServiceAssignmentRow) => ({
+    ...mapAssignmentToCurrentCase(assignment),
+    postVoteSummary: await loadReplaySummary(db, assignment),
+  });
+
+  const retryResolvedViolationNotificationOnReplay = async (
+    db: AppDrizzleDb,
+    assignment: ServiceAssignmentRow,
+    summary: CrowdReviewPostVoteSummaryDto,
+  ): Promise<void> => {
+    if (!shouldNotifyResolvedViolationReplay(summary)) {
+      return;
+    }
+
+    const round = await deps.repo.getRoundById(db, assignment.crowdReviewRoundId);
+    if (!round) {
+      throw new CrowdReviewNotFoundError('众查轮次不存在');
+    }
+
+    await retryReportCaseResolutionNotification({
+      db,
+      reportCaseId: round.reportCaseId,
+      notify: deps.notifyReportCaseResolutionIfNeeded,
+    });
+  };
+
   return {
     async getCrowdReviewSummary(input: {
       db: AppDrizzleDb | null;
@@ -961,7 +1017,7 @@ const createCrowdReviewService = (deps: CrowdReviewServiceDeps) => {
       }
 
       const latestCompleted = await deps.repo.getLatestCompletedAssignmentByInspector(db, input.userId);
-      return latestCompleted ? mapAssignmentToCurrentCase(latestCompleted) : null;
+      return latestCompleted ? await mapReplayAssignmentToCurrentCase(db, latestCompleted) : null;
     },
 
     async submitCrowdReviewDecision(input: {
@@ -987,11 +1043,13 @@ const createCrowdReviewService = (deps: CrowdReviewServiceDeps) => {
       }
 
       if (isFinalAssignmentStatus(assignment.status)) {
+        const replaySummary = await loadReplaySummary(db, assignment);
+        await retryResolvedViolationNotificationOnReplay(db, assignment, replaySummary);
         return {
           assignmentId: assignment.id,
           assignmentStatus: assignment.status,
           decision: assignment.decision,
-          postVoteSummary: await loadReplaySummary(db, assignment),
+          postVoteSummary: replaySummary,
           idempotentReplay: true,
         };
       }
@@ -1128,27 +1186,11 @@ export async function applyCrowdReviewRoundResultToReportCase(input: {
       closedAt: input.now,
       now: input.now,
     });
-
-    const notify = input.notifyReportCaseResolutionIfNeeded;
-    if (notify) {
-      let lastError: unknown = null;
-      for (let attempt = 0; attempt < REPORT_CASE_RESOLUTION_NOTIFY_ATTEMPTS; attempt += 1) {
-        try {
-          await notify({
-            db: input.db,
-            reportCaseId: input.reportCaseId,
-          });
-          lastError = null;
-          break;
-        } catch (error) {
-          lastError = error;
-        }
-      }
-
-      if (lastError) {
-        throw lastError;
-      }
-    }
+    await retryReportCaseResolutionNotification({
+      db: input.db,
+      reportCaseId: input.reportCaseId,
+      notify: input.notifyReportCaseResolutionIfNeeded,
+    });
     return;
   }
 
