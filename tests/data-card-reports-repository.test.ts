@@ -11,6 +11,7 @@ import {
   createReportCase,
   createReportSubmissionEvent,
   getActiveReportByCaseAndReporter,
+  getLatestReportCaseByTarget,
   getLatestReportSubmissionEventByReport,
   getOpenReportCaseByTarget,
   listReportReferencesByReport,
@@ -183,6 +184,77 @@ describe('data card reports repository', () => {
       targetEntityId: 'card-1',
       status: 'open',
     });
+  });
+
+  test('getLatestReportCaseByTarget keeps newer case recency ahead of older case bookkeeping touches', async () => {
+    exec(`
+      INSERT INTO report_cases (
+        id,
+        target_entity_type,
+        target_entity_id,
+        target_user_id,
+        status,
+        resolution_code,
+        creator_notified_at,
+        creator_notified_report_count,
+        latest_reported_at,
+        target_card_updated_at_at_notice,
+        resolution_notified_at,
+        resolution_notified_case_updated_at,
+        closed_at,
+        created_at,
+        updated_at
+      ) VALUES
+        (
+          'case-old',
+          'data_card',
+          'card-1',
+          2,
+          'resolved',
+          'violation',
+          NULL,
+          0,
+          '2026-04-08T10:00:00.000Z',
+          NULL,
+          NULL,
+          NULL,
+          '2026-04-08T10:10:00.000Z',
+          '2026-04-08T10:00:00.000Z',
+          '2026-04-08T10:10:00.000Z'
+        ),
+        (
+          'case-new',
+          'data_card',
+          'card-1',
+          2,
+          'open',
+          NULL,
+          NULL,
+          0,
+          '2026-04-08T10:30:00.000Z',
+          NULL,
+          NULL,
+          NULL,
+          NULL,
+          '2026-04-08T10:30:00.000Z',
+          '2026-04-08T10:30:00.000Z'
+        );
+    `);
+
+    const touched = await markReportCaseCreatorNotified(db, {
+      caseId: 'case-old',
+      notifiedAt: '2026-04-08T11:00:00.000Z',
+      reportCount: 0,
+      targetCardUpdatedAtAtNotice: '2026-04-08T10:00:00.000Z',
+    });
+    const latest = await getLatestReportCaseByTarget(db, {
+      targetEntityType: 'data_card',
+      targetEntityId: 'card-1',
+    });
+
+    expect(touched).toBe(true);
+    expect(latest?.id).toBe('case-new');
+    expect(latest?.latestReportedAt).toBe('2026-04-08T10:30:00.000Z');
   });
 
   test('active reporter unique index allows only one active report per case and reporter', async () => {

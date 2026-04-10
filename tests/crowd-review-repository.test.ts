@@ -13,6 +13,7 @@ import {
   listAssignableCases,
   listCrowdReviewHistoryByInspector,
   listActionableAssignmentsByInspector,
+  updateAssignmentPostVoteSummary,
   upsertCrowdReviewInspectorState,
 } from '@/lib/db/repositories/crowd-review';
 
@@ -492,6 +493,73 @@ describe('crowd review repository', () => {
     expect(latestCompleted?.status).toBe('expired');
   });
 
+  test('latest completed assignment ignores later post-vote summary touches on older rounds', async () => {
+    await createCrowdReviewRound(db, {
+      id: 'round-1',
+      reportCaseId: 'case-1',
+      status: 'concluded',
+      openedAt: '2026-04-08T10:20:00.000Z',
+      deadlineAt: '2026-04-08T11:20:00.000Z',
+      extensionCount: 0,
+      minValidVotes: 3,
+      resultCode: 'violation',
+      resultSummaryJson: '{}',
+      now: '2026-04-08T10:20:00.000Z',
+    });
+    await createCrowdReviewRound(db, {
+      id: 'round-2',
+      reportCaseId: 'case-2',
+      status: 'concluded',
+      openedAt: '2026-04-08T10:21:00.000Z',
+      deadlineAt: '2026-04-08T11:21:00.000Z',
+      extensionCount: 0,
+      minValidVotes: 3,
+      resultCode: 'no_violation',
+      resultSummaryJson: '{}',
+      now: '2026-04-08T10:21:00.000Z',
+    });
+    await createCrowdReviewAssignment(db, {
+      id: 'assignment-1',
+      crowdReviewRoundId: 'round-1',
+      inspectorUserId: 7,
+      status: 'voted',
+      assignedAt: '2026-04-08T10:22:00.000Z',
+      expiresAt: '2026-04-08T10:52:00.000Z',
+      completedAt: '2026-04-08T10:24:00.000Z',
+      decision: 'violation',
+      decisionNote: null,
+      postVoteSummaryJson: '{}',
+      postVoteSummarySeenAt: '2026-04-08T10:24:00.000Z',
+      now: '2026-04-08T10:24:00.000Z',
+    });
+    await createCrowdReviewAssignment(db, {
+      id: 'assignment-2',
+      crowdReviewRoundId: 'round-2',
+      inspectorUserId: 7,
+      status: 'expired',
+      assignedAt: '2026-04-08T10:25:00.000Z',
+      expiresAt: '2026-04-08T10:55:00.000Z',
+      completedAt: '2026-04-08T10:26:00.000Z',
+      decision: null,
+      decisionNote: null,
+      postVoteSummaryJson: '{}',
+      postVoteSummarySeenAt: null,
+      now: '2026-04-08T10:26:00.000Z',
+    });
+
+    const updated = await updateAssignmentPostVoteSummary(db, {
+      assignmentId: 'assignment-1',
+      userId: 7,
+      postVoteSummaryJson: '{"summaryText":"旧轮次补充结论"}',
+      now: '2026-04-08T11:00:00.000Z',
+    });
+    const latestCompleted = await getLatestCompletedAssignmentByInspector(db, 7);
+
+    expect(updated).toBe(true);
+    expect(latestCompleted?.id).toBe('assignment-2');
+    expect(latestCompleted?.completedAt).toBe('2026-04-08T10:26:00.000Z');
+  });
+
   test('history excludes unfinished assigned rows and keeps completed rows ordered newest first', async () => {
     await createCrowdReviewRound(db, {
       id: 'round-active',
@@ -587,6 +655,76 @@ describe('crowd review repository', () => {
       'assignment-completed-a',
     ]);
     expect(history.every((row) => row.assignmentStatus !== 'assigned')).toBe(true);
+  });
+
+  test('history stays ordered by completion time after older assignments get summary refreshes', async () => {
+    await createCrowdReviewRound(db, {
+      id: 'round-completed-a',
+      reportCaseId: 'case-1',
+      status: 'concluded',
+      openedAt: '2026-04-08T10:20:00.000Z',
+      deadlineAt: '2026-04-08T11:20:00.000Z',
+      extensionCount: 0,
+      minValidVotes: 3,
+      resultCode: 'violation',
+      resultSummaryJson: '{}',
+      now: '2026-04-08T10:20:00.000Z',
+    });
+    await createCrowdReviewRound(db, {
+      id: 'round-completed-b',
+      reportCaseId: 'case-2',
+      status: 'concluded',
+      openedAt: '2026-04-08T10:21:00.000Z',
+      deadlineAt: '2026-04-08T11:21:00.000Z',
+      extensionCount: 0,
+      minValidVotes: 3,
+      resultCode: 'no_violation',
+      resultSummaryJson: '{}',
+      now: '2026-04-08T10:21:00.000Z',
+    });
+
+    await createCrowdReviewAssignment(db, {
+      id: 'assignment-completed-a',
+      crowdReviewRoundId: 'round-completed-a',
+      inspectorUserId: 7,
+      status: 'voted',
+      assignedAt: '2026-04-08T10:24:00.000Z',
+      expiresAt: '2026-04-08T10:54:00.000Z',
+      completedAt: '2026-04-08T10:26:00.000Z',
+      decision: 'violation',
+      decisionNote: null,
+      postVoteSummaryJson: '{}',
+      postVoteSummarySeenAt: '2026-04-08T10:26:00.000Z',
+      now: '2026-04-08T10:26:00.000Z',
+    });
+    await createCrowdReviewAssignment(db, {
+      id: 'assignment-completed-b',
+      crowdReviewRoundId: 'round-completed-b',
+      inspectorUserId: 7,
+      status: 'expired',
+      assignedAt: '2026-04-08T10:25:00.000Z',
+      expiresAt: '2026-04-08T10:55:00.000Z',
+      completedAt: '2026-04-08T10:27:00.000Z',
+      decision: null,
+      decisionNote: null,
+      postVoteSummaryJson: '{}',
+      postVoteSummarySeenAt: null,
+      now: '2026-04-08T10:27:00.000Z',
+    });
+
+    const updated = await updateAssignmentPostVoteSummary(db, {
+      assignmentId: 'assignment-completed-a',
+      userId: 7,
+      postVoteSummaryJson: '{"summaryText":"旧案件补票后已刷新"}',
+      now: '2026-04-08T11:10:00.000Z',
+    });
+    const history = await listCrowdReviewHistoryByInspector(db, 7, 20);
+
+    expect(updated).toBe(true);
+    expect(history.map((row) => row.assignmentId)).toEqual([
+      'assignment-completed-b',
+      'assignment-completed-a',
+    ]);
   });
 
   test('listAssignableCases excludes cards that are no longer publicly accessible', async () => {

@@ -285,7 +285,7 @@ export async function getLatestReportCaseByTarget(
       eq(reportCases.targetEntityType, input.targetEntityType),
       eq(reportCases.targetEntityId, input.targetEntityId),
     ),
-    orderBy: [desc(reportCases.updatedAt), desc(reportCases.id)],
+    orderBy: [desc(reportCases.latestReportedAt), desc(reportCases.createdAt), desc(reportCases.id)],
   });
 
   return row ?? null;

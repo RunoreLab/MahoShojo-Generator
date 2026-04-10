@@ -404,7 +404,11 @@ export async function getLatestCompletedAssignmentByInspector(
       eq(crowdReviewAssignments.inspectorUserId, userId),
       inArray(crowdReviewAssignments.status, COMPLETED_ASSIGNMENT_STATUSES),
     ),
-    orderBy: [desc(crowdReviewAssignments.updatedAt), desc(crowdReviewAssignments.id)],
+    orderBy: [
+      desc(crowdReviewAssignments.completedAt),
+      desc(crowdReviewAssignments.assignedAt),
+      desc(crowdReviewAssignments.id),
+    ],
   });
 
   return row ?? null;
@@ -566,7 +570,11 @@ export async function listCrowdReviewHistoryByInspector(
         inArray(crowdReviewAssignments.status, COMPLETED_ASSIGNMENT_STATUSES),
       ),
     )
-    .orderBy(desc(crowdReviewAssignments.updatedAt), desc(crowdReviewAssignments.id))
+    .orderBy(
+      desc(crowdReviewAssignments.completedAt),
+      desc(crowdReviewAssignments.assignedAt),
+      desc(crowdReviewAssignments.id),
+    )
     .limit(safeLimit);
 }
 
