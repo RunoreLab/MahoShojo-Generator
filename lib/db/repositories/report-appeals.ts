@@ -153,6 +153,16 @@ export type RestoreReportAppealAfterReviewFailureInput = {
   now: string;
 };
 
+const FALLBACK_TARGET_CARD_NAME = '相关数据卡';
+
+const withTargetCardNameFallback = <T extends { targetCardName: string | null }>(row: T): T & { targetCardName: string } => ({
+  ...row,
+  targetCardName:
+    typeof row.targetCardName === 'string' && row.targetCardName.trim()
+      ? row.targetCardName.trim()
+      : FALLBACK_TARGET_CARD_NAME,
+});
+
 export async function getAppealableCaseForUser(
   db: AppDrizzleDb,
   input: { reportCaseId: string; userId: number },
@@ -169,13 +179,13 @@ export async function getAppealableCaseForUser(
       targetCardName: dataCards.name,
     })
     .from(reportCases)
-    .innerJoin(
+    .leftJoin(
       dataCards,
       and(eq(dataCards.id, reportCases.targetEntityId), eq(reportCases.targetEntityType, 'data_card')),
     )
     .where(and(eq(reportCases.id, input.reportCaseId), eq(reportCases.targetUserId, input.userId)));
 
-  return rows[0] ?? null;
+  return rows[0] ? withTargetCardNameFallback(rows[0]) : null;
 }
 
 export async function getLatestNonWithdrawnAppealByCaseSnapshot(
@@ -309,10 +319,10 @@ export async function getReportAppealByIdForAppellant(
       reportCases,
       and(eq(reportCases.id, reportAppeals.reportCaseId), eq(reportCases.targetEntityType, 'data_card')),
     )
-    .innerJoin(dataCards, eq(dataCards.id, reportCases.targetEntityId))
+    .leftJoin(dataCards, eq(dataCards.id, reportCases.targetEntityId))
     .where(and(eq(reportAppeals.id, input.appealId), eq(reportAppeals.appellantUserId, input.userId)));
 
-  return rows[0] ?? null;
+  return rows[0] ? withTargetCardNameFallback(rows[0]) : null;
 }
 
 export async function getReportAppealByIdForAdmin(
@@ -352,10 +362,10 @@ export async function getReportAppealByIdForAdmin(
       reportCases,
       and(eq(reportCases.id, reportAppeals.reportCaseId), eq(reportCases.targetEntityType, 'data_card')),
     )
-    .innerJoin(dataCards, eq(dataCards.id, reportCases.targetEntityId))
+    .leftJoin(dataCards, eq(dataCards.id, reportCases.targetEntityId))
     .where(eq(reportAppeals.id, appealId));
 
-  return rows[0] ?? null;
+  return rows[0] ? withTargetCardNameFallback(rows[0]) : null;
 }
 
 export async function listReportAppealsByAppellant(
@@ -393,10 +403,11 @@ export async function listReportAppealsByAppellant(
       reportCases,
       and(eq(reportCases.id, reportAppeals.reportCaseId), eq(reportCases.targetEntityType, 'data_card')),
     )
-    .innerJoin(dataCards, eq(dataCards.id, reportCases.targetEntityId))
+    .leftJoin(dataCards, eq(dataCards.id, reportCases.targetEntityId))
     .where(eq(reportAppeals.appellantUserId, userId))
     .orderBy(desc(reportAppeals.createdAt), desc(reportAppeals.id))
-    .limit(safeLimit);
+    .limit(safeLimit)
+    .then((rows) => rows.map(withTargetCardNameFallback));
 }
 
 export async function listReportAppealsForAdmin(
@@ -434,11 +445,12 @@ export async function listReportAppealsForAdmin(
       reportCases,
       and(eq(reportCases.id, reportAppeals.reportCaseId), eq(reportCases.targetEntityType, 'data_card')),
     )
-    .innerJoin(dataCards, eq(dataCards.id, reportCases.targetEntityId))
+    .leftJoin(dataCards, eq(dataCards.id, reportCases.targetEntityId))
     .leftJoin(users, eq(users.id, reportAppeals.appellantUserId))
     .where(input.status ? eq(reportAppeals.status, input.status) : undefined)
     .orderBy(desc(reportAppeals.createdAt), desc(reportAppeals.id))
-    .limit(safeLimit);
+    .limit(safeLimit)
+    .then((rows) => rows.map(withTargetCardNameFallback));
 }
 
 export async function updateReportAppealResolution(
@@ -532,13 +544,13 @@ export async function getReportCaseForResolutionNotification(
       resolutionNotifiedCaseUpdatedAt: reportCases.resolutionNotifiedCaseUpdatedAt,
     })
     .from(reportCases)
-    .innerJoin(
+    .leftJoin(
       dataCards,
       and(eq(dataCards.id, reportCases.targetEntityId), eq(reportCases.targetEntityType, 'data_card')),
     )
     .where(eq(reportCases.id, reportCaseId));
 
-  return rows[0] ?? null;
+  return rows[0] ? withTargetCardNameFallback(rows[0]) : null;
 }
 
 export async function markReportCaseResolutionNotified(

@@ -6,9 +6,14 @@ import type { AppDrizzleDb } from '@/lib/db/drizzle';
 import * as schema from '@/lib/db/schema';
 import {
   createReportAppeal,
+  getAppealableCaseForUser,
   getLatestNonWithdrawnAppealByCaseSnapshot,
+  getReportAppealByIdForAdmin,
+  getReportAppealByIdForAppellant,
+  getReportCaseForResolutionNotification,
   listReportAppealReferences,
   listReportAppealsByAppellant,
+  listReportAppealsForAdmin,
   markReportCaseResolutionNotified,
   replaceReportAppealReferences,
   updateReportAppealResolution,
@@ -488,5 +493,72 @@ describe('report appeals repository', () => {
     });
 
     expect(updated).toBe(true);
+  });
+
+  test('keeps an appealable resolved case readable after the target data card row is removed', async () => {
+    exec(`DELETE FROM data_cards WHERE id = 'card-1';`);
+
+    const row = await getAppealableCaseForUser(db, {
+      reportCaseId: 'case-1',
+      userId: 2,
+    });
+
+    expect(row).not.toBeNull();
+    expect(row?.id).toBe('case-1');
+    expect(row?.targetEntityId).toBe('card-1');
+    expect(row?.resolutionCode).toBe('confirmed_violation');
+  });
+
+  test('keeps appeal history and detail readable after the target data card row is removed', async () => {
+    await createReportAppeal(db, {
+      id: 'appeal-1',
+      reportCaseId: 'case-1',
+      appellantUserId: 7,
+      targetUserId: 2,
+      targetEntityType: 'data_card',
+      targetEntityId: 'card-1',
+      appealReasonCode: 'missing_context',
+      details: '卡片被移除后仍可查看',
+      evidenceSummaryJson: '{}',
+      status: 'submitted',
+      resolutionCode: null,
+      resolutionNote: null,
+      caseStatusSnapshot: 'resolved',
+      caseResolutionCodeSnapshot: 'confirmed_violation',
+      caseUpdatedAtSnapshot,
+      reviewedByUserId: null,
+      reviewedAt: null,
+      withdrawnAt: null,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    exec(`DELETE FROM data_cards WHERE id = 'card-1';`);
+
+    const history = await listReportAppealsByAppellant(db, 7, 10);
+    const appellantDetail = await getReportAppealByIdForAppellant(db, {
+      appealId: 'appeal-1',
+      userId: 7,
+    });
+    const adminDetail = await getReportAppealByIdForAdmin(db, 'appeal-1');
+    const adminList = await listReportAppealsForAdmin(db, {
+      limit: 10,
+    });
+
+    expect(history.map((item) => item.id)).toEqual(['appeal-1']);
+    expect(appellantDetail?.id).toBe('appeal-1');
+    expect(adminDetail?.id).toBe('appeal-1');
+    expect(adminList.map((item) => item.id)).toEqual(['appeal-1']);
+  });
+
+  test('keeps resolution notification context readable after the target data card row is removed', async () => {
+    exec(`DELETE FROM data_cards WHERE id = 'card-1';`);
+
+    const row = await getReportCaseForResolutionNotification(db, 'case-1');
+
+    expect(row).not.toBeNull();
+    expect(row?.id).toBe('case-1');
+    expect(row?.targetEntityId).toBe('card-1');
+    expect(row?.targetUserId).toBe(2);
   });
 });
