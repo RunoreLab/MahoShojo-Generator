@@ -2,7 +2,10 @@ import { describe, expect, test } from 'bun:test';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 
-import ReportAppealsPage, { loadReportAppealsPageData } from '@/components/report-appeals/ReportAppealsPage';
+import ReportAppealsPage, {
+  loadReportAppealsPageData,
+  submitReportAppealAndRefreshPageData,
+} from '@/components/report-appeals/ReportAppealsPage';
 
 describe('ReportAppealsPage', () => {
   test('renders appeal form when reportCaseId query is eligible and no existing appeal exists', async () => {
@@ -175,6 +178,86 @@ describe('ReportAppealsPage', () => {
       '/api/report-appeals/entry?reportCaseId=case-1',
       '/api/report-appeals/detail?appealId=appeal-1',
     ]);
+    expect(loaded.detail).toEqual(detail);
+  });
+
+  test('submitReportAppealAndRefreshPageData refreshes history and existingAppeal after submit succeeds', async () => {
+    const calls: string[] = [];
+    const submitInput = {
+      reportCaseId: 'case-1',
+      caseUpdatedAtSnapshot: '2026-04-10T01:20:00.000Z',
+      appealReasonCode: 'missing_context',
+      details: '补充说明',
+      references: [],
+    };
+    const history = {
+      items: [
+        {
+          appealId: 'appeal-1',
+          reportCaseId: 'case-1',
+          targetCardId: 'card-1',
+          targetCardName: '公开卡',
+          appealReasonCode: 'missing_context' as const,
+          status: 'submitted' as const,
+          resolutionCode: null,
+          resolutionNote: null,
+          caseUpdatedAtSnapshot: '2026-04-10T01:20:00.000Z',
+          createdAt: '2026-04-10T01:30:00.000Z',
+          updatedAt: '2026-04-10T01:30:00.000Z',
+        },
+      ],
+      fetchedAt: '2026-04-10T01:31:00.000Z',
+    };
+    const entry = {
+      reportCaseId: 'case-1',
+      eligible: true,
+      caseUpdatedAtSnapshot: '2026-04-10T01:20:00.000Z',
+      caseStatus: 'resolved' as const,
+      caseResolutionCode: 'confirmed_violation' as const,
+      targetCard: { id: 'card-1', name: '公开卡' },
+      reasonOptions: [],
+      existingAppeal: history.items[0],
+    };
+    const detail = {
+      ...history.items[0],
+      details: '补充说明',
+      references: [],
+      caseSnapshot: {
+        status: 'resolved' as const,
+        resolutionCode: 'confirmed_violation' as const,
+        updatedAt: '2026-04-10T01:20:00.000Z',
+      },
+      currentCase: {
+        status: 'resolved' as const,
+        resolutionCode: 'confirmed_violation' as const,
+        closedAt: '2026-04-10T01:20:00.000Z',
+        updatedAt: '2026-04-10T01:20:00.000Z',
+      },
+    };
+
+    const loaded = await submitReportAppealAndRefreshPageData(submitInput, async (url, init) => {
+      calls.push(`${init?.method ?? 'GET'} ${url}`);
+      if (url === '/api/report-appeals' && init?.method === 'POST') {
+        return {
+          appealId: 'appeal-1',
+          status: 'submitted',
+          entryUrl: '/report-appeals?appealId=appeal-1',
+        };
+      }
+      if (url === '/api/report-appeals') return history;
+      if (url === '/api/report-appeals/entry?reportCaseId=case-1') return entry;
+      if (url === '/api/report-appeals/detail?appealId=appeal-1') return detail;
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+
+    expect(calls).toEqual([
+      'POST /api/report-appeals',
+      'GET /api/report-appeals',
+      'GET /api/report-appeals/entry?reportCaseId=case-1',
+      'GET /api/report-appeals/detail?appealId=appeal-1',
+    ]);
+    expect(loaded.history).toEqual(history);
+    expect(loaded.entry?.existingAppeal?.appealId).toBe('appeal-1');
     expect(loaded.detail).toEqual(detail);
   });
 });

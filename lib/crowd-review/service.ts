@@ -49,6 +49,7 @@ export const CROWD_REVIEW_ENTRY_URL = '/investigation' as const;
 export const CROWD_REVIEW_INSPECTOR_BADGE_ID = 'crowd_review_inspector' as const;
 const ROUND_EXTENSION_MS = 60 * 60 * 1000;
 const ACTIVE_ROUND_STATUSES = ['pending_dispatch', 'active', 'waiting_more_votes'] as const;
+const REPORT_CASE_RESOLUTION_NOTIFY_ATTEMPTS = 2;
 
 type CrowdReviewCaseCandidate = {
   reportCaseId: string;
@@ -1127,13 +1128,26 @@ export async function applyCrowdReviewRoundResultToReportCase(input: {
       closedAt: input.now,
       now: input.now,
     });
-    try {
-      await input.notifyReportCaseResolutionIfNeeded?.({
-        db: input.db,
-        reportCaseId: input.reportCaseId,
-      });
-    } catch {
-      // 记票与案件结论已经生效，通知失败仅保留为后续幂等补发问题，不回滚已记录结果。
+
+    const notify = input.notifyReportCaseResolutionIfNeeded;
+    if (notify) {
+      let lastError: unknown = null;
+      for (let attempt = 0; attempt < REPORT_CASE_RESOLUTION_NOTIFY_ATTEMPTS; attempt += 1) {
+        try {
+          await notify({
+            db: input.db,
+            reportCaseId: input.reportCaseId,
+          });
+          lastError = null;
+          break;
+        } catch (error) {
+          lastError = error;
+        }
+      }
+
+      if (lastError) {
+        throw lastError;
+      }
     }
     return;
   }

@@ -1,7 +1,14 @@
 import { useEffect, useState } from 'react';
 
 import { authStorage } from '@/lib/auth';
-import { REPORT_APPEAL_REASON_OPTIONS, type ReportAppealDetailDto, type ReportAppealEntryDto, type ReportAppealListDto, type SubmitReportAppealResult } from '@/lib/report-appeals/types';
+import {
+  REPORT_APPEAL_REASON_OPTIONS,
+  type ReportAppealDetailDto,
+  type ReportAppealEntryDto,
+  type ReportAppealListDto,
+  type ReportAppealReferenceDraft,
+  type SubmitReportAppealResult,
+} from '@/lib/report-appeals/types';
 import ReportAppealForm from '@/components/report-appeals/ReportAppealForm';
 import ReportAppealHistoryCard from '@/components/report-appeals/ReportAppealHistoryCard';
 
@@ -15,6 +22,14 @@ type ReportAppealsPageProps = {
   initialHistory?: ReportAppealListDto | null;
   initialEntry?: ReportAppealEntryDto | null;
   initialDetail?: ReportAppealDetailDto | null;
+};
+
+export type SubmitReportAppealPayload = {
+  reportCaseId: string;
+  caseUpdatedAtSnapshot: string;
+  appealReasonCode: string;
+  details: string;
+  references: ReportAppealReferenceDraft[];
 };
 
 const fetchJson = async <T,>(url: string, init?: RequestInit): Promise<T> => {
@@ -60,6 +75,28 @@ export async function loadReportAppealsPageData(
   }
 
   return { history, entry: null, detail: null };
+}
+
+export async function submitReportAppealAndRefreshPageData(
+  input: SubmitReportAppealPayload,
+  fetcher: <T>(url: string, init?: RequestInit) => Promise<T> = fetchJson,
+): Promise<{
+  submitResult: SubmitReportAppealResult;
+  history: ReportAppealListDto;
+  entry: ReportAppealEntryDto | null;
+  detail: ReportAppealDetailDto | null;
+}> {
+  const submitResult = await fetcher<SubmitReportAppealResult>('/api/report-appeals', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  const refreshed = await loadReportAppealsPageData({ reportCaseId: input.reportCaseId }, fetcher);
+
+  return {
+    submitResult,
+    ...refreshed,
+  };
 }
 
 export function ReportAppealsPage({
@@ -168,15 +205,10 @@ export function ReportAppealsPage({
                 setSubmitting(true);
                 setError(null);
                 try {
-                  const result = await fetchJson<SubmitReportAppealResult>('/api/report-appeals', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(input),
-                  });
-                  const nextDetail = await fetchJson<ReportAppealDetailDto>(
-                    `/api/report-appeals/detail?appealId=${encodeURIComponent(result.appealId)}`,
-                  );
-                  setDetail(nextDetail);
+                  const refreshed = await submitReportAppealAndRefreshPageData(input);
+                  setHistory(refreshed.history);
+                  setEntry(refreshed.entry);
+                  setDetail(refreshed.detail);
                 } catch (nextError) {
                   setError(nextError instanceof Error ? nextError.message : '提交申诉失败');
                 } finally {

@@ -846,8 +846,8 @@ describe('crowd review service', () => {
     expect(replay.postVoteSummary.summaryText).toBe(first.postVoteSummary.summaryText);
   });
 
-  test('submit still succeeds and persists summary when report-case notification fails after a deciding vote', async () => {
-    let persistedSummaryJson = '{}';
+  test('submit surfaces report-case notification failure after a deciding vote', async () => {
+    let attempts = 0;
     const service = buildService({
       repo: {
         getAssignmentByIdForInspector: async () => makeAssignmentRow(),
@@ -857,27 +857,25 @@ describe('crowd review service', () => {
           makeAssignmentRow({ id: 'assignment-2', status: 'voted', decision: 'violation', inspectorUserId: 8 }),
         ],
         finalizeAssignment: async () => true,
-        updateAssignmentPostVoteSummary: async (_db, input) => {
-          persistedSummaryJson = input.postVoteSummaryJson;
-          return true;
-        },
+        updateAssignmentPostVoteSummary: async () => true,
       },
       notifyReportCaseResolutionIfNeeded: async () => {
+        attempts += 1;
         throw new Error('notify failed');
       },
     });
 
-    const result = await service.submitCrowdReviewDecision({
-      db: {} as never,
-      userId: 7,
-      assignmentId: 'assignment-1',
-      decision: 'violation',
-      note: null,
-    });
+    await expect(
+      service.submitCrowdReviewDecision({
+        db: {} as never,
+        userId: 7,
+        assignmentId: 'assignment-1',
+        decision: 'violation',
+        note: null,
+      }),
+    ).rejects.toThrow('notify failed');
 
-    expect(result.assignmentStatus).toBe('voted');
-    expect(result.postVoteSummary.resultCode).toBe('violation');
-    expect(JSON.parse(persistedSummaryJson).resultCode).toBe('violation');
+    expect(attempts).toBe(2);
   });
 
   test('submit replay loads stored round summary when finalized assignment still has empty summary json', async () => {
@@ -1040,5 +1038,46 @@ describe('crowd review service', () => {
     } as any);
 
     expect(notified).toBe(true);
+  });
+
+  test('concluded violation round retries report-case resolution notification once after transient failure', async () => {
+    let attempts = 0;
+
+    await applyCrowdReviewRoundResultToReportCase({
+      db: {} as never,
+      reportCaseId: 'case-1',
+      roundResult: 'violation',
+      now,
+      updateReportCaseResolution: async () => true,
+      notifyReportCaseResolutionIfNeeded: async () => {
+        attempts += 1;
+        if (attempts === 1) {
+          throw new Error('transient notify failure');
+        }
+        return true;
+      },
+    } as any);
+
+    expect(attempts).toBe(2);
+  });
+
+  test('concluded violation round surfaces notification failure after retry budget is exhausted', async () => {
+    let attempts = 0;
+
+    await expect(
+      applyCrowdReviewRoundResultToReportCase({
+        db: {} as never,
+        reportCaseId: 'case-1',
+        roundResult: 'violation',
+        now,
+        updateReportCaseResolution: async () => true,
+        notifyReportCaseResolutionIfNeeded: async () => {
+          attempts += 1;
+          throw new Error('persistent notify failure');
+        },
+      } as any),
+    ).rejects.toThrow('persistent notify failure');
+
+    expect(attempts).toBe(2);
   });
 });

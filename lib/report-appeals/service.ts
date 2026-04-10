@@ -135,6 +135,9 @@ const requireDb = (db: ReportAppealsServiceDb): AppDrizzleDb => {
 const isAppealableFinalResolutionCode = (value: ReportResolutionCode | null): boolean =>
   value != null && APPEALABLE_FINAL_RESOLUTION_CODES.includes(value);
 
+const canRepairExistingAppealReferences = (status: ReportAppealStatus): boolean =>
+  status === 'submitted' || status === 'under_review';
+
 const normalizeAppealDetails = (details: string): string => {
   const normalized = details.trim();
   if (!normalized) {
@@ -391,6 +394,9 @@ const createReportAppealsService = (deps: ReportAppealsServiceDeps) => ({
       if (input.references.length === 0) return;
 
       const currentReferences = await deps.repo.listReportAppealReferences(db, appealId);
+      if (currentReferences.length > 0) {
+        return;
+      }
       if (hasMatchingAppealReferences(currentReferences, input.references)) {
         return;
       }
@@ -422,7 +428,9 @@ const createReportAppealsService = (deps: ReportAppealsServiceDeps) => ({
       caseUpdatedAtSnapshot: input.caseUpdatedAtSnapshot,
     });
     if (existingAppeal) {
-      await repairAppealReferencesIfNeeded(existingAppeal.id);
+      if (canRepairExistingAppealReferences(existingAppeal.status)) {
+        await repairAppealReferencesIfNeeded(existingAppeal.id);
+      }
       return {
         appealId: existingAppeal.id,
         status: existingAppeal.status,
@@ -477,7 +485,9 @@ const createReportAppealsService = (deps: ReportAppealsServiceDeps) => ({
         caseUpdatedAtSnapshot: input.caseUpdatedAtSnapshot,
       });
       if (racedExisting) {
-        await repairAppealReferencesIfNeeded(racedExisting.id);
+        if (canRepairExistingAppealReferences(racedExisting.status)) {
+          await repairAppealReferencesIfNeeded(racedExisting.id);
+        }
         return {
           appealId: racedExisting.id,
           status: racedExisting.status,

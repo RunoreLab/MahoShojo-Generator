@@ -233,6 +233,54 @@ describe('report appeals service', () => {
     ]);
   });
 
+  test('submit does not rewrite references for an already resolved appeal', async () => {
+    let replaceCalled = false;
+    const service = buildService({
+      repo: {
+        getAppealableCaseForUser: async () => makeCaseRow(),
+        getLatestNonWithdrawnAppealByCaseSnapshot: async () => makeAppealRow({ status: 'resolved' }),
+        listReportAppealReferences: async () => [
+          {
+            appealId: 'appeal-1',
+            referenceType: 'public_data_card',
+            referenceId: 'card-old',
+            labelSnapshot: '旧引用',
+            urlSnapshot: '/data-cards/card-old',
+            note: '旧备注',
+            sortOrder: 0,
+          },
+        ],
+        replaceReportAppealReferences: async () => {
+          replaceCalled = true;
+        },
+      },
+      resolveReferenceSnapshots: async () => [
+        {
+          referenceType: 'encyclopedia_entry',
+          referenceId: 'community-rules',
+          labelSnapshot: '社区守则',
+          urlSnapshot: '/encyclopedia/community-rules',
+          note: '新备注',
+          sortOrder: 0,
+        },
+      ],
+    });
+
+    const result = await service.submitReportAppeal({
+      db: {} as never,
+      userId: 2,
+      reportCaseId: 'case-1',
+      caseUpdatedAtSnapshot: '2026-04-10T01:20:00.000Z',
+      appealReasonCode: 'missing_context',
+      details: '补充说明',
+      references: [{ referenceType: 'encyclopedia_entry', referenceId: 'community-rules', note: '新备注' }],
+    });
+
+    expect(result.appealId).toBe('appeal-1');
+    expect(result.status).toBe('resolved');
+    expect(replaceCalled).toBe(false);
+  });
+
   test('submit rejects stale caseUpdatedAtSnapshot with 422', async () => {
     const service = buildService({
       repo: {

@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
+import { withPvpErrorBoundary } from '@/lib/pvp/server';
 import {
   ReportAppealConflictError,
   ReportAppealForbiddenError,
@@ -226,6 +227,87 @@ describe('report appeals API', () => {
     expect(response.status).toBe(200);
     expect(payload.status).toBe('resolved');
     expect(payload.resolutionCode).toBe('upheld');
+  });
+
+  test('wrapped admin detail handler preserves dynamic appealId params', async () => {
+    let receivedAppealId: string | null = null;
+    const handler = withPvpErrorBoundary(createReportAppealAdminDetailHandler({
+      requireAuthUser: async () => adminAuth,
+      getDb: () => ({ db: true }),
+      getReportAppealForAdmin: async (input) => {
+        receivedAppealId = input.appealId;
+        return {
+          appealId: input.appealId,
+          reportCaseId: 'case-1',
+          targetCardId: 'card-1',
+          targetCardName: '公开卡',
+          appealReasonCode: 'missing_context',
+          status: 'submitted',
+          resolutionCode: null,
+          resolutionNote: null,
+          details: '补充说明',
+          references: [],
+          caseUpdatedAtSnapshot: '2026-04-10T01:20:00.000Z',
+          createdAt: '2026-04-10T01:30:00.000Z',
+          updatedAt: '2026-04-10T01:30:00.000Z',
+          caseSnapshot: {
+            status: 'resolved',
+            resolutionCode: 'confirmed_violation',
+            updatedAt: '2026-04-10T01:20:00.000Z',
+          },
+          currentCase: {
+            status: 'resolved',
+            resolutionCode: 'confirmed_violation',
+            closedAt: '2026-04-10T01:20:00.000Z',
+            updatedAt: '2026-04-10T01:20:00.000Z',
+          },
+          appellant: {
+            userId: 2,
+            username: 'creator',
+          },
+        } as any;
+      },
+    }));
+
+    const response = await (handler as any)(
+      new Request('https://example.test/api/report-appeals/admin/appeal-1'),
+      { params: { appealId: 'appeal-1' } },
+    );
+    const payload = await jsonBody<any>(response);
+
+    expect(response.status).toBe(200);
+    expect(receivedAppealId).toBe('appeal-1');
+    expect(payload.appealId).toBe('appeal-1');
+  });
+
+  test('wrapped admin review handler preserves dynamic appealId params', async () => {
+    let receivedAppealId: string | null = null;
+    const handler = withPvpErrorBoundary(createReportAppealAdminReviewHandler({
+      requireAuthUser: async () => adminAuth,
+      getDb: () => ({ db: true }),
+      reviewReportAppeal: async (input) => {
+        receivedAppealId = input.appealId;
+        return {
+          appealId: input.appealId,
+          status: 'resolved',
+          resolutionCode: 'upheld',
+          resolutionNote: '维持原判',
+        };
+      },
+    }));
+
+    const response = await (handler as any)(
+      new Request('https://example.test/api/report-appeals/admin/appeal-1/review', {
+        method: 'POST',
+        body: JSON.stringify({ resolutionCode: 'upheld', resolutionNote: '维持原判' }),
+      }),
+      { params: { appealId: 'appeal-1' } },
+    );
+    const payload = await jsonBody<any>(response);
+
+    expect(response.status).toBe(200);
+    expect(receivedAppealId).toBe('appeal-1');
+    expect(payload.appealId).toBe('appeal-1');
   });
 
   test('GET /api/data-card-reports includes ownerModerationSummary for the target owner', async () => {
