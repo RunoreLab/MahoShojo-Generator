@@ -14,6 +14,7 @@ import type {
 type ServiceSiteMessageRow = repo.SiteMessageRow;
 type ServiceUserMessageRow = repo.UserMessageRow;
 type ServiceUserMessageStateRow = repo.UserMessageStateRow;
+type CrowdReviewPromptSummary = Pick<MessageSummaryDto, 'hasCrowdReviewPending' | 'crowdReviewPrompt'>;
 
 type MessagesRepository = {
   getUserMessageState: (input: { userId: number }) => Promise<ServiceUserMessageStateRow | null>;
@@ -37,14 +38,7 @@ export type MessagesServiceDeps = {
   getCrowdReviewPromptSummary?: (input: {
     db?: AppDrizzleDb | null;
     userId: number;
-  }) => Promise<{
-    hasCrowdReviewPending: boolean;
-    crowdReviewPrompt: {
-      title: string;
-      body: string;
-      actionUrl: string;
-    } | null;
-  }>;
+  }) => Promise<CrowdReviewPromptSummary>;
 };
 
 export type MessageServiceDb = AppDrizzleDb | null;
@@ -220,8 +214,11 @@ const createMessagesService = (deps: MessagesServiceDeps) => {
         ...latestUserRows.map(buildPreviewFromUser),
       ].sort(compareMessageSortKeys);
 
-      const emptyCrowdReviewSummary = { hasCrowdReviewPending: false, crowdReviewPrompt: null };
-      let crowdReviewSummary = emptyCrowdReviewSummary;
+      const emptyCrowdReviewSummary: CrowdReviewPromptSummary = {
+        hasCrowdReviewPending: false,
+        crowdReviewPrompt: null,
+      };
+      let crowdReviewSummary: CrowdReviewPromptSummary = emptyCrowdReviewSummary;
       if (deps.getCrowdReviewPromptSummary) {
         try {
           crowdReviewSummary = await deps.getCrowdReviewPromptSummary({ userId: input.userId });

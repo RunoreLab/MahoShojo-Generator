@@ -48,6 +48,28 @@ describe('messages service', () => {
     expect(summary.crowdReviewPrompt).toBeNull();
   });
 
+  test('summary returns crowd review prompt when crowd review has pending work', async () => {
+    const service = buildMessagesService({
+      getCrowdReviewPromptSummary: async () => ({
+        hasCrowdReviewPending: true,
+        crowdReviewPrompt: {
+          title: '调查院有新的可处理案件',
+          body: '你有新的众查案件待处理，前往调查院查看',
+          actionUrl: '/investigation',
+        },
+      }),
+    });
+
+    const summary = await service.getSummary({ userId: 7 });
+
+    expect(summary.hasCrowdReviewPending).toBe(true);
+    expect(summary.crowdReviewPrompt).toEqual({
+      title: '调查院有新的可处理案件',
+      body: '你有新的众查案件待处理，前往调查院查看',
+      actionUrl: '/investigation',
+    });
+  });
+
   test('summary rethrows unexpected runtime error from optional crowd review lookup', async () => {
     const service = buildMessagesService({
       getCrowdReviewPromptSummary: async () => {
