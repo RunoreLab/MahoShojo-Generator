@@ -2,6 +2,15 @@ import { describe, expect, test } from 'bun:test';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 
+class CustomEventPolyfill<T = unknown> extends Event {
+  detail: T;
+
+  constructor(type: string, init?: CustomEventInit<T>) {
+    super(type);
+    this.detail = (init?.detail ?? null) as T;
+  }
+}
+
 describe('investigation page', () => {
   test('eligible inspectors still attempt current-case recovery after refresh without an active assignment', async () => {
     const { shouldFetchCurrentCaseOnLoad } = await import('@/components/investigation/InvestigationPage');
@@ -194,5 +203,35 @@ describe('investigation page', () => {
     expect(html).toContain('当前没有已领取案件');
     expect(html).toContain('领取当前案件');
     expect(html).toContain('本次提交已记录');
+  });
+
+  test('dispatches message-summary invalidation event after crowd-review completion refreshes availability', async () => {
+    const module = await import('@/components/investigation/InvestigationPage');
+    const notify = (module as { notifyMessagesSummaryUpdated?: () => void }).notifyMessagesSummaryUpdated;
+
+    expect(typeof notify).toBe('function');
+
+    const previousWindow = (globalThis as any).window;
+    const previousCustomEvent = (globalThis as any).CustomEvent;
+
+    try {
+      const windowTarget = new EventTarget();
+      let received = 0;
+      windowTarget.addEventListener('mahoshojo:messages-updated', () => {
+        received += 1;
+      });
+
+      (globalThis as any).window = windowTarget;
+      if (typeof previousCustomEvent === 'undefined') {
+        (globalThis as any).CustomEvent = CustomEventPolyfill;
+      }
+
+      notify?.();
+
+      expect(received).toBe(1);
+    } finally {
+      (globalThis as any).window = previousWindow;
+      (globalThis as any).CustomEvent = previousCustomEvent;
+    }
   });
 });

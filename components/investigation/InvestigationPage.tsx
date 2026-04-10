@@ -8,6 +8,7 @@ import type {
   CrowdReviewCurrentCaseDto,
   CrowdReviewSummaryDto,
 } from '@/lib/crowd-review/types';
+import { dispatchMessagesUpdatedEvent } from '@/lib/messages/events';
 import { useAuth } from '@/lib/useAuth';
 
 type InvestigationAuthState = 'loading' | 'anonymous' | 'authenticated';
@@ -50,6 +51,10 @@ export const shouldFetchCurrentCaseOnLoad = (
   authState: InvestigationAuthState,
   summary: CrowdReviewSummaryDto | null,
 ): boolean => authState === 'authenticated' && summary?.eligible === true;
+
+export const notifyMessagesSummaryUpdated = (): void => {
+  dispatchMessagesUpdatedEvent();
+};
 
 export function InvestigationPage({
   initialStateOverride,
@@ -165,6 +170,7 @@ export function InvestigationPage({
         currentCase: summary.hasCurrentAssignment ? current.currentCase : (isCompletedCurrentCase(current.currentCase) ? current.currentCase : null),
         error: null,
       }));
+      notifyMessagesSummaryUpdated();
     } catch (refreshError) {
       setState((current) => ({
         ...current,

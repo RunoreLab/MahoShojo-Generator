@@ -96,6 +96,7 @@ export type CreateCrowdReviewAssignmentInput = {
 };
 
 const ACTIVE_ROUND_STATUSES: CrowdReviewRoundStatus[] = ['pending_dispatch', 'active', 'waiting_more_votes'];
+const COMPLETED_ASSIGNMENT_STATUSES: CrowdReviewAssignmentStatus[] = ['voted', 'abstained', 'expired', 'revoked'];
 const OPEN_REPORT_CASE_STATUSES: ReportCaseStatus[] = ['open', 'under_review'];
 
 export async function getInspectorState(
@@ -233,7 +234,7 @@ export async function getLatestCompletedAssignmentByInspector(
   const row = await db.query.crowdReviewAssignments.findFirst({
     where: and(
       eq(crowdReviewAssignments.inspectorUserId, userId),
-      inArray(crowdReviewAssignments.status, ['voted', 'abstained', 'expired', 'revoked']),
+      inArray(crowdReviewAssignments.status, COMPLETED_ASSIGNMENT_STATUSES),
     ),
     orderBy: [desc(crowdReviewAssignments.updatedAt), desc(crowdReviewAssignments.id)],
   });
@@ -391,7 +392,12 @@ export async function listCrowdReviewHistoryByInspector(
     })
     .from(crowdReviewAssignments)
     .innerJoin(crowdReviewRounds, eq(crowdReviewRounds.id, crowdReviewAssignments.crowdReviewRoundId))
-    .where(eq(crowdReviewAssignments.inspectorUserId, userId))
+    .where(
+      and(
+        eq(crowdReviewAssignments.inspectorUserId, userId),
+        inArray(crowdReviewAssignments.status, COMPLETED_ASSIGNMENT_STATUSES),
+      ),
+    )
     .orderBy(desc(crowdReviewAssignments.updatedAt), desc(crowdReviewAssignments.id))
     .limit(safeLimit);
 }

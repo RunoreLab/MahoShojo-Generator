@@ -10,6 +10,7 @@ import {
   getActiveAssignmentByInspector,
   getLatestCompletedAssignmentByInspector,
   getInspectorState,
+  listCrowdReviewHistoryByInspector,
   listActionableAssignmentsByInspector,
   upsertCrowdReviewInspectorState,
 } from '@/lib/db/repositories/crowd-review';
@@ -423,5 +424,102 @@ describe('crowd review repository', () => {
 
     expect(latestCompleted?.id).toBe('assignment-2');
     expect(latestCompleted?.status).toBe('expired');
+  });
+
+  test('history excludes unfinished assigned rows and keeps completed rows ordered newest first', async () => {
+    await createCrowdReviewRound(db, {
+      id: 'round-active',
+      reportCaseId: 'case-1',
+      status: 'active',
+      openedAt: '2026-04-08T10:20:00.000Z',
+      deadlineAt: '2026-04-08T11:20:00.000Z',
+      extensionCount: 0,
+      minValidVotes: 3,
+      resultCode: null,
+      resultSummaryJson: '{}',
+      now: '2026-04-08T10:20:00.000Z',
+    });
+    await createCrowdReviewRound(db, {
+      id: 'round-completed-a',
+      reportCaseId: 'case-2',
+      status: 'concluded',
+      openedAt: '2026-04-08T10:21:00.000Z',
+      deadlineAt: '2026-04-08T11:21:00.000Z',
+      extensionCount: 0,
+      minValidVotes: 3,
+      resultCode: 'violation',
+      resultSummaryJson: '{}',
+      now: '2026-04-08T10:21:00.000Z',
+    });
+    await exec(`
+      INSERT INTO report_cases (
+        id, target_entity_type, target_entity_id, target_user_id, status, latest_reported_at, created_at, updated_at
+      ) VALUES (
+        'case-3', 'data_card', 'card-3', 2, 'open', '2026-04-08T10:06:00.000Z', '2026-04-08T10:06:00.000Z', '2026-04-08T10:06:00.000Z'
+      );
+    `);
+    await createCrowdReviewRound(db, {
+      id: 'round-completed-b',
+      reportCaseId: 'case-3',
+      status: 'concluded',
+      openedAt: '2026-04-08T10:22:00.000Z',
+      deadlineAt: '2026-04-08T11:22:00.000Z',
+      extensionCount: 0,
+      minValidVotes: 3,
+      resultCode: 'no_violation',
+      resultSummaryJson: '{}',
+      now: '2026-04-08T10:22:00.000Z',
+    });
+
+    await createCrowdReviewAssignment(db, {
+      id: 'assignment-active',
+      crowdReviewRoundId: 'round-active',
+      inspectorUserId: 7,
+      status: 'assigned',
+      assignedAt: '2026-04-08T10:23:00.000Z',
+      expiresAt: '2026-04-08T10:53:00.000Z',
+      completedAt: null,
+      decision: null,
+      decisionNote: null,
+      postVoteSummaryJson: '{}',
+      postVoteSummarySeenAt: null,
+      now: '2026-04-08T10:23:00.000Z',
+    });
+    await createCrowdReviewAssignment(db, {
+      id: 'assignment-completed-a',
+      crowdReviewRoundId: 'round-completed-a',
+      inspectorUserId: 7,
+      status: 'voted',
+      assignedAt: '2026-04-08T10:24:00.000Z',
+      expiresAt: '2026-04-08T10:54:00.000Z',
+      completedAt: '2026-04-08T10:26:00.000Z',
+      decision: 'violation',
+      decisionNote: null,
+      postVoteSummaryJson: '{}',
+      postVoteSummarySeenAt: '2026-04-08T10:26:00.000Z',
+      now: '2026-04-08T10:26:00.000Z',
+    });
+    await createCrowdReviewAssignment(db, {
+      id: 'assignment-completed-b',
+      crowdReviewRoundId: 'round-completed-b',
+      inspectorUserId: 7,
+      status: 'expired',
+      assignedAt: '2026-04-08T10:25:00.000Z',
+      expiresAt: '2026-04-08T10:55:00.000Z',
+      completedAt: '2026-04-08T10:27:00.000Z',
+      decision: null,
+      decisionNote: null,
+      postVoteSummaryJson: '{}',
+      postVoteSummarySeenAt: null,
+      now: '2026-04-08T10:27:00.000Z',
+    });
+
+    const history = await listCrowdReviewHistoryByInspector(db, 7, 20);
+
+    expect(history.map((row) => row.assignmentId)).toEqual([
+      'assignment-completed-b',
+      'assignment-completed-a',
+    ]);
+    expect(history.every((row) => row.assignmentStatus !== 'assigned')).toBe(true);
   });
 });

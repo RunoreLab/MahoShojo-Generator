@@ -5,6 +5,7 @@ import { MessageCard } from '@/components/messages/MessageCard';
 import { CrowdReviewPromptCard } from '@/components/messages/CrowdReviewPromptCard';
 import { MessageFilters } from '@/components/messages/MessageFilters';
 import { authStorage } from '@/lib/auth';
+import { dispatchMessagesUpdatedEvent } from '@/lib/messages/events';
 import { useAuth } from '@/lib/useAuth';
 import type { MessageFilter, MessageListDto, MessagePreviewDto, MessageSummaryDto } from '@/lib/messages/types';
 
@@ -18,8 +19,6 @@ export type MessagesPageState = {
   summary: MessageSummaryDto | null;
   error?: string | null;
 };
-
-const MESSAGES_UPDATED_EVENT = 'mahoshojo:messages-updated';
 
 const createDefaultState = (isAuthenticated: boolean): MessagesPageState => ({
   isAuthenticated,
@@ -240,7 +239,7 @@ export function MessagesPage({
       return;
     }
 
-    window.dispatchEvent(new CustomEvent(MESSAGES_UPDATED_EVENT));
+    dispatchMessagesUpdatedEvent();
     await loadPageData(currentFilterRef.current);
   };
 
@@ -258,7 +257,7 @@ export function MessagesPage({
       return;
     }
 
-    window.dispatchEvent(new CustomEvent(MESSAGES_UPDATED_EVENT));
+    dispatchMessagesUpdatedEvent();
     await loadPageData(currentFilterRef.current);
   };
 

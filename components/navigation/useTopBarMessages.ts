@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react';
 
 import { authStorage } from '@/lib/auth';
+import { MESSAGES_UPDATED_EVENT } from '@/lib/messages/events';
 
 const TOPBAR_MESSAGES_CACHE_KEY = 'topbar_messages_summary_v1';
 const TOPBAR_MESSAGES_REFRESH_INTERVAL_MS = 90_000;
-const TOPBAR_MESSAGES_UPDATED_EVENT = 'mahoshojo:messages-updated';
 
 type MessagesSummaryResponse = {
   unreadTotal?: unknown;
@@ -244,12 +244,12 @@ export function useTopBarMessages(userId: number | null, enabled: boolean): {
     };
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
-    window.addEventListener(TOPBAR_MESSAGES_UPDATED_EVENT, handleMessagesUpdated);
+    window.addEventListener(MESSAGES_UPDATED_EVENT, handleMessagesUpdated);
 
     return () => {
       cancelled = true;
       document.removeEventListener('visibilitychange', handleVisibilityChange);
-      window.removeEventListener(TOPBAR_MESSAGES_UPDATED_EVENT, handleMessagesUpdated);
+      window.removeEventListener(MESSAGES_UPDATED_EVENT, handleMessagesUpdated);
     };
   }, [enabled, userId]);
 
