@@ -46,4 +46,35 @@ describe('message templates', () => {
     expect(rendered.body).toContain('引用公开数据卡');
     expect(rendered.body).not.toContain('举报人');
   });
+
+  test('renders report case resolved appeal-entry notification', () => {
+    const rendered = renderMessageTemplate({
+      templateKey: 'user.moderation.report_case_resolved',
+      payload: {
+        dataCardName: '雪沫',
+        resolutionLabel: '确认违规',
+      },
+      titleText: null,
+      bodyText: null,
+    });
+
+    expect(rendered.title).toContain('雪沫');
+    expect(rendered.body).toContain('确认违规');
+    expect(rendered.body).toContain('申诉');
+  });
+
+  test('renders report appeal resolved notification', () => {
+    const rendered = renderMessageTemplate({
+      templateKey: 'user.moderation.report_appeal_resolved',
+      payload: {
+        dataCardName: '雪沫',
+        resolutionLabel: '维持原判',
+      },
+      titleText: null,
+      bodyText: null,
+    });
+
+    expect(rendered.title).toContain('申诉');
+    expect(rendered.body).toContain('维持原判');
+  });
 });

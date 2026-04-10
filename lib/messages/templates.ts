@@ -177,6 +177,37 @@ const templateRenderers: Record<string, (input: TemplateRenderInput) => Template
       { title: '数据卡被举报', body: '你的公开数据卡收到举报，请自查并按需修订。' },
     );
   },
+  'user.moderation.report_case_resolved': (input) => {
+    const cardName = pick(input.payload, 'dataCardName');
+    const resolutionLabel = pick(input.payload, 'resolutionLabel', 'resolutionCode');
+    return withFallback(
+      {
+        title: cardName ? `处理结果通知：${cardName}` : '处理结果通知',
+        body: [
+          resolutionLabel ? `当前处理结果：${resolutionLabel}` : '你的公开数据卡已完成处理。',
+          '如对处理结果有异议，可前往申诉页提交说明。',
+        ]
+          .filter(Boolean)
+          .join('\n'),
+      },
+      input,
+      { title: '处理结果通知', body: '你的公开数据卡已完成处理，可前往申诉页查看并提交说明。' },
+    );
+  },
+  'user.moderation.report_appeal_resolved': (input) => {
+    const cardName = pick(input.payload, 'dataCardName');
+    const resolutionLabel = pick(input.payload, 'resolutionLabel', 'resolutionCode');
+    return withFallback(
+      {
+        title: cardName ? `申诉处理完成：${cardName}` : '申诉处理完成',
+        body: resolutionLabel
+          ? `你的申诉已处理，复核结论：${resolutionLabel}。`
+          : '你的申诉已处理，请查看最新复核结论。',
+      },
+      input,
+      { title: '申诉处理完成', body: '你的申诉已处理，请查看最新复核结论。' },
+    );
+  },
   'user.generic.notice': (input) =>
     withFallback({}, input, { title: '系统通知', body: '你有一条新的定向通知。' }),
 };

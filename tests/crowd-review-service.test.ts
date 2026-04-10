@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import {
+  applyCrowdReviewRoundResultToReportCase,
   createCrowdReviewServiceForTests,
   CrowdReviewConflictError,
   CrowdReviewServiceUnavailableError,
@@ -950,5 +951,23 @@ describe('crowd review service', () => {
     expect(replay?.assignmentStatus).toBe('voted');
     expect(replay?.postVoteSummary?.resultCode).toBe('violation');
     expect(replay?.postVoteSummary?.summaryText).toContain('支持违规');
+  });
+
+  test('concluded violation round triggers report-case resolution notification helper', async () => {
+    let notified = false;
+
+    await applyCrowdReviewRoundResultToReportCase({
+      db: {} as never,
+      reportCaseId: 'case-1',
+      roundResult: 'violation',
+      now,
+      updateReportCaseResolution: async () => true,
+      notifyReportCaseResolutionIfNeeded: async () => {
+        notified = true;
+        return true;
+      },
+    } as any);
+
+    expect(notified).toBe(true);
   });
 });

@@ -1,3 +1,5 @@
+import type { DataCardOwnerModerationSummaryDto } from '@/lib/report-appeals/types';
+
 export type DataCardReportReasonCode =
   | 'plagiarism'
   | 'harassment_or_hate'
@@ -46,6 +48,7 @@ export type DataCardReportCapabilityDto = {
   hasOpenCase: boolean;
   myActiveReport: DataCardReportDraft | null;
   reasons: DataCardReportReasonOption[];
+  ownerModerationSummary: DataCardOwnerModerationSummaryDto | null;
   caseSummary: {
     caseId: string;
     reportCount: number;

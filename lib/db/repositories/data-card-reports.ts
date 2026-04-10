@@ -20,6 +20,8 @@ export type ReportCaseRow = {
   creatorNotifiedReportCount: number;
   latestReportedAt: string;
   targetCardUpdatedAtAtNotice: string | null;
+  resolutionNotifiedAt: string | null;
+  resolutionNotifiedCaseUpdatedAt: string | null;
   closedAt: string | null;
   createdAt: string;
   updatedAt: string;
@@ -128,6 +130,21 @@ export async function getOpenReportCaseByTarget(
   return row ?? null;
 }
 
+export async function getLatestReportCaseByTarget(
+  db: AppDrizzleDb,
+  input: { targetEntityType: 'data_card'; targetEntityId: string },
+): Promise<ReportCaseRow | null> {
+  const row = await db.query.reportCases.findFirst({
+    where: and(
+      eq(reportCases.targetEntityType, input.targetEntityType),
+      eq(reportCases.targetEntityId, input.targetEntityId),
+    ),
+    orderBy: [desc(reportCases.updatedAt), desc(reportCases.id)],
+  });
+
+  return row ?? null;
+}
+
 export async function createReportCase(
   db: AppDrizzleDb,
   input: CreateReportCaseInput,
@@ -145,6 +162,8 @@ export async function createReportCase(
       creatorNotifiedReportCount: 0,
       latestReportedAt: input.now,
       targetCardUpdatedAtAtNotice: null,
+      resolutionNotifiedAt: null,
+      resolutionNotifiedCaseUpdatedAt: null,
       closedAt: null,
       createdAt: input.now,
       updatedAt: input.now,

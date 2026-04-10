@@ -20,6 +20,14 @@ export type ReportResolutionCode =
 export type ReportStatus = 'active' | 'withdrawn';
 export type ReportSubmissionDecision = 'created' | 'updated';
 export type ReportReferenceType = 'public_data_card' | 'encyclopedia_entry';
+export type ReportAppealStatus = 'submitted' | 'under_review' | 'resolved' | 'withdrawn';
+export type ReportAppealResolutionCode = 'upheld' | 'overturned_no_violation' | 'reopened_under_review';
+export type ReportAppealReasonCode =
+  | 'factual_error'
+  | 'missing_context'
+  | 'already_fixed'
+  | 'misidentified_target'
+  | 'other';
 export type CrowdReviewInspectorStatus = 'active' | 'suspended' | 'revoked';
 export type InspectorDisciplineEventType = 'grant' | 'suspend' | 'revoke' | 'restore' | 'warning';
 export type CrowdReviewRoundStatus =
@@ -89,6 +97,8 @@ export const reportCases = sqliteTable(
     creatorNotifiedReportCount: integer('creator_notified_report_count').notNull().default(0),
     latestReportedAt: text('latest_reported_at').notNull(),
     targetCardUpdatedAtAtNotice: text('target_card_updated_at_at_notice'),
+    resolutionNotifiedAt: text('resolution_notified_at'),
+    resolutionNotifiedCaseUpdatedAt: text('resolution_notified_case_updated_at'),
     closedAt: text('closed_at'),
     createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
     updatedAt: text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
@@ -185,6 +195,77 @@ export const reportReferences = sqliteTable(
     ),
     reportTargetUnique: uniqueIndex('idx_report_references_report_target_unique').on(
       table.reportId,
+      table.referenceType,
+      table.referenceId,
+    ),
+  }),
+);
+
+export const reportAppeals = sqliteTable(
+  'report_appeals',
+  {
+    id: text('id').primaryKey(),
+    reportCaseId: text('report_case_id')
+      .notNull()
+      .references(() => reportCases.id, { onDelete: 'cascade' }),
+    appellantUserId: integer('appellant_user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    targetUserId: integer('target_user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    targetEntityType: text('target_entity_type').notNull(),
+    targetEntityId: text('target_entity_id').notNull(),
+    appealReasonCode: text('appeal_reason_code').$type<ReportAppealReasonCode>().notNull(),
+    details: text('details').notNull(),
+    evidenceSummaryJson: text('evidence_summary_json').notNull().default('{}'),
+    status: text('status').$type<ReportAppealStatus>().notNull(),
+    resolutionCode: text('resolution_code').$type<ReportAppealResolutionCode | null>(),
+    resolutionNote: text('resolution_note'),
+    caseStatusSnapshot: text('case_status_snapshot').$type<ReportCaseStatus>().notNull(),
+    caseResolutionCodeSnapshot: text('case_resolution_code_snapshot').$type<ReportResolutionCode | null>(),
+    caseUpdatedAtSnapshot: text('case_updated_at_snapshot').notNull(),
+    reviewedByUserId: integer('reviewed_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+    reviewedAt: text('reviewed_at'),
+    withdrawnAt: text('withdrawn_at'),
+    createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    reportCaseActiveUnique: uniqueIndex('idx_report_appeals_case_active')
+      .on(table.reportCaseId)
+      .where(sql`${table.status} IN ('submitted', 'under_review')`),
+    reportCaseSnapshotUnique: uniqueIndex('idx_report_appeals_case_snapshot_unique')
+      .on(table.reportCaseId, table.caseUpdatedAtSnapshot)
+      .where(sql`${table.status} IN ('submitted', 'under_review', 'resolved')`),
+    appellantCreatedAtIndex: index('idx_report_appeals_appellant_created').on(table.appellantUserId, table.createdAt),
+    statusCreatedAtIndex: index('idx_report_appeals_status_created').on(table.status, table.createdAt),
+  }),
+);
+
+export const reportAppealReferences = sqliteTable(
+  'report_appeal_references',
+  {
+    id: text('id').primaryKey(),
+    appealId: text('appeal_id')
+      .notNull()
+      .references(() => reportAppeals.id, { onDelete: 'cascade' }),
+    referenceType: text('reference_type').$type<ReportReferenceType>().notNull(),
+    referenceId: text('reference_id').notNull(),
+    labelSnapshot: text('label_snapshot').notNull(),
+    urlSnapshot: text('url_snapshot'),
+    note: text('note'),
+    sortOrder: integer('sort_order').notNull().default(0),
+    createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    appealSortIndex: index('idx_report_appeal_references_sort').on(
+      table.appealId,
+      table.sortOrder,
+      table.createdAt,
+    ),
+    appealTargetUnique: uniqueIndex('idx_report_appeal_references_target_unique').on(
+      table.appealId,
       table.referenceType,
       table.referenceId,
     ),

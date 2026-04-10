@@ -17,6 +17,7 @@ import {
   getDataCardReportReasonLabel,
   isDataCardReportReasonCode,
 } from '@/lib/data-card-reports/reasons';
+import { getOwnerModerationSummary } from '@/lib/report-appeals/service';
 import type {
   DataCardReportCapabilityDto,
   DataCardReportDraft,
@@ -38,6 +39,7 @@ type ResolvedReferenceSnapshot = {
 
 type DataCardReportsRepository = {
   getOpenReportCaseByTarget: typeof repo.getOpenReportCaseByTarget;
+  getLatestReportCaseByTarget: typeof repo.getLatestReportCaseByTarget;
   createReportCase: typeof repo.createReportCase;
   getActiveReportByCaseAndReporter: typeof repo.getActiveReportByCaseAndReporter;
   createReport: typeof repo.createReport;
@@ -74,6 +76,7 @@ export type DataCardReportsServiceDeps = {
     details: string | null;
   }) => Promise<{ allowed: boolean }>;
   createUserMessageEntry: typeof createUserMessageEntry;
+  getOwnerModerationSummary: typeof getOwnerModerationSummary;
 };
 
 export type SubmitDataCardReportInput = {
@@ -146,6 +149,7 @@ const requireDb = (db: DataCardReportsServiceDb): AppDrizzleDb => {
 
 const toRepo = (): DataCardReportsRepository => ({
   getOpenReportCaseByTarget: (innerDb, input) => repo.getOpenReportCaseByTarget(innerDb, input),
+  getLatestReportCaseByTarget: (innerDb, input) => repo.getLatestReportCaseByTarget(innerDb, input),
   createReportCase: (innerDb, input) => repo.createReportCase(innerDb, input),
   getActiveReportByCaseAndReporter: (innerDb, input) => repo.getActiveReportByCaseAndReporter(innerDb, input),
   createReport: (innerDb, input) => repo.createReport(innerDb, input),
@@ -530,6 +534,7 @@ const createDataCardReportsService = (deps: DataCardReportsServiceDeps) => {
           hasOpenCase: false,
           myActiveReport: null,
           reasons: DATA_CARD_REPORT_REASONS,
+          ownerModerationSummary: null,
           caseSummary: null,
         };
       }
@@ -543,17 +548,30 @@ const createDataCardReportsService = (deps: DataCardReportsServiceDeps) => {
           hasOpenCase: false,
           myActiveReport: null,
           reasons: DATA_CARD_REPORT_REASONS,
+          ownerModerationSummary: null,
           caseSummary: null,
         };
       }
 
       if (targetCard.user_id === input.viewerUserId) {
+        const latestCase = await deps.repo.getLatestReportCaseByTarget(db, {
+          targetEntityType: 'data_card',
+          targetEntityId: input.targetEntityId,
+        });
+        const ownerModerationSummary = latestCase
+          ? await deps.getOwnerModerationSummary({
+              db,
+              userId: input.viewerUserId,
+              reportCaseId: latestCase.id,
+            })
+          : null;
         return {
           canReport: false,
           reportDisabledReason: '不能举报自己的公开数据卡',
           hasOpenCase: false,
           myActiveReport: null,
           reasons: DATA_CARD_REPORT_REASONS,
+          ownerModerationSummary,
           caseSummary: null,
         };
       }
@@ -569,6 +587,7 @@ const createDataCardReportsService = (deps: DataCardReportsServiceDeps) => {
           hasOpenCase: false,
           myActiveReport: null,
           reasons: DATA_CARD_REPORT_REASONS,
+          ownerModerationSummary: null,
           caseSummary: null,
         };
       }
@@ -598,6 +617,7 @@ const createDataCardReportsService = (deps: DataCardReportsServiceDeps) => {
             }
           : null,
         reasons: DATA_CARD_REPORT_REASONS,
+        ownerModerationSummary: null,
         caseSummary: {
           caseId: openCase.id,
           reportCount: activeReports.length,
@@ -977,6 +997,7 @@ export function createDataCardReportsServiceForTests(
     idFactory: deps.idFactory ?? (() => crypto.randomUUID()),
     repo: {
       getOpenReportCaseByTarget: deps.repo?.getOpenReportCaseByTarget ?? (() => missing('getOpenReportCaseByTarget')),
+      getLatestReportCaseByTarget: deps.repo?.getLatestReportCaseByTarget ?? (async () => null),
       createReportCase: deps.repo?.createReportCase ?? (() => missing('createReportCase')),
       getActiveReportByCaseAndReporter:
         deps.repo?.getActiveReportByCaseAndReporter ?? (() => missing('getActiveReportByCaseAndReporter')),
@@ -1018,6 +1039,7 @@ export function createDataCardReportsServiceForTests(
     rateLimit: deps.rateLimit ?? (async () => ({ allowed: true })),
     screenSubmission: deps.screenSubmission ?? (async () => ({ allowed: true })),
     createUserMessageEntry: deps.createUserMessageEntry ?? (async () => ({ id: null })),
+    getOwnerModerationSummary: deps.getOwnerModerationSummary ?? (async () => null),
   });
 }
 
@@ -1035,6 +1057,7 @@ export async function getDataCardReportCapability(input: {
     rateLimit: async () => ({ allowed: true }),
     screenSubmission: screenDataCardReportSubmission,
     createUserMessageEntry,
+    getOwnerModerationSummary,
   }).getDataCardReportCapability(input);
 }
 
@@ -1049,6 +1072,7 @@ export async function submitDataCardReport(input: SubmitDataCardReportInput) {
       rateLimitDataCardReportSubmission(requireDb(input.db), { reporterUserId, targetEntityId }),
     screenSubmission: screenDataCardReportSubmission,
     createUserMessageEntry,
+    getOwnerModerationSummary,
   }).submitDataCardReport(input);
 }
 
@@ -1062,5 +1086,6 @@ export async function withdrawDataCardReport(input: WithdrawDataCardReportInput)
     rateLimit: async () => ({ allowed: true }),
     screenSubmission: screenDataCardReportSubmission,
     createUserMessageEntry,
+    getOwnerModerationSummary,
   }).withdrawDataCardReport(input);
 }

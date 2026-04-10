@@ -27,6 +27,7 @@ import {
   type ReportResolutionCode,
 } from '@/lib/db/schema';
 import { getDataCardReportReasonLabel, isDataCardReportReasonCode } from '@/lib/data-card-reports/reasons';
+import { notifyReportCaseResolutionIfNeeded } from '@/lib/report-appeals/service';
 import { and, asc, eq, inArray, lte } from 'drizzle-orm';
 import type {
   AssignCurrentCaseResult,
@@ -146,6 +147,7 @@ export type CrowdReviewServiceDeps = {
   idFactory: () => string;
   hasInspectorBadge: (db: AppDrizzleDb, userId: number) => Promise<boolean>;
   repo: CrowdReviewServiceRepo;
+  notifyReportCaseResolutionIfNeeded?: (input: { db: AppDrizzleDb | null; reportCaseId: string }) => Promise<boolean>;
 };
 
 export class CrowdReviewServiceUnavailableError extends Error {
@@ -696,6 +698,7 @@ const createCrowdReviewService = (deps: CrowdReviewServiceDeps) => {
         roundResult: 'escalated',
         now,
         updateReportCaseResolution: deps.repo.updateReportCaseResolution,
+        notifyReportCaseResolutionIfNeeded: deps.notifyReportCaseResolutionIfNeeded,
       });
       await syncFinalizedRoundAssignments(db, assignments, summary, now);
       return summary;
@@ -722,6 +725,7 @@ const createCrowdReviewService = (deps: CrowdReviewServiceDeps) => {
       roundResult: resultCode,
       now,
       updateReportCaseResolution: deps.repo.updateReportCaseResolution,
+      notifyReportCaseResolutionIfNeeded: deps.notifyReportCaseResolutionIfNeeded,
     });
     await syncFinalizedRoundAssignments(db, assignments, summary, now);
     return summary;
@@ -1021,6 +1025,7 @@ export async function applyCrowdReviewRoundResultToReportCase(input: {
   roundResult: 'violation' | 'no_violation' | 'tie' | 'escalated';
   now: string;
   updateReportCaseResolution: CrowdReviewServiceRepo['updateReportCaseResolution'];
+  notifyReportCaseResolutionIfNeeded?: (input: { db: AppDrizzleDb | null; reportCaseId: string }) => Promise<boolean>;
 }): Promise<void> {
   if (input.roundResult === 'violation') {
     await input.updateReportCaseResolution(input.db, {
@@ -1029,6 +1034,10 @@ export async function applyCrowdReviewRoundResultToReportCase(input: {
       resolutionCode: 'confirmed_violation',
       closedAt: input.now,
       now: input.now,
+    });
+    await input.notifyReportCaseResolutionIfNeeded?.({
+      db: input.db,
+      reportCaseId: input.reportCaseId,
     });
     return;
   }
@@ -1096,6 +1105,7 @@ export function createCrowdReviewServiceForTests(
         deps.repo?.listCrowdReviewHistoryByInspector ?? (async () => missing('listCrowdReviewHistoryByInspector')),
       advanceExpiredState: deps.repo?.advanceExpiredState ?? (async () => undefined),
     },
+    notifyReportCaseResolutionIfNeeded: deps.notifyReportCaseResolutionIfNeeded,
   });
 }
 
@@ -1107,6 +1117,7 @@ const defaultService = createCrowdReviewService({
     return count > 0;
   },
   repo: createRuntimeRepo(),
+  notifyReportCaseResolutionIfNeeded,
 });
 
 export async function getCrowdReviewSummary(input: {

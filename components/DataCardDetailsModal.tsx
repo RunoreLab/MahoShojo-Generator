@@ -132,6 +132,7 @@ interface DataCardDetailsModalProps {
   isOwner?: boolean;
   adminTagEditor?: boolean;
   metaCardId?: string | null;
+  initialReportCapability?: DataCardReportCapabilityDto | null;
   card: {
     id: string;
     name: string;
@@ -157,6 +158,7 @@ export default function DataCardDetailsModal({
   metaCardId,
   isOwner = false,
   adminTagEditor = false,
+  initialReportCapability = null,
 }: DataCardDetailsModalProps) {
   const canEditTags = isOwner || adminTagEditor;
   const [tagScope, setTagScope] = useState<'user' | 'system' | 'admin'>(adminTagEditor ? 'admin' : 'user');
@@ -167,7 +169,7 @@ export default function DataCardDetailsModal({
   const metaRequestIdRef = useRef(0);
   const metaAbortRef = useRef<AbortController | null>(null);
   const [downloadError, setDownloadError] = useState<string | null>(null);
-  const [reportCapability, setReportCapability] = useState<DataCardReportCapabilityDto | null>(null);
+  const [reportCapability, setReportCapability] = useState<DataCardReportCapabilityDto | null>(initialReportCapability);
   const [reportCapabilityLoading, setReportCapabilityLoading] = useState(false);
   const [reportCapabilityError, setReportCapabilityError] = useState<string | null>(null);
   const reportRequestIdRef = useRef(0);
@@ -763,6 +765,21 @@ export default function DataCardDetailsModal({
               {pendingNotice}
             </div>
           )}
+
+          {isOwner && reportCapability?.ownerModerationSummary ? (
+            <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-900">
+              <div className="font-medium">处理结果与申诉</div>
+              <div className="mt-1">{reportCapability.ownerModerationSummary.statusSummary}</div>
+              {reportCapability.ownerModerationSummary.appealEntryUrl ? (
+                <a
+                  href={reportCapability.ownerModerationSummary.appealEntryUrl}
+                  className="mt-2 inline-flex text-sm text-rose-700 underline underline-offset-2"
+                >
+                  {reportCapability.ownerModerationSummary.activeAppealId ? '查看申诉状态' : '前往申诉页'}
+                </a>
+              ) : null}
+            </div>
+          ) : null}
 
           <section className="space-y-2">
             <h3 className="font-medium text-gray-700 flex items-center gap-2">

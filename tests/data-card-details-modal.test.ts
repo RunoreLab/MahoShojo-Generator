@@ -125,4 +125,84 @@ describe('DataCardDetailsModal', () => {
 
     expect(html).toContain('更多');
   });
+
+  it('owner view renders moderation summary banner when ownerModerationSummary.canAppeal is true', () => {
+    const html = renderToStaticMarkup(
+      React.createElement(DataCardDetailsModal, {
+        isOpen: true,
+        onClose: () => {},
+        isOwner: true,
+        initialReportCapability: {
+          canReport: false,
+          reportDisabledReason: '不能举报自己的公开数据卡',
+          hasOpenCase: false,
+          myActiveReport: null,
+          reasons: [],
+          ownerModerationSummary: {
+            latestCaseId: 'case-1',
+            status: 'resolved',
+            resolutionCode: 'confirmed_violation',
+            canAppeal: true,
+            activeAppealId: null,
+            activeAppealStatus: null,
+            appealEntryUrl: '/report-appeals?reportCaseId=case-1',
+            statusSummary: '该卡因举报处理结果被判定为违规，可提交申诉。',
+          },
+          caseSummary: null,
+        },
+        card: {
+          id: 'card-1',
+          name: '公开卡',
+          description: '用于申诉入口测试',
+          type: 'character',
+          data: JSON.stringify({ name: '公开卡' }),
+          isPublic: true,
+          author: 'tester',
+        },
+      }),
+    );
+
+    expect(html).toContain('处理结果与申诉');
+    expect(html).toContain('前往申诉页');
+  });
+
+  it('owner view renders active appeal status summary when activeAppealId exists', () => {
+    const html = renderToStaticMarkup(
+      React.createElement(DataCardDetailsModal, {
+        isOpen: true,
+        onClose: () => {},
+        isOwner: true,
+        initialReportCapability: {
+          canReport: false,
+          reportDisabledReason: '不能举报自己的公开数据卡',
+          hasOpenCase: false,
+          myActiveReport: null,
+          reasons: [],
+          ownerModerationSummary: {
+            latestCaseId: 'case-1',
+            status: 'resolved',
+            resolutionCode: 'confirmed_violation',
+            canAppeal: false,
+            activeAppealId: 'appeal-1',
+            activeAppealStatus: 'submitted',
+            appealEntryUrl: '/report-appeals?appealId=appeal-1',
+            statusSummary: '该处理结果的申诉正在处理中，可查看当前状态。',
+          },
+          caseSummary: null,
+        },
+        card: {
+          id: 'card-1',
+          name: '公开卡',
+          description: '用于申诉状态测试',
+          type: 'character',
+          data: JSON.stringify({ name: '公开卡' }),
+          isPublic: true,
+          author: 'tester',
+        },
+      }),
+    );
+
+    expect(html).toContain('该处理结果的申诉正在处理中');
+    expect(html).toContain('查看申诉状态');
+  });
 });

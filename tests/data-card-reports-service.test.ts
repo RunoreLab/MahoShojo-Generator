@@ -95,6 +95,50 @@ describe('data card reports service', () => {
     expect(reports).toHaveLength(2);
   });
 
+  test('getDataCardReportCapability returns ownerModerationSummary when owner views a resolved violation case', async () => {
+    const service = buildService({
+      repo: {
+        getLatestReportCaseByTarget: async () => ({
+          id: 'case-1',
+          targetEntityType: 'data_card',
+          targetEntityId: 'card-1',
+          targetUserId: 2,
+          status: 'resolved',
+          resolutionCode: 'confirmed_violation',
+          creatorNotifiedAt: null,
+          creatorNotifiedReportCount: 0,
+          latestReportedAt: now,
+          targetCardUpdatedAtAtNotice: null,
+          resolutionNotifiedAt: now,
+          resolutionNotifiedCaseUpdatedAt: now,
+          closedAt: now,
+          createdAt: now,
+          updatedAt: now,
+        }),
+      } as any,
+      getOwnerModerationSummary: async () => ({
+        latestCaseId: 'case-1',
+        status: 'resolved',
+        resolutionCode: 'confirmed_violation',
+        canAppeal: true,
+        activeAppealId: null,
+        activeAppealStatus: null,
+        appealEntryUrl: '/report-appeals?reportCaseId=case-1',
+        statusSummary: '该卡因举报处理结果被判定为违规，可提交申诉。',
+      }),
+    } as any);
+
+    const capability = await service.getDataCardReportCapability({
+      db: {} as never,
+      viewerUserId: 2,
+      targetEntityId: 'card-1',
+    });
+
+    expect(capability.canReport).toBe(false);
+    expect(capability.ownerModerationSummary?.canAppeal).toBe(true);
+    expect(capability.ownerModerationSummary?.latestCaseId).toBe('case-1');
+  });
+
   test('same user changed payload updates active report after passing screening', async () => {
     let updateCalled = false;
     const service = buildService({
