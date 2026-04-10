@@ -359,6 +359,7 @@ body.announcement-visible {
     left: 0;
     right: 0;
     bottom: 0;
+    pointer-events: none;
     background-image: radial-gradient(circle at 20% 50%, rgba(255, 255, 255, 0.2) 2px, transparent 2px), radial-gradient(circle at 80% 20%, rgba(255, 255, 255, 0.15) 1px, transparent 1px), radial-gradient(circle at 40% 80%, rgba(255, 255, 255, 0.1) 1px, transparent 1px);
     background-size: 50px 50px, 30px 30px, 40px 40px;
     animation: sparkle 6s ease-in-out infinite;
