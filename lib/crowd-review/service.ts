@@ -245,6 +245,110 @@ const buildPostVoteSummary = (input: {
   };
 };
 
+const countAssignmentVotes = (assignments: ServiceAssignmentRow[]) => {
+  const violationVotes = assignments.filter(
+    (item) => item.status === 'voted' && item.decision === 'violation',
+  ).length;
+  const noViolationVotes = assignments.filter(
+    (item) => item.status === 'voted' && item.decision === 'no_violation',
+  ).length;
+  const abstainCount = assignments.filter((item) => item.status === 'abstained').length;
+
+  return {
+    violationVotes,
+    noViolationVotes,
+    abstainCount,
+    validVotes: violationVotes + noViolationVotes,
+  };
+};
+
+const deriveRoundSummary = (
+  round: CrowdReviewRoundRow,
+  assignments: ServiceAssignmentRow[],
+  now: string,
+): {
+  summary: CrowdReviewPostVoteSummaryDto;
+  nextRoundStatus: string;
+  nextResultCode: string | null;
+  nextDeadlineAt?: string;
+  nextExtensionCount?: number;
+} => {
+  const { violationVotes, noViolationVotes, abstainCount, validVotes } = countAssignmentVotes(assignments);
+
+  if (!isActiveRoundStatus(round.status)) {
+    return {
+      summary:
+        parseSummaryJson(round.resultSummaryJson) ??
+        buildPostVoteSummary({
+          roundStatus: round.status,
+          resultCode: round.resultCode,
+          validViolationVotes: violationVotes,
+          validNoViolationVotes: noViolationVotes,
+          abstainCount,
+        }),
+      nextRoundStatus: round.status,
+      nextResultCode: round.resultCode,
+    };
+  }
+
+  if (new Date(round.deadlineAt).getTime() > new Date(now).getTime() || validVotes < round.minValidVotes) {
+    return {
+      summary: buildPostVoteSummary({
+        roundStatus: round.status,
+        resultCode: round.resultCode,
+        validViolationVotes: violationVotes,
+        validNoViolationVotes: noViolationVotes,
+        abstainCount,
+      }),
+      nextRoundStatus: round.status,
+      nextResultCode: round.resultCode,
+    };
+  }
+
+  if (violationVotes === noViolationVotes) {
+    if (round.extensionCount < 1) {
+      return {
+        summary: buildPostVoteSummary({
+          roundStatus: 'waiting_more_votes',
+          resultCode: null,
+          validViolationVotes: violationVotes,
+          validNoViolationVotes: noViolationVotes,
+          abstainCount,
+        }),
+        nextRoundStatus: 'waiting_more_votes',
+        nextResultCode: null,
+        nextDeadlineAt: addMs(round.deadlineAt, ROUND_EXTENSION_MS),
+        nextExtensionCount: round.extensionCount + 1,
+      };
+    }
+
+    return {
+      summary: buildPostVoteSummary({
+        roundStatus: 'escalated',
+        resultCode: 'escalated',
+        validViolationVotes: violationVotes,
+        validNoViolationVotes: noViolationVotes,
+        abstainCount,
+      }),
+      nextRoundStatus: 'escalated',
+      nextResultCode: 'escalated',
+    };
+  }
+
+  const resultCode = violationVotes > noViolationVotes ? 'violation' : 'no_violation';
+  return {
+    summary: buildPostVoteSummary({
+      roundStatus: 'concluded',
+      resultCode,
+      validViolationVotes: violationVotes,
+      validNoViolationVotes: noViolationVotes,
+      abstainCount,
+    }),
+    nextRoundStatus: 'concluded',
+    nextResultCode: resultCode,
+  };
+};
+
 const mapAssignmentToCurrentCase = (
   row: ServiceAssignmentRow,
   fallback?: Partial<CrowdReviewCurrentCaseDto>,
@@ -625,71 +729,35 @@ const createCrowdReviewService = (deps: CrowdReviewServiceDeps) => {
     assignments: ServiceAssignmentRow[],
     now: string,
   ) => {
-    const violationVotes = assignments.filter(
-      (item) => item.status === 'voted' && item.decision === 'violation',
-    ).length;
-    const noViolationVotes = assignments.filter(
-      (item) => item.status === 'voted' && item.decision === 'no_violation',
-    ).length;
-    const abstainCount = assignments.filter((item) => item.status === 'abstained').length;
-    const validVotes = violationVotes + noViolationVotes;
+    const summaryPlan = deriveRoundSummary(round, assignments, now);
 
     if (!isActiveRoundStatus(round.status)) {
-      return (
-        parseSummaryJson(round.resultSummaryJson) ??
-        buildPostVoteSummary({
-          roundStatus: round.status,
-          resultCode: round.resultCode,
-          validViolationVotes: violationVotes,
-          validNoViolationVotes: noViolationVotes,
-          abstainCount,
-        })
-      );
+      return summaryPlan.summary;
     }
 
-    if (new Date(round.deadlineAt).getTime() > new Date(now).getTime() || validVotes < round.minValidVotes) {
-      return buildPostVoteSummary({
-        roundStatus: round.status,
-        resultCode: round.resultCode,
-        validViolationVotes: violationVotes,
-        validNoViolationVotes: noViolationVotes,
-        abstainCount,
-      });
+    if (summaryPlan.nextRoundStatus === round.status) {
+      return summaryPlan.summary;
     }
 
-    if (violationVotes === noViolationVotes) {
-      if (round.extensionCount < 1) {
-        const nextRoundStatus = 'waiting_more_votes';
-        await deps.repo.updateRound(db, {
-          roundId: round.id,
-          status: nextRoundStatus,
-          deadlineAt: addMs(round.deadlineAt, ROUND_EXTENSION_MS),
-          extensionCount: round.extensionCount + 1,
-          resultCode: null,
-          resultSummaryJson: '{}',
-          now,
-        });
-        return buildPostVoteSummary({
-          roundStatus: nextRoundStatus,
-          resultCode: null,
-          validViolationVotes: violationVotes,
-          validNoViolationVotes: noViolationVotes,
-          abstainCount,
-        });
-      }
-
-      const summary = buildPostVoteSummary({
-        roundStatus: 'escalated',
-        resultCode: 'escalated',
-        validViolationVotes: violationVotes,
-        validNoViolationVotes: noViolationVotes,
-        abstainCount,
-      });
+    if (summaryPlan.nextRoundStatus === 'waiting_more_votes') {
       await deps.repo.updateRound(db, {
         roundId: round.id,
-        status: 'escalated',
-        resultCode: 'escalated',
-        resultSummaryJson: JSON.stringify(summary),
+        status: summaryPlan.nextRoundStatus,
+        deadlineAt: summaryPlan.nextDeadlineAt,
+        extensionCount: summaryPlan.nextExtensionCount,
+        resultCode: null,
+        resultSummaryJson: '{}',
+        now,
+      });
+      return summaryPlan.summary;
+    }
+
+    if (summaryPlan.nextRoundStatus === 'escalated') {
+      await deps.repo.updateRound(db, {
+        roundId: round.id,
+        status: summaryPlan.nextRoundStatus,
+        resultCode: summaryPlan.nextResultCode,
+        resultSummaryJson: JSON.stringify(summaryPlan.summary),
         now,
       });
       await applyCrowdReviewRoundResultToReportCase({
@@ -700,35 +768,46 @@ const createCrowdReviewService = (deps: CrowdReviewServiceDeps) => {
         updateReportCaseResolution: deps.repo.updateReportCaseResolution,
         notifyReportCaseResolutionIfNeeded: deps.notifyReportCaseResolutionIfNeeded,
       });
-      await syncFinalizedRoundAssignments(db, assignments, summary, now);
-      return summary;
+      await syncFinalizedRoundAssignments(db, assignments, summaryPlan.summary, now);
+      return summaryPlan.summary;
     }
 
-    const resultCode = violationVotes > noViolationVotes ? 'violation' : 'no_violation';
-    const summary = buildPostVoteSummary({
-      roundStatus: 'concluded',
-      resultCode,
-      validViolationVotes: violationVotes,
-      validNoViolationVotes: noViolationVotes,
-      abstainCount,
-    });
     await deps.repo.updateRound(db, {
       roundId: round.id,
-      status: 'concluded',
-      resultCode,
-      resultSummaryJson: JSON.stringify(summary),
+      status: summaryPlan.nextRoundStatus,
+      resultCode: summaryPlan.nextResultCode,
+      resultSummaryJson: JSON.stringify(summaryPlan.summary),
       now,
     });
     await applyCrowdReviewRoundResultToReportCase({
       db,
       reportCaseId: round.reportCaseId,
-      roundResult: resultCode,
+      roundResult: summaryPlan.nextResultCode as 'violation' | 'no_violation',
       now,
       updateReportCaseResolution: deps.repo.updateReportCaseResolution,
       notifyReportCaseResolutionIfNeeded: deps.notifyReportCaseResolutionIfNeeded,
     });
-    await syncFinalizedRoundAssignments(db, assignments, summary, now);
-    return summary;
+    await syncFinalizedRoundAssignments(db, assignments, summaryPlan.summary, now);
+    return summaryPlan.summary;
+  };
+
+  const loadReplaySummary = async (db: AppDrizzleDb, assignment: ServiceAssignmentRow) => {
+    const persisted = parseSummaryJson(assignment.postVoteSummaryJson);
+    if (persisted) {
+      return persisted;
+    }
+
+    const round = await deps.repo.getRoundById(db, assignment.crowdReviewRoundId);
+    const roundSummary = parseSummaryJson(round?.resultSummaryJson);
+    if (roundSummary) {
+      return roundSummary;
+    }
+
+    return buildAssignmentReplaySummary({
+      ...assignment,
+      roundStatus: round?.status ?? assignment.roundStatus,
+      roundResultCode: round?.resultCode ?? assignment.roundResultCode,
+    });
   };
 
   return {
@@ -911,7 +990,7 @@ const createCrowdReviewService = (deps: CrowdReviewServiceDeps) => {
           assignmentId: assignment.id,
           assignmentStatus: assignment.status,
           decision: assignment.decision,
-          postVoteSummary: buildAssignmentReplaySummary(assignment),
+          postVoteSummary: await loadReplaySummary(db, assignment),
           idempotentReplay: true,
         };
       }
@@ -950,7 +1029,7 @@ const createCrowdReviewService = (deps: CrowdReviewServiceDeps) => {
               assignmentId: latest.id,
               assignmentStatus: latest.status,
               decision: latest.decision,
-              postVoteSummary: buildAssignmentReplaySummary(latest),
+              postVoteSummary: await loadReplaySummary(db, latest),
               idempotentReplay: true,
             };
           }
@@ -967,13 +1046,26 @@ const createCrowdReviewService = (deps: CrowdReviewServiceDeps) => {
       }
 
       const nextStatus = input.decision === 'abstain' ? 'abstained' : 'voted';
+      const previewAssignments: ServiceAssignmentRow[] = (
+        await deps.repo.listAssignmentsByRound(db, round.id)
+      ).map((item): ServiceAssignmentRow =>
+        item.id !== assignment.id
+          ? item
+          : {
+              ...item,
+              status: nextStatus,
+              decision: input.decision,
+              decisionNote: input.note,
+            },
+      );
+      const previewSummary = deriveRoundSummary(round, previewAssignments, now).summary;
       const finalized = await deps.repo.finalizeAssignment(db, {
         assignmentId: assignment.id,
         userId: input.userId,
         status: nextStatus,
         decision: input.decision,
         note: input.note,
-        postVoteSummaryJson: '{}',
+        postVoteSummaryJson: JSON.stringify(previewSummary),
         now,
       });
       if (!finalized) {
@@ -1035,10 +1127,14 @@ export async function applyCrowdReviewRoundResultToReportCase(input: {
       closedAt: input.now,
       now: input.now,
     });
-    await input.notifyReportCaseResolutionIfNeeded?.({
-      db: input.db,
-      reportCaseId: input.reportCaseId,
-    });
+    try {
+      await input.notifyReportCaseResolutionIfNeeded?.({
+        db: input.db,
+        reportCaseId: input.reportCaseId,
+      });
+    } catch {
+      // 记票与案件结论已经生效，通知失败仅保留为后续幂等补发问题，不回滚已记录结果。
+    }
     return;
   }
 

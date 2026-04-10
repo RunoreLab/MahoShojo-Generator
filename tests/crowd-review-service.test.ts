@@ -846,6 +846,77 @@ describe('crowd review service', () => {
     expect(replay.postVoteSummary.summaryText).toBe(first.postVoteSummary.summaryText);
   });
 
+  test('submit still succeeds and persists summary when report-case notification fails after a deciding vote', async () => {
+    let persistedSummaryJson = '{}';
+    const service = buildService({
+      repo: {
+        getAssignmentByIdForInspector: async () => makeAssignmentRow(),
+        getRoundById: async () => makeRoundRow(),
+        listAssignmentsByRound: async () => [
+          makeAssignmentRow({ id: 'assignment-1', status: 'voted', decision: 'violation' }),
+          makeAssignmentRow({ id: 'assignment-2', status: 'voted', decision: 'violation', inspectorUserId: 8 }),
+        ],
+        finalizeAssignment: async () => true,
+        updateAssignmentPostVoteSummary: async (_db, input) => {
+          persistedSummaryJson = input.postVoteSummaryJson;
+          return true;
+        },
+      },
+      notifyReportCaseResolutionIfNeeded: async () => {
+        throw new Error('notify failed');
+      },
+    });
+
+    const result = await service.submitCrowdReviewDecision({
+      db: {} as never,
+      userId: 7,
+      assignmentId: 'assignment-1',
+      decision: 'violation',
+      note: null,
+    });
+
+    expect(result.assignmentStatus).toBe('voted');
+    expect(result.postVoteSummary.resultCode).toBe('violation');
+    expect(JSON.parse(persistedSummaryJson).resultCode).toBe('violation');
+  });
+
+  test('submit replay loads stored round summary when finalized assignment still has empty summary json', async () => {
+    const service = buildService({
+      repo: {
+        getAssignmentByIdForInspector: async () =>
+          makeAssignmentRow({
+            status: 'voted',
+            decision: 'violation',
+            postVoteSummaryJson: '{}',
+            roundStatus: 'concluded',
+            roundResultCode: 'violation',
+          }),
+        getRoundById: async () =>
+          makeRoundRow({
+            status: 'concluded',
+            resultCode: 'violation',
+            resultSummaryJson:
+              '{"roundStatus":"concluded","resultCode":"violation","summaryText":"当前轮次已形成“支持违规”结果。 有效票：支持违规 2，支持不违规 0，弃权 0。"}',
+          }),
+      },
+    });
+
+    const result = await service.submitCrowdReviewDecision({
+      db: {} as never,
+      userId: 7,
+      assignmentId: 'assignment-1',
+      decision: 'violation',
+      note: null,
+    });
+
+    expect(result.idempotentReplay).toBe(true);
+    expect(result.postVoteSummary).toEqual({
+      roundStatus: 'concluded',
+      resultCode: 'violation',
+      summaryText: '当前轮次已形成“支持违规”结果。 有效票：支持违规 2，支持不违规 0，弃权 0。',
+    });
+  });
+
   test('submit backfills the final round summary to earlier voters for current-case replay', async () => {
     let round = makeRoundRow({
       deadlineAt: '2026-04-08T11:00:00.000Z',

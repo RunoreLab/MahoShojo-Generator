@@ -204,6 +204,41 @@ const mapAppealReferences = (
     sortOrder: reference.sortOrder,
   }));
 
+const normalizeAppealReferenceNote = (note: string | null | undefined): string | null => note?.trim() || null;
+
+const canonicalizeAppealReferenceIdentity = (
+  references: Array<{ referenceType: string; referenceId: string; note: string | null; sortOrder: number }>,
+): string[] =>
+  references
+    .map((reference) =>
+      JSON.stringify([reference.referenceType, reference.referenceId, reference.note ?? null, reference.sortOrder]),
+    )
+    .sort();
+
+const hasMatchingAppealReferences = (
+  currentReferences: Array<{
+    referenceType: string;
+    referenceId: string;
+    note: string | null;
+    sortOrder: number;
+  }>,
+  submittedReferences: ReportAppealReferenceDraft[],
+): boolean => {
+  if (currentReferences.length !== submittedReferences.length) return false;
+
+  const currentCanonical = canonicalizeAppealReferenceIdentity(currentReferences);
+  const submittedCanonical = canonicalizeAppealReferenceIdentity(
+    submittedReferences.map((reference, index) => ({
+      referenceType: reference.referenceType,
+      referenceId: reference.referenceId,
+      note: normalizeAppealReferenceNote(reference.note),
+      sortOrder: index,
+    })),
+  );
+
+  return submittedCanonical.every((referenceKey, index) => currentCanonical[index] === referenceKey);
+};
+
 const buildAppealStatusSummary = (input: {
   resolutionCode: ReportResolutionCode | null;
   existingAppealStatus: ReportAppealStatus | null;
@@ -352,11 +387,42 @@ const createReportAppealsService = (deps: ReportAppealsServiceDeps) => ({
       throw new ReportAppealUnprocessableError('案件结果快照已变化，请刷新后重新确认');
     }
 
+    const repairAppealReferencesIfNeeded = async (appealId: string) => {
+      if (input.references.length === 0) return;
+
+      const currentReferences = await deps.repo.listReportAppealReferences(db, appealId);
+      if (hasMatchingAppealReferences(currentReferences, input.references)) {
+        return;
+      }
+
+      const referenceSnapshots = await deps.resolveReferenceSnapshots({
+        db,
+        targetEntityId: reportCase.targetEntityId,
+        references: input.references,
+      });
+      const repairNow = deps.now();
+
+      await deps.repo.replaceReportAppealReferences(db, {
+        appealId,
+        references: referenceSnapshots.map((reference, index) => ({
+          id: `${appealId}-ref-${index + 1}`,
+          referenceType: reference.referenceType,
+          referenceId: reference.referenceId,
+          labelSnapshot: reference.labelSnapshot,
+          urlSnapshot: reference.urlSnapshot,
+          note: reference.note,
+          sortOrder: reference.sortOrder,
+          createdAt: repairNow,
+        })),
+      });
+    };
+
     const existingAppeal = await deps.repo.getLatestNonWithdrawnAppealByCaseSnapshot(db, {
       reportCaseId: reportCase.id,
       caseUpdatedAtSnapshot: input.caseUpdatedAtSnapshot,
     });
     if (existingAppeal) {
+      await repairAppealReferencesIfNeeded(existingAppeal.id);
       return {
         appealId: existingAppeal.id,
         status: existingAppeal.status,
@@ -411,6 +477,7 @@ const createReportAppealsService = (deps: ReportAppealsServiceDeps) => ({
         caseUpdatedAtSnapshot: input.caseUpdatedAtSnapshot,
       });
       if (racedExisting) {
+        await repairAppealReferencesIfNeeded(racedExisting.id);
         return {
           appealId: racedExisting.id,
           status: racedExisting.status,

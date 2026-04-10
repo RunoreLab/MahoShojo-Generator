@@ -165,6 +165,74 @@ describe('report appeals service', () => {
     expect(result.appealId).toContain('appeal-generated');
   });
 
+  test('submit retry repairs missing references after create succeeded but reference write failed', async () => {
+    let existingAppeal: ReturnType<typeof makeAppealRow> | null = null;
+    let replaceAttempts = 0;
+    const writtenReferences: Array<Record<string, unknown>> = [];
+    const service = buildService({
+      repo: {
+        getAppealableCaseForUser: async () => makeCaseRow(),
+        getLatestNonWithdrawnAppealByCaseSnapshot: async () => existingAppeal,
+        getActiveAppealByCase: async () => null,
+        createReportAppeal: async (_db, input) => {
+          existingAppeal = makeAppealRow({ id: input.id });
+          return existingAppeal;
+        },
+        listReportAppealReferences: async () => writtenReferences as any,
+        replaceReportAppealReferences: async (_db, input) => {
+          replaceAttempts += 1;
+          writtenReferences.splice(0, writtenReferences.length);
+          if (replaceAttempts === 1) {
+            throw new Error('transient references failure');
+          }
+          writtenReferences.push(
+            ...input.references.map((reference) => ({
+              referenceType: reference.referenceType,
+              referenceId: reference.referenceId,
+              note: reference.note,
+              sortOrder: reference.sortOrder,
+            })),
+          );
+        },
+      },
+      resolveReferenceSnapshots: async () => [
+        {
+          referenceType: 'encyclopedia_entry',
+          referenceId: 'community-rules',
+          labelSnapshot: '社区守则',
+          urlSnapshot: '/encyclopedia/community-rules',
+          note: '需要核对',
+          sortOrder: 0,
+        },
+      ],
+    });
+
+    const submitInput = {
+      db: {} as never,
+      userId: 2,
+      reportCaseId: 'case-1',
+      caseUpdatedAtSnapshot: '2026-04-10T01:20:00.000Z',
+      appealReasonCode: 'missing_context' as const,
+      details: '补充说明',
+      references: [{ referenceType: 'encyclopedia_entry' as const, referenceId: 'community-rules', note: '需要核对' }],
+    };
+
+    await expect(service.submitReportAppeal(submitInput)).rejects.toThrow('transient references failure');
+
+    const result = await service.submitReportAppeal(submitInput);
+
+    expect(result.appealId).toBe(existingAppeal?.id);
+    expect(replaceAttempts).toBe(2);
+    expect(writtenReferences).toEqual([
+      {
+        referenceType: 'encyclopedia_entry',
+        referenceId: 'community-rules',
+        note: '需要核对',
+        sortOrder: 0,
+      },
+    ]);
+  });
+
   test('submit rejects stale caseUpdatedAtSnapshot with 422', async () => {
     const service = buildService({
       repo: {

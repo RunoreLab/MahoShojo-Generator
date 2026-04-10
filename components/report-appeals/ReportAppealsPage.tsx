@@ -26,12 +26,50 @@ const fetchJson = async <T,>(url: string, init?: RequestInit): Promise<T> => {
   return payload;
 };
 
+export async function loadReportAppealsPageData(
+  query: QueryState,
+  fetcher: <T>(url: string, init?: RequestInit) => Promise<T> = fetchJson,
+): Promise<{
+  history: ReportAppealListDto;
+  entry: ReportAppealEntryDto | null;
+  detail: ReportAppealDetailDto | null;
+}> {
+  const history = await fetcher<ReportAppealListDto>('/api/report-appeals');
+
+  if (query.appealId) {
+    return {
+      history,
+      entry: null,
+      detail: await fetcher<ReportAppealDetailDto>(
+        `/api/report-appeals/detail?appealId=${encodeURIComponent(query.appealId)}`,
+      ),
+    };
+  }
+
+  if (query.reportCaseId) {
+    const entry = await fetcher<ReportAppealEntryDto>(
+      `/api/report-appeals/entry?reportCaseId=${encodeURIComponent(query.reportCaseId)}`,
+    );
+    const detail = entry.existingAppeal
+      ? await fetcher<ReportAppealDetailDto>(
+          `/api/report-appeals/detail?appealId=${encodeURIComponent(entry.existingAppeal.appealId)}`,
+        )
+      : null;
+
+    return { history, entry, detail };
+  }
+
+  return { history, entry: null, detail: null };
+}
+
 export function ReportAppealsPage({
   query = {},
   initialHistory = null,
   initialEntry = null,
   initialDetail = null,
 }: ReportAppealsPageProps) {
+  const reportCaseId = query.reportCaseId ?? null;
+  const appealId = query.appealId ?? null;
   const [history, setHistory] = useState<ReportAppealListDto | null>(initialHistory);
   const [entry, setEntry] = useState<ReportAppealEntryDto | null>(initialEntry);
   const [detail, setDetail] = useState<ReportAppealDetailDto | null>(initialDetail);
@@ -77,44 +115,11 @@ export function ReportAppealsPage({
 
     const load = async () => {
       try {
-        const nextHistory = await fetchJson<ReportAppealListDto>('/api/report-appeals');
+        const loaded = await loadReportAppealsPageData({ reportCaseId, appealId });
         if (!cancelled) {
-          setHistory(nextHistory);
-        }
-
-        if (query.appealId) {
-          const nextDetail = await fetchJson<ReportAppealDetailDto>(
-            `/api/report-appeals/detail?appealId=${encodeURIComponent(query.appealId)}`,
-          );
-          if (!cancelled) {
-            setDetail(nextDetail);
-          }
-          return;
-        }
-
-        if (query.reportCaseId) {
-          const nextEntry = await fetchJson<ReportAppealEntryDto>(
-            `/api/report-appeals/entry?reportCaseId=${encodeURIComponent(query.reportCaseId)}`,
-          );
-          if (!cancelled) {
-            setEntry(nextEntry);
-            setDetail(nextEntry.existingAppeal ? ({
-              ...nextEntry.existingAppeal,
-              details: '',
-              references: [],
-              caseSnapshot: {
-                status: nextEntry.caseStatus ?? 'resolved',
-                resolutionCode: nextEntry.caseResolutionCode,
-                updatedAt: nextEntry.caseUpdatedAtSnapshot ?? '',
-              },
-              currentCase: {
-                status: nextEntry.caseStatus ?? 'resolved',
-                resolutionCode: nextEntry.caseResolutionCode,
-                closedAt: null,
-                updatedAt: nextEntry.caseUpdatedAtSnapshot ?? '',
-              },
-            } as ReportAppealDetailDto) : null);
-          }
+          setHistory(loaded.history);
+          setEntry(loaded.entry);
+          setDetail(loaded.detail);
         }
       } catch (nextError) {
         if (!cancelled) {
@@ -130,7 +135,7 @@ export function ReportAppealsPage({
     return () => {
       cancelled = true;
     };
-  }, [initialDetail, initialEntry, initialHistory, query.appealId, query.reportCaseId]);
+  }, [appealId, initialDetail, initialEntry, initialHistory, reportCaseId]);
 
   const handleWithdraw = async (appealId: string) => {
     setError(null);
