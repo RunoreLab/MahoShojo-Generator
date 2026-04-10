@@ -103,6 +103,83 @@ describe('ReportAppealsPage', () => {
     expect(html).not.toContain('补充说明不能为空');
   });
 
+  test('renders appeal form again when the current appeal was withdrawn for the same report case', async () => {
+    const html = renderToStaticMarkup(
+      <ReportAppealsPage
+        query={{ reportCaseId: 'case-1' }}
+        initialHistory={{
+          items: [
+            {
+              appealId: 'appeal-1',
+              reportCaseId: 'case-1',
+              targetCardId: 'card-1',
+              targetCardName: '公开卡',
+              appealReasonCode: 'missing_context',
+              status: 'withdrawn',
+              resolutionCode: null,
+              resolutionNote: null,
+              caseUpdatedAtSnapshot: '2026-04-10T01:20:00.000Z',
+              createdAt: '2026-04-10T01:30:00.000Z',
+              updatedAt: '2026-04-10T01:40:00.000Z',
+            },
+          ],
+          fetchedAt: '2026-04-10T01:41:00.000Z',
+        }}
+        initialEntry={{
+          reportCaseId: 'case-1',
+          eligible: true,
+          caseUpdatedAtSnapshot: '2026-04-10T01:20:00.000Z',
+          caseStatus: 'resolved',
+          caseResolutionCode: 'confirmed_violation',
+          targetCard: { id: 'card-1', name: '公开卡' },
+          reasonOptions: [],
+          existingAppeal: {
+            appealId: 'appeal-1',
+            reportCaseId: 'case-1',
+            targetCardId: 'card-1',
+            targetCardName: '公开卡',
+            appealReasonCode: 'missing_context',
+            status: 'withdrawn',
+            resolutionCode: null,
+            resolutionNote: null,
+            caseUpdatedAtSnapshot: '2026-04-10T01:20:00.000Z',
+            createdAt: '2026-04-10T01:30:00.000Z',
+            updatedAt: '2026-04-10T01:40:00.000Z',
+          },
+        }}
+        initialDetail={{
+          appealId: 'appeal-1',
+          reportCaseId: 'case-1',
+          targetCardId: 'card-1',
+          targetCardName: '公开卡',
+          appealReasonCode: 'missing_context',
+          status: 'withdrawn',
+          resolutionCode: null,
+          resolutionNote: null,
+          caseUpdatedAtSnapshot: '2026-04-10T01:20:00.000Z',
+          createdAt: '2026-04-10T01:30:00.000Z',
+          updatedAt: '2026-04-10T01:40:00.000Z',
+          details: '补充说明',
+          references: [],
+          caseSnapshot: {
+            status: 'resolved',
+            resolutionCode: 'confirmed_violation',
+            updatedAt: '2026-04-10T01:20:00.000Z',
+          },
+          currentCase: {
+            status: 'resolved',
+            resolutionCode: 'confirmed_violation',
+            closedAt: '2026-04-10T01:20:00.000Z',
+            updatedAt: '2026-04-10T01:20:00.000Z',
+          },
+        }}
+      />,
+    );
+
+    expect(html).toContain('提交申诉');
+    expect(html).toContain('补充说明');
+  });
+
   test('renders history list and empty state when no reportCaseId query is present', async () => {
     const html = renderToStaticMarkup(
       <ReportAppealsPage

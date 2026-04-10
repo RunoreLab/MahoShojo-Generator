@@ -120,6 +120,16 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
 
 const isUuid = (value: string) => UUID_PATTERN.test(value.trim());
 
+export const shouldLoadReportCapability = ({
+  isCloudDataCard,
+  isPublic,
+  isOwner,
+}: {
+  isCloudDataCard: boolean;
+  isPublic: boolean;
+  isOwner: boolean;
+}) => isCloudDataCard && (isPublic || isOwner);
+
 const sanitizeDownloadFilename = (value: string) => {
   const trimmed = value.trim();
   if (!trimmed) return '数据卡';
@@ -269,6 +279,11 @@ export default function DataCardDetailsModal({
   const resolvedMetaCardId = metaCardId === undefined ? card?.id : metaCardId;
   const resolvedCloudCardId = typeof resolvedMetaCardId === 'string' ? resolvedMetaCardId.trim() : '';
   const isCloudDataCard = Boolean(resolvedCloudCardId) && isUuid(resolvedCloudCardId);
+  const shouldFetchReportCapability = shouldLoadReportCapability({
+    isCloudDataCard,
+    isPublic: card.isPublic,
+    isOwner,
+  });
   const canShowReportActions = isCloudDataCard && card.isPublic;
   const canDownloadCard = isCloudDataCard ? (Boolean(meta) || isOwner) : true;
 
@@ -323,7 +338,7 @@ export default function DataCardDetailsModal({
       return;
     }
     void reloadMeta(resolvedMetaCardId);
-    if (isCloudDataCard && card.isPublic) {
+    if (shouldFetchReportCapability) {
       void reloadReportCapability(resolvedMetaCardId);
     } else {
       setReportCapability(null);
@@ -336,7 +351,7 @@ export default function DataCardDetailsModal({
     setIsMoreActionsOpen(false);
     setIsReportModalOpen(false);
     setReportSubmitError(null);
-  }, [card.isPublic, isCloudDataCard, isOpen, metaNonce, reloadMeta, reloadReportCapability, resolvedMetaCardId]);
+  }, [isOpen, metaNonce, reloadMeta, reloadReportCapability, resolvedMetaCardId, shouldFetchReportCapability]);
 
   useEffect(() => {
     if (!isOpen) return;

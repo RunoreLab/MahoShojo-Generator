@@ -2,7 +2,10 @@ import { describe, expect, it } from 'bun:test';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 
-import DataCardDetailsModal, { StrictSeasonExtremaBlock } from '@/components/DataCardDetailsModal';
+import DataCardDetailsModal, {
+  shouldLoadReportCapability,
+  StrictSeasonExtremaBlock,
+} from '@/components/DataCardDetailsModal';
 
 describe('DataCardDetailsModal', () => {
   it('renders markdown strings with preserved line breaks', () => {
@@ -204,5 +207,18 @@ describe('DataCardDetailsModal', () => {
 
     expect(html).toContain('该处理结果的申诉正在处理中');
     expect(html).toContain('查看申诉状态');
+  });
+
+  it('loads moderation capability for owners even when the cloud card is not public', () => {
+    expect(shouldLoadReportCapability({
+      isCloudDataCard: true,
+      isPublic: false,
+      isOwner: true,
+    })).toBe(true);
+    expect(shouldLoadReportCapability({
+      isCloudDataCard: true,
+      isPublic: false,
+      isOwner: false,
+    })).toBe(false);
   });
 });

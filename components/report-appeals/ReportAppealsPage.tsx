@@ -24,6 +24,11 @@ type ReportAppealsPageProps = {
   initialDetail?: ReportAppealDetailDto | null;
 };
 
+type ReportAppealFormEntry = ReportAppealEntryDto & {
+  caseUpdatedAtSnapshot: string;
+  targetCard: { id: string; name: string };
+};
+
 export type SubmitReportAppealPayload = {
   reportCaseId: string;
   caseUpdatedAtSnapshot: string;
@@ -31,6 +36,25 @@ export type SubmitReportAppealPayload = {
   details: string;
   references: ReportAppealReferenceDraft[];
 };
+
+const shouldRenderAppealForm = ({
+  reportCaseId,
+  entry,
+  detail,
+}: {
+  reportCaseId: string | null;
+  entry: ReportAppealEntryDto | null;
+  detail: ReportAppealDetailDto | null;
+}) => {
+  if (!reportCaseId) return false;
+  if (!entry?.eligible || !entry.targetCard || !entry.caseUpdatedAtSnapshot) return false;
+  if (detail) return detail.status === 'withdrawn';
+  if (entry.existingAppeal) return entry.existingAppeal.status === 'withdrawn';
+  return true;
+};
+
+const isReportAppealFormEntry = (entry: ReportAppealEntryDto | null): entry is ReportAppealFormEntry =>
+  Boolean(entry?.eligible && entry.targetCard && entry.caseUpdatedAtSnapshot);
 
 const fetchJson = async <T,>(url: string, init?: RequestInit): Promise<T> => {
   const response = await authStorage.fetch(url, init);
@@ -188,35 +212,44 @@ export function ReportAppealsPage({
     }
   };
 
-  const activeCard = detail
-    ? <ReportAppealHistoryCard appeal={detail} emphasized onWithdraw={handleWithdraw} />
-    : entry?.existingAppeal
-      ? <ReportAppealHistoryCard appeal={entry.existingAppeal} emphasized onWithdraw={handleWithdraw} />
-      : entry?.eligible && entry.targetCard && entry.caseUpdatedAtSnapshot
-        ? (
-            <ReportAppealForm
-              reportCaseId={entry.reportCaseId}
-              caseUpdatedAtSnapshot={entry.caseUpdatedAtSnapshot}
-              targetCardName={entry.targetCard.name}
-              reasonOptions={entry.reasonOptions.length > 0 ? entry.reasonOptions : REPORT_APPEAL_REASON_OPTIONS}
-              submitting={submitting}
-              error={error}
-              onSubmit={async (input) => {
-                setSubmitting(true);
-                setError(null);
-                try {
-                  const refreshed = await submitReportAppealAndRefreshPageData(input);
-                  setHistory(refreshed.history);
-                  setEntry(refreshed.entry);
-                  setDetail(refreshed.detail);
-                } catch (nextError) {
-                  setError(nextError instanceof Error ? nextError.message : '提交申诉失败');
-                } finally {
-                  setSubmitting(false);
-                }
-              }}
-            />
-          )
+  const activeAppealFormEntry = shouldRenderAppealForm({ reportCaseId, entry, detail })
+    && isReportAppealFormEntry(entry)
+    ? entry
+    : null;
+
+  const activeCard = activeAppealFormEntry
+    ? (
+        <ReportAppealForm
+          reportCaseId={activeAppealFormEntry.reportCaseId}
+          caseUpdatedAtSnapshot={activeAppealFormEntry.caseUpdatedAtSnapshot}
+          targetCardName={activeAppealFormEntry.targetCard.name}
+          reasonOptions={
+            activeAppealFormEntry.reasonOptions.length > 0
+              ? activeAppealFormEntry.reasonOptions
+              : REPORT_APPEAL_REASON_OPTIONS
+          }
+          submitting={submitting}
+          error={error}
+          onSubmit={async (input) => {
+            setSubmitting(true);
+            setError(null);
+            try {
+              const refreshed = await submitReportAppealAndRefreshPageData(input);
+              setHistory(refreshed.history);
+              setEntry(refreshed.entry);
+              setDetail(refreshed.detail);
+            } catch (nextError) {
+              setError(nextError instanceof Error ? nextError.message : '提交申诉失败');
+            } finally {
+              setSubmitting(false);
+            }
+          }}
+        />
+      )
+    : detail
+      ? <ReportAppealHistoryCard appeal={detail} emphasized onWithdraw={handleWithdraw} />
+      : entry?.existingAppeal
+        ? <ReportAppealHistoryCard appeal={entry.existingAppeal} emphasized onWithdraw={handleWithdraw} />
         : null;
 
   return (
