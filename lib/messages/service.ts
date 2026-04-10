@@ -217,14 +217,10 @@ const createMessagesService = (deps: MessagesServiceDeps) => {
         ...latestUserRows.map(buildPreviewFromUser),
       ].sort(compareMessageSortKeys);
 
+      const emptyCrowdReviewSummary = { hasCrowdReviewPending: false, crowdReviewPrompt: null };
       const crowdReviewSummary = deps.getCrowdReviewPromptSummary
-        ? await deps.getCrowdReviewPromptSummary({ userId: input.userId }).catch((error) => {
-            if (error instanceof Error && error.name === 'CrowdReviewServiceUnavailableError') {
-              return { hasCrowdReviewPending: false, crowdReviewPrompt: null };
-            }
-            throw error;
-          })
-        : { hasCrowdReviewPending: false, crowdReviewPrompt: null };
+        ? await deps.getCrowdReviewPromptSummary({ userId: input.userId }).catch(() => emptyCrowdReviewSummary)
+        : emptyCrowdReviewSummary;
 
       return {
         unreadTotal: siteUnread + directUnread,

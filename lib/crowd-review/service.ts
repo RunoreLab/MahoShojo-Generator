@@ -718,16 +718,21 @@ const createCrowdReviewService = (deps: CrowdReviewServiceDeps) => {
 
     await Promise.all(
       assignments.map(async (assignment) => {
-        if (assignment.status === 'voted' || assignment.status === 'abstained') {
-          await deps.repo.updateAssignmentPostVoteSummary(db, {
-            assignmentId: assignment.id,
-            userId: assignment.inspectorUserId,
-            postVoteSummaryJson: finalSummaryJson,
-            now,
-          });
+        if (assignment.status !== 'voted' && assignment.status !== 'abstained') {
           return;
         }
 
+        await deps.repo.updateAssignmentPostVoteSummary(db, {
+          assignmentId: assignment.id,
+          userId: assignment.inspectorUserId,
+          postVoteSummaryJson: finalSummaryJson,
+          now,
+        });
+      }),
+    );
+
+    await Promise.all(
+      assignments.map(async (assignment) => {
         if (assignment.status !== 'assigned') {
           return;
         }
@@ -771,15 +776,30 @@ const createCrowdReviewService = (deps: CrowdReviewServiceDeps) => {
     }
 
     if (summaryPlan.nextRoundStatus === 'waiting_more_votes') {
+      const waitingSummaryJson = JSON.stringify(summaryPlan.summary);
       await deps.repo.updateRound(db, {
         roundId: round.id,
         status: summaryPlan.nextRoundStatus,
         deadlineAt: summaryPlan.nextDeadlineAt,
         extensionCount: summaryPlan.nextExtensionCount,
         resultCode: null,
-        resultSummaryJson: '{}',
+        resultSummaryJson: waitingSummaryJson,
         now,
       });
+      await Promise.all(
+        assignments.map(async (assignment) => {
+          if (assignment.status !== 'voted' && assignment.status !== 'abstained') {
+            return;
+          }
+
+          await deps.repo.updateAssignmentPostVoteSummary(db, {
+            assignmentId: assignment.id,
+            userId: assignment.inspectorUserId,
+            postVoteSummaryJson: waitingSummaryJson,
+            now,
+          });
+        }),
+      );
       return summaryPlan.summary;
     }
 

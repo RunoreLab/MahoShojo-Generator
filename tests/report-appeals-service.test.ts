@@ -205,7 +205,7 @@ describe('report appeals service', () => {
     expect(result.appealId).toContain('appeal-generated');
   });
 
-  test('submit retry repairs missing references after create succeeded but reference write failed', async () => {
+  test('submit retry repairs partially written references after create succeeded but reference write failed', async () => {
     let existingAppeal: ReturnType<typeof makeAppealRow> | null = null;
     let replaceAttempts = 0;
     const writtenReferences: Array<Record<string, unknown>> = [];
@@ -223,6 +223,12 @@ describe('report appeals service', () => {
           replaceAttempts += 1;
           writtenReferences.splice(0, writtenReferences.length);
           if (replaceAttempts === 1) {
+            writtenReferences.push({
+              referenceType: input.references[0]?.referenceType,
+              referenceId: input.references[0]?.referenceId,
+              note: input.references[0]?.note,
+              sortOrder: input.references[0]?.sortOrder,
+            });
             throw new Error('transient references failure');
           }
           writtenReferences.push(
@@ -244,6 +250,14 @@ describe('report appeals service', () => {
           note: '需要核对',
           sortOrder: 0,
         },
+        {
+          referenceType: 'public_data_card',
+          referenceId: 'card-2',
+          labelSnapshot: '对照卡',
+          urlSnapshot: '/character-manager?dataCardId=card-2',
+          note: '第二条证据',
+          sortOrder: 1,
+        },
       ],
     });
 
@@ -254,7 +268,10 @@ describe('report appeals service', () => {
       caseUpdatedAtSnapshot: '2026-04-10T01:20:00.000Z',
       appealReasonCode: 'missing_context' as const,
       details: '补充说明',
-      references: [{ referenceType: 'encyclopedia_entry' as const, referenceId: 'community-rules', note: '需要核对' }],
+      references: [
+        { referenceType: 'encyclopedia_entry' as const, referenceId: 'community-rules', note: '需要核对' },
+        { referenceType: 'public_data_card' as const, referenceId: 'card-2', note: '第二条证据' },
+      ],
     };
 
     await expect(service.submitReportAppeal(submitInput)).rejects.toThrow('transient references failure');
@@ -269,6 +286,12 @@ describe('report appeals service', () => {
         referenceId: 'community-rules',
         note: '需要核对',
         sortOrder: 0,
+      },
+      {
+        referenceType: 'public_data_card',
+        referenceId: 'card-2',
+        note: '第二条证据',
+        sortOrder: 1,
       },
     ]);
   });

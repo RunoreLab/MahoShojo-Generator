@@ -209,6 +209,46 @@ describe('DataCardDetailsModal', () => {
     expect(html).toContain('查看申诉状态');
   });
 
+  it('owner view hides moderation summary banner when no appeal action is available', () => {
+    const html = renderToStaticMarkup(
+      React.createElement(DataCardDetailsModal, {
+        isOpen: true,
+        onClose: () => {},
+        isOwner: true,
+        initialReportCapability: {
+          canReport: false,
+          reportDisabledReason: '不能举报自己的公开数据卡',
+          hasOpenCase: false,
+          myActiveReport: null,
+          reasons: [],
+          ownerModerationSummary: {
+            latestCaseId: 'case-2',
+            status: 'under_review',
+            resolutionCode: null,
+            canAppeal: false,
+            activeAppealId: null,
+            activeAppealStatus: null,
+            appealEntryUrl: null,
+            statusSummary: '当前处理结果暂不可申诉。',
+          },
+          caseSummary: null,
+        },
+        card: {
+          id: 'card-1',
+          name: '公开卡',
+          description: '用于不可申诉状态测试',
+          type: 'character',
+          data: JSON.stringify({ name: '公开卡' }),
+          isPublic: true,
+          author: 'tester',
+        },
+      }),
+    );
+
+    expect(html).not.toContain('处理结果与申诉');
+    expect(html).not.toContain('当前处理结果暂不可申诉。');
+  });
+
   it('loads moderation capability for owners even when the cloud card is not public', () => {
     expect(shouldLoadReportCapability({
       isCloudDataCard: true,

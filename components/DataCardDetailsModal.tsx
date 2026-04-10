@@ -199,6 +199,11 @@ export default function DataCardDetailsModal({
   const [saveTagsError, setSaveTagsError] = useState<string | null>(null);
   const [isMetaExpanded, setIsMetaExpanded] = useState(true);
   const { display: displayName, full: fullName } = buildTitleDisplay(card.name || '未命名');
+  const ownerModerationSummary = reportCapability?.ownerModerationSummary ?? null;
+  const showOwnerModerationSummary =
+    isOwner &&
+    ownerModerationSummary != null &&
+    (ownerModerationSummary.canAppeal || ownerModerationSummary.activeAppealId != null);
   const cardTypeLabel =
     card.type === 'character'
       ? '角色'
@@ -781,16 +786,16 @@ export default function DataCardDetailsModal({
             </div>
           )}
 
-          {isOwner && reportCapability?.ownerModerationSummary ? (
+          {showOwnerModerationSummary ? (
             <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-900">
               <div className="font-medium">处理结果与申诉</div>
-              <div className="mt-1">{reportCapability.ownerModerationSummary.statusSummary}</div>
-              {reportCapability.ownerModerationSummary.appealEntryUrl ? (
+              <div className="mt-1">{ownerModerationSummary.statusSummary}</div>
+              {ownerModerationSummary.appealEntryUrl ? (
                 <a
-                  href={reportCapability.ownerModerationSummary.appealEntryUrl}
+                  href={ownerModerationSummary.appealEntryUrl}
                   className="mt-2 inline-flex text-sm text-rose-700 underline underline-offset-2"
                 >
-                  {reportCapability.ownerModerationSummary.activeAppealId ? '查看申诉状态' : '前往申诉页'}
+                  {ownerModerationSummary.activeAppealId ? '查看申诉状态' : '前往申诉页'}
                 </a>
               ) : null}
             </div>

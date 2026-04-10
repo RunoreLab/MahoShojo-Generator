@@ -408,9 +408,6 @@ const createReportAppealsService = (deps: ReportAppealsServiceDeps) => ({
       if (input.references.length === 0) return;
 
       const currentReferences = await deps.repo.listReportAppealReferences(db, appealId);
-      if (currentReferences.length > 0) {
-        return;
-      }
       if (hasMatchingAppealReferences(currentReferences, input.references)) {
         return;
       }
