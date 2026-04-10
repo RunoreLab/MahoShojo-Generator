@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull } from 'drizzle-orm';
 
 import type { AppDrizzleDb } from '@/lib/db/drizzle';
 import {
@@ -596,7 +596,14 @@ export async function listAssignableCases(
       dataCards,
       and(eq(dataCards.id, reportCases.targetEntityId), eq(reportCases.targetEntityType, 'data_card')),
     )
-    .where(and(inArray(reportCases.status, OPEN_REPORT_CASE_STATUSES), eq(dataCards.isPublic, true)))
+    .where(
+      and(
+        inArray(reportCases.status, OPEN_REPORT_CASE_STATUSES),
+        eq(dataCards.isPublic, true),
+        eq(dataCards.reviewStatus, 'approved'),
+        isNull(dataCards.deletedAt),
+      ),
+    )
     .orderBy(asc(reportCases.latestReportedAt), asc(reportCases.id));
 
   const candidates: Array<{

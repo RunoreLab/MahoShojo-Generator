@@ -9,7 +9,7 @@ import {
   type ReportAppealReferenceDraft,
   type SubmitReportAppealResult,
 } from '@/lib/report-appeals/types';
-import ReportAppealForm from '@/components/report-appeals/ReportAppealForm';
+import ReportAppealForm, { getReportAppealFormIdentity } from '@/components/report-appeals/ReportAppealForm';
 import ReportAppealHistoryCard from '@/components/report-appeals/ReportAppealHistoryCard';
 
 type QueryState = {
@@ -220,6 +220,10 @@ export function ReportAppealsPage({
   const activeCard = activeAppealFormEntry
     ? (
         <ReportAppealForm
+          key={getReportAppealFormIdentity({
+            reportCaseId: activeAppealFormEntry.reportCaseId,
+            caseUpdatedAtSnapshot: activeAppealFormEntry.caseUpdatedAtSnapshot,
+          })}
           reportCaseId={activeAppealFormEntry.reportCaseId}
           caseUpdatedAtSnapshot={activeAppealFormEntry.caseUpdatedAtSnapshot}
           targetCardName={activeAppealFormEntry.targetCard.name}

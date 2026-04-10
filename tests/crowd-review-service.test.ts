@@ -899,6 +899,88 @@ describe('crowd review service', () => {
     expect(attempts).toBe(2);
   });
 
+  test('submit revokes remaining assigned inspectors before surfacing report-case notification failure', async () => {
+    const finalizeWrites: Array<Record<string, unknown>> = [];
+    const assignments = new Map([
+      [
+        'assignment-1',
+        makeAssignmentRow({
+          id: 'assignment-1',
+          inspectorUserId: 7,
+          status: 'assigned',
+          decision: null,
+          completedAt: null,
+        }),
+      ],
+      [
+        'assignment-2',
+        makeAssignmentRow({
+          id: 'assignment-2',
+          inspectorUserId: 8,
+          status: 'voted',
+          decision: 'violation',
+          completedAt: now,
+        }),
+      ],
+      [
+        'assignment-3',
+        makeAssignmentRow({
+          id: 'assignment-3',
+          inspectorUserId: 9,
+          status: 'assigned',
+          decision: null,
+          completedAt: null,
+        }),
+      ],
+    ]);
+    const service = buildService({
+      repo: {
+        getAssignmentByIdForInspector: async () => makeAssignmentRow(),
+        getRoundById: async () => makeRoundRow({ minValidVotes: 2 }),
+        listAssignmentsByRound: async () => Array.from(assignments.values()),
+        finalizeAssignment: async (_db, input) => {
+          finalizeWrites.push(input);
+          const current = assignments.get(input.assignmentId);
+          if (current) {
+            assignments.set(input.assignmentId, {
+              ...current,
+              status: input.status,
+              decision: input.decision,
+              decisionNote: input.note,
+              completedAt: input.now,
+              postVoteSummaryJson: input.postVoteSummaryJson,
+              updatedAt: input.now,
+            });
+          }
+          return true;
+        },
+        updateAssignmentPostVoteSummary: async () => true,
+      },
+      notifyReportCaseResolutionIfNeeded: async () => {
+        throw new Error('notify failed');
+      },
+    });
+
+    await expect(
+      service.submitCrowdReviewDecision({
+        db: {} as never,
+        userId: 7,
+        assignmentId: 'assignment-1',
+        decision: 'violation',
+        note: null,
+      }),
+    ).rejects.toThrow('notify failed');
+
+    expect(finalizeWrites).toContainEqual(
+      expect.objectContaining({
+        assignmentId: 'assignment-3',
+        userId: 9,
+        status: 'revoked',
+        decision: null,
+      }),
+    );
+  });
+
   test('submit replay retries report-case notification after an earlier deciding vote exhausted retries', async () => {
     let finalized = false;
     let persistedSummaryJson = '{}';

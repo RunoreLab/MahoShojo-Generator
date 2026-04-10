@@ -10,6 +10,7 @@ import {
   getActiveAssignmentByInspector,
   getLatestCompletedAssignmentByInspector,
   getInspectorState,
+  listAssignableCases,
   listCrowdReviewHistoryByInspector,
   listActionableAssignmentsByInspector,
   upsertCrowdReviewInspectorState,
@@ -27,6 +28,19 @@ describe('crowd review repository', () => {
 
     exec(`
       CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL, email TEXT NOT NULL);
+      CREATE TABLE data_cards (
+        id TEXT PRIMARY KEY,
+        user_id INTEGER NOT NULL,
+        type TEXT NOT NULL,
+        name TEXT NOT NULL,
+        description TEXT,
+        data TEXT NOT NULL,
+        is_public INTEGER NOT NULL,
+        review_status TEXT DEFAULT 'approved',
+        deleted_at TEXT,
+        created_at TEXT,
+        updated_at TEXT
+      );
       CREATE TABLE report_cases (
         id TEXT PRIMARY KEY,
         target_entity_type TEXT NOT NULL,
@@ -41,6 +55,13 @@ describe('crowd review repository', () => {
         closed_at TEXT,
         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE TABLE reports (
+        id TEXT PRIMARY KEY,
+        case_id TEXT NOT NULL,
+        reporter_user_id INTEGER NOT NULL,
+        status TEXT NOT NULL,
+        created_at TEXT NOT NULL
       );
       CREATE TABLE crowd_review_inspectors (
         user_id INTEGER PRIMARY KEY,
@@ -566,5 +587,31 @@ describe('crowd review repository', () => {
       'assignment-completed-a',
     ]);
     expect(history.every((row) => row.assignmentStatus !== 'assigned')).toBe(true);
+  });
+
+  test('listAssignableCases excludes cards that are no longer publicly accessible', async () => {
+    exec(`
+      INSERT INTO report_cases (
+        id, target_entity_type, target_entity_id, target_user_id, status, latest_reported_at, created_at, updated_at
+      ) VALUES (
+        'case-3', 'data_card', 'card-3', 2, 'under_review', '2026-04-08T10:06:00.000Z', '2026-04-08T10:06:00.000Z', '2026-04-08T10:06:00.000Z'
+      );
+
+      INSERT INTO data_cards (
+        id, user_id, type, name, description, data, is_public, review_status, deleted_at, created_at, updated_at
+      ) VALUES
+        ('card-1', 2, 'character', '公开卡', '描述', '{}', 1, 'approved', NULL, '2026-04-08T09:50:00.000Z', '2026-04-08T09:50:00.000Z'),
+        ('card-2', 2, 'character', '待审卡', '描述', '{}', 1, 'pending', NULL, '2026-04-08T09:51:00.000Z', '2026-04-08T09:51:00.000Z'),
+        ('card-3', 2, 'character', '已删除卡', '描述', '{}', 1, 'approved', '2026-04-08T09:59:00.000Z', '2026-04-08T09:52:00.000Z', '2026-04-08T09:59:00.000Z');
+
+      INSERT INTO reports (id, case_id, reporter_user_id, status, created_at) VALUES
+        ('report-1', 'case-1', 9, 'active', '2026-04-08T10:00:00.000Z'),
+        ('report-2', 'case-2', 10, 'active', '2026-04-08T10:05:00.000Z'),
+        ('report-3', 'case-3', 11, 'active', '2026-04-08T10:06:00.000Z');
+    `);
+
+    const cases = await listAssignableCases(db, 7);
+
+    expect(cases.map((row) => row.reportCaseId)).toEqual(['case-1']);
   });
 });

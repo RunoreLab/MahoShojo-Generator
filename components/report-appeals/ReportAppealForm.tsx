@@ -18,6 +18,11 @@ type ReportAppealFormProps = {
   }) => void | Promise<void>) | null;
 };
 
+export const getReportAppealFormIdentity = (input: {
+  reportCaseId: string;
+  caseUpdatedAtSnapshot: string;
+}) => `${input.reportCaseId}:${input.caseUpdatedAtSnapshot}`;
+
 export function ReportAppealForm({
   reportCaseId,
   caseUpdatedAtSnapshot,

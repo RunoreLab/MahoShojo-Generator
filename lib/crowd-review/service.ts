@@ -818,6 +818,7 @@ const createCrowdReviewService = (deps: CrowdReviewServiceDeps) => {
         now,
         updateReportCaseResolution: deps.repo.updateReportCaseResolution,
         notifyReportCaseResolutionIfNeeded: deps.notifyReportCaseResolutionIfNeeded,
+        skipNotification: true,
       });
       await syncFinalizedRoundAssignments(db, assignments, summaryPlan.summary, now);
       return summaryPlan.summary;
@@ -837,8 +838,16 @@ const createCrowdReviewService = (deps: CrowdReviewServiceDeps) => {
       now,
       updateReportCaseResolution: deps.repo.updateReportCaseResolution,
       notifyReportCaseResolutionIfNeeded: deps.notifyReportCaseResolutionIfNeeded,
+      skipNotification: true,
     });
     await syncFinalizedRoundAssignments(db, assignments, summaryPlan.summary, now);
+    if (summaryPlan.nextResultCode === 'violation') {
+      await retryReportCaseResolutionNotification({
+        db,
+        reportCaseId: round.reportCaseId,
+        notify: deps.notifyReportCaseResolutionIfNeeded,
+      });
+    }
     return summaryPlan.summary;
   };
 
@@ -1197,6 +1206,7 @@ export async function applyCrowdReviewRoundResultToReportCase(input: {
   now: string;
   updateReportCaseResolution: CrowdReviewServiceRepo['updateReportCaseResolution'];
   notifyReportCaseResolutionIfNeeded?: (input: { db: AppDrizzleDb | null; reportCaseId: string }) => Promise<boolean>;
+  skipNotification?: boolean;
 }): Promise<void> {
   if (input.roundResult === 'violation') {
     await input.updateReportCaseResolution(input.db, {
@@ -1206,11 +1216,13 @@ export async function applyCrowdReviewRoundResultToReportCase(input: {
       closedAt: input.now,
       now: input.now,
     });
-    await retryReportCaseResolutionNotification({
-      db: input.db,
-      reportCaseId: input.reportCaseId,
-      notify: input.notifyReportCaseResolutionIfNeeded,
-    });
+    if (!input.skipNotification) {
+      await retryReportCaseResolutionNotification({
+        db: input.db,
+        reportCaseId: input.reportCaseId,
+        notify: input.notifyReportCaseResolutionIfNeeded,
+      });
+    }
     return;
   }
 
