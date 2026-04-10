@@ -5,6 +5,7 @@ import { drizzle } from 'drizzle-orm/bun-sqlite';
 import type { AppDrizzleDb } from '@/lib/db/drizzle';
 import * as schema from '@/lib/db/schema';
 import {
+  createReportWithReferencesIfCaseEditable,
   countReportSubmissionEventsByReporterSince,
   createReport,
   createReportCase,
@@ -15,7 +16,10 @@ import {
   listReportReferencesByReport,
   markReportCaseCreatorNotified,
   replaceReportReferences,
+  replaceReportReferencesIfCaseEditable,
   updateActiveReportForReporter,
+  updateActiveReportForReporterWithReferencesIfCaseEditable,
+  withdrawActiveReportAndMaybeDismissCaseIfEditable,
 } from '@/lib/db/repositories/data-card-reports';
 
 let sqlite: Database;
@@ -86,6 +90,8 @@ describe('data card reports repository', () => {
         creator_notified_report_count INTEGER NOT NULL DEFAULT 0,
         latest_reported_at TEXT NOT NULL,
         target_card_updated_at_at_notice TEXT,
+        resolution_notified_at TEXT,
+        resolution_notified_case_updated_at TEXT,
         closed_at TEXT,
         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -136,6 +142,22 @@ describe('data card reports repository', () => {
       );
       CREATE UNIQUE INDEX idx_report_references_report_target_unique
         ON report_references(report_id, reference_type, reference_id);
+      CREATE TABLE crowd_review_rounds (
+        id TEXT PRIMARY KEY,
+        report_case_id TEXT NOT NULL,
+        status TEXT NOT NULL,
+        opened_at TEXT NOT NULL,
+        deadline_at TEXT NOT NULL,
+        extension_count INTEGER NOT NULL DEFAULT 0,
+        min_valid_votes INTEGER NOT NULL,
+        result_code TEXT,
+        result_summary_json TEXT NOT NULL DEFAULT '{}',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE UNIQUE INDEX idx_crowd_review_rounds_report_case_active
+        ON crowd_review_rounds(report_case_id)
+        WHERE status IN ('pending_dispatch', 'active', 'waiting_more_votes');
       INSERT INTO users (id, username, email) VALUES
         (2, 'creator', 'creator@example.test'),
         (7, 'reporter', 'reporter@example.test');
@@ -223,6 +245,157 @@ describe('data card reports repository', () => {
       ['encyclopedia_entry', 'community-rules', 0],
       ['public_data_card', 'card-2', 1],
     ]);
+  });
+
+  test('createReportWithReferencesIfCaseEditable blocks writes once the case has an active crowd review round', async () => {
+    await createReportCaseFixture();
+    exec(`
+      INSERT INTO crowd_review_rounds (
+        id, report_case_id, status, opened_at, deadline_at, extension_count, min_valid_votes, result_code, result_summary_json, created_at, updated_at
+      ) VALUES (
+        'round-1', 'case-1', 'active', '2026-04-08T10:21:00.000Z', '2026-04-08T11:21:00.000Z', 0, 3, NULL, '{}', '2026-04-08T10:21:00.000Z', '2026-04-08T10:21:00.000Z'
+      );
+    `);
+
+    const created = await createReportWithReferencesIfCaseEditable(db, {
+      id: 'report-1',
+      caseId: 'case-1',
+      reporterUserId: 7,
+      reasonCode: 'plagiarism',
+      details: '冻结后不应成功',
+      evidenceSummaryJson: '{}',
+      normalizedPayloadHash: 'hash-blocked',
+      targetNameSnapshot: '公开卡',
+      targetDescriptionSnapshot: '描述',
+      targetDataSnapshot: '{"name":"公开卡"}',
+      targetUpdatedAtSnapshot: '2026-04-08T10:00:00.000Z',
+      now: '2026-04-08T10:21:00.000Z',
+      references: [
+        {
+          id: 'ref-1',
+          referenceType: 'encyclopedia_entry',
+          referenceId: 'community-rules',
+          labelSnapshot: '社区守则',
+          urlSnapshot: '/encyclopedia/community-rules',
+          note: null,
+          sortOrder: 0,
+        },
+      ],
+    });
+
+    expect(created).toBeNull();
+    expect(
+      await getActiveReportByCaseAndReporter(db, {
+        caseId: 'case-1',
+        reporterUserId: 7,
+      }),
+    ).toBeNull();
+  });
+
+  test('updateActiveReportForReporterWithReferencesIfCaseEditable atomically updates report and references', async () => {
+    await createReportCaseFixture();
+    await createReportFixture();
+    await replaceReportReferences(db, {
+      reportId: 'report-1',
+      references: [
+        {
+          id: 'ref-old',
+          referenceType: 'encyclopedia_entry',
+          referenceId: 'old-entry',
+          labelSnapshot: '旧引用',
+          urlSnapshot: '/encyclopedia/old-entry',
+          note: '旧',
+          sortOrder: 0,
+        },
+      ],
+    });
+
+    const updated = await updateActiveReportForReporterWithReferencesIfCaseEditable(db, {
+      caseId: 'case-1',
+      reporterUserId: 7,
+      reasonCode: 'rule_violation_other',
+      details: '修订说明',
+      evidenceSummaryJson: '{"reasonLabels":["其他违规"]}',
+      normalizedPayloadHash: 'hash-b',
+      targetNameSnapshot: '公开卡',
+      targetDescriptionSnapshot: '描述',
+      targetDataSnapshot: '{"name":"公开卡"}',
+      targetUpdatedAtSnapshot: '2026-04-08T10:30:00.000Z',
+      now: '2026-04-08T10:30:00.000Z',
+      references: [
+        {
+          id: 'ref-new-1',
+          referenceType: 'encyclopedia_entry',
+          referenceId: 'community-rules',
+          labelSnapshot: '社区守则',
+          urlSnapshot: '/encyclopedia/community-rules',
+          note: '第一条',
+          sortOrder: 0,
+        },
+        {
+          id: 'ref-new-2',
+          referenceType: 'public_data_card',
+          referenceId: 'card-2',
+          labelSnapshot: '对照卡',
+          urlSnapshot: '/character-manager?dataCardId=card-2',
+          note: '第二条',
+          sortOrder: 1,
+        },
+      ],
+    });
+
+    const references = await listReportReferencesByReport(db, 'report-1');
+
+    expect(updated?.details).toBe('修订说明');
+    expect(updated?.normalizedPayloadHash).toBe('hash-b');
+    expect(references.map((row) => row.referenceId)).toEqual(['community-rules', 'card-2']);
+    expect(references.map((row) => row.note)).toEqual(['第一条', '第二条']);
+  });
+
+  test('replaceReportReferencesIfCaseEditable refuses to mutate references once the case has an active crowd review round', async () => {
+    await createReportCaseFixture();
+    await createReportFixture();
+    await replaceReportReferences(db, {
+      reportId: 'report-1',
+      references: [
+        {
+          id: 'ref-old',
+          referenceType: 'encyclopedia_entry',
+          referenceId: 'old-entry',
+          labelSnapshot: '旧引用',
+          urlSnapshot: '/encyclopedia/old-entry',
+          note: '旧',
+          sortOrder: 0,
+        },
+      ],
+    });
+    exec(`
+      INSERT INTO crowd_review_rounds (
+        id, report_case_id, status, opened_at, deadline_at, extension_count, min_valid_votes, result_code, result_summary_json, created_at, updated_at
+      ) VALUES (
+        'round-1', 'case-1', 'waiting_more_votes', '2026-04-08T10:31:00.000Z', '2026-04-08T11:31:00.000Z', 0, 3, NULL, '{}', '2026-04-08T10:31:00.000Z', '2026-04-08T10:31:00.000Z'
+      );
+    `);
+
+    const replaced = await replaceReportReferencesIfCaseEditable(db, {
+      caseId: 'case-1',
+      reportId: 'report-1',
+      references: [
+        {
+          id: 'ref-new',
+          referenceType: 'encyclopedia_entry',
+          referenceId: 'community-rules',
+          labelSnapshot: '社区守则',
+          urlSnapshot: '/encyclopedia/community-rules',
+          note: '新',
+          sortOrder: 0,
+        },
+      ],
+    });
+
+    const rows = await listReportReferencesByReport(db, 'report-1');
+    expect(replaced).toBe(false);
+    expect(rows.map((row) => row.referenceId)).toEqual(['old-entry']);
   });
 
   test('counts immutable submission events by reporter and window', async () => {
@@ -351,5 +524,58 @@ describe('data card reports repository', () => {
     expect(claimed).toBe(true);
     expect(row?.creatorNotifiedAt).toBe('2026-04-08T10:22:00.000Z');
     expect(row?.creatorNotifiedReportCount).toBe(2);
+  });
+
+  test('withdrawActiveReportAndMaybeDismissCaseIfEditable withdraws the last active report and dismisses the case', async () => {
+    await createReportCaseFixture();
+    await createReportFixture();
+
+    const result = await withdrawActiveReportAndMaybeDismissCaseIfEditable(db, {
+      caseId: 'case-1',
+      reporterUserId: 7,
+      now: '2026-04-08T10:35:00.000Z',
+    });
+
+    const report = await getActiveReportByCaseAndReporter(db, {
+      caseId: 'case-1',
+      reporterUserId: 7,
+    });
+    const caseRow = await db.query.reportCases.findFirst({
+      where: (fields, { eq }) => eq(fields.id, 'case-1'),
+    });
+
+    expect(result).toEqual({ withdrawn: true, caseDismissed: true });
+    expect(report).toBeNull();
+    expect(caseRow?.status).toBe('dismissed');
+  });
+
+  test('withdrawActiveReportAndMaybeDismissCaseIfEditable blocks withdrawal once the case has an active crowd review round', async () => {
+    await createReportCaseFixture();
+    await createReportFixture();
+    exec(`
+      INSERT INTO crowd_review_rounds (
+        id, report_case_id, status, opened_at, deadline_at, extension_count, min_valid_votes, result_code, result_summary_json, created_at, updated_at
+      ) VALUES (
+        'round-1', 'case-1', 'pending_dispatch', '2026-04-08T10:35:00.000Z', '2026-04-08T11:35:00.000Z', 0, 3, NULL, '{}', '2026-04-08T10:35:00.000Z', '2026-04-08T10:35:00.000Z'
+      );
+    `);
+
+    const result = await withdrawActiveReportAndMaybeDismissCaseIfEditable(db, {
+      caseId: 'case-1',
+      reporterUserId: 7,
+      now: '2026-04-08T10:36:00.000Z',
+    });
+
+    const report = await getActiveReportByCaseAndReporter(db, {
+      caseId: 'case-1',
+      reporterUserId: 7,
+    });
+    const caseRow = await db.query.reportCases.findFirst({
+      where: (fields, { eq }) => eq(fields.id, 'case-1'),
+    });
+
+    expect(result).toEqual({ withdrawn: false, caseDismissed: false });
+    expect(report?.status).toBe('active');
+    expect(caseRow?.status).toBe('open');
   });
 });

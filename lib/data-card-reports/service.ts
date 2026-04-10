@@ -43,15 +43,20 @@ type DataCardReportsRepository = {
   createReportCase: typeof repo.createReportCase;
   getActiveReportByCaseAndReporter: typeof repo.getActiveReportByCaseAndReporter;
   createReport: typeof repo.createReport;
+  createReportWithReferencesIfCaseEditable: typeof repo.createReportWithReferencesIfCaseEditable;
   updateActiveReportForReporter: typeof repo.updateActiveReportForReporter;
+  updateActiveReportForReporterWithReferencesIfCaseEditable:
+    typeof repo.updateActiveReportForReporterWithReferencesIfCaseEditable;
   createReportSubmissionEvent: typeof repo.createReportSubmissionEvent;
   getLatestReportSubmissionEventByReport: typeof repo.getLatestReportSubmissionEventByReport;
   countReportSubmissionEventsByReporterSince: typeof repo.countReportSubmissionEventsByReporterSince;
   replaceReportReferences: typeof repo.replaceReportReferences;
+  replaceReportReferencesIfCaseEditable: typeof repo.replaceReportReferencesIfCaseEditable;
   listReportReferencesByReport: typeof repo.listReportReferencesByReport;
   listActiveReportsByCase: typeof repo.listActiveReportsByCase;
   countActiveReportsByCase: typeof repo.countActiveReportsByCase;
   withdrawActiveReportByReporter: typeof repo.withdrawActiveReportByReporter;
+  withdrawActiveReportAndMaybeDismissCaseIfEditable: typeof repo.withdrawActiveReportAndMaybeDismissCaseIfEditable;
   dismissCaseIfNoActiveReports: typeof repo.dismissCaseIfNoActiveReports;
   markReportCaseCreatorNotified: typeof repo.markReportCaseCreatorNotified;
   clearReportCaseCreatorNotified: typeof repo.clearReportCaseCreatorNotified;
@@ -153,17 +158,23 @@ const toRepo = (): DataCardReportsRepository => ({
   createReportCase: (innerDb, input) => repo.createReportCase(innerDb, input),
   getActiveReportByCaseAndReporter: (innerDb, input) => repo.getActiveReportByCaseAndReporter(innerDb, input),
   createReport: (innerDb, input) => repo.createReport(innerDb, input),
+  createReportWithReferencesIfCaseEditable: (innerDb, input) => repo.createReportWithReferencesIfCaseEditable(innerDb, input),
   updateActiveReportForReporter: (innerDb, input) => repo.updateActiveReportForReporter(innerDb, input),
+  updateActiveReportForReporterWithReferencesIfCaseEditable: (innerDb, input) =>
+    repo.updateActiveReportForReporterWithReferencesIfCaseEditable(innerDb, input),
   createReportSubmissionEvent: (innerDb, input) => repo.createReportSubmissionEvent(innerDb, input),
   getLatestReportSubmissionEventByReport: (innerDb, reportId) =>
     repo.getLatestReportSubmissionEventByReport(innerDb, reportId),
   countReportSubmissionEventsByReporterSince: (innerDb, input) =>
     repo.countReportSubmissionEventsByReporterSince(innerDb, input),
   replaceReportReferences: (innerDb, input) => repo.replaceReportReferences(innerDb, input),
+  replaceReportReferencesIfCaseEditable: (innerDb, input) => repo.replaceReportReferencesIfCaseEditable(innerDb, input),
   listReportReferencesByReport: (innerDb, reportId) => repo.listReportReferencesByReport(innerDb, reportId),
   listActiveReportsByCase: (innerDb, caseId) => repo.listActiveReportsByCase(innerDb, caseId),
   countActiveReportsByCase: (innerDb, caseId) => repo.countActiveReportsByCase(innerDb, caseId),
   withdrawActiveReportByReporter: (innerDb, input) => repo.withdrawActiveReportByReporter(innerDb, input),
+  withdrawActiveReportAndMaybeDismissCaseIfEditable: (innerDb, input) =>
+    repo.withdrawActiveReportAndMaybeDismissCaseIfEditable(innerDb, input),
   dismissCaseIfNoActiveReports: (innerDb, input) => repo.dismissCaseIfNoActiveReports(innerDb, input),
   markReportCaseCreatorNotified: (innerDb, input) => repo.markReportCaseCreatorNotified(innerDb, input),
   clearReportCaseCreatorNotified: (innerDb, input) => repo.clearReportCaseCreatorNotified(innerDb, input),
@@ -283,6 +294,9 @@ const hasMatchingReportReferences = (
 
   return normalizedCanonical.every((referenceKey, index) => currentCanonical[index] === referenceKey);
 };
+
+const isUniqueConstraintError = (error: unknown): boolean =>
+  error instanceof Error && /UNIQUE constraint failed/i.test(error.message);
 
 type AggregatedCaseEvidenceSummary = {
   reasonLabels: string[];
@@ -542,13 +556,24 @@ const createDataCardReportsService = (deps: DataCardReportsServiceDeps) => {
       const db = requireDb(input.db);
       const targetCard = await deps.getTargetCard(db, input.targetEntityId);
       if (!targetCard) {
+        const latestCase = await deps.repo.getLatestReportCaseByTarget(db, {
+          targetEntityType: 'data_card',
+          targetEntityId: input.targetEntityId,
+        });
+        const ownerModerationSummary = latestCase
+          ? await deps.getOwnerModerationSummary({
+              db,
+              userId: input.viewerUserId,
+              reportCaseId: latestCase.id,
+            })
+          : null;
         return {
           canReport: false,
           reportDisabledReason: '该数据卡当前不可举报',
           hasOpenCase: false,
           myActiveReport: null,
           reasons: DATA_CARD_REPORT_REASONS,
-          ownerModerationSummary: null,
+          ownerModerationSummary,
           caseSummary: null,
         };
       }
@@ -787,11 +812,18 @@ const createDataCardReportsService = (deps: DataCardReportsServiceDeps) => {
 
           if (existingActiveReport) {
             submissionDecision = 'updated';
-            reportRow = await deps.repo.updateActiveReportForReporter(db, reportWriteInput);
+            reportRow = await deps.repo.updateActiveReportForReporterWithReferencesIfCaseEditable(db, {
+              ...reportWriteInput,
+              references: toReportReferenceWriteInput(deps.idFactory, referenceSnapshots ?? []),
+            });
             if (reportRow) {
+              shouldReplaceReferences = false;
               break;
             }
 
+            if (await deps.repo.hasActiveCrowdReviewRoundForCase(db, openCase.id)) {
+              throw new DataCardReportConflictError('该举报案件已进入众查，当前不可再修改举报材料');
+            }
             existingActiveReport = null;
             submissionDecision = 'created';
             continue;
@@ -799,11 +831,25 @@ const createDataCardReportsService = (deps: DataCardReportsServiceDeps) => {
 
           try {
             submissionDecision = 'created';
-            reportRow = await deps.repo.createReport(db, {
+            reportRow = await deps.repo.createReportWithReferencesIfCaseEditable(db, {
               id: deps.idFactory(),
               ...reportWriteInput,
+              references: toReportReferenceWriteInput(deps.idFactory, referenceSnapshots ?? []),
             });
+            if (!reportRow) {
+              if (await deps.repo.hasActiveCrowdReviewRoundForCase(db, openCase.id)) {
+                throw new DataCardReportConflictError('该举报案件已进入众查，当前不可再修改举报材料');
+              }
+              throw new DataCardReportsServiceUnavailableError('更新举报失败');
+            }
+            shouldReplaceReferences = false;
           } catch (error) {
+            if (error instanceof DataCardReportConflictError) {
+              throw error;
+            }
+            if (!isUniqueConstraintError(error)) {
+              throw error;
+            }
             const concurrentActiveReport = await deps.repo.getActiveReportByCaseAndReporter(db, {
               caseId: openCase.id,
               reporterUserId: input.reporterUserId,
@@ -888,10 +934,14 @@ const createDataCardReportsService = (deps: DataCardReportsServiceDeps) => {
       }
 
       if (shouldReplaceReferences && referenceSnapshots !== null) {
-        await deps.repo.replaceReportReferences(db, {
+        const replaced = await deps.repo.replaceReportReferencesIfCaseEditable(db, {
+          caseId: openCase.id,
           reportId: reportRow.id,
           references: toReportReferenceWriteInput(deps.idFactory, referenceSnapshots),
         });
+        if (!replaced) {
+          throw new DataCardReportConflictError('该举报案件已进入众查，当前不可再修改举报材料');
+        }
       }
 
       let creatorNotified = false;
@@ -964,20 +1014,19 @@ const createDataCardReportsService = (deps: DataCardReportsServiceDeps) => {
         throw new DataCardReportConflictError('该举报案件已进入众查，当前不可撤回举报');
       }
 
-      const withdrawn = await deps.repo.withdrawActiveReportByReporter(db, {
+      const result = await deps.repo.withdrawActiveReportAndMaybeDismissCaseIfEditable(db, {
         caseId: openCase.id,
         reporterUserId: input.reporterUserId,
         now: deps.now(),
       });
-      if (!withdrawn) {
+      if (!result.withdrawn) {
+        if (await deps.repo.hasActiveCrowdReviewRoundForCase(db, openCase.id)) {
+          throw new DataCardReportConflictError('该举报案件已进入众查，当前不可撤回举报');
+        }
         return { withdrawn: false, caseDismissed: false };
       }
 
-      const caseDismissed = await deps.repo.dismissCaseIfNoActiveReports(db, {
-        caseId: openCase.id,
-        now: deps.now(),
-      });
-      return { withdrawn: true, caseDismissed };
+      return result;
     },
 
     buildSelfRemediationCandidateDto,
@@ -991,6 +1040,15 @@ export function createDataCardReportsServiceForTests(
   const missing = (name: string) => {
     throw new Error(`Missing test dependency: ${name}`);
   };
+  const createReportImpl = deps.repo?.createReport ?? (() => missing('createReport'));
+  const updateActiveReportImpl =
+    deps.repo?.updateActiveReportForReporter ?? (() => missing('updateActiveReportForReporter'));
+  const replaceReportReferencesImpl =
+    deps.repo?.replaceReportReferences ?? (() => missing('replaceReportReferences'));
+  const withdrawActiveReportImpl =
+    deps.repo?.withdrawActiveReportByReporter ?? (() => missing('withdrawActiveReportByReporter'));
+  const dismissCaseIfNoActiveReportsImpl =
+    deps.repo?.dismissCaseIfNoActiveReports ?? (() => missing('dismissCaseIfNoActiveReports'));
 
   return createDataCardReportsService({
     now: deps.now ?? (() => new Date().toISOString()),
@@ -1001,9 +1059,29 @@ export function createDataCardReportsServiceForTests(
       createReportCase: deps.repo?.createReportCase ?? (() => missing('createReportCase')),
       getActiveReportByCaseAndReporter:
         deps.repo?.getActiveReportByCaseAndReporter ?? (() => missing('getActiveReportByCaseAndReporter')),
-      createReport: deps.repo?.createReport ?? (() => missing('createReport')),
-      updateActiveReportForReporter:
-        deps.repo?.updateActiveReportForReporter ?? (() => missing('updateActiveReportForReporter')),
+      createReport: createReportImpl,
+      createReportWithReferencesIfCaseEditable:
+        deps.repo?.createReportWithReferencesIfCaseEditable ??
+        (async (db, input) => {
+          const created = await createReportImpl(db, input);
+          await replaceReportReferencesImpl(db, {
+            reportId: created.id,
+            references: input.references,
+          });
+          return created;
+        }),
+      updateActiveReportForReporter: updateActiveReportImpl,
+      updateActiveReportForReporterWithReferencesIfCaseEditable:
+        deps.repo?.updateActiveReportForReporterWithReferencesIfCaseEditable ??
+        (async (db, input) => {
+          const updated = await updateActiveReportImpl(db, input);
+          if (!updated) return null;
+          await replaceReportReferencesImpl(db, {
+            reportId: updated.id,
+            references: input.references,
+          });
+          return updated;
+        }),
       createReportSubmissionEvent:
         deps.repo?.createReportSubmissionEvent ??
         (async (_db, input) => ({
@@ -1018,15 +1096,32 @@ export function createDataCardReportsServiceForTests(
         deps.repo?.getLatestReportSubmissionEventByReport ?? (async () => null),
       countReportSubmissionEventsByReporterSince:
         deps.repo?.countReportSubmissionEventsByReporterSince ?? (async () => 0),
-      replaceReportReferences: deps.repo?.replaceReportReferences ?? (() => missing('replaceReportReferences')),
+      replaceReportReferences: replaceReportReferencesImpl,
+      replaceReportReferencesIfCaseEditable:
+        deps.repo?.replaceReportReferencesIfCaseEditable ??
+        (async (db, input) => {
+          await replaceReportReferencesImpl(db, input);
+          return true;
+        }),
       listReportReferencesByReport:
         deps.repo?.listReportReferencesByReport ?? (async () => []),
       listActiveReportsByCase: deps.repo?.listActiveReportsByCase ?? (async () => []),
       countActiveReportsByCase: deps.repo?.countActiveReportsByCase ?? (() => missing('countActiveReportsByCase')),
-      withdrawActiveReportByReporter:
-        deps.repo?.withdrawActiveReportByReporter ?? (() => missing('withdrawActiveReportByReporter')),
-      dismissCaseIfNoActiveReports:
-        deps.repo?.dismissCaseIfNoActiveReports ?? (() => missing('dismissCaseIfNoActiveReports')),
+      withdrawActiveReportByReporter: withdrawActiveReportImpl,
+      withdrawActiveReportAndMaybeDismissCaseIfEditable:
+        deps.repo?.withdrawActiveReportAndMaybeDismissCaseIfEditable ??
+        (async (db, input) => {
+          const withdrawn = await withdrawActiveReportImpl(db, input);
+          if (!withdrawn) {
+            return { withdrawn: false, caseDismissed: false };
+          }
+          const caseDismissed = await dismissCaseIfNoActiveReportsImpl(db, {
+            caseId: input.caseId,
+            now: input.now,
+          });
+          return { withdrawn: true, caseDismissed };
+        }),
+      dismissCaseIfNoActiveReports: dismissCaseIfNoActiveReportsImpl,
       markReportCaseCreatorNotified:
         deps.repo?.markReportCaseCreatorNotified ?? (async () => false),
       clearReportCaseCreatorNotified:

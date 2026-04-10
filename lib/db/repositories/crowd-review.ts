@@ -99,6 +99,114 @@ const ACTIVE_ROUND_STATUSES: CrowdReviewRoundStatus[] = ['pending_dispatch', 'ac
 const COMPLETED_ASSIGNMENT_STATUSES: CrowdReviewAssignmentStatus[] = ['voted', 'abstained', 'expired', 'revoked'];
 const OPEN_REPORT_CASE_STATUSES: ReportCaseStatus[] = ['open', 'under_review'];
 
+type D1PreparedStatementLike = {
+  bind?: (...params: unknown[]) => D1PreparedStatementLike;
+  all: (...params: unknown[]) => Promise<unknown> | unknown;
+  run?: () => Promise<unknown>;
+};
+
+type D1ClientLike = {
+  prepare: (sqlText: string) => D1PreparedStatementLike;
+  batch?: (statements: unknown[]) => Promise<unknown[]>;
+  exec?: (sqlText: string) => unknown;
+};
+
+type D1LikeStatementResult = {
+  success?: boolean;
+  results?: unknown;
+  error?: unknown;
+};
+
+const asObject = (value: unknown): Record<string, unknown> | null =>
+  typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : null;
+
+const asArray = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
+
+const getD1Client = (db: AppDrizzleDb): D1ClientLike => {
+  const client = (db as unknown as { $client?: unknown }).$client;
+  const prepare = asObject(client)?.prepare;
+  if (typeof prepare !== 'function') {
+    throw new Error('Drizzle D1 client 不可用：未检测到 prepare 方法');
+  }
+  return client as D1ClientLike;
+};
+
+const parseStatementRows = (raw: unknown): Record<string, unknown>[] => {
+  if (Array.isArray(raw)) {
+    return raw
+      .map((row) => asObject(row))
+      .filter((row): row is Record<string, unknown> => Boolean(row));
+  }
+
+  const parsed = asObject(raw) as D1LikeStatementResult | null;
+  if (parsed?.success === false) {
+    throw new Error(typeof parsed.error === 'string' ? parsed.error : 'D1 查询失败');
+  }
+  return asArray(parsed?.results)
+    .map((row) => asObject(row))
+    .filter((row): row is Record<string, unknown> => Boolean(row));
+};
+
+type AtomicSqlStep = {
+  sqlText: string;
+  params?: unknown[];
+};
+
+const bindPreparedStatement = (
+  statement: D1PreparedStatementLike,
+  params: unknown[],
+): D1PreparedStatementLike => {
+  return typeof statement.bind === 'function' ? statement.bind(...params) : statement;
+};
+
+const executeAtomicSteps = async (
+  db: AppDrizzleDb,
+  steps: AtomicSqlStep[],
+): Promise<Record<string, unknown>[][]> => {
+  const client = getD1Client(db);
+  if (typeof client.batch === 'function') {
+    const rawResults = await client.batch(
+      steps.map((step) => bindPreparedStatement(client.prepare(step.sqlText), step.params ?? [])),
+    );
+    return rawResults.map((raw) => parseStatementRows(raw));
+  }
+
+  if (typeof client.exec !== 'function') {
+    throw new Error('Drizzle D1 client 不可用：未检测到 batch/exec 方法');
+  }
+
+  client.exec('BEGIN IMMEDIATE');
+  try {
+    const results: Record<string, unknown>[][] = [];
+    for (const step of steps) {
+      const params = step.params ?? [];
+      const statement = client.prepare(step.sqlText);
+      const raw = typeof statement.bind === 'function'
+        ? await bindPreparedStatement(statement, params).all()
+        : await statement.all(...params);
+      results.push(parseStatementRows(raw));
+    }
+    client.exec('COMMIT');
+    return results;
+  } catch (error) {
+    try {
+      client.exec('ROLLBACK');
+    } catch {}
+    throw error;
+  }
+};
+
+const toNullableString = (value: unknown): string | null => (typeof value === 'string' ? value : null);
+
+const toInteger = (value: unknown, fallback = 0): number => {
+  if (typeof value === 'number' && Number.isFinite(value)) return Math.trunc(value);
+  if (typeof value === 'string') {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return Math.trunc(parsed);
+  }
+  return fallback;
+};
+
 export async function getInspectorState(
   db: AppDrizzleDb,
   userId: number,
@@ -146,24 +254,84 @@ export async function createCrowdReviewRound(
   db: AppDrizzleDb,
   input: CreateCrowdReviewRoundInput,
 ): Promise<CrowdReviewRoundRow> {
-  const rows = await db
-    .insert(crowdReviewRounds)
-    .values({
-      id: input.id,
-      reportCaseId: input.reportCaseId,
-      status: input.status,
-      openedAt: input.openedAt,
-      deadlineAt: input.deadlineAt,
-      extensionCount: input.extensionCount,
-      minValidVotes: input.minValidVotes,
-      resultCode: input.resultCode,
-      resultSummaryJson: input.resultSummaryJson,
-      createdAt: input.now,
-      updatedAt: input.now,
-    })
-    .returning();
+  const [updatedCaseRows, insertedRoundRows] = await executeAtomicSteps(db, [
+    {
+      sqlText: `
+        UPDATE report_cases
+        SET status = 'under_review', updated_at = ?
+        WHERE id = ?
+          AND status IN ('open', 'under_review')
+        RETURNING id
+      `,
+      params: [input.now, input.reportCaseId],
+    },
+    {
+      sqlText: `
+        INSERT INTO crowd_review_rounds (
+          id,
+          report_case_id,
+          status,
+          opened_at,
+          deadline_at,
+          extension_count,
+          min_valid_votes,
+          result_code,
+          result_summary_json,
+          created_at,
+          updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        RETURNING
+          id,
+          report_case_id AS reportCaseId,
+          status,
+          opened_at AS openedAt,
+          deadline_at AS deadlineAt,
+          extension_count AS extensionCount,
+          min_valid_votes AS minValidVotes,
+          result_code AS resultCode,
+          result_summary_json AS resultSummaryJson,
+          created_at AS createdAt,
+          updated_at AS updatedAt
+      `,
+      params: [
+        input.id,
+        input.reportCaseId,
+        input.status,
+        input.openedAt,
+        input.deadlineAt,
+        input.extensionCount,
+        input.minValidVotes,
+        input.resultCode,
+        input.resultSummaryJson,
+        input.now,
+        input.now,
+      ],
+    },
+  ]);
 
-  return rows[0]!;
+  if (updatedCaseRows.length === 0) {
+    throw new Error('案件状态已变化，当前不可进入众查');
+  }
+
+  const row = insertedRoundRows[0];
+  if (!row) {
+    throw new Error('众查轮次创建失败');
+  }
+
+  return {
+    id: String(row.id ?? ''),
+    reportCaseId: String(row.reportCaseId ?? ''),
+    status: row.status as CrowdReviewRoundStatus,
+    openedAt: String(row.openedAt ?? ''),
+    deadlineAt: String(row.deadlineAt ?? ''),
+    extensionCount: toInteger(row.extensionCount, 0),
+    minValidVotes: toInteger(row.minValidVotes, 0),
+    resultCode: toNullableString(row.resultCode) as CrowdReviewResultCode | null,
+    resultSummaryJson: String(row.resultSummaryJson ?? '{}'),
+    createdAt: String(row.createdAt ?? ''),
+    updatedAt: String(row.updatedAt ?? ''),
+  };
 }
 
 export async function createCrowdReviewAssignment(

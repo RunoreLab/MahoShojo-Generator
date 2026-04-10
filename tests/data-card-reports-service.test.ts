@@ -139,6 +139,52 @@ describe('data card reports service', () => {
     expect(capability.ownerModerationSummary?.latestCaseId).toBe('case-1');
   });
 
+  test('getDataCardReportCapability still returns ownerModerationSummary when the target card is no longer publicly readable', async () => {
+    const service = buildService({
+      getTargetCard: async () => null,
+      repo: {
+        getLatestReportCaseByTarget: async () => ({
+          id: 'case-removed',
+          targetEntityType: 'data_card',
+          targetEntityId: 'card-1',
+          targetUserId: 2,
+          status: 'resolved',
+          resolutionCode: 'content_removed',
+          creatorNotifiedAt: null,
+          creatorNotifiedReportCount: 1,
+          latestReportedAt: now,
+          targetCardUpdatedAtAtNotice: null,
+          resolutionNotifiedAt: now,
+          resolutionNotifiedCaseUpdatedAt: now,
+          closedAt: now,
+          createdAt: now,
+          updatedAt: now,
+        }),
+      } as any,
+      getOwnerModerationSummary: async () => ({
+        latestCaseId: 'case-removed',
+        status: 'resolved',
+        resolutionCode: 'content_removed',
+        canAppeal: true,
+        activeAppealId: null,
+        activeAppealStatus: null,
+        appealEntryUrl: '/report-appeals?reportCaseId=case-removed',
+        statusSummary: '该卡已下架，但仍可在详情页查看处理结果并发起申诉。',
+      }),
+    } as any);
+
+    const capability = await service.getDataCardReportCapability({
+      db: {} as never,
+      viewerUserId: 2,
+      targetEntityId: 'card-1',
+    });
+
+    expect(capability.canReport).toBe(false);
+    expect(capability.reportDisabledReason).toBe('该数据卡当前不可举报');
+    expect(capability.ownerModerationSummary?.canAppeal).toBe(true);
+    expect(capability.ownerModerationSummary?.latestCaseId).toBe('case-removed');
+  });
+
   test('same user changed payload updates active report after passing screening', async () => {
     let updateCalled = false;
     const service = buildService({

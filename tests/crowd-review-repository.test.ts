@@ -166,6 +166,51 @@ describe('crowd review repository', () => {
     ).rejects.toThrow();
   });
 
+  test('createCrowdReviewRound marks the report case as under_review when an active round is opened', async () => {
+    await createCrowdReviewRound(db, {
+      id: 'round-1',
+      reportCaseId: 'case-1',
+      status: 'active',
+      openedAt: '2026-04-08T10:20:00.000Z',
+      deadlineAt: '2026-04-08T11:20:00.000Z',
+      extensionCount: 0,
+      minValidVotes: 3,
+      resultCode: null,
+      resultSummaryJson: '{}',
+      now: '2026-04-08T10:20:00.000Z',
+    });
+
+    const caseRow = await db.query.reportCases.findFirst({
+      where: (fields, { eq }) => eq(fields.id, 'case-1'),
+    });
+
+    expect(caseRow?.status).toBe('under_review');
+    expect(caseRow?.updatedAt).toBe('2026-04-08T10:20:00.000Z');
+  });
+
+  test('createCrowdReviewRound rejects dismissed report cases', async () => {
+    exec(`
+      UPDATE report_cases
+      SET status = 'dismissed', updated_at = '2026-04-08T10:18:00.000Z', closed_at = '2026-04-08T10:18:00.000Z'
+      WHERE id = 'case-2';
+    `);
+
+    await expect(
+      createCrowdReviewRound(db, {
+        id: 'round-dismissed',
+        reportCaseId: 'case-2',
+        status: 'pending_dispatch',
+        openedAt: '2026-04-08T10:20:00.000Z',
+        deadlineAt: '2026-04-08T11:20:00.000Z',
+        extensionCount: 0,
+        minValidVotes: 3,
+        resultCode: null,
+        resultSummaryJson: '{}',
+        now: '2026-04-08T10:20:00.000Z',
+      }),
+    ).rejects.toThrow('案件状态已变化');
+  });
+
   test('enforces one active assignment per inspector at a time', async () => {
     await createCrowdReviewRound(db, {
       id: 'round-1',
