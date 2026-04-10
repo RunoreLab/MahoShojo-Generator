@@ -48,17 +48,13 @@ describe('messages service', () => {
     expect(summary.crowdReviewPrompt).toBeNull();
   });
 
-  test('summary degrades crowd review prompt when optional summary lookup throws unexpected runtime error', async () => {
+  test('summary rethrows unexpected runtime error from optional crowd review lookup', async () => {
     const service = buildMessagesService({
       getCrowdReviewPromptSummary: async () => {
         throw new Error('crowd review tables mismatch');
       },
     });
 
-    const summary = await service.getSummary({ userId: 7 });
-
-    expect(summary.unreadTotal).toBe(0);
-    expect(summary.hasCrowdReviewPending).toBe(false);
-    expect(summary.crowdReviewPrompt).toBeNull();
+    await expect(service.getSummary({ userId: 7 })).rejects.toThrow('crowd review tables mismatch');
   });
 });

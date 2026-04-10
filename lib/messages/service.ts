@@ -169,6 +169,9 @@ export class UnauthorizedMessagesFilterError extends Error {
   }
 }
 
+const isCrowdReviewUnavailableError = (error: unknown): boolean =>
+  error instanceof Error && error.name === 'CrowdReviewServiceUnavailableError';
+
 const createMessagesService = (deps: MessagesServiceDeps) => {
   const resolveState = async (userId: number): Promise<ServiceUserMessageStateRow> =>
     (await deps.repo.getUserMessageState({ userId })) ?? {
@@ -218,9 +221,16 @@ const createMessagesService = (deps: MessagesServiceDeps) => {
       ].sort(compareMessageSortKeys);
 
       const emptyCrowdReviewSummary = { hasCrowdReviewPending: false, crowdReviewPrompt: null };
-      const crowdReviewSummary = deps.getCrowdReviewPromptSummary
-        ? await deps.getCrowdReviewPromptSummary({ userId: input.userId }).catch(() => emptyCrowdReviewSummary)
-        : emptyCrowdReviewSummary;
+      let crowdReviewSummary = emptyCrowdReviewSummary;
+      if (deps.getCrowdReviewPromptSummary) {
+        try {
+          crowdReviewSummary = await deps.getCrowdReviewPromptSummary({ userId: input.userId });
+        } catch (error) {
+          if (!isCrowdReviewUnavailableError(error)) {
+            throw error;
+          }
+        }
+      }
 
       return {
         unreadTotal: siteUnread + directUnread,

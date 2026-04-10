@@ -43,12 +43,21 @@ describe('ReportAppealsPage', () => {
           appealReasonCode: 'missing_context',
           status: 'resolved',
           resolutionCode: 'upheld',
-          resolutionNote: '维持原判',
+          resolutionNote: '管理员备注：维持原判，现有证据不足以推翻原结论',
           caseUpdatedAtSnapshot: '2026-04-10T01:20:00.000Z',
           createdAt: '2026-04-10T01:30:00.000Z',
           updatedAt: '2026-04-10T01:40:00.000Z',
           details: '补充说明',
-          references: [],
+          references: [
+            {
+              referenceType: 'encyclopedia_entry',
+              referenceId: 'community-rules',
+              labelSnapshot: '社区守则',
+              urlSnapshot: '/encyclopedia/community-rules',
+              note: '需要核对处理依据',
+              sortOrder: 0,
+            },
+          ],
           caseSnapshot: {
             status: 'resolved',
             resolutionCode: 'confirmed_violation',
@@ -66,6 +75,12 @@ describe('ReportAppealsPage', () => {
 
     expect(html).toContain('补充说明');
     expect(html).toContain('已结案');
+    expect(html).toContain('管理员备注：维持原判，现有证据不足以推翻原结论');
+    expect(html).toContain('社区守则');
+    expect(html).toContain('需要核对处理依据');
+    expect(html).toContain('案件快照');
+    expect(html).toContain('当前案件');
+    expect(html).toContain('确认违规');
   });
 
   test('renders existing appeal status card instead of empty form when entry already exists', async () => {

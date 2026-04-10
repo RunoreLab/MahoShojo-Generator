@@ -176,6 +176,58 @@ describe('report appeals service', () => {
     expect(createCalled).toBe(false);
   });
 
+  test('submit returns existing in-flight appeal without rewriting references when resubmitted evidence differs', async () => {
+    let replaceCalled = false;
+    let resolveCalled = false;
+    const service = buildService({
+      repo: {
+        getAppealableCaseForUser: async () => makeCaseRow(),
+        getLatestNonWithdrawnAppealByCaseSnapshot: async () => makeAppealRow({ status: 'submitted' }),
+        listReportAppealReferences: async () => [
+          {
+            appealId: 'appeal-1',
+            referenceType: 'public_data_card',
+            referenceId: 'card-old',
+            labelSnapshot: '旧引用',
+            urlSnapshot: '/character-manager?dataCardId=card-old',
+            note: '旧备注',
+            sortOrder: 0,
+          },
+        ],
+        replaceReportAppealReferences: async () => {
+          replaceCalled = true;
+        },
+      },
+      resolveReferenceSnapshots: async () => {
+        resolveCalled = true;
+        return [
+          {
+            referenceType: 'encyclopedia_entry',
+            referenceId: 'community-rules',
+            labelSnapshot: '社区守则',
+            urlSnapshot: '/encyclopedia/community-rules',
+            note: '新备注',
+            sortOrder: 0,
+          },
+        ];
+      },
+    });
+
+    const result = await service.submitReportAppeal({
+      db: {} as never,
+      userId: 2,
+      reportCaseId: 'case-1',
+      caseUpdatedAtSnapshot: '2026-04-10T01:20:00.000Z',
+      appealReasonCode: 'missing_context',
+      details: '补充说明',
+      references: [{ referenceType: 'encyclopedia_entry', referenceId: 'community-rules', note: '新备注' }],
+    });
+
+    expect(result.appealId).toBe('appeal-1');
+    expect(resolveCalled).toBe(false);
+    expect(replaceCalled).toBe(false);
+  });
+
   test('submit allows a new record after the same snapshot was previously withdrawn', async () => {
     let createCalled = false;
     const service = buildService({
@@ -215,7 +267,7 @@ describe('report appeals service', () => {
         getLatestNonWithdrawnAppealByCaseSnapshot: async () => existingAppeal,
         getActiveAppealByCase: async () => null,
         createReportAppeal: async (_db, input) => {
-          existingAppeal = makeAppealRow({ id: input.id });
+          existingAppeal = makeAppealRow({ id: input.id, evidenceSummaryJson: input.evidenceSummaryJson });
           return existingAppeal;
         },
         listReportAppealReferences: async () => writtenReferences as any,

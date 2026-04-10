@@ -36,6 +36,15 @@ type ResolvedAppealReferenceSnapshot = {
   sortOrder: number;
 };
 
+type StoredAppealReferenceSummary = {
+  referenceType: ReportReferenceType;
+  referenceId: string;
+  labelSnapshot: string;
+  urlSnapshot: string | null;
+  note: string | null;
+  sortOrder: number;
+};
+
 type ReportAppealsRepository = {
   getAppealableCaseForUser: typeof repo.getAppealableCaseForUser;
   getLatestNonWithdrawnAppealByCaseSnapshot: typeof repo.getLatestNonWithdrawnAppealByCaseSnapshot;
@@ -229,29 +238,87 @@ const canonicalizeAppealReferenceIdentity = (
     )
     .sort();
 
-const hasMatchingAppealReferences = (
+const hasMatchingAppealReferenceIdentity = (
   currentReferences: Array<{
     referenceType: string;
     referenceId: string;
     note: string | null;
     sortOrder: number;
   }>,
-  submittedReferences: ReportAppealReferenceDraft[],
+  expectedReferences: Array<{
+    referenceType: string;
+    referenceId: string;
+    note: string | null;
+    sortOrder: number;
+  }>,
 ): boolean => {
-  if (currentReferences.length !== submittedReferences.length) return false;
+  if (currentReferences.length !== expectedReferences.length) return false;
 
   const currentCanonical = canonicalizeAppealReferenceIdentity(currentReferences);
-  const submittedCanonical = canonicalizeAppealReferenceIdentity(
-    submittedReferences.map((reference, index) => ({
-      referenceType: reference.referenceType,
-      referenceId: reference.referenceId,
-      note: normalizeAppealReferenceNote(reference.note),
-      sortOrder: index,
-    })),
-  );
+  const expectedCanonical = canonicalizeAppealReferenceIdentity(expectedReferences);
 
-  return submittedCanonical.every((referenceKey, index) => currentCanonical[index] === referenceKey);
+  return expectedCanonical.every((referenceKey, index) => currentCanonical[index] === referenceKey);
 };
+
+const buildAppealReferenceFallbackUrl = (referenceType: ReportReferenceType, referenceId: string): string | null => {
+  if (referenceType === 'public_data_card') {
+    return `/character-manager?dataCardId=${encodeURIComponent(referenceId)}`;
+  }
+
+  const entry = getEncyclopediaEntry(referenceId);
+  return entry ? `/encyclopedia/${entry.slug}` : null;
+};
+
+const parseStoredAppealReferenceSummaries = (raw: string): StoredAppealReferenceSummary[] => {
+  try {
+    const parsed = JSON.parse(raw) as { references?: unknown };
+    if (!Array.isArray(parsed.references)) return [];
+
+    return parsed.references.flatMap((reference, index) => {
+      const item = reference as Record<string, unknown> | null;
+      const referenceType = item?.referenceType;
+      const referenceId = item?.referenceId;
+
+      if (!isReportReferenceType(referenceType) || typeof referenceId !== 'string' || !referenceId.trim()) {
+        return [];
+      }
+
+      return [{
+        referenceType,
+        referenceId,
+        labelSnapshot:
+          typeof item?.labelSnapshot === 'string' && item.labelSnapshot.trim()
+            ? item.labelSnapshot.trim()
+            : referenceId,
+        urlSnapshot:
+          typeof item?.urlSnapshot === 'string'
+            ? item.urlSnapshot
+            : buildAppealReferenceFallbackUrl(referenceType, referenceId),
+        note: normalizeAppealReferenceNote(
+          typeof item?.note === 'string' || item?.note == null ? (item?.note as string | null | undefined) : null,
+        ),
+        sortOrder:
+          typeof item?.sortOrder === 'number' && Number.isFinite(item.sortOrder)
+            ? Math.max(0, Math.trunc(item.sortOrder))
+            : index,
+      }];
+    });
+  } catch {
+    return [];
+  }
+};
+
+const mapStoredAppealReferencesToSnapshots = (
+  references: StoredAppealReferenceSummary[],
+): ResolvedAppealReferenceSnapshot[] =>
+  references.map((reference) => ({
+    referenceType: reference.referenceType,
+    referenceId: reference.referenceId,
+    labelSnapshot: reference.labelSnapshot,
+    urlSnapshot: reference.urlSnapshot,
+    note: reference.note,
+    sortOrder: reference.sortOrder,
+  }));
 
 const buildAppealStatusSummary = (input: {
   resolutionCode: ReportResolutionCode | null;
@@ -360,7 +427,9 @@ const buildEvidenceSummaryJson = (references: ResolvedAppealReferenceSnapshot[])
       referenceType: reference.referenceType,
       referenceId: reference.referenceId,
       labelSnapshot: reference.labelSnapshot,
+      urlSnapshot: reference.urlSnapshot,
       note: reference.note,
+      sortOrder: reference.sortOrder,
     })),
   });
 
@@ -416,25 +485,22 @@ const createReportAppealsService = (deps: ReportAppealsServiceDeps) => ({
       throw new ReportAppealUnprocessableError('案件结果快照已变化，请刷新后重新确认');
     }
 
-    const repairAppealReferencesIfNeeded = async (appealId: string) => {
-      if (input.references.length === 0) return;
+    const repairAppealReferencesIfNeeded = async (appeal: { id: string; evidenceSummaryJson: string }) => {
+      const storedReferences = parseStoredAppealReferenceSummaries(appeal.evidenceSummaryJson);
+      if (storedReferences.length === 0) return;
 
-      const currentReferences = await deps.repo.listReportAppealReferences(db, appealId);
-      if (hasMatchingAppealReferences(currentReferences, input.references)) {
+      const currentReferences = await deps.repo.listReportAppealReferences(db, appeal.id);
+      if (hasMatchingAppealReferenceIdentity(currentReferences, storedReferences)) {
         return;
       }
 
-      const referenceSnapshots = await deps.resolveReferenceSnapshots({
-        db,
-        targetEntityId: reportCase.targetEntityId,
-        references: input.references,
-      });
+      const referenceSnapshots = mapStoredAppealReferencesToSnapshots(storedReferences);
       const repairNow = deps.now();
 
       await deps.repo.replaceReportAppealReferences(db, {
-        appealId,
+        appealId: appeal.id,
         references: referenceSnapshots.map((reference, index) => ({
-          id: `${appealId}-ref-${index + 1}`,
+          id: `${appeal.id}-ref-${index + 1}`,
           referenceType: reference.referenceType,
           referenceId: reference.referenceId,
           labelSnapshot: reference.labelSnapshot,
@@ -452,7 +518,7 @@ const createReportAppealsService = (deps: ReportAppealsServiceDeps) => ({
     });
     if (existingAppeal) {
       if (canRepairExistingAppealReferences(existingAppeal.status)) {
-        await repairAppealReferencesIfNeeded(existingAppeal.id);
+        await repairAppealReferencesIfNeeded(existingAppeal);
       }
       return {
         appealId: existingAppeal.id,
@@ -509,7 +575,7 @@ const createReportAppealsService = (deps: ReportAppealsServiceDeps) => ({
       });
       if (racedExisting) {
         if (canRepairExistingAppealReferences(racedExisting.status)) {
-          await repairAppealReferencesIfNeeded(racedExisting.id);
+          await repairAppealReferencesIfNeeded(racedExisting);
         }
         return {
           appealId: racedExisting.id,
