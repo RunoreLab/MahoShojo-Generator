@@ -1,8 +1,14 @@
 import Head from 'next/head';
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { AdminReportCaseDetailDto, AdminReportCaseListItem } from '@/lib/admin/governance';
+import {
+  getCrowdReviewResultCodeLabel,
+  getCrowdReviewRoundStatusLabel,
+  getReportCaseStatusLabel,
+  getReportResolutionCodeLabel,
+} from '@/lib/admin/governance-labels';
 
 const formatDateTime = (value: string | null | undefined): string => {
   if (!value) return '—';
@@ -12,6 +18,57 @@ const formatDateTime = (value: string | null | undefined): string => {
 
 const formatList = (items: string[]): string => (items.length > 0 ? items.join('；') : '—');
 
+const STATUS_FILTER_OPTIONS = [
+  { value: '', label: '全部状态' },
+  { value: 'open', label: getReportCaseStatusLabel('open') },
+  { value: 'under_review', label: getReportCaseStatusLabel('under_review') },
+  { value: 'resolved', label: getReportCaseStatusLabel('resolved') },
+  { value: 'dismissed', label: getReportCaseStatusLabel('dismissed') },
+] as const;
+
+const DECISION_STATUS_OPTIONS = [
+  { value: 'resolved', label: '正式结案：违规成立' },
+  { value: 'dismissed', label: '正式结案：不构成违规 / 恶意举报' },
+  { value: 'under_review', label: '转回人工复核' },
+] as const;
+
+const RESOLVED_RESOLUTION_OPTIONS = [
+  { value: 'confirmed_violation', label: getReportResolutionCodeLabel('confirmed_violation') },
+  { value: 'content_removed', label: getReportResolutionCodeLabel('content_removed') },
+  { value: 'self_remediated', label: getReportResolutionCodeLabel('self_remediated') },
+] as const;
+
+const DISMISSED_RESOLUTION_OPTIONS = [
+  { value: 'no_violation', label: getReportResolutionCodeLabel('no_violation') },
+  { value: 'malicious_report', label: getReportResolutionCodeLabel('malicious_report') },
+] as const;
+
+type DecisionFormState = {
+  nextStatus: 'resolved' | 'dismissed' | 'under_review';
+  resolutionCode: string;
+  resolutionNote: string;
+  notifyCreator: boolean;
+  creatorMessageReason: string;
+  enableCardModeration: boolean;
+  cardModerationAction: 'reject' | 'set_public_status';
+  cardModerationValue: 0 | -1;
+  sendCardMessage: boolean;
+  cardMessageReason: string;
+};
+
+const buildDecisionFormState = (creatorMessageReason: string): DecisionFormState => ({
+  nextStatus: 'resolved',
+  resolutionCode: 'confirmed_violation',
+  resolutionNote: '',
+  notifyCreator: true,
+  creatorMessageReason,
+  enableCardModeration: true,
+  cardModerationAction: 'set_public_status',
+  cardModerationValue: -1,
+  sendCardMessage: true,
+  cardMessageReason: '公开卡违规封禁',
+});
+
 export default function AdminReportCasesPage() {
   const [items, setItems] = useState<AdminReportCaseListItem[]>([]);
   const [status, setStatus] = useState('');
@@ -19,71 +76,125 @@ export default function AdminReportCasesPage() {
   const [selectedCaseId, setSelectedCaseId] = useState<string | null>(null);
   const [detail, setDetail] = useState<AdminReportCaseDetailDto | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const detailRequestIdRef = useRef(0);
   const [sendMessage, setSendMessage] = useState(true);
   const [notifyReason, setNotifyReason] = useState('');
   const [notifySubmitting, setNotifySubmitting] = useState(false);
+  const [decisionSubmitting, setDecisionSubmitting] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
+  const [decisionForm, setDecisionForm] = useState<DecisionFormState>(() => buildDecisionFormState(''));
 
-  useEffect(() => {
-    let active = true;
+  const decisionResolutionOptions = useMemo(() => {
+    if (decisionForm.nextStatus === 'resolved') return RESOLVED_RESOLUTION_OPTIONS;
+    if (decisionForm.nextStatus === 'dismissed') return DISMISSED_RESOLUTION_OPTIONS;
+    return [];
+  }, [decisionForm.nextStatus]);
+
+  const canApplyCardModeration =
+    decisionForm.nextStatus === 'resolved' &&
+    (decisionForm.resolutionCode === 'confirmed_violation' ||
+      decisionForm.resolutionCode === 'content_removed' ||
+      decisionForm.resolutionCode === 'self_remediated');
+
+  const loadCaseList = useCallback(async () => {
     const params = new URLSearchParams();
     if (status) params.set('status', status);
 
+    setLoading(true);
+    try {
+      const response = await fetch(`/api/admin/report-cases?${params.toString()}`);
+      const payload = (await response.json()) as { items?: AdminReportCaseListItem[] };
+      setItems(Array.isArray(payload.items) ? payload.items : []);
+    } finally {
+      setLoading(false);
+    }
+  }, [status]);
+
+  const loadCaseDetail = useCallback(async (caseId: string) => {
+    const requestId = detailRequestIdRef.current + 1;
+    detailRequestIdRef.current = requestId;
+    setDetailLoading(true);
+    setFeedback(null);
+    try {
+      const response = await fetch(`/api/admin/report-cases/${encodeURIComponent(caseId)}`);
+      if (detailRequestIdRef.current !== requestId) {
+        return;
+      }
+      if (!response.ok) {
+        setDetail(null);
+        return;
+      }
+      const payload = (await response.json()) as AdminReportCaseDetailDto;
+      if (detailRequestIdRef.current !== requestId) {
+        return;
+      }
+      setDetail(payload);
+      const summaryReason = payload.aggregatedSummary.detailsPreview ?? payload.aggregatedSummary.reasonLabels.join('；');
+      setNotifyReason(summaryReason);
+      setDecisionForm(buildDecisionFormState(summaryReason));
+    } finally {
+      if (detailRequestIdRef.current === requestId) {
+        setDetailLoading(false);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+
     (async () => {
-      setLoading(true);
       try {
-        const response = await fetch(`/api/admin/report-cases?${params.toString()}`);
-        const payload = (await response.json()) as { items?: AdminReportCaseListItem[] };
+        await loadCaseList();
         if (!active) return;
-        setItems(Array.isArray(payload.items) ? payload.items : []);
       } finally {
-        if (active) setLoading(false);
+        if (!active) return;
       }
     })();
 
     return () => {
       active = false;
     };
-  }, [status]);
+  }, [loadCaseList]);
 
   useEffect(() => {
     if (!selectedCaseId) {
+      detailRequestIdRef.current += 1;
       setDetail(null);
+      setNotifyReason('');
+      setDecisionForm(buildDecisionFormState(''));
+      setFeedback(null);
       return;
     }
 
+    setDetail(null);
+    setNotifyReason('');
+    setDecisionForm(buildDecisionFormState(''));
+    setFeedback(null);
     let active = true;
     (async () => {
-      setDetailLoading(true);
-      setFeedback(null);
       try {
-        const response = await fetch(`/api/admin/report-cases/${encodeURIComponent(selectedCaseId)}`);
-        if (!response.ok) {
-          if (!active) return;
-          setDetail(null);
-          return;
-        }
-        const payload = (await response.json()) as AdminReportCaseDetailDto;
+        await loadCaseDetail(selectedCaseId);
         if (!active) return;
-        setDetail(payload);
-        setNotifyReason(payload.aggregatedSummary.detailsPreview ?? payload.aggregatedSummary.reasonLabels.join('；'));
       } finally {
-        if (active) setDetailLoading(false);
+        if (!active) return;
       }
     })();
 
     return () => {
       active = false;
     };
-  }, [selectedCaseId]);
+  }, [loadCaseDetail, selectedCaseId]);
+
+  const activeDetail = detail && detail.reportCaseId === selectedCaseId ? detail : null;
 
   const handleNotifyCreator = async () => {
-    if (!selectedCaseId) return;
+    const caseId = activeDetail?.reportCaseId;
+    if (!caseId) return;
 
     setNotifySubmitting(true);
     setFeedback(null);
     try {
-      const response = await fetch(`/api/admin/report-cases/${encodeURIComponent(selectedCaseId)}/notify-creator`, {
+      const response = await fetch(`/api/admin/report-cases/${encodeURIComponent(caseId)}/notify-creator`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -112,7 +223,7 @@ export default function AdminReportCasesPage() {
 
       setItems((current) =>
         current.map((item) =>
-          item.reportCaseId === selectedCaseId
+          item.reportCaseId === caseId
             ? {
                 ...item,
                 creatorNotifiedAt: notifyPayload.creatorNotifiedAt,
@@ -121,7 +232,7 @@ export default function AdminReportCasesPage() {
         ),
       );
       setDetail((current) =>
-        current && current.reportCaseId === selectedCaseId
+        current && current.reportCaseId === caseId
           ? {
               ...current,
               creatorNotifiedAt: notifyPayload.creatorNotifiedAt,
@@ -135,6 +246,53 @@ export default function AdminReportCasesPage() {
       );
     } finally {
       setNotifySubmitting(false);
+    }
+  };
+
+  const handleSubmitDecision = async () => {
+    const caseId = activeDetail?.reportCaseId;
+    if (!caseId) return;
+
+    setDecisionSubmitting(true);
+    setFeedback(null);
+    try {
+      const payload = {
+        nextStatus: decisionForm.nextStatus,
+        resolutionCode: decisionForm.nextStatus === 'under_review' ? null : decisionForm.resolutionCode,
+        resolutionNote: decisionForm.resolutionNote || null,
+        notifyCreator: decisionForm.notifyCreator,
+        creatorMessageReason: decisionForm.notifyCreator ? decisionForm.creatorMessageReason || null : null,
+        cardModerationAction:
+          decisionForm.enableCardModeration && canApplyCardModeration
+            ? {
+                action: decisionForm.cardModerationAction,
+                value:
+                  decisionForm.cardModerationAction === 'set_public_status'
+                    ? decisionForm.cardModerationValue
+                    : undefined,
+                messageOptions: {
+                  send: decisionForm.sendCardMessage,
+                  defaultReason: decisionForm.cardMessageReason || null,
+                },
+              }
+            : null,
+      };
+
+      const response = await fetch(`/api/admin/report-cases/${encodeURIComponent(caseId)}/decision`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const result = (await response.json()) as { error?: string; closedAt?: string | null };
+      if (!response.ok) {
+        setFeedback(result.error ?? '正式处理失败');
+        return;
+      }
+
+      await Promise.all([loadCaseList(), loadCaseDetail(caseId)]);
+      setFeedback(`正式处理已提交${result.closedAt ? `，结案时间 ${formatDateTime(result.closedAt)}` : ''}`);
+    } finally {
+      setDecisionSubmitting(false);
     }
   };
 
@@ -160,11 +318,11 @@ export default function AdminReportCasesPage() {
                 onChange={(event) => setStatus(event.target.value)}
                 className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm"
               >
-                <option value="">全部状态</option>
-                <option value="open">open</option>
-                <option value="under_review">under_review</option>
-                <option value="resolved">resolved</option>
-                <option value="dismissed">dismissed</option>
+                {STATUS_FILTER_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
               </select>
             </div>
           </div>
@@ -209,8 +367,14 @@ export default function AdminReportCasesPage() {
                           </div>
                         </td>
                         <td className="px-4 py-3">
-                          <div>{item.status}</div>
-                          <div className="mt-1 text-xs text-gray-500">{item.resolutionCode ?? '—'}</div>
+                          <div>{getReportCaseStatusLabel(item.status)}</div>
+                          <div className="mt-1 text-xs text-gray-500">
+                            {item.resolutionCode ? getReportResolutionCodeLabel(item.resolutionCode) : '未结案'}
+                          </div>
+                          <div className="mt-1 text-[11px] text-gray-400">
+                            {item.status}
+                            {item.resolutionCode ? ` · ${item.resolutionCode}` : ''}
+                          </div>
                         </td>
                         <td className="px-4 py-3">{item.activeReportCount}</td>
                         <td className="px-4 py-3">
@@ -255,7 +419,7 @@ export default function AdminReportCasesPage() {
                 <div className="rounded-xl border border-dashed border-gray-200 p-6 text-sm text-gray-500">
                   正在加载案件详情...
                 </div>
-              ) : !detail ? (
+              ) : !activeDetail ? (
                 <div className="rounded-xl border border-dashed border-rose-200 bg-rose-50 p-6 text-sm text-rose-700">
                   案件详情加载失败或已不存在。
                 </div>
@@ -263,10 +427,10 @@ export default function AdminReportCasesPage() {
                 <>
                   <div>
                     <h2 className="text-lg font-semibold text-gray-900">
-                      {detail.targetCardName ?? detail.targetCardId ?? detail.reportCaseId}
+                      {activeDetail.targetCardName ?? activeDetail.targetCardId ?? activeDetail.reportCaseId}
                     </h2>
                     <p className="mt-1 text-xs text-gray-500">
-                      case #{detail.reportCaseId} · 作者 {detail.targetUsername ?? '未知'} · 最近举报 {formatDateTime(detail.latestReportedAt)}
+                      case #{activeDetail.reportCaseId} · 作者 {activeDetail.targetUsername ?? '未知'} · 最近举报 {formatDateTime(activeDetail.latestReportedAt)}
                     </p>
                   </div>
 
@@ -274,21 +438,199 @@ export default function AdminReportCasesPage() {
                     <div className="rounded-xl bg-gray-50 p-4">
                       <div className="text-xs uppercase tracking-wide text-gray-500">案件状态</div>
                       <div className="mt-2 text-sm text-gray-900">
-                        {detail.status} / {detail.resolutionCode ?? '未结案'}
+                        {getReportCaseStatusLabel(activeDetail.status)}
+                        {activeDetail.resolutionCode ? ` / ${getReportResolutionCodeLabel(activeDetail.resolutionCode)}` : ' / 未结案'}
+                      </div>
+                      <div className="mt-1 text-xs text-gray-400">
+                        {activeDetail.status}
+                        {activeDetail.resolutionCode ? ` · ${activeDetail.resolutionCode}` : ''}
                       </div>
                       <div className="mt-2 text-xs text-gray-500">
-                        作者通知：{formatDateTime(detail.creatorNotifiedAt)}
+                        作者通知：{formatDateTime(activeDetail.creatorNotifiedAt)}
                       </div>
                       <div className="mt-1 text-xs text-gray-500">
-                        结案通知：{formatDateTime(detail.resolutionNotifiedAt)}
+                        结案通知：{formatDateTime(activeDetail.resolutionNotifiedAt)}
                       </div>
                     </div>
                     <div className="rounded-xl bg-gray-50 p-4">
                       <div className="text-xs uppercase tracking-wide text-gray-500">治理摘要</div>
-                      <div className="mt-2 text-sm text-gray-900">理由：{formatList(detail.aggregatedSummary.reasonLabels)}</div>
-                      <div className="mt-2 text-xs text-gray-500">引用：{formatList(detail.aggregatedSummary.referenceSummary)}</div>
+                      <div className="mt-2 text-sm text-gray-900">理由：{formatList(activeDetail.aggregatedSummary.reasonLabels)}</div>
+                      <div className="mt-2 text-xs text-gray-500">引用：{formatList(activeDetail.aggregatedSummary.referenceSummary)}</div>
                       <div className="mt-2 text-xs text-gray-500">
-                        补充说明：{detail.aggregatedSummary.detailsPreview ?? '—'}
+                        补充说明：{activeDetail.aggregatedSummary.detailsPreview ?? '—'}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl border border-gray-200 p-4">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-sm font-semibold text-gray-900">正式处理</h3>
+                      <span className="text-xs text-gray-500">支持正式结案、改判与数据卡处罚</span>
+                    </div>
+                    <div className="mt-3 grid gap-3">
+                      <div className="grid gap-3 md:grid-cols-2">
+                        <label className="grid gap-1 text-sm text-gray-700">
+                          <span className="font-medium">处理动作</span>
+                          <select
+                            value={decisionForm.nextStatus}
+                            onChange={(event) => {
+                              const nextStatus = event.target.value as 'resolved' | 'dismissed' | 'under_review';
+                              setDecisionForm((current) => ({
+                                ...current,
+                                nextStatus,
+                                resolutionCode:
+                                  nextStatus === 'dismissed'
+                                    ? 'no_violation'
+                                    : nextStatus === 'under_review'
+                                      ? ''
+                                      : 'confirmed_violation',
+                                enableCardModeration: nextStatus === 'resolved',
+                              }));
+                            }}
+                            className="rounded-xl border border-gray-200 px-3 py-2 text-sm"
+                          >
+                            {DECISION_STATUS_OPTIONS.map((option) => (
+                              <option key={option.value} value={option.value}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className="grid gap-1 text-sm text-gray-700">
+                          <span className="font-medium">处理结论</span>
+                          <select
+                            value={decisionForm.resolutionCode}
+                            onChange={(event) =>
+                              setDecisionForm((current) => ({ ...current, resolutionCode: event.target.value }))
+                            }
+                            disabled={decisionForm.nextStatus === 'under_review'}
+                            className="rounded-xl border border-gray-200 px-3 py-2 text-sm disabled:bg-gray-100"
+                          >
+                            {decisionForm.nextStatus === 'under_review' ? (
+                              <option value="">重新打开后不附带结论</option>
+                            ) : (
+                              decisionResolutionOptions.map((option) => (
+                                <option key={option.value} value={option.value}>
+                                  {option.label}
+                                </option>
+                              ))
+                            )}
+                          </select>
+                        </label>
+                      </div>
+                      <textarea
+                        value={decisionForm.resolutionNote}
+                        onChange={(event) =>
+                          setDecisionForm((current) => ({ ...current, resolutionNote: event.target.value }))
+                        }
+                        rows={3}
+                        className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm"
+                        placeholder="管理员备注，会随本次动作一起提交给后端。"
+                      />
+                      <label className="flex items-center gap-2 text-sm text-gray-700">
+                        <input
+                          type="checkbox"
+                          checked={decisionForm.notifyCreator}
+                          onChange={(event) =>
+                            setDecisionForm((current) => ({ ...current, notifyCreator: event.target.checked }))
+                          }
+                        />
+                        正式处理后通知作者
+                      </label>
+                      {decisionForm.notifyCreator ? (
+                        <textarea
+                          value={decisionForm.creatorMessageReason}
+                          onChange={(event) =>
+                            setDecisionForm((current) => ({ ...current, creatorMessageReason: event.target.value }))
+                          }
+                          rows={3}
+                          className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm"
+                          placeholder="写给作者的补充说明，可单独补充整改要求。"
+                        />
+                      ) : null}
+                      <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+                        <label className="flex items-center gap-2 text-sm font-medium text-amber-900">
+                          <input
+                            type="checkbox"
+                            checked={decisionForm.enableCardModeration && canApplyCardModeration}
+                            onChange={(event) =>
+                              setDecisionForm((current) => ({
+                                ...current,
+                                enableCardModeration: event.target.checked,
+                              }))
+                            }
+                            disabled={!canApplyCardModeration}
+                          />
+                          同步执行数据卡处罚
+                        </label>
+                        <p className="mt-2 text-xs text-amber-800">
+                          仅在“违规成立”结案时可用，复用内容管理后台的现有处罚链路。
+                        </p>
+                        {decisionForm.enableCardModeration && canApplyCardModeration ? (
+                          <div className="mt-3 grid gap-3">
+                            <div className="grid gap-3 md:grid-cols-2">
+                              <select
+                                value={decisionForm.cardModerationAction}
+                                onChange={(event) =>
+                                  setDecisionForm((current) => ({
+                                    ...current,
+                                    cardModerationAction: event.target.value as 'reject' | 'set_public_status',
+                                  }))
+                                }
+                                className="rounded-xl border border-amber-200 bg-white px-3 py-2 text-sm"
+                              >
+                                <option value="set_public_status">封禁公开卡</option>
+                                <option value="reject">标记审核未通过</option>
+                              </select>
+                              {decisionForm.cardModerationAction === 'set_public_status' ? (
+                                <select
+                                  value={decisionForm.cardModerationValue}
+                                  onChange={(event) =>
+                                    setDecisionForm((current) => ({
+                                      ...current,
+                                      cardModerationValue: Number(event.target.value) as 0 | -1,
+                                    }))
+                                  }
+                                  className="rounded-xl border border-amber-200 bg-white px-3 py-2 text-sm"
+                                >
+                                  <option value={-1}>封禁公开卡（-1）</option>
+                                  <option value={0}>下架为私有（0）</option>
+                                </select>
+                              ) : null}
+                            </div>
+                            <label className="flex items-center gap-2 text-sm text-amber-900">
+                              <input
+                                type="checkbox"
+                                checked={decisionForm.sendCardMessage}
+                                onChange={(event) =>
+                                  setDecisionForm((current) => ({ ...current, sendCardMessage: event.target.checked }))
+                                }
+                              />
+                              同时给作者发送处罚消息
+                            </label>
+                            <input
+                              value={decisionForm.cardMessageReason}
+                              onChange={(event) =>
+                                setDecisionForm((current) => ({ ...current, cardMessageReason: event.target.value }))
+                              }
+                              className="rounded-xl border border-amber-200 bg-white px-3 py-2 text-sm"
+                              placeholder="处罚消息默认原因"
+                            />
+                          </div>
+                        ) : null}
+                      </div>
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="text-xs text-gray-500">
+                          成功后会刷新左侧列表和当前详情。
+                        </p>
+                        <button
+                          type="button"
+                          disabled={decisionSubmitting}
+                          onClick={() => void handleSubmitDecision()}
+                          className="rounded-xl bg-rose-700 px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
+                        >
+                          {decisionSubmitting ? '提交中...' : '提交正式处理'}
+                        </button>
                       </div>
                     </div>
                   </div>
@@ -332,23 +674,23 @@ export default function AdminReportCasesPage() {
                     <div className="rounded-xl border border-gray-200 p-4">
                       <h3 className="text-sm font-semibold text-gray-900">当前目标卡</h3>
                       <div className="mt-2 text-sm text-gray-700">
-                        {detail.currentTargetCard.name ?? '未知'} · {detail.currentTargetCard.reviewStatus ?? '—'}
+                        {activeDetail.currentTargetCard.name ?? '未知'} · {activeDetail.currentTargetCard.reviewStatus ?? '—'}
                       </div>
                       <div className="mt-1 text-xs text-gray-500">
-                        更新时间：{formatDateTime(detail.currentTargetCard.updatedAt)}
+                        更新时间：{formatDateTime(activeDetail.currentTargetCard.updatedAt)}
                       </div>
                       <pre className="mt-3 max-h-56 overflow-auto rounded-lg bg-gray-50 p-3 text-xs text-gray-700">
-                        {detail.currentTargetCard.dataPreview ?? '暂无当前卡内容预览'}
+                        {activeDetail.currentTargetCard.dataPreview ?? '暂无当前卡内容预览'}
                       </pre>
                     </div>
                     <div className="rounded-xl border border-gray-200 p-4">
                       <h3 className="text-sm font-semibold text-gray-900">最近举报快照</h3>
-                      <div className="mt-2 text-sm text-gray-700">{detail.latestTargetSnapshot?.name ?? '暂无快照'}</div>
+                      <div className="mt-2 text-sm text-gray-700">{activeDetail.latestTargetSnapshot?.name ?? '暂无快照'}</div>
                       <div className="mt-1 text-xs text-gray-500">
-                        快照时间：{formatDateTime(detail.latestTargetSnapshot?.updatedAt)}
+                        快照时间：{formatDateTime(activeDetail.latestTargetSnapshot?.updatedAt)}
                       </div>
                       <pre className="mt-3 max-h-56 overflow-auto rounded-lg bg-gray-50 p-3 text-xs text-gray-700">
-                        {detail.latestTargetSnapshot?.dataPreview ?? '暂无快照内容预览'}
+                        {activeDetail.latestTargetSnapshot?.dataPreview ?? '暂无快照内容预览'}
                       </pre>
                     </div>
                   </div>
@@ -356,10 +698,10 @@ export default function AdminReportCasesPage() {
                   <div className="rounded-xl border border-gray-200 p-4">
                     <h3 className="text-sm font-semibold text-gray-900">活跃举报材料</h3>
                     <div className="mt-3 space-y-3">
-                      {detail.activeReports.length === 0 ? (
+                      {activeDetail.activeReports.length === 0 ? (
                         <div className="text-sm text-gray-500">暂无活跃举报。</div>
                       ) : (
-                        detail.activeReports.map((report) => (
+                        activeDetail.activeReports.map((report) => (
                           <div key={report.reportId} className="rounded-xl bg-gray-50 p-4">
                             <div className="flex flex-wrap items-center gap-2">
                               <span className="text-sm font-medium text-gray-900">{report.reasonLabel}</span>
@@ -396,16 +738,21 @@ export default function AdminReportCasesPage() {
                     <div className="rounded-xl border border-gray-200 p-4">
                       <h3 className="text-sm font-semibold text-gray-900">众查轮次</h3>
                       <div className="mt-3 space-y-2">
-                        {detail.crowdReviewRounds.length === 0 ? (
+                        {activeDetail.crowdReviewRounds.length === 0 ? (
                           <div className="text-sm text-gray-500">暂无众查轮次。</div>
                         ) : (
-                          detail.crowdReviewRounds.map((round) => (
+                          activeDetail.crowdReviewRounds.map((round) => (
                             <div key={round.roundId} className="rounded-lg bg-gray-50 p-3 text-sm text-gray-700">
                               <div className="font-medium">
-                                round #{round.roundId} · {round.status}
+                                round #{round.roundId} · {getCrowdReviewRoundStatusLabel(round.status)}
                               </div>
                               <div className="mt-1 text-xs text-gray-500">
-                                截止 {formatDateTime(round.deadlineAt)} · 结果 {round.resultCode ?? '—'}
+                                截止 {formatDateTime(round.deadlineAt)} · 结果{' '}
+                                {round.resultCode ? getCrowdReviewResultCodeLabel(round.resultCode) : '—'}
+                              </div>
+                              <div className="mt-1 text-[11px] text-gray-400">
+                                {round.status}
+                                {round.resultCode ? ` · ${round.resultCode}` : ''}
                               </div>
                             </div>
                           ))
@@ -415,10 +762,10 @@ export default function AdminReportCasesPage() {
                     <div className="rounded-xl border border-gray-200 p-4">
                       <h3 className="text-sm font-semibold text-gray-900">关联申诉</h3>
                       <div className="mt-3 space-y-2">
-                        {detail.appeals.length === 0 ? (
+                        {activeDetail.appeals.length === 0 ? (
                           <div className="text-sm text-gray-500">暂无申诉。</div>
                         ) : (
-                          detail.appeals.map((appeal) => (
+                          activeDetail.appeals.map((appeal) => (
                             <div key={appeal.appealId} className="rounded-lg bg-gray-50 p-3 text-sm text-gray-700">
                               <div className="font-medium">
                                 appeal #{appeal.appealId} · {appeal.status}

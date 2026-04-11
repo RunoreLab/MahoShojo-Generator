@@ -1,8 +1,12 @@
 import Head from 'next/head';
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { AdminCrowdReviewCaseDetailDto, AdminCrowdReviewCaseListItem } from '@/lib/admin/governance';
+import {
+  getCrowdReviewResultCodeLabel,
+  getCrowdReviewRoundStatusLabel,
+} from '@/lib/admin/governance-labels';
 
 const formatDateTime = (value: string | null | undefined): string => {
   if (!value) return '—';
@@ -16,6 +20,16 @@ const stringifySummary = (value: Record<string, unknown>): string => {
   return JSON.stringify(value, null, 2);
 };
 
+const STATUS_FILTER_OPTIONS = [
+  { value: '', label: '全部状态' },
+  { value: 'pending_dispatch', label: getCrowdReviewRoundStatusLabel('pending_dispatch') },
+  { value: 'active', label: getCrowdReviewRoundStatusLabel('active') },
+  { value: 'waiting_more_votes', label: getCrowdReviewRoundStatusLabel('waiting_more_votes') },
+  { value: 'concluded', label: getCrowdReviewRoundStatusLabel('concluded') },
+  { value: 'escalated', label: getCrowdReviewRoundStatusLabel('escalated') },
+  { value: 'cancelled', label: getCrowdReviewRoundStatusLabel('cancelled') },
+] as const;
+
 export default function AdminCrowdReviewCasesPage() {
   const [items, setItems] = useState<AdminCrowdReviewCaseListItem[]>([]);
   const [status, setStatus] = useState('');
@@ -23,56 +37,140 @@ export default function AdminCrowdReviewCasesPage() {
   const [selectedRoundId, setSelectedRoundId] = useState<string | null>(null);
   const [detail, setDetail] = useState<AdminCrowdReviewCaseDetailDto | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const detailRequestIdRef = useRef(0);
+  const [actionFeedback, setActionFeedback] = useState<string | null>(null);
+  const [actionSubmitting, setActionSubmitting] = useState<'take-over' | 'cancel' | 'override' | null>(null);
+  const [takeOverReason, setTakeOverReason] = useState('管理员接管处理');
+  const [cancelReason, setCancelReason] = useState('管理员撤销当前众查轮次');
+  const [overrideDecision, setOverrideDecision] = useState<'violation' | 'no_violation' | 'reopen_under_review'>(
+    'violation',
+  );
+  const [overrideReason, setOverrideReason] = useState('管理员改判');
 
-  useEffect(() => {
-    let active = true;
+  const loadRoundList = useCallback(async () => {
     const params = new URLSearchParams();
     if (status) params.set('status', status);
 
+    setLoading(true);
+    try {
+      const response = await fetch(`/api/admin/crowd-review/cases?${params.toString()}`);
+      const payload = (await response.json()) as { items?: AdminCrowdReviewCaseListItem[] };
+      setItems(Array.isArray(payload.items) ? payload.items : []);
+    } finally {
+      setLoading(false);
+    }
+  }, [status]);
+
+  const loadRoundDetail = useCallback(async (roundId: string) => {
+    const requestId = detailRequestIdRef.current + 1;
+    detailRequestIdRef.current = requestId;
+    setDetailLoading(true);
+    setActionFeedback(null);
+    try {
+      const response = await fetch(`/api/admin/crowd-review/cases/${encodeURIComponent(roundId)}`);
+      if (detailRequestIdRef.current !== requestId) {
+        return;
+      }
+      if (!response.ok) {
+        setDetail(null);
+        return;
+      }
+      const payload = (await response.json()) as AdminCrowdReviewCaseDetailDto;
+      if (detailRequestIdRef.current !== requestId) {
+        return;
+      }
+      setDetail(payload);
+    } finally {
+      if (detailRequestIdRef.current === requestId) {
+        setDetailLoading(false);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+
     (async () => {
-      setLoading(true);
       try {
-        const response = await fetch(`/api/admin/crowd-review/cases?${params.toString()}`);
-        const payload = (await response.json()) as { items?: AdminCrowdReviewCaseListItem[] };
+        await loadRoundList();
         if (!active) return;
-        setItems(Array.isArray(payload.items) ? payload.items : []);
       } finally {
-        if (active) setLoading(false);
+        if (!active) return;
       }
     })();
 
     return () => {
       active = false;
     };
-  }, [status]);
+  }, [loadRoundList]);
 
   useEffect(() => {
     if (!selectedRoundId) {
+      detailRequestIdRef.current += 1;
       setDetail(null);
+      setActionFeedback(null);
       return;
     }
 
+    setDetail(null);
+    setActionFeedback(null);
+    setTakeOverReason('管理员接管处理');
+    setCancelReason('管理员撤销当前众查轮次');
+    setOverrideDecision('violation');
+    setOverrideReason('管理员改判');
     let active = true;
     (async () => {
-      setDetailLoading(true);
       try {
-        const response = await fetch(`/api/admin/crowd-review/cases/${encodeURIComponent(selectedRoundId)}`);
-        if (!response.ok) {
-          if (!active) return;
-          setDetail(null);
-          return;
-        }
-        const payload = (await response.json()) as AdminCrowdReviewCaseDetailDto;
-        if (active) setDetail(payload);
+        await loadRoundDetail(selectedRoundId);
       } finally {
-        if (active) setDetailLoading(false);
+        if (!active) return;
       }
     })();
 
     return () => {
       active = false;
     };
-  }, [selectedRoundId]);
+  }, [loadRoundDetail, selectedRoundId]);
+
+  const activeDetail = detail && detail.roundId === selectedRoundId ? detail : null;
+
+  const runRoundAction = async (
+    action: 'take-over' | 'cancel' | 'override',
+    payload: Record<string, unknown>,
+  ) => {
+    const roundId = activeDetail?.roundId;
+    if (!roundId) return;
+
+    setActionSubmitting(action);
+    setActionFeedback(null);
+    try {
+      const response = await fetch(
+        `/api/admin/crowd-review/cases/${encodeURIComponent(roundId)}/${action}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        },
+      );
+      const result = (await response.json()) as {
+        error?: string;
+        roundStatus?: string;
+        reportCaseStatus?: string;
+        revokedAssignmentsCount?: number;
+      };
+      if (!response.ok) {
+        setActionFeedback(result.error ?? '众查动作执行失败');
+        return;
+      }
+
+      await Promise.all([loadRoundList(), loadRoundDetail(roundId)]);
+      setActionFeedback(
+        `操作已完成：轮次 ${result.roundStatus ?? '已更新'}，案件 ${result.reportCaseStatus ?? '已更新'}，撤销派单 ${result.revokedAssignmentsCount ?? 0} 条。`,
+      );
+    } finally {
+      setActionSubmitting(null);
+    }
+  };
 
   return (
     <>
@@ -87,7 +185,7 @@ export default function AdminCrowdReviewCasesPage() {
           <div className="rounded-2xl bg-white p-6 shadow-sm">
             <h1 className="text-2xl font-bold text-gray-900">众查案件</h1>
             <p className="mt-3 text-sm leading-6 text-gray-600">
-              查看众查轮次状态、投票/派单明细、目标卡和案件联动。管理员接管、撤销轮次和改判动作已预留入口。
+              查看众查轮次状态、投票/派单明细、目标卡和案件联动，并可直接执行接管、撤销和管理员改判。
             </p>
             <div className="mt-4 w-full max-w-xs">
               <label className="mb-1 block text-sm font-medium text-gray-700">轮次状态</label>
@@ -96,13 +194,11 @@ export default function AdminCrowdReviewCasesPage() {
                 onChange={(event) => setStatus(event.target.value)}
                 className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm"
               >
-                <option value="">全部状态</option>
-                <option value="pending_dispatch">pending_dispatch</option>
-                <option value="active">active</option>
-                <option value="waiting_more_votes">waiting_more_votes</option>
-                <option value="concluded">concluded</option>
-                <option value="escalated">escalated</option>
-                <option value="cancelled">cancelled</option>
+                {STATUS_FILTER_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
               </select>
             </div>
           </div>
@@ -145,14 +241,18 @@ export default function AdminCrowdReviewCasesPage() {
                             round #{item.roundId} · case #{item.reportCaseId}
                           </div>
                         </td>
-                        <td className="px-4 py-3">{item.status}</td>
+                        <td className="px-4 py-3">
+                          <div>{getCrowdReviewRoundStatusLabel(item.status)}</div>
+                          <div className="mt-1 text-[11px] text-gray-400">{item.status}</div>
+                        </td>
                         <td className="px-4 py-3">
                           已投 {item.votedCount} / 总派单 {item.assignmentCount} / 进行中 {item.activeAssignmentCount}
                         </td>
                         <td className="px-4 py-3 text-gray-500">{formatDateTime(item.deadlineAt)}</td>
                         <td className="px-4 py-3">
-                          <div>{item.resultCode ?? '—'}</div>
+                          <div>{item.resultCode ? getCrowdReviewResultCodeLabel(item.resultCode) : '—'}</div>
                           <div className="mt-1 text-xs text-gray-500">minValidVotes={item.minValidVotes}</div>
+                          <div className="mt-1 text-[11px] text-gray-400">{item.resultCode ?? '—'}</div>
                         </td>
                         <td className="px-4 py-3">
                           <button
@@ -179,7 +279,7 @@ export default function AdminCrowdReviewCasesPage() {
                 <div className="rounded-xl border border-dashed border-gray-200 p-6 text-sm text-gray-500">
                   正在加载轮次详情...
                 </div>
-              ) : !detail ? (
+              ) : !activeDetail ? (
                 <div className="rounded-xl border border-dashed border-rose-200 bg-rose-50 p-6 text-sm text-rose-700">
                   轮次详情加载失败或已不存在。
                 </div>
@@ -187,54 +287,121 @@ export default function AdminCrowdReviewCasesPage() {
                 <>
                   <div>
                     <h2 className="text-lg font-semibold text-gray-900">
-                      {detail.targetCardName ?? detail.targetCardId ?? detail.roundId}
+                      {activeDetail.targetCardName ?? activeDetail.targetCardId ?? activeDetail.roundId}
                     </h2>
                     <p className="mt-1 text-xs text-gray-500">
-                      round #{detail.roundId} · case #{detail.reportCaseId} · 作者 {detail.targetUsername ?? '未知'}
+                      round #{activeDetail.roundId} · case #{activeDetail.reportCaseId} · 作者 {activeDetail.targetUsername ?? '未知'}
                     </p>
                   </div>
 
                   <div className="grid gap-3 sm:grid-cols-2">
                     <div className="rounded-xl bg-gray-50 p-4">
                       <div className="text-xs uppercase tracking-wide text-gray-500">轮次状态</div>
-                      <div className="mt-2 text-sm text-gray-900">{detail.status}</div>
-                      <div className="mt-2 text-xs text-gray-500">开始：{formatDateTime(detail.openedAt)}</div>
-                      <div className="mt-1 text-xs text-gray-500">截止：{formatDateTime(detail.deadlineAt)}</div>
+                      <div className="mt-2 text-sm text-gray-900">{getCrowdReviewRoundStatusLabel(activeDetail.status)}</div>
+                      <div className="mt-1 text-xs text-gray-400">{activeDetail.status}</div>
+                      <div className="mt-2 text-xs text-gray-500">开始：{formatDateTime(activeDetail.openedAt)}</div>
+                      <div className="mt-1 text-xs text-gray-500">截止：{formatDateTime(activeDetail.deadlineAt)}</div>
                     </div>
                     <div className="rounded-xl bg-gray-50 p-4">
                       <div className="text-xs uppercase tracking-wide text-gray-500">投票统计</div>
                       <div className="mt-2 text-sm text-gray-900">
-                        已投 {detail.votedCount} / 派单 {detail.assignmentCount}
+                        已投 {activeDetail.votedCount} / 派单 {activeDetail.assignmentCount}
                       </div>
-                      <div className="mt-2 text-xs text-gray-500">进行中：{detail.activeAssignmentCount}</div>
+                      <div className="mt-2 text-xs text-gray-500">进行中：{activeDetail.activeAssignmentCount}</div>
                       <div className="mt-1 text-xs text-gray-500">
-                        结果：{detail.resultCode ?? '—'} · minValidVotes={detail.minValidVotes}
+                        结果：{activeDetail.resultCode ? getCrowdReviewResultCodeLabel(activeDetail.resultCode) : '—'} · minValidVotes={activeDetail.minValidVotes}
                       </div>
+                      <div className="mt-1 text-[11px] text-gray-400">{activeDetail.resultCode ?? '—'}</div>
                     </div>
                   </div>
 
                   <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
                     <h3 className="text-sm font-semibold text-amber-900">管理员动作入口</h3>
                     <p className="mt-2 text-xs text-amber-800">
-                      管理员接管、撤销轮次、改判和留痕 API 尚未在本轮完全开放；当前页面先提供详情视图和后续动作位置。
+                      接管会将轮次升级为管理员处理；撤销会终止当前众查；改判会以管理员结论覆盖本轮结果。
                     </p>
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      <button type="button" disabled className="rounded-lg bg-white px-3 py-1.5 text-xs text-amber-700 opacity-70">
-                        接管轮次（待接入）
-                      </button>
-                      <button type="button" disabled className="rounded-lg bg-white px-3 py-1.5 text-xs text-amber-700 opacity-70">
-                        撤销轮次（待接入）
-                      </button>
-                      <button type="button" disabled className="rounded-lg bg-white px-3 py-1.5 text-xs text-amber-700 opacity-70">
-                        改判留痕（待接入）
-                      </button>
+                    <div className="mt-3 grid gap-3">
+                      <div className="rounded-lg border border-amber-200 bg-white p-3">
+                        <div className="text-sm font-medium text-amber-900">接管轮次</div>
+                        <textarea
+                          value={takeOverReason}
+                          onChange={(event) => setTakeOverReason(event.target.value)}
+                          rows={2}
+                          className="mt-2 w-full rounded-lg border border-amber-200 px-3 py-2 text-sm"
+                          placeholder="填写管理员接管说明"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => void runRoundAction('take-over', { reasonDetail: takeOverReason })}
+                          disabled={actionSubmitting !== null}
+                          className="mt-3 rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-medium text-white disabled:opacity-60"
+                        >
+                          {actionSubmitting === 'take-over' ? '处理中...' : '接管轮次'}
+                        </button>
+                      </div>
+                      <div className="rounded-lg border border-amber-200 bg-white p-3">
+                        <div className="text-sm font-medium text-amber-900">撤销轮次</div>
+                        <textarea
+                          value={cancelReason}
+                          onChange={(event) => setCancelReason(event.target.value)}
+                          rows={2}
+                          className="mt-2 w-full rounded-lg border border-amber-200 px-3 py-2 text-sm"
+                          placeholder="填写撤销原因"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => void runRoundAction('cancel', { reasonDetail: cancelReason })}
+                          disabled={actionSubmitting !== null}
+                          className="mt-3 rounded-lg bg-white px-3 py-1.5 text-xs font-medium text-amber-800 ring-1 ring-amber-300 disabled:opacity-60"
+                        >
+                          {actionSubmitting === 'cancel' ? '处理中...' : '撤销轮次'}
+                        </button>
+                      </div>
+                      <div className="rounded-lg border border-amber-200 bg-white p-3">
+                        <div className="text-sm font-medium text-amber-900">管理员改判</div>
+                        <div className="mt-2 grid gap-2 md:grid-cols-2">
+                          <select
+                            value={overrideDecision}
+                            onChange={(event) =>
+                              setOverrideDecision(
+                                event.target.value as 'violation' | 'no_violation' | 'reopen_under_review',
+                              )
+                            }
+                            className="rounded-lg border border-amber-200 px-3 py-2 text-sm"
+                          >
+                            <option value="violation">改判：违规成立</option>
+                            <option value="no_violation">改判：不构成违规</option>
+                            <option value="reopen_under_review">改判：转回人工复核</option>
+                          </select>
+                          <input
+                            value={overrideReason}
+                            onChange={(event) => setOverrideReason(event.target.value)}
+                            className="rounded-lg border border-amber-200 px-3 py-2 text-sm"
+                            placeholder="管理员改判说明"
+                          />
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            void runRoundAction('override', {
+                              caseDecision: overrideDecision,
+                              reasonDetail: overrideReason,
+                            })
+                          }
+                          disabled={actionSubmitting !== null}
+                          className="mt-3 rounded-lg bg-rose-700 px-3 py-1.5 text-xs font-medium text-white disabled:opacity-60"
+                        >
+                          {actionSubmitting === 'override' ? '处理中...' : '提交管理员改判'}
+                        </button>
+                      </div>
                     </div>
+                    {actionFeedback ? <div className="mt-3 text-xs text-amber-900">{actionFeedback}</div> : null}
                   </div>
 
                   <div className="rounded-xl border border-gray-200 p-4">
-                    <h3 className="text-sm font-semibold text-gray-900">结果摘要</h3>
+                      <h3 className="text-sm font-semibold text-gray-900">结果摘要</h3>
                     <pre className="mt-3 max-h-52 overflow-auto rounded-lg bg-gray-50 p-3 text-xs text-gray-700">
-                      {stringifySummary(detail.resultSummary)}
+                      {stringifySummary(activeDetail.resultSummary)}
                     </pre>
                   </div>
 
@@ -251,14 +418,14 @@ export default function AdminCrowdReviewCasesPage() {
                           </tr>
                         </thead>
                         <tbody>
-                          {detail.assignments.length === 0 ? (
+                          {activeDetail.assignments.length === 0 ? (
                             <tr>
                               <td colSpan={4} className="py-6 text-center text-gray-500">
                                 暂无派单。
                               </td>
                             </tr>
                           ) : (
-                            detail.assignments.map((assignment) => (
+                            activeDetail.assignments.map((assignment) => (
                               <tr key={assignment.assignmentId} className="border-t border-gray-100">
                                 <td className="py-2 pr-3">
                                   {assignment.inspectorUsername ?? `user #${assignment.inspectorUserId}`}

@@ -30,6 +30,7 @@ export type CrowdReviewInspectorRow = {
 export type CrowdReviewRoundRow = {
   id: string;
   reportCaseId: string;
+  reportCaseUpdatedAt?: string;
   status: CrowdReviewRoundStatus;
   openedAt: string;
   deadlineAt: string;
@@ -328,6 +329,7 @@ export async function createCrowdReviewRound(
   return {
     id: String(row.id ?? ''),
     reportCaseId: String(row.reportCaseId ?? ''),
+    reportCaseUpdatedAt: input.now,
     status: row.status as CrowdReviewRoundStatus,
     openedAt: String(row.openedAt ?? ''),
     deadlineAt: String(row.deadlineAt ?? ''),
@@ -438,11 +440,27 @@ export async function getRoundById(
   db: AppDrizzleDb,
   roundId: string,
 ): Promise<CrowdReviewRoundRow | null> {
-  const row = await db.query.crowdReviewRounds.findFirst({
-    where: eq(crowdReviewRounds.id, roundId),
-  });
+  const rows = await db
+    .select({
+      id: crowdReviewRounds.id,
+      reportCaseId: crowdReviewRounds.reportCaseId,
+      reportCaseUpdatedAt: reportCases.updatedAt,
+      status: crowdReviewRounds.status,
+      openedAt: crowdReviewRounds.openedAt,
+      deadlineAt: crowdReviewRounds.deadlineAt,
+      extensionCount: crowdReviewRounds.extensionCount,
+      minValidVotes: crowdReviewRounds.minValidVotes,
+      resultCode: crowdReviewRounds.resultCode,
+      resultSummaryJson: crowdReviewRounds.resultSummaryJson,
+      createdAt: crowdReviewRounds.createdAt,
+      updatedAt: crowdReviewRounds.updatedAt,
+    })
+    .from(crowdReviewRounds)
+    .innerJoin(reportCases, eq(reportCases.id, crowdReviewRounds.reportCaseId))
+    .where(eq(crowdReviewRounds.id, roundId))
+    .limit(1);
 
-  return row ?? null;
+  return rows[0] ?? null;
 }
 
 export async function listAssignmentsByRound(
@@ -516,6 +534,28 @@ export async function updateAssignmentPostVoteSummary(
   return rows.length > 0;
 }
 
+export async function revokeAssignedAssignmentsByRound(
+  db: AppDrizzleDb,
+  input: { roundId: string; now: string },
+): Promise<number> {
+  const rows = await db
+    .update(crowdReviewAssignments)
+    .set({
+      status: 'revoked',
+      completedAt: input.now,
+      updatedAt: input.now,
+    })
+    .where(
+      and(
+        eq(crowdReviewAssignments.crowdReviewRoundId, input.roundId),
+        eq(crowdReviewAssignments.status, 'assigned'),
+      ),
+    )
+    .returning({ id: crowdReviewAssignments.id });
+
+  return rows.length;
+}
+
 export async function updateRound(
   db: AppDrizzleDb,
   input: {
@@ -526,8 +566,14 @@ export async function updateRound(
     resultCode?: string | null;
     resultSummaryJson?: string;
     now: string;
+    expectedUpdatedAt?: string;
   },
 ): Promise<boolean> {
+  const whereConditions = [eq(crowdReviewRounds.id, input.roundId)];
+  if (input.expectedUpdatedAt) {
+    whereConditions.push(eq(crowdReviewRounds.updatedAt, input.expectedUpdatedAt));
+  }
+
   const rows = await db
     .update(crowdReviewRounds)
     .set({
@@ -538,7 +584,7 @@ export async function updateRound(
       resultSummaryJson: input.resultSummaryJson,
       updatedAt: input.now,
     })
-    .where(eq(crowdReviewRounds.id, input.roundId))
+    .where(and(...whereConditions))
     .returning({ id: crowdReviewRounds.id });
 
   return rows.length > 0;

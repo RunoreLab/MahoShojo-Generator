@@ -180,11 +180,13 @@ const templateRenderers: Record<string, (input: TemplateRenderInput) => Template
   'user.moderation.report_case_resolved': (input) => {
     const cardName = pick(input.payload, 'dataCardName');
     const resolutionLabel = pick(input.payload, 'resolutionLabel', 'resolutionCode');
+    const reason = pick(input.payload, 'reason', 'summary');
     return withFallback(
       {
         title: cardName ? `处理结果通知：${cardName}` : '处理结果通知',
         body: [
           resolutionLabel ? `当前处理结果：${resolutionLabel}` : '你的公开数据卡已完成处理。',
+          reason ? `补充说明：${reason}` : null,
           '如对处理结果有异议，可前往申诉页提交说明。',
         ]
           .filter(Boolean)

@@ -1,7 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 
+import {
+  ADMIN_MESSAGE_TEMPLATE_CATALOG,
+  getAdminMessageTemplateCatalogItem,
+  type AdminMessageTemplateCatalogItem,
+} from '@/lib/admin/message-catalog';
 import type { AdminDirectMessageDto, AdminMessageScope, AdminSiteMessageDto } from '@/lib/admin/messages';
+import { getMessagePriorityLabel } from '@/lib/messages/display';
 import type { MessagePriority } from '@/lib/messages/types';
 
 type AdminMessagesResponse = {
@@ -19,6 +25,56 @@ const SCOPE_OPTIONS: Array<{ value: AdminMessageScope; label: string }> = [
 
 const PRIORITY_OPTIONS: MessagePriority[] = ['low', 'normal', 'high'];
 
+type AdminMessageFormState = {
+  messageType: string;
+  templateKey: string;
+  titleText: string;
+  bodyText: string;
+  actionUrl: string;
+  priority: MessagePriority;
+  expiresAt: string;
+  payloadText: string;
+};
+
+const SITE_TEMPLATE_CATALOG = ADMIN_MESSAGE_TEMPLATE_CATALOG.filter((item) => item.scope === 'site');
+const DIRECT_TEMPLATE_CATALOG = ADMIN_MESSAGE_TEMPLATE_CATALOG.filter((item) => item.scope === 'direct');
+
+const buildMessageFormState = (template: AdminMessageTemplateCatalogItem): AdminMessageFormState => ({
+  messageType: template.messageType,
+  templateKey: template.templateKey,
+  titleText: '',
+  bodyText: '',
+  actionUrl: template.defaultActionUrl ?? '',
+  priority: template.defaultPriority,
+  expiresAt: '',
+  payloadText: template.payloadHint,
+});
+
+const SITE_DEFAULT_TEMPLATE = SITE_TEMPLATE_CATALOG[0]!;
+const DIRECT_DEFAULT_TEMPLATE = DIRECT_TEMPLATE_CATALOG[0]!;
+
+const shouldReplaceCatalogDrivenField = (currentValue: string, previousValue: string | undefined): boolean => {
+  const normalized = currentValue.trim();
+  return normalized.length === 0 || normalized === (previousValue ?? '').trim();
+};
+
+const applyTemplateToForm = (
+  form: AdminMessageFormState,
+  nextTemplate: AdminMessageTemplateCatalogItem,
+  previousTemplate: AdminMessageTemplateCatalogItem | null,
+): AdminMessageFormState => ({
+  ...form,
+  messageType: nextTemplate.messageType,
+  templateKey: nextTemplate.templateKey,
+  actionUrl: shouldReplaceCatalogDrivenField(form.actionUrl, previousTemplate?.defaultActionUrl)
+    ? nextTemplate.defaultActionUrl ?? ''
+    : form.actionUrl,
+  priority: nextTemplate.defaultPriority,
+  payloadText: shouldReplaceCatalogDrivenField(form.payloadText, previousTemplate?.payloadHint)
+    ? nextTemplate.payloadHint
+    : form.payloadText,
+});
+
 export function AdminMessagesPage() {
   const [scope, setScope] = useState<AdminMessageScope>('all');
   const [loading, setLoading] = useState(true);
@@ -26,29 +82,26 @@ export function AdminMessagesPage() {
   const [siteMessages, setSiteMessages] = useState<AdminSiteMessageDto[]>([]);
   const [directMessages, setDirectMessages] = useState<AdminDirectMessageDto[]>([]);
 
-  const [siteForm, setSiteForm] = useState({
-    messageType: 'generic',
-    templateKey: 'site.generic.notice',
-    titleText: '',
-    bodyText: '',
-    actionUrl: '',
-    priority: 'normal' as MessagePriority,
-    expiresAt: '',
-    payloadText: '{}',
-  });
-  const [directForm, setDirectForm] = useState({
+  const [siteForm, setSiteForm] = useState<AdminMessageFormState>(() => buildMessageFormState(SITE_DEFAULT_TEMPLATE));
+  const [directForm, setDirectForm] = useState<
+    AdminMessageFormState & {
+      recipientUserIdsText: string;
+    }
+  >(() => ({
     recipientUserIdsText: '',
-    messageType: 'generic',
-    templateKey: 'user.generic.notice',
-    titleText: '',
-    bodyText: '',
-    actionUrl: '',
-    priority: 'normal' as MessagePriority,
-    expiresAt: '',
-    payloadText: '{}',
-  });
+    ...buildMessageFormState(DIRECT_DEFAULT_TEMPLATE),
+  }));
   const [sendingSite, setSendingSite] = useState(false);
   const [sendingDirect, setSendingDirect] = useState(false);
+
+  const siteSelectedTemplate = useMemo(
+    () => getAdminMessageTemplateCatalogItem(siteForm.templateKey) ?? SITE_DEFAULT_TEMPLATE,
+    [siteForm.templateKey],
+  );
+  const directSelectedTemplate = useMemo(
+    () => getAdminMessageTemplateCatalogItem(directForm.templateKey) ?? DIRECT_DEFAULT_TEMPLATE,
+    [directForm.templateKey],
+  );
 
   const loadMessages = useCallback(async () => {
     setLoading(true);
@@ -109,12 +162,13 @@ export function AdminMessagesPage() {
         .map((item) => item.trim())
         .filter(Boolean)
         .map((item) => Number.parseInt(item, 10));
+      const validRecipientUserIds = recipientUserIds.filter((item) => Number.isInteger(item) && item > 0);
       const response = await fetch('/api/admin/messages/direct', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           ...directForm,
-          recipientUserIds,
+          recipientUserIds: validRecipientUserIds,
           payload: directPayloadPreview ? JSON.parse(directPayloadPreview) : {},
           expiresAt: directForm.expiresAt || null,
         }),
@@ -185,18 +239,30 @@ export function AdminMessagesPage() {
           <section className="rounded-2xl bg-white p-5 shadow-sm">
             <h2 className="text-lg font-semibold text-gray-900">发送全站消息</h2>
             <div className="mt-4 grid gap-3">
-              <input
-                value={siteForm.messageType}
-                onChange={(event) => setSiteForm((prev) => ({ ...prev, messageType: event.target.value }))}
-                className="rounded-xl border border-gray-200 px-3 py-2 text-sm"
-                placeholder="messageType，例如 issue"
-              />
-              <input
-                value={siteForm.templateKey}
-                onChange={(event) => setSiteForm((prev) => ({ ...prev, templateKey: event.target.value }))}
-                className="rounded-xl border border-gray-200 px-3 py-2 text-sm"
-                placeholder="templateKey，例如 site.issue.update"
-              />
+              <label className="grid gap-1 text-sm text-gray-700">
+                <span className="font-medium">消息模板</span>
+                <select
+                  value={siteForm.templateKey}
+                  onChange={(event) => {
+                    const nextTemplate =
+                      getAdminMessageTemplateCatalogItem(event.target.value) ?? SITE_DEFAULT_TEMPLATE;
+                    setSiteForm((prev) =>
+                      applyTemplateToForm(prev, nextTemplate, getAdminMessageTemplateCatalogItem(prev.templateKey)),
+                    );
+                  }}
+                  className="rounded-xl border border-gray-200 px-3 py-2 text-sm"
+                >
+                  {SITE_TEMPLATE_CATALOG.map((item) => (
+                    <option key={item.templateKey} value={item.templateKey}>
+                      {item.label}
+                    </option>
+                  ))}
+                </select>
+                <span className="text-xs text-gray-500">
+                  分类：{siteSelectedTemplate.messageType} · {siteSelectedTemplate.description}
+                </span>
+                <span className="text-xs text-gray-400">templateKey：{siteForm.templateKey}</span>
+              </label>
               <input
                 value={siteForm.titleText}
                 onChange={(event) => setSiteForm((prev) => ({ ...prev, titleText: event.target.value }))}
@@ -223,7 +289,7 @@ export function AdminMessagesPage() {
                 >
                   {PRIORITY_OPTIONS.map((option) => (
                     <option key={option} value={option}>
-                      {option}
+                      {getMessagePriorityLabel(option)}
                     </option>
                   ))}
                 </select>
@@ -238,8 +304,9 @@ export function AdminMessagesPage() {
                 value={siteForm.payloadText}
                 onChange={(event) => setSiteForm((prev) => ({ ...prev, payloadText: event.target.value }))}
                 className="min-h-28 rounded-xl border border-gray-200 px-3 py-2 font-mono text-sm"
-                placeholder='JSON payload，例如 {"issueTitle":"服务状态"}'
+                placeholder={siteSelectedTemplate.payloadHint}
               />
+              <p className="text-xs text-gray-500">Payload 示例：{siteSelectedTemplate.payloadHint}</p>
               <button
                 type="button"
                 onClick={() => void handleSendSiteMessage()}
@@ -260,18 +327,31 @@ export function AdminMessagesPage() {
                 className="min-h-20 rounded-xl border border-gray-200 px-3 py-2 text-sm"
                 placeholder="接收用户 ID，支持英文逗号、空格或换行分隔"
               />
-              <input
-                value={directForm.messageType}
-                onChange={(event) => setDirectForm((prev) => ({ ...prev, messageType: event.target.value }))}
-                className="rounded-xl border border-gray-200 px-3 py-2 text-sm"
-                placeholder="messageType，例如 moderation"
-              />
-              <input
-                value={directForm.templateKey}
-                onChange={(event) => setDirectForm((prev) => ({ ...prev, templateKey: event.target.value }))}
-                className="rounded-xl border border-gray-200 px-3 py-2 text-sm"
-                placeholder="templateKey，例如 user.generic.notice"
-              />
+              <label className="grid gap-1 text-sm text-gray-700">
+                <span className="font-medium">消息模板</span>
+                <select
+                  value={directForm.templateKey}
+                  onChange={(event) => {
+                    const nextTemplate =
+                      getAdminMessageTemplateCatalogItem(event.target.value) ?? DIRECT_DEFAULT_TEMPLATE;
+                    setDirectForm((prev) => ({
+                      ...applyTemplateToForm(prev, nextTemplate, getAdminMessageTemplateCatalogItem(prev.templateKey)),
+                      recipientUserIdsText: prev.recipientUserIdsText,
+                    }));
+                  }}
+                  className="rounded-xl border border-gray-200 px-3 py-2 text-sm"
+                >
+                  {DIRECT_TEMPLATE_CATALOG.map((item) => (
+                    <option key={item.templateKey} value={item.templateKey}>
+                      {item.label}
+                    </option>
+                  ))}
+                </select>
+                <span className="text-xs text-gray-500">
+                  分类：{directSelectedTemplate.messageType} · {directSelectedTemplate.description}
+                </span>
+                <span className="text-xs text-gray-400">templateKey：{directForm.templateKey}</span>
+              </label>
               <input
                 value={directForm.titleText}
                 onChange={(event) => setDirectForm((prev) => ({ ...prev, titleText: event.target.value }))}
@@ -298,7 +378,7 @@ export function AdminMessagesPage() {
                 >
                   {PRIORITY_OPTIONS.map((option) => (
                     <option key={option} value={option}>
-                      {option}
+                      {getMessagePriorityLabel(option)}
                     </option>
                   ))}
                 </select>
@@ -313,8 +393,9 @@ export function AdminMessagesPage() {
                 value={directForm.payloadText}
                 onChange={(event) => setDirectForm((prev) => ({ ...prev, payloadText: event.target.value }))}
                 className="min-h-28 rounded-xl border border-gray-200 px-3 py-2 font-mono text-sm"
-                placeholder='JSON payload，例如 {"summary":"请查看最新处理说明"}'
+                placeholder={directSelectedTemplate.payloadHint}
               />
+              <p className="text-xs text-gray-500">Payload 示例：{directSelectedTemplate.payloadHint}</p>
               <button
                 type="button"
                 onClick={() => void handleSendDirectMessage()}
@@ -359,11 +440,14 @@ export function AdminMessagesPage() {
                     siteMessages.map((message) => (
                       <tr key={message.id} className="border-t">
                         <td className="px-4 py-3">
-                          <div className="font-medium text-gray-900">{message.title}</div>
+                          <div className="font-medium text-gray-900">
+                            {getAdminMessageTemplateCatalogItem(message.templateKey)?.label ?? message.templateKey}
+                          </div>
                           <div className="mt-1 text-xs text-gray-500">{message.templateKey}</div>
+                          <div className="mt-2 text-sm font-medium text-gray-900">{message.title}</div>
                           <div className="mt-2 whitespace-pre-wrap text-gray-700">{message.body}</div>
                         </td>
-                        <td className="px-4 py-3">{message.priority}</td>
+                        <td className="px-4 py-3">{getMessagePriorityLabel(message.priority)}</td>
                         <td className="px-4 py-3">
                           {message.isExpired ? <span className="text-red-600">已失效</span> : <span className="text-emerald-600">生效中</span>}
                         </td>
@@ -417,6 +501,9 @@ export function AdminMessagesPage() {
                       <tr key={message.id} className="border-t">
                         <td className="px-4 py-3">
                           <div className="font-medium text-gray-900">用户 {message.recipientUserId}</div>
+                          <div className="mt-1 text-sm text-gray-800">
+                            {getAdminMessageTemplateCatalogItem(message.templateKey)?.label ?? message.templateKey}
+                          </div>
                           <div className="mt-1 text-xs text-gray-500">{message.templateKey}</div>
                         </td>
                         <td className="px-4 py-3">

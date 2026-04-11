@@ -13,6 +13,8 @@ import {
   listAssignableCases,
   listCrowdReviewHistoryByInspector,
   listActionableAssignmentsByInspector,
+  revokeAssignedAssignmentsByRound,
+  updateRound,
   updateAssignmentPostVoteSummary,
   upsertCrowdReviewInspectorState,
 } from '@/lib/db/repositories/crowd-review';
@@ -318,6 +320,105 @@ describe('crowd review repository', () => {
         now: '2026-04-08T10:23:00.000Z',
       }),
     ).rejects.toThrow();
+  });
+
+  test('revokeAssignedAssignmentsByRound only revokes assigned rows and preserves completed votes', async () => {
+    await createCrowdReviewRound(db, {
+      id: 'round-1',
+      reportCaseId: 'case-1',
+      status: 'active',
+      openedAt: '2026-04-08T10:20:00.000Z',
+      deadlineAt: '2026-04-08T11:20:00.000Z',
+      extensionCount: 0,
+      minValidVotes: 3,
+      resultCode: null,
+      resultSummaryJson: '{}',
+      now: '2026-04-08T10:20:00.000Z',
+    });
+    await createCrowdReviewAssignment(db, {
+      id: 'assignment-1',
+      crowdReviewRoundId: 'round-1',
+      inspectorUserId: 7,
+      status: 'assigned',
+      assignedAt: '2026-04-08T10:21:00.000Z',
+      expiresAt: '2026-04-08T11:21:00.000Z',
+      completedAt: null,
+      decision: null,
+      decisionNote: null,
+      postVoteSummaryJson: '{}',
+      postVoteSummarySeenAt: null,
+      now: '2026-04-08T10:21:00.000Z',
+    });
+    await createCrowdReviewAssignment(db, {
+      id: 'assignment-2',
+      crowdReviewRoundId: 'round-1',
+      inspectorUserId: 8,
+      status: 'voted',
+      assignedAt: '2026-04-08T10:22:00.000Z',
+      expiresAt: '2026-04-08T11:22:00.000Z',
+      completedAt: '2026-04-08T10:40:00.000Z',
+      decision: 'violation',
+      decisionNote: '已有投票',
+      postVoteSummaryJson: '{"summaryText":"done"}',
+      postVoteSummarySeenAt: null,
+      now: '2026-04-08T10:22:00.000Z',
+    });
+
+    const revokedCount = await revokeAssignedAssignmentsByRound(db, {
+      roundId: 'round-1',
+      now: '2026-04-08T10:50:00.000Z',
+    });
+
+    const assignments = await db.query.crowdReviewAssignments.findMany({
+      where: (fields, { eq }) => eq(fields.crowdReviewRoundId, 'round-1'),
+      orderBy: (fields, { asc }) => [asc(fields.id)],
+    });
+
+    expect(revokedCount).toBe(1);
+    expect(assignments[0]).toMatchObject({
+      id: 'assignment-1',
+      status: 'revoked',
+      completedAt: '2026-04-08T10:50:00.000Z',
+    });
+    expect(assignments[1]).toMatchObject({
+      id: 'assignment-2',
+      status: 'voted',
+      completedAt: '2026-04-08T10:40:00.000Z',
+      decision: 'violation',
+    });
+  });
+
+  test('updateRound can reject stale updatedAt snapshot', async () => {
+    await createCrowdReviewRound(db, {
+      id: 'round-1',
+      reportCaseId: 'case-1',
+      status: 'active',
+      openedAt: '2026-04-08T10:20:00.000Z',
+      deadlineAt: '2026-04-08T11:20:00.000Z',
+      extensionCount: 0,
+      minValidVotes: 3,
+      resultCode: null,
+      resultSummaryJson: '{}',
+      now: '2026-04-08T10:20:00.000Z',
+    });
+
+    const stale = await updateRound(db, {
+      roundId: 'round-1',
+      status: 'escalated',
+      resultCode: 'escalated',
+      now: '2026-04-08T10:50:00.000Z',
+      expectedUpdatedAt: '2026-04-08T10:00:00.000Z',
+    });
+    const fresh = await updateRound(db, {
+      roundId: 'round-1',
+      status: 'escalated',
+      resultCode: 'escalated',
+      now: '2026-04-08T10:50:00.000Z',
+      expectedUpdatedAt: '2026-04-08T10:20:00.000Z',
+    });
+
+    expect(stale).toBe(false);
+    expect(fresh).toBe(true);
   });
 
   test('enforces one assignment per round and inspector pair', async () => {

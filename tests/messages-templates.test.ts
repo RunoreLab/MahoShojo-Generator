@@ -63,6 +63,22 @@ describe('message templates', () => {
     expect(rendered.body).toContain('申诉');
   });
 
+  test('renders report case resolved notification with admin follow-up reason', () => {
+    const rendered = renderMessageTemplate({
+      templateKey: 'user.moderation.report_case_resolved',
+      payload: {
+        dataCardName: '雪沫',
+        resolutionLabel: '确认违规',
+        reason: '请按说明整改后再提交。',
+      },
+      titleText: null,
+      bodyText: null,
+    });
+
+    expect(rendered.body).toContain('确认违规');
+    expect(rendered.body).toContain('请按说明整改后再提交');
+  });
+
   test('renders report appeal resolved notification', () => {
     const rendered = renderMessageTemplate({
       templateKey: 'user.moderation.report_appeal_resolved',

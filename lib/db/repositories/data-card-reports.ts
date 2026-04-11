@@ -5,6 +5,7 @@ import { reportCases, reportReferences, reportSubmissionEvents, reports } from '
 import type {
   ReportCaseStatus,
   ReportReferenceType,
+  ReportResolutionCode,
   ReportStatus,
   ReportSubmissionDecision,
 } from '@/lib/db/schema/business';
@@ -1045,6 +1046,36 @@ export async function clearReportCaseCreatorNotified(
       updatedAt: input.notifiedAt,
     })
     .where(and(eq(reportCases.id, input.caseId), eq(reportCases.creatorNotifiedAt, input.notifiedAt)))
+    .returning({ id: reportCases.id });
+
+  return rows.length > 0;
+}
+
+export async function updateReportCaseDecision(
+  db: AppDrizzleDb,
+  input: {
+    reportCaseId: string;
+    status: ReportCaseStatus;
+    resolutionCode: ReportResolutionCode | null;
+    closedAt: string | null;
+    now: string;
+    expectedUpdatedAt?: string;
+  },
+): Promise<boolean> {
+  const whereConditions = [eq(reportCases.id, input.reportCaseId)];
+  if (input.expectedUpdatedAt) {
+    whereConditions.push(eq(reportCases.updatedAt, input.expectedUpdatedAt));
+  }
+
+  const rows = await db
+    .update(reportCases)
+    .set({
+      status: input.status,
+      resolutionCode: input.resolutionCode,
+      closedAt: input.closedAt,
+      updatedAt: input.now,
+    })
+    .where(and(...whereConditions))
     .returning({ id: reportCases.id });
 
   return rows.length > 0;
