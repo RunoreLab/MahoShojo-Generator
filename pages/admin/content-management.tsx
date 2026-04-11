@@ -34,6 +34,12 @@ const parseQuestionnaireNativeAllowed = (rawData: string | null | undefined): bo
 
 const SIZE_WARNING_THRESHOLD_BYTES = Math.floor(MAX_DATA_CARD_BYTES * 0.8);
 
+type ModerationMessageOptions = {
+  send: boolean;
+  defaultReason?: string | null;
+  reasonByTargetKey?: Record<string, string>;
+};
+
 const formatSizeBadge = (bytes: number | null | undefined): string | null => {
   if (typeof bytes !== 'number' || !Number.isFinite(bytes)) return null;
   if (bytes >= MAX_DATA_CARD_BYTES) return `超预算 ${formatKilobytes(bytes)} KB`;
@@ -370,11 +376,24 @@ const ContentManagementPage: React.FC = () => {
     if (selectedIds.size === 0) return alert('请至少选择一个项目');
     if (!window.confirm(`确定要对选中的 ${selectedIds.size} 个项目执行此操作吗？`)) return;
 
+    let messageOptions: ModerationMessageOptions | undefined;
+    if (action === 'set_public_status' && value === -1) {
+      const sendMessage = window.confirm('是否同时向这些数据卡作者发送封禁通知？');
+      if (sendMessage) {
+        const suggestedReason = getSuggestedReasonFromSelection({ cardIds: Array.from(selectedIds), updateIds: [] });
+        const nextReason = window.prompt('请输入封禁通知中的理由。', suggestedReason) ?? '';
+        messageOptions = {
+          send: true,
+          defaultReason: nextReason.trim(),
+        };
+      }
+    }
+
     try {
       const response = await fetch('/api/admin/data-cards/batch-update', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ cardIds: Array.from(selectedIds), action, value }),
+        body: JSON.stringify({ cardIds: Array.from(selectedIds), action, value, messageOptions }),
       });
       if (!response.ok) throw new Error('操作失败');
       alert('操作成功！');
@@ -526,11 +545,15 @@ const ContentManagementPage: React.FC = () => {
     }
   };
 
-  const executeBatchReviewUpdates = async (updateIds: string[], action: 'approve' | 'reject') => {
+  const executeBatchReviewUpdates = async (
+    updateIds: string[],
+    action: 'approve' | 'reject',
+    messageOptions?: ModerationMessageOptions,
+  ) => {
     const res = await fetch('/api/admin/data-card-updates/batch-review', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ updateIds, action }),
+      body: JSON.stringify({ updateIds, action, messageOptions }),
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || data.success === false) {
@@ -540,11 +563,15 @@ const ContentManagementPage: React.FC = () => {
     return { processed: Number(data.processed || updateIds.length), failedIds: [] as string[] };
   };
 
-  const executeBatchUpdateCards = async (cardIds: string[], action: 'approve' | 'reject') => {
+  const executeBatchUpdateCards = async (
+    cardIds: string[],
+    action: 'approve' | 'reject',
+    messageOptions?: ModerationMessageOptions,
+  ) => {
     const res = await fetch('/api/admin/data-cards/batch-update', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ cardIds, action }),
+      body: JSON.stringify({ cardIds, action, messageOptions }),
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || data.success === false) throw new Error(data.error || '批量更新数据卡失败');
@@ -570,9 +597,22 @@ const ContentManagementPage: React.FC = () => {
       return;
     }
 
+    let messageOptions: ModerationMessageOptions | undefined;
+    if (action === 'reject') {
+      const sendMessage = window.confirm('是否同时向数据卡作者发送审核未通过通知？');
+      if (sendMessage) {
+        const suggestedReason = getSuggestedReasonFromSelection({ cardIds, updateIds });
+        const nextReason = window.prompt('请输入发送给作者的审核理由。', suggestedReason) ?? '';
+        messageOptions = {
+          send: true,
+          defaultReason: nextReason.trim(),
+        };
+      }
+    }
+
     try {
       if (updateIds.length > 0) {
-        const { processed, failedIds } = await executeBatchReviewUpdates(updateIds, action);
+        const { processed, failedIds } = await executeBatchReviewUpdates(updateIds, action, messageOptions);
         if (failedIds.length > 0) {
           alert(`更新审查存在部分失败：成功 ${processed - failedIds.length}，失败 ${failedIds.length}。请刷新后重试。`);
           await fetchData(filters);
@@ -581,7 +621,7 @@ const ContentManagementPage: React.FC = () => {
       }
 
       if (cardIds.length > 0) {
-        await executeBatchUpdateCards(cardIds, action);
+        await executeBatchUpdateCards(cardIds, action, messageOptions);
       }
 
       alert('操作成功！');
@@ -677,6 +717,44 @@ const ContentManagementPage: React.FC = () => {
     setMarkedActions(prev => ({ ...prev, [id]: action }));
   };
 
+  const getSuggestedReasonFromSelection = (input: { cardIds: string[]; updateIds: string[] }): string => {
+    const cardIdSet = new Set(input.cardIds);
+    const updateIdSet = new Set(input.updateIds);
+
+    for (const result of aiReviewResults) {
+      const snapshot = aiTargetSnapshotById[result.id];
+      if (!snapshot) continue;
+      if (snapshot.kind === 'update' && snapshot.updateId && updateIdSet.has(snapshot.updateId) && result.reason.trim()) {
+        return result.reason.trim();
+      }
+      if (snapshot.kind === 'card' && cardIdSet.has(snapshot.cardId) && result.reason.trim()) {
+        return result.reason.trim();
+      }
+    }
+    return '';
+  };
+
+  const buildAiRejectMessageOptions = () => {
+    const reasonByCardId: Record<string, string> = {};
+    const reasonByUpdateId: Record<string, string> = {};
+
+    for (const result of aiReviewResults) {
+      if (markedActions[result.id] !== 'reject') continue;
+      const snapshot = aiTargetSnapshotById[result.id];
+      if (!snapshot || !result.reason.trim()) continue;
+      if (snapshot.kind === 'update' && snapshot.updateId) {
+        reasonByUpdateId[snapshot.updateId] = result.reason.trim();
+      } else if (snapshot.kind === 'card') {
+        reasonByCardId[snapshot.cardId] = result.reason.trim();
+      }
+    }
+
+    return {
+      cardMessageOptions: Object.keys(reasonByCardId).length > 0 ? { send: true, reasonByTargetKey: reasonByCardId } : undefined,
+      updateMessageOptions: Object.keys(reasonByUpdateId).length > 0 ? { send: true, reasonByTargetKey: reasonByUpdateId } : undefined,
+    };
+  };
+
   const handleExecuteMarkedActions = async () => {
     const actionsToExecute = Object.entries(markedActions);
     if (actionsToExecute.length === 0) return alert('没有已标记的操作');
@@ -705,6 +783,17 @@ const ContentManagementPage: React.FC = () => {
         if (item.kind === 'card') rejectCardIds.push(item.cardId);
       }
 
+      let rejectCardMessageOptions: ModerationMessageOptions | undefined;
+      let rejectUpdateMessageOptions: ModerationMessageOptions | undefined;
+      if (rejectUpdateIds.length > 0 || rejectCardIds.length > 0) {
+        const sendAiReasonMessage = window.confirm('是否同时向作者发送拒绝通知？若确认，将优先自动使用 AI 审查理由。');
+        if (sendAiReasonMessage) {
+          const { cardMessageOptions, updateMessageOptions } = buildAiRejectMessageOptions();
+          rejectCardMessageOptions = cardMessageOptions;
+          rejectUpdateMessageOptions = updateMessageOptions;
+        }
+      }
+
       if (approveUpdateIds.length > 0) {
         const { failedIds } = await executeBatchReviewUpdates(approveUpdateIds, 'approve');
         if (failedIds.length > 0) {
@@ -714,7 +803,7 @@ const ContentManagementPage: React.FC = () => {
         }
       }
       if (rejectUpdateIds.length > 0) {
-        const { failedIds } = await executeBatchReviewUpdates(rejectUpdateIds, 'reject');
+        const { failedIds } = await executeBatchReviewUpdates(rejectUpdateIds, 'reject', rejectUpdateMessageOptions);
         if (failedIds.length > 0) {
           alert(`拒绝更新存在失败 ${failedIds.length} 条，请刷新后重试。`);
           await fetchData(filters);
@@ -723,7 +812,7 @@ const ContentManagementPage: React.FC = () => {
       }
 
       if (approveCardIds.length > 0) await executeBatchUpdateCards(approveCardIds, 'approve');
-      if (rejectCardIds.length > 0) await executeBatchUpdateCards(rejectCardIds, 'reject');
+      if (rejectCardIds.length > 0) await executeBatchUpdateCards(rejectCardIds, 'reject', rejectCardMessageOptions);
 
       alert('操作成功！');
       setShowAiReviewModal(false);

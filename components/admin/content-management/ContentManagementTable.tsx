@@ -1,4 +1,5 @@
 import type { ChangeEvent, ReactElement } from 'react';
+import Link from 'next/link';
 
 import { AdminTableScroll } from '@/components/admin/AdminTableScroll';
 import type { ContentManagementFilters, DataCard } from '@/components/admin/content-management/shared';
@@ -83,6 +84,9 @@ export function ContentManagementTable(props: ContentManagementTableProps) {
                 const metricsStale = card.metrics_stale === 1;
                 const hasVisualAssets = card.has_visual_assets === 1;
                 const sizeBadgeText = formatSizeBadge(card.size_bytes);
+                const hasActiveCrowdReview = card.has_active_crowd_review === 1;
+                const hasActiveAppeal = card.has_active_appeal === 1;
+                const isSelfRemediationCandidate = card.is_self_remediation_candidate === 1;
 
                 return (
                   <tr key={card.id} className="border-b bg-white hover:bg-gray-50">
@@ -131,6 +135,41 @@ export function ContentManagementTable(props: ContentManagementTableProps) {
                             }`}
                           >
                             {sizeBadgeText}
+                          </span>
+                        ) : null}
+                        {card.latest_report_case_id ? (
+                          <Link
+                            href={`/admin/report-cases?caseId=${encodeURIComponent(card.latest_report_case_id)}`}
+                            className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] ${
+                              card.latest_report_case_status === 'open'
+                                ? 'bg-rose-100 text-rose-700'
+                                : card.latest_report_case_status === 'under_review'
+                                  ? 'bg-orange-100 text-orange-700'
+                                  : 'bg-slate-100 text-slate-700'
+                            }`}
+                          >
+                            案件 {card.latest_report_case_status ?? 'unknown'}
+                          </Link>
+                        ) : null}
+                        {hasActiveCrowdReview ? (
+                          <Link
+                            href="/admin/crowd-review/cases"
+                            className="inline-flex items-center rounded-full bg-violet-100 px-2 py-0.5 text-[11px] text-violet-700"
+                          >
+                            众查冻结
+                          </Link>
+                        ) : null}
+                        {hasActiveAppeal ? (
+                          <Link
+                            href="/admin/report-appeals"
+                            className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[11px] text-amber-700"
+                          >
+                            活跃申诉
+                          </Link>
+                        ) : null}
+                        {isSelfRemediationCandidate ? (
+                          <span className="inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] text-emerald-700">
+                            自整改候选
                           </span>
                         ) : null}
                       </div>

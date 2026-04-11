@@ -69,9 +69,25 @@ export type DashboardStats = {
   pvpStalledRoomsTotal: number;
   pvpActiveMatchesTotal: number;
   pvpMatches7dTotal: number;
+
+  openReportCasesTotal: number;
+  underReviewReportCasesTotal: number;
+  activeCrowdReviewRoundsTotal: number;
+  submittedReportAppealsTotal: number;
+  activeInspectorsTotal: number;
+  recentSiteMessagesTotal: number;
+  recentDirectMessagesTotal: number;
 };
 
-export type DashboardStatsSection = 'core' | 'arena' | 'tags' | 'storage' | 'activity' | 'accounts' | 'pvp';
+export type DashboardStatsSection =
+  | 'core'
+  | 'arena'
+  | 'tags'
+  | 'storage'
+  | 'activity'
+  | 'accounts'
+  | 'pvp'
+  | 'governance';
 
 export type DashboardStatsCore = Pick<
   DashboardStats,
@@ -145,6 +161,17 @@ export type DashboardStatsPvp = Pick<
   | 'pvpStalledRoomsTotal'
   | 'pvpActiveMatchesTotal'
   | 'pvpMatches7dTotal'
+>;
+
+export type DashboardStatsGovernance = Pick<
+  DashboardStats,
+  | 'openReportCasesTotal'
+  | 'underReviewReportCasesTotal'
+  | 'activeCrowdReviewRoundsTotal'
+  | 'submittedReportAppealsTotal'
+  | 'activeInspectorsTotal'
+  | 'recentSiteMessagesTotal'
+  | 'recentDirectMessagesTotal'
 >;
 
 type D1Row = Record<string, unknown>;
@@ -491,8 +518,68 @@ export async function getDashboardStatsPvp(): Promise<DashboardStatsPvp> {
   return stats;
 }
 
+export async function getDashboardStatsGovernance(): Promise<DashboardStatsGovernance> {
+  const stats: DashboardStatsGovernance = {
+    openReportCasesTotal: 0,
+    underReviewReportCasesTotal: 0,
+    activeCrowdReviewRoundsTotal: 0,
+    submittedReportAppealsTotal: 0,
+    activeInspectorsTotal: 0,
+    recentSiteMessagesTotal: 0,
+    recentDirectMessagesTotal: 0,
+  };
+
+  try {
+    const governanceSql = `
+      SELECT
+        (SELECT COUNT(*) FROM report_cases WHERE status = 'open') AS openReportCasesTotal,
+        (SELECT COUNT(*) FROM report_cases WHERE status = 'under_review') AS underReviewReportCasesTotal,
+        (
+          SELECT COUNT(*)
+          FROM crowd_review_rounds
+          WHERE status IN ('pending_dispatch', 'active', 'waiting_more_votes')
+        ) AS activeCrowdReviewRoundsTotal,
+        (
+          SELECT COUNT(*)
+          FROM report_appeals
+          WHERE status IN ('submitted', 'under_review')
+        ) AS submittedReportAppealsTotal,
+        (
+          SELECT COUNT(*)
+          FROM crowd_review_inspectors
+          WHERE status = 'active'
+        ) AS activeInspectorsTotal,
+        (
+          SELECT COUNT(*)
+          FROM site_messages
+          WHERE created_at >= datetime('now', '-7 day')
+        ) AS recentSiteMessagesTotal,
+        (
+          SELECT COUNT(*)
+          FROM user_messages
+          WHERE created_at >= datetime('now', '-7 day')
+        ) AS recentDirectMessagesTotal;
+    `;
+
+    const result = await queryFromD1(governanceSql);
+    const row = readFirstRow(result as any);
+
+    stats.openReportCasesTotal = readInt(row.openReportCasesTotal);
+    stats.underReviewReportCasesTotal = readInt(row.underReviewReportCasesTotal);
+    stats.activeCrowdReviewRoundsTotal = readInt(row.activeCrowdReviewRoundsTotal);
+    stats.submittedReportAppealsTotal = readInt(row.submittedReportAppealsTotal);
+    stats.activeInspectorsTotal = readInt(row.activeInspectorsTotal);
+    stats.recentSiteMessagesTotal = readInt(row.recentSiteMessagesTotal);
+    stats.recentDirectMessagesTotal = readInt(row.recentDirectMessagesTotal);
+  } catch (error) {
+    console.warn('[Admin] 治理后台统计未就绪，跳过治理统计:', error);
+  }
+
+  return stats;
+}
+
 export async function getDashboardStats(): Promise<DashboardStats> {
-  const [core, arena, activity, tags, storage, accounts, pvp] = await Promise.all([
+  const [core, arena, activity, tags, storage, accounts, pvp, governance] = await Promise.all([
     getDashboardStatsCore(),
     getDashboardStatsArena(),
     getDashboardStatsActivity(),
@@ -500,6 +587,7 @@ export async function getDashboardStats(): Promise<DashboardStats> {
     getDashboardStatsStorage(),
     getDashboardStatsAccounts(),
     getDashboardStatsPvp(),
+    getDashboardStatsGovernance(),
   ]);
 
   return {
@@ -510,6 +598,7 @@ export async function getDashboardStats(): Promise<DashboardStats> {
     ...storage,
     ...accounts,
     ...pvp,
+    ...governance,
   };
 }
 
@@ -683,7 +772,65 @@ export async function getAdminDataCards(filters: {
       ${sizeBytesSql} AS size_bytes,
       ${sizeCharsSql} AS size_chars,
       (${metricsStaleSql}) AS metrics_stale,
-      (${hasVisualAssetsSql}) AS has_visual_assets
+      (${hasVisualAssetsSql}) AS has_visual_assets,
+      (
+        SELECT rc.id
+        FROM report_cases rc
+        WHERE rc.target_entity_type = 'data_card'
+          AND rc.target_entity_id = dc.id
+        ORDER BY rc.latest_reported_at DESC, rc.created_at DESC, rc.id DESC
+        LIMIT 1
+      ) AS latest_report_case_id,
+      (
+        SELECT rc.status
+        FROM report_cases rc
+        WHERE rc.target_entity_type = 'data_card'
+          AND rc.target_entity_id = dc.id
+        ORDER BY rc.latest_reported_at DESC, rc.created_at DESC, rc.id DESC
+        LIMIT 1
+      ) AS latest_report_case_status,
+      (
+        SELECT rc.resolution_code
+        FROM report_cases rc
+        WHERE rc.target_entity_type = 'data_card'
+          AND rc.target_entity_id = dc.id
+        ORDER BY rc.latest_reported_at DESC, rc.created_at DESC, rc.id DESC
+        LIMIT 1
+      ) AS latest_report_case_resolution_code,
+      CASE
+        WHEN EXISTS (
+          SELECT 1
+          FROM report_cases rc
+          JOIN crowd_review_rounds crr ON crr.report_case_id = rc.id
+          WHERE rc.target_entity_type = 'data_card'
+            AND rc.target_entity_id = dc.id
+            AND crr.status IN ('pending_dispatch', 'active', 'waiting_more_votes')
+        ) THEN 1
+        ELSE 0
+      END AS has_active_crowd_review,
+      CASE
+        WHEN EXISTS (
+          SELECT 1
+          FROM report_cases rc
+          JOIN report_appeals ra ON ra.report_case_id = rc.id
+          WHERE rc.target_entity_type = 'data_card'
+            AND rc.target_entity_id = dc.id
+            AND ra.status IN ('submitted', 'under_review')
+        ) THEN 1
+        ELSE 0
+      END AS has_active_appeal,
+      COALESCE((
+        SELECT CASE
+          WHEN COALESCE(rc.target_card_updated_at_at_notice, rc.creator_notified_at) IS NULL THEN 0
+          WHEN dc.updated_at > COALESCE(rc.target_card_updated_at_at_notice, rc.creator_notified_at) THEN 1
+          ELSE 0
+        END
+        FROM report_cases rc
+        WHERE rc.target_entity_type = 'data_card'
+          AND rc.target_entity_id = dc.id
+        ORDER BY rc.latest_reported_at DESC, rc.created_at DESC, rc.id DESC
+        LIMIT 1
+      ), 0) AS is_self_remediation_candidate
       ${pendingUpdateSelectSql}
     FROM data_cards dc
     JOIN users u ON dc.user_id = u.id
@@ -863,6 +1010,58 @@ export async function getDataForExport(cardIds: string[]): Promise<any[]> {
     console.error('[Admin] 获取导出数据失败:', error);
     throw error;
   }
+}
+
+export type DataCardNotificationTarget = {
+  recipientUserId: number;
+  dataCardId: string;
+  dataCardName: string;
+  reasonKey: string;
+};
+
+export async function getDataCardNotificationTargets(cardIds: string[]): Promise<DataCardNotificationTarget[]> {
+  if (cardIds.length === 0) return [];
+
+  const placeholders = cardIds.map(() => '?').join(', ');
+  const sql = `
+    SELECT id AS data_card_id, user_id AS recipient_user_id, name AS data_card_name
+    FROM data_cards
+    WHERE id IN (${placeholders})
+  `;
+
+  const result = (await queryFromD1(sql, cardIds)) as any;
+  const rows = result?.success ? result.result?.[0]?.results || [] : [];
+  return rows.map((row: Record<string, unknown>) => ({
+    recipientUserId: Number(row.recipient_user_id),
+    dataCardId: String(row.data_card_id),
+    dataCardName: String(row.data_card_name ?? ''),
+    reasonKey: String(row.data_card_id),
+  }));
+}
+
+export async function getDataCardUpdateNotificationTargets(updateIds: string[]): Promise<DataCardNotificationTarget[]> {
+  if (updateIds.length === 0) return [];
+
+  const placeholders = updateIds.map(() => '?').join(', ');
+  const sql = `
+    SELECT
+      dcu.id AS reason_key,
+      dc.id AS data_card_id,
+      dc.user_id AS recipient_user_id,
+      COALESCE(dcu.name, dc.name) AS data_card_name
+    FROM data_card_updates dcu
+    JOIN data_cards dc ON dc.id = dcu.data_card_id
+    WHERE dcu.id IN (${placeholders})
+  `;
+
+  const result = (await queryFromD1(sql, updateIds)) as any;
+  const rows = result?.success ? result.result?.[0]?.results || [] : [];
+  return rows.map((row: Record<string, unknown>) => ({
+    recipientUserId: Number(row.recipient_user_id),
+    dataCardId: String(row.data_card_id),
+    dataCardName: String(row.data_card_name ?? ''),
+    reasonKey: String(row.reason_key),
+  }));
 }
 
 /**

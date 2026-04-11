@@ -3,6 +3,7 @@ export interface DataCard {
   name: string;
   description: string;
   data: string;
+  user_id: number;
   type: 'character' | 'scenario' | 'history' | 'questionnaire';
   is_public: -1 | 0 | 1;
   review_status: 'pending' | 'approved' | 'rejected';
@@ -22,6 +23,12 @@ export interface DataCard {
   size_chars?: number | null;
   metrics_stale?: number | null;
   has_visual_assets?: number | null;
+  latest_report_case_id?: string | null;
+  latest_report_case_status?: 'open' | 'under_review' | 'resolved' | 'dismissed' | null;
+  latest_report_case_resolution_code?: string | null;
+  has_active_crowd_review?: number | null;
+  has_active_appeal?: number | null;
+  is_self_remediation_candidate?: number | null;
 }
 
 export interface AiTargetSnapshotItem {

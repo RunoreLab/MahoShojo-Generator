@@ -8,11 +8,15 @@ import {
   BookOpen,
   Clock,
   Database,
+  Gavel,
   FileCheck,
   FileText,
   HardDrive,
+  Mail,
+  MessageSquareWarning,
   ShieldAlert,
   ShieldCheck,
+  Siren,
   Tags,
   Trophy,
   UserCog,
@@ -22,7 +26,7 @@ import {
 
 import { encyclopediaEntries } from '@/lib/encyclopedia';
 
-type DashboardSection = 'core' | 'activity' | 'accounts' | 'arena' | 'pvp' | 'tags' | 'storage';
+type DashboardSection = 'core' | 'activity' | 'accounts' | 'arena' | 'pvp' | 'tags' | 'storage' | 'governance';
 type SectionStatus = 'idle' | 'loading' | 'loaded' | 'error';
 
 type DashboardStats = {
@@ -75,6 +79,14 @@ type DashboardStats = {
   pvpStalledRoomsTotal: number;
   pvpActiveMatchesTotal: number;
   pvpMatches7dTotal: number;
+
+  openReportCasesTotal: number;
+  underReviewReportCasesTotal: number;
+  activeCrowdReviewRoundsTotal: number;
+  submittedReportAppealsTotal: number;
+  activeInspectorsTotal: number;
+  recentSiteMessagesTotal: number;
+  recentDirectMessagesTotal: number;
 };
 
 function StatCard(props: {
@@ -150,6 +162,7 @@ export default function AdminHomePage() {
     pvp: null,
     tags: null,
     storage: null,
+    governance: null,
   });
 
   const [stats, setStats] = useState<Partial<DashboardStats>>({});
@@ -161,6 +174,7 @@ export default function AdminHomePage() {
     pvp: 'idle',
     tags: 'idle',
     storage: 'idle',
+    governance: 'idle',
   });
   const [sectionError, setSectionError] = useState<Record<DashboardSection, string | null>>({
     core: null,
@@ -170,6 +184,7 @@ export default function AdminHomePage() {
     pvp: null,
     tags: null,
     storage: null,
+    governance: null,
   });
   const [loading, setLoading] = useState(true);
   const [quickJumpTarget, setQuickJumpTarget] = useState<'user' | 'dataCard' | 'battleReport'>('user');
@@ -219,6 +234,7 @@ export default function AdminHomePage() {
     void loadSection('arena');
     void loadSection('pvp');
     void loadSection('tags');
+    void loadSection('governance');
     const storageTimer = window.setTimeout(() => void loadSection('storage'), 1000);
 
     const coreTimer = window.setInterval(() => void loadSection('core'), 60_000);
@@ -227,6 +243,7 @@ export default function AdminHomePage() {
     const pvpTimer = window.setInterval(() => void loadSection('pvp'), 90_000);
     const activityTimer = window.setInterval(() => void loadSection('activity'), 5 * 60_000);
     const tagsTimer = window.setInterval(() => void loadSection('tags'), 5 * 60_000);
+    const governanceTimer = window.setInterval(() => void loadSection('governance'), 90_000);
     const storageRefreshTimer = window.setInterval(() => void loadSection('storage'), 10 * 60_000);
     const controllerMap = controllersRef.current;
 
@@ -238,6 +255,7 @@ export default function AdminHomePage() {
       window.clearInterval(pvpTimer);
       window.clearInterval(activityTimer);
       window.clearInterval(tagsTimer);
+      window.clearInterval(governanceTimer);
       window.clearInterval(storageRefreshTimer);
       (Object.keys(controllerMap) as DashboardSection[]).forEach(abort);
     };
@@ -302,7 +320,7 @@ export default function AdminHomePage() {
         {
           href: '/admin/content-management',
           title: '内容管理',
-          description: '审核数据卡、批量操作、AI 审查与待审核更新处理。',
+          description: '审核数据卡、批量操作、AI 审查，并查看举报/众查/申诉联动状态。',
           tone: 'border-purple-200 hover:border-purple-300',
           icon: FileCheck,
         },
@@ -319,6 +337,47 @@ export default function AdminHomePage() {
           description: '维护 tags、tag_aliases 与标签绑定关系。',
           tone: 'border-slate-200 hover:border-slate-300',
           icon: Tags,
+        },
+      ],
+    },
+    {
+      title: '治理',
+      items: [
+        {
+          href: '/admin/messages',
+          title: '消息管理',
+          description: '发送全站通知、定向消息，并查看近期待发送/已发送运营消息。',
+          tone: 'border-sky-200 hover:border-sky-300',
+          icon: Mail,
+        },
+        {
+          href: '/admin/report-cases',
+          title: '举报案件',
+          description: '查看举报案件状态、创作者通知、自整改候选、众查冻结与申诉联动。',
+          tone: 'border-rose-200 hover:border-rose-300',
+          icon: MessageSquareWarning,
+          badge: '治理中枢',
+        },
+        {
+          href: '/admin/report-appeals',
+          title: '申诉复核',
+          description: '筛选待复核申诉，查看案件快照与当前状态，并执行复核结论。',
+          tone: 'border-orange-200 hover:border-orange-300',
+          icon: Gavel,
+        },
+        {
+          href: '/admin/crowd-review/inspectors',
+          title: '巡查使管理',
+          description: '查看巡查使资格状态，并执行授予、暂停、撤销与恢复。',
+          tone: 'border-emerald-200 hover:border-emerald-300',
+          icon: ShieldCheck,
+        },
+        {
+          href: '/admin/crowd-review/cases',
+          title: '众查案件',
+          description: '查看众查轮次、派单状态、票型摘要与管理员接管入口。',
+          tone: 'border-violet-200 hover:border-violet-300',
+          icon: Siren,
         },
       ],
     },
@@ -486,6 +545,48 @@ export default function AdminHomePage() {
             </div>
           </div>
 
+          <div className="mb-8 rounded-2xl border border-white/70 bg-white/90 p-5 shadow-sm backdrop-blur">
+            <div className="mb-4 flex items-center justify-between">
+              <div>
+                <h2 className="text-xl font-semibold text-slate-900">治理概览</h2>
+                <p className="mt-1 text-sm text-slate-500">消息、举报案件、众查和申诉的核心治理指标。</p>
+              </div>
+              <Link href="/admin/report-cases" className="text-sm text-sky-700 hover:underline">
+                进入治理中枢
+              </Link>
+            </div>
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+              <StatCard
+                title="开放案件 / 处理中"
+                value={`${stats.openReportCasesTotal ?? 0} / ${stats.underReviewReportCasesTotal ?? 0}`}
+                note={`活跃众查轮次 ${stats.activeCrowdReviewRoundsTotal ?? 0}`}
+                icon={MessageSquareWarning}
+                color="bg-rose-600"
+              />
+              <StatCard
+                title="待复核申诉"
+                value={String(stats.submittedReportAppealsTotal ?? 0)}
+                note="submitted + under_review"
+                icon={Gavel}
+                color="bg-orange-600"
+              />
+              <StatCard
+                title="活跃巡查使"
+                value={String(stats.activeInspectorsTotal ?? 0)}
+                note="当前具备众查资格"
+                icon={ShieldCheck}
+                color="bg-emerald-600"
+              />
+              <StatCard
+                title="近 7 天消息投放"
+                value={`${stats.recentSiteMessagesTotal ?? 0} / ${stats.recentDirectMessagesTotal ?? 0}`}
+                note="全站 / 定向"
+                icon={Mail}
+                color="bg-sky-600"
+              />
+            </div>
+          </div>
+
           <div className="mb-8 grid gap-6 lg:grid-cols-2 xl:grid-cols-4">
             <div className="rounded-2xl border border-white/70 bg-white/90 p-5 shadow-sm backdrop-blur">
               <h3 className="mb-4 text-lg font-semibold text-slate-900">账号迁移</h3>
@@ -584,7 +685,7 @@ export default function AdminHomePage() {
           {(Object.values(sectionStatus) as SectionStatus[]).some((status) => status === 'error') ? (
             <div className="mt-8 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
               部分统计读取失败：
-              {(['accounts', 'arena', 'pvp', 'tags', 'storage', 'activity', 'core'] as DashboardSection[])
+              {(['governance', 'accounts', 'arena', 'pvp', 'tags', 'storage', 'activity', 'core'] as DashboardSection[])
                 .filter((section) => sectionStatus[section] === 'error')
                 .map((section) => `${section}(${sectionError[section] || '未知错误'})`)
                 .join('；')}
