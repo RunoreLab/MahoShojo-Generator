@@ -29,6 +29,25 @@ describe('DataCardReportModal', () => {
     expect(html).toContain('引用百科条目');
   });
 
+  test('uses a constrained modal layout with scrollable body and fixed actions', () => {
+    const html = renderToStaticMarkup(
+      <DataCardReportModal
+        isOpen={true}
+        cardName="雪沫"
+        reasons={[{ code: 'plagiarism', label: '疑似抄袭', description: '高度近似搬运' }]}
+        initialReport={null}
+        submitting={false}
+        error={null}
+        onClose={() => {}}
+        onSubmit={() => {}}
+      />,
+    );
+
+    expect(html).toContain('max-h-[calc(100dvh-2rem)]');
+    expect(html).toContain('min-h-0 flex-1 overflow-y-auto');
+    expect(html).toContain('shrink-0 border-t border-gray-200');
+  });
+
   test('preserves existing reference notes for unchanged references when rebuilding draft references', () => {
     const references = buildReportReferencesFromModalFields({
       initialReferences: [
