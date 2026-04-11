@@ -44,8 +44,9 @@ describe('DataCardReportModal', () => {
     );
 
     expect(html).toContain('max-h-[calc(100dvh-2rem)]');
-    expect(html).toContain('min-h-0 flex-1 overflow-y-auto');
+    expect(html).toContain('min-h-0 flex-1 overflow-auto');
     expect(html).toContain('shrink-0 border-t border-gray-200');
+    expect(html).toContain('z-[60]');
   });
 
   test('preserves existing reference notes for unchanged references when rebuilding draft references', () => {

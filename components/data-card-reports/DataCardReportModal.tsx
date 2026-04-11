@@ -1,5 +1,12 @@
 import React, { useEffect, useState } from 'react';
 
+import {
+  BASE_MODAL_BODY_LAYOUT_CLASS_NAME,
+  BASE_MODAL_FOOTER_LAYOUT_CLASS_NAME,
+  BASE_MODAL_HEADER_LAYOUT_CLASS_NAME,
+  BASE_MODAL_PANEL_LAYOUT_CLASS_NAME,
+  getBaseModalLayoutClassNames,
+} from '@/components/shared/BaseModal';
 import { normalizePublicDataCardReferenceId } from '@/lib/data-card-reports/public-reference-id';
 import type {
   DataCardReportDraft,
@@ -103,18 +110,19 @@ export function DataCardReportModal({
   }, [initialReport, isOpen, reasons]);
 
   if (!isOpen) return null;
+  const { rootClassName } = getBaseModalLayoutClassNames({ zIndexClassName: 'z-[60]' });
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4">
-      <div className="flex max-h-[calc(100dvh-2rem)] w-full max-w-2xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
-        <div className="shrink-0 border-b border-gray-200 px-6 py-4">
+    <div className={[rootClassName, 'bg-black/60'].join(' ')}>
+      <div className={[BASE_MODAL_PANEL_LAYOUT_CLASS_NAME, 'max-w-2xl rounded-2xl bg-white shadow-2xl'].join(' ')}>
+        <div className={[BASE_MODAL_HEADER_LAYOUT_CLASS_NAME, 'border-b border-gray-200 px-6 py-4'].join(' ')}>
           <div className="text-lg font-semibold text-gray-900">
             {initialReport ? '编辑我的举报' : '举报数据卡'}
           </div>
           <div className="mt-1 text-sm text-gray-500">目标：{cardName}</div>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
+        <div className={[BASE_MODAL_BODY_LAYOUT_CLASS_NAME, 'px-6 py-5'].join(' ')}>
           <div className="space-y-5">
             <section className="space-y-3">
               <div className="text-sm font-medium text-gray-800">举报理由</div>
@@ -188,7 +196,7 @@ export function DataCardReportModal({
           </div>
         </div>
 
-        <div className="shrink-0 border-t border-gray-200 px-6 py-4">
+        <div className={[BASE_MODAL_FOOTER_LAYOUT_CLASS_NAME, 'border-t border-gray-200 px-6 py-4'].join(' ')}>
           <div className="flex items-center justify-end gap-3">
             <button
               type="button"
