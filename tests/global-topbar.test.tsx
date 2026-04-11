@@ -1,0 +1,256 @@
+import { afterAll, beforeEach, describe, expect, mock, test } from 'bun:test';
+import React from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+
+let authState = {
+  user: null as null | { id: number; username: string; prefix?: string | null },
+  userBadges: [],
+  loading: false,
+  isAuthenticated: false,
+  logout: async () => undefined,
+};
+
+let topBarProfileState = {
+  avatarDataUrl: null as string | null,
+};
+
+let topBarMessagesState = {
+  unreadTotal: 0,
+  loading: false,
+  error: null as string | null,
+  refresh: async () => undefined,
+};
+
+mock.module('next/link', () => ({
+  default: function LinkMock({
+    children,
+    href,
+    ...props
+  }: {
+    children?: React.ReactNode;
+    href: string;
+    [key: string]: unknown;
+  }) {
+    return (
+      <a href={href} {...props}>
+        {children}
+      </a>
+    );
+  },
+}));
+
+mock.module('@/lib/useAuth', () => ({
+  useAuth: () => authState,
+}));
+
+mock.module('@/components/navigation/useTopBarProfile', () => ({
+  useTopBarProfile: () => topBarProfileState,
+}));
+
+mock.module('@/components/navigation/useTopBarMessages', () => ({
+  useTopBarMessages: () => topBarMessagesState,
+}));
+
+describe('topbar leaf components', () => {
+  beforeEach(() => {
+    authState = {
+      user: null,
+      userBadges: [],
+      loading: false,
+      isAuthenticated: false,
+      logout: async () => undefined,
+    };
+    topBarProfileState = {
+      avatarDataUrl: null,
+    };
+    topBarMessagesState = {
+      unreadTotal: 0,
+      loading: false,
+      error: null,
+      refresh: async () => undefined,
+    };
+  });
+
+  test('message entry links to the message center and renders unread data', async () => {
+    topBarMessagesState = {
+      ...topBarMessagesState,
+      unreadTotal: 5,
+    };
+    const { TopBarMessageButton } = await import('@/components/navigation/TopBarMessageButton');
+    const html = renderToStaticMarkup(<TopBarMessageButton isAuthenticated={true} userId={7} />);
+
+    expect(html).toContain('消息');
+    expect(html).toContain('href="/messages"');
+    expect(html).toContain('5');
+    expect(html).not.toContain('disabled');
+  });
+
+  test('theme menu renders the existing color mode options', async () => {
+    const { TopBarThemeMenu } = await import('@/components/navigation/TopBarThemeMenu');
+    const html = renderToStaticMarkup(<TopBarThemeMenu />);
+
+    expect(html).toContain('外观');
+    expect(html).toContain('跟随系统');
+    expect(html).toContain('浅色');
+    expect(html).toContain('深色');
+  });
+
+  test('logged out user menu points to character manager login entry', async () => {
+    const { TopBarUserMenu } = await import('@/components/navigation/TopBarUserMenu');
+    const html = renderToStaticMarkup(<TopBarUserMenu />);
+
+    expect(html).toContain('登录 / 注册');
+    expect(html).toContain('href="/character-manager"');
+  });
+
+  test('logged in user menu renders user actions', async () => {
+    authState = {
+      ...authState,
+      user: { id: 7, username: '小圆' },
+      isAuthenticated: true,
+    };
+    const { TopBarUserMenu } = await import('@/components/navigation/TopBarUserMenu');
+    const html = renderToStaticMarkup(<TopBarUserMenu />);
+
+    expect(html).toContain('小圆');
+    expect(html).toContain('个人页');
+    expect(html).toContain('角色管理');
+    expect(html).toContain('退出登录');
+  });
+
+  test('logged in user menu renders avatar image when profile has avatar', async () => {
+    authState = {
+      ...authState,
+      user: { id: 7, username: '小圆' },
+      isAuthenticated: true,
+    };
+    topBarProfileState = {
+      avatarDataUrl: 'data:image/webp;base64,topbar-avatar',
+    };
+    const { TopBarUserMenu } = await import('@/components/navigation/TopBarUserMenu');
+    const html = renderToStaticMarkup(<TopBarUserMenu />);
+
+    expect(html).toContain('src="data:image/webp;base64,topbar-avatar"');
+    expect(html).toContain('alt="小圆的头像"');
+    expect(html).not.toContain('>小<');
+  });
+
+  test('mobile user menu expands actions inline for touch navigation', async () => {
+    authState = {
+      ...authState,
+      user: { id: 7, username: '小圆' },
+      isAuthenticated: true,
+    };
+    const { TopBarUserMenu } = await import('@/components/navigation/TopBarUserMenu');
+    const html = renderToStaticMarkup(
+      <TopBarUserMenu variant="mobile" onNavigate={() => undefined} />,
+    );
+
+    expect(html).toContain('小圆');
+    expect(html).toContain('账户快捷入口');
+    expect(html).toContain('个人页');
+    expect(html).toContain('角色管理');
+    expect(html).toContain('退出登录');
+    expect(html).not.toContain('aria-haspopup="menu"');
+  });
+});
+
+describe('GlobalTopBar', () => {
+  beforeEach(() => {
+    authState = {
+      user: null,
+      userBadges: [],
+      loading: false,
+      isAuthenticated: false,
+      logout: async () => undefined,
+    };
+  });
+
+  test('renders logo, grouped nav, theme, messages, and user entry', async () => {
+    const { GlobalTopBar } = await import('@/components/navigation/GlobalTopBar');
+    const html = renderToStaticMarkup(<GlobalTopBar pathname="/battle" />);
+
+    expect(html).toContain('MahoShojo');
+    expect(html).toContain('src="/favicon.svg"');
+    expect(html).toContain('data-logo-fallback="true"');
+    expect(html).toContain('data-logo-fallback="true" class="hidden');
+    expect(html).toContain('href="/"');
+    expect(html).toContain('创作');
+    expect(html).toContain('竞技');
+    expect(html).toContain('角色');
+    expect(html).toContain('百科');
+    expect(html).toContain('简洁竞技场');
+    expect(html).toContain('完整竞技场');
+    expect(html).toContain('外观');
+    expect(html).toContain('消息');
+    expect(html).toContain('href="/messages"');
+    expect(html).toContain('登录 / 注册');
+  });
+
+  test('marks only covered active group while keeping non-covered targets as links', async () => {
+    const { GlobalTopBar } = await import('@/components/navigation/GlobalTopBar');
+    const html = renderToStaticMarkup(<GlobalTopBar pathname="/creator" />);
+
+    expect(html).toContain('data-active-group="creative"');
+    expect(html).toContain('href="/ranking"');
+    expect(html).toContain('href="/encyclopedia"');
+    expect(html).toContain('href="/name"');
+  });
+
+  test('mobile drawer markup contains grouped navigation and close controls', async () => {
+    const { TopBarMobileDrawer } = await import('@/components/navigation/TopBarMobileDrawer');
+    const html = renderToStaticMarkup(
+      <TopBarMobileDrawer isOpen={true} activeGroupId="battle" onClose={() => undefined} />,
+    );
+
+    expect(html).toContain('role="dialog"');
+    expect(html).toContain('移动端导航');
+    expect(html).toContain('关闭导航');
+    expect(html).toContain('创作');
+    expect(html).toContain('竞技');
+    expect(html).toContain('排行榜');
+    expect(html).toContain('登录 / 注册');
+  });
+
+  test('topbar navigation exposes accessible labels without unsupported menu roles', async () => {
+    const { GlobalTopBar } = await import('@/components/navigation/GlobalTopBar');
+    const html = renderToStaticMarkup(<GlobalTopBar pathname="/arena" />);
+
+    expect(html).toContain('aria-label="返回首页"');
+    expect(html).toContain('aria-label="全站主导航"');
+    expect(html).toContain('aria-label="外观设置"');
+    expect(html).toContain('aria-label="消息中心"');
+    expect(html).toContain('aria-label="打开导航菜单"');
+    expect(html).not.toContain('role="menu"');
+    expect(html).not.toContain('aria-haspopup="menu"');
+  });
+
+  test('renders one shared theme menu instance across breakpoints', async () => {
+    const { GlobalTopBar } = await import('@/components/navigation/GlobalTopBar');
+    const html = renderToStaticMarkup(<GlobalTopBar pathname="/arena" />);
+
+    expect(html.match(/aria-label="外观设置"/g)?.length ?? 0).toBe(1);
+  });
+
+  test('renders one shared message entry instance across breakpoints', async () => {
+    const { GlobalTopBar } = await import('@/components/navigation/GlobalTopBar');
+    const html = renderToStaticMarkup(<GlobalTopBar pathname="/arena" />);
+
+    expect(html.match(/aria-label="消息中心"/g)?.length ?? 0).toBe(1);
+  });
+
+  test('mobile drawer renders outside the sticky header container', async () => {
+    const { GlobalTopBar } = await import('@/components/navigation/GlobalTopBar');
+    const html = renderToStaticMarkup(<GlobalTopBar pathname="/arena" defaultMobileOpen={true} />);
+
+    const headerEndIndex = html.indexOf('</header>');
+    const drawerDialogIndex = html.indexOf('role="dialog"');
+
+    expect(headerEndIndex).toBeGreaterThan(-1);
+    expect(drawerDialogIndex).toBeGreaterThan(headerEndIndex);
+  });
+});
+
+afterAll(() => {
+  mock.restore();
+});

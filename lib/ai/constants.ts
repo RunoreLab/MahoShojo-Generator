@@ -76,6 +76,16 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 description: 'Google 旗下的上两代模型，但是真的好快！'
             },
             {
+                value: 'gemma-4-31b-it',
+                label: 'Gemma 4 31B IT',
+                description: '较新的 Gemma 4 指令模型（31B），适合作为高优先级的 Gemma 备用选择。'
+            },
+            {
+                value: 'gemma-4-26b-a4b-it',
+                label: 'Gemma 4 26B A4B IT',
+                description: '较新的 Gemma 4 指令模型（26B A4B），建议先作为可选备用通道使用。'
+            },
+            {
                 value: 'gemma-3-27b-it',
                 label: 'Gemma 3 27B IT',
                 description: '更便宜但也更弱的 Gemma 3 指令模型（27B），建议仅作为流式输出的备用选择。'
@@ -179,6 +189,11 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
             {
                 value: 'glm-5',
                 label: 'GLM-5',
+                description: '智谱旗下新一代通用模型，综合能力更强，适合复杂指令、多轮对话与高质量创作。'
+            },
+            {
+                value: 'glm-5.1',
+                label: 'GLM-5.1',
                 description: '智谱旗下新一代通用模型，综合能力更强，适合复杂指令、多轮对话与高质量创作。'
             },
             {
@@ -379,6 +394,11 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 description: '智谱新一代通用模型，适合中文对话、总结与结构化输出。'
             },
             {
+                value: 'glm-5.1',
+                label: 'GLM-5.1',
+                description: '智谱旗下新一代通用模型，综合能力更强，适合复杂指令、多轮对话与高质量创作。'
+            },
+            {
                 value: 'glm-4.6',
                 label: 'GLM-4.6',
                 description: '通用指令模型，适合中文对话、总结与结构化输出。'
@@ -392,6 +412,72 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 value: 'deepseek-ai/DeepSeek-V3.2',
                 label: 'DeepSeek V3.2',
                 description: '通用对话与推理模型，适合分析、总结与多轮交互。'
+            },
+        ]
+    },
+    {
+        id: 'nova-cervus',
+        name: '鹿鹿 API',
+        description: '鹿鹿 API 为用户提供了国内外广泛的模型库，主要是按次计费，适合按可用性挑选单模型通道。',
+        docsUrl: 'https://nova.cervus.top/register?aff=i0uQ',
+        baseUrl: 'https://nova.cervus.top/v1',
+        type: 'openai',
+        mode: 'json',
+        models: [
+            {
+                value: '[鹿鹿10]gemini-3.1-pro-preview',
+                label: 'Gemini 3.1 Pro（按次）',
+                description: '鹿鹿当前可选的 Gemini 3.1 Pro 按次档之一，适合复杂指令、高质量创作与长文本任务。'
+            },
+            {
+                value: '[鹿鹿10]gemini-3-pro-preview',
+                label: 'Gemini 3.0 Pro（按次）',
+                description: '较稳定的 Gemini 3.0 Pro 按次通道，适合综合写作、推理与结构化生成。'
+            },
+            {
+                value: '[鹿鹿2]gemini-3-flash-preview',
+                label: 'Gemini 3.0 Flash（按次）',
+                description: '鹿鹿的 Gemini 3.0 Flash 档位，适合高频交互与流式生成。'
+            },
+            {
+                value: '[鹿鹿10]gemini-2.5-pro',
+                label: 'Gemini 2.5 Pro（按次）',
+                description: '鹿鹿的 Gemini 2.5 Pro 按次通道，适合质量优先的文本生成场景。'
+            },
+            {
+                value: '[鹿鹿5]gemini-2.5-pro-preview-06-05',
+                label: 'Gemini 2.5 Pro（按量）',
+                description: '鹿鹿的 Gemini 2.5 Pro 按量通道，适合质量优先的文本生成场景。'
+            },
+            {
+                value: '[鹿鹿2]gemini-2.5-flash',
+                label: 'Gemini 2.5 Flash（按次）',
+                description: 'Gemini 2.5 Flash 的按次通道，适合作为均衡速度与成本的常用选择。'
+            },
+            {
+                value: '[鹿鹿14]claude-sonnet-4-6',
+                label: 'Claude Sonnet 4.6（按次）',
+                description: '鹿鹿的 Claude Sonnet 4.6 档位，适合稳健写作与长文本整理。'
+            },
+            {
+                value: '[鹿鹿14]claude-sonnet-4-5-20250929',
+                label: 'Claude Sonnet 4.5（按次）',
+                description: '鹿鹿的 Claude Sonnet 4.5 按次档，状态波动较大，建议作为备用通道。'
+            },
+            {
+                value: '[鹿鹿14]claude-opus-4-6',
+                label: 'Claude Opus 4.6（按次）',
+                description: 'Claude Opus 4.6 的按次通道，适合复杂创作与高要求任务。'
+            },
+            {
+                value: '[鹿鹿1]deepseek/deepseek-r1-0528:free',
+                label: 'DeepSeek R1（免费）',
+                description: '鹿鹿提供的 DeepSeek 免费试用档，实时状态通常不稳定，适合作为低成本备用入口。'
+            },
+            {
+                value: '[鹿鹿1]qwen/qwen3-next-80b-a3b-instruct:free',
+                label: 'Qwen3 Next 80B（免费）',
+                description: '鹿鹿提供的 Qwen3 免费试用档，适合低成本尝试，但实时可用性较弱。'
             },
         ]
     },
@@ -438,6 +524,11 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 value: 'ZhipuAI/GLM-5',
                 label: 'GLM-5',
                 description: '面向中文场景的新一代通用模型，适合复杂对话、改写与信息整理。'
+            },
+            {
+                value: 'ZhipuAI/GLM-5.1',
+                label: 'GLM-5.1',
+                description: '智谱旗下新一代通用模型，综合能力更强，适合复杂指令、多轮对话与高质量创作。'
             },
             {
                 value: 'ZhipuAI/GLM-4.7-Flash',
@@ -525,6 +616,16 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 description: 'Google 早前的轻量版快速模型，速度极快，适合预算敏感或高并发场景。'
             },
             {
+                value: 'gemma-4-31b-it',
+                label: 'Gemma 4 31B IT',
+                description: '较新的 Gemma 4 指令模型（31B），适合作为高优先级的 Gemma 备用选择。'
+            },
+            {
+                value: 'gemma-4-26b-a4b-it',
+                label: 'Gemma 4 26B A4B IT',
+                description: '较新的 Gemma 4 指令模型（26B A4B），建议先作为可选备用通道使用。'
+            },
+            {
                 value: 'gemma-3-27b-it',
                 label: 'Gemma 3 27B IT',
                 description: '更便宜但也更弱的 Gemma 3 指令模型（27B），建议仅用于流式生成的备用通道。'
@@ -584,9 +685,19 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 description: '偏推理的思考模型，适合复杂规划、多步分析与高约束任务。'
             },
             {
-                value: 'zai-org/GLM-5',
+                value: 'Pro/zai-org/GLM-5',
                 label: 'GLM-5',
                 description: '中文场景综合能力更强，适合复杂指令、结构化输出与多轮对话。'
+            },
+            {
+                value: 'Pro/zai-org/GLM-5.1',
+                label: 'GLM-5.1',
+                description: '智谱旗下新一代通用模型，综合能力更强，适合复杂指令、多轮对话与高质量创作。'
+            },
+            {
+                value: 'Pro/zai-org/GLM-4.7',
+                label: 'GLM-4.7',
+                description: '中文场景表现稳定，适合结构化输出、改写与多轮对话。'
             },
             {
                 value: 'zai-org/GLM-4.6',
@@ -726,6 +837,108 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 value: 'kimi-k2.5',
                 label: 'Kimi K2.5',
                 description: 'Moonshot AI 旗下模型，在多模态和智能体能力方面实现了显著飞跃。'
+            },
+        ]
+    },
+    {
+        id: 'nvidia',
+        name: '英伟达 NVIDIA',
+        description: 'NVIDIA Build 官方 OpenAI 兼容通道，老黄特供开源模型。优先收录可免费试用、口碑较好的文本与推理模型。',
+        docsUrl: 'https://build.nvidia.com/',
+        baseUrl: 'https://integrate.api.nvidia.com/v1',
+        type: 'openai',
+        mode: 'auto',
+
+        models: [
+            {
+                value: 'google/gemma-4-31b-it',
+                label: 'Gemma 4 31B IT',
+                description: 'Gemma 4 主力档位，在 NVIDIA 通道下可作为高质量开源创作模型。'
+            },
+            {
+                value: 'google/gemma-3-27b-it',
+                label: 'Gemma 3 27B IT',
+                description: '中高配 Gemma 3，适合兼顾速度、成本与结构化输出稳定性。'
+            },
+            {
+                value: 'deepseek-ai/deepseek-v3.2',
+                label: 'DeepSeek V3.2',
+                description: 'DeepSeek 主力模型，适合中文写作、整理与通用分析。'
+            },
+            {
+                value: 'deepseek-ai/deepseek-v3.1-terminus',
+                label: 'DeepSeek V3.1 Terminus',
+                description: '通用能力均衡，适合中文写作、整理、总结与结构化任务。'
+            },
+            {
+                value: 'qwen/qwen3.5-397b-a17b',
+                label: 'Qwen 3.5 397B',
+                description: 'Qwen 3.5 大档位，适合高质量内容生成与复杂指令。'
+            },
+            {
+                value: 'qwen/qwen3.5-122b-a10b',
+                label: 'Qwen 3.5 122B',
+                description: 'Qwen 3.5 中高档位，适合作为更均衡的中文创作选择。'
+            },
+            {
+                value: 'moonshotai/kimi-k2.5',
+                label: 'Kimi K2.5',
+                description: 'Kimi 模型，适合创意发散、设定撰写与长文本续写。'
+            },
+            {
+                value: 'moonshotai/kimi-k2-instruct',
+                label: 'Kimi K2 Instruct',
+                description: '长文本、创意写作和中文表达都很强，适合人设与剧情生成。'
+            },
+            {
+                value: 'mistralai/mistral-large-3-675b-instruct-2512',
+                label: 'Mistral Large 3 675B',
+                description: '高质量通用旗舰，适合复杂指令、长文本和高要求创作。'
+            },
+            {
+                value: 'qwen/qwq-32b',
+                label: 'QwQ 32B',
+                description: '偏推理与思考，适合复杂约束、分析和多步生成。'
+            },
+            {
+                value: 'z-ai/glm4.7',
+                label: 'GLM 4.7',
+                description: '中文场景表现稳定，适合角色设定、续写与问答。'
+            },
+            {
+                value: 'bytedance/seed-oss-36b-instruct',
+                label: 'Seed OSS 36B Instruct',
+                description: '字节系开源指令模型，适合通用写作和多轮对话。'
+            },
+            {
+                value: 'mistralai/magistral-small-2506',
+                label: 'Magistral Small',
+                description: '较轻量的推理模型，适合需要思考链但不想太慢的任务。'
+            },
+            {
+                value: 'mistralai/mistral-nemotron',
+                label: 'Mistral Nemotron',
+                description: '通用性与稳定性不错，适合作为均衡备用选项。'
+            },
+            {
+                value: 'microsoft/phi-4-mini-flash-reasoning',
+                label: 'Phi 4 Mini Flash Reasoning',
+                description: '小而快的 reasoning 模型，适合预算敏感和高频调用。'
+            },
+            {
+                value: 'tiiuae/falcon3-7b-instruct',
+                label: 'Falcon 3 7B Instruct',
+                description: '轻量通用模型，适合草稿、改写和低成本尝试。'
+            },
+            {
+                value: 'mistralai/mistral-7b-instruct-v0.2',
+                label: 'Mistral 7B Instruct',
+                description: '经典轻量指令模型，适合基础聊天、润色和短文本生成。'
+            },
+            {
+                value: 'nvidia/nemotron-mini-4b-instruct',
+                label: 'Nemotron Mini 4B Instruct',
+                description: '超轻量模型，适合低门槛试用与简短结构化输出。'
             },
         ]
     },

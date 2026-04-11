@@ -1,0 +1,1463 @@
+import { describe, expect, test } from 'bun:test';
+
+import {
+  MAX_DATA_CARD_REPORT_DETAILS_LENGTH,
+  MAX_DATA_CARD_REPORT_REFERENCE_NOTE_LENGTH,
+} from '@/lib/data-card-reports/normalization';
+import { buildNormalizedReportPayloadHash } from '@/lib/data-card-reports/normalization';
+import { createDataCardReportsServiceForTests } from '@/lib/data-card-reports/service';
+import type { DataCardReportSubmissionDecision } from '@/lib/data-card-reports/types';
+
+const now = '2026-04-08T10:20:00.000Z';
+
+const targetCard = {
+  id: 'card-1',
+  user_id: 2,
+  type: 'character' as const,
+  name: '公开卡',
+  description: '描述',
+  data: '{"name":"公开卡"}',
+  is_public: 1,
+  public_since: null,
+  usage_count: 0,
+  like_count: 0,
+  favorite_count: 0,
+  review_status: 'approved',
+  is_recommended: 0,
+  created_at: null,
+  updated_at: '2026-04-08T10:00:00.000Z',
+  deleted_at: null,
+  username: 'creator',
+  tag_ids: null,
+};
+
+const makeSubmitInput = (reporterUserId: number, details = '说明') => ({
+  db: {} as never,
+  reporterUserId,
+  targetEntityId: 'card-1',
+  reasonCode: 'plagiarism' as const,
+  details,
+  references: [],
+});
+
+const buildService = (overrides: Parameters<typeof createDataCardReportsServiceForTests>[0] = {}) =>
+  createDataCardReportsServiceForTests({
+    now: () => now,
+    idFactory: (() => {
+      let index = 0;
+      return () => `id-${++index}`;
+    })(),
+    getTargetCard: async () => targetCard,
+    resolveReferenceSnapshots: async () => [],
+    rateLimit: async () => ({ allowed: true }),
+    screenSubmission: async () => ({ allowed: true }),
+    createUserMessageEntry: async () => ({ id: 99 }),
+    ...overrides,
+  });
+
+describe('data card reports service', () => {
+  test('multi-user reports against the same card reuse one open case', async () => {
+    let openCase: any = null;
+    const reports: any[] = [];
+    const service = buildService({
+      repo: {
+        getOpenReportCaseByTarget: async () => openCase,
+        createReportCase: async (input: any) => {
+          openCase = { ...input, status: 'open', creatorNotifiedAt: null, creatorNotifiedReportCount: 0 };
+          return openCase;
+        },
+        getActiveReportByCaseAndReporter: async (input: any) => {
+          if (input.reporterUserId === 8) return null;
+          if (input.reporterUserId !== 7) return null;
+          return reports.find((report) => report.caseId === input.caseId && report.reporterUserId === input.reporterUserId) ?? null;
+        },
+        createReport: async (input: any) => {
+          const row = { ...input, status: 'active' };
+          reports.push(row);
+          return row;
+        },
+        updateActiveReportForReporter: async (input: any) => ({ id: 'updated-report', ...input, status: 'active' }),
+        replaceReportReferences: async () => {},
+        countActiveReportsByCase: async () => reports.length,
+        markReportCaseCreatorNotified: async () => {
+          openCase.creatorNotifiedAt = now;
+          return true;
+        },
+      },
+    });
+
+    const first = await service.submitDataCardReport(makeSubmitInput(7));
+    const second = await service.submitDataCardReport(makeSubmitInput(8));
+
+    expect(first.submissionDecision).toBe('created');
+    expect(second.submissionDecision).toBe('created');
+    expect(first.caseId).toBe(second.caseId);
+    expect(reports).toHaveLength(2);
+  });
+
+  test('getDataCardReportCapability returns ownerModerationSummary when owner views a resolved violation case', async () => {
+    const service = buildService({
+      repo: {
+        getLatestReportCaseByTarget: async () => ({
+          id: 'case-1',
+          targetEntityType: 'data_card',
+          targetEntityId: 'card-1',
+          targetUserId: 2,
+          status: 'resolved',
+          resolutionCode: 'confirmed_violation',
+          creatorNotifiedAt: null,
+          creatorNotifiedReportCount: 0,
+          latestReportedAt: now,
+          targetCardUpdatedAtAtNotice: null,
+          resolutionNotifiedAt: now,
+          resolutionNotifiedCaseUpdatedAt: now,
+          closedAt: now,
+          createdAt: now,
+          updatedAt: now,
+        }),
+      } as any,
+      getOwnerModerationSummary: async () => ({
+        latestCaseId: 'case-1',
+        status: 'resolved',
+        resolutionCode: 'confirmed_violation',
+        canAppeal: true,
+        activeAppealId: null,
+        activeAppealStatus: null,
+        appealEntryUrl: '/report-appeals?reportCaseId=case-1',
+        statusSummary: '该卡因举报处理结果被判定为违规，可提交申诉。',
+      }),
+    } as any);
+
+    const capability = await service.getDataCardReportCapability({
+      db: {} as never,
+      viewerUserId: 2,
+      targetEntityId: 'card-1',
+    });
+
+    expect(capability.canReport).toBe(false);
+    expect(capability.ownerModerationSummary?.canAppeal).toBe(true);
+    expect(capability.ownerModerationSummary?.latestCaseId).toBe('case-1');
+  });
+
+  test('getDataCardReportCapability still returns ownerModerationSummary when the target card is no longer publicly readable', async () => {
+    const service = buildService({
+      getTargetCard: async () => null,
+      repo: {
+        getLatestReportCaseByTarget: async () => ({
+          id: 'case-removed',
+          targetEntityType: 'data_card',
+          targetEntityId: 'card-1',
+          targetUserId: 2,
+          status: 'resolved',
+          resolutionCode: 'content_removed',
+          creatorNotifiedAt: null,
+          creatorNotifiedReportCount: 1,
+          latestReportedAt: now,
+          targetCardUpdatedAtAtNotice: null,
+          resolutionNotifiedAt: now,
+          resolutionNotifiedCaseUpdatedAt: now,
+          closedAt: now,
+          createdAt: now,
+          updatedAt: now,
+        }),
+      } as any,
+      getOwnerModerationSummary: async () => ({
+        latestCaseId: 'case-removed',
+        status: 'resolved',
+        resolutionCode: 'content_removed',
+        canAppeal: true,
+        activeAppealId: null,
+        activeAppealStatus: null,
+        appealEntryUrl: '/report-appeals?reportCaseId=case-removed',
+        statusSummary: '该卡已下架，但仍可在详情页查看处理结果并发起申诉。',
+      }),
+    } as any);
+
+    const capability = await service.getDataCardReportCapability({
+      db: {} as never,
+      viewerUserId: 2,
+      targetEntityId: 'card-1',
+    });
+
+    expect(capability.canReport).toBe(false);
+    expect(capability.reportDisabledReason).toBe('该数据卡当前不可举报');
+    expect(capability.ownerModerationSummary?.canAppeal).toBe(true);
+    expect(capability.ownerModerationSummary?.latestCaseId).toBe('case-removed');
+  });
+
+  test('getDataCardReportCapability prefers the in-flight owner appeal summary over a newer report case', async () => {
+    const service = buildService({
+      repo: {
+        getLatestReportCaseByTarget: async () => ({
+          id: 'case-new',
+          targetEntityType: 'data_card',
+          targetEntityId: 'card-1',
+          targetUserId: 2,
+          status: 'under_review',
+          resolutionCode: null,
+          creatorNotifiedAt: null,
+          creatorNotifiedReportCount: 1,
+          latestReportedAt: now,
+          targetCardUpdatedAtAtNotice: null,
+          resolutionNotifiedAt: null,
+          resolutionNotifiedCaseUpdatedAt: null,
+          closedAt: null,
+          createdAt: now,
+          updatedAt: now,
+        }),
+      } as any,
+      getOwnerModerationSummary: async ({ reportCaseId }: { reportCaseId: string }) =>
+        reportCaseId === 'case-new'
+          ? {
+              latestCaseId: 'case-new',
+              status: 'under_review',
+              resolutionCode: null,
+              canAppeal: false,
+              activeAppealId: null,
+              activeAppealStatus: null,
+              appealEntryUrl: null,
+              statusSummary: '当前处理结果暂不可申诉。',
+            }
+          : null,
+      getActiveOwnerModerationSummaryByTarget: async () => ({
+        latestCaseId: 'case-old',
+        status: 'resolved',
+        resolutionCode: 'confirmed_violation',
+        canAppeal: false,
+        activeAppealId: 'appeal-1',
+        activeAppealStatus: 'submitted',
+        appealEntryUrl: '/report-appeals?appealId=appeal-1',
+        statusSummary: '该处理结果的申诉正在处理中，可查看当前状态。',
+      }),
+    } as any);
+
+    const capability = await service.getDataCardReportCapability({
+      db: {} as never,
+      viewerUserId: 2,
+      targetEntityId: 'card-1',
+    });
+
+    expect(capability.canReport).toBe(false);
+    expect(capability.ownerModerationSummary?.latestCaseId).toBe('case-old');
+    expect(capability.ownerModerationSummary?.activeAppealId).toBe('appeal-1');
+  });
+
+  test('getDataCardReportCapability reports crowd-review frozen cases as non-reportable', async () => {
+    const service = buildService({
+      repo: {
+        getOpenReportCaseByTarget: async () => ({
+          id: 'case-1',
+          targetEntityType: 'data_card',
+          targetEntityId: 'card-1',
+          targetUserId: 2,
+          status: 'under_review',
+          creatorNotifiedAt: now,
+          creatorNotifiedReportCount: 1,
+        }),
+        getActiveReportByCaseAndReporter: async () => null,
+        listActiveReportsByCase: async () => [],
+        hasActiveCrowdReviewRoundForCase: async () => true,
+      },
+    });
+
+    const capability = await service.getDataCardReportCapability({
+      db: {} as never,
+      viewerUserId: 7,
+      targetEntityId: 'card-1',
+    });
+
+    expect(capability.canReport).toBe(false);
+    expect(capability.reportDisabledReason).toContain('已进入众查');
+    expect(capability.hasOpenCase).toBe(true);
+  });
+
+  test('same user changed payload updates active report after passing screening', async () => {
+    let updateCalled = false;
+    const service = buildService({
+      repo: {
+        getOpenReportCaseByTarget: async () => ({
+          id: 'case-1',
+          targetEntityType: 'data_card',
+          targetEntityId: 'card-1',
+          targetUserId: 2,
+          status: 'open',
+          creatorNotifiedAt: now,
+          creatorNotifiedReportCount: 1,
+        }),
+        getActiveReportByCaseAndReporter: async () => ({
+          id: 'report-1',
+          caseId: 'case-1',
+          reporterUserId: 7,
+          normalizedPayloadHash: 'hash-a',
+          status: 'active',
+        }),
+        updateActiveReportForReporter: async (input: any) => {
+          updateCalled = true;
+          return { id: 'report-1', ...input, status: 'active' };
+        },
+        replaceReportReferences: async () => {},
+        countActiveReportsByCase: async () => 1,
+      },
+    });
+
+    const result = await service.submitDataCardReport(makeSubmitInput(7, '新的说明'));
+
+    expect(result.submissionDecision).toBe('updated');
+    expect(updateCalled).toBe(true);
+  });
+
+  test('rejects report mutation once the open case has entered crowd review', async () => {
+    const service = buildService({
+      repo: {
+        getOpenReportCaseByTarget: async () => ({
+          id: 'case-1',
+          targetEntityType: 'data_card',
+          targetEntityId: 'card-1',
+          targetUserId: 2,
+          status: 'under_review',
+          creatorNotifiedAt: now,
+          creatorNotifiedReportCount: 1,
+        }),
+        hasActiveCrowdReviewRoundForCase: async () => true,
+      },
+    });
+
+    await expect(service.submitDataCardReport(makeSubmitInput(7))).rejects.toThrow('已进入众查');
+  });
+
+  test('rejects oversized details before touching report repositories', async () => {
+    let repoTouched = false;
+    const service = buildService({
+      repo: {
+        getOpenReportCaseByTarget: async () => {
+          repoTouched = true;
+          return null;
+        },
+      },
+    });
+
+    await expect(
+      service.submitDataCardReport(makeSubmitInput(7, 'a'.repeat(MAX_DATA_CARD_REPORT_DETAILS_LENGTH + 1))),
+    ).rejects.toThrow(`补充说明不能超过 ${MAX_DATA_CARD_REPORT_DETAILS_LENGTH} 个字符`);
+    expect(repoTouched).toBe(false);
+  });
+
+  test('rejects oversized reference notes before touching report repositories', async () => {
+    let repoTouched = false;
+    const service = buildService({
+      repo: {
+        getOpenReportCaseByTarget: async () => {
+          repoTouched = true;
+          return null;
+        },
+      },
+    });
+
+    await expect(
+      service.submitDataCardReport({
+        ...makeSubmitInput(7),
+        references: [
+          {
+            referenceType: 'encyclopedia_entry',
+            referenceId: 'community-rules',
+            note: 'a'.repeat(MAX_DATA_CARD_REPORT_REFERENCE_NOTE_LENGTH + 1),
+          },
+        ],
+      }),
+    ).rejects.toThrow(`引用备注不能超过 ${MAX_DATA_CARD_REPORT_REFERENCE_NOTE_LENGTH} 个字符`);
+    expect(repoTouched).toBe(false);
+  });
+
+  test('same user same normalized payload returns noop and does not count rate limit', async () => {
+    let rateLimitCalled = false;
+    const existingHash = await buildNormalizedReportPayloadHash({
+      targetEntityId: 'card-1',
+      reasonCode: 'plagiarism',
+      details: '说明',
+      references: [],
+    });
+    const existingHashService = buildService({
+      repo: {
+        getOpenReportCaseByTarget: async () => ({
+          id: 'case-1',
+          targetEntityType: 'data_card',
+          targetEntityId: 'card-1',
+          targetUserId: 2,
+          status: 'open',
+          creatorNotifiedAt: now,
+          creatorNotifiedReportCount: 1,
+        }),
+        getActiveReportByCaseAndReporter: async () => ({
+          id: 'report-1',
+          caseId: 'case-1',
+          reporterUserId: 7,
+          evidenceSummaryJson: '{}',
+          normalizedPayloadHash: existingHash,
+          status: 'active',
+        }),
+        listReportReferencesByReport: async () => [],
+        replaceReportReferences: async () => {},
+      },
+      rateLimit: async () => {
+        rateLimitCalled = true;
+        return { allowed: true };
+      },
+    });
+
+    const result = await existingHashService.submitDataCardReport(makeSubmitInput(7));
+
+    expect(result.submissionDecision).toBe('noop_duplicate_payload');
+    expect(rateLimitCalled).toBe(false);
+  });
+
+  test('same payload retry repairs missing references after a partial write failure', async () => {
+    let activeReport: any = null;
+    let replaceAttempts = 0;
+    const writtenReferences: any[] = [];
+    const service = buildService({
+      repo: {
+        getOpenReportCaseByTarget: async () => ({
+          id: 'case-1',
+          targetEntityType: 'data_card',
+          targetEntityId: 'card-1',
+          targetUserId: 2,
+          status: 'open',
+          creatorNotifiedAt: now,
+          creatorNotifiedReportCount: 1,
+        }),
+        getActiveReportByCaseAndReporter: async () => activeReport,
+        createReport: async (_db: any, input: any) => {
+          activeReport = { ...input, id: 'report-1', status: 'active' };
+          return activeReport;
+        },
+        updateActiveReportForReporter: async () => {
+          throw new Error('should not update same payload retry');
+        },
+        listReportReferencesByReport: async () => writtenReferences,
+        replaceReportReferences: async (_db: any, input: any) => {
+          replaceAttempts += 1;
+          writtenReferences.splice(0, writtenReferences.length);
+          if (replaceAttempts === 1) {
+            throw new Error('transient references failure');
+          }
+          writtenReferences.push(
+            ...input.references.map((reference: any) => ({
+              referenceType: reference.referenceType,
+              referenceId: reference.referenceId,
+              note: reference.note,
+              sortOrder: reference.sortOrder,
+            })),
+          );
+        },
+        countActiveReportsByCase: async () => 1,
+      },
+      resolveReferenceSnapshots: async () => [
+        {
+          referenceType: 'encyclopedia_entry',
+          referenceId: 'community-rules',
+          labelSnapshot: '社区守则',
+          urlSnapshot: '/encyclopedia/community-rules',
+          note: '需要核对',
+          sortOrder: 0,
+        },
+      ],
+    });
+
+    const submitInput = {
+      ...makeSubmitInput(7),
+      references: [{ referenceType: 'encyclopedia_entry' as const, referenceId: 'community-rules', note: '需要核对' }],
+    };
+
+    await expect(service.submitDataCardReport(submitInput)).rejects.toThrow('transient references failure');
+
+    const result = await service.submitDataCardReport(submitInput);
+
+    expect(result).toEqual({
+      submissionDecision: 'noop_duplicate_payload',
+      caseId: 'case-1',
+      reportId: 'report-1',
+      creatorNotified: false,
+    });
+    expect(replaceAttempts).toBe(2);
+    expect(writtenReferences).toEqual([
+      {
+        referenceType: 'encyclopedia_entry',
+        referenceId: 'community-rules',
+        note: '需要核对',
+        sortOrder: 0,
+      },
+    ]);
+  });
+
+  test('same payload retry repairs missing submission event after a partial write failure', async () => {
+    let activeReport: any = null;
+    let eventAttempts = 0;
+    const writtenEvents: any[] = [];
+    const service = buildService({
+      repo: {
+        getOpenReportCaseByTarget: async () => ({
+          id: 'case-1',
+          targetEntityType: 'data_card',
+          targetEntityId: 'card-1',
+          targetUserId: 2,
+          status: 'open',
+          creatorNotifiedAt: now,
+          creatorNotifiedReportCount: 1,
+        }),
+        getActiveReportByCaseAndReporter: async () => activeReport,
+        createReport: async (_db: any, input: any) => {
+          activeReport = {
+            ...input,
+            id: 'report-1',
+            status: 'active',
+            createdAt: input.now,
+            updatedAt: input.now,
+          };
+          return activeReport;
+        },
+        updateActiveReportForReporter: async () => {
+          throw new Error('should not update same payload retry');
+        },
+        createReportSubmissionEvent: async (_db: any, input: any) => {
+          eventAttempts += 1;
+          if (eventAttempts === 1) {
+            throw new Error('transient submission event failure');
+          }
+          writtenEvents.push({ ...input, createdAt: input.now });
+          return { ...input, createdAt: input.now };
+        },
+        listReportReferencesByReport: async () => [],
+        replaceReportReferences: async () => {},
+        countActiveReportsByCase: async () => 1,
+      },
+    });
+
+    await expect(service.submitDataCardReport(makeSubmitInput(7))).rejects.toThrow('transient submission event failure');
+
+    const result = await service.submitDataCardReport(makeSubmitInput(7));
+
+    expect(result).toEqual({
+      submissionDecision: 'noop_duplicate_payload',
+      caseId: 'case-1',
+      reportId: 'report-1',
+      creatorNotified: false,
+    });
+    expect(eventAttempts).toBe(2);
+    expect(writtenEvents).toEqual([
+      expect.objectContaining({
+        caseId: 'case-1',
+        reportId: 'report-1',
+        reporterUserId: 7,
+        submissionDecision: 'created',
+      }),
+    ]);
+  });
+
+  test('concurrent duplicate submission only records one immutable submission event', async () => {
+    const openCase = {
+      id: 'case-1',
+      targetEntityType: 'data_card',
+      targetEntityId: 'card-1',
+      targetUserId: 2,
+      status: 'open',
+      creatorNotifiedAt: now,
+      creatorNotifiedReportCount: 1,
+    };
+    let activeReport: any = null;
+    let notifyFirstEventWriteStarted = () => {};
+    const firstEventWriteStarted = new Promise<void>((resolve) => {
+      notifyFirstEventWriteStarted = resolve;
+    });
+    let releaseFirstEventWrite = () => {};
+    const firstEventWriteMayContinue = new Promise<void>((resolve) => {
+      releaseFirstEventWrite = resolve;
+    });
+    let firstEventBlocked = false;
+    const writtenEvents = new Map<string, any>();
+    const service = buildService({
+      repo: {
+        getOpenReportCaseByTarget: async () => openCase,
+        getActiveReportByCaseAndReporter: async () => activeReport,
+        createReport: async (_db: any, input: any) => {
+          activeReport = {
+            ...input,
+            id: 'report-1',
+            status: 'active',
+            createdAt: input.now,
+            updatedAt: input.now,
+          };
+          return activeReport;
+        },
+        updateActiveReportForReporter: async () => {
+          throw new Error('should not update concurrent identical payload');
+        },
+        createReportSubmissionEvent: async (_db: any, input: any) => {
+          if (!firstEventBlocked) {
+            firstEventBlocked = true;
+            notifyFirstEventWriteStarted();
+            await firstEventWriteMayContinue;
+          }
+          const existing = writtenEvents.get(input.id);
+          if (existing) {
+            return existing;
+          }
+          const row = { ...input, createdAt: input.now };
+          writtenEvents.set(input.id, row);
+          return row;
+        },
+        getLatestReportSubmissionEventByReport: async (_db: any, reportId: string) =>
+          Array.from(writtenEvents.values()).find((event) => event.reportId === reportId) ?? null,
+        listReportReferencesByReport: async () => [],
+        replaceReportReferences: async () => {},
+        countActiveReportsByCase: async () => 1,
+        markReportCaseCreatorNotified: async () => false,
+      },
+    });
+
+    const firstSubmission = service.submitDataCardReport(makeSubmitInput(7));
+    await firstEventWriteStarted;
+
+    const secondResult = await service.submitDataCardReport(makeSubmitInput(7));
+    releaseFirstEventWrite();
+    const firstResult = await firstSubmission;
+
+    expect(firstResult.submissionDecision).toBe('created');
+    expect(secondResult.submissionDecision).toBe('noop_duplicate_payload');
+    expect(Array.from(writtenEvents.values())).toEqual([
+      expect.objectContaining({
+        reportId: 'report-1',
+        reporterUserId: 7,
+        submissionDecision: 'created',
+      }),
+    ]);
+  });
+
+  test('same normalized payload with reordered references stays side-effect free', async () => {
+    let replaceCalled = false;
+    let resolveCalled = false;
+    const existingHash = await buildNormalizedReportPayloadHash({
+      targetEntityId: 'card-1',
+      reasonCode: 'plagiarism',
+      details: '说明',
+      references: [
+        { referenceType: 'encyclopedia_entry', referenceId: 'community-rules', note: '规则', sortOrder: 0 },
+        { referenceType: 'public_data_card', referenceId: 'card-2', note: '对照', sortOrder: 1 },
+      ],
+    });
+    const service = buildService({
+      repo: {
+        getOpenReportCaseByTarget: async () => ({
+          id: 'case-1',
+          targetEntityType: 'data_card',
+          targetEntityId: 'card-1',
+          targetUserId: 2,
+          status: 'open',
+          creatorNotifiedAt: now,
+          creatorNotifiedReportCount: 1,
+        }),
+        getActiveReportByCaseAndReporter: async () => ({
+          id: 'report-1',
+          caseId: 'case-1',
+          reporterUserId: 7,
+          evidenceSummaryJson: '{}',
+          normalizedPayloadHash: existingHash,
+          status: 'active',
+        }),
+        listReportReferencesByReport: async () => [
+          {
+            id: 'ref-1',
+            reportId: 'report-1',
+            referenceType: 'encyclopedia_entry',
+            referenceId: 'community-rules',
+            labelSnapshot: '社区守则',
+            urlSnapshot: '/encyclopedia/community-rules',
+            note: '规则',
+            sortOrder: 0,
+            createdAt: now,
+          },
+          {
+            id: 'ref-2',
+            reportId: 'report-1',
+            referenceType: 'public_data_card',
+            referenceId: 'card-2',
+            labelSnapshot: '对照卡',
+            urlSnapshot: '/character-manager?dataCardId=card-2',
+            note: '对照',
+            sortOrder: 1,
+            createdAt: now,
+          },
+        ],
+        replaceReportReferences: async () => {
+          replaceCalled = true;
+        },
+      },
+      resolveReferenceSnapshots: async () => {
+        resolveCalled = true;
+        return [];
+      },
+    });
+
+    const result = await service.submitDataCardReport({
+      ...makeSubmitInput(7),
+      references: [
+        { referenceType: 'public_data_card', referenceId: 'card-2', note: '对照' },
+        { referenceType: 'encyclopedia_entry', referenceId: 'community-rules', note: '规则' },
+        { referenceType: 'public_data_card', referenceId: 'card-2', note: '重复但应被归一化忽略' },
+      ],
+    });
+
+    expect(result.submissionDecision).toBe('noop_duplicate_payload');
+    expect(resolveCalled).toBe(false);
+    expect(replaceCalled).toBe(false);
+  });
+
+  test('same payload retry can resend creator notification after a partial write failure', async () => {
+    const openCase = {
+      id: 'case-1',
+      targetEntityType: 'data_card',
+      targetEntityId: 'card-1',
+      targetUserId: 2,
+      status: 'open',
+      creatorNotifiedAt: null,
+      creatorNotifiedReportCount: 0,
+    };
+    let activeReport: any = null;
+    let markAttempts = 0;
+    let clearAttempts = 0;
+    let messageAttempts = 0;
+    const service = buildService({
+      repo: {
+        getOpenReportCaseByTarget: async () => openCase,
+        getActiveReportByCaseAndReporter: async () => activeReport,
+        createReport: async (_db: any, input: any) => {
+          activeReport = { ...input, id: 'report-1', status: 'active' };
+          return activeReport;
+        },
+        updateActiveReportForReporter: async () => {
+          throw new Error('should not update same payload retry');
+        },
+        listReportReferencesByReport: async () => [],
+        replaceReportReferences: async () => {},
+        countActiveReportsByCase: async () => 1,
+        markReportCaseCreatorNotified: async (_db: any, input: any) => {
+          markAttempts += 1;
+          if (openCase.creatorNotifiedAt) return false;
+          openCase.creatorNotifiedAt = input.notifiedAt;
+          openCase.creatorNotifiedReportCount = input.reportCount;
+          return true;
+        },
+        clearReportCaseCreatorNotified: async (_db: any, input: any) => {
+          clearAttempts += 1;
+          if (openCase.creatorNotifiedAt !== input.notifiedAt) return false;
+          openCase.creatorNotifiedAt = null;
+          openCase.creatorNotifiedReportCount = 0;
+          return true;
+        },
+      },
+      createUserMessageEntry: async () => {
+        messageAttempts += 1;
+        if (messageAttempts === 1) {
+          throw new Error('message write failed');
+        }
+        return { id: 9 };
+      },
+    });
+
+    await expect(service.submitDataCardReport(makeSubmitInput(7))).rejects.toThrow('message write failed');
+
+    const result = await service.submitDataCardReport(makeSubmitInput(7));
+
+    expect(result).toEqual({
+      submissionDecision: 'noop_duplicate_payload',
+      caseId: 'case-1',
+      reportId: 'report-1',
+      creatorNotified: true,
+    });
+    expect(markAttempts).toBe(2);
+    expect(clearAttempts).toBe(1);
+    expect(messageAttempts).toBe(2);
+  });
+
+  test('falls back to recreating the active report when concurrent update loses the row', async () => {
+    let activeReport: any = {
+      id: 'report-1',
+      caseId: 'case-1',
+      reporterUserId: 7,
+      normalizedPayloadHash: 'old-hash',
+      status: 'active',
+      updatedAt: '2026-04-08T10:00:00.000Z',
+    };
+    let createCalled = false;
+    let updateAttempts = 0;
+    const service = buildService({
+      repo: {
+        getOpenReportCaseByTarget: async () => ({
+          id: 'case-1',
+          targetEntityType: 'data_card',
+          targetEntityId: 'card-1',
+          targetUserId: 2,
+          status: 'open',
+          creatorNotifiedAt: now,
+          creatorNotifiedReportCount: 1,
+        }),
+        getActiveReportByCaseAndReporter: async () => activeReport,
+        updateActiveReportForReporter: async () => {
+          updateAttempts += 1;
+          activeReport = null;
+          return null;
+        },
+        createReport: async (_db: any, input: any) => {
+          createCalled = true;
+          activeReport = {
+            ...input,
+            id: 'report-2',
+            status: 'active',
+            createdAt: input.now,
+            updatedAt: input.now,
+          };
+          return activeReport;
+        },
+        replaceReportReferences: async () => {},
+        countActiveReportsByCase: async () => 1,
+      },
+    });
+
+    const result = await service.submitDataCardReport(makeSubmitInput(7, '新的说明'));
+
+    expect(result).toEqual({
+      submissionDecision: 'created',
+      caseId: 'case-1',
+      reportId: 'report-2',
+      creatorNotified: false,
+    });
+    expect(updateAttempts).toBe(1);
+    expect(createCalled).toBe(true);
+  });
+
+  test('changed payload that fails rate limit returns 429-facing decision and does not write', async () => {
+    let updateCalled = false;
+    const service = buildService({
+      repo: {
+        getOpenReportCaseByTarget: async () => ({
+          id: 'case-1',
+          targetEntityType: 'data_card',
+          targetEntityId: 'card-1',
+          targetUserId: 2,
+          status: 'open',
+          creatorNotifiedAt: now,
+          creatorNotifiedReportCount: 1,
+        }),
+        getActiveReportByCaseAndReporter: async () => ({
+          id: 'report-1',
+          caseId: 'case-1',
+          reporterUserId: 7,
+          normalizedPayloadHash: 'hash-a',
+          status: 'active',
+        }),
+        updateActiveReportForReporter: async () => {
+          updateCalled = true;
+          throw new Error('should not update');
+        },
+      },
+      rateLimit: async () => ({ allowed: false }),
+    });
+
+    const result = await service.submitDataCardReport(makeSubmitInput(7, '新的说明'));
+
+    expect(result.submissionDecision satisfies DataCardReportSubmissionDecision).toBe('rejected_rate_limited');
+    expect(updateCalled).toBe(false);
+  });
+
+  test('creator notification is sent only once for the open case with actorUserId null and source report_case', async () => {
+    const messages: any[] = [];
+    const service = buildService({
+      repo: {
+        getOpenReportCaseByTarget: async () => null,
+        createReportCase: async (input: any) => ({
+          ...input,
+          status: 'open',
+          creatorNotifiedAt: null,
+          creatorNotifiedReportCount: 0,
+        }),
+        getActiveReportByCaseAndReporter: async () => null,
+        createReport: async (input: any) => ({ id: input.id, ...input, status: 'active' }),
+        replaceReportReferences: async () => {},
+        countActiveReportsByCase: async () => 1,
+        markReportCaseCreatorNotified: async () => true,
+      },
+      createUserMessageEntry: async (input: any) => {
+        messages.push(input);
+        return { id: 9 };
+      },
+    });
+
+    const result = await service.submitDataCardReport(makeSubmitInput(7));
+
+    expect(result.creatorNotified).toBe(true);
+    expect(messages[0]).toMatchObject({
+      recipientUserId: 2,
+      actorUserId: null,
+      sourceEntityType: 'report_case',
+      templateKey: 'user.moderation.data_card_reported',
+    });
+  });
+
+  test('first creator notification aggregates the whole active case summary', async () => {
+    const messages: any[] = [];
+    const createdReportEvidenceSummary = {
+      reasonLabels: ['疑似抄袭'],
+      referenceSummary: ['引用公开数据卡：白百合'],
+      detailsPreview: '能力结构高度近似。',
+    };
+    const otherReportEvidenceSummary = {
+      reasonLabels: ['骚扰或仇恨内容'],
+      referenceSummary: ['引用百科：社区守则'],
+      detailsPreview: '存在针对性辱骂。',
+    };
+    const service = buildService({
+      repo: {
+        getOpenReportCaseByTarget: async () => ({
+          id: 'case-1',
+          targetEntityType: 'data_card',
+          targetEntityId: 'card-1',
+          targetUserId: 2,
+          status: 'open',
+          creatorNotifiedAt: null,
+          creatorNotifiedReportCount: 0,
+        }),
+        getActiveReportByCaseAndReporter: async () => null,
+        createReport: async (input: any) => ({
+          id: 'report-1',
+          ...input,
+          status: 'active',
+          evidenceSummaryJson: JSON.stringify(createdReportEvidenceSummary),
+        }),
+        replaceReportReferences: async () => {},
+        listActiveReportsByCase: async () => [
+          {
+            id: 'report-1',
+            caseId: 'case-1',
+            reporterUserId: 7,
+            reasonCode: 'plagiarism',
+            details: '能力结构高度近似。',
+            status: 'active',
+            evidenceSummaryJson: JSON.stringify(createdReportEvidenceSummary),
+            normalizedPayloadHash: 'hash-1',
+            targetNameSnapshot: '公开卡',
+            targetDescriptionSnapshot: '描述',
+            targetDataSnapshot: '{"name":"公开卡"}',
+            targetUpdatedAtSnapshot: targetCard.updated_at,
+            createdAt: now,
+            updatedAt: now,
+            withdrawnAt: null,
+          },
+          {
+            id: 'report-2',
+            caseId: 'case-1',
+            reporterUserId: 8,
+            reasonCode: 'harassment_or_hate',
+            details: '存在针对性辱骂。',
+            status: 'active',
+            evidenceSummaryJson: JSON.stringify(otherReportEvidenceSummary),
+            normalizedPayloadHash: 'hash-2',
+            targetNameSnapshot: '公开卡',
+            targetDescriptionSnapshot: '描述',
+            targetDataSnapshot: '{"name":"公开卡"}',
+            targetUpdatedAtSnapshot: targetCard.updated_at,
+            createdAt: now,
+            updatedAt: now,
+            withdrawnAt: null,
+          },
+        ],
+        countActiveReportsByCase: async () => 2,
+        markReportCaseCreatorNotified: async () => true,
+      },
+      resolveReferenceSnapshots: async () => [
+        {
+          referenceType: 'public_data_card',
+          referenceId: 'card-2',
+          labelSnapshot: '白百合',
+          urlSnapshot: '/character-manager?dataCardId=card-2',
+          note: null,
+          sortOrder: 0,
+        },
+      ],
+      createUserMessageEntry: async (input: any) => {
+        messages.push(input);
+        return { id: 9 };
+      },
+    });
+
+    const result = await service.submitDataCardReport({
+      ...makeSubmitInput(7, '能力结构高度近似。'),
+      references: [{ referenceType: 'public_data_card', referenceId: 'card-2' }],
+    });
+
+    expect(result.creatorNotified).toBe(true);
+    expect(messages).toHaveLength(1);
+    expect(messages[0].payload).toMatchObject({
+      reportCount: 2,
+      reasonLabels: ['疑似抄袭', '骚扰或仇恨内容'],
+      referenceSummary: ['引用公开数据卡：白百合', '引用百科：社区守则'],
+    });
+  });
+
+  test('first creator notification recomputes case summary after winning notification claim', async () => {
+    const messages: any[] = [];
+    const createdReportEvidenceSummary = {
+      reasonLabels: ['疑似抄袭'],
+      referenceSummary: ['引用公开数据卡：白百合'],
+      detailsPreview: '能力结构高度近似。',
+    };
+    const concurrentReportEvidenceSummary = {
+      reasonLabels: ['骚扰或仇恨内容'],
+      referenceSummary: ['引用百科：社区守则'],
+      detailsPreview: '存在针对性辱骂。',
+    };
+    let notificationClaimed = false;
+    const service = buildService({
+      repo: {
+        getOpenReportCaseByTarget: async () => ({
+          id: 'case-1',
+          targetEntityType: 'data_card',
+          targetEntityId: 'card-1',
+          targetUserId: 2,
+          status: 'open',
+          creatorNotifiedAt: null,
+          creatorNotifiedReportCount: 0,
+        }),
+        getActiveReportByCaseAndReporter: async () => null,
+        createReport: async (input: any) => ({
+          id: 'report-1',
+          ...input,
+          status: 'active',
+          evidenceSummaryJson: JSON.stringify(createdReportEvidenceSummary),
+        }),
+        replaceReportReferences: async () => {},
+        listActiveReportsByCase: async () =>
+          notificationClaimed
+            ? [
+                {
+                  id: 'report-1',
+                  caseId: 'case-1',
+                  reporterUserId: 7,
+                  reasonCode: 'plagiarism',
+                  details: '能力结构高度近似。',
+                  status: 'active',
+                  evidenceSummaryJson: JSON.stringify(createdReportEvidenceSummary),
+                  normalizedPayloadHash: 'hash-1',
+                  targetNameSnapshot: '公开卡',
+                  targetDescriptionSnapshot: '描述',
+                  targetDataSnapshot: '{"name":"公开卡"}',
+                  targetUpdatedAtSnapshot: targetCard.updated_at,
+                  createdAt: now,
+                  updatedAt: now,
+                  withdrawnAt: null,
+                },
+                {
+                  id: 'report-2',
+                  caseId: 'case-1',
+                  reporterUserId: 8,
+                  reasonCode: 'harassment_or_hate',
+                  details: '存在针对性辱骂。',
+                  status: 'active',
+                  evidenceSummaryJson: JSON.stringify(concurrentReportEvidenceSummary),
+                  normalizedPayloadHash: 'hash-2',
+                  targetNameSnapshot: '公开卡',
+                  targetDescriptionSnapshot: '描述',
+                  targetDataSnapshot: '{"name":"公开卡"}',
+                  targetUpdatedAtSnapshot: targetCard.updated_at,
+                  createdAt: now,
+                  updatedAt: now,
+                  withdrawnAt: null,
+                },
+              ]
+            : [
+                {
+                  id: 'report-1',
+                  caseId: 'case-1',
+                  reporterUserId: 7,
+                  reasonCode: 'plagiarism',
+                  details: '能力结构高度近似。',
+                  status: 'active',
+                  evidenceSummaryJson: JSON.stringify(createdReportEvidenceSummary),
+                  normalizedPayloadHash: 'hash-1',
+                  targetNameSnapshot: '公开卡',
+                  targetDescriptionSnapshot: '描述',
+                  targetDataSnapshot: '{"name":"公开卡"}',
+                  targetUpdatedAtSnapshot: targetCard.updated_at,
+                  createdAt: now,
+                  updatedAt: now,
+                  withdrawnAt: null,
+                },
+              ],
+        countActiveReportsByCase: async () => (notificationClaimed ? 2 : 1),
+        markReportCaseCreatorNotified: async () => {
+          notificationClaimed = true;
+          return true;
+        },
+      },
+      createUserMessageEntry: async (input: any) => {
+        messages.push(input);
+        return { id: 9 };
+      },
+    });
+
+    const result = await service.submitDataCardReport({
+      ...makeSubmitInput(7, '能力结构高度近似。'),
+      references: [{ referenceType: 'public_data_card', referenceId: 'card-2' }],
+    });
+
+    expect(result.creatorNotified).toBe(true);
+    expect(messages).toHaveLength(1);
+    expect(messages[0].payload).toMatchObject({
+      reportCount: 2,
+      reasonLabels: ['疑似抄袭', '骚扰或仇恨内容'],
+      referenceSummary: ['引用公开数据卡：白百合', '引用百科：社区守则'],
+    });
+  });
+
+  test('create report case falls back to existing open case when insert hits concurrent unique conflict', async () => {
+    let lookupCount = 0;
+    const service = buildService({
+      repo: {
+        getOpenReportCaseByTarget: async () => {
+          lookupCount += 1;
+          return lookupCount >= 2
+            ? {
+                id: 'case-1',
+                targetEntityType: 'data_card',
+                targetEntityId: 'card-1',
+                targetUserId: 2,
+                status: 'open',
+                creatorNotifiedAt: now,
+                creatorNotifiedReportCount: 1,
+              }
+            : null;
+        },
+        createReportCase: async () => {
+          throw new Error('UNIQUE constraint failed: report_cases.target_entity_type, report_cases.target_entity_id');
+        },
+        getActiveReportByCaseAndReporter: async () => null,
+        createReport: async (input: any) => ({ id: input.id, ...input, status: 'active' }),
+        replaceReportReferences: async () => {},
+        countActiveReportsByCase: async () => 1,
+        markReportCaseCreatorNotified: async () => false,
+      },
+    });
+
+    const result = await service.submitDataCardReport(makeSubmitInput(7));
+
+    expect(result.caseId).toBe('case-1');
+    expect(result.submissionDecision).toBe('created');
+  });
+
+  test('reuses reporter active report after concurrent case creation is adopted', async () => {
+    let lookupCount = 0;
+    let createReportCalled = false;
+    let updateCalled = false;
+    const activeReport = {
+      id: 'report-1',
+      caseId: 'case-1',
+      reporterUserId: 7,
+      normalizedPayloadHash: 'old-hash',
+      status: 'active',
+    };
+    const service = buildService({
+      repo: {
+        getOpenReportCaseByTarget: async () => {
+          lookupCount += 1;
+          return lookupCount >= 2
+            ? {
+                id: 'case-1',
+                targetEntityType: 'data_card',
+                targetEntityId: 'card-1',
+                targetUserId: 2,
+                status: 'open',
+                creatorNotifiedAt: now,
+                creatorNotifiedReportCount: 1,
+              }
+            : null;
+        },
+        createReportCase: async () => {
+          throw new Error('UNIQUE constraint failed: report_cases.target_entity_type, report_cases.target_entity_id');
+        },
+        getActiveReportByCaseAndReporter: async (_db: any, input: any) =>
+          input.caseId === 'case-1' ? activeReport : null,
+        createReport: async () => {
+          createReportCalled = true;
+          throw new Error('should not create duplicate report');
+        },
+        updateActiveReportForReporter: async (_db: any, input: any) => {
+          updateCalled = true;
+          return { id: 'report-1', ...input, status: 'active' };
+        },
+        replaceReportReferences: async () => {},
+        countActiveReportsByCase: async () => 1,
+        markReportCaseCreatorNotified: async () => false,
+      },
+    });
+
+    const result = await service.submitDataCardReport(makeSubmitInput(7, '新的说明'));
+
+    expect(result.caseId).toBe('case-1');
+    expect(result.reportId).toBe('report-1');
+    expect(result.submissionDecision).toBe('updated');
+    expect(createReportCalled).toBe(false);
+    expect(updateCalled).toBe(true);
+  });
+
+  test('reuses concurrent active report creation as noop when payload hash already matches', async () => {
+    let createReportAttempted = false;
+    let replaceCalled = false;
+    let updateCalled = false;
+    const payloadHash = await buildNormalizedReportPayloadHash({
+      targetEntityId: 'card-1',
+      reasonCode: 'plagiarism',
+      details: '说明',
+      references: [],
+    });
+    const service = buildService({
+      repo: {
+        getOpenReportCaseByTarget: async () => ({
+          id: 'case-1',
+          targetEntityType: 'data_card',
+          targetEntityId: 'card-1',
+          targetUserId: 2,
+          status: 'open',
+          creatorNotifiedAt: now,
+          creatorNotifiedReportCount: 1,
+        }),
+        getActiveReportByCaseAndReporter: async () =>
+          createReportAttempted
+            ? {
+                id: 'report-1',
+                caseId: 'case-1',
+                reporterUserId: 7,
+                normalizedPayloadHash: payloadHash,
+                status: 'active',
+              }
+            : null,
+        createReport: async () => {
+          createReportAttempted = true;
+          throw new Error('UNIQUE constraint failed: reports.case_id, reports.reporter_user_id');
+        },
+        updateActiveReportForReporter: async () => {
+          updateCalled = true;
+          throw new Error('should not update after duplicate payload conflict');
+        },
+        replaceReportReferences: async () => {
+          replaceCalled = true;
+        },
+        countActiveReportsByCase: async () => 1,
+        markReportCaseCreatorNotified: async () => false,
+      },
+    });
+
+    const result = await service.submitDataCardReport(makeSubmitInput(7));
+
+    expect(result).toEqual({
+      submissionDecision: 'noop_duplicate_payload',
+      caseId: 'case-1',
+      reportId: 'report-1',
+      creatorNotified: false,
+    });
+    expect(updateCalled).toBe(false);
+    expect(replaceCalled).toBe(false);
+  });
+
+  test('updates concurrent active report after insert conflict when payload differs', async () => {
+    let createReportAttempted = false;
+    let replaceCalled = false;
+    let updateCalled = false;
+    const service = buildService({
+      repo: {
+        getOpenReportCaseByTarget: async () => ({
+          id: 'case-1',
+          targetEntityType: 'data_card',
+          targetEntityId: 'card-1',
+          targetUserId: 2,
+          status: 'open',
+          creatorNotifiedAt: now,
+          creatorNotifiedReportCount: 1,
+        }),
+        getActiveReportByCaseAndReporter: async () =>
+          createReportAttempted
+            ? {
+                id: 'report-1',
+                caseId: 'case-1',
+                reporterUserId: 7,
+                normalizedPayloadHash: 'old-hash',
+                status: 'active',
+              }
+            : null,
+        createReport: async () => {
+          createReportAttempted = true;
+          throw new Error('UNIQUE constraint failed: reports.case_id, reports.reporter_user_id');
+        },
+        updateActiveReportForReporter: async (_db: any, input: any) => {
+          updateCalled = true;
+          return { id: 'report-1', ...input, status: 'active' };
+        },
+        replaceReportReferences: async () => {
+          replaceCalled = true;
+        },
+        countActiveReportsByCase: async () => 1,
+        markReportCaseCreatorNotified: async () => false,
+      },
+    });
+
+    const result = await service.submitDataCardReport(makeSubmitInput(7, '新的说明'));
+
+    expect(result).toEqual({
+      submissionDecision: 'updated',
+      caseId: 'case-1',
+      reportId: 'report-1',
+      creatorNotified: false,
+    });
+    expect(updateCalled).toBe(true);
+    expect(replaceCalled).toBe(true);
+  });
+
+  test('sends creator notification only after winning notification flag claim', async () => {
+    const messages: any[] = [];
+    const service = buildService({
+      repo: {
+        getOpenReportCaseByTarget: async () => ({
+          id: 'case-1',
+          targetEntityType: 'data_card',
+          targetEntityId: 'card-1',
+          targetUserId: 2,
+          status: 'open',
+          creatorNotifiedAt: null,
+          creatorNotifiedReportCount: 0,
+        }),
+        getActiveReportByCaseAndReporter: async () => null,
+        createReport: async (input: any) => ({ id: input.id, ...input, status: 'active' }),
+        replaceReportReferences: async () => {},
+        countActiveReportsByCase: async () => 1,
+        markReportCaseCreatorNotified: async () => false,
+      },
+      createUserMessageEntry: async (input: any) => {
+        messages.push(input);
+        return { id: 9 };
+      },
+    });
+
+    const result = await service.submitDataCardReport(makeSubmitInput(7));
+
+    expect(result.creatorNotified).toBe(false);
+    expect(messages).toHaveLength(0);
+  });
+
+  test('rolls back claimed notification flag when creator message write fails', async () => {
+    let markCalled = false;
+    let clearCalled = false;
+    const service = buildService({
+      repo: {
+        getOpenReportCaseByTarget: async () => null,
+        createReportCase: async (input: any) => ({
+          ...input,
+          status: 'open',
+          creatorNotifiedAt: null,
+          creatorNotifiedReportCount: 0,
+        }),
+        getActiveReportByCaseAndReporter: async () => null,
+        createReport: async (input: any) => ({ id: input.id, ...input, status: 'active' }),
+        replaceReportReferences: async () => {},
+        countActiveReportsByCase: async () => 1,
+        markReportCaseCreatorNotified: async () => {
+          markCalled = true;
+          return true;
+        },
+        clearReportCaseCreatorNotified: async () => {
+          clearCalled = true;
+          return true;
+        },
+      },
+      createUserMessageEntry: async () => {
+        throw new Error('message write failed');
+      },
+    });
+
+    await expect(service.submitDataCardReport(makeSubmitInput(7))).rejects.toThrow('message write failed');
+    expect(markCalled).toBe(true);
+    expect(clearCalled).toBe(true);
+  });
+
+  test('builds self-remediation candidate DTO from current card updatedAt and notice snapshot', () => {
+    const service = buildService();
+
+    const dto = service.buildSelfRemediationCandidateDto({
+      caseId: 'case-1',
+      creatorNotifiedAt: '2026-04-08T10:20:00.000Z',
+      targetCardUpdatedAtAtNotice: '2026-04-08T10:00:00.000Z',
+      currentTargetCardUpdatedAt: '2026-04-08T10:40:00.000Z',
+    });
+
+    expect(dto).toEqual({
+      caseId: 'case-1',
+      isSelfRemediationCandidate: true,
+      selfRemediationDetectedAt: '2026-04-08T10:40:00.000Z',
+    });
+  });
+
+  test('falls back to creatorNotifiedAt when notice snapshot updatedAt is unavailable', () => {
+    const service = buildService();
+
+    const dto = service.buildSelfRemediationCandidateDto({
+      caseId: 'case-1',
+      creatorNotifiedAt: '2026-04-08T10:20:00.000Z',
+      targetCardUpdatedAtAtNotice: null,
+      currentTargetCardUpdatedAt: '2026-04-08T10:40:00.000Z',
+    });
+
+    expect(dto).toEqual({
+      caseId: 'case-1',
+      isSelfRemediationCandidate: true,
+      selfRemediationDetectedAt: '2026-04-08T10:40:00.000Z',
+    });
+  });
+
+  test('parses mixed SQLite and ISO timestamps when notice snapshot updatedAt is unavailable', () => {
+    const service = buildService();
+
+    const dto = service.buildSelfRemediationCandidateDto({
+      caseId: 'case-1',
+      creatorNotifiedAt: '2026-04-08T10:20:00.000Z',
+      targetCardUpdatedAtAtNotice: null,
+      currentTargetCardUpdatedAt: '2026-04-08 10:40:00',
+    });
+
+    expect(dto).toEqual({
+      caseId: 'case-1',
+      isSelfRemediationCandidate: true,
+      selfRemediationDetectedAt: '2026-04-08 10:40:00',
+    });
+  });
+
+  test('rejects withdrawal once the open case has entered crowd review', async () => {
+    const service = buildService({
+      repo: {
+        getOpenReportCaseByTarget: async () => ({
+          id: 'case-1',
+          targetEntityType: 'data_card',
+          targetEntityId: 'card-1',
+          targetUserId: 2,
+          status: 'under_review',
+          creatorNotifiedAt: now,
+          creatorNotifiedReportCount: 1,
+        }),
+        hasActiveCrowdReviewRoundForCase: async () => true,
+      },
+    });
+
+    await expect(
+      service.withdrawDataCardReport({
+        db: {} as never,
+        reporterUserId: 7,
+        targetEntityId: 'card-1',
+      }),
+    ).rejects.toThrow('已进入众查');
+  });
+});

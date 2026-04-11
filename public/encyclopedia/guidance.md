@@ -1,7 +1,7 @@
 # 引导 / 裁判事件 / 读写状态
 
 > 作者：[末伏之夜](https://github.com/notuhao)  
-> 更新时间：2026-01-04
+> 更新时间：2026-04-03
 
 本页解释几类“会显著改变对局走向/可重复性”的开关与输入：它们会影响对战叙事，也会影响 **strict/free 排位是否计分**。
 
@@ -51,8 +51,21 @@
 - free：对局完成 + 1v1 + 有可用的脱敏 IP（`ip_anonymized`）  
 - strict：在 free 基础上额外要求：classic 模式 + 已登录 + 无 userGuidance + 无裁判事件 + 不读历战/状态 + 无角色引导  
 
+## 6) `/creator` 的“角色参数”不等于用户引导
+
+如果你是从 `/creator` 生成并保存了一张带规则车卡结果的角色卡，那么这张卡后续可能会带着“角色参数”进入战报。
+
+这里要区分两层东西：
+
+- **角色参数**：属于角色卡本身携带的信息层
+- **userGuidance / character_guidance / 裁判事件**：属于这一局额外施加的引导或强干预
+
+两者都会影响故事生成，但不是同一种输入。  
+不要把“角色卡自带的角色参数”与“这局临时加的引导词/判定规则”混成一回事。
+
 ## 相关条目
 
+- 创作工房（/creator）：`/encyclopedia/creator`
 - 排位与排行榜：`/encyclopedia/ranking`
 - 术语表（历战/状态栏）：`/encyclopedia/glossary`
 - 情景卡进阶（继承长线）：`/encyclopedia/scenario-advanced`

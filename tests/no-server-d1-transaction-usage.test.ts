@@ -17,6 +17,8 @@ const allowedTransactionFiles = new Set([
   // 仅允许浏览器端 IndexedDB 存储模块使用 transaction。
   'lib/magic-tea-party/storage.ts',
   'lib/ai-session/battle-story/storage.ts',
+  'lib/challenge/storage.ts',
+  'lib/public-card-cache/storage.ts',
 ]);
 
 const isObjectRecord = (value: unknown): value is Record<string, unknown> =>

@@ -1,4 +1,5 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 import { ArenaHistory, ArenaHistoryEntry, CharacterCurrentState } from '@/types/arena';
 import { GeneralCharacterData } from '@/lib/schemas/general-character';
 import { CurrentStatePanel } from '@/components/CurrentStatePanel';
@@ -7,10 +8,17 @@ import { capturePngBlob } from '@/lib/client/snapdomCapture';
 import { createBlobUrl, downloadBlob } from '@/lib/client/blobUrl';
 import { GeneratedByUserBadge } from '@/components/shared/GeneratedByUserBadge';
 import { InlineField } from '@/components/shared/InlineField';
+import { CharacterParameterSection } from '@/components/shared/CharacterParameterSection';
+import {
+  buildCharacterParameterView,
+  type CharacterParameterSourceKey,
+} from '@/lib/creator/character-parameter-view';
 import type { CharacterCardPortraitAsset } from '@/types/visual-asset';
 
 export interface GeneralCharacterDetails extends GeneralCharacterData {
   arena_history?: ArenaHistory | null;
+  creationInputs?: unknown;
+  buildState?: unknown;
 }
 
 interface GeneralCharacterCardProps {
@@ -19,6 +27,8 @@ interface GeneralCharacterCardProps {
     content: string;
     arena_history?: ArenaHistory | null;
     current_state?: CharacterCurrentState | null;
+    creationInputs?: unknown;
+    buildState?: unknown;
   };
   isStreaming?: boolean;
   onSaveImage?: (imageUrl: string) => void;
@@ -89,6 +99,16 @@ const detectColorFromContent = (content?: string): MainColorKey => {
   return 'Pink';
 };
 
+const waitForNextPaint = async () => {
+  if (typeof window === 'undefined' || typeof window.requestAnimationFrame !== 'function') {
+    return;
+  }
+
+  await new Promise<void>((resolve) => {
+    window.requestAnimationFrame(() => resolve());
+  });
+};
+
 const GeneralCharacterCard: React.FC<GeneralCharacterCardProps> = ({
   general,
   isStreaming = false,
@@ -100,6 +120,18 @@ const GeneralCharacterCard: React.FC<GeneralCharacterCardProps> = ({
   const cardRef = useRef<HTMLDivElement>(null);
   const [isHistoryVisible, setIsHistoryVisible] = useState(false);
   const [isSavingImage, setIsSavingImage] = useState(false);
+  const parameterView = useMemo(
+    () =>
+      buildCharacterParameterView({
+        creationInputs: general?.creationInputs,
+        buildState: general?.buildState,
+      }),
+    [general]
+  );
+  const [parameterSourceKey, setParameterSourceKey] = useState<CharacterParameterSourceKey>(
+    parameterView?.activeSource ?? 'current'
+  );
+  const [isExportingImage, setIsExportingImage] = useState(false);
   const labelClassName = 'text-sm opacity-90';
   const portraitImageUrl = typeof portraitAsset?.imageUrl === 'string' ? portraitAsset.imageUrl.trim() : '';
   const uploadedPortraitNote =
@@ -119,6 +151,15 @@ const GeneralCharacterCard: React.FC<GeneralCharacterCardProps> = ({
     return `linear-gradient(135deg, ${colors.first} 0%, ${colors.second} 100%)`;
   }, [general]);
 
+  useEffect(() => {
+    setParameterSourceKey((currentSourceKey) => {
+      if (!parameterView) return 'current';
+      return parameterView.sources.some((source) => source.key === currentSourceKey)
+        ? currentSourceKey
+        : parameterView.activeSource;
+    });
+  }, [parameterView]);
+
   const handleSaveImage = async () => {
     if (isStreaming) return;
     if (!cardRef.current) return;
@@ -128,6 +169,8 @@ const GeneralCharacterCard: React.FC<GeneralCharacterCardProps> = ({
     const logoPlaceholder = cardRef.current.querySelector('.logo-placeholder') as HTMLElement;
     try {
       setIsSavingImage(true);
+      flushSync(() => setIsExportingImage(true));
+      await waitForNextPaint();
       if (saveButton) saveButton.style.display = 'none';
       if (logoPlaceholder) logoPlaceholder.style.display = 'flex';
 
@@ -162,6 +205,7 @@ const GeneralCharacterCard: React.FC<GeneralCharacterCardProps> = ({
       alert('生成图片失败，请重试');
       console.error('Image generation failed:', err);
     } finally {
+      flushSync(() => setIsExportingImage(false));
       if (saveButton) saveButton.style.display = 'block';
       if (logoPlaceholder) logoPlaceholder.style.display = 'none';
       setIsSavingImage(false);
@@ -255,6 +299,15 @@ const GeneralCharacterCard: React.FC<GeneralCharacterCardProps> = ({
             <span className="inline-block w-2 h-4 bg-white/70 animate-pulse align-middle ml-1" />
           )}
         </div>
+
+        {parameterView ? (
+          <CharacterParameterSection
+            view={parameterView}
+            sourceKey={parameterSourceKey}
+            renderMode={isExportingImage ? 'export' : 'interactive'}
+            onChangeSource={setParameterSourceKey}
+          />
+        ) : null}
 
         <CurrentStatePanel state={general?.current_state} variant="dark" />
 

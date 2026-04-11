@@ -22,17 +22,17 @@ const newTraceId = (): string => {
   return `pvp_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
 };
 
-export type PvpApiHandler = (req: Request) => Promise<Response>;
+export type PvpApiHandler<TArgs extends unknown[] = []> = (req: Request, ...args: TArgs) => Promise<Response>;
 
 /**
  * 兜底错误边界：避免 Edge Runtime 直接抛出 500（无 JSON），同时返回 traceId 便于定位。
  */
 export const withPvpErrorBoundary =
-  (handler: PvpApiHandler): PvpApiHandler =>
-  async (req: Request): Promise<Response> => {
+  <TArgs extends unknown[]>(handler: PvpApiHandler<TArgs>): PvpApiHandler<TArgs> =>
+  async (req: Request, ...args: TArgs): Promise<Response> => {
     const traceId = newTraceId();
     try {
-      return await handler(req);
+      return await handler(req, ...args);
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
       console.error(`[pvp][${traceId}] 未捕获异常:`, error);
@@ -59,4 +59,3 @@ export const readJson = async <T = any>(req: Request): Promise<{ data: T } | { r
     return { response: json({ error: '请求体不是有效 JSON' }, { status: 400 }) };
   }
 };
-

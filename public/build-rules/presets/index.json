@@ -1,0 +1,22 @@
+{
+  "presets": [
+    {
+      "id": "arena-trpg-lite",
+      "title": "魔法少女竞技场 TRPG 简化角色卡",
+      "version": "1.0.0",
+      "description": "基于核心属性、力量层级、基础能力模块与派生值的轻量车卡规则。"
+    },
+    {
+      "id": "dnd-5e-lite",
+      "title": "DND 5e 经典角色卡",
+      "version": "1.0.0",
+      "description": "等级、职业、族裔、六维属性与战斗摘要。"
+    },
+    {
+      "id": "coc-7e-lite",
+      "title": "CoC 7e 经典调查员卡",
+      "version": "1.0.0",
+      "description": "年代、职业、八维属性、SAN/HP/MP 与技能倾向摘要。"
+    }
+  ]
+}

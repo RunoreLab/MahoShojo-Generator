@@ -47,6 +47,11 @@ next-env.d.ts
 # IDEs and editors
 .idea/
 
+# Doccuments
+/docs/temp
+/docs/logs
+current_state.md
+
 # OS files
 .next/
 .home/
@@ -55,5 +60,4 @@ next-env.d.ts
 
 .cache/
 .xdg-data/
-/docs/temp
 /.worktrees/

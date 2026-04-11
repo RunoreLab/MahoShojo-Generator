@@ -4,7 +4,8 @@ import { anonymizeIp, getClientIpFromHeaders } from '@/lib/arena/battle-report-l
 export type AiSessionRateLimitAction =
   | 'battle_story_session_continue'
   | 'battle_story_session_regenerate_chapter'
-  | 'battle_story_session_refresh_summary';
+  | 'battle_story_session_refresh_summary'
+  | 'challenge_node_adjudicate';
 
 type TokenBucketState = {
   tokens: number;
@@ -67,6 +68,16 @@ const getRateLimitRule = (
 
   if (actionType === 'battle_story_session_regenerate_chapter') {
     return {
+      cooldownMs: isSystem ? OFFICIAL_KEY_ARENA_BATTLE_REPORT_COOLDOWN_MS : USER_PROVIDED_KEY_COOLDOWN_MS,
+      bucketCapacity: isSystem ? 3 : 30,
+      bucketWindowMs: 10 * 60_000,
+      disallowConcurrent: true,
+    };
+  }
+
+  if (actionType === 'challenge_node_adjudicate') {
+    return {
+      // Challenge AI adjudication intentionally shares the same official-key budget as arena battle reports.
       cooldownMs: isSystem ? OFFICIAL_KEY_ARENA_BATTLE_REPORT_COOLDOWN_MS : USER_PROVIDED_KEY_COOLDOWN_MS,
       bucketCapacity: isSystem ? 3 : 30,
       bucketWindowMs: 10 * 60_000,

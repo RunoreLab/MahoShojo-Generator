@@ -1,3 +1,4 @@
+import { sql } from 'drizzle-orm';
 import { index, integer, primaryKey, real, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
 
 export type DataCardType = 'character' | 'scenario' | 'history' | 'questionnaire';
@@ -5,6 +6,40 @@ export type DataCardReviewStatus = 'pending' | 'approved' | 'rejected';
 export type ArenaRatingEntityType = 'data_card' | 'preset';
 export type ArenaRatingQueue = 'strict' | 'free';
 export type ArenaRatingEventStatus = 'pending' | 'applied' | 'skipped' | 'failed';
+export type SiteMessageType = 'service' | 'maintenance' | 'activity' | 'policy' | 'issue' | 'generic';
+export type UserMessageChannel = 'system' | 'admin';
+export type UserMessageType = 'moderation' | 'reputation' | 'account' | 'generic';
+export type MessagePriority = 'low' | 'normal' | 'high';
+export type ReportCaseStatus = 'open' | 'under_review' | 'resolved' | 'dismissed';
+export type ReportResolutionCode =
+  | 'self_remediated'
+  | 'content_removed'
+  | 'confirmed_violation'
+  | 'no_violation'
+  | 'malicious_report';
+export type ReportStatus = 'active' | 'withdrawn';
+export type ReportSubmissionDecision = 'created' | 'updated';
+export type ReportReferenceType = 'public_data_card' | 'encyclopedia_entry';
+export type ReportAppealStatus = 'submitted' | 'under_review' | 'resolved' | 'withdrawn';
+export type ReportAppealResolutionCode = 'upheld' | 'overturned_no_violation' | 'reopened_under_review';
+export type ReportAppealReasonCode =
+  | 'factual_error'
+  | 'missing_context'
+  | 'already_fixed'
+  | 'misidentified_target'
+  | 'other';
+export type CrowdReviewInspectorStatus = 'active' | 'suspended' | 'revoked';
+export type InspectorDisciplineEventType = 'grant' | 'suspend' | 'revoke' | 'restore' | 'warning';
+export type CrowdReviewRoundStatus =
+  | 'pending_dispatch'
+  | 'active'
+  | 'waiting_more_votes'
+  | 'concluded'
+  | 'escalated'
+  | 'cancelled';
+export type CrowdReviewResultCode = 'violation' | 'no_violation' | 'tie' | 'escalated' | 'admin_override';
+export type CrowdReviewAssignmentStatus = 'assigned' | 'voted' | 'abstained' | 'expired' | 'revoked';
+export type CrowdReviewDecision = 'violation' | 'no_violation' | 'abstain';
 
 /**
  * 业务主用户表（映射现有 users）
@@ -45,6 +80,376 @@ export const dataCards = sqliteTable('data_cards', {
   createdAt: text('created_at'),
   updatedAt: text('updated_at'),
   deletedAt: text('deleted_at'),
+});
+
+export const reportCases = sqliteTable(
+  'report_cases',
+  {
+    id: text('id').primaryKey(),
+    targetEntityType: text('target_entity_type').notNull(),
+    targetEntityId: text('target_entity_id').notNull(),
+    targetUserId: integer('target_user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    status: text('status').$type<ReportCaseStatus>().notNull(),
+    resolutionCode: text('resolution_code').$type<ReportResolutionCode | null>(),
+    creatorNotifiedAt: text('creator_notified_at'),
+    creatorNotifiedReportCount: integer('creator_notified_report_count').notNull().default(0),
+    latestReportedAt: text('latest_reported_at').notNull(),
+    targetCardUpdatedAtAtNotice: text('target_card_updated_at_at_notice'),
+    resolutionNotifiedAt: text('resolution_notified_at'),
+    resolutionNotifiedCaseUpdatedAt: text('resolution_notified_case_updated_at'),
+    closedAt: text('closed_at'),
+    createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    targetOpenUnique: uniqueIndex('idx_report_cases_target_open')
+      .on(table.targetEntityType, table.targetEntityId)
+      .where(sql`${table.status} IN ('open', 'under_review')`),
+    statusLatestIndex: index('idx_report_cases_status_latest').on(table.status, table.latestReportedAt),
+  }),
+);
+
+export const reports = sqliteTable(
+  'reports',
+  {
+    id: text('id').primaryKey(),
+    caseId: text('case_id')
+      .notNull()
+      .references(() => reportCases.id, { onDelete: 'cascade' }),
+    reporterUserId: integer('reporter_user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    reasonCode: text('reason_code').notNull(),
+    details: text('details'),
+    status: text('status').$type<ReportStatus>().notNull(),
+    evidenceSummaryJson: text('evidence_summary_json').notNull().default('{}'),
+    normalizedPayloadHash: text('normalized_payload_hash').notNull(),
+    targetNameSnapshot: text('target_name_snapshot').notNull(),
+    targetDescriptionSnapshot: text('target_description_snapshot'),
+    targetDataSnapshot: text('target_data_snapshot').notNull(),
+    targetUpdatedAtSnapshot: text('target_updated_at_snapshot'),
+    createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+    withdrawnAt: text('withdrawn_at'),
+  },
+  (table) => ({
+    caseReporterActiveUnique: uniqueIndex('idx_reports_case_reporter_active')
+      .on(table.caseId, table.reporterUserId)
+      .where(sql`${table.status} = 'active'`),
+    caseStatusCreatedIndex: index('idx_reports_case_status_created').on(table.caseId, table.status, table.createdAt),
+    reporterUpdatedAtIndex: index('idx_reports_reporter_updated_at').on(table.reporterUserId, table.updatedAt),
+    reporterStatusCreatedIndex: index('idx_reports_reporter_status_created').on(
+      table.reporterUserId,
+      table.status,
+      table.createdAt,
+    ),
+  }),
+);
+
+export const reportSubmissionEvents = sqliteTable(
+  'report_submission_events',
+  {
+    id: text('id').primaryKey(),
+    caseId: text('case_id')
+      .notNull()
+      .references(() => reportCases.id, { onDelete: 'cascade' }),
+    reportId: text('report_id')
+      .notNull()
+      .references(() => reports.id, { onDelete: 'cascade' }),
+    reporterUserId: integer('reporter_user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    submissionDecision: text('submission_decision').$type<ReportSubmissionDecision>().notNull(),
+    createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    reporterCreatedAtIndex: index('idx_report_submission_events_reporter_created_at').on(
+      table.reporterUserId,
+      table.createdAt,
+    ),
+  }),
+);
+
+export const reportReferences = sqliteTable(
+  'report_references',
+  {
+    id: text('id').primaryKey(),
+    reportId: text('report_id')
+      .notNull()
+      .references(() => reports.id, { onDelete: 'cascade' }),
+    referenceType: text('reference_type').$type<ReportReferenceType>().notNull(),
+    referenceId: text('reference_id').notNull(),
+    labelSnapshot: text('label_snapshot').notNull(),
+    urlSnapshot: text('url_snapshot'),
+    note: text('note'),
+    sortOrder: integer('sort_order').notNull().default(0),
+    createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    reportSortIndex: index('idx_report_references_report_sort').on(
+      table.reportId,
+      table.sortOrder,
+      table.createdAt,
+    ),
+    reportTargetUnique: uniqueIndex('idx_report_references_report_target_unique').on(
+      table.reportId,
+      table.referenceType,
+      table.referenceId,
+    ),
+  }),
+);
+
+export const reportAppeals = sqliteTable(
+  'report_appeals',
+  {
+    id: text('id').primaryKey(),
+    reportCaseId: text('report_case_id')
+      .notNull()
+      .references(() => reportCases.id, { onDelete: 'cascade' }),
+    appellantUserId: integer('appellant_user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    targetUserId: integer('target_user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    targetEntityType: text('target_entity_type').notNull(),
+    targetEntityId: text('target_entity_id').notNull(),
+    appealReasonCode: text('appeal_reason_code').$type<ReportAppealReasonCode>().notNull(),
+    details: text('details').notNull(),
+    evidenceSummaryJson: text('evidence_summary_json').notNull().default('{}'),
+    status: text('status').$type<ReportAppealStatus>().notNull(),
+    resolutionCode: text('resolution_code').$type<ReportAppealResolutionCode | null>(),
+    resolutionNote: text('resolution_note'),
+    caseStatusSnapshot: text('case_status_snapshot').$type<ReportCaseStatus>().notNull(),
+    caseResolutionCodeSnapshot: text('case_resolution_code_snapshot').$type<ReportResolutionCode | null>(),
+    caseUpdatedAtSnapshot: text('case_updated_at_snapshot').notNull(),
+    reviewedByUserId: integer('reviewed_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+    reviewedAt: text('reviewed_at'),
+    withdrawnAt: text('withdrawn_at'),
+    createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    reportCaseActiveUnique: uniqueIndex('idx_report_appeals_case_active')
+      .on(table.reportCaseId)
+      .where(sql`${table.status} IN ('submitted', 'under_review')`),
+    reportCaseSnapshotUnique: uniqueIndex('idx_report_appeals_case_snapshot_unique')
+      .on(table.reportCaseId, table.caseUpdatedAtSnapshot)
+      .where(sql`${table.status} IN ('submitted', 'under_review', 'resolved')`),
+    appellantCreatedAtIndex: index('idx_report_appeals_appellant_created').on(table.appellantUserId, table.createdAt),
+    statusCreatedAtIndex: index('idx_report_appeals_status_created').on(table.status, table.createdAt),
+  }),
+);
+
+export const reportAppealReferences = sqliteTable(
+  'report_appeal_references',
+  {
+    id: text('id').primaryKey(),
+    appealId: text('appeal_id')
+      .notNull()
+      .references(() => reportAppeals.id, { onDelete: 'cascade' }),
+    referenceType: text('reference_type').$type<ReportReferenceType>().notNull(),
+    referenceId: text('reference_id').notNull(),
+    labelSnapshot: text('label_snapshot').notNull(),
+    urlSnapshot: text('url_snapshot'),
+    note: text('note'),
+    sortOrder: integer('sort_order').notNull().default(0),
+    createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    appealSortIndex: index('idx_report_appeal_references_sort').on(
+      table.appealId,
+      table.sortOrder,
+      table.createdAt,
+    ),
+    appealTargetUnique: uniqueIndex('idx_report_appeal_references_target_unique').on(
+      table.appealId,
+      table.referenceType,
+      table.referenceId,
+    ),
+  }),
+);
+
+export const crowdReviewInspectors = sqliteTable('crowd_review_inspectors', {
+  userId: integer('user_id')
+    .primaryKey()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  status: text('status').$type<CrowdReviewInspectorStatus>().notNull(),
+  suspendedUntil: text('suspended_until'),
+  statusReasonCode: text('status_reason_code'),
+  statusReasonDetail: text('status_reason_detail'),
+  updatedByUserId: integer('updated_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+  createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
+export const inspectorDisciplineEvents = sqliteTable(
+  'inspector_discipline_events',
+  {
+    id: text('id').primaryKey(),
+    userId: integer('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    eventType: text('event_type').$type<InspectorDisciplineEventType>().notNull(),
+    reasonCode: text('reason_code'),
+    reasonDetail: text('reason_detail'),
+    sourceEntityType: text('source_entity_type'),
+    sourceEntityId: text('source_entity_id'),
+    createdByUserId: integer('created_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    userCreatedAtIndex: index('idx_inspector_discipline_events_user_created_at').on(table.userId, table.createdAt),
+    eventTypeCreatedAtIndex: index('idx_inspector_discipline_events_type_created_at').on(
+      table.eventType,
+      table.createdAt,
+    ),
+  }),
+);
+
+export const crowdReviewRounds = sqliteTable(
+  'crowd_review_rounds',
+  {
+    id: text('id').primaryKey(),
+    reportCaseId: text('report_case_id')
+      .notNull()
+      .references(() => reportCases.id, { onDelete: 'cascade' }),
+    status: text('status').$type<CrowdReviewRoundStatus>().notNull(),
+    openedAt: text('opened_at').notNull(),
+    deadlineAt: text('deadline_at').notNull(),
+    extensionCount: integer('extension_count').notNull().default(0),
+    minValidVotes: integer('min_valid_votes').notNull(),
+    resultCode: text('result_code').$type<CrowdReviewResultCode | null>(),
+    resultSummaryJson: text('result_summary_json').notNull().default('{}'),
+    createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    reportCaseActiveUnique: uniqueIndex('idx_crowd_review_rounds_report_case_active')
+      .on(table.reportCaseId)
+      .where(sql`${table.status} IN ('pending_dispatch', 'active', 'waiting_more_votes')`),
+    statusDeadlineIndex: index('idx_crowd_review_rounds_status_deadline').on(table.status, table.deadlineAt),
+  }),
+);
+
+export const crowdReviewAssignments = sqliteTable(
+  'crowd_review_assignments',
+  {
+    id: text('id').primaryKey(),
+    crowdReviewRoundId: text('crowd_review_round_id')
+      .notNull()
+      .references(() => crowdReviewRounds.id, { onDelete: 'cascade' }),
+    inspectorUserId: integer('inspector_user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    status: text('status').$type<CrowdReviewAssignmentStatus>().notNull(),
+    assignedAt: text('assigned_at').notNull(),
+    expiresAt: text('expires_at').notNull(),
+    completedAt: text('completed_at'),
+    decision: text('decision').$type<CrowdReviewDecision | null>(),
+    decisionNote: text('decision_note'),
+    postVoteSummaryJson: text('post_vote_summary_json').notNull().default('{}'),
+    postVoteSummarySeenAt: text('post_vote_summary_seen_at'),
+    createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    activeInspectorUnique: uniqueIndex('idx_crowd_review_assignments_active_inspector')
+      .on(table.inspectorUserId)
+      .where(sql`${table.status} = 'assigned'`),
+    roundInspectorUnique: uniqueIndex('idx_crowd_review_assignments_round_inspector').on(
+      table.crowdReviewRoundId,
+      table.inspectorUserId,
+    ),
+    inspectorStatusExpiresIndex: index('idx_crowd_review_assignments_inspector_status_expires').on(
+      table.inspectorUserId,
+      table.status,
+      table.expiresAt,
+    ),
+    roundStatusAssignedIndex: index('idx_crowd_review_assignments_round_status_assigned').on(
+      table.crowdReviewRoundId,
+      table.status,
+      table.assignedAt,
+    ),
+  }),
+);
+
+export const siteMessages = sqliteTable(
+  'site_messages',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    messageType: text('message_type').$type<SiteMessageType>().notNull(),
+    templateKey: text('template_key').notNull(),
+    payloadJson: text('payload_json').notNull().default('{}'),
+    titleText: text('title_text'),
+    bodyText: text('body_text'),
+    actionUrl: text('action_url'),
+    priority: text('priority').$type<MessagePriority>().notNull().default('normal'),
+    expiresAt: text('expires_at'),
+    createdByUserId: integer('created_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    activeIdIndex: index('idx_site_messages_active_id').on(table.id, table.expiresAt),
+    createdAtIndex: index('idx_site_messages_created_at').on(table.createdAt),
+  }),
+);
+
+export const userMessages = sqliteTable(
+  'user_messages',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    recipientUserId: integer('recipient_user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    actorUserId: integer('actor_user_id').references(() => users.id, { onDelete: 'set null' }),
+    channel: text('channel').$type<UserMessageChannel>().notNull().default('system'),
+    messageType: text('message_type').$type<UserMessageType>().notNull(),
+    templateKey: text('template_key').notNull(),
+    payloadJson: text('payload_json').notNull().default('{}'),
+    titleText: text('title_text'),
+    bodyText: text('body_text'),
+    actionUrl: text('action_url'),
+    sourceEntityType: text('source_entity_type'),
+    sourceEntityId: text('source_entity_id'),
+    priority: text('priority').$type<MessagePriority>().notNull().default('normal'),
+    readAt: text('read_at'),
+    archivedAt: text('archived_at'),
+    expiresAt: text('expires_at'),
+    createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    recipientInboxIndex: index('idx_user_messages_recipient_inbox').on(
+      table.recipientUserId,
+      table.archivedAt,
+      table.readAt,
+      table.id,
+    ),
+    recipientCreatedAtIndex: index('idx_user_messages_recipient_created_at').on(
+      table.recipientUserId,
+      table.createdAt,
+    ),
+    recipientSourceIndex: index('idx_user_messages_recipient_source').on(
+      table.recipientUserId,
+      table.sourceEntityType,
+      table.sourceEntityId,
+    ),
+    expiresAtIndex: index('idx_user_messages_expires_at').on(table.expiresAt),
+  }),
+);
+
+export const userMessageState = sqliteTable('user_message_state', {
+  userId: integer('user_id')
+    .primaryKey()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  lastReadSiteMessageId: integer('last_read_site_message_id').notNull().default(0),
+  lastSummaryReadAt: text('last_summary_read_at'),
+  createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
 });
 
 export const favorites = sqliteTable(

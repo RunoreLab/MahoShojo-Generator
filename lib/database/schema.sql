@@ -214,6 +214,250 @@ CREATE TABLE IF NOT EXISTS deck_favorites (
 
 CREATE INDEX IF NOT EXISTS idx_deck_favorites_deck_id ON deck_favorites(deck_id);
 
+-- 公开数据卡举报案件表
+CREATE TABLE IF NOT EXISTS report_cases (
+  id TEXT PRIMARY KEY,
+  target_entity_type TEXT NOT NULL,
+  target_entity_id TEXT NOT NULL,
+  target_user_id INTEGER NOT NULL,
+  status TEXT NOT NULL,
+  resolution_code TEXT,
+  creator_notified_at TEXT,
+  creator_notified_report_count INTEGER NOT NULL DEFAULT 0,
+  latest_reported_at TEXT NOT NULL,
+  target_card_updated_at_at_notice TEXT,
+  resolution_notified_at TEXT,
+  resolution_notified_case_updated_at TEXT,
+  closed_at TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (target_user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_report_cases_target_open
+  ON report_cases(target_entity_type, target_entity_id)
+  WHERE status IN ('open', 'under_review');
+
+CREATE INDEX IF NOT EXISTS idx_report_cases_status_latest
+  ON report_cases(status, latest_reported_at DESC);
+
+-- 单条举报记录表
+CREATE TABLE IF NOT EXISTS reports (
+  id TEXT PRIMARY KEY,
+  case_id TEXT NOT NULL,
+  reporter_user_id INTEGER NOT NULL,
+  reason_code TEXT NOT NULL,
+  details TEXT,
+  status TEXT NOT NULL,
+  evidence_summary_json TEXT NOT NULL DEFAULT '{}',
+  normalized_payload_hash TEXT NOT NULL,
+  target_name_snapshot TEXT NOT NULL,
+  target_description_snapshot TEXT,
+  target_data_snapshot TEXT NOT NULL,
+  target_updated_at_snapshot TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  withdrawn_at TEXT,
+  FOREIGN KEY (case_id) REFERENCES report_cases(id) ON DELETE CASCADE,
+  FOREIGN KEY (reporter_user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_reports_case_reporter_active
+  ON reports(case_id, reporter_user_id)
+  WHERE status = 'active';
+
+CREATE INDEX IF NOT EXISTS idx_reports_case_status_created
+  ON reports(case_id, status, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_reports_reporter_updated_at
+  ON reports(reporter_user_id, updated_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_reports_reporter_status_created
+  ON reports(reporter_user_id, status, created_at DESC);
+
+-- 举报有效提交事件表
+CREATE TABLE IF NOT EXISTS report_submission_events (
+  id TEXT PRIMARY KEY,
+  case_id TEXT NOT NULL,
+  report_id TEXT NOT NULL,
+  reporter_user_id INTEGER NOT NULL,
+  submission_decision TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (case_id) REFERENCES report_cases(id) ON DELETE CASCADE,
+  FOREIGN KEY (report_id) REFERENCES reports(id) ON DELETE CASCADE,
+  FOREIGN KEY (reporter_user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_report_submission_events_reporter_created_at
+  ON report_submission_events(reporter_user_id, created_at DESC);
+
+-- 举报引用表
+CREATE TABLE IF NOT EXISTS report_references (
+  id TEXT PRIMARY KEY,
+  report_id TEXT NOT NULL,
+  reference_type TEXT NOT NULL,
+  reference_id TEXT NOT NULL,
+  label_snapshot TEXT NOT NULL,
+  url_snapshot TEXT,
+  note TEXT,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (report_id) REFERENCES reports(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_report_references_report_sort
+  ON report_references(report_id, sort_order, created_at);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_report_references_report_target_unique
+  ON report_references(report_id, reference_type, reference_id);
+
+-- 举报处理结果申诉表
+CREATE TABLE IF NOT EXISTS report_appeals (
+  id TEXT PRIMARY KEY,
+  report_case_id TEXT NOT NULL,
+  appellant_user_id INTEGER NOT NULL,
+  target_user_id INTEGER NOT NULL,
+  target_entity_type TEXT NOT NULL,
+  target_entity_id TEXT NOT NULL,
+  appeal_reason_code TEXT NOT NULL,
+  details TEXT NOT NULL,
+  evidence_summary_json TEXT NOT NULL DEFAULT '{}',
+  status TEXT NOT NULL,
+  resolution_code TEXT,
+  resolution_note TEXT,
+  case_status_snapshot TEXT NOT NULL,
+  case_resolution_code_snapshot TEXT,
+  case_updated_at_snapshot TEXT NOT NULL,
+  reviewed_by_user_id INTEGER,
+  reviewed_at TEXT,
+  withdrawn_at TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (report_case_id) REFERENCES report_cases(id) ON DELETE CASCADE,
+  FOREIGN KEY (appellant_user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (target_user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (reviewed_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_report_appeals_case_active
+  ON report_appeals(report_case_id)
+  WHERE status IN ('submitted', 'under_review');
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_report_appeals_case_snapshot_unique
+  ON report_appeals(report_case_id, case_updated_at_snapshot)
+  WHERE status IN ('submitted', 'under_review', 'resolved');
+
+CREATE INDEX IF NOT EXISTS idx_report_appeals_appellant_created
+  ON report_appeals(appellant_user_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_report_appeals_status_created
+  ON report_appeals(status, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS report_appeal_references (
+  id TEXT PRIMARY KEY,
+  appeal_id TEXT NOT NULL,
+  reference_type TEXT NOT NULL,
+  reference_id TEXT NOT NULL,
+  label_snapshot TEXT NOT NULL,
+  url_snapshot TEXT,
+  note TEXT,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (appeal_id) REFERENCES report_appeals(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_report_appeal_references_sort
+  ON report_appeal_references(appeal_id, sort_order, created_at);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_report_appeal_references_target_unique
+  ON report_appeal_references(appeal_id, reference_type, reference_id);
+
+CREATE TABLE IF NOT EXISTS crowd_review_inspectors (
+  user_id INTEGER PRIMARY KEY,
+  status TEXT NOT NULL,
+  suspended_until TEXT,
+  status_reason_code TEXT,
+  status_reason_detail TEXT,
+  updated_by_user_id INTEGER,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (updated_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS inspector_discipline_events (
+  id TEXT PRIMARY KEY,
+  user_id INTEGER NOT NULL,
+  event_type TEXT NOT NULL,
+  reason_code TEXT,
+  reason_detail TEXT,
+  source_entity_type TEXT,
+  source_entity_id TEXT,
+  created_by_user_id INTEGER,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (created_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_inspector_discipline_events_user_created_at
+  ON inspector_discipline_events(user_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_inspector_discipline_events_type_created_at
+  ON inspector_discipline_events(event_type, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS crowd_review_rounds (
+  id TEXT PRIMARY KEY,
+  report_case_id TEXT NOT NULL,
+  status TEXT NOT NULL,
+  opened_at TEXT NOT NULL,
+  deadline_at TEXT NOT NULL,
+  extension_count INTEGER NOT NULL DEFAULT 0,
+  min_valid_votes INTEGER NOT NULL,
+  result_code TEXT,
+  result_summary_json TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (report_case_id) REFERENCES report_cases(id) ON DELETE CASCADE
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_crowd_review_rounds_report_case_active
+  ON crowd_review_rounds(report_case_id)
+  WHERE status IN ('pending_dispatch', 'active', 'waiting_more_votes');
+
+CREATE INDEX IF NOT EXISTS idx_crowd_review_rounds_status_deadline
+  ON crowd_review_rounds(status, deadline_at);
+
+CREATE TABLE IF NOT EXISTS crowd_review_assignments (
+  id TEXT PRIMARY KEY,
+  crowd_review_round_id TEXT NOT NULL,
+  inspector_user_id INTEGER NOT NULL,
+  status TEXT NOT NULL,
+  assigned_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  completed_at TEXT,
+  decision TEXT,
+  decision_note TEXT,
+  post_vote_summary_json TEXT NOT NULL DEFAULT '{}',
+  post_vote_summary_seen_at TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (crowd_review_round_id) REFERENCES crowd_review_rounds(id) ON DELETE CASCADE,
+  FOREIGN KEY (inspector_user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_crowd_review_assignments_active_inspector
+  ON crowd_review_assignments(inspector_user_id)
+  WHERE status = 'assigned';
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_crowd_review_assignments_round_inspector
+  ON crowd_review_assignments(crowd_review_round_id, inspector_user_id);
+
+CREATE INDEX IF NOT EXISTS idx_crowd_review_assignments_inspector_status_expires
+  ON crowd_review_assignments(inspector_user_id, status, expires_at);
+
+CREATE INDEX IF NOT EXISTS idx_crowd_review_assignments_round_status_assigned
+  ON crowd_review_assignments(crowd_review_round_id, status, assigned_at);
+
 -- 兑换码表（用完即删除，无需记录历史）
 CREATE TABLE IF NOT EXISTS redemption_codes (
   code TEXT PRIMARY KEY NOT NULL,           -- 兑换码
@@ -238,6 +482,30 @@ CREATE TABLE IF NOT EXISTS badges (
 
 CREATE INDEX IF NOT EXISTS idx_badges_rarity ON badges(rarity);
 CREATE INDEX IF NOT EXISTS idx_badges_is_active ON badges(is_active);
+
+INSERT OR IGNORE INTO badges (
+  id,
+  name,
+  description,
+  icon,
+  text_color,
+  background_color,
+  border_color,
+  rarity,
+  sort_order,
+  is_active
+) VALUES (
+  'crowd_review_inspector',
+  '巡查使',
+  '持有该徽章且运行时状态为 active 的用户，可参与公开数据卡举报案件的众查。',
+  '{"type":"lucide","name":"ShieldCheck"}',
+  '{"type":"solid","value":"#ffffff"}',
+  '{"type":"gradient","value":"linear-gradient(135deg, #0f766e, #0ea5e9)"}',
+  '{"type":"solid","value":"#0f766e"}',
+  88,
+  31,
+  1
+);
 
 -- 用户徽章关联表
 CREATE TABLE IF NOT EXISTS user_badges (
@@ -825,3 +1093,64 @@ CREATE TABLE IF NOT EXISTS admin_cleanup_job_logs (
 );
 
 CREATE INDEX IF NOT EXISTS idx_admin_cleanup_job_logs_job_id_batch ON admin_cleanup_job_logs(job_id, batch_no);
+
+-- Messages（v0.8.2）
+-- =================================================================
+CREATE TABLE IF NOT EXISTS site_messages (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  message_type TEXT NOT NULL,
+  template_key TEXT NOT NULL,
+  payload_json TEXT NOT NULL DEFAULT '{}',
+  title_text TEXT,
+  body_text TEXT,
+  action_url TEXT,
+  priority TEXT NOT NULL DEFAULT 'normal',
+  expires_at TEXT,
+  created_by_user_id INTEGER,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (created_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_site_messages_active_id ON site_messages(id, expires_at);
+CREATE INDEX IF NOT EXISTS idx_site_messages_created_at ON site_messages(created_at);
+
+CREATE TABLE IF NOT EXISTS user_messages (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  recipient_user_id INTEGER NOT NULL,
+  actor_user_id INTEGER,
+  channel TEXT NOT NULL DEFAULT 'system',
+  message_type TEXT NOT NULL,
+  template_key TEXT NOT NULL,
+  payload_json TEXT NOT NULL DEFAULT '{}',
+  title_text TEXT,
+  body_text TEXT,
+  action_url TEXT,
+  source_entity_type TEXT,
+  source_entity_id TEXT,
+  priority TEXT NOT NULL DEFAULT 'normal',
+  read_at TEXT,
+  archived_at TEXT,
+  expires_at TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (recipient_user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (actor_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_messages_recipient_inbox
+  ON user_messages(recipient_user_id, archived_at, read_at, id DESC);
+CREATE INDEX IF NOT EXISTS idx_user_messages_recipient_created_at
+  ON user_messages(recipient_user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_user_messages_recipient_source
+  ON user_messages(recipient_user_id, source_entity_type, source_entity_id);
+CREATE INDEX IF NOT EXISTS idx_user_messages_expires_at ON user_messages(expires_at);
+
+CREATE TABLE IF NOT EXISTS user_message_state (
+  user_id INTEGER PRIMARY KEY,
+  last_read_site_message_id INTEGER NOT NULL DEFAULT 0,
+  last_summary_read_at TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);

@@ -1,5 +1,6 @@
 import { z } from 'zod/v3';
 import { AdjudicatorEventSchema } from './adjudicator';
+import { BuildStateSchema, CreationInputsSchema } from './creator-metadata';
 import { ScenarioBattleStoryExtensionSchema } from '@/lib/scenario-battle-story';
 
 // 情景数据卡的 Zod Schema
@@ -26,10 +27,22 @@ export const ScenarioSchema = z.object({
     signature: z.string().optional(),
   }).optional(),
   adjudicationEvents: z.array(AdjudicatorEventSchema).optional(),
+  creationInputs: CreationInputsSchema.optional(),
+  buildState: BuildStateSchema.optional(),
   _battle_story: ScenarioBattleStoryExtensionSchema.optional(),
 }).catchall(z.unknown())
   .superRefine((data, ctx) => {
-    const allowedKeys = ['title', 'scenario_type', 'description', 'elements', 'metadata', 'adjudicationEvents', '_battle_story'];
+    const allowedKeys = [
+      'title',
+      'scenario_type',
+      'description',
+      'elements',
+      'metadata',
+      'adjudicationEvents',
+      'creationInputs',
+      'buildState',
+      '_battle_story',
+    ];
     for (const key in data) {
       if (!allowedKeys.includes(key) && !key.startsWith('_')) {
         ctx.addIssue({

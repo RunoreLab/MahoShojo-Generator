@@ -21,6 +21,7 @@ import {
 } from '@/lib/scenario-battle-story';
 
 const NON_SUBSTANTIVE_KEYS = new Set(['signature', 'templateId']);
+const CREATOR_META_KEYS = ['creationInputs', 'buildState'] as const;
 
 export type DataCardTemplate = 'magical-girl' | 'canshou' | 'general' | 'scenario' | 'general-scenario';
 export type InferableTemplate = DataCardTemplate | 'unknown';
@@ -441,6 +442,22 @@ function formatUnmatchedFields(unmatched: UnmatchedField[], ignoreTopLevel: stri
     .join('\n');
 }
 
+function cloneMetadata<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function copyKnownMetadata(
+  source: Record<string, unknown>,
+  target: Record<string, unknown>,
+  keys: readonly string[]
+): void {
+  keys.forEach((key) => {
+    if (source[key] !== undefined) {
+      target[key] = cloneMetadata(source[key]);
+    }
+  });
+}
+
 function convertToGeneral(data: any): AssignResult<GeneralCharacterData> {
   const name = data?.codename || data?.name || data?.title || '未命名角色';
   const rest = { ...data };
@@ -448,6 +465,8 @@ function convertToGeneral(data: any): AssignResult<GeneralCharacterData> {
   delete rest.name;
   delete rest.title;
   delete rest.templateId;
+  delete rest.creationInputs;
+  delete rest.buildState;
   delete rest._battle_story;
 
   const content = toMarkdownContent(rest);
@@ -465,6 +484,7 @@ function convertToGeneral(data: any): AssignResult<GeneralCharacterData> {
   if (data?.current_state) {
     (result as any).current_state = JSON.parse(JSON.stringify(data.current_state));
   }
+  copyKnownMetadata(data, result as Record<string, unknown>, CREATOR_META_KEYS);
   return { data: GeneralCharacterSchema.parse(result), warnings: [] };
 }
 
@@ -479,6 +499,8 @@ function convertToGeneralScenario(data: any, sourceTemplate: InferableTemplate):
   delete rest.templateId;
   delete rest.signature;
   delete rest.metadata;
+  delete rest.creationInputs;
+  delete rest.buildState;
   delete rest.arena_history;
   delete rest.current_state;
   delete rest.adjudicationEvents;
@@ -504,6 +526,7 @@ function convertToGeneralScenario(data: any, sourceTemplate: InferableTemplate):
   if (data?.adjudicationEvents) {
     (result as any).adjudicationEvents = JSON.parse(JSON.stringify(data.adjudicationEvents));
   }
+  copyKnownMetadata(data, result as Record<string, unknown>, CREATOR_META_KEYS);
 
   return { data: GeneralScenarioSchema.parse(result), warnings: [] };
 }
@@ -516,6 +539,8 @@ function convertToMagicalGirl(data: any, sourceTemplate: InferableTemplate): Ass
   delete source.codename;
   delete source.name;
   delete source.title;
+  delete source.creationInputs;
+  delete source.buildState;
   delete source._battle_story;
   if (sourceTemplate === 'general' || sourceTemplate === 'general-scenario') {
     delete source.content;
@@ -537,6 +562,7 @@ function convertToMagicalGirl(data: any, sourceTemplate: InferableTemplate): Ass
   if (data?.current_state) {
     (base as any).current_state = JSON.parse(JSON.stringify(data.current_state));
   }
+  copyKnownMetadata(data, base as Record<string, unknown>, CREATOR_META_KEYS);
 
   base.templateId = '魔法少女/心之花/魔法少女（问卷生成）';
   return { data: MagicalGirlSchema.parse(base), warnings: unmatched.length ? ['部分字段已追加至预测依据。'] : [] };
@@ -550,6 +576,8 @@ function convertToCanshou(data: any, sourceTemplate: InferableTemplate): AssignR
   delete source.codename;
   delete source.name;
   delete source.title;
+  delete source.creationInputs;
+  delete source.buildState;
   delete source._battle_story;
   if (sourceTemplate === 'general' || sourceTemplate === 'general-scenario') {
     delete source.content;
@@ -570,6 +598,7 @@ function convertToCanshou(data: any, sourceTemplate: InferableTemplate): AssignR
   if (data?.current_state) {
     (base as any).current_state = JSON.parse(JSON.stringify(data.current_state));
   }
+  copyKnownMetadata(data, base as Record<string, unknown>, CREATOR_META_KEYS);
 
   base.templateId = '魔法少女/心之花/残兽（问卷生成）';
   return { data: CanshouSchema.parse(base), warnings: unmatched.length ? ['部分字段已附加到研究员注记。'] : [] };
@@ -586,6 +615,8 @@ function convertToScenario(data: any, sourceTemplate: InferableTemplate): Assign
   delete source.title;
   delete source.signature;
   delete source.templateId;
+  delete source.creationInputs;
+  delete source.buildState;
   delete source.arena_history;
   delete source.current_state;
   delete source._battle_story;
@@ -630,6 +661,7 @@ function convertToScenario(data: any, sourceTemplate: InferableTemplate): Assign
   if (battleStoryExtension) {
     (base as any)._battle_story = battleStoryExtension;
   }
+  copyKnownMetadata(data, base as Record<string, unknown>, CREATOR_META_KEYS);
 
   return { data: ScenarioSchema.parse(base), warnings: unmatched.length ? ['部分字段已合并至情景描述。'] : [] };
 }

@@ -1,11 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { X, Info, Star, Heart, Download, ChevronDown, ChevronUp } from 'lucide-react';
+import { X, Info, Star, Heart, Download, ChevronDown, ChevronUp, Flag, MoreHorizontal } from 'lucide-react';
 import { MarkdownBlock } from '@/components/MarkdownBlock';
+import { DataCardReportModal } from '@/components/data-card-reports/DataCardReportModal';
 import { getFieldDisplayName } from '@/lib/fieldTranslations';
 import { formatDateTime } from '@/lib/constants';
 import { authStorage } from '@/lib/auth';
 import { upsertArenaRankCacheFromMeta } from '@/lib/arena/rank-cache';
 import { TierBadge } from '@/components/ranking/TierBadge';
+import type { DataCardReportCapabilityDto, DataCardReportDraft } from '@/lib/data-card-reports/types';
 import { buildTitleDisplay } from '@/lib/text';
 import {
   extractDataCardVisualAssets,
@@ -124,6 +126,16 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
 
 const isUuid = (value: string) => UUID_PATTERN.test(value.trim());
 
+export const shouldLoadReportCapability = ({
+  isCloudDataCard,
+  isPublic,
+  isOwner,
+}: {
+  isCloudDataCard: boolean;
+  isPublic: boolean;
+  isOwner: boolean;
+}) => isCloudDataCard && (isPublic || isOwner);
+
 const sanitizeDownloadFilename = (value: string) => {
   const trimmed = value.trim();
   if (!trimmed) return '数据卡';
@@ -173,6 +185,7 @@ interface DataCardDetailsModalProps {
   isOwner?: boolean;
   adminTagEditor?: boolean;
   metaCardId?: string | null;
+  initialReportCapability?: DataCardReportCapabilityDto | null;
   card: {
     id: string;
     name: string;
@@ -205,6 +218,7 @@ export default function DataCardDetailsModal({
   metaCardId,
   isOwner = false,
   adminTagEditor = false,
+  initialReportCapability = null,
 }: DataCardDetailsModalProps) {
   const canEditTags = isOwner || adminTagEditor;
   const [tagScope, setTagScope] = useState<'user' | 'system' | 'admin'>(adminTagEditor ? 'admin' : 'user');
@@ -216,6 +230,15 @@ export default function DataCardDetailsModal({
   const metaAbortRef = useRef<AbortController | null>(null);
   const [downloadError, setDownloadError] = useState<string | null>(null);
   const [assetDimensions, setAssetDimensions] = useState<Record<string, { width: number; height: number }>>({});
+  const [reportCapability, setReportCapability] = useState<DataCardReportCapabilityDto | null>(initialReportCapability);
+  const [reportCapabilityLoading, setReportCapabilityLoading] = useState(false);
+  const [reportCapabilityError, setReportCapabilityError] = useState<string | null>(null);
+  const reportRequestIdRef = useRef(0);
+  const reportAbortRef = useRef<AbortController | null>(null);
+  const [isMoreActionsOpen, setIsMoreActionsOpen] = useState(false);
+  const [isReportModalOpen, setIsReportModalOpen] = useState(false);
+  const [reportSubmitting, setReportSubmitting] = useState(false);
+  const [reportSubmitError, setReportSubmitError] = useState<string | null>(null);
 
   const [isEditingTags, setIsEditingTags] = useState(false);
   const [allTags, setAllTags] = useState<ApiTag[]>([]);
@@ -227,6 +250,11 @@ export default function DataCardDetailsModal({
   const [saveTagsError, setSaveTagsError] = useState<string | null>(null);
   const [isMetaExpanded, setIsMetaExpanded] = useState(true);
   const { display: displayName, full: fullName } = buildTitleDisplay(card.name || '未命名');
+  const ownerModerationSummary = reportCapability?.ownerModerationSummary ?? null;
+  const showOwnerModerationSummary =
+    isOwner &&
+    ownerModerationSummary != null &&
+    (ownerModerationSummary.canAppeal || ownerModerationSummary.activeAppealId != null);
   const cardTypeLabel =
     card.type === 'character'
       ? '角色'
@@ -274,9 +302,45 @@ export default function DataCardDetailsModal({
     }
   }, []);
 
+  const reloadReportCapability = useCallback(async (dataCardId: string) => {
+    const requestId = (reportRequestIdRef.current += 1);
+    reportAbortRef.current?.abort();
+    const controller = new AbortController();
+    reportAbortRef.current = controller;
+
+    setReportCapabilityLoading(true);
+    setReportCapabilityError(null);
+    try {
+      const init = await authStorage.buildAuthenticatedRequestInit({
+        method: 'GET',
+        signal: controller.signal,
+      });
+      if (controller.signal.aborted || requestId !== reportRequestIdRef.current) return;
+      const payload = await fetchJson<DataCardReportCapabilityDto>(
+        `/api/data-card-reports?dataCardId=${encodeURIComponent(dataCardId)}`,
+        init,
+      );
+      if (controller.signal.aborted || requestId !== reportRequestIdRef.current) return;
+      setReportCapability(payload);
+    } catch (error) {
+      if (controller.signal.aborted || requestId !== reportRequestIdRef.current) return;
+      setReportCapability(null);
+      setReportCapabilityError(String(error));
+    } finally {
+      if (controller.signal.aborted || requestId !== reportRequestIdRef.current) return;
+      setReportCapabilityLoading(false);
+    }
+  }, []);
+
   const resolvedMetaCardId = metaCardId === undefined ? card?.id : metaCardId;
   const resolvedCloudCardId = typeof resolvedMetaCardId === 'string' ? resolvedMetaCardId.trim() : '';
   const isCloudDataCard = Boolean(resolvedCloudCardId) && isUuid(resolvedCloudCardId);
+  const shouldFetchReportCapability = shouldLoadReportCapability({
+    isCloudDataCard,
+    isPublic: card.isPublic,
+    isOwner,
+  });
+  const canShowReportActions = isCloudDataCard && card.isPublic;
   const canDownloadCard = isCloudDataCard ? (Boolean(meta) || isOwner) : true;
 
   useEffect(() => {
@@ -314,19 +378,36 @@ export default function DataCardDetailsModal({
     if (!isOpen) return;
     if (!resolvedMetaCardId) {
       metaAbortRef.current?.abort();
+      reportAbortRef.current?.abort();
       setMeta(null);
       setMetaError(null);
       setMetaLoading(false);
+      setReportCapability(null);
+      setReportCapabilityError(null);
+      setReportCapabilityLoading(false);
       setIsEditingTags(false);
       setSaveTagsError(null);
       setDownloadError(null);
+      setIsMoreActionsOpen(false);
+      setIsReportModalOpen(false);
+      setReportSubmitError(null);
       return;
     }
     void reloadMeta(resolvedMetaCardId);
+    if (shouldFetchReportCapability) {
+      void reloadReportCapability(resolvedMetaCardId);
+    } else {
+      setReportCapability(null);
+      setReportCapabilityError(null);
+      setReportCapabilityLoading(false);
+    }
     setIsEditingTags(false);
     setSaveTagsError(null);
     setDownloadError(null);
-  }, [isOpen, metaNonce, reloadMeta, resolvedMetaCardId]);
+    setIsMoreActionsOpen(false);
+    setIsReportModalOpen(false);
+    setReportSubmitError(null);
+  }, [isOpen, metaNonce, reloadMeta, reloadReportCapability, resolvedMetaCardId, shouldFetchReportCapability]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -347,7 +428,10 @@ export default function DataCardDetailsModal({
   }, [isOpen]);
 
   useEffect(() => {
-    return () => metaAbortRef.current?.abort();
+    return () => {
+      metaAbortRef.current?.abort();
+      reportAbortRef.current?.abort();
+    };
   }, []);
 
   useEffect(() => {
@@ -552,6 +636,59 @@ export default function DataCardDetailsModal({
     }
   }, [card.data]);
 
+  const submitReport = useCallback(
+    async (draft: DataCardReportDraft) => {
+      if (!resolvedCloudCardId) return;
+
+      setReportSubmitting(true);
+      setReportSubmitError(null);
+      try {
+        const init = await authStorage.buildAuthenticatedRequestInit({
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            dataCardId: resolvedCloudCardId,
+            reasonCode: draft.reasonCode,
+            details: draft.details,
+            references: draft.references.map((reference) => ({
+              referenceType: reference.referenceType,
+              referenceId: reference.referenceId,
+              note: reference.note,
+            })),
+          }),
+        });
+        const response = await fetch('/api/data-card-reports', init);
+        const payload = (await response.json().catch(() => null)) as
+          | { error?: string; submissionDecision?: string }
+          | null;
+
+        if (!response.ok) {
+          if (payload?.error) {
+            setReportSubmitError(payload.error);
+          } else if (payload?.submissionDecision === 'rejected_rate_limited') {
+            setReportSubmitError('提交过于频繁，请稍后再试。');
+          } else if (payload?.submissionDecision === 'rejected_screened') {
+            setReportSubmitError('该举报暂未通过基础审核。');
+          } else {
+            setReportSubmitError(`提交失败（HTTP ${response.status}）`);
+          }
+          return;
+        }
+
+        setIsReportModalOpen(false);
+        setIsMoreActionsOpen(false);
+        void reloadReportCapability(resolvedCloudCardId);
+      } catch (error) {
+        setReportSubmitError(String(error));
+      } finally {
+        setReportSubmitting(false);
+      }
+    },
+    [reloadReportCapability, resolvedCloudCardId],
+  );
+
   const visualAssets = useMemo(() => extractDataCardVisualAssets(parsedData), [parsedData]);
   const reviewDiff = useMemo(() => {
     if (!compareCard) return null;
@@ -662,12 +799,54 @@ export default function DataCardDetailsModal({
               <p className="text-xs text-gray-500 mt-1">类型：{cardTypeLabel}</p>
             </div>
           </div>
-          <button
-            onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 p-2 rounded-lg hover:bg-gray-100"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          <div className="relative flex items-center gap-2">
+            {canShowReportActions ? (
+              <button
+                type="button"
+                onClick={() => setIsMoreActionsOpen((prev) => !prev)}
+                className="inline-flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+              >
+                <MoreHorizontal className="w-4 h-4" />
+                <span>更多</span>
+              </button>
+            ) : null}
+            <button
+              onClick={onClose}
+              className="text-gray-400 hover:text-gray-600 p-2 rounded-lg hover:bg-gray-100"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            {canShowReportActions && isMoreActionsOpen ? (
+              <div className="absolute right-12 top-12 z-10 w-72 rounded-xl border border-gray-200 bg-white p-2 shadow-xl">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (reportCapability?.canReport) {
+                      setIsReportModalOpen(true);
+                      setIsMoreActionsOpen(false);
+                    }
+                  }}
+                  disabled={reportCapabilityLoading || !reportCapability?.canReport}
+                  className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm text-gray-800 hover:bg-gray-50 disabled:cursor-not-allowed disabled:text-gray-400"
+                  title={reportCapability?.reportDisabledReason ?? undefined}
+                >
+                  <span className="inline-flex items-center gap-2">
+                    <Flag className="w-4 h-4" />
+                    <span>举报此卡</span>
+                  </span>
+                  <span className="text-xs text-gray-400">
+                    {reportCapabilityLoading ? '加载中' : reportCapability?.canReport ? '可用' : '不可用'}
+                  </span>
+                </button>
+                {reportCapabilityError ? (
+                  <div className="px-3 pb-1 text-xs text-red-600">举报能力加载失败：{reportCapabilityError}</div>
+                ) : reportCapability?.reportDisabledReason ? (
+                  <div className="px-3 pb-1 text-xs text-gray-500">{reportCapability.reportDisabledReason}</div>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
         </div>
 
         {/* 内容区 */}
@@ -677,6 +856,21 @@ export default function DataCardDetailsModal({
               {pendingNotice}
             </div>
           )}
+
+          {showOwnerModerationSummary ? (
+            <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-900">
+              <div className="font-medium">处理结果与申诉</div>
+              <div className="mt-1">{ownerModerationSummary.statusSummary}</div>
+              {ownerModerationSummary.appealEntryUrl ? (
+                <a
+                  href={ownerModerationSummary.appealEntryUrl}
+                  className="mt-2 inline-flex text-sm text-rose-700 underline underline-offset-2"
+                >
+                  {ownerModerationSummary.activeAppealId ? '查看申诉状态' : '前往申诉页'}
+                </a>
+              ) : null}
+            </div>
+          ) : null}
 
           {reviewDiff && (
             <section className="space-y-3">
@@ -1136,6 +1330,21 @@ export default function DataCardDetailsModal({
           </div>
         </div>
       </div>
+      <DataCardReportModal
+        isOpen={isReportModalOpen}
+        cardName={card.name}
+        reasons={reportCapability?.reasons ?? []}
+        initialReport={reportCapability?.myActiveReport ?? null}
+        submitting={reportSubmitting}
+        error={reportSubmitError}
+        onClose={() => {
+          setIsReportModalOpen(false);
+          setReportSubmitError(null);
+        }}
+        onSubmit={(draft) => {
+          void submitReport(draft);
+        }}
+      />
     </div>
   );
 }

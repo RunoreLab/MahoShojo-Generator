@@ -4,6 +4,7 @@ import { useMemo } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { authStorage } from '@/lib/auth';
+import { dispatchMeProfileAvatarUpdated } from '@/lib/me-profile-events';
 
 export type MeProfile = {
   signature: string;
@@ -126,6 +127,9 @@ export function useMeProfile(userId: number | null) {
         const prevProfile = prev?.profile ?? { signature: '', avatarDataUrl: null };
         return { success: true, profile: { ...prevProfile, avatarDataUrl: data.avatarDataUrl } };
       });
+      if (typeof userId === 'number' && userId > 0) {
+        dispatchMeProfileAvatarUpdated({ userId, avatarDataUrl: data.avatarDataUrl });
+      }
     },
   });
 
@@ -139,6 +143,9 @@ export function useMeProfile(userId: number | null) {
         const prevProfile = prev?.profile ?? { signature: '', avatarDataUrl: null };
         return { success: true, profile: { ...prevProfile, avatarDataUrl: null } };
       });
+      if (typeof userId === 'number' && userId > 0) {
+        dispatchMeProfileAvatarUpdated({ userId, avatarDataUrl: null });
+      }
     },
   });
 

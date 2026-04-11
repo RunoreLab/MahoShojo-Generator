@@ -1,5 +1,6 @@
 // components/CanshouCard.tsx
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 import { ArenaHistory, ArenaHistoryEntry, CharacterCurrentState } from '@/types/arena';
 import { CurrentStatePanel } from '@/components/CurrentStatePanel';
 import { MarkdownBlock } from '@/components/MarkdownBlock';
@@ -7,6 +8,11 @@ import { capturePngBlob } from '@/lib/client/snapdomCapture';
 import { createBlobUrl, downloadBlob } from '@/lib/client/blobUrl';
 import { GeneratedByUserBadge } from '@/components/shared/GeneratedByUserBadge';
 import { InlineField } from '@/components/shared/InlineField';
+import { CharacterParameterSection } from '@/components/shared/CharacterParameterSection';
+import {
+  buildCharacterParameterView,
+  type CharacterParameterSourceKey,
+} from '@/lib/creator/character-parameter-view';
 import type { CharacterCardPortraitAsset } from '@/types/visual-asset';
 
 export interface CanshouDetails {
@@ -24,6 +30,8 @@ export interface CanshouDetails {
   researcherNotes: string;
   arena_history?: ArenaHistory;
   current_state?: CharacterCurrentState | null;
+  creationInputs?: unknown;
+  buildState?: unknown;
 }
 
 interface CanshouCardProps {
@@ -34,17 +42,48 @@ interface CanshouCardProps {
   portraitAsset?: CharacterCardPortraitAsset | null;
 }
 
+const waitForNextPaint = async () => {
+  if (typeof window === 'undefined' || typeof window.requestAnimationFrame !== 'function') {
+    return;
+  }
+
+  await new Promise<void>((resolve) => {
+    window.requestAnimationFrame(() => resolve());
+  });
+};
+
 const CanshouCard: React.FC<CanshouCardProps> = ({ canshou, onSaveImage, imageSaveMode = 'auto', saveButtonLabel, portraitAsset = null }) => {
   const cardRef = useRef<HTMLDivElement>(null);
   // 新增：用于控制历战记录可见性的状态
   const [isHistoryVisible, setIsHistoryVisible] = useState(false);
   const [isSavingImage, setIsSavingImage] = useState(false);
+  const parameterView = useMemo(
+    () =>
+      buildCharacterParameterView({
+        creationInputs: canshou?.creationInputs,
+        buildState: canshou?.buildState,
+      }),
+    [canshou]
+  );
+  const [parameterSourceKey, setParameterSourceKey] = useState<CharacterParameterSourceKey>(
+    parameterView?.activeSource ?? 'current'
+  );
+  const [isExportingImage, setIsExportingImage] = useState(false);
   const labelClassName = 'text-sm opacity-90';
   const portraitImageUrl = typeof portraitAsset?.imageUrl === 'string' ? portraitAsset.imageUrl.trim() : '';
   const uploadedPortraitNote =
     portraitAsset?.source === 'uploaded'
       ? (typeof portraitAsset.note === 'string' && portraitAsset.note.trim() ? portraitAsset.note.trim() : '用户自行上传')
       : '';
+
+  useEffect(() => {
+    setParameterSourceKey((currentSourceKey) => {
+      if (!parameterView) return 'current';
+      return parameterView.sources.some((source) => source.key === currentSourceKey)
+        ? currentSourceKey
+        : parameterView.activeSource;
+    });
+  }, [parameterView]);
 
   /**
    * 截图残兽档案，并根据 imageSaveMode 决定保存方式。
@@ -58,6 +97,8 @@ const CanshouCard: React.FC<CanshouCardProps> = ({ canshou, onSaveImage, imageSa
     const logoPlaceholder = cardRef.current.querySelector('.logo-placeholder') as HTMLElement;
     try {
       setIsSavingImage(true);
+      flushSync(() => setIsExportingImage(true));
+      await waitForNextPaint();
       if (saveButton) saveButton.style.display = 'none';
       if (logoPlaceholder) logoPlaceholder.style.display = 'flex';
 
@@ -92,6 +133,7 @@ const CanshouCard: React.FC<CanshouCardProps> = ({ canshou, onSaveImage, imageSa
       alert('生成图片失败，请重试');
       console.error("Image generation failed:", err);
     } finally {
+      flushSync(() => setIsExportingImage(false));
       if (saveButton) saveButton.style.display = 'block';
       if (logoPlaceholder) logoPlaceholder.style.display = 'none';
       setIsSavingImage(false);
@@ -232,6 +274,15 @@ const CanshouCard: React.FC<CanshouCardProps> = ({ canshou, onSaveImage, imageSa
           contentClassName="text-sm italic"
         />
       </div>
+
+      {parameterView ? (
+        <CharacterParameterSection
+          view={parameterView}
+          sourceKey={parameterSourceKey}
+          renderMode={isExportingImage ? 'export' : 'interactive'}
+          onChangeSource={setParameterSourceKey}
+        />
+      ) : null}
         
         <CurrentStatePanel state={canshou.current_state} variant="dark" />
 

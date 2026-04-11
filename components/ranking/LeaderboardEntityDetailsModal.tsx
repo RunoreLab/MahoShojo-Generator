@@ -6,6 +6,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import DataCardDetailsModal from '@/components/DataCardDetailsModal';
 import { mapPublicDataCardRowToDetailsCard } from '@/lib/data-card-read-mappers';
 import { PRESET_LIST } from '@/lib/presets';
+import { fetchPublicDataCardRowById, type PublicDataCardApiFetchLike } from '@/lib/public-card-cache/public-data-card-api';
+import { getPublicCardByIdWithSharedCache } from '@/lib/public-card-cache/shared-loader';
 
 export type LeaderboardEntityDetailsTarget = {
   entityType: 'data_card' | 'preset';
@@ -23,11 +25,71 @@ type CacheEntry = {
 
 const presetByFilename = new Map(PRESET_LIST.map((preset) => [preset.filename, preset]));
 
-const fetchJson = async <T,>(url: string, init?: RequestInit): Promise<T> => {
-  const res = await fetch(url, init);
-  const json = (await res.json()) as T;
-  if (!res.ok) throw new Error(`HTTP ${res.status}: ${JSON.stringify(json)}`);
-  return json;
+export type LoadLeaderboardEntityDetailsOptions = {
+  fetcher?: PublicDataCardApiFetchLike;
+  getNowMs?: () => number;
+};
+
+export const loadLeaderboardEntityDetails = async (
+  entity: LeaderboardEntityDetailsTarget,
+  options: LoadLeaderboardEntityDetailsOptions = {},
+): Promise<CacheEntry> => {
+  if (entity.entityType === 'data_card') {
+    const result = await getPublicCardByIdWithSharedCache({
+      id: entity.entityId,
+      fetcher: (id) => fetchPublicDataCardRowById(id, { fetcher: options.fetcher }),
+      allowedRecordSources: ['public-data-card-api'],
+      getNowMs: options.getNowMs,
+    });
+
+    if (!result.card) {
+      throw new Error('无法读取数据卡');
+    }
+
+    return {
+      card: mapPublicDataCardRowToDetailsCard(result.card, {
+        id: entity.entityId,
+        name: entity.displayName,
+        author:
+          typeof entity.authorName === 'string' && entity.authorName.trim()
+            ? entity.authorName.trim()
+            : '未知',
+      }),
+      metaCardId: undefined,
+      pendingNotice: entity.pendingNotice ?? null,
+    };
+  }
+
+  const presetMeta = presetByFilename.get(entity.entityId);
+  const response = await (options.fetcher ?? fetch)(`/presets/${encodeURIComponent(entity.entityId)}`, {
+    headers: { Accept: 'application/json' },
+  });
+  if (!response.ok) {
+    throw new Error(`无法加载预设设定文件（HTTP ${response.status}）`);
+  }
+  const presetData = (await response.json()) as unknown;
+
+  const baseNotice = entity.pendingNotice ?? null;
+  const pendingNotice = baseNotice
+    ? `${baseNotice} · 预设角色不支持标签/指标查询（以排行榜展示为准）`
+    : '预设角色不支持标签/指标查询（以排行榜展示为准）';
+
+  return {
+    card: {
+      id: `preset:${entity.entityId}`,
+      name: presetMeta?.name ?? entity.displayName,
+      description: presetMeta?.description ?? '系统预设角色',
+      type: 'character',
+      data: JSON.stringify(presetData, null, 2),
+      isPublic: true,
+      author: '官方',
+      usageCount: 0,
+      likeCount: 0,
+      favoriteCount: 0,
+    },
+    metaCardId: null,
+    pendingNotice,
+  };
 };
 
 export function LeaderboardEntityDetailsModal(props: {
@@ -44,7 +106,6 @@ export function LeaderboardEntityDetailsModal(props: {
   const [retryNonce, setRetryNonce] = useState(0);
 
   const requestIdRef = useRef(0);
-  const cacheRef = useRef<Map<string, CacheEntry>>(new Map());
 
   const modalTitle = useMemo(() => {
     if (!entity) return '角色详情';
@@ -53,17 +114,6 @@ export function LeaderboardEntityDetailsModal(props: {
 
   useEffect(() => {
     if (!isOpen || !entity) return;
-
-    const key = `${entity.entityType}:${entity.entityId}`;
-    const cached = cacheRef.current.get(key);
-    if (cached) {
-      setDetailsCard(cached.card);
-      setDetailsMetaCardId(cached.metaCardId);
-      setDetailsPendingNotice(cached.pendingNotice);
-      setIsLoading(false);
-      setError(null);
-      return;
-    }
 
     const requestId = (requestIdRef.current += 1);
     const controller = new AbortController();
@@ -76,71 +126,13 @@ export function LeaderboardEntityDetailsModal(props: {
 
     void (async () => {
       try {
-        if (entity.entityType === 'data_card') {
-          const result = await fetchJson<{ success: boolean; card?: Record<string, unknown>; error?: string }>(
-            `/api/public-data-cards?id=${encodeURIComponent(entity.entityId)}`,
-            { signal: controller.signal },
-          );
-
-          if (!result.success || !result.card) {
-            throw new Error(result.error ?? '无法读取数据卡');
-          }
-
-          const card = mapPublicDataCardRowToDetailsCard(result.card, {
-            id: entity.entityId,
-            name: entity.displayName,
-            author:
-              typeof entity.authorName === 'string' && entity.authorName.trim()
-                ? entity.authorName.trim()
-                : '未知',
-          });
-
-          const entry: CacheEntry = {
-            card,
-            metaCardId: undefined,
-            pendingNotice: entity.pendingNotice ?? null,
-          };
-          cacheRef.current.set(key, entry);
-
-          if (controller.signal.aborted || requestId !== requestIdRef.current) return;
-          setDetailsCard(entry.card);
-          setDetailsMetaCardId(entry.metaCardId);
-          setDetailsPendingNotice(entry.pendingNotice);
-          return;
-        }
-
-        const presetMeta = presetByFilename.get(entity.entityId);
-        const response = await fetch(`/presets/${encodeURIComponent(entity.entityId)}`, {
-          signal: controller.signal,
-          headers: { Accept: 'application/json' },
+        const entry = await loadLeaderboardEntityDetails(entity, {
+          fetcher: (input, init) =>
+            fetch(input, {
+              ...init,
+              signal: controller.signal,
+            }),
         });
-        if (!response.ok) {
-          throw new Error(`无法加载预设设定文件（HTTP ${response.status}）`);
-        }
-        const presetData = (await response.json()) as unknown;
-
-        const baseNotice = entity.pendingNotice ?? null;
-        const pendingNotice = baseNotice
-          ? `${baseNotice} · 预设角色不支持标签/指标查询（以排行榜展示为准）`
-          : '预设角色不支持标签/指标查询（以排行榜展示为准）';
-
-        const entry: CacheEntry = {
-          card: {
-            id: `preset:${entity.entityId}`,
-            name: presetMeta?.name ?? entity.displayName,
-            description: presetMeta?.description ?? '系统预设角色',
-            type: 'character',
-            data: JSON.stringify(presetData, null, 2),
-            isPublic: true,
-            author: '官方',
-            usageCount: 0,
-            likeCount: 0,
-            favoriteCount: 0,
-          },
-          metaCardId: null,
-          pendingNotice,
-        };
-        cacheRef.current.set(key, entry);
 
         if (controller.signal.aborted || requestId !== requestIdRef.current) return;
         setDetailsCard(entry.card);

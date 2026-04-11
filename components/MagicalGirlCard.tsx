@@ -1,5 +1,6 @@
 // components/MagicalGirlCard.tsx
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 import { ArenaHistory, ArenaHistoryEntry, CharacterCurrentState } from '@/types/arena';
 import { CurrentStatePanel } from '@/components/CurrentStatePanel';
 import { MarkdownBlock } from '@/components/MarkdownBlock';
@@ -7,6 +8,11 @@ import { capturePngBlob } from '@/lib/client/snapdomCapture';
 import { createBlobUrl, downloadBlob } from '@/lib/client/blobUrl';
 import { GeneratedByUserBadge } from '@/components/shared/GeneratedByUserBadge';
 import { InlineField } from '@/components/shared/InlineField';
+import { CharacterParameterSection } from '@/components/shared/CharacterParameterSection';
+import {
+  buildCharacterParameterView,
+  type CharacterParameterSourceKey,
+} from '@/lib/creator/character-parameter-view';
 import type { CharacterCardPortraitAsset } from '@/types/visual-asset';
 
 interface MagicalGirlCardProps {
@@ -49,6 +55,8 @@ interface MagicalGirlCardProps {
     };
   arena_history?: ArenaHistory;
   current_state?: CharacterCurrentState | null;
+  creationInputs?: unknown;
+  buildState?: unknown;
   };
   gradientStyle: string;
   onSaveImage?: (imageUrl: string) => void;
@@ -164,6 +172,16 @@ const renderAbilityItem = (ability: string | Record<string, unknown>, index: num
   return <li key={`basicAbility-${index}`}>• {renderInlineValue(ability)}</li>;
 };
 
+const waitForNextPaint = async () => {
+  if (typeof window === 'undefined' || typeof window.requestAnimationFrame !== 'function') {
+    return;
+  }
+
+  await new Promise<void>((resolve) => {
+    window.requestAnimationFrame(() => resolve());
+  });
+};
+
 const MagicalGirlCard: React.FC<MagicalGirlCardProps> = ({
   magicalGirl,
   gradientStyle,
@@ -175,11 +193,32 @@ const MagicalGirlCard: React.FC<MagicalGirlCardProps> = ({
   const resultRef = useRef<HTMLDivElement>(null);
   const [isHistoryVisible, setIsHistoryVisible] = useState(false);
   const [isSavingImage, setIsSavingImage] = useState(false);
+  const parameterView = useMemo(
+    () =>
+      buildCharacterParameterView({
+        creationInputs: magicalGirl?.creationInputs,
+        buildState: magicalGirl?.buildState,
+      }),
+    [magicalGirl]
+  );
+  const [parameterSourceKey, setParameterSourceKey] = useState<CharacterParameterSourceKey>(
+    parameterView?.activeSource ?? 'current'
+  );
+  const [isExportingImage, setIsExportingImage] = useState(false);
   const portraitImageUrl = typeof portraitAsset?.imageUrl === 'string' ? portraitAsset.imageUrl.trim() : '';
   const uploadedPortraitNote =
     portraitAsset?.source === 'uploaded'
       ? (typeof portraitAsset.note === 'string' && portraitAsset.note.trim() ? portraitAsset.note.trim() : '用户自行上传')
       : '';
+
+  useEffect(() => {
+    setParameterSourceKey((currentSourceKey) => {
+      if (!parameterView) return 'current';
+      return parameterView.sources.some((source) => source.key === currentSourceKey)
+        ? currentSourceKey
+        : parameterView.activeSource;
+    });
+  }, [parameterView]);
 
   /**
    * 对卡片内容进行截图，并根据 imageSaveMode 选择保存策略。
@@ -195,6 +234,8 @@ const MagicalGirlCard: React.FC<MagicalGirlCardProps> = ({
     const logoPlaceholder = resultRef.current.querySelector('.logo-placeholder') as HTMLElement;
     try {
       setIsSavingImage(true);
+      flushSync(() => setIsExportingImage(true));
+      await waitForNextPaint();
       if (saveButton) saveButton.style.display = 'none';
       if (logoPlaceholder) logoPlaceholder.style.display = 'flex';
 
@@ -229,6 +270,7 @@ const MagicalGirlCard: React.FC<MagicalGirlCardProps> = ({
       alert('生成图片失败，请重试');
       console.error("Image generation failed:", err);
     } finally {
+      flushSync(() => setIsExportingImage(false));
       if (saveButton) saveButton.style.display = 'block';
       if (logoPlaceholder) logoPlaceholder.style.display = 'none';
       setIsSavingImage(false);
@@ -389,6 +431,15 @@ const MagicalGirlCard: React.FC<MagicalGirlCardProps> = ({
           </div>
         </div>
         )}
+
+        {parameterView ? (
+          <CharacterParameterSection
+            view={parameterView}
+            sourceKey={parameterSourceKey}
+            renderMode={isExportingImage ? 'export' : 'interactive'}
+            onChangeSource={setParameterSourceKey}
+          />
+        ) : null}
 
         <CurrentStatePanel state={magicalGirl.current_state} variant="dark" />
 

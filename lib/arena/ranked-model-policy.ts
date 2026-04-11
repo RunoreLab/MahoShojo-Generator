@@ -3,6 +3,7 @@ export const STRICT_RANKED_MODEL_BLACKLIST = new Set<string>(['gemma-3-4b-it', '
 // 严格排位默认优先模型名单（按回退顺序）。
 // 说明：严格排位强调成本与速度稳定性，因此优先使用轻量模型；在模型故障/限流时按顺序回退。
 export const STRICT_RANKED_MODEL_FALLBACKS = [
+  'gemma-4-31b-it',
   'gemma-3-27b-it',
   'gemini-2.5-flash-lite',
   'glm-4.7',

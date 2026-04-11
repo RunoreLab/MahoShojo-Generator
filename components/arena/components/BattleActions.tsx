@@ -83,7 +83,7 @@ const buttonTextMap: Record<string, string> = {
   scenario: '开始演绎情景 (´｡• ᵕ •｡`)',
 };
 
-export function BattleActions() {
+export function BattleActions({ showAdvancedUtilities = true }: { showAdvancedUtilities?: boolean }) {
   const {
     handleGenerate,
     isGenerating,
@@ -250,32 +250,36 @@ export function BattleActions() {
         className="mt-2 text-center text-xs text-amber-700"
       />
 
-      <CollapsibleSection
-        title="高级：叙事历史 / 上下文估算"
-        description="当生成失败或耗时过长时，建议从这里开始排查"
-        defaultOpen={false}
-        storageKey="arena.section.generateAdvanced.open"
-        className="mt-3"
-      >
-        <div className="flex w-full items-center justify-center gap-2">
-          <button
-            type="button"
-            onClick={() => setShowNarrativeModal(true)}
-            className="w-full max-w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm break-words whitespace-normal text-center hover:bg-gray-50 sm:w-auto"
-            disabled={isGenerating}
-            title="查看/编辑叙事历史记录"
+      {showAdvancedUtilities ? (
+        <>
+          <CollapsibleSection
+            title="高级：叙事历史 / 上下文估算"
+            description="当生成失败或耗时过长时，建议从这里开始排查"
+            defaultOpen={false}
+            storageKey="arena.section.generateAdvanced.open"
+            className="mt-3"
           >
-            叙事历史：{narrativeCount} 条{narrativeLastUpdatedAt ? `｜${formatDateTime(narrativeLastUpdatedAt)}` : ''}
-          </button>
-        </div>
+            <div className="flex w-full items-center justify-center gap-2">
+              <button
+                type="button"
+                onClick={() => setShowNarrativeModal(true)}
+                className="w-full max-w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm break-words whitespace-normal text-center hover:bg-gray-50 sm:w-auto"
+                disabled={isGenerating}
+                title="查看/编辑叙事历史记录"
+              >
+                叙事历史：{narrativeCount} 条{narrativeLastUpdatedAt ? `｜${formatDateTime(narrativeLastUpdatedAt)}` : ''}
+              </button>
+            </div>
 
-        <TokenIndicator
-          text={estimatePayloadText}
-          warningText="⚠️ 预计上下文较长，可能更易超时/失败。可尝试关闭“叙事历史读取”或“历战记录读取”，或减少历史条目/参战角色。"
-        />
-      </CollapsibleSection>
+            <TokenIndicator
+              text={estimatePayloadText}
+              warningText="⚠️ 预计上下文较长，可能更易超时/失败。可尝试关闭“叙事历史读取”或“历战记录读取”，或减少历史条目/参战角色。"
+            />
+          </CollapsibleSection>
 
-      <NarrativeHistoryModal isOpen={showNarrativeModal} onClose={() => setShowNarrativeModal(false)} />
+          <NarrativeHistoryModal isOpen={showNarrativeModal} onClose={() => setShowNarrativeModal(false)} />
+        </>
+      ) : null}
     </>
   );
 }

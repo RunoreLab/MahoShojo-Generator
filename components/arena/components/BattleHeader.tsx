@@ -26,6 +26,12 @@ export function BattleHeader() {
       >
         <ol className="list-decimal list-inside space-y-1">
           <li>
+            本页是完整版竞技场，如需更简洁或怀旧的体验，可前往
+            <Link href="/battle" className="footer-link">
+            【简洁版竞技场】
+            </Link>。
+          </li>
+          <li>
             前往
             <Link href="/details" className="footer-link">
               【奇妙妖精大调查】
@@ -44,7 +50,7 @@ export function BattleHeader() {
           className="mt-3 flex flex-wrap gap-3 text-xs"
           items={[
             { slug: 'arena', text: '百科：竞技场' },
-            { slug: 'guidance', text: '引导/裁判事件/读写状态' },
+            { slug: 'guidance', text: '引导/判定事件/读写状态' },
           ]}
           linkClassName="text-blue-700 hover:underline"
         />

@@ -234,6 +234,14 @@ export const encyclopediaEntries: EncyclopediaEntry[] = [
     keywords: ['/name', '/details', '/canshou', '角色生成'],
   },
   {
+    slug: 'creator',
+    title: '创作工房（/creator）',
+    summary: '组合问卷、自由补充说明与规则车卡的创作工作台，以及角色参数如何进入后续战报。',
+    markdownPath: '/encyclopedia/creator.md',
+    categoryId: 'guide',
+    keywords: ['/creator', '创作工房', '规则车卡', '车卡规则', '角色参数', 'build rule'],
+  },
+  {
     slug: 'questionnaire',
     title: '问卷系统与自定义问卷（编辑器 / 云端问卷库）',
     summary: '自定义问卷、条件显示/跳题、云端问卷库与字数上限等新功能说明。',
@@ -283,11 +291,11 @@ export const encyclopediaEntries: EncyclopediaEntry[] = [
   },
   {
     slug: 'guidance',
-    title: '引导 / 裁判事件 / 读写状态',
-    summary: 'userGuidance、裁判事件、读写历战/状态栏对战报与计分的影响。',
+    title: '引导 / 判定事件 / 读写状态',
+    summary: 'userGuidance、判定事件、读写历战/状态栏对战报与计分的影响。',
     markdownPath: '/encyclopedia/guidance.md',
     categoryId: 'gameplay',
-    keywords: ['userGuidance', '裁判', '历战记录', '状态栏'],
+    keywords: ['userGuidance', '判定', '历战记录', '状态栏'],
   },
   {
     slug: 'ranking',

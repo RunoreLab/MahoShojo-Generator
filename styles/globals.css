@@ -67,6 +67,14 @@
   --app-border-strong: rgba(229, 231, 235, 0.8);
   --app-input-bg: rgba(255, 255, 255, 0.85);
   --app-input-border: #e0e0e0;
+  --creator-panel-bg: rgba(255, 255, 255, 0.94);
+  --creator-panel-border: rgba(203, 213, 225, 0.9);
+  --creator-subpanel-bg: rgba(248, 250, 252, 0.92);
+  --creator-subpanel-border: rgba(203, 213, 225, 0.92);
+  --creator-subpanel-emphasis-bg: rgba(255, 255, 255, 0.97);
+  --creator-subpanel-muted-bg: rgba(241, 245, 249, 0.92);
+  --creator-input-bg: rgba(255, 255, 255, 0.98);
+  --creator-input-border: rgba(203, 213, 225, 0.95);
   --app-card-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
   --app-accent: #ff6b6b;
   --app-accent-strong: #ee5a6f;
@@ -76,6 +84,8 @@
   --app-result-card-bg: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   --app-footer-link: #ff6b6b;
   --app-footer-link-hover: #ee5a6f;
+  --global-topbar-height: 56px;
+  --global-topbar-z-index: 40;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -101,6 +111,14 @@
     --app-border-strong: rgba(148, 163, 184, 0.45);
     --app-input-bg: rgba(15, 23, 42, 0.6);
     --app-input-border: rgba(148, 163, 184, 0.35);
+    --creator-panel-bg: rgba(15, 23, 42, 0.92);
+    --creator-panel-border: rgba(148, 163, 184, 0.45);
+    --creator-subpanel-bg: rgba(30, 41, 59, 0.86);
+    --creator-subpanel-border: rgba(148, 163, 184, 0.32);
+    --creator-subpanel-emphasis-bg: rgba(51, 65, 85, 0.86);
+    --creator-subpanel-muted-bg: rgba(30, 41, 59, 0.72);
+    --creator-input-bg: rgba(15, 23, 42, 0.7);
+    --creator-input-border: rgba(148, 163, 184, 0.4);
     --app-card-shadow: 0 20px 40px rgba(0, 0, 0, 0.45);
     --app-accent: #fb7185;
     --app-accent-strong: #f43f5e;
@@ -139,6 +157,14 @@
   --app-border-strong: rgba(148, 163, 184, 0.45);
   --app-input-bg: rgba(15, 23, 42, 0.6);
   --app-input-border: rgba(148, 163, 184, 0.35);
+  --creator-panel-bg: rgba(15, 23, 42, 0.92);
+  --creator-panel-border: rgba(148, 163, 184, 0.45);
+  --creator-subpanel-bg: rgba(30, 41, 59, 0.86);
+  --creator-subpanel-border: rgba(148, 163, 184, 0.32);
+  --creator-subpanel-emphasis-bg: rgba(51, 65, 85, 0.86);
+  --creator-subpanel-muted-bg: rgba(30, 41, 59, 0.72);
+  --creator-input-bg: rgba(15, 23, 42, 0.7);
+  --creator-input-border: rgba(148, 163, 184, 0.4);
   --app-card-shadow: 0 20px 40px rgba(0, 0, 0, 0.45);
   --app-accent: #fb7185;
   --app-accent-strong: #f43f5e;
@@ -226,6 +252,29 @@ body {
   margin-top: 1.5rem;
 }
 
+.creator-workbench-shell .container {
+  max-width: none;
+  padding: 0;
+}
+
+.creator-workbench-shell .card {
+  max-width: none;
+  margin-top: 1rem;
+}
+
+.creator-workbench-shell .result-card,
+.creator-workbench-shell .title-container {
+  max-width: none;
+}
+
+@media (min-width: 1024px) {
+  .creator-workbench-shell .creator-workbench-sidebar {
+    position: sticky;
+    top: 24px;
+    align-self: start;
+  }
+}
+
 .title {
   text-align: center;
   font-size: 2rem;
@@ -310,6 +359,7 @@ body.announcement-visible {
     left: 0;
     right: 0;
     bottom: 0;
+    pointer-events: none;
     background-image: radial-gradient(circle at 20% 50%, rgba(255, 255, 255, 0.2) 2px, transparent 2px), radial-gradient(circle at 80% 20%, rgba(255, 255, 255, 0.15) 1px, transparent 1px), radial-gradient(circle at 40% 80%, rgba(255, 255, 255, 0.1) 1px, transparent 1px);
     background-size: 50px 50px, 30px 30px, 40px 40px;
     animation: sparkle 6s ease-in-out infinite;

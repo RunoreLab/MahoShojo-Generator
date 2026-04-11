@@ -28,6 +28,7 @@ import {
   QuestionnaireQuestionPanel,
 } from '@/components/questionnaire/QuestionnaireQuestionPanel';
 import { QuestionnaireAnswerExportPanel } from '@/components/questionnaire/QuestionnaireAnswerExportPanel';
+import { CreatorEntryLink } from '@/components/shared/CreatorEntryLink';
 import { readTextAndReasoningStreamFromResponse } from '@/lib/stream/read-text-and-reasoning-stream';
 import { buildGeneralCharacterCardFromMarkdown } from '@/lib/stream/markdown-card';
 import { readJsonOrTextFromResponse, resolveApiErrorMessage } from '@/lib/client/apiError';
@@ -1633,6 +1634,12 @@ const CanshouPage: React.FC = () => {
                   >
                     {submitting ? '生成中...' : '快速随机生成'}
                   </button>
+                </div>
+                <div className="mt-4 text-center">
+                  <CreatorEntryLink
+                    className="text-sm text-slate-300"
+                    linkClassName="font-semibold text-emerald-300 hover:underline"
+                  />
                 </div>
                 <div className="mt-8">
                   <Link href="/" className="footer-link">返回首页</Link>

@@ -13,6 +13,7 @@ import Footer from '../components/Footer';
 import { GeneratedByUserBadge } from '@/components/shared/GeneratedByUserBadge';
 import { ErrorMessage } from '@/components/ErrorMessage';
 import { EncyclopediaLinks } from '@/components/encyclopedia/EncyclopediaLinks';
+import { CreatorEntryLink } from '@/components/shared/CreatorEntryLink';
 import { readJsonOrTextFromResponse, resolveApiErrorMessage } from '@/lib/client/apiError';
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
 import { ThemeImage } from '@/components/shared/ThemeImage';
@@ -391,6 +392,9 @@ export default function Name() {
                   ? '少女创造中，请稍后捏 (≖ᴗ≖)✧✨'
                   : 'へんしん(ﾉﾟ▽ﾟ)ﾉ! '}
             </button>
+            <div className="mt-4 text-center">
+              <CreatorEntryLink />
+            </div>
 
             {/* 返回首页链接 */}
             <div className="text-center" style={{ marginTop: '2rem' }}>

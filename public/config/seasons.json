@@ -2,14 +2,26 @@
   "schemaVersion": 1,
   "seasons": [
     {
+      "id": "S2",
+      "name": "闪耀赛季",
+      "startsAt": "2026-04-01",
+      "status": "current",
+      "description": "闪耀赛季（S2）开启。本赛季严格排位采用「羁绊」故事模式，不附加其他赛季特殊规则。",
+      "specialRules": {
+        "mode": "kizuna"
+      }
+    },
+    {
       "id": "S1",
       "name": "启航赛季",
       "startsAt": "2026-02-05",
-      "status": "current",
+      "endsAt": "2026-04-01",
+      "status": "history",
       "description": "启航赛季（S1）开启！本赛季将继续打磨排位体验与结算稳定性。本赛季特殊规则会启用故事引导，欢迎反馈与建议。",
       "specialRules": {
         "storyGuidance": "双方全力以赴禁止平局"
-      }
+      },
+      "archivedAt": "2026-04-01T00:34:32.127Z"
     },
     {
       "id": "S0",

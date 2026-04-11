@@ -1,6 +1,7 @@
 import { z } from 'zod/v3';
 import { CurrentStateSchema } from './current-state';
 import { AdjudicatorEventSchema } from './adjudicator';
+import { BuildStateSchema, CreationInputsSchema } from './creator-metadata';
 
 const keyList = [
   'codename',
@@ -15,7 +16,9 @@ const keyList = [
   'arena_history',
   'current_state',
   'isPreset',
-  'adjudicationEvents'
+  'adjudicationEvents',
+  'creationInputs',
+  'buildState',
 ];
 
 // 魔法少女数据卡的 Zod Schema
@@ -83,6 +86,8 @@ export const MagicalGirlSchema = z.object({
   signature: z.string().optional(),
   isPreset: z.boolean().optional(),
   current_state: CurrentStateSchema.optional(),
+  creationInputs: CreationInputsSchema.optional(),
+  buildState: BuildStateSchema.optional(),
   arena_history: z.object({
     attributes: z.object({
       world_line_id: z.string().optional(),

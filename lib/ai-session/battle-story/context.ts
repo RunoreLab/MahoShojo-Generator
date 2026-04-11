@@ -6,6 +6,7 @@ import type {
   BattleStoryPromptWindowItem,
 } from '@/lib/ai-session/battle-story/types';
 import { resolveBattleStoryPromptChapterPlanState } from '@/lib/ai-session/battle-story/plan';
+import { sanitizeStoryPromptValue } from '@/lib/arena/story-prompt-data';
 
 const DEFAULT_MAX_RECENT_CHAPTERS = 2;
 const DEFAULT_MAX_FULL_CHAPTER_CHARS = 6000;
@@ -30,10 +31,6 @@ const safeJsonBlock = (value: unknown): string => {
   } catch {
     return '"[unserializable]"';
   }
-};
-
-const isRecord = (value: unknown): value is Record<string, unknown> => {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 };
 
 const resolveArenaHistoryReadLimit = (settings: BattleStorySessionSettings | null | undefined): number | null => {
@@ -61,28 +58,45 @@ const trimArenaHistoryForPrompt = (
   };
 };
 
+const isRecord = (value: unknown): value is Record<string, unknown> => {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+};
+
+const applyArenaHistoryLimitForPrompt = (
+  value: unknown,
+  settings: BattleStorySessionSettings | null | undefined
+): unknown => {
+  if (Array.isArray(value)) {
+    return value.map((item) => applyArenaHistoryLimitForPrompt(item, settings));
+  }
+
+  if (!isRecord(value)) return value;
+
+  const clone: Record<string, unknown> = {};
+  for (const [key, rawValue] of Object.entries(value)) {
+    if (key === 'arena_history') {
+      clone[key] = trimArenaHistoryForPrompt(rawValue, settings);
+      continue;
+    }
+    clone[key] = applyArenaHistoryLimitForPrompt(rawValue, settings);
+  }
+
+  return clone;
+};
+
 const sanitizeCombatantPayloadForPrompt = (
   value: unknown,
   settings: BattleStorySessionSettings | null | undefined
 ): unknown => {
-  if (!isRecord(value)) return value;
+  const sanitized = sanitizeStoryPromptValue(value, {
+    readArenaHistory: settings?.readArenaHistory === true,
+    readCurrentState: settings?.readCurrentState === true,
+  });
 
-  const clone: Record<string, unknown> = { ...value };
-  if ('data' in clone) {
-    clone.data = sanitizeCombatantPayloadForPrompt(clone.data, settings);
-  }
-
-  if (!settings?.readArenaHistory) {
-    delete clone.arena_history;
-  } else if ('arena_history' in clone) {
-    clone.arena_history = trimArenaHistoryForPrompt(clone.arena_history, settings);
-  }
-
-  if (!settings?.readCurrentState) {
-    delete clone.current_state;
-  }
-
-  return clone;
+  if (!isRecord(sanitized)) return sanitized;
+  return settings?.readArenaHistory === true
+    ? applyArenaHistoryLimitForPrompt(sanitized, settings)
+    : sanitized;
 };
 
 const buildDigestText = (chapter: BattleStoryPromptChapterInput): string => {

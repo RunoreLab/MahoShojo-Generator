@@ -6,6 +6,49 @@ import {
 } from '@/lib/data-card-converter';
 import { inferTemplateId, validateDataCard } from '@/lib/schemas';
 
+const creatorMetadata = {
+  creationInputs: {
+    template: 'magical-girl',
+    freeformBrief: '保留冷调气质',
+    questionnaires: [],
+    questionnaireAnswers: [],
+    buildRules: [
+      {
+        ruleId: 'arena-trpg-lite',
+        version: '1.0.0',
+        blockResults: {
+          powerLevel: 'seed',
+        },
+        derived: {
+          HP: 3,
+        },
+        validationSummary: {
+          valid: true,
+        },
+      },
+    ],
+    primaryRuleId: 'arena-trpg-lite',
+  },
+  buildState: {
+    primaryRuleId: 'arena-trpg-lite',
+    rules: [
+      {
+        ruleId: 'arena-trpg-lite',
+        version: '1.0.0',
+        blockResults: {
+          powerLevel: 'seed',
+        },
+        derived: {
+          HP: 3,
+        },
+        validationSummary: {
+          valid: true,
+        },
+      },
+    ],
+  },
+};
+
 describe('data-card-converter', () => {
   it('creates a blank general character card with default content', () => {
     const blank = createBlankDataCard('general');
@@ -129,6 +172,43 @@ describe('data-card-converter', () => {
     expect(inferTemplate(generalScenario)).toBe('general-scenario');
   });
 
+  it('validateDataCard accepts creator metadata on structured cards', () => {
+    const cards = [
+      {
+        expectedType: 'character',
+        card: {
+          codename: '测试魔法少女',
+          templateId: '魔法少女/心之花/魔法少女（问卷生成）',
+          ...creatorMetadata,
+        },
+      },
+      {
+        expectedType: 'canshou',
+        card: {
+          name: '测试残兽',
+          templateId: '魔法少女/心之花/残兽（问卷生成）',
+          ...creatorMetadata,
+        },
+      },
+      {
+        expectedType: 'scenario',
+        card: {
+          title: '测试情景',
+          elements: {
+            scene: {},
+          },
+          ...creatorMetadata,
+        },
+      },
+    ] as const;
+
+    cards.forEach(({ card, expectedType }) => {
+      const result = validateDataCard(card);
+      expect(result.success).toBe(true);
+      expect(result.type).toBe(expectedType);
+    });
+  });
+
   it('validateDataCard supports legacy general scenario name field', () => {
     const legacyGeneralScenario = {
       templateId: '通用情景',
@@ -235,6 +315,29 @@ describe('data-card-converter', () => {
       total_chapters: 5,
       plan_mode: 'fixed',
     });
+  });
+
+  it('preserves creator metadata without leaking it into converted content', () => {
+    const source = {
+      codename: '元数据测试者',
+      analysis: {
+        predictionBasis: '既有分析',
+      },
+      templateId: '魔法少女/心之花/魔法少女（问卷生成）',
+      ...creatorMetadata,
+    };
+
+    const { data: general } = convertDataCard(source, 'general', 'magical-girl');
+    expect((general as any).creationInputs).toEqual(creatorMetadata.creationInputs);
+    expect((general as any).buildState).toEqual(creatorMetadata.buildState);
+    expect(general.content).not.toContain('creationInputs');
+    expect(general.content).not.toContain('buildState');
+
+    const { data: magical } = convertDataCard(general, 'magical-girl', 'general');
+    expect((magical as any).creationInputs).toEqual(creatorMetadata.creationInputs);
+    expect((magical as any).buildState).toEqual(creatorMetadata.buildState);
+    expect(magical.analysis?.predictionBasis ?? '').not.toContain('creationInputs');
+    expect(magical.analysis?.predictionBasis ?? '').not.toContain('buildState');
   });
 
   it('drops _battle_story when converting scenario into character-like templates', () => {
