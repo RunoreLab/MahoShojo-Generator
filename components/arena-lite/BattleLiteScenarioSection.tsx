@@ -85,12 +85,12 @@ export function BattleLiteScenarioSection({
 
   return (
     <div className="space-y-4">
-      <div className="rounded-2xl border border-slate-200/80 bg-white/80 px-4 py-4 shadow-sm">
+      <div className="battle-lite-surface-card rounded-2xl px-4 py-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <div className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500">当前主情景</div>
-            <div className="mt-2 text-sm font-semibold text-slate-800">{scenarioSummary}</div>
-            {scenario.isNative ? <div className="mt-1 text-xs text-emerald-700">该情景已识别为原生格式。</div> : null}
+            <div className="battle-lite-subtle-text text-[11px] font-semibold uppercase tracking-[0.24em]">当前主情景</div>
+            <div className="battle-lite-strong-text mt-2 text-sm font-semibold">{scenarioSummary}</div>
+            {scenario.isNative ? <div className="battle-lite-link mt-1 text-xs">该情景已识别为原生格式。</div> : null}
           </div>
           <button
             type="button"
@@ -99,7 +99,7 @@ export function BattleLiteScenarioSection({
               setError(null);
             }}
             disabled={isGenerating || !scenario.content}
-            className="rounded-full border border-rose-200 px-3 py-1.5 text-xs font-semibold text-rose-700 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50"
+            className="battle-lite-danger-button rounded-full px-3 py-1.5 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-50"
           >
             清空情景
           </button>
@@ -132,7 +132,7 @@ export function BattleLiteScenarioSection({
             无法加载预设情景：{(scenarioPresetQuery.error as Error).message}
           </div>
         ) : scenarioPresetQuery.isLoading || !scenarioPresetQuery.data ? (
-          <div className="text-sm text-gray-500">正在加载预设情景...</div>
+          <div className="battle-lite-subtle-text text-sm">正在加载预设情景...</div>
         ) : (
           <ScenarioPresetGridPicker
             title="选择预设情景"

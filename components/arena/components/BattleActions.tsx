@@ -263,7 +263,7 @@ export function BattleActions({ showAdvancedUtilities = true }: { showAdvancedUt
               <button
                 type="button"
                 onClick={() => setShowNarrativeModal(true)}
-                className="w-full max-w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm break-words whitespace-normal text-center hover:bg-gray-50 sm:w-auto"
+                className="battle-lite-tonal-button w-full max-w-full rounded-lg px-3 py-2 text-sm break-words whitespace-normal text-center sm:w-auto"
                 disabled={isGenerating}
                 title="查看/编辑叙事历史记录"
               >

@@ -53,8 +53,8 @@ export function DatabaseSelector({
         </button>
       </div>
       {!isAuthenticated && (
-        <div className="text-xs text-gray-500 flex items-center px-2 mt-2">
-          <Link href="/character-manager" className="text-pink-600 hover:text-pink-800 underline">
+        <div className="battle-lite-subtle-text mt-2 flex items-center px-2 text-xs">
+          <Link href="/character-manager" className="battle-lite-link underline">
             登录后可访问私有数据卡
           </Link>
         </div>

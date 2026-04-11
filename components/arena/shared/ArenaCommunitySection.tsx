@@ -10,9 +10,9 @@ export function ArenaCommunitySection({ className }: ArenaCommunitySectionProps)
   return (
     <div className={className}>
       <div className="text-center">
-        <div className="text-sm font-semibold">
+        <div className="battle-lite-muted-text text-sm font-semibold">
           点击加入QQ群（任选其一）：
-          <div className="text-sm text-blue-600 font-semibold">
+          <div className="battle-lite-link text-sm font-semibold">
             {qqGroups.map((group, index) => (
               <span key={group.groupCode}>
                 {index > 0 ? ' / ' : ' '}
@@ -35,7 +35,7 @@ export function ArenaCommunitySection({ className }: ArenaCommunitySectionProps)
           href="https://pd.qq.com/s/brisxifbl"
           target="_blank"
           rel="noopener noreferrer"
-          className="text-sm text-blue-600 hover:underline font-semibold"
+          className="battle-lite-link text-sm font-semibold"
         >
           点击加入腾讯频道
         </a>
