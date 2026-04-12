@@ -22,6 +22,11 @@ import { readJsonOrTextFromResponse, resolveApiErrorMessage } from '@/lib/client
 import { AI_META_REQUEST_HEADER, AI_META_REQUEST_VALUE, readJsonWithAiMeta } from '@/lib/client/read-json-with-ai-meta';
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
 import { authStorage } from '@/lib/auth';
+import {
+  clearScenarioPageDraft,
+  readScenarioPageDraft,
+  writeScenarioPageDraft,
+} from '@/lib/scenario-page-draft';
 import type { AIReasoningEnvelope } from '@/types/ai-reasoning';
 
 // 定义引导性问题
@@ -32,6 +37,9 @@ const scenarioQuestions = [
   { id: 'atmosphere', label: '希望故事的整体氛围是怎样的？', placeholder: '例如：轻松愉快、紧张悬疑、悲伤感人、热血沸腾...' },
   { id: 'development', label: '故事可能会有哪些有趣的发展方向？', placeholder: '例如：决斗中途有第三方介入；谜题的答案指向一个惊人的秘密；采访者突然问了一个尖锐的问题...' },
 ];
+
+const createInitialScenarioAnswers = (): Record<string, string> =>
+  scenarioQuestions.reduce((acc, q) => ({ ...acc, [q.label]: '' }), {});
 
 // 定义可供用户选择留空的字段列表
 // 这里的 'value' 必须精确对应 Zod Schema 中的路径
@@ -52,18 +60,19 @@ type RateLimitError = Error & {
 
 const ScenarioPage: React.FC = () => {
   const router = useRouter();
-  const [answers, setAnswers] = useState<Record<string, string>>(
-    scenarioQuestions.reduce((acc, q) => ({ ...acc, [q.label]: '' }), {})
-  );
+  const [answers, setAnswers] = useState<Record<string, string>>(createInitialScenarioAnswers);
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [resultData, setResultData] = useState<any | null>(null);
   const [generalScenarioDraft, setGeneralScenarioDraft] = useState<any | null>(null);
+  const [generalScenarioDraftEdited, setGeneralScenarioDraftEdited] = useState(false);
   const [streamingReasoning, setStreamingReasoning] = useState<AIReasoningEnvelope | null>(null);
   const [nonStreamReasoning, setNonStreamReasoning] = useState<AIReasoningEnvelope | null>(null);
   const [generationMode, setGenerationMode] = useState<GenerationMode>('non-stream');
   const [scenarioTitleHint, setScenarioTitleHint] = useState('');
   const [userProviderConfig, setUserProviderConfig] = useState<UserAIProviderConfig | null>(null);
+  const [autoSaveTimestamp, setAutoSaveTimestamp] = useState<number | null>(null);
+  const [draftRestoreReady, setDraftRestoreReady] = useState(false);
 
   // 根据是否使用自定义 Key 动态调整冷却时间：官方 60s，自定义 3s
   const isUserCustomKey = userProviderConfig?.providerId !== 'system' && !!userProviderConfig?.apiKey?.trim();
@@ -120,6 +129,25 @@ const ScenarioPage: React.FC = () => {
   }, []);
 
   useEffect(() => {
+    const restored = readScenarioPageDraft();
+    if (!restored) {
+      setDraftRestoreReady(true);
+      return;
+    }
+
+    setAnswers({ ...createInitialScenarioAnswers(), ...restored.payload.answers });
+    setScenarioTitleHint(restored.payload.scenarioTitleHint);
+    setFieldsToKeepEmpty(restored.payload.fieldsToKeepEmpty);
+    setIsAdvancedVisible(restored.payload.isAdvancedVisible);
+    setSelectedLanguage(restored.payload.selectedLanguage);
+    setGenerationMode(restored.payload.generationMode);
+    setGeneralScenarioDraft(restored.payload.generalScenarioDraft);
+    setGeneralScenarioDraftEdited(restored.payload.generalScenarioDraftEdited);
+    setAutoSaveTimestamp(restored.updatedAt);
+    setDraftRestoreReady(true);
+  }, []);
+
+  useEffect(() => {
     if (typeof window === 'undefined') return;
     try {
       const payload = {
@@ -135,9 +163,62 @@ const ScenarioPage: React.FC = () => {
     }
   }, [generationMode, scenarioTitleHint, selectedLanguage, isAdvancedVisible, fieldsToKeepEmpty]);
 
+  useEffect(() => {
+    if (!draftRestoreReady) return;
+
+    const stored = writeScenarioPageDraft({
+      answers,
+      scenarioTitleHint,
+      fieldsToKeepEmpty,
+      isAdvancedVisible,
+      selectedLanguage,
+      generationMode,
+      generalScenarioDraft,
+      generalScenarioDraftEdited,
+    });
+
+    setAutoSaveTimestamp(stored?.updatedAt ?? null);
+  }, [
+    answers,
+    draftRestoreReady,
+    fieldsToKeepEmpty,
+    generalScenarioDraft,
+    generalScenarioDraftEdited,
+    generationMode,
+    isAdvancedVisible,
+    scenarioTitleHint,
+    selectedLanguage,
+  ]);
+
   const handleAnswerChange = (id: string, value: string) => {
     setAnswers(prev => ({ ...prev, [id]: value }));
   };
+
+  const handleClearScenarioDraft = useCallback(() => {
+    if (typeof window !== 'undefined' && !window.confirm('确定要清空当前页面的本地草稿吗？')) {
+      return;
+    }
+
+    clearScenarioPageDraft();
+    if (typeof window !== 'undefined') {
+      try {
+        window.localStorage.removeItem(SCENARIO_PREFERENCE_KEY);
+      } catch {
+        // localStorage 可能不可用，忽略
+      }
+    }
+
+    setAnswers(createInitialScenarioAnswers());
+    setScenarioTitleHint('');
+    setFieldsToKeepEmpty([]);
+    setIsAdvancedVisible(false);
+    setSelectedLanguage('zh-CN');
+    setGenerationMode('non-stream');
+    setGeneralScenarioDraft(null);
+    setGeneralScenarioDraftEdited(false);
+    setAutoSaveTimestamp(null);
+    setError(null);
+  }, []);
 
   const verifyOrigin = useCallback(async (data: any): Promise<boolean> => {
     try {
@@ -204,6 +285,7 @@ const ScenarioPage: React.FC = () => {
     let nextCooldownMs = scenarioCooldownMs;
     let shouldStartCooldown = false;
     if (generationMode === 'stream') {
+      setGeneralScenarioDraftEdited(false);
       const blank = createBlankDataCard('general-scenario');
       setGeneralScenarioDraft({
         ...blank,
@@ -368,6 +450,7 @@ const ScenarioPage: React.FC = () => {
   const handleCreateBlankGeneralScenario = () => {
     const blank = createBlankDataCard('general-scenario');
     setGeneralScenarioDraft(blank);
+    setGeneralScenarioDraftEdited(true);
   };
 
   const handleConvertToGeneralScenario = useCallback(async () => {
@@ -388,6 +471,7 @@ const ScenarioPage: React.FC = () => {
       }
 
       setGeneralScenarioDraft(finalConverted);
+      setGeneralScenarioDraftEdited(true);
     } catch (err) {
       const message = err instanceof Error ? err.message : '转换失败';
       setError(`✨ 转换失败！${message}`);
@@ -417,6 +501,21 @@ const ScenarioPage: React.FC = () => {
               </div>
 
               <div className="space-y-6">
+                <div className="flex flex-col gap-2 rounded-lg border border-amber-100 bg-amber-50 px-3 py-2 text-xs text-amber-900 sm:flex-row sm:items-center sm:justify-between">
+                  <span>
+                    {autoSaveTimestamp
+                      ? `已自动保存于 ${new Date(autoSaveTimestamp).toLocaleTimeString()}`
+                      : '当前输入会自动保存到浏览器，本页刷新后可恢复。'}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleClearScenarioDraft}
+                    className="text-left font-semibold text-amber-800 hover:text-amber-950 sm:text-right"
+                  >
+                    清空本地草稿
+                  </button>
+                </div>
+
                 <div className="input-group">
                   <label htmlFor="scenario-title-hint" className="input-label">情景标题（可选）</label>
                   <input
@@ -596,7 +695,10 @@ const ScenarioPage: React.FC = () => {
                       <input
                         type="text"
                         value={generalScenarioDraft.title || ''}
-                        onChange={(e) => setGeneralScenarioDraft((prev: any) => ({ ...prev, title: e.target.value }))}
+                        onChange={(e) => {
+                          setGeneralScenarioDraftEdited(true);
+                          setGeneralScenarioDraft((prev: any) => ({ ...prev, title: e.target.value }));
+                        }}
                         className="input-field"
                         placeholder="请输入通用情景名称"
                       />
@@ -606,7 +708,10 @@ const ScenarioPage: React.FC = () => {
                       <label className="input-label">情景内容（Markdown）</label>
                       <textarea
                         value={generalScenarioDraft.content || ''}
-                        onChange={(e) => setGeneralScenarioDraft((prev: any) => ({ ...prev, content: e.target.value }))}
+                        onChange={(e) => {
+                          setGeneralScenarioDraftEdited(true);
+                          setGeneralScenarioDraft((prev: any) => ({ ...prev, content: e.target.value }));
+                        }}
                         className="input-field resize-y"
                         rows={12}
                         placeholder="请在此处编写情景设定，建议使用 Markdown 小标题/列表。"

@@ -46,6 +46,11 @@ import {
     type DataCardTemplate,
     type InferableTemplate
 	} from '@/lib/data-card-converter';
+import {
+    clearCharacterManagerPageDraft,
+    readCharacterManagerPageDraft,
+    writeCharacterManagerPageDraft,
+} from '@/lib/character-manager-page-draft';
 import type { CharacterCardPortraitAsset } from '@/types/visual-asset';
 
 
@@ -324,6 +329,8 @@ const CharacterManagerPage: React.FC = () => {
     const [copiedStatus, setCopiedStatus] = useState(false);
     const [validationResult, setValidationResult] = useState<ValidationResult | null>(null);
     const [selectedTemplate, setSelectedTemplate] = useState<InferableTemplate>('unknown');
+    const [autoSaveTimestamp, setAutoSaveTimestamp] = useState<number | null>(null);
+    const [draftRestoreReady, setDraftRestoreReady] = useState(false);
     // 【新增】图片保存模态框的状态
     const [showImageModal, setShowImageModal] = useState(false);
     const [savedImageUrl, setSavedImageUrl] = useState<string | null>(null);
@@ -896,6 +903,66 @@ const CharacterManagerPage: React.FC = () => {
     const [isTachieVisible, setIsTachieVisible] = useState(false);
     const [tachiePrompt, setTachiePrompt] = useState('');
     const [characterPortraitAsset, setCharacterPortraitAsset] = useState<CharacterCardPortraitAsset | null>(null);
+
+    useEffect(() => {
+        const restored = readCharacterManagerPageDraft();
+        if (!restored) {
+            setDraftRestoreReady(true);
+            return;
+        }
+
+        const mode = restored.payload.characterData && restored.payload.originalData ? 'editor' : 'paste';
+        setPastedJson(restored.payload.pastedJson);
+        setCharacterData(restored.payload.characterData);
+        setOriginalData(restored.payload.originalData);
+        setIsNative(restored.payload.isNative);
+        setHasLostNativeness(false);
+        setSelectedTemplate(restored.payload.selectedTemplate);
+        setValidationResult(restored.payload.characterData ? validateDataCard(restored.payload.characterData) : null);
+        setIsPasteAreaVisible(mode === 'paste' && restored.payload.pastedJson.trim().length > 0);
+        setAutoSaveTimestamp(restored.updatedAt);
+        setMessage({
+            type: 'info',
+            text: `已恢复本地草稿（${new Date(restored.updatedAt).toLocaleTimeString()}）`,
+        });
+        setDraftRestoreReady(true);
+    }, []);
+
+    useEffect(() => {
+        if (!draftRestoreReady) return;
+
+        const stored = writeCharacterManagerPageDraft({
+            pastedJson,
+            characterData,
+            originalData,
+            isNative,
+            selectedTemplate,
+        });
+
+        setAutoSaveTimestamp(stored?.updatedAt ?? null);
+    }, [pastedJson, characterData, originalData, isNative, selectedTemplate, draftRestoreReady]);
+
+    const handleLoadOtherData = useCallback(() => {
+        clearCharacterManagerPageDraft();
+        setCharacterData(null);
+        setOriginalData(null);
+        setPastedJson('');
+        setCharacterPortraitAsset(null);
+        setIsNative(false);
+        setHasLostNativeness(false);
+        setSelectedTemplate('unknown');
+        setValidationResult(null);
+        setAutoSaveTimestamp(null);
+        setIsPasteAreaVisible(false);
+        setMessage(null);
+    }, []);
+
+    const handleClearCharacterManagerDraft = useCallback(() => {
+        if (typeof window !== 'undefined' && !window.confirm('确定要清空当前页面的本地草稿吗？')) {
+            return;
+        }
+        handleLoadOtherData();
+    }, [handleLoadOtherData]);
 
     // [SRS 3.3.3] 动态生成立绘提示词
     useEffect(() => {
@@ -2002,6 +2069,21 @@ const CharacterManagerPage: React.FC = () => {
                             </p>
                         </div>
 
+                        <div className="mb-6 flex flex-col gap-2 rounded-lg border border-amber-100 bg-amber-50 px-3 py-2 text-xs text-amber-900 sm:flex-row sm:items-center sm:justify-between">
+                            <span>
+                                {autoSaveTimestamp
+                                    ? `已自动保存于 ${new Date(autoSaveTimestamp).toLocaleTimeString()}`
+                                    : '当前输入会自动保存到浏览器，刷新后仍可恢复。'}
+                            </span>
+                            <button
+                                type="button"
+                                onClick={handleClearCharacterManagerDraft}
+                                className="text-left font-semibold text-amber-800 hover:text-amber-950 sm:text-right"
+                            >
+                                清空本地草稿
+                            </button>
+                        </div>
+
                         {!characterData ? (
                             <>
                                 <div className="input-group">
@@ -2211,7 +2293,7 @@ const CharacterManagerPage: React.FC = () => {
                                     <button onClick={() => handleSaveChanges('copy')} disabled={message?.type === 'error' || isLoading} className="generate-button w-full" style={{ backgroundColor: '#3b82f6', backgroundImage: 'linear-gradient(to right, #3b82f6, #2563eb)' }}>
                                         {isLoading ? '处理中...' : copiedStatus ? '已复制！' : '复制到剪贴板'}
                                     </button>
-                                    <button onClick={() => { setCharacterData(null); setCharacterPortraitAsset(null); setPastedJson('') }} className="footer-link mt-4 w-full text-center">
+                                    <button onClick={handleLoadOtherData} className="footer-link mt-4 w-full text-center">
                                         加载其他数据
                                     </button>
                                 </div>
