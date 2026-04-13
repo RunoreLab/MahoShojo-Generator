@@ -375,6 +375,7 @@ async function handler(req: NextRequest): Promise<Response> {
       },
       {
         ...(providerOptions ?? {}),
+        abortSignal: req.signal,
         telemetry: aiTelemetry,
         ...(reasoningBridge ? { onReasoningEvent: reasoningBridge.onReasoningEvent } : {}),
       }

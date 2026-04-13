@@ -6,6 +6,7 @@ import { ProviderCooldownNotice } from '@/components/ai/ProviderCooldownNotice';
 import { TokenIndicator } from '@/components/shared/TokenIndicator';
 import { formatDateTime } from '@/lib/constants';
 import { CollapsibleSection } from '@/components/shared/CollapsibleSection';
+import { StreamStopButton } from '@/components/shared/StreamStopButton';
 import { limitNarrativeHistoryEntriesForPrompt } from '@/lib/narrative-history';
 
 import { useBattleStore } from '../stores/useBattleStore';
@@ -86,6 +87,7 @@ const buttonTextMap: Record<string, string> = {
 export function BattleActions({ showAdvancedUtilities = true }: { showAdvancedUtilities?: boolean }) {
   const {
     handleGenerate,
+    stopGeneration,
     isGenerating,
     isCooldown,
     remainingTime,
@@ -95,6 +97,7 @@ export function BattleActions({ showAdvancedUtilities = true }: { showAdvancedUt
   const useBattleSelector = <T,>(selector: (state: BattleStoreState) => T) => useBattleStore(selector);
   const combatants = useBattleSelector((state) => state.combatants);
   const battleMode = useBattleSelector((state) => state.battleMode);
+  const generationMode = useBattleSelector((state) => state.generationMode);
   const scenario = useBattleSelector((state) => state.scenario);
   const auxScenarios = useBattleSelector((state) => state.auxScenarios);
   const selectedLanguage = useBattleSelector((state) => state.selectedLanguage);
@@ -242,6 +245,13 @@ export function BattleActions({ showAdvancedUtilities = true }: { showAdvancedUt
         >
           {getButtonText()}
         </button>
+        {isGenerating && generationMode === 'stream' ? (
+          <StreamStopButton
+            onClick={stopGeneration}
+            compact
+            label="停止生成"
+          />
+        ) : null}
       </div>
       <ProviderCooldownNotice
         currentMode={providerCooldownMode}

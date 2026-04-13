@@ -43,8 +43,9 @@ import { GenerationModeSwitcher, type GenerationMode } from '@/components/shared
 import { ProviderCooldownNotice } from '@/components/ai/ProviderCooldownNotice';
 import { TokenIndicator } from '@/components/shared/TokenIndicator';
 import { JsonSizeIndicator } from '@/components/shared/JsonSizeIndicator';
-import { readTextAndReasoningStreamFromResponse } from '@/lib/stream/read-text-and-reasoning-stream';
+import { StreamStopButton } from '@/components/shared/StreamStopButton';
 import { buildGeneralCharacterCardFromMarkdown } from '@/lib/stream/markdown-card';
+import { readSafeTextAndReasoningStreamFromResponse } from '@/lib/stream/read-safe-text-and-reasoning-stream';
 import { readJsonOrTextFromResponse, resolveApiErrorMessage } from '@/lib/client/apiError';
 import { AI_META_REQUEST_HEADER, AI_META_REQUEST_VALUE, readJsonWithAiMeta } from '@/lib/client/read-json-with-ai-meta';
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
@@ -58,6 +59,7 @@ import {
 import { QuestionnaireAnswerExportPanel } from '@/components/questionnaire/QuestionnaireAnswerExportPanel';
 import { CharacterPortraitAssetPanel } from '@/components/shared/CharacterPortraitAssetPanel';
 import { CreatorEntryLink } from '@/components/shared/CreatorEntryLink';
+import { STREAM_ABORT_REASON_USER } from '@/lib/stream/abort';
 import type { AIReasoningEnvelope } from '@/types/ai-reasoning';
 import type { CharacterCardPortraitAsset } from '@/types/visual-asset';
 
@@ -290,6 +292,8 @@ const DetailsPage: React.FC = () => {
   const [streamedGeneralCard, setStreamedGeneralCard] = useState<any | null>(null);
   const [streamingReasoning, setStreamingReasoning] = useState<AIReasoningEnvelope | null>(null);
   const [nonStreamReasoning, setNonStreamReasoning] = useState<AIReasoningEnvelope | null>(null);
+  const [streamNotice, setStreamNotice] = useState<string | null>(null);
+  const streamAbortControllerRef = useRef<AbortController | null>(null);
   const [characterPortraitAsset, setCharacterPortraitAsset] = useState<CharacterCardPortraitAsset | null>(null);
 
   // 多语言支持
@@ -1433,6 +1437,7 @@ const DetailsPage: React.FC = () => {
     setStreamedGeneralCard(null);
     setStreamingReasoning(null);
     setNonStreamReasoning(null);
+    setStreamNotice(null);
     setCharacterPortraitAsset(null);
     let nextCooldownMs = generatorCooldownMs;
 
@@ -1464,6 +1469,11 @@ const DetailsPage: React.FC = () => {
       } else {
         requestHeaders[AI_META_REQUEST_HEADER] = AI_META_REQUEST_VALUE;
       }
+      const streamController = generationMode === 'stream' ? new AbortController() : null;
+      if (streamController) {
+        streamAbortControllerRef.current?.abort(STREAM_ABORT_REASON_USER);
+        streamAbortControllerRef.current = streamController;
+      }
       const response = await fetch(endpoint, {
         method: 'POST',
         headers: requestHeaders,
@@ -1493,6 +1503,7 @@ const DetailsPage: React.FC = () => {
           language: selectedLanguage,
           customProvider: customProviderPayload,
         }),
+        ...(streamController ? { signal: streamController.signal } : {}),
       });
 
       if (!response.ok) {
@@ -1530,18 +1541,17 @@ const DetailsPage: React.FC = () => {
         }
 
         setStreamingMarkdown('');
-        const { text: markdown } = await readTextAndReasoningStreamFromResponse(response, {
+        const controller = streamAbortControllerRef.current;
+        if (!controller) {
+          throw new Error('流式控制器初始化失败');
+        }
+        const { text: markdown, outputSafetyStatus, wasAborted, abortReason } = await readSafeTextAndReasoningStreamFromResponse(response, {
+          abortController: controller,
           label: '魔法少女角色卡（流式）',
           onText: (text) => setStreamingMarkdown(text),
           onReasoning: (reasoning) => setStreamingReasoning(reasoning),
+          safetyReason: '使用危险符文',
         });
-
-        if (await checkSensitiveWords(markdown, {
-          source: 'output',
-          origin: 'details-stream',
-          reason: '使用危险符文',
-          backupItems: buildAnswerBackupItems(),
-        })) return;
 
         const fallbackName = finalAnswerItems[0]?.answer ?? '';
         const { card } = buildGeneralCharacterCardFromMarkdown({
@@ -1553,6 +1563,15 @@ const DetailsPage: React.FC = () => {
           ...card,
           userAnswers: compactQuestionnaireAnswerItems(finalAnswerItems),
         };
+        if (outputSafetyStatus === 'blocked') {
+          setStreamNotice('输出触发调查院规则，已自动截断并追加逮捕令。当前内容可能不完整，但可继续保存。');
+        } else if (wasAborted) {
+          setStreamNotice(
+            abortReason === STREAM_ABORT_REASON_USER
+              ? '已手动停止生成。当前内容可能不完整，但可继续保存。'
+              : '流式生成已中断。当前内容可能不完整，但可继续保存。'
+          );
+        }
         if (!allowNativeSignatureForSubmit) {
           setStreamedGeneralCard(cardWithAnswers);
           setError(null);
@@ -1560,18 +1579,20 @@ const DetailsPage: React.FC = () => {
         }
         let signedCard = cardWithAnswers;
         let hasSignError = false;
-        try {
-          const result = await resignDataCard(cardWithAnswers);
-          if (!result) return;
-          signedCard = result;
-        } catch (err) {
-          const message = err instanceof Error ? err.message : '签名失败';
-          setError(`⚠️ 原生性签名失败，已降级为非原生：${message}`);
-          hasSignError = true;
+        if (!wasAborted && outputSafetyStatus !== 'blocked') {
+          try {
+            const result = await resignDataCard(cardWithAnswers);
+            if (!result) return;
+            signedCard = result;
+          } catch (err) {
+            const message = err instanceof Error ? err.message : '签名失败';
+            setError(`⚠️ 原生性签名失败，已降级为非原生：${message}`);
+            hasSignError = true;
+          }
         }
 
         setStreamedGeneralCard(signedCard);
-        if (!hasSignError) {
+        if (!hasSignError && !wasAborted && outputSafetyStatus !== 'blocked') {
           setError(null);
         }
         return;
@@ -1618,6 +1639,7 @@ const DetailsPage: React.FC = () => {
         setError('✨ 魔法失效了！生成详情时发生未知错误，请重试');
       }
     } finally {
+      streamAbortControllerRef.current = null;
       setSubmitting(false);
       // 依据当前通道实时覆盖冷却时间，确保自定义 AI 时降为 3 秒
       startCooldown(nextCooldownMs);
@@ -2259,11 +2281,20 @@ const DetailsPage: React.FC = () => {
                 {error && (
                   <ErrorMessage message={error} />
                 )}
+                {streamNotice ? <div className="mt-3 text-center text-sm text-amber-700">{streamNotice}</div> : null}
                 {isQuestionnaireNativeAllowed && hasOverLimitAnswer && (
                   <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-700">
                     ⚠️ 已有 {overLimitItems.length} 条答案超过字数上限，继续提交将导致生成内容丧失原生性。
                   </div>
                 )}
+                {submitting && generationMode === 'stream' ? (
+                  <div className="mt-4 flex justify-center">
+                    <StreamStopButton
+                      onClick={() => streamAbortControllerRef.current?.abort(STREAM_ABORT_REASON_USER)}
+                      label="停止生成"
+                    />
+                  </div>
+                ) : null}
 
                 <QuestionnaireAnswerExportPanel
                   variant="light"

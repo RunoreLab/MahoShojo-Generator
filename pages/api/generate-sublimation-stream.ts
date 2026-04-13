@@ -303,6 +303,7 @@ ${identityHint ? `角色当前标识：${identityHint}` : '（无）'}
       },
       {
         ...(providerOptions ?? {}),
+        abortSignal: req.signal,
         telemetry: aiTelemetry,
         ...(reasoningBridge ? { onReasoningEvent: reasoningBridge.onReasoningEvent } : {}),
       }

@@ -50,6 +50,7 @@ import { useProviderModeCooldown } from '@/lib/cooldown';
 import { extractHeadlineFromMarkdown, extractWinnerFromText } from '@/lib/arena/battle-report-log-utils';
 import { readScenarioBattleStoryConfig } from '@/lib/scenario-battle-story';
 import { readTextAndReasoningStreamFromResponse } from '@/lib/stream/read-text-and-reasoning-stream';
+import { STREAM_ABORT_REASON_USER } from '@/lib/stream/abort';
 
 import { useBattleStore } from '../stores/useBattleStore';
 import { BattleStoreState, Combatant, CombatantData } from '../types';
@@ -341,6 +342,7 @@ export function useBattleStorySession() {
   const chaptersRef = useRef<BattleStoryChapterRecord[]>([]);
   const checkpointsRef = useRef<BattleStoryCheckpointRecord[]>([]);
   const summaryRetryAtRef = useRef<Record<string, number>>({});
+  const generationAbortControllerRef = useRef<AbortController | null>(null);
 
   const customProviderPayload = useMemo(
     () => buildCustomProviderPayload(userProviderConfig),
@@ -840,16 +842,22 @@ export function useBattleStorySession() {
       recentChapters: ReturnType<typeof buildChapterRequestWindow>;
       chapterIndexHint?: number;
       userGuidance: string;
-    }): Promise<{
-      markdown: string;
-      reportJson: Record<string, unknown>;
-      digest: BattleStoryDeterministicDigest;
-      chapterIndex: number;
-      generationId?: string | null;
-      cardSnapshot: BattleStoryChapterCardSnapshot | null;
-      nextWorkingCombatants: Array<Record<string, unknown>>;
-      warning?: string;
-    }> => {
+    }): Promise<
+      | {
+          aborted: true;
+        }
+      | {
+          aborted?: false;
+          markdown: string;
+          reportJson: Record<string, unknown>;
+          digest: BattleStoryDeterministicDigest;
+          chapterIndex: number;
+          generationId?: string | null;
+          cardSnapshot: BattleStoryChapterCardSnapshot | null;
+          nextWorkingCombatants: Array<Record<string, unknown>>;
+          warning?: string;
+        }
+    > => {
       if (isCooldown) {
         throw new Error(`冷却中，请等待 ${remainingTime} 秒后再继续。`);
       }
@@ -868,6 +876,9 @@ export function useBattleStorySession() {
         ...(fallbackCharacterGuidances ? { characterGuidances: fallbackCharacterGuidances } : {}),
       };
       setStreamCardSnapshot(Object.keys(fallbackCardSnapshot).length > 0 ? fallbackCardSnapshot : null);
+      const generationController = new AbortController();
+      generationAbortControllerRef.current?.abort(STREAM_ABORT_REASON_USER);
+      generationAbortControllerRef.current = generationController;
       let responseStatus: number | null = null;
       let requestAccepted = false;
       let cooldownHandled = false;
@@ -876,6 +887,7 @@ export function useBattleStorySession() {
         const response = await fetch('/api/arena/session/generate-next', {
           method: 'POST',
           headers: await buildRequestHeaders(true),
+          signal: generationController.signal,
           body: JSON.stringify({
             sessionId: input.sessionId,
             action: input.action,
@@ -1123,6 +1135,16 @@ export function useBattleStorySession() {
           ...(updateResult.warning ? { warning: updateResult.warning } : {}),
         };
       } catch (error) {
+        if (generationController.signal.aborted) {
+          startCooldown();
+          cooldownHandled = true;
+          setNotice(
+            generationController.signal.reason === STREAM_ABORT_REASON_USER
+              ? '已手动停止连续战报生成。当前预览可能不完整，本次不会写入章节。'
+              : '连续战报流已中断。当前预览可能不完整，本次不会写入章节。'
+          );
+          return { aborted: true };
+        }
         const errorMessage = error instanceof Error ? error.message.trim() : '';
         const isLocalCooldownError = Boolean(errorMessage) && errorMessage.includes('冷却中');
         if (!isLocalCooldownError && !cooldownHandled) {
@@ -1136,6 +1158,9 @@ export function useBattleStorySession() {
         }
         throw error;
       } finally {
+        if (generationAbortControllerRef.current === generationController) {
+          generationAbortControllerRef.current = null;
+        }
         setIsGenerating(false);
         setGeneratingAction(null);
       }
@@ -1198,6 +1223,10 @@ export function useBattleStorySession() {
         chapterIndexHint: 1,
         userGuidance: state.settings.userGuidance,
       });
+      if (generated.aborted) {
+        setPendingStartSession(null);
+        return;
+      }
 
       const chapter = createBattleStoryChapterRecord({
         sessionId: sessionDraft.id,
@@ -1292,6 +1321,9 @@ export function useBattleStorySession() {
         chapterIndexHint: (latestChapter?.index ?? 0) + 1,
         userGuidance: useBattleStore.getState().settings.userGuidance,
       });
+      if (generated.aborted) {
+        return;
+      }
 
       const previousWorkingCombatants =
         Array.isArray(sessionRecord.workingCombatants) && sessionRecord.workingCombatants.length > 0
@@ -1430,6 +1462,9 @@ export function useBattleStorySession() {
         chapterIndexHint: targetChapter.index + 1,
         userGuidance: useBattleStore.getState().settings.userGuidance,
       });
+      if (generated.aborted) {
+        return;
+      }
 
       const { chapters: clonedChapters, chapterIdMap } = cloneBattleStoryActiveChaptersForNewSession({
         chapters: prefixChapters,
@@ -1568,6 +1603,9 @@ export function useBattleStorySession() {
         chapterIndexHint: targetChapter.index,
         userGuidance: useBattleStore.getState().settings.userGuidance,
       });
+      if (generated.aborted) {
+        return;
+      }
 
       const rewrittenChapter = createBattleStoryChapterRecord({
         sessionId: sessionRecord.id,
@@ -1831,6 +1869,10 @@ export function useBattleStorySession() {
     URL.revokeObjectURL(url);
   }, []);
 
+  const stopGeneration = useCallback(() => {
+    generationAbortControllerRef.current?.abort(STREAM_ABORT_REASON_USER);
+  }, []);
+
   return {
     isReady,
     storageError,
@@ -1871,6 +1913,7 @@ export function useBattleStorySession() {
     selectedBranchDisabledReason,
     selectedRewriteDisabledReason,
     selectedDeleteDisabledReason,
+    stopGeneration,
     handleStartSession,
     handleContinueSession,
     handleBranchSession,

@@ -1,5 +1,5 @@
 import { useRouter } from 'next/router';
-import { useCallback, useEffect, useMemo, useReducer, useState } from 'react';
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 
 import AiProviderSelector, { type UserAIProviderConfig } from '@/components/AiProviderSelector';
 import AiReasoningPanel from '@/components/ai/AiReasoningPanel';
@@ -13,6 +13,7 @@ import TachieGenerator from '@/components/TachieGenerator';
 import { GenerationModeSwitcher, type GenerationMode } from '@/components/shared/GenerationModeSwitcher';
 import { ImagePreviewModal } from '@/components/shared/ImagePreviewModal';
 import { JsonSizeIndicator } from '@/components/shared/JsonSizeIndicator';
+import { StreamStopButton } from '@/components/shared/StreamStopButton';
 import { OFFICIAL_KEY_MAX_AI_COOLDOWN_MS, USER_PROVIDED_KEY_COOLDOWN_MS } from '@/lib/ai/cooldowns';
 import { buildCustomProviderPayload, isUsingUserProvidedKey } from '@/lib/ai/custom-provider';
 import { authStorage } from '@/lib/auth';
@@ -25,7 +26,8 @@ import { useCooldown } from '@/lib/cooldown';
 import { createBlankDataCard, type DataCardTemplate } from '@/lib/data-card-converter';
 import { formatKilobytes, MAX_DATA_CARD_BYTES } from '@/lib/data-card-size';
 import { buildGeneralCharacterCardFromMarkdown, buildGeneralScenarioCardFromMarkdown } from '@/lib/stream/markdown-card';
-import { readTextAndReasoningStreamFromResponse } from '@/lib/stream/read-text-and-reasoning-stream';
+import { STREAM_ABORT_REASON_USER } from '@/lib/stream/abort';
+import { readSafeTextAndReasoningStreamFromResponse } from '@/lib/stream/read-safe-text-and-reasoning-stream';
 import {
   buildTavernCloudSavePayload,
   buildTavernAiAttachment,
@@ -382,6 +384,8 @@ export function TavernImportPanel() {
   const [streamedGeneralCard, setStreamedGeneralCard] = useState<any | null>(null);
   const [streamingReasoning, setStreamingReasoning] = useState<AIReasoningEnvelope | null>(null);
   const [nonStreamReasoning, setNonStreamReasoning] = useState<AIReasoningEnvelope | null>(null);
+  const [streamNotice, setStreamNotice] = useState<string | null>(null);
+  const streamAbortControllerRef = useRef<AbortController | null>(null);
   const isUserCustomKey = isUsingUserProvidedKey(userProviderConfig);
   const tavernAiCooldownMs = isUserCustomKey ? USER_PROVIDED_KEY_COOLDOWN_MS : OFFICIAL_KEY_MAX_AI_COOLDOWN_MS;
   const tavernAiCooldownKey = isUserCustomKey ? 'tavernConvertCooldown:custom' : 'tavernConvertCooldown:system';
@@ -665,65 +669,86 @@ export function TavernImportPanel() {
         setStreamedGeneralCard(null);
         setStreamingReasoning(null);
         setNonStreamReasoning(null);
+        setStreamNotice(null);
         setCopyStatus('idle');
+        const streamController = new AbortController();
+        streamAbortControllerRef.current?.abort(STREAM_ABORT_REASON_USER);
+        streamAbortControllerRef.current = streamController;
 
-        const response = await fetch('/api/tavern/convert-stream?format=sse', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream', ...activityHeaders },
-          body: JSON.stringify(requestBody),
-        });
-
-        if (!response.ok) {
-          const { payload } = await readJsonOrTextFromResponse(response);
-          const errorJson = payload && typeof payload === 'object' ? (payload as any) : null;
-          const redirectReason = errorJson?.reason || errorJson?.message || errorJson?.error || resolveApiErrorMessage({ payload, fallback: '' });
-          if (errorJson?.shouldRedirect || errorJson?.redirect === '/arrested') {
-            void router.push({
-              pathname: '/arrested',
-              query: { reason: redirectReason || '使用危险符文' },
-            });
-            throw new Error('已跳转到被捕页面');
-          }
-          const serverMessage = resolveApiErrorMessage({ payload, fallback: 'AI 转换失败' });
-          throw new Error(formatHttpErrorMessage({ serverMessage, status: response.status, fallback: 'AI 转换失败' }));
-        }
-
-        const contentType = (response.headers.get('content-type') || '').toLowerCase();
-        if (contentType.includes('application/json') || contentType.includes('+json')) {
-          const { payload } = await readJsonOrTextFromResponse(response);
-          const serverMessage = resolveApiErrorMessage({ payload, fallback: 'AI 转换失败' });
-          throw new Error(formatHttpErrorMessage({ serverMessage, status: response.status, fallback: 'AI 转换失败' }));
-        }
-
-        const { text: markdown } = await readTextAndReasoningStreamFromResponse(response, {
-          label: '酒馆导入（流式）',
-          onText: (text) => setStreamingMarkdown(text),
-          onReasoning: (reasoning) => setStreamingReasoning(reasoning),
-        });
-
-        const isScenarioTarget = state.targetTemplate === 'scenario' || state.targetTemplate === 'general-scenario';
-        if (isScenarioTarget) {
-          const { card } = buildGeneralScenarioCardFromMarkdown({
-            markdown,
-            fallbackTitle: selectedNormalized.name,
-            defaultTitle: '情景',
+        try {
+          const response = await fetch('/api/tavern/convert-stream?format=sse', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream', ...activityHeaders },
+            body: JSON.stringify(requestBody),
+            signal: streamController.signal,
           });
+
+          if (!response.ok) {
+            const { payload } = await readJsonOrTextFromResponse(response);
+            const errorJson = payload && typeof payload === 'object' ? (payload as any) : null;
+            const redirectReason = errorJson?.reason || errorJson?.message || errorJson?.error || resolveApiErrorMessage({ payload, fallback: '' });
+            if (errorJson?.shouldRedirect || errorJson?.redirect === '/arrested') {
+              void router.push({
+                pathname: '/arrested',
+                query: { reason: redirectReason || '使用危险符文' },
+              });
+              throw new Error('已跳转到被捕页面');
+            }
+            const serverMessage = resolveApiErrorMessage({ payload, fallback: 'AI 转换失败' });
+            throw new Error(formatHttpErrorMessage({ serverMessage, status: response.status, fallback: 'AI 转换失败' }));
+          }
+
+          const contentType = (response.headers.get('content-type') || '').toLowerCase();
+          if (contentType.includes('application/json') || contentType.includes('+json')) {
+            const { payload } = await readJsonOrTextFromResponse(response);
+            const serverMessage = resolveApiErrorMessage({ payload, fallback: 'AI 转换失败' });
+            throw new Error(formatHttpErrorMessage({ serverMessage, status: response.status, fallback: 'AI 转换失败' }));
+          }
+
+          const { text: markdown, outputSafetyStatus, wasAborted, abortReason } = await readSafeTextAndReasoningStreamFromResponse(response, {
+            abortController: streamController,
+            label: '酒馆导入（流式）',
+            onText: (text) => setStreamingMarkdown(text),
+            onReasoning: (reasoning) => setStreamingReasoning(reasoning),
+            safetyReason: '使用危险符文',
+          });
+
+          if (outputSafetyStatus === 'blocked') {
+            setStreamNotice('输出触发调查院规则，已自动截断并追加逮捕令。当前内容可能不完整，但可继续保存。');
+          } else if (wasAborted) {
+            setStreamNotice(
+              abortReason === STREAM_ABORT_REASON_USER
+                ? '已手动停止生成。当前内容可能不完整，但可继续保存。'
+                : '流式生成已中断。当前内容可能不完整，但可继续保存。'
+            );
+          }
+
+          const isScenarioTarget = state.targetTemplate === 'scenario' || state.targetTemplate === 'general-scenario';
+          if (isScenarioTarget) {
+            const { card } = buildGeneralScenarioCardFromMarkdown({
+              markdown,
+              fallbackTitle: selectedNormalized.name,
+              defaultTitle: '情景',
+            });
+            setStreamedGeneralCard(card);
+            startCooldown(tavernAiCooldownMs);
+            return { ...card, _tavern: tavernPayload };
+          }
+
+          const defaultName =
+            state.targetTemplate === 'magical-girl' ? '魔法少女' : state.targetTemplate === 'canshou' ? '残兽' : '角色';
+          const { card } = buildGeneralCharacterCardFromMarkdown({
+            markdown,
+            fallbackName: selectedNormalized.name,
+            defaultName,
+          });
+
           setStreamedGeneralCard(card);
           startCooldown(tavernAiCooldownMs);
           return { ...card, _tavern: tavernPayload };
+        } finally {
+          streamAbortControllerRef.current = null;
         }
-
-        const defaultName =
-          state.targetTemplate === 'magical-girl' ? '魔法少女' : state.targetTemplate === 'canshou' ? '残兽' : '角色';
-        const { card } = buildGeneralCharacterCardFromMarkdown({
-          markdown,
-          fallbackName: selectedNormalized.name,
-          defaultName,
-        });
-
-        setStreamedGeneralCard(card);
-        startCooldown(tavernAiCooldownMs);
-        return { ...card, _tavern: tavernPayload };
       }
 
       setNonStreamReasoning(null);
@@ -1242,6 +1267,15 @@ export function TavernImportPanel() {
                 <div className="mt-2 text-xs text-gray-600">
                   生成后会在下方展示{targetLabel}卡预览；你可以保存图片、下载/复制 JSON，或保存到云端（档案馆）。
                 </div>
+                {streamNotice ? <div className="mt-3 text-center text-sm text-amber-700">{streamNotice}</div> : null}
+                {state.step === 'converting' && state.convertMode === 'ai' && generationMode === 'stream' ? (
+                  <div className="mt-3 flex justify-center">
+                    <StreamStopButton
+                      onClick={() => streamAbortControllerRef.current?.abort(STREAM_ABORT_REASON_USER)}
+                      label="停止生成"
+                    />
+                  </div>
+                ) : null}
 
                 <div>
                   <label className="block text-sm font-semibold text-pink-700">占位符替换</label>

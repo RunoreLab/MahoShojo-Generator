@@ -1,6 +1,6 @@
 // pages/scenario.tsx
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Head from 'next/head';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
@@ -16,12 +16,14 @@ import { ErrorMessage } from '@/components/ErrorMessage';
 import { EncyclopediaLinks } from '@/components/encyclopedia/EncyclopediaLinks';
 import { convertDataCard, createBlankDataCard } from '@/lib/data-card-converter';
 import { GenerationModeSwitcher, type GenerationMode } from '@/components/shared/GenerationModeSwitcher';
-import { readTextAndReasoningStreamFromResponse } from '@/lib/stream/read-text-and-reasoning-stream';
+import { StreamStopButton } from '@/components/shared/StreamStopButton';
 import { buildGeneralScenarioCardFromMarkdown } from '@/lib/stream/markdown-card';
+import { readSafeTextAndReasoningStreamFromResponse } from '@/lib/stream/read-safe-text-and-reasoning-stream';
 import { readJsonOrTextFromResponse, resolveApiErrorMessage } from '@/lib/client/apiError';
 import { AI_META_REQUEST_HEADER, AI_META_REQUEST_VALUE, readJsonWithAiMeta } from '@/lib/client/read-json-with-ai-meta';
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
 import { authStorage } from '@/lib/auth';
+import { STREAM_ABORT_REASON_USER } from '@/lib/stream/abort';
 import {
   clearScenarioPageDraft,
   readScenarioPageDraft,
@@ -68,6 +70,8 @@ const ScenarioPage: React.FC = () => {
   const [generalScenarioDraftEdited, setGeneralScenarioDraftEdited] = useState(false);
   const [streamingReasoning, setStreamingReasoning] = useState<AIReasoningEnvelope | null>(null);
   const [nonStreamReasoning, setNonStreamReasoning] = useState<AIReasoningEnvelope | null>(null);
+  const [streamNotice, setStreamNotice] = useState<string | null>(null);
+  const streamAbortControllerRef = useRef<AbortController | null>(null);
   const [generationMode, setGenerationMode] = useState<GenerationMode>('non-stream');
   const [scenarioTitleHint, setScenarioTitleHint] = useState('');
   const [userProviderConfig, setUserProviderConfig] = useState<UserAIProviderConfig | null>(null);
@@ -282,6 +286,7 @@ const ScenarioPage: React.FC = () => {
     setNonStreamReasoning(null);
     setResultData(null);
     setStreamingReasoning(null);
+    setStreamNotice(null);
     let nextCooldownMs = scenarioCooldownMs;
     let shouldStartCooldown = false;
     if (generationMode === 'stream') {
@@ -332,6 +337,11 @@ const ScenarioPage: React.FC = () => {
       } else {
         requestHeaders[AI_META_REQUEST_HEADER] = AI_META_REQUEST_VALUE;
       }
+      const streamController = generationMode === 'stream' ? new AbortController() : null;
+      if (streamController) {
+        streamAbortControllerRef.current?.abort(STREAM_ABORT_REASON_USER);
+        streamAbortControllerRef.current = streamController;
+      }
       const response = await fetch(endpoint, {
         method: 'POST',
         headers: requestHeaders,
@@ -339,6 +349,7 @@ const ScenarioPage: React.FC = () => {
           ...requestBody,
           ...(generationMode === 'stream' ? { titleHint: scenarioTitleHint.trim() } : {}),
         }),
+        ...(streamController ? { signal: streamController.signal } : {}),
       });
 
       if (!response.ok) {
@@ -370,12 +381,18 @@ const ScenarioPage: React.FC = () => {
           throw new Error(formatHttpErrorMessage({ serverMessage, status: response.status, fallback: '生成失败' }));
         }
 
-        const { text: markdown } = await readTextAndReasoningStreamFromResponse(response, {
+        const controller = streamAbortControllerRef.current;
+        if (!controller) {
+          throw new Error('流式控制器初始化失败');
+        }
+        const { text: markdown, outputSafetyStatus, wasAborted, abortReason } = await readSafeTextAndReasoningStreamFromResponse(response, {
+          abortController: controller,
           label: '情景卡（流式）',
           onText: (text) => {
             setGeneralScenarioDraft((prev: any) => (prev ? { ...prev, content: text } : prev));
           },
           onReasoning: (reasoning) => setStreamingReasoning(reasoning),
+          safetyReason: '使用危险符文',
         });
 
         const { card } = buildGeneralScenarioCardFromMarkdown({
@@ -385,16 +402,27 @@ const ScenarioPage: React.FC = () => {
         });
 
         let signedCard = card;
-        try {
-          const result = await resignDataCard(card);
-          if (!result) return;
-          signedCard = result;
-        } catch (err) {
-          const message = err instanceof Error ? err.message : '签名失败';
-          setError(`⚠️ 原生性签名失败，已降级为非原生：${message}`);
+        if (!wasAborted && outputSafetyStatus !== 'blocked') {
+          try {
+            const result = await resignDataCard(card);
+            if (!result) return;
+            signedCard = result;
+          } catch (err) {
+            const message = err instanceof Error ? err.message : '签名失败';
+            setError(`⚠️ 原生性签名失败，已降级为非原生：${message}`);
+          }
         }
 
         setGeneralScenarioDraft(signedCard);
+        if (outputSafetyStatus === 'blocked') {
+          setStreamNotice('输出触发调查院规则，已自动截断并追加逮捕令。当前内容可能不完整，但可继续保存。');
+        } else if (wasAborted) {
+          setStreamNotice(
+            abortReason === STREAM_ABORT_REASON_USER
+              ? '已手动停止生成。当前内容可能不完整，但可继续保存。'
+              : '流式生成已中断。当前内容可能不完整，但可继续保存。'
+          );
+        }
         shouldStartCooldown = true;
         return;
       }
@@ -419,6 +447,7 @@ const ScenarioPage: React.FC = () => {
         setError(`✨ 剧本创作失败！${message}`);
       }
     } finally {
+      streamAbortControllerRef.current = null;
       if (shouldStartCooldown) {
         startCooldown(nextCooldownMs);
       }
@@ -625,10 +654,21 @@ const ScenarioPage: React.FC = () => {
               </p>
             </div>
 
-            <button onClick={handleGenerate} disabled={isGenerating || isCooldown} className="generate-button mt-4">
-              {isCooldown ? `冷却中 (${remainingTime}s)` : isGenerating ? '正在构建舞台...' : '生成情景'}
-            </button>
+            <div className="mt-4 flex flex-col gap-3">
+              <button onClick={handleGenerate} disabled={isGenerating || isCooldown} className="generate-button">
+                {isCooldown ? `冷却中 (${remainingTime}s)` : isGenerating ? '正在构建舞台...' : '生成情景'}
+              </button>
+              {isGenerating && generationMode === 'stream' ? (
+                <div className="flex justify-center">
+                  <StreamStopButton
+                    onClick={() => streamAbortControllerRef.current?.abort(STREAM_ABORT_REASON_USER)}
+                    label="停止生成"
+                  />
+                </div>
+              ) : null}
+            </div>
             {error && <ErrorMessage message={error} className="error-message mt-4" />}
+            {streamNotice ? <div className="mt-3 text-center text-sm text-amber-700">{streamNotice}</div> : null}
           </div>
 
           {generationMode === 'non-stream' && resultData && (

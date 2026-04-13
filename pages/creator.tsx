@@ -38,7 +38,9 @@ import { ErrorMessage } from '@/components/ErrorMessage';
 import { EncyclopediaLinks } from '@/components/encyclopedia/EncyclopediaLinks';
 import { type GenerationMode } from '@/components/shared/GenerationModeSwitcher';
 import { JsonSizeIndicator } from '@/components/shared/JsonSizeIndicator';
-import { readTextAndReasoningStreamFromResponse } from '@/lib/stream/read-text-and-reasoning-stream';
+import { StreamStopButton } from '@/components/shared/StreamStopButton';
+import { STREAM_ABORT_REASON_USER } from '@/lib/stream/abort';
+import { readSafeTextAndReasoningStreamFromResponse } from '@/lib/stream/read-safe-text-and-reasoning-stream';
 import { readJsonOrTextFromResponse, resolveApiErrorMessage } from '@/lib/client/apiError';
 import { AI_META_REQUEST_HEADER, AI_META_REQUEST_VALUE, readJsonWithAiMeta } from '@/lib/client/read-json-with-ai-meta';
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
@@ -365,6 +367,8 @@ const DetailsPage: React.FC = () => {
   const [streamedGeneralCard, setStreamedGeneralCard] = useState<any | null>(null);
   const [streamingReasoning, setStreamingReasoning] = useState<AIReasoningEnvelope | null>(null);
   const [nonStreamReasoning, setNonStreamReasoning] = useState<AIReasoningEnvelope | null>(null);
+  const [streamNotice, setStreamNotice] = useState<string | null>(null);
+  const streamAbortControllerRef = useRef<AbortController | null>(null);
   const [characterPortraitAsset, setCharacterPortraitAsset] = useState<CharacterCardPortraitAsset | null>(null);
   const [creatorResultSnapshot, setCreatorResultSnapshot] = useState<CreatorWorkbenchSnapshot | null>(null);
   const buildRulePresetIndex = useMemo(() => loadBuildRulePresetIndex(), []);
@@ -1794,6 +1798,7 @@ const DetailsPage: React.FC = () => {
     setStreamedGeneralCard(null);
     setStreamingReasoning(null);
     setNonStreamReasoning(null);
+    setStreamNotice(null);
     setCharacterPortraitAsset(null);
     setCreatorResultSnapshot({
       generationMode,
@@ -1833,6 +1838,11 @@ const DetailsPage: React.FC = () => {
       } else {
         requestHeaders[AI_META_REQUEST_HEADER] = AI_META_REQUEST_VALUE;
       }
+      const streamController = generationMode === 'stream' ? new AbortController() : null;
+      if (streamController) {
+        streamAbortControllerRef.current?.abort(STREAM_ABORT_REASON_USER);
+        streamAbortControllerRef.current = streamController;
+      }
       const response = await fetch(endpoint, {
         method: 'POST',
         headers: requestHeaders,
@@ -1866,6 +1876,7 @@ const DetailsPage: React.FC = () => {
           buildRules: buildRuleRequestPayload,
           primaryRuleId: primaryBuildRuleId,
         }),
+        ...(streamController ? { signal: streamController.signal } : {}),
       });
 
       if (!response.ok) {
@@ -1903,18 +1914,17 @@ const DetailsPage: React.FC = () => {
         }
 
         setStreamingMarkdown('');
-        const { text: markdown } = await readTextAndReasoningStreamFromResponse(response, {
+        const controller = streamAbortControllerRef.current;
+        if (!controller) {
+          throw new Error('流式控制器初始化失败');
+        }
+        const { text: markdown, outputSafetyStatus, wasAborted, abortReason } = await readSafeTextAndReasoningStreamFromResponse(response, {
+          abortController: controller,
           label: creatorTemplate === 'general-scenario' ? '通用情景卡（流式）' : '通用角色卡（流式）',
           onText: (text) => setStreamingMarkdown(text),
           onReasoning: (reasoning) => setStreamingReasoning(reasoning),
+          safetyReason: '使用危险符文',
         });
-
-        if (await checkSensitiveWords(markdown, {
-          source: 'output',
-          origin: 'creator-stream',
-          reason: '使用危险符文',
-          backupItems: buildAnswerBackupItems(),
-        })) return;
 
         const cardWithAnswers = finalizeCreatorStreamCard({
           template: creatorTemplate === 'general-scenario' ? 'general-scenario' : 'general',
@@ -1924,6 +1934,15 @@ const DetailsPage: React.FC = () => {
           creationInputs: creatorRequestPayload,
           ...(creatorBuildState ? { buildState: creatorBuildState } : {}),
         });
+        if (outputSafetyStatus === 'blocked') {
+          setStreamNotice('输出触发调查院规则，已自动截断并追加逮捕令。当前内容可能不完整，但可继续保存。');
+        } else if (wasAborted) {
+          setStreamNotice(
+            abortReason === STREAM_ABORT_REASON_USER
+              ? '已手动停止生成。当前内容可能不完整，但可继续保存。'
+              : '流式生成已中断。当前内容可能不完整，但可继续保存。'
+          );
+        }
         if (!allowNativeSignatureForSubmit) {
           setStreamedGeneralCard(cardWithAnswers);
           setError(null);
@@ -1931,18 +1950,20 @@ const DetailsPage: React.FC = () => {
         }
         let signedCard = cardWithAnswers;
         let hasSignError = false;
-        try {
-          const result = await resignDataCard(cardWithAnswers);
-          if (!result) return;
-          signedCard = result;
-        } catch (err) {
-          const message = err instanceof Error ? err.message : '签名失败';
-          setError(`⚠️ 原生性签名失败，已降级为非原生：${message}`);
-          hasSignError = true;
+        if (!wasAborted && outputSafetyStatus !== 'blocked') {
+          try {
+            const result = await resignDataCard(cardWithAnswers);
+            if (!result) return;
+            signedCard = result;
+          } catch (err) {
+            const message = err instanceof Error ? err.message : '签名失败';
+            setError(`⚠️ 原生性签名失败，已降级为非原生：${message}`);
+            hasSignError = true;
+          }
         }
 
         setStreamedGeneralCard(signedCard);
-        if (!hasSignError) {
+        if (!hasSignError && !wasAborted && outputSafetyStatus !== 'blocked') {
           setError(null);
         }
         return;
@@ -1989,6 +2010,7 @@ const DetailsPage: React.FC = () => {
         setError('✨ 魔法失效了！生成结果时发生未知错误，请重试');
       }
     } finally {
+      streamAbortControllerRef.current = null;
       setSubmitting(false);
       // 依据当前通道实时覆盖冷却时间，确保自定义 AI 时降为 3 秒
       startCooldown(nextCooldownMs);
@@ -2449,6 +2471,15 @@ const DetailsPage: React.FC = () => {
         buildContent={buildAnswerExportText}
         disabled={submitting || isTransitioning || isCooldown}
       />
+      {streamNotice ? <div className="text-center text-sm text-amber-700">{streamNotice}</div> : null}
+      {submitting && generationMode === 'stream' ? (
+        <div className="flex justify-center">
+          <StreamStopButton
+            onClick={() => streamAbortControllerRef.current?.abort(STREAM_ABORT_REASON_USER)}
+            label="停止生成"
+          />
+        </div>
+      ) : null}
     </div>
   );
 

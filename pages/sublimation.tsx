@@ -26,8 +26,10 @@ import { GenerationModeSwitcher, type GenerationMode } from '@/components/shared
 import { ThemeImage } from '@/components/shared/ThemeImage';
 import { TokenIndicator } from '@/components/shared/TokenIndicator';
 import { JsonSizeIndicator } from '@/components/shared/JsonSizeIndicator';
+import { StreamStopButton } from '@/components/shared/StreamStopButton';
 import { SublimationArenaHistoryStrategyFieldset } from '@/components/shared/SublimationArenaHistoryStrategyFieldset';
-import { readTextAndReasoningStreamFromResponse } from '@/lib/stream/read-text-and-reasoning-stream';
+import { STREAM_ABORT_REASON_USER } from '@/lib/stream/abort';
+import { readSafeTextAndReasoningStreamFromResponse } from '@/lib/stream/read-safe-text-and-reasoning-stream';
 import { buildGeneralCharacterCardFromMarkdown } from '@/lib/stream/markdown-card';
 import { buildStreamedSublimationResultCard } from '@/lib/sublimation/stream-result';
 import { DEFAULT_ARENA_HISTORY_RETENTION_STRATEGY } from '@/lib/sublimation/arena-history';
@@ -224,6 +226,8 @@ const SublimationPage: React.FC = () => {
     const [streamedGeneralCard, setStreamedGeneralCard] = useState<any | null>(null);
     const [streamingReasoning, setStreamingReasoning] = useState<AIReasoningEnvelope | null>(null);
     const [nonStreamReasoning, setNonStreamReasoning] = useState<AIReasoningEnvelope | null>(null);
+    const [streamNotice, setStreamNotice] = useState<string | null>(null);
+    const streamAbortControllerRef = useRef<AbortController | null>(null);
     const [savedImageUrl, setSavedImageUrl] = useState<string | null>(null);
     const [showImageModal, setShowImageModal] = useState(false);
     const [pastedJson, setPastedJson] = useState('');
@@ -934,6 +938,7 @@ const SublimationPage: React.FC = () => {
         setStreamedGeneralCard(null);
         setStreamingReasoning(null);
         setNonStreamReasoning(null);
+        setStreamNotice(null);
         let nextCooldownMs = sublimationCooldownMs;
         let shouldStartCooldown = false;
 
@@ -1021,10 +1026,16 @@ const SublimationPage: React.FC = () => {
             } else {
                 requestHeaders[AI_META_REQUEST_HEADER] = AI_META_REQUEST_VALUE;
             }
+            const streamController = generationMode === 'stream' ? new AbortController() : null;
+            if (streamController) {
+                streamAbortControllerRef.current?.abort(STREAM_ABORT_REASON_USER);
+                streamAbortControllerRef.current = streamController;
+            }
             const response = await fetch(endpoint, {
                 method: 'POST',
                 headers: requestHeaders,
                 body: JSON.stringify(payload),
+                ...(streamController ? { signal: streamController.signal } : {}),
             });
 
             if (!response.ok) {
@@ -1057,10 +1068,16 @@ const SublimationPage: React.FC = () => {
                 }
 
                 setStreamingMarkdown('');
-                const { text: markdown } = await readTextAndReasoningStreamFromResponse(response, {
+                const controller = streamAbortControllerRef.current;
+                if (!controller) {
+                    throw new Error('流式控制器初始化失败');
+                }
+                const { text: markdown, outputSafetyStatus, wasAborted, abortReason } = await readSafeTextAndReasoningStreamFromResponse(response, {
+                    abortController: controller,
                     label: '升华（流式）',
                     onText: (text) => setStreamingMarkdown(text),
                     onReasoning: (reasoning) => setStreamingReasoning(reasoning),
+                    safetyReason: '使用危险符文',
                 });
 
                 const fallbackName =
@@ -1094,24 +1111,35 @@ const SublimationPage: React.FC = () => {
                     questionnaireSelectionCount: selectedQuestionnaires.length,
                     isNative: isSourceNative === true,
                 });
+                if (outputSafetyStatus === 'blocked') {
+                    setStreamNotice('输出触发调查院规则，已自动截断并追加逮捕令。当前内容可能不完整，但可继续保存。');
+                } else if (wasAborted) {
+                    setStreamNotice(
+                        abortReason === STREAM_ABORT_REASON_USER
+                            ? '已手动停止生成。当前内容可能不完整，但可继续保存。'
+                            : '流式生成已中断。当前内容可能不完整，但可继续保存。'
+                    );
+                }
 
                 let signedCard = card;
                 let hasSignError = false;
-                try {
-                    const shouldSign = await shouldResignStreamedCard();
-                    if (shouldSign) {
-                        const result = await resignDataCard(card);
-                        if (!result) return;
-                        signedCard = result;
+                if (!wasAborted && outputSafetyStatus !== 'blocked') {
+                    try {
+                        const shouldSign = await shouldResignStreamedCard();
+                        if (shouldSign) {
+                            const result = await resignDataCard(card);
+                            if (!result) return;
+                            signedCard = result;
+                        }
+                    } catch (err) {
+                        const message = err instanceof Error ? err.message : '签名失败';
+                        setError(`⚠️ 原生性签名失败，已降级为非原生：${message}`);
+                        hasSignError = true;
                     }
-                } catch (err) {
-                    const message = err instanceof Error ? err.message : '签名失败';
-                    setError(`⚠️ 原生性签名失败，已降级为非原生：${message}`);
-                    hasSignError = true;
                 }
 
                 setStreamedGeneralCard(signedCard);
-                if (!hasSignError) {
+                if (!hasSignError && !wasAborted && outputSafetyStatus !== 'blocked') {
                     setError(null);
                 }
                 shouldStartCooldown = true;
@@ -1141,6 +1169,7 @@ const SublimationPage: React.FC = () => {
                 setError(`✨ 升华失败！${message}`);
             }
         } finally {
+            streamAbortControllerRef.current = null;
             if (shouldStartCooldown) {
                 startCooldown(nextCooldownMs);
             }
@@ -1843,7 +1872,7 @@ const SublimationPage: React.FC = () => {
                                 🎉 升华成功！结果已显示在下方，请下滑查看。
                             </div>
                         )}
-                        {!isGenerating && generationMode === 'stream' && streamedGeneralCard && (
+                        {!isGenerating && generationMode === 'stream' && streamedGeneralCard && !streamNotice && (
                             <div className="text-center text-sm text-green-600 my-2 font-semibold">
                                 🎉 升华成功！已生成通用角色卡（流式），请下滑查看。
                             </div>
@@ -1853,6 +1882,15 @@ const SublimationPage: React.FC = () => {
                         <button onClick={handleGenerate} disabled={isGenerating || !characterData || isCooldown} className="generate-button mt-4">
                             {isCooldown ? `冷却中 (${remainingTime}s)` : isGenerating ? '升华中...' : '开始升华'}
                         </button>
+                        {isGenerating && generationMode === 'stream' ? (
+                            <div className="mt-3 flex justify-center">
+                                <StreamStopButton
+                                    onClick={() => streamAbortControllerRef.current?.abort(STREAM_ABORT_REASON_USER)}
+                                    label="停止生成"
+                                />
+                            </div>
+                        ) : null}
+                        {streamNotice ? <div className="mt-3 text-center text-sm text-amber-700">{streamNotice}</div> : null}
                         {error && <ErrorMessage message={error} className="error-message mt-4" />}
                     </div>
 

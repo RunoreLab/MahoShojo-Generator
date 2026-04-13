@@ -5,6 +5,7 @@ import { useMemo, useState } from 'react';
 import { ProviderCooldownNotice } from '@/components/ai/ProviderCooldownNotice';
 import { MarkdownBlock } from '@/components/MarkdownBlock';
 import { CollapsibleSection } from '@/components/shared/CollapsibleSection';
+import { StreamStopButton } from '@/components/shared/StreamStopButton';
 import StreamingBattleReportCard from '@/components/stream/StreamingBattleReportCard';
 import {
   formatBattleStoryChapterPlanSource,
@@ -198,6 +199,7 @@ export function BattleStorySessionPanel(props: {
     selectedBranchDisabledReason,
     selectedRewriteDisabledReason,
     selectedDeleteDisabledReason,
+    stopGeneration,
     handleStartSession,
     handleContinueSession,
     handleBranchSession,
@@ -455,6 +457,13 @@ export function BattleStorySessionPanel(props: {
             >
               {isDeletingSession ? '正在删除会话...' : '删除当前会话'}
             </button>
+            {isGenerating ? (
+              <StreamStopButton
+                onClick={stopGeneration}
+                compact
+                label="停止生成"
+              />
+            ) : null}
           </div>
           <ProviderCooldownNotice
             currentMode={providerCooldownMode}

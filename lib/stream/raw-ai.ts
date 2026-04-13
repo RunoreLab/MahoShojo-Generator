@@ -152,6 +152,7 @@ type RawUnifiedStreamChunk =
 export interface GenerateWithAIOptions {
     loadBalanceStrategy?: LoadBalanceStrategy;
     providerOverride?: AIProvider;
+    abortSignal?: AbortSignal;
     telemetry?: {
         providerName?: string;
         providerType?: AIProvider['type'];
@@ -162,6 +163,10 @@ export interface GenerateWithAIOptions {
     };
     onReasoningEvent?: (event: RawReasoningStreamEvent) => void;
 }
+
+export const buildStreamTextAbortOptions = (abortSignal?: AbortSignal): { abortSignal?: AbortSignal } => (
+    abortSignal ? { abortSignal } : {}
+);
 
 // 通用 AI 生成函数
 export async function generateWithStreamAI(
@@ -316,6 +321,7 @@ export async function generateWithStreamAI(
                     temperature: generationConfig.temperature,
                     maxRetries: 0,
                     ...maxOutputTokensOption,
+                    ...buildStreamTextAbortOptions(options?.abortSignal),
                     ...googleThinkingOptions,
                     onError: ({ error }) => {
                         capturedError = error;
