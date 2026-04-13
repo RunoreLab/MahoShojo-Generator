@@ -17,8 +17,8 @@ export const baUsers = sqliteTable(
     email: text('email').notNull(),
     emailVerified: integer('email_verified', { mode: 'boolean' }).notNull().default(false),
     image: text('image'),
-    createdAt: integer('created_at').notNull().default(unixEpochNow),
-    updatedAt: integer('updated_at').notNull().default(unixEpochNow),
+    createdAt: integer('created_at', { mode: 'timestamp' }).notNull().default(unixEpochNow),
+    updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull().default(unixEpochNow),
   },
   (table) => ({
     emailUnique: uniqueIndex('ba_user_email_unique').on(table.email),
@@ -29,15 +29,15 @@ export const baSessions = sqliteTable(
   'ba_session',
   {
     id: text('id').primaryKey(),
-    expiresAt: integer('expires_at').notNull(),
+    expiresAt: integer('expires_at', { mode: 'timestamp' }).notNull(),
     token: text('token').notNull(),
     ipAddress: text('ip_address'),
     userAgent: text('user_agent'),
     userId: text('user_id')
       .notNull()
       .references(() => baUsers.id, { onDelete: 'cascade' }),
-    createdAt: integer('created_at').notNull().default(unixEpochNow),
-    updatedAt: integer('updated_at').notNull().default(unixEpochNow),
+    createdAt: integer('created_at', { mode: 'timestamp' }).notNull().default(unixEpochNow),
+    updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull().default(unixEpochNow),
   },
   (table) => ({
     tokenUnique: uniqueIndex('ba_session_token_unique').on(table.token),
@@ -54,21 +54,21 @@ export const baAccounts = sqliteTable('ba_account', {
   accessToken: text('access_token'),
   refreshToken: text('refresh_token'),
   idToken: text('id_token'),
-  accessTokenExpiresAt: integer('access_token_expires_at'),
-  refreshTokenExpiresAt: integer('refresh_token_expires_at'),
+  accessTokenExpiresAt: integer('access_token_expires_at', { mode: 'timestamp' }),
+  refreshTokenExpiresAt: integer('refresh_token_expires_at', { mode: 'timestamp' }),
   scope: text('scope'),
   password: text('password'),
-  createdAt: integer('created_at').notNull().default(unixEpochNow),
-  updatedAt: integer('updated_at').notNull().default(unixEpochNow),
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull().default(unixEpochNow),
+  updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull().default(unixEpochNow),
 });
 
 export const baVerifications = sqliteTable('ba_verification', {
   id: text('id').primaryKey(),
   identifier: text('identifier').notNull(),
   value: text('value').notNull(),
-  expiresAt: integer('expires_at').notNull(),
-  createdAt: integer('created_at').notNull().default(unixEpochNow),
-  updatedAt: integer('updated_at').notNull().default(unixEpochNow),
+  expiresAt: integer('expires_at', { mode: 'timestamp' }).notNull(),
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull().default(unixEpochNow),
+  updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull().default(unixEpochNow),
 });
 
 export const userAuthLinks = sqliteTable(
