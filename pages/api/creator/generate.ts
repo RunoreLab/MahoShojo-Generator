@@ -24,6 +24,7 @@ import { enforceTextSafety } from '@/lib/content-safety/server';
 import { recordUserActivityFromRequest } from '@/lib/user-activity/record';
 import presetIndex from '@/public/questionnaires/presets/index.json';
 import { resolveBuildRuleRuntimeResultsFromRequest } from '@/lib/creator/build-rule-request';
+import { buildPersistedCreationInputs } from '@/lib/creator/card-metadata';
 import { buildCreatorPromptInput, validateCreatorRequest } from '@/lib/creator/server';
 import {
   CREATOR_TEMPLATE_IDS,
@@ -758,14 +759,12 @@ async function handler(req: Request): Promise<Response> {
 
     // 将用户答案和生成结果合并，并添加模板ID，为签名做准备
     const compactAnswers = compactQuestionnaireAnswerItems(normalizedAnswers);
-    const creationInputs = {
+    const creationInputs = buildPersistedCreationInputs({
       template,
       freeformBrief,
-      questionnaires: creatorRequestInput.questionnaires,
-      questionnaireAnswers: compactAnswers,
       buildRules,
       ...(primaryRuleId ? { primaryRuleId } : {}),
-    };
+    });
     const buildState = buildRules.length > 0
       ? {
         ...(primaryRuleId ? { primaryRuleId } : {}),

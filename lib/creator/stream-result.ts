@@ -3,6 +3,7 @@ import {
   buildGeneralScenarioCardFromMarkdown,
 } from '@/lib/stream/markdown-card';
 
+import { buildPersistedCreationInputs } from './card-metadata';
 import type { CreatorStreamTemplateId } from './templates';
 
 type BuildCreatorStreamCardInput = {
@@ -27,7 +28,7 @@ export function buildCreatorStreamCardFromMarkdown({
   buildState,
 }: BuildCreatorStreamCardInput) {
   const creatorMetadata = {
-    ...(typeof creationInputs === 'undefined' ? {} : { creationInputs }),
+    ...(typeof creationInputs === 'undefined' ? {} : { creationInputs: buildPersistedCreationInputs(creationInputs) }),
     ...(typeof buildState === 'undefined' ? {} : { buildState }),
   };
 
