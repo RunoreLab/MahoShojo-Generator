@@ -19,6 +19,11 @@ interface SaveToCloudButtonProps {
   style?: React.CSSProperties;
 }
 
+type DataCardsLoadState = {
+  status: 'idle' | 'loading' | 'success' | 'error';
+  error: string | null;
+};
+
 // 检测是否为情景文件
 const isScenarioData = (data: any): boolean => {
   if (!data) return false;
@@ -40,7 +45,7 @@ export default function SaveToCloudButton({
   style = {}
 }: SaveToCloudButtonProps) {
   const router = useRouter();
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, user } = useAuth();
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [cardName, setCardName] = useState('');
   const [cardDescription, setCardDescription] = useState('');
@@ -53,26 +58,43 @@ export default function SaveToCloudButton({
   const [userCapacity, setUserCapacity] = useState(config.DEFAULT_DATA_CARD_CAPACITY);
   const [showReplaceModal, setShowReplaceModal] = useState(false);
   const [isReplacing, setIsReplacing] = useState(false);
+  const [cardsLoadState, setCardsLoadState] = useState<DataCardsLoadState>({ status: 'idle', error: null });
 
   // 加载用户数据卡信息
   useEffect(() => {
     if (isAuthenticated) {
-      loadUserDataCards();
+      void loadUserDataCards();
+      return;
     }
+    setUserDataCards([]);
+    setCardsLoadState({ status: 'idle', error: null });
   }, [isAuthenticated]);
 
   const loadUserDataCards = async () => {
+    setCardsLoadState((current) => ({
+      status: 'loading',
+      error: current.error,
+    }));
     try {
-      const [cards, capacity] = await Promise.all([
-        dataCardApi.getCards(),
+      const [cardsResult, capacity] = await Promise.all([
+        dataCardApi.getCardsDetailed(),
         dataCardApi.getUserCapacity()
       ]);
-      setUserDataCards(cards);
+      setUserDataCards(cardsResult.cards);
       if (capacity !== null) {
         setUserCapacity(capacity);
       }
+      setCardsLoadState({
+        status: cardsResult.success ? 'success' : 'error',
+        error: cardsResult.success ? null : (cardsResult.error || '获取数据卡失败'),
+      });
+      return cardsResult;
     } catch (error) {
-        console.error("加载用户数据卡失败:", error);
+      const message = error instanceof Error ? error.message : '加载用户数据卡失败';
+      console.error("加载用户数据卡失败:", error);
+      setUserDataCards([]);
+      setCardsLoadState({ status: 'error', error: message });
+      return { success: false, cards: [], error: message };
     }
   };
 
@@ -271,6 +293,7 @@ export default function SaveToCloudButton({
               }
               return;
             }
+            await loadUserDataCards();
             setShowReplaceModal(true);
           })();
         }}
@@ -306,6 +329,8 @@ export default function SaveToCloudButton({
         onConfirm={handleReplaceConfirm}
         isSaving={isReplacing}
         data={effectiveData}
+        viewer={user ? { id: user.id, username: user.username } : null}
+        loadError={cardsLoadState.status === 'error' ? cardsLoadState.error : null}
       />
     </>
   );

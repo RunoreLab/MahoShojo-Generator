@@ -276,6 +276,75 @@ export const authStorage = {
   }
 };
 
+export type DataCardsListResult = {
+  success: boolean;
+  cards: any[];
+  error?: string;
+  status?: number;
+};
+
+const resolveApiErrorMessage = async (response: Response, fallback: string): Promise<string> => {
+  const contentType = (response.headers.get('content-type') || '').toLowerCase();
+
+  if (contentType.includes('application/json')) {
+    const payload = await response.json().catch(() => null);
+    if (payload && typeof payload === 'object') {
+      const record = payload as Record<string, unknown>;
+      const message = typeof record.message === 'string' ? record.message.trim() : '';
+      const error = typeof record.error === 'string' ? record.error.trim() : '';
+      if (message) return message;
+      if (error) return error;
+    }
+  }
+
+  const text = await response.text().catch(() => '');
+  const trimmed = typeof text === 'string' ? text.trim() : '';
+  if (trimmed) return trimmed.slice(0, 200);
+
+  return fallback;
+};
+
+const fetchDataCardsDetailed = async (
+  search?: string,
+  sortBy?: 'likes' | 'usage' | 'favorites' | 'created_at',
+): Promise<DataCardsListResult> => {
+  try {
+    const searchParams = new URLSearchParams();
+    if (search) {
+      searchParams.append('search', search);
+    }
+    if (sortBy) {
+      searchParams.append('sortBy', sortBy);
+    }
+
+    const queryString = searchParams.toString();
+    const url = `/api/data-cards${queryString ? `?${queryString}` : ''}`;
+    const response = await authStorage.fetch(url);
+
+    if (response.ok) {
+      const data = await response.json().catch(() => null);
+      return {
+        success: true,
+        cards: Array.isArray(data?.cards) ? data.cards : [],
+      };
+    }
+
+    const fallback = `获取数据卡失败（HTTP ${response.status}）`;
+    return {
+      success: false,
+      cards: [],
+      status: response.status,
+      error: await resolveApiErrorMessage(response, fallback),
+    };
+  } catch (error) {
+    return {
+      success: false,
+      cards: [],
+      error: error instanceof Error ? error.message : '获取数据卡失败',
+    };
+  }
+};
+
 // API 请求工具函数
 export const authApi = {
   // 注册
@@ -404,31 +473,20 @@ export const authApi = {
 
 // 数据卡 API
 export const dataCardApi = {
+  async getCardsDetailed(
+    search?: string,
+    sortBy?: 'likes' | 'usage' | 'favorites' | 'created_at',
+  ): Promise<DataCardsListResult> {
+    return fetchDataCardsDetailed(search, sortBy);
+  },
+
   // 获取所有数据卡
   async getCards(search?: string, sortBy?: 'likes' | 'usage' | 'favorites' | 'created_at'): Promise<any[]> {
-    try {
-      const searchParams = new URLSearchParams();
-      if (search) {
-        searchParams.append('search', search);
-      }
-      if (sortBy) {
-        searchParams.append('sortBy', sortBy);
-      }
-      
-      const queryString = searchParams.toString();
-      const url = `/api/data-cards${queryString ? `?${queryString}` : ''}`;
-      
-      const response = await authStorage.fetch(url);
-
-      if (response.ok) {
-        const data = await response.json();
-        return data.cards || [];
-      }
-      return [];
-    } catch (error) {
-      console.error('Get cards error:', error);
-      return [];
+    const result = await fetchDataCardsDetailed(search, sortBy);
+    if (!result.success && result.error) {
+      console.error('Get cards error:', result.error);
     }
+    return result.cards;
   },
 
   // 获取用户数据卡容量
