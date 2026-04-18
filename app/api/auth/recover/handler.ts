@@ -2,7 +2,10 @@ import { generateRecoveryToken, hashRecoveryToken, RECOVERY_TOKEN_TTL_SECONDS } 
 import { guardMailSendByAudit } from '@/lib/auth/mail-send-guard';
 import { recordAuthAuditLog } from '@/lib/auth/auth-audit';
 import { getDrizzleDbFromRuntime } from '@/lib/db/drizzle';
-import { getBusinessUserByUsername } from '@/lib/db/repositories/business-users';
+import {
+  getBusinessUserByUsername,
+  listBusinessUsersByEmailInsensitive,
+} from '@/lib/db/repositories/business-users';
 import {
   consumePasswordResetTokenById,
   createPasswordResetToken,
@@ -14,6 +17,11 @@ export const runtime = 'edge';
 
 const GENERIC_MESSAGE = '如果您输入的信息正确，系统会向邮箱发送一次性重置链接，请在 15 分钟内完成重置。';
 const LEGACY_RECOVERY_EVENT_TYPE = 'legacy_password_recovery_request';
+
+type RecoveryUserCandidate = {
+  id: number;
+  username: string;
+};
 
 const toNonEmptyString = (value: unknown): string | null => {
   if (typeof value !== 'string') return null;
@@ -37,6 +45,7 @@ type RecoverDeps = {
   recoveryTokenTtlSeconds: number;
   getDrizzleDbFromRuntime: typeof getDrizzleDbFromRuntime;
   getBusinessUserByUsername: typeof getBusinessUserByUsername;
+  listBusinessUsersByEmailInsensitive: typeof listBusinessUsersByEmailInsensitive;
   consumePasswordResetTokenById: typeof consumePasswordResetTokenById;
   createPasswordResetToken: typeof createPasswordResetToken;
   getUserByUsername: typeof getUserByUsername;
@@ -52,6 +61,7 @@ const defaultRecoverDeps: RecoverDeps = {
   recoveryTokenTtlSeconds: RECOVERY_TOKEN_TTL_SECONDS,
   getDrizzleDbFromRuntime,
   getBusinessUserByUsername,
+  listBusinessUsersByEmailInsensitive,
   consumePasswordResetTokenById,
   createPasswordResetToken,
   getUserByUsername,
@@ -114,16 +124,16 @@ const buildRecoverHandler = (deps: RecoverDeps): ((req: Request) => Promise<Resp
       });
     }
 
-    const { username, email, turnstileToken } = payload;
-    if (!username || !email || !turnstileToken) {
+    const { email, turnstileToken } = payload;
+    if (!email || !turnstileToken) {
       await recordAuthAuditLog({
         req,
         eventType: LEGACY_RECOVERY_EVENT_TYPE,
         authSource: 'legacy',
-        identifierType: 'username',
+        identifierType: 'email',
         resultCode: 'INVALID_PAYLOAD',
       });
-      return new Response(JSON.stringify({ success: false, error: '用户名、邮箱和验证码均不能为空' }), {
+      return new Response(JSON.stringify({ success: false, error: '邮箱和验证码均不能为空' }), {
         status: 400,
         headers: { 'Content-Type': 'application/json' },
       });
@@ -135,7 +145,7 @@ const buildRecoverHandler = (deps: RecoverDeps): ((req: Request) => Promise<Resp
         req,
         eventType: LEGACY_RECOVERY_EVENT_TYPE,
         authSource: 'legacy',
-        identifierType: 'username',
+        identifierType: 'email',
         resultCode: 'TURNSTILE_INVALID',
       });
       return new Response(JSON.stringify({ success: false, error: '安全验证失败，请重新验证' }), {
@@ -153,16 +163,20 @@ const buildRecoverHandler = (deps: RecoverDeps): ((req: Request) => Promise<Resp
     }
 
     const normalizedEmail = email.trim().toLowerCase();
-    const normalizedUsername = username.trim();
 
     try {
-      const userFromDb = await deps.getBusinessUserByUsername(db, normalizedUsername);
-      const legacyUser = userFromDb ?? (await deps.getUserByUsername(normalizedUsername));
-      const userId = typeof legacyUser?.id === 'number' && Number.isSafeInteger(legacyUser.id) ? legacyUser.id : null;
-      const storedEmail = toNonEmptyString(legacyUser?.email)?.toLowerCase() ?? null;
-      const safeUsername = toNonEmptyString(legacyUser?.username) ?? normalizedUsername;
+      const emailCandidates = await deps.listBusinessUsersByEmailInsensitive(db, normalizedEmail, 2);
+      const recoveryUser: RecoveryUserCandidate | null =
+        emailCandidates.length === 1
+          ? {
+              id: emailCandidates[0].id,
+              username: emailCandidates[0].username,
+            }
+          : null;
 
-      if (userId && storedEmail === normalizedEmail) {
+      if (recoveryUser) {
+        const userId = recoveryUser.id;
+        const safeUsername = toNonEmptyString(recoveryUser.username) ?? '用户';
         const guard = await guardMailSendByAudit({
           db,
           req,
@@ -273,7 +287,8 @@ const buildRecoverHandler = (deps: RecoverDeps): ((req: Request) => Promise<Resp
           eventType: LEGACY_RECOVERY_EVENT_TYPE,
           authSource: 'legacy',
           identifierType: 'email',
-          resultCode: 'USER_EMAIL_MISMATCH',
+          resultCode: emailCandidates.length > 1 ? 'EMAIL_RECOVERY_CONFLICT' : 'USER_EMAIL_MISMATCH',
+          metadata: emailCandidates.length > 1 ? { candidateCount: emailCandidates.length } : undefined,
         });
       }
 
