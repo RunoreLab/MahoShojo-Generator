@@ -61,7 +61,7 @@
       "id": "magical-girl-wastetrace-traveler",
       "kind": "magical-girl",
       "title": "废土行迹世界观向：旅人角色问卷",
-      "description": "不需要预先了解设定，按直觉作答即可；推荐用于创作台 / 通用角色卡（Markdown），生成废土旅人、调查者、护送者、熟路人等角色。",
+      "description": "用于生成废土世界的角色档案：推荐用于通用角色卡，生成废土旅人、调查者、护送者、探路者等角色。",
       "path": "/questionnaires/presets/magical-girl-wastetrace-traveler.json"
     },
     {
