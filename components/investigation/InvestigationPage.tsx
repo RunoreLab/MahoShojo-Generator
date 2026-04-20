@@ -272,7 +272,7 @@ export function InvestigationPage({
           </p>
           <h1 className="mt-2 text-3xl font-bold">调查院</h1>
           <p className="mt-2 text-sm leading-6 text-gray-600 dark:text-slate-300">
-            面向公开数据卡的众查入口。这里会显示你当前可处理的案件与调查员状态。
+            面向公开数据卡的众查入口。这里会显示你当前可处理的案件与巡查使状态。
           </p>
         </section>
 
@@ -292,7 +292,7 @@ export function InvestigationPage({
           <section className="rounded-[32px] border border-white/70 bg-white/90 p-6 shadow-lg dark:border-slate-700/70 dark:bg-slate-950/80">
             <h2 className="text-2xl font-bold text-gray-900 dark:text-slate-50">请先登录</h2>
             <p className="mt-3 text-sm leading-6 text-gray-600 dark:text-slate-300">
-              登录后可查看调查员资格、领取众查案件并提交处理结论。
+              登录后可查看巡查使资格、领取众查案件并提交处理结论。
             </p>
             <Link
               href="/character-manager"
@@ -307,7 +307,7 @@ export function InvestigationPage({
           <section className="rounded-[32px] border border-white/70 bg-white/90 p-6 shadow-lg dark:border-slate-700/70 dark:bg-slate-950/80">
             <h2 className="text-2xl font-bold text-gray-900 dark:text-slate-50">当前不可参与众查</h2>
             <p className="mt-3 text-sm leading-6 text-gray-600 dark:text-slate-300">
-              {summary?.statusReason ?? '当前账号尚未满足调查员资格要求。'}
+              {summary?.statusReason ?? '当前账号尚未满足巡查使资格要求。'}
             </p>
           </section>
         ) : null}
