@@ -366,6 +366,43 @@ describe('crowd review service', () => {
     );
   });
 
+  test('concluded violation round enforces target card to rejected and banned', async () => {
+    const writes: Array<Record<string, unknown>> = [];
+    const service = buildService({
+      repo: {
+        getAssignmentByIdForInspector: async () => makeAssignmentRow(),
+        getRoundById: async () => makeRoundRow(),
+        listAssignmentsByRound: async () => [
+          makeAssignmentRow({ id: 'assignment-1', status: 'voted', decision: 'violation' }),
+          makeAssignmentRow({ id: 'assignment-2', status: 'voted', decision: 'violation', inspectorUserId: 8 }),
+        ],
+        finalizeAssignment: async () => true,
+        updateRound: async () => true,
+        updateReportCaseResolution: async () => true,
+        enforceTargetDataCardModerationOutcome: async (_db: unknown, input: Record<string, unknown>) => {
+          writes.push(input);
+          return { found: true, changed: true };
+        },
+      },
+    });
+
+    await service.submitCrowdReviewDecision({
+      db: {} as never,
+      userId: 7,
+      assignmentId: 'assignment-1',
+      decision: 'violation',
+      note: null,
+    });
+
+    expect(writes).toContainEqual(
+      expect.objectContaining({
+        cardId: 'card-1',
+        reviewStatus: 'rejected',
+        isPublic: -1,
+      }),
+    );
+  });
+
   test('concluded no_violation round writes report case to dismissed no_violation', async () => {
     const writes: Array<Record<string, unknown>> = [];
     const service = buildService({
@@ -403,6 +440,37 @@ describe('crowd review service', () => {
         resolutionCode: 'no_violation',
       }),
     );
+  });
+
+  test('concluded no_violation round does not enforce target card moderation outcome', async () => {
+    let called = false;
+    const service = buildService({
+      repo: {
+        getAssignmentByIdForInspector: async () => makeAssignmentRow(),
+        getRoundById: async () => makeRoundRow(),
+        listAssignmentsByRound: async () => [
+          makeAssignmentRow({ id: 'assignment-1', status: 'voted', decision: 'no_violation' }),
+          makeAssignmentRow({ id: 'assignment-2', status: 'voted', decision: 'no_violation', inspectorUserId: 8 }),
+        ],
+        finalizeAssignment: async () => true,
+        updateRound: async () => true,
+        updateReportCaseResolution: async () => true,
+        enforceTargetDataCardModerationOutcome: async () => {
+          called = true;
+          return { found: true, changed: true };
+        },
+      },
+    });
+
+    await service.submitCrowdReviewDecision({
+      db: {} as never,
+      userId: 7,
+      assignmentId: 'assignment-1',
+      decision: 'no_violation',
+      note: null,
+    });
+
+    expect(called).toBe(false);
   });
 
   test('tie after first deadline extends once and second tie escalates to under_review', async () => {

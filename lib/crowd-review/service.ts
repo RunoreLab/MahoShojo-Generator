@@ -1,5 +1,6 @@
 import type { AppDrizzleDb } from '@/lib/db/drizzle';
 import { countUserBadgesByBadgeId } from '@/lib/db/repositories/badges';
+import { enforceDataCardModerationOutcome as enforceDataCardModerationOutcomeRow } from '@/lib/db/repositories/data-cards-core';
 import {
   createCrowdReviewAssignment as createCrowdReviewAssignmentRow,
   createCrowdReviewRound as createCrowdReviewRoundRow,
@@ -26,6 +27,7 @@ import {
   type ReportCaseStatus,
   type ReportResolutionCode,
 } from '@/lib/db/schema';
+import { enforceResolvedReportCaseTargetCard } from '@/lib/data-card-reports/outcome-enforcement';
 import { getDataCardReportReasonLabel, isDataCardReportReasonCode } from '@/lib/data-card-reports/reasons';
 import { notifyReportCaseResolutionIfNeeded } from '@/lib/report-appeals/service';
 import { and, asc, eq, inArray, lte } from 'drizzle-orm';
@@ -139,6 +141,15 @@ type CrowdReviewServiceRepo = {
       now: string;
     },
   ) => Promise<boolean>;
+  enforceTargetDataCardModerationOutcome: (
+    db: AppDrizzleDb,
+    input: {
+      cardId: string;
+      reviewStatus: 'rejected';
+      isPublic: -1;
+      now: string;
+    },
+  ) => Promise<{ found: boolean; changed: boolean }>;
   listCrowdReviewHistoryByInspector: (db: AppDrizzleDb, userId: number, limit: number) => Promise<any[]>;
   advanceExpiredState: (db: AppDrizzleDb, now: string) => Promise<void>;
 };
@@ -663,6 +674,13 @@ const createRuntimeRepo = (): CrowdReviewServiceRepo => ({
     return rows.length > 0;
   },
   listCrowdReviewHistoryByInspector: (db, userId, limit) => listCrowdReviewHistoryByInspectorRows(db, userId, limit),
+  enforceTargetDataCardModerationOutcome: async (db, input) =>
+    enforceDataCardModerationOutcomeRow(db, {
+      cardId: input.cardId,
+      reviewStatus: input.reviewStatus,
+      isPublic: input.isPublic,
+      now: input.now,
+    }),
   advanceExpiredState: async (db, now) => {
     await db
       .update(crowdReviewAssignments)
@@ -845,6 +863,24 @@ const createCrowdReviewService = (deps: CrowdReviewServiceDeps) => {
       notifyReportCaseResolutionIfNeeded: deps.notifyReportCaseResolutionIfNeeded,
       skipNotification: true,
     });
+    if (summaryPlan.nextResultCode === 'violation') {
+      const targetEntityId =
+        assignments.find((item) => typeof item.targetEntityId === 'string' && item.targetEntityId.length > 0)
+          ?.targetEntityId ?? '';
+      const enforcement = await enforceResolvedReportCaseTargetCard({
+        db,
+        targetEntityType: 'data_card',
+        targetEntityId,
+        resolutionCode: 'confirmed_violation',
+        now,
+        enforceDataCardModerationOutcome: (enforcementDb, input) =>
+          deps.repo.enforceTargetDataCardModerationOutcome(enforcementDb, input),
+      });
+
+      if (!enforcement.found) {
+        throw new Error('众查结果已写回，但目标数据卡不存在，无法自动执行未通过与封禁');
+      }
+    }
     await syncFinalizedRoundAssignments(db, assignments, summaryPlan.summary, now);
     if (summaryPlan.nextResultCode === 'violation') {
       await retryReportCaseResolutionNotification({
@@ -1294,6 +1330,8 @@ export function createCrowdReviewServiceForTests(
       updateRound: deps.repo?.updateRound ?? (async () => missing('updateRound')),
       updateReportCaseResolution:
         deps.repo?.updateReportCaseResolution ?? (async () => missing('updateReportCaseResolution')),
+      enforceTargetDataCardModerationOutcome:
+        deps.repo?.enforceTargetDataCardModerationOutcome ?? (async () => ({ found: true, changed: false })),
       listCrowdReviewHistoryByInspector:
         deps.repo?.listCrowdReviewHistoryByInspector ?? (async () => missing('listCrowdReviewHistoryByInspector')),
       advanceExpiredState: deps.repo?.advanceExpiredState ?? (async () => undefined),

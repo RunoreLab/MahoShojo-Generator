@@ -675,6 +675,10 @@ describe('report appeals service', () => {
     expect(second).toBe(false);
     expect(messages).toHaveLength(1);
     expect(messages[0]?.templateKey).toBe('user.moderation.report_case_resolved');
+    expect(messages[0]?.payload).toMatchObject({
+      cardAutoRejected: true,
+      cardAutoBanned: true,
+    });
   });
 
   test('notifyReportCaseResolutionIfNeeded clears notification claim when message delivery fails', async () => {
