@@ -29,7 +29,9 @@ import {
 } from '@/components/questionnaire/QuestionnaireQuestionPanel';
 import { QuestionnaireAnswerExportPanel } from '@/components/questionnaire/QuestionnaireAnswerExportPanel';
 import { CreatorEntryLink } from '@/components/shared/CreatorEntryLink';
-import { readTextAndReasoningStreamFromResponse } from '@/lib/stream/read-text-and-reasoning-stream';
+import { StreamStopButton } from '@/components/shared/StreamStopButton';
+import { STREAM_ABORT_REASON_USER } from '@/lib/stream/abort';
+import { readSafeTextAndReasoningStreamFromResponse } from '@/lib/stream/read-safe-text-and-reasoning-stream';
 import { buildGeneralCharacterCardFromMarkdown } from '@/lib/stream/markdown-card';
 import { readJsonOrTextFromResponse, resolveApiErrorMessage } from '@/lib/client/apiError';
 import { AI_META_REQUEST_HEADER, AI_META_REQUEST_VALUE, readJsonWithAiMeta } from '@/lib/client/read-json-with-ai-meta';
@@ -252,6 +254,8 @@ const CanshouPage: React.FC = () => {
   const [streamedGeneralCard, setStreamedGeneralCard] = useState<any | null>(null);
   const [streamingReasoning, setStreamingReasoning] = useState<AIReasoningEnvelope | null>(null);
   const [nonStreamReasoning, setNonStreamReasoning] = useState<AIReasoningEnvelope | null>(null);
+  const [streamNotice, setStreamNotice] = useState<string | null>(null);
+  const streamAbortControllerRef = useRef<AbortController | null>(null);
   const [autoSaveTimestamp, setAutoSaveTimestamp] = useState<number | null>(null);
   const recommendedImageMode: ImageSaveMode = deviceType === 'mobile' ? 'modal' : 'download';
   const recommendedJsonMode: JsonSaveMode = deviceType === 'mobile' ? 'text' : 'download';
@@ -1179,6 +1183,7 @@ const CanshouPage: React.FC = () => {
     setStreamedGeneralCard(null);
     setStreamingReasoning(null);
     setNonStreamReasoning(null);
+    setStreamNotice(null);
     let nextCooldownMs = generatorCooldownMs;
     let shouldStartCooldown = false;
 
@@ -1227,6 +1232,11 @@ const CanshouPage: React.FC = () => {
       } else {
         requestHeaders[AI_META_REQUEST_HEADER] = AI_META_REQUEST_VALUE;
       }
+      const streamController = generationMode === 'stream' ? new AbortController() : null;
+      if (streamController) {
+        streamAbortControllerRef.current?.abort(STREAM_ABORT_REASON_USER);
+        streamAbortControllerRef.current = streamController;
+      }
       const response = await fetch(endpoint, {
         method: 'POST',
         headers: requestHeaders,
@@ -1256,6 +1266,7 @@ const CanshouPage: React.FC = () => {
           language: selectedLanguage,
           customProvider: customProviderPayload,
         }),
+        ...(streamController ? { signal: streamController.signal } : {}),
       });
 
       if (!response.ok) {
@@ -1285,10 +1296,16 @@ const CanshouPage: React.FC = () => {
         }
 
         setStreamingMarkdown('');
-        const { text: markdown } = await readTextAndReasoningStreamFromResponse(response, {
+        const controller = streamAbortControllerRef.current;
+        if (!controller) {
+          throw new Error('流式控制器初始化失败');
+        }
+        const { text: markdown, outputSafetyStatus, wasAborted, abortReason } = await readSafeTextAndReasoningStreamFromResponse(response, {
+          abortController: controller,
           label: '残兽档案（流式）',
           onText: (text) => setStreamingMarkdown(text),
           onReasoning: (reasoning) => setStreamingReasoning(reasoning),
+          safetyReason: '使用危险符文',
         });
 
         const { card } = buildGeneralCharacterCardFromMarkdown({
@@ -1299,6 +1316,15 @@ const CanshouPage: React.FC = () => {
           ...card,
           userAnswers: compactQuestionnaireAnswerItems(finalAnswerItems),
         };
+        if (outputSafetyStatus === 'blocked') {
+          setStreamNotice('输出触发调查院规则，已自动截断并追加逮捕令。当前内容可能不完整，但可继续保存。');
+        } else if (wasAborted) {
+          setStreamNotice(
+            abortReason === STREAM_ABORT_REASON_USER
+              ? '已手动停止生成。当前内容可能不完整，但可继续保存。'
+              : '流式生成已中断。当前内容可能不完整，但可继续保存。'
+          );
+        }
         if (!allowNativeSignatureForSubmit) {
           setStreamedGeneralCard(cardWithAnswers);
           setError(null);
@@ -1308,18 +1334,20 @@ const CanshouPage: React.FC = () => {
 
         let signedCard = cardWithAnswers;
         let hasSignError = false;
-        try {
-          const result = await resignDataCard(cardWithAnswers);
-          if (!result) return;
-          signedCard = result;
-        } catch (err) {
-          const message = err instanceof Error ? err.message : '签名失败';
-          setError(`⚠️ 原生性签名失败，已降级为非原生：${message}`);
-          hasSignError = true;
+        if (!wasAborted && outputSafetyStatus !== 'blocked') {
+          try {
+            const result = await resignDataCard(cardWithAnswers);
+            if (!result) return;
+            signedCard = result;
+          } catch (err) {
+            const message = err instanceof Error ? err.message : '签名失败';
+            setError(`⚠️ 原生性签名失败，已降级为非原生：${message}`);
+            hasSignError = true;
+          }
         }
 
         setStreamedGeneralCard(signedCard);
-        if (!hasSignError) {
+        if (!hasSignError && !wasAborted && outputSafetyStatus !== 'blocked') {
           setError(null);
         }
         shouldStartCooldown = true;
@@ -1344,6 +1372,7 @@ const CanshouPage: React.FC = () => {
         setError(err instanceof Error ? `✨ 魔法失效了！${err.message}` : '发生未知错误');
       }
     } finally {
+      streamAbortControllerRef.current = null;
       if (shouldStartCooldown) {
         startCooldown(nextCooldownMs);
       }
@@ -2049,11 +2078,20 @@ const CanshouPage: React.FC = () => {
                 </div>
 
                 {error && <ErrorMessage message={error} />}
+                {streamNotice ? <div className="mt-3 text-center text-sm text-amber-700">{streamNotice}</div> : null}
                 {isQuestionnaireNativeAllowed && hasOverLimitAnswer && (
                   <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-700">
                     ⚠️ 已有 {overLimitItems.length} 条答案超过字数上限，继续提交将导致生成内容丧失原生性。
                   </div>
                 )}
+                {submitting && generationMode === 'stream' ? (
+                  <div className="mt-4 flex justify-center">
+                    <StreamStopButton
+                      onClick={() => streamAbortControllerRef.current?.abort(STREAM_ABORT_REASON_USER)}
+                      label="停止生成"
+                    />
+                  </div>
+                ) : null}
 
                 <QuestionnaireAnswerExportPanel
                   variant="dark"

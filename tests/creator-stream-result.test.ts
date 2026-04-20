@@ -80,6 +80,8 @@ describe('creator stream result', () => {
     expect(result.title).toBe('深夜车站');
     expect(result.content).toContain('月台空无一人');
     expect(result.creationInputs.template).toBe('general-scenario');
+    expect((result.creationInputs as Record<string, unknown>).questionnaires).toBeUndefined();
+    expect((result.creationInputs as Record<string, unknown>).questionnaireAnswers).toBeUndefined();
     expect(result.buildState?.rules).toEqual([]);
   });
 });

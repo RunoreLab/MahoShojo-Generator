@@ -27,6 +27,7 @@ import { ScenarioPickerPanel } from '@/components/shared/ScenarioPickerPanel';
 import { StoryOptionsPanel } from '@/components/shared/StoryOptionsPanel';
 import { GenerationModeSwitcher } from '@/components/shared/GenerationModeSwitcher';
 import { ImagePreviewModal } from '@/components/shared/ImagePreviewModal';
+import { StreamStopButton } from '@/components/shared/StreamStopButton';
 import { PvpSettlementCardModal } from '@/components/pvp/PvpSettlementCardModal';
 import { authStorage } from '@/lib/auth';
 import { copyTextToClipboard } from '@/lib/clipboard';
@@ -43,8 +44,9 @@ import { mapDataCardRuntimeSourceInfo, mapPublicDataCardRowToBattleSelectionPayl
 	import { buildPvpScenarioRulesPatch } from '@/lib/pvp/rules-patch';
 	import { isLegacyAdjudicatorFormat, mergeAdjudicationEvents } from '@/lib/pvp/adjudication-events';
 	import type { PvpRoomRules, PvpScenarioSelection } from '@/lib/pvp/types';
-	import { canViewOtherSubmissions } from '@/lib/pvp/submission-visibility';
-	import { createStreamReadWithTimeout, STREAM_READ_IDLE_TIMEOUT_MS, STREAM_READ_TOTAL_TIMEOUT_MS } from '@/lib/stream/timeout';
+import { canViewOtherSubmissions } from '@/lib/pvp/submission-visibility';
+import { createStreamReadWithTimeout, STREAM_READ_IDLE_TIMEOUT_MS, STREAM_READ_TOTAL_TIMEOUT_MS } from '@/lib/stream/timeout';
+import { relayAbortSignal, STREAM_ABORT_REASON_USER } from '@/lib/stream/abort';
 
 import type { Preset } from '@/lib/presets';
 import type { ScenarioPreset } from '@/lib/scenario-presets';
@@ -146,13 +148,20 @@ const summarizeNonJsonResponse = (res: Response, rawText: string): { error: stri
   };
 };
 
-const fetchWithTimeout = async (input: RequestInfo | URL, init: RequestInit, timeoutMs: number): Promise<Response> => {
+const fetchWithTimeout = async (
+  input: RequestInfo | URL,
+  init: RequestInit,
+  timeoutMs: number,
+  externalSignal?: AbortSignal | null,
+): Promise<Response> => {
   const controller = new AbortController();
+  const cleanupRelay = relayAbortSignal(externalSignal, controller);
   const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
   try {
     const res = await fetch(input, { ...init, signal: controller.signal });
     return res;
   } finally {
+    cleanupRelay();
     window.clearTimeout(timeoutId);
   }
 };
@@ -275,6 +284,9 @@ export function PvpRoomPage() {
   const [streamingResolveMarkdown, setStreamingResolveMarkdown] = useState('');
   const [streamingResolveMeta, setStreamingResolveMeta] = useState<any | null>(null);
   const [isStreamingResolve, setIsStreamingResolve] = useState(false);
+  const [resolveNotice, setResolveNotice] = useState<string | null>(null);
+  const [keepStreamingResolvePreview, setKeepStreamingResolvePreview] = useState(false);
+  const resolveAbortControllerRef = useRef<AbortController | null>(null);
 
   const [versionConflictRetryUntil, setVersionConflictRetryUntil] = useState<number | null>(null);
   const [versionConflictSecondsLeft, setVersionConflictSecondsLeft] = useState(0);
@@ -726,8 +738,9 @@ export function PvpRoomPage() {
     const raw = (latestRoundResult as any)?.streamMeta ?? null;
     return raw && typeof raw === 'object' ? raw : null;
   }, [latestRoundResult]);
-  const reportContentForUi = (isStreamingResolve ? streamingResolveMarkdown : '') || latestRoundReportMarkdown;
-  const reportMetaForUi = (isStreamingResolve ? streamingResolveMeta : null) || latestRoundStreamMeta;
+  const shouldShowStreamingResolvePreview = isStreamingResolve || keepStreamingResolvePreview;
+  const reportContentForUi = (shouldShowStreamingResolvePreview ? streamingResolveMarkdown : '') || latestRoundReportMarkdown;
+  const reportMetaForUi = (shouldShowStreamingResolvePreview ? streamingResolveMeta : null) || latestRoundStreamMeta;
   const hasAnyReportForUi = Boolean(reportContentForUi.trim()) || Boolean(latestRoundResult?.report);
 
   const rulesDraftError = useMemo(() => {
@@ -1066,7 +1079,12 @@ export function PvpRoomPage() {
 
       setStreamingResolveMarkdown('');
       setStreamingResolveMeta(null);
+      setResolveNotice(null);
+      setKeepStreamingResolvePreview(false);
       setIsStreamingResolve(true);
+      const resolveController = new AbortController();
+      resolveAbortControllerRef.current?.abort(STREAM_ABORT_REASON_USER);
+      resolveAbortControllerRef.current = resolveController;
       try {
         const res = await fetchWithTimeout(
           `/api/pvp/rooms/${roomId}/rounds/${latestRound?.id}/resolve-stream?format=sse`,
@@ -1080,6 +1098,7 @@ export function PvpRoomPage() {
             }),
           }),
           RESOLVE_REQUEST_TIMEOUT_MS,
+          resolveController.signal,
         );
 
         // resolve-stream 成功时通常返回 SSE（也兼容 text/plain）；失败返回 JSON 错误
@@ -1360,13 +1379,31 @@ export function PvpRoomPage() {
             accumulated += flushed;
             setStreamingResolveMarkdown(accumulated);
           }
-	        return { success: true, streamed: true };
-	      } finally {
+	        return { success: true, streamed: true, aborted: false as const };
+	      } catch (error) {
+        if (resolveController.signal.aborted) {
+          setKeepStreamingResolvePreview(true);
+          setResolveNotice(
+            resolveController.signal.reason === STREAM_ABORT_REASON_USER
+              ? '已手动停止结算。当前预览可能不完整，本轮不会记为正式结算。'
+              : '结算流已中断。当前预览可能不完整，本轮不会记为正式结算。'
+          );
+          return { success: true, streamed: true, aborted: true as const };
+        }
+        throw error;
+      } finally {
+        if (resolveAbortControllerRef.current === resolveController) {
+          resolveAbortControllerRef.current = null;
+        }
         setIsStreamingResolve(false);
       }
     },
-    onSuccess: () => {
+    onSuccess: (result: { success?: boolean; streamed?: boolean; aborted?: boolean } | undefined) => {
       startCooldown();
+      if (result?.aborted) {
+        return;
+      }
+      setKeepStreamingResolvePreview(false);
       void roomQuery.refetch();
     },
     onError: (e: any) => {
@@ -3322,20 +3359,30 @@ export function PvpRoomPage() {
                               </div>
                             </details>
 
-                            <button
-                              className="generate-button mt-3 w-full"
-                              style={{ backgroundColor: '#f59e0b', backgroundImage: 'linear-gradient(to right, #f59e0b, #d97706)' }}
-                              onClick={() => handleResolve()}
-                              disabled={resolveMutation.isPending || isCooldown || isCustomProviderMissingKey}
-                            >
-                              {resolveMutation.isPending
-                                ? '结算中…'
-                                : isCooldown
-                                  ? `冷却中（${remainingTime}s）`
-                                  : rules?.generationMode === 'stream'
-                                    ? '结算（流式生成）'
-                                    : '结算（生成战报）'}
-                            </button>
+                            <div className="mt-3 flex items-center gap-2">
+                              <button
+                                className="generate-button w-full"
+                                style={{ backgroundColor: '#f59e0b', backgroundImage: 'linear-gradient(to right, #f59e0b, #d97706)' }}
+                                onClick={() => handleResolve()}
+                                disabled={resolveMutation.isPending || isCooldown || isCustomProviderMissingKey}
+                              >
+                                {resolveMutation.isPending
+                                  ? '结算中…'
+                                  : isCooldown
+                                    ? `冷却中（${remainingTime}s）`
+                                    : rules?.generationMode === 'stream'
+                                      ? '结算（流式生成）'
+                                      : '结算（生成战报）'}
+                              </button>
+                              {resolveMutation.isPending && rules?.generationMode === 'stream' ? (
+                                <StreamStopButton
+                                  onClick={() => resolveAbortControllerRef.current?.abort(STREAM_ABORT_REASON_USER)}
+                                  compact
+                                  label="停止结算"
+                                />
+                              ) : null}
+                            </div>
+                            {resolveNotice ? <div className="mt-2 text-xs text-amber-700">{resolveNotice}</div> : null}
                           </>
                         ) : (
                           <div className="mt-3 rounded-md border bg-gray-50 p-3 text-sm text-gray-700">
@@ -3407,7 +3454,7 @@ export function PvpRoomPage() {
                     ) : null}
                     <div className="text-sm text-gray-700 mt-2 flex items-center justify-between gap-2">
                       <div>
-                        本轮胜者：<span className="font-semibold">{latestWinnerText || (isStreamingResolve ? '解析中…' : '平局')}</span>
+                        本轮胜者：<span className="font-semibold">{latestWinnerText || (shouldShowStreamingResolvePreview ? '解析中…' : '平局')}</span>
                       </div>
                       {isHost && phase === 'reviewing' && latestRound ? (
                         <button

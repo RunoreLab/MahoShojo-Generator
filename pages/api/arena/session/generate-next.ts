@@ -315,6 +315,7 @@ export default async function handler(req: NextRequest): Promise<Response> {
       method: 'POST',
       headers: upstreamHeaders,
       body: JSON.stringify(buildUpstreamRequestBody(payload, internalGuidance, customProviderParsed.value)),
+      signal: req.signal,
     });
 
     if (!upstreamResponse.ok || !upstreamResponse.body) {

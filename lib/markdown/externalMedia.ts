@@ -41,6 +41,7 @@ const BASE_TRUSTED_MEDIA_HOSTS = [
   'imgur.com',
   'i.imgur.com',
   'imgchr.com',
+  's41.ax1x.com',
   // 托管
   'i.imgs.ovh',
   'imgloc.com'

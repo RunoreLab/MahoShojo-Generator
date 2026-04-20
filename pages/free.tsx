@@ -13,6 +13,7 @@ import { GenerationModeSwitcher, type GenerationMode } from '@/components/shared
 import { CharacterPortraitAssetPanel } from '@/components/shared/CharacterPortraitAssetPanel';
 import { TokenIndicator } from '@/components/shared/TokenIndicator';
 import { JsonSizeIndicator } from '@/components/shared/JsonSizeIndicator';
+import { StreamStopButton } from '@/components/shared/StreamStopButton';
 import { MarkdownBlock } from '@/components/MarkdownBlock';
 import MagicalGirlCard from '@/components/MagicalGirlCard';
 import CanshouCard from '@/components/CanshouCard';
@@ -20,8 +21,8 @@ import GeneralCharacterCard from '@/components/GeneralCharacterCard';
 
 import { useProviderModeCooldown } from '@/lib/cooldown';
 import { getSensitiveWordRedirectTarget } from '@/lib/content-safety/client';
-import { readTextAndReasoningStreamFromResponse } from '@/lib/stream/read-text-and-reasoning-stream';
 import { buildGeneralCharacterCardFromMarkdown, buildGeneralScenarioCardFromMarkdown } from '@/lib/stream/markdown-card';
+import { readSafeTextAndReasoningStreamFromResponse } from '@/lib/stream/read-safe-text-and-reasoning-stream';
 import { USER_PROVIDED_KEY_COOLDOWN_MS, OFFICIAL_KEY_MAX_AI_COOLDOWN_MS } from '@/lib/ai/cooldowns';
 import { buildCustomProviderPayload, isUsingUserProvidedKey } from '@/lib/ai/custom-provider';
 import { FREE_GENERATION_ATTACHMENT_LIMITS, formatReferenceAttachmentsForPrompt } from '@/lib/ai/attachments';
@@ -30,6 +31,7 @@ import { readJsonOrTextFromResponse, resolveApiErrorMessage } from '@/lib/client
 import { AI_META_REQUEST_HEADER, AI_META_REQUEST_VALUE, readJsonWithAiMeta } from '@/lib/client/read-json-with-ai-meta';
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
 import { authStorage } from '@/lib/auth';
+import { STREAM_ABORT_REASON_USER } from '@/lib/stream/abort';
 import type { AIReasoningEnvelope } from '@/types/ai-reasoning';
 import type { CharacterCardPortraitAsset } from '@/types/visual-asset';
 
@@ -258,6 +260,8 @@ export default function FreeGeneratorPage() {
   const [streamingMarkdown, setStreamingMarkdown] = useState<string | null>(null);
   const [streamedGeneralCard, setStreamedGeneralCard] = useState<any | null>(null);
   const [streamingReasoning, setStreamingReasoning] = useState<AIReasoningEnvelope | null>(null);
+  const [streamNotice, setStreamNotice] = useState<string | null>(null);
+  const streamAbortControllerRef = useRef<AbortController | null>(null);
   const [characterPortraitAsset, setCharacterPortraitAsset] = useState<CharacterCardPortraitAsset | null>(null);
 
   const [showFieldGuide, setShowFieldGuide] = useState(false);
@@ -501,6 +505,7 @@ export default function FreeGeneratorPage() {
     setStreamingMarkdown(null);
     setStreamedGeneralCard(null);
     setStreamingReasoning(null);
+    setStreamNotice(null);
     setCharacterPortraitAsset(null);
     let nextCooldownMs = freeCooldownMs;
     let shouldStartCooldown = false;
@@ -552,10 +557,16 @@ export default function FreeGeneratorPage() {
       } else {
         requestHeaders[AI_META_REQUEST_HEADER] = AI_META_REQUEST_VALUE;
       }
+      const streamController = generationMode === 'stream' ? new AbortController() : null;
+      if (streamController) {
+        streamAbortControllerRef.current?.abort(STREAM_ABORT_REASON_USER);
+        streamAbortControllerRef.current = streamController;
+      }
       const response = await fetch(endpoint, {
         method: 'POST',
         headers: requestHeaders,
         body: JSON.stringify(requestBody),
+        ...(streamController ? { signal: streamController.signal } : {}),
       });
 
       if (!response.ok) {
@@ -588,10 +599,16 @@ export default function FreeGeneratorPage() {
         }
 
         setStreamingMarkdown('');
-        const { text: markdown } = await readTextAndReasoningStreamFromResponse(response, {
+        const controller = streamAbortControllerRef.current;
+        if (!controller) {
+          throw new Error('流式控制器初始化失败');
+        }
+        const { text: markdown, outputSafetyStatus, wasAborted, abortReason } = await readSafeTextAndReasoningStreamFromResponse(response, {
+          abortController: controller,
           label: '自由生成（流式）',
           onText: (text) => setStreamingMarkdown(text),
           onReasoning: (reasoning) => setStreamingReasoning(reasoning),
+          safetyReason: '使用危险符文',
         });
 
         if (schemaId === 'general') {
@@ -606,6 +623,16 @@ export default function FreeGeneratorPage() {
             defaultTitle: '情景',
           });
           setStreamedGeneralCard(card);
+        }
+
+        if (outputSafetyStatus === 'blocked') {
+          setStreamNotice('输出触发调查院规则，已自动截断并追加逮捕令。当前内容可能不完整，但可继续保存。');
+        } else if (wasAborted) {
+          setStreamNotice(
+            abortReason === STREAM_ABORT_REASON_USER
+              ? '已手动停止生成。当前内容可能不完整，但可继续保存。'
+              : '流式生成已中断。当前内容可能不完整，但可继续保存。'
+          );
         }
 
         shouldStartCooldown = true;
@@ -631,6 +658,7 @@ export default function FreeGeneratorPage() {
         setError(`✨ 生成失败！${message}`);
       }
     } finally {
+      streamAbortControllerRef.current = null;
       if (shouldStartCooldown) {
         startCooldown(nextCooldownMs);
       }
@@ -1106,6 +1134,14 @@ export default function FreeGeneratorPage() {
                 >
                   {isCooldown ? `冷却中 (${remainingTime}s)` : submitting ? '生成中...' : '开始生成'}
                 </button>
+                {submitting && generationMode === 'stream' ? (
+                  <div className="mt-3 flex justify-center">
+                    <StreamStopButton
+                      onClick={() => streamAbortControllerRef.current?.abort(STREAM_ABORT_REASON_USER)}
+                      label="停止生成"
+                    />
+                  </div>
+                ) : null}
 
                 <TokenIndicator
                   text={tokenEstimateText}
@@ -1113,6 +1149,7 @@ export default function FreeGeneratorPage() {
                 />
 
                 {error && <ErrorMessage message={error} className="mt-3" />}
+                {streamNotice ? <div className="mt-3 text-center text-sm text-amber-700">{streamNotice}</div> : null}
 
                 <div className="mt-6 text-center">
                   <Link href="/" className="footer-link">返回首页</Link>

@@ -58,6 +58,13 @@
       "path": "/questionnaires/presets/magical-girl-afterwork-world-lore-power-system.json"
     },
     {
+      "id": "magical-girl-wastetrace-traveler",
+      "kind": "magical-girl",
+      "title": "废土行迹世界观向：旅人角色问卷",
+      "description": "用于生成废土世界的角色档案：推荐用于通用角色卡，生成废土旅人、调查者、护送者、探路者等角色。",
+      "path": "/questionnaires/presets/magical-girl-wastetrace-traveler.json"
+    },
+    {
       "id": "canshou-default",
       "kind": "canshou",
       "title": "研究院残兽调查",

@@ -145,6 +145,13 @@ type UpdateDataCardInput = {
   reviewStatus?: 'pending' | 'approved' | 'rejected';
 };
 
+type EnforceDataCardModerationOutcomeInput = {
+  cardId: string;
+  reviewStatus: 'rejected';
+  isPublic: -1;
+  now: string;
+};
+
 type UpsertDataCardUpdateInput = {
   id: string;
   dataCardId: string;
@@ -221,6 +228,43 @@ const mapDataCardDbRow = (row: Record<string, unknown>): DataCardDbRow => ({
   updated_at: toNullableString(row.updated_at),
   deleted_at: toNullableString(row.deleted_at),
 });
+
+export const enforceDataCardModerationOutcome = async (
+  db: AppDrizzleDb,
+  input: EnforceDataCardModerationOutcomeInput,
+): Promise<{ found: boolean; changed: boolean }> => {
+  const rows = await db
+    .select({
+      id: dataCards.id,
+      isPublic: sql<number>`CAST(${dataCards.isPublic} AS INTEGER)`,
+      reviewStatus: dataCards.reviewStatus,
+    })
+    .from(dataCards)
+    .where(and(eq(dataCards.id, input.cardId), isNull(dataCards.deletedAt)))
+    .limit(1);
+
+  const current = rows[0];
+  if (!current) {
+    return { found: false, changed: false };
+  }
+
+  if (current.reviewStatus === input.reviewStatus && Number(current.isPublic) === input.isPublic) {
+    return { found: true, changed: false };
+  }
+
+  await db
+    .update(dataCards)
+    .set({
+      reviewStatus: input.reviewStatus,
+      isPublic: sql`${input.isPublic}`,
+      publicSince: null,
+      updatedAt: input.now,
+    })
+    .where(and(eq(dataCards.id, input.cardId), isNull(dataCards.deletedAt)))
+    .returning({ id: dataCards.id });
+
+  return { found: true, changed: true };
+};
 
 const buildExcludeIdsClause = (ids: string[]): SQL | undefined => {
   if (ids.length === 0) return undefined;

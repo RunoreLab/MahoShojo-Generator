@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useMemo } from 'react';
+import { useCallback, useMemo, useRef } from 'react';
 import { useRouter } from 'next/router';
 
 import type { NewsReport } from '@/components/BattleReportCard';
@@ -8,12 +8,14 @@ import { persistArrestedBackup, type ArrestedBackupDraftItem, type ArrestedBacku
 import { useProviderModeCooldown } from '@/lib/cooldown';
 import { quickCheck } from '@/lib/sensitive-word-filter';
 import { applyShieldWords } from '@/lib/shield-word-filter';
+import { buildStreamSensitiveArrestWarrantMarkdown } from '@/lib/stream/arrest-warrant';
+import { STREAM_ABORT_REASON_USER } from '@/lib/stream/abort';
 import { useBattleStore } from '../stores/useBattleStore';
 import { BattleAiImpact, BattleApiResponse, BattleStoreState, CombatantData } from '../types';
 import { useBattleActions } from './useBattleActions';
 import { useStreamCombatantUpdater } from './useStreamCombatantUpdater';
 import { toBattleReportMarkdown } from '../utils/battleReportMarkdown';
-import { precheckBattleReportForRedo, STREAM_TRUNCATED_BY_SENSITIVE_MARKER } from '@/lib/arena/redo-updates';
+import { precheckBattleReportForRedo } from '@/lib/arena/redo-updates';
 import { extractStreamTelemetryMeta, extractStreamUpdateMeta, stripStreamUpdateMetaComment } from '@/lib/arena/stream-meta';
 import {
   createStreamReadWithTimeout,
@@ -209,28 +211,6 @@ const appendNarrativeHistoryIfEnabled = async (payload: {
     // 叙事历史是“增强功能”，失败不应影响战报生成主流程（localStorage 配额/浏览器异常等）
     console.warn('写入叙事历史失败（已忽略）', error);
   }
-};
-
-const buildStreamSensitiveArrestWarrantMarkdown = (reason?: string): string => {
-  const safeReason = reason?.trim() ? `（原因：${reason.trim()}）` : '';
-  return [
-    '',
-    '',
-    '---',
-    '',
-    '<!-- ' + STREAM_TRUNCATED_BY_SENSITIVE_MARKER + ' -->',
-    '',
-    '## 逮捕令',
-    '',
-    '**批 准 逮 捕**',
-    '',
-    `内容违反调查院规定${safeReason}，系统已自动截断。`,
-    '',
-    '⚠️ **金绿猫眼权杖严正声明** ⚠️',
-    '',
-    '城际网络并非法外之地！',
-    '',
-  ].join('\n');
 };
 
 const sanitizeReportByShieldWords = (report: NewsReport): NewsReport => ({
@@ -441,6 +421,7 @@ export const useBattleEngine = () => {
     baseKey: ARENA_PROVIDER_COOLDOWN_BASE_KEY,
     ...providerCooldownConfig,
   });
+  const generationAbortControllerRef = useRef<AbortController | null>(null);
 
   const scenarioDisplayName = useMemo(() => {
     // 只有在情景模式下才需要展示情景标题，避免切换到其他模式后沿用上一次的情景小标题
@@ -723,6 +704,8 @@ export const useBattleEngine = () => {
 
 	      if (generationMode === 'stream') {
 	        const abortController = new AbortController();
+	        generationAbortControllerRef.current?.abort(STREAM_ABORT_REASON_USER);
+	        generationAbortControllerRef.current = abortController;
 	        let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
 
 		        try {
@@ -1567,14 +1550,20 @@ export const useBattleEngine = () => {
 	    } catch (error) {
 	      const shouldTreatAsInterrupted = generationMode === 'stream' && isStreamInterruptedError(error);
 	      if (shouldTreatAsInterrupted) {
-	        const details = error instanceof Error ? error.message : '连接被中断';
-	        setError(buildStreamInterruptedMessage(details));
+          const abortReason = generationAbortControllerRef.current?.signal.reason;
+          if (abortReason === STREAM_ABORT_REASON_USER) {
+            setError('已手动停止生成。当前预览可能不完整，但可继续查看。');
+          } else {
+            const details = error instanceof Error ? error.message : '连接被中断';
+            setError(buildStreamInterruptedMessage(details));
+          }
 	        startCooldown();
 	      } else {
 	        setError(`✨ 魔法失效了！${error instanceof Error ? error.message : '发生未知错误，请重试。'}`);
 	        setNewsReport(null);
 	      }
 	    } finally {
+        generationAbortControllerRef.current = null;
 	      setIsGenerating(false);
 	      setIsStreaming(false);
 	    }
@@ -1617,6 +1606,10 @@ export const useBattleEngine = () => {
 	    startCooldown,
     updateFromMarkdown,
   ]);
+
+  const stopGeneration = useCallback(() => {
+    generationAbortControllerRef.current?.abort(STREAM_ABORT_REASON_USER);
+  }, []);
 
   const handleRedoUpdates = useCallback(async () => {
     if (isCooldown) {
@@ -1842,6 +1835,7 @@ export const useBattleEngine = () => {
 
   return {
     handleGenerate,
+    stopGeneration,
     handleRedoUpdates,
     handleApplyManualMetaUpdates,
     isGenerating,

@@ -16,6 +16,7 @@ import { CustomProviderSchema } from '@/lib/arena/schemas';
 import { extractStreamUpdateMeta, stripStreamUpdateMetaComment } from '@/lib/arena/stream-meta';
 import { extractWinnerFromText } from '@/lib/arena/battle-report-log-utils';
 import { createStreamReadWithTimeout, STREAM_READ_IDLE_TIMEOUT_MS, STREAM_READ_TOTAL_TIMEOUT_MS } from '@/lib/stream/timeout';
+import { relayAbortSignal } from '@/lib/stream/abort';
 import { buildReasoningSummary, normalizeReasoningSource } from '@/lib/ai/reasoning-normalizer';
 import { pickBotChoiceSnapshotId } from '@/lib/pvp/bot/choose';
 import { parsePvpRoomInternalState, stringifyPvpRoomInternalState } from '@/lib/pvp/bot/room';
@@ -389,8 +390,10 @@ async function resolveStreamHandler(req: Request): Promise<Response> {
 
   const UPSTREAM_TOTAL_TIMEOUT_MS = STREAM_READ_TOTAL_TIMEOUT_MS;
   const upstreamAbortController = new AbortController();
+  const cleanupRequestAbortRelay = relayAbortSignal(req.signal, upstreamAbortController);
   const upstreamTimeoutId: ReturnType<typeof setTimeout> = setTimeout(() => upstreamAbortController.abort(), UPSTREAM_TOTAL_TIMEOUT_MS);
   const clearUpstreamTimeout = () => {
+    cleanupRequestAbortRelay();
     try {
       clearTimeout(upstreamTimeoutId);
     } catch {

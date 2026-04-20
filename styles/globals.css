@@ -176,6 +176,110 @@
   --app-footer-link-hover: #fb7185;
 }
 
+.battle-lite-shell {
+  --battle-lite-panel-bg: rgba(255, 255, 255, 0.86);
+  --battle-lite-panel-border: rgba(226, 232, 240, 0.9);
+  --battle-lite-subpanel-bg: rgba(255, 255, 255, 0.84);
+  --battle-lite-subpanel-border: rgba(203, 213, 225, 0.88);
+  --battle-lite-muted-text: #475569;
+  --battle-lite-subtle-text: #64748b;
+  --battle-lite-link: #0369a1;
+  --battle-lite-link-hover: #075985;
+  --battle-lite-info-bg: rgba(239, 246, 255, 0.88);
+  --battle-lite-info-border: rgba(125, 211, 252, 0.42);
+  --battle-lite-info-text: #334155;
+  --battle-lite-info-pill-bg: rgba(255, 255, 255, 0.82);
+  --battle-lite-info-pill-text: #334155;
+  --battle-lite-accent-bg: rgba(250, 245, 255, 0.9);
+  --battle-lite-accent-border: rgba(196, 181, 253, 0.5);
+  --battle-lite-accent-text: #5b21b6;
+  --battle-lite-danger-bg: rgba(255, 241, 242, 0.88);
+  --battle-lite-danger-border: rgba(251, 113, 133, 0.34);
+  --battle-lite-danger-text: #be123c;
+  --battle-lite-warning-bg: rgba(255, 251, 235, 0.92);
+  --battle-lite-warning-border: rgba(251, 191, 36, 0.38);
+  --battle-lite-warning-text: #92400e;
+  --battle-lite-error-bg: rgba(254, 242, 242, 0.92);
+  --battle-lite-error-border: rgba(248, 113, 113, 0.34);
+  --battle-lite-error-text: #b91c1c;
+  --battle-lite-modal-bg: rgba(255, 255, 255, 0.98);
+  --battle-lite-hero-bg: linear-gradient(135deg, rgba(255, 255, 255, 0.96) 0%, rgba(253, 242, 248, 0.92) 45%, rgba(239, 246, 255, 0.88) 100%);
+  --battle-lite-hero-border: rgba(244, 114, 182, 0.18);
+  --battle-lite-hero-pill-bg: rgba(255, 255, 255, 0.82);
+  --battle-lite-hero-pill-text: #be185d;
+  --battle-lite-hero-shadow: 0 18px 45px rgba(244, 114, 182, 0.12);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-color-mode]) .battle-lite-shell {
+    --battle-lite-panel-bg: rgba(9, 14, 26, 0.78);
+    --battle-lite-panel-border: rgba(71, 85, 105, 0.72);
+    --battle-lite-subpanel-bg: rgba(15, 23, 42, 0.82);
+    --battle-lite-subpanel-border: rgba(100, 116, 139, 0.5);
+    --battle-lite-muted-text: #d6def0;
+    --battle-lite-subtle-text: #a8b4ca;
+    --battle-lite-link: #7dd3fc;
+    --battle-lite-link-hover: #bae6fd;
+    --battle-lite-info-bg: rgba(14, 36, 61, 0.76);
+    --battle-lite-info-border: rgba(56, 189, 248, 0.24);
+    --battle-lite-info-text: #dbeafe;
+    --battle-lite-info-pill-bg: rgba(30, 41, 59, 0.88);
+    --battle-lite-info-pill-text: #e0f2fe;
+    --battle-lite-accent-bg: rgba(55, 48, 163, 0.24);
+    --battle-lite-accent-border: rgba(167, 139, 250, 0.28);
+    --battle-lite-accent-text: #e9d5ff;
+    --battle-lite-danger-bg: rgba(78, 20, 34, 0.66);
+    --battle-lite-danger-border: rgba(251, 113, 133, 0.34);
+    --battle-lite-danger-text: #fecdd3;
+    --battle-lite-warning-bg: rgba(69, 39, 6, 0.62);
+    --battle-lite-warning-border: rgba(245, 158, 11, 0.3);
+    --battle-lite-warning-text: #fde68a;
+    --battle-lite-error-bg: rgba(69, 10, 10, 0.62);
+    --battle-lite-error-border: rgba(248, 113, 113, 0.28);
+    --battle-lite-error-text: #fecaca;
+    --battle-lite-modal-bg: rgba(15, 23, 42, 0.98);
+    --battle-lite-hero-bg: linear-gradient(135deg, rgba(17, 24, 39, 0.96) 0%, rgba(55, 48, 71, 0.92) 45%, rgba(15, 23, 42, 0.94) 100%);
+    --battle-lite-hero-border: rgba(125, 211, 252, 0.18);
+    --battle-lite-hero-pill-bg: rgba(15, 23, 42, 0.76);
+    --battle-lite-hero-pill-text: #fbcfe8;
+    --battle-lite-hero-shadow: 0 22px 50px rgba(0, 0, 0, 0.42);
+  }
+}
+
+:root[data-color-mode='dark'] .battle-lite-shell {
+  --battle-lite-panel-bg: rgba(9, 14, 26, 0.78);
+  --battle-lite-panel-border: rgba(71, 85, 105, 0.72);
+  --battle-lite-subpanel-bg: rgba(15, 23, 42, 0.82);
+  --battle-lite-subpanel-border: rgba(100, 116, 139, 0.5);
+  --battle-lite-muted-text: #d6def0;
+  --battle-lite-subtle-text: #a8b4ca;
+  --battle-lite-link: #7dd3fc;
+  --battle-lite-link-hover: #bae6fd;
+  --battle-lite-info-bg: rgba(14, 36, 61, 0.76);
+  --battle-lite-info-border: rgba(56, 189, 248, 0.24);
+  --battle-lite-info-text: #dbeafe;
+  --battle-lite-info-pill-bg: rgba(30, 41, 59, 0.88);
+  --battle-lite-info-pill-text: #e0f2fe;
+  --battle-lite-accent-bg: rgba(55, 48, 163, 0.24);
+  --battle-lite-accent-border: rgba(167, 139, 250, 0.28);
+  --battle-lite-accent-text: #e9d5ff;
+  --battle-lite-danger-bg: rgba(78, 20, 34, 0.66);
+  --battle-lite-danger-border: rgba(251, 113, 133, 0.34);
+  --battle-lite-danger-text: #fecdd3;
+  --battle-lite-warning-bg: rgba(69, 39, 6, 0.62);
+  --battle-lite-warning-border: rgba(245, 158, 11, 0.3);
+  --battle-lite-warning-text: #fde68a;
+  --battle-lite-error-bg: rgba(69, 10, 10, 0.62);
+  --battle-lite-error-border: rgba(248, 113, 113, 0.28);
+  --battle-lite-error-text: #fecaca;
+  --battle-lite-modal-bg: rgba(15, 23, 42, 0.98);
+  --battle-lite-hero-bg: linear-gradient(135deg, rgba(17, 24, 39, 0.96) 0%, rgba(55, 48, 71, 0.92) 45%, rgba(15, 23, 42, 0.94) 100%);
+  --battle-lite-hero-border: rgba(125, 211, 252, 0.18);
+  --battle-lite-hero-pill-bg: rgba(15, 23, 42, 0.76);
+  --battle-lite-hero-pill-text: #fbcfe8;
+  --battle-lite-hero-shadow: 0 22px 50px rgba(0, 0, 0, 0.42);
+}
+
 html,
 body {
   max-width: 100vw;
@@ -324,6 +428,167 @@ body.announcement-visible {
     min-height: 100vh;
     position: relative;
     overflow: hidden;
+  }
+
+  .battle-lite-panel {
+    background: var(--battle-lite-panel-bg, var(--app-surface-90));
+    border: 1px solid var(--battle-lite-panel-border, var(--app-border-strong));
+    box-shadow: var(--app-card-shadow);
+    backdrop-filter: blur(10px);
+  }
+
+  .battle-lite-surface-card {
+    background: var(--battle-lite-subpanel-bg, var(--app-surface-80));
+    border: 1px solid var(--battle-lite-subpanel-border, var(--app-border-strong));
+    box-shadow: 0 12px 30px rgba(15, 23, 42, 0.12);
+  }
+
+  .battle-lite-hero-card {
+    border-color: var(--battle-lite-hero-border, var(--app-border-strong));
+    background: var(--battle-lite-hero-bg, var(--app-surface-95));
+    box-shadow: var(--battle-lite-hero-shadow, var(--app-card-shadow));
+  }
+
+  .battle-lite-hero-pill {
+    border: 1px solid var(--battle-lite-hero-border, var(--app-border-strong));
+    background: var(--battle-lite-hero-pill-bg, var(--app-surface-strong));
+    color: var(--battle-lite-hero-pill-text, var(--app-accent-strong));
+  }
+
+  .battle-lite-strong-text {
+    color: var(--app-text);
+  }
+
+  .battle-lite-muted-text {
+    color: var(--battle-lite-muted-text, var(--app-text-muted));
+  }
+
+  .battle-lite-subtle-text {
+    color: var(--battle-lite-subtle-text, var(--app-text-subtle));
+  }
+
+  .battle-lite-link {
+    color: var(--battle-lite-link, var(--app-accent-strong));
+  }
+
+  .battle-lite-link:hover {
+    color: var(--battle-lite-link-hover, var(--app-accent));
+    text-decoration: underline;
+  }
+
+  .battle-lite-info-box {
+    background: var(--battle-lite-info-bg, var(--app-surface-80));
+    border: 1px solid var(--battle-lite-info-border, var(--app-border-strong));
+    color: var(--battle-lite-info-text, var(--app-text));
+  }
+
+  .battle-lite-info-pill {
+    background: var(--battle-lite-info-pill-bg, var(--app-surface));
+    color: var(--battle-lite-info-pill-text, var(--app-text));
+  }
+
+  .battle-lite-accent-box {
+    background: var(--battle-lite-accent-bg, var(--app-surface-80));
+    border: 1px solid var(--battle-lite-accent-border, var(--app-border-strong));
+    color: var(--battle-lite-accent-text, var(--app-text));
+  }
+
+  .battle-lite-danger-button {
+    border: 1px solid var(--battle-lite-danger-border, var(--app-border-strong));
+    background: var(--battle-lite-danger-bg, var(--app-surface));
+    color: var(--battle-lite-danger-text, var(--app-text));
+  }
+
+  .battle-lite-danger-button:hover {
+    filter: brightness(1.05);
+  }
+
+  .battle-lite-tonal-button {
+    border: 1px solid var(--battle-lite-subpanel-border, var(--app-border-strong));
+    background: var(--battle-lite-info-pill-bg, var(--app-surface-strong));
+    color: var(--battle-lite-muted-text, var(--app-text-muted));
+  }
+
+  .battle-lite-tonal-button:hover {
+    background: var(--battle-lite-subpanel-bg, var(--app-surface));
+    color: var(--app-text);
+  }
+
+  .battle-lite-chip-active {
+    border-color: transparent;
+    background: linear-gradient(45deg, var(--app-accent), var(--app-accent-strong));
+    color: #fff;
+    box-shadow: 0 10px 20px var(--app-accent-shadow);
+  }
+
+  .battle-lite-select-menu {
+    background: var(--battle-lite-modal-bg, var(--app-surface-strong));
+    border: 1px solid var(--battle-lite-subpanel-border, var(--app-border-strong));
+    box-shadow: var(--app-card-shadow);
+  }
+
+  .battle-lite-select-option {
+    color: var(--app-text);
+  }
+
+  .battle-lite-select-option:hover {
+    background: var(--battle-lite-subpanel-bg, var(--app-surface));
+  }
+
+  .battle-lite-select-option-active {
+    background: rgba(244, 114, 182, 0.14);
+    color: var(--app-text);
+  }
+
+  .battle-lite-modal-surface {
+    background: var(--battle-lite-modal-bg, var(--app-surface-strong));
+    border: 1px solid var(--battle-lite-panel-border, var(--app-border-strong));
+    color: var(--app-text);
+    box-shadow: var(--app-card-shadow);
+  }
+
+  .battle-lite-modal-header {
+    background: var(--battle-lite-panel-bg, var(--app-surface-95));
+  }
+
+  .battle-lite-modal-close {
+    color: var(--battle-lite-subtle-text, var(--app-text-subtle));
+  }
+
+  .battle-lite-modal-close:hover {
+    color: var(--app-text);
+  }
+
+  .battle-lite-alert {
+    border: 1px solid transparent;
+  }
+
+  .battle-lite-alert--error {
+    background: var(--battle-lite-error-bg, var(--app-surface));
+    border-color: var(--battle-lite-error-border, var(--app-border-strong));
+    color: var(--battle-lite-error-text, var(--app-text));
+  }
+
+  .battle-lite-alert--warning {
+    background: var(--battle-lite-warning-bg, var(--app-surface));
+    border-color: var(--battle-lite-warning-border, var(--app-border-strong));
+    color: var(--battle-lite-warning-text, var(--app-text));
+  }
+
+  .battle-lite-file-input::file-selector-button {
+    margin-right: 1rem;
+    border: 0;
+    border-radius: 9999px;
+    padding: 0.5rem 1rem;
+    background: var(--battle-lite-info-pill-bg, var(--app-surface));
+    color: var(--battle-lite-link, var(--app-accent-strong));
+    font-size: 0.875rem;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .battle-lite-file-input:hover::file-selector-button {
+    filter: brightness(1.05);
   }
 
   .theme-image-light {

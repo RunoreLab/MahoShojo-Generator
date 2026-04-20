@@ -517,6 +517,15 @@ const buildAuthHarness = async () => {
       const user = getUserByUsername(username);
       return user ? toBusinessUser(user) : null;
     },
+    listBusinessUsersByEmailInsensitive: async (_db: unknown, email: string, limit: number = 2) =>
+      Array.from(state.usersById.values())
+        .filter((user) => user.email === normalizeEmail(email))
+        .slice(0, limit)
+        .map((user) => ({
+          id: user.id,
+          username: user.username,
+          email: user.email,
+        })),
     consumePasswordResetTokenById: async (_db: unknown, tokenId: string, nowEpochSeconds: number) => {
       for (const row of state.resetTokensByHash.values()) {
         if (row.id === tokenId && row.consumedAt === null) {
@@ -700,6 +709,45 @@ describe('auth 全链路集成', () => {
     expect(registerResp.status).toBe(400);
     const payload = (await registerResp.json()) as { error?: string };
     expect(payload.error).toContain('用户名、邮箱、密码和安全验证不能为空');
+  });
+
+  test('recover 允许仅凭邮箱发起找回', async () => {
+    const harness = await buildAuthHarness();
+
+    const registerResp = await harness.registerPost(
+      postJsonRequest('https://example.com/api/auth/register', {
+        username: 'email-only-user',
+        email: 'email-only@example.com',
+        password: 'password-123',
+        turnstileToken: 'turnstile-ok',
+      }),
+    );
+
+    expect(registerResp.status).toBe(200);
+
+    const recoverResp = await harness.recoverPost(
+      postJsonRequest(
+        'https://example.com/api/auth/recover',
+        {
+          email: 'email-only@example.com',
+          turnstileToken: 'turnstile-ok',
+        },
+        {
+          'cf-connecting-ip': '203.0.113.9',
+        },
+      ),
+    );
+
+    const recoverPayload = (await recoverResp.json()) as {
+      success?: boolean;
+      message?: string;
+      error?: string;
+    };
+    expect(recoverResp.status).toBe(200);
+    expect(recoverPayload.success).toBeTrue();
+    expect(recoverPayload.message).toContain('15 分钟');
+    expect(harness.state.resendRequests).toHaveLength(1);
+    expect(String(harness.state.resendRequests[0]?.payload.text ?? '')).toContain('recover-token-');
   });
 
   test('register/login/verify/recover/reset 应串联成功并验证重置一次性', async () => {

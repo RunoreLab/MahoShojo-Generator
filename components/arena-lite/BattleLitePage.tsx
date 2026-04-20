@@ -132,17 +132,9 @@ export function BattleLitePage() {
         />
       </Head>
 
-      <div className="magic-background-white">
+      <div className="magic-background-white battle-lite-shell">
         <div className="mx-auto w-full max-w-[820px] px-4 pb-8 pt-6 sm:px-6 lg:px-8">
-          <div
-            className="rounded-[30px] border px-4 py-5 sm:px-6 sm:py-6"
-            style={{
-              borderColor: 'var(--app-border-strong)',
-              background: 'var(--app-surface-90)',
-              boxShadow: 'var(--app-card-shadow)',
-              backdropFilter: 'blur(10px)',
-            }}
-          >
+          <div className="battle-lite-panel rounded-[30px] px-4 py-5 sm:px-6 sm:py-6">
             <BattleLiteHeader />
 
             <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
@@ -179,7 +171,7 @@ export function BattleLitePage() {
                   isMatching={isMatching}
                   combatantCount={combatants.length}
                 />
-                <div className="mt-2 text-xs text-gray-600">
+                <div className="battle-lite-muted-text mt-2 text-xs">
                   提示：浏览在线角色库可选择公开/私有数据卡；随机匹配仅从公开角色库中抽取。
                 </div>
               </CollapsibleSection>
@@ -265,7 +257,9 @@ export function BattleLitePage() {
                   <ErrorMessage
                     message={error}
                     className={`mt-3 rounded-md p-4 text-sm ${
-                      error.startsWith('❌') ? 'bg-red-100 text-red-800' : 'bg-yellow-100 text-yellow-800'
+                      error.startsWith('❌')
+                        ? 'battle-lite-alert battle-lite-alert--error'
+                        : 'battle-lite-alert battle-lite-alert--warning'
                     }`}
                   />
                 ) : null}
@@ -300,21 +294,21 @@ export function BattleLitePage() {
           className="fixed inset-0 z-50 flex items-center justify-center bg-black"
           style={{ backgroundColor: 'rgba(0, 0, 0, 0.7)', paddingLeft: '2rem', paddingRight: '2rem' }}
         >
-          <div className="relative max-h-[80vh] w-full max-w-lg overflow-auto rounded-lg bg-white">
-            <div className="sticky top-0 z-10 flex justify-end bg-white/95 p-2 backdrop-blur">
+          <div className="battle-lite-modal-surface relative max-h-[80vh] w-full max-w-lg overflow-auto rounded-lg">
+            <div className="battle-lite-modal-header sticky top-0 z-10 flex justify-end p-2 backdrop-blur">
               <button
                 onClick={() => {
                   setShowImageModal(false);
                   setSavedImageUrl(null);
                 }}
                 aria-label="关闭"
-                className="text-3xl leading-none text-gray-500 hover:text-gray-700"
+                className="battle-lite-modal-close text-3xl leading-none"
               >
                 ×
               </button>
             </div>
             <div className="px-4 pb-4">
-              <p className="mt-2 text-center text-sm text-gray-600">📱 长按图片保存到相册</p>
+              <p className="battle-lite-muted-text mt-2 text-center text-sm">📱 长按图片保存到相册</p>
               <div className="flex flex-col items-center p-2">
                 <img src={savedImageUrl} alt="魔法少女战斗报告" className="mx-auto h-auto w-full rounded-lg" />
               </div>

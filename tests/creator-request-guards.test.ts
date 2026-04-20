@@ -107,6 +107,54 @@ describe('creator request guards', () => {
     state.blockedTexts = new Set<string>();
   });
 
+  test('非流式 creator API 返回的卡片不会在 creationInputs 中重复保存问卷与答案', async () => {
+    const { default: handler } = await import('@/pages/api/creator/generate');
+    const response = await handler(
+      new Request('https://example.com/api/creator/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          template: 'magical-girl',
+          freeformBrief: '写成冷淡的观察记录体。',
+          answers: [
+            {
+              question: '你是谁？',
+              answer: '雾灯',
+              questionId: 'q-1',
+            },
+          ],
+          questionnaires: [
+            {
+              id: 'mg-64',
+              title: '64题版问卷',
+              kind: 'magical-girl',
+              questions: [
+                {
+                  id: 'q-1',
+                  question: '你是谁？',
+                  required: true,
+                  maxLength: 80,
+                },
+              ],
+            },
+          ],
+        }),
+      }),
+    );
+
+    const payload = (await response.json()) as {
+      userAnswers?: Array<Record<string, unknown>>;
+      creationInputs?: Record<string, unknown>;
+    };
+
+    expect(response.status).toBe(200);
+    expect(payload.userAnswers).toHaveLength(1);
+    expect(payload.creationInputs?.template).toBe('magical-girl');
+    expect(payload.creationInputs?.freeformBrief).toBe('写成冷淡的观察记录体。');
+    expect(payload.creationInputs?.questionnaires).toBeUndefined();
+    expect(payload.creationInputs?.questionnaireAnswers).toBeUndefined();
+  });
+
   test('非流式 creator API 拒绝不受支持的通用模板', async () => {
     const { default: handler } = await import('@/pages/api/creator/generate');
     const response = await handler(

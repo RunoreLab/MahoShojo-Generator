@@ -22,7 +22,7 @@ const PasswordRecoveryPage = () => {
   }, [router.query.token]);
   const isResetMode = resetToken.length > 0;
 
-  const [requestForm, setRequestForm] = useState({ username: '', email: '' });
+  const [requestForm, setRequestForm] = useState({ email: '' });
   const [resetForm, setResetForm] = useState({ newPassword: '', confirmPassword: '' });
   const [turnstileToken, setTurnstileToken] = useState('');
   const [message, setMessage] = useState<RecoveryMessage | null>(null);
@@ -47,7 +47,6 @@ const PasswordRecoveryPage = () => {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          username: requestForm.username.trim(),
           email: requestForm.email.trim(),
           turnstileToken,
         }),
@@ -59,7 +58,7 @@ const PasswordRecoveryPage = () => {
           type: 'success',
           text: data.message || REQUEST_SUCCESS_HINT,
         });
-        setRequestForm({ username: '', email: '' });
+        setRequestForm({ email: '' });
       } else {
         setMessage({
           type: 'error',
@@ -146,7 +145,7 @@ const PasswordRecoveryPage = () => {
   return (
     <>
       <Head>
-        <title>{isResetMode ? '设置新密码' : '找回密码'} - MahoShojo Generator</title>
+        <title>{`${isResetMode ? '设置新密码' : '找回密码'} - MahoShojo Generator`}</title>
       </Head>
       <div className="magic-background-white min-h-screen">
         <div className="container py-12">
@@ -157,7 +156,7 @@ const PasswordRecoveryPage = () => {
               <p className="text-sm text-gray-600 text-center mb-6">
                 {isResetMode
                   ? '请设置新的登录密码。重置链接仅可使用一次，过期后请重新发起找回。'
-                  : '请输入注册用户名和邮箱，系统会发送一次性重置链接。'}
+                  : '请输入注册邮箱，系统会发送一次性重置链接。'}
               </p>
             )}
 
@@ -229,19 +228,6 @@ const PasswordRecoveryPage = () => {
               </form>
             ) : (
               <form onSubmit={handleRequestSubmit} className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">用户名</label>
-                  <input
-                    type="text"
-                    value={requestForm.username}
-                    onChange={(event) => setRequestForm({ ...requestForm, username: event.target.value })}
-                    className="input-field"
-                    placeholder="请输入用户名"
-                    required
-                    maxLength={20}
-                  />
-                </div>
-
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">邮箱地址</label>
                   <input

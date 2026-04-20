@@ -326,6 +326,7 @@ ${qaText}
       },
       {
         ...(providerOptions ?? {}),
+        abortSignal: req.signal,
         telemetry: aiTelemetry,
         ...(reasoningBridge ? { onReasoningEvent: reasoningBridge.onReasoningEvent } : {}),
       }

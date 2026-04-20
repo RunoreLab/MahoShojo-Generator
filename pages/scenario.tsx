@@ -1,6 +1,6 @@
 // pages/scenario.tsx
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Head from 'next/head';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
@@ -16,12 +16,19 @@ import { ErrorMessage } from '@/components/ErrorMessage';
 import { EncyclopediaLinks } from '@/components/encyclopedia/EncyclopediaLinks';
 import { convertDataCard, createBlankDataCard } from '@/lib/data-card-converter';
 import { GenerationModeSwitcher, type GenerationMode } from '@/components/shared/GenerationModeSwitcher';
-import { readTextAndReasoningStreamFromResponse } from '@/lib/stream/read-text-and-reasoning-stream';
+import { StreamStopButton } from '@/components/shared/StreamStopButton';
 import { buildGeneralScenarioCardFromMarkdown } from '@/lib/stream/markdown-card';
+import { readSafeTextAndReasoningStreamFromResponse } from '@/lib/stream/read-safe-text-and-reasoning-stream';
 import { readJsonOrTextFromResponse, resolveApiErrorMessage } from '@/lib/client/apiError';
 import { AI_META_REQUEST_HEADER, AI_META_REQUEST_VALUE, readJsonWithAiMeta } from '@/lib/client/read-json-with-ai-meta';
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
 import { authStorage } from '@/lib/auth';
+import { STREAM_ABORT_REASON_USER } from '@/lib/stream/abort';
+import {
+  clearScenarioPageDraft,
+  readScenarioPageDraft,
+  writeScenarioPageDraft,
+} from '@/lib/scenario-page-draft';
 import type { AIReasoningEnvelope } from '@/types/ai-reasoning';
 
 // 定义引导性问题
@@ -32,6 +39,9 @@ const scenarioQuestions = [
   { id: 'atmosphere', label: '希望故事的整体氛围是怎样的？', placeholder: '例如：轻松愉快、紧张悬疑、悲伤感人、热血沸腾...' },
   { id: 'development', label: '故事可能会有哪些有趣的发展方向？', placeholder: '例如：决斗中途有第三方介入；谜题的答案指向一个惊人的秘密；采访者突然问了一个尖锐的问题...' },
 ];
+
+const createInitialScenarioAnswers = (): Record<string, string> =>
+  scenarioQuestions.reduce((acc, q) => ({ ...acc, [q.label]: '' }), {});
 
 // 定义可供用户选择留空的字段列表
 // 这里的 'value' 必须精确对应 Zod Schema 中的路径
@@ -52,18 +62,21 @@ type RateLimitError = Error & {
 
 const ScenarioPage: React.FC = () => {
   const router = useRouter();
-  const [answers, setAnswers] = useState<Record<string, string>>(
-    scenarioQuestions.reduce((acc, q) => ({ ...acc, [q.label]: '' }), {})
-  );
+  const [answers, setAnswers] = useState<Record<string, string>>(createInitialScenarioAnswers);
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [resultData, setResultData] = useState<any | null>(null);
   const [generalScenarioDraft, setGeneralScenarioDraft] = useState<any | null>(null);
+  const [generalScenarioDraftEdited, setGeneralScenarioDraftEdited] = useState(false);
   const [streamingReasoning, setStreamingReasoning] = useState<AIReasoningEnvelope | null>(null);
   const [nonStreamReasoning, setNonStreamReasoning] = useState<AIReasoningEnvelope | null>(null);
+  const [streamNotice, setStreamNotice] = useState<string | null>(null);
+  const streamAbortControllerRef = useRef<AbortController | null>(null);
   const [generationMode, setGenerationMode] = useState<GenerationMode>('non-stream');
   const [scenarioTitleHint, setScenarioTitleHint] = useState('');
   const [userProviderConfig, setUserProviderConfig] = useState<UserAIProviderConfig | null>(null);
+  const [autoSaveTimestamp, setAutoSaveTimestamp] = useState<number | null>(null);
+  const [draftRestoreReady, setDraftRestoreReady] = useState(false);
 
   // 根据是否使用自定义 Key 动态调整冷却时间：官方 60s，自定义 3s
   const isUserCustomKey = userProviderConfig?.providerId !== 'system' && !!userProviderConfig?.apiKey?.trim();
@@ -120,6 +133,25 @@ const ScenarioPage: React.FC = () => {
   }, []);
 
   useEffect(() => {
+    const restored = readScenarioPageDraft();
+    if (!restored) {
+      setDraftRestoreReady(true);
+      return;
+    }
+
+    setAnswers({ ...createInitialScenarioAnswers(), ...restored.payload.answers });
+    setScenarioTitleHint(restored.payload.scenarioTitleHint);
+    setFieldsToKeepEmpty(restored.payload.fieldsToKeepEmpty);
+    setIsAdvancedVisible(restored.payload.isAdvancedVisible);
+    setSelectedLanguage(restored.payload.selectedLanguage);
+    setGenerationMode(restored.payload.generationMode);
+    setGeneralScenarioDraft(restored.payload.generalScenarioDraft);
+    setGeneralScenarioDraftEdited(restored.payload.generalScenarioDraftEdited);
+    setAutoSaveTimestamp(restored.updatedAt);
+    setDraftRestoreReady(true);
+  }, []);
+
+  useEffect(() => {
     if (typeof window === 'undefined') return;
     try {
       const payload = {
@@ -135,9 +167,62 @@ const ScenarioPage: React.FC = () => {
     }
   }, [generationMode, scenarioTitleHint, selectedLanguage, isAdvancedVisible, fieldsToKeepEmpty]);
 
+  useEffect(() => {
+    if (!draftRestoreReady) return;
+
+    const stored = writeScenarioPageDraft({
+      answers,
+      scenarioTitleHint,
+      fieldsToKeepEmpty,
+      isAdvancedVisible,
+      selectedLanguage,
+      generationMode,
+      generalScenarioDraft,
+      generalScenarioDraftEdited,
+    });
+
+    setAutoSaveTimestamp(stored?.updatedAt ?? null);
+  }, [
+    answers,
+    draftRestoreReady,
+    fieldsToKeepEmpty,
+    generalScenarioDraft,
+    generalScenarioDraftEdited,
+    generationMode,
+    isAdvancedVisible,
+    scenarioTitleHint,
+    selectedLanguage,
+  ]);
+
   const handleAnswerChange = (id: string, value: string) => {
     setAnswers(prev => ({ ...prev, [id]: value }));
   };
+
+  const handleClearScenarioDraft = useCallback(() => {
+    if (typeof window !== 'undefined' && !window.confirm('确定要清空当前页面的本地草稿吗？')) {
+      return;
+    }
+
+    clearScenarioPageDraft();
+    if (typeof window !== 'undefined') {
+      try {
+        window.localStorage.removeItem(SCENARIO_PREFERENCE_KEY);
+      } catch {
+        // localStorage 可能不可用，忽略
+      }
+    }
+
+    setAnswers(createInitialScenarioAnswers());
+    setScenarioTitleHint('');
+    setFieldsToKeepEmpty([]);
+    setIsAdvancedVisible(false);
+    setSelectedLanguage('zh-CN');
+    setGenerationMode('non-stream');
+    setGeneralScenarioDraft(null);
+    setGeneralScenarioDraftEdited(false);
+    setAutoSaveTimestamp(null);
+    setError(null);
+  }, []);
 
   const verifyOrigin = useCallback(async (data: any): Promise<boolean> => {
     try {
@@ -201,9 +286,11 @@ const ScenarioPage: React.FC = () => {
     setNonStreamReasoning(null);
     setResultData(null);
     setStreamingReasoning(null);
+    setStreamNotice(null);
     let nextCooldownMs = scenarioCooldownMs;
     let shouldStartCooldown = false;
     if (generationMode === 'stream') {
+      setGeneralScenarioDraftEdited(false);
       const blank = createBlankDataCard('general-scenario');
       setGeneralScenarioDraft({
         ...blank,
@@ -250,6 +337,11 @@ const ScenarioPage: React.FC = () => {
       } else {
         requestHeaders[AI_META_REQUEST_HEADER] = AI_META_REQUEST_VALUE;
       }
+      const streamController = generationMode === 'stream' ? new AbortController() : null;
+      if (streamController) {
+        streamAbortControllerRef.current?.abort(STREAM_ABORT_REASON_USER);
+        streamAbortControllerRef.current = streamController;
+      }
       const response = await fetch(endpoint, {
         method: 'POST',
         headers: requestHeaders,
@@ -257,6 +349,7 @@ const ScenarioPage: React.FC = () => {
           ...requestBody,
           ...(generationMode === 'stream' ? { titleHint: scenarioTitleHint.trim() } : {}),
         }),
+        ...(streamController ? { signal: streamController.signal } : {}),
       });
 
       if (!response.ok) {
@@ -288,12 +381,18 @@ const ScenarioPage: React.FC = () => {
           throw new Error(formatHttpErrorMessage({ serverMessage, status: response.status, fallback: '生成失败' }));
         }
 
-        const { text: markdown } = await readTextAndReasoningStreamFromResponse(response, {
+        const controller = streamAbortControllerRef.current;
+        if (!controller) {
+          throw new Error('流式控制器初始化失败');
+        }
+        const { text: markdown, outputSafetyStatus, wasAborted, abortReason } = await readSafeTextAndReasoningStreamFromResponse(response, {
+          abortController: controller,
           label: '情景卡（流式）',
           onText: (text) => {
             setGeneralScenarioDraft((prev: any) => (prev ? { ...prev, content: text } : prev));
           },
           onReasoning: (reasoning) => setStreamingReasoning(reasoning),
+          safetyReason: '使用危险符文',
         });
 
         const { card } = buildGeneralScenarioCardFromMarkdown({
@@ -303,16 +402,27 @@ const ScenarioPage: React.FC = () => {
         });
 
         let signedCard = card;
-        try {
-          const result = await resignDataCard(card);
-          if (!result) return;
-          signedCard = result;
-        } catch (err) {
-          const message = err instanceof Error ? err.message : '签名失败';
-          setError(`⚠️ 原生性签名失败，已降级为非原生：${message}`);
+        if (!wasAborted && outputSafetyStatus !== 'blocked') {
+          try {
+            const result = await resignDataCard(card);
+            if (!result) return;
+            signedCard = result;
+          } catch (err) {
+            const message = err instanceof Error ? err.message : '签名失败';
+            setError(`⚠️ 原生性签名失败，已降级为非原生：${message}`);
+          }
         }
 
         setGeneralScenarioDraft(signedCard);
+        if (outputSafetyStatus === 'blocked') {
+          setStreamNotice('输出触发调查院规则，已自动截断并追加逮捕令。当前内容可能不完整，但可继续保存。');
+        } else if (wasAborted) {
+          setStreamNotice(
+            abortReason === STREAM_ABORT_REASON_USER
+              ? '已手动停止生成。当前内容可能不完整，但可继续保存。'
+              : '流式生成已中断。当前内容可能不完整，但可继续保存。'
+          );
+        }
         shouldStartCooldown = true;
         return;
       }
@@ -337,6 +447,7 @@ const ScenarioPage: React.FC = () => {
         setError(`✨ 剧本创作失败！${message}`);
       }
     } finally {
+      streamAbortControllerRef.current = null;
       if (shouldStartCooldown) {
         startCooldown(nextCooldownMs);
       }
@@ -368,6 +479,7 @@ const ScenarioPage: React.FC = () => {
   const handleCreateBlankGeneralScenario = () => {
     const blank = createBlankDataCard('general-scenario');
     setGeneralScenarioDraft(blank);
+    setGeneralScenarioDraftEdited(true);
   };
 
   const handleConvertToGeneralScenario = useCallback(async () => {
@@ -388,6 +500,7 @@ const ScenarioPage: React.FC = () => {
       }
 
       setGeneralScenarioDraft(finalConverted);
+      setGeneralScenarioDraftEdited(true);
     } catch (err) {
       const message = err instanceof Error ? err.message : '转换失败';
       setError(`✨ 转换失败！${message}`);
@@ -417,6 +530,21 @@ const ScenarioPage: React.FC = () => {
               </div>
 
               <div className="space-y-6">
+                <div className="flex flex-col gap-2 rounded-lg border border-amber-100 bg-amber-50 px-3 py-2 text-xs text-amber-900 sm:flex-row sm:items-center sm:justify-between">
+                  <span>
+                    {autoSaveTimestamp
+                      ? `已自动保存于 ${new Date(autoSaveTimestamp).toLocaleTimeString()}`
+                      : '当前输入会自动保存到浏览器，本页刷新后可恢复。'}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleClearScenarioDraft}
+                    className="text-left font-semibold text-amber-800 hover:text-amber-950 sm:text-right"
+                  >
+                    清空本地草稿
+                  </button>
+                </div>
+
                 <div className="input-group">
                   <label htmlFor="scenario-title-hint" className="input-label">情景标题（可选）</label>
                   <input
@@ -526,10 +654,21 @@ const ScenarioPage: React.FC = () => {
               </p>
             </div>
 
-            <button onClick={handleGenerate} disabled={isGenerating || isCooldown} className="generate-button mt-4">
-              {isCooldown ? `冷却中 (${remainingTime}s)` : isGenerating ? '正在构建舞台...' : '生成情景'}
-            </button>
+            <div className="mt-4 flex flex-col gap-3">
+              <button onClick={handleGenerate} disabled={isGenerating || isCooldown} className="generate-button">
+                {isCooldown ? `冷却中 (${remainingTime}s)` : isGenerating ? '正在构建舞台...' : '生成情景'}
+              </button>
+              {isGenerating && generationMode === 'stream' ? (
+                <div className="flex justify-center">
+                  <StreamStopButton
+                    onClick={() => streamAbortControllerRef.current?.abort(STREAM_ABORT_REASON_USER)}
+                    label="停止生成"
+                  />
+                </div>
+              ) : null}
+            </div>
             {error && <ErrorMessage message={error} className="error-message mt-4" />}
+            {streamNotice ? <div className="mt-3 text-center text-sm text-amber-700">{streamNotice}</div> : null}
           </div>
 
           {generationMode === 'non-stream' && resultData && (
@@ -596,7 +735,10 @@ const ScenarioPage: React.FC = () => {
                       <input
                         type="text"
                         value={generalScenarioDraft.title || ''}
-                        onChange={(e) => setGeneralScenarioDraft((prev: any) => ({ ...prev, title: e.target.value }))}
+                        onChange={(e) => {
+                          setGeneralScenarioDraftEdited(true);
+                          setGeneralScenarioDraft((prev: any) => ({ ...prev, title: e.target.value }));
+                        }}
                         className="input-field"
                         placeholder="请输入通用情景名称"
                       />
@@ -606,7 +748,10 @@ const ScenarioPage: React.FC = () => {
                       <label className="input-label">情景内容（Markdown）</label>
                       <textarea
                         value={generalScenarioDraft.content || ''}
-                        onChange={(e) => setGeneralScenarioDraft((prev: any) => ({ ...prev, content: e.target.value }))}
+                        onChange={(e) => {
+                          setGeneralScenarioDraftEdited(true);
+                          setGeneralScenarioDraft((prev: any) => ({ ...prev, content: e.target.value }));
+                        }}
                         className="input-field resize-y"
                         rows={12}
                         placeholder="请在此处编写情景设定，建议使用 Markdown 小标题/列表。"

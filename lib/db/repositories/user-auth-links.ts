@@ -186,7 +186,7 @@ export const createAuthResetPasswordVerification = async (
   input: CreateAuthResetPasswordVerificationInput,
 ): Promise<void> => {
   const identifier = `reset-password:${input.token}`;
-  const expiresAt = Math.trunc(input.expiresAt);
+  const expiresAt = new Date(Math.trunc(input.expiresAt) * 1000);
 
   await db.insert(baVerifications).values({
     id: input.id,

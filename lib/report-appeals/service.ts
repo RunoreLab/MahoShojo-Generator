@@ -1,4 +1,5 @@
 import type { AppDrizzleDb } from '@/lib/db/drizzle';
+import { isAdverseFinalReportResolutionCode } from '@/lib/data-card-reports/outcome-enforcement';
 import { getDataCardByIdWithAuthorAndTags } from '@/lib/db/repositories/data-cards-core';
 import * as repo from '@/lib/db/repositories/report-appeals';
 import { getEncyclopediaEntry } from '@/lib/encyclopedia';
@@ -913,6 +914,8 @@ const createReportAppealsService = (deps: ReportAppealsServiceDeps) => ({
           dataCardName: reportCase.targetCardName,
           resolutionCode: reportCase.resolutionCode,
           resolutionLabel: buildResolutionLabel(reportCase.resolutionCode),
+          cardAutoRejected: isAdverseFinalReportResolutionCode(reportCase.resolutionCode),
+          cardAutoBanned: isAdverseFinalReportResolutionCode(reportCase.resolutionCode),
         },
         actionUrl: `/report-appeals?reportCaseId=${encodeURIComponent(reportCase.id)}`,
         sourceEntityType: 'report_case',

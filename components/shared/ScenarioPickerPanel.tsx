@@ -99,8 +99,8 @@ export function ScenarioPickerPanel({
           </button>
         </div>
         {!isAuthenticated && (
-          <div className="flex-1 text-xs text-gray-500 flex items-center px-2">
-            <Link href="/character-manager" className="text-green-600 hover:text-green-800 underline">
+          <div className="battle-lite-subtle-text flex flex-1 items-center px-2 text-xs">
+            <Link href="/character-manager" className="battle-lite-link underline">
               登录后可访问私有数据卡
             </Link>
           </div>
@@ -119,14 +119,14 @@ export function ScenarioPickerPanel({
             accept=".json"
             onChange={onFileChange}
             disabled={isGenerating}
-            className="cursor-pointer input-field file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm font-semibold file:bg-purple-50 file:text-purple-700 hover:file:bg-purple-100 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="battle-lite-file-input input-field cursor-pointer font-semibold disabled:cursor-not-allowed disabled:opacity-50"
           />
         </>
       )}
       {scenarioFileName && (
-        <p className="text-xs text-gray-500 mt-2">
-          已加载情景: <span className="font-bold text-green-600">{scenarioFileName}</span>
-          {isScenarioNative && <span className="text-xs text-green-600 ml-1 font-semibold">(原生)</span>}
+        <p className="battle-lite-subtle-text mt-2 text-xs">
+          已加载情景: <span className="battle-lite-link font-bold">{scenarioFileName}</span>
+          {isScenarioNative && <span className="battle-lite-link ml-1 text-xs font-semibold">(原生)</span>}
         </p>
       )}
 
@@ -136,7 +136,7 @@ export function ScenarioPickerPanel({
             <DisclosureButton
               open={isPasteVisible}
               onToggle={() => setIsPasteVisible((prev) => !prev)}
-              className="text-purple-700 hover:underline mb-2"
+              className="battle-lite-link mb-2"
             >
               {isPasteVisible ? '收起情景粘贴区域' : '展开情景粘贴区域（手机端推荐）'}
             </DisclosureButton>
@@ -161,7 +161,7 @@ export function ScenarioPickerPanel({
             )}
           </>
         )}
-        <div className="mt-2 p-3 bg-purple-50 border border-purple-200 rounded-lg text-sm text-purple-800">
+        <div className="battle-lite-accent-box mt-2 rounded-lg p-3 text-sm">
           <p className="font-bold">你已选择【情景模式】！</p>
           <p className="mt-1">
             {enableLocalInput

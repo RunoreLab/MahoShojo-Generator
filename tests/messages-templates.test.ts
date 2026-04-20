@@ -53,6 +53,8 @@ describe('message templates', () => {
       payload: {
         dataCardName: '雪沫',
         resolutionLabel: '确认违规',
+        cardAutoRejected: true,
+        cardAutoBanned: true,
       },
       titleText: null,
       bodyText: null,
@@ -60,6 +62,7 @@ describe('message templates', () => {
 
     expect(rendered.title).toContain('雪沫');
     expect(rendered.body).toContain('确认违规');
+    expect(rendered.body).toContain('已自动将该数据卡设为未通过并封禁');
     expect(rendered.body).toContain('申诉');
   });
 

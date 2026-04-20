@@ -81,6 +81,24 @@ export const SCENARIO_PRESET_LIST: ScenarioPreset[] = [
     filename: 'S12_system_core_meta_dialogue_v4_2.json',
     template: 'scenario',
   },
+  {
+    title: '废土行迹·偶遇：同路人未必同行',
+    description: '【旅途遭遇】通路与中继点上的临时相遇，强调试探、立场摩擦与是否同行。',
+    filename: 'S13_wastetrace_encounter.json',
+    template: 'general-scenario',
+  },
+  {
+    title: '废土行迹·调查探索：路标失效之后',
+    description: '【调查探索】围绕失效路线、失联节点与异常记录展开复核，强调判断、记录与处置。',
+    filename: 'S14_wastetrace_route_failure.json',
+    template: 'general-scenario',
+  },
+  {
+    title: '废土行迹·战斗冲突：封路与突围',
+    description: '【冲突】因封锁、误判或争夺目标而升级的废土武装冲突，强调代价、撤离与后果。',
+    filename: 'S15_wastetrace_blockade_breakout.json',
+    template: 'general-scenario',
+  },
 ];
 
 const SCENARIO_PRESET_FILENAME_SET = new Set(SCENARIO_PRESET_LIST.map((preset) => preset.filename));

@@ -12,8 +12,45 @@ type Props = {
   children: ReactNode;
   footer?: ReactNode;
   maxWidthClassName?: string;
+  zIndexClassName?: string;
   onClose: () => void;
 };
+
+export type BaseModalLayoutClassNameOptions = {
+  maxWidthClassName?: string;
+  zIndexClassName?: string;
+};
+
+const joinClassNames = (...classNames: Array<string | null | undefined | false>): string =>
+  classNames.filter(Boolean).join(' ');
+
+const DEFAULT_Z_INDEX_CLASS_NAME = 'z-50';
+const DEFAULT_MAX_WIDTH_CLASS_NAME = 'max-w-4xl';
+
+export const BASE_MODAL_ROOT_LAYOUT_CLASS_NAME = 'fixed inset-0 flex items-center justify-center p-4';
+export const BASE_MODAL_PANEL_LAYOUT_CLASS_NAME =
+  'relative flex max-h-[calc(100dvh-2rem)] w-full flex-col overflow-hidden';
+export const BASE_MODAL_HEADER_LAYOUT_CLASS_NAME = 'shrink-0';
+export const BASE_MODAL_BODY_LAYOUT_CLASS_NAME = 'min-h-0 flex-1 overflow-auto';
+export const BASE_MODAL_FOOTER_LAYOUT_CLASS_NAME = 'shrink-0';
+
+export const getBaseModalLayoutClassNames = ({
+  maxWidthClassName = DEFAULT_MAX_WIDTH_CLASS_NAME,
+  zIndexClassName = DEFAULT_Z_INDEX_CLASS_NAME,
+}: BaseModalLayoutClassNameOptions = {}) => ({
+  rootClassName: joinClassNames(BASE_MODAL_ROOT_LAYOUT_CLASS_NAME, zIndexClassName),
+  panelClassName: joinClassNames(
+    BASE_MODAL_PANEL_LAYOUT_CLASS_NAME,
+    'rounded-xl border border-white/10 bg-white shadow-2xl',
+    maxWidthClassName,
+  ),
+  headerClassName: joinClassNames(
+    BASE_MODAL_HEADER_LAYOUT_CLASS_NAME,
+    'flex items-start justify-between gap-3 border-b px-5 py-4',
+  ),
+  bodyClassName: joinClassNames(BASE_MODAL_BODY_LAYOUT_CLASS_NAME, 'px-5 py-4'),
+  footerClassName: joinClassNames(BASE_MODAL_FOOTER_LAYOUT_CLASS_NAME, 'border-t bg-gray-50 px-5 py-3'),
+});
 
 export function BaseModal({
   isOpen,
@@ -22,6 +59,7 @@ export function BaseModal({
   children,
   footer,
   maxWidthClassName,
+  zIndexClassName,
   onClose,
 }: Props) {
   const [mounted, setMounted] = useState(false);
@@ -50,9 +88,11 @@ export function BaseModal({
   }, [mounted]);
 
   if (!isOpen || !wrapper) return null;
+  const { rootClassName, panelClassName, headerClassName, bodyClassName, footerClassName } =
+    getBaseModalLayoutClassNames({ maxWidthClassName, zIndexClassName });
 
   return createPortal(
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div className={rootClassName}>
       <button
         type="button"
         aria-label="关闭"
@@ -62,12 +102,9 @@ export function BaseModal({
       <div
         role="dialog"
         aria-modal="true"
-        className={[
-          'relative w-full overflow-hidden rounded-xl border border-white/10 bg-white shadow-2xl',
-          maxWidthClassName || 'max-w-4xl',
-        ].join(' ')}
+        className={panelClassName}
       >
-        <div className="flex items-start justify-between gap-3 border-b px-5 py-4">
+        <div className={headerClassName}>
           <div className="min-w-0">
             {title ? <div className="text-lg font-semibold text-gray-900 truncate">{title}</div> : null}
             {description ? <div className="mt-1 text-sm text-gray-600">{description}</div> : null}
@@ -81,12 +118,11 @@ export function BaseModal({
           </button>
         </div>
 
-        <div className="max-h-[78vh] overflow-auto px-5 py-4">{children}</div>
+        <div className={bodyClassName}>{children}</div>
 
-        {footer ? <div className="border-t bg-gray-50 px-5 py-3">{footer}</div> : null}
+        {footer ? <div className={footerClassName}>{footer}</div> : null}
       </div>
     </div>,
     wrapper
   );
 }
-

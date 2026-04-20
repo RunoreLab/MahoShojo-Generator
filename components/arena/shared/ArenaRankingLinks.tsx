@@ -14,14 +14,14 @@ export function ArenaRankingLinks({ onOpenRankingModal, className }: ArenaRankin
         <button
           type="button"
           onClick={onOpenRankingModal}
-          className="text-blue-600 hover:underline font-semibold"
+          className="battle-lite-link font-semibold"
         >
           快速查看排行榜
         </button>
       ) : (
-        <span className="text-blue-600 font-semibold">快速查看排行榜</span>
+        <span className="battle-lite-link font-semibold">快速查看排行榜</span>
       )}
-      <Link href="/ranking" className="text-blue-600 hover:underline">
+      <Link href="/ranking" className="battle-lite-link">
         进入排行榜页
       </Link>
     </div>

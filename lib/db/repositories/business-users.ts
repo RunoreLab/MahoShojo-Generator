@@ -1,4 +1,4 @@
-import { and, eq, sql } from 'drizzle-orm';
+import { and, asc, eq, sql } from 'drizzle-orm';
 import type { AppDrizzleDb } from '@/lib/db/drizzle';
 import { users } from '@/lib/db/schema';
 
@@ -28,6 +28,31 @@ export const getBusinessUserByEmail = async (db: AppDrizzleDb, email: string): P
     .where(sql`lower(${users.email}) = lower(${email})`)
     .limit(1);
   return rows[0] ?? null;
+};
+
+const normalizeLimit = (limit: number, min = 1, max = 10): number => {
+  if (!Number.isFinite(limit)) return min;
+  return Math.max(min, Math.min(max, Math.floor(limit)));
+};
+
+export const listBusinessUsersByEmailInsensitive = async (
+  db: AppDrizzleDb,
+  email: string,
+  limit: number = 2,
+): Promise<Array<Pick<BusinessUserRow, 'id' | 'username' | 'email'>>> => {
+  const normalizedEmail = typeof email === 'string' ? email.trim() : '';
+  if (!normalizedEmail) return [];
+
+  return db
+    .select({
+      id: users.id,
+      username: users.username,
+      email: users.email,
+    })
+    .from(users)
+    .where(sql`lower(${users.email}) = lower(${normalizedEmail})`)
+    .orderBy(asc(users.id))
+    .limit(normalizeLimit(limit));
 };
 
 export const getBusinessUserByUsername = async (db: AppDrizzleDb, username: string): Promise<BusinessUserRow | null> => {

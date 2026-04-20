@@ -677,6 +677,7 @@ async function handler(req: NextRequest): Promise<Response> {
         let flushReasoningQueueNow: (() => void) | null = null;
         const aiOptions: GenerateWithAIOptions = {
             ...(providerOptions ?? {}),
+            abortSignal: req.signal,
             telemetry: aiTelemetry,
             ...(wantsSse
                 ? {

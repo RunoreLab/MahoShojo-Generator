@@ -91,7 +91,7 @@ export function StoryOptionsPanel({
             {userGuidance.trim() ? (
               <button
                 type="button"
-                className="px-3 py-2 text-xs font-semibold rounded bg-gray-100 text-gray-700 hover:bg-gray-200 disabled:opacity-50"
+                className="battle-lite-tonal-button rounded px-3 py-2 text-xs font-semibold disabled:opacity-50"
                 onClick={() => onUserGuidanceChange('')}
                 disabled={isGenerating}
               >
@@ -99,7 +99,7 @@ export function StoryOptionsPanel({
               </button>
             ) : null}
           </div>
-          <p className="text-xs text-gray-500 mt-1">例如：“在雨中相遇”、“保卫要地”、“猫咖聚会”等。</p>
+          <p className="battle-lite-subtle-text mt-1 text-xs">例如：“在雨中相遇”、“保卫要地”、“猫咖聚会”等。</p>
         </div>
       )}
 
@@ -114,8 +114,10 @@ export function StoryOptionsPanel({
                 key={option.value}
                 onClick={() => onStoryLengthChange(option.value)}
                 disabled={isGenerating}
-                className={`px-3 py-1.5 text-xs font-semibold rounded-full transition-colors ${
-                  storyLength === option.value ? 'bg-pink-500 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                className={`rounded-full px-3 py-1.5 text-xs font-semibold transition-colors ${
+                  storyLength === option.value
+                    ? 'battle-lite-chip-active'
+                    : 'battle-lite-tonal-button'
                 }`}
               >
                 {option.label}

@@ -154,6 +154,7 @@ describe('investigation page', () => {
     expect(html).toContain('支持违规');
     expect(html).toContain('支持不违规');
     expect(html).toContain('弃权');
+    expect(html).toContain('查看卡片详情');
     expect(html).not.toContain('有效票');
   });
 

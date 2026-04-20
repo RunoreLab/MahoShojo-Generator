@@ -5,14 +5,69 @@ import { buildTitleDisplay } from '@/lib/text';
 import { JsonSizeIndicator } from '@/components/shared/JsonSizeIndicator';
 import { getDataCardStatus, getDataCardVisibilityValue } from '@/lib/data-card-status';
 
+export type ReplaceCardTargetType = 'character' | 'scenario' | 'history' | 'questionnaire';
+
+type ReplaceCardViewer = {
+  id?: number | null;
+  username?: string | null;
+};
+
+type ReplaceCardEmptyStateInput = {
+  targetType: ReplaceCardTargetType;
+  totalCards: number;
+  candidateCount: number;
+  viewer?: ReplaceCardViewer | null;
+  loadError?: string | null;
+};
+
+export function getReplaceCardTargetTypeLabel(targetType: ReplaceCardTargetType): string {
+  if (targetType === 'character') return '角色';
+  if (targetType === 'scenario') return '情景';
+  if (targetType === 'history') return '叙事历史';
+  return '问卷';
+}
+
+const formatReplaceCardViewer = (viewer?: ReplaceCardViewer | null): string => {
+  const username = typeof viewer?.username === 'string' ? viewer.username.trim() : '';
+  const id = typeof viewer?.id === 'number' && Number.isFinite(viewer.id) ? Math.trunc(viewer.id) : null;
+
+  if (username && id !== null) return `${username} (#${id})`;
+  if (username) return username;
+  if (id !== null) return `用户 #${id}`;
+  return '未知';
+};
+
+export function buildReplaceCardEmptyState(input: ReplaceCardEmptyStateInput): {
+  title: string;
+  details: string[];
+  errorMessage: string | null;
+} {
+  const errorMessage = typeof input.loadError === 'string' && input.loadError.trim() ? input.loadError.trim() : null;
+  const details = [
+    ...(errorMessage ? ['加载状态：失败'] : []),
+    `当前登录：${formatReplaceCardViewer(input.viewer)}`,
+    `已加载数据卡：${Math.max(0, Math.trunc(input.totalCards))} 张`,
+    `目标类型：${getReplaceCardTargetTypeLabel(input.targetType)}`,
+    `同类型候选：${Math.max(0, Math.trunc(input.candidateCount))} 张`,
+  ];
+
+  return {
+    title: '暂无同类型的数据卡可替换。',
+    details,
+    errorMessage,
+  };
+}
+
 interface ReplaceCardModalProps {
   isOpen: boolean;
   onClose: () => void;
   cards: any[];
-  targetType: 'character' | 'scenario' | 'history' | 'questionnaire';
+  targetType: ReplaceCardTargetType;
   onConfirm: (cardId: string, opts: { name?: string; description?: string; isPublic?: number }) => Promise<void>;
   isSaving?: boolean;
   data?: unknown;
+  viewer?: ReplaceCardViewer | null;
+  loadError?: string | null;
 }
 
 export default function ReplaceCardModal({
@@ -22,9 +77,22 @@ export default function ReplaceCardModal({
   targetType,
   onConfirm,
   isSaving = false,
-  data
+  data,
+  viewer = null,
+  loadError = null,
 }: ReplaceCardModalProps) {
   const filteredCards = useMemo(() => cards.filter((c) => c.type === targetType), [cards, targetType]);
+  const emptyState = useMemo(
+    () =>
+      buildReplaceCardEmptyState({
+        targetType,
+        totalCards: cards.length,
+        candidateCount: filteredCards.length,
+        viewer,
+        loadError,
+      }),
+    [cards.length, filteredCards.length, loadError, targetType, viewer],
+  );
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
@@ -70,7 +138,19 @@ export default function ReplaceCardModal({
         </div>
 
         {filteredCards.length === 0 ? (
-          <p className="text-sm text-gray-600">暂无同类型的数据卡可替换。</p>
+          <div className="space-y-3">
+            <p className="text-sm text-gray-600">{emptyState.title}</p>
+            {emptyState.errorMessage && (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                最近一次数据卡列表加载失败：{emptyState.errorMessage}
+              </div>
+            )}
+            <div className="rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-600">
+              {emptyState.details.map((line) => (
+                <p key={line}>{line}</p>
+              ))}
+            </div>
+          </div>
         ) : (
           <>
             <div className="space-y-3 mb-4">

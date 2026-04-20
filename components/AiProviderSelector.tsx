@@ -64,10 +64,10 @@ const CustomSelect: React.FC<CustomSelectProps> = ({ options, value, onChange, p
 
     const renderSelected = () => (
         <div className="flex flex-col text-left leading-tight">
-            <span className="text-sm font-semibold text-gray-800">
+            <span className="battle-lite-strong-text text-sm font-semibold">
                 {selectedOption?.label ?? placeholder}
             </span>
-            <span className="text-xs text-gray-500">
+            <span className="battle-lite-subtle-text text-xs">
                 {selectedOption?.description ?? '请选择'}
             </span>
         </div>
@@ -84,10 +84,10 @@ const CustomSelect: React.FC<CustomSelectProps> = ({ options, value, onChange, p
                 disabled={disabled}
             >
                 {renderSelected()}
-                <span className="text-gray-400">{isOpen ? '▲' : '▼'}</span>
+                <span className="battle-lite-subtle-text">{isOpen ? '▲' : '▼'}</span>
             </button>
             {isOpen && (
-                <div className="absolute z-30 mt-2 max-h-64 w-full overflow-y-auto rounded-lg border border-pink-200 bg-white shadow-lg">
+                <div className="battle-lite-select-menu absolute z-30 mt-2 max-h-64 w-full overflow-y-auto rounded-lg">
                     <div role="listbox">
                         {options.map((option, index) => (
                             <button
@@ -95,18 +95,19 @@ const CustomSelect: React.FC<CustomSelectProps> = ({ options, value, onChange, p
                                 type="button"
                                 role="option"
                                 aria-selected={option.value === value}
-                                className={`flex w-full flex-col items-start gap-1 px-4 py-3 text-left transition-colors ${option.value === value ? 'bg-pink-100 text-pink-700' : 'hover:bg-pink-50'
+                                className={`flex w-full flex-col items-start gap-1 px-4 py-3 text-left transition-colors ${
+                                    option.value === value ? 'battle-lite-select-option-active' : 'battle-lite-select-option'
                                     }`}
                                 onClick={() => {
                                     onChange(option.value);
                                     setIsOpen(false);
                                 }}
                             >
-                                <span className="text-sm font-semibold text-gray-800">
+                                <span className="battle-lite-strong-text text-sm font-semibold">
                                     {option.label}
                                 </span>
                                 {option.description && (
-                                    <span className="text-xs text-gray-500">
+                                    <span className="battle-lite-subtle-text text-xs">
                                         {option.description}
                                     </span>
                                 )}
@@ -357,7 +358,7 @@ const AiProviderSelector: React.FC<AiProviderSelectorProps> = ({
                 onChange={setSelectedProviderId}
                 placeholder="选择供应商"
             />
-            <label className="text-xs text-gray-500">更多提供商正在添加中...</label>
+            <label className="battle-lite-subtle-text text-xs">更多提供商正在添加中...</label>
             {
                 activeProvider && (activeProvider.id !== 'system') && (
                     <div className="mt-4">
@@ -373,9 +374,9 @@ const AiProviderSelector: React.FC<AiProviderSelectorProps> = ({
                 )
             }
 
-            <div className="mt-3 space-y-3 rounded-lg border border-pink-200 bg-pink-50 p-3 text-sm text-gray-700">
+            <div className="battle-lite-accent-box mt-3 space-y-3 rounded-lg p-3 text-sm">
                 <div>
-                    <label className="block text-xs font-semibold text-gray-600 mb-1">选择模型</label>
+                    <label className="battle-lite-muted-text mb-1 block text-xs font-semibold">选择模型</label>
                     <CustomSelect
                         options={modelSelectOptions}
                         value={selectedModel}
@@ -388,7 +389,7 @@ const AiProviderSelector: React.FC<AiProviderSelectorProps> = ({
                 {
                     activeProvider && activeProvider.id !== 'system' && (
                         <div>
-                            <label className="block text-xs font-semibold text-gray-600 mb-1">API Key</label>
+                            <label className="battle-lite-muted-text mb-1 block text-xs font-semibold">API Key</label>
                             <input
                                 className="input-field font-mono"
                                 type={shouldShowMaskedApiKey ? 'text' : 'password'}
@@ -409,10 +410,10 @@ const AiProviderSelector: React.FC<AiProviderSelectorProps> = ({
                                     }
                                 }}
                             />
-                            <p className="mt-1 text-xs text-gray-500">
+                            <p className="battle-lite-subtle-text mt-1 text-xs">
                                 已默认隐藏完整 Key，仅显示前 6 位；点击输入框可直接修改。
                             </p>
-                            <p className="mt-1 text-xs text-gray-500">
+                            <p className="battle-lite-subtle-text mt-1 text-xs">
                                 API Key 仅存储于本地浏览器；请求时会随 HTTPS 发送到边缘函数用于转发调用，不会写入数据库或日志。
                             </p>
                         </div>

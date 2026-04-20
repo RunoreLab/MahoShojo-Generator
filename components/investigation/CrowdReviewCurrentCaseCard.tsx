@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 
+import { LeaderboardEntityDetailsModal } from '@/components/ranking/LeaderboardEntityDetailsModal';
 import { authStorage } from '@/lib/auth';
 import type {
   CrowdReviewCurrentCaseDto,
@@ -22,14 +23,26 @@ export function CrowdReviewCurrentCaseCard({
   onCaseUpdated,
 }: CrowdReviewCurrentCaseCardProps) {
   const [caseState, setCaseState] = useState(currentCase);
+  const [isDetailsOpen, setIsDetailsOpen] = useState(false);
   const [submittingDecision, setSubmittingDecision] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     setCaseState(currentCase);
+    setIsDetailsOpen(false);
     setError(null);
     setSubmittingDecision(null);
   }, [currentCase]);
+
+  const detailsTarget =
+    caseState.targetEntityId.trim().length > 0
+      ? {
+          entityType: 'data_card' as const,
+          entityId: caseState.targetEntityId,
+          displayName: caseState.targetSnapshot?.name?.trim() || '匿名公开数据卡',
+          pendingNotice: '提示：详情模态读取的是当前公开卡内容，可能与举报材料中的历史快照不完全一致。',
+        }
+      : null;
 
   const handleSubmitDecision = async (decision: 'violation' | 'no_violation' | 'abstain') => {
     setSubmittingDecision(decision);
@@ -81,98 +94,129 @@ export function CrowdReviewCurrentCaseCard({
   const showDecisionButtons = caseState.postVoteSummary == null;
 
   return (
-    <article className="rounded-[32px] border border-white/70 bg-white/90 p-6 shadow-xl backdrop-blur dark:border-slate-700/70 dark:bg-slate-950/80">
-      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-        <div>
-          <p className="text-sm font-semibold uppercase tracking-[0.2em] text-amber-600 dark:text-amber-200">
-            Current Case
-          </p>
-          <h2 className="mt-2 text-2xl font-bold text-gray-900 dark:text-slate-50">
-            当前案件：{caseState.targetSnapshot?.name ?? '匿名公开数据卡'}
-          </h2>
-          <p className="mt-2 text-sm leading-6 text-gray-600 dark:text-slate-300">
-            该页面仅展示匿名化摘要。投票前不会展示票况，也不会展示其他调查员的选择。
-          </p>
+    <>
+      <article className="rounded-[32px] border border-white/70 bg-white/90 p-6 shadow-xl backdrop-blur dark:border-slate-700/70 dark:bg-slate-950/80">
+        <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+          <div>
+            <p className="text-sm font-semibold uppercase tracking-[0.2em] text-amber-600 dark:text-amber-200">
+              Current Case
+            </p>
+            <h2 className="mt-2 text-2xl font-bold text-gray-900 dark:text-slate-50">
+              当前案件：{caseState.targetSnapshot?.name ?? '匿名公开数据卡'}
+            </h2>
+            <p className="mt-2 text-sm leading-6 text-gray-600 dark:text-slate-300">
+              该页面仅展示匿名化摘要。投票前不会展示票况，也不会展示其他调查员的选择。
+            </p>
+          </div>
+
+          <div className="rounded-2xl bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:bg-amber-500/10 dark:text-amber-100">
+            <div>派单时间：{new Date(caseState.assignedAt).toLocaleString('zh-CN', { hour12: false })}</div>
+            <div className="mt-1">截止时间：{new Date(caseState.expiresAt).toLocaleString('zh-CN', { hour12: false })}</div>
+          </div>
         </div>
 
-        <div className="rounded-2xl bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:bg-amber-500/10 dark:text-amber-100">
-          <div>派单时间：{new Date(caseState.assignedAt).toLocaleString('zh-CN', { hour12: false })}</div>
-          <div className="mt-1">截止时间：{new Date(caseState.expiresAt).toLocaleString('zh-CN', { hour12: false })}</div>
+        {caseState.targetSnapshot?.description ? (
+          <section className="mt-5 rounded-3xl bg-gray-50 px-5 py-4 text-sm leading-6 text-gray-700 dark:bg-slate-900/80 dark:text-slate-200">
+            {caseState.targetSnapshot.description}
+          </section>
+        ) : null}
+
+        {detailsTarget ? (
+          <section className="mt-5 rounded-3xl border border-sky-200 bg-sky-50/80 px-5 py-4 dark:border-sky-400/30 dark:bg-sky-500/10">
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div>
+                <h3 className="text-sm font-semibold text-sky-950 dark:text-sky-100">卡片详情</h3>
+                <p className="mt-1 text-xs leading-5 text-sky-800/80 dark:text-sky-100/80">
+                  可直接打开复用的卡片详情模态框，查看完整设定并使用现有下载能力。
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsDetailsOpen(true)}
+                className="inline-flex rounded-full border border-sky-300 bg-white px-5 py-2.5 text-sm font-semibold text-sky-700 transition hover:border-sky-400 hover:text-sky-900 dark:border-sky-300/40 dark:bg-slate-950/70 dark:text-sky-100 dark:hover:border-sky-200"
+              >
+                查看卡片详情
+              </button>
+            </div>
+            <p className="mt-3 text-xs leading-5 text-sky-900/80 dark:text-sky-100/80">
+              详情模态读取的是当前公开卡内容，若创作者已修改卡片，内容可能与举报时快照不完全一致。
+            </p>
+          </section>
+        ) : null}
+
+        <div className="mt-5 grid gap-4 lg:grid-cols-3">
+          <section className="rounded-3xl border border-white/70 bg-white/70 p-4 dark:border-slate-700 dark:bg-slate-900/70">
+            <h3 className="text-sm font-semibold text-gray-900 dark:text-slate-100">举报理由</h3>
+            <ul className="mt-3 space-y-2 text-sm text-gray-600 dark:text-slate-300">
+              {caseState.reportSummary.reasonLabels.map((item) => (
+                <li key={item}>{item}</li>
+              ))}
+            </ul>
+          </section>
+
+          <section className="rounded-3xl border border-white/70 bg-white/70 p-4 dark:border-slate-700 dark:bg-slate-900/70">
+            <h3 className="text-sm font-semibold text-gray-900 dark:text-slate-100">说明摘要</h3>
+            <ul className="mt-3 space-y-2 text-sm text-gray-600 dark:text-slate-300">
+              {caseState.reportSummary.details.map((item) => (
+                <li key={item}>{item}</li>
+              ))}
+            </ul>
+          </section>
+
+          <section className="rounded-3xl border border-white/70 bg-white/70 p-4 dark:border-slate-700 dark:bg-slate-900/70">
+            <h3 className="text-sm font-semibold text-gray-900 dark:text-slate-100">参考材料</h3>
+            <ul className="mt-3 space-y-2 text-sm text-gray-600 dark:text-slate-300">
+              {caseState.reportSummary.references.map((item) => (
+                <li key={item}>{item}</li>
+              ))}
+            </ul>
+          </section>
         </div>
-      </div>
 
-      {caseState.targetSnapshot?.description ? (
-        <section className="mt-5 rounded-3xl bg-gray-50 px-5 py-4 text-sm leading-6 text-gray-700 dark:bg-slate-900/80 dark:text-slate-200">
-          {caseState.targetSnapshot.description}
-        </section>
-      ) : null}
-
-      <div className="mt-5 grid gap-4 lg:grid-cols-3">
-        <section className="rounded-3xl border border-white/70 bg-white/70 p-4 dark:border-slate-700 dark:bg-slate-900/70">
-          <h3 className="text-sm font-semibold text-gray-900 dark:text-slate-100">举报理由</h3>
-          <ul className="mt-3 space-y-2 text-sm text-gray-600 dark:text-slate-300">
-            {caseState.reportSummary.reasonLabels.map((item) => (
+        <section className="mt-5 rounded-3xl border border-dashed border-amber-200 bg-amber-50/80 px-5 py-4 text-sm text-amber-900 dark:border-amber-400/30 dark:bg-amber-500/10 dark:text-amber-100">
+          <h3 className="font-semibold">处理提醒</h3>
+          <ul className="mt-3 space-y-2">
+            {caseState.ruleHints.map((item) => (
               <li key={item}>{item}</li>
             ))}
           </ul>
         </section>
 
-        <section className="rounded-3xl border border-white/70 bg-white/70 p-4 dark:border-slate-700 dark:bg-slate-900/70">
-          <h3 className="text-sm font-semibold text-gray-900 dark:text-slate-100">说明摘要</h3>
-          <ul className="mt-3 space-y-2 text-sm text-gray-600 dark:text-slate-300">
-            {caseState.reportSummary.details.map((item) => (
-              <li key={item}>{item}</li>
+        {error ? (
+          <div className="mt-5 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-400/30 dark:bg-rose-950/40 dark:text-rose-200">
+            {error}
+          </div>
+        ) : null}
+
+        {showDecisionButtons ? (
+          <div className="mt-5 flex flex-wrap gap-3">
+            {caseState.availableDecisions.map((decision) => (
+              <button
+                key={decision}
+                type="button"
+                onClick={() => void handleSubmitDecision(decision)}
+                disabled={submittingDecision !== null}
+                className="inline-flex rounded-full bg-gray-900 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-gray-700 disabled:cursor-wait disabled:opacity-60 dark:bg-slate-100 dark:text-slate-950 dark:hover:bg-white"
+              >
+                {submittingDecision === decision ? '提交中…' : DECISION_LABELS[decision]}
+              </button>
             ))}
-          </ul>
-        </section>
+          </div>
+        ) : null}
 
-        <section className="rounded-3xl border border-white/70 bg-white/70 p-4 dark:border-slate-700 dark:bg-slate-900/70">
-          <h3 className="text-sm font-semibold text-gray-900 dark:text-slate-100">参考材料</h3>
-          <ul className="mt-3 space-y-2 text-sm text-gray-600 dark:text-slate-300">
-            {caseState.reportSummary.references.map((item) => (
-              <li key={item}>{item}</li>
-            ))}
-          </ul>
-        </section>
-      </div>
+        {caseState.postVoteSummary ? (
+          <section className="mt-5 rounded-3xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm leading-6 text-emerald-900 dark:border-emerald-400/30 dark:bg-emerald-500/10 dark:text-emerald-100">
+            <h3 className="font-semibold">本次提交已记录</h3>
+            <p className="mt-2">{caseState.postVoteSummary.summaryText}</p>
+          </section>
+        ) : null}
+      </article>
 
-      <section className="mt-5 rounded-3xl border border-dashed border-amber-200 bg-amber-50/80 px-5 py-4 text-sm text-amber-900 dark:border-amber-400/30 dark:bg-amber-500/10 dark:text-amber-100">
-        <h3 className="font-semibold">处理提醒</h3>
-        <ul className="mt-3 space-y-2">
-          {caseState.ruleHints.map((item) => (
-            <li key={item}>{item}</li>
-          ))}
-        </ul>
-      </section>
-
-      {error ? (
-        <div className="mt-5 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-400/30 dark:bg-rose-950/40 dark:text-rose-200">
-          {error}
-        </div>
-      ) : null}
-
-      {showDecisionButtons ? (
-        <div className="mt-5 flex flex-wrap gap-3">
-          {caseState.availableDecisions.map((decision) => (
-            <button
-              key={decision}
-              type="button"
-              onClick={() => void handleSubmitDecision(decision)}
-              disabled={submittingDecision !== null}
-              className="inline-flex rounded-full bg-gray-900 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-gray-700 disabled:cursor-wait disabled:opacity-60 dark:bg-slate-100 dark:text-slate-950 dark:hover:bg-white"
-            >
-              {submittingDecision === decision ? '提交中…' : DECISION_LABELS[decision]}
-            </button>
-          ))}
-        </div>
-      ) : null}
-
-      {caseState.postVoteSummary ? (
-        <section className="mt-5 rounded-3xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm leading-6 text-emerald-900 dark:border-emerald-400/30 dark:bg-emerald-500/10 dark:text-emerald-100">
-          <h3 className="font-semibold">本次提交已记录</h3>
-          <p className="mt-2">{caseState.postVoteSummary.summaryText}</p>
-        </section>
-      ) : null}
-    </article>
+      <LeaderboardEntityDetailsModal
+        isOpen={isDetailsOpen}
+        onClose={() => setIsDetailsOpen(false)}
+        entity={isDetailsOpen ? detailsTarget : null}
+      />
+    </>
   );
 }
