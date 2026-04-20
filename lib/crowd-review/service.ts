@@ -459,6 +459,31 @@ const retryReportCaseResolutionNotification = async (input: {
   }
 };
 
+const syncVotedAssignmentSummaries = async (
+  db: AppDrizzleDb,
+  assignments: ServiceAssignmentRow[],
+  summary: CrowdReviewPostVoteSummaryDto,
+  now: string,
+  updateAssignmentPostVoteSummary: CrowdReviewServiceRepo['updateAssignmentPostVoteSummary'],
+) => {
+  const summaryJson = JSON.stringify(summary);
+
+  await Promise.all(
+    assignments.map(async (assignment) => {
+      if (assignment.status !== 'voted' && assignment.status !== 'abstained') {
+        return;
+      }
+
+      await updateAssignmentPostVoteSummary(db, {
+        assignmentId: assignment.id,
+        userId: assignment.inspectorUserId,
+        postVoteSummaryJson: summaryJson,
+        now,
+      });
+    }),
+  );
+};
+
 const buildAssignmentReplaySummary = (assignment: ServiceAssignmentRow): CrowdReviewPostVoteSummaryDto => {
   const persisted = parseSummaryJson(assignment.postVoteSummaryJson);
   if (persisted) {
@@ -714,22 +739,7 @@ const createCrowdReviewService = (deps: CrowdReviewServiceDeps) => {
     summary: CrowdReviewPostVoteSummaryDto,
     now: string,
   ) => {
-    const finalSummaryJson = JSON.stringify(summary);
-
-    await Promise.all(
-      assignments.map(async (assignment) => {
-        if (assignment.status !== 'voted' && assignment.status !== 'abstained') {
-          return;
-        }
-
-        await deps.repo.updateAssignmentPostVoteSummary(db, {
-          assignmentId: assignment.id,
-          userId: assignment.inspectorUserId,
-          postVoteSummaryJson: finalSummaryJson,
-          now,
-        });
-      }),
-    );
+    await syncVotedAssignmentSummaries(db, assignments, summary, now, deps.repo.updateAssignmentPostVoteSummary);
 
     await Promise.all(
       assignments.map(async (assignment) => {
@@ -772,6 +782,14 @@ const createCrowdReviewService = (deps: CrowdReviewServiceDeps) => {
     }
 
     if (summaryPlan.nextRoundStatus === round.status) {
+      await deps.repo.updateRound(db, {
+        roundId: round.id,
+        status: round.status,
+        resultCode: round.resultCode,
+        resultSummaryJson: JSON.stringify(summaryPlan.summary),
+        now,
+      });
+      await syncVotedAssignmentSummaries(db, assignments, summaryPlan.summary, now, deps.repo.updateAssignmentPostVoteSummary);
       return summaryPlan.summary;
     }
 
@@ -786,20 +804,7 @@ const createCrowdReviewService = (deps: CrowdReviewServiceDeps) => {
         resultSummaryJson: waitingSummaryJson,
         now,
       });
-      await Promise.all(
-        assignments.map(async (assignment) => {
-          if (assignment.status !== 'voted' && assignment.status !== 'abstained') {
-            return;
-          }
-
-          await deps.repo.updateAssignmentPostVoteSummary(db, {
-            assignmentId: assignment.id,
-            userId: assignment.inspectorUserId,
-            postVoteSummaryJson: waitingSummaryJson,
-            now,
-          });
-        }),
-      );
+      await syncVotedAssignmentSummaries(db, assignments, summaryPlan.summary, now, deps.repo.updateAssignmentPostVoteSummary);
       return summaryPlan.summary;
     }
 
@@ -853,14 +858,18 @@ const createCrowdReviewService = (deps: CrowdReviewServiceDeps) => {
 
   const loadReplaySummary = async (db: AppDrizzleDb, assignment: ServiceAssignmentRow) => {
     const persisted = parseSummaryJson(assignment.postVoteSummaryJson);
-    if (persisted) {
-      return persisted;
-    }
-
     const round = await deps.repo.getRoundById(db, assignment.crowdReviewRoundId);
     const roundSummary = parseSummaryJson(round?.resultSummaryJson);
-    if (roundSummary) {
-      return roundSummary;
+
+    if (assignment.status === 'voted' || assignment.status === 'abstained') {
+      if (roundSummary) {
+        return roundSummary;
+      }
+      if (persisted) {
+        return persisted;
+      }
+    } else if (persisted) {
+      return persisted;
     }
 
     return buildAssignmentReplaySummary({

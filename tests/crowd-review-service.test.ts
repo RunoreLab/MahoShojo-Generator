@@ -1097,6 +1097,117 @@ describe('crowd review service', () => {
     });
   });
 
+  test('submit refreshes active round tally for earlier voters without status transition', async () => {
+    let round = makeRoundRow({
+      deadlineAt: '2026-04-08T13:00:00.000Z',
+      minValidVotes: 3,
+      resultSummaryJson:
+        '{"roundStatus":"active","resultCode":null,"summaryText":"你的处理结果已记录，当前轮次仍在等待更多结果。 有效票：支持违规 1，支持不违规 0，弃权 0。"}',
+    });
+    const assignments = new Map([
+      [
+        'assignment-1',
+        makeAssignmentRow({
+          id: 'assignment-1',
+          inspectorUserId: 7,
+          status: 'voted',
+          decision: 'violation',
+          completedAt: '2026-04-08T11:20:00.000Z',
+          postVoteSummaryJson:
+            '{"roundStatus":"active","resultCode":null,"summaryText":"你的处理结果已记录，当前轮次仍在等待更多结果。 有效票：支持违规 1，支持不违规 0，弃权 0。"}',
+          postVoteSummarySeenAt: '2026-04-08T11:20:00.000Z',
+        }),
+      ],
+      [
+        'assignment-2',
+        makeAssignmentRow({
+          id: 'assignment-2',
+          inspectorUserId: 8,
+          status: 'assigned',
+          decision: null,
+          completedAt: null,
+          postVoteSummaryJson: '{}',
+        }),
+      ],
+    ]);
+
+    const service = buildService({
+      repo: {
+        getActiveAssignmentByInspector: async (_db, userId) =>
+          Array.from(assignments.values()).find(
+            (assignment) => assignment.inspectorUserId === userId && assignment.status === 'assigned',
+          ) ?? null,
+        getLatestCompletedAssignmentByInspector: async (_db, userId) =>
+          Array.from(assignments.values()).find(
+            (assignment) =>
+              assignment.inspectorUserId === userId &&
+              ['voted', 'abstained', 'expired', 'revoked'].includes(String(assignment.status)),
+          ) ?? null,
+        getAssignmentByIdForInspector: async (_db, input) => assignments.get(input.assignmentId) ?? null,
+        getRoundById: async () => round,
+        listAssignmentsByRound: async () => Array.from(assignments.values()),
+        finalizeAssignment: async (_db, input) => {
+          const current = assignments.get(input.assignmentId);
+          if (!current || current.inspectorUserId !== input.userId || current.status !== 'assigned') {
+            return false;
+          }
+          assignments.set(input.assignmentId, {
+            ...current,
+            status: input.status,
+            decision: input.decision,
+            decisionNote: input.note,
+            completedAt: input.now,
+            postVoteSummaryJson: input.postVoteSummaryJson,
+            updatedAt: input.now,
+          });
+          return true;
+        },
+        updateAssignmentPostVoteSummary: async (_db, input) => {
+          const current = assignments.get(input.assignmentId);
+          if (!current || current.inspectorUserId !== input.userId) {
+            return false;
+          }
+          assignments.set(input.assignmentId, {
+            ...current,
+            postVoteSummaryJson: input.postVoteSummaryJson,
+            updatedAt: input.now,
+          });
+          return true;
+        },
+        updateRound: async (_db, input) => {
+          round = {
+            ...round,
+            status: String(input.status) as typeof round.status,
+            deadlineAt: input.deadlineAt ?? round.deadlineAt,
+            extensionCount: input.extensionCount ?? round.extensionCount,
+            resultCode: (input.resultCode ?? round.resultCode) as typeof round.resultCode,
+            resultSummaryJson: input.resultSummaryJson ?? round.resultSummaryJson,
+            updatedAt: input.now,
+          };
+          return true;
+        },
+      } as any,
+    });
+
+    const submitResult = await service.submitCrowdReviewDecision({
+      db: {} as never,
+      userId: 8,
+      assignmentId: 'assignment-2',
+      decision: 'no_violation',
+      note: null,
+    });
+    const replay = await service.getCrowdReviewCurrentCase({ db: {} as never, userId: 7 });
+
+    expect(submitResult.assignmentStatus).toBe('voted');
+    expect(submitResult.postVoteSummary.roundStatus).toBe('active');
+    expect(submitResult.postVoteSummary.summaryText).toContain('支持违规 1，支持不违规 1');
+    expect(replay?.assignmentStatus).toBe('voted');
+    expect(replay?.postVoteSummary?.roundStatus).toBe('active');
+    expect(replay?.postVoteSummary?.summaryText).toContain('支持违规 1，支持不违规 1');
+    expect(round.status).toBe('active');
+    expect(round.resultSummaryJson).toContain('支持不违规 1');
+  });
+
   test('submit backfills the final round summary to earlier voters for current-case replay', async () => {
     let round = makeRoundRow({
       deadlineAt: '2026-04-08T11:00:00.000Z',
