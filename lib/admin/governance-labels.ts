@@ -1,4 +1,6 @@
 import type {
+  CrowdReviewAssignmentStatus,
+  CrowdReviewDecision,
   CrowdReviewInspectorStatus,
   CrowdReviewResultCode,
   CrowdReviewRoundStatus,
@@ -38,6 +40,20 @@ const CROWD_REVIEW_RESULT_CODE_LABELS: Record<CrowdReviewResultCode, string> = {
   admin_override: '管理员改判',
 };
 
+const CROWD_REVIEW_DECISION_LABELS: Record<CrowdReviewDecision, string> = {
+  violation: '投票：违规',
+  no_violation: '投票：不违规',
+  abstain: '投票：弃权',
+};
+
+const CROWD_REVIEW_ASSIGNMENT_STATUS_LABELS: Record<CrowdReviewAssignmentStatus, string> = {
+  assigned: '待处理',
+  voted: '已投票',
+  abstained: '已弃权',
+  expired: '已过期',
+  revoked: '已撤销',
+};
+
 const CROWD_REVIEW_INSPECTOR_STATUS_LABELS: Record<CrowdReviewInspectorStatus, string> = {
   active: '正常',
   suspended: '已暂停',
@@ -70,6 +86,14 @@ export function getCrowdReviewRoundStatusLabel(value: string | null | undefined)
 
 export function getCrowdReviewResultCodeLabel(value: string | null | undefined): string {
   return lookupLabel(CROWD_REVIEW_RESULT_CODE_LABELS, value);
+}
+
+export function getCrowdReviewDecisionLabel(value: string | null | undefined): string {
+  return lookupLabel(CROWD_REVIEW_DECISION_LABELS, value);
+}
+
+export function getCrowdReviewAssignmentStatusLabel(value: string | null | undefined): string {
+  return lookupLabel(CROWD_REVIEW_ASSIGNMENT_STATUS_LABELS, value);
 }
 
 export function getCrowdReviewInspectorStatusLabel(value: string | null | undefined): string {

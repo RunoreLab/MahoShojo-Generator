@@ -158,6 +158,7 @@ export type AdminCrowdReviewAssignmentDetailItem = {
   assignmentId: string;
   inspectorUserId: number;
   inspectorUsername: string | null;
+  inspectorEmail: string | null;
   status: string;
   assignedAt: string;
   expiresAt: string;
@@ -995,6 +996,7 @@ export async function getAdminCrowdReviewCaseDetail(roundId: string): Promise<Ad
         cra.id AS assignment_id,
         cra.inspector_user_id,
         u.username AS inspector_username,
+        u.email AS inspector_email,
         cra.status,
         cra.assigned_at,
         cra.expires_at,
@@ -1037,6 +1039,7 @@ export async function getAdminCrowdReviewCaseDetail(roundId: string): Promise<Ad
       assignmentId: String(assignment.assignment_id ?? ''),
       inspectorUserId: readInt(assignment.inspector_user_id),
       inspectorUsername: readString(assignment.inspector_username),
+      inspectorEmail: readString(assignment.inspector_email),
       status: String(assignment.status ?? ''),
       assignedAt: String(assignment.assigned_at ?? ''),
       expiresAt: String(assignment.expires_at ?? ''),

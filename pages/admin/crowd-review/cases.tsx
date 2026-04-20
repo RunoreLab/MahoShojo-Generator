@@ -1,9 +1,17 @@
 import Head from 'next/head';
 import Link from 'next/link';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useRouter } from 'next/router';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { AdminCrowdReviewCaseDetailDto, AdminCrowdReviewCaseListItem } from '@/lib/admin/governance';
 import {
+  getCrowdReviewVoteAuditResult,
+  summarizeCrowdReviewVotes,
+  type CrowdReviewVoteAuditTone,
+} from '@/lib/admin/crowd-review-audit';
+import {
+  getCrowdReviewAssignmentStatusLabel,
+  getCrowdReviewDecisionLabel,
   getCrowdReviewResultCodeLabel,
   getCrowdReviewRoundStatusLabel,
 } from '@/lib/admin/governance-labels';
@@ -20,6 +28,14 @@ const stringifySummary = (value: Record<string, unknown>): string => {
   return JSON.stringify(value, null, 2);
 };
 
+const getVoteAuditToneClasses = (tone: CrowdReviewVoteAuditTone): string => {
+  if (tone === 'positive') return 'bg-emerald-100 text-emerald-700';
+  if (tone === 'negative') return 'bg-rose-100 text-rose-700';
+  if (tone === 'warning') return 'bg-amber-100 text-amber-700';
+  if (tone === 'pending') return 'bg-sky-100 text-sky-700';
+  return 'bg-slate-100 text-slate-700';
+};
+
 const STATUS_FILTER_OPTIONS = [
   { value: '', label: '全部状态' },
   { value: 'pending_dispatch', label: getCrowdReviewRoundStatusLabel('pending_dispatch') },
@@ -31,6 +47,7 @@ const STATUS_FILTER_OPTIONS = [
 ] as const;
 
 export default function AdminCrowdReviewCasesPage() {
+  const router = useRouter();
   const [items, setItems] = useState<AdminCrowdReviewCaseListItem[]>([]);
   const [status, setStatus] = useState('');
   const [loading, setLoading] = useState(true);
@@ -132,7 +149,33 @@ export default function AdminCrowdReviewCasesPage() {
     };
   }, [loadRoundDetail, selectedRoundId]);
 
+  useEffect(() => {
+    if (!router.isReady) return;
+    const roundId = typeof router.query.roundId === 'string' ? router.query.roundId.trim() : '';
+    if (!roundId || roundId === selectedRoundId) return;
+    setSelectedRoundId(roundId);
+  }, [router.isReady, router.query.roundId, selectedRoundId]);
+
   const activeDetail = detail && detail.roundId === selectedRoundId ? detail : null;
+  const activeVoteSummary = useMemo(
+    () => (activeDetail ? summarizeCrowdReviewVotes(activeDetail.assignments) : null),
+    [activeDetail],
+  );
+  const activeAssignmentAudits = useMemo(
+    () =>
+      activeDetail
+        ? activeDetail.assignments.map((assignment) => ({
+            assignment,
+            audit: getCrowdReviewVoteAuditResult({
+              assignment,
+              roundStatus: activeDetail.status,
+              resultCode: activeDetail.resultCode,
+              reportCaseResolutionCode: activeDetail.reportCaseResolutionCode,
+            }),
+          }))
+        : [],
+    [activeDetail],
+  );
 
   const runRoundAction = async (
     action: 'take-over' | 'cancel' | 'override',
@@ -307,6 +350,20 @@ export default function AdminCrowdReviewCasesPage() {
                       <div className="mt-2 text-sm text-gray-900">
                         已投 {activeDetail.votedCount} / 派单 {activeDetail.assignmentCount}
                       </div>
+                      <div className="mt-2 flex flex-wrap gap-2 text-[11px]">
+                        <span className="rounded-full bg-rose-100 px-2 py-0.5 text-rose-700">
+                          违规票 {activeVoteSummary?.violationVoteCount ?? 0}
+                        </span>
+                        <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-emerald-700">
+                          不违规票 {activeVoteSummary?.noViolationVoteCount ?? 0}
+                        </span>
+                        <span className="rounded-full bg-slate-100 px-2 py-0.5 text-slate-700">
+                          弃权 {activeVoteSummary?.abstainCount ?? 0}
+                        </span>
+                        <span className="rounded-full bg-sky-100 px-2 py-0.5 text-sky-700">
+                          待处理 {activeVoteSummary?.pendingCount ?? 0}
+                        </span>
+                      </div>
                       <div className="mt-2 text-xs text-gray-500">进行中：{activeDetail.activeAssignmentCount}</div>
                       <div className="mt-1 text-xs text-gray-500">
                         结果：{activeDetail.resultCode ? getCrowdReviewResultCodeLabel(activeDetail.resultCode) : '—'} · minValidVotes={activeDetail.minValidVotes}
@@ -399,14 +456,21 @@ export default function AdminCrowdReviewCasesPage() {
                   </div>
 
                   <div className="rounded-xl border border-gray-200 p-4">
-                      <h3 className="text-sm font-semibold text-gray-900">结果摘要</h3>
+                    <h3 className="text-sm font-semibold text-gray-900">结果摘要</h3>
                     <pre className="mt-3 max-h-52 overflow-auto rounded-lg bg-gray-50 p-3 text-xs text-gray-700">
                       {stringifySummary(activeDetail.resultSummary)}
                     </pre>
                   </div>
 
                   <div className="rounded-xl border border-gray-200 p-4">
-                    <h3 className="text-sm font-semibold text-gray-900">派单与投票</h3>
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <h3 className="text-sm font-semibold text-gray-900">投票审计明细</h3>
+                        <p className="mt-1 text-xs text-gray-500">
+                          可直接查看每位巡查使的派单状态、投票方向、备注与是否和本轮最终方向一致。
+                        </p>
+                      </div>
+                    </div>
                     <div className="mt-3 overflow-x-auto">
                       <table className="min-w-full text-left text-xs">
                         <thead className="text-gray-500">
@@ -414,31 +478,63 @@ export default function AdminCrowdReviewCasesPage() {
                             <th className="py-2 pr-3">巡查使</th>
                             <th className="py-2 pr-3">状态</th>
                             <th className="py-2 pr-3">投票</th>
-                            <th className="py-2 pr-3">完成</th>
+                            <th className="py-2 pr-3">审计结论</th>
+                            <th className="py-2 pr-3">时间</th>
                           </tr>
                         </thead>
                         <tbody>
-                          {activeDetail.assignments.length === 0 ? (
+                          {activeAssignmentAudits.length === 0 ? (
                             <tr>
-                              <td colSpan={4} className="py-6 text-center text-gray-500">
+                              <td colSpan={5} className="py-6 text-center text-gray-500">
                                 暂无派单。
                               </td>
                             </tr>
                           ) : (
-                            activeDetail.assignments.map((assignment) => (
+                            activeAssignmentAudits.map(({ assignment, audit }) => (
                               <tr key={assignment.assignmentId} className="border-t border-gray-100">
                                 <td className="py-2 pr-3">
                                   {assignment.inspectorUsername ?? `user #${assignment.inspectorUserId}`}
+                                  <div className="text-[11px] text-gray-400">user #{assignment.inspectorUserId}</div>
+                                  {assignment.inspectorEmail ? (
+                                    <div className="text-[11px] text-gray-400">{assignment.inspectorEmail}</div>
+                                  ) : null}
                                   <div className="text-[11px] text-gray-400">#{assignment.assignmentId}</div>
                                 </td>
-                                <td className="py-2 pr-3">{assignment.status}</td>
                                 <td className="py-2 pr-3">
-                                  <div>{assignment.decision ?? '—'}</div>
+                                  <div>{getCrowdReviewAssignmentStatusLabel(assignment.status)}</div>
+                                  <div className="mt-1 text-[11px] text-gray-400">{assignment.status}</div>
+                                  <div className="mt-2 text-[11px] text-gray-500">
+                                    派单 {formatDateTime(assignment.assignedAt)}
+                                  </div>
+                                  <div className="mt-1 text-[11px] text-gray-500">
+                                    截止 {formatDateTime(assignment.expiresAt)}
+                                  </div>
+                                </td>
+                                <td className="py-2 pr-3">
+                                  <div>{assignment.decision ? getCrowdReviewDecisionLabel(assignment.decision) : '—'}</div>
                                   {assignment.decisionNote ? (
-                                    <div className="mt-1 max-w-[180px] text-[11px] text-gray-500">{assignment.decisionNote}</div>
+                                    <div className="mt-1 max-w-[220px] text-[11px] text-gray-500">{assignment.decisionNote}</div>
+                                  ) : null}
+                                  {typeof assignment.postVoteSummary.summaryText === 'string' ? (
+                                    <div className="mt-1 max-w-[220px] text-[11px] text-gray-400">
+                                      {assignment.postVoteSummary.summaryText}
+                                    </div>
                                   ) : null}
                                 </td>
-                                <td className="py-2 pr-3">{formatDateTime(assignment.completedAt)}</td>
+                                <td className="py-2 pr-3">
+                                  <div
+                                    className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium ${getVoteAuditToneClasses(audit.tone)}`}
+                                  >
+                                    {audit.label}
+                                  </div>
+                                  <div className="mt-1 max-w-[220px] text-[11px] text-gray-500">{audit.detail}</div>
+                                </td>
+                                <td className="py-2 pr-3">
+                                  <div>完成 {formatDateTime(assignment.completedAt)}</div>
+                                  <div className="mt-1 text-[11px] text-gray-500">
+                                    已读回执 {formatDateTime(assignment.postVoteSummarySeenAt)}
+                                  </div>
+                                </td>
                               </tr>
                             ))
                           )}

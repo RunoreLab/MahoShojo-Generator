@@ -754,6 +754,14 @@ export default function AdminReportCasesPage() {
                                 {round.status}
                                 {round.resultCode ? ` · ${round.resultCode}` : ''}
                               </div>
+                              <div className="mt-3">
+                                <Link
+                                  href={`/admin/crowd-review/cases?roundId=${encodeURIComponent(round.roundId)}`}
+                                  className="inline-flex rounded-lg border border-violet-200 px-2.5 py-1 text-[11px] font-medium text-violet-700 hover:bg-violet-50"
+                                >
+                                  查看投票明细
+                                </Link>
+                              </div>
                             </div>
                           ))
                         )}
