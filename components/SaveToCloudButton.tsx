@@ -24,6 +24,23 @@ type DataCardsLoadState = {
   error: string | null;
 };
 
+type OpenReplaceModalAndRefreshInput = {
+  openModal: () => void;
+  refreshCards: () => Promise<unknown>;
+  onRefreshError?: (error: unknown) => void;
+};
+
+export function openReplaceModalAndRefresh({
+  openModal,
+  refreshCards,
+  onRefreshError,
+}: OpenReplaceModalAndRefreshInput): void {
+  openModal();
+  void refreshCards().catch((error) => {
+    onRefreshError?.(error);
+  });
+}
+
 // 检测是否为情景文件
 const isScenarioData = (data: any): boolean => {
   if (!data) return false;
@@ -293,8 +310,13 @@ export default function SaveToCloudButton({
               }
               return;
             }
-            await loadUserDataCards();
-            setShowReplaceModal(true);
+            openReplaceModalAndRefresh({
+              openModal: () => setShowReplaceModal(true),
+              refreshCards: loadUserDataCards,
+              onRefreshError: (error) => {
+                console.error('替换弹窗打开后刷新数据卡失败:', error);
+              },
+            });
           })();
         }}
         className={`${className} ml-2`}
