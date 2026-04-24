@@ -1,6 +1,8 @@
 'use client';
 
-import type { ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
+
+import { hasCustomStoryLength, normalizeCustomStoryLength } from '@/lib/story-length';
 
 export type StoryLengthOption = 'default' | 'short' | 'standard' | 'detailed' | 'long';
 
@@ -23,6 +25,8 @@ type Props = {
 
   storyLength: StoryLengthOption;
   onStoryLengthChange: (value: StoryLengthOption) => void;
+  customStoryLength?: string;
+  onCustomStoryLengthChange?: (value: string) => void;
 
   selectedLanguage: string;
   onSelectedLanguageChange: (value: string) => void;
@@ -40,6 +44,8 @@ export function StoryOptionsPanel({
   afterUserGuidance,
   storyLength,
   onStoryLengthChange,
+  customStoryLength = '',
+  onCustomStoryLengthChange = () => {},
   selectedLanguage,
   onSelectedLanguageChange,
 }: Props) {
@@ -55,6 +61,16 @@ export function StoryOptionsPanel({
     ...(allowEmptyLanguage ? [{ code: '', name: '默认（不指定）' }] : []),
     ...(Array.isArray(languages) ? languages : []),
   ];
+  const normalizedCustomStoryLength = normalizeCustomStoryLength(customStoryLength);
+  const [isCustomStoryLengthMode, setIsCustomStoryLengthMode] = useState(() =>
+    hasCustomStoryLength(customStoryLength),
+  );
+
+  useEffect(() => {
+    if (normalizedCustomStoryLength) {
+      setIsCustomStoryLengthMode(true);
+    }
+  }, [normalizedCustomStoryLength]);
 
   return (
     <>
@@ -112,10 +128,16 @@ export function StoryOptionsPanel({
             {storyOptions.map((option) => (
               <button
                 key={option.value}
-                onClick={() => onStoryLengthChange(option.value)}
+                onClick={() => {
+                  setIsCustomStoryLengthMode(false);
+                  if (normalizedCustomStoryLength) {
+                    onCustomStoryLengthChange('');
+                  }
+                  onStoryLengthChange(option.value);
+                }}
                 disabled={isGenerating}
                 className={`rounded-full px-3 py-1.5 text-xs font-semibold transition-colors ${
-                  storyLength === option.value
+                  !isCustomStoryLengthMode && !normalizedCustomStoryLength && storyLength === option.value
                     ? 'battle-lite-chip-active'
                     : 'battle-lite-tonal-button'
                 }`}
@@ -123,7 +145,41 @@ export function StoryOptionsPanel({
                 {option.label}
               </button>
             ))}
+            <button
+              type="button"
+              onClick={() => setIsCustomStoryLengthMode(true)}
+              disabled={isGenerating}
+              className={`rounded-full px-3 py-1.5 text-xs font-semibold transition-colors ${
+                isCustomStoryLengthMode || Boolean(normalizedCustomStoryLength)
+                  ? 'battle-lite-chip-active'
+                  : 'battle-lite-tonal-button'
+              }`}
+            >
+              自定义
+            </button>
           </div>
+          {isCustomStoryLengthMode || normalizedCustomStoryLength ? (
+            <div className="mt-3 space-y-1">
+              <label htmlFor="custom-story-length" className="input-label">
+                自定义目标字数
+              </label>
+              <input
+                id="custom-story-length"
+                name="custom_story_length"
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                className="input-field"
+                placeholder="输入正整数，例如 1200"
+                disabled={isGenerating}
+                value={customStoryLength}
+                onChange={(e) => onCustomStoryLengthChange(e.target.value.replace(/[^\d]/g, ''))}
+              />
+              <p className="battle-lite-subtle-text text-xs">
+                自定义目标字数仅作参考，生成结果不会严格等于该数字。
+              </p>
+            </div>
+          ) : null}
         </div>
       ) : null}
 

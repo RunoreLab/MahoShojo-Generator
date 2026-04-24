@@ -135,6 +135,7 @@ describe('battle story generate-next validation', () => {
           ],
           mode: 'classic',
           storyLength: 'standard',
+          customStoryLength: '1444',
           language: 'zh-CN',
           settings: {
             readArenaHistory: true,
@@ -174,6 +175,7 @@ describe('battle story generate-next validation', () => {
     ]);
     expect(body.arenaHistoryReadLimit).toBe(5);
     expect(body.narrativeHistoryReadLimit).toBe(9);
+    expect(body.customStoryLength).toBe('1444');
     expect(body.forceStreamMeta).toBe(true);
   });
 });

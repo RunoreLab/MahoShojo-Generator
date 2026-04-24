@@ -884,7 +884,7 @@ export function useBattleStorySession() {
       let cooldownHandled = false;
 
       try {
-        const response = await fetch('/api/arena/session/generate-next', {
+      const response = await fetch('/api/arena/session/generate-next', {
           method: 'POST',
           headers: await buildRequestHeaders(true),
           signal: generationController.signal,
@@ -906,6 +906,7 @@ export function useBattleStorySession() {
               questionnaires: input.seed.questionnaires ?? [],
               mode: input.source.mode,
               storyLength: input.source.storyLength,
+              customStoryLength: input.source.customStoryLength,
               language: input.source.language,
               settings: input.seed.settings,
             },
@@ -1195,6 +1196,7 @@ export function useBattleStorySession() {
         adjudicationEvents: state.adjudicationEvents,
         selectedLanguage: state.selectedLanguage,
         storyLength: state.storyLength,
+        customStoryLength: state.customStoryLength,
         settings: state.settings,
         providerMode: customProviderPayload?.providerId === 'system' || !customProviderPayload ? 'system' : 'custom',
         providerId: customProviderPayload?.providerId ?? 'system',

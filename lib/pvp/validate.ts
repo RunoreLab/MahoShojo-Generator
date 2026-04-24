@@ -1,6 +1,7 @@
 import { DEFAULT_PVP_RULES } from './defaults';
 import type { PvpRoomRules } from './types';
 import type { AdjudicatorEvent } from '@/types/arena';
+import { normalizeCustomStoryLength } from '@/lib/story-length';
 
 const intInRange = (raw: unknown, fallback: number, min: number, max: number): number => {
   const n = Number.isFinite(raw as number) ? Math.floor(raw as number) : fallback;
@@ -241,6 +242,7 @@ export const parsePvpRules = (input: unknown): { rules: PvpRoomRules } | { error
 
   const storyLengthRaw = typeof raw.storyLength === 'string' ? raw.storyLength : DEFAULT_PVP_RULES.storyLength;
   const storyLength = allowedStoryLengths.has(storyLengthRaw) ? (storyLengthRaw as any) : DEFAULT_PVP_RULES.storyLength;
+  const customStoryLength = normalizeCustomStoryLength(raw.customStoryLength);
 
   const languageRaw = typeof raw.language === 'string' ? raw.language : DEFAULT_PVP_RULES.language;
   const language = languageRaw.trim().length <= 32 ? languageRaw.trim() : DEFAULT_PVP_RULES.language;
@@ -275,6 +277,7 @@ export const parsePvpRules = (input: unknown): { rules: PvpRoomRules } | { error
     generationMode,
     userGuidance,
     storyLength,
+    customStoryLength,
     language,
     adjudicationEvents,
   };

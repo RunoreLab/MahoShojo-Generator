@@ -44,6 +44,7 @@ export type BattleStorySessionSource = {
   mode: BattleStorySourceMode;
   language: string;
   storyLength: BattleStoryLengthOption;
+  customStoryLength?: string;
   generationMode: BattleStoryGenerationMode;
   providerMode?: AiSessionProviderMode;
   providerId?: string;

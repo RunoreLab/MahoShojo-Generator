@@ -77,6 +77,7 @@ export const useBattleStore = create<BattleStoreState>()(
       streamUpdateMetaDebug: null,
       latestAiImpacts: null,
       storyLength: 'default',
+      customStoryLength: '',
       selectedLanguage: 'zh-CN',
       lastGenerationId: null,
       settings: defaultSettings,
@@ -107,6 +108,7 @@ export const useBattleStore = create<BattleStoreState>()(
       setStreamUpdateMetaDebug: (debug) => set({ streamUpdateMetaDebug: debug }),
       setLatestAiImpacts: (impacts) => set({ latestAiImpacts: impacts }),
       setStoryLength: (storyLength) => set({ storyLength }),
+      setCustomStoryLength: (customStoryLength) => set({ customStoryLength }),
       setSelectedLanguage: (selectedLanguage) => set({ selectedLanguage }),
       setLastGenerationId: (lastGenerationId) => set({ lastGenerationId }),
       updateSettings: (incoming) =>
@@ -351,6 +353,7 @@ export const useBattleStore = create<BattleStoreState>()(
         generationMode: state.generationMode,
         arenaFreeRankingEnabled: state.arenaFreeRankingEnabled,
         storyLength: state.storyLength,
+        customStoryLength: state.customStoryLength,
         selectedLanguage: state.selectedLanguage,
         settings: state.settings,
       }),

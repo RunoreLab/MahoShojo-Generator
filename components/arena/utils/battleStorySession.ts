@@ -2,6 +2,7 @@
 
 import { randomUUID } from '@/lib/crypto';
 import { formatBattleStoryChapterProgress } from '@/lib/ai-session/battle-story/plan';
+import { normalizeCustomStoryLength } from '@/lib/story-length';
 import {
   buildAdjudicationRecordMarkdown,
   hasAdjudicationRecordSection,
@@ -188,6 +189,7 @@ export const buildBattleStorySessionSeedSnapshot = (input: {
   adjudicationEvents: AdjudicatorEvent[];
   selectedLanguage: string;
   storyLength: StoryLengthOption;
+  customStoryLength?: string;
   settings: BattleSettings;
   providerMode: 'system' | 'custom';
   providerId: string;
@@ -226,6 +228,9 @@ export const buildBattleStorySessionSeedSnapshot = (input: {
       mode: input.battleMode,
       language: input.selectedLanguage,
       storyLength: input.storyLength,
+      ...(normalizeCustomStoryLength(input.customStoryLength)
+        ? { customStoryLength: normalizeCustomStoryLength(input.customStoryLength) }
+        : {}),
       generationMode: 'stream',
       providerMode: input.providerMode,
       providerId: input.providerId,

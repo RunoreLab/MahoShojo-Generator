@@ -1,10 +1,12 @@
 import type { BattleStoreState } from '@/components/arena/types';
+import { formatStoryLengthSummaryLabel } from '@/lib/story-length';
 
 type SummaryInput = Pick<
   BattleStoreState,
   | 'battleMode'
   | 'scenario'
   | 'storyLength'
+  | 'customStoryLength'
   | 'selectedLanguage'
   | 'settings'
   | 'auxScenarios'
@@ -47,7 +49,7 @@ export const buildBattleLiteInheritedSummary = (input: SummaryInput): BattleLite
 
   return {
     inheritedSettings: [
-      `长度：${input.storyLength}`,
+      `长度：${formatStoryLengthSummaryLabel(input.storyLength, input.customStoryLength)}`,
       `语言：${input.selectedLanguage}`,
       formatArenaHistoryRead(input.settings),
       `当前状态读取：${input.settings.readCurrentState ? '开启' : '关闭'}`,

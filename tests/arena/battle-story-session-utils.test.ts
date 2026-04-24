@@ -73,6 +73,7 @@ describe('battle story session utils', () => {
       ],
       selectedLanguage: 'zh-CN',
       storyLength: 'long',
+      customStoryLength: '1666',
       settings: {
         readArenaHistory: true,
         readArenaHistoryLimit: 3,
@@ -94,6 +95,7 @@ describe('battle story session utils', () => {
 
     expect(snapshot.titleHint).toContain('废都决战');
     expect(snapshot.source.storyLength).toBe('long');
+    expect(snapshot.source.customStoryLength).toBe('1666');
     expect(snapshot.seed.scenario).toEqual({ title: '废都决战' });
     expect(snapshot.seed.auxScenarios).toHaveLength(1);
     expect(snapshot.seed.questionnaires?.[0]?.loreMarkdown).toBe('角色关系与世界观');

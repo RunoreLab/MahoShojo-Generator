@@ -8,6 +8,7 @@ import { createBlobUrl, downloadBlob } from '@/lib/client/blobUrl';
 import { capturePngBlob } from '@/lib/client/snapdomCapture';
 import { getMainColorGradient, type MainColorKey } from '@/lib/main-color';
 import type { PvpRoomRules } from '@/lib/pvp/types';
+import { formatStoryLengthSummaryLabel } from '@/lib/story-length';
 import type { UserBadge } from '@/types/badge';
 import { parseUserPrefix } from '@/lib/user-prefix';
 
@@ -315,7 +316,7 @@ export function PvpSettlementCard({
               人数：{rules.participants}；提交：{rules.submissionMode === 'hostOnly' ? '房主牌堆' : `${rules.cardsPerPlayer} / 人`}；初始手牌：{rules.dealPerPlayer}；空手补发：{rules.dealWhenEmpty}；抽取：{rules.drawSource}；复用弃牌：{String(rules.recycleUsedCards)}；去重：{String(rules.dedupe)}；洗混：{String(rules.shuffleDecks)}；展示提交：{String(rules.showAllSubmissions)}
             </div>
             <div className="mt-1 text-xs text-white/85 leading-relaxed">
-              生成：{generationLabel(rules.generationMode)}；语言：{rules.language?.trim() || '默认'}；字数：{rules.storyLength || 'default'}
+              生成：{generationLabel(rules.generationMode)}；语言：{rules.language?.trim() || '默认'}；字数：{formatStoryLengthSummaryLabel(rules.storyLength || 'default', rules.customStoryLength)}
             </div>
             {rules.mode === 'scenario' ? (
               <div className="mt-1 text-xs text-white/85">

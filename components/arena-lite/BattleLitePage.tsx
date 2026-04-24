@@ -59,6 +59,7 @@ export function BattleLitePage() {
   const isMatching = useBattleStore((state: BattleStoreState) => state.isMatching);
   const error = useBattleStore((state: BattleStoreState) => state.error);
   const storyLength = useBattleStore((state: BattleStoreState) => state.storyLength);
+  const customStoryLength = useBattleStore((state: BattleStoreState) => state.customStoryLength);
   const selectedLanguage = useBattleStore((state: BattleStoreState) => state.selectedLanguage);
   const settings = useBattleStore((state: BattleStoreState) => state.settings);
 
@@ -90,13 +91,14 @@ export function BattleLitePage() {
         battleMode,
         scenario,
         storyLength,
+        customStoryLength,
         selectedLanguage,
         settings,
         auxScenarios,
         selectedQuestionnaires,
         adjudicationEvents,
       }),
-    [adjudicationEvents, auxScenarios, battleMode, scenario, selectedLanguage, selectedQuestionnaires, settings, storyLength],
+    [adjudicationEvents, auxScenarios, battleMode, customStoryLength, scenario, selectedLanguage, selectedQuestionnaires, settings, storyLength],
   );
 
   const handleOpenCharacterDataModal = () => {

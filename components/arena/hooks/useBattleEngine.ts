@@ -34,6 +34,7 @@ import {
   ARENA_PROVIDER_COOLDOWN_BASE_KEY,
   resolveArenaProviderCooldownConfig,
 } from '../utils/providerCooldown';
+import { normalizeCustomStoryLength } from '@/lib/story-length';
 
 const sanitizeTextByShieldWords = (text: string): string => applyShieldWords(text).filteredText;
 
@@ -389,6 +390,7 @@ export const useBattleEngine = () => {
   const selectedQuestionnaires = useBattleSelector((state) => state.selectedQuestionnaires);
   const selectedLanguage = useBattleSelector((state) => state.selectedLanguage);
   const storyLength = useBattleSelector((state) => state.storyLength);
+  const customStoryLength = useBattleSelector((state) => state.customStoryLength);
   const settings = useBattleSelector((state) => state.settings);
   const adjudicationEvents = useBattleSelector((state) => state.adjudicationEvents);
   const userProviderConfig = useBattleSelector((state) => state.userProviderConfig);
@@ -593,6 +595,7 @@ export const useBattleEngine = () => {
         isDowngrade: false,
         adjudicationEvents,
         storyLength,
+        customStoryLength: normalizeCustomStoryLength(customStoryLength) || undefined,
       };
 
       if (selectedQuestionnaires.length > 0) {
@@ -1581,6 +1584,7 @@ export const useBattleEngine = () => {
     settings,
     selectedLanguage,
     storyLength,
+    customStoryLength,
     adjudicationEvents,
     scenarioDisplayName,
     setError,

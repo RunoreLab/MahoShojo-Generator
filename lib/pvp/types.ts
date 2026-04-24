@@ -129,6 +129,7 @@ export interface PvpRoomRules {
   /** 故事生成设置（与竞技场对齐；默认不指定/留空）。 */
   userGuidance: string;
   storyLength: PvpStoryLengthOption;
+  customStoryLength: string;
   /**
    * 生成语言：留空表示“不指定”，由生成端使用默认值（当前为 zh-CN）。
    */

@@ -38,6 +38,7 @@ import {
 } from '@/lib/arena/battle-report-log-utils';
 import { buildOutputPreviewForStorage } from '@/lib/arena/output-preview';
 import { settleArenaRatingsForGeneration } from '@/lib/database/arena-ratings';
+import { normalizeCustomStoryLength, resolveEffectiveStoryLength } from '@/lib/story-length';
 import { storeBattleReportGenerationOutputTextToR2 } from '@/lib/arena/battle-report-output-storage';
 import { recordUserActivityFromRequest } from '@/lib/user-activity/record';
 import { createRequestAuthUserResolver } from '@/lib/auth/request-auth-user';
@@ -160,6 +161,7 @@ const buildQuestionnaireLoreText = (questionnaires: RequestQuestionnaire[]): str
             isDowngrade = false,
             adjudicationEvents,
             storyLength,
+            customStoryLength,
             customProvider: customProviderPayload,
             scenarioTitle,
             scenarioFileName,
@@ -474,6 +476,7 @@ const buildQuestionnaireLoreText = (questionnaires: RequestQuestionnaire[]): str
                 resolvedWriteCurrentState,
                 adjudicationResults,
                 storyLength,
+                normalizeCustomStoryLength(customStoryLength),
                 narrativeHistoryForPrompt,
                 loreText,
                 includeQuestionnaireAnswersInPrompt
@@ -653,7 +656,7 @@ const buildQuestionnaireLoreText = (questionnaires: RequestQuestionnaire[]): str
 	                scenarioDataCardUpdatedAt: typeof scenarioSourceDataCardUpdatedAt === 'string' ? scenarioSourceDataCardUpdatedAt : null,
 	                language: normalizeOptionalString(language),
 	                selectedLevel: null,
-	                storyLength: normalizeOptionalString(storyLength),
+	                storyLength: resolveEffectiveStoryLength(normalizeOptionalString(storyLength), customStoryLength) ?? null,
                 readArenaHistory: typeof resolvedReadArenaHistory === 'boolean' ? resolvedReadArenaHistory : null,
                 arenaHistoryReadLimit: resolvedReadArenaHistory
                     ? (Number.isFinite(resolvedHistoryReadLimit) ? (resolvedHistoryReadLimit === Infinity ? null : resolvedHistoryReadLimit) : null)

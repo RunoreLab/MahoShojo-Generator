@@ -37,6 +37,7 @@ import {
 } from '@/lib/arena/battle-report-log-utils';
 import { buildOutputPreviewForStorage } from '@/lib/arena/output-preview';
 import { settleArenaRatingsForGeneration } from '@/lib/database/arena-ratings';
+import { normalizeCustomStoryLength, resolveEffectiveStoryLength } from '@/lib/story-length';
 import { storeBattleReportGenerationOutputTextToR2 } from '@/lib/arena/battle-report-output-storage';
 import { recordUserActivityFromRequest } from '@/lib/user-activity/record';
 import { createRequestAuthUserResolver } from '@/lib/auth/request-auth-user';
@@ -169,6 +170,7 @@ async function handler(req: NextRequest): Promise<Response> {
             isDowngrade = false,
             adjudicationEvents,
             storyLength,
+            customStoryLength,
             customProvider: customProviderPayload,
             scenarioTitle,
             scenarioSourceDataCardId,
@@ -188,7 +190,7 @@ async function handler(req: NextRequest): Promise<Response> {
 
 	        snapshotMode = typeof mode === 'string' ? mode : 'classic';
 	        snapshotLanguage = normalizeOptionalString(language);
-	        snapshotStoryLength = normalizeOptionalString(storyLength);
+	        snapshotStoryLength = resolveEffectiveStoryLength(normalizeOptionalString(storyLength), customStoryLength) ?? null;
 
         const parsePvpContext = (value: unknown): { roomId: string; matchId: string; roundId: string } | null => {
             if (!value || typeof value !== 'object') return null;
@@ -646,6 +648,7 @@ async function handler(req: NextRequest): Promise<Response> {
                 resolvedWriteCurrentState,
                 adjudicationResults,
                 storyLength,
+                normalizeCustomStoryLength(customStoryLength),
                 narrativeHistoryForPrompt,
                 loreText,
                 includeQuestionnaireAnswersInPrompt
@@ -826,7 +829,7 @@ async function handler(req: NextRequest): Promise<Response> {
                 scenarioDataCardUpdatedAt: typeof scenarioSourceDataCardUpdatedAt === 'string' ? scenarioSourceDataCardUpdatedAt : null,
 	                language: normalizeOptionalString(language),
 	                selectedLevel: null,
-	                storyLength: normalizeOptionalString(storyLength),
+	                storyLength: resolveEffectiveStoryLength(normalizeOptionalString(storyLength), customStoryLength) ?? null,
                 readArenaHistory: typeof resolvedReadArenaHistory === 'boolean' ? resolvedReadArenaHistory : null,
                 arenaHistoryReadLimit: resolvedReadArenaHistory
                     ? (Number.isFinite(resolvedHistoryReadLimit) ? (resolvedHistoryReadLimit === Infinity ? null : resolvedHistoryReadLimit) : null)

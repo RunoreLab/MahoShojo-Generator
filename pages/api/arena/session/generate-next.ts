@@ -90,6 +90,7 @@ const BattleStoryRequestSchema = z.object({
       .optional(),
     mode: z.enum(['classic', 'kizuna', 'daily', 'scenario']),
     storyLength: z.enum(['default', 'short', 'standard', 'detailed', 'long']).default('standard'),
+    customStoryLength: z.string().optional(),
     language: z.string().default('zh-CN'),
     settings: z.object({
       readArenaHistory: z.boolean(),
@@ -194,6 +195,7 @@ export const buildUpstreamRequestBody = (
     narrativeHistoryReadLimit,
     writeNarrativeHistory: payload.seed.settings.writeNarrativeHistory,
     storyLength: payload.seed.storyLength,
+    customStoryLength: payload.seed.customStoryLength,
     questionnaires: payload.seed.questionnaires,
     forceStreamMeta: true,
     ...(customProvider ? { customProvider } : {}),
@@ -244,6 +246,7 @@ export default async function handler(req: NextRequest): Promise<Response> {
       mode: payload.seed.mode,
       language: payload.seed.language,
       storyLength: payload.seed.storyLength,
+      ...(payload.seed.customStoryLength ? { customStoryLength: payload.seed.customStoryLength } : {}),
       generationMode: 'stream',
       providerMode: providerResolved.value.providerMode,
       providerId: providerResolved.value.providerId,

@@ -42,6 +42,7 @@ export const DEFAULT_PVP_RULES: PvpRoomRules = {
   generationMode: 'non-stream',
   userGuidance: '',
   storyLength: 'default',
+  customStoryLength: '',
   language: '',
   adjudicationEvents: [],
 };

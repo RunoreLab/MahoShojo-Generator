@@ -56,6 +56,7 @@ import { buildBattleReportGenerationCombatantInserts } from '@/lib/arena/battle-
 import { createBattleReportWriteContext } from '@/lib/arena/battle-report-write-context';
 	import { extractStreamUpdateMeta, findStreamUpdateMetaStart } from '@/lib/arena/stream-meta';
 import { summarizeStreamBattleReportPreview } from '@/lib/arena/stream-report-summary';
+import { normalizeCustomStoryLength, resolveEffectiveStoryLength } from '@/lib/story-length';
 
 const log = getLogger('api-gen-battle-stream');
 
@@ -215,6 +216,7 @@ async function handler(req: NextRequest): Promise<Response> {
             narrativeHistoryReadLimit,
             adjudicationEvents,
             storyLength,
+            customStoryLength,
             customProvider: customProviderPayload,
             scenarioTitle,
             scenarioFileName,
@@ -254,7 +256,7 @@ async function handler(req: NextRequest): Promise<Response> {
 
 		        snapshotMode = typeof mode === 'string' ? mode : 'classic';
 		        snapshotLanguage = normalizeOptionalString(language);
-		        snapshotStoryLength = normalizeOptionalString(storyLength);
+		        snapshotStoryLength = resolveEffectiveStoryLength(normalizeOptionalString(storyLength), customStoryLength) ?? null;
                 snapshotCustomProviderId =
                     customProviderPayload && typeof customProviderPayload === 'object' && typeof customProviderPayload.providerId === 'string'
                         ? customProviderPayload.providerId.trim() || null
@@ -667,6 +669,7 @@ async function handler(req: NextRequest): Promise<Response> {
             shouldForceStreamMeta,
 	            adjudicationResults,
 	            storyLength,
+                normalizeCustomStoryLength(customStoryLength),
 	            narrativeHistoryForPrompt,
 	            loreText,
 	            includeQuestionnaireAnswersInPrompt,
@@ -893,7 +896,7 @@ async function handler(req: NextRequest): Promise<Response> {
                     scenarioDataCardUpdatedAt: typeof scenarioSourceDataCardUpdatedAt === 'string' ? scenarioSourceDataCardUpdatedAt : null,
 	                    language: normalizeOptionalString(language),
 	                    selectedLevel: null,
-	                    storyLength: normalizeOptionalString(storyLength),
+	                    storyLength: resolveEffectiveStoryLength(normalizeOptionalString(storyLength), customStoryLength) ?? null,
                     pvpRoomId: snapshotPvpRoomId,
                     pvpMatchId: snapshotPvpMatchId,
                     pvpRoundId: snapshotPvpRoundId,
