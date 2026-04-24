@@ -491,6 +491,17 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
         mode: 'json',
         models: [
             {
+                value: 'deepseek-ai/DeepSeek-V4-Flash',
+                label: 'DeepSeek V4 Flash',
+                description:
+                    'DeepSeek V4 的高速轻量版本，但是体验也很强大，据称文本生成体验堪比 gemini-3.1-pro。'
+            },
+            {
+                value: 'deepseek-ai/DeepSeek-V4-Pro',
+                label: 'DeepSeek V4 Pro',
+                description: 'DeepSeek V4 的完全体，适合复杂分析、长文本写作与更高要求的生成任务。'
+            },
+            {
                 value: 'Qwen/Qwen3.5-397B-A17B',
                 label: '通义千问 3.5 397B',
                 description: '通义千问 3.5 的高规格版本，适合复杂中文写作、长文本与高约束结构化任务。'
