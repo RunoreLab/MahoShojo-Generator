@@ -965,7 +965,22 @@ export const arenaRatingEvents = sqliteTable('arena_rating_events', {
   detailsJson: text('details_json'),
   createdAt: text('created_at').notNull(),
   appliedAt: text('applied_at'),
-});
+}, (table) => ({
+  aEntityQueueStatusCreatedAtIndex: index('idx_arena_rating_events_a_entity_queue_status_created_at').on(
+    table.aEntityType,
+    table.aEntityId,
+    table.queue,
+    table.status,
+    table.createdAt,
+  ),
+  bEntityQueueStatusCreatedAtIndex: index('idx_arena_rating_events_b_entity_queue_status_created_at').on(
+    table.bEntityType,
+    table.bEntityId,
+    table.queue,
+    table.status,
+    table.createdAt,
+  ),
+}));
 
 export const battleReportGenerations = sqliteTable('battle_report_generations', {
   id: text('id').primaryKey(),

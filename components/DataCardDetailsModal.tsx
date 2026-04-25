@@ -6,6 +6,7 @@ import { getFieldDisplayName } from '@/lib/fieldTranslations';
 import { formatDateTime } from '@/lib/constants';
 import { authStorage } from '@/lib/auth';
 import { upsertArenaRankCacheFromMeta } from '@/lib/arena/rank-cache';
+import { EntityRatingHistoryButton } from '@/components/ranking/EntityRatingHistoryButton';
 import { TierBadge } from '@/components/ranking/TierBadge';
 import type { DataCardReportCapabilityDto, DataCardReportDraft } from '@/lib/data-card-reports/types';
 import { buildTitleDisplay } from '@/lib/text';
@@ -142,6 +143,10 @@ interface DataCardDetailsModalProps {
   isOwner?: boolean;
   adminTagEditor?: boolean;
   metaCardId?: string | null;
+  ratingHistoryEntity?: {
+    entityType: 'data_card' | 'preset';
+    entityId: string;
+  } | null;
   initialReportCapability?: DataCardReportCapabilityDto | null;
   card: {
     id: string;
@@ -166,6 +171,7 @@ export default function DataCardDetailsModal({
   card,
   pendingNotice,
   metaCardId,
+  ratingHistoryEntity,
   isOwner = false,
   adminTagEditor = false,
   initialReportCapability = null,
@@ -284,6 +290,22 @@ export default function DataCardDetailsModal({
   const resolvedMetaCardId = metaCardId === undefined ? card?.id : metaCardId;
   const resolvedCloudCardId = typeof resolvedMetaCardId === 'string' ? resolvedMetaCardId.trim() : '';
   const isCloudDataCard = Boolean(resolvedCloudCardId) && isUuid(resolvedCloudCardId);
+  const resolvedRatingHistoryEntity = useMemo(() => {
+    if (ratingHistoryEntity === null) return null;
+    if (ratingHistoryEntity?.entityId?.trim()) {
+      return {
+        entityType: ratingHistoryEntity.entityType,
+        entityId: ratingHistoryEntity.entityId.trim(),
+      };
+    }
+    if (card.type === 'character' && isCloudDataCard) {
+      return {
+        entityType: 'data_card' as const,
+        entityId: resolvedCloudCardId,
+      };
+    }
+    return null;
+  }, [card.type, isCloudDataCard, ratingHistoryEntity, resolvedCloudCardId]);
   const shouldFetchReportCapability = shouldLoadReportCapability({
     isCloudDataCard,
     isPublic: card.isPublic,
@@ -825,16 +847,24 @@ export default function DataCardDetailsModal({
               <h3 className="font-medium text-gray-700 flex items-center gap-2">
                 <span>技术与标签</span>
               </h3>
-              <button
-                type="button"
-                onClick={toggleMetaExpanded}
-                className="inline-flex items-center gap-1 rounded-full border border-gray-200 bg-white px-2 py-1 text-gray-700 hover:bg-gray-50 disabled:opacity-60 disabled:cursor-not-allowed"
-                aria-expanded={showMetaDetails}
-                disabled={isEditingTags}
-              >
-                {showMetaDetails ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-                <span>{showMetaDetails ? '收起信息' : '展开信息'}</span>
-              </button>
+              <div className="flex flex-wrap items-center gap-2">
+                {card.type === 'character' && resolvedRatingHistoryEntity ? (
+                  <EntityRatingHistoryButton
+                    entityType={resolvedRatingHistoryEntity.entityType}
+                    entityId={resolvedRatingHistoryEntity.entityId}
+                  />
+                ) : null}
+                <button
+                  type="button"
+                  onClick={toggleMetaExpanded}
+                  className="inline-flex items-center gap-1 rounded-full border border-gray-200 bg-white px-2 py-1 text-gray-700 hover:bg-gray-50 disabled:opacity-60 disabled:cursor-not-allowed"
+                  aria-expanded={showMetaDetails}
+                  disabled={isEditingTags}
+                >
+                  {showMetaDetails ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                  <span>{showMetaDetails ? '收起信息' : '展开信息'}</span>
+                </button>
+              </div>
             </div>
 
             {!showMetaDetails && (
