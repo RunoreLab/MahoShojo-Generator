@@ -19,6 +19,52 @@ export interface AIProviderOption {
     models: AIModelOption[];
 }
 
+export const CUSTOM_AI_MODEL_OPTION_VALUE = '__custom_model_id__';
+export const MAX_CUSTOM_AI_MODEL_ID_LENGTH = 200;
+
+export const CUSTOM_AI_MODEL_OPTION: AIModelOption = {
+    value: CUSTOM_AI_MODEL_OPTION_VALUE,
+    label: '自定义模型',
+    description: '手动填写该供应商支持的 modelId，仍使用当前预置供应商端点。'
+};
+
+export type ResolvedAIProviderModel = {
+    modelId: string;
+    isCustom: boolean;
+};
+
+export const canUseCustomModelId = (provider: AIProviderOption | null | undefined): boolean => {
+    if (!provider) return false;
+    return provider.id !== 'system' && provider.baseUrl.trim().length > 0;
+};
+
+const normalizeCustomModelId = (modelId: string): string | null => {
+    const normalized = modelId.trim();
+    if (!normalized) return null;
+    if (normalized === CUSTOM_AI_MODEL_OPTION_VALUE) return null;
+    if (normalized.length > MAX_CUSTOM_AI_MODEL_ID_LENGTH) return null;
+    if (/[\u0000-\u001f\u007f]/.test(normalized)) return null;
+    return normalized;
+};
+
+export const resolveAIProviderModel = (
+    provider: AIProviderOption,
+    rawModelId: string
+): ResolvedAIProviderModel | null => {
+    const modelId = rawModelId.trim();
+    const preset = provider.models.find((model) => model.value === modelId);
+    if (preset) {
+        return { modelId: preset.value, isCustom: false };
+    }
+
+    const customModelId = normalizeCustomModelId(rawModelId);
+    if (!customModelId || !canUseCustomModelId(provider)) {
+        return null;
+    }
+
+    return { modelId: customModelId, isCustom: true };
+};
+
 /**
  * 可选 AI 供应商目录。
  * - description 用于向用户解释供应商特色。

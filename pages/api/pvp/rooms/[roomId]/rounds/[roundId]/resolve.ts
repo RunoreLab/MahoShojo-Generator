@@ -11,7 +11,7 @@ import {
   updatePvpRound,
   upsertPvpRoomHand,
 } from '@/lib/database/pvp';
-import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
+import { AI_PROVIDER_CATALOG, resolveAIProviderModel } from '@/lib/ai/constants';
 import { CustomProviderSchema } from '@/lib/arena/schemas';
 import { pickBotChoiceSnapshotId } from '@/lib/pvp/bot/choose';
 import { parsePvpRoomInternalState, stringifyPvpRoomInternalState } from '@/lib/pvp/bot/room';
@@ -114,15 +114,15 @@ async function resolveHandler(req: Request): Promise<Response> {
 
     const providerConfig = AI_PROVIDER_CATALOG.find((item) => item.id === parsed.data.providerId);
     if (!providerConfig) return json({ error: '未知的模型供应商 ID' }, { status: 400 });
-    const modelConfig = providerConfig.models.find((model) => model.value === parsed.data.modelId);
-    if (!modelConfig) return json({ error: '未知的模型 ID' }, { status: 400 });
+    const modelResolution = resolveAIProviderModel(providerConfig, parsed.data.modelId);
+    if (!modelResolution) return json({ error: '未知的模型 ID' }, { status: 400 });
 
     const apiKey = parsed.data.apiKey.trim();
     if (providerConfig.id !== 'system' && !apiKey) return json({ error: 'API Key 不能为空' }, { status: 400 });
 
     // 与竞技场保持一致：系统默认策略（modelId=default）不需要透传到生成接口
     if (!(providerConfig.id === 'system' && parsed.data.modelId === 'default')) {
-      customProvider = { ...parsed.data, apiKey };
+      customProvider = { ...parsed.data, modelId: modelResolution.modelId, apiKey };
     }
   }
 

@@ -1,4 +1,4 @@
-import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
+import { AI_PROVIDER_CATALOG, resolveAIProviderModel } from '@/lib/ai/constants';
 import type { AIProvider } from '@/lib/config';
 import { CustomProviderSchema } from '@/lib/arena/schemas';
 import { LoadBalanceStrategy, type GenerateWithAIOptions } from '@/lib/stream/raw-ai';
@@ -31,33 +31,43 @@ export const parseAiSessionCustomProvider = (
 export const resolveAiSessionProvider = (
   customProvider: AiSessionCustomProvider | null
 ): { ok: true; value: AiSessionResolvedProvider } | { ok: false; error: string; status: number } => {
-  if (!customProvider || customProvider.providerId.trim() === '' || customProvider.providerId === 'system') {
+  if (!customProvider || customProvider.providerId.trim() === '') {
     return {
       ok: true,
       value: {
         providerMode: 'system',
         providerId: 'system',
-        modelId: customProvider?.modelId?.trim() || null,
+        modelId: null,
       },
     };
   }
 
   const providerId = customProvider.providerId.trim();
   const modelId = customProvider.modelId.trim();
-  const apiKey = customProvider.apiKey.trim();
-
-  if (!apiKey) {
-    return { ok: false, error: '缺少 API Key', status: 401 };
-  }
-
   const providerConfig = AI_PROVIDER_CATALOG.find((item) => item.id === providerId);
   if (!providerConfig) {
     return { ok: false, error: '未知的模型供应商 ID', status: 400 };
   }
 
-  const modelConfig = providerConfig.models.find((item) => item.value === modelId);
-  if (!modelConfig) {
+  const modelResolution = resolveAIProviderModel(providerConfig, modelId);
+  if (!modelResolution) {
     return { ok: false, error: '未知的模型 ID', status: 400 };
+  }
+
+  if (providerId === 'system') {
+    return {
+      ok: true,
+      value: {
+        providerMode: 'system',
+        providerId: 'system',
+        modelId: modelResolution.modelId,
+      },
+    };
+  }
+
+  const apiKey = customProvider.apiKey.trim();
+  if (!apiKey) {
+    return { ok: false, error: '缺少 API Key', status: 401 };
   }
 
   const baseUrl = providerConfig.baseUrl?.trim() ?? '';
@@ -69,7 +79,7 @@ export const resolveAiSessionProvider = (
     name: providerConfig.name,
     apiKey,
     baseUrl,
-    model: modelConfig.value,
+    model: modelResolution.modelId,
     type: providerConfig.type,
     mode: providerConfig.mode || 'auto',
     retryCount: 1,
@@ -81,7 +91,7 @@ export const resolveAiSessionProvider = (
     value: {
       providerMode: 'custom',
       providerId,
-      modelId,
+      modelId: modelResolution.modelId,
       providerOverride,
       providerOptions: {
         providerOverride,

@@ -7,7 +7,7 @@ import magicalGirlQuestionnaire from '@/public/questionnaires/presets/magical-gi
 import canshouQuestionnaire from '@/public/questionnaires/presets/canshou-default.json';
 import { getRandomJournalist } from '@/lib/random-choose-journalist';
 import { config as appConfig, SafetyCheckPolicy, type AIProvider } from '@/lib/config';
-import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
+import { AI_PROVIDER_CATALOG, resolveAIProviderModel } from '@/lib/ai/constants';
 import { quickCheck } from '@/lib/sensitive-word-filter';
 import { buildPolicySafetyCheckText } from '@/lib/content-safety/server';
 import { NextRequest } from 'next/server';
@@ -276,8 +276,8 @@ const buildQuestionnaireLoreText = (questionnaires: RequestQuestionnaire[]): str
                 return new Response(JSON.stringify({ error: '未知的模型供应商 ID' }), { status: 400 });
             }
 
-            const modelConfig = providerConfig.models.find(model => model.value === parsed.modelId);
-            if (!modelConfig) {
+            const modelResolution = resolveAIProviderModel(providerConfig, parsed.modelId);
+            if (!modelResolution) {
                 return new Response(JSON.stringify({ error: '未知的模型 ID' }), { status: 400 });
             }
 
@@ -288,17 +288,17 @@ const buildQuestionnaireLoreText = (questionnaires: RequestQuestionnaire[]): str
 
             const sanitizedBaseUrl = providerConfig.baseUrl?.trim() ?? '';
             if (!sanitizedBaseUrl) {
-                customModelOverride = modelConfig.value;
+                customModelOverride = modelResolution.modelId;
                 log.info('检测到 baseUrl 为空的自定义供应商，改用系统默认通道，仅覆盖模型参数', {
                     providerId: providerConfig.id,
-                    model: modelConfig.value,
+                    model: modelResolution.modelId,
                 });
             } else {
                 customProviderOverride = {
                     name: providerConfig.name,
                     apiKey: sanitizedApiKey,
                     baseUrl: sanitizedBaseUrl,
-                    model: modelConfig.value,
+                    model: modelResolution.modelId,
                     type: providerConfig.type,
                     mode: providerConfig.mode || 'auto',
                     retryCount: 1,

@@ -1,7 +1,7 @@
 import { z } from 'zod/v3';
 import { NextRequest } from 'next/server';
 
-import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
+import { AI_PROVIDER_CATALOG, resolveAIProviderModel } from '@/lib/ai/constants';
 import type { AIProvider } from '@/lib/config';
 import { enforceTextSafety } from '@/lib/content-safety/server';
 import { createBlankDataCard } from '@/lib/data-card-converter';
@@ -147,8 +147,8 @@ const buildProviderOverride = (payload: z.infer<typeof CustomProviderSchema>): {
   const providerConfig = AI_PROVIDER_CATALOG.find((item) => item.id === providerId);
   if (!providerConfig) return json({ error: '未知的模型供应商 ID' }, { status: 400 });
 
-  const modelConfig = providerConfig.models.find((model) => model.value === modelId);
-  if (!modelConfig) return json({ error: '未知的模型 ID' }, { status: 400 });
+  const modelResolution = resolveAIProviderModel(providerConfig, modelId);
+  if (!modelResolution) return json({ error: '未知的模型 ID' }, { status: 400 });
 
   const baseUrl = providerConfig.baseUrl?.trim() ?? '';
   if (!baseUrl) return json({ error: '该供应商未配置 baseUrl，无法在 BYOK 模式下使用' }, { status: 400 });
@@ -159,7 +159,7 @@ const buildProviderOverride = (payload: z.infer<typeof CustomProviderSchema>): {
       name: providerConfig.name,
       apiKey,
       baseUrl,
-      model: modelConfig.value,
+      model: modelResolution.modelId,
       type: providerConfig.type,
       mode: providerConfig.mode || 'auto',
       retryCount: 1,
