@@ -46,4 +46,20 @@ describe('ai-provider-catalog', () => {
       expect(modelValues).toContain('gemma-4-26b-a4b-it');
     }
   });
+
+  it('词元跳动目录包含 OpenAI 兼容端点与关键文本模型', () => {
+    const provider = AI_PROVIDER_CATALOG.find(item => item.id === 'tokendance');
+    const modelValues = provider?.models.map(model => model.value) ?? [];
+
+    expect(provider?.name).toBe('词元跳动 TokenDance');
+    expect(provider?.baseUrl).toBe('https://tokendance.space/gateway/v1');
+    expect(provider?.type).toBe('openai');
+    expect(modelValues).toEqual(expect.arrayContaining([
+      'minimax-m2.7',
+      'glm-5.1',
+      'deepseek-v4-flash',
+      'kimi-k2.6',
+      'seed-2.0-pro',
+    ]));
+  });
 });

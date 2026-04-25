@@ -371,6 +371,107 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
         ]
     },
     {
+        id: 'tokendance',
+        name: '词元跳动 TokenDance',
+        description: '词元跳动是统一的 AI API 网关，支持 OpenAI 兼容协议、模型路由与自动容错。',
+        docsUrl: 'https://tokendance.space/docs/quickstart',
+        baseUrl: 'https://tokendance.space/gateway/v1',
+        type: 'openai',
+        mode: 'auto',
+        models: [
+            {
+                value: 'minimax-m2.7',
+                label: 'MiniMax M2.7',
+                description: 'MiniMax 面向自主执行与真实工作流的新一代模型，适合复杂规划、长链路任务与高质量文本生成。'
+            },
+            {
+                value: 'minimax-m2.5',
+                label: 'MiniMax M2.5',
+                description: 'MiniMax 面向真实工作场景的模型，适合办公文档、结构化输出与多步骤创作任务。'
+            },
+            {
+                value: 'glm-5.1',
+                label: 'GLM-5.1',
+                description: '智谱新一代长链路模型，代码与复杂任务执行能力更强，适合高约束内容生成。'
+            },
+            {
+                value: 'glm-5',
+                label: 'GLM-5',
+                description: '智谱旗舰级通用模型，适合复杂系统设计、多轮对话与高质量中文创作。'
+            },
+            {
+                value: 'glm-4.7',
+                label: 'GLM-4.7',
+                description: '智谱通用模型更新版本，强化编程与多步推理，适合稳定的中文写作和结构化任务。'
+            },
+            {
+                value: 'deepseek-v4-flash',
+                label: 'DeepSeek V4 Flash',
+                description: 'DeepSeek V4 的高速轻量版本，拥有长上下文能力，适合兼顾质量与成本的生成场景。'
+            },
+            {
+                value: 'deepseek-v4-pro',
+                label: 'DeepSeek V4 Pro',
+                description: 'DeepSeek V4 完全体，适合复杂分析、长文本写作、Agent 任务与更高要求的生成。'
+            },
+            {
+                value: 'deepseek-v3.2',
+                label: 'DeepSeek V3.2',
+                description: 'DeepSeek 通用对话与推理模型，适合剧情推进、总结、分析与多轮交互。'
+            },
+            {
+                value: 'kimi-k2.6',
+                label: 'Kimi K2.6',
+                description: 'Moonshot 新一代多模态模型，适合长链路编程、复杂创作和多智能体式任务。'
+            },
+            {
+                value: 'kimi-k2.5',
+                label: 'Kimi K2.5',
+                description: 'Moonshot Kimi 系列模型，适合中文创作、摘要、视觉编程与多轮指令跟随。'
+            },
+            {
+                value: 'seed-2.0-pro',
+                label: 'Seed 2.0 Pro',
+                description: '字节 Seed 旗舰通用模型，面向复杂推理、长上下文、多模态理解与工具增强执行。'
+            },
+            {
+                value: 'seed-2.0-lite',
+                label: 'Seed 2.0 Lite',
+                description: '字节 Seed 均衡型模型，适合高频企业场景、内容创作、信息处理与数据分析。'
+            },
+            {
+                value: 'seed-2.0-mini',
+                label: 'Seed 2.0 Mini',
+                description: '字节 Seed 低时延轻量模型，适合成本敏感、高并发和草稿生成场景。'
+            },
+            {
+                value: 'qwen3.5-plus',
+                label: 'Qwen 3.5 Plus',
+                description: '通义千问 3.5 Plus，百万上下文模型，适合长文本、多模态与复杂中文任务。'
+            },
+            {
+                value: 'qwen3.5-flash',
+                label: 'Qwen 3.5 Flash',
+                description: '通义千问 3.5 Flash，响应速度快，适合高频交互、推理速度优先与批量生成。'
+            },
+            {
+                value: 'qwen3-max',
+                label: 'Qwen3 Max',
+                description: '通义千问 Qwen3 Max，适合复杂指令、数学编码、知识问答与多语种生成。'
+            },
+            {
+                value: 'qwen3-vl-plus',
+                label: 'Qwen3 VL Plus',
+                description: '通义千问视觉理解模型，适合多模态输入、视觉智能体和长视频理解场景。'
+            },
+            {
+                value: 'step-3.5-flash',
+                label: 'Step 3.5 Flash',
+                description: '阶跃星辰开源基础模型，侧重推理速度与效率，适合长上下文下的快速生成。'
+            },
+        ]
+    },
+    {
         id: 'yiye',
         name: '一叶知秋 API',
         description: '一叶知秋 API 为用户提供了国内外广泛的模型库，性价比高但不太稳定。',
