@@ -65,6 +65,34 @@ export const resolveAIProviderModel = (
     return { modelId: customModelId, isCustom: true };
 };
 
+const XIAOMI_MIMO_MODELS: AIModelOption[] = [
+    {
+        value: 'mimo-v2.5-pro',
+        label: 'MiMo V2.5 Pro',
+        description: '小米 MiMo V2.5 Pro，适合复杂指令、长文本创作与高质量生成。'
+    },
+    {
+        value: 'mimo-v2.5',
+        label: 'MiMo V2.5',
+        description: '小米 MiMo V2.5 通用模型，适合日常对话、剧情推进与结构化文本生成。'
+    }
+];
+
+const buildXiaomiMimoTokenPlanProvider = (
+    id: string,
+    nameSuffix: string,
+    baseUrl: string
+): AIProviderOption => ({
+    id,
+    name: `小米 MiMo Token Plan（${nameSuffix}）`,
+    description: '小米 MiMo Token Plan OpenAI 兼容端点。仅使用 tp- 开头的 Token Plan API Key，不要与普通 sk- Key 混用。',
+    docsUrl: 'https://platform.xiaomimimo.com',
+    baseUrl,
+    type: 'openai',
+    mode: 'auto',
+    models: XIAOMI_MIMO_MODELS.map(model => ({ ...model })),
+});
+
 /**
  * 可选 AI 供应商目录。
  * - description 用于向用户解释供应商特色。
@@ -471,6 +499,31 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
             },
         ]
     },
+    {
+        id: 'xiaomi-mimo',
+        name: '小米 MiMo',
+        description: '小米 MiMo 普通 API OpenAI 兼容端点。仅使用 sk- 开头的按量付费 API Key，不要与 Token Plan 的 tp- Key 混用。',
+        docsUrl: 'https://platform.xiaomimimo.com',
+        baseUrl: 'https://api.xiaomimimo.com/v1',
+        type: 'openai',
+        mode: 'auto',
+        models: XIAOMI_MIMO_MODELS,
+    },
+    buildXiaomiMimoTokenPlanProvider(
+        'xiaomi-mimo-token-plan-cn',
+        '中国大陆',
+        'https://token-plan-cn.xiaomimimo.com/v1'
+    ),
+    buildXiaomiMimoTokenPlanProvider(
+        'xiaomi-mimo-token-plan-ams',
+        '欧洲',
+        'https://token-plan-ams.xiaomimimo.com/v1'
+    ),
+    buildXiaomiMimoTokenPlanProvider(
+        'xiaomi-mimo-token-plan-sgp',
+        '新加坡',
+        'https://token-plan-sgp.xiaomimimo.com/v1'
+    ),
     {
         id: 'yiye',
         name: '一叶知秋 API',

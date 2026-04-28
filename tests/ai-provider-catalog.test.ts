@@ -62,4 +62,32 @@ describe('ai-provider-catalog', () => {
       'seed-2.0-pro',
     ]));
   });
+
+  it('小米 MiMo 目录区分普通 API 与 Token Plan 端点', () => {
+    const normalProvider = AI_PROVIDER_CATALOG.find(item => item.id === 'xiaomi-mimo');
+    const tokenPlanProviders = [
+      AI_PROVIDER_CATALOG.find(item => item.id === 'xiaomi-mimo-token-plan-cn'),
+      AI_PROVIDER_CATALOG.find(item => item.id === 'xiaomi-mimo-token-plan-ams'),
+      AI_PROVIDER_CATALOG.find(item => item.id === 'xiaomi-mimo-token-plan-sgp'),
+    ];
+
+    expect(normalProvider?.name).toBe('小米 MiMo');
+    expect(normalProvider?.baseUrl).toBe('https://api.xiaomimimo.com/v1');
+    expect(normalProvider?.type).toBe('openai');
+    expect(normalProvider?.description).toContain('sk-');
+
+    expect(tokenPlanProviders.map(provider => provider?.baseUrl)).toEqual([
+      'https://token-plan-cn.xiaomimimo.com/v1',
+      'https://token-plan-ams.xiaomimimo.com/v1',
+      'https://token-plan-sgp.xiaomimimo.com/v1',
+    ]);
+    for (const provider of tokenPlanProviders) {
+      expect(provider?.type).toBe('openai');
+      expect(provider?.description).toContain('tp-');
+      expect(provider?.models.map(model => model.value)).toEqual(expect.arrayContaining([
+        'mimo-v2.5-pro',
+        'mimo-v2.5',
+      ]));
+    }
+  });
 });
