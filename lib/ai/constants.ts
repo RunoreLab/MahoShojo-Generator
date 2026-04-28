@@ -75,6 +75,26 @@ const XIAOMI_MIMO_MODELS: AIModelOption[] = [
         value: 'mimo-v2.5',
         label: 'MiMo V2.5',
         description: '小米 MiMo V2.5 通用模型，适合日常对话、剧情推进与结构化文本生成。'
+    },
+    {
+        value: 'mimo-v2.5-flash',
+        label: 'MiMo V2.5 Flash',
+        description: '小米 MiMo V2.5 高性价比轻量模型，适合成本敏感、高频生成与快速草稿。'
+    },
+    {
+        value: 'mimo-v2-pro',
+        label: 'MiMo V2 Pro',
+        description: '小米 MiMo V2 Pro 旗舰推理模型，适合复杂指令、深度思考与工具调用。'
+    },
+    {
+        value: 'mimo-v2-omni',
+        label: 'MiMo V2 Omni',
+        description: '小米 MiMo V2 Omni 全模态理解模型，文本场景可作为 V2.5 的兼容备用。'
+    },
+    {
+        value: 'mimo-v2-flash',
+        label: 'MiMo V2 Flash',
+        description: '小米 MiMo V2 Flash 高效推理模型，适合速度优先与较低成本的文本生成。'
     }
 ];
 

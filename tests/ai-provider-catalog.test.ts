@@ -75,6 +75,14 @@ describe('ai-provider-catalog', () => {
     expect(normalProvider?.baseUrl).toBe('https://api.xiaomimimo.com/v1');
     expect(normalProvider?.type).toBe('openai');
     expect(normalProvider?.description).toContain('sk-');
+    expect(normalProvider?.models.map(model => model.value)).toEqual(expect.arrayContaining([
+      'mimo-v2.5-pro',
+      'mimo-v2.5',
+      'mimo-v2.5-flash',
+      'mimo-v2-pro',
+      'mimo-v2-omni',
+      'mimo-v2-flash',
+    ]));
 
     expect(tokenPlanProviders.map(provider => provider?.baseUrl)).toEqual([
       'https://token-plan-cn.xiaomimimo.com/v1',
@@ -87,6 +95,10 @@ describe('ai-provider-catalog', () => {
       expect(provider?.models.map(model => model.value)).toEqual(expect.arrayContaining([
         'mimo-v2.5-pro',
         'mimo-v2.5',
+        'mimo-v2.5-flash',
+        'mimo-v2-pro',
+        'mimo-v2-omni',
+        'mimo-v2-flash',
       ]));
     }
   });
