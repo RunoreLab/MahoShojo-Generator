@@ -17,6 +17,12 @@
       "title": "CoC 7e 经典调查员卡",
       "version": "1.0.0",
       "description": "年代、职业、八维属性、SAN/HP/MP 与技能倾向摘要。"
+    },
+    {
+      "id": "wuxiankongbu-fx-v137",
+      "title": "无限恐怖FXv137 标准人物卡",
+      "version": "1.0.0",
+      "description": "九项属性、十二项技能、体积、基础衍生值与初始专长预算。"
     }
   ]
 }

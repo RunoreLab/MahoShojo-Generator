@@ -115,6 +115,15 @@ describe('creator build-rule runtime', () => {
     expect(typeof inputs.secondaryInputs).toBe('object');
   });
 
+  test('无限恐怖FXv137 默认输入包含属性、技能、体积与专长', () => {
+    const inputs = createDefaultBuildRuleInputs('wuxiankongbu-fx-v137');
+
+    expect(typeof inputs.coreAttributes).toBe('object');
+    expect(typeof inputs.skills).toBe('object');
+    expect(typeof inputs.bodyProfile).toBe('object');
+    expect(Array.isArray(inputs.specialties)).toBe(true);
+  });
+
   test('缺少 stat-array 输入时会生成 block 级问题摘要', () => {
     const result = evaluateBuildRuleState({
       ruleId: 'dnd-5e-lite',
@@ -194,5 +203,52 @@ describe('creator build-rule runtime', () => {
     expect(result.derived.MP).toBe(12);
     expect(result.derived.Build).toBeDefined();
     expect(result.derived.DamageBonus).toBeDefined();
+  });
+
+  test('wuxiankongbu-fx-v137 计算速度、先攻、防御、生命值与意志力', () => {
+    const result = evaluateBuildRuleState({
+      ruleId: 'wuxiankongbu-fx-v137',
+      inputs: {
+        coreAttributes: {
+          INT: 2,
+          PER: 2,
+          RES: 1,
+          STR: 2,
+          DEX: 3,
+          STA: 1,
+          PRE: 2,
+          MAN: 1,
+          COM: 1,
+        },
+        skills: {
+          academics: 1,
+          devices: 1,
+          craft: 1,
+          focus: 1,
+          athletics: 1,
+          survival: 1,
+          firearms: 2,
+          combat: 1,
+          insight: 1,
+          stealth: 1,
+          expression: 1,
+          social: 1,
+        },
+        bodyProfile: {
+          size: 5,
+        },
+        specialties: ['lucky-star-1', 'quick-reload-1'],
+      },
+    });
+
+    expect(result.derived.Speed).toBe(10);
+    expect(result.derived.Initiative).toBe('1d10+4');
+    expect(result.derived.BaseDefense).toBe(2);
+    expect(result.derived.Health).toBe(6);
+    expect(result.derived.Willpower).toBe(2);
+    expect(result.validationSummary.valid).toBe(true);
+    expect(result.validationSummary.budget?.attributePointsUsed).toBe(6);
+    expect(result.validationSummary.budget?.skillPointsUsed).toBe(13);
+    expect(result.validationSummary.budget?.specialtyPointsUsed).toBe(2);
   });
 });

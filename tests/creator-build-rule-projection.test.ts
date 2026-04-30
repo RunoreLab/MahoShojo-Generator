@@ -115,6 +115,54 @@ const cocRuntimeResult = {
   },
 } as const;
 
+const wuxiankongbuFxRuntimeResult = {
+  ruleId: 'wuxiankongbu-fx-v137',
+  version: '1.0.0',
+  blockResults: {
+    coreAttributes: {
+      INT: 2,
+      PER: 2,
+      RES: 1,
+      STR: 2,
+      DEX: 3,
+      STA: 1,
+      PRE: 2,
+      MAN: 1,
+      COM: 1,
+    },
+    skills: {
+      academics: 1,
+      devices: 1,
+      craft: 1,
+      focus: 1,
+      athletics: 1,
+      survival: 1,
+      firearms: 2,
+      combat: 1,
+      insight: 1,
+      stealth: 1,
+      expression: 1,
+      social: 1,
+    },
+    bodyProfile: {
+      size: 5,
+    },
+    specialties: ['lucky-star-1', 'quick-reload-1'],
+  },
+  derived: {
+    Speed: 10,
+    Initiative: '1d10+4',
+    BaseDefense: 2,
+    Health: 6,
+    Willpower: 2,
+  },
+  validationSummary: {
+    valid: true,
+    issues: [],
+    missingRequiredBlockKeys: [],
+  },
+} as const;
+
 describe('creator build-rule projection', () => {
   test('主规则投影保留结构化事实与中文摘要', () => {
     const projection = projectBuildRulesForPrompt({
@@ -175,5 +223,19 @@ describe('creator build-rule projection', () => {
     expect(projection.primary?.summary).toContain('1920s');
     expect(projection.primary?.summary).toContain('侦探');
     expect(projection.primary?.summary).toContain('SAN');
+  });
+
+  test('wuxiankongbu-fx-v137 主规则摘要包含九项属性、衍生值与专长', () => {
+    const projection = projectBuildRulesForPrompt({
+      template: 'general',
+      primaryRuleId: 'wuxiankongbu-fx-v137',
+      rules: [wuxiankongbuFxRuntimeResult],
+      resolveRuleProjectionPolicy: () => 'primary-structured',
+    });
+
+    expect(projection.primary?.summary).toContain('无限恐怖FXv137');
+    expect(projection.primary?.summary).toContain('智力 2');
+    expect(projection.primary?.summary).toContain('速度 10');
+    expect(projection.primary?.summary).toContain('幸运星');
   });
 });

@@ -1,0 +1,108 @@
+{
+  "id": "wuxiankongbu-fx-v137",
+  "version": "1.0.0",
+  "title": "无限恐怖FXv137 标准人物卡",
+  "description": "基于无限恐怖FXv137 标准人物卡的轻量车卡规则，覆盖九项属性、十二项技能、体积、基础衍生值与初始专长预算。",
+  "supportedTemplates": ["general", "magical-girl", "canshou"],
+  "allowStandalone": true,
+  "mainRuleEligible": true,
+  "projectionPolicy": "primary-structured",
+  "uiSummary": "适用于无限恐怖FXv137 风格的轮回者角色，记录九项属性、十二项技能、体积、专长与基础衍生值。",
+  "aiPromptHint": "以下字段代表角色在无限恐怖FXv137 语境下的确定事实，请优先尊重九项属性、十二项技能、体积、基础衍生值与专长选择。",
+  "blocks": [
+    {
+      "id": "coreAttributes",
+      "type": "stat-array",
+      "label": "九项属性",
+      "description": "初始属性基本值为 1，按 3/2/1+3 分配后的最终值；首版以总属性点预算校验为主。",
+      "fields": [
+        { "id": "INT", "label": "智力", "min": 1, "max": 5, "defaultValue": 1 },
+        { "id": "PER", "label": "感知", "min": 1, "max": 5, "defaultValue": 1 },
+        { "id": "RES", "label": "决心", "min": 1, "max": 5, "defaultValue": 1 },
+        { "id": "STR", "label": "力量", "min": 1, "max": 5, "defaultValue": 1 },
+        { "id": "DEX", "label": "敏捷", "min": 1, "max": 5, "defaultValue": 1 },
+        { "id": "STA", "label": "耐力", "min": 1, "max": 5, "defaultValue": 1 },
+        { "id": "PRE", "label": "风度", "min": 1, "max": 5, "defaultValue": 1 },
+        { "id": "MAN", "label": "操控", "min": 1, "max": 5, "defaultValue": 1 },
+        { "id": "COM", "label": "沉着", "min": 1, "max": 5, "defaultValue": 1 }
+      ]
+    },
+    {
+      "id": "skills",
+      "type": "stat-array",
+      "label": "十二项技能",
+      "description": "初始技能基本值为 0，按 6/5/4+3 与 6 专业的口径填写最终技能等级；首版不记录专业明细。",
+      "fields": [
+        { "id": "academics", "label": "学识", "min": 0, "max": 4, "defaultValue": 0 },
+        { "id": "devices", "label": "器用", "min": 0, "max": 4, "defaultValue": 0 },
+        { "id": "craft", "label": "手艺", "min": 0, "max": 4, "defaultValue": 0 },
+        { "id": "focus", "label": "专注", "min": 0, "max": 4, "defaultValue": 0 },
+        { "id": "athletics", "label": "运动", "min": 0, "max": 4, "defaultValue": 0 },
+        { "id": "survival", "label": "生存", "min": 0, "max": 4, "defaultValue": 0 },
+        { "id": "firearms", "label": "射击", "min": 0, "max": 4, "defaultValue": 0 },
+        { "id": "combat", "label": "武技", "min": 0, "max": 4, "defaultValue": 0 },
+        { "id": "insight", "label": "洞察", "min": 0, "max": 4, "defaultValue": 0 },
+        { "id": "stealth", "label": "隐秘", "min": 0, "max": 4, "defaultValue": 0 },
+        { "id": "expression", "label": "表达", "min": 0, "max": 4, "defaultValue": 0 },
+        { "id": "social", "label": "社交", "min": 0, "max": 4, "defaultValue": 0 }
+      ]
+    },
+    {
+      "id": "bodyProfile",
+      "type": "number-group",
+      "label": "体格与补充",
+      "description": "体积影响速度与生命值；普通成年人体积默认为 5。",
+      "fields": [
+        { "id": "size", "label": "体积", "min": 4, "max": 6, "defaultValue": 5 }
+      ]
+    },
+    {
+      "id": "specialties",
+      "type": "multi-select",
+      "label": "初始专长",
+      "description": "初始人物卡获得 5 个专长点数；此处提供常见开卡专长与叙事占位，完整专长仍以规则书为准。",
+      "groups": [
+        {
+          "id": "background",
+          "label": "背景专长",
+          "items": [
+            { "id": "special-identity-1", "label": "特殊身份 1", "cost": 1, "description": "在某个行当有稳定身份或资源。" },
+            { "id": "special-identity-2", "label": "特殊身份 2", "cost": 2, "description": "具备更明确的训练、组织或社会资源。" },
+            { "id": "special-identity-3", "label": "特殊身份 3", "cost": 3, "description": "可代表顶尖地位或非常规入场资源。" },
+            { "id": "language-talent-1", "label": "语言天赋 1", "cost": 1, "description": "强化语言学习或跨文化表达。" }
+          ]
+        },
+        {
+          "id": "combat",
+          "label": "战斗专长",
+          "items": [
+            { "id": "quick-reload-1", "label": "快速装填 1", "cost": 1, "description": "购买时选择一类现实远程武器，降低装填动作开销。" },
+            { "id": "melee-training-1", "label": "近战训练 1", "cost": 1, "description": "强化近身战斗的稳定性。" },
+            { "id": "shooting-training-1", "label": "射击训练 1", "cost": 1, "description": "强化现实远程武器使用。" }
+          ]
+        },
+        {
+          "id": "general",
+          "label": "一般专长",
+          "items": [
+            { "id": "lucky-star-1", "label": "幸运星 1", "cost": 1, "description": "偏向机运骰、剧情奖励或类似检定的幸运型专长。" },
+            { "id": "iron-will-1", "label": "钢铁意志 1", "cost": 1, "description": "强化承压、坚持与意志相关表现。" },
+            { "id": "sharp-senses-1", "label": "敏锐感官 1", "cost": 1, "description": "强化感知危险、搜索和反应。" }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "derivedStats",
+      "type": "derived",
+      "label": "基础衍生值",
+      "description": "运行时会根据力量、敏捷、耐力、感知、决心、沉着与体积生成速度、先攻、基础防御、生命值和意志力。"
+    },
+    {
+      "id": "ruleNotice",
+      "type": "section",
+      "label": "规则说明",
+      "description": "本版以无限恐怖FXv137 标准人物卡为主，覆盖初始卡常用字段；专业明细、攻击预设、防御预设、超凡属性、超凡技能、血统、装备与完整强化树仍建议写入自由描述或后续专门规则块。"
+    }
+  ]
+}

@@ -72,6 +72,26 @@ const asIntegerLike = (value: unknown): number | null => {
   return null;
 };
 
+const getAttributePointCost = (value: number): number => {
+  if (value <= 1) return 0;
+  if (value <= 4) return value - 1;
+  return 3 + (value - 4) * 2;
+};
+
+const getSkillPointCost = (value: number): number => {
+  if (value <= 0) return 0;
+  if (value <= 2) return value;
+  return 2 + (value - 2) * 2;
+};
+
+const sumRecordCost = (value: unknown, getCost: (value: number) => number): number => {
+  if (!isRecord(value)) return 0;
+  return Object.values(value).reduce<number>((sum, item) => {
+    const numeric = asFiniteInteger(item);
+    return numeric === null ? sum : sum + getCost(numeric);
+  }, 0);
+};
+
 const resolveCocBuildAndDamageBonus = (strength: number, size: number): { build: number; damageBonus: string } => {
   const total = strength + size;
   if (total <= 64) return { build: -2, damageBonus: '-2' };
@@ -309,6 +329,8 @@ const buildValidationSummary = (args: {
   missingRequiredBlockKeys: string[];
   attributePointsUsed: number;
   attributePointsLimit: number | null;
+  skillPointsUsed?: number;
+  skillPointsLimit?: number | null;
   specialtyPointsUsed: number;
   specialtyPointsLimit: number | null;
 }): BuildRuleValidationSummary => {
@@ -317,6 +339,8 @@ const buildValidationSummary = (args: {
     missingRequiredBlockKeys,
     attributePointsUsed,
     attributePointsLimit,
+    skillPointsUsed,
+    skillPointsLimit,
     specialtyPointsUsed,
     specialtyPointsLimit,
   } = args;
@@ -328,6 +352,8 @@ const buildValidationSummary = (args: {
     budget: {
       attributePointsUsed,
       attributePointsLimit,
+      ...(typeof skillPointsUsed === 'number' ? { skillPointsUsed } : {}),
+      ...(typeof skillPointsUsed === 'number' ? { skillPointsLimit: skillPointsLimit ?? null } : {}),
       specialtyPointsUsed,
       specialtyPointsLimit,
     },
@@ -401,6 +427,65 @@ const evaluateGenericBuildRuleState = (
     derived.MP = Math.floor(power / 5);
     derived.Build = build;
     derived.DamageBonus = damageBonus;
+  }
+  if (ruleId === 'wuxiankongbu-fx-v137') {
+    const coreAttributes = isRecord(blockResults.coreAttributes) ? blockResults.coreAttributes : {};
+    const bodyProfile = isRecord(blockResults.bodyProfile) ? blockResults.bodyProfile : {};
+    const strength = asFiniteInteger(coreAttributes.STR) ?? 0;
+    const dexterity = asFiniteInteger(coreAttributes.DEX) ?? 0;
+    const stamina = asFiniteInteger(coreAttributes.STA) ?? 0;
+    const perception = asFiniteInteger(coreAttributes.PER) ?? 0;
+    const resolve = asFiniteInteger(coreAttributes.RES) ?? 0;
+    const composure = asFiniteInteger(coreAttributes.COM) ?? 0;
+    const size = asFiniteInteger(bodyProfile.size) ?? 5;
+    const dexterityExtraSuccess = Math.max(0, dexterity - 5);
+    const perceptionExtraSuccess = Math.max(0, perception - 5);
+    const staminaExtraSuccess = Math.max(0, stamina - 5);
+    const resolveExtraSuccess = Math.max(0, resolve - 5);
+    const composureExtraSuccess = Math.max(0, composure - 5);
+    const higherDefenseExtraSuccess = Math.max(dexterityExtraSuccess, perceptionExtraSuccess);
+    const attributePointsUsed = sumRecordCost(coreAttributes, getAttributePointCost);
+    const skillPointsUsed = sumRecordCost(blockResults.skills, getSkillPointCost);
+    const specialtyItems = getSpecialtyItems(preset);
+    const specialtyMap = new Map(specialtyItems.map((item) => [item.id, item]));
+    const specialties = Array.isArray(blockResults.specialties)
+      ? blockResults.specialties.filter((item): item is string => typeof item === 'string')
+      : [];
+    const specialtyPointsUsed = specialties.reduce((sum, specialtyId) => sum + (specialtyMap.get(specialtyId)?.cost ?? 0), 0);
+
+    derived.Speed = strength + dexterity + size + dexterityExtraSuccess * 5;
+    derived.Initiative = `${1 + composureExtraSuccess}d10+${dexterity + composure}`;
+    derived.BaseDefense = Math.min(dexterity, perception);
+    derived.BaseDefenseExtraSuccess = higherDefenseExtraSuccess;
+    derived.Health = stamina + size + staminaExtraSuccess * 2;
+    derived.Willpower = resolve + composure + resolveExtraSuccess * 2;
+
+    if (attributePointsUsed > 9) {
+      issues.push(`属性点超出预算：已使用 ${attributePointsUsed} / 上限 9`);
+    }
+    if (skillPointsUsed > 18) {
+      issues.push(`技能点超出预算：已使用 ${skillPointsUsed} / 上限 18`);
+    }
+    if (specialtyPointsUsed > 5) {
+      issues.push(`专长点超出预算：已使用 ${specialtyPointsUsed} / 上限 5`);
+    }
+
+    return {
+      ruleId,
+      version: typeof preset.version === 'string' ? preset.version : '1.0.0',
+      blockResults,
+      derived,
+      validationSummary: buildValidationSummary({
+        issues,
+        missingRequiredBlockKeys,
+        attributePointsUsed,
+        attributePointsLimit: 9,
+        skillPointsUsed,
+        skillPointsLimit: 18,
+        specialtyPointsUsed,
+        specialtyPointsLimit: 5,
+      }),
+    };
   }
 
   return {

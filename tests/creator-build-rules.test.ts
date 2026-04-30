@@ -42,13 +42,14 @@ describe('creator build rules', () => {
     expect(loadBuildRulePresetById('coc-7e-lite').supportedTemplates).toContain('canshou');
   });
 
-  test('规则索引包含 arena / dnd / coc 三套预设', () => {
+  test('规则索引包含 arena / dnd / coc / 无限恐怖FXv137 四套预设', () => {
     const index = loadBuildRulePresetIndex();
 
     expect(index.map((item) => item.id)).toEqual([
       'arena-trpg-lite',
       'dnd-5e-lite',
       'coc-7e-lite',
+      'wuxiankongbu-fx-v137',
     ]);
   });
 
@@ -64,6 +65,28 @@ describe('creator build rules', () => {
 
     expect(preset.blocks.some((block) => block.id === 'occupation')).toBe(true);
     expect(preset.blocks.some((block) => block.id === 'derivedStats')).toBe(true);
+  });
+
+  test('wuxiankongbu-fx-v137 声明九项属性、十二项技能与专长 block', () => {
+    const preset = loadBuildRulePresetById('wuxiankongbu-fx-v137');
+    const attributes = preset.blocks.find((block) => block.id === 'coreAttributes');
+    const skills = preset.blocks.find((block) => block.id === 'skills');
+
+    expect(attributes?.type).toBe('stat-array');
+    expect(attributes?.fields?.map((field) => field.id)).toEqual([
+      'INT',
+      'PER',
+      'RES',
+      'STR',
+      'DEX',
+      'STA',
+      'PRE',
+      'MAN',
+      'COM',
+    ]);
+    expect(skills?.type).toBe('stat-array');
+    expect(skills?.fields).toHaveLength(12);
+    expect(preset.blocks.some((block) => block.id === 'specialties')).toBe(true);
   });
 
   test('arena-trpg-lite 的力量层级选项带有预算 meta', () => {
