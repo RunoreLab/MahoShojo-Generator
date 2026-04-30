@@ -167,7 +167,7 @@ const buildCocRuleSummary = (template: CreatorTemplateId, rule: BuildRuleRuntime
     .join('\n');
 };
 
-const buildWuxiankongbuFxRuleSummary = (template: CreatorTemplateId, rule: BuildRuleRuntimeResult): string => {
+const buildTerrorInfinityFxRuleSummary = (template: CreatorTemplateId, rule: BuildRuleRuntimeResult): string => {
   const blockResults = isRecord(rule.blockResults) ? rule.blockResults : {};
   const derived = isRecord(rule.derived) ? rule.derived : {};
   const coreAttributes = isRecord(blockResults.coreAttributes) ? blockResults.coreAttributes : {};
@@ -198,8 +198,8 @@ const buildRuleSummary = (template: CreatorTemplateId, rule: BuildRuleRuntimeRes
   if (rule.ruleId === 'coc-7e-lite') {
     return buildCocRuleSummary(template, rule);
   }
-  if (rule.ruleId === 'wuxiankongbu-fx-v137') {
-    return buildWuxiankongbuFxRuleSummary(template, rule);
+  if (rule.ruleId === 'terrorinfinity-fx-v137') {
+    return buildTerrorInfinityFxRuleSummary(template, rule);
   }
 
   return buildArenaRuleSummary(template, rule);

@@ -49,7 +49,7 @@ describe('creator build rules', () => {
       'arena-trpg-lite',
       'dnd-5e-lite',
       'coc-7e-lite',
-      'wuxiankongbu-fx-v137',
+      'terrorinfinity-fx-v137',
     ]);
   });
 
@@ -67,8 +67,8 @@ describe('creator build rules', () => {
     expect(preset.blocks.some((block) => block.id === 'derivedStats')).toBe(true);
   });
 
-  test('wuxiankongbu-fx-v137 声明九项属性、十二项技能与专长 block', () => {
-    const preset = loadBuildRulePresetById('wuxiankongbu-fx-v137');
+  test('terrorinfinity-fx-v137 声明九项属性、十二项技能与专长 block', () => {
+    const preset = loadBuildRulePresetById('terrorinfinity-fx-v137');
     const attributes = preset.blocks.find((block) => block.id === 'coreAttributes');
     const skills = preset.blocks.find((block) => block.id === 'skills');
 

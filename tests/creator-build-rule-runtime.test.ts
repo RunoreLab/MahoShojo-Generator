@@ -116,7 +116,7 @@ describe('creator build-rule runtime', () => {
   });
 
   test('无限恐怖FXv137 默认输入包含属性、技能、体积与专长', () => {
-    const inputs = createDefaultBuildRuleInputs('wuxiankongbu-fx-v137');
+    const inputs = createDefaultBuildRuleInputs('terrorinfinity-fx-v137');
 
     expect(typeof inputs.coreAttributes).toBe('object');
     expect(typeof inputs.skills).toBe('object');
@@ -205,9 +205,9 @@ describe('creator build-rule runtime', () => {
     expect(result.derived.DamageBonus).toBeDefined();
   });
 
-  test('wuxiankongbu-fx-v137 计算速度、先攻、防御、生命值与意志力', () => {
+  test('terrorinfinity-fx-v137 计算速度、先攻、防御、生命值与意志力', () => {
     const result = evaluateBuildRuleState({
-      ruleId: 'wuxiankongbu-fx-v137',
+      ruleId: 'terrorinfinity-fx-v137',
       inputs: {
         coreAttributes: {
           INT: 2,

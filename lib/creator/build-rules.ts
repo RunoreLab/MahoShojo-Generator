@@ -2,7 +2,7 @@ import presetIndexJson from '@/public/build-rules/presets/index.json';
 import arenaTrpgLiteJson from '@/public/build-rules/presets/arena-trpg-lite.json';
 import coc7eLiteJson from '@/public/build-rules/presets/coc-7e-lite.json';
 import dnd5eLiteJson from '@/public/build-rules/presets/dnd-5e-lite.json';
-import wuxiankongbuFxV137Json from '@/public/build-rules/presets/wuxiankongbu-fx-v137.json';
+import terrorinfinityFxV137Json from '@/public/build-rules/presets/terrorinfinity-fx-v137.json';
 
 import type { BuildRulePreset, BuildRulePresetIndex } from './types';
 
@@ -12,7 +12,7 @@ const BUILD_RULE_PRESET_MAP: Record<string, BuildRulePreset> = {
   'arena-trpg-lite': arenaTrpgLiteJson as BuildRulePreset,
   'dnd-5e-lite': dnd5eLiteJson as BuildRulePreset,
   'coc-7e-lite': coc7eLiteJson as BuildRulePreset,
-  'wuxiankongbu-fx-v137': wuxiankongbuFxV137Json as BuildRulePreset,
+  'terrorinfinity-fx-v137': terrorinfinityFxV137Json as BuildRulePreset,
 };
 
 export function loadBuildRulePresetIndex(): BuildRulePresetIndex {

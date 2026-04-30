@@ -79,7 +79,7 @@ const buildSummaryItems = (runtimeResult: BuildRuleRuntimeResult): SummaryItem[]
     ];
   }
 
-  if (runtimeResult.ruleId === 'wuxiankongbu-fx-v137') {
+  if (runtimeResult.ruleId === 'terrorinfinity-fx-v137') {
     return [
       { key: 'Speed', label: '速度', value: `${derived.Speed ?? '-'}` },
       { key: 'Initiative', label: '先攻', value: `${derived.Initiative ?? '-'}` },

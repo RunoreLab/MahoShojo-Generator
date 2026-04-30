@@ -428,7 +428,7 @@ const evaluateGenericBuildRuleState = (
     derived.Build = build;
     derived.DamageBonus = damageBonus;
   }
-  if (ruleId === 'wuxiankongbu-fx-v137') {
+  if (ruleId === 'terrorinfinity-fx-v137') {
     const coreAttributes = isRecord(blockResults.coreAttributes) ? blockResults.coreAttributes : {};
     const bodyProfile = isRecord(blockResults.bodyProfile) ? blockResults.bodyProfile : {};
     const strength = asFiniteInteger(coreAttributes.STR) ?? 0;

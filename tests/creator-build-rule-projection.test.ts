@@ -115,8 +115,8 @@ const cocRuntimeResult = {
   },
 } as const;
 
-const wuxiankongbuFxRuntimeResult = {
-  ruleId: 'wuxiankongbu-fx-v137',
+const terrorinfinityFxRuntimeResult = {
+  ruleId: 'terrorinfinity-fx-v137',
   version: '1.0.0',
   blockResults: {
     coreAttributes: {
@@ -225,11 +225,11 @@ describe('creator build-rule projection', () => {
     expect(projection.primary?.summary).toContain('SAN');
   });
 
-  test('wuxiankongbu-fx-v137 主规则摘要包含九项属性、衍生值与专长', () => {
+  test('terrorinfinity-fx-v137 主规则摘要包含九项属性、衍生值与专长', () => {
     const projection = projectBuildRulesForPrompt({
       template: 'general',
-      primaryRuleId: 'wuxiankongbu-fx-v137',
-      rules: [wuxiankongbuFxRuntimeResult],
+      primaryRuleId: 'terrorinfinity-fx-v137',
+      rules: [terrorinfinityFxRuntimeResult],
       resolveRuleProjectionPolicy: () => 'primary-structured',
     });
 
