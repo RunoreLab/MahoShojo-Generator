@@ -1,6 +1,11 @@
+import type { ComponentProps } from 'react';
 import { useEffect, useState } from 'react';
 
-import { LeaderboardEntityDetailsModal } from '@/components/ranking/LeaderboardEntityDetailsModal';
+import DataCardDetailsModal from '@/components/DataCardDetailsModal';
+import {
+  LeaderboardEntityDetailsModal,
+  type LeaderboardEntityDetailsTarget,
+} from '@/components/ranking/LeaderboardEntityDetailsModal';
 import { authStorage } from '@/lib/auth';
 import type {
   CrowdReviewCurrentCaseDto,
@@ -18,18 +23,41 @@ const DECISION_LABELS: Record<'violation' | 'no_violation' | 'abstain', string> 
   abstain: '弃权',
 };
 
+type DetailsCard = ComponentProps<typeof DataCardDetailsModal>['card'];
+
+const buildSnapshotDetailsCard = (currentCase: CrowdReviewCurrentCaseDto): DetailsCard | null => {
+  const snapshot = currentCase.targetSnapshot;
+  if (!snapshot?.data) return null;
+
+  return {
+    id: `report-snapshot:${currentCase.reportCaseId}`,
+    name: snapshot.name || '举报时目标卡快照',
+    description: snapshot.description ?? '举报时保存的数据卡快照',
+    type: snapshot.type ?? 'character',
+    data: snapshot.data,
+    isPublic: false,
+    author: '举报快照',
+    usageCount: 0,
+    likeCount: 0,
+    favoriteCount: 0,
+    updatedAt: snapshot.updatedAt ?? undefined,
+  };
+};
+
 export function CrowdReviewCurrentCaseCard({
   currentCase,
   onCaseUpdated,
 }: CrowdReviewCurrentCaseCardProps) {
   const [caseState, setCaseState] = useState(currentCase);
-  const [isDetailsOpen, setIsDetailsOpen] = useState(false);
+  const [remoteDetailsTarget, setRemoteDetailsTarget] = useState<LeaderboardEntityDetailsTarget | null>(null);
+  const [snapshotDetailsCard, setSnapshotDetailsCard] = useState<DetailsCard | null>(null);
   const [submittingDecision, setSubmittingDecision] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     setCaseState(currentCase);
-    setIsDetailsOpen(false);
+    setRemoteDetailsTarget(null);
+    setSnapshotDetailsCard(null);
     setError(null);
     setSubmittingDecision(null);
   }, [currentCase]);
@@ -43,6 +71,29 @@ export function CrowdReviewCurrentCaseCard({
           pendingNotice: '提示：详情模态读取的是当前公开卡内容，可能与举报材料中的历史快照不完全一致。',
         }
       : null;
+  const snapshotDetailsTarget = buildSnapshotDetailsCard(caseState);
+
+  const openTargetDetails = () => {
+    if (snapshotDetailsTarget) {
+      setSnapshotDetailsCard(snapshotDetailsTarget);
+      setRemoteDetailsTarget(null);
+      return;
+    }
+    setRemoteDetailsTarget(detailsTarget);
+  };
+
+  const openReferenceDetails = (
+    item: NonNullable<CrowdReviewCurrentCaseDto['reportSummary']['referenceItems']>[number],
+  ) => {
+    if (item.referenceType !== 'public_data_card') return;
+    setSnapshotDetailsCard(null);
+    setRemoteDetailsTarget({
+      entityType: 'data_card',
+      entityId: item.referenceId,
+      displayName: item.labelSnapshot,
+      pendingNotice: '提示：引用卡详情读取的是当前公开卡内容，可能与举报时引用快照不完全一致。',
+    });
+  };
 
   const handleSubmitDecision = async (decision: 'violation' | 'no_violation' | 'abstain') => {
     setSubmittingDecision(decision);
@@ -132,14 +183,16 @@ export function CrowdReviewCurrentCaseCard({
               </div>
               <button
                 type="button"
-                onClick={() => setIsDetailsOpen(true)}
+                onClick={openTargetDetails}
                 className="inline-flex rounded-full border border-sky-300 bg-white px-5 py-2.5 text-sm font-semibold text-sky-700 transition hover:border-sky-400 hover:text-sky-900 dark:border-sky-300/40 dark:bg-slate-950/70 dark:text-sky-100 dark:hover:border-sky-200"
               >
                 查看卡片详情
               </button>
             </div>
             <p className="mt-3 text-xs leading-5 text-sky-900/80 dark:text-sky-100/80">
-              详情模态读取的是当前公开卡内容，若创作者已修改卡片，内容可能与举报时快照不完全一致。
+              {snapshotDetailsTarget
+                ? '详情模态读取的是举报时保存的目标卡快照；即使创作者后来改为私有或修改内容，也不会影响本案判断材料。'
+                : '详情模态读取的是当前公开卡内容，若创作者已修改卡片，内容可能与举报时快照不完全一致。'}
             </p>
           </section>
         ) : null}
@@ -165,11 +218,43 @@ export function CrowdReviewCurrentCaseCard({
 
           <section className="rounded-3xl border border-white/70 bg-white/70 p-4 dark:border-slate-700 dark:bg-slate-900/70">
             <h3 className="text-sm font-semibold text-gray-900 dark:text-slate-100">参考材料</h3>
-            <ul className="mt-3 space-y-2 text-sm text-gray-600 dark:text-slate-300">
-              {caseState.reportSummary.references.map((item) => (
-                <li key={item}>{item}</li>
-              ))}
-            </ul>
+            {(caseState.reportSummary.referenceItems?.length ?? 0) > 0 ? (
+              <ul className="mt-3 space-y-3 text-sm text-gray-600 dark:text-slate-300">
+                {caseState.reportSummary.referenceItems?.map((item) => (
+                  <li key={`${item.referenceType}:${item.referenceId}`} className="space-y-2">
+                    <div>
+                      {item.referenceType === 'public_data_card' ? '引用公开数据卡：' : '引用百科：'}
+                      {item.labelSnapshot}
+                    </div>
+                    {item.note ? <div className="text-xs text-gray-500 dark:text-slate-400">备注：{item.note}</div> : null}
+                    {item.referenceType === 'public_data_card' ? (
+                      <button
+                        type="button"
+                        onClick={() => openReferenceDetails(item)}
+                        className="inline-flex rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-xs font-semibold text-sky-700 transition hover:border-sky-300 hover:text-sky-900 dark:border-sky-300/30 dark:bg-sky-500/10 dark:text-sky-100"
+                      >
+                        查看引用卡详情
+                      </button>
+                    ) : item.urlSnapshot ? (
+                      <a
+                        href={item.urlSnapshot}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-800 transition hover:border-amber-300 hover:text-amber-950 dark:border-amber-300/30 dark:bg-amber-500/10 dark:text-amber-100"
+                      >
+                        打开百科
+                      </a>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <ul className="mt-3 space-y-2 text-sm text-gray-600 dark:text-slate-300">
+                {caseState.reportSummary.references.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+            )}
           </section>
         </div>
 
@@ -213,10 +298,20 @@ export function CrowdReviewCurrentCaseCard({
       </article>
 
       <LeaderboardEntityDetailsModal
-        isOpen={isDetailsOpen}
-        onClose={() => setIsDetailsOpen(false)}
-        entity={isDetailsOpen ? detailsTarget : null}
+        isOpen={remoteDetailsTarget != null}
+        onClose={() => setRemoteDetailsTarget(null)}
+        entity={remoteDetailsTarget}
       />
+      {snapshotDetailsCard ? (
+        <DataCardDetailsModal
+          isOpen
+          onClose={() => setSnapshotDetailsCard(null)}
+          card={snapshotDetailsCard}
+          metaCardId={null}
+          ratingHistoryEntity={null}
+          pendingNotice="该详情来自举报时保存的目标卡快照，不依赖当前公开库可访问性。"
+        />
+      ) : null}
     </>
   );
 }

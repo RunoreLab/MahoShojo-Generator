@@ -114,4 +114,32 @@ describe('DataCardReportModal', () => {
       },
     ]);
   });
+
+  test('extracts public data card ids from pasted share text and ignores surrounding instructions', () => {
+    const references = buildReportReferencesFromModalFields({
+      initialReferences: [],
+      publicDataCardRefs: [
+        'https://mahoshojo.example/character-manager?dataCardId=00000000-0000-4000-8000-000000000001',
+        '生成新的故事吧！',
+        '在数据库的搜索框粘贴 ID 即可加载角色档案。',
+        '00000000-0000-4000-8000-000000000002',
+      ].join('\n'),
+      encyclopediaRefs: '',
+    });
+
+    expect(references).toEqual([
+      {
+        referenceType: 'public_data_card',
+        referenceId: '00000000-0000-4000-8000-000000000001',
+        note: null,
+        sortOrder: 0,
+      },
+      {
+        referenceType: 'public_data_card',
+        referenceId: '00000000-0000-4000-8000-000000000002',
+        note: null,
+        sortOrder: 1,
+      },
+    ]);
+  });
 });

@@ -24,6 +24,7 @@ import {
   reportReferences,
   reports,
   type CrowdReviewDecision,
+  type DataCardType,
   type ReportCaseStatus,
   type ReportResolutionCode,
 } from '@/lib/db/schema';
@@ -36,6 +37,7 @@ import type {
   CrowdReviewCurrentCaseDto,
   CrowdReviewHistoryDto,
   CrowdReviewPostVoteSummaryDto,
+  CrowdReviewReportReferenceItemDto,
   CrowdReviewSummaryDto,
   SubmitCrowdReviewDecisionResult,
 } from '@/lib/crowd-review/types';
@@ -67,9 +69,13 @@ type ServiceAssignmentRow = CrowdReviewAssignmentRow & {
   targetEntityId?: string;
   targetSnapshotName?: string | null;
   targetSnapshotDescription?: string | null;
+  targetSnapshotType?: DataCardType | null;
+  targetSnapshotData?: string | null;
+  targetSnapshotUpdatedAt?: string | null;
   reasonLabels?: string[];
   detailPreviews?: string[];
   referenceSummary?: string[];
+  referenceItems?: CrowdReviewReportReferenceItemDto[];
   roundStatus?: string;
   roundDeadlineAt?: string;
   roundMinValidVotes?: number;
@@ -374,16 +380,20 @@ const mapAssignmentToCurrentCase = (
   targetEntityType: 'data_card',
   targetEntityId: row.targetEntityId ?? fallback?.targetEntityId ?? '',
   targetSnapshot:
-    row.targetSnapshotName || row.targetSnapshotDescription
+    row.targetSnapshotName || row.targetSnapshotDescription || row.targetSnapshotData
       ? {
           name: row.targetSnapshotName ?? '',
           description: row.targetSnapshotDescription ?? null,
+          type: row.targetSnapshotType ?? null,
+          data: row.targetSnapshotData ?? null,
+          updatedAt: row.targetSnapshotUpdatedAt ?? null,
         }
       : (fallback?.targetSnapshot ?? null),
   reportSummary: {
     reasonLabels: row.reasonLabels ?? fallback?.reportSummary?.reasonLabels ?? [],
     details: row.detailPreviews ?? fallback?.reportSummary?.details ?? [],
     references: row.referenceSummary ?? fallback?.reportSummary?.references ?? [],
+    referenceItems: row.referenceItems ?? fallback?.reportSummary?.referenceItems ?? [],
   },
   ruleHints: fallback?.ruleHints ?? ['投票前不会展示票况'],
   availableDecisions: ['violation', 'no_violation', 'abstain'],
@@ -571,6 +581,10 @@ const hydrateAssignmentForRuntime = async (
       id: reports.id,
       reasonCode: reports.reasonCode,
       details: reports.details,
+      targetNameSnapshot: reports.targetNameSnapshot,
+      targetDescriptionSnapshot: reports.targetDescriptionSnapshot,
+      targetDataSnapshot: reports.targetDataSnapshot,
+      targetUpdatedAtSnapshot: reports.targetUpdatedAtSnapshot,
     })
     .from(reports)
     .where(and(eq(reports.caseId, reportCase.id), eq(reports.status, 'active')))
@@ -589,7 +603,10 @@ const hydrateAssignmentForRuntime = async (
           .select({
             reportId: reportReferences.reportId,
             referenceType: reportReferences.referenceType,
+            referenceId: reportReferences.referenceId,
             labelSnapshot: reportReferences.labelSnapshot,
+            urlSnapshot: reportReferences.urlSnapshot,
+            note: reportReferences.note,
           })
           .from(reportReferences)
           .where(inArray(reportReferences.reportId, reportIds))
@@ -600,16 +617,28 @@ const hydrateAssignmentForRuntime = async (
       ? `引用公开数据卡：${item.labelSnapshot}`
       : `引用百科：${item.labelSnapshot}`,
   );
+  const referenceItems = referenceRows.map((item) => ({
+    referenceType: item.referenceType,
+    referenceId: item.referenceId,
+    labelSnapshot: item.labelSnapshot,
+    urlSnapshot: item.urlSnapshot,
+    note: item.note,
+  }));
+  const targetSnapshotReport = activeReports.find((item) => item.targetDataSnapshot) ?? activeReports[0] ?? null;
 
   return {
     ...assignment,
     reportCaseId: reportCase.id,
     targetEntityId: reportCase.targetEntityId,
-    targetSnapshotName: targetCard?.name ?? null,
-    targetSnapshotDescription: targetCard?.description ?? null,
+    targetSnapshotName: targetSnapshotReport?.targetNameSnapshot ?? targetCard?.name ?? null,
+    targetSnapshotDescription: targetSnapshotReport?.targetDescriptionSnapshot ?? targetCard?.description ?? null,
+    targetSnapshotType: targetCard?.type ?? null,
+    targetSnapshotData: targetSnapshotReport?.targetDataSnapshot ?? null,
+    targetSnapshotUpdatedAt: targetSnapshotReport?.targetUpdatedAtSnapshot ?? targetCard?.updatedAt ?? null,
     reasonLabels,
     detailPreviews,
     referenceSummary,
+    referenceItems,
     roundStatus: round.status,
     roundDeadlineAt: round.deadlineAt,
     roundMinValidVotes: round.minValidVotes,

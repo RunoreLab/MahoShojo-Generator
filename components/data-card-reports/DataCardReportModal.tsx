@@ -7,7 +7,10 @@ import {
   BASE_MODAL_PANEL_LAYOUT_CLASS_NAME,
   getBaseModalLayoutClassNames,
 } from '@/components/shared/BaseModal';
-import { normalizePublicDataCardReferenceId } from '@/lib/data-card-reports/public-reference-id';
+import {
+  extractPublicDataCardReferenceIds,
+  normalizePublicDataCardReferenceId,
+} from '@/lib/data-card-reports/public-reference-id';
 import type {
   DataCardReportDraft,
   DataCardReportReasonOption,
@@ -53,22 +56,29 @@ const parseReferenceIds = (
   referenceType: DataCardReportReferenceType,
   startOrder: number,
   existingNoteByReference: Map<string, string | null>,
-): NormalizedReportReference[] =>
-  Array.from(
-    new Set(
-      value
-        .split('\n')
-        .map((item) =>
-          referenceType === 'public_data_card' ? normalizePublicDataCardReferenceId(item) : item.trim(),
-        )
-        .filter(Boolean),
-    ),
-  ).map((referenceId, index) => ({
+): NormalizedReportReference[] => {
+  const publicIds = referenceType === 'public_data_card' ? extractPublicDataCardReferenceIds(value) : [];
+  const referenceIds =
+    publicIds.length > 0
+      ? publicIds
+      : Array.from(
+          new Set(
+            value
+              .split('\n')
+              .map((item) =>
+                referenceType === 'public_data_card' ? normalizePublicDataCardReferenceId(item) : item.trim(),
+              )
+              .filter(Boolean),
+          ),
+        );
+
+  return referenceIds.map((referenceId, index) => ({
     referenceType,
     referenceId,
     note: existingNoteByReference.get(buildReferenceNoteKey(referenceType, referenceId)) ?? null,
     sortOrder: startOrder + index,
   }));
+};
 
 export const buildReportReferencesFromModalFields = (input: {
   initialReferences: NormalizedReportReference[];

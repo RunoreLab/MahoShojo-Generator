@@ -140,6 +140,15 @@ describe('investigation page', () => {
               reasonLabels: ['疑似抄袭'],
               details: ['文本高度近似'],
               references: ['引用公开数据卡：对照卡'],
+              referenceItems: [
+                {
+                  referenceType: 'public_data_card',
+                  referenceId: 'card-2',
+                  labelSnapshot: '对照卡',
+                  urlSnapshot: '/character-manager?dataCardId=card-2',
+                  note: null,
+                },
+              ],
             },
             ruleHints: ['投票前不会展示票况'],
             availableDecisions: ['violation', 'no_violation', 'abstain'],
@@ -155,6 +164,7 @@ describe('investigation page', () => {
     expect(html).toContain('支持不违规');
     expect(html).toContain('弃权');
     expect(html).toContain('查看卡片详情');
+    expect(html).toContain('查看引用卡详情');
     expect(html).not.toContain('有效票');
   });
 
