@@ -61,8 +61,8 @@ describe('App topbar coverage', () => {
     expect(html.indexOf('GlobalTopBar')).toBeLessThan(html.indexOf('页面内容'));
   });
 
-  test('excluded route does not render global topbar', async () => {
-    pathname = '/ranking';
+  test('flow-specific excluded route does not render global topbar', async () => {
+    pathname = '/arrested';
     const { default: App } = await import('@/pages/_app');
     const html = renderToStaticMarkup(<App Component={Page} pageProps={{}} router={{} as never} />);
 
