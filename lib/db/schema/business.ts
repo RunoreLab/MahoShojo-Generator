@@ -3,6 +3,8 @@ import { index, integer, primaryKey, real, sqliteTable, text, uniqueIndex } from
 
 export type DataCardType = 'character' | 'scenario' | 'history' | 'questionnaire';
 export type DataCardReviewStatus = 'pending' | 'approved' | 'rejected';
+export type DataCardInteractionEventType = 'like' | 'usage';
+export type DataCardInteractionActorScope = 'auth_user' | 'activity_user' | 'anonymous';
 export type ArenaRatingEntityType = 'data_card' | 'preset';
 export type ArenaRatingQueue = 'strict' | 'free';
 export type ArenaRatingEventStatus = 'pending' | 'applied' | 'skipped' | 'failed';
@@ -466,6 +468,29 @@ export const favorites = sqliteTable(
   (table) => ({
     pk: primaryKey({ columns: [table.userId, table.dataCardId] }),
     dataCardIdIndex: index('idx_favorites_data_card_id').on(table.dataCardId),
+  }),
+);
+
+export const dataCardInteractions = sqliteTable(
+  'data_card_interactions',
+  {
+    id: text('id').primaryKey(),
+    dataCardId: text('data_card_id')
+      .notNull()
+      .references(() => dataCards.id, { onDelete: 'cascade' }),
+    eventType: text('event_type').$type<DataCardInteractionEventType>().notNull(),
+    actorScope: text('actor_scope').$type<DataCardInteractionActorScope>().notNull(),
+    actorKeyHash: text('actor_key_hash').notNull(),
+    createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    uniqueActorEvent: uniqueIndex('idx_data_card_interactions_unique_actor_event').on(
+      table.dataCardId,
+      table.eventType,
+      table.actorScope,
+      table.actorKeyHash,
+    ),
+    cardEventIndex: index('idx_data_card_interactions_card_event').on(table.dataCardId, table.eventType, table.createdAt),
   }),
 );
 
