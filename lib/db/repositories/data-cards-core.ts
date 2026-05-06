@@ -787,10 +787,6 @@ export const listPublicDataCardsWithFilters = async (
   } else if (input.sortBy === 'favorites') {
     orderBy = [desc(dataCards.favoriteCount), desc(dataCards.createdAt)];
   }
-  if (input.recommendedOnly && input.sortBy !== 'favorites') {
-    orderBy = [desc(dataCards.updatedAt), desc(dataCards.createdAt)];
-  }
-
   const rows = await db
     .select({
       ...dataCardBaseSelect,
