@@ -57,6 +57,7 @@ import { createBattleReportWriteContext } from '@/lib/arena/battle-report-write-
 	import { extractStreamUpdateMeta, findStreamUpdateMetaStart } from '@/lib/arena/stream-meta';
 import { summarizeStreamBattleReportPreview } from '@/lib/arena/stream-report-summary';
 import { normalizeCustomStoryLength, resolveEffectiveStoryLength } from '@/lib/story-length';
+import { buildEmptyStreamOutputErrorPayload } from '@/lib/arena/stream-empty-output';
 
 const log = getLogger('api-gen-battle-stream');
 
@@ -1347,24 +1348,27 @@ async function handler(req: NextRequest): Promise<Response> {
 			                    const metaCandidate = metaBuffer && metaBuffer.trim() ? metaBuffer : metaFallbackTail;
 			                    const rawPreview = metaCandidate && metaCandidate.trim() ? metaCandidate.slice(0, 400) : null;
 		                    controller.enqueue(
-		                        encodeEvent('error', {
-		                            ok: false,
-		                            error: 'AI 返回空对象/空内容（{} / [] / 空白），未收到有效正文，请重试或切换模型。',
-		                            debug: debugSse
-		                                ? {
-		                                    outputBytes,
-		                                    outputChars,
-		                                    markdownCharsSent,
-		                                    hasMeaningfulMarkdown,
-		                                    metaHasImpacts,
-		                                    inMeta,
-		                                    pendingMarkdownTailLength: pendingMarkdownTail.length,
-		                                    metaBufferLength: metaBuffer.length,
-		                                    metaFallbackTailLength: metaFallbackTail.length,
-		                                    rawPreview,
-		                                  }
-		                                : null,
-		                        })
+		                        encodeEvent(
+                                    'error',
+                                    buildEmptyStreamOutputErrorPayload({
+                                        debug: debugSse,
+                                        outputBytes,
+                                        outputChars,
+                                        markdownCharsSent,
+                                        hasMeaningfulMarkdown,
+                                        metaHasImpacts,
+                                        inMeta,
+                                        pendingMarkdownTailLength: pendingMarkdownTail.length,
+                                        metaBufferLength: metaBuffer.length,
+                                        metaFallbackTailLength: metaFallbackTail.length,
+                                        reasoningCharsSent,
+                                        hasReasoningStarted,
+                                        hasReasoningDelta,
+                                        reasoningCompleted,
+                                        finishReason: finishReasonForTelemetry,
+                                        rawPreview,
+                                    })
+                                )
 			                    );
 			                    await finalizeOnce('failed', 'empty stream output');
                                 sseStreamClosed = true;

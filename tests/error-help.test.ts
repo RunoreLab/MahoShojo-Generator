@@ -95,6 +95,14 @@ describe('error-help', () => {
     expect(inferEncyclopediaSlugForError({ message: '服务端响应为空，未收到有效内容。' })).toBe('ai-empty-output');
   });
 
+  test('infer by message: reasoning only without markdown', () => {
+    expect(
+      inferEncyclopediaSlugForError({
+        message: 'AI 只返回了思考过程，但未返回可展示的战报正文，请重试或切换模型。',
+      }),
+    ).toBe('ai-empty-output');
+  });
+
   test('infer by message: server returned {}', () => {
     expect(inferEncyclopediaSlugForError({ message: '✨ 生成失败，服务端返回信息：{}' })).toBe('ai-empty-output');
   });
