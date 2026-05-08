@@ -677,6 +677,7 @@ async function handler(req: NextRequest): Promise<Response> {
 
         const aiTelemetry: NonNullable<GenerateWithAIOptions['telemetry']> = {};
         const reasoningEventQueue: RawReasoningStreamEvent[] = [];
+        let lastReasoningActivityAtMs: number | null = null;
         let flushReasoningQueueNow: (() => void) | null = null;
         const aiOptions: GenerateWithAIOptions = {
             ...(providerOptions ?? {}),
@@ -685,6 +686,7 @@ async function handler(req: NextRequest): Promise<Response> {
             ...(wantsSse
                 ? {
                     onReasoningEvent: (event) => {
+                        lastReasoningActivityAtMs = Date.now();
                         reasoningEventQueue.push(event);
                         flushReasoningQueueNow?.();
                     },
@@ -1047,6 +1049,7 @@ async function handler(req: NextRequest): Promise<Response> {
                 label: 'api/arena/generate-stream SSE 上游读取',
                 idleTimeoutMs: STREAM_READ_IDLE_TIMEOUT_MS,
                 totalTimeoutMs: STREAM_READ_TOTAL_TIMEOUT_MS,
+                getLastActivityAtMs: () => lastReasoningActivityAtMs,
                 onTimeout: () => {
                     try {
                         void reader.cancel('timeout').catch(() => {});

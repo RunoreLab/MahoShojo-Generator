@@ -45,6 +45,45 @@ describe('stream timeout', () => {
     expect(second.done).toBe(true);
   });
 
+  test('外部活动会延长 idle timeout，直到读取到正文 chunk', async () => {
+    let lastActivityAtMs: number | null = null;
+    const timers: Array<ReturnType<typeof setTimeout>> = [];
+    const stream = new ReadableStream<string>({
+      start(controller) {
+        for (const delayMs of [20, 50, 80]) {
+          timers.push(
+            setTimeout(() => {
+              lastActivityAtMs = Date.now();
+            }, delayMs)
+          );
+        }
+        timers.push(
+          setTimeout(() => {
+            controller.enqueue('ok-after-thinking');
+            controller.close();
+          }, 110)
+        );
+      },
+    });
+    const reader = stream.getReader();
+    const readWithTimeout = createStreamReadWithTimeout({
+      idleTimeoutMs: 40,
+      totalTimeoutMs: 500,
+      label: 'test-external-activity',
+      getLastActivityAtMs: () => lastActivityAtMs,
+    });
+
+    try {
+      const first = await readWithTimeout(reader);
+      expect(first.done).toBe(false);
+      expect(first.value).toBe('ok-after-thinking');
+    } finally {
+      for (const timer of timers) {
+        clearTimeout(timer);
+      }
+    }
+  });
+
   test('total timeout：超过总时长后将立即终止后续 read', async () => {
     const stream = new ReadableStream<string>({
       start(controller) {
@@ -74,4 +113,3 @@ describe('stream timeout', () => {
     }
   });
 });
-
