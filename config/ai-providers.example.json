@@ -41,6 +41,17 @@
     "type": "openai"
   },
   {
+    "name": "sensenova_token_plan_provider",
+    "apiKey": "your_sensenova_token_plan_key_here",
+    "baseUrl": "https://api.sensenova.cn/v1",
+    "model": [
+      "deepseek-v4-flash",
+      "sensenova-6.7-flash-lite",
+      "sensenova-u1-fast"
+    ],
+    "type": "openai"
+  },
+  {
     "name": "backup_provider",
     "apiKey": "your_backup_api_key",
     "baseUrl": "https://api.backup-provider.com/v1",

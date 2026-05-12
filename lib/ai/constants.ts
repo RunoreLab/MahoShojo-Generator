@@ -113,6 +113,24 @@ const buildXiaomiMimoTokenPlanProvider = (
     models: XIAOMI_MIMO_MODELS.map(model => ({ ...model })),
 });
 
+const SENSENOVA_TOKEN_PLAN_MODELS: AIModelOption[] = [
+    {
+        value: 'deepseek-v4-flash',
+        label: 'DeepSeek V4 Flash',
+        description: '商汤 Token Plan 相关的 DeepSeek V4 高速轻量模型，适合高频生成、草稿与长文本补全。'
+    },
+    {
+        value: 'sensenova-6.7-flash-lite',
+        label: 'SenseNova 6.7 Flash-Lite',
+        description: '商汤 SenseNova 6.7 免费额度相关轻量快模型，适合低成本剧情推进与结构化文本生成。'
+    },
+    {
+        value: 'sensenova-u1-fast',
+        label: 'SenseNova U1 Fast',
+        description: '商汤 SenseNova U1 快速模型，适合速度优先的对话、摘要与短中篇内容生成。'
+    }
+];
+
 /**
  * 可选 AI 供应商目录。
  * - description 用于向用户解释供应商特色。
@@ -544,6 +562,16 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
         '新加坡',
         'https://token-plan-sgp.xiaomimimo.com/v1'
     ),
+    {
+        id: 'sensenova-token-plan',
+        name: '商汤 SenseNova Token Plan',
+        description: '商汤大装置 Token Plan OpenAI 兼容端点。优先收录免费赠送额度和 Token Plan 相关文本模型，需使用商汤控制台签发的 Token Plan Key。',
+        docsUrl: 'https://www.sensenova.cn/token-plan',
+        baseUrl: 'https://api.sensenova.cn/v1',
+        type: 'openai',
+        mode: 'auto',
+        models: SENSENOVA_TOKEN_PLAN_MODELS,
+    },
     {
         id: 'yiye',
         name: '一叶知秋 API',

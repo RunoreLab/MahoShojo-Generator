@@ -102,4 +102,19 @@ describe('ai-provider-catalog', () => {
       ]));
     }
   });
+
+  it('商汤 Token Plan 目录包含免费额度相关模型', () => {
+    const provider = AI_PROVIDER_CATALOG.find(item => item.id === 'sensenova-token-plan');
+    const modelValues = provider?.models.map(model => model.value) ?? [];
+
+    expect(provider?.name).toBe('商汤 SenseNova Token Plan');
+    expect(provider?.baseUrl).toBe('https://api.sensenova.cn/v1');
+    expect(provider?.type).toBe('openai');
+    expect(provider?.description).toContain('Token Plan');
+    expect(modelValues).toEqual(expect.arrayContaining([
+      'deepseek-v4-flash',
+      'sensenova-6.7-flash-lite',
+      'sensenova-u1-fast',
+    ]));
+  });
 });
