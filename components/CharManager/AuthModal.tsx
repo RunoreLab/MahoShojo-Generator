@@ -18,7 +18,7 @@ interface AuthModalProps {
     credential: string,
     turnstileToken: string,
     mode: 'password' | 'legacy',
-  ) => Promise<void>;
+  ) => Promise<{ requiresTurnstile?: boolean } | void>;
   onRegister: (username: string, email: string, turnstileToken: string, password: string) => Promise<void>;
   authMessage: { type: 'error' | 'success'; text: string } | null;
 }
@@ -58,6 +58,7 @@ export default function AuthModal({
   const [loginMethod, setLoginMethod] = useState<LoginMethod>('password');
   const [authForm, setAuthForm] = useState<AuthFormState>(EMPTY_FORM);
   const [turnstileToken, setTurnstileToken] = useState<string>('');
+  const [loginRequiresTurnstile, setLoginRequiresTurnstile] = useState(false);
   const [usernameError, setUsernameError] = useState<string>('');
   const [identifierError, setIdentifierError] = useState<string>('');
   const [passwordError, setPasswordError] = useState<string>('');
@@ -78,6 +79,7 @@ export default function AuthModal({
       setLoginMethod('password');
       setAuthForm(EMPTY_FORM);
       setTurnstileToken('');
+      setLoginRequiresTurnstile(false);
       setUsernameError('');
       setIdentifierError('');
       setPasswordError('');
@@ -172,7 +174,8 @@ export default function AuthModal({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!turnstileToken) return;
+    const requiresTurnstile = authMode === 'register' || loginRequiresTurnstile;
+    if (requiresTurnstile && !turnstileToken) return;
 
     if (authMode === 'register') {
       const username = authForm.username.trim();
@@ -199,11 +202,13 @@ export default function AuthModal({
       }
 
       if (loginMethod === 'password') {
-        await onLogin(authForm.identifier.trim(), authForm.password, turnstileToken, 'password');
+        const result = await onLogin(authForm.identifier.trim(), authForm.password, turnstileToken, 'password');
+        if (result?.requiresTurnstile) setLoginRequiresTurnstile(true);
         return;
       }
 
-      await onLogin(authForm.username.trim(), authForm.authKey, turnstileToken, 'legacy');
+      const result = await onLogin(authForm.username.trim(), authForm.authKey, turnstileToken, 'legacy');
+      if (result?.requiresTurnstile) setLoginRequiresTurnstile(true);
     } finally {
       // 由 authMessage 监听统一结束提交态与重置验证码
     }
@@ -213,6 +218,7 @@ export default function AuthModal({
     setAuthMode(authMode === 'login' ? 'register' : 'login');
     setLoginMethod('password');
     setAuthForm(EMPTY_FORM);
+    setLoginRequiresTurnstile(false);
     setUsernameError('');
     setIdentifierError('');
     setPasswordError('');
@@ -221,13 +227,15 @@ export default function AuthModal({
 
   const switchLoginMethod = (method: LoginMethod) => {
     setLoginMethod(method);
+    setLoginRequiresTurnstile(false);
     setIdentifierError('');
     setPasswordError('');
     resetCaptcha();
   };
 
+  const shouldShowTurnstile = authMode === 'register' || loginRequiresTurnstile;
   const canSubmit =
-    Boolean(turnstileToken) &&
+    (!shouldShowTurnstile || Boolean(turnstileToken)) &&
     !isSubmitting &&
     !(authMode === 'register' && (!authForm.password || Boolean(usernameError) || Boolean(identifierError) || Boolean(passwordError))) &&
     !(authMode === 'login' && loginMethod === 'password' && !authForm.identifier.trim());
@@ -405,10 +413,12 @@ export default function AuthModal({
             </div>
           ) : null}
 
-          <div>
-            <label className="mb-2 block text-sm font-medium text-gray-700">安全验证</label>
-            <TurnstileWidget ref={turnstileRef} onVerify={setTurnstileToken} />
-          </div>
+          {shouldShowTurnstile ? (
+            <div>
+              <label className="mb-2 block text-sm font-medium text-gray-700">安全验证</label>
+              <TurnstileWidget ref={turnstileRef} onVerify={setTurnstileToken} />
+            </div>
+          ) : null}
 
           <button
             type="submit"

@@ -519,6 +519,7 @@ const CharacterManagerPage: React.FC = () => {
         } else {
             setAuthMessage({ type: 'error', text: result.error || '登录失败' });
         }
+        return result;
     };
 
     const handleLogout = useCallback(() => {

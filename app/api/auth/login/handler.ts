@@ -16,13 +16,24 @@ import {
   ensureBusinessUserLegacyAuthKey,
   getLinkedBusinessUserByAuthUserId,
 } from '@/lib/auth/user-auth-linking';
+import { anonymizeIp, getClientIpFromHeaders } from '@/lib/arena/battle-report-log-utils';
 import { getUserById, getUserByUsername, verifyUserLogin } from '@/lib/database/users';
+import { getDrizzleDbFromRuntime } from '@/lib/db/drizzle';
+import {
+  countRecentFailedLoginsByIpAnonymized,
+  countRecentFailedLoginsByLoginIdentifierHash,
+} from '@/lib/db/repositories/auth-audit-logs';
+import { sha256Hex } from '@/lib/pvp/crypto';
 import { verifyTurnstileToken } from '@/lib/turnstile';
 
 export const runtime = 'edge';
 
 type LoginMode = 'password' | 'legacy';
 type PasswordIdentifierType = 'email' | 'username' | 'user-id';
+
+const LOGIN_TURNSTILE_IDENTIFIER_FAILURE_THRESHOLD = 5;
+const LOGIN_TURNSTILE_IP_FAILURE_THRESHOLD = 10;
+const LOGIN_TURNSTILE_FAILURE_WINDOW_SECONDS = 15 * 60;
 
 type LoginPayload = {
   identifier?: string;
@@ -41,6 +52,23 @@ type BetterAuthSignInPayload = {
   };
 };
 
+type LoginChallengeReason = 'none' | 'identifier-failures' | 'ip-failures';
+
+type LoginChallengeDecision = {
+  requiresTurnstile: boolean;
+  reason: LoginChallengeReason;
+  loginIdentifierHash: string;
+  identifierFailures: number;
+  ipFailures: number;
+};
+
+type LoginAuditMetadata = {
+  loginIdentifierHash: string;
+  loginChallengeReason?: LoginChallengeReason;
+  loginIdentifierFailures?: number;
+  loginIpFailures?: number;
+};
+
 const json = (payload: unknown, status = 200, headers?: Headers): Response => {
   const merged = new Headers(headers ?? {});
   if (!merged.has('Content-Type')) {
@@ -57,6 +85,22 @@ const toNonEmptyString = (value: unknown): string | null => {
 
 const isValidEmail = (email: string): boolean => {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+};
+
+const hashLoginIdentifier = async (identifier: string): Promise<string> => {
+  return sha256Hex(`auth-login:${identifier.trim().toLowerCase()}`);
+};
+
+const buildLoginAuditMetadata = (challenge: LoginChallengeDecision): LoginAuditMetadata => {
+  const metadata: LoginAuditMetadata = {
+    loginIdentifierHash: challenge.loginIdentifierHash,
+  };
+  if (challenge.reason !== 'none') {
+    metadata.loginChallengeReason = challenge.reason;
+    metadata.loginIdentifierFailures = challenge.identifierFailures;
+    metadata.loginIpFailures = challenge.ipFailures;
+  }
+  return metadata;
 };
 
 const parsePasswordIdentifier = (
@@ -106,6 +150,9 @@ type LoginDeps = {
   getUserByUsername: typeof getUserByUsername;
   verifyUserLogin: typeof verifyUserLogin;
   verifyTurnstileToken: typeof verifyTurnstileToken;
+  getDrizzleDbFromRuntime: typeof getDrizzleDbFromRuntime;
+  countRecentFailedLoginsByLoginIdentifierHash: typeof countRecentFailedLoginsByLoginIdentifierHash;
+  countRecentFailedLoginsByIpAnonymized: typeof countRecentFailedLoginsByIpAnonymized;
 };
 
 const defaultLoginDeps: LoginDeps = {
@@ -125,9 +172,75 @@ const defaultLoginDeps: LoginDeps = {
   getUserByUsername,
   verifyUserLogin,
   verifyTurnstileToken,
+  getDrizzleDbFromRuntime,
+  countRecentFailedLoginsByLoginIdentifierHash,
+  countRecentFailedLoginsByIpAnonymized,
 };
 
 const buildLoginHandler = (deps: LoginDeps): ((req: Request) => Promise<Response>) => {
+  const getLoginChallengeDecision = async (req: Request, identifier: string): Promise<LoginChallengeDecision> => {
+    const loginIdentifierHash = await hashLoginIdentifier(identifier);
+    const emptyDecision: LoginChallengeDecision = {
+      requiresTurnstile: false,
+      reason: 'none',
+      loginIdentifierHash,
+      identifierFailures: 0,
+      ipFailures: 0,
+    };
+
+    const db = deps.getDrizzleDbFromRuntime();
+    if (!db) return emptyDecision;
+
+    const sinceEpochSeconds = Math.floor(Date.now() / 1000) - LOGIN_TURNSTILE_FAILURE_WINDOW_SECONDS;
+    const ipAnonymized = anonymizeIp(getClientIpFromHeaders(req.headers));
+
+    try {
+      const [identifierFailures, ipFailures] = await Promise.all([
+        deps.countRecentFailedLoginsByLoginIdentifierHash(db, {
+          loginIdentifierHash,
+          sinceEpochSeconds,
+        }),
+        ipAnonymized
+          ? deps.countRecentFailedLoginsByIpAnonymized(db, {
+              ipAnonymized,
+              sinceEpochSeconds,
+            })
+          : Promise.resolve(0),
+      ]);
+
+      if (identifierFailures >= LOGIN_TURNSTILE_IDENTIFIER_FAILURE_THRESHOLD) {
+        return {
+          requiresTurnstile: true,
+          reason: 'identifier-failures',
+          loginIdentifierHash,
+          identifierFailures,
+          ipFailures,
+        };
+      }
+
+      if (ipFailures >= LOGIN_TURNSTILE_IP_FAILURE_THRESHOLD) {
+        return {
+          requiresTurnstile: true,
+          reason: 'ip-failures',
+          loginIdentifierHash,
+          identifierFailures,
+          ipFailures,
+        };
+      }
+
+      return {
+        requiresTurnstile: false,
+        reason: 'none',
+        loginIdentifierHash,
+        identifierFailures,
+        ipFailures,
+      };
+    } catch (error) {
+      console.error('[auth/login] 登录 Turnstile 升级判断失败（已放行）:', error);
+      return emptyDecision;
+    }
+  };
+
   const resolveEmailByIdentifier = async (
     parsed: { type: PasswordIdentifierType; value: string; userId: number | null },
   ): Promise<string | null> => {
@@ -153,7 +266,12 @@ const buildLoginHandler = (deps: LoginDeps): ((req: Request) => Promise<Response
     return 'email';
   };
 
-  const loginWithLegacyAuthKey = async (req: Request, username: string, authKey: string): Promise<Response> => {
+  const loginWithLegacyAuthKey = async (
+    req: Request,
+    username: string,
+    authKey: string,
+    auditMetadata: LoginAuditMetadata,
+  ): Promise<Response> => {
     const user = await deps.verifyUserLogin(username, authKey);
     if (!user) {
       await deps.recordAuthAuditLog({
@@ -162,6 +280,7 @@ const buildLoginHandler = (deps: LoginDeps): ((req: Request) => Promise<Response
         authSource: 'legacy',
         identifierType: 'username',
         resultCode: 'INVALID_CREDENTIAL',
+        metadata: auditMetadata,
       });
       return json({ error: '用户名或密钥错误' }, 401);
     }
@@ -193,6 +312,7 @@ const buildLoginHandler = (deps: LoginDeps): ((req: Request) => Promise<Response
     email: string,
     password: string,
     identifierType: PasswordIdentifierType,
+    auditMetadata: LoginAuditMetadata,
   ): Promise<Response> => {
     const bridge = await deps.invokeBetterAuthJsonEndpoint({
       path: '/api/auth/sign-in/email',
@@ -232,6 +352,7 @@ const buildLoginHandler = (deps: LoginDeps): ((req: Request) => Promise<Response
         identifierType: toAuditIdentifierType(identifierType),
         resultCode: 'INVALID_CREDENTIAL',
         resultMessage: upstreamMessage,
+        metadata: auditMetadata,
       });
       return json(
         {
@@ -330,14 +451,14 @@ const buildLoginHandler = (deps: LoginDeps): ((req: Request) => Promise<Response
       const mode: LoginMode = payload.mode === 'legacy' ? 'legacy' : 'password';
       const auditSource = toAuditSource(mode);
 
-      if (!turnstileToken || !identifier || !credential) {
+      if (!identifier || !credential) {
         await deps.recordAuthAuditLog({
           req,
           eventType: 'login_failed',
           authSource: auditSource,
           resultCode: 'INVALID_PAYLOAD',
         });
-        return json({ error: '登录信息和安全验证不能为空' }, 400);
+        return json({ error: '登录信息不能为空' }, 400);
       }
 
       const parsedIdentifier = mode === 'password' ? parsePasswordIdentifier(identifier) : null;
@@ -389,19 +510,37 @@ const buildLoginHandler = (deps: LoginDeps): ((req: Request) => Promise<Response
         return deps.buildAuthAttemptRateLimitResponse(rateLimit);
       }
 
-      const isTurnstileValid = await deps.verifyTurnstileToken(turnstileToken);
-      if (!isTurnstileValid) {
-        await deps.recordAuthAuditLog({
-          req,
-          eventType: 'login_failed',
-          authSource: auditSource,
-          resultCode: 'TURNSTILE_FAILED',
-        });
-        return json({ error: '安全验证失败，请重新验证' }, 400);
+      const challenge = await getLoginChallengeDecision(req, identifier);
+      const auditMetadata = buildLoginAuditMetadata(challenge);
+      if (challenge.requiresTurnstile) {
+        if (!turnstileToken) {
+          await deps.recordAuthAuditLog({
+            req,
+            eventType: 'login_failed',
+            authSource: auditSource,
+            identifierType: auditIdentifierType,
+            resultCode: 'TURNSTILE_REQUIRED',
+            metadata: auditMetadata,
+          });
+          return json({ requiresTurnstile: true, error: '请完成安全验证' }, 400);
+        }
+
+        const isTurnstileValid = await deps.verifyTurnstileToken(turnstileToken);
+        if (!isTurnstileValid) {
+          await deps.recordAuthAuditLog({
+            req,
+            eventType: 'login_failed',
+            authSource: auditSource,
+            identifierType: auditIdentifierType,
+            resultCode: 'TURNSTILE_FAILED',
+            metadata: auditMetadata,
+          });
+          return json({ requiresTurnstile: true, error: '安全验证失败，请重新验证' }, 400);
+        }
       }
 
       if (mode === 'legacy') {
-        return loginWithLegacyAuthKey(req, identifier, credential);
+        return loginWithLegacyAuthKey(req, identifier, credential, auditMetadata);
       }
 
       const safeParsedIdentifier = parsedIdentifier ?? parsePasswordIdentifier(identifier);
@@ -413,11 +552,12 @@ const buildLoginHandler = (deps: LoginDeps): ((req: Request) => Promise<Response
           authSource: 'better-auth',
           identifierType: toAuditIdentifierType(safeParsedIdentifier.type),
           resultCode: 'INVALID_CREDENTIAL',
+          metadata: auditMetadata,
         });
         return json({ error: '账号或密码错误' }, 401);
       }
 
-      return loginWithBetterAuthPassword(req, email, credential, safeParsedIdentifier.type);
+      return loginWithBetterAuthPassword(req, email, credential, safeParsedIdentifier.type, auditMetadata);
     } catch (error) {
       console.error('Login error:', error);
       await deps.recordAuthAuditLog({
