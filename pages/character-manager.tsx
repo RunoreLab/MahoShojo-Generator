@@ -2140,7 +2140,7 @@ const CharacterManagerPage: React.FC = () => {
                         {!characterData ? (
                             <>
                                 <div className="input-group">
-                                    <label htmlFor="file-upload" className="input-label">上传 .json 设定文件（支持角色、情景或万途 character）</label>
+                                    <label htmlFor="file-upload" className="input-label">上传 .json 设定文件（支持角色、情景、万途通用卡）</label>
                                     <input id="file-upload" type="file" accept=".json" onChange={handleFileChange} className="input-field file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0" />
                                     <label className="mt-2 flex items-start gap-2 text-xs text-gray-600">
                                         <input
@@ -2166,7 +2166,7 @@ const CharacterManagerPage: React.FC = () => {
                                             <textarea
                                                 value={pastedJson}
                                                 onChange={(e) => setPastedJson(e.target.value)}
-                                                placeholder="在此处粘贴角色、情景或万途 character 的 .json 内容..."
+                                                placeholder="在此处粘贴角色、情景等数据卡的 .json 内容..."
                                                 className="input-field resize-y h-32"
                                                 disabled={isLoading}
                                             />
