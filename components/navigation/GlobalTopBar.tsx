@@ -83,6 +83,8 @@ export function GlobalTopBar({ pathname, defaultMobileOpen = false }: GlobalTopB
                         <Link
                           key={item.href}
                           href={item.href}
+                          target={item.isExternal ? '_blank' : undefined}
+                          rel={item.isExternal ? 'noopener noreferrer' : undefined}
                           className="block rounded-xl px-3 py-2 text-sm text-gray-800 hover:bg-pink-50 dark:text-slate-100 dark:hover:bg-slate-800"
                         >
                           <span className="font-medium">{item.label}</span>

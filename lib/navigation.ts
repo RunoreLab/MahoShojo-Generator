@@ -1,10 +1,11 @@
-export type NavGroupId = 'creative' | 'battle' | 'character' | 'knowledge';
+export type NavGroupId = 'creative' | 'battle' | 'character' | 'ecosystem' | 'knowledge';
 
 export interface NavItem {
   label: string;
   href: string;
   description?: string;
   isTopbarCovered: boolean;
+  isExternal?: boolean;
 }
 
 export interface NavGroup {
@@ -130,6 +131,46 @@ export const NAV_GROUPS: NavGroup[] = [
         href: '/sublimation',
         description: '角色成长与升华流程',
         isTopbarCovered: true,
+      },
+    ],
+  },
+  {
+    id: 'ecosystem',
+    label: '生态',
+    items: [
+      {
+        label: '酒馆生态',
+        href: '/tavern',
+        description: 'SillyTavern 角色卡导入、导出与转换',
+        isTopbarCovered: true,
+      },
+      {
+        label: '万途驿站',
+        href: 'https://wantu-waystation.pages.dev/',
+        description: '通往万途各世界与平台功能的总入口',
+        isTopbarCovered: false,
+        isExternal: true,
+      },
+      {
+        label: '万途竞技场',
+        href: 'https://wantu-waystation.pages.dev/arena',
+        description: '万途站点级本地对战工作台',
+        isTopbarCovered: false,
+        isExternal: true,
+      },
+      {
+        label: '废土车卡',
+        href: 'https://wantu-waystation.pages.dev/worlds/wastetrace/cards',
+        description: '废土行迹角色、地点、势力与事件资料卡',
+        isTopbarCovered: false,
+        isExternal: true,
+      },
+      {
+        label: '废土旅途',
+        href: 'https://wantu-waystation.pages.dev/worlds/wastetrace/journeys',
+        description: '废土行迹路线、遭遇与行进体验入口',
+        isTopbarCovered: false,
+        isExternal: true,
       },
     ],
   },
