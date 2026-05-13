@@ -42,6 +42,7 @@ import { storeBattleReportGenerationOutputTextToR2 } from '@/lib/arena/battle-re
 import { recordUserActivityFromRequest } from '@/lib/user-activity/record';
 import { createRequestAuthUserResolver } from '@/lib/auth/request-auth-user';
 import { createBattleReportWriteContext } from '@/lib/arena/battle-report-write-context';
+import { MAX_ARENA_MATERIALS, normalizeArenaMaterialsForRequest } from '@/lib/arena/materials';
 
 const log = getLogger('api-gen-battle-story');
 
@@ -154,6 +155,7 @@ async function handler(req: NextRequest): Promise<Response> {
             userGuidance,
             scenario,
             auxScenarios,
+            materials,
             scenarioFileName,
             teams,
             teamNames,
@@ -278,6 +280,32 @@ async function handler(req: NextRequest): Promise<Response> {
 
             return new Response(JSON.stringify({ error: payload.message, generationId: recordId }), { status: payload.statusCode });
         };
+
+        const normalizedAuxScenarios = Array.isArray(auxScenarios)
+            ? auxScenarios.filter((item) => item && typeof item === 'object')
+            : null;
+        if (normalizedAuxScenarios && normalizedAuxScenarios.length > 10) {
+            return await writeFailedRecordIfNeeded({
+                statusCode: 400,
+                message: '辅助情景最多 10 个',
+                stage: 'aux-scenarios-count',
+            });
+        }
+
+        if (Array.isArray(materials) && materials.length > MAX_ARENA_MATERIALS) {
+            return await writeFailedRecordIfNeeded({
+                statusCode: 400,
+                message: `素材最多 ${MAX_ARENA_MATERIALS} 个`,
+                stage: 'materials-count',
+            });
+        }
+        const normalizedMaterials = normalizeArenaMaterialsForRequest(materials);
+        const materialCount = normalizedMaterials.length;
+        const materialSourceTypes = Array.from(new Set(
+            normalizedMaterials
+                .map((material) => material.sourceType || material.sourceKind)
+                .filter((value): value is string => typeof value === 'string' && Boolean(value.trim()))
+        )).slice(0, MAX_ARENA_MATERIALS);
 
         const resolvedReadArenaHistory = typeof readArenaHistory === 'boolean'
             ? readArenaHistory
@@ -407,6 +435,7 @@ async function handler(req: NextRequest): Promise<Response> {
             mode === 'classic'
             && String(language ?? '').trim() === 'zh-CN'
             && !String(userGuidance ?? '').trim()
+            && materialCount === 0
             && !hasQuestionnaireLore
             && resolvedReadArenaHistory === false
             && resolvedReadCurrentState === false
@@ -639,7 +668,7 @@ async function handler(req: NextRequest): Promise<Response> {
                 language,
                 mode,
                 scenario,
-                null,
+                normalizedAuxScenarios,
                 teams,
                 teamNames,
                 resolvedReadArenaHistory,
@@ -651,7 +680,8 @@ async function handler(req: NextRequest): Promise<Response> {
                 normalizeCustomStoryLength(customStoryLength),
                 narrativeHistoryForPrompt,
                 loreText,
-                includeQuestionnaireAnswersInPrompt
+                includeQuestionnaireAnswersInPrompt,
+                normalizedMaterials
             ),
             schema: battleReportSchema,
             taskName: `生成${mode}模式故事`,
@@ -780,6 +810,7 @@ async function handler(req: NextRequest): Promise<Response> {
             combatants,
             userGuidance: finalUserGuidance,
             scenario,
+            materials: normalizedMaterials,
             teams,
         });
         const inputBytes = new TextEncoder().encode(inputJson).length;
@@ -882,6 +913,8 @@ async function handler(req: NextRequest): Promise<Response> {
                         questionnaireLoreIds,
                         scenarioFileName: normalizedScenarioFileName,
                         auxScenarioCount: auxScenarioCount > 0 ? auxScenarioCount : null,
+                        materialCount: materialCount > 0 ? materialCount : null,
+                        materialSourceTypes: materialSourceTypes.length > 0 ? materialSourceTypes : null,
 	                    resolvedModelOverride: usedModelOverride ?? null,
 	                    readNarrativeHistory: resolvedReadNarrativeHistory,
                         narrativeHistoryReadLimit: resolvedReadNarrativeHistory
