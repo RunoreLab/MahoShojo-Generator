@@ -148,8 +148,23 @@ mock.module('@/components/arena/shared/ArenaCommunitySection', () => ({
 }));
 
 mock.module('@/components/arena/shared/ArenaPageLinks', () => ({
-  ArenaPageLinks() {
-    return <div>page-links</div>;
+  ArenaPageLinks({ variant }: { variant: 'lite' | 'full' }) {
+    if (variant === 'lite') {
+      return (
+        <div>
+          <a href="/arena">进入完整版竞技场</a>
+        </div>
+      );
+    }
+
+    return (
+      <div>
+        <a href="/battle">切换到简洁版</a>
+        <a href="https://wantu-waystation.pages.dev/arena" target="_blank" rel="noopener noreferrer">
+          前往万途竞技场
+        </a>
+      </div>
+    );
   },
 }));
 
