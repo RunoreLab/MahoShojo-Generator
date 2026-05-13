@@ -41,6 +41,20 @@ export type WantuCharacterExportPayloadResult =
     }
   | { success: false; error: string };
 
+export const WANTU_ROUND_TRIP_EXPORT_PREFERENCE_KEY = 'mahoshojo_wantu_round_trip_export';
+
+export function parseStoredWantuRoundTripExportPreference(value: string | null): boolean {
+  return value === 'true';
+}
+
+export function serializeWantuRoundTripExportPreference(value: boolean): string {
+  return value ? 'true' : 'false';
+}
+
+export function getWantuCharacterExportModeFromPreference(value: boolean): WantuCharacterExportMode {
+  return value ? 'roundTrip' : 'interop';
+}
+
 export function resolveWantuCharacterImport(
   input: unknown,
   options: FromWantuCharacterCardOptions = {},

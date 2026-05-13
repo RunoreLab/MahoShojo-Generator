@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import Head from 'next/head';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
-import { Download, RefreshCcw } from 'lucide-react';
+import { Download } from 'lucide-react';
 import { quickCheck, type FilterResult, type SensitiveMatchDetail } from '@/lib/sensitive-word-filter';
 import { randomChooseOneHanaName } from '@/lib/random-choose-hana-name';
 import { config } from '@/lib/config';
@@ -13,7 +13,11 @@ import { randomUUID } from '@/lib/crypto';
 import { downloadBlob } from '@/lib/client/blobUrl';
 import {
     buildWantuCharacterExportPayload,
+    getWantuCharacterExportModeFromPreference,
+    parseStoredWantuRoundTripExportPreference,
     resolveWantuCharacterImport,
+    serializeWantuRoundTripExportPreference,
+    WANTU_ROUND_TRIP_EXPORT_PREFERENCE_KEY,
 } from '@/lib/wantu-card/character-manager';
 import Footer from '../components/Footer';
 // 【新增】导入卡片组件和颜色配置
@@ -350,6 +354,7 @@ const CharacterManagerPage: React.FC = () => {
     // 用于控制粘贴区域折叠/展开的状态，默认为折叠
     const [isPasteAreaVisible, setIsPasteAreaVisible] = useState(false);
     const [restoreWantuOriginalOnImport, setRestoreWantuOriginalOnImport] = useState(false);
+    const [exportWantuRoundTrip, setExportWantuRoundTrip] = useState(false);
 
     // 敏感词检测相关状态
     const [sensitiveIssues, setSensitiveIssues] = useState<SensitiveIssue[]>([]);
@@ -424,6 +429,13 @@ const CharacterManagerPage: React.FC = () => {
         }
     }, []);
 
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+        setExportWantuRoundTrip(parseStoredWantuRoundTripExportPreference(
+            window.localStorage.getItem(WANTU_ROUND_TRIP_EXPORT_PREFERENCE_KEY)
+        ));
+    }, []);
+
     const refreshAuthMigrationStatus = useCallback(async () => {
         if (!isAuthenticated) {
             setAuthMigrationStatus(null);
@@ -483,6 +495,16 @@ const CharacterManagerPage: React.FC = () => {
         }
         setShowLegacyMigrationReminderModal(false);
     }, [legacyMigrationDeferCount]);
+
+    const handleWantuRoundTripExportPreferenceChange = useCallback((checked: boolean) => {
+        setExportWantuRoundTrip(checked);
+        if (typeof window !== 'undefined') {
+            window.localStorage.setItem(
+                WANTU_ROUND_TRIP_EXPORT_PREFERENCE_KEY,
+                serializeWantuRoundTripExportPreference(checked)
+            );
+        }
+    }, []);
 
     // 处理注册
     const handleRegister = async (username: string, email: string, turnstileToken: string, password: string) => {
@@ -1866,7 +1888,7 @@ const CharacterManagerPage: React.FC = () => {
         }
     };
 
-    const handleExportWantuCharacter = async (mode: 'interop' | 'roundTrip') => {
+    const handleExportWantuCharacter = async () => {
         if (!characterData) return;
         setMessage(null);
 
@@ -1880,6 +1902,7 @@ const CharacterManagerPage: React.FC = () => {
             return;
         }
 
+        const mode = getWantuCharacterExportModeFromPreference(exportWantuRoundTrip);
         const result = buildWantuCharacterExportPayload(characterData, { mode });
         if (!result.success) {
             setMessage({ type: 'error', text: result.error });
@@ -2356,27 +2379,33 @@ const CharacterManagerPage: React.FC = () => {
                                         {isLoading ? '处理中...' : copiedStatus ? '已复制！' : '复制到剪贴板'}
                                     </button>
                                     {!isScenarioData(characterData) && (
-                                        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                                        <div className="space-y-2">
                                             <button
                                                 type="button"
-                                                onClick={() => handleExportWantuCharacter('interop')}
+                                                onClick={handleExportWantuCharacter}
                                                 disabled={message?.type === 'error' || isLoading}
                                                 className="generate-button mb-0 flex w-full items-center justify-center gap-2"
                                                 style={{ backgroundColor: '#0f766e', backgroundImage: 'linear-gradient(to right, #0f766e, #0d9488)' }}
                                             >
                                                 <Download className="h-4 w-4" aria-hidden="true" />
-                                                <span>万途互通 JSON</span>
+                                                <span>导出万途 JSON</span>
                                             </button>
-                                            <button
-                                                type="button"
-                                                onClick={() => handleExportWantuCharacter('roundTrip')}
-                                                disabled={message?.type === 'error' || isLoading}
-                                                className="generate-button mb-0 flex w-full items-center justify-center gap-2"
-                                                style={{ backgroundColor: '#7c3aed', backgroundImage: 'linear-gradient(to right, #7c3aed, #6d28d9)' }}
+                                            <label
+                                                htmlFor="wantu-round-trip-export"
+                                                className="flex items-start gap-2 rounded-lg border border-teal-100 bg-teal-50 px-3 py-2 text-xs text-teal-900"
                                             >
-                                                <RefreshCcw className="h-4 w-4" aria-hidden="true" />
-                                                <span>万途往返 JSON</span>
-                                            </button>
+                                                <input
+                                                    id="wantu-round-trip-export"
+                                                    type="checkbox"
+                                                    checked={exportWantuRoundTrip}
+                                                    onChange={(event) => handleWantuRoundTripExportPreferenceChange(event.target.checked)}
+                                                    className="mt-0.5 accent-teal-700"
+                                                />
+                                                <span>
+                                                    <span className="font-semibold">导出可往返 JSON：</span>
+                                                    额外加 <code>_mahoshojo</code>，保存原始信息
+                                                </span>
+                                            </label>
                                         </div>
                                     )}
                                     <button onClick={handleLoadOtherData} className="footer-link mt-4 w-full text-center">

@@ -2,6 +2,8 @@ import { describe, expect, it } from 'bun:test';
 
 import {
   buildWantuCharacterExportPayload,
+  getWantuCharacterExportModeFromPreference,
+  parseStoredWantuRoundTripExportPreference,
   resolveWantuCharacterImport,
 } from '@/lib/wantu-card/character-manager';
 import { GENERAL_CHARACTER_TEMPLATE_ID } from '@/lib/schemas';
@@ -113,5 +115,15 @@ describe('wantu-card character manager helpers', () => {
       },
     });
     expect(JSON.parse(result.json)).toEqual(result.card);
+  });
+
+  it('defaults Wantu export to interop unless round-trip preference is enabled', () => {
+    expect(parseStoredWantuRoundTripExportPreference(null)).toBe(false);
+    expect(parseStoredWantuRoundTripExportPreference('false')).toBe(false);
+    expect(parseStoredWantuRoundTripExportPreference('true')).toBe(true);
+    expect(parseStoredWantuRoundTripExportPreference('broken')).toBe(false);
+
+    expect(getWantuCharacterExportModeFromPreference(false)).toBe('interop');
+    expect(getWantuCharacterExportModeFromPreference(true)).toBe('roundTrip');
   });
 });
