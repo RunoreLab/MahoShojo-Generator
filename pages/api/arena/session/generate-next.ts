@@ -75,6 +75,7 @@ const BattleStoryRequestSchema = z.object({
     combatants: z.array(z.unknown()).min(1),
     scenario: z.record(z.unknown()).nullable().optional(),
     auxScenarios: z.array(z.record(z.unknown())).max(10).optional(),
+    materials: z.array(z.unknown()).max(10).optional(),
     adjudicationEvents: z.array(z.unknown()).optional(),
     questionnaires: z
       .array(
@@ -184,6 +185,7 @@ export const buildUpstreamRequestBody = (
     internalGuidance,
     scenario: payload.seed.scenario ?? undefined,
     auxScenarios: payload.seed.auxScenarios,
+    materials: payload.seed.materials,
     adjudicationEvents: payload.seed.adjudicationEvents,
     language: payload.seed.language,
     readArenaHistory: payload.seed.settings.readArenaHistory,
@@ -256,6 +258,7 @@ export default async function handler(req: NextRequest): Promise<Response> {
       combatants: payload.seed.combatants,
       scenario: payload.seed.scenario ?? null,
       auxScenarios: payload.seed.auxScenarios ?? [],
+      materials: payload.seed.materials ?? [],
       questionnaires: payload.seed.questionnaires ?? [],
       settings: payload.seed.settings,
     },

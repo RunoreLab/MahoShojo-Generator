@@ -58,6 +58,7 @@ import { createBattleReportWriteContext } from '@/lib/arena/battle-report-write-
 import { summarizeStreamBattleReportPreview } from '@/lib/arena/stream-report-summary';
 import { normalizeCustomStoryLength, resolveEffectiveStoryLength } from '@/lib/story-length';
 import { buildEmptyStreamOutputErrorPayload } from '@/lib/arena/stream-empty-output';
+import { MAX_ARENA_MATERIALS, normalizeArenaMaterialsForRequest } from '@/lib/arena/materials';
 
 const log = getLogger('api-gen-battle-stream');
 
@@ -174,6 +175,8 @@ async function handler(req: NextRequest): Promise<Response> {
 	    let snapshotResolvedArenaFreeRankingEnabled: boolean | null = null;
 	    let snapshotQuestionnaireLoreIds: string[] = [];
 	    let snapshotHasQuestionnaireLore: boolean | null = null;
+        let snapshotMaterialCount = 0;
+        let snapshotMaterialSourceTypes: string[] = [];
         let snapshotGenerationId: string | null = null;
 
         try {
@@ -203,6 +206,7 @@ async function handler(req: NextRequest): Promise<Response> {
             internalGuidance,
             scenario,
             auxScenarios,
+            materials,
             teams,
             teamNames,
             language = 'zh-CN',
@@ -254,6 +258,18 @@ async function handler(req: NextRequest): Promise<Response> {
           if (normalizedAuxScenarios && normalizedAuxScenarios.length > 10) {
               return new Response(JSON.stringify({ error: '辅助情景最多 10 个' }), { status: 400 });
           }
+          if (Array.isArray(materials) && materials.length > MAX_ARENA_MATERIALS) {
+              return new Response(JSON.stringify({ error: `素材最多 ${MAX_ARENA_MATERIALS} 个` }), { status: 400 });
+          }
+          const normalizedMaterials = normalizeArenaMaterialsForRequest(materials);
+          const materialCount = normalizedMaterials.length;
+          const materialSourceTypes = Array.from(new Set(
+              normalizedMaterials
+                  .map((material) => material.sourceType || material.sourceKind)
+                  .filter((value): value is string => typeof value === 'string' && Boolean(value.trim()))
+          )).slice(0, MAX_ARENA_MATERIALS);
+          snapshotMaterialCount = materialCount;
+          snapshotMaterialSourceTypes = materialSourceTypes;
 
 		        snapshotMode = typeof mode === 'string' ? mode : 'classic';
 		        snapshotLanguage = normalizeOptionalString(language);
@@ -511,6 +527,15 @@ async function handler(req: NextRequest): Promise<Response> {
                 inputsToCheck.push({ type: 'scenario', content: JSON.stringify(aux), isNative });
             }
         }
+        if (normalizedMaterials.length > 0) {
+            for (const material of normalizedMaterials) {
+                inputsToCheck.push({
+                    type: 'userGuidance',
+                    content: JSON.stringify(material.content),
+                    isNative: material.isNative,
+                });
+            }
+        }
         combatants.forEach((c: any) => {
             inputsToCheck.push({ type: 'character', content: JSON.stringify(c.data), isNative: c.isNative });
         });
@@ -584,6 +609,8 @@ async function handler(req: NextRequest): Promise<Response> {
 		                                rejectedBy: 'sensitive-input',
 		                                arenaFreeRankingEnabled: resolvedArenaFreeRankingEnabled,
 		                                readNarrativeHistory: resolvedReadNarrativeHistory,
+                                        materialCount: materialCount > 0 ? materialCount : null,
+                                        materialSourceTypes: materialSourceTypes.length > 0 ? materialSourceTypes : null,
                                         narrativeHistoryReadLimit: resolvedReadNarrativeHistory
                                             ? (Number.isFinite(resolvedNarrativeHistoryReadLimit)
                                                 ? (resolvedNarrativeHistoryReadLimit === Infinity ? null : resolvedNarrativeHistoryReadLimit)
@@ -641,6 +668,7 @@ async function handler(req: NextRequest): Promise<Response> {
 	            mode === 'classic'
 	            && String(language ?? '').trim() === 'zh-CN'
 	            && !String(userGuidance ?? '').trim()
+                && materialCount === 0
 	            && !hasQuestionnaireLore
 	            && resolvedReadArenaHistory === false
 	            && resolvedReadCurrentState === false
@@ -674,6 +702,7 @@ async function handler(req: NextRequest): Promise<Response> {
 	            narrativeHistoryForPrompt,
 	            loreText,
 	            includeQuestionnaireAnswersInPrompt,
+                normalizedMaterials,
 	        )({ combatants });
 
         const aiTelemetry: NonNullable<GenerateWithAIOptions['telemetry']> = {};
@@ -841,6 +870,7 @@ async function handler(req: NextRequest): Promise<Response> {
                     combatants,
                     userGuidance: finalUserGuidance,
                     scenario,
+                    materials: normalizedMaterials,
                     teams,
                 });
                 const inputBytes = new TextEncoder().encode(inputJson).length;
@@ -860,6 +890,8 @@ async function handler(req: NextRequest): Promise<Response> {
                         questionnaireLoreIds,
                         scenarioFileName: normalizedScenarioFileName,
                         auxScenarioCount: auxScenarioCount > 0 ? auxScenarioCount : null,
+                        materialCount: materialCount > 0 ? materialCount : null,
+                        materialSourceTypes: materialSourceTypes.length > 0 ? materialSourceTypes : null,
                         resolvedModelOverride: usedModelOverride ?? null,
                         readNarrativeHistory: resolvedReadNarrativeHistory,
                         narrativeHistoryReadLimit: resolvedReadNarrativeHistory
@@ -1615,6 +1647,8 @@ async function handler(req: NextRequest): Promise<Response> {
                         questionnaireLoreEnabled: snapshotHasQuestionnaireLore ? true : null,
                         questionnaireLoreIds: snapshotQuestionnaireLoreIds,
                         readNarrativeHistory: snapshotReadNarrativeHistory,
+                        materialCount: snapshotMaterialCount > 0 ? snapshotMaterialCount : null,
+                        materialSourceTypes: snapshotMaterialSourceTypes.length > 0 ? snapshotMaterialSourceTypes : null,
                         narrativeHistoryReadLimit: snapshotNarrativeHistoryReadLimit,
                         narrativeHistoryReadCount: snapshotNarrativeHistoryReadCount,
                         combatantsFallback: buildCombatantsFallbackForExtraJson(snapshotCombatants),

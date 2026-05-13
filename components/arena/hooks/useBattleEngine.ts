@@ -274,11 +274,18 @@ const buildBattleBackupItems = (
   isScenarioNative: boolean,
   scenarioDisplayName: string | null,
   auxScenarios: { content: Record<string, unknown>; fileName: string | null; isNative: boolean }[],
+  materials: { content: unknown; fileName: string | null; isNative: boolean; name: string }[],
   userGuidance: string,
   adjudicationEvents: any[],
   adjudicationResults?: any[] | null
 ): ArrestedBackupDraftItem[] => {
   const items: ArrestedBackupDraftItem[] = [];
+  const toBackupContent = (value: unknown): ArrestedBackupDraftItem['content'] => {
+    if (typeof value === 'string') return value;
+    if (Array.isArray(value)) return value;
+    if (value && typeof value === 'object') return value as Record<string, unknown>;
+    return String(value ?? '');
+  };
 
   combatants.forEach((combatant, index) => {
     items.push({
@@ -308,6 +315,16 @@ const buildBattleBackupItems = (
       filename: aux.fileName || `aux-scenario-${index + 1}.json`,
       content: aux.content,
       description: aux.isNative ? '原生辅助情景文件' : '用户自定义辅助情景',
+    });
+  });
+
+  materials.forEach((material, index) => {
+    items.push({
+      id: `material-${index}`,
+      label: material.name ? `素材：${material.name}` : `素材 #${index + 1}`,
+      filename: material.fileName || `material-${index + 1}.json`,
+      content: toBackupContent(material.content),
+      description: material.isNative ? '原生素材' : '用户素材',
     });
   });
 
@@ -387,6 +404,7 @@ export const useBattleEngine = () => {
   const arenaFreeRankingEnabled = useBattleSelector((state) => state.arenaFreeRankingEnabled);
   const scenario = useBattleSelector((state) => state.scenario);
   const auxScenarios = useBattleSelector((state) => state.auxScenarios);
+  const materials = useBattleSelector((state) => state.materials);
   const selectedQuestionnaires = useBattleSelector((state) => state.selectedQuestionnaires);
   const selectedLanguage = useBattleSelector((state) => state.selectedLanguage);
   const storyLength = useBattleSelector((state) => state.storyLength);
@@ -510,6 +528,7 @@ export const useBattleEngine = () => {
           .join('\n\n'),
         shouldUseScenario ? JSON.stringify(scenario.content) : '',
         shouldUseScenario && auxScenarios.length > 0 ? JSON.stringify(auxScenarios.map((s) => s.content)) : '',
+        materials.length > 0 ? JSON.stringify(materials.map((item) => item.content)) : '',
       ];
 
       for (const payload of sensitiveTargets) {
@@ -576,6 +595,7 @@ export const useBattleEngine = () => {
         userGuidance: settings.userGuidance,
         scenario: shouldUseScenario ? scenario.content : undefined,
         auxScenarios: shouldUseScenario && auxScenarios.length > 0 ? auxScenarios.map((s) => s.content) : undefined,
+        materials: materials.length > 0 ? materials : undefined,
         scenarioTitle: shouldUseScenario ? scenarioDisplayName : undefined,
         scenarioFileName: shouldUseScenario ? scenario.fileName : undefined,
         scenarioSourceDataCardId: shouldUseScenario ? scenario.sourceDataCardId : undefined,
@@ -644,6 +664,12 @@ export const useBattleEngine = () => {
           shouldUseScenario ? scenario.isNative : false,
           shouldUseScenario ? scenarioDisplayName : null,
           shouldUseScenario ? auxScenarios.map((s) => ({ content: s.content, fileName: s.fileName, isNative: s.isNative })) : [],
+          materials.map((material) => ({
+            content: material.content,
+            fileName: material.fileName,
+            isNative: material.isNative,
+            name: material.name,
+          })),
           settings.userGuidance,
           adjudicationEvents,
           result.adjudicationResults
@@ -906,6 +932,12 @@ export const useBattleEngine = () => {
             shouldUseScenario ? scenario.isNative : false,
             shouldUseScenario && scenarioDisplayName ? sanitizeTextByShieldWords(scenarioDisplayName) : null,
             shouldUseScenario ? auxScenarios.map((s) => ({ content: s.content, fileName: s.fileName, isNative: s.isNative })) : [],
+            materials.map((material) => ({
+              content: material.content,
+              fileName: material.fileName,
+              isNative: material.isNative,
+              name: material.name,
+            })),
             settings.userGuidance,
             adjudicationEvents
           );
@@ -1579,6 +1611,7 @@ export const useBattleEngine = () => {
     combatants,
     scenario,
     auxScenarios,
+    materials,
     selectedQuestionnaires,
     userProviderConfig,
     settings,

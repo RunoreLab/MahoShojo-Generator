@@ -143,6 +143,12 @@ const buildStrictIneligibleReasons = (snapshot: ArenaEligibilitySnapshot, combat
     if (typeof raw === 'string') return Boolean(raw.trim() && Number(raw) > 0);
     return false;
   })();
+  const hasMaterials = (() => {
+    const raw = parsedExtraJson?.materialCount;
+    if (typeof raw === 'number' && Number.isFinite(raw)) return raw > 0;
+    if (typeof raw === 'string') return Boolean(raw.trim() && Number(raw) > 0);
+    return false;
+  })();
 
   const reasons: string[] = [];
   if (snapshot.status !== 'completed') reasons.push('status-not-completed');
@@ -210,6 +216,7 @@ const buildStrictIneligibleReasons = (snapshot: ArenaEligibilitySnapshot, combat
   if (snapshot.readArenaHistory !== 0) reasons.push('read-arena-history');
   if (snapshot.readCurrentState !== 0) reasons.push('read-current-state');
   if (readNarrativeHistory !== false) reasons.push('read-narrative-history');
+  if (hasMaterials) reasons.push('has-materials');
   if (isStrictRankedModelBlacklisted(resolvedModelOverride)) reasons.push('ai-model-blacklisted');
   if (combatants.some((c) => typeof c.character_guidance === 'string' && c.character_guidance.trim())) reasons.push('has-character-guidance');
   return reasons;

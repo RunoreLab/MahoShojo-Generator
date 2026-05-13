@@ -35,6 +35,7 @@ export type BattleStorySessionSeed = {
   combatants: unknown[];
   scenario?: Record<string, unknown> | null;
   auxScenarios?: Record<string, unknown>[];
+  materials?: unknown[];
   questionnaires?: BattleStoryQuestionnaireSeed[];
   adjudicationEvents?: AdjudicatorEvent[];
   settings: BattleStorySessionSettings;

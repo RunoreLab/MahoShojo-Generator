@@ -3,6 +3,7 @@
 import { useCallback } from 'react';
 
 import { inferTemplate } from '@/lib/data-card-converter';
+import { buildArenaMaterialState } from '@/lib/arena/materials';
 import {
   mapDataCardRuntimeSourceInfo,
   mapPublicDataCardRowToBattleSelectionPayload,
@@ -16,6 +17,7 @@ import {
   BattleStoreState,
   CombatantData,
   isCombatantLimitReached,
+  MAX_ARENA_MATERIALS,
   MAX_AUX_SCENARIOS,
   MAX_COMBATANTS,
   RandomCombatantPlaceholder,
@@ -48,6 +50,7 @@ export const useBattleActions = () => {
   const useBattleSelector = <T,>(selector: (state: BattleStoreState) => T) => useBattleStore(selector);
   const combatants = useBattleSelector((state) => state.combatants);
   const auxScenarios = useBattleSelector((state) => state.auxScenarios);
+  const materials = useBattleSelector((state) => state.materials);
   const isGenerating = useBattleSelector((state) => state.isGenerating);
   const setError = useBattleSelector((state) => state.setError);
   const addCombatant = useBattleSelector((state) => state.addCombatant);
@@ -58,6 +61,11 @@ export const useBattleActions = () => {
   const moveAuxScenario = useBattleSelector((state) => state.moveAuxScenario);
   const clearAuxScenarios = useBattleSelector((state) => state.clearAuxScenarios);
   const setAuxScenarios = useBattleSelector((state) => state.setAuxScenarios);
+  const addMaterial = useBattleSelector((state) => state.addMaterial);
+  const removeMaterial = useBattleSelector((state) => state.removeMaterial);
+  const moveMaterial = useBattleSelector((state) => state.moveMaterial);
+  const clearMaterials = useBattleSelector((state) => state.clearMaterials);
+  const setMaterials = useBattleSelector((state) => state.setMaterials);
   const setAdjudicationEvents = useBattleSelector((state) => state.setAdjudicationEvents);
   const scenario = useBattleSelector((state) => state.scenario);
 
@@ -522,6 +530,100 @@ export const useBattleActions = () => {
     [addAuxScenario, buildAuxScenario, setError]
   );
 
+  const handleMaterialUpload = useCallback(
+    async (files: FileList | null) => {
+      if (!files || isGenerating) return;
+      const errors: string[] = [];
+      for (const file of Array.from(files)) {
+        try {
+          if (useBattleStore.getState().materials.length >= MAX_ARENA_MATERIALS) {
+            errors.push(`${file.name}: 最多只能添加 ${MAX_ARENA_MATERIALS} 个素材。`);
+            continue;
+          }
+          const json = JSON.parse(await file.text());
+          const isNative = await verifyOrigin(json).catch(() => false);
+          addMaterial(buildArenaMaterialState({ payload: json, fileName: file.name, isNative }));
+        } catch (error) {
+          errors.push(`${file.name}: ${error instanceof Error ? error.message : '解析失败'}`);
+        }
+      }
+      if (errors.length > 0) {
+        setError(`❌ ${errors.join('；')}`);
+      } else {
+        setError(null);
+      }
+    },
+    [addMaterial, isGenerating, setError]
+  );
+
+  const handleMaterialPaste = useCallback(
+    async (text: string, options?: { fileName?: string }) => {
+      const trimmed = text.trim();
+      if (!trimmed) return;
+      if (useBattleStore.getState().materials.length >= MAX_ARENA_MATERIALS) {
+        throw new Error(`最多只能添加 ${MAX_ARENA_MATERIALS} 个素材。`);
+      }
+      const json = JSON.parse(trimmed);
+      const isNative = await verifyOrigin(json).catch(() => false);
+      addMaterial(buildArenaMaterialState({ payload: json, fileName: options?.fileName ?? '粘贴素材.json', isNative }));
+      setError(null);
+    },
+    [addMaterial, setError]
+  );
+
+  const handleToggleMaterialDataCard = useCallback(
+    async (cardData: any, nextSelected: boolean) => {
+      const {
+        sourceDataCardId,
+        sourceDataCardName,
+        sourceDataCardUpdatedAt,
+      } = mapDataCardRuntimeSourceInfo(cardData);
+      const materialId = sourceDataCardId ? `material-card-${sourceDataCardId}` : createClientId('material-card');
+
+      if (!nextSelected) {
+        setMaterials(
+          useBattleStore
+            .getState()
+            .materials.filter((item) =>
+              sourceDataCardId ? item.sourceDataCardId !== sourceDataCardId : item.id !== materialId
+            )
+        );
+        setError(null);
+        return;
+      }
+
+      if (useBattleStore.getState().materials.length >= MAX_ARENA_MATERIALS) {
+        setError(`❌ 最多只能添加 ${MAX_ARENA_MATERIALS} 个素材。`);
+        return;
+      }
+      if (sourceDataCardId && useBattleStore.getState().materials.some((item) => item.sourceDataCardId === sourceDataCardId)) {
+        return;
+      }
+      if (loadingCards.has(materialId)) return;
+      loadingCards.add(materialId);
+
+      try {
+        const cleanedCardData = stripBattleSelectionTransportMeta(cardData);
+        const isNative = await verifyOrigin(cleanedCardData).catch(() => false);
+        const material = buildArenaMaterialState({
+          payload: cardData,
+          id: materialId,
+          sourceDataCardName,
+          sourceDataCardId,
+          sourceDataCardUpdatedAt,
+          isNative,
+        });
+        addMaterial(material);
+        setError(null);
+      } catch (error) {
+        setError(`❌ 添加素材失败: ${error instanceof Error ? error.message : '未知错误'}`);
+      } finally {
+        loadingCards.delete(materialId);
+      }
+    },
+    [addMaterial, setError, setMaterials]
+  );
+
   const handleResolveRandomPlaceholders = useCallback(async () => {
     const placeholders = combatants.filter((item): item is RandomCombatantPlaceholder => 'id' in item);
     if (placeholders.length === 0) return;
@@ -557,6 +659,9 @@ export const useBattleActions = () => {
     handleScenarioPaste,
     handleAuxScenarioUpload,
     handleAuxScenarioPaste,
+    handleMaterialUpload,
+    handleMaterialPaste,
+    handleToggleMaterialDataCard,
     handleToggleAuxScenarioDataCard,
     handleToggleCombatantDataCard,
     handleRandomMatchAuxScenario,
@@ -564,9 +669,13 @@ export const useBattleActions = () => {
     handleResolveRandomPlaceholders,
     handleClearRoster,
     auxScenarios,
+    materials,
     removeAuxScenario,
     moveAuxScenario,
     clearAuxScenarios,
+    removeMaterial,
+    moveMaterial,
+    clearMaterials,
     scenario,
   };
 };

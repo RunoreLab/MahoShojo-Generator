@@ -10,6 +10,7 @@ import {
   MAX_COMBATANTS,
   ScenarioState,
   MAX_AUX_SCENARIOS,
+  MAX_ARENA_MATERIALS,
 } from '../types';
 import {
   DEFAULT_BATTLE_REPORT_CARD_WIDTH_MODE,
@@ -61,6 +62,7 @@ export const useBattleStore = create<BattleStoreState>()(
       teams: [],
       scenario: defaultScenario,
       auxScenarios: [],
+      materials: [],
       selectedQuestionnaires: [],
       battleMode: 'classic',
       generationMode: 'non-stream',
@@ -264,6 +266,35 @@ export const useBattleStore = create<BattleStoreState>()(
 
       clearAuxScenarios: () => set({ auxScenarios: [] }),
       setAuxScenarios: (scenarios) => set({ auxScenarios: scenarios }),
+
+      addMaterial: (material) =>
+        set((state) => {
+          if (state.materials.length >= MAX_ARENA_MATERIALS) {
+            return state;
+          }
+          return { materials: [...state.materials, material] };
+        }),
+
+      removeMaterial: (id) =>
+        set((state) => ({
+          materials: state.materials.filter((item) => item.id !== id),
+        })),
+
+      moveMaterial: (fromIndex, toIndex) =>
+        set((state) => {
+          const current = state.materials;
+          if (fromIndex === toIndex) return state;
+          if (fromIndex < 0 || fromIndex >= current.length) return state;
+          if (toIndex < 0 || toIndex >= current.length) return state;
+
+          const next = [...current];
+          const [moved] = next.splice(fromIndex, 1);
+          next.splice(toIndex, 0, moved!);
+          return { materials: next };
+        }),
+
+      clearMaterials: () => set({ materials: [] }),
+      setMaterials: (materials) => set({ materials }),
 
       setAdjudicationEvents: (events) => set({ adjudicationEvents: events }),
       setAdjudicationResults: (results) => set({ adjudicationResults: results }),

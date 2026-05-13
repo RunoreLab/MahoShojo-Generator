@@ -8,6 +8,7 @@ import {
     STORY_PROMPT_CHARACTER_PARAMETERS_KEY,
 } from '@/lib/arena/story-prompt-data';
 import { buildStoryLengthRequirementText } from '@/lib/story-length';
+import { formatArenaMaterialsForPrompt } from '@/lib/arena/materials';
 
 type PromptFallbackQuestions =
     | string[]
@@ -333,7 +334,8 @@ export const createPromptBuilder = (
     customStoryLength: string | undefined,
     narrativeHistory?: NarrativeHistoryEntry[] | null,
     loreText?: string | null,
-    includeQuestionnaireAnswers: boolean = true
+    includeQuestionnaireAnswers: boolean = true,
+    materials?: unknown[] | null
 ) => (input: { combatants: any[] }): string => {
     const { combatants } = input;
     const profiles = buildCombatantProfilesForPrompt({
@@ -406,6 +408,11 @@ export const createPromptBuilder = (
             const title = typeof auxForPrompt.title === 'string' && auxForPrompt.title.trim() ? auxForPrompt.title.trim() : '';
             finalPrompt += `### 辅助情景 #${index + 1}${title ? `：${title}` : ''}\n\`\`\`json\n${JSON.stringify(auxForPrompt, null, 2)}\n\`\`\`\n\n`;
         });
+    }
+
+    const materialsBlock = formatArenaMaterialsForPrompt(materials);
+    if (materialsBlock) {
+        finalPrompt += materialsBlock;
     }
 
     if (teams && Object.keys(teams).length > 0) {
@@ -468,7 +475,8 @@ export const createStreamPromptBuilder = (
     customStoryLength: string | undefined,
     narrativeHistory?: NarrativeHistoryEntry[] | null,
     loreText?: string | null,
-    includeQuestionnaireAnswers: boolean = true
+    includeQuestionnaireAnswers: boolean = true,
+    materials?: unknown[] | null
 ) => (input: { combatants: any[] }): string => {
     const { combatants } = input;
     const profiles = buildCombatantProfilesForPrompt({
@@ -541,6 +549,11 @@ export const createStreamPromptBuilder = (
             const title = typeof auxForPrompt.title === 'string' && auxForPrompt.title.trim() ? auxForPrompt.title.trim() : '';
             finalPrompt += `### 辅助情景 #${index + 1}${title ? `：${title}` : ''}\n\`\`\`json\n${JSON.stringify(auxForPrompt, null, 2)}\n\`\`\`\n\n`;
         });
+    }
+
+    const materialsBlock = formatArenaMaterialsForPrompt(materials);
+    if (materialsBlock) {
+        finalPrompt += materialsBlock;
     }
 
     if (teams && Object.keys(teams).length > 0) {

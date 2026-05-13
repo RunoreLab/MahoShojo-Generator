@@ -862,6 +862,19 @@ const readExtraJsonBoolean = (extraJson: string | null, key: string): boolean | 
   }
 };
 
+const readExtraJsonNonNegativeInt = (extraJson: string | null, key: string): number | null => {
+  if (typeof extraJson !== 'string' || !extraJson.trim()) return null;
+  try {
+    const parsed = JSON.parse(extraJson) as Record<string, unknown>;
+    const raw = parsed?.[key];
+    const value = typeof raw === 'number' ? raw : typeof raw === 'string' ? Number(raw) : NaN;
+    if (!Number.isFinite(value)) return null;
+    return Math.max(0, Math.floor(value));
+  } catch {
+    return null;
+  }
+};
+
 const readExtraJsonString = (extraJson: string | null, key: string): string | null => {
   if (typeof extraJson !== 'string' || !extraJson.trim()) return null;
   try {
@@ -960,6 +973,7 @@ export const isStrictEligible = (snapshot: ArenaEligibilitySnapshot, combatants:
   if (snapshot.hasAdjudicationEvents !== 0) return false;
   if (snapshot.readArenaHistory !== 0) return false;
   if (snapshot.readCurrentState !== 0) return false;
+  if ((readExtraJsonNonNegativeInt(snapshot.extraJson, 'materialCount') ?? 0) > 0) return false;
 
   // 严格排位：禁止读取叙事历史。该字段目前落在 extra_json 中；缺失则按“宁可漏算”处理为不具备资格。
   if (readExtraJsonBoolean(snapshot.extraJson, 'readNarrativeHistory') !== false) return false;

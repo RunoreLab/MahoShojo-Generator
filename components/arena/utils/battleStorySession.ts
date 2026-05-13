@@ -23,6 +23,7 @@ import type { AdjudicatorEvent } from '@/types/arena';
 
 import type {
   AuxiliaryScenarioState,
+  ArenaMaterialState,
   BattleMode,
   BattleSettings,
   Combatant,
@@ -185,6 +186,7 @@ export const buildBattleStorySessionSeedSnapshot = (input: {
   battleMode: BattleMode;
   scenario: ScenarioState;
   auxScenarios: AuxiliaryScenarioState[];
+  materials?: ArenaMaterialState[];
   selectedQuestionnaires: QuestionnaireSelection[];
   adjudicationEvents: AdjudicatorEvent[];
   selectedLanguage: string;
@@ -241,6 +243,7 @@ export const buildBattleStorySessionSeedSnapshot = (input: {
       scenario: input.battleMode === 'scenario' ? input.scenario.content : null,
       auxScenarios:
         input.battleMode === 'scenario' ? input.auxScenarios.map((item) => item.content) : [],
+      materials: input.materials ?? [],
       questionnaires: input.selectedQuestionnaires.map((selection) => ({
         id: selection.questionnaire.id,
         title: selection.questionnaire.title,

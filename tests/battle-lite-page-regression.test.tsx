@@ -49,6 +49,18 @@ mock.module('@/components/shared/CollapsibleSection', () => ({
       </section>
     );
   },
+  DisclosureButton(props: {
+    children?: React.ReactNode;
+    disabled?: boolean;
+    onToggle?: () => void;
+    open?: boolean;
+  }) {
+    return (
+      <button type="button" disabled={props.disabled} aria-expanded={props.open} onClick={props.onToggle}>
+        {props.children}
+      </button>
+    );
+  },
 }));
 
 mock.module('@/components/arena/components/BattleActions', () => ({
@@ -113,9 +125,15 @@ mock.module('@/components/arena/components/ArenaRankingModal', () => ({
 
 mock.module('@/components/arena/hooks/useBattleActions', () => ({
   useBattleActions: () => ({
+    materials: [],
     handleSelectDataCard: async () => {},
     handleRandomMatch: async () => {},
     handleToggleCombatantDataCard: async () => {},
+    handleMaterialUpload: async () => {},
+    handleMaterialPaste: async () => {},
+    removeMaterial: () => {},
+    moveMaterial: () => {},
+    clearMaterials: () => {},
   }),
 }));
 

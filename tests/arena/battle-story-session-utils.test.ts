@@ -51,6 +51,17 @@ describe('battle story session utils', () => {
           isNative: false,
         },
       ],
+      materials: [
+        {
+          id: 'material-1',
+          name: '灰潮车站',
+          content: { cardKind: 'location', name: '灰潮车站', content: '盐雾穿过站台。' },
+          fileName: '灰潮车站.json',
+          sourceKind: 'wantu-card',
+          sourceType: 'location',
+          isNative: false,
+        },
+      ],
       selectedQuestionnaires: [
         {
           source: 'preset',
@@ -98,6 +109,17 @@ describe('battle story session utils', () => {
     expect(snapshot.source.customStoryLength).toBe('1666');
     expect(snapshot.seed.scenario).toEqual({ title: '废都决战' });
     expect(snapshot.seed.auxScenarios).toHaveLength(1);
+    expect(snapshot.seed.materials).toEqual([
+      {
+        id: 'material-1',
+        name: '灰潮车站',
+        content: { cardKind: 'location', name: '灰潮车站', content: '盐雾穿过站台。' },
+        fileName: '灰潮车站.json',
+        sourceKind: 'wantu-card',
+        sourceType: 'location',
+        isNative: false,
+      },
+    ]);
     expect(snapshot.seed.questionnaires?.[0]?.loreMarkdown).toBe('角色关系与世界观');
     expect(snapshot.seed.adjudicationEvents).toEqual([
       {

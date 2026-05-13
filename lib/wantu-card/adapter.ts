@@ -158,14 +158,6 @@ export function toArenaMaterialCandidate(
   const parsed = parseWantuCard(input);
   if (!parsed.success) return parsed;
 
-  if (parsed.data.cardKind === 'character') {
-    return {
-      success: false,
-      error: '角色卡不能作为首版竞技场素材候选；请作为参战角色导入。',
-      issues: ['cardKind: character is not a material kind'],
-    };
-  }
-
   const sourceDataCardId = options.sourceDataCardId;
   return {
     success: true,
