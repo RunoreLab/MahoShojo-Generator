@@ -4,11 +4,17 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import Head from 'next/head';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
+import { Download, RefreshCcw } from 'lucide-react';
 import { quickCheck, type FilterResult, type SensitiveMatchDetail } from '@/lib/sensitive-word-filter';
 import { randomChooseOneHanaName } from '@/lib/random-choose-hana-name';
 import { config } from '@/lib/config';
 import { validateDataCard, ValidationResult } from '@/lib/schemas';
 import { randomUUID } from '@/lib/crypto';
+import { downloadBlob } from '@/lib/client/blobUrl';
+import {
+    buildWantuCharacterExportPayload,
+    resolveWantuCharacterImport,
+} from '@/lib/wantu-card/character-manager';
 import Footer from '../components/Footer';
 // 【新增】导入卡片组件和颜色配置
 import MagicalGirlCard from '../components/MagicalGirlCard';
@@ -343,6 +349,7 @@ const CharacterManagerPage: React.FC = () => {
 
     // 用于控制粘贴区域折叠/展开的状态，默认为折叠
     const [isPasteAreaVisible, setIsPasteAreaVisible] = useState(false);
+    const [restoreWantuOriginalOnImport, setRestoreWantuOriginalOnImport] = useState(false);
 
     // 敏感词检测相关状态
     const [sensitiveIssues, setSensitiveIssues] = useState<SensitiveIssue[]>([]);
@@ -955,6 +962,7 @@ const CharacterManagerPage: React.FC = () => {
         setValidationResult(null);
         setAutoSaveTimestamp(null);
         setIsPasteAreaVisible(false);
+        setRestoreWantuOriginalOnImport(false);
         setMessage(null);
     }, []);
 
@@ -1122,6 +1130,25 @@ const CharacterManagerPage: React.FC = () => {
 
             if (typeof data !== 'object' || data === null) {
                 throw new Error('无效的文件格式。');
+            }
+
+            const wantuImport = resolveWantuCharacterImport(data, {
+                restoreOriginal: restoreWantuOriginalOnImport,
+            });
+            if (wantuImport.kind === 'error') {
+                throw new Error(wantuImport.error);
+            }
+            if (wantuImport.kind === 'success') {
+                setValidationResult(wantuImport.validationResult);
+                setCharacterData(wantuImport.data);
+                setOriginalData(JSON.parse(JSON.stringify(wantuImport.data)));
+                setIsNative(false);
+                setSelectedTemplate(wantuImport.selectedTemplate);
+                setMessage({
+                    type: wantuImport.warnings.length > 0 ? 'info' : 'success',
+                    text: wantuImport.message,
+                });
+                return;
             }
 
             // 使用 Zod Schema 验证文件格式
@@ -1839,6 +1866,31 @@ const CharacterManagerPage: React.FC = () => {
         }
     };
 
+    const handleExportWantuCharacter = async (mode: 'interop' | 'roundTrip') => {
+        if (!characterData) return;
+        setMessage(null);
+
+        if (isScenarioData(characterData)) {
+            setMessage({ type: 'error', text: '当前内容是情景卡，不能导出为万途角色卡。' });
+            return;
+        }
+
+        if ((await quickCheck(JSON.stringify(characterData))).hasSensitiveWords) {
+            setMessage({ type: 'error', text: '检测到不适宜内容，无法导出万途角色卡。请修改后重试。' });
+            return;
+        }
+
+        const result = buildWantuCharacterExportPayload(characterData, { mode });
+        if (!result.success) {
+            setMessage({ type: 'error', text: result.error });
+            return;
+        }
+
+        const blob = new Blob([result.json], { type: 'application/json' });
+        downloadBlob(blob, result.fileName);
+        setMessage({ type: 'success', text: result.message });
+    };
+
     /**
      * 【新增】处理图片保存的回调函数。
      * 当在移动设备上点击卡片保存按钮时，此函数会被调用。
@@ -2088,8 +2140,17 @@ const CharacterManagerPage: React.FC = () => {
                         {!characterData ? (
                             <>
                                 <div className="input-group">
-                                    <label htmlFor="file-upload" className="input-label">上传 .json 设定文件（支持角色或情景文件）</label>
+                                    <label htmlFor="file-upload" className="input-label">上传 .json 设定文件（支持角色、情景或万途 character）</label>
                                     <input id="file-upload" type="file" accept=".json" onChange={handleFileChange} className="input-field file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0" />
+                                    <label className="mt-2 flex items-start gap-2 text-xs text-gray-600">
+                                        <input
+                                            type="checkbox"
+                                            checked={restoreWantuOriginalOnImport}
+                                            onChange={(event) => setRestoreWantuOriginalOnImport(event.target.checked)}
+                                            className="mt-0.5"
+                                        />
+                                        <span>导入万途往返卡时恢复本仓库原始模板</span>
+                                    </label>
                                 </div>
                                 <div className="text-center my-4 text-gray-500">或</div>
                                 {/* 可折叠的粘贴区域 */}
@@ -2105,7 +2166,7 @@ const CharacterManagerPage: React.FC = () => {
                                             <textarea
                                                 value={pastedJson}
                                                 onChange={(e) => setPastedJson(e.target.value)}
-                                                placeholder="在此处粘贴角色或情景的设定文件(.json)内容..."
+                                                placeholder="在此处粘贴角色、情景或万途 character 的 .json 内容..."
                                                 className="input-field resize-y h-32"
                                                 disabled={isLoading}
                                             />
@@ -2294,6 +2355,30 @@ const CharacterManagerPage: React.FC = () => {
                                     <button onClick={() => handleSaveChanges('copy')} disabled={message?.type === 'error' || isLoading} className="generate-button w-full" style={{ backgroundColor: '#3b82f6', backgroundImage: 'linear-gradient(to right, #3b82f6, #2563eb)' }}>
                                         {isLoading ? '处理中...' : copiedStatus ? '已复制！' : '复制到剪贴板'}
                                     </button>
+                                    {!isScenarioData(characterData) && (
+                                        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                                            <button
+                                                type="button"
+                                                onClick={() => handleExportWantuCharacter('interop')}
+                                                disabled={message?.type === 'error' || isLoading}
+                                                className="generate-button mb-0 flex w-full items-center justify-center gap-2"
+                                                style={{ backgroundColor: '#0f766e', backgroundImage: 'linear-gradient(to right, #0f766e, #0d9488)' }}
+                                            >
+                                                <Download className="h-4 w-4" aria-hidden="true" />
+                                                <span>万途互通 JSON</span>
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => handleExportWantuCharacter('roundTrip')}
+                                                disabled={message?.type === 'error' || isLoading}
+                                                className="generate-button mb-0 flex w-full items-center justify-center gap-2"
+                                                style={{ backgroundColor: '#7c3aed', backgroundImage: 'linear-gradient(to right, #7c3aed, #6d28d9)' }}
+                                            >
+                                                <RefreshCcw className="h-4 w-4" aria-hidden="true" />
+                                                <span>万途往返 JSON</span>
+                                            </button>
+                                        </div>
+                                    )}
                                     <button onClick={handleLoadOtherData} className="footer-link mt-4 w-full text-center">
                                         加载其他数据
                                     </button>
