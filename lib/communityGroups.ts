@@ -19,6 +19,12 @@ export const qqGroups: QQGroupInfo[] = [
     joinUrl:
       'https://qm.qq.com/cgi-bin/qm/qr?k=szfg7A7-AIy_UA1HUbrop4GAr5mrhzxC&jump_from=webapi&authKey=3R4sPTM0hzUHEYDaEcOLrvCtMy1U49OAW2vjT+7cvFqYtbUqwrhvQ8cp06dI0CBR',
   },
+  {
+    groupCode: '1078309485',
+    name: '万途驿站①',
+    joinUrl:
+      'https://qun.qq.com/universal-share/share?ac=1&authKey=8yaiSlkPmEa82b07ebbgc%2F76mgpkw3GwWBISvMQczeUlh%2BUIA%2FOio%2Fb0lUHoJI4P&busi_data=eyJncm91cENvZGUiOiIxMDc4MzA5NDg1IiwidG9rZW4iOiJzWDZNcVk5aytVemtwTXJFSUhzbFptKzRwWkxWT0xjUlowbEM4d0tnNDlzWUJRTjI4TktrcTQyK1Y3MzQ2UDI3IiwidWluIjoiMTAxOTcyNzcxMCJ9&data=XkTI5DpklN0YPUgYeYNU6BVJOpROzvzh4p1LYh-U90SgQj-kQRcvrarI-jlPectNJBNIW8feC7rh00yoKz2TVQ&svctype=4&tempid=h5_group_info',
+  },
 ];
 
 export const getQQGroupsMarkdownList = (): string => {
