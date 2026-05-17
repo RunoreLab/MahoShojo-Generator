@@ -183,6 +183,16 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 description: '智谱旗下通用模型的更新版本，适合复杂指令、多轮对话与综合写作场景。'
             },
             {
+                value: 'deepseek-v4-flash',
+                label: 'DeepSeek V4 Flash',
+                description: 'DeepSeek V4 的高速轻量版本，适合高频生成、草稿与长文本补全。'
+            },
+            {
+                value: 'deepseek-v4-pro',
+                label: 'DeepSeek V4 Pro',
+                description: 'DeepSeek V4 完全体，适合复杂分析、长文本写作与高质量生成。'
+            },
+            {
                 value: 'gemini-2.0-flash-exp',
                 label: 'Gemini 2.0 Flash Exp',
                 description: 'Google 旗下的上两代模型，但是真的好快！'
@@ -327,6 +337,16 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 value: 'deepseek-chat',
                 label: 'DeepSeek Chat',
                 description: '通用对话与分析模型，中文写作稳定；非流式可能不稳定，建议优先流式使用。'
+            },
+            {
+                value: 'deepseek-v4-flash',
+                label: 'DeepSeek V4 Flash',
+                description: 'DeepSeek V4 的高速轻量版本，适合 KouriChat 上的高频生成与流式草稿。'
+            },
+            {
+                value: 'deepseek-v4-pro',
+                label: 'DeepSeek V4 Pro',
+                description: 'DeepSeek V4 完全体，适合 KouriChat 上的复杂分析、长文本写作与高质量生成。'
             },
             {
                 value: 'doubao-seed-1-6',
