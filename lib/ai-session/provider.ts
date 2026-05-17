@@ -84,6 +84,9 @@ export const resolveAiSessionProvider = (
     mode: providerConfig.mode || 'auto',
     retryCount: 1,
     skipProbability: 0,
+    ...(typeof customProvider.maxOutputTokens === 'number'
+      ? { defaultMaxOutputTokens: customProvider.maxOutputTokens }
+      : {}),
   };
 
   return {

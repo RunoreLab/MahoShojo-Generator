@@ -24,6 +24,7 @@ const CustomProviderSchema = z.object({
   providerId: z.string().min(1),
   modelId: z.string().min(1),
   apiKey: z.string(),
+  maxOutputTokens: z.number().int().min(1).max(1_000_000).optional(),
 });
 
 type RequestQuestion = {
@@ -262,6 +263,7 @@ async function handler(req: NextRequest): Promise<Response> {
           mode: providerConfig.mode || 'auto',
           retryCount: 1,
           skipProbability: 0,
+          ...(typeof parsed.maxOutputTokens === 'number' ? { defaultMaxOutputTokens: parsed.maxOutputTokens } : {}),
         };
       }
     }

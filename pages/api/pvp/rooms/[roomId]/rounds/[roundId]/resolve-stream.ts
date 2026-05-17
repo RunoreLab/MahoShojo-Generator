@@ -146,7 +146,7 @@ async function resolveStreamHandler(req: Request): Promise<Response> {
   if ('response' in body) return body.response;
 
   const rawCustomProvider = (body.data as ResolveBody).customProvider;
-  let customProvider: { providerId: string; modelId: string; apiKey: string } | null = null;
+  let customProvider: { providerId: string; modelId: string; apiKey: string; maxOutputTokens?: number } | null = null;
   if (rawCustomProvider !== undefined) {
     const parsed = CustomProviderSchema.safeParse(rawCustomProvider);
     if (!parsed.success) return json({ error: '自定义 AI 供应商配置无效' }, { status: 400 });

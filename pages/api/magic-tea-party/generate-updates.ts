@@ -24,6 +24,7 @@ const CustomProviderSchema = z.object({
   providerId: z.string().min(1),
   modelId: z.string().min(1),
   apiKey: z.string().min(1),
+  maxOutputTokens: z.number().int().min(1).max(1_000_000).optional(),
 });
 
 const MessageSchema = z
@@ -141,6 +142,7 @@ const buildProviderOverride = (payload: z.infer<typeof CustomProviderSchema>): {
       mode: providerConfig.mode || 'auto',
       retryCount: 1,
       skipProbability: 0,
+      ...(typeof payload.maxOutputTokens === 'number' ? { defaultMaxOutputTokens: payload.maxOutputTokens } : {}),
     },
   };
 };

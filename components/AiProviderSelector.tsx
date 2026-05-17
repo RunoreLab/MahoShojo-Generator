@@ -6,6 +6,11 @@ import {
     canUseCustomModelId,
     type AIProviderOption,
 } from '@/lib/ai/constants';
+import {
+    MAX_CUSTOM_PROVIDER_OUTPUT_TOKENS,
+    isDeepSeekV4Model,
+    normalizeCustomProviderMaxOutputTokens,
+} from '@/lib/ai/custom-provider';
 import { maskApiKeyForDisplay } from '@/lib/client/mask-api-key';
 import Link from 'next/link';
 
@@ -13,6 +18,7 @@ export interface UserAIProviderConfig {
     providerId: string;
     modelId: string;
     apiKey: string;
+    maxOutputTokens?: number;
 }
 
 interface AiProviderSelectorProps {
@@ -145,12 +151,14 @@ const AiProviderSelector: React.FC<AiProviderSelectorProps> = ({
             apiKeyPrefix: `${storageNamespace}.apiKey.`,
             modelPrefix: `${storageNamespace}.model.`,
             customModelPrefix: `${storageNamespace}.customModel.`,
+            maxOutputTokensPrefix: `${storageNamespace}.maxOutputTokens.`,
         };
     }, [storageNamespace]);
 
     const getApiKeyStorageKey = useCallback((providerId: string) => `${storageKeys.apiKeyPrefix}${providerId}`, [storageKeys.apiKeyPrefix]);
     const getModelStorageKey = useCallback((providerId: string) => `${storageKeys.modelPrefix}${providerId}`, [storageKeys.modelPrefix]);
     const getCustomModelStorageKey = useCallback((providerId: string) => `${storageKeys.customModelPrefix}${providerId}`, [storageKeys.customModelPrefix]);
+    const getMaxOutputTokensStorageKey = useCallback((providerId: string) => `${storageKeys.maxOutputTokensPrefix}${providerId}`, [storageKeys.maxOutputTokensPrefix]);
 
     const defaultProviderId = useMemo(() => {
         if (allowSystemProvider) return 'system';
@@ -161,10 +169,12 @@ const AiProviderSelector: React.FC<AiProviderSelectorProps> = ({
     const [selectedModel, setSelectedModel] = useState<string>('');
     const [customModelId, setCustomModelId] = useState<string>('');
     const [apiKey, setApiKey] = useState<string>('');
+    const [maxOutputTokensInput, setMaxOutputTokensInput] = useState<string>('');
     const [isEditingApiKey, setIsEditingApiKey] = useState<boolean>(false);
     const [isHydrated, setIsHydrated] = useState<boolean>(false);
     const onConfigChangeRef = useRef(onConfigChange);
     const lastEmittedConfigKeyRef = useRef<string>('');
+    const lastAutoFilledMaxTokensKeyRef = useRef<string>('');
 
     const activeProvider = providerOptions.find(provider => provider.id === selectedProviderId) ?? null;
     const hasApiKey = apiKey.trim().length > 0;
@@ -234,12 +244,14 @@ const AiProviderSelector: React.FC<AiProviderSelectorProps> = ({
             const storedApiKey = window.localStorage.getItem(getApiKeyStorageKey(validProvider.id)) || '';
             const storedModel = window.localStorage.getItem(getModelStorageKey(validProvider.id)) || validProvider.models[0]?.value || '';
             const storedCustomModelId = window.localStorage.getItem(getCustomModelStorageKey(validProvider.id)) || '';
+            const storedMaxOutputTokens = window.localStorage.getItem(getMaxOutputTokensStorageKey(validProvider.id)) || '';
             const modelSelection = resolveModelSelection(validProvider, storedModel, storedCustomModelId);
 
             setSelectedProviderId(validProvider.id);
             setApiKey(storedApiKey);
             setSelectedModel(modelSelection.selectedModel);
             setCustomModelId(modelSelection.customModelId);
+            setMaxOutputTokensInput(storedMaxOutputTokens);
         } else {
             if (savedProviderId) {
                 window.localStorage.setItem(storageKeys.selectedProvider, defaultProviderId);
@@ -248,10 +260,11 @@ const AiProviderSelector: React.FC<AiProviderSelectorProps> = ({
             setApiKey('');
             setSelectedModel('');
             setCustomModelId('');
+            setMaxOutputTokensInput('');
         }
 
         setIsHydrated(true);
-    }, [defaultProviderId, getApiKeyStorageKey, getCustomModelStorageKey, getModelStorageKey, providerOptions, resolveModelSelection, storageKeys.selectedProvider]);
+    }, [defaultProviderId, getApiKeyStorageKey, getCustomModelStorageKey, getMaxOutputTokensStorageKey, getModelStorageKey, providerOptions, resolveModelSelection, storageKeys.selectedProvider]);
 
     useEffect(() => {
         if (typeof window === 'undefined') {
@@ -280,11 +293,15 @@ const AiProviderSelector: React.FC<AiProviderSelectorProps> = ({
 
             const modelFromEvent = typeof detail.modelId === 'string' ? detail.modelId.trim() : '';
             const apiKeyFromEvent = typeof detail.apiKey === 'string' ? detail.apiKey : null;
+            const maxOutputTokensFromEvent = normalizeCustomProviderMaxOutputTokens(detail.maxOutputTokens);
 
             try {
                 window.localStorage.setItem(storageKeys.selectedProvider, nextProviderId);
                 if (apiKeyFromEvent != null) {
                     window.localStorage.setItem(getApiKeyStorageKey(nextProviderId), apiKeyFromEvent);
+                }
+                if (typeof maxOutputTokensFromEvent === 'number') {
+                    window.localStorage.setItem(getMaxOutputTokensStorageKey(nextProviderId), String(maxOutputTokensFromEvent));
                 }
                 if (modelFromEvent) {
                     const modelSelection = resolveModelSelection(provider, modelFromEvent, modelFromEvent);
@@ -303,6 +320,9 @@ const AiProviderSelector: React.FC<AiProviderSelectorProps> = ({
             if (apiKeyFromEvent != null) {
                 setApiKey(apiKeyFromEvent);
             }
+            if (typeof maxOutputTokensFromEvent === 'number') {
+                setMaxOutputTokensInput(String(maxOutputTokensFromEvent));
+            }
             if (modelFromEvent) {
                 const modelSelection = resolveModelSelection(provider, modelFromEvent, modelFromEvent);
                 setSelectedModel(modelSelection.selectedModel);
@@ -312,7 +332,7 @@ const AiProviderSelector: React.FC<AiProviderSelectorProps> = ({
 
         window.addEventListener(PROVIDER_SELECTOR_SYNC_EVENT, handler as EventListener);
         return () => window.removeEventListener(PROVIDER_SELECTOR_SYNC_EVENT, handler as EventListener);
-    }, [allowSystemProvider, getApiKeyStorageKey, getCustomModelStorageKey, getModelStorageKey, providerOptions, resolveModelSelection, storageKeys.selectedProvider]);
+    }, [allowSystemProvider, getApiKeyStorageKey, getCustomModelStorageKey, getMaxOutputTokensStorageKey, getModelStorageKey, providerOptions, resolveModelSelection, storageKeys.selectedProvider]);
 
     useEffect(() => {
         if (!isHydrated || typeof window === 'undefined') {
@@ -323,18 +343,21 @@ const AiProviderSelector: React.FC<AiProviderSelectorProps> = ({
             setApiKey('');
             setSelectedModel('');
             setCustomModelId('');
+            setMaxOutputTokensInput('');
             return;
         }
 
         let storedApiKey = '';
         let storedModel = activeProvider.models[0]?.value || '';
         let storedCustomModelId = '';
+        let storedMaxOutputTokens = '';
 
         try {
             window.localStorage.setItem(storageKeys.selectedProvider, selectedProviderId);
             storedApiKey = window.localStorage.getItem(getApiKeyStorageKey(activeProvider.id)) || '';
             storedModel = window.localStorage.getItem(getModelStorageKey(activeProvider.id)) || storedModel;
             storedCustomModelId = window.localStorage.getItem(getCustomModelStorageKey(activeProvider.id)) || '';
+            storedMaxOutputTokens = window.localStorage.getItem(getMaxOutputTokensStorageKey(activeProvider.id)) || '';
         } catch {
             // localStorage 在部分隐私模式/受限环境下可能不可用，忽略即可
         }
@@ -343,7 +366,9 @@ const AiProviderSelector: React.FC<AiProviderSelectorProps> = ({
         setApiKey(storedApiKey);
         setSelectedModel(modelSelection.selectedModel);
         setCustomModelId(modelSelection.customModelId);
-    }, [activeProvider, getApiKeyStorageKey, getCustomModelStorageKey, getModelStorageKey, isHydrated, resolveModelSelection, selectedProviderId, storageKeys.selectedProvider]);
+        setMaxOutputTokensInput(storedMaxOutputTokens);
+        lastAutoFilledMaxTokensKeyRef.current = '';
+    }, [activeProvider, getApiKeyStorageKey, getCustomModelStorageKey, getMaxOutputTokensStorageKey, getModelStorageKey, isHydrated, resolveModelSelection, selectedProviderId, storageKeys.selectedProvider]);
 
     useEffect(() => {
         if (!isHydrated) {
@@ -363,7 +388,10 @@ const AiProviderSelector: React.FC<AiProviderSelectorProps> = ({
         const effectiveModel = isCustomModelSelected
             ? customModelId.trim()
             : (selectedModel || activeProvider.models[0]?.value || '');
-        const configKey = `${activeProvider.id}::${selectedModel}::${effectiveModel}::${apiKey.trim()}`;
+        const parsedMaxOutputTokens = maxOutputTokensInput.trim()
+            ? normalizeCustomProviderMaxOutputTokens(Number(maxOutputTokensInput))
+            : undefined;
+        const configKey = `${activeProvider.id}::${selectedModel}::${effectiveModel}::${apiKey.trim()}::${parsedMaxOutputTokens ?? ''}`;
         if (configKey === lastEmittedConfigKeyRef.current) {
             return;
         }
@@ -372,8 +400,32 @@ const AiProviderSelector: React.FC<AiProviderSelectorProps> = ({
             providerId: activeProvider.id,
             modelId: effectiveModel,
             apiKey: apiKey.trim(),
+            ...(typeof parsedMaxOutputTokens === 'number' ? { maxOutputTokens: parsedMaxOutputTokens } : {}),
         });
-    }, [activeProvider, apiKey, customModelId, isCustomModelSelected, isHydrated, selectedModel]);
+    }, [activeProvider, apiKey, customModelId, isCustomModelSelected, isHydrated, maxOutputTokensInput, selectedModel]);
+
+    useEffect(() => {
+        if (!isHydrated || !activeProvider) {
+            return;
+        }
+
+        const effectiveModel = isCustomModelSelected
+            ? customModelId.trim()
+            : (selectedModel || activeProvider.models[0]?.value || '');
+        const autoFillKey = `${activeProvider.id}::${effectiveModel}`;
+        if (!isDeepSeekV4Model(effectiveModel)) {
+            lastAutoFilledMaxTokensKeyRef.current = '';
+            return;
+        }
+        if (maxOutputTokensInput.trim()) {
+            return;
+        }
+        if (lastAutoFilledMaxTokensKeyRef.current === autoFillKey) {
+            return;
+        }
+        lastAutoFilledMaxTokensKeyRef.current = autoFillKey;
+        setMaxOutputTokensInput('65536');
+    }, [activeProvider, customModelId, isCustomModelSelected, isHydrated, maxOutputTokensInput, selectedModel]);
 
     useEffect(() => {
         if (!isHydrated || !activeProvider || typeof window === 'undefined') {
@@ -401,6 +453,13 @@ const AiProviderSelector: React.FC<AiProviderSelectorProps> = ({
         }
         window.localStorage.setItem(getCustomModelStorageKey(activeProvider.id), customModelId.trim());
     }, [activeProvider, customModelId, getCustomModelStorageKey, isHydrated, selectedModel]);
+
+    useEffect(() => {
+        if (!isHydrated || !activeProvider || typeof window === 'undefined') {
+            return;
+        }
+        window.localStorage.setItem(getMaxOutputTokensStorageKey(activeProvider.id), maxOutputTokensInput.trim());
+    }, [activeProvider, getMaxOutputTokensStorageKey, isHydrated, maxOutputTokensInput]);
 
     const providerSelectOptions = useMemo<CustomSelectOption[]>(() => {
         return providerOptions.map((provider): CustomSelectOption => ({
@@ -517,6 +576,24 @@ const AiProviderSelector: React.FC<AiProviderSelectorProps> = ({
                         </div>
                     )
                 }
+
+                <div>
+                    <label className="battle-lite-muted-text mb-1 block text-xs font-semibold">最大输出 Tokens（可选）</label>
+                    <input
+                        className="input-field font-mono"
+                        type="number"
+                        min={1}
+                        max={MAX_CUSTOM_PROVIDER_OUTPUT_TOKENS}
+                        step={1}
+                        placeholder="不填写则使用系统默认"
+                        value={maxOutputTokensInput}
+                        inputMode="numeric"
+                        onChange={(event) => setMaxOutputTokensInput(event.target.value)}
+                    />
+                    <p className="battle-lite-subtle-text mt-1 text-xs">
+                        建议 65536；你可以按供应商限制自行调整。
+                    </p>
+                </div>
             </div>
         </div>
     );

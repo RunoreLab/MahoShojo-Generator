@@ -123,6 +123,7 @@ async function handler(req: NextRequest): Promise<Response> {
           mode: providerConfig.mode || 'auto',
           retryCount: 1,
           skipProbability: 0,
+          ...(typeof parsed.maxOutputTokens === 'number' ? { defaultMaxOutputTokens: parsed.maxOutputTokens } : {}),
         };
       }
     }

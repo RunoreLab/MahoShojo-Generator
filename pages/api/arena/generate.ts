@@ -315,6 +315,7 @@ const buildQuestionnaireLoreText = (questionnaires: RequestQuestionnaire[]): str
                     mode: providerConfig.mode || 'auto',
                     retryCount: 1,
                     skipProbability: 0,
+                    ...(typeof parsed.maxOutputTokens === 'number' ? { defaultMaxOutputTokens: parsed.maxOutputTokens } : {}),
                 };
             }
         }

@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'bun:test';
 
 import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
-import { buildCustomProviderPayload, isUsingUserProvidedKey } from '@/lib/ai/custom-provider';
-import { resolveAiSessionProvider } from '@/lib/ai-session/provider';
+import { buildCustomProviderPayload, isDeepSeekV4Model, isUsingUserProvidedKey } from '@/lib/ai/custom-provider';
+import { parseAiSessionCustomProvider, resolveAiSessionProvider } from '@/lib/ai-session/provider';
 
 const getProvider = (providerId: string) => {
   const provider = AI_PROVIDER_CATALOG.find((item) => item.id === providerId);
@@ -38,6 +38,39 @@ describe('custom provider helpers', () => {
     });
   });
 
+  it('自定义 provider payload 会透传有效的最大输出 Tokens', () => {
+    expect(buildCustomProviderPayload({
+      providerId: 'kourichat',
+      modelId: 'deepseek-v4-flash',
+      apiKey: 'sk-xxx',
+      maxOutputTokens: 65536,
+    })).toEqual({
+      providerId: 'kourichat',
+      modelId: 'deepseek-v4-flash',
+      apiKey: 'sk-xxx',
+      maxOutputTokens: 65536,
+    });
+
+    expect(buildCustomProviderPayload({
+      providerId: 'kourichat',
+      modelId: 'deepseek-v4-flash',
+      apiKey: 'sk-xxx',
+      maxOutputTokens: 0,
+    })).toEqual({
+      providerId: 'kourichat',
+      modelId: 'deepseek-v4-flash',
+      apiKey: 'sk-xxx',
+    });
+  });
+
+  it('DeepSeek V4 模型识别覆盖普通与带命名空间的 modelId', () => {
+    expect(isDeepSeekV4Model('deepseek-v4-flash')).toBe(true);
+    expect(isDeepSeekV4Model('deepseek-ai/DeepSeek-V4-Pro')).toBe(true);
+    expect(isDeepSeekV4Model('vendor/deepseek_v4_flash')).toBe(true);
+    expect(isDeepSeekV4Model('deepseek-v3.2')).toBe(false);
+    expect(isDeepSeekV4Model('not-deepseek-v4-flash')).toBe(false);
+  });
+
   it('isUsingUserProvidedKey 只对非 system 且 apiKey 非空返回 true', () => {
     expect(isUsingUserProvidedKey(null)).toBe(false);
     expect(isUsingUserProvidedKey({ providerId: 'system', modelId: 'gemini-2.5-flash', apiKey: '' })).toBe(false);
@@ -60,6 +93,34 @@ describe('custom provider helpers', () => {
     expect(resolved.value.modelId).toBe('vendor/custom-model-2026-04-25');
     expect(resolved.value.providerOverride?.model).toBe('vendor/custom-model-2026-04-25');
     expect(resolved.value.providerOverride?.baseUrl).toBe(getProvider('kourichat').baseUrl);
+  });
+
+  it('自定义 provider 解析会把最大输出 Tokens 放入 provider 默认值', () => {
+    const resolved = resolveAiSessionProvider({
+      providerId: 'kourichat',
+      modelId: 'deepseek-v4-flash',
+      apiKey: 'sk-test',
+      maxOutputTokens: 65536,
+    });
+
+    expect(resolved.ok).toBe(true);
+    if (!resolved.ok) return;
+    expect(resolved.value.providerOverride?.defaultMaxOutputTokens).toBe(65536);
+  });
+
+  it('自定义 provider schema 拒绝非法最大输出 Tokens', () => {
+    for (const maxOutputTokens of [0, -1, 1.5, 1_000_001]) {
+      const parsed = parseAiSessionCustomProvider({
+        providerId: 'kourichat',
+        modelId: 'deepseek-v4-flash',
+        apiKey: 'sk-test',
+        maxOutputTokens,
+      });
+
+      expect(parsed.ok).toBe(false);
+      if (parsed.ok) return;
+      expect(parsed.error).toBe('customProvider 无效');
+    }
   });
 
   it('system provider 不接受目录外自填 modelId', () => {
