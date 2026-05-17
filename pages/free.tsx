@@ -24,7 +24,7 @@ import { getSensitiveWordRedirectTarget } from '@/lib/content-safety/client';
 import { buildGeneralCharacterCardFromMarkdown, buildGeneralScenarioCardFromMarkdown } from '@/lib/stream/markdown-card';
 import { readSafeTextAndReasoningStreamFromResponse } from '@/lib/stream/read-safe-text-and-reasoning-stream';
 import { USER_PROVIDED_KEY_COOLDOWN_MS, OFFICIAL_KEY_MAX_AI_COOLDOWN_MS } from '@/lib/ai/cooldowns';
-import { buildCustomProviderPayload, isUsingUserProvidedKey } from '@/lib/ai/custom-provider';
+import { buildCustomProviderRequestPayload, isUsingUserProvidedKey } from '@/lib/ai/custom-provider';
 import { FREE_GENERATION_ATTACHMENT_LIMITS, formatReferenceAttachmentsForPrompt } from '@/lib/ai/attachments';
 import { GENERAL_SCENARIO_TEMPLATE_ID } from '@/lib/schemas/general-scenario';
 import { readJsonOrTextFromResponse, resolveApiErrorMessage } from '@/lib/client/apiError';
@@ -537,13 +537,9 @@ export default function FreeGeneratorPage() {
         }));
       }
 
-      const customProviderPayload = buildCustomProviderPayload(userProviderConfig);
+      const customProviderPayload = buildCustomProviderRequestPayload(userProviderConfig);
       if (customProviderPayload) {
-        requestBody.customProvider = {
-          providerId: customProviderPayload.providerId,
-          modelId: customProviderPayload.modelId,
-          apiKey: customProviderPayload.apiKey.trim(),
-        };
+        requestBody.customProvider = customProviderPayload;
       }
 
       const endpoint = generationMode === 'stream' ? '/api/generate-free-stream?format=sse' : '/api/generate-free';

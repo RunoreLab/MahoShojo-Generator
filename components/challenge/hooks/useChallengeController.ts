@@ -18,7 +18,7 @@ import {
   resolveNodeExecutionMode,
 } from '@/components/challenge/hooks/useChallengeStreamResolution';
 import type { ChallengeStoryCardState } from '@/components/challenge/ChallengeStoryCardSection';
-import { buildCustomProviderPayload } from '@/lib/ai/custom-provider';
+import { buildCustomProviderRequestPayload } from '@/lib/ai/custom-provider';
 import {
   deleteChallengeRunCascade,
   getChallengeRun,
@@ -941,7 +941,7 @@ export function useChallengeController() {
   const activeResolutionAbortRef = useRef<AbortController | null>(null);
   const activeResolutionIdRef = useRef(0);
   const customProviderPayload = useMemo(
-    () => buildCustomProviderPayload(userProviderConfig),
+    () => buildCustomProviderRequestPayload(userProviderConfig),
     [userProviderConfig]
   );
 

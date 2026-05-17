@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'bun:test';
 
 import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
-import { buildCustomProviderPayload, isDeepSeekV4Model, isUsingUserProvidedKey } from '@/lib/ai/custom-provider';
+import {
+  buildCustomProviderPayload,
+  buildCustomProviderRequestPayload,
+  isDeepSeekV4Model,
+  isUsingUserProvidedKey,
+} from '@/lib/ai/custom-provider';
 import { parseAiSessionCustomProvider, resolveAiSessionProvider } from '@/lib/ai-session/provider';
 
 const getProvider = (providerId: string) => {
@@ -61,6 +66,28 @@ describe('custom provider helpers', () => {
       modelId: 'deepseek-v4-flash',
       apiKey: 'sk-xxx',
     });
+  });
+
+  it('自定义 provider 请求 payload 会保留最大输出 Tokens 并修剪 API Key', () => {
+    expect(buildCustomProviderRequestPayload({
+      providerId: 'kourichat',
+      modelId: 'deepseek-ai/DeepSeek-V4-Flash',
+      apiKey: '  sk-xxx  ',
+      maxOutputTokens: 65536,
+    })).toEqual({
+      providerId: 'kourichat',
+      modelId: 'deepseek-ai/DeepSeek-V4-Flash',
+      apiKey: 'sk-xxx',
+      maxOutputTokens: 65536,
+    });
+  });
+
+  it('竞技场生成请求复用请求 payload helper，避免丢失最大输出 Tokens', async () => {
+    const source = await Bun.file('components/arena/hooks/useBattleEngine.ts').text();
+    const helperCalls = source.match(/buildCustomProviderRequestPayload\(userProviderConfig\)/g) ?? [];
+
+    expect(helperCalls.length).toBeGreaterThanOrEqual(2);
+    expect(source).not.toMatch(/customProvider\s*=\s*\{[\s\S]{0,240}providerId:\s*userProviderConfig\.providerId/);
   });
 
   it('DeepSeek V4 模型识别覆盖普通与带命名空间的 modelId', () => {

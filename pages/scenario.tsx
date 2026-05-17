@@ -24,6 +24,7 @@ import { AI_META_REQUEST_HEADER, AI_META_REQUEST_VALUE, readJsonWithAiMeta } fro
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
 import { authStorage } from '@/lib/auth';
 import { STREAM_ABORT_REASON_USER } from '@/lib/stream/abort';
+import { buildCustomProviderRequestPayload } from '@/lib/ai/custom-provider';
 import {
   clearScenarioPageDraft,
   readScenarioPageDraft,
@@ -314,16 +315,9 @@ const ScenarioPage: React.FC = () => {
         fieldsToKeepEmpty,
       };
 
-      if (
-        userProviderConfig &&
-        (userProviderConfig.apiKey || userProviderConfig.providerId === 'system') &&
-        userProviderConfig.modelId !== 'default'
-      ) {
-        requestBody.customProvider = {
-          providerId: userProviderConfig.providerId,
-          modelId: userProviderConfig.modelId,
-          apiKey: userProviderConfig.apiKey.trim(),
-        };
+      const customProviderPayload = buildCustomProviderRequestPayload(userProviderConfig);
+      if (customProviderPayload) {
+        requestBody.customProvider = customProviderPayload;
       }
 
       const endpoint = generationMode === 'stream' ? '/api/generate-scenario-stream?format=sse' : '/api/generate-scenario';

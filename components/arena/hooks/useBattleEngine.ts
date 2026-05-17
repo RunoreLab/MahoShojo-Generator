@@ -35,6 +35,7 @@ import {
   resolveArenaProviderCooldownConfig,
 } from '../utils/providerCooldown';
 import { normalizeCustomStoryLength } from '@/lib/story-length';
+import { buildCustomProviderRequestPayload } from '@/lib/ai/custom-provider';
 
 const sanitizeTextByShieldWords = (text: string): string => applyShieldWords(text).filteredText;
 
@@ -635,16 +636,9 @@ export const useBattleEngine = () => {
         }));
       }
 
-      if (
-        userProviderConfig &&
-        (userProviderConfig.apiKey || userProviderConfig.providerId === 'system') &&
-        userProviderConfig.modelId !== 'default'
-      ) {
-        requestBody.customProvider = {
-          providerId: userProviderConfig.providerId,
-          modelId: userProviderConfig.modelId,
-          apiKey: userProviderConfig.apiKey,
-        };
+      const customProviderPayload = buildCustomProviderRequestPayload(userProviderConfig);
+      if (customProviderPayload) {
+        requestBody.customProvider = customProviderPayload;
       }
 
       const authHeader = await authStorage.getAuthHeader();
@@ -1698,16 +1692,9 @@ export const useBattleEngine = () => {
         writeCurrentState: settings.writeCurrentState,
       };
 
-      if (
-        userProviderConfig &&
-        (userProviderConfig.apiKey || userProviderConfig.providerId === 'system') &&
-        userProviderConfig.modelId !== 'default'
-      ) {
-        requestBody.customProvider = {
-          providerId: userProviderConfig.providerId,
-          modelId: userProviderConfig.modelId,
-          apiKey: userProviderConfig.apiKey,
-        };
+      const customProviderPayload = buildCustomProviderRequestPayload(userProviderConfig);
+      if (customProviderPayload) {
+        requestBody.customProvider = customProviderPayload;
       }
 
       const response = await fetch('/api/arena/redo-combatant-updates', {

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { buildCustomProviderPayload } from '@/lib/ai/custom-provider';
+import { buildCustomProviderRequestPayload } from '@/lib/ai/custom-provider';
 import {
   createBattleStoryCheckpointRecord,
   createBattleStoryChapterRecord,
@@ -148,7 +148,7 @@ const readRetryAfterMs = (response: Response, fallbackMs = 15_000): number => {
 
 const buildProviderSource = (
   currentSource: BattleStorySessionSource,
-  customProviderPayload: ReturnType<typeof buildCustomProviderPayload>
+  customProviderPayload: ReturnType<typeof buildCustomProviderRequestPayload>
 ): BattleStorySessionSource => {
   if (!customProviderPayload) {
     return {
@@ -345,7 +345,7 @@ export function useBattleStorySession() {
   const generationAbortControllerRef = useRef<AbortController | null>(null);
 
   const customProviderPayload = useMemo(
-    () => buildCustomProviderPayload(userProviderConfig),
+    () => buildCustomProviderRequestPayload(userProviderConfig),
     [userProviderConfig]
   );
   const providerCooldownConfig = useMemo(

@@ -40,3 +40,14 @@ export const buildCustomProviderPayload = (
     ...(typeof maxOutputTokens === 'number' ? { maxOutputTokens } : {}),
   };
 };
+
+export const buildCustomProviderRequestPayload = (
+  config: UserAIProviderConfig | null | undefined
+): CustomProviderPayload | undefined => {
+  const payload = buildCustomProviderPayload(config);
+  if (!payload) return undefined;
+  return {
+    ...payload,
+    apiKey: payload.apiKey.trim(),
+  };
+};

@@ -37,6 +37,7 @@ import { readJsonOrTextFromResponse, resolveApiErrorMessage } from '@/lib/client
 import { AI_META_REQUEST_HEADER, AI_META_REQUEST_VALUE, readJsonWithAiMeta } from '@/lib/client/read-json-with-ai-meta';
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
 import { authStorage } from '@/lib/auth';
+import { buildCustomProviderRequestPayload } from '@/lib/ai/custom-provider';
 import { mapDataCardSourceMeta } from '@/lib/data-card-read-mappers';
 import {
   buildQuestionKey,
@@ -1211,15 +1212,7 @@ const CanshouPage: React.FC = () => {
       const overLimitForSubmit = buildOverLimitItems(snapshot);
       const allowNativeSignatureForSubmit = isQuestionnaireNativeAllowed && overLimitForSubmit.length === 0;
 
-      const customProviderPayload = (
-        userProviderConfig
-        && (userProviderConfig.apiKey || userProviderConfig.providerId === 'system')
-        && userProviderConfig.modelId !== 'default'
-      ) ? {
-        providerId: userProviderConfig.providerId,
-        modelId: userProviderConfig.modelId,
-        apiKey: userProviderConfig.apiKey,
-      } : undefined;
+      const customProviderPayload = buildCustomProviderRequestPayload(userProviderConfig);
 
       const endpoint = generationMode === 'stream' ? '/api/generate-canshou-stream?format=sse' : '/api/generate-canshou';
       const activityHeaders = await authStorage.getActivityHeaders();

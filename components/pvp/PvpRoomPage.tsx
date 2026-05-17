@@ -36,7 +36,7 @@ import { inferTemplate } from '@/lib/data-card-converter';
 import { mapDataCardRuntimeSourceInfo, mapPublicDataCardRowToBattleSelectionPayload } from '@/lib/data-card-read-mappers';
 	import { config as appConfig } from '@/lib/config';
 	import { useAuth } from '@/lib/useAuth';
-	import { buildCustomProviderPayload, isUsingUserProvidedKey } from '@/lib/ai/custom-provider';
+	import { buildCustomProviderRequestPayload, isUsingUserProvidedKey } from '@/lib/ai/custom-provider';
 	import { buildReasoningSummary, normalizeReasoningSource } from '@/lib/ai/reasoning-normalizer';
 	import { describePvpRoomCardRange, isPvpCombatantTypeAllowedByRange, isPvpDataCardStatsAllowedByRange, normalizePvpRoomCardRange } from '@/lib/pvp/card-range';
 	import { formatPvpDisplayName } from '@/lib/pvp/displayName';
@@ -1053,7 +1053,7 @@ export function PvpRoomPage() {
     mutationFn: async (payload?: { customProvider?: UserAIProviderConfig | null; force?: boolean }) => {
       if (!latestRound?.id) throw new Error('当前回合不存在，请刷新');
 
-      const customProvider = buildCustomProviderPayload(payload?.customProvider ?? null);
+      const customProvider = buildCustomProviderRequestPayload(payload?.customProvider ?? null);
       const shouldStream = rules?.generationMode === 'stream';
 
       if (!shouldStream) {
