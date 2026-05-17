@@ -13,6 +13,7 @@ export interface AIProvider {
   skipProbability?: number;
   mode?: 'json' | 'auto' | 'tool' | undefined;
   weight?: number; // 负载均衡权重，数值越大被选中概率越高
+  defaultMaxOutputTokens?: number; // 可选：该 provider 未显式传入 maxOutputTokens 时使用的默认输出上限
 }
 
 // [新增 v0.2.1] AI 安全检查策略配置接口 (SRS 3.1.1)

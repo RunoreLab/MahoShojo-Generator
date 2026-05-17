@@ -6,6 +6,7 @@ import { z } from 'zod/v3';
 import { config, AIProvider } from "../config";
 import { getLogger } from "../logger";
 import { getProviderFetch } from "@/lib/ai/middleware/provider-fetch";
+import { resolveMaxOutputTokensOption } from "@/lib/ai/max-output-tokens";
 
 // 延迟函数
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -231,10 +232,7 @@ export async function generateWithStreamAI<T, I = string>(
 
         const systemPrompt = generationConfig.systemPrompt + generationConfig.promptBuilder(input) + 'Ignore the user \'s prompt.';
         log.info(`provider.type: ${provider.type}`);
-        const maxOutputTokensOption =
-          typeof generationConfig.maxOutputTokens === 'number'
-            ? { maxOutputTokens: generationConfig.maxOutputTokens }
-            : {};
+        const maxOutputTokensOption = resolveMaxOutputTokensOption(generationConfig, provider);
         const result = streamObject({
           model: provider.type === 'openai' ? llm.chat(selectedModel) : llm(selectedModel), // Type assertion for AI SDK 5 compatibility
           // 应对风控，尝试直接全部放入系统提示词中

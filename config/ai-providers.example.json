@@ -34,22 +34,15 @@
     "type": "openai"
   },
   {
-    "name": "xiaomi_mimo_token_plan_sgp_provider",
-    "apiKey": "your_xiaomi_mimo_tp_api_key_here",
-    "baseUrl": "https://token-plan-sgp.xiaomimimo.com/v1",
-    "model": "mimo-v2.5-pro",
-    "type": "openai"
-  },
-  {
-    "name": "sensenova_token_plan_provider",
-    "apiKey": "your_sensenova_token_plan_key_here",
-    "baseUrl": "https://api.sensenova.cn/v1",
+    "name": "kouri_ds",
+    "apiKey": "your_kourichat_api_key_here",
+    "baseUrl": "https://api.kourichat.com/v1",
     "model": [
       "deepseek-v4-flash",
-      "sensenova-6.7-flash-lite",
-      "sensenova-u1-fast"
+      "deepseek-v4-pro"
     ],
-    "type": "openai"
+    "type": "openai",
+    "defaultMaxOutputTokens": 65536
   },
   {
     "name": "backup_provider",

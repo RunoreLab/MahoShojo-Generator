@@ -6,6 +6,7 @@ import { z } from 'zod/v3';
 import { config, AIProvider } from "./config";
 import { getLogger } from "./logger";
 import { getProviderFetch } from "@/lib/ai/middleware/provider-fetch";
+import { resolveMaxOutputTokensOption } from "@/lib/ai/max-output-tokens";
 import { enhanceErrorWithUpstreamMessage } from "@/lib/ai/utils/error-extraction";
 import { buildStructuredJsonInstructionFromZodSchema, parseStructuredJsonWithSchema } from "@/lib/ai/utils/structured-json";
 import { buildReasoningSummary } from "@/lib/ai/reasoning-normalizer";
@@ -409,10 +410,7 @@ export async function generateWithAI<T, I = string>(
             })(),
           },
         ]);
-        const maxOutputTokensOption =
-          typeof generationConfig.maxOutputTokens === 'number'
-            ? { maxOutputTokens: generationConfig.maxOutputTokens }
-            : {};
+        const maxOutputTokensOption = resolveMaxOutputTokensOption(generationConfig, provider);
 
         const tryGenerateObject = async () => {
           return await generateObject({
