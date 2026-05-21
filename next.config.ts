@@ -54,6 +54,9 @@ const nextConfig: NextConfig = {
   },
 
   // 其他配置
+  eslint: {
+    ignoreDuringBuilds: true,
+  },
   typescript: {
     ignoreBuildErrors: false,
   },

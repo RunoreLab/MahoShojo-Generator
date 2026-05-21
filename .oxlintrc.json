@@ -1,0 +1,15 @@
+{
+	"$schema": "https://raw.githubusercontent.com/nicolo-ribaudo/oxc-project/refs/heads/nicolo/json-schema/npm/oxlint/configuration_schema.json",
+	"rules": {
+		"no-explicit-any": "off",
+		"no-useless-fallback-in-spread": "off",
+		"no-useless-escape": "off",
+		"no-unsafe-finally": "off",
+		"no-control-regex": "off",
+		"no-new-array": "off"
+	},
+	"ignorePatterns": ["lib/vendor/**"],
+	"categories": {
+		"correctness": "warn"
+	}
+}

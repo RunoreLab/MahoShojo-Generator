@@ -1,0 +1,6 @@
+pre-commit:
+  parallel: true
+  jobs:
+    - name: oxlint
+      glob: "*.{js,ts,jsx,tsx}"
+      run: bunx oxlint {staged_files}
