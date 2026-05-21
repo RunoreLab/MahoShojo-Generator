@@ -153,26 +153,6 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 description: '常规场景保持原有调用顺序，默认倾向使用 Gemini 2.5 Flash；排位优先使用轻量模型。'
             },
             {
-                value: 'gemini-3-flash-preview',
-                label: 'Gemini 3.0 Flash',
-                description: 'Google 旗下最新一代的先进模型，现已提供尝鲜使用。'
-            },
-            {
-                value: 'gemini-3.1-flash-lite-preview',
-                label: 'Gemini 3.1 Flash Lite',
-                description: 'Google 最新一代高速轻量模型，适合预算敏感与高并发生成场景。'
-            },
-            {
-                value: 'gemini-2.5-flash',
-                label: 'Gemini 2.5 Flash',
-                description: 'Google 旗下前代的最先进模型系列，在性能和价格上十分均衡，也是魔法少女生成器默认使用的模型。'
-            },
-            {
-                value: 'gemini-2.5-flash-lite',
-                label: 'Gemini 2.5 Flash Lite',
-                description: 'Google 旗下前代的最先进模型系列，性能略差但是速度很快，是魔法少女生成器默认使用的轻量模型。'
-            },
-            {
                 value: 'glm-5',
                 label: 'GLM-5',
                 description: '智谱旗下新一代通用模型，综合能力更强，适合复杂指令、多轮对话与高质量创作。'
@@ -193,9 +173,19 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 description: 'DeepSeek V4 完全体，适合复杂分析、长文本写作与高质量生成。'
             },
             {
-                value: 'gemini-2.0-flash-exp',
-                label: 'Gemini 2.0 Flash Exp',
-                description: 'Google 旗下的上两代模型，但是真的好快！'
+                value: 'gemini-3.5-flash',
+                label: 'Gemini 3.5 Flash',
+                description: 'Google 的新模型，据用户评测说很喜欢一惊一乍，还挺中二的。'
+            },
+            {
+                value: 'gemini-3-flash-preview',
+                label: 'Gemini 3.0 Flash',
+                description: 'Google 旗下最新一代的先进模型，现已提供尝鲜使用。'
+            },
+            {
+                value: 'gemini-3.1-flash-lite-preview',
+                label: 'Gemini 3.1 Flash Lite',
+                description: 'Google 最新一代高速轻量模型，适合预算敏感与高并发生成场景。'
             },
             {
                 value: 'gemma-4-31b-it',
@@ -243,6 +233,11 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
         type: 'openai',
         mode: 'json',
         models: [
+            {
+                value: 'gemini-3.5-flash',
+                label: 'Gemini 3.5 Flash',
+                description: 'Google 的新模型，据用户评测说很喜欢一惊一乍，还挺中二的。'
+            },
             {
                 value: 'gemini-3.1-pro-preview',
                 label: 'Gemini 3.1 Pro',
@@ -602,6 +597,11 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
         mode: 'json',
         models: [
             {
+                value: 'gemini-3.5-flash',
+                label: 'Gemini 3.5 Flash',
+                description: 'Google 的新模型，据用户评测说很喜欢一惊一乍，还挺中二的。'
+            },
+            {
                 value: 'gemini-3.1-pro-preview',
                 label: 'Gemini 3.1 Pro',
                 description: 'Google 最新一代的 Gemini 3.1 Pro 预览模型。'
@@ -692,6 +692,11 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
         type: 'openai',
         mode: 'json',
         models: [
+            {
+                value: '[鹿鹿10]gemini-3.5-flash',
+                label: 'Gemini 3.5 Flash（按次）',
+                description: 'Google 的新模型，据用户评测说很喜欢一惊一乍，还挺中二的。'
+            },
             {
                 value: '[鹿鹿10]gemini-3.1-pro-preview',
                 label: 'Gemini 3.1 Pro（按次）',
@@ -849,6 +854,11 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
         baseUrl: 'https://gateway.ai.cloudflare.com/v1/5e2c3572782d87ae449e050ac15d6c5d/mhsj-custom/google-ai-studio/v1beta',
         type: 'google',
         models: [
+            {
+                value: 'gemini-3.5-flash',
+                label: 'Gemini 3.5 Flash',
+                description: 'Google 的新模型，据用户评测说很喜欢一惊一乍，还挺中二的。'
+            },
             {
                 value: 'gemini-3.1-pro-preview',
                 label: 'Gemini 3.1 Pro',
@@ -1021,6 +1031,11 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
         type: 'openai',
         mode: 'auto',
         models: [
+            {
+                value: 'gemini-3.5-flash',
+                label: 'Gemini 3.5 Flash',
+                description: 'Google 的新模型，据用户评测说很喜欢一惊一乍，还挺中二的。'
+            },
             { value: 'google/gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro', description: 'Google 最新一代的 Gemini 3.1 Pro 预览模型。' },
             { value: 'google/gemini-3-pro-preview', label: 'Gemini 3.0 Pro', description: 'Google 迄今为止最智能的模型系列，以先进的推理和联网搜索能力为基础。' },
             { value: 'google/gemini-3-flash-preview', label: 'Gemini 3.0 Flash', description: 'Google 旗下最新一代的先进模型，现已提供尝鲜使用。' },
@@ -1075,8 +1090,13 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 description: 'Google 最新一代高速轻量模型，适合预算敏感与高并发生成场景。'
             },
             {
-                value: 'GPT-5.2',
-                label: 'GPT-5.2',
+                value: 'gemini-3.5-flash',
+                label: 'Gemini 3.5 Flash',
+                description: 'Google 的新模型，据用户评测说很喜欢一惊一乍，还挺中二的。'
+            },
+            {
+                value: 'GPT-5.5',
+                label: 'GPT-5.5',
                 description: 'OpenAI 最新模型，综合能力更强，适合高质量生成与复杂任务。'
             },
             {
@@ -1108,6 +1128,16 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 value: 'deepseek-v3.2',
                 label: 'DeepSeek V3.2',
                 description: '深度求索旗下模型，旨在将高计算效率与最先进的推理和智能体性能相结合。'
+            },
+            {
+                value: 'deepseek-v4-flash',
+                label: 'DeepSeek V4 Flash',
+                description: 'DeepSeek V4 的高速轻量版本，但是体验也很强大，据称文本生成体验堪比 gemini-3.1-pro。'
+            },
+            {
+                value: 'deepseek-v4-pro',
+                label: 'DeepSeek V4 Pro',
+                description: 'DeepSeek V4 的高性能版本，适合需要高精度和复杂推理的任务。'
             },
             {
                 value: 'qwen-3.5-plus',
