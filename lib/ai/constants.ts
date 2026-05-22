@@ -588,6 +588,87 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
         models: SENSENOVA_TOKEN_PLAN_MODELS,
     },
     {
+        id: 'qiniu-ai',
+        name: '七牛云 AI 大模型推理',
+        description: '七牛云 AI 大模型推理 OpenAI 兼容端点，支持 DeepSeek、Kimi、GLM、Qwen、MiniMax、豆包等模型。',
+        docsUrl: 'https://www.qiniu.com/ai/models',
+        baseUrl: 'https://api.qnaigc.com/v1',
+        type: 'openai',
+        mode: 'auto',
+        models: [
+            {
+                value: 'deepseek/deepseek-v4-flash',
+                label: 'DeepSeek V4 Flash',
+                description: 'DeepSeek V4 高速轻量模型，适合高频生成、剧情推进与草稿输出。'
+            },
+            {
+                value: 'deepseek/deepseek-v4-pro',
+                label: 'DeepSeek V4 Pro',
+                description: 'DeepSeek V4 完全体，适合复杂分析、长文本写作与高质量生成。'
+            },
+            {
+                value: 'moonshotai/kimi-k2.6',
+                label: 'Kimi K2.6',
+                description: 'Moonshot Kimi 系列模型，适合中文创作、角色设定、摘要与多轮指令跟随。'
+            },
+            {
+                value: 'moonshotai/kimi-k2.5',
+                label: 'Kimi K2.5',
+                description: 'Moonshot Kimi 系列模型，适合作为中文创作与长文本任务的备用选择。'
+            },
+            {
+                value: 'z-ai/glm-5.1',
+                label: 'GLM-5.1',
+                description: '智谱 GLM 新一代通用模型，适合复杂指令、多轮对话与结构化中文生成。'
+            },
+            {
+                value: 'z-ai/glm-5',
+                label: 'GLM-5',
+                description: '智谱旗舰级通用模型，适合中文写作、设定整理与高约束内容生成。'
+            },
+            {
+                value: 'z-ai/glm-4.5-air-free',
+                label: 'GLM-4.5-Air（免费）',
+                description: '智谱旗舰级通用模型轻量级版本，可免费使用。'
+            },
+            {
+                value: 'qwen/qwen3.6-plus',
+                label: 'Qwen 3.6 Plus',
+                description: '通义千问新一代 Plus 模型，适合复杂中文任务、长文本与多轮指令。'
+            },
+            {
+                value: 'qwen/qwen3.5-35b-a3b',
+                label: 'Qwen 3.5 35b（限免）',
+                description: '通义千问轻量限时免费模型，整体性能与 Qwen3.5-27B 相当。'
+            },
+            {
+                value: 'qwen/qwen3.7-max',
+                label: 'Qwen 3.7 Max',
+                description: '通义千问 3.7 Max，适合中文创作、复杂问答与长文本整理。'
+            },
+            {
+                value: 'minimax/minimax-m2.7',
+                label: 'MiniMax M2.7',
+                description: 'MiniMax 新一代模型，适合复杂规划、长链路任务与高质量文本生成。'
+            },
+            {
+                value: 'doubao-seed-1.6-thinking',
+                label: 'Doubao Seed 1.6（推理）',
+                description: '字节 Seed 旗舰通用模型推理版本。'
+            },
+            {
+                value: 'doubao-seed-1.6-flash',
+                label: 'Doubao Seed 1.6 Flash',
+                description: '字节 Seed 均衡型模型，适合高频内容生成、信息处理与数据分析。'
+            },
+            {
+                value: 'qwen3-235b-a22b-instruct-2507',
+                label: 'Qwen3 235B Instruct',
+                description: '通义千问 3 旗舰指令模型，适合高质量中文创作与复杂指令执行。'
+            },
+        ]
+    },
+    {
         id: 'yiye',
         name: '一叶知秋 API',
         description: '一叶知秋 API 为用户提供了国内外广泛的模型库，性价比高但不太稳定。',
