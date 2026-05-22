@@ -14,6 +14,7 @@ import {
   type CharacterParameterSourceKey,
 } from '@/lib/creator/character-parameter-view';
 import type { CharacterCardPortraitAsset } from '@/types/visual-asset';
+import { StreamStopButton } from '@/components/shared/StreamStopButton';
 
 export interface GeneralCharacterDetails extends GeneralCharacterData {
   arena_history?: ArenaHistory | null;
@@ -31,6 +32,7 @@ interface GeneralCharacterCardProps {
     buildState?: unknown;
   };
   isStreaming?: boolean;
+  onStopGeneration?: () => void;
   onSaveImage?: (imageUrl: string) => void;
   imageSaveMode?: 'auto' | 'modal' | 'download';
   saveButtonLabel?: string;
@@ -112,6 +114,7 @@ const waitForNextPaint = async () => {
 const GeneralCharacterCard: React.FC<GeneralCharacterCardProps> = ({
   general,
   isStreaming = false,
+  onStopGeneration,
   onSaveImage,
   imageSaveMode = 'auto',
   saveButtonLabel,
@@ -313,9 +316,14 @@ const GeneralCharacterCard: React.FC<GeneralCharacterCardProps> = ({
 
         {renderHistory()}
 
-        <button onClick={handleSaveImage} className="save-button mt-4" disabled={isStreaming || isSavingImage}>
-          {isStreaming || isSavingImage ? '生成中...' : (saveButtonLabel ?? '📱 保存为图片')}
-        </button>
+        <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+          <button onClick={handleSaveImage} className="save-button flex-1" disabled={isStreaming || isSavingImage}>
+            {isStreaming || isSavingImage ? '生成中...' : (saveButtonLabel ?? '📱 保存为图片')}
+          </button>
+          {isStreaming && onStopGeneration ? (
+            <StreamStopButton onClick={onStopGeneration} className="flex-1" />
+          ) : null}
+        </div>
 
         <div
           className="logo-placeholder"

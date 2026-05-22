@@ -2399,6 +2399,7 @@ const DetailsPage: React.FC = () => {
                   <GeneralCharacterCard
                     general={streamedGeneralCardForDisplay}
                     isStreaming={submitting}
+                    onStopGeneration={() => streamAbortControllerRef.current?.abort(STREAM_ABORT_REASON_USER)}
                     onSaveImage={handleSaveImage}
                     imageSaveMode={imageSaveMode}
                     saveButtonLabel={imageSaveButtonLabel}

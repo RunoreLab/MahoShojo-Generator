@@ -1903,6 +1903,7 @@ const SublimationPage: React.FC = () => {
                                         general={streamedGeneralCardForDisplay}
                                         onSaveImage={handleSaveImage}
                                         isStreaming={isGenerating}
+                                        onStopGeneration={() => streamAbortControllerRef.current?.abort(STREAM_ABORT_REASON_USER)}
                                     />
                                     <AiReasoningPanel reasoning={streamingReasoning} status={streamingReasoning?.status ?? 'idle'} compact />
                                     <p className="mt-3 text-xs text-gray-500 text-center">

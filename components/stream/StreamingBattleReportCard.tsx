@@ -27,6 +27,7 @@ import AiReasoningPanel from '@/components/ai/AiReasoningPanel';
 import { extractHeuristicReasoningFromMarkdown } from '@/lib/ai/reasoning-normalizer';
 import type { AIReasoningEnvelope } from '@/types/ai-reasoning';
 import type { BattleReportIllustrationAsset } from '@/components/BattleReportCard';
+import { StreamStopButton } from '@/components/shared/StreamStopButton';
 
 interface StreamingBattleReportCardProps {
     /** 流式输入的 Markdown 文本内容 */
@@ -60,6 +61,8 @@ interface StreamingBattleReportCardProps {
     aiReasoning?: AIReasoningEnvelope | null;
     /** 是否正在生成中（可选，用于显示加载光标等） */
     isStreaming?: boolean;
+    /** 流式生成中的手动中止回调。 */
+    onStopGeneration?: () => void;
     /** 战报插图（可选，支持生成图或用户上传图） */
     illustrationAsset?: BattleReportIllustrationAsset | null;
     /** 手动指定卡片宽度（px）；为空时自动铺满容器。 */
@@ -80,6 +83,7 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
     narrativeHistoryReadCount = null,
     aiReasoning = null,
     isStreaming = false,
+    onStopGeneration,
     illustrationAsset = null,
     cardWidthPx = null
 }) => {
@@ -715,6 +719,9 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
                     >
                         📄 下载记录
                     </button>
+                    {isStreaming && onStopGeneration ? (
+                        <StreamStopButton onClick={onStopGeneration} className="flex-1" />
+                    ) : null}
                 </div>
 
                 {/* Logo占位符，用于截图 */}

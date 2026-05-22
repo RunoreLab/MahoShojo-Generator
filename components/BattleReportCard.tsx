@@ -25,6 +25,7 @@ import { GeneratedByUserBadge } from '@/components/shared/GeneratedByUserBadge';
 import AiReasoningPanel from '@/components/ai/AiReasoningPanel';
 import { extractHeuristicReasoningFromMarkdown } from '@/lib/ai/reasoning-normalizer';
 import type { AIReasoningEnvelope } from '@/types/ai-reasoning';
+import { StreamStopButton } from '@/components/shared/StreamStopButton';
 
 type MarkdownCodeProps = React.ComponentPropsWithoutRef<'code'> & ExtraProps & { inline?: boolean };
 
@@ -85,6 +86,8 @@ export interface BattleReportIllustrationAsset {
 interface BattleReportCardProps {
   report: NewsReport;
   onSaveImage?: (imageUrl: string) => void;
+  isStreaming?: boolean;
+  onStopGeneration?: () => void;
   // 战斗模式，设为可选以兼容旧功能
   mode?: 'classic' | 'kizuna' | 'daily' | 'scenario';
   liveBody?: string;
@@ -92,7 +95,16 @@ interface BattleReportCardProps {
   cardWidthPx?: number | null;
 }
 
-const BattleReportCard: React.FC<BattleReportCardProps> = ({ report, onSaveImage, mode, liveBody, illustrationAsset, cardWidthPx }) => {
+const BattleReportCard: React.FC<BattleReportCardProps> = ({
+  report,
+  onSaveImage,
+  isStreaming = false,
+  onStopGeneration,
+  mode,
+  liveBody,
+  illustrationAsset,
+  cardWidthPx,
+}) => {
   const cardRef = useRef<HTMLDivElement>(null);
   const [isSavingImage, setIsSavingImage] = useState(false);
 
@@ -673,6 +685,9 @@ ${adjudicationMarkdown}
           <button onClick={handleSaveMarkdown} className="save-button" style={{ marginTop: 0, flex: 1 }}>
             📄 下载战斗记录
           </button>
+          {isStreaming && onStopGeneration ? (
+            <StreamStopButton onClick={onStopGeneration} className="flex-1" />
+          ) : null}
         </div>
 
         {/* Logo占位符，用于截图 */}

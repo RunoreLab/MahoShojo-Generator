@@ -742,6 +742,7 @@ export default function FreeGeneratorPage() {
                   <GeneralCharacterCard
                     general={card}
                     isStreaming={submitting}
+                    onStopGeneration={() => streamAbortControllerRef.current?.abort(STREAM_ABORT_REASON_USER)}
                     portraitAsset={characterPortraitAsset}
                   />
                   <AiReasoningPanel reasoning={streamingReasoning} status={streamingReasoning?.status ?? 'idle'} compact />

@@ -691,6 +691,7 @@ export function BattleStorySessionPanel(props: {
                     narrativeHistoryReadCount={streamCardSnapshot?.narrativeHistoryReadCount ?? null}
                     aiReasoning={streamCardSnapshot?.aiReasoning ?? null}
                     isStreaming
+                    onStopGeneration={stopGeneration}
                     cardWidthPx={battleReportCardWidthPx}
                   />
                   <BattleStoryMetaDebugPanel

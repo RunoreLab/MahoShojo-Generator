@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { UserAIProviderConfig } from '@/components/AiProviderSelector';
 import { randomUUID } from '@/lib/crypto';
@@ -1763,6 +1763,10 @@ export function useChallengeController() {
     }
   };
 
+  const stopNodeResolution = useCallback((): void => {
+    activeResolutionAbortRef.current?.abort();
+  }, []);
+
   const backToMap = (): void => {
     resetNodeStageState();
     setStage('map');
@@ -1839,6 +1843,7 @@ export function useChallengeController() {
     deleteRun,
     enterNode,
     resolveCurrentNode,
+    stopNodeResolution,
     backToMap,
     backToLobby,
   };

@@ -3445,6 +3445,7 @@ export function PvpRoomPage() {
                         aiModel={(reportMetaForUi as any)?.ai?.model ?? null}
                         narrativeHistoryReadCount={(reportMetaForUi as any)?.narrativeHistoryReadCount ?? null}
                         aiReasoning={(reportMetaForUi as any)?.aiReasoning ?? null}
+                        onStopGeneration={() => resolveAbortControllerRef.current?.abort(STREAM_ABORT_REASON_USER)}
                         onSaveImage={(imageUrl) => {
                           setSavedImageUrl(imageUrl);
                           setShowImageModal(true);

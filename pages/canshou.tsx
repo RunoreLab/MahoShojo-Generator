@@ -2002,7 +2002,11 @@ const CanshouPage: React.FC = () => {
 
                 {generationMode === 'stream' && streamedGeneralCardForDisplay && (
                   <div className="my-6">
-                    <GeneralCharacterCard general={streamedGeneralCardForDisplay} isStreaming={submitting} />
+                    <GeneralCharacterCard
+                      general={streamedGeneralCardForDisplay}
+                      isStreaming={submitting}
+                      onStopGeneration={() => streamAbortControllerRef.current?.abort(STREAM_ABORT_REASON_USER)}
+                    />
                     <AiReasoningPanel reasoning={streamingReasoning} status={streamingReasoning?.status ?? 'idle'} compact />
                   </div>
                 )}
@@ -2185,6 +2189,8 @@ const CanshouPage: React.FC = () => {
                   <>
                     <GeneralCharacterCard
                       general={streamedGeneralCard}
+                      isStreaming={submitting}
+                      onStopGeneration={() => streamAbortControllerRef.current?.abort(STREAM_ABORT_REASON_USER)}
                       onSaveImage={handleSaveImage}
                       imageSaveMode={imageSaveMode}
                       saveButtonLabel={imageSaveButtonLabel}

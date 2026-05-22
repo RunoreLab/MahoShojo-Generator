@@ -12,12 +12,14 @@ export type ChallengeStoryCardState = {
 type ChallengeStoryCardSectionProps = {
   state: ChallengeStoryCardState;
   isResolving: boolean;
+  onStopGeneration?: () => void;
   onSaveImage?: (imageUrl: string) => void;
 };
 
 export function ChallengeStoryCardSection({
   state,
   isResolving,
+  onStopGeneration,
   onSaveImage,
 }: ChallengeStoryCardSectionProps) {
   const aiUsage = normalizeUsage(state.telemetry?.usage ?? null);
@@ -34,6 +36,7 @@ export function ChallengeStoryCardSection({
         aiUsage={aiUsage}
         aiModel={aiModel}
         isStreaming={isResolving}
+        onStopGeneration={onStopGeneration}
         onSaveImage={onSaveImage}
       />
     </div>
