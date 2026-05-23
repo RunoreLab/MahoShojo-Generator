@@ -718,6 +718,7 @@ body.announcement-visible {
     left: 0;
     right: 0;
     bottom: 0;
+    pointer-events: none;
     background: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="25" cy="25" r="2" fill="rgba(255,255,255,0.1)"/><circle cx="75" cy="75" r="1.5" fill="rgba(255,255,255,0.1)"/><circle cx="80" cy="20" r="1" fill="rgba(255,255,255,0.1)"/></svg>');
     background-size: 100px 100px;
   }
