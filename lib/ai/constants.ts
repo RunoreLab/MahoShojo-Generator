@@ -153,14 +153,9 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 description: '常规场景保持原有调用顺序，默认倾向使用 Gemini 2.5 Flash；排位优先使用轻量模型。'
             },
             {
-                value: 'glm-5',
-                label: 'GLM-5',
-                description: '智谱旗下新一代通用模型，综合能力更强，适合复杂指令、多轮对话与高质量创作。'
-            },
-            {
-                value: 'glm-4.7',
-                label: 'GLM-4.7',
-                description: '智谱旗下通用模型的更新版本，适合复杂指令、多轮对话与综合写作场景。'
+                value: 'big-pickle',
+                label: '实验性/推广模型',
+                description: '可能会随时更换的、处于实验或推广期的模型，或许能带来一些新奇的体验，但不建议发送敏感或私密数据。'
             },
             {
                 value: 'deepseek-v4-flash',
@@ -171,6 +166,16 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 value: 'deepseek-v4-pro',
                 label: 'DeepSeek V4 Pro',
                 description: 'DeepSeek V4 完全体，适合复杂分析、长文本写作与高质量生成。'
+            },
+            {
+                value: 'glm-5',
+                label: 'GLM-5',
+                description: '智谱旗下新一代通用模型，综合能力更强，适合复杂指令、多轮对话与高质量创作。'
+            },
+            {
+                value: 'glm-4.7',
+                label: 'GLM-4.7',
+                description: '智谱旗下通用模型的更新版本，适合复杂指令、多轮对话与综合写作场景。'
             },
             {
                 value: 'gemini-3.5-flash',

@@ -6,6 +6,7 @@ import { STRICT_RANKED_MODEL_FALLBACKS } from '@/lib/arena/ranked-model-policy';
 export interface AIProvider {
   name: string;
   apiKey: string;
+  allowAnonymous?: boolean;
   baseUrl: string;
   model: string | string[]; // 支持单个模型或多个模型数组
   type: 'openai' | 'google' | 'deepseek';
@@ -23,14 +24,27 @@ export interface SafetyCheckPolicy {
   userGuidance: 'all' | 'none';                   // 故事引导检查策略
 }
 
+const hasNonEmptyText = (value: unknown): value is string =>
+  typeof value === 'string' && value.trim().length > 0;
+
+const hasValidModel = (model: AIProvider['model']): boolean => {
+  if (typeof model === 'string') return model.trim().length > 0;
+  if (!Array.isArray(model)) return false;
+  return model.some((item) => hasNonEmptyText(item));
+};
+
 // 解析 AI 提供商配置的函数
-const parseAIProviders = (): AIProvider[] => {
+export const parseAIProvidersFromEnv = (env: NodeJS.ProcessEnv = process.env): AIProvider[] => {
   // JSON 配置方式
-  if (process.env.AI_PROVIDERS_CONFIG) {
+  if (env.AI_PROVIDERS_CONFIG) {
     try {
-      const providers = JSON.parse(process.env.AI_PROVIDERS_CONFIG) as AIProvider[];
+      const providers = JSON.parse(env.AI_PROVIDERS_CONFIG) as AIProvider[];
       return providers
-        .filter(p => p.apiKey && p.baseUrl && p.model && p.type)
+        .filter((provider) => {
+          const hasApiKey = hasNonEmptyText(provider.apiKey);
+          const canBeAnonymous = provider.allowAnonymous === true && provider.type === 'openai';
+          return hasValidModel(provider.model) && hasNonEmptyText(provider.baseUrl) && hasNonEmptyText(provider.type) && (hasApiKey || canBeAnonymous);
+        })
         .map(p => ({
           ...p,
           retryCount: p.retryCount ?? 1,
@@ -42,9 +56,9 @@ const parseAIProviders = (): AIProvider[] => {
   }
 
   // 向后兼容：单个 API Key 方式
-  const singleKey = process.env.AI_API_KEY;
-  const singleUrl = process.env.AI_BASE_URL || 'https://api.openai.com/v1';
-  const singleModel = process.env.AI_MODEL || 'gemini-2.0-flash';
+  const singleKey = env.AI_API_KEY;
+  const singleUrl = env.AI_BASE_URL || 'https://api.openai.com/v1';
+  const singleModel = env.AI_MODEL || 'gemini-2.0-flash';
 
   if (singleKey) {
     return [{
@@ -63,7 +77,7 @@ const parseAIProviders = (): AIProvider[] => {
 
 // 获取有效的 API 提供商（按配置顺序）
 const getAPIProviders = (): AIProvider[] => {
-  return parseAIProviders();
+  return parseAIProvidersFromEnv();
 };
 
 // 为了保持向后兼容，转换为原有的格式
