@@ -25,7 +25,6 @@ import { GeneratedByUserBadge } from '@/components/shared/GeneratedByUserBadge';
 import AiReasoningPanel from '@/components/ai/AiReasoningPanel';
 import { extractHeuristicReasoningFromMarkdown } from '@/lib/ai/reasoning-normalizer';
 import type { AIReasoningEnvelope } from '@/types/ai-reasoning';
-import { StreamStopButton } from '@/components/shared/StreamStopButton';
 
 type MarkdownCodeProps = React.ComponentPropsWithoutRef<'code'> & ExtraProps & { inline?: boolean };
 
@@ -678,16 +677,18 @@ ${adjudicationMarkdown}
         {/* 按钮容器 */}
         <div className="buttons-container flex gap-2 justify-center mt-4" style={{ alignItems: 'stretch' }}>
           {onSaveImage && (
-            <button onClick={handleSaveImage} className="save-button" style={{ marginTop: 0, flex: 1 }} disabled={isSavingImage}>
-              {isSavingImage ? '生成中...' : '📱 保存为图片'}
+            <button
+              onClick={isStreaming && onStopGeneration ? onStopGeneration : handleSaveImage}
+              className="save-button"
+              style={{ marginTop: 0, flex: 1 }}
+              disabled={isSavingImage}
+            >
+              {isStreaming && onStopGeneration ? '⏹ 停止生成' : isSavingImage ? '生成中...' : '📱 保存为图片'}
             </button>
           )}
           <button onClick={handleSaveMarkdown} className="save-button" style={{ marginTop: 0, flex: 1 }}>
             📄 下载战斗记录
           </button>
-          {isStreaming && onStopGeneration ? (
-            <StreamStopButton onClick={onStopGeneration} className="flex-1" />
-          ) : null}
         </div>
 
         {/* Logo占位符，用于截图 */}

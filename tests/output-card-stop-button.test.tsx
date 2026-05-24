@@ -79,15 +79,15 @@ const canshou = {
 describe('输出卡片停止生成按钮', () => {
   test('流式战报卡片在生成中显示停止生成按钮', () => {
     const html = renderToStaticMarkup(
-      <StreamingBattleReportCard content="# 破晓战报\n正文" isStreaming onStopGeneration={noop} />
+      <StreamingBattleReportCard content="# 破晓战报\n正文" isStreaming onStopGeneration={noop} onSaveImage={noop} />
     );
 
     expect(html).toContain('停止生成');
   });
 
-  test('非流式战报卡片只有在生成中且存在中止回调时显示停止生成按钮', () => {
+  test('非流式战报卡片在空闲时不显示停止生成，在流式生成中显示', () => {
     const idleHtml = renderToStaticMarkup(<BattleReportCard report={report} />);
-    const streamingHtml = renderToStaticMarkup(<BattleReportCard report={report} isStreaming onStopGeneration={noop} />);
+    const streamingHtml = renderToStaticMarkup(<BattleReportCard report={report} isStreaming onStopGeneration={noop} onSaveImage={noop} />);
 
     expect(idleHtml).not.toContain('停止生成');
     expect(streamingHtml).toContain('停止生成');
@@ -110,5 +110,17 @@ describe('输出卡片停止生成按钮', () => {
     expect(magicalGirlHtml).toContain('停止生成');
     expect(canshouHtml).toContain('停止生成');
     expect(generalHtml).toContain('停止生成');
+  });
+
+  test('角色卡片在空闲时显示保存图片按钮', () => {
+    const magicalGirlHtml = renderToStaticMarkup(
+      <MagicalGirlCard
+        magicalGirl={magicalGirl}
+        gradientStyle="linear-gradient(135deg, #111827 0%, #1f2937 100%)"
+      />
+    );
+
+    expect(magicalGirlHtml).toContain('保存为图片');
+    expect(magicalGirlHtml).not.toContain('停止生成');
   });
 });

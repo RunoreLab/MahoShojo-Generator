@@ -27,7 +27,6 @@ import AiReasoningPanel from '@/components/ai/AiReasoningPanel';
 import { extractHeuristicReasoningFromMarkdown } from '@/lib/ai/reasoning-normalizer';
 import type { AIReasoningEnvelope } from '@/types/ai-reasoning';
 import type { BattleReportIllustrationAsset } from '@/components/BattleReportCard';
-import { StreamStopButton } from '@/components/shared/StreamStopButton';
 
 interface StreamingBattleReportCardProps {
     /** 流式输入的 Markdown 文本内容 */
@@ -706,11 +705,11 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
                 <div className="buttons-container flex gap-2 justify-center mt-6 pt-4 border-t border-gray-700" style={{ alignItems: 'stretch' }}>
                     {onSaveImage && (
                         <button
-                            onClick={handleSaveImage}
-                            disabled={isStreaming || isSavingImage}
+                            onClick={isStreaming && onStopGeneration ? onStopGeneration : handleSaveImage}
+                            disabled={isSavingImage}
                             className="save-button flex-1 bg-white/10 hover:bg-white/20 text-white py-2 px-4 rounded transition-all disabled:opacity-60 disabled:cursor-not-allowed"
                         >
-                            {isSavingImage ? '生成中...' : isStreaming ? '生成中...' : '📱 保存为图片'}
+                            {isStreaming && onStopGeneration ? '⏹ 停止生成' : isSavingImage ? '生成中...' : '📱 保存为图片'}
                         </button>
                     )}
                     <button
@@ -719,9 +718,6 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
                     >
                         📄 下载记录
                     </button>
-                    {isStreaming && onStopGeneration ? (
-                        <StreamStopButton onClick={onStopGeneration} className="flex-1" />
-                    ) : null}
                 </div>
 
                 {/* Logo占位符，用于截图 */}

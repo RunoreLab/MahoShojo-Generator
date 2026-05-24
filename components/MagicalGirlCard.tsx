@@ -14,7 +14,6 @@ import {
   type CharacterParameterSourceKey,
 } from '@/lib/creator/character-parameter-view';
 import type { CharacterCardPortraitAsset } from '@/types/visual-asset';
-import { StreamStopButton } from '@/components/shared/StreamStopButton';
 
 interface MagicalGirlCardProps {
   magicalGirl: {
@@ -487,12 +486,13 @@ const MagicalGirlCard: React.FC<MagicalGirlCardProps> = ({
         )}
 
         <div className="mt-4 flex flex-col gap-2 sm:flex-row">
-          <button onClick={handleSaveImage} className="save-button flex-1" disabled={isStreaming || isSavingImage}>
-            {isStreaming || isSavingImage ? '生成中...' : (saveButtonLabel ?? '📱 保存为图片')}
+          <button
+            onClick={isStreaming && onStopGeneration ? onStopGeneration : handleSaveImage}
+            className="save-button flex-1"
+            disabled={isSavingImage}
+          >
+            {isStreaming && onStopGeneration ? '⏹ 停止生成' : isSavingImage ? '生成中...' : (saveButtonLabel ?? '📱 保存为图片')}
           </button>
-          {isStreaming && onStopGeneration ? (
-            <StreamStopButton onClick={onStopGeneration} className="flex-1" />
-          ) : null}
         </div>
 
         <div
