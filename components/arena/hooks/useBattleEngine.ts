@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useMemo, useRef } from 'react';
+import { useCallback, useMemo } from 'react';
 import { useRouter } from 'next/router';
 
 import type { NewsReport } from '@/components/BattleReportCard';
@@ -38,6 +38,8 @@ import { normalizeCustomStoryLength } from '@/lib/story-length';
 import { buildCustomProviderRequestPayload } from '@/lib/ai/custom-provider';
 
 const sanitizeTextByShieldWords = (text: string): string => applyShieldWords(text).filteredText;
+
+let sharedGenerationAbortController: AbortController | null = null;
 
 const isStreamInterruptedError = (error: unknown): boolean => {
   if (error instanceof StreamReadTimeoutError) return true;
@@ -442,7 +444,6 @@ export const useBattleEngine = () => {
     baseKey: ARENA_PROVIDER_COOLDOWN_BASE_KEY,
     ...providerCooldownConfig,
   });
-  const generationAbortControllerRef = useRef<AbortController | null>(null);
 
   const scenarioDisplayName = useMemo(() => {
     // 只有在情景模式下才需要展示情景标题，避免切换到其他模式后沿用上一次的情景小标题
@@ -727,8 +728,8 @@ export const useBattleEngine = () => {
 
 	      if (generationMode === 'stream') {
 	        const abortController = new AbortController();
-	        generationAbortControllerRef.current?.abort(STREAM_ABORT_REASON_USER);
-	        generationAbortControllerRef.current = abortController;
+	        sharedGenerationAbortController?.abort(STREAM_ABORT_REASON_USER);
+	        sharedGenerationAbortController = abortController;
 	        let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
 
 		        try {
@@ -1579,7 +1580,7 @@ export const useBattleEngine = () => {
 	    } catch (error) {
 	      const shouldTreatAsInterrupted = generationMode === 'stream' && isStreamInterruptedError(error);
 	      if (shouldTreatAsInterrupted) {
-          const abortReason = generationAbortControllerRef.current?.signal.reason;
+          const abortReason = sharedGenerationAbortController?.signal.reason;
           if (abortReason === STREAM_ABORT_REASON_USER) {
             setError('已手动停止生成。当前预览可能不完整，但可继续查看。');
           } else {
@@ -1592,7 +1593,7 @@ export const useBattleEngine = () => {
 	        setNewsReport(null);
 	      }
 	    } finally {
-        generationAbortControllerRef.current = null;
+        sharedGenerationAbortController = null;
 	      setIsGenerating(false);
 	      setIsStreaming(false);
 	    }
@@ -1639,7 +1640,7 @@ export const useBattleEngine = () => {
   ]);
 
   const stopGeneration = useCallback(() => {
-    generationAbortControllerRef.current?.abort(STREAM_ABORT_REASON_USER);
+    sharedGenerationAbortController?.abort(STREAM_ABORT_REASON_USER);
   }, []);
 
   const handleRedoUpdates = useCallback(async () => {
