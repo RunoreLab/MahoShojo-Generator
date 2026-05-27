@@ -7,6 +7,7 @@ import rehypeKatex from 'rehype-katex';
 import remarkMath from 'remark-math';
 import type { AdjudicationResult } from '@/types/arena';
 import remarkBattleTable from '@/lib/markdown/remarkBattleTable';
+import { fixNestedListIndentation } from '@/lib/markdown/fix-list-indentation';
 import {
     formatMarkdownImage,
     formatMarkdownLink,
@@ -90,7 +91,7 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
     const [isSavingImage, setIsSavingImage] = useState(false);
     const headlineMatch = content.match(/^\s*#{1,3}\s*(.*)(?:\r?\n|$)/);
     const headline = headlineMatch ? headlineMatch[1].trim() : '';
-    const markdownBody = headlineMatch && headline ? content.slice(headlineMatch[0].length).trimStart() : content;
+    const markdownBody = fixNestedListIndentation(headlineMatch && headline ? content.slice(headlineMatch[0].length).trimStart() : content);
     const illustrationImageUrl = typeof illustrationAsset?.imageUrl === 'string' ? illustrationAsset.imageUrl.trim() : '';
     const uploadedIllustrationNote =
         illustrationAsset?.source === 'uploaded'
@@ -398,6 +399,12 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
             <ul className="list-none space-y-2 my-2 text-sm bg-black/20 p-3 rounded border-l-4 border-green-400" {...props}>
                 {children}
             </ul>
+        ),
+        // ol -> 有序列表
+        ol: ({ children, ...props }) => (
+            <ol className="list-decimal pl-5 my-2 space-y-1 text-sm opacity-90" {...props}>
+                {children}
+            </ol>
         ),
         li: ({ children, ...props }) => (
             <li className="opacity-90 pl-2 border-l border-gray-700/50" {...props}>

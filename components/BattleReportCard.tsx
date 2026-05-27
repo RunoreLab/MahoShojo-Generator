@@ -7,6 +7,7 @@ import remarkMath from 'remark-math';
 // 1. [新增] 导入随机判定结果的类型定义
 import { AdjudicationResult } from '@/types/arena';
 import remarkBattleTable from '@/lib/markdown/remarkBattleTable';
+import { fixNestedListIndentation } from '@/lib/markdown/fix-list-indentation';
 import {
   formatMarkdownImage,
   formatMarkdownLink,
@@ -110,7 +111,7 @@ const BattleReportCard: React.FC<BattleReportCardProps> = ({
   const headline = typeof report?.headline === 'string' && report.headline.trim() ? report.headline.trim() : '（无标题）';
   const reporterName = typeof report?.reporterInfo?.name === 'string' ? report.reporterInfo.name : '';
   const reporterPublication = typeof report?.reporterInfo?.publication === 'string' ? report.reporterInfo.publication : '';
-  const bodyContent = (liveBody ?? report.article?.body ?? '').trimEnd();
+  const bodyContent = fixNestedListIndentation((liveBody ?? report.article?.body ?? '').trimEnd());
   const analysisContent = (report.article?.analysis ?? '').trimEnd();
   const officialWinner = (report.officialReport?.winner ?? '').trim();
   const officialConclusion = (report.officialReport?.conclusion ?? '').trimEnd();
