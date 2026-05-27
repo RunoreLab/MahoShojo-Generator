@@ -156,20 +156,6 @@ export const useBattleStore = create<BattleStoreState>()(
         set({
           combatants: [],
           teams: [],
-          newsReport: null,
-          updatedCombatants: [],
-          streamingMarkdown: null,
-          isStreaming: false,
-          streamReporterInfo: null,
-          streamUserGuidance: null,
-          streamCharacterGuidances: null,
-          streamAiUsage: null,
-          streamAiModel: null,
-          streamNarrativeHistoryReadCount: null,
-          streamReasoning: null,
-          streamUpdateMetaDebug: null,
-          latestAiImpacts: null,
-          lastGenerationId: null,
         }),
 
       updateCombatantTeam: (identifier, teamId) =>
