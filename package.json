@@ -59,6 +59,7 @@
         "react-hook-form": "^7.68.0",
         "react-markdown": "^10.1.0",
         "rehype-katex": "^7.0.1",
+        "remark-gfm": "^4.0.1",
         "remark-math": "^6.0.0",
         "string-random": "^0.1.3",
         "tailwind-merge": "^3.3.0",

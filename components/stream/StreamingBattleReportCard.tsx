@@ -4,6 +4,7 @@ import React, { useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { Components } from 'react-markdown';
 import rehypeKatex from 'rehype-katex';
+import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import type { AdjudicationResult } from '@/types/arena';
 import remarkBattleTable from '@/lib/markdown/remarkBattleTable';
@@ -634,7 +635,7 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
                 {/* Markdown 内容渲染区域 */}
                 <div className="min-h-[200px]">
                     <ReactMarkdown
-                        remarkPlugins={[remarkBattleTable, [remarkMath, { singleDollarTextMath: true }]]}
+                        remarkPlugins={[remarkGfm, remarkBattleTable, [remarkMath, { singleDollarTextMath: true }]]}
                         rehypePlugins={[[rehypeKatex, { throwOnError: false, strict: 'ignore' }]]}
                         components={markdownComponents}
                     >

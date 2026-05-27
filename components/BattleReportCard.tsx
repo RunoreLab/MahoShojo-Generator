@@ -3,6 +3,7 @@
 import React, { useRef, useState } from 'react';
 import ReactMarkdown, { type Components, type ExtraProps } from 'react-markdown';
 import rehypeKatex from 'rehype-katex';
+import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 // 1. [新增] 导入随机判定结果的类型定义
 import { AdjudicationResult } from '@/types/arena';
@@ -590,7 +591,7 @@ ${adjudicationMarkdown}
         <div className="result-item">
           <div className="result-value">
             <ReactMarkdown
-              remarkPlugins={[remarkBattleTable, [remarkMath, { singleDollarTextMath: true }]]}
+              remarkPlugins={[remarkGfm, remarkBattleTable, [remarkMath, { singleDollarTextMath: true }]]}
               rehypePlugins={[[rehypeKatex, { throwOnError: false, strict: 'ignore' }]]}
               components={markdownComponents}
             >
