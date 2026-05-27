@@ -18,6 +18,7 @@ import { buildTitleDisplay } from '@/lib/text';
 import { ChevronDown, Filter } from 'lucide-react';
 import DecksModal from './DecksModal';
 import { getDataCardStatus } from '@/lib/data-card-status';
+import type { BadgeDefinition } from '@/types/badge';
 
 type DataCardType = 'character' | 'scenario' | 'history' | 'questionnaire';
 type BattleDataSelectedType = DataCardType | 'all';
@@ -181,10 +182,11 @@ export default function BattleDataModal({
   maxSelected,
   externalError,
 }: BattleDataModalProps) {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, user, userBadges } = useAuth();
   const isComposingSearchRef = useRef(false);
   const publicFetchAbortControllerRef = useRef<AbortController | null>(null);
   const metaFetchAbortControllerRef = useRef<AbortController | null>(null);
+  const badgeFetchAbortControllerRef = useRef<AbortController | null>(null);
   const selectingCardIdsRef = useRef<Set<string>>(new Set());
   const isSingleSelectingRef = useRef(false);
   const [userDataCards, setUserDataCards] = useState<any[]>([]);
@@ -205,6 +207,7 @@ export default function BattleDataModal({
   const [selectError, setSelectError] = useState<string | null>(null);
   const cardsPerPage = 12;
   const [cardMetaById, setCardMetaById] = useState<Record<string, { techScore: number | null; techLevel: string | null; strictTier: string | null; isNative: boolean | null }>>({});
+  const [authorBadgesById, setAuthorBadgesById] = useState<Record<number, BadgeDefinition[]>>({});
   const effectiveAllowedTypes = useMemo<DataCardType[]>(() => {
     const candidates = selectedType === 'all'
       ? (Array.isArray(allowedTypes) && allowedTypes.length > 0 ? allowedTypes : ['character', 'scenario', 'history', 'questionnaire'])
@@ -1159,6 +1162,83 @@ export default function BattleDataModal({
     };
   }, [isOpen, isPvpHandTab, displayCardIds, cardMetaById]);
 
+  // 批量获取作者佩戴的徽章
+  const currentUserEquippedBadges = useMemo(() => {
+    return (Array.isArray(userBadges) ? userBadges : [])
+      .filter((ub) => ub.isEquipped)
+      .sort((a, b) => a.displayOrder - b.displayOrder)
+      .map((ub) => ub.badge);
+  }, [userBadges]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    if (isPvpHandTab) return;
+    if (displayCards.length === 0) return;
+
+    // "我的" 标签页直接使用当前用户的徽章
+    if (activeTab === 'my' && user?.id) {
+      setAuthorBadgesById((prev) => {
+        if (prev[user.id]) return prev;
+        return { ...prev, [user.id]: currentUserEquippedBadges };
+      });
+      return;
+    }
+
+    // 提取需要获取徽章的用户 ID
+    const pendingUserIds = new Set<number>();
+    for (const card of displayCards as any[]) {
+      const uid = typeof card?.user_id === 'number' ? card.user_id : 0;
+      if (uid > 0 && !Object.prototype.hasOwnProperty.call(authorBadgesById, uid)) {
+        pendingUserIds.add(uid);
+      }
+    }
+    if (pendingUserIds.size === 0) return;
+
+    badgeFetchAbortControllerRef.current?.abort();
+    const abortController = new AbortController();
+    badgeFetchAbortControllerRef.current = abortController;
+
+    const run = async () => {
+      try {
+        const res = await fetch('/api/badges/batch', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userIds: [...pendingUserIds] }),
+          signal: abortController.signal,
+        });
+        if (!res.ok) return;
+        const json = (await res.json()) as any;
+        if (!json || json.success !== true || typeof json.items !== 'object' || !json.items) return;
+
+        setAuthorBadgesById((prev) => {
+          const next = { ...prev };
+          for (const [uid, badges] of Object.entries<any>(json.items)) {
+            const userId = Number(uid);
+            if (userId > 0 && Array.isArray(badges)) {
+              next[userId] = badges;
+            }
+          }
+          return next;
+        });
+      } catch (error) {
+        if (abortController.signal.aborted || (error instanceof Error && error.name === 'AbortError')) {
+          return;
+        }
+        console.warn('加载作者徽章失败（降级为不显示）:', error);
+      } finally {
+        if (badgeFetchAbortControllerRef.current === abortController) {
+          badgeFetchAbortControllerRef.current = null;
+        }
+      }
+    };
+
+    void run();
+
+    return () => {
+      abortController.abort();
+    };
+  }, [isOpen, isPvpHandTab, activeTab, displayCards, user?.id, currentUserEquippedBadges, authorBadgesById]);
+
   const publicTotalPages = publicFilters.roleType && selectedType === 'character'
     ? Math.max(1, Math.ceil(filteredPublicCards.length / cardsPerPage))
     : null;
@@ -1658,6 +1738,7 @@ export default function BattleDataModal({
 	                        canFavorite={enableFavorite}
 	                        isRecommended={card.is_recommended === 1}
 	                        author={activeTab === 'my' ? '我' : (card.username || '未知')}
+	                        authorBadges={activeTab === 'my' ? currentUserEquippedBadges : (authorBadgesById[card.user_id] ?? [])}
 	                        onViewDetails={() => { setSelectedCard(card); setShowDetailsModal(true); }}
 	                        onAuthorClick={handleAuthorClick}
 	                        onToggleFavorite={enableFavorite ? (next) => handleFavoriteToggleForCard(card, next) : undefined}
@@ -1731,6 +1812,7 @@ export default function BattleDataModal({
             likeCount: selectedCard.like_count,
             favoriteCount: selectedCard.favorite_count,
             author: activeTab === 'my' ? '我' : (selectedCard.username || '未知'),
+            authorBadges: activeTab === 'my' ? currentUserEquippedBadges : (authorBadgesById[selectedCard.user_id] ?? []),
             createdAt: selectedCard.created_at,
             updatedAt: selectedCard.updated_at
           }}

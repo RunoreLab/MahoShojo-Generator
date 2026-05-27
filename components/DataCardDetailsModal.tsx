@@ -10,6 +10,8 @@ import { EntityRatingHistoryButton } from '@/components/ranking/EntityRatingHist
 import { TierBadge } from '@/components/ranking/TierBadge';
 import type { DataCardReportCapabilityDto, DataCardReportDraft } from '@/lib/data-card-reports/types';
 import { buildTitleDisplay } from '@/lib/text';
+import Badge from '@/components/badge/Badge';
+import type { BadgeDefinition } from '@/types/badge';
 
 type ApiTag = {
   id: string;
@@ -159,6 +161,7 @@ interface DataCardDetailsModalProps {
     likeCount?: number;
     favoriteCount?: number;
     author?: string;
+    authorBadges?: BadgeDefinition[];
     createdAt?: string;
     updatedAt?: string;
   };
@@ -836,7 +839,16 @@ export default function DataCardDetailsModal({
               <span className="flex items-center gap-1"><Download className="w-3 h-3" />{card.usageCount ?? 0}</span>
             </div>
             <div className="flex flex-wrap items-center gap-4 text-[11px] text-gray-500">
-              <span>作者：{card.author ?? '未知'}</span>
+              <span className="inline-flex items-center gap-1">
+                作者：{card.author ?? '未知'}
+                {card.authorBadges && card.authorBadges.length > 0 && (
+                  <span className="inline-flex items-center gap-0.5">
+                    {card.authorBadges.map((badge) => (
+                      <Badge key={badge.id} badge={badge} size="sm" />
+                    ))}
+                  </span>
+                )}
+              </span>
               <span>创建：{formatDateTime(card.createdAt)}</span>
               <span>更新：{formatDateTime(card.updatedAt)}</span>
             </div>

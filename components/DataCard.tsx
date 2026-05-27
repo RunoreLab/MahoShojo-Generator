@@ -6,6 +6,8 @@ import { getDataCardStatus } from '@/lib/data-card-status';
 import { TechBadge } from '@/components/ranking/TechBadge';
 import { TierBadge } from '@/components/ranking/TierBadge';
 import { buildTitleDisplay } from '@/lib/text';
+import Badge from '@/components/badge/Badge';
+import type { BadgeDefinition } from '@/types/badge';
 
 interface DataCardProps {
   id: string; // Changed from number to string for UUID
@@ -42,6 +44,7 @@ interface DataCardProps {
   hot?: boolean;
   pending?: boolean;
   onReplace?: () => void;
+  authorBadges?: BadgeDefinition[];
 }
 
 const typeMap = {
@@ -98,6 +101,7 @@ export default function DataCard({
   hot = false,
   pending = false,
   onReplace,
+  authorBadges,
 }: DataCardProps) {
   const [shareStatus, setShareStatus] = useState<'idle' | 'copied'>('idle');
   const [liked, setLiked] = useState(false);
@@ -381,22 +385,31 @@ export default function DataCard({
       <div className="mt-auto flex flex-col gap-2">
         {/* 作者信息现在是单独一行，避免与按钮竞争空间 */}
         {author && (
-          onAuthorClick ? (
-            <button
-              onClick={(e) => {
-                e.stopPropagation(); // 阻止事件冒泡，防止触发整个卡片的点击事件
-                onAuthorClick(author);
-              }}
-              className={`text-xs ${subTextColor} hover:text-purple-600 hover:underline transition-colors text-left truncate`}
-              title={`筛选作者: ${author}`}
-            >
-              作者: {author}
-            </button>
-          ) : (
-            <p className={`text-xs leading-[18px] ${subTextColor} truncate`} title={`作者: ${author}`}>
-              作者: {author}
-            </p>
-          )
+          <div className="flex items-center gap-1 min-w-0">
+            {onAuthorClick ? (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation(); // 阻止事件冒泡，防止触发整个卡片的点击事件
+                  onAuthorClick(author);
+                }}
+                className={`text-xs ${subTextColor} hover:text-purple-600 hover:underline transition-colors text-left truncate`}
+                title={`筛选作者: ${author}`}
+              >
+                作者: {author}
+              </button>
+            ) : (
+              <p className={`text-xs leading-[18px] ${subTextColor} truncate`} title={`作者: ${author}`}>
+                作者: {author}
+              </p>
+            )}
+            {authorBadges && authorBadges.length > 0 && (
+              <span className="inline-flex items-center gap-0.5 shrink-0">
+                {authorBadges.map((badge) => (
+                  <Badge key={badge.id} badge={badge} size="sm" />
+                ))}
+              </span>
+            )}
+          </div>
         )}
 
         {/* 操作按钮行 */}
