@@ -138,6 +138,9 @@ importers:
       '@eslint/eslintrc':
         specifier: ^3
         version: 3.3.3
+      '@next/env':
+        specifier: 15.3.8
+        version: 15.3.8
       '@tailwindcss/postcss':
         specifier: ^4
         version: 4.1.18
