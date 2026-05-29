@@ -1,9 +1,9 @@
 import { useMemo, useRef, useState } from 'react';
 import Head from 'next/head';
 import Link from 'next/link';
-import { useRouter } from 'next/router';
 import TurnstileWidget, { TurnstileRef } from '@/components/Turnstile';
 import { PASSWORD_MIN_LENGTH, getPasswordPolicySummaryMessage, validatePasswordPolicy } from '@/lib/auth/password-policy';
+import { useNextRouter } from '@/lib/use-next-router';
 
 interface RecoveryMessage {
   type: 'success' | 'error';
@@ -14,7 +14,7 @@ const REQUEST_SUCCESS_HINT = '如果您输入的信息正确，系统会向邮�
 const RESET_SUCCESS_HINT = '新密码设置成功，请使用密码登录。';
 
 const PasswordRecoveryPage = () => {
-  const router = useRouter();
+  const router = useNextRouter();
   const resetToken = useMemo(() => {
     const value = router.query.token;
     if (Array.isArray(value)) return value[0] ?? '';
