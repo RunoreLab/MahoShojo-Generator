@@ -103,7 +103,7 @@ const main = () => {
   if (args.has('--help')) {
     console.log(`[season-archive-migrate]
 用法：
-  bun tsx scripts/season-archive-migrate.ts [--file <archive.json>] [--dir <dir>] [--write]
+  pnpm exec tsx scripts/season-archive-migrate.ts [--file <archive.json>] [--dir <dir>] [--write]
 
 说明：
   - 用于把历史赛季归档从 schemaVersion=2 迁移到 schemaVersion=3

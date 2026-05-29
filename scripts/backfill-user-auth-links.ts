@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env -S pnpm exec tsx
 
 import { loadEnvConfig } from '@next/env';
 
@@ -150,7 +150,7 @@ async function main() {
 回填 user_auth_links（email 优先，username 兜底）
 
 用法：
-  bun scripts/backfill-user-auth-links.ts [options]
+  pnpm exec tsx scripts/backfill-user-auth-links.ts [options]
 
 Options：
   --write                  写入数据库（默认 dry-run）

@@ -510,7 +510,7 @@ v0.6.0 推荐采用“事件先行”的两阶段：
 **试算脚本（用于自检分布与榜单对照）**  
 可以用项目内脚本快速跑一遍本地语料与强度榜单（输出分布、各 tier 的均值/分位数、以及 Spearman 相关性，仅作 sanity check）：
 ```bash
-bun run scripts/tech-index-report.ts --input "/mnt/d/04-生活与娱乐/魔法少女竞技场" --sample 600 --seed 20260103 --ranking "/mnt/d/04-生活与娱乐/魔法少女竞技场/社群内排行榜单/AAA MLA V9.0/📘 魔法少女  残兽 强度排行榜（非原生篇）V8.0.txt" --ranking-search-root "/mnt/d/04-生活与娱乐/魔法少女竞技场/社群内排行榜单/AAA MLA V9.0"
+pnpm exec tsx scripts/tech-index-report.ts --input "/mnt/d/04-生活与娱乐/魔法少女竞技场" --sample 600 --seed 20260103 --ranking "/mnt/d/04-生活与娱乐/魔法少女竞技场/社群内排行榜单/AAA MLA V9.0/📘 魔法少女  残兽 强度排行榜（非原生篇）V8.0.txt" --ranking-search-root "/mnt/d/04-生活与娱乐/魔法少女竞技场/社群内排行榜单/AAA MLA V9.0"
 ```
 
 #### 2.3.6 映射到本项目的建议

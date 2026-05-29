@@ -30,7 +30,7 @@
 用于验证 SQL 过滤、快照范围、字段是否齐全。
 
 ```bash
-bun tsx scripts/season-archive.ts --season-id S0 --snapshot-only --require-db
+pnpm exec tsx scripts/season-archive.ts --season-id S0 --snapshot-only --require-db
 ```
 
 可选：
@@ -41,7 +41,7 @@ bun tsx scripts/season-archive.ts --season-id S0 --snapshot-only --require-db
 ### Step 2：正式归档（写入快照 + 把赛季标记为 history）
 
 ```bash
-bun tsx scripts/season-archive.ts --season-id S0 --require-db
+pnpm exec tsx scripts/season-archive.ts --season-id S0 --require-db
 ```
 
 脚本会做两件事：
@@ -55,20 +55,20 @@ bun tsx scripts/season-archive.ts --season-id S0 --require-db
 先 dry-run（默认即 dry-run），观察参数与样例变化：
 
 ```bash
-bun tsx scripts/season-soft-reset.ts --queue all --preview 10 --require-db
+pnpm exec tsx scripts/season-soft-reset.ts --queue all --preview 10 --require-db
 ```
 
 确认无误后再执行写入（会更新 `arena_ratings`，并清空局数/W-L-D 等用于新赛季重新定级）：
 
 ```bash
-bun tsx scripts/season-soft-reset.ts --queue all --preview 10 --apply --require-db
+pnpm exec tsx scripts/season-soft-reset.ts --queue all --preview 10 --apply --require-db
 ```
 
 说明：
 - 默认启用 auto tuning，会基于数据库统计推导“按场次/活跃度的回收力度”；如需完全手动，传入 `--no-auto`
 - strict 队列执行 soft reset 时，会同时把 `seasonPeakRating/seasonPeakGames/seasonPeakAt/seasonPeakTier/seasonLowRating/seasonLowGames/seasonLowAt` 重置到新赛季起始值语义（起始分 + 0 局 + 当前时间），其中 `seasonPeakTier` 固定重置为 `无牌`
 - free 队列第一版仍不写 season extrema 相关字段（保持原值/NULL，不做污染）
-- 更详细参数见：`bun tsx scripts/season-soft-reset.ts --help`
+- 更详细参数见：`pnpm exec tsx scripts/season-soft-reset.ts --help`
 
 ### Step 4：创建/切换新赛季（手动编辑静态配置）
 

@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env -S pnpm exec tsx
 
 /**
  * S0 赛季结算徽章：创建/同步定义，并为满足条件的用户发放
@@ -8,8 +8,8 @@
  * - S0历战：任意角色在自由排位对局数 > 100
  *
  * 用法：
- * - 预览（默认）：bun run scripts/badge/grant-season-s0-badges.ts
- * - 执行写入：bun run scripts/badge/grant-season-s0-badges.ts --apply
+ * - 预览（默认）：pnpm exec tsx scripts/badge/grant-season-s0-badges.ts
+ * - 执行写入：pnpm exec tsx scripts/badge/grant-season-s0-badges.ts --apply
  *
  * 说明：
  * - 默认会从 .env / .env.local 读取 Cloudflare D1 配置（与 season-archive / season-soft-reset 脚本一致）
@@ -321,7 +321,7 @@ async function main() {
   }
   if (dryRun) {
     console.log('Dry-run 模式：未对数据库进行任何修改。');
-    console.log('如需执行写入，请运行：bun run scripts/badge/grant-season-s0-badges.ts --apply');
+    console.log('如需执行写入，请运行：pnpm exec tsx scripts/badge/grant-season-s0-badges.ts --apply');
   }
 }
 

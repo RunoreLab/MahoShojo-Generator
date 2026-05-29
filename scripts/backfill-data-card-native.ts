@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env -S pnpm exec tsx
 
 import { loadEnvConfig } from '@next/env';
 
@@ -183,15 +183,15 @@ async function main() {
 批量重算 data_card_metrics.is_native（仅原生性，不重算技术值）
 
 用法：
-  bun scripts/backfill-data-card-native.ts [options]
+  pnpm exec tsx scripts/backfill-data-card-native.ts [options]
 
 必需环境变量：
   CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID / D1_DATABASE_ID / SIGNATURE_SECRET_KEY
 
 常用示例：
-  bun scripts/backfill-data-card-native.ts --dry-run --limit 50
-  bun scripts/backfill-data-card-native.ts --batch 30 --concurrency 4
-  bun scripts/backfill-data-card-native.ts --type character
+  pnpm exec tsx scripts/backfill-data-card-native.ts --dry-run --limit 50
+  pnpm exec tsx scripts/backfill-data-card-native.ts --batch 30 --concurrency 4
+  pnpm exec tsx scripts/backfill-data-card-native.ts --type character
 
 Options：
   --dry-run                仅校验不落库

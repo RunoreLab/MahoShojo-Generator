@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env -S pnpm exec tsx
 
 /**
  * 赛季结算徽章：创建/同步定义，并为满足条件的用户发放
@@ -8,8 +8,8 @@
  * - {seasonId}历战：任意角色在自由排位对局数 > 100
  *
  * 用法：
- * - 预览：bun run scripts/badge/grant-season-badges.ts --season-id S1 --season-name 启航赛季
- * - 执行：bun run scripts/badge/grant-season-badges.ts --season-id S1 --season-name 启航赛季 --apply
+ * - 预览：pnpm exec tsx scripts/badge/grant-season-badges.ts --season-id S1 --season-name 启航赛季
+ * - 执行：pnpm exec tsx scripts/badge/grant-season-badges.ts --season-id S1 --season-name 启航赛季 --apply
  */
 
 import { loadEnvConfig } from '@next/env';
@@ -219,7 +219,7 @@ async function main() {
   if (args.has('--help') || args.has('-h')) {
     console.log(`[grant-season-badges]
 用法：
-  bun run scripts/badge/grant-season-badges.ts --season-id S1 --season-name 启航赛季 [--apply]
+  pnpm exec tsx scripts/badge/grant-season-badges.ts --season-id S1 --season-name 启航赛季 [--apply]
 
 说明：
   - 默认 dry-run，仅预览将要创建的徽章定义与发放名单

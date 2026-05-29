@@ -2,10 +2,10 @@
  * 生成随机兑换码的工具脚本
  *
  * 使用方法：
- * bun run scripts/generate-redemption-codes.ts <数量> <槽位数>
+ * pnpm exec tsx scripts/generate-redemption-codes.ts <数量> <槽位数>
  *
  * 例如：
- * bun run scripts/generate-redemption-codes.ts 10 64
+ * pnpm exec tsx scripts/generate-redemption-codes.ts 10 64
  * 生成 10 个兑换码，每个增加 64 个槽位
  */
 
@@ -167,8 +167,8 @@ async function main() {
   const args = process.argv.slice(2);
 
   if (args.length < 2) {
-    console.error('❌ 使用方法: bun run scripts/generate-redemption-codes.ts <数量> <槽位数>');
-    console.error('例如: bun run scripts/generate-redemption-codes.ts 10 64');
+    console.error('❌ 使用方法: pnpm exec tsx scripts/generate-redemption-codes.ts <数量> <槽位数>');
+    console.error('例如: pnpm exec tsx scripts/generate-redemption-codes.ts 10 64');
     process.exit(1);
   }
 

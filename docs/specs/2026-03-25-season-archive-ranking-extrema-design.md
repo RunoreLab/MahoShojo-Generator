@@ -326,7 +326,7 @@ type LeaderboardItem = {
 2. 扩展 `scripts/season-archive.ts` 的快照输出
 3. 扩展 `arena-read` 与 `/api/arena/leaderboard`
 4. 统一 `RankingPage` 当前/历史赛季的 season 视图模型和渲染
-5. 补齐测试并运行 `bun test`、`bun run lint`、`bun run build`
+5. 补齐测试并运行 `pnpm test`、`pnpm lint`、`pnpm build`
 
 ---
 

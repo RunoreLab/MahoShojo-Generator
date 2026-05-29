@@ -4,7 +4,7 @@
  * 将用户原有的 prefix 头衔转换为对应的徽章，并插入数据库中
  *
  * 使用方法：
- * bun run scripts/convert-prefix-to-badges.ts [--dry-run]
+ * pnpm exec tsx scripts/convert-prefix-to-badges.ts [--dry-run]
  *
  * 选项：
  * --dry-run: 只显示转换预览，不实际执行数据库操作

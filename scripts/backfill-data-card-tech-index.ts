@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env -S pnpm exec tsx
 
 import { loadEnvConfig } from '@next/env';
 
@@ -280,7 +280,7 @@ async function main() {
 批量回填/重算数据卡技术值（tech index）
 
 用法：
-  bun scripts/backfill-data-card-tech-index.ts [options]
+  pnpm exec tsx scripts/backfill-data-card-tech-index.ts [options]
 
 必需环境变量：
   CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID / D1_DATABASE_ID
@@ -289,10 +289,10 @@ async function main() {
   SIGNATURE_SECRET_KEY（用于签名校验；仅在首次写入 is_native 或显式 --recompute-native 时生效）
 
 常用示例：
-  bun scripts/backfill-data-card-tech-index.ts --dry-run --limit 20
-  bun scripts/backfill-data-card-tech-index.ts --batch 10 --concurrency 2
-  bun scripts/backfill-data-card-tech-index.ts --force --write-details false
-  bun scripts/backfill-data-card-tech-index.ts --start-after <dataCardId>
+  pnpm exec tsx scripts/backfill-data-card-tech-index.ts --dry-run --limit 20
+  pnpm exec tsx scripts/backfill-data-card-tech-index.ts --batch 10 --concurrency 2
+  pnpm exec tsx scripts/backfill-data-card-tech-index.ts --force --write-details false
+  pnpm exec tsx scripts/backfill-data-card-tech-index.ts --start-after <dataCardId>
 
 Options：
   --dry-run                仅计算不落库

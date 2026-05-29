@@ -75,7 +75,7 @@
 * **框架**: Next.js 15（Pages Router 为主，局部 App Router）, React 19
 * **语言**: TypeScript
 * **包管理器**: pnpm 11.3.0
-* **运行时**: Node.js 22+ (开发与构建), Bun (测试运行器), Cloudflare Pages/Workers (生产，Edge Runtime)
+* **运行时**: Node.js 22+ (开发、构建与脚本), Cloudflare Pages/Workers (生产，Edge Runtime)
 * **数据库**: Cloudflare D1（主库）+ Cloudflare R2
 * **AI**: Vercel AI SDK, 支持 OpenAI/Google Gemini 等多种模型 (推荐 `gemini-2.5-flash` 或 `gemini-2.5-flash-lite`)
 * **样式**: Tailwind CSS 4, shadcn/ui (部分)
@@ -88,7 +88,7 @@
 
 - Node.js 22+（推荐 v24.14.0）
 - pnpm 11.3.0（可通过 Corepack 启用）
-- Vitest（当前测试运行器）与 Bun（部分运维脚本仍依赖）
+- Vitest（当前测试运行器）
 - AI 提供商 API Key (推荐使用 Google Gemini 系列)
 - Cloudflare Turnstile Site Key & Secret Key
 - Cloudflare 的一些相关配置（如 D1 数据库绑定）

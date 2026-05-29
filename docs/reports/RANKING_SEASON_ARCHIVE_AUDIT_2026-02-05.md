@@ -137,9 +137,9 @@
 
 ## 5. 推荐的“赛季结算 Checklist”（可直接执行）
 
-1) 运行 `bun tsx scripts/season-archive.ts --season-id <当前赛季>`（必要时先用 `--snapshot-only` 预览）
+1) 运行 `pnpm exec tsx scripts/season-archive.ts --season-id <当前赛季>`（必要时先用 `--snapshot-only` 预览）
 2) 确认生成了 `public/data/seasons/archive_<id>.json`，并且 `public/config/seasons.json` 中目标赛季已写入 `archivedAt`
-3) 再运行 `bun tsx scripts/season-soft-reset.ts`（按需要选择队列与 policy）
+3) 再运行 `pnpm exec tsx scripts/season-soft-reset.ts`（按需要选择队列与 policy）
 4) 在 `public/config/seasons.json` 里新增/更新新赛季，并确保**仅一个** `status=current`
 5) 部署并在 `/ranking` 页面验证：赛季切换、历史赛季能正确读取快照、当前赛季榜单正常
 
