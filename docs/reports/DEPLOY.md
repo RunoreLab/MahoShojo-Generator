@@ -12,7 +12,7 @@
 
       * 本项目使用 pnpm 作为包管理器与脚本调度入口，推荐 Node.js v24.14.0，最低要求 Node.js 22。
       * 安装 Node.js 后，可通过 Corepack 启用固定版本：`corepack prepare pnpm@11.3.0 --activate`。
-      * 当前测试运行器和少量运维脚本仍依赖 Bun；如果你要运行测试或这些脚本，也需要安装 Bun。
+      * 当前测试运行器已迁移到 Vitest，运维脚本入口统一通过 `pnpm` 调度；本地运行、测试和常规维护不再需要安装 Bun。
 
 2.  **获取 AI 提供商 API Key**
 
@@ -133,6 +133,20 @@
 3.  现在你应该能看到魔法少女生成器的首页了！
 
 至此，你已成功在本地部署了该项目。祝你玩得开心！
+
+-----
+
+#### 第 6.5 步：运行质量检查（可选）
+
+如果你要提交代码或验证本地环境，请使用 pnpm 运行当前质量门禁：
+
+```bash
+pnpm test
+pnpm lint
+pnpm build
+```
+
+其中 `pnpm test` 使用 Vitest，`pnpm build` 使用 Next.js 构建；这些命令都不依赖 Bun。
 
 -----
 
