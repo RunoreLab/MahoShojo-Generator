@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 
 import {
   appendReasoningDelta,
@@ -17,7 +17,7 @@ describe('ai/reasoning-normalizer', () => {
 
     expect(summary).toBeTruthy();
     expect(summary).toContain('先梳理角色设定');
-    expect(summary?.endsWith('…')).toBeTrue();
+    expect(summary?.endsWith('…')).toBe(true);
   });
 
   test('appendReasoningDelta 会累积文本并更新摘要', () => {

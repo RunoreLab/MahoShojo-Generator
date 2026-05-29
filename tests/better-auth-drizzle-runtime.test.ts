@@ -1,8 +1,8 @@
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { Database } from 'bun:sqlite';
+import { afterEach, beforeEach, describe, expect, test } from 'vitest';
+import Database from 'better-sqlite3';
 import { betterAuth } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
-import { drizzle } from 'drizzle-orm/bun-sqlite';
+import { drizzle } from 'drizzle-orm/better-sqlite3';
 
 import type { AppDrizzleDb } from '@/lib/db/drizzle';
 import * as schema from '@/lib/db/schema';
@@ -67,7 +67,7 @@ const signUpRuntimeUser = async (
     asResponse: true,
   });
 
-  expect(response.ok).toBeTrue();
+  expect(response.ok).toBe(true);
 
   const payload = (await response.json()) as {
     user?: {
@@ -152,11 +152,14 @@ describe('better-auth drizzle runtime compatibility', () => {
     });
 
     const row = sqlite
-      .query<{
-        email: string;
-        createdAtType: string;
-        updatedAtType: string;
-      }, []>(
+      .prepare<
+        [],
+        {
+          email: string;
+          createdAtType: string;
+          updatedAtType: string;
+        }
+      >(
         `select email, typeof(created_at) as createdAtType, typeof(updated_at) as updatedAtType
          from ba_user
          where email = 'runtime-signup@example.com'
@@ -192,7 +195,7 @@ describe('better-auth drizzle runtime compatibility', () => {
       asResponse: true,
     });
 
-    expect(resetResponse.ok).toBeTrue();
+    expect(resetResponse.ok).toBe(true);
 
     const signInResponse = await auth.api.signInEmail({
       body: {
@@ -202,6 +205,6 @@ describe('better-auth drizzle runtime compatibility', () => {
       asResponse: true,
     });
 
-    expect(signInResponse.ok).toBeTrue();
+    expect(signInResponse.ok).toBe(true);
   });
 });

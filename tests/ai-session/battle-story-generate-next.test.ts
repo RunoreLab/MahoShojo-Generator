@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 
 import { validateBattleStoryGenerateNextInput } from '@/lib/ai-session/battle-story/generate-next';
 import { buildUpstreamRequestBody } from '@/pages/api/arena/session/generate-next';

@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 
 import { createMessagesHandler } from '@/pages/api/messages';
 import { createMessagesReadAllHandler } from '@/pages/api/messages/read-all';

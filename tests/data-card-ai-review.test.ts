@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test';
+import { describe, expect, it } from 'vitest';
 import { buildDataCardAiReviewPrompt, extractModerationTextFromJsonString } from '@/lib/review/data-card-ai-review';
 
 describe('data-card-ai-review', () => {

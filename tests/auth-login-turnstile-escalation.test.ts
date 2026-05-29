@@ -1,6 +1,4 @@
-import { describe, expect, mock, test } from 'bun:test';
-
-mock.module('server-only', () => ({}));
+import { describe, expect, vi, test } from 'vitest';
 
 const postJsonRequest = (url: string, payload: unknown): Request =>
   new Request(url, {

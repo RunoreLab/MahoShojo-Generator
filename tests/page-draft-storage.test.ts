@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 
 import { clearPageDraft, readPageDraft, writePageDraft } from '@/lib/page-draft-storage';
 

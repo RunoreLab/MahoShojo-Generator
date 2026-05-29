@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 
 import { readJsonWithAiMeta } from '@/lib/client/read-json-with-ai-meta';
 

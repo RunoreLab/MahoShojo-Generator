@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 
 import { reconcileCreatorBuildRuleSelection } from '@/lib/creator/build-rule-selection';
 

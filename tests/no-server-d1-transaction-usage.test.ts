@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { parse } from '@typescript-eslint/typescript-estree';

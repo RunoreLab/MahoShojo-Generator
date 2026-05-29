@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, mock, test } from 'bun:test';
+import { beforeEach, describe, expect, vi, test } from 'vitest';
 
 const state = {
   rateLimitCalls: [] as Array<Record<string, unknown>>,
@@ -6,7 +6,7 @@ const state = {
   safetyResponse: null as Response | null,
 };
 
-mock.module('@/lib/ai/public-rate-limit', () => ({
+vi.mock('@/lib/ai/public-rate-limit', () => ({
   acquirePublicAiRateLimit: async (input: Record<string, unknown>) => {
     state.rateLimitCalls.push(input);
     return {
@@ -23,14 +23,14 @@ mock.module('@/lib/ai/public-rate-limit', () => ({
   inferPublicAiProviderMode: () => 'system',
 }));
 
-mock.module('@/lib/content-safety/server', () => ({
+vi.mock('@/lib/content-safety/server', () => ({
   enforceTextSafety: async (input: Record<string, unknown>) => {
     state.safetyCalls.push(input);
     return state.safetyResponse;
   },
 }));
 
-mock.module('@/lib/user-activity/record', () => ({
+vi.mock('@/lib/user-activity/record', () => ({
   recordUserActivityFromRequest: () => {},
 }));
 
@@ -68,7 +68,7 @@ describe('public ai input safety', () => {
 
     const payload = (await response.json()) as { shouldRedirect?: boolean; reason?: string };
     expect(response.status).toBe(400);
-    expect(payload.shouldRedirect).toBeTrue();
+    expect(payload.shouldRedirect).toBe(true);
     expect(payload.reason).toBe('使用危险符文');
     expect(state.rateLimitCalls).toHaveLength(1);
     expect(state.safetyCalls).toHaveLength(1);
@@ -143,7 +143,7 @@ describe('public ai input safety', () => {
 
     const payload = (await response.json()) as { shouldRedirect?: boolean; reason?: string };
     expect(response.status).toBe(400);
-    expect(payload.shouldRedirect).toBeTrue();
+    expect(payload.shouldRedirect).toBe(true);
     expect(payload.reason).toBe('在问卷中使用了危险符文');
     expect(state.rateLimitCalls).toHaveLength(1);
     expect(state.safetyCalls).toHaveLength(1);

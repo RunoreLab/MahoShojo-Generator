@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 import type { AppDrizzleDb } from '@/lib/db/drizzle';
 import { runBadgeOpsTransaction } from '@/lib/db/repositories/badges';
 

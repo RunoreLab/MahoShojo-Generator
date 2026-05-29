@@ -1,46 +1,46 @@
 import React from 'react';
-import { expect, mock, test } from 'bun:test';
+import { expect, vi, test } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { renderToStaticMarkup } from 'react-dom/server';
 
 import { useBattleStore } from '@/components/arena/stores/useBattleStore';
 
-mock.module('next/head', () => ({
+vi.mock('next/head', () => ({
   default(props: { children?: React.ReactNode }) {
     return <>{props.children}</>;
   },
 }));
 
-mock.module('@/lib/useAuth', () => ({
+vi.mock('@/lib/useAuth', () => ({
   useAuth: () => ({ isAuthenticated: false }),
 }));
 
-mock.module('@/components/BattleDataModal', () => ({
+vi.mock('@/components/BattleDataModal', () => ({
   default() {
     return null;
   },
 }));
 
-mock.module('@/components/DataCardDetailsModal', () => ({
+vi.mock('@/components/DataCardDetailsModal', () => ({
   default() {
     return null;
   },
 }));
 
-mock.module('@/components/Footer', () => ({
+vi.mock('@/components/Footer', () => ({
   default() {
     return <div>footer</div>;
   },
 }));
 
-mock.module('@/components/ErrorMessage', () => ({
+vi.mock('@/components/ErrorMessage', () => ({
   ErrorMessage({ message }: { message: string }) {
     return <div>{message}</div>;
   },
 }));
 
-mock.module('@/components/shared/CollapsibleSection', () => ({
+vi.mock('@/components/shared/CollapsibleSection', () => ({
   CollapsibleSection(props: { title?: string; children?: React.ReactNode }) {
     return (
       <section>
@@ -63,67 +63,67 @@ mock.module('@/components/shared/CollapsibleSection', () => ({
   },
 }));
 
-mock.module('@/components/arena/components/BattleActions', () => ({
+vi.mock('@/components/arena/components/BattleActions', () => ({
   BattleActions() {
     return <div>battle-actions</div>;
   },
 }));
 
-mock.module('@/components/arena/components/BattleModeSwitcher', () => ({
+vi.mock('@/components/arena/components/BattleModeSwitcher', () => ({
   BattleModeSwitcher() {
     return <div>battle-mode-switcher</div>;
   },
 }));
 
-mock.module('@/components/arena/components/BattleResult', () => ({
+vi.mock('@/components/arena/components/BattleResult', () => ({
   BattleResult() {
     return null;
   },
 }));
 
-mock.module('@/components/arena/components/BattleStorySessionPanel', () => ({
+vi.mock('@/components/arena/components/BattleStorySessionPanel', () => ({
   BattleStorySessionPanel() {
     return null;
   },
 }));
 
-mock.module('@/components/arena/components/CombatantList', () => ({
+vi.mock('@/components/arena/components/CombatantList', () => ({
   CombatantList() {
     return <div>combatant-list</div>;
   },
 }));
 
-mock.module('@/components/arena/components/DatabaseSelector', () => ({
+vi.mock('@/components/arena/components/DatabaseSelector', () => ({
   DatabaseSelector() {
     return <div>database-selector</div>;
   },
 }));
 
-mock.module('@/components/arena/components/GenerationModeSwitcher', () => ({
+vi.mock('@/components/arena/components/GenerationModeSwitcher', () => ({
   GenerationModeSwitcher() {
     return <div>generation-mode-switcher</div>;
   },
 }));
 
-mock.module('@/components/arena/components/PresetSelector', () => ({
+vi.mock('@/components/arena/components/PresetSelector', () => ({
   PresetSelector() {
     return <div>preset-selector</div>;
   },
 }));
 
-mock.module('@/components/arena/components/RosterUploader', () => ({
+vi.mock('@/components/arena/components/RosterUploader', () => ({
   RosterUploader() {
     return <div>roster-uploader</div>;
   },
 }));
 
-mock.module('@/components/arena/components/ArenaRankingModal', () => ({
+vi.mock('@/components/arena/components/ArenaRankingModal', () => ({
   ArenaRankingModal() {
     return null;
   },
 }));
 
-mock.module('@/components/arena/hooks/useBattleActions', () => ({
+vi.mock('@/components/arena/hooks/useBattleActions', () => ({
   useBattleActions: () => ({
     materials: [],
     handleSelectDataCard: async () => {},
@@ -137,17 +137,17 @@ mock.module('@/components/arena/hooks/useBattleActions', () => ({
   }),
 }));
 
-mock.module('@/components/arena/utils/characterValidator', () => ({
+vi.mock('@/components/arena/utils/characterValidator', () => ({
   getCombatantDisplayName: () => '角色',
 }));
 
-mock.module('@/components/arena/shared/ArenaCommunitySection', () => ({
+vi.mock('@/components/arena/shared/ArenaCommunitySection', () => ({
   ArenaCommunitySection() {
     return <div>community</div>;
   },
 }));
 
-mock.module('@/components/arena/shared/ArenaPageLinks', () => ({
+vi.mock('@/components/arena/shared/ArenaPageLinks', () => ({
   ArenaPageLinks({ variant }: { variant: 'lite' | 'full' }) {
     if (variant === 'lite') {
       return (
@@ -168,32 +168,32 @@ mock.module('@/components/arena/shared/ArenaPageLinks', () => ({
   },
 }));
 
-mock.module('@/components/arena/shared/ArenaRankingLinks', () => ({
+vi.mock('@/components/arena/shared/ArenaRankingLinks', () => ({
   ArenaRankingLinks() {
     return <div>ranking-links</div>;
   },
 }));
 
-mock.module('@/components/arena-lite/BattleLiteHeader', () => ({
+vi.mock('@/components/arena-lite/BattleLiteHeader', () => ({
   BattleLiteHeader() {
     return <div>battle-lite-header</div>;
   },
 }));
 
-mock.module('@/components/arena-lite/BattleLiteScenarioSection', () => ({
+vi.mock('@/components/arena-lite/BattleLiteScenarioSection', () => ({
   BattleLiteScenarioSection() {
     return <div>battle-lite-scenario</div>;
   },
 }));
 
-mock.module('@/components/arena-lite/BattleLiteStoryOptions', () => ({
+vi.mock('@/components/arena-lite/BattleLiteStoryOptions', () => ({
   BattleLiteStoryOptions() {
     return <div>battle-lite-story-options</div>;
   },
 }));
 
 const { BattleLitePage } = await import('@/components/arena-lite/BattleLitePage');
-mock.restore();
+vi.restoreAllMocks();
 
 test('BattleLitePage 不再引用 applyBattleLiteDefaults，并保留共享设置', () => {
   const source = readFileSync(join(process.cwd(), 'components/arena-lite/BattleLitePage.tsx'), 'utf8');

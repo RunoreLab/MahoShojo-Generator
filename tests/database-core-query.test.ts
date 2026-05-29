@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 import { queryD1Payload, queryD1RawPayload, queryFromD1 } from '@/lib/database/core';
 
 type EnvSnapshot = {
@@ -119,7 +119,7 @@ describe('database/core queryD1Payload', () => {
       await withSilencedConsoleError(async () => {
         await expect(queryD1Payload('SELECT 1', [])).rejects.toThrow('缺少 Cloudflare 配置信息');
       });
-      expect(fetchCalled).toBeFalse();
+      expect(fetchCalled).toBe(false);
     } finally {
       globalThis.fetch = originalFetch;
       restoreEnvSnapshot(envSnapshot);

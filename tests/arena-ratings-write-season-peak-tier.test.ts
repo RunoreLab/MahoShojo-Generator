@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, mock, test } from 'bun:test';
+import { beforeEach, describe, expect, vi, test } from 'vitest';
 
 import { getArenaTierRank, type ArenaTier } from '@/lib/arena/tier';
 
@@ -9,7 +9,7 @@ const mockState = {
   queenCalls: 0,
 };
 
-mock.module('@/lib/db/repositories/data-card-meta', () => ({
+vi.mock('@/lib/db/repositories/data-card-meta', () => ({
   queryArenaPublicQueenEntityByQueue: async () => {
     mockState.queenCalls += 1;
     return mockState.queen;

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test';
+import { describe, expect, it } from 'vitest';
 
 import { extractMagicTeaPartyNoticesFromMarkdown } from '@/lib/magic-tea-party/notice';
 

@@ -1,4 +1,4 @@
-import { describe, expect, mock, test } from 'bun:test';
+import { describe, expect, vi, test } from 'vitest';
 
 type EnvSnapshot = {
   CLOUDFLARE_API_TOKEN?: string;
@@ -36,8 +36,6 @@ describe('db/d1-http-client', () => {
       process.env.CLOUDFLARE_API_TOKEN = `token_${Date.now()}`;
       process.env.CLOUDFLARE_ACCOUNT_ID = 'account_x';
       process.env.D1_DATABASE_ID = 'db_x';
-
-      mock.module('server-only', () => ({}));
       globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
         const url = String(input);
         const body = JSON.parse(String(init?.body ?? '{}'));
@@ -142,7 +140,7 @@ describe('db/d1-http-client', () => {
     } finally {
       restoreEnvSnapshot(envSnapshot);
       globalThis.fetch = originalFetch;
-      mock.restore();
+      vi.restoreAllMocks();
     }
   });
 
@@ -159,8 +157,6 @@ describe('db/d1-http-client', () => {
       process.env.CLOUDFLARE_API_TOKEN = `token_${Date.now()}`;
       process.env.CLOUDFLARE_ACCOUNT_ID = 'account_x';
       process.env.D1_DATABASE_ID = 'db_x';
-
-      mock.module('server-only', () => ({}));
       globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
         const body = JSON.parse(String(init?.body ?? '{}'));
         queryCalls.push({
@@ -248,7 +244,7 @@ describe('db/d1-http-client', () => {
     } finally {
       restoreEnvSnapshot(envSnapshot);
       globalThis.fetch = originalFetch;
-      mock.restore();
+      vi.restoreAllMocks();
     }
   });
 });

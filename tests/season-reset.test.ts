@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 
 import { computeSeasonStartRating, computeSeasonStartRatingAdvanced } from '@/lib/arena/season-reset';
 import type { AppDrizzleDb } from '@/lib/db/drizzle';
@@ -159,10 +159,10 @@ const createSeasonResetMockDb = (expectedCalls: ExpectedUpdateCall[]) => {
     if (!expected) throw new Error(`未预期的 SQL 调用: ${sqlText}`);
 
     for (const token of expected.sqlIncludes) {
-      expect(sqlText.includes(token)).toBeTrue();
+      expect(sqlText.includes(token)).toBe(true);
     }
     for (const token of expected.sqlExcludes ?? []) {
-      expect(sqlText.includes(token)).toBeFalse();
+      expect(sqlText.includes(token)).toBe(false);
     }
     expect(params).toEqual(expected.params);
 
@@ -205,15 +205,15 @@ describe('season-soft-reset SQL seam', () => {
       includeLegacyColumns: true,
     });
 
-    expect(result.sql.includes('last_delta = NULL')).toBeTrue();
-    expect(result.sql.includes('last_applied_at = NULL')).toBeTrue();
-    expect(result.sql.includes(`season_peak_rating = ${ratingExpr}`)).toBeTrue();
-    expect(result.sql.includes('season_peak_games = 0')).toBeTrue();
-    expect(result.sql.includes('season_peak_at = ?')).toBeTrue();
-    expect(result.sql.includes("season_peak_tier = '无牌'")).toBeTrue();
-    expect(result.sql.includes(`season_low_rating = ${ratingExpr}`)).toBeTrue();
-    expect(result.sql.includes('season_low_games = 0')).toBeTrue();
-    expect(result.sql.includes('season_low_at = ?')).toBeTrue();
+    expect(result.sql.includes('last_delta = NULL')).toBe(true);
+    expect(result.sql.includes('last_applied_at = NULL')).toBe(true);
+    expect(result.sql.includes(`season_peak_rating = ${ratingExpr}`)).toBe(true);
+    expect(result.sql.includes('season_peak_games = 0')).toBe(true);
+    expect(result.sql.includes('season_peak_at = ?')).toBe(true);
+    expect(result.sql.includes("season_peak_tier = '无牌'")).toBe(true);
+    expect(result.sql.includes(`season_low_rating = ${ratingExpr}`)).toBe(true);
+    expect(result.sql.includes('season_low_games = 0')).toBe(true);
+    expect(result.sql.includes('season_low_at = ?')).toBe(true);
     expect(result.params).toEqual([...ratingParams, ...ratingParams, nowIso, ...ratingParams, nowIso, nowIso, 'strict']);
   });
 
@@ -226,13 +226,13 @@ describe('season-soft-reset SQL seam', () => {
       includeLegacyColumns: false,
     });
 
-    expect(result.sql.includes('last_delta = NULL')).toBeFalse();
-    expect(result.sql.includes('last_applied_at = NULL')).toBeFalse();
-    expect(result.sql.includes(`season_peak_rating = ${ratingExpr}`)).toBeTrue();
-    expect(result.sql.includes('season_peak_games = 0')).toBeTrue();
-    expect(result.sql.includes("season_peak_tier = '无牌'")).toBeTrue();
-    expect(result.sql.includes(`season_low_rating = ${ratingExpr}`)).toBeTrue();
-    expect(result.sql.includes('season_low_games = 0')).toBeTrue();
+    expect(result.sql.includes('last_delta = NULL')).toBe(false);
+    expect(result.sql.includes('last_applied_at = NULL')).toBe(false);
+    expect(result.sql.includes(`season_peak_rating = ${ratingExpr}`)).toBe(true);
+    expect(result.sql.includes('season_peak_games = 0')).toBe(true);
+    expect(result.sql.includes("season_peak_tier = '无牌'")).toBe(true);
+    expect(result.sql.includes(`season_low_rating = ${ratingExpr}`)).toBe(true);
+    expect(result.sql.includes('season_low_games = 0')).toBe(true);
     expect(result.params).toEqual([...ratingParams, ...ratingParams, nowIso, ...ratingParams, nowIso, nowIso, 'strict']);
   });
 
@@ -252,16 +252,16 @@ describe('season-soft-reset SQL seam', () => {
       includeLegacyColumns: false,
     });
 
-    expect(legacyTrue.sql.includes('last_delta = NULL')).toBeTrue();
-    expect(legacyFalse.sql.includes('last_delta = NULL')).toBeFalse();
-    expect(legacyTrue.sql.includes('season_peak_rating')).toBeFalse();
-    expect(legacyTrue.sql.includes('season_peak_games')).toBeFalse();
-    expect(legacyTrue.sql.includes('season_peak_at')).toBeFalse();
-    expect(legacyTrue.sql.includes('season_peak_tier')).toBeFalse();
-    expect(legacyTrue.sql.includes('season_low_rating')).toBeFalse();
-    expect(legacyTrue.sql.includes('season_low_games')).toBeFalse();
-    expect(legacyTrue.sql.includes('season_low_at')).toBeFalse();
-    expect(legacyFalse.sql.includes('season_peak_rating')).toBeFalse();
+    expect(legacyTrue.sql.includes('last_delta = NULL')).toBe(true);
+    expect(legacyFalse.sql.includes('last_delta = NULL')).toBe(false);
+    expect(legacyTrue.sql.includes('season_peak_rating')).toBe(false);
+    expect(legacyTrue.sql.includes('season_peak_games')).toBe(false);
+    expect(legacyTrue.sql.includes('season_peak_at')).toBe(false);
+    expect(legacyTrue.sql.includes('season_peak_tier')).toBe(false);
+    expect(legacyTrue.sql.includes('season_low_rating')).toBe(false);
+    expect(legacyTrue.sql.includes('season_low_games')).toBe(false);
+    expect(legacyTrue.sql.includes('season_low_at')).toBe(false);
+    expect(legacyFalse.sql.includes('season_peak_rating')).toBe(false);
     expect(legacyTrue.params).toEqual([...ratingParams, nowIso, 'free']);
     expect(legacyFalse.params).toEqual([...ratingParams, nowIso, 'free']);
   });

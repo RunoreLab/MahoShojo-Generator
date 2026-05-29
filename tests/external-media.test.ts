@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test';
+import { describe, expect, it } from 'vitest';
 
 import { isAllowedExternalMediaUrl, isLikelyAudioUrl, isLikelyVideoUrl, resolveExternalMediaUrl } from '@/lib/markdown/externalMedia';
 

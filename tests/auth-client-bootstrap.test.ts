@@ -1,4 +1,4 @@
-import { describe, expect, mock, test } from 'bun:test';
+import { describe, expect, vi, test } from 'vitest';
 
 import { authStorage } from '@/lib/auth';
 
@@ -32,7 +32,7 @@ describe('authStorage session bootstrap', () => {
       (globalThis as typeof globalThis & { window?: unknown }).window = {};
       (globalThis as typeof globalThis & { localStorage?: unknown }).localStorage = new LocalStorageMock();
 
-      const fetchMock = mock(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         expect(String(input)).toBe('/api/auth/verify');
         expect(init?.method).toBe('POST');
 
@@ -94,7 +94,7 @@ describe('authStorage session bootstrap', () => {
       (globalThis as typeof globalThis & { window?: unknown }).window = {};
       (globalThis as typeof globalThis & { localStorage?: unknown }).localStorage = new LocalStorageMock();
 
-      const fetchMock = mock(async () => {
+      const fetchMock = vi.fn(async () => {
         return new Response(
           JSON.stringify({
             success: false,
@@ -131,7 +131,7 @@ describe('authStorage session bootstrap', () => {
       (globalThis as typeof globalThis & { window?: unknown }).window = {};
       (globalThis as typeof globalThis & { localStorage?: unknown }).localStorage = new LocalStorageMock();
 
-      const fetchMock = mock(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
         if (url === '/api/auth/verify') {
           return new Response(JSON.stringify({ success: false, error: '未授权' }), {
@@ -160,7 +160,7 @@ describe('authStorage session bootstrap', () => {
         body: JSON.stringify({ code: 'A3F8-E9C2-1D4B' }),
       });
 
-      expect(response.ok).toBeTrue();
+      expect(response.ok).toBe(true);
       expect(fetchMock).toHaveBeenCalledTimes(2);
     } finally {
       authStorage.clearAuth();

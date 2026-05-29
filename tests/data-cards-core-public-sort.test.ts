@@ -1,6 +1,6 @@
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { Database } from 'bun:sqlite';
-import { drizzle } from 'drizzle-orm/bun-sqlite';
+import { afterEach, beforeEach, describe, expect, test } from 'vitest';
+import Database from 'better-sqlite3';
+import { drizzle } from 'drizzle-orm/better-sqlite3';
 
 import type { AppDrizzleDb } from '@/lib/db/drizzle';
 import { listPublicDataCardsWithFilters } from '@/lib/db/repositories/data-cards-core';

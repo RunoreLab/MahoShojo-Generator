@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test';
+import { describe, expect, it } from 'vitest';
 
 import { fromMarkdown } from 'mdast-util-from-markdown';
 import type { Root, Table } from 'mdast';

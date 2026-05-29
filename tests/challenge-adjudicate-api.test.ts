@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 
 describe('api/challenge/adjudicate-stream', () => {
   test('SSE 请求会直接返回流响应，而不是等待完整裁定结束后再回放', async () => {

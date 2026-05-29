@@ -1,6 +1,6 @@
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { Database } from 'bun:sqlite';
-import { drizzle } from 'drizzle-orm/bun-sqlite';
+import { afterEach, beforeEach, describe, expect, test } from 'vitest';
+import Database from 'better-sqlite3';
+import { drizzle } from 'drizzle-orm/better-sqlite3';
 
 import type { AppDrizzleDb } from '@/lib/db/drizzle';
 import * as schema from '@/lib/db/schema';
@@ -433,7 +433,7 @@ describe('report appeals repository', () => {
       now: '2026-04-10T01:33:00.000Z',
     });
     const reportCaseRow = sqlite
-      .query(
+      .prepare(
         `
           SELECT resolution_notified_at, resolution_notified_case_updated_at, updated_at
           FROM report_cases

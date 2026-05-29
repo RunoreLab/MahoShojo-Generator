@@ -88,7 +88,7 @@
 
 - Node.js 22+（推荐 v24.14.0）
 - pnpm 11.3.0（可通过 Corepack 启用）
-- Bun（当前测试运行器与部分运维脚本仍依赖）
+- Vitest（当前测试运行器）与 Bun（部分运维脚本仍依赖）
 - AI 提供商 API Key (推荐使用 Google Gemini 系列)
 - Cloudflare Turnstile Site Key & Secret Key
 - Cloudflare 的一些相关配置（如 D1 数据库绑定）

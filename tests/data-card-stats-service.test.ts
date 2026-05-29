@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 
 import { recordDataCardStatInteraction } from '@/lib/data-card-stats/service';
 

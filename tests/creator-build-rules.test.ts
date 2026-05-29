@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 
 import { loadBuildRulePresetById, loadBuildRulePresetIndex } from '@/lib/creator/build-rules';
 import {

@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 import { appendSetCookieHeaders, splitSetCookieHeaderValue } from '@/lib/auth/set-cookie';
 
 describe('auth/better-auth-bridge', () => {
@@ -24,8 +24,8 @@ describe('auth/better-auth-bridge', () => {
     appendSetCookieHeaders(target, source);
 
     const merged = target.get('set-cookie') ?? '';
-    expect(merged.includes('a=1')).toBeTrue();
-    expect(merged.includes('b=2')).toBeTrue();
-    expect(merged.includes('Expires=Wed, 21 Oct 2015 07:28:00 GMT')).toBeTrue();
+    expect(merged.includes('a=1')).toBe(true);
+    expect(merged.includes('b=2')).toBe(true);
+    expect(merged.includes('Expires=Wed, 21 Oct 2015 07:28:00 GMT')).toBe(true);
   });
 });

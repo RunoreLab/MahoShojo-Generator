@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 
 import { buildBattleStoryPromptContext, resolveBattleStoryRecentWindow } from '@/lib/ai-session/battle-story/context';
 

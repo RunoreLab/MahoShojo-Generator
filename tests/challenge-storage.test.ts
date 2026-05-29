@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, test } from 'bun:test';
+import { beforeEach, describe, expect, test } from 'vitest';
 import '@/tests/helpers/fake-indexeddb';
 
 import { __resetAiSessionDbForTest, requestToPromise, transactionToPromise } from '@/lib/ai-session/storage';

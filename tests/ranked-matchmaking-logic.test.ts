@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 
 import { pickStrictMatchmakingCandidate, STRICT_MATCHMAKING_BANDS } from '@/lib/arena/ranked-matchmaking-logic';
 

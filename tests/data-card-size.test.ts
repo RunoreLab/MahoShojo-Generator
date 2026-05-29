@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test';
+import { describe, expect, it } from 'vitest';
 import { getUtf8ByteLength, MAX_DATA_CARD_BYTES } from '@/lib/data-card-size';
 
 describe('data-card-size', () => {

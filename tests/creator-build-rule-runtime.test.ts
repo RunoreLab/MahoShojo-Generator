@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 
 import { createDefaultBuildRuleInputs } from '@/lib/creator/build-rules';
 import { evaluateBuildRuleState } from '@/lib/creator/build-rule-runtime';

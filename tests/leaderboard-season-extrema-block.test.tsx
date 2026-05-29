@@ -1,4 +1,4 @@
-import { describe, expect, it, mock } from 'bun:test';
+import { describe, expect, it, vi } from 'vitest';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 
@@ -49,13 +49,13 @@ describe('LeaderboardSeasonExtrema', () => {
   });
 });
 
-mock.module('next/head', () => ({
+vi.mock('next/head', () => ({
   default: function HeadMock({ children }: { children?: React.ReactNode }) {
     return <>{children}</>;
   },
 }));
 
-mock.module('next/link', () => ({
+vi.mock('next/link', () => ({
   default: function LinkMock({
     children,
     href,
@@ -100,7 +100,7 @@ const buildItem = (overrides?: Partial<Record<string, unknown>>) => {
 
 let mockedLeaderboardItems: unknown[] = [buildItem()];
 
-mock.module('@tanstack/react-query', () => ({
+vi.mock('@tanstack/react-query', () => ({
   useQuery: ({ queryKey }: { queryKey: unknown[] }) => {
     const key = queryKey?.[0];
     if (key === 'arenaLeaderboard') {

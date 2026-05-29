@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'bun:test';
+import { describe, it, expect } from 'vitest';
 import { urlSignature, getSignedUrl } from '@/lib/tachie/liblib/utils';
 
 describe('lib/tachie/liblib/utils', () => {

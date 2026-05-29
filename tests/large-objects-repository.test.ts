@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 import { largeObjects } from '@/lib/db/schema';
 import { upsertLargeObjectByKindAndOwnerRef } from '@/lib/db/repositories/large-objects';
 

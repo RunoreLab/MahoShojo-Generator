@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, mock, test } from 'bun:test';
+import { beforeEach, describe, expect, vi, test } from 'vitest';
 
 let loginResult: {
   success: boolean;
@@ -9,23 +9,23 @@ let loginResult: {
 let logoutCalls = 0;
 let badgeCalls = 0;
 
-mock.module('@/lib/auth', () => ({
+vi.mock('@/lib/auth', () => ({
   authApi: {
-    verify: mock(async () => ({ success: false })),
-    register: mock(async () => ({ success: false })),
-    login: mock(async () => loginResult),
-    logout: mock(async () => {
+    verify: vi.fn(async () => ({ success: false })),
+    register: vi.fn(async () => ({ success: false })),
+    login: vi.fn(async () => loginResult),
+    logout: vi.fn(async () => {
       logoutCalls += 1;
     }),
   },
   authStorage: {
-    getAuth: mock(async () => null),
-    clearAuth: mock(() => undefined),
+    getAuth: vi.fn(async () => null),
+    clearAuth: vi.fn(() => undefined),
   },
 }));
 
-mock.module('@/lib/userBadges', () => ({
-  getUserBadges: mock(async () => {
+vi.mock('@/lib/userBadges', () => ({
+  getUserBadges: vi.fn(async () => {
     badgeCalls += 1;
     return [];
   }),
