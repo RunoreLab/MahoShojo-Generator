@@ -10,8 +10,8 @@ mock.module('next/head', () => ({
   },
 }));
 
-mock.module('next/router', () => ({
-  useRouter() {
+mock.module('@/lib/use-next-router', () => ({
+  useNextRouter() {
     return {
       pathname,
       route: pathname,

@@ -74,7 +74,8 @@
 
 * **框架**: Next.js 15（Pages Router 为主，局部 App Router）, React 19
 * **语言**: TypeScript
-* **运行时**: Bun (开发与构建), Cloudflare Pages/Workers (生产，Edge Runtime)
+* **包管理器**: pnpm 11.3.0
+* **运行时**: Node.js 22+ (开发与构建), Bun (测试运行器), Cloudflare Pages/Workers (生产，Edge Runtime)
 * **数据库**: Cloudflare D1（主库）+ Cloudflare R2
 * **AI**: Vercel AI SDK, 支持 OpenAI/Google Gemini 等多种模型 (推荐 `gemini-2.5-flash` 或 `gemini-2.5-flash-lite`)
 * **样式**: Tailwind CSS 4, shadcn/ui (部分)
@@ -85,7 +86,9 @@
 
 ### 环境要求
 
-- Bun (推荐) 或 Node.js 18+
+- Node.js 22+（推荐 v24.14.0）
+- pnpm 11.3.0（可通过 Corepack 启用）
+- Bun（当前测试运行器与部分运维脚本仍依赖）
 - AI 提供商 API Key (推荐使用 Google Gemini 系列)
 - Cloudflare Turnstile Site Key & Secret Key
 - Cloudflare 的一些相关配置（如 D1 数据库绑定）
@@ -94,7 +97,7 @@
 
 ```bash
 # 安装依赖
-bun install
+pnpm install
 
 # 配置环境变量
 cp env.example .env.local
@@ -125,18 +128,20 @@ AI_PROVIDERS_CONFIG='[
 
 ```bash
 # 开发模式
-bun run dev
+pnpm dev
 
 # 生产构建
-bun run build
-bun run start
+pnpm build
+pnpm start
 
 # Cloudflare Pages 构建（推荐）
-bun run build:cf
-bun run preview
+pnpm build:cf
+pnpm preview
 ```
 
 访问 [http://localhost:3000](http://localhost:3000) 查看应用。
+
+Cloudflare Pages 部署环境变量需显式设置 `PNPM_VERSION=11.3.0`，避免构建平台使用默认 pnpm 版本。
 
 ## 📋 路线图
 

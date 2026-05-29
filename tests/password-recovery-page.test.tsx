@@ -27,8 +27,8 @@ test('password-recovery 页面默认展示邮箱单独找回入口', async () =>
     },
   }));
 
-  mock.module('next/router', () => ({
-    useRouter() {
+  mock.module('@/lib/use-next-router', () => ({
+    useNextRouter() {
       return {
         query: {},
         pathname: '/password-recovery',

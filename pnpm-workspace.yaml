@@ -1,0 +1,10 @@
+allowBuilds:
+  esbuild: true
+  msw: false
+  sharp: true
+  unrs-resolver: true
+  workerd: true
+peerDependencyRules:
+  allowedVersions:
+    next: 15.3.8
+    vercel: 47.0.4
