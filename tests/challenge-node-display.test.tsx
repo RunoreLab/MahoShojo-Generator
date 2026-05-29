@@ -1,5 +1,5 @@
 import React from 'react';
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 
 import type { EncounterSnapshotV1 } from '@/lib/challenge/types';

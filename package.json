@@ -24,8 +24,8 @@
         "db:migrate:remote:preview": "node scripts/check-wrangler-d1-config.mjs && node scripts/d1-migrate-safe.mjs --database DB --remote --env preview",
         "db:status:remote:prod": "node scripts/check-wrangler-d1-config.mjs && node scripts/d1-release-status.mjs --database DB --remote --env production",
         "db:status:remote:prod:ready": "node scripts/check-wrangler-d1-config.mjs && node scripts/d1-release-status.mjs --database DB --remote --env production --require-ready",
-        "test": "bun test",
-        "test:watch": "bun test --watch"
+        "test": "vitest run",
+        "test:watch": "vitest"
     },
     "dependencies": {
         "@ai-sdk/deepseek": "^2.0.35",
@@ -74,10 +74,12 @@
         "@cloudflare/next-on-pages": "^1.13.13",
         "@eslint/eslintrc": "^3",
         "@tailwindcss/postcss": "^4",
+        "@types/better-sqlite3": "^7.6.13",
         "@types/node": "^20",
         "@types/react": "^19",
         "@types/react-dom": "^19",
         "@typescript-eslint/typescript-estree": "^8.43.0",
+        "better-sqlite3": "^12.10.0",
         "drizzle-kit": "^0.31.9",
         "eslint": "^9",
         "eslint-config-next": "15.3.2",
@@ -87,6 +89,7 @@
         "tw-animate-css": "^1.3.0",
         "typescript": "^5",
         "vercel": "47.0.4",
+        "vitest": "^4.1.7",
         "wrangler": "^4.28.0"
     }
 }

@@ -1,6 +1,4 @@
-import { describe, expect, mock, test } from 'bun:test';
-
-mock.module('server-only', () => ({}));
+import { describe, expect, vi, test } from 'vitest';
 
 describe('api/data-card-stats', () => {
   test('actor 超过 stats 限流时返回 429 且不写 interaction', async () => {

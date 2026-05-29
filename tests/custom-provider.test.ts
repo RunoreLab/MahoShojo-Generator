@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'bun:test';
+import { readFile } from 'node:fs/promises';
+import { describe, expect, it } from 'vitest';
 
 import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
 import {
@@ -83,7 +84,7 @@ describe('custom provider helpers', () => {
   });
 
   it('竞技场生成请求复用请求 payload helper，避免丢失最大输出 Tokens', async () => {
-    const source = await Bun.file('components/arena/hooks/useBattleEngine.ts').text();
+    const source = await readFile('components/arena/hooks/useBattleEngine.ts', 'utf8');
     const helperCalls = source.match(/buildCustomProviderRequestPayload\(userProviderConfig\)/g) ?? [];
 
     expect(helperCalls.length).toBeGreaterThanOrEqual(2);

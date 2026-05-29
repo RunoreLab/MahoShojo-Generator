@@ -1,10 +1,10 @@
-import { describe, expect, mock, test } from 'bun:test';
+import { describe, expect, vi, test } from 'vitest';
 
 import { buildRedeemCodeRequestInit, submitRedeemCode } from '@/lib/client/redeem-code';
 
 describe('redeem client request compatibility', () => {
   test('缺少 legacy bearer 时仍应使用会话 cookie 发起兑换请求', async () => {
-    const fetchMock = mock(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       expect(String(input)).toBe('/api/redeem-code');
       expect(init?.method).toBe('POST');
       expect(init?.credentials).toBe('include');
@@ -28,7 +28,7 @@ describe('redeem client request compatibility', () => {
       fetchImpl: fetchMock as typeof fetch,
     });
 
-    expect(data.success).toBeTrue();
+    expect(data.success).toBe(true);
     expect(data.slotCount).toBe(3);
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });

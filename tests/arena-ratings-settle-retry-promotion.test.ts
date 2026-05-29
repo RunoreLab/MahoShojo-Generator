@@ -1,4 +1,4 @@
-import { afterAll, beforeEach, describe, expect, test } from 'bun:test';
+import { afterAll, beforeEach, describe, expect, test } from 'vitest';
 
 type Queue = 'strict' | 'free';
 type EntityType = 'data_card' | 'preset';
@@ -343,7 +343,7 @@ describe('settleArenaRatingsForGeneration retry promotion recovery', () => {
     const secondEvent = state.events.get(state.eventId);
     expect(secondEvent?.status).toBe('applied');
     expect(state.applyCalls).toBe(2);
-    expect(state.promotionRecoveredByAlreadyApplied).toBeTrue();
+    expect(state.promotionRecoveredByAlreadyApplied).toBe(true);
     expect(state.updateComputedCalls).toBe(1);
     expect(secondEvent?.a_before_rating).toBe(auditSnapshotAfterFirst.a_before_rating);
     expect(secondEvent?.a_after_rating).toBe(auditSnapshotAfterFirst.a_after_rating);

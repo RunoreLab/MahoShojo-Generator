@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 
 import { DEFAULT_PVP_RULES } from '@/lib/pvp/defaults';
 import { requiresPvpSubmissionPhase } from '@/lib/pvp/logic';

@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 
 import { mapMagicTeaPartyUpdateDraftCompat } from '@/lib/magic-tea-party/update-draft-mappers';
 

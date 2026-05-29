@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 
 import { relayAbortSignal, STREAM_ABORT_REASON_USER } from '@/lib/stream/abort';
 

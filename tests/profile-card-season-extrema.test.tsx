@@ -1,11 +1,9 @@
-import { describe, expect, it, mock } from 'bun:test';
+import { describe, expect, it, vi } from 'vitest';
 import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { renderToStaticMarkup } from 'react-dom/server';
 
 import { ProfileCard, type MeProfileCardPayload } from '@/components/me/ProfileCard';
-
-mock.module('server-only', () => ({}));
 
 const { buildTopRatedStrictRating } = await import('@/pages/api/me/profile-card');
 

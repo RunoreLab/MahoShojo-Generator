@@ -1,6 +1,4 @@
-import { describe, expect, mock, test } from 'bun:test';
-
-mock.module('server-only', () => ({}));
+import { describe, expect, vi, test } from 'vitest';
 
 const loadCreateRecoverHandler = async () => {
   const route = await import('@/app/api/auth/recover/handler');
@@ -113,7 +111,7 @@ describe('auth/recover handler', () => {
 
     const payload = (await response.json()) as { success?: boolean; message?: string };
     expect(response.status).toBe(200);
-    expect(payload.success).toBeTrue();
+    expect(payload.success).toBe(true);
     expect(mailPayloads).toHaveLength(0);
   });
 });

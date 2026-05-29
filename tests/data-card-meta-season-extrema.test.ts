@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 
 import { arenaRatings } from '@/lib/db/schema';
 import { ensureArenaRatingsExist } from '@/lib/db/repositories/arena-ratings-write';

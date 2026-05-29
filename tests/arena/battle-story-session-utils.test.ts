@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 
 import {
   BATTLE_STORY_FAILURE_COOLDOWN_MS,

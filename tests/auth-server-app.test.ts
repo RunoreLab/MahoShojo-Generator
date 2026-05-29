@@ -1,4 +1,4 @@
-import { describe, expect, mock, test } from 'bun:test';
+import { describe, expect, vi, test } from 'vitest';
 
 const state = {
   session: {
@@ -21,7 +21,7 @@ const state = {
   } as Record<string, unknown> | null,
 };
 
-mock.module('@/lib/auth/better-auth-app', () => ({
+vi.mock('@/lib/auth/better-auth-app', () => ({
   getBetterAuthInstance: () => ({
     api: {
       getSession: async () => state.session,
@@ -29,16 +29,16 @@ mock.module('@/lib/auth/better-auth-app', () => ({
   }),
 }));
 
-mock.module('@/lib/db/drizzle', () => ({
+vi.mock('@/lib/db/drizzle', () => ({
   getDrizzleDbFromRuntime: () => ({ __mockDb: true }),
 }));
 
-mock.module('@/lib/auth/user-auth-linking', () => ({
+vi.mock('@/lib/auth/user-auth-linking', () => ({
   getLinkedBusinessUserByAuthUserId: async () => state.linkedBusinessUser,
   ensureAuthUserLink: async () => null,
 }));
 
-mock.module('@/lib/db/repositories/business-users', () => ({
+vi.mock('@/lib/db/repositories/business-users', () => ({
   getBusinessUserByEmail: async () => null,
   getBusinessUserByUsername: async () => null,
 }));

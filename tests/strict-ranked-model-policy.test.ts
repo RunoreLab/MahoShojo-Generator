@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 
 import { config } from '@/lib/config';
 import { isStrictRankedModelBlacklisted, STRICT_RANKED_MODEL_FALLBACKS } from '@/lib/arena/ranked-model-policy';

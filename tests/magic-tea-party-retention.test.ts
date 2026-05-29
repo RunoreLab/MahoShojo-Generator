@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test';
+import { describe, expect, it } from 'vitest';
 
 import { computeMagicTeaPartyCleanupPlan } from '@/lib/magic-tea-party/retention';
 import type { MagicTeaPartySession } from '@/lib/magic-tea-party/types';

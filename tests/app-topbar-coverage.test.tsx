@@ -1,16 +1,16 @@
-import { describe, expect, mock, test } from 'bun:test';
+import { describe, expect, vi, test } from 'vitest';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 
 let pathname = '/';
 
-mock.module('next/head', () => ({
+vi.mock('next/head', () => ({
   default: function HeadMock({ children }: { children?: React.ReactNode }) {
     return <>{children}</>;
   },
 }));
 
-mock.module('@/lib/use-next-router', () => ({
+vi.mock('@/lib/use-next-router', () => ({
   useNextRouter() {
     return {
       pathname,
@@ -23,25 +23,25 @@ mock.module('@/lib/use-next-router', () => ({
   },
 }));
 
-mock.module('@next/third-parties/google', () => ({
+vi.mock('@next/third-parties/google', () => ({
   GoogleAnalytics: function GoogleAnalyticsMock() {
     return <div data-google-analytics="mock" />;
   },
 }));
 
-mock.module('@/components/Announcement/AnnouncementTicker', () => ({
+vi.mock('@/components/Announcement/AnnouncementTicker', () => ({
   default: function AnnouncementTickerMock() {
     return <div data-announcement-ticker="mock" />;
   },
 }));
 
-mock.module('@/components/navigation/GlobalTopBar', () => ({
+vi.mock('@/components/navigation/GlobalTopBar', () => ({
   GlobalTopBar: function GlobalTopBarMock({ pathname: currentPathname }: { pathname: string }) {
     return <div data-global-topbar={currentPathname}>GlobalTopBar</div>;
   },
 }));
 
-mock.module('@/components/shared/ColorModeSwitcher', () => ({
+vi.mock('@/components/shared/ColorModeSwitcher', () => ({
   ColorModeSwitcher: function ColorModeSwitcherMock() {
     return <div data-color-mode-switcher="legacy-floating-widget" />;
   },

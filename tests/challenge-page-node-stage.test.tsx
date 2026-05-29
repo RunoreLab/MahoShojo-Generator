@@ -1,5 +1,5 @@
 import React from 'react';
-import { expect, test } from 'bun:test';
+import { expect, test } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 
 import { ChallengePageView, type ChallengePageController } from '@/components/challenge/ChallengePage';

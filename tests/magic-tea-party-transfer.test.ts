@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test';
+import { describe, expect, it } from 'vitest';
 
 import { parseSillyTavernJsonl, stringifySillyTavernJsonl } from '@/lib/magic-tea-party/transfer';
 import type { MagicTeaPartyMessage } from '@/lib/magic-tea-party/types';

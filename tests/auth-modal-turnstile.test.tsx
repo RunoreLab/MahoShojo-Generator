@@ -1,8 +1,8 @@
-import { expect, mock, test } from 'bun:test';
+import { expect, vi, test } from 'vitest';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 
-mock.module('next/link', () => ({
+vi.mock('next/link', () => ({
   __esModule: true,
   default: function LinkMock({
     children,
@@ -21,14 +21,14 @@ mock.module('next/link', () => ({
   },
 }));
 
-mock.module('../Turnstile', () => ({
+vi.mock('../Turnstile', () => ({
   __esModule: true,
   default: React.forwardRef(function TurnstileMock() {
     return <div data-turnstile="mock" />;
   }),
 }));
 
-mock.module('@/components/Turnstile', () => ({
+vi.mock('@/components/Turnstile', () => ({
   __esModule: true,
   default: React.forwardRef(function TurnstileMock() {
     return <div data-turnstile="mock" />;
@@ -51,6 +51,6 @@ test('登录弹窗初始不展示 Turnstile', async () => {
     expect(html).toContain('登录');
     expect(html).not.toContain('data-turnstile="mock"');
   } finally {
-    mock.restore();
+    vi.restoreAllMocks();
   }
 });

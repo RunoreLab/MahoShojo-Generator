@@ -1,5 +1,5 @@
 import React from 'react';
-import { describe, expect, mock, test } from 'bun:test';
+import { describe, expect, vi, test } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 
 type MockBetaAccessState = {
@@ -25,17 +25,17 @@ let betaAccessState: MockBetaAccessState = {
   error: null,
 };
 
-mock.module('next/router', () => ({
+vi.mock('next/router', () => ({
   default: {
     replace: async () => true,
   },
 }));
 
-mock.module('@/lib/useAuth', () => ({
+vi.mock('@/lib/useAuth', () => ({
   useAuth: () => authState,
 }));
 
-mock.module('@/lib/beta-access-client', () => ({
+vi.mock('@/lib/beta-access-client', () => ({
   useBetaAccessStatus: () => betaAccessState,
 }));
 

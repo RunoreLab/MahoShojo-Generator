@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 import { hasBetterAuthSessionCookie } from '@/lib/auth/better-auth';
 import { generateRecoveryToken, hashRecoveryToken, normalizeLegacyAuthKey } from '@/lib/auth/recovery-token';
 
@@ -6,7 +6,7 @@ describe('auth/recovery-token', () => {
   test('generateRecoveryToken 生成固定长度十六进制串', () => {
     const token = generateRecoveryToken();
     expect(token).toHaveLength(64);
-    expect(/^[0-9a-f]+$/.test(token)).toBeTrue();
+    expect(/^[0-9a-f]+$/.test(token)).toBe(true);
   });
 
   test('hashRecoveryToken 对相同输入稳定、对不同输入可区分', async () => {
@@ -40,14 +40,14 @@ describe('auth/better-auth cookie hint', () => {
         cookie: '__Secure-better-auth.session_token=token1; foo=bar',
       },
     });
-    expect(hasBetterAuthSessionCookie(reqSecureCookie)).toBeTrue();
+    expect(hasBetterAuthSessionCookie(reqSecureCookie)).toBe(true);
 
     const reqNormalCookie = new Request('https://example.com/api/test', {
       headers: {
         cookie: 'foo=bar; better-auth.session_token=token2',
       },
     });
-    expect(hasBetterAuthSessionCookie(reqNormalCookie)).toBeTrue();
+    expect(hasBetterAuthSessionCookie(reqNormalCookie)).toBe(true);
   });
 
   test('无 session cookie 时返回 false', () => {
@@ -56,6 +56,6 @@ describe('auth/better-auth cookie hint', () => {
         cookie: 'foo=bar; hello=world',
       },
     });
-    expect(hasBetterAuthSessionCookie(req)).toBeFalse();
+    expect(hasBetterAuthSessionCookie(req)).toBe(false);
   });
 });

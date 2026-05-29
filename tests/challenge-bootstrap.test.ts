@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 
 import { acceptBootstrapSnapshot } from '@/lib/challenge/progression';
 import { buildArenaBootstrapSnapshot } from '@/lib/challenge/worlds/arena/bootstrap';

@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 
 import { createRedeemHandler } from '@/pages/api/redeem-code';
 
@@ -49,7 +49,7 @@ describe('api/redeem-code handler', () => {
 
     const payload = (await response.json()) as { success?: boolean; slotCount?: number; message?: string };
     expect(response.status).toBe(200);
-    expect(payload.success).toBeTrue();
+    expect(payload.success).toBe(true);
     expect(payload.slotCount).toBe(3);
     expect(payload.message).toContain('3');
     expect(receivedStatements).toHaveLength(3);

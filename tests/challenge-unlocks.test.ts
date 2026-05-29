@@ -1,5 +1,5 @@
 import React from 'react';
-import { beforeEach, describe, expect, test } from 'bun:test';
+import { beforeEach, describe, expect, test } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 
 import '@/tests/helpers/fake-indexeddb';

@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 
 import { getDeckStatus, getDeckVisibilityValue, isDeckBanned } from '@/lib/deck-status';
 

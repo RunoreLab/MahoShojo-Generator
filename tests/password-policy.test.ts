@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 import {
   evaluatePasswordStrength,
   getPasswordPolicySummaryMessage,
@@ -12,7 +12,7 @@ describe('auth/password-policy', () => {
       email: 'alice@example.com',
     });
 
-    expect(result.ok).toBeFalse();
+    expect(result.ok).toBe(false);
     expect(result.issues).toContain('min-length');
     expect(result.issues).toContain('insufficient-character-categories');
     expect(getPasswordPolicySummaryMessage(result.issues)).toContain('密码长度至少需要');
@@ -24,7 +24,7 @@ describe('auth/password-policy', () => {
       email: 'alice@example.com',
     });
 
-    expect(result.ok).toBeFalse();
+    expect(result.ok).toBe(false);
     expect(result.issues).toContain('contains-username');
     expect(result.issues).toContain('contains-email-local-part');
   });
@@ -35,9 +35,9 @@ describe('auth/password-policy', () => {
       email: 'alice@example.com',
     });
 
-    expect(result.ok).toBeTrue();
+    expect(result.ok).toBe(true);
     expect(result.issues).toHaveLength(0);
-    expect(result.strength.level === 'medium' || result.strength.level === 'strong').toBeTrue();
+    expect(result.strength.level === 'medium' || result.strength.level === 'strong').toBe(true);
   });
 
   test('强密码评分应高于弱密码', () => {

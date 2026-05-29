@@ -1,4 +1,4 @@
-import { describe, expect, mock, test } from 'bun:test';
+import { describe, expect, vi, test } from 'vitest';
 
 const createJsonResponse = (payload: unknown, status = 200): Response =>
   new Response(JSON.stringify(payload), {
@@ -39,7 +39,7 @@ const state = {
   updatedEmails: [] as string[],
 };
 
-mock.module('@/lib/pvp/server', () => ({
+vi.mock('@/lib/pvp/server', () => ({
   json: (payload: unknown, init?: ResponseInit) =>
     new Response(JSON.stringify(payload), {
       status: init?.status ?? 200,
@@ -62,7 +62,7 @@ mock.module('@/lib/pvp/server', () => ({
   withPvpErrorBoundary: (handler: (req: Request) => Promise<Response>) => handler,
 }));
 
-mock.module('@/lib/auth/better-auth-subrequest', () => ({
+vi.mock('@/lib/auth/better-auth-subrequest', () => ({
   invokeBetterAuthSubrequest: async (input: { path: string; body: unknown }) => {
     state.bridgeCalls.push({ path: input.path, body: input.body });
     return state.bridgeResponsesByPath[input.path] ?? state.bridgeResponse;
@@ -82,14 +82,14 @@ mock.module('@/lib/auth/better-auth-subrequest', () => ({
   appendSetCookieHeaders: (_target: Headers, _source: Headers) => {},
 }));
 
-mock.module('@/lib/db/drizzle', () => ({
+vi.mock('@/lib/db/drizzle', () => ({
   getDrizzleDbFromRuntime: () => ({ __mockDb: true }),
   getRuntimeD1Client: () => null,
   getRuntimeD1ClientWithoutHttpFallback: () => null,
   createDrizzleDb: () => ({ __mockDb: true }),
 }));
 
-mock.module('@/lib/db/repositories/business-users', () => ({
+vi.mock('@/lib/db/repositories/business-users', () => ({
   getBusinessUserById: async () => (state.businessUser ? { ...state.businessUser } : null),
   updateBusinessUserEmailById: async (_db: unknown, _userId: number, email: string) => {
     state.updatedEmails.push(email);
@@ -98,7 +98,7 @@ mock.module('@/lib/db/repositories/business-users', () => ({
   },
 }));
 
-mock.module('@/lib/db/repositories/user-auth-links', () => ({
+vi.mock('@/lib/db/repositories/user-auth-links', () => ({
   getUserAuthLinkByBusinessUserId: async () => state.authLink,
   getAuthUserProfileByAuthUserId: async () => state.authProfile,
   getAuthMigrationStatusByBusinessUserId: async () => {
@@ -116,7 +116,7 @@ mock.module('@/lib/db/repositories/user-auth-links', () => ({
   },
 }));
 
-mock.module('@/lib/auth/user-auth-linking', () => ({
+vi.mock('@/lib/auth/user-auth-linking', () => ({
   ensureAuthUserLink: async (input: { authUserId: string; email?: string | null; name?: string | null }) => {
     state.ensuredLinks.push(input);
     return state.businessUser;

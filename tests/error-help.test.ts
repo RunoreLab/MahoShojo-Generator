@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 
 import { getEncyclopediaHelpForError, inferEncyclopediaSlugForError, inferErrorCategoryForError } from '@/lib/error-help';
 

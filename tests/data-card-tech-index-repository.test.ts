@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 import type { AppDrizzleDb } from '@/lib/db/drizzle';
 import { updateNativeFlagsByDataCardIds } from '@/lib/db/repositories/data-card-tech-index';
 

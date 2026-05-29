@@ -1,10 +1,10 @@
-import { describe, expect, mock, test } from 'bun:test';
+import { describe, expect, vi, test } from 'vitest';
 
 const state = {
   verifiedByToken: new Map<string, { userId: number; expiresAt: string }>(),
 };
 
-mock.module('@/lib/auth/activity-token', () => ({
+vi.mock('@/lib/auth/activity-token', () => ({
   ACTIVITY_TOKEN_HEADER: 'x-mahoshojo-activity-token',
   verifyActivityToken: async (token: string) => state.verifiedByToken.get(token) ?? null,
 }));

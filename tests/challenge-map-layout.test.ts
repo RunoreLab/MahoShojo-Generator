@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 
 import { buildChallengeMapLayout } from '@/lib/challenge/map-layout';
 import { advanceMapVisibility, generateChallengeMap } from '@/lib/challenge/map';

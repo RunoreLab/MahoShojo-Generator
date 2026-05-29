@@ -1,4 +1,4 @@
-import { describe, expect, mock, test } from 'bun:test';
+import { describe, expect, vi, test } from 'vitest';
 
 import type { ChallengeEntrantDraftState } from '@/lib/challenge/entrant-draft';
 
@@ -57,7 +57,7 @@ describe('challenge entrant draft', () => {
     );
 
     const draft = markEditorTextChanged(createDraftFromImportedCard({ codename: '雾灯' }, 'database'), '{"codename":"夜纱"}');
-    const parseCard = mock(async (text: string) => JSON.parse(text) as Record<string, unknown>);
+    const parseCard = vi.fn(async (text: string) => JSON.parse(text) as Record<string, unknown>);
 
     const result = await resolveSourceCardForPrepare(draft, parseCard);
 
@@ -70,7 +70,7 @@ describe('challenge entrant draft', () => {
   test('resolveSourceCardForPrepare 在已有 entrantCards[0] 且 dirty=false 时不会重新解析 editorText', async () => {
     const { createDraftFromImportedCard, resolveSourceCardForPrepare } = await import('@/lib/challenge/entrant-draft');
 
-    const parseCard = mock(async (_text: string) => ({ codename: '夜纱' }));
+    const parseCard = vi.fn(async (_text: string) => ({ codename: '夜纱' }));
     const result = await resolveSourceCardForPrepare(createDraftFromImportedCard({ codename: '雾灯' }, 'database'), parseCard);
 
     expect(parseCard).toHaveBeenCalledTimes(0);

@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 import type { AppDrizzleDb } from '@/lib/db/drizzle';
 import {
   countBadgesById,
@@ -28,7 +28,7 @@ const createMockDb = (expectedCalls: ExpectedCall[]) => {
     }
 
     expect(method).toBe(expected.method);
-    expect(sqlText.includes(expected.sqlIncludes)).toBeTrue();
+    expect(sqlText.includes(expected.sqlIncludes)).toBe(true);
     expect(params).toEqual(expected.params);
 
     if (expected.error) {

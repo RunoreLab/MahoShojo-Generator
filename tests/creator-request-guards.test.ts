@@ -1,11 +1,11 @@
-import { beforeEach, describe, expect, mock, test } from 'bun:test';
+import { beforeEach, describe, expect, vi, test } from 'vitest';
 
 const state = {
   safetyCalls: [] as Array<Record<string, unknown>>,
   blockedTexts: new Set<string>(),
 };
 
-mock.module('@/lib/ai/public-rate-limit', () => ({
+vi.mock('@/lib/ai/public-rate-limit', () => ({
   acquirePublicAiRateLimit: async () => ({
     allowed: true,
     retryAfterSeconds: 0,
@@ -19,7 +19,7 @@ mock.module('@/lib/ai/public-rate-limit', () => ({
   inferPublicAiProviderMode: () => 'system',
 }));
 
-mock.module('@/lib/content-safety/server', () => ({
+vi.mock('@/lib/content-safety/server', () => ({
   enforceTextSafety: async (input: Record<string, unknown>) => {
     state.safetyCalls.push(input);
     const text = typeof input.text === 'string' ? input.text : '';
@@ -38,11 +38,11 @@ mock.module('@/lib/content-safety/server', () => ({
   },
 }));
 
-mock.module('@/lib/user-activity/record', () => ({
+vi.mock('@/lib/user-activity/record', () => ({
   recordUserActivityFromRequest: () => {},
 }));
 
-mock.module('@/lib/ai', () => ({
+vi.mock('@/lib/ai', () => ({
   generateWithAI: async () => ({
     codename: '测试魔法少女',
     appearance: {
@@ -87,7 +87,7 @@ mock.module('@/lib/ai', () => ({
   },
 }));
 
-mock.module('@/lib/stream/raw-ai', () => ({
+vi.mock('@/lib/stream/raw-ai', () => ({
   generateWithStreamAI: async () => {
     throw new Error('stream ai should not run in request guard tests');
   },
@@ -97,7 +97,7 @@ mock.module('@/lib/stream/raw-ai', () => ({
   },
 }));
 
-mock.module('@/lib/signature', () => ({
+vi.mock('@/lib/signature', () => ({
   generateSignature: async () => 'test-signature',
 }));
 
@@ -216,7 +216,7 @@ describe('creator request guards', () => {
 
     const payload = (await response.json()) as { shouldRedirect?: boolean; reason?: string };
     expect(response.status).toBe(400);
-    expect(payload.shouldRedirect).toBeTrue();
+    expect(payload.shouldRedirect).toBe(true);
     expect(payload.reason).toBe('在自由补充说明中使用了危险符文');
     expect(state.safetyCalls.some((call) => call.text === '危险补充说明')).toBe(true);
   });
@@ -240,7 +240,7 @@ describe('creator request guards', () => {
 
     const payload = (await response.json()) as { shouldRedirect?: boolean; reason?: string };
     expect(response.status).toBe(400);
-    expect(payload.shouldRedirect).toBeTrue();
+    expect(payload.shouldRedirect).toBe(true);
     expect(payload.reason).toBe('在自由补充说明中使用了危险符文');
     expect(state.safetyCalls.some((call) => call.text === '危险流式补充说明')).toBe(true);
   });

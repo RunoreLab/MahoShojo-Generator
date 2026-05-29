@@ -1,4 +1,4 @@
-import { describe, expect, mock, test } from 'bun:test';
+import { describe, expect, vi, test } from 'vitest';
 
 type MockUser = {
   id: number;
@@ -83,7 +83,6 @@ let routeFactoriesPromise: Promise<RouteFactories> | null = null;
 
 const loadRouteFactories = async (): Promise<RouteFactories> => {
   if (!routeFactoriesPromise) {
-    mock.module('server-only', () => ({}));
 
     routeFactoriesPromise = Promise.all([
       import('@/app/api/auth/register/handler'),
@@ -744,7 +743,7 @@ describe('auth 全链路集成', () => {
       error?: string;
     };
     expect(recoverResp.status).toBe(200);
-    expect(recoverPayload.success).toBeTrue();
+    expect(recoverPayload.success).toBe(true);
     expect(recoverPayload.message).toContain('15 分钟');
     expect(harness.state.resendRequests).toHaveLength(1);
     expect(String(harness.state.resendRequests[0]?.payload.text ?? '')).toContain('recover-token-');
@@ -768,7 +767,7 @@ describe('auth 全链路集成', () => {
       authKey: string;
       user: { id: number; username: string };
     };
-    expect(registerPayload.success).toBeTrue();
+    expect(registerPayload.success).toBe(true);
     expect(registerPayload.authMode).toBe('better-auth');
     expect(registerPayload.user.username).toBe('hikari');
 
@@ -789,7 +788,7 @@ describe('auth 全链路集成', () => {
       authMode: string;
       user: { id: number; username: string };
     };
-    expect(loginPayload.success).toBeTrue();
+    expect(loginPayload.success).toBe(true);
     expect(loginPayload.authMode).toBe('better-auth');
     expect(loginPayload.user.id).toBe(registerPayload.user.id);
 
@@ -844,7 +843,7 @@ describe('auth 全链路集成', () => {
       user: { id: number; username: string };
       activityToken: string;
     };
-    expect(verifyPayload.success).toBeTrue();
+    expect(verifyPayload.success).toBe(true);
     expect(verifyPayload.authKey).toBe(registerPayload.authKey);
     expect(verifyPayload.user.username).toBe('hikari');
     expect(verifyPayload.activityToken).toContain(`activity-${registerPayload.user.id}-`);
@@ -867,7 +866,7 @@ describe('auth 全链路集成', () => {
       success: boolean;
       message: string;
     };
-    expect(recoverPayload.success).toBeTrue();
+    expect(recoverPayload.success).toBe(true);
     expect(recoverPayload.message).toContain('15 分钟');
     expect(harness.state.lastRecoveryToken).toContain('recover-token-');
     expect(harness.state.resendRequests).toHaveLength(1);
@@ -885,7 +884,7 @@ describe('auth 全链路集成', () => {
       success: boolean;
       message: string;
     };
-    expect(resetPayload.success).toBeTrue();
+    expect(resetPayload.success).toBe(true);
     expect(resetPayload.message).toContain('设置成功');
 
     const replayResetResp = await harness.resetPost(
@@ -920,12 +919,12 @@ describe('auth 全链路集成', () => {
       authMode: string;
       user: { id: number; username: string };
     };
-    expect(newPasswordPayload.success).toBeTrue();
+    expect(newPasswordPayload.success).toBe(true);
     expect(newPasswordPayload.authMode).toBe('better-auth');
     expect(newPasswordPayload.user.id).toBe(registerPayload.user.id);
 
     const account = harness.state.authAccountsByEmail.get('hikari@example.com');
-    expect(account?.emailVerified).toBeTrue();
+    expect(account?.emailVerified).toBe(true);
     expect(account?.password).toBe(newPassword);
   });
 });

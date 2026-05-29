@@ -1,5 +1,6 @@
 // 分布概率验证测试
 // 测试 getWeightedRandomFromSeed 函数的分布概率
+import { expect, test } from 'vitest';
 
 // 复制核心函数实现
 function seedRandom(str) {
@@ -173,6 +174,20 @@ function runAllTests() {
 if (typeof module !== 'undefined' && require.main === module) {
   runAllTests()
 }
+
+test('getWeightedRandomFromSeed 的分布质量在大样本下接近期望权重', () => {
+  const result = runDistributionTest(10000)
+
+  expect(result.isDistributionGood).toBe(true)
+})
+
+test('getWeightedRandomFromSeed 对相同种子保持确定性', () => {
+  const seed = seedRandom('Alice')
+  const first = getWeightedRandomFromSeed(levels, levelProbabilities, seed, 6)
+  const second = getWeightedRandomFromSeed(levels, levelProbabilities, seed, 6)
+
+  expect(second).toEqual(first)
+})
 
 // 导出函数供其他测试使用
 if (typeof module !== 'undefined') {
