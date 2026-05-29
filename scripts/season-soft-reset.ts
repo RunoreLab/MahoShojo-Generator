@@ -216,7 +216,7 @@ const main = async () => {
   if (args.has('--help') || args.has('-h')) {
     console.log(`[season-soft-reset]
 用法：
-  bun tsx scripts/season-soft-reset.ts [--queue all|strict|free] [--policy soft|hundreds_toward_base] [--base 1000] [--factor 1] [--step 100] [--min-start 800] [--max-start 1500] [--apply] [--dry-run] [--require-db]
+  pnpm exec tsx scripts/season-soft-reset.ts [--queue all|strict|free] [--policy soft|hundreds_toward_base] [--base 1000] [--factor 1] [--step 100] [--min-start 800] [--max-start 1500] [--apply] [--dry-run] [--require-db]
 
 默认策略（更像成熟排位的赛季收敛）：
   policy=hundreds_toward_base（向初始值方向“整档/整百”归位）
@@ -413,7 +413,7 @@ const main = async () => {
 
     if (!apply) {
       console.log('[season-soft-reset] 未传入 --apply，已跳过实际更新。');
-      console.log('  如需执行写入，请运行：bun tsx scripts/season-soft-reset.ts --apply');
+      console.log('  如需执行写入，请运行：pnpm exec tsx scripts/season-soft-reset.ts --apply');
     }
     return;
   }

@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env -S pnpm exec tsx
 
 /**
  * 记者档位徽章发放脚本（含高级档位）
@@ -6,8 +6,8 @@
  * 默认仅建议 dry-run 预览；若需要实际写入，请去掉 --dry-run。
  *
  * 使用：
- * - bun run scripts/badge/grant-reporter-tiers.ts --dry-run
- * - bun run scripts/badge/grant-reporter-tiers.ts
+ * - pnpm exec tsx scripts/badge/grant-reporter-tiers.ts --dry-run
+ * - pnpm exec tsx scripts/badge/grant-reporter-tiers.ts
  *
  * 可选参数：
  * - --max-tier=<badgeId> 仅发放到指定档位（包含该档位）。例如：--max-tier=excellent_reporter

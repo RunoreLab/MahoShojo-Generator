@@ -426,7 +426,7 @@ const main = async () => {
   if (args.has('--help') || args.has('-h')) {
     console.log(`[season-archive]
 用法：
-  bun tsx scripts/season-archive.ts [--season-id <id>] [--force] [--require-db] [--snapshot-only] [--top <n>] [--bottom <n>] [--full]
+  pnpm exec tsx scripts/season-archive.ts [--season-id <id>] [--force] [--require-db] [--snapshot-only] [--top <n>] [--bottom <n>] [--full]
 
 说明：
   - 默认归档当前赛季（status=current）

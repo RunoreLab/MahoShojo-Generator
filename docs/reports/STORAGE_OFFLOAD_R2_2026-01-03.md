@@ -321,12 +321,12 @@ SQLite 文件大小包含已释放但未回收的页面（freelist）。本次�
 
 1) 初始化 `large_objects` 表（必须先做，才会真正开始“置空 output_preview + 从 R2 双读”）：
 
-- `bun tsx scripts/init-large-objects.ts`
+- `pnpm exec tsx scripts/init-large-objects.ts`
 
 2) 立即清理历史遗留的 PVP 过程数据（推荐先 dry-run 再执行）：
 
-- `bun tsx scripts/pvp-prune-ephemeral.ts --dry-run --limit=500`
-- `bun tsx scripts/pvp-prune-ephemeral.ts --limit=500`（可重复执行直到候选为空）
+- `pnpm exec tsx scripts/pvp-prune-ephemeral.ts --dry-run --limit=500`
+- `pnpm exec tsx scripts/pvp-prune-ephemeral.ts --limit=500`（可重复执行直到候选为空）
 
 ---
 

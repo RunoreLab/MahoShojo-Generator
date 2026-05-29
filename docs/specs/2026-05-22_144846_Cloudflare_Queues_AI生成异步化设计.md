@@ -512,9 +512,9 @@ type AiGenerationJobClientState = {
 提交前至少运行：
 
 ```bash
-bun test
-bun run lint
-bun run build
+pnpm test
+pnpm lint
+pnpm build
 ```
 
 如果只完成底座局部实现，可运行对应测试子集并在 PR 中记录未覆盖范围。

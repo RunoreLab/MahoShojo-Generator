@@ -43,7 +43,7 @@
 
 ### 环境与配置提示
 - 复制 `env.example` 至 `.env.local` 并填充所需凭据；复杂配置参考 `config/ai-providers.example.json`。
-- 徽章或内容脚本通过 `bun tsx scripts/<name>.ts` 运行。
+- 徽章或内容脚本通过 `pnpm exec tsx scripts/<name>.ts` 运行。
 
 ## 文档规则
 

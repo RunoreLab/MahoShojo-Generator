@@ -144,8 +144,8 @@ async function main() {
     console.log('');
     console.log('🎉 徽章定义初始化成功！');
     console.log('💡 现在可以运行以下命令转换用户头衔：');
-    console.log('   bun run scripts/convert-prefix-to-badges.ts --dry-run');
-    console.log('   bun run scripts/convert-prefix-to-badges.ts');
+    console.log('   pnpm exec tsx scripts/convert-prefix-to-badges.ts --dry-run');
+    console.log('   pnpm exec tsx scripts/convert-prefix-to-badges.ts');
   } else {
     console.log('');
     console.log('⚠️  部分徽章处理失败，请检查错误信息');
