@@ -2,8 +2,6 @@ import { getCrowdReviewSummary } from '@/lib/crowd-review/service';
 import type { CrowdReviewSummaryDto } from '@/lib/crowd-review/types';
 import { getAuthUser, json, withPvpErrorBoundary } from '@/lib/pvp/server';
 
-export const runtime = 'edge';
-
 type HandlerDeps = {
   getAuthUser: typeof getAuthUser;
   getDb: () => any;

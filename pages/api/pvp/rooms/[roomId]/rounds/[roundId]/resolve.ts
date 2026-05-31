@@ -27,8 +27,6 @@ import { createPvpWinnerVoteState } from '@/lib/pvp/winner-vote';
 import { buildSubrequestAuthHeaders } from '@/lib/subrequest-auth';
 import { resolvePvpAdjudicationEvents } from '@/lib/pvp/adjudication-events';
 
-export const runtime = 'edge';
-
 type ResolveBody = { expectedVersion?: number; customProvider?: unknown; force?: boolean };
 
 type PvpPickedSnapshot = NonNullable<Awaited<ReturnType<typeof getPvpCardSnapshotById>>>;

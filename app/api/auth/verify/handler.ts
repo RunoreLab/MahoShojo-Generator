@@ -4,8 +4,6 @@ import { ensureBusinessUserLegacyAuthKey } from '@/lib/auth/user-auth-linking';
 import { getBusinessUserById } from '@/lib/db/repositories/business-users';
 import { getDrizzleDbFromRuntime } from '@/lib/db/drizzle';
 
-export const runtime = 'edge';
-
 type VerifyDeps = {
   requireAuthUserForApp: typeof requireAuthUserForApp;
   issueActivityToken: typeof issueActivityToken;

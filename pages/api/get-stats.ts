@@ -12,10 +12,6 @@ import {
   type StatsLeaderboardMode,
 } from '@/lib/db/repositories/arena-read';
 
-export const config = {
-  runtime: 'edge',
-};
-
 export interface StatsData {
   totalBattles: number;
   totalParticipants: number;

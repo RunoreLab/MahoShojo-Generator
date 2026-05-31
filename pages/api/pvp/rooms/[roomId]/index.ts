@@ -22,8 +22,6 @@ import { requiresPvpSubmissionPhase } from '@/lib/pvp/logic';
 import type { PvpHandState, PvpSubmissionPayload } from '@/lib/pvp/types';
 import type { UserBadge } from '@/types/badge';
 
-export const runtime = 'edge';
-
 const parseSubmission = (raw: string): PvpSubmissionPayload | null => {
   try {
     const parsed = JSON.parse(raw) as PvpSubmissionPayload;

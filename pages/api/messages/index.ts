@@ -10,8 +10,6 @@ import {
 } from '@/lib/messages/service';
 import { getAuthUser, json, withPvpErrorBoundary } from '@/lib/pvp/server';
 
-export const runtime = 'edge';
-
 type HandlerDeps = {
   getAuthUser: typeof getAuthUser;
   getDb: () => MessageServiceDb;

@@ -15,10 +15,6 @@ import { getTagsForDataCard, type TagScope } from '@/lib/database/tags';
 import { computeTechIndex } from '@/lib/metrics/techIndex';
 import { verifySignature } from '@/lib/signature';
 
-export const config = {
-  runtime: 'edge',
-};
-
 type Queue = 'strict' | 'free';
 
 type ApiTag = {

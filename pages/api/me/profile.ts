@@ -5,8 +5,6 @@ import {
 } from '@/lib/db/repositories/business-users';
 import { json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
 
-export const runtime = 'edge';
-
 const MAX_SIGNATURE_LENGTH = 120;
 
 function toProfileResponse(row: { signature: string | null; avatar_webp_base64: string | null } | null) {

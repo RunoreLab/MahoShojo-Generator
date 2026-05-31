@@ -15,8 +15,6 @@ import {
 } from '@/lib/db/repositories/user-auth-links';
 import { json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
 
-export const runtime = 'edge';
-
 type ChangeEmailPayload = {
   newEmail?: unknown;
 };

@@ -19,10 +19,6 @@ import {
   type ArenaEligibilitySnapshot,
 } from '@/lib/database/arena-ratings';
 
-export const config = {
-  runtime: 'edge',
-};
-
 type ApiQueue = 'strict' | 'free';
 
 type ApiQueueResult = {

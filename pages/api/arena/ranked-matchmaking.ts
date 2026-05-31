@@ -1,9 +1,5 @@
 import type { NextRequest } from 'next/server';
 
-export const config = {
-  runtime: 'edge',
-};
-
 type ApiErrorResponse = { success: false; error: string };
 export default async function handler(req: NextRequest): Promise<Response> {
   if (req.method !== 'POST') {

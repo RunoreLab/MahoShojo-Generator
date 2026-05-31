@@ -16,10 +16,6 @@ import { recordUserActivityFromRequest } from '@/lib/user-activity/record';
 
 const log = getLogger('api-gen-canshou-stream');
 
-export const config = {
-  runtime: 'edge',
-};
-
 const CustomProviderSchema = z.object({
   providerId: z.string().min(1),
   modelId: z.string().min(1),

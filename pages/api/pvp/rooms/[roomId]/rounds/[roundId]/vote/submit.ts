@@ -16,8 +16,6 @@ import {
   type PvpWinnerVoteChoice,
 } from '@/lib/pvp/winner-vote';
 
-export const runtime = 'edge';
-
 type SubmitVoteBody = {
   expectedVersion?: number;
   choice?: unknown;

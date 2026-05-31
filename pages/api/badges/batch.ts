@@ -1,7 +1,5 @@
 import { getUserEquippedBadges } from '@/lib/database/badges';
 
-export const runtime = 'edge';
-
 /**
  * POST /api/badges/batch
  * 批量获取用户已佩戴的徽章（公开接口，仅返回 BadgeDefinition）

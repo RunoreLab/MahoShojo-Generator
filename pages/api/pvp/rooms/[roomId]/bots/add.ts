@@ -10,8 +10,6 @@ import { json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp
 import type { PvpSubmissionPayload } from '@/lib/pvp/types';
 import { buildSubrequestAuthHeaders } from '@/lib/subrequest-auth';
 
-export const runtime = 'edge';
-
 type AddBotBody = { expectedVersion?: number };
 
 const parseSubmission = (raw: string): PvpSubmissionPayload | null => {

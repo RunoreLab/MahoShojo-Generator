@@ -5,8 +5,6 @@ import { recordDataCardStatInteraction } from '@/lib/data-card-stats/service';
 import type { AppDrizzleDb } from '@/lib/db/drizzle';
 import type { DataCardInteractionEventType } from '@/lib/db/schema';
 
-export const runtime = 'edge';
-
 type DataCardStatsHandlerDeps = {
   getDb?: () => AppDrizzleDb | null;
   resolveActor?: typeof resolveDataCardStatsActor;

@@ -10,8 +10,6 @@ import { validateAndBuildPvpChatMessage, normalizePvpChatSendBody } from '@/lib/
 import { getRoomIdFromRequestUrl } from '@/lib/pvp/route';
 import { json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
 
-export const runtime = 'edge';
-
 const parseAfterId = (url: string): number | null => {
   try {
     const u = new URL(url);

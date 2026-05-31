@@ -4,8 +4,6 @@ import { requiresPvpSubmissionPhase } from '@/lib/pvp/logic';
 import { getRoomIdFromRequestUrl } from '@/lib/pvp/route';
 import { json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
 
-export const runtime = 'edge';
-
 type RestartBody = { expectedVersion?: number };
 
 async function restartHandler(req: Request): Promise<Response> {

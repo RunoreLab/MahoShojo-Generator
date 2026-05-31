@@ -15,10 +15,6 @@ import { recordUserActivityFromRequest } from '@/lib/user-activity/record';
 const log = getLogger('api-gen-sublimation-stream');
 const SUBLIMATION_USER_GUIDANCE_MAX_CHARS = 200;
 
-export const config = {
-  runtime: 'edge',
-};
-
 const CustomProviderSchema = z.object({
   providerId: z.string().min(1),
   modelId: z.string().min(1),

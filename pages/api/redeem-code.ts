@@ -1,8 +1,6 @@
 import { requireAuthUser } from '@/lib/auth/server';
 import { getRuntimeD1Client } from '@/lib/db/drizzle';
 
-export const runtime = 'edge';
-
 type RedeemBatchResult = {
   invalidCode: boolean;
   slotCount: number;

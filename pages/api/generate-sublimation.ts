@@ -31,10 +31,6 @@ import { buildFinalSublimationData } from '@/lib/sublimation/finalize';
 const log = getLogger('api-gen-sublimation');
 const SUBLIMATION_USER_GUIDANCE_MAX_CHARS = 200;
 
-export const config = {
-  runtime: 'edge',
-};
-
 type SupportedTargetTemplate = 'magical-girl' | 'canshou' | 'general';
 
 const SUPPORTED_TARGET_TEMPLATES: SupportedTargetTemplate[] = ['magical-girl', 'canshou', 'general'];

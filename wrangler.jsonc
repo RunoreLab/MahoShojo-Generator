@@ -1,0 +1,65 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "ifmahoushoujo",
+  "main": ".open-next/worker.js",
+  "compatibility_date": "2024-09-23",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  },
+  "services": [
+    {
+      "binding": "WORKER_SELF_REFERENCE",
+      "service": "ifmahoushoujo"
+    }
+  ],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "mhsj-d1-test",
+      "database_id": "3836f44c-4e49-4356-9b33-6080278e4448",
+      "migrations_dir": "drizzle"
+    }
+  ],
+  "env": {
+    "production": {
+      "name": "ifmahoushoujo",
+      "compatibility_date": "2024-09-23",
+      "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+      "services": [
+        {
+          "binding": "WORKER_SELF_REFERENCE",
+          "service": "ifmahoushoujo"
+        }
+      ],
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "ifmahoushoujo",
+          "database_id": "8eb9b25c-5a00-4feb-b5cb-c5dd25cda1d3",
+          "migrations_dir": "drizzle"
+        }
+      ]
+    },
+    "preview": {
+      "name": "ifmahoushoujo-preview",
+      "compatibility_date": "2024-09-23",
+      "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+      "services": [
+        {
+          "binding": "WORKER_SELF_REFERENCE",
+          "service": "ifmahoushoujo-preview"
+        }
+      ],
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "mhsj-d1-test-preview",
+          "database_id": "3836f44c-4e49-4356-9b33-6080278e4448",
+          "migrations_dir": "drizzle"
+        }
+      ]
+    }
+  }
+}

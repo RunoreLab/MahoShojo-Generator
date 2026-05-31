@@ -7,8 +7,6 @@ import {
   withdrawDataCardReport,
 } from '@/lib/data-card-reports/service';
 
-export const runtime = 'edge';
-
 type HandlerDeps = {
   requireAuthUser: typeof requireAuthUser;
   getDb: () => DataCardReportsServiceDb | Promise<DataCardReportsServiceDb>;

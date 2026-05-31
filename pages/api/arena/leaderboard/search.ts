@@ -7,10 +7,6 @@ import { getDrizzleDbFromRuntime } from '@/lib/db/drizzle';
 import { searchArenaLeaderboardRows } from '@/lib/db/repositories/arena-read';
 import { queryArenaPublicQueenEntityByQueue } from '@/lib/db/repositories/data-card-meta';
 
-export const config = {
-  runtime: 'edge',
-};
-
 type Queue = 'strict' | 'free';
 type Sort = 'rating' | 'tech';
 type SortOrder = 'asc' | 'desc';

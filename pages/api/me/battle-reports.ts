@@ -6,8 +6,6 @@ import {
 import { extractBattleReportGenerationErrorMessage } from '@/lib/arena/battle-report-record-utils';
 import { json, requireAuthUser } from '@/lib/pvp/server';
 
-export const runtime = 'edge';
-
 const clampInt = (value: unknown, fallback: number, min: number, max: number): number => {
   const n = typeof value === 'string' ? Number(value) : typeof value === 'number' ? value : NaN;
   if (!Number.isFinite(n)) return fallback;

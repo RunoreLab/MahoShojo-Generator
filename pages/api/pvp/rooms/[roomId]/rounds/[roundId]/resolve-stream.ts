@@ -34,8 +34,6 @@ import { buildSubrequestAuthHeaders } from '@/lib/subrequest-auth';
 import { extractWinnerLineFromMarkdown, parsePvpWinnerFromText } from '@/lib/pvp/winner-parse';
 import type { AIReasoningSource, AIReasoningStatus } from '@/types/ai-reasoning';
 
-export const runtime = 'edge';
-
 type ResolveBody = { expectedVersion?: number; customProvider?: unknown; force?: boolean };
 
 type PvpPickedSnapshot = NonNullable<Awaited<ReturnType<typeof getPvpCardSnapshotById>>>;

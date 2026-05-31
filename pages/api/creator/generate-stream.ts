@@ -30,10 +30,6 @@ import type { CreatorPromptInput, CreatorRequestInput } from '@/lib/creator/type
 
 const log = getLogger('api-gen-details-stream');
 
-export const config = {
-  runtime: 'edge',
-};
-
 const CustomProviderSchema = z.object({
   providerId: z.string().min(1),
   modelId: z.string().min(1),

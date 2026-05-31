@@ -8,10 +8,6 @@ import {
   type ArenaReadQueue,
 } from '@/lib/db/repositories/arena-read';
 
-export const config = {
-  runtime: 'edge',
-};
-
 type ApiSuccessResponse = {
   success: true;
   entityType: ArenaReadEntityType;

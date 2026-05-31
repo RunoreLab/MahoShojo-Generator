@@ -11,8 +11,6 @@ import { getDrizzleDbFromRuntime } from '@/lib/db/drizzle';
 import { getBusinessUserById } from '@/lib/db/repositories/business-users';
 import { json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
 
-export const runtime = 'edge';
-
 type ChangePasswordPayload = {
   currentPassword?: unknown;
   newPassword?: unknown;

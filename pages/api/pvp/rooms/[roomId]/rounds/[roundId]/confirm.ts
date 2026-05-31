@@ -26,8 +26,6 @@ import { getRoomIdFromRequestUrl, getRoundIdFromRequestUrl } from '@/lib/pvp/rou
 import { json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
 import type { PvpHandState, PvpSnapshotRef } from '@/lib/pvp/types';
 
-export const runtime = 'edge';
-
 type ConfirmBody = { expectedVersion?: number };
 
 type PostRoundState = {

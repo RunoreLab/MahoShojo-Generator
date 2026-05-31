@@ -14,8 +14,6 @@ import { getLogger } from '@/lib/logger';
 import { createReasoningSseBridge, shouldUseClientSse } from '@/lib/stream/reasoning-sse';
 import { recordUserActivityFromRequest } from '@/lib/user-activity/record';
 
-export const runtime = 'edge';
-
 const log = getLogger('api-challenge-adjudicate-stream');
 
 const TrackValueSchema = z.object({

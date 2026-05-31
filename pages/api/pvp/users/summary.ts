@@ -2,8 +2,6 @@ import { getPvpUserSummariesByUserIds } from '@/lib/database/pvp';
 import { buildDefaultPvpUserSummary, computePvpWinRate, mapPvpUserSummaryRow } from '@/lib/pvp/read-mappers';
 import { json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
 
-export const runtime = 'edge';
-
 type SummaryBody = { userIds?: unknown };
 
 async function summaryHandler(req: Request): Promise<Response> {

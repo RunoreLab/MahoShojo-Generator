@@ -20,10 +20,6 @@ import { recordUserActivityFromRequest } from '@/lib/user-activity/record';
 
 const log = getLogger('api-magic-tea-party-generate-stream');
 
-export const config = {
-  runtime: 'edge',
-};
-
 const MAX_SAFETY_TEXT_CHARS = 50_000;
 const MAX_MESSAGE_CHARS = 8_000;
 

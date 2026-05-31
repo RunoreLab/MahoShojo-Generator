@@ -11,8 +11,9 @@
         "check:naming": "node scripts/check-naming-conventions.mjs --report-only",
         "check:naming:strict": "node scripts/check-naming-conventions.mjs",
         "check:wrangler:d1": "node scripts/check-wrangler-d1-config.mjs",
-        "build:cf": "node -e \"require('node:fs').rmSync('.next', { recursive: true, force: true })\" && node scripts/check-wrangler-d1-config.mjs && node scripts/build-cf.mjs",
-        "preview": "pnpm run build:cf && wrangler pages dev .vercel/output/static",
+        "build:cf": "node -e \"require('node:fs').rmSync('.next', { recursive: true, force: true })\" && node scripts/check-wrangler-d1-config.mjs && opennextjs-cloudflare build",
+        "preview": "pnpm run build:cf && opennextjs-cloudflare preview",
+        "deploy": "pnpm run build:cf && opennextjs-cloudflare deploy",
         "start": "next start",
         "lint": "next lint",
         "db:generate": "drizzle-kit generate --config drizzle.config.ts",
@@ -34,6 +35,7 @@
         "@ai-sdk/react": "^3.0.186",
         "@hookform/resolvers": "^5.2.2",
         "@next/third-parties": "15.3.8",
+        "@opennextjs/cloudflare": "^1.15.0",
         "@tanstack/react-query": "^5.90.12",
         "@types/mdast": "^4.0.4",
         "@zumer/snapdom": "^1.9.7",
@@ -71,7 +73,6 @@
         "zustand": "^5.0.9"
     },
     "devDependencies": {
-        "@cloudflare/next-on-pages": "^1.13.13",
         "@eslint/eslintrc": "^3",
         "@next/env": "15.3.8",
         "@tailwindcss/postcss": "^4",
@@ -81,6 +82,7 @@
         "@types/react-dom": "^19",
         "@typescript-eslint/typescript-estree": "^8.43.0",
         "better-sqlite3": "^12.10.0",
+        "comment-json": "4.2.5",
         "drizzle-kit": "^0.31.9",
         "eslint": "^9",
         "eslint-config-next": "15.3.2",
@@ -91,6 +93,6 @@
         "typescript": "^5",
         "vercel": "47.0.4",
         "vitest": "^4.1.7",
-        "wrangler": "^4.28.0"
+        "wrangler": "^4.60.0"
     }
 }

@@ -2,8 +2,6 @@ import { listMyReportAppeals, submitReportAppeal, ReportAppealConflictError, Rep
 import { json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
 import type { ReportAppealReferenceDraft } from '@/lib/report-appeals/types';
 
-export const runtime = 'edge';
-
 type HandlerDeps = {
   requireAuthUser: typeof requireAuthUser;
   getDb: () => any;

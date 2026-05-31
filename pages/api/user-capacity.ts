@@ -4,8 +4,6 @@ import { getDrizzleDbFromRuntime } from '@/lib/db/drizzle';
 import { getBusinessUserSlotCountById } from '@/lib/db/repositories/business-users';
 import { countUserUsedDataCardSlots } from '@/lib/db/repositories/data-cards-core';
 
-export const runtime = 'edge';
-
 export default async function handler(req: Request): Promise<Response> {
   // 只支持 GET 请求
   if (req.method !== 'GET') {

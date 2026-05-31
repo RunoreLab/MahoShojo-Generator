@@ -4,8 +4,6 @@ import { json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp
 import type { PvpHandState, PvpSnapshotRef } from '@/lib/pvp/types';
 import { parsePvpRoomInternalState } from '@/lib/pvp/bot/room';
 
-export const runtime = 'edge';
-
 type ChooseBody = {
   expectedVersion?: number;
   snapshotId?: string;

@@ -22,8 +22,6 @@ import { json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp
 import type { PvpHandState, PvpSnapshotRef, PvpSubmissionPayload } from '@/lib/pvp/types';
 import { buildSubrequestAuthHeaders } from '@/lib/subrequest-auth';
 
-export const runtime = 'edge';
-
 type KickBody = { expectedVersion?: number; userId?: number };
 
 const parseSubmission = (raw: string): PvpSubmissionPayload | null => {

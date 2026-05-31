@@ -2,8 +2,6 @@ import { getDrizzleDbFromRuntime } from '@/lib/db/drizzle';
 import { getAuthMigrationStatusByBusinessUserId } from '@/lib/db/repositories/user-auth-links';
 import { json, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
 
-export const runtime = 'edge';
-
 export default withPvpErrorBoundary(async function handler(req: Request): Promise<Response> {
   if (req.method !== 'GET') return json({ error: 'Method not allowed' }, { status: 405 });
 

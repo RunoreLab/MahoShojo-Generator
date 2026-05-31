@@ -2,10 +2,6 @@
 import { NextRequest } from 'next/server';
 import { verifySignature } from '../../lib/signature'; // 导入我们的校验工具
 
-export const config = {
-  runtime: 'edge',
-};
-
 async function handler(req: NextRequest) {
   if (req.method !== 'POST') {
     return new Response(JSON.stringify({ error: 'Method not allowed' }), {

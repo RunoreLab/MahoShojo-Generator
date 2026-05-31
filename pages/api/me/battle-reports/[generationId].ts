@@ -12,8 +12,6 @@ import { isUserInPvpMatch } from '@/lib/database/pvp';
 import { json, requireAuthUser } from '@/lib/pvp/server';
 import { quickCheck } from '@/lib/sensitive-word-filter';
 
-export const runtime = 'edge';
-
 const getGenerationIdFromUrl = (url: string): string | null => {
   try {
     const parts = new URL(url).pathname.split('/').filter(Boolean);

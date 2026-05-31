@@ -26,8 +26,6 @@ import {
 import { sha256Hex } from '@/lib/pvp/crypto';
 import { verifyTurnstileToken } from '@/lib/turnstile';
 
-export const runtime = 'edge';
-
 type LoginMode = 'password' | 'legacy';
 type PasswordIdentifierType = 'email' | 'username' | 'user-id';
 

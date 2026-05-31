@@ -25,10 +25,6 @@ import presetIndex from '@/public/questionnaires/presets/index.json';
 
 const log = getLogger('api-gen-details');
 
-export const config = {
-  runtime: 'edge',
-};
-
 // 定义基于问卷的魔法少女详细信息生成 schema
 const MagicalGirlDetailsSchema = z.object({
   codename: z.string().describe(`代号：魔法少女对应的一种花的名字，根据性格、理念匹配合适的花语对应的花名。可以从我提供的花名中选取最合适的一个，也可以生成一个其他的更合适的花名。`),

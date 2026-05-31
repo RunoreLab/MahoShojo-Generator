@@ -19,10 +19,6 @@ import { getStrictArenaRatingsByEntities } from '@/lib/db/repositories/arena-str
 import { fetchCurrentSeasonFromOrigin } from '@/lib/seasons-config';
 import { deriveSeasonStrictRules } from '@/lib/seasons';
 
-export const config = {
-  runtime: 'edge',
-};
-
 type ApiSuccessResponse = {
   success: true;
   willCount: boolean;

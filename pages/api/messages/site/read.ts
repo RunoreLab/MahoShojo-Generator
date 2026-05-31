@@ -1,8 +1,6 @@
 import { type MessageServiceDb, MessagesServiceUnavailableError, markSiteMessagesRead } from '@/lib/messages/service';
 import { json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
 
-export const runtime = 'edge';
-
 type RequireAuthResult = Awaited<ReturnType<typeof requireAuthUser>> | { user: { id: number } } | Response;
 
 type HandlerDeps = {

@@ -2,10 +2,6 @@ import type { NextRequest } from 'next/server';
 
 import { isAllowedExternalMediaUrl } from '@/lib/markdown/externalMedia';
 
-export const config = {
-  runtime: 'edge',
-};
-
 const buildJsonResponse = (status: number, payload: Record<string, unknown>) =>
   new Response(JSON.stringify(payload), {
     status,

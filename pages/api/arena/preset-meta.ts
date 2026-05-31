@@ -5,10 +5,6 @@ import { getDrizzleDbFromRuntime } from '@/lib/db/drizzle';
 import { getPresetArenaRatingsByEntityId } from '@/lib/db/repositories/arena-read';
 import { queryArenaPublicQueenEntityByQueue } from '@/lib/db/repositories/data-card-meta';
 
-export const config = {
-  runtime: 'edge',
-};
-
 type Queue = 'strict' | 'free';
 
 type ApiRating = {

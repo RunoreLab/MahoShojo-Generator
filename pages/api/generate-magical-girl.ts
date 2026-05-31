@@ -12,10 +12,6 @@ import { enforceTextSafety } from '@/lib/content-safety/server';
 
 const log = getLogger('api-gen-girl');
 
-export const config = {
-  runtime: 'edge',
-};
-
 export type MainColor = (typeof MainColor)[keyof typeof MainColor];
 
 export const MAGICAL_GIRL_NAME_MAX_LENGTH = 300;

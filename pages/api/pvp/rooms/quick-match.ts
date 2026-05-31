@@ -13,8 +13,6 @@ import { DEFAULT_PVP_RULES } from '@/lib/pvp/defaults';
 import { requiresPvpSubmissionPhase } from '@/lib/pvp/logic';
 import { json, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
 
-export const runtime = 'edge';
-
 const pickSeat = (existingSeats: Array<number | null>, maxPlayers: number): number | null => {
   const used = new Set(existingSeats.filter((s): s is number => typeof s === 'number'));
   for (let i = 0; i < maxPlayers; i++) {

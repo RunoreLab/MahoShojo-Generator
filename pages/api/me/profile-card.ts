@@ -34,8 +34,6 @@ import { json, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
 import { buildDefaultPvpUserSummary, mapPvpMatchPlayerRow, mapPvpMatchRow, mapPvpUserSummaryRow } from '@/lib/pvp/read-mappers';
 import type { UserBadge } from '@/types/badge';
 
-export const runtime = 'edge';
-
 type CardLite = {
   id: string;
   type: 'character' | 'scenario';

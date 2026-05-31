@@ -75,10 +75,6 @@ const isInterruptedStreamError = (error: unknown): boolean => {
     return false;
 };
 
-export const config = {
-    runtime: 'edge',
-};
-
 type RequestQuestionnaire = {
     id: string;
     title: string;

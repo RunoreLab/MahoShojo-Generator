@@ -10,8 +10,6 @@ import {
 } from '@/lib/data-card-reports/service';
 import { DATA_CARD_REPORT_REASONS } from '@/lib/data-card-reports/reasons';
 
-export const runtime = 'edge';
-
 type HandlerDeps = {
   getAuthUser: typeof getAuthUser;
   requireAuthUser: typeof requireAuthUser;
