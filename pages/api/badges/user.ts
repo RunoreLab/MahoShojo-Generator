@@ -1,8 +1,6 @@
 import { getUserBadges } from '@/lib/database/badges';
 import { requireAuthUser } from '@/lib/auth/server';
 
-export const runtime = 'edge';
-
 /**
  * GET /api/badges/user
  * 获取当前用户的所有徽章

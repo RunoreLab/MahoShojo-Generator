@@ -6,10 +6,6 @@ import { getLogger } from '../../lib/logger';
 
 const log = getLogger('api-resign-data');
 
-export const config = {
-  runtime: 'edge',
-};
-
 /**
  * 这是一个专门用于重新签名角色数据的API端点。
  * 流程：

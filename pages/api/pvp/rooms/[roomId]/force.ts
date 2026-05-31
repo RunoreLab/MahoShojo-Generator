@@ -18,8 +18,6 @@ import { json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp
 import type { PvpHandState, PvpSnapshotRef } from '@/lib/pvp/types';
 import { buildSubrequestAuthHeaders } from '@/lib/subrequest-auth';
 
-export const runtime = 'edge';
-
 type ForceKind = 'submit' | 'choose' | 'confirm';
 type ForceBody = { expectedVersion?: number; kind?: ForceKind };
 

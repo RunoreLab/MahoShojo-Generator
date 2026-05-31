@@ -4,10 +4,6 @@ import { getTags } from '@/lib/database/tags';
 import type { TagScope } from '@/lib/database/tags';
 import { withEdgeCache } from '@/lib/edge-cache';
 
-export const config = {
-  runtime: 'edge',
-};
-
 type ApiTag = {
   id: string;
   name: string;

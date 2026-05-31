@@ -8,8 +8,6 @@ import { getUserDataCardCapacity } from '@/lib/database/users';
 import { requireAuthUser } from '@/lib/auth/server';
 import { config } from '@/lib/config';
 
-export const runtime = 'edge';
-
 export default async function handler(req: Request): Promise<Response> {
   const auth = await requireAuthUser(req);
   if ('response' in auth) return auth.response;

@@ -46,10 +46,6 @@ import { MAX_ARENA_MATERIALS, normalizeArenaMaterialsForRequest } from '@/lib/ar
 
 const log = getLogger('api-gen-battle-story');
 
-export const config = {
-    runtime: 'edge',
-};
-
 interface BattleApiResponse {
     report: NewsReport;
     updatedCombatants: any[];

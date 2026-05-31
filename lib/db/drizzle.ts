@@ -1,4 +1,5 @@
 import 'server-only';
+import { getCloudflareContext } from '@opennextjs/cloudflare';
 import { drizzle, type DrizzleD1Database } from 'drizzle-orm/d1';
 import * as schema from '@/lib/db/schema';
 import { createHttpD1ClientFromEnv } from '@/lib/db/d1-http-client';
@@ -6,11 +7,8 @@ import { createHttpD1ClientFromEnv } from '@/lib/db/d1-http-client';
 export type AppDrizzleDb = DrizzleD1Database<typeof schema>;
 
 type DrizzleD1Client = Parameters<typeof drizzle>[0];
-type CloudflareContextEnv = { DB?: unknown };
-type CloudflareRequestContext = { env?: CloudflareContextEnv };
 
 const dbCache = new WeakMap<object, AppDrizzleDb>();
-const CLOUDFLARE_REQUEST_CONTEXT_SYMBOL = Symbol.for('__cloudflare-request-context__');
 
 const isObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null;
@@ -47,19 +45,12 @@ export const getDrizzleDbFromEnv = (env: { DB?: unknown }): AppDrizzleDb => {
   return createDrizzleDb(env.DB);
 };
 
-const readOptionalCloudflareRequestContext = (): CloudflareRequestContext | null => {
-  const globalContext = (globalThis as Record<PropertyKey, unknown>)[CLOUDFLARE_REQUEST_CONTEXT_SYMBOL];
-  if (!isObject(globalContext)) return null;
-  return globalContext as CloudflareRequestContext;
-};
-
 const readD1FromCloudflareContext = (): DrizzleD1Client | null => {
   try {
-    const context = readOptionalCloudflareRequestContext();
-    const env = context?.env;
-    if (!env) return null;
-    if (!isD1LikeClient(env.DB)) return null;
-    return env.DB;
+    const { env } = getCloudflareContext();
+    const candidate = (env as { DB?: unknown }).DB;
+    if (!isD1LikeClient(candidate)) return null;
+    return candidate;
   } catch {
     return null;
   }

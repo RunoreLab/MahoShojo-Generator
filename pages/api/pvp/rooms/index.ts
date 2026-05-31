@@ -7,8 +7,6 @@ import type { PvpScenarioSelection } from '@/lib/pvp/types';
 import { parsePvpRules } from '@/lib/pvp/validate';
 import { getScenarioPresetByFilename } from '@/lib/scenario-presets';
 
-export const runtime = 'edge';
-
 async function roomsHandler(req: Request): Promise<Response> {
   if (req.method !== 'POST') {
     return json({ error: 'Method not allowed' }, { status: 405 });

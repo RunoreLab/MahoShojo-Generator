@@ -2,8 +2,6 @@ import { getDrizzleDbFromRuntime } from '@/lib/db/drizzle';
 import { updateBusinessUserAvatarWebpBase64ById } from '@/lib/db/repositories/business-users';
 import { json, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
 
-export const runtime = 'edge';
-
 const AVATAR_SIZE = 128;
 const WEBP_QUALITY = 0.82;
 const MAX_UPLOAD_BYTES = 6 * 1024 * 1024;

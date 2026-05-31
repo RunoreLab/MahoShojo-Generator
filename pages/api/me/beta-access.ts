@@ -1,8 +1,6 @@
 import { getUserProfileCardDataStats } from '@/lib/database/data-cards';
 import { json, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
 
-export const runtime = 'edge';
-
 export default withPvpErrorBoundary(async function handler(req: Request): Promise<Response> {
   const auth = await requireAuthUser(req);
   if ('response' in auth) return auth.response;

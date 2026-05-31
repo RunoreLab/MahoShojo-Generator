@@ -25,10 +25,6 @@ import presetIndex from '@/public/questionnaires/presets/index.json';
 
 const log = getLogger('api-gen-canshou');
 
-export const config = {
-  runtime: 'edge',
-};
-
 
 // 定义残兽设定的Zod Schema
 const CanshouSchema = z.object({

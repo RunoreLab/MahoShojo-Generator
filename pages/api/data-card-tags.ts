@@ -4,10 +4,6 @@ import { verifyCardOwnership } from '@/lib/database/data-cards';
 import { requireAuthUser } from '@/lib/auth/server';
 import { replaceUserTagsForDataCard } from '@/lib/database/tags';
 
-export const config = {
-  runtime: 'edge',
-};
-
 type PutBody = {
   dataCardId?: unknown;
   tagIds?: unknown;

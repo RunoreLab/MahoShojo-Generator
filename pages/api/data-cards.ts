@@ -28,8 +28,6 @@ import {
   autoReviewLatestPendingPublicDataCardUpdatesForUser
 } from '@/lib/review/auto-data-card-review';
 
-export const runtime = 'edge';
-
 async function getDataCardUpdatedAt(db: AppDrizzleDb | null, dataCardId: string): Promise<string | null> {
   if (!db) return null;
   try {

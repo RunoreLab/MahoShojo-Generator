@@ -30,10 +30,6 @@ import { buildScenarioCorePrinciples, buildScenarioMarkdownRequirements } from '
 
 const log = getLogger('api-tavern-convert');
 
-export const config = {
-  runtime: 'edge',
-};
-
 const MAX_SAFETY_TEXT_CHARS = 50_000;
 
 const CustomProviderSchema = z.object({

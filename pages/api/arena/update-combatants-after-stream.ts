@@ -7,10 +7,6 @@ import { applyPostBattleUpdates } from '@/lib/arena/service';
 
 const log = getLogger('api-update-combatants-stream');
 
-export const config = {
-    runtime: 'edge',
-};
-
 /**
  * 专门用于流式生成后更新角色数据的端点
  *

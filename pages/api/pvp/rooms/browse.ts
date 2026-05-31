@@ -5,8 +5,6 @@ import { getPvpScenarioTitle, parsePvpScenarioSelection } from '@/lib/pvp/scenar
 import { json, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
 import type { PvpRoomRules } from '@/lib/pvp/types';
 
-export const runtime = 'edge';
-
 type BrowseRoomItem = {
   roomId: string;
   host: { userId: number; username: string; prefix?: string | null };

@@ -9,8 +9,6 @@ import { json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp
 import type { PvpDataCardRef, PvpPresetRef, PvpRoomRules, PvpSubmissionPayload, PvpSubmittedCard } from '@/lib/pvp/types';
 import { buildSubrequestAuthHeaders } from '@/lib/subrequest-auth';
 
-export const runtime = 'edge';
-
 const parseRules = (rulesJson: string): PvpRoomRules | null => {
   try {
     return JSON.parse(rulesJson) as PvpRoomRules;

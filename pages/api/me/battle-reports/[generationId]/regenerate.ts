@@ -11,8 +11,6 @@ import { hydrateBattleReportCardFromGenerationRecord } from '@/lib/arena/battle-
 import { json, readJson, requireAuthUser } from '@/lib/pvp/server';
 import { quickCheck } from '@/lib/sensitive-word-filter';
 
-export const runtime = 'edge';
-
 type RegenerateBody = { userGuidance?: unknown };
 
 const getGenerationIdFromUrl = (url: string): string | null => {

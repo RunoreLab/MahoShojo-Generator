@@ -1,8 +1,6 @@
 import { getPvpMatchById, getPvpMatchPlayersByMatchId, getPvpRoundsByMatch, isUserInPvpMatch } from '@/lib/database/pvp';
 import { json, requireAuthUser } from '@/lib/pvp/server';
 
-export const runtime = 'edge';
-
 const getMatchIdFromUrl = (url: string): string | null => {
   try {
     const parts = new URL(url).pathname.split('/').filter(Boolean);

@@ -23,7 +23,6 @@ import {
   upsertUserAuthLink,
 } from '@/lib/db/repositories/user-auth-links';
 
-export const runtime = 'edge';
 const RESET_PASSWORD_TOKEN_TTL_SECONDS = 5 * 60;
 
 const json = (payload: unknown, status = 200, headers?: HeadersInit): Response => {

@@ -21,8 +21,6 @@ import type { PvpSubmissionPayload } from '@/lib/pvp/types';
 import { buildSubrequestAuthHeaders } from '@/lib/subrequest-auth';
 import { getScenarioPresetByFilename } from '@/lib/scenario-presets';
 
-export const runtime = 'edge';
-
 type RulesBody = { expectedVersion?: number; rules?: unknown; clearSubmissions?: boolean };
 
 const isObject = (v: unknown): v is Record<string, unknown> => Boolean(v && typeof v === 'object');

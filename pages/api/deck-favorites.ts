@@ -7,8 +7,6 @@ import {
 import { requireAuthUser } from '@/lib/auth/server';
 import { mapDeckReadRows } from '@/lib/deck-read-mappers';
 
-export const runtime = 'edge';
-
 export default async function handler(req: Request): Promise<Response> {
   const auth = await requireAuthUser(req);
   if ('response' in auth) return auth.response;

@@ -2,8 +2,6 @@ import { countPvpMatchesByUserId, getPvpMatchesByUserId, getPvpUserSummariesByUs
 import { buildDefaultPvpUserSummary, mapPvpMatchPlayerRow, mapPvpMatchRow, mapPvpUserSummaryRow } from '@/lib/pvp/read-mappers';
 import { json, requireAuthUser } from '@/lib/pvp/server';
 
-export const runtime = 'edge';
-
 const clampInt = (value: unknown, fallback: number, min: number, max: number): number => {
   const n = typeof value === 'string' ? Number(value) : typeof value === 'number' ? value : NaN;
   if (!Number.isFinite(n)) return fallback;

@@ -8,10 +8,6 @@ import { type ArenaLeaderboardRow, listArenaLeaderboardRows } from '@/lib/db/rep
 import { queryArenaPublicQueenEntityByQueue } from '@/lib/db/repositories/data-card-meta';
 import { buildStrictLeaderboardSeasonExtrema, type LeaderboardSeasonExtreme } from '@/lib/ranking/season-extrema';
 
-export const config = {
-  runtime: 'edge',
-};
-
 type Queue = 'strict' | 'free';
 type Sort = 'rating' | 'tech';
 type SortOrder = 'asc' | 'desc';

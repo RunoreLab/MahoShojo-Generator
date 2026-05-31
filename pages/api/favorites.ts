@@ -6,8 +6,6 @@ import {
 } from '@/lib/database/favorites';
 import { requireAuthUser } from '@/lib/auth/server';
 
-export const runtime = 'edge';
-
 export default async function handler(req: Request): Promise<Response> {
   const auth = await requireAuthUser(req);
   if ('response' in auth) {

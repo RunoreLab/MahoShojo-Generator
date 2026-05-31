@@ -11,8 +11,6 @@ import { getRoomIdFromRequestUrl, getRoundIdFromRequestUrl } from '@/lib/pvp/rou
 import { json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
 import { createPvpWinnerVoteState, parsePvpWinnerVoteState } from '@/lib/pvp/winner-vote';
 
-export const runtime = 'edge';
-
 type StartVoteBody = { expectedVersion?: number };
 
 const markRoundResultPendingVote = (rawResultJson: string, meta: { createdAt: string; createdByUserId: number }) => {

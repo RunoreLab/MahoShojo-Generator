@@ -6,8 +6,6 @@ import { quickCheck } from '@/lib/sensitive-word-filter';
 import { mapDeckReadRows } from '@/lib/deck-read-mappers';
 import { normalizeDeckVisibilityInput, readDeckVisibilityInput } from '@/lib/deck-write-mappers';
 
-export const runtime = 'edge';
-
 export default async function handler(req: Request): Promise<Response> {
   const auth = await requireAuthUser(req);
   if ('response' in auth) return auth.response;

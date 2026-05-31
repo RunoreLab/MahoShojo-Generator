@@ -16,8 +16,6 @@ import {
 } from '@/lib/db/repositories/user-auth-links';
 import { json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
 
-export const runtime = 'edge';
-
 const RESET_TOKEN_TTL_SECONDS = 5 * 60;
 
 type SetPasswordPayload = {

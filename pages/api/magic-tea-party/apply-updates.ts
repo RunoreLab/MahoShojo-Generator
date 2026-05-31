@@ -7,10 +7,6 @@ import type { MagicTeaPartyRole, MagicTeaPartyUpdateDraft } from '@/lib/magic-te
 
 const log = getLogger('api-magic-tea-party-apply-updates');
 
-export const config = {
-  runtime: 'edge',
-};
-
 const DraftSchema = z
   .object({
     roleId: z.string().optional(),

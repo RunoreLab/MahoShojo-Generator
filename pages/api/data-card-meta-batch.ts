@@ -13,10 +13,6 @@ import { upsertDataCardMetrics } from '@/lib/database/data-card-metrics';
 import { computeTechIndex } from '@/lib/metrics/techIndex';
 import { verifySignature } from '@/lib/signature';
 
-export const config = {
-  runtime: 'edge',
-};
-
 type ApiMetrics = {
   techScore: number;
   techLevel: string;

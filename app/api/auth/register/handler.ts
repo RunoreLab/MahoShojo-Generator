@@ -29,8 +29,6 @@ import { getClientIpFromHeaders } from '@/lib/arena/battle-report-log-utils';
 import { quickCheck } from '@/lib/sensitive-word-filter';
 import { verifyTurnstileToken } from '@/lib/turnstile';
 
-export const runtime = 'edge';
-
 type RegisterPayload = {
   username?: string;
   email?: string;

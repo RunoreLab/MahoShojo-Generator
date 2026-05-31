@@ -4,8 +4,6 @@ import {
   type ResolveChallengeEnemyCandidatesResult,
 } from '@/lib/challenge/server/enemy-candidates';
 
-export const runtime = 'edge';
-
 type HandlerDeps = {
   resolveChallengeEnemyCandidates: (input: {
     worldId: ChallengeWorldId;

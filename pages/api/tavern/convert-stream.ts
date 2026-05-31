@@ -17,10 +17,6 @@ import { TAVERN_IMPORT_ATTACHMENT_LIMITS } from '@/lib/tavern-card/limits';
 
 const log = getLogger('api-tavern-convert-stream');
 
-export const config = {
-  runtime: 'edge',
-};
-
 const MAX_SAFETY_TEXT_CHARS = 50_000;
 
 const CustomProviderSchema = z.object({

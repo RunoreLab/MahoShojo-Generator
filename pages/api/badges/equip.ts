@@ -1,8 +1,6 @@
 import { updateEquippedBadges } from '@/lib/database/badges';
 import { requireAuthUser } from '@/lib/auth/server';
 
-export const runtime = 'edge';
-
 /**
  * POST /api/badges/equip
  * 更新用户佩戴的徽章

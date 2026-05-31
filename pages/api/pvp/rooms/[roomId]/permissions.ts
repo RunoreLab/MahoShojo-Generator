@@ -3,8 +3,6 @@ import { parsePvpRoomInternalState, stringifyPvpRoomInternalState } from '@/lib/
 import { getRoomIdFromRequestUrl } from '@/lib/pvp/route';
 import { json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
 
-export const runtime = 'edge';
-
 type PermissionsBody = {
   expectedVersion?: number;
   allowNonHostControl?: boolean;

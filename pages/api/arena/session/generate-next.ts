@@ -17,10 +17,6 @@ import { randomUUID } from '@/lib/crypto';
 import { getLogger } from '@/lib/logger';
 import { recordUserActivityFromRequest } from '@/lib/user-activity/record';
 
-export const config = {
-  runtime: 'edge',
-};
-
 const log = getLogger('api-arena-session-generate-next');
 
 const json = (payload: unknown, init?: ResponseInit): Response =>

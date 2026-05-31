@@ -32,8 +32,6 @@ import { compactPvpSeats } from '@/lib/pvp/seat-compaction';
 import { json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
 import type { PvpCardRef, PvpHandState, PvpSubmissionPayload, PvpSubmittedCard } from '@/lib/pvp/types';
 
-export const runtime = 'edge';
-
 const parseSubmission = (raw: string): PvpSubmissionPayload | null => {
   try {
     const parsed = JSON.parse(raw) as PvpSubmissionPayload;

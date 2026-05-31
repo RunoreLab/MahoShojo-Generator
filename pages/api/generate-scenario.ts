@@ -16,10 +16,6 @@ import { recordUserActivityFromRequest } from '@/lib/user-activity/record';
 
 const log = getLogger('api-gen-scenario');
 
-export const config = {
-  runtime: 'edge',
-};
-
 // =================================================================
 // 1. Zod Schema 定义
 // =================================================================

@@ -2,8 +2,6 @@
 
 import { getRandomPublicCard } from '@/lib/database/data-cards';
 
-export const runtime = 'edge';
-
 /**
  * @api {get} /api/random-public-card
  * @description 从数据库中随机获取一张公开的数据卡（角色或情景）。

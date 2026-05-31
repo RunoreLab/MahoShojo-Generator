@@ -9,8 +9,6 @@ import { getDeckStatus } from '@/lib/deck-status';
 import { mapDeckReadRow } from '@/lib/deck-read-mappers';
 import { getAuthUser, requireAuthUser } from '@/lib/auth/server';
 
-export const runtime = 'edge';
-
 export default async function handler(req: Request): Promise<Response> {
   if (req.method === 'GET') {
     try {

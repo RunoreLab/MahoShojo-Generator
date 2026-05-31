@@ -3,10 +3,6 @@
 import { NextRequest } from 'next/server';
 import { PRESET_LIST } from '@/lib/presets';
 
-export const config = {
-  runtime: 'edge',
-};
-
 export default async function handler(req: NextRequest) {
   if (req.method !== 'GET') {
     return new Response(

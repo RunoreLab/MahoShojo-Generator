@@ -12,8 +12,6 @@ import { getRoomIdFromRequestUrl, getRoundIdFromRequestUrl } from '@/lib/pvp/rou
 import { json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
 import { parsePvpWinnerVoteState, tallyPvpWinnerVotes } from '@/lib/pvp/winner-vote';
 
-export const runtime = 'edge';
-
 type FinalizeVoteBody = { expectedVersion?: number };
 
 const finalizeRoundWithVote = (rawResultJson: string, input: {

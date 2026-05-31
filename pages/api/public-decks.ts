@@ -4,8 +4,6 @@ import { getAuthUser } from '@/lib/auth/server';
 import { getDeckStatus } from '@/lib/deck-status';
 import { mapDeckReadRow, mapDeckReadRows } from '@/lib/deck-read-mappers';
 
-export const runtime = 'edge';
-
 const MAX_LIMIT = 100;
 const MAX_SEARCH_LENGTH = 200;
 

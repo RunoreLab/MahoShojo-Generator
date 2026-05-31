@@ -5,8 +5,6 @@ import {
 } from '@/lib/crowd-review/service';
 import { json, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
 
-export const runtime = 'edge';
-
 type HandlerDeps = {
   requireAuthUser: typeof requireAuthUser;
   getDb: () => any;

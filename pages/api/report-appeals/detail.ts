@@ -1,8 +1,6 @@
 import { getReportAppealDetail, ReportAppealForbiddenError, ReportAppealNotFoundError, ReportAppealServiceUnavailableError, ReportAppealUnprocessableError, ReportAppealValidationError } from '@/lib/report-appeals/service';
 import { json, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
 
-export const runtime = 'edge';
-
 type HandlerDeps = {
   requireAuthUser: typeof requireAuthUser;
   getDb: () => any;

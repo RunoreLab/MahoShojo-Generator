@@ -15,10 +15,6 @@ import {
   parseModelScopeJsonSafe,
 } from "@/lib/tachie/modelscope/error";
 
-export const config = {
-  runtime: 'edge',
-};
-
 export default async function handler(req: Request) {
   if (req.method !== "POST") {
     return new Response(

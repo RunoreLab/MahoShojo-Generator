@@ -22,8 +22,6 @@ import type { PvpSubmissionPayload } from '@/lib/pvp/types';
 import type { UserBadge } from '@/types/badge';
 import { buildPvpSettlementRoundSummary, parsePvpRoundResultJson } from '@/lib/pvp/settlement-card';
 
-export const runtime = 'edge';
-
 type SnapshotLite = {
   snapshotId: string;
   name: string;

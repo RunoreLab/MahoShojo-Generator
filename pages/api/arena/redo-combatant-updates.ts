@@ -22,10 +22,6 @@ import { redoPostBattleUpdates } from '@/lib/arena/service';
 
 const log = getLogger('api-redo-combatant-updates');
 
-export const config = {
-  runtime: 'edge',
-};
-
 async function handler(req: NextRequest): Promise<Response> {
   if (req.method !== 'POST') {
     return new Response(JSON.stringify({ error: 'Method not allowed' }), { status: 405 });

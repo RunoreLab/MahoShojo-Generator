@@ -3,8 +3,6 @@
 import { getDataCardById, getPublicDataCards } from '@/lib/database/data-cards';
 import { withEdgeCache } from '@/lib/edge-cache';
 
-export const runtime = 'edge';
-
 const MAX_LIMIT = 100;
 const MAX_TAGS = 20;
 const MAX_SEARCH_LENGTH = 200;

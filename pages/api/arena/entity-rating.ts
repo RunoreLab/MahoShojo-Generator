@@ -3,10 +3,6 @@ import type { NextRequest } from 'next/server';
 import { getDrizzleDbFromRuntime } from '@/lib/db/drizzle';
 import { getArenaRatingByEntity } from '@/lib/db/repositories/arena-read';
 
-export const config = {
-  runtime: 'edge',
-};
-
 type ApiSuccessResponse = {
   success: true;
   queue: 'strict' | 'free';
