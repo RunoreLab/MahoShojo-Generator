@@ -1,6 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "ifmahoushoujo",
+  "name": "mahoshojo-next",
   "main": ".open-next/worker.js",
   "compatibility_date": "2024-09-23",
   "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
@@ -11,7 +11,7 @@
   "services": [
     {
       "binding": "WORKER_SELF_REFERENCE",
-      "service": "ifmahoushoujo"
+      "service": "mahoshojo-next"
     }
   ],
   "d1_databases": [
@@ -30,7 +30,7 @@
       "services": [
         {
           "binding": "WORKER_SELF_REFERENCE",
-          "service": "ifmahoushoujo"
+          "service": "mahoshojo-next"
         }
       ],
       "d1_databases": [
@@ -43,7 +43,7 @@
       ]
     },
     "preview": {
-      "name": "ifmahoushoujo-preview",
+      "name": "mahoshojo-next-preview",
       "compatibility_date": "2024-09-23",
       "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
       "services": [
