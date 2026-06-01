@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 
 import { createAdminDataCardsBatchUpdateHandler } from '@/pages/api/admin/data-cards/batch-update';
 import { createAdminDataCardUpdatesBatchReviewHandler } from '@/pages/api/admin/data-card-updates/batch-review';

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test';
+import { describe, expect, it } from 'vitest';
 
 import {
   ADMIN_PVP_STALLED_ROOM_MINUTES,

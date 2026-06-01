@@ -6,14 +6,14 @@
  * - 为 2025 年 9 月注册的用户授予 old_exp（老经验）徽章
  *
  * 使用方法：
- * bun run scripts/award-early-adopters.ts [--dry-run]
+ * pnpm exec tsx scripts/badge/grant-early-adopters.ts [--dry-run]
  *
  * 参数：
  * --dry-run 或 -d: 试运行模式，只统计不实际授予
  *
  * 示例：
- * bun run scripts/award-early-adopters.ts           # 正式运行
- * bun run scripts/award-early-adopters.ts --dry-run # 试运行
+ * pnpm exec tsx scripts/badge/grant-early-adopters.ts           # 正式运行
+ * pnpm exec tsx scripts/badge/grant-early-adopters.ts --dry-run # 试运行
  */
 
 import { queryFromD1 } from '@/lib/database/core';

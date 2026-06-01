@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 
 import { createAdminMessagesExpireSiteHandler } from '@/pages/api/admin/messages/site/[id]/expire';
 import { createAdminDirectMessagesHandler } from '@/pages/api/admin/messages/direct';

@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 
 import { createAdminReportCaseDetailHandler } from '@/pages/api/admin/report-cases/[caseId]';
 import { createAdminReportCaseDecisionHandler } from '@/pages/api/admin/report-cases/[caseId]/decision';

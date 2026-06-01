@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 
 import { createAdminCrowdReviewServiceForTests } from '@/lib/admin/crowd-review';
 import { AdminGovernanceConflictError } from '@/lib/admin/governance';

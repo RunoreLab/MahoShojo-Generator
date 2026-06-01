@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test';
+import { describe, expect, it } from 'vitest';
 
 import {
   ADMIN_USER_ANALYTICS_SCHEDULED_SNAPSHOT_UTC_HOUR,

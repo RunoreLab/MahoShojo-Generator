@@ -1,11 +1,10 @@
-import { describe, expect, mock, test } from 'bun:test';
-import * as actualR2 from '@/lib/r2';
+import { describe, expect, test, vi } from 'vitest';
 
 const toD1Result = (rows: Array<Record<string, unknown>>) => ({
   result: [{ results: rows }],
 });
 
-const state = {
+const state = vi.hoisted(() => ({
   kindRows: [] as Array<Record<string, unknown>>,
   indexedRows: [] as Array<Record<string, unknown>>,
   missingIndexGenerationRows: [] as Array<Record<string, unknown>>,
@@ -26,9 +25,9 @@ const state = {
         };
       }
     | { success: false; error: string },
-};
+}));
 
-mock.module('@/lib/database/core', () => ({
+vi.mock('@/lib/database/core', () => ({
   queryFromD1: async (sql: string) => {
     if (sql.includes('FROM large_objects') && sql.includes('GROUP BY kind')) {
       return toD1Result(state.kindRows);
@@ -43,8 +42,8 @@ mock.module('@/lib/database/core', () => ({
   },
 }));
 
-mock.module('@/lib/r2', () => ({
-  ...actualR2,
+vi.mock('@/lib/r2', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/r2')>()),
   listAllObjects: async () => state.r2Result,
 }));
 
