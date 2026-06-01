@@ -12,6 +12,7 @@ import {
   FileCheck,
   FileText,
   HardDrive,
+  Gift,
   Mail,
   MessageSquareWarning,
   ShieldAlert,
@@ -304,6 +305,13 @@ export default function AdminHomePage() {
           description: '查看用户规模、高频分层、留存与活跃构成；趋势与导出会在该页持续演进。',
           tone: 'border-indigo-200 hover:border-indigo-300',
           icon: BarChart3,
+        },
+        {
+          href: '/admin/redemption-codes',
+          title: '兑换码管理',
+          description: '批量生成、筛选、废弃兑换码，并按当前库存与用户槽位倒推兑换规模。',
+          tone: 'border-emerald-200 hover:border-emerald-300',
+          icon: Gift,
         },
         {
           href: '/admin/badge-management',

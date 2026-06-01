@@ -46,7 +46,7 @@ const isD1BatchClient = (value: unknown): value is D1BatchClient => {
 const toNonEmptyString = (value: unknown): string | null => {
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : null;
+  return trimmed.length > 0 ? trimmed.toUpperCase() : null;
 };
 
 const toInt = (value: unknown, fallback = 0): number => {

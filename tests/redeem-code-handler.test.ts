@@ -85,4 +85,34 @@ describe('api/redeem-code handler', () => {
     expect(response.status).toBe(400);
     expect(payload.error).toBe('兑换码无效或已被使用');
   });
+
+  test('兑换码输入大小写不敏感', async () => {
+    let receivedCode = '';
+    const post = createRedeemHandler({
+      requireAuthUser: async () => ({
+        user: { id: 7, username: 'hana' },
+        source: 'better-auth-session',
+      }),
+      getRuntimeD1Client: () =>
+        createFakeClient(async (statements) => {
+          receivedCode = String((statements[0] as FakeBatchStatement).params[0]);
+          return [
+            { results: [{ redeemed_slot_count: 3 }] },
+            { results: [] },
+            { results: [{ slot_count: 3 }] },
+          ];
+        }) as never,
+    });
+
+    const response = await post(
+      new Request('https://example.com/api/redeem-code', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: 'a3f8-e9c2-1d4b' }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(receivedCode).toBe('A3F8-E9C2-1D4B');
+  });
 });

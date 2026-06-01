@@ -144,6 +144,12 @@ interface DataCardDetailsModalProps {
   onClose: () => void;
   isOwner?: boolean;
   adminTagEditor?: boolean;
+  compareCard?: {
+    name: string;
+    description: string;
+    data: string;
+    updatedAt?: string;
+  } | null;
   metaCardId?: string | null;
   ratingHistoryEntity?: {
     entityType: 'data_card' | 'preset';

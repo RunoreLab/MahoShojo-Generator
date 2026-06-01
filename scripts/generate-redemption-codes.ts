@@ -118,7 +118,7 @@ function generateRandomCode(): string {
   for (let i = 0; i < 12; i++) {
     code += chars.charAt(Math.floor(Math.random() * chars.length));
   }
-  return `${code.slice(0, 4)}-${code.slice(4, 8)}-${code.slice(8, 12)}`;
+  return `${code.slice(0, 4)}-${code.slice(4, 8)}-${code.slice(8, 12)}`.toUpperCase();
 }
 
 async function insertRedemptionCodesBatch(codes: RedemptionCodeInput[]): Promise<RedemptionCodeInput[]> {
