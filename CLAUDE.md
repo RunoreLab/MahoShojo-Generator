@@ -4,16 +4,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-MahoShojo-Generator (魔法少女生成器) is a Magical Girl Generator - an AI-powered web application that creates personalized magical girl characters. Built with Next.js 15, React 19, Bun and TypeScript, it features a mobile-friendly design with a whimsical, magical theme.
+MahoShojo-Generator (魔法少女生成器) is a Magical Girl Generator - an AI-powered web application that creates personalized magical girl characters. Built with Next.js 15, React 19, pnpm-managed TypeScript tooling, and Vitest for tests, it features a mobile-friendly design with a whimsical, magical theme.
 
 ## Commands
 
 ### Development
 ```bash
-bun run dev         # Start development server with Turbopack
-bun run build       # Build for production
-bun run start       # Start production server
-bun run lint        # Run ESLint
+pnpm dev         # Start development server with Turbopack
+pnpm build       # Build for production
+pnpm start       # Start production server
+pnpm lint        # Run ESLint
+pnpm test        # Run Vitest tests
 ```
 
 ### Environment Setup

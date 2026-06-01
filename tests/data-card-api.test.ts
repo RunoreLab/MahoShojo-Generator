@@ -1,4 +1,4 @@
-import { describe, expect, mock, test } from 'bun:test';
+import { describe, expect, vi, test } from 'vitest';
 
 import { authStorage, dataCardApi } from '@/lib/auth';
 
@@ -7,7 +7,7 @@ describe('dataCardApi.getCardsDetailed', () => {
     const originalFetch = authStorage.fetch;
 
     try {
-      (authStorage as typeof authStorage & { fetch: typeof authStorage.fetch }).fetch = mock(async () => {
+      (authStorage as typeof authStorage & { fetch: typeof authStorage.fetch }).fetch = vi.fn(async () => {
         return new Response(JSON.stringify({ error: '未授权' }), {
           status: 401,
           headers: { 'Content-Type': 'application/json' },
@@ -37,7 +37,7 @@ describe('dataCardApi.getCardsDetailed', () => {
     const originalFetch = authStorage.fetch;
 
     try {
-      (authStorage as typeof authStorage & { fetch: typeof authStorage.fetch }).fetch = mock(async () => {
+      (authStorage as typeof authStorage & { fetch: typeof authStorage.fetch }).fetch = vi.fn(async () => {
         return new Response(
           JSON.stringify({
             success: true,

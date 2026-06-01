@@ -1,4 +1,5 @@
 import { z } from 'zod/v3';
+import { MAX_CUSTOM_PROVIDER_OUTPUT_TOKENS } from '@/lib/ai/custom-provider';
 
 export const buildBattleReportSchema = (options: { enableImpacts: boolean; enableImpactText: boolean; enableCurrentState: boolean }) => {
     const baseShape: Record<string, z.ZodTypeAny> = {
@@ -36,5 +37,5 @@ export const CustomProviderSchema = z.object({
     providerId: z.string().min(1),
     modelId: z.string().min(1),
     apiKey: z.string(),
+    maxOutputTokens: z.number().int().min(1).max(MAX_CUSTOM_PROVIDER_OUTPUT_TOKENS).optional(),
 }).strict();
-

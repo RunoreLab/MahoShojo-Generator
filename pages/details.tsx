@@ -37,6 +37,11 @@ import { persistArrestedBackup, type ArrestedBackupDraftItem, type ArrestedBacku
 import AiProviderSelector, { type UserAIProviderConfig } from '@/components/AiProviderSelector';
 import AiReasoningPanel from '@/components/ai/AiReasoningPanel';
 import { parseBulkQuestionnaireAnswers } from '@/lib/questionnaire-bulk-parser';
+import {
+  applyQuestionnaireAnswerImportEntries,
+  extractQuestionnaireAnswersFromCharacterCard,
+  type QuestionnaireAnswerMergeMode,
+} from '@/lib/questionnaire-answer-import';
 import { ErrorMessage } from '@/components/ErrorMessage';
 import { EncyclopediaLinks } from '@/components/encyclopedia/EncyclopediaLinks';
 import { GenerationModeSwitcher, type GenerationMode } from '@/components/shared/GenerationModeSwitcher';
@@ -51,6 +56,7 @@ import { AI_META_REQUEST_HEADER, AI_META_REQUEST_VALUE, readJsonWithAiMeta } fro
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
 import { getAnswerLimitInfo, isAnswerOverLimit, QUESTIONNAIRE_NATIVE_MAX_ANSWER_CHARS } from '@/lib/questionnaire-limits';
 import { authStorage } from '@/lib/auth';
+import { buildCustomProviderRequestPayload } from '@/lib/ai/custom-provider';
 import { mapDataCardSourceMeta } from '@/lib/data-card-read-mappers';
 import {
   DETAILS_QUESTIONNAIRE_THEME,
@@ -279,6 +285,7 @@ const DetailsPage: React.FC = () => {
     customDurationMs: 3000,
   });
   const [bulkAnswers, setBulkAnswers] = useState(''); // 用于"一键填充"的textarea
+  const [characterImportMergeMode, setCharacterImportMergeMode] = useState<QuestionnaireAnswerMergeMode>('fill-empty');
   const [showLanguageSection, setShowLanguageSection] = useState(false); // 控制生成语言区域的折叠状态
   const [showBulkFillSection, setShowBulkFillSection] = useState(false); // 控制一键填充区域的折叠状态
   const [isGenerating, setIsGenerating] = useState(false);
@@ -1361,6 +1368,55 @@ const DetailsPage: React.FC = () => {
     setBulkAnswers('');
   };
 
+  const handleCharacterCardAnswerImport = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    if (allQuestionTargets.length === 0) {
+      setError('⚠️ 当前没有可填充的题目，请先选择问卷。');
+      return;
+    }
+
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text) as unknown;
+      const extracted = extractQuestionnaireAnswersFromCharacterCard(parsed);
+      if (!extracted.success) {
+        setError(`⚠️ ${extracted.error}`);
+        return;
+      }
+
+      const applied = applyQuestionnaireAnswerImportEntries({
+        currentAnswersByKey: answersByKey,
+        targets: allQuestionTargets,
+        lookup: questionAnswerLookup,
+        entries: extracted.entries,
+        mergeMode: characterImportMergeMode,
+      });
+
+      setAnswersByKey(applied.answersByKey);
+      const currentKey = mergedQuestions[currentQuestionIndex]?.key;
+      setCurrentAnswer(currentKey ? applied.answersByKey[currentKey] || '' : '');
+      setError(null);
+
+      const skippedExisting = extracted.entries.length - applied.appliedCount - applied.ignoredCount;
+      const modeLabel = characterImportMergeMode === 'overwrite' ? '覆盖匹配题' : '只填空题';
+      alert(
+        `已从${extracted.sourceLabel}导入问卷答案（${modeLabel}）：成功填充 ${applied.appliedCount} 条` +
+        `${applied.overwrittenCount > 0 ? `，覆盖 ${applied.overwrittenCount} 条` : ''}` +
+        `${skippedExisting > 0 ? `，保留已有 ${skippedExisting} 条` : ''}` +
+        `${applied.ignoredCount > 0 ? `，忽略 ${applied.ignoredCount} 条未匹配内容` : ''}。`
+      );
+    } catch (error) {
+      const message = error instanceof SyntaxError
+        ? '角色卡 JSON 无法解析：请检查文件内容是否为有效 JSON。'
+        : error instanceof Error
+          ? error.message
+          : '导入角色卡答案失败。';
+      setError(`⚠️ ${message}`);
+    }
+  };
+
   const buildAnswerExportText = useCallback(() => {
     const now = new Date();
     const answered = mergedQuestions.flatMap((item, index) => {
@@ -1445,15 +1501,7 @@ const DetailsPage: React.FC = () => {
 
     try {
       console.log('提交答案:', finalAnswerItems);
-      const customProviderPayload = (
-        userProviderConfig
-        && (userProviderConfig.apiKey || userProviderConfig.providerId === 'system')
-        && userProviderConfig.modelId !== 'default'
-      ) ? {
-        providerId: userProviderConfig.providerId,
-        modelId: userProviderConfig.modelId,
-        apiKey: userProviderConfig.apiKey,
-      } : undefined;
+      const customProviderPayload = buildCustomProviderRequestPayload(userProviderConfig);
 
       const endpoint = generationMode === 'stream'
         ? '/api/generate-magical-girl-details-stream?format=sse'
@@ -2237,6 +2285,31 @@ const DetailsPage: React.FC = () => {
                         <button onClick={handleBulkFill} className="text-sm text-blue-600 hover:underline">填充</button>
                         <button onClick={handleClearDraft} className="text-sm text-red-600 hover:underline">清空存档</button>
                       </div>
+                      <div className="mt-4 rounded-lg border border-blue-100 bg-white p-3">
+                        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                          <div>
+                            <p className="text-sm font-medium text-gray-700">从角色卡 JSON 导入答案</p>
+                            <p className="mt-1 text-xs text-gray-500">支持本仓库角色 JSON、万途互通 JSON 与万途往返 JSON。</p>
+                          </div>
+                          <select
+                            value={characterImportMergeMode}
+                            onChange={(event) => setCharacterImportMergeMode(event.target.value as QuestionnaireAnswerMergeMode)}
+                            className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs text-gray-700"
+                          >
+                            <option value="fill-empty">只填空题</option>
+                            <option value="overwrite">覆盖匹配题</option>
+                          </select>
+                        </div>
+                        <label className="mt-3 inline-flex cursor-pointer items-center rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-medium text-blue-700 hover:border-blue-300 hover:bg-blue-100">
+                          选择角色卡 JSON
+                          <input
+                            type="file"
+                            accept="application/json,.json"
+                            className="sr-only"
+                            onChange={handleCharacterCardAnswerImport}
+                          />
+                        </label>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -2326,6 +2399,7 @@ const DetailsPage: React.FC = () => {
                   <GeneralCharacterCard
                     general={streamedGeneralCardForDisplay}
                     isStreaming={submitting}
+                    onStopGeneration={() => streamAbortControllerRef.current?.abort(STREAM_ABORT_REASON_USER)}
                     onSaveImage={handleSaveImage}
                     imageSaveMode={imageSaveMode}
                     saveButtonLabel={imageSaveButtonLabel}

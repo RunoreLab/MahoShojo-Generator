@@ -402,6 +402,14 @@ export const encyclopediaEntries: EncyclopediaEntry[] = [
     keywords: ['SillyTavern', '酒馆', '/tavern', '导入', '导出', 'PNG', 'ccv3', 'chara'],
   },
   {
+    slug: 'wantu-ecosystem',
+    title: '万途生态互通',
+    summary: '万途驿站、万途 Card 导入导出、竞技场素材注入与严格排位边界说明。',
+    markdownPath: '/encyclopedia/wantu-ecosystem.md',
+    categoryId: 'management',
+    keywords: ['万途', '万途驿站', 'Wantu', 'Waystation', '素材注入', 'Card', '导入', '导出', '废土行迹'],
+  },
+  {
     slug: 'review',
     title: '公开与审核机制',
     summary: 'review_status、公开展示口径，以及“提交审核/待审核”的含义。',

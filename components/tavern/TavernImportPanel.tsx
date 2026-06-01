@@ -15,7 +15,7 @@ import { ImagePreviewModal } from '@/components/shared/ImagePreviewModal';
 import { JsonSizeIndicator } from '@/components/shared/JsonSizeIndicator';
 import { StreamStopButton } from '@/components/shared/StreamStopButton';
 import { OFFICIAL_KEY_MAX_AI_COOLDOWN_MS, USER_PROVIDED_KEY_COOLDOWN_MS } from '@/lib/ai/cooldowns';
-import { buildCustomProviderPayload, isUsingUserProvidedKey } from '@/lib/ai/custom-provider';
+import { buildCustomProviderRequestPayload, isUsingUserProvidedKey } from '@/lib/ai/custom-provider';
 import { authStorage } from '@/lib/auth';
 import { buildSafeFileName } from '@/lib/client/fileName';
 import { readJsonOrTextFromResponse, resolveApiErrorMessage } from '@/lib/client/apiError';
@@ -639,7 +639,7 @@ export function TavernImportPanel() {
       }
 
       const aiAttachment = aiAttachmentPreview ?? buildTavernAiAttachment(normalizedForConvert);
-      const customProviderPayload = buildCustomProviderPayload(userProviderConfig);
+      const customProviderPayload = buildCustomProviderRequestPayload(userProviderConfig);
       const requestBody: Record<string, unknown> = {
         template: state.targetTemplate,
         sourceName: selectedNormalized.name,
@@ -654,11 +654,7 @@ export function TavernImportPanel() {
         ],
         ...(customProviderPayload
           ? {
-              customProvider: {
-                providerId: customProviderPayload.providerId,
-                modelId: customProviderPayload.modelId,
-                apiKey: customProviderPayload.apiKey.trim(),
-              },
+              customProvider: customProviderPayload,
             }
           : {}),
       };

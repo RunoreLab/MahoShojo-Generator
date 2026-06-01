@@ -6,11 +6,15 @@ import type { AdjudicatorEvent, AdjudicationResult, CharacterCurrentState } from
 import type { NormalizedStreamUpdateMeta } from '@/lib/arena/stream-meta';
 import type { QuestionnaireDefinition } from '@/lib/questionnaires';
 import type { AIReasoningEnvelope } from '@/types/ai-reasoning';
+import type { ArenaMaterialState } from '@/lib/arena/materials';
+import { MAX_ARENA_MATERIALS } from '@/lib/arena/materials';
 
 /** 参战角色上限；为 null 代表不限制数量。 */
 export const MAX_COMBATANTS: number | null = null;
 export const MAX_AUX_SCENARIOS = 10;
+export { MAX_ARENA_MATERIALS };
 export const ARENA_STATE_PREF_KEY = 'arena-history-state-preferences-v1';
+export type { ArenaMaterialState };
 
 export const hasCombatantLimit = (limit: number | null = MAX_COMBATANTS): limit is number =>
   typeof limit === 'number' && Number.isFinite(limit) && limit > 0;
@@ -167,6 +171,7 @@ export interface BattleStoreState {
   teams: BattleTeam[];
   scenario: ScenarioState;
   auxScenarios: AuxiliaryScenarioState[];
+  materials: ArenaMaterialState[];
   selectedQuestionnaires: QuestionnaireSelection[];
   battleMode: BattleMode;
   generationMode: GenerationMode;
@@ -184,6 +189,7 @@ export interface BattleStoreState {
   streamUpdateMetaDebug: StreamUpdateMetaDebug | null;
   latestAiImpacts: BattleAiImpact[] | null;
   storyLength: StoryLengthOption;
+  customStoryLength: string;
   selectedLanguage: string;
   /** 最近一次生成战报的 generationId（用于排位结算展示）。 */
   lastGenerationId: string | null;
@@ -215,6 +221,7 @@ export interface BattleStoreState {
   setStreamUpdateMetaDebug: (debug: StreamUpdateMetaDebug | null) => void;
   setLatestAiImpacts: (impacts: BattleAiImpact[] | null) => void;
   setStoryLength: (length: StoryLengthOption) => void;
+  setCustomStoryLength: (length: string) => void;
   setSelectedLanguage: (language: string) => void;
   setLastGenerationId: (generationId: string | null) => void;
   updateSettings: (settings: Partial<BattleSettings>) => void;
@@ -242,6 +249,12 @@ export interface BattleStoreState {
   moveAuxScenario: (fromIndex: number, toIndex: number) => void;
   clearAuxScenarios: () => void;
   setAuxScenarios: (scenarios: AuxiliaryScenarioState[]) => void;
+
+  addMaterial: (material: ArenaMaterialState) => void;
+  removeMaterial: (id: string) => void;
+  moveMaterial: (fromIndex: number, toIndex: number) => void;
+  clearMaterials: () => void;
+  setMaterials: (materials: ArenaMaterialState[]) => void;
 
   setAdjudicationEvents: (events: AdjudicatorEvent[]) => void;
   setAdjudicationResults: (results: AdjudicationResult[] | null) => void;

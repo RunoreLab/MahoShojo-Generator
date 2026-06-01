@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 
 import { AI_META_REQUEST_HEADER, buildJsonResponseWithOptionalAiMeta } from '@/lib/ai/meta-response';
 

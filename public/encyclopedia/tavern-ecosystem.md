@@ -50,7 +50,7 @@
 
 ## 相关条目
 
+- 万途生态互通：`/encyclopedia/wantu-ecosystem`
 - 通用数据卡（Markdown）：`/encyclopedia/general-cards`
 - 箱庭物语（情景生成器）：`/encyclopedia/scenario-generator`
 - 档案馆（角色管理）：`/encyclopedia/archive`
-

@@ -1,73 +1,101 @@
 import { getDrizzleDbFromRuntime } from '@/lib/db/drizzle';
-import {
-  incrementPublicApprovedDataCardLikeCount,
-  incrementPublicApprovedDataCardUsageCount,
-} from '@/lib/db/repositories/data-cards-core';
+import { resolveDataCardStatsActor } from '@/lib/data-card-stats/actor';
+import { acquireDataCardStatsRateLimit } from '@/lib/data-card-stats/rate-limit';
+import { recordDataCardStatInteraction } from '@/lib/data-card-stats/service';
+import type { AppDrizzleDb } from '@/lib/db/drizzle';
+import type { DataCardInteractionEventType } from '@/lib/db/schema';
 
 export const runtime = 'edge';
 
-export default async function handler(req: Request): Promise<Response> {
+type DataCardStatsHandlerDeps = {
+  getDb?: () => AppDrizzleDb | null;
+  resolveActor?: typeof resolveDataCardStatsActor;
+  acquireRateLimit?: typeof acquireDataCardStatsRateLimit;
+  recordInteraction?: typeof recordDataCardStatInteraction;
+  now?: () => Date;
+};
+
+const json = (payload: unknown, status = 200, headers?: HeadersInit): Response =>
+  new Response(JSON.stringify(payload), {
+    status,
+    headers: { 'Content-Type': 'application/json', ...(headers ?? {}) },
+  });
+
+const normalizeEventType = (value: unknown): DataCardInteractionEventType | null =>
+  value === 'like' || value === 'usage' ? value : null;
+
+export const createDataCardStatsHandler = (deps: DataCardStatsHandlerDeps = {}) => async (
+  req: Request,
+): Promise<Response> => {
   if (req.method !== 'POST') {
-    return new Response(JSON.stringify({ error: 'Method not allowed' }), {
-      status: 405,
-      headers: { 'Content-Type': 'application/json' }
-    });
+    return json({ error: 'Method not allowed' }, 405);
   }
 
   try {
-    const db = getDrizzleDbFromRuntime();
+    const db = (deps.getDb ?? getDrizzleDbFromRuntime)();
     if (!db) {
-      return new Response(JSON.stringify({
+      return json({
         success: false,
-        error: '数据库不可用，请稍后重试'
-      }), {
-        status: 503,
-        headers: { 'Content-Type': 'application/json' }
-      });
+        error: '数据库不可用，请稍后重试',
+      }, 503);
     }
 
-    const { cardId, type } = await req.json();
-    
-    if (!cardId || !type || !['like', 'usage'].includes(type)) {
-      return new Response(JSON.stringify({ 
-        success: false, 
-        error: '无效的参数' 
-      }), {
-        status: 400,
-        headers: { 'Content-Type': 'application/json' }
-      });
-    }
+    const body = await req.json().catch(() => null);
+    const cardId = typeof body?.cardId === 'string' ? body.cardId.trim() : '';
+    const eventType = normalizeEventType(body?.type);
 
-    const changed =
-      type === 'like'
-        ? await incrementPublicApprovedDataCardLikeCount(db, cardId)
-        : await incrementPublicApprovedDataCardUsageCount(db, cardId);
-
-    if (changed <= 0) {
-      return new Response(JSON.stringify({
+    if (!cardId || !eventType) {
+      return json({
         success: false,
-        error: '卡片不存在或不可操作'
-      }), {
-        status: 400,
-        headers: { 'Content-Type': 'application/json' }
+        error: '无效的参数',
+      }, 400);
+    }
+
+    const actor = await (deps.resolveActor ?? resolveDataCardStatsActor)(req);
+    const now = (deps.now ?? (() => new Date()))();
+    const rateLimit = (deps.acquireRateLimit ?? acquireDataCardStatsRateLimit)({
+      actorScope: actor.actorScope,
+      actorKeyHash: actor.actorKeyHash,
+      nowMs: now.getTime(),
+    });
+    if (!rateLimit.allowed) {
+      return json({
+        success: false,
+        error: `请求过于频繁，请在 ${rateLimit.retryAfterSeconds} 秒后重试`,
+        retryAfterSeconds: rateLimit.retryAfterSeconds,
+      }, 429, {
+        'Retry-After': String(rateLimit.retryAfterSeconds),
       });
     }
 
-    return new Response(JSON.stringify({
-      success: true
-    }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' }
+    const nowIso = now.toISOString();
+    const result = await (deps.recordInteraction ?? recordDataCardStatInteraction)(db, {
+      dataCardId: cardId,
+      eventType,
+      actorScope: actor.actorScope,
+      actorKeyHash: actor.actorKeyHash,
+      nowIso,
+    });
+
+    if (!result.success) {
+      return json({
+        success: false,
+        error: '卡片不存在或不可操作',
+      }, 400);
+    }
+
+    return json({
+      success: true,
+      alreadyExists: result.alreadyExists,
     });
 
   } catch (error) {
     console.error('Increment data card stats error:', error);
-    return new Response(JSON.stringify({ 
+    return json({
       success: false,
-      error: '操作失败' 
-    }), {
-      status: 500,
-      headers: { 'Content-Type': 'application/json' }
-    });
+      error: '操作失败',
+    }, 500);
   }
-}
+};
+
+export default createDataCardStatsHandler();

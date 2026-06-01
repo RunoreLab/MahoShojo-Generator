@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 
 import { deriveSeasonResetAutoTuning } from '@/lib/arena/season-reset-auto';
 import { buildSeasonSoftResetUpdateSql } from '@/lib/db/repositories/season-soft-reset';
@@ -103,11 +103,11 @@ describe('season-reset-auto: queue=all helper seam', () => {
     const strictSql = updates[0]?.sql ?? '';
     const freeSql = updates[1]?.sql ?? '';
 
-    expect(strictSql.includes('season_peak_rating')).toBeTrue();
-    expect(strictSql.includes("season_peak_tier = '无牌'")).toBeTrue();
-    expect(strictSql.includes('season_low_rating')).toBeTrue();
-    expect(freeSql.includes('season_peak_rating')).toBeFalse();
-    expect(freeSql.includes('season_peak_tier')).toBeFalse();
-    expect(freeSql.includes('season_low_rating')).toBeFalse();
+    expect(strictSql.includes('season_peak_rating')).toBe(true);
+    expect(strictSql.includes("season_peak_tier = '无牌'")).toBe(true);
+    expect(strictSql.includes('season_low_rating')).toBe(true);
+    expect(freeSql.includes('season_peak_rating')).toBe(false);
+    expect(freeSql.includes('season_peak_tier')).toBe(false);
+    expect(freeSql.includes('season_low_rating')).toBe(false);
   });
 });

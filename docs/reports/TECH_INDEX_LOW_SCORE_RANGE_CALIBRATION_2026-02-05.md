@@ -125,7 +125,7 @@ WHERE dc.type='character'
 推荐命令（谨慎在生产环境执行）：
 
 ```bash
-bun scripts/backfill-data-card-tech-index.ts --force --type character
+pnpm exec tsx scripts/backfill-data-card-tech-index.ts --force --type character
 ```
 
 > 如果只想观察影响，可以先 `--dry-run`（但 dry-run 不会输出分布，需要配合额外统计脚本）。

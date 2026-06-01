@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 
 import {
   applyCrowdReviewRoundResultToReportCase,
@@ -862,6 +862,49 @@ describe('crowd review service', () => {
     expect(currentCase).not.toBeNull();
     expect(currentCase?.assignmentStatus).toBe('voted');
     expect(currentCase?.postVoteSummary?.summaryText).toContain('支持违规');
+  });
+
+  test('current-case exposes report-time target snapshot data and structured reference items', async () => {
+    const service = buildService({
+      repo: {
+        getActiveAssignmentByInspector: async () =>
+          makeAssignmentRow({
+            targetSnapshotName: '举报时目标卡',
+            targetSnapshotDescription: '举报时简介',
+            targetSnapshotType: 'character',
+            targetSnapshotData: '{"name":"举报时目标卡","profile":"举报时设定"}',
+            targetSnapshotUpdatedAt: '2026-04-08T09:50:00.000Z',
+            referenceItems: [
+              {
+                referenceType: 'public_data_card',
+                referenceId: 'card-2',
+                labelSnapshot: '对照卡',
+                urlSnapshot: '/character-manager?dataCardId=card-2',
+                note: '对比用',
+              },
+            ],
+          }),
+      },
+    });
+
+    const currentCase = await service.getCrowdReviewCurrentCase({ db: {} as never, userId: 7 });
+
+    expect(currentCase?.targetSnapshot).toMatchObject({
+      name: '举报时目标卡',
+      description: '举报时简介',
+      type: 'character',
+      data: '{"name":"举报时目标卡","profile":"举报时设定"}',
+      updatedAt: '2026-04-08T09:50:00.000Z',
+    });
+    expect(currentCase?.reportSummary.referenceItems).toEqual([
+      {
+        referenceType: 'public_data_card',
+        referenceId: 'card-2',
+        labelSnapshot: '对照卡',
+        urlSnapshot: '/character-manager?dataCardId=card-2',
+        note: '对比用',
+      },
+    ]);
   });
 
   test('current-case replay hydrates expired assignments with a synthetic post-vote summary', async () => {

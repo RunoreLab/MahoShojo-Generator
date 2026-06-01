@@ -136,6 +136,20 @@ CREATE INDEX idx_data_cards_is_recommended ON data_cards(is_recommended);
 CREATE INDEX IF NOT EXISTS idx_data_cards_public_approved_type_created_at
   ON data_cards(type, is_public, review_status, deleted_at, created_at DESC);
 
+CREATE TABLE IF NOT EXISTS data_card_interactions (
+  id TEXT PRIMARY KEY NOT NULL,
+  data_card_id TEXT NOT NULL,
+  event_type TEXT NOT NULL CHECK(event_type IN ('like', 'usage')),
+  actor_scope TEXT NOT NULL CHECK(actor_scope IN ('auth_user', 'activity_user', 'anonymous')),
+  actor_key_hash TEXT NOT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+  FOREIGN KEY (data_card_id) REFERENCES data_cards(id) ON DELETE CASCADE,
+  UNIQUE(data_card_id, event_type, actor_scope, actor_key_hash)
+);
+
+CREATE INDEX IF NOT EXISTS idx_data_card_interactions_card_event
+  ON data_card_interactions(data_card_id, event_type, created_at);
+
 -- 数据卡更新暂存表：用于存放需要审核的新版本内容
 CREATE TABLE IF NOT EXISTS data_card_updates (
   id TEXT PRIMARY KEY NOT NULL,              -- UUID，唯一标识一次更新
@@ -988,6 +1002,10 @@ CREATE INDEX IF NOT EXISTS idx_arena_rating_events_user_pair_created_at ON arena
 CREATE INDEX IF NOT EXISTS idx_arena_rating_events_ip_pair_created_at ON arena_rating_events(ip_anonymized, pair_key, created_at);
 CREATE INDEX IF NOT EXISTS idx_arena_rating_events_user_queue_status_created_at
   ON arena_rating_events(user_id, queue, status, created_at);
+CREATE INDEX IF NOT EXISTS idx_arena_rating_events_a_entity_queue_status_created_at
+  ON arena_rating_events(a_entity_type, a_entity_id, queue, status, created_at);
+CREATE INDEX IF NOT EXISTS idx_arena_rating_events_b_entity_queue_status_created_at
+  ON arena_rating_events(b_entity_type, b_entity_id, queue, status, created_at);
 
 -- =================================================================
 -- Data Card Metrics（v0.6.0）

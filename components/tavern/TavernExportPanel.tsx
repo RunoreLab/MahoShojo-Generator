@@ -7,7 +7,7 @@ import { ErrorMessage } from '@/components/ErrorMessage';
 import TachieGenerator from '@/components/TachieGenerator';
 import { TavernAiFillButton } from '@/components/tavern/TavernAiFillButton';
 import { OFFICIAL_KEY_MAX_AI_COOLDOWN_MS, USER_PROVIDED_KEY_COOLDOWN_MS } from '@/lib/ai/cooldowns';
-import { buildCustomProviderPayload, isUsingUserProvidedKey } from '@/lib/ai/custom-provider';
+import { buildCustomProviderRequestPayload, isUsingUserProvidedKey } from '@/lib/ai/custom-provider';
 import { authStorage } from '@/lib/auth';
 import { downloadBlob } from '@/lib/client/blobUrl';
 import { readJsonOrTextFromResponse, resolveApiErrorMessage } from '@/lib/client/apiError';
@@ -962,7 +962,7 @@ export function TavernExportPanel() {
         throw new Error('⚠️ 已选择自定义 AI 供应商，但尚未填写 API Key。');
       }
 
-      const customProviderPayload = buildCustomProviderPayload(userProviderConfig);
+      const customProviderPayload = buildCustomProviderRequestPayload(userProviderConfig);
       const requestBody: Record<string, unknown> = {
         name: (state.fields.name || '').trim() || '未命名角色',
         description: truncate(state.fields.description || '', 8_000),
@@ -972,11 +972,7 @@ export function TavernExportPanel() {
         language: 'zh-CN',
         ...(customProviderPayload
           ? {
-              customProvider: {
-                providerId: customProviderPayload.providerId,
-                modelId: customProviderPayload.modelId,
-                apiKey: customProviderPayload.apiKey.trim(),
-              },
+              customProvider: customProviderPayload,
             }
           : {}),
       };

@@ -7,6 +7,8 @@ import {
     sanitizeStoryPromptValue,
     STORY_PROMPT_CHARACTER_PARAMETERS_KEY,
 } from '@/lib/arena/story-prompt-data';
+import { buildStoryLengthRequirementText } from '@/lib/story-length';
+import { formatArenaMaterialsForPrompt } from '@/lib/arena/materials';
 
 type PromptFallbackQuestions =
     | string[]
@@ -329,9 +331,11 @@ export const createPromptBuilder = (
     writeCurrentState: boolean,
     adjudicationResults: AdjudicationResult[] | null,
     storyLength: string | undefined,
+    customStoryLength: string | undefined,
     narrativeHistory?: NarrativeHistoryEntry[] | null,
     loreText?: string | null,
-    includeQuestionnaireAnswers: boolean = true
+    includeQuestionnaireAnswers: boolean = true,
+    materials?: unknown[] | null
 ) => (input: { combatants: any[] }): string => {
     const { combatants } = input;
     const profiles = buildCombatantProfilesForPrompt({
@@ -406,6 +410,11 @@ export const createPromptBuilder = (
         });
     }
 
+    const materialsBlock = formatArenaMaterialsForPrompt(materials);
+    if (materialsBlock) {
+        finalPrompt += materialsBlock;
+    }
+
     if (teams && Object.keys(teams).length > 0) {
         finalPrompt += `## 【分队情况】\n本次的参与者进行了如下分队，请在故事中体现出团队对抗或合作的特点：\n`;
         Object.entries(teams).forEach(([teamId, members]) => {
@@ -425,14 +434,13 @@ export const createPromptBuilder = (
         finalPrompt += `\n\n【重要提醒】\n故事引导可能不完全符合世界观，请你在创作时，务必确保最终生成的故事符合魔法少女的世界观，修正或忽略不恰当的元素。`;
     }
 
-    if (storyLength && storyLength !== 'default') {
-        const lengthMap = {
-            short: '约300字',
-            standard: '约600字',
-            detailed: '约1000字',
-            long: '约2000字以上'
-        } as const;
-        finalPrompt += `\n\n【字数要求】\n请将故事正文(article.body)的长度控制在 **${lengthMap[storyLength as keyof typeof lengthMap]}** 左右。`;
+    const storyLengthRequirement = buildStoryLengthRequirementText({
+        storyLength,
+        customStoryLength,
+        targetLabel: '故事正文(article.body)',
+    });
+    if (storyLengthRequirement) {
+        finalPrompt += `\n\n【字数要求】\n${storyLengthRequirement}`;
     }
 
     finalPrompt += `\n\n【重要指令】请你必须使用【${language}】进行内容创作。`;
@@ -464,9 +472,11 @@ export const createStreamPromptBuilder = (
     forceStreamMeta: boolean,
     adjudicationResults: AdjudicationResult[] | null,
     storyLength: string | undefined,
+    customStoryLength: string | undefined,
     narrativeHistory?: NarrativeHistoryEntry[] | null,
     loreText?: string | null,
-    includeQuestionnaireAnswers: boolean = true
+    includeQuestionnaireAnswers: boolean = true,
+    materials?: unknown[] | null
 ) => (input: { combatants: any[] }): string => {
     const { combatants } = input;
     const profiles = buildCombatantProfilesForPrompt({
@@ -541,6 +551,11 @@ export const createStreamPromptBuilder = (
         });
     }
 
+    const materialsBlock = formatArenaMaterialsForPrompt(materials);
+    if (materialsBlock) {
+        finalPrompt += materialsBlock;
+    }
+
     if (teams && Object.keys(teams).length > 0) {
         finalPrompt += `## 【分队情况】\n本次的参与者进行了如下分队，请在故事中体现出团队对抗或合作的特点：\n`;
         Object.entries(teams).forEach(([teamId, members]) => {
@@ -560,14 +575,13 @@ export const createStreamPromptBuilder = (
         finalPrompt += `\n\n【重要提醒】\n故事引导可能不完全符合世界观，请你在创作时，务必确保最终生成的故事符合魔法少女的世界观，修正或忽略不恰当的元素。`;
     }
 
-    if (storyLength && storyLength !== 'default') {
-        const lengthMap = {
-            short: '约300字',
-            standard: '约600字',
-            detailed: '约1000字',
-            long: '约2000字以上'
-        } as const;
-        finalPrompt += `\n\n【字数要求】\n请将故事正文的长度控制在 **${lengthMap[storyLength as keyof typeof lengthMap]}** 左右。`;
+    const storyLengthRequirement = buildStoryLengthRequirementText({
+        storyLength,
+        customStoryLength,
+        targetLabel: '故事正文',
+    });
+    if (storyLengthRequirement) {
+        finalPrompt += `\n\n【字数要求】\n${storyLengthRequirement}`;
     }
 
     finalPrompt += `\n\n【重要指令】请你必须使用【${language}】进行内容创作。`;

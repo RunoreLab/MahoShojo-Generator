@@ -16,6 +16,7 @@ import {
   sum,
   type SQL,
 } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/sqlite-core';
 import type { AppDrizzleDb } from '@/lib/db/drizzle';
 import {
   mapArenaRatingEventReadRow,
@@ -28,6 +29,8 @@ import {
   arenaRatingEvents,
   arenaRatings,
   battles,
+  battleReportGenerationCombatants,
+  battleReportGenerations,
   characters,
   dataCardMetrics,
   dataCards,
@@ -85,6 +88,24 @@ export type ArenaLeaderboardRow = ArenaLeaderboardSelectRow & {
   tagIds: string[];
 };
 
+export type ArenaEntityRatingHistoryRow = {
+  generationId: string;
+  createdAt: string;
+  appliedAt: string | null;
+  opponent: {
+    entityType: ArenaReadEntityType;
+    entityId: string;
+    displayName: string;
+  };
+  result: 'win' | 'loss' | 'draw';
+  delta: number;
+  afterRating: number;
+  initiator: {
+    userId: number | null;
+    username: string | null;
+  };
+};
+
 export type CharacterWinRateRankRow = {
   name: string;
   isPreset: boolean;
@@ -107,6 +128,15 @@ const toInteger = (value: unknown, fallback = 0): number => {
 const normalizeLimit = (value: number, min: number, max: number): number => {
   if (!Number.isFinite(value)) return min;
   return Math.min(max, Math.max(min, Math.floor(value)));
+};
+
+const normalizeEntityType = (value: unknown): ArenaReadEntityType =>
+  value === 'preset' ? 'preset' : 'data_card';
+
+const toNullableInteger = (value: unknown): number | null => {
+  const n = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : NaN;
+  if (!Number.isFinite(n)) return null;
+  return Math.floor(n);
 };
 
 const buildStrictPublicSinceClause = (): SQL =>
@@ -505,6 +535,141 @@ export const getArenaRatingEventsByIds = async (
     .where(inArray(arenaRatingEvents.id, ids));
 
   return rows.map((row) => mapArenaRatingEventReadRow(row as Record<string, unknown>));
+};
+
+type ArenaEntityRatingHistorySide = 'a' | 'b';
+
+type ArenaEntityRatingHistorySelectRow = {
+  generationId: string;
+  createdAt: string;
+  appliedAt: string | null;
+  winnerSlot: number;
+  aEntityType: ArenaReadEntityType;
+  aEntityId: string;
+  bEntityType: ArenaReadEntityType;
+  bEntityId: string;
+  aDelta: number | null;
+  aAfterRating: number | null;
+  bDelta: number | null;
+  bAfterRating: number | null;
+  initiatorUserId: number | null;
+  initiatorUsername: string | null;
+  aDisplayName: string | null;
+  bDisplayName: string | null;
+};
+
+const mapEntityRatingHistoryRow = (
+  row: ArenaEntityRatingHistorySelectRow,
+  side: ArenaEntityRatingHistorySide,
+): ArenaEntityRatingHistoryRow | null => {
+  const isA = side === 'a';
+  const opponentEntityType = isA ? row.bEntityType : row.aEntityType;
+  const opponentEntityId = isA ? row.bEntityId : row.aEntityId;
+  const opponentDisplayName = (isA ? row.bDisplayName : row.aDisplayName)?.trim() || opponentEntityId;
+  const delta = toNullableInteger(isA ? row.aDelta : row.bDelta);
+  const afterRating = toNullableInteger(isA ? row.aAfterRating : row.bAfterRating);
+  if (delta == null || afterRating == null) return null;
+
+  const result = row.winnerSlot === 0
+    ? 'draw'
+    : row.winnerSlot === (isA ? 1 : 2)
+      ? 'win'
+      : 'loss';
+
+  return {
+    generationId: row.generationId,
+    createdAt: row.createdAt,
+    appliedAt: typeof row.appliedAt === 'string' ? row.appliedAt : null,
+    opponent: {
+      entityType: normalizeEntityType(opponentEntityType),
+      entityId: opponentEntityId,
+      displayName: opponentDisplayName,
+    },
+    result,
+    delta,
+    afterRating,
+    initiator: {
+      userId: toNullableInteger(row.initiatorUserId),
+      username:
+        typeof row.initiatorUsername === 'string' && row.initiatorUsername.trim()
+          ? row.initiatorUsername.trim()
+          : null,
+    },
+  };
+};
+
+export const listArenaEntityRatingHistory = async (
+  db: AppDrizzleDb,
+  input: {
+    entityType: ArenaReadEntityType;
+    entityId: string;
+    queue?: ArenaReadQueue;
+    limit?: number;
+  },
+): Promise<ArenaEntityRatingHistoryRow[]> => {
+  const entityType = normalizeEntityType(input.entityType);
+  const entityId = typeof input.entityId === 'string' ? input.entityId.trim() : '';
+  if (!entityId) return [];
+  const queue = input.queue === 'free' ? 'free' : 'strict';
+  const limit = normalizeLimit(input.limit ?? 10, 1, 20);
+
+  const aCombatant = alias(battleReportGenerationCombatants, 'a_combatant');
+  const bCombatant = alias(battleReportGenerationCombatants, 'b_combatant');
+
+  const selectBase = {
+    generationId: arenaRatingEvents.generationId,
+    createdAt: arenaRatingEvents.createdAt,
+    appliedAt: arenaRatingEvents.appliedAt,
+    winnerSlot: arenaRatingEvents.winnerSlot,
+    aEntityType: arenaRatingEvents.aEntityType,
+    aEntityId: arenaRatingEvents.aEntityId,
+    bEntityType: arenaRatingEvents.bEntityType,
+    bEntityId: arenaRatingEvents.bEntityId,
+    aDelta: arenaRatingEvents.aDelta,
+    aAfterRating: arenaRatingEvents.aAfterRating,
+    bDelta: arenaRatingEvents.bDelta,
+    bAfterRating: arenaRatingEvents.bAfterRating,
+    initiatorUserId: battleReportGenerations.userId,
+    initiatorUsername: sql<string | null>`COALESCE(${users.username}, ${battleReportGenerations.username})`,
+    aDisplayName: aCombatant.name,
+    bDisplayName: bCombatant.name,
+  };
+
+  const readSide = async (side: ArenaEntityRatingHistorySide): Promise<ArenaEntityRatingHistoryRow[]> => {
+    const rows = await db
+      .select(selectBase)
+      .from(arenaRatingEvents)
+      .leftJoin(battleReportGenerations, eq(battleReportGenerations.id, arenaRatingEvents.generationId))
+      .leftJoin(users, eq(users.id, battleReportGenerations.userId))
+      .leftJoin(
+        aCombatant,
+        and(eq(aCombatant.generationId, arenaRatingEvents.generationId), eq(aCombatant.sortIndex, 0)),
+      )
+      .leftJoin(
+        bCombatant,
+        and(eq(bCombatant.generationId, arenaRatingEvents.generationId), eq(bCombatant.sortIndex, 1)),
+      )
+      .where(
+        and(
+          eq(arenaRatingEvents.queue, queue),
+          eq(arenaRatingEvents.status, 'applied'),
+          side === 'a'
+            ? and(eq(arenaRatingEvents.aEntityType, entityType), eq(arenaRatingEvents.aEntityId, entityId))
+            : and(eq(arenaRatingEvents.bEntityType, entityType), eq(arenaRatingEvents.bEntityId, entityId)),
+        ),
+      )
+      .orderBy(desc(arenaRatingEvents.createdAt))
+      .limit(limit);
+
+    return rows
+      .map((row) => mapEntityRatingHistoryRow(row as ArenaEntityRatingHistorySelectRow, side))
+      .filter((row): row is ArenaEntityRatingHistoryRow => Boolean(row));
+  };
+
+  const [aRows, bRows] = await Promise.all([readSide('a'), readSide('b')]);
+  return [...aRows, ...bRows]
+    .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+    .slice(0, limit);
 };
 
 export const getArenaRatingsByEntities = async (

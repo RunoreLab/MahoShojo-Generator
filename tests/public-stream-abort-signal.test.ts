@@ -1,22 +1,22 @@
-import { beforeEach, describe, expect, mock, test } from 'bun:test';
+import { beforeEach, describe, expect, vi, test } from 'vitest';
 
 let capturedOptions: any = null;
 
-mock.module('@/lib/ai/public-rate-limit', () => ({
+vi.mock('@/lib/ai/public-rate-limit', () => ({
   acquirePublicAiRateLimit: async () => ({ allowed: true }),
   buildPublicAiRateLimitResponse: () => new Response(null, { status: 429 }),
   inferPublicAiProviderMode: () => 'system',
 }));
 
-mock.module('@/lib/content-safety/server', () => ({
+vi.mock('@/lib/content-safety/server', () => ({
   enforceTextSafety: async () => null,
 }));
 
-mock.module('@/lib/user-activity/record', () => ({
+vi.mock('@/lib/user-activity/record', () => ({
   recordUserActivityFromRequest: () => {},
 }));
 
-mock.module('@/lib/stream/raw-ai', () => ({
+vi.mock('@/lib/stream/raw-ai', () => ({
   LoadBalanceStrategy: {
     CUSTOM: 'custom',
     SEQUENTIAL: 'sequential',
@@ -56,6 +56,9 @@ describe('public stream abort signal', () => {
     const response = await handler(request as any);
 
     expect(response.status).toBe(200);
-    expect(capturedOptions?.abortSignal).toBe(controller.signal);
+    expect(capturedOptions?.abortSignal).toBeInstanceOf(AbortSignal);
+    expect(capturedOptions?.abortSignal.aborted).toBe(false);
+    controller.abort('test-abort');
+    expect(capturedOptions?.abortSignal.aborted).toBe(true);
   });
 });

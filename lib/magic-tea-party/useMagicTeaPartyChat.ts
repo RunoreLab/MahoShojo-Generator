@@ -93,6 +93,13 @@ const mergeAssistantAiMeta = (
   return { ...message, meta: nextMeta };
 };
 
+const buildMagicTeaPartyCustomProviderPayload = (config: UserAIProviderConfig) => ({
+  providerId: config.providerId,
+  modelId: config.modelId,
+  apiKey: config.apiKey,
+  ...(typeof config.maxOutputTokens === 'number' ? { maxOutputTokens: config.maxOutputTokens } : {}),
+});
+
 export type UseMagicTeaPartyChatOptions = {
   activeSession: MagicTeaPartySession | null;
   activeSessionId: string | null;
@@ -461,11 +468,7 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
               choiceCount: params.session.settings.choiceCount ?? preferences.choiceCount,
               userDisplayName: params.session.settings.userDisplayName,
             },
-            customProvider: {
-              providerId: userProviderConfig.providerId,
-              modelId: userProviderConfig.modelId,
-              apiKey: userProviderConfig.apiKey,
-            },
+            customProvider: buildMagicTeaPartyCustomProviderPayload(userProviderConfig),
           }),
         });
 
@@ -657,11 +660,7 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
               language,
               userDisplayName,
               messages: normalizedHistory,
-              customProvider: {
-                providerId: userProviderConfig.providerId,
-                modelId: userProviderConfig.modelId,
-                apiKey: userProviderConfig.apiKey,
-              },
+              customProvider: buildMagicTeaPartyCustomProviderPayload(userProviderConfig),
             }),
           });
 
@@ -747,11 +746,7 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
                 language,
                 userDisplayName,
               },
-              customProvider: {
-                providerId: userProviderConfig.providerId,
-                modelId: userProviderConfig.modelId,
-                apiKey: userProviderConfig.apiKey,
-              },
+              customProvider: buildMagicTeaPartyCustomProviderPayload(userProviderConfig),
             }),
           });
 
@@ -910,11 +905,7 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
               modelId: userProviderConfig?.modelId,
               userDisplayName: params.session.settings.userDisplayName,
             },
-            customProvider: {
-              providerId: userProviderConfig?.providerId,
-              modelId: userProviderConfig?.modelId,
-              apiKey: userProviderConfig?.apiKey,
-            },
+            customProvider: buildMagicTeaPartyCustomProviderPayload(userProviderConfig!),
           }),
         });
 
@@ -1267,11 +1258,7 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
             language: session.settings.language ?? preferences.language,
             userDisplayName,
             messages: summaryMessages,
-            customProvider: {
-              providerId: userProviderConfig?.providerId,
-              modelId: userProviderConfig?.modelId,
-              apiKey: userProviderConfig?.apiKey,
-            },
+            customProvider: buildMagicTeaPartyCustomProviderPayload(userProviderConfig!),
           }),
         });
 
@@ -1630,11 +1617,7 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
             choiceCount: activeSession.settings.choiceCount ?? preferences.choiceCount,
             userDisplayName: activeSession.settings.userDisplayName,
           },
-          customProvider: {
-            providerId: userProviderConfig?.providerId,
-            modelId: userProviderConfig?.modelId,
-            apiKey: userProviderConfig?.apiKey,
-          },
+          customProvider: buildMagicTeaPartyCustomProviderPayload(userProviderConfig!),
         }),
       });
 
@@ -1829,11 +1812,7 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
           language: activeSession.settings.language ?? preferences.language,
           userDisplayName: activeSession.settings.userDisplayName || preferences.userDisplayName || '旅人',
           messages: historyForRequest,
-          customProvider: {
-            providerId: userProviderConfig.providerId,
-            modelId: userProviderConfig.modelId,
-            apiKey: userProviderConfig.apiKey,
-          },
+          customProvider: buildMagicTeaPartyCustomProviderPayload(userProviderConfig),
         }),
       });
 

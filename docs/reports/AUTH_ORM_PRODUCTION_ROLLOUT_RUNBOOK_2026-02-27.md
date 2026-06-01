@@ -18,9 +18,9 @@
 - 工作区：干净（无未提交改动）
 - 分支差异：`feature/Auth+ORM` 相对 `feature/v0.2.0_Battle_Growth_MahoShojo` 为 `0 <- 36`（目标分支不领先，Auth+ORM 领先 36 个提交）
 - 本地质量校验：
-  - `bun run lint` 通过
-  - `bun test` 通过（448 tests）
-  - `bun run build` 通过
+  - 当前命令口径：`pnpm lint`
+  - 当前命令口径：`pnpm test`
+  - 当前命令口径：`pnpm build`
 
 ### 2.2 配置状态（`.env` 与 `wrangler.toml`）
 - `wrangler.toml` 已配置 `env.production.d1_databases`，且 `check:wrangler:d1` 通过。
@@ -149,10 +149,10 @@ git merge --no-ff feature/Auth+ORM
 ### 步骤 B：合并后本地质量门禁
 
 ```bash
-bun install
-bun run lint
-bun test
-bun run build
+pnpm install
+pnpm lint
+pnpm test
+pnpm build
 ```
 
 ### 步骤 C：部署代码
@@ -164,7 +164,7 @@ bun run build
 先跑配置检查：
 
 ```bash
-bun run check:wrangler:d1
+pnpm run check:wrangler:d1
 ```
 
 再执行迁移（安全脚本，含 `0001` 兼容补列逻辑）：
@@ -189,13 +189,13 @@ node scripts/d1-release-status.mjs --database DB --remote --env production --env
 先 dry-run：
 
 ```bash
-bun run backfill:user-auth-links:dry
+pnpm run backfill:user-auth-links:dry
 ```
 
 确认无异常后再写入：
 
 ```bash
-bun run backfill:user-auth-links:write
+pnpm run backfill:user-auth-links:write
 ```
 
 ---

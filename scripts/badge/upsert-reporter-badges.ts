@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env -S pnpm exec tsx
 
 /**
  * 记者类徽章定义同步脚本
@@ -7,8 +7,8 @@
  * - 更新/创建：优秀记者、热门记者、资深记者、王牌记者、首席记者 等徽章定义
  *
  * 使用：
- * - bun run scripts/badge/upsert-reporter-badges.ts
- * - bun run scripts/badge/upsert-reporter-badges.ts --dry-run
+ * - pnpm exec tsx scripts/badge/upsert-reporter-badges.ts
+ * - pnpm exec tsx scripts/badge/upsert-reporter-badges.ts --dry-run
  */
 
 import {

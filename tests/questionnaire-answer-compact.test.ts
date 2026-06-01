@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test';
+import { describe, expect, it } from 'vitest';
 import { compactQuestionnaireAnswerItems } from '@/lib/questionnaires';
 
 describe('问卷答案瘦身', () => {

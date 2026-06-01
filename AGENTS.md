@@ -9,10 +9,10 @@
 - AI 相关能力封装在 `lib/`（`ai.ts`、`config.ts`、`signature.ts` 等）；共享类型位于 `types/arena.d.ts`；静态资源在 `public/`；全局样式集中于 `styles/`；工具脚本放在 `scripts/`；测试与夹具位于 `tests/`。
 
 ### 构建、测试与开发命令
-- 使用 `bun install`（或备用的 `npm install`）安装依赖，Bun 是脚本与 CI 的首选运行时。
-- `bun run dev` 启动 Turbopack 开发服务器（默认 `http://localhost:3000`）。
-- `bun run build` 与 `bun run start` 生成并服务生产构建；`bun run preview` 模拟 Cloudflare Pages 流程。
-- `bun run lint` 执行 Next/ESLint 规则校验，是提交前的强制步骤；`bun test`/`bun test --watch` 运行 Bun 测试。
+- 使用 `pnpm install` 安装依赖，pnpm 是包管理器与脚本调度入口；当前固定版本为 `pnpm@11.3.0`。
+- `pnpm dev` 启动 Turbopack 开发服务器（默认 `http://localhost:3000`）。
+- `pnpm build` 与 `pnpm start` 生成并服务生产构建；`pnpm preview` 模拟 Cloudflare Pages 流程。
+- `pnpm lint` 执行 Next/ESLint 规则校验，是提交前的强制步骤；`pnpm test`/`pnpm test:watch` 通过 Vitest 执行测试。
 
 ### 编码风格与命名约定
 - TypeScript 采用 `strict` 配置；React 19 组件文件使用 PascalCase 命名并导出具名函数，除非框架限制不得使用匿名默认导出。
@@ -36,14 +36,14 @@
 - 该项目部署在 Cloudflare 上，使用 Edge Runtime，请不要使用不兼容的库或者特性。
 
 ### 测试规范
-- 测试脚本逻辑基于 `bun` 的测试能力执行，请不要使用其他测试框架的代码。
+- 测试脚本逻辑基于 Vitest 执行；测试 API 从 `vitest` 导入，禁止新增 `bun:test` 依赖。
 - 在 `tests/` 下新建 `*.test.ts` 测试文件（仅针对遗留代码使用 `.test.js`），共用 `tests/test.json` 等夹具。
 - 随机逻辑需可复现，参考 `tests/getWeightedRandomFromSeed.test.js`：为辅助函数设定种子，并验证概率分布而非采样结果。
-- 每次提交前执行 `bun test`、`bun run lint` 和 `bun run build`，在 PR 描述中记录重要日志差异；任何结构性变更需同步更新夹具与类型声明。
+- 每次提交前执行 `pnpm test`、`pnpm lint` 和 `pnpm build`，在 PR 描述中记录重要日志差异；任何结构性变更需同步更新夹具与类型声明。
 
 ### 环境与配置提示
 - 复制 `env.example` 至 `.env.local` 并填充所需凭据；复杂配置参考 `config/ai-providers.example.json`。
-- 徽章或内容脚本通过 `bun tsx scripts/<name>.ts` 运行。
+- 徽章或内容脚本通过 `pnpm exec tsx scripts/<name>.ts` 运行。
 
 ## 文档规则
 

@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 import { signOutBetterAuthSession } from '@/lib/auth/logout';
 
 describe('auth/logout', () => {
@@ -10,7 +10,7 @@ describe('auth/logout', () => {
     };
 
     const ok = await signOutBetterAuthSession(mockFetch);
-    expect(ok).toBeTrue();
+    expect(ok).toBe(true);
     expect(calls).toHaveLength(1);
 
     const firstCall = calls[0];
@@ -26,6 +26,6 @@ describe('auth/logout', () => {
     };
 
     const ok = await signOutBetterAuthSession(mockFetch);
-    expect(ok).toBeFalse();
+    expect(ok).toBe(false);
   });
 });

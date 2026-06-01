@@ -4,7 +4,7 @@ import { getLogger } from '@/lib/logger';
 import magicalGirlQuestionnaire from '@/public/questionnaires/presets/magical-girl-default.json';
 import canshouQuestionnaire from '@/public/questionnaires/presets/canshou-default.json';
 import { config as appConfig, SafetyCheckPolicy, type AIProvider } from '@/lib/config';
-import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
+import { AI_PROVIDER_CATALOG, resolveAIProviderModel } from '@/lib/ai/constants';
 import { quickCheck } from '@/lib/sensitive-word-filter';
 import { buildPolicySafetyCheckText } from '@/lib/content-safety/server';
 import { NextRequest } from 'next/server';
@@ -56,6 +56,9 @@ import { buildBattleReportGenerationCombatantInserts } from '@/lib/arena/battle-
 import { createBattleReportWriteContext } from '@/lib/arena/battle-report-write-context';
 	import { extractStreamUpdateMeta, findStreamUpdateMetaStart } from '@/lib/arena/stream-meta';
 import { summarizeStreamBattleReportPreview } from '@/lib/arena/stream-report-summary';
+import { normalizeCustomStoryLength, resolveEffectiveStoryLength } from '@/lib/story-length';
+import { buildEmptyStreamOutputErrorPayload } from '@/lib/arena/stream-empty-output';
+import { MAX_ARENA_MATERIALS, normalizeArenaMaterialsForRequest } from '@/lib/arena/materials';
 
 const log = getLogger('api-gen-battle-stream');
 
@@ -172,6 +175,8 @@ async function handler(req: NextRequest): Promise<Response> {
 	    let snapshotResolvedArenaFreeRankingEnabled: boolean | null = null;
 	    let snapshotQuestionnaireLoreIds: string[] = [];
 	    let snapshotHasQuestionnaireLore: boolean | null = null;
+        let snapshotMaterialCount = 0;
+        let snapshotMaterialSourceTypes: string[] = [];
         let snapshotGenerationId: string | null = null;
 
         try {
@@ -201,6 +206,7 @@ async function handler(req: NextRequest): Promise<Response> {
             internalGuidance,
             scenario,
             auxScenarios,
+            materials,
             teams,
             teamNames,
             language = 'zh-CN',
@@ -215,6 +221,7 @@ async function handler(req: NextRequest): Promise<Response> {
             narrativeHistoryReadLimit,
             adjudicationEvents,
             storyLength,
+            customStoryLength,
             customProvider: customProviderPayload,
             scenarioTitle,
             scenarioFileName,
@@ -251,10 +258,22 @@ async function handler(req: NextRequest): Promise<Response> {
           if (normalizedAuxScenarios && normalizedAuxScenarios.length > 10) {
               return new Response(JSON.stringify({ error: '辅助情景最多 10 个' }), { status: 400 });
           }
+          if (Array.isArray(materials) && materials.length > MAX_ARENA_MATERIALS) {
+              return new Response(JSON.stringify({ error: `素材最多 ${MAX_ARENA_MATERIALS} 个` }), { status: 400 });
+          }
+          const normalizedMaterials = normalizeArenaMaterialsForRequest(materials);
+          const materialCount = normalizedMaterials.length;
+          const materialSourceTypes = Array.from(new Set(
+              normalizedMaterials
+                  .map((material) => material.sourceType || material.sourceKind)
+                  .filter((value): value is string => typeof value === 'string' && Boolean(value.trim()))
+          )).slice(0, MAX_ARENA_MATERIALS);
+          snapshotMaterialCount = materialCount;
+          snapshotMaterialSourceTypes = materialSourceTypes;
 
 		        snapshotMode = typeof mode === 'string' ? mode : 'classic';
 		        snapshotLanguage = normalizeOptionalString(language);
-		        snapshotStoryLength = normalizeOptionalString(storyLength);
+		        snapshotStoryLength = resolveEffectiveStoryLength(normalizeOptionalString(storyLength), customStoryLength) ?? null;
                 snapshotCustomProviderId =
                     customProviderPayload && typeof customProviderPayload === 'object' && typeof customProviderPayload.providerId === 'string'
                         ? customProviderPayload.providerId.trim() || null
@@ -388,8 +407,8 @@ async function handler(req: NextRequest): Promise<Response> {
                 return new Response(JSON.stringify({ error: '未知的模型供应商 ID' }), { status: 400 });
             }
 
-            const modelConfig = providerConfig.models.find(model => model.value === parsed.modelId);
-            if (!modelConfig) {
+            const modelResolution = resolveAIProviderModel(providerConfig, parsed.modelId);
+            if (!modelResolution) {
                 return new Response(JSON.stringify({ error: '未知的模型 ID' }), { status: 400 });
             }
 
@@ -400,21 +419,22 @@ async function handler(req: NextRequest): Promise<Response> {
 
             const sanitizedBaseUrl = providerConfig.baseUrl?.trim() ?? '';
             if (!sanitizedBaseUrl) {
-                customModelOverride = modelConfig.value;
+                customModelOverride = modelResolution.modelId;
                 log.info('检测到 baseUrl 为空的自定义供应商，改用系统默认通道，仅覆盖模型参数', {
                     providerId: providerConfig.id,
-                    model: modelConfig.value,
+                    model: modelResolution.modelId,
                 });
             } else {
                 customProviderOverride = {
                     name: providerConfig.name,
                     apiKey: sanitizedApiKey,
                     baseUrl: sanitizedBaseUrl,
-                    model: modelConfig.value,
+                    model: modelResolution.modelId,
                     type: providerConfig.type,
                     mode: providerConfig.mode || 'auto',
                     retryCount: 1,
                     skipProbability: 0,
+                    ...(typeof parsed.maxOutputTokens === 'number' ? { defaultMaxOutputTokens: parsed.maxOutputTokens } : {}),
                 };
             }
         }
@@ -508,6 +528,15 @@ async function handler(req: NextRequest): Promise<Response> {
                 inputsToCheck.push({ type: 'scenario', content: JSON.stringify(aux), isNative });
             }
         }
+        if (normalizedMaterials.length > 0) {
+            for (const material of normalizedMaterials) {
+                inputsToCheck.push({
+                    type: 'userGuidance',
+                    content: JSON.stringify(material.content),
+                    isNative: material.isNative,
+                });
+            }
+        }
         combatants.forEach((c: any) => {
             inputsToCheck.push({ type: 'character', content: JSON.stringify(c.data), isNative: c.isNative });
         });
@@ -581,6 +610,8 @@ async function handler(req: NextRequest): Promise<Response> {
 		                                rejectedBy: 'sensitive-input',
 		                                arenaFreeRankingEnabled: resolvedArenaFreeRankingEnabled,
 		                                readNarrativeHistory: resolvedReadNarrativeHistory,
+                                        materialCount: materialCount > 0 ? materialCount : null,
+                                        materialSourceTypes: materialSourceTypes.length > 0 ? materialSourceTypes : null,
                                         narrativeHistoryReadLimit: resolvedReadNarrativeHistory
                                             ? (Number.isFinite(resolvedNarrativeHistoryReadLimit)
                                                 ? (resolvedNarrativeHistoryReadLimit === Infinity ? null : resolvedNarrativeHistoryReadLimit)
@@ -638,6 +669,7 @@ async function handler(req: NextRequest): Promise<Response> {
 	            mode === 'classic'
 	            && String(language ?? '').trim() === 'zh-CN'
 	            && !String(userGuidance ?? '').trim()
+                && materialCount === 0
 	            && !hasQuestionnaireLore
 	            && resolvedReadArenaHistory === false
 	            && resolvedReadCurrentState === false
@@ -667,13 +699,16 @@ async function handler(req: NextRequest): Promise<Response> {
             shouldForceStreamMeta,
 	            adjudicationResults,
 	            storyLength,
+                normalizeCustomStoryLength(customStoryLength),
 	            narrativeHistoryForPrompt,
 	            loreText,
 	            includeQuestionnaireAnswersInPrompt,
+                normalizedMaterials,
 	        )({ combatants });
 
         const aiTelemetry: NonNullable<GenerateWithAIOptions['telemetry']> = {};
         const reasoningEventQueue: RawReasoningStreamEvent[] = [];
+        let lastReasoningActivityAtMs: number | null = null;
         let flushReasoningQueueNow: (() => void) | null = null;
         const aiOptions: GenerateWithAIOptions = {
             ...(providerOptions ?? {}),
@@ -682,6 +717,7 @@ async function handler(req: NextRequest): Promise<Response> {
             ...(wantsSse
                 ? {
                     onReasoningEvent: (event) => {
+                        lastReasoningActivityAtMs = Date.now();
                         reasoningEventQueue.push(event);
                         flushReasoningQueueNow?.();
                     },
@@ -835,6 +871,7 @@ async function handler(req: NextRequest): Promise<Response> {
                     combatants,
                     userGuidance: finalUserGuidance,
                     scenario,
+                    materials: normalizedMaterials,
                     teams,
                 });
                 const inputBytes = new TextEncoder().encode(inputJson).length;
@@ -854,6 +891,8 @@ async function handler(req: NextRequest): Promise<Response> {
                         questionnaireLoreIds,
                         scenarioFileName: normalizedScenarioFileName,
                         auxScenarioCount: auxScenarioCount > 0 ? auxScenarioCount : null,
+                        materialCount: materialCount > 0 ? materialCount : null,
+                        materialSourceTypes: materialSourceTypes.length > 0 ? materialSourceTypes : null,
                         resolvedModelOverride: usedModelOverride ?? null,
                         readNarrativeHistory: resolvedReadNarrativeHistory,
                         narrativeHistoryReadLimit: resolvedReadNarrativeHistory
@@ -893,7 +932,7 @@ async function handler(req: NextRequest): Promise<Response> {
                     scenarioDataCardUpdatedAt: typeof scenarioSourceDataCardUpdatedAt === 'string' ? scenarioSourceDataCardUpdatedAt : null,
 	                    language: normalizeOptionalString(language),
 	                    selectedLevel: null,
-	                    storyLength: normalizeOptionalString(storyLength),
+	                    storyLength: resolveEffectiveStoryLength(normalizeOptionalString(storyLength), customStoryLength) ?? null,
                     pvpRoomId: snapshotPvpRoomId,
                     pvpMatchId: snapshotPvpMatchId,
                     pvpRoundId: snapshotPvpRoundId,
@@ -1044,6 +1083,7 @@ async function handler(req: NextRequest): Promise<Response> {
                 label: 'api/arena/generate-stream SSE 上游读取',
                 idleTimeoutMs: STREAM_READ_IDLE_TIMEOUT_MS,
                 totalTimeoutMs: STREAM_READ_TOTAL_TIMEOUT_MS,
+                getLastActivityAtMs: () => lastReasoningActivityAtMs,
                 onTimeout: () => {
                     try {
                         void reader.cancel('timeout').catch(() => {});
@@ -1341,24 +1381,27 @@ async function handler(req: NextRequest): Promise<Response> {
 			                    const metaCandidate = metaBuffer && metaBuffer.trim() ? metaBuffer : metaFallbackTail;
 			                    const rawPreview = metaCandidate && metaCandidate.trim() ? metaCandidate.slice(0, 400) : null;
 		                    controller.enqueue(
-		                        encodeEvent('error', {
-		                            ok: false,
-		                            error: 'AI 返回空对象/空内容（{} / [] / 空白），未收到有效正文，请重试或切换模型。',
-		                            debug: debugSse
-		                                ? {
-		                                    outputBytes,
-		                                    outputChars,
-		                                    markdownCharsSent,
-		                                    hasMeaningfulMarkdown,
-		                                    metaHasImpacts,
-		                                    inMeta,
-		                                    pendingMarkdownTailLength: pendingMarkdownTail.length,
-		                                    metaBufferLength: metaBuffer.length,
-		                                    metaFallbackTailLength: metaFallbackTail.length,
-		                                    rawPreview,
-		                                  }
-		                                : null,
-		                        })
+		                        encodeEvent(
+                                    'error',
+                                    buildEmptyStreamOutputErrorPayload({
+                                        debug: debugSse,
+                                        outputBytes,
+                                        outputChars,
+                                        markdownCharsSent,
+                                        hasMeaningfulMarkdown,
+                                        metaHasImpacts,
+                                        inMeta,
+                                        pendingMarkdownTailLength: pendingMarkdownTail.length,
+                                        metaBufferLength: metaBuffer.length,
+                                        metaFallbackTailLength: metaFallbackTail.length,
+                                        reasoningCharsSent,
+                                        hasReasoningStarted,
+                                        hasReasoningDelta,
+                                        reasoningCompleted,
+                                        finishReason: finishReasonForTelemetry,
+                                        rawPreview,
+                                    })
+                                )
 			                    );
 			                    await finalizeOnce('failed', 'empty stream output');
                                 sseStreamClosed = true;
@@ -1605,6 +1648,8 @@ async function handler(req: NextRequest): Promise<Response> {
                         questionnaireLoreEnabled: snapshotHasQuestionnaireLore ? true : null,
                         questionnaireLoreIds: snapshotQuestionnaireLoreIds,
                         readNarrativeHistory: snapshotReadNarrativeHistory,
+                        materialCount: snapshotMaterialCount > 0 ? snapshotMaterialCount : null,
+                        materialSourceTypes: snapshotMaterialSourceTypes.length > 0 ? snapshotMaterialSourceTypes : null,
                         narrativeHistoryReadLimit: snapshotNarrativeHistoryReadLimit,
                         narrativeHistoryReadCount: snapshotNarrativeHistoryReadCount,
                         combatantsFallback: buildCombatantsFallbackForExtraJson(snapshotCombatants),

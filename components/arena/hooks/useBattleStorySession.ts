@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { buildCustomProviderPayload } from '@/lib/ai/custom-provider';
+import { buildCustomProviderRequestPayload } from '@/lib/ai/custom-provider';
 import {
   createBattleStoryCheckpointRecord,
   createBattleStoryChapterRecord,
@@ -148,7 +148,7 @@ const readRetryAfterMs = (response: Response, fallbackMs = 15_000): number => {
 
 const buildProviderSource = (
   currentSource: BattleStorySessionSource,
-  customProviderPayload: ReturnType<typeof buildCustomProviderPayload>
+  customProviderPayload: ReturnType<typeof buildCustomProviderRequestPayload>
 ): BattleStorySessionSource => {
   if (!customProviderPayload) {
     return {
@@ -345,7 +345,7 @@ export function useBattleStorySession() {
   const generationAbortControllerRef = useRef<AbortController | null>(null);
 
   const customProviderPayload = useMemo(
-    () => buildCustomProviderPayload(userProviderConfig),
+    () => buildCustomProviderRequestPayload(userProviderConfig),
     [userProviderConfig]
   );
   const providerCooldownConfig = useMemo(
@@ -884,7 +884,7 @@ export function useBattleStorySession() {
       let cooldownHandled = false;
 
       try {
-        const response = await fetch('/api/arena/session/generate-next', {
+      const response = await fetch('/api/arena/session/generate-next', {
           method: 'POST',
           headers: await buildRequestHeaders(true),
           signal: generationController.signal,
@@ -903,9 +903,11 @@ export function useBattleStorySession() {
               combatants: input.seed.combatants,
               scenario: input.seed.scenario ?? null,
               auxScenarios: input.seed.auxScenarios ?? [],
+              materials: input.seed.materials ?? [],
               questionnaires: input.seed.questionnaires ?? [],
               mode: input.source.mode,
               storyLength: input.source.storyLength,
+              customStoryLength: input.source.customStoryLength,
               language: input.source.language,
               settings: input.seed.settings,
             },
@@ -1191,10 +1193,12 @@ export function useBattleStorySession() {
         battleMode: state.battleMode,
         scenario: state.scenario,
         auxScenarios: state.auxScenarios,
+        materials: state.materials,
         selectedQuestionnaires: state.selectedQuestionnaires,
         adjudicationEvents: state.adjudicationEvents,
         selectedLanguage: state.selectedLanguage,
         storyLength: state.storyLength,
+        customStoryLength: state.customStoryLength,
         settings: state.settings,
         providerMode: customProviderPayload?.providerId === 'system' || !customProviderPayload ? 'system' : 'custom',
         providerId: customProviderPayload?.providerId ?? 'system',

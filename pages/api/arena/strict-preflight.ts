@@ -132,6 +132,7 @@ export default async function handler(req: NextRequest) {
     const scenarioEnabled = readBoolean(body?.scenarioEnabled);
     const scenarioFileName = trimString(body?.scenarioFileName);
     const auxScenarioCount = readNonNegativeInt(body?.auxScenarioCount);
+    const materialCount = readNonNegativeInt(body?.materialCount);
     const questionnaireLoreEnabled = readBoolean(body?.questionnaireLoreEnabled);
     const questionnaireLoreIds = Array.isArray(body?.questionnaireLoreIds)
       ? (body.questionnaireLoreIds as unknown[])
@@ -205,6 +206,7 @@ export default async function handler(req: NextRequest) {
     if (readCurrentState) reasons.push('read-current-state');
     if (readNarrativeHistory) reasons.push('read-narrative-history');
     if (adjudicationEventCount > 0) reasons.push('has-adjudication-events');
+    if (materialCount > 0) reasons.push('has-materials');
     if (customModelId && isStrictRankedModelBlacklisted(customModelId)) reasons.push('ai-model-blacklisted');
     if (
       Array.isArray(combatants) &&

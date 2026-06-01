@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 
 import { isBlobUrl } from '@/lib/client/blobUrl';
 import { getSafeDpr } from '@/lib/client/snapdomCapture';

@@ -25,7 +25,7 @@ interface BattleResultProps {
 }
 
 export function BattleResult({ onSaveImage }: BattleResultProps) {
-  const { handleRedoUpdates, handleApplyManualMetaUpdates, isCooldown, remainingTime, isRedoingUpdates } = useBattleEngine();
+  const { handleRedoUpdates, handleApplyManualMetaUpdates, stopGeneration, isCooldown, remainingTime, isRedoingUpdates } = useBattleEngine();
   const useBattleSelector = <T,>(selector: (state: BattleStoreState) => T) => useBattleStore(selector);
   const adjudicationResults = useBattleSelector((state) => state.adjudicationResults);
   const newsReport = useBattleSelector((state) => state.newsReport);
@@ -208,6 +208,7 @@ export function BattleResult({ onSaveImage }: BattleResultProps) {
               narrativeHistoryReadCount={streamNarrativeHistoryReadCount}
               aiReasoning={streamReasoning}
               isStreaming={isGenerating}
+              onStopGeneration={stopGeneration}
               illustrationAsset={illustrationAsset}
               cardWidthPx={battleReportCardWidthPx}
             />

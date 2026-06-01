@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 
 describe('challenge stream meta', () => {
   test('extractChallengeAdjudicationMeta 会去掉隐藏尾注并解析出裁定结果', async () => {

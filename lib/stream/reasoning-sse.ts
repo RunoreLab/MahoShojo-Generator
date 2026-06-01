@@ -51,6 +51,7 @@ export const createReasoningSseBridge = (label?: string): ReasoningSseBridge => 
   const queuedEvents: SseQueuedEvent[] = [];
   let sawReasoningDone = false;
   let hasReasoningText = false;
+  let lastReasoningActivityAtMs: number | null = null;
   let activeController: ReadableStreamDefaultController<Uint8Array> | null = null;
   let streamClosed = false;
 
@@ -59,6 +60,7 @@ export const createReasoningSseBridge = (label?: string): ReasoningSseBridge => 
   };
 
   const onReasoningEvent = (event: RawReasoningStreamEvent) => {
+    lastReasoningActivityAtMs = Date.now();
     if (event.type === 'reasoning-start') {
       enqueue('reasoning', { source: 'sdk', status: 'thinking', chunk: '' });
       flushQueuedEventsIfReady();
@@ -131,6 +133,7 @@ export const createReasoningSseBridge = (label?: string): ReasoningSseBridge => 
       label: label ?? '通用流式 reasoning SSE',
       idleTimeoutMs: STREAM_READ_IDLE_TIMEOUT_MS,
       totalTimeoutMs: STREAM_READ_TOTAL_TIMEOUT_MS,
+      getLastActivityAtMs: () => lastReasoningActivityAtMs,
       onTimeout: () => {
         try {
           void upstreamReader.cancel('timeout').catch(() => {});

@@ -400,6 +400,7 @@ export const authApi = {
     authKey?: string;
     user?: { id: number; username: string; prefix?: string | null };
     activityToken?: string | null;
+    requiresTurnstile?: boolean;
     error?: string;
   }> {
     try {
@@ -434,7 +435,11 @@ export const authApi = {
         return data;
       }
       
-      return { success: false, error: data.error || '登录失败' };
+      return {
+        success: false,
+        error: data.error || '登录失败',
+        requiresTurnstile: data.requiresTurnstile === true,
+      };
     } catch (error) {
       console.error('Login error:', error);
       return { success: false, error: '网络错误' };

@@ -1,13 +1,16 @@
 import type { BattleStoreState } from '@/components/arena/types';
+import { formatStoryLengthSummaryLabel } from '@/lib/story-length';
 
 type SummaryInput = Pick<
   BattleStoreState,
   | 'battleMode'
   | 'scenario'
   | 'storyLength'
+  | 'customStoryLength'
   | 'selectedLanguage'
   | 'settings'
   | 'auxScenarios'
+  | 'materials'
   | 'selectedQuestionnaires'
   | 'adjudicationEvents'
 >;
@@ -42,12 +45,14 @@ export const buildBattleLiteInheritedSummary = (input: SummaryInput): BattleLite
   const shouldCountAuxScenarios = input.battleMode === 'scenario' && Boolean(input.scenario?.content);
 
   if (shouldCountAuxScenarios && input.auxScenarios.length > 0) hiddenContext.push(`辅助情景 ${input.auxScenarios.length} 个`);
+  const materialCount = Array.isArray(input.materials) ? input.materials.length : 0;
+  if (materialCount > 0) hiddenContext.push(`素材 ${materialCount} 个`);
   if (input.selectedQuestionnaires.length > 0) hiddenContext.push(`问卷 ${input.selectedQuestionnaires.length} 张`);
   if (input.adjudicationEvents.length > 0) hiddenContext.push(`判定事件 ${input.adjudicationEvents.length} 条`);
 
   return {
     inheritedSettings: [
-      `长度：${input.storyLength}`,
+      `长度：${formatStoryLengthSummaryLabel(input.storyLength, input.customStoryLength)}`,
       `语言：${input.selectedLanguage}`,
       formatArenaHistoryRead(input.settings),
       `当前状态读取：${input.settings.readCurrentState ? '开启' : '关闭'}`,

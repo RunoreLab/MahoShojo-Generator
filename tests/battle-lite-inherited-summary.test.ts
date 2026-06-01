@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 
 import { buildBattleLiteInheritedSummary } from '@/components/arena-lite/battle-lite-inherited-summary';
 
@@ -9,6 +9,7 @@ describe('battle lite inherited summary', () => {
         battleMode: 'scenario',
         scenario: { content: { title: '主情景' } },
         storyLength: 'long',
+        customStoryLength: '1350',
         selectedLanguage: 'en-US',
         settings: {
           userGuidance: '保持原样',
@@ -32,7 +33,7 @@ describe('battle lite inherited summary', () => {
       } as any),
     ).toEqual({
       inheritedSettings: [
-        '长度：long',
+        '长度：自定义 1350 字（预设：long）',
         '语言：en-US',
         '历战读取：开启（5 条）',
         '当前状态读取：开启',

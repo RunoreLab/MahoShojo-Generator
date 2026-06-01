@@ -167,12 +167,39 @@ const buildCocRuleSummary = (template: CreatorTemplateId, rule: BuildRuleRuntime
     .join('\n');
 };
 
+const buildTerrorInfinityFxRuleSummary = (template: CreatorTemplateId, rule: BuildRuleRuntimeResult): string => {
+  const blockResults = isRecord(rule.blockResults) ? rule.blockResults : {};
+  const derived = isRecord(rule.derived) ? rule.derived : {};
+  const coreAttributes = isRecord(blockResults.coreAttributes) ? blockResults.coreAttributes : {};
+  const skills = isRecord(blockResults.skills) ? blockResults.skills : {};
+  const bodyProfile = isRecord(blockResults.bodyProfile) ? blockResults.bodyProfile : {};
+  const specialties = getMultiSelectLabels(rule.ruleId, 'specialties', blockResults.specialties);
+  const budget = rule.validationSummary.budget;
+
+  return [
+    `模板：${template}`,
+    '规则：无限恐怖FXv137 标准人物卡',
+    `属性：智力 ${coreAttributes.INT ?? '-'} / 感知 ${coreAttributes.PER ?? '-'} / 决心 ${coreAttributes.RES ?? '-'} / 力量 ${coreAttributes.STR ?? '-'} / 敏捷 ${coreAttributes.DEX ?? '-'} / 耐力 ${coreAttributes.STA ?? '-'} / 风度 ${coreAttributes.PRE ?? '-'} / 操控 ${coreAttributes.MAN ?? '-'} / 沉着 ${coreAttributes.COM ?? '-'}`,
+    `技能：学识 ${skills.academics ?? '-'} / 器用 ${skills.devices ?? '-'} / 手艺 ${skills.craft ?? '-'} / 专注 ${skills.focus ?? '-'} / 运动 ${skills.athletics ?? '-'} / 生存 ${skills.survival ?? '-'} / 射击 ${skills.firearms ?? '-'} / 武技 ${skills.combat ?? '-'} / 洞察 ${skills.insight ?? '-'} / 隐秘 ${skills.stealth ?? '-'} / 表达 ${skills.expression ?? '-'} / 社交 ${skills.social ?? '-'}`,
+    `衍生：体积 ${bodyProfile.size ?? '-'} / 速度 ${derived.Speed ?? '-'} / 先攻 ${derived.Initiative ?? '-'} / 基础防御 ${derived.BaseDefense ?? '-'} / 生命值 ${derived.Health ?? '-'} / 意志力 ${derived.Willpower ?? '-'}`,
+    `专长：${specialties.length > 0 ? specialties.join('、') : '未选择'}`,
+    budget
+      ? `预算：属性点 ${budget.attributePointsUsed}/${budget.attributePointsLimit ?? '无限'}；技能点 ${budget.skillPointsUsed ?? 0}/${budget.skillPointsLimit ?? '无限'}；专长点 ${budget.specialtyPointsUsed}/${budget.specialtyPointsLimit ?? '无限'}`
+      : '',
+  ]
+    .filter(Boolean)
+    .join('\n');
+};
+
 const buildRuleSummary = (template: CreatorTemplateId, rule: BuildRuleRuntimeResult): string => {
   if (rule.ruleId === 'dnd-5e-lite') {
     return buildDndRuleSummary(template, rule);
   }
   if (rule.ruleId === 'coc-7e-lite') {
     return buildCocRuleSummary(template, rule);
+  }
+  if (rule.ruleId === 'terrorinfinity-fx-v137') {
+    return buildTerrorInfinityFxRuleSummary(template, rule);
   }
 
   return buildArenaRuleSummary(template, rule);

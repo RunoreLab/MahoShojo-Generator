@@ -2,6 +2,7 @@
 
 import { randomUUID } from '@/lib/crypto';
 import { formatBattleStoryChapterProgress } from '@/lib/ai-session/battle-story/plan';
+import { normalizeCustomStoryLength } from '@/lib/story-length';
 import {
   buildAdjudicationRecordMarkdown,
   hasAdjudicationRecordSection,
@@ -22,6 +23,7 @@ import type { AdjudicatorEvent } from '@/types/arena';
 
 import type {
   AuxiliaryScenarioState,
+  ArenaMaterialState,
   BattleMode,
   BattleSettings,
   Combatant,
@@ -184,10 +186,12 @@ export const buildBattleStorySessionSeedSnapshot = (input: {
   battleMode: BattleMode;
   scenario: ScenarioState;
   auxScenarios: AuxiliaryScenarioState[];
+  materials?: ArenaMaterialState[];
   selectedQuestionnaires: QuestionnaireSelection[];
   adjudicationEvents: AdjudicatorEvent[];
   selectedLanguage: string;
   storyLength: StoryLengthOption;
+  customStoryLength?: string;
   settings: BattleSettings;
   providerMode: 'system' | 'custom';
   providerId: string;
@@ -226,6 +230,9 @@ export const buildBattleStorySessionSeedSnapshot = (input: {
       mode: input.battleMode,
       language: input.selectedLanguage,
       storyLength: input.storyLength,
+      ...(normalizeCustomStoryLength(input.customStoryLength)
+        ? { customStoryLength: normalizeCustomStoryLength(input.customStoryLength) }
+        : {}),
       generationMode: 'stream',
       providerMode: input.providerMode,
       providerId: input.providerId,
@@ -236,6 +243,7 @@ export const buildBattleStorySessionSeedSnapshot = (input: {
       scenario: input.battleMode === 'scenario' ? input.scenario.content : null,
       auxScenarios:
         input.battleMode === 'scenario' ? input.auxScenarios.map((item) => item.content) : [],
+      materials: input.materials ?? [],
       questionnaires: input.selectedQuestionnaires.map((selection) => ({
         id: selection.questionnaire.id,
         title: selection.questionnaire.title,

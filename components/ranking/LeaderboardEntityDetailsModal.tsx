@@ -199,6 +199,10 @@ export function LeaderboardEntityDetailsModal(props: {
       card={detailsCard}
       pendingNotice={detailsPendingNotice ?? undefined}
       metaCardId={detailsMetaCardId}
+      ratingHistoryEntity={{
+        entityType: entity.entityType,
+        entityId: entity.entityId,
+      }}
     />
   );
 }

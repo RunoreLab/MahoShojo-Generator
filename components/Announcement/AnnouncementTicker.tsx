@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import rehypeKatex from 'rehype-katex';
+import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 
 import { interpolateWithQQGroups } from '@/lib/communityGroups';
@@ -195,7 +196,7 @@ const AnnouncementTicker: React.FC = () => {
                 </div>
                 <div className="px-6 py-4 overflow-y-auto flex-grow">
                   <ReactMarkdown
-                    remarkPlugins={[[remarkMath, { singleDollarTextMath: true }]]}
+                    remarkPlugins={[remarkGfm, [remarkMath, { singleDollarTextMath: true }]]}
                     rehypePlugins={[[rehypeKatex, { throwOnError: false, strict: 'ignore' }]]}
                     components={{
                       h3: ({ children }) => <h3 className="text-lg font-bold my-4">{children}</h3>,

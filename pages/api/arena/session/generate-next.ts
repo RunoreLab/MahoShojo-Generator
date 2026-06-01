@@ -75,6 +75,7 @@ const BattleStoryRequestSchema = z.object({
     combatants: z.array(z.unknown()).min(1),
     scenario: z.record(z.unknown()).nullable().optional(),
     auxScenarios: z.array(z.record(z.unknown())).max(10).optional(),
+    materials: z.array(z.unknown()).max(10).optional(),
     adjudicationEvents: z.array(z.unknown()).optional(),
     questionnaires: z
       .array(
@@ -90,6 +91,7 @@ const BattleStoryRequestSchema = z.object({
       .optional(),
     mode: z.enum(['classic', 'kizuna', 'daily', 'scenario']),
     storyLength: z.enum(['default', 'short', 'standard', 'detailed', 'long']).default('standard'),
+    customStoryLength: z.string().optional(),
     language: z.string().default('zh-CN'),
     settings: z.object({
       readArenaHistory: z.boolean(),
@@ -183,6 +185,7 @@ export const buildUpstreamRequestBody = (
     internalGuidance,
     scenario: payload.seed.scenario ?? undefined,
     auxScenarios: payload.seed.auxScenarios,
+    materials: payload.seed.materials,
     adjudicationEvents: payload.seed.adjudicationEvents,
     language: payload.seed.language,
     readArenaHistory: payload.seed.settings.readArenaHistory,
@@ -194,6 +197,7 @@ export const buildUpstreamRequestBody = (
     narrativeHistoryReadLimit,
     writeNarrativeHistory: payload.seed.settings.writeNarrativeHistory,
     storyLength: payload.seed.storyLength,
+    customStoryLength: payload.seed.customStoryLength,
     questionnaires: payload.seed.questionnaires,
     forceStreamMeta: true,
     ...(customProvider ? { customProvider } : {}),
@@ -244,6 +248,7 @@ export default async function handler(req: NextRequest): Promise<Response> {
       mode: payload.seed.mode,
       language: payload.seed.language,
       storyLength: payload.seed.storyLength,
+      ...(payload.seed.customStoryLength ? { customStoryLength: payload.seed.customStoryLength } : {}),
       generationMode: 'stream',
       providerMode: providerResolved.value.providerMode,
       providerId: providerResolved.value.providerId,
@@ -253,6 +258,7 @@ export default async function handler(req: NextRequest): Promise<Response> {
       combatants: payload.seed.combatants,
       scenario: payload.seed.scenario ?? null,
       auxScenarios: payload.seed.auxScenarios ?? [],
+      materials: payload.seed.materials ?? [],
       questionnaires: payload.seed.questionnaires ?? [],
       settings: payload.seed.settings,
     },

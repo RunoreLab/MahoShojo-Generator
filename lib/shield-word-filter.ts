@@ -88,6 +88,7 @@ const shieldWordsConfig: ShieldWordsConfig = {
     '56eR5a2m5LiK572R',
     '5oyC5qKv5a2Q',
     'R0ZX',
+    '5oCn5L61',
     // 使用指定词汇替换
     '5Lit5Zu9',
     '5Lit5Y2O5Lq65rCR5YWx5ZKM5Zu9',

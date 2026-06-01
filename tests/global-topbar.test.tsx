@@ -1,4 +1,4 @@
-import { afterAll, beforeEach, describe, expect, mock, test } from 'bun:test';
+import { afterAll, beforeEach, describe, expect, vi, test } from 'vitest';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 
@@ -21,7 +21,7 @@ let topBarMessagesState = {
   refresh: async () => undefined,
 };
 
-mock.module('next/link', () => ({
+vi.mock('next/link', () => ({
   default: function LinkMock({
     children,
     href,
@@ -39,15 +39,15 @@ mock.module('next/link', () => ({
   },
 }));
 
-mock.module('@/lib/useAuth', () => ({
+vi.mock('@/lib/useAuth', () => ({
   useAuth: () => authState,
 }));
 
-mock.module('@/components/navigation/useTopBarProfile', () => ({
+vi.mock('@/components/navigation/useTopBarProfile', () => ({
   useTopBarProfile: () => topBarProfileState,
 }));
 
-mock.module('@/components/navigation/useTopBarMessages', () => ({
+vi.mock('@/components/navigation/useTopBarMessages', () => ({
   useTopBarMessages: () => topBarMessagesState,
 }));
 
@@ -252,5 +252,5 @@ describe('GlobalTopBar', () => {
 });
 
 afterAll(() => {
-  mock.restore();
+  vi.restoreAllMocks();
 });

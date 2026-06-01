@@ -20,9 +20,9 @@
 
 📖 查看完整的版本更新历史，请参阅 [CHANGELOG.md](./CHANGELOG.md)
 
-> 当前版本：`v0.8.1`
+> 当前版本：`v0.8.2`
 >  
-> 最新版本重点：竞技场连续战报补上“章节规划”，新会话可设置总章节数，情景卡可提供建议/固定章节数，AI 会按当前章节定位推进并在终章主动收束。
+> 最新版本重点：接入万途生态互通与竞技场素材注入。档案馆可导入/导出万途通用角色卡，竞技场可把角色、情景、历史、问卷或万途 Card 作为参考素材注入战报；顶部导航新增万途驿站、万途竞技场、废土车卡与废土旅途入口。
 
 ## ✨ 核心功能
 
@@ -38,6 +38,7 @@
 - **故事生成**：上传 1-10 位角色，AI 生成刺激的对战，或温馨（？）的故事
 - **实时流式生成**：实时观看战报生成过程
 - **连续战报会话**：本地保存章节链，支持章节规划、续写 / 分支 / 重写最后一章，适合长篇连续剧情
+- **素材注入**：可把 JSON 数据卡、万途 Card、历史或问卷作为参考素材加入普通竞技场与连续战报；使用素材时不计严格排位
 - **情景卡章节规划**：主情景可为连续战报提供建议或固定章节数，帮助 AI 按章推进并控制终章收束
 - **多种模式**：经典/日常/羁绊/情景模式
 - **随机元素**：随机角色加入、随机判定事件
@@ -53,6 +54,7 @@
 - **用户系统**：注册/登录账户，云端保存角色数据（v0.8.0 起进入旧密钥迁移窗口）
 - **公开分享**：分享角色供他人使用，支持点赞和筛选
 - **数据卡管理**：可视化编辑器、回收站、徽章系统
+- **万途通用卡互通**：档案馆支持把本站角色导出为万途 `character` 卡，也支持把万途角色卡导入为通用角色
 - **标签系统**：标签库分类与筛选
 
 ### 其他功能
@@ -60,6 +62,7 @@
 - **通用情景卡（Markdown）**：更自由的长线舞台设定卡，也可携带连续战报章节规划扩展
 - **自由生成**：任意提示词按 Schema 生成角色/情景数据卡
 - **酒馆生态联动**：SillyTavern 角色卡 PNG 导入/导出
+- **万途生态入口**：顶部导航提供万途驿站、万途竞技场、废土车卡与废土旅途外链入口
 - **角色组队卡**：把多张角色卡拼成一张队伍卡
 - **魔法茶会**：基于角色卡/情景卡的长期剧情对话（本地会话，支持选项/摘要/角色更新）
 - **立绘生成**：AI 绘图接口生成角色立绘（实验性）
@@ -71,7 +74,8 @@
 
 * **框架**: Next.js 15（Pages Router 为主，局部 App Router）, React 19
 * **语言**: TypeScript
-* **运行时**: Bun (开发与构建), Cloudflare Pages/Workers (生产，Edge Runtime)
+* **包管理器**: pnpm 11.3.0
+* **运行时**: Node.js 22+ (开发、构建与脚本), Cloudflare Pages/Workers (生产，Edge Runtime)
 * **数据库**: Cloudflare D1（主库）+ Cloudflare R2
 * **AI**: Vercel AI SDK, 支持 OpenAI/Google Gemini 等多种模型 (推荐 `gemini-2.5-flash` 或 `gemini-2.5-flash-lite`)
 * **样式**: Tailwind CSS 4, shadcn/ui (部分)
@@ -82,7 +86,9 @@
 
 ### 环境要求
 
-- Bun (推荐) 或 Node.js 18+
+- Node.js 22+（推荐 v24.14.0）
+- pnpm 11.3.0（可通过 Corepack 启用）
+- Vitest（当前测试运行器）
 - AI 提供商 API Key (推荐使用 Google Gemini 系列)
 - Cloudflare Turnstile Site Key & Secret Key
 - Cloudflare 的一些相关配置（如 D1 数据库绑定）
@@ -91,7 +97,7 @@
 
 ```bash
 # 安装依赖
-bun install
+pnpm install
 
 # 配置环境变量
 cp env.example .env.local
@@ -122,18 +128,20 @@ AI_PROVIDERS_CONFIG='[
 
 ```bash
 # 开发模式
-bun run dev
+pnpm dev
 
 # 生产构建
-bun run build
-bun run start
+pnpm build
+pnpm start
 
 # Cloudflare Pages 构建（推荐）
-bun run build:cf
-bun run preview
+pnpm build:cf
+pnpm preview
 ```
 
 访问 [http://localhost:3000](http://localhost:3000) 查看应用。
+
+Cloudflare Pages 部署环境变量需显式设置 `PNPM_VERSION=11.3.0`，避免构建平台使用默认 pnpm 版本。
 
 ## 📋 路线图
 

@@ -79,6 +79,16 @@ const buildSummaryItems = (runtimeResult: BuildRuleRuntimeResult): SummaryItem[]
     ];
   }
 
+  if (runtimeResult.ruleId === 'terrorinfinity-fx-v137') {
+    return [
+      { key: 'Speed', label: '速度', value: `${derived.Speed ?? '-'}` },
+      { key: 'Initiative', label: '先攻', value: `${derived.Initiative ?? '-'}` },
+      { key: 'BaseDefense', label: '基础防御', value: `${derived.BaseDefense ?? '-'}` },
+      { key: 'Health', label: '生命值', value: `${derived.Health ?? '-'}` },
+      { key: 'Willpower', label: '意志力', value: `${derived.Willpower ?? '-'}` },
+    ];
+  }
+
   return [
     { key: 'HP', label: 'HP', value: `${derived.HP ?? '-'}` },
     { key: 'MP', label: 'MP', value: `${derived.MP ?? '-'}` },
@@ -94,8 +104,10 @@ export function BuildSummaryPanel({ runtimeResult }: BuildSummaryPanelProps) {
     !!budget
     && (
       budget.attributePointsUsed > 0
+      || (typeof budget.skillPointsUsed === 'number' && budget.skillPointsUsed > 0)
       || budget.specialtyPointsUsed > 0
       || budget.attributePointsLimit !== null
+      || (typeof budget.skillPointsLimit !== 'undefined' && budget.skillPointsLimit !== null)
       || budget.specialtyPointsLimit !== null
     );
 
@@ -138,6 +150,17 @@ export function BuildSummaryPanel({ runtimeResult }: BuildSummaryPanelProps) {
               {budget.specialtyPointsUsed} / {budget.specialtyPointsLimit ?? '无限'}
             </div>
           </div>
+          {typeof budget.skillPointsUsed === 'number' ? (
+            <div
+              data-creator-surface="subpanel"
+              className={joinCreatorClassNames(CREATOR_SUBPANEL_SURFACE_CLASS, 'bg-[var(--creator-subpanel-emphasis-bg)] p-3 text-sm text-slate-700')}
+            >
+              <div className="font-medium text-slate-900">技能点</div>
+              <div className="mt-1">
+                {budget.skillPointsUsed} / {budget.skillPointsLimit ?? '无限'}
+              </div>
+            </div>
+          ) : null}
         </div>
       ) : null}
 

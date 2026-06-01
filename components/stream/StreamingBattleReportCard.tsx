@@ -4,9 +4,11 @@ import React, { useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { Components } from 'react-markdown';
 import rehypeKatex from 'rehype-katex';
+import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import type { AdjudicationResult } from '@/types/arena';
 import remarkBattleTable from '@/lib/markdown/remarkBattleTable';
+import { fixNestedListIndentation } from '@/lib/markdown/fix-list-indentation';
 import {
     formatMarkdownImage,
     formatMarkdownLink,
@@ -60,6 +62,8 @@ interface StreamingBattleReportCardProps {
     aiReasoning?: AIReasoningEnvelope | null;
     /** 是否正在生成中（可选，用于显示加载光标等） */
     isStreaming?: boolean;
+    /** 流式生成中的手动中止回调。 */
+    onStopGeneration?: () => void;
     /** 战报插图（可选，支持生成图或用户上传图） */
     illustrationAsset?: BattleReportIllustrationAsset | null;
     /** 手动指定卡片宽度（px）；为空时自动铺满容器。 */
@@ -80,6 +84,7 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
     narrativeHistoryReadCount = null,
     aiReasoning = null,
     isStreaming = false,
+    onStopGeneration,
     illustrationAsset = null,
     cardWidthPx = null
 }) => {
@@ -87,7 +92,7 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
     const [isSavingImage, setIsSavingImage] = useState(false);
     const headlineMatch = content.match(/^\s*#{1,3}\s*(.*)(?:\r?\n|$)/);
     const headline = headlineMatch ? headlineMatch[1].trim() : '';
-    const markdownBody = headlineMatch && headline ? content.slice(headlineMatch[0].length).trimStart() : content;
+    const markdownBody = fixNestedListIndentation(headlineMatch && headline ? content.slice(headlineMatch[0].length).trimStart() : content);
     const illustrationImageUrl = typeof illustrationAsset?.imageUrl === 'string' ? illustrationAsset.imageUrl.trim() : '';
     const uploadedIllustrationNote =
         illustrationAsset?.source === 'uploaded'
@@ -396,6 +401,12 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
                 {children}
             </ul>
         ),
+        // ol -> 有序列表
+        ol: ({ children, ...props }) => (
+            <ol className="list-decimal pl-5 my-2 space-y-1 text-sm opacity-90" {...props}>
+                {children}
+            </ol>
+        ),
         li: ({ children, ...props }) => (
             <li className="opacity-90 pl-2 border-l border-gray-700/50" {...props}>
                 {children}
@@ -624,7 +635,7 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
                 {/* Markdown 内容渲染区域 */}
                 <div className="min-h-[200px]">
                     <ReactMarkdown
-                        remarkPlugins={[remarkBattleTable, [remarkMath, { singleDollarTextMath: true }]]}
+                        remarkPlugins={[remarkGfm, remarkBattleTable, [remarkMath, { singleDollarTextMath: true }]]}
                         rehypePlugins={[[rehypeKatex, { throwOnError: false, strict: 'ignore' }]]}
                         components={markdownComponents}
                     >
@@ -702,11 +713,11 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
                 <div className="buttons-container flex gap-2 justify-center mt-6 pt-4 border-t border-gray-700" style={{ alignItems: 'stretch' }}>
                     {onSaveImage && (
                         <button
-                            onClick={handleSaveImage}
-                            disabled={isStreaming || isSavingImage}
+                            onClick={isStreaming && onStopGeneration ? onStopGeneration : handleSaveImage}
+                            disabled={isSavingImage}
                             className="save-button flex-1 bg-white/10 hover:bg-white/20 text-white py-2 px-4 rounded transition-all disabled:opacity-60 disabled:cursor-not-allowed"
                         >
-                            {isSavingImage ? '生成中...' : isStreaming ? '生成中...' : '📱 保存为图片'}
+                            {isStreaming && onStopGeneration ? '⏹ 停止生成' : isSavingImage ? '生成中...' : '📱 保存为图片'}
                         </button>
                     )}
                     <button

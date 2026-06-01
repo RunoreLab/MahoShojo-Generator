@@ -10,6 +10,7 @@ import {
   MAX_COMBATANTS,
   ScenarioState,
   MAX_AUX_SCENARIOS,
+  MAX_ARENA_MATERIALS,
 } from '../types';
 import {
   DEFAULT_BATTLE_REPORT_CARD_WIDTH_MODE,
@@ -61,6 +62,7 @@ export const useBattleStore = create<BattleStoreState>()(
       teams: [],
       scenario: defaultScenario,
       auxScenarios: [],
+      materials: [],
       selectedQuestionnaires: [],
       battleMode: 'classic',
       generationMode: 'non-stream',
@@ -77,6 +79,7 @@ export const useBattleStore = create<BattleStoreState>()(
       streamUpdateMetaDebug: null,
       latestAiImpacts: null,
       storyLength: 'default',
+      customStoryLength: '',
       selectedLanguage: 'zh-CN',
       lastGenerationId: null,
       settings: defaultSettings,
@@ -107,6 +110,7 @@ export const useBattleStore = create<BattleStoreState>()(
       setStreamUpdateMetaDebug: (debug) => set({ streamUpdateMetaDebug: debug }),
       setLatestAiImpacts: (impacts) => set({ latestAiImpacts: impacts }),
       setStoryLength: (storyLength) => set({ storyLength }),
+      setCustomStoryLength: (customStoryLength) => set({ customStoryLength }),
       setSelectedLanguage: (selectedLanguage) => set({ selectedLanguage }),
       setLastGenerationId: (lastGenerationId) => set({ lastGenerationId }),
       updateSettings: (incoming) =>
@@ -152,20 +156,6 @@ export const useBattleStore = create<BattleStoreState>()(
         set({
           combatants: [],
           teams: [],
-          newsReport: null,
-          updatedCombatants: [],
-          streamingMarkdown: null,
-          isStreaming: false,
-          streamReporterInfo: null,
-          streamUserGuidance: null,
-          streamCharacterGuidances: null,
-          streamAiUsage: null,
-          streamAiModel: null,
-          streamNarrativeHistoryReadCount: null,
-          streamReasoning: null,
-          streamUpdateMetaDebug: null,
-          latestAiImpacts: null,
-          lastGenerationId: null,
         }),
 
       updateCombatantTeam: (identifier, teamId) =>
@@ -263,6 +253,35 @@ export const useBattleStore = create<BattleStoreState>()(
       clearAuxScenarios: () => set({ auxScenarios: [] }),
       setAuxScenarios: (scenarios) => set({ auxScenarios: scenarios }),
 
+      addMaterial: (material) =>
+        set((state) => {
+          if (state.materials.length >= MAX_ARENA_MATERIALS) {
+            return state;
+          }
+          return { materials: [...state.materials, material] };
+        }),
+
+      removeMaterial: (id) =>
+        set((state) => ({
+          materials: state.materials.filter((item) => item.id !== id),
+        })),
+
+      moveMaterial: (fromIndex, toIndex) =>
+        set((state) => {
+          const current = state.materials;
+          if (fromIndex === toIndex) return state;
+          if (fromIndex < 0 || fromIndex >= current.length) return state;
+          if (toIndex < 0 || toIndex >= current.length) return state;
+
+          const next = [...current];
+          const [moved] = next.splice(fromIndex, 1);
+          next.splice(toIndex, 0, moved!);
+          return { materials: next };
+        }),
+
+      clearMaterials: () => set({ materials: [] }),
+      setMaterials: (materials) => set({ materials }),
+
       setAdjudicationEvents: (events) => set({ adjudicationEvents: events }),
       setAdjudicationResults: (results) => set({ adjudicationResults: results }),
 
@@ -351,6 +370,7 @@ export const useBattleStore = create<BattleStoreState>()(
         generationMode: state.generationMode,
         arenaFreeRankingEnabled: state.arenaFreeRankingEnabled,
         storyLength: state.storyLength,
+        customStoryLength: state.customStoryLength,
         selectedLanguage: state.selectedLanguage,
         settings: state.settings,
       }),

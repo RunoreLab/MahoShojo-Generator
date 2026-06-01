@@ -168,4 +168,4 @@
 
 3. 工程：
 - 认证相关单元/集成测试补齐（登录、刷新、登出、吊销、找回、越权）。
-- 发布前完成 `bun run lint`、`bun test`、`bun run build`。
+- 发布前完成 `pnpm lint`、`pnpm test`、`pnpm build`。

@@ -2,7 +2,7 @@ import { z } from 'zod/v3';
 import { NextRequest } from 'next/server';
 
 import { generateWithAI, LoadBalanceStrategy, type GenerationConfig, type GenerateWithAIOptions } from '@/lib/ai';
-import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
+import { AI_PROVIDER_CATALOG, resolveAIProviderModel } from '@/lib/ai/constants';
 import { acquirePublicAiRateLimit, buildPublicAiRateLimitResponse, inferPublicAiProviderMode } from '@/lib/ai/public-rate-limit';
 import { FREE_GENERATION_ATTACHMENT_LIMITS, formatReferenceAttachmentsForPrompt, type AITextAttachment } from '@/lib/ai/attachments';
 import { buildJsonResponseWithOptionalAiMeta } from '@/lib/ai/meta-response';
@@ -32,6 +32,7 @@ const CustomProviderSchema = z.object({
   providerId: z.string().min(1),
   modelId: z.string().min(1),
   apiKey: z.string(),
+  maxOutputTokens: z.number().int().min(1).max(1_000_000).optional(),
 });
 
 const AttachmentSchema = z.object({
@@ -373,8 +374,8 @@ export default async function handler(req: NextRequest): Promise<Response> {
         return new Response(JSON.stringify({ error: '未知的模型供应商 ID' }), { status: 400 });
       }
 
-      const modelConfig = providerConfig.models.find((model) => model.value === parsed.modelId);
-      if (!modelConfig) {
+      const modelResolution = resolveAIProviderModel(providerConfig, parsed.modelId);
+      if (!modelResolution) {
         return new Response(JSON.stringify({ error: '未知的模型 ID' }), { status: 400 });
       }
 
@@ -385,21 +386,22 @@ export default async function handler(req: NextRequest): Promise<Response> {
 
       const sanitizedBaseUrl = providerConfig.baseUrl?.trim() ?? '';
       if (!sanitizedBaseUrl) {
-        customModelOverride = modelConfig.value;
+        customModelOverride = modelResolution.modelId;
         log.info('检测到 baseUrl 为空的自定义供应商，改用系统默认通道，仅覆盖模型参数', {
           providerId: providerConfig.id,
-          model: modelConfig.value,
+          model: modelResolution.modelId,
         });
       } else {
         customProviderOverride = {
           name: providerConfig.name,
           apiKey: sanitizedApiKey,
           baseUrl: sanitizedBaseUrl,
-          model: modelConfig.value,
+          model: modelResolution.modelId,
           type: providerConfig.type,
           mode: providerConfig.mode || 'auto',
           retryCount: 1,
           skipProbability: 0,
+          ...(typeof parsed.maxOutputTokens === 'number' ? { defaultMaxOutputTokens: parsed.maxOutputTokens } : {}),
         };
       }
     }

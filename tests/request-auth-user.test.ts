@@ -1,4 +1,4 @@
-import { describe, expect, mock, test } from 'bun:test';
+import { describe, expect, vi, test } from 'vitest';
 
 const state = {
   authContext: null as { user: { id: number; username: string; prefix?: string | null } } | null,
@@ -7,16 +7,16 @@ const state = {
   getUserByIdCalls: [] as number[],
 };
 
-mock.module('@/lib/auth/server', () => ({
+vi.mock('@/lib/auth/server', () => ({
   getAuthUser: async () => state.authContext,
 }));
 
-mock.module('@/lib/auth/activity-token', () => ({
+vi.mock('@/lib/auth/activity-token', () => ({
   ACTIVITY_TOKEN_HEADER: 'x-mahoshojo-activity-token',
   verifyActivityToken: async (_token: string) => state.verifiedActivity,
 }));
 
-mock.module('@/lib/database/users', () => ({
+vi.mock('@/lib/database/users', () => ({
   getUserById: async (userId: number) => {
     state.getUserByIdCalls.push(userId);
     return state.businessUser;

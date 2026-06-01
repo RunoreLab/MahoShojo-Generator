@@ -36,7 +36,7 @@ import { inferTemplate } from '@/lib/data-card-converter';
 import { mapDataCardRuntimeSourceInfo, mapPublicDataCardRowToBattleSelectionPayload } from '@/lib/data-card-read-mappers';
 	import { config as appConfig } from '@/lib/config';
 	import { useAuth } from '@/lib/useAuth';
-	import { buildCustomProviderPayload, isUsingUserProvidedKey } from '@/lib/ai/custom-provider';
+	import { buildCustomProviderRequestPayload, isUsingUserProvidedKey } from '@/lib/ai/custom-provider';
 	import { buildReasoningSummary, normalizeReasoningSource } from '@/lib/ai/reasoning-normalizer';
 	import { describePvpRoomCardRange, isPvpCombatantTypeAllowedByRange, isPvpDataCardStatsAllowedByRange, normalizePvpRoomCardRange } from '@/lib/pvp/card-range';
 	import { formatPvpDisplayName } from '@/lib/pvp/displayName';
@@ -52,6 +52,7 @@ import type { Preset } from '@/lib/presets';
 import type { ScenarioPreset } from '@/lib/scenario-presets';
 import type { UserBadge } from '@/types/badge';
 import { revokeBlobUrl } from '@/lib/client/blobUrl';
+import { formatStoryLengthSummaryLabel, normalizeCustomStoryLength } from '@/lib/story-length';
 
 	const PASSWORD_CACHE_PREFIX = 'pvp-room-password:';
 	const RESOLVE_REQUEST_TIMEOUT_MS = 120_000;
@@ -794,6 +795,11 @@ export function PvpRoomPage() {
     if (!['default', 'short', 'standard', 'detailed', 'long'].includes(storyLength)) {
       return '期望字数设置不合法';
     }
+    const rawCustomStoryLength =
+      typeof (rulesDraft as any).customStoryLength === 'string' ? String((rulesDraft as any).customStoryLength).trim() : '';
+    if (rawCustomStoryLength && !normalizeCustomStoryLength(rawCustomStoryLength)) {
+      return '自定义目标字数必须为正整数';
+    }
 
     const generationMode = typeof (rulesDraft as any).generationMode === 'string' ? String((rulesDraft as any).generationMode).trim() : 'non-stream';
     if (!['non-stream', 'stream'].includes(generationMode)) {
@@ -1047,7 +1053,7 @@ export function PvpRoomPage() {
     mutationFn: async (payload?: { customProvider?: UserAIProviderConfig | null; force?: boolean }) => {
       if (!latestRound?.id) throw new Error('当前回合不存在，请刷新');
 
-      const customProvider = buildCustomProviderPayload(payload?.customProvider ?? null);
+      const customProvider = buildCustomProviderRequestPayload(payload?.customProvider ?? null);
       const shouldStream = rules?.generationMode === 'stream';
 
       if (!shouldStream) {
@@ -2268,7 +2274,7 @@ export function PvpRoomPage() {
                     )}
                     {rules && (
                       <div className="mt-1 text-xs text-gray-600 whitespace-pre-wrap">
-                        生成设置：方式 {rules.generationMode === 'stream' ? '流式' : '非流式'}；历战 读 {String(rules.readArenaHistory)} / 写 {String(rules.writeArenaHistory)}；状态 读 {String(rules.readCurrentState)} / 写 {String(rules.writeCurrentState)}；引导 {rules.userGuidance?.trim() ? `“${rules.userGuidance.trim()}”` : '无'}；字数 {rules.storyLength || 'default'}；语言 {rules.language?.trim() || '默认'}
+                        生成设置：方式 {rules.generationMode === 'stream' ? '流式' : '非流式'}；历战 读 {String(rules.readArenaHistory)} / 写 {String(rules.writeArenaHistory)}；状态 读 {String(rules.readCurrentState)} / 写 {String(rules.writeCurrentState)}；引导 {rules.userGuidance?.trim() ? `“${rules.userGuidance.trim()}”` : '无'}；字数 {formatStoryLengthSummaryLabel(rules.storyLength || 'default', rules.customStoryLength)}；语言 {rules.language?.trim() || '默认'}
                       </div>
                     )}
                     {rules?.bestOf?.enabled && latestRound ? (
@@ -2973,6 +2979,8 @@ export function PvpRoomPage() {
                               }
                               storyLength={rulesDraft.storyLength as any}
                               onStoryLengthChange={(value) => setRulesDraft((r) => (r ? { ...r, storyLength: value as any } : r))}
+                              customStoryLength={rulesDraft.customStoryLength}
+                              onCustomStoryLengthChange={(value) => setRulesDraft((r) => (r ? { ...r, customStoryLength: value } : r))}
                               selectedLanguage={rulesDraft.language}
                               onSelectedLanguageChange={(value) => setRulesDraft((r) => (r ? { ...r, language: value } : r))}
                             />
@@ -3437,6 +3445,7 @@ export function PvpRoomPage() {
                         aiModel={(reportMetaForUi as any)?.ai?.model ?? null}
                         narrativeHistoryReadCount={(reportMetaForUi as any)?.narrativeHistoryReadCount ?? null}
                         aiReasoning={(reportMetaForUi as any)?.aiReasoning ?? null}
+                        onStopGeneration={() => resolveAbortControllerRef.current?.abort(STREAM_ABORT_REASON_USER)}
                         onSaveImage={(imageUrl) => {
                           setSavedImageUrl(imageUrl);
                           setShowImageModal(true);

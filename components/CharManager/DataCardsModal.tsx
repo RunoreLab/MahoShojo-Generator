@@ -35,6 +35,8 @@ interface DataCardsModalProps {
   allowedTypes?: CardTypeFilter[];
   hideRoleTypeFilter?: boolean;
   showHotHint?: boolean;
+  hideEditData?: boolean;
+  allowHistoryReplace?: boolean;
 }
 
 type CardTypeFilter = '' | 'character' | 'scenario' | 'history' | 'questionnaire';
@@ -206,6 +208,8 @@ export default function DataCardsModal({
   allowedTypes,
   hideRoleTypeFilter = false,
   showHotHint = true,
+  hideEditData = false,
+  allowHistoryReplace = false,
 }: DataCardsModalProps) {
   const [selectedCard, setSelectedCard] = useState<any | null>(null);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
@@ -709,10 +713,14 @@ export default function DataCardsModal({
                             URL.revokeObjectURL(url);
                           }}
                           onEditInfo={() => onEditCard(card)}
-                          onEditData={() => onLoadCard(card)}
+                          onEditData={hideEditData ? undefined : () => onLoadCard(card)}
                           onDelete={() => onDeleteCard(card.id)}
                           onShare={() => onShareCard?.(card)}
-                          onReplace={card.type === 'history' ? undefined : () => onReplaceCard?.(card)}
+                          onReplace={
+                            onReplaceCard && (card.type !== 'history' || allowHistoryReplace)
+                              ? () => onReplaceCard(card)
+                              : undefined
+                          }
                         />
                       );
                     })}

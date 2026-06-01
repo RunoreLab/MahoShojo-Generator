@@ -28,6 +28,7 @@ type NodeResolutionPanelProps = {
   onSelectOption: (value: string) => void;
   onNoteChange: (value: string) => void;
   onResolve: () => void;
+  onStopGeneration?: () => void;
   onBackToMap: () => void;
 };
 
@@ -71,6 +72,7 @@ export function NodeResolutionPanel({
   onSelectOption,
   onNoteChange,
   onResolve,
+  onStopGeneration,
   onBackToMap,
 }: NodeResolutionPanelProps) {
   const actions = recommendedActions?.length ? recommendedActions : defaultBattleRecommendedActions;
@@ -274,6 +276,7 @@ export function NodeResolutionPanel({
         <ChallengeStoryCardSection
           state={resolvedStoryCardState}
           isResolving={isResolving}
+          onStopGeneration={onStopGeneration}
           onSaveImage={onSaveImage}
         />
       ) : null}

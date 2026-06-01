@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 
 import {
   MAX_DATA_CARD_REPORT_DETAILS_LENGTH,

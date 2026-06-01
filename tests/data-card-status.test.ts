@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 
 import { getDataCardStatus, getDataCardVisibilityValue, isDataCardBanned } from '@/lib/data-card-status';
 

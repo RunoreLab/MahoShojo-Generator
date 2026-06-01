@@ -18,6 +18,8 @@ export function StoryOptions({ languages, afterUserGuidance }: StoryOptionsProps
   const useBattleSelector = <T,>(selector: (state: BattleStoreState) => T) => useBattleStore(selector);
   const storyLength = useBattleSelector((state) => state.storyLength);
   const setStoryLength = useBattleSelector((state) => state.setStoryLength);
+  const customStoryLength = useBattleSelector((state) => state.customStoryLength);
+  const setCustomStoryLength = useBattleSelector((state) => state.setCustomStoryLength);
   const selectedLanguage = useBattleSelector((state) => state.selectedLanguage);
   const setSelectedLanguage = useBattleSelector((state) => state.setSelectedLanguage);
   const settings = useBattleSelector((state) => state.settings);
@@ -36,6 +38,8 @@ export function StoryOptions({ languages, afterUserGuidance }: StoryOptionsProps
         afterUserGuidance={afterUserGuidance}
         storyLength={storyLength}
         onStoryLengthChange={setStoryLength}
+        customStoryLength={customStoryLength}
+        onCustomStoryLengthChange={setCustomStoryLength}
         selectedLanguage={selectedLanguage}
         onSelectedLanguageChange={setSelectedLanguage}
       />

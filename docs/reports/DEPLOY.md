@@ -8,10 +8,11 @@
 
 在开始之前，你的电脑需要安装两个基本软件。
 
-1.  **安装 Bun**
+1.  **安装 Node.js 与 pnpm**
 
-      * 这是一个现代化的工具，可以帮你安装和运行项目。根据 `README.md` 文件，这是项目推荐的工具。
-      * 访问 [Bun 的官方网站](https://bun.sh/)，根据你的操作系统（Windows, macOS, Linux）按照指示进行安装。安装过程通常只需要在终端（命令行工具）里复制粘贴一行命令。
+      * 本项目使用 pnpm 作为包管理器与脚本调度入口，推荐 Node.js v24.14.0，最低要求 Node.js 22。
+      * 安装 Node.js 后，可通过 Corepack 启用固定版本：`corepack prepare pnpm@11.3.0 --activate`。
+      * 当前测试运行器已迁移到 Vitest，运维脚本入口统一通过 `pnpm` 调度；本地运行、测试和常规维护不再需要安装 Bun。
 
 2.  **获取 AI 提供商 API Key**
 
@@ -51,10 +52,10 @@
 3.  运行以下命令来安装所有必要的依赖：
 
     ```bash
-    bun install
+    pnpm install
     ```
 
-4.  等待命令执行完成。Bun 会自动下载并安装所有需要的东西。
+4.  等待命令执行完成。pnpm 会自动下载并安装所有需要的东西。
 
 -----
 
@@ -116,7 +117,7 @@
 2.  运行以下命令：
 
     ```bash
-    bun run dev
+    pnpm dev
     ```
 
 3.  终端会显示一些信息，如果一切顺利，你会看到提示项目已经成功启动。
@@ -135,7 +136,23 @@
 
 -----
 
+#### 第 6.5 步：运行质量检查（可选）
+
+如果你要提交代码或验证本地环境，请使用 pnpm 运行当前质量门禁：
+
+```bash
+pnpm test
+pnpm lint
+pnpm build
+```
+
+其中 `pnpm test` 使用 Vitest，`pnpm build` 使用 Next.js 构建；这些命令都不依赖 Bun。
+
+-----
+
 #### 第 7 步：配置 Cloudflare D1 Binding（Auth/ORM 必需）
+
+部署到 Cloudflare Pages 时，请在项目环境变量中设置 `PNPM_VERSION=11.3.0`，确保平台使用与仓库 `packageManager` 一致的 pnpm 版本。
 
 如果你要启用 Better Auth 与 Drizzle（推荐），需要在 `wrangler.toml` 中配置 `DB` 绑定。
 
@@ -157,7 +174,7 @@ migrations_dir = "drizzle"
 4. 部署前执行硬校验（会拦截占位值或非法 UUID）：
 
 ```bash
-bun run check:wrangler:d1
+pnpm check:wrangler:d1
 ```
 
 > 说明：当前项目里 Better Auth 路由（`/api/auth/[...all]`）在没有 `DB` 绑定时会直接返回 `BETTER_AUTH_DB_UNAVAILABLE`（503）。
@@ -169,26 +186,26 @@ bun run check:wrangler:d1
 1. 生成迁移（如有 schema 改动）：
 
 ```bash
-bun run db:generate
+pnpm db:generate
 ```
 
 2. 应用到本地 D1（生产环境配置）：
 
 ```bash
-bun run db:migrate:local:prod
+pnpm db:migrate:local:prod
 ```
 
 3. 应用到远端 D1（生产）：
 
 ```bash
-bun run db:migrate:remote:prod
+pnpm db:migrate:remote:prod
 ```
 
 4. 预览环境可使用：
 
 ```bash
-bun run db:migrate:local:preview
-bun run db:migrate:remote:preview
+pnpm db:migrate:local:preview
+pnpm db:migrate:remote:preview
 ```
 
 > 说明：以上迁移命令已切换到 `scripts/d1-migrate-safe.mjs`，并内置以下保护：

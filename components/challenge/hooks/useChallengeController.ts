@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { UserAIProviderConfig } from '@/components/AiProviderSelector';
 import { randomUUID } from '@/lib/crypto';
@@ -18,7 +18,7 @@ import {
   resolveNodeExecutionMode,
 } from '@/components/challenge/hooks/useChallengeStreamResolution';
 import type { ChallengeStoryCardState } from '@/components/challenge/ChallengeStoryCardSection';
-import { buildCustomProviderPayload } from '@/lib/ai/custom-provider';
+import { buildCustomProviderRequestPayload } from '@/lib/ai/custom-provider';
 import {
   deleteChallengeRunCascade,
   getChallengeRun,
@@ -941,7 +941,7 @@ export function useChallengeController() {
   const activeResolutionAbortRef = useRef<AbortController | null>(null);
   const activeResolutionIdRef = useRef(0);
   const customProviderPayload = useMemo(
-    () => buildCustomProviderPayload(userProviderConfig),
+    () => buildCustomProviderRequestPayload(userProviderConfig),
     [userProviderConfig]
   );
 
@@ -1763,6 +1763,10 @@ export function useChallengeController() {
     }
   };
 
+  const stopNodeResolution = useCallback((): void => {
+    activeResolutionAbortRef.current?.abort();
+  }, []);
+
   const backToMap = (): void => {
     resetNodeStageState();
     setStage('map');
@@ -1839,6 +1843,7 @@ export function useChallengeController() {
     deleteRun,
     enterNode,
     resolveCurrentNode,
+    stopNodeResolution,
     backToMap,
     backToLobby,
   };

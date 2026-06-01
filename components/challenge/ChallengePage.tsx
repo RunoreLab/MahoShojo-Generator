@@ -150,6 +150,7 @@ export function ChallengePageView({
               onSelectOption={controller.setSelectedOptionId}
               onNoteChange={controller.setNote}
               onResolve={() => void controller.resolveCurrentNode()}
+              onStopGeneration={controller.stopNodeResolution}
               onBackToMap={controller.backToMap}
             />
           ) : null}

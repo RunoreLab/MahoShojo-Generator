@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test';
+import { describe, expect, it } from 'vitest';
 import { parseBulkQuestionnaireAnswers } from '@/lib/questionnaire-bulk-parser';
 
 describe('问卷答案粘贴解析器', () => {

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useMemo, useRef } from 'react';
+import { useCallback, useMemo } from 'react';
 import { useRouter } from 'next/router';
 
 import type { NewsReport } from '@/components/BattleReportCard';
@@ -34,8 +34,12 @@ import {
   ARENA_PROVIDER_COOLDOWN_BASE_KEY,
   resolveArenaProviderCooldownConfig,
 } from '../utils/providerCooldown';
+import { normalizeCustomStoryLength } from '@/lib/story-length';
+import { buildCustomProviderRequestPayload } from '@/lib/ai/custom-provider';
 
 const sanitizeTextByShieldWords = (text: string): string => applyShieldWords(text).filteredText;
+
+let sharedGenerationAbortController: AbortController | null = null;
 
 const isStreamInterruptedError = (error: unknown): boolean => {
   if (error instanceof StreamReadTimeoutError) return true;
@@ -273,11 +277,18 @@ const buildBattleBackupItems = (
   isScenarioNative: boolean,
   scenarioDisplayName: string | null,
   auxScenarios: { content: Record<string, unknown>; fileName: string | null; isNative: boolean }[],
+  materials: { content: unknown; fileName: string | null; isNative: boolean; name: string }[],
   userGuidance: string,
   adjudicationEvents: any[],
   adjudicationResults?: any[] | null
 ): ArrestedBackupDraftItem[] => {
   const items: ArrestedBackupDraftItem[] = [];
+  const toBackupContent = (value: unknown): ArrestedBackupDraftItem['content'] => {
+    if (typeof value === 'string') return value;
+    if (Array.isArray(value)) return value;
+    if (value && typeof value === 'object') return value as Record<string, unknown>;
+    return String(value ?? '');
+  };
 
   combatants.forEach((combatant, index) => {
     items.push({
@@ -307,6 +318,16 @@ const buildBattleBackupItems = (
       filename: aux.fileName || `aux-scenario-${index + 1}.json`,
       content: aux.content,
       description: aux.isNative ? '原生辅助情景文件' : '用户自定义辅助情景',
+    });
+  });
+
+  materials.forEach((material, index) => {
+    items.push({
+      id: `material-${index}`,
+      label: material.name ? `素材：${material.name}` : `素材 #${index + 1}`,
+      filename: material.fileName || `material-${index + 1}.json`,
+      content: toBackupContent(material.content),
+      description: material.isNative ? '原生素材' : '用户素材',
     });
   });
 
@@ -386,9 +407,11 @@ export const useBattleEngine = () => {
   const arenaFreeRankingEnabled = useBattleSelector((state) => state.arenaFreeRankingEnabled);
   const scenario = useBattleSelector((state) => state.scenario);
   const auxScenarios = useBattleSelector((state) => state.auxScenarios);
+  const materials = useBattleSelector((state) => state.materials);
   const selectedQuestionnaires = useBattleSelector((state) => state.selectedQuestionnaires);
   const selectedLanguage = useBattleSelector((state) => state.selectedLanguage);
   const storyLength = useBattleSelector((state) => state.storyLength);
+  const customStoryLength = useBattleSelector((state) => state.customStoryLength);
   const settings = useBattleSelector((state) => state.settings);
   const adjudicationEvents = useBattleSelector((state) => state.adjudicationEvents);
   const userProviderConfig = useBattleSelector((state) => state.userProviderConfig);
@@ -421,7 +444,6 @@ export const useBattleEngine = () => {
     baseKey: ARENA_PROVIDER_COOLDOWN_BASE_KEY,
     ...providerCooldownConfig,
   });
-  const generationAbortControllerRef = useRef<AbortController | null>(null);
 
   const scenarioDisplayName = useMemo(() => {
     // 只有在情景模式下才需要展示情景标题，避免切换到其他模式后沿用上一次的情景小标题
@@ -508,6 +530,7 @@ export const useBattleEngine = () => {
           .join('\n\n'),
         shouldUseScenario ? JSON.stringify(scenario.content) : '',
         shouldUseScenario && auxScenarios.length > 0 ? JSON.stringify(auxScenarios.map((s) => s.content)) : '',
+        materials.length > 0 ? JSON.stringify(materials.map((item) => item.content)) : '',
       ];
 
       for (const payload of sensitiveTargets) {
@@ -574,6 +597,7 @@ export const useBattleEngine = () => {
         userGuidance: settings.userGuidance,
         scenario: shouldUseScenario ? scenario.content : undefined,
         auxScenarios: shouldUseScenario && auxScenarios.length > 0 ? auxScenarios.map((s) => s.content) : undefined,
+        materials: materials.length > 0 ? materials : undefined,
         scenarioTitle: shouldUseScenario ? scenarioDisplayName : undefined,
         scenarioFileName: shouldUseScenario ? scenario.fileName : undefined,
         scenarioSourceDataCardId: shouldUseScenario ? scenario.sourceDataCardId : undefined,
@@ -593,6 +617,7 @@ export const useBattleEngine = () => {
         isDowngrade: false,
         adjudicationEvents,
         storyLength,
+        customStoryLength: normalizeCustomStoryLength(customStoryLength) || undefined,
       };
 
       if (selectedQuestionnaires.length > 0) {
@@ -612,16 +637,9 @@ export const useBattleEngine = () => {
         }));
       }
 
-      if (
-        userProviderConfig &&
-        (userProviderConfig.apiKey || userProviderConfig.providerId === 'system') &&
-        userProviderConfig.modelId !== 'default'
-      ) {
-        requestBody.customProvider = {
-          providerId: userProviderConfig.providerId,
-          modelId: userProviderConfig.modelId,
-          apiKey: userProviderConfig.apiKey,
-        };
+      const customProviderPayload = buildCustomProviderRequestPayload(userProviderConfig);
+      if (customProviderPayload) {
+        requestBody.customProvider = customProviderPayload;
       }
 
       const authHeader = await authStorage.getAuthHeader();
@@ -641,6 +659,12 @@ export const useBattleEngine = () => {
           shouldUseScenario ? scenario.isNative : false,
           shouldUseScenario ? scenarioDisplayName : null,
           shouldUseScenario ? auxScenarios.map((s) => ({ content: s.content, fileName: s.fileName, isNative: s.isNative })) : [],
+          materials.map((material) => ({
+            content: material.content,
+            fileName: material.fileName,
+            isNative: material.isNative,
+            name: material.name,
+          })),
           settings.userGuidance,
           adjudicationEvents,
           result.adjudicationResults
@@ -704,8 +728,8 @@ export const useBattleEngine = () => {
 
 	      if (generationMode === 'stream') {
 	        const abortController = new AbortController();
-	        generationAbortControllerRef.current?.abort(STREAM_ABORT_REASON_USER);
-	        generationAbortControllerRef.current = abortController;
+	        sharedGenerationAbortController?.abort(STREAM_ABORT_REASON_USER);
+	        sharedGenerationAbortController = abortController;
 	        let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
 
 		        try {
@@ -903,6 +927,12 @@ export const useBattleEngine = () => {
             shouldUseScenario ? scenario.isNative : false,
             shouldUseScenario && scenarioDisplayName ? sanitizeTextByShieldWords(scenarioDisplayName) : null,
             shouldUseScenario ? auxScenarios.map((s) => ({ content: s.content, fileName: s.fileName, isNative: s.isNative })) : [],
+            materials.map((material) => ({
+              content: material.content,
+              fileName: material.fileName,
+              isNative: material.isNative,
+              name: material.name,
+            })),
             settings.userGuidance,
             adjudicationEvents
           );
@@ -1550,7 +1580,7 @@ export const useBattleEngine = () => {
 	    } catch (error) {
 	      const shouldTreatAsInterrupted = generationMode === 'stream' && isStreamInterruptedError(error);
 	      if (shouldTreatAsInterrupted) {
-          const abortReason = generationAbortControllerRef.current?.signal.reason;
+          const abortReason = sharedGenerationAbortController?.signal.reason;
           if (abortReason === STREAM_ABORT_REASON_USER) {
             setError('已手动停止生成。当前预览可能不完整，但可继续查看。');
           } else {
@@ -1563,7 +1593,7 @@ export const useBattleEngine = () => {
 	        setNewsReport(null);
 	      }
 	    } finally {
-        generationAbortControllerRef.current = null;
+        sharedGenerationAbortController = null;
 	      setIsGenerating(false);
 	      setIsStreaming(false);
 	    }
@@ -1576,11 +1606,13 @@ export const useBattleEngine = () => {
     combatants,
     scenario,
     auxScenarios,
+    materials,
     selectedQuestionnaires,
     userProviderConfig,
     settings,
     selectedLanguage,
     storyLength,
+    customStoryLength,
     adjudicationEvents,
     scenarioDisplayName,
     setError,
@@ -1608,7 +1640,7 @@ export const useBattleEngine = () => {
   ]);
 
   const stopGeneration = useCallback(() => {
-    generationAbortControllerRef.current?.abort(STREAM_ABORT_REASON_USER);
+    sharedGenerationAbortController?.abort(STREAM_ABORT_REASON_USER);
   }, []);
 
   const handleRedoUpdates = useCallback(async () => {
@@ -1661,16 +1693,9 @@ export const useBattleEngine = () => {
         writeCurrentState: settings.writeCurrentState,
       };
 
-      if (
-        userProviderConfig &&
-        (userProviderConfig.apiKey || userProviderConfig.providerId === 'system') &&
-        userProviderConfig.modelId !== 'default'
-      ) {
-        requestBody.customProvider = {
-          providerId: userProviderConfig.providerId,
-          modelId: userProviderConfig.modelId,
-          apiKey: userProviderConfig.apiKey,
-        };
+      const customProviderPayload = buildCustomProviderRequestPayload(userProviderConfig);
+      if (customProviderPayload) {
+        requestBody.customProvider = customProviderPayload;
       }
 
       const response = await fetch('/api/arena/redo-combatant-updates', {

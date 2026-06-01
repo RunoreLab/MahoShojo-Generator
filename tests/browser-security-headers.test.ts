@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 
 import {
   buildContentSecurityPolicy,
@@ -66,18 +66,18 @@ describe('browser security headers', () => {
   test('HTTPS 跳转会尊重代理协议头且放过本地开发地址', () => {
     expect(
       shouldRedirectToHttps(new URL('http://mahoshojo.example.com/free'), new Headers()),
-    ).toBeTrue();
+    ).toBe(true);
 
     expect(
       shouldRedirectToHttps(
         new URL('https://mahoshojo.example.com/free'),
         new Headers({ 'x-forwarded-proto': 'https' }),
       ),
-    ).toBeFalse();
+    ).toBe(false);
 
     expect(
       shouldRedirectToHttps(new URL('http://localhost:3000/free'), new Headers()),
-    ).toBeFalse();
+    ).toBe(false);
   });
 
   test('协议识别会优先读取代理透传头', () => {

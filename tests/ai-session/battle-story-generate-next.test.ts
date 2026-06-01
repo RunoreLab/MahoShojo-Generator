@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 
 import { validateBattleStoryGenerateNextInput } from '@/lib/ai-session/battle-story/generate-next';
 import { buildUpstreamRequestBody } from '@/pages/api/arena/session/generate-next';
@@ -135,6 +135,7 @@ describe('battle story generate-next validation', () => {
           ],
           mode: 'classic',
           storyLength: 'standard',
+          customStoryLength: '1444',
           language: 'zh-CN',
           settings: {
             readArenaHistory: true,
@@ -174,6 +175,7 @@ describe('battle story generate-next validation', () => {
     ]);
     expect(body.arenaHistoryReadLimit).toBe(5);
     expect(body.narrativeHistoryReadLimit).toBe(9);
+    expect(body.customStoryLength).toBe('1444');
     expect(body.forceStreamMeta).toBe(true);
   });
 });

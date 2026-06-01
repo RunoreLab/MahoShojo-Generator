@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 
 import { DEFAULT_PVP_RULES } from '@/lib/pvp/defaults';
 import { requiresPvpSubmissionPhase } from '@/lib/pvp/logic';
@@ -148,6 +148,7 @@ describe('pvp: parsePvpRules', () => {
   test('非法“对局生成设置”回退/截断为安全值', () => {
     const parsed = parsePvpRules({
       storyLength: 'x',
+      customStoryLength: 'abc',
       language: 'x'.repeat(999),
       userGuidance: 'a'.repeat(999),
       adjudicationEvents: new Array(999).fill('nope'),
@@ -157,10 +158,23 @@ describe('pvp: parsePvpRules', () => {
     if ('error' in parsed) return;
 
     expect(parsed.rules.storyLength).toBe(DEFAULT_PVP_RULES.storyLength);
+    expect(parsed.rules.customStoryLength).toBe('');
     expect(parsed.rules.language.length).toBeLessThanOrEqual(32);
     expect(parsed.rules.userGuidance.length).toBeLessThanOrEqual(200);
     expect(parsed.rules.adjudicationEvents.length).toBeLessThanOrEqual(50);
     expect(parsed.rules.readArenaHistoryLimit).toBeLessThanOrEqual(999);
+  });
+
+  test('允许保留自定义目标字数字符串', () => {
+    const parsed = parsePvpRules({
+      storyLength: 'default',
+      customStoryLength: '1200',
+    });
+    expect('error' in parsed).toBe(false);
+    if ('error' in parsed) return;
+
+    expect(parsed.rules.storyLength).toBe('default');
+    expect(parsed.rules.customStoryLength).toBe('1200');
   });
 
   test('cardRange 不允许空 allowedCombatantTypes', () => {

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test';
+import { describe, expect, it } from 'vitest';
 
 import { buildBotUsername } from '@/lib/pvp/bot/names';
 import { computeDefaultCardWeight, getBotStrategyById } from '@/lib/pvp/bot/strategies';

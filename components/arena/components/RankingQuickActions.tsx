@@ -100,6 +100,7 @@ const buildStrictSetupMissingReasons = (input: {
   userProviderConfigModelId: string | null;
   scenarioEnabled: boolean;
   auxScenarioCount: number;
+  materialCount: number;
   questionnaireLoreEnabled: boolean;
   questionnaireLoreAllowed: boolean;
   requiredQuestionnaireLorePresetIds: string[];
@@ -153,6 +154,7 @@ const buildStrictSetupMissingReasons = (input: {
   }
 
   if (input.auxScenarioCount > 0) reasons.push('需移除「辅助情景」');
+  if (input.materialCount > 0) reasons.push('需移除「素材」');
   if (input.userProviderConfigModelId && isStrictRankedModelBlacklisted(input.userProviderConfigModelId)) {
     reasons.push('需改用支持严格排位计分的 AI 模型');
   }
@@ -224,6 +226,7 @@ const formatStrictReason = (code: string): string => {
     'season-scenario-missing': '需选择主情景（赛季规则）',
     'season-scenario-preset-mismatch': '主情景需为赛季指定预设',
     'season-aux-scenarios-not-allowed': '需移除「辅助情景」（赛季规则）',
+    'has-materials': '需移除「素材」',
     'daily-limit': '今日严格排位计分次数已达上限（按 UTC 00:00/北京时间 08:00 刷新）',
     'ai-model-blacklisted': '选择了不支持严格排位计分的模型',
   };
@@ -303,11 +306,13 @@ export function RankingQuickActions() {
   const setUserProviderConfig = useBattleSelector((state) => state.setUserProviderConfig);
   const scenario = useBattleSelector((state) => state.scenario);
   const auxScenarios = useBattleSelector((state) => state.auxScenarios);
+  const materials = useBattleSelector((state) => state.materials);
   const selectedQuestionnaires = useBattleSelector((state) => state.selectedQuestionnaires);
   const setQuestionnaireSelections = useBattleSelector((state) => state.setQuestionnaireSelections);
   const updateCombatantCharacterGuidance = useBattleSelector((state) => state.updateCombatantCharacterGuidance);
   const clearScenario = useBattleSelector((state) => state.clearScenario);
   const clearAuxScenarios = useBattleSelector((state) => state.clearAuxScenarios);
+  const clearMaterials = useBattleSelector((state) => state.clearMaterials);
   const isGenerating = useBattleSelector((state) => state.isGenerating);
   const setError = useBattleSelector((state) => state.setError);
 
@@ -377,6 +382,7 @@ export function RankingQuickActions() {
         userProviderConfigModelId: userProviderConfig?.modelId ?? null,
         scenarioEnabled: battleMode === 'scenario' && Boolean(scenario.content),
         auxScenarioCount: auxScenarios.length,
+        materialCount: materials.length,
         questionnaireLoreEnabled,
         questionnaireLoreAllowed: seasonStrictRules.questionnaireLoreAllowed,
         requiredQuestionnaireLorePresetIds: seasonStrictRules.questionnaireLorePresetIds,
@@ -385,6 +391,7 @@ export function RankingQuickActions() {
     [
       adjudicationEvents,
       auxScenarios.length,
+      materials.length,
       battleMode,
       isAuthenticated,
       questionnaireLoreEnabled,
@@ -463,6 +470,7 @@ export function RankingQuickActions() {
       clearScenario();
     }
     clearAuxScenarios();
+    clearMaterials();
 
     let questionnaireAdjustmentMessage: string | null = null;
     let disabledQuestionnaireLoreCount = 0;
@@ -653,6 +661,7 @@ export function RankingQuickActions() {
       scenarioEnabled: battleMode === 'scenario' && Boolean(scenario.content),
       scenarioFileName: battleMode === 'scenario' ? scenario.fileName : null,
       auxScenarioCount: auxScenarios.length,
+      materialCount: materials.length,
       questionnaireLoreEnabled,
       questionnaireLoreIds,
       settings: {
@@ -670,6 +679,7 @@ export function RankingQuickActions() {
   }, [
     adjudicationEvents,
     auxScenarios.length,
+    materials.length,
     battleMode,
     combatants,
     scenario.content,
@@ -723,6 +733,7 @@ export function RankingQuickActions() {
     if (settings.readCurrentState) reasons.push('read-current-state');
     if (settings.readNarrativeHistory) reasons.push('read-narrative-history');
     if (Array.isArray(adjudicationEvents) && adjudicationEvents.length > 0) reasons.push('has-adjudication-events');
+    if (materials.length > 0) reasons.push('has-materials');
     if (readableCombatants.some((c) => (c.characterGuidance ?? '').trim())) reasons.push('has-character-guidance');
     if (userProviderConfig?.modelId && userProviderConfig.modelId !== 'default' && isStrictRankedModelBlacklisted(userProviderConfig.modelId)) {
       reasons.push('ai-model-blacklisted');
@@ -749,6 +760,7 @@ export function RankingQuickActions() {
   }, [
     adjudicationEvents,
     auxScenarios.length,
+    materials.length,
     battleMode,
     combatants.length,
     isAuthenticated,

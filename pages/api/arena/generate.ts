@@ -7,7 +7,7 @@ import magicalGirlQuestionnaire from '@/public/questionnaires/presets/magical-gi
 import canshouQuestionnaire from '@/public/questionnaires/presets/canshou-default.json';
 import { getRandomJournalist } from '@/lib/random-choose-journalist';
 import { config as appConfig, SafetyCheckPolicy, type AIProvider } from '@/lib/config';
-import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
+import { AI_PROVIDER_CATALOG, resolveAIProviderModel } from '@/lib/ai/constants';
 import { quickCheck } from '@/lib/sensitive-word-filter';
 import { buildPolicySafetyCheckText } from '@/lib/content-safety/server';
 import { NextRequest } from 'next/server';
@@ -38,10 +38,12 @@ import {
 } from '@/lib/arena/battle-report-log-utils';
 import { buildOutputPreviewForStorage } from '@/lib/arena/output-preview';
 import { settleArenaRatingsForGeneration } from '@/lib/database/arena-ratings';
+import { normalizeCustomStoryLength, resolveEffectiveStoryLength } from '@/lib/story-length';
 import { storeBattleReportGenerationOutputTextToR2 } from '@/lib/arena/battle-report-output-storage';
 import { recordUserActivityFromRequest } from '@/lib/user-activity/record';
 import { createRequestAuthUserResolver } from '@/lib/auth/request-auth-user';
 import { createBattleReportWriteContext } from '@/lib/arena/battle-report-write-context';
+import { MAX_ARENA_MATERIALS, normalizeArenaMaterialsForRequest } from '@/lib/arena/materials';
 
 const log = getLogger('api-gen-battle-story');
 
@@ -145,6 +147,7 @@ const buildQuestionnaireLoreText = (questionnaires: RequestQuestionnaire[]): str
             userGuidance,
             scenario,
             auxScenarios,
+            materials,
             teams,
             teamNames,
             language = 'zh-CN',
@@ -160,6 +163,7 @@ const buildQuestionnaireLoreText = (questionnaires: RequestQuestionnaire[]): str
             isDowngrade = false,
             adjudicationEvents,
             storyLength,
+            customStoryLength,
             customProvider: customProviderPayload,
             scenarioTitle,
             scenarioFileName,
@@ -182,6 +186,16 @@ const buildQuestionnaireLoreText = (questionnaires: RequestQuestionnaire[]): str
         if (normalizedAuxScenarios && normalizedAuxScenarios.length > 10) {
             return new Response(JSON.stringify({ error: '辅助情景最多 10 个' }), { status: 400 });
         }
+        if (Array.isArray(materials) && materials.length > MAX_ARENA_MATERIALS) {
+            return new Response(JSON.stringify({ error: `素材最多 ${MAX_ARENA_MATERIALS} 个` }), { status: 400 });
+        }
+        const normalizedMaterials = normalizeArenaMaterialsForRequest(materials);
+        const materialCount = normalizedMaterials.length;
+        const materialSourceTypes = Array.from(new Set(
+            normalizedMaterials
+                .map((material) => material.sourceType || material.sourceKind)
+                .filter((value): value is string => typeof value === 'string' && Boolean(value.trim()))
+        )).slice(0, MAX_ARENA_MATERIALS);
 
         const resolvedReadArenaHistory = typeof readArenaHistory === 'boolean'
             ? readArenaHistory
@@ -274,8 +288,8 @@ const buildQuestionnaireLoreText = (questionnaires: RequestQuestionnaire[]): str
                 return new Response(JSON.stringify({ error: '未知的模型供应商 ID' }), { status: 400 });
             }
 
-            const modelConfig = providerConfig.models.find(model => model.value === parsed.modelId);
-            if (!modelConfig) {
+            const modelResolution = resolveAIProviderModel(providerConfig, parsed.modelId);
+            if (!modelResolution) {
                 return new Response(JSON.stringify({ error: '未知的模型 ID' }), { status: 400 });
             }
 
@@ -286,21 +300,22 @@ const buildQuestionnaireLoreText = (questionnaires: RequestQuestionnaire[]): str
 
             const sanitizedBaseUrl = providerConfig.baseUrl?.trim() ?? '';
             if (!sanitizedBaseUrl) {
-                customModelOverride = modelConfig.value;
+                customModelOverride = modelResolution.modelId;
                 log.info('检测到 baseUrl 为空的自定义供应商，改用系统默认通道，仅覆盖模型参数', {
                     providerId: providerConfig.id,
-                    model: modelConfig.value,
+                    model: modelResolution.modelId,
                 });
             } else {
                 customProviderOverride = {
                     name: providerConfig.name,
                     apiKey: sanitizedApiKey,
                     baseUrl: sanitizedBaseUrl,
-                    model: modelConfig.value,
+                    model: modelResolution.modelId,
                     type: providerConfig.type,
                     mode: providerConfig.mode || 'auto',
                     retryCount: 1,
                     skipProbability: 0,
+                    ...(typeof parsed.maxOutputTokens === 'number' ? { defaultMaxOutputTokens: parsed.maxOutputTokens } : {}),
                 };
             }
         }
@@ -316,6 +331,7 @@ const buildQuestionnaireLoreText = (questionnaires: RequestQuestionnaire[]): str
             mode === 'classic'
             && String(language ?? '').trim() === 'zh-CN'
             && !String(userGuidance ?? '').trim()
+            && materialCount === 0
             && !hasQuestionnaireLore
             && resolvedReadArenaHistory === false
             && resolvedReadCurrentState === false
@@ -411,6 +427,15 @@ const buildQuestionnaireLoreText = (questionnaires: RequestQuestionnaire[]): str
                 inputsToCheck.push({ type: 'scenario', content: JSON.stringify(aux), isNative });
             }
         }
+        if (normalizedMaterials.length > 0) {
+            for (const material of normalizedMaterials) {
+                inputsToCheck.push({
+                    type: 'userGuidance',
+                    content: JSON.stringify(material.content),
+                    isNative: material.isNative,
+                });
+            }
+        }
         combatants.forEach((c: any) => {
             inputsToCheck.push({ type: 'character', content: JSON.stringify(c.data), isNative: c.isNative });
         });
@@ -474,9 +499,11 @@ const buildQuestionnaireLoreText = (questionnaires: RequestQuestionnaire[]): str
                 resolvedWriteCurrentState,
                 adjudicationResults,
                 storyLength,
+                normalizeCustomStoryLength(customStoryLength),
                 narrativeHistoryForPrompt,
                 loreText,
-                includeQuestionnaireAnswersInPrompt
+                includeQuestionnaireAnswersInPrompt,
+                normalizedMaterials
             ),
             schema: battleReportSchema,
             taskName: `生成${mode}模式故事`,
@@ -603,6 +630,7 @@ const buildQuestionnaireLoreText = (questionnaires: RequestQuestionnaire[]): str
             combatants,
             userGuidance: finalUserGuidance,
             scenario,
+            materials: normalizedMaterials,
             teams,
         });
         const inputBytes = new TextEncoder().encode(inputJson).length;
@@ -653,7 +681,7 @@ const buildQuestionnaireLoreText = (questionnaires: RequestQuestionnaire[]): str
 	                scenarioDataCardUpdatedAt: typeof scenarioSourceDataCardUpdatedAt === 'string' ? scenarioSourceDataCardUpdatedAt : null,
 	                language: normalizeOptionalString(language),
 	                selectedLevel: null,
-	                storyLength: normalizeOptionalString(storyLength),
+	                storyLength: resolveEffectiveStoryLength(normalizeOptionalString(storyLength), customStoryLength) ?? null,
                 readArenaHistory: typeof resolvedReadArenaHistory === 'boolean' ? resolvedReadArenaHistory : null,
                 arenaHistoryReadLimit: resolvedReadArenaHistory
                     ? (Number.isFinite(resolvedHistoryReadLimit) ? (resolvedHistoryReadLimit === Infinity ? null : resolvedHistoryReadLimit) : null)
@@ -703,6 +731,8 @@ const buildQuestionnaireLoreText = (questionnaires: RequestQuestionnaire[]): str
                         questionnaireLoreIds,
                         scenarioFileName: normalizedScenarioFileName,
                         auxScenarioCount: auxScenarioCount > 0 ? auxScenarioCount : null,
+                        materialCount: materialCount > 0 ? materialCount : null,
+                        materialSourceTypes: materialSourceTypes.length > 0 ? materialSourceTypes : null,
 	                    resolvedModelOverride: usedModelOverride ?? null,
 	                    readNarrativeHistory: resolvedReadNarrativeHistory,
                         narrativeHistoryReadLimit: resolvedReadNarrativeHistory

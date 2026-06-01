@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test';
+import { describe, expect, it } from 'vitest';
 import { mergeTeamDataCards } from '@/lib/team/merge-team-cards';
 
 describe('team/merge-team-cards', () => {

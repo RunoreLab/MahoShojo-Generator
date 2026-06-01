@@ -1,9 +1,11 @@
 import Link from 'next/link';
 import ReactMarkdown, { type Components, type ExtraProps } from 'react-markdown';
 import rehypeKatex from 'rehype-katex';
+import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 
 import remarkBattleTable from '@/lib/markdown/remarkBattleTable';
+import { fixNestedListIndentation } from '@/lib/markdown/fix-list-indentation';
 import {
   formatMarkdownImage,
   formatMarkdownLink,
@@ -367,11 +369,11 @@ export function MarkdownBlock({ content, variant = 'dark', mode = 'compact', cla
   return (
     <div className={className}>
       <ReactMarkdown
-        remarkPlugins={[remarkBattleTable, [remarkMath, { singleDollarTextMath: true }]]}
+        remarkPlugins={[remarkGfm, remarkBattleTable, [remarkMath, { singleDollarTextMath: true }]]}
         rehypePlugins={[[rehypeKatex, { throwOnError: false, strict: 'ignore' }]]}
         components={components}
       >
-        {content}
+        {fixNestedListIndentation(content)}
       </ReactMarkdown>
     </div>
   );

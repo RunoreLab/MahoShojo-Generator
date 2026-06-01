@@ -18,6 +18,7 @@ import { DatabaseSelector } from './components/DatabaseSelector';
 import { RosterUploader } from './components/RosterUploader';
 import { CombatantList } from './components/CombatantList';
 import { ScenarioPanel } from './components/ScenarioPanel';
+import { MaterialPanel } from './components/MaterialPanel';
 import { BattleSettings } from './components/BattleSettings';
 import { AdjudicatorPanel } from './components/AdjudicatorPanel';
 import { StoryOptions } from './components/StoryOptions';
@@ -36,6 +37,7 @@ import {
   formatCombatantCount,
   hasCombatantLimit,
   MAX_AUX_SCENARIOS,
+  MAX_ARENA_MATERIALS,
   MAX_COMBATANTS,
 } from './types';
 import { useBattleActions } from './hooks/useBattleActions';
@@ -48,7 +50,7 @@ import { ArenaRankingLinks } from './shared/ArenaRankingLinks';
 export function ArenaPage() {
   const { isAuthenticated } = useAuth();
   const [showBattleDataModal, setShowBattleDataModal] = useState(false);
-  const [dataModalType, setDataModalType] = useState<'character' | 'scenario' | 'auxScenario'>('character');
+  const [dataModalType, setDataModalType] = useState<'character' | 'scenario' | 'auxScenario' | 'material'>('character');
   const [selectedCombatant, setSelectedCombatant] = useState<CombatantData | null>(null);
   const [showImageModal, setShowImageModal] = useState(false);
   const [savedImageUrl, setSavedImageUrl] = useState<string | null>(null);
@@ -57,12 +59,19 @@ export function ArenaPage() {
   const combatants = useBattleStore((state: BattleStoreState) => state.combatants);
   const scenario = useBattleStore((state: BattleStoreState) => state.scenario);
   const auxScenarios = useBattleStore((state: BattleStoreState) => state.auxScenarios);
+  const materials = useBattleStore((state: BattleStoreState) => state.materials);
   const battleMode = useBattleStore((state: BattleStoreState) => state.battleMode);
   const isGenerating = useBattleStore((state: BattleStoreState) => state.isGenerating);
   const isMatching = useBattleStore((state: BattleStoreState) => state.isMatching);
   const error = useBattleStore((state: BattleStoreState) => state.error);
 
-  const { handleSelectDataCard, handleRandomMatch, handleToggleAuxScenarioDataCard, handleToggleCombatantDataCard } = useBattleActions();
+  const {
+    handleSelectDataCard,
+    handleRandomMatch,
+    handleToggleAuxScenarioDataCard,
+    handleToggleCombatantDataCard,
+    handleToggleMaterialDataCard,
+  } = useBattleActions();
 
   const { grouped: presetGrouped } = usePresetQuery();
   const { data: languages } = useLanguagesQuery();
@@ -116,6 +125,16 @@ export function ArenaPage() {
     return out;
   }, [auxScenarios]);
 
+  const selectedMaterialDataCardIds = useMemo(() => {
+    const out: string[] = [];
+    materials.forEach((material) => {
+      if (typeof material.sourceDataCardId === 'string' && material.sourceDataCardId) {
+        out.push(material.sourceDataCardId);
+      }
+    });
+    return out;
+  }, [materials]);
+
   const handleOpenCharacterDataModal = () => {
     setDataModalType('character');
     setShowBattleDataModal(true);
@@ -128,6 +147,11 @@ export function ArenaPage() {
 
   const handleOpenAuxScenarioDataModal = () => {
     setDataModalType('auxScenario');
+    setShowBattleDataModal(true);
+  };
+
+  const handleOpenMaterialDataModal = () => {
+    setDataModalType('material');
     setShowBattleDataModal(true);
   };
 
@@ -256,6 +280,17 @@ export function ArenaPage() {
                     />
                   </CollapsibleSection>
                 )}
+
+                <CollapsibleSection
+                  title="📎 素材注入"
+                  description={`已选 ${materials.length}/${MAX_ARENA_MATERIALS}`}
+                  defaultOpen={false}
+                  disabled={isGenerating}
+                  keepMounted
+                  storageKey="arena.section.materials.open"
+                >
+                  <MaterialPanel onOpenMaterialModal={handleOpenMaterialDataModal} />
+                </CollapsibleSection>
 
                 <CollapsibleSection
                   title="🏁 排位与快速设置"
@@ -393,23 +428,40 @@ export function ArenaPage() {
             : (
               dataModalType === 'auxScenario'
                 ? (card, nextSelected) => void handleToggleAuxScenarioDataCard(card, nextSelected)
-                : undefined
+                : (
+                  dataModalType === 'material'
+                    ? (card, nextSelected) => void handleToggleMaterialDataCard(card, nextSelected)
+                    : undefined
+                )
             )
         }
-        selectedType={dataModalType === 'character' ? 'character' : 'scenario'}
-        titleOverride={dataModalType === 'auxScenario' ? '选择辅助情景' : undefined}
+        selectedType={dataModalType === 'character' ? 'character' : (dataModalType === 'material' ? 'all' : 'scenario')}
+        allowedTypes={dataModalType === 'material' ? ['character', 'scenario', 'history', 'questionnaire'] : undefined}
+        titleOverride={
+          dataModalType === 'auxScenario'
+            ? '选择辅助情景'
+            : (dataModalType === 'material' ? '选择素材' : undefined)
+        }
         selectionMode={dataModalType === 'scenario' ? 'single' : 'multi'}
         selectedCardIds={
           dataModalType === 'character'
             ? selectedCharacterDataCardIds
-            : (dataModalType === 'auxScenario' ? selectedAuxScenarioDataCardIds : selectedScenarioDataCardIds)
+            : (
+              dataModalType === 'auxScenario'
+                ? selectedAuxScenarioDataCardIds
+                : (dataModalType === 'material' ? selectedMaterialDataCardIds : selectedScenarioDataCardIds)
+            )
         }
         selectedCountOverride={
           dataModalType === 'character'
             ? combatants.length
-            : (dataModalType === 'auxScenario' ? auxScenarios.length : undefined)
+            : (dataModalType === 'auxScenario' ? auxScenarios.length : (dataModalType === 'material' ? materials.length : undefined))
         }
-        maxSelected={dataModalType === 'character' ? characterMaxSelected : (dataModalType === 'auxScenario' ? MAX_AUX_SCENARIOS : undefined)}
+        maxSelected={
+          dataModalType === 'character'
+            ? characterMaxSelected
+            : (dataModalType === 'auxScenario' ? MAX_AUX_SCENARIOS : (dataModalType === 'material' ? MAX_ARENA_MATERIALS : undefined))
+        }
       />
 
       {selectedCombatant && (

@@ -23,6 +23,8 @@ export function BattleLiteStoryOptions() {
         onUserGuidanceChange={(value) => updateSettings({ userGuidance: value })}
         storyLength="default"
         onStoryLengthChange={() => {}}
+        customStoryLength=""
+        onCustomStoryLengthChange={() => {}}
         selectedLanguage="zh-CN"
         onSelectedLanguageChange={() => {}}
         showStoryLength={false}

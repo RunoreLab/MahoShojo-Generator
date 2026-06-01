@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 
 import type { AdjudicatorEvent } from '@/types/arena';
 import { normalizeAdjudicationEvents } from '@/lib/adjudicator/normalize';

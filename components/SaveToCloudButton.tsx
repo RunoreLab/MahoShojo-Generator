@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
 import SaveCardModal from './CharManager/SaveCardModal';
-import ReplaceCardModal from './ReplaceCardModal';
+import DataCardsModal from './CharManager/DataCardsModal';
 import { useAuth } from '@/lib/useAuth';
 import { dataCardApi } from '@/lib/auth';
 import { quickCheck } from '@/lib/sensitive-word-filter';
@@ -45,7 +45,7 @@ export default function SaveToCloudButton({
   style = {}
 }: SaveToCloudButtonProps) {
   const router = useRouter();
-  const { isAuthenticated, user } = useAuth();
+  const { isAuthenticated } = useAuth();
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [cardName, setCardName] = useState('');
   const [cardDescription, setCardDescription] = useState('');
@@ -56,9 +56,10 @@ export default function SaveToCloudButton({
   const [preparedData, setPreparedData] = useState<any>(null);
   const [userDataCards, setUserDataCards] = useState<any[]>([]);
   const [userCapacity, setUserCapacity] = useState(config.DEFAULT_DATA_CARD_CAPACITY);
-  const [showReplaceModal, setShowReplaceModal] = useState(false);
-  const [isReplacing, setIsReplacing] = useState(false);
-  const [cardsLoadState, setCardsLoadState] = useState<DataCardsLoadState>({ status: 'idle', error: null });
+  const [showDataCardsForReplace, setShowDataCardsForReplace] = useState(false);
+  const [replaceEditingCard, setReplaceEditingCard] = useState<any | null>(null);
+  const [replaceCurrentPage, setReplaceCurrentPage] = useState(1);
+  const [, setCardsLoadState] = useState<DataCardsLoadState>({ status: 'idle', error: null });
 
   // 加载用户数据卡信息
   useEffect(() => {
@@ -164,39 +165,73 @@ export default function SaveToCloudButton({
     setShowSaveModal(true);
   };
 
-  const handleReplaceConfirm = async (cardId: string, opts: { name?: string; description?: string; isPublic?: number }) => {
+  const handleReplaceFromDataCards = async (card: any) => {
     const workingData = preparedData ?? data;
-    if (!workingData) return;
-    setIsReplacing(true);
+    if (!workingData) {
+      alert('没有可替换的数据。');
+      return;
+    }
+    if (!window.confirm(`确认用当前数据替换「${card.name}」吗？`)) return;
     setSaveError(null);
     try {
       const finalData = { ...workingData };
-      // 敏感词检查
-      const textToCheck = `${opts.name || ''} ${opts.description || ''} ${JSON.stringify(finalData)}`;
+      const textToCheck = `${card.name || ''} ${card.description || ''} ${JSON.stringify(finalData)}`;
       const sensitiveWordResult = await quickCheck(textToCheck);
       if (sensitiveWordResult.hasSensitiveWords) {
         router.push('/arrested');
         return;
       }
 
-      const result = await dataCardApi.replaceCard(cardId, {
-        name: opts.name,
-        description: opts.description,
-        isPublic: opts.isPublic,
+      const result = await dataCardApi.replaceCard(card.id, {
+        name: card.name,
+        description: card.description,
+        isPublic: card.is_public,
         data: finalData,
       });
 
       if (result.success) {
         alert(result.pendingReview ? '更新已提交审核，审核通过后生效' : '已替换成功');
-        setShowReplaceModal(false);
         loadUserDataCards();
       } else {
-        setSaveError(result.error || '替换失败');
+        alert(result.error || '替换失败');
       }
     } catch (error) {
-      setSaveError(error instanceof Error ? error.message : '替换失败，请稍后重试');
-    } finally {
-      setIsReplacing(false);
+      alert(error instanceof Error ? error.message : '替换失败，请稍后重试');
+    }
+  };
+
+  const handleUpdateCardInfo = async (id: string, name: string, description: string, isPublic?: number) => {
+    const textToCheck = `${name} ${description}`;
+    const sensitiveWordResult = await quickCheck(textToCheck);
+    if (sensitiveWordResult.hasSensitiveWords) {
+      router.push('/arrested');
+      return;
+    }
+
+    const result = await dataCardApi.updateCard(id, name, description, isPublic);
+    if (result.success) {
+      setReplaceEditingCard(null);
+      loadUserDataCards();
+    } else {
+      if (result.error === 'SENSITIVE_WORD_DETECTED' || (result as any).redirect === '/arrested') {
+        router.push('/arrested');
+        return;
+      }
+      alert(result.error || '更新失败');
+    }
+  };
+
+  const handleDeleteCard = async (id: string) => {
+    if (!window.confirm('确认删除此数据卡？')) return;
+    try {
+      const result = await dataCardApi.deleteCard(id);
+      if (result.success) {
+        loadUserDataCards();
+      } else {
+        alert(result.error || '删除失败');
+      }
+    } catch (error) {
+      alert(error instanceof Error ? error.message : '删除失败');
     }
   };
 
@@ -293,8 +328,10 @@ export default function SaveToCloudButton({
               }
               return;
             }
-            await loadUserDataCards();
-            setShowReplaceModal(true);
+            setShowDataCardsForReplace(true);
+            setReplaceEditingCard(null);
+            setReplaceCurrentPage(1);
+            void loadUserDataCards();
           })();
         }}
         className={`${className} ml-2`}
@@ -321,16 +358,31 @@ export default function SaveToCloudButton({
         userCapacity={userCapacity}
       />
 
-      <ReplaceCardModal
-        isOpen={showReplaceModal}
-        onClose={() => setShowReplaceModal(false)}
-        cards={userDataCards}
-        targetType={cardType ?? (isScenarioData(effectiveData) ? 'scenario' : 'character')}
-        onConfirm={handleReplaceConfirm}
-        isSaving={isReplacing}
-        data={effectiveData}
-        viewer={user ? { id: user.id, username: user.username } : null}
-        loadError={cardsLoadState.status === 'error' ? cardsLoadState.error : null}
+      <DataCardsModal
+        isOpen={showDataCardsForReplace}
+        onClose={() => {
+          setShowDataCardsForReplace(false);
+          setReplaceEditingCard(null);
+        }}
+        dataCards={userDataCards}
+        editingCard={replaceEditingCard}
+        currentPage={replaceCurrentPage}
+        cardsPerPage={8}
+        onPageChange={setReplaceCurrentPage}
+        onEditCard={setReplaceEditingCard}
+        onUpdateCard={handleUpdateCardInfo}
+        onDeleteCard={handleDeleteCard}
+        onLoadCard={() => {}}
+        onCancelEdit={() => setReplaceEditingCard(null)}
+        onReplaceCard={handleReplaceFromDataCards}
+        userCapacity={userCapacity}
+        title="替换已有数据卡"
+        emptyText="暂无数据卡"
+        defaultFilters={cardType ? { type: cardType } : undefined}
+        allowedTypes={cardType ? [cardType] : undefined}
+        hideEditData={true}
+        allowHistoryReplace={cardType === 'history'}
+        showHotHint={false}
       />
     </>
   );

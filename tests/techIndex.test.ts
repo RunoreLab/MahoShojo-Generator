@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 
 import { computeTechIndex, DEFAULT_TECH_INDEX_CONFIG } from '@/lib/metrics/techIndex';
 

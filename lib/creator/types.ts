@@ -64,6 +64,8 @@ export interface BuildRulePreset {
 export interface BuildRuleValidationBudgetSummary {
   attributePointsUsed: number;
   attributePointsLimit: number | null;
+  skillPointsUsed?: number;
+  skillPointsLimit?: number | null;
   specialtyPointsUsed: number;
   specialtyPointsLimit: number | null;
 }

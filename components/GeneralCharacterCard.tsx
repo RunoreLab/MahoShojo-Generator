@@ -31,6 +31,7 @@ interface GeneralCharacterCardProps {
     buildState?: unknown;
   };
   isStreaming?: boolean;
+  onStopGeneration?: () => void;
   onSaveImage?: (imageUrl: string) => void;
   imageSaveMode?: 'auto' | 'modal' | 'download';
   saveButtonLabel?: string;
@@ -112,6 +113,7 @@ const waitForNextPaint = async () => {
 const GeneralCharacterCard: React.FC<GeneralCharacterCardProps> = ({
   general,
   isStreaming = false,
+  onStopGeneration,
   onSaveImage,
   imageSaveMode = 'auto',
   saveButtonLabel,
@@ -313,9 +315,15 @@ const GeneralCharacterCard: React.FC<GeneralCharacterCardProps> = ({
 
         {renderHistory()}
 
-        <button onClick={handleSaveImage} className="save-button mt-4" disabled={isStreaming || isSavingImage}>
-          {isStreaming || isSavingImage ? '生成中...' : (saveButtonLabel ?? '📱 保存为图片')}
-        </button>
+        <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+          <button
+            onClick={isStreaming && onStopGeneration ? onStopGeneration : handleSaveImage}
+            className="save-button flex-1"
+            disabled={isSavingImage}
+          >
+            {isStreaming && onStopGeneration ? '⏹ 停止生成' : isSavingImage ? '生成中...' : (saveButtonLabel ?? '📱 保存为图片')}
+          </button>
+        </div>
 
         <div
           className="logo-placeholder"

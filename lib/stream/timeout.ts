@@ -24,6 +24,7 @@ export type CreateStreamReadWithTimeoutOptions = {
   totalTimeoutMs?: number;
   label?: string;
   onTimeout?: (error: StreamReadTimeoutError) => void;
+  getLastActivityAtMs?: () => number | null | undefined;
 };
 
 const parsePositiveTimeoutMs = (value: string | undefined, fallback: number): number => {
@@ -34,7 +35,7 @@ const parsePositiveTimeoutMs = (value: string | undefined, fallback: number): nu
   return Math.floor(parsed);
 };
 
-export const STREAM_READ_IDLE_TIMEOUT_MS = parsePositiveTimeoutMs(process.env.NEXT_PUBLIC_STREAM_READ_IDLE_TIMEOUT_MS, 100_000);
+export const STREAM_READ_IDLE_TIMEOUT_MS = parsePositiveTimeoutMs(process.env.NEXT_PUBLIC_STREAM_READ_IDLE_TIMEOUT_MS, 150_000);
 export const STREAM_READ_TOTAL_TIMEOUT_MS = parsePositiveTimeoutMs(
   process.env.NEXT_PUBLIC_STREAM_READ_TOTAL_TIMEOUT_MS,
   10 * 60_000
@@ -43,13 +44,21 @@ export const STREAM_READ_TOTAL_TIMEOUT_MS = parsePositiveTimeoutMs(
 export function createStreamReadWithTimeout(options: CreateStreamReadWithTimeoutOptions) {
   const startedAtMs = Date.now();
   const deadlineAtMs = typeof options.totalTimeoutMs === 'number' ? startedAtMs + Math.max(0, options.totalTimeoutMs) : null;
+  const resolveLastActivityAtMs = (): number | null => {
+    try {
+      const value = options.getLastActivityAtMs?.();
+      return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null;
+    } catch {
+      return null;
+    }
+  };
 
   return async function readWithTimeout<T>(
     reader: ReadableStreamDefaultReader<T>
   ): Promise<ReadableStreamReadResult<T>> {
-    const now = Date.now();
+    const readStartedAtMs = Date.now();
     if (deadlineAtMs != null) {
-      const remaining = deadlineAtMs - now;
+      const remaining = deadlineAtMs - readStartedAtMs;
       if (remaining <= 0) {
         const error = new StreamReadTimeoutError('total', options.totalTimeoutMs ?? 0, options.label);
         options.onTimeout?.(error);
@@ -57,19 +66,45 @@ export function createStreamReadWithTimeout(options: CreateStreamReadWithTimeout
       }
     }
 
-    const timeoutMs = Math.max(
-      1,
-      deadlineAtMs == null ? options.idleTimeoutMs : Math.min(options.idleTimeoutMs, deadlineAtMs - now)
-    );
-
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
     const readPromise = reader.read();
     const timeoutPromise = new Promise<never>((_, reject) => {
-      timeoutId = setTimeout(() => {
-        const error = new StreamReadTimeoutError('idle', timeoutMs, options.label);
-        options.onTimeout?.(error);
-        reject(error);
-      }, timeoutMs);
+      const scheduleTimeout = () => {
+        const now = Date.now();
+        if (deadlineAtMs != null && now >= deadlineAtMs) {
+          const error = new StreamReadTimeoutError('total', options.totalTimeoutMs ?? 0, options.label);
+          options.onTimeout?.(error);
+          reject(error);
+          return;
+        }
+
+        const lastActivityAtMs = Math.max(readStartedAtMs, resolveLastActivityAtMs() ?? 0);
+        const idleDeadlineAtMs = lastActivityAtMs + options.idleTimeoutMs;
+        const nextDeadlineAtMs = deadlineAtMs == null ? idleDeadlineAtMs : Math.min(idleDeadlineAtMs, deadlineAtMs);
+        const delayMs = Math.max(1, nextDeadlineAtMs - now);
+
+        timeoutId = setTimeout(() => {
+          const firedAtMs = Date.now();
+          if (deadlineAtMs != null && firedAtMs >= deadlineAtMs) {
+            const error = new StreamReadTimeoutError('total', options.totalTimeoutMs ?? 0, options.label);
+            options.onTimeout?.(error);
+            reject(error);
+            return;
+          }
+
+          const latestActivityAtMs = Math.max(readStartedAtMs, resolveLastActivityAtMs() ?? 0);
+          if (latestActivityAtMs + options.idleTimeoutMs > firedAtMs) {
+            scheduleTimeout();
+            return;
+          }
+
+          const error = new StreamReadTimeoutError('idle', options.idleTimeoutMs, options.label);
+          options.onTimeout?.(error);
+          reject(error);
+        }, delayMs);
+      };
+
+      scheduleTimeout();
     });
 
     try {

@@ -1,6 +1,6 @@
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { Database } from 'bun:sqlite';
-import { drizzle } from 'drizzle-orm/bun-sqlite';
+import { afterEach, beforeEach, describe, expect, test } from 'vitest';
+import Database from 'better-sqlite3';
+import { drizzle } from 'drizzle-orm/better-sqlite3';
 
 import type { AppDrizzleDb } from '@/lib/db/drizzle';
 import * as schema from '@/lib/db/schema';
@@ -55,6 +55,8 @@ describe('crowd review repository', () => {
         creator_notified_report_count INTEGER NOT NULL DEFAULT 0,
         latest_reported_at TEXT NOT NULL,
         target_card_updated_at_at_notice TEXT,
+        resolution_notified_at TEXT,
+        resolution_notified_case_updated_at TEXT,
         closed_at TEXT,
         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP

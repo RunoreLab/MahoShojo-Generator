@@ -46,6 +46,7 @@ import { AI_META_REQUEST_HEADER, AI_META_REQUEST_VALUE, readJsonWithAiMeta } fro
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
 import { getAnswerLimitInfo, isAnswerOverLimit, QUESTIONNAIRE_NATIVE_MAX_ANSWER_CHARS } from '@/lib/questionnaire-limits';
 import { authStorage } from '@/lib/auth';
+import { buildCustomProviderRequestPayload } from '@/lib/ai/custom-provider';
 import { mapDataCardSourceMeta } from '@/lib/data-card-read-mappers';
 import {
   DETAILS_QUESTIONNAIRE_THEME,
@@ -1814,15 +1815,7 @@ const DetailsPage: React.FC = () => {
 
     try {
       console.log('提交答案:', finalAnswerItems);
-      const customProviderPayload = (
-        userProviderConfig
-        && (userProviderConfig.apiKey || userProviderConfig.providerId === 'system')
-        && userProviderConfig.modelId !== 'default'
-      ) ? {
-        providerId: userProviderConfig.providerId,
-        modelId: userProviderConfig.modelId,
-        apiKey: userProviderConfig.apiKey,
-      } : undefined;
+      const customProviderPayload = buildCustomProviderRequestPayload(userProviderConfig);
 
       const endpoint = generationMode === 'stream'
         ? '/api/creator/generate-stream?format=sse'
@@ -2880,6 +2873,7 @@ const DetailsPage: React.FC = () => {
                           content: streamingMarkdown ?? streamedGeneralCard?.content ?? '',
                         }}
                         isStreaming={submitting}
+                        onStopGeneration={() => streamAbortControllerRef.current?.abort(STREAM_ABORT_REASON_USER)}
                         onSaveImage={handleSaveImage}
                         imageSaveMode={imageSaveMode}
                         saveButtonLabel={imageSaveButtonLabel}

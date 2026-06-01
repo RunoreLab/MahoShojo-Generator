@@ -27,6 +27,24 @@
     "type": "openai"
   },
   {
+    "name": "xiaomi_mimo_provider",
+    "apiKey": "your_xiaomi_mimo_sk_api_key_here",
+    "baseUrl": "https://api.xiaomimimo.com/v1",
+    "model": "mimo-v2.5-pro",
+    "type": "openai"
+  },
+  {
+    "name": "kouri_ds",
+    "apiKey": "your_kourichat_api_key_here",
+    "baseUrl": "https://api.kourichat.com/v1",
+    "model": [
+      "deepseek-v4-flash",
+      "deepseek-v4-pro"
+    ],
+    "type": "openai",
+    "defaultMaxOutputTokens": 65536
+  },
+  {
     "name": "backup_provider",
     "apiKey": "your_backup_api_key",
     "baseUrl": "https://api.backup-provider.com/v1",

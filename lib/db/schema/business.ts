@@ -3,6 +3,8 @@ import { index, integer, primaryKey, real, sqliteTable, text, uniqueIndex } from
 
 export type DataCardType = 'character' | 'scenario' | 'history' | 'questionnaire';
 export type DataCardReviewStatus = 'pending' | 'approved' | 'rejected';
+export type DataCardInteractionEventType = 'like' | 'usage';
+export type DataCardInteractionActorScope = 'auth_user' | 'activity_user' | 'anonymous';
 export type ArenaRatingEntityType = 'data_card' | 'preset';
 export type ArenaRatingQueue = 'strict' | 'free';
 export type ArenaRatingEventStatus = 'pending' | 'applied' | 'skipped' | 'failed';
@@ -466,6 +468,29 @@ export const favorites = sqliteTable(
   (table) => ({
     pk: primaryKey({ columns: [table.userId, table.dataCardId] }),
     dataCardIdIndex: index('idx_favorites_data_card_id').on(table.dataCardId),
+  }),
+);
+
+export const dataCardInteractions = sqliteTable(
+  'data_card_interactions',
+  {
+    id: text('id').primaryKey(),
+    dataCardId: text('data_card_id')
+      .notNull()
+      .references(() => dataCards.id, { onDelete: 'cascade' }),
+    eventType: text('event_type').$type<DataCardInteractionEventType>().notNull(),
+    actorScope: text('actor_scope').$type<DataCardInteractionActorScope>().notNull(),
+    actorKeyHash: text('actor_key_hash').notNull(),
+    createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    uniqueActorEvent: uniqueIndex('idx_data_card_interactions_unique_actor_event').on(
+      table.dataCardId,
+      table.eventType,
+      table.actorScope,
+      table.actorKeyHash,
+    ),
+    cardEventIndex: index('idx_data_card_interactions_card_event').on(table.dataCardId, table.eventType, table.createdAt),
   }),
 );
 
@@ -965,7 +990,22 @@ export const arenaRatingEvents = sqliteTable('arena_rating_events', {
   detailsJson: text('details_json'),
   createdAt: text('created_at').notNull(),
   appliedAt: text('applied_at'),
-});
+}, (table) => ({
+  aEntityQueueStatusCreatedAtIndex: index('idx_arena_rating_events_a_entity_queue_status_created_at').on(
+    table.aEntityType,
+    table.aEntityId,
+    table.queue,
+    table.status,
+    table.createdAt,
+  ),
+  bEntityQueueStatusCreatedAtIndex: index('idx_arena_rating_events_b_entity_queue_status_created_at').on(
+    table.bEntityType,
+    table.bEntityId,
+    table.queue,
+    table.status,
+    table.createdAt,
+  ),
+}));
 
 export const battleReportGenerations = sqliteTable('battle_report_generations', {
   id: text('id').primaryKey(),

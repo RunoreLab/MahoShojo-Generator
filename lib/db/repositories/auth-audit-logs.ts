@@ -81,6 +81,16 @@ export type GetLatestAuthAuditSuccessEpochInput = {
   ipAnonymized?: string | null;
 };
 
+export type CountRecentFailedLoginsByLoginIdentifierHashInput = {
+  loginIdentifierHash: string;
+  sinceEpochSeconds: number;
+};
+
+export type CountRecentFailedLoginsByIpAnonymizedInput = {
+  ipAnonymized: string;
+  sinceEpochSeconds: number;
+};
+
 const toSafeInteger = (value: unknown): number => {
   if (typeof value === 'number' && Number.isFinite(value)) return Math.max(0, Math.floor(value));
   if (typeof value === 'string') {
@@ -200,4 +210,56 @@ export const getLatestAuthAuditSuccessEpoch = async (
 
   const latest = rows[0]?.createdAt;
   return toSafeEpochSeconds(latest);
+};
+
+export const countRecentFailedLoginsByLoginIdentifierHash = async (
+  db: AppDrizzleDb,
+  input: CountRecentFailedLoginsByLoginIdentifierHashInput,
+): Promise<number> => {
+  const loginIdentifierHash = normalizeOptionalNonEmptyString(input.loginIdentifierHash, 128);
+  const sinceEpochSeconds = toSafeEpochSeconds(input.sinceEpochSeconds);
+  if (!loginIdentifierHash || sinceEpochSeconds === null) return 0;
+
+  const rows = await db
+    .select({
+      count: sql<number>`count(*)`,
+    })
+    .from(authAuditLogs)
+    .where(
+      and(
+        eq(authAuditLogs.eventType, 'login_failed'),
+        eq(authAuditLogs.resultCode, 'INVALID_CREDENTIAL'),
+        gte(authAuditLogs.createdAt, sinceEpochSeconds),
+        sql`json_extract(${authAuditLogs.metadataJson}, '$.loginIdentifierHash') = ${loginIdentifierHash}`,
+      ),
+    )
+    .limit(1);
+
+  return toSafeInteger(rows[0]?.count);
+};
+
+export const countRecentFailedLoginsByIpAnonymized = async (
+  db: AppDrizzleDb,
+  input: CountRecentFailedLoginsByIpAnonymizedInput,
+): Promise<number> => {
+  const ipAnonymized = normalizeOptionalNonEmptyString(input.ipAnonymized, 128);
+  const sinceEpochSeconds = toSafeEpochSeconds(input.sinceEpochSeconds);
+  if (!ipAnonymized || sinceEpochSeconds === null) return 0;
+
+  const rows = await db
+    .select({
+      count: sql<number>`count(*)`,
+    })
+    .from(authAuditLogs)
+    .where(
+      and(
+        eq(authAuditLogs.eventType, 'login_failed'),
+        eq(authAuditLogs.resultCode, 'INVALID_CREDENTIAL'),
+        eq(authAuditLogs.ipAnonymized, ipAnonymized),
+        gte(authAuditLogs.createdAt, sinceEpochSeconds),
+      ),
+    )
+    .limit(1);
+
+  return toSafeInteger(rows[0]?.count);
 };

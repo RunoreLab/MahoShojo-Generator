@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 
 import {
   buildPairKey,
@@ -385,6 +385,23 @@ describe('arena-ratings: 严格排位资格判定', () => {
 
   test('不满足：读取叙事历史开启', () => {
     expect(isStrictEligible({ ...baseSnapshot, extraJson: JSON.stringify({ readNarrativeHistory: true, rankedMatchOk: true }) }, baseCombatants)).toBe(false);
+  });
+
+  test('不满足：使用通用素材', () => {
+    expect(
+      isStrictEligible(
+        {
+          ...baseSnapshot,
+          extraJson: JSON.stringify({
+            readNarrativeHistory: false,
+            narrativeHistoryReadCount: 0,
+            rankedMatchOk: true,
+            materialCount: 1,
+          }),
+        },
+        baseCombatants,
+      ),
+    ).toBe(false);
   });
 
   test('不满足：使用黑名单模型', () => {

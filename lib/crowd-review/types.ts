@@ -3,6 +3,7 @@ import type {
   CrowdReviewDecision,
   CrowdReviewInspectorStatus,
   CrowdReviewResultCode,
+  DataCardType,
 } from '@/lib/db/schema';
 
 export type CrowdReviewSummaryDto = {
@@ -20,6 +21,14 @@ export type CrowdReviewPostVoteSummaryDto = {
   summaryText: string;
 };
 
+export type CrowdReviewReportReferenceItemDto = {
+  referenceType: 'public_data_card' | 'encyclopedia_entry';
+  referenceId: string;
+  labelSnapshot: string;
+  urlSnapshot: string | null;
+  note: string | null;
+};
+
 export type CrowdReviewCurrentCaseDto = {
   assignmentId: string;
   assignmentStatus: CrowdReviewAssignmentStatus;
@@ -32,11 +41,15 @@ export type CrowdReviewCurrentCaseDto = {
   targetSnapshot: {
     name: string;
     description: string | null;
+    type?: DataCardType | null;
+    data?: string | null;
+    updatedAt?: string | null;
   } | null;
   reportSummary: {
     reasonLabels: string[];
     details: string[];
     references: string[];
+    referenceItems?: CrowdReviewReportReferenceItemDto[];
   };
   ruleHints: string[];
   availableDecisions: CrowdReviewDecision[];

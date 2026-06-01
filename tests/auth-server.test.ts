@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 import { createAuthServer } from '@/lib/auth/server';
 
 const createJsonResponse = (payload: unknown, status = 200): Response =>
@@ -54,7 +54,7 @@ describe('auth/server unified chain', () => {
     expect(fetchCalls[0]?.url).toBe('https://example.com/api/auth/verify');
     const headers = new Headers(fetchCalls[0]?.init?.headers);
     expect(headers.get('cf-access-jwt-assertion')).toBe('cf-jwt-token');
-    expect(headers.get('cookie')?.includes('session_token=token')).toBeTrue();
+    expect(headers.get('cookie')?.includes('session_token=token')).toBe(true);
   });
 
   test('无会话时应回落到 legacy bearer 鉴权', async () => {
@@ -83,7 +83,7 @@ describe('auth/server unified chain', () => {
     });
 
     const result = await authServer.requireAuthUser(req);
-    expect('response' in result).toBeFalse();
+    expect('response' in result).toBe(false);
     if ('response' in result) return;
     expect(result.source).toBe('legacy-bearer');
     expect(result.user.id).toBe(7);
@@ -102,7 +102,7 @@ describe('auth/server unified chain', () => {
 
     const req = new Request('https://example.com/api/favorites');
     const result = await authServer.requireAuthUser(req);
-    expect('response' in result).toBeTrue();
+    expect('response' in result).toBe(true);
     if (!('response' in result)) return;
     expect(result.response.status).toBe(401);
     const payload = (await result.response.json()) as { error?: string };
@@ -131,7 +131,7 @@ describe('auth/server unified chain', () => {
     });
 
     const result = await authServer.requireAuthUser(req);
-    expect('response' in result).toBeTrue();
+    expect('response' in result).toBe(true);
     if (!('response' in result)) return;
     expect(result.response.status).toBe(403);
     const payload = (await result.response.json()) as { error?: string };

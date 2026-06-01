@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 
 describe('challenge entrant import', () => {
   test('会清掉 BattleDataModal transport meta 并保留来源信息', async () => {

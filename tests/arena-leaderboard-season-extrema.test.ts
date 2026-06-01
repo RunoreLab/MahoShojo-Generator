@@ -1,6 +1,4 @@
-import { beforeAll, describe, expect, mock, test } from 'bun:test';
-
-mock.module('server-only', () => ({}));
+import { beforeAll, describe, expect, vi, test } from 'vitest';
 
 let buildLeaderboardItemFromRow: typeof import('@/pages/api/arena/leaderboard').buildLeaderboardItemFromRow;
 

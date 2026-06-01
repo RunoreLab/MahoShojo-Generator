@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 
 import { createBattleReportWriteContext } from '@/lib/arena/battle-report-write-context';
 

@@ -5,6 +5,7 @@ import { createDeepSeek } from "@ai-sdk/deepseek";
 import { config, AIProvider } from "../config";
 import { getLogger } from "../logger";
 import { getProviderFetch } from "@/lib/ai/middleware/provider-fetch";
+import { resolveMaxOutputTokensOption } from "@/lib/ai/max-output-tokens";
 import { extractUpstreamErrorMessage, enhanceErrorWithUpstreamMessage } from "@/lib/ai/utils/error-extraction";
 import { createStreamReadWithTimeout, STREAM_READ_IDLE_TIMEOUT_MS, STREAM_READ_TOTAL_TIMEOUT_MS } from "@/lib/stream/timeout";
 
@@ -276,10 +277,7 @@ export async function generateWithStreamAI(
                 }
 
 	                const llm = createAIClient(provider);
-	                const maxOutputTokensOption =
-	                    typeof generationConfig.maxOutputTokens === 'number'
-	                        ? { maxOutputTokens: generationConfig.maxOutputTokens }
-	                        : {};
+	                const maxOutputTokensOption = resolveMaxOutputTokensOption(generationConfig, provider);
 	                const shouldEnableGoogleThinking =
 	                    provider.type === 'google' && typeof selectedModel === 'string' && /^gemini/i.test(selectedModel.trim());
 	                const googleThinkingOptions =

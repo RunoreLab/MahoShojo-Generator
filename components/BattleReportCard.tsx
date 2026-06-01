@@ -3,10 +3,12 @@
 import React, { useRef, useState } from 'react';
 import ReactMarkdown, { type Components, type ExtraProps } from 'react-markdown';
 import rehypeKatex from 'rehype-katex';
+import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 // 1. [新增] 导入随机判定结果的类型定义
 import { AdjudicationResult } from '@/types/arena';
 import remarkBattleTable from '@/lib/markdown/remarkBattleTable';
+import { fixNestedListIndentation } from '@/lib/markdown/fix-list-indentation';
 import {
   formatMarkdownImage,
   formatMarkdownLink,
@@ -85,6 +87,8 @@ export interface BattleReportIllustrationAsset {
 interface BattleReportCardProps {
   report: NewsReport;
   onSaveImage?: (imageUrl: string) => void;
+  isStreaming?: boolean;
+  onStopGeneration?: () => void;
   // 战斗模式，设为可选以兼容旧功能
   mode?: 'classic' | 'kizuna' | 'daily' | 'scenario';
   liveBody?: string;
@@ -92,14 +96,23 @@ interface BattleReportCardProps {
   cardWidthPx?: number | null;
 }
 
-const BattleReportCard: React.FC<BattleReportCardProps> = ({ report, onSaveImage, mode, liveBody, illustrationAsset, cardWidthPx }) => {
+const BattleReportCard: React.FC<BattleReportCardProps> = ({
+  report,
+  onSaveImage,
+  isStreaming = false,
+  onStopGeneration,
+  mode,
+  liveBody,
+  illustrationAsset,
+  cardWidthPx,
+}) => {
   const cardRef = useRef<HTMLDivElement>(null);
   const [isSavingImage, setIsSavingImage] = useState(false);
 
   const headline = typeof report?.headline === 'string' && report.headline.trim() ? report.headline.trim() : '（无标题）';
   const reporterName = typeof report?.reporterInfo?.name === 'string' ? report.reporterInfo.name : '';
   const reporterPublication = typeof report?.reporterInfo?.publication === 'string' ? report.reporterInfo.publication : '';
-  const bodyContent = (liveBody ?? report.article?.body ?? '').trimEnd();
+  const bodyContent = fixNestedListIndentation((liveBody ?? report.article?.body ?? '').trimEnd());
   const analysisContent = (report.article?.analysis ?? '').trimEnd();
   const officialWinner = (report.officialReport?.winner ?? '').trim();
   const officialConclusion = (report.officialReport?.conclusion ?? '').trimEnd();
@@ -578,7 +591,7 @@ ${adjudicationMarkdown}
         <div className="result-item">
           <div className="result-value">
             <ReactMarkdown
-              remarkPlugins={[remarkBattleTable, [remarkMath, { singleDollarTextMath: true }]]}
+              remarkPlugins={[remarkGfm, remarkBattleTable, [remarkMath, { singleDollarTextMath: true }]]}
               rehypePlugins={[[rehypeKatex, { throwOnError: false, strict: 'ignore' }]]}
               components={markdownComponents}
             >
@@ -666,8 +679,13 @@ ${adjudicationMarkdown}
         {/* 按钮容器 */}
         <div className="buttons-container flex gap-2 justify-center mt-4" style={{ alignItems: 'stretch' }}>
           {onSaveImage && (
-            <button onClick={handleSaveImage} className="save-button" style={{ marginTop: 0, flex: 1 }} disabled={isSavingImage}>
-              {isSavingImage ? '生成中...' : '📱 保存为图片'}
+            <button
+              onClick={isStreaming && onStopGeneration ? onStopGeneration : handleSaveImage}
+              className="save-button"
+              style={{ marginTop: 0, flex: 1 }}
+              disabled={isSavingImage}
+            >
+              {isStreaming && onStopGeneration ? '⏹ 停止生成' : isSavingImage ? '生成中...' : '📱 保存为图片'}
             </button>
           )}
           <button onClick={handleSaveMarkdown} className="save-button" style={{ marginTop: 0, flex: 1 }}>
