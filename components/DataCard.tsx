@@ -555,15 +555,17 @@ export default function DataCard({
           >
             删除
           </button>
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onEditData?.();
-            }}
-            className="flex-1 min-w-[80px] text-sm px-3 py-1.5 bg-purple-100 text-purple-700 hover:bg-purple-200 rounded transition-colors flex items-center justify-center gap-1"
-          >
-            编辑档案
-          </button>
+          {onEditData && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onEditData();
+              }}
+              className="flex-1 min-w-[80px] text-sm px-3 py-1.5 bg-purple-100 text-purple-700 hover:bg-purple-200 rounded transition-colors flex items-center justify-center gap-1"
+            >
+              编辑档案
+            </button>
+          )}
           {onReplace && (
             <button
               onClick={(e) => {

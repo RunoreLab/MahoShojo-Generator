@@ -381,6 +381,7 @@ export default function SaveToCloudButton({
         defaultFilters={cardType ? { type: cardType } : undefined}
         allowedTypes={cardType ? [cardType] : undefined}
         hideEditData={true}
+        allowHistoryReplace={cardType === 'history'}
         showHotHint={false}
       />
     </>
