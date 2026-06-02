@@ -24,7 +24,7 @@
   ],
   "env": {
     "production": {
-      "name": "ifmahoushoujo",
+      "name": "mahoshojo-next",
       "compatibility_date": "2024-09-23",
       "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
       "services": [
@@ -36,7 +36,7 @@
       "d1_databases": [
         {
           "binding": "DB",
-          "database_name": "ifmahoushoujo",
+          "database_name": "mahoshojo",
           "database_id": "8eb9b25c-5a00-4feb-b5cb-c5dd25cda1d3",
           "migrations_dir": "drizzle"
         }
@@ -49,7 +49,7 @@
       "services": [
         {
           "binding": "WORKER_SELF_REFERENCE",
-          "service": "ifmahoushoujo-preview"
+          "service": "mahoshojo-next-preview"
         }
       ],
       "d1_databases": [
