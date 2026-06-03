@@ -1,3 +1,5 @@
+import { withPagesApiResponse } from '@/lib/pages-api-adapter';
+import { getRequestUrl } from '@/lib/request-url';
 import type { NextRequest } from 'next/server';
 
 import { PRESET_LIST } from '@/lib/presets';
@@ -101,7 +103,7 @@ export const buildLeaderboardItemFromRow = (
   };
 };
 
-export default async function handler(req: NextRequest) {
+async function handler(req: NextRequest) {
   if (req.method !== 'GET') {
     return new Response(JSON.stringify({ error: 'Method Not Allowed' }), {
       status: 405,
@@ -119,7 +121,7 @@ export default async function handler(req: NextRequest) {
         });
       }
 
-      const url = new URL(req.url);
+      const url = getRequestUrl(req);
       const queue: Queue = url.searchParams.get('queue') === 'free' ? 'free' : 'strict';
       const sort: Sort = url.searchParams.get('sort') === 'tech' ? 'tech' : 'rating';
       const order: SortOrder = url.searchParams.get('order') === 'asc' ? 'asc' : 'desc';
@@ -199,3 +201,5 @@ export default async function handler(req: NextRequest) {
     }
   });
 }
+
+export default withPagesApiResponse(handler);

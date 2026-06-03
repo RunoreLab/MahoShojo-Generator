@@ -1,3 +1,4 @@
+import { withPagesApiResponse } from '@/lib/pages-api-adapter';
 import { getPvpUserSummariesByUserIds } from '@/lib/database/pvp';
 import { buildDefaultPvpUserSummary, computePvpWinRate, mapPvpUserSummaryRow } from '@/lib/pvp/read-mappers';
 import { json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
@@ -45,4 +46,5 @@ async function summaryHandler(req: Request): Promise<Response> {
   });
 }
 
-export default withPvpErrorBoundary(summaryHandler);
+export default withPagesApiResponse(withPvpErrorBoundary(summaryHandler));
+

@@ -1,3 +1,4 @@
+import { withPagesApiResponse } from '@/lib/pages-api-adapter';
 import {
   getLatestPvpRoundByMatch,
   getPvpRoomById,
@@ -206,4 +207,5 @@ async function forceHandler(req: Request): Promise<Response> {
   return json({ error: '未知 kind' }, { status: 400 });
 }
 
-export default withPvpErrorBoundary(forceHandler);
+export default withPagesApiResponse(withPvpErrorBoundary(forceHandler));
+

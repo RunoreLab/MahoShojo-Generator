@@ -1,3 +1,4 @@
+import { withPagesApiResponse } from '@/lib/pages-api-adapter';
 import {
   getPvpCardSnapshotById,
   getPvpEligibleScenarioDataCard,
@@ -675,4 +676,5 @@ async function resolveHandler(req: Request): Promise<Response> {
   return json({ success: true, roundResolved: true, result: JSON.parse(resultJson), waitingConfirmation: true });
 }
 
-export default withPvpErrorBoundary(resolveHandler);
+export default withPagesApiResponse(withPvpErrorBoundary(resolveHandler));
+

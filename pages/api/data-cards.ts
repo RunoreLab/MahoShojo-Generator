@@ -1,3 +1,5 @@
+import { withPagesApiResponse } from '@/lib/pages-api-adapter';
+import { getRequestUrl } from '@/lib/request-url';
 import { 
   createDataCardWithAuthor, 
   getUserDataCards, 
@@ -11,7 +13,7 @@ import {
 } from '@/lib/database/data-cards';
 import { getUserDataCardCapacity } from '@/lib/database/users';
 import { requireAuthUser } from '@/lib/auth/server';
-import { config } from '@/lib/config';
+import { config as appConfig } from '@/lib/config';
 import { quickCheck } from '@/lib/sensitive-word-filter';
 import { getDrizzleDbFromRuntime, type AppDrizzleDb } from '@/lib/db/drizzle';
 import {
@@ -71,7 +73,7 @@ async function computeAndUpsertMetrics(
   }
 }
 
-export default async function handler(req: Request): Promise<Response> {
+async function handler(req: Request): Promise<Response> {
   const auth = await requireAuthUser(req);
   if ('response' in auth) return auth.response;
   const user = auth.user;
@@ -94,7 +96,7 @@ export default async function handler(req: Request): Promise<Response> {
     case 'GET':
       // 获取用户的所有数据卡
       try {
-        const url = new URL(req.url);
+        const url = getRequestUrl(req);
         const search = url.searchParams.get('search'); // 搜索关键词
         const sortBy = url.searchParams.get('sortBy') as 'likes' | 'usage' | 'favorites' | 'created_at' | null; // 排序方式
         
@@ -170,7 +172,7 @@ export default async function handler(req: Request): Promise<Response> {
 
         // 检查用户数据卡数量限制（热门卡不占槽）
         const usedSlots = await getUserUsedSlots(userId);
-        const userCapacity = await getUserDataCardCapacity(userId, config.DEFAULT_DATA_CARD_CAPACITY);
+        const userCapacity = await getUserDataCardCapacity(userId, appConfig.DEFAULT_DATA_CARD_CAPACITY);
         if (usedSlots >= userCapacity) {
           return new Response(JSON.stringify({ 
             error: `数据卡数量已达上限（${userCapacity}个），请删除部分数据卡后再试` 
@@ -208,7 +210,7 @@ export default async function handler(req: Request): Promise<Response> {
         if (result.id) {
           const tasks: Promise<unknown>[] = [computeAndUpsertMetrics(db, result.id, dataWithAuthorString)];
           const shouldAutoReview =
-            config.DATA_CARD_AUTO_REVIEW?.enabled && normalizedPublic === 1 && reviewStatus === 'pending';
+            appConfig.DATA_CARD_AUTO_REVIEW?.enabled && normalizedPublic === 1 && reviewStatus === 'pending';
           if (shouldAutoReview) {
             tasks.push(autoReviewLatestPendingPublicDataCardsForUser(userId));
           }
@@ -320,7 +322,7 @@ export default async function handler(req: Request): Promise<Response> {
               ? Math.floor(isPublic)
               : (isPublic ? 1 : 0);
         const shouldAutoReview =
-          config.DATA_CARD_AUTO_REVIEW?.enabled &&
+          appConfig.DATA_CARD_AUTO_REVIEW?.enabled &&
           !isExempt &&
           !isAdmin &&
           normalizedPublicAfter === 1 &&
@@ -408,7 +410,7 @@ export default async function handler(req: Request): Promise<Response> {
           }
 
           const shouldAutoReviewUpdate =
-            config.DATA_CARD_AUTO_REVIEW?.enabled && Number(currentCard.is_public) === 1;
+            appConfig.DATA_CARD_AUTO_REVIEW?.enabled && Number(currentCard.is_public) === 1;
           if (shouldAutoReviewUpdate) {
             const executionContext = (req as any).context;
             const autoReviewPromise = autoReviewLatestPendingPublicDataCardUpdatesForUser(userId).then(() => undefined);
@@ -449,7 +451,7 @@ export default async function handler(req: Request): Promise<Response> {
     case 'DELETE':
       // 删除数据卡
       try {
-        const url = new URL(req.url);
+        const url = getRequestUrl(req);
         const id = url.searchParams.get('id');
 
         if (!id) {
@@ -468,7 +470,7 @@ export default async function handler(req: Request): Promise<Response> {
           });
         }
 
-        await pruneUserRecycleBin(userId, config.RECYCLE_BIN_LIMIT);
+        await pruneUserRecycleBin(userId, appConfig.RECYCLE_BIN_LIMIT);
 
         return new Response(JSON.stringify({ success: true, message: '数据卡已移入回收站' }), {
           status: 200,
@@ -489,3 +491,5 @@ export default async function handler(req: Request): Promise<Response> {
       });
   }
 }
+
+export default withPagesApiResponse(handler);

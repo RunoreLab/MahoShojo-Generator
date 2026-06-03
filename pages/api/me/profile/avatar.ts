@@ -1,3 +1,4 @@
+import { withPagesApiResponse } from '@/lib/pages-api-adapter';
 import { getDrizzleDbFromRuntime } from '@/lib/db/drizzle';
 import { updateBusinessUserAvatarWebpBase64ById } from '@/lib/db/repositories/business-users';
 import { json, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
@@ -72,7 +73,7 @@ async function compressAvatarToWebpBase64(file: File) {
   return base64;
 }
 
-export default withPvpErrorBoundary(async function handler(req: Request): Promise<Response> {
+const handler = withPvpErrorBoundary(async function handler(req: Request): Promise<Response> {
   const auth = await requireAuthUser(req);
   if ('response' in auth) return auth.response;
   const db = getDrizzleDbFromRuntime();
@@ -143,3 +144,5 @@ export default withPvpErrorBoundary(async function handler(req: Request): Promis
   return json({ error: 'Method not allowed' }, { status: 405 });
 });
 
+
+export default withPagesApiResponse(handler);

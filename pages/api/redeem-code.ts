@@ -1,3 +1,4 @@
+import { withPagesApiResponse } from '@/lib/pages-api-adapter';
 import { requireAuthUser } from '@/lib/auth/server';
 import { getRuntimeD1Client } from '@/lib/db/drizzle';
 
@@ -148,4 +149,4 @@ export const createRedeemHandler = (overrides: Partial<RedeemDeps> = {}): ((req:
   };
 };
 
-export default createRedeemHandler();
+export default withPagesApiResponse(createRedeemHandler());

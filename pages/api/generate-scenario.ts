@@ -1,3 +1,4 @@
+import { withPagesApiResponse } from '@/lib/pages-api-adapter';
 // pages/api/generate-scenario.ts
 
 import { z } from 'zod/v3';
@@ -243,4 +244,4 @@ async function handler(req: NextRequest): Promise<Response> {
   }
 }
 
-export default handler;
+export default withPagesApiResponse(handler);

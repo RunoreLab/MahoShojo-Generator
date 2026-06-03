@@ -1,3 +1,4 @@
+import { withPagesApiResponse } from '@/lib/pages-api-adapter';
 import { z } from 'zod/v3';
 import { NextRequest } from 'next/server';
 
@@ -88,7 +89,7 @@ const normalizeTitle = (raw: string): string => {
     .slice(0, 60);
 };
 
-export default async function handler(req: NextRequest): Promise<Response> {
+async function handler(req: NextRequest): Promise<Response> {
   if (req.method !== 'POST') {
     return json({ error: 'Method not allowed' }, { status: 405 });
   }
@@ -160,3 +161,5 @@ export default async function handler(req: NextRequest): Promise<Response> {
     return json({ error: '生成失败', message }, { status: 500 });
   }
 }
+
+export default withPagesApiResponse(handler);

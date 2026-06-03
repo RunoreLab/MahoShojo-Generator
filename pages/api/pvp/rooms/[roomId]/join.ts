@@ -1,3 +1,4 @@
+import { withPagesApiResponse } from '@/lib/pages-api-adapter';
 import { addPvpRoomPlayer, getPvpRoomById, getPvpRoomMembers, getPvpRoomPlayers, updatePvpRoomCas } from '@/lib/database/pvp';
 import { parsePvpRoomInternalState } from '@/lib/pvp/bot/room';
 import { constantTimeEqual, hashJoinCode } from '@/lib/pvp/crypto';
@@ -94,4 +95,5 @@ async function joinHandler(req: Request): Promise<Response> {
   return json({ success: true, role: joinAs, advanced: shouldAdvance, casOk });
 }
 
-export default withPvpErrorBoundary(joinHandler);
+export default withPagesApiResponse(withPvpErrorBoundary(joinHandler));
+

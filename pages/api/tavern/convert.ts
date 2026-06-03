@@ -1,3 +1,4 @@
+import { withPagesApiResponse } from '@/lib/pages-api-adapter';
 import { z } from 'zod/v3';
 import { NextRequest } from 'next/server';
 
@@ -449,7 +450,7 @@ const resolveProviderOverride = (payload: unknown): CustomProviderResolveResult 
   };
 };
 
-export default async function handler(req: NextRequest): Promise<Response> {
+async function handler(req: NextRequest): Promise<Response> {
   if (req.method !== 'POST') {
     return new Response(JSON.stringify({ error: 'Method not allowed' }), {
       status: 405,
@@ -704,3 +705,5 @@ export default async function handler(req: NextRequest): Promise<Response> {
     });
   }
 }
+
+export default withPagesApiResponse(handler);

@@ -1,3 +1,4 @@
+import { withPagesApiResponse } from '@/lib/pages-api-adapter';
 import {
   appendSetCookieHeaders,
   extractErrorMessage,
@@ -28,7 +29,7 @@ const toBoolean = (value: unknown): boolean | undefined => {
   return undefined;
 };
 
-export default withPvpErrorBoundary(async function handler(req: Request): Promise<Response> {
+const handler = withPvpErrorBoundary(async function handler(req: Request): Promise<Response> {
   if (req.method !== 'PUT') return json({ error: 'Method not allowed' }, { status: 405 });
 
   const auth = await requireAuthUser(req);
@@ -142,3 +143,5 @@ export default withPvpErrorBoundary(async function handler(req: Request): Promis
     },
   );
 });
+
+export default withPagesApiResponse(handler);

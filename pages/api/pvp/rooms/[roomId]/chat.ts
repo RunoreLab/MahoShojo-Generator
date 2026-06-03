@@ -1,3 +1,4 @@
+import { withPagesApiResponse } from '@/lib/pages-api-adapter';
 import {
   createPvpRoomChatMessage,
   getLatestPvpRoomChatMessageBySender,
@@ -103,5 +104,6 @@ async function chatHandler(req: Request): Promise<Response> {
   return json({ error: 'Method not allowed' }, { status: 405 });
 }
 
-export default withPvpErrorBoundary(chatHandler);
+export default withPagesApiResponse(withPvpErrorBoundary(chatHandler));
+
 

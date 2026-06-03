@@ -1,3 +1,4 @@
+import { getRequestUrl } from '@/lib/request-url';
 import { getUserByAuthKey } from '@/lib/database/users';
 import { ACTIVITY_TOKEN_HEADER, ACTIVITY_USER_ID_HEADER } from '@/lib/auth/activity-token';
 import { hasBetterAuthSessionCookie } from '@/lib/auth/better-auth';
@@ -142,7 +143,7 @@ const getSessionAuthUser = async (req: Request, deps: AuthServerDeps): Promise<A
   if (!deps.hasBetterAuthSessionCookieImpl(req)) return null;
 
   try {
-    const requestUrl = new URL(req.url);
+    const requestUrl = getRequestUrl(req);
     if (requestUrl.pathname === '/api/auth/verify') return null;
 
     const verifyUrl = new URL('/api/auth/verify', requestUrl.origin);

@@ -1,3 +1,4 @@
+import { withPagesApiResponse } from '@/lib/pages-api-adapter';
 import {
   getPvpCardSnapshotById,
   getPvpRoomById,
@@ -473,4 +474,5 @@ async function getRoomHandler(req: Request): Promise<Response> {
   });
 }
 
-export default withPvpErrorBoundary(getRoomHandler);
+export default withPagesApiResponse(withPvpErrorBoundary(getRoomHandler));
+

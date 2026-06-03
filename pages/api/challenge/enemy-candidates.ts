@@ -1,3 +1,5 @@
+import { withPagesApiResponse } from '@/lib/pages-api-adapter';
+import { getRequestUrl } from '@/lib/request-url';
 import type { ChallengeWorldId, StrengthTier } from '@/lib/challenge/types';
 import {
   resolveChallengeEnemyCandidates,
@@ -45,7 +47,7 @@ export const createChallengeEnemyCandidatesHandler = (
     }
 
     try {
-      const url = new URL(req.url);
+      const url = getRequestUrl(req);
       const worldId = (url.searchParams.get('worldId') ?? 'arena') as ChallengeWorldId;
       if (worldId !== 'arena') {
         return errorJson(400, '暂不支持该挑战世界');
@@ -110,4 +112,4 @@ export const createChallengeEnemyCandidatesHandler = (
   };
 };
 
-export default createChallengeEnemyCandidatesHandler();
+export default withPagesApiResponse(createChallengeEnemyCandidatesHandler());

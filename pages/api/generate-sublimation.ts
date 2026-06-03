@@ -1,3 +1,4 @@
+import { withPagesApiResponse } from '@/lib/pages-api-adapter';
 // pages/api/generate-sublimation.ts
 
 import { z } from 'zod/v3';
@@ -933,4 +934,4 @@ const extractTextForCheck = (data: any): string => {
   return textContent;
 };
 
-export default handler;
+export default withPagesApiResponse(handler);

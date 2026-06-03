@@ -1,3 +1,4 @@
+import { withPagesApiResponse } from '@/lib/pages-api-adapter';
 import { getPvpRoundById, getPvpRoomById, getPvpRoomHands, getPvpRoomPlayers, upsertPvpRoundChoice } from '@/lib/database/pvp';
 import { getRoomIdFromRequestUrl, getRoundIdFromRequestUrl } from '@/lib/pvp/route';
 import { json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
@@ -84,4 +85,5 @@ async function chooseHandler(req: Request): Promise<Response> {
   return json({ success: true });
 }
 
-export default withPvpErrorBoundary(chooseHandler);
+export default withPagesApiResponse(withPvpErrorBoundary(chooseHandler));
+

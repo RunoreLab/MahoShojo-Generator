@@ -1,3 +1,5 @@
+import { withPagesApiResponse } from '@/lib/pages-api-adapter';
+import { getRequestUrl } from '@/lib/request-url';
 import {
   addCardsToDeck,
   getDeckCardsWithAccess,
@@ -9,10 +11,10 @@ import { getDeckStatus } from '@/lib/deck-status';
 import { mapDeckReadRow } from '@/lib/deck-read-mappers';
 import { getAuthUser, requireAuthUser } from '@/lib/auth/server';
 
-export default async function handler(req: Request): Promise<Response> {
+async function handler(req: Request): Promise<Response> {
   if (req.method === 'GET') {
     try {
-      const url = new URL(req.url);
+      const url = getRequestUrl(req);
       const deckId = url.searchParams.get('deckId')?.trim() || '';
       if (!deckId) {
         return new Response(JSON.stringify({ error: '缺少卡组ID' }), {
@@ -161,3 +163,5 @@ export default async function handler(req: Request): Promise<Response> {
     headers: { 'Content-Type': 'application/json' }
   });
 }
+
+export default withPagesApiResponse(handler);

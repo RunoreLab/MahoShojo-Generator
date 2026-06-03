@@ -1,3 +1,4 @@
+import { withPagesApiResponse } from '@/lib/pages-api-adapter';
 import {
   getBattleReportGenerationByIdLite,
   updateBattleReportGenerationOutputHasSensitiveWords,
@@ -24,7 +25,7 @@ const getGenerationIdFromUrl = (url: string): string | null => {
   }
 };
 
-export default async function handler(req: Request): Promise<Response> {
+async function handler(req: Request): Promise<Response> {
   if (req.method !== 'GET') return json({ error: 'Method not allowed' }, { status: 405 });
 
   const auth = await requireAuthUser(req);
@@ -102,3 +103,5 @@ export default async function handler(req: Request): Promise<Response> {
     })),
   });
 }
+
+export default withPagesApiResponse(handler);

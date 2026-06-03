@@ -1,3 +1,4 @@
+import { withPagesApiResponse } from '@/lib/pages-api-adapter';
 import {
   clearPvpRoomEphemeralState,
   deletePvpRoomHand,
@@ -213,4 +214,5 @@ async function kickHandler(req: Request): Promise<Response> {
   return json({ success: true, nextVersion: expectedVersion + 1 });
 }
 
-export default withPvpErrorBoundary(kickHandler);
+export default withPagesApiResponse(withPvpErrorBoundary(kickHandler));
+

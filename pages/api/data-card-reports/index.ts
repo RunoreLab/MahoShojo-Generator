@@ -1,3 +1,5 @@
+import { withPagesApiResponse } from '@/lib/pages-api-adapter';
+import { getRequestUrl } from '@/lib/request-url';
 import { getAuthUser, json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
 import {
   DataCardReportConflictError,
@@ -33,7 +35,7 @@ const resolveDb = async (deps: Partial<HandlerDeps>): Promise<DataCardReportsSer
   (deps.getDb ? await deps.getDb() : await defaultDeps.getDb());
 
 const getTargetEntityIdFromQuery = (req: Request): string => {
-  const url = new URL(req.url);
+  const url = getRequestUrl(req);
   return url.searchParams.get('dataCardId')?.trim() ?? '';
 };
 
@@ -177,4 +179,4 @@ export const createDataCardReportsHandler =
     return json({ error: 'Method not allowed' }, { status: 405 });
   };
 
-export default withPvpErrorBoundary(createDataCardReportsHandler());
+export default withPagesApiResponse(withPvpErrorBoundary(createDataCardReportsHandler()));

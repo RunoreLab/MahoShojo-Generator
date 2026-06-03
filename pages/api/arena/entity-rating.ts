@@ -1,3 +1,5 @@
+import { withPagesApiResponse } from '@/lib/pages-api-adapter';
+import { getRequestUrl } from '@/lib/request-url';
 import type { NextRequest } from 'next/server';
 
 import { getDrizzleDbFromRuntime } from '@/lib/db/drizzle';
@@ -23,7 +25,7 @@ const toNonNegativeInt = (value: unknown, fallback: number): number => {
   return Math.max(0, Math.floor(n));
 };
 
-export default async function handler(req: NextRequest): Promise<Response> {
+async function handler(req: NextRequest): Promise<Response> {
   if (req.method !== 'GET') {
     const body = { success: false, error: 'Method Not Allowed' } satisfies ApiErrorResponse;
     return new Response(JSON.stringify(body), {
@@ -33,7 +35,7 @@ export default async function handler(req: NextRequest): Promise<Response> {
   }
 
   try {
-    const url = new URL(req.url);
+    const url = getRequestUrl(req);
     const queue = url.searchParams.get('queue') === 'free' ? 'free' : 'strict';
     const entityType = url.searchParams.get('entityType') === 'preset' ? 'preset' : url.searchParams.get('entityType') === 'data_card' ? 'data_card' : null;
     const entityId = (url.searchParams.get('entityId') ?? '').trim();
@@ -70,3 +72,5 @@ export default async function handler(req: NextRequest): Promise<Response> {
     return new Response(JSON.stringify(body), { status: 500, headers: { 'Content-Type': 'application/json' } });
   }
 }
+
+export default withPagesApiResponse(handler);

@@ -1,3 +1,4 @@
+import { withPagesApiResponse } from '@/lib/pages-api-adapter';
 // pages/api/generate-canshou.ts
 import { z } from 'zod/v3';
 import { generateWithAI, GenerationConfig, LoadBalanceStrategy, type GenerateWithAIOptions } from '../../lib/ai';
@@ -607,4 +608,4 @@ async function handler(req: NextRequest): Promise<Response> {
   }
 }
 
-export default handler;
+export default withPagesApiResponse(handler);

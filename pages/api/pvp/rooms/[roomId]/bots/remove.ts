@@ -1,3 +1,4 @@
+import { withPagesApiResponse } from '@/lib/pages-api-adapter';
 import { getPvpRoomById, getPvpRoomPlayers, updatePvpRoomCas } from '@/lib/database/pvp';
 import { parsePvpRoomInternalState, stringifyPvpRoomInternalState } from '@/lib/pvp/bot/room';
 import { requiresPvpSubmissionPhase } from '@/lib/pvp/logic';
@@ -58,4 +59,5 @@ async function removeBotHandler(req: Request): Promise<Response> {
   return json({ success: true, nextVersion: expectedVersion + 1 });
 }
 
-export default withPvpErrorBoundary(removeBotHandler);
+export default withPagesApiResponse(withPvpErrorBoundary(removeBotHandler));
+

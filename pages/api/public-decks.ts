@@ -1,3 +1,5 @@
+import { withPagesApiResponse } from '@/lib/pages-api-adapter';
+import { getRequestUrl } from '@/lib/request-url';
 import { getDeckCardsWithAccess } from '@/lib/database/deck-cards';
 import { getDeckById, getPublicDecks } from '@/lib/database/decks';
 import { getAuthUser } from '@/lib/auth/server';
@@ -15,7 +17,7 @@ const readIntParam = (value: string | null, fallback: number) => {
 
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
 
-export default async function handler(req: Request): Promise<Response> {
+async function handler(req: Request): Promise<Response> {
   if (req.method !== 'GET') {
     return new Response(JSON.stringify({ error: 'Method not allowed' }), {
       status: 405,
@@ -24,7 +26,7 @@ export default async function handler(req: Request): Promise<Response> {
   }
 
   try {
-    const url = new URL(req.url);
+    const url = getRequestUrl(req);
     const id = url.searchParams.get('id');
     const searchRaw = url.searchParams.get('search');
     const sortByRaw = url.searchParams.get('sortBy');
@@ -79,3 +81,5 @@ export default async function handler(req: Request): Promise<Response> {
     });
   }
 }
+
+export default withPagesApiResponse(handler);

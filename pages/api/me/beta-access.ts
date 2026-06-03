@@ -1,7 +1,8 @@
+import { withPagesApiResponse } from '@/lib/pages-api-adapter';
 import { getUserProfileCardDataStats } from '@/lib/database/data-cards';
 import { json, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
 
-export default withPvpErrorBoundary(async function handler(req: Request): Promise<Response> {
+const handler = withPvpErrorBoundary(async function handler(req: Request): Promise<Response> {
   const auth = await requireAuthUser(req);
   if ('response' in auth) return auth.response;
 
@@ -21,3 +22,5 @@ export default withPvpErrorBoundary(async function handler(req: Request): Promis
     { headers: { 'Cache-Control': 'no-store' } }
   );
 });
+
+export default withPagesApiResponse(handler);

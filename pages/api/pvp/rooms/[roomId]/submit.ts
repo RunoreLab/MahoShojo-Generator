@@ -1,3 +1,4 @@
+import { withPagesApiResponse } from '@/lib/pages-api-adapter';
 import { getPvpEligibleDataCard, getPvpRoomById, getPvpRoomPlayers, updatePvpRoomCas, upsertPvpRoomSubmission } from '@/lib/database/pvp';
 import { quickCheck } from '@/lib/sensitive-word-filter';
 import { describePvpRoomCardRange, isPvpCombatantTypeAllowedByRange, isPvpDataCardStatsAllowedByRange, normalizePvpRoomCardRange } from '@/lib/pvp/card-range';
@@ -191,4 +192,5 @@ async function submitHandler(req: Request): Promise<Response> {
   return json({ success: true, submitted: true, nextVersion: expectedVersion + 1 });
 }
 
-export default withPvpErrorBoundary(submitHandler);
+export default withPagesApiResponse(withPvpErrorBoundary(submitHandler));
+

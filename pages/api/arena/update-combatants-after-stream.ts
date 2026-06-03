@@ -1,3 +1,4 @@
+import { withPagesApiResponse } from '@/lib/pages-api-adapter';
 // pages/api/arena/update-combatants-after-stream.ts
 
 import { getLogger } from '@/lib/logger';
@@ -110,4 +111,4 @@ async function handler(req: NextRequest): Promise<Response> {
     }
 }
 
-export default handler;
+export default withPagesApiResponse(handler);

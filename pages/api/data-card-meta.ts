@@ -1,3 +1,5 @@
+import { withPagesApiResponse } from '@/lib/pages-api-adapter';
+import { getRequestUrl } from '@/lib/request-url';
 import type { NextRequest } from 'next/server';
 
 import { getAuthUser } from '@/lib/auth/server';
@@ -128,7 +130,7 @@ const json = (payload: unknown, status = 200): Response =>
     headers: { 'Content-Type': 'application/json' },
   });
 
-export default async function handler(req: NextRequest) {
+async function handler(req: NextRequest) {
   if (req.method !== 'GET') {
     return json({ error: 'Method Not Allowed' }, 405);
   }
@@ -139,7 +141,7 @@ export default async function handler(req: NextRequest) {
     return json({ error: '数据库绑定不可用，请检查 Cloudflare D1 配置' }, 503);
   }
 
-  const url = new URL(req.url);
+  const url = getRequestUrl(req);
   const dataCardId = (url.searchParams.get('dataCardId') ?? '').trim();
   if (!dataCardId) {
     return json({ error: '缺少 dataCardId' }, 400);
@@ -286,3 +288,5 @@ export default async function handler(req: NextRequest) {
     return json({ success: false, error: '无法加载数据卡指标' }, 500);
   }
 }
+
+export default withPagesApiResponse(handler);

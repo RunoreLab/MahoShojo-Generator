@@ -1,3 +1,5 @@
+import { withPagesApiResponse } from '@/lib/pages-api-adapter';
+import { getRequestUrl } from '@/lib/request-url';
 import { getReportAppealEntry, ReportAppealForbiddenError, ReportAppealNotFoundError, ReportAppealServiceUnavailableError, ReportAppealUnprocessableError, ReportAppealValidationError } from '@/lib/report-appeals/service';
 import { json, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
 
@@ -37,7 +39,7 @@ export const createReportAppealEntryHandler =
     const auth = await (deps.requireAuthUser ?? defaultDeps.requireAuthUser)(req);
     if ('response' in auth) return auth.response;
 
-    const reportCaseId = new URL(req.url).searchParams.get('reportCaseId')?.trim() ?? '';
+    const reportCaseId = getRequestUrl(req).searchParams.get('reportCaseId')?.trim() ?? '';
     if (!reportCaseId) {
       return json({ error: '缺少 reportCaseId' }, { status: 400 });
     }
@@ -56,4 +58,4 @@ export const createReportAppealEntryHandler =
     }
   };
 
-export default withPvpErrorBoundary(createReportAppealEntryHandler());
+export default withPagesApiResponse(withPvpErrorBoundary(createReportAppealEntryHandler()));

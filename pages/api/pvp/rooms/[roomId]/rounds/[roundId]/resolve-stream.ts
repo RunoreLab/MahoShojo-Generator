@@ -1,3 +1,4 @@
+import { withPagesApiResponse } from '@/lib/pages-api-adapter';
 import {
   getPvpCardSnapshotById,
   getPvpEligibleScenarioDataCard,
@@ -33,6 +34,7 @@ import { createPvpWinnerVoteState } from '@/lib/pvp/winner-vote';
 import { buildSubrequestAuthHeaders } from '@/lib/subrequest-auth';
 import { extractWinnerLineFromMarkdown, parsePvpWinnerFromText } from '@/lib/pvp/winner-parse';
 import type { AIReasoningSource, AIReasoningStatus } from '@/types/ai-reasoning';
+import { getRequestUrl } from '@/lib/request-url';
 
 type ResolveBody = { expectedVersion?: number; customProvider?: unknown; force?: boolean };
 
@@ -111,7 +113,7 @@ const buildMarkdownFromArrestReport = (report: ReturnType<typeof buildPvpSensiti
 
 const shouldUseClientSse = (req: Request): boolean => {
   try {
-    const url = new URL(req.url);
+    const url = getRequestUrl(req);
     if (url.searchParams.get('format') === 'sse') return true;
   } catch {
     // ignore
@@ -1177,4 +1179,5 @@ async function resolveStreamHandler(req: Request): Promise<Response> {
   return new Response(wrappedBody, { status: 200, headers });
 }
 
-export default withPvpErrorBoundary(resolveStreamHandler);
+export default withPagesApiResponse(withPvpErrorBoundary(resolveStreamHandler));
+

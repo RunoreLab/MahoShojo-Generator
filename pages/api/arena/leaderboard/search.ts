@@ -1,3 +1,5 @@
+import { withPagesApiResponse } from '@/lib/pages-api-adapter';
+import { getRequestUrl } from '@/lib/request-url';
 import type { NextRequest } from 'next/server';
 
 import { PRESET_LIST } from '@/lib/presets';
@@ -84,7 +86,7 @@ const parseCommaList = (value: string | null): string[] => {
   return Array.from(new Set(parts));
 };
 
-export default async function handler(req: NextRequest) {
+async function handler(req: NextRequest) {
   if (req.method !== 'GET') {
     return new Response(JSON.stringify({ error: 'Method Not Allowed' }), {
       status: 405,
@@ -116,7 +118,7 @@ export default async function handler(req: NextRequest) {
         });
       }
 
-      const url = new URL(req.url);
+      const url = getRequestUrl(req);
       const qRaw = url.searchParams.get('q');
       const q = typeof qRaw === 'string' ? qRaw.trim() : '';
       if (!q) {
@@ -224,3 +226,5 @@ export default async function handler(req: NextRequest) {
     }
   });
 }
+
+export default withPagesApiResponse(handler);

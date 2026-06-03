@@ -1,3 +1,4 @@
+import { withPagesApiResponse } from '@/lib/pages-api-adapter';
 import { getCrowdReviewSummary } from '@/lib/crowd-review/service';
 import type { CrowdReviewSummaryDto } from '@/lib/crowd-review/types';
 import { getAuthUser, json, withPvpErrorBoundary } from '@/lib/pvp/server';
@@ -48,4 +49,4 @@ export const createCrowdReviewSummaryHandler =
     }
   };
 
-export default withPvpErrorBoundary(createCrowdReviewSummaryHandler());
+export default withPagesApiResponse(withPvpErrorBoundary(createCrowdReviewSummaryHandler()));

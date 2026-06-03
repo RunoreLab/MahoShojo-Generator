@@ -1,3 +1,4 @@
+import { withPagesApiResponse } from '@/lib/pages-api-adapter';
 import { type MessageServiceDb, MessagesServiceUnavailableError, markSiteMessagesRead } from '@/lib/messages/service';
 import { json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
 
@@ -75,4 +76,4 @@ export const createMessagesSiteReadHandler =
     }
   };
 
-export default withPvpErrorBoundary(createMessagesSiteReadHandler());
+export default withPagesApiResponse(withPvpErrorBoundary(createMessagesSiteReadHandler()));

@@ -1,10 +1,11 @@
+import { withPagesApiResponse } from '@/lib/pages-api-adapter';
 import { requireAuthUser } from '@/lib/auth/server';
-import { config } from '@/lib/config';
+import { config as appConfig } from '@/lib/config';
 import { getDrizzleDbFromRuntime } from '@/lib/db/drizzle';
 import { getBusinessUserSlotCountById } from '@/lib/db/repositories/business-users';
 import { countUserUsedDataCardSlots } from '@/lib/db/repositories/data-cards-core';
 
-export default async function handler(req: Request): Promise<Response> {
+async function handler(req: Request): Promise<Response> {
   // 只支持 GET 请求
   if (req.method !== 'GET') {
     return new Response(JSON.stringify({ error: 'Method not allowed' }), {
@@ -26,7 +27,7 @@ export default async function handler(req: Request): Promise<Response> {
         ])
       : [null, 0];
 
-    const capacity = typeof slotCount === 'number' && slotCount > 0 ? slotCount : config.DEFAULT_DATA_CARD_CAPACITY;
+    const capacity = typeof slotCount === 'number' && slotCount > 0 ? slotCount : appConfig.DEFAULT_DATA_CARD_CAPACITY;
     
     return new Response(JSON.stringify({ 
       success: true, 
@@ -44,3 +45,5 @@ export default async function handler(req: Request): Promise<Response> {
     });
   }
 }
+
+export default withPagesApiResponse(handler);

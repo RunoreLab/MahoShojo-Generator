@@ -1,3 +1,4 @@
+import { withPagesApiResponse } from '@/lib/pages-api-adapter';
 import {
   clearPvpRoomRuntimeState,
   getPvpEligibleScenarioDataCard,
@@ -254,4 +255,5 @@ async function rulesHandler(req: Request): Promise<Response> {
   return json({ success: true, phase: nextPhase, rules: nextRules, cleared: shouldClear && willInvalidateSubmissions });
 }
 
-export default withPvpErrorBoundary(rulesHandler);
+export default withPagesApiResponse(withPvpErrorBoundary(rulesHandler));
+

@@ -1,3 +1,5 @@
+import { withPagesApiResponse } from '@/lib/pages-api-adapter';
+import { getRequestUrl } from '@/lib/request-url';
 import { listMyReportAppeals, submitReportAppeal, ReportAppealConflictError, ReportAppealForbiddenError, ReportAppealNotFoundError, ReportAppealServiceUnavailableError, ReportAppealUnprocessableError, ReportAppealValidationError } from '@/lib/report-appeals/service';
 import { json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
 import type { ReportAppealReferenceDraft } from '@/lib/report-appeals/types';
@@ -73,7 +75,7 @@ export const createReportAppealsHandler =
     if ('response' in auth) return auth.response;
 
     if (req.method === 'GET') {
-      const url = new URL(req.url);
+      const url = getRequestUrl(req);
       const limit = Number.parseInt(url.searchParams.get('limit') ?? '20', 10);
       try {
         const payload = await (deps.listMyReportAppeals ?? defaultDeps.listMyReportAppeals)({
@@ -114,4 +116,4 @@ export const createReportAppealsHandler =
     return json({ error: 'Method not allowed' }, { status: 405 });
   };
 
-export default withPvpErrorBoundary(createReportAppealsHandler());
+export default withPagesApiResponse(withPvpErrorBoundary(createReportAppealsHandler()));

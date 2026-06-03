@@ -1,3 +1,4 @@
+import { withPagesApiResponse } from '@/lib/pages-api-adapter';
 // pages/api/generate-battle-story.ts
 
 import { z } from 'zod/v3';
@@ -838,4 +839,4 @@ const buildQuestionnaireLoreText = (questionnaires: RequestQuestionnaire[]): str
     }
 }
 
-export default handler;
+export default withPagesApiResponse(handler);

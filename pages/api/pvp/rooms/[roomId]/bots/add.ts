@@ -1,3 +1,4 @@
+import { withPagesApiResponse } from '@/lib/pages-api-adapter';
 import { getPvpRoomById, getPvpRoomPlayers, getPvpRoomSubmissions, updatePvpRoomCas } from '@/lib/database/pvp';
 import { pickBotBaseName, buildBotUsername } from '@/lib/pvp/bot/names';
 import { parsePvpRoomInternalState, stringifyPvpRoomInternalState } from '@/lib/pvp/bot/room';
@@ -166,4 +167,5 @@ async function addBotHandler(req: Request): Promise<Response> {
   });
 }
 
-export default withPvpErrorBoundary(addBotHandler);
+export default withPagesApiResponse(withPvpErrorBoundary(addBotHandler));
+

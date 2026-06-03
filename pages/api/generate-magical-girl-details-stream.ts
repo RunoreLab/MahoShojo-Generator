@@ -1,3 +1,4 @@
+import { withPagesApiResponse } from '@/lib/pages-api-adapter';
 // pages/api/generate-magical-girl-details-stream.ts
 
 import { z } from 'zod/v3';
@@ -349,4 +350,4 @@ ${qaText}
   }
 }
 
-export default handler;
+export default withPagesApiResponse(handler);

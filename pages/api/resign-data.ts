@@ -1,3 +1,4 @@
+import { withPagesApiResponse } from '@/lib/pages-api-adapter';
 // pages/api/resign-data.ts
 import { NextRequest } from 'next/server';
 import { generateSignature } from '../../lib/signature'; // 导入我们的签名生成工具
@@ -67,4 +68,4 @@ async function handler(req: NextRequest) {
   }
 }
 
-export default handler;
+export default withPagesApiResponse(handler);

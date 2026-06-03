@@ -1,3 +1,4 @@
+import { withPagesApiResponse } from '@/lib/pages-api-adapter';
 // pages/api/generate-magical-girl-details.ts
 import { generateWithAI, GenerationConfig, LoadBalanceStrategy, type GenerateWithAIOptions } from '@/lib/ai';
 import { z } from 'zod/v3';
@@ -814,7 +815,7 @@ async function handler(req: Request): Promise<Response> {
   }
 }
 
-export default handler;
+export default withPagesApiResponse(handler);
 const CustomProviderSchema = z.object({
   providerId: z.string().min(1),
   modelId: z.string().min(1),

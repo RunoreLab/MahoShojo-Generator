@@ -1,3 +1,4 @@
+import { withPagesApiResponse } from '@/lib/pages-api-adapter';
 import type { NextRequest } from 'next/server';
 
 import { getAuthUser } from '@/lib/auth/server';
@@ -51,7 +52,7 @@ const json = (payload: ApiResponse, status = 200): Response =>
     headers: { 'Content-Type': 'application/json' },
   });
 
-export default async function handler(req: NextRequest): Promise<Response> {
+async function handler(req: NextRequest): Promise<Response> {
   if (req.method !== 'POST') {
     return json({ success: false, error: 'Method Not Allowed' }, 405);
   }
@@ -193,3 +194,5 @@ export default async function handler(req: NextRequest): Promise<Response> {
 
   return json({ success: true, items });
 }
+
+export default withPagesApiResponse(handler);

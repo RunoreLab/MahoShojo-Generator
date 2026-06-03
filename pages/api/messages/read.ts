@@ -1,3 +1,4 @@
+import { withPagesApiResponse } from '@/lib/pages-api-adapter';
 import {
   InvalidMessageReadRequestError,
   type MessageServiceDb,
@@ -82,4 +83,4 @@ export const createMessagesReadHandler =
     }
   };
 
-export default withPvpErrorBoundary(createMessagesReadHandler());
+export default withPagesApiResponse(withPvpErrorBoundary(createMessagesReadHandler()));

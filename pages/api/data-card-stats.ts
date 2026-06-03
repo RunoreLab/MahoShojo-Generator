@@ -1,3 +1,4 @@
+import { withPagesApiResponse } from '@/lib/pages-api-adapter';
 import { getDrizzleDbFromRuntime } from '@/lib/db/drizzle';
 import { resolveDataCardStatsActor } from '@/lib/data-card-stats/actor';
 import { acquireDataCardStatsRateLimit } from '@/lib/data-card-stats/rate-limit';
@@ -96,4 +97,4 @@ export const createDataCardStatsHandler = (deps: DataCardStatsHandlerDeps = {}) 
   }
 };
 
-export default createDataCardStatsHandler();
+export default withPagesApiResponse(createDataCardStatsHandler());

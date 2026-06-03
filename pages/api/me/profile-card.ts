@@ -1,3 +1,4 @@
+import { withPagesApiResponse } from '@/lib/pages-api-adapter';
 import {
   getBattleReportGenerationsByUserIdLite,
   countBattleReportGenerationsByUserId,
@@ -212,7 +213,7 @@ export function buildTopRatedStrictRating(
   };
 }
 
-export default withPvpErrorBoundary(async function handler(req: Request): Promise<Response> {
+const handler = withPvpErrorBoundary(async function handler(req: Request): Promise<Response> {
   if (req.method !== 'GET') return json({ error: 'Method not allowed' }, { status: 405 });
 
   const auth = await requireAuthUser(req);
@@ -506,3 +507,5 @@ export default withPvpErrorBoundary(async function handler(req: Request): Promis
     { headers: { 'Cache-Control': 'no-store' } }
   );
 });
+
+export default withPagesApiResponse(handler);

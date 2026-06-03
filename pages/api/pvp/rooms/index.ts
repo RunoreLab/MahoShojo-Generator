@@ -1,3 +1,4 @@
+import { withPagesApiResponse } from '@/lib/pages-api-adapter';
 import { createPvpRoom, getPvpEligibleScenarioDataCard } from '@/lib/database/pvp';
 import { PVP_ROOM_TTL_MS } from '@/lib/pvp/constants';
 import { generateSaltHex, hashJoinCode } from '@/lib/pvp/crypto';
@@ -84,4 +85,5 @@ async function roomsHandler(req: Request): Promise<Response> {
   return json({ success: true, roomId: room.roomId });
 }
 
-export default withPvpErrorBoundary(roomsHandler);
+export default withPagesApiResponse(withPvpErrorBoundary(roomsHandler));
+

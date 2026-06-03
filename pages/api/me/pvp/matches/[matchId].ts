@@ -1,3 +1,4 @@
+import { withPagesApiResponse } from '@/lib/pages-api-adapter';
 import { getPvpMatchById, getPvpMatchPlayersByMatchId, getPvpRoundsByMatch, isUserInPvpMatch } from '@/lib/database/pvp';
 import { json, requireAuthUser } from '@/lib/pvp/server';
 
@@ -13,7 +14,7 @@ const getMatchIdFromUrl = (url: string): string | null => {
   }
 };
 
-export default async function handler(req: Request): Promise<Response> {
+async function handler(req: Request): Promise<Response> {
   if (req.method !== 'GET') return json({ error: 'Method not allowed' }, { status: 405 });
 
   const auth = await requireAuthUser(req);
@@ -64,3 +65,5 @@ export default async function handler(req: Request): Promise<Response> {
   });
 }
 
+
+export default withPagesApiResponse(handler);

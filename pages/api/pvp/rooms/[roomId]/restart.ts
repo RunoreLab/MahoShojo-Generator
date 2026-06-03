@@ -1,3 +1,4 @@
+import { withPagesApiResponse } from '@/lib/pages-api-adapter';
 import { clearPvpRoomRuntimeState, getPvpRoomById, getPvpRoomPlayers, updatePvpRoomCas } from '@/lib/database/pvp';
 import { clearPvpRoomRuntimeFromRulesJson, parsePvpRoomInternalState } from '@/lib/pvp/bot/room';
 import { requiresPvpSubmissionPhase } from '@/lib/pvp/logic';
@@ -53,4 +54,5 @@ async function restartHandler(req: Request): Promise<Response> {
   return json({ success: true });
 }
 
-export default withPvpErrorBoundary(restartHandler);
+export default withPagesApiResponse(withPvpErrorBoundary(restartHandler));
+
