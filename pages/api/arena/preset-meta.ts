@@ -1,3 +1,5 @@
+import { withPagesApiResponse } from '@/lib/pages-api-adapter';
+import { getRequestUrl } from '@/lib/request-url';
 import type { NextRequest } from 'next/server';
 
 import { applyQueenTier, computeArenaBaseTier } from '@/lib/arena/tier';
@@ -17,7 +19,7 @@ type ApiRating = {
   tier: string;
 };
 
-export default async function handler(req: NextRequest) {
+async function handler(req: NextRequest) {
   if (req.method !== 'GET') {
     return new Response(JSON.stringify({ error: 'Method Not Allowed' }), {
       status: 405,
@@ -25,7 +27,7 @@ export default async function handler(req: NextRequest) {
     });
   }
 
-  const url = new URL(req.url);
+  const url = getRequestUrl(req);
   const entityId = (url.searchParams.get('entityId') ?? '').trim();
   if (!entityId) {
     return new Response(JSON.stringify({ error: '缺少 entityId' }), {
@@ -96,3 +98,5 @@ export default async function handler(req: NextRequest) {
     });
   }
 }
+
+export default withPagesApiResponse(handler);

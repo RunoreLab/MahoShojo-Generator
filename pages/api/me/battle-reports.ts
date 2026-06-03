@@ -1,3 +1,5 @@
+import { withPagesApiResponse } from '@/lib/pages-api-adapter';
+import { getRequestUrl } from '@/lib/request-url';
 import {
   countBattleReportGenerationsByUserId,
   getBattleReportGenerationsByUserIdLite,
@@ -28,13 +30,13 @@ const parseBool = (value: unknown): boolean => {
   return v === '1' || v === 'true' || v === 'yes' || v === 'on';
 };
 
-export default async function handler(req: Request): Promise<Response> {
+async function handler(req: Request): Promise<Response> {
   if (req.method !== 'GET') return json({ error: 'Method not allowed' }, { status: 405 });
 
   const auth = await requireAuthUser(req);
   if ('response' in auth) return auth.response;
 
-  const url = new URL(req.url);
+  const url = getRequestUrl(req);
   const page = clampInt(url.searchParams.get('page'), 1, 1, 10_000);
   const pageSize = clampInt(url.searchParams.get('pageSize'), 10, 1, 30);
   const offset = (page - 1) * pageSize;
@@ -92,3 +94,5 @@ export default async function handler(req: Request): Promise<Response> {
     records,
   });
 }
+
+export default withPagesApiResponse(handler);

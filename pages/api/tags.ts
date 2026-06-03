@@ -1,8 +1,10 @@
+import { withPagesApiResponse } from '@/lib/pages-api-adapter';
 import type { NextRequest } from 'next/server';
 
 import { getTags } from '@/lib/database/tags';
 import type { TagScope } from '@/lib/database/tags';
 import { withEdgeCache } from '@/lib/edge-cache';
+import { getRequestUrl } from '@/lib/request-url';
 
 type ApiTag = {
   id: string;
@@ -13,7 +15,7 @@ type ApiTag = {
   isActive: boolean;
 };
 
-export default async function handler(req: NextRequest) {
+async function handler(req: NextRequest) {
   if (req.method !== 'GET') {
     return new Response(JSON.stringify({ error: 'Method Not Allowed' }), {
       status: 405,
@@ -23,7 +25,7 @@ export default async function handler(req: NextRequest) {
 
   return withEdgeCache(req, { key: req.url, ttlSeconds: 300 }, async () => {
     try {
-      const url = new URL(req.url);
+      const url = getRequestUrl(req);
       const includeInactive = url.searchParams.get('includeInactive') === '1';
       const rows = await getTags({ includeInactive });
       const tags: ApiTag[] = rows.map((row) => ({
@@ -48,3 +50,5 @@ export default async function handler(req: NextRequest) {
     }
   });
 }
+
+export default withPagesApiResponse(handler);

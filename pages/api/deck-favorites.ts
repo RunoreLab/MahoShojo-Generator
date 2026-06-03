@@ -1,3 +1,5 @@
+import { withPagesApiResponse } from '@/lib/pages-api-adapter';
+import { getRequestUrl } from '@/lib/request-url';
 import {
   addDeckFavorite,
   getUserDeckFavoriteIds,
@@ -7,13 +9,13 @@ import {
 import { requireAuthUser } from '@/lib/auth/server';
 import { mapDeckReadRows } from '@/lib/deck-read-mappers';
 
-export default async function handler(req: Request): Promise<Response> {
+async function handler(req: Request): Promise<Response> {
   const auth = await requireAuthUser(req);
   if ('response' in auth) return auth.response;
 
   if (req.method === 'GET') {
     try {
-      const url = new URL(req.url);
+      const url = getRequestUrl(req);
       const idsOnly = url.searchParams.get('idsOnly') === '1';
 
       if (idsOnly) {
@@ -108,3 +110,5 @@ export default async function handler(req: Request): Promise<Response> {
     headers: { 'Content-Type': 'application/json' }
   });
 }
+
+export default withPagesApiResponse(handler);

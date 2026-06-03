@@ -1,7 +1,8 @@
+import { withPagesApiResponse } from '@/lib/pages-api-adapter';
 import type { NextRequest } from 'next/server';
 
 type ApiErrorResponse = { success: false; error: string };
-export default async function handler(req: NextRequest): Promise<Response> {
+async function handler(req: NextRequest): Promise<Response> {
   if (req.method !== 'POST') {
     const body = { success: false, error: 'Method Not Allowed' } satisfies ApiErrorResponse;
     return new Response(JSON.stringify(body), {
@@ -17,3 +18,5 @@ export default async function handler(req: NextRequest): Promise<Response> {
     headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
   });
 }
+
+export default withPagesApiResponse(handler);

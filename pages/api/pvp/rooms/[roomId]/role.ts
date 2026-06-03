@@ -1,3 +1,4 @@
+import { withPagesApiResponse } from '@/lib/pages-api-adapter';
 import {
   deletePvpRoomHand,
   deletePvpRoomSubmission,
@@ -111,4 +112,5 @@ async function roleHandler(req: Request): Promise<Response> {
   return json({ success: true, role: 'player', seat });
 }
 
-export default withPvpErrorBoundary(roleHandler);
+export default withPagesApiResponse(withPvpErrorBoundary(roleHandler));
+

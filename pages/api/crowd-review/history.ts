@@ -1,3 +1,4 @@
+import { withPagesApiResponse } from '@/lib/pages-api-adapter';
 import {
   CrowdReviewForbiddenError,
   CrowdReviewServiceUnavailableError,
@@ -56,4 +57,4 @@ export const createCrowdReviewHistoryHandler =
     }
   };
 
-export default withPvpErrorBoundary(createCrowdReviewHistoryHandler());
+export default withPagesApiResponse(withPvpErrorBoundary(createCrowdReviewHistoryHandler()));

@@ -1,3 +1,5 @@
+import { withPagesApiResponse } from '@/lib/pages-api-adapter';
+import { getRequestUrl } from '@/lib/request-url';
 import type { NextRequest } from 'next/server';
 
 import { isAllowedExternalMediaUrl } from '@/lib/markdown/externalMedia';
@@ -9,7 +11,7 @@ const buildJsonResponse = (status: number, payload: Record<string, unknown>) =>
   });
 
 const getProxyTarget = (req: NextRequest) => {
-  const url = new URL(req.url);
+  const url = getRequestUrl(req);
   return url.searchParams.get('url')?.trim() ?? '';
 };
 
@@ -18,7 +20,7 @@ const normalizeExternalTarget = (value: string) => {
   return value;
 };
 
-export default async function handler(req: NextRequest) {
+async function handler(req: NextRequest) {
   if (req.method !== 'GET' && req.method !== 'HEAD') {
     return buildJsonResponse(405, { error: 'Method not allowed' });
   }
@@ -73,3 +75,5 @@ export default async function handler(req: NextRequest) {
     },
   });
 }
+
+export default withPagesApiResponse(handler);

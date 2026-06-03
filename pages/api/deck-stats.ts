@@ -1,7 +1,8 @@
+import { withPagesApiResponse } from '@/lib/pages-api-adapter';
 import { getDrizzleDbFromRuntime } from '@/lib/db/drizzle';
 import { incrementPublicDeckLikeCountById } from '@/lib/db/repositories/decks';
 
-export default async function handler(req: Request): Promise<Response> {
+async function handler(req: Request): Promise<Response> {
   if (req.method !== 'POST') {
     return new Response(JSON.stringify({ error: 'Method not allowed' }), {
       status: 405,
@@ -47,3 +48,5 @@ export default async function handler(req: Request): Promise<Response> {
     });
   }
 }
+
+export default withPagesApiResponse(handler);

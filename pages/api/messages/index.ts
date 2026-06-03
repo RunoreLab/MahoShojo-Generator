@@ -1,3 +1,5 @@
+import { withPagesApiResponse } from '@/lib/pages-api-adapter';
+import { getRequestUrl } from '@/lib/request-url';
 import {
   InvalidMessageCursorError,
   decodeMessageCursor,
@@ -69,7 +71,7 @@ export const createMessagesHandler =
     }
 
     try {
-      const url = new URL(req.url);
+      const url = getRequestUrl(req);
       const filter = parseFilter(url.searchParams.get('filter'));
       const limit = parseLimit(url.searchParams.get('limit'));
       const cursor = decodeMessageCursor(url.searchParams.get('cursor'));
@@ -97,4 +99,4 @@ export const createMessagesHandler =
     }
   };
 
-export default withPvpErrorBoundary(createMessagesHandler());
+export default withPagesApiResponse(withPvpErrorBoundary(createMessagesHandler()));

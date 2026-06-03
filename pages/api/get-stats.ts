@@ -1,3 +1,4 @@
+import { withPagesApiResponse } from '@/lib/pages-api-adapter';
 import { type NextRequest } from 'next/server';
 
 import { config as appConfig } from '@/lib/config';
@@ -33,7 +34,7 @@ const normalizeLeaderboardMode = (value: unknown): StatsLeaderboardMode => {
   return 'all';
 };
 
-export default async function handler(req: NextRequest) {
+async function handler(req: NextRequest) {
   if (req.method !== 'GET') {
     return new Response(JSON.stringify({ error: 'Method Not Allowed' }), {
       status: 405,
@@ -111,3 +112,5 @@ export default async function handler(req: NextRequest) {
     });
   }
 }
+
+export default withPagesApiResponse(handler);

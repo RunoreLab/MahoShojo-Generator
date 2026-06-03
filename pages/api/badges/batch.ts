@@ -1,10 +1,11 @@
+import { withPagesApiResponse } from '@/lib/pages-api-adapter';
 import { getUserEquippedBadges } from '@/lib/database/badges';
 
 /**
  * POST /api/badges/batch
  * 批量获取用户已佩戴的徽章（公开接口，仅返回 BadgeDefinition）
  */
-export default async function handler(req: Request): Promise<Response> {
+async function handler(req: Request): Promise<Response> {
   if (req.method !== 'POST') {
     return new Response(JSON.stringify({ error: 'Method not allowed' }), {
       status: 405,
@@ -61,3 +62,5 @@ export default async function handler(req: Request): Promise<Response> {
     });
   }
 }
+
+export default withPagesApiResponse(handler);

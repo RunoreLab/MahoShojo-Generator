@@ -1,3 +1,4 @@
+import { withPagesApiResponse } from '@/lib/pages-api-adapter';
 import {
   clearPvpRoomEphemeralState,
   deletePvpRoomHand,
@@ -238,4 +239,5 @@ async function leaveHandler(req: Request): Promise<Response> {
   return json({ success: true });
 }
 
-export default withPvpErrorBoundary(leaveHandler);
+export default withPagesApiResponse(withPvpErrorBoundary(leaveHandler));
+

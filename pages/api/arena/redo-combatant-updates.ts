@@ -1,3 +1,4 @@
+import { withPagesApiResponse } from '@/lib/pages-api-adapter';
 // pages/api/arena/redo-combatant-updates.ts
 
 import { z } from 'zod/v3';
@@ -255,4 +256,4 @@ async function handler(req: NextRequest): Promise<Response> {
   }
 }
 
-export default handler;
+export default withPagesApiResponse(handler);

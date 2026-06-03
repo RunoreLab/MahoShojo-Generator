@@ -1,3 +1,4 @@
+import { withPagesApiResponse } from '@/lib/pages-api-adapter';
 import { getSignedUrl } from "@/lib/tachie/liblib/utils";
 import type { GenerateResponse, ComfyUIAppParams } from "@/lib/tachie/liblib/types";
 import {
@@ -13,7 +14,7 @@ import {
   parseModelScopeJsonSafe,
 } from "@/lib/tachie/modelscope/error";
 
-export default async function handler(req: Request) {
+async function handler(req: Request) {
   if (req.method !== "POST") {
     return new Response(
       JSON.stringify({ error: "Method not allowed" }),
@@ -278,3 +279,5 @@ export default async function handler(req: Request) {
     );
   }
 }
+
+export default withPagesApiResponse(handler);

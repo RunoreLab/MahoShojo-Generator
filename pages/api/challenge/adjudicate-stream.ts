@@ -1,3 +1,4 @@
+import { withPagesApiResponse } from '@/lib/pages-api-adapter';
 import { z } from 'zod/v3';
 
 import { parseAiSessionCustomProvider, resolveAiSessionProvider } from '@/lib/ai-session/provider';
@@ -474,4 +475,4 @@ export const createChallengeAdjudicateStreamHandler = (
   };
 };
 
-export default createChallengeAdjudicateStreamHandler();
+export default withPagesApiResponse(createChallengeAdjudicateStreamHandler());

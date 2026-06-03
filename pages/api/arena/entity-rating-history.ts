@@ -1,3 +1,5 @@
+import { withPagesApiResponse } from '@/lib/pages-api-adapter';
+import { getRequestUrl } from '@/lib/request-url';
 import type { NextRequest } from 'next/server';
 
 import { getDrizzleDbFromRuntime } from '@/lib/db/drizzle';
@@ -51,7 +53,7 @@ export const createEntityRatingHistoryHandler = (deps: HandlerDeps) => async (re
   }
 
   try {
-    const url = new URL(req.url);
+    const url = getRequestUrl(req);
     const entityType = parseEntityType(url.searchParams.get('entityType'));
     const entityId = (url.searchParams.get('entityId') ?? '').trim();
     const queue = url.searchParams.get('queue') === 'free' ? 'free' : 'strict';
@@ -94,6 +96,8 @@ const handler = createEntityRatingHistoryHandler({
   listArenaEntityRatingHistory: listArenaEntityRatingHistory as HandlerDeps['listArenaEntityRatingHistory'],
 });
 
-export default async function entityRatingHistoryHandler(req: NextRequest): Promise<Response> {
+async function entityRatingHistoryHandler(req: NextRequest): Promise<Response> {
   return handler(req);
 }
+
+export default withPagesApiResponse(entityRatingHistoryHandler);

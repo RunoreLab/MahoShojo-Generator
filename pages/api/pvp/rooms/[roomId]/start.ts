@@ -1,3 +1,4 @@
+import { withPagesApiResponse } from '@/lib/pages-api-adapter';
 import {
   createPvpCardSnapshot,
   createPvpMatch,
@@ -1065,4 +1066,5 @@ async function startHandler(req: Request): Promise<Response> {
   return json({ success: true, roundId, nextVersion: dealingVersion + 1 });
 }
 
-export default withPvpErrorBoundary(startHandler);
+export default withPagesApiResponse(withPvpErrorBoundary(startHandler));
+

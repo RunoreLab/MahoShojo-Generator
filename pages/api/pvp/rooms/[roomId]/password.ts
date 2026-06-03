@@ -1,3 +1,4 @@
+import { withPagesApiResponse } from '@/lib/pages-api-adapter';
 import { getPvpRoomById, updatePvpRoomCas } from '@/lib/database/pvp';
 import { generateSaltHex, hashJoinCode } from '@/lib/pvp/crypto';
 import { getRoomIdFromRequestUrl } from '@/lib/pvp/route';
@@ -41,4 +42,5 @@ async function passwordHandler(req: Request): Promise<Response> {
   return json({ success: true, enabled: Boolean(joinCodeHash) });
 }
 
-export default withPvpErrorBoundary(passwordHandler);
+export default withPagesApiResponse(withPvpErrorBoundary(passwordHandler));
+

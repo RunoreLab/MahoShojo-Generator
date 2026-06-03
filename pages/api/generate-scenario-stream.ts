@@ -1,3 +1,4 @@
+import { withPagesApiResponse } from '@/lib/pages-api-adapter';
 // pages/api/generate-scenario-stream.ts
 
 import { z } from 'zod/v3';
@@ -193,4 +194,4 @@ ${answerText}
   }
 }
 
-export default handler;
+export default withPagesApiResponse(handler);

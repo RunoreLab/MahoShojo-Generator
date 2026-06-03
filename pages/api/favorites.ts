@@ -1,3 +1,5 @@
+import { withPagesApiResponse } from '@/lib/pages-api-adapter';
+import { getRequestUrl } from '@/lib/request-url';
 import {
   addFavorite,
   removeFavorite,
@@ -6,7 +8,7 @@ import {
 } from '@/lib/database/favorites';
 import { requireAuthUser } from '@/lib/auth/server';
 
-export default async function handler(req: Request): Promise<Response> {
+async function handler(req: Request): Promise<Response> {
   const auth = await requireAuthUser(req);
   if ('response' in auth) {
     const authPayload = await auth.response.clone().json().catch(() => null);
@@ -21,7 +23,7 @@ export default async function handler(req: Request): Promise<Response> {
 
   try {
     if (req.method === 'GET') {
-      const url = new URL(req.url);
+      const url = getRequestUrl(req);
       const type = url.searchParams.get('type') as 'character' | 'scenario' | 'history' | 'questionnaire' | null;
       const idsOnly = url.searchParams.get('idsOnly') === '1';
 
@@ -105,3 +107,5 @@ export default async function handler(req: Request): Promise<Response> {
     });
   }
 }
+
+export default withPagesApiResponse(handler);

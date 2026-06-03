@@ -1,3 +1,4 @@
+import { withPagesApiResponse } from '@/lib/pages-api-adapter';
 import { z } from 'zod/v3';
 import { NextRequest } from 'next/server';
 
@@ -16,6 +17,7 @@ import { buildSubrequestAuthHeaders } from '@/lib/subrequest-auth';
 import { randomUUID } from '@/lib/crypto';
 import { getLogger } from '@/lib/logger';
 import { recordUserActivityFromRequest } from '@/lib/user-activity/record';
+import { getRequestOrigin } from '@/lib/request-url';
 
 const log = getLogger('api-arena-session-generate-next');
 
@@ -202,7 +204,7 @@ export const buildUpstreamRequestBody = (
   return requestBody;
 };
 
-export default async function handler(req: NextRequest): Promise<Response> {
+async function handler(req: NextRequest): Promise<Response> {
   if (req.method !== 'POST') {
     return json({ error: 'Method not allowed' }, { status: 405 });
   }
@@ -301,7 +303,7 @@ export default async function handler(req: NextRequest): Promise<Response> {
   recordUserActivityFromRequest(req);
 
   try {
-    const upstreamUrl = new URL('/api/arena/generate-stream?format=sse', req.url);
+    const upstreamUrl = new URL('/api/arena/generate-stream?format=sse', getRequestOrigin(req));
     const upstreamHeaders: Record<string, string> = {
       'Content-Type': 'application/json',
       Accept: 'text/event-stream',
@@ -482,3 +484,5 @@ export default async function handler(req: NextRequest): Promise<Response> {
     return json({ error: '生成失败', message }, { status: 500 });
   }
 }
+
+export default withPagesApiResponse(handler);

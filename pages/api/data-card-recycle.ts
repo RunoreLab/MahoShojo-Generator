@@ -1,3 +1,5 @@
+import { withPagesApiResponse } from '@/lib/pages-api-adapter';
+import { getRequestUrl } from '@/lib/request-url';
 import {
   getUserDataCards,
   getUserRecycleBinCards,
@@ -6,9 +8,9 @@ import {
 } from '@/lib/database/data-cards';
 import { getUserDataCardCapacity } from '@/lib/database/users';
 import { requireAuthUser } from '@/lib/auth/server';
-import { config } from '@/lib/config';
+import { config as appConfig } from '@/lib/config';
 
-export default async function handler(req: Request): Promise<Response> {
+async function handler(req: Request): Promise<Response> {
   const auth = await requireAuthUser(req);
   if ('response' in auth) return auth.response;
 
@@ -35,7 +37,7 @@ export default async function handler(req: Request): Promise<Response> {
 
         const [activeCards, capacity] = await Promise.all([
           getUserDataCards(userId),
-          getUserDataCardCapacity(userId, config.DEFAULT_DATA_CARD_CAPACITY)
+          getUserDataCardCapacity(userId, appConfig.DEFAULT_DATA_CARD_CAPACITY)
         ]);
 
         if (capacity !== null && activeCards.length >= capacity) {
@@ -62,7 +64,7 @@ export default async function handler(req: Request): Promise<Response> {
         });
       }
       case 'DELETE': {
-        const url = new URL(req.url);
+        const url = getRequestUrl(req);
         const id = url.searchParams.get('id');
 
         if (!id) {
@@ -100,3 +102,5 @@ export default async function handler(req: Request): Promise<Response> {
     });
   }
 }
+
+export default withPagesApiResponse(handler);

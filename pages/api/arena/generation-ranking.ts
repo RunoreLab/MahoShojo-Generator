@@ -1,3 +1,5 @@
+import { withPagesApiResponse } from '@/lib/pages-api-adapter';
+import { getRequestUrl } from '@/lib/request-url';
 import type { NextRequest } from 'next/server';
 
 import { applyQueenTier, computeArenaBaseTier } from '@/lib/arena/tier';
@@ -259,8 +261,8 @@ const buildDefaultQueueResult = (eligible: boolean, ineligibleReasons: string[])
   rankDelta: null,
 });
 
-export default async function handler(req: NextRequest) {
-  const url = new URL(req.url);
+async function handler(req: NextRequest) {
+  const url = getRequestUrl(req);
   const generationId = (url.searchParams.get('generationId') ?? '').trim();
 
   if (req.method !== 'GET') {
@@ -532,3 +534,5 @@ export default async function handler(req: NextRequest) {
     return new Response(JSON.stringify(res), { status: 500, headers: { 'Content-Type': 'application/json' } });
   }
 }
+
+export default withPagesApiResponse(handler);

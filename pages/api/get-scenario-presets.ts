@@ -1,9 +1,10 @@
+import { withPagesApiResponse } from '@/lib/pages-api-adapter';
 // pages/api/get-scenario-presets.ts
 
 import { NextRequest } from 'next/server';
 import { SCENARIO_PRESET_LIST } from '@/lib/scenario-presets';
 
-export default async function handler(req: NextRequest) {
+async function handler(req: NextRequest) {
   if (req.method !== 'GET') {
     return new Response(
       JSON.stringify({ error: 'Method Not Allowed' }),
@@ -25,3 +26,5 @@ export default async function handler(req: NextRequest) {
   }
 }
 
+
+export default withPagesApiResponse(handler);

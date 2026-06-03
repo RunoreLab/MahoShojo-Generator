@@ -1,3 +1,4 @@
+import { withPagesApiResponse } from '@/lib/pages-api-adapter';
 import {
   addPvpRoomPlayer,
   createPvpRoom,
@@ -96,4 +97,5 @@ async function quickMatchHandler(req: Request): Promise<Response> {
   return json({ success: true, roomId: created.roomId, joinedExisting: false, created: true });
 }
 
-export default withPvpErrorBoundary(quickMatchHandler);
+export default withPagesApiResponse(withPvpErrorBoundary(quickMatchHandler));
+

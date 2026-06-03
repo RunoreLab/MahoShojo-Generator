@@ -1,3 +1,4 @@
+import { withPagesApiResponse } from '@/lib/pages-api-adapter';
 import { getPvpRoomById, updatePvpRoomCas } from '@/lib/database/pvp';
 import { parsePvpRoomInternalState, stringifyPvpRoomInternalState } from '@/lib/pvp/bot/room';
 import { getRoomIdFromRequestUrl } from '@/lib/pvp/route';
@@ -76,4 +77,5 @@ async function permissionsHandler(req: Request): Promise<Response> {
   });
 }
 
-export default withPvpErrorBoundary(permissionsHandler);
+export default withPagesApiResponse(withPvpErrorBoundary(permissionsHandler));
+

@@ -1,3 +1,4 @@
+import { withPagesApiResponse } from '@/lib/pages-api-adapter';
 // pages/api/generate-magical-girl.ts
 import { z } from 'zod/v3';
 import { generateWithAI, GenerationConfig } from "../../lib/ai";
@@ -156,4 +157,4 @@ async function handler(
   }
 }
 
-export default handler;
+export default withPagesApiResponse(handler);

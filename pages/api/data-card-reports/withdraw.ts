@@ -1,3 +1,4 @@
+import { withPagesApiResponse } from '@/lib/pages-api-adapter';
 import { json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
 import {
   DataCardReportConflictError,
@@ -80,4 +81,4 @@ export const createDataCardReportWithdrawHandler =
     }
   };
 
-export default withPvpErrorBoundary(createDataCardReportWithdrawHandler());
+export default withPagesApiResponse(withPvpErrorBoundary(createDataCardReportWithdrawHandler()));

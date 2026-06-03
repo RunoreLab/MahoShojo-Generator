@@ -1,3 +1,5 @@
+import { withPagesApiResponse } from '@/lib/pages-api-adapter';
+import { getRequestUrl } from '@/lib/request-url';
 // pages/api/random-public-card.ts
 
 import { getRandomPublicCard } from '@/lib/database/data-cards';
@@ -8,7 +10,7 @@ import { getRandomPublicCard } from '@/lib/database/data-cards';
  * @param {string} type - 'character' 或 'scenario'，指定要获取的卡片类型。
  * @returns {Response} 返回包含随机卡片数据的 JSON 响应。
  */
-export default async function handler(req: Request): Promise<Response> {
+async function handler(req: Request): Promise<Response> {
   // 仅允许 GET 请求
   if (req.method !== 'GET') {
     return new Response(JSON.stringify({ error: 'Method not allowed' }), {
@@ -19,7 +21,7 @@ export default async function handler(req: Request): Promise<Response> {
 
   try {
     // 从请求 URL 中解析查询参数
-    const url = new URL(req.url);
+    const url = getRequestUrl(req);
     const type = url.searchParams.get('type') as 'character' | 'scenario' | null;
     const readNonNegativeInt = (key: string): number | null => {
       const raw = url.searchParams.get(key);
@@ -71,7 +73,7 @@ export default async function handler(req: Request): Promise<Response> {
     });
 
   } catch (error) {
-    console.error(`获取随机公开数据卡 API 错误 (类型: ${new URL(req.url).searchParams.get('type')}):`, error);
+    console.error(`获取随机公开数据卡 API 错误 (类型: ${getRequestUrl(req).searchParams.get('type')}):`, error);
     return new Response(JSON.stringify({
       success: false,
       error: '获取随机数据失败，服务器内部错误',
@@ -81,3 +83,5 @@ export default async function handler(req: Request): Promise<Response> {
     });
   }
 }
+
+export default withPagesApiResponse(handler);

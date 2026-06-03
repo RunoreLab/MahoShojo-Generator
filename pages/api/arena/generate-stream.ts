@@ -1,3 +1,5 @@
+import { withPagesApiResponse } from '@/lib/pages-api-adapter';
+import { getRequestUrl } from '@/lib/request-url';
 // pages/api/arena/generate-stream.ts
 
 import { getLogger } from '@/lib/logger';
@@ -131,7 +133,7 @@ async function handler(req: NextRequest): Promise<Response> {
         requestUrl: req.url,
         authUserResolver,
     });
-    const requestUrl = new URL(req.url);
+    const requestUrl = getRequestUrl(req);
     const wantsSse =
         requestUrl.searchParams.get('format') === 'sse' ||
         (req.headers.get('accept') || '').includes('text/event-stream');
@@ -1779,4 +1781,4 @@ async function handler(req: NextRequest): Promise<Response> {
 	    }
 	}
 
-export default handler;
+export default withPagesApiResponse(handler);

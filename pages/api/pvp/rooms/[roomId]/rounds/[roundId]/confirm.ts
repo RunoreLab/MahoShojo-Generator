@@ -1,3 +1,4 @@
+import { withPagesApiResponse } from '@/lib/pages-api-adapter';
 import {
   createPvpRound,
   createPvpCardSnapshot,
@@ -606,4 +607,5 @@ async function confirmHandler(req: Request): Promise<Response> {
   return json({ success: true, advanced: true, finished: true, matchWinnerUserId });
 }
 
-export default withPvpErrorBoundary(confirmHandler);
+export default withPagesApiResponse(withPvpErrorBoundary(confirmHandler));
+

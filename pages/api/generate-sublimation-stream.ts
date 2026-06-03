@@ -1,3 +1,4 @@
+import { withPagesApiResponse } from '@/lib/pages-api-adapter';
 // pages/api/generate-sublimation-stream.ts
 
 import { z } from 'zod/v3';
@@ -326,4 +327,4 @@ ${identityHint ? `角色当前标识：${identityHint}` : '（无）'}
   }
 }
 
-export default handler;
+export default withPagesApiResponse(handler);

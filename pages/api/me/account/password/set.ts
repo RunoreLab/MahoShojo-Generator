@@ -1,3 +1,4 @@
+import { withPagesApiResponse } from '@/lib/pages-api-adapter';
 import {
   appendSetCookieHeaders,
   extractErrorMessage,
@@ -55,7 +56,7 @@ const createVerificationId = (): string => {
 
 const createResetPasswordToken = (): string => randomHex(24);
 
-export default withPvpErrorBoundary(async function handler(req: Request): Promise<Response> {
+const handler = withPvpErrorBoundary(async function handler(req: Request): Promise<Response> {
   if (req.method !== 'PUT') return json({ error: 'Method not allowed' }, { status: 405 });
 
   const auth = await requireAuthUser(req);
@@ -280,3 +281,5 @@ export default withPvpErrorBoundary(async function handler(req: Request): Promis
     { headers },
   );
 });
+
+export default withPagesApiResponse(handler);

@@ -1,3 +1,5 @@
+import { withPagesApiResponse } from '@/lib/pages-api-adapter';
+import { getRequestUrl } from '@/lib/request-url';
 import type { NextRequest } from 'next/server';
 
 import { createRequestAuthUserResolver } from '@/lib/auth/request-auth-user';
@@ -111,7 +113,7 @@ const validateStrictPublicDataCards = async (db: AppDrizzleDb, entities: ArenaEn
   }
 };
 
-export default async function handler(req: NextRequest) {
+async function handler(req: NextRequest) {
   if (req.method !== 'POST') {
     return new Response(JSON.stringify({ success: false, error: 'Method Not Allowed' } satisfies ApiErrorResponse), {
       status: 405,
@@ -137,7 +139,7 @@ export default async function handler(req: NextRequest) {
           .slice(0, 20)
       : [];
 
-    const origin = new URL(req.url).origin;
+    const origin = getRequestUrl(req).origin;
     const currentSeason = await fetchCurrentSeasonFromOrigin(origin);
     const seasonStrictRules = deriveSeasonStrictRules(currentSeason);
 
@@ -301,3 +303,5 @@ export default async function handler(req: NextRequest) {
     });
   }
 }
+
+export default withPagesApiResponse(handler);

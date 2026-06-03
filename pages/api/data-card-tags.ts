@@ -1,3 +1,4 @@
+import { withPagesApiResponse } from '@/lib/pages-api-adapter';
 import type { NextRequest } from 'next/server';
 
 import { verifyCardOwnership } from '@/lib/database/data-cards';
@@ -9,7 +10,7 @@ type PutBody = {
   tagIds?: unknown;
 };
 
-export default async function handler(req: NextRequest) {
+async function handler(req: NextRequest) {
   if (req.method !== 'PUT') {
     return new Response(JSON.stringify({ error: 'Method Not Allowed' }), {
       status: 405,
@@ -70,3 +71,5 @@ export default async function handler(req: NextRequest) {
   });
 }
 
+
+export default withPagesApiResponse(handler);

@@ -1,3 +1,4 @@
+import { withPagesApiResponse } from '@/lib/pages-api-adapter';
 // pages/api/verify-origin.ts
 import { NextRequest } from 'next/server';
 import { verifySignature } from '../../lib/signature'; // 导入我们的校验工具
@@ -32,4 +33,4 @@ async function handler(req: NextRequest) {
   }
 }
 
-export default handler;
+export default withPagesApiResponse(handler);

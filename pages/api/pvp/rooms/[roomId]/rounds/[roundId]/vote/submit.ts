@@ -1,3 +1,4 @@
+import { withPagesApiResponse } from '@/lib/pages-api-adapter';
 import {
   getLatestPvpRoundByMatch,
   getPvpRoomById,
@@ -223,4 +224,5 @@ async function submitVoteHandler(req: Request): Promise<Response> {
   return json({ success: true, voteSubmitted: true, voteClosed: true, tally, winnerUserId, winnerName, nextVersion: expectedVersion + 1 });
 }
 
-export default withPvpErrorBoundary(submitVoteHandler);
+export default withPagesApiResponse(withPvpErrorBoundary(submitVoteHandler));
+

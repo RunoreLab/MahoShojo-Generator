@@ -1,3 +1,4 @@
+import { withPagesApiResponse } from '@/lib/pages-api-adapter';
 import { getUserBadges } from '@/lib/database/badges';
 import { requireAuthUser } from '@/lib/auth/server';
 
@@ -5,7 +6,7 @@ import { requireAuthUser } from '@/lib/auth/server';
  * GET /api/badges/user
  * 获取当前用户的所有徽章
  */
-export default async function handler(req: Request): Promise<Response> {
+async function handler(req: Request): Promise<Response> {
   if (req.method !== 'GET') {
     return new Response(JSON.stringify({ error: 'Method not allowed' }), {
       status: 405,
@@ -37,3 +38,5 @@ export default async function handler(req: Request): Promise<Response> {
     });
   }
 }
+
+export default withPagesApiResponse(handler);

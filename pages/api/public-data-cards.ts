@@ -1,3 +1,5 @@
+import { withPagesApiResponse } from '@/lib/pages-api-adapter';
+import { getRequestUrl } from '@/lib/request-url';
 // pages/api/public-data-cards.ts
 
 import { getDataCardById, getPublicDataCards } from '@/lib/database/data-cards';
@@ -31,7 +33,7 @@ const readNonNegativeInt = (value: string | null): number | undefined => {
 
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
 
-export default async function handler(req: Request): Promise<Response> {
+async function handler(req: Request): Promise<Response> {
   if (req.method !== 'GET') {
     return new Response(JSON.stringify({ error: 'Method not allowed' }), {
       status: 405,
@@ -41,7 +43,7 @@ export default async function handler(req: Request): Promise<Response> {
 
   return withEdgeCache(req, { key: req.url, ttlSeconds: 15 }, async () => {
     try {
-      const url = new URL(req.url);
+      const url = getRequestUrl(req);
       const id = url.searchParams.get('id'); // 单个数据卡ID
       const typeRaw = url.searchParams.get('type'); // 'character' | 'scenario' | 'history' | 'questionnaire'
       const searchRaw = url.searchParams.get('search'); // 搜索关键词
@@ -176,3 +178,5 @@ export default async function handler(req: Request): Promise<Response> {
     }
   });
 }
+
+export default withPagesApiResponse(handler);

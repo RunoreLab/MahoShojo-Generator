@@ -1,3 +1,5 @@
+import { withPagesApiResponse } from '@/lib/pages-api-adapter';
+import { getRequestUrl } from '@/lib/request-url';
 import { getPvpRoomBrowseRows } from '@/lib/database/pvp';
 import { parsePvpRoomInternalState } from '@/lib/pvp/bot/room';
 import { canJoinPvpRoomFromBrowse, canSpectatePvpRoomFromBrowse } from '@/lib/pvp/room-browse';
@@ -37,7 +39,7 @@ async function browseHandler(req: Request): Promise<Response> {
   const auth = await requireAuthUser(req);
   if ('response' in auth) return auth.response;
 
-  const url = new URL(req.url);
+  const url = getRequestUrl(req);
   const q = url.searchParams.get('q')?.trim() || '';
   const mode = url.searchParams.get('mode')?.trim() || 'all';
   const phase = url.searchParams.get('phase')?.trim() || 'any';
@@ -105,4 +107,5 @@ async function browseHandler(req: Request): Promise<Response> {
   return json({ success: true, rooms });
 }
 
-export default withPvpErrorBoundary(browseHandler);
+export default withPagesApiResponse(withPvpErrorBoundary(browseHandler));
+

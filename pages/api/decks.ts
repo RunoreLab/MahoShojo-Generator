@@ -1,12 +1,14 @@
+import { withPagesApiResponse } from '@/lib/pages-api-adapter';
+import { getRequestUrl } from '@/lib/request-url';
 import { countUserDecks, createDeck, deleteDeck, getUserDecks, updateDeck } from '@/lib/database/decks';
 import { getUserDataCardCapacity } from '@/lib/database/users';
 import { requireAuthUser } from '@/lib/auth/server';
-import { config } from '@/lib/config';
+import { config as appConfig } from '@/lib/config';
 import { quickCheck } from '@/lib/sensitive-word-filter';
 import { mapDeckReadRows } from '@/lib/deck-read-mappers';
 import { normalizeDeckVisibilityInput, readDeckVisibilityInput } from '@/lib/deck-write-mappers';
 
-export default async function handler(req: Request): Promise<Response> {
+async function handler(req: Request): Promise<Response> {
   const auth = await requireAuthUser(req);
   if ('response' in auth) return auth.response;
 
@@ -17,7 +19,7 @@ export default async function handler(req: Request): Promise<Response> {
     try {
       const [decks, capacity, deckCount] = await Promise.all([
         getUserDecks(userId),
-        getUserDataCardCapacity(userId, config.DEFAULT_DATA_CARD_CAPACITY),
+        getUserDataCardCapacity(userId, appConfig.DEFAULT_DATA_CARD_CAPACITY),
         countUserDecks(userId)
       ]);
       const mappedDecks = mapDeckReadRows(decks);
@@ -60,7 +62,7 @@ export default async function handler(req: Request): Promise<Response> {
       }
 
       const [capacity, deckCount] = await Promise.all([
-        getUserDataCardCapacity(userId, config.DEFAULT_DATA_CARD_CAPACITY),
+        getUserDataCardCapacity(userId, appConfig.DEFAULT_DATA_CARD_CAPACITY),
         countUserDecks(userId)
       ]);
 
@@ -147,7 +149,7 @@ export default async function handler(req: Request): Promise<Response> {
 
   if (req.method === 'DELETE') {
     try {
-      const url = new URL(req.url);
+      const url = getRequestUrl(req);
       const idFromQuery = url.searchParams.get('id');
       const body = await (async () => {
         try {
@@ -194,3 +196,5 @@ export default async function handler(req: Request): Promise<Response> {
     headers: { 'Content-Type': 'application/json' }
   });
 }
+
+export default withPagesApiResponse(handler);

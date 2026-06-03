@@ -1,3 +1,4 @@
+import { withPagesApiResponse } from '@/lib/pages-api-adapter';
 import { updateEquippedBadges } from '@/lib/database/badges';
 import { requireAuthUser } from '@/lib/auth/server';
 
@@ -5,7 +6,7 @@ import { requireAuthUser } from '@/lib/auth/server';
  * POST /api/badges/equip
  * 更新用户佩戴的徽章
  */
-export default async function handler(req: Request): Promise<Response> {
+async function handler(req: Request): Promise<Response> {
   if (req.method !== 'POST') {
     return new Response(JSON.stringify({ error: 'Method not allowed' }), {
       status: 405,
@@ -63,3 +64,5 @@ export default async function handler(req: Request): Promise<Response> {
     });
   }
 }
+
+export default withPagesApiResponse(handler);
