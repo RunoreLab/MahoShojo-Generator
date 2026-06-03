@@ -48,7 +48,7 @@ const getHeaderValue = (headers: NodeLikeRequest['headers'], name: string): stri
 };
 
 const getNodeRequestOrigin = (req: NodeLikeRequest): string => {
-  const host = getHeaderValue(req.headers, 'x-forwarded-host') || getHeaderValue(req.headers, 'host');
+  const host = getHeaderValue(req.headers, 'host') || getHeaderValue(req.headers, 'x-forwarded-host');
   const proto = getHeaderValue(req.headers, 'x-forwarded-proto') || 'https';
   return host ? `${proto.split(',')[0]?.trim() || 'https'}://${host.split(',')[0]?.trim() || host}` : 'https://mahoshojo.local';
 };

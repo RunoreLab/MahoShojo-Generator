@@ -46,6 +46,24 @@ describe('withPagesApiResponse', () => {
     expect(new TextDecoder().decode(res.chunks[0] as Uint8Array)).toBe('{"query":"ok"}');
   });
 
+  test('相对 URL 适配时不应让 x-forwarded-host 覆盖 host', async () => {
+    const handler = withPagesApiResponse(async (req) => {
+      return new Response(new URL(req.url).origin);
+    });
+
+    const response = await handler({
+      method: 'GET',
+      url: '/api/auth/verify',
+      headers: {
+        host: 'example.test',
+        'x-forwarded-host': 'attacker.test',
+        'x-forwarded-proto': 'https',
+      },
+    });
+
+    expect(await response!.text()).toBe('https://example.test');
+  });
+
   test('没有 Pages API res 时保持返回 Web Response，兼容直接单元测试调用', async () => {
     const handler = withPagesApiResponse(async () => new Response('ok'));
 

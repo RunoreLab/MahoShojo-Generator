@@ -10,6 +10,7 @@ type MemoryCacheEntry = {
 const memoryCache = new Map<string, MemoryCacheEntry>();
 const MAX_MEMORY_CACHE_ENTRIES = 300;
 const MAX_MEMORY_CACHE_BODY_CHARS = 200_000;
+const CACHE_MATCH_TIMEOUT_MS = 25;
 
 const readDefaultCache = (): Cache | null => {
   const anyCaches = (globalThis as any)?.caches;
@@ -50,6 +51,18 @@ const pruneMemoryCache = (now: number): void => {
   }
 };
 
+const matchCacheWithTimeout = async (cache: Cache, cacheReq: Request): Promise<Response | null> => {
+  try {
+    const cached = await Promise.race<Response | undefined | null>([
+      cache.match(cacheReq),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), CACHE_MATCH_TIMEOUT_MS)),
+    ]);
+    return cached ?? null;
+  } catch {
+    return null;
+  }
+};
+
 export async function withEdgeCache(
   req: Request,
   options: { key: string; ttlSeconds: number },
@@ -69,6 +82,10 @@ export async function withEdgeCache(
 
   const cache = readDefaultCache();
   const cacheReq = cache ? new Request(key, { method: 'GET' }) : null;
+  if (cache && cacheReq) {
+    const cacheHit = await matchCacheWithTimeout(cache, cacheReq);
+    if (cacheHit) return cacheHit;
+  }
 
   const res = await handler();
   if (res.status !== 200) return res;
