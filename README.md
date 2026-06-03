@@ -72,7 +72,7 @@
 
 ## 🚀 技术栈
 
-* **框架**: Next.js 15（Pages Router 为主，局部 App Router）, React 19
+* **框架**: Next.js 15（App Router 迁移期：Route Handlers 已用于新版 auth，Pages Router 承载既有页面/API）, React 19
 * **语言**: TypeScript
 * **包管理器**: pnpm 11.3.0
 * **运行时**: Node.js 22+ (开发、构建与脚本), Cloudflare Pages/Workers (生产，Edge Runtime)
@@ -151,6 +151,8 @@ Cloudflare Pages 部署环境变量需显式设置 `PNPM_VERSION=11.3.0`，避�
 
 - 命名规范采用“分层统一 + 边界映射”，适用于全项目，不限于鉴权模块。
 - 详细说明见 [docs/NAMING_CONVENTIONS_2026-02-28.md](./docs/NAMING_CONVENTIONS_2026-02-28.md)。
+- App Router 迁移采用“API 优先、全局壳其次、页面按业务岛迁移”的路线；迁移评估与阶段计划见 [docs/reports/2026-06-03_204053_App_Router迁移评估.md](./docs/reports/2026-06-03_204053_App_Router迁移评估.md)。
+- 新增 API 默认使用 `app/api/**/route.ts` Route Handler；`pages/api` 仅作为迁移期遗留入口维护，不作为新接口默认位置。
 
 - [x] 核心 AI 生成系统
 - [x] 角色成长与竞技场系统
@@ -182,10 +184,10 @@ Cloudflare Pages 部署环境变量需显式设置 `PNPM_VERSION=11.3.0`，避�
 
 ```
 MahoShojo-Generator/
-├── app/                    # App Router（承载新版 auth 路由）
+├── app/                    # App Router 目标路由体系（已承载新版 auth 路由）
 │   └── api/
 │       └── auth/
-├── pages/                   # 页面路由
+├── pages/                   # 迁移期遗留页面路由
 │   ├── index.tsx           # 主页
 │   ├── name.tsx            # 魔法少女生成
 │   ├── details.tsx         # 深度问卷
@@ -200,7 +202,7 @@ MahoShojo-Generator/
 │   ├── magic-tea-party.tsx # 魔法茶会（长期对话）
 │   ├── encyclopedia/       # 百科系统
 │   ├── character-manager.tsx  # 角色管理
-│   └── api/                # API 路由
+│   └── api/                # 迁移期遗留 API 路由，新增 API 默认进入 app/api
 ├── lib/                    # 核心逻辑
 │   ├── ai/                 # AI 集成
 │   ├── ai-session/         # AI 连续会话（连续战报等）
