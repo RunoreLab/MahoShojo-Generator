@@ -38,11 +38,35 @@ describe('withEdgeCache relative URL support', () => {
       withEdgeCache(req, { key: req.url, ttlSeconds: 300 }, async () => {
         return new Response('ok', { status: 200 });
       }),
-      new Promise<'timeout'>((resolve) => setTimeout(() => resolve('timeout'), 30)),
+      new Promise<'timeout'>((resolve) => setTimeout(() => resolve('timeout'), 80)),
     ]);
 
     expect(response).not.toBe('timeout');
     expect(response).toBeInstanceOf(Response);
+  });
+
+  test('Cache API 命中时应直接返回缓存响应且不调用 handler', async () => {
+    let handlerCalls = 0;
+    (globalThis as { caches?: unknown }).caches = {
+      default: {
+        match: async () => new Response('cached', { status: 200 }),
+        put: async () => undefined,
+      },
+    };
+
+    const req = {
+      method: 'GET',
+      url: '/api/tags?includeInactive=1&case=cache-hit',
+      headers: new Headers({ host: 'example.test' }),
+    } as Request;
+
+    const response = await withEdgeCache(req, { key: req.url, ttlSeconds: 300 }, async () => {
+      handlerCalls += 1;
+      return new Response('fresh', { status: 200 });
+    });
+
+    expect(await response.text()).toBe('cached');
+    expect(handlerCalls).toBe(0);
   });
 
   test('Cache API 读取挂起时不应阻塞业务响应', async () => {
@@ -63,7 +87,7 @@ describe('withEdgeCache relative URL support', () => {
       withEdgeCache(req, { key: req.url, ttlSeconds: 300 }, async () => {
         return new Response('ok', { status: 200 });
       }),
-      new Promise<'timeout'>((resolve) => setTimeout(() => resolve('timeout'), 30)),
+      new Promise<'timeout'>((resolve) => setTimeout(() => resolve('timeout'), 80)),
     ]);
 
     expect(response).not.toBe('timeout');
