@@ -211,6 +211,20 @@ const normalizePathname = (pathname: string): string => {
   return withoutQuery;
 };
 
+export const getTopbarCanonicalPathname = (pathname: string): string => {
+  const normalized = normalizePathname(pathname);
+
+  if (normalized.startsWith('/pvp/') && normalized !== '/pvp/[roomId]') {
+    return '/pvp/[roomId]';
+  }
+
+  if (normalized.startsWith('/encyclopedia/') && normalized !== '/encyclopedia/[slug]') {
+    return '/encyclopedia/[slug]';
+  }
+
+  return normalized;
+};
+
 export const isTopbarCoveredPath = (pathname: string): boolean => {
   return TOPBAR_COVERED_ROUTE_SET.has(normalizePathname(pathname));
 };

@@ -2,6 +2,7 @@ import { describe, expect, test } from 'vitest';
 
 import {
   getNavGroupForPath,
+  getTopbarCanonicalPathname,
   getTopbarCoverage,
   isTopbarCoveredPath,
   NAV_GROUPS,
@@ -92,5 +93,11 @@ describe('navigation config', () => {
     expect(getTopbarCoverage('/pvp/[roomId]')).toEqual({ isCovered: true, activeGroupId: 'battle' });
     expect(getTopbarCoverage('/messages')).toEqual({ isCovered: true, activeGroupId: null });
     expect(getTopbarCoverage('/investigation')).toEqual({ isCovered: true, activeGroupId: 'knowledge' });
+  });
+
+  test('App Router dynamic pathnames can be mapped to legacy topbar route patterns', () => {
+    expect(getTopbarCanonicalPathname('/pvp/room-7')).toBe('/pvp/[roomId]');
+    expect(getTopbarCanonicalPathname('/encyclopedia/site-guide')).toBe('/encyclopedia/[slug]');
+    expect(getTopbarCanonicalPathname('/ranking?season=current#top')).toBe('/ranking');
   });
 });

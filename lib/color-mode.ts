@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react';
 
+import { COLOR_MODE_STORAGE_KEY } from '@/lib/color-mode-init';
+
 export type ColorModePreference = 'system' | 'light' | 'dark';
 export type ResolvedColorMode = 'light' | 'dark';
 
-export const COLOR_MODE_STORAGE_KEY = 'mahoshojo.color-mode';
+export { COLOR_MODE_STORAGE_KEY } from '@/lib/color-mode-init';
 
 export const COLOR_MODE_OPTIONS: Array<{ value: ColorModePreference; label: string }> = [
   { value: 'system', label: '跟随系统' },
