@@ -2,7 +2,7 @@ import { describe, expect, test } from 'vitest';
 
 describe('api/challenge/adjudicate-stream', () => {
   test('SSE 请求会直接返回流响应，而不是等待完整裁定结束后再回放', async () => {
-    const { createChallengeAdjudicateStreamHandler } = await import('@/pages/api/challenge/adjudicate-stream');
+    const { createChallengeAdjudicateStreamHandler } = await import('@/app/api/challenge/adjudicate-stream/handler');
 
     let releaseAdjudication!: () => void;
     const slowAdjudication = new Promise<any>((resolve) => {
@@ -136,7 +136,7 @@ describe('api/challenge/adjudicate-stream', () => {
   });
 
   test('adjudicate-stream returns SSE markdown and done event', async () => {
-    const { createChallengeAdjudicateStreamHandler } = await import('@/pages/api/challenge/adjudicate-stream');
+    const { createChallengeAdjudicateStreamHandler } = await import('@/app/api/challenge/adjudicate-stream/handler');
 
     const validRunState = {
       version: 1,
@@ -260,7 +260,7 @@ describe('api/challenge/adjudicate-stream', () => {
   });
 
   test('非 POST 请求会返回 405', async () => {
-    const { createChallengeAdjudicateStreamHandler } = await import('@/pages/api/challenge/adjudicate-stream');
+    const { createChallengeAdjudicateStreamHandler } = await import('@/app/api/challenge/adjudicate-stream/handler');
 
     const handler = createChallengeAdjudicateStreamHandler({
       adjudicateChallengeRequest: async () => {
@@ -278,7 +278,7 @@ describe('api/challenge/adjudicate-stream', () => {
   });
 
   test('缺少 runState 或 encounter 时返回 400', async () => {
-    const { createChallengeAdjudicateStreamHandler } = await import('@/pages/api/challenge/adjudicate-stream');
+    const { createChallengeAdjudicateStreamHandler } = await import('@/app/api/challenge/adjudicate-stream/handler');
 
     const handler = createChallengeAdjudicateStreamHandler({
       adjudicateChallengeRequest: async () => {
@@ -302,7 +302,7 @@ describe('api/challenge/adjudicate-stream', () => {
   });
 
   test('runState 或 encounter 结构不完整时返回 400，而不是落入内部 500', async () => {
-    const { createChallengeAdjudicateStreamHandler } = await import('@/pages/api/challenge/adjudicate-stream');
+    const { createChallengeAdjudicateStreamHandler } = await import('@/app/api/challenge/adjudicate-stream/handler');
 
     const handler = createChallengeAdjudicateStreamHandler({
       adjudicateChallengeRequest: async () => {

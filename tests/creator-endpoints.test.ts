@@ -8,7 +8,7 @@ describe('creator endpoints', () => {
   });
 
   test('非流式 creator API 允许仅凭 freeformBrief 进入后续校验', async () => {
-    const { default: handler } = await import('@/pages/api/creator/generate');
+    const { default: handler } = await import('@/app/api/creator/generate/handler');
     const response = await handler(
       new Request('https://example.com/api/creator/generate', {
         method: 'POST',
@@ -30,7 +30,7 @@ describe('creator endpoints', () => {
   });
 
   test('非流式 creator API 允许 canshou 模板仅凭 freeformBrief 进入后续校验', async () => {
-    const { default: handler } = await import('@/pages/api/creator/generate');
+    const { default: handler } = await import('@/app/api/creator/generate/handler');
     const response = await handler(
       new Request('https://example.com/api/creator/generate', {
         method: 'POST',
@@ -53,7 +53,7 @@ describe('creator endpoints', () => {
   });
 
   test('非流式 creator API 拒绝伪造的规则运行时快照', async () => {
-    const { default: handler } = await import('@/pages/api/creator/generate');
+    const { default: handler } = await import('@/app/api/creator/generate/handler');
     const response = await handler(
       new Request('https://example.com/api/creator/generate', {
         method: 'POST',
@@ -94,7 +94,7 @@ describe('creator endpoints', () => {
   });
 
   test('流式 creator API 允许仅凭独立规则输入进入后续校验', async () => {
-    const { default: handler } = await import('@/pages/api/creator/generate-stream');
+    const { default: handler } = await import('@/app/api/creator/generate-stream/handler');
     const response = await handler(
       new Request('https://example.com/api/creator/generate-stream', {
         method: 'POST',
@@ -135,7 +135,7 @@ describe('creator endpoints', () => {
   });
 
   test('流式 creator API 拒绝伪造的规则运行时快照', async () => {
-    const { default: handler } = await import('@/pages/api/creator/generate-stream');
+    const { default: handler } = await import('@/app/api/creator/generate-stream/handler');
     const response = await handler(
       new Request('https://example.com/api/creator/generate-stream', {
         method: 'POST',
@@ -181,7 +181,7 @@ describe('creator endpoints', () => {
   });
 
   test('流式 creator API 拒绝缺少 inputs 的畸形规则载荷', async () => {
-    const { default: handler } = await import('@/pages/api/creator/generate-stream');
+    const { default: handler } = await import('@/app/api/creator/generate-stream/handler');
     const response = await handler(
       new Request('https://example.com/api/creator/generate-stream', {
         method: 'POST',
@@ -210,7 +210,7 @@ describe('creator endpoints', () => {
   });
 
   test('流式 creator API 拒绝顶层非数组的 buildRules 载荷', async () => {
-    const { default: handler } = await import('@/pages/api/creator/generate-stream');
+    const { default: handler } = await import('@/app/api/creator/generate-stream/handler');
     const response = await handler(
       new Request('https://example.com/api/creator/generate-stream', {
         method: 'POST',

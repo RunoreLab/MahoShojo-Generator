@@ -6,7 +6,7 @@ vi.mock('@/lib/db/drizzle', () => ({
 
 describe('api/arena/entity-rating-history', () => {
   test('返回 strict 实体历史并限制为公开摘要字段', async () => {
-    const { createEntityRatingHistoryHandler } = await import('@/pages/api/arena/entity-rating-history');
+    const { createEntityRatingHistoryHandler } = await import('@/app/api/arena/entity-rating-history/handler');
 
     const handler = createEntityRatingHistoryHandler({
       getDb: () => ({ db: true }),

@@ -1,7 +1,7 @@
 import type { NewsReport } from '@/components/BattleReportCard';
 import type { UserAIProviderConfig } from '@/components/AiProviderSelector';
 import type { Preset } from '@/lib/presets';
-import type { StatsData } from '@/pages/api/get-stats';
+import type { StatsData } from '@/app/api/get-stats/handler';
 import type { AdjudicatorEvent, AdjudicationResult, CharacterCurrentState } from '@/types/arena';
 import type { NormalizedStreamUpdateMeta } from '@/lib/arena/stream-meta';
 import type { QuestionnaireDefinition } from '@/lib/questionnaires';

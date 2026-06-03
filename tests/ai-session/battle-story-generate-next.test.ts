@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 
 import { validateBattleStoryGenerateNextInput } from '@/lib/ai-session/battle-story/generate-next';
-import { buildUpstreamRequestBody } from '@/pages/api/arena/session/generate-next';
+import { buildUpstreamRequestBody } from '@/app/api/arena/session/generate-next/handler';
 
 describe('battle story generate-next validation', () => {
   test('start 只允许空会话且固定首章索引', () => {

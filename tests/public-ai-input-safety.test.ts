@@ -54,7 +54,7 @@ describe('public ai input safety', () => {
       },
     );
 
-    const { default: handler } = await import('@/pages/api/generate-magical-girl');
+    const { default: handler } = await import('@/app/api/generate-magical-girl/handler');
     const response = await handler(
       new Request('https://example.com/api/generate-magical-girl', {
         method: 'POST',
@@ -77,7 +77,7 @@ describe('public ai input safety', () => {
   });
 
   test('名字超过上限时会在服务端直接拒绝且不进入安全检查', async () => {
-    const { default: handler } = await import('@/pages/api/generate-magical-girl');
+    const { default: handler } = await import('@/app/api/generate-magical-girl/handler');
     const response = await handler(
       new Request('https://example.com/api/generate-magical-girl', {
         method: 'POST',
@@ -108,7 +108,7 @@ describe('public ai input safety', () => {
       },
     );
 
-    const { default: handler } = await import('@/pages/api/generate-magical-girl-details');
+    const { default: handler } = await import('@/app/api/generate-magical-girl-details/handler');
     const response = await handler(
       new Request('https://example.com/api/generate-magical-girl-details', {
         method: 'POST',

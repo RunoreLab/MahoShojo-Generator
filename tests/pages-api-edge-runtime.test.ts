@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 
 import { describe, expect, test } from 'vitest';
@@ -6,6 +6,7 @@ import { describe, expect, test } from 'vitest';
 const repoRoot = process.cwd();
 
 const listTsFiles = (dir: string): string[] => {
+  if (!existsSync(dir)) return [];
   return readdirSync(dir)
     .flatMap((entry) => {
       const fullPath = join(dir, entry);
@@ -15,19 +16,45 @@ const listTsFiles = (dir: string): string[] => {
     });
 };
 
-const usesWebResponseApi = (source: string): boolean => {
-  return source.includes('new Response(') || source.includes('Promise<Response>') || source.includes('return json(');
-};
+const allowedRouteExports = new Set([
+  'GET',
+  'HEAD',
+  'OPTIONS',
+  'POST',
+  'PUT',
+  'PATCH',
+  'DELETE',
+  'config',
+  'dynamic',
+  'dynamicParams',
+  'fetchCache',
+  'maxDuration',
+  'preferredRegion',
+  'revalidate',
+  'runtime',
+]);
 
-describe('pages/api Web Response adapter', () => {
-  test('Web Response 风格的 Pages API 必须通过 withPagesApiResponse 适配 Pages API res', () => {
-    const missing = listTsFiles(join(repoRoot, 'pages/api'))
-      .filter((file) => {
-        const source = readFileSync(file, 'utf8');
-        return usesWebResponseApi(source) && !/export\s+default\s+withPagesApiResponse\(/.test(source);
-      })
+const namedExportPattern = /export\s+(?:async\s+)?(?:const|function|let|var)\s+([A-Za-z_$][\w$]*)/g;
+
+describe('App Router API migration guard', () => {
+  test('生产 API 不应继续放在 pages/api', () => {
+    const pagesApiFiles = listTsFiles(join(repoRoot, 'pages/api'))
       .map((file) => relative(repoRoot, file));
 
-    expect(missing).toEqual([]);
+    expect(pagesApiFiles).toEqual([]);
+  });
+
+  test('app/api route.ts 只导出 Next.js Route Handler 允许的接口', () => {
+    const invalidExports = listTsFiles(join(repoRoot, 'app/api'))
+      .filter((file) => file.endsWith('/route.ts'))
+      .flatMap((file) => {
+        const source = readFileSync(file, 'utf8');
+        return Array.from(source.matchAll(namedExportPattern))
+          .map((match) => match[1]!)
+          .filter((name) => !allowedRouteExports.has(name))
+          .map((name) => `${relative(repoRoot, file)}:${name}`);
+      });
+
+    expect(invalidExports).toEqual([]);
   });
 });

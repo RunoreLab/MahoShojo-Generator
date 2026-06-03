@@ -2,7 +2,7 @@ import { describe, expect, vi, test } from 'vitest';
 
 describe('api/data-card-stats', () => {
   test('actor 超过 stats 限流时返回 429 且不写 interaction', async () => {
-    const { createDataCardStatsHandler } = await import('@/pages/api/data-card-stats');
+    const { createDataCardStatsHandler } = await import('@/app/api/data-card-stats/handler');
     let recordCalled = false;
     const handler = createDataCardStatsHandler({
       getDb: () => ({ db: true } as never),

@@ -1,5 +1,5 @@
 import React from 'react';
-import { CharacterRank } from '../pages/api/get-stats';
+import type { CharacterRank } from '@/app/api/get-stats/handler';
 import { buildTitleDisplay } from '@/lib/text';
 
 interface LeaderboardProps {

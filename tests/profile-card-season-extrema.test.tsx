@@ -5,7 +5,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 
 import { ProfileCard, type MeProfileCardPayload } from '@/components/me/ProfileCard';
 
-const { buildTopRatedStrictRating } = await import('@/pages/api/me/profile-card');
+const { buildTopRatedStrictRating } = await import('@/app/api/me/profile-card/handler');
 
 function buildPayload(): MeProfileCardPayload {
   const payload: MeProfileCardPayload = {
