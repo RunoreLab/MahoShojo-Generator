@@ -13,7 +13,7 @@ vi.mock('@/lib/database/tags', () => ({
   ]),
 }));
 
-import handler from '@/pages/api/tags';
+import handler from '@/app/api/tags/handler';
 
 describe('pages/api/tags Worker URL compatibility', () => {
   test('OpenNext Worker 传入相对 req.url 时仍能读取 query 并返回标签', async () => {

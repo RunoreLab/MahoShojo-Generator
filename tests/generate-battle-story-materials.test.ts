@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const readEndpointSource = () =>
-  readFileSync(join(process.cwd(), 'pages/api/generate-battle-story.ts'), 'utf8');
+  readFileSync(join(process.cwd(), 'app/api/generate-battle-story/handler.ts'), 'utf8');
 
 describe('generate-battle-story context wiring', () => {
   test('非流式默认 endpoint 会解析 materials、注入 prompt builder，并排除 strict 轻量模型路径', () => {

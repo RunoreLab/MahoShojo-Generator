@@ -27,7 +27,7 @@ const createResolvedSourceCardLite = (id: string, name: string): ChallengeResolv
 
 describe('api/challenge/enemy-candidates', () => {
   test('compatibility 模式返回 candidates，并省略 enemySnapshot / resolvedSourceCardLite', async () => {
-    const { createChallengeEnemyCandidatesHandler } = await import('@/pages/api/challenge/enemy-candidates');
+    const { createChallengeEnemyCandidatesHandler } = await import('@/app/api/challenge/enemy-candidates/handler');
 
     const handler = createChallengeEnemyCandidatesHandler({
       resolveChallengeEnemyCandidates: async (input) => {
@@ -94,7 +94,7 @@ describe('api/challenge/enemy-candidates', () => {
   });
 
   test('selectionSeed 模式返回 enemySnapshot 和 resolvedSourceCardLite，不返回 candidates', async () => {
-    const { createChallengeEnemyCandidatesHandler } = await import('@/pages/api/challenge/enemy-candidates');
+    const { createChallengeEnemyCandidatesHandler } = await import('@/app/api/challenge/enemy-candidates/handler');
 
     const handler = createChallengeEnemyCandidatesHandler({
       resolveChallengeEnemyCandidates: async (input) => {
@@ -145,7 +145,7 @@ describe('api/challenge/enemy-candidates', () => {
   });
 
   test('selectionSeed 模式在 remote 不足阈值时仍返回 preset-only enemySnapshot 和 null sidecar', async () => {
-    const { createChallengeEnemyCandidatesHandler } = await import('@/pages/api/challenge/enemy-candidates');
+    const { createChallengeEnemyCandidatesHandler } = await import('@/app/api/challenge/enemy-candidates/handler');
 
     const handler = createChallengeEnemyCandidatesHandler({
       resolveChallengeEnemyCandidates: async () => ({
@@ -187,7 +187,7 @@ describe('api/challenge/enemy-candidates', () => {
   });
 
   test('非 GET 请求会返回 success=false 的 405', async () => {
-    const { createChallengeEnemyCandidatesHandler } = await import('@/pages/api/challenge/enemy-candidates');
+    const { createChallengeEnemyCandidatesHandler } = await import('@/app/api/challenge/enemy-candidates/handler');
     const handler = createChallengeEnemyCandidatesHandler({
       resolveChallengeEnemyCandidates: async () => {
         throw new Error('should not be called');
@@ -207,7 +207,7 @@ describe('api/challenge/enemy-candidates', () => {
   });
 
   test('非法 tier 参数会返回 success=false 的 400', async () => {
-    const { createChallengeEnemyCandidatesHandler } = await import('@/pages/api/challenge/enemy-candidates');
+    const { createChallengeEnemyCandidatesHandler } = await import('@/app/api/challenge/enemy-candidates/handler');
     const handler = createChallengeEnemyCandidatesHandler({
       resolveChallengeEnemyCandidates: async () => {
         throw new Error('should not be called');
@@ -227,7 +227,7 @@ describe('api/challenge/enemy-candidates', () => {
   });
 
   test('暂不支持的 worldId 会返回 success=false 的 400', async () => {
-    const { createChallengeEnemyCandidatesHandler } = await import('@/pages/api/challenge/enemy-candidates');
+    const { createChallengeEnemyCandidatesHandler } = await import('@/app/api/challenge/enemy-candidates/handler');
     const handler = createChallengeEnemyCandidatesHandler({
       resolveChallengeEnemyCandidates: async () => {
         throw new Error('should not be called');

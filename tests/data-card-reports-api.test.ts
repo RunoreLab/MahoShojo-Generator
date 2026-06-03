@@ -5,8 +5,8 @@ import {
   DataCardReportsServiceUnavailableError,
   DataCardReportValidationError,
 } from '@/lib/data-card-reports/service';
-import { createDataCardReportsHandler } from '@/pages/api/data-card-reports';
-import { createDataCardReportWithdrawHandler } from '@/pages/api/data-card-reports/withdraw';
+import { createDataCardReportsHandler } from '@/app/api/data-card-reports/handler';
+import { createDataCardReportWithdrawHandler } from '@/app/api/data-card-reports/withdraw/handler';
 
 const auth = {
   user: { id: 7, username: 'hana' },

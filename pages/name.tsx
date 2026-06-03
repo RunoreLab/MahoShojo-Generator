@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import Head from 'next/head';
 import { snapdom } from '@zumer/snapdom';
 // TODO: 从这里引入怪怪的，但是先这样吧！
-import { type AIGeneratedMagicalGirl } from './api/generate-magical-girl';
+import type { AIGeneratedMagicalGirl } from '@/app/api/generate-magical-girl/handler';
 import { MainColor } from '../lib/main-color';
 import Link from 'next/link';
 import { useCooldown } from '../lib/cooldown';

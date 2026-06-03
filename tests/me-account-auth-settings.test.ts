@@ -125,9 +125,9 @@ vi.mock('@/lib/auth/user-auth-linking', () => ({
 
 const loadHandlers = async () => {
   const [passwordModule, passwordSetModule, emailModule] = await Promise.all([
-    import('@/pages/api/me/account/password'),
-    import('@/pages/api/me/account/password/set'),
-    import('@/pages/api/me/account/email'),
+    import('@/app/api/me/account/password/handler'),
+    import('@/app/api/me/account/password/set/handler'),
+    import('@/app/api/me/account/email/handler'),
   ]);
   return {
     passwordHandler: passwordModule.default as (req: Request) => Promise<Response>,

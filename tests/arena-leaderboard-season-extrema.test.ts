@@ -1,9 +1,9 @@
 import { beforeAll, describe, expect, vi, test } from 'vitest';
 
-let buildLeaderboardItemFromRow: typeof import('@/pages/api/arena/leaderboard').buildLeaderboardItemFromRow;
+let buildLeaderboardItemFromRow: typeof import('@/app/api/arena/leaderboard/handler').buildLeaderboardItemFromRow;
 
 beforeAll(async () => {
-  const mod = await import('@/pages/api/arena/leaderboard');
+  const mod = await import('@/app/api/arena/leaderboard/handler');
   buildLeaderboardItemFromRow = mod.buildLeaderboardItemFromRow;
 });
 

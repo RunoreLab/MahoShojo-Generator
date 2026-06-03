@@ -108,7 +108,7 @@ describe('creator request guards', () => {
   });
 
   test('非流式 creator API 返回的卡片不会在 creationInputs 中重复保存问卷与答案', async () => {
-    const { default: handler } = await import('@/pages/api/creator/generate');
+    const { default: handler } = await import('@/app/api/creator/generate/handler');
     const response = await handler(
       new Request('https://example.com/api/creator/generate', {
         method: 'POST',
@@ -156,7 +156,7 @@ describe('creator request guards', () => {
   });
 
   test('非流式 creator API 拒绝不受支持的通用模板', async () => {
-    const { default: handler } = await import('@/pages/api/creator/generate');
+    const { default: handler } = await import('@/app/api/creator/generate/handler');
     const response = await handler(
       new Request('https://example.com/api/creator/generate', {
         method: 'POST',
@@ -177,7 +177,7 @@ describe('creator request guards', () => {
   });
 
   test('流式 creator API 拒绝结构化模板', async () => {
-    const { default: handler } = await import('@/pages/api/creator/generate-stream');
+    const { default: handler } = await import('@/app/api/creator/generate-stream/handler');
     const response = await handler(
       new Request('https://example.com/api/creator/generate-stream', {
         method: 'POST',
@@ -200,7 +200,7 @@ describe('creator request guards', () => {
   test('非流式 creator API 会对 freeformBrief 做服务端安全检查', async () => {
     state.blockedTexts.add('危险补充说明');
 
-    const { default: handler } = await import('@/pages/api/creator/generate');
+    const { default: handler } = await import('@/app/api/creator/generate/handler');
     const response = await handler(
       new Request('https://example.com/api/creator/generate', {
         method: 'POST',
@@ -224,7 +224,7 @@ describe('creator request guards', () => {
   test('流式 creator API 会对 freeformBrief 做服务端安全检查', async () => {
     state.blockedTexts.add('危险流式补充说明');
 
-    const { default: handler } = await import('@/pages/api/creator/generate-stream');
+    const { default: handler } = await import('@/app/api/creator/generate-stream/handler');
     const response = await handler(
       new Request('https://example.com/api/creator/generate-stream', {
         method: 'POST',

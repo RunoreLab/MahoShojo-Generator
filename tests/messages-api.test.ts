@@ -1,10 +1,10 @@
 import { describe, expect, test } from 'vitest';
 
-import { createMessagesHandler } from '@/pages/api/messages';
-import { createMessagesReadAllHandler } from '@/pages/api/messages/read-all';
-import { createMessagesReadHandler } from '@/pages/api/messages/read';
-import { createMessagesSiteReadHandler } from '@/pages/api/messages/site/read';
-import { createMessagesSummaryHandler } from '@/pages/api/messages/summary';
+import { createMessagesHandler } from '@/app/api/messages/handler';
+import { createMessagesReadAllHandler } from '@/app/api/messages/read-all/handler';
+import { createMessagesReadHandler } from '@/app/api/messages/read/handler';
+import { createMessagesSiteReadHandler } from '@/app/api/messages/site/read/handler';
+import { createMessagesSummaryHandler } from '@/app/api/messages/summary/handler';
 
 const auth = {
   user: { id: 7, username: 'hana' },
