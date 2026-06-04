@@ -1,9 +1,8 @@
-// pages/badge-manager.tsx
+'use client';
 
 import React, { useState, useEffect } from 'react';
-import Head from 'next/head';
 import Link from 'next/link';
-import { useRouter } from 'next/router';
+import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/useAuth';
 import { authStorage } from '@/lib/auth';
 import type { UserBadge } from '@/types/badge';
@@ -16,7 +15,7 @@ import Footer from '@/components/Footer';
  * 徽章管理页面
  * 包含徽章展示、佩戴管理等功能
  */
-export default function BadgeManager() {
+export function BadgeManagerPage() {
   const { user, loading: authLoading } = useAuth();
   const router = useRouter();
   const [userBadges, setUserBadges] = useState<UserBadge[]>([]);
@@ -91,21 +90,16 @@ export default function BadgeManager() {
   // 加载状态
   if (authLoading || loading) {
     return (
-      <>
-        <Head>
-          <title>徽章管理 - MahoShojo Generator</title>
-        </Head>
-        <div className="magic-background-white">
-          <div className="container">
-            <div className="flex items-center justify-center min-h-screen">
-              <div className="text-center">
-                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-pink-600 mx-auto mb-4"></div>
-                <p className="text-gray-600">加载中...</p>
-              </div>
+      <div className="magic-background-white">
+        <div className="container">
+          <div className="flex items-center justify-center min-h-screen">
+            <div className="text-center">
+              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-pink-600 mx-auto mb-4"></div>
+              <p className="text-gray-600">加载中...</p>
             </div>
           </div>
         </div>
-      </>
+      </div>
     );
   }
 
@@ -116,9 +110,6 @@ export default function BadgeManager() {
 
   return (
     <>
-      <Head>
-        <title>徽章管理 - MahoShojo Generator</title>
-      </Head>
       <div className="magic-background-white">
         <div className="container">
           <div className="card max-w-4xl mx-auto">

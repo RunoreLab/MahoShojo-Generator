@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import Head from 'next/head';
 import Link from 'next/link';
 import { useMutation } from '@tanstack/react-query';
 
@@ -88,11 +87,6 @@ export function MePage() {
 
   return (
     <>
-      <Head>
-        <title>个人页 - MahoShojo Generator</title>
-        <meta name="description" content="查看战报记录、PVP 战绩与个人设置" />
-      </Head>
-
       <div className="magic-background-white">
         <div className="container">
           <div className="card">

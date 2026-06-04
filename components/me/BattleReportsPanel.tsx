@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useRouter } from 'next/router';
+import { usePathname, useSearchParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { RefreshCcw, Search, X } from 'lucide-react';
 
@@ -108,7 +108,8 @@ const normalizeQueryFromRouter = (
 };
 
 export function BattleReportsPanel({ isAuthenticated, onOpenDetails, onRegenerate, isRegenerating, regenerateError }: Props) {
-  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
 
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
@@ -129,17 +130,17 @@ export function BattleReportsPanel({ isAuthenticated, onOpenDetails, onRegenerat
   }, [searchInput]);
 
   useEffect(() => {
-    if (!router.isReady) return;
     if (didInitFromUrl.current) return;
+    if (!searchParams) return;
 
-    const initialPage = clampInt(getSingleQueryValue(router.query.page), 1, 1, 10_000);
-    const initialPageSize = clampInt(getSingleQueryValue(router.query.pageSize), 10, 1, 30);
-    const initialStatus = getSingleQueryValue(router.query.status);
-    const initialMode = getSingleQueryValue(router.query.mode);
-    const initialGenerationMode = getSingleQueryValue(router.query.generationMode);
-    const initialPvpOnly = getSingleQueryValue(router.query.pvpOnly);
-    const initialSort = getSingleQueryValue(router.query.sort);
-    const initialQ = getSingleQueryValue(router.query.q);
+    const initialPage = clampInt(searchParams.get('page') ?? undefined, 1, 1, 10_000);
+    const initialPageSize = clampInt(searchParams.get('pageSize') ?? undefined, 10, 1, 30);
+    const initialStatus = searchParams.get('status');
+    const initialMode = searchParams.get('mode');
+    const initialGenerationMode = searchParams.get('generationMode');
+    const initialPvpOnly = searchParams.get('pvpOnly');
+    const initialSort = searchParams.get('sort');
+    const initialQ = searchParams.get('q');
 
     setPage(initialPage);
     setPageSize(initialPageSize);
@@ -159,11 +160,12 @@ export function BattleReportsPanel({ isAuthenticated, onOpenDetails, onRegenerat
     }
 
     didInitFromUrl.current = true;
-  }, [router.isReady, router.query]);
+  }, [searchParams]);
 
   useEffect(() => {
-    if (!router.isReady) return;
     if (!didInitFromUrl.current) return;
+    if (typeof window === 'undefined') return;
+    if (!searchParams) return;
 
     const nextQuery: Record<string, string> = {};
     if (page !== 1) nextQuery.page = String(page);
@@ -175,11 +177,17 @@ export function BattleReportsPanel({ isAuthenticated, onOpenDetails, onRegenerat
     if (sort !== 'started_at_desc') nextQuery.sort = sort;
     if (search) nextQuery.q = search;
 
-    const currentQuery = normalizeQueryFromRouter(router.query as Record<string, string | string[] | undefined>);
+    const currentQuery = normalizeQueryFromRouter(Object.fromEntries(searchParams.entries()));
     if (areQueryRecordsEqual(currentQuery, nextQuery)) return;
 
-    void router.replace({ pathname: router.pathname, query: nextQuery }, undefined, { shallow: true });
-  }, [router, page, pageSize, status, mode, generationMode, pvpOnly, sort, search]);
+    const params = new URLSearchParams(nextQuery);
+    const queryString = params.toString();
+    window.history.replaceState(
+      window.history.state,
+      '',
+      queryString ? `${pathname}?${queryString}` : pathname,
+    );
+  }, [pathname, searchParams, page, pageSize, status, mode, generationMode, pvpOnly, sort, search]);
 
   const reportsQuery = useQuery({
     queryKey: ['me', 'battle-reports', page, pageSize, status, mode, generationMode, pvpOnly, sort, search],

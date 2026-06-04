@@ -1,9 +1,8 @@
-// pages/character-manager.tsx
+'use client';
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import Head from 'next/head';
 import Link from 'next/link';
-import { useRouter } from 'next/router';
+import { useRouter } from 'next/navigation';
 import { Download } from 'lucide-react';
 import { quickCheck, type FilterResult, type SensitiveMatchDetail } from '@/lib/sensitive-word-filter';
 import { randomChooseOneHanaName } from '@/lib/random-choose-hana-name';
@@ -19,11 +18,11 @@ import {
     serializeWantuRoundTripExportPreference,
     WANTU_ROUND_TRIP_EXPORT_PREFERENCE_KEY,
 } from '@/lib/wantu-card/character-manager';
-import Footer from '../components/Footer';
+import Footer from '@/components/Footer';
 // 【新增】导入卡片组件和颜色配置
-import MagicalGirlCard from '../components/MagicalGirlCard';
-import CanshouCard from '../components/CanshouCard';
-import GeneralCharacterCard from '../components/GeneralCharacterCard';
+import MagicalGirlCard from '@/components/MagicalGirlCard';
+import CanshouCard from '@/components/CanshouCard';
+import GeneralCharacterCard from '@/components/GeneralCharacterCard';
 import { CharacterPortraitAssetPanel } from '@/components/shared/CharacterPortraitAssetPanel';
 import { ThemeImage } from '@/components/shared/ThemeImage';
 import { JsonSizeIndicator } from '@/components/shared/JsonSizeIndicator';
@@ -34,16 +33,16 @@ import { loadAuthMigrationStatus, type AuthMigrationStatus } from '@/components/
 import { getDataCardVisibilityValue } from '@/lib/data-card-status';
 
 // 引入 AdjudicatorEditor 和新类型
-import AdjudicatorEditor from '../components/AdjudicatorEditor';
+import AdjudicatorEditor from '@/components/AdjudicatorEditor';
 
 // 导入拆分的组件
-import AuthModal from '../components/CharManager/AuthModal';
-import SaveCardModal from '../components/CharManager/SaveCardModal';
-import DataCardsModal from '../components/CharManager/DataCardsModal';
-import RecycleBinModal from '../components/CharManager/RecycleBinModal';
-import NarrativeHistoryCardEditorModal from '../components/CharManager/NarrativeHistoryCardEditorModal';
-import QuestionnaireCompatModal, { type QuestionnaireCompatTargetCard } from '../components/CharManager/QuestionnaireCompatModal';
-import ScenarioEditor from '../components/ScenarioEditor';
+import AuthModal from '@/components/CharManager/AuthModal';
+import SaveCardModal from '@/components/CharManager/SaveCardModal';
+import DataCardsModal from '@/components/CharManager/DataCardsModal';
+import RecycleBinModal from '@/components/CharManager/RecycleBinModal';
+import NarrativeHistoryCardEditorModal from '@/components/CharManager/NarrativeHistoryCardEditorModal';
+import QuestionnaireCompatModal, { type QuestionnaireCompatTargetCard } from '@/components/CharManager/QuestionnaireCompatModal';
+import ScenarioEditor from '@/components/ScenarioEditor';
 import ScenarioBattleStoryPlanEditor from '@/components/ScenarioBattleStoryPlanEditor';
 import { UserWithTitle } from '@/components/UserTitle';
 import type { UserBadge } from '@/types/badge';
@@ -80,6 +79,12 @@ const LEGACY_MIGRATION_SOFT_BLOCK_THRESHOLD = 3;
 
 const getDisplayCharCount = (text: string): number => {
     return Array.from((text ?? '').trim()).length;
+};
+
+const getArrestedHref = (reason?: string): string => {
+    const trimmedReason = typeof reason === 'string' ? reason.trim() : '';
+    if (!trimmedReason) return '/arrested';
+    return `/arrested?reason=${encodeURIComponent(trimmedReason)}`;
 };
 
 /**
@@ -287,7 +292,7 @@ const gradientColors: Record<string, { first: string; second: string }> = {
 const TEMPLATE_PLACEHOLDER_VALUE = '__unknown__';
 const TEMPLATE_ORDER: DataCardTemplate[] = ['magical-girl', 'canshou', 'general', 'scenario', 'general-scenario'];
 
-const CharacterManagerPage: React.FC = () => {
+export const CharacterManagerPage: React.FC = () => {
     const router = useRouter();
     const { user, loading: authLoading, isAuthenticated, register, login, logout } = useAuth();
     const [pastedJson, setPastedJson] = useState('');
@@ -575,10 +580,7 @@ const CharacterManagerPage: React.FC = () => {
             if (!response.ok) {
                 const errorData = await response.json();
                 if (errorData.shouldRedirect) {
-                    router.push({
-                        pathname: '/arrested',
-                        query: { reason: errorData.reason || '编辑内容不合规' }
-                    });
+                    router.push(getArrestedHref(errorData.reason || '编辑内容不合规'));
                     return null;
                 }
                 throw new Error(errorData.message || '签名服务器认证失败');
@@ -1829,10 +1831,7 @@ const CharacterManagerPage: React.FC = () => {
                 if (!response.ok) {
                     const errorData = await response.json();
                     if (errorData.shouldRedirect) {
-                        router.push({
-                            pathname: '/arrested',
-                            query: { reason: errorData.reason || '编辑内容不合规' }
-                        });
+                        router.push(getArrestedHref(errorData.reason || '编辑内容不合规'));
                         // 中断执行，因为页面即将跳转
                         return;
                     }
@@ -1926,9 +1925,6 @@ const CharacterManagerPage: React.FC = () => {
 
     return (
         <>
-            <Head>
-                <title>角色管理中心 - MahoShojo Generator</title>
-            </Head>
             <div className="magic-background-white">
                 <div className="container">
                     <div className="card">
@@ -2796,5 +2792,3 @@ const CharacterManagerPage: React.FC = () => {
         </>
     );
 };
-
-export default CharacterManagerPage;

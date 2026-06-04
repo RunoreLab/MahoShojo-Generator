@@ -1,7 +1,8 @@
+'use client';
+
 import React, { useMemo, useState } from 'react';
-import Head from 'next/head';
 import Link from 'next/link';
-import { useRouter } from 'next/router';
+import { useRouter } from 'next/navigation';
 
 import BattleDataModal from '@/components/BattleDataModal';
 import Footer from '@/components/Footer';
@@ -36,6 +37,12 @@ type TeamMember = {
 
 type AddMemberOptions = {
   dataCardId?: string;
+};
+
+const getArrestedHref = (reason?: string): string => {
+  const trimmedReason = typeof reason === 'string' ? reason.trim() : '';
+  if (!trimmedReason) return '/arrested';
+  return `/arrested?reason=${encodeURIComponent(trimmedReason)}`;
 };
 
 const SOURCE_LABELS: Record<TeamMember['source'], string> = {
@@ -123,7 +130,7 @@ const buildTachiePrompt = (data: Record<string, unknown>): string => {
   return '';
 };
 
-export default function CharacterPartyPage() {
+export function CharacterPartyPage() {
   const { isAuthenticated } = useAuth();
   const router = useRouter();
 
@@ -241,10 +248,7 @@ export default function CharacterPartyPage() {
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
       if (errorData?.shouldRedirect) {
-        router.push({
-          pathname: '/arrested',
-          query: { reason: errorData.reason || '编辑内容不合规' }
-        });
+        router.push(getArrestedHref(errorData.reason || '编辑内容不合规'));
         return null;
       }
       throw new Error(errorData?.message || errorData?.error || '签名服务器认证失败');
@@ -482,11 +486,6 @@ export default function CharacterPartyPage() {
 
   return (
     <>
-      <Head>
-        <title>角色组队 - 魔法少女生成器</title>
-        <meta name="description" content="将多个角色卡拼接组合成一张角色卡，支持保存图片/下载/保存到云端与生成 LibLib 或 ModelScope 立绘。" />
-      </Head>
-
       <div className="magic-background-white">
         <div className="container !max-w-[1100px]">
           <div className="card !max-w-none">
