@@ -1,5 +1,7 @@
+'use client';
+
 import { useEffect } from 'react';
-import Router from 'next/router';
+import { useRouter } from 'next/navigation';
 
 import { ChallengePage } from '@/components/challenge/ChallengePage';
 import type { BetaAccessFeatureId } from '@/config/beta-access';
@@ -7,7 +9,8 @@ import { buildBetaAccessUrl } from '@/lib/beta-access';
 import { useBetaAccessStatus } from '@/lib/beta-access-client';
 import { useAuth } from '@/lib/useAuth';
 
-export default function ChallengePageRoute() {
+export function ChallengeRouteGate() {
+  const router = useRouter();
   const { isAuthenticated, loading, userBadges, badgesLoading } = useAuth();
   const betaFeatureId: BetaAccessFeatureId = 'challenge';
   const betaAccess = useBetaAccessStatus({
@@ -20,9 +23,9 @@ export default function ChallengePageRoute() {
 
   useEffect(() => {
     if (betaAccess.status === 'blocked' || betaAccess.status === 'error') {
-      void Router.replace(buildBetaAccessUrl(betaFeatureId));
+      router.replace(buildBetaAccessUrl(betaFeatureId));
     }
-  }, [betaAccess.status, betaFeatureId]);
+  }, [betaAccess.status, betaFeatureId, router]);
 
   if (betaAccess.status !== 'allowed') {
     return (

@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import Head from 'next/head';
 
 import BattleDataModal from '@/components/BattleDataModal';
 import DataCardDetailsModal from '@/components/DataCardDetailsModal';
@@ -145,14 +144,6 @@ export function BattleLitePage() {
 
   return (
     <>
-      <Head>
-        <title>魔法少女竞技场（简洁版） - MahoShojo Generator</title>
-        <meta
-          name="description"
-          content="简洁单列竞技场页：更轻量地选择角色、情景并开始生成战报。"
-        />
-      </Head>
-
       <div className="magic-background-white battle-lite-shell">
         <div className="mx-auto w-full max-w-[820px] px-4 pb-8 pt-6 sm:px-6 lg:px-8">
           <div className="battle-lite-panel rounded-[30px] px-4 py-5 sm:px-6 sm:py-6">

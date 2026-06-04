@@ -1,19 +1,18 @@
-// pages/sublimation.tsx
+'use client';
 
 import React, { useState, ChangeEvent, useEffect, useMemo, useCallback, useRef } from 'react';
-import Head from 'next/head';
-import { useRouter } from 'next/router';
 import Link from 'next/link';
-import MagicalGirlCard from '../components/MagicalGirlCard';
-import CanshouCard from '../components/CanshouCard';
-import GeneralCharacterCard from '../components/GeneralCharacterCard';
+import MagicalGirlCard from '@/components/MagicalGirlCard';
+import CanshouCard from '@/components/CanshouCard';
+import GeneralCharacterCard from '@/components/GeneralCharacterCard';
 import { getSensitiveWordRedirectTarget } from '@/lib/content-safety/client';
-import { useProviderModeCooldown } from '../lib/cooldown';
-import { config as appConfig } from '../lib/config';
-import SaveToCloudButton from '../components/SaveToCloudButton';
-import Footer from '../components/Footer';
-import BattleDataModal from '../components/BattleDataModal';
-import DataCardDetailsModal from '../components/DataCardDetailsModal';
+import { useClientRouteAdapter } from '@/lib/client-route-adapter';
+import { useProviderModeCooldown } from '@/lib/cooldown';
+import { config as appConfig } from '@/lib/config';
+import SaveToCloudButton from '@/components/SaveToCloudButton';
+import Footer from '@/components/Footer';
+import BattleDataModal from '@/components/BattleDataModal';
+import DataCardDetailsModal from '@/components/DataCardDetailsModal';
 import { NarrativeHistoryModal } from '@/components/arena/components/NarrativeHistoryModal';
 import { NarrativeHistoryPickerModal } from '@/components/arena/components/NarrativeHistoryPickerModal';
 import { useNarrativeHistoryStore } from '@/components/arena/stores/useNarrativeHistoryStore';
@@ -214,8 +213,8 @@ const SUBLIMATION_PREFERENCE_KEY = 'mahoshojo.sublimation.preferences.v1';
 const SUBLIMATION_USER_GUIDANCE_MAX_CHARS = 200;
 
 
-const SublimationPage: React.FC = () => {
-    const router = useRouter();
+export const SublimationPage: React.FC = () => {
+    const router = useClientRouteAdapter();
     const { isAuthenticated } = useAuth();
     const [characterData, setCharacterData] = useState<any>(null);
     const [fileName, setFileName] = useState<string | null>(null);
@@ -1292,10 +1291,6 @@ const SublimationPage: React.FC = () => {
 
     return (
         <>
-            <Head>
-                <title>成长升华 - MahoShojo Generator</title>
-                <meta name="description" content="根据角色的历战记录，生成一个全新的成长后形态！" />
-            </Head>
             <div className="magic-background-white">
                 <div className="container">
                     <div className="card">
@@ -2075,5 +2070,3 @@ const SublimationPage: React.FC = () => {
 	        </>
 	    );
 	};
-
-export default SublimationPage;

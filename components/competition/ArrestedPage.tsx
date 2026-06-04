@@ -1,13 +1,12 @@
-// pages/arrested.tsx
+'use client';
 
 import React, { useState, useEffect } from 'react';
-import Head from 'next/head';
 import Link from 'next/link';
-import { useRouter } from 'next/router';
+import { useClientRouteAdapter } from '@/lib/client-route-adapter';
 import { loadArrestedBackup, clearArrestedBackup, type ArrestedBackupPackage, type ArrestedBackupItem } from '@/lib/arrested-backup';
 
-export default function ArrestedPage() {
-    const router = useRouter();
+export function ArrestedPage() {
+    const router = useClientRouteAdapter();
     const [inspectorId, setInspectorId] = useState('');
     const [caseNumber, setCaseNumber] = useState('');
     const [magicalTimestamp, setMagicalTimestamp] = useState('');
@@ -174,12 +173,6 @@ export default function ArrestedPage() {
 
     return (
         <>
-            <Head>
-                <title>调查院正在出动 - 魔法国度调查院</title>
-                <meta name="description" content="魔法国度调查院逮捕令" />
-                <link rel="icon" href="/favicon.svg" />
-            </Head>
-
             <div className="min-h-screen bg-gradient-to-br from-purple-900 via-violet-800 to-indigo-900 text-white font-sans relative overflow-hidden">
                 {/* Magical background patterns */}
                 <div className="absolute inset-0 opacity-10">
