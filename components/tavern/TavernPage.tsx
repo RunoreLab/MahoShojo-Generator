@@ -1,4 +1,5 @@
-import Head from 'next/head';
+'use client';
+
 import Link from 'next/link';
 import { useState } from 'react';
 
@@ -9,17 +10,11 @@ import { TavernImportPanel } from '@/components/tavern/TavernImportPanel';
 
 type TavernTab = 'import' | 'export';
 
-export default function TavernPage() {
+export function TavernPage() {
   const [tab, setTab] = useState<TavernTab>('import');
 
   return (
-    <>
-      <Head>
-        <title>酒馆生态联动</title>
-        <meta name="description" content="SillyTavern（酒馆）角色卡导入/导出：PNG 内嵌 JSON 解析与写入（本地处理）" />
-      </Head>
-
-      <div className="magic-background-white">
+    <div className="magic-background-white">
         <div className="container !max-w-[980px]">
           <div className="card !max-w-none !p-0">
             <TavernHeroBanner
@@ -89,7 +84,6 @@ export default function TavernPage() {
             </div>
           </div>
         </div>
-      </div>
-    </>
+    </div>
   );
 }

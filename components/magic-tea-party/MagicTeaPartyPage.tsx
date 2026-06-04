@@ -1,6 +1,6 @@
-import Head from 'next/head';
+'use client';
+
 import Link from 'next/link';
-import { useRouter } from 'next/router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 import type { UserAIProviderConfig } from '@/components/AiProviderSelector';
@@ -43,9 +43,10 @@ import type {
 } from '@/lib/magic-tea-party/types';
 import { useAuth } from '@/lib/useAuth';
 import { applyShieldWords } from '@/lib/shield-word-filter';
+import { useAppRouterAdapter } from '@/lib/app-router-adapter';
 
-export default function MagicTeaPartyPage() {
-  const router = useRouter();
+export function MagicTeaPartyPage() {
+  const router = useAppRouterAdapter();
   const { user, isAuthenticated, loading } = useAuth();
 
   const [globalError, setGlobalError] = useState<string | null>(null);
@@ -715,60 +716,44 @@ export default function MagicTeaPartyPage() {
 
   if (loading) {
     return (
-      <>
-        <Head>
-          <title>魔法茶会</title>
-        </Head>
-        <div className="magic-background-white">
-          <div className="container">
-            <div className="card">
-              <div className="py-10 text-center text-sm text-gray-600">正在确认登录状态…</div>
-            </div>
+      <div className="magic-background-white">
+        <div className="container">
+          <div className="card">
+            <div className="py-10 text-center text-sm text-gray-600">正在确认登录状态…</div>
           </div>
         </div>
-      </>
+      </div>
     );
   }
 
   if (!isAuthenticated) {
     return (
-      <>
-        <Head>
-          <title>魔法茶会</title>
-        </Head>
-        <div className="magic-background-white">
-          <div className="container">
-            <div className="card">
-              <div className="py-10 text-center text-sm text-gray-600">
-                <div className="text-base font-semibold text-gray-800">魔法茶会仅对已登录用户开放</div>
-                <p className="mt-2 text-sm text-gray-600">请先前往角色管理器完成登录，再返回开启茶会。</p>
-                <div className="mt-4 flex flex-wrap items-center justify-center gap-3">
-                  <Link
-                    href="/character-manager"
-                    className="rounded-full border border-pink-200 px-4 py-2 text-sm text-pink-700 hover:bg-pink-50"
-                  >
-                    前往登录
-                  </Link>
-                  <Link href="/" className="rounded-full border border-gray-200 px-4 py-2 text-sm text-gray-600 hover:bg-gray-50">
-                    返回首页
-                  </Link>
-                </div>
+      <div className="magic-background-white">
+        <div className="container">
+          <div className="card">
+            <div className="py-10 text-center text-sm text-gray-600">
+              <div className="text-base font-semibold text-gray-800">魔法茶会仅对已登录用户开放</div>
+              <p className="mt-2 text-sm text-gray-600">请先前往角色管理器完成登录，再返回开启茶会。</p>
+              <div className="mt-4 flex flex-wrap items-center justify-center gap-3">
+                <Link
+                  href="/character-manager"
+                  className="rounded-full border border-pink-200 px-4 py-2 text-sm text-pink-700 hover:bg-pink-50"
+                >
+                  前往登录
+                </Link>
+                <Link href="/" className="rounded-full border border-gray-200 px-4 py-2 text-sm text-gray-600 hover:bg-gray-50">
+                  返回首页
+                </Link>
               </div>
             </div>
           </div>
         </div>
-      </>
+      </div>
     );
   }
 
   return (
-    <>
-      <Head>
-        <title>魔法茶会</title>
-        <meta name="description" content="基于角色卡/情景卡的长期对话与剧情体验（本地存储，自备 API Key）" />
-      </Head>
-
-      <div className="magic-background-white">
+    <div className="magic-background-white">
         <div className="container !max-w-[1200px]">
           <div className="card !max-w-none">
             <MagicTeaPartyHero globalError={globalError} />
@@ -975,7 +960,6 @@ export default function MagicTeaPartyPage() {
           onToggleRoleCard={onToggleRoleCard}
           onToggleScenarioCard={onToggleScenarioCard}
         />
-      </div>
-    </>
+    </div>
   );
 }

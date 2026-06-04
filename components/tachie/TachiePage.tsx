@@ -1,14 +1,16 @@
+'use client';
+
 import TachieGenerator from '@/components/TachieGenerator';
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/router';
 
 import type { BetaAccessFeatureId } from '@/config/beta-access';
 import { buildBetaAccessUrl } from '@/lib/beta-access';
 import { useBetaAccessStatus } from '@/lib/beta-access-client';
 import { useAuth } from '@/lib/useAuth';
+import { useAppRouterAdapter } from '@/lib/app-router-adapter';
 
-export default function TachiePage() {
-  const router = useRouter();
+export function TachiePage() {
+  const router = useAppRouterAdapter();
   const { isAuthenticated, loading, userBadges, badgesLoading } = useAuth();
   const betaFeatureId: BetaAccessFeatureId = 'tachie';
   const betaAccess = useBetaAccessStatus({

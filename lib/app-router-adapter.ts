@@ -3,12 +3,18 @@
 import { useRouter } from 'next/navigation';
 
 type QueryValue = string | number | boolean | null | undefined;
-type RouterPushTarget = string | {
+export type AppRouterPushTarget = string | {
   pathname: string;
   query?: Record<string, QueryValue | QueryValue[]>;
 };
+export type AppRouterAdapter = {
+  push(target: AppRouterPushTarget): void;
+  replace(target: AppRouterPushTarget): void;
+  refresh(): void;
+  back(): void;
+};
 
-const buildHref = (target: RouterPushTarget): string => {
+const buildHref = (target: AppRouterPushTarget): string => {
   if (typeof target === 'string') return target;
 
   const params = new URLSearchParams();
@@ -24,14 +30,14 @@ const buildHref = (target: RouterPushTarget): string => {
   return query ? `${target.pathname}?${query}` : target.pathname;
 };
 
-export function useAppRouterAdapter() {
+export function useAppRouterAdapter(): AppRouterAdapter {
   const router = useRouter();
 
   return {
-    push(target: RouterPushTarget) {
+    push(target: AppRouterPushTarget) {
       router.push(buildHref(target));
     },
-    replace(target: RouterPushTarget) {
+    replace(target: AppRouterPushTarget) {
       router.replace(buildHref(target));
     },
     refresh() {
