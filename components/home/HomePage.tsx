@@ -1,14 +1,15 @@
+'use client';
+
 import React, { useState, useEffect } from 'react';
-import Head from 'next/head';
 import Link from 'next/link';
-import Footer from '../components/Footer';
+import Footer from '@/components/Footer';
 import { useAuth } from '@/lib/useAuth';
 import { UserWithTitle } from '@/components/UserTitle';
 import { featureCategories, getAllFeatureImages } from '@/config/features';
 import { EncyclopediaLinks } from '@/components/encyclopedia/EncyclopediaLinks';
 import { ThemeImage } from '@/components/shared/ThemeImage';
 
-export default function Home() {
+export function HomePage() {
   const [, setImagesLoaded] = useState(false);
   const { user, userBadges, isAuthenticated, loading } = useAuth();
 
@@ -39,19 +40,6 @@ export default function Home() {
 
   return (
     <>
-      <Head>
-        <title>✨ 魔法少女生成器 ✨</title>
-        <meta name="description" content="AI驱动的魔法少女角色生成器，创建独一无二的魔法少女角色" />
-        {getAllFeatureImages().map((src, index) => (
-          <link
-            key={index}
-            rel="preload"
-            href={src}
-            as="image"
-            type="image/svg+xml"
-          />
-        ))}
-      </Head>
       <div className="magic-background-white">
         <div className="container">
           <div className="card">

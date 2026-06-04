@@ -1,6 +1,6 @@
-import Head from 'next/head';
+'use client';
+
 import Link from 'next/link';
-import { useRouter } from 'next/router';
 import { useEffect, useMemo, useState } from 'react';
 
 import { MarkdownBlock } from '@/components/MarkdownBlock';
@@ -13,11 +13,11 @@ import {
   matchEncyclopediaEntry,
 } from '@/lib/encyclopedia';
 
-export default function EncyclopediaEntryPage() {
-  const router = useRouter();
-  const slugParam = router.query.slug;
-  const slug = typeof slugParam === 'string' ? slugParam : undefined;
+interface EncyclopediaEntryPageProps {
+  slug?: string;
+}
 
+export function EncyclopediaEntryPage({ slug }: EncyclopediaEntryPageProps) {
   const entry = useMemo(() => getEncyclopediaEntry(slug), [slug]);
 
   const [content, setContent] = useState<string>('');
@@ -182,10 +182,6 @@ export default function EncyclopediaEntryPage() {
 
   return (
     <>
-      <Head>
-        <title>{entry ? `${entry.title} - 百科` : '百科 - MahoShojo Generator'}</title>
-      </Head>
-
       <div className="magic-background-white">
         <div className="mx-auto w-full max-w-6xl px-4 py-10 sm:px-6 lg:px-10">
           <div className="rounded-2xl bg-white/95 shadow-[0_20px_40px_rgba(0,0,0,0.10)] ring-1 ring-white/50 backdrop-blur">
