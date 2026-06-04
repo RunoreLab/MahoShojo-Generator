@@ -1,14 +1,13 @@
-// pages/creator.tsx
+'use client';
 
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import Head from 'next/head';
-import { useRouter } from 'next/router';
-import GeneralCharacterCard from '../components/GeneralCharacterCard';
-import { useProviderModeCooldown } from '../lib/cooldown';
+import GeneralCharacterCard from '@/components/GeneralCharacterCard';
+import { useProviderModeCooldown } from '@/lib/cooldown';
 import { quickCheck } from '@/lib/sensitive-word-filter';
 import Link from 'next/link';
-import SaveToCloudButton from '../components/SaveToCloudButton';
-import QuestionNavigator from '../components/QuestionNavigator';
+import SaveToCloudButton from '@/components/SaveToCloudButton';
+import QuestionNavigator from '@/components/QuestionNavigator';
+import { useAppRouterAdapter } from '@/lib/app-router-adapter';
 import BattleDataModal from '@/components/BattleDataModal';
 import DataCardDetailsModal from '@/components/DataCardDetailsModal';
 import {
@@ -293,8 +292,8 @@ const SaveJsonButton: React.FC<SaveJsonButtonProps> = ({ template, data, mode, r
 const LOCAL_STORAGE_KEY = 'magicalGirlAnswersDraft'; // 定义本地存储的键
 const DETAILS_PREFERENCE_KEY = 'mahoshojo.details.preferences.v1';
 
-const DetailsPage: React.FC = () => {
-  const router = useRouter();
+export const CreatorPage: React.FC = () => {
+  const router = useAppRouterAdapter();
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [selectedQuestionnaires, setSelectedQuestionnaires] = useState<QuestionnaireSelection[]>([]);
   const [presetEntries, setPresetEntries] = useState<QuestionnairePresetEntry[]>([]);
@@ -2569,12 +2568,6 @@ const DetailsPage: React.FC = () => {
     showFooter?: boolean;
   }) => (
     <>
-      <Head>
-        <title>{CREATOR_PAGE_COPY.headTitle}</title>
-        <meta name="description" content={CREATOR_PAGE_COPY.metaDescription} />
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <link rel="icon" href="/favicon.ico" />
-      </Head>
       <CreatorWorkbenchPage
         layoutMode={layoutMode}
         sidebarResetKey={sidebarResetKey(sidebarStage)}
@@ -3139,5 +3132,3 @@ const DetailsPage: React.FC = () => {
     showFooter: true,
   });
 };
-
-export default DetailsPage;
