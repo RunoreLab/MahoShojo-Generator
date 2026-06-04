@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useRouter } from 'next/compat/router';
+import { useRouter } from 'next/navigation';
 import SaveCardModal from './CharManager/SaveCardModal';
 import DataCardsModal from './CharManager/DataCardsModal';
 import { useAuth } from '@/lib/useAuth';
@@ -62,13 +62,7 @@ export default function SaveToCloudButton({
   const [, setCardsLoadState] = useState<DataCardsLoadState>({ status: 'idle', error: null });
 
   const navigateToArrested = () => {
-    if (router) {
-      void router.push('/arrested');
-      return;
-    }
-    if (typeof window !== 'undefined') {
-      window.location.assign('/arrested');
-    }
+    router.push('/arrested');
   };
 
   // 加载用户数据卡信息
