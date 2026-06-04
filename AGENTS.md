@@ -4,8 +4,7 @@
 
 ### 项目结构与模块划分
 - 本项目基于 Next.js + `@opennextjs/cloudflare` + Cloudflare D1 数据库 + Tailwind 4 + Vercel AI SDK 1.x 编写。
-- `pages/` 暴露现有 Next.js 页面路由属于 App Router 迁移期遗留主页面入口；`pages/api/` 属于遗留 API 入口，不应再作为新 API 的默认位置。
-- `app/` 是目标路由体系；新增 API 默认优先放在 `app/api/**/route.ts`。
+- `app/` 是当前统一路由体系，页面入口使用 `app/**/page.tsx`，API 入口使用 `app/api/**/route.ts`。
 - 可复用的卡片与模态组件存放于 `components/`，复杂业务逻辑优先放在所属路由目录，避免组件过度臃肿。
 - AI 相关能力封装在 `lib/`（`ai.ts`、`config.ts`、`signature.ts` 等）；共享类型位于 `types/arena.d.ts`；静态资源在 `public/`；全局样式集中于 `styles/`；工具脚本放在 `scripts/`；测试与夹具位于 `tests/`。
 
