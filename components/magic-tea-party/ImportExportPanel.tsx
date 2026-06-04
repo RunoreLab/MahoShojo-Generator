@@ -1,8 +1,8 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
-import { useRouter } from 'next/router';
 import { zipSync } from 'fflate';
 
 import { ErrorMessage } from '@/components/ErrorMessage';
+import { useAppRouterAdapter } from '@/lib/app-router-adapter';
 import { downloadBlob } from '@/lib/client/blobUrl';
 import { buildSafeFileName } from '@/lib/client/fileName';
 import { randomUUID } from '@/lib/crypto';
@@ -64,7 +64,7 @@ const ensureArray = <T,>(value: unknown): T[] => (Array.isArray(value) ? (value 
 
 export function MagicTeaPartyImportExportPanel(props: ImportExportPanelProps) {
   const { activeSession, preferences, onSessionImported } = props;
-  const router = useRouter();
+  const router = useAppRouterAdapter();
   const [collapsed, setCollapsed] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);

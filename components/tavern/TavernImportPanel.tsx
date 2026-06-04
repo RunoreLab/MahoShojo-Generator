@@ -1,4 +1,3 @@
-import { useRouter } from 'next/router';
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 
 import AiProviderSelector, { type UserAIProviderConfig } from '@/components/AiProviderSelector';
@@ -28,6 +27,7 @@ import { formatKilobytes, MAX_DATA_CARD_BYTES } from '@/lib/data-card-size';
 import { buildGeneralCharacterCardFromMarkdown, buildGeneralScenarioCardFromMarkdown } from '@/lib/stream/markdown-card';
 import { STREAM_ABORT_REASON_USER } from '@/lib/stream/abort';
 import { readSafeTextAndReasoningStreamFromResponse } from '@/lib/stream/read-safe-text-and-reasoning-stream';
+import { useAppRouterAdapter } from '@/lib/app-router-adapter';
 import {
   buildTavernCloudSavePayload,
   buildTavernAiAttachment,
@@ -374,7 +374,7 @@ type TavernAttachment = { meta: TavernImportMeta; raw?: unknown };
 type WithTavern<T> = T & { _tavern: TavernAttachment };
 
 export function TavernImportPanel() {
-  const router = useRouter();
+  const router = useAppRouterAdapter();
   const [state, dispatch] = useReducer(reducer, initialState);
   const { user } = useAuth();
   const [cloudPreset, setCloudPreset] = useState<TavernCloudSavePreset>('standard');

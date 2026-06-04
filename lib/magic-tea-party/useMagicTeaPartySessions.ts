@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { ChangeEvent, Dispatch, SetStateAction } from 'react';
-import { useRouter } from 'next/router';
 
 import type { UserAIProviderConfig } from '@/components/AiProviderSelector';
+import { useAppRouterAdapter } from '@/lib/app-router-adapter';
 import { randomUUID } from '@/lib/crypto';
 import { inferTemplate } from '@/lib/data-card-converter';
 import { mapDataCardRuntimeSourceInfo } from '@/lib/data-card-read-mappers';
@@ -269,7 +269,7 @@ export type UseMagicTeaPartySessionsResult = {
 
 export function useMagicTeaPartySessions(options: UseMagicTeaPartySessionsOptions): UseMagicTeaPartySessionsResult {
   const { username, userProviderConfig, onGlobalError } = options;
-  const router = useRouter();
+  const router = useAppRouterAdapter();
 
   const [sessions, setSessions] = useState<MagicTeaPartySession[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
