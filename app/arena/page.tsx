@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 
-import { ArenaRouteProviders } from '@/components/competition/CompetitionRouteProviders';
+import { ArenaRouteProviders } from '@/components/competition/ArenaRouteProviders';
 
 export const metadata: Metadata = {
   title: '魔法少女竞技场 - MahoShojo Generator',

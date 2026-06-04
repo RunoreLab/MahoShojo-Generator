@@ -1,109 +1,69 @@
-import pino from 'pino';
+type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
-// 创建 Pino 日志器配置
-const createLogger = () => {
-  const isDev = process.env.NODE_ENV === 'development';
-  const level = process.env.LOG_LEVEL || (isDev ? 'debug' : 'info');
-  const isEdge = process.env.NEXT_RUNTIME === 'edge';
-
-  // Edge Runtime 环境配置
-  if (isEdge) {
-    return pino({
-      level,
-      browser: {
-        write: {
-          info: (o: any) => console.info(JSON.stringify(o)),
-          warn: (o: any) => console.warn(JSON.stringify(o)),
-          error: (o: any) => console.error(JSON.stringify(o)),
-          debug: (o: any) => console.debug(JSON.stringify(o)),
-        },
-      }
-    });
-  }
-
-  // Node.js 环境配置
-  // 说明：不要默认启用 pino-pretty transport。
-  // 这个仓库的 logger 还会被客户端 hook/Edge 相关链路间接引用，
-  // 在 Next.js/Turbopack 下让运行时再去解析 "pino-pretty" 容易直接触发 SSR 500。
-  return pino({
-    level,
-    formatters: {
-      level: (label: string) => {
-        return { level: label };
-      }
-    },
-    timestamp: pino.stdTimeFunctions.isoTime,
-  });
+const LEVEL_VALUES: Record<LogLevel | 'silent', number> = {
+  debug: 10,
+  info: 20,
+  warn: 30,
+  error: 40,
+  silent: 50,
 };
 
-// 创建日志器实例
-const logger = createLogger();
-
-// 创建带有文件名的日志实例
-export const getLogger = (fileName: string) => ({
-  info: (msg: string, ...args: any[]) => {
-    if (args.length > 0) {
-      // 如果有额外参数，将它们合并到对象中
-      const [firstArg, ...restArgs] = args;
-      if (typeof firstArg === 'object' && firstArg !== null) {
-        logger.info({ caller: fileName, ...firstArg }, msg, ...restArgs);
-      } else {
-        logger.info({ caller: fileName, data: firstArg }, msg, ...restArgs);
-      }
-    } else {
-      logger.info({ caller: fileName }, msg);
-    }
-  },
-  error: (msg: string, ...args: any[]) => {
-    if (args.length > 0) {
-      const [firstArg, ...restArgs] = args;
-      if (typeof firstArg === 'object' && firstArg !== null) {
-        logger.error({ caller: fileName, ...firstArg }, msg, ...restArgs);
-      } else {
-        logger.error({ caller: fileName, data: firstArg }, msg, ...restArgs);
-      }
-    } else {
-      logger.error({ caller: fileName }, msg);
-    }
-  },
-  warn: (msg: string, ...args: any[]) => {
-    if (args.length > 0) {
-      const [firstArg, ...restArgs] = args;
-      if (typeof firstArg === 'object' && firstArg !== null) {
-        logger.warn({ caller: fileName, ...firstArg }, msg, ...restArgs);
-      } else {
-        logger.warn({ caller: fileName, data: firstArg }, msg, ...restArgs);
-      }
-    } else {
-      logger.warn({ caller: fileName }, msg);
-    }
-  },
-  debug: (msg: string, ...args: any[]) => {
-    if (args.length > 0) {
-      const [firstArg, ...restArgs] = args;
-      if (typeof firstArg === 'object' && firstArg !== null) {
-        logger.debug({ caller: fileName, ...firstArg }, msg, ...restArgs);
-      } else {
-        logger.debug({ caller: fileName, data: firstArg }, msg, ...restArgs);
-      }
-    } else {
-      logger.debug({ caller: fileName }, msg);
-    }
+const normalizeLevel = (value: string | undefined): LogLevel | 'silent' => {
+  const normalized = value?.trim().toLowerCase();
+  if (normalized === 'debug' || normalized === 'info' || normalized === 'warn' || normalized === 'error' || normalized === 'silent') {
+    return normalized;
   }
+  return process.env.NODE_ENV === 'development' ? 'debug' : 'info';
+};
+
+const activeLevel = normalizeLevel(process.env.LOG_LEVEL);
+
+const shouldLog = (level: LogLevel): boolean => LEVEL_VALUES[level] >= LEVEL_VALUES[activeLevel];
+
+const toRecord = (value: unknown): Record<string, unknown> | null => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+};
+
+const buildPayload = (caller: string | undefined, args: unknown[]): Record<string, unknown> | undefined => {
+  const [firstArg, ...restArgs] = args;
+  const firstRecord = toRecord(firstArg);
+  const payload: Record<string, unknown> = {
+    ...(caller ? { caller } : {}),
+    ...(firstRecord ?? (typeof firstArg === 'undefined' ? {} : { data: firstArg })),
+  };
+
+  if (restArgs.length > 0) {
+    payload.args = restArgs;
+  }
+
+  return Object.keys(payload).length > 0 ? payload : undefined;
+};
+
+const writeLog = (level: LogLevel, caller: string | undefined, msg: string, args: unknown[]): void => {
+  if (!shouldLog(level)) return;
+
+  const payload = buildPayload(caller, args);
+  const writer = console[level] ?? console.log;
+
+  if (payload) {
+    writer(JSON.stringify(payload), msg);
+    return;
+  }
+
+  writer(msg);
+};
+
+export const getLogger = (fileName: string) => ({
+  info: (msg: string, ...args: unknown[]) => writeLog('info', fileName, msg, args),
+  error: (msg: string, ...args: unknown[]) => writeLog('error', fileName, msg, args),
+  warn: (msg: string, ...args: unknown[]) => writeLog('warn', fileName, msg, args),
+  debug: (msg: string, ...args: unknown[]) => writeLog('debug', fileName, msg, args),
 });
 
-// 默认日志方法（无文件名）
 export const log = {
-  info: (msg: string, ...args: any[]) => {
-    logger.info(msg, ...args);
-  },
-  error: (msg: string, ...args: any[]) => {
-    logger.error(msg, ...args);
-  },
-  warn: (msg: string, ...args: any[]) => {
-    logger.warn(msg, ...args);
-  },
-  debug: (msg: string, ...args: any[]) => {
-    logger.debug(msg, ...args);
-  }
+  info: (msg: string, ...args: unknown[]) => writeLog('info', undefined, msg, args),
+  error: (msg: string, ...args: unknown[]) => writeLog('error', undefined, msg, args),
+  warn: (msg: string, ...args: unknown[]) => writeLog('warn', undefined, msg, args),
+  debug: (msg: string, ...args: unknown[]) => writeLog('debug', undefined, msg, args),
 };

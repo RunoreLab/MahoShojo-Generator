@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 
-import { RankingRouteProviders } from '@/components/competition/CompetitionRouteProviders';
+import { RankingRouteProviders } from '@/components/competition/RankingRouteProviders';
 
 export const metadata: Metadata = {
   title: '排位排行榜 - MahoShojo Generator',
