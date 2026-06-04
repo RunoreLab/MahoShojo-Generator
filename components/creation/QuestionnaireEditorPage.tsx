@@ -1,7 +1,8 @@
+'use client';
+
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import Head from 'next/head';
 import Link from 'next/link';
-import { useRouter } from 'next/router';
+import { useAppRouterAdapter } from '@/lib/app-router-adapter';
 import SaveToCloudButton from '@/components/SaveToCloudButton';
 import Footer from '@/components/Footer';
 import { ErrorMessage } from '@/components/ErrorMessage';
@@ -240,8 +241,8 @@ const getQuestionLabel = (question: EditableQuestion, index: number) => {
   return `${idLabel} · ${textLabel}`;
 };
 
-const QuestionnaireEditorPage: React.FC = () => {
-  const router = useRouter();
+export const QuestionnaireEditorPage: React.FC = () => {
+  const router = useAppRouterAdapter();
   const { isAuthenticated } = useAuth();
   const [kind, setKind] = useState<'magical-girl' | 'canshou'>('magical-girl');
   const [questionnaireId, setQuestionnaireId] = useState('magical-girl-custom');
@@ -896,9 +897,6 @@ const QuestionnaireEditorPage: React.FC = () => {
 
   return (
     <>
-      <Head>
-        <title>问卷编辑器</title>
-      </Head>
       <div className="magic-background-white">
         <div className="container !max-w-[1100px]">
           <div className="card !max-w-none">
@@ -1773,5 +1771,3 @@ const QuestionnaireEditorPage: React.FC = () => {
     </>
   );
 };
-
-export default QuestionnaireEditorPage;

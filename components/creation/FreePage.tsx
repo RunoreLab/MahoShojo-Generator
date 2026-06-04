@@ -1,7 +1,8 @@
+'use client';
+
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import Head from 'next/head';
 import Link from 'next/link';
-import { useRouter } from 'next/router';
+import { useAppRouterAdapter } from '@/lib/app-router-adapter';
 
 import Footer from '@/components/Footer';
 import AiProviderSelector, { type UserAIProviderConfig } from '@/components/AiProviderSelector';
@@ -242,8 +243,8 @@ const buildFieldGuideForUi = (schemaId: FreeSchemaId): string => {
   }
 };
 
-export default function FreeGeneratorPage() {
-  const router = useRouter();
+export function FreePage() {
+  const router = useAppRouterAdapter();
   const attachmentInputRef = useRef<HTMLInputElement>(null);
 
   const [schemaId, setSchemaId] = useState<FreeSchemaId>('general');
@@ -932,10 +933,6 @@ export default function FreeGeneratorPage() {
 
   return (
     <>
-      <Head>
-        <title>自由生成 - MahoShojo Generator</title>
-        <meta name="description" content="自由输入提示词，按指定 Schema 生成任意数据卡（角色/情景）。自由生成产物为非原生。" />
-      </Head>
       <div className="magic-background-white">
         <div className="container !max-w-[980px] lg:!max-w-[1200px]">
           <div className="grid gap-6 lg:grid-cols-2 lg:items-start">

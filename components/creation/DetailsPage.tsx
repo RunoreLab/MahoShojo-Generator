@@ -1,17 +1,16 @@
-// pages/details.tsx
+'use client';
 
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import Head from 'next/head';
-import { useRouter } from 'next/router';
-import MagicalGirlCard from '../components/MagicalGirlCard';
-import GeneralCharacterCard from '../components/GeneralCharacterCard';
-import { useProviderModeCooldown } from '../lib/cooldown';
+import MagicalGirlCard from '@/components/MagicalGirlCard';
+import GeneralCharacterCard from '@/components/GeneralCharacterCard';
+import { useProviderModeCooldown } from '@/lib/cooldown';
 import { quickCheck } from '@/lib/sensitive-word-filter';
 import Link from 'next/link';
-import { generateRandomMagicalGirl } from '../lib/random-character-generator';
-import SaveToCloudButton from '../components/SaveToCloudButton';
-import Footer from '../components/Footer';
-import QuestionNavigator from '../components/QuestionNavigator';
+import { generateRandomMagicalGirl } from '@/lib/random-character-generator';
+import SaveToCloudButton from '@/components/SaveToCloudButton';
+import Footer from '@/components/Footer';
+import QuestionNavigator from '@/components/QuestionNavigator';
+import { useAppRouterAdapter } from '@/lib/app-router-adapter';
 import BattleDataModal from '@/components/BattleDataModal';
 import DataCardDetailsModal from '@/components/DataCardDetailsModal';
 import {
@@ -232,8 +231,8 @@ const SaveJsonButton: React.FC<SaveJsonButtonProps> = ({ data, mode, recommended
 const LOCAL_STORAGE_KEY = 'magicalGirlAnswersDraft'; // 定义本地存储的键
 const DETAILS_PREFERENCE_KEY = 'mahoshojo.details.preferences.v1';
 
-const DetailsPage: React.FC = () => {
-  const router = useRouter();
+export const DetailsPage: React.FC = () => {
+  const router = useAppRouterAdapter();
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [selectedQuestionnaires, setSelectedQuestionnaires] = useState<QuestionnaireSelection[]>([]);
   const [presetEntries, setPresetEntries] = useState<QuestionnairePresetEntry[]>([]);
@@ -1845,13 +1844,6 @@ const DetailsPage: React.FC = () => {
 
   return (
     <>
-      <Head>
-        <title>魔法少女调查问卷 ~ 奇妙妖精大调查</title>
-        <meta name="description" content="回答问卷，生成您的专属魔法少女" />
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <link rel="icon" href="/favicon.ico" />
-      </Head>
-
       <div className="magic-background">
         <div className="container">
           <div className="card">
@@ -2699,5 +2691,3 @@ const DetailsPage: React.FC = () => {
     </>
   );
 };
-
-export default DetailsPage;

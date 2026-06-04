@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useRouter } from 'next/router';
+import { useRouter } from 'next/compat/router';
 import SaveCardModal from './CharManager/SaveCardModal';
 import DataCardsModal from './CharManager/DataCardsModal';
 import { useAuth } from '@/lib/useAuth';
@@ -60,6 +60,16 @@ export default function SaveToCloudButton({
   const [replaceEditingCard, setReplaceEditingCard] = useState<any | null>(null);
   const [replaceCurrentPage, setReplaceCurrentPage] = useState(1);
   const [, setCardsLoadState] = useState<DataCardsLoadState>({ status: 'idle', error: null });
+
+  const navigateToArrested = () => {
+    if (router) {
+      void router.push('/arrested');
+      return;
+    }
+    if (typeof window !== 'undefined') {
+      window.location.assign('/arrested');
+    }
+  };
 
   // 加载用户数据卡信息
   useEffect(() => {
@@ -178,7 +188,7 @@ export default function SaveToCloudButton({
       const textToCheck = `${card.name || ''} ${card.description || ''} ${JSON.stringify(finalData)}`;
       const sensitiveWordResult = await quickCheck(textToCheck);
       if (sensitiveWordResult.hasSensitiveWords) {
-        router.push('/arrested');
+        navigateToArrested();
         return;
       }
 
@@ -204,7 +214,7 @@ export default function SaveToCloudButton({
     const textToCheck = `${name} ${description}`;
     const sensitiveWordResult = await quickCheck(textToCheck);
     if (sensitiveWordResult.hasSensitiveWords) {
-      router.push('/arrested');
+      navigateToArrested();
       return;
     }
 
@@ -214,7 +224,7 @@ export default function SaveToCloudButton({
       loadUserDataCards();
     } else {
       if (result.error === 'SENSITIVE_WORD_DETECTED' || (result as any).redirect === '/arrested') {
-        router.push('/arrested');
+        navigateToArrested();
         return;
       }
       alert(result.error || '更新失败');
@@ -261,7 +271,7 @@ export default function SaveToCloudButton({
       const sensitiveWordResult = await quickCheck(textToCheck);
 
       if (sensitiveWordResult.hasSensitiveWords) {
-        router.push('/arrested');
+        navigateToArrested();
         return;
       }
 
@@ -283,7 +293,7 @@ export default function SaveToCloudButton({
         loadUserDataCards();
       } else {
         if (result.error === 'SENSITIVE_WORD_DETECTED' || (result as any).redirect === '/arrested') {
-          router.push('/arrested');
+          navigateToArrested();
           return;
         }
         setSaveError(result.error || '保存失败');

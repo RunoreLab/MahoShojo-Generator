@@ -1,16 +1,16 @@
-// pages/canshou.tsx
+'use client';
+
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import Head from 'next/head';
-import { useRouter } from 'next/router';
-import { useProviderModeCooldown } from '../lib/cooldown';
+import { useProviderModeCooldown } from '@/lib/cooldown';
 import Link from 'next/link';
-import CanshouCard, { CanshouDetails } from '../components/CanshouCard';
-import GeneralCharacterCard from '../components/GeneralCharacterCard';
-import { CANSHOU_LORE } from '../lib/canshou-lore';
-import { generateRandomCanshou } from '../lib/random-character-generator';
-import SaveToCloudButton from '../components/SaveToCloudButton';
-import Footer from '../components/Footer';
-import QuestionNavigator from '../components/QuestionNavigator';
+import CanshouCard, { CanshouDetails } from '@/components/CanshouCard';
+import GeneralCharacterCard from '@/components/GeneralCharacterCard';
+import { CANSHOU_LORE } from '@/lib/canshou-lore';
+import { generateRandomCanshou } from '@/lib/random-character-generator';
+import SaveToCloudButton from '@/components/SaveToCloudButton';
+import Footer from '@/components/Footer';
+import QuestionNavigator from '@/components/QuestionNavigator';
+import { useAppRouterAdapter } from '@/lib/app-router-adapter';
 import BattleDataModal from '@/components/BattleDataModal';
 import DataCardDetailsModal from '@/components/DataCardDetailsModal';
 import AiProviderSelector, { type UserAIProviderConfig } from '@/components/AiProviderSelector';
@@ -194,8 +194,8 @@ const SaveJsonButton: React.FC<SaveJsonButtonProps> = ({ data, mode, recommended
 const LOCAL_STORAGE_KEY = 'canshouAnswersDraft'; // 定义本地存储的键
 const CANSHOU_PREFERENCE_KEY = 'mahoshojo.canshou.preferences.v1';
 
-const CanshouPage: React.FC = () => {
-  const router = useRouter();
+export const CanshouPage: React.FC = () => {
+  const router = useAppRouterAdapter();
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [selectedQuestionnaires, setSelectedQuestionnaires] = useState<QuestionnaireSelection[]>([]);
   const [presetEntries, setPresetEntries] = useState<QuestionnairePresetEntry[]>([]);
@@ -1662,9 +1662,6 @@ const CanshouPage: React.FC = () => {
 
   return (
     <>
-      <Head>
-        <title>残兽生成器 - 间界残兽前进基地</title>
-      </Head>
       <div className="magic-background-dark">
         <div className="container">
           <div className="card">
@@ -2441,5 +2438,3 @@ const CanshouPage: React.FC = () => {
     </>
   );
 };
-
-export default CanshouPage;

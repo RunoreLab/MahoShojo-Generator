@@ -1,15 +1,16 @@
+'use client';
+
 import React, { useState, useRef, useEffect } from 'react';
-import Head from 'next/head';
 import { snapdom } from '@zumer/snapdom';
 // TODO: 从这里引入怪怪的，但是先这样吧！
 import type { AIGeneratedMagicalGirl } from '@/app/api/generate-magical-girl/handler';
-import { MainColor } from '../lib/main-color';
+import { MainColor } from '@/lib/main-color';
 import Link from 'next/link';
-import { useCooldown } from '../lib/cooldown';
+import { useCooldown } from '@/lib/cooldown';
 import { getSensitiveWordRedirectTarget } from '@/lib/content-safety/client';
-import { useRouter } from 'next/router';
-import TachieGenerator from '../components/TachieGenerator';
-import Footer from '../components/Footer';
+import { useAppRouterAdapter } from '@/lib/app-router-adapter';
+import TachieGenerator from '@/components/TachieGenerator';
+import Footer from '@/components/Footer';
 import { GeneratedByUserBadge } from '@/components/shared/GeneratedByUserBadge';
 import { ErrorMessage } from '@/components/ErrorMessage';
 import { EncyclopediaLinks } from '@/components/encyclopedia/EncyclopediaLinks';
@@ -162,7 +163,7 @@ async function generateMagicalGirl(inputName: string, language: string): Promise
   }
 }
 
-export default function Name() {
+export function NamePage() {
   const [inputName, setInputName] = useState('');
   const [magicalGirl, setMagicalGirl] = useState<MagicalGirl | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -171,7 +172,7 @@ export default function Name() {
   const [error, setError] = useState<string | null>(null);
   const resultRef = useRef<HTMLDivElement>(null);
   const { isCooldown, startCooldown, remainingTime } = useCooldown('generateMagicalGirlCooldown', 60000);
-  const router = useRouter();
+  const router = useAppRouterAdapter();
   // 多语言支持
   const [languages, setLanguages] = useState<{ code: string; name: string }[]>([]);
   const [selectedLanguage, setSelectedLanguage] = useState('zh-CN');
@@ -328,10 +329,6 @@ export default function Name() {
 
   return (
     <>
-      <Head>
-        <link rel="preload" href="/logo.svg" as="image" type="image/svg+xml" />
-        <link rel="preload" href="/logo-white.svg" as="image" type="image/svg+xml" />
-      </Head>
       <div className="magic-background">
         <div className="container">
           <div className="card">

@@ -1,13 +1,12 @@
-// pages/scenario.tsx
+'use client';
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import Head from 'next/head';
 import Link from 'next/link';
-import { useRouter } from 'next/router';
+import { useAppRouterAdapter } from '@/lib/app-router-adapter';
 import { getSensitiveWordRedirectTarget } from '@/lib/content-safety/client';
-import { useProviderModeCooldown } from '../lib/cooldown';
-import SaveToCloudButton from '../components/SaveToCloudButton';
-import Footer from '../components/Footer';
+import { useProviderModeCooldown } from '@/lib/cooldown';
+import SaveToCloudButton from '@/components/SaveToCloudButton';
+import Footer from '@/components/Footer';
 import AiProviderSelector, { UserAIProviderConfig } from '@/components/AiProviderSelector';
 import AiReasoningPanel from '@/components/ai/AiReasoningPanel';
 import { ProviderCooldownNotice } from '@/components/ai/ProviderCooldownNotice';
@@ -61,8 +60,8 @@ type RateLimitError = Error & {
   retryAfterSeconds?: number;
 };
 
-const ScenarioPage: React.FC = () => {
-  const router = useRouter();
+export const ScenarioPage: React.FC = () => {
+  const router = useAppRouterAdapter();
   const [answers, setAnswers] = useState<Record<string, string>>(createInitialScenarioAnswers);
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -503,10 +502,6 @@ const ScenarioPage: React.FC = () => {
 
   return (
     <>
-      <Head>
-        <title>箱庭物语 - MahoShojo Generator</title>
-        <meta name="description" content="通过回答问题，快速生成用于竞技场的自定义故事场景。" />
-      </Head>
       <div className="magic-background-white">
         <div className="container">
             <div className="card">
@@ -799,5 +794,3 @@ const ScenarioPage: React.FC = () => {
     </>
   );
 };
-
-export default ScenarioPage;
