@@ -1,13 +1,14 @@
+'use client';
+
 import React, { useState } from 'react';
-import Head from 'next/head';
 import Link from 'next/link';
-import { useRouter } from 'next/router';
+import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/useAuth';
 import { authStorage } from '@/lib/auth';
 import { submitRedeemCode } from '@/lib/client/redeem-code';
 import Footer from '@/components/Footer';
 
-const RedeemPage: React.FC = () => {
+export const RedeemPage: React.FC = () => {
   const router = useRouter();
   const { user, isAuthenticated } = useAuth();
   const [code, setCode] = useState('');
@@ -56,9 +57,6 @@ const RedeemPage: React.FC = () => {
 
   return (
     <>
-      <Head>
-        <title>兑换中心 - MahoShojo Generator</title>
-      </Head>
       <div className="magic-background-white">
         <div className="container">
           <div className="card max-w-2xl mx-auto">
@@ -162,5 +160,3 @@ const RedeemPage: React.FC = () => {
     </>
   );
 };
-
-export default RedeemPage;

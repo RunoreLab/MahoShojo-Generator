@@ -1,6 +1,7 @@
-import Head from 'next/head';
+'use client';
+
 import Link from 'next/link';
-import { useRouter } from 'next/router';
+import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 
 import { betaAccessConfig } from '@/config/beta-access';
@@ -23,9 +24,12 @@ const requirementStatusMap: Record<RequirementStatus, RequirementStatusMeta> = {
   unknown: { label: '待核验', className: 'border-purple-200/70 text-purple-100 bg-purple-500/10' },
 };
 
-export default function BetaAccessPage() {
+interface BetaAccessPageProps {
+  rawFeature?: string | null;
+}
+
+export function BetaAccessPage({ rawFeature = null }: BetaAccessPageProps) {
   const router = useRouter();
-  const rawFeature = typeof router.query.feature === 'string' ? router.query.feature : null;
   const feature = getBetaAccessFeature(rawFeature);
   const resolvedFeatureId = feature?.id ?? 'magic-tea-party';
 
@@ -85,12 +89,6 @@ export default function BetaAccessPage() {
 
   return (
     <>
-      <Head>
-        <title>权限拦截 - 魔法国度</title>
-        <meta name="description" content="内测功能权限拦截页" />
-        <link rel="icon" href="/favicon.svg" />
-      </Head>
-
       <div className="min-h-screen bg-gradient-to-br from-purple-900 via-violet-800 to-indigo-900 text-white font-sans relative overflow-hidden">
         <div className="absolute inset-0 opacity-10">
           <div className="absolute top-10 left-10 text-6xl animate-pulse">🌸</div>

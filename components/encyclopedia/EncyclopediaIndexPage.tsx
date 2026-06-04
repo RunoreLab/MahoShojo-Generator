@@ -1,6 +1,7 @@
-import Head from 'next/head';
+'use client';
+
 import Link from 'next/link';
-import { useRouter } from 'next/router';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 
 import {
@@ -12,47 +13,53 @@ import {
   type EncyclopediaCategoryId,
 } from '@/lib/encyclopedia';
 
-export default function EncyclopediaIndex() {
+type EncyclopediaCategoryFilter = EncyclopediaCategoryId | 'all';
+
+interface EncyclopediaIndexPageProps {
+  initialQuery?: string;
+  initialCategoryId?: EncyclopediaCategoryFilter;
+}
+
+const normalizeCategoryId = (value: string | null | undefined): EncyclopediaCategoryFilter => {
+  return encyclopediaCategories.some((category) => category.id === value)
+    ? (value as EncyclopediaCategoryId)
+    : 'all';
+};
+
+export function EncyclopediaIndexPage({
+  initialQuery = '',
+  initialCategoryId = 'all',
+}: EncyclopediaIndexPageProps) {
   const router = useRouter();
+  const pathname = usePathname() || '/encyclopedia';
+  const searchParams = useSearchParams();
 
-  const [query, setQuery] = useState('');
-  const [categoryId, setCategoryId] = useState<EncyclopediaCategoryId | 'all'>('all');
+  const queryFromUrl = searchParams?.get('q') ?? initialQuery;
+  const categoryFromUrl = searchParams
+    ? normalizeCategoryId(searchParams.get('c') ?? 'all')
+    : initialCategoryId;
 
-  useEffect(() => {
-    if (!router.isReady) return;
-    const qFromUrl = typeof router.query.q === 'string' ? router.query.q : '';
-    const cFromUrl = typeof router.query.c === 'string' ? router.query.c : 'all';
-    const normalizedCategory = encyclopediaCategories.some((c) => c.id === cFromUrl)
-      ? (cFromUrl as EncyclopediaCategoryId)
-      : 'all';
-
-    setQuery(qFromUrl);
-    setCategoryId(normalizedCategory);
-  }, [router.isReady, router.query.c, router.query.q]);
+  const [query, setQuery] = useState(initialQuery);
+  const [categoryId, setCategoryId] = useState<EncyclopediaCategoryFilter>(initialCategoryId);
 
   useEffect(() => {
-    if (!router.isReady) return;
+    setQuery(queryFromUrl);
+    setCategoryId(categoryFromUrl);
+  }, [categoryFromUrl, queryFromUrl]);
 
-    const qFromUrl = typeof router.query.q === 'string' ? router.query.q : '';
-    const cFromUrl = typeof router.query.c === 'string' ? router.query.c : 'all';
-    const normalizedCategory = encyclopediaCategories.some((c) => c.id === cFromUrl)
-      ? (cFromUrl as EncyclopediaCategoryId)
-      : 'all';
-
-    if (qFromUrl === query && normalizedCategory === categoryId) return;
+  useEffect(() => {
+    if (queryFromUrl === query && categoryFromUrl === categoryId) return;
 
     const handle = setTimeout(() => {
-      const nextQuery: Record<string, string> = {};
-      if (categoryId !== 'all') nextQuery.c = categoryId;
-      if (query.trim()) nextQuery.q = query.trim();
-      void router.replace({ pathname: '/encyclopedia', query: nextQuery }, undefined, {
-        shallow: true,
-        scroll: false,
-      });
+      const nextQuery = new URLSearchParams();
+      if (categoryId !== 'all') nextQuery.set('c', categoryId);
+      if (query.trim()) nextQuery.set('q', query.trim());
+      const queryString = nextQuery.toString();
+      router.replace(queryString ? `${pathname}?${queryString}` : pathname, { scroll: false });
     }, 250);
 
     return () => clearTimeout(handle);
-  }, [categoryId, query, router]);
+  }, [categoryFromUrl, categoryId, pathname, query, queryFromUrl, router]);
 
   const filteredEntries = useMemo(() => {
     return encyclopediaEntries.filter((entry) => {
@@ -94,10 +101,6 @@ export default function EncyclopediaIndex() {
 
   return (
     <>
-      <Head>
-        <title>百科 - MahoShojo Generator</title>
-      </Head>
-
       <div className="magic-background-white">
         <div className="mx-auto w-full max-w-6xl px-4 py-10 sm:px-6 lg:px-10">
           <div className="rounded-2xl bg-white/95 shadow-[0_20px_40px_rgba(0,0,0,0.10)] ring-1 ring-white/50 backdrop-blur">
