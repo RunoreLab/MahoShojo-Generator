@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 
-import { PvpRoomRouteProviders } from '@/components/competition/CompetitionRouteProviders';
+import { PvpRoomRouteProviders } from '@/components/competition/PvpRoomRouteProviders';
 
 type RouteParams = {
   roomId?: string | string[];

@@ -167,7 +167,12 @@ describe('competition domain App Router pages', () => {
       'app/pvp/page.tsx',
       'app/pvp/[roomId]/page.tsx',
       'app/arrested/page.tsx',
-      'components/competition/CompetitionRouteProviders.tsx',
+      'components/competition/BattleRouteProviders.tsx',
+      'components/competition/ArenaRouteProviders.tsx',
+      'components/competition/RankingRouteProviders.tsx',
+      'components/competition/PvpRouteProviders.tsx',
+      'components/competition/PvpRoomRouteProviders.tsx',
+      'components/competition/QueryRouteProviders.tsx',
       'components/competition/ChallengeRouteGate.tsx',
       'components/arena/ArenaPage.tsx',
       'components/arena-lite/BattleLitePage.tsx',
@@ -186,5 +191,38 @@ describe('competition domain App Router pages', () => {
       expect(source, path).not.toContain('next/router');
       expect(source, path).not.toContain('next/head');
     }
+  });
+
+  test('competition route providers keep page module graphs isolated', () => {
+    const routeProviderFiles = {
+      battle: 'components/competition/BattleRouteProviders.tsx',
+      arena: 'components/competition/ArenaRouteProviders.tsx',
+      ranking: 'components/competition/RankingRouteProviders.tsx',
+      pvp: 'components/competition/PvpRouteProviders.tsx',
+      pvpRoom: 'components/competition/PvpRoomRouteProviders.tsx',
+    };
+
+    for (const path of Object.values(routeProviderFiles)) {
+      expect(existsSync(join(process.cwd(), path)), path).toBe(true);
+    }
+
+    const battleProvider = readProjectFile(routeProviderFiles.battle);
+    expect(battleProvider).toContain('BattleLitePage');
+    expect(battleProvider).not.toContain('PvpLobbyPage');
+    expect(battleProvider).not.toContain('PvpRoomPage');
+    expect(battleProvider).not.toContain('RankingPage');
+
+    const pvpProvider = readProjectFile(routeProviderFiles.pvp);
+    expect(pvpProvider).toContain('PvpLobbyPage');
+    expect(pvpProvider).not.toContain('PvpRoomPage');
+    expect(pvpProvider).not.toContain('BattleLitePage');
+    expect(pvpProvider).not.toContain('ArenaPage');
+    expect(pvpProvider).not.toContain('RankingPage');
+
+    const pvpRoomProvider = readProjectFile(routeProviderFiles.pvpRoom);
+    expect(pvpRoomProvider).toContain('PvpRoomPage');
+    expect(pvpRoomProvider).not.toContain('PvpLobbyPage');
+    expect(pvpRoomProvider).not.toContain('BattleLitePage');
+    expect(pvpRoomProvider).not.toContain('ArenaPage');
   });
 });

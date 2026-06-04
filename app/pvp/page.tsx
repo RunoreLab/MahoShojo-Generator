@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 
-import { PvpRouteProviders } from '@/components/competition/CompetitionRouteProviders';
+import { PvpRouteProviders } from '@/components/competition/PvpRouteProviders';
 
 export const metadata: Metadata = {
   title: 'PVP 大厅 - MahoShojo Generator',
