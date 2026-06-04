@@ -17,8 +17,8 @@
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "mhsj-d1-test",
-      "database_id": "3836f44c-4e49-4356-9b33-6080278e4448",
+      "database_name": "ifmahoushoujo",
+      "database_id": "8eb9b25c-5a00-4feb-b5cb-c5dd25cda1d3",
       "migrations_dir": "drizzle"
     }
   ],
@@ -36,7 +36,7 @@
       "d1_databases": [
         {
           "binding": "DB",
-          "database_name": "mahoshojo",
+          "database_name": "ifmahoushoujo",
           "database_id": "8eb9b25c-5a00-4feb-b5cb-c5dd25cda1d3",
           "migrations_dir": "drizzle"
         }
@@ -55,8 +55,8 @@
       "d1_databases": [
         {
           "binding": "DB",
-          "database_name": "mhsj-d1-test-preview",
-          "database_id": "3836f44c-4e49-4356-9b33-6080278e4448",
+          "database_name": "ifmahoushoujo",
+          "database_id": "8eb9b25c-5a00-4feb-b5cb-c5dd25cda1d3",
           "migrations_dir": "drizzle"
         }
       ]

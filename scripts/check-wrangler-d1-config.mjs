@@ -64,6 +64,7 @@ const appendD1Entries = (entries, lines, section, databases) => {
         key,
         value: rawValue.trim(),
         section,
+        databaseIndex: index,
         lineNumber: findLineNumber(lines, key, rawValue) || index + 1,
       });
     }
@@ -98,6 +99,13 @@ const validateEntries = (entries) => {
   const productionDatabaseNameEntries = entries.filter(
     (entry) => entry.section === 'env.production.d1_databases' && entry.key === 'database_name',
   );
+  const findDatabaseNameEntry = (idEntry) =>
+    entries.find(
+      (entry) =>
+        entry.section === idEntry.section &&
+        entry.databaseIndex === idEntry.databaseIndex &&
+        entry.key === 'database_name',
+    );
 
   if (databaseIdEntries.length === 0) {
     issues.push('未检测到 database_id 配置。');
@@ -124,11 +132,17 @@ const validateEntries = (entries) => {
     issues.push('未检测到 env.production.d1_databases.database_id 配置。');
   }
 
-  const nonProductionIds = new Set(nonProductionDatabaseIdEntries.map((entry) => entry.value));
-  for (const entry of productionDatabaseIdEntries) {
-    if (nonProductionIds.has(entry.value)) {
+  const productionNameById = new Map(
+    productionDatabaseIdEntries.map((entry) => [entry.value, findDatabaseNameEntry(entry)?.value ?? '']),
+  );
+  for (const entry of nonProductionDatabaseIdEntries) {
+    const productionName = productionNameById.get(entry.value);
+    if (!productionName) continue;
+
+    const nonProductionName = findDatabaseNameEntry(entry)?.value ?? '';
+    if (nonProductionName !== productionName) {
       issues.push(
-        `第 ${entry.lineNumber} 行的 production database_id 与 default/preview 复用同一 D1：${entry.value}`,
+        `第 ${entry.lineNumber} 行的 ${entry.section} 复用 production D1 ID，但 database_name 不一致：${nonProductionName || '(未配置)'} != ${productionName}`,
       );
     }
   }
