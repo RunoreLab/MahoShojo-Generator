@@ -2,10 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { useRouter } from 'next/router';
 import { RefreshCcw, Zap, X } from 'lucide-react';
 
 import { authStorage } from '@/lib/auth';
+import { useClientRouteAdapter } from '@/lib/client-route-adapter';
 import type { PvpRoomRules } from '@/lib/pvp/types';
 import { describePvpRoomCardRange, normalizePvpRoomCardRange } from '@/lib/pvp/card-range';
 import { formatPvpDisplayName } from '@/lib/pvp/displayName';
@@ -85,7 +85,7 @@ const formatTimeAgo = (iso: string | null): string => {
 };
 
 export function PvpRoomBrowserModal({ isOpen, onClose }: Props) {
-  const router = useRouter();
+  const router = useClientRouteAdapter();
   const abortRef = useRef<AbortController | null>(null);
   const refreshTimerRef = useRef<number | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);

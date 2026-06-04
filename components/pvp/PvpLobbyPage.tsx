@@ -1,8 +1,6 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import Head from 'next/head';
-import { useRouter } from 'next/router';
 import { LayoutList } from 'lucide-react';
 
 import BattleDataModal from '@/components/BattleDataModal';
@@ -16,6 +14,7 @@ import { ScenarioPickerPanel } from '@/components/shared/ScenarioPickerPanel';
 import { ScenarioPresetGridPicker } from '@/components/ScenarioPresetGridPicker';
 import { useScenarioPresetQuery } from '@/components/arena/hooks/useArenaData';
 import { authStorage } from '@/lib/auth';
+import { useClientRouteAdapter } from '@/lib/client-route-adapter';
 import { inferTemplate } from '@/lib/data-card-converter';
 import { mapDataCardRuntimeSourceInfo, mapPublicDataCardRowToBattleSelectionPayload } from '@/lib/data-card-read-mappers';
 import { useAuth } from '@/lib/useAuth';
@@ -56,7 +55,7 @@ const removePrivateKeys = (obj: any): any => {
 };
 
 export function PvpLobbyPage() {
-  const router = useRouter();
+  const router = useClientRouteAdapter();
   const { isAuthenticated, loading } = useAuth();
 
   const rules = usePvpLobbyStore((s) => s.rules);
@@ -246,11 +245,6 @@ export function PvpLobbyPage() {
 
   return (
     <>
-      <Head>
-        <title>PVP 对战大厅 - MahoShojo Generator</title>
-        <meta name="description" content="创建或加入PVP房间，进行卡组对战！" />
-      </Head>
-
       <div className="magic-background-white">
         <div className="container !max-w-[980px]">
           <div className="card !max-w-none !p-0">

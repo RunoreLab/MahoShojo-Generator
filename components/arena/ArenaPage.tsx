@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import Head from 'next/head';
 
 import BattleDataModal from '@/components/BattleDataModal';
 import DataCardDetailsModal from '@/components/DataCardDetailsModal';
@@ -170,13 +169,6 @@ export function ArenaPage() {
 
   return (
     <>
-      <Head>
-        <title>魔法少女竞技场 - MahoShojo Generator</title>
-        <meta
-          name="description"
-          content="选择角色卡，生成角色之间的战斗或日常故事！"
-        />
-      </Head>
       <div className="magic-background-white">
         <div className="arena-page-shell mx-auto w-full max-w-[1380px] px-4 pb-8 pt-6 sm:px-6 lg:px-8">
           <div

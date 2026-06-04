@@ -2,9 +2,11 @@ import { expect, test } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-test('pages/battle 继续作为 BattleLitePage + QueryClientProvider 入口', () => {
-  const source = readFileSync(join(process.cwd(), 'pages/battle.tsx'), 'utf8');
+test('app/battle 继续作为 BattleLitePage + QueryClientProvider 入口', () => {
+  const routeSource = readFileSync(join(process.cwd(), 'app/battle/page.tsx'), 'utf8');
+  const providerSource = readFileSync(join(process.cwd(), 'components/competition/CompetitionRouteProviders.tsx'), 'utf8');
 
-  expect(source).toContain('QueryClientProvider');
-  expect(source).toContain('BattleLitePage');
+  expect(routeSource).toContain('BattleRouteProviders');
+  expect(providerSource).toContain('QueryClientProvider');
+  expect(providerSource).toContain('BattleLitePage');
 });

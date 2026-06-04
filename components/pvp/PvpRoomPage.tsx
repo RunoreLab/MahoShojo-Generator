@@ -1,8 +1,6 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState, type ComponentProps } from 'react';
-import Head from 'next/head';
-import { useRouter } from 'next/router';
 import { useMutation, useQuery } from '@tanstack/react-query';
 
 import AiProviderSelector, { type UserAIProviderConfig } from '@/components/AiProviderSelector';
@@ -30,6 +28,7 @@ import { ImagePreviewModal } from '@/components/shared/ImagePreviewModal';
 import { StreamStopButton } from '@/components/shared/StreamStopButton';
 import { PvpSettlementCardModal } from '@/components/pvp/PvpSettlementCardModal';
 import { authStorage } from '@/lib/auth';
+import { useClientRouteAdapter } from '@/lib/client-route-adapter';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { useCooldown } from '@/lib/cooldown';
 import { inferTemplate } from '@/lib/data-card-converter';
@@ -244,7 +243,7 @@ type PvpRoomSpectatorView = {
 };
 
 export function PvpRoomPage() {
-  const router = useRouter();
+  const router = useClientRouteAdapter();
   const { user, isAuthenticated, loading } = useAuth();
   const roomId = typeof router.query.roomId === 'string' ? router.query.roomId : '';
 
@@ -2123,9 +2122,6 @@ export function PvpRoomPage() {
 
   return (
     <>
-      <Head>
-        <title>PVP 房间 - {roomId || '...'}</title>
-      </Head>
       <div className="magic-background-white">
         <div className="container !max-w-[1100px]">
           <div className="card !max-w-none !p-0">

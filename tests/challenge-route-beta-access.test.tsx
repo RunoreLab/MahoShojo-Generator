@@ -25,9 +25,11 @@ let betaAccessState: MockBetaAccessState = {
   error: null,
 };
 
-vi.mock('next/router', () => ({
-  default: {
-    replace: async () => true,
+vi.mock('next/navigation', () => ({
+  useRouter() {
+    return {
+      replace: vi.fn(),
+    };
   },
 }));
 
@@ -47,7 +49,7 @@ describe('/challenge beta access route', () => {
       error: null,
     };
 
-    const { default: ChallengePageRoute } = await import('@/pages/challenge');
+    const { default: ChallengePageRoute } = await import('@/app/challenge/page');
     const html = renderToStaticMarkup(<ChallengePageRoute />);
 
     expect(html).toContain('正在核验内测权限');
@@ -65,7 +67,7 @@ describe('/challenge beta access route', () => {
       error: null,
     };
 
-    const { default: ChallengePageRoute } = await import('@/pages/challenge');
+    const { default: ChallengePageRoute } = await import('@/app/challenge/page');
     const html = renderToStaticMarkup(<ChallengePageRoute />);
 
     expect(html).toContain('本轮挑战');

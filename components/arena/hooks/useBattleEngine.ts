@@ -1,10 +1,10 @@
 'use client';
 
 import { useCallback, useMemo } from 'react';
-import { useRouter } from 'next/router';
 
 import type { NewsReport } from '@/components/BattleReportCard';
 import { persistArrestedBackup, type ArrestedBackupDraftItem, type ArrestedBackupTriggerSource } from '@/lib/arrested-backup';
+import { useClientRouteAdapter } from '@/lib/client-route-adapter';
 import { useProviderModeCooldown } from '@/lib/cooldown';
 import { quickCheck } from '@/lib/sensitive-word-filter';
 import { applyShieldWords } from '@/lib/shield-word-filter';
@@ -398,7 +398,7 @@ const checkSensitivePayload = async (
 };
 
 export const useBattleEngine = () => {
-  const router = useRouter();
+  const router = useClientRouteAdapter();
   const { updateFromMarkdown } = useStreamCombatantUpdater();
   const useBattleSelector = <T,>(selector: (state: BattleStoreState) => T) => useBattleStore(selector);
   const combatants = useBattleSelector((state) => state.combatants);
