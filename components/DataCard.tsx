@@ -385,25 +385,25 @@ export default function DataCard({
       <div className="mt-auto flex flex-col gap-2">
         {/* 作者信息现在是单独一行，避免与按钮竞争空间 */}
         {author && (
-          <div className="flex items-center gap-1 min-w-0">
+          <div className="data-card-author-row flex flex-wrap items-center gap-x-1 gap-y-1 min-w-0 max-w-full overflow-hidden">
             {onAuthorClick ? (
               <button
                 onClick={(e) => {
                   e.stopPropagation(); // 阻止事件冒泡，防止触发整个卡片的点击事件
                   onAuthorClick(author);
                 }}
-                className={`text-xs ${subTextColor} hover:text-purple-600 hover:underline transition-colors text-left truncate`}
+                className={`min-w-0 max-w-full flex-[1_1_9rem] text-xs ${subTextColor} hover:text-purple-600 hover:underline transition-colors text-left truncate`}
                 title={`筛选作者: ${author}`}
               >
                 作者: {author}
               </button>
             ) : (
-              <p className={`text-xs leading-[18px] ${subTextColor} truncate`} title={`作者: ${author}`}>
+              <p className={`min-w-0 max-w-full flex-[1_1_9rem] text-xs leading-[18px] ${subTextColor} truncate`} title={`作者: ${author}`}>
                 作者: {author}
               </p>
             )}
             {authorBadges && authorBadges.length > 0 && (
-              <span className="inline-flex items-center gap-0.5 shrink-0">
+              <span className="data-card-author-badges inline-flex flex-wrap items-center gap-0.5 min-w-0 max-w-full">
                 {authorBadges.map((badge) => (
                   <Badge key={badge.id} badge={badge} size="sm" />
                 ))}
@@ -555,15 +555,17 @@ export default function DataCard({
           >
             删除
           </button>
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onEditData?.();
-            }}
-            className="flex-1 min-w-[80px] text-sm px-3 py-1.5 bg-purple-100 text-purple-700 hover:bg-purple-200 rounded transition-colors flex items-center justify-center gap-1"
-          >
-            编辑档案
-          </button>
+          {onEditData && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onEditData();
+              }}
+              className="flex-1 min-w-[80px] text-sm px-3 py-1.5 bg-purple-100 text-purple-700 hover:bg-purple-200 rounded transition-colors flex items-center justify-center gap-1"
+            >
+              编辑档案
+            </button>
+          )}
           {onReplace && (
             <button
               onClick={(e) => {

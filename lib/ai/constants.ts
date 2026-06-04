@@ -603,6 +603,27 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
         models: SENSENOVA_TOKEN_PLAN_MODELS,
     },
     {
+        id: 'agnes-ai',
+        name: 'Agnes AI',
+        description: 'Agnes AI OpenAI 兼容端点。据说旗下三大核心模型API无限期免费开放。',
+        docsUrl: 'https://platform.agnes-ai.com',
+        baseUrl: 'https://apihub.agnes-ai.com/v1',
+        type: 'openai',
+        mode: 'auto',
+        models: [
+            {
+                value: 'agnes-2.0-flash',
+                label: 'Agnes 2.0 Flash',
+                description: '由 Sapiens AI 开发的快速高效的语言模型，专为智能体工作流程、工具使用、编码任务、推理、多轮对话和高频生产应用而设计。'
+            },
+            {
+                value: 'agnes-1.5-flash',
+                label: 'Agnes 1.5 Flash',
+                description: '轻量级、高效的大型语言模型，针对低延迟、高并发和经济高效的部署进行了优化。'
+            },
+        ],
+    },
+    {
         id: 'qiniu-ai',
         name: '七牛云 AI 大模型推理',
         description: '七牛云 AI 大模型推理 OpenAI 兼容端点，支持 DeepSeek、Kimi、GLM、Qwen、MiniMax、豆包等模型。',
