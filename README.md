@@ -9,7 +9,7 @@
   <div>✨ 基于 AI 结构化生成的生成器 ✨</div>
   <a href="https://mahoshojo.colanns.me">在线试玩</a> |
   <a href="https://github.com/colasama/MahoShojo-Generator/discussions">交流反馈</a> |
-  <a href="https://pd.qq.com/s/brisxifbl">腾讯频道: pd73230758</a>
+  <a href="https://pd.qq.com/s/brisxifbl">加入腾讯频道</a>
 </div>
 
 ## ✨ 项目介绍
