@@ -1931,11 +1931,11 @@ export const DetailsPage: React.FC = () => {
                   theme="pink"
                 />
 
-                <div className="my-4 rounded-xl border border-indigo-100 bg-indigo-50/70 p-4 text-sm">
+                <div className="details-questionnaire-settings-panel my-4 rounded-xl border border-indigo-100 bg-indigo-50/70 p-4 text-sm">
                   <button
                     type="button"
                     onClick={() => setShowQuestionnaireSettings(!showQuestionnaireSettings)}
-                    className="flex w-full items-center justify-between font-semibold text-indigo-700"
+                    className="details-questionnaire-settings-toggle flex w-full items-center justify-between font-semibold text-indigo-700"
                   >
                     <span>问卷设置</span>
                     <span>{showQuestionnaireSettings ? '▲' : '▼'}</span>
@@ -1965,7 +1965,7 @@ export const DetailsPage: React.FC = () => {
 	                      <div className="space-y-2">
 	                        <div className="text-[11px] font-semibold text-slate-500">可作答问卷（题目）</div>
 	                        {answerableSelections.length === 0 ? (
-	                          <div className="rounded-lg border border-indigo-100 bg-white px-3 py-2 text-[11px] text-slate-500">
+	                          <div className="details-questionnaire-subcard rounded-lg border border-indigo-100 bg-white px-3 py-2 text-[11px] text-slate-500">
 	                            暂无可作答问卷
 	                          </div>
 	                        ) : (
@@ -1974,7 +1974,7 @@ export const DetailsPage: React.FC = () => {
 	                            const hasLore = Boolean(selection.questionnaire.loreMarkdown?.trim());
 	                            const loreStatus = hasLore ? (selection.useLore !== false ? ' · 设定：启用' : ' · 设定：关闭') : '';
 	                            return (
-	                              <div key={selectionId} className="flex items-center justify-between rounded-lg border border-indigo-100 bg-white px-3 py-2">
+	                              <div key={selectionId} className="details-questionnaire-subcard flex items-center justify-between rounded-lg border border-indigo-100 bg-white px-3 py-2">
 	                                <div>
 	                                  <div className="font-semibold text-indigo-700">{selection.questionnaire.title}</div>
 	                                  <div className="text-[11px] text-gray-500">
@@ -2009,7 +2009,7 @@ export const DetailsPage: React.FC = () => {
 	                      <div className="space-y-2">
 	                        <div className="text-[11px] font-semibold text-slate-500">设定（Lore）注入</div>
 	                        {loreSelections.length === 0 ? (
-	                          <div className="rounded-lg border border-indigo-100 bg-white px-3 py-2 text-[11px] text-slate-500">
+	                          <div className="details-questionnaire-subcard rounded-lg border border-indigo-100 bg-white px-3 py-2 text-[11px] text-slate-500">
 	                            暂无设定来源
 	                          </div>
 	                        ) : (
@@ -2017,7 +2017,7 @@ export const DetailsPage: React.FC = () => {
 	                            const selectionId = selection.selectionId ?? selection.questionnaire.id;
 	                            const isLoreOnly = selection.questionnaire.questions.length === 0;
 	                            return (
-	                              <div key={selectionId} className="flex items-center justify-between rounded-lg border border-indigo-100 bg-white px-3 py-2">
+	                              <div key={selectionId} className="details-questionnaire-subcard flex items-center justify-between rounded-lg border border-indigo-100 bg-white px-3 py-2">
 	                                <div>
 	                                  <div className="font-semibold text-indigo-700">{selection.questionnaire.title}</div>
 	                                  <div className="text-[11px] text-gray-500">
@@ -2075,7 +2075,7 @@ export const DetailsPage: React.FC = () => {
                             <option key={preset.id} value={preset.id}>{preset.title}</option>
                           ))}
                         </select>
-                        <label className="inline-flex items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1 text-xs font-medium text-indigo-700 hover:border-indigo-300 hover:bg-indigo-100 cursor-pointer">
+                        <label className="details-questionnaire-action inline-flex items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1 text-xs font-medium text-indigo-700 hover:border-indigo-300 hover:bg-indigo-100 cursor-pointer">
                           上传问卷 JSON
                           <input
                             type="file"
@@ -2090,7 +2090,7 @@ export const DetailsPage: React.FC = () => {
                             setQuestionnairePickerError(null);
                             setShowQuestionnairePicker(true);
                           }}
-                          className="rounded-lg border border-indigo-200 bg-white px-3 py-1 text-xs text-indigo-600 hover:border-indigo-400"
+                          className="details-questionnaire-action rounded-lg border border-indigo-200 bg-white px-3 py-1 text-xs text-indigo-600 hover:border-indigo-400"
                         >
                           从云端问卷库选择
                         </button>
@@ -2100,7 +2100,7 @@ export const DetailsPage: React.FC = () => {
                             setPasteQuestionnaireError(null);
                             setShowPasteImport((prev) => !prev);
                           }}
-                          className="rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1 text-xs text-indigo-700 hover:border-indigo-300 hover:bg-indigo-100"
+                          className="details-questionnaire-action rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1 text-xs text-indigo-700 hover:border-indigo-300 hover:bg-indigo-100"
                         >
                           {showPasteImport ? '收起粘贴导入' : '粘贴导入 JSON'}
                         </button>
@@ -2109,7 +2109,7 @@ export const DetailsPage: React.FC = () => {
                         </Link>
                       </div>
                       {showPasteImport && (
-                        <div className="rounded-lg border border-indigo-100 bg-white p-3 text-xs text-slate-600">
+                        <div className="details-questionnaire-subcard rounded-lg border border-indigo-100 bg-white p-3 text-xs text-slate-600">
                           <label className="text-xs text-slate-500">粘贴问卷 JSON</label>
                           <textarea
                             value={pasteQuestionnaireText}
@@ -2122,7 +2122,7 @@ export const DetailsPage: React.FC = () => {
                             <button
                               type="button"
                               onClick={handlePasteQuestionnaireImport}
-                              className="rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1 text-xs text-indigo-700 hover:border-indigo-300 hover:bg-indigo-100"
+                              className="details-questionnaire-action rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1 text-xs text-indigo-700 hover:border-indigo-300 hover:bg-indigo-100"
                             >
                               解析并载入
                             </button>

@@ -1524,3 +1524,71 @@ body.announcement-visible {
     }
   }
 }
+
+:root[data-color-mode='dark'] .details-questionnaire-settings-panel,
+:root[data-color-mode='dark'] .details-questionnaire-surface,
+:root[data-color-mode='dark'] .details-questionnaire-subcard {
+  background-color: rgba(15, 23, 42, 0.82);
+  border-color: rgba(129, 140, 248, 0.28);
+  color: #dbeafe;
+}
+
+:root[data-color-mode='dark'] .details-questionnaire-settings-panel {
+  background-color: rgba(30, 41, 59, 0.72);
+}
+
+:root[data-color-mode='dark'] .details-questionnaire-settings-toggle {
+  color: #c7d2fe;
+}
+
+:root[data-color-mode='dark'] .details-questionnaire-action,
+:root[data-color-mode='dark'] .details-questionnaire-choice {
+  background-color: rgba(15, 23, 42, 0.88);
+  border-color: rgba(244, 114, 182, 0.32);
+  color: #fbcfe8;
+}
+
+:root[data-color-mode='dark'] .details-questionnaire-choice {
+  color: #e5e7eb;
+}
+
+:root[data-color-mode='dark'] .details-questionnaire-action:hover,
+:root[data-color-mode='dark'] .details-questionnaire-choice:hover {
+  background-color: rgba(51, 65, 85, 0.82);
+  border-color: rgba(244, 114, 182, 0.55);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-color-mode]) .details-questionnaire-settings-panel,
+  :root:not([data-color-mode]) .details-questionnaire-surface,
+  :root:not([data-color-mode]) .details-questionnaire-subcard {
+    background-color: rgba(15, 23, 42, 0.82);
+    border-color: rgba(129, 140, 248, 0.28);
+    color: #dbeafe;
+  }
+
+  :root:not([data-color-mode]) .details-questionnaire-settings-panel {
+    background-color: rgba(30, 41, 59, 0.72);
+  }
+
+  :root:not([data-color-mode]) .details-questionnaire-settings-toggle {
+    color: #c7d2fe;
+  }
+
+  :root:not([data-color-mode]) .details-questionnaire-action,
+  :root:not([data-color-mode]) .details-questionnaire-choice {
+    background-color: rgba(15, 23, 42, 0.88);
+    border-color: rgba(244, 114, 182, 0.32);
+    color: #fbcfe8;
+  }
+
+  :root:not([data-color-mode]) .details-questionnaire-choice {
+    color: #e5e7eb;
+  }
+
+  :root:not([data-color-mode]) .details-questionnaire-action:hover,
+  :root:not([data-color-mode]) .details-questionnaire-choice:hover {
+    background-color: rgba(51, 65, 85, 0.82);
+    border-color: rgba(244, 114, 182, 0.55);
+  }
+}
