@@ -3,6 +3,7 @@
 import { useCallback } from 'react';
 
 import { inferTemplate } from '@/lib/data-card-converter';
+import { buildAdjudicationSourceKey, markAdjudicationEventsWithSource } from '@/lib/arena/adjudication-events';
 import { buildArenaMaterialState } from '@/lib/arena/materials';
 import {
   mapDataCardRuntimeSourceInfo,
@@ -55,6 +56,7 @@ export const useBattleActions = () => {
   const setError = useBattleSelector((state) => state.setError);
   const addCombatant = useBattleSelector((state) => state.addCombatant);
   const setCombatants = useBattleSelector((state) => state.setCombatants);
+  const removeCombatant = useBattleSelector((state) => state.removeCombatant);
   const setScenario = useBattleSelector((state) => state.setScenario);
   const addAuxScenario = useBattleSelector((state) => state.addAuxScenario);
   const removeAuxScenario = useBattleSelector((state) => state.removeAuxScenario);
@@ -66,7 +68,7 @@ export const useBattleActions = () => {
   const moveMaterial = useBattleSelector((state) => state.moveMaterial);
   const clearMaterials = useBattleSelector((state) => state.clearMaterials);
   const setMaterials = useBattleSelector((state) => state.setMaterials);
-  const setAdjudicationEvents = useBattleSelector((state) => state.setAdjudicationEvents);
+  const appendAdjudicationEventsToStore = useBattleSelector((state) => state.appendAdjudicationEvents);
   const scenario = useBattleSelector((state) => state.scenario);
 
   const buildAuxScenario = useCallback(
@@ -74,6 +76,7 @@ export const useBattleActions = () => {
       id?: string;
       rawScenario: any;
       fileName: string;
+      adjudicationSourceKey?: string;
       sourceDataCardId?: string;
       sourceDataCardName?: string;
       sourceDataCardUpdatedAt?: string;
@@ -86,11 +89,19 @@ export const useBattleActions = () => {
       }
 
       const isNative = await verifyOrigin(parsed.data);
+      const adjudicationSourceKey =
+        input.adjudicationSourceKey ??
+        buildAdjudicationSourceKey({
+          sourceDataCardId: input.sourceDataCardId,
+          sourceFileName: input.fileName,
+          sourceLabel: input.sourceDataCardName || input.fileName,
+        });
       return {
         id: input.id || createClientId('aux-scenario'),
         content: parsed.data,
         fileName: input.fileName,
         isNative,
+        ...(adjudicationSourceKey ? { adjudicationSourceKey } : {}),
         sourceDataCardId: input.sourceDataCardId,
         sourceDataCardUpdatedAt: input.sourceDataCardUpdatedAt,
         sourceDataCardName: input.sourceDataCardName,
@@ -102,18 +113,18 @@ export const useBattleActions = () => {
   );
 
   const appendAdjudicationEvents = useCallback(
-    (events: unknown, label: string) => {
+    (events: unknown, label: string, sourceKey?: string | null) => {
       if (!Array.isArray(events) || events.length === 0) return;
       if (isLegacyAdjudicatorFormat(events as any[])) {
         setError(`⚠️ 文件 "${label}" 包含旧版随机事件，已被忽略。`);
         return;
       }
-      const current = useBattleStore.getState().adjudicationEvents;
-      const merged = [...current];
-      events.forEach((evt) => merged.push(evt as any));
-      setAdjudicationEvents(merged);
+      const effectiveSourceKey = sourceKey ?? buildAdjudicationSourceKey({ sourceLabel: label });
+      const marked = markAdjudicationEventsWithSource(events, effectiveSourceKey);
+      if (marked.length === 0) return;
+      appendAdjudicationEventsToStore(marked, effectiveSourceKey);
     },
-    [setAdjudicationEvents, setError]
+    [appendAdjudicationEventsToStore, setError]
   );
 
   const importFromText = useCallback(
@@ -140,7 +151,15 @@ export const useBattleActions = () => {
       });
 
       // 添加唯一的角色
-      uniqueResults.forEach(addCombatant);
+      uniqueResults.forEach((result) =>
+        addCombatant({
+          ...result,
+          adjudicationSourceKey: buildAdjudicationSourceKey({
+            sourceFileName: result.filename,
+            sourceLabel: result.filename,
+          }) ?? undefined,
+        })
+      );
 
       // 显示重复角色的警告信息
       if (duplicates.length > 0) {
@@ -206,6 +225,11 @@ export const useBattleActions = () => {
       const resolvedName = getCombatantDisplayName(cleanedCardData);
       const inferredTemplate = inferTemplate(cleanedCardData);
       const targetFilename = `${sourceDataCardName || resolvedName}.json`;
+      const adjudicationSourceKey = buildAdjudicationSourceKey({
+        sourceDataCardId,
+        sourceFileName: targetFilename,
+        sourceLabel: sourceDataCardName || resolvedName,
+      });
 
       // 检查是否已在加载中或已存在（防止重复点击）
       if (loadingCards.has(targetFilename)) {
@@ -227,6 +251,7 @@ export const useBattleActions = () => {
             content: cleanedCardData,
             fileName: `${sourceDataCardName || resolvedName}.json`,
             isNative,
+            ...(adjudicationSourceKey ? { adjudicationSourceKey } : {}),
             sourceDataCardId,
             sourceDataCardDescription,
             sourceDataCardCreatedAt,
@@ -238,7 +263,7 @@ export const useBattleActions = () => {
             sourceDataCardLikeCount,
             sourceDataCardFavoriteCount,
           });
-          appendAdjudicationEvents(cleanedCardData.adjudicationEvents, resolvedName);
+          appendAdjudicationEvents(cleanedCardData.adjudicationEvents, resolvedName, adjudicationSourceKey);
           setError(null);
           return;
         }
@@ -262,6 +287,7 @@ export const useBattleActions = () => {
           isValid,
           isPreset: false,
           isNonStandard: false,
+          ...(adjudicationSourceKey ? { adjudicationSourceKey } : {}),
           sourceDataCardId,
           sourceDataCardDescription,
           sourceDataCardCreatedAt,
@@ -273,7 +299,7 @@ export const useBattleActions = () => {
           sourceDataCardLikeCount,
           sourceDataCardFavoriteCount,
         });
-        appendAdjudicationEvents(cleanedCardData.adjudicationEvents, resolvedName);
+        appendAdjudicationEvents(cleanedCardData.adjudicationEvents, resolvedName, adjudicationSourceKey);
         setError(null);
       } finally {
         // 无论成功还是失败，都要移除加载标记
@@ -376,6 +402,7 @@ export const useBattleActions = () => {
           sourceAuthor,
         });
         addAuxScenario(built);
+        appendAdjudicationEvents(cleanedCardData.adjudicationEvents, resolvedName, built.adjudicationSourceKey);
         setError(null);
       } catch (error) {
         setError(`❌ 添加辅助情景失败: ${error instanceof Error ? error.message : '未知错误'}`);
@@ -383,7 +410,7 @@ export const useBattleActions = () => {
         loadingCards.delete(auxId);
       }
     },
-    [addAuxScenario, buildAuxScenario, setAuxScenarios, setError]
+    [addAuxScenario, appendAdjudicationEvents, buildAuxScenario, setAuxScenarios, setError]
   );
 
   const handleToggleCombatantDataCard = useCallback(
@@ -392,21 +419,14 @@ export const useBattleActions = () => {
       if (!sourceDataCardId) return;
 
       if (!nextSelected) {
-        const currentCombatants = useBattleStore.getState().combatants;
-        setCombatants(
-          currentCombatants.filter((combatant) => {
-            if (!('sourceDataCardId' in combatant)) return true;
-            if (typeof combatant.sourceDataCardId !== 'string') return true;
-            return combatant.sourceDataCardId !== sourceDataCardId;
-          })
-        );
+        removeCombatant(sourceDataCardId);
         setError(null);
         return;
       }
 
       await handleSelectDataCard(cardData);
     },
-    [handleSelectDataCard, setCombatants, setError]
+    [handleSelectDataCard, removeCombatant, setError]
   );
 
   const handleRandomMatchAuxScenario = useCallback(async () => {
@@ -445,12 +465,17 @@ export const useBattleActions = () => {
       }
       const isNative = await verifyOrigin(parsed.data);
       const scenarioLabel = (parsed.data as any)?.title || (parsed.data as any)?.name || file.name;
+      const adjudicationSourceKey = buildAdjudicationSourceKey({
+        sourceFileName: file.name,
+        sourceLabel: scenarioLabel,
+      });
       setScenario({
         content: parsed.data,
         fileName: file.name,
         isNative,
+        ...(adjudicationSourceKey ? { adjudicationSourceKey } : {}),
       });
-      appendAdjudicationEvents((parsed.data as any).adjudicationEvents, scenarioLabel);
+      appendAdjudicationEvents((parsed.data as any).adjudicationEvents, scenarioLabel, adjudicationSourceKey);
       setError(null);
     },
     [appendAdjudicationEvents, setError, setScenario]
@@ -475,9 +500,10 @@ export const useBattleActions = () => {
         fileName: file.name,
       });
       addAuxScenario(built);
+      appendAdjudicationEvents((json as any).adjudicationEvents, file.name, built.adjudicationSourceKey);
       setError(null);
     },
-    [addAuxScenario, buildAuxScenario, setError]
+    [addAuxScenario, appendAdjudicationEvents, buildAuxScenario, setError]
   );
 
   const handleScenarioPaste = useCallback(
@@ -489,12 +515,17 @@ export const useBattleActions = () => {
       const isNative = await verifyOrigin(parsed.data);
       const scenarioLabel = (parsed.data as any)?.title || (parsed.data as any)?.name || '粘贴的情景';
       const scenarioFileName = options?.fileName || scenarioLabel;
+      const adjudicationSourceKey = buildAdjudicationSourceKey({
+        sourceFileName: scenarioFileName,
+        sourceLabel: scenarioLabel,
+      });
       setScenario({
         content: parsed.data,
         fileName: scenarioFileName,
         isNative,
+        ...(adjudicationSourceKey ? { adjudicationSourceKey } : {}),
       });
-      appendAdjudicationEvents((parsed.data as any).adjudicationEvents, scenarioLabel);
+      appendAdjudicationEvents((parsed.data as any).adjudicationEvents, scenarioLabel, adjudicationSourceKey);
       setError(null);
     },
     [appendAdjudicationEvents, setError, setScenario]
@@ -525,9 +556,10 @@ export const useBattleActions = () => {
         fileName: scenarioFileName,
       });
       addAuxScenario(built);
+      appendAdjudicationEvents((parsed.data as any).adjudicationEvents, scenarioLabel, built.adjudicationSourceKey);
       setError(null);
     },
-    [addAuxScenario, buildAuxScenario, setError]
+    [addAuxScenario, appendAdjudicationEvents, buildAuxScenario, setError]
   );
 
   const handleMaterialUpload = useCallback(

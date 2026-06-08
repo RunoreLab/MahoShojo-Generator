@@ -2986,6 +2986,7 @@ export function PvpRoomPage() {
                             <AdjudicatorSettingsPanel
                               events={Array.isArray(rulesDraft.adjudicationEvents) ? rulesDraft.adjudicationEvents : []}
                               onEventsChange={(events) => setRulesDraft((r) => (r ? { ...r, adjudicationEvents: events } : r))}
+                              onClearEvents={() => setRulesDraft((r) => (r ? { ...r, adjudicationEvents: [] } : r))}
                               disabled={rulesMutation.isPending}
                             />
                           </div>

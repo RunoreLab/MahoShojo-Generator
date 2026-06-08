@@ -79,6 +79,7 @@ export interface CombatantData {
   isNonStandard?: boolean;
   wasCorrected?: boolean;
   teamId?: number;
+  adjudicationSourceKey?: string;
   /** 用户对该角色的行动/想法引导（可选，最多 100 字）。 */
   characterGuidance?: string;
   sourceDataCardId?: string;
@@ -106,6 +107,7 @@ export interface ScenarioState {
   content: Record<string, unknown> | null;
   fileName: string | null;
   isNative: boolean;
+  adjudicationSourceKey?: string;
   sourceDataCardId?: string;
   sourceDataCardDescription?: string;
   sourceDataCardCreatedAt?: string;
@@ -257,6 +259,9 @@ export interface BattleStoreState {
   setMaterials: (materials: ArenaMaterialState[]) => void;
 
   setAdjudicationEvents: (events: AdjudicatorEvent[]) => void;
+  appendAdjudicationEvents: (events: AdjudicatorEvent[], sourceKey?: string | null) => void;
+  removeAdjudicationEventsBySource: (sourceKey: string) => void;
+  clearAdjudicationEvents: () => void;
   setAdjudicationResults: (results: AdjudicationResult[] | null) => void;
 
   setNewsReport: (report: NewsReport | null) => void;

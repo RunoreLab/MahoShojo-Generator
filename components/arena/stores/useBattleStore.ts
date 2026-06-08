@@ -16,6 +16,61 @@ import {
   DEFAULT_BATTLE_REPORT_CARD_WIDTH_MODE,
   DEFAULT_BATTLE_REPORT_CARD_WIDTH_PX,
 } from '../utils/battleReportCardWidth';
+import type { AdjudicatorEvent } from '@/types/arena';
+import { buildAdjudicationSourceKey, filterAdjudicationEventsBySources } from '@/lib/arena/adjudication-events';
+
+const normalizeSourceKey = (value: unknown): string => (typeof value === 'string' ? value.trim() : '');
+
+const getCombatantSourceKey = (combatant: unknown): string => {
+  if (!combatant || typeof combatant !== 'object') return '';
+  const record = combatant as Record<string, unknown>;
+  return (
+    normalizeSourceKey(record.adjudicationSourceKey) ||
+    buildAdjudicationSourceKey({
+      sourceDataCardId: normalizeSourceKey(record.sourceDataCardId),
+      sourceFileName: normalizeSourceKey(record.filename),
+      sourceLabel: normalizeSourceKey(record.sourceDataCardName) || normalizeSourceKey(record.filename) || normalizeSourceKey(record.id),
+    }) ||
+    ''
+  );
+};
+
+const matchesCombatantIdentifier = (combatant: unknown, identifier: unknown): boolean => {
+  const normalizedIdentifier = normalizeSourceKey(identifier);
+  if (!normalizedIdentifier || !combatant || typeof combatant !== 'object') return false;
+
+  const record = combatant as Record<string, unknown>;
+  const directMatches = [record.id, record.filename, record.sourceDataCardId, record.adjudicationSourceKey]
+    .map(normalizeSourceKey)
+    .some((value) => value === normalizedIdentifier);
+  if (directMatches) return true;
+
+  return getCombatantSourceKey(combatant) === normalizedIdentifier;
+};
+
+const getScenarioSourceKey = (scenario: unknown): string => {
+  if (!scenario || typeof scenario !== 'object') return '';
+  const record = scenario as Record<string, unknown>;
+  return (
+    normalizeSourceKey(record.adjudicationSourceKey) ||
+    buildAdjudicationSourceKey({
+      sourceDataCardId: normalizeSourceKey(record.sourceDataCardId),
+      sourceFileName: normalizeSourceKey(record.fileName),
+      sourceLabel: normalizeSourceKey(record.sourceDataCardName) || normalizeSourceKey(record.fileName),
+    }) ||
+    ''
+  );
+};
+
+const applyAdjudicationEventSourceRemoval = (events: unknown, sourceKey: string): AdjudicatorEvent[] => {
+  if (!Array.isArray(events) || !normalizeSourceKey(sourceKey)) return Array.isArray(events) ? (events as AdjudicatorEvent[]) : [];
+  return filterAdjudicationEventsBySources(events, [sourceKey]);
+};
+
+const removeAdjudicationEventsForKeys = (events: unknown, sourceKeys: string[]): AdjudicatorEvent[] => {
+  if (!Array.isArray(events) || events.length === 0) return Array.isArray(events) ? (events as AdjudicatorEvent[]) : [];
+  return filterAdjudicationEventsBySources(events, sourceKeys);
+};
 
 const defaultScenario: ScenarioState = {
   content: null,
@@ -130,14 +185,16 @@ export const useBattleStore = create<BattleStoreState>()(
         }),
 
       removeCombatant: (identifier) =>
-        set((state) => ({
-          combatants: state.combatants.filter((item) => {
-            if ('id' in item) {
-              return item.id !== identifier && item.filename !== identifier;
-            }
-            return item.filename !== identifier;
-          }),
-        })),
+        set((state) => {
+          const removed = state.combatants.filter((item) => matchesCombatantIdentifier(item, identifier));
+          const removedKeys = removed.map(getCombatantSourceKey).filter(Boolean);
+          return {
+            combatants: state.combatants.filter((item) => !removed.includes(item)),
+            adjudicationEvents: removedKeys.length > 0
+              ? removeAdjudicationEventsForKeys(state.adjudicationEvents, removedKeys)
+              : state.adjudicationEvents,
+          };
+        }),
 
       setCombatants: (combatants) => set({ combatants }),
       moveCombatant: (fromIndex, toIndex) =>
@@ -153,9 +210,15 @@ export const useBattleStore = create<BattleStoreState>()(
           return { combatants: next };
         }),
       clearCombatants: () =>
-        set({
-          combatants: [],
-          teams: [],
+        set((state) => {
+          const removedKeys = state.combatants.map(getCombatantSourceKey).filter(Boolean);
+          return {
+            combatants: [],
+            teams: [],
+            adjudicationEvents: removedKeys.length > 0
+              ? removeAdjudicationEventsForKeys(state.adjudicationEvents, removedKeys)
+              : state.adjudicationEvents,
+          };
         }),
 
       updateCombatantTeam: (identifier, teamId) =>
@@ -221,8 +284,27 @@ export const useBattleStore = create<BattleStoreState>()(
           teams: state.teams.map((team) => (team.id === teamId ? { ...team, isCollapsed: !team.isCollapsed } : team)),
         })),
 
-      setScenario: (scenario) => set({ scenario }),
-      clearScenario: () => set({ scenario: defaultScenario }),
+      setScenario: (scenario) =>
+        set((state) => {
+          const previousSourceKey = getScenarioSourceKey(state.scenario);
+          const nextEvents = previousSourceKey
+            ? applyAdjudicationEventSourceRemoval(state.adjudicationEvents, previousSourceKey)
+            : state.adjudicationEvents;
+          return {
+            scenario,
+            adjudicationEvents: nextEvents,
+          };
+        }),
+      clearScenario: () =>
+        set((state) => {
+          const previousSourceKey = getScenarioSourceKey(state.scenario);
+          return {
+            scenario: defaultScenario,
+            adjudicationEvents: previousSourceKey
+              ? applyAdjudicationEventSourceRemoval(state.adjudicationEvents, previousSourceKey)
+              : state.adjudicationEvents,
+          };
+        }),
 
       addAuxScenario: (scenario) =>
         set((state) => {
@@ -233,9 +315,16 @@ export const useBattleStore = create<BattleStoreState>()(
         }),
 
       removeAuxScenario: (id) =>
-        set((state) => ({
-          auxScenarios: state.auxScenarios.filter((item) => item.id !== id),
-        })),
+        set((state) => {
+          const removed = state.auxScenarios.filter((item) => item.id === id);
+          const removedKeys = removed.map(getScenarioSourceKey).filter(Boolean);
+          return {
+            auxScenarios: state.auxScenarios.filter((item) => item.id !== id),
+            adjudicationEvents: removedKeys.length > 0
+              ? removeAdjudicationEventsForKeys(state.adjudicationEvents, removedKeys)
+              : state.adjudicationEvents,
+          };
+        }),
 
       moveAuxScenario: (fromIndex, toIndex) =>
         set((state) => {
@@ -250,8 +339,27 @@ export const useBattleStore = create<BattleStoreState>()(
           return { auxScenarios: next };
         }),
 
-      clearAuxScenarios: () => set({ auxScenarios: [] }),
-      setAuxScenarios: (scenarios) => set({ auxScenarios: scenarios }),
+      clearAuxScenarios: () =>
+        set((state) => ({
+          auxScenarios: [],
+          adjudicationEvents: removeAdjudicationEventsForKeys(
+            state.adjudicationEvents,
+            state.auxScenarios.map(getScenarioSourceKey).filter(Boolean)
+          ),
+        })),
+      setAuxScenarios: (scenarios) =>
+        set((state) => {
+          const nextKeys = new Set(scenarios.map(getScenarioSourceKey).filter(Boolean));
+          const removedKeys = state.auxScenarios
+            .map(getScenarioSourceKey)
+            .filter((key) => key && !nextKeys.has(key));
+          return {
+            auxScenarios: scenarios,
+            adjudicationEvents: removedKeys.length > 0
+              ? removeAdjudicationEventsForKeys(state.adjudicationEvents, removedKeys)
+              : state.adjudicationEvents,
+          };
+        }),
 
       addMaterial: (material) =>
         set((state) => {
@@ -283,6 +391,24 @@ export const useBattleStore = create<BattleStoreState>()(
       setMaterials: (materials) => set({ materials }),
 
       setAdjudicationEvents: (events) => set({ adjudicationEvents: events }),
+      appendAdjudicationEvents: (events, sourceKey) =>
+        set((state) => {
+          const normalizedSourceKey = normalizeSourceKey(sourceKey);
+          const nextEvents = Array.isArray(events) ? events : [];
+          if (nextEvents.length === 0) return state;
+          const withoutSameSource = normalizedSourceKey
+            ? filterAdjudicationEventsBySources(state.adjudicationEvents, [normalizedSourceKey])
+            : state.adjudicationEvents;
+          const markedEvents = normalizedSourceKey
+            ? nextEvents.map((event) => ({ ...event, sourceKey: normalizedSourceKey }))
+            : nextEvents;
+          return { adjudicationEvents: [...withoutSameSource, ...markedEvents] };
+        }),
+      removeAdjudicationEventsBySource: (sourceKey) =>
+        set((state) => ({
+          adjudicationEvents: applyAdjudicationEventSourceRemoval(state.adjudicationEvents, sourceKey),
+        })),
+      clearAdjudicationEvents: () => set({ adjudicationEvents: [] }),
       setAdjudicationResults: (results) => set({ adjudicationResults: results }),
 
       setNewsReport: (report) => set({ newsReport: report }),

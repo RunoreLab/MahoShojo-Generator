@@ -13,7 +13,15 @@ export function AdjudicatorPanel() {
   const useBattleSelector = <T,>(selector: (state: BattleStoreState) => T) => useBattleStore(selector);
   const adjudicationEvents = useBattleSelector((state) => state.adjudicationEvents);
   const setAdjudicationEvents = useBattleSelector((state) => state.setAdjudicationEvents);
+  const clearAdjudicationEvents = useBattleSelector((state) => state.clearAdjudicationEvents);
   const isGenerating = useBattleSelector((state) => state.isGenerating);
 
-  return <AdjudicatorSettingsPanel events={adjudicationEvents} onEventsChange={setAdjudicationEvents} disabled={isGenerating} />;
+  return (
+    <AdjudicatorSettingsPanel
+      events={adjudicationEvents}
+      onEventsChange={setAdjudicationEvents}
+      onClearEvents={clearAdjudicationEvents}
+      disabled={isGenerating}
+    />
+  );
 }
