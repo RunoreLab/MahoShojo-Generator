@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import DataCard from '../DataCard';
 import EditCardForm from './EditCardForm';
 import DataCardDetailsModal from '../DataCardDetailsModal';
@@ -495,7 +496,7 @@ export default function DataCardsModal({
 
   if (!isOpen) return null;
 
-  return (
+  const modal = (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-lg p-6 max-w-7xl w-full max-h-[90vh] overflow-hidden flex flex-col relative">
         <button
@@ -783,4 +784,9 @@ export default function DataCardsModal({
       )}
     </div>
   );
+
+  if (typeof document !== 'undefined') {
+    return createPortal(modal, document.body);
+  }
+  return modal;
 }
