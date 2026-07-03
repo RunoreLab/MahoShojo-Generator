@@ -3,7 +3,10 @@
   "name": "mahoshojo-next",
   "main": ".open-next/worker.js",
   "compatibility_date": "2024-09-23",
-  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "compatibility_flags": [
+    "nodejs_compat",
+    "global_fetch_strictly_public"
+  ],
   "assets": {
     "directory": ".open-next/assets",
     "binding": "ASSETS"
@@ -18,7 +21,7 @@
     {
       "binding": "DB",
       "database_name": "mahoshojo",
-      "database_id": "0175bc65-b160-49e4-b0d2-ef3f97827ea2",
+      "database_id": "8eb9b25c-5a00-4feb-b5cb-c5dd25cda1d3",
       "migrations_dir": "drizzle"
     }
   ],
@@ -26,7 +29,10 @@
     "production": {
       "name": "mahoshojo-next",
       "compatibility_date": "2024-09-23",
-      "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+      "compatibility_flags": [
+        "nodejs_compat",
+        "global_fetch_strictly_public"
+      ],
       "services": [
         {
           "binding": "WORKER_SELF_REFERENCE",
@@ -37,7 +43,7 @@
         {
           "binding": "DB",
           "database_name": "mahoshojo",
-          "database_id": "0175bc65-b160-49e4-b0d2-ef3f97827ea2",
+          "database_id": "8eb9b25c-5a00-4feb-b5cb-c5dd25cda1d3",
           "migrations_dir": "drizzle"
         }
       ]
@@ -45,7 +51,10 @@
     "preview": {
       "name": "mahoshojo-next-preview",
       "compatibility_date": "2024-09-23",
-      "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+      "compatibility_flags": [
+        "nodejs_compat",
+        "global_fetch_strictly_public"
+      ],
       "services": [
         {
           "binding": "WORKER_SELF_REFERENCE",
@@ -56,7 +65,7 @@
         {
           "binding": "DB",
           "database_name": "mahoshojo",
-          "database_id": "0175bc65-b160-49e4-b0d2-ef3f97827ea2",
+          "database_id": "8eb9b25c-5a00-4feb-b5cb-c5dd25cda1d3",
           "migrations_dir": "drizzle"
         }
       ]
