@@ -7,6 +7,10 @@
     "nodejs_compat",
     "global_fetch_strictly_public"
   ],
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 0.01
+  },
   "assets": {
     "directory": ".open-next/assets",
     "binding": "ASSETS"
@@ -33,6 +37,10 @@
         "nodejs_compat",
         "global_fetch_strictly_public"
       ],
+      "observability": {
+        "enabled": true,
+        "head_sampling_rate": 0.01
+      },
       "services": [
         {
           "binding": "WORKER_SELF_REFERENCE",
@@ -55,6 +63,10 @@
         "nodejs_compat",
         "global_fetch_strictly_public"
       ],
+      "observability": {
+        "enabled": true,
+        "head_sampling_rate": 1
+      },
       "services": [
         {
           "binding": "WORKER_SELF_REFERENCE",
