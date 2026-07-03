@@ -108,7 +108,7 @@ export function BetaAccessPage({ rawFeature = null }: BetaAccessPageProps) {
           <div className="absolute animate-float w-1 h-1 bg-purple-200 rounded-full opacity-80" style={{ top: '80%', left: '70%', animationDelay: '3s' }}></div>
         </div>
 
-        <div className="container mx-auto px-4 py-8 relative z-10" style={{ marginTop: '4rem' }}>
+        <div className="container mx-auto px-4 pb-8 pt-4 relative z-10">
           <div className="text-center text-purple-100 mb-2">权限审查结果</div>
           <div className="bg-gradient-to-r from-pink-600 via-purple-600 to-violet-600 border-2 border-pink-400 rounded-lg p-6 mb-6 text-center shadow-2xl relative overflow-hidden">
             <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white to-transparent opacity-10 animate-pulse"></div>

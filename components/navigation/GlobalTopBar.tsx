@@ -23,15 +23,14 @@ export function GlobalTopBar({ pathname, defaultMobileOpen = false }: GlobalTopB
   return (
     <>
       <header
-        className="sticky top-0 z-[var(--global-topbar-z-index)] border-b border-white/50 bg-white/75 shadow-sm backdrop-blur-xl dark:border-slate-700/60 dark:bg-slate-950/75"
-        style={{ minHeight: 'var(--global-topbar-height)' }}
+        className="global-topbar pointer-events-none fixed left-0 right-0 top-0 z-[var(--global-topbar-z-index)] bg-transparent px-3 py-3 sm:px-4 lg:px-6"
         data-active-group={activeGroupId ?? ''}
       >
-        <div className="mx-auto flex min-h-[var(--global-topbar-height)] w-full max-w-screen-2xl items-center gap-3 px-3 sm:px-4 lg:px-6">
+        <div className="global-topbar-panel pointer-events-auto mx-auto flex min-h-[var(--global-topbar-height)] w-full max-w-screen-2xl items-center gap-3 px-3 backdrop-blur-2xl backdrop-saturate-150 sm:px-4 lg:px-6">
           <Link
             href="/"
             aria-label="返回首页"
-            className="inline-flex min-w-0 items-center gap-2 rounded-full px-2 py-1.5 text-gray-900 transition hover:bg-white/70 dark:text-slate-100 dark:hover:bg-slate-900"
+            className="global-topbar-logo-link inline-flex min-w-0 items-center gap-2 rounded-full px-2 py-1.5 transition"
           >
             {logoLoadFailed ? null : (
               <img
@@ -69,7 +68,7 @@ export function GlobalTopBar({ pathname, defaultMobileOpen = false }: GlobalTopB
                     className={
                       active
                         ? 'h-9 rounded-full bg-pink-600 px-4 text-sm font-semibold text-white shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pink-200'
-                        : 'h-9 rounded-full px-4 text-sm font-semibold text-gray-700 transition hover:bg-white/75 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pink-200 dark:text-slate-100 dark:hover:bg-slate-900'
+                        : 'global-topbar-nav-trigger h-9 rounded-full px-4 text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pink-200'
                     }
                   >
                     {group.label}
@@ -78,14 +77,14 @@ export function GlobalTopBar({ pathname, defaultMobileOpen = false }: GlobalTopB
                     aria-label={`${group.label}导航`}
                     className="invisible absolute left-0 top-full z-[45] min-w-56 pt-2 opacity-0 transition group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100"
                   >
-                    <div className="rounded-2xl border border-white/60 bg-white/95 p-2 shadow-xl backdrop-blur dark:border-slate-600/60 dark:bg-slate-950/95">
+                    <div className="global-topbar-dropdown rounded-2xl p-2 shadow-xl backdrop-blur">
                       {group.items.map((item) => (
                         <Link
                           key={item.href}
                           href={item.href}
                           target={item.isExternal ? '_blank' : undefined}
                           rel={item.isExternal ? 'noopener noreferrer' : undefined}
-                          className="block rounded-xl px-3 py-2 text-sm text-gray-800 hover:bg-pink-50 dark:text-slate-100 dark:hover:bg-slate-800"
+                          className="global-topbar-dropdown-link block rounded-xl px-3 py-2 text-sm"
                         >
                           <span className="font-medium">{item.label}</span>
                           {item.description ? (
@@ -114,7 +113,7 @@ export function GlobalTopBar({ pathname, defaultMobileOpen = false }: GlobalTopB
                 aria-label="打开导航菜单"
                 aria-expanded={isMobileOpen}
                 onClick={() => setIsMobileOpen(true)}
-                className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/50 bg-white/70 text-gray-800 shadow-sm backdrop-blur dark:border-slate-600/60 dark:bg-slate-900/70 dark:text-slate-100"
+                className="global-topbar-mobile-button inline-flex h-9 w-9 items-center justify-center rounded-full shadow-sm backdrop-blur"
               >
                 <Menu className="h-5 w-5" aria-hidden="true" />
               </button>
@@ -122,6 +121,7 @@ export function GlobalTopBar({ pathname, defaultMobileOpen = false }: GlobalTopB
           </div>
         </div>
       </header>
+      <div className="h-[calc(var(--global-topbar-height)+24px)]" aria-hidden="true" />
 
       <TopBarMobileDrawer
         isOpen={isMobileOpen}

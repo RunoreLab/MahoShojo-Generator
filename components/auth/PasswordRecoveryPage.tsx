@@ -143,7 +143,7 @@ export function PasswordRecoveryPage({ resetToken = '' }: PasswordRecoveryPagePr
 
   return (
     <div className="magic-background-white min-h-screen">
-      <div className="container py-12">
+      <div className="container pb-12 pt-4">
         <div className="card max-w-lg mx-auto">
           <h1 className="text-2xl font-bold text-center mb-4">{isResetMode ? '设置新密码' : '找回密码'}</h1>
 

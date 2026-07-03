@@ -47,38 +47,33 @@ export function HomePage() {
               <ThemeImage lightSrc="/logo.svg" darkSrc="/logo-white.svg" width={280} height={180} alt="魔法少女生成器" />
             </div>
 
-            <div className="flex justify-center mb-4">
-              {loading ? (
-                <span className="text-sm text-gray-600">加载中...</span>
-              ) : isAuthenticated ? (
-                <div className="flex flex-col items-center gap-2">
-                  <Link
-                    href="/character-manager"
-                    className="inline-flex items-center px-4 py-2 text-sm bg-pink-100 text-pink-700 rounded-lg hover:bg-pink-200 transition-colors"
-                  >
-                    <span>欢迎回来，</span>
-                    <UserWithTitle
-                      username={user?.username || ''}
-                      usernameClassName="text-pink-700 font-semibold"
-                      titleClassName="text-xs"
-                      badges={userBadges}
-                      showBadges={true}
-                    />
-                    <span className="ml-2">点击进入档案馆</span>
-                  </Link>
-                  <Link href="/me" className="text-sm text-blue-600 hover:underline">
-                    个人页：战报记录 / PVP 战绩（测试版）
-                  </Link>
-                </div>
-              ) : (
-                <Link
-                  href="/character-manager"
-                  className="inline-flex items-center px-4 py-2 text-sm bg-pink-600 text-white rounded-lg hover:bg-pink-700 transition-colors"
-                >
-                  注册或登录
-                </Link>
-              )}
-            </div>
+            {(loading || isAuthenticated) && (
+              <div className="flex justify-center mb-4">
+                {loading ? (
+                  <span className="text-sm text-gray-600">加载中...</span>
+                ) : (
+                  <div className="flex flex-col items-center gap-2">
+                    <Link
+                      href="/character-manager"
+                      className="inline-flex items-center px-4 py-2 text-sm bg-pink-100 text-pink-700 rounded-lg hover:bg-pink-200 transition-colors"
+                    >
+                      <span>欢迎回来，</span>
+                      <UserWithTitle
+                        username={user?.username || ''}
+                        usernameClassName="text-pink-700 font-semibold"
+                        titleClassName="text-xs"
+                        badges={userBadges}
+                        showBadges={true}
+                      />
+                      <span className="ml-2">点击进入档案馆</span>
+                    </Link>
+                    <Link href="/me" className="text-sm text-blue-600 hover:underline">
+                      个人页：战报记录 / PVP 战绩（测试版）
+                    </Link>
+                  </div>
+                )}
+              </div>
+            )}
             <p className="subtitle text-center mb-4">
               欢迎来到魔法国度！选择一个项目开始玩耍吧！
             </p>

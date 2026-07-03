@@ -41,7 +41,7 @@ export function TachiePage() {
     );
   }
   return (
-    <div className="min-h-screen bg-gradient-to-br from-pink-100 via-purple-50 to-cyan-100 py-12">
+    <div className="min-h-screen bg-gradient-to-br from-pink-100 via-purple-50 to-cyan-100 pb-12 pt-4">
       <div className="container mx-auto px-4">
         <h1 className="text-3xl font-bold text-center mb-8 text-purple-800">
           立绘生成

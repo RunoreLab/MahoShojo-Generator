@@ -31,7 +31,9 @@ body {
 }
 
 body {
-  background: linear-gradient(135deg, #3b82f6 0%, #1e40af 100%);
+  background: var(--app-page-bg);
+  background-attachment: fixed;
+  background-size: cover;
   min-height: 100vh;
 }
 
@@ -45,11 +47,13 @@ body {
   }
 
   :root:not([data-color-mode]) .blue-theme .magic-background {
-    background: linear-gradient(135deg, #0b1220 0%, #1f2937 55%, #111827 100%);
+    background: var(--app-magic-bg);
   }
 
   :root:not([data-color-mode]) body {
-    background: linear-gradient(135deg, #0b1220 0%, #0f172a 55%, #111827 100%);
+    background: var(--app-page-bg);
+    background-attachment: fixed;
+    background-size: cover;
   }
 }
 
@@ -62,11 +66,13 @@ body {
 }
 
 :root[data-color-mode='dark'] .blue-theme .magic-background {
-  background: linear-gradient(135deg, #0b1220 0%, #1f2937 55%, #111827 100%);
+  background: var(--app-magic-bg);
 }
 
 :root[data-color-mode='dark'] body {
-  background: linear-gradient(135deg, #0b1220 0%, #0f172a 55%, #111827 100%);
+  background: var(--app-page-bg);
+  background-attachment: fixed;
+  background-size: cover;
 }
 
 .container {
@@ -82,7 +88,6 @@ body {
   border-radius: 20px;
   padding: 30px;
   box-shadow: var(--app-card-shadow);
-  margin-top: 100px;
   backdrop-filter: blur(10px);
   border: 1px solid var(--app-border);
   max-width: 500px;
@@ -92,7 +97,9 @@ body {
 @layer components {
   /* 蓝色主题样式 - 只在 .blue-theme 容器内生效 */
   .blue-theme .magic-background {
-    background: linear-gradient(45deg, #4f46e5 0%, #7c3aed 50%, #3b82f6 100%);
+    background: var(--app-magic-bg);
+    background-attachment: fixed;
+    background-size: cover;
     min-height: 100vh;
     position: relative;
     overflow: hidden;

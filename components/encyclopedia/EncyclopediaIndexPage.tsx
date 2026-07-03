@@ -102,7 +102,7 @@ export function EncyclopediaIndexPage({
   return (
     <>
       <div className="magic-background-white">
-        <div className="mx-auto w-full max-w-6xl px-4 py-10 sm:px-6 lg:px-10">
+        <div className="mx-auto w-full max-w-6xl px-4 pb-10 pt-4 sm:px-6 lg:px-10">
           <div className="rounded-2xl bg-white/95 shadow-[0_20px_40px_rgba(0,0,0,0.10)] ring-1 ring-white/50 backdrop-blur">
             <header className="flex flex-wrap items-center justify-between gap-4 border-b border-gray-100 px-6 py-5 sm:px-8">
               <div>

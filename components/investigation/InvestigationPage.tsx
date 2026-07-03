@@ -266,7 +266,7 @@ export function InvestigationPage({
     (!state.currentCase || isCompletedCurrentCase(state.currentCase));
 
   return (
-    <main className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(251,191,36,0.16),_transparent_34%),linear-gradient(180deg,_#fffbeb_0%,_#fff7ed_34%,_#f8fafc_100%)] px-4 py-8 text-gray-900 dark:bg-[radial-gradient(circle_at_top,_rgba(245,158,11,0.12),_transparent_30%),linear-gradient(180deg,_#020617_0%,_#111827_48%,_#0f172a_100%)] dark:text-slate-100 sm:px-6 lg:px-8">
+    <main className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(251,191,36,0.16),_transparent_34%),linear-gradient(180deg,_#fffbeb_0%,_#fff7ed_34%,_#f8fafc_100%)] px-4 pb-8 pt-4 text-gray-900 dark:bg-[radial-gradient(circle_at_top,_rgba(245,158,11,0.12),_transparent_30%),linear-gradient(180deg,_#020617_0%,_#111827_48%,_#0f172a_100%)] dark:text-slate-100 sm:px-6 lg:px-8">
       <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
         <section className="rounded-[32px] border border-white/70 bg-white/85 p-6 shadow-xl backdrop-blur dark:border-slate-700/70 dark:bg-slate-950/75">
           <p className="text-sm font-semibold uppercase tracking-[0.24em] text-amber-600 dark:text-amber-200">
