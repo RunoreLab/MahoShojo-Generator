@@ -2,14 +2,27 @@
   "schemaVersion": 1,
   "seasons": [
     {
+      "id": "S3",
+      "name": "八角笼赛季",
+      "startsAt": "2026-07-03",
+      "status": "current",
+      "description": "八角笼赛季（S3）开启！本赛季特殊规则：指定情景模式，仅使用预设情景 拳愿八角笼：原始搏斗竞技（S04_kengan_gold_tournament_v3.json）。",
+      "specialRules": {
+        "mode": "scenario",
+        "scenarioPresetFilename": "S04_kengan_gold_tournament_v3.json"
+      }
+    },
+    {
       "id": "S2",
       "name": "闪耀赛季",
       "startsAt": "2026-04-01",
-      "status": "current",
+      "endsAt": "2026-07-03",
+      "status": "history",
       "description": "闪耀赛季（S2）开启。本赛季严格排位采用「羁绊」故事模式，不附加其他赛季特殊规则。",
       "specialRules": {
         "mode": "kizuna"
-      }
+      },
+      "archivedAt": "2026-07-03T04:11:22.429Z"
     },
     {
       "id": "S1",
