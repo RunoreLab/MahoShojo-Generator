@@ -6,7 +6,7 @@
       "name": "八角笼赛季",
       "startsAt": "2026-07-03",
       "status": "current",
-      "description": "八角笼赛季（S3）开启！本赛季特殊规则：指定情景模式，仅使用预设情景 拳愿八角笼：原始搏斗竞技（S04_kengan_gold_tournament_v3.json）。",
+      "description": "八角笼赛季（S3）开启！本赛季特殊规则：采用「羁绊」故事模式，仅使用预设情景 拳愿八角笼：原始搏斗竞技。",
       "specialRules": {
         "mode": "scenario",
         "scenarioPresetFilename": "S04_kengan_gold_tournament_v3.json"

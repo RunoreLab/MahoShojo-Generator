@@ -17,8 +17,8 @@
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "ifmahoushoujo",
-      "database_id": "8eb9b25c-5a00-4feb-b5cb-c5dd25cda1d3",
+      "database_name": "mahoshojo",
+      "database_id": "0175bc65-b160-49e4-b0d2-ef3f97827ea2",
       "migrations_dir": "drizzle"
     }
   ],
@@ -36,8 +36,8 @@
       "d1_databases": [
         {
           "binding": "DB",
-          "database_name": "ifmahoushoujo",
-          "database_id": "8eb9b25c-5a00-4feb-b5cb-c5dd25cda1d3",
+          "database_name": "mahoshojo",
+          "database_id": "0175bc65-b160-49e4-b0d2-ef3f97827ea2",
           "migrations_dir": "drizzle"
         }
       ]
@@ -55,8 +55,8 @@
       "d1_databases": [
         {
           "binding": "DB",
-          "database_name": "ifmahoushoujo",
-          "database_id": "8eb9b25c-5a00-4feb-b5cb-c5dd25cda1d3",
+          "database_name": "mahoshojo",
+          "database_id": "0175bc65-b160-49e4-b0d2-ef3f97827ea2",
           "migrations_dir": "drizzle"
         }
       ]
