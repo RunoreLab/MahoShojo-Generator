@@ -14,6 +14,8 @@ jobs:
   deploy:
     name: Build and deploy
     runs-on: ubuntu-latest
+    environment:
+      name: ${{ github.ref == 'refs/heads/feature/v0.2.0_Battle_Growth_MahoShojo' && 'production' || 'preview' }}
     permissions:
       contents: read
       deployments: write
