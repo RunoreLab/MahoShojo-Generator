@@ -2,7 +2,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { Menu, Sparkles } from 'lucide-react';
 
-import { getTopbarCoverage, NAV_GROUPS } from '@/lib/navigation';
+import { getTopbarCoverage, NAV_GROUPS, type NavGroupId } from '@/lib/navigation';
 import { useAuth } from '@/lib/useAuth';
 import { TopBarMessageButton } from '@/components/navigation/TopBarMessageButton';
 import { TopBarMobileDrawer } from '@/components/navigation/TopBarMobileDrawer';
@@ -16,6 +16,7 @@ interface GlobalTopBarProps {
 
 export function GlobalTopBar({ pathname, defaultMobileOpen = false }: GlobalTopBarProps) {
   const [isMobileOpen, setIsMobileOpen] = useState(defaultMobileOpen);
+  const [openGroupId, setOpenGroupId] = useState<NavGroupId | null>(null);
   const [logoLoadFailed, setLogoLoadFailed] = useState(false);
   const { activeGroupId } = getTopbarCoverage(pathname);
   const { isAuthenticated, user } = useAuth();
@@ -57,14 +58,30 @@ export function GlobalTopBar({ pathname, defaultMobileOpen = false }: GlobalTopB
             </span>
           </Link>
 
-          <nav className="hidden items-center gap-1 md:flex" aria-label="全站主导航">
+          <nav
+            className="hidden items-center gap-1 md:flex"
+            aria-label="全站主导航"
+            onMouseLeave={() => setOpenGroupId(null)}
+            onBlur={(event) => {
+              if (!event.currentTarget.contains(event.relatedTarget)) {
+                setOpenGroupId(null);
+              }
+            }}
+          >
             {NAV_GROUPS.map((group) => {
               const active = activeGroupId === group.id;
+              const isOpen = openGroupId === group.id;
 
               return (
-                <div key={group.id} className="group relative">
+                <div
+                  key={group.id}
+                  className="relative"
+                  onMouseEnter={() => setOpenGroupId(group.id)}
+                  onFocus={() => setOpenGroupId(group.id)}
+                >
                   <button
                     type="button"
+                    aria-expanded={isOpen}
                     className={
                       active
                         ? 'h-9 rounded-full bg-pink-600 px-4 text-sm font-semibold text-white shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pink-200'
@@ -75,7 +92,9 @@ export function GlobalTopBar({ pathname, defaultMobileOpen = false }: GlobalTopB
                   </button>
                   <div
                     aria-label={`${group.label}导航`}
-                    className="invisible absolute left-0 top-full z-[45] min-w-56 pt-2 opacity-0 transition group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100"
+                    className={`${
+                      isOpen ? 'visible opacity-100' : 'invisible opacity-0'
+                    } absolute left-0 top-full z-[45] min-w-56 pt-2 transition`}
                   >
                     <div className="global-topbar-dropdown rounded-2xl p-2 shadow-xl backdrop-blur">
                       {group.items.map((item) => (
@@ -84,6 +103,7 @@ export function GlobalTopBar({ pathname, defaultMobileOpen = false }: GlobalTopB
                           href={item.href}
                           target={item.isExternal ? '_blank' : undefined}
                           rel={item.isExternal ? 'noopener noreferrer' : undefined}
+                          onClick={() => setOpenGroupId(null)}
                           className="global-topbar-dropdown-link block rounded-xl px-3 py-2 text-sm"
                         >
                           <span className="font-medium">{item.label}</span>
