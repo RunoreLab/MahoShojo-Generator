@@ -51,6 +51,14 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Build Cloudflare bundle
+        env:
+          # NEXT_PUBLIC_* 变量在构建时被内联进客户端产物，必须在此步骤显式注入。
+          # site key 为敏感凭据走 secrets；其余为公开配置走 environment variables。
+          NEXT_PUBLIC_TURNSTILE_SITE_KEY: ${{ secrets.NEXT_PUBLIC_TURNSTILE_SITE_KEY }}
+          NEXT_PUBLIC_AI_SAFETY_PROMPT_LEVEL: ${{ vars.NEXT_PUBLIC_AI_SAFETY_PROMPT_LEVEL }}
+          NEXT_PUBLIC_ENABLE_BUNDLE_SAFETY_CHECK: ${{ vars.NEXT_PUBLIC_ENABLE_BUNDLE_SAFETY_CHECK }}
+          NEXT_PUBLIC_GA_ID: ${{ vars.NEXT_PUBLIC_GA_ID }}
+          NEXT_PUBLIC_SAFETY_CHECK_POLICY: ${{ vars.NEXT_PUBLIC_SAFETY_CHECK_POLICY }}
         run: pnpm run build:cf
 
       - name: Deploy production
