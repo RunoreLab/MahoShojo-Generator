@@ -8,6 +8,7 @@ import { TopBarMessageButton } from '@/components/navigation/TopBarMessageButton
 import { TopBarMobileDrawer } from '@/components/navigation/TopBarMobileDrawer';
 import { TopBarThemeMenu } from '@/components/navigation/TopBarThemeMenu';
 import { TopBarUserMenu } from '@/components/navigation/TopBarUserMenu';
+import AuthModal from '@/components/CharManager/AuthModal';
 
 interface GlobalTopBarProps {
   pathname: string;
@@ -18,13 +19,51 @@ export function GlobalTopBar({ pathname, defaultMobileOpen = false }: GlobalTopB
   const [isMobileOpen, setIsMobileOpen] = useState(defaultMobileOpen);
   const [openGroupId, setOpenGroupId] = useState<NavGroupId | null>(null);
   const [logoLoadFailed, setLogoLoadFailed] = useState(false);
+  const [showAuthModal, setShowAuthModal] = useState(false);
+  const [authMessage, setAuthMessage] = useState<{ type: 'error' | 'success'; text: string } | null>(null);
   const { activeGroupId } = getTopbarCoverage(pathname);
-  const { isAuthenticated, user } = useAuth();
+  const { isAuthenticated, user, login, register } = useAuth();
+
+  const handleRegister = async (
+    username: string,
+    email: string,
+    turnstileToken: string,
+    password: string,
+  ) => {
+    setAuthMessage(null);
+    const result = await register(username, email, turnstileToken, password);
+    if (!result.success) {
+      setAuthMessage({ type: 'error', text: result.error || '注册失败' });
+      return;
+    }
+    setShowAuthModal(false);
+  };
+
+  const handleLogin = async (
+    identifier: string,
+    credential: string,
+    turnstileToken: string,
+    mode: 'password' | 'legacy',
+  ) => {
+    setAuthMessage(null);
+    const result = await login(identifier, credential, turnstileToken, mode);
+    if (result.success) {
+      setShowAuthModal(false);
+    } else {
+      setAuthMessage({ type: 'error', text: result.error || '登录失败' });
+    }
+    return result;
+  };
+
+  const openAuthModal = () => {
+    setAuthMessage(null);
+    setShowAuthModal(true);
+  };
 
   return (
     <>
       <header
-        className="global-topbar pointer-events-none fixed left-0 right-0 top-0 z-[var(--global-topbar-z-index)] bg-transparent px-3 py-3 sm:px-4 lg:px-6"
+        className="global-topbar pointer-events-none relative z-[var(--global-topbar-z-index)] bg-transparent px-3 py-3 sm:px-4 lg:px-6"
         data-active-group={activeGroupId ?? ''}
       >
         <div className="global-topbar-panel pointer-events-auto mx-auto flex min-h-[var(--global-topbar-height)] w-full max-w-screen-2xl items-center gap-3 px-3 backdrop-blur-2xl backdrop-saturate-150 sm:px-4 lg:px-6">
@@ -125,7 +164,7 @@ export function GlobalTopBar({ pathname, defaultMobileOpen = false }: GlobalTopB
             <TopBarThemeMenu />
             <TopBarMessageButton isAuthenticated={isAuthenticated} userId={user?.id ?? null} />
             <div className="hidden items-center gap-2 md:flex">
-              <TopBarUserMenu />
+              <TopBarUserMenu onRequestAuth={openAuthModal} />
             </div>
             <div className="flex items-center gap-2 md:hidden">
               <button
@@ -141,12 +180,23 @@ export function GlobalTopBar({ pathname, defaultMobileOpen = false }: GlobalTopB
           </div>
         </div>
       </header>
-      <div className="h-[calc(var(--global-topbar-height)+24px)]" aria-hidden="true" />
 
       <TopBarMobileDrawer
         isOpen={isMobileOpen}
         activeGroupId={activeGroupId}
         onClose={() => setIsMobileOpen(false)}
+        onRequestAuth={openAuthModal}
+      />
+
+      <AuthModal
+        isOpen={showAuthModal}
+        onClose={() => {
+          setShowAuthModal(false);
+          setAuthMessage(null);
+        }}
+        onLogin={handleLogin}
+        onRegister={handleRegister}
+        authMessage={authMessage}
       />
     </>
   );
