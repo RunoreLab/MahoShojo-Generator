@@ -129,7 +129,7 @@ export const FIELD_TRANSLATIONS: Record<string, string> = {
   'fightingStyle': '战斗方式',
   'battleStrategy': '战斗策略',
   'specialMoves': '必杀技',
-  'ultimateAttack': '终极技能',
+  'ultimateAttack': '终结技',
   'weaknesses': '弱点',
   'strengths': '优势',
   'resistances': '抗性',

@@ -85,3 +85,26 @@ export interface ArenaMaterialCandidateOptions {
 export type ArenaMaterialCandidateResult =
   | { success: true; data: WantuArenaMaterialCandidate; warnings: string[] }
   | { success: false; error: string; issues: string[] };
+
+export interface WantuDataCard {
+  format: 'wantu-data-card';
+  formatVersion: number;
+  exportedAt: string;
+  app: { id: string; name: string };
+  card: {
+    schemaVersion: number;
+    id: string;
+    cardType: { genreId: string; categoryId: string; typeId: string };
+    name: string;
+    domains: Record<string, { kind: string; status: string; value: unknown }>;
+    meta: Record<string, unknown>;
+  };
+  assets?: Array<{
+    digest: string;
+    domainKey: string;
+    fileName: string;
+    mimeType: string;
+    byteSize: number;
+    dataBase64: string;
+  }>;
+}

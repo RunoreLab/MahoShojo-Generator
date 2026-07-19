@@ -6,6 +6,7 @@ import {
   parseWantuCard,
   toWantuCharacterCard,
 } from './adapter';
+import { isWantuDataCard, convertWantuDataCardToGeneralCharacter } from './wantu-data-card';
 import type {
   FromWantuCharacterCardOptions,
   MahoshojoRoundTripSource,
@@ -59,6 +60,30 @@ export function resolveWantuCharacterImport(
   input: unknown,
   options: FromWantuCharacterCardOptions = {},
 ): WantuCharacterImportResolution {
+  if (isWantuDataCard(input)) {
+    const converted = convertWantuDataCardToGeneralCharacter(input);
+    if (!converted) {
+      return {
+        kind: 'error',
+        error: '万途AI数据卡转换失败：缺少必要的名称或内容字段。',
+        issues: ['card.name or domains content missing'],
+      };
+    }
+    const data = cloneRecord(converted);
+    const selectedTemplate = inferTemplate(data);
+    const validationResult = validateDataCard(data);
+    const displayName = typeof input.card.name === 'string' ? input.card.name : '未知角色';
+    return {
+      kind: 'success',
+      data,
+      restored: false,
+      warnings: ['检测到万途AI数据卡格式，已自动转换为通用角色。'],
+      selectedTemplate,
+      validationResult,
+      message: `成功导入万途AI数据卡为通用角色：${displayName}`,
+    };
+  }
+
   if (!hasWantuCardMarker(input)) {
     return { kind: 'not-wantu' };
   }
