@@ -1,9 +1,20 @@
-import { createStreamReadWithTimeout, STREAM_READ_IDLE_TIMEOUT_MS, STREAM_READ_TOTAL_TIMEOUT_MS } from '@/lib/stream/timeout';
+import {
+  createStreamReadWithTimeout,
+  STREAM_READ_IDLE_TIMEOUT_MS,
+  STREAM_READ_TOTAL_TIMEOUT_MS,
+  type StreamReadTimeoutMode,
+  type StreamSoftTimeoutEvent,
+} from '@/lib/stream/timeout';
 
 export type ReadTextStreamFromResponseOptions = {
   label?: string;
   idleTimeoutMs?: number;
   totalTimeoutMs?: number;
+  /**
+   * hard（默认）：超时切断；soft：仅回调提示，继续等待。
+   */
+  timeoutMode?: StreamReadTimeoutMode;
+  onSoftTimeout?: (event: StreamSoftTimeoutEvent) => void;
   onText?: (text: string) => void;
 };
 
@@ -18,9 +29,11 @@ export async function readTextStreamFromResponse(
 
   const decoder = new TextDecoder();
   let accumulatedText = '';
+  const timeoutMode: StreamReadTimeoutMode = options.timeoutMode === 'soft' ? 'soft' : 'hard';
 
     const readWithTimeout = createStreamReadWithTimeout({
       label: options.label,
+      mode: timeoutMode,
       idleTimeoutMs: options.idleTimeoutMs ?? STREAM_READ_IDLE_TIMEOUT_MS,
       totalTimeoutMs: options.totalTimeoutMs ?? STREAM_READ_TOTAL_TIMEOUT_MS,
       onTimeout: () => {
@@ -29,6 +42,9 @@ export async function readTextStreamFromResponse(
         } catch {
           // ignore
         }
+      },
+      onSoftTimeout: (event) => {
+        options.onSoftTimeout?.(event);
       },
     });
 

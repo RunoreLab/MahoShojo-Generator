@@ -189,6 +189,11 @@ export interface BattleStoreState {
   streamNarrativeHistoryReadCount: number | null;
   streamReasoning: AIReasoningEnvelope | null;
   streamUpdateMetaDebug: StreamUpdateMetaDebug | null;
+  /**
+   * 流式生成软超时提示（仅提示、不切断）。
+   * 例如：已超过 600 秒仍未结束生成。
+   */
+  streamSoftTimeoutWarning: string | null;
   latestAiImpacts: BattleAiImpact[] | null;
   storyLength: StoryLengthOption;
   customStoryLength: string;
@@ -221,6 +226,7 @@ export interface BattleStoreState {
   setStreamNarrativeHistoryReadCount: (count: number | null) => void;
   setStreamReasoning: (reasoning: AIReasoningEnvelope | null) => void;
   setStreamUpdateMetaDebug: (debug: StreamUpdateMetaDebug | null) => void;
+  setStreamSoftTimeoutWarning: (warning: string | null) => void;
   setLatestAiImpacts: (impacts: BattleAiImpact[] | null) => void;
   setStoryLength: (length: StoryLengthOption) => void;
   setCustomStoryLength: (length: string) => void;

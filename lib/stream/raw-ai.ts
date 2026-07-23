@@ -7,7 +7,12 @@ import { getLogger } from "../logger";
 import { getProviderFetch } from "@/lib/ai/middleware/provider-fetch";
 import { resolveMaxOutputTokensOption } from "@/lib/ai/max-output-tokens";
 import { extractUpstreamErrorMessage, enhanceErrorWithUpstreamMessage } from "@/lib/ai/utils/error-extraction";
-import { createStreamReadWithTimeout, STREAM_READ_IDLE_TIMEOUT_MS, STREAM_READ_TOTAL_TIMEOUT_MS } from "@/lib/stream/timeout";
+import {
+    createStreamReadWithTimeout,
+    STREAM_READ_IDLE_TIMEOUT_MS,
+    STREAM_READ_TOTAL_TIMEOUT_MS,
+    type StreamReadTimeoutMode,
+} from "@/lib/stream/timeout";
 
 // 延迟函数
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -154,6 +159,11 @@ export interface GenerateWithAIOptions {
     loadBalanceStrategy?: LoadBalanceStrategy;
     providerOverride?: AIProvider;
     abortSignal?: AbortSignal;
+    /**
+     * 上游 fullStream 读超时策略。
+     * hard（默认）：超时切断；soft：仅日志提示，继续等待（用于战报长生成）。
+     */
+    streamReadTimeoutMode?: StreamReadTimeoutMode;
     telemetry?: {
         providerName?: string;
         providerType?: AIProvider['type'];
@@ -367,8 +377,11 @@ export async function generateWithStreamAI(
 
 	                // 预检流：仅做“连接可用”探测，避免等待正文首字导致流式首屏阻塞。
 	                const reader = result.fullStream.getReader();
+                const streamReadTimeoutMode: StreamReadTimeoutMode =
+                    options?.streamReadTimeoutMode === 'soft' ? 'soft' : 'hard';
                 const readWithTimeout = createStreamReadWithTimeout({
                     label: `上游流式(${provider.name}/${selectedModel})`,
+                    mode: streamReadTimeoutMode,
                     idleTimeoutMs: STREAM_READ_IDLE_TIMEOUT_MS,
                     totalTimeoutMs: STREAM_READ_TOTAL_TIMEOUT_MS,
                     onTimeout: () => {
@@ -377,6 +390,15 @@ export async function generateWithStreamAI(
                         } catch {
                             // ignore
                         }
+                    },
+                    onSoftTimeout: (event) => {
+                        log.warn('上游 fullStream 软超时（仅提示，不切断）', {
+                            kind: event.kind,
+                            timeoutMs: event.timeoutMs,
+                            elapsedMs: event.elapsedMs,
+                            provider: provider.name,
+                            model: selectedModel,
+                        });
                     },
 	                });
 	                const prefetchedChunks: RawUnifiedStreamChunk[] = [];

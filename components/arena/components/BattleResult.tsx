@@ -39,6 +39,7 @@ export function BattleResult({ onSaveImage }: BattleResultProps) {
   const streamNarrativeHistoryReadCount = useBattleSelector((state) => state.streamNarrativeHistoryReadCount);
   const streamReasoning = useBattleSelector((state) => state.streamReasoning);
   const streamUpdateMetaDebug = useBattleSelector((state) => state.streamUpdateMetaDebug);
+  const streamSoftTimeoutWarning = useBattleSelector((state) => state.streamSoftTimeoutWarning);
   const isGenerating = useBattleSelector((state) => state.isGenerating);
   const combatants = useBattleSelector((state) => state.combatants);
   const updatedCombatants = useBattleSelector((state) => state.updatedCombatants);
@@ -208,6 +209,7 @@ export function BattleResult({ onSaveImage }: BattleResultProps) {
               narrativeHistoryReadCount={streamNarrativeHistoryReadCount}
               aiReasoning={streamReasoning}
               isStreaming={isGenerating}
+              softTimeoutWarning={streamSoftTimeoutWarning}
               onStopGeneration={stopGeneration}
               illustrationAsset={illustrationAsset}
               cardWidthPx={battleReportCardWidthPx}

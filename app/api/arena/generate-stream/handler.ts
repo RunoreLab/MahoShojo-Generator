@@ -710,6 +710,8 @@ async function handler(req: NextRequest): Promise<Response> {
         const aiOptions: GenerateWithAIOptions = {
             ...(providerOptions ?? {}),
             abortSignal: req.signal,
+            // 战报可能长思考/长生成超过 600s：上游读流改为 soft，避免误杀。
+            streamReadTimeoutMode: 'soft',
             telemetry: aiTelemetry,
             ...(wantsSse
                 ? {
@@ -1076,17 +1078,20 @@ async function handler(req: NextRequest): Promise<Response> {
             });
 
             const reader = clientUpstream.getReader();
+            // 战报生成：超时仅记录日志，不主动切断上游（长思考/长生成可能超过 600s）。
             const readWithTimeout = createStreamReadWithTimeout({
                 label: 'api/arena/generate-stream SSE 上游读取',
+                mode: 'soft',
                 idleTimeoutMs: STREAM_READ_IDLE_TIMEOUT_MS,
                 totalTimeoutMs: STREAM_READ_TOTAL_TIMEOUT_MS,
                 getLastActivityAtMs: () => lastReasoningActivityAtMs,
-                onTimeout: () => {
-                    try {
-                        void reader.cancel('timeout').catch(() => {});
-                    } catch {
-                        // ignore
-                    }
+                onSoftTimeout: (event) => {
+                    log.warn('上游读流软超时（仅提示，不切断）', {
+                        kind: event.kind,
+                        timeoutMs: event.timeoutMs,
+                        elapsedMs: event.elapsedMs,
+                        generationId,
+                    });
                 },
             });
 
@@ -1517,16 +1522,19 @@ async function handler(req: NextRequest): Promise<Response> {
         }
 
         const reader = originalBody.getReader();
+        // 战报生成：超时仅记录日志，不主动切断上游（长思考/长生成可能超过 600s）。
         const readWithTimeout = createStreamReadWithTimeout({
             label: 'api/arena/generate-stream 上游读取',
+            mode: 'soft',
             idleTimeoutMs: STREAM_READ_IDLE_TIMEOUT_MS,
             totalTimeoutMs: STREAM_READ_TOTAL_TIMEOUT_MS,
-            onTimeout: () => {
-                try {
-                    void reader.cancel('timeout').catch(() => {});
-                } catch {
-                    // ignore
-                }
+            onSoftTimeout: (event) => {
+                log.warn('上游读流软超时（仅提示，不切断）', {
+                    kind: event.kind,
+                    timeoutMs: event.timeoutMs,
+                    elapsedMs: event.elapsedMs,
+                    generationId,
+                });
             },
         });
         const wrappedBody = new ReadableStream<Uint8Array>({

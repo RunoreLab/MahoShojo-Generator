@@ -175,6 +175,7 @@ export function BattleStorySessionPanel(props: {
     isGenerating,
     generatingAction,
     streamingMarkdown,
+    streamSoftTimeoutWarning,
     streamCardSnapshot,
     streamChapterIndex,
     isRefreshingSummary,
@@ -465,6 +466,14 @@ export function BattleStorySessionPanel(props: {
               />
             ) : null}
           </div>
+          {isGenerating && streamSoftTimeoutWarning ? (
+            <div
+              className="mt-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900"
+              role="status"
+            >
+              ⚠️ {streamSoftTimeoutWarning}
+            </div>
+          ) : null}
           <ProviderCooldownNotice
             currentMode={providerCooldownMode}
             currentIsCooldown={isCooldown}
@@ -691,6 +700,7 @@ export function BattleStorySessionPanel(props: {
                     narrativeHistoryReadCount={streamCardSnapshot?.narrativeHistoryReadCount ?? null}
                     aiReasoning={streamCardSnapshot?.aiReasoning ?? null}
                     isStreaming
+                    softTimeoutWarning={streamSoftTimeoutWarning}
                     onStopGeneration={stopGeneration}
                     cardWidthPx={battleReportCardWidthPx}
                   />

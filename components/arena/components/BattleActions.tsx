@@ -93,6 +93,7 @@ export function BattleActions({ showAdvancedUtilities = true }: { showAdvancedUt
     remainingTime,
     providerCooldownMode,
     otherRemainingTime,
+    streamSoftTimeoutWarning,
   } = useBattleEngine();
   const useBattleSelector = <T,>(selector: (state: BattleStoreState) => T) => useBattleStore(selector);
   const combatants = useBattleSelector((state) => state.combatants);
@@ -253,6 +254,14 @@ export function BattleActions({ showAdvancedUtilities = true }: { showAdvancedUt
           />
         ) : null}
       </div>
+      {isGenerating && generationMode === 'stream' && streamSoftTimeoutWarning ? (
+        <div
+          className="mt-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-center text-xs text-amber-900"
+          role="status"
+        >
+          ⚠️ {streamSoftTimeoutWarning}
+        </div>
+      ) : null}
       <ProviderCooldownNotice
         currentMode={providerCooldownMode}
         currentIsCooldown={isCooldown}

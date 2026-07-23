@@ -18,6 +18,7 @@ import { toBattleReportMarkdown } from '../utils/battleReportMarkdown';
 import { precheckBattleReportForRedo } from '@/lib/arena/redo-updates';
 import { extractStreamTelemetryMeta, extractStreamUpdateMeta, stripStreamUpdateMetaComment } from '@/lib/arena/stream-meta';
 import {
+  buildStreamSoftTimeoutMessage,
   createStreamReadWithTimeout,
   STREAM_READ_IDLE_TIMEOUT_MS,
   STREAM_READ_TOTAL_TIMEOUT_MS,
@@ -431,10 +432,12 @@ export const useBattleEngine = () => {
   const setStreamNarrativeHistoryReadCount = useBattleSelector((state) => state.setStreamNarrativeHistoryReadCount);
   const setStreamReasoning = useBattleSelector((state) => state.setStreamReasoning);
   const setStreamUpdateMetaDebug = useBattleSelector((state) => state.setStreamUpdateMetaDebug);
+  const setStreamSoftTimeoutWarning = useBattleSelector((state) => state.setStreamSoftTimeoutWarning);
   const setLatestAiImpacts = useBattleSelector((state) => state.setLatestAiImpacts);
   const setLastGenerationId = useBattleSelector((state) => state.setLastGenerationId);
   const setCombatants = useBattleSelector((state) => state.setCombatants);
   const isGenerating = useBattleSelector((state) => state.isGenerating);
+  const streamSoftTimeoutWarning = useBattleSelector((state) => state.streamSoftTimeoutWarning);
   const isRedoingUpdates = useBattleSelector((state) => state.isRedoingUpdates);
   const { handleResolveRandomPlaceholders } = useBattleActions();
 
@@ -512,6 +515,7 @@ export const useBattleEngine = () => {
     setStreamNarrativeHistoryReadCount(null);
     setStreamReasoning(null);
     setStreamUpdateMetaDebug(null);
+    setStreamSoftTimeoutWarning(null);
     setLatestAiImpacts(null);
     setLastGenerationId(null);
 
@@ -896,28 +900,18 @@ export const useBattleEngine = () => {
           };
 	          const readWithTimeout = createStreamReadWithTimeout({
 	            label: '战报流式生成',
+	            mode: 'soft',
 	            idleTimeoutMs: STREAM_READ_IDLE_TIMEOUT_MS,
 	            totalTimeoutMs: STREAM_READ_TOTAL_TIMEOUT_MS,
-	            onTimeout: (timeoutError) => {
+	            onSoftTimeout: (event) => {
 	              if (debugSseEnabled) {
-	                console.warn('SSE 调试：读流超时', {
-	                  kind: (timeoutError as any)?.kind ?? null,
-	                  timeoutMs: (timeoutError as any)?.timeoutMs ?? null,
-	                  message: timeoutError instanceof Error ? timeoutError.message : String(timeoutError ?? 'timeout'),
+	                console.warn('SSE 调试：读流软超时（仅提示，不切断）', {
+	                  kind: event.kind,
+	                  timeoutMs: event.timeoutMs,
+	                  elapsedMs: event.elapsedMs,
 	                });
 	              }
-	              try {
-	                abortController.abort();
-	              } catch {
-	                // ignore
-	              }
-	              if (reader) {
-	                try {
-	                  void reader.cancel('timeout').catch(() => {});
-	                } catch {
-	                  // ignore
-	                }
-	              }
+	              setStreamSoftTimeoutWarning(buildStreamSoftTimeoutMessage(event));
 	            },
 	          });
           const streamBackupItems = buildBattleBackupItems(
@@ -1596,6 +1590,7 @@ export const useBattleEngine = () => {
         sharedGenerationAbortController = null;
 	      setIsGenerating(false);
 	      setIsStreaming(false);
+	      setStreamSoftTimeoutWarning(null);
 	    }
   }, [
     isCooldown,
@@ -1630,6 +1625,7 @@ export const useBattleEngine = () => {
 	    setStreamNarrativeHistoryReadCount,
       setStreamReasoning,
       setStreamUpdateMetaDebug,
+      setStreamSoftTimeoutWarning,
       setLatestAiImpacts,
       setLastGenerationId,
 		    setCombatants,
@@ -1869,5 +1865,6 @@ export const useBattleEngine = () => {
     remainingTime,
     providerCooldownMode,
     otherRemainingTime,
+    streamSoftTimeoutWarning,
   };
 };
