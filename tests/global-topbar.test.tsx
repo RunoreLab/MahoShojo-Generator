@@ -95,12 +95,13 @@ describe('topbar leaf components', () => {
     expect(html).toContain('深色');
   });
 
-  test('logged out user menu points to character manager login entry', async () => {
+  test('logged out user menu renders auth button and triggers onRequestAuth', async () => {
     const { TopBarUserMenu } = await import('@/components/navigation/TopBarUserMenu');
     const html = renderToStaticMarkup(<TopBarUserMenu />);
 
     expect(html).toContain('登录 / 注册');
-    expect(html).toContain('href="/character-manager"');
+    expect(html).toContain('<button');
+    expect(html).not.toContain('href="/character-manager"');
   });
 
   test('logged in user menu renders user actions', async () => {
