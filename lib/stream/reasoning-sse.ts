@@ -1,3 +1,4 @@
+import { getRequestUrl } from '@/lib/request-url';
 import { normalizeUsage } from '@/lib/arena/battle-report-log-utils';
 import type { RawReasoningStreamEvent } from '@/lib/stream/raw-ai';
 import {
@@ -25,7 +26,7 @@ export type ReasoningSseBridge = {
 
 export const shouldUseClientSse = (req: Request): boolean => {
   try {
-    const url = new URL(req.url);
+    const url = getRequestUrl(req);
     if (url.searchParams.get('format') === 'sse') return true;
   } catch {
     // ignore

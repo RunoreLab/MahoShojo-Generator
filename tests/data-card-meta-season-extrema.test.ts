@@ -8,7 +8,7 @@ import {
   getArenaRatingsByDataCardId as getArenaRatingsByDataCardIdReader,
   getStrictArenaRatingsByDataCardIds,
 } from '@/lib/db/repositories/data-card-meta';
-import { buildApiRatingFromRow } from '@/pages/api/data-card-meta';
+import { buildApiRatingFromRow } from '@/app/api/data-card-meta/handler';
 
 describe('data-card meta season extrema schema', () => {
   test('arena_ratings 季度极值字段名保持 snake_case', () => {

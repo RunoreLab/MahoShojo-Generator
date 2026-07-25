@@ -1,4 +1,5 @@
 import { parseWantuCard } from '@/lib/wantu-card/adapter';
+import { isWantuDataCard, convertWantuDataCardToArenaMaterialPayload } from '@/lib/wantu-card/wantu-data-card';
 
 export const MAX_ARENA_MATERIALS = 10;
 
@@ -158,6 +159,25 @@ export const buildArenaMaterialState = (input: BuildArenaMaterialStateInput): Ar
       sourceType,
       isNative: input.isNative === true,
     };
+  }
+
+  if (isWantuDataCard(input.payload)) {
+    const materialPayload = convertWantuDataCardToArenaMaterialPayload(input.payload);
+    if (materialPayload) {
+      const name = normalizeText(input.sourceDataCardName) || materialPayload.name;
+      const sourceType = 'wantu-data-card';
+      return {
+        id: normalizeText(input.id) || sourceDataCardId || createMaterialId('mahoshojo-data-card', sourceType, name),
+        name,
+        content: cloneJsonValue(materialPayload.content),
+        fileName: input.fileName ?? null,
+        ...(sourceDataCardId ? { sourceDataCardId } : {}),
+        ...(sourceDataCardUpdatedAt ? { sourceDataCardUpdatedAt } : {}),
+        sourceKind: 'mahoshojo-data-card',
+        sourceType,
+        isNative: input.isNative === true,
+      };
+    }
   }
 
   const sourceType = normalizeText(input.sourceType) || inferMahoshojoSourceType(input.payload);

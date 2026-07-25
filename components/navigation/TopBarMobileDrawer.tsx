@@ -10,12 +10,14 @@ interface TopBarMobileDrawerProps {
   isOpen: boolean;
   activeGroupId: NavGroupId | null;
   onClose: () => void;
+  onRequestAuth?: () => void;
 }
 
 export function TopBarMobileDrawer({
   isOpen,
   activeGroupId,
   onClose,
+  onRequestAuth,
 }: TopBarMobileDrawerProps) {
   const panelRef = useRef<HTMLDivElement | null>(null);
 
@@ -112,7 +114,7 @@ export function TopBarMobileDrawer({
           <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-slate-400">
             账户
           </div>
-          <TopBarUserMenu variant="mobile" onNavigate={onClose} />
+          <TopBarUserMenu variant="mobile" onNavigate={onClose} onRequestAuth={onRequestAuth} />
         </div>
       </div>
     </div>

@@ -1,7 +1,7 @@
 'use client';
 
 import Leaderboard from '@/components/Leaderboard';
-import { StatsData } from '@/pages/api/get-stats';
+import type { StatsData } from '@/app/api/get-stats/handler';
 import { CollapsibleSection } from '@/components/shared/CollapsibleSection';
 
 interface ArenaStatisticsProps {

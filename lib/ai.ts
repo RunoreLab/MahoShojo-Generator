@@ -9,6 +9,7 @@ import { getProviderFetch } from "@/lib/ai/middleware/provider-fetch";
 import { resolveMaxOutputTokensOption } from "@/lib/ai/max-output-tokens";
 import { enhanceErrorWithUpstreamMessage } from "@/lib/ai/utils/error-extraction";
 import { buildStructuredJsonInstructionFromZodSchema, parseStructuredJsonWithSchema } from "@/lib/ai/utils/structured-json";
+import { classifySuccess, classifyOutcome, recordAiChannelOutcome } from "@/lib/ai/availability";
 import { buildReasoningSummary } from "@/lib/ai/reasoning-normalizer";
 import type { AIReasoningEnvelope } from "@/types/ai-reasoning";
 
@@ -284,6 +285,11 @@ export interface GenerateWithAIOptions {
     finishReason?: unknown;
     reasoning?: AIReasoningEnvelope | null;
   };
+  /** 渠道上下文，用于可用性记分。无此字段则不记分。 */
+  channelContext?: {
+    providerId: string;
+    modelId: string;
+  };
 }
 
 // 通用 AI 生成函数
@@ -546,6 +552,10 @@ export async function generateWithAI<T, I = string>(
         }
 
         log.info(`提供商生成成功: 提供商: ${provider.name} 尝试次数: ${attempt + 1}`);
+        if (options?.channelContext) {
+          const ctx = options.channelContext;
+          void recordAiChannelOutcome({ providerId: ctx.providerId, modelId: ctx.modelId, ...classifySuccess() });
+        }
         if (options?.telemetry) {
           options.telemetry.usage = usage;
           options.telemetry.finishReason = finishReason;
@@ -564,6 +574,13 @@ export async function generateWithAI<T, I = string>(
             usage: error.usage,
             finishReason: error.finishReason
           });
+        }
+
+        // 记录本次 attempt 的失败 outcome
+        if (options?.channelContext) {
+          const ctx = options.channelContext;
+          const outcome = classifyOutcome(ctx.providerId === 'system', error);
+          void recordAiChannelOutcome({ providerId: ctx.providerId, modelId: ctx.modelId, ...outcome });
         }
 
         // 如果不是最后一次尝试，等待后再重试

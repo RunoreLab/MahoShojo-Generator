@@ -1,3 +1,4 @@
+import { getRequestUrl } from '@/lib/request-url';
 import { buildSubrequestAuthHeaders } from '@/lib/subrequest-auth';
 
 type BetterAuthSubrequestInput = {
@@ -14,7 +15,7 @@ const copyHeader = (source: Headers, target: Headers, key: string): void => {
 };
 
 export const invokeBetterAuthSubrequest = async (input: BetterAuthSubrequestInput): Promise<Response> => {
-  const requestUrl = new URL(input.req.url);
+  const requestUrl = getRequestUrl(input.req);
   const normalizedPath = input.path.startsWith('/') ? input.path : `/${input.path}`;
   const targetUrl = new URL(normalizedPath, requestUrl.origin);
 

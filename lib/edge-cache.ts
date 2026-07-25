@@ -1,3 +1,5 @@
+import { getRequestCacheKey } from '@/lib/request-url';
+
 type MemoryCacheEntry = {
   status: number;
   headers: Array<[string, string]>;
@@ -8,6 +10,7 @@ type MemoryCacheEntry = {
 const memoryCache = new Map<string, MemoryCacheEntry>();
 const MAX_MEMORY_CACHE_ENTRIES = 300;
 const MAX_MEMORY_CACHE_BODY_CHARS = 200_000;
+const CACHE_MATCH_TIMEOUT_MS = 25;
 
 const readDefaultCache = (): Cache | null => {
   const anyCaches = (globalThis as any)?.caches;
@@ -48,6 +51,18 @@ const pruneMemoryCache = (now: number): void => {
   }
 };
 
+const matchCacheWithTimeout = async (cache: Cache, cacheReq: Request): Promise<Response | null> => {
+  try {
+    const cached = await Promise.race<Response | undefined | null>([
+      cache.match(cacheReq),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), CACHE_MATCH_TIMEOUT_MS)),
+    ]);
+    return cached ?? null;
+  } catch {
+    return null;
+  }
+};
+
 export async function withEdgeCache(
   req: Request,
   options: { key: string; ttlSeconds: number },
@@ -57,7 +72,7 @@ export async function withEdgeCache(
   if (ttlSeconds <= 0) return handler();
   if (req.method !== 'GET' && req.method !== 'HEAD') return handler();
 
-  const key = options.key;
+  const key = getRequestCacheKey(req, options.key);
   const now = Date.now();
 
   const memoryHit = readMemoryCache(key, now);
@@ -66,11 +81,10 @@ export async function withEdgeCache(
   }
 
   const cache = readDefaultCache();
-  const cacheReq = new Request(key, { method: 'GET' });
-
-  if (cache) {
-    const hit = await cache.match(cacheReq);
-    if (hit) return hit;
+  const cacheReq = cache ? new Request(key, { method: 'GET' }) : null;
+  if (cache && cacheReq) {
+    const cacheHit = await matchCacheWithTimeout(cache, cacheReq);
+    if (cacheHit) return cacheHit;
   }
 
   const res = await handler();
@@ -82,23 +96,23 @@ export async function withEdgeCache(
     const shouldAttemptMemoryCache = !Number.isFinite(contentLengthNum) || contentLengthNum <= MAX_MEMORY_CACHE_BODY_CHARS;
 
     if (shouldAttemptMemoryCache) {
-      const bodyText = await res.clone().text();
-      if (bodyText.length <= MAX_MEMORY_CACHE_BODY_CHARS) {
+      void res.clone().text().then((bodyText) => {
+        if (bodyText.length > MAX_MEMORY_CACHE_BODY_CHARS) return;
         memoryCache.set(key, {
           status: res.status,
           headers: Array.from(res.headers.entries()),
           bodyText,
           expiresAt: now + ttlSeconds * 1000,
         });
-        pruneMemoryCache(now);
-      }
+        pruneMemoryCache(Date.now());
+      }).catch(() => {});
     }
   } catch {
   }
 
-  if (cache) {
+  if (cache && cacheReq) {
     try {
-      await cache.put(cacheReq, res.clone());
+      void cache.put(cacheReq, res.clone()).catch(() => {});
     } catch {
     }
   }

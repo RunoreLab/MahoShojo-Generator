@@ -1,3 +1,5 @@
+'use client';
+
 import { useEffect, useState } from 'react';
 
 import { authStorage } from '@/lib/auth';
@@ -257,7 +259,7 @@ export function ReportAppealsPage({
         : null;
 
   return (
-    <main className="mx-auto max-w-5xl space-y-6 px-4 py-8">
+    <main className="mx-auto max-w-5xl space-y-6 px-4 pb-8 pt-4">
       <section className="space-y-2">
         <p className="text-xs uppercase tracking-[0.24em] text-rose-600">Report Appeals</p>
         <h1 className="text-2xl font-semibold text-gray-900">处理结果申诉</h1>

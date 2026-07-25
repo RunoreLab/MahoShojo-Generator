@@ -3,8 +3,8 @@
 ## 仓库基础规范
 
 ### 项目结构与模块划分
-- 本项目基于 Next.js + Cloudflare Edge Runtime + Cloudflare D1 数据库 + Tailwind 4 + Vercel AI SDK 1.x 编写。
-- `pages/` 暴露 Next.js 路由（如 `index.tsx`、`name.tsx`、`details.tsx`、`battle.tsx` 等），同时在 `pages/api/` 下维护 API 处理器。
+- 本项目基于 Next.js + `@opennextjs/cloudflare` + Cloudflare D1 数据库 + Tailwind 4 + Vercel AI SDK 1.x 编写。
+- `app/` 是当前统一路由体系，页面入口使用 `app/**/page.tsx`，API 入口使用 `app/api/**/route.ts`。
 - 可复用的卡片与模态组件存放于 `components/`，复杂业务逻辑优先放在所属路由目录，避免组件过度臃肿。
 - AI 相关能力封装在 `lib/`（`ai.ts`、`config.ts`、`signature.ts` 等）；共享类型位于 `types/arena.d.ts`；静态资源在 `public/`；全局样式集中于 `styles/`；工具脚本放在 `scripts/`；测试与夹具位于 `tests/`。
 
@@ -33,7 +33,10 @@
 - 新增或修改跨层字段时，必须同步更新：schema、mapper、类型定义、API 契约与测试。
 
 ### API 的编写
-- 该项目部署在 Cloudflare 上，使用 Edge Runtime，请不要使用不兼容的库或者特性。
+- 该项目部署在 Cloudflare 上，通过 `@opennextjs/cloudflare` 运行于 Cloudflare Workers/Pages 链路；不要引入不兼容的库或特性。
+- 新 API 默认使用 App Router Route Handler：路径形如 `app/api/<domain>/<resource>/route.ts`，导出 `GET`、`POST` 等方法，并直接返回 Web `Response`。
+- 业务处理函数优先保持 `(req: Request) => Promise<Response>` 的 Web 标准形态，Route Handler 文件只负责 HTTP method 导出、动态参数接入和轻量组装。
+- 动态路由迁移时，优先通过 Route Handler 的 `context.params` 显式传参；避免在业务层零散解析 pathname，除非是为了兼容既有公共函数。
 
 ### 测试规范
 - 测试脚本逻辑基于 Vitest 执行；测试 API 从 `vitest` 导入，禁止新增 `bun:test` 依赖。

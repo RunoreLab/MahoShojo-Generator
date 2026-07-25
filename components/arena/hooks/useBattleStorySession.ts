@@ -51,6 +51,7 @@ import { extractHeadlineFromMarkdown, extractWinnerFromText } from '@/lib/arena/
 import { readScenarioBattleStoryConfig } from '@/lib/scenario-battle-story';
 import { readTextAndReasoningStreamFromResponse } from '@/lib/stream/read-text-and-reasoning-stream';
 import { STREAM_ABORT_REASON_USER } from '@/lib/stream/abort';
+import { buildStreamSoftTimeoutMessage } from '@/lib/stream/timeout';
 
 import { useBattleStore } from '../stores/useBattleStore';
 import { BattleStoreState, Combatant, CombatantData } from '../types';
@@ -331,6 +332,7 @@ export function useBattleStorySession() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [generatingAction, setGeneratingAction] = useState<BattleStorySessionAction | null>(null);
   const [streamingMarkdown, setStreamingMarkdown] = useState('');
+  const [streamSoftTimeoutWarning, setStreamSoftTimeoutWarning] = useState<string | null>(null);
   const [streamCardSnapshot, setStreamCardSnapshot] = useState<BattleStoryChapterCardSnapshot | null>(null);
   const [streamChapterIndex, setStreamChapterIndex] = useState<number | null>(null);
   const [isRefreshingSummary, setIsRefreshingSummary] = useState(false);
@@ -867,6 +869,7 @@ export function useBattleStorySession() {
       setIsGenerating(true);
       setGeneratingAction(input.action);
       setStreamingMarkdown('');
+      setStreamSoftTimeoutWarning(null);
       setStreamChapterIndex(input.chapterIndexHint ?? null);
       const fallbackCharacterGuidances = extractChapterGuidancesFromWorkingCombatants(
         input.workingCombatants
@@ -987,6 +990,10 @@ export function useBattleStorySession() {
 
         const result = await readTextAndReasoningStreamFromResponse(response, {
           label: '连续战报章节生成',
+          timeoutMode: 'soft',
+          onSoftTimeout: (event) => {
+            setStreamSoftTimeoutWarning(buildStreamSoftTimeoutMessage(event));
+          },
           onText: (text) => setStreamingMarkdown(text),
           onReasoning: (reasoning) => {
             patchStreamCardSnapshot({ aiReasoning: reasoning });
@@ -1165,6 +1172,7 @@ export function useBattleStorySession() {
         }
         setIsGenerating(false);
         setGeneratingAction(null);
+        setStreamSoftTimeoutWarning(null);
       }
     },
     [
@@ -1893,6 +1901,7 @@ export function useBattleStorySession() {
     isGenerating,
     generatingAction,
     streamingMarkdown,
+    streamSoftTimeoutWarning,
     streamCardSnapshot,
     streamChapterIndex,
     isRefreshingSummary,

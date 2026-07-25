@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 
-import { createRedeemHandler } from '@/pages/api/redeem-code';
+import { createRedeemHandler } from '@/app/api/redeem-code/handler';
 
 type FakeBatchStatement = {
   sqlText: string;

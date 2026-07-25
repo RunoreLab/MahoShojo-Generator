@@ -1,3 +1,5 @@
+'use client';
+
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 
@@ -315,7 +317,7 @@ export function MessagesPage({
   const emptyStateCopy = getMessagesPageEmptyStateCopy(visibleAppliedFilter, effectiveIsAuthenticated);
 
   return (
-    <main className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(244,114,182,0.18),_transparent_38%),linear-gradient(180deg,_#fff8fb_0%,_#f8fafc_42%,_#eef2ff_100%)] px-4 py-8 text-gray-900 dark:bg-[radial-gradient(circle_at_top,_rgba(244,114,182,0.12),_transparent_32%),linear-gradient(180deg,_#020617_0%,_#111827_48%,_#0f172a_100%)] dark:text-slate-100 sm:px-6 lg:px-8">
+    <main className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(244,114,182,0.18),_transparent_38%),linear-gradient(180deg,_#fff8fb_0%,_#f8fafc_42%,_#eef2ff_100%)] px-4 pb-8 pt-4 text-gray-900 dark:bg-[radial-gradient(circle_at_top,_rgba(244,114,182,0.12),_transparent_32%),linear-gradient(180deg,_#020617_0%,_#111827_48%,_#0f172a_100%)] dark:text-slate-100 sm:px-6 lg:px-8">
       <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
         <section className="rounded-[32px] border border-white/70 bg-white/85 p-6 shadow-xl backdrop-blur dark:border-slate-700/70 dark:bg-slate-950/75">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">

@@ -4,22 +4,9 @@ import { renderToStaticMarkup } from 'react-dom/server';
 
 let pathname = '/';
 
-vi.mock('next/head', () => ({
-  default: function HeadMock({ children }: { children?: React.ReactNode }) {
-    return <>{children}</>;
-  },
-}));
-
-vi.mock('@/lib/use-next-router', () => ({
-  useNextRouter() {
-    return {
-      pathname,
-      route: pathname,
-      query: {},
-      asPath: pathname,
-      push: async () => true,
-      prefetch: async () => undefined,
-    };
+vi.mock('next/navigation', () => ({
+  usePathname() {
+    return pathname;
   },
 }));
 
@@ -54,8 +41,8 @@ function Page() {
 describe('App topbar coverage', () => {
   test('covered route renders global topbar before page content', async () => {
     pathname = '/investigation';
-    const { default: App } = await import('@/pages/_app');
-    const html = renderToStaticMarkup(<App Component={Page} pageProps={{}} router={{} as never} />);
+    const { AppProviders } = await import('@/app/providers');
+    const html = renderToStaticMarkup(<AppProviders><Page /></AppProviders>);
 
     expect(html).toContain('data-global-topbar="/investigation"');
     expect(html.indexOf('GlobalTopBar')).toBeLessThan(html.indexOf('页面内容'));
@@ -63,8 +50,8 @@ describe('App topbar coverage', () => {
 
   test('flow-specific excluded route does not render global topbar', async () => {
     pathname = '/arrested';
-    const { default: App } = await import('@/pages/_app');
-    const html = renderToStaticMarkup(<App Component={Page} pageProps={{}} router={{} as never} />);
+    const { AppProviders } = await import('@/app/providers');
+    const html = renderToStaticMarkup(<AppProviders><Page /></AppProviders>);
 
     expect(html).not.toContain('data-global-topbar');
     expect(html).toContain('页面内容');
@@ -72,8 +59,8 @@ describe('App topbar coverage', () => {
 
   test('legacy floating color mode switcher is not rendered globally', async () => {
     pathname = '/battle';
-    const { default: App } = await import('@/pages/_app');
-    const html = renderToStaticMarkup(<App Component={Page} pageProps={{}} router={{} as never} />);
+    const { AppProviders } = await import('@/app/providers');
+    const html = renderToStaticMarkup(<AppProviders><Page /></AppProviders>);
 
     expect(html).not.toContain('data-color-mode-switcher="legacy-floating-widget"');
   });

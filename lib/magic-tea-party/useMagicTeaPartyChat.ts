@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
-import type { NextRouter } from 'next/router';
 
 import type { UserAIProviderConfig } from '@/components/AiProviderSelector';
+import type { AppRouterAdapter } from '@/lib/app-router-adapter';
 import type { AIReasoningEnvelope } from '@/types/ai-reasoning';
 import { persistArrestedBackup } from '@/lib/arrested-backup';
 import { authStorage } from '@/lib/auth';
@@ -117,7 +117,7 @@ export type UseMagicTeaPartyChatOptions = {
     outputFormat: MagicTeaPartyOutputFormat;
     sourceMessageId: string;
   }) => void | Promise<void>;
-  router: NextRouter;
+  router: Pick<AppRouterAdapter, 'push'>;
 };
 
 export type UseMagicTeaPartyChatResult = {

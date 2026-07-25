@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/router';
+import { useRouter } from 'next/navigation';
 import { quickCheck } from '@/lib/sensitive-word-filter';
 import { dataCardApi } from '@/lib/auth';
 import { normalizeQuestionnaireDefinition } from '@/lib/questionnaires';
@@ -253,4 +253,3 @@ export default function QuestionnaireCompatModal({
     </div>
   );
 }
-

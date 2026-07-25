@@ -27,7 +27,7 @@ export type QuestionnaireTheme = {
 };
 
 export const DETAILS_QUESTIONNAIRE_THEME: QuestionnaireTheme = {
-  card: 'rounded-2xl border border-pink-100 bg-white/90 p-4 shadow-sm',
+  card: 'details-questionnaire-surface rounded-2xl border border-pink-100 bg-white/90 p-4 shadow-sm',
   progressText: 'text-sm text-gray-600',
   progressTrack: 'bg-pink-100',
   progressBar: 'bg-pink-400',
@@ -36,14 +36,14 @@ export const DETAILS_QUESTIONNAIRE_THEME: QuestionnaireTheme = {
   noticeText: 'text-xs text-center text-gray-500 mt-2',
   helperText: 'mt-2 text-sm text-gray-600 text-center',
   skipText: 'mt-2 text-xs text-pink-500 text-center',
-  quickOptionButton: 'rounded-full border border-pink-200 bg-white px-4 py-1.5 font-medium text-pink-600 transition-colors hover:border-pink-400 hover:bg-pink-50',
-  optionsCard: 'rounded-2xl border border-pink-100 bg-white p-4 shadow-sm',
+  quickOptionButton: 'details-questionnaire-action rounded-full border border-pink-200 bg-white px-4 py-1.5 font-medium text-pink-600 transition-colors hover:border-pink-400 hover:bg-pink-50',
+  optionsCard: 'details-questionnaire-surface rounded-2xl border border-pink-100 bg-white p-4 shadow-sm',
   optionsHintText: 'text-xs text-gray-500 mb-2',
-  optionButton: 'rounded-lg border px-3 py-2 text-sm transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-pink-300 border-pink-200 bg-white text-gray-700 hover:border-pink-400 hover:bg-pink-50',
+  optionButton: 'details-questionnaire-choice rounded-lg border px-3 py-2 text-sm transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-pink-300 border-pink-200 bg-white text-gray-700 hover:border-pink-400 hover:bg-pink-50',
   optionButtonDisabled: 'border-gray-200 bg-gray-100 text-gray-400 cursor-not-allowed',
-  suggestionCard: 'rounded-2xl border border-pink-100 bg-white/80 p-3 shadow-sm',
+  suggestionCard: 'details-questionnaire-surface rounded-2xl border border-pink-100 bg-white/80 p-3 shadow-sm',
   suggestionHintText: 'text-xs text-gray-500 mb-2',
-  suggestionButton: 'rounded-full border border-pink-200 bg-white px-3 py-1.5 text-xs text-pink-600 transition-colors hover:border-pink-400 hover:bg-pink-50',
+  suggestionButton: 'details-questionnaire-action rounded-full border border-pink-200 bg-white px-3 py-1.5 text-xs text-pink-600 transition-colors hover:border-pink-400 hover:bg-pink-50',
   inputCounterText: 'text-xs text-gray-500',
   limitLabelText: 'text-[11px] text-gray-400',
   overLimitText: 'mt-1 text-right text-xs text-amber-600',

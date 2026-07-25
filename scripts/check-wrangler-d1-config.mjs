@@ -1,7 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { parse } from 'comment-json';
 
-const WRANGLER_PATH = resolve(process.cwd(), 'wrangler.toml');
+const WRANGLER_PATH = resolve(process.cwd(), 'wrangler.jsonc');
 const PLACEHOLDER_PATTERN = /replace_with_[a-z0-9_]+/i;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const TEST_NAME_PATTERN = /test/i;
@@ -11,7 +12,7 @@ const readWranglerFile = () => {
     return readFileSync(WRANGLER_PATH, 'utf8');
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`[check:wrangler:d1] 读取 wrangler.toml 失败: ${message}`);
+    throw new Error(`[check:wrangler:d1] 读取 wrangler.jsonc 失败: ${message}`);
   }
 };
 
@@ -27,41 +28,67 @@ const findPlaceholderLines = (lines) => {
   return hits;
 };
 
-const parseD1Entries = (lines) => {
-  const entries = [];
-  const sectionPattern = /^\s*\[\[([^\]]+)\]\]\s*$/;
-  const entryPattern = /^\s*(database_id|preview_database_id|database_name)\s*=\s*"([^"]*)"\s*$/;
-  let currentSection = '';
+const isObject = (value) => typeof value === 'object' && value !== null && !Array.isArray(value);
 
-  lines.forEach((line, index) => {
-    const normalized = line.split('#')[0]?.trim() ?? '';
-    if (!normalized) return;
-
-    const sectionMatch = sectionPattern.exec(normalized);
-    if (sectionMatch) {
-      currentSection = sectionMatch[1]?.trim() ?? '';
-      return;
+const parseWranglerConfig = (content) => {
+  try {
+    const parsed = parse(content, undefined, true);
+    if (!isObject(parsed)) {
+      throw new Error('顶层配置不是对象');
     }
+    return parsed;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`[check:wrangler:d1] 解析 wrangler.jsonc 失败: ${message}`);
+  }
+};
 
-    const match = entryPattern.exec(normalized);
-    if (!match) return;
+const findLineNumber = (lines, key, value) => {
+  const escapedValue = value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const pattern = new RegExp(`"${key}"\\s*:\\s*"${escapedValue}"`);
+  const index = lines.findIndex((line) => pattern.test(line));
+  return index >= 0 ? index + 1 : 0;
+};
 
-    const key = match[1];
-    const value = match[2]?.trim() ?? '';
-    entries.push({
-      key,
-      value,
-      section: currentSection,
-      lineNumber: index + 1,
-    });
+const appendD1Entries = (entries, lines, section, databases) => {
+  if (!Array.isArray(databases)) return;
+
+  databases.forEach((database, index) => {
+    if (!isObject(database)) return;
+
+    for (const key of ['database_id', 'database_name']) {
+      const rawValue = database[key];
+      if (typeof rawValue !== 'string') continue;
+
+      entries.push({
+        key,
+        value: rawValue.trim(),
+        section,
+        databaseIndex: index,
+        lineNumber: findLineNumber(lines, key, rawValue) || index + 1,
+      });
+    }
   });
+};
+
+const parseD1Entries = (config, lines) => {
+  const entries = [];
+
+  appendD1Entries(entries, lines, 'd1_databases', config.d1_databases);
+
+  if (isObject(config.env)) {
+    for (const [envName, envConfig] of Object.entries(config.env)) {
+      if (!isObject(envConfig)) continue;
+      appendD1Entries(entries, lines, `env.${envName}.d1_databases`, envConfig.d1_databases);
+    }
+  }
 
   return entries;
 };
 
 const validateEntries = (entries) => {
   const issues = [];
-  const databaseIdEntries = entries.filter((entry) => entry.key === 'database_id' || entry.key === 'preview_database_id');
+  const databaseIdEntries = entries.filter((entry) => entry.key === 'database_id');
   const productionDatabaseIdEntries = entries.filter(
     (entry) => entry.section === 'env.production.d1_databases' && entry.key === 'database_id',
   );
@@ -72,9 +99,16 @@ const validateEntries = (entries) => {
   const productionDatabaseNameEntries = entries.filter(
     (entry) => entry.section === 'env.production.d1_databases' && entry.key === 'database_name',
   );
+  const findDatabaseNameEntry = (idEntry) =>
+    entries.find(
+      (entry) =>
+        entry.section === idEntry.section &&
+        entry.databaseIndex === idEntry.databaseIndex &&
+        entry.key === 'database_name',
+    );
 
   if (databaseIdEntries.length === 0) {
-    issues.push('未检测到 database_id / preview_database_id 配置。');
+    issues.push('未检测到 database_id 配置。');
     return issues;
   }
 
@@ -98,11 +132,17 @@ const validateEntries = (entries) => {
     issues.push('未检测到 env.production.d1_databases.database_id 配置。');
   }
 
-  const nonProductionIds = new Set(nonProductionDatabaseIdEntries.map((entry) => entry.value));
-  for (const entry of productionDatabaseIdEntries) {
-    if (nonProductionIds.has(entry.value)) {
+  const productionNameById = new Map(
+    productionDatabaseIdEntries.map((entry) => [entry.value, findDatabaseNameEntry(entry)?.value ?? '']),
+  );
+  for (const entry of nonProductionDatabaseIdEntries) {
+    const productionName = productionNameById.get(entry.value);
+    if (!productionName) continue;
+
+    const nonProductionName = findDatabaseNameEntry(entry)?.value ?? '';
+    if (nonProductionName !== productionName) {
       issues.push(
-        `第 ${entry.lineNumber} 行的 production database_id 与 default/preview 复用同一 D1：${entry.value}`,
+        `第 ${entry.lineNumber} 行的 ${entry.section} 复用 production D1 ID，但 database_name 不一致：${nonProductionName || '(未配置)'} != ${productionName}`,
       );
     }
   }
@@ -119,10 +159,11 @@ const validateEntries = (entries) => {
 const main = () => {
   const content = readWranglerFile();
   const lines = buildLineIndex(content);
+  const config = parseWranglerConfig(content);
   const placeholderLines = findPlaceholderLines(lines);
-  const entries = parseD1Entries(lines);
+  const entries = parseD1Entries(config, lines);
   const issues = validateEntries(entries);
-  const databaseIdEntries = entries.filter((entry) => entry.key === 'database_id' || entry.key === 'preview_database_id');
+  const databaseIdEntries = entries.filter((entry) => entry.key === 'database_id');
 
   for (const hit of placeholderLines) {
     issues.push(`第 ${hit.lineNumber} 行存在 replace_with_* 占位符：${hit.line}`);

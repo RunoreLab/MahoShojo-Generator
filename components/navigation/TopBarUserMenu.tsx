@@ -1,12 +1,14 @@
 import Link from 'next/link';
-import { LogOut, UserRound } from 'lucide-react';
+import { IdCard, LogOut, UserRound } from 'lucide-react';
 
 import { useAuth } from '@/lib/useAuth';
 import { useTopBarProfile } from '@/components/navigation/useTopBarProfile';
+import UserTitle from '@/components/UserTitle';
 
 interface TopBarUserMenuProps {
   variant?: 'desktop' | 'mobile';
   onNavigate?: () => void;
+  onRequestAuth?: () => void;
 }
 
 const getInitial = (username: string): string => username.trim().slice(0, 1) || 'U';
@@ -35,8 +37,8 @@ function TopBarAvatar({
   );
 }
 
-export function TopBarUserMenu({ variant = 'desktop', onNavigate }: TopBarUserMenuProps) {
-  const { user, loading, isAuthenticated, logout } = useAuth();
+export function TopBarUserMenu({ variant = 'desktop', onNavigate, onRequestAuth }: TopBarUserMenuProps) {
+  const { user, userBadges, loading, isAuthenticated, logout } = useAuth();
   const { avatarDataUrl } = useTopBarProfile(user?.id ?? null, isAuthenticated);
 
   if (loading) {
@@ -55,9 +57,12 @@ export function TopBarUserMenu({ variant = 'desktop', onNavigate }: TopBarUserMe
 
   if (!isAuthenticated || !user) {
     return (
-      <Link
-        href="/character-manager"
-        onClick={onNavigate}
+      <button
+        type="button"
+        onClick={() => {
+          onRequestAuth?.();
+          onNavigate?.();
+        }}
         className={
           variant === 'mobile'
             ? 'inline-flex h-11 w-full items-center justify-center rounded-2xl bg-pink-600 px-3 text-sm font-semibold text-white shadow-sm transition hover:bg-pink-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pink-200'
@@ -65,7 +70,7 @@ export function TopBarUserMenu({ variant = 'desktop', onNavigate }: TopBarUserMe
         }
       >
         登录 / 注册
-      </Link>
+      </button>
     );
   }
 
@@ -93,8 +98,9 @@ export function TopBarUserMenu({ variant = 'desktop', onNavigate }: TopBarUserMe
           <Link
             href="/character-manager"
             onClick={onNavigate}
-            className="rounded-xl px-3 py-2 text-sm text-gray-700 hover:bg-pink-50 dark:text-slate-100 dark:hover:bg-slate-800"
+            className="flex items-center gap-2 rounded-xl px-3 py-2 text-sm text-gray-700 hover:bg-pink-50 dark:text-slate-100 dark:hover:bg-slate-800"
           >
+            <IdCard className="h-4 w-4" aria-hidden="true" />
             角色管理
           </Link>
           <button
@@ -121,6 +127,11 @@ export function TopBarUserMenu({ variant = 'desktop', onNavigate }: TopBarUserMe
       >
         <TopBarAvatar avatarDataUrl={avatarDataUrl} username={user.username} size="desktop" />
         <span className="max-w-24 truncate">{user.username}</span>
+        <UserTitle
+          badges={userBadges}
+          className="hidden max-w-40 overflow-hidden lg:inline-flex"
+          showBadges
+        />
       </button>
       <div
         aria-label="用户菜单"
@@ -138,6 +149,7 @@ export function TopBarUserMenu({ variant = 'desktop', onNavigate }: TopBarUserMe
             href="/character-manager"
             className="flex items-center gap-2 rounded-xl px-3 py-2 text-sm text-gray-700 hover:bg-pink-50 dark:text-slate-100 dark:hover:bg-slate-800"
           >
+            <IdCard className="h-4 w-4" aria-hidden="true" />
             角色管理
           </Link>
           <button

@@ -62,6 +62,8 @@ interface StreamingBattleReportCardProps {
     aiReasoning?: AIReasoningEnvelope | null;
     /** 是否正在生成中（可选，用于显示加载光标等） */
     isStreaming?: boolean;
+    /** 流式生成软超时提示（仅提示、不切断）。 */
+    softTimeoutWarning?: string | null;
     /** 流式生成中的手动中止回调。 */
     onStopGeneration?: () => void;
     /** 战报插图（可选，支持生成图或用户上传图） */
@@ -84,6 +86,7 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
     narrativeHistoryReadCount = null,
     aiReasoning = null,
     isStreaming = false,
+    softTimeoutWarning = null,
     onStopGeneration,
     illustrationAsset = null,
     cardWidthPx = null
@@ -579,6 +582,15 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
                 { scenarioName && <h3 className='ml-2 mb-4 font-bold text-gray-100'>~ {scenarioName.replace(".json", "")} ~</h3> }
 
                 {headline && <h2 className="text-xl font-bold mb-2 mt-2 px-1">{headline}</h2>}
+
+                {isStreaming && softTimeoutWarning ? (
+                    <div
+                        className="mb-4 rounded-lg border border-amber-300/70 bg-amber-500/15 px-3 py-2 text-sm text-amber-100"
+                        role="status"
+                    >
+                        ⚠️ {softTimeoutWarning}
+                    </div>
+                ) : null}
 
                 {(reporterInfo?.name && reporterInfo?.publication) || shouldShowAiModel || hasAnyTokenNumber || shouldShowNarrativeReadCount ? (
                     <div className="px-1 mb-4 text-sm text-gray-300">

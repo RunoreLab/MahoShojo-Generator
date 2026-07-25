@@ -9,6 +9,7 @@ import {
   createStreamReadWithTimeout,
   STREAM_READ_IDLE_TIMEOUT_MS,
   STREAM_READ_TOTAL_TIMEOUT_MS,
+  type StreamReadTimeoutMode,
 } from '@/lib/stream/timeout';
 import type { AIReasoningEnvelope, AIReasoningStatus } from '@/types/ai-reasoning';
 
@@ -112,8 +113,10 @@ export async function readTextAndReasoningStreamFromResponse(
   let latestReasoning: AIReasoningEnvelope | null = null;
   let latestReasoningTokens: number | null = null;
 
+  const timeoutMode: StreamReadTimeoutMode = options.timeoutMode === 'soft' ? 'soft' : 'hard';
   const readWithTimeout = createStreamReadWithTimeout({
     label: options.label,
+    mode: timeoutMode,
     idleTimeoutMs: options.idleTimeoutMs ?? STREAM_READ_IDLE_TIMEOUT_MS,
     totalTimeoutMs: options.totalTimeoutMs ?? STREAM_READ_TOTAL_TIMEOUT_MS,
     onTimeout: () => {
@@ -122,6 +125,9 @@ export async function readTextAndReasoningStreamFromResponse(
       } catch {
         // ignore
       }
+    },
+    onSoftTimeout: (event) => {
+      options.onSoftTimeout?.(event);
     },
   });
 

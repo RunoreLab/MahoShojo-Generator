@@ -1,0 +1,76 @@
+name: Deploy to Cloudflare Workers
+
+on:
+  push:
+    branches:
+      - '**'
+  workflow_dispatch:
+
+concurrency:
+  group: cloudflare-workers-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Build and deploy
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ github.ref == 'refs/heads/feature/v0.2.0_Battle_Growth_MahoShojo' && 'production' || 'preview' }}
+    permissions:
+      contents: read
+      deployments: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 11.3.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: Get pnpm store path
+        id: pnpm-store
+        shell: bash
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore pnpm cache
+        uses: actions/cache@v5
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build Cloudflare bundle
+        env:
+          # NEXT_PUBLIC_* 变量在构建时被内联进客户端产物，必须在此步骤显式注入。
+          # site key 为敏感凭据走 secrets；其余为公开配置走 environment variables。
+          NEXT_PUBLIC_TURNSTILE_SITE_KEY: ${{ secrets.NEXT_PUBLIC_TURNSTILE_SITE_KEY }}
+          NEXT_PUBLIC_AI_SAFETY_PROMPT_LEVEL: ${{ vars.NEXT_PUBLIC_AI_SAFETY_PROMPT_LEVEL }}
+          NEXT_PUBLIC_ENABLE_BUNDLE_SAFETY_CHECK: ${{ vars.NEXT_PUBLIC_ENABLE_BUNDLE_SAFETY_CHECK }}
+          NEXT_PUBLIC_GA_ID: ${{ vars.NEXT_PUBLIC_GA_ID }}
+          NEXT_PUBLIC_SAFETY_CHECK_POLICY: ${{ vars.NEXT_PUBLIC_SAFETY_CHECK_POLICY }}
+        run: pnpm run build:cf
+
+      - name: Deploy production
+        if: github.ref == 'refs/heads/feature/v0.2.0_Battle_Growth_MahoShojo'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: pnpm exec wrangler deploy --env production
+
+      - name: Deploy preview
+        if: github.ref != 'refs/heads/feature/v0.2.0_Battle_Growth_MahoShojo'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: pnpm exec wrangler deploy --env preview

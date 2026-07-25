@@ -81,6 +81,7 @@ export interface AdjudicatorEvent {
   id: string;          // 用于React key的唯一标识
   description: string; // 事件的描述，例如“天气如何？”或“攻击是否命中？”
   type: 'binary' | 'custom'; // 事件类型
+  sourceKey?: string;  // 来源标记，用于自动清理导入的事件
 
   // --- 仅用于 'binary' (二元判定) 类型 ---
   /**

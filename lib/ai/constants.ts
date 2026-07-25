@@ -1109,19 +1109,9 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 description: '偏推理的思考模型，适合复杂规划、多步分析与高约束任务。'
             },
             {
-                value: 'Pro/zai-org/GLM-5',
-                label: 'GLM-5',
-                description: '中文场景综合能力更强，适合复杂指令、结构化输出与多轮对话。'
-            },
-            {
                 value: 'Pro/zai-org/GLM-5.1',
                 label: 'GLM-5.1',
                 description: '智谱旗下新一代通用模型，综合能力更强，适合复杂指令、多轮对话与高质量创作。'
-            },
-            {
-                value: 'Pro/zai-org/GLM-4.7',
-                label: 'GLM-4.7',
-                description: '中文场景表现稳定，适合结构化输出、改写与多轮对话。'
             },
             {
                 value: 'Qwen/Qwen3.6-plus',
@@ -1144,14 +1134,9 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 description: '旗舰级长文本与复杂指令能力，适合高质量内容生成。'
             },
             {
-                value: 'moonshotai/Kimi-K2-Instruct-0905',
-                label: 'Kimi K2 Instruct',
-                description: '擅长中文创作与多轮指令跟随，适合角色设定与风格化文案。'
-            },
-            {
-                value: 'moonshotai/Kimi-K2-Thinking',
-                label: 'Kimi K2 Thinking',
-                description: 'Kimi K2 的思考版本，适合需要更强推理链路的任务。'
+                value: 'moonshotai/Kimi-K2.6',
+                label: 'Kimi K2.6',
+                description: 'Kimi K2.6，适合需要更强推理链路的任务。'
             },
         ]
     },

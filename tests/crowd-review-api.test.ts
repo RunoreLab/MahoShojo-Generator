@@ -6,11 +6,11 @@ import {
   CrowdReviewNotFoundError,
   CrowdReviewServiceUnavailableError,
 } from '@/lib/crowd-review/service';
-import { createCrowdReviewCurrentAssignHandler } from '@/pages/api/crowd-review/current/assign';
-import { createCrowdReviewCurrentHandler } from '@/pages/api/crowd-review/current';
-import { createCrowdReviewCurrentSubmitHandler } from '@/pages/api/crowd-review/current/submit';
-import { createCrowdReviewHistoryHandler } from '@/pages/api/crowd-review/history';
-import { createCrowdReviewSummaryHandler } from '@/pages/api/crowd-review/summary';
+import { createCrowdReviewCurrentAssignHandler } from '@/app/api/crowd-review/current/assign/handler';
+import { createCrowdReviewCurrentHandler } from '@/app/api/crowd-review/current/handler';
+import { createCrowdReviewCurrentSubmitHandler } from '@/app/api/crowd-review/current/submit/handler';
+import { createCrowdReviewHistoryHandler } from '@/app/api/crowd-review/history/handler';
+import { createCrowdReviewSummaryHandler } from '@/app/api/crowd-review/summary/handler';
 
 const auth = {
   user: { id: 7, username: 'hana' },

@@ -7,6 +7,7 @@ import { config, AIProvider } from "../config";
 import { getLogger } from "../logger";
 import { getProviderFetch } from "@/lib/ai/middleware/provider-fetch";
 import { resolveMaxOutputTokensOption } from "@/lib/ai/max-output-tokens";
+import { classifySuccess, classifyOutcome, recordAiChannelOutcome } from "@/lib/ai/availability";
 
 // 延迟函数
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -132,6 +133,11 @@ let roundRobinCounter = 0;
 export interface GenerateWithAIOptions {
   loadBalanceStrategy?: LoadBalanceStrategy;
   providerOverride?: AIProvider;
+  /** 渠道上下文，用于可用性记分。无此字段则不记分。 */
+  channelContext?: {
+    providerId: string;
+    modelId: string;
+  };
 }
 
 // 通用 AI 生成函数
@@ -257,6 +263,10 @@ export async function generateWithStreamAI<T, I = string>(
         });
 
         log.info(`提供商生成成功: 提供商: ${provider.name} 尝试次数: ${attempt + 1}`);
+        if (options?.channelContext) {
+          const ctx = options.channelContext;
+          void recordAiChannelOutcome({ providerId: ctx.providerId, modelId: ctx.modelId, ...classifySuccess() });
+        }
         return result.toTextStreamResponse();
       } catch (error) {
         lastError = error;
@@ -270,6 +280,13 @@ export async function generateWithStreamAI<T, I = string>(
             usage: error.usage,
             finishReason: error.finishReason
           });
+        }
+
+        // 记录本次 attempt 的失败 outcome
+        if (options?.channelContext) {
+          const ctx = options.channelContext;
+          const outcome = classifyOutcome(ctx.providerId === 'system', error);
+          void recordAiChannelOutcome({ providerId: ctx.providerId, modelId: ctx.modelId, ...outcome });
         }
 
         // 如果不是最后一次尝试，等待后再重试

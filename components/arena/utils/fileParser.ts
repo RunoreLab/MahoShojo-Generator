@@ -1,5 +1,6 @@
 'use client';
 
+import { isWantuDataCard, convertWantuDataCardToGeneralCharacter } from '@/lib/wantu-card/wantu-data-card';
 import {
   getCombatantDisplayName,
   inferCombatantType,
@@ -38,7 +39,14 @@ export const parseCombatantsFromText = async (text: string, options: ParseOption
 
   const combatants: CombatantData[] = [];
 
-  for (const item of dataArray) {
+  for (let item of dataArray) {
+    if (isWantuDataCard(item)) {
+      const converted = convertWantuDataCardToGeneralCharacter(item);
+      if (converted) {
+        options.onWarn?.(`检测到万途AI数据卡格式，已自动转换为通用角色。`);
+        item = converted;
+      }
+    }
     const type = inferCombatantType(item);
     const label = getCombatantDisplayName(item);
     let validationResult;

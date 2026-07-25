@@ -5,11 +5,11 @@ import {
   ReportAppealForbiddenError,
   ReportAppealValidationError,
 } from '@/lib/report-appeals/service';
-import { createDataCardReportsHandler } from '@/pages/api/data-card-reports';
-import { createReportAppealDetailHandler } from '@/pages/api/report-appeals/detail';
-import { createReportAppealEntryHandler } from '@/pages/api/report-appeals/entry';
-import { createReportAppealsHandler } from '@/pages/api/report-appeals';
-import { createReportAppealWithdrawHandler } from '@/pages/api/report-appeals/withdraw';
+import { createDataCardReportsHandler } from '@/app/api/data-card-reports/handler';
+import { createReportAppealDetailHandler } from '@/app/api/report-appeals/detail/handler';
+import { createReportAppealEntryHandler } from '@/app/api/report-appeals/entry/handler';
+import { createReportAppealsHandler } from '@/app/api/report-appeals/handler';
+import { createReportAppealWithdrawHandler } from '@/app/api/report-appeals/withdraw/handler';
 
 const auth = {
   user: { id: 7, username: 'hana', is_admin: 0 },

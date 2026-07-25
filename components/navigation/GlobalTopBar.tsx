@@ -2,12 +2,13 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { Menu, Sparkles } from 'lucide-react';
 
-import { getTopbarCoverage, NAV_GROUPS } from '@/lib/navigation';
+import { getTopbarCoverage, NAV_GROUPS, type NavGroupId } from '@/lib/navigation';
 import { useAuth } from '@/lib/useAuth';
 import { TopBarMessageButton } from '@/components/navigation/TopBarMessageButton';
 import { TopBarMobileDrawer } from '@/components/navigation/TopBarMobileDrawer';
 import { TopBarThemeMenu } from '@/components/navigation/TopBarThemeMenu';
 import { TopBarUserMenu } from '@/components/navigation/TopBarUserMenu';
+import AuthModal from '@/components/CharManager/AuthModal';
 
 interface GlobalTopBarProps {
   pathname: string;
@@ -16,22 +17,60 @@ interface GlobalTopBarProps {
 
 export function GlobalTopBar({ pathname, defaultMobileOpen = false }: GlobalTopBarProps) {
   const [isMobileOpen, setIsMobileOpen] = useState(defaultMobileOpen);
+  const [openGroupId, setOpenGroupId] = useState<NavGroupId | null>(null);
   const [logoLoadFailed, setLogoLoadFailed] = useState(false);
+  const [showAuthModal, setShowAuthModal] = useState(false);
+  const [authMessage, setAuthMessage] = useState<{ type: 'error' | 'success'; text: string } | null>(null);
   const { activeGroupId } = getTopbarCoverage(pathname);
-  const { isAuthenticated, user } = useAuth();
+  const { isAuthenticated, user, login, register } = useAuth();
+
+  const handleRegister = async (
+    username: string,
+    email: string,
+    turnstileToken: string,
+    password: string,
+  ) => {
+    setAuthMessage(null);
+    const result = await register(username, email, turnstileToken, password);
+    if (!result.success) {
+      setAuthMessage({ type: 'error', text: result.error || '注册失败' });
+      return;
+    }
+    setShowAuthModal(false);
+  };
+
+  const handleLogin = async (
+    identifier: string,
+    credential: string,
+    turnstileToken: string,
+    mode: 'password' | 'legacy',
+  ) => {
+    setAuthMessage(null);
+    const result = await login(identifier, credential, turnstileToken, mode);
+    if (result.success) {
+      setShowAuthModal(false);
+    } else {
+      setAuthMessage({ type: 'error', text: result.error || '登录失败' });
+    }
+    return result;
+  };
+
+  const openAuthModal = () => {
+    setAuthMessage(null);
+    setShowAuthModal(true);
+  };
 
   return (
     <>
       <header
-        className="sticky top-0 z-[var(--global-topbar-z-index)] border-b border-white/50 bg-white/75 shadow-sm backdrop-blur-xl dark:border-slate-700/60 dark:bg-slate-950/75"
-        style={{ minHeight: 'var(--global-topbar-height)' }}
+        className="global-topbar pointer-events-none relative z-[var(--global-topbar-z-index)] bg-transparent px-3 py-3 sm:px-4 lg:px-6"
         data-active-group={activeGroupId ?? ''}
       >
-        <div className="mx-auto flex min-h-[var(--global-topbar-height)] w-full max-w-screen-2xl items-center gap-3 px-3 sm:px-4 lg:px-6">
+        <div className="global-topbar-panel pointer-events-auto mx-auto flex min-h-[var(--global-topbar-height)] w-full max-w-screen-2xl items-center gap-3 px-3 backdrop-blur-2xl backdrop-saturate-150 sm:px-4 lg:px-6">
           <Link
             href="/"
             aria-label="返回首页"
-            className="inline-flex min-w-0 items-center gap-2 rounded-full px-2 py-1.5 text-gray-900 transition hover:bg-white/70 dark:text-slate-100 dark:hover:bg-slate-900"
+            className="global-topbar-logo-link inline-flex min-w-0 items-center gap-2 rounded-full px-2 py-1.5 transition"
           >
             {logoLoadFailed ? null : (
               <img
@@ -58,34 +97,53 @@ export function GlobalTopBar({ pathname, defaultMobileOpen = false }: GlobalTopB
             </span>
           </Link>
 
-          <nav className="hidden items-center gap-1 md:flex" aria-label="全站主导航">
+          <nav
+            className="hidden items-center gap-1 md:flex"
+            aria-label="全站主导航"
+            onMouseLeave={() => setOpenGroupId(null)}
+            onBlur={(event) => {
+              if (!event.currentTarget.contains(event.relatedTarget)) {
+                setOpenGroupId(null);
+              }
+            }}
+          >
             {NAV_GROUPS.map((group) => {
               const active = activeGroupId === group.id;
+              const isOpen = openGroupId === group.id;
 
               return (
-                <div key={group.id} className="group relative">
+                <div
+                  key={group.id}
+                  className="relative"
+                  onMouseEnter={() => setOpenGroupId(group.id)}
+                  onFocus={() => setOpenGroupId(group.id)}
+                >
                   <button
                     type="button"
+                    aria-expanded={isOpen}
                     className={
                       active
                         ? 'h-9 rounded-full bg-pink-600 px-4 text-sm font-semibold text-white shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pink-200'
-                        : 'h-9 rounded-full px-4 text-sm font-semibold text-gray-700 transition hover:bg-white/75 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pink-200 dark:text-slate-100 dark:hover:bg-slate-900'
+                        : 'global-topbar-nav-trigger h-9 rounded-full px-4 text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pink-200'
                     }
                   >
                     {group.label}
                   </button>
                   <div
                     aria-label={`${group.label}导航`}
-                    className="invisible absolute left-0 top-full z-[45] min-w-56 pt-2 opacity-0 transition group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100"
+                    className={`${
+                      isOpen ? 'visible opacity-100' : 'invisible opacity-0'
+                    } absolute left-0 top-full z-[45] min-w-56 pt-2 transition`}
                   >
-                    <div className="rounded-2xl border border-white/60 bg-white/95 p-2 shadow-xl backdrop-blur dark:border-slate-600/60 dark:bg-slate-950/95">
+                    <div className="global-topbar-dropdown rounded-2xl p-2 shadow-xl backdrop-blur">
                       {group.items.map((item) => (
                         <Link
                           key={item.href}
                           href={item.href}
                           target={item.isExternal ? '_blank' : undefined}
                           rel={item.isExternal ? 'noopener noreferrer' : undefined}
-                          className="block rounded-xl px-3 py-2 text-sm text-gray-800 hover:bg-pink-50 dark:text-slate-100 dark:hover:bg-slate-800"
+                          onClick={() => setOpenGroupId(null)}
+                          className="global-topbar-dropdown-link block rounded-xl px-3 py-2 text-sm"
                         >
                           <span className="font-medium">{item.label}</span>
                           {item.description ? (
@@ -106,7 +164,7 @@ export function GlobalTopBar({ pathname, defaultMobileOpen = false }: GlobalTopB
             <TopBarThemeMenu />
             <TopBarMessageButton isAuthenticated={isAuthenticated} userId={user?.id ?? null} />
             <div className="hidden items-center gap-2 md:flex">
-              <TopBarUserMenu />
+              <TopBarUserMenu onRequestAuth={openAuthModal} />
             </div>
             <div className="flex items-center gap-2 md:hidden">
               <button
@@ -114,7 +172,7 @@ export function GlobalTopBar({ pathname, defaultMobileOpen = false }: GlobalTopB
                 aria-label="打开导航菜单"
                 aria-expanded={isMobileOpen}
                 onClick={() => setIsMobileOpen(true)}
-                className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/50 bg-white/70 text-gray-800 shadow-sm backdrop-blur dark:border-slate-600/60 dark:bg-slate-900/70 dark:text-slate-100"
+                className="global-topbar-mobile-button inline-flex h-9 w-9 items-center justify-center rounded-full shadow-sm backdrop-blur"
               >
                 <Menu className="h-5 w-5" aria-hidden="true" />
               </button>
@@ -127,6 +185,18 @@ export function GlobalTopBar({ pathname, defaultMobileOpen = false }: GlobalTopB
         isOpen={isMobileOpen}
         activeGroupId={activeGroupId}
         onClose={() => setIsMobileOpen(false)}
+        onRequestAuth={openAuthModal}
+      />
+
+      <AuthModal
+        isOpen={showAuthModal}
+        onClose={() => {
+          setShowAuthModal(false);
+          setAuthMessage(null);
+        }}
+        onLogin={handleLogin}
+        onRegister={handleRegister}
+        authMessage={authMessage}
       />
     </>
   );

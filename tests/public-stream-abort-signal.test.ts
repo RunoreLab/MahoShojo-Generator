@@ -39,7 +39,7 @@ describe('public stream abort signal', () => {
   });
 
   test('generate-free-stream 将 Request.signal 传给上游流式生成层', async () => {
-    const { default: handler } = await import('@/pages/api/generate-free-stream');
+    const { default: handler } = await import('@/app/api/generate-free-stream/handler');
     const controller = new AbortController();
     const request = new Request('https://example.com/api/generate-free-stream?format=sse', {
       method: 'POST',

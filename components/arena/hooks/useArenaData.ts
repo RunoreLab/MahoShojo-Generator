@@ -6,7 +6,7 @@ import { useQuery } from '@tanstack/react-query';
 import { config as appConfig } from '@/lib/config';
 import type { Preset } from '@/lib/presets';
 import type { ScenarioPreset } from '@/lib/scenario-presets';
-import { StatsData } from '@/pages/api/get-stats';
+import type { StatsData } from '@/app/api/get-stats/handler';
 
 import { LanguageOption, PresetCollections } from '../types';
 

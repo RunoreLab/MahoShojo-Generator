@@ -7,7 +7,13 @@ import { getLogger } from "../logger";
 import { getProviderFetch } from "@/lib/ai/middleware/provider-fetch";
 import { resolveMaxOutputTokensOption } from "@/lib/ai/max-output-tokens";
 import { extractUpstreamErrorMessage, enhanceErrorWithUpstreamMessage } from "@/lib/ai/utils/error-extraction";
-import { createStreamReadWithTimeout, STREAM_READ_IDLE_TIMEOUT_MS, STREAM_READ_TOTAL_TIMEOUT_MS } from "@/lib/stream/timeout";
+import { classifySuccess, classifyOutcome, recordAiChannelOutcome } from "@/lib/ai/availability";
+import {
+    createStreamReadWithTimeout,
+    STREAM_READ_IDLE_TIMEOUT_MS,
+    STREAM_READ_TOTAL_TIMEOUT_MS,
+    type StreamReadTimeoutMode,
+} from "@/lib/stream/timeout";
 
 // 延迟函数
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -154,6 +160,11 @@ export interface GenerateWithAIOptions {
     loadBalanceStrategy?: LoadBalanceStrategy;
     providerOverride?: AIProvider;
     abortSignal?: AbortSignal;
+    /**
+     * 上游 fullStream 读超时策略。
+     * hard（默认）：超时切断；soft：仅日志提示，继续等待（用于战报长生成）。
+     */
+    streamReadTimeoutMode?: StreamReadTimeoutMode;
     telemetry?: {
         providerName?: string;
         providerType?: AIProvider['type'];
@@ -163,6 +174,11 @@ export interface GenerateWithAIOptions {
         attempt?: number;
     };
     onReasoningEvent?: (event: RawReasoningStreamEvent) => void;
+    /** 渠道上下文，用于可用性记分。无此字段则不记分。 */
+    channelContext?: {
+        providerId: string;
+        modelId: string;
+    };
 }
 
 export const buildStreamTextAbortOptions = (abortSignal?: AbortSignal): { abortSignal?: AbortSignal } => (
@@ -367,8 +383,11 @@ export async function generateWithStreamAI(
 
 	                // 预检流：仅做“连接可用”探测，避免等待正文首字导致流式首屏阻塞。
 	                const reader = result.fullStream.getReader();
+                const streamReadTimeoutMode: StreamReadTimeoutMode =
+                    options?.streamReadTimeoutMode === 'soft' ? 'soft' : 'hard';
                 const readWithTimeout = createStreamReadWithTimeout({
                     label: `上游流式(${provider.name}/${selectedModel})`,
+                    mode: streamReadTimeoutMode,
                     idleTimeoutMs: STREAM_READ_IDLE_TIMEOUT_MS,
                     totalTimeoutMs: STREAM_READ_TOTAL_TIMEOUT_MS,
                     onTimeout: () => {
@@ -377,6 +396,15 @@ export async function generateWithStreamAI(
                         } catch {
                             // ignore
                         }
+                    },
+                    onSoftTimeout: (event) => {
+                        log.warn('上游 fullStream 软超时（仅提示，不切断）', {
+                            kind: event.kind,
+                            timeoutMs: event.timeoutMs,
+                            elapsedMs: event.elapsedMs,
+                            provider: provider.name,
+                            model: selectedModel,
+                        });
                     },
 	                });
 	                const prefetchedChunks: RawUnifiedStreamChunk[] = [];
@@ -452,6 +480,10 @@ export async function generateWithStreamAI(
 	                );
 
                 log.info(`提供商生成成功: 提供商: ${provider.name} 尝试次数: ${attempt + 1}`);
+                if (options?.channelContext) {
+                    const ctx = options.channelContext;
+                    void recordAiChannelOutcome({ providerId: ctx.providerId, modelId: ctx.modelId, ...classifySuccess() });
+                }
 
                 return {
                     response: new Response(textOnlyStream.pipeThrough(new TextEncoderStream()), {
@@ -477,6 +509,13 @@ export async function generateWithStreamAI(
                         usage: error.usage,
                         finishReason: error.finishReason
                     });
+                }
+
+                // 记录本次 attempt 的失败 outcome
+                if (options?.channelContext) {
+                    const ctx = options.channelContext;
+                    const outcome = classifyOutcome(ctx.providerId === 'system', error);
+                    void recordAiChannelOutcome({ providerId: ctx.providerId, modelId: ctx.modelId, ...outcome });
                 }
 
                 // 如果不是最后一次尝试，等待后再重试

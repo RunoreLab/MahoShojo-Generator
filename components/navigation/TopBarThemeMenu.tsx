@@ -31,7 +31,7 @@ export function TopBarThemeMenu() {
         aria-label="外观设置"
         className="invisible absolute right-0 top-full z-[45] min-w-40 pt-2 opacity-0 transition group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100"
       >
-        <div className="rounded-2xl border border-white/60 bg-white/95 p-2 shadow-xl backdrop-blur dark:border-slate-600/60 dark:bg-slate-950/95">
+        <div className="space-y-2 rounded-2xl border border-white/60 bg-white/95 p-2 shadow-xl backdrop-blur dark:border-slate-600/60 dark:bg-slate-950/95">
           {COLOR_MODE_OPTIONS.map((option) => {
             const isActive = option.value === preference;
 

@@ -12,6 +12,7 @@ import {
     normalizeCustomProviderMaxOutputTokens,
 } from '@/lib/ai/custom-provider';
 import { maskApiKeyForDisplay } from '@/lib/client/mask-api-key';
+import { ChannelAvailabilityBadge } from '@/components/ChannelAvailabilityBadge';
 import Link from 'next/link';
 
 export interface UserAIProviderConfig {
@@ -30,10 +31,26 @@ interface AiProviderSelectorProps {
 
 const PROVIDER_SELECTOR_SYNC_EVENT = 'mahoshojo:set-ai-provider-config';
 
+type AvailabilityEntry = {
+    providerId: string;
+    modelId: string;
+    primary: {
+        window: '1h' | '24h' | 'none';
+        successRate: number | null;
+        status: 'healthy' | 'degraded' | 'poor' | 'unknown';
+    };
+    reference?: {
+        window: '24h';
+        successRate: number;
+        status: 'healthy' | 'degraded' | 'poor';
+    };
+};
+
 interface CustomSelectOption {
     value: string;
     label: string;
     description?: string;
+    availability?: AvailabilityEntry;
 }
 
 interface CustomSelectProps {
@@ -75,12 +92,15 @@ const CustomSelect: React.FC<CustomSelectProps> = ({ options, value, onChange, p
     }, [isOpen]);
 
     const renderSelected = () => (
-        <div className="flex flex-col text-left leading-tight">
+        <div className="flex flex-1 flex-col text-left leading-tight">
             <span className="battle-lite-strong-text text-sm font-semibold">
                 {selectedOption?.label ?? placeholder}
             </span>
-            <span className="battle-lite-subtle-text text-xs">
-                {selectedOption?.description ?? '请选择'}
+            <span className="battle-lite-subtle-text flex items-center gap-1 text-xs">
+                <span>{selectedOption?.description ?? '请选择'}</span>
+                {selectedOption?.availability && (
+                    <ChannelAvailabilityBadge availability={selectedOption.availability} compact />
+                )}
             </span>
         </div>
     );
@@ -107,7 +127,7 @@ const CustomSelect: React.FC<CustomSelectProps> = ({ options, value, onChange, p
                                 type="button"
                                 role="option"
                                 aria-selected={option.value === value}
-                                className={`flex w-full flex-col items-start gap-1 px-4 py-3 text-left transition-colors ${
+                                className={`flex w-full items-start gap-2 px-4 py-3 text-left transition-colors ${
                                     option.value === value ? 'battle-lite-select-option-active' : 'battle-lite-select-option'
                                     }`}
                                 onClick={() => {
@@ -115,12 +135,19 @@ const CustomSelect: React.FC<CustomSelectProps> = ({ options, value, onChange, p
                                     setIsOpen(false);
                                 }}
                             >
-                                <span className="battle-lite-strong-text text-sm font-semibold">
-                                    {option.label}
-                                </span>
-                                {option.description && (
-                                    <span className="battle-lite-subtle-text text-xs">
-                                        {option.description}
+                                <div className="flex flex-1 flex-col items-start gap-1">
+                                    <span className="battle-lite-strong-text text-sm font-semibold">
+                                        {option.label}
+                                    </span>
+                                    {option.description && (
+                                        <span className="battle-lite-subtle-text text-xs">
+                                            {option.description}
+                                        </span>
+                                    )}
+                                </div>
+                                {option.availability && (
+                                    <span className="mt-0.5 shrink-0">
+                                        <ChannelAvailabilityBadge availability={option.availability} compact />
                                     </span>
                                 )}
                             </button>
@@ -172,6 +199,7 @@ const AiProviderSelector: React.FC<AiProviderSelectorProps> = ({
     const [maxOutputTokensInput, setMaxOutputTokensInput] = useState<string>('');
     const [isEditingApiKey, setIsEditingApiKey] = useState<boolean>(false);
     const [isHydrated, setIsHydrated] = useState<boolean>(false);
+    const [availabilityMap, setAvailabilityMap] = useState<Map<string, AvailabilityEntry>>(new Map());
     const onConfigChangeRef = useRef(onConfigChange);
     const lastEmittedConfigKeyRef = useRef<string>('');
     const lastAutoFilledMaxTokensKeyRef = useRef<string>('');
@@ -265,6 +293,24 @@ const AiProviderSelector: React.FC<AiProviderSelectorProps> = ({
 
         setIsHydrated(true);
     }, [defaultProviderId, getApiKeyStorageKey, getCustomModelStorageKey, getMaxOutputTokensStorageKey, getModelStorageKey, providerOptions, resolveModelSelection, storageKeys.selectedProvider]);
+
+    // 加载渠道可用性数据（静默失败）
+    useEffect(() => {
+        if (!isHydrated || typeof window === 'undefined') return;
+        let cancelled = false;
+        fetch('/api/ai/channel-availability')
+            .then((res) => (res.ok ? res.json() : null))
+            .then((data) => {
+                if (cancelled || !data?.entries) return;
+                const map = new Map<string, AvailabilityEntry>();
+                for (const entry of data.entries) {
+                    map.set(`${entry.providerId}:${entry.modelId}`, entry);
+                }
+                setAvailabilityMap(map);
+            })
+            .catch(() => {});
+        return () => { cancelled = true; };
+    }, [isHydrated]);
 
     useEffect(() => {
         if (typeof window === 'undefined') {
@@ -466,8 +512,11 @@ const AiProviderSelector: React.FC<AiProviderSelectorProps> = ({
             value: provider.id,
             label: provider.name,
             description: provider.description,
+            availability: provider.models[0]
+                ? availabilityMap.get(`${provider.id}:${provider.models[0].value}`)
+                : undefined,
         }));
-    }, [providerOptions]);
+    }, [providerOptions, availabilityMap]);
 
     const modelSelectOptions: CustomSelectOption[] = useMemo(() => {
         if (!activeProvider) return [];
@@ -475,16 +524,18 @@ const AiProviderSelector: React.FC<AiProviderSelectorProps> = ({
             value: model.value,
             label: model.label,
             description: model.description,
+            availability: availabilityMap.get(`${activeProvider.id}:${model.value}`),
         }));
         if (canUseCustomModelId(activeProvider)) {
             options.push({
                 value: CUSTOM_AI_MODEL_OPTION.value,
                 label: CUSTOM_AI_MODEL_OPTION.label,
                 description: CUSTOM_AI_MODEL_OPTION.description,
+                availability: undefined,
             });
         }
         return options;
-    }, [activeProvider]);
+    }, [activeProvider, availabilityMap]);
 
     return (
         <div className="input-group">

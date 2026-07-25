@@ -1,7 +1,7 @@
 import type { NewsReport } from '@/components/BattleReportCard';
 import type { UserAIProviderConfig } from '@/components/AiProviderSelector';
 import type { Preset } from '@/lib/presets';
-import type { StatsData } from '@/pages/api/get-stats';
+import type { StatsData } from '@/app/api/get-stats/handler';
 import type { AdjudicatorEvent, AdjudicationResult, CharacterCurrentState } from '@/types/arena';
 import type { NormalizedStreamUpdateMeta } from '@/lib/arena/stream-meta';
 import type { QuestionnaireDefinition } from '@/lib/questionnaires';
@@ -79,6 +79,7 @@ export interface CombatantData {
   isNonStandard?: boolean;
   wasCorrected?: boolean;
   teamId?: number;
+  adjudicationSourceKey?: string;
   /** 用户对该角色的行动/想法引导（可选，最多 100 字）。 */
   characterGuidance?: string;
   sourceDataCardId?: string;
@@ -106,6 +107,7 @@ export interface ScenarioState {
   content: Record<string, unknown> | null;
   fileName: string | null;
   isNative: boolean;
+  adjudicationSourceKey?: string;
   sourceDataCardId?: string;
   sourceDataCardDescription?: string;
   sourceDataCardCreatedAt?: string;
@@ -187,6 +189,11 @@ export interface BattleStoreState {
   streamNarrativeHistoryReadCount: number | null;
   streamReasoning: AIReasoningEnvelope | null;
   streamUpdateMetaDebug: StreamUpdateMetaDebug | null;
+  /**
+   * 流式生成软超时提示（仅提示、不切断）。
+   * 例如：已超过 600 秒仍未结束生成。
+   */
+  streamSoftTimeoutWarning: string | null;
   latestAiImpacts: BattleAiImpact[] | null;
   storyLength: StoryLengthOption;
   customStoryLength: string;
@@ -219,6 +226,7 @@ export interface BattleStoreState {
   setStreamNarrativeHistoryReadCount: (count: number | null) => void;
   setStreamReasoning: (reasoning: AIReasoningEnvelope | null) => void;
   setStreamUpdateMetaDebug: (debug: StreamUpdateMetaDebug | null) => void;
+  setStreamSoftTimeoutWarning: (warning: string | null) => void;
   setLatestAiImpacts: (impacts: BattleAiImpact[] | null) => void;
   setStoryLength: (length: StoryLengthOption) => void;
   setCustomStoryLength: (length: string) => void;
@@ -257,6 +265,9 @@ export interface BattleStoreState {
   setMaterials: (materials: ArenaMaterialState[]) => void;
 
   setAdjudicationEvents: (events: AdjudicatorEvent[]) => void;
+  appendAdjudicationEvents: (events: AdjudicatorEvent[], sourceKey?: string | null) => void;
+  removeAdjudicationEventsBySource: (sourceKey: string) => void;
+  clearAdjudicationEvents: () => void;
   setAdjudicationResults: (results: AdjudicationResult[] | null) => void;
 
   setNewsReport: (report: NewsReport | null) => void;

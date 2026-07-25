@@ -1,4 +1,3 @@
-import { useRouter } from 'next/router';
 import { useEffect, useMemo, useReducer, useState } from 'react';
 
 import AiProviderSelector, { type UserAIProviderConfig } from '@/components/AiProviderSelector';
@@ -14,6 +13,7 @@ import { readJsonOrTextFromResponse, resolveApiErrorMessage } from '@/lib/client
 import { buildSafeFileName } from '@/lib/client/fileName';
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
 import { useCooldown } from '@/lib/cooldown';
+import { useAppRouterAdapter } from '@/lib/app-router-adapter';
 import { inferTemplate, type InferableTemplate } from '@/lib/data-card-converter';
 import { mapDataCardRuntimeSourceInfo, mapPublicDataCardRowToBattleSelectionPayload } from '@/lib/data-card-read-mappers';
 import { computeTechIndex } from '@/lib/metrics/techIndex';
@@ -683,7 +683,7 @@ const createId = (prefix: string): string => {
 };
 
 export function TavernExportPanel() {
-  const router = useRouter();
+  const router = useAppRouterAdapter();
   const [state, dispatch] = useReducer(reducer, initialState);
   const { isAuthenticated, user } = useAuth();
   const [userProviderConfig, setUserProviderConfig] = useState<UserAIProviderConfig | null>(null);

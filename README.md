@@ -9,7 +9,7 @@
   <div>✨ 基于 AI 结构化生成的生成器 ✨</div>
   <a href="https://mahoshojo.colanns.me">在线试玩</a> |
   <a href="https://github.com/colasama/MahoShojo-Generator/discussions">交流反馈</a> |
-  <a href="https://pd.qq.com/s/brisxifbl">腾讯频道: pd73230758</a>
+  <a href="https://pd.qq.com/s/brisxifbl">加入腾讯频道</a>
 </div>
 
 ## ✨ 项目介绍
@@ -72,7 +72,7 @@
 
 ## 🚀 技术栈
 
-* **框架**: Next.js 15（Pages Router 为主，局部 App Router）, React 19
+* **框架**: Next.js 15（App Router 页面与 Route Handlers）, React 19
 * **语言**: TypeScript
 * **包管理器**: pnpm 11.3.0
 * **运行时**: Node.js 22+ (开发、构建与脚本), Cloudflare Pages/Workers (生产，Edge Runtime)
@@ -151,6 +151,8 @@ Cloudflare Pages 部署环境变量需显式设置 `PNPM_VERSION=11.3.0`，避�
 
 - 命名规范采用“分层统一 + 边界映射”，适用于全项目，不限于鉴权模块。
 - 详细说明见 [docs/NAMING_CONVENTIONS_2026-02-28.md](./docs/NAMING_CONVENTIONS_2026-02-28.md)。
+- 当前路由统一使用 App Router；历史迁移评估见 [docs/reports/2026-06-03_204053_App_Router迁移评估.md](./docs/reports/2026-06-03_204053_App_Router迁移评估.md)。
+- 新增 API 默认使用 `app/api/**/route.ts` Route Handler；不要新增 `pages/` 或 `pages/api/` 入口。
 
 - [x] 核心 AI 生成系统
 - [x] 角色成长与竞技场系统
@@ -182,25 +184,10 @@ Cloudflare Pages 部署环境变量需显式设置 `PNPM_VERSION=11.3.0`，避�
 
 ```
 MahoShojo-Generator/
-├── app/                    # App Router（承载新版 auth 路由）
-│   └── api/
-│       └── auth/
-├── pages/                   # 页面路由
-│   ├── index.tsx           # 主页
-│   ├── name.tsx            # 魔法少女生成
-│   ├── details.tsx         # 深度问卷
-│   ├── canshou.tsx         # 残兽生成
-│   ├── free.tsx            # 自由生成
-│   ├── arena.tsx           # 竞技场
-│   ├── pvp.tsx             # PVP 对决
-│   ├── ranking.tsx         # 排行榜
-│   ├── scenario.tsx        # 情景生成（箱庭物语）
-│   ├── character-party.tsx # 角色组队卡
-│   ├── tavern.tsx          # 酒馆生态联动
-│   ├── magic-tea-party.tsx # 魔法茶会（长期对话）
-│   ├── encyclopedia/       # 百科系统
-│   ├── character-manager.tsx  # 角色管理
-│   └── api/                # API 路由
+├── app/                    # App Router 页面、全局 layout 与 Route Handlers
+│   ├── api/                # Web Request/Response API 入口
+│   ├── layout.tsx          # 全局 HTML 壳、metadata、样式与 Providers
+│   └── **/page.tsx         # 页面路由入口
 ├── lib/                    # 核心逻辑
 │   ├── ai/                 # AI 集成
 │   ├── ai-session/         # AI 连续会话（连续战报等）
