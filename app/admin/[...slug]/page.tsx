@@ -26,6 +26,7 @@ const COMPONENT_MAP: Record<string, React.ComponentType> = {
   'pvp': dynamic(() => import('@/components/creation/admin/pvp'), { ssr: false }),
   'large-objects': dynamic(() => import('@/components/creation/admin/large-objects'), { ssr: false }),
   'data-maintenance': dynamic(() => import('@/components/creation/admin/data-maintenance'), { ssr: false }),
+  'ai-channel-availability': dynamic(() => import('@/components/creation/admin/ai-channel-availability'), { ssr: false }),
 };
 
 function AdminSlugContent({ slug }: { slug: string }) {

@@ -14,6 +14,7 @@ import dashboardStatsHandler from '@/components/creation/api/admin/dashboard-sta
 import usersHandler from '@/components/creation/api/admin/users';
 import dataCardsHandler from '@/components/creation/api/admin/data-cards';
 import aiModelsHandler from '@/components/creation/api/admin/ai-models';
+import aiChannelAvailabilityHandler from '@/components/creation/api/admin/ai-channel-availability';
 import aiReviewHandler from '@/components/creation/api/admin/ai-review';
 import arenaRatingsHandler from '@/components/creation/api/admin/arena-ratings';
 import arenaRatingEventsHandler from '@/components/creation/api/admin/arena-rating-events';
@@ -106,6 +107,7 @@ const ROUTE_MAP: Record<string, any> = {
   'data-card-updates': dataCardUpdatesHandler,
   'data-card-updates/batch-review': dataCardUpdatesBatchReviewHandler,
   'data-card-metrics/recompute': dataCardMetricsRecomputeHandler,
+  'ai-channel-availability': aiChannelAvailabilityHandler,
   'ai-models': aiModelsHandler,
   'ai-review': aiReviewHandler,
   'questionnaire-native': questionnaireNativeHandler,

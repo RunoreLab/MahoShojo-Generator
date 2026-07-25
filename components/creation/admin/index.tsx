@@ -448,6 +448,14 @@ export default function AdminHomePage() {
           tone: 'border-violet-200 hover:border-violet-300',
           icon: Database,
         },
+        {
+          href: '/admin/ai-channel-availability',
+          title: 'AI 渠道可用性',
+          description: '查看 AI 渠道/模型可用性汇总、错误分布，浏览原始桶数据，清理过期记录。',
+          tone: 'border-cyan-200 hover:border-cyan-300',
+          icon: Activity,
+          badge: 'Phase 2',
+        },
       ],
     },
   ];
