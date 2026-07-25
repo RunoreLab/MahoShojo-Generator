@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import Head from 'next/head';
 import Link from 'next/link';
-import { useRouter } from 'next/router';
+import { usePagesRouterCompat as useRouter } from '@/lib/admin/pages-router-compat';
 import { debounce } from '@/lib/debounce';
 import { ContentManagementActionBar } from '@/components/admin/content-management/ContentManagementActionBar';
 import { ContentManagementAiReviewModal } from '@/components/admin/content-management/ContentManagementAiReviewModal';

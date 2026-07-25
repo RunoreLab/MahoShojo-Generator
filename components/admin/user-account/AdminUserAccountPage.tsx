@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import Head from 'next/head';
 import Link from 'next/link';
-import { useRouter } from 'next/router';
+import { usePagesRouterCompat as useRouter } from '@/lib/admin/pages-router-compat';
 import { AlertTriangle, MailCheck, RefreshCw, ShieldAlert, ShieldCheck, Users } from 'lucide-react';
 
 import { AdminUserAccountDetailPanel } from '@/components/admin/user-account/AdminUserAccountDetailPanel';

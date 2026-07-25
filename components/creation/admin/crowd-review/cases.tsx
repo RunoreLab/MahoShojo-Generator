@@ -1,6 +1,6 @@
 import Head from 'next/head';
 import Link from 'next/link';
-import { useRouter } from 'next/router';
+import { usePagesRouterCompat as useRouter } from '@/lib/admin/pages-router-compat';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { AdminCrowdReviewCaseDetailDto, AdminCrowdReviewCaseListItem } from '@/lib/admin/governance';

@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/router';
+import { usePagesRouterCompat as useRouter } from '@/lib/admin/pages-router-compat';
 import {
   AlertTriangle,
   Download,
