@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 
-import { createAdminRedemptionCodesHandler } from '@/pages/api/admin/redemption-codes';
+import { createAdminRedemptionCodesHandler } from '@/components/creation/api/admin/redemption-codes';
 
 describe('api/admin/redemption-codes handler', () => {
   test('GET returns list and stats using canonical camelCase DTOs', async () => {

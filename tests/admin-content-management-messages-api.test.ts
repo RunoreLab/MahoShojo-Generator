@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 
-import { createAdminDataCardsBatchUpdateHandler } from '@/pages/api/admin/data-cards/batch-update';
-import { createAdminDataCardUpdatesBatchReviewHandler } from '@/pages/api/admin/data-card-updates/batch-review';
+import { createAdminDataCardsBatchUpdateHandler } from '@/components/creation/api/admin/data-cards/batch-update';
+import { createAdminDataCardUpdatesBatchReviewHandler } from '@/components/creation/api/admin/data-card-updates/batch-review';
 
 const auth = {
   user: { id: 88, username: 'admin', is_admin: 1 },

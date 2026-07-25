@@ -1,9 +1,9 @@
 import { describe, expect, test } from 'vitest';
 
-import { createAdminMessagesExpireSiteHandler } from '@/pages/api/admin/messages/site/[id]/expire';
-import { createAdminDirectMessagesHandler } from '@/pages/api/admin/messages/direct';
-import { createAdminMessagesHandler } from '@/pages/api/admin/messages';
-import { createAdminSiteMessagesHandler } from '@/pages/api/admin/messages/site';
+import { createAdminMessagesExpireSiteHandler } from '@/components/creation/api/admin/messages/site/[id]/expire';
+import { createAdminDirectMessagesHandler } from '@/components/creation/api/admin/messages/direct';
+import { createAdminMessagesHandler } from '@/components/creation/api/admin/messages/index';
+import { createAdminSiteMessagesHandler } from '@/components/creation/api/admin/messages/site';
 
 const auth = {
   user: { id: 88, username: 'admin', is_admin: 1 },

@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'vitest';
 
-import { createAdminCrowdReviewCasesHandler } from '@/pages/api/admin/crowd-review/cases';
-import { createAdminCrowdReviewInspectorsHandler } from '@/pages/api/admin/crowd-review/inspectors';
-import { createAdminReportCasesHandler } from '@/pages/api/admin/report-cases';
+import { createAdminCrowdReviewCasesHandler } from '@/components/creation/api/admin/crowd-review/cases/index';
+import { createAdminCrowdReviewInspectorsHandler } from '@/components/creation/api/admin/crowd-review/inspectors/index';
+import { createAdminReportCasesHandler } from '@/components/creation/api/admin/report-cases/index';
 
 describe('admin governance read APIs', () => {
   test('GET /api/admin/report-cases forwards status filter', async () => {

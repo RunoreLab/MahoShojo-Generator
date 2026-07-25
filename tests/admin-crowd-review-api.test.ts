@@ -1,10 +1,10 @@
 import { describe, expect, test } from 'vitest';
 
-import { createAdminCrowdReviewCaseDetailHandler } from '@/pages/api/admin/crowd-review/cases/[roundId]';
-import { createAdminCrowdReviewRoundCancelHandler } from '@/pages/api/admin/crowd-review/cases/[roundId]/cancel';
-import { createAdminCrowdReviewRoundOverrideHandler } from '@/pages/api/admin/crowd-review/cases/[roundId]/override';
-import { createAdminCrowdReviewRoundTakeOverHandler } from '@/pages/api/admin/crowd-review/cases/[roundId]/take-over';
-import { createAdminCrowdReviewInspectorStatusHandler } from '@/pages/api/admin/crowd-review/inspectors/[userId]/status';
+import { createAdminCrowdReviewCaseDetailHandler } from '@/components/creation/api/admin/crowd-review/cases/[roundId]';
+import { createAdminCrowdReviewRoundCancelHandler } from '@/components/creation/api/admin/crowd-review/cases/[roundId]/cancel';
+import { createAdminCrowdReviewRoundOverrideHandler } from '@/components/creation/api/admin/crowd-review/cases/[roundId]/override';
+import { createAdminCrowdReviewRoundTakeOverHandler } from '@/components/creation/api/admin/crowd-review/cases/[roundId]/take-over';
+import { createAdminCrowdReviewInspectorStatusHandler } from '@/components/creation/api/admin/crowd-review/inspectors/[userId]/status';
 import { AdminGovernanceConflictError, AdminGovernanceNotFoundError } from '@/lib/admin/governance';
 
 const auth = {

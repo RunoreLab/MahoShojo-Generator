@@ -5,9 +5,9 @@ import {
   ReportAppealNotFoundError,
   ReportAppealValidationError,
 } from '@/lib/report-appeals/service';
-import { createAdminReportAppealDetailHandler } from '@/pages/api/admin/report-appeals/[appealId]';
-import { createAdminReportAppealReviewHandler } from '@/pages/api/admin/report-appeals/[appealId]/review';
-import { createAdminReportAppealsHandler } from '@/pages/api/admin/report-appeals';
+import { createAdminReportAppealDetailHandler } from '@/components/creation/api/admin/report-appeals/[appealId]';
+import { createAdminReportAppealReviewHandler } from '@/components/creation/api/admin/report-appeals/[appealId]/review';
+import { createAdminReportAppealsHandler } from '@/components/creation/api/admin/report-appeals/index';
 
 const auth = {
   user: { id: 99, username: 'admin', is_admin: 1 },

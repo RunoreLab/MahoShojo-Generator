@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'vitest';
 
-import { createAdminReportCaseDetailHandler } from '@/pages/api/admin/report-cases/[caseId]';
-import { createAdminReportCaseDecisionHandler } from '@/pages/api/admin/report-cases/[caseId]/decision';
-import { createAdminReportCaseNotifyCreatorHandler } from '@/pages/api/admin/report-cases/[caseId]/notify-creator';
+import { createAdminReportCaseDetailHandler } from '@/components/creation/api/admin/report-cases/[caseId]';
+import { createAdminReportCaseDecisionHandler } from '@/components/creation/api/admin/report-cases/[caseId]/decision';
+import { createAdminReportCaseNotifyCreatorHandler } from '@/components/creation/api/admin/report-cases/[caseId]/notify-creator';
 import {
   AdminGovernanceConflictError,
   AdminGovernanceNotFoundError,

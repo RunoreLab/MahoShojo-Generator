@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 
-import { createAdminDashboardStatsHandler } from '@/pages/api/admin/dashboard-stats';
+import { createAdminDashboardStatsHandler } from '@/components/creation/api/admin/dashboard-stats';
 
 describe('admin dashboard stats API', () => {
   test('GET /api/admin/dashboard-stats reads governance section', async () => {

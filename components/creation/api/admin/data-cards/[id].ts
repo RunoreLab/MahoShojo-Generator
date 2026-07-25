@@ -1,4 +1,4 @@
-import { queryFromD1 } from '../../../../lib/database/core';
+import { queryFromD1 } from '@/lib/database/core';
 import { reviewDataCardUpdate } from '@/lib/database/admin';
 
 export const runtime = 'edge';
