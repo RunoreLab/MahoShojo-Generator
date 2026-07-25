@@ -92,12 +92,15 @@ const CustomSelect: React.FC<CustomSelectProps> = ({ options, value, onChange, p
     }, [isOpen]);
 
     const renderSelected = () => (
-        <div className="flex flex-col text-left leading-tight">
+        <div className="flex flex-1 flex-col text-left leading-tight">
             <span className="battle-lite-strong-text text-sm font-semibold">
                 {selectedOption?.label ?? placeholder}
             </span>
-            <span className="battle-lite-subtle-text text-xs">
-                {selectedOption?.description ?? '请选择'}
+            <span className="battle-lite-subtle-text flex items-center gap-1 text-xs">
+                <span>{selectedOption?.description ?? '请选择'}</span>
+                {selectedOption?.availability && (
+                    <ChannelAvailabilityBadge availability={selectedOption.availability} compact />
+                )}
             </span>
         </div>
     );
