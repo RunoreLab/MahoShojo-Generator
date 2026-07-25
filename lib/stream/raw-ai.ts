@@ -511,6 +511,13 @@ export async function generateWithStreamAI(
                     });
                 }
 
+                // 记录本次 attempt 的失败 outcome
+                if (options?.channelContext) {
+                    const ctx = options.channelContext;
+                    const outcome = classifyOutcome(ctx.providerId === 'system', error);
+                    void recordAiChannelOutcome({ providerId: ctx.providerId, modelId: ctx.modelId, ...outcome });
+                }
+
                 // 如果不是最后一次尝试，等待后再重试
                 if (attempt < retryCount - 1) {
                     const waitTime = (attempt + 1) * 200; // 递增等待时间
@@ -521,11 +528,6 @@ export async function generateWithStreamAI(
         }
 
         log.warn(`提供商所有尝试都失败了: ${provider.name}`);
-        if (options?.channelContext) {
-            const ctx = options.channelContext;
-            const outcome = classifyOutcome(ctx.providerId === 'system', lastError);
-            void recordAiChannelOutcome({ providerId: ctx.providerId, modelId: ctx.modelId, ...outcome });
-        }
     }
 
     log.error(`所有提供商都失败了: ${lastError}`);

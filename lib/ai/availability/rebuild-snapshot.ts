@@ -178,24 +178,17 @@ async function rebuildFromBuckets(db: AppDrizzleDb): Promise<ChannelAvailability
   }
 
   // 收集自定义 model（不在 catalog 中，但 24h 有样本）
-  const customEntries: ChannelAvailabilityEntry[] = [];
+  const customEntriesWithSamples: { entry: ChannelAvailabilityEntry; totalSamples: number }[] = [];
   for (const [key, agg] of aggMap) {
     if (catalogKeys.has(key)) continue;
     const totalSamples = agg.success24h + agg.failure24h;
     if (totalSamples < MIN_SAMPLE_COUNT) continue;
-    customEntries.push(buildEntry(agg));
+    customEntriesWithSamples.push({ entry: buildEntry(agg), totalSamples });
   }
 
   // 按样本数降序，硬顶 MAX_CUSTOM_ENTRIES
-  customEntries.sort((a, b) => {
-    const aRef = a.reference ?? a.primary;
-    const bRef = b.reference ?? b.primary;
-    // 粗排：有数据的排前面
-    if (aRef.status !== 'unknown' && bRef.status === 'unknown') return -1;
-    if (aRef.status === 'unknown' && bRef.status !== 'unknown') return 1;
-    return 0;
-  });
-  const trimmedCustom = customEntries.slice(0, MAX_CUSTOM_ENTRIES);
+  customEntriesWithSamples.sort((a, b) => b.totalSamples - a.totalSamples);
+  const trimmedCustom = customEntriesWithSamples.slice(0, MAX_CUSTOM_ENTRIES).map(item => item.entry);
 
   const sourceBucketMax = rows.length > 0
     ? rows.reduce((max, r) => (r.bucketStart > max ? r.bucketStart : max), rows[0].bucketStart)
