@@ -14,6 +14,7 @@ import type {
   MagicTeaPartyUpdateDraft,
 } from '@/lib/magic-tea-party/types';
 import { generateWithStreamAI, LoadBalanceStrategy, type GenerateWithAIOptions } from '@/lib/stream/raw-ai';
+import { buildChannelContextFromResolved } from '@/lib/ai/availability';
 import { createReasoningSseBridge, shouldUseClientSse } from '@/lib/stream/reasoning-sse';
 import { createBlankDataCard } from '@/lib/data-card-converter';
 import { recordUserActivityFromRequest } from '@/lib/user-activity/record';
@@ -310,6 +311,7 @@ async function handler(req: NextRequest): Promise<Response> {
     const providerOptions: GenerateWithAIOptions = {
       providerOverride,
       loadBalanceStrategy: LoadBalanceStrategy.CUSTOM,
+      channelContext: buildChannelContextFromResolved(providerId, customProvider.modelId.trim()),
     };
     const reasoningBridge = wantsClientSse ? createReasoningSseBridge('魔法茶会流式生成') : null;
     const aiTelemetry: NonNullable<GenerateWithAIOptions['telemetry']> = {};

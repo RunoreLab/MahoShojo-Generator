@@ -8,6 +8,7 @@ import { type AIProvider } from '@/lib/config';
 import { enforceTextSafety } from '@/lib/content-safety/server';
 import { getLogger } from '@/lib/logger';
 import { generateWithStreamAI, LoadBalanceStrategy, type GenerateWithAIOptions } from '@/lib/stream/raw-ai';
+import { buildChannelContextFromPayload } from '@/lib/ai/availability';
 import { createReasoningSseBridge, shouldUseClientSse } from '@/lib/stream/reasoning-sse';
 import { recordUserActivityFromRequest } from '@/lib/user-activity/record';
 
@@ -196,6 +197,7 @@ async function handler(req: NextRequest): Promise<Response> {
       : undefined;
     const reasoningBridge = wantsClientSse ? createReasoningSseBridge('自由生成（流式）') : null;
     const aiTelemetry: NonNullable<GenerateWithAIOptions['telemetry']> = {};
+    const channelContext = buildChannelContextFromPayload(customProviderPayload, customModelOverride);
 
     const streamResult = await generateWithStreamAI(
       {
@@ -207,6 +209,7 @@ async function handler(req: NextRequest): Promise<Response> {
         ...(providerOptions ?? {}),
         abortSignal: req.signal,
         telemetry: aiTelemetry,
+        channelContext,
         ...(reasoningBridge ? { onReasoningEvent: reasoningBridge.onReasoningEvent } : {}),
       }
     );

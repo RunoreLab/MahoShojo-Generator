@@ -1,5 +1,6 @@
 // app/api/generate-magical-girl-details/handler.ts
 import { generateWithAI, GenerationConfig, LoadBalanceStrategy, type GenerateWithAIOptions } from '@/lib/ai';
+import { buildChannelContextFromPayload } from '@/lib/ai/availability';
 import { z } from 'zod/v3';
 import { getRandomFlowers } from '@/lib/random-choose-hana-name';
 // import { saveToD1 } from '@/lib/d1';
@@ -605,7 +606,8 @@ async function handler(req: Request): Promise<Response> {
     const loreText = buildQuestionnaireLoreText(effectiveQuestionnaires);
 
     const aiTelemetry: NonNullable<GenerateWithAIOptions['telemetry']> = {};
-    const aiOptions = providerOptions ? { ...providerOptions, telemetry: aiTelemetry } : { telemetry: aiTelemetry };
+    const channelContext = buildChannelContextFromPayload(customProviderPayload, customModelOverride);
+    const aiOptions = providerOptions ? { ...providerOptions, channelContext, telemetry: aiTelemetry } : { channelContext, telemetry: aiTelemetry };
 
     const magicalGirlDetails = await generateWithAI({ answers: normalizedAnswers, language, loreText }, {
       ...magicalGirlDetailsConfig,

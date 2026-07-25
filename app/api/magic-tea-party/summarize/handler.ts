@@ -7,6 +7,7 @@ import { enforceTextSafety } from '@/lib/content-safety/server';
 import { getLogger } from '@/lib/logger';
 import { buildMagicTeaPartySummarizePrompt, type MagicTeaPartySummarizeMode } from '@/lib/magic-tea-party/prompts';
 import { generateWithStreamAI, LoadBalanceStrategy, type GenerateWithAIOptions } from '@/lib/stream/raw-ai';
+import { buildChannelContextFromResolved } from '@/lib/ai/availability';
 import { recordUserActivityFromRequest } from '@/lib/user-activity/record';
 
 const log = getLogger('api-magic-tea-party-summarize');
@@ -131,6 +132,7 @@ async function handler(req: NextRequest): Promise<Response> {
     const providerOptions: GenerateWithAIOptions = {
       providerOverride,
       loadBalanceStrategy: LoadBalanceStrategy.CUSTOM,
+      channelContext: buildChannelContextFromResolved(providerId, customProvider.modelId.trim()),
     };
 
     const streamResult = await generateWithStreamAI(

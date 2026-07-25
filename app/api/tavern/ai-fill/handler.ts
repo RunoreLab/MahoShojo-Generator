@@ -2,6 +2,7 @@ import { z } from 'zod/v3';
 import { NextRequest } from 'next/server';
 
 import { generateWithAI, LoadBalanceStrategy, type GenerationConfig, type GenerateWithAIOptions } from '@/lib/ai';
+import { buildChannelContextFromPayload } from '@/lib/ai/availability';
 import { AI_PROVIDER_CATALOG, resolveAIProviderModel } from '@/lib/ai/constants';
 import { formatReferenceAttachmentsForPrompt, type AITextAttachment } from '@/lib/ai/attachments';
 import type { AIProvider } from '@/lib/config';
@@ -159,6 +160,7 @@ ${formatReferenceAttachmentsForPrompt(input.attachments)}
       };
 
     const shouldDisablePolling = customProviderId !== null && customProviderId !== 'system';
+    const channelContext = buildChannelContextFromPayload(customProviderPayload, customModelOverride);
     const providerOptions: GenerateWithAIOptions | undefined =
       customProviderOverride || shouldDisablePolling
         ? {
@@ -166,8 +168,9 @@ ${formatReferenceAttachmentsForPrompt(input.attachments)}
             ...(shouldDisablePolling
               ? { loadBalanceStrategy: LoadBalanceStrategy.CUSTOM }
               : { loadBalanceStrategy: LoadBalanceStrategy.SEQUENTIAL }),
+            channelContext,
           }
-        : undefined;
+        : { channelContext };
 
     const result = await generateWithAI({ name, language, attachments: [attachment] }, generationConfig, providerOptions);
     recordUserActivityFromRequest(req);

@@ -5,6 +5,7 @@ import { NextRequest } from 'next/server';
 
 import { getLogger } from '@/lib/logger';
 import { generateWithAI, GenerationConfig, LoadBalanceStrategy } from '@/lib/ai';
+import { buildChannelContextFromPayload } from '@/lib/ai/availability';
 import { AI_PROVIDER_CATALOG, resolveAIProviderModel } from '@/lib/ai/constants';
 import { config as appConfig, SafetyCheckPolicy, type AIProvider } from '@/lib/config';
 import { quickCheck } from '@/lib/sensitive-word-filter';
@@ -125,14 +126,16 @@ async function handler(req: NextRequest): Promise<Response> {
     }
 
     const shouldDisablePolling = customProviderId !== null && customProviderId !== 'system';
+    const channelContext = buildChannelContextFromPayload(customProviderPayload, customModelOverride);
     const providerOptions = (customProviderOverride || shouldDisablePolling)
       ? {
         ...(customProviderOverride ? { providerOverride: customProviderOverride } : {}),
         ...(shouldDisablePolling
           ? { loadBalanceStrategy: LoadBalanceStrategy.CUSTOM }
           : { loadBalanceStrategy: LoadBalanceStrategy.SEQUENTIAL }),
+        channelContext,
       }
-      : {};
+      : { channelContext };
 
     const finalUserGuidance = typeof userGuidance === 'string' ? userGuidance.trim() : '';
 

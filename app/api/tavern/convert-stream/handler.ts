@@ -9,6 +9,7 @@ import { getUtf8ByteLength } from '@/lib/data-card-size';
 import { getLogger } from '@/lib/logger';
 import { CANSHOU_LORE } from '@/lib/canshou-lore';
 import { generateWithStreamAI, LoadBalanceStrategy, type GenerateWithAIOptions } from '@/lib/stream/raw-ai';
+import { buildChannelContextFromPayload } from '@/lib/ai/availability';
 import { createReasoningSseBridge, shouldUseClientSse } from '@/lib/stream/reasoning-sse';
 import { recordUserActivityFromRequest } from '@/lib/user-activity/record';
 import { getRandomFlowers } from '@/lib/random-choose-hana-name';
@@ -284,6 +285,7 @@ async function handler(req: NextRequest): Promise<Response> {
       : undefined;
     const reasoningBridge = wantsClientSse ? createReasoningSseBridge('酒馆导入（流式）') : null;
     const aiTelemetry: NonNullable<GenerateWithAIOptions['telemetry']> = {};
+    const channelContext = buildChannelContextFromPayload(customProviderPayload, customModelOverride);
 
     const streamResult = await generateWithStreamAI(
       {
@@ -295,6 +297,7 @@ async function handler(req: NextRequest): Promise<Response> {
         ...(providerOptions ?? {}),
         abortSignal: req.signal,
         telemetry: aiTelemetry,
+        channelContext,
         ...(reasoningBridge ? { onReasoningEvent: reasoningBridge.onReasoningEvent } : {}),
       }
     );

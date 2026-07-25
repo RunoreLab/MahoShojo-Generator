@@ -16,6 +16,7 @@ import { enforceTextSafety } from '@/lib/content-safety/server';
 import { AI_PROVIDER_CATALOG, resolveAIProviderModel } from '@/lib/ai/constants';
 import { acquirePublicAiRateLimit, buildPublicAiRateLimitResponse, inferPublicAiProviderMode } from '@/lib/ai/public-rate-limit';
 import { generateWithStreamAI, LoadBalanceStrategy, type GenerateWithAIOptions } from '@/lib/stream/raw-ai';
+import { buildChannelContextFromPayload } from '@/lib/ai/availability';
 import { createReasoningSseBridge, shouldUseClientSse } from '@/lib/stream/reasoning-sse';
 import { getRandomFlowers } from '@/lib/random-choose-hana-name';
 import { recordUserActivityFromRequest } from '@/lib/user-activity/record';
@@ -315,6 +316,7 @@ ${qaText}
       : undefined;
     const reasoningBridge = wantsClientSse ? createReasoningSseBridge('魔法少女档案（流式）') : null;
     const aiTelemetry: NonNullable<GenerateWithAIOptions['telemetry']> = {};
+    const channelContext = buildChannelContextFromPayload(customProviderPayload, customModelOverride);
 
     const streamResult = await generateWithStreamAI(
       {
@@ -326,6 +328,7 @@ ${qaText}
         ...(providerOptions ?? {}),
         abortSignal: req.signal,
         telemetry: aiTelemetry,
+        channelContext,
         ...(reasoningBridge ? { onReasoningEvent: reasoningBridge.onReasoningEvent } : {}),
       }
     );

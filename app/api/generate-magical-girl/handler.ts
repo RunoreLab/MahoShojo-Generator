@@ -1,6 +1,7 @@
 // app/api/generate-magical-girl/handler.ts
 import { z } from 'zod/v3';
 import { generateWithAI, GenerationConfig } from '@/lib/ai';
+import { buildSystemChannelContext } from '@/lib/ai/availability';
 import { config as appConfig } from '@/lib/config';
 import { MainColor } from '@/lib/main-color';
 import { getLogger } from '@/lib/logger';
@@ -67,7 +68,9 @@ export async function generateMagicalGirlWithAI(
   realName: string,
   language: string
 ): Promise<AIGeneratedMagicalGirl> {
-  return generateWithAI({ realName, language }, magicalGirlGenerationConfig);
+  return generateWithAI({ realName, language }, magicalGirlGenerationConfig, {
+    channelContext: buildSystemChannelContext(),
+  });
 }
 
 // 处理器重构：

@@ -22,6 +22,7 @@ import { STRICT_RANKED_MODEL_FALLBACKS } from '@/lib/arena/ranked-model-policy';
     GenerateWithAIOptions,
     RawReasoningStreamEvent
 } from '@/lib/stream/raw-ai';
+import { buildChannelContextFromPayload } from '@/lib/ai/availability';
 import {
     createStreamReadWithTimeout,
     STREAM_READ_IDLE_TIMEOUT_MS,
@@ -707,12 +708,14 @@ async function handler(req: NextRequest): Promise<Response> {
         const reasoningEventQueue: RawReasoningStreamEvent[] = [];
         let lastReasoningActivityAtMs: number | null = null;
         let flushReasoningQueueNow: (() => void) | null = null;
+        const channelContext = buildChannelContextFromPayload(customProviderPayload, customModelOverride);
         const aiOptions: GenerateWithAIOptions = {
             ...(providerOptions ?? {}),
             abortSignal: req.signal,
             // 战报可能长思考/长生成超过 600s：上游读流改为 soft，避免误杀。
             streamReadTimeoutMode: 'soft',
             telemetry: aiTelemetry,
+            channelContext,
             ...(wantsSse
                 ? {
                     onReasoningEvent: (event) => {

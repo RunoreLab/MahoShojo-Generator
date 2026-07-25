@@ -2,6 +2,7 @@ import { z } from 'zod/v3';
 import { NextRequest } from 'next/server';
 
 import { generateWithAI, LoadBalanceStrategy, type GenerationConfig, type GenerateWithAIOptions } from '@/lib/ai';
+import { buildChannelContextFromPayload } from '@/lib/ai/availability';
 import { AI_PROVIDER_CATALOG, resolveAIProviderModel } from '@/lib/ai/constants';
 import { acquirePublicAiRateLimit, buildPublicAiRateLimitResponse, inferPublicAiProviderMode } from '@/lib/ai/public-rate-limit';
 import { FREE_GENERATION_ATTACHMENT_LIMITS, formatReferenceAttachmentsForPrompt, type AITextAttachment } from '@/lib/ai/attachments';
@@ -435,7 +436,8 @@ ${input.prompt}
       : undefined;
 
     const aiTelemetry: NonNullable<GenerateWithAIOptions['telemetry']> = {};
-    const aiOptions = providerOptions ? { ...providerOptions, telemetry: aiTelemetry } : { telemetry: aiTelemetry };
+    const channelContext = buildChannelContextFromPayload(customProviderPayload, customModelOverride);
+    const aiOptions = providerOptions ? { ...providerOptions, channelContext, telemetry: aiTelemetry } : { channelContext, telemetry: aiTelemetry };
 
     const result = await generateWithAI({ prompt, language, attachments }, generationConfig, aiOptions);
     recordUserActivityFromRequest(req);

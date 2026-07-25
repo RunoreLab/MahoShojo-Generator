@@ -10,6 +10,7 @@ import { AI_PROVIDER_CATALOG, resolveAIProviderModel } from '@/lib/ai/constants'
 import { acquirePublicAiRateLimit, buildPublicAiRateLimitResponse, inferPublicAiProviderMode } from '@/lib/ai/public-rate-limit';
 import { CANSHOU_LORE } from '@/lib/canshou-lore';
 import { generateWithStreamAI, LoadBalanceStrategy, type GenerateWithAIOptions } from '@/lib/stream/raw-ai';
+import { buildChannelContextFromPayload } from '@/lib/ai/availability';
 import { createReasoningSseBridge, shouldUseClientSse } from '@/lib/stream/reasoning-sse';
 import { formatQuestionnaireAnswers, normalizeUserAnswers, type QuestionnaireAnswerItem } from '@/lib/questionnaires';
 import { recordUserActivityFromRequest } from '@/lib/user-activity/record';
@@ -298,6 +299,7 @@ ${answerText}
       : undefined;
     const reasoningBridge = wantsClientSse ? createReasoningSseBridge('残兽档案（流式）') : null;
     const aiTelemetry: NonNullable<GenerateWithAIOptions['telemetry']> = {};
+    const channelContext = buildChannelContextFromPayload(customProviderPayload, customModelOverride);
 
     const streamResult = await generateWithStreamAI(
       {
@@ -309,6 +311,7 @@ ${answerText}
         ...(providerOptions ?? {}),
         abortSignal: req.signal,
         telemetry: aiTelemetry,
+        channelContext,
         ...(reasoningBridge ? { onReasoningEvent: reasoningBridge.onReasoningEvent } : {}),
       }
     );

@@ -8,6 +8,7 @@ import { getLogger } from '@/lib/logger';
 import { buildMagicTeaPartyUpdatePrompt } from '@/lib/magic-tea-party/prompts';
 import type { MagicTeaPartyMessage, MagicTeaPartyRole, MagicTeaPartyScenario, MagicTeaPartyUpdateDraft } from '@/lib/magic-tea-party/types';
 import { generateWithAI, LoadBalanceStrategy } from '@/lib/ai';
+import { buildChannelContextFromResolved } from '@/lib/ai/availability';
 import { applyShieldWords } from '@/lib/shield-word-filter';
 import { recordUserActivityFromRequest } from '@/lib/user-activity/record';
 
@@ -246,6 +247,7 @@ async function handler(req: NextRequest): Promise<Response> {
     }, {
       providerOverride,
       loadBalanceStrategy: LoadBalanceStrategy.CUSTOM,
+      channelContext: buildChannelContextFromResolved(providerId, customProvider.modelId.trim()),
     });
     recordUserActivityFromRequest(req);
 

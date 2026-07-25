@@ -9,6 +9,7 @@ import { enforceTextSafety } from '@/lib/content-safety/server';
 import { AI_PROVIDER_CATALOG, resolveAIProviderModel } from '@/lib/ai/constants';
 import { acquirePublicAiRateLimit, buildPublicAiRateLimitResponse, inferPublicAiProviderMode } from '@/lib/ai/public-rate-limit';
 import { generateWithStreamAI, LoadBalanceStrategy, type GenerateWithAIOptions } from '@/lib/stream/raw-ai';
+import { buildChannelContextFromPayload } from '@/lib/ai/availability';
 import { createReasoningSseBridge, shouldUseClientSse } from '@/lib/stream/reasoning-sse';
 import { recordUserActivityFromRequest } from '@/lib/user-activity/record';
 
@@ -292,6 +293,7 @@ ${identityHint ? `角色当前标识：${identityHint}` : '（无）'}
       : undefined;
     const reasoningBridge = wantsClientSse ? createReasoningSseBridge('角色升华（流式）') : null;
     const aiTelemetry: NonNullable<GenerateWithAIOptions['telemetry']> = {};
+    const channelContext = buildChannelContextFromPayload(customProviderPayload, customModelOverride);
 
     const streamResult = await generateWithStreamAI(
       {
@@ -303,6 +305,7 @@ ${identityHint ? `角色当前标识：${identityHint}` : '（无）'}
         ...(providerOptions ?? {}),
         abortSignal: req.signal,
         telemetry: aiTelemetry,
+        channelContext,
         ...(reasoningBridge ? { onReasoningEvent: reasoningBridge.onReasoningEvent } : {}),
       }
     );

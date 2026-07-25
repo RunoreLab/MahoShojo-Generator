@@ -1,6 +1,7 @@
 // app/api/generate-canshou/handler.ts
 import { z } from 'zod/v3';
 import { generateWithAI, GenerationConfig, LoadBalanceStrategy, type GenerateWithAIOptions } from '@/lib/ai';
+import { buildChannelContextFromPayload } from '@/lib/ai/availability';
 import { getLogger } from '@/lib/logger';
 import { NextRequest } from 'next/server';
 import { generateSignature } from '@/lib/signature'; // 导入签名工具
@@ -554,7 +555,8 @@ async function handler(req: NextRequest): Promise<Response> {
 
     // 调用通用AI生成函数
     const aiTelemetry: NonNullable<GenerateWithAIOptions['telemetry']> = {};
-    const aiOptions = providerOptions ? { ...providerOptions, telemetry: aiTelemetry } : { telemetry: aiTelemetry };
+    const channelContext = buildChannelContextFromPayload(customProviderPayload, customModelOverride);
+    const aiOptions = providerOptions ? { ...providerOptions, channelContext, telemetry: aiTelemetry } : { channelContext, telemetry: aiTelemetry };
 
     const canshouDetails = await generateWithAI({ answers: normalizedAnswers, language, loreText }, {
       ...canshouGenerationConfig,

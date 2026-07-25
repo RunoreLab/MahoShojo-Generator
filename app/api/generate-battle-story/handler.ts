@@ -2,6 +2,7 @@
 
 import { z } from 'zod/v3';
 import { generateWithAI, GenerationConfig, LoadBalanceStrategy, type GenerateWithAIOptions } from '@/lib/ai';
+import { buildChannelContextFromPayload } from '@/lib/ai/availability';
 import { getLogger } from '@/lib/logger';
 import magicalGirlQuestionnaire from '@/public/questionnaires/presets/magical-girl-default.json';
 import canshouQuestionnaire from '@/public/questionnaires/presets/canshou-default.json';
@@ -685,7 +686,8 @@ async function handler(req: NextRequest): Promise<Response> {
         };
 
         const aiTelemetry: NonNullable<GenerateWithAIOptions['telemetry']> = {};
-        const aiOptions = providerOptions ? { ...providerOptions, telemetry: aiTelemetry } : { telemetry: aiTelemetry };
+        const channelContext = buildChannelContextFromPayload(customProviderPayload, customModelOverride);
+        const aiOptions = providerOptions ? { ...providerOptions, channelContext, telemetry: aiTelemetry } : { channelContext, telemetry: aiTelemetry };
         let usedModelOverride: string | undefined;
         let aiResult: BattleReportResult | null = null;
         let lastModelOverrideError: unknown = null;

@@ -4,6 +4,7 @@ import { NextRequest } from 'next/server';
 import questionnaire from '@/public/questionnaires/presets/magical-girl-default.json';
 import canshouQuestionnaire from '@/public/questionnaires/presets/canshou-default.json';
 import { generateWithAI, LoadBalanceStrategy, type GenerationConfig, type GenerateWithAIOptions } from '@/lib/ai';
+import { buildChannelContextFromPayload } from '@/lib/ai/availability';
 import { AI_PROVIDER_CATALOG, resolveAIProviderModel } from '@/lib/ai/constants';
 import { formatReferenceAttachmentsForPrompt, type AITextAttachment } from '@/lib/ai/attachments';
 import { buildJsonResponseWithOptionalAiMeta } from '@/lib/ai/meta-response';
@@ -505,9 +506,10 @@ async function handler(req: NextRequest): Promise<Response> {
           }
         : undefined;
     const aiTelemetry: NonNullable<GenerateWithAIOptions['telemetry']> = {};
+    const channelContext = buildChannelContextFromPayload(customProviderPayload, customModelOverride);
     const aiOptions: GenerateWithAIOptions = providerOptions
-      ? { ...providerOptions, telemetry: aiTelemetry }
-      : { telemetry: aiTelemetry };
+      ? { ...providerOptions, channelContext, telemetry: aiTelemetry }
+      : { channelContext, telemetry: aiTelemetry };
 
     const toSuccessResponse = (data: unknown) =>
       buildJsonResponseWithOptionalAiMeta({

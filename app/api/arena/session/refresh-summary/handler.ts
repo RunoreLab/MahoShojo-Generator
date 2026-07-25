@@ -5,6 +5,7 @@ import { buildBattleStorySummaryFallback, buildBattleStorySummaryPrompt } from '
 import { resolveAiSessionProvider, parseAiSessionCustomProvider } from '@/lib/ai-session/provider';
 import { acquireAiSessionSoftRateLimit } from '@/lib/ai-session/rate-limit';
 import { generateWithStreamAI, LoadBalanceStrategy, type GenerateWithAIOptions } from '@/lib/stream/raw-ai';
+import { buildChannelContextFromResolved } from '@/lib/ai/availability';
 import { getLogger } from '@/lib/logger';
 import { recordUserActivityFromRequest } from '@/lib/user-activity/record';
 
@@ -103,11 +104,21 @@ async function handler(req: NextRequest): Promise<Response> {
       language: parsed.data.language,
     });
 
+    const channelContext = buildChannelContextFromResolved(
+      providerResolved.value.providerId,
+      providerResolved.value.modelId ?? 'default',
+    );
     const providerOptions: GenerateWithAIOptions =
       providerResolved.value.providerOptions ??
       ({
         loadBalanceStrategy: LoadBalanceStrategy.RANDOM,
+        channelContext,
       } satisfies GenerateWithAIOptions);
+
+    // Ensure channelContext is present even when providerOptions comes from providerResolved
+    if (!providerOptions.channelContext) {
+      providerOptions.channelContext = channelContext;
+    }
 
     const streamResult = await generateWithStreamAI(
       {

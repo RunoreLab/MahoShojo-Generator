@@ -2,6 +2,7 @@
 
 import { z } from 'zod/v3';
 import { generateWithAI, GenerationConfig, LoadBalanceStrategy } from '@/lib/ai';
+import { buildChannelContextFromPayload } from '@/lib/ai/availability';
 import { getLogger } from '@/lib/logger';
 import { NextRequest } from 'next/server';
 import { generateSignature } from '@/lib/signature';
@@ -202,7 +203,8 @@ async function handler(req: NextRequest): Promise<Response> {
       : undefined;
 
     const aiTelemetry: NonNullable<GenerateWithAIOptions['telemetry']> = {};
-    const aiOptions = providerOptions ? { ...providerOptions, telemetry: aiTelemetry } : { telemetry: aiTelemetry };
+    const channelContext = buildChannelContextFromPayload(customProviderPayload, customModelOverride);
+    const aiOptions = providerOptions ? { ...providerOptions, channelContext, telemetry: aiTelemetry } : { channelContext, telemetry: aiTelemetry };
     const scenarioData = await generateWithAI(null, generationConfig, aiOptions);
     recordUserActivityFromRequest(req);
 
