@@ -7,6 +7,7 @@ import { getLogger } from "../logger";
 import { getProviderFetch } from "@/lib/ai/middleware/provider-fetch";
 import { resolveMaxOutputTokensOption } from "@/lib/ai/max-output-tokens";
 import { extractUpstreamErrorMessage, enhanceErrorWithUpstreamMessage } from "@/lib/ai/utils/error-extraction";
+import { classifySuccess, classifyOutcome, recordAiChannelOutcome } from "@/lib/ai/availability";
 import {
     createStreamReadWithTimeout,
     STREAM_READ_IDLE_TIMEOUT_MS,
@@ -173,6 +174,11 @@ export interface GenerateWithAIOptions {
         attempt?: number;
     };
     onReasoningEvent?: (event: RawReasoningStreamEvent) => void;
+    /** 渠道上下文，用于可用性记分。无此字段则不记分。 */
+    channelContext?: {
+        providerId: string;
+        modelId: string;
+    };
 }
 
 export const buildStreamTextAbortOptions = (abortSignal?: AbortSignal): { abortSignal?: AbortSignal } => (
@@ -474,6 +480,10 @@ export async function generateWithStreamAI(
 	                );
 
                 log.info(`提供商生成成功: 提供商: ${provider.name} 尝试次数: ${attempt + 1}`);
+                if (options?.channelContext) {
+                    const ctx = options.channelContext;
+                    void recordAiChannelOutcome({ providerId: ctx.providerId, modelId: ctx.modelId, ...classifySuccess() });
+                }
 
                 return {
                     response: new Response(textOnlyStream.pipeThrough(new TextEncoderStream()), {
@@ -511,6 +521,11 @@ export async function generateWithStreamAI(
         }
 
         log.warn(`提供商所有尝试都失败了: ${provider.name}`);
+        if (options?.channelContext) {
+            const ctx = options.channelContext;
+            const outcome = classifyOutcome(ctx.providerId === 'system', lastError);
+            void recordAiChannelOutcome({ providerId: ctx.providerId, modelId: ctx.modelId, ...outcome });
+        }
     }
 
     log.error(`所有提供商都失败了: ${lastError}`);
