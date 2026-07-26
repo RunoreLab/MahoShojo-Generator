@@ -31,6 +31,8 @@ interface AiProviderSelectorProps {
 
 const PROVIDER_SELECTOR_SYNC_EVENT = 'mahoshojo:set-ai-provider-config';
 
+type AvailabilityStatus = 'healthy' | 'degraded' | 'poor' | 'unknown';
+
 type AvailabilityEntry = {
     providerId: string;
     modelId: string;
@@ -508,14 +510,51 @@ const AiProviderSelector: React.FC<AiProviderSelectorProps> = ({
     }, [activeProvider, getMaxOutputTokensStorageKey, isHydrated, maxOutputTokensInput]);
 
     const providerSelectOptions = useMemo<CustomSelectOption[]>(() => {
-        return providerOptions.map((provider): CustomSelectOption => ({
-            value: provider.id,
-            label: provider.name,
-            description: provider.description,
-            availability: provider.models[0]
-                ? availabilityMap.get(`${provider.id}:${provider.models[0].value}`)
-                : undefined,
-        }));
+        return providerOptions.map((provider): CustomSelectOption => {
+            const entries = provider.models
+                .map(model => availabilityMap.get(`${provider.id}:${model.value}`))
+                .filter((entry): entry is AvailabilityEntry => entry !== undefined);
+
+            if (entries.length === 0) {
+                return {
+                    value: provider.id,
+                    label: provider.name,
+                    description: provider.description,
+                };
+            }
+
+            let rateSum = 0;
+            let rateCount = 0;
+            let hasAnyRate = false;
+
+            for (const entry of entries) {
+                // 优先取 1h 数据，无则回退 24h reference
+                const rate = entry.primary.successRate ?? entry.reference?.successRate ?? null;
+                if (rate !== null) {
+                    rateSum += rate;
+                    rateCount++;
+                    hasAnyRate = true;
+                }
+            }
+
+            if (!hasAnyRate) {
+                return {
+                    value: provider.id,
+                    label: provider.name,
+                    description: provider.description,
+                    availability: { providerId: provider.id, modelId: '', primary: { window: 'none', successRate: null, status: 'unknown' } },
+                };
+            }
+
+            const avgRate = rateSum / rateCount;
+            const status: AvailabilityStatus = avgRate >= 0.90 ? 'healthy' : avgRate >= 0.70 ? 'degraded' : 'poor';
+            return {
+                value: provider.id,
+                label: provider.name,
+                description: provider.description,
+                availability: { providerId: provider.id, modelId: '', primary: { window: '1h', successRate: avgRate, status } },
+            };
+        });
     }, [providerOptions, availabilityMap]);
 
     const modelSelectOptions: CustomSelectOption[] = useMemo(() => {
