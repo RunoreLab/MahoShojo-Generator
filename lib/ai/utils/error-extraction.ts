@@ -131,11 +131,38 @@ export function enhanceErrorWithUpstreamMessage(error: any): Error {
         if (upstreamMessage) {
             // 创建一个新的错误对象，包含上游的详细错误信息
             const errorPrefix = errorAny.name || 'AI_Error';
-            const statusCode = typeof errorAny?.statusCode === 'number' ? errorAny.statusCode : null;
+            const statusCode = typeof errorAny?.statusCode === 'number'
+                ? errorAny.statusCode
+                : (typeof errorAny?.status === 'number' ? errorAny.status : null);
             const suffix = statusCode ? `（HTTP ${statusCode}）` : '';
             const enhancedError = new Error(`${errorPrefix}: ${upstreamMessage}${suffix}`);
-            // 保留原始错误对象作为 cause
+
+            // 保留分类/记分所需的关键元数据，避免 enhance 后 statusCode/name 丢失
+            // 导致可用性统计把真实上游 5xx 误判为 excluded
+            if (typeof errorAny.name === 'string' && errorAny.name) {
+                enhancedError.name = errorAny.name;
+            }
+            if (statusCode !== null) {
+                (enhancedError as any).statusCode = statusCode;
+                (enhancedError as any).status = statusCode;
+            }
+            if (errorAny.responseBody !== undefined) {
+                (enhancedError as any).responseBody = errorAny.responseBody;
+            }
+            if (errorAny.data !== undefined) {
+                (enhancedError as any).data = errorAny.data;
+            }
+            if (errorAny.url !== undefined) {
+                (enhancedError as any).url = errorAny.url;
+            }
+            if (errorAny.requestBodyValues !== undefined) {
+                (enhancedError as any).requestBodyValues = errorAny.requestBodyValues;
+            }
+            // 保留原始错误，供 classifyOutcome 回退读取
             (enhancedError as any).originalError = error;
+            if (error instanceof Error) {
+                (enhancedError as any).cause = error;
+            }
             return enhancedError;
         }
     } catch (e) {
