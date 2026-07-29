@@ -7,7 +7,10 @@ import { config, AIProvider } from "../config";
 import { getLogger } from "../logger";
 import { getProviderFetch } from "@/lib/ai/middleware/provider-fetch";
 import { resolveMaxOutputTokensOption } from "@/lib/ai/max-output-tokens";
-import { classifySuccess, classifyOutcome, recordAiChannelOutcome } from "@/lib/ai/availability";
+import {
+  createAttemptOutcomeRecorder,
+  wrapResponseWithAttemptOutcome,
+} from "@/lib/ai/availability";
 
 // 延迟函数
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -231,6 +234,8 @@ export async function generateWithStreamAI<T, I = string>(
 
     // 对当前提供商进行重试
     for (let attempt = 0; attempt < retryCount; attempt++) {
+      // 同一 attempt 只记一次：流结束（onFinish/onError/body close/cancel）或 catch 时落分
+      const outcomeRecorder = createAttemptOutcomeRecorder(options?.channelContext);
       try {
         log.debug(`开始尝试: 提供商: ${provider.name} 模型: ${selectedModel} 尝试次数: ${attempt + 1} / ${retryCount}`);
 
@@ -260,14 +265,28 @@ export async function generateWithStreamAI<T, I = string>(
           temperature: generationConfig.temperature,
           maxRetries: 0,
           ...maxOutputTokensOption,
+          onError: ({ error }) => {
+            log.error(`streamObject 流式传输出错: 提供商: ${provider.name}`, { error });
+            outcomeRecorder.recordFromError(error);
+          },
+          onFinish: ({ error }) => {
+            // 上游已出流但最终对象校验失败 → excluded（本地解析，不反映渠道可用性）
+            if (error) {
+              outcomeRecorder.recordClassification({
+                outcome: 'excluded',
+                errorClass: 'local_parse',
+              });
+              return;
+            }
+            outcomeRecorder.recordSuccess();
+          },
         });
 
-        log.info(`提供商生成成功: 提供商: ${provider.name} 尝试次数: ${attempt + 1}`);
-        if (options?.channelContext) {
-          const ctx = options.channelContext;
-          void recordAiChannelOutcome({ providerId: ctx.providerId, modelId: ctx.modelId, ...classifySuccess() });
-        }
-        return result.toTextStreamResponse();
+        log.info(`提供商开始流式输出: 提供商: ${provider.name} 尝试次数: ${attempt + 1}`);
+        // body 只负责 error/cancel 落分；success/local_parse 由 onFinish 决定，避免 schema 失败被误记 success
+        return wrapResponseWithAttemptOutcome(result.toTextStreamResponse(), outcomeRecorder, {
+          recordSuccessOnClose: false,
+        });
       } catch (error) {
         lastError = error;
         log.error(`提供商 ${provider.name} 第 ${attempt + 1} 次失败`, { error });
@@ -282,12 +301,7 @@ export async function generateWithStreamAI<T, I = string>(
           });
         }
 
-        // 记录本次 attempt 的失败 outcome
-        if (options?.channelContext) {
-          const ctx = options.channelContext;
-          const outcome = classifyOutcome(ctx.providerId === 'system', error);
-          void recordAiChannelOutcome({ providerId: ctx.providerId, modelId: ctx.modelId, ...outcome });
-        }
+        outcomeRecorder.recordFromError(error);
 
         // 如果不是最后一次尝试，等待后再重试
         if (attempt < retryCount - 1) {

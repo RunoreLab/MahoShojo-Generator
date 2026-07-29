@@ -7,7 +7,10 @@ import { getLogger } from "../logger";
 import { getProviderFetch } from "@/lib/ai/middleware/provider-fetch";
 import { resolveMaxOutputTokensOption } from "@/lib/ai/max-output-tokens";
 import { extractUpstreamErrorMessage, enhanceErrorWithUpstreamMessage } from "@/lib/ai/utils/error-extraction";
-import { classifySuccess, classifyOutcome, recordAiChannelOutcome } from "@/lib/ai/availability";
+import {
+    createAttemptOutcomeRecorder,
+    pipeStreamWithAttemptOutcome,
+} from "@/lib/ai/availability";
 import {
     createStreamReadWithTimeout,
     STREAM_READ_IDLE_TIMEOUT_MS,
@@ -280,6 +283,8 @@ export async function generateWithStreamAI(
 
         // 对当前提供商进行重试
 	        for (let attempt = 0; attempt < retryCount; attempt++) {
+            // 同一 attempt 只记一次：在流真正结束（成功/失败/取消）时落分，而非首包时
+            const outcomeRecorder = createAttemptOutcomeRecorder(options?.channelContext);
 	            try {
                 log.debug(`开始尝试: 提供商: ${provider.name} 模型: ${selectedModel} 尝试次数: ${attempt + 1} / ${retryCount}`);
 
@@ -340,6 +345,11 @@ export async function generateWithStreamAI(
                     onError: ({ error }) => {
                         capturedError = error;
                         log.error(`流式传输过程中出错: 提供商: ${provider.name} 模型: ${selectedModel}`, { error });
+                        // 流中错误：先记 failure（后续 body close/cancel 不会重复记分）
+                        outcomeRecorder.recordFromError(error);
+                    },
+                    onAbort: () => {
+                        outcomeRecorder.recordFromCancel('abort');
                     },
 	                });
 
@@ -444,20 +454,34 @@ export async function generateWithStreamAI(
                             emitReasoningEvent(chunk);
                             controller.enqueue(chunk);
                         }
+                        // 预取已耗尽且上游已结束：在首包路径上完成 attempt
+                        if (prefetchedDone) {
+                            outcomeRecorder.recordSuccess();
+                        }
                     },
                     async pull(controller) {
-                        while (true) {
-                            const { done, value } = await readWithTimeout(reader);
-                            if (done) {
-                                controller.close();
+                        try {
+                            while (true) {
+                                const { done, value } = await readWithTimeout(reader);
+                                if (done) {
+                                    outcomeRecorder.recordSuccess();
+                                    controller.close();
+                                    return;
+                                }
+
+                                const mapped = mapToUnifiedChunk(value);
+                                if (!mapped) continue;
+                                emitReasoningEvent(mapped);
+                                controller.enqueue(mapped);
                                 return;
                             }
-
-                            const mapped = mapToUnifiedChunk(value);
-                            if (!mapped) continue;
-                            emitReasoningEvent(mapped);
-                            controller.enqueue(mapped);
-                            return;
+                        } catch (streamError) {
+                            outcomeRecorder.recordFromError(streamError);
+                            try {
+                                controller.error(streamError);
+                            } catch {
+                                // controller 可能已关闭
+                            }
                         }
                     },
                     cancel(reason) {
@@ -466,6 +490,7 @@ export async function generateWithStreamAI(
                         } catch {
                             // ignore
                         }
+                        outcomeRecorder.recordFromCancel(reason);
                     }
                 });
 
@@ -479,14 +504,16 @@ export async function generateWithStreamAI(
 	                    })
 	                );
 
-                log.info(`提供商生成成功: 提供商: ${provider.name} 尝试次数: ${attempt + 1}`);
-                if (options?.channelContext) {
-                    const ctx = options.channelContext;
-                    void recordAiChannelOutcome({ providerId: ctx.providerId, modelId: ctx.modelId, ...classifySuccess() });
-                }
+                // 再包一层：确保客户端完整消费/异常/取消时都能落分（与上方 pull 共用 once recorder）
+                const scoredByteStream = pipeStreamWithAttemptOutcome(
+                    textOnlyStream.pipeThrough(new TextEncoderStream()),
+                    outcomeRecorder,
+                );
+
+                log.info(`提供商开始流式输出: 提供商: ${provider.name} 尝试次数: ${attempt + 1}`);
 
                 return {
-                    response: new Response(textOnlyStream.pipeThrough(new TextEncoderStream()), {
+                    response: new Response(scoredByteStream, {
                         headers: {
                             'Content-Type': 'text/plain; charset=utf-8',
                         },
@@ -511,12 +538,8 @@ export async function generateWithStreamAI(
                     });
                 }
 
-                // 记录本次 attempt 的失败 outcome
-                if (options?.channelContext) {
-                    const ctx = options.channelContext;
-                    const outcome = classifyOutcome(ctx.providerId === 'system', error);
-                    void recordAiChannelOutcome({ providerId: ctx.providerId, modelId: ctx.modelId, ...outcome });
-                }
+                // 预检/建连失败：attempt 在返回 Response 前结束（与 onError 共用 once recorder）
+                outcomeRecorder.recordFromError(enhancedError);
 
                 // 如果不是最后一次尝试，等待后再重试
                 if (attempt < retryCount - 1) {
