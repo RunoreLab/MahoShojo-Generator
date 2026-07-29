@@ -75,26 +75,6 @@ const XIAOMI_MIMO_MODELS: AIModelOption[] = [
         value: 'mimo-v2.5',
         label: 'MiMo V2.5',
         description: '小米 MiMo V2.5 通用模型，适合日常对话、剧情推进与结构化文本生成。'
-    },
-    {
-        value: 'mimo-v2.5-flash',
-        label: 'MiMo V2.5 Flash',
-        description: '小米 MiMo V2.5 高性价比轻量模型，适合成本敏感、高频生成与快速草稿。'
-    },
-    {
-        value: 'mimo-v2-pro',
-        label: 'MiMo V2 Pro',
-        description: '小米 MiMo V2 Pro 旗舰推理模型，适合复杂指令、深度思考与工具调用。'
-    },
-    {
-        value: 'mimo-v2-omni',
-        label: 'MiMo V2 Omni',
-        description: '小米 MiMo V2 Omni 全模态理解模型，文本场景可作为 V2.5 的兼容备用。'
-    },
-    {
-        value: 'mimo-v2-flash',
-        label: 'MiMo V2 Flash',
-        description: '小米 MiMo V2 Flash 高效推理模型，适合速度优先与较低成本的文本生成。'
     }
 ];
 
@@ -214,16 +194,6 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 description: 'Google 最新一代的 Gemini 3.1 Pro 预览模型。'
             },
             {
-                value: 'gemini-3-pro-preview',
-                label: 'Gemini 3.0 Pro',
-                description: 'Google 迄今为止最智能的模型系列，以先进的推理和联网搜索能力为基础。'
-            },
-            {
-                value: 'gemini-3-flash-preview',
-                label: 'Gemini 3.0 Flash',
-                description: 'Google 迄今为止最智能的模型系列的略轻量的模型，推荐流式使用。'
-            },
-            {
                 value: 'gemini-3.5-flash-lite',
                 label: 'Gemini 3.5 Flash Lite',
                 description: 'Google 最新一代高速轻量模型，适合预算敏感与高并发生成场景。'
@@ -267,26 +237,6 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 value: 'claude-opus-4-8',
                 label: 'Claude Opus 4.8',
                 description: 'Anthropic 旗下最新旗舰模型，非常适合复杂的专业任务和高级代理。'
-            },
-            {
-                value: 'claude-opus-4-7',
-                label: 'Claude Opus 4.7',
-                description: 'Anthropic 旗下旗舰模型，非常适合复杂的专业任务和高级代理。'
-            },
-            {
-                value: 'claude-sonnet-4-6',
-                label: 'Claude Sonnet 4.6',
-                description: 'Anthropic 旗下主力模型之一，写作、推理与长文本表现稳定。'
-            },
-            {
-                value: 'claude-haiku-4-5',
-                label: 'Claude Haiku 4.5',
-                description: 'Anthropic 旗下最快且最聪慧的 Haiku 模型，具有接近前沿的性能。第一个支持扩展思考的 Haiku 模型。'
-            },
-            {
-                value: 'grok-4.20-beta',
-                label: 'Grok 4.20',
-                description: 'xAI 旗下最新推理模型，适合复杂任务与多步推理。'
             },
             {
                 value: 'glm-5.2',
@@ -729,16 +679,6 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 description: 'Google 最新一代的 Gemini 3.1 Pro 预览模型。'
             },
             {
-                value: 'gemini-3-pro-preview',
-                label: 'Gemini 3.0 Pro',
-                description: 'Google 迄今为止最智能的模型系列，以先进的推理和联网搜索能力为基础。'
-            },
-            {
-                value: 'gemini-3-flash-preview',
-                label: 'Gemini 3.0 Flash',
-                description: 'Google 迄今为止最智能的模型系列的略轻量的模型，推荐流式使用。'
-            },
-            {
                 value: 'gemini-3.5-flash-lite',
                 label: 'Gemini 3.5 Flash Lite',
                 description: 'Google 最新一代高速轻量模型，适合预算敏感与高并发生成场景。'
@@ -762,11 +702,6 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 value: 'gpt-5.5',
                 label: 'GPT-5.5',
                 description: 'OpenAI 最新旗舰模型，适合高质量内容生成与复杂任务。'
-            },
-            {
-                value: 'gpt-5.4',
-                label: 'GPT-5.4',
-                description: 'OpenAI 最新通用模型，适合高质量内容生成与复杂任务。'
             },
             {
                 value: 'gpt-5.6-luna',
@@ -794,14 +729,9 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 description: 'Anthropic 旗下主力模型之一，写作、推理与长文本表现稳定。'
             },
             {
-                value: 'grok-4.3',
-                label: 'Grok 4.3',
+                value: 'grok-4.5',
+                label: 'Grok 4.5',
                 description: 'xAI 旗下最新通用模型，适合头脑风暴、创意发散与快速问答。'
-            },
-            {
-                value: 'grok-4.20',
-                label: 'Grok 4.20',
-                description: 'xAI 旗下最新推理模型，适合复杂任务与多步推理。'
             },
             {
                 value: 'glm-5.2',
@@ -1047,16 +977,6 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 description: 'Google 最新一代的 Gemini 3.1 Pro 预览模型。'
             },
             {
-                value: 'gemini-3-pro-preview',
-                label: 'Gemini 3.0 Pro',
-                description: 'Google 迄今为止最智能的模型系列，以先进的推理和联网搜索能力为基础。'
-            },
-            {
-                value: 'gemini-3-flash-preview',
-                label: 'Gemini 3.0 Flash',
-                description: 'Google 旗下最新一代的先进模型，现已提供尝鲜使用。'
-            },
-            {
                 value: 'gemini-3.5-flash-lite',
                 label: 'Gemini 3.5 Flash Lite',
                 description: 'Google 最新一代高速轻量模型，适合预算敏感与高并发生成场景。'
@@ -1200,8 +1120,6 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 description: 'Google 的新模型，据用户评测说很喜欢一惊一乍，还挺中二的。'
             },
             { value: 'google/gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro', description: 'Google 最新一代的 Gemini 3.1 Pro 预览模型。' },
-            { value: 'google/gemini-3-pro-preview', label: 'Gemini 3.0 Pro', description: 'Google 迄今为止最智能的模型系列，以先进的推理和联网搜索能力为基础。' },
-            { value: 'google/gemini-3-flash-preview', label: 'Gemini 3.0 Flash', description: 'Google 旗下最新一代的先进模型，现已提供尝鲜使用。' },
             { value: 'google/gemini-3.5-flash-lite', label: 'Gemini 3.5 Flash Lite', description: 'Google 最新一代高速轻量模型，适合预算敏感与高并发生成场景。' },
             { value: 'google/gemini-2.5-pro', label: 'Gemini 2.5 Pro', description: 'Google 旗下前代的最先进模型系列，性能很棒棒。' },
             { value: 'google/gemini-2.5-flash', label: 'Gemini 2.5 Flash', description: 'Google 旗下前代的最先进模型系列，在性能和价格上十分均衡，也是魔法少女生成器默认使用的模型。' },
@@ -1213,7 +1131,7 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
             { value: 'openai/gpt-5.6-sol', label: 'GPT-5.6 Sol', description: 'GPT-5.6 系列旗舰模型，专为复杂编程、科研与多步推理等高端任务设计，支持深度推理与多智能体协作。' },
             { value: 'anthropic/claude-opus-4.8', label: 'Claude Opus 4.8', description: 'Anthropic 旗下最新旗舰模型，非常适合复杂的专业任务和高级代理。' },
             { value: 'anthropic/claude-sonnet-4.6', label: 'Claude Sonnet 4.6', description: 'Anthropic 旗下主力模型之一，写作、推理与长文本表现稳定。' },
-            { value: 'x-ai/grok-4.3', label: 'Grok 4.3', description: 'xAI 旗下最新通用模型，适合头脑风暴、创意发散与快速问答。' },
+            { value: 'x-ai/grok-4.5', label: 'Grok 4.5', description: 'xAI 旗下最新通用模型，适合头脑风暴、创意发散与快速问答。' },
             { value: 'deepseek/deepseek-v4-flash', label: 'DeepSeek V4 Flash', description: 'DeepSeek V4 的高速轻量版本，但是体验也很强大，据称文本生成体验堪比 gemini-3.1-pro。' },
             { value: 'deepseek/deepseek-v4-pro', label: 'DeepSeek V4 Pro', description: 'DeepSeek V4 的高性能版本，适合需要高精度和复杂推理的任务。' },
             { value: 'qwen/qwen3.6-plus', label: 'Qwen 3.6 Plus', description: '通义千问 3.6 Plus，先进多模态开源旗舰模型，采用混合架构，能力强大。' },
@@ -1312,8 +1230,8 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 description: '更快更省的 Claude，适合高频对话、草稿生成与轻量改写。'
             },
             {
-                value: 'Grok-4.3',
-                label: 'Grok 4.3',
+                value: 'Grok-4.5',
+                label: 'Grok 4.5',
                 description: 'xAI 旗下最新通用模型，适合头脑风暴、创意发散与快速问答。'
             },
             {
