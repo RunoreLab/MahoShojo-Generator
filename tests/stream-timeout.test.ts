@@ -206,4 +206,24 @@ describe('stream timeout', () => {
     await expect(readWithTimeout(reader)).rejects.toBeInstanceOf(StreamReadTimeoutError);
     expect(onTimeout).toHaveBeenCalledTimes(1);
   });
+
+  test('hard mode 超时可取消上游 reader，避免挂起读流继续占用资源', async () => {
+    const stream = new ReadableStream<string>({
+      start() {
+        // 永不 enqueue / close
+      },
+    });
+    const reader = stream.getReader();
+    const cancel = vi.spyOn(reader, 'cancel');
+    const readWithTimeout = createStreamReadWithTimeout({
+      idleTimeoutMs: 20,
+      totalTimeoutMs: 200,
+      onTimeout: (error) => {
+        void reader.cancel(error.message);
+      },
+    });
+
+    await expect(readWithTimeout(reader)).rejects.toBeInstanceOf(StreamReadTimeoutError);
+    expect(cancel).toHaveBeenCalledTimes(1);
+  });
 });

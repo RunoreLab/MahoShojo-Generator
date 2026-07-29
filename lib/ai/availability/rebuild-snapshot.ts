@@ -12,6 +12,9 @@ const SNAPSHOT_TTL_SECONDS = 120;
 const MIN_SAMPLE_COUNT = 3;
 const MAX_CUSTOM_ENTRIES = 200;
 
+// Worker isolate 内 single-flight：过期快照并发命中时只允许一次 D1 扫描/写入。
+let rebuildInFlight: Promise<ChannelAvailabilityResponse> | null = null;
+
 // --- 类型 ---
 
 export type AvailabilityStatus = 'healthy' | 'degraded' | 'poor' | 'unknown';
@@ -261,15 +264,22 @@ export async function rebuildSnapshot(): Promise<ChannelAvailabilityResponse> {
         }
       }
       // 快照过期，惰性重建
-      const fresh = await rebuildFromBuckets(db);
-      return fresh;
+      return rebuildSnapshotFromBuckets(db);
     }
   } catch (error) {
     log.debug('读取快照失败', { error });
   }
 
   // 无快照，重建
-  return rebuildFromBuckets(db);
+  return rebuildSnapshotFromBuckets(db);
+}
+
+function rebuildSnapshotFromBuckets(db: AppDrizzleDb): Promise<ChannelAvailabilityResponse> {
+  if (rebuildInFlight) return rebuildInFlight;
+  rebuildInFlight = rebuildFromBuckets(db).finally(() => {
+    rebuildInFlight = null;
+  });
+  return rebuildInFlight;
 }
 
 function buildEmptyResponse(): ChannelAvailabilityResponse {

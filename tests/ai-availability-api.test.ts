@@ -81,6 +81,7 @@ describe('GET /api/ai/channel-availability', () => {
     const req = new Request('http://localhost/api/ai/channel-availability', { method: 'GET' });
     const res = await GET(req);
     expect(res.headers.get('Cache-Control')).toContain('max-age=45');
+    expect(res.headers.get('Cloudflare-CDN-Cache-Control')).toContain('s-maxage=45');
   });
 
   it('空数据时返回全 unknown entries', async () => {

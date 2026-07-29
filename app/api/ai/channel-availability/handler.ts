@@ -9,6 +9,7 @@ const json = (payload: unknown, status = 200, extraHeaders?: Record<string, stri
     headers: {
       'Content-Type': 'application/json',
       'Cache-Control': `public, max-age=${EDGE_CACHE_TTL_SECONDS}`,
+      'Cloudflare-CDN-Cache-Control': `public, s-maxage=${EDGE_CACHE_TTL_SECONDS}`,
       ...extraHeaders,
     },
   });

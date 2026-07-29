@@ -80,11 +80,8 @@ export function createStreamReadWithTimeout(options: CreateStreamReadWithTimeout
     }
   };
 
-  const notifyHardTimeout = (kind: StreamReadTimeoutKind, timeoutMs: number): StreamReadTimeoutError => {
-    const error = new StreamReadTimeoutError(kind, timeoutMs, options.label);
-    options.onTimeout?.(error);
-    return error;
-  };
+  const createHardTimeoutError = (kind: StreamReadTimeoutKind, timeoutMs: number): StreamReadTimeoutError =>
+    new StreamReadTimeoutError(kind, timeoutMs, options.label);
 
   const notifySoftTimeout = (kind: StreamReadTimeoutKind, timeoutMs: number) => {
     if (kind === 'total') {
@@ -111,7 +108,9 @@ export function createStreamReadWithTimeout(options: CreateStreamReadWithTimeout
     if (mode === 'hard' && deadlineAtMs != null) {
       const remaining = deadlineAtMs - readStartedAtMs;
       if (remaining <= 0) {
-        throw notifyHardTimeout('total', options.totalTimeoutMs ?? 0);
+        const error = createHardTimeoutError('total', options.totalTimeoutMs ?? 0);
+        options.onTimeout?.(error);
+        throw error;
       }
     }
 
@@ -181,10 +180,16 @@ export function createStreamReadWithTimeout(options: CreateStreamReadWithTimeout
     }
 
     const timeoutPromise = new Promise<never>((_, reject) => {
+      const rejectHardTimeout = (kind: StreamReadTimeoutKind, timeoutMs: number) => {
+        const error = createHardTimeoutError(kind, timeoutMs);
+        reject(error);
+        options.onTimeout?.(error);
+      };
+
       const scheduleTimeout = () => {
         const now = Date.now();
         if (deadlineAtMs != null && now >= deadlineAtMs) {
-          reject(notifyHardTimeout('total', options.totalTimeoutMs ?? 0));
+          rejectHardTimeout('total', options.totalTimeoutMs ?? 0);
           return;
         }
 
@@ -196,7 +201,7 @@ export function createStreamReadWithTimeout(options: CreateStreamReadWithTimeout
         timeoutId = setTimeout(() => {
           const firedAtMs = Date.now();
           if (deadlineAtMs != null && firedAtMs >= deadlineAtMs) {
-            reject(notifyHardTimeout('total', options.totalTimeoutMs ?? 0));
+            rejectHardTimeout('total', options.totalTimeoutMs ?? 0);
             return;
           }
 
@@ -206,7 +211,7 @@ export function createStreamReadWithTimeout(options: CreateStreamReadWithTimeout
             return;
           }
 
-          reject(notifyHardTimeout('idle', options.idleTimeoutMs));
+          rejectHardTimeout('idle', options.idleTimeoutMs);
         }, delayMs);
       };
 

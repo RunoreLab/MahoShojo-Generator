@@ -712,8 +712,8 @@ async function handler(req: NextRequest): Promise<Response> {
         const aiOptions: GenerateWithAIOptions = {
             ...(providerOptions ?? {}),
             abortSignal: req.signal,
-            // 战报可能长思考/长生成超过 600s：上游读流改为 soft，避免误杀。
-            streamReadTimeoutMode: 'soft',
+            // 战报服务端必须有资源上限；客户端仍可显示“生成较慢”提示。
+            streamReadTimeoutMode: 'hard',
             telemetry: aiTelemetry,
             channelContext,
             ...(wantsSse
@@ -1081,20 +1081,17 @@ async function handler(req: NextRequest): Promise<Response> {
             });
 
             const reader = clientUpstream.getReader();
-            // 战报生成：超时仅记录日志，不主动切断上游（长思考/长生成可能超过 600s）。
             const readWithTimeout = createStreamReadWithTimeout({
                 label: 'api/arena/generate-stream SSE 上游读取',
-                mode: 'soft',
                 idleTimeoutMs: STREAM_READ_IDLE_TIMEOUT_MS,
                 totalTimeoutMs: STREAM_READ_TOTAL_TIMEOUT_MS,
                 getLastActivityAtMs: () => lastReasoningActivityAtMs,
-                onSoftTimeout: (event) => {
-                    log.warn('上游读流软超时（仅提示，不切断）', {
-                        kind: event.kind,
-                        timeoutMs: event.timeoutMs,
-                        elapsedMs: event.elapsedMs,
-                        generationId,
-                    });
+                onTimeout: (error) => {
+                    try {
+                        void reader.cancel(error.message).catch(() => {});
+                    } catch {
+                        // ignore cancellation race
+                    }
                 },
             });
 
@@ -1434,7 +1431,7 @@ async function handler(req: NextRequest): Promise<Response> {
 		                    try {
 		                        // 简单背压：队列满时暂停读取上游，避免无界缓存
 		                        while (!sseCancelled && typeof controller.desiredSize === 'number' && controller.desiredSize <= 0) {
-		                            await new Promise((resolve) => setTimeout(resolve, 5));
+                            await new Promise((resolve) => setTimeout(resolve, 100));
 		                        }
 
 		                        const { done, value } = await readWithTimeout(reader);
@@ -1525,19 +1522,16 @@ async function handler(req: NextRequest): Promise<Response> {
         }
 
         const reader = originalBody.getReader();
-        // 战报生成：超时仅记录日志，不主动切断上游（长思考/长生成可能超过 600s）。
         const readWithTimeout = createStreamReadWithTimeout({
             label: 'api/arena/generate-stream 上游读取',
-            mode: 'soft',
             idleTimeoutMs: STREAM_READ_IDLE_TIMEOUT_MS,
             totalTimeoutMs: STREAM_READ_TOTAL_TIMEOUT_MS,
-            onSoftTimeout: (event) => {
-                log.warn('上游读流软超时（仅提示，不切断）', {
-                    kind: event.kind,
-                    timeoutMs: event.timeoutMs,
-                    elapsedMs: event.elapsedMs,
-                    generationId,
-                });
+            onTimeout: (error) => {
+                try {
+                    void reader.cancel(error.message).catch(() => {});
+                } catch {
+                    // ignore cancellation race
+                }
             },
         });
         const wrappedBody = new ReadableStream<Uint8Array>({
