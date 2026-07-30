@@ -8,6 +8,7 @@ interface PutObjectOptions {
     contentEncoding?: string;
     cacheControl?: string;
     metadata?: Record<string, string>;
+    signal?: AbortSignal;
 }
 
 interface PresignOptions {
@@ -128,7 +129,10 @@ export async function putObject(
             body: normalizeBody(body),
         });
 
-        const response = await fetch(signed.url, signed);
+        const response = await fetch(signed.url, {
+            ...signed,
+            signal: options.signal,
+        });
         if (!response.ok) {
             const errorText = await response.text();
             return { success: false, status: response.status, error: errorText || 'R2 上传失败' };

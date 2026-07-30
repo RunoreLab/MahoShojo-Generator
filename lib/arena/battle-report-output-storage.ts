@@ -80,6 +80,7 @@ export async function storeBattleReportGenerationOutputStreamToR2(input: {
   generationId: string;
   startedAtIso: string;
   stream: ReadableStream<Uint8Array>;
+  signal?: AbortSignal;
 }): Promise<StoredBattleReportOutput> {
   const persistPreviewInD1 = shouldPersistPreviewInD1();
   const { key, contentType } = buildBattleReportGenerationR2Key({
@@ -117,6 +118,7 @@ export async function storeBattleReportGenerationOutputStreamToR2(input: {
       generationId: input.generationId,
       format: 'markdown',
     },
+    signal: input.signal,
   });
 
   if (!put.success) {

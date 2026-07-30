@@ -214,6 +214,8 @@ export class SensitiveWordFilter {
   private plainSearch: ReturnType<typeof createWordsSearch> | null = null;
 
   private pinyinKeywords: string[] = [];
+  private pinyinKeywordSet: Set<string> = new Set();
+  private maxPinyinKeywordLength = 0;
   private pinyinToSource: Map<string, string> = new Map();
   private pinyinSearch: ReturnType<typeof createWordsSearch> | null = null;
 
@@ -287,6 +289,11 @@ export class SensitiveWordFilter {
     }
 
     this.pinyinKeywords = Array.from(new Set(pinyinKeywords));
+    this.pinyinKeywordSet = new Set(this.pinyinKeywords);
+    this.maxPinyinKeywordLength = this.pinyinKeywords.reduce(
+      (maxLength, keyword) => Math.max(maxLength, keyword.length),
+      0,
+    );
     this.pinyinSearch = this.pinyinKeywords.length > 0 ? createWordsSearch(this.pinyinKeywords) : null;
 
     this.isInitialized = true;
@@ -298,6 +305,55 @@ export class SensitiveWordFilter {
    */
   private escapeRegExp(str: string): string {
     return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
+  /**
+   * 只判断是否命中敏感词。该路径与 checkText 使用相同规则，但不会构造
+   * 遮罩文本、上下文或完整匹配详情，并在首次命中时立即返回。
+   */
+  async containsSensitiveWord(text: string): Promise<boolean> {
+    await this.ready;
+
+    if (!this.isInitialized) {
+      throw new Error('过滤器未初始化成功');
+    }
+    if (!text) return false;
+
+    const simplified = foldFullwidthAscii(toSimplifiedChinese(text));
+
+    for (const word of this.regexKeywords) {
+      try {
+        if (new RegExp(word, 'i').test(simplified)) return true;
+      } catch {
+        if (new RegExp(this.escapeRegExp(word), 'i').test(simplified)) return true;
+      }
+    }
+
+    const simplifiedLower = simplified.toLowerCase();
+    if (this.plainSearch && this.plainSearch.ContainsAny(simplifiedLower)) {
+      return true;
+    }
+
+    if (this.plainSearch) {
+      const { normalized } = buildKeepCharsMapping(simplifiedLower, keepHanOrAsciiWordChar);
+      if (this.plainSearch.ContainsAny(normalized)) return true;
+    }
+
+    if (this.pinyinSearch) {
+      const { normalized, isTokenStart, isTokenEnd } = buildLatinTokenMappingForPinyinCheck(text);
+      if (normalized) {
+        for (let start = 0; start < normalized.length; start++) {
+          if (!isTokenStart[start]) continue;
+          const endLimit = Math.min(normalized.length, start + this.maxPinyinKeywordLength);
+          for (let endExclusive = start + 1; endExclusive <= endLimit; endExclusive++) {
+            if (!isTokenEnd[endExclusive - 1]) continue;
+            if (this.pinyinKeywordSet.has(normalized.slice(start, endExclusive))) return true;
+          }
+        }
+      }
+    }
+
+    return false;
   }
 
   /**
@@ -544,6 +600,16 @@ export const quickCheck = async (text: string): Promise<FilterResult> => {
       shouldRedirectToArrested: false,
       matchDetails: []
     };
+  }
+};
+
+export const containsSensitiveWord = async (text: string): Promise<boolean> => {
+  const filter = createSensitiveWordFilter();
+  try {
+    return await filter.containsSensitiveWord(text);
+  } catch (error) {
+    console.error('敏感词布尔检测失败，启用安全回退逻辑。', error);
+    return false;
   }
 };
 
