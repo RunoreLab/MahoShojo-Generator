@@ -9,8 +9,28 @@
   ],
   "observability": {
     "enabled": true,
-    "head_sampling_rate": 0.01
+    "head_sampling_rate": 0.1
   },
+  "limits": {
+    "cpu_ms": 10000
+  },
+  "ratelimits": [
+    {
+      "name": "ARENA_RANKING_ACTOR_LIMITER",
+      "namespace_id": "73001",
+      "simple": { "limit": 12, "period": 60 }
+    },
+    {
+      "name": "ARENA_RANKING_IP_GENERATION_LIMITER",
+      "namespace_id": "73002",
+      "simple": { "limit": 12, "period": 60 }
+    },
+    {
+      "name": "ARENA_RANKING_IP_LIMITER",
+      "namespace_id": "73003",
+      "simple": { "limit": 120, "period": 60 }
+    }
+  ],
   "assets": {
     "directory": ".open-next/assets",
     "binding": "ASSETS"
@@ -39,8 +59,28 @@
       ],
       "observability": {
         "enabled": true,
-        "head_sampling_rate": 0.01
+        "head_sampling_rate": 0.1
       },
+      "limits": {
+        "cpu_ms": 10000
+      },
+      "ratelimits": [
+        {
+          "name": "ARENA_RANKING_ACTOR_LIMITER",
+          "namespace_id": "73001",
+          "simple": { "limit": 12, "period": 60 }
+        },
+        {
+          "name": "ARENA_RANKING_IP_GENERATION_LIMITER",
+          "namespace_id": "73002",
+          "simple": { "limit": 12, "period": 60 }
+        },
+        {
+          "name": "ARENA_RANKING_IP_LIMITER",
+          "namespace_id": "73003",
+          "simple": { "limit": 120, "period": 60 }
+        }
+      ],
       "services": [
         {
           "binding": "WORKER_SELF_REFERENCE",
@@ -67,6 +107,23 @@
         "enabled": true,
         "head_sampling_rate": 1
       },
+      "ratelimits": [
+        {
+          "name": "ARENA_RANKING_ACTOR_LIMITER",
+          "namespace_id": "73101",
+          "simple": { "limit": 12, "period": 60 }
+        },
+        {
+          "name": "ARENA_RANKING_IP_GENERATION_LIMITER",
+          "namespace_id": "73102",
+          "simple": { "limit": 12, "period": 60 }
+        },
+        {
+          "name": "ARENA_RANKING_IP_LIMITER",
+          "namespace_id": "73103",
+          "simple": { "limit": 120, "period": 60 }
+        }
+      ],
       "services": [
         {
           "binding": "WORKER_SELF_REFERENCE",

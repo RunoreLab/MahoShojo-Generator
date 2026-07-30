@@ -3,6 +3,11 @@ import type { NextRequest } from 'next/server';
 
 import { applyQueenTier, computeArenaBaseTier } from '@/lib/arena/tier';
 import { isStrictRankedModelBlacklisted } from '@/lib/arena/ranked-model-policy';
+import {
+  buildGenerationRankingRateLimitResponse,
+  enforceGenerationRankingRateLimit,
+  getGenerationRankingRateLimitBindings,
+} from '@/lib/arena/generation-ranking-rate-limit';
 import { getDrizzleDbFromRuntime } from '@/lib/db/drizzle';
 import { getArenaRatingEventsByIds, getArenaRatingsByEntities, type ArenaRatingEventReadRow } from '@/lib/db/repositories/arena-read';
 import { getDataCardMetricsByDataCardIds, queryArenaPublicQueenEntityByQueue } from '@/lib/db/repositories/data-card-meta';
@@ -21,6 +26,8 @@ import {
 } from '@/lib/database/arena-ratings';
 
 type ApiQueue = 'strict' | 'free';
+
+let hasWarnedMissingRateLimitBinding = false;
 
 type ApiQueueResult = {
   eligible: boolean;
@@ -276,6 +283,25 @@ async function handler(req: NextRequest) {
       status: 400,
       headers: { 'Content-Type': 'application/json' },
     });
+  }
+
+  const rateLimit = await enforceGenerationRankingRateLimit({
+    req,
+    generationId,
+    bindings: getGenerationRankingRateLimitBindings(),
+  });
+  if (!rateLimit.bindingAvailable && !hasWarnedMissingRateLimitBinding) {
+    hasWarnedMissingRateLimitBinding = true;
+    console.warn('[generation-ranking] rate limit binding 不可用，当前请求降级放行');
+  }
+  const rateLimitResponse = buildGenerationRankingRateLimitResponse(rateLimit);
+  if (rateLimitResponse) {
+    console.warn('[generation-ranking] 请求被限流', {
+      route: '/api/arena/generation-ranking',
+      responseState: 'rate_limited',
+      limitedBy: rateLimit.limitedBy,
+    });
+    return rateLimitResponse;
   }
 
   try {

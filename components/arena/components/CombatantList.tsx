@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useQueries, useQuery } from '@tanstack/react-query';
 import { ChevronDown } from 'lucide-react';
 
@@ -15,6 +15,11 @@ import { useBattleStore } from '../stores/useBattleStore';
 import { formatCombatantCount, isCombatantLimitReached } from '../types';
 import type { BattleStoreState, Combatant, CombatantData } from '../types';
 import { getCombatantDisplayName } from '../utils/characterValidator';
+import {
+  GENERATION_RANKING_MAX_ATTEMPTS,
+  GENERATION_RANKING_MAX_DURATION_MS,
+  getGenerationRankingRefetchInterval,
+} from '../utils/generation-ranking-polling';
 
 interface CombatantListProps {
   onShowDetails: (combatant: CombatantData) => void;
@@ -213,6 +218,7 @@ export function CombatantList({ onShowDetails }: CombatantListProps) {
   const [editingTeamId, setEditingTeamId] = useState<number | null>(null);
   const [editingTeamName, setEditingTeamName] = useState<string>('');
   const [unassignedCollapsed, setUnassignedCollapsed] = useState(false);
+  const generationRankingPollingRef = useRef({ generationId: '', startedAt: 0, attemptCount: 0 });
   const isCombatantCapReached = isCombatantLimitReached(combatants.length);
 
   const teamNameMap = useMemo(() => {
@@ -375,23 +381,37 @@ export function CombatantList({ onShowDetails }: CombatantListProps) {
 
   const generationRankingQuery = useQuery({
     queryKey: ['arenaGenerationRanking', lastGenerationId],
-    queryFn: () =>
-      fetchJson<GenerationRankingResponse>(
+    queryFn: ({ signal }) => {
+      const generationId = lastGenerationId as string;
+      if (generationRankingPollingRef.current.generationId !== generationId) {
+        generationRankingPollingRef.current = { generationId, startedAt: Date.now(), attemptCount: 0 };
+      }
+      generationRankingPollingRef.current.attemptCount += 1;
+      return fetchJson<GenerationRankingResponse>(
         `/api/arena/generation-ranking?generationId=${encodeURIComponent(lastGenerationId as string)}`,
-      ),
-    enabled: Boolean(lastGenerationId),
+        { signal },
+      );
+    },
+    enabled: Boolean(lastGenerationId) && !isGenerating,
+    retry: 1,
+    refetchOnWindowFocus: false,
+    refetchIntervalInBackground: false,
     refetchInterval: (query) => {
       const data = query.state.data;
-      if (!data) return 1500;
-      if (data.success && data.state === 'pending') return 1500;
-      if (data.success && data.state === 'ready') {
-        const hasAnyQueuePending = data.participants.some((p) =>
+      let pending = Boolean(data?.success && data.state === 'pending');
+      if (data?.success && data.state === 'ready') {
+        pending = data.participants.some((p) =>
           (p.queues.strict.eligible && (p.queues.strict.eventStatus === 'missing' || p.queues.strict.eventStatus === 'pending')) ||
           (p.queues.free.eligible && (p.queues.free.eventStatus === 'missing' || p.queues.free.eventStatus === 'pending')),
         );
-        return hasAnyQueuePending ? 1500 : false;
       }
-      return false;
+      const polling = generationRankingPollingRef.current;
+      return getGenerationRankingRefetchInterval({
+        enabled: Boolean(lastGenerationId) && !isGenerating,
+        pending,
+        attemptCount: polling.attemptCount,
+        elapsedMs: polling.startedAt > 0 ? Date.now() - polling.startedAt : 0,
+      });
     },
   });
 
@@ -406,6 +426,19 @@ export function CombatantList({ onShowDetails }: CombatantListProps) {
     });
     return map;
   }, [generationRankingQuery.data]);
+
+  const generationRankingPollingStopped = (() => {
+    const data = generationRankingQuery.data;
+    if (!data?.success) return false;
+    const pending = data.state === 'pending' || (data.state === 'ready' && data.participants.some((participant) =>
+      (participant.queues.strict.eligible && ['missing', 'pending'].includes(participant.queues.strict.eventStatus))
+      || (participant.queues.free.eligible && ['missing', 'pending'].includes(participant.queues.free.eventStatus)),
+    ));
+    if (!pending) return false;
+    const polling = generationRankingPollingRef.current;
+    return polling.attemptCount >= GENERATION_RANKING_MAX_ATTEMPTS
+      || (polling.startedAt > 0 && Date.now() - polling.startedAt >= GENERATION_RANKING_MAX_DURATION_MS);
+  })();
 
   const eloPredictionByCombatantKey = useMemo(() => {
     const map = new Map<string, EloWinRatePrediction>();
@@ -669,7 +702,25 @@ export function CombatantList({ onShowDetails }: CombatantListProps) {
                 {!entityKey ? (
                   <div className="mt-0.5 text-[11px] text-gray-500">提示：未登记为数据卡/预设时，无法参与排位计分。</div>
                 ) : entityKey && lastGenerationId && !generationParticipant && generationRankingQuery.data?.success && generationRankingQuery.data.state === 'pending' ? (
-                  <div className="mt-0.5 text-[11px] text-gray-500">排位结算中…（可能需要几秒钟）</div>
+                  <div className="mt-0.5 text-[11px] text-gray-500">
+                    {generationRankingPollingStopped ? '排位结果暂未就绪，已停止自动查询。' : '排位结算中…（可能需要几秒钟）'}
+                    {generationRankingPollingStopped ? (
+                      <button
+                        type="button"
+                        className="ml-1 text-sky-700 hover:underline"
+                        onClick={() => {
+                          generationRankingPollingRef.current = {
+                            generationId: lastGenerationId,
+                            startedAt: Date.now(),
+                            attemptCount: 0,
+                          };
+                          void generationRankingQuery.refetch();
+                        }}
+                      >
+                        手动刷新
+                      </button>
+                    ) : null}
+                  </div>
                 ) : null}
               </div>
             )}
