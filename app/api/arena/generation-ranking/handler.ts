@@ -4,6 +4,11 @@ import type { NextRequest } from 'next/server';
 import { applyQueenTier, computeArenaBaseTier } from '@/lib/arena/tier';
 import { isStrictRankedModelBlacklisted } from '@/lib/arena/ranked-model-policy';
 import {
+  buildPublicGenerationRankingSnapshot,
+  getGenerationRankingCacheControl,
+  type GenerationRankingResponse,
+} from '@/lib/arena/generation-ranking';
+import {
   buildGenerationRankingRateLimitResponse,
   enforceGenerationRankingRateLimit,
   getGenerationRankingRateLimitBindings,
@@ -20,7 +25,6 @@ import {
   isStrictEligible,
   parseCombatantEntity,
   parseGenerationCombatantsFallback,
-  settleArenaRatingsForGeneration,
   type ArenaEntity,
   type ArenaEligibilitySnapshot,
 } from '@/lib/database/arena-ratings';
@@ -55,25 +59,16 @@ type ApiParticipantResult = {
   queues: Record<ApiQueue, ApiQueueResult>;
 };
 
-type ApiResponse =
-  | {
-      success: true;
-      generationId: string;
-      state: 'pending';
-      message: string;
-    }
-  | {
-      success: true;
-      generationId: string;
-      state: 'ready';
-      snapshot: ArenaEligibilitySnapshot;
-      participants: ApiParticipantResult[];
-    }
-  | {
-      success: false;
-      generationId: string;
-      error: string;
-    };
+type ApiResponse = GenerationRankingResponse;
+
+const buildApiResponse = (response: ApiResponse, status = 200): Response =>
+  new Response(JSON.stringify(response), {
+    status,
+    headers: {
+      'Content-Type': 'application/json',
+      'Cache-Control': status === 200 ? getGenerationRankingCacheControl(response) : 'no-store',
+    },
+  });
 
 const buildStrictIneligibleReasons = (snapshot: ArenaEligibilitySnapshot, combatants: BattleReportGenerationCombatantRow[]): string[] => {
   const parsedExtraJson = (() => {
@@ -267,11 +262,16 @@ const buildDefaultQueueResult = (eligible: boolean, ineligibleReasons: string[])
   rankDelta: null,
 });
 
-async function handler(req: NextRequest) {
-  const url = getRequestUrl(req);
-  const generationId = (url.searchParams.get('generationId') ?? '').trim();
+type HandlerOptions = {
+  internalGenerationId?: string;
+};
 
-  if (req.method !== 'GET') {
+async function handler(req: NextRequest, options: HandlerOptions = {}) {
+  const url = getRequestUrl(req);
+  const generationId = (options.internalGenerationId ?? url.searchParams.get('generationId') ?? '').trim();
+  const isInternalRead = Boolean(options.internalGenerationId);
+
+  if (!isInternalRead && req.method !== 'GET') {
     return new Response(JSON.stringify({ error: 'Method Not Allowed' }), {
       status: 405,
       headers: { 'Content-Type': 'application/json' },
@@ -279,38 +279,34 @@ async function handler(req: NextRequest) {
   }
 
   if (!generationId) {
-    return new Response(JSON.stringify({ success: false, generationId: '', error: '缺少 generationId' } satisfies ApiResponse), {
-      status: 400,
-      headers: { 'Content-Type': 'application/json' },
-    });
+    return buildApiResponse({ success: false, generationId: '', error: '缺少 generationId' }, 400);
   }
 
-  const rateLimit = await enforceGenerationRankingRateLimit({
-    req,
-    generationId,
-    bindings: getGenerationRankingRateLimitBindings(),
-  });
-  if (!rateLimit.bindingAvailable && !hasWarnedMissingRateLimitBinding) {
-    hasWarnedMissingRateLimitBinding = true;
-    console.warn('[generation-ranking] rate limit binding 不可用，当前请求降级放行');
-  }
-  const rateLimitResponse = buildGenerationRankingRateLimitResponse(rateLimit);
-  if (rateLimitResponse) {
-    console.warn('[generation-ranking] 请求被限流', {
-      route: '/api/arena/generation-ranking',
-      responseState: 'rate_limited',
-      limitedBy: rateLimit.limitedBy,
+  if (!isInternalRead) {
+    const rateLimit = await enforceGenerationRankingRateLimit({
+      req,
+      generationId,
+      bindings: getGenerationRankingRateLimitBindings(),
     });
-    return rateLimitResponse;
+    if (!rateLimit.bindingAvailable && !hasWarnedMissingRateLimitBinding) {
+      hasWarnedMissingRateLimitBinding = true;
+      console.warn('[generation-ranking] rate limit binding 不可用，当前请求降级放行');
+    }
+    const rateLimitResponse = buildGenerationRankingRateLimitResponse(rateLimit);
+    if (rateLimitResponse) {
+      console.warn('[generation-ranking] 请求被限流', {
+        route: '/api/arena/generation-ranking',
+        responseState: 'rate_limited',
+        limitedBy: rateLimit.limitedBy,
+      });
+      return rateLimitResponse;
+    }
   }
 
   try {
     const db = getDrizzleDbFromRuntime();
     if (!db) {
-      return new Response(JSON.stringify({ success: false, generationId, error: '数据库绑定不可用，请检查 Cloudflare D1 配置' } satisfies ApiResponse), {
-        status: 503,
-        headers: { 'Content-Type': 'application/json' },
-      });
+      return buildApiResponse({ success: false, generationId, error: '数据库绑定不可用，请检查 Cloudflare D1 配置' }, 503);
     }
 
     const snapshot = await getArenaEligibilitySnapshotByGenerationId(generationId);
@@ -321,7 +317,7 @@ async function handler(req: NextRequest) {
         state: 'pending',
         message: '战报记录尚未落库，排位结算尚不可用（请稍后重试）',
       };
-      return new Response(JSON.stringify(res), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      return buildApiResponse(res);
     }
 
     const rawCombatants = await getBattleReportGenerationCombatantsByGenerationId(generationId);
@@ -335,10 +331,10 @@ async function handler(req: NextRequest) {
           success: true,
           generationId,
           state: 'ready',
-          snapshot,
+          snapshot: buildPublicGenerationRankingSnapshot(snapshot),
           participants: [],
         };
-        return new Response(JSON.stringify(res), { status: 200, headers: { 'Content-Type': 'application/json' } });
+        return buildApiResponse(res);
       }
 
       const res: ApiResponse = {
@@ -347,7 +343,7 @@ async function handler(req: NextRequest) {
         state: 'pending',
         message: '参战者明细尚未落库，排位结算尚不可用（请稍后重试）',
       };
-      return new Response(JSON.stringify(res), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      return buildApiResponse(res);
     }
 
     const strictEligible = isStrictEligible(snapshot, combatants);
@@ -396,30 +392,8 @@ async function handler(req: NextRequest) {
     const readEventRows = async (): Promise<ArenaRatingEventReadRow[]> =>
       getArenaRatingEventsByIds(db, [buildArenaRatingEventId(generationId, 'strict'), buildArenaRatingEventId(generationId, 'free')]);
 
-    // 读取事件（可能尚未插入）
-    let eventRows = await readEventRows();
-
-    // 自愈：流式生成时排位结算可能因边缘运行时中断而未执行/未完成。
-    // 若 eligible 队列缺事件或处于 pending，则尝试在查询端补做一次结算。
-    const shouldAttemptAutoSettle = (() => {
-      if (!strictEligible && !freeEligible) return false;
-      const byQueue = new Map<ApiQueue, (typeof eventRows)[number]>();
-      eventRows.forEach((row) => byQueue.set(row.queue === 'free' ? 'free' : 'strict', row));
-      if (strictEligible) {
-        const strictEvent = byQueue.get('strict');
-        if (!strictEvent || strictEvent.status === 'pending') return true;
-      }
-      if (freeEligible) {
-        const freeEvent = byQueue.get('free');
-        if (!freeEvent || freeEvent.status === 'pending') return true;
-      }
-      return false;
-    })();
-
-    if (shouldAttemptAutoSettle) {
-      await settleArenaRatingsForGeneration(generationId);
-      eventRows = await readEventRows();
-    }
+    // 公共 GET 只读取结算事件；缺失或 pending 时由客户端恢复查询，绝不触发写入。
+    const eventRows = await readEventRows();
 
     const eventByQueue = new Map<ApiQueue, (typeof eventRows)[number]>();
     eventRows.forEach((row) => eventByQueue.set(row.queue === 'free' ? 'free' : 'strict', row));
@@ -545,10 +519,10 @@ async function handler(req: NextRequest) {
       success: true,
       generationId,
       state: 'ready',
-      snapshot,
+      snapshot: buildPublicGenerationRankingSnapshot(snapshot),
       participants,
     };
-    return new Response(JSON.stringify(res), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    return buildApiResponse(res);
   } catch (error) {
     console.error('读取 generation-ranking 失败:', error);
     const res: ApiResponse = {
@@ -556,9 +530,20 @@ async function handler(req: NextRequest) {
       generationId,
       error: '无法加载本局排位信息',
     };
-    return new Response(JSON.stringify(res), { status: 500, headers: { 'Content-Type': 'application/json' } });
+    return buildApiResponse(res, 500);
   }
 }
 
-export const appRouteHandler = handler;
+export const appRouteHandler = (req: NextRequest): Promise<Response> => handler(req);
+
+export const readGenerationRankingForGeneration = async (
+  generationId: string,
+): Promise<GenerationRankingResponse> => {
+  const request = new Request('https://internal.invalid/api/arena/generation-ranking', {
+    method: 'GET',
+  }) as NextRequest;
+  const response = await handler(request, { internalGenerationId: generationId });
+  return (await response.json()) as GenerationRankingResponse;
+};
+
 export default appRouteHandler;

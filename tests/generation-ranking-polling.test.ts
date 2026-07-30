@@ -4,9 +4,23 @@ import {
   GENERATION_RANKING_MAX_ATTEMPTS,
   GENERATION_RANKING_MAX_DURATION_MS,
   getGenerationRankingRefetchInterval,
+  shouldEnableGenerationRankingRecovery,
 } from '@/components/arena/utils/generation-ranking-polling';
 
 describe('generation ranking polling', () => {
+  test('SSE 已写入终态结果时不再发起恢复查询', () => {
+    expect(shouldEnableGenerationRankingRecovery({
+      generationId: 'generation-1',
+      isGenerating: false,
+      hasTerminalRanking: true,
+    })).toBe(false);
+    expect(shouldEnableGenerationRankingRecovery({
+      generationId: 'generation-1',
+      isGenerating: false,
+      hasTerminalRanking: false,
+    })).toBe(true);
+  });
+
   test('仅在生成结束且 generationId 存在时启用', () => {
     expect(getGenerationRankingRefetchInterval({ enabled: false, pending: true, attemptCount: 1, elapsedMs: 0 })).toBe(false);
     expect(getGenerationRankingRefetchInterval({ enabled: true, pending: true, attemptCount: 1, elapsedMs: 0 })).toBe(2_000);

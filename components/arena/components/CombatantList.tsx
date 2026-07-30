@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useRef, useState } from 'react';
-import { useQueries, useQuery } from '@tanstack/react-query';
+import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ChevronDown } from 'lucide-react';
 
 import { TierBadge } from '@/components/ranking/TierBadge';
@@ -9,6 +9,7 @@ import { TechBadge } from '@/components/ranking/TechBadge';
 import { computeEloExpectedScore } from '@/lib/arena/elo';
 import { authStorage } from '@/lib/auth';
 import { computeTechIndex } from '@/lib/metrics/techIndex';
+import type { GenerationRankingResponse } from '@/lib/arena/generation-ranking';
 
 import { useBattleActions } from '../hooks/useBattleActions';
 import { useBattleStore } from '../stores/useBattleStore';
@@ -19,6 +20,7 @@ import {
   GENERATION_RANKING_MAX_ATTEMPTS,
   GENERATION_RANKING_MAX_DURATION_MS,
   getGenerationRankingRefetchInterval,
+  shouldEnableGenerationRankingRecovery,
 } from '../utils/generation-ranking-polling';
 
 interface CombatantListProps {
@@ -70,30 +72,6 @@ type PresetMetaResponse = {
   success: boolean;
   ratings: { strict: ApiRating | null; free: ApiRating | null };
 };
-
-type GenerationRankingResponse =
-  | { success: true; state: 'pending'; message: string; generationId: string }
-  | {
-      success: true;
-      state: 'ready';
-      generationId: string;
-      snapshot: { status: string | null; combatantCount: number | null };
-      participants: Array<{
-        displayName: string;
-        entityKey: string | null;
-        queues: Record<Queue, {
-          eligible: boolean;
-          ineligibleReasons: string[];
-          eventStatus: 'missing' | 'pending' | 'applied' | 'skipped' | 'failed';
-          skipReason: string | null;
-          rating: number | null;
-          games: number | null;
-          tier: string | null;
-          delta: number | null;
-        }>;
-      }>;
-    }
-  | { success: false; generationId: string; error: string };
 
 const fetchJson = async <T,>(url: string, init?: RequestInit): Promise<T> => {
   const res = await fetch(url, init);
@@ -198,6 +176,7 @@ const renderDeltaBadge = (delta: number) => {
 };
 
 export function CombatantList({ onShowDetails }: CombatantListProps) {
+  const queryClient = useQueryClient();
   const useBattleSelector = <T,>(selector: (state: BattleStoreState) => T) => useBattleStore(selector);
   const combatants = useBattleSelector((state) => state.combatants);
   const teams = useBattleSelector((state) => state.teams);
@@ -379,8 +358,24 @@ export function CombatantList({ onShowDetails }: CombatantListProps) {
     return map;
   }, [metaQueries, metaTargets]);
 
+  const generationRankingQueryKey = ['arenaGenerationRanking', lastGenerationId] as const;
+  const cachedGenerationRanking = queryClient.getQueryData<GenerationRankingResponse>(generationRankingQueryKey);
+  const hasTerminalRanking = Boolean(
+    cachedGenerationRanking?.success
+      && cachedGenerationRanking.state === 'ready'
+      && !cachedGenerationRanking.participants.some((participant) =>
+        (participant.queues.strict.eligible && ['missing', 'pending'].includes(participant.queues.strict.eventStatus))
+        || (participant.queues.free.eligible && ['missing', 'pending'].includes(participant.queues.free.eventStatus)),
+      ),
+  );
+  const generationRankingRecoveryEnabled = shouldEnableGenerationRankingRecovery({
+    generationId: lastGenerationId,
+    isGenerating,
+    hasTerminalRanking,
+  });
+
   const generationRankingQuery = useQuery({
-    queryKey: ['arenaGenerationRanking', lastGenerationId],
+    queryKey: generationRankingQueryKey,
     queryFn: ({ signal }) => {
       const generationId = lastGenerationId as string;
       if (generationRankingPollingRef.current.generationId !== generationId) {
@@ -392,7 +387,7 @@ export function CombatantList({ onShowDetails }: CombatantListProps) {
         { signal },
       );
     },
-    enabled: Boolean(lastGenerationId) && !isGenerating,
+    enabled: generationRankingRecoveryEnabled,
     retry: 1,
     refetchOnWindowFocus: false,
     refetchIntervalInBackground: false,
@@ -407,7 +402,7 @@ export function CombatantList({ onShowDetails }: CombatantListProps) {
       }
       const polling = generationRankingPollingRef.current;
       return getGenerationRankingRefetchInterval({
-        enabled: Boolean(lastGenerationId) && !isGenerating,
+        enabled: generationRankingRecoveryEnabled,
         pending,
         attemptCount: polling.attemptCount,
         elapsedMs: polling.startedAt > 0 ? Date.now() - polling.startedAt : 0,

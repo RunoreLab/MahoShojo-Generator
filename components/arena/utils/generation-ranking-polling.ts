@@ -10,6 +10,19 @@ type GenerationRankingPollingState = {
   elapsedMs: number;
 };
 
+type GenerationRankingRecoveryState = {
+  generationId: string | null | undefined;
+  isGenerating: boolean;
+  hasTerminalRanking: boolean;
+};
+
+export const shouldEnableGenerationRankingRecovery = ({
+  generationId,
+  isGenerating,
+  hasTerminalRanking,
+}: GenerationRankingRecoveryState): boolean =>
+  Boolean(generationId) && !isGenerating && !hasTerminalRanking;
+
 export const getGenerationRankingRefetchInterval = ({
   enabled,
   pending,

@@ -51,6 +51,8 @@ import {
 } from '@/lib/arena/battle-report-log-utils';
 import { createOutputPreviewCollector } from '@/lib/arena/output-preview';
 import { settleArenaRatingsForGeneration } from '@/lib/database/arena-ratings';
+import { readGenerationRankingForGeneration } from '@/app/api/arena/generation-ranking/handler';
+import type { GenerationRankingResponse } from '@/lib/arena/generation-ranking';
 import { storeBattleReportGenerationOutputStreamToR2 } from '@/lib/arena/battle-report-output-storage';
 import { deleteObject } from '@/lib/r2';
 import { createRequestAuthUserResolver } from '@/lib/auth/request-auth-user';
@@ -823,8 +825,12 @@ async function handler(req: NextRequest): Promise<Response> {
         let finalized = false;
         const executionContext = (req as any).context;
 
-        const finalizeOnce = async (status: 'completed' | 'aborted' | 'failed', errorMessage?: string) => {
-            if (finalized) return;
+        let finalizedRanking: GenerationRankingResponse | null = null;
+        const finalizeOnce = async (
+            status: 'completed' | 'aborted' | 'failed',
+            errorMessage?: string,
+        ): Promise<GenerationRankingResponse | null> => {
+            if (finalized) return finalizedRanking;
             finalized = true;
 
             const endedAtMs = Date.now();
@@ -1008,38 +1014,61 @@ async function handler(req: NextRequest): Promise<Response> {
 	                        }
 	                    }
 
-	                    const stored = r2UploadPromise ? await r2UploadPromise.catch(() => null) : null;
-		                    if (stored?.ok && stored.r2Key) {
-		                        if (normalizedStatus === 'completed') {
-		                            const indexed = await upsertLargeObjectByOwnerRef({
-                                kind: 'battle_report_generation_output',
-                                ownerRefId: generationId,
-                                ownerUserId: user?.id ?? null,
-                                r2Key: stored.r2Key,
-                                bytes: stored.bytes,
-                                storedBytes: stored.storedBytes,
-                                contentType: stored.contentType,
-                                contentEncoding: stored.contentEncoding,
-                                sha256: null,
-                            });
-                            if (indexed.ok && !stored.persistPreviewInD1) {
-                                await updateBattleReportGenerationOutputPreview(generationId, null);
+
+                    let rankingResult: GenerationRankingResponse | null = null;
+                    if (createdId && normalizedStatus === 'completed') {
+                        try {
+                            rankingResult = await readGenerationRankingForGeneration(generationId);
+                        } catch (error) {
+                            log.warn('排位结果读取失败（降级为恢复查询）', { recordId: generationId, error });
+                        }
+                    }
+
+                    const finalizeBackground = async () => {
+                        const stored = r2UploadPromise ? await r2UploadPromise.catch(() => null) : null;
+                        if (stored?.ok && stored.r2Key) {
+                            if (normalizedStatus === 'completed') {
+                                const indexed = await upsertLargeObjectByOwnerRef({
+                                    kind: 'battle_report_generation_output',
+                                    ownerRefId: generationId,
+                                    ownerUserId: user?.id ?? null,
+                                    r2Key: stored.r2Key,
+                                    bytes: stored.bytes,
+                                    storedBytes: stored.storedBytes,
+                                    contentType: stored.contentType,
+                                    contentEncoding: stored.contentEncoding,
+                                    sha256: null,
+                                });
+                                if (indexed.ok && !stored.persistPreviewInD1) {
+                                    await updateBattleReportGenerationOutputPreview(generationId, null);
+                                }
+                            } else {
+                                await deleteObject(stored.r2Key);
                             }
-                        } else {
-		                            await deleteObject(stored.r2Key);
-		                        }
-		                    }
+                        }
+                    };
+                    const backgroundPromise = finalizeBackground();
+                    if (executionContext?.waitUntil) {
+                        executionContext.waitUntil(backgroundPromise);
+                    } else {
+                        await backgroundPromise;
+                    }
+
+                    return rankingResult;
 		            })();
 
             try {
-                if (executionContext?.waitUntil) {
+                if (normalizedStatus === 'completed') {
+                    finalizedRanking = await recordPromise;
+                } else if (executionContext?.waitUntil) {
                     executionContext.waitUntil(recordPromise);
                 } else {
-                    await recordPromise;
+                    finalizedRanking = await recordPromise;
                 }
             } catch (writeError) {
                 log.warn('战报生成记录：写入失败', { writeError });
             }
+            return finalizedRanking;
         };
 
         const shouldAllowStreamMeta = shouldForceStreamMeta || resolvedWriteArenaHistory || resolvedWriteCurrentState;
@@ -1413,8 +1442,11 @@ async function handler(req: NextRequest): Promise<Response> {
 			                    return;
 			                }
 
+			                const rankingResult = await finalizeOnce('completed');
+                            if (rankingResult?.success) {
+                                controller.enqueue(encodeEvent('ranking', rankingResult));
+                            }
 			                controller.enqueue(encodeEvent('done', { ok: true }));
-			                await finalizeOnce('completed');
                             sseStreamClosed = true;
                             activeSseController = null;
                             flushReasoningQueueNow = null;

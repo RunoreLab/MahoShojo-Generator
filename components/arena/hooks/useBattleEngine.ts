@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useMemo } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 
 import type { NewsReport } from '@/components/BattleReportCard';
 import { persistArrestedBackup, type ArrestedBackupDraftItem, type ArrestedBackupTriggerSource } from '@/lib/arrested-backup';
@@ -37,6 +38,7 @@ import {
 } from '../utils/providerCooldown';
 import { normalizeCustomStoryLength } from '@/lib/story-length';
 import { buildCustomProviderRequestPayload } from '@/lib/ai/custom-provider';
+import type { GenerationRankingResponse } from '@/lib/arena/generation-ranking';
 
 const sanitizeTextByShieldWords = (text: string): string => applyShieldWords(text).filteredText;
 
@@ -399,6 +401,7 @@ const checkSensitivePayload = async (
 };
 
 export const useBattleEngine = () => {
+  const queryClient = useQueryClient();
   const router = useClientRouteAdapter();
   const { updateFromMarkdown } = useStreamCombatantUpdater();
   const useBattleSelector = <T,>(selector: (state: BattleStoreState) => T) => useBattleStore(selector);
@@ -1157,6 +1160,22 @@ export const useBattleEngine = () => {
                 return;
               }
 
+              if (event === 'ranking') {
+                const ranking = payload as GenerationRankingResponse | null;
+                if (
+                  ranking
+                  && typeof ranking === 'object'
+                  && typeof ranking.generationId === 'string'
+                  && ranking.generationId.trim()
+                ) {
+                  queryClient.setQueryData<GenerationRankingResponse>(
+                    ['arenaGenerationRanking', ranking.generationId],
+                    ranking,
+                  );
+                }
+                return;
+              }
+
               if (event === 'debug') {
                 if (payload && typeof payload === 'object') {
                   console.info('SSE 调试事件', payload);
@@ -1593,6 +1612,7 @@ export const useBattleEngine = () => {
 	      setStreamSoftTimeoutWarning(null);
 	    }
   }, [
+    queryClient,
     isCooldown,
     remainingTime,
     battleMode,
