@@ -207,3 +207,9 @@ MahoShojo-Generator/
 ---
 
 <div style="text-align: center">✨ 为结构化生成献上祝福 ✨</div>
+
+## License
+
+This project is licensed under the Apache License 2.0.
+
+See [LICENSE](LICENSE) for details.
