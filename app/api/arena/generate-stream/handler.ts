@@ -64,9 +64,9 @@ import { normalizeCustomStoryLength, resolveEffectiveStoryLength } from '@/lib/s
 import { buildEmptyStreamOutputErrorPayload } from '@/lib/arena/stream-empty-output';
 import { MAX_ARENA_MATERIALS, normalizeArenaMaterialsForRequest } from '@/lib/arena/materials';
 import {
-    ArenaStreamInputLimitError,
+    ArenaStreamInputError,
     parseArenaStreamRequestBody,
-    serializeAndValidateArenaStreamInput,
+    prepareArenaStreamInput,
 } from '@/lib/arena/generate-stream-input';
 import { sha256Hex } from '@/lib/pvp/crypto';
 import { isArenaAbortFastPathEnabled } from '@/lib/arena/generate-stream-finalization';
@@ -205,7 +205,7 @@ async function handler(req: NextRequest): Promise<Response> {
             };
 
             const body = await parseArenaStreamRequestBody(req);
-            const validatedInput = serializeAndValidateArenaStreamInput(body);
+            const preparedInput = prepareArenaStreamInput(body);
             const {
                 combatants,
             mode = 'classic',
@@ -486,7 +486,7 @@ async function handler(req: NextRequest): Promise<Response> {
             ? buildContentPreview(finalUserGuidance, { headChars: 300, tailChars: 300 })
             : null;
         snapshotAdjudicationEventsPreview = Array.isArray(adjudicationEvents)
-            ? buildContentPreview(validatedInput.serialized.adjudicationEvents!, { headChars: 300, tailChars: 300 })
+            ? buildContentPreview(preparedInput.serialize(adjudicationEvents, '判定事件'), { headChars: 300, tailChars: 300 })
             : null;
         const characterGuidancesForReport =
             Array.isArray(combatants)
@@ -528,25 +528,25 @@ async function handler(req: NextRequest): Promise<Response> {
         }
         if (scenario) {
             const isNative = await verifySignature(scenario);
-            inputsToCheck.push({ type: 'scenario', content: validatedInput.serialized.scenario!, isNative });
+            inputsToCheck.push({ type: 'scenario', content: preparedInput.serialize(scenario, '情景'), isNative });
         }
         if (normalizedAuxScenarios && normalizedAuxScenarios.length > 0) {
-            for (const [index, aux] of normalizedAuxScenarios.entries()) {
+            for (const aux of normalizedAuxScenarios) {
                 const isNative = await verifySignature(aux);
-                inputsToCheck.push({ type: 'scenario', content: validatedInput.serialized.auxScenarios[index]!, isNative });
+                inputsToCheck.push({ type: 'scenario', content: preparedInput.serialize(aux, '辅助情景'), isNative });
             }
         }
         if (normalizedMaterials.length > 0) {
-            for (const [index, material] of normalizedMaterials.entries()) {
+            for (const material of normalizedMaterials) {
                 inputsToCheck.push({
                     type: 'userGuidance',
-                    content: validatedInput.serialized.materials[index]!,
+                    content: preparedInput.serialize(material.content, '素材'),
                     isNative: material.isNative,
                 });
             }
         }
-        combatants.forEach((c: any, index: number) => {
-            inputsToCheck.push({ type: 'character', content: validatedInput.serialized.combatants[index]!, isNative: c.isNative });
+        combatants.forEach((c: any) => {
+            inputsToCheck.push({ type: 'character', content: preparedInput.serialize(c.data, '角色'), isNative: c.isNative });
         });
 
 		    const { combinedText, usedBundle } = buildPolicySafetyCheckText(inputsToCheck, {
@@ -872,8 +872,8 @@ async function handler(req: NextRequest): Promise<Response> {
                     hasUserGuidance: Boolean(finalUserGuidance),
                     hasAdjudicationEvents: Array.isArray(adjudicationEvents) && adjudicationEvents.length > 0,
                     hasTeams: Boolean(teams && typeof teams === 'object' && Object.keys(teams).length > 0),
-                    inputChars: validatedInput.inputChars,
-                    inputBytes: validatedInput.inputBytes,
+                    inputChars: preparedInput.inputChars,
+                    inputBytes: preparedInput.inputBytes,
                     outputChars,
                     outputBytes,
                     outputPreview: null,
@@ -950,7 +950,7 @@ async function handler(req: NextRequest): Promise<Response> {
                     : false;
                 const combatantsFallback = buildCombatantsFallbackForExtraJson(combatants);
 
-                const { inputBytes, inputChars } = validatedInput;
+                const { inputBytes, inputChars } = preparedInput;
 
                     const extraJsonBase = compactExtraJson({
                         errorMessage: normalizeErrorMessage(normalizedErrorMessage),
@@ -1028,7 +1028,7 @@ async function handler(req: NextRequest): Promise<Response> {
                     inputBytes,
                     userGuidancePreview: finalUserGuidance ? buildContentPreview(finalUserGuidance, { headChars: 300, tailChars: 300 }) : null,
                     adjudicationEventsPreview: Array.isArray(adjudicationEvents)
-	                        ? buildContentPreview(validatedInput.serialized.adjudicationEvents!, { headChars: 300, tailChars: 300 })
+	                        ? buildContentPreview(preparedInput.serialize(adjudicationEvents, '判定事件'), { headChars: 300, tailChars: 300 })
                         : null,
                     customProviderId: customProviderId ?? null,
                     customModelId: customProviderPayload?.modelId ?? null,
@@ -1729,7 +1729,7 @@ async function handler(req: NextRequest): Promise<Response> {
             headers,
         });
 	    } catch (error) {
-	        if (error instanceof ArenaStreamInputLimitError) {
+	        if (error instanceof ArenaStreamInputError) {
                 return new Response(JSON.stringify({ error: error.message, code: error.code }), {
                     status: error.status,
                     headers: { 'Content-Type': 'application/json; charset=utf-8' },
