@@ -786,6 +786,10 @@ export const CharacterManagerPage: React.FC = () => {
 
     // 用当前编辑的 characterData 替换已有卡片
     const handleReplaceExistingCard = async (card: any) => {
+        if (card?.type === 'history') {
+            await handleLoadDataCard(card);
+            return;
+        }
         if (card?.type === 'questionnaire') {
             const raw = typeof card.data === 'string' ? card.data : JSON.stringify(card.data ?? {}, null, 2);
             openQuestionnaireCompat(raw, {
@@ -2719,6 +2723,7 @@ export const CharacterManagerPage: React.FC = () => {
                 onCancelEdit={() => setEditingCard(null)}
             onShareCard={handleShareDataCard}
             onReplaceCard={handleReplaceExistingCard}
+            allowHistoryReplace={true}
             userCapacity={userCapacity}
             onOpenRecycleBin={() => {
                 setShowDataCardsModal(false);
