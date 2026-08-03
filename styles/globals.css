@@ -1699,3 +1699,360 @@ body.announcement-visible {
     border-color: rgba(244, 114, 182, 0.55);
   }
 }
+
+/* ==================== 卡牌工坊（GameCardFace）样式 ==================== */
+
+.gc-wrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+}
+
+.gc-card {
+  position: relative;
+  width: 360px;
+  max-width: 100%;
+  border-radius: 16px;
+  padding: 14px 16px 12px;
+  color: #fff;
+  overflow: hidden;
+  box-shadow:
+    0 0 0 2px var(--gc-rarity-primary, #9ca3af),
+    0 0 0 4px rgba(0, 0, 0, 0.3),
+    0 0 24px var(--gc-rarity-glow, rgba(156, 163, 175, 0.4)),
+    0 8px 32px rgba(0, 0, 0, 0.5);
+  font-family: 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+}
+
+.gc-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse at 30% 0%, var(--gc-rarity-glow, transparent) 0%, transparent 50%),
+    radial-gradient(ellipse at 70% 100%, var(--gc-rarity-glow, transparent) 0%, transparent 50%);
+  opacity: 0.5;
+  z-index: 0;
+}
+
+.gc-top-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, transparent, var(--gc-rarity-primary, #9ca3af), transparent);
+  z-index: 2;
+}
+
+.gc-bottom-bar {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, transparent, var(--gc-rarity-primary, #9ca3af), transparent);
+  z-index: 2;
+}
+
+/* 费用宝石 */
+.gc-cost-gem {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #60a5fa 0%, #2563eb 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 0 8px rgba(96, 165, 250, 0.6), inset 0 0 4px rgba(255, 255, 255, 0.3);
+  z-index: 3;
+  border: 2px solid rgba(255, 255, 255, 0.4);
+}
+
+.gc-cost-number {
+  font-size: 18px;
+  font-weight: 800;
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+}
+
+/* 稀有度宝石 */
+.gc-rarity-gem {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  min-width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--gc-rarity-primary, #9ca3af) 0%, var(--gc-rarity-secondary, #6b7280) 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 0 8px var(--gc-rarity-glow, transparent), inset 0 0 4px rgba(255, 255, 255, 0.3);
+  z-index: 3;
+  border: 2px solid rgba(255, 255, 255, 0.4);
+  padding: 0 6px;
+}
+
+.gc-rarity-stars {
+  font-size: 9px;
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+  letter-spacing: -1px;
+  line-height: 1;
+}
+
+/* 卡牌名称 */
+.gc-name-bar {
+  position: relative;
+  z-index: 1;
+  margin: 44px auto 8px;
+  text-align: center;
+  padding: 4px 48px;
+}
+
+.gc-name-text {
+  font-size: 17px;
+  font-weight: 700;
+  color: #fff;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.6), 0 0 12px var(--gc-rarity-glow, transparent);
+  letter-spacing: 0.05em;
+  line-height: 1.3;
+}
+
+/* 插图区域 */
+.gc-art-frame {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  margin-bottom: 8px;
+}
+
+.gc-art-bg {
+  width: 100%;
+  height: 100%;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1.5px solid rgba(255, 255, 255, 0.15);
+  background: rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(4px);
+}
+
+.gc-art-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.gc-art-placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: rgba(255, 255, 255, 0.3);
+}
+
+.gc-art-placeholder-icon {
+  font-size: 36px;
+}
+
+.gc-art-placeholder-text {
+  font-size: 12px;
+}
+
+/* 元素标识 */
+.gc-element-badge {
+  position: absolute;
+  bottom: 6px;
+  right: 6px;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+}
+
+.gc-element-symbol {
+  font-size: 13px;
+}
+
+/* 类型栏 */
+.gc-type-bar {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 8px;
+  margin-bottom: 6px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.gc-type-text {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.75);
+  font-weight: 500;
+}
+
+.gc-power-level {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--gc-rarity-primary, #9ca3af);
+  text-shadow: 0 0 6px var(--gc-rarity-glow, transparent);
+}
+
+/* 效果文本框 */
+.gc-effect-box {
+  position: relative;
+  z-index: 1;
+  padding: 8px;
+  background: rgba(0, 0, 0, 0.35);
+  border-radius: 6px;
+  margin-bottom: 6px;
+  min-height: 60px;
+  max-height: 140px;
+  overflow-y: auto;
+}
+
+.gc-effect-item {
+  margin-bottom: 4px;
+  line-height: 1.5;
+}
+
+.gc-effect-item:last-child {
+  margin-bottom: 0;
+}
+
+.gc-effect-type {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--gc-rarity-primary, #9ca3af);
+  margin-right: 2px;
+}
+
+.gc-effect-desc {
+  font-size: 11.5px;
+  color: rgba(255, 255, 255, 0.9);
+  line-height: 1.5;
+}
+
+/* 风味文本 */
+.gc-flavor-text {
+  position: relative;
+  z-index: 1;
+  font-size: 10.5px;
+  font-style: italic;
+  color: rgba(255, 255, 255, 0.5);
+  text-align: center;
+  padding: 4px 12px;
+  margin-bottom: 6px;
+  line-height: 1.4;
+}
+
+.gc-flavor-quote {
+  font-size: 14px;
+  opacity: 0.6;
+  margin: 0 2px;
+}
+
+/* 底部数值栏 */
+.gc-stats-bar {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  padding: 6px 4px 2px;
+}
+
+.gc-stats-bar-simple {
+  justify-content: center;
+}
+
+.gc-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+}
+
+.gc-stat-label {
+  font-size: 9px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.5);
+  letter-spacing: 0.1em;
+}
+
+.gc-stat-value {
+  font-size: 18px;
+  font-weight: 800;
+  line-height: 1;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+}
+
+.gc-stat-atk .gc-stat-value {
+  color: #f87171;
+}
+
+.gc-stat-hp .gc-stat-value {
+  color: #4ade80;
+}
+
+.gc-stat-def .gc-stat-value {
+  color: #60a5fa;
+}
+
+.gc-stat-simple {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--gc-rarity-primary, #9ca3af);
+}
+
+/* 导出水印 */
+.gc-export-watermark {
+  position: absolute;
+  bottom: 6px;
+  left: 0;
+  right: 0;
+  text-align: center;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.gc-export-watermark span {
+  font-size: 9px;
+  color: rgba(255, 255, 255, 0.25);
+  letter-spacing: 0.1em;
+}
+
+/* 响应式 */
+@media (max-width: 400px) {
+  .gc-card {
+    width: 100%;
+    padding: 12px 14px 10px;
+  }
+
+  .gc-name-text {
+    font-size: 15px;
+  }
+
+  .gc-effect-desc {
+    font-size: 11px;
+  }
+}

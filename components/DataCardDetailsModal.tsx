@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { X, Info, Star, Heart, Download, ChevronDown, ChevronUp, Flag, MoreHorizontal } from 'lucide-react';
+import { X, Info, Star, Heart, Download, ChevronDown, ChevronUp, Flag, MoreHorizontal, Layers } from 'lucide-react';
 import { MarkdownBlock } from '@/components/MarkdownBlock';
 import { DataCardReportModal } from '@/components/data-card-reports/DataCardReportModal';
 import { getFieldDisplayName } from '@/lib/fieldTranslations';
@@ -1115,6 +1115,22 @@ export default function DataCardDetailsModal({
           </div>
 
           <div className="flex items-center gap-2">
+            <button
+              onClick={() => {
+                try {
+                  sessionStorage.setItem('card-forge-source-data', card.data);
+                } catch {
+                  /* ignore */
+                }
+                onClose();
+                window.location.href = '/card-forge';
+              }}
+              className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors inline-flex items-center gap-2"
+              title="将此数据卡发送到卡牌工坊生成卡牌风格卡面"
+            >
+              <Layers className="w-4 h-4" />
+              <span>卡牌工坊</span>
+            </button>
             <button
               onClick={downloadDataCard}
               disabled={!canDownloadCard}

@@ -214,6 +214,15 @@
       #6B5B95 100%);
 }
 
+.card-forge .gradient-overlay {
+  background: linear-gradient(45deg,
+      #fbbf24 0%,
+      #f472b6 25%,
+      #a78bfa 50%,
+      #60a5fa 75%,
+      #34d399 100%);
+}
+
 .feature-button:hover .gradient-overlay {
   /* 恢复原始动画，但使用GPU加速 */
   animation: gradientFlowFast 4s ease-in-out infinite;

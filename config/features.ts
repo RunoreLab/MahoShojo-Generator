@@ -106,6 +106,16 @@ export const featureCategories: FeatureCategory[] = [
         href: '/magic-tea-party',
         className: 'magic-tea-party',
         color: 'white'
+      },
+      {
+        id: 'card-forge',
+        src: '/logo-white.svg',
+        width: 240,
+        height: 100,
+        alt: '卡牌工坊',
+        href: '/card-forge',
+        className: 'card-forge',
+        color: 'white'
       }
     ]
   },
