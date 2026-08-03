@@ -2056,3 +2056,147 @@ body.announcement-visible {
     font-size: 11px;
   }
 }
+
+/* ==================== 卡牌工坊页面样式 ==================== */
+
+.card-forge-shell {
+  position: relative;
+  z-index: 1;
+}
+
+.card-forge-title {
+  background: linear-gradient(45deg, #fbbf24, #f472b6, #a78bfa);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+:root[data-color-mode='dark'] .card-forge-title {
+  background: linear-gradient(45deg, #fde68a, #f9a8d4, #c4b5fd);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-color-mode]) .card-forge-title {
+    background: linear-gradient(45deg, #fde68a, #f9a8d4, #c4b5fd);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+}
+
+.card-forge-panel {
+  background: var(--app-surface);
+  border: 1px solid var(--app-border);
+  box-shadow: var(--app-card-shadow);
+  backdrop-filter: blur(10px);
+  color: var(--app-text);
+  max-width: none;
+}
+
+.card-forge-chip {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.75rem;
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.375rem;
+  transition: background-color 0.2s, color 0.2s;
+  border: none;
+  cursor: pointer;
+}
+
+.card-forge-chip-blue {
+  background: rgba(219, 234, 254, 0.9);
+  color: #2563eb;
+}
+
+.card-forge-chip-blue:hover {
+  background: rgba(191, 219, 254, 0.95);
+}
+
+.card-forge-chip-neutral {
+  background: rgba(243, 244, 246, 0.9);
+  color: #4b5563;
+}
+
+.card-forge-chip-neutral:hover {
+  background: rgba(229, 231, 235, 0.95);
+}
+
+:root[data-color-mode='dark'] .card-forge-chip-blue {
+  background: rgba(30, 58, 138, 0.4);
+  color: #93c5fd;
+}
+
+:root[data-color-mode='dark'] .card-forge-chip-blue:hover {
+  background: rgba(30, 58, 138, 0.6);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-color-mode]) .card-forge-chip-blue {
+    background: rgba(30, 58, 138, 0.4);
+    color: #93c5fd;
+  }
+
+  :root:not([data-color-mode]) .card-forge-chip-blue:hover {
+    background: rgba(30, 58, 138, 0.6);
+  }
+
+  :root:not([data-color-mode]) .card-forge-chip-neutral {
+    background: rgba(55, 65, 81, 0.6);
+    color: #d1d5db;
+  }
+
+  :root:not([data-color-mode]) .card-forge-chip-neutral:hover {
+    background: rgba(75, 85, 99, 0.7);
+  }
+}
+
+:root[data-color-mode='dark'] .card-forge-chip-neutral {
+  background: rgba(55, 65, 81, 0.6);
+  color: #d1d5db;
+}
+
+:root[data-color-mode='dark'] .card-forge-chip-neutral:hover {
+  background: rgba(75, 85, 99, 0.7);
+}
+
+/* 修复保存图片按钮在白色背景上的对比度问题 */
+.card-forge-shell .gc-save-btn.save-button {
+  width: 100%;
+  max-width: 360px;
+  padding: 12px;
+  background: linear-gradient(45deg, var(--app-accent), var(--app-accent-strong));
+  color: #ffffff;
+  border: none;
+  border-radius: 12px;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  margin-top: 0;
+  margin-bottom: 0;
+}
+
+.card-forge-shell .gc-save-btn.save-button:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 20px var(--app-accent-shadow);
+  background: linear-gradient(45deg, var(--app-accent-strong), var(--app-accent));
+}
+
+.card-forge-shell .gc-save-btn.save-button:active {
+  transform: translateY(0);
+}
+
+.card-forge-shell .gc-save-btn.save-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* 卡牌工坊内的生成按钮不需要额外的 margin-bottom */
+.card-forge-shell .generate-button {
+  margin-bottom: 0;
+}
