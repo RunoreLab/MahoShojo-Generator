@@ -109,7 +109,7 @@ export const featureCategories: FeatureCategory[] = [
       },
       {
         id: 'card-forge',
-        src: '',
+        src: '/card-forge-white.svg',
         width: 240,
         height: 100,
         alt: '卡牌工坊',

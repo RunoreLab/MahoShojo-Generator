@@ -1887,8 +1887,8 @@ body.announcement-visible {
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
 }
 
-.gc-element-symbol {
-  font-size: 13px;
+.gc-element-badge svg {
+  flex-shrink: 0;
 }
 
 /* 类型栏 */
@@ -2024,21 +2024,29 @@ body.announcement-visible {
   color: var(--gc-rarity-primary, #9ca3af);
 }
 
-/* 导出水印 */
-.gc-export-watermark {
-  position: absolute;
-  bottom: 6px;
-  left: 0;
-  right: 0;
-  text-align: center;
-  z-index: 2;
-  pointer-events: none;
+/* 捕获区域已合并回 .gc-card */
+
+/* 导出时展开折叠的效果文本框 */
+.gc-card.gc-exporting .gc-effect-box {
+  max-height: none;
+  overflow: visible;
 }
 
-.gc-export-watermark span {
-  font-size: 9px;
-  color: rgba(255, 255, 255, 0.25);
-  letter-spacing: 0.1em;
+/* 导出 LOGO 水印（嵌于卡牌底部，无独立背景） */
+.gc-export-logo {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 4px;
+  padding-bottom: 2px;
+}
+
+.gc-export-logo img {
+  height: 22px;
+  width: auto;
+  opacity: 0.35;
 }
 
 /* 响应式 */

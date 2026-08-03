@@ -2,6 +2,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
+import { Flame, Droplet, Mountain, Wind, Sun, Moon, CircleDashed, CircleEllipsis } from 'lucide-react';
 import { capturePngBlob } from '@/lib/client/snapdomCapture';
 import { createBlobUrl, downloadBlob } from '@/lib/client/blobUrl';
 import {
@@ -27,15 +28,15 @@ export interface GameCardFaceProps {
   className?: string;
 }
 
-const ELEMENT_SYMBOLS: Record<GameCardElement, string> = {
-  fire: '炎',
-  water: '淼',
-  earth: '岩',
-  wind: '风',
-  light: '光',
-  dark: '暗',
-  void: '虚',
-  neutral: '无',
+const ELEMENT_ICONS: Record<GameCardElement, React.ComponentType<{ size?: number; strokeWidth?: number }>> = {
+  fire: Flame,
+  water: Droplet,
+  earth: Mountain,
+  wind: Wind,
+  light: Sun,
+  dark: Moon,
+  void: CircleDashed,
+  neutral: CircleEllipsis,
 };
 
 const RARITY_STARS: Record<GameCardRarity, number> = {
@@ -89,14 +90,12 @@ export function GameCardFace({
 
   const handleSaveImage = async () => {
     if (!cardRef.current || isSavingImage) return;
-    const saveButton = cardRef.current.querySelector('.gc-save-btn') as HTMLElement | null;
     try {
       setIsSavingImage(true);
       if (externalIsExporting === undefined) {
         flushSync(() => setInternalIsExporting(true));
       }
       await waitForNextPaint();
-      if (saveButton) saveButton.style.display = 'none';
 
       const blob = await capturePngBlob(cardRef.current, {
         scale: 2,
@@ -128,7 +127,6 @@ export function GameCardFace({
       if (externalIsExporting === undefined) {
         flushSync(() => setInternalIsExporting(false));
       }
-      if (saveButton) saveButton.style.display = '';
       setIsSavingImage(false);
     }
   };
@@ -137,7 +135,7 @@ export function GameCardFace({
     <div className={`gc-wrapper ${className ?? ''}`}>
       <div
         ref={cardRef}
-        className="gc-card"
+        className={`gc-card ${isExporting ? 'gc-exporting' : ''}`}
         style={{
           ['--gc-rarity-primary' as string]: rarityColors.primary,
           ['--gc-rarity-secondary' as string]: rarityColors.secondary,
@@ -184,7 +182,10 @@ export function GameCardFace({
           </div>
           {/* 元素标识 */}
           <div className="gc-element-badge" style={{ background: `${elementColor}cc` }}>
-            <span className="gc-element-symbol">{ELEMENT_SYMBOLS[faceData.element]}</span>
+            {(() => {
+              const Icon = ELEMENT_ICONS[faceData.element] ?? CircleEllipsis;
+              return <Icon size={12} strokeWidth={2.5} />;
+            })()}
             <span className="gc-element-label">{ELEMENT_LABELS[faceData.element]}</span>
           </div>
         </div>
@@ -251,15 +252,15 @@ export function GameCardFace({
           </div>
         )}
 
-        {/* 底部装饰条 */}
-        <div className="gc-bottom-bar" />
-
-        {/* 导出时显示的水印 */}
+        {/* 导出时显示的 LOGO 水印 */}
         {isExporting && (
-          <div className="gc-export-watermark">
-            <span>魔法少女生成器</span>
+          <div className="gc-export-logo">
+            <img src="/logo-white.svg" alt="魔法少女生成器" />
           </div>
         )}
+
+        {/* 底部装饰条 */}
+        <div className="gc-bottom-bar" />
       </div>
 
       {showSaveButton && (
