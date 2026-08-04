@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import {
@@ -11,13 +11,17 @@ import {
   CARD_TYPE_LABELS,
   ELEMENT_LABELS,
 } from '@/lib/schemas/game-card';
-import { GameCardFace } from '@/components/game-card/GameCardFace';
+import { GameCardFace, type ImageTransform, DEFAULT_IMAGE_TRANSFORM } from '@/components/game-card/GameCardFace';
 import { ErrorMessage } from '@/components/ErrorMessage';
+import { StreamStopButton } from '@/components/shared/StreamStopButton';
+import { ImagePreviewModal } from '@/components/shared/ImagePreviewModal';
 import AiProviderSelector, { type UserAIProviderConfig } from '@/components/AiProviderSelector';
 import { buildCustomProviderRequestPayload } from '@/lib/ai/custom-provider';
 import { normalizeModelScopeToken } from '@/lib/tachie/modelscope/error';
 import { authStorage } from '@/lib/auth';
 import { downloadBlob } from '@/lib/client/blobUrl';
+import { resolveApiErrorMessage, readJsonOrTextFromResponse } from '@/lib/client/apiError';
+import { isAbortErrorLike, STREAM_ABORT_REASON_USER } from '@/lib/stream/abort';
 
 type GenerationStatus = 'idle' | 'generating' | 'success' | 'error';
 
@@ -25,6 +29,8 @@ interface ApiResponse {
   faceData?: GameCardFaceData;
   sourceCardKind?: string;
   error?: string;
+  message?: string;
+  details?: string;
 }
 
 const SAMPLE_CARD_JSON = JSON.stringify(
@@ -145,6 +151,7 @@ export function CardForgePage() {
   const [sourceCardKind, setSourceCardKind] = useState<string | null>(null);
   const [genStatus, setGenStatus] = useState<GenerationStatus>('idle');
   const [genError, setGenError] = useState<string | null>(null);
+  const [genErrorStatus, setGenErrorStatus] = useState<number | null>(null);
   const [themeColorOverride, setThemeColorOverride] = useState<string | null>(null);
   const [imageTab, setImageTab] = useState<'upload' | 'tachie'>('upload');
   const [tachiePrompt, setTachiePrompt] = useState('');
@@ -157,6 +164,11 @@ export function CardForgePage() {
   const [modelscopeModel, setModelscopeModel] = useState(DEFAULT_MODELSCOPE_MODEL);
   const [modelscopeSize, setModelscopeSize] = useState<ModelScopePresetSize>(DEFAULT_MODELSCOPE_SIZE);
   const [rememberTachieCreds, setRememberTachieCreds] = useState(false);
+
+  const [imageTransform, setImageTransform] = useState<ImageTransform>(DEFAULT_IMAGE_TRANSFORM);
+  const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
+  const genAbortRef = useRef<AbortController | null>(null);
+  const tachieAbortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     const saved = loadTachieCredentials();
@@ -195,6 +207,13 @@ export function CardForgePage() {
     }
   }, [searchParams]);
 
+  useEffect(() => {
+    return () => {
+      genAbortRef.current?.abort();
+      tachieAbortRef.current?.abort();
+    };
+  }, []);
+
   const effectiveFaceData = useMemo(() => {
     if (!faceData) return null;
     if (themeColorOverride) {
@@ -206,11 +225,19 @@ export function CardForgePage() {
   const handleGenerate = useCallback(async () => {
     if (!sourceCardJson.trim()) {
       setGenError('请先输入或导入数据卡 JSON');
+      setGenErrorStatus(null);
       setGenStatus('error');
       return;
     }
     setGenStatus('generating');
     setGenError(null);
+    setGenErrorStatus(null);
+
+    const abortController = new AbortController();
+    genAbortRef.current?.abort();
+    genAbortRef.current = abortController;
+
+    let errorStatus: number | null = null;
     try {
       const authHeader = await authStorage.getAuthHeader();
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -230,11 +257,19 @@ export function CardForgePage() {
         method: 'POST',
         headers,
         body: JSON.stringify(body),
+        signal: abortController.signal,
       });
 
-      const json: ApiResponse = await resp.json();
+      const { payload } = await readJsonOrTextFromResponse(resp);
+      const json = payload as ApiResponse;
+
       if (!resp.ok || !json.faceData) {
-        throw new Error(json.error ?? `请求失败 (${resp.status})`);
+        errorStatus = resp.status;
+        const errorMessage = resolveApiErrorMessage({
+          payload,
+          fallback: `请求失败 (${resp.status})`,
+        });
+        throw new Error(errorMessage);
       }
 
       setFaceData(json.faceData);
@@ -242,10 +277,19 @@ export function CardForgePage() {
       setThemeColorOverride(null);
       setGenStatus('success');
     } catch (err) {
+      if (isAbortErrorLike(err) || abortController.signal.aborted) {
+        setGenStatus('idle');
+        return;
+      }
       setGenError(err instanceof Error ? err.message : String(err));
+      setGenErrorStatus(errorStatus);
       setGenStatus('error');
     }
   }, [sourceCardJson, customInstructions, userProviderConfig]);
+
+  const handleStopGeneration = useCallback(() => {
+    genAbortRef.current?.abort(STREAM_ABORT_REASON_USER);
+  }, []);
 
   const handleLoadSample = () => {
     setSourceCardJson(SAMPLE_CARD_JSON);
@@ -272,6 +316,7 @@ export function CardForgePage() {
     reader.onload = () => {
       setImageUrl(String(reader.result ?? ''));
       setImageSource('uploaded');
+      setImageTransform(DEFAULT_IMAGE_TRANSFORM);
     };
     reader.readAsDataURL(file);
   };
@@ -291,6 +336,10 @@ export function CardForgePage() {
     }
     setTachieStatus('generating');
     setTachieError(null);
+
+    const abortController = new AbortController();
+    tachieAbortRef.current?.abort();
+    tachieAbortRef.current = abortController;
 
     if (rememberTachieCreds) {
       saveTachieCredentials({
@@ -315,11 +364,18 @@ export function CardForgePage() {
           modelscopeModel: modelscopeModel.trim() || DEFAULT_MODELSCOPE_MODEL,
           modelscopeSize,
         }),
+        signal: abortController.signal,
       });
 
-      const json = await resp.json();
+      const { payload } = await readJsonOrTextFromResponse(resp);
+      const json = payload as { error?: string; message?: string; details?: string; generateUuid?: string; taskId?: string };
+
       if (!resp.ok) {
-        throw new Error(json.error ?? `立绘生成请求失败 (${resp.status})`);
+        const errorMessage = resolveApiErrorMessage({
+          payload,
+          fallback: `立绘生成请求失败 (${resp.status})`,
+        });
+        throw new Error(errorMessage);
       }
 
       const generateUuid = json.generateUuid ?? json.taskId;
@@ -331,6 +387,7 @@ export function CardForgePage() {
         `/api/tachie/status?uuid=${encodeURIComponent(generateUuid)}&source=modelscope`,
         {
           headers: authHeader ? { Authorization: authHeader } : {},
+          signal: abortController.signal,
         },
       );
       const statusJson = await statusResp.json();
@@ -338,16 +395,25 @@ export function CardForgePage() {
       if (statusJson.imageUrl) {
         setImageUrl(statusJson.imageUrl);
         setImageSource('generated');
+        setImageTransform(DEFAULT_IMAGE_TRANSFORM);
         setTachieStatus('success');
       } else {
         setTachieError('立绘生成中，请稍后在此页面刷新或使用上传方式');
         setTachieStatus('error');
       }
     } catch (err) {
+      if (isAbortErrorLike(err) || abortController.signal.aborted) {
+        setTachieStatus('idle');
+        return;
+      }
       setTachieError(err instanceof Error ? err.message : String(err));
       setTachieStatus('error');
     }
   }, [tachiePrompt, normalizedModelscopeToken, modelscopeModel, modelscopeSize, rememberTachieCreds]);
+
+  const handleStopTachie = useCallback(() => {
+    tachieAbortRef.current?.abort(STREAM_ABORT_REASON_USER);
+  }, []);
 
   const handleExportJson = useCallback(() => {
     if (!effectiveFaceData) return;
@@ -458,16 +524,24 @@ export function CardForgePage() {
                 />
               </div>
 
-              <button
-                onClick={handleGenerate}
-                disabled={genStatus === 'generating' || !sourceCardJson.trim()}
-                className="generate-button w-full"
-              >
-                {genStatus === 'generating' ? '生成中...' : '生成卡牌卡面'}
-              </button>
+              {genStatus === 'generating' ? (
+                <StreamStopButton onClick={handleStopGeneration} label="停止生成" className="w-full" />
+              ) : (
+                <button
+                  onClick={handleGenerate}
+                  disabled={!sourceCardJson.trim()}
+                  className="generate-button w-full"
+                >
+                  生成卡牌卡面
+                </button>
+              )}
 
               {genStatus === 'error' && genError && (
-                <ErrorMessage message={genError} />
+                <ErrorMessage
+                  message={genError}
+                  status={genErrorStatus}
+                  className="rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300"
+                />
               )}
             </section>
 
@@ -533,7 +607,7 @@ export function CardForgePage() {
                   </label>
                   {imageUrl && (
                     <button
-                      onClick={() => { setImageUrl(null); setImageSource(null); }}
+                      onClick={() => { setImageUrl(null); setImageSource(null); setImageTransform(DEFAULT_IMAGE_TRANSFORM); }}
                       className="text-xs text-red-500 hover:underline"
                     >
                       移除图片
@@ -628,22 +702,85 @@ export function CardForgePage() {
                       style={{ resize: 'vertical' }}
                     />
                   </div>
-                  <button
-                    onClick={handleTachieGenerate}
-                    disabled={tachieStatus === 'generating' || !normalizedModelscopeToken}
-                    className="generate-button w-full text-sm"
-                  >
-                    {tachieStatus === 'generating' ? '生成中...' : '生成立绘'}
-                  </button>
+                  {tachieStatus === 'generating' ? (
+                    <StreamStopButton onClick={handleStopTachie} label="停止生成" className="w-full text-sm" />
+                  ) : (
+                    <button
+                      onClick={handleTachieGenerate}
+                      disabled={!normalizedModelscopeToken}
+                      className="generate-button w-full text-sm"
+                    >
+                      生成立绘
+                    </button>
+                  )}
                   {tachieStatus === 'error' && tachieError && (
-                    <p className="text-xs text-red-500">{tachieError}</p>
+                    <div className="rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300">
+                      {tachieError}
+                    </div>
                   )}
                   {tachieStatus === 'success' && (
-                    <p className="text-xs text-green-600 dark:text-green-400">立绘生成成功！</p>
+                    <div className="rounded-lg border border-green-300 bg-green-50 px-3 py-2 text-xs text-green-700 dark:border-green-800 dark:bg-green-950/40 dark:text-green-300">
+                      立绘生成成功！
+                    </div>
                   )}
                   <p className="text-xs text-gray-400 dark:text-gray-500">
                     注：立绘生成通过 ModelScope 异步执行，可能需要等待一段时间。如生成未立即完成，可稍后重试或使用上传方式。
                   </p>
+                </div>
+              )}
+
+              {imageUrl && (
+                <div className="space-y-2 border-t border-gray-200 dark:border-gray-700 pt-3">
+                  <div className="flex items-center justify-between">
+                    <span className="input-label text-xs">图片裁剪调整</span>
+                    <button
+                      onClick={() => setImageTransform(DEFAULT_IMAGE_TRANSFORM)}
+                      className="text-xs text-[var(--app-accent-strong)] hover:underline"
+                    >
+                      重置
+                    </button>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="flex items-center gap-2 text-xs text-[var(--app-text-muted)]">
+                      <span className="w-10 shrink-0">缩放</span>
+                      <input
+                        type="range"
+                        min={1}
+                        max={3}
+                        step={0.1}
+                        value={imageTransform.scale}
+                        onChange={(e) => setImageTransform((prev) => ({ ...prev, scale: Number(e.target.value) }))}
+                        className="flex-1 accent-pink-500"
+                      />
+                      <span className="w-10 shrink-0 text-right tabular-nums">{imageTransform.scale.toFixed(1)}x</span>
+                    </label>
+                    <label className="flex items-center gap-2 text-xs text-[var(--app-text-muted)]">
+                      <span className="w-10 shrink-0">水平</span>
+                      <input
+                        type="range"
+                        min={-50}
+                        max={50}
+                        step={5}
+                        value={imageTransform.x}
+                        onChange={(e) => setImageTransform((prev) => ({ ...prev, x: Number(e.target.value) }))}
+                        className="flex-1 accent-pink-500"
+                      />
+                      <span className="w-10 shrink-0 text-right tabular-nums">{imageTransform.x > 0 ? `+${imageTransform.x}` : imageTransform.x}%</span>
+                    </label>
+                    <label className="flex items-center gap-2 text-xs text-[var(--app-text-muted)]">
+                      <span className="w-10 shrink-0">垂直</span>
+                      <input
+                        type="range"
+                        min={-50}
+                        max={50}
+                        step={5}
+                        value={imageTransform.y}
+                        onChange={(e) => setImageTransform((prev) => ({ ...prev, y: Number(e.target.value) }))}
+                        className="flex-1 accent-pink-500"
+                      />
+                      <span className="w-10 shrink-0 text-right tabular-nums">{imageTransform.y > 0 ? `+${imageTransform.y}` : imageTransform.y}%</span>
+                    </label>
+                  </div>
                 </div>
               )}
             </section>
@@ -713,6 +850,8 @@ export function CardForgePage() {
                     faceData={effectiveFaceData}
                     imageUrl={imageUrl}
                     imageSaveMode="auto"
+                    imageTransform={imageTransform}
+                    onSaveImage={setPreviewImageUrl}
                   />
 
                   {/* 元数据摘要 */}
@@ -766,6 +905,12 @@ export function CardForgePage() {
           </Link>
         </div>
       </div>
+
+      <ImagePreviewModal
+        isOpen={previewImageUrl !== null}
+        imageUrl={previewImageUrl}
+        onClose={() => setPreviewImageUrl(null)}
+      />
     </div>
   );
 }

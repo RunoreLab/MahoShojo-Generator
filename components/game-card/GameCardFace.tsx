@@ -16,6 +16,14 @@ import {
   ELEMENT_COLORS,
 } from '@/lib/schemas/game-card';
 
+export interface ImageTransform {
+  scale: number;
+  x: number;
+  y: number;
+}
+
+export const DEFAULT_IMAGE_TRANSFORM: ImageTransform = { scale: 1, x: 0, y: 0 };
+
 export interface GameCardFaceProps {
   faceData: GameCardFaceData;
   imageUrl?: string | null;
@@ -25,6 +33,7 @@ export interface GameCardFaceProps {
   imageSaveMode?: 'auto' | 'modal' | 'download';
   showSaveButton?: boolean;
   saveButtonLabel?: string;
+  imageTransform?: ImageTransform;
   className?: string;
 }
 
@@ -62,6 +71,7 @@ export function GameCardFace({
   imageSaveMode = 'auto',
   showSaveButton = true,
   saveButtonLabel,
+  imageTransform,
   className,
 }: GameCardFaceProps) {
   const cardRef = useRef<HTMLDivElement>(null);
@@ -105,16 +115,37 @@ export function GameCardFace({
         excludeMode: 'remove',
       });
 
-      const resolvedMode: 'modal' | 'download' =
-        imageSaveMode === 'modal' || imageSaveMode === 'download'
-          ? imageSaveMode
-          : /Mobi/i.test(window.navigator.userAgent)
-            ? 'modal'
-            : 'download';
       const sanitized = faceData.cardName.replace(/[^a-z0-9\u4e00-\u9fa5]/gi, '_');
       const filename = `卡牌_${sanitized}.png`;
 
-      if (resolvedMode === 'modal') {
+      if (imageSaveMode === 'download') {
+        downloadBlob(blob, filename);
+        return;
+      }
+
+      if (imageSaveMode === 'modal') {
+        const url = createBlobUrl(blob);
+        onSaveImage?.(url);
+        return;
+      }
+
+      const isMobileDevice = /Mobi/i.test(window.navigator.userAgent);
+
+      if (isMobileDevice) {
+        const canShare = typeof navigator !== 'undefined' && 'share' in navigator && 'canShare' in navigator;
+        if (canShare && typeof File !== 'undefined') {
+          try {
+            const file = new File([blob], filename, { type: 'image/png' });
+            const shareData: ShareData = { files: [file], title: faceData.cardName };
+            if (navigator.canShare(shareData)) {
+              await navigator.share({ files: [file], title: faceData.cardName });
+              return;
+            }
+          } catch (shareError) {
+            if (shareError instanceof DOMException && shareError.name === 'AbortError') return;
+            console.warn('图片分享失败，将回退到长按保存弹窗', shareError);
+          }
+        }
         const url = createBlobUrl(blob);
         onSaveImage?.(url);
       } else {
@@ -172,6 +203,10 @@ export function GameCardFace({
                 alt={faceData.cardName}
                 className="gc-art-img"
                 crossOrigin="anonymous"
+                style={imageTransform && (imageTransform.scale !== 1 || imageTransform.x !== 0 || imageTransform.y !== 0) ? {
+                  transform: `scale(${imageTransform.scale}) translate(${imageTransform.x}%, ${imageTransform.y}%)`,
+                  transformOrigin: 'center center',
+                } : undefined}
               />
             ) : (
               <div className="gc-art-placeholder">

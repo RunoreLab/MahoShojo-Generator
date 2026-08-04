@@ -280,6 +280,7 @@ export function inferEncyclopediaSlugForError(input: ErrorHelpInput): string | n
 
   if (status === 524) return 'cloudflare-524-timeout';
   if (status === 429) return 'rate-limit-429';
+  if (status === 400) return 'data-card-errors';
   if (
     isAiApiCallError
     && typeof status === 'number'

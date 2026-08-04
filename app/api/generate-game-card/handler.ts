@@ -29,6 +29,15 @@ const RequestBodySchema = z.object({
   customProvider: CustomProviderSchema.optional(),
 });
 
+function formatZodIssues(issues: z.ZodIssue[]): string {
+  return issues
+    .map((issue) => {
+      const path = issue.path.length > 0 ? issue.path.join('.') : '输入';
+      return `${path}：${issue.message}`;
+    })
+    .join('；');
+}
+
 async function handler(req: Request) {
   if (req.method !== 'POST') {
     return new Response(
@@ -42,7 +51,10 @@ async function handler(req: Request) {
     const parsed = RequestBodySchema.safeParse(payloadRaw);
     if (!parsed.success) {
       return new Response(
-        JSON.stringify({ error: '请求参数无效', details: parsed.error.issues }),
+        JSON.stringify({
+          error: '请求参数无效',
+          message: formatZodIssues(parsed.error.issues),
+        }),
         { status: 400, headers: { 'Content-Type': 'application/json' } },
       );
     }
@@ -154,7 +166,7 @@ async function handler(req: Request) {
   } catch (error) {
     log.error('卡牌卡面生成失败', { error: String(error) });
     return new Response(
-      JSON.stringify({ error: '卡牌卡面生成失败', details: String(error) }),
+      JSON.stringify({ error: '卡牌卡面生成失败', message: String(error) }),
       { status: 500, headers: { 'Content-Type': 'application/json' } },
     );
   }
