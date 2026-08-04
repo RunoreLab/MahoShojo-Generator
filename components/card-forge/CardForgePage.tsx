@@ -6,12 +6,15 @@ import { useSearchParams } from 'next/navigation';
 import {
   type GameCardFaceData,
   type GameCardMetadata,
+  type GameCardImageAspectRatio,
   GAME_CARD_TEMPLATE_ID,
   RARITY_LABELS,
   CARD_TYPE_LABELS,
   ELEMENT_LABELS,
 } from '@/lib/schemas/game-card';
 import { GameCardFace, type ImageTransform, DEFAULT_IMAGE_TRANSFORM } from '@/components/game-card/GameCardFace';
+import { ImageCropEditor } from '@/components/card-forge/ImageCropEditor';
+import BattleDataModal from '@/components/BattleDataModal';
 import { ErrorMessage } from '@/components/ErrorMessage';
 import { StreamStopButton } from '@/components/shared/StreamStopButton';
 import { ImagePreviewModal } from '@/components/shared/ImagePreviewModal';
@@ -22,6 +25,12 @@ import { authStorage } from '@/lib/auth';
 import { downloadBlob } from '@/lib/client/blobUrl';
 import { resolveApiErrorMessage, readJsonOrTextFromResponse } from '@/lib/client/apiError';
 import { isAbortErrorLike, STREAM_ABORT_REASON_USER } from '@/lib/stream/abort';
+import {
+  DEFAULT_GAME_CARD_IMAGE_ASPECT_RATIO,
+  normalizeGameCardImageAspectRatio,
+  normalizeImageTransform,
+} from '@/lib/game-card/image-crop';
+import { formatSelectedDataCardJson } from '@/lib/card-forge/source-card';
 
 type GenerationStatus = 'idle' | 'generating' | 'success' | 'error';
 
@@ -166,6 +175,8 @@ export function CardForgePage() {
   const [rememberTachieCreds, setRememberTachieCreds] = useState(false);
 
   const [imageTransform, setImageTransform] = useState<ImageTransform>(DEFAULT_IMAGE_TRANSFORM);
+  const [imageAspectRatio, setImageAspectRatio] = useState<GameCardImageAspectRatio>(DEFAULT_GAME_CARD_IMAGE_ASPECT_RATIO);
+  const [isDataCardModalOpen, setIsDataCardModalOpen] = useState(false);
   const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
   const genAbortRef = useRef<AbortController | null>(null);
   const tachieAbortRef = useRef<AbortController | null>(null);
@@ -295,6 +306,14 @@ export function CardForgePage() {
     setSourceCardJson(SAMPLE_CARD_JSON);
   };
 
+  const handleSelectOnlineDataCard = useCallback((payload: unknown) => {
+    setSourceCardJson(formatSelectedDataCardJson(payload));
+    setGenError(null);
+    setGenErrorStatus(null);
+    setGenStatus('idle');
+    setIsDataCardModalOpen(false);
+  }, []);
+
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -317,6 +336,7 @@ export function CardForgePage() {
       setImageUrl(String(reader.result ?? ''));
       setImageSource('uploaded');
       setImageTransform(DEFAULT_IMAGE_TRANSFORM);
+      setImageAspectRatio(DEFAULT_GAME_CARD_IMAGE_ASPECT_RATIO);
     };
     reader.readAsDataURL(file);
   };
@@ -396,6 +416,7 @@ export function CardForgePage() {
         setImageUrl(statusJson.imageUrl);
         setImageSource('generated');
         setImageTransform(DEFAULT_IMAGE_TRANSFORM);
+        setImageAspectRatio(DEFAULT_GAME_CARD_IMAGE_ASPECT_RATIO);
         setTachieStatus('success');
       } else {
         setTachieError('立绘生成中，请稍后在此页面刷新或使用上传方式');
@@ -422,13 +443,15 @@ export function CardForgePage() {
       faceData: effectiveFaceData,
       imageUrl,
       imageSource: imageSource ?? null,
+      imageAspectRatio,
+      imageTransform,
       sourceCardType: sourceCardKind ?? undefined,
       createdAt: new Date().toISOString(),
     };
     const blob = new Blob([JSON.stringify(metadata, null, 2)], { type: 'application/json' });
     const sanitized = effectiveFaceData.cardName.replace(/[^a-z0-9\u4e00-\u9fa5]/gi, '_');
     downloadBlob(blob, `卡牌_${sanitized}.json`);
-  }, [effectiveFaceData, imageUrl, imageSource, sourceCardKind]);
+  }, [effectiveFaceData, imageAspectRatio, imageTransform, imageSource, imageUrl, sourceCardKind]);
 
   const handleImportJson = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -436,14 +459,22 @@ export function CardForgePage() {
     const reader = new FileReader();
     reader.onload = () => {
       try {
-        const parsed = JSON.parse(String(reader.result));
-        const face = parsed.faceData ?? parsed;
-        if (face && face.cardName && face.rarity) {
-          setFaceData(face);
-          if (parsed.imageUrl) {
-            setImageUrl(parsed.imageUrl);
-            setImageSource(parsed.imageSource ?? 'uploaded');
-          }
+        const parsed = JSON.parse(String(reader.result)) as Record<string, unknown>;
+        const face = (parsed.faceData ?? parsed) as Partial<GameCardFaceData>;
+        if (typeof face.cardName === 'string' && typeof face.rarity === 'string') {
+          setFaceData(face as GameCardFaceData);
+          const importedImageUrl = typeof parsed.imageUrl === 'string' && parsed.imageUrl.trim()
+            ? parsed.imageUrl
+            : null;
+          const importedImageSource = parsed.imageSource === 'generated' || parsed.imageSource === 'data-card'
+            ? parsed.imageSource
+            : 'uploaded';
+          setImageUrl(importedImageUrl);
+          setImageSource(importedImageUrl ? importedImageSource : null);
+          setImageAspectRatio(normalizeGameCardImageAspectRatio(parsed.imageAspectRatio));
+          setImageTransform(normalizeImageTransform(parsed.imageTransform));
+          setGenError(null);
+          setGenErrorStatus(null);
           setGenStatus('success');
         } else {
           setGenError('导入的 JSON 不包含有效的卡牌卡面数据');
@@ -496,6 +527,14 @@ export function CardForgePage() {
                     />
                   </label>
                   <button
+                    type="button"
+                    onClick={() => setIsDataCardModalOpen(true)}
+                    className="card-forge-chip card-forge-chip-blue"
+                  >
+                    浏览线上卡
+                  </button>
+                  <button
+                    type="button"
                     onClick={handleLoadSample}
                     className="card-forge-chip card-forge-chip-neutral"
                   >
@@ -506,7 +545,7 @@ export function CardForgePage() {
               <textarea
                 value={sourceCardJson}
                 onChange={(e) => setSourceCardJson(e.target.value)}
-                placeholder="粘贴角色卡 / 情景卡的 JSON 数据，或点击右上角导入文件 / 加载示例"
+                placeholder="可直接粘贴角色卡 / 情景卡 JSON，也可从本地文件或线上数据卡填入"
                 className="input-field w-full font-mono text-xs"
                 rows={10}
                 style={{ resize: 'vertical', minHeight: '200px' }}
@@ -587,9 +626,9 @@ export function CardForgePage() {
                   <label className="block">
                     <div className="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl p-6 text-center cursor-pointer hover:border-pink-400 transition-colors">
                       {imageUrl && imageSource === 'uploaded' ? (
-                        <div className="space-y-2">
-                          <img src={imageUrl} alt="预览" className="max-h-32 mx-auto rounded" />
-                          <p className="text-xs text-gray-500 dark:text-gray-400">点击重新选择</p>
+                        <div className="space-y-1">
+                          <p className="text-sm font-medium text-[var(--app-text)]">已选择上传图片</p>
+                          <p className="text-xs text-gray-500 dark:text-gray-400">点击重新选择，详细构图请在下方裁剪视窗调整</p>
                         </div>
                       ) : (
                         <div className="space-y-1">
@@ -607,7 +646,13 @@ export function CardForgePage() {
                   </label>
                   {imageUrl && (
                     <button
-                      onClick={() => { setImageUrl(null); setImageSource(null); setImageTransform(DEFAULT_IMAGE_TRANSFORM); }}
+                      type="button"
+                      onClick={() => {
+                        setImageUrl(null);
+                        setImageSource(null);
+                        setImageTransform(DEFAULT_IMAGE_TRANSFORM);
+                        setImageAspectRatio(DEFAULT_GAME_CARD_IMAGE_ASPECT_RATIO);
+                      }}
                       className="text-xs text-red-500 hover:underline"
                     >
                       移除图片
@@ -730,57 +775,15 @@ export function CardForgePage() {
               )}
 
               {imageUrl && (
-                <div className="space-y-2 border-t border-gray-200 dark:border-gray-700 pt-3">
-                  <div className="flex items-center justify-between">
-                    <span className="input-label text-xs">图片裁剪调整</span>
-                    <button
-                      onClick={() => setImageTransform(DEFAULT_IMAGE_TRANSFORM)}
-                      className="text-xs text-[var(--app-accent-strong)] hover:underline"
-                    >
-                      重置
-                    </button>
-                  </div>
-                  <div className="space-y-2">
-                    <label className="flex items-center gap-2 text-xs text-[var(--app-text-muted)]">
-                      <span className="w-10 shrink-0">缩放</span>
-                      <input
-                        type="range"
-                        min={1}
-                        max={3}
-                        step={0.1}
-                        value={imageTransform.scale}
-                        onChange={(e) => setImageTransform((prev) => ({ ...prev, scale: Number(e.target.value) }))}
-                        className="flex-1 accent-pink-500"
-                      />
-                      <span className="w-10 shrink-0 text-right tabular-nums">{imageTransform.scale.toFixed(1)}x</span>
-                    </label>
-                    <label className="flex items-center gap-2 text-xs text-[var(--app-text-muted)]">
-                      <span className="w-10 shrink-0">水平</span>
-                      <input
-                        type="range"
-                        min={-50}
-                        max={50}
-                        step={5}
-                        value={imageTransform.x}
-                        onChange={(e) => setImageTransform((prev) => ({ ...prev, x: Number(e.target.value) }))}
-                        className="flex-1 accent-pink-500"
-                      />
-                      <span className="w-10 shrink-0 text-right tabular-nums">{imageTransform.x > 0 ? `+${imageTransform.x}` : imageTransform.x}%</span>
-                    </label>
-                    <label className="flex items-center gap-2 text-xs text-[var(--app-text-muted)]">
-                      <span className="w-10 shrink-0">垂直</span>
-                      <input
-                        type="range"
-                        min={-50}
-                        max={50}
-                        step={5}
-                        value={imageTransform.y}
-                        onChange={(e) => setImageTransform((prev) => ({ ...prev, y: Number(e.target.value) }))}
-                        className="flex-1 accent-pink-500"
-                      />
-                      <span className="w-10 shrink-0 text-right tabular-nums">{imageTransform.y > 0 ? `+${imageTransform.y}` : imageTransform.y}%</span>
-                    </label>
-                  </div>
+                <div className="border-t border-gray-200 pt-4 dark:border-gray-700">
+                  <ImageCropEditor
+                    imageUrl={imageUrl}
+                    imageAspectRatio={imageAspectRatio}
+                    imageTransform={imageTransform}
+                    onAspectRatioChange={setImageAspectRatio}
+                    onTransformChange={setImageTransform}
+                    onReset={() => setImageTransform(DEFAULT_IMAGE_TRANSFORM)}
+                  />
                 </div>
               )}
             </section>
@@ -851,6 +854,7 @@ export function CardForgePage() {
                     imageUrl={imageUrl}
                     imageSaveMode="auto"
                     imageTransform={imageTransform}
+                    imageAspectRatio={imageAspectRatio}
                     onSaveImage={setPreviewImageUrl}
                   />
 
@@ -905,6 +909,18 @@ export function CardForgePage() {
           </Link>
         </div>
       </div>
+
+      <BattleDataModal
+        isOpen={isDataCardModalOpen}
+        onClose={() => setIsDataCardModalOpen(false)}
+        onSelectCard={handleSelectOnlineDataCard}
+        selectedType="all"
+        allowedTypes={['character', 'scenario', 'history', 'questionnaire']}
+        visibleTabs={['my', 'public', 'favorites']}
+        initialTab="public"
+        selectionMode="single"
+        titleOverride="选择数据卡"
+      />
 
       <ImagePreviewModal
         isOpen={previewImageUrl !== null}
