@@ -18,6 +18,7 @@ import BattleDataModal from '@/components/BattleDataModal';
 import { ErrorMessage } from '@/components/ErrorMessage';
 import { StreamStopButton } from '@/components/shared/StreamStopButton';
 import { ImagePreviewModal } from '@/components/shared/ImagePreviewModal';
+import { TokenIndicator } from '@/components/shared/TokenIndicator';
 import AiProviderSelector, { type UserAIProviderConfig } from '@/components/AiProviderSelector';
 import { buildCustomProviderRequestPayload } from '@/lib/ai/custom-provider';
 import { normalizeModelScopeToken } from '@/lib/tachie/modelscope/error';
@@ -232,6 +233,14 @@ export function CardForgePage() {
     }
     return faceData;
   }, [faceData, themeColorOverride]);
+
+  const tokenEstimateText = useMemo(() => {
+    const parts = [sourceCardJson];
+    if (customInstructions.trim()) {
+      parts.push(`\n--- 用户附加要求 ---\n${customInstructions}`);
+    }
+    return parts.join('');
+  }, [customInstructions, sourceCardJson]);
 
   const handleGenerate = useCallback(async () => {
     if (!sourceCardJson.trim()) {
@@ -562,6 +571,11 @@ export function CardForgePage() {
                   style={{ resize: 'vertical' }}
                 />
               </div>
+
+              <TokenIndicator
+                text={tokenEstimateText}
+                warningText="⚠️ 预计上下文较长，可能更易超时/失败。请结合所选模型的上下文限制自行评估，必要时精简数据卡。"
+              />
 
               {genStatus === 'generating' ? (
                 <StreamStopButton onClick={handleStopGeneration} label="停止生成" className="w-full" />

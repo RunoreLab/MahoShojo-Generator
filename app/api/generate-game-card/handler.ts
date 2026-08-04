@@ -13,7 +13,6 @@ import { inferCharacterKind } from '@/lib/schemas';
 
 const log = getLogger('api-gen-game-card');
 
-const MAX_SOURCE_CARD_CHARS = 50_000;
 const MAX_INSTRUCTIONS_CHARS = 2_000;
 
 const CustomProviderSchema = z.object({
@@ -24,7 +23,7 @@ const CustomProviderSchema = z.object({
 });
 
 const RequestBodySchema = z.object({
-  sourceCardJson: z.string().min(1).max(MAX_SOURCE_CARD_CHARS),
+  sourceCardJson: z.string().min(1),
   customInstructions: z.string().max(MAX_INSTRUCTIONS_CHARS).optional(),
   customProvider: CustomProviderSchema.optional(),
 });
