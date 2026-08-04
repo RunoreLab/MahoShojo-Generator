@@ -9,20 +9,25 @@ import {
   type GameCardFaceData,
   type GameCardRarity,
   type GameCardElement,
+  type GameCardImageAspectRatio,
+  type ImageTransform,
   RARITY_LABELS,
   CARD_TYPE_LABELS,
   ELEMENT_LABELS,
   RARITY_COLORS,
   ELEMENT_COLORS,
 } from '@/lib/schemas/game-card';
+import {
+  DEFAULT_GAME_CARD_IMAGE_ASPECT_RATIO,
+  DEFAULT_IMAGE_TRANSFORM,
+  getAspectRatioValue,
+  getCoverLayout,
+  normalizeImageTransform,
+  type ImageSize,
+} from '@/lib/game-card/image-crop';
 
-export interface ImageTransform {
-  scale: number;
-  x: number;
-  y: number;
-}
-
-export const DEFAULT_IMAGE_TRANSFORM: ImageTransform = { scale: 1, x: 0, y: 0 };
+export type { ImageTransform } from '@/lib/schemas/game-card';
+export { DEFAULT_IMAGE_TRANSFORM };
 
 export interface GameCardFaceProps {
   faceData: GameCardFaceData;
@@ -34,6 +39,7 @@ export interface GameCardFaceProps {
   showSaveButton?: boolean;
   saveButtonLabel?: string;
   imageTransform?: ImageTransform;
+  imageAspectRatio?: GameCardImageAspectRatio;
   className?: string;
 }
 
@@ -72,12 +78,66 @@ export function GameCardFace({
   showSaveButton = true,
   saveButtonLabel,
   imageTransform,
+  imageAspectRatio = DEFAULT_GAME_CARD_IMAGE_ASPECT_RATIO,
   className,
 }: GameCardFaceProps) {
   const cardRef = useRef<HTMLDivElement>(null);
+  const artViewportRef = useRef<HTMLDivElement>(null);
   const [internalIsExporting, setInternalIsExporting] = useState(false);
   const [isSavingImage, setIsSavingImage] = useState(false);
+  const [artViewportSize, setArtViewportSize] = useState<ImageSize | null>(null);
+  const [artImageSize, setArtImageSize] = useState<ImageSize | null>(null);
   const isExporting = externalIsExporting ?? internalIsExporting;
+  const effectiveImageTransform = useMemo(
+    () => normalizeImageTransform(imageTransform ?? DEFAULT_IMAGE_TRANSFORM),
+    [imageTransform],
+  );
+
+  useEffect(() => {
+    const element = artViewportRef.current;
+    if (!element) return;
+
+    const updateViewportSize = () => {
+      const rect = element.getBoundingClientRect();
+      setArtViewportSize({ width: rect.width, height: rect.height });
+    };
+
+    updateViewportSize();
+    if (typeof ResizeObserver === 'undefined') return;
+
+    const observer = new ResizeObserver(updateViewportSize);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    setArtImageSize(null);
+  }, [imageUrl]);
+
+  const artLayout = useMemo(() => {
+    if (!artViewportSize || !artImageSize) return null;
+    return getCoverLayout(artImageSize, artViewportSize, effectiveImageTransform.scale);
+  }, [artImageSize, artViewportSize, effectiveImageTransform.scale]);
+
+  const artImageStyle: React.CSSProperties = artLayout
+    ? {
+        width: artLayout.width,
+        height: artLayout.height,
+        left: '50%',
+        top: '50%',
+        transform: `translate(-50%, -50%) translate(${effectiveImageTransform.x * artLayout.maxPanX}px, ${effectiveImageTransform.y * artLayout.maxPanY}px)`,
+      }
+    : {
+        width: '100%',
+        height: '100%',
+        objectFit: 'cover',
+      };
+
+  const handleArtImageLoad = (event: React.SyntheticEvent<HTMLImageElement>) => {
+    const image = event.currentTarget;
+    if (!image.naturalWidth || !image.naturalHeight) return;
+    setArtImageSize({ width: image.naturalWidth, height: image.naturalHeight });
+  };
 
   useEffect(() => {
     if (onExportStateChange) onExportStateChange(isExporting);
@@ -195,18 +255,16 @@ export function GameCardFace({
         </div>
 
         {/* 插图区域 */}
-        <div className="gc-art-frame">
-          <div className="gc-art-bg" style={{ borderColor: `${elementColor}66` }}>
+        <div className="gc-art-frame" style={{ aspectRatio: getAspectRatioValue(imageAspectRatio) }}>
+          <div ref={artViewportRef} className="gc-art-bg" style={{ borderColor: `${elementColor}66` }}>
             {imageUrl ? (
               <img
                 src={imageUrl}
                 alt={faceData.cardName}
                 className="gc-art-img"
                 crossOrigin="anonymous"
-                style={imageTransform && (imageTransform.scale !== 1 || imageTransform.x !== 0 || imageTransform.y !== 0) ? {
-                  transform: `scale(${imageTransform.scale}) translate(${imageTransform.x}%, ${imageTransform.y}%)`,
-                  transformOrigin: 'center center',
-                } : undefined}
+                style={artImageStyle}
+                onLoad={handleArtImageLoad}
               />
             ) : (
               <div className="gc-art-placeholder">
