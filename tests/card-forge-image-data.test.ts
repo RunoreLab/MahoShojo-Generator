@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import {
+  estimateImageDataUrlByteLength,
+  getImageSizeWarning,
+  IMAGE_SIZE_WARNING_BYTES,
   blobToDataUrl,
   imageUrlToDataUrl,
   isImageDataUrl,
@@ -8,6 +11,19 @@ import {
 afterEach(() => vi.restoreAllMocks());
 
 describe('card forge image data', () => {
+  test('large images only produce a user-facing warning', () => {
+    expect(getImageSizeWarning(IMAGE_SIZE_WARNING_BYTES)).toBeNull();
+
+    const warning = getImageSizeWarning(IMAGE_SIZE_WARNING_BYTES + 1);
+    expect(warning).toContain('图片较大');
+    expect(warning).toContain('不会阻止继续使用');
+  });
+
+  test('estimates embedded image Data URL size without imposing a limit', () => {
+    expect(estimateImageDataUrlByteLength('data:image/png;base64,aGVsbG8=')).toBe(5);
+    expect(estimateImageDataUrlByteLength('https://cdn.example.test/card.png')).toBeNull();
+  });
+
   test('recognizes image Base64 Data URLs only', () => {
     expect(isImageDataUrl('data:image/png;base64,aGVsbG8=')).toBe(true);
     expect(isImageDataUrl('https://cdn.example.test/card.png')).toBe(false);

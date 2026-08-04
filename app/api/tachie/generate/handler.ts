@@ -1,3 +1,5 @@
+import { enforceTextSafety } from "@/lib/content-safety/server";
+import { getLogger } from "@/lib/logger";
 import { getSignedUrl } from "@/lib/tachie/liblib/utils";
 import type { GenerateResponse, ComfyUIAppParams } from "@/lib/tachie/liblib/types";
 import {
@@ -12,6 +14,8 @@ import {
   normalizeModelScopeToken,
   parseModelScopeJsonSafe,
 } from "@/lib/tachie/modelscope/error";
+
+const log = getLogger("api-tachie-generate");
 
 async function handler(req: Request) {
   if (req.method !== "POST") {
@@ -92,6 +96,14 @@ async function handler(req: Request) {
         );
       }
 
+      const safetyResponse = await enforceTextSafety({
+        text: prompt,
+        log,
+        sensitiveWordReason: "立绘生成提示词含敏感词",
+        aiPromptTemplate: "free",
+      });
+      if (safetyResponse) return safetyResponse;
+
       const response = await fetch("https://api-inference.modelscope.cn/v1/images/generations", {
         method: "POST",
         headers: {
@@ -154,6 +166,14 @@ async function handler(req: Request) {
         { status: 400, headers: { "Content-Type": "application/json" } }
       );
     }
+
+    const safetyResponse = await enforceTextSafety({
+      text: prompt,
+      log,
+      sensitiveWordReason: "立绘生成提示词含敏感词",
+      aiPromptTemplate: "free",
+    });
+    if (safetyResponse) return safetyResponse;
 
     const modeRaw = typeof payload.mode === 'string' ? payload.mode.trim() : '';
     const mode = modeRaw === 'illustration' ? 'illustration' : 'tachie';

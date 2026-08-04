@@ -31,8 +31,14 @@ import {
   parseGameCardForgeImport,
   serializeGameCardForgeDocument,
 } from '@/lib/card-forge/document';
-import { imageUrlToDataUrl } from '@/lib/card-forge/image-data';
+import {
+  estimateImageDataUrlByteLength,
+  getImageSizeWarning,
+  imageUrlToDataUrl,
+} from '@/lib/card-forge/image-data';
+import { applyShieldWordsToGameCardFaceData } from '@/lib/card-forge/content-safety';
 import { formatSelectedDataCardJson } from '@/lib/card-forge/source-card';
+import { quickCheck } from '@/lib/sensitive-word-filter';
 
 type GenerationStatus = 'idle' | 'generating' | 'success' | 'error';
 
@@ -182,6 +188,7 @@ export function CardForgePage() {
   const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
   const [isExportingJson, setIsExportingJson] = useState(false);
   const [cardForgeFileError, setCardForgeFileError] = useState<string | null>(null);
+  const [imageSizeWarning, setImageSizeWarning] = useState<string | null>(null);
   const genAbortRef = useRef<AbortController | null>(null);
   const tachieAbortRef = useRef<AbortController | null>(null);
 
@@ -295,7 +302,7 @@ export function CardForgePage() {
         throw new Error(errorMessage);
       }
 
-      setFaceData(json.faceData);
+      setFaceData(applyShieldWordsToGameCardFaceData(json.faceData).faceData);
       setSourceCardKind(json.sourceCardKind ?? null);
       setThemeColorOverride(null);
       setGenStatus('success');
@@ -343,6 +350,7 @@ export function CardForgePage() {
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    setImageSizeWarning(getImageSizeWarning(file.size));
     const reader = new FileReader();
     reader.onload = () => {
       setImageUrl(String(reader.result ?? ''));
@@ -455,6 +463,12 @@ export function CardForgePage() {
 
     try {
       const imageDataUrl = imageUrl ? await imageUrlToDataUrl(imageUrl) : null;
+      const imageByteLength = imageDataUrl
+        ? estimateImageDataUrlByteLength(imageDataUrl)
+        : null;
+      if (imageByteLength !== null) {
+        setImageSizeWarning(getImageSizeWarning(imageByteLength));
+      }
       const json = serializeGameCardForgeDocument({
         faceData: effectiveFaceData,
         imageDataUrl,
@@ -483,9 +497,18 @@ export function CardForgePage() {
 
     try {
       const imported = parseGameCardForgeImport(JSON.parse(await file.text()));
-      setFaceData(imported.faceData);
+      const importedSafety = await quickCheck(JSON.stringify(imported.faceData));
+      if (importedSafety.hasSensitiveWords) {
+        throw new Error('导入的卡面含敏感词，已拒绝载入。');
+      }
+      setFaceData(applyShieldWordsToGameCardFaceData(imported.faceData).faceData);
       setImageUrl(imported.imageUrl);
       setImageSource(imported.imageSource);
+      setImageSizeWarning(
+        imported.imageUrl?.startsWith('data:image/')
+          ? getImageSizeWarning(Math.floor((imported.imageUrl.length * 3) / 4))
+          : null,
+      );
       setImageAspectRatio(imported.imageAspectRatio);
       setImageTransform(imported.imageTransform);
       setThemeColorOverride(null);
@@ -666,6 +689,7 @@ export function CardForgePage() {
                       onClick={() => {
                         setImageUrl(null);
                         setImageSource(null);
+                        setImageSizeWarning(null);
                         setImageTransform(DEFAULT_IMAGE_TRANSFORM);
                         setImageAspectRatio(DEFAULT_GAME_CARD_IMAGE_ASPECT_RATIO);
                       }}
@@ -673,6 +697,9 @@ export function CardForgePage() {
                     >
                       移除图片
                     </button>
+                  )}
+                  {imageSizeWarning && (
+                    <p className="text-xs text-amber-600 dark:text-amber-400">{imageSizeWarning}</p>
                   )}
                 </div>
               )}

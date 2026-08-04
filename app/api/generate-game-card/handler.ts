@@ -4,9 +4,11 @@ import { buildChannelContextFromPayload } from '@/lib/ai/availability';
 import { AI_PROVIDER_CATALOG, resolveAIProviderModel } from '@/lib/ai/constants';
 import { acquirePublicAiRateLimit, buildPublicAiRateLimitResponse, inferPublicAiProviderMode } from '@/lib/ai/public-rate-limit';
 import { buildJsonResponseWithOptionalAiMeta } from '@/lib/ai/meta-response';
-import { type AIProvider } from '@/lib/config';
+import { config as appConfig, type AIProvider } from '@/lib/config';
+import { applyShieldWordsToGameCardFaceData } from '@/lib/card-forge/content-safety';
 import { enforceTextSafety } from '@/lib/content-safety/server';
 import { getLogger } from '@/lib/logger';
+import { quickCheck } from '@/lib/sensitive-word-filter';
 import { recordUserActivityFromRequest } from '@/lib/user-activity/record';
 import { gameCardGenerationConfig, type GameCardGenerationInput } from '@/lib/game-card/config';
 import { inferCharacterKind } from '@/lib/schemas';
@@ -135,7 +137,22 @@ async function handler(req: Request) {
       ...(providerOptions ?? {}),
     };
 
-    const faceData = await generateWithAI(input, gameCardGenerationConfig, aiOptions);
+    const generatedFaceData = await generateWithAI(input, gameCardGenerationConfig, aiOptions);
+
+    if (appConfig.ENABLE_SENSITIVE_WORD_FILTER) {
+      const outputCheck = await quickCheck(JSON.stringify(generatedFaceData));
+      if (outputCheck.hasSensitiveWords) {
+        log.warn('卡牌卡面生成结果含敏感词，已拒绝返回', {
+          detectedWords: outputCheck.detectedWords,
+        });
+        return new Response(
+          JSON.stringify({ error: '卡牌卡面生成结果不合规', shouldRedirect: true }),
+          { status: 400, headers: { 'Content-Type': 'application/json' } },
+        );
+      }
+    }
+
+    const faceData = applyShieldWordsToGameCardFaceData(generatedFaceData).faceData;
     recordUserActivityFromRequest(req);
 
     const sourceCardKind = (() => {

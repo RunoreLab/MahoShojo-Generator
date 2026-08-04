@@ -55,5 +55,5 @@ export const gameCardGenerationConfig: GenerationConfig<GameCardFaceData, GameCa
   promptBuilder: buildPrompt,
   schema: GameCardFaceDataSchema as unknown as z.ZodSchema<GameCardFaceData>,
   taskName: 'generate-game-card',
-  maxOutputTokens: 4096,
+  // 不在卡牌工坊任务层设置输出上限；如模型或卡面协议出现异常，再恢复明确的任务级预算。
 };

@@ -62,9 +62,11 @@ export const GameCardFaceDataSchema = z.object({
   rarity: GameCardRaritySchema.describe('稀有度'),
   cost: z.number().int().min(0).max(20).describe('使用花费（法力/能量点数）'),
   element: GameCardElementSchema.describe('属性/元素'),
-  attack: z.number().int().min(0).max(999).nullable().describe('攻击力，非战斗卡可为 null'),
-  defense: z.number().int().min(0).max(999).nullable().describe('防御力，非战斗卡可为 null'),
-  hp: z.number().int().min(1).max(999).nullable().describe('生命值，非战斗卡可为 null'),
+  // 卡面属性当前只承担展示与卡面协议校验，不设置上界；如后续出现布局或接口问题，再在此处恢复明确上限。
+  attack: z.number().int().min(0).nullable().describe('攻击力，非战斗卡可为 null'),
+  defense: z.number().int().min(0).nullable().describe('防御力，非战斗卡可为 null'),
+  hp: z.number().int().min(1).nullable().describe('生命值，非战斗卡可为 null'),
+  // 文本长度、效果数量和特性数量暂不设新的硬上限；若出现布局或模型失控问题，再按字段补充边界。
   effects: z.array(GameCardEffectSchema).describe('卡牌效果列表'),
   traits: z.array(z.string()).describe('关键词特性，如"飞行"、"先攻"、"嘲讽"'),
   flavorText: z.string().describe('风味文本/背景故事（一句简短的引言）'),
@@ -76,6 +78,7 @@ export const GameCardFaceDataSchema = z.object({
 export type GameCardFaceData = z.infer<typeof GameCardFaceDataSchema>;
 
 const ImageDataUrlSchema = z.string().regex(
+  // Data URL 只校验类型与格式，不限制字节数；大图由卡牌工坊前端给出软提示。
   /^data:image\/[a-z0-9.+-]+;base64,[a-z0-9+/=\s]+$/i,
   '插图必须是图片 Base64 Data URL',
 );

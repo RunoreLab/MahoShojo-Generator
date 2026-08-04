@@ -1,5 +1,27 @@
 const IMAGE_DATA_URL_PATTERN = /^data:image\/[a-z0-9.+-]+;base64,[a-z0-9+/=\s]+$/i;
 
+// 这是性能提示阈值，不是上传、导入或导出的硬拒绝上限。
+export const IMAGE_SIZE_WARNING_BYTES = 10 * 1024 * 1024;
+
+const formatImageSize = (byteLength: number): string => {
+  if (byteLength >= 1024 * 1024) return `${(byteLength / (1024 * 1024)).toFixed(1)} MiB`;
+  return `${Math.max(1, Math.round(byteLength / 1024))} KiB`;
+};
+
+export const getImageSizeWarning = (byteLength: number): string | null => {
+  if (!Number.isFinite(byteLength) || byteLength <= IMAGE_SIZE_WARNING_BYTES) return null;
+  return `图片较大（约 ${formatImageSize(byteLength)}），导出卡面 JSON 时可能占用更多内存，但不会阻止继续使用。`;
+};
+
+export const estimateImageDataUrlByteLength = (dataUrl: string): number | null => {
+  if (!isImageDataUrl(dataUrl)) return null;
+  const separatorIndex = dataUrl.indexOf(',');
+  if (separatorIndex < 0) return null;
+  const payload = dataUrl.slice(separatorIndex + 1).replace(/\s/g, '');
+  const padding = payload.endsWith('==') ? 2 : payload.endsWith('=') ? 1 : 0;
+  return Math.max(0, Math.floor((payload.length * 3) / 4) - padding);
+};
+
 export const isImageDataUrl = (value: unknown): value is string =>
   typeof value === 'string' && IMAGE_DATA_URL_PATTERN.test(value);
 
