@@ -13,6 +13,12 @@ export const ImageTransformSchema = z.object({
 });
 export type ImageTransform = z.infer<typeof ImageTransformSchema>;
 
+export const GAME_CARD_FORGE_DOCUMENT_TYPE = 'maho-shojo-game-card-forge' as const;
+export const GAME_CARD_FORGE_DOCUMENT_VERSION = 1 as const;
+
+export const GameCardImageSourceSchema = z.enum(['uploaded', 'data-card', 'generated']);
+export type GameCardImageSource = z.infer<typeof GameCardImageSourceSchema>;
+
 export const GameCardRaritySchema = z.enum([
   'common',
   'uncommon',
@@ -69,11 +75,34 @@ export const GameCardFaceDataSchema = z.object({
 
 export type GameCardFaceData = z.infer<typeof GameCardFaceDataSchema>;
 
+const ImageDataUrlSchema = z.string().regex(
+  /^data:image\/[a-z0-9.+-]+;base64,[a-z0-9+/=\s]+$/i,
+  '插图必须是图片 Base64 Data URL',
+);
+
+export const GameCardForgeIllustrationSchema = z.object({
+  dataUrl: ImageDataUrlSchema,
+  source: GameCardImageSourceSchema,
+  aspectRatio: GameCardImageAspectRatioSchema,
+  transform: ImageTransformSchema,
+});
+
+export const GameCardForgeDocumentSchema = z.object({
+  documentType: z.literal(GAME_CARD_FORGE_DOCUMENT_TYPE),
+  documentVersion: z.literal(GAME_CARD_FORGE_DOCUMENT_VERSION),
+  faceData: GameCardFaceDataSchema,
+  illustration: GameCardForgeIllustrationSchema.nullable(),
+  createdAt: z.string().datetime().optional(),
+}).strict();
+
+export type GameCardForgeIllustration = z.infer<typeof GameCardForgeIllustrationSchema>;
+export type GameCardForgeDocument = z.infer<typeof GameCardForgeDocumentSchema>;
+
 export const GameCardMetadataSchema = z.object({
   templateId: z.literal(GAME_CARD_TEMPLATE_ID).default(GAME_CARD_TEMPLATE_ID),
   faceData: GameCardFaceDataSchema,
   imageUrl: z.string().nullable().default(null),
-  imageSource: z.enum(['uploaded', 'data-card', 'generated']).nullable().default(null),
+  imageSource: GameCardImageSourceSchema.nullable().default(null),
   imageAspectRatio: GameCardImageAspectRatioSchema.optional(),
   imageTransform: ImageTransformSchema.optional(),
   sourceCardData: z.unknown().optional(),
