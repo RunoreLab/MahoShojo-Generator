@@ -5,9 +5,7 @@ import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import {
   type GameCardFaceData,
-  type GameCardMetadata,
   type GameCardImageAspectRatio,
-  GAME_CARD_TEMPLATE_ID,
   RARITY_LABELS,
   CARD_TYPE_LABELS,
   ELEMENT_LABELS,
@@ -28,9 +26,12 @@ import { resolveApiErrorMessage, readJsonOrTextFromResponse } from '@/lib/client
 import { isAbortErrorLike, STREAM_ABORT_REASON_USER } from '@/lib/stream/abort';
 import {
   DEFAULT_GAME_CARD_IMAGE_ASPECT_RATIO,
-  normalizeGameCardImageAspectRatio,
-  normalizeImageTransform,
 } from '@/lib/game-card/image-crop';
+import {
+  parseGameCardForgeImport,
+  serializeGameCardForgeDocument,
+} from '@/lib/card-forge/document';
+import { imageUrlToDataUrl } from '@/lib/card-forge/image-data';
 import { formatSelectedDataCardJson } from '@/lib/card-forge/source-card';
 
 type GenerationStatus = 'idle' | 'generating' | 'success' | 'error';
@@ -179,6 +180,8 @@ export function CardForgePage() {
   const [imageAspectRatio, setImageAspectRatio] = useState<GameCardImageAspectRatio>(DEFAULT_GAME_CARD_IMAGE_ASPECT_RATIO);
   const [isDataCardModalOpen, setIsDataCardModalOpen] = useState(false);
   const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
+  const [isExportingJson, setIsExportingJson] = useState(false);
+  const [cardForgeFileError, setCardForgeFileError] = useState<string | null>(null);
   const genAbortRef = useRef<AbortController | null>(null);
   const tachieAbortRef = useRef<AbortController | null>(null);
 
@@ -445,56 +448,55 @@ export function CardForgePage() {
     tachieAbortRef.current?.abort(STREAM_ABORT_REASON_USER);
   }, []);
 
-  const handleExportJson = useCallback(() => {
-    if (!effectiveFaceData) return;
-    const metadata: GameCardMetadata = {
-      templateId: GAME_CARD_TEMPLATE_ID,
-      faceData: effectiveFaceData,
-      imageUrl,
-      imageSource: imageSource ?? null,
-      imageAspectRatio,
-      imageTransform,
-      sourceCardType: sourceCardKind ?? undefined,
-      createdAt: new Date().toISOString(),
-    };
-    const blob = new Blob([JSON.stringify(metadata, null, 2)], { type: 'application/json' });
-    const sanitized = effectiveFaceData.cardName.replace(/[^a-z0-9\u4e00-\u9fa5]/gi, '_');
-    downloadBlob(blob, `卡牌_${sanitized}.json`);
-  }, [effectiveFaceData, imageAspectRatio, imageTransform, imageSource, imageUrl, sourceCardKind]);
+  const handleExportJson = useCallback(async () => {
+    if (!effectiveFaceData || isExportingJson) return;
+    setIsExportingJson(true);
+    setCardForgeFileError(null);
 
-  const handleImportJson = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+    try {
+      const imageDataUrl = imageUrl ? await imageUrlToDataUrl(imageUrl) : null;
+      const json = serializeGameCardForgeDocument({
+        faceData: effectiveFaceData,
+        imageDataUrl,
+        imageSource,
+        imageAspectRatio,
+        imageTransform,
+        createdAt: new Date().toISOString(),
+      });
+      const sanitized = effectiveFaceData.cardName.replace(/[^a-z0-9\u4e00-\u9fa5]/gi, '_');
+      downloadBlob(
+        new Blob([json], { type: 'application/json' }),
+        `卡牌_${sanitized}.json`,
+      );
+    } catch (error) {
+      setCardForgeFileError(error instanceof Error ? error.message : '卡面存档导出失败');
+    } finally {
+      setIsExportingJson(false);
+    }
+  }, [effectiveFaceData, imageAspectRatio, imageSource, imageTransform, imageUrl, isExportingJson]);
+
+  const handleImportJson = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const input = event.currentTarget;
+    const file = input.files?.[0];
+    input.value = '';
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      try {
-        const parsed = JSON.parse(String(reader.result)) as Record<string, unknown>;
-        const face = (parsed.faceData ?? parsed) as Partial<GameCardFaceData>;
-        if (typeof face.cardName === 'string' && typeof face.rarity === 'string') {
-          setFaceData(face as GameCardFaceData);
-          const importedImageUrl = typeof parsed.imageUrl === 'string' && parsed.imageUrl.trim()
-            ? parsed.imageUrl
-            : null;
-          const importedImageSource = parsed.imageSource === 'generated' || parsed.imageSource === 'data-card'
-            ? parsed.imageSource
-            : 'uploaded';
-          setImageUrl(importedImageUrl);
-          setImageSource(importedImageUrl ? importedImageSource : null);
-          setImageAspectRatio(normalizeGameCardImageAspectRatio(parsed.imageAspectRatio));
-          setImageTransform(normalizeImageTransform(parsed.imageTransform));
-          setGenError(null);
-          setGenErrorStatus(null);
-          setGenStatus('success');
-        } else {
-          setGenError('导入的 JSON 不包含有效的卡牌卡面数据');
-          setGenStatus('error');
-        }
-      } catch {
-        setGenError('JSON 解析失败');
-        setGenStatus('error');
-      }
-    };
-    reader.readAsText(file);
+
+    try {
+      const imported = parseGameCardForgeImport(JSON.parse(await file.text()));
+      setFaceData(imported.faceData);
+      setImageUrl(imported.imageUrl);
+      setImageSource(imported.imageSource);
+      setImageAspectRatio(imported.imageAspectRatio);
+      setImageTransform(imported.imageTransform);
+      setThemeColorOverride(null);
+      setSourceCardKind(null);
+      setCardForgeFileError(null);
+      setGenError(null);
+      setGenErrorStatus(null);
+      setGenStatus('success');
+    } catch (error) {
+      setCardForgeFileError(error instanceof Error ? error.message : '卡面存档导入失败');
+    }
   };
 
   const handleClearTachieCreds = () => {
@@ -802,14 +804,15 @@ export function CardForgePage() {
               )}
             </section>
 
-            {/* 主题色 + 导入/导出 */}
+            {/* 主题色 */}
             {effectiveFaceData && (
               <section className="card-forge-panel rounded-2xl p-5 space-y-4">
-                <h2 className="text-lg font-semibold text-[var(--app-text)]">主题色与导出</h2>
+                <h2 className="text-lg font-semibold text-[var(--app-text)]">主题色</h2>
                 <div className="flex flex-wrap gap-2">
                   {PRESET_COLORS.map((color) => (
                     <button
                       key={color}
+                      type="button"
                       onClick={() => setThemeColorOverride(color)}
                       className="w-8 h-8 rounded-full border-2 transition-transform hover:scale-110"
                       style={{
@@ -831,30 +834,48 @@ export function CardForgePage() {
                       value={themeColorOverride ?? effectiveFaceData.themeColor}
                       onChange={(e) => setThemeColorOverride(e.target.value)}
                       className="opacity-0 absolute w-8 h-8"
+                      aria-label="自定义主题色"
                     />
                     <span className="text-xs">+</span>
                   </label>
                 </div>
 
-                <div className="flex gap-2">
-                  <button
-                    onClick={handleExportJson}
-                    className="flex-1 px-3 py-2 bg-green-50 text-green-700 rounded-xl text-sm font-medium hover:bg-green-100 transition-colors dark:bg-green-950/30 dark:text-green-400 dark:hover:bg-green-950/50"
-                  >
-                    导出元数据 JSON
-                  </button>
-                  <label className="flex-1 px-3 py-2 bg-blue-50 text-blue-700 rounded-xl text-sm font-medium hover:bg-blue-100 transition-colors cursor-pointer text-center dark:bg-blue-950/30 dark:text-blue-400 dark:hover:bg-blue-950/50">
-                    导入元数据 JSON
-                    <input
-                      type="file"
-                      accept=".json,application/json"
-                      className="hidden"
-                      onChange={handleImportJson}
-                    />
-                  </label>
-                </div>
               </section>
             )}
+
+            {/* 卡面存档 */}
+            <section className="card-forge-panel rounded-2xl p-5 space-y-4">
+              <div>
+                <h2 className="text-lg font-semibold text-[var(--app-text)]">卡面存档</h2>
+                <p className="mt-1 text-xs text-[var(--app-text-muted)]">
+                  导出会将插图内嵌到 JSON，文件较大但可以离线恢复卡面。
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => void handleExportJson()}
+                  disabled={!effectiveFaceData || isExportingJson}
+                  className="flex-1 px-3 py-2 bg-green-50 text-green-700 rounded-xl text-sm font-medium disabled:cursor-not-allowed disabled:opacity-50 dark:bg-green-950/30 dark:text-green-400"
+                >
+                  {isExportingJson ? '正在嵌入插图…' : '导出卡面 JSON'}
+                </button>
+                <label className="flex-1 px-3 py-2 bg-blue-50 text-blue-700 rounded-xl text-sm font-medium hover:bg-blue-100 transition-colors cursor-pointer text-center dark:bg-blue-950/30 dark:text-blue-400">
+                  导入卡面 JSON
+                  <input
+                    type="file"
+                    accept=".json,application/json"
+                    className="hidden"
+                    onChange={(event) => void handleImportJson(event)}
+                  />
+                </label>
+              </div>
+              {cardForgeFileError && (
+                <div className="rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300">
+                  {cardForgeFileError}
+                </div>
+              )}
+            </section>
           </div>
 
           {/* 右侧：预览区 */}

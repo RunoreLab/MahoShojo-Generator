@@ -20,8 +20,8 @@ export const imageUrlToDataUrl = async (imageUrl: string): Promise<string> => {
   let response: Response;
   try {
     response = await fetch(imageUrl);
-  } catch (error) {
-    throw new Error('图片下载失败，无法将插图嵌入存档。', { cause: error });
+  } catch {
+    throw new Error('图片下载失败，无法将插图嵌入存档。');
   }
   if (!response.ok) {
     throw new Error(`图片下载失败（HTTP ${response.status}），无法将插图嵌入存档。`);
