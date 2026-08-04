@@ -2,6 +2,17 @@ import { z } from 'zod/v3';
 
 export const GAME_CARD_TEMPLATE_ID = '卡牌工坊/游戏卡面' as const;
 
+export const GAME_CARD_IMAGE_ASPECT_RATIOS = ['4:3', '1:1', '3:4', '16:9'] as const;
+export const GameCardImageAspectRatioSchema = z.enum(GAME_CARD_IMAGE_ASPECT_RATIOS);
+export type GameCardImageAspectRatio = z.infer<typeof GameCardImageAspectRatioSchema>;
+
+export const ImageTransformSchema = z.object({
+  scale: z.number().min(1).max(3),
+  x: z.number().min(-1).max(1),
+  y: z.number().min(-1).max(1),
+});
+export type ImageTransform = z.infer<typeof ImageTransformSchema>;
+
 export const GameCardRaritySchema = z.enum([
   'common',
   'uncommon',
@@ -63,6 +74,8 @@ export const GameCardMetadataSchema = z.object({
   faceData: GameCardFaceDataSchema,
   imageUrl: z.string().nullable().default(null),
   imageSource: z.enum(['uploaded', 'data-card', 'generated']).nullable().default(null),
+  imageAspectRatio: GameCardImageAspectRatioSchema.optional(),
+  imageTransform: ImageTransformSchema.optional(),
   sourceCardData: z.unknown().optional(),
   sourceCardType: z.string().optional(),
   createdAt: z.string().optional(),
