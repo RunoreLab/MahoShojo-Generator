@@ -60,9 +60,7 @@ const sensitiveWordsConfig = {
     // 新增违禁词
     "5LiL5L2T6auY5r2u",
     "54ix5ray",
-    "54OI5aOr",
     // 慈爱眷者相关违禁词
-    "5amK",
     "5aaT5aWz",
     "57K+5ray",
     "5rer5Lmx",
@@ -70,7 +68,6 @@ const sensitiveWordsConfig = {
     "552h5aW4",
     "5oi/5Lit5pyv",
     "5oCn6auY5r2u",
-    "54ix5oqa",
     "5aiH5ZCf",
     "5r2u5ZC5",
     "6IuX5bqK",
@@ -96,7 +93,7 @@ const sensitiveWordsConfig = {
     "5YK76YC8",
     "54We56yU",
     "6ISR55ir",
-    "6Im5",
+    "6IKP",
     "5pSv55Wc",
     "6LSx56eN",
     // 1016新增
