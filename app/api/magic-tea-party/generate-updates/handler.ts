@@ -1,4 +1,5 @@
 import { z } from 'zod/v3';
+import { UserGenerationOverridesSchema } from '@/lib/ai/generation-settings/schemas';
 import { NextRequest } from 'next/server';
 
 import { AI_PROVIDER_CATALOG, resolveAIProviderModel } from '@/lib/ai/constants';
@@ -22,6 +23,7 @@ const CustomProviderSchema = z.object({
   modelId: z.string().min(1),
   apiKey: z.string().min(1),
   maxOutputTokens: z.number().int().min(1).max(1_000_000).optional(),
+  generationOverrides: UserGenerationOverridesSchema.optional(),
 });
 
 const MessageSchema = z
@@ -140,6 +142,8 @@ const buildProviderOverride = (payload: z.infer<typeof CustomProviderSchema>): {
       retryCount: 1,
       skipProbability: 0,
       ...(typeof payload.maxOutputTokens === 'number' ? { defaultMaxOutputTokens: payload.maxOutputTokens } : {}),
+      providerId: payload.providerId,
+      ...(payload.generationOverrides ? { generationOverrides: payload.generationOverrides } : {}),
     },
   };
 };

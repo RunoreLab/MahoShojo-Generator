@@ -313,6 +313,8 @@ const buildQuestionnaireLoreText = (questionnaires: RequestQuestionnaire[]): str
                     retryCount: 1,
                     skipProbability: 0,
                     ...(typeof parsed.maxOutputTokens === 'number' ? { defaultMaxOutputTokens: parsed.maxOutputTokens } : {}),
+                    providerId: parsed.providerId,
+                    ...(parsed.generationOverrides ? { generationOverrides: parsed.generationOverrides } : {}),
                 };
             }
         }

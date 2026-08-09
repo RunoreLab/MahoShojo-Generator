@@ -1,0 +1,128 @@
+// lib/ai/generation-settings/resolve.ts
+// 统一生成参数解析：用户覆盖 → 任务默认 → Provider 默认 → 模型能力过滤 → 最终请求参数。
+//
+// 规则：
+// - 已知模型 unsupported：不发送（避免 400），并由 diagnostics.omitted 说明。
+// - 未知模型 unknown：开放，用户显式设置的参数尝试发送；错误由上游原样透传，禁止静默删除重试。
+// - 最终请求通过 spread 展开，未发送的参数以 undefined 省略，绝不发送 `temperature: undefined`。
+
+import { getModelGenerationCapabilities } from './model-capabilities';
+import { buildGoogleThinkingOptions, buildThinkingProviderOptions } from './provider-adapters';
+import type {
+  GenerationProviderDefaults,
+  GenerationTaskDefaults,
+  ResolvedGenerationSettings,
+  UserGenerationOverrides,
+} from './types';
+
+const clamp = (value: number, min?: number, max?: number): number => {
+  let result = value;
+  if (typeof min === 'number' && result < min) result = min;
+  if (typeof max === 'number' && result > max) result = max;
+  return result;
+};
+
+const sanitizeMaxOutputTokens = (value: number | undefined): number | undefined => {
+  if (typeof value !== 'number') return undefined;
+  if (!Number.isFinite(value)) return undefined;
+  if (!Number.isInteger(value)) return undefined;
+  if (value <= 0) return undefined;
+  return value;
+};
+
+export interface ResolveGenerationSettingsInput {
+  providerId: string;
+  modelId: string;
+  taskDefaults?: GenerationTaskDefaults;
+  providerDefaults?: GenerationProviderDefaults;
+  userOverrides?: UserGenerationOverrides;
+}
+
+export const resolveGenerationSettings = (
+  input: ResolveGenerationSettingsInput,
+): ResolvedGenerationSettings => {
+  const { providerId, modelId, taskDefaults, providerDefaults, userOverrides } = input;
+
+  const capabilities = getModelGenerationCapabilities(providerId, modelId);
+  const omitted: ResolvedGenerationSettings['diagnostics']['omitted'] = [];
+  const warnings: string[] = [];
+
+  const standardOptions: ResolvedGenerationSettings['standardOptions'] = {};
+  let providerOptions: ResolvedGenerationSettings['providerOptions'];
+
+  // ---- Temperature ----
+  const temperatureCandidate =
+    userOverrides?.temperature ?? taskDefaults?.temperature;
+  if (typeof temperatureCandidate === 'number') {
+    if (capabilities.temperature.support === 'unsupported') {
+      omitted.push({ field: 'temperature', reason: 'unsupported' });
+    } else {
+      standardOptions.temperature = clamp(
+        temperatureCandidate,
+        capabilities.temperature.min,
+        capabilities.temperature.max,
+      );
+    }
+  }
+
+  // ---- Max Output Tokens ----
+  const maxOutputTokensCandidate = sanitizeMaxOutputTokens(
+    userOverrides?.maxOutputTokens ??
+      taskDefaults?.maxOutputTokens ??
+      providerDefaults?.defaultMaxOutputTokens,
+  );
+  if (typeof maxOutputTokensCandidate === 'number') {
+    if (capabilities.maxOutputTokens.support === 'unsupported') {
+      omitted.push({ field: 'maxOutputTokens', reason: 'unsupported' });
+    } else {
+      standardOptions.maxOutputTokens = clamp(
+        maxOutputTokensCandidate,
+        undefined,
+        capabilities.maxOutputTokens.max,
+      );
+    }
+  }
+
+  // ---- Thinking ----
+  // 语义：
+  // - mode 'disabled'：显式关闭，不发送任何 thinking 参数。
+  // - mode 'default'（或未设置）：跟随模型默认。对 Google Gemini 项目默认开启思考并回流 reasoning，
+  //   因此保留 includeThoughts；openai/deepseek 不额外发送参数。
+  // - mode 'enabled'：显式开启，发送档位参数（google 用 thinkingLevel，openai/deepseek 用 reasoningEffort）。
+  const thinkingOverride = userOverrides?.thinking;
+  const thinkingCapability = capabilities.thinking;
+  const thinkingExplicitlyDisabled = thinkingOverride?.mode === 'disabled';
+
+  if (!thinkingExplicitlyDisabled) {
+    if (thinkingCapability.support === 'unsupported') {
+      if (thinkingOverride?.mode === 'enabled') {
+        omitted.push({ field: 'thinking', reason: 'unsupported' });
+      }
+    } else if (thinkingCapability.adapter === 'google') {
+      const effort = thinkingOverride?.mode === 'enabled' ? thinkingOverride.effort : undefined;
+      if (effort && !thinkingCapability.efforts?.includes(effort)) {
+        warnings.push(`模型 ${modelId} 不支持 thinking 档位 ${effort}，已忽略强度设置`);
+      } else {
+        providerOptions = { ...(providerOptions ?? {}), ...buildGoogleThinkingOptions(effort) };
+      }
+    } else if (thinkingOverride?.mode === 'enabled') {
+      const options = buildThinkingProviderOptions(
+        thinkingCapability.adapter ?? 'unknown',
+        thinkingOverride.effort,
+      );
+      if (options) {
+        providerOptions = { ...(providerOptions ?? {}), ...options };
+      } else if (thinkingOverride.effort) {
+        warnings.push(
+          `模型 ${modelId} 不支持 thinking 档位 ${thinkingOverride.effort}，已忽略强度设置`,
+        );
+      }
+    }
+  }
+
+  return {
+    standardOptions,
+    ...(providerOptions ? { providerOptions } : {}),
+    diagnostics: { omitted, warnings },
+  };
+};

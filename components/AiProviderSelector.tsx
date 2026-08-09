@@ -7,12 +7,12 @@ import {
     type AIProviderOption,
 } from '@/lib/ai/constants';
 import {
-    MAX_CUSTOM_PROVIDER_OUTPUT_TOKENS,
-    isDeepSeekV4Model,
     normalizeCustomProviderMaxOutputTokens,
 } from '@/lib/ai/custom-provider';
 import { maskApiKeyForDisplay } from '@/lib/client/mask-api-key';
 import { ChannelAvailabilityBadge } from '@/components/ChannelAvailabilityBadge';
+import type { UserGenerationOverrides } from '@/lib/ai/generation-settings/types';
+import AdvancedGenerationSettings from '@/components/AdvancedGenerationSettings';
 import Link from 'next/link';
 
 export interface UserAIProviderConfig {
@@ -20,6 +20,7 @@ export interface UserAIProviderConfig {
     modelId: string;
     apiKey: string;
     maxOutputTokens?: number;
+    generationOverrides?: UserGenerationOverrides;
 }
 
 interface AiProviderSelectorProps {
@@ -181,6 +182,7 @@ const AiProviderSelector: React.FC<AiProviderSelectorProps> = ({
             modelPrefix: `${storageNamespace}.model.`,
             customModelPrefix: `${storageNamespace}.customModel.`,
             maxOutputTokensPrefix: `${storageNamespace}.maxOutputTokens.`,
+            generationOverridesPrefix: `${storageNamespace}.generationOverrides.`,
         };
     }, [storageNamespace]);
 
@@ -188,6 +190,52 @@ const AiProviderSelector: React.FC<AiProviderSelectorProps> = ({
     const getModelStorageKey = useCallback((providerId: string) => `${storageKeys.modelPrefix}${providerId}`, [storageKeys.modelPrefix]);
     const getCustomModelStorageKey = useCallback((providerId: string) => `${storageKeys.customModelPrefix}${providerId}`, [storageKeys.customModelPrefix]);
     const getMaxOutputTokensStorageKey = useCallback((providerId: string) => `${storageKeys.maxOutputTokensPrefix}${providerId}`, [storageKeys.maxOutputTokensPrefix]);
+    const getGenerationOverridesKey = useCallback((providerId: string, modelId: string) => `${storageKeys.generationOverridesPrefix}${providerId}.${modelId}`, [storageKeys.generationOverridesPrefix]);
+
+    /** 读取某 provider+model 的生成覆盖：优先新 key，兼容读取旧 provider 级 maxOutputTokens 并回写。 */
+    const readGenerationOverrides = useCallback((providerId: string, modelId: string): { overrides: UserGenerationOverrides | undefined; migrated: boolean } => {
+        if (typeof window === 'undefined') {
+            return { overrides: undefined, migrated: false };
+        }
+        try {
+            const newKey = getGenerationOverridesKey(providerId, modelId);
+            const stored = window.localStorage.getItem(newKey);
+            if (stored) {
+                try {
+                    return { overrides: JSON.parse(stored) as UserGenerationOverrides, migrated: false };
+                } catch {
+                    // 损坏数据，忽略并回退到旧 key
+                }
+            }
+            const legacy = window.localStorage.getItem(getMaxOutputTokensStorageKey(providerId));
+            if (legacy) {
+                const parsed = normalizeCustomProviderMaxOutputTokens(Number(legacy));
+                if (typeof parsed === 'number') {
+                    const overrides: UserGenerationOverrides = { maxOutputTokens: parsed };
+                    window.localStorage.setItem(newKey, JSON.stringify(overrides));
+                    return { overrides, migrated: true };
+                }
+            }
+            return { overrides: undefined, migrated: false };
+        } catch {
+            return { overrides: undefined, migrated: false };
+        }
+    }, [getGenerationOverridesKey, getMaxOutputTokensStorageKey]);
+
+    /** 保存某 provider+model 的生成覆盖。 */
+    const writeGenerationOverrides = useCallback((providerId: string, modelId: string, overrides: UserGenerationOverrides | undefined) => {
+        if (typeof window === 'undefined') return;
+        try {
+            const newKey = getGenerationOverridesKey(providerId, modelId);
+            if (overrides && (typeof overrides.maxOutputTokens === 'number' || typeof overrides.temperature === 'number' || overrides.thinking)) {
+                window.localStorage.setItem(newKey, JSON.stringify(overrides));
+            } else {
+                window.localStorage.removeItem(newKey);
+            }
+        } catch {
+            // localStorage 不可用时忽略
+        }
+    }, [getGenerationOverridesKey]);
 
     const defaultProviderId = useMemo(() => {
         if (allowSystemProvider) return 'system';
@@ -198,13 +246,12 @@ const AiProviderSelector: React.FC<AiProviderSelectorProps> = ({
     const [selectedModel, setSelectedModel] = useState<string>('');
     const [customModelId, setCustomModelId] = useState<string>('');
     const [apiKey, setApiKey] = useState<string>('');
-    const [maxOutputTokensInput, setMaxOutputTokensInput] = useState<string>('');
+    const [generationOverrides, setGenerationOverrides] = useState<UserGenerationOverrides | undefined>(undefined);
     const [isEditingApiKey, setIsEditingApiKey] = useState<boolean>(false);
     const [isHydrated, setIsHydrated] = useState<boolean>(false);
     const [availabilityMap, setAvailabilityMap] = useState<Map<string, AvailabilityEntry>>(new Map());
     const onConfigChangeRef = useRef(onConfigChange);
     const lastEmittedConfigKeyRef = useRef<string>('');
-    const lastAutoFilledMaxTokensKeyRef = useRef<string>('');
 
     const activeProvider = providerOptions.find(provider => provider.id === selectedProviderId) ?? null;
     const hasApiKey = apiKey.trim().length > 0;
@@ -274,14 +321,12 @@ const AiProviderSelector: React.FC<AiProviderSelectorProps> = ({
             const storedApiKey = window.localStorage.getItem(getApiKeyStorageKey(validProvider.id)) || '';
             const storedModel = window.localStorage.getItem(getModelStorageKey(validProvider.id)) || validProvider.models[0]?.value || '';
             const storedCustomModelId = window.localStorage.getItem(getCustomModelStorageKey(validProvider.id)) || '';
-            const storedMaxOutputTokens = window.localStorage.getItem(getMaxOutputTokensStorageKey(validProvider.id)) || '';
             const modelSelection = resolveModelSelection(validProvider, storedModel, storedCustomModelId);
 
             setSelectedProviderId(validProvider.id);
             setApiKey(storedApiKey);
             setSelectedModel(modelSelection.selectedModel);
             setCustomModelId(modelSelection.customModelId);
-            setMaxOutputTokensInput(storedMaxOutputTokens);
         } else {
             if (savedProviderId) {
                 window.localStorage.setItem(storageKeys.selectedProvider, defaultProviderId);
@@ -290,11 +335,10 @@ const AiProviderSelector: React.FC<AiProviderSelectorProps> = ({
             setApiKey('');
             setSelectedModel('');
             setCustomModelId('');
-            setMaxOutputTokensInput('');
         }
 
         setIsHydrated(true);
-    }, [defaultProviderId, getApiKeyStorageKey, getCustomModelStorageKey, getMaxOutputTokensStorageKey, getModelStorageKey, providerOptions, resolveModelSelection, storageKeys.selectedProvider]);
+    }, [defaultProviderId, getApiKeyStorageKey, getCustomModelStorageKey, getModelStorageKey, providerOptions, resolveModelSelection, storageKeys.selectedProvider]);
 
     // 加载渠道可用性数据（静默失败）
     useEffect(() => {
@@ -341,23 +385,26 @@ const AiProviderSelector: React.FC<AiProviderSelectorProps> = ({
 
             const modelFromEvent = typeof detail.modelId === 'string' ? detail.modelId.trim() : '';
             const apiKeyFromEvent = typeof detail.apiKey === 'string' ? detail.apiKey : null;
-            const maxOutputTokensFromEvent = normalizeCustomProviderMaxOutputTokens(detail.maxOutputTokens);
+            const generationOverridesFromEvent = detail.generationOverrides;
 
             try {
                 window.localStorage.setItem(storageKeys.selectedProvider, nextProviderId);
                 if (apiKeyFromEvent != null) {
                     window.localStorage.setItem(getApiKeyStorageKey(nextProviderId), apiKeyFromEvent);
                 }
-                if (typeof maxOutputTokensFromEvent === 'number') {
-                    window.localStorage.setItem(getMaxOutputTokensStorageKey(nextProviderId), String(maxOutputTokensFromEvent));
-                }
                 if (modelFromEvent) {
                     const modelSelection = resolveModelSelection(provider, modelFromEvent, modelFromEvent);
+                    const effectiveModel = modelSelection.selectedModel === CUSTOM_AI_MODEL_OPTION_VALUE
+                        ? modelSelection.customModelId
+                        : (modelSelection.selectedModel || modelFromEvent);
                     if (modelSelection.selectedModel) {
                         window.localStorage.setItem(getModelStorageKey(nextProviderId), modelSelection.selectedModel);
                     }
                     if (modelSelection.selectedModel === CUSTOM_AI_MODEL_OPTION_VALUE) {
                         window.localStorage.setItem(getCustomModelStorageKey(nextProviderId), modelSelection.customModelId);
+                    }
+                    if (effectiveModel && generationOverridesFromEvent) {
+                        writeGenerationOverrides(nextProviderId, effectiveModel, generationOverridesFromEvent);
                     }
                 }
             } catch {
@@ -368,8 +415,8 @@ const AiProviderSelector: React.FC<AiProviderSelectorProps> = ({
             if (apiKeyFromEvent != null) {
                 setApiKey(apiKeyFromEvent);
             }
-            if (typeof maxOutputTokensFromEvent === 'number') {
-                setMaxOutputTokensInput(String(maxOutputTokensFromEvent));
+            if (generationOverridesFromEvent) {
+                setGenerationOverrides(generationOverridesFromEvent);
             }
             if (modelFromEvent) {
                 const modelSelection = resolveModelSelection(provider, modelFromEvent, modelFromEvent);
@@ -380,7 +427,7 @@ const AiProviderSelector: React.FC<AiProviderSelectorProps> = ({
 
         window.addEventListener(PROVIDER_SELECTOR_SYNC_EVENT, handler as EventListener);
         return () => window.removeEventListener(PROVIDER_SELECTOR_SYNC_EVENT, handler as EventListener);
-    }, [allowSystemProvider, getApiKeyStorageKey, getCustomModelStorageKey, getMaxOutputTokensStorageKey, getModelStorageKey, providerOptions, resolveModelSelection, storageKeys.selectedProvider]);
+    }, [allowSystemProvider, getApiKeyStorageKey, getCustomModelStorageKey, getModelStorageKey, providerOptions, resolveModelSelection, storageKeys.selectedProvider, writeGenerationOverrides]);
 
     useEffect(() => {
         if (!isHydrated || typeof window === 'undefined') {
@@ -391,21 +438,19 @@ const AiProviderSelector: React.FC<AiProviderSelectorProps> = ({
             setApiKey('');
             setSelectedModel('');
             setCustomModelId('');
-            setMaxOutputTokensInput('');
+            setGenerationOverrides(undefined);
             return;
         }
 
         let storedApiKey = '';
         let storedModel = activeProvider.models[0]?.value || '';
         let storedCustomModelId = '';
-        let storedMaxOutputTokens = '';
 
         try {
             window.localStorage.setItem(storageKeys.selectedProvider, selectedProviderId);
             storedApiKey = window.localStorage.getItem(getApiKeyStorageKey(activeProvider.id)) || '';
             storedModel = window.localStorage.getItem(getModelStorageKey(activeProvider.id)) || storedModel;
             storedCustomModelId = window.localStorage.getItem(getCustomModelStorageKey(activeProvider.id)) || '';
-            storedMaxOutputTokens = window.localStorage.getItem(getMaxOutputTokensStorageKey(activeProvider.id)) || '';
         } catch {
             // localStorage 在部分隐私模式/受限环境下可能不可用，忽略即可
         }
@@ -414,9 +459,22 @@ const AiProviderSelector: React.FC<AiProviderSelectorProps> = ({
         setApiKey(storedApiKey);
         setSelectedModel(modelSelection.selectedModel);
         setCustomModelId(modelSelection.customModelId);
-        setMaxOutputTokensInput(storedMaxOutputTokens);
-        lastAutoFilledMaxTokensKeyRef.current = '';
-    }, [activeProvider, getApiKeyStorageKey, getCustomModelStorageKey, getMaxOutputTokensStorageKey, getModelStorageKey, isHydrated, resolveModelSelection, selectedProviderId, storageKeys.selectedProvider]);
+    }, [activeProvider, getApiKeyStorageKey, getCustomModelStorageKey, getModelStorageKey, isHydrated, resolveModelSelection, selectedProviderId, storageKeys.selectedProvider]);
+
+    // 按 providerId+modelId 加载生成覆盖（含旧 maxOutputTokens 迁移）。
+    useEffect(() => {
+        if (!isHydrated || !activeProvider) {
+            return;
+        }
+        const effectiveModel = isCustomModelSelected
+            ? customModelId.trim()
+            : (selectedModel || activeProvider.models[0]?.value || '');
+        if (!activeProvider.id || !effectiveModel) {
+            return;
+        }
+        const { overrides } = readGenerationOverrides(activeProvider.id, effectiveModel);
+        setGenerationOverrides(overrides);
+    }, [activeProvider, customModelId, isCustomModelSelected, isHydrated, readGenerationOverrides, selectedModel]);
 
     useEffect(() => {
         if (!isHydrated) {
@@ -436,10 +494,8 @@ const AiProviderSelector: React.FC<AiProviderSelectorProps> = ({
         const effectiveModel = isCustomModelSelected
             ? customModelId.trim()
             : (selectedModel || activeProvider.models[0]?.value || '');
-        const parsedMaxOutputTokens = maxOutputTokensInput.trim()
-            ? normalizeCustomProviderMaxOutputTokens(Number(maxOutputTokensInput))
-            : undefined;
-        const configKey = `${activeProvider.id}::${selectedModel}::${effectiveModel}::${apiKey.trim()}::${parsedMaxOutputTokens ?? ''}`;
+        const parsedMaxOutputTokens = normalizeCustomProviderMaxOutputTokens(generationOverrides?.maxOutputTokens);
+        const configKey = `${activeProvider.id}::${selectedModel}::${effectiveModel}::${apiKey.trim()}::${parsedMaxOutputTokens ?? ''}::${JSON.stringify(generationOverrides ?? null)}`;
         if (configKey === lastEmittedConfigKeyRef.current) {
             return;
         }
@@ -449,31 +505,9 @@ const AiProviderSelector: React.FC<AiProviderSelectorProps> = ({
             modelId: effectiveModel,
             apiKey: apiKey.trim(),
             ...(typeof parsedMaxOutputTokens === 'number' ? { maxOutputTokens: parsedMaxOutputTokens } : {}),
+            ...(generationOverrides ? { generationOverrides } : {}),
         });
-    }, [activeProvider, apiKey, customModelId, isCustomModelSelected, isHydrated, maxOutputTokensInput, selectedModel]);
-
-    useEffect(() => {
-        if (!isHydrated || !activeProvider) {
-            return;
-        }
-
-        const effectiveModel = isCustomModelSelected
-            ? customModelId.trim()
-            : (selectedModel || activeProvider.models[0]?.value || '');
-        const autoFillKey = `${activeProvider.id}::${effectiveModel}`;
-        if (!isDeepSeekV4Model(effectiveModel)) {
-            lastAutoFilledMaxTokensKeyRef.current = '';
-            return;
-        }
-        if (maxOutputTokensInput.trim()) {
-            return;
-        }
-        if (lastAutoFilledMaxTokensKeyRef.current === autoFillKey) {
-            return;
-        }
-        lastAutoFilledMaxTokensKeyRef.current = autoFillKey;
-        setMaxOutputTokensInput('65536');
-    }, [activeProvider, customModelId, isCustomModelSelected, isHydrated, maxOutputTokensInput, selectedModel]);
+    }, [activeProvider, apiKey, customModelId, generationOverrides, isCustomModelSelected, isHydrated, selectedModel]);
 
     useEffect(() => {
         if (!isHydrated || !activeProvider || typeof window === 'undefined') {
@@ -502,12 +536,20 @@ const AiProviderSelector: React.FC<AiProviderSelectorProps> = ({
         window.localStorage.setItem(getCustomModelStorageKey(activeProvider.id), customModelId.trim());
     }, [activeProvider, customModelId, getCustomModelStorageKey, isHydrated, selectedModel]);
 
-    useEffect(() => {
-        if (!isHydrated || !activeProvider || typeof window === 'undefined') {
+    // 用户主动修改高级设置时，仅写入当前 provider+model 的 key，避免模型切换时误写旧值。
+    const handleGenerationOverridesChange = useCallback((next: UserGenerationOverrides | undefined) => {
+        setGenerationOverrides(next);
+        if (!activeProvider || typeof window === 'undefined') {
             return;
         }
-        window.localStorage.setItem(getMaxOutputTokensStorageKey(activeProvider.id), maxOutputTokensInput.trim());
-    }, [activeProvider, getMaxOutputTokensStorageKey, isHydrated, maxOutputTokensInput]);
+        const effectiveModel = isCustomModelSelected
+            ? customModelId.trim()
+            : (selectedModel || activeProvider.models[0]?.value || '');
+        if (!effectiveModel) {
+            return;
+        }
+        writeGenerationOverrides(activeProvider.id, effectiveModel, next);
+    }, [activeProvider, customModelId, isCustomModelSelected, selectedModel, writeGenerationOverrides]);
 
     const providerSelectOptions = useMemo<CustomSelectOption[]>(() => {
         return providerOptions.map((provider): CustomSelectOption => {
@@ -667,23 +709,15 @@ const AiProviderSelector: React.FC<AiProviderSelectorProps> = ({
                     )
                 }
 
-                <div>
-                    <label className="battle-lite-muted-text mb-1 block text-xs font-semibold">最大输出 Tokens（可选）</label>
-                    <input
-                        className="input-field font-mono"
-                        type="number"
-                        min={1}
-                        max={MAX_CUSTOM_PROVIDER_OUTPUT_TOKENS}
-                        step={1}
-                        placeholder="不填写则使用系统默认"
-                        value={maxOutputTokensInput}
-                        inputMode="numeric"
-                        onChange={(event) => setMaxOutputTokensInput(event.target.value)}
-                    />
-                    <p className="battle-lite-subtle-text mt-1 text-xs">
-                        建议 65536；你可以按供应商限制自行调整。
-                    </p>
-                </div>
+                <AdvancedGenerationSettings
+                    value={generationOverrides}
+                    onChange={handleGenerationOverridesChange}
+                    temperatureSupported={true}
+                />
+
+                <p className="battle-lite-subtle-text mt-1 text-xs">
+                    高级设置按「供应商 + 模型」分别保存；留空表示跟随模型 / 供应商默认。
+                </p>
             </div>
         </div>
     );

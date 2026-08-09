@@ -1,6 +1,7 @@
 // lib/config.ts
 
 import { STRICT_RANKED_MODEL_FALLBACKS } from '@/lib/arena/ranked-model-policy';
+import type { UserGenerationOverrides } from '@/lib/ai/generation-settings/types';
 
 // AI 提供商配置接口
 export interface AIProvider {
@@ -15,6 +16,10 @@ export interface AIProvider {
   mode?: 'json' | 'auto' | 'tool' | undefined;
   weight?: number; // 负载均衡权重，数值越大被选中概率越高
   defaultMaxOutputTokens?: number; // 可选：该 provider 未显式传入 maxOutputTokens 时使用的默认输出上限
+  /** 可选：能力解析用 providerId（自定义通道时由调用方填充）。 */
+  providerId?: string;
+  /** 可选：用户生成参数覆盖（仅自定义通道透传）。 */
+  generationOverrides?: UserGenerationOverrides;
 }
 
 // [新增 v0.2.1] AI 安全检查策略配置接口 (SRS 3.1.1)

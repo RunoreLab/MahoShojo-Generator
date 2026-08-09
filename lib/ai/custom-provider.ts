@@ -1,10 +1,12 @@
 import type { UserAIProviderConfig } from '@/components/AiProviderSelector';
+import type { UserGenerationOverrides } from '@/lib/ai/generation-settings/types';
 
 export type CustomProviderPayload = {
   providerId: string;
   modelId: string;
   apiKey: string;
   maxOutputTokens?: number;
+  generationOverrides?: UserGenerationOverrides;
 };
 
 export const isUsingUserProvidedKey = (config: UserAIProviderConfig | null | undefined): boolean =>
@@ -38,6 +40,7 @@ export const buildCustomProviderPayload = (
     modelId: config.modelId,
     apiKey: config.apiKey,
     ...(typeof maxOutputTokens === 'number' ? { maxOutputTokens } : {}),
+    ...(config.generationOverrides ? { generationOverrides: config.generationOverrides } : {}),
   };
 };
 

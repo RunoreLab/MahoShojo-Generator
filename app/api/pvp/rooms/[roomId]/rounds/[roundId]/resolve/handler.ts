@@ -13,6 +13,7 @@ import {
 } from '@/lib/database/pvp';
 import { AI_PROVIDER_CATALOG, resolveAIProviderModel } from '@/lib/ai/constants';
 import { CustomProviderSchema } from '@/lib/arena/schemas';
+import type { CustomProviderPayload } from '@/lib/ai/custom-provider';
 import { pickBotChoiceSnapshotId } from '@/lib/pvp/bot/choose';
 import { parsePvpRoomInternalState, stringifyPvpRoomInternalState } from '@/lib/pvp/bot/room';
 import { normalizeWinnerFromCandidates } from '@/lib/pvp/logic';
@@ -105,7 +106,7 @@ async function resolveHandler(req: Request): Promise<Response> {
   if ('response' in body) return body.response;
 
   const rawCustomProvider = (body.data as ResolveBody).customProvider;
-  let customProvider: { providerId: string; modelId: string; apiKey: string; maxOutputTokens?: number } | null = null;
+  let customProvider: CustomProviderPayload | null = null;
   if (rawCustomProvider !== undefined) {
     const parsed = CustomProviderSchema.safeParse(rawCustomProvider);
     if (!parsed.success) return json({ error: '自定义 AI 供应商配置无效' }, { status: 400 });

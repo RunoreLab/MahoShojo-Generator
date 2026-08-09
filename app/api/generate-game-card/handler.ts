@@ -1,4 +1,5 @@
 import { z } from 'zod/v3';
+import { UserGenerationOverridesSchema } from '@/lib/ai/generation-settings/schemas';
 import { generateWithAI, LoadBalanceStrategy, type GenerateWithAIOptions } from '@/lib/ai';
 import { buildChannelContextFromPayload } from '@/lib/ai/availability';
 import { AI_PROVIDER_CATALOG, resolveAIProviderModel } from '@/lib/ai/constants';
@@ -22,6 +23,7 @@ const CustomProviderSchema = z.object({
   modelId: z.string().min(1),
   apiKey: z.string(),
   maxOutputTokens: z.number().int().min(1).max(1_000_000).optional(),
+  generationOverrides: UserGenerationOverridesSchema.optional(),
 });
 
 const RequestBodySchema = z.object({
@@ -110,6 +112,8 @@ async function handler(req: Request) {
           retryCount: 1,
           skipProbability: 0,
           ...(typeof customProviderPayload.maxOutputTokens === 'number' ? { defaultMaxOutputTokens: customProviderPayload.maxOutputTokens } : {}),
+          providerId: customProviderPayload.providerId,
+          ...(customProviderPayload.generationOverrides ? { generationOverrides: customProviderPayload.generationOverrides } : {}),
         };
       }
     }

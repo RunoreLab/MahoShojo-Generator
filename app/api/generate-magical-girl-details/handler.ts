@@ -2,6 +2,7 @@
 import { generateWithAI, GenerationConfig, LoadBalanceStrategy, type GenerateWithAIOptions } from '@/lib/ai';
 import { buildChannelContextFromPayload } from '@/lib/ai/availability';
 import { z } from 'zod/v3';
+import { UserGenerationOverridesSchema } from '@/lib/ai/generation-settings/schemas';
 import { getRandomFlowers } from '@/lib/random-choose-hana-name';
 // import { saveToD1 } from '@/lib/d1';
 import { getLogger } from '@/lib/logger';
@@ -569,6 +570,8 @@ async function handler(req: Request): Promise<Response> {
           retryCount: 1,
           skipProbability: 0,
           ...(typeof parsed.maxOutputTokens === 'number' ? { defaultMaxOutputTokens: parsed.maxOutputTokens } : {}),
+          providerId: parsed.providerId,
+          ...(parsed.generationOverrides ? { generationOverrides: parsed.generationOverrides } : {}),
         };
       }
     }
@@ -680,5 +683,6 @@ const CustomProviderSchema = z.object({
   modelId: z.string().min(1),
   apiKey: z.string(),
   maxOutputTokens: z.number().int().min(1).max(1_000_000).optional(),
+  generationOverrides: UserGenerationOverridesSchema.optional(),
 });
 export default appRouteHandler;

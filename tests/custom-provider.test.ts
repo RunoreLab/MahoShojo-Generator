@@ -83,6 +83,37 @@ describe('custom provider helpers', () => {
     });
   });
 
+  it('自定义 provider payload 透传 generationOverrides（仅当存在）', () => {
+    expect(buildCustomProviderPayload({
+      providerId: 'kourichat',
+      modelId: 'gemini-2.5-flash',
+      apiKey: 'sk-xxx',
+      generationOverrides: { temperature: 0.7, thinking: { mode: 'enabled', effort: 'high' } },
+    })).toEqual({
+      providerId: 'kourichat',
+      modelId: 'gemini-2.5-flash',
+      apiKey: 'sk-xxx',
+      generationOverrides: { temperature: 0.7, thinking: { mode: 'enabled', effort: 'high' } },
+    });
+
+    expect(buildCustomProviderPayload({
+      providerId: 'kourichat',
+      modelId: 'gemini-2.5-flash',
+      apiKey: 'sk-xxx',
+    })).not.toHaveProperty('generationOverrides');
+  });
+
+  it('自定义 provider schema 接受 generationOverrides', () => {
+    const parsed = parseAiSessionCustomProvider({
+      providerId: 'kourichat',
+      modelId: 'gemini-2.5-flash',
+      apiKey: 'sk-xxx',
+      generationOverrides: { temperature: 0.6 },
+    });
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect(parsed.value?.generationOverrides?.temperature).toBe(0.6);
+  });
+
   it('竞技场生成请求复用请求 payload helper，避免丢失最大输出 Tokens', async () => {
     const source = await readFile('components/arena/hooks/useBattleEngine.ts', 'utf8');
     const helperCalls = source.match(/buildCustomProviderRequestPayload\(userProviderConfig\)/g) ?? [];

@@ -1,4 +1,5 @@
 import { z } from 'zod/v3';
+import { UserGenerationOverridesSchema } from '@/lib/ai/generation-settings/schemas';
 import { NextRequest } from 'next/server';
 
 import questionnaire from '@/public/questionnaires/presets/magical-girl-default.json';
@@ -38,6 +39,7 @@ const CustomProviderSchema = z.object({
   modelId: z.string().min(1),
   apiKey: z.string(),
   maxOutputTokens: z.number().int().min(1).max(1_000_000).optional(),
+  generationOverrides: UserGenerationOverridesSchema.optional(),
 });
 
 const AttachmentSchema = z
@@ -444,6 +446,8 @@ const resolveProviderOverride = (payload: unknown): CustomProviderResolveResult 
       retryCount: 1,
       skipProbability: 0,
       ...(typeof parsed.maxOutputTokens === 'number' ? { defaultMaxOutputTokens: parsed.maxOutputTokens } : {}),
+      providerId: parsed.providerId,
+      ...(parsed.generationOverrides ? { generationOverrides: parsed.generationOverrides } : {}),
     },
     customProviderId: providerConfig.id,
     customModelOverride: undefined,

@@ -84,8 +84,12 @@ export const resolveAiSessionProvider = (
     mode: providerConfig.mode || 'auto',
     retryCount: 1,
     skipProbability: 0,
+    providerId,
     ...(typeof customProvider.maxOutputTokens === 'number'
       ? { defaultMaxOutputTokens: customProvider.maxOutputTokens }
+      : {}),
+    ...(customProvider.generationOverrides
+      ? { generationOverrides: customProvider.generationOverrides }
       : {}),
   };
 

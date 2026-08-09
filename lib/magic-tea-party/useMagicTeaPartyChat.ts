@@ -98,6 +98,7 @@ const buildMagicTeaPartyCustomProviderPayload = (config: UserAIProviderConfig) =
   modelId: config.modelId,
   apiKey: config.apiKey,
   ...(typeof config.maxOutputTokens === 'number' ? { maxOutputTokens: config.maxOutputTokens } : {}),
+  ...(config.generationOverrides ? { generationOverrides: config.generationOverrides } : {}),
 });
 
 export type UseMagicTeaPartyChatOptions = {
