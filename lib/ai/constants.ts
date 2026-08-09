@@ -47,6 +47,15 @@ const normalizeCustomModelId = (modelId: string): string | null => {
     return normalized;
 };
 
+const normalizeResolvedModelId = (provider: AIProviderOption, modelId: string): string => {
+    // DeepSeek 官方 V4 Flash 的 API modelId 是 deepseek-v4-flash。
+    // 目录暂时保留 -0731 以兼容既有 localStorage / UI 选择，在请求解析边界统一规范化。
+    if (provider.id === 'deepseek' && modelId.toLowerCase() === 'deepseek-v4-flash-0731') {
+        return 'deepseek-v4-flash';
+    }
+    return modelId;
+};
+
 export const resolveAIProviderModel = (
     provider: AIProviderOption,
     rawModelId: string
@@ -54,7 +63,7 @@ export const resolveAIProviderModel = (
     const modelId = rawModelId.trim();
     const preset = provider.models.find((model) => model.value === modelId);
     if (preset) {
-        return { modelId: preset.value, isCustom: false };
+        return { modelId: normalizeResolvedModelId(provider, preset.value), isCustom: false };
     }
 
     const customModelId = normalizeCustomModelId(rawModelId);
@@ -62,7 +71,7 @@ export const resolveAIProviderModel = (
         return null;
     }
 
-    return { modelId: customModelId, isCustom: true };
+    return { modelId: normalizeResolvedModelId(provider, customModelId), isCustom: true };
 };
 
 const XIAOMI_MIMO_MODELS: AIModelOption[] = [
@@ -1157,7 +1166,7 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
         mode: 'auto',
         models: [
             {
-                value: 'gemini-3.6-flash',
+                value: 'google/gemini-3.6-flash',
                 label: 'Gemini 3.6 Flash',
                 description: 'Google 的新模型，据用户评测说很喜欢一惊一乍，还挺中二的。'
             },

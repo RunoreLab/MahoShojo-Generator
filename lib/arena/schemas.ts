@@ -1,5 +1,6 @@
 import { z } from 'zod/v3';
 import { MAX_CUSTOM_PROVIDER_OUTPUT_TOKENS } from '@/lib/ai/custom-provider';
+import { UserGenerationOverridesSchema } from '@/lib/ai/generation-settings/schemas';
 
 export const buildBattleReportSchema = (options: { enableImpacts: boolean; enableImpactText: boolean; enableCurrentState: boolean }) => {
     const baseShape: Record<string, z.ZodTypeAny> = {
@@ -38,4 +39,5 @@ export const CustomProviderSchema = z.object({
     modelId: z.string().min(1),
     apiKey: z.string(),
     maxOutputTokens: z.number().int().min(1).max(MAX_CUSTOM_PROVIDER_OUTPUT_TOKENS).optional(),
+    generationOverrides: UserGenerationOverridesSchema.optional(),
 }).strict();

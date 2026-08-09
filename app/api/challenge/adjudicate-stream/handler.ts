@@ -331,7 +331,8 @@ const defaultAdjudicateChallengeRequest: HandlerDeps['adjudicateChallengeRequest
             },
             {
               providerOptions: prepared.providerResolved.providerOptions,
-              modelOverride: prepared.providerResolved.modelId,
+              modelOverride: prepared.providerResolved.modelId === 'default' ? undefined : prepared.providerResolved.modelId,
+              generationSettingsContext: prepared.providerResolved.generationSettingsContext,
             }
           );
         },
@@ -381,7 +382,8 @@ const defaultStreamChallengeRequest: HandlerDeps['streamChallengeRequest'] = asy
       },
       {
         providerOptions: prepared.providerResolved.providerOptions,
-        modelOverride: prepared.providerResolved.modelId,
+        modelOverride: prepared.providerResolved.modelId === 'default' ? undefined : prepared.providerResolved.modelId,
+              generationSettingsContext: prepared.providerResolved.generationSettingsContext,
         onReasoningEvent: reasoningBridge.onReasoningEvent,
       }
     );

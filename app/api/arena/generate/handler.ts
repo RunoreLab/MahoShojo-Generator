@@ -297,7 +297,7 @@ const buildQuestionnaireLoreText = (questionnaires: RequestQuestionnaire[]): str
 
             const sanitizedBaseUrl = providerConfig.baseUrl?.trim() ?? '';
             if (!sanitizedBaseUrl) {
-                customModelOverride = modelResolution.modelId;
+                customModelOverride = modelResolution.modelId === 'default' ? undefined : modelResolution.modelId;
                 log.info('检测到 baseUrl 为空的自定义供应商，改用系统默认通道，仅覆盖模型参数', {
                     providerId: providerConfig.id,
                     model: modelResolution.modelId,
@@ -313,6 +313,8 @@ const buildQuestionnaireLoreText = (questionnaires: RequestQuestionnaire[]): str
                     retryCount: 1,
                     skipProbability: 0,
                     ...(typeof parsed.maxOutputTokens === 'number' ? { defaultMaxOutputTokens: parsed.maxOutputTokens } : {}),
+                    providerId: parsed.providerId,
+                    ...(parsed.generationOverrides ? { generationOverrides: parsed.generationOverrides } : {}),
                 };
             }
         }
@@ -479,6 +481,12 @@ const buildQuestionnaireLoreText = (questionnaires: RequestQuestionnaire[]): str
         const generationConfig: GenerationConfig<BattleReportResult, any> = {
             systemPrompt,
             temperature: 0.9,
+            ...(customProviderPayload ? {
+                generationSettingsContext: {
+                    providerId: customProviderPayload.providerId,
+                    ...(customProviderPayload.generationOverrides ? { userOverrides: customProviderPayload.generationOverrides } : {}),
+                },
+            } : {}),
             promptBuilder: createPromptBuilder(
                 fallbackQuestions,
                 finalUserGuidance,

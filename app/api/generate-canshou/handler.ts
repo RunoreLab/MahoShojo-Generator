@@ -1,5 +1,6 @@
 // app/api/generate-canshou/handler.ts
 import { z } from 'zod/v3';
+import { UserGenerationOverridesSchema } from '@/lib/ai/generation-settings/schemas';
 import { generateWithAI, GenerationConfig, LoadBalanceStrategy, type GenerateWithAIOptions } from '@/lib/ai';
 import { buildChannelContextFromPayload } from '@/lib/ai/availability';
 import { getLogger } from '@/lib/logger';
@@ -48,6 +49,7 @@ const CustomProviderSchema = z.object({
   modelId: z.string().min(1),
   apiKey: z.string(),
   maxOutputTokens: z.number().int().min(1).max(1_000_000).optional(),
+  generationOverrides: UserGenerationOverridesSchema.optional(),
 });
 
 type CanshouDetails = z.infer<typeof CanshouSchema>;
@@ -523,7 +525,7 @@ async function handler(req: NextRequest): Promise<Response> {
 
       const sanitizedBaseUrl = providerConfig.baseUrl?.trim() ?? '';
       if (!sanitizedBaseUrl) {
-        customModelOverride = modelResolution.modelId;
+        customModelOverride = modelResolution.modelId === 'default' ? undefined : modelResolution.modelId;
         log.info('检测到 baseUrl 为空的自定义供应商，改用系统默认通道，仅覆盖模型参数', {
           providerId: providerConfig.id,
           model: modelResolution.modelId,
@@ -539,6 +541,8 @@ async function handler(req: NextRequest): Promise<Response> {
           retryCount: 1,
           skipProbability: 0,
           ...(typeof parsed.maxOutputTokens === 'number' ? { defaultMaxOutputTokens: parsed.maxOutputTokens } : {}),
+          providerId: parsed.providerId,
+          ...(parsed.generationOverrides ? { generationOverrides: parsed.generationOverrides } : {}),
         };
       }
     }
@@ -561,6 +565,7 @@ async function handler(req: NextRequest): Promise<Response> {
     const canshouDetails = await generateWithAI({ answers: normalizedAnswers, language, loreText }, {
       ...canshouGenerationConfig,
       ...(customModelOverride ? { modelOverride: customModelOverride } : {}),
+      ...(customProviderPayload ? { generationSettingsContext: { providerId: customProviderPayload.providerId, ...(customProviderPayload.generationOverrides ? { userOverrides: customProviderPayload.generationOverrides } : {}) } } : {}),
     }, aiOptions);
     recordUserActivityFromRequest(req);
 

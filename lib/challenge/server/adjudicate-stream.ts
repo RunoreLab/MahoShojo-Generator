@@ -1,4 +1,5 @@
 import { generateWithStreamAI, type GenerateWithAIOptions, type RawReasoningStreamEvent } from '@/lib/stream/raw-ai';
+import type { GenerationSettingsContext } from '@/lib/ai/generation-settings/types';
 import { finalizeNodeResolution } from '@/lib/challenge/progression';
 import {
   buildChallengeResolverEnvelope,
@@ -184,6 +185,7 @@ export const generateChallengeAttemptStreamFromAi = async (
   options?: {
     providerOptions?: GenerateWithAIOptions;
     modelOverride?: string | null;
+    generationSettingsContext?: GenerationSettingsContext;
     onReasoningEvent?: (event: RawReasoningStreamEvent) => void;
   }
 ): Promise<ChallengeStreamAttemptResult> => {
@@ -196,6 +198,7 @@ export const generateChallengeAttemptStreamFromAi = async (
       temperature: 0.6,
       maxOutputTokens: 1_600,
       ...(options?.modelOverride ? { modelOverride: options.modelOverride } : {}),
+      ...(options?.generationSettingsContext ? { generationSettingsContext: options.generationSettingsContext } : {}),
     },
     {
       ...(options?.providerOptions ?? {}),
@@ -228,6 +231,7 @@ export const generateChallengeAttemptFromStreamAi = async (
   options?: {
     providerOptions?: GenerateWithAIOptions;
     modelOverride?: string | null;
+    generationSettingsContext?: GenerationSettingsContext;
   }
 ): Promise<ChallengeAttemptResult> => {
   const streamAttempt = await generateChallengeAttemptStreamFromAi(input, options);

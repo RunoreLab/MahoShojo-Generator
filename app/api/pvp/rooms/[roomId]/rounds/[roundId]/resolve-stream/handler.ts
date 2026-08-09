@@ -13,6 +13,7 @@ import {
 } from '@/lib/database/pvp';
 import { AI_PROVIDER_CATALOG, resolveAIProviderModel } from '@/lib/ai/constants';
 import { CustomProviderSchema } from '@/lib/arena/schemas';
+import type { CustomProviderPayload } from '@/lib/ai/custom-provider';
 import { extractStreamUpdateMeta, stripStreamUpdateMetaComment } from '@/lib/arena/stream-meta';
 import { extractWinnerFromText } from '@/lib/arena/battle-report-log-utils';
 import { createStreamReadWithTimeout, STREAM_READ_IDLE_TIMEOUT_MS, STREAM_READ_TOTAL_TIMEOUT_MS } from '@/lib/stream/timeout';
@@ -145,7 +146,7 @@ async function resolveStreamHandler(req: Request): Promise<Response> {
   if ('response' in body) return body.response;
 
   const rawCustomProvider = (body.data as ResolveBody).customProvider;
-  let customProvider: { providerId: string; modelId: string; apiKey: string; maxOutputTokens?: number } | null = null;
+  let customProvider: CustomProviderPayload | null = null;
   if (rawCustomProvider !== undefined) {
     const parsed = CustomProviderSchema.safeParse(rawCustomProvider);
     if (!parsed.success) return json({ error: '自定义 AI 供应商配置无效' }, { status: 400 });

@@ -119,6 +119,9 @@ async function handler(req: NextRequest): Promise<Response> {
     if (!providerOptions.channelContext) {
       providerOptions.channelContext = channelContext;
     }
+    if (providerResolved.value.generationSettingsContext) {
+      providerOptions.generationSettingsContext = providerResolved.value.generationSettingsContext;
+    }
 
     const streamResult = await generateWithStreamAI(
       {
