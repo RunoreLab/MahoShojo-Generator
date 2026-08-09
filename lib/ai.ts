@@ -306,7 +306,11 @@ export async function generateWithAI<T, I = string>(
 ): Promise<T> {
   const baseProviders: AIProvider[] = [
     ...(options?.providerOverride ? [options.providerOverride] : []),
-    ...config.PROVIDERS,
+    ...config.PROVIDERS.map((provider) => ({
+      ...provider,
+      // config.PROVIDERS 属于系统通道；显式标记后才能命中 system::<model> 能力登记。
+      providerId: provider.providerId ?? 'system',
+    })),
   ];
 
   if (baseProviders.length === 0) {

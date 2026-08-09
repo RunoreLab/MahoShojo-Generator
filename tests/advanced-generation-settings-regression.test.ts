@@ -198,4 +198,11 @@ describe('advanced generation settings regressions', () => {
       'loadedGenerationOverridesKey !== currentGenerationOverridesKey',
     );
   });
+
+  it('内置系统通道在三个生成入口都标记为 system capability namespace', async () => {
+    for (const path of ['lib/ai.ts', 'lib/stream/ai.ts', 'lib/stream/raw-ai.ts']) {
+      const source = await readFile(path, 'utf8');
+      expect(source, path).toContain("providerId: provider.providerId ?? 'system'");
+    }
+  });
 });

@@ -46,6 +46,10 @@ const AdvancedGenerationSettings: React.FC<AdvancedGenerationSettingsProps> = ({
 
     const maxOutputTokens = value?.maxOutputTokens;
     const temperature = value?.temperature;
+    const effectiveMaxOutputTokensMax = Math.min(
+        maxOutputTokensMax ?? MAX_CUSTOM_PROVIDER_OUTPUT_TOKENS,
+        MAX_CUSTOM_PROVIDER_OUTPUT_TOKENS,
+    );
     const thinking = value?.thinking;
     const rawThinkingMode = thinking?.mode ?? 'default';
     // 兼容旧 localStorage：若旧版本保存了 disabled，但能力表确认不可关闭，UI 回退为“默认”。
@@ -117,7 +121,7 @@ const AdvancedGenerationSettings: React.FC<AdvancedGenerationSettingsProps> = ({
             </button>
 
             {isOpen && (
-                <div className="battle-lite-accent-box mt-2 space-y-3 rounded-lg p-3 text-sm">
+                <div className="mt-2 space-y-3 text-sm">
                     {/* 最大输出 Tokens */}
                     <div>
                         <label className="battle-lite-muted-text mb-1 block text-xs font-semibold">
@@ -127,7 +131,7 @@ const AdvancedGenerationSettings: React.FC<AdvancedGenerationSettingsProps> = ({
                             className="input-field font-mono"
                             type="number"
                             min={1}
-                            max={maxOutputTokensMax ?? MAX_CUSTOM_PROVIDER_OUTPUT_TOKENS}
+                            max={effectiveMaxOutputTokensMax}
                             step={1}
                             placeholder="自动"
                             value={typeof maxOutputTokens === 'number' ? String(maxOutputTokens) : ''}
@@ -139,12 +143,10 @@ const AdvancedGenerationSettings: React.FC<AdvancedGenerationSettingsProps> = ({
                                     return;
                                 }
                                 const parsed = Number(raw);
-                                const bounded = Number.isFinite(parsed) && parsed >= 1 ? Math.floor(parsed) : undefined;
-                                updateMaxOutputTokens(
-                                    bounded != null && typeof maxOutputTokensMax === 'number' && bounded > maxOutputTokensMax
-                                        ? maxOutputTokensMax
-                                        : bounded,
-                                );
+                                const bounded = Number.isFinite(parsed) && parsed >= 1
+                                    ? Math.min(Math.floor(parsed), effectiveMaxOutputTokensMax)
+                                    : undefined;
+                                updateMaxOutputTokens(bounded);
                             }}
                         />
                         <p className="battle-lite-subtle-text mt-1 text-xs">
@@ -174,7 +176,13 @@ const AdvancedGenerationSettings: React.FC<AdvancedGenerationSettingsProps> = ({
                                     return;
                                 }
                                 const parsed = Number(raw);
-                                updateTemperature(Number.isFinite(parsed) ? parsed : undefined);
+                                let bounded = Number.isFinite(parsed)
+                                    ? Math.max(0, parsed)
+                                    : undefined;
+                                if (bounded != null && typeof temperatureMax === 'number') {
+                                    bounded = Math.min(bounded, temperatureMax);
+                                }
+                                updateTemperature(bounded);
                             }}
                         />
                         <p className="battle-lite-subtle-text mt-1 text-xs">
