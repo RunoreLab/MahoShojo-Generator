@@ -1,3 +1,4 @@
+import { readFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
 
 import { AI_PROVIDER_CATALOG, resolveAIProviderModel } from '@/lib/ai/constants';
@@ -93,5 +94,15 @@ describe('advanced generation settings regressions', () => {
 
     expect(gemini.providerOptions).toBeUndefined();
     expect(deepseek.providerOptions).toBeUndefined();
+  });
+
+  it('AiProviderSelector 校验持久化 overrides，并等待当前模型设置加载后再向外 emit', async () => {
+    const source = await readFile('components/AiProviderSelector.tsx', 'utf8');
+
+    expect(source).toContain('UserGenerationOverridesSchema.safeParse(JSON.parse(stored))');
+    expect(source).toContain('setLoadedGenerationOverridesKey(currentGenerationOverridesKey)');
+    expect(source).toContain(
+      'loadedGenerationOverridesKey !== currentGenerationOverridesKey',
+    );
   });
 });

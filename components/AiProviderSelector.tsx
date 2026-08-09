@@ -12,6 +12,7 @@ import {
 import { maskApiKeyForDisplay } from '@/lib/client/mask-api-key';
 import { ChannelAvailabilityBadge } from '@/components/ChannelAvailabilityBadge';
 import type { UserGenerationOverrides } from '@/lib/ai/generation-settings/types';
+import { UserGenerationOverridesSchema } from '@/lib/ai/generation-settings/schemas';
 import AdvancedGenerationSettings from '@/components/AdvancedGenerationSettings';
 import { getModelGenerationCapabilities } from '@/lib/ai/generation-settings/model-capabilities';
 import Link from 'next/link';
@@ -203,10 +204,15 @@ const AiProviderSelector: React.FC<AiProviderSelectorProps> = ({
             const stored = window.localStorage.getItem(newKey);
             if (stored) {
                 try {
-                    return { overrides: JSON.parse(stored) as UserGenerationOverrides, migrated: false };
+                    const parsed = UserGenerationOverridesSchema.safeParse(JSON.parse(stored));
+                    if (parsed.success) {
+                        return { overrides: parsed.data, migrated: false };
+                    }
                 } catch {
-                    // 损坏数据，忽略并回退到旧 key
+                    // 非法 JSON，同样按损坏缓存处理
                 }
+                // 合法 JSON 但不符合当前 schema 也视为损坏缓存，避免非法值反复复活并最终导致服务端 400。
+                window.localStorage.removeItem(newKey);
             }
             const legacy = window.localStorage.getItem(getMaxOutputTokensStorageKey(providerId));
             if (legacy) {
@@ -250,6 +256,7 @@ const AiProviderSelector: React.FC<AiProviderSelectorProps> = ({
     const [customModelId, setCustomModelId] = useState<string>('');
     const [apiKey, setApiKey] = useState<string>('');
     const [generationOverrides, setGenerationOverrides] = useState<UserGenerationOverrides | undefined>(undefined);
+    const [loadedGenerationOverridesKey, setLoadedGenerationOverridesKey] = useState<string | null>(null);
     const [isEditingApiKey, setIsEditingApiKey] = useState<boolean>(false);
     const [isHydrated, setIsHydrated] = useState<boolean>(false);
     const [availabilityMap, setAvailabilityMap] = useState<Map<string, AvailabilityEntry>>(new Map());
@@ -452,6 +459,7 @@ const AiProviderSelector: React.FC<AiProviderSelectorProps> = ({
             setSelectedModel('');
             setCustomModelId('');
             setGenerationOverrides(undefined);
+            setLoadedGenerationOverridesKey(null);
             return;
         }
 
@@ -483,10 +491,14 @@ const AiProviderSelector: React.FC<AiProviderSelectorProps> = ({
             ? customModelId.trim()
             : (selectedModel || activeProvider.models[0]?.value || '');
         if (!activeProvider.id || !effectiveModel) {
+            setGenerationOverrides(undefined);
+            setLoadedGenerationOverridesKey(null);
             return;
         }
+        const currentGenerationOverridesKey = `${activeProvider.id}::${effectiveModel}`;
         const { overrides } = readGenerationOverrides(activeProvider.id, effectiveModel);
         setGenerationOverrides(overrides);
+        setLoadedGenerationOverridesKey(currentGenerationOverridesKey);
     }, [activeProvider, customModelId, isCustomModelSelected, isHydrated, readGenerationOverrides, selectedModel]);
 
     useEffect(() => {
@@ -507,6 +519,10 @@ const AiProviderSelector: React.FC<AiProviderSelectorProps> = ({
         const effectiveModel = isCustomModelSelected
             ? customModelId.trim()
             : (selectedModel || activeProvider.models[0]?.value || '');
+        const currentGenerationOverridesKey = `${activeProvider.id}::${effectiveModel}`;
+        if (loadedGenerationOverridesKey !== currentGenerationOverridesKey) {
+            return;
+        }
         const parsedMaxOutputTokens = normalizeCustomProviderMaxOutputTokens(generationOverrides?.maxOutputTokens);
         const configKey = `${activeProvider.id}::${selectedModel}::${effectiveModel}::${apiKey.trim()}::${parsedMaxOutputTokens ?? ''}::${JSON.stringify(generationOverrides ?? null)}`;
         if (configKey === lastEmittedConfigKeyRef.current) {
@@ -520,7 +536,7 @@ const AiProviderSelector: React.FC<AiProviderSelectorProps> = ({
             ...(typeof parsedMaxOutputTokens === 'number' ? { maxOutputTokens: parsedMaxOutputTokens } : {}),
             ...(generationOverrides ? { generationOverrides } : {}),
         });
-    }, [activeProvider, apiKey, customModelId, generationOverrides, isCustomModelSelected, isHydrated, selectedModel]);
+    }, [activeProvider, apiKey, customModelId, generationOverrides, isCustomModelSelected, isHydrated, loadedGenerationOverridesKey, selectedModel]);
 
     useEffect(() => {
         if (!isHydrated || !activeProvider || typeof window === 'undefined') {
@@ -551,16 +567,21 @@ const AiProviderSelector: React.FC<AiProviderSelectorProps> = ({
 
     // 用户主动修改高级设置时，仅写入当前 provider+model 的 key，避免模型切换时误写旧值。
     const handleGenerationOverridesChange = useCallback((next: UserGenerationOverrides | undefined) => {
-        setGenerationOverrides(next);
-        if (!activeProvider || typeof window === 'undefined') {
+        if (!activeProvider) {
+            setGenerationOverrides(next);
+            setLoadedGenerationOverridesKey(null);
             return;
         }
         const effectiveModel = isCustomModelSelected
             ? customModelId.trim()
             : (selectedModel || activeProvider.models[0]?.value || '');
         if (!effectiveModel) {
+            setGenerationOverrides(next);
+            setLoadedGenerationOverridesKey(null);
             return;
         }
+        setGenerationOverrides(next);
+        setLoadedGenerationOverridesKey(`${activeProvider.id}::${effectiveModel}`);
         writeGenerationOverrides(activeProvider.id, effectiveModel, next);
     }, [activeProvider, customModelId, isCustomModelSelected, selectedModel, writeGenerationOverrides]);
 

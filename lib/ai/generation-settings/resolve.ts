@@ -58,11 +58,16 @@ export const resolveGenerationSettings = (
     thinkingCapability.adapter === 'deepseek-thinking-toggle' && thinkingMode !== 'disabled';
 
   // ---- Temperature ----
-  const temperatureCandidate =
-    userOverrides?.temperature ?? taskDefaults?.temperature;
+  const hasUserTemperatureOverride = typeof userOverrides?.temperature === 'number';
+  const temperatureCandidate = hasUserTemperatureOverride
+    ? userOverrides.temperature
+    : taskDefaults?.temperature;
   if (typeof temperatureCandidate === 'number') {
     if (capabilities.temperature.support === 'unsupported') {
       omitted.push({ field: 'temperature', reason: 'unsupported' });
+    } else if (capabilities.temperature.support === 'unknown' && !hasUserTemperatureOverride) {
+      // 未知模型不自动继承任务默认 temperature；仅用户显式设置时开放尝试发送，
+      // 避免新模型因不再接受 sampling 参数而直接返回 400。
     } else if (deepSeekThinkingActive) {
       // DeepSeek 官方说明：Thinking 模式下 temperature 会被接受但不生效。
       omitted.push({ field: 'temperature', reason: 'ignored-in-thinking-mode' });
@@ -107,18 +112,21 @@ export const resolveGenerationSettings = (
     const effort = thinkingOverride?.mode === 'enabled' ? thinkingOverride.effort : undefined;
     if (thinkingMode === 'disabled' && thinkingCapability.canDisable === false) {
       omitted.push({ field: 'thinking', reason: 'cannot-disable' });
-    } else if (
-      thinkingMode === 'enabled' &&
-      effort &&
-      thinkingCapability.efforts &&
-      !thinkingCapability.efforts.includes(effort)
-    ) {
-      warnings.push(`模型 ${modelId} 不支持 thinking 档位 ${effort}，已忽略强度设置`);
     } else {
+      let effectiveEffort = effort;
+      if (
+        thinkingMode === 'enabled' &&
+        effort &&
+        thinkingCapability.efforts &&
+        !thinkingCapability.efforts.includes(effort)
+      ) {
+        warnings.push(`模型 ${modelId} 不支持 thinking 档位 ${effort}，已忽略强度设置`);
+        effectiveEffort = undefined;
+      }
       const options = buildThinkingOptions(
         thinkingCapability.adapter ?? 'unknown',
         thinkingMode,
-        effort,
+        effectiveEffort,
       );
       if (options) {
         providerOptions = { ...(providerOptions ?? {}), ...options };

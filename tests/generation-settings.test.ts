@@ -9,8 +9,8 @@ import type { UserGenerationOverrides } from '@/lib/ai/generation-settings/types
 
 const resolve = (overrides: UserGenerationOverrides = {}, opts: { providerId?: string; modelId?: string } = {}) =>
   resolveGenerationSettings({
-    providerId: opts.providerId ?? 'openai',
-    modelId: opts.modelId ?? 'gpt-5.6',
+    providerId: opts.providerId ?? 'google-cloudflare',
+    modelId: opts.modelId ?? 'gemini-2.5-flash',
     taskDefaults: { temperature: 0.8, maxOutputTokens: 2048 },
     providerDefaults: { defaultMaxOutputTokens: 4096 },
     userOverrides: overrides,
@@ -40,6 +40,13 @@ describe('resolveGenerationSettings - temperature', () => {
   it('未知模型（unknown）：尝试发送 temperature', () => {
     const result = resolve({ temperature: 0.7 }, { providerId: 'custom-vendor', modelId: 'custom-model' });
     expect(result.standardOptions.temperature).toBe(0.7);
+  });
+
+  it('未知模型（unknown）：不会自动继承任务默认 temperature', () => {
+    const result = resolve({}, { providerId: 'custom-vendor', modelId: 'custom-model' });
+    expect(result.standardOptions.temperature).toBeUndefined();
+    // 任务默认不是用户显式设置，不需要作为“被丢弃的用户字段”制造诊断噪音。
+    expect(result.diagnostics.omitted).toHaveLength(0);
   });
 });
 
@@ -248,12 +255,14 @@ describe('Gemini 3.x：移除 sampling 参数（temperature 不发送），think
     expect(result.providerOptions).toEqual({ google: { thinkingConfig: { includeThoughts: true, thinkingLevel: 'high' } } });
   });
 
-  it('Gemini 3.6 Flash 只开放 minimal/low/medium/high 档位（xhigh/max 被忽略并告警）', () => {
+  it('Gemini 3.6 Flash 的非法档位只降级强度，不会连 Thinking 开启意图一起丢弃', () => {
     const overCap = resolve(
       { thinking: { mode: 'enabled', effort: 'xhigh' } },
       { providerId: 'google-cloudflare', modelId: 'gemini-3.6-flash' },
     );
-    expect(overCap.providerOptions).toBeUndefined();
+    expect(overCap.providerOptions).toEqual({
+      google: { thinkingConfig: { includeThoughts: true } },
+    });
     expect(overCap.diagnostics.warnings.length).toBeGreaterThan(0);
   });
 
