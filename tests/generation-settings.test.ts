@@ -161,9 +161,16 @@ describe('getModelGenerationCapabilities', () => {
 describe('capability ↔ catalog 一致性：registry 声称支持的预置模型应能在 catalog 找到', () => {
   const registered = [
     ['google-cloudflare', 'gemini-2.5-flash'],
-    ['system', 'gemini-2.5-flash'],
+    ['google-cloudflare', 'gemini-2.5-pro'],
+    ['google-cloudflare', 'gemini-2.5-flash-lite'],
+    ['google-cloudflare', 'gemini-3.6-flash'],
+    ['google-cloudflare', 'gemini-3.5-flash-lite'],
+    ['google-cloudflare', 'gemini-3.1-pro-preview'],
     ['deepseek', 'deepseek-v4-flash-0731'],
     ['deepseek', 'deepseek-v4-pro'],
+    ['system', 'gemini-2.5-flash'],
+    ['system', 'gemini-3.6-flash'],
+    ['system', 'gemini-3.5-flash-lite'],
     ['system', 'deepseek-v4-flash-0731'],
     ['system', 'deepseek-v4-pro'],
   ] as const;
@@ -179,10 +186,14 @@ describe('capability ↔ catalog 一致性：registry 声称支持的预置模�
           `${providerId}::${modelId} 应存在于 catalog`,
         ).toBe(true);
       }
+      const caps = getModelGenerationCapabilities(providerId, modelId);
+      // 已登记 ≠ 全部 unknown（temperature 可能是 unsupported，如 Gemini 3.x）。
       expect(
-        getModelGenerationCapabilities(providerId, modelId).temperature.support,
-        `${providerId}::${modelId} 应已登记能力`,
-      ).not.toBe('unsupported');
+        caps.temperature.support !== 'unknown' ||
+          caps.thinking.support !== 'unknown' ||
+          caps.maxOutputTokens.support !== 'unknown',
+        `${providerId}::${modelId} 应已登记至少一项能力`,
+      ).toBe(true);
     }
   });
 });
@@ -215,6 +226,50 @@ describe('Gemini 2.5 Flash 硬限制：非法参数不得被发送', () => {
       { providerId: 'google-cloudflare', modelId: 'gemini-2.5-flash' },
     );
     expect(result.standardOptions.temperature).toBe(2);
+  });
+});
+
+describe('Gemini 3.x：移除 sampling 参数（temperature 不发送），thinking 用 thinkingLevel', () => {
+  it('Gemini 3.6 Flash 的 temperature 被丢弃（unsupported），并由 diagnostics 说明', () => {
+    const result = resolve(
+      { temperature: 0.7 },
+      { providerId: 'google-cloudflare', modelId: 'gemini-3.6-flash' },
+    );
+    expect(result.standardOptions.temperature).toBeUndefined();
+    expect(result.diagnostics.omitted).toContainEqual({ field: 'temperature', reason: 'unsupported' });
+  });
+
+  it('Gemini 3.6 Flash enabled/high → google.thinkingLevel: high', () => {
+    const result = resolve(
+      { thinking: { mode: 'enabled', effort: 'high' } },
+      { providerId: 'google-cloudflare', modelId: 'gemini-3.6-flash' },
+    );
+    expect(result.providerOptions).toEqual({ google: { thinkingConfig: { includeThoughts: true, thinkingLevel: 'high' } } });
+  });
+
+  it('Gemini 3.6 Flash 只开放 minimal/low/medium/high 档位（xhigh/max 被忽略并告警）', () => {
+    const overCap = resolve(
+      { thinking: { mode: 'enabled', effort: 'xhigh' } },
+      { providerId: 'google-cloudflare', modelId: 'gemini-3.6-flash' },
+    );
+    expect(overCap.providerOptions).toBeUndefined();
+    expect(overCap.diagnostics.warnings.length).toBeGreaterThan(0);
+  });
+
+  it('Gemini 3.6 Flash maxOutputTokens 上限 64000', () => {
+    const result = resolve(
+      { maxOutputTokens: 100_000 },
+      { providerId: 'google-cloudflare', modelId: 'gemini-3.6-flash' },
+    );
+    expect(result.standardOptions.maxOutputTokens).toBe(64_000);
+  });
+
+  it('Gemini 3.1 Pro 仍支持 temperature（仅 3.6/3.5 Lite 起移除 sampling）', () => {
+    const result = resolve(
+      { temperature: 0.7 },
+      { providerId: 'google-cloudflare', modelId: 'gemini-3.1-pro-preview' },
+    );
+    expect(result.standardOptions.temperature).toBe(0.7);
   });
 });
 
