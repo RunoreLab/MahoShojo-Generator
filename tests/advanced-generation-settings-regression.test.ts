@@ -205,4 +205,17 @@ describe('advanced generation settings regressions', () => {
       expect(source, path).toContain("providerId: provider.providerId ?? 'system'");
     }
   });
+
+  it('恢复默认会清除 number 输入框残留的浏览器 bad-input 草稿', async () => {
+    const source = await readFile('components/AdvancedGenerationSettings.tsx', 'utf8');
+
+    expect(source).toContain('const [numericInputRevision, setNumericInputRevision] = useState(0)');
+    expect(source).toContain('key={numericInputRevision}');
+    expect(source).toMatch(
+      /const handleReset = \(\) => \{\s+resetNumericInputDrafts\(\);\s+onChange\(undefined\);/,
+    );
+    expect(source).toContain('!Number.isFinite(parsed) || parsed < 1');
+    expect(source).toContain('if (!Number.isFinite(parsed))');
+    expect((source.match(/resetNumericInputDrafts\(\);/g) ?? []).length).toBeGreaterThanOrEqual(3);
+  });
 });

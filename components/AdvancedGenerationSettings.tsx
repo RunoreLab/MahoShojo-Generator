@@ -37,6 +37,14 @@ const AdvancedGenerationSettings: React.FC<AdvancedGenerationSettingsProps> = ({
     canDisableThinking = true,
 }) => {
     const [isOpen, setIsOpen] = useState(false);
+    const [numericInputRevision, setNumericInputRevision] = useState(0);
+
+    // <input type="number"> 对极端指数等 bad input 可能保留浏览器内部草稿；
+    // 此时业务状态已经回到 undefined，再次 setState(undefined) 不一定触发重渲染，
+    // 导致“恢复默认设置”看起来没有反应。递增 revision 可强制重建输入区域并清掉该草稿。
+    const resetNumericInputDrafts = () => {
+        setNumericInputRevision(revision => revision + 1);
+    };
 
     const efforts = thinkingEfforts ?? [];
     const hasThinkingEffortControl = efforts.length > 0;
@@ -101,6 +109,7 @@ const AdvancedGenerationSettings: React.FC<AdvancedGenerationSettingsProps> = ({
     };
 
     const handleReset = () => {
+        resetNumericInputDrafts();
         onChange(undefined);
     };
 
@@ -121,7 +130,10 @@ const AdvancedGenerationSettings: React.FC<AdvancedGenerationSettingsProps> = ({
             </button>
 
             {isOpen && (
-                <div className="mt-2 space-y-3 text-sm">
+                <div
+                    key={numericInputRevision}
+                    className="mt-2 space-y-3 text-sm"
+                >
                     {/* 最大输出 Tokens */}
                     <div>
                         <label className="battle-lite-muted-text mb-1 block text-xs font-semibold">
@@ -143,9 +155,12 @@ const AdvancedGenerationSettings: React.FC<AdvancedGenerationSettingsProps> = ({
                                     return;
                                 }
                                 const parsed = Number(raw);
-                                const bounded = Number.isFinite(parsed) && parsed >= 1
-                                    ? Math.min(Math.floor(parsed), effectiveMaxOutputTokensMax)
-                                    : undefined;
+                                if (!Number.isFinite(parsed) || parsed < 1) {
+                                    resetNumericInputDrafts();
+                                    updateMaxOutputTokens(undefined);
+                                    return;
+                                }
+                                const bounded = Math.min(Math.floor(parsed), effectiveMaxOutputTokensMax);
                                 updateMaxOutputTokens(bounded);
                             }}
                         />
@@ -176,10 +191,13 @@ const AdvancedGenerationSettings: React.FC<AdvancedGenerationSettingsProps> = ({
                                     return;
                                 }
                                 const parsed = Number(raw);
-                                let bounded = Number.isFinite(parsed)
-                                    ? Math.max(0, parsed)
-                                    : undefined;
-                                if (bounded != null && typeof temperatureMax === 'number') {
+                                if (!Number.isFinite(parsed)) {
+                                    resetNumericInputDrafts();
+                                    updateTemperature(undefined);
+                                    return;
+                                }
+                                let bounded = Math.max(0, parsed);
+                                if (typeof temperatureMax === 'number') {
                                     bounded = Math.min(bounded, temperatureMax);
                                 }
                                 updateTemperature(bounded);
