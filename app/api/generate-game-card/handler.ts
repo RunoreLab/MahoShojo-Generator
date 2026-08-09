@@ -100,7 +100,7 @@ async function handler(req: Request) {
       }
       const sanitizedBaseUrl = providerConfig.baseUrl?.trim() ?? '';
       if (!sanitizedBaseUrl) {
-        customModelOverride = modelResolution.modelId;
+        customModelOverride = modelResolution.modelId === 'default' ? undefined : modelResolution.modelId;
       } else {
         customProviderOverride = {
           name: providerConfig.name,

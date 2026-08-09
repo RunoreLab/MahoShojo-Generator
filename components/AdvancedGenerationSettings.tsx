@@ -16,6 +16,8 @@ interface AdvancedGenerationSettingsProps {
     temperatureSupported?: boolean;
     /** 当前模型 temperature 上限（由 capability 决定，未提供则不限制）。 */
     temperatureMax?: number;
+    /** 当前模型 maxOutputTokens 上限（由 capability 决定，未提供则用全局上限）。 */
+    maxOutputTokensMax?: number;
     /** 当前模型 thinking 支持状态。 */
     thinkingSupport?: ThinkingSupport;
     /** 当前模型可用的 thinking 档位（未提供则展示全部档位）。 */
@@ -31,6 +33,7 @@ const AdvancedGenerationSettings: React.FC<AdvancedGenerationSettingsProps> = ({
     onChange,
     temperatureSupported = true,
     temperatureMax,
+    maxOutputTokensMax,
     thinkingSupport = 'supported',
     thinkingEfforts,
     canDisableThinking = true,
@@ -111,7 +114,7 @@ const AdvancedGenerationSettings: React.FC<AdvancedGenerationSettingsProps> = ({
                             className="input-field font-mono"
                             type="number"
                             min={1}
-                            max={MAX_CUSTOM_PROVIDER_OUTPUT_TOKENS}
+                            max={maxOutputTokensMax ?? MAX_CUSTOM_PROVIDER_OUTPUT_TOKENS}
                             step={1}
                             placeholder="自动"
                             value={typeof maxOutputTokens === 'number' ? String(maxOutputTokens) : ''}
@@ -123,11 +126,17 @@ const AdvancedGenerationSettings: React.FC<AdvancedGenerationSettingsProps> = ({
                                     return;
                                 }
                                 const parsed = Number(raw);
-                                updateMaxOutputTokens(Number.isFinite(parsed) && parsed >= 1 ? Math.floor(parsed) : undefined);
+                                const bounded = Number.isFinite(parsed) && parsed >= 1 ? Math.floor(parsed) : undefined;
+                                updateMaxOutputTokens(
+                                    bounded != null && typeof maxOutputTokensMax === 'number' && bounded > maxOutputTokensMax
+                                        ? maxOutputTokensMax
+                                        : bounded,
+                                );
                             }}
                         />
                         <p className="battle-lite-subtle-text mt-1 text-xs">
                             留空则使用模型 / 供应商默认。
+                            {typeof maxOutputTokensMax === 'number' && `当前模型上限 ${maxOutputTokensMax}。`}
                         </p>
                     </div>
 

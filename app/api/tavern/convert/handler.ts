@@ -430,7 +430,7 @@ const resolveProviderOverride = (payload: unknown): CustomProviderResolveResult 
       ok: true,
       customProviderOverride: null,
       customProviderId: providerConfig.id,
-      customModelOverride: modelResolution.modelId,
+      customModelOverride: modelResolution.modelId === 'default' ? undefined : modelResolution.modelId,
     };
   }
 

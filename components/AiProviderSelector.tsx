@@ -727,6 +727,7 @@ const AiProviderSelector: React.FC<AiProviderSelectorProps> = ({
                     onChange={handleGenerationOverridesChange}
                     temperatureSupported={activeCapabilities ? activeCapabilities.temperature.support !== 'unsupported' : true}
                     temperatureMax={activeCapabilities?.temperature.max}
+                    maxOutputTokensMax={activeCapabilities?.maxOutputTokens.max}
                     thinkingSupport={activeCapabilities?.thinking.support}
                     thinkingEfforts={activeCapabilities?.thinking.efforts}
                     canDisableThinking={activeCapabilities ? activeCapabilities.thinking.support === 'supported' : true}

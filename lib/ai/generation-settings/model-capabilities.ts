@@ -67,18 +67,31 @@ const buildCapabilities = (capabilities: {
  * - 其余模型 / 自定义 modelId：不登记 → unknown（开放 / 不可乱猜）。
  */
 const CAPABILITIES = new Map<string, ModelGenerationCapabilities>([
+  // Gemini 2.5 Flash：Google 官方限制 maxOutputTokens=65_536、thinkingBudget 0–24_576（0 关闭）。
+  // 档位 max 对 2.5 Flash 无独立意义（预算上限即 24_576），故不登记；xhigh 映射到 24_576。
   [buildKey('google-cloudflare', 'gemini-2.5-flash'), buildCapabilities({
     temperature: SUPPORTED_TEMPERATURE,
-    maxOutputTokens: buildMaxOutputTokens(1_000_000),
-    thinking: buildThinking('google-thinking-budget', ['minimal', 'low', 'medium', 'high', 'xhigh', 'max']),
+    maxOutputTokens: buildMaxOutputTokens(65_536),
+    thinking: buildThinking('google-thinking-budget', ['minimal', 'low', 'medium', 'high', 'xhigh']),
   })],
   [buildKey('system', 'gemini-2.5-flash'), buildCapabilities({
     temperature: SUPPORTED_TEMPERATURE,
+    maxOutputTokens: buildMaxOutputTokens(65_536),
+    thinking: buildThinking('google-thinking-budget', ['minimal', 'low', 'medium', 'high', 'xhigh']),
+  })],
+  [buildKey('system', 'deepseek-v4-flash-0731'), buildCapabilities({
+    temperature: SUPPORTED_TEMPERATURE,
     maxOutputTokens: buildMaxOutputTokens(1_000_000),
-    thinking: buildThinking('google-thinking-budget', ['minimal', 'low', 'medium', 'high', 'xhigh', 'max']),
+    thinking: buildThinking('deepseek-thinking-toggle'),
+  })],
+  [buildKey('system', 'deepseek-v4-pro'), buildCapabilities({
+    temperature: SUPPORTED_TEMPERATURE,
+    maxOutputTokens: buildMaxOutputTokens(1_000_000),
+    thinking: buildThinking('deepseek-thinking-toggle'),
   })],
 
-  [buildKey('deepseek', 'deepseek-v4-flash'), buildCapabilities({
+  // DeepSeek 官方 provider：catalog 的 modelId 为 deepseek-v4-flash-0731（带正式版后缀）。
+  [buildKey('deepseek', 'deepseek-v4-flash-0731'), buildCapabilities({
     temperature: SUPPORTED_TEMPERATURE,
     maxOutputTokens: buildMaxOutputTokens(1_000_000),
     thinking: buildThinking('deepseek-thinking-toggle'),

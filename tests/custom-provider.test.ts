@@ -22,8 +22,54 @@ describe('custom provider helpers', () => {
     expect(buildCustomProviderPayload(undefined)).toBeUndefined();
   });
 
-  it('系统默认策略不产生 payload', () => {
+  it('系统默认策略无覆盖不产生 payload', () => {
     expect(buildCustomProviderPayload({ providerId: 'system', modelId: 'default', apiKey: '' })).toBeUndefined();
+  });
+
+  it('系统默认策略 + generationOverrides 产生 payload（让 Resolver 应用覆盖项）', () => {
+    expect(buildCustomProviderPayload({
+      providerId: 'system',
+      modelId: 'default',
+      apiKey: '',
+      generationOverrides: { temperature: 0.7, maxOutputTokens: 65536 },
+    })).toEqual({
+      providerId: 'system',
+      modelId: 'default',
+      apiKey: '',
+      generationOverrides: { temperature: 0.7, maxOutputTokens: 65536 },
+    });
+  });
+
+  it('系统默认策略顶层 legacy maxOutputTokens 也触发 payload', () => {
+    expect(buildCustomProviderPayload({
+      providerId: 'system',
+      modelId: 'default',
+      apiKey: '',
+      maxOutputTokens: 65536,
+    })).toEqual({
+      providerId: 'system',
+      modelId: 'default',
+      apiKey: '',
+      maxOutputTokens: 65536,
+    });
+  });
+
+  it('系统默认策略空 generationOverrides（{}）仍不产生 payload', () => {
+    expect(buildCustomProviderPayload({
+      providerId: 'system',
+      modelId: 'default',
+      apiKey: '',
+      generationOverrides: {},
+    })).toBeUndefined();
+  });
+
+  it('非系统 provider 的 default modelId 仍不产生 payload', () => {
+    expect(buildCustomProviderPayload({
+      providerId: 'kourichat',
+      modelId: 'default',
+      apiKey: 'sk-xxx',
+      generationOverrides: { temperature: 0.7 },
+    })).toBeUndefined();
   });
 
   it('系统自定义模型会产生 payload（不要求 apiKey）', () => {
@@ -193,6 +239,24 @@ describe('custom provider helpers', () => {
     if (resolved.ok) return;
     expect(resolved.error).toBe('未知的模型 ID');
     expect(resolved.status).toBe(400);
+  });
+
+  it('system/default 解析后不产生 providerOverride（避免 modelOverride=default），但透传 generationOverrides', () => {
+    const resolved = resolveAiSessionProvider({
+      providerId: 'system',
+      modelId: 'default',
+      apiKey: '',
+      generationOverrides: { temperature: 0.7, maxOutputTokens: 65536 },
+    });
+
+    expect(resolved.ok).toBe(true);
+    if (!resolved.ok) return;
+    expect(resolved.value.providerMode).toBe('system');
+    expect(resolved.value.providerOverride).toBeUndefined();
+    expect(resolved.value.generationSettingsContext).toEqual({
+      providerId: 'system',
+      userOverrides: { temperature: 0.7, maxOutputTokens: 65536 },
+    });
   });
 
   it('自填 modelId 拒绝空值和控制字符', () => {

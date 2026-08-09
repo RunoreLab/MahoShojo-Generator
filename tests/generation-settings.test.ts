@@ -4,6 +4,7 @@ import { resolveGenerationSettings } from '@/lib/ai/generation-settings/resolve'
 import { getModelGenerationCapabilities } from '@/lib/ai/generation-settings/model-capabilities';
 import { buildThinkingOptions } from '@/lib/ai/generation-settings/provider-adapters';
 import { UserGenerationOverridesSchema } from '@/lib/ai/generation-settings/schemas';
+import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
 import type { UserGenerationOverrides } from '@/lib/ai/generation-settings/types';
 
 const resolve = (overrides: UserGenerationOverrides = {}, opts: { providerId?: string; modelId?: string } = {}) =>
@@ -132,6 +133,88 @@ describe('getModelGenerationCapabilities', () => {
     const elsewhere = getModelGenerationCapabilities('openai', 'gemini-2.5-flash');
     expect(google.thinking.adapter).toBe('google-thinking-budget');
     expect(elsewhere.thinking.adapter).toBe('unknown');
+  });
+
+  it('Gemini 2.5 Flash 的 maxOutputTokens 上限为 65536（而非 1_000_000）', () => {
+    const caps = getModelGenerationCapabilities('google-cloudflare', 'gemini-2.5-flash');
+    expect(caps.maxOutputTokens.max).toBe(65_536);
+  });
+
+  it('Gemini 2.5 Flash 不登记 xhigh 之外的越界档位（max 不开放）', () => {
+    const caps = getModelGenerationCapabilities('google-cloudflare', 'gemini-2.5-flash');
+    expect(caps.thinking.efforts).toEqual(['minimal', 'low', 'medium', 'high', 'xhigh']);
+  });
+
+  it('DeepSeek V4 Flash 应使用 catalog 真值 deepseek-v4-flash-0731', () => {
+    const catalogModel = AI_PROVIDER_CATALOG
+      .find((p) => p.id === 'deepseek')
+      ?.models.find((m) => m.label === 'DeepSeek V4 Flash');
+    expect(catalogModel?.value).toBe('deepseek-v4-flash-0731');
+
+    const caps = getModelGenerationCapabilities('deepseek', 'deepseek-v4-flash-0731');
+    expect(caps.thinking.adapter).toBe('deepseek-thinking-toggle');
+    // registry 不再登记与 catalog 错位的旧 ID
+    expect(getModelGenerationCapabilities('deepseek', 'deepseek-v4-flash').thinking.support).toBe('unknown');
+  });
+});
+
+describe('capability ↔ catalog 一致性：registry 声称支持的预置模型应能在 catalog 找到', () => {
+  const registered = [
+    ['google-cloudflare', 'gemini-2.5-flash'],
+    ['system', 'gemini-2.5-flash'],
+    ['deepseek', 'deepseek-v4-flash-0731'],
+    ['deepseek', 'deepseek-v4-pro'],
+    ['system', 'deepseek-v4-flash-0731'],
+    ['system', 'deepseek-v4-pro'],
+  ] as const;
+
+  it('每个 registry 预置模型都存在于 AI_PROVIDER_CATALOG 对应 provider 的 models 中（system 动态解析除外）', () => {
+    for (const [providerId, modelId] of registered) {
+      const provider = AI_PROVIDER_CATALOG.find((p) => p.id === providerId);
+      expect(provider, `provider ${providerId} 应存在于 catalog`).toBeDefined();
+      // system 通过负载均衡动态选模型，其模型并不要求在 system 的固定列表中小而全，故显式 whitelist。
+      if (providerId !== 'system') {
+        expect(
+          provider?.models.some((m) => m.value === modelId),
+          `${providerId}::${modelId} 应存在于 catalog`,
+        ).toBe(true);
+      }
+      expect(
+        getModelGenerationCapabilities(providerId, modelId).temperature.support,
+        `${providerId}::${modelId} 应已登记能力`,
+      ).not.toBe('unsupported');
+    }
+  });
+});
+
+describe('Gemini 2.5 Flash 硬限制：非法参数不得被发送', () => {
+  it('maxOutputTokens = 100000（> 65536）被 clamp 到 65536', () => {
+    const result = resolve(
+      { maxOutputTokens: 100_000 },
+      { providerId: 'google-cloudflare', modelId: 'gemini-2.5-flash' },
+    );
+    expect(result.standardOptions.maxOutputTokens).toBe(65_536);
+  });
+
+  it('所有 UI Thinking 档位生成的 thinkingBudget <= 24576', () => {
+    const efforts = ['minimal', 'low', 'medium', 'high', 'xhigh'] as const;
+    for (const effort of efforts) {
+      const result = resolve(
+        { thinking: { mode: 'enabled', effort } },
+        { providerId: 'google-cloudflare', modelId: 'gemini-2.5-flash' },
+      );
+      const budget = (result.providerOptions?.google as { thinkingConfig?: { thinkingBudget?: number } })
+        ?.thinkingConfig?.thinkingBudget;
+      expect(budget, `effort=${effort}`).toBeLessThanOrEqual(24_576);
+    }
+  });
+
+  it('能力上限小于用户输入时强约束（temperature 同理被 clamp）', () => {
+    const result = resolve(
+      { temperature: 3 },
+      { providerId: 'google-cloudflare', modelId: 'gemini-2.5-flash' },
+    );
+    expect(result.standardOptions.temperature).toBe(2);
   });
 });
 

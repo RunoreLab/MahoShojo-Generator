@@ -385,7 +385,7 @@ async function handler(req: NextRequest): Promise<Response> {
 
       const sanitizedBaseUrl = providerConfig.baseUrl?.trim() ?? '';
       if (!sanitizedBaseUrl) {
-        customModelOverride = modelResolution.modelId;
+        customModelOverride = modelResolution.modelId === 'default' ? undefined : modelResolution.modelId;
         log.info('检测到 baseUrl 为空的自定义供应商，改用系统默认通道，仅覆盖模型参数', {
           providerId: providerConfig.id,
           model: modelResolution.modelId,

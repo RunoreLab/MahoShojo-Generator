@@ -15,14 +15,18 @@ import type { GenerationProviderOptions, ThinkingAdapter, ThinkingEffort } from 
 
 export type ThinkingMode = 'default' | 'disabled' | 'enabled';
 
-/** effort → Gemini 2.5 thinkingBudget（token 数），仅作合理估算。 */
+/**
+ * effort → Gemini 2.5 thinkingBudget（token 数），仅作合理估算。
+ * Gemini 2.5 Flash 的 thinkingBudget 有效范围是 0–24_576（0 关闭），因此档位值不得超过 24_576；
+ * xhigh / max 在 2.5 Flash 上同义（预算上限即 24_576），均映射到 24_576。
+ */
 const GOOGLE_THINKING_BUDGETS: Record<ThinkingEffort, number> = {
   minimal: 1024,
   low: 4096,
   medium: 8192,
   high: 16384,
-  xhigh: 32768,
-  max: 65536,
+  xhigh: 24576,
+  max: 24576,
 };
 
 /**
