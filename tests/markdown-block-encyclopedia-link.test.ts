@@ -42,4 +42,25 @@ describe('MarkdownBlock', () => {
 
     expect(html).toContain('katex');
   });
+
+  test('浅色 Markdown 表格的斑马纹可随全局深色模式切换', () => {
+    const html = renderToStaticMarkup(
+      React.createElement(MarkdownBlock, {
+        content: [
+          '| 列 A | 列 B |',
+          '| --- | --- |',
+          '| 1 | 2 |',
+          '| 3 | 4 |',
+        ].join('\n'),
+        variant: 'light',
+      }),
+    );
+
+    // bg-white 是 globals.css 深色兼容层可覆盖的基础 utility；
+    // even:bg-black/5 只叠加中性色透明层，不会在深色模式中产生浅色条纹。
+    expect(html).toContain('bg-white');
+    expect(html).toContain('even:bg-black/5');
+    expect(html).not.toContain('odd:bg-white');
+    expect(html).not.toContain('even:bg-gray-50/40');
+  });
 });

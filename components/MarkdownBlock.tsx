@@ -251,8 +251,17 @@ export function MarkdownBlock({ content, variant = 'dark', mode = 'compact', cla
       </div>
     ),
     thead: ({ children }) => <thead className={headerBgClass}>{children}</thead>,
-    tbody: ({ children }) => <tbody className={`divide-y ${rowDividerClass}`}>{children}</tbody>,
-    tr: ({ children }) => <tr className={variant === 'light' ? 'odd:bg-white even:bg-gray-50/40' : 'odd:bg-white/5'}>{children}</tr>,
+    // 全局深色模式会重写基础的 bg-white/bg-gray-* utility。
+    // odd:/even: 前缀会生成不同的选择器，无法命中该兼容层，因此浅色表格的
+    // 行背景不能直接使用 odd:bg-white / even:bg-gray-*。
+    tbody: ({ children }) => (
+      <tbody className={`divide-y ${rowDividerClass}${variant === 'light' ? ' bg-white' : ''}`}>{children}</tbody>
+    ),
+    tr: ({ children }) => (
+      <tr className={variant === 'light' ? 'even:bg-black/5' : 'odd:bg-white/5'}>
+        {children}
+      </tr>
+    ),
     th: ({ children }) => (
       <th className={`px-3 py-2 font-semibold border-b ${cellBorderClass} whitespace-nowrap`}>{children}</th>
     ),
