@@ -18,7 +18,8 @@ export const UserThinkingOverrideSchema: z.ZodType<UserThinkingOverride> = z.uni
 export const UserGenerationOverridesSchema: z.ZodType<UserGenerationOverrides> = z
   .object({
     maxOutputTokens: z.number().int().min(1).max(MAX_CUSTOM_PROVIDER_OUTPUT_TOKENS).optional(),
-    temperature: z.number().min(0).max(2).optional(),
+    // 上限不在此硬编码：已知模型由 Capability Registry 决定，未知自定义模型按“开放透传”处理。
+    temperature: z.number().finite().min(0).optional(),
     thinking: UserThinkingOverrideSchema.optional(),
   })
   .strict();

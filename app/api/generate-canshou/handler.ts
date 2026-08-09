@@ -565,6 +565,7 @@ async function handler(req: NextRequest): Promise<Response> {
     const canshouDetails = await generateWithAI({ answers: normalizedAnswers, language, loreText }, {
       ...canshouGenerationConfig,
       ...(customModelOverride ? { modelOverride: customModelOverride } : {}),
+      ...(customProviderPayload ? { generationSettingsContext: { providerId: customProviderPayload.providerId, ...(customProviderPayload.generationOverrides ? { userOverrides: customProviderPayload.generationOverrides } : {}) } } : {}),
     }, aiOptions);
     recordUserActivityFromRequest(req);
 

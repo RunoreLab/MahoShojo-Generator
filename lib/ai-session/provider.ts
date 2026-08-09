@@ -2,6 +2,7 @@ import { AI_PROVIDER_CATALOG, resolveAIProviderModel } from '@/lib/ai/constants'
 import type { AIProvider } from '@/lib/config';
 import { CustomProviderSchema } from '@/lib/arena/schemas';
 import { LoadBalanceStrategy, type GenerateWithAIOptions } from '@/lib/stream/raw-ai';
+import type { GenerationSettingsContext } from '@/lib/ai/generation-settings/types';
 import { z } from 'zod/v3';
 
 export type AiSessionCustomProvider = z.infer<typeof CustomProviderSchema>;
@@ -11,7 +12,16 @@ export type AiSessionResolvedProvider = {
   modelId: string | null;
   providerOverride?: AIProvider;
   providerOptions?: GenerateWithAIOptions;
+  generationSettingsContext?: GenerationSettingsContext;
 };
+
+const buildGenerationSettingsContext = (
+  providerId: string,
+  generationOverrides: AiSessionCustomProvider['generationOverrides'],
+): GenerationSettingsContext | undefined =>
+  generationOverrides
+    ? { providerId, userOverrides: generationOverrides }
+    : { providerId };
 
 export const parseAiSessionCustomProvider = (
   payload: unknown
@@ -61,6 +71,7 @@ export const resolveAiSessionProvider = (
         providerMode: 'system',
         providerId: 'system',
         modelId: modelResolution.modelId,
+        generationSettingsContext: buildGenerationSettingsContext('system', customProvider.generationOverrides),
       },
     };
   }
@@ -104,6 +115,7 @@ export const resolveAiSessionProvider = (
         providerOverride,
         loadBalanceStrategy: LoadBalanceStrategy.CUSTOM,
       },
+      generationSettingsContext: buildGenerationSettingsContext(providerId, customProvider.generationOverrides),
     },
   };
 };

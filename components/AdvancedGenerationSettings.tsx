@@ -7,13 +7,21 @@ import type {
 import { THINKING_EFFORT_LABELS } from '@/lib/ai/generation-settings/provider-adapters';
 import { MAX_CUSTOM_PROVIDER_OUTPUT_TOKENS } from '@/lib/ai/custom-provider';
 
+type ThinkingSupport = 'supported' | 'unsupported' | 'unknown';
+
 interface AdvancedGenerationSettingsProps {
     value?: UserGenerationOverrides;
     onChange: (value: UserGenerationOverrides | undefined) => void;
+    /** 当前模型 temperature 支持状态。 */
+    temperatureSupported?: boolean;
+    /** 当前模型 temperature 上限（由 capability 决定，未提供则不限制）。 */
+    temperatureMax?: number;
+    /** 当前模型 thinking 支持状态。 */
+    thinkingSupport?: ThinkingSupport;
     /** 当前模型可用的 thinking 档位（未提供则展示全部档位）。 */
     thinkingEfforts?: ThinkingEffort[];
-    /** 当前模型是否支持 temperature（用于提示，不强制）。 */
-    temperatureSupported?: boolean;
+    /** 当前模型是否支持显式关闭 thinking。 */
+    canDisableThinking?: boolean;
 }
 
 const ALL_EFFORTS: ThinkingEffort[] = ['minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
@@ -21,8 +29,11 @@ const ALL_EFFORTS: ThinkingEffort[] = ['minimal', 'low', 'medium', 'high', 'xhig
 const AdvancedGenerationSettings: React.FC<AdvancedGenerationSettingsProps> = ({
     value,
     onChange,
-    thinkingEfforts,
     temperatureSupported = true,
+    temperatureMax,
+    thinkingSupport = 'supported',
+    thinkingEfforts,
+    canDisableThinking = true,
 }) => {
     const [isOpen, setIsOpen] = useState(false);
 
@@ -42,9 +53,8 @@ const AdvancedGenerationSettings: React.FC<AdvancedGenerationSettingsProps> = ({
         return count;
     }, [maxOutputTokens, temperature, thinking]);
 
-    const update = (patch: Partial<UserGenerationOverrides>) => {
-        const next = { ...(value ?? {}), ...patch };
-        // 清空所有字段时视为恢复默认（undefined）。
+    /** 直接构造最终对象并向外发送（不再合并旧 value，避免“删除字段又被合回”）。 */
+    const emit = (next: UserGenerationOverrides) => {
         if (typeof next.maxOutputTokens !== 'number' && typeof next.temperature !== 'number' && !next.thinking) {
             onChange(undefined);
             return;
@@ -52,19 +62,29 @@ const AdvancedGenerationSettings: React.FC<AdvancedGenerationSettingsProps> = ({
         onChange(next);
     };
 
+    const updateMaxOutputTokens = (next: number | undefined) => {
+        emit({ ...(value ?? {}), maxOutputTokens: next });
+    };
+
+    const updateTemperature = (next: number | undefined) => {
+        emit({ ...(value ?? {}), temperature: next });
+    };
+
     const updateThinking = (next: UserThinkingOverride) => {
+        const rest = { ...(value ?? {}) };
         if (next.mode === 'default') {
-            const rest = { ...value };
             delete rest.thinking;
-            update(rest);
-            return;
+        } else {
+            rest.thinking = next;
         }
-        update({ thinking: next });
+        emit(rest);
     };
 
     const handleReset = () => {
         onChange(undefined);
     };
+
+    const thinkingUncontrollable = thinkingSupport === 'unsupported' || thinkingSupport === 'unknown';
 
     return (
         <div className="mt-3">
@@ -99,13 +119,11 @@ const AdvancedGenerationSettings: React.FC<AdvancedGenerationSettingsProps> = ({
                             onChange={(event) => {
                                 const raw = event.target.value.trim();
                                 if (!raw) {
-                                    update({ maxOutputTokens: undefined });
+                                    updateMaxOutputTokens(undefined);
                                     return;
                                 }
                                 const parsed = Number(raw);
-                                update({
-                                    maxOutputTokens: Number.isFinite(parsed) && parsed >= 1 ? Math.floor(parsed) : undefined,
-                                });
+                                updateMaxOutputTokens(Number.isFinite(parsed) && parsed >= 1 ? Math.floor(parsed) : undefined);
                             }}
                         />
                         <p className="battle-lite-subtle-text mt-1 text-xs">
@@ -122,7 +140,7 @@ const AdvancedGenerationSettings: React.FC<AdvancedGenerationSettingsProps> = ({
                             className="input-field font-mono"
                             type="number"
                             min={0}
-                            max={2}
+                            max={temperatureMax}
                             step={0.1}
                             placeholder="自动"
                             value={typeof temperature === 'number' ? String(temperature) : ''}
@@ -130,11 +148,11 @@ const AdvancedGenerationSettings: React.FC<AdvancedGenerationSettingsProps> = ({
                             onChange={(event) => {
                                 const raw = event.target.value.trim();
                                 if (!raw) {
-                                    update({ temperature: undefined });
+                                    updateTemperature(undefined);
                                     return;
                                 }
                                 const parsed = Number(raw);
-                                update({ temperature: Number.isFinite(parsed) ? parsed : undefined });
+                                updateTemperature(Number.isFinite(parsed) ? parsed : undefined);
                             }}
                         />
                         <p className="battle-lite-subtle-text mt-1 text-xs">
@@ -148,47 +166,57 @@ const AdvancedGenerationSettings: React.FC<AdvancedGenerationSettingsProps> = ({
                         <label className="battle-lite-muted-text mb-1 block text-xs font-semibold">
                             Thinking / 推理
                         </label>
-                        <div className="flex flex-wrap gap-3">
-                            {([
-                                { key: 'default', label: '跟随模型默认' },
-                                { key: 'disabled', label: '关闭' },
-                                { key: 'enabled', label: '开启' },
-                            ] as const).map(option => (
-                                <label key={option.key} className="flex items-center gap-1 text-sm cursor-pointer">
-                                    <input
-                                        type="radio"
-                                        name="thinking-mode"
-                                        checked={thinkingMode === option.key}
-                                        onChange={() =>
-                                            updateThinking(
-                                                option.key === 'enabled'
-                                                    ? { mode: 'enabled', effort: thinkingEffort }
-                                                    : { mode: option.key },
-                                            )
-                                        }
-                                        className="h-4 w-4"
-                                    />
-                                    <span>{option.label}</span>
-                                </label>
-                            ))}
-                        </div>
-                        {thinkingMode === 'enabled' && (
-                            <div className="mt-2">
-                                <label className="battle-lite-muted-text mb-1 block text-xs font-semibold">强度</label>
-                                <select
-                                    className="input-field"
-                                    value={thinkingEffort}
-                                    onChange={(event) =>
-                                        updateThinking({ mode: 'enabled', effort: event.target.value as ThinkingEffort })
-                                    }
-                                >
-                                    {efforts.map(effort => (
-                                        <option key={effort} value={effort}>
-                                            {THINKING_EFFORT_LABELS[effort]}
-                                        </option>
+                        {thinkingUncontrollable ? (
+                            <p className="battle-lite-subtle-text text-xs">
+                                {thinkingSupport === 'unsupported'
+                                    ? '当前模型不支持自定义推理设置。'
+                                    : '未知模型，无法确定推理参数格式，将跟随模型默认。'}
+                            </p>
+                        ) : (
+                            <>
+                                <div className="flex flex-wrap gap-3">
+                                    {([
+                                        { key: 'default', label: '跟随模型默认' },
+                                        ...(canDisableThinking ? [{ key: 'disabled', label: '关闭' } as const] : []),
+                                        { key: 'enabled', label: '开启' },
+                                    ] as const).map(option => (
+                                        <label key={option.key} className="flex items-center gap-1 text-sm cursor-pointer">
+                                            <input
+                                                type="radio"
+                                                name="thinking-mode"
+                                                checked={thinkingMode === option.key}
+                                                onChange={() =>
+                                                    updateThinking(
+                                                        option.key === 'enabled'
+                                                            ? { mode: 'enabled', effort: thinkingEffort }
+                                                            : { mode: option.key },
+                                                    )
+                                                }
+                                                className="h-4 w-4"
+                                            />
+                                            <span>{option.label}</span>
+                                        </label>
                                     ))}
-                                </select>
-                            </div>
+                                </div>
+                                {thinkingMode === 'enabled' && (
+                                    <div className="mt-2">
+                                        <label className="battle-lite-muted-text mb-1 block text-xs font-semibold">强度</label>
+                                        <select
+                                            className="input-field"
+                                            value={thinkingEffort}
+                                            onChange={(event) =>
+                                                updateThinking({ mode: 'enabled', effort: event.target.value as ThinkingEffort })
+                                            }
+                                        >
+                                            {efforts.map(effort => (
+                                                <option key={effort} value={effort}>
+                                                    {THINKING_EFFORT_LABELS[effort]}
+                                                </option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                )}
+                            </>
                         )}
                     </div>
 

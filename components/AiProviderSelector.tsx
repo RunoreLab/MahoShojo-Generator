@@ -13,6 +13,7 @@ import { maskApiKeyForDisplay } from '@/lib/client/mask-api-key';
 import { ChannelAvailabilityBadge } from '@/components/ChannelAvailabilityBadge';
 import type { UserGenerationOverrides } from '@/lib/ai/generation-settings/types';
 import AdvancedGenerationSettings from '@/components/AdvancedGenerationSettings';
+import { getModelGenerationCapabilities } from '@/lib/ai/generation-settings/model-capabilities';
 import Link from 'next/link';
 
 export interface UserAIProviderConfig {
@@ -213,6 +214,8 @@ const AiProviderSelector: React.FC<AiProviderSelectorProps> = ({
                 if (typeof parsed === 'number') {
                     const overrides: UserGenerationOverrides = { maxOutputTokens: parsed };
                     window.localStorage.setItem(newKey, JSON.stringify(overrides));
+                    // 迁移成功后立即删除旧 key，避免“恢复默认”后旧值复活、或传播到其他模型。
+                    window.localStorage.removeItem(getMaxOutputTokensStorageKey(providerId));
                     return { overrides, migrated: true };
                 }
             }
@@ -258,6 +261,16 @@ const AiProviderSelector: React.FC<AiProviderSelectorProps> = ({
     const maskedApiKey = useMemo(() => maskApiKeyForDisplay(apiKey), [apiKey]);
     const shouldShowMaskedApiKey = hasApiKey && !isEditingApiKey;
     const isCustomModelSelected = selectedModel === CUSTOM_AI_MODEL_OPTION_VALUE;
+
+    // 当前 provider+model 的生成能力（驱动高级设置 UI）。
+    const activeCapabilities = useMemo(() => {
+        if (!activeProvider) return undefined;
+        const effectiveModel = isCustomModelSelected
+            ? customModelId.trim()
+            : (selectedModel || activeProvider.models[0]?.value || '');
+        if (!effectiveModel) return undefined;
+        return getModelGenerationCapabilities(activeProvider.id, effectiveModel);
+    }, [activeProvider, customModelId, isCustomModelSelected, selectedModel]);
 
     const resolveModelSelection = useCallback((
         provider: AIProviderOption,
@@ -712,7 +725,11 @@ const AiProviderSelector: React.FC<AiProviderSelectorProps> = ({
                 <AdvancedGenerationSettings
                     value={generationOverrides}
                     onChange={handleGenerationOverridesChange}
-                    temperatureSupported={true}
+                    temperatureSupported={activeCapabilities ? activeCapabilities.temperature.support !== 'unsupported' : true}
+                    temperatureMax={activeCapabilities?.temperature.max}
+                    thinkingSupport={activeCapabilities?.thinking.support}
+                    thinkingEfforts={activeCapabilities?.thinking.efforts}
+                    canDisableThinking={activeCapabilities ? activeCapabilities.thinking.support === 'supported' : true}
                 />
 
                 <p className="battle-lite-subtle-text mt-1 text-xs">

@@ -660,6 +660,12 @@ async function handler(req: NextRequest): Promise<Response> {
         const generationConfig: GenerationConfig<BattleReportResult, any> = {
             systemPrompt,
             temperature: 0.9,
+            ...(customProviderPayload ? {
+                generationSettingsContext: {
+                    providerId: customProviderPayload.providerId,
+                    ...(customProviderPayload.generationOverrides ? { userOverrides: customProviderPayload.generationOverrides } : {}),
+                },
+            } : {}),
             promptBuilder: createPromptBuilder(
                 fallbackQuestions,
                 finalUserGuidance,

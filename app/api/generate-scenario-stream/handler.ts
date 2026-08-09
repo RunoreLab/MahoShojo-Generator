@@ -171,6 +171,7 @@ ${answerText}
         prompt,
         temperature: 0.75,
         ...(customModelOverride ? { modelOverride: customModelOverride } : {}),
+        ...(customProviderPayload ? { generationSettingsContext: { providerId: customProviderPayload.providerId, ...(customProviderPayload.generationOverrides ? { userOverrides: customProviderPayload.generationOverrides } : {}) } } : {}),
       },
       {
         ...(providerOptions ?? {}),

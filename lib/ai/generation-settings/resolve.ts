@@ -7,10 +7,11 @@
 // - 最终请求通过 spread 展开，未发送的参数以 undefined 省略，绝不发送 `temperature: undefined`。
 
 import { getModelGenerationCapabilities } from './model-capabilities';
-import { buildGoogleThinkingOptions, buildThinkingProviderOptions } from './provider-adapters';
+import { buildThinkingOptions } from './provider-adapters';
 import type {
   GenerationProviderDefaults,
   GenerationTaskDefaults,
+  GenerationProviderOptions,
   ResolvedGenerationSettings,
   UserGenerationOverrides,
 } from './types';
@@ -48,7 +49,7 @@ export const resolveGenerationSettings = (
   const warnings: string[] = [];
 
   const standardOptions: ResolvedGenerationSettings['standardOptions'] = {};
-  let providerOptions: ResolvedGenerationSettings['providerOptions'];
+  let providerOptions: GenerationProviderOptions | undefined;
 
   // ---- Temperature ----
   const temperatureCandidate =
@@ -85,39 +86,34 @@ export const resolveGenerationSettings = (
 
   // ---- Thinking ----
   // 语义：
-  // - mode 'disabled'：显式关闭，不发送任何 thinking 参数。
-  // - mode 'default'（或未设置）：跟随模型默认。对 Google Gemini 项目默认开启思考并回流 reasoning，
-  //   因此保留 includeThoughts；openai/deepseek 不额外发送参数。
-  // - mode 'enabled'：显式开启，发送档位参数（google 用 thinkingLevel，openai/deepseek 用 reasoningEffort）。
+  // - mode 'disabled'：显式关闭。对支持显式关闭的模型（Gemini budget / OpenAI none / DeepSeek toggle）
+  //   发送关闭参数，而不是“不发送”（不发送 = 模型默认开启）。
+  // - mode 'default'（或未设置）：跟随模型默认。对 Google 项目默认开启思考并回流 reasoning。
+  // - mode 'enabled'：显式开启，发送档位参数。
   const thinkingOverride = userOverrides?.thinking;
   const thinkingCapability = capabilities.thinking;
-  const thinkingExplicitlyDisabled = thinkingOverride?.mode === 'disabled';
 
-  if (!thinkingExplicitlyDisabled) {
-    if (thinkingCapability.support === 'unsupported') {
-      if (thinkingOverride?.mode === 'enabled') {
-        omitted.push({ field: 'thinking', reason: 'unsupported' });
-      }
-    } else if (thinkingCapability.adapter === 'google') {
-      const effort = thinkingOverride?.mode === 'enabled' ? thinkingOverride.effort : undefined;
-      if (effort && !thinkingCapability.efforts?.includes(effort)) {
-        warnings.push(`模型 ${modelId} 不支持 thinking 档位 ${effort}，已忽略强度设置`);
-      } else {
-        providerOptions = { ...(providerOptions ?? {}), ...buildGoogleThinkingOptions(effort) };
-      }
-    } else if (thinkingOverride?.mode === 'enabled') {
-      const options = buildThinkingProviderOptions(
+  if (thinkingCapability.support === 'unsupported') {
+    if (thinkingOverride?.mode === 'enabled') {
+      omitted.push({ field: 'thinking', reason: 'unsupported' });
+    }
+  } else if (thinkingCapability.support === 'supported') {
+    const mode: 'default' | 'disabled' | 'enabled' = thinkingOverride?.mode ?? 'default';
+    const effort = thinkingOverride?.mode === 'enabled' ? thinkingOverride.effort : undefined;
+    if (mode === 'enabled' && effort && !thinkingCapability.efforts?.includes(effort)) {
+      warnings.push(`模型 ${modelId} 不支持 thinking 档位 ${effort}，已忽略强度设置`);
+    } else {
+      const options = buildThinkingOptions(
         thinkingCapability.adapter ?? 'unknown',
-        thinkingOverride.effort,
+        mode,
+        effort,
       );
       if (options) {
         providerOptions = { ...(providerOptions ?? {}), ...options };
-      } else if (thinkingOverride.effort) {
-        warnings.push(
-          `模型 ${modelId} 不支持 thinking 档位 ${thinkingOverride.effort}，已忽略强度设置`,
-        );
       }
     }
+  } else {
+    // support === 'unknown'：无法确定参数格式，不发送 thinking 参数（不可控）。
   }
 
   return {

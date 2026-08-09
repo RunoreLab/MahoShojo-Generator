@@ -159,6 +159,7 @@ ${formatReferenceAttachmentsForPrompt(input.attachments)}
         schema: TavernAiFillSchema,
         taskName: '酒馆导出字段 AI 补全',
         ...(customModelOverride ? { modelOverride: customModelOverride } : {}),
+        ...(customProviderPayload ? { generationSettingsContext: { providerId: customProviderPayload.providerId, ...(customProviderPayload.generationOverrides ? { userOverrides: customProviderPayload.generationOverrides } : {}) } } : {}),
       };
 
     const shouldDisablePolling = customProviderId !== null && customProviderId !== 'system';

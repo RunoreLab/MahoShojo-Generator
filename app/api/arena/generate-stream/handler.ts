@@ -753,6 +753,12 @@ async function handler(req: NextRequest): Promise<Response> {
         const generationConfig: RawGenerationConfig = {
             prompt: `${systemPrompt}\n\n${prompt}`,
             temperature: 0.9,
+            ...(customProviderPayload ? {
+                generationSettingsContext: {
+                    providerId: customProviderPayload.providerId,
+                    ...(customProviderPayload.generationOverrides ? { userOverrides: customProviderPayload.generationOverrides } : {}),
+                },
+            } : {}),
         };
 
         let usedModelOverride: string | undefined;

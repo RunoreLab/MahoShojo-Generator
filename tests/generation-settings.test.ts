@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { resolveGenerationSettings } from '@/lib/ai/generation-settings/resolve';
 import { getModelGenerationCapabilities } from '@/lib/ai/generation-settings/model-capabilities';
-import { buildThinkingProviderOptions } from '@/lib/ai/generation-settings/provider-adapters';
+import { buildThinkingOptions } from '@/lib/ai/generation-settings/provider-adapters';
 import { UserGenerationOverridesSchema } from '@/lib/ai/generation-settings/schemas';
 import type { UserGenerationOverrides } from '@/lib/ai/generation-settings/types';
 
@@ -27,16 +27,16 @@ describe('resolveGenerationSettings - temperature', () => {
     expect(result.standardOptions.temperature).toBe(0.8);
   });
 
-  it('已知不支持 temperature 的模型：丢弃并记录 omitted', () => {
+  it('Gemini 2.5 仍支持 temperature（不走 sampling 参数移除规则）', () => {
     const result = resolve(
       { temperature: 0.7 },
       { providerId: 'google-cloudflare', modelId: 'gemini-2.5-flash' },
     );
-    expect(result.standardOptions.temperature).toBeUndefined();
-    expect(result.diagnostics.omitted).toContainEqual({ field: 'temperature', reason: 'unsupported' });
+    expect(result.standardOptions.temperature).toBe(0.7);
+    expect(result.diagnostics.omitted).toHaveLength(0);
   });
 
-  it('未知模型（unknown）：尝试发送', () => {
+  it('未知模型（unknown）：尝试发送 temperature', () => {
     const result = resolve({ temperature: 0.7 }, { providerId: 'custom-vendor', modelId: 'custom-model' });
     expect(result.standardOptions.temperature).toBe(0.7);
   });
@@ -65,17 +65,17 @@ describe('resolveGenerationSettings - maxOutputTokens', () => {
 });
 
 describe('resolveGenerationSettings - thinking', () => {
-  it('Google Gemini：enabled + effort high → thinkingLevel=high，且保留 includeThoughts', () => {
+  it('Gemini 2.5：enabled + effort high → thinkingBudget（非 thinkingLevel）', () => {
     const result = resolve(
       { thinking: { mode: 'enabled', effort: 'high' } },
       { providerId: 'google-cloudflare', modelId: 'gemini-2.5-flash' },
     );
     expect(result.providerOptions).toEqual({
-      google: { thinkingConfig: { includeThoughts: true, thinkingLevel: 'high' } },
+      google: { thinkingConfig: { includeThoughts: true, thinkingBudget: 16384 } },
     });
   });
 
-  it('Google Gemini：default（跟随模型默认）仍开启思考并回流 reasoning', () => {
+  it('Gemini 2.5：default（跟随模型默认）回流 reasoning', () => {
     const result = resolve(
       { thinking: { mode: 'default' } },
       { providerId: 'google-cloudflare', modelId: 'gemini-2.5-flash' },
@@ -85,61 +85,110 @@ describe('resolveGenerationSettings - thinking', () => {
     });
   });
 
-  it('Google Gemini：disabled 不发送任何 thinking 参数', () => {
+  it('Gemini 2.5：disabled 发送 thinkingBudget:0 真正关闭（而非不发送）', () => {
     const result = resolve(
       { thinking: { mode: 'disabled' } },
       { providerId: 'google-cloudflare', modelId: 'gemini-2.5-flash' },
     );
-    expect(result.providerOptions).toBeUndefined();
+    expect(result.providerOptions).toEqual({
+      google: { thinkingConfig: { thinkingBudget: 0 } },
+    });
   });
 
-  it('OpenAI：enabled + effort → reasoningEffort', () => {
-    const result = resolve({ thinking: { mode: 'enabled', effort: 'medium' } });
-    expect(result.providerOptions).toEqual({ openai: { reasoningEffort: 'medium' } });
-  });
-
-  it('DeepSeek：enabled + effort → deepseek.reasoningEffort', () => {
+  it('DeepSeek：enabled → thinking.type=enabled', () => {
     const result = resolve(
-      { thinking: { mode: 'enabled', effort: 'high' } },
+      { thinking: { mode: 'enabled' } },
       { providerId: 'deepseek', modelId: 'deepseek-v4-pro' },
     );
-    expect(result.providerOptions).toEqual({ deepseek: { reasoningEffort: 'high' } });
+    expect(result.providerOptions).toEqual({ deepseek: { thinking: { type: 'enabled' } } });
   });
 
-  it('未知模型：enabled 尽力发送（unknown adapter 有 effort 时映射失败则警告）', () => {
+  it('DeepSeek：disabled → thinking.type=disabled', () => {
+    const result = resolve(
+      { thinking: { mode: 'disabled' } },
+      { providerId: 'deepseek', modelId: 'deepseek-v4-pro' },
+    );
+    expect(result.providerOptions).toEqual({ deepseek: { thinking: { type: 'disabled' } } });
+  });
+
+  it('未知模型：thinking 不可控（不发送参数）', () => {
     const result = resolve(
       { thinking: { mode: 'enabled', effort: 'high' } },
       { providerId: 'custom-vendor', modelId: 'custom-model' },
     );
-    // unknown adapter 无法映射 → 增加 warning，不静默丢弃档位
-    expect(result.diagnostics.warnings.length).toBeGreaterThan(0);
+    expect(result.providerOptions).toBeUndefined();
   });
 });
 
 describe('getModelGenerationCapabilities', () => {
-  it('未登记模型返回 unknown（开放）', () => {
+  it('未登记模型返回 unknown（开放 / 不猜测）', () => {
     const caps = getModelGenerationCapabilities('vendor', 'custom-model');
     expect(caps.temperature.support).toBe('unknown');
     expect(caps.thinking.support).toBe('unknown');
   });
 
-  it('key 必须区分 providerId + modelId', () => {
+  it('key 必须区分 providerId + modelId（不因 modelId 相同而混用）', () => {
     const google = getModelGenerationCapabilities('google-cloudflare', 'gemini-2.5-flash');
-    const openaiSameModel = getModelGenerationCapabilities('openai', 'gemini-2.5-flash');
-    expect(google.thinking.adapter).toBe('google');
-    expect(openaiSameModel.thinking.adapter).not.toBe('google');
+    const elsewhere = getModelGenerationCapabilities('openai', 'gemini-2.5-flash');
+    expect(google.thinking.adapter).toBe('google-thinking-budget');
+    expect(elsewhere.thinking.adapter).toBe('unknown');
   });
 });
 
 describe('provider-adapters', () => {
-  it('google 档位映射到 thinkingLevel 且保留 includeThoughts', () => {
-    expect(buildThinkingProviderOptions('google', 'low')).toEqual({
-      google: { thinkingConfig: { includeThoughts: true, thinkingLevel: 'low' } },
+  it('google-thinking-budget：enabled/low 映射到 thinkingBudget', () => {
+    expect(buildThinkingOptions('google-thinking-budget', 'enabled', 'low')).toEqual({
+      google: { thinkingConfig: { includeThoughts: true, thinkingBudget: 4096 } },
+    });
+    expect(buildThinkingOptions('google-thinking-budget', 'disabled')).toEqual({
+      google: { thinkingConfig: { thinkingBudget: 0 } },
+    });
+  });
+
+  it('google-thinking-level：enabled/high 映射到 thinkingLevel', () => {
+    expect(buildThinkingOptions('google-thinking-level', 'enabled', 'high')).toEqual({
+      google: { thinkingConfig: { includeThoughts: true, thinkingLevel: 'high' } },
+    });
+  });
+
+  it('openai-reasoning-effort：enabled→档位，disabled→none', () => {
+    expect(buildThinkingOptions('openai-reasoning-effort', 'enabled', 'xhigh')).toEqual({
+      openai: { reasoningEffort: 'xhigh' },
+    });
+    expect(buildThinkingOptions('openai-reasoning-effort', 'disabled')).toEqual({
+      openai: { reasoningEffort: 'none' },
+    });
+  });
+
+  it('deepseek-thinking-toggle：enabled/disabled 开关', () => {
+    expect(buildThinkingOptions('deepseek-thinking-toggle', 'enabled')).toEqual({
+      deepseek: { thinking: { type: 'enabled' } },
+    });
+    expect(buildThinkingOptions('deepseek-thinking-toggle', 'disabled')).toEqual({
+      deepseek: { thinking: { type: 'disabled' } },
     });
   });
 
   it('未知 adapter 无法映射', () => {
-    expect(buildThinkingProviderOptions('unknown', 'high')).toBeUndefined();
+    expect(buildThinkingOptions('unknown', 'enabled', 'high')).toBeUndefined();
+  });
+});
+
+describe('AI SDK options 展开约定（providerOptions 需包在 providerOptions: 内）', () => {
+  it('resolver 输出按调用点约定展开后 providerOptions 位于顶层', () => {
+    const resolved = resolve(
+      { thinking: { mode: 'enabled', effort: 'high' } },
+      { providerId: 'google-cloudflare', modelId: 'gemini-2.5-flash' },
+    );
+    const callArgs = {
+      ...resolved.standardOptions,
+      ...(resolved.providerOptions ? { providerOptions: resolved.providerOptions } : {}),
+    };
+    expect(callArgs.providerOptions).toEqual({
+      google: { thinkingConfig: { includeThoughts: true, thinkingBudget: 16384 } },
+    });
+    // providerOptions 不在顶层摊平（避免把 google 当作文档顶层字段）
+    expect(callArgs.google).toBeUndefined();
   });
 });
 
@@ -150,8 +199,13 @@ describe('UserGenerationOverridesSchema', () => {
     expect(UserGenerationOverridesSchema.safeParse({ thinking: { mode: 'disabled' } }).success).toBe(true);
   });
 
-  it('拒绝非法 temperature 与超范围 maxOutputTokens', () => {
-    expect(UserGenerationOverridesSchema.safeParse({ temperature: 3 }).success).toBe(false);
+  it('temperature 只约束有限且非负，不硬编码上限（上限由 capability 决定）', () => {
+    expect(UserGenerationOverridesSchema.safeParse({ temperature: 3 }).success).toBe(true);
+    expect(UserGenerationOverridesSchema.safeParse({ temperature: -1 }).success).toBe(false);
+    expect(UserGenerationOverridesSchema.safeParse({ temperature: Number.NaN }).success).toBe(false);
+  });
+
+  it('拒绝非法 maxOutputTokens', () => {
     expect(UserGenerationOverridesSchema.safeParse({ maxOutputTokens: 0 }).success).toBe(false);
     expect(UserGenerationOverridesSchema.safeParse({ maxOutputTokens: 1_000_001 }).success).toBe(false);
   });

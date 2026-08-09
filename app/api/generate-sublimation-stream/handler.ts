@@ -304,6 +304,7 @@ ${identityHint ? `角色当前标识：${identityHint}` : '（无）'}
         prompt,
         temperature: 0.7,
         ...(customModelOverride ? { modelOverride: customModelOverride } : {}),
+        ...(customProviderPayload ? { generationSettingsContext: { providerId: customProviderPayload.providerId, ...(customProviderPayload.generationOverrides ? { userOverrides: customProviderPayload.generationOverrides } : {}) } } : {}),
       },
       {
         ...(providerOptions ?? {}),

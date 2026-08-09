@@ -208,6 +208,7 @@ async function handler(req: NextRequest): Promise<Response> {
         prompt,
         temperature: 0.75,
         ...(customModelOverride ? { modelOverride: customModelOverride } : {}),
+        ...(customProviderPayload ? { generationSettingsContext: { providerId: customProviderPayload.providerId, ...(customProviderPayload.generationOverrides ? { userOverrides: customProviderPayload.generationOverrides } : {}) } } : {}),
       },
       {
         ...(providerOptions ?? {}),

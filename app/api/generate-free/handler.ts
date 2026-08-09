@@ -429,6 +429,7 @@ ${input.prompt}
       schema,
       taskName: '自由生成数据卡',
       ...(customModelOverride ? { modelOverride: customModelOverride } : {}),
+      ...(customProviderPayload ? { generationSettingsContext: { providerId: customProviderPayload.providerId, ...(customProviderPayload.generationOverrides ? { userOverrides: customProviderPayload.generationOverrides } : {}) } } : {}),
     };
 
     const shouldDisablePolling = customProviderId !== null && customProviderId !== 'system';

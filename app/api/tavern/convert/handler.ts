@@ -540,6 +540,7 @@ async function handler(req: NextRequest): Promise<Response> {
         schema,
         taskName: '酒馆导入：魔法少女 AI 转换',
         ...(customModelOverride ? { modelOverride: customModelOverride } : {}),
+        ...(customProviderPayload ? { generationSettingsContext: { providerId: customProviderPayload.providerId, ...(customProviderPayload.generationOverrides ? { userOverrides: customProviderPayload.generationOverrides } : {}) } } : {}),
       };
 
       const generated = await generateWithAI({ language, sourceName, attachments }, generationConfig, aiOptions);
@@ -586,6 +587,7 @@ async function handler(req: NextRequest): Promise<Response> {
         schema,
         taskName: '酒馆导入：残兽 AI 转换',
         ...(customModelOverride ? { modelOverride: customModelOverride } : {}),
+        ...(customProviderPayload ? { generationSettingsContext: { providerId: customProviderPayload.providerId, ...(customProviderPayload.generationOverrides ? { userOverrides: customProviderPayload.generationOverrides } : {}) } } : {}),
       };
 
       const generated = await generateWithAI({ language, sourceName, attachments }, generationConfig, aiOptions);
@@ -629,6 +631,7 @@ async function handler(req: NextRequest): Promise<Response> {
         schema,
         taskName: '酒馆导入：情景 AI 转换',
         ...(customModelOverride ? { modelOverride: customModelOverride } : {}),
+        ...(customProviderPayload ? { generationSettingsContext: { providerId: customProviderPayload.providerId, ...(customProviderPayload.generationOverrides ? { userOverrides: customProviderPayload.generationOverrides } : {}) } } : {}),
       };
 
       const generated = await generateWithAI({ language, sourceName, attachments }, generationConfig, aiOptions);
@@ -657,6 +660,7 @@ async function handler(req: NextRequest): Promise<Response> {
         schema,
         taskName: '酒馆导入：通用情景 AI 转换',
         ...(customModelOverride ? { modelOverride: customModelOverride } : {}),
+        ...(customProviderPayload ? { generationSettingsContext: { providerId: customProviderPayload.providerId, ...(customProviderPayload.generationOverrides ? { userOverrides: customProviderPayload.generationOverrides } : {}) } } : {}),
       };
 
       const generated = await generateWithAI({ language, sourceName, attachments }, generationConfig, aiOptions);
@@ -685,6 +689,7 @@ async function handler(req: NextRequest): Promise<Response> {
       schema,
       taskName: '酒馆导入：通用角色 AI 转换',
       ...(customModelOverride ? { modelOverride: customModelOverride } : {}),
+      ...(customProviderPayload ? { generationSettingsContext: { providerId: customProviderPayload.providerId, ...(customProviderPayload.generationOverrides ? { userOverrides: customProviderPayload.generationOverrides } : {}) } } : {}),
     };
 
     const generated = await generateWithAI({ language, sourceName, attachments }, generationConfig, aiOptions);

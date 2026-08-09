@@ -204,6 +204,12 @@ async function handler(req: NextRequest): Promise<Response> {
       schema,
       taskName: '重做角色更新',
       modelOverride: customModelOverride,
+      ...(customProviderPayload ? {
+        generationSettingsContext: {
+          providerId: customProviderPayload.providerId,
+          ...(customProviderPayload.generationOverrides ? { userOverrides: customProviderPayload.generationOverrides } : {}),
+        },
+      } : {}),
     };
 
     const redo = await generateWithAI<RedoResult, null>(null, generationConfig, providerOptions);

@@ -139,6 +139,16 @@ async function handler(req: Request) {
       channelContext,
       telemetry,
       ...(providerOptions ?? {}),
+      ...(customProviderPayload
+        ? {
+            generationSettingsContext: {
+              providerId: customProviderPayload.providerId,
+              ...(customProviderPayload.generationOverrides
+                ? { userOverrides: customProviderPayload.generationOverrides }
+                : {}),
+            },
+          }
+        : {}),
     };
 
     const generatedFaceData = await generateWithAI(input, gameCardGenerationConfig, aiOptions);

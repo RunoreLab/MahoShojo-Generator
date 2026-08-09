@@ -7,7 +7,7 @@ import { config, AIProvider } from "./config";
 import { getLogger } from "./logger";
 import { getProviderFetch } from "@/lib/ai/middleware/provider-fetch";
 import { resolveGenerationSettings } from "@/lib/ai/generation-settings/resolve";
-import type { UserGenerationOverrides } from "@/lib/ai/generation-settings/types";
+import type { GenerationSettingsContext, UserGenerationOverrides } from "@/lib/ai/generation-settings/types";
 import { enhanceErrorWithUpstreamMessage } from "@/lib/ai/utils/error-extraction";
 import { buildStructuredJsonInstructionFromZodSchema, parseStructuredJsonWithSchema } from "@/lib/ai/utils/structured-json";
 import { classifySuccess, classifyOutcome, recordAiChannelOutcome } from "@/lib/ai/availability";
@@ -28,6 +28,8 @@ export interface GenerationConfig<T, I = string> {
   maxOutputTokens?: number;
   modelOverride?: string; // 新增：可选的模型覆盖参数
   generationOverrides?: UserGenerationOverrides;
+  /** 生成设置上下文：system/custom 通道统一传递 providerId 与用户覆盖。 */
+  generationSettingsContext?: GenerationSettingsContext;
 }
 
 const createAIClient = (provider: AIProvider) => {
@@ -292,6 +294,8 @@ export interface GenerateWithAIOptions {
     providerId: string;
     modelId: string;
   };
+  /** 生成设置上下文：system/custom 通道统一传递 providerId 与用户覆盖。 */
+  generationSettingsContext?: GenerationSettingsContext;
 }
 
 // 通用 AI 生成函数
@@ -419,14 +423,18 @@ export async function generateWithAI<T, I = string>(
           },
         ]);
         const resolvedSettings = resolveGenerationSettings({
-          providerId: provider.providerId ?? provider.type,
+          providerId: options?.generationSettingsContext?.providerId ?? generationConfig.generationSettingsContext?.providerId ?? provider.providerId ?? provider.type,
           modelId: selectedModel,
           taskDefaults: {
             temperature: generationConfig.temperature,
             maxOutputTokens: generationConfig.maxOutputTokens,
           },
           providerDefaults: provider,
-          userOverrides: provider.generationOverrides ?? generationConfig.generationOverrides,
+          userOverrides:
+            options?.generationSettingsContext?.userOverrides ??
+            generationConfig.generationSettingsContext?.userOverrides ??
+            provider.generationOverrides ??
+            generationConfig.generationOverrides,
         });
         if (resolvedSettings.diagnostics.omitted.length > 0 || resolvedSettings.diagnostics.warnings.length > 0) {
           log.warn('生成参数解析诊断', {
@@ -444,7 +452,7 @@ export async function generateWithAI<T, I = string>(
             schema: generationConfig.schema,
             maxRetries: 0,
             ...resolvedSettings.standardOptions,
-            ...resolvedSettings.providerOptions,
+            ...(resolvedSettings.providerOptions ? { providerOptions: resolvedSettings.providerOptions } : {}),
           });
         };
 
@@ -458,7 +466,7 @@ export async function generateWithAI<T, I = string>(
             prompt: buildPromptMessages(guidedPrompt),
             maxRetries: 0,
             ...resolvedSettings.standardOptions,
-            ...resolvedSettings.providerOptions,
+            ...(resolvedSettings.providerOptions ? { providerOptions: resolvedSettings.providerOptions } : {}),
           });
 
           const parsed = parseStructuredJsonWithSchema(textResult.text, generationConfig.schema, {

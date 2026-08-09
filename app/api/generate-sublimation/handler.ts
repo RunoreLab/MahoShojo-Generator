@@ -823,7 +823,8 @@ async function handler(req: NextRequest): Promise<Response> {
     if (hasNonNativeQuestionnaireLore) {
       shouldSign = false;
     }
-	    const generationConfig = createGenerationConfig(
+	    const generationConfig = {
+	      ...createGenerationConfig(
 	      originalCharacterData,
 	      baseOutputData,
 	      language,
@@ -842,7 +843,14 @@ async function handler(req: NextRequest): Promise<Response> {
         readCurrentState: resolvedReadCurrentState,
         writeCurrentState: resolvedWriteCurrentState,
       }
-    );
+      ),
+      ...(customProviderPayload ? {
+        generationSettingsContext: {
+          providerId: customProviderPayload.providerId,
+          ...(customProviderPayload.generationOverrides ? { userOverrides: customProviderPayload.generationOverrides } : {}),
+        },
+      } : {}),
+    };
 
     const providerOptions = (customProviderOverride || shouldDisablePolling)
       ? {

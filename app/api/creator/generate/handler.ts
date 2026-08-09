@@ -623,6 +623,7 @@ async function handler(req: Request): Promise<Response> {
     let customProviderOverride: AIProvider | null = null;
     let customProviderId: string | null = null;
     let customModelOverride: string | undefined;
+    let parsedCustomProvider: z.infer<typeof CustomProviderSchema> | null = null;
 
     if (customProviderPayload) {
       const parsedResult = CustomProviderSchema.safeParse(customProviderPayload);
@@ -635,6 +636,7 @@ async function handler(req: Request): Promise<Response> {
       }
 
       const parsed = parsedResult.data;
+      parsedCustomProvider = parsed;
       customProviderId = parsed.providerId;
       const providerConfig = AI_PROVIDER_CATALOG.find(item => item.id === parsed.providerId);
       if (!providerConfig) {
@@ -731,6 +733,7 @@ async function handler(req: Request): Promise<Response> {
           {
             ...canshouGenerationConfig,
             ...(customModelOverride ? { modelOverride: customModelOverride } : {}),
+            ...(parsedCustomProvider ? { generationSettingsContext: { providerId: parsedCustomProvider.providerId, ...(parsedCustomProvider.generationOverrides ? { userOverrides: parsedCustomProvider.generationOverrides } : {}) } } : {}),
           },
           aiOptions
         )
@@ -739,6 +742,7 @@ async function handler(req: Request): Promise<Response> {
           {
             ...magicalGirlDetailsConfig,
             ...(customModelOverride ? { modelOverride: customModelOverride } : {}),
+            ...(parsedCustomProvider ? { generationSettingsContext: { providerId: parsedCustomProvider.providerId, ...(parsedCustomProvider.generationOverrides ? { userOverrides: parsedCustomProvider.generationOverrides } : {}) } } : {}),
           },
           aiOptions
         );
