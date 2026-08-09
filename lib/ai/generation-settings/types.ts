@@ -42,6 +42,7 @@ export type SupportState = 'supported' | 'unsupported' | 'unknown';
 export type ThinkingAdapter =
   | 'google-thinking-budget'
   | 'google-thinking-level'
+  | 'google-thinking-binary-level'
   | 'openai-reasoning-effort'
   | 'deepseek-thinking-toggle'
   | 'unknown';

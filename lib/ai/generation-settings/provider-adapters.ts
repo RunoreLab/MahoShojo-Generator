@@ -5,6 +5,7 @@
 // 各控制机制：
 // - google-thinking-budget：Gemini 2.5 系列，用 thinkingBudget（token 数）控制；0 即关闭。
 // - google-thinking-level：Gemini 3.x 系列，用 thinkingLevel 控制。
+// - google-thinking-binary-level：Gemma 4，用 high/minimal 二元 thinkingLevel 控制。
 // - openai-reasoning-effort：OpenAI reasoning 模型，用 reasoningEffort；'none' 即关闭。
 // - deepseek-thinking-toggle：DeepSeek，用 thinking.type 开关。
 //
@@ -73,6 +74,17 @@ export const buildThinkingOptions = (
         };
       }
       return { google: { thinkingConfig: { includeThoughts: true } } };
+    }
+    case 'google-thinking-binary-level': {
+      // Gemma 4：官方严格定义 high=开启、minimal=关闭；不存在中间档位。
+      if (mode === 'disabled') {
+        return { google: { thinkingConfig: { thinkingLevel: 'minimal' } } };
+      }
+      if (mode === 'enabled') {
+        return { google: { thinkingConfig: { thinkingLevel: 'high' } } };
+      }
+      // default：保持当前未登记 Gemma 时的行为，不附加未被 hosted Gemma 文档明确承诺的字段。
+      return undefined;
     }
     case 'openai-reasoning-effort': {
       // OpenAI：'none' 关闭 reasoning；其余为档位。

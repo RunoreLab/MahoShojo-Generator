@@ -1166,7 +1166,7 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
         mode: 'auto',
         models: [
             {
-                value: 'gemini-3.6-flash',
+                value: 'google/gemini-3.6-flash',
                 label: 'Gemini 3.6 Flash',
                 description: 'Google 的新模型，据用户评测说很喜欢一惊一乍，还挺中二的。'
             },

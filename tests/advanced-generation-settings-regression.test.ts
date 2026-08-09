@@ -80,6 +80,99 @@ describe('advanced generation settings regressions', () => {
     expect(buildThinkingOptions('google-thinking-level', 'disabled')).toBeUndefined();
   });
 
+  it('Gemma 4 用专用二元 adapter 表达 high=开启 / minimal=关闭', () => {
+    for (const modelId of ['gemma-4-31b-it', 'gemma-4-26b-a4b-it'] as const) {
+      const caps = getModelGenerationCapabilities('google-cloudflare', modelId);
+      expect(caps.temperature.support).toBe('supported');
+      expect(caps.maxOutputTokens.support).toBe('supported');
+      expect(caps.thinking.adapter).toBe('google-thinking-binary-level');
+      expect(caps.thinking.efforts).toEqual(['high']);
+      expect(caps.thinking.canDisable).toBe(true);
+
+      const disabled = resolveGenerationSettings({
+        providerId: 'google-cloudflare',
+        modelId,
+        userOverrides: { thinking: { mode: 'disabled' } },
+      });
+      expect(disabled.providerOptions).toEqual({
+        google: { thinkingConfig: { thinkingLevel: 'minimal' } },
+      });
+
+      // 即使旧缓存里没有合法 effort，enabled 也必须保持“开启”语义，而不是回退模型默认。
+      const enabled = resolveGenerationSettings({
+        providerId: 'google-cloudflare',
+        modelId,
+        userOverrides: { thinking: { mode: 'enabled', effort: 'low' } },
+      });
+      expect(enabled.providerOptions).toEqual({
+        google: { thinkingConfig: { thinkingLevel: 'high' } },
+      });
+      expect(enabled.diagnostics.warnings).toHaveLength(1);
+    }
+  });
+
+  it('OpenRouter 按网关元数据约束 sampling、输出上限与 reasoning_effort', () => {
+    const gpt = getModelGenerationCapabilities('openrouter', 'openai/gpt-5.5');
+    expect(gpt.temperature.support).toBe('unsupported');
+    expect(gpt.maxOutputTokens.max).toBe(128_000);
+    expect(gpt.thinking.efforts).toEqual(['low', 'medium', 'high', 'xhigh']);
+    expect(gpt.thinking.canDisable).toBe(true);
+
+    const gptResolved = resolveGenerationSettings({
+      providerId: 'openrouter',
+      modelId: 'openai/gpt-5.5',
+      userOverrides: {
+        temperature: 0.8,
+        thinking: { mode: 'disabled' },
+      },
+    });
+    expect(gptResolved.standardOptions.temperature).toBeUndefined();
+    expect(gptResolved.diagnostics.omitted).toContainEqual({
+      field: 'temperature',
+      reason: 'unsupported',
+    });
+    expect(gptResolved.providerOptions).toEqual({
+      openai: { reasoningEffort: 'none' },
+    });
+
+    const gemini = getModelGenerationCapabilities('openrouter', 'google/gemini-3.1-pro-preview');
+    expect(gemini.temperature.support).toBe('supported');
+    expect(gemini.maxOutputTokens.max).toBe(65_536);
+    expect(gemini.thinking.efforts).toEqual(['low', 'medium', 'high']);
+    expect(gemini.thinking.canDisable).toBe(false);
+
+    const qwen = getModelGenerationCapabilities('openrouter', 'qwen/qwen3.8-max');
+    expect(qwen.maxOutputTokens.max).toBe(131_072);
+    expect(qwen.thinking.efforts).toEqual(['minimal', 'low', 'medium', 'high', 'xhigh']);
+    expect(qwen.thinking.canDisable).toBe(false);
+
+    const claudeCaps = getModelGenerationCapabilities('openrouter', 'anthropic/claude-opus-4.8');
+    expect(claudeCaps.thinking.canDisable).toBe(false);
+
+    const claude = resolveGenerationSettings({
+      providerId: 'openrouter',
+      modelId: 'anthropic/claude-opus-4.8',
+      userOverrides: { thinking: { mode: 'enabled', effort: 'max' } },
+    });
+    expect(claude.providerOptions).toEqual({
+      openai: { reasoningEffort: 'max' },
+    });
+
+    // DeepSeek 的 OpenRouter 路径仍保守地不开放 Thinking：条件性 temperature 语义尚未建模。
+    const deepseekFlash = getModelGenerationCapabilities('openrouter', 'deepseek/deepseek-v4-flash');
+    expect(deepseekFlash.maxOutputTokens.max).toBe(393_216);
+    expect(deepseekFlash.thinking.support).toBe('unknown');
+
+    const deepseek = getModelGenerationCapabilities('openrouter', 'deepseek/deepseek-v4-pro');
+    expect(deepseek.maxOutputTokens.max).toBe(384_000);
+    expect(deepseek.thinking.support).toBe('unknown');
+
+    // Kimi K3 虽然网关有 reasoning_effort，但不包含当前 adapter 默认 medium，暂不冒进登记。
+    expect(
+      getModelGenerationCapabilities('openrouter', 'moonshotai/kimi-k3').thinking.support,
+    ).toBe('unknown');
+  });
+
   it('system 是逻辑路由器，不发送 Google/DeepSeek 专属 Thinking providerOptions', () => {
     const gemini = resolveGenerationSettings({
       providerId: 'system',
