@@ -36,10 +36,12 @@ const UNKNOWN_MAX_OUTPUT_TOKENS: ModelGenerationCapabilities['maxOutputTokens'] 
 const buildThinking = (
   adapter: ThinkingAdapter,
   efforts?: ThinkingEffort[],
+  canDisable = true,
 ): ModelGenerationCapabilities['thinking'] => ({
   support: 'supported',
   ...(efforts && efforts.length > 0 ? { efforts } : {}),
   adapter,
+  canDisable,
 });
 
 const UNKNOWN_THINKING: ModelGenerationCapabilities['thinking'] = {
@@ -47,8 +49,9 @@ const UNKNOWN_THINKING: ModelGenerationCapabilities['thinking'] = {
   adapter: 'unknown',
 };
 
-// Gemini 3.x 用 thinkingLevel 控制。官方档位：minimal（3.5 Flash-Lite 默认）、low/medium（3.6 Flash 默认）、high。
-const GEMINI_3_THINKING_LEVELS: ThinkingEffort[] = ['minimal', 'low', 'medium', 'high'];
+// Gemini 3 Flash / Flash-Lite 支持 minimal/low/medium/high；3.1 Pro 不支持 minimal。
+const GEMINI_3_FLASH_THINKING_LEVELS: ThinkingEffort[] = ['minimal', 'low', 'medium', 'high'];
+const GEMINI_3_PRO_THINKING_LEVELS: ThinkingEffort[] = ['low', 'medium', 'high'];
 
 // Gemini 2.5 系列用 thinkingBudget（token 数）控制；适配器把档位映射为 ≤ max 的预算值。
 // 档位 max 对 2.5 Flash 无独立意义（预算上限即 24_576），统一不登记 max。
@@ -69,11 +72,11 @@ const buildCapabilities = (capabilities: {
  *
  * 登记（仅已验证，未列出的保持 unknown 不猜测）：
  * - Gemini 2.5：temperature 受支持；thinking 用 google-thinking-budget（thinkingBudget 控制）。
- *   Flash/Flash-Lite：maxOutputTokens=65_536、thinkingBudget≤24_576；Pro：maxOutputTokens=65_536、
- *   thinkingBudget≤32_768（适配器保守映射到 ≤24_576，安全）。
+ *   Flash/Flash-Lite 可用 thinkingBudget=0 关闭；2.5 Pro 不能关闭 Thinking。
  * - Gemini 3.x：3.6/3.5 Flash-Lite 起移除 sampling 参数（temperature unsupported）；
- *   thinking 用 google-thinking-level（low/medium/high）；maxOutputTokens=64_000。
- * - DeepSeek V4：temperature 受支持；thinking 用 deepseek-thinking-toggle（thinking.type）。
+ *   thinking 用 google-thinking-level，不能完全关闭；maxOutputTokens=65_536。
+ * - DeepSeek V4：1M 是上下文长度，最大输出为 384K；thinking 用 deepseek-thinking-toggle（thinking.type）。
+ * - system 是逻辑路由器，只登记安全的标准参数能力，不绑定 Google/DeepSeek 专属 adapter。
  * - 其余模型 / 自定义 modelId：不登记 → unknown（开放 / 不可乱猜）。
  */
 const CAPABILITIES = new Map<string, ModelGenerationCapabilities>([
@@ -87,18 +90,16 @@ const CAPABILITIES = new Map<string, ModelGenerationCapabilities>([
   [buildKey('system', 'gemini-2.5-flash'), buildCapabilities({
     temperature: SUPPORTED_TEMPERATURE,
     maxOutputTokens: buildMaxOutputTokens(65_536),
-    thinking: buildThinking('google-thinking-budget', GEMINI_2_5_BUDGET_EFFORTS),
   })],
-  // Pro：maxOutputTokens=65_536、thinkingBudget 0–32_768。适配器档位最大值 24_576 < 32_768，安全。
+  // Pro：thinkingBudget 范围 128–32_768，官方明确不支持 thinkingBudget=0。
   [buildKey('google-cloudflare', 'gemini-2.5-pro'), buildCapabilities({
     temperature: SUPPORTED_TEMPERATURE,
     maxOutputTokens: buildMaxOutputTokens(65_536),
-    thinking: buildThinking('google-thinking-budget', GEMINI_2_5_BUDGET_EFFORTS),
+    thinking: buildThinking('google-thinking-budget', GEMINI_2_5_BUDGET_EFFORTS, false),
   })],
   [buildKey('system', 'gemini-2.5-pro'), buildCapabilities({
     temperature: SUPPORTED_TEMPERATURE,
     maxOutputTokens: buildMaxOutputTokens(65_536),
-    thinking: buildThinking('google-thinking-budget', GEMINI_2_5_BUDGET_EFFORTS),
   })],
   // Flash-Lite：与 Flash 同协议，保守复用同一组限制。
   [buildKey('google-cloudflare', 'gemini-2.5-flash-lite'), buildCapabilities({
@@ -111,52 +112,53 @@ const CAPABILITIES = new Map<string, ModelGenerationCapabilities>([
   // 3.6/3.5 Flash-Lite 起移除 sampling 参数（temperature 不发送）。
   [buildKey('google-cloudflare', 'gemini-3.6-flash'), buildCapabilities({
     temperature: { support: 'unsupported' },
-    maxOutputTokens: buildMaxOutputTokens(64_000),
-    thinking: buildThinking('google-thinking-level', GEMINI_3_THINKING_LEVELS),
+    maxOutputTokens: buildMaxOutputTokens(65_536),
+    thinking: buildThinking('google-thinking-level', GEMINI_3_FLASH_THINKING_LEVELS, false),
   })],
   [buildKey('system', 'gemini-3.6-flash'), buildCapabilities({
     temperature: { support: 'unsupported' },
-    maxOutputTokens: buildMaxOutputTokens(64_000),
-    thinking: buildThinking('google-thinking-level', GEMINI_3_THINKING_LEVELS),
+    maxOutputTokens: buildMaxOutputTokens(65_536),
   })],
   [buildKey('google-cloudflare', 'gemini-3.5-flash-lite'), buildCapabilities({
     temperature: { support: 'unsupported' },
-    maxOutputTokens: buildMaxOutputTokens(64_000),
-    thinking: buildThinking('google-thinking-level', GEMINI_3_THINKING_LEVELS),
+    maxOutputTokens: buildMaxOutputTokens(65_536),
+    thinking: buildThinking('google-thinking-level', GEMINI_3_FLASH_THINKING_LEVELS, false),
   })],
   [buildKey('system', 'gemini-3.5-flash-lite'), buildCapabilities({
     temperature: { support: 'unsupported' },
-    maxOutputTokens: buildMaxOutputTokens(64_000),
-    thinking: buildThinking('google-thinking-level', GEMINI_3_THINKING_LEVELS),
+    maxOutputTokens: buildMaxOutputTokens(65_536),
   })],
-  // 3.1 Pro 仍支持 temperature（仅 3.6/3.5 Lite 起移除 sampling）。
+  // 3.1 Pro 仍支持 temperature，但 thinkingLevel 仅 low/medium/high，且不能完全关闭。
   [buildKey('google-cloudflare', 'gemini-3.1-pro-preview'), buildCapabilities({
     temperature: SUPPORTED_TEMPERATURE,
-    maxOutputTokens: buildMaxOutputTokens(64_000),
-    thinking: buildThinking('google-thinking-level', GEMINI_3_THINKING_LEVELS),
+    maxOutputTokens: buildMaxOutputTokens(65_536),
+    thinking: buildThinking('google-thinking-level', GEMINI_3_PRO_THINKING_LEVELS, false),
   })],
 
   // ---- DeepSeek（deepseek-thinking-toggle）----
   [buildKey('system', 'deepseek-v4-flash-0731'), buildCapabilities({
     temperature: SUPPORTED_TEMPERATURE,
-    maxOutputTokens: buildMaxOutputTokens(1_000_000),
-    thinking: buildThinking('deepseek-thinking-toggle'),
+    maxOutputTokens: buildMaxOutputTokens(384_000),
   })],
   [buildKey('system', 'deepseek-v4-pro'), buildCapabilities({
     temperature: SUPPORTED_TEMPERATURE,
-    maxOutputTokens: buildMaxOutputTokens(1_000_000),
-    thinking: buildThinking('deepseek-thinking-toggle'),
+    maxOutputTokens: buildMaxOutputTokens(384_000),
   })],
 
-  // DeepSeek 官方 provider：catalog 的 modelId 为 deepseek-v4-flash-0731（带正式版后缀）。
+  // DeepSeek 官方 API canonical modelId；同时保留旧 catalog ID 的能力别名以兼容 UI/localStorage。
+  [buildKey('deepseek', 'deepseek-v4-flash'), buildCapabilities({
+    temperature: SUPPORTED_TEMPERATURE,
+    maxOutputTokens: buildMaxOutputTokens(384_000),
+    thinking: buildThinking('deepseek-thinking-toggle'),
+  })],
   [buildKey('deepseek', 'deepseek-v4-flash-0731'), buildCapabilities({
     temperature: SUPPORTED_TEMPERATURE,
-    maxOutputTokens: buildMaxOutputTokens(1_000_000),
+    maxOutputTokens: buildMaxOutputTokens(384_000),
     thinking: buildThinking('deepseek-thinking-toggle'),
   })],
   [buildKey('deepseek', 'deepseek-v4-pro'), buildCapabilities({
     temperature: SUPPORTED_TEMPERATURE,
-    maxOutputTokens: buildMaxOutputTokens(1_000_000),
+    maxOutputTokens: buildMaxOutputTokens(384_000),
     thinking: buildThinking('deepseek-thinking-toggle'),
   })],
 ]);

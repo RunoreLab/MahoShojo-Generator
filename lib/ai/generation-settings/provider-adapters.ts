@@ -58,9 +58,9 @@ export const buildThinkingOptions = (
       return { google: { thinkingConfig: { includeThoughts: true } } };
     }
     case 'google-thinking-level': {
-      // Gemini 3.x：default 回流 reasoning；disabled 用 thinkingLevel:'none' 关闭。
+      // Gemini 3.x 当前没有合法的 full-off thinkingLevel；Resolver 会依据 capability 拦截 disabled。
       if (mode === 'disabled') {
-        return { google: { thinkingConfig: { thinkingLevel: 'none' } } };
+        return undefined;
       }
       if (mode === 'enabled') {
         return {

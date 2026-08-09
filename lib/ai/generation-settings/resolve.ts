@@ -51,12 +51,21 @@ export const resolveGenerationSettings = (
   const standardOptions: ResolvedGenerationSettings['standardOptions'] = {};
   let providerOptions: GenerationProviderOptions | undefined;
 
+  const thinkingOverride = userOverrides?.thinking;
+  const thinkingCapability = capabilities.thinking;
+  const thinkingMode: 'default' | 'disabled' | 'enabled' = thinkingOverride?.mode ?? 'default';
+  const deepSeekThinkingActive =
+    thinkingCapability.adapter === 'deepseek-thinking-toggle' && thinkingMode !== 'disabled';
+
   // ---- Temperature ----
   const temperatureCandidate =
     userOverrides?.temperature ?? taskDefaults?.temperature;
   if (typeof temperatureCandidate === 'number') {
     if (capabilities.temperature.support === 'unsupported') {
       omitted.push({ field: 'temperature', reason: 'unsupported' });
+    } else if (deepSeekThinkingActive) {
+      // DeepSeek 官方说明：Thinking 模式下 temperature 会被接受但不生效。
+      omitted.push({ field: 'temperature', reason: 'ignored-in-thinking-mode' });
     } else {
       standardOptions.temperature = clamp(
         temperatureCandidate,
@@ -90,22 +99,25 @@ export const resolveGenerationSettings = (
   //   发送关闭参数，而不是“不发送”（不发送 = 模型默认开启）。
   // - mode 'default'（或未设置）：跟随模型默认。对 Google 项目默认开启思考并回流 reasoning。
   // - mode 'enabled'：显式开启，发送档位参数。
-  const thinkingOverride = userOverrides?.thinking;
-  const thinkingCapability = capabilities.thinking;
-
   if (thinkingCapability.support === 'unsupported') {
-    if (thinkingOverride?.mode === 'enabled') {
+    if (thinkingOverride && thinkingOverride.mode !== 'default') {
       omitted.push({ field: 'thinking', reason: 'unsupported' });
     }
   } else if (thinkingCapability.support === 'supported') {
-    const mode: 'default' | 'disabled' | 'enabled' = thinkingOverride?.mode ?? 'default';
     const effort = thinkingOverride?.mode === 'enabled' ? thinkingOverride.effort : undefined;
-    if (mode === 'enabled' && effort && !thinkingCapability.efforts?.includes(effort)) {
+    if (thinkingMode === 'disabled' && thinkingCapability.canDisable === false) {
+      omitted.push({ field: 'thinking', reason: 'cannot-disable' });
+    } else if (
+      thinkingMode === 'enabled' &&
+      effort &&
+      thinkingCapability.efforts &&
+      !thinkingCapability.efforts.includes(effort)
+    ) {
       warnings.push(`模型 ${modelId} 不支持 thinking 档位 ${effort}，已忽略强度设置`);
     } else {
       const options = buildThinkingOptions(
         thinkingCapability.adapter ?? 'unknown',
-        mode,
+        thinkingMode,
         effort,
       );
       if (options) {

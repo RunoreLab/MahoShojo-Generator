@@ -730,7 +730,9 @@ const AiProviderSelector: React.FC<AiProviderSelectorProps> = ({
                     maxOutputTokensMax={activeCapabilities?.maxOutputTokens.max}
                     thinkingSupport={activeCapabilities?.thinking.support}
                     thinkingEfforts={activeCapabilities?.thinking.efforts}
-                    canDisableThinking={activeCapabilities ? activeCapabilities.thinking.support === 'supported' : true}
+                    canDisableThinking={activeCapabilities
+                        ? activeCapabilities.thinking.support === 'supported' && activeCapabilities.thinking.canDisable !== false
+                        : true}
                 />
 
                 <p className="battle-lite-subtle-text mt-1 text-xs">

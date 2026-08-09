@@ -26,8 +26,6 @@ interface AdvancedGenerationSettingsProps {
     canDisableThinking?: boolean;
 }
 
-const ALL_EFFORTS: ThinkingEffort[] = ['minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
-
 const AdvancedGenerationSettings: React.FC<AdvancedGenerationSettingsProps> = ({
     value,
     onChange,
@@ -40,21 +38,36 @@ const AdvancedGenerationSettings: React.FC<AdvancedGenerationSettingsProps> = ({
 }) => {
     const [isOpen, setIsOpen] = useState(false);
 
-    const efforts = thinkingEfforts && thinkingEfforts.length > 0 ? thinkingEfforts : ALL_EFFORTS;
+    const efforts = thinkingEfforts ?? [];
+    const hasThinkingEffortControl = efforts.length > 0;
+    const defaultThinkingEffort: ThinkingEffort = efforts.includes('medium')
+        ? 'medium'
+        : (efforts[0] ?? 'medium');
 
     const maxOutputTokens = value?.maxOutputTokens;
     const temperature = value?.temperature;
     const thinking = value?.thinking;
-    const thinkingMode = thinking?.mode ?? 'default';
-    const thinkingEffort = thinking?.mode === 'enabled' ? (thinking?.effort ?? 'medium') : 'medium';
+    const rawThinkingMode = thinking?.mode ?? 'default';
+    // 兼容旧 localStorage：若旧版本保存了 disabled，但能力表确认不可关闭，UI 回退为“默认”。
+    const thinkingMode = rawThinkingMode === 'disabled' && !canDisableThinking
+        ? 'default'
+        : rawThinkingMode;
+    const storedEffort = thinking?.mode === 'enabled' ? thinking.effort : undefined;
+    const thinkingEffort = storedEffort && efforts.includes(storedEffort)
+        ? storedEffort
+        : defaultThinkingEffort;
 
     const modifiedCount = useMemo(() => {
         let count = 0;
         if (typeof maxOutputTokens === 'number') count++;
         if (typeof temperature === 'number') count++;
-        if (thinking && thinking.mode !== 'default') count++;
+        if (
+            thinking &&
+            thinking.mode !== 'default' &&
+            !(thinking.mode === 'disabled' && !canDisableThinking)
+        ) count++;
         return count;
-    }, [maxOutputTokens, temperature, thinking]);
+    }, [maxOutputTokens, temperature, thinking, canDisableThinking]);
 
     /** 直接构造最终对象并向外发送（不再合并旧 value，避免“删除字段又被合回”）。 */
     const emit = (next: UserGenerationOverrides) => {
@@ -197,7 +210,9 @@ const AdvancedGenerationSettings: React.FC<AdvancedGenerationSettingsProps> = ({
                                                 onChange={() =>
                                                     updateThinking(
                                                         option.key === 'enabled'
-                                                            ? { mode: 'enabled', effort: thinkingEffort }
+                                                            ? (hasThinkingEffortControl
+                                                                ? { mode: 'enabled', effort: thinkingEffort }
+                                                                : { mode: 'enabled' })
                                                             : { mode: option.key },
                                                     )
                                                 }
@@ -207,7 +222,12 @@ const AdvancedGenerationSettings: React.FC<AdvancedGenerationSettingsProps> = ({
                                         </label>
                                     ))}
                                 </div>
-                                {thinkingMode === 'enabled' && (
+                                {!canDisableThinking && (
+                                    <p className="battle-lite-subtle-text mt-1 text-xs">
+                                        当前模型支持调整推理，但不支持完全关闭。
+                                    </p>
+                                )}
+                                {thinkingMode === 'enabled' && hasThinkingEffortControl && (
                                     <div className="mt-2">
                                         <label className="battle-lite-muted-text mb-1 block text-xs font-semibold">强度</label>
                                         <select
@@ -224,6 +244,11 @@ const AdvancedGenerationSettings: React.FC<AdvancedGenerationSettingsProps> = ({
                                             ))}
                                         </select>
                                     </div>
+                                )}
+                                {thinkingMode === 'enabled' && !hasThinkingEffortControl && (
+                                    <p className="battle-lite-subtle-text mt-1 text-xs">
+                                        当前接入仅支持开启 / 关闭或跟随默认，不提供可靠的强度档位。
+                                    </p>
                                 )}
                             </>
                         )}

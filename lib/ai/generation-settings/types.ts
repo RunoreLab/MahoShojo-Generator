@@ -61,6 +61,8 @@ export interface ModelGenerationCapabilities {
     support: SupportState;
     efforts?: ThinkingEffort[];
     adapter?: ThinkingAdapter;
+    /** 是否允许显式关闭 Thinking；省略表示未知/由调用方保守处理。 */
+    canDisable?: boolean;
   };
 }
 

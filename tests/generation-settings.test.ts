@@ -145,16 +145,17 @@ describe('getModelGenerationCapabilities', () => {
     expect(caps.thinking.efforts).toEqual(['minimal', 'low', 'medium', 'high', 'xhigh']);
   });
 
-  it('DeepSeek V4 Flash 应使用 catalog 真值 deepseek-v4-flash-0731', () => {
+  it('DeepSeek V4 Flash 同时登记 canonical API ID 与 catalog 兼容 ID', () => {
     const catalogModel = AI_PROVIDER_CATALOG
       .find((p) => p.id === 'deepseek')
       ?.models.find((m) => m.label === 'DeepSeek V4 Flash');
     expect(catalogModel?.value).toBe('deepseek-v4-flash-0731');
 
-    const caps = getModelGenerationCapabilities('deepseek', 'deepseek-v4-flash-0731');
-    expect(caps.thinking.adapter).toBe('deepseek-thinking-toggle');
-    // registry 不再登记与 catalog 错位的旧 ID
-    expect(getModelGenerationCapabilities('deepseek', 'deepseek-v4-flash').thinking.support).toBe('unknown');
+    const legacyCaps = getModelGenerationCapabilities('deepseek', 'deepseek-v4-flash-0731');
+    const canonicalCaps = getModelGenerationCapabilities('deepseek', 'deepseek-v4-flash');
+    expect(legacyCaps.thinking.adapter).toBe('deepseek-thinking-toggle');
+    expect(canonicalCaps.thinking.adapter).toBe('deepseek-thinking-toggle');
+    expect(canonicalCaps.maxOutputTokens.max).toBe(384_000);
   });
 });
 
@@ -256,12 +257,12 @@ describe('Gemini 3.x：移除 sampling 参数（temperature 不发送），think
     expect(overCap.diagnostics.warnings.length).toBeGreaterThan(0);
   });
 
-  it('Gemini 3.6 Flash maxOutputTokens 上限 64000', () => {
+  it('Gemini 3.6 Flash maxOutputTokens 上限 65536', () => {
     const result = resolve(
       { maxOutputTokens: 100_000 },
       { providerId: 'google-cloudflare', modelId: 'gemini-3.6-flash' },
     );
-    expect(result.standardOptions.maxOutputTokens).toBe(64_000);
+    expect(result.standardOptions.maxOutputTokens).toBe(65_536);
   });
 
   it('Gemini 3.1 Pro 仍支持 temperature（仅 3.6/3.5 Lite 起移除 sampling）', () => {
