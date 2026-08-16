@@ -1439,6 +1439,148 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
         ]
     },
     {
+        id: 'opencode-zen',
+        name: 'OpenCode Zen',
+        description: 'OpenCode 官方 AI 网关，聚合经团队实测的 DeepSeek / GLM / Kimi / MiniMax 等模型，按量计费。',
+        docsUrl: 'https://opencode.ai/auth',
+        baseUrl: 'https://opencode.ai/zen/v1',
+        type: 'openai',
+        mode: 'auto',
+        models: [
+            {
+                value: 'deepseek-v4-flash',
+                label: 'DeepSeek V4 Flash',
+                description: 'DeepSeek V4 Flash，Agent 能力大幅增强，百万级上下文，兼顾质量与成本。'
+            },
+            {
+                value: 'deepseek-v4-pro',
+                label: 'DeepSeek V4 Pro',
+                description: 'DeepSeek V4 完全体，适合复杂分析、长文本写作与高质量生成。'
+            },
+            {
+                value: 'glm-5.2',
+                label: 'GLM-5.2',
+                description: '智谱开源旗舰模型，支持 1M 无损上下文，编程能力领先，适合复杂长程任务。'
+            },
+            {
+                value: 'glm-5.1',
+                label: 'GLM-5.1',
+                description: '智谱通用模型，综合能力均衡，适合复杂指令、多轮对话与高质量创作。'
+            },
+            {
+                value: 'glm-5',
+                label: 'GLM-5',
+                description: '智谱通用模型，适合中文对话、总结与结构化输出。'
+            },
+            {
+                value: 'kimi-k3',
+                label: 'Kimi K3',
+                description: 'Moonshot 旗舰模型，1M token 上下文，综合智能领先，适合长程编程与端到端知识工作。'
+            },
+            {
+                value: 'kimi-k2.7-code',
+                label: 'Kimi K2.7 Code',
+                description: 'Moonshot 面向编程场景的模型，长上下文指令遵循更可靠。'
+            },
+            {
+                value: 'kimi-k2.6',
+                label: 'Kimi K2.6',
+                description: 'Moonshot 通用模型，适合中文创作、角色设定、摘要与多轮指令跟随。'
+            },
+            {
+                value: 'kimi-k2.5',
+                label: 'Kimi K2.5',
+                description: 'Moonshot 原生多模态模型，适合中文创作、摘要与多轮指令跟随。'
+            },
+            {
+                value: 'minimax-m3',
+                label: 'MiniMax M3',
+                description: 'MiniMax 多模态旗舰模型，适合复杂 Agent 工作流与长程任务。'
+            },
+            {
+                value: 'minimax-m2.7',
+                label: 'MiniMax M2.7',
+                description: 'MiniMax 通用模型，适合复杂规划、长链路任务与高质量文本生成。'
+            },
+            {
+                value: 'big-pickle',
+                label: 'Big Pickle（免费）',
+                description: 'OpenCode Zen 提供的免费实验模型，处于实验期，不建议发送敏感或私密数据。'
+            },
+            {
+                value: 'deepseek-v4-flash-free',
+                label: 'DeepSeek V4 Flash（免费）',
+                description: 'OpenCode Zen 限时免费的 DeepSeek V4 Flash，适合低成本尝试。'
+            },
+        ]
+    },
+    {
+        id: 'opencode-go',
+        name: 'OpenCode Go',
+        description: 'OpenCode 官方低价订阅（首月 $5，之后 $10/月），稳定访问主流开源编码模型。',
+        docsUrl: 'https://opencode.ai/auth',
+        baseUrl: 'https://opencode.ai/zen/go/v1',
+        type: 'openai',
+        mode: 'auto',
+        models: [
+            {
+                value: 'deepseek-v4-flash',
+                label: 'DeepSeek V4 Flash',
+                description: 'DeepSeek V4 Flash，Agent 能力大幅增强，百万级上下文，兼顾质量与成本。'
+            },
+            {
+                value: 'deepseek-v4-pro',
+                label: 'DeepSeek V4 Pro',
+                description: 'DeepSeek V4 完全体，适合复杂分析、长文本写作与高质量生成。'
+            },
+            {
+                value: 'glm-5.3',
+                label: 'GLM-5.3',
+                description: '智谱通用模型，综合能力均衡，适合复杂指令、多轮对话与高质量创作。'
+            },
+            {
+                value: 'glm-5.2',
+                label: 'GLM-5.2',
+                description: '智谱开源旗舰模型，支持 1M 无损上下文，编程能力领先，适合复杂长程任务。'
+            },
+            {
+                value: 'glm-5.1',
+                label: 'GLM-5.1',
+                description: '智谱通用模型，综合能力均衡，适合复杂指令、多轮对话与高质量创作。'
+            },
+            {
+                value: 'kimi-k3',
+                label: 'Kimi K3',
+                description: 'Moonshot 旗舰模型，1M token 上下文，综合智能领先，适合长程编程与端到端知识工作。'
+            },
+            {
+                value: 'kimi-k2.7-code',
+                label: 'Kimi K2.7 Code',
+                description: 'Moonshot 面向编程场景的模型，长上下文指令遵循更可靠。'
+            },
+            {
+                value: 'kimi-k2.6',
+                label: 'Kimi K2.6',
+                description: 'Moonshot 通用模型，适合中文创作、角色设定、摘要与多轮指令跟随。'
+            },
+            {
+                value: 'mimo-v2.5',
+                label: 'MiMo V2.5',
+                description: '小米 MiMo V2.5 通用模型，适合日常对话、剧情推进与结构化文本生成。'
+            },
+            {
+                value: 'mimo-v2.5-pro',
+                label: 'MiMo V2.5 Pro',
+                description: '小米 MiMo V2.5 Pro，适合复杂指令、长文本创作与高质量生成。'
+            },
+            {
+                value: 'hy3',
+                label: '混元 Hy3',
+                description: '腾讯混元通用模型，提供多档思考模式，适合复杂任务执行。'
+            },
+        ]
+    },
+    {
         id: 'mystery',
         name: '魔法国度',
         description: '神秘渠道，不定时放送。',
