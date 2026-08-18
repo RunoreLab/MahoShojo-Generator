@@ -1563,16 +1563,7 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 label: 'Kimi K2.6',
                 description: 'Moonshot 通用模型，适合中文创作、角色设定、摘要与多轮指令跟随。'
             },
-            {
-                value: 'mimo-v2.5',
-                label: 'MiMo V2.5',
-                description: '小米 MiMo V2.5 通用模型，适合日常对话、剧情推进与结构化文本生成。'
-            },
-            {
-                value: 'mimo-v2.5-pro',
-                label: 'MiMo V2.5 Pro',
-                description: '小米 MiMo V2.5 Pro，适合复杂指令、长文本创作与高质量生成。'
-            },
+            ...XIAOMI_MIMO_MODELS,
             {
                 value: 'hy3',
                 label: '混元 Hy3',
