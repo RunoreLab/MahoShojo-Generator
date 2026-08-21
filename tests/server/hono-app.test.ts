@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { HonoServerConfig } from '@/server/config';
-import { createHonoApp } from '@/server/app';
+import { createHonoApp, isAllowedOrigin } from '@/server/app';
 import type { RedisService } from '@/server/redis/runtime';
 
 const config: HonoServerConfig = {
@@ -23,6 +23,21 @@ const createRedisStub = (): RedisService => ({
 });
 
 describe('Hono server app', () => {
+  it('安全匹配 HTTPS 子域通配符', () => {
+    const allowedOrigins = ['https://*.colanns.me'];
+
+    expect(isAllowedOrigin('https://mahoshojo.colanns.me', allowedOrigins)).toBe(
+      'https://mahoshojo.colanns.me',
+    );
+    expect(isAllowedOrigin('https://preview.dev.colanns.me', allowedOrigins)).toBe(
+      'https://preview.dev.colanns.me',
+    );
+    expect(isAllowedOrigin('https://colanns.me', allowedOrigins)).toBe('');
+    expect(isAllowedOrigin('http://mahoshojo.colanns.me', allowedOrigins)).toBe('');
+    expect(isAllowedOrigin('https://evilcolanns.me', allowedOrigins)).toBe('');
+    expect(isAllowedOrigin('https://colanns.me.evil.example', allowedOrigins)).toBe('');
+  });
+
   it('提供存活和就绪探针', async () => {
     const app = createHonoApp(config, createRedisStub());
 
@@ -96,11 +111,14 @@ describe('Hono server app', () => {
   });
 
   it('允许前端携带 authKey 和活跃令牌跨域请求', async () => {
-    const app = createHonoApp(config, createRedisStub());
+    const app = createHonoApp({
+      ...config,
+      corsOrigins: ['https://*.colanns.me'],
+    }, createRedisStub());
     const response = await app.request('/api/generate-free', {
       method: 'OPTIONS',
       headers: {
-        Origin: 'http://localhost:3000',
+        Origin: 'https://mahoshojo.colanns.me',
         'Access-Control-Request-Method': 'POST',
         'Access-Control-Request-Headers': [
           'authorization',
@@ -112,7 +130,7 @@ describe('Hono server app', () => {
     });
 
     expect(response.status).toBe(204);
-    expect(response.headers.get('access-control-allow-origin')).toBe('http://localhost:3000');
+    expect(response.headers.get('access-control-allow-origin')).toBe('https://mahoshojo.colanns.me');
     expect(response.headers.get('access-control-allow-credentials')).toBeNull();
     expect(response.headers.get('access-control-allow-headers')?.toLowerCase()).toContain('authorization');
     expect(response.headers.get('access-control-allow-headers')?.toLowerCase()).toContain(

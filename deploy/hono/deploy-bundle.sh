@@ -38,7 +38,7 @@ docker run --rm \
   --env-file "$runtime_env" \
   -e NODE_ENV=production \
   -e HONO_AUTH_MODE=bearer \
-  -e HONO_CORS_ORIGINS=https://homura.colanns.me \
+  -e HONO_CORS_ORIGINS='https://*.colanns.me' \
   -e REDIS_HOST=redis \
   -e REDIS_PORT=6379 \
   -e REDIS_REQUIRED=true \

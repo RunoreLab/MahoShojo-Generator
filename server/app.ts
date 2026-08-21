@@ -8,9 +8,38 @@ import { redisRateLimit } from '@/server/middleware/redis-rate-limit';
 import { requestMetadata, type HonoAppVariables } from '@/server/middleware/request-metadata';
 import type { RedisService } from '@/server/redis/runtime';
 
-const isAllowedOrigin = (origin: string, allowedOrigins: string[]): string => {
+const matchesWildcardOrigin = (origin: string, rule: string): boolean => {
+  const wildcardPrefix = /^(https?):\/\/\*\./i;
+  if (!wildcardPrefix.test(rule)) return false;
+
+  try {
+    const wildcardHostPrefix = 'cors-wildcard.';
+    const ruleUrl = new URL(rule.replace(wildcardPrefix, `$1://${wildcardHostPrefix}`));
+    const originUrl = new URL(origin);
+    const baseHostname = ruleUrl.hostname.slice(wildcardHostPrefix.length);
+
+    if (!baseHostname
+      || ruleUrl.username
+      || ruleUrl.password
+      || ruleUrl.pathname !== '/'
+      || ruleUrl.search
+      || ruleUrl.hash) {
+      return false;
+    }
+
+    return originUrl.protocol === ruleUrl.protocol
+      && originUrl.port === ruleUrl.port
+      && originUrl.hostname.endsWith(`.${baseHostname}`);
+  } catch {
+    return false;
+  }
+};
+
+export const isAllowedOrigin = (origin: string, allowedOrigins: string[]): string => {
   if (allowedOrigins.includes('*')) return origin;
-  return allowedOrigins.includes(origin) ? origin : '';
+  return allowedOrigins.some((rule) => rule === origin || matchesWildcardOrigin(origin, rule))
+    ? origin
+    : '';
 };
 
 export const createHonoApp = (config: HonoServerConfig, redis: RedisService) => {

@@ -44,6 +44,8 @@ jobs:
           pnpm run build:server
           cd dist/server
           sha256sum index.mjs > index.mjs.sha256
+          cp ../../deploy/hono/compose.yml compose.yml
+          cp ../../deploy/hono/deploy-bundle.sh deploy-bundle.sh
 
       - name: Upload bundle
         uses: actions/upload-artifact@v4
@@ -52,6 +54,8 @@ jobs:
           path: |
             dist/server/index.mjs
             dist/server/index.mjs.sha256
+            dist/server/compose.yml
+            dist/server/deploy-bundle.sh
           if-no-files-found: error
           retention-days: 7
 
@@ -80,7 +84,17 @@ jobs:
           release_id="$(awk '{print $1}' artifact/index.mjs.sha256)"
           ssh -i ~/.ssh/deploy_key "$VPS_USER@$VPS_HOST" "install -d -m 755 /opt/mahoshojo-hono/releases/$release_id"
           scp -i ~/.ssh/deploy_key artifact/index.mjs artifact/index.mjs.sha256 "$VPS_USER@$VPS_HOST:/opt/mahoshojo-hono/releases/$release_id/"
+          scp -i ~/.ssh/deploy_key artifact/compose.yml "$VPS_USER@$VPS_HOST:/opt/mahoshojo-hono/compose.yml.next"
+          scp -i ~/.ssh/deploy_key artifact/deploy-bundle.sh "$VPS_USER@$VPS_HOST:/opt/mahoshojo-hono/deploy-bundle.sh.next"
+          ssh -i ~/.ssh/deploy_key "$VPS_USER@$VPS_HOST" "chmod 755 /opt/mahoshojo-hono/deploy-bundle.sh.next && mv /opt/mahoshojo-hono/compose.yml.next /opt/mahoshojo-hono/compose.yml && mv /opt/mahoshojo-hono/deploy-bundle.sh.next /opt/mahoshojo-hono/deploy-bundle.sh"
           ssh -i ~/.ssh/deploy_key "$VPS_USER@$VPS_HOST" "/opt/mahoshojo-hono/deploy-bundle.sh $release_id"
 
       - name: Verify public endpoint
-        run: curl --fail --show-error --retry 6 --retry-delay 5 https://homura.colanns.me/health/ready
+        run: |
+          curl --fail --show-error --retry 6 --retry-delay 5 https://homura.colanns.me/health/ready
+          curl --fail --show-error --dump-header /tmp/hono-cors-headers --output /dev/null \
+            --request OPTIONS https://homura.colanns.me/api/generate-battle-story \
+            --header 'Origin: https://mahoshojo.colanns.me' \
+            --header 'Access-Control-Request-Method: POST' \
+            --header 'Access-Control-Request-Headers: authorization,content-type,x-mahoshojo-activity-token,x-mahoshojo-user-id'
+          grep -Fqi 'Access-Control-Allow-Origin: https://mahoshojo.colanns.me' /tmp/hono-cors-headers

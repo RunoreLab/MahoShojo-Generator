@@ -4,7 +4,7 @@ import { readHonoServerConfig } from '@/server/config';
 const stubValidBearerProductionEnv = (): void => {
   vi.stubEnv('NODE_ENV', 'production');
   vi.stubEnv('HONO_AUTH_MODE', 'bearer');
-  vi.stubEnv('HONO_CORS_ORIGINS', 'https://homura.colanns.me');
+  vi.stubEnv('HONO_CORS_ORIGINS', 'https://*.colanns.me');
   vi.stubEnv('REDIS_URL', 'redis://default:secret@redis:6379');
   vi.stubEnv('AI_API_KEY', 'test-ai-key');
   vi.stubEnv('SIGNATURE_SECRET_KEY', 'a'.repeat(32));
@@ -24,7 +24,7 @@ describe('Hono server config', () => {
     expect(readHonoServerConfig()).toMatchObject({
       nodeEnv: 'production',
       authMode: 'bearer',
-      corsOrigins: ['https://homura.colanns.me'],
+      corsOrigins: ['https://*.colanns.me'],
     });
   });
 

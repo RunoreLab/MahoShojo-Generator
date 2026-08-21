@@ -15,6 +15,11 @@ export const requestMetadata = (): MiddlewareHandler<{ Variables: HonoAppVariabl
 
     await next();
 
+    const skipsSuccessfulRequestLog = (
+      context.req.method === 'GET' || context.req.method === 'OPTIONS'
+    ) && context.res.status < 400;
+    if (skipsSuccessfulRequestLog) return;
+
     const durationMs = Math.round((performance.now() - startedAt) * 10) / 10;
     console.info('[hono][request]', {
       requestId,

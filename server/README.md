@@ -24,6 +24,9 @@ Hono 对全部 `/api/*` 使用 Redis 固定窗口限速：每个客户端 IP 每
 
 各生成 handler 原有的用户/IP 冷却、会话并发和突发额度限制仍会叠加执行，不会被 Hono 全局限速取代。
 
+`HONO_CORS_ORIGINS` 支持逗号分隔的精确来源，也支持形如 `https://*.colanns.me` 的子域通配符。
+通配符只匹配相同协议和端口下的子域（包括多级子域），不匹配裸域 `colanns.me`。
+
 ## 鉴权
 
 独立 Hono 服务推荐设置 `HONO_AUTH_MODE=bearer`。需要登录的 handler 使用现有统一认证链，客户端通过
