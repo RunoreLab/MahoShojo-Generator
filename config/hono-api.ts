@@ -1,4 +1,4 @@
 export const honoApiConfig = {
-  enabled: false,
+  enabled: true,
   origin: 'https://homura.colanns.me',
 };
