@@ -1,9 +1,11 @@
 type D1Config = {
-  databaseId: string;
-  apiToken: string;
-  accountId: string;
+  transport: 'gateway' | 'cloudflare-api';
   queryUrl: string;
   rawUrl: string;
+  apiToken?: string;
+  hmacSecret?: string;
+  accessClientId?: string;
+  accessClientSecret?: string;
 };
 
 const sleep = async (ms: number) => {
@@ -91,6 +93,19 @@ const fetchWithRetry = async (
 };
 
 const getD1Config = (): D1Config | null => {
+  const gatewayUrl = process.env.D1_GATEWAY_URL?.trim().replace(/\/+$/, '');
+  if (gatewayUrl) {
+    return {
+      transport: 'gateway',
+      queryUrl: `${gatewayUrl}/v1/query`,
+      rawUrl: `${gatewayUrl}/v1/raw`,
+      hmacSecret: process.env.D1_GATEWAY_HMAC_SECRET?.trim() || undefined,
+      apiToken: process.env.D1_GATEWAY_TOKEN?.trim() || undefined,
+      accessClientId: process.env.CF_ACCESS_CLIENT_ID?.trim() || undefined,
+      accessClientSecret: process.env.CF_ACCESS_CLIENT_SECRET?.trim() || undefined,
+    };
+  }
+
   const databaseId = process.env.D1_DATABASE_ID;
   const apiToken = process.env.CLOUDFLARE_API_TOKEN;
   const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
@@ -98,9 +113,8 @@ const getD1Config = (): D1Config | null => {
   if (!databaseId || !apiToken || !accountId) return null;
 
   return {
-    databaseId,
+    transport: 'cloudflare-api',
     apiToken,
-    accountId,
     queryUrl: `https://api.cloudflare.com/client/v4/accounts/${accountId}/d1/database/${databaseId}/query`,
     rawUrl: `https://api.cloudflare.com/client/v4/accounts/${accountId}/d1/database/${databaseId}/raw`,
   };
@@ -111,11 +125,62 @@ const assertD1Config = (): D1Config => {
   if (config) return config;
 
   const missing: string[] = [];
+  if (!process.env.D1_GATEWAY_URL) missing.push('D1_GATEWAY_URL');
   if (!process.env.CLOUDFLARE_API_TOKEN) missing.push('CLOUDFLARE_API_TOKEN');
   if (!process.env.CLOUDFLARE_ACCOUNT_ID) missing.push('CLOUDFLARE_ACCOUNT_ID');
   if (!process.env.D1_DATABASE_ID) missing.push('D1_DATABASE_ID');
 
-  throw new Error(`缺少 Cloudflare 配置信息：${missing.join(', ') || '未知'}`);
+  throw new Error(`缺少 Cloudflare 配置信息（也未配置 D1 Gateway）：${missing.join(', ') || '未知'}`);
+};
+
+const bytesToHex = (bytes: ArrayBuffer): string =>
+  Array.from(new Uint8Array(bytes), (value) => value.toString(16).padStart(2, '0')).join('');
+
+const createGatewaySignature = async (
+  secret: string,
+  timestamp: string,
+  nonce: string,
+  pathname: string,
+  bodyText: string,
+): Promise<string> => {
+  const encoder = new TextEncoder();
+  const key = await globalThis.crypto.subtle.importKey(
+    'raw',
+    encoder.encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  );
+  const signature = await globalThis.crypto.subtle.sign(
+    'HMAC',
+    key,
+    encoder.encode(`${timestamp}\n${nonce}\n${pathname}\n${bodyText}`),
+  );
+  return bytesToHex(signature);
+};
+
+const buildD1Headers = async (
+  config: D1Config,
+  targetUrl: string,
+  bodyText: string,
+): Promise<Record<string, string>> => {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+
+  if (config.apiToken) headers.Authorization = `Bearer ${config.apiToken}`;
+  if (config.accessClientId) headers['CF-Access-Client-Id'] = config.accessClientId;
+  if (config.accessClientSecret) headers['CF-Access-Client-Secret'] = config.accessClientSecret;
+
+  if (config.transport === 'gateway' && config.hmacSecret) {
+    const timestamp = String(Date.now());
+    const nonce = generateUUID();
+    const pathname = new URL(targetUrl).pathname;
+    const signature = await createGatewaySignature(config.hmacSecret, timestamp, nonce, pathname, bodyText);
+    headers['X-Mahoshojo-Timestamp'] = timestamp;
+    headers['X-Mahoshojo-Nonce'] = nonce;
+    headers['X-Mahoshojo-Signature'] = signature;
+  }
+
+  return headers;
 };
 
 const TABLE_NAME_RE = /^[A-Za-z0-9_]+$/;
@@ -179,16 +244,15 @@ type D1QueryEndpoint = 'query' | 'raw';
 async function query(body: Record<string, unknown>, endpoint: D1QueryEndpoint = 'query'): Promise<Response> {
   const config = assertD1Config();
   const targetUrl = endpoint === 'raw' ? config.rawUrl : config.queryUrl;
+  const bodyText = JSON.stringify(body);
+  const headers = await buildD1Headers(config, targetUrl, bodyText);
 
   return await fetchWithRetry(
     targetUrl,
     {
       method: "POST",
-      headers: {
-        "Authorization": `Bearer ${config.apiToken}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(body),
+      headers,
+      body: bodyText,
     },
     { attempts: 5, baseDelayMs: 500, maxDelayMs: 8000 }
   );

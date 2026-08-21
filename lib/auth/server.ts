@@ -3,6 +3,7 @@ import { getUserByAuthKey } from '@/lib/database/users';
 import { ACTIVITY_TOKEN_HEADER, ACTIVITY_USER_ID_HEADER } from '@/lib/auth/activity-token';
 import { hasBetterAuthSessionCookie } from '@/lib/auth/better-auth';
 import { buildSubrequestAuthHeaders } from '@/lib/subrequest-auth';
+import { isBearerOnlyHonoAuthMode } from '@/lib/auth/hono-auth-mode';
 
 export interface AuthenticatedUser {
   id: number;
@@ -204,6 +205,11 @@ const getLegacyBearerAuthUserWithDeps = async (
 };
 
 const getAuthUserWithDeps = async (req: Request, deps: AuthServerDeps): Promise<AuthUserContext | null> => {
+  if (isBearerOnlyHonoAuthMode()) {
+    const bearerUser = await getLegacyBearerAuthUserWithDeps(req, deps);
+    return bearerUser ? { user: bearerUser, source: 'legacy-bearer' } : null;
+  }
+
   const sessionUser = await getSessionAuthUser(req, deps);
   if (sessionUser) {
     return { user: sessionUser, source: 'better-auth-session' };

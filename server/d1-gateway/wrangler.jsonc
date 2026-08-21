@@ -1,0 +1,25 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "mahoshojo-d1-gateway",
+  "main": "index.ts",
+  "compatibility_date": "2025-04-01",
+  "workers_dev": false,
+  "routes": [
+    {
+      "pattern": "mahoshojo-d1-gateway.colanns.me",
+      "custom_domain": true
+    }
+  ],
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 0.1
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "mahoshojo",
+      "database_id": "8eb9b25c-5a00-4feb-b5cb-c5dd25cda1d3",
+      "migrations_dir": "../../drizzle"
+    }
+  ]
+}

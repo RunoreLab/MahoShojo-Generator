@@ -1,0 +1,17 @@
+.git
+.github
+.cache
+.home
+.xdg-data
+.next
+.open-next
+.wrangler
+dist
+node_modules
+coverage
+.env
+.env.*
+!env.example
+*.log
+tsconfig.tsbuildinfo
+tsconfig.vitest.tsbuildinfo

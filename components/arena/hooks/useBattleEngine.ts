@@ -26,6 +26,7 @@ import {
   StreamReadTimeoutError,
 } from '@/lib/stream/timeout';
 import { authStorage } from '@/lib/auth';
+import { generationApiFetch } from '@/lib/hono-api-client';
 import { useNarrativeHistoryStore } from '../stores/useNarrativeHistoryStore';
 import { resolveApiErrorMessage } from '@/lib/client/apiError';
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
@@ -767,7 +768,7 @@ export const useBattleEngine = () => {
               } else {
                 delete requestHeaders.Accept;
               }
-		          const response = await fetch(endpoint, {
+		          const response = await generationApiFetch(endpoint, {
 		            method: 'POST',
 		            headers: requestHeaders,
 		            body: JSON.stringify(requestBody),
@@ -1557,7 +1558,7 @@ export const useBattleEngine = () => {
         }
       }
 
-      const response = await fetch('/api/generate-battle-story', {
+      const response = await generationApiFetch('/api/generate-battle-story', {
         method: 'POST',
         headers: requestHeaders,
         body: JSON.stringify(requestBody),

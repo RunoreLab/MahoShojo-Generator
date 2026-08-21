@@ -22,6 +22,7 @@ import { buildReasoningSummary, normalizeReasoningSource } from '@/lib/ai/reason
 import { pickBotChoiceSnapshotId } from '@/lib/pvp/bot/choose';
 import { parsePvpRoomInternalState, stringifyPvpRoomInternalState } from '@/lib/pvp/bot/room';
 import { normalizeWinnerFromCandidates } from '@/lib/pvp/logic';
+import { resolveGenerationApiUrl } from '@/lib/hono-api-routing';
 import { getRequestOrigin } from '@/lib/pvp/origin';
 import { loadScenarioPresetPayload } from '@/lib/pvp/scenario-preset';
 import { getRoomIdFromRequestUrl, getRoundIdFromRequestUrl } from '@/lib/pvp/route';
@@ -421,7 +422,10 @@ async function resolveStreamHandler(req: Request): Promise<Response> {
     req.headers.get('x-real-ip')?.trim() ||
     '';
 
-  const upstreamRes = await fetch(new URL('/api/arena/generate-stream?format=sse', origin).toString(), {
+  const upstreamRes = await fetch(new URL(
+    resolveGenerationApiUrl('/api/arena/generate-stream?format=sse'),
+    origin,
+  ).toString(), {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

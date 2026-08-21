@@ -6,6 +6,7 @@ import type { AppRouterAdapter } from '@/lib/app-router-adapter';
 import type { AIReasoningEnvelope } from '@/types/ai-reasoning';
 import { persistArrestedBackup } from '@/lib/arrested-backup';
 import { authStorage } from '@/lib/auth';
+import { generationApiFetch } from '@/lib/hono-api-client';
 import { resolveApiErrorMessage } from '@/lib/client/apiError';
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
 import { getSensitiveWordRedirectTarget } from '@/lib/content-safety/client';
@@ -449,7 +450,7 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
       };
 
       try {
-        const response = await fetch('/api/magic-tea-party/generate-choices?format=sse', {
+        const response = await generationApiFetch('/api/magic-tea-party/generate-choices?format=sse', {
           method: 'POST',
           headers: await buildMagicTeaPartyRequestHeaders({ acceptSse: true }),
           signal: controller.signal,
@@ -728,7 +729,7 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
             fromMessageId && toMessageId
               ? { fromMessageId, toMessageId, count: normalizedHistory.length }
               : undefined;
-          const response = await fetch('/api/magic-tea-party/generate-updates', {
+          const response = await generationApiFetch('/api/magic-tea-party/generate-updates', {
             method: 'POST',
             headers: await buildMagicTeaPartyRequestHeaders(),
             body: JSON.stringify({
@@ -887,7 +888,7 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
       };
 
       try {
-        const response = await fetch('/api/magic-tea-party/generate-stream?format=sse', {
+        const response = await generationApiFetch('/api/magic-tea-party/generate-stream?format=sse', {
           method: 'POST',
           headers: await buildMagicTeaPartyRequestHeaders({ acceptSse: true }),
           signal: controller.signal,
@@ -1598,7 +1599,7 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
       );
     };
     try {
-      const response = await fetch('/api/magic-tea-party/generate-choices?format=sse', {
+      const response = await generationApiFetch('/api/magic-tea-party/generate-choices?format=sse', {
         method: 'POST',
         headers: await buildMagicTeaPartyRequestHeaders({ acceptSse: true }),
         signal: controller.signal,

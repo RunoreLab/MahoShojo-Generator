@@ -17,6 +17,7 @@ import type { CustomProviderPayload } from '@/lib/ai/custom-provider';
 import { pickBotChoiceSnapshotId } from '@/lib/pvp/bot/choose';
 import { parsePvpRoomInternalState, stringifyPvpRoomInternalState } from '@/lib/pvp/bot/room';
 import { normalizeWinnerFromCandidates } from '@/lib/pvp/logic';
+import { resolveGenerationApiUrl } from '@/lib/hono-api-routing';
 import { getRequestOrigin } from '@/lib/pvp/origin';
 import { loadScenarioPresetPayload } from '@/lib/pvp/scenario-preset';
 import { getRoomIdFromRequestUrl, getRoundIdFromRequestUrl } from '@/lib/pvp/route';
@@ -363,7 +364,7 @@ async function resolveHandler(req: Request): Promise<Response> {
   for (let attempt = 0; attempt < 2; attempt++) {
     attempts = attempt + 1;
     try {
-      const res = await fetch(new URL('/api/generate-battle-story', origin).toString(), {
+      const res = await fetch(new URL(resolveGenerationApiUrl('/api/generate-battle-story'), origin).toString(), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

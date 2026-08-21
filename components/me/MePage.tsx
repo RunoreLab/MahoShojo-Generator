@@ -17,7 +17,7 @@ import { PvpMatchesPanel } from '@/components/me/PvpMatchesPanel';
 import { ProfileHeader } from '@/components/me/ProfileHeader';
 import { ProfileCardModal } from '@/components/me/ProfileCardModal';
 import { ProfileSettingsPanel } from '@/components/me/ProfileSettingsPanel';
-import { authStorage } from '@/lib/auth';
+import { generationApiFetch } from '@/lib/hono-api-client';
 import { useAuth } from '@/lib/useAuth';
 
 type MeTab = 'reports' | 'pvp' | 'settings';
@@ -64,7 +64,7 @@ export function MePage() {
 
   const regenerateMutation = useMutation({
     mutationFn: async (generationId: string) => {
-      const res = await authStorage.fetch(`/api/me/battle-reports/${generationId}/regenerate`, {
+      const res = await generationApiFetch(`/api/me/battle-reports/${generationId}/regenerate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({}),

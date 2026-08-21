@@ -4,6 +4,7 @@ import { ensureAuthUserLink, getLinkedBusinessUserByAuthUserId } from '@/lib/aut
 import { getDrizzleDbFromRuntime } from '@/lib/db/drizzle';
 import { getBusinessUserByEmail, getBusinessUserByUsername } from '@/lib/db/repositories/business-users';
 import { getLegacyBearerAuthUser, type AuthUserContext, type AuthenticatedUser } from '@/lib/auth/server';
+import { isBearerOnlyHonoAuthMode } from '@/lib/auth/hono-auth-mode';
 
 type BetterAuthSession = {
   user?: {
@@ -202,6 +203,11 @@ export const requireAuthUserForApp = async (
 };
 
 export const getAuthUserForApp = async (req: Request): Promise<AuthUserContext | null> => {
+  if (isBearerOnlyHonoAuthMode()) {
+    const bearerUser = await getLegacyBearerAuthUser(req);
+    return bearerUser ? { user: bearerUser, source: 'legacy-bearer' } : null;
+  }
+
   const sessionUser = await getSessionAuthUser(req);
   if (sessionUser) {
     return { user: sessionUser, source: 'better-auth-session' };

@@ -1,0 +1,86 @@
+name: Deploy Hono
+
+on:
+  push:
+    branches:
+      - '**'
+  workflow_dispatch:
+
+concurrency:
+  group: hono-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  VPS_HOST: ${{ vars.VPS_HOST }}
+  VPS_USER: ${{ vars.VPS_USER }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify Hono authentication and runtime
+        run: pnpm exec vitest run tests/server tests/auth-server.test.ts tests/auth-server-app.test.ts
+
+      - name: Build single-file server
+        run: |
+          pnpm run build:server
+          cd dist/server
+          sha256sum index.mjs > index.mjs.sha256
+
+      - name: Upload bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: hono-server-${{ github.sha }}
+          path: |
+            dist/server/index.mjs
+            dist/server/index.mjs.sha256
+          if-no-files-found: error
+          retention-days: 7
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: hono-production
+    steps:
+      - name: Download bundle
+        uses: actions/download-artifact@v5
+        with:
+          name: hono-server-${{ github.sha }}
+          path: artifact
+
+      - name: Configure SSH
+        env:
+          VPS_SSH_PRIVATE_KEY: ${{ secrets.VPS_SSH_PRIVATE_KEY }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$VPS_SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          printf '%s %s\n' "$VPS_HOST" 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIARFAFVUCsUdVM8PtbbiOhkUD9zn5Q6MeK47hxEr/XuC' > ~/.ssh/known_hosts
+
+      - name: Upload release
+        run: |
+          release_id="$(awk '{print $1}' artifact/index.mjs.sha256)"
+          ssh -i ~/.ssh/deploy_key "$VPS_USER@$VPS_HOST" "install -d -m 755 /opt/mahoshojo-hono/releases/$release_id"
+          scp -i ~/.ssh/deploy_key artifact/index.mjs artifact/index.mjs.sha256 "$VPS_USER@$VPS_HOST:/opt/mahoshojo-hono/releases/$release_id/"
+          ssh -i ~/.ssh/deploy_key "$VPS_USER@$VPS_HOST" "/opt/mahoshojo-hono/deploy-bundle.sh $release_id"
+
+      - name: Verify public endpoint
+        run: curl --fail --show-error --retry 6 --retry-delay 5 https://homura.colanns.me/health/ready

@@ -1,0 +1,42 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.hono
+    restart: unless-stopped
+    ports:
+      - "${HONO_PORT:-8787}:8787"
+    environment:
+      NODE_ENV: production
+      HONO_HOST: 0.0.0.0
+      HONO_PORT: 8787
+      HONO_CORS_ORIGINS: ${HONO_CORS_ORIGINS:?请配置 HONO_CORS_ORIGINS}
+      HONO_AUTH_MODE: bearer
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_USERNAME: default
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?请配置 REDIS_PASSWORD}
+      REDIS_REQUIRED: "true"
+      D1_REQUIRED: "true"
+      D1_GATEWAY_URL: ${D1_GATEWAY_URL:?请配置 D1_GATEWAY_URL}
+      D1_GATEWAY_HMAC_SECRET: ${D1_GATEWAY_HMAC_SECRET:?请配置 D1_GATEWAY_HMAC_SECRET}
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  redis:
+    image: redis:8.2-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:?请配置 REDIS_PASSWORD}"]
+    volumes:
+      - hono-redis-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "REDISCLI_AUTH=$${REDIS_PASSWORD} redis-cli ping | grep -q PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?请配置 REDIS_PASSWORD}
+
+volumes:
+  hono-redis-data:

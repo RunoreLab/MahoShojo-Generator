@@ -1,0 +1,28 @@
+{
+  "routeIds": [
+    "arena/generate",
+    "arena/generate-stream",
+    "arena/session/generate-next",
+    "creator/generate",
+    "creator/generate-stream",
+    "generate-battle-story",
+    "generate-canshou",
+    "generate-canshou-stream",
+    "generate-free",
+    "generate-free-stream",
+    "generate-game-card",
+    "generate-magical-girl",
+    "generate-magical-girl-details",
+    "generate-magical-girl-details-stream",
+    "generate-scenario",
+    "generate-scenario-stream",
+    "generate-sublimation",
+    "generate-sublimation-stream",
+    "magic-tavern/generate-choices",
+    "magic-tavern/generate-stream",
+    "magic-tea-party/generate-choices",
+    "magic-tea-party/generate-stream",
+    "magic-tea-party/generate-updates",
+    "me/battle-reports/[generationId]/regenerate"
+  ]
+}

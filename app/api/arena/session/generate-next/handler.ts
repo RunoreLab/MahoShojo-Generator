@@ -15,6 +15,7 @@ import { acquireAiSessionSoftRateLimit } from '@/lib/ai-session/rate-limit';
 import { buildSubrequestAuthHeaders } from '@/lib/subrequest-auth';
 import { randomUUID } from '@/lib/crypto';
 import { getLogger } from '@/lib/logger';
+import { resolveGenerationApiUrl } from '@/lib/hono-api-routing';
 import { recordUserActivityFromRequest } from '@/lib/user-activity/record';
 import { getRequestOrigin } from '@/lib/request-url';
 
@@ -302,7 +303,10 @@ async function handler(req: NextRequest): Promise<Response> {
   recordUserActivityFromRequest(req);
 
   try {
-    const upstreamUrl = new URL('/api/arena/generate-stream?format=sse', getRequestOrigin(req));
+    const upstreamUrl = new URL(
+      resolveGenerationApiUrl('/api/arena/generate-stream?format=sse'),
+      getRequestOrigin(req),
+    );
     const upstreamHeaders: Record<string, string> = {
       'Content-Type': 'application/json',
       Accept: 'text/event-stream',

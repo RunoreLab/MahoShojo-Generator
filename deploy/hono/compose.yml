@@ -1,0 +1,42 @@
+services:
+  hono:
+    image: node:22-alpine
+    container_name: mahoshojo-hono
+    init: true
+    restart: unless-stopped
+    user: node
+    command: ["node", "/app/index.mjs"]
+    env_file:
+      - /opt/mahoshojo-hono/.env.hono
+    environment:
+      NODE_ENV: production
+      HONO_HOST: 0.0.0.0
+      HONO_PORT: 8787
+      HONO_AUTH_MODE: bearer
+      HONO_CORS_ORIGINS: https://homura.colanns.me
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_REQUIRED: "true"
+      D1_REQUIRED: "true"
+    ports:
+      - "127.0.0.1:8080:8787"
+    volumes:
+      - "${HONO_RELEASE_DIR:?HONO_RELEASE_DIR 未配置}/index.mjs:/app/index.mjs:ro"
+    networks:
+      - default
+      - mahoshojo-redis
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8787/health/ready"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+
+networks:
+  mahoshojo-redis:
+    external: true
+    name: mahoshojo-redis

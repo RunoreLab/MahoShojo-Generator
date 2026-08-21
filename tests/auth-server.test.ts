@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'vitest';
+import { afterEach, describe, expect, test, vi } from 'vitest';
 import { createAuthServer } from '@/lib/auth/server';
 
 const createJsonResponse = (payload: unknown, status = 200): Response =>
@@ -10,6 +10,10 @@ const createJsonResponse = (payload: unknown, status = 200): Response =>
   });
 
 describe('auth/server unified chain', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   test('session 链路应透传并解析 admin/exempt 字段', async () => {
     const fetchCalls: Array<{ url: string; init?: RequestInit }> = [];
     const authServer = createAuthServer({
@@ -173,5 +177,48 @@ describe('auth/server unified chain', () => {
     expect(context?.source).toBe('better-auth-session');
     expect(context?.user.id).toBe(88);
     expect(bearerLookupCount).toBe(0);
+  });
+
+  test('bearer 模式应忽略 Better Auth 会话并只校验 authkey', async () => {
+    vi.stubEnv('HONO_AUTH_MODE', 'bearer');
+    let sessionLookupCount = 0;
+    const authServer = createAuthServer({
+      hasBetterAuthSessionCookieImpl: () => true,
+      buildSubrequestAuthHeadersImpl: () => ({}),
+      fetchImpl: async () => {
+        sessionLookupCount += 1;
+        return createJsonResponse({ user: { id: 88, username: 'session-user' } });
+      },
+      getUserByAuthKeyImpl: async (authKey) => authKey === 'hono-authkey'
+        ? { id: 21, username: 'bearer-user' }
+        : null,
+    });
+
+    const context = await authServer.getAuthUser(new Request('https://example.com/api/protected', {
+      headers: {
+        cookie: '__Secure-better-auth.session_token=must-be-ignored',
+        authorization: 'Bearer hono-authkey',
+      },
+    }));
+
+    expect(context).toMatchObject({ source: 'legacy-bearer', user: { id: 21 } });
+    expect(sessionLookupCount).toBe(0);
+  });
+
+  test('bearer 模式下只有会话 Cookie 仍应返回 401', async () => {
+    vi.stubEnv('HONO_AUTH_MODE', 'bearer');
+    const authServer = createAuthServer({
+      hasBetterAuthSessionCookieImpl: () => true,
+      buildSubrequestAuthHeadersImpl: () => ({}),
+      fetchImpl: async () => createJsonResponse({ user: { id: 88, username: 'session-user' } }),
+      getUserByAuthKeyImpl: async () => null,
+    });
+
+    const result = await authServer.requireAuthUser(new Request('https://example.com/api/protected', {
+      headers: { cookie: '__Secure-better-auth.session_token=ignored' },
+    }));
+
+    expect('response' in result).toBe(true);
+    if ('response' in result) expect(result.response.status).toBe(401);
   });
 });

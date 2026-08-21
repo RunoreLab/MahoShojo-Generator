@@ -19,6 +19,7 @@ import { readJsonOrTextFromResponse, resolveApiErrorMessage } from '@/lib/client
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
 import { ThemeImage } from '@/components/shared/ThemeImage';
 import { authStorage } from '@/lib/auth';
+import { generationApiFetch } from '@/lib/hono-api-client';
 
 // 注意：QueueStatus 组件及其相关逻辑已被移除，因为它在Serverless环境下无法正常工作。
 
@@ -106,7 +107,7 @@ function checkNameLength(name: string): boolean {
 async function generateMagicalGirl(inputName: string, language: string): Promise<MagicalGirl> {
   try {
     const activityHeaders = await authStorage.getActivityHeaders();
-    const response = await fetch('/api/generate-magical-girl', {
+    const response = await generationApiFetch('/api/generate-magical-girl', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
