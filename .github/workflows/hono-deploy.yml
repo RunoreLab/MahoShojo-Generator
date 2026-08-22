@@ -37,7 +37,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Verify Hono authentication and runtime
-        run: pnpm exec vitest run tests/server tests/auth-server.test.ts tests/auth-server-app.test.ts
+        run: pnpm exec vitest run tests/server tests/auth-server.test.ts tests/auth-server-app.test.ts tests/hono-deploy-workflow.test.ts
 
       - name: Build single-file server
         run: |
@@ -61,6 +61,7 @@ jobs:
 
   deploy:
     needs: build
+    if: github.ref == 'refs/heads/feature/v0.2.0_Battle_Growth_MahoShojo'
     runs-on: ubuntu-latest
     environment: hono-production
     steps:
