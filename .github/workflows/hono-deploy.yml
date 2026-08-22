@@ -36,6 +36,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Verify workspace boundaries and packages
+        run: pnpm run workspace:verify
+
       - name: Verify Hono authentication and runtime
         run: pnpm exec vitest run tests/server tests/auth-server.test.ts tests/auth-server-app.test.ts tests/hono-deploy-workflow.test.ts
 

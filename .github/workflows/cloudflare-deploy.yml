@@ -50,6 +50,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Verify workspace boundaries and packages
+        run: pnpm run workspace:verify
+
       - name: Build Cloudflare bundle
         env:
           # NEXT_PUBLIC_* 变量在构建时被内联进客户端产物，必须在此步骤显式注入。

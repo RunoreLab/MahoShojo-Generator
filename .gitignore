@@ -2,6 +2,8 @@
 
 # dependencies
 /node_modules
+apps/*/node_modules/
+packages/*/node_modules/
 /.pnp
 .pnp.*
 .yarn/*
@@ -21,6 +23,16 @@
 # production
 /build
 /dist
+apps/*/dist/
+packages/*/dist/
+apps/*/coverage/
+apps/*/build/
+apps/*/out/
+apps/*/.open-next/
+packages/*/coverage/
+packages/*/build/
+packages/*/out/
+packages/*/.open-next/
 
 # misc
 .DS_Store
