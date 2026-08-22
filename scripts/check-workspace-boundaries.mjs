@@ -109,6 +109,26 @@ function isStringLiteral(node) {
   return node && node.type === 'Literal' && typeof node.value === 'string';
 }
 
+function memberPropertyName(node) {
+  if (!node) return null;
+  if (!node.computed && node.type === 'Identifier') return node.name;
+  return isStringLiteral(node) ? node.value : null;
+}
+
+function unwrapTransparentExpression(node) {
+  let current = node;
+  while (
+    current
+    && (current.type === 'TSAsExpression'
+      || current.type === 'TSTypeAssertion'
+      || current.type === 'TSNonNullExpression'
+      || current.type === 'ChainExpression')
+  ) {
+    current = current.expression;
+  }
+  return current;
+}
+
 function collectSourceDependencies(source, filePath) {
   const imports = [];
   const seenImportNodes = new Set();
@@ -124,6 +144,14 @@ function collectSourceDependencies(source, filePath) {
   const ast = parsed.ast;
   const domGlobals = [];
   const seenDomReferences = new Set();
+  const environmentReadCandidates = [];
+  const seenEnvironmentReads = new Set();
+  const unresolvedProcessReferences = new Set(
+    (parsed.scopeManager?.globalScope?.through ?? [])
+      .filter((reference) => reference.identifier?.name === 'process' && !reference.resolved)
+      .map((reference) => reference.identifier.range?.join(':'))
+      .filter(Boolean),
+  );
   for (const reference of parsed.scopeManager?.globalScope?.through ?? []) {
     const identifier = reference.identifier;
     if (!identifier || identifier.type !== 'Identifier' || !DOM_GLOBAL_IDENTIFIERS.has(identifier.name)) continue;
@@ -142,6 +170,48 @@ function collectSourceDependencies(source, filePath) {
     if (seenImportNodes.has(key)) return;
     seenImportNodes.add(key);
     imports.push({ module: value, line });
+  };
+
+  const isUnresolvedProcess = (node) => {
+    const current = unwrapTransparentExpression(node);
+    if (!current || current.type !== 'Identifier' || current.name !== 'process' || !current.range) return false;
+    return unresolvedProcessReferences.has(current.range.join(':'));
+  };
+
+  const isProcessEnvMember = (node) => {
+    const current = unwrapTransparentExpression(node);
+    return current?.type === 'MemberExpression'
+      && isUnresolvedProcess(current.object)
+      && memberPropertyName(unwrapTransparentExpression(current.property)) === 'env';
+  };
+
+  const isImportMetaEnvMember = (node) => {
+    const current = unwrapTransparentExpression(node);
+    const object = unwrapTransparentExpression(current?.object);
+    return current?.type === 'MemberExpression'
+      && object?.type === 'MetaProperty'
+      && object.meta?.name === 'import'
+      && object.property?.name === 'meta'
+      && memberPropertyName(unwrapTransparentExpression(current.property)) === 'env';
+  };
+
+  const isEnvironmentAccess = (node) => {
+    const current = unwrapTransparentExpression(node);
+    if (!current) return false;
+    if (isProcessEnvMember(current) || isImportMetaEnvMember(current)) return true;
+    return current.type === 'MemberExpression' && isEnvironmentAccess(current.object);
+  };
+
+  const addEnvironmentRead = (node) => {
+    if (!node?.range) return;
+    const key = node.range.join(':');
+    if (seenEnvironmentReads.has(key)) return;
+    seenEnvironmentReads.add(key);
+    environmentReadCandidates.push({
+      range: node.range,
+      module: source.slice(node.range[0], node.range[1]),
+      line: node.loc?.start?.line ?? 1,
+    });
   };
 
   const visit = (node) => {
@@ -172,6 +242,10 @@ function collectSourceDependencies(source, filePath) {
       add(node.arguments[0], node.arguments[0].value);
     }
 
+    if (isEnvironmentAccess(node)) {
+      addEnvironmentRead(node);
+    }
+
     for (const [key, value] of Object.entries(node)) {
       if (key === 'loc' || key === 'range' || key === 'tokens' || key === 'comments') continue;
       if (value && typeof value === 'object') visit(value);
@@ -179,7 +253,15 @@ function collectSourceDependencies(source, filePath) {
   };
 
   visit(ast);
-  return { imports, domGlobals };
+  const environmentReads = environmentReadCandidates
+    .filter((candidate, index, candidates) => !candidates.some((other, otherIndex) => {
+      if (index === otherIndex) return false;
+      return other.range[0] <= candidate.range[0]
+        && other.range[1] >= candidate.range[1]
+        && (other.range[0] < candidate.range[0] || other.range[1] > candidate.range[1]);
+    }))
+    .map(({ module, line }) => ({ module, line }));
+  return { imports, domGlobals, environmentReads };
 }
 
 function appTargetFromSpecifier(rootDirectory, moduleSpecifier, apps) {
@@ -256,6 +338,13 @@ function isClientPackage(unit) {
   return CLIENT_PACKAGE_NAMES.has(directoryName) || CLIENT_PACKAGE_NAMES.has(packageName);
 }
 
+function isContractsPackage(unit) {
+  if (unit.kind !== 'packages' || !unit.manifest) return false;
+  const directoryName = path.basename(unit.directory);
+  const packageName = unit.name.split('/').at(-1) ?? unit.name;
+  return directoryName === 'contracts' || packageName === 'contracts';
+}
+
 function addViolation(violations, rule, filePath, moduleSpecifier, message, line) {
   violations.push({
     rule,
@@ -310,8 +399,9 @@ export function checkWorkspaceBoundaries(rootDirectory = process.cwd()) {
     for (const sourceFile of unit.sourceFiles) {
       let imports;
       let domGlobals;
+      let environmentReads;
       try {
-        ({ imports, domGlobals } = collectSourceDependencies(readFileSync(sourceFile, 'utf8'), sourceFile));
+        ({ imports, domGlobals, environmentReads } = collectSourceDependencies(readFileSync(sourceFile, 'utf8'), sourceFile));
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error);
         addViolation(violations, 'MONO-005-PARSE', sourceFile, '<parse>', `cannot parse source: ${reason}`);
@@ -326,6 +416,19 @@ export function checkWorkspaceBoundaries(rootDirectory = process.cwd()) {
             sourceFile,
             domGlobal,
             'domain package must not reference browser DOM globals',
+            line,
+          );
+        }
+      }
+
+      if (isContractsPackage(unit)) {
+        for (const { module: environmentRead, line } of environmentReads) {
+          addViolation(
+            violations,
+            'MONO-005-CONTRACTS-ENV',
+            sourceFile,
+            environmentRead,
+            'contracts package must not read runtime environment variables',
             line,
           );
         }

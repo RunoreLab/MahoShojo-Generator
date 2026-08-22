@@ -290,6 +290,124 @@ describe('workspace dependency boundaries', () => {
     expect(violations.some((violation) => violation.rule === 'MONO-004-DEEP-IMPORT')).toBe(false);
   });
 
+  it('rejects runtime environment reads in contracts package source', async () => {
+    const rootDir = await createWorkspaceFixture({
+      'packages/contracts/package.json': manifest('@mahoshojo/contracts'),
+      'packages/contracts/src/index.ts': [
+        'const direct = process.env.FOO;',
+        "const computed = process.env['BAR'];",
+        'const vite = import.meta.env.BAZ;',
+        'void direct; void computed; void vite;',
+      ].join('\n'),
+    });
+
+    const violations = checkWorkspaceBoundaries(rootDir).filter(
+      (violation) => violation.rule === 'MONO-005-CONTRACTS-ENV',
+    );
+
+    expect(violations).toHaveLength(3);
+    expect(violations.map((violation) => violation.module)).toEqual([
+      'process.env.FOO',
+      "process.env['BAR']",
+      'import.meta.env.BAZ',
+    ]);
+    expect(violations.every((violation) => violation.message.includes('contracts'))).toBe(true);
+  });
+
+  it('limits contracts environment checks to manifest-backed contracts packages and unresolved process globals', async () => {
+    const rootDir = await createWorkspaceFixture({
+      'packages/schema/package.json': manifest('@mahoshojo/contracts'),
+      'packages/schema/src/index.ts': 'const namedPackageValue = process.env.NAMED_PACKAGE;\nvoid namedPackageValue;\n',
+      'packages/schema/src/imported-process.ts': 'export default { env: { IMPORTED: "imported" } };\n',
+      'packages/schema/src/shadow.ts': [
+        "import process from './imported-process';",
+        'function parameterShadow(process: { env: Record<string, string> }) { return process.env.LOCAL; }',
+        'function localShadow() { const process = { env: { LOCAL: "local" } }; return process.env.LOCAL; }',
+        'const importedValue = process.env.IMPORTED;',
+        'void parameterShadow; void localShadow; void importedValue;',
+      ].join('\n'),
+      'packages/other/package.json': manifest('@mahoshojo/other'),
+      'packages/other/src/index.ts': 'const otherValue = process.env.OTHER;\nvoid otherValue;\n',
+      'packages/contracts-no-manifest/src/index.ts': 'const untrackedValue = process.env.UNTRACKED;\nvoid untrackedValue;\n',
+    });
+
+    const violations = checkWorkspaceBoundaries(rootDir).filter(
+      (violation) => violation.rule === 'MONO-005-CONTRACTS-ENV',
+    );
+
+    expect(violations).toHaveLength(1);
+    expect(violations[0].module).toBe('process.env.NAMED_PACKAGE');
+    expect(violations[0].file).toContain('packages/schema/src/index.ts');
+  });
+
+  it('reports root environment members through aliases, destructuring, spreads, and TypeScript wrappers without duplicates', async () => {
+    const rootDir = await createWorkspaceFixture({
+      'packages/contracts/package.json': manifest('@mahoshojo/contracts'),
+      'packages/contracts/src/index.ts': [
+        'const alias = process.env;',
+        'const { FOO } = process.env;',
+        'const spread = { ...process.env };',
+        'const nested = process.env.FOO;',
+        'const asserted = (process.env as Record<string, string>).FOO;',
+        'const assertedType = (<Record<string, string>>process.env).FOO;',
+        'const nonNull = process.env!.FOO;',
+        'const chained = process.env?.FOO;',
+        'const metaAlias = import.meta.env;',
+        'const metaSpread = { ...import.meta.env };',
+        'const metaNested = import.meta.env.FOO;',
+        'const metaAsserted = (import.meta.env as Record<string, string>).FOO;',
+        'const metaNonNull = import.meta.env!.FOO;',
+        'const metaChained = import.meta.env?.FOO;',
+        'void alias; void FOO; void spread; void nested; void asserted; void assertedType;',
+        'void nonNull; void chained; void metaAlias; void metaSpread; void metaNested;',
+        'void metaAsserted; void metaNonNull; void metaChained;',
+      ].join('\n'),
+    });
+
+    const violations = checkWorkspaceBoundaries(rootDir).filter(
+      (violation) => violation.rule === 'MONO-005-CONTRACTS-ENV',
+    );
+
+    expect(violations.map((violation) => violation.module)).toEqual([
+      'process.env',
+      'process.env',
+      'process.env',
+      'process.env.FOO',
+      '(process.env as Record<string, string>).FOO',
+      '(<Record<string, string>>process.env).FOO',
+      'process.env!.FOO',
+      'process.env?.FOO',
+      'import.meta.env',
+      'import.meta.env',
+      'import.meta.env.FOO',
+      '(import.meta.env as Record<string, string>).FOO',
+      'import.meta.env!.FOO',
+      'import.meta.env?.FOO',
+    ]);
+    expect(violations.filter((violation) => violation.module === 'process.env.FOO')).toHaveLength(1);
+    expect(violations.filter((violation) => violation.module === 'import.meta.env.FOO')).toHaveLength(1);
+  });
+
+  it('unwraps type assertions around import.meta before checking its environment member', async () => {
+    const rootDir = await createWorkspaceFixture({
+      'packages/contracts/package.json': manifest('@mahoshojo/contracts'),
+      'packages/contracts/src/index.ts': [
+        'const assertedMeta = (import.meta as ImportMeta).env.FOO;',
+        'const nestedAssertedMeta = ((import.meta as any).env).BAR;',
+        'void assertedMeta; void nestedAssertedMeta;',
+      ].join('\n'),
+    });
+
+    const violations = checkWorkspaceBoundaries(rootDir).filter(
+      (violation) => violation.rule === 'MONO-005-CONTRACTS-ENV',
+    );
+
+    expect(violations.map((violation) => violation.module)).toEqual([
+      '(import.meta as ImportMeta).env.FOO',
+      '((import.meta as any).env).BAR',
+    ]);
+  });
+
   it('requires test, lint, and build scripts for manifest-backed workspace projects', async () => {
     const rootDir = await createWorkspaceFixture({
       'apps/valid/package.json': manifest('@mahoshojo/valid-app'),
