@@ -110,7 +110,7 @@ describe('Hono server app', () => {
     expect(response.headers.get('x-ratelimit-remaining')).toBe('599');
   });
 
-  it('允许前端携带 authKey 和活跃令牌跨域请求', async () => {
+  it('允许前端携带鉴权、活跃令牌和 AI 元数据请求头跨域请求', async () => {
     const app = createHonoApp({
       ...config,
       corsOrigins: ['https://*.colanns.me'],
@@ -124,6 +124,7 @@ describe('Hono server app', () => {
           'authorization',
           'content-type',
           'x-mahoshojo-activity-token',
+          'x-mahoshojo-ai-meta',
           'x-mahoshojo-user-id',
         ].join(', '),
       },
@@ -135,6 +136,9 @@ describe('Hono server app', () => {
     expect(response.headers.get('access-control-allow-headers')?.toLowerCase()).toContain('authorization');
     expect(response.headers.get('access-control-allow-headers')?.toLowerCase()).toContain(
       'x-mahoshojo-activity-token',
+    );
+    expect(response.headers.get('access-control-allow-headers')?.toLowerCase()).toContain(
+      'x-mahoshojo-ai-meta',
     );
   });
 

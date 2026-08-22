@@ -56,6 +56,7 @@ export const createHonoApp = (config: HonoServerConfig, redis: RedisService) => 
       'X-Request-Id',
       'X-Mahoshojo-Activity-Token',
       'X-Mahoshojo-User-Id',
+      'X-Mahoshojo-AI-Meta',
     ],
     exposeHeaders: ['X-Request-Id', 'X-RateLimit-Limit', 'X-RateLimit-Remaining', 'Retry-After'],
     allowMethods: ['GET', 'HEAD', 'OPTIONS', 'POST', 'PUT', 'PATCH', 'DELETE'],
