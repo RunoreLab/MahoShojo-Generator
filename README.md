@@ -21,8 +21,6 @@
 📖 查看完整的版本更新历史，请参阅 [CHANGELOG.md](./CHANGELOG.md)
 
 > 当前版本：`v0.8.2`
->  
-> 最新版本重点：接入万途生态互通与竞技场素材注入。档案馆可导入/导出万途通用角色卡，竞技场可把角色、情景、历史、问卷或万途 Card 作为参考素材注入战报；顶部导航新增万途驿站、万途竞技场、废土车卡与废土旅途入口。
 
 ## ✨ 核心功能
 
@@ -77,7 +75,7 @@
 * **包管理器**: pnpm 11.3.0
 * **运行时**: Node.js 22+ (开发、构建与脚本), Cloudflare Pages/Workers (生产，Edge Runtime)
 * **数据库**: Cloudflare D1（主库）+ Cloudflare R2
-* **AI**: Vercel AI SDK, 支持 OpenAI/Google Gemini 等多种模型 (推荐 `gemini-2.5-flash` 或 `gemini-2.5-flash-lite`)
+* **AI**: Vercel AI SDK, 支持 OpenAI/Google Gemini 等多种模型
 * **样式**: Tailwind CSS 4, shadcn/ui (部分)
 * **安全**: Cloudflare Turnstile (验证码)
 * **开发工具**: Turbopack (开发模式)
@@ -158,10 +156,44 @@ Cloudflare Pages 部署环境变量需显式设置 `PNPM_VERSION=11.3.0`，避�
 - [x] 角色成长与竞技场系统
 - [x] 云端存储与用户系统
 - [x] 排位系统与排行榜
-- [x] PVP 对决模式
+- [ ] 多人模式
 - [ ] 系统通用化与模块化
-- [ ] 更多角色模板扩展
 
+### 项目结构与模块划分
+- 本项目基于 Next.js + `@opennextjs/cloudflare` + Cloudflare D1 数据库 + Tailwind 4 + Vercel AI SDK 编写。
+- `app/` 是当前统一路由体系，页面入口使用 `app/**/page.tsx`，API 入口使用 `app/api/**/route.ts`。
+- 可复用的卡片与模态组件存放于 `components/`，复杂业务逻辑优先放在所属路由目录，避免组件过度臃肿。
+- AI 相关能力封装在 `lib/`（`ai.ts`、`config.ts`、`signature.ts` 等）；共享类型位于 `types/arena.d.ts`；静态资源在 `public/`；全局样式集中于 `styles/`；工具脚本放在 `scripts/`；测试与夹具位于 `tests/`。
+
+### 编码风格与命名约定
+- TypeScript 采用 `strict` 配置；React 19 组件文件使用 PascalCase 命名并导出具名函数，除非框架限制不得使用匿名默认导出。
+- 优先使用 `camelCase` 工具函数与具描述性的状态枚举；如必须使用 `any`，需注明原因。
+- 通过 `@/*` 别名导入模块，避免深层相对路径；布局扩展优先利用 Tailwind 4 工具类与共享渐变样式。
+
+### 全局命名分层规范
+- 全局采用“分层统一 + 边界映射”策略：每一层内部只允许一种命名风格，跨层必须显式转换，禁止隐式透传。
+- 数据库、SQL、迁移脚本默认使用 `snake_case`。
+- TypeScript 业务层、服务层、组件内部变量、函数、props、state、API DTO 字段默认使用 `camelCase`。
+- React 组件名、类型、接口、类、枚举名使用 `PascalCase`。
+- Hook 名必须以 `use` 开头，并使用 `camelCase`。
+- 内容层协议、历史兼容 JSON、外部导入导出格式，按各自 schema 的 canonical 命名保存；跨层转换必须放在 mapper / adapter 边界，不得在业务层零散兼容。
+- 常量仅指模块级、语义上稳定且复用的常量；这类常量使用 `UPPER_SNAKE_CASE`。普通 `const` 局部变量仍使用 `camelCase`。
+- 普通文件与目录默认使用 `kebab-case`；React 组件文件使用 `PascalCase`；Next.js 保留文件名遵循框架约定
+- 同一对象中禁止长期并存语义等价的双字段。
+- 对内容层字段允许“兼容读取”，但写回必须遵循当前协议；`created_at/updated_at` 等历史字段视为稳定兼容字段。
+- 新增或修改跨层字段时，必须同步更新：schema、mapper、类型定义、API 契约与测试。
+
+### API 的编写
+- 该项目部署在 Cloudflare 上，通过 `@opennextjs/cloudflare` 运行于 Cloudflare Workers/Pages 链路；不要引入不兼容的库或特性。
+- 新 API 默认使用 App Router Route Handler：路径形如 `app/api/<domain>/<resource>/route.ts`，导出 `GET`、`POST` 等方法，并直接返回 Web `Response`。
+- 业务处理函数优先保持 `(req: Request) => Promise<Response>` 的 Web 标准形态，Route Handler 文件只负责 HTTP method 导出、动态参数接入和轻量组装。
+- 动态路由迁移时，优先通过 Route Handler 的 `context.params` 显式传参；避免在业务层零散解析 pathname，除非是为了兼容既有公共函数。
+
+### 测试规范
+- 测试脚本逻辑基于 Vitest 执行；测试 API 从 `vitest` 导入，禁止新增 `bun:test` 依赖。
+- 在 `tests/` 下新建 `*.test.ts` 测试文件（仅针对遗留代码使用 `.test.js`），共用 `tests/test.json` 等夹具。
+- 随机逻辑需可复现，参考 `tests/getWeightedRandomFromSeed.test.js`：为辅助函数设定种子，并验证概率分布而非采样结果。
+- 每次提交前执行 `pnpm test`、`pnpm lint` 和 `pnpm build`，在 PR 描述中记录重要日志差异；任何结构性变更需同步更新夹具与类型声明。
 
 ## 📊 统计
 
