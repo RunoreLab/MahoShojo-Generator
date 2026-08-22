@@ -44,10 +44,12 @@
 
 - `ArenaRoomSharedConfig`
 - `HostLocalCombatantStub`
-- `DataCardRef`
+- versioned `DataCardRef(versionToken)`
 - `ArenaProposal`
 - `ArenaProposalChange`
+- typed `expectedBase` / precondition
 - `RoomRevision`
+- room protocol version / cursor types
 - proposal dependency / atomic group
 
 ### 3.2 Shared Config Projection
@@ -88,17 +90,23 @@
 - host-local stub
 - 敏感字段不可进入 DTO
 - dependsOn/atomic group
-- stale revision conflict
+- stale revision conflict based on typed expectedBase
+- online ref versionToken drift
+- old/new protocol fixture
 
 ## 4. Phase B：Room Worker / Durable Object 基础
 
 ### 4.1 独立 Worker
 
-建议新增独立部署目录，例如：
+独立 Room Worker 已由 ADR 冻结；Monorepo 迁移前可用：
 
 - `workers/arena-room/`
 
-或仓库现有 Worker 组织方式下的等价目录。
+或仓库现有等价目录；迁移后目标为：
+
+- `apps/arena-room/`
+
+这不新增第二套 Arena 页面。
 
 职责：
 
@@ -106,19 +114,26 @@
 - short-lived room ticket verification
 - ArenaRoom Durable Object
 - room-local SQLite storage
-- alarms
-- broadcast
+- unified alarm scheduler
+- broadcast / reconnect
+- GenerationBridge ingress
 
-主 Next Worker 通过 Service Binding / internal RPC 与 room worker 通讯。
+调用路径：
+
+- Cloudflare Worker caller -> Service Binding / typed RPC；
+- `apps/api` / Hono -> generation-scoped authenticated GenerationBridge；
+- Hono 不使用 Service Binding 假设。
 
 ### 4.2 Durable Object 数据
 
-最小表：
+最小表/持久状态：
 
-- room
-- members
-- shared_config
-- proposals
+- room / terminal state / roomEpoch / control seq
+- user-level members
+- shared_config / revision
+- proposals + typed precondition
+- generation idempotency/current attempt
+- logical deadlines
 
 不要建立：
 
@@ -144,22 +159,38 @@
 
 `destroyRoom(reason)`
 
+顺序：
+
+1. durable state -> closing/terminal，禁止新 join/publish；
+2. 广播 closing；
+3. best-effort 幂等删除 D1 directory；
+4. `storage.deleteAll()`；
+5. D1 删除失败交给低频 reconciliation。
+
 要求：
 
-- 幂等
-- 广播 closing
-- 删除 D1 directory
-- `storage.deleteAll()`
-- 日志只记录 room hash / reason / metrics
+- 幂等；
+- 空 DO storage 在 join/reconnect 上解释为 not-found，不能自动创建 room；
+- 只有显式 create-room 流程能初始化新 room；
+- 日志只记录 room hash / reason / metrics。
 
 ### 4.5 Alarm
 
-实现：
+实现逻辑 deadline：
 
 - host-offline grace
 - abandoned room idle TTL
 
-alarm handler 必须再次读取当前状态确认条件，避免旧 alarm 错删活跃房间。
+每个 DO 只有一个物理 alarm：
+
+1. deadlines 持久化；
+2. `setAlarm(min(active deadlines))`；
+3. handler 再读当前状态；
+4. 处理所有 due 条件；
+5. destructive cleanup 再验证；
+6. 重新安排下一 deadline。
+
+覆盖 alarm retry / duplicate delivery，避免旧 alarm 错删活跃房间。
 
 ## 5. Phase C：Arena 页面房间 UI
 
@@ -197,8 +228,10 @@ alarm handler 必须再次读取当前状态确认条件，避免旧 alarm 错�
 实现：
 
 - reconnect backoff
-- last seq
-- snapshot recovery
+- `roomEpoch + controlSeq`
+- generation `chunkSeq`
+- snapshot / generation resync recovery
+- multi-tab connection presence
 - host offline indicator
 
 不实现 polling fallback loop。
@@ -237,10 +270,13 @@ UI 应在多人 member 模式中禁用或明确隐藏“本地导入用于 Propo
 - reject
 - dependency/atomic group enforcement
 
-接受后：
+接受后，在单房间原子状态转换中：
 
-- server/DO validate
-- apply semantic change
+- server/DO validate schema/capability
+- validate typed expectedBase / versionToken
+- enforce dependency/atomic group
+- apply selected semantic changes
+- update proposal state
 - revision++
 - broadcast `room.config.updated`
 
@@ -261,33 +297,47 @@ UI 应在多人 member 模式中禁用或明确隐藏“本地导入用于 Propo
 
 开始前：
 
-1. 检查 host 仍在房间；
+1. 检查 host 仍是有效 membership；
 2. 发布未同步 host working config；
-3. freeze room revision；
-4. 创建 participant snapshot；
-5. 设置 `collaborativeInfluence`；
-6. 调用现有 Arena generation。
+3. 生成稳定 `generationRequestId`；
+4. DO 原子 reserve generation，freeze room revision / shared config / ref versions；
+5. 创建 participant snapshot / snapshot digest；
+6. 仅根据实际进入 snapshot 的 accepted third-party changes 设置 `collaborativeInfluence`；
+7. 调用现有 Arena generation，并把同一 `generationRequestId` 作为 idempotency key。
 
-### 7.2 不改 AI 核心为 N 份
+### 7.2 不改 AI 核心为 N 份，也不让浏览器做中继
 
 现有生成链路仍是唯一 AI 调用。
 
-新增 room bridge：
+Host browser：
+
+- 只发起 generation intent / 所需 generation payload；
+- 不承担 `AI stream -> room` 唯一转发责任。
+
+Generation service -> Room 新增版本化 GenerationBridge：
 
 - generation started
 - batched story delta
 - generation metadata
-- completed/failed
+- completed/failed/cancelled
+- attempt / batchSeq / idempotency
 
-### 7.3 流批处理
+Hono 场景首选 generation-scoped authenticated WebSocket publisher；若 PoC 后选择 batched HTTPS，仍复用同一 bridge contract。
+
+### 7.3 流批处理与恢复
 
 将 AI stream delta 累积后批量发给 room worker。
 
 初始目标：
 
 - 50–100ms 或达到字节阈值发送；
-- 实测后调整；
-- 不把“每 token 一个 DO call”作为实现。
+- 单 batch 有 bytes/rate 上限；
+- `generationId + chunkSeq` 单调；
+- 重复 batch 幂等丢弃；
+- 不把“每 token 一个 DO call”作为实现；
+- 不逐 chunk 持久化正文；
+- reconnect gap 无法恢复时允许 `generation.resync`；
+- completed 后从 authoritative generation storage / R2 恢复完整 report。
 
 ### 7.4 member view
 
@@ -361,19 +411,28 @@ generation 完成后一次 batch insert participant snapshot。
 - 不做 `COUNT(*)` 全表实时在线统计；
 - 可短期 edge cache 房间列表。
 
-### 9.4 DO
+### 9.4 DO / Protocol
 
 记录：
 
 - room creation count
 - active room count（统计层，不每次 presence 写 D1）
-- messages in/out
-- proposal count
-- cleanup reason
-- generation fanout count
-- reconnect count
+- messages in/out / rejected oversized/rate-limited
+- proposal count / stale conflict count
+- cleanup reason / alarm retry
+- generation fanout / bridge retry / duplicate batch count
+- reconnect / snapshot fallback / resync count
+- protocol version / incompatible peer count
 
-不记录用户正文、API Key、完整本地卡。
+不记录用户正文、ticket、API Key、完整本地卡。
+
+同时测试：
+
+- old/new peer version skew；
+- target Worker 先部署、caller 后切换的 expand/contract；
+- slow consumer/backpressure；
+- D1 orphan directory reconciliation；
+- browser Origin deny 与 native ticket path。
 
 ### 9.5 成本验收
 
@@ -387,6 +446,12 @@ generation 完成后一次 batch insert participant snapshot。
 6. member refresh/reconnect
 7. host close
 8. abandoned room alarm cleanup
+9. host refresh / socket disconnect during generation
+10. duplicate generation start / bridge batch retry
+11. multi-tab same-user join/leave
+12. old/new protocol version skew
+13. oversized/flood/slow-consumer
+14. orphan D1 room directory row
 
 检查：
 
@@ -453,15 +518,22 @@ v1 完成时应满足：
 - member 本地修改不产生网络请求。
 - member 只能提案线上引用与允许字段。
 - host 可部分接受 Proposal。
-- stale Proposal 有冲突保护。
-- host-local full payload 不泄漏。
+- stale Proposal 通过 typed expectedBase 有冲突保护，不依赖无限 revision history。
+- online ref 具备 versionToken，引用漂移显式失败。
+- host-local full payload 不进入 Room/broadcast。
 - API credential 不进入 room。
+- generationRequestId 重试不产生重复 AI。
 - host 一次生成所有成员看到同一战报。
+- 房主浏览器不是流式中继；host refresh 不破坏已接受 generation。
+- GenerationBridge 有鉴权、batch sequence 与幂等。
 - 成员不触发额外 AI 调用。
+- same user 多标签页只有一个 membership。
 - socket disconnect 不销毁房间。
-- host explicit leave 销毁房间。
-- abandoned room 会被 TTL 清理。
+- host explicit leave/close 销毁房间。
+- abandoned room 会被单 alarm scheduler + TTL 清理。
 - 无固定频率 room polling。
-- idle WebSocket 能 hibernate。
-- D1 不存 presence / story chunk。
+- idle WebSocket 能 hibernate，wake 后 cursor/snapshot 可恢复。
+- D1 不存 presence / story chunk，且只作为 derived directory。
+- old/new protocol version 有兼容夹具和 rollout 顺序。
+- oversized/flood/slow-consumer 有服务器保护。
 - room cleanup 后 DO storage 被完全清理。

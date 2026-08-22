@@ -2,12 +2,14 @@
 
 ## 1. 文档信息
 
-- 状态：Draft / 设计基线
+- 状态：`accepted` / v1 设计基线
 - 编写时间：2026-08-21
+- 最近修订：2026-08-22
 - 适用项目：MahoShojo Generator
 - 目标功能：竞技场多人观看、配置同步与提案协作
-- 目标平台：Cloudflare Workers + Durable Objects + D1 + R2
-- 核心原则：尽量复用现有竞技场页面、组件、生成链路与非持久角色更新语义
+- 目标平台：Cloudflare Workers + Durable Objects + D1 + R2 + existing Arena generation service
+- 核心原则：产品/UI 继续复用现有竞技场；实时房间协调独立部署；不复制既有战报生成核心语义
+- 部署 ADR：`docs/decisions/2026-08-22_184800_ArenaRoom部署边界与实时权威决策.md`
 
 ## 2. 背景与目标
 
@@ -111,17 +113,25 @@ type HostLocalCombatantStub = {
 
 v1 不建立“通过房间临时授权房主读取成员私有线上卡”的权限模型。
 
-线上对象 Proposal 应保存稳定引用，而非复制完整 JSON：
+线上对象 Proposal 应保存稳定、版本化引用，而非复制完整 JSON：
 
 ```ts
 type DataCardRef = {
   id: string;
-  updatedAt?: string;
   kind: 'character' | 'scenario' | 'material';
+  versionToken: string;
 };
 ```
 
-接受和生成前服务端/房主端应重新验证引用仍可读取且类型有效。
+`versionToken` 是服务器可验证的不透明版本标识，可由 canonical `updatedAt`、revision、content digest 或未来版本系统生成；网络发布后的 ref 不得使用可选版本。
+
+接受 Proposal、房主 publish 和 generation reservation 前必须重新验证：
+
+- 引用仍可读取且类型有效；
+- `versionToken` 仍匹配；
+- 权限未变化。
+
+版本已变化时返回显式 stale/reference-changed；不得静默解析到最新版并保持 room revision 不变。
 
 ### 5.3 稳定对象键
 
@@ -195,19 +205,29 @@ Proposal 必须携带：
 baseRevision
 ```
 
+但 `baseRevision` 只用于定位/诊断，不能单独重建 BASE。每个 typed change 还必须携带与其 target 对应的 typed `expectedBase` / precondition，使服务端无需保存无限 revision 历史即可验证 Proposal 创建时的语义值。
+
 ### 7.2 三方冲突判断
 
 房主审阅旧 Proposal 时，以：
 
-- BASE：提案创建时的 baseline；
-- CURRENT：当前房间权威配置；
+- BASE：change 自带的 typed `expectedBase`；
+- CURRENT：当前房间权威配置中同一 semantic target 的规范化值；
 - PROPOSED：提案目标值；
 
 进行轻量三方比较。
 
-若 CURRENT 在同一语义字段上已偏离 BASE，则标记冲突，由房主决定是否接受。
+若 CURRENT 在同一语义字段上已偏离 BASE，则标记冲突，由房主决定是否接受。冲突 UI 可以展示 human-readable baseline，但服务端正确性不能依赖客户端冲突判断。
 
-不使用 CRDT。
+接受所选 changes 时，必须在单房间原子状态转换中完成：
+
+1. schema/capability/precondition；
+2. dependsOn / atomic group；
+3. apply selected changes；
+4. Proposal 状态；
+5. `revision++`。
+
+不使用 CRDT，也不为了 stale conflict 保存无限完整 revision history。
 
 ## 8. Proposal 模型
 
@@ -345,9 +365,28 @@ WebSocket 断线可能来自：
 
 满足“房主长期离线”或“房间长期无成员连接且无有意义活动”时，由 Durable Object alarm 触发幂等销毁。
 
+每个 DO 同时只有一个物理 alarm。`hostOfflineDeadline`、`roomIdleDeadline` 及未来 recovery deadline 必须保存在 durable state，由统一 scheduler 始终 `setAlarm(min(active deadlines))`。`alarm()` 重新读取状态、处理所有到期项、再次验证 destructive 条件并重新安排下一个 deadline；不得由 constructor 无条件覆盖已有 alarm。
+
+### 10.6 Membership 与 Connection
+
+membership 以用户为单位，presence 以连接为单位：
+
+```text
+member(userId)
+  -> connectionId A
+  -> connectionId B
+```
+
+- 多标签页/多设备不能重复计算成员；
+- socket close 只改变 connection presence；
+- 普通成员“退出房间”是显式 user-level command；
+- 房主“显式退出/关闭房间”是 room-level close command；
+- 页面 unload / 单连接关闭不得隐式触发 leave/close；
+- kick 失效 user-level membership 并关闭该用户现有连接；旧 ticket 重连时仍需由 DO membership 拒绝。
+
 ## 11. 生成模型
 
-### 11.1 只生成一次
+### 11.1 只生成一次，浏览器不做中继
 
 多人模式不得为每个观看者调用 AI。
 
@@ -355,42 +394,68 @@ WebSocket 断线可能来自：
 
 ```text
 Host Arena UI
-  -> existing arena generate/generate-stream
-  -> one generation
+  -> start-generation intent
+  -> room reservation / frozen snapshot
+  -> existing Arena generation service
+  -> one authoritative generation
   -> existing generation persistence / R2
-  -> room broadcast
-  -> all members render same result
+  -> authenticated GenerationBridge
+  -> ArenaRoom broadcast
+  -> all host/member viewers render same safe projection
 ```
 
-### 11.2 生成快照
+房主浏览器可以发起 generation request，但不得成为 `AI stream -> browser -> room` 的唯一中继。generation service 接受多人任务后，AI 执行与 room publisher 不依赖房主 Arena WebSocket；刷新/切网/关闭一个标签页不得自动制造第二次 generation。
+
+### 11.2 生成快照与幂等
 
 开始生成时必须冻结不可变快照：
 
 ```ts
 type ArenaMultiplayerGenerationSnapshot = {
   roomId: string;
+  generationRequestId: string;
   configRevision: number;
+  snapshotDigest: string;
   collaborativeInfluence: boolean;
   participantUserIds: number[];
+  // online refs 均带 versionToken
   // 其余为既有 generation 输入快照/引用
 };
 ```
 
+`generationRequestId` 在一次用户开始意图内稳定。Room 至少维护：
+
+```text
+idle
+  -> starting(requestId, revision, snapshotDigest)
+  -> running(generationId)
+  -> completed | failed | cancelled
+```
+
+浏览器重试、API 重试和 bridge 重试使用同一 idempotency key，不得产生第二次权威 generation。旧 attempt 的 completed/failed 不得覆盖当前 attempt。
+
 生成中后续 Proposal 或房主修改只影响下一次生成。
 
-### 11.3 房主本地 payload
+`collaborativeInfluence=true` 只在至少一个非房主 Proposal 的 accepted change **确实进入本次 frozen snapshot** 时设置；历史上接受过但本次已被房主覆盖/移除的 change 不得误标。
+
+### 11.3 房主本地 payload 与 Generation Plane
 
 Room Shared Config 只提供 stub。
 
-实际生成前由房主浏览器将：
+实际生成前由房主客户端将：
 
-- Shared Config；
-- 房主本地完整卡；
-- 房主 provider/config credential；
+- frozen Shared Config / refs；
+- generation 所需的房主本地完整卡；
+- 既有 Hosted generation 若支持时所需的 provider/config credential；
 
-组合成既有 Arena generation payload。
+组合成既有 Arena generation payload，并**直接发送给 generation service**。
 
-多人服务不得持久化 API Key。
+边界：
+
+- 完整 host-local payload、Provider/API credential 不进入 Room Worker/DO/D1/snapshot/member response；
+- generation service 只按既有 generation 安全契约接收、脱敏和处理；
+- Room 只接收结果的安全投影与 generation metadata；
+- 多人服务不得持久化 API Key。
 
 ## 12. 战报与角色更新
 
@@ -435,7 +500,7 @@ Room Shared Config 只提供 stub。
 
 - 仅观看、无第三方 Proposal 被接受：
   `collaborativeInfluence = false`
-- 至少一项非房主 Proposal 被接受并进入生成：
+- 至少一项非房主 Proposal 的 accepted change 实际进入本次 frozen generation snapshot：
   `collaborativeInfluence = true`
 
 建议：
@@ -492,17 +557,19 @@ Room Shared Config 只提供 stub。
 
 ### 14.3 Sidecar Worker
 
-推荐独立 Worker：
+独立 Worker 是 v1 已接受部署边界：
 
 ```text
-mahoshojo-next
-  Next/Auth/Arena Generation/D1/R2/AI
-        |
-        | Service Binding / internal RPC
-        v
-mahoshojo-room
-  WebSocket gateway
-  ArenaRoom Durable Object
+existing Arena UI
+  -> apps/web
+  -> Service Binding / typed RPC
+  -> apps/arena-room
+       -> ArenaRoom DO
+
+apps/api / Hono generation
+  -> generation-scoped authenticated GenerationBridge
+  -> apps/arena-room
+       -> target ArenaRoom DO
 ```
 
 理由：
@@ -511,22 +578,41 @@ mahoshojo-room
 - room worker 可使用更现代 compatibility date；
 - 可设置更紧 CPU / rate limit；
 - 将实时协调与高 CPU AI generation 隔离；
-- 后续可复用于 PVP 实时传输改造。
+- Hono 不是 Worker，不能把 Service Binding 当作其调用机制；
+- 后续可复用于 PVP 的 transport/lifecycle 基础设施，但不复用 Arena 业务语义。
+
+GenerationBridge 要求：
+
+- 绑定 room + generation attempt + expiry；
+- batch 带单调 `batchSeq` 并可幂等去重；
+- 不按 token publish；
+- bridge credential 不进入普通客户端；
+- 首选 generation-scoped authenticated WebSocket publisher；若压测证明 batched HTTPS 更优，可替换 transport 但不能改变契约。
 
 ## 15. WebSocket 协议
 
-所有消息使用版本化 envelope：
+所有消息使用版本化 envelope。控制事件与 story stream 使用不同 cursor，避免为了流式正文高频持久化全局 seq：
 
 ```ts
 type RoomEventEnvelope<T> = {
-  v: 1;
+  v: 1; // protocol version
   type: string;
   roomId: string;
-  seq: number;
+  roomEpoch: string;
   ts: string;
+  controlSeq?: number;
+  generationId?: string;
+  chunkSeq?: number;
   payload: T;
 };
 ```
+
+规则：
+
+- `roomEpoch + controlSeq` 只用于 durable control state / bounded replay；
+- `story.delta` 使用 `generationId + chunkSeq`；
+- control seq 与对应 durable state write 一起提交；
+- Hibernation 后不得从 0 重新开始一个无法区分的新 seq。
 
 核心事件：
 
@@ -547,14 +633,16 @@ type RoomEventEnvelope<T> = {
 
 ### 15.1 Reconnect
 
-客户端记录最后 `seq`。
+客户端记录最近 durable control cursor；生成中另记录当前 `generationId/chunkSeq`。
 
 重连后：
 
-- 若 DO 仍有足够事件窗口，可 replay；
-- 否则发送 `snapshot_required` / 直接返回最新 `room.snapshot`。
+- `roomEpoch` 相同且 DO 仍有足够 control event window：可 replay；
+- epoch 不同或 replay window 不足：发送 `snapshot_required` / 直接返回最新 `room.snapshot`；
+- story delta window 不足：进入 `generation.resync`，不为此逐 chunk 持久化；
+- generation 完成后从 authoritative generation record / R2 获取完整最终结果。
 
-不要为完整实时历史建立无限事件日志。
+Hibernation 会重建 DO instance，因此 constructor 必须从 durable state / WebSocket attachments 恢复必要信息。不要为完整实时历史建立无限事件日志。
 
 ## 16. 降耗与限流
 
@@ -616,7 +704,15 @@ AI 流式输出转发给房间时：
 
 ## 17. D1 使用原则
 
-D1 仅保存低频、跨对象查询所需事实。
+D1 仅保存低频、跨对象查询所需事实。它是 **derived directory/index**，不是单房间 lifecycle 的真相源；目标 ArenaRoom DO 才是最终权威。
+
+因此：
+
+- public listing 可以依赖 D1；
+- join 必须最终由目标 DO 验证 room/membership；
+- DO 已 terminal/closed 时，D1 残留行不得使房间复活；
+- directory create/update/delete 必须幂等、可重试；
+- 允许低频 reconciliation 清理 orphan row，不用高频全表轮询维持一致。
 
 建议最小 directory：
 
@@ -660,21 +756,27 @@ battle_report_generation_participants (
 
 Room local persistence 只保存跨 hibernation 必须恢复的状态：
 
-- room metadata
-- member identities/roles（非实时在线标志）
+- room metadata / terminal state
+- member identities/roles（presence 以 WebSocket connection/attachment 恢复）
 - shared config
 - current revision
-- unresolved Proposal
-- 必要的 generation mirror state
-- cleanup alarm timestamp
+- unresolved Proposal + typed precondition
+- `roomEpoch` / durable control cursor
+- generation request idempotency / current attempt / mirror state
+- host-offline / room-idle 等逻辑 deadlines
 
-销毁必须使用完整清理流程。
+销毁必须使用完整清理流程：
 
-对于 compatibility date >= 2026-02-24 的 SQLite-backed Durable Object：
+1. 将 durable room state 标记为 closing/terminal，阻止新的 join/publish；
+2. 广播 `room.closing`；
+3. best-effort 幂等删除 D1 directory；
+4. `ctx.storage.deleteAll()` 彻底清空 room storage。
 
-`ctx.storage.deleteAll()`
+对于 compatibility date >= 2026-02-24 的 SQLite-backed Durable Object，`deleteAll()` 同时删除 active alarm。
 
-用于彻底清空 storage；销毁流程必须幂等。
+销毁后的“缺少 room metadata”必须解释为 **room 不存在**。join/reconnect 路径不得在发现空 storage 时自动初始化房间；只有经过授权的 create-room 流程才能创建新房间，因此 D1 orphan row 不能把已销毁 room 复活。
+
+销毁流程必须幂等；D1 删除失败由低频 reconciliation 修复。
 
 ## 19. 房间发现
 
@@ -690,16 +792,20 @@ v1 可支持：
 ## 20. 安全要求
 
 - 仅注册用户。
-- WebSocket upgrade 前完成身份验证。
-- 验证 `Origin`。
-- room ticket 应短期有效、绑定 `roomId/userId/role/exp`。
-- 不在每条 WS message 上查询 D1 验证用户。
+- 生产连接使用 HTTPS/WSS；WebSocket upgrade 前完成身份验证。
+- 浏览器 handshake 严格验证显式 `Origin` allowlist；不使用 wildcard/substring 匹配。
+- Desktop/Mobile 等非浏览器客户端不能把 `Origin` 当信任根，统一依赖短期签名 room ticket、membership 与 message-level authorization。
+- room ticket 应短期有效、绑定 `roomId/userId/capability-or-role-hint/exp/protocolVersion/jti-or-equivalent`。
+- ticket 中的 role hint 不能覆盖 DO 当前 membership；kick 后旧 ticket 重连仍必须失败。
+- 对外 `roomId` 为服务端生成的高熵 opaque id；不直接暴露 DO internal id。
+- 不在每条 WS message 上查询 D1 验证用户；权限由 DO room state 校验。
 - 在创建/解析 DO id 前尽可能完成鉴权和 room id 基本验证，避免对象 spray。
-- 所有 Proposal 需要服务端 schema validation。
+- 所有 WebSocket message / Proposal 需要服务端 schema validation、capability check、message byte limit 和 rate limit。
 - Guidance 长度、Proposal change 数、Proposal 总字节数必须有限制。
+- slow consumer / outbound backlog 必须有界；可丢弃可恢复的临时 story delta，不得无限缓存。
 - participant guidance 按不可信用户内容处理，不得提升为 system authority。
-- 本地 host-only 内容不得出现在日志、room snapshot 或普通成员响应中。
-- API credential 不得进入 DO/D1/R2/日志。
+- 本地 host-only 内容不得出现在 Room 日志、room snapshot 或普通成员响应中。
+- API credential 不得进入 DO/D1/R2/Room 日志；GenerationBridge credential 不得进入普通客户端。
 
 ## 21. UI/UX
 
@@ -763,27 +869,35 @@ v1 可支持：
 - pending proposals / member：建议 5–10；
 - proposal changes：建议 20–50；
 - proposal payload：严格字节上限；
+- WebSocket 普通 control message：必须有字节上限（可从 64 KiB 级保护值开始，再按实测调低/拆包）；
+- story publisher batch：独立字节/频率上限；
+- per-user/per-connection message rate 与 outbound backlog：必须有界；
 - guidance：沿用现有角色引导 100 字语义或统一重新冻结；
 - room title / metadata：严格长度上限。
 
-不要把上限分散硬编码到 UI 与 API，应共享 schema/constant。
+不要把上限分散硬编码到 UI 与 API，应共享 schema/constant；安全上限由服务端强制，客户端只做 UX 预检。
 
 ## 23. 关键不变量
 
 1. 只有房主能改变 Room Shared Config。
 2. 普通成员只能通过 Proposal 影响共享配置。
 3. 普通成员不能上传或提交本地 payload。
-4. 房主本地 payload 不离开房主生成链路。
-5. API Key/credential 永不进入共享配置。
-6. 一次房间生成只调用一次 AI。
+4. 完整 host-local payload 不进入 Room plane；权威生成确有需要时只直送 generation service。
+5. API Key/credential 永不进入共享配置/Room storage/Room broadcast。
+6. 一次 generation intent 只有一个稳定 `generationRequestId`，权威 AI 只执行一次。
 7. 生成快照创建后不可被后续 Proposal 修改。
-8. socket disconnect 不等于 membership leave。
-9. host explicit leave 关闭房间。
+8. browser/socket disconnect 不等于 membership leave，也不是 AI stream 中继失败条件。
+9. host explicit leave/close 关闭房间；单连接关闭不得模拟该命令。
 10. 房间销毁清理临时 Proposal/revision/runtime storage。
-11. 战报与角色更新沿用现有竞技场非持久语义。
-12. D1 不承担实时 presence 或高频 room state。
+11. 战报与角色更新沿用现有竞技场非持久语义，final result 以既有 generation storage 为权威。
+12. D1 不承担实时 presence 或高频 room state，且不是单房间 lifecycle 真相源。
 13. WebSocket 健康时不得退化为固定频率轮询。
-14. accepted third-party Proposal 必须在 generation provenance 中可识别。
+14. accepted third-party change 只有实际进入 frozen snapshot 时才影响 `collaborativeInfluence`/provenance。
+15. stale Proposal 正确性不依赖保存无限历史，change 自带 typed BASE precondition。
+16. online DataCard ref 在 Room 中版本化，不静默漂移。
+17. Hibernation reconnect 不依赖纯内存全局 seq。
+18. 多个逻辑 deadline 共享一个物理 DO alarm scheduler。
+19. `apps/web`、`apps/arena-room`、`apps/api` 的独立部署必须遵循版本化 wire contract。
 
 ## 24. 测试与验收
 
@@ -799,24 +913,32 @@ v1 可支持：
 - 自动 diff 只勾选真正修改项。
 - 部分接受正确。
 - dependsOn / atomicGroup 正确。
-- stale baseline 能检测同字段冲突。
+- change 缺少/伪造 expectedBase 时失败。
+- stale baseline 能用 typed precondition 检测同字段冲突。
 - 无冲突旧 Proposal 可安全接受。
+- online ref versionToken 变化时显式 stale/reference-changed。
 
 ### Lifecycle
 
 - refresh / socket reconnect 不删除房间。
+- 同一 user 多标签页只算一个 membership，多 connection presence 可恢复。
 - member leave 正确。
-- host leave 关闭房间。
+- host explicit leave/close 关闭房间；单 tab/socket close 不关闭。
+- kick 后旧 ticket 重连失败。
 - last member 清理 room。
-- alarm 可回收 abandoned room。
-- cleanup 可重复执行。
+- 一个 alarm scheduler 可同时正确处理 host-offline 与 room-idle deadline。
+- alarm retry / cleanup 可重复执行。
+- D1 orphan directory row 不会复活 closed DO。
 
 ### Generation
 
 - 所有成员只对应一个 generationId。
-- 成员不会触发重复 AI 生成。
+- 同一 generationRequestId 多次提交仍只有一次 AI。
 - generation snapshot 不受生成中的 config change 影响。
-- host-local payload 不广播。
+- host refresh / room socket reconnect 不成为生成中继故障。
+- GenerationBridge 重复 batch 可去重，旧 attempt terminal event 不覆盖当前 attempt。
+- host-local payload 不进入 Room/broadcast。
+- story delta gap 可降级 resync，final report 仍可从权威存储恢复。
 - 战报与更新角色结果可由成员查看。
 
 ### Cost
@@ -837,11 +959,24 @@ v1 可支持：
 
 外部设计依据：
 
-- Cloudflare Durable Objects：以 chat room / game session 作为 coordination atom。
-- Cloudflare Durable Objects Hibernation WebSocket：空闲时允许对象休眠，避免保持连接导致持续 duration。
-- Cloudflare WebSocket best practices：高频消息应批量发送，减少 context switch。
-- Cloudflare Durable Object Storage：需要彻底销毁时使用 `deleteAll()`。
-- Cloudflare Durable Object Alarms：用于 room-local TTL 清理。
+- Cloudflare Durable Objects Rules：按 chat room / game session 这类 coordination atom 建一房间一对象。
+  https://developers.cloudflare.com/durable-objects/best-practices/rules-of-durable-objects/
+- Cloudflare Hibernation WebSocket：idle 时允许对象休眠；hibernation 后内存会重建，应通过 storage/attachment 恢复。
+  https://developers.cloudflare.com/durable-objects/best-practices/websockets/
+- Cloudflare WebSocket batching：高频逻辑消息应按时间/数量/字节批量，减少 runtime context switch。
+  https://developers.cloudflare.com/durable-objects/best-practices/websockets/
+- Cloudflare Service Bindings：Worker-to-Worker 优先 RPC，独立部署时遵循被调用方先兼容扩展、调用方再切换。
+  https://developers.cloudflare.com/workers/runtime-apis/bindings/service-bindings/
+- Cloudflare Durable Object Alarms：每个 DO 同时一个 alarm，多个逻辑事件应由 durable scheduler 管理；执行为 at-least-once。
+  https://developers.cloudflare.com/durable-objects/api/alarms/
+- Cloudflare SQLite-backed DO storage：`deleteAll()` 原子清空 SQLite-backed storage；compatibility date >= 2026-02-24 时同时删除 alarm。
+  https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/
+- Cloudflare gradual deployments：独立 Worker 会产生 version skew，wire contract 必须考虑 old/new peer。
+  https://developers.cloudflare.com/workers/versions-and-deployments/gradual-deployments/
+- RFC 6455：浏览器 Origin 模型、非浏览器 Origin 不可作为信任根、WebSocket close semantics。
+  https://www.rfc-editor.org/rfc/rfc6455
+- OWASP WebSocket Security：Origin allowlist、message authorization、size/rate limits、replay 与 backpressure。
+  https://cheatsheetseries.owasp.org/cheatsheets/WebSocket_Security_Cheat_Sheet.html
 - Cloudflare D1：按 rows read/write 计量，索引可减少扫描行数，应避免高频轮询与大范围扫描。
 
 ## 26. 后续可选演进
