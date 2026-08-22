@@ -73,7 +73,7 @@
 
 - `diffArenaSharedConfig(base, working)`
 - `validateProposalChanges()`
-- `detectProposalConflicts(base, current, changes)`
+- `detectProposalConflicts(current, changes)`；BASE 由每个 change 自带的 typed `expectedBase` 提供，不再传入独立 base snapshot
 
 先完全在浏览器/单元测试运行，不接后端。
 

@@ -12,3 +12,4 @@
 
 - `@mahoshojo/config`：仅导出非秘密的 workspace/layout 常量与类型；
 - `@mahoshojo/contracts`：导出版本化协议 DTO、Zod schema、错误码和 wire 安全限制，不包含业务执行、存储、鉴权或部署 runtime。
+- `@mahoshojo/multiplayer-core`：承载 Arena Room Shared Config 的白名单投影、不可变 working copy、typed Proposal diff/selection/conflict/apply 纯逻辑；只依赖 `@mahoshojo/contracts`，不依赖应用、框架、数据库、网络或任何 Node/DOM/Cloudflare runtime。`buildArenaRoomSharedConfig` 的公开输入边界是 `ArenaRoomNormalizedSource`，只负责 normalized source 的白名单投影；`applyArenaProposal` 只接受 `(state, proposalInput, selectedChangeIds?)`；真实 `BattleStoreState -> normalized source` Web adapter 尚未在本批实现，stable host-local key/versionToken 映射需另批接入，不能由此包猜测。
