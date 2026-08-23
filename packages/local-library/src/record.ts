@@ -32,15 +32,33 @@ export const LocalCardExecutionProvenanceSchema = z.enum([
 ]);
 export type LocalCardExecutionProvenance = z.infer<typeof LocalCardExecutionProvenanceSchema>;
 
-export const LocalCardProvenanceSchema = z
-  .object({
-    kind: LocalCardProvenanceKindSchema,
-    signature: z.string().min(1).max(16 * 1024).optional(),
-    signatureVersion: z.number().int().positive().optional(),
-    signatureKeyId: OptionalNonBlankStringSchema(256).optional(),
-    execution: LocalCardExecutionProvenanceSchema.optional(),
-  })
-  .strict();
+const LocalCardSignatureEvidenceShape = {
+  signature: z.string().min(1).max(16 * 1024),
+  signatureVersion: z.number().int().positive().optional(),
+  signatureKeyId: OptionalNonBlankStringSchema(256).optional(),
+  execution: LocalCardExecutionProvenanceSchema.optional(),
+};
+
+export const LocalCardProvenanceSchema = z.discriminatedUnion('kind', [
+  z
+    .object({
+      kind: z.literal('official-signed'),
+      ...LocalCardSignatureEvidenceShape,
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('signature-invalid'),
+      ...LocalCardSignatureEvidenceShape,
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('unsigned'),
+      execution: LocalCardExecutionProvenanceSchema.optional(),
+    })
+    .strict(),
+]);
 export type LocalCardProvenance = z.infer<typeof LocalCardProvenanceSchema>;
 
 export const LocalCardCloudRefSchema = z

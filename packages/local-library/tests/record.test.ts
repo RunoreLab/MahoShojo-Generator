@@ -1,4 +1,7 @@
-import { LocalCardRecordV1Schema } from '@mahoshojo/local-library/record';
+import {
+  LocalCardProvenanceSchema,
+  LocalCardRecordV1Schema,
+} from '@mahoshojo/local-library/record';
 
 import { createLocalCardRecord } from './fixtures';
 
@@ -68,5 +71,37 @@ describe('LocalCardRecordV1', () => {
       updatedAt: '2026-08-23T14:00:00.000Z',
       deletedAt: '2026-08-23T13:00:00.000Z',
     })).success).toBe(false);
+  });
+});
+
+describe('LocalCardProvenance', () => {
+  it.each([
+    { kind: 'official-signed', execution: 'downloaded' },
+    { kind: 'signature-invalid', execution: 'edited' },
+  ])('rejects signed provenance without signature: $kind', (provenance) => {
+    expect(LocalCardProvenanceSchema.safeParse(provenance).success).toBe(false);
+  });
+
+  it.each([
+    ['signature', { kind: 'unsigned', signature: 'signed-payload' }],
+    ['signatureVersion', { kind: 'unsigned', signatureVersion: 1 }],
+    ['signatureKeyId', { kind: 'unsigned', signatureKeyId: 'signing-key-2026' }],
+  ])('rejects %s on unsigned provenance', (_evidenceField, provenance) => {
+    expect(LocalCardProvenanceSchema.safeParse(provenance).success).toBe(false);
+  });
+
+  it.each([
+    {
+      kind: 'official-signed',
+      signature: 'legacy-signed-payload',
+      execution: 'downloaded',
+    },
+    {
+      kind: 'signature-invalid',
+      signature: 'legacy-invalid-signature',
+      execution: 'edited',
+    },
+  ])('accepts legacy signature evidence without version or key ID: $kind', (provenance) => {
+    expect(LocalCardProvenanceSchema.safeParse(provenance).success).toBe(true);
   });
 });
