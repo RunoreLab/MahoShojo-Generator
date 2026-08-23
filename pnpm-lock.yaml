@@ -26,6 +26,9 @@ importers:
       '@hookform/resolvers':
         specifier: ^5.2.2
         version: 5.4.0(react-hook-form@7.68.0(react@19.2.3))
+      '@mahoshojo/ai-core':
+        specifier: workspace:*
+        version: link:packages/ai-core
       '@mahoshojo/contracts':
         specifier: workspace:*
         version: link:packages/contracts
@@ -222,6 +225,65 @@ importers:
       wrangler:
         specifier: ^4.60.0
         version: 4.60.0
+
+  packages/ai-core:
+    dependencies:
+      '@mahoshojo/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      jsonrepair:
+        specifier: ^3.13.1
+        version: 3.14.0
+      zod:
+        specifier: ^4.1.13
+        version: 4.3.6
+    devDependencies:
+      '@types/node':
+        specifier: ^20
+        version: 20.19.27
+      '@typescript-eslint/parser':
+        specifier: ^8.50.0
+        version: 8.50.0(eslint@9.39.2(jiti@2.6.1))(typescript@5.9.3)
+      esbuild:
+        specifier: ^0.27.2
+        version: 0.27.2
+      eslint:
+        specifier: ^9
+        version: 9.39.2(jiti@2.6.1)
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.7
+        version: 4.1.7(@edge-runtime/vm@3.2.0)(@opentelemetry/api@1.9.0)(@types/node@20.19.27)(msw@2.12.4(@types/node@20.19.27)(typescript@5.9.3))(vite@8.0.14(@types/node@20.19.27)(esbuild@0.27.2)(jiti@2.6.1)(terser@5.16.9)(tsx@4.22.4)(yaml@2.9.0))
+
+  packages/ai-direct:
+    dependencies:
+      '@mahoshojo/ai-core':
+        specifier: workspace:*
+        version: link:../ai-core
+      '@mahoshojo/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+    devDependencies:
+      '@types/node':
+        specifier: ^20
+        version: 20.19.27
+      '@typescript-eslint/parser':
+        specifier: ^8.50.0
+        version: 8.50.0(eslint@9.39.2(jiti@2.6.1))(typescript@5.9.3)
+      esbuild:
+        specifier: ^0.27.2
+        version: 0.27.2
+      eslint:
+        specifier: ^9
+        version: 9.39.2(jiti@2.6.1)
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.7
+        version: 4.1.7(@edge-runtime/vm@3.2.0)(@opentelemetry/api@1.9.0)(@types/node@20.19.27)(msw@2.12.4(@types/node@20.19.27)(typescript@5.9.3))(vite@8.0.14(@types/node@20.19.27)(esbuild@0.27.2)(jiti@2.6.1)(terser@5.16.9)(tsx@4.22.4)(yaml@2.9.0))
 
   packages/config:
     devDependencies:

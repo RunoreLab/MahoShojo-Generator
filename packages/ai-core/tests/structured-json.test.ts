@@ -3,7 +3,7 @@ import { z } from 'zod/v3';
 import {
   buildStructuredJsonInstructionFromZodSchema,
   parseStructuredJsonWithSchema,
-} from '@/lib/ai/utils/structured-json';
+} from '../src/structured-json';
 
 describe('structured-json', () => {
   it('parses direct JSON', () => {

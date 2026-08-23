@@ -1,0 +1,41 @@
+{
+  "name": "@mahoshojo/ai-core",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./structured-json": {
+      "types": "./src/structured-json.ts",
+      "import": "./src/structured-json.ts",
+      "default": "./src/structured-json.ts"
+    },
+    "./stream-events": {
+      "types": "./src/stream-events.ts",
+      "import": "./src/stream-events.ts",
+      "default": "./src/stream-events.ts"
+    }
+  },
+  "scripts": {
+    "test": "vitest run --config vitest.config.ts",
+    "lint": "eslint src tests --config eslint.config.mjs",
+    "build": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@mahoshojo/contracts": "workspace:*",
+    "jsonrepair": "^3.13.1",
+    "zod": "^4.1.13"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "@typescript-eslint/parser": "^8.50.0",
+    "esbuild": "^0.27.2",
+    "eslint": "^9",
+    "typescript": "^5",
+    "vitest": "^4.1.7"
+  }
+}
