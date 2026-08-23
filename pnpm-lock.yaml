@@ -26,6 +26,9 @@ importers:
       '@hookform/resolvers':
         specifier: ^5.2.2
         version: 5.4.0(react-hook-form@7.68.0(react@19.2.3))
+      '@mahoshojo/contracts':
+        specifier: workspace:*
+        version: link:packages/contracts
       '@mahoshojo/domain':
         specifier: workspace:*
         version: link:packages/domain

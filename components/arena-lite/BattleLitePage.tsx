@@ -8,6 +8,7 @@ import Footer from '@/components/Footer';
 import { ErrorMessage } from '@/components/ErrorMessage';
 import { CollapsibleSection } from '@/components/shared/CollapsibleSection';
 import { useAuth } from '@/lib/useAuth';
+import { ONLINE_DATA_CARD_TYPES } from '@mahoshojo/contracts/data-cards';
 
 import { BattleActions } from '@/components/arena/components/BattleActions';
 import { BattleModeSwitcher } from '@/components/arena/components/BattleModeSwitcher';
@@ -350,7 +351,7 @@ export function BattleLitePage() {
             : (dataModalType === 'material' ? (card, nextSelected) => void handleToggleMaterialDataCard(card, nextSelected) : undefined)
         }
         selectedType={dataModalType === 'character' ? 'character' : (dataModalType === 'material' ? 'all' : 'scenario')}
-        allowedTypes={dataModalType === 'material' ? ['character', 'scenario', 'history', 'questionnaire'] : undefined}
+        allowedTypes={dataModalType === 'material' ? [...ONLINE_DATA_CARD_TYPES] : undefined}
         titleOverride={dataModalType === 'material' ? '选择素材' : undefined}
         selectionMode={dataModalType === 'scenario' ? 'single' : 'multi'}
         selectedCardIds={

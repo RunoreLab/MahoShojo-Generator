@@ -12,6 +12,12 @@ import {
   type SQL,
 } from 'drizzle-orm';
 import {
+  DataCardReviewStatusSchema,
+  OnlineDataCardTypeSchema,
+  type DataCardReviewStatus,
+  type OnlineDataCardType,
+} from '@mahoshojo/contracts/data-cards';
+import {
   ARENA_PLACEMENT_GAMES,
   ARENA_QUEEN_MIN_SCEPTER_COUNT,
   ARENA_SCEPTER_MIN_RATING,
@@ -24,9 +30,9 @@ import { arenaRatings, dataCardMetrics, dataCards } from '@/lib/db/schema';
 export type DataCardMetaCardRow = {
   id: string;
   userId: number;
-  type: 'character' | 'scenario' | 'history' | 'questionnaire';
+  type: OnlineDataCardType;
   isPublic: boolean;
-  reviewStatus: 'pending' | 'approved' | 'rejected' | null;
+  reviewStatus: DataCardReviewStatus | null;
   updatedAt: string | null;
   data: string;
 };
@@ -61,11 +67,11 @@ export type DataCardArenaRatingRow = {
 
 export type TopRatedCharacterCardRow = {
   id: string;
-  type: 'character' | 'scenario' | 'history' | 'questionnaire';
+  type: OnlineDataCardType;
   name: string;
   description: string | null;
   is_public: boolean;
-  review_status: 'pending' | 'approved' | 'rejected' | null;
+  review_status: DataCardReviewStatus | null;
   usage_count: number | null;
   like_count: number | null;
   favorite_count: number | null;
@@ -77,14 +83,13 @@ const QUEEN_CACHE_TTL_MS = 30_000;
 const queenCache = new Map<ArenaQueue, { value: ArenaEntityRef | null; expiresAt: number }>();
 
 const asDataCardType = (value: unknown): DataCardMetaCardRow['type'] => {
-  if (value === 'scenario' || value === 'history' || value === 'questionnaire') return value;
-  return 'character';
+  const result = OnlineDataCardTypeSchema.safeParse(value);
+  return result.success ? result.data : 'character';
 };
 
 const asDataCardReviewStatus = (value: unknown): DataCardMetaCardRow['reviewStatus'] => {
-  if (value === 'approved' || value === 'rejected') return value;
-  if (value === 'pending') return value;
-  return null;
+  const result = DataCardReviewStatusSchema.safeParse(value);
+  return result.success ? result.data : null;
 };
 
 const mapMetaCardRow = (row: {

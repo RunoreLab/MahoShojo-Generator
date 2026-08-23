@@ -1,3 +1,5 @@
+import type { OnlineDataCardType } from '@mahoshojo/contracts/data-cards';
+
 interface FavoriteOperationResult {
   success: boolean;
   alreadyExists?: boolean;
@@ -5,7 +7,7 @@ interface FavoriteOperationResult {
   error?: string;
 }
 
-type FavoriteCardType = 'character' | 'scenario' | 'history' | 'questionnaire';
+type FavoriteCardType = OnlineDataCardType;
 
 type FavoritesRepoBundle = {
   db: unknown;

@@ -1,8 +1,12 @@
 import { sql } from 'drizzle-orm';
 import { index, integer, primaryKey, real, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
+import type {
+  DataCardReviewStatus as ContractDataCardReviewStatus,
+  OnlineDataCardType,
+} from '@mahoshojo/contracts/data-cards';
 
-export type DataCardType = 'character' | 'scenario' | 'history' | 'questionnaire';
-export type DataCardReviewStatus = 'pending' | 'approved' | 'rejected';
+export type DataCardType = OnlineDataCardType;
+export type DataCardReviewStatus = ContractDataCardReviewStatus;
 export type DataCardInteractionEventType = 'like' | 'usage';
 export type DataCardInteractionActorScope = 'auth_user' | 'activity_user' | 'anonymous';
 export type ArenaRatingEntityType = 'data_card' | 'preset';
@@ -72,6 +76,7 @@ export const dataCards = sqliteTable('data_cards', {
   name: text('name').notNull(),
   description: text('description'),
   data: text('data').notNull(),
+  // 旧 ORM 属性保留 boolean adapter；三态读写必须经 CAST/raw SQL 与共享可见性契约。
   isPublic: integer('is_public', { mode: 'boolean' }).notNull(),
   publicSince: text('public_since'),
   usageCount: integer('usage_count'),

@@ -1,5 +1,7 @@
+import type { OnlineDataCardType } from '@mahoshojo/contracts/data-cards';
+
 export type PublicCardRenderableTemplate = 'magical-girl' | 'canshou' | 'general' | null;
-export type PublicCardDetailsType = 'character' | 'scenario' | 'history' | 'questionnaire';
+export type PublicCardDetailsType = OnlineDataCardType;
 
 export type PublicCardCacheRecord = {
   id: string;

@@ -13,6 +13,11 @@
       "types": "./src/arena-room.ts",
       "import": "./src/arena-room.ts",
       "default": "./src/arena-room.ts"
+    },
+    "./data-cards": {
+      "types": "./src/data-cards.ts",
+      "import": "./src/data-cards.ts",
+      "default": "./src/data-cards.ts"
     }
   },
   "scripts": {

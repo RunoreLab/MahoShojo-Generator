@@ -1,4 +1,5 @@
 import { and, count, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
+import { OnlineDataCardTypeSchema, type OnlineDataCardType } from '@mahoshojo/contracts/data-cards';
 import type { AppDrizzleDb } from '@/lib/db/drizzle';
 import { dataCards, dataCardUpdates } from '@/lib/db/schema';
 
@@ -15,13 +16,18 @@ export type PendingDataCardUpdateReviewRow = {
   name: string;
   description: string | null;
   data: string;
-  type: 'character' | 'scenario' | 'history' | 'questionnaire' | null;
+  type: OnlineDataCardType | null;
 };
 
 const toInt = (value: unknown, fallback = 0): number => {
   const n = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : NaN;
   if (!Number.isFinite(n)) return fallback;
   return Math.trunc(n);
+};
+
+const asOnlineDataCardType = (value: unknown): OnlineDataCardType | null => {
+  const result = OnlineDataCardTypeSchema.safeParse(value);
+  return result.success ? result.data : null;
 };
 
 export const countPendingPublicCardsByUserId = async (
@@ -168,9 +174,7 @@ export const listLatestPendingPublicCardUpdatesByUserId = async (
     name: typeof row.name === 'string' ? row.name : '',
     description: typeof row.description === 'string' ? row.description : null,
     data: typeof row.data === 'string' ? row.data : '',
-    type: row.type === 'character' || row.type === 'scenario' || row.type === 'history' || row.type === 'questionnaire'
-      ? row.type
-      : null,
+    type: asOnlineDataCardType(row.type),
   }));
 };
 

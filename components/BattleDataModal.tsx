@@ -19,8 +19,13 @@ import { ChevronDown, Filter } from 'lucide-react';
 import DecksModal from './DecksModal';
 import { getDataCardStatus } from '@/lib/data-card-status';
 import type { BadgeDefinition } from '@/types/badge';
+import {
+  ONLINE_DATA_CARD_TYPES,
+  OnlineDataCardTypeSchema,
+  type OnlineDataCardType,
+} from '@mahoshojo/contracts/data-cards';
 
-type DataCardType = 'character' | 'scenario' | 'history' | 'questionnaire';
+type DataCardType = OnlineDataCardType;
 type BattleDataSelectedType = DataCardType | 'all';
 
 interface BattleDataModalProps {
@@ -210,13 +215,13 @@ export default function BattleDataModal({
   const [authorBadgesById, setAuthorBadgesById] = useState<Record<number, BadgeDefinition[]>>({});
   const effectiveAllowedTypes = useMemo<DataCardType[]>(() => {
     const candidates = selectedType === 'all'
-      ? (Array.isArray(allowedTypes) && allowedTypes.length > 0 ? allowedTypes : ['character', 'scenario', 'history', 'questionnaire'])
+      ? (Array.isArray(allowedTypes) && allowedTypes.length > 0 ? allowedTypes : ONLINE_DATA_CARD_TYPES)
       : [selectedType];
     const seen = new Set<DataCardType>();
     return candidates.filter((type): type is DataCardType => {
-      if (type !== 'character' && type !== 'scenario' && type !== 'history' && type !== 'questionnaire') return false;
-      if (seen.has(type)) return false;
-      seen.add(type);
+      const result = OnlineDataCardTypeSchema.safeParse(type);
+      if (!result.success || seen.has(result.data)) return false;
+      seen.add(result.data);
       return true;
     });
   }, [allowedTypes, selectedType]);

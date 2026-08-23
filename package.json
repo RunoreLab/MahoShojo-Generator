@@ -42,6 +42,7 @@
         "test:watch": "vitest"
     },
     "dependencies": {
+        "@mahoshojo/contracts": "workspace:*",
         "@mahoshojo/domain": "workspace:*",
         "@ai-sdk/deepseek": "^2.0.35",
         "@ai-sdk/google": "^3.0.75",

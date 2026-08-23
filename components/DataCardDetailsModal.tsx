@@ -12,6 +12,7 @@ import type { DataCardReportCapabilityDto, DataCardReportDraft } from '@/lib/dat
 import { buildTitleDisplay } from '@/lib/text';
 import Badge from '@/components/badge/Badge';
 import type { BadgeDefinition } from '@/types/badge';
+import type { OnlineDataCardType } from '@mahoshojo/contracts/data-cards';
 
 type ApiTag = {
   id: string;
@@ -154,7 +155,7 @@ interface DataCardDetailsModalProps {
     id: string;
     name: string;
     description: string;
-    type: 'character' | 'scenario' | 'history' | 'questionnaire';
+    type: OnlineDataCardType;
     data: string; // JSON字符串
     isPublic: boolean;
     usageCount?: number;

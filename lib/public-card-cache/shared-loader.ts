@@ -1,3 +1,4 @@
+import { OnlineDataCardTypeSchema } from '@mahoshojo/contracts/data-cards';
 import type { ChallengeResolvedSourceCardLite } from '@/lib/challenge/types';
 import {
   inferChallengeRenderableTemplate,
@@ -76,10 +77,8 @@ const readCreatedAt = (input: Record<string, unknown>): string | null => {
 
 const readDetailsType = (input: Record<string, unknown>): PublicCardDetailsType | null => {
   const type = safeString(input.type);
-  if (type === 'character' || type === 'scenario' || type === 'history' || type === 'questionnaire') {
-    return type;
-  }
-  return null;
+  const result = OnlineDataCardTypeSchema.safeParse(type);
+  return result.success ? result.data : null;
 };
 
 const readVisibility = (input: Record<string, unknown>): boolean | number | null => {

@@ -14,11 +14,17 @@ import {
   sql,
   type SQL,
 } from 'drizzle-orm';
+import {
+  DataCardReviewStatusSchema,
+  OnlineDataCardTypeSchema,
+  type DataCardReviewStatus,
+  type OnlineDataCardType,
+} from '@mahoshojo/contracts/data-cards';
 import type { AppDrizzleDb } from '@/lib/db/drizzle';
 import { arenaRatings, dataCardMetrics, dataCards } from '@/lib/db/schema';
 
-export type ScriptDataCardType = 'character' | 'scenario' | 'history' | 'questionnaire';
-export type ScriptReviewStatus = 'pending' | 'approved' | 'rejected' | null;
+export type ScriptDataCardType = OnlineDataCardType;
+export type ScriptReviewStatus = DataCardReviewStatus | null;
 export type ScriptArenaQueue = 'strict' | 'free';
 
 export type NativeBackfillFilter = {
@@ -87,13 +93,13 @@ const toInt = (value: unknown, fallback = 0): number => {
 };
 
 const asDataCardType = (value: unknown): ScriptDataCardType => {
-  if (value === 'scenario' || value === 'history' || value === 'questionnaire') return value;
-  return 'character';
+  const result = OnlineDataCardTypeSchema.safeParse(value);
+  return result.success ? result.data : 'character';
 };
 
 const asReviewStatus = (value: unknown): ScriptReviewStatus => {
-  if (value === 'approved' || value === 'pending' || value === 'rejected') return value;
-  return null;
+  const result = DataCardReviewStatusSchema.safeParse(value);
+  return result.success ? result.data : null;
 };
 
 const normalizeIds = (ids: string[]): string[] => {

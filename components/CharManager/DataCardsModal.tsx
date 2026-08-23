@@ -10,6 +10,7 @@ import { authStorage } from '@/lib/auth';
 import { normalizePublicVisibilityValue } from '@/lib/data-card-read-mappers';
 import { getDataCardStatus } from '@/lib/data-card-status';
 import { ChevronDown, Filter } from 'lucide-react';
+import { ONLINE_DATA_CARD_TYPES, type OnlineDataCardType } from '@mahoshojo/contracts/data-cards';
 
 interface DataCardsModalProps {
   isOpen: boolean;
@@ -40,7 +41,7 @@ interface DataCardsModalProps {
   allowHistoryReplace?: boolean;
 }
 
-type CardTypeFilter = '' | 'character' | 'scenario' | 'history' | 'questionnaire';
+type CardTypeFilter = '' | OnlineDataCardType;
 type CardVisibilityFilter = '' | 'private' | 'public' | 'banned';
 type CardRoleType = 'magical-girl' | 'canshou' | 'general';
 type RoleTypeFilter = '' | CardRoleType;
@@ -70,7 +71,7 @@ const initialFilters: Filters = {
   roleType: '',
 };
 
-const ALL_CARD_TYPES: CardTypeFilter[] = ['character', 'scenario', 'history', 'questionnaire'];
+const ALL_CARD_TYPES: CardTypeFilter[] = [...ONLINE_DATA_CARD_TYPES];
 
 const typeLabelMap: Record<Exclude<CardTypeFilter, ''>, string> = {
   character: '角色',

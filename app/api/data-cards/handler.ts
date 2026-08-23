@@ -1,3 +1,5 @@
+import { OnlineDataCardTypeSchema } from '@mahoshojo/contracts/data-cards';
+import { normalizeOnlineDataCardVisibilityCompat } from '@/lib/data-card-visibility';
 import { getRequestUrl } from '@/lib/request-url';
 import { 
   createDataCardWithAuthor, 
@@ -125,8 +127,19 @@ async function handler(req: Request): Promise<Response> {
           });
         }
 
-        if (type !== 'character' && type !== 'scenario' && type !== 'history' && type !== 'questionnaire') {
+        const typeResult = OnlineDataCardTypeSchema.safeParse(type);
+        if (!typeResult.success) {
           return new Response(JSON.stringify({ error: '无效的数据卡类型' }), {
+            status: 400,
+            headers: { 'Content-Type': 'application/json' }
+          });
+        }
+        const cardType = typeResult.data;
+        const normalizedPublic = isPublic == null
+          ? 0
+          : normalizeOnlineDataCardVisibilityCompat(isPublic);
+        if (normalizedPublic === null) {
+          return new Response(JSON.stringify({ error: '无效的数据卡可见性' }), {
             status: 400,
             headers: { 'Content-Type': 'application/json' }
           });
@@ -139,7 +152,7 @@ async function handler(req: Request): Promise<Response> {
           const isPlainObject = (value: unknown): value is Record<string, unknown> =>
             typeof value === 'object' && value !== null && !Array.isArray(value);
           const sanitizedPayload =
-            type === 'questionnaire' && !isAdmin && isPlainObject(data)
+            cardType === 'questionnaire' && !isAdmin && isPlainObject(data)
               ? { ...data, nativeAllowed: false }
               : data;
 
@@ -183,13 +196,10 @@ async function handler(req: Request): Promise<Response> {
 
         // [v0.4.2 核心逻辑] 根据用户豁免状态决定审查状态
         const reviewStatus = user.is_review_exempt === 1 ? 'approved' : 'pending';
-        const normalizedPublic =
-          typeof isPublic === 'number' ? Math.floor(isPublic) : (isPublic ? 1 : 0);
-
         const result = await createDataCardWithAuthor(
           userId,
           user.username,
-          type,
+          cardType,
           name,
           description || '',
           dataWithAuthorString,
@@ -245,6 +255,18 @@ async function handler(req: Request): Promise<Response> {
 
         if (!id) {
           return new Response(JSON.stringify({ error: '缺少数据卡ID' }), {
+            status: 400,
+            headers: { 'Content-Type': 'application/json' }
+          });
+        }
+
+        const normalizedPublicInput = isPublic === undefined
+          ? undefined
+          : isPublic === null
+            ? 0
+            : normalizeOnlineDataCardVisibilityCompat(isPublic);
+        if (normalizedPublicInput === null) {
+          return new Response(JSON.stringify({ error: '无效的数据卡可见性' }), {
             status: 400,
             headers: { 'Content-Type': 'application/json' }
           });
@@ -313,13 +335,11 @@ async function handler(req: Request): Promise<Response> {
         }
 
         const normalizedPublicAfter =
-          isPublic === undefined
+          normalizedPublicInput === undefined
             ? Number(currentCard.is_public) === 1
               ? 1
               : 0
-            : typeof isPublic === 'number'
-              ? Math.floor(isPublic)
-              : (isPublic ? 1 : 0);
+            : normalizedPublicInput;
         const shouldAutoReview =
           appConfig.DATA_CARD_AUTO_REVIEW?.enabled &&
           !isExempt &&
@@ -334,7 +354,7 @@ async function handler(req: Request): Promise<Response> {
             userId,
             name ?? currentCard.name,
             description ?? currentCard.description,
-            isPublic,
+            normalizedPublicInput,
             currentCard.review_status
           );
 
@@ -427,7 +447,13 @@ async function handler(req: Request): Promise<Response> {
         }
 
         // 仅修改元信息（名称、描述、公开状态），直接更新主表
-        const success = await updateDataCard(id, userId, name ?? currentCard.name, description ?? currentCard.description, isPublic);
+        const success = await updateDataCard(
+          id,
+          userId,
+          name ?? currentCard.name,
+          description ?? currentCard.description,
+          normalizedPublicInput,
+        );
         if (!success) {
           return new Response(JSON.stringify({ error: '数据卡不存在或无权访问' }), {
             status: 404,

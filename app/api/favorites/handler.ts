@@ -1,3 +1,4 @@
+import type { OnlineDataCardType } from '@mahoshojo/contracts/data-cards';
 import { getRequestUrl } from '@/lib/request-url';
 import {
   addFavorite,
@@ -23,7 +24,7 @@ async function handler(req: Request): Promise<Response> {
   try {
     if (req.method === 'GET') {
       const url = getRequestUrl(req);
-      const type = url.searchParams.get('type') as 'character' | 'scenario' | 'history' | 'questionnaire' | null;
+      const type = url.searchParams.get('type') as OnlineDataCardType | null;
       const idsOnly = url.searchParams.get('idsOnly') === '1';
 
       if (idsOnly) {

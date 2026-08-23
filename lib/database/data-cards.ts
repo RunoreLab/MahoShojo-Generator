@@ -1,7 +1,13 @@
 import { generateUUID } from './core';
+import type {
+  DataCardReviewStatus,
+  OnlineDataCardType,
+  OnlineDataCardVisibility,
+} from '@mahoshojo/contracts/data-cards';
 import { inferCharacterKind } from '@mahoshojo/domain/data-cards';
+import { normalizeOnlineDataCardVisibilityCompat } from '@/lib/data-card-visibility';
 
-type DataCardType = 'character' | 'scenario' | 'history' | 'questionnaire';
+type DataCardType = OnlineDataCardType;
 type DataCardSortBy = 'likes' | 'usage' | 'favorites' | 'created_at';
 
 type DataCardsRepoBundle = {
@@ -16,8 +22,8 @@ type DataCardsRepoBundle = {
       name: string;
       description: string;
       data: string;
-      isPublic: number;
-      reviewStatus?: 'pending' | 'approved' | 'rejected';
+      isPublic: OnlineDataCardVisibility;
+      reviewStatus?: DataCardReviewStatus;
     },
   ) => Promise<boolean>;
   listUserDataCards: (
@@ -31,8 +37,8 @@ type DataCardsRepoBundle = {
       userId: number;
       name: string;
       description: string;
-      isPublic?: number;
-      reviewStatus?: 'pending' | 'approved' | 'rejected';
+      isPublic?: OnlineDataCardVisibility;
+      reviewStatus?: DataCardReviewStatus;
     },
   ) => Promise<number>;
   updateDataCardContentByIdAndUserWithChanges: (
@@ -153,8 +159,11 @@ const readDataCardsRepoBundle = async (): Promise<DataCardsRepoBundle | null> =>
   }
 };
 
-const normalizeIsPublicValue = (isPublic: boolean | number): number =>
-  typeof isPublic === 'number' ? Math.floor(isPublic) : isPublic ? 1 : 0;
+const normalizeIsPublicValue = (isPublic: boolean | number): OnlineDataCardVisibility => {
+  const normalized = normalizeOnlineDataCardVisibilityCompat(isPublic);
+  if (normalized === null) throw new Error('无效的数据卡可见性');
+  return normalized;
+};
 
 const withTagIds = (rows: any[]): any[] => {
   return rows.map((row) => {
@@ -291,7 +300,7 @@ export async function updateDataCard(
   name: string,
   description: string,
   isPublic?: boolean | number,
-  reviewStatus?: 'pending' | 'approved' | 'rejected',
+  reviewStatus?: DataCardReviewStatus,
 ): Promise<boolean> {
   try {
     const bundle = await readDataCardsRepoBundle();

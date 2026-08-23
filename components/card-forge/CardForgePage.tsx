@@ -22,6 +22,7 @@ import { buildCustomProviderRequestPayload } from '@/lib/ai/custom-provider';
 import { normalizeModelScopeToken } from '@/lib/tachie/modelscope/error';
 import { authStorage } from '@/lib/auth';
 import { generationApiFetch } from '@/lib/hono-api-client';
+import { ONLINE_DATA_CARD_TYPES } from '@mahoshojo/contracts/data-cards';
 import { downloadBlob } from '@/lib/client/blobUrl';
 import { resolveApiErrorMessage, readJsonOrTextFromResponse } from '@/lib/client/apiError';
 import { isAbortErrorLike, STREAM_ABORT_REASON_USER } from '@/lib/stream/abort';
@@ -978,7 +979,7 @@ export function CardForgePage() {
         onClose={() => setIsDataCardModalOpen(false)}
         onSelectCard={handleSelectOnlineDataCard}
         selectedType="all"
-        allowedTypes={['character', 'scenario', 'history', 'questionnaire']}
+        allowedTypes={[...ONLINE_DATA_CARD_TYPES]}
         visibleTabs={['my', 'public', 'favorites']}
         initialTab="public"
         selectionMode="single"

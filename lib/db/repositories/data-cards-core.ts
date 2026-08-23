@@ -14,10 +14,17 @@ import {
   sql,
   type SQL,
 } from 'drizzle-orm';
+import {
+  OnlineDataCardTypeSchema,
+  OnlineDataCardVisibilitySchema,
+  type DataCardReviewStatus,
+  type OnlineDataCardType,
+  type OnlineDataCardVisibility,
+} from '@mahoshojo/contracts/data-cards';
 import type { AppDrizzleDb } from '@/lib/db/drizzle';
 import { dataCardMetrics, dataCards, dataCardTags, dataCardUpdates, users } from '@/lib/db/schema';
 
-export type DataCardType = 'character' | 'scenario' | 'history' | 'questionnaire';
+export type DataCardType = OnlineDataCardType;
 export type DataCardSortBy = 'likes' | 'usage' | 'favorites' | 'created_at';
 
 export type DataCardDbRow = {
@@ -132,8 +139,8 @@ type InsertDataCardInput = {
   name: string;
   description: string;
   data: string;
-  isPublic: number;
-  reviewStatus?: 'pending' | 'approved' | 'rejected';
+  isPublic: OnlineDataCardVisibility;
+  reviewStatus?: DataCardReviewStatus;
 };
 
 type UpdateDataCardInput = {
@@ -141,8 +148,8 @@ type UpdateDataCardInput = {
   userId: number;
   name: string;
   description: string;
-  isPublic?: number;
-  reviewStatus?: 'pending' | 'approved' | 'rejected';
+  isPublic?: OnlineDataCardVisibility;
+  reviewStatus?: DataCardReviewStatus;
 };
 
 type EnforceDataCardModerationOutcomeInput = {
@@ -172,8 +179,8 @@ const toInt = (value: unknown, fallback = 0): number => {
 const toNullableString = (value: unknown): string | null => (typeof value === 'string' ? value : null);
 
 const asDataCardType = (value: unknown): DataCardType => {
-  if (value === 'scenario' || value === 'history' || value === 'questionnaire') return value;
-  return 'character';
+  const result = OnlineDataCardTypeSchema.safeParse(value);
+  return result.success ? result.data : 'character';
 };
 
 const normalizeStringIds = (ids: string[], limit?: number): string[] => {
@@ -302,6 +309,7 @@ export const insertDataCard = async (
   db: AppDrizzleDb,
   input: InsertDataCardInput,
 ): Promise<boolean> => {
+  const isPublic = OnlineDataCardVisibilitySchema.parse(input.isPublic);
   const values: Record<string, unknown> = {
     id: input.id,
     userId: input.userId,
@@ -309,8 +317,8 @@ export const insertDataCard = async (
     name: input.name,
     description: input.description,
     data: input.data,
-    isPublic: sql`${input.isPublic}`,
-    publicSince: input.isPublic === 1 ? sql`CURRENT_TIMESTAMP` : null,
+    isPublic: sql`${isPublic}`,
+    publicSince: isPublic === 1 ? sql`CURRENT_TIMESTAMP` : null,
     usageCount: 0,
     likeCount: 0,
     favoriteCount: 0,
@@ -391,10 +399,11 @@ export const updateDataCardByIdAndUser = async (
   };
 
   if (typeof input.isPublic === 'number') {
-    setValues.isPublic = sql`${input.isPublic}`;
+    const isPublic = OnlineDataCardVisibilitySchema.parse(input.isPublic);
+    setValues.isPublic = sql`${isPublic}`;
     setValues.publicSince = sql`CASE
-      WHEN CAST(${dataCards.isPublic} AS INTEGER) <> ${input.isPublic}
-      THEN (CASE WHEN ${input.isPublic} = 1 THEN CURRENT_TIMESTAMP ELSE NULL END)
+      WHEN CAST(${dataCards.isPublic} AS INTEGER) <> ${isPublic}
+      THEN (CASE WHEN ${isPublic} = 1 THEN CURRENT_TIMESTAMP ELSE NULL END)
       ELSE ${dataCards.publicSince}
     END`;
   }

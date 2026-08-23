@@ -8,15 +8,16 @@ import { TierBadge } from '@/components/ranking/TierBadge';
 import { buildTitleDisplay } from '@/lib/text';
 import Badge from '@/components/badge/Badge';
 import type { BadgeDefinition } from '@/types/badge';
+import type { DataCardReviewStatus, OnlineDataCardType } from '@mahoshojo/contracts/data-cards';
 
 interface DataCardProps {
   id: string; // Changed from number to string for UUID
   name: string;
   description: string;
-  type: 'character' | 'scenario' | 'history' | 'questionnaire';
+  type: OnlineDataCardType;
   roleType?: 'magical-girl' | 'canshou' | 'general';
   isPublic: boolean | number; // 支持 -1 表示封禁
-  reviewStatus?: 'pending' | 'approved' | 'rejected'; // 新增：审查状态属性
+  reviewStatus?: DataCardReviewStatus; // 新增：审查状态属性
   usageCount?: number;
   likeCount?: number;
   favoriteCount?: number;

@@ -1,3 +1,4 @@
+import type { OnlineDataCardType } from '@mahoshojo/contracts/data-cards';
 import type { UserBadge } from '@/types/badge';
 import { signOutBetterAuthSession } from '@/lib/auth/logout';
 import { mapDeckDetailPayload, mapDeckListPayload } from '@/lib/deck-client-mappers';
@@ -511,7 +512,7 @@ export const dataCardApi = {
   },
 
   // 创建数据卡
-  async createCard(type: 'character' | 'scenario' | 'history' | 'questionnaire', name: string, description: string, data: any, isPublic: number = 0): Promise<{
+  async createCard(type: OnlineDataCardType, name: string, description: string, data: any, isPublic: number = 0): Promise<{
     success: boolean;
     id?: string;
     error?: string;
@@ -653,7 +654,7 @@ export const dataCardApi = {
 };
 
 export const favoritesApi = {
-  async getFavorites(options?: { type?: 'character' | 'scenario' | 'history' | 'questionnaire'; idsOnly?: boolean }) {
+  async getFavorites(options?: { type?: OnlineDataCardType; idsOnly?: boolean }) {
     const params = new URLSearchParams();
     if (options?.type) {
       params.append('type', options.type);

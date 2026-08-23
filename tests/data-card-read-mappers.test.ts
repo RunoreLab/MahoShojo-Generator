@@ -75,6 +75,20 @@ describe('data-card read mappers', () => {
     expect(mapped.author).toBe('bob');
   });
 
+  test('线上类型只接受共享契约值，未知或内部类型回退为 character', () => {
+    const fallback = { id: 'fallback-id', name: 'fallback-name', author: 'fallback-author' };
+
+    for (const type of ['character', 'scenario', 'history', 'questionnaire']) {
+      const mapped = mapPublicDataCardRowToDetailsCard({ type, data: '{}' }, fallback);
+      expect(mapped.type).toBe(type);
+    }
+
+    for (const type of ['canshou', 'general', 'unknown']) {
+      const mapped = mapPublicDataCardRowToDetailsCard({ type, data: '{}' }, fallback);
+      expect(mapped.type).toBe('character');
+    }
+  });
+
   test('mapPublicDataCardRowToBattleSelectionPayload 支持 snake/camel 双输入并输出统一 metadata', () => {
     const snakePayload = mapPublicDataCardRowToBattleSelectionPayload({
       id: 'snake-id',
@@ -237,6 +251,16 @@ describe('data-card read mappers', () => {
     expect(isPublicVisibility(boolPublic)).toBe(true);
     expect(isPublicVisibility(internalPublic)).toBe(true);
     expect(isPublicVisibility(internalPrivate)).toBe(false);
+  });
+
+  test('visibility helper 拒绝共享契约之外的数字值', () => {
+    expect(normalizePublicVisibilityValue({ is_public: 2 })).toBe(false);
+    expect(normalizePublicVisibilityValue({ is_public: -2 })).toBe(false);
+    expect(normalizePublicVisibilityValue({ is_public: 0.5 })).toBe(false);
+    expect(normalizePublicVisibilityValue({ is_public: 1.5 })).toBe(false);
+
+    expect(mapDataCardRuntimeSourceInfo({ is_public: 0.5 }).sourceIsPublic).toBeUndefined();
+    expect(mapDataCardRuntimeSourceInfo({ is_public: 1.5 }).sourceIsPublic).toBeUndefined();
   });
 
   test('data 为空或不合法时抛出统一错误', () => {

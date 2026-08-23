@@ -1,8 +1,9 @@
 import { and, desc, eq, isNull, sql } from 'drizzle-orm';
+import { OnlineDataCardTypeSchema, type OnlineDataCardType } from '@mahoshojo/contracts/data-cards';
 import type { AppDrizzleDb } from '@/lib/db/drizzle';
 import { dataCards, favorites, users } from '@/lib/db/schema';
 
-export type FavoriteCardType = 'character' | 'scenario' | 'history' | 'questionnaire';
+export type FavoriteCardType = OnlineDataCardType;
 
 export type UserFavoriteRow = {
   id: string;
@@ -32,9 +33,8 @@ const toInt = (value: unknown, fallback = 0): number => {
 };
 
 const toFavoriteCardType = (value: unknown): FavoriteCardType | null => {
-  return value === 'character' || value === 'scenario' || value === 'history' || value === 'questionnaire'
-    ? value
-    : null;
+  const result = OnlineDataCardTypeSchema.safeParse(value);
+  return result.success ? result.data : null;
 };
 
 export const isDataCardFavoritable = async (

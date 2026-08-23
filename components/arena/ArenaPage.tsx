@@ -10,6 +10,7 @@ import { useAuth } from '@/lib/useAuth';
 import { config as appConfig } from '@/lib/config';
 import type { Preset } from '@/lib/presets';
 import { CollapsibleSection } from '@/components/shared/CollapsibleSection';
+import { ONLINE_DATA_CARD_TYPES } from '@mahoshojo/contracts/data-cards';
 
 import { BattleHeader } from './components/BattleHeader';
 import { PresetSelector } from './components/PresetSelector';
@@ -428,7 +429,7 @@ export function ArenaPage() {
             )
         }
         selectedType={dataModalType === 'character' ? 'character' : (dataModalType === 'material' ? 'all' : 'scenario')}
-        allowedTypes={dataModalType === 'material' ? ['character', 'scenario', 'history', 'questionnaire'] : undefined}
+        allowedTypes={dataModalType === 'material' ? [...ONLINE_DATA_CARD_TYPES] : undefined}
         titleOverride={
           dataModalType === 'auxScenario'
             ? '选择辅助情景'

@@ -1,3 +1,4 @@
+import { OnlineDataCardTypeSchema } from '@mahoshojo/contracts/data-cards';
 import { getRequestUrl } from '@/lib/request-url';
 // app/api/public-data-cards/handler.ts
 
@@ -92,10 +93,8 @@ async function handler(req: Request): Promise<Response> {
         );
       }
 
-      const type =
-        typeRaw === 'character' || typeRaw === 'scenario' || typeRaw === 'history' || typeRaw === 'questionnaire'
-          ? typeRaw
-          : undefined;
+      const typeResult = OnlineDataCardTypeSchema.safeParse(typeRaw);
+      const type = typeResult.success ? typeResult.data : undefined;
 
       const sortBy =
         sortByRaw === 'likes' || sortByRaw === 'usage' || sortByRaw === 'favorites' || sortByRaw === 'created_at'

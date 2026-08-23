@@ -6,11 +6,12 @@ import { useAuth } from '@/lib/useAuth';
 import { dataCardApi } from '@/lib/auth';
 import { quickCheck } from '@/lib/sensitive-word-filter';
 import { config } from '@/lib/config';
+import type { OnlineDataCardType } from '@mahoshojo/contracts/data-cards';
 
 interface SaveToCloudButtonProps {
   data: any;
   getData?: () => Promise<any>;
-  cardType?: 'character' | 'scenario' | 'history' | 'questionnaire';
+  cardType?: OnlineDataCardType;
   buttonText?: string;
   defaultName?: string;
   defaultDescription?: string;

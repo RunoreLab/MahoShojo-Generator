@@ -1,4 +1,8 @@
-type DataCardType = 'character' | 'scenario' | 'history' | 'questionnaire';
+import {
+  OnlineDataCardTypeSchema,
+  type OnlineDataCardType,
+} from '@mahoshojo/contracts/data-cards';
+import { normalizeOnlineDataCardVisibilityCompat } from '@/lib/data-card-visibility';
 
 export type PublicDataCardCompatRow = Record<string, unknown>;
 
@@ -6,7 +10,7 @@ export type DataCardDetailsModalCard = {
   id: string;
   name: string;
   description: string;
-  type: DataCardType;
+  type: OnlineDataCardType;
   data: string;
   isPublic: boolean;
   usageCount?: number;
@@ -102,14 +106,17 @@ const normalizeOptionalText = (value: string | null): string | undefined => {
   return trimmed.length > 0 ? trimmed : undefined;
 };
 
-const normalizeCardType = (raw: string | null): DataCardType => {
-  if (raw === 'scenario' || raw === 'history' || raw === 'questionnaire') return raw;
-  return 'character';
+const normalizeCardType = (raw: string | null): OnlineDataCardType => {
+  const result = OnlineDataCardTypeSchema.safeParse(raw);
+  return result.success ? result.data : 'character';
 };
 
 export const normalizePublicVisibilityValue = (source: Record<string, unknown>): boolean | number => {
   const numeric = readNumber(source, ['is_public', 'isPublic', '_isPublic']);
-  if (numeric !== null) return Math.floor(numeric);
+  if (numeric !== null) {
+    const normalized = normalizeOnlineDataCardVisibilityCompat(numeric);
+    if (normalized !== null) return normalized;
+  }
   const bool = readBoolean(source, ['is_public', 'isPublic', '_isPublic']);
   if (bool !== null) return bool;
   return false;
@@ -132,12 +139,12 @@ export const mapDataCardRuntimeSourceInfo = (rowInput: unknown): DataCardRuntime
 
   const numericVisibility = readNumber(row, ['_isPublic', 'is_public', 'isPublic']);
   const boolVisibility = readBoolean(row, ['_isPublic', 'is_public', 'isPublic']);
-  const sourceIsPublic =
-    numericVisibility !== null
-      ? Math.floor(numericVisibility) === 1
-      : boolVisibility !== null
-        ? boolVisibility
-        : undefined;
+  const normalizedNumericVisibility = numericVisibility === null
+    ? null
+    : normalizeOnlineDataCardVisibilityCompat(numericVisibility);
+  const sourceIsPublic = normalizedNumericVisibility !== null
+    ? normalizedNumericVisibility === 1
+    : boolVisibility ?? undefined;
 
   return {
     sourceDataCardId: sourceMeta.dataCardId,
