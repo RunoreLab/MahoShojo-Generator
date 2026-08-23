@@ -1,20 +1,5 @@
 {
-  "legacyRouteIds": [
-    "arena/generate",
-    "arena/generate-stream",
-    "arena/session/generate-next",
-    "generate-battle-story",
-    "generate-magical-girl-details",
-    "generate-magical-girl-details-stream",
-    "generate-sublimation",
-    "generate-sublimation-stream",
-    "magic-tavern/generate-choices",
-    "magic-tavern/generate-stream",
-    "magic-tea-party/generate-choices",
-    "magic-tea-party/generate-stream",
-    "magic-tea-party/generate-updates",
-    "me/battle-reports/[generationId]/regenerate"
-  ],
+  "legacyRouteIds": [],
   "sharedRouteIds": [
     "creator/generate",
     "creator/generate-stream",
