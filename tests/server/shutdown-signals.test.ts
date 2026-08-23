@@ -53,6 +53,96 @@ describe('graceful shutdown signal wiring', () => {
     expect(shutdown).toHaveBeenCalledTimes(1);
     expect(exit).toHaveBeenCalledTimes(1);
   });
+
+  it('shutdown rejection 只触发一次失败退出', async () => {
+    const signalSource = new EventEmitter();
+    const shutdownError = new Error('redis close failed');
+    const shutdown = vi.fn(async () => {
+      throw shutdownError;
+    });
+    const exit = vi.fn();
+    const errorLogger = vi.fn();
+    disposers.push(wireGracefulShutdownSignals({
+      errorLogger,
+      exit,
+      shutdown,
+      signalSource,
+    }));
+
+    signalSource.emit('SIGTERM');
+    signalSource.emit('SIGINT');
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    expect(shutdown).toHaveBeenCalledTimes(1);
+    expect(errorLogger).toHaveBeenCalledWith('[hono] 优雅退出失败', shutdownError);
+    expect(exit).toHaveBeenCalledTimes(1);
+    expect(exit).toHaveBeenCalledWith(1);
+  });
+
+  it('异步 error logger rejection 被吸收且仍只失败退出一次', async () => {
+    const signalSource = new EventEmitter();
+    const loggerFailure = Promise.reject(new Error('log sink unavailable'));
+    void loggerFailure.then(undefined, () => undefined);
+    const catchSpy = vi.spyOn(loggerFailure, 'catch');
+    const errorLogger = vi.fn(() => loggerFailure);
+    const exit = vi.fn();
+    disposers.push(wireGracefulShutdownSignals({
+      errorLogger,
+      exit,
+      shutdown: vi.fn(async () => {
+        throw new Error('shutdown failed');
+      }),
+      signalSource,
+    }));
+
+    signalSource.emit('SIGTERM');
+    signalSource.emit('SIGTERM');
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    expect(errorLogger).toHaveBeenCalledTimes(1);
+    expect(catchSpy).toHaveBeenCalledTimes(1);
+    expect(exit).toHaveBeenCalledTimes(1);
+    expect(exit).toHaveBeenCalledWith(1);
+  });
+
+  it('disposer 可重复调用并精确移除两个 signal listener', async () => {
+    const signalSource = new EventEmitter();
+    const shutdown = vi.fn(async () => undefined);
+    const dispose = wireGracefulShutdownSignals({
+      exit: vi.fn(),
+      shutdown,
+      signalSource,
+    });
+
+    expect(signalSource.listenerCount('SIGINT')).toBe(1);
+    expect(signalSource.listenerCount('SIGTERM')).toBe(1);
+    dispose();
+    dispose();
+    expect(signalSource.listenerCount('SIGINT')).toBe(0);
+    expect(signalSource.listenerCount('SIGTERM')).toBe(0);
+
+    signalSource.emit('SIGINT');
+    signalSource.emit('SIGTERM');
+    await Promise.resolve();
+    expect(shutdown).not.toHaveBeenCalled();
+  });
+
+  it('disposer 不会取消已经开始的 shutdown lifecycle', async () => {
+    const signalSource = new EventEmitter();
+    const deferred = createDeferred();
+    const shutdown = vi.fn(() => deferred.promise);
+    const exit = vi.fn();
+    const dispose = wireGracefulShutdownSignals({ exit, shutdown, signalSource });
+
+    signalSource.emit('SIGTERM');
+    dispose();
+    deferred.resolve();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    expect(shutdown).toHaveBeenCalledTimes(1);
+    expect(exit).toHaveBeenCalledTimes(1);
+    expect(exit).toHaveBeenCalledWith(0);
+  });
 });
 
 const readMarkers = async (markerPath: string): Promise<string> => {
