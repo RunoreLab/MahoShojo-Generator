@@ -60,7 +60,9 @@ const readInput = async (
   const parsedBody = await request.json();
   if (throwOnNullBody && parsedBody === null) {
     // 非流式 legacy handler 直接对 JSON 结果解构；JSON null 因此进入 500 分支。
-    const { answers: _answers } = parsedBody as Record<string, unknown>;
+    const { answers: _answers } = await Promise.resolve(
+      parsedBody as Record<string, unknown>,
+    );
     void _answers;
   }
   const body = (parsedBody ?? {}) as Record<string, unknown>;
@@ -78,10 +80,12 @@ const readInput = async (
     answers: answers as Record<string, unknown>,
     language: (body?.language === undefined ? 'zh-CN' : body.language) as string,
     fieldsToKeepEmpty: body?.fieldsToKeepEmpty === undefined ? [] : body.fieldsToKeepEmpty,
-    ...(body && Object.hasOwn(body, 'customProvider')
+    ...(Object.prototype.hasOwnProperty.call(body, 'customProvider')
       ? { customProvider: body.customProvider }
       : {}),
-    ...(body && Object.hasOwn(body, 'titleHint') ? { titleHint: body.titleHint } : {}),
+    ...(Object.prototype.hasOwnProperty.call(body, 'titleHint')
+      ? { titleHint: body.titleHint }
+      : {}),
   };
 };
 

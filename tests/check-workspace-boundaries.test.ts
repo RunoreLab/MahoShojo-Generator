@@ -143,6 +143,39 @@ describe('workspace dependency boundaries', () => {
     ]);
   });
 
+  it('rejects non-literal module loads reachable from Hono shared adapters', async () => {
+    const rootDir = await createWorkspaceFixture({
+      'server/adapters/generate.ts': [
+        "const routePath = '../../app/api/generate/handler';",
+        'export const load = () => import(routePath);',
+      ].join('\n'),
+    });
+
+    const violations = checkWorkspaceBoundaries(rootDir).filter(
+      (violation) => violation.rule === 'MONO-009-HONO-ADAPTER-DYNAMIC',
+    );
+
+    expect(violations).toHaveLength(1);
+    expect(violations[0]?.file).toMatch(/server\/adapters\/generate\.ts$/);
+    expect(violations[0]?.module).toBe('<dynamic-import>');
+  });
+
+  it('rejects indirect local bridges from Hono adapters to legacy Next routes', async () => {
+    const rootDir = await createWorkspaceFixture({
+      'app/api/generate/handler.ts': 'export const handler = () => new Response();\n',
+      'lib/bridge.ts': "export { handler } from '@/app/api/generate/handler';\n",
+      'server/adapters/generate.ts': "export { handler as POST } from '@/lib/bridge';\n",
+    });
+
+    const violations = checkWorkspaceBoundaries(rootDir).filter(
+      (violation) => violation.rule === 'MONO-009-HONO-ADAPTER-LEGACY',
+    );
+
+    expect(violations).toHaveLength(1);
+    expect(violations[0]?.file).toMatch(/lib\/bridge\.ts$/);
+    expect(violations[0]?.module).toBe('@/app/api/generate/handler');
+  });
+
   it('rejects app-to-app imports through relative, alias, and workspace package names', async () => {
     const rootDir = await createWorkspaceFixture({
       'apps/web/package.json': manifest('@mahoshojo/web'),

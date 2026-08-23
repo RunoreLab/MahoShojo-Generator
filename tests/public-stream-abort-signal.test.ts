@@ -25,7 +25,10 @@ vi.mock('@/lib/stream/raw-ai', () => ({
     capturedOptions = options;
     return {
       response: new Response('ok', {
-        headers: { 'content-type': 'text/plain; charset=utf-8' },
+        headers: {
+          'content-type': 'text/plain; charset=utf-8',
+          'x-upstream-stream': 'preserved',
+        },
       }),
       usagePromise: Promise.resolve({}),
       telemetry: {},
@@ -41,9 +44,9 @@ describe('public stream abort signal', () => {
   test('generate-free-stream 将 Request.signal 传给上游流式生成层', async () => {
     const { default: handler } = await import('@/app/api/generate-free-stream/handler');
     const controller = new AbortController();
-    const request = new Request('https://example.com/api/generate-free-stream?format=sse', {
+    const request = new Request('https://example.com/api/generate-free-stream', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
+      headers: { 'Content-Type': 'application/json' },
       signal: controller.signal,
       body: JSON.stringify({
         schema: 'general',
@@ -56,6 +59,8 @@ describe('public stream abort signal', () => {
     const response = await handler(request as any);
 
     expect(response.status).toBe(200);
+    expect(response.headers.get('x-upstream-stream')).toBe('preserved');
+    expect(await response.text()).toBe('ok');
     expect(capturedOptions?.abortSignal).toBeInstanceOf(AbortSignal);
     expect(capturedOptions?.abortSignal.aborted).toBe(false);
     controller.abort('test-abort');
@@ -79,6 +84,8 @@ describe('public stream abort signal', () => {
     const response = await handler(request as any);
 
     expect(response.status).toBe(200);
+    expect(response.headers.get('x-upstream-stream')).toBe('preserved');
+    expect(await response.text()).toBe('ok');
     expect(capturedOptions?.abortSignal).toBeInstanceOf(AbortSignal);
     expect(capturedOptions?.abortSignal.aborted).toBe(false);
     controller.abort('test-abort');

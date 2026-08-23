@@ -137,7 +137,7 @@ describe('regular hosted generation services', () => {
     expect(errors).toHaveLength(1);
   });
 
-  it('Free 非流式保持 rate-limit -> safety -> generate -> normalize -> activity -> response 顺序', async () => {
+  it('Free 非流式保持 rate-limit -> safety -> generate -> activity -> normalize -> response 顺序', async () => {
     const calls: string[] = [];
     const service = createGenerateFreeService({
       checkRateLimit: async () => {
@@ -176,8 +176,8 @@ describe('regular hosted generation services', () => {
       'rate-limit',
       'safety:general:生成角色\n\n附件设定',
       'generate:生成角色',
-      'normalize',
       'activity',
+      'normalize',
       'response',
     ]);
   });
@@ -388,6 +388,10 @@ describe('regular hosted generation services', () => {
     expect(streamMalformed.status).toBe(500);
     expect(nonStreamNull.status).toBe(500);
     expect(streamNull.status).toBe(400);
+    expect(await nonStreamNull.json()).toEqual({
+      error: '生成失败',
+      message: "Cannot destructure property 'answers' of '(intermediate value)' as it is null.",
+    });
     expect(errors).toHaveLength(3);
   });
 });

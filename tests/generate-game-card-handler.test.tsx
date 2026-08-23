@@ -143,6 +143,33 @@ test('卡牌生成响应命中敏感词时拒绝返回卡面', async () => {
   expect(mocks.buildJsonResponseWithOptionalAiMeta).not.toHaveBeenCalled();
 });
 
+test('卡牌生成保留 custom Provider 的 legacy SEQUENTIAL 策略', async () => {
+  const response = await handler(
+    new Request('https://example.test/api/generate-game-card', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sourceCardJson: '{"safe":true}',
+        customProvider: {
+          providerId: 'kourichat',
+          modelId: 'gpt-5.4',
+          apiKey: 'test-provider-key',
+        },
+      }),
+    }),
+  );
+
+  expect(response.status).toBe(200);
+  const aiOptions = mocks.generateWithAI.mock.calls[0]?.[2] as any;
+  expect(aiOptions.loadBalanceStrategy).toBe('sequential');
+  expect(aiOptions.providerOverride).toMatchObject({
+    providerId: 'kourichat',
+    model: 'gpt-5.4',
+    apiKey: 'test-provider-key',
+  });
+  expect(mocks.recordUserActivityFromRequest).toHaveBeenCalledOnce();
+});
+
 test('卡牌工坊展示 Token 指示器', () => {
   const html = renderToStaticMarkup(<CardForgePage />);
 

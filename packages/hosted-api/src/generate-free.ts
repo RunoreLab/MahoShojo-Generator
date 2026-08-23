@@ -155,9 +155,9 @@ const createFreeService = <
     const generated = await options.dependencies.generate(request, input);
     if (!generated.completed) return generated.response;
 
+    options.dependencies.recordActivity(request);
     const output = await options.transformOutput(request, input, generated.value);
     if (!output.completed) return output.response;
-    options.dependencies.recordActivity(request);
     return await options.dependencies.buildResponse(request, input, output.value);
   } catch (error) {
     options.dependencies.logError(error);

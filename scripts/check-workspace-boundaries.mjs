@@ -80,6 +80,14 @@ function isDirectory(targetPath) {
   }
 }
 
+function isFile(targetPath) {
+  try {
+    return statSync(targetPath).isFile();
+  } catch {
+    return false;
+  }
+}
+
 function readManifest(packageJsonPath) {
   if (!existsSync(packageJsonPath)) return null;
 
@@ -419,6 +427,30 @@ function isLegacyNextRouteSpecifier(rootDirectory, filePath, moduleSpecifier) {
     || relativePath.startsWith('pages/api/');
 }
 
+function localSourceTargetFromSpecifier(rootDirectory, filePath, moduleSpecifier) {
+  let unresolvedTarget;
+  if (moduleSpecifier.startsWith('./') || moduleSpecifier.startsWith('../')) {
+    unresolvedTarget = path.resolve(path.dirname(filePath), moduleSpecifier);
+  } else if (moduleSpecifier.startsWith('@/')) {
+    unresolvedTarget = path.resolve(rootDirectory, moduleSpecifier.slice(2));
+  } else {
+    return null;
+  }
+
+  if (!isWithin(unresolvedTarget, rootDirectory)) return null;
+  const extension = path.extname(unresolvedTarget);
+  const candidates = extension
+    ? [unresolvedTarget]
+    : [
+        ...Array.from(SOURCE_EXTENSIONS, (sourceExtension) => `${unresolvedTarget}${sourceExtension}`),
+        ...Array.from(SOURCE_EXTENSIONS, (sourceExtension) => path.join(
+          unresolvedTarget,
+          `index${sourceExtension}`,
+        )),
+      ];
+  return candidates.find((candidate) => isFile(candidate)) ?? null;
+}
+
 function packageSubpath(moduleSpecifier, packageName) {
   return moduleSpecifier === packageName ? null : `.${moduleSpecifier.slice(packageName.length)}`;
 }
@@ -701,10 +733,18 @@ export function checkWorkspaceBoundaries(rootDirectory = process.cwd()) {
   }
 
   const honoAdapterDirectory = path.join(normalizedRoot, 'server', 'adapters');
-  for (const sourceFile of collectSourceFiles(honoAdapterDirectory)) {
+  const visitedHonoDependencies = new Set();
+  const inspectHonoDependency = (sourceFile) => {
+    if (visitedHonoDependencies.has(sourceFile)) return;
+    visitedHonoDependencies.add(sourceFile);
+
     let imports;
+    let nonLiteralModuleLoads;
     try {
-      ({ imports } = collectSourceDependencies(readFileSync(sourceFile, 'utf8'), sourceFile));
+      ({ imports, nonLiteralModuleLoads } = collectSourceDependencies(
+        readFileSync(sourceFile, 'utf8'),
+        sourceFile,
+      ));
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       addViolation(
@@ -714,20 +754,44 @@ export function checkWorkspaceBoundaries(rootDirectory = process.cwd()) {
         '<parse>',
         `cannot parse Hono adapter source: ${reason}`,
       );
-      continue;
+      return;
     }
 
-    for (const { module: moduleSpecifier, line } of imports) {
-      if (!isLegacyNextRouteSpecifier(normalizedRoot, sourceFile, moduleSpecifier)) continue;
+    for (const { module: moduleSpecifier, line } of nonLiteralModuleLoads) {
       addViolation(
         violations,
-        'MONO-009-HONO-ADAPTER-LEGACY',
+        'MONO-009-HONO-ADAPTER-DYNAMIC',
         sourceFile,
         moduleSpecifier,
-        'Hono shared adapter must depend on a shared service composition, not legacy Next route source',
+        'Hono shared adapter dependency graph must use statically analyzable module specifiers',
         line,
       );
     }
+
+    for (const { module: moduleSpecifier, line } of imports) {
+      if (isLegacyNextRouteSpecifier(normalizedRoot, sourceFile, moduleSpecifier)) {
+        addViolation(
+          violations,
+          'MONO-009-HONO-ADAPTER-LEGACY',
+          sourceFile,
+          moduleSpecifier,
+          'Hono shared adapter must depend on a shared service composition, not legacy Next route source',
+          line,
+        );
+        continue;
+      }
+
+      const targetSource = localSourceTargetFromSpecifier(
+        normalizedRoot,
+        sourceFile,
+        moduleSpecifier,
+      );
+      if (targetSource) inspectHonoDependency(targetSource);
+    }
+  };
+
+  for (const sourceFile of collectSourceFiles(honoAdapterDirectory)) {
+    inspectHonoDependency(sourceFile);
   }
 
   return violations.sort((left, right) => {
