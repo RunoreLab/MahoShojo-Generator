@@ -13,11 +13,26 @@ const isD1Configured = (): boolean => {
   );
 };
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const isSuccessfulD1ProbePayload = (payload: unknown): boolean => {
+  if (!isRecord(payload) || payload.success !== true) return false;
+  if (!Array.isArray(payload.result) || payload.result.length !== 1) return false;
+
+  const statementResult = payload.result[0];
+  if (!isRecord(statementResult) || statementResult.success !== true) return false;
+  if (!Array.isArray(statementResult.results) || statementResult.results.length !== 1) return false;
+
+  const row = statementResult.results[0];
+  return isRecord(row) && row.ok === 1;
+};
+
 const probeD1 = async (): Promise<boolean> => {
   if (!isD1Configured()) return false;
   try {
     const payload = await queryD1Payload('SELECT 1 AS ok', [], { retry: 'safe-read' });
-    return typeof payload === 'object' && payload !== null;
+    return isSuccessfulD1ProbePayload(payload);
   } catch (error) {
     console.error('[hono][health] D1 探测失败', error);
     return false;

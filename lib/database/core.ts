@@ -333,6 +333,20 @@ export async function queryD1Payload(
     }
 
     const result = await response.json();
+    if (result && typeof result === 'object' && (result as { success?: unknown }).success === false) {
+      const errors = (result as { errors?: unknown }).errors;
+      const message = Array.isArray(errors)
+        ? errors
+          .map((entry) => {
+            if (!entry || typeof entry !== 'object') return '';
+            const value = (entry as { message?: unknown }).message;
+            return typeof value === 'string' ? value.trim() : '';
+          })
+          .filter(Boolean)
+          .join('; ')
+        : '';
+      throw new Error(`D1 API 返回失败 envelope${message ? `: ${message}` : ''}`);
+    }
     return result;
   } catch (error) {
     console.error("从 D1 数据库查询失败:", error);

@@ -126,6 +126,32 @@ describe('database/core queryD1Payload', () => {
     }
   });
 
+  test.each([
+    ['Cloudflare 管理 API', setMinimalEnv],
+    ['Gateway', setGatewayEnv],
+  ])('HTTP 200 的 %s 失败 envelope 仍然抛错', async (_transport, setEnv) => {
+    const envSnapshot = readEnvSnapshot();
+    const originalFetch = globalThis.fetch;
+
+    try {
+      setEnv();
+      globalThis.fetch = (async () =>
+        Response.json({
+          success: false,
+          result: [],
+          errors: [{ code: 7500, message: 'D1 query failed' }],
+        })) as typeof globalThis.fetch;
+
+      await withSilencedConsoleError(async () => {
+        await expect(queryD1Payload('SELECT 1 AS ok', [], { retry: 'safe-read' }))
+          .rejects.toThrow('D1 API 返回失败 envelope: D1 query failed');
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+      restoreEnvSnapshot(envSnapshot);
+    }
+  });
+
   test('缺少 Cloudflare 配置时直接失败', async () => {
     const envSnapshot = readEnvSnapshot();
     const originalFetch = globalThis.fetch;
