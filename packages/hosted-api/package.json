@@ -4,10 +4,30 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./generate-free": {
+      "types": "./src/generate-free.ts",
+      "import": "./src/generate-free.ts",
+      "default": "./src/generate-free.ts"
+    },
+    "./generate-game-card": {
+      "types": "./src/generate-game-card.ts",
+      "import": "./src/generate-game-card.ts",
+      "default": "./src/generate-game-card.ts"
+    },
     "./generate-magical-girl": {
       "types": "./src/generate-magical-girl.ts",
       "import": "./src/generate-magical-girl.ts",
       "default": "./src/generate-magical-girl.ts"
+    },
+    "./generate-scenario": {
+      "types": "./src/generate-scenario.ts",
+      "import": "./src/generate-scenario.ts",
+      "default": "./src/generate-scenario.ts"
+    },
+    "./regular-generation": {
+      "types": "./src/regular-generation.ts",
+      "import": "./src/regular-generation.ts",
+      "default": "./src/regular-generation.ts"
     }
   },
   "scripts": {

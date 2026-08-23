@@ -61,4 +61,27 @@ describe('public stream abort signal', () => {
     controller.abort('test-abort');
     expect(capturedOptions?.abortSignal.aborted).toBe(true);
   });
+
+  test('generate-scenario-stream 将 Request.signal 传给上游流式生成层', async () => {
+    const { default: handler } = await import('@/app/api/generate-scenario-stream/handler');
+    const controller = new AbortController();
+    const request = new Request('https://example.com/api/generate-scenario-stream', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal: controller.signal,
+      body: JSON.stringify({
+        answers: { 核心事件: '一次测试重逢' },
+        language: 'zh-CN',
+        fieldsToKeepEmpty: [],
+      }),
+    });
+
+    const response = await handler(request as any);
+
+    expect(response.status).toBe(200);
+    expect(capturedOptions?.abortSignal).toBeInstanceOf(AbortSignal);
+    expect(capturedOptions?.abortSignal.aborted).toBe(false);
+    controller.abort('test-abort');
+    expect(capturedOptions?.abortSignal.aborted).toBe(true);
+  });
 });

@@ -120,6 +120,29 @@ describe('workspace dependency boundaries', () => {
     ]));
   });
 
+  it('rejects Hono shared adapters importing legacy Next route source', async () => {
+    const rootDir = await createWorkspaceFixture({
+      'app/api/generate/handler.ts': 'export const appRouteHandler = () => new Response();\n',
+      'pages/api/legacy.ts': 'export default function legacy() {}\n',
+      'lib/hosted-api/generate.ts': 'export const sharedService = () => new Response();\n',
+      'server/adapters/generate.ts': [
+        "export { appRouteHandler } from '../../app/api/generate/handler';",
+        "export { default as legacy } from '@/pages/api/legacy';",
+        "export { sharedService } from '@/lib/hosted-api/generate';",
+      ].join('\n'),
+    });
+
+    const violations = checkWorkspaceBoundaries(rootDir).filter(
+      (violation) => violation.rule === 'MONO-009-HONO-ADAPTER-LEGACY',
+    );
+
+    expect(violations).toHaveLength(2);
+    expect(violations.map((violation) => violation.module)).toEqual([
+      '../../app/api/generate/handler',
+      '@/pages/api/legacy',
+    ]);
+  });
+
   it('rejects app-to-app imports through relative, alias, and workspace package names', async () => {
     const rootDir = await createWorkspaceFixture({
       'apps/web/package.json': manifest('@mahoshojo/web'),

@@ -402,6 +402,23 @@ function legacyRootAppTargetFromSpecifier(rootDirectory, filePath, moduleSpecifi
   return LEGACY_ROOT_APP_DIRECTORIES.has(topLevelDirectory) ? topLevelDirectory : null;
 }
 
+function isLegacyNextRouteSpecifier(rootDirectory, filePath, moduleSpecifier) {
+  let targetPath;
+  if (moduleSpecifier.startsWith('./') || moduleSpecifier.startsWith('../')) {
+    targetPath = path.resolve(path.dirname(filePath), moduleSpecifier);
+  } else if (moduleSpecifier.startsWith('@/')) {
+    targetPath = path.resolve(rootDirectory, moduleSpecifier.slice(2));
+  } else {
+    return false;
+  }
+
+  const relativePath = path.relative(rootDirectory, targetPath).split(path.sep).join('/');
+  return relativePath === 'app/api'
+    || relativePath.startsWith('app/api/')
+    || relativePath === 'pages/api'
+    || relativePath.startsWith('pages/api/');
+}
+
 function packageSubpath(moduleSpecifier, packageName) {
   return moduleSpecifier === packageName ? null : `.${moduleSpecifier.slice(packageName.length)}`;
 }
@@ -680,6 +697,36 @@ export function checkWorkspaceBoundaries(rootDirectory = process.cwd()) {
           );
         }
       }
+    }
+  }
+
+  const honoAdapterDirectory = path.join(normalizedRoot, 'server', 'adapters');
+  for (const sourceFile of collectSourceFiles(honoAdapterDirectory)) {
+    let imports;
+    try {
+      ({ imports } = collectSourceDependencies(readFileSync(sourceFile, 'utf8'), sourceFile));
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      addViolation(
+        violations,
+        'MONO-009-HONO-ADAPTER-PARSE',
+        sourceFile,
+        '<parse>',
+        `cannot parse Hono adapter source: ${reason}`,
+      );
+      continue;
+    }
+
+    for (const { module: moduleSpecifier, line } of imports) {
+      if (!isLegacyNextRouteSpecifier(normalizedRoot, sourceFile, moduleSpecifier)) continue;
+      addViolation(
+        violations,
+        'MONO-009-HONO-ADAPTER-LEGACY',
+        sourceFile,
+        moduleSpecifier,
+        'Hono shared adapter must depend on a shared service composition, not legacy Next route source',
+        line,
+      );
     }
   }
 

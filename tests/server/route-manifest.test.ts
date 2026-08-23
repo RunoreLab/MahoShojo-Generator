@@ -36,27 +36,30 @@ describe('Hono route manifest', () => {
     expect(routeDefinitions.some((route) => route.pattern.startsWith('/api/pvp/'))).toBe(false);
   });
 
-  it('把首条共享 service 路由从 legacy Next 动态导入中移除', async () => {
+  it('把常规生成 shared service 路由从 legacy Next 动态导入中移除', async () => {
     const sharedDefinitions = routeDefinitions.filter((route) => route.adapter === 'shared-service');
-    expect(sharedDefinitions.map((route) => route.id)).toEqual(['generate-magical-girl']);
-    expect(routeDefinitions.filter((route) => route.adapter === 'legacy-next')).toHaveLength(23);
-
-    const routeModule = await sharedDefinitions[0]?.load();
-    expect(Object.keys(routeModule ?? {}).sort()).toEqual([
-      'DELETE',
-      'GET',
-      'HEAD',
-      'OPTIONS',
-      'PATCH',
-      'POST',
-      'PUT',
+    expect(sharedDefinitions.map((route) => route.id).sort()).toEqual([
+      'generate-free',
+      'generate-free-stream',
+      'generate-game-card',
+      'generate-magical-girl',
+      'generate-scenario',
+      'generate-scenario-stream',
     ]);
+    expect(routeDefinitions.filter((route) => route.adapter === 'legacy-next')).toHaveLength(18);
+
+    for (const definition of sharedDefinitions) {
+      const routeModule = await definition.load();
+      expect(routeModule.POST).toEqual(expect.any(Function));
+    }
 
     const generatedSource = readFileSync(
       path.join(process.cwd(), 'server/generated/routes.ts'),
       'utf8',
     );
-    expect(generatedSource).toContain('import("../adapters/generate-magical-girl")');
-    expect(generatedSource).not.toContain('app/api/generate-magical-girl/route');
+    for (const routeId of sharedDefinitions.map((definition) => definition.id)) {
+      expect(generatedSource).toContain(`import("../adapters/${routeId}")`);
+      expect(generatedSource).not.toContain(`app/api/${routeId}/route`);
+    }
   });
 });

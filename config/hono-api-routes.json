@@ -8,13 +8,8 @@
     "generate-battle-story",
     "generate-canshou",
     "generate-canshou-stream",
-    "generate-free",
-    "generate-free-stream",
-    "generate-game-card",
     "generate-magical-girl-details",
     "generate-magical-girl-details-stream",
-    "generate-scenario",
-    "generate-scenario-stream",
     "generate-sublimation",
     "generate-sublimation-stream",
     "magic-tavern/generate-choices",
@@ -25,6 +20,11 @@
     "me/battle-reports/[generationId]/regenerate"
   ],
   "sharedRouteIds": [
-    "generate-magical-girl"
+    "generate-free",
+    "generate-free-stream",
+    "generate-game-card",
+    "generate-magical-girl",
+    "generate-scenario",
+    "generate-scenario-stream"
   ]
 }

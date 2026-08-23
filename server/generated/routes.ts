@@ -89,20 +89,20 @@ export const routeDefinitions: RouteDefinition[] = [
   {
     id: "generate-free",
     pattern: "/api/generate-free",
-    adapter: "legacy-next",
-    load: () => import("../../app/api/generate-free/route") as unknown as Promise<RouteModule>,
+    adapter: "shared-service",
+    load: () => import("../adapters/generate-free") as unknown as Promise<RouteModule>,
   },
   {
     id: "generate-free-stream",
     pattern: "/api/generate-free-stream",
-    adapter: "legacy-next",
-    load: () => import("../../app/api/generate-free-stream/route") as unknown as Promise<RouteModule>,
+    adapter: "shared-service",
+    load: () => import("../adapters/generate-free-stream") as unknown as Promise<RouteModule>,
   },
   {
     id: "generate-game-card",
     pattern: "/api/generate-game-card",
-    adapter: "legacy-next",
-    load: () => import("../../app/api/generate-game-card/route") as unknown as Promise<RouteModule>,
+    adapter: "shared-service",
+    load: () => import("../adapters/generate-game-card") as unknown as Promise<RouteModule>,
   },
   {
     id: "generate-magical-girl",
@@ -125,14 +125,14 @@ export const routeDefinitions: RouteDefinition[] = [
   {
     id: "generate-scenario",
     pattern: "/api/generate-scenario",
-    adapter: "legacy-next",
-    load: () => import("../../app/api/generate-scenario/route") as unknown as Promise<RouteModule>,
+    adapter: "shared-service",
+    load: () => import("../adapters/generate-scenario") as unknown as Promise<RouteModule>,
   },
   {
     id: "generate-scenario-stream",
     pattern: "/api/generate-scenario-stream",
-    adapter: "legacy-next",
-    load: () => import("../../app/api/generate-scenario-stream/route") as unknown as Promise<RouteModule>,
+    adapter: "shared-service",
+    load: () => import("../adapters/generate-scenario-stream") as unknown as Promise<RouteModule>,
   },
   {
     id: "generate-sublimation",
