@@ -33,6 +33,11 @@
       "types": "./src/api.ts",
       "import": "./src/api.ts",
       "default": "./src/api.ts"
+    },
+    "./json-value": {
+      "types": "./src/json-value.ts",
+      "import": "./src/json-value.ts",
+      "default": "./src/json-value.ts"
     }
   },
   "scripts": {
