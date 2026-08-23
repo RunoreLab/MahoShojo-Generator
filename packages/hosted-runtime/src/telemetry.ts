@@ -1,3 +1,5 @@
+import { ObserverRegistry } from './observer-registry';
+
 export type AiUpstreamOutcome = 'success' | 'error' | 'aborted' | 'timeout';
 
 export type AiUpstreamFinishObservation = {
@@ -51,46 +53,23 @@ export const noopHostedRuntimeObserver: HostedRuntimeObserver = Object.freeze({
   observeD1RoundTrip: () => undefined,
 });
 
-type ObserverRegistration = {
-  observer: HostedRuntimeObserver;
-  active: boolean;
-};
+const observerRegistry = new ObserverRegistry<HostedRuntimeObserver>();
 
-const observerRegistrations: ObserverRegistration[] = [];
-
-const currentObserver = (): HostedRuntimeObserver => {
-  for (let index = observerRegistrations.length - 1; index >= 0; index -= 1) {
-    const registration = observerRegistrations[index];
-    if (registration?.active) return registration.observer;
-  }
-  return noopHostedRuntimeObserver;
-};
-
-const discardInactiveTail = (): void => {
-  while (observerRegistrations.at(-1)?.active === false) {
-    observerRegistrations.pop();
-  }
-};
+const currentObserver = (): HostedRuntimeObserver => (
+  observerRegistry.current() ?? noopHostedRuntimeObserver
+);
 
 export const registerHostedRuntimeObserver = (
   observer: HostedRuntimeObserver,
-): (() => void) => {
-  const registration: ObserverRegistration = { observer, active: true };
-  observerRegistrations.push(registration);
-
-  return () => {
-    if (!registration.active) return;
-    registration.active = false;
-    discardInactiveTail();
-  };
-};
+): (() => void) => observerRegistry.register(observer);
 
 export const resetHostedRuntimeObserverForTests = (): void => {
-  observerRegistrations.splice(0, observerRegistrations.length);
+  observerRegistry.clear();
 };
 
-const normalizeNonNegativeFinite = (value: number): number => (
-  Number.isFinite(value) && value > 0 ? value : 0
+const normalizeNonNegativeFinite = (value: number): number => Math.min(
+  Number.MAX_SAFE_INTEGER,
+  Number.isFinite(value) && value > 0 ? value : 0,
 );
 
 const normalizeNonNegativeInteger = (value: number): number => Math.min(

@@ -140,6 +140,9 @@ describe('hosted runtime telemetry port', () => {
       attempt.recordTtfb(durationMs);
       attempt.finish({ outcome: 'success', durationMs });
     }
+    const hugeAttempt = beginAiUpstream();
+    hugeAttempt.recordTtfb(Number.MAX_VALUE);
+    hugeAttempt.finish({ outcome: 'success', durationMs: Number.MAX_VALUE });
     observeD1RoundTrip({
       durationMs: Number.POSITIVE_INFINITY,
       rowsRead: -3.2,
@@ -147,18 +150,21 @@ describe('hosted runtime telemetry port', () => {
       outcome: 'ok',
     });
     observeD1RoundTrip({
-      durationMs: 7.5,
+      durationMs: Number.MAX_VALUE,
       rowsRead: Number.POSITIVE_INFINITY,
       rowsWritten: Number.MAX_VALUE,
       outcome: 'error',
       errorClass: 'timeout',
     });
 
-    expect(recorder.ttfb).toEqual(Array.from({ length: 4 }, () => ({ durationMs: 0 })));
-    expect(recorder.finishes).toEqual(Array.from(
-      { length: 4 },
-      () => ({ outcome: 'success', durationMs: 0 }),
-    ));
+    expect(recorder.ttfb).toEqual([
+      ...Array.from({ length: 4 }, () => ({ durationMs: 0 })),
+      { durationMs: Number.MAX_SAFE_INTEGER },
+    ]);
+    expect(recorder.finishes).toEqual([
+      ...Array.from({ length: 4 }, () => ({ outcome: 'success', durationMs: 0 })),
+      { outcome: 'success', durationMs: Number.MAX_SAFE_INTEGER },
+    ]);
     expect(recorder.d1).toEqual([
       {
         durationMs: 0,
@@ -168,7 +174,7 @@ describe('hosted runtime telemetry port', () => {
         errorClass: 'none',
       },
       {
-        durationMs: 7.5,
+        durationMs: Number.MAX_SAFE_INTEGER,
         rowsRead: 0,
         rowsWritten: Number.MAX_SAFE_INTEGER,
         outcome: 'error',
@@ -222,6 +228,39 @@ describe('hosted runtime telemetry port', () => {
     }).not.toThrow();
     expect(recorder.aiStarts).toBe(0);
     expect(recorder.d1).toEqual([]);
+  });
+
+  it('reset 后的新 observer 不受旧 unregister 影响', () => {
+    const oldRecorder = createRecorder();
+    const currentRecorder = createRecorder();
+    const unregisterOld = registerHostedRuntimeObserver(oldRecorder.observer);
+    resetHostedRuntimeObserverForTests();
+    registerHostedRuntimeObserver(currentRecorder.observer);
+
+    unregisterOld();
+    beginAiUpstream();
+
+    expect(oldRecorder.aiStarts).toBe(0);
+    expect(currentRecorder.aiStarts).toBe(1);
+  });
+
+  it.each([
+    ['undefined', undefined],
+    ['null', null],
+    ['empty object', {}],
+    ['missing finish', { recordTtfb: () => undefined }],
+    ['missing recordTtfb', { finish: () => undefined }],
+  ])('malformed AI attempt handle（%s）保持 fail-soft', (_label, malformedHandle) => {
+    registerHostedRuntimeObserver({
+      beginAiUpstream: () => malformedHandle as never,
+      observeD1RoundTrip: () => undefined,
+    });
+
+    expect(() => {
+      const attempt = beginAiUpstream();
+      attempt.recordTtfb(1);
+      attempt.finish({ outcome: 'error', durationMs: 2 });
+    }).not.toThrow();
   });
 
   it('公开类型和转发值都不携带 secret/body/url/provider/sql metadata', () => {
