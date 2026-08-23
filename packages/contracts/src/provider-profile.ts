@@ -87,6 +87,27 @@ const addDisallowedHeaderIssues = (
   }
 };
 
+const addCanonicalDuplicateHeaderIssues = (
+  headers: Record<string, unknown>,
+  context: z.RefinementCtx,
+): void => {
+  const originalNamesByCanonicalName = new Map<string, string>();
+
+  for (const headerName of Object.keys(headers)) {
+    const canonicalName = headerName.toLowerCase();
+    if (originalNamesByCanonicalName.has(canonicalName)) {
+      context.addIssue({
+        code: 'custom',
+        path: [headerName],
+        message: 'HTTP header names are case-insensitive and must be unique',
+      });
+      continue;
+    }
+
+    originalNamesByCanonicalName.set(canonicalName, headerName);
+  }
+};
+
 const SecretHeaderRefsSchema = z
   .record(HeaderNameSchema, OpaqueKeySchema)
   .superRefine((headers, context) => {
@@ -99,6 +120,7 @@ const SecretHeaderRefsSchema = z
       TRANSPORT_CONTROLLED_HEADERS,
       'transport-controlled headers cannot be configured',
     );
+    addCanonicalDuplicateHeaderIssues(headers, context);
   });
 
 const PublicHeadersSchema = z
@@ -119,6 +141,7 @@ const PublicHeadersSchema = z
       KNOWN_SECRET_HEADERS,
       'secret-bearing headers must use secretHeaderRefs',
     );
+    addCanonicalDuplicateHeaderIssues(headers, context);
   });
 
 const GenerationDefaultKeySchema = z
@@ -159,6 +182,19 @@ export const DirectProviderProfileV1Schema = z
   })
   .strict()
   .superRefine((profile, context) => {
+    const publicHeaderNames = new Set(
+      Object.keys(profile.publicHeaders ?? {}).map((headerName) => headerName.toLowerCase()),
+    );
+    for (const secretHeaderName of Object.keys(profile.secretHeaderRefs ?? {})) {
+      if (publicHeaderNames.has(secretHeaderName.toLowerCase())) {
+        context.addIssue({
+          code: 'custom',
+          path: ['secretHeaderRefs', secretHeaderName],
+          message: 'HTTP header names are case-insensitive and cannot overlap publicHeaders',
+        });
+      }
+    }
+
     if (jsonUtf8ByteLength(profile) > MAX_DIRECT_PROVIDER_PROFILE_BYTES) {
       context.addIssue({
         code: 'too_big',

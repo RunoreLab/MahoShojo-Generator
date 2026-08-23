@@ -123,6 +123,34 @@ describe('Direct Provider Profile v1 contract', () => {
     }
   });
 
+  it('rejects case-insensitive duplicate header names within and across maps', () => {
+    expect(DirectProviderProfileV1Schema.safeParse({
+      ...validProfile,
+      publicHeaders: {
+        'X-Client-Name': 'MahoShojo',
+        'x-client-name': 'MahoShojo Desktop',
+      },
+    }).success).toBe(false);
+
+    expect(DirectProviderProfileV1Schema.safeParse({
+      ...validProfile,
+      secretHeaderRefs: {
+        'X-Custom-Token': 'vault:profile-local:custom-token',
+        'x-custom-token': 'vault:profile-local:alternate-custom-token',
+      },
+    }).success).toBe(false);
+
+    expect(DirectProviderProfileV1Schema.safeParse({
+      ...validProfile,
+      publicHeaders: {
+        'X-Custom-Token': 'public-value',
+      },
+      secretHeaderRefs: {
+        'x-custom-token': 'vault:profile-local:custom-token',
+      },
+    }).success).toBe(false);
+  });
+
   it('rejects invalid timestamps, blank identifiers, and non-JSON defaults', () => {
     expect(DirectProviderProfileV1Schema.safeParse({
       ...validProfile,
