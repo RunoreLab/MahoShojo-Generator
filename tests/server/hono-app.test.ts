@@ -1,7 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { HonoServerConfig } from '@/server/config';
 import { createHonoApp, isAllowedOrigin } from '@/server/app';
 import type { RedisService } from '@/server/redis/runtime';
+import { HonoRuntimeTelemetry } from '@/server/telemetry/runtime';
 
 const config: HonoServerConfig = {
   host: '127.0.0.1',
@@ -58,6 +59,24 @@ describe('Hono server app', () => {
         d1: { configured: false, required: false, ready: false, transport: 'none' },
       },
     });
+  });
+
+  it('telemetry 日志 transport 失败不改变 health/readiness', async () => {
+    const telemetry = new HonoRuntimeTelemetry({
+      logger: () => {
+        throw new Error('telemetry sink unavailable');
+      },
+      errorLogger: vi.fn(),
+    });
+    telemetry.emitSnapshot();
+    const app = createHonoApp(config, createRedisStub(), telemetry);
+
+    const [liveResponse, readyResponse] = await Promise.all([
+      app.request('/health/live'),
+      app.request('/health/ready'),
+    ]);
+    expect(liveResponse.status).toBe(200);
+    expect(readyResponse.status).toBe(200);
   });
 
   it('为响应添加运行时和请求 ID 标识', async () => {

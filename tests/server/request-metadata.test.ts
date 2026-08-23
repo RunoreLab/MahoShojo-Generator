@@ -4,16 +4,25 @@ import {
   requestMetadata,
   type HonoAppVariables,
 } from '@/server/middleware/request-metadata';
+import { HonoRuntimeTelemetry } from '@/server/telemetry/runtime';
 
 afterEach(() => {
   vi.restoreAllMocks();
 });
 
 describe('requestMetadata', () => {
-  const createApp = () => {
+  const createApp = (telemetry?: HonoRuntimeTelemetry) => {
     const app = new Hono<{ Variables: HonoAppVariables }>();
-    app.use('*', requestMetadata());
+    app.use('*', requestMetadata(telemetry));
     app.get('/resource', (context) => context.text('ok'));
+    app.get('/resource-stream', () => new Response(new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('chunk'));
+        controller.close();
+      },
+    }), {
+      headers: { 'content-type': 'text/event-stream; charset=utf-8' },
+    }));
     app.options('/resource', (context) => context.body(null, 204));
     app.post('/resource', (context) => context.text('created', 201));
     app.get('/failure', (context) => context.json({ error: 'failed' }, 500));
@@ -69,5 +78,20 @@ describe('requestMetadata', () => {
       path: '/resource',
       status: 201,
     }));
+  });
+
+  it('跟踪 request 和 streaming response 直到响应体消费完成', async () => {
+    const telemetry = new HonoRuntimeTelemetry();
+    const response = await createApp(telemetry).request('/resource-stream');
+
+    expect(telemetry.snapshot().http).toMatchObject({
+      activeRequests: 0,
+      peakActiveRequests: 1,
+      activeStreams: 1,
+      peakActiveStreams: 1,
+    });
+
+    await expect(response.text()).resolves.toBe('chunk');
+    expect(telemetry.snapshot().http.activeStreams).toBe(0);
   });
 });

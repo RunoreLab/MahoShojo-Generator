@@ -7,6 +7,10 @@ import { registerRoutes } from '@/server/routes/register';
 import { redisRateLimit } from '@/server/middleware/redis-rate-limit';
 import { requestMetadata, type HonoAppVariables } from '@/server/middleware/request-metadata';
 import type { RedisService } from '@/server/redis/runtime';
+import {
+  noopRuntimeTelemetry,
+  type RuntimeTelemetryService,
+} from '@/server/telemetry/runtime';
 
 const matchesWildcardOrigin = (origin: string, rule: string): boolean => {
   const wildcardPrefix = /^(https?):\/\/\*\./i;
@@ -42,10 +46,14 @@ export const isAllowedOrigin = (origin: string, allowedOrigins: string[]): strin
     : '';
 };
 
-export const createHonoApp = (config: HonoServerConfig, redis: RedisService) => {
+export const createHonoApp = (
+  config: HonoServerConfig,
+  redis: RedisService,
+  telemetry: RuntimeTelemetryService = noopRuntimeTelemetry,
+) => {
   const app = new Hono<{ Variables: HonoAppVariables }>();
 
-  app.use('*', requestMetadata());
+  app.use('*', requestMetadata(telemetry));
   app.use('*', secureHeaders());
   app.use('/api/*', cors({
     origin: (origin) => isAllowedOrigin(origin, config.corsOrigins),

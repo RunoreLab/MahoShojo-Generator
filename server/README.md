@@ -10,11 +10,29 @@
 - Redis 提供跨实例 API 限流；
 - 生产 Hono 默认使用 `HONO_AUTH_MODE=bearer`，受保护端点只接受用户 `authkey`；
 - `/health/live` 和 `/health/ready` 分离进程存活与依赖就绪状态；
+- 每 60 秒以单行 JSON 日志导出 Node 进程、event-loop 和 HTTP 容量基线。
 
 Phase 2.5B 当前已将 `generate-magical-girl` 作为首条 shared service 纵切：Hono 从
 `server/adapters/generate-magical-girl.ts` 加载 adapter，不再动态导入对应 Next route；Next wrapper 继续保留，
 但业务顺序与响应由共享 package 唯一实现。其余 23 条白名单 route 仍明确位于 `legacyRouteIds`，因此本批不表示
 Hono seam 或 `apps/api` 已整体完成。生成后的实际 registry 为 `server/generated/routes.ts`，不得手工修改。
+
+## 容量遥测
+
+Hono 主进程启动 `HonoRuntimeTelemetry`，默认每 60 秒向 stdout 输出一行固定
+`schemaVersion=1`、`event=hono.runtime.telemetry` 的 JSON。当前快照包含：
+
+- process 累计 CPU 时间与采样间隔 utilization、RSS、heap used/total/limit；
+- event-loop utilization、active/idle 时间与 delay samples/mean/p99/max；
+- active/peak HTTP request、response stream 和 Node socket。request 在 handler 结束时释放，stream
+  在响应体消费、取消或异常时释放，socket 在连接关闭时释放；
+- runtime origin 明确为 `hono-node`。当前 Hono 进程看不到入口层的真实 DR 选择，因此
+  `selection` 诚实记为 `not-observed`，不根据部署角色推断实际流量来源。
+
+该日志不记录 URL、request ID、用户标识、header、Prompt 或输出正文，也不新增公网
+metrics endpoint。当前批次只完成 `RESOURCE-005` 中的 Node 容量导出基础；AI upstream、
+D1、Redis 和可信控制面的 DR selection/failover reason 仍需从各自真实调用 seam 注入，
+不得将当前实现描述为 `RESOURCE-005` 已全部完成。
 
 迁移范围包括白名单内路径段以 `generate` 开头的 API，以及战报的 `regenerate` API；具体清单以
 `config/hono-api-routes.json` 为准。`/api/tachie/generate` 暂不迁移，继续由 Next.js Route Handler 承载。

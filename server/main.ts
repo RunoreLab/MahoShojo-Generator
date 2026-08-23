@@ -2,6 +2,10 @@ import { serve } from '@hono/node-server';
 import { createHonoApp } from '@/server/app';
 import { readHonoServerConfig } from '@/server/config';
 import { RedisRuntime } from '@/server/redis/runtime';
+import {
+  HonoRuntimeTelemetry,
+  observeServerConnections,
+} from '@/server/telemetry/runtime';
 
 const config = readHonoServerConfig();
 if (process.env.HONO_CONFIG_CHECK_ONLY === 'true') {
@@ -10,7 +14,9 @@ if (process.env.HONO_CONFIG_CHECK_ONLY === 'true') {
   const redis = new RedisRuntime(config.redisUrl, config.redisRequired);
   await redis.connect();
 
-  const app = createHonoApp(config, redis);
+  const telemetry = new HonoRuntimeTelemetry();
+  telemetry.start();
+  const app = createHonoApp(config, redis, telemetry);
   const server = serve({
     fetch: app.fetch,
     hostname: config.host,
@@ -18,6 +24,7 @@ if (process.env.HONO_CONFIG_CHECK_ONLY === 'true') {
   }, (info) => {
     console.info(`[hono] 服务已启动：http://${info.address}:${info.port}`);
   });
+  const stopObservingConnections = observeServerConnections(server, telemetry);
 
   let shuttingDown = false;
   const shutdown = async (signal: string): Promise<void> => {
@@ -25,8 +32,14 @@ if (process.env.HONO_CONFIG_CHECK_ONLY === 'true') {
     shuttingDown = true;
     console.info(`[hono] 收到 ${signal}，开始优雅退出`);
 
-    await new Promise<void>((resolve) => server.close(() => resolve()));
-    await redis.close();
+    try {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+      await redis.close();
+    } finally {
+      stopObservingConnections();
+      telemetry.emitSnapshot();
+      telemetry.stop();
+    }
   };
 
   for (const signal of ['SIGINT', 'SIGTERM'] as const) {
