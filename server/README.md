@@ -59,11 +59,12 @@ curl http://localhost:8787/health/ready
 
 ## D1 Gateway
 
-Gateway 配置位于 `server/d1-gateway/wrangler.jsonc`，业务接口仅接受参数化 query、raw 和最多
-50 条语句的 batch，并拒绝 DDL/维护 SQL。部署前设置 HMAC 密钥：
+Gateway 已迁移为独立 workspace app，配置位于 `apps/d1-gateway/wrangler.jsonc`。业务接口仅接受参数化
+query、raw 和最多 50 条语句的 batch，并拒绝 DDL/维护 SQL。完整运行时、环境、health、部署与回滚说明见
+`apps/d1-gateway/README.md`。部署前设置 HMAC 密钥：
 
 ```bash
-pnpm exec wrangler secret put D1_GATEWAY_HMAC_SECRET --config server/d1-gateway/wrangler.jsonc
+pnpm --filter @mahoshojo/d1-gateway exec wrangler secret put D1_GATEWAY_HMAC_SECRET
 pnpm run deploy:d1-gateway
 ```
 

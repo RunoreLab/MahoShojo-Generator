@@ -6,7 +6,7 @@
     "scripts": {
         "dev": "next dev --turbopack",
         "dev:server": "node scripts/generate-hono-route-manifest.mjs && tsx watch server/index.ts",
-        "dev:d1-gateway": "wrangler dev --config server/d1-gateway/wrangler.jsonc",
+        "dev:d1-gateway": "pnpm --filter @mahoshojo/d1-gateway run dev",
         "dev:pretty": "bash -lc 'if command -v pino-pretty >/dev/null 2>&1; then next dev --turbopack | pino-pretty; else echo \"[dev:pretty] pino-pretty 未安装，回退到原始日志输出\" >&2; next dev --turbopack; fi'",
         "clean:next": "node -e \"require('node:fs').rmSync('.next', { recursive: true, force: true })\"",
         "build": "node -e \"require('node:fs').rmSync('.next', { recursive: true, force: true })\" && next build",
@@ -22,7 +22,7 @@
         "build:server": "node scripts/generate-hono-route-manifest.mjs && node scripts/build-hono-server.mjs",
         "server:routes": "node scripts/generate-hono-route-manifest.mjs",
         "verify:server:runtime": "node scripts/verify-hono-runtime.mjs",
-        "deploy:d1-gateway": "wrangler deploy --config server/d1-gateway/wrangler.jsonc",
+        "deploy:d1-gateway": "pnpm --filter @mahoshojo/d1-gateway run deploy",
         "lint": "next lint",
         "check:workspace:boundaries": "node scripts/check-workspace-boundaries.mjs",
         "workspace:test": "pnpm --filter \"./packages/*\" --filter \"./apps/*\" --if-present run test",
