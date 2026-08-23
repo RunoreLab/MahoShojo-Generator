@@ -39,6 +39,21 @@ const mocks = vi.hoisted(() => ({
     mocks.events.push('activity');
     expect(request.headers.get('x-mahoshojo-activity-token')).toBe('activity-token');
   }),
+  streamAbortSignals: [] as AbortSignal[],
+  generateWithStreamAI: vi.fn(async (_input: unknown, options: any) => {
+    mocks.events.push('generate-stream');
+    mocks.streamAbortSignals.push(options.abortSignal);
+    options.telemetry.model = 'stream-test-model';
+    return {
+      response: new Response('hono-stream-body', {
+        headers: {
+          'Content-Type': 'text/plain; charset=utf-8',
+          'X-Upstream-Stream': 'preserved',
+        },
+      }),
+      usagePromise: Promise.resolve({}),
+    };
+  }),
 }));
 
 vi.mock('@/lib/ai', () => ({
@@ -47,6 +62,10 @@ vi.mock('@/lib/ai', () => ({
 }));
 vi.mock('@/lib/ai/availability', () => ({
   buildChannelContextFromPayload: vi.fn(() => undefined),
+}));
+vi.mock('@/lib/stream/raw-ai', () => ({
+  LoadBalanceStrategy: { CUSTOM: 'custom', SEQUENTIAL: 'sequential' },
+  generateWithStreamAI: mocks.generateWithStreamAI,
 }));
 vi.mock('@/lib/ai/public-rate-limit', () => ({
   acquirePublicAiRateLimit: vi.fn(async () => ({ allowed: true })),
@@ -265,5 +284,62 @@ describe('常规生成 Hono production composition', () => {
     expect(mocks.events).toEqual(['generate', 'activity', 'signature']);
     expect(mocks.generateSignature).toHaveBeenCalledOnce();
     expect(mocks.recordActivity).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    {
+      name: 'Creator stream',
+      path: '/api/creator/generate-stream',
+      body: {
+        template: 'general',
+        freeformBrief: '生成一个测试角色',
+        answers: [],
+        questionnaires: [],
+      },
+    },
+    {
+      name: '残兽 stream',
+      path: '/api/generate-canshou-stream',
+      body: {
+        answers: [{
+          question: '核心概念？',
+          answer: '测试残兽',
+          questionId: 'q-1',
+          questionnaireId: 'canshou-test',
+        }],
+        questionnaires: [{
+          id: 'canshou-test',
+          title: '测试残兽问卷',
+          kind: 'canshou',
+          questions: [{ id: 'q-1', question: '核心概念？' }],
+        }],
+      },
+    },
+  ])('经 Hono dispatcher 保留 $name 原始 body/header 与 abort signal', async ({ path, body }) => {
+    mocks.events.length = 0;
+    mocks.streamAbortSignals.length = 0;
+    const app = createHonoApp(config, redis);
+    const controller = new AbortController();
+    const response = await app.request(path, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Mahoshojo-Activity-Token': 'activity-token',
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('x-backend-runtime')).toBe('hono-node');
+    expect(response.headers.get('x-upstream-stream')).toBe('preserved');
+    expect(response.headers.get('content-type')).toBe('text/plain; charset=utf-8');
+    expect(await response.text()).toBe('hono-stream-body');
+    expect(mocks.events).toEqual(['generate-stream', 'activity']);
+    expect(mocks.streamAbortSignals).toHaveLength(1);
+    expect(mocks.streamAbortSignals[0]).toBeInstanceOf(AbortSignal);
+    expect(mocks.streamAbortSignals[0]?.aborted).toBe(false);
+    controller.abort('hono-caller-abort');
+    expect(mocks.streamAbortSignals[0]?.aborted).toBe(true);
   });
 });

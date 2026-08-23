@@ -88,7 +88,7 @@ describe('常规 Hosted generation runtime adapters', () => {
     expect(canshouNull.status).toBe(500);
     expect(await canshouNull.json()).toEqual({
       error: '生成失败，当前服务器可能正忙，请稍后重试',
-      message: expect.any(String),
+      message: "Cannot destructure property 'answers' of 'parsedBody' as it is null.",
     });
   });
 });

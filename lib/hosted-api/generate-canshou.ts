@@ -125,7 +125,9 @@ export const createDefaultGenerateCanshouService = (): GenerateCanshouService =>
   createGenerateCanshouService<CanshouInput, CanshouExecution, CanshouGeneration>({
     prepare: async (request, body) => {
       if (body === null || body === undefined) {
-        throw new TypeError('Cannot destructure an empty request body');
+        throw new TypeError(
+          "Cannot destructure property 'answers' of 'parsedBody' as it is null.",
+        );
       }
       const parsedBody = body && typeof body === 'object'
         ? body as Record<string, unknown>

@@ -186,6 +186,31 @@ describe('questionnaire generation runtime', () => {
     expect(unsafeLoader).not.toHaveBeenCalled();
   });
 
+  it('preset 仅显式 false 禁止原生使用，缺省值保持 legacy 允许语义', async () => {
+    const resolve = (nativeAllowed: unknown) => resolveNativeQuestionnaires({
+      requestUrl: 'https://example.test/api/generate',
+      selections: normalizeQuestionnaireSelections([{
+        source: 'preset',
+        kind: 'magical-girl',
+        presetId: 'default',
+      }]),
+      requiredQuestionnaireIds: new Set(['mg-default']),
+      presetEntries: [{
+        id: 'default',
+        kind: 'magical-girl',
+        path: '/questionnaires/presets/default.json',
+      }],
+      loadPreset: vi.fn(async () => questionnaire({ nativeAllowed })),
+      loadDataCard: vi.fn(),
+    });
+
+    await expect(resolve(false)).resolves.toEqual({ allowed: false, questionnaires: [] });
+    await expect(resolve(undefined)).resolves.toMatchObject({
+      allowed: true,
+      questionnaires: [{ id: 'mg-default' }],
+    });
+  });
+
   it('数据库问卷必须显式 nativeAllowed=true，且 required answer id 必须完整加载', async () => {
     const baseOptions = {
       requestUrl: 'https://example.test/api/generate',
@@ -217,6 +242,46 @@ describe('questionnaire generation runtime', () => {
       })),
     });
     expect(missingRequired).toEqual({ allowed: false, questionnaires: [] });
+
+    const deniedFalse = await resolveNativeQuestionnaires({
+      ...baseOptions,
+      requiredQuestionnaireIds: new Set(['mg-default']),
+      loadDataCard: vi.fn(async () => ({
+        type: 'questionnaire',
+        data: JSON.stringify(questionnaire({ nativeAllowed: false })),
+      })),
+    });
+    expect(deniedFalse).toEqual({ allowed: false, questionnaires: [] });
+
+    const skippedFalse = await resolveNativeQuestionnaires({
+      requestUrl: 'https://example.test/api/generate',
+      selections: normalizeQuestionnaireSelections([
+        {
+          source: 'database',
+          kind: 'magical-girl',
+          dataCardId: 'untrusted-card',
+          useLore: false,
+        },
+        {
+          source: 'database',
+          kind: 'magical-girl',
+          dataCardId: 'trusted-card',
+        },
+      ]),
+      requiredQuestionnaireIds: new Set(['trusted-questionnaire']),
+      presetEntries: [],
+      loadPreset: vi.fn(),
+      loadDataCard: vi.fn(async (id: string) => ({
+        type: 'questionnaire',
+        data: JSON.stringify(id === 'untrusted-card'
+          ? questionnaire({ id: 'untrusted-questionnaire', nativeAllowed: false })
+          : questionnaire({ id: 'trusted-questionnaire', nativeAllowed: true })),
+      })),
+    });
+    expect(skippedFalse).toMatchObject({
+      allowed: true,
+      questionnaires: [{ id: 'trusted-questionnaire' }],
+    });
   });
 
   it('不可信 selection 仅可在无 lore 且与已提交答案无关时跳过', async () => {

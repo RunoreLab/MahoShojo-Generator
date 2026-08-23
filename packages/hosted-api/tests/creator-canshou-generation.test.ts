@@ -163,6 +163,50 @@ describe('Creator / 残兽 shared generation services', () => {
     expect(deps.buildResponse).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ['prepare', ['prepare']],
+    ['safety', ['prepare', 'rate-limit', 'safety']],
+    ['provider', ['prepare', 'rate-limit', 'safety', 'provider']],
+    ['generate', ['prepare', 'rate-limit', 'safety', 'provider', 'generate']],
+  ] as const)('%s 返回 StepResult/Response 时停止全部后续步骤', async (step, expectedEvents) => {
+    const events: string[] = [];
+    const deps = dependencies(events);
+    const stopped = () => new Response(JSON.stringify({ error: `${step} stopped` }), {
+      status: 418,
+    });
+    if (step === 'prepare') {
+      deps.prepare.mockImplementationOnce(async () => {
+        events.push('prepare');
+        return respondStep(stopped()) as never;
+      });
+    } else if (step === 'safety') {
+      deps.enforceSafety.mockImplementationOnce(async () => {
+        events.push('safety');
+        return stopped() as never;
+      });
+    } else if (step === 'provider') {
+      deps.resolveExecution.mockImplementationOnce(async () => {
+        events.push('provider');
+        return respondStep(stopped()) as never;
+      });
+    } else {
+      deps.generate.mockImplementationOnce(async () => {
+        events.push('generate');
+        return respondStep(stopped()) as never;
+      });
+    }
+    const service = createGenerateCreatorStreamService<Prepared, Execution, Generated>(deps);
+
+    const response = await service(request());
+
+    expect(response.status).toBe(418);
+    expect(await response.json()).toEqual({ error: `${step} stopped` });
+    expect(events).toEqual(expectedEvents);
+    expect(deps.recordActivity).not.toHaveBeenCalled();
+    expect(deps.buildResponse).not.toHaveBeenCalled();
+    expect(deps.logError).not.toHaveBeenCalled();
+  });
+
   it('正常拒绝使用 StepResult 响应且不被转换成异常 wire', async () => {
     const events: string[] = [];
     const deps = dependencies(events);
