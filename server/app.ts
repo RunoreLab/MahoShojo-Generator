@@ -3,7 +3,7 @@ import { cors } from 'hono/cors';
 import { secureHeaders } from 'hono/secure-headers';
 import type { HonoServerConfig } from '@/server/config';
 import { registerHealthRoutes } from '@/server/health';
-import { registerLegacyRoutes } from '@/server/legacy/register';
+import { registerRoutes } from '@/server/routes/register';
 import { redisRateLimit } from '@/server/middleware/redis-rate-limit';
 import { requestMetadata, type HonoAppVariables } from '@/server/middleware/request-metadata';
 import type { RedisService } from '@/server/redis/runtime';
@@ -75,7 +75,7 @@ export const createHonoApp = (config: HonoServerConfig, redis: RedisService) => 
   }));
 
   registerHealthRoutes(app, config, redis);
-  registerLegacyRoutes(app);
+  registerRoutes(app);
 
   app.notFound((context) => context.json({
     error: 'Not found',

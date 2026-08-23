@@ -2,13 +2,19 @@
 
 当前实现建立了可并行验证的 Hono Node 服务，不会改变原有 `pnpm dev` 和 Cloudflare Next 部署：
 
-- 通过 `config/hono-api-routes.json` 白名单挂载全部生成类 API；
-- 复用已有标准 Web `Request` / `Response` handler；
+- 通过 `config/hono-api-routes.json` 的 `sharedRouteIds` / `legacyRouteIds` 互斥白名单挂载全部生成类 API；
+- shared route 由 Hono adapter 与 Next Route Adapter 调用同一 `@mahoshojo/hosted-api` application service；
+- 尚未迁移的 route 短期继续复用已有标准 Web `Request` / `Response` handler；
 - 为旧 handler 提供 Node 版 `waitUntil`；
 - D1 访问优先经过内部 Gateway Worker，保留 Cloudflare 管理 API 作为迁移回退；
 - Redis 提供跨实例 API 限流；
 - 生产 Hono 默认使用 `HONO_AUTH_MODE=bearer`，受保护端点只接受用户 `authkey`；
 - `/health/live` 和 `/health/ready` 分离进程存活与依赖就绪状态；
+
+Phase 2.5B 当前已将 `generate-magical-girl` 作为首条 shared service 纵切：Hono 从
+`server/adapters/generate-magical-girl.ts` 加载 adapter，不再动态导入对应 Next route；Next wrapper 继续保留，
+但业务顺序与响应由共享 package 唯一实现。其余 23 条白名单 route 仍明确位于 `legacyRouteIds`，因此本批不表示
+Hono seam 或 `apps/api` 已整体完成。生成后的实际 registry 为 `server/generated/routes.ts`，不得手工修改。
 
 迁移范围包括白名单内路径段以 `generate` 开头的 API，以及战报的 `regenerate` API；具体清单以
 `config/hono-api-routes.json` 为准。`/api/tachie/generate` 暂不迁移，继续由 Next.js Route Handler 承载。

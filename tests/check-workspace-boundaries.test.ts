@@ -95,6 +95,31 @@ describe('workspace dependency boundaries', () => {
     ]));
   });
 
+  it('rejects workspace apps importing legacy root app internals', async () => {
+    const rootDir = await createWorkspaceFixture({
+      'app/api/generate/route.ts': 'export const POST = () => new Response();\n',
+      'lib/ai.ts': 'export const generate = () => null;\n',
+      'server/app.ts': 'export const createApp = () => null;\n',
+      'apps/api/package.json': manifest('@mahoshojo/api'),
+      'apps/api/src/index.ts': [
+        "export { POST } from '../../../app/api/generate/route';",
+        "export { generate } from '@/lib/ai';",
+        "export { createApp } from '@/server/app';",
+      ].join('\n'),
+    });
+
+    const violations = checkWorkspaceBoundaries(rootDir).filter(
+      (violation) => violation.rule === 'MONO-003-LEGACY-APP',
+    );
+
+    expect(violations).toHaveLength(3);
+    expect(violations.map((violation) => violation.module)).toEqual(expect.arrayContaining([
+      '../../../app/api/generate/route',
+      '@/lib/ai',
+      '@/server/app',
+    ]));
+  });
+
   it('rejects app-to-app imports through relative, alias, and workspace package names', async () => {
     const rootDir = await createWorkspaceFixture({
       'apps/web/package.json': manifest('@mahoshojo/web'),

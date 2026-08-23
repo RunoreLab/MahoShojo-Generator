@@ -1,16 +1,22 @@
-import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 const projectRoot = process.cwd();
 const apiRoot = path.join(projectRoot, 'app', 'api');
-const outputFile = path.join(projectRoot, 'server', 'generated', 'legacy-routes.ts');
+const sharedAdapterRoot = path.join(projectRoot, 'server', 'adapters');
+const outputFile = path.join(projectRoot, 'server', 'generated', 'routes.ts');
 const allowlistFile = path.join(projectRoot, 'config', 'hono-api-routes.json');
 
 const readRouteAllowlist = async () => {
   const payload = JSON.parse(await readFile(allowlistFile, 'utf8'));
-  const routeIds = payload?.routeIds;
-  if (!Array.isArray(routeIds) || routeIds.length === 0) {
-    throw new Error('config/hono-api-routes.json 必须提供非空 routeIds 数组');
+  const legacyRouteIds = payload?.legacyRouteIds;
+  const sharedRouteIds = payload?.sharedRouteIds;
+  if (!Array.isArray(legacyRouteIds) || !Array.isArray(sharedRouteIds)) {
+    throw new Error('config/hono-api-routes.json 必须提供 legacyRouteIds 与 sharedRouteIds 数组');
+  }
+  const routeIds = [...legacyRouteIds, ...sharedRouteIds];
+  if (routeIds.length === 0) {
+    throw new Error('Hono 路由白名单不得为空');
   }
   if (routeIds.some((routeId) => typeof routeId !== 'string' || !routeId.trim())) {
     throw new Error('Hono routeIds 只能包含非空字符串');
@@ -18,9 +24,14 @@ const readRouteAllowlist = async () => {
 
   const normalizedRouteIds = routeIds.map((routeId) => routeId.trim());
   if (new Set(normalizedRouteIds).size !== normalizedRouteIds.length) {
-    throw new Error('Hono routeIds 不得重复');
+    throw new Error('legacyRouteIds 与 sharedRouteIds 不得重复或重叠');
   }
-  return normalizedRouteIds;
+  const normalizedLegacyRouteIds = legacyRouteIds.map((routeId) => routeId.trim());
+  return {
+    legacyRouteIds: normalizedLegacyRouteIds,
+    routeIds: normalizedRouteIds,
+    sharedRouteIdSet: new Set(sharedRouteIds.map((routeId) => routeId.trim())),
+  };
 };
 
 const walk = async (directory) => {
@@ -59,7 +70,7 @@ const routeRank = (routePath) => {
   return staticCount * 10_000 + segments.length * 100 - dynamicCount * 10 - wildcardCount * 1_000;
 };
 
-const allowedRouteIds = await readRouteAllowlist();
+const { legacyRouteIds, routeIds: allowedRouteIds, sharedRouteIdSet } = await readRouteAllowlist();
 const allowedRouteIdSet = new Set(allowedRouteIds);
 const routeFiles = await walk(apiRoot);
 const discoveredDefinitions = routeFiles
@@ -68,8 +79,7 @@ const discoveredDefinitions = routeFiles
     const routeId = relativeToApi.replace(/\/route\.ts$/, '');
     const segments = routeId.split('/').map(toHonoSegment);
     const routePath = `/api/${segments.join('/')}`;
-    const importPath = `../../app/api/${relativeToApi.replace(/\.ts$/, '')}`;
-    return { importPath, routeId, routePath };
+    return { routeId, routePath };
   });
 
 const discoveredRouteIdSet = new Set(discoveredDefinitions.map((definition) => definition.routeId));
@@ -80,21 +90,38 @@ if (missingRouteIds.length > 0) {
 
 const definitions = discoveredDefinitions
   .filter((definition) => allowedRouteIdSet.has(definition.routeId))
+  .map((definition) => ({
+    ...definition,
+    adapter: sharedRouteIdSet.has(definition.routeId) ? 'shared-service' : 'legacy-next',
+    importPath: sharedRouteIdSet.has(definition.routeId)
+      ? `../adapters/${definition.routeId}`
+      : `../../app/api/${definition.routeId}/route`,
+  }))
   .sort((left, right) => routeRank(right.routePath) - routeRank(left.routePath)
     || left.routePath.localeCompare(right.routePath));
 
+for (const routeId of sharedRouteIdSet) {
+  const adapterPath = path.join(sharedAdapterRoot, `${routeId}.ts`);
+  try {
+    await access(adapterPath);
+  } catch {
+    throw new Error(`共享 Hono route adapter 不存在：${path.relative(projectRoot, adapterPath)}`);
+  }
+}
+
 const lines = [
   '// 此文件由 scripts/generate-hono-route-manifest.mjs 自动生成，请勿手工编辑。',
-  "import type { LegacyRouteDefinition, LegacyRouteModule } from '@/server/legacy/types';",
+  "import type { RouteDefinition, RouteModule } from '@/server/routes/types';",
   '',
-  'export const legacyRouteDefinitions: LegacyRouteDefinition[] = [',
+  'export const routeDefinitions: RouteDefinition[] = [',
 ];
 
 for (const definition of definitions) {
   lines.push('  {');
   lines.push(`    id: ${JSON.stringify(definition.routeId)},`);
   lines.push(`    pattern: ${JSON.stringify(definition.routePath)},`);
-  lines.push(`    load: () => import(${JSON.stringify(definition.importPath)}) as unknown as Promise<LegacyRouteModule>,`);
+  lines.push(`    adapter: ${JSON.stringify(definition.adapter)},`);
+  lines.push(`    load: () => import(${JSON.stringify(definition.importPath)}) as unknown as Promise<RouteModule>,`);
   lines.push('  },');
 }
 
@@ -102,4 +129,7 @@ lines.push('];', '');
 
 await mkdir(path.dirname(outputFile), { recursive: true });
 await writeFile(outputFile, `${lines.join('\n')}\n`, 'utf8');
-console.log(`[hono-routes] generated ${definitions.length} allowlisted routes -> ${path.relative(projectRoot, outputFile)}`);
+console.log(
+  `[hono-routes] generated ${definitions.length} allowlisted routes `
+  + `(${sharedRouteIdSet.size} shared, ${legacyRouteIds.length} legacy) -> ${path.relative(projectRoot, outputFile)}`,
+);

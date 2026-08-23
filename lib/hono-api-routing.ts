@@ -3,7 +3,12 @@ import honoApiRoutes from '@/config/hono-api-routes.json';
 
 const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-const honoRoutePatterns = honoApiRoutes.routeIds.map((routeId) => {
+const honoRouteIds = [
+  ...honoApiRoutes.legacyRouteIds,
+  ...honoApiRoutes.sharedRouteIds,
+];
+
+const honoRoutePatterns = honoRouteIds.map((routeId) => {
   const pattern = routeId
     .split('/')
     .map((segment) => (/^\[[^\]]+\]$/.test(segment) ? '[^/]+' : escapeRegExp(segment)))

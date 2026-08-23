@@ -1,5 +1,5 @@
 {
-  "routeIds": [
+  "legacyRouteIds": [
     "arena/generate",
     "arena/generate-stream",
     "arena/session/generate-next",
@@ -11,7 +11,6 @@
     "generate-free",
     "generate-free-stream",
     "generate-game-card",
-    "generate-magical-girl",
     "generate-magical-girl-details",
     "generate-magical-girl-details-stream",
     "generate-scenario",
@@ -24,5 +23,8 @@
     "magic-tea-party/generate-stream",
     "magic-tea-party/generate-updates",
     "me/battle-reports/[generationId]/regenerate"
+  ],
+  "sharedRouteIds": [
+    "generate-magical-girl"
   ]
 }

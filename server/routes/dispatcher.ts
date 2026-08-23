@@ -1,10 +1,10 @@
 import type { Context } from 'hono';
 import type {
-  LegacyHttpMethod,
-  LegacyRouteContext,
-  LegacyRouteDefinition,
+  HttpMethod,
   NodeExecutionContext,
-} from '@/server/legacy/types';
+  RouteContext,
+  RouteDefinition,
+} from '@/server/routes/types';
 
 const attachExecutionContext = (request: Request, routeId: string): Request => {
   const pendingTasks = new Set<Promise<unknown>>();
@@ -28,15 +28,15 @@ const attachExecutionContext = (request: Request, routeId: string): Request => {
   return request;
 };
 
-const buildRouteContext = (context: Context): LegacyRouteContext => ({
+const buildRouteContext = (context: Context): RouteContext => ({
   params: Promise.resolve(context.req.param()),
 });
 
-export const dispatchLegacyRoute = async (
+export const dispatchRoute = async (
   context: Context,
-  definition: LegacyRouteDefinition,
+  definition: RouteDefinition,
 ): Promise<Response> => {
-  const method = context.req.method.toUpperCase() as LegacyHttpMethod;
+  const method = context.req.method.toUpperCase() as HttpMethod;
   const routeModule = await definition.load();
   const handler = routeModule[method];
 

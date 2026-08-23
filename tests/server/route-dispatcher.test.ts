@@ -1,14 +1,15 @@
 import { Hono } from 'hono';
 import { describe, expect, it } from 'vitest';
-import { dispatchLegacyRoute } from '@/server/legacy/dispatcher';
-import type { LegacyRouteDefinition } from '@/server/legacy/types';
+import { dispatchRoute } from '@/server/routes/dispatcher';
+import type { RouteDefinition } from '@/server/routes/types';
 
-describe('Hono legacy route dispatcher', () => {
+describe('Hono route dispatcher', () => {
   it('传递动态参数并补充 waitUntil 上下文', async () => {
     let waitUntilAvailable = false;
-    const definition: LegacyRouteDefinition = {
+    const definition: RouteDefinition = {
       id: 'items/[itemId]',
       pattern: '/api/items/:itemId',
+      adapter: 'shared-service',
       load: async () => ({
         GET: async (request, context) => {
           const requestWithContext = request as Request & {
@@ -21,7 +22,7 @@ describe('Hono legacy route dispatcher', () => {
       }),
     };
     const app = new Hono();
-    app.all(definition.pattern, (context) => dispatchLegacyRoute(context, definition));
+    app.all(definition.pattern, (context) => dispatchRoute(context, definition));
 
     const response = await app.request('/api/items/card-1');
     expect(response.status).toBe(200);
@@ -30,13 +31,14 @@ describe('Hono legacy route dispatcher', () => {
   });
 
   it('未导出对应方法时返回 405', async () => {
-    const definition: LegacyRouteDefinition = {
+    const definition: RouteDefinition = {
       id: 'read-only',
       pattern: '/api/read-only',
+      adapter: 'shared-service',
       load: async () => ({ GET: async () => Response.json({ ok: true }) }),
     };
     const app = new Hono();
-    app.all(definition.pattern, (context) => dispatchLegacyRoute(context, definition));
+    app.all(definition.pattern, (context) => dispatchRoute(context, definition));
 
     const response = await app.request('/api/read-only', { method: 'POST' });
     expect(response.status).toBe(405);

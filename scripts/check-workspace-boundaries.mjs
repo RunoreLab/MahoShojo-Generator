@@ -477,22 +477,22 @@ export function checkWorkspaceBoundaries(rootDirectory = process.cwd()) {
           );
         }
 
-        if (unit.kind === 'packages') {
-          const legacyRootTarget = legacyRootAppTargetFromSpecifier(
-            normalizedRoot,
+        const legacyRootTarget = legacyRootAppTargetFromSpecifier(
+          normalizedRoot,
+          sourceFile,
+          moduleSpecifier,
+        );
+        if (legacyRootTarget) {
+          addViolation(
+            violations,
+            unit.kind === 'packages' ? 'MONO-005-PACKAGE-LEGACY-APP' : 'MONO-003-LEGACY-APP',
             sourceFile,
             moduleSpecifier,
+            unit.kind === 'packages'
+              ? `package ${unit.name} must not import legacy root app directory ${legacyRootTarget}`
+              : `app ${unit.name} must not import legacy root app directory ${legacyRootTarget}`,
+            line,
           );
-          if (legacyRootTarget) {
-            addViolation(
-              violations,
-              'MONO-005-PACKAGE-LEGACY-APP',
-              sourceFile,
-              moduleSpecifier,
-              `package ${unit.name} must not import legacy root app directory ${legacyRootTarget}`,
-              line,
-            );
-          }
         }
 
         const relativePackageTarget = packageTargetFromRelativeSpecifier(sourceFile, moduleSpecifier, packages);

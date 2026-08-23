@@ -1,0 +1,29 @@
+{
+  "name": "@mahoshojo/hosted-api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./generate-magical-girl": {
+      "types": "./src/generate-magical-girl.ts",
+      "import": "./src/generate-magical-girl.ts",
+      "default": "./src/generate-magical-girl.ts"
+    }
+  },
+  "scripts": {
+    "test": "vitest run --config vitest.config.ts",
+    "lint": "eslint src tests --config eslint.config.mjs",
+    "build": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "zod": "^4.1.13"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "@typescript-eslint/parser": "^8.50.0",
+    "esbuild": "^0.28.1",
+    "eslint": "^9",
+    "typescript": "^5",
+    "vitest": "^4.1.7"
+  }
+}
