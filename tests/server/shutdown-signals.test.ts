@@ -81,10 +81,11 @@ describe('graceful shutdown signal wiring', () => {
 
   it('异步 error logger rejection 被吸收且仍只失败退出一次', async () => {
     const signalSource = new EventEmitter();
-    const loggerFailure = Promise.reject(new Error('log sink unavailable'));
-    void loggerFailure.then(undefined, () => undefined);
-    const catchSpy = vi.spyOn(loggerFailure, 'catch');
-    const errorLogger = vi.fn(() => loggerFailure);
+    const unhandledRejections: unknown[] = [];
+    const onUnhandledRejection = (reason: unknown) => {
+      unhandledRejections.push(reason);
+    };
+    const errorLogger = vi.fn(() => Promise.reject(new Error('log sink unavailable')));
     const exit = vi.fn();
     disposers.push(wireGracefulShutdownSignals({
       errorLogger,
@@ -95,18 +96,28 @@ describe('graceful shutdown signal wiring', () => {
       signalSource,
     }));
 
-    signalSource.emit('SIGTERM');
-    signalSource.emit('SIGTERM');
-    await new Promise<void>((resolve) => setImmediate(resolve));
+    process.on('unhandledRejection', onUnhandledRejection);
+    try {
+      signalSource.emit('SIGTERM');
+      signalSource.emit('SIGTERM');
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    } finally {
+      process.off('unhandledRejection', onUnhandledRejection);
+    }
 
+    expect(process.listeners('unhandledRejection')).not.toContain(onUnhandledRejection);
+    expect(unhandledRejections).toEqual([]);
     expect(errorLogger).toHaveBeenCalledTimes(1);
-    expect(catchSpy).toHaveBeenCalledTimes(1);
     expect(exit).toHaveBeenCalledTimes(1);
     expect(exit).toHaveBeenCalledWith(1);
   });
 
   it('disposer 可重复调用并精确移除两个 signal listener', async () => {
     const signalSource = new EventEmitter();
+    const sigintSentinel = vi.fn();
+    const sigtermSentinel = vi.fn();
+    signalSource.on('SIGINT', sigintSentinel);
+    signalSource.on('SIGTERM', sigtermSentinel);
     const shutdown = vi.fn(async () => undefined);
     const dispose = wireGracefulShutdownSignals({
       exit: vi.fn(),
@@ -114,16 +125,18 @@ describe('graceful shutdown signal wiring', () => {
       signalSource,
     });
 
+    expect(signalSource.listenerCount('SIGINT')).toBe(2);
+    expect(signalSource.listenerCount('SIGTERM')).toBe(2);
+    dispose();
+    dispose();
     expect(signalSource.listenerCount('SIGINT')).toBe(1);
     expect(signalSource.listenerCount('SIGTERM')).toBe(1);
-    dispose();
-    dispose();
-    expect(signalSource.listenerCount('SIGINT')).toBe(0);
-    expect(signalSource.listenerCount('SIGTERM')).toBe(0);
 
     signalSource.emit('SIGINT');
     signalSource.emit('SIGTERM');
     await Promise.resolve();
+    expect(sigintSentinel).toHaveBeenCalledTimes(1);
+    expect(sigtermSentinel).toHaveBeenCalledTimes(1);
     expect(shutdown).not.toHaveBeenCalled();
   });
 
