@@ -64,6 +64,7 @@ const CONTRACTS_BROWSER_ONLY_GLOBALS = new Set([
 const NODE_RUNTIME_MODULE = /^(?:node:|assert(?:\/|$)|buffer(?:\/|$)|child_process(?:\/|$)|cluster(?:\/|$)|crypto(?:\/|$)|dgram(?:\/|$)|dns(?:\/|$)|events(?:\/|$)|fs(?:\/|$)|http(?:\/|$)|https(?:\/|$)|module(?:\/|$)|net(?:\/|$)|os(?:\/|$)|path(?:\/|$)|perf_hooks(?:\/|$)|process(?:\/|$)|readline(?:\/|$)|stream(?:\/|$)|string_decoder(?:\/|$)|timers(?:\/|$)|tls(?:\/|$)|tty(?:\/|$)|url(?:\/|$)|util(?:\/|$)|v8(?:\/|$)|vm(?:\/|$)|worker_threads(?:\/|$)|zlib(?:\/|$))/;
 const FRAMEWORK_RUNTIME_MODULE = /^(?:next(?:\/|$)|react(?:\/|$)|react-dom(?:\/|$)|hono(?:\/|$)|@hono\/(?:.+)|wrangler(?:\/|$)|cloudflare:.+|cloudflare(?:\/|$)|@cloudflare\/(?:.+)|@opennextjs\/(?:.+)|@tauri\/(?:.+)|@tauri-apps\/(?:.+)|tauri(?:\/|$)|electron(?:\/|$)|@electron\/(?:.+)|drizzle-orm(?:\/|$)|better-sqlite3(?:\/|$)|kysely(?:\/|$)|redis(?:\/|$)|ioredis(?:\/|$)|pg(?:\/|$)|mysql2(?:\/|$)|sqlite3(?:\/|$)|@libsql\/(?:.+)|idb(?:\/|$)|indexeddb(?:\/|$))/;
 const SECRET_MODULE_SEGMENT = /(^|[\\/_.-])(server|secret|secrets|signature|signatures|env|environment|environments|private)(?=$|[\\/_.-])/i;
+const CONTRACTS_EXCLUDED_SOURCE_SUFFIX = /\.(test|spec|config)\.(?:[cm]?[jt]sx?|[cm]?js)$/i;
 
 /**
  * @typedef {'apps' | 'packages'} WorkspaceKind
@@ -428,8 +429,14 @@ function isContractsPackage(unit) {
 function isContractsSourceFile(unit, sourceFile) {
   if (!isContractsPackage(unit)) return false;
   const relativeSource = path.relative(unit.directory, sourceFile);
-  const normalized = relativeSource.split(path.sep)[0];
-  return normalized === 'src';
+  if (
+    relativeSource === ''
+    || relativeSource.startsWith('..')
+    || path.isAbsolute(relativeSource)
+  ) return false;
+  const sourceFileName = path.basename(sourceFile).toLowerCase();
+  if (CONTRACTS_EXCLUDED_SOURCE_SUFFIX.test(sourceFileName)) return false;
+  return true;
 }
 
 function addViolation(violations, rule, filePath, moduleSpecifier, message, line) {

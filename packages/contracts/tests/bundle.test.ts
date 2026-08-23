@@ -27,6 +27,9 @@ describe('public contracts entrypoint portability', () => {
   });
 
   it.each(publicEntrypoints)('bundles %s for every target without environment imports', async (entrypoint) => {
+    const runtimeNamespace = await import(entrypoint);
+    const expectedKeys = [...Object.keys(runtimeNamespace)].sort();
+
     for (const platform of ['node', 'browser', 'neutral'] as const) {
       const result = await build({
         absWorkingDir: process.cwd(),
@@ -36,7 +39,7 @@ describe('public contracts entrypoint portability', () => {
         platform,
         format: 'esm',
         stdin: {
-          contents: `import * as publicApi from '${entrypoint}'; export { publicApi }; export const publicApiKeys = Object.keys(publicApi);`,
+          contents: `import * as publicApi from '${entrypoint}'; export { publicApi }; export const publicKeys = Object.keys(publicApi);`,
           loader: 'ts',
           resolveDir: process.cwd(),
           sourcefile: `contracts-entry-${platform}.ts`,
@@ -60,13 +63,15 @@ describe('public contracts entrypoint portability', () => {
 
       const moduleUrl = `data:application/javascript;base64,${Buffer.from(output).toString('base64')}`;
       const imported = await import(moduleUrl);
-      const sortedRuntimeKeys = [...(imported.publicApiKeys ?? [])].sort();
+      const sortedRuntimeKeys = [...(imported.publicKeys ?? [])].sort();
       const sortedNamespaceKeys = [...Object.keys(imported.publicApi ?? {})].sort();
+      const sortedExpectedKeys = [...expectedKeys];
 
       expect(imported.publicApi).toBeTypeOf('object');
-      expect(imported.publicApiKeys).toBeInstanceOf(Array);
-      expect(imported.publicApiKeys).toHaveLength(sortedNamespaceKeys.length);
+      expect(imported.publicKeys).toBeInstanceOf(Array);
+      expect(imported.publicKeys).toHaveLength(sortedNamespaceKeys.length);
       expect(sortedRuntimeKeys).toEqual(sortedNamespaceKeys);
+      expect(sortedRuntimeKeys).toEqual(sortedExpectedKeys);
     }
   });
 });

@@ -247,6 +247,28 @@ describe('workspace dependency boundaries', () => {
     expect(violations.map((violation) => violation.module)).toEqual(['window', 'document', 'localStorage']);
   });
 
+  it('checks contracts production support files for runtime and browser-only globals', async () => {
+    const rootDir = await createWorkspaceFixture({
+      'packages/contracts/package.json': manifest('@mahoshojo/contracts'),
+      'packages/contracts/src/index.ts': "export * from '../support/runtime';\n",
+      'packages/contracts/support/runtime.ts': [
+        "import 'react';",
+        'const document = globalThis.document;',
+        'export { document };',
+      ].join('\n'),
+      'packages/contracts/tests/spec-review.test.ts': "import 'node:fs';\nvoid null;\n",
+      'packages/contracts/tests/helpers.ts': "import 'node:fs/promises';\nexport const helper = 1;\n",
+    });
+
+    const violations = checkWorkspaceBoundaries(rootDir);
+    const runtimeViolations = violations.filter((violation) => violation.rule === 'MONO-005-CONTRACTS-RUNTIME');
+    const browserViolations = violations.filter((violation) => violation.rule === 'MONO-005-CONTRACTS-BROWSER-GLOBAL');
+
+    expect(runtimeViolations.map((violation) => violation.module).sort()).toEqual(['node:fs/promises', 'react']);
+    expect(browserViolations.map((violation) => violation.module)).toEqual(['document']);
+    expect(violations.some((violation) => violation.file.endsWith('tests/spec-review.test.ts'))).toBe(false);
+  });
+
   it('rejects server secret modules imported by client packages', async () => {
     const clientPackages = ['ai-direct', 'local-library', 'cloud-client', 'ui-web'];
     const files: FixtureFiles = {};
