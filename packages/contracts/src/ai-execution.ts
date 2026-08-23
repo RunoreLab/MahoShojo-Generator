@@ -1,7 +1,10 @@
 import { z } from 'zod';
 
 import { OpaqueKeySchema } from './primitives';
-import { JsonValueSchema } from './json-value';
+import { SafeJsonValueSchema } from './json-value';
+import { jsonUtf8ByteLength } from './wire-size';
+
+export const MAX_AI_EXECUTION_RESULT_BYTES = 1_000_000;
 
 export const AI_EXECUTION_CONTRACT_VERSION = 1 as const;
 export const AiExecutionContractVersionSchema = z.literal(AI_EXECUTION_CONTRACT_VERSION);
@@ -104,7 +107,7 @@ export type AiExecutionUsage = z.infer<typeof AiExecutionUsageSchema>;
 export const AiExecutionOutputSchema = z
   .object({
     text: isNonBlankText.optional(),
-    structured: JsonValueSchema.optional(),
+    structured: SafeJsonValueSchema.optional(),
     reasoning: isNonBlankText.optional(),
   })
   .strict()
@@ -151,9 +154,21 @@ export const AiExecutionCancelledResultSchema = z.object({
 }).strict();
 export type AiExecutionCancelledResult = z.infer<typeof AiExecutionCancelledResultSchema>;
 
-export const AiExecutionResultSchema = z.discriminatedUnion('status', [
-  AiExecutionCompletedResultSchema,
-  AiExecutionFailedResultSchema,
-  AiExecutionCancelledResultSchema,
-]);
+export const AiExecutionResultSchema = z
+  .discriminatedUnion('status', [
+    AiExecutionCompletedResultSchema,
+    AiExecutionFailedResultSchema,
+    AiExecutionCancelledResultSchema,
+  ])
+  .superRefine((result, context) => {
+    if (jsonUtf8ByteLength(result) > MAX_AI_EXECUTION_RESULT_BYTES) {
+      context.addIssue({
+        code: 'too_big',
+        maximum: MAX_AI_EXECUTION_RESULT_BYTES,
+        origin: 'value',
+        inclusive: true,
+        message: `execution result must not exceed ${MAX_AI_EXECUTION_RESULT_BYTES} UTF-8 bytes`,
+      });
+    }
+  });
 export type AiExecutionResult = z.infer<typeof AiExecutionResultSchema>;

@@ -2,6 +2,8 @@ import {
   DIRECT_PROVIDER_PROFILE_VERSION,
   DirectProviderAdapterSchema,
   DirectProviderProfileV1Schema,
+  MAX_DIRECT_PROVIDER_PROFILE_BYTES,
+  MAX_DIRECT_PROVIDER_PROFILE_HEADERS,
   type DirectProviderProfileV1,
 } from '@mahoshojo/contracts/provider-profile';
 import {
@@ -112,6 +114,13 @@ describe('Direct Provider Profile v1 contract', () => {
         secretHeaderRefs: { [headerName]: 'vault:ref' },
       }).success).toBe(false);
     }
+
+    for (const value of ['safe\r\nX-Injected: yes', 'safe\nX-Injected: yes', 'safe\u0000value']) {
+      expect(DirectProviderProfileV1Schema.safeParse({
+        ...validProfile,
+        publicHeaders: { 'X-Public': value },
+      }).success).toBe(false);
+    }
   });
 
   it('rejects invalid timestamps, blank identifiers, and non-JSON defaults', () => {
@@ -126,6 +135,20 @@ describe('Direct Provider Profile v1 contract', () => {
     expect(DirectProviderProfileV1Schema.safeParse({
       ...validProfile,
       generationDefaults: { invalid: new Date() },
+    }).success).toBe(false);
+  });
+
+  it('bounds aggregate profile and header collection sizes', () => {
+    expect(DirectProviderProfileV1Schema.safeParse({
+      ...validProfile,
+      publicHeaders: Object.fromEntries(
+        Array.from({ length: MAX_DIRECT_PROVIDER_PROFILE_HEADERS + 1 }, (_, index) => [`X-Header-${index}`, 'value']),
+      ),
+    }).success).toBe(false);
+
+    expect(DirectProviderProfileV1Schema.safeParse({
+      ...validProfile,
+      generationDefaults: { prompt: 'x'.repeat(MAX_DIRECT_PROVIDER_PROFILE_BYTES) },
     }).success).toBe(false);
   });
 });

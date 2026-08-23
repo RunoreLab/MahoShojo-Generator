@@ -1,10 +1,14 @@
 import { z } from 'zod';
 
-import { JsonValueSchema } from './json-value';
+import { SafeJsonValueSchema } from './json-value';
 import { IsoTimestampSchema, OpaqueKeySchema } from './primitives';
+import { jsonUtf8ByteLength } from './wire-size';
 
 export const DIRECT_PROVIDER_PROFILE_VERSION = 1 as const;
 export const DirectProviderProfileVersionSchema = z.literal(DIRECT_PROVIDER_PROFILE_VERSION);
+export const MAX_DIRECT_PROVIDER_PROFILE_BYTES = 64 * 1024;
+export const MAX_DIRECT_PROVIDER_PROFILE_HEADERS = 32;
+export const MAX_DIRECT_PROVIDER_GENERATION_DEFAULTS = 64;
 
 export const DirectProviderAdapterSchema = z.enum([
   'openai-compatible',
@@ -42,6 +46,11 @@ const HeaderNameSchema = z
   .min(1)
   .max(128)
   .regex(/^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/, 'must be a valid HTTP header name');
+
+const HeaderValueSchema = z
+  .string()
+  .max(8192)
+  .refine((value) => !/[\u0000-\u001F\u007F]/u.test(value), 'must not contain HTTP control characters');
 
 const TRANSPORT_CONTROLLED_HEADERS = new Set([
   'connection',
@@ -81,6 +90,9 @@ const addDisallowedHeaderIssues = (
 const SecretHeaderRefsSchema = z
   .record(HeaderNameSchema, OpaqueKeySchema)
   .superRefine((headers, context) => {
+    if (Object.keys(headers).length > MAX_DIRECT_PROVIDER_PROFILE_HEADERS) {
+      context.addIssue({ code: 'custom', message: `must contain at most ${MAX_DIRECT_PROVIDER_PROFILE_HEADERS} headers` });
+    }
     addDisallowedHeaderIssues(
       headers,
       context,
@@ -90,8 +102,11 @@ const SecretHeaderRefsSchema = z
   });
 
 const PublicHeadersSchema = z
-  .record(HeaderNameSchema, z.string().max(8192))
+  .record(HeaderNameSchema, HeaderValueSchema)
   .superRefine((headers, context) => {
+    if (Object.keys(headers).length > MAX_DIRECT_PROVIDER_PROFILE_HEADERS) {
+      context.addIssue({ code: 'custom', message: `must contain at most ${MAX_DIRECT_PROVIDER_PROFILE_HEADERS} headers` });
+    }
     addDisallowedHeaderIssues(
       headers,
       context,
@@ -106,10 +121,19 @@ const PublicHeadersSchema = z
     );
   });
 
-const GenerationDefaultsSchema = z.record(
-  z.string().min(1).max(128),
-  JsonValueSchema,
-);
+const GenerationDefaultKeySchema = z
+  .string()
+  .min(1)
+  .max(128)
+  .refine((key) => !['__proto__', 'prototype', 'constructor'].includes(key), 'unsafe key is not allowed');
+
+const GenerationDefaultsSchema = z
+  .record(GenerationDefaultKeySchema, SafeJsonValueSchema)
+  .superRefine((defaults, context) => {
+    if (Object.keys(defaults).length > MAX_DIRECT_PROVIDER_GENERATION_DEFAULTS) {
+      context.addIssue({ code: 'custom', message: `must contain at most ${MAX_DIRECT_PROVIDER_GENERATION_DEFAULTS} defaults` });
+    }
+  });
 
 export const DirectProviderProfileV1Schema = z
   .object({
@@ -133,5 +157,16 @@ export const DirectProviderProfileV1Schema = z
     createdAt: IsoTimestampSchema,
     updatedAt: IsoTimestampSchema,
   })
-  .strict();
+  .strict()
+  .superRefine((profile, context) => {
+    if (jsonUtf8ByteLength(profile) > MAX_DIRECT_PROVIDER_PROFILE_BYTES) {
+      context.addIssue({
+        code: 'too_big',
+        maximum: MAX_DIRECT_PROVIDER_PROFILE_BYTES,
+        origin: 'value',
+        inclusive: true,
+        message: `provider profile must not exceed ${MAX_DIRECT_PROVIDER_PROFILE_BYTES} UTF-8 bytes`,
+      });
+    }
+  });
 export type DirectProviderProfileV1 = z.infer<typeof DirectProviderProfileV1Schema>;

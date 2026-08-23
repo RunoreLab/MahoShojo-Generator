@@ -11,6 +11,7 @@ import {
   AiExecutionRequestSchema,
   AiExecutionResultSchema,
   AiExecutionUsageSchema,
+  MAX_AI_EXECUTION_RESULT_BYTES,
   isSupportedAiExecutionContractVersion,
   type AiExecutionErrorCode,
   type AiExecutionRequest as AiExecutionRequestFromSubpath,
@@ -312,5 +313,28 @@ describe('AI execution result contract', () => {
     expect(RootAiExecutionErrorCodeSchema).toBe(AiExecutionErrorCodeSchema);
     expect(RootAiExecutionResultSchema).toBe(AiExecutionResultSchema);
     expect(RootAiExecutionMessageSchema).toBe(AiExecutionMessageSchema);
+  });
+
+  it('rejects oversized or dangerous structured execution results', () => {
+    const baseResult = {
+      status: 'completed' as const,
+      requestId: 'request-1',
+      contractVersion: 1 as const,
+      mode: 'direct-local' as const,
+      finishReason: 'stop' as const,
+    };
+
+    expect(AiExecutionResultSchema.safeParse({
+      ...baseResult,
+      output: { text: 'x'.repeat(MAX_AI_EXECUTION_RESULT_BYTES + 1) },
+    }).success).toBe(false);
+
+    for (const key of ['__proto__', 'prototype', 'constructor']) {
+      const structured = JSON.parse(`{"payload":{"${key}":{"polluted":true}}}`) as unknown;
+      expect(AiExecutionResultSchema.safeParse({
+        ...baseResult,
+        output: { structured },
+      }).success).toBe(false);
+    }
   });
 });

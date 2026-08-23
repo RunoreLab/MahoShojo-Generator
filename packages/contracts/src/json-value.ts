@@ -12,8 +12,17 @@ const isPlainJsonObject = (input: unknown): input is Record<string, unknown> =>
 type JsonValueFrame = {
   value: Record<string, unknown> | unknown[];
   children: unknown[];
+  depth: number;
   nextChildIndex: number;
 };
+
+type JsonValueValidationOptions = {
+  rejectUnsafeKeys?: boolean;
+  maxDepth?: number;
+  maxNodes?: number;
+};
+
+const UNSAFE_JSON_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
 
 const isNonNaNFiniteNumber = (value: number): value is number => Number.isFinite(value);
 
@@ -63,15 +72,25 @@ const isPrimitiveJsonValue = (value: unknown): boolean => (
   (typeof value === 'number' && isNonNaNFiniteNumber(value))
 );
 
-const isValidJsonValue = (input: unknown): boolean => {
+const isValidJsonValue = (
+  input: unknown,
+  options: JsonValueValidationOptions = {},
+): boolean => {
   if (isPrimitiveJsonValue(input)) return true;
   if (typeof input !== 'object' || input === null) return false;
 
   const stack: JsonValueFrame[] = [];
   const inProgress = new Set<object>();
+  let nodes = 1;
 
-  const pushObject = (value: Record<string, unknown> | unknown[]): boolean => {
+  const pushObject = (value: Record<string, unknown> | unknown[], depth: number): boolean => {
     if (inProgress.has(value as object)) return false;
+    if (options.maxDepth !== undefined && depth > options.maxDepth) return false;
+
+    if (
+      options.rejectUnsafeKeys === true &&
+      Object.getOwnPropertyNames(value).some((key) => UNSAFE_JSON_KEYS.has(key))
+    ) return false;
 
     const children = Array.isArray(value) ? getJsonArrayChildren(value) : getJsonObjectChildren(value);
     if (children === undefined) return false;
@@ -80,12 +99,13 @@ const isValidJsonValue = (input: unknown): boolean => {
     stack.push({
       value,
       children,
+      depth,
       nextChildIndex: 0,
     });
     return true;
   };
 
-  if (!pushObject(input as Record<string, unknown> | unknown[])) {
+  if (!pushObject(input as Record<string, unknown> | unknown[], 0)) {
     return false;
   }
 
@@ -99,13 +119,15 @@ const isValidJsonValue = (input: unknown): boolean => {
 
     const child = frame.children[frame.nextChildIndex];
     frame.nextChildIndex += 1;
+    nodes += 1;
+    if (options.maxNodes !== undefined && nodes > options.maxNodes) return false;
 
     if (child === null || isPrimitiveJsonValue(child)) {
       continue;
     }
     if (child === undefined || typeof child !== 'object') return false;
 
-    if (!pushObject(child as Record<string, unknown> | unknown[])) return false;
+    if (!pushObject(child as Record<string, unknown> | unknown[], frame.depth + 1)) return false;
   }
 
   return true;
@@ -114,3 +136,15 @@ const isValidJsonValue = (input: unknown): boolean => {
 export const JsonValueSchema = z.custom<JsonValue>(isValidJsonValue, {
   message: 'must be a plain JSON value',
 });
+
+export const SAFE_JSON_VALUE_MAX_DEPTH = 64;
+export const SAFE_JSON_VALUE_MAX_NODES = 10_000;
+
+export const SafeJsonValueSchema = z.custom<JsonValue>(
+  (input) => isValidJsonValue(input, {
+    rejectUnsafeKeys: true,
+    maxDepth: SAFE_JSON_VALUE_MAX_DEPTH,
+    maxNodes: SAFE_JSON_VALUE_MAX_NODES,
+  }),
+  { message: 'must be a bounded plain JSON value without unsafe keys' },
+);

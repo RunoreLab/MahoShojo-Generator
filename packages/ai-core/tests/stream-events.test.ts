@@ -56,6 +56,23 @@ describe('AiStreamEvent v1', () => {
       result: { ...completed, mode: 'hosted' },
     }).success).toBe(false);
   });
+
+  it('rejects dangerous structured keys at the canonical result boundary', async () => {
+    const structured = JSON.parse('{"payload":{"__proto__":{"polluted":true}}}') as unknown;
+    const events = [
+      validEvents[0],
+      {
+        ...validEvents[4],
+        sequence: 1,
+        result: { ...completed, output: { structured } },
+      },
+    ];
+
+    expect(AiStreamEventSchema.safeParse(events[1]).success).toBe(false);
+    await expect(collectAiStreamResult(request, events)).rejects.toMatchObject({
+      code: 'invalid-event',
+    });
+  });
 });
 
 describe('collectAiStreamResult', () => {
