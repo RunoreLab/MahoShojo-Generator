@@ -3,9 +3,12 @@ import { createHonoApp } from '@/server/app';
 import { readHonoServerConfig } from '@/server/config';
 import { RedisRuntime } from '@/server/redis/runtime';
 import {
+  createSingleRunShutdown,
+  DEFAULT_SERVER_CLOSE_GRACE_TIMEOUT_MS,
   DEFAULT_WAIT_UNTIL_DRAIN_TIMEOUT_MS,
   nodeExecutionContextCoordinator,
   shutdownWithWaitUntilDrain,
+  stopAcceptingRequestsWithGrace,
 } from '@/server/runtime/execution-context';
 import {
   HonoRuntimeTelemetry,
@@ -31,10 +34,7 @@ if (process.env.HONO_CONFIG_CHECK_ONLY === 'true') {
   });
   const stopObservingConnections = observeServerConnections(server, telemetry);
 
-  let shuttingDown = false;
-  const shutdown = async (signal: string): Promise<void> => {
-    if (shuttingDown) return;
-    shuttingDown = true;
+  const shutdown = createSingleRunShutdown(async (signal: string): Promise<void> => {
     console.info(`[hono] 收到 ${signal}，开始优雅退出`);
 
     try {
@@ -42,7 +42,17 @@ if (process.env.HONO_CONFIG_CHECK_ONLY === 'true') {
         closeDependencies: () => redis.close(),
         coordinator: nodeExecutionContextCoordinator,
         drainTimeoutMs: DEFAULT_WAIT_UNTIL_DRAIN_TIMEOUT_MS,
-        stopAcceptingRequests: () => new Promise<void>((resolve) => server.close(() => resolve())),
+        stopAcceptingRequests: async () => {
+          const closeResult = await stopAcceptingRequestsWithGrace(server, {
+            timeoutMs: DEFAULT_SERVER_CLOSE_GRACE_TIMEOUT_MS,
+          });
+          if (closeResult.timedOut) {
+            console.error(
+              `[hono][shutdown] HTTP 请求等待 ${DEFAULT_SERVER_CLOSE_GRACE_TIMEOUT_MS}ms 后超时，`
+              + '已强制关闭活动连接',
+            );
+          }
+        },
       });
       if (drainResult.timedOut) {
         console.error(
@@ -55,7 +65,7 @@ if (process.env.HONO_CONFIG_CHECK_ONLY === 'true') {
       telemetry.emitSnapshot();
       telemetry.stop();
     }
-  };
+  });
 
   for (const signal of ['SIGINT', 'SIGTERM'] as const) {
     process.once(signal, () => {

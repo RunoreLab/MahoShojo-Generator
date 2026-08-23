@@ -1,8 +1,9 @@
 import type { NodeExecutionContext } from '@/server/routes/types';
 
 export const DEFAULT_WAIT_UNTIL_DRAIN_TIMEOUT_MS = 10_000;
+export const DEFAULT_SERVER_CLOSE_GRACE_TIMEOUT_MS = 10_000;
 
-type ErrorLogger = (message: string, error: unknown) => void;
+type ErrorLogger = (message: string, error: unknown) => void | PromiseLike<void>;
 
 type CoordinatorOptions = {
   errorLogger?: ErrorLogger;
@@ -11,6 +12,59 @@ type CoordinatorOptions = {
 export type WaitUntilDrainResult = {
   pendingTaskCount: number;
   timedOut: boolean;
+};
+
+type HttpServerShutdownControls = {
+  close: (callback: () => void) => unknown;
+  closeAllConnections?: () => unknown;
+  closeIdleConnections?: () => unknown;
+};
+
+export const stopAcceptingRequestsWithGrace = (
+  server: HttpServerShutdownControls,
+  { timeoutMs }: { timeoutMs: number },
+): Promise<{ timedOut: boolean }> => {
+  if (!Number.isFinite(timeoutMs) || timeoutMs < 0) {
+    throw new Error('server close grace timeoutMs 必须是非负有限数');
+  }
+
+  return new Promise<{ timedOut: boolean }>((resolve, reject) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      try {
+        server.closeAllConnections?.();
+      } catch (error) {
+        console.error('[hono][shutdown] 强制关闭 HTTP 连接失败', error);
+      }
+      resolve({ timedOut: true });
+    }, timeoutMs);
+
+    try {
+      server.close(() => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve({ timedOut: false });
+      });
+      if (!settled) server.closeIdleConnections?.();
+    } catch (error) {
+      settled = true;
+      clearTimeout(timer);
+      reject(error);
+    }
+  });
+};
+
+export const createSingleRunShutdown = <Trigger>(
+  executeShutdown: (trigger: Trigger) => Promise<void>,
+): ((trigger: Trigger) => Promise<void>) => {
+  let shutdownPromise: Promise<void> | undefined;
+  return (trigger) => {
+    shutdownPromise ??= Promise.resolve().then(() => executeShutdown(trigger));
+    return shutdownPromise;
+  };
 };
 
 export class NodeExecutionContextCoordinator {
@@ -59,7 +113,11 @@ export class NodeExecutionContextCoordinator {
       () => undefined,
       (error: unknown) => {
         try {
-          this.#errorLogger(`[hono][waitUntil][${routeId}] 后台任务失败`, error);
+          const logging = this.#errorLogger(
+            `[hono][waitUntil][${routeId}] 后台任务失败`,
+            error,
+          );
+          void Promise.resolve(logging).catch(() => undefined);
         } catch {
           // 日志 sink 失败不能把已吸收的后台任务 rejection 重新抛回事件循环。
         }
