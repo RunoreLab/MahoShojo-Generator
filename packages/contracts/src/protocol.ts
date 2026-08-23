@@ -10,8 +10,9 @@ import {
   MAX_STORY_FRAME_BYTES,
 } from './limits';
 import {
-  ArenaProposalSchema,
-  ArenaProposalStatusSchema,
+  ResolvedArenaProposalStatusSchema,
+  RoomStoredArenaProposalSchema,
+  SubmittedArenaProposalSchema,
 } from './proposals';
 import { ArenaRoomSharedConfigSchema } from './shared-config';
 import {
@@ -108,7 +109,7 @@ export const ArenaRoomSnapshotSchema = z
     revision: RoomRevisionSchema,
     sharedConfig: ArenaRoomSharedConfigSchema,
     members: z.array(RoomMemberSchema).max(MAX_ROOM_MEMBERS),
-    proposals: z.array(ArenaProposalSchema).max(MAX_ROOM_MEMBERS * MAX_PENDING_PROPOSALS_PER_MEMBER).default([]),
+    proposals: z.array(RoomStoredArenaProposalSchema).max(MAX_ROOM_MEMBERS * MAX_PENDING_PROPOSALS_PER_MEMBER).default([]),
     activeGeneration: GenerationMirrorSchema.nullable(),
   })
   .strict()
@@ -135,7 +136,7 @@ export const ArenaRoomSnapshotSchema = z
       if (!memberIds.includes(proposal.authorUserId)) {
         context.addIssue({ code: 'custom', path: ['proposals'], message: 'proposal authorUserId must reference a room member' });
       }
-      if (proposal.status === 'accepted' || proposal.status === 'rejected' || proposal.status === 'withdrawn' || proposal.status === 'stale') return;
+      if (proposal.status !== 'submitted') return;
       const nextCount = (pendingByMember.get(proposal.authorUserId) ?? 0) + 1;
       pendingByMember.set(proposal.authorUserId, nextCount);
       if (nextCount > MAX_PENDING_PROPOSALS_PER_MEMBER) {
@@ -192,12 +193,12 @@ export const RoomEventSchema = z.discriminatedUnion('type', [
     type: z.literal('room.config.updated'),
     payload: z.object({ revision: RoomRevisionSchema, sharedConfig: ArenaRoomSharedConfigSchema }).strict(),
   }).strict(),
-  z.object({ ...ControlEventBaseSchema, type: z.literal('proposal.submitted'), payload: z.object({ proposal: ArenaProposalSchema }).strict() }).strict(),
-  z.object({ ...ControlEventBaseSchema, type: z.literal('proposal.updated'), payload: z.object({ proposal: ArenaProposalSchema }).strict() }).strict(),
+  z.object({ ...ControlEventBaseSchema, type: z.literal('proposal.submitted'), payload: z.object({ proposal: SubmittedArenaProposalSchema }).strict() }).strict(),
+  z.object({ ...ControlEventBaseSchema, type: z.literal('proposal.updated'), payload: z.object({ proposal: RoomStoredArenaProposalSchema }).strict() }).strict(),
   z.object({
     ...ControlEventBaseSchema,
     type: z.literal('proposal.resolved'),
-    payload: z.object({ proposalId: OpaqueKeySchema, status: ArenaProposalStatusSchema }).strict(),
+    payload: z.object({ proposalId: OpaqueKeySchema, status: ResolvedArenaProposalStatusSchema }).strict(),
   }).strict(),
   z.object({ ...ControlEventBaseSchema, type: z.literal('generation.started'), payload: GenerationEventPayloadSchema }).strict(),
   z.object({ ...ControlEventBaseSchema, type: z.literal('generation.completed'), payload: GenerationCompletedPayloadSchema }).strict(),

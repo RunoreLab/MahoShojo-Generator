@@ -66,6 +66,8 @@ const makeProposal = (changes: readonly unknown[], proposalId = 'proposal-matrix
   createdAt: '2026-08-23T00:00:00.000Z',
 });
 
+const proposalState = (config: unknown, revision: number) => ({ roomId: 'room-1', config, revision });
+
 const callApplyWithLegacyArgs = (...values: unknown[]): unknown => Reflect.apply(
   applyArenaProposal as CallableFunction,
   undefined,
@@ -440,6 +442,27 @@ describe('proposal selection and conflicts', () => {
 });
 
 describe('proposal application', () => {
+  it('rejects proposals from another room without changing state', () => {
+    const current = baseConfig();
+    const crossRoomProposal = {
+      ...makeProposal([{
+        changeId: 'guidance',
+        type: 'setUserGuidance' as const,
+        value: 'must not cross rooms',
+        expectedBase: { kind: 'value' as const, value: '' },
+      }], 'proposal-cross-room'),
+      roomId: 'room-2',
+    };
+
+    const result = applyArenaProposal(proposalState(current, 2), crossRoomProposal);
+
+    expect(result).toMatchObject({ status: 'rejected', revision: 2, config: current });
+    expect(result.issues).toContainEqual(expect.objectContaining({ code: 'proposal-room-mismatch' }));
+    expect(() => applyArenaProposal({ roomId: '', config: current, revision: 2 }, makeProposal([]))).toThrowError(
+      expect.objectContaining({ code: 'invalid-input' }),
+    );
+  });
+
   it('accepts only the state/proposal API and rejects legacy positional compatibility forms', () => {
     const current = baseConfig();
     const proposal = makeProposal([{
@@ -448,7 +471,7 @@ describe('proposal application', () => {
       value: 'state api',
       expectedBase: { kind: 'value' as const, value: '' },
     }], 'proposal-api');
-    const accepted = applyArenaProposal({ config: current, revision: 2 }, proposal);
+    const accepted = applyArenaProposal(proposalState(current, 2), proposal);
 
     expect(accepted.status).toBe('accepted');
     expect(() => callApplyWithLegacyArgs(current, 2, proposal)).toThrowError(
@@ -472,14 +495,14 @@ describe('proposal application', () => {
       expectedBase: { kind: 'value' as const, value: '' },
     }], `proposal-invalid-${_label}`);
 
-    expect(() => applyArenaProposal({ config: baseConfig(), revision }, proposal)).toThrowError(
+    expect(() => applyArenaProposal(proposalState(baseConfig(), revision), proposal)).toThrowError(
       expect.objectContaining({ code: 'invalid-input' }),
     );
   });
 
   it('reports malformed proposal as a structured invalid-proposal issue', () => {
     const current = baseConfig();
-    const result = applyArenaProposal({ config: current, revision: 3 }, {
+    const result = applyArenaProposal(proposalState(current, 3), {
       ...makeProposal([{ changeId: 'bad', type: 'setBattleMode', value: 'invalid' }], 'proposal-invalid'),
     });
 
@@ -493,7 +516,7 @@ describe('proposal application', () => {
 
   it.each(['draft', 'stale'] as const)('reports non-submitted proposal status %s structurally', (status) => {
     const current = baseConfig();
-    const result = applyArenaProposal({ config: current, revision: 3 }, {
+    const result = applyArenaProposal(proposalState(current, 3), {
       ...makeProposal([{
         changeId: 'guidance',
         type: 'setUserGuidance' as const,
@@ -513,7 +536,7 @@ describe('proposal application', () => {
 
   it('reports an explicitly empty selection as a structured issue', () => {
     const current = baseConfig();
-    const result = applyArenaProposal({ config: current, revision: 3 }, makeProposal([{
+    const result = applyArenaProposal(proposalState(current, 3), makeProposal([{
       changeId: 'guidance',
       type: 'setUserGuidance' as const,
       value: 'must not apply',
@@ -568,7 +591,7 @@ describe('proposal application', () => {
         expectedBase: { kind: 'present' as const, ref: ref('c1', 'character') },
       },
     ];
-    const result = applyArenaProposal({ config: current, revision: 4 }, makeProposal(changes));
+    const result = applyArenaProposal(proposalState(current, 4), makeProposal(changes));
 
     expect(result.status).toBe('accepted');
     expect(result.revision).toBe(5);
@@ -612,7 +635,7 @@ describe('proposal application', () => {
         expectedBase: { kind: 'value' as const, value: current.historySettings },
       },
     ];
-    const result = applyArenaProposal({ config: current, revision: 9 }, makeProposal(changes, 'proposal-scalars'));
+    const result = applyArenaProposal(proposalState(current, 9), makeProposal(changes, 'proposal-scalars'));
 
     expect(result.status).toBe('accepted');
     expect(result.config.teams[0].combatantKeys).toEqual([]);
@@ -625,14 +648,14 @@ describe('proposal application', () => {
 
   it('rejects malformed proposals and absent targets without changing config or revision', () => {
     const current = baseConfig();
-    const malformed = applyArenaProposal({ config: current, revision: 3 }, {
+    const malformed = applyArenaProposal(proposalState(current, 3), {
       ...makeProposal([{ changeId: 'bad', type: 'setBattleMode', value: 'invalid' }], 'proposal-malformed'),
     });
     expect(malformed.status).toBe('rejected');
     expect(malformed.revision).toBe(3);
     expect(malformed.config).toEqual(current);
 
-    const absentTarget = applyArenaProposal({ config: current, revision: 3 }, makeProposal([{
+    const absentTarget = applyArenaProposal(proposalState(current, 3), makeProposal([{
       changeId: 'remove-missing',
       type: 'removeMaterial' as const,
       materialKey: 'data-card:missing',
@@ -646,7 +669,7 @@ describe('proposal application', () => {
 
   it('returns the original config/revision when an earlier selected change stages before a later conflict', () => {
     const current = baseConfig();
-    const result = applyArenaProposal({ config: current, revision: 11 }, makeProposal([
+    const result = applyArenaProposal(proposalState(current, 11), makeProposal([
       {
         changeId: 'first-guidance',
         type: 'setUserGuidance' as const,
@@ -707,7 +730,7 @@ describe('proposal application', () => {
       createdAt: '2026-08-23T00:00:00.000Z',
     };
 
-    const result = applyArenaProposal({ config: current, revision: 7 }, proposal, ['add-c3', 'guide-c3']);
+    const result = applyArenaProposal(proposalState(current, 7), proposal, ['add-c3', 'guide-c3']);
 
     expect(result.status).toBe('partially_accepted');
     expect(result.revision).toBe(8);
@@ -749,7 +772,7 @@ describe('proposal application', () => {
       createdAt: '2026-08-23T00:00:00.000Z',
     };
 
-    const result = applyArenaProposal({ config: current, revision: 7 }, proposal, ['mode', 'guidance']);
+    const result = applyArenaProposal(proposalState(current, 7), proposal, ['mode', 'guidance']);
 
     expect(result.status).toBe('rejected');
     expect(result.revision).toBe(7);

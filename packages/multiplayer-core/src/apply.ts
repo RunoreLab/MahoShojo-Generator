@@ -1,6 +1,7 @@
 import {
   ArenaProposalSchema,
   ArenaRoomSharedConfigSchema,
+  OpaqueKeySchema,
   RoomRevisionSchema,
   parseArenaRoomSharedConfig,
   type ArenaProposal,
@@ -14,6 +15,7 @@ import { validateProposalChanges, type ProposalSelectionIssue, type ProposalSele
 import { canonicalDataCardKey, deepClone } from './utils';
 
 export interface ArenaProposalState {
+  readonly roomId: string;
   readonly config: unknown;
   readonly revision: number;
 }
@@ -33,15 +35,21 @@ const parseState = (input: unknown): ArenaProposalState => {
     throw new ArenaMultiplayerCoreError('invalid-input', 'applyArenaProposal requires a state object');
   }
   const state = input as Record<string, unknown>;
-  if (!Object.prototype.hasOwnProperty.call(state, 'config')
+  if (!Object.prototype.hasOwnProperty.call(state, 'roomId')
+    || !Object.prototype.hasOwnProperty.call(state, 'config')
     || !Object.prototype.hasOwnProperty.call(state, 'revision')) {
-    throw new ArenaMultiplayerCoreError('invalid-input', 'state must contain config and revision');
+    throw new ArenaMultiplayerCoreError('invalid-input', 'state must contain roomId, config, and revision');
+  }
+  const parsedRoomId = OpaqueKeySchema.safeParse(state.roomId);
+  if (!parsedRoomId.success) {
+    throw new ArenaMultiplayerCoreError('invalid-input', 'state roomId must be a non-empty opaque key');
   }
   const parsedRevision = RoomRevisionSchema.safeParse(state.revision);
   if (!parsedRevision.success) {
     throw new ArenaMultiplayerCoreError('invalid-input', 'state revision must be a nonnegative integer');
   }
   return {
+    roomId: parsedRoomId.data,
     config: state.config,
     revision: parsedRevision.data,
   };
@@ -206,6 +214,12 @@ export function applyArenaProposal(
     return rejected(config, state.revision, allIds, [{
       code: 'invalid-proposal',
       message: 'proposal does not satisfy ArenaProposalSchema',
+    }]);
+  }
+  if (proposal.roomId !== state.roomId) {
+    return rejected(config, state.revision, proposal.changes.map((change) => change.changeId), [{
+      code: 'proposal-room-mismatch',
+      message: 'proposal roomId does not match state roomId',
     }]);
   }
   if (proposal.status !== 'submitted') {

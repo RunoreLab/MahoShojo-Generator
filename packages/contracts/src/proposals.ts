@@ -255,6 +255,28 @@ export const ArenaProposalSchema = z
   });
 export type ArenaProposal = z.infer<typeof ArenaProposalSchema>;
 
+/** Local drafts never cross the room protocol boundary. */
+export const RoomStoredArenaProposalSchema = ArenaProposalSchema.refine(
+  (proposal) => proposal.status !== 'draft',
+  { path: ['status'], message: 'room-stored proposals cannot be drafts' },
+);
+
+/** A proposal.submitted event always introduces a pending proposal. */
+export const SubmittedArenaProposalSchema = ArenaProposalSchema.refine(
+  (proposal) => proposal.status === 'submitted',
+  { path: ['status'], message: 'submitted proposal status must be submitted' },
+);
+
+/** proposal.resolved records only terminal lifecycle states. */
+export const ResolvedArenaProposalStatusSchema = z.enum([
+  'partially_accepted',
+  'accepted',
+  'rejected',
+  'withdrawn',
+  'stale',
+]);
+export type ResolvedArenaProposalStatus = z.infer<typeof ResolvedArenaProposalStatusSchema>;
+
 export const parseArenaProposal = (input: unknown): ArenaProposal => {
   if (jsonUtf8ByteLength(input) > MAX_PROPOSAL_BYTES) {
     throw new ArenaContractError('payload-too-large');

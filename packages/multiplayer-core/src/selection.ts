@@ -8,6 +8,7 @@ export type ProposalSelectionIssueCode =
   | 'invalid-changes'
   | 'invalid-proposal'
   | 'invalid-proposal-status'
+  | 'proposal-room-mismatch'
   | 'empty-selection'
   | 'too-many-changes'
   | 'duplicate-change-id'
