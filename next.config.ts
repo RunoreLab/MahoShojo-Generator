@@ -1,8 +1,11 @@
 import { initOpenNextCloudflareForDev } from "@opennextjs/cloudflare";
 import type { NextConfig } from "next";
 import { PHASE_DEVELOPMENT_SERVER } from "next/constants";
+import { fileURLToPath } from "node:url";
 
 import { buildStaticBrowserSecurityHeaders } from "./lib/security/browser-headers";
+
+const projectRoot = fileURLToPath(new URL('.', import.meta.url));
 
 const createNextConfig = (phase: string): NextConfig => {
   if (phase === PHASE_DEVELOPMENT_SERVER) {
@@ -16,6 +19,8 @@ const createNextConfig = (phase: string): NextConfig => {
   });
 
   return {
+    outputFileTracingRoot: projectRoot,
+
     // 图片优化配置（Cloudflare Workers 不支持默认的图片优化）
     images: {
       unoptimized: true

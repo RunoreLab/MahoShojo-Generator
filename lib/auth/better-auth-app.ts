@@ -6,7 +6,6 @@ import { ensureAuthUserLink } from '@/lib/auth/user-auth-linking';
 import { getDrizzleDbFromRuntime } from '@/lib/db/drizzle';
 import { baAccounts, baSessions, baUsers, baVerifications } from '@/lib/db/schema/auth';
 
-type BetterAuthInstance = ReturnType<typeof betterAuth>;
 type BetterAuthRouteHandlers = ReturnType<typeof toNextJsHandler>;
 
 const betterAuthSchema = {
@@ -37,9 +36,6 @@ const runtimeDbProxy = new Proxy(
     },
   },
 );
-
-let cachedAuthInstance: BetterAuthInstance | null | undefined;
-let cachedRouteHandlers: BetterAuthRouteHandlers | null | undefined;
 
 const readBaseURL = (): string | undefined => {
   const raw = process.env.BETTER_AUTH_URL?.trim();
@@ -152,23 +148,8 @@ export const hasBetterAuthDatabaseBinding = (): boolean => {
   return getDrizzleDbFromRuntime() !== null;
 };
 
-export const getBetterAuthInstance = (): BetterAuthInstance | null => {
-  if (cachedAuthInstance !== undefined) {
-    return cachedAuthInstance;
-  }
-
-  if (getBetterAuthBootstrapStatus() !== 'ready') {
-    cachedAuthInstance = null;
-    return null;
-  }
-
-  const secret = readSecret();
-  if (!secret) {
-    cachedAuthInstance = null;
-    return null;
-  }
-
-  cachedAuthInstance = betterAuth({
+const createBetterAuthInstance = (secret: string) =>
+  betterAuth({
     database: drizzleAdapter(runtimeDbProxy, {
       provider: 'sqlite',
       schema: betterAuthSchema,
@@ -209,6 +190,29 @@ export const getBetterAuthInstance = (): BetterAuthInstance | null => {
       },
     },
   });
+
+type BetterAuthInstance = ReturnType<typeof createBetterAuthInstance>;
+
+let cachedAuthInstance: BetterAuthInstance | null | undefined;
+let cachedRouteHandlers: BetterAuthRouteHandlers | null | undefined;
+
+export const getBetterAuthInstance = (): BetterAuthInstance | null => {
+  if (cachedAuthInstance !== undefined) {
+    return cachedAuthInstance;
+  }
+
+  if (getBetterAuthBootstrapStatus() !== 'ready') {
+    cachedAuthInstance = null;
+    return null;
+  }
+
+  const secret = readSecret();
+  if (!secret) {
+    cachedAuthInstance = null;
+    return null;
+  }
+
+  cachedAuthInstance = createBetterAuthInstance(secret);
 
   return cachedAuthInstance;
 };

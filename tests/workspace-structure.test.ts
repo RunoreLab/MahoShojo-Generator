@@ -56,7 +56,7 @@ describe('phase 1 workspace structure', () => {
 
     expect(configPackage.type).toBe('module');
     expect(configPackage.scripts.build).toContain('--noEmit');
-    expect(configPackage.devDependencies?.esbuild).toBe('^0.27.2');
+    expect(configPackage.devDependencies?.esbuild).toBe('^0.28.1');
     expect(existsSync(path.join(rootDirectory, 'packages/config/tsconfig.build.json'))).toBe(false);
     expect(packagesReadme).toContain('source-export');
     expect(packagesReadme).toContain('esbuild');
