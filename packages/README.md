@@ -11,6 +11,6 @@
 本目录不设一个无边界的 `common`/`shared` 倾倒包。新增 package 应按领域职责命名，并同步维护类型、exports、测试和依赖边界。当前真实 package 为：
 
 - `@mahoshojo/config`：仅导出非秘密的 workspace/layout 常量与类型；
-- `@mahoshojo/contracts`：导出版本化协议 DTO、Zod schema、错误码和 wire 安全限制；当前已覆盖 Arena Room v1 以及线上数据卡类型、审核状态和 `-1/0/1` 可见性元数据，不包含业务执行、存储、鉴权或部署 runtime；
+- `@mahoshojo/contracts`：导出版本化协议 DTO、Zod schema、错误码和 wire 安全限制；当前已覆盖 Arena Room v1、线上数据卡元数据、runtime-neutral `AiExecution` request/result v1，以及通用 API version/success/error envelope。AI 请求契约不携带 Provider Profile、Endpoint 或凭据，API/AI 输出只接受 JSON-safe 数据；`AiExecutionPort`、stream event、Direct Provider Profile、业务执行、存储、鉴权和部署 runtime 仍由后续 package/adapter 承担；
 - `@mahoshojo/domain`：导出无 runtime 依赖的数据卡模板标识、角色分类与旧数据模板推断；根 Web 保留 `lib/schemas` 兼容出口，但 Web 组件、Arena 服务和 API 已有真实生产路径直接消费 `@mahoshojo/domain/data-cards`；
 - `@mahoshojo/multiplayer-core`：承载 Arena Room Shared Config 的白名单投影、不可变 working copy、typed Proposal diff/selection/conflict/apply 纯逻辑；只依赖 `@mahoshojo/contracts`，不依赖应用、框架、数据库、网络或任何 Node/DOM/Cloudflare runtime。`buildArenaRoomSharedConfig` 的公开输入边界是 `ArenaRoomNormalizedSource`，只负责 normalized source 的白名单投影；`applyArenaProposal` 只接受 `(state, proposalInput, selectedChangeIds?)`；真实 `BattleStoreState -> normalized source` Web adapter 尚未在本批实现，stable host-local key/versionToken 映射需另批接入，不能由此包猜测。

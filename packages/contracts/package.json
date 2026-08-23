@@ -18,6 +18,16 @@
       "types": "./src/data-cards.ts",
       "import": "./src/data-cards.ts",
       "default": "./src/data-cards.ts"
+    },
+    "./ai-execution": {
+      "types": "./src/ai-execution.ts",
+      "import": "./src/ai-execution.ts",
+      "default": "./src/ai-execution.ts"
+    },
+    "./api": {
+      "types": "./src/api.ts",
+      "import": "./src/api.ts",
+      "default": "./src/api.ts"
     }
   },
   "scripts": {
