@@ -115,14 +115,17 @@ docker compose -f compose.hono.yml up -d --build
 
 ## GitHub Actions 自动发布
 
-`.github/workflows/hono-deploy.yml` 会在任意分支的每次 push 后运行测试、生成单文件 bundle，然后上传到
-服务器。服务器先校验 SHA-256，并用当前 `/opt/mahoshojo-hono/.env.hono` 执行生产配置预检；预检成功后
-才重建容器。如果新版本在两分钟内未就绪，脚本会恢复上一个 release。
+`.github/workflows/hono-deploy.yml` 会在任意分支的每次 push 后运行统一 CI 验证、Hono 定向测试、容器
+smoke 与单文件 bundle 构建，并把 bundle 上传为 GitHub Actions artifact。只有
+`feature/v0.2.0_Battle_Growth_MahoShojo` 分支通过 build job 后，`deploy` job 才会把 artifact 上传到 VPS：
+服务器先校验 SHA-256，并用当前 `/opt/mahoshojo-hono/.env.hono` 执行生产配置预检；预检成功后才重建
+容器。如果新版本在两分钟内未就绪，脚本会恢复上一个 release。
 
 仓库的 `hono-production` Environment 需要配置一个 Secret：`VPS_SSH_PRIVATE_KEY`，内容为可以连接
-服务器的私钥（当前运维使用 `.ssh/mahoshojo`）；还需配置两个 Variable：`VPS_HOST` 和 `VPS_USER`。建议为该 Environment 设置允许部署的分支规则；如果
-实际上只想让生产分支发布，也可将 workflow 的 `push.branches` 收窄到生产分支。已核验的 ED25519
-host key 固定在 workflow 中，以便审查服务器指纹变化。
+服务器的私钥（当前运维使用 `.ssh/mahoshojo`）；还需配置两个 Variable：`VPS_HOST` 和 `VPS_USER`。建议为该
+Environment 设置允许部署的分支规则。`deploy` job 已有生产分支 gate；若将 workflow 的 `push.branches`
+收窄到生产分支，只会减少非生产分支上的 build 与验证。已核验的 ED25519 host key 固定在 workflow 中，
+以便审查服务器指纹变化。
 
 生产切流只应将 `config/hono-api-routes.json` 中的精确路径转发到 Hono origin；其他 `/api/*` 继续访问 Next.js。前端继续使用
 同源相对路径，旧 Next API 至少保留两个发布周期用于回滚。当前阶段不提供 `/ws`。
