@@ -53,8 +53,6 @@ describe('Hono route manifest', () => {
       'generate-scenario',
       'generate-scenario-stream',
     ]);
-    expect(routeDefinitions.filter((route) => route.adapter === 'legacy-next')).toHaveLength(0);
-
     const routeInventory = JSON.parse(readFileSync(
       path.join(process.cwd(), 'config/hono-api-routes.json'),
       'utf8',

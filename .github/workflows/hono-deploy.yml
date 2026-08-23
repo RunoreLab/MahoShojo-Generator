@@ -99,9 +99,13 @@ jobs:
       - name: Verify public endpoint
         run: |
           curl --fail --show-error --retry 6 --retry-delay 5 https://homura.colanns.me/health/ready
-          curl --fail --show-error --dump-header /tmp/hono-cors-headers --output /dev/null \
-            --request OPTIONS https://homura.colanns.me/api/generate-battle-story \
+          probe_status="$(curl --silent --show-error --retry 6 --retry-delay 5 \
+            --dump-header /tmp/hono-cors-headers --output /tmp/hono-probe-body \
+            --write-out '%{http_code}' \
+            --request POST https://homura.colanns.me/api/generate-magical-girl \
             --header 'Origin: https://mahoshojo.colanns.me' \
-            --header 'Access-Control-Request-Method: POST' \
-            --header 'Access-Control-Request-Headers: authorization,content-type,x-mahoshojo-activity-token,x-mahoshojo-user-id'
+            --header 'Content-Type: application/json' \
+            --data '{}')"
+          test "$probe_status" = '400'
+          grep -Fq '"error":"Name is required"' /tmp/hono-probe-body
           grep -Fqi 'Access-Control-Allow-Origin: https://mahoshojo.colanns.me' /tmp/hono-cors-headers

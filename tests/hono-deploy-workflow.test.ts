@@ -40,6 +40,23 @@ function getStep(job: string, stepName: string): string {
 }
 
 describe('Hono deployment workflow', () => {
+  test('public probe exercises a retained shared route instead of a generic CORS preflight', () => {
+    const workflow = readFileSync(HONO_WORKFLOW_PATH, 'utf8');
+    const verificationStep = getStep(getJob(workflow, 'deploy'), 'Verify public endpoint');
+    const routeInventory = JSON.parse(readFileSync(
+      resolve(process.cwd(), 'config/hono-api-routes.json'),
+      'utf8',
+    )) as { exitedRouteIds: string[]; sharedRouteIds: string[] };
+    const probePath = verificationStep.match(/https:\/\/homura\.colanns\.me\/api\/([^\s\\]+)/)?.[1];
+
+    expect(probePath).toBeDefined();
+    expect(routeInventory.sharedRouteIds).toContain(probePath);
+    expect(routeInventory.exitedRouteIds).not.toContain(probePath);
+    expect(verificationStep).toContain('--request POST');
+    expect(verificationStep).toContain("test \"$probe_status\" = '400'");
+    expect(verificationStep).toContain('Name is required');
+  });
+
   test('gates the deploy job to the production branch', () => {
     const workflow = readFileSync(HONO_WORKFLOW_PATH, 'utf8');
     const deployJob = getJob(workflow, 'deploy');
