@@ -1,4 +1,9 @@
 import { describe, expect, vi, test } from 'vitest';
+import {
+  registerHostedRuntimeObserver,
+  resetHostedRuntimeObserverForTests,
+  type D1RoundTripObservation,
+} from '@mahoshojo/hosted-runtime/telemetry';
 
 type EnvSnapshot = {
   CLOUDFLARE_API_TOKEN?: string;
@@ -24,6 +29,67 @@ const restoreEnvSnapshot = (snapshot: EnvSnapshot) => {
 };
 
 describe('db/d1-http-client', () => {
+  test('每个真实 D1 HTTP round trip 都写入低基数 observation', async () => {
+    const envSnapshot = readEnvSnapshot();
+    const originalFetch = globalThis.fetch;
+    const observations: D1RoundTripObservation[] = [];
+
+    try {
+      process.env.CLOUDFLARE_API_TOKEN = `telemetry_token_${Date.now()}`;
+      process.env.CLOUDFLARE_ACCOUNT_ID = 'telemetry_account';
+      process.env.D1_DATABASE_ID = 'telemetry_db';
+      registerHostedRuntimeObserver({
+        beginAiUpstream: () => ({ recordTtfb: () => undefined, finish: () => undefined }),
+        observeD1RoundTrip: (observation) => observations.push(observation),
+      });
+      globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+        const body = JSON.parse(String(init?.body ?? '{}')) as { sql?: unknown };
+        const mutation = typeof body.sql === 'string' && body.sql.startsWith('UPDATE');
+        return new Response(
+          JSON.stringify({
+            success: true,
+            result: [{
+              success: true,
+              results: mutation ? [] : [{ id: 1 }],
+              meta: mutation ? { changes: 2 } : {},
+            }],
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      }) as typeof globalThis.fetch;
+
+      const { createHttpD1ClientFromEnv } = await import('@/lib/db/d1-http-client');
+      const client = createHttpD1ClientFromEnv() as {
+        prepare: (sql: string) => {
+          all: () => Promise<unknown>;
+          run: () => Promise<unknown>;
+        };
+      } | null;
+
+      expect(client).not.toBeNull();
+      if (!client) return;
+      await client.prepare('SELECT id FROM users').all();
+      await client.prepare('UPDATE users SET active = 1').run();
+
+      expect(observations).toHaveLength(2);
+      expect(observations.map(({ outcome, rowsRead, rowsWritten, errorClass }) => ({
+        outcome,
+        rowsRead,
+        rowsWritten,
+        errorClass,
+      }))).toEqual([
+        { outcome: 'ok', rowsRead: 1, rowsWritten: 0, errorClass: 'none' },
+        { outcome: 'ok', rowsRead: 0, rowsWritten: 2, errorClass: 'none' },
+      ]);
+      expect(JSON.stringify(observations)).not.toMatch(/SELECT|UPDATE|telemetry_token|users/);
+    } finally {
+      resetHostedRuntimeObserverForTests();
+      restoreEnvSnapshot(envSnapshot);
+      globalThis.fetch = originalFetch;
+      vi.restoreAllMocks();
+    }
+  });
+
   test('raw() 使用 /raw 通道并保留数组列顺序（含重复列）', async () => {
     const envSnapshot = readEnvSnapshot();
     const originalFetch = globalThis.fetch;

@@ -4,6 +4,11 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./d1-http-client": {
+      "types": "./src/d1-http-client.ts",
+      "import": "./src/d1-http-client.ts",
+      "default": "./src/d1-http-client.ts"
+    },
     "./telemetry": {
       "types": "./src/telemetry.ts",
       "import": "./src/telemetry.ts",
