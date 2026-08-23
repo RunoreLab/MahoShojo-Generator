@@ -50,6 +50,7 @@ const FORBIDDEN_SQL_TOKENS = new Set([
   'DETACH',
   'DROP',
   'END',
+  'EXPLAIN',
   'PRAGMA',
   'REINDEX',
   'RELEASE',

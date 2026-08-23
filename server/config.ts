@@ -78,7 +78,7 @@ const validateProductionEnvironment = (
       problems.push('hybrid 鉴权需要 BETTER_AUTH_URL');
     } else {
       try {
-        parseTrustedBetterAuthBaseUrl(env.BETTER_AUTH_URL);
+        parseTrustedBetterAuthBaseUrl(env.BETTER_AUTH_URL, { allowLocalHttp: false });
       } catch (error) {
         problems.push(error instanceof Error ? error.message : 'BETTER_AUTH_URL 配置无效');
       }

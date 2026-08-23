@@ -47,6 +47,23 @@ describe('Better Auth subrequest target', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  test.each([
+    '/api/auth/../admin',
+    '/api/auth/%2e%2e/admin',
+    '/api/auth/change-password?redirect=/admin',
+  ])('拒绝可在规范化后越出 auth endpoint 的路径：%s', async (path) => {
+    vi.stubEnv('BETTER_AUTH_URL', 'https://auth.example.com');
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(invokeBetterAuthSubrequest({
+      req: new Request('https://app.example.com/api/me/account/password'),
+      path,
+      body: {},
+    })).rejects.toThrow('Better Auth 子请求路径无效');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   test('拒绝缺失或不安全的 Better Auth URL 且不得发出请求', async () => {
     vi.stubEnv('BETTER_AUTH_URL', 'http://auth.example.com');
     const fetchMock = vi.fn();

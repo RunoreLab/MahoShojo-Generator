@@ -204,6 +204,8 @@ describe('D1 Gateway Worker', () => {
     'REINDEX users',
     'ANALYZE users',
     'VACUUM',
+    'EXPLAIN PRAGMA optimize',
+    'EXPLAIN VACUUM',
   ])('阻止 DDL 或维护语句通过业务 Gateway：%s', async (sql) => {
     const secret = 'test-secret';
     const body = JSON.stringify({ sql, params: [] });

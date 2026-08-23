@@ -42,6 +42,14 @@ describe('Hono server config', () => {
     expect(() => readHonoServerConfig()).toThrow(/BETTER_AUTH_URL.*HTTPS/);
   });
 
+  it('hybrid 生产模式也拒绝 loopback 明文 Better Auth URL', () => {
+    stubValidBearerProductionEnv();
+    vi.stubEnv('HONO_AUTH_MODE', 'hybrid');
+    vi.stubEnv('BETTER_AUTH_SECRET', 'c'.repeat(32));
+    vi.stubEnv('BETTER_AUTH_URL', 'http://127.0.0.1:3000');
+    expect(() => readHonoServerConfig()).toThrow(/BETTER_AUTH_URL.*HTTPS/);
+  });
+
   it('生产配置不完整时聚合报告缺失项', () => {
     stubValidBearerProductionEnv();
     vi.stubEnv('REDIS_URL', '');
