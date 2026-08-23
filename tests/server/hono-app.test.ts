@@ -3,6 +3,7 @@ import type { HonoServerConfig } from '@/server/config';
 import { createHonoApp, isAllowedOrigin } from '@/server/app';
 import type { RedisService } from '@/server/redis/runtime';
 import { HonoRuntimeTelemetry } from '@/server/telemetry/runtime';
+import honoApiRoutes from '@/config/hono-api-routes.json';
 
 const config: HonoServerConfig = {
   host: '127.0.0.1',
@@ -170,5 +171,20 @@ describe('Hono server app', () => {
 
     expect(unmigratedApiResponse.status).toBe(404);
     expect(webSocketResponse.status).toBe(404);
+  });
+
+  it('对已退出 capability 全部返回 Hono 404 而不进入 Next handler', async () => {
+    const app = createHonoApp(config, createRedisStub());
+
+    for (const routeId of honoApiRoutes.exitedRouteIds) {
+      const path = `/api/${routeId.replace(/\[[^\]]+\]/gu, 'test-id')}`;
+      const response = await app.request(path, { method: 'POST' });
+      expect(response.status).toBe(404);
+      expect(response.headers.get('x-backend-runtime')).toBe('hono-node');
+      expect(await response.json()).toEqual({
+        error: 'Not found',
+        code: 'NOT_FOUND',
+      });
+    }
   });
 });

@@ -9,28 +9,36 @@ const allowlistFile = path.join(projectRoot, 'config', 'hono-api-routes.json');
 
 const readRouteAllowlist = async () => {
   const payload = JSON.parse(await readFile(allowlistFile, 'utf8'));
+  const exitedRouteIds = payload?.exitedRouteIds;
   const legacyRouteIds = payload?.legacyRouteIds;
   const sharedRouteIds = payload?.sharedRouteIds;
-  if (!Array.isArray(legacyRouteIds) || !Array.isArray(sharedRouteIds)) {
-    throw new Error('config/hono-api-routes.json 必须提供 legacyRouteIds 与 sharedRouteIds 数组');
+  if (
+    !Array.isArray(exitedRouteIds)
+    || !Array.isArray(legacyRouteIds)
+    || !Array.isArray(sharedRouteIds)
+  ) {
+    throw new Error(
+      'config/hono-api-routes.json 必须提供 exitedRouteIds、legacyRouteIds 与 sharedRouteIds 数组',
+    );
   }
-  const routeIds = [...legacyRouteIds, ...sharedRouteIds];
-  if (routeIds.length === 0) {
+  if (legacyRouteIds.length > 0) {
+    throw new Error('Phase 2.5B 结构退出后 legacyRouteIds 必须为空');
+  }
+  if (sharedRouteIds.length === 0) {
     throw new Error('Hono 路由白名单不得为空');
   }
-  if (routeIds.some((routeId) => typeof routeId !== 'string' || !routeId.trim())) {
+  const inventoryRouteIds = [...sharedRouteIds, ...exitedRouteIds];
+  if (inventoryRouteIds.some((routeId) => typeof routeId !== 'string' || !routeId.trim())) {
     throw new Error('Hono routeIds 只能包含非空字符串');
   }
 
-  const normalizedRouteIds = routeIds.map((routeId) => routeId.trim());
-  if (new Set(normalizedRouteIds).size !== normalizedRouteIds.length) {
-    throw new Error('legacyRouteIds 与 sharedRouteIds 不得重复或重叠');
+  const normalizedInventoryRouteIds = inventoryRouteIds.map((routeId) => routeId.trim());
+  if (new Set(normalizedInventoryRouteIds).size !== normalizedInventoryRouteIds.length) {
+    throw new Error('exitedRouteIds 与 sharedRouteIds 不得重复或重叠');
   }
-  const normalizedLegacyRouteIds = legacyRouteIds.map((routeId) => routeId.trim());
   return {
-    legacyRouteIds: normalizedLegacyRouteIds,
-    routeIds: normalizedRouteIds,
-    sharedRouteIdSet: new Set(sharedRouteIds.map((routeId) => routeId.trim())),
+    inventoryRouteIds: normalizedInventoryRouteIds,
+    sharedRouteIds: sharedRouteIds.map((routeId) => routeId.trim()),
   };
 };
 
@@ -70,8 +78,8 @@ const routeRank = (routePath) => {
   return staticCount * 10_000 + segments.length * 100 - dynamicCount * 10 - wildcardCount * 1_000;
 };
 
-const { legacyRouteIds, routeIds: allowedRouteIds, sharedRouteIdSet } = await readRouteAllowlist();
-const allowedRouteIdSet = new Set(allowedRouteIds);
+const { inventoryRouteIds, sharedRouteIds } = await readRouteAllowlist();
+const sharedRouteIdSet = new Set(sharedRouteIds);
 const routeFiles = await walk(apiRoot);
 const discoveredDefinitions = routeFiles
   .map((absolutePath) => {
@@ -83,19 +91,17 @@ const discoveredDefinitions = routeFiles
   });
 
 const discoveredRouteIdSet = new Set(discoveredDefinitions.map((definition) => definition.routeId));
-const missingRouteIds = allowedRouteIds.filter((routeId) => !discoveredRouteIdSet.has(routeId));
+const missingRouteIds = inventoryRouteIds.filter((routeId) => !discoveredRouteIdSet.has(routeId));
 if (missingRouteIds.length > 0) {
-  throw new Error(`Hono 路由白名单包含不存在的 routeId：${missingRouteIds.join(', ')}`);
+  throw new Error(`Hono capability inventory 包含不存在的 routeId：${missingRouteIds.join(', ')}`);
 }
 
 const definitions = discoveredDefinitions
-  .filter((definition) => allowedRouteIdSet.has(definition.routeId))
+  .filter((definition) => sharedRouteIdSet.has(definition.routeId))
   .map((definition) => ({
     ...definition,
-    adapter: sharedRouteIdSet.has(definition.routeId) ? 'shared-service' : 'legacy-next',
-    importPath: sharedRouteIdSet.has(definition.routeId)
-      ? `../adapters/${definition.routeId}`
-      : `../../app/api/${definition.routeId}/route`,
+    adapter: 'shared-service',
+    importPath: `../adapters/${definition.routeId}`,
   }))
   .sort((left, right) => routeRank(right.routePath) - routeRank(left.routePath)
     || left.routePath.localeCompare(right.routePath));
@@ -131,5 +137,5 @@ await mkdir(path.dirname(outputFile), { recursive: true });
 await writeFile(outputFile, `${lines.join('\n')}\n`, 'utf8');
 console.log(
   `[hono-routes] generated ${definitions.length} allowlisted routes `
-  + `(${sharedRouteIdSet.size} shared, ${legacyRouteIds.length} legacy) -> ${path.relative(projectRoot, outputFile)}`,
+  + `(${sharedRouteIdSet.size} shared, 0 legacy) -> ${path.relative(projectRoot, outputFile)}`,
 );

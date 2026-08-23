@@ -21,7 +21,7 @@ export type RouteHandler = (
 
 export type RouteModule = Partial<Record<HttpMethod, RouteHandler>>;
 
-export type RouteAdapter = 'legacy-next' | 'shared-service';
+export type RouteAdapter = 'shared-service';
 
 export type RouteDefinition = {
   id: string;
