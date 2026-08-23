@@ -9,6 +9,13 @@ type CoordinatorOptions = {
   errorLogger?: ErrorLogger;
 };
 
+type ShutdownSignal = 'SIGINT' | 'SIGTERM';
+
+type ShutdownSignalSource = {
+  off: (signal: ShutdownSignal, listener: () => void) => unknown;
+  on: (signal: ShutdownSignal, listener: () => void) => unknown;
+};
+
 export type WaitUntilDrainResult = {
   pendingTaskCount: number;
   timedOut: boolean;
@@ -64,6 +71,51 @@ export const createSingleRunShutdown = <Trigger>(
   return (trigger) => {
     shutdownPromise ??= Promise.resolve().then(() => executeShutdown(trigger));
     return shutdownPromise;
+  };
+};
+
+export const wireGracefulShutdownSignals = ({
+  errorLogger = console.error,
+  exit = (code) => process.exit(code),
+  shutdown,
+  signalSource = process,
+}: {
+  errorLogger?: ErrorLogger;
+  exit?: (code: number) => void;
+  shutdown: (signal: ShutdownSignal) => Promise<void>;
+  signalSource?: ShutdownSignalSource;
+}): (() => void) => {
+  let exitCompletion: Promise<void> | undefined;
+  const listeners = new Map<ShutdownSignal, () => void>();
+
+  const beginShutdown = (signal: ShutdownSignal): void => {
+    if (exitCompletion) return;
+    exitCompletion = Promise.resolve()
+      .then(() => shutdown(signal))
+      .then(
+        () => exit(0),
+        (error: unknown) => {
+          try {
+            const logging = errorLogger('[hono] 优雅退出失败', error);
+            void Promise.resolve(logging).catch(() => undefined);
+          } catch {
+            // 日志 sink 失败不能阻止进程按失败状态退出。
+          }
+          exit(1);
+        },
+      );
+  };
+
+  for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+    const listener = () => beginShutdown(signal);
+    listeners.set(signal, listener);
+    signalSource.on(signal, listener);
+  }
+
+  return () => {
+    for (const [signal, listener] of listeners) {
+      signalSource.off(signal, listener);
+    }
   };
 };
 

@@ -9,6 +9,7 @@ import {
   nodeExecutionContextCoordinator,
   shutdownWithWaitUntilDrain,
   stopAcceptingRequestsWithGrace,
+  wireGracefulShutdownSignals,
 } from '@/server/runtime/execution-context';
 import {
   HonoRuntimeTelemetry,
@@ -67,14 +68,5 @@ if (process.env.HONO_CONFIG_CHECK_ONLY === 'true') {
     }
   });
 
-  for (const signal of ['SIGINT', 'SIGTERM'] as const) {
-    process.once(signal, () => {
-      void shutdown(signal)
-        .then(() => process.exit(0))
-        .catch((error: unknown) => {
-          console.error('[hono] 优雅退出失败', error);
-          process.exit(1);
-        });
-    });
-  }
+  wireGracefulShutdownSignals({ shutdown });
 }
