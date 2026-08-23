@@ -8,6 +8,27 @@ type D1Config = {
   accessClientSecret?: string;
 };
 
+export type D1QueryRetryMode = 'none' | 'safe-read';
+
+export interface D1QueryOptions {
+  retry?: D1QueryRetryMode;
+}
+
+export const D1_INDETERMINATE_OUTCOME_ERROR_CODE = 'D1_INDETERMINATE_OUTCOME' as const;
+
+export class D1IndeterminateOutcomeError extends Error {
+  readonly code = D1_INDETERMINATE_OUTCOME_ERROR_CODE;
+  readonly status?: number;
+
+  constructor(status?: number) {
+    super(status == null
+      ? 'D1 请求已发出，但无法确认是否已提交'
+      : `D1 请求已发出，但无法确认是否已提交（HTTP ${status}）`);
+    this.name = 'D1IndeterminateOutcomeError';
+    this.status = status;
+  }
+}
+
 const sleep = async (ms: number) => {
   await new Promise<void>((resolve) => setTimeout(resolve, ms));
 };
@@ -55,15 +76,21 @@ const jitterMs = (ms: number): number => {
 
 const fetchWithRetry = async (
   url: string,
-  init: RequestInit,
-  options?: { attempts?: number; baseDelayMs?: number; maxDelayMs?: number }
+  createInit: () => RequestInit | Promise<RequestInit>,
+  options?: {
+    attempts?: number;
+    baseDelayMs?: number;
+    maxDelayMs?: number;
+    indeterminateOnRetryableFetchError?: boolean;
+  },
 ): Promise<Response> => {
-  const attempts = Math.max(1, options?.attempts ?? 3);
+  const attempts = Math.max(1, options?.attempts ?? 1);
   const baseDelayMs = Math.max(0, options?.baseDelayMs ?? 300);
   const maxDelayMs = Math.max(0, options?.maxDelayMs ?? 10_000);
 
   let lastError: unknown;
   for (let i = 0; i < attempts; i++) {
+    const init = await createInit();
     try {
       const response = await fetch(url, init);
 
@@ -84,7 +111,13 @@ const fetchWithRetry = async (
       await sleep(jitterMs(delayMs));
     } catch (error) {
       lastError = error;
-      if (!isRetryableFetchError(error) || i === attempts - 1) throw error;
+      if (!isRetryableFetchError(error)) throw error;
+      if (i === attempts - 1) {
+        if (options?.indeterminateOnRetryableFetchError) {
+          throw new D1IndeterminateOutcomeError();
+        }
+        throw error;
+      }
       await sleep(jitterMs(Math.min(maxDelayMs, baseDelayMs * Math.pow(2, i))));
     }
   }
@@ -241,27 +274,51 @@ export function generateUUID(): string {
 type D1QueryEndpoint = 'query' | 'raw';
 
 // 核心查询函数
-async function query(body: Record<string, unknown>, endpoint: D1QueryEndpoint = 'query'): Promise<Response> {
+async function query(
+  body: Record<string, unknown>,
+  endpoint: D1QueryEndpoint = 'query',
+  options: D1QueryOptions = {},
+): Promise<Response> {
   const config = assertD1Config();
   const targetUrl = endpoint === 'raw' ? config.rawUrl : config.queryUrl;
   const bodyText = JSON.stringify(body);
-  const headers = await buildD1Headers(config, targetUrl, bodyText);
+  const safeRead = options.retry === 'safe-read';
 
-  return await fetchWithRetry(
+  const response = await fetchWithRetry(
     targetUrl,
-    {
+    async () => ({
       method: "POST",
-      headers,
+      headers: await buildD1Headers(config, targetUrl, bodyText),
       body: bodyText,
+    }),
+    {
+      attempts: safeRead ? 5 : 1,
+      baseDelayMs: 500,
+      maxDelayMs: 8000,
+      indeterminateOnRetryableFetchError: !safeRead,
     },
-    { attempts: 5, baseDelayMs: 500, maxDelayMs: 8000 }
   );
+
+  if (!safeRead && isRetryableStatus(response.status)) {
+    try {
+      await response.body?.cancel();
+    } catch {
+      // ignore
+    }
+    throw new D1IndeterminateOutcomeError(response.status);
+  }
+
+  return response;
 }
 
 // 从 D1 数据库直接执行 SQL 语句并返回 Cloudflare D1 HTTP payload
-export async function queryD1Payload(sql: string, params: unknown[] = []): Promise<unknown> {
+export async function queryD1Payload(
+  sql: string,
+  params: unknown[] = [],
+  options: D1QueryOptions = {},
+): Promise<unknown> {
   try {
-    const response = await query({ sql, params }, 'query');
+    const response = await query({ sql, params }, 'query', options);
 
     if (!response.ok) {
       let extra = '';
@@ -284,9 +341,12 @@ export async function queryD1Payload(sql: string, params: unknown[] = []): Promi
 }
 
 // 使用 Cloudflare D1 HTTP batch 载荷执行多条语句并返回 payload
-export async function queryD1BatchPayload(batch: Array<{ sql: string; params?: unknown[] }>): Promise<unknown> {
+export async function queryD1BatchPayload(
+  batch: Array<{ sql: string; params?: unknown[] }>,
+  options: D1QueryOptions = {},
+): Promise<unknown> {
   try {
-    const response = await query({ batch }, 'query');
+    const response = await query({ batch }, 'query', options);
 
     if (!response.ok) {
       let extra = '';
@@ -309,9 +369,13 @@ export async function queryD1BatchPayload(batch: Array<{ sql: string; params?: u
 }
 
 // 从 D1 数据库直接执行 SQL 语句并返回 Cloudflare D1 HTTP raw payload
-export async function queryD1RawPayload(sql: string, params: unknown[] = []): Promise<unknown> {
+export async function queryD1RawPayload(
+  sql: string,
+  params: unknown[] = [],
+  options: D1QueryOptions = {},
+): Promise<unknown> {
   try {
-    const response = await query({ sql, params }, 'raw');
+    const response = await query({ sql, params }, 'raw', options);
 
     if (!response.ok) {
       let extra = '';
@@ -336,8 +400,12 @@ export async function queryD1RawPayload(sql: string, params: unknown[] = []): Pr
 /**
  * @deprecated 请改用 `queryD1Payload`。该函数仅保留为兼容层别名，后续会在完成全仓迁移后移除。
  */
-export async function queryFromD1(sql: string, params: unknown[] = []): Promise<unknown> {
-  return queryD1Payload(sql, params);
+export async function queryFromD1(
+  sql: string,
+  params: unknown[] = [],
+  options: D1QueryOptions = {},
+): Promise<unknown> {
+  return queryD1Payload(sql, params, options);
 }
 
 // 保存数据到 D1 数据库，使用自定义 32 位随机字符串 ID 并返回 ID
@@ -370,6 +438,7 @@ export async function createWithCustomId(data: string, table: string): Promise<s
     
     return null;
   } catch (error) {
+    if (error instanceof D1IndeterminateOutcomeError) throw error;
     console.error("保存到 D1 数据库失败:", error);
     return null;
   }
@@ -405,6 +474,7 @@ export async function updateById(id: string, data: string, table: string): Promi
     
     return false;
   } catch (error) {
+    if (error instanceof D1IndeterminateOutcomeError) throw error;
     console.error("更新 D1 数据库失败:", error);
     return false;
   }
@@ -448,6 +518,7 @@ export async function saveToD1(data: unknown): Promise<boolean> {
     }
     return true;
   } catch (error) {
+    if (error instanceof D1IndeterminateOutcomeError) throw error;
     console.error("保存到 D1 数据库失败:", error);
     // 不抛出错误，避免影响主要生成流程
     return false;

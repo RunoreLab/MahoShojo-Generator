@@ -1,16 +1,28 @@
-import { describe, expect, test } from 'vitest';
-import { queryD1Payload, queryD1RawPayload, queryFromD1 } from '@/lib/database/core';
+import { describe, expect, test, vi } from 'vitest';
+import {
+  createWithCustomId,
+  queryD1BatchPayload,
+  queryD1Payload,
+  queryD1RawPayload,
+  queryFromD1,
+  saveToD1,
+  updateById,
+} from '@/lib/database/core';
 
 type EnvSnapshot = {
   CLOUDFLARE_API_TOKEN?: string;
   CLOUDFLARE_ACCOUNT_ID?: string;
   D1_DATABASE_ID?: string;
+  D1_GATEWAY_URL?: string;
+  D1_GATEWAY_HMAC_SECRET?: string;
 };
 
 const readEnvSnapshot = (): EnvSnapshot => ({
   CLOUDFLARE_API_TOKEN: process.env.CLOUDFLARE_API_TOKEN,
   CLOUDFLARE_ACCOUNT_ID: process.env.CLOUDFLARE_ACCOUNT_ID,
   D1_DATABASE_ID: process.env.D1_DATABASE_ID,
+  D1_GATEWAY_URL: process.env.D1_GATEWAY_URL,
+  D1_GATEWAY_HMAC_SECRET: process.env.D1_GATEWAY_HMAC_SECRET,
 });
 
 const restoreEnvSnapshot = (snapshot: EnvSnapshot) => {
@@ -22,12 +34,25 @@ const restoreEnvSnapshot = (snapshot: EnvSnapshot) => {
 
   if (snapshot.D1_DATABASE_ID == null) delete process.env.D1_DATABASE_ID;
   else process.env.D1_DATABASE_ID = snapshot.D1_DATABASE_ID;
+
+  if (snapshot.D1_GATEWAY_URL == null) delete process.env.D1_GATEWAY_URL;
+  else process.env.D1_GATEWAY_URL = snapshot.D1_GATEWAY_URL;
+
+  if (snapshot.D1_GATEWAY_HMAC_SECRET == null) delete process.env.D1_GATEWAY_HMAC_SECRET;
+  else process.env.D1_GATEWAY_HMAC_SECRET = snapshot.D1_GATEWAY_HMAC_SECRET;
 };
 
 const setMinimalEnv = () => {
+  delete process.env.D1_GATEWAY_URL;
+  delete process.env.D1_GATEWAY_HMAC_SECRET;
   process.env.CLOUDFLARE_API_TOKEN = 'token_x';
   process.env.CLOUDFLARE_ACCOUNT_ID = 'account_x';
   process.env.D1_DATABASE_ID = 'db_x';
+};
+
+const setGatewayEnv = () => {
+  process.env.D1_GATEWAY_URL = 'https://gateway.example.test';
+  process.env.D1_GATEWAY_HMAC_SECRET = 'gateway-secret';
 };
 
 const withSilencedConsoleError = async (fn: () => Promise<void>) => {
@@ -174,6 +199,206 @@ describe('database/core queryD1Payload', () => {
       expect(body.sql).toBe('SELECT id, name FROM badges');
       expect(body.params).toEqual([]);
     } finally {
+      globalThis.fetch = originalFetch;
+      restoreEnvSnapshot(envSnapshot);
+    }
+  });
+
+  test('mutation 收到可重试状态时不透明重放，并报告未知提交结果', async () => {
+    const envSnapshot = readEnvSnapshot();
+    const originalFetch = globalThis.fetch;
+
+    try {
+      setMinimalEnv();
+      let fetchCalls = 0;
+      globalThis.fetch = (async () => {
+        fetchCalls += 1;
+        return new Response('temporarily unavailable', {
+          status: 503,
+          headers: { 'Retry-After': '0' },
+        });
+      }) as typeof globalThis.fetch;
+
+      await withSilencedConsoleError(async () => {
+        await expect(queryD1Payload('UPDATE shojo SET data = ? WHERE id = ?', ['{}', '1']))
+          .rejects.toMatchObject({
+            name: 'D1IndeterminateOutcomeError',
+            code: 'D1_INDETERMINATE_OUTCOME',
+            status: 503,
+          });
+      });
+      expect(fetchCalls).toBe(1);
+    } finally {
+      globalThis.fetch = originalFetch;
+      restoreEnvSnapshot(envSnapshot);
+    }
+  });
+
+  test('mutation 遇到可重试 fetch 错误时不透明重放，并报告未知提交结果', async () => {
+    const envSnapshot = readEnvSnapshot();
+    const originalFetch = globalThis.fetch;
+    vi.useFakeTimers();
+
+    try {
+      setMinimalEnv();
+      let fetchCalls = 0;
+      globalThis.fetch = (async () => {
+        fetchCalls += 1;
+        throw new TypeError('fetch failed');
+      }) as typeof globalThis.fetch;
+
+      await withSilencedConsoleError(async () => {
+        const pendingError = queryD1Payload('DELETE FROM shojo WHERE id = ?', ['1'])
+          .catch((error: unknown) => error);
+        await vi.runAllTimersAsync();
+        await expect(pendingError).resolves.toMatchObject({
+          name: 'D1IndeterminateOutcomeError',
+          code: 'D1_INDETERMINATE_OUTCOME',
+        });
+      });
+      expect(fetchCalls).toBe(1);
+    } finally {
+      vi.useRealTimers();
+      globalThis.fetch = originalFetch;
+      restoreEnvSnapshot(envSnapshot);
+    }
+  });
+
+  test('混合读写 batch 收到可重试状态时不透明重放', async () => {
+    const envSnapshot = readEnvSnapshot();
+    const originalFetch = globalThis.fetch;
+
+    try {
+      setMinimalEnv();
+      let fetchCalls = 0;
+      globalThis.fetch = (async () => {
+        fetchCalls += 1;
+        return new Response('temporarily unavailable', {
+          status: 503,
+          headers: { 'Retry-After': '0' },
+        });
+      }) as typeof globalThis.fetch;
+
+      await withSilencedConsoleError(async () => {
+        await expect(queryD1BatchPayload([
+          { sql: 'SELECT 1 AS ok' },
+          { sql: 'INSERT INTO shojo (data) VALUES (?)', params: ['{}'] },
+        ])).rejects.toMatchObject({
+          name: 'D1IndeterminateOutcomeError',
+          code: 'D1_INDETERMINATE_OUTCOME',
+          status: 503,
+        });
+      });
+      expect(fetchCalls).toBe(1);
+    } finally {
+      globalThis.fetch = originalFetch;
+      restoreEnvSnapshot(envSnapshot);
+    }
+  });
+
+  test('显式 safe-read 可重试查询', async () => {
+    const envSnapshot = readEnvSnapshot();
+    const originalFetch = globalThis.fetch;
+
+    try {
+      setMinimalEnv();
+      let fetchCalls = 0;
+      globalThis.fetch = (async () => {
+        fetchCalls += 1;
+        if (fetchCalls === 1) {
+          return new Response('temporarily unavailable', {
+            status: 503,
+            headers: { 'Retry-After': '0' },
+          });
+        }
+        return new Response(JSON.stringify({ success: true, result: [{ ok: 1 }] }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }) as typeof globalThis.fetch;
+
+      const result = await queryD1Payload('SELECT 1 AS ok', [], { retry: 'safe-read' });
+      expect(result).toEqual({ success: true, result: [{ ok: 1 }] });
+      expect(fetchCalls).toBe(2);
+    } finally {
+      globalThis.fetch = originalFetch;
+      restoreEnvSnapshot(envSnapshot);
+    }
+  });
+
+  test.each([
+    ['createWithCustomId', () => createWithCustomId('{}', 'shojo')],
+    ['updateById', () => updateById('record-1', '{}', 'shojo')],
+    ['saveToD1', () => saveToD1({ id: 'record-1' })],
+  ])('%s 不吞掉未知提交结果', async (_name, invoke) => {
+    const envSnapshot = readEnvSnapshot();
+    const originalFetch = globalThis.fetch;
+
+    try {
+      setMinimalEnv();
+      let fetchCalls = 0;
+      globalThis.fetch = (async () => {
+        fetchCalls += 1;
+        return new Response('temporarily unavailable', {
+          status: 503,
+          headers: { 'Retry-After': '0' },
+        });
+      }) as typeof globalThis.fetch;
+
+      await withSilencedConsoleError(async () => {
+        await expect(invoke()).rejects.toMatchObject({
+          name: 'D1IndeterminateOutcomeError',
+          code: 'D1_INDETERMINATE_OUTCOME',
+          status: 503,
+        });
+      });
+      expect(fetchCalls).toBe(1);
+    } finally {
+      globalThis.fetch = originalFetch;
+      restoreEnvSnapshot(envSnapshot);
+    }
+  });
+
+  test('Gateway safe-read 的每次 attempt 都重新生成鉴权证据', async () => {
+    const envSnapshot = readEnvSnapshot();
+    const originalFetch = globalThis.fetch;
+    const dateNowSpy = vi.spyOn(Date, 'now')
+      .mockReturnValueOnce(1_700_000_000_000)
+      .mockReturnValue(1_700_000_000_001);
+
+    try {
+      setGatewayEnv();
+      const attemptHeaders: Array<Record<string, string>> = [];
+      globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+        attemptHeaders.push(init?.headers as Record<string, string>);
+        if (attemptHeaders.length === 1) {
+          return new Response('temporarily unavailable', {
+            status: 503,
+            headers: { 'Retry-After': '0' },
+          });
+        }
+        return new Response(JSON.stringify({ success: true, result: [{ ok: 1 }] }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }) as typeof globalThis.fetch;
+
+      await queryD1Payload('SELECT 1 AS ok', [], { retry: 'safe-read' });
+
+      expect(attemptHeaders).toHaveLength(2);
+      for (const headers of attemptHeaders) {
+        expect(headers['X-Mahoshojo-Timestamp']).toBeTruthy();
+        expect(headers['X-Mahoshojo-Nonce']).toBeTruthy();
+        expect(headers['X-Mahoshojo-Signature']).toBeTruthy();
+      }
+      expect(attemptHeaders[0]['X-Mahoshojo-Timestamp'])
+        .not.toBe(attemptHeaders[1]['X-Mahoshojo-Timestamp']);
+      expect(attemptHeaders[0]['X-Mahoshojo-Nonce'])
+        .not.toBe(attemptHeaders[1]['X-Mahoshojo-Nonce']);
+      expect(attemptHeaders[0]['X-Mahoshojo-Signature'])
+        .not.toBe(attemptHeaders[1]['X-Mahoshojo-Signature']);
+    } finally {
+      dateNowSpy.mockRestore();
       globalThis.fetch = originalFetch;
       restoreEnvSnapshot(envSnapshot);
     }

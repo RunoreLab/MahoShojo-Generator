@@ -16,7 +16,7 @@ const isD1Configured = (): boolean => {
 const probeD1 = async (): Promise<boolean> => {
   if (!isD1Configured()) return false;
   try {
-    const payload = await queryD1Payload('SELECT 1 AS ok');
+    const payload = await queryD1Payload('SELECT 1 AS ok', [], { retry: 'safe-read' });
     return typeof payload === 'object' && payload !== null;
   } catch (error) {
     console.error('[hono][health] D1 探测失败', error);
