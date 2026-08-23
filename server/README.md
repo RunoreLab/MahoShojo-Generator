@@ -116,7 +116,7 @@ docker compose -f compose.hono.yml up -d --build
 ## GitHub Actions 自动发布
 
 `.github/workflows/hono-deploy.yml` 会在任意分支的每次 push 后运行统一 CI 验证、Hono 定向测试、容器
-smoke 与单文件 bundle 构建，并把 bundle 上传为 GitHub Actions artifact。只有
+构建校验与单文件 bundle 构建，并把 bundle 上传为 GitHub Actions artifact。只有
 `feature/v0.2.0_Battle_Growth_MahoShojo` 分支通过 build job 后，`deploy` job 才会把 artifact 上传到 VPS：
 服务器先校验 SHA-256，并用当前 `/opt/mahoshojo-hono/.env.hono` 执行生产配置预检；预检成功后才重建
 容器。如果新版本在两分钟内未就绪，脚本会恢复上一个 release。
