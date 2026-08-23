@@ -231,18 +231,28 @@ describe('workspace dependency boundaries', () => {
         "const frameworkModule = 'react';",
         'export const loadNode = () => import(nodeModule);',
         'export const loadFramework = () => require(frameworkModule);',
-        'export function localRequire(require: (specifier: string) => unknown) { return require(frameworkModule); }',
+        "export const loadZod = () => import('zod');",
+        "export const loadNodeRuntime = () => import('node:fs');",
+        "export const requireZod = () => require('zod');",
+        "export const requireNodeRuntime = () => require('node:fs');",
+        'export function localRequire(require: (specifier: string) => unknown) { return [require(frameworkModule), require(\'node:fs\')]; }',
       ].join('\n'),
     });
 
-    const violations = checkWorkspaceBoundaries(rootDir).filter(
+    const violations = checkWorkspaceBoundaries(rootDir);
+    const dynamicViolations = violations.filter(
       (violation) => violation.rule === 'MONO-005-CONTRACTS-DYNAMIC-MODULE',
     );
+    const runtimeViolations = violations.filter(
+      (violation) => violation.rule === 'MONO-005-CONTRACTS-RUNTIME',
+    );
 
-    expect(violations.map((violation) => violation.module)).toEqual([
+    expect(dynamicViolations.map((violation) => violation.module)).toEqual([
       '<dynamic-import>',
       '<dynamic-require>',
     ]);
+    expect(runtimeViolations.map((violation) => violation.module)).toEqual(['node:fs', 'node:fs']);
+    expect(violations.some((violation) => violation.module === 'zod')).toBe(false);
   });
 
   it('rejects contracts browser-only globals while allowing web standard APIs and shadows', async () => {
