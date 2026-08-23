@@ -7,6 +7,18 @@ const SOURCE_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs',
 const IGNORED_DIRECTORIES = new Set(['.git', '.next', '.open-next', 'build', 'coverage', 'dist', 'node_modules', 'out']);
 const CLIENT_PACKAGE_NAMES = new Set(['ai-direct', 'local-library', 'cloud-client', 'ui-web']);
 const REQUIRED_WORKSPACE_SCRIPTS = ['test', 'lint', 'build'];
+const LEGACY_ROOT_APP_DIRECTORIES = new Set([
+  'app',
+  'components',
+  'config',
+  'drizzle',
+  'lib',
+  'pages',
+  'public',
+  'server',
+  'styles',
+  'types',
+]);
 const DOM_GLOBAL_IDENTIFIERS = new Set([
   'window',
   'document',
@@ -298,6 +310,22 @@ function packageTargetFromRelativeSpecifier(filePath, moduleSpecifier, packages)
   return packages.find((pkg) => isWithin(targetPath, pkg.directory)) ?? null;
 }
 
+function legacyRootAppTargetFromSpecifier(rootDirectory, filePath, moduleSpecifier) {
+  let targetPath;
+  if (moduleSpecifier.startsWith('./') || moduleSpecifier.startsWith('../')) {
+    targetPath = path.resolve(path.dirname(filePath), moduleSpecifier);
+  } else if (moduleSpecifier === '@' || moduleSpecifier.startsWith('@/')) {
+    targetPath = path.resolve(rootDirectory, moduleSpecifier === '@' ? '.' : moduleSpecifier.slice(2));
+  } else {
+    return null;
+  }
+
+  const relativePath = path.relative(rootDirectory, targetPath);
+  if (relativePath === '' || relativePath.startsWith('..') || path.isAbsolute(relativePath)) return null;
+  const topLevelDirectory = relativePath.split(path.sep)[0];
+  return LEGACY_ROOT_APP_DIRECTORIES.has(topLevelDirectory) ? topLevelDirectory : null;
+}
+
 function packageSubpath(moduleSpecifier, packageName) {
   return moduleSpecifier === packageName ? null : `.${moduleSpecifier.slice(packageName.length)}`;
 }
@@ -447,6 +475,24 @@ export function checkWorkspaceBoundaries(rootDirectory = process.cwd()) {
               : `app ${unit.name} must not import app ${appTarget.name}`,
             line,
           );
+        }
+
+        if (unit.kind === 'packages') {
+          const legacyRootTarget = legacyRootAppTargetFromSpecifier(
+            normalizedRoot,
+            sourceFile,
+            moduleSpecifier,
+          );
+          if (legacyRootTarget) {
+            addViolation(
+              violations,
+              'MONO-005-PACKAGE-LEGACY-APP',
+              sourceFile,
+              moduleSpecifier,
+              `package ${unit.name} must not import legacy root app directory ${legacyRootTarget}`,
+              line,
+            );
+          }
         }
 
         const relativePackageTarget = packageTargetFromRelativeSpecifier(sourceFile, moduleSpecifier, packages);

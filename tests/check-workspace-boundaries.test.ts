@@ -66,6 +66,35 @@ describe('workspace dependency boundaries', () => {
     expect(violations.every((violation) => violation.file.endsWith('packages/shared/src/index.ts'))).toBe(true);
   });
 
+  it('rejects package imports into the legacy root app across supported import forms', async () => {
+    const rootDir = await createWorkspaceFixture({
+      'packages/shared/package.json': manifest('@mahoshojo/shared'),
+      'packages/shared/src/index.ts': [
+        "export * from '../../../lib/auth';",
+        "export { value } from '@/server/auth';",
+        "const page = import('../../../app/page');",
+        "const button = require('../../../components/button');",
+        "type User = import('../../../types/user').User;",
+        "import legacyPage = require('../../../pages/index');",
+        'void page; void button; void legacyPage;',
+      ].join('\n'),
+    });
+
+    const violations = checkWorkspaceBoundaries(rootDir).filter(
+      (violation) => violation.rule === 'MONO-005-PACKAGE-LEGACY-APP',
+    );
+
+    expect(violations).toHaveLength(6);
+    expect(violations.map((violation) => violation.module)).toEqual(expect.arrayContaining([
+      '../../../lib/auth',
+      '@/server/auth',
+      '../../../app/page',
+      '../../../components/button',
+      '../../../types/user',
+      '../../../pages/index',
+    ]));
+  });
+
   it('rejects app-to-app imports through relative, alias, and workspace package names', async () => {
     const rootDir = await createWorkspaceFixture({
       'apps/web/package.json': manifest('@mahoshojo/web'),
