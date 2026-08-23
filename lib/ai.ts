@@ -17,6 +17,10 @@ import {
 import { classifySuccess, classifyOutcome, recordAiChannelOutcome } from "@/lib/ai/availability";
 import { buildReasoningSummary } from "@/lib/ai/reasoning-normalizer";
 import type { AIReasoningEnvelope } from "@/types/ai-reasoning";
+import {
+  createAiUpstreamAttemptRuntime,
+  classifyAiUpstreamOutcome,
+} from '@mahoshojo/hosted-runtime/ai-upstream';
 
 // 延迟函数
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -397,6 +401,7 @@ export async function generateWithAI<T, I = string>(
 
     // 对当前提供商进行重试
     for (let attempt = 0; attempt < retryCount; attempt++) {
+      const runtimeAttempt = createAiUpstreamAttemptRuntime();
       try {
         log.debug(`开始尝试: 提供商: ${provider.name} 模型: ${selectedModel} 尝试次数: ${attempt + 1} / ${retryCount}`);
 
@@ -494,6 +499,8 @@ export async function generateWithAI<T, I = string>(
             options.telemetry.reasoning = buildNonStreamReasoningEnvelope(textResult.reasoningText, textResult.usage);
           }
 
+          runtimeAttempt.recordTtfb();
+          runtimeAttempt.finish('success');
           return parsed.data as T;
         };
 
@@ -539,6 +546,8 @@ export async function generateWithAI<T, I = string>(
                 options.telemetry.reasoning = buildNonStreamReasoningEnvelope(undefined, rawError.usage);
               }
 
+              runtimeAttempt.recordTtfb();
+              runtimeAttempt.finish('success');
               return repaired.data as T;
             } catch {
               // 本地修复失败时，再尝试一次“文本 JSON 回退重试”
@@ -597,8 +606,11 @@ export async function generateWithAI<T, I = string>(
           options.telemetry.finishReason = finishReason;
           options.telemetry.reasoning = reasoning;
         }
+        runtimeAttempt.recordTtfb();
+        runtimeAttempt.finish('success');
         return object as T;
       } catch (error) {
+        runtimeAttempt.finish(classifyAiUpstreamOutcome(error));
         lastError = error;
         log.error(`提供商 ${provider.name} 第 ${attempt + 1} 次失败`, { error });
 

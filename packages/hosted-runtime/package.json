@@ -9,6 +9,11 @@
       "import": "./src/d1-http-client.ts",
       "default": "./src/d1-http-client.ts"
     },
+    "./ai-upstream": {
+      "types": "./src/ai-upstream.ts",
+      "import": "./src/ai-upstream.ts",
+      "default": "./src/ai-upstream.ts"
+    },
     "./telemetry": {
       "types": "./src/telemetry.ts",
       "import": "./src/telemetry.ts",

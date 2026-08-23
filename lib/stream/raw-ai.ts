@@ -18,6 +18,12 @@ import {
     STREAM_READ_TOTAL_TIMEOUT_MS,
     type StreamReadTimeoutMode,
 } from "@/lib/stream/timeout";
+import {
+    classifyAiUpstreamOutcome,
+    createAiUpstreamAttemptRuntime,
+} from '@mahoshojo/hosted-runtime/ai-upstream';
+
+export const classifyStreamRuntimeOutcome = classifyAiUpstreamOutcome;
 
 // 延迟函数
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -295,6 +301,7 @@ export async function generateWithStreamAI(
 	        for (let attempt = 0; attempt < retryCount; attempt++) {
             // 同一 attempt 只记一次：在流真正结束（成功/失败/取消）时落分，而非首包时
             const outcomeRecorder = createAttemptOutcomeRecorder(options?.channelContext);
+	            const runtimeAttempt = createAiUpstreamAttemptRuntime();
 	            try {
                 log.debug(`开始尝试: 提供商: ${provider.name} 模型: ${selectedModel} 尝试次数: ${attempt + 1} / ${retryCount}`);
 
@@ -362,9 +369,11 @@ export async function generateWithStreamAI(
                         log.error(`流式传输过程中出错: 提供商: ${provider.name} 模型: ${selectedModel}`, { error });
                         // 流中错误：先记 failure（后续 body close/cancel 不会重复记分）
                         outcomeRecorder.recordFromError(error);
+                        runtimeAttempt.finish(classifyAiUpstreamOutcome(error));
                     },
                     onAbort: () => {
                         outcomeRecorder.recordFromCancel('abort');
+                        runtimeAttempt.finish('aborted');
                     },
 	                });
 
@@ -449,6 +458,7 @@ export async function generateWithStreamAI(
 	                    if (mapped.type === 'text-delta') {
 	                        prefetchedText += mapped.text;
 	                    }
+                    runtimeAttempt.recordTtfb();
 	                    // 低延迟优先：拿到首个有效 chunk（文本或 reasoning）后立即交由上层持续消费。
 	                    break;
 	                }
@@ -472,6 +482,7 @@ export async function generateWithStreamAI(
                         // 预取已耗尽且上游已结束：在首包路径上完成 attempt
                         if (prefetchedDone) {
                             outcomeRecorder.recordSuccess();
+                            runtimeAttempt.finish('success');
                         }
                     },
                     async pull(controller) {
@@ -480,6 +491,7 @@ export async function generateWithStreamAI(
                                 const { done, value } = await readWithTimeout(reader);
                                 if (done) {
                                     outcomeRecorder.recordSuccess();
+                                    runtimeAttempt.finish('success');
                                     controller.close();
                                     return;
                                 }
@@ -492,6 +504,7 @@ export async function generateWithStreamAI(
                             }
                         } catch (streamError) {
                             outcomeRecorder.recordFromError(streamError);
+                            runtimeAttempt.finish(classifyAiUpstreamOutcome(streamError));
                             try {
                                 controller.error(streamError);
                             } catch {
@@ -506,6 +519,7 @@ export async function generateWithStreamAI(
                             // ignore
                         }
                         outcomeRecorder.recordFromCancel(reason);
+                        runtimeAttempt.finish(classifyAiUpstreamOutcome(reason));
                     }
                 });
 
@@ -555,6 +569,7 @@ export async function generateWithStreamAI(
 
                 // 预检/建连失败：attempt 在返回 Response 前结束（与 onError 共用 once recorder）
                 outcomeRecorder.recordFromError(enhancedError);
+                runtimeAttempt.finish(classifyAiUpstreamOutcome(enhancedError));
 
                 // 如果不是最后一次尝试，等待后再重试
                 if (attempt < retryCount - 1) {
