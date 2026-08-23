@@ -39,6 +39,10 @@ describe('Hono route manifest', () => {
   it('把常规生成 shared service 路由从 legacy Next 动态导入中移除', async () => {
     const sharedDefinitions = routeDefinitions.filter((route) => route.adapter === 'shared-service');
     expect(sharedDefinitions.map((route) => route.id).sort()).toEqual([
+      'creator/generate',
+      'creator/generate-stream',
+      'generate-canshou',
+      'generate-canshou-stream',
       'generate-free',
       'generate-free-stream',
       'generate-game-card',
@@ -46,7 +50,7 @@ describe('Hono route manifest', () => {
       'generate-scenario',
       'generate-scenario-stream',
     ]);
-    expect(routeDefinitions.filter((route) => route.adapter === 'legacy-next')).toHaveLength(18);
+    expect(routeDefinitions.filter((route) => route.adapter === 'legacy-next')).toHaveLength(14);
 
     for (const definition of sharedDefinitions) {
       const routeModule = await definition.load();

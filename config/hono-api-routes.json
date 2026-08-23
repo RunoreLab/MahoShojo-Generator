@@ -3,11 +3,7 @@
     "arena/generate",
     "arena/generate-stream",
     "arena/session/generate-next",
-    "creator/generate",
-    "creator/generate-stream",
     "generate-battle-story",
-    "generate-canshou",
-    "generate-canshou-stream",
     "generate-magical-girl-details",
     "generate-magical-girl-details-stream",
     "generate-sublimation",
@@ -20,6 +16,10 @@
     "me/battle-reports/[generationId]/regenerate"
   ],
   "sharedRouteIds": [
+    "creator/generate",
+    "creator/generate-stream",
+    "generate-canshou",
+    "generate-canshou-stream",
     "generate-free",
     "generate-free-stream",
     "generate-game-card",

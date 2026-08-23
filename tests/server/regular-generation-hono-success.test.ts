@@ -4,9 +4,20 @@ import type { RedisService } from '@/server/redis/runtime';
 
 const mocks = vi.hoisted(() => ({
   events: [] as string[],
-  generateWithAI: vi.fn(async (_input: unknown, _config: unknown, options: any) => {
+  generateWithAI: vi.fn(async (_input: unknown, config: unknown, options: any) => {
     mocks.events.push('generate');
-    options.telemetry.model = 'scenario-test-model';
+    const taskName = (config as { taskName?: string })?.taskName;
+    options.telemetry.model = taskName === '生成残兽档案'
+      ? 'canshou-test-model'
+      : taskName === '生成魔法少女详细信息'
+        ? 'creator-test-model'
+        : 'scenario-test-model';
+    if (taskName === '生成残兽档案') {
+      return { name: '测试残兽', coreConcept: '测试核心' };
+    }
+    if (taskName === '生成魔法少女详细信息') {
+      return { codename: '测试花名' };
+    }
     return {
       title: '测试情景',
       scenario_type: '日常',
@@ -50,6 +61,18 @@ vi.mock('@/lib/logger', () => ({
 }));
 vi.mock('@/lib/signature', () => ({
   generateSignature: mocks.generateSignature,
+}));
+vi.mock('@/lib/database/data-cards', () => ({
+  getDataCardById: vi.fn(async (id: string) => ({
+    type: 'questionnaire',
+    data: JSON.stringify({
+      id: id === 'canshou-card' ? 'canshou-native' : 'creator-native',
+      title: id === 'canshou-card' ? '残兽原生问卷' : 'Creator 原生问卷',
+      kind: id === 'canshou-card' ? 'canshou' : 'magical-girl',
+      nativeAllowed: true,
+      questions: [{ id: 'q-1', question: '核心问题？', maxLength: 80 }],
+    }),
+  })),
 }));
 vi.mock('@/lib/user-activity/record', () => ({
   recordUserActivityFromRequest: mocks.recordActivity,
@@ -114,6 +137,130 @@ describe('常规生成 Hono production composition', () => {
         },
       },
       aiMeta: { aiModel: 'scenario-test-model' },
+    });
+    expect(mocks.events).toEqual(['generate', 'activity', 'signature']);
+    expect(mocks.generateSignature).toHaveBeenCalledOnce();
+    expect(mocks.recordActivity).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    {
+      name: 'Creator',
+      path: '/api/creator/generate',
+      dataCardId: 'creator-card',
+      questionnaireId: 'creator-native',
+      kind: 'magical-girl',
+      body: {
+        template: 'magical-girl',
+        primaryRuleId: 'arena-trpg-lite',
+        buildRules: [{
+          ruleId: 'arena-trpg-lite',
+          version: '1.0.0',
+          inputs: {
+            powerLevel: 'seed',
+            coreAttributes: {
+              STR: 40,
+              CON: 40,
+              AGI: 40,
+              MAG: 40,
+              WILL: 40,
+              PER: 40,
+              CHM: 40,
+            },
+            specialties: [],
+          },
+        }],
+      },
+      expected: {
+        codename: '测试花名',
+        templateId: '魔法少女/心之花/魔法少女（问卷生成）',
+        creationInputs: {
+          template: 'magical-girl',
+          freeformBrief: null,
+          primaryRuleId: 'arena-trpg-lite',
+          buildRules: [expect.objectContaining({
+            ruleId: 'arena-trpg-lite',
+            version: '1.0.0',
+            blockResults: expect.any(Object),
+            derived: expect.objectContaining({ HP: expect.any(Number) }),
+            validationSummary: expect.objectContaining({ valid: true }),
+          })],
+        },
+        buildState: {
+          primaryRuleId: 'arena-trpg-lite',
+          rules: [expect.objectContaining({
+            ruleId: 'arena-trpg-lite',
+            blockResults: expect.any(Object),
+            derived: expect.objectContaining({ HP: expect.any(Number) }),
+            validationSummary: expect.objectContaining({ valid: true }),
+          })],
+        },
+      },
+      aiModel: 'creator-test-model',
+    },
+    {
+      name: '残兽',
+      path: '/api/generate-canshou',
+      dataCardId: 'canshou-card',
+      questionnaireId: 'canshou-native',
+      kind: 'canshou',
+      body: {},
+      expected: {
+        name: '测试残兽',
+        coreConcept: '测试核心',
+        templateId: '魔法少女/心之花/残兽（问卷生成）',
+      },
+      aiModel: 'canshou-test-model',
+    },
+  ])('经 dispatcher 保留 $name 原生问卷、签名、AI meta、活动与顺序', async ({
+    path,
+    dataCardId,
+    questionnaireId,
+    kind,
+    body,
+    expected,
+    aiModel,
+  }) => {
+    mocks.events.length = 0;
+    const app = createHonoApp(config, redis);
+    const response = await app.request(path, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Mahoshojo-AI-Meta': 'true',
+        'X-Mahoshojo-Activity-Token': 'activity-token',
+      },
+      body: JSON.stringify({
+        ...body,
+        allowNativeSignature: true,
+        questionnaireSelections: [{
+          source: 'database',
+          kind,
+          dataCardId,
+        }],
+        answers: [{
+          question: '客户端提交的问题文本',
+          answer: '测试答案',
+          questionId: 'q-1',
+          questionnaireId,
+        }],
+        questionnaires: [],
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('x-backend-runtime')).toBe('hono-node');
+    expect(await response.json()).toEqual({
+      data: {
+        ...expected,
+        userAnswers: [{
+          question: '核心问题？',
+          answer: '测试答案',
+          questionId: 'q-1',
+        }],
+        signature: 'test-signature',
+      },
+      aiMeta: { aiModel },
     });
     expect(mocks.events).toEqual(['generate', 'activity', 'signature']);
     expect(mocks.generateSignature).toHaveBeenCalledOnce();

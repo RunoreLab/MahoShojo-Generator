@@ -3,8 +3,16 @@ import { describe, expect, it } from 'vitest';
 import { appRouteHandler as nextFree } from '@/app/api/generate-free/handler';
 import { appRouteHandler as nextFreeStream } from '@/app/api/generate-free-stream/handler';
 import { handler as nextGameCard } from '@/app/api/generate-game-card/handler';
+import { appRouteHandler as nextCreator } from '@/app/api/creator/generate/handler';
+import { appRouteHandler as nextCreatorStream } from '@/app/api/creator/generate-stream/handler';
+import { appRouteHandler as nextCanshou } from '@/app/api/generate-canshou/handler';
+import { appRouteHandler as nextCanshouStream } from '@/app/api/generate-canshou-stream/handler';
 import { appRouteHandler as nextScenario } from '@/app/api/generate-scenario/handler';
 import { appRouteHandler as nextScenarioStream } from '@/app/api/generate-scenario-stream/handler';
+import { POST as honoCreator } from '@/server/adapters/creator/generate';
+import { POST as honoCreatorStream } from '@/server/adapters/creator/generate-stream';
+import { POST as honoCanshou } from '@/server/adapters/generate-canshou';
+import { POST as honoCanshouStream } from '@/server/adapters/generate-canshou-stream';
 import { POST as honoFree } from '@/server/adapters/generate-free';
 import { POST as honoFreeStream } from '@/server/adapters/generate-free-stream';
 import { POST as honoGameCard } from '@/server/adapters/generate-game-card';
@@ -16,6 +24,10 @@ describe('常规 Hosted generation runtime adapters', () => {
     expect(honoFree).toBe(nextFree);
     expect(honoFreeStream).toBe(nextFreeStream);
     expect(honoGameCard).toBe(nextGameCard);
+    expect(honoCreator).toBe(nextCreator);
+    expect(honoCreatorStream).toBe(nextCreatorStream);
+    expect(honoCanshou).toBe(nextCanshou);
+    expect(honoCanshouStream).toBe(nextCanshouStream);
     expect(honoScenario).toBe(nextScenario);
     expect(honoScenarioStream).toBe(nextScenarioStream);
   });
@@ -64,5 +76,19 @@ describe('常规 Hosted generation runtime adapters', () => {
     expect(scenarioStreamInvalid.status).toBe(400);
     expect(scenarioStreamInvalid.headers.get('content-type')).toBe('application/json');
     expect(await scenarioStreamInvalid.json()).toEqual({ error: 'Answers object is required' });
+
+    const canshouNull = await honoCanshou(new Request(
+      'https://example.test/api/generate-canshou',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: 'null',
+      },
+    ));
+    expect(canshouNull.status).toBe(500);
+    expect(await canshouNull.json()).toEqual({
+      error: '生成失败，当前服务器可能正忙，请稍后重试',
+      message: expect.any(String),
+    });
   });
 });

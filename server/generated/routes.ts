@@ -29,14 +29,14 @@ export const routeDefinitions: RouteDefinition[] = [
   {
     id: "creator/generate",
     pattern: "/api/creator/generate",
-    adapter: "legacy-next",
-    load: () => import("../../app/api/creator/generate/route") as unknown as Promise<RouteModule>,
+    adapter: "shared-service",
+    load: () => import("../adapters/creator/generate") as unknown as Promise<RouteModule>,
   },
   {
     id: "creator/generate-stream",
     pattern: "/api/creator/generate-stream",
-    adapter: "legacy-next",
-    load: () => import("../../app/api/creator/generate-stream/route") as unknown as Promise<RouteModule>,
+    adapter: "shared-service",
+    load: () => import("../adapters/creator/generate-stream") as unknown as Promise<RouteModule>,
   },
   {
     id: "magic-tavern/generate-choices",
@@ -77,14 +77,14 @@ export const routeDefinitions: RouteDefinition[] = [
   {
     id: "generate-canshou",
     pattern: "/api/generate-canshou",
-    adapter: "legacy-next",
-    load: () => import("../../app/api/generate-canshou/route") as unknown as Promise<RouteModule>,
+    adapter: "shared-service",
+    load: () => import("../adapters/generate-canshou") as unknown as Promise<RouteModule>,
   },
   {
     id: "generate-canshou-stream",
     pattern: "/api/generate-canshou-stream",
-    adapter: "legacy-next",
-    load: () => import("../../app/api/generate-canshou-stream/route") as unknown as Promise<RouteModule>,
+    adapter: "shared-service",
+    load: () => import("../adapters/generate-canshou-stream") as unknown as Promise<RouteModule>,
   },
   {
     id: "generate-free",

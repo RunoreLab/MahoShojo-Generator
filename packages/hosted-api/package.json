@@ -4,6 +4,16 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./generate-canshou": {
+      "types": "./src/generate-canshou.ts",
+      "import": "./src/generate-canshou.ts",
+      "default": "./src/generate-canshou.ts"
+    },
+    "./generate-creator": {
+      "types": "./src/generate-creator.ts",
+      "import": "./src/generate-creator.ts",
+      "default": "./src/generate-creator.ts"
+    },
     "./generate-free": {
       "types": "./src/generate-free.ts",
       "import": "./src/generate-free.ts",
