@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
+import { parse } from 'comment-json';
 
 const rootDirectory = process.cwd();
 
@@ -132,7 +133,7 @@ describe('phase 2.5A D1 Gateway workspace app', () => {
     expect(existsSync(appWranglerPath)).toBe(true);
     if (!existsSync(appWranglerPath)) return;
 
-    const wrangler = JSON.parse(readFileSync(appWranglerPath, 'utf8')) as {
+    const wrangler = parse(readFileSync(appWranglerPath, 'utf8'), undefined, true) as {
       name?: string;
       main?: string;
       compatibility_date?: string;

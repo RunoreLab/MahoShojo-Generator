@@ -49,7 +49,7 @@ const createDatabase = () => {
           return this;
         },
         async all() {
-          return { success: true, results: [{ ok: 1 }], meta: { rows_read: 1 } };
+          return { success: true, results: [{ ok: 1 }], meta: {} };
         },
         async raw(options?: { columnNames?: boolean }) {
           rawOptions.push(options);
