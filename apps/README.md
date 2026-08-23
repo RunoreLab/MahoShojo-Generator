@@ -7,7 +7,7 @@
 
 - `web`：现有 Web 产品的未来独立应用边界，当前仍在 legacy root；
 - `admin`：管理端应用；
-- `api`：面向 API/服务端能力的应用边界；G25C 已把 Hono 清单收口为 `10 shared-service / 0 legacy-next`，但 source、manifest、构建与部署仍在 legacy `server/`/根目录，应用尚未激活；
+- `api`：面向 API/服务端能力的应用边界；Phase 2.5B 已把 Hono 清单和生成链收口为 `10 shared-service / 14 exited / 0 legacy-next`，但 source、manifest、构建与部署仍在 legacy `server/`/根目录，应用尚未激活；
 - `d1-gateway`：已激活的 D1 网关 Cloudflare Worker，详见 [`d1-gateway/README.md`](./d1-gateway/README.md)；
 - `arena-room`：Arena 多人 Room Worker / Durable Object 的未来部署边界；
 - `desktop`、`mobile`：桌面端与移动端应用边界。

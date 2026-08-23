@@ -12,7 +12,7 @@
 
 **Preserves:** `AI-006`、`AUTHORITY-001..006`、`DR-004..011`、`DR-013..014`、`COMPAT-001..002`、`ACCEPT-008`；不改变 Arena v1 wire/authority，也不把 generation 标记为可透明重放。
 
-**执行检查点（2026-08-24）：** 已完成 Task 1 Step 4 的 capability manifest 原子修改，当前为 `10 shared-service / 0 legacy-next`；对应 14 条 Next 公开 route 未删除。根据当前收口要求，尚未完成的 app ownership RED 已撤回，`@mahoshojo/hosted-runtime`、真实 `apps/api`、AI/D1/Redis telemetry、Docker/CI/deploy ownership 与独立审查均未开始，不能据此判定 G25C stopping condition 达成。
+**执行检查点（2026-08-24）：** Phase 2.5B 已在 capability manifest 原子修改之上完成结构退出审计，当前为 `10 shared-service / 14 exited / 0 legacy-next`；对应 14 条 Next 公开 route 未删除，legacy codegen/type 后门已删除并 fail closed。根据当前收口要求，尚未完成的 app ownership RED 已撤回，`@mahoshojo/hosted-runtime`、真实 `apps/api`、AI/D1/Redis telemetry、Docker/CI/deploy ownership 与 G25C 独立审查均未开始，不能据此判定 G25C stopping condition 达成。
 
 ---
 

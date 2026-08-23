@@ -2,7 +2,7 @@
 
 当前实现建立了可并行验证的 Hono Node 服务，不会改变原有 `pnpm dev` 和 Cloudflare Next 部署：
 
-- 通过 `config/hono-api-routes.json` 的 `sharedRouteIds` / `legacyRouteIds` 互斥清单挂载经裁决保留的生成类 API；
+- 通过 `config/hono-api-routes.json` 的 `sharedRouteIds` 挂载经裁决保留的生成类 API，并用 `exitedRouteIds` 冻结继续由 Next 承载的退出清单；
 - shared route 由 Hono adapter 与 Next Route Adapter 调用同一 `@mahoshojo/hosted-api` application service；
 - 为旧 handler 提供 Node 版 `waitUntil`；
 - D1 访问优先经过内部 Gateway Worker，保留 Cloudflare 管理 API 作为迁移回退；
@@ -15,9 +15,10 @@ Phase 2.5B 当前有 10 条 shared-service route：`generate-magical-girl`，G25
 `generate-game-card`、Free generate/stream、Scenario generate/stream，以及 G25B-2 收口的 Creator、残兽
 generate/stream。Hono 从 `server/adapters/*` 加载这些 adapter，不再动态导入对应 Next route；Next wrapper
 继续保留，两个 runtime 使用同一默认 service composition，业务顺序与错误 wire 由
-`@mahoshojo/hosted-api` 负责。G25C 启动检查已将其余 14 条 legacy capability 从 Hono 执行清单退出；对应
+`@mahoshojo/hosted-api` 负责。Phase 2.5B 退出审计已将其余 14 条 legacy capability 从 Hono 执行清单退出；对应
 Next 公开 route 保持原有实现、wire、鉴权和数据语义，未来若要重新进入 Hono，必须先形成 shared seam 和
-副作用/replay 证据。当前 registry 为 `10 shared-service / 0 legacy-next`，但 Hono source 与生命周期仍由
+副作用/replay 证据。生成器在 `legacyRouteIds` 非空时 fail closed，生成的 registry 也不再拥有动态导入
+legacy Next handler 的 adapter 类型或代码路径。当前 registry 为 `10 shared-service / 0 legacy-next`，但 Hono source 与生命周期仍由
 legacy `server/` 和根 manifest 持有，不能据此宣称 `apps/api` 已激活。生成后的实际 registry 为
 `server/generated/routes.ts`，不得手工修改。
 
