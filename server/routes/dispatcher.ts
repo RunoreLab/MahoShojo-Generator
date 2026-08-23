@@ -1,29 +1,23 @@
 import type { Context } from 'hono';
+import {
+  NodeExecutionContextCoordinator,
+  nodeExecutionContextCoordinator,
+} from '@/server/runtime/execution-context';
 import type {
   HttpMethod,
-  NodeExecutionContext,
   RouteContext,
   RouteDefinition,
 } from '@/server/routes/types';
 
-const attachExecutionContext = (request: Request, routeId: string): Request => {
-  const pendingTasks = new Set<Promise<unknown>>();
-  const executionContext: NodeExecutionContext = {
-    waitUntil(promise) {
-      const tracked = Promise.resolve(promise);
-      pendingTasks.add(tracked);
-      void tracked
-        .catch((error: unknown) => {
-          console.error(`[hono][waitUntil][${routeId}] 后台任务失败`, error);
-        })
-        .finally(() => pendingTasks.delete(tracked));
-    },
-  };
-
+const attachExecutionContext = (
+  request: Request,
+  routeId: string,
+  coordinator: NodeExecutionContextCoordinator,
+): Request => {
   Object.defineProperty(request, 'context', {
     configurable: true,
     enumerable: false,
-    value: executionContext,
+    value: coordinator.createExecutionContext(routeId),
   });
   return request;
 };
@@ -35,6 +29,7 @@ const buildRouteContext = (context: Context): RouteContext => ({
 export const dispatchRoute = async (
   context: Context,
   definition: RouteDefinition,
+  coordinator: NodeExecutionContextCoordinator = nodeExecutionContextCoordinator,
 ): Promise<Response> => {
   const method = context.req.method.toUpperCase() as HttpMethod;
   const routeModule = await definition.load();
@@ -53,6 +48,6 @@ export const dispatchRoute = async (
     );
   }
 
-  const request = attachExecutionContext(context.req.raw, definition.id);
+  const request = attachExecutionContext(context.req.raw, definition.id, coordinator);
   return handler(request, buildRouteContext(context));
 };

@@ -3,6 +3,11 @@ import { createHonoApp } from '@/server/app';
 import { readHonoServerConfig } from '@/server/config';
 import { RedisRuntime } from '@/server/redis/runtime';
 import {
+  DEFAULT_WAIT_UNTIL_DRAIN_TIMEOUT_MS,
+  nodeExecutionContextCoordinator,
+  shutdownWithWaitUntilDrain,
+} from '@/server/runtime/execution-context';
+import {
   HonoRuntimeTelemetry,
   observeServerConnections,
 } from '@/server/telemetry/runtime';
@@ -33,8 +38,18 @@ if (process.env.HONO_CONFIG_CHECK_ONLY === 'true') {
     console.info(`[hono] 收到 ${signal}，开始优雅退出`);
 
     try {
-      await new Promise<void>((resolve) => server.close(() => resolve()));
-      await redis.close();
+      const drainResult = await shutdownWithWaitUntilDrain({
+        closeDependencies: () => redis.close(),
+        coordinator: nodeExecutionContextCoordinator,
+        drainTimeoutMs: DEFAULT_WAIT_UNTIL_DRAIN_TIMEOUT_MS,
+        stopAcceptingRequests: () => new Promise<void>((resolve) => server.close(() => resolve())),
+      });
+      if (drainResult.timedOut) {
+        console.error(
+          `[hono][waitUntil] 优雅退出等待 ${DEFAULT_WAIT_UNTIL_DRAIN_TIMEOUT_MS}ms 后超时，`
+          + `仍有 ${drainResult.pendingTaskCount} 个后台任务`,
+        );
+      }
     } finally {
       stopObservingConnections();
       telemetry.emitSnapshot();
