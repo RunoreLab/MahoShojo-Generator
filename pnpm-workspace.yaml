@@ -1,6 +1,12 @@
 packages:
   - apps/*
   - packages/*
+overrides:
+  # GHSA-rgw5-rvv9-x895 / GHSA-3jxr-9vmj-r5cp: stay inside parent semver ranges.
+  brace-expansion@1: 1.1.18
+  brace-expansion@2: 2.1.2
+  # GHSA-m7jm-9gc2-mpf2: OpenNext 1.15 pins an older AWS client to 4.2.5.
+  fast-xml-parser@4: 4.5.4
 allowBuilds:
   better-sqlite3: true
   esbuild: true
@@ -11,4 +17,3 @@ allowBuilds:
 peerDependencyRules:
   allowedVersions:
     next: 15.3.8
-    vercel: 47.0.4
