@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import { parse } from 'comment-json';
 
@@ -26,6 +26,43 @@ describe('phase 1 workspace structure', () => {
     expect(packageJson.scripts['workspace:verify']).toContain('check:workspace:boundaries');
     expect(packageJson.scripts['workspace:verify']).toContain('check:naming:workspace');
     expect(packageJson.scripts['workspace:verify']).not.toContain('pnpm test');
+  });
+
+  it('provides one CI entrypoint that verifies workspaces and the legacy root', () => {
+    const packageJson = JSON.parse(readFileSync(path.join(rootDirectory, 'package.json'), 'utf8')) as {
+      scripts: Record<string, string>;
+    };
+
+    expect(packageJson.scripts['ci:verify']).toBe(
+      'pnpm run workspace:verify && pnpm test && pnpm lint',
+    );
+  });
+
+  it('copies every workspace manifest before the Hono container installs dependencies', () => {
+    const dockerfile = readFileSync(path.join(rootDirectory, 'Dockerfile.hono'), 'utf8');
+    const installIndex = dockerfile.indexOf('RUN pnpm install --frozen-lockfile');
+    expect(installIndex).toBeGreaterThan(-1);
+
+    const workspaceDirectories = ['apps', 'packages'].flatMap((workspaceRoot) =>
+      readdirSync(path.join(rootDirectory, workspaceRoot), { withFileTypes: true })
+        .filter(
+          (entry) =>
+            entry.isDirectory() &&
+            existsSync(path.join(rootDirectory, workspaceRoot, entry.name, 'package.json')),
+        )
+        .map((entry) => `${workspaceRoot}/${entry.name}`),
+    );
+
+    expect(workspaceDirectories.length).toBeGreaterThan(0);
+    for (const workspaceDirectory of workspaceDirectories) {
+      const copyInstruction =
+        `COPY ${workspaceDirectory}/package.json ./${workspaceDirectory}/package.json`;
+      const copyIndex = dockerfile.indexOf(copyInstruction);
+      expect(copyIndex, `Dockerfile.hono must copy ${workspaceDirectory}/package.json`).toBeGreaterThan(-1);
+      expect(copyIndex, `${workspaceDirectory}/package.json must be copied before pnpm install`).toBeLessThan(
+        installIndex,
+      );
+    }
   });
 
   it('ignores workspace-local generated artifacts with exact glob rules', () => {

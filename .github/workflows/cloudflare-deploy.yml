@@ -50,8 +50,8 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Verify workspace boundaries and packages
-        run: pnpm run workspace:verify
+      - name: Verify workspace and legacy root
+        run: pnpm run ci:verify
 
       - name: Build Cloudflare bundle
         env:

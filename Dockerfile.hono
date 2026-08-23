@@ -2,6 +2,16 @@ FROM node:22-alpine AS dependencies
 WORKDIR /app
 RUN corepack enable && corepack prepare pnpm@11.3.0 --activate
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
+# Phase 2.5 legacy-root 临时策略；apps/api 激活后改为复制其实际 workspace 依赖闭包。
+COPY apps/d1-gateway/package.json ./apps/d1-gateway/package.json
+COPY packages/ai-core/package.json ./packages/ai-core/package.json
+COPY packages/ai-direct/package.json ./packages/ai-direct/package.json
+COPY packages/config/package.json ./packages/config/package.json
+COPY packages/contracts/package.json ./packages/contracts/package.json
+COPY packages/domain/package.json ./packages/domain/package.json
+COPY packages/hosted-api/package.json ./packages/hosted-api/package.json
+COPY packages/local-library/package.json ./packages/local-library/package.json
+COPY packages/multiplayer-core/package.json ./packages/multiplayer-core/package.json
 RUN pnpm install --frozen-lockfile
 
 FROM dependencies AS builder

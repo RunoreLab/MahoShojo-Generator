@@ -2,7 +2,8 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
-const WORKFLOW_PATH = resolve(process.cwd(), '.github/workflows/hono-deploy.yml');
+const HONO_WORKFLOW_PATH = resolve(process.cwd(), '.github/workflows/hono-deploy.yml');
+const CLOUDFLARE_WORKFLOW_PATH = resolve(process.cwd(), '.github/workflows/cloudflare-deploy.yml');
 const PRODUCTION_BRANCH = 'refs/heads/feature/v0.2.0_Battle_Growth_MahoShojo';
 
 function escapeRegExp(value: string): string {
@@ -40,7 +41,7 @@ function getStep(job: string, stepName: string): string {
 
 describe('Hono deployment workflow', () => {
   test('gates the deploy job to the production branch', () => {
-    const workflow = readFileSync(WORKFLOW_PATH, 'utf8');
+    const workflow = readFileSync(HONO_WORKFLOW_PATH, 'utf8');
     const deployJob = getJob(workflow, 'deploy');
 
     expect(deployJob).toMatch(
@@ -50,6 +51,27 @@ describe('Hono deployment workflow', () => {
     const verificationStep = getStep(getJob(workflow, 'build'), 'Verify Hono authentication and runtime');
     expect(verificationStep).toContain('run: pnpm exec vitest run');
     expect(verificationStep).toContain('tests/hono-deploy-workflow.test.ts');
+  });
+
+  test.each([
+    ['Hono', HONO_WORKFLOW_PATH, 'build'],
+    ['Cloudflare', CLOUDFLARE_WORKFLOW_PATH, 'deploy'],
+  ])('%s workflow verifies workspaces and the legacy root through the unified entrypoint', (_, path, jobKey) => {
+    const workflow = readFileSync(path, 'utf8');
+    const verificationStep = getStep(getJob(workflow, jobKey), 'Verify workspace and legacy root');
+
+    expect(verificationStep).toContain('run: pnpm run ci:verify');
+  });
+
+  test('builds the Hono container before assembling and uploading the deployment artifact', () => {
+    const workflow = readFileSync(HONO_WORKFLOW_PATH, 'utf8');
+    const buildJob = getJob(workflow, 'build');
+    const containerBuildStep = getStep(buildJob, 'Verify Hono container build');
+
+    expect(containerBuildStep).toContain('run: docker build --file Dockerfile.hono .');
+    expect(buildJob.indexOf(containerBuildStep)).toBeLessThan(
+      buildJob.indexOf('- name: Build single-file server'),
+    );
   });
 
   test('finds a quoted deploy job key with an inline comment', () => {

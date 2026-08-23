@@ -29,6 +29,7 @@
         "workspace:lint": "pnpm --filter \"./packages/*\" --filter \"./apps/*\" --if-present run lint",
         "workspace:build": "pnpm --filter \"./packages/*\" --filter \"./apps/*\" --if-present run build",
         "workspace:verify": "pnpm run check:workspace:boundaries && pnpm run check:naming:workspace && pnpm run workspace:test && pnpm run workspace:lint && pnpm run workspace:build",
+        "ci:verify": "pnpm run workspace:verify && pnpm test && pnpm lint",
         "db:generate": "drizzle-kit generate --config drizzle.config.ts",
         "backfill:user-auth-links:dry": "pnpm exec tsx scripts/backfill-user-auth-links.ts --dry-run true --batch 200",
         "backfill:user-auth-links:write": "pnpm exec tsx scripts/backfill-user-auth-links.ts --write --batch 200",
