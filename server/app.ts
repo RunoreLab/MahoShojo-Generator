@@ -75,11 +75,13 @@ export const createHonoApp = (
     namespace: 'api',
     limit: 600,
     windowSeconds: 60,
+    failureMode: config.redisRequired ? 'closed' : 'open',
   }));
   app.use('/api/auth/*', redisRateLimit(redis, {
     namespace: 'auth',
     limit: 30,
     windowSeconds: 60,
+    failureMode: config.redisRequired ? 'closed' : 'open',
   }));
 
   registerHealthRoutes(app, config, redis);

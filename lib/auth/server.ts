@@ -1,9 +1,9 @@
-import { getRequestUrl } from '@/lib/request-url';
 import { getUserByAuthKey } from '@/lib/database/users';
 import { ACTIVITY_TOKEN_HEADER, ACTIVITY_USER_ID_HEADER } from '@/lib/auth/activity-token';
 import { hasBetterAuthSessionCookie } from '@/lib/auth/better-auth';
 import { buildSubrequestAuthHeaders } from '@/lib/subrequest-auth';
 import { isBearerOnlyHonoAuthMode } from '@/lib/auth/hono-auth-mode';
+import { resolveTrustedBetterAuthSubrequestUrl } from '@/lib/auth/trusted-better-auth-url';
 
 export interface AuthenticatedUser {
   id: number;
@@ -144,10 +144,7 @@ const getSessionAuthUser = async (req: Request, deps: AuthServerDeps): Promise<A
   if (!deps.hasBetterAuthSessionCookieImpl(req)) return null;
 
   try {
-    const requestUrl = getRequestUrl(req);
-    if (requestUrl.pathname === '/api/auth/verify') return null;
-
-    const verifyUrl = new URL('/api/auth/verify', requestUrl.origin);
+    const verifyUrl = resolveTrustedBetterAuthSubrequestUrl('/api/auth/verify');
     const headers = new Headers({
       'Content-Type': 'application/json',
     });
@@ -158,7 +155,6 @@ const getSessionAuthUser = async (req: Request, deps: AuthServerDeps): Promise<A
     }
 
     copyHeader(req.headers, headers, 'cookie');
-    copyHeader(req.headers, headers, 'authorization');
     copyHeader(req.headers, headers, 'origin');
     copyHeader(req.headers, headers, 'referer');
     copyHeader(req.headers, headers, 'user-agent');

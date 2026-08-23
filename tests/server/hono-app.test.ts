@@ -106,6 +106,36 @@ describe('Hono server app', () => {
     expect(await response.json()).toMatchObject({ code: 'RATE_LIMITED', retryAfterSeconds: 12 });
   });
 
+  it('Redis 命令异常且非必需时按文档降级放行', async () => {
+    const redis = createRedisStub();
+    redis.consumeFixedWindow = async () => {
+      throw new Error('redis connection dropped');
+    };
+    const app = createHonoApp(config, redis);
+
+    const response = await app.request('/api/not-existing');
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toMatchObject({ code: 'NOT_FOUND' });
+  });
+
+  it('Redis 命令异常且为必需依赖时稳定返回 503', async () => {
+    const redis = createRedisStub();
+    redis.consumeFixedWindow = async () => {
+      throw new Error('redis connection dropped');
+    };
+    const app = createHonoApp({ ...config, redisRequired: true }, redis);
+
+    const response = await app.request('/api/not-existing');
+
+    expect(response.status).toBe(503);
+    expect(response.headers.get('retry-after')).toBe('1');
+    expect(await response.json()).toEqual({
+      error: '限速服务暂时不可用',
+      code: 'RATE_LIMIT_UNAVAILABLE',
+    });
+  });
+
   it('全局 API 限速按客户端 IP 计数', async () => {
     const redis = createRedisStub();
     let capturedIdentity: string | null = null;

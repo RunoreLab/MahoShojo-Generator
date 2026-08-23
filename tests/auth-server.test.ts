@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { createAuthServer } from '@/lib/auth/server';
 
 const createJsonResponse = (payload: unknown, status = 200): Response =>
@@ -10,6 +10,10 @@ const createJsonResponse = (payload: unknown, status = 200): Response =>
   });
 
 describe('auth/server unified chain', () => {
+  beforeEach(() => {
+    vi.stubEnv('BETTER_AUTH_URL', 'https://auth.example.com');
+  });
+
   afterEach(() => {
     vi.unstubAllEnvs();
   });
@@ -38,7 +42,7 @@ describe('auth/server unified chain', () => {
       },
     });
 
-    const req = new Request('https://example.com/api/data-cards', {
+    const req = new Request('https://attacker.invalid/api/data-cards', {
       headers: {
         cookie: '__Secure-better-auth.session_token=token',
         authorization: 'Bearer should-not-win',
@@ -55,10 +59,38 @@ describe('auth/server unified chain', () => {
     expect(context?.user.is_review_exempt).toBe(1);
 
     expect(fetchCalls).toHaveLength(1);
-    expect(fetchCalls[0]?.url).toBe('https://example.com/api/auth/verify');
+    expect(fetchCalls[0]?.url).toBe('https://auth.example.com/api/auth/verify');
     const headers = new Headers(fetchCalls[0]?.init?.headers);
     expect(headers.get('cf-access-jwt-assertion')).toBe('cf-jwt-token');
     expect(headers.get('cookie')?.includes('session_token=token')).toBe(true);
+  });
+
+  test('缺少可信 Better Auth URL 时应 fail closed 并回落 bearer', async () => {
+    vi.stubEnv('BETTER_AUTH_URL', '');
+    let fetchCount = 0;
+    const authServer = createAuthServer({
+      hasBetterAuthSessionCookieImpl: () => true,
+      buildSubrequestAuthHeadersImpl: () => ({
+        'cf-access-client-secret': 'must-not-leak',
+      }),
+      fetchImpl: async () => {
+        fetchCount += 1;
+        return createJsonResponse({ user: { id: 88, username: 'session-user' } });
+      },
+      getUserByAuthKeyImpl: async (authKey) => authKey === 'fallback-auth-key'
+        ? { id: 7, username: 'legacy-user' }
+        : null,
+    });
+
+    const context = await authServer.getAuthUser(new Request('https://attacker.invalid/api/protected', {
+      headers: {
+        cookie: '__Secure-better-auth.session_token=token',
+        authorization: 'Bearer fallback-auth-key',
+      },
+    }));
+
+    expect(fetchCount).toBe(0);
+    expect(context).toMatchObject({ source: 'legacy-bearer', user: { id: 7 } });
   });
 
   test('无会话时应回落到 legacy bearer 鉴权', async () => {

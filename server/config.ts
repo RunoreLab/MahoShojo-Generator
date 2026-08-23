@@ -1,4 +1,5 @@
 import { readHonoAuthMode, type HonoAuthMode } from '@/lib/auth/hono-auth-mode';
+import { parseTrustedBetterAuthBaseUrl } from '@/lib/auth/trusted-better-auth-url';
 
 export type HonoServerConfig = {
   host: string;
@@ -73,7 +74,15 @@ const validateProductionEnvironment = (
     if ((env.BETTER_AUTH_SECRET?.trim().length ?? 0) < 32) {
       problems.push('hybrid 鉴权需要至少 32 字符的 BETTER_AUTH_SECRET');
     }
-    if (!hasText(env.BETTER_AUTH_URL)) problems.push('hybrid 鉴权需要 BETTER_AUTH_URL');
+    if (!hasText(env.BETTER_AUTH_URL)) {
+      problems.push('hybrid 鉴权需要 BETTER_AUTH_URL');
+    } else {
+      try {
+        parseTrustedBetterAuthBaseUrl(env.BETTER_AUTH_URL);
+      } catch (error) {
+        problems.push(error instanceof Error ? error.message : 'BETTER_AUTH_URL 配置无效');
+      }
+    }
   }
 
   if (problems.length > 0) {

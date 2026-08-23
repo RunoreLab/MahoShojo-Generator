@@ -119,10 +119,16 @@ export class RedisRuntime implements RedisService {
     const limit = Math.max(1, Math.floor(input.limit));
     const windowMs = Math.max(1_000, Math.floor(input.windowSeconds * 1_000));
     const key = `mahoshojo:rate-limit:${input.namespace}:${hashKeyPart(input.identity)}`;
-    const rawResult = await this.client.eval(FIXED_WINDOW_SCRIPT, {
-      keys: [key],
-      arguments: [String(windowMs)],
-    });
+    let rawResult: unknown;
+    try {
+      rawResult = await this.client.eval(FIXED_WINDOW_SCRIPT, {
+        keys: [key],
+        arguments: [String(windowMs)],
+      });
+    } catch (error) {
+      this.lastError = toErrorMessage(error);
+      throw error;
+    }
     const values = Array.isArray(rawResult) ? rawResult : [];
     const current = Number(values[0] ?? 0);
     const ttlMs = Math.max(1, Number(values[1] ?? windowMs));

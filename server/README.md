@@ -51,8 +51,9 @@ Hono 执行范围只包括 machine-readable 清单中明确保留的 API；具�
 
 Hono 对全部 `/api/*` 使用 Redis 固定窗口限速：每个客户端 IP 每 60 秒 600 次。客户端 IP 按
 `CF-Connecting-IP`、`X-Forwarded-For` 首项、`X-Real-IP` 的顺序解析；生产反向代理必须清理外部传入的
-这些请求头。无法识别 IP 的请求共享 `unknown` 身份。Redis 不可用时中间件会降级放行，若生产要求
-限速不可绕过，应同时将 `REDIS_REQUIRED` 设为 `true`，并让流量入口根据就绪探针摘除异常实例。
+这些请求头。无法识别 IP 的请求共享 `unknown` 身份。Redis 不可用且 `REDIS_REQUIRED=false` 时中间件会
+记录错误并降级放行；`REDIS_REQUIRED=true` 时会稳定返回 `503 RATE_LIMIT_UNAVAILABLE`，同时应让流量入口
+根据就绪探针摘除异常实例。
 
 各生成 handler 原有的用户/IP 冷却、会话并发和突发额度限制仍会叠加执行，不会被 Hono 全局限速取代。
 
@@ -67,7 +68,8 @@ Hono 对全部 `/api/*` 使用 Redis 固定窗口限速：每个客户端 IP 每
 `BETTER_AUTH_TRUSTED_ORIGINS`。
 
 `HONO_AUTH_MODE=hybrid` 仅用于需要同时兼容 Better Auth session 的环境，此时上述 Better Auth 配置仍是
-生产必填项。未显式要求身份的生成端点仍可匿名访问；端点是否强制认证继续由各 handler 的
+生产必填项。`BETTER_AUTH_URL` 必须指向承载 `/api/auth/*` 的可信主站 origin；除本机开发外必须使用
+HTTPS，服务不会从请求 URL 或 `Host` 推断携带 Cookie/Access Service Token 的子请求目标。未显式要求身份的生成端点仍可匿名访问；端点是否强制认证继续由各 handler 的
 `requireAuthUser` 调用决定。
 
 ## 本地启动
