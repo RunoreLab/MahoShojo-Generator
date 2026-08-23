@@ -223,6 +223,28 @@ describe('workspace dependency boundaries', () => {
     expect(violations.some((violation) => violation.module === 'zod')).toBe(false);
   });
 
+  it('rejects non-literal dynamic module loads in contracts production source while allowing shadowed require', async () => {
+    const rootDir = await createWorkspaceFixture({
+      'packages/contracts/package.json': manifest('@mahoshojo/contracts'),
+      'packages/contracts/src/index.ts': [
+        "const nodeModule = 'node:fs';",
+        "const frameworkModule = 'react';",
+        'export const loadNode = () => import(nodeModule);',
+        'export const loadFramework = () => require(frameworkModule);',
+        'export function localRequire(require: (specifier: string) => unknown) { return require(frameworkModule); }',
+      ].join('\n'),
+    });
+
+    const violations = checkWorkspaceBoundaries(rootDir).filter(
+      (violation) => violation.rule === 'MONO-005-CONTRACTS-DYNAMIC-MODULE',
+    );
+
+    expect(violations.map((violation) => violation.module)).toEqual([
+      '<dynamic-import>',
+      '<dynamic-require>',
+    ]);
+  });
+
   it('rejects contracts browser-only globals while allowing web standard APIs and shadows', async () => {
     const rootDir = await createWorkspaceFixture({
       'packages/contracts/package.json': manifest('@mahoshojo/contracts'),

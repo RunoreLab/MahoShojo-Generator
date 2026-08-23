@@ -161,8 +161,10 @@ function unwrapTransparentExpression(node) {
 
 function collectSourceDependencies(source, filePath) {
   const imports = [];
+  const nonLiteralModuleLoads = [];
   const contractsBrowserGlobals = [];
   const seenImportNodes = new Set();
+  const seenNonLiteralModuleLoads = new Set();
   const parsed = parser.parseForESLint(source, {
     filePath,
     jsx: /\.[cm]?tsx?$|\.[jt]sx$/i.test(filePath),
@@ -188,6 +190,12 @@ function collectSourceDependencies(source, filePath) {
   const unresolvedGlobalThisRanges = new Set(
     throughReferences
       .filter((reference) => reference.identifier?.name === 'globalThis' && !reference.resolved)
+      .map((reference) => reference.identifier.range?.join(':'))
+      .filter(Boolean),
+  );
+  const unresolvedRequireRanges = new Set(
+    throughReferences
+      .filter((reference) => reference.identifier?.name === 'require' && !reference.resolved)
       .map((reference) => reference.identifier.range?.join(':'))
       .filter(Boolean),
   );
@@ -230,6 +238,14 @@ function collectSourceDependencies(source, filePath) {
     if (seenImportNodes.has(key)) return;
     seenImportNodes.add(key);
     imports.push({ module: value, line });
+  };
+
+  const addNonLiteralModuleLoad = (node, module) => {
+    const line = node?.loc?.start?.line ?? 1;
+    const key = node?.range ? `${node.range[0]}:${node.range[1]}` : `${line}:${module}`;
+    if (seenNonLiteralModuleLoads.has(key)) return;
+    seenNonLiteralModuleLoads.add(key);
+    nonLiteralModuleLoads.push({ module, line });
   };
 
   const isUnresolvedProcess = (node) => {
@@ -283,8 +299,9 @@ function collectSourceDependencies(source, filePath) {
 
     if (node.type === 'ImportDeclaration' || node.type === 'ExportNamedDeclaration' || node.type === 'ExportAllDeclaration') {
       if (isStringLiteral(node.source)) add(node.source, node.source.value);
-    } else if (node.type === 'ImportExpression' && isStringLiteral(node.source)) {
-      add(node.source, node.source.value);
+    } else if (node.type === 'ImportExpression') {
+      if (isStringLiteral(node.source)) add(node.source, node.source.value);
+      else addNonLiteralModuleLoad(node.source ?? node, '<dynamic-import>');
     } else if (node.type === 'TSImportType' && isStringLiteral(node.source)) {
       add(node.source, node.source.value);
     } else if (
@@ -297,9 +314,15 @@ function collectSourceDependencies(source, filePath) {
       node.type === 'CallExpression'
       && node.callee?.type === 'Identifier'
       && node.callee.name === 'require'
-      && isStringLiteral(node.arguments?.[0])
+      && node.callee.range
+      && unresolvedRequireRanges.has(node.callee.range.join(':'))
     ) {
-      add(node.arguments[0], node.arguments[0].value);
+      const [specifier] = node.arguments ?? [];
+      if (node.arguments?.length === 1 && isStringLiteral(specifier) && specifier.value.length > 0) {
+        add(specifier, specifier.value);
+      } else {
+        addNonLiteralModuleLoad(node, '<dynamic-require>');
+      }
     } else if (
       (node.type === 'MemberExpression' || node.type === 'OptionalMemberExpression')
       && isUnresolvedGlobalThis(node.object)
@@ -326,7 +349,7 @@ function collectSourceDependencies(source, filePath) {
         && (other.range[0] < candidate.range[0] || other.range[1] > candidate.range[1]);
     }))
     .map(({ module, line }) => ({ module, line }));
-  return { imports, domGlobals, contractsBrowserGlobals, environmentReads };
+  return { imports, nonLiteralModuleLoads, domGlobals, contractsBrowserGlobals, environmentReads };
 }
 
 function appTargetFromSpecifier(rootDirectory, moduleSpecifier, apps) {
@@ -495,6 +518,7 @@ export function checkWorkspaceBoundaries(rootDirectory = process.cwd()) {
       let domGlobals;
       let contractsBrowserGlobals;
       let environmentReads;
+      let nonLiteralModuleLoads;
       const contractsSourceFile = isContractsSourceFile(unit, sourceFile);
       try {
         ({
@@ -502,6 +526,7 @@ export function checkWorkspaceBoundaries(rootDirectory = process.cwd()) {
           domGlobals,
           contractsBrowserGlobals,
           environmentReads,
+          nonLiteralModuleLoads,
         } = collectSourceDependencies(readFileSync(sourceFile, 'utf8'), sourceFile));
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error);
@@ -517,6 +542,19 @@ export function checkWorkspaceBoundaries(rootDirectory = process.cwd()) {
             sourceFile,
             domGlobal,
             'domain package must not reference browser DOM globals',
+            line,
+          );
+        }
+      }
+
+      if (contractsSourceFile) {
+        for (const { module: moduleSpecifier, line } of nonLiteralModuleLoads) {
+          addViolation(
+            violations,
+            'MONO-005-CONTRACTS-DYNAMIC-MODULE',
+            sourceFile,
+            moduleSpecifier,
+            'contracts package module specifiers must be statically analyzable',
             line,
           );
         }
