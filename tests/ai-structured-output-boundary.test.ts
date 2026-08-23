@@ -149,7 +149,6 @@ describe('Hosted structured output acceptance boundary', () => {
       fullStream: new ReadableStream({
         start(controller) {
           controller.enqueue({ type: 'text-delta', text: 'chunk-canary' });
-          controller.close();
         },
       }),
     });
@@ -162,8 +161,42 @@ describe('Hosted structured output acceptance boundary', () => {
       await reader?.read();
       await reader?.cancel(undefined);
       expect(ttfb).toHaveLength(1);
-      expect(terminal).toHaveLength(1);
+      await vi.waitFor(() => expect(terminal).toHaveLength(1));
+      expect(terminal).toEqual([expect.objectContaining({ outcome: 'aborted' })]);
       expect(JSON.stringify(terminal)).not.toMatch(/chunk-canary|body-canary|provider|url/);
+    } finally {
+      resetHostedRuntimeObserverForTests();
+    }
+  });
+
+  it('records TTFB when the first mapped chunk follows the prefetch window', async () => {
+    const ttfb: number[] = [];
+    const terminal: unknown[] = [];
+    registerHostedRuntimeObserver({
+      beginAiUpstream: () => ({
+        recordTtfb: (value) => ttfb.push(value),
+        finish: (value) => terminal.push(value),
+      }),
+      observeD1RoundTrip: () => undefined,
+    });
+    mocks.streamText.mockReturnValueOnce({
+      fullStream: new ReadableStream({
+        start(controller) {
+          for (let index = 0; index < 16; index += 1) {
+            controller.enqueue({ type: 'metadata', index });
+          }
+          controller.enqueue({ type: 'text-delta', text: 'late-mapped-chunk' });
+          controller.close();
+        },
+      }),
+    });
+
+    try {
+      const { generateWithStreamAI } = await import('@/lib/stream/raw-ai');
+      const result = await generateWithStreamAI({ prompt: 'late-prefetch-canary' });
+      expect(await result.response.text()).toBe('late-mapped-chunk');
+      expect(ttfb).toHaveLength(1);
+      expect(terminal).toEqual([expect.objectContaining({ outcome: 'success' })]);
     } finally {
       resetHostedRuntimeObserverForTests();
     }

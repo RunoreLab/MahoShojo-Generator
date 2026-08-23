@@ -8,10 +8,44 @@ export type AiUpstreamAttemptRuntime = {
   finish(_outcome: AiUpstreamOutcome): void;
 };
 
+const readErrorText = (error: object, key: 'name' | 'code' | 'message'): string => {
+  try {
+    const value = (error as Record<string, unknown>)[key];
+    return typeof value === 'string' ? value : '';
+  } catch {
+    return '';
+  }
+};
+
 export const classifyAiUpstreamOutcome = (error: unknown): AiUpstreamOutcome => {
   if (error == null) return 'aborted';
-  const message = error instanceof Error ? `${error.name} ${error.message}` : String(error);
-  const lowered = message.toLowerCase();
+
+  let name = '';
+  let code = '';
+  let message = '';
+  if (typeof error === 'object' || typeof error === 'function') {
+    name = readErrorText(error, 'name');
+    code = readErrorText(error, 'code');
+    message = readErrorText(error, 'message');
+  } else {
+    try {
+      message = String(error);
+    } catch {
+      return 'error';
+    }
+  }
+
+  if (name === 'AbortError' || code === 'ABORT_ERR') return 'aborted';
+  if (
+    name === 'StreamReadTimeoutError'
+    || name === 'TimeoutError'
+    || code === 'ETIMEDOUT'
+    || code === 'UND_ERR_CONNECT_TIMEOUT'
+  ) {
+    return 'timeout';
+  }
+
+  const lowered = `${name} ${code} ${message}`.toLowerCase();
   if (lowered.includes('abort')) return 'aborted';
   if (lowered.includes('timeout') || message.includes('超时')) return 'timeout';
   return 'error';

@@ -425,6 +425,7 @@ export async function generateWithStreamAI(
                     idleTimeoutMs: STREAM_READ_IDLE_TIMEOUT_MS,
                     totalTimeoutMs: STREAM_READ_TOTAL_TIMEOUT_MS,
                     onTimeout: () => {
+                        runtimeAttempt.finish('timeout');
                         try {
                             void reader.cancel('timeout').catch(() => {});
                         } catch {
@@ -498,6 +499,7 @@ export async function generateWithStreamAI(
 
                                 const mapped = mapToUnifiedChunk(value);
                                 if (!mapped) continue;
+                                runtimeAttempt.recordTtfb();
                                 emitReasoningEvent(mapped);
                                 controller.enqueue(mapped);
                                 return;
@@ -519,7 +521,7 @@ export async function generateWithStreamAI(
                             // ignore
                         }
                         outcomeRecorder.recordFromCancel(reason);
-                        runtimeAttempt.finish(classifyAiUpstreamOutcome(reason));
+                        runtimeAttempt.finish('aborted');
                     }
                 });
 
