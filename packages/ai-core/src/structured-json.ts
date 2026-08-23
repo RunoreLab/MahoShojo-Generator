@@ -324,6 +324,7 @@ type StructuredJsonScanItem = { value: unknown; depth: number };
  */
 const assertSafeStructuredJsonValue = (value: unknown, limits: StructuredJsonLimits): void => {
   const pending: StructuredJsonScanItem[] = [{ value, depth: 0 }];
+  const seenObjects = new Set<object>();
   let nodes = 0;
 
   while (pending.length > 0) {
@@ -337,7 +338,20 @@ const assertSafeStructuredJsonValue = (value: unknown, limits: StructuredJsonLim
     }
 
     const currentValue = current.value;
-    if (currentValue === null || typeof currentValue !== 'object') continue;
+    if (currentValue === null || typeof currentValue === 'string' || typeof currentValue === 'boolean') continue;
+    if (typeof currentValue === 'number') {
+      if (!Number.isFinite(currentValue)) {
+        throw new StructuredJsonParseError('invalid-output', '结构化输出包含无效数字');
+      }
+      continue;
+    }
+    if (typeof currentValue !== 'object') {
+      throw new StructuredJsonParseError('invalid-output', '结构化输出包含非 JSON 值');
+    }
+    if (seenObjects.has(currentValue)) {
+      throw new StructuredJsonParseError('invalid-output', '结构化输出包含循环或共享对象引用');
+    }
+    seenObjects.add(currentValue);
 
     if (Array.isArray(currentValue)) {
       // JSON.parse 不会产生稀疏数组，但显式检查 length/own index 可避免该
@@ -346,7 +360,11 @@ const assertSafeStructuredJsonValue = (value: unknown, limits: StructuredJsonLim
         if (!Object.prototype.hasOwnProperty.call(currentValue, index)) {
           throw new StructuredJsonParseError('invalid-output', '结构化输出包含无效数组');
         }
-        pending.push({ value: currentValue[index], depth: current.depth + 1 });
+        const descriptor = Object.getOwnPropertyDescriptor(currentValue, String(index));
+        if (!descriptor || !Object.prototype.hasOwnProperty.call(descriptor, 'value')) {
+          throw new StructuredJsonParseError('invalid-output', '结构化输出包含无效数组');
+        }
+        pending.push({ value: descriptor.value, depth: current.depth + 1 });
       }
       for (const key of Object.keys(currentValue)) {
         if (isUnsafeStructuredJsonKey(key)) {
@@ -366,13 +384,51 @@ const assertSafeStructuredJsonValue = (value: unknown, limits: StructuredJsonLim
       if (isUnsafeStructuredJsonKey(key)) {
         throw new StructuredJsonParseError('unsafe-key', '结构化输出包含不允许的键名');
       }
+      const descriptor = Object.getOwnPropertyDescriptor(currentValue, key);
+      if (!descriptor || !Object.prototype.hasOwnProperty.call(descriptor, 'value')) {
+        throw new StructuredJsonParseError('invalid-output', '结构化输出包含无效对象属性');
+      }
     }
     for (let index = keys.length - 1; index >= 0; index -= 1) {
       const key = keys[index]!;
-      pending.push({ value: (currentValue as Record<string, unknown>)[key], depth: current.depth + 1 });
+      const descriptor = Object.getOwnPropertyDescriptor(currentValue, key)!;
+      pending.push({ value: descriptor.value, depth: current.depth + 1 });
     }
   }
 };
+
+export type ValidateStructuredJsonValueOptions = {
+  taskName?: string;
+  limits?: Partial<StructuredJsonLimits>;
+};
+
+/** Validates an already parsed, untrusted model result before it enters domain state. */
+export function validateStructuredJsonValueWithSchema<T>(
+  value: unknown,
+  schema: z.ZodSchema<T>,
+  options: ValidateStructuredJsonValueOptions = {},
+): T {
+  const taskName = options.taskName ?? '结构化输出校验';
+  const limits = resolveStructuredJsonLimits(options.limits);
+  assertSafeStructuredJsonValue(value, limits);
+
+  let serialized: string | undefined;
+  try {
+    serialized = JSON.stringify(value);
+  } catch {
+    throw new StructuredJsonParseError('invalid-output', `${taskName}失败：结构化输出不是有效 JSON 值`);
+  }
+  if (typeof serialized !== 'string') {
+    throw new StructuredJsonParseError('invalid-output', `${taskName}失败：结构化输出不是有效 JSON 值`);
+  }
+  assertInputWithinStructuredJsonLimit(serialized, limits);
+
+  const parsed = schema.safeParse(value);
+  if (!parsed.success) {
+    throw new StructuredJsonParseError('invalid-output', `${taskName}失败：结构化输出无法通过 Schema 校验`);
+  }
+  return parsed.data;
+}
 
 const parseJsonWithStructuredJsonLimits = (input: string, limits: StructuredJsonLimits): unknown => {
   assertInputWithinStructuredJsonLimit(input, limits);

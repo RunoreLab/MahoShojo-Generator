@@ -4,7 +4,16 @@ import type { AiStreamEvent } from '@mahoshojo/ai-core/stream-events';
 import type { AiExecutionPort } from '@mahoshojo/ai-direct';
 
 class InMemoryAiExecutionPort implements AiExecutionPort {
-  async execute(request: AiExecutionRequest): Promise<AiExecutionResult> {
+  async execute(request: AiExecutionRequest, signal: AbortSignal): Promise<AiExecutionResult> {
+    if (signal.aborted) {
+      return {
+        status: 'cancelled',
+        requestId: request.requestId,
+        contractVersion: request.contractVersion,
+        mode: request.mode,
+        reason: 'aborted',
+      };
+    }
     return {
       status: 'completed',
       requestId: request.requestId,
@@ -37,7 +46,7 @@ class InMemoryAiExecutionPort implements AiExecutionPort {
             mode: request.mode,
             reason: 'aborted',
           }
-        : await this.execute(request),
+        : await this.execute(request, signal),
     };
   }
 }
@@ -52,10 +61,11 @@ describe('AiExecutionPort', () => {
     };
     const port: AiExecutionPort = new InMemoryAiExecutionPort();
 
-    await expect(port.execute(request)).resolves.toMatchObject({ status: 'completed' });
+    await expect(port.execute(request, new AbortController().signal)).resolves.toMatchObject({ status: 'completed' });
 
     const controller = new AbortController();
     controller.abort();
+    await expect(port.execute(request, controller.signal)).resolves.toMatchObject({ status: 'cancelled' });
     const events: AiStreamEvent[] = [];
     for await (const event of port.stream(request, controller.signal)) events.push(event);
     expect(events.at(-1)).toMatchObject({ type: 'result', result: { status: 'cancelled' } });

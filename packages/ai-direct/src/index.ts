@@ -6,6 +6,6 @@ import type { AiExecutionRequest, AiExecutionResult } from '@mahoshojo/contracts
  * Provider credentials, endpoints, and transport details stay behind this port.
  */
 export interface AiExecutionPort {
-  execute(_request: AiExecutionRequest): Promise<AiExecutionResult>;
+  execute(_request: AiExecutionRequest, _signal: AbortSignal): Promise<AiExecutionResult>;
   stream(_request: AiExecutionRequest, _signal: AbortSignal): AsyncIterable<AiStreamEvent>;
 }

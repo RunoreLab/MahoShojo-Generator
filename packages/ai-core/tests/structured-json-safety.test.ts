@@ -4,6 +4,7 @@ import {
   DEFAULT_STRUCTURED_JSON_LIMITS,
   StructuredJsonParseError,
   parseStructuredJsonWithSchema,
+  validateStructuredJsonValueWithSchema,
 } from '../src/structured-json';
 
 describe('structured JSON safety boundary', () => {
@@ -46,5 +47,19 @@ describe('structured JSON safety boundary', () => {
     expect(() => parseStructuredJsonWithSchema('{"a":1,"b":2,"c":3}', schema, {
       limits: { maxNodes: 3 },
     })).toThrowError(StructuredJsonParseError);
+  });
+
+  it('validates an already parsed model object through the same safety limits', () => {
+    const schema = z.object({ payload: z.record(z.unknown()) });
+    const dangerous = JSON.parse('{"payload":{"constructor":{"sentinel":"must-not-leak"}}}') as unknown;
+
+    expect(() => validateStructuredJsonValueWithSchema(dangerous, schema)).toThrowError(
+      expect.objectContaining({ code: 'unsafe-key' }),
+    );
+    expect(() => validateStructuredJsonValueWithSchema(
+      { payload: { text: 'x'.repeat(64) } },
+      schema,
+      { limits: { maxInputChars: 16 } },
+    )).toThrowError(expect.objectContaining({ code: 'input-too-large' }));
   });
 });

@@ -9,7 +9,11 @@ import { getProviderFetch } from "@/lib/ai/middleware/provider-fetch";
 import { resolveGenerationSettings } from "@/lib/ai/generation-settings/resolve";
 import type { GenerationSettingsContext, UserGenerationOverrides } from "@/lib/ai/generation-settings/types";
 import { enhanceErrorWithUpstreamMessage } from "@/lib/ai/utils/error-extraction";
-import { buildStructuredJsonInstructionFromZodSchema, parseStructuredJsonWithSchema } from "@/lib/ai/utils/structured-json";
+import {
+  buildStructuredJsonInstructionFromZodSchema,
+  parseStructuredJsonWithSchema,
+  validateStructuredJsonValueWithSchema,
+} from "@/lib/ai/utils/structured-json";
 import { classifySuccess, classifyOutcome, recordAiChannelOutcome } from "@/lib/ai/availability";
 import { buildReasoningSummary } from "@/lib/ai/reasoning-normalizer";
 import type { AIReasoningEnvelope } from "@/types/ai-reasoning";
@@ -509,7 +513,9 @@ export async function generateWithAI<T, I = string>(
 
         try {
           const result = await tryGenerateObject();
-          object = result.object;
+          object = validateStructuredJsonValueWithSchema(result.object, generationConfig.schema, {
+            taskName: generationConfig.taskName,
+          });
           usage = result.usage;
           finishReason = result.finishReason;
           reasoning = buildNonStreamReasoningEnvelope((result as { reasoning?: unknown }).reasoning, result.usage);
