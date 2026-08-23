@@ -2,9 +2,8 @@
 
 当前实现建立了可并行验证的 Hono Node 服务，不会改变原有 `pnpm dev` 和 Cloudflare Next 部署：
 
-- 通过 `config/hono-api-routes.json` 的 `sharedRouteIds` / `legacyRouteIds` 互斥白名单挂载全部生成类 API；
+- 通过 `config/hono-api-routes.json` 的 `sharedRouteIds` / `legacyRouteIds` 互斥清单挂载经裁决保留的生成类 API；
 - shared route 由 Hono adapter 与 Next Route Adapter 调用同一 `@mahoshojo/hosted-api` application service；
-- 尚未迁移的 route 短期继续复用已有标准 Web `Request` / `Response` handler；
 - 为旧 handler 提供 Node 版 `waitUntil`；
 - D1 访问优先经过内部 Gateway Worker，保留 Cloudflare 管理 API 作为迁移回退；
 - Redis 提供跨实例 API 限流；
@@ -16,9 +15,11 @@ Phase 2.5B 当前有 10 条 shared-service route：`generate-magical-girl`，G25
 `generate-game-card`、Free generate/stream、Scenario generate/stream，以及 G25B-2 收口的 Creator、残兽
 generate/stream。Hono 从 `server/adapters/*` 加载这些 adapter，不再动态导入对应 Next route；Next wrapper
 继续保留，两个 runtime 使用同一默认 service composition，业务顺序与错误 wire 由
-`@mahoshojo/hosted-api` 负责。其余 14 条白名单 route 仍明确位于 `legacyRouteIds`，主要是魔法少女详情/升华
-等深 composition 生成族和 Arena/session/tea-party/regenerate 等状态型能力；因此
-本批不表示 Hono seam 或 `apps/api` 已整体完成。生成后的实际 registry 为 `server/generated/routes.ts`，不得手工修改。
+`@mahoshojo/hosted-api` 负责。G25C 启动检查已将其余 14 条 legacy capability 从 Hono 执行清单退出；对应
+Next 公开 route 保持原有实现、wire、鉴权和数据语义，未来若要重新进入 Hono，必须先形成 shared seam 和
+副作用/replay 证据。当前 registry 为 `10 shared-service / 0 legacy-next`，但 Hono source 与生命周期仍由
+legacy `server/` 和根 manifest 持有，不能据此宣称 `apps/api` 已激活。生成后的实际 registry 为
+`server/generated/routes.ts`，不得手工修改。
 
 `check:workspace:boundaries` 还会扫描 `server/adapters`，禁止 shared adapter 回导 legacy `app/api` 或 `pages/api`
 源码；新增 shared route 必须先形成 service/runtime composition，而不是把 Next handler 换一个入口继续加载。
@@ -40,8 +41,8 @@ metrics endpoint。当前批次只完成 `RESOURCE-005` 中的 Node 容量导出
 D1、Redis 和可信控制面的 DR selection/failover reason 仍需从各自真实调用 seam 注入，
 不得将当前实现描述为 `RESOURCE-005` 已全部完成。
 
-迁移范围包括白名单内路径段以 `generate` 开头的 API，以及战报的 `regenerate` API；具体清单以
-`config/hono-api-routes.json` 为准。`/api/tachie/generate` 暂不迁移，继续由 Next.js Route Handler 承载。
+Hono 执行范围只包括 machine-readable 清单中明确保留的 API；具体清单以
+`config/hono-api-routes.json` 为准。已退出的 capability 与 `/api/tachie/generate` 继续由 Next.js Route Handler 承载。
 其余 API 也继续由 Next.js Route Handler 承载。Hono 对未列入白名单的 API 返回 `404`，新增迁移路由时
 必须先修改白名单、重新生成路由清单并补充测试。
 
