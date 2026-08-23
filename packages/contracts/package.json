@@ -24,6 +24,11 @@
       "import": "./src/ai-execution.ts",
       "default": "./src/ai-execution.ts"
     },
+    "./provider-profile": {
+      "types": "./src/provider-profile.ts",
+      "import": "./src/provider-profile.ts",
+      "default": "./src/provider-profile.ts"
+    },
     "./api": {
       "types": "./src/api.ts",
       "import": "./src/api.ts",

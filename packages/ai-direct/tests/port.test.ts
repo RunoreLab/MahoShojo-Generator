@@ -1,7 +1,23 @@
 import type { AiExecutionRequest, AiExecutionResult } from '@mahoshojo/contracts/ai-execution';
 import type { AiStreamEvent } from '@mahoshojo/ai-core/stream-events';
 
-import type { AiExecutionPort } from '@mahoshojo/ai-direct';
+import type { AiExecutionPort, SecureVault } from '@mahoshojo/ai-direct';
+
+class InMemorySecureVault implements SecureVault {
+  readonly #secrets = new Map<string, string>();
+
+  async setSecret(ref: string, value: string): Promise<void> {
+    this.#secrets.set(ref, value);
+  }
+
+  async getSecret(ref: string): Promise<string | null> {
+    return this.#secrets.get(ref) ?? null;
+  }
+
+  async deleteSecret(ref: string): Promise<void> {
+    this.#secrets.delete(ref);
+  }
+}
 
 class InMemoryAiExecutionPort implements AiExecutionPort {
   async execute(request: AiExecutionRequest, signal: AbortSignal): Promise<AiExecutionResult> {
@@ -69,5 +85,17 @@ describe('AiExecutionPort', () => {
     const events: AiStreamEvent[] = [];
     for await (const event of port.stream(request, controller.signal)) events.push(event);
     expect(events.at(-1)).toMatchObject({ type: 'result', result: { status: 'cancelled' } });
+  });
+});
+
+describe('SecureVault', () => {
+  it('is a runtime-neutral secret reference port', async () => {
+    const vault: SecureVault = new InMemorySecureVault();
+
+    await vault.setSecret('vault:profile-1:api-key', 'secret-value');
+    await expect(vault.getSecret('vault:profile-1:api-key')).resolves.toBe('secret-value');
+
+    await vault.deleteSecret('vault:profile-1:api-key');
+    await expect(vault.getSecret('vault:profile-1:api-key')).resolves.toBeNull();
   });
 });

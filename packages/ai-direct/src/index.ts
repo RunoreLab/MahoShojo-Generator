@@ -1,6 +1,8 @@
 import type { AiStreamEvent } from '@mahoshojo/ai-core/stream-events';
 import type { AiExecutionRequest, AiExecutionResult } from '@mahoshojo/contracts/ai-execution';
 
+export type { SecureVault } from './vault';
+
 /**
  * Runtime-neutral boundary for an AI execution implementation.
  * Provider credentials, endpoints, and transport details stay behind this port.
