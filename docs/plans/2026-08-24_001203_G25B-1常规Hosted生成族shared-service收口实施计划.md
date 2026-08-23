@@ -23,7 +23,7 @@
   - `generate-scenario-stream`
 - 预期完成后为 `6 shared-service / 18 legacy-next`，不增加 Hono capability。
 - 保留理由：这些能力已经在 Hono 白名单中，属于项目承担成本的 Hosted generation；流式能力有明确的长连接/Cloudflare CPU 价值，非流式同族共享安全、Provider 和回滚 composition。当前没有逐 capability 新证据足以证明退出 Hono比保持 Hono 主执行面更可靠或更省成本。
-- 延后理由：Creator、残兽、魔法少女详情、升华与 questionnaire/DataCard/build-rule/signature 组合更深，不与本批共享同一 service composition；Arena/session/tea-party/regenerate 属于 G25B-2 原定高风险状态族。
+- 延后理由：Creator、残兽、魔法少女详情、升华与 questionnaire/DataCard/build-rule/signature 组合更深，不与本批共享同一 service composition，已按最终依赖图重排到 G25B-2/3；Arena/session/battle/tea-party/regenerate 属于 G25B-4/5 高风险状态族。
 
 ## 2. 文件结构与责任
 
@@ -63,7 +63,7 @@
 
 ## 3. Task 1：RED——shared service contract 与边界门禁
 
-- [ ] 在 package test 中先导入尚不存在的五条 service factory，覆盖：
+- [x] 在 package test 中先导入尚不存在的五条 service factory，覆盖：
   - 非 POST 的现有 405 status/body/content-type；
   - 无效 body 的现有 400 status/body；
   - Game Card 的 safety 在 rate-limit 前；Free/Scenario 的 rate-limit 在 safety 前；
@@ -71,9 +71,9 @@
   - 成功路径只记录一次 activity；Scenario 非流式保持 activity 在签名前；
   - stream executor 接收原 `Request.signal`，响应正文/headers 原样返回；
   - exception 保持各 route 的既有 500 wire 和日志上下文。
-- [ ] 在 boundary test 中加入 `server/adapters/example.ts -> app/api/example/handler` fixture，预期 `MONO-009-HONO-ADAPTER-LEGACY` violation。
-- [ ] 在 route manifest test 中先期望 6 shared / 18 legacy。
-- [ ] 运行 RED：
+- [x] 在 boundary test 中加入 `server/adapters/example.ts -> app/api/example/handler` fixture，预期 `MONO-009-HONO-ADAPTER-LEGACY` violation。
+- [x] 在 route manifest test 中先期望 6 shared / 18 legacy。
+- [x] 运行 RED：
 
 ```bash
 pnpm --filter @mahoshojo/hosted-api test
@@ -84,29 +84,29 @@ pnpm exec vitest run tests/check-workspace-boundaries.test.ts tests/server/route
 
 ## 4. Task 2：GREEN——package business services
 
-- [ ] 实现 shared request/custom-provider schema，保持既有字段、默认值、上限与错误文本；不新增网络、secret 或 runtime 依赖。
-- [ ] 实现 Game Card service，显式保持：
+- [x] 实现 shared request/custom-provider schema，保持既有字段、默认值、上限与错误文本；不新增网络、secret 或 runtime 依赖。
+- [x] 实现 Game Card service，显式保持：
 
 ```text
 method/body -> input safety -> rate limit -> AI generate
 -> output sensitive policy/shield normalization -> activity -> response
 ```
 
-- [ ] 实现 Free generate/stream services，显式保持：
+- [x] 实现 Free generate/stream services，显式保持：
 
 ```text
 method/body -> rate limit -> bounded combined safety text
 -> AI generate/stream -> activity -> canonical response
 ```
 
-- [ ] 实现 Scenario generate/stream services，显式保持：
+- [x] 实现 Scenario generate/stream services，显式保持：
 
 ```text
 method/body -> rate limit -> answers safety -> AI generate/stream
 -> activity -> non-stream signature/final response | stream response
 ```
 
-- [ ] 运行 package GREEN、lint、typecheck：
+- [x] 运行 package GREEN、lint、typecheck：
 
 ```bash
 pnpm --filter @mahoshojo/hosted-api test
@@ -116,10 +116,10 @@ pnpm --filter @mahoshojo/hosted-api build
 
 ## 5. Task 3：GREEN——runtime composition 与双 adapter
 
-- [ ] 将五条现有 handler 的 Provider resolution、AI config/prompt/output schema、签名和日志实现移入三个 `lib/hosted-api/*` composition 文件；只保留一份 production implementation。
-- [ ] Next handler 改为薄兼容导出，保持现有 test import 和 route method surface。
-- [ ] 新建 Hono adapter，直接引用同一 default service；不得导入 Next route/handler。
-- [ ] 运行既有行为回归：
+- [x] 将五条现有 handler 的 Provider resolution、AI config/prompt/output schema、签名和日志实现移入五个 `lib/hosted-api/*` composition 文件；只保留一份 production implementation。
+- [x] Next handler 改为薄兼容导出，保持现有 test import 和 route method surface。
+- [x] 新建 Hono adapter，直接引用同一 default service；不得导入 Next route/handler。
+- [x] 运行既有行为回归：
 
 ```bash
 pnpm exec vitest run \
@@ -132,10 +132,10 @@ pnpm exec tsc --noEmit -p tsconfig.server.json
 
 ## 6. Task 4：GREEN——manifest、机械门禁与跨 adapter contract
 
-- [ ] 实现 Hono adapter legacy-import AST/path 门禁。
-- [ ] 原子移动五条 manifest ID，运行 generator，确认总路由数仍为 24。
-- [ ] 增加 Next/Hono adapter identity 和 method/wire contract 测试。
-- [ ] 运行：
+- [x] 实现 Hono adapter legacy-import AST/path 门禁。
+- [x] 原子移动五条 manifest ID，运行 generator，确认总路由数仍为 24。
+- [x] 增加 Next/Hono adapter identity 和 method/wire contract 测试。
+- [x] 运行：
 
 ```bash
 pnpm run server:routes
@@ -151,17 +151,17 @@ pnpm run build:server
 
 ## 7. Task 5：文档、self-review 与 independent review
 
-- [ ] 更新 topic、`packages/README.md`、`server/README.md` 的当前 6/18 事实与剩余 family。
-- [ ] 新增 G25B-1 实施日志，记录 source commit、route 理由、TDD、验证、回滚、影响和下一入口；不回写旧日志伪造历史。
-- [ ] Builder self-review 完整 diff，逐项检查：
+- [x] 更新 topic、`packages/README.md`、`server/README.md` 的当前 6/18 事实与剩余 family。
+- [x] 新增 G25B-1 实施日志，记录 source commit、route 理由、TDD、验证、回滚、影响和下一入口；不回写旧日志伪造历史。
+- [x] Builder self-review 完整 diff，逐项检查：
   - package/app/runtime 依赖；
   - auth/activity header、content safety、Provider secret、签名与 activity 顺序；
   - stream abort/body/headers；
   - public wire 与 Legacy/Better Auth；
   - manifest 客户端消费与回滚；
   - 测试是否只证明 mock，而没有 adapter/production regression。
-- [ ] 使用独立 subagent 从 architecture、security/authority、compatibility/replay/data、test adequacy 四个维度审查完整 diff。
-- [ ] 所有 Critical/Important 先补 RED 再修复并重跑 targeted validation；Minor 修复或在日志说明不阻塞理由。
+- [x] 使用独立 subagent 从 architecture、security/authority、compatibility/replay/data、test adequacy 四个维度审查完整 diff。
+- [x] 所有 Critical/Important 先补 RED 再修复并重跑 targeted validation；Minor 修复或在日志说明不阻塞理由。
 
 ## 8. Task 6：最终 `GOAL-061` 验收
 

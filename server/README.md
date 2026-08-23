@@ -12,10 +12,15 @@
 - `/health/live` 和 `/health/ready` 分离进程存活与依赖就绪状态；
 - 每 60 秒以单行 JSON 日志导出 Node 进程、event-loop 和 HTTP 容量基线。
 
-Phase 2.5B 当前已将 `generate-magical-girl` 作为首条 shared service 纵切：Hono 从
-`server/adapters/generate-magical-girl.ts` 加载 adapter，不再动态导入对应 Next route；Next wrapper 继续保留，
-但业务顺序与响应由共享 package 唯一实现。其余 23 条白名单 route 仍明确位于 `legacyRouteIds`，因此本批不表示
-Hono seam 或 `apps/api` 已整体完成。生成后的实际 registry 为 `server/generated/routes.ts`，不得手工修改。
+Phase 2.5B 当前有 6 条 shared-service route：`generate-magical-girl`，以及 G25B-1 收口的
+`generate-game-card`、Free generate/stream、Scenario generate/stream。Hono 从 `server/adapters/*` 加载这些
+adapter，不再动态导入对应 Next route；Next wrapper 继续保留，两个 runtime 使用同一默认 service composition，
+业务顺序与错误 wire 由 `@mahoshojo/hosted-api` 负责。其余 18 条白名单 route 仍明确位于 `legacyRouteIds`，主要是
+Creator/残兽/魔法少女详情/升华等深 composition 生成族和 Arena/session/tea-party/regenerate 等状态型能力；因此
+本批不表示 Hono seam 或 `apps/api` 已整体完成。生成后的实际 registry 为 `server/generated/routes.ts`，不得手工修改。
+
+`check:workspace:boundaries` 还会扫描 `server/adapters`，禁止 shared adapter 回导 legacy `app/api` 或 `pages/api`
+源码；新增 shared route 必须先形成 service/runtime composition，而不是把 Next handler 换一个入口继续加载。
 
 ## 容量遥测
 
