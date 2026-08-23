@@ -40,7 +40,24 @@ const MAX_SQL_CHARS = 100_000;
 const MAX_BATCH_STATEMENTS = 50;
 const MAX_PARAMS = 1_000;
 const MAX_CLOCK_SKEW_MS = 60_000;
-const FORBIDDEN_SQL_RE = /^\s*(?:--[^\n]*\n\s*)*(?:CREATE|ALTER|DROP|TRUNCATE|VACUUM|ATTACH|DETACH)\b/i;
+const FORBIDDEN_SQL_TOKENS = new Set([
+  'ALTER',
+  'ANALYZE',
+  'ATTACH',
+  'BEGIN',
+  'COMMIT',
+  'CREATE',
+  'DETACH',
+  'DROP',
+  'END',
+  'PRAGMA',
+  'REINDEX',
+  'RELEASE',
+  'ROLLBACK',
+  'SAVEPOINT',
+  'TRUNCATE',
+  'VACUUM',
+]);
 
 const json = (payload: unknown, status = 200, headers?: HeadersInit): Response => new Response(
   JSON.stringify(payload),
@@ -102,6 +119,32 @@ const isAuthorized = async (request: Request, env: GatewayEnv, bodyText: string)
   return timingSafeEqual(expectedSignature, suppliedSignature.toLowerCase());
 };
 
+const readFirstSqlToken = (sql: string): string => {
+  let offset = 0;
+
+  while (offset < sql.length) {
+    while (offset < sql.length && /\s/.test(sql[offset] ?? '')) offset += 1;
+
+    if (sql.startsWith('--', offset)) {
+      const lineEnd = sql.slice(offset + 2).search(/[\r\n]/);
+      if (lineEnd < 0) return '';
+      offset += lineEnd + 3;
+      continue;
+    }
+
+    if (sql.startsWith('/*', offset)) {
+      const commentEnd = sql.indexOf('*/', offset + 2);
+      if (commentEnd < 0) throw new Error('Gateway 禁止执行 DDL 或维护语句');
+      offset = commentEnd + 2;
+      continue;
+    }
+
+    break;
+  }
+
+  return /^[A-Za-z]+/.exec(sql.slice(offset))?.[0]?.toUpperCase() ?? '';
+};
+
 const normalizeStatement = (value: unknown): StatementInput => {
   if (!value || typeof value !== 'object') throw new Error('语句必须是对象');
   const record = value as { sql?: unknown; params?: unknown };
@@ -109,7 +152,9 @@ const normalizeStatement = (value: unknown): StatementInput => {
   const params = record.params === undefined ? [] : record.params;
 
   if (!sql || sql.length > MAX_SQL_CHARS) throw new Error('SQL 为空或过长');
-  if (FORBIDDEN_SQL_RE.test(sql)) throw new Error('Gateway 禁止执行 DDL 或维护语句');
+  if (FORBIDDEN_SQL_TOKENS.has(readFirstSqlToken(sql))) {
+    throw new Error('Gateway 禁止执行 DDL 或维护语句');
+  }
   if (!Array.isArray(params) || params.length > MAX_PARAMS) throw new Error('SQL params 格式异常或数量过多');
   return { sql, params };
 };

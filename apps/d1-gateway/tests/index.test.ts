@@ -195,18 +195,57 @@ describe('D1 Gateway Worker', () => {
     });
   });
 
-  it('阻止 DDL 通过业务 Gateway', async () => {
+  it.each([
+    'DROP TABLE users',
+    '-- audit\nDROP TABLE users',
+    '/* audit */ DROP TABLE users',
+    '/* first */ -- second\n ALTER TABLE users ADD COLUMN leaked TEXT',
+    'PRAGMA optimize',
+    'REINDEX users',
+    'ANALYZE users',
+    'VACUUM',
+  ])('阻止 DDL 或维护语句通过业务 Gateway：%s', async (sql) => {
     const secret = 'test-secret';
-    const body = JSON.stringify({ sql: 'DROP TABLE users', params: [] });
+    const body = JSON.stringify({ sql, params: [] });
     const request = await createSignedRequest(body, secret);
-    const { database } = createDatabase();
+    const { calls, database } = createDatabase();
     const response = await gateway.fetch(request, { DB: database, D1_GATEWAY_HMAC_SECRET: secret });
 
     expect(response.status).toBe(400);
+    expect(calls).toEqual([]);
     expect(await response.json()).toEqual({
       success: false,
       errors: [{ message: 'Gateway 禁止执行 DDL 或维护语句' }],
     });
+  });
+
+  it('在 raw 和 batch 入口同样阻止维护语句', async () => {
+    const secret = 'test-secret';
+    const rawBody = JSON.stringify({ sql: '/* raw */ PRAGMA optimize', params: [] });
+    const rawRequest = await createSignedRequest(rawBody, secret, '/v1/raw');
+    const rawDatabase = createDatabase();
+    const rawResponse = await gateway.fetch(rawRequest, {
+      DB: rawDatabase.database,
+      D1_GATEWAY_HMAC_SECRET: secret,
+    });
+
+    const batchBody = JSON.stringify({
+      batch: [
+        { sql: 'SELECT 1', params: [] },
+        { sql: '/* batch */ REINDEX users', params: [] },
+      ],
+    });
+    const batchRequest = await createSignedRequest(batchBody, secret);
+    const batchDatabase = createDatabase();
+    const batchResponse = await gateway.fetch(batchRequest, {
+      DB: batchDatabase.database,
+      D1_GATEWAY_HMAC_SECRET: secret,
+    });
+
+    expect(rawResponse.status).toBe(400);
+    expect(batchResponse.status).toBe(400);
+    expect(rawDatabase.calls).toEqual([]);
+    expect(batchDatabase.calls).toEqual([]);
   });
 
   it('拒绝超过 50 条语句的 batch', async () => {
