@@ -1,5 +1,12 @@
-import type { UserAIProviderConfig } from '@/components/AiProviderSelector';
 import type { UserGenerationOverrides } from '@/lib/ai/generation-settings/types';
+
+export interface UserAIProviderConfig {
+  providerId: string;
+  modelId: string;
+  apiKey: string;
+  maxOutputTokens?: number;
+  generationOverrides?: UserGenerationOverrides;
+}
 
 export type CustomProviderPayload = {
   providerId: string;

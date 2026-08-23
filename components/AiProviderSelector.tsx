@@ -8,6 +8,7 @@ import {
 } from '@/lib/ai/constants';
 import {
     normalizeCustomProviderMaxOutputTokens,
+    type UserAIProviderConfig,
 } from '@/lib/ai/custom-provider';
 import { maskApiKeyForDisplay } from '@/lib/client/mask-api-key';
 import { ChannelAvailabilityBadge } from '@/components/ChannelAvailabilityBadge';
@@ -17,13 +18,7 @@ import AdvancedGenerationSettings from '@/components/AdvancedGenerationSettings'
 import { getModelGenerationCapabilities } from '@/lib/ai/generation-settings/model-capabilities';
 import Link from 'next/link';
 
-export interface UserAIProviderConfig {
-    providerId: string;
-    modelId: string;
-    apiKey: string;
-    maxOutputTokens?: number;
-    generationOverrides?: UserGenerationOverrides;
-}
+export type { UserAIProviderConfig } from '@/lib/ai/custom-provider';
 
 interface AiProviderSelectorProps {
     onConfigChange: (config: UserAIProviderConfig | null) => void;
