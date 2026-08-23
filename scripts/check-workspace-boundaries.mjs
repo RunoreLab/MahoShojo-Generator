@@ -43,6 +43,23 @@ const DOM_GLOBAL_IDENTIFIERS = new Set([
   'FormData',
   'WebSocket',
 ]);
+const CONTRACTS_BROWSER_ONLY_GLOBALS = new Set([
+  'window',
+  'document',
+  'localStorage',
+  'sessionStorage',
+  'indexedDB',
+  'location',
+  'history',
+  'screen',
+  'HTMLElement',
+  'Element',
+  'Node',
+  'MutationObserver',
+  'ResizeObserver',
+  'IntersectionObserver',
+  'FileReader',
+]);
 
 const NODE_RUNTIME_MODULE = /^(?:node:|assert(?:\/|$)|buffer(?:\/|$)|child_process(?:\/|$)|cluster(?:\/|$)|crypto(?:\/|$)|dgram(?:\/|$)|dns(?:\/|$)|events(?:\/|$)|fs(?:\/|$)|http(?:\/|$)|https(?:\/|$)|module(?:\/|$)|net(?:\/|$)|os(?:\/|$)|path(?:\/|$)|perf_hooks(?:\/|$)|process(?:\/|$)|readline(?:\/|$)|stream(?:\/|$)|string_decoder(?:\/|$)|timers(?:\/|$)|tls(?:\/|$)|tty(?:\/|$)|url(?:\/|$)|util(?:\/|$)|v8(?:\/|$)|vm(?:\/|$)|worker_threads(?:\/|$)|zlib(?:\/|$))/;
 const FRAMEWORK_RUNTIME_MODULE = /^(?:next(?:\/|$)|react(?:\/|$)|react-dom(?:\/|$)|hono(?:\/|$)|@hono\/(?:.+)|wrangler(?:\/|$)|cloudflare:.+|cloudflare(?:\/|$)|@cloudflare\/(?:.+)|@opennextjs\/(?:.+)|@tauri\/(?:.+)|@tauri-apps\/(?:.+)|tauri(?:\/|$)|electron(?:\/|$)|@electron\/(?:.+)|drizzle-orm(?:\/|$)|better-sqlite3(?:\/|$)|kysely(?:\/|$)|redis(?:\/|$)|ioredis(?:\/|$)|pg(?:\/|$)|mysql2(?:\/|$)|sqlite3(?:\/|$)|@libsql\/(?:.+)|idb(?:\/|$)|indexeddb(?:\/|$))/;
@@ -143,6 +160,7 @@ function unwrapTransparentExpression(node) {
 
 function collectSourceDependencies(source, filePath) {
   const imports = [];
+  const contractsBrowserGlobals = [];
   const seenImportNodes = new Set();
   const parsed = parser.parseForESLint(source, {
     filePath,
@@ -154,25 +172,54 @@ function collectSourceDependencies(source, filePath) {
     ecmaVersion: 'latest',
   });
   const ast = parsed.ast;
+  const throughReferences = parsed.scopeManager?.globalScope?.through ?? [];
   const domGlobals = [];
   const seenDomReferences = new Set();
   const environmentReadCandidates = [];
   const seenEnvironmentReads = new Set();
+  const seenContractsBrowserGlobals = new Set();
   const unresolvedProcessReferences = new Set(
-    (parsed.scopeManager?.globalScope?.through ?? [])
+    throughReferences
       .filter((reference) => reference.identifier?.name === 'process' && !reference.resolved)
       .map((reference) => reference.identifier.range?.join(':'))
       .filter(Boolean),
   );
-  for (const reference of parsed.scopeManager?.globalScope?.through ?? []) {
+  const unresolvedGlobalThisRanges = new Set(
+    throughReferences
+      .filter((reference) => reference.identifier?.name === 'globalThis' && !reference.resolved)
+      .map((reference) => reference.identifier.range?.join(':'))
+      .filter(Boolean),
+  );
+
+  const isUnresolvedGlobalThis = (node) => {
+    const current = unwrapTransparentExpression(node);
+    if (!current || current.type !== 'Identifier' || current.name !== 'globalThis' || !current.range) return false;
+    return unresolvedGlobalThisRanges.has(current.range.join(':'));
+  };
+
+  const addContractsBrowserGlobal = (node, value) => {
+    if (!value || !CONTRACTS_BROWSER_ONLY_GLOBALS.has(value)) return;
+    const line = node?.loc?.start?.line ?? 1;
+    const key = node?.range ? `${node.range[0]}:${node.range[1]}` : `${line}:${value}`;
+    if (seenContractsBrowserGlobals.has(key)) return;
+    seenContractsBrowserGlobals.add(key);
+    contractsBrowserGlobals.push({ module: value, line });
+  };
+
+  for (const reference of throughReferences.filter((reference) => !reference.resolved)) {
     const identifier = reference.identifier;
-    if (!identifier || identifier.type !== 'Identifier' || !DOM_GLOBAL_IDENTIFIERS.has(identifier.name)) continue;
-    const key = identifier.range
-      ? `${identifier.range[0]}:${identifier.range[1]}`
-      : `${identifier.loc?.start?.line ?? 1}:${identifier.loc?.start?.column ?? 0}:${identifier.name}`;
-    if (seenDomReferences.has(key)) continue;
-    seenDomReferences.add(key);
-    domGlobals.push({ module: identifier.name, line: identifier.loc?.start?.line ?? 1 });
+    if (identifier?.type === 'Identifier' && DOM_GLOBAL_IDENTIFIERS.has(identifier.name)) {
+      const key = identifier.range
+        ? `${identifier.range[0]}:${identifier.range[1]}`
+        : `${identifier.loc?.start?.line ?? 1}:${identifier.loc?.start?.column ?? 0}:${identifier.name}`;
+      if (seenDomReferences.has(key)) continue;
+      seenDomReferences.add(key);
+      domGlobals.push({ module: identifier.name, line: identifier.loc?.start?.line ?? 1 });
+    }
+
+    if (identifier?.type === 'Identifier') {
+      addContractsBrowserGlobal(identifier, identifier.name);
+    }
   }
 
   const add = (node, value) => {
@@ -252,6 +299,11 @@ function collectSourceDependencies(source, filePath) {
       && isStringLiteral(node.arguments?.[0])
     ) {
       add(node.arguments[0], node.arguments[0].value);
+    } else if (
+      (node.type === 'MemberExpression' || node.type === 'OptionalMemberExpression')
+      && isUnresolvedGlobalThis(node.object)
+    ) {
+      addContractsBrowserGlobal(node.property, memberPropertyName(unwrapTransparentExpression(node.property)));
     }
 
     if (isEnvironmentAccess(node)) {
@@ -273,7 +325,7 @@ function collectSourceDependencies(source, filePath) {
         && (other.range[0] < candidate.range[0] || other.range[1] > candidate.range[1]);
     }))
     .map(({ module, line }) => ({ module, line }));
-  return { imports, domGlobals, environmentReads };
+  return { imports, domGlobals, contractsBrowserGlobals, environmentReads };
 }
 
 function appTargetFromSpecifier(rootDirectory, moduleSpecifier, apps) {
@@ -373,6 +425,13 @@ function isContractsPackage(unit) {
   return directoryName === 'contracts' || packageName === 'contracts';
 }
 
+function isContractsSourceFile(unit, sourceFile) {
+  if (!isContractsPackage(unit)) return false;
+  const relativeSource = path.relative(unit.directory, sourceFile);
+  const normalized = relativeSource.split(path.sep)[0];
+  return normalized === 'src';
+}
+
 function addViolation(violations, rule, filePath, moduleSpecifier, message, line) {
   violations.push({
     rule,
@@ -427,9 +486,16 @@ export function checkWorkspaceBoundaries(rootDirectory = process.cwd()) {
     for (const sourceFile of unit.sourceFiles) {
       let imports;
       let domGlobals;
+      let contractsBrowserGlobals;
       let environmentReads;
+      const contractsSourceFile = isContractsSourceFile(unit, sourceFile);
       try {
-        ({ imports, domGlobals, environmentReads } = collectSourceDependencies(readFileSync(sourceFile, 'utf8'), sourceFile));
+        ({
+          imports,
+          domGlobals,
+          contractsBrowserGlobals,
+          environmentReads,
+        } = collectSourceDependencies(readFileSync(sourceFile, 'utf8'), sourceFile));
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error);
         addViolation(violations, 'MONO-005-PARSE', sourceFile, '<parse>', `cannot parse source: ${reason}`);
@@ -449,7 +515,20 @@ export function checkWorkspaceBoundaries(rootDirectory = process.cwd()) {
         }
       }
 
-      if (isContractsPackage(unit)) {
+      if (contractsSourceFile) {
+        for (const { module: browserGlobal, line } of contractsBrowserGlobals) {
+          addViolation(
+            violations,
+            'MONO-005-CONTRACTS-BROWSER-GLOBAL',
+            sourceFile,
+            browserGlobal,
+            'contracts package must not reference browser-only globals',
+            line,
+          );
+        }
+      }
+
+      if (contractsSourceFile) {
         for (const { module: environmentRead, line } of environmentReads) {
           addViolation(
             violations,
@@ -538,6 +617,20 @@ export function checkWorkspaceBoundaries(rootDirectory = process.cwd()) {
             sourceFile,
             moduleSpecifier,
             `package subpath ${requestedSubpath} is not declared by ${targetPackage.name}.exports`,
+            line,
+          );
+        }
+
+        if (
+          contractsSourceFile
+          && (NODE_RUNTIME_MODULE.test(moduleSpecifier) || FRAMEWORK_RUNTIME_MODULE.test(moduleSpecifier))
+        ) {
+          addViolation(
+            violations,
+            'MONO-005-CONTRACTS-RUNTIME',
+            sourceFile,
+            moduleSpecifier,
+            'contracts package must remain independent from framework, runtime, and database modules',
             line,
           );
         }

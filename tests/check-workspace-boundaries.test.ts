@@ -203,6 +203,50 @@ describe('workspace dependency boundaries', () => {
     expect(violations.map((violation) => violation.module)).toEqual(['window', 'localStorage']);
   });
 
+  it('rejects framework/runtime/database imports in contracts package without allowing zod', async () => {
+    const rootDir = await createWorkspaceFixture({
+      'packages/contracts/package.json': manifest('@mahoshojo/contracts'),
+      'packages/contracts/src/index.ts': [
+        "import 'next';",
+        "import 'react';",
+        "import 'hono';",
+        "import 'node:fs';",
+        "import 'drizzle-orm';",
+        "import '@tauri-apps/api';",
+        "import 'cloudflare:workers';",
+        "import 'zod';",
+      ].join('\n'),
+    });
+
+    const violations = checkWorkspaceBoundaries(rootDir);
+    expect(violations.filter((violation) => violation.rule === 'MONO-005-CONTRACTS-RUNTIME')).toHaveLength(7);
+    expect(violations.some((violation) => violation.module === 'zod')).toBe(false);
+  });
+
+  it('rejects contracts browser-only globals while allowing web standard APIs and shadows', async () => {
+    const rootDir = await createWorkspaceFixture({
+      'packages/contracts/package.json': manifest('@mahoshojo/contracts'),
+      'packages/contracts/src/index.ts': [
+        'const docFromWindow = window.document;',
+        'const fromGlobalThis = globalThis.document;',
+        "const fromGlobalStorage = globalThis['localStorage'];",
+        'const url = new URL("https://example.com");',
+        'const blob = new Blob([1]);',
+        'function shadowedGlobalThis(globalThis: { document: string }) { return globalThis.document; }',
+        'const holder = { globalThis: { document: "value" }, window: "value", localStorage: "value" };',
+        'const safeText = "window document localStorage";',
+        'void docFromWindow; void fromGlobalThis; void fromGlobalStorage; void url; void blob; void holder; void safeText; void shadowedGlobalThis;',
+      ].join('\n'),
+    });
+
+    const violations = checkWorkspaceBoundaries(rootDir).filter(
+      (violation) => violation.rule === 'MONO-005-CONTRACTS-BROWSER-GLOBAL',
+    );
+
+    expect(violations).toHaveLength(3);
+    expect(violations.map((violation) => violation.module)).toEqual(['window', 'document', 'localStorage']);
+  });
+
   it('rejects server secret modules imported by client packages', async () => {
     const clientPackages = ['ai-direct', 'local-library', 'cloud-client', 'ui-web'];
     const files: FixtureFiles = {};
