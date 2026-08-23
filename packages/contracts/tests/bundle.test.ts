@@ -57,21 +57,24 @@ describe('public contracts entrypoint portability', () => {
         forbiddenBundleInputs.some((rule) => rule.test(input)),
       )).toBe(false);
 
-      if (platform !== 'node') {
-        continue;
+      const moduleUrl = `data:application/javascript;base64,${Buffer.from(output).toString('base64')}`;
+      const importFailureMessage = `entrypoint ${entrypoint} should be importable as data URL for ${platform} bundle`;
+      let imported;
+      try {
+        imported = await import(moduleUrl);
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        throw new Error(`${importFailureMessage}: ${reason}`);
       }
 
-      const moduleUrl = `data:application/javascript;base64,${Buffer.from(output).toString('base64')}`;
-      const imported = await import(moduleUrl);
       const sortedRuntimeKeys = [...(imported.publicKeys ?? [])].sort();
       const sortedNamespaceKeys = [...Object.keys(imported.publicApi ?? {})].sort();
-      const sortedExpectedKeys = [...expectedKeys];
 
       expect(imported.publicApi).toBeTypeOf('object');
       expect(imported.publicKeys).toBeInstanceOf(Array);
       expect(imported.publicKeys).toHaveLength(sortedNamespaceKeys.length);
       expect(sortedRuntimeKeys).toEqual(sortedNamespaceKeys);
-      expect(sortedRuntimeKeys).toEqual(sortedExpectedKeys);
+      expect(sortedRuntimeKeys).toEqual(expectedKeys);
     }
   });
 });

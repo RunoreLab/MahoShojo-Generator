@@ -257,6 +257,7 @@ describe('workspace dependency boundaries', () => {
         'export { document };',
       ].join('\n'),
       'packages/contracts/tests/spec-review.test.ts': "import 'node:fs';\nvoid null;\n",
+      'packages/contracts/tests/spec-review.test.unit.ts': "import 'node:fs';\nvoid null;\n",
       'packages/contracts/tests/helpers.ts': "import 'node:fs/promises';\nexport const helper = 1;\n",
     });
 
@@ -267,6 +268,7 @@ describe('workspace dependency boundaries', () => {
     expect(runtimeViolations.map((violation) => violation.module).sort()).toEqual(['node:fs/promises', 'react']);
     expect(browserViolations.map((violation) => violation.module)).toEqual(['document']);
     expect(violations.some((violation) => violation.file.endsWith('tests/spec-review.test.ts'))).toBe(false);
+    expect(violations.some((violation) => violation.file.endsWith('tests/spec-review.test.unit.ts'))).toBe(false);
   });
 
   it('rejects server secret modules imported by client packages', async () => {
