@@ -1,7 +1,8 @@
 import { z } from 'zod/v3';
+import { GENERAL_SCENARIO_TEMPLATE_ID } from '@mahoshojo/domain/data-cards';
 import { ScenarioBattleStoryExtensionSchema } from '@/lib/scenario-battle-story';
 
-export const GENERAL_SCENARIO_TEMPLATE_ID = '通用情景' as const;
+export { GENERAL_SCENARIO_TEMPLATE_ID } from '@mahoshojo/domain/data-cards';
 
 /**
  * 通用情景数据卡的 Zod Schema

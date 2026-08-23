@@ -1,5 +1,5 @@
 import { generateUUID } from './core';
-import { inferCharacterKind } from '@/lib/schemas';
+import { inferCharacterKind } from '@mahoshojo/domain/data-cards';
 
 type DataCardType = 'character' | 'scenario' | 'history' | 'questionnaire';
 type DataCardSortBy = 'likes' | 'usage' | 'favorites' | 'created_at';

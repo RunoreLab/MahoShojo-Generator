@@ -1,5 +1,5 @@
 import { z } from 'zod/v3';
-import { GENERAL_SCENARIO_TEMPLATE_ID } from '@/lib/schemas';
+import { GENERAL_SCENARIO_TEMPLATE_ID } from '@mahoshojo/domain/data-cards';
 import {
   BATTLE_REPORT_CARD_WIDTH_MAX,
   BATTLE_REPORT_CARD_WIDTH_MIN,

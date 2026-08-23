@@ -2,7 +2,7 @@ import { config as appConfig } from '@/lib/config';
 import { getLogger } from '@/lib/logger';
 import { NewsReport } from '@/components/BattleReportCard';
 import { ArenaHistoryEntry } from '@/types/arena';
-import { inferCharacterKind, inferTemplateId } from '@/lib/schemas';
+import { inferCharacterKind, inferTemplateId } from '@mahoshojo/domain/data-cards';
 import { generateSignature, verifySignature } from '@/lib/signature';
 import { randomUUID } from '@/lib/crypto';
 

@@ -1,6 +1,6 @@
 # 共享 Package 边界占位
 
-`packages/*` 只承载可被多个应用复用、且有明确公共契约的代码。依赖方向为：应用可以依赖共享 package；共享 package 不得导入 `apps/*`。`packages/domain` 未来必须保持纯领域边界，不依赖 Next、React、Hono、Cloudflare、Node、Tauri、Electron、DOM 或数据库 runtime；客户端 package 不得读取服务端秘密、签名或环境模块。
+`packages/*` 只承载可被多个应用复用、且有明确公共契约的代码。依赖方向为：应用可以依赖共享 package；共享 package 不得导入 `apps/*`。`packages/domain` 必须保持纯领域边界，不依赖 Next、React、Hono、Cloudflare、Node、Tauri、Electron、DOM 或数据库 runtime；客户端 package 不得读取服务端秘密、签名或环境模块。
 
 共享 package 必须在自己的 `package.json` 中声明显式 `exports`，消费者只能导入导出的公共入口或已声明子路径，不能把 `src/*` 等内部目录当作稳定 API。
 
@@ -11,5 +11,6 @@
 本目录不设一个无边界的 `common`/`shared` 倾倒包。新增 package 应按领域职责命名，并同步维护类型、exports、测试和依赖边界。当前真实 package 为：
 
 - `@mahoshojo/config`：仅导出非秘密的 workspace/layout 常量与类型；
-- `@mahoshojo/contracts`：导出版本化协议 DTO、Zod schema、错误码和 wire 安全限制，不包含业务执行、存储、鉴权或部署 runtime。
+- `@mahoshojo/contracts`：导出版本化协议 DTO、Zod schema、错误码和 wire 安全限制，不包含业务执行、存储、鉴权或部署 runtime；
+- `@mahoshojo/domain`：导出无 runtime 依赖的数据卡模板标识、角色分类与旧数据模板推断；根 Web 保留 `lib/schemas` 兼容出口，但 Web 组件、Arena 服务和 API 已有真实生产路径直接消费 `@mahoshojo/domain/data-cards`；
 - `@mahoshojo/multiplayer-core`：承载 Arena Room Shared Config 的白名单投影、不可变 working copy、typed Proposal diff/selection/conflict/apply 纯逻辑；只依赖 `@mahoshojo/contracts`，不依赖应用、框架、数据库、网络或任何 Node/DOM/Cloudflare runtime。`buildArenaRoomSharedConfig` 的公开输入边界是 `ArenaRoomNormalizedSource`，只负责 normalized source 的白名单投影；`applyArenaProposal` 只接受 `(state, proposalInput, selectedChangeIds?)`；真实 `BattleStoreState -> normalized source` Web adapter 尚未在本批实现，stable host-local key/versionToken 映射需另批接入，不能由此包猜测。

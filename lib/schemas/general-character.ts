@@ -1,7 +1,8 @@
 import { z } from 'zod/v3';
+import { GENERAL_CHARACTER_TEMPLATE_ID } from '@mahoshojo/domain/data-cards';
 import { CurrentStateSchema } from './current-state';
 
-export const GENERAL_CHARACTER_TEMPLATE_ID = '通用角色' as const;
+export { GENERAL_CHARACTER_TEMPLATE_ID } from '@mahoshojo/domain/data-cards';
 
 /**
  * 通用角色数据卡的 Zod Schema

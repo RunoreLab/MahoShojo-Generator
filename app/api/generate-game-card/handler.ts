@@ -12,7 +12,7 @@ import { getLogger } from '@/lib/logger';
 import { quickCheck } from '@/lib/sensitive-word-filter';
 import { recordUserActivityFromRequest } from '@/lib/user-activity/record';
 import { gameCardGenerationConfig, type GameCardGenerationInput } from '@/lib/game-card/config';
-import { inferCharacterKind } from '@/lib/schemas';
+import { inferCharacterKind } from '@mahoshojo/domain/data-cards';
 
 const log = getLogger('api-gen-game-card');
 

@@ -1,5 +1,5 @@
 import { AdjudicatorEvent, AdjudicationResult, ArenaHistory, CharacterCurrentState, NarrativeHistoryEntry } from '@/types/arena';
-import { GENERAL_SCENARIO_TEMPLATE_ID } from '@/lib/schemas';
+import { GENERAL_SCENARIO_TEMPLATE_ID } from '@mahoshojo/domain/data-cards';
 import { formatQuestionnaireAnswers, normalizeUserAnswers } from '@/lib/questionnaires';
 import {
     getStoryPromptCharacterParameters,
