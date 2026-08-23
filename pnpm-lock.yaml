@@ -408,6 +408,27 @@ importers:
         specifier: ^4.1.7
         version: 4.1.7(@opentelemetry/api@1.9.1)(@types/node@20.19.27)(msw@2.15.0(@types/node@20.19.27)(typescript@5.9.3))(vite@8.0.16(@types/node@20.19.27)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.16.9)(tsx@4.22.4)(yaml@2.9.0))
 
+  packages/hosted-runtime:
+    devDependencies:
+      '@types/node':
+        specifier: ^20
+        version: 20.19.27
+      '@typescript-eslint/parser':
+        specifier: ^8.50.0
+        version: 8.50.0(eslint@9.39.2(jiti@2.7.0))(typescript@5.9.3)
+      esbuild:
+        specifier: ^0.28.1
+        version: 0.28.1
+      eslint:
+        specifier: ^9
+        version: 9.39.2(jiti@2.7.0)
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.7
+        version: 4.1.7(@opentelemetry/api@1.9.1)(@types/node@20.19.27)(msw@2.15.0(@types/node@20.19.27)(typescript@5.9.3))(vite@8.0.16(@types/node@20.19.27)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.16.9)(tsx@4.22.4)(yaml@2.9.0))
+
   packages/local-library:
     dependencies:
       '@mahoshojo/contracts':
