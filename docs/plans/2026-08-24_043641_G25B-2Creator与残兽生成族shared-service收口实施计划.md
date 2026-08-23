@@ -1,5 +1,12 @@
 # G25B-2 Creator 与残兽生成族 shared-service 收口实施计划
 
+状态：`completed`
+
+执行说明：本计划已由实现提交 `8ef5b47b`、review-fix 提交 `2b6adbd0` 与
+[`G25B-2 实施日志`](../logs/2026-08-24_045949_平台重整G25B-2Creator与残兽生成族收口实施日志.md)
+闭合。下方 checkbox 保留制定时的执行顺序，不再表示当前待办；实际完成范围、RED/GREEN、独立 review
+与验证结果以实施日志和对应提交为证据，不据此重复执行。
+
 > **For agentic workers:** 本计划由当前 `/goal` 内联执行；行为修改必须遵循 RED → GREEN，最终必须经过 Builder self-review、独立 review 与 `GOAL-061` 验收。
 
 **Goal:** 将 Creator generate/stream 与残兽 generate/stream 四条深 composition Hosted route 收口到 `@mahoshojo/hosted-api` business service + 唯一 server runtime composition + Next/Hono adapter 边界，保持现有 questionnaire、build-rule、Provider、安全、签名、活动与 stream contract。

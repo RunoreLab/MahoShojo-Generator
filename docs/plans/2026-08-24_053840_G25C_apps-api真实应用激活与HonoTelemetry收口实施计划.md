@@ -12,13 +12,16 @@
 
 **Preserves:** `AI-006`、`AUTHORITY-001..006`、`DR-004..011`、`DR-013..014`、`COMPAT-001..002`、`ACCEPT-008`；不改变 Arena v1 wire/authority，也不把 generation 标记为可透明重放。
 
-**执行检查点（2026-08-24）：** Phase 2.5B 已在 capability manifest 原子修改之上完成结构退出审计，当前为 `10 shared-service / 14 exited / 0 legacy-next`；对应 14 条 Next 公开 route 未删除，legacy codegen/type 后门已删除并 fail closed。根据当前收口要求，尚未完成的 app ownership RED 已撤回，`@mahoshojo/hosted-runtime`、真实 `apps/api`、AI/D1/Redis telemetry、Docker/CI/deploy ownership 与 G25C 独立审查均未开始，不能据此判定 G25C stopping condition 达成。
+**执行检查点（2026-08-24）：** Phase 2.5B 已在 capability manifest 原子修改之上完成结构退出审计，当前为 `10 shared-service / 14 exited / 0 legacy-next`；对应 14 条 Next 公开 route 未删除，legacy codegen/type 后门已删除并 fail closed。`@mahoshojo/hosted-runtime` 已建立低基数 no-op/registrable telemetry port；`apps/api` ownership 与原子 release tuple 的 RED 合约将在 G25C 工作分支保持启用。10 条 retained service 的唯一 runtime composition、真实 `apps/api`、完整 AI/D1/Redis 调用接线、Docker/CI/deploy ownership 与 G25C 独立审查仍未全部完成，不能据此判定 G25C stopping condition 达成。
 
 ---
 
-## 启动裁决与验收矩阵
+## 历史启动裁决与当前验收矩阵
 
-当前 source commit 为 `dc3d90c4`，manifest 是 `10 shared-service / 14 legacy-next`。G25C 原计划假定 Phase 2.5B 已结构退出，但当前分支尚未完成 G25B-3..5；本次不把约三个 Goal 的业务重构并入目录迁移，而按计划允许的 capability exit 路径处理：
+以下 capability 裁决记录的是 G25C 首次启动时的历史基线：source commit `dc3d90c4`，manifest 为
+`10 shared-service / 14 legacy-next`。随后 Phase 2.5B 已按该裁决完成结构退出与独立审查；当前 HEAD
+必须以执行检查点所述 `10 shared-service / 14 exited / 0 legacy-next` 为准，不得再次退出同一组 route。
+历史裁决为：
 
 - 保留 10 条已经具有 shared business service、Next/Hono contract 和 review 证据的 Hosted capability；
 - 退出 14 条仍需动态 import Next handler 的 Hono capability；
@@ -69,7 +72,10 @@ Stopping condition 验收表：
 
 ---
 
-### Task 1：冻结 capability exit 与 apps/api ownership RED
+### Task 1：复核 capability exit，并建立 apps/api ownership RED
+
+当前状态：capability exit、生成器 fail-closed 与 retained/exited contract 已由 Phase 2.5B 完成；本 Task
+只剩 `apps/api`、dependency、Docker/CI ownership 的 RED。route contract 继续作为回归门禁，不重复修改 inventory。
 
 **Files:**
 
@@ -79,9 +85,11 @@ Stopping condition 验收表：
 - Modify: `tests/hono-deploy-workflow.test.ts`
 - Modify: `config/hono-api-routes.json`
 
-- [ ] **Step 1：写 route 与 app ownership 失败测试**
+- [ ] **Step 1：写 app ownership 失败测试，并保留 route 回归断言**
 
-新增精确断言：manifest 总数为 10、`legacyRouteIds` 为空、10 条 retained ID 不变；`apps/api/package.json`、`src/index.ts`、README/env/Docker/deploy 文件必须存在；root `server/`、`Dockerfile.hono` 和 `deploy/hono` 在迁移完成态不得存在。
+现有测试已精确断言 manifest 总数为 10、`legacyRouteIds` 为空、10 条 retained ID 与 14 条 exited ID
+不变。本步只新增尚未满足的 ownership 断言：`apps/api/package.json`、`src/index.ts`、README/env/Docker/deploy
+文件必须存在；root `server/`、`Dockerfile.hono` 和 `deploy/hono` 在迁移完成态不得存在。
 
 ```ts
 expect(routeInventory.legacyRouteIds).toEqual([]);
@@ -100,11 +108,13 @@ fixture 必须证明 `apps/api -> lib/server/app/pages/components/types` 的直�
 pnpm exec vitest run tests/server/route-manifest.test.ts tests/workspace-structure.test.ts tests/check-workspace-boundaries.test.ts tests/hono-deploy-workflow.test.ts --reporter=verbose
 ```
 
-Expected: 旧 10/14 manifest、缺少 `apps/api`、root server/Docker owner 仍存在而失败；失败不得来自语法或 fixture 错误。
+Expected: route contract 继续通过；缺少 `apps/api`、root server/Docker owner 仍存在而失败。失败不得来自语法或 fixture 错误。
 
-- [ ] **Step 4：只执行 capability manifest 原子修改并生成旧 registry**
+- [x] **Step 4：capability manifest 原子修改与 registry 结构退出（由 Phase 2.5B 完成）**
 
-把 14 条 legacy route 从 Hono inventory 删除，保留 10 条 shared route；运行 generator，确认公开 Next 文件没有删除。
+Phase 2.5B 已把 14 条 legacy route 登记为 exited、保留 10 条 shared route，并确认公开 Next 文件未删除；
+generator 当前拒绝任何非空 `legacyRouteIds`。完成证据见
+[`Phase 2.5B Hono Seam 结构退出审计`](../logs/2026-08-24_060244_平台重整Phase2.5B_HonoSeam结构退出审计.md)。
 
 ```bash
 pnpm run server:routes
