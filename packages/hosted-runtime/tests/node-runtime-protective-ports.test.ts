@@ -8,7 +8,11 @@ import {
   AI_PROVIDER_CATALOG,
   resolveAIProviderModel,
 } from '../src/node-runtime/provider-catalog';
-import { quickCheck } from '../src/node-runtime/sensitive-word-filter';
+import {
+  SensitiveWordFilter,
+  quickCheck,
+  quickCheckForServer,
+} from '../src/node-runtime/sensitive-word-filter';
 import { applyShieldWords } from '../src/node-runtime/shield-word-filter';
 
 describe('package-owned protective Node ports', () => {
@@ -31,6 +35,16 @@ describe('package-owned protective Node ports', () => {
       hasShieldWords: true,
       filteredText: '我来自【国度】。',
     });
+  });
+
+  test('服务器权威敏感词入口在扫描异常时向上抛出并 fail closed', async () => {
+    const failure = new Error('sensitive-scan-secret-canary');
+    const checkText = vi
+      .spyOn(SensitiveWordFilter.prototype, 'checkText')
+      .mockRejectedValueOnce(failure);
+
+    await expect(quickCheckForServer('用户正文 canary')).rejects.toBe(failure);
+    expect(checkText).toHaveBeenCalledOnce();
   });
 
   test('rate limiter 只信任已验证 token，并保持 429 wire 与 Retry-After', async () => {

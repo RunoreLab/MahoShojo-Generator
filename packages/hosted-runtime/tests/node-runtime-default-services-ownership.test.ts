@@ -80,4 +80,11 @@ describe('default Hosted services ownership', () => {
     expect(localInputs).not.toEqual([]);
     expect(localInputs.every((candidate) => candidate.startsWith('packages/'))).toBe(true);
   });
+
+  test('默认 Node composition 只使用服务器权威敏感词检查入口', () => {
+    const source = readFileSync(path.join(PACKAGE_DIRECTORY, ENTRY), 'utf8');
+    expect(source).toContain("import { quickCheckForServer } from './sensitive-word-filter';");
+    expect(source).not.toMatch(/\bquickCheck\(/u);
+    expect(source.match(/\bquickCheckForServer\b/gu)).toHaveLength(3);
+  });
 });

@@ -5,6 +5,8 @@ import { parse as parseEnvironment } from 'dotenv';
 import { createClient } from 'redis';
 import { fileURLToPath } from 'node:url';
 
+import { terminateChildProcess } from './child-process-lifecycle.mjs';
+
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 const serverPort = Number(process.env.HONO_VERIFY_PORT || '8790');
@@ -127,7 +129,6 @@ try {
   console.error(logBuffer.join('').slice(-8_000));
   throw error;
 } finally {
-  child.kill('SIGTERM');
-  await new Promise((resolve) => child.once('exit', resolve));
+  await terminateChildProcess(child);
   await redis.quit();
 }

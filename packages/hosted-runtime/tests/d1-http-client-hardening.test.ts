@@ -202,6 +202,34 @@ describe('D1 HTTP hardening', () => {
     }
   });
 
+  it.each([301, 302, 303, 307, 308])(
+    'never follows HTTP %i for a mutation or replays its signed body',
+    async (status) => {
+      const fetcher = vi.fn(async (_input: unknown, init?: RequestInit) => {
+        expect(init?.redirect).toBe('manual');
+        return new Response(null, {
+          status,
+          headers: { location: 'https://redirect-secret-canary.invalid/v1/query' },
+        });
+      });
+      const error = await createD1HttpTransport({
+        kind: 'gateway',
+        baseUrl: 'https://gateway.example.test',
+        hmacSecret: 'hmac-secret-canary',
+        accessClientId: 'access-id-canary',
+        accessClientSecret: 'access-secret-canary',
+        fetch: fetcher,
+      }).query('UPDATE users SET secret = ?', ['sql-param-secret-canary'], { retry: 'safe-read' })
+        .catch((value: unknown) => value as Error);
+
+      expect(error).toMatchObject({ code: 'D1_INDETERMINATE_OUTCOME', status });
+      expect(fetcher).toHaveBeenCalledOnce();
+      expect(String(error)).not.toMatch(
+        /redirect-secret-canary|hmac-secret-canary|access-secret-canary|sql-param-secret-canary/u,
+      );
+    },
+  );
+
   it('does not double-observe hostile response header/body access', async () => {
     const events: any[] = [];
     const unregister = observer(events);

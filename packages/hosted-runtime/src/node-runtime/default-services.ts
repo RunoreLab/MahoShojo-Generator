@@ -73,7 +73,7 @@ import {
   type PublicAiProviderMode,
   type PublicAiRateLimitAction,
 } from './public-rate-limit';
-import { quickCheck } from './sensitive-word-filter';
+import { quickCheckForServer } from './sensitive-word-filter';
 import { createNodeStructuredAiRuntime } from './structured-ai';
 import {
   CANSHOU_LORE,
@@ -186,7 +186,7 @@ export const createNodeHostedServices = (
       ),
       enableAiSafetyCheck: flagEnabled(env, 'NEXT_PUBLIC_ENABLE_AI_SAFETY_CHECK', false),
     },
-    quickCheck,
+    quickCheck: quickCheckForServer,
     generateWithAI: (input, config) => structuredAi.generateWithAI(input, config),
   });
 
@@ -379,7 +379,7 @@ export const createNodeHostedServices = (
       true,
     ),
     checkOutputSafety: async (serializedFaceData) => {
-      const result = await quickCheck(serializedFaceData);
+      const result = await quickCheckForServer(serializedFaceData);
       return {
         hasSensitiveWords: result.hasSensitiveWords,
         detectedWords: result.detectedWords,

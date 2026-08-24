@@ -124,6 +124,14 @@ const isRetryableStatus = (status: number): boolean => (
   || (status >= 500 && status <= 599)
 );
 
+const isRedirectStatus = (status: number): boolean => (
+  status === 301
+  || status === 302
+  || status === 303
+  || status === 307
+  || status === 308
+);
+
 const readErrorProperty = (error: unknown, property: 'name' | 'message' | 'cause' | 'code'): unknown => {
   if ((typeof error !== 'object' && typeof error !== 'function') || error === null) return undefined;
   try {
@@ -620,7 +628,12 @@ function createD1HttpTransport(config: D1HttpTransportConfig): D1HttpTransport {
         }
 
         started = now();
-        const responsePromise = fetcher(url, { method: 'POST', headers, body: bodyText });
+        const responsePromise = fetcher(url, {
+          method: 'POST',
+          headers,
+          body: bodyText,
+          redirect: 'manual',
+        });
         dispatched = true;
         const response = await responsePromise;
         let responseStatus: number;
@@ -632,6 +645,17 @@ function createD1HttpTransport(config: D1HttpTransportConfig): D1HttpTransport {
           observeError(started, error, 'response');
           if (operation === 'write') throw new D1IndeterminateOutcomeError();
           throw literalError('parse');
+        }
+
+        if (isRedirectStatus(responseStatus)) {
+          observeError(started, undefined, 'response');
+          await cancelResponseBody(response);
+          if (operation === 'write') throw new D1IndeterminateOutcomeError(responseStatus);
+          throw new D1HttpError(
+            `D1 API 错误: ${responseStatus}`,
+            'response',
+            responseStatus,
+          );
         }
 
         if (isRetryableStatus(responseStatus) && attempt < attempts - 1) {
