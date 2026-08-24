@@ -9,6 +9,66 @@
       "import": "./src/d1-http-client.ts",
       "default": "./src/d1-http-client.ts"
     },
+    "./node-runtime": {
+      "types": "./src/node-runtime/index.ts",
+      "import": "./src/node-runtime/index.ts",
+      "default": "./src/node-runtime/index.ts"
+    },
+    "./node-runtime/availability": {
+      "types": "./src/node-runtime/availability.ts",
+      "import": "./src/node-runtime/availability.ts",
+      "default": "./src/node-runtime/availability.ts"
+    },
+    "./node-runtime/error-extraction": {
+      "types": "./src/node-runtime/error-extraction.ts",
+      "import": "./src/node-runtime/error-extraction.ts",
+      "default": "./src/node-runtime/error-extraction.ts"
+    },
+    "./node-runtime/generation-settings": {
+      "types": "./src/node-runtime/generation-settings/index.ts",
+      "import": "./src/node-runtime/generation-settings/index.ts",
+      "default": "./src/node-runtime/generation-settings/index.ts"
+    },
+    "./node-runtime/meta-response": {
+      "types": "./src/node-runtime/meta-response.ts",
+      "import": "./src/node-runtime/meta-response.ts",
+      "default": "./src/node-runtime/meta-response.ts"
+    },
+    "./node-runtime/provider-fetch": {
+      "types": "./src/node-runtime/provider-fetch.ts",
+      "import": "./src/node-runtime/provider-fetch.ts",
+      "default": "./src/node-runtime/provider-fetch.ts"
+    },
+    "./node-runtime/providers": {
+      "types": "./src/node-runtime/providers.ts",
+      "import": "./src/node-runtime/providers.ts",
+      "default": "./src/node-runtime/providers.ts"
+    },
+    "./node-runtime/reasoning": {
+      "types": "./src/node-runtime/reasoning-normalizer.ts",
+      "import": "./src/node-runtime/reasoning-normalizer.ts",
+      "default": "./src/node-runtime/reasoning-normalizer.ts"
+    },
+    "./node-runtime/reasoning-sse": {
+      "types": "./src/node-runtime/reasoning-sse.ts",
+      "import": "./src/node-runtime/reasoning-sse.ts",
+      "default": "./src/node-runtime/reasoning-sse.ts"
+    },
+    "./node-runtime/stream-timeout": {
+      "types": "./src/node-runtime/stream-timeout.ts",
+      "import": "./src/node-runtime/stream-timeout.ts",
+      "default": "./src/node-runtime/stream-timeout.ts"
+    },
+    "./node-runtime/types": {
+      "types": "./src/node-runtime/types.ts",
+      "import": "./src/node-runtime/types.ts",
+      "default": "./src/node-runtime/types.ts"
+    },
+    "./node-runtime/usage": {
+      "types": "./src/node-runtime/usage.ts",
+      "import": "./src/node-runtime/usage.ts",
+      "default": "./src/node-runtime/usage.ts"
+    },
     "./generate-magical-girl-runtime": {
       "types": "./src/generate-magical-girl-runtime.ts",
       "import": "./src/generate-magical-girl-runtime.ts",
@@ -86,10 +146,14 @@
     "build": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
+    "@ai-sdk/deepseek": "^2.0.35",
+    "@ai-sdk/google": "^3.0.75",
+    "@ai-sdk/openai": "^3.0.64",
     "@mahoshojo/ai-core": "workspace:*",
     "@mahoshojo/contracts": "workspace:*",
     "@mahoshojo/domain": "workspace:*",
     "@mahoshojo/hosted-api": "workspace:*",
+    "ai": "^6.0.184",
     "zod": "^4.1.13"
   },
   "devDependencies": {

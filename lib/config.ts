@@ -1,26 +1,11 @@
 // lib/config.ts
 
 import { STRICT_RANKED_MODEL_FALLBACKS } from '@/lib/arena/ranked-model-policy';
-import type { UserGenerationOverrides } from '@/lib/ai/generation-settings/types';
+import { parseAIProvidersFromEnv } from '@mahoshojo/hosted-runtime/node-runtime/providers';
+import type { AIProvider } from '@mahoshojo/hosted-runtime/node-runtime/types';
 
-// AI 提供商配置接口
-export interface AIProvider {
-  name: string;
-  apiKey: string;
-  allowAnonymous?: boolean;
-  baseUrl: string;
-  model: string | string[]; // 支持单个模型或多个模型数组
-  type: 'openai' | 'google' | 'deepseek';
-  retryCount?: number;
-  skipProbability?: number;
-  mode?: 'json' | 'auto' | 'tool' | undefined;
-  weight?: number; // 负载均衡权重，数值越大被选中概率越高
-  defaultMaxOutputTokens?: number; // 可选：该 provider 未显式传入 maxOutputTokens 时使用的默认输出上限
-  /** 可选：能力解析用 providerId（自定义通道时由调用方填充）。 */
-  providerId?: string;
-  /** 可选：用户生成参数覆盖（仅自定义通道透传）。 */
-  generationOverrides?: UserGenerationOverrides;
-}
+export { parseAIProvidersFromEnv };
+export type { AIProvider };
 
 // [新增 v0.2.1] AI 安全检查策略配置接口 (SRS 3.1.1)
 export interface SafetyCheckPolicy {
@@ -28,57 +13,6 @@ export interface SafetyCheckPolicy {
   scenario: 'non-native-only' | 'all' | 'none';  // 情景文件检查策略
   userGuidance: 'all' | 'none';                   // 故事引导检查策略
 }
-
-const hasNonEmptyText = (value: unknown): value is string =>
-  typeof value === 'string' && value.trim().length > 0;
-
-const hasValidModel = (model: AIProvider['model']): boolean => {
-  if (typeof model === 'string') return model.trim().length > 0;
-  if (!Array.isArray(model)) return false;
-  return model.some((item) => hasNonEmptyText(item));
-};
-
-// 解析 AI 提供商配置的函数
-export const parseAIProvidersFromEnv = (env: NodeJS.ProcessEnv = process.env): AIProvider[] => {
-  // JSON 配置方式
-  if (env.AI_PROVIDERS_CONFIG) {
-    try {
-      const providers = JSON.parse(env.AI_PROVIDERS_CONFIG) as AIProvider[];
-      return providers
-        .filter((provider) => {
-          const hasApiKey = hasNonEmptyText(provider.apiKey);
-          const canBeAnonymous = provider.allowAnonymous === true && provider.type === 'openai';
-          return hasValidModel(provider.model) && hasNonEmptyText(provider.baseUrl) && hasNonEmptyText(provider.type) && (hasApiKey || canBeAnonymous);
-        })
-        .map(p => ({
-          ...p,
-          retryCount: p.retryCount ?? 1,
-          skipProbability: p.skipProbability ?? 0
-        }));
-    } catch (error) {
-      console.warn('解析 AI_PROVIDERS_CONFIG 失败，回退到简单配置:', error);
-    }
-  }
-
-  // 向后兼容：单个 API Key 方式
-  const singleKey = env.AI_API_KEY;
-  const singleUrl = env.AI_BASE_URL || 'https://api.openai.com/v1';
-  const singleModel = env.AI_MODEL || 'gemini-2.0-flash';
-
-  if (singleKey) {
-    return [{
-      name: 'default_provider',
-      apiKey: singleKey,
-      baseUrl: singleUrl,
-      model: singleModel,
-      type: singleUrl.includes('googleapis.com') ? 'google' : 'openai',
-      retryCount: 1,
-      skipProbability: 0
-    }];
-  }
-
-  return [];
-};
 
 // 获取有效的 API 提供商（按配置顺序）
 const getAPIProviders = (): AIProvider[] => {

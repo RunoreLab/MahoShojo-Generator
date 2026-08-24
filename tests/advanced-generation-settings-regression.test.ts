@@ -199,10 +199,19 @@ describe('advanced generation settings regressions', () => {
     );
   });
 
-  it('内置系统通道在三个生成入口都标记为 system capability namespace', async () => {
-    for (const path of ['lib/ai.ts', 'lib/stream/ai.ts', 'lib/stream/raw-ai.ts']) {
+  it('内置系统通道在唯一 concrete runtime 与遗留 streamObject 入口都标记为 system capability namespace', async () => {
+    for (const path of [
+      'packages/hosted-runtime/src/node-runtime/structured-ai.ts',
+      'packages/hosted-runtime/src/node-runtime/raw-stream-ai.ts',
+      'lib/stream/ai.ts',
+    ]) {
       const source = await readFile(path, 'utf8');
       expect(source, path).toContain("providerId: provider.providerId ?? 'system'");
+    }
+
+    for (const path of ['lib/ai.ts', 'lib/stream/raw-ai.ts']) {
+      const source = await readFile(path, 'utf8');
+      expect(source, path).toContain("from '@mahoshojo/hosted-runtime/node-runtime'");
     }
   });
 

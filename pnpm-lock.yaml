@@ -420,6 +420,15 @@ importers:
 
   packages/hosted-runtime:
     dependencies:
+      '@ai-sdk/deepseek':
+        specifier: ^2.0.35
+        version: 2.0.35(zod@4.3.6)
+      '@ai-sdk/google':
+        specifier: ^3.0.75
+        version: 3.0.75(zod@4.3.6)
+      '@ai-sdk/openai':
+        specifier: ^3.0.64
+        version: 3.0.64(zod@4.3.6)
       '@mahoshojo/ai-core':
         specifier: workspace:*
         version: link:../ai-core
@@ -432,6 +441,9 @@ importers:
       '@mahoshojo/hosted-api':
         specifier: workspace:*
         version: link:../hosted-api
+      ai:
+        specifier: ^6.0.184
+        version: 6.0.184(zod@4.3.6)
       zod:
         specifier: ^4.1.13
         version: 4.3.6

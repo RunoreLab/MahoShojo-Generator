@@ -1,3 +1,8 @@
+import { normalizeUsage, type UsageLike } from '@mahoshojo/hosted-runtime/node-runtime/usage';
+
+export { normalizeUsage };
+export type { UsageLike };
+
 export interface ContentPreviewOptions {
   headChars: number;
   tailChars: number;
@@ -158,95 +163,6 @@ export function extractWinnerFromText(text: string | null | undefined): string |
   }
 
   return null;
-}
-
-export interface UsageLike {
-  promptTokens?: number;
-  completionTokens?: number;
-  totalTokens?: number;
-  cachedTokens?: number;
-  reasoningTokens?: number;
-  [key: string]: unknown;
-}
-
-export function normalizeUsage(usage: unknown): UsageLike | null {
-  if (!usage || typeof usage !== 'object') return null;
-
-  const readNumber = (value: unknown) =>
-    typeof value === 'number' && Number.isFinite(value) ? Math.floor(value) : null;
-
-  const readPath = (obj: unknown, path: string) => {
-    let cur: any = obj;
-    for (const key of path.split('.')) {
-      if (!cur || typeof cur !== 'object') return null;
-      cur = cur[key];
-    }
-    return readNumber(cur);
-  };
-
-  const readFirst = (obj: unknown, paths: string[]) => {
-    for (const path of paths) {
-      const v = readPath(obj, path);
-      if (v !== null) return v;
-    }
-    return null;
-  };
-
-  // 兼容不同供应商/SDK 的命名：有的会包一层 usage / tokenUsage
-  const root = usage as Record<string, unknown>;
-  const maybeWrapped =
-    (root.usage && typeof root.usage === 'object' ? (root.usage as Record<string, unknown>) : null) ??
-    (root.tokenUsage && typeof root.tokenUsage === 'object' ? (root.tokenUsage as Record<string, unknown>) : null) ??
-    root;
-
-  const promptTokens =
-    readFirst(maybeWrapped, ['promptTokens', 'prompt_tokens', 'inputTokens', 'input_tokens']) ??
-    null;
-  const completionTokens =
-    readFirst(maybeWrapped, ['completionTokens', 'completion_tokens', 'outputTokens', 'output_tokens']) ??
-    null;
-  const totalTokens = readFirst(maybeWrapped, ['totalTokens', 'total_tokens']) ?? null;
-
-  const cachedTokens =
-    readFirst(maybeWrapped, [
-      'cachedTokens',
-      'cached_tokens',
-      'cacheTokens',
-      'cache_tokens',
-      'promptCacheTokens',
-      'prompt_cache_tokens',
-      'promptTokensDetails.cachedTokens',
-      'prompt_tokens_details.cached_tokens',
-      'promptTokensDetails.cached_tokens',
-    ]) ?? null;
-
-  const reasoningTokens =
-    readFirst(maybeWrapped, [
-      'reasoningTokens',
-      'reasoning_tokens',
-      'outputTokensDetails.reasoningTokens',
-      'output_tokens_details.reasoning_tokens',
-      'completionTokensDetails.reasoningTokens',
-      'completion_tokens_details.reasoning_tokens',
-    ]) ?? null;
-
-  // 若只给了 input/outputTokens，则补齐到 prompt/completion（避免 UI 长期显示空值）
-  const finalPromptTokens =
-    promptTokens !== null ? promptTokens : readFirst(maybeWrapped, ['inputTokens', 'input_tokens']) ?? null;
-  const finalCompletionTokens =
-    completionTokens !== null
-      ? completionTokens
-      : readFirst(maybeWrapped, ['outputTokens', 'output_tokens']) ?? null;
-
-  const out: UsageLike = {
-    ...(finalPromptTokens !== null ? { promptTokens: finalPromptTokens } : {}),
-    ...(finalCompletionTokens !== null ? { completionTokens: finalCompletionTokens } : {}),
-    ...(totalTokens !== null ? { totalTokens } : {}),
-    ...(cachedTokens !== null ? { cachedTokens } : {}),
-    ...(reasoningTokens !== null ? { reasoningTokens } : {}),
-  };
-
-  return Object.keys(out).length > 0 ? out : null;
 }
 
 export function normalizeErrorMessage(errorMessage: unknown, maxChars: number = 300): string | null {
