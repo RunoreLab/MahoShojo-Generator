@@ -85,10 +85,24 @@ describe('Hono deployment workflow', () => {
     const buildJob = getJob(workflow, 'build');
     const containerBuildStep = getStep(buildJob, 'Verify Hono container build');
 
-    expect(containerBuildStep).toContain('run: docker build --file Dockerfile.hono .');
+    expect(containerBuildStep).toContain('run: docker build --file apps/api/Dockerfile .');
     expect(buildJob.indexOf(containerBuildStep)).toBeLessThan(
       buildJob.indexOf('- name: Build single-file server'),
     );
+  });
+
+  test('所有 Hono artifact 与部署生命周期都引用 apps/api owner', () => {
+    const workflow = readFileSync(HONO_WORKFLOW_PATH, 'utf8');
+    const buildJob = getJob(workflow, 'build');
+    const deployJob = getJob(workflow, 'deploy');
+
+    expect(buildJob).toContain('pnpm --filter @mahoshojo/api');
+    expect(buildJob).toContain('apps/api/dist');
+    expect(buildJob).toContain('apps/api/deploy/compose.yml');
+    expect(buildJob).toContain('apps/api/deploy/deploy-bundle.sh');
+    expect(workflow).not.toContain('Dockerfile.hono');
+    expect(workflow).not.toContain('deploy/hono/');
+    expect(deployJob).toContain('artifact/release.sha256');
   });
 
   test('finds a quoted deploy job key with an inline comment', () => {

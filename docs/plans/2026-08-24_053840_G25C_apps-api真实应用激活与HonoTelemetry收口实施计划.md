@@ -12,7 +12,7 @@
 
 **Preserves:** `AI-006`、`AUTHORITY-001..006`、`DR-004..011`、`DR-013..014`、`COMPAT-001..002`、`ACCEPT-008`；不改变 Arena v1 wire/authority，也不把 generation 标记为可透明重放。
 
-**执行检查点（2026-08-24）：** Phase 2.5B 已在 capability manifest 原子修改之上完成结构退出审计，当前为 `10 shared-service / 14 exited / 0 legacy-next`；对应 14 条 Next 公开 route 未删除，legacy codegen/type 后门已删除并 fail closed。`@mahoshojo/hosted-runtime` 已建立低基数 no-op/registrable telemetry port；`apps/api` ownership 与原子 release tuple 的 RED 合约将在 G25C 工作分支保持启用。10 条 retained service 的唯一 runtime composition、真实 `apps/api`、完整 AI/D1/Redis 调用接线、Docker/CI/deploy ownership 与 G25C 独立审查仍未全部完成，不能据此判定 G25C stopping condition 达成。
+**执行检查点（2026-08-24）：** Phase 2.5B 已在 capability manifest 原子修改之上完成结构退出审计，当前为 `10 shared-service / 14 exited / 0 legacy-next`；对应 14 条 Next 公开 route 未删除，legacy codegen/type 后门已删除并 fail closed。`@mahoshojo/hosted-runtime` 已建立低基数 no-op/registrable telemetry port；本 G25C 工作分支已启用 `apps/api` ownership RED，原子 release tuple RED 紧随其后建立。10 条 retained service 的唯一 runtime composition、真实 `apps/api`、完整 AI/D1/Redis 调用接线、Docker/CI/deploy ownership 与 G25C 独立审查仍未全部完成，不能据此判定 G25C stopping condition 达成。
 
 ---
 
@@ -85,7 +85,7 @@ Stopping condition 验收表：
 - Modify: `tests/hono-deploy-workflow.test.ts`
 - Modify: `config/hono-api-routes.json`
 
-- [ ] **Step 1：写 app ownership 失败测试，并保留 route 回归断言**
+- [x] **Step 1：写 app ownership 失败测试，并保留 route 回归断言**
 
 现有测试已精确断言 manifest 总数为 10、`legacyRouteIds` 为空、10 条 retained ID 与 14 条 exited ID
 不变。本步只新增尚未满足的 ownership 断言：`apps/api/package.json`、`src/index.ts`、README/env/Docker/deploy
@@ -98,11 +98,11 @@ expect(existsSync('apps/api/package.json')).toBe(true);
 expect(existsSync('server/index.ts')).toBe(false);
 ```
 
-- [ ] **Step 2：写 dependency/CI ownership 失败测试**
+- [x] **Step 2：写 dependency/CI ownership 失败测试**
 
 fixture 必须证明 `apps/api -> lib/server/app/pages/components/types` 的直接、间接和 workspace-name import 都被拒绝；Docker test 只要求 `apps/api` 与其 workspace dependency closure，不再动态要求 `apps/d1-gateway` 或未来 app 进入 API image；workflow 只引用 app-owned paths。
 
-- [ ] **Step 3：运行 RED**
+- [x] **Step 3：运行 RED**
 
 ```bash
 pnpm exec vitest run tests/server/route-manifest.test.ts tests/workspace-structure.test.ts tests/check-workspace-boundaries.test.ts tests/hono-deploy-workflow.test.ts --reporter=verbose

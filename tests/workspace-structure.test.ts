@@ -206,3 +206,93 @@ describe('phase 2.5A D1 Gateway workspace app', () => {
     });
   });
 });
+
+describe('phase 2.5C Hono API workspace app ownership', () => {
+  const appDirectory = path.join(rootDirectory, 'apps/api');
+  const appManifestPath = path.join(appDirectory, 'package.json');
+
+  it('由 apps/api 独占 Hono source、测试、容器和部署生命周期', () => {
+    for (const relativePath of [
+      'package.json',
+      'README.md',
+      'env.example',
+      'Dockerfile',
+      'src/index.ts',
+      'tests/route-manifest.test.ts',
+      'scripts/build.mjs',
+      'scripts/generate-route-manifest.mjs',
+      'scripts/verify-runtime.mjs',
+      'deploy/compose.yml',
+      'deploy/deploy-bundle.sh',
+    ]) {
+      expect(
+        existsSync(path.join(appDirectory, relativePath)),
+        `apps/api/${relativePath} must exist`,
+      ).toBe(true);
+    }
+
+    expect(existsSync(path.join(rootDirectory, 'server/index.ts'))).toBe(false);
+    expect(existsSync(path.join(rootDirectory, 'Dockerfile.hono'))).toBe(false);
+    expect(existsSync(path.join(rootDirectory, 'deploy/hono'))).toBe(false);
+  });
+
+  it('声明独立 app 生命周期，并由 root scripts 只做代理入口', () => {
+    expect(existsSync(appManifestPath)).toBe(true);
+    if (!existsSync(appManifestPath)) return;
+
+    const appManifest = JSON.parse(readFileSync(appManifestPath, 'utf8')) as {
+      name?: string;
+      private?: boolean;
+      type?: string;
+      scripts?: Record<string, string>;
+    };
+    expect(appManifest).toMatchObject({
+      name: '@mahoshojo/api',
+      private: true,
+      type: 'module',
+    });
+    for (const scriptName of [
+      'dev',
+      'start',
+      'test',
+      'lint',
+      'build',
+      'build:bundle',
+      'routes',
+      'verify:runtime',
+      'deploy:prepare',
+    ]) {
+      expect(appManifest.scripts?.[scriptName], `missing scripts.${scriptName}`).toEqual(expect.any(String));
+    }
+
+    const rootManifest = JSON.parse(readFileSync(path.join(rootDirectory, 'package.json'), 'utf8')) as {
+      scripts: Record<string, string>;
+    };
+    expect(rootManifest.scripts['dev:server']).toBe('pnpm --filter @mahoshojo/api run dev');
+    expect(rootManifest.scripts['start:server']).toBe('pnpm --filter @mahoshojo/api run start');
+    expect(rootManifest.scripts['build:server']).toBe('pnpm --filter @mahoshojo/api run build:bundle');
+    expect(rootManifest.scripts['server:routes']).toBe('pnpm --filter @mahoshojo/api run routes');
+    expect(rootManifest.scripts['verify:server:runtime']).toBe('pnpm --filter @mahoshojo/api run verify:runtime');
+    expect(rootManifest.scripts['test:server']).toBe('pnpm --filter @mahoshojo/api run test');
+  });
+
+  it('Docker install layer 只复制 apps/api 及其 workspace 依赖闭包', () => {
+    const dockerfilePath = path.join(appDirectory, 'Dockerfile');
+    expect(existsSync(dockerfilePath)).toBe(true);
+    if (!existsSync(dockerfilePath)) return;
+
+    const dockerfile = readFileSync(dockerfilePath, 'utf8');
+    const installIndex = dockerfile.indexOf('RUN pnpm install --frozen-lockfile');
+    expect(installIndex).toBeGreaterThan(-1);
+    for (const manifestPath of [
+      'apps/api/package.json',
+      'packages/hosted-api/package.json',
+      'packages/hosted-runtime/package.json',
+    ]) {
+      const copyIndex = dockerfile.indexOf(`COPY ${manifestPath} ./${manifestPath}`);
+      expect(copyIndex, `${manifestPath} must be copied before install`).toBeGreaterThan(-1);
+      expect(copyIndex).toBeLessThan(installIndex);
+    }
+    expect(dockerfile).not.toContain('apps/d1-gateway/package.json');
+  });
+});
