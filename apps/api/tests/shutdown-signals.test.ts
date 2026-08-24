@@ -229,7 +229,7 @@ describe('graceful shutdown real Node signals', () => {
         await waitForMarker(child, markerPath, 'shutdown-started:SIGTERM\n');
         expect(child.kill('SIGTERM')).toBe(true);
 
-        const [code, signal] = await once(child, 'exit') as [
+        const [code, signal] = await once(child, 'close') as [
           number | null,
           NodeJS.Signals | null,
         ];
