@@ -470,38 +470,44 @@ export async function generateWithAI<T, I = string>(
         };
 
         const runTextJsonFallback = async (label: string): Promise<T> => {
-          const guidedPrompt =
-            `${systemPrompt}\n\n` +
-            buildStructuredJsonInstructionFromZodSchema(generationConfig.schema);
+          const fallbackRuntime = createAiUpstreamAttemptRuntime();
+          try {
+            const guidedPrompt =
+              `${systemPrompt}\n\n` +
+              buildStructuredJsonInstructionFromZodSchema(generationConfig.schema);
 
-          const textResult = await generateText({
-            model,
-            prompt: buildPromptMessages(guidedPrompt),
-            maxRetries: 0,
-            ...resolvedSettings.standardOptions,
-            ...(resolvedSettings.providerOptions ? { providerOptions: resolvedSettings.providerOptions } : {}),
-          });
+            const textResult = await generateText({
+              model,
+              prompt: buildPromptMessages(guidedPrompt),
+              maxRetries: 0,
+              ...resolvedSettings.standardOptions,
+              ...(resolvedSettings.providerOptions ? { providerOptions: resolvedSettings.providerOptions } : {}),
+            });
 
-          const parsed = parseStructuredJsonWithSchema(textResult.text, generationConfig.schema, {
-            taskName: generationConfig.taskName,
-          });
+            const parsed = parseStructuredJsonWithSchema(textResult.text, generationConfig.schema, {
+              taskName: generationConfig.taskName,
+            });
 
-          log.info(`兼容回退解析成功（${label}）`, {
-            provider: provider.name,
-            model: selectedModel,
-            usedJsonRepair: parsed.telemetry.usedJsonRepair,
-            unwrap: parsed.telemetry.unwrapAttempt,
-          });
+            log.info(`兼容回退解析成功（${label}）`, {
+              provider: provider.name,
+              model: selectedModel,
+              usedJsonRepair: parsed.telemetry.usedJsonRepair,
+              unwrap: parsed.telemetry.unwrapAttempt,
+            });
 
-          if (options?.telemetry) {
-            options.telemetry.usage = textResult.usage;
-            options.telemetry.finishReason = textResult.finishReason;
-            options.telemetry.reasoning = buildNonStreamReasoningEnvelope(textResult.reasoningText, textResult.usage);
+            if (options?.telemetry) {
+              options.telemetry.usage = textResult.usage;
+              options.telemetry.finishReason = textResult.finishReason;
+              options.telemetry.reasoning = buildNonStreamReasoningEnvelope(textResult.reasoningText, textResult.usage);
+            }
+
+            fallbackRuntime.recordTtfb();
+            fallbackRuntime.finish('success');
+            return parsed.data as T;
+          } catch (error) {
+            fallbackRuntime.finish(classifyAiUpstreamOutcome(error));
+            throw error;
           }
-
-          runtimeAttempt.recordTtfb();
-          runtimeAttempt.finish('success');
-          return parsed.data as T;
         };
 
         // 0) 预判：某些模型（如 Gemma / GLM）不支持 JSON mode，直接走“文本 JSON + 本地解析”避免硬错误与二次请求
@@ -550,6 +556,7 @@ export async function generateWithAI<T, I = string>(
               runtimeAttempt.finish('success');
               return repaired.data as T;
             } catch {
+              runtimeAttempt.finish(classifyAiUpstreamOutcome(rawError));
               // 本地修复失败时，再尝试一次“文本 JSON 回退重试”
               try {
                 return await runTextJsonFallback('NoObjectGeneratedError 分支');
@@ -563,6 +570,7 @@ export async function generateWithAI<T, I = string>(
 
           // 2) 上游不支持 JSON 模式：退化为“纯文本生成 JSON + 本地解析/修复”
           if (isJsonModeNotSupportedError(enhancedError)) {
+            runtimeAttempt.finish(classifyAiUpstreamOutcome(enhancedError));
             log.warn('检测到上游不支持 JSON 模式，启用兼容回退（文本生成 JSON + 本地解析）', {
               provider: provider.name,
               model: selectedModel,
@@ -579,6 +587,7 @@ export async function generateWithAI<T, I = string>(
             maybeApiCallError?.name === 'AI_APICallError' && apiCallStatusCode !== 401 && apiCallStatusCode !== 403 && apiCallStatusCode !== 429;
 
           if (shouldTryTextFallback) {
+            runtimeAttempt.finish(classifyAiUpstreamOutcome(enhancedError));
             log.warn('generateObject 触发 APICallError，尝试兼容回退（文本生成 JSON + 本地解析）', {
               provider: provider.name,
               model: selectedModel,
