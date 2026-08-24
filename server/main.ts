@@ -1,7 +1,10 @@
 import { serve } from '@hono/node-server';
 import { createHonoApp } from '@/server/app';
+import { installUnhandledRejectionGuard } from '@/server/client-disconnect';
 import { readHonoServerConfig } from '@/server/config';
 import { RedisRuntime } from '@/server/redis/runtime';
+
+installUnhandledRejectionGuard();
 
 const config = readHonoServerConfig();
 if (process.env.HONO_CONFIG_CHECK_ONLY === 'true') {

@@ -83,6 +83,7 @@ const isInterruptedStreamError = (error: unknown): boolean => {
     if (message.includes('timeout') || message.includes('timed out')) return true;
     if (message.includes('流式读取超时') || message.includes('流式生成超时')) return true;
     if (message.includes('aborted') || message.includes('中断')) return true;
+    if (message.includes('client connection prematurely closed')) return true;
     return false;
 };
 
@@ -1717,8 +1718,17 @@ async function handler(req: NextRequest): Promise<Response> {
                         controller.enqueue(value);
                     }
                 } catch (streamError) {
-                    controller.error(streamError);
-                    const statusForRecord: 'aborted' | 'failed' = isInterruptedStreamError(streamError) ? 'aborted' : 'failed';
+                    const interrupted = isInterruptedStreamError(streamError);
+                    if (interrupted) {
+                        try {
+                            controller.close();
+                        } catch {
+                            // 客户端可能已经关闭响应流
+                        }
+                    } else {
+                        controller.error(streamError);
+                    }
+                    const statusForRecord: 'aborted' | 'failed' = interrupted ? 'aborted' : 'failed';
                     await finalizeOnce(statusForRecord, streamError instanceof Error ? streamError.message : 'stream error');
                 }
             },

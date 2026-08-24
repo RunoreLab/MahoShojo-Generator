@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { HonoServerConfig } from '@/server/config';
 import { createHonoApp, isAllowedOrigin } from '@/server/app';
 import type { RedisService } from '@/server/redis/runtime';
+import presetIndex from '@/public/questionnaires/presets/index.json';
 
 const config: HonoServerConfig = {
   host: '127.0.0.1',
@@ -58,6 +59,23 @@ describe('Hono server app', () => {
         d1: { configured: false, required: false, ready: false, transport: 'none' },
       },
     });
+  });
+
+  it('为独立 Hono 运行时提供服务端依赖的静态 JSON', async () => {
+    const app = createHonoApp(config, createRedisStub());
+    const [seasonsResponse, questionnaireResponse, missingResponse, ...presetResponses] = await Promise.all([
+      app.request('/config/seasons.json'),
+      app.request('/questionnaires/presets/magical-girl-full-profile.json'),
+      app.request('/questionnaires/presets/not-existing.json'),
+      ...presetIndex.presets.map((preset) => app.request(preset.path)),
+    ]);
+
+    expect(seasonsResponse.status).toBe(200);
+    expect(await seasonsResponse.json()).toMatchObject({ schemaVersion: 1 });
+    expect(questionnaireResponse.status).toBe(200);
+    expect(await questionnaireResponse.json()).toMatchObject({ id: 'magical-girl-full-profile' });
+    expect(missingResponse.status).toBe(404);
+    expect(presetResponses.every((response) => response.status === 200)).toBe(true);
   });
 
   it('为响应添加运行时和请求 ID 标识', async () => {

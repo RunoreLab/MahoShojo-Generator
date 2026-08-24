@@ -6,6 +6,7 @@ import { registerHealthRoutes } from '@/server/health';
 import { registerLegacyRoutes } from '@/server/legacy/register';
 import { redisRateLimit } from '@/server/middleware/redis-rate-limit';
 import { requestMetadata, type HonoAppVariables } from '@/server/middleware/request-metadata';
+import { getPublicJsonAssetResponse } from '@/server/public-json-assets';
 import type { RedisService } from '@/server/redis/runtime';
 
 const matchesWildcardOrigin = (origin: string, rule: string): boolean => {
@@ -76,6 +77,11 @@ export const createHonoApp = (config: HonoServerConfig, redis: RedisService) => 
 
   registerHealthRoutes(app, config, redis);
   registerLegacyRoutes(app);
+
+  app.get('/config/seasons.json', (context) =>
+    getPublicJsonAssetResponse(context.req.path) ?? context.notFound());
+  app.get('/questionnaires/presets/:filename', (context) =>
+    getPublicJsonAssetResponse(context.req.path) ?? context.notFound());
 
   app.notFound((context) => context.json({
     error: 'Not found',

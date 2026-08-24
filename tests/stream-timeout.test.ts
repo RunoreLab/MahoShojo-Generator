@@ -180,8 +180,8 @@ describe('stream timeout', () => {
   });
 
   test('buildStreamSoftTimeoutMessage 文案匹配 UI 约定', () => {
-    expect(buildStreamSoftTimeoutMessage({ kind: 'idle', timeoutMs: 150_000 })).toBe(
-      '已超过 150 秒仍未收到新内容，建议手动终止后重试。'
+    expect(buildStreamSoftTimeoutMessage({ kind: 'idle', timeoutMs: 300_000 })).toBe(
+      '已超过 300 秒仍未收到新内容，建议手动终止后重试。'
     );
     expect(buildStreamSoftTimeoutMessage({ kind: 'total', timeoutMs: 600_000 })).toBe(
       '已超过 600 秒仍未结束生成，建议手动终止后重试。'
