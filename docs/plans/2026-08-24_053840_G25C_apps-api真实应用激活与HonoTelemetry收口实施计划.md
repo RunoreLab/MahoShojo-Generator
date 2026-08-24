@@ -8,11 +8,13 @@
 
 **Tech Stack:** TypeScript、Hono、`@hono/node-server`、pnpm workspace、Vitest、ESLint、esbuild、Redis、D1 Gateway、AI SDK、Docker、GitHub Actions。
 
-**Implements:** `MONO-002`、`MONO-003`、`MONO-004`、`MONO-005`、`MONO-006`、`MONO-009`、`RESOURCE-003`、`RESOURCE-005`、`GOAL-040`、`GOAL-061`。
+**Implements/validates within G25C slice:** `MONO-003`、`MONO-004`、`MONO-005`、`MONO-006`、`RESOURCE-005`。
+
+**Advances only:** `MONO-002` 的 `apps/api` slice、`MONO-009` 的 10 条 retained adapter slice、`RESOURCE-003` 的 Hono telemetry subset；完整 app 集合、DR manifest 和跨执行模式/R2/DO telemetry 仍由后续 Goal 闭合。`GOAL-040`、`GOAL-061` 作为本 Goal 治理规则，不伪报为产品实现。
 
 **Preserves:** `AI-006`、`AUTHORITY-001..006`、`DR-004..011`、`DR-013..014`、`COMPAT-001..002`、`ACCEPT-008`；不改变 Arena v1 wire/authority，也不把 generation 标记为可透明重放。
 
-**执行检查点（2026-08-24）：** Phase 2.5B 已在 capability manifest 原子修改之上完成结构退出审计，当前为 `10 shared-service / 14 exited / 0 legacy-next`；对应 14 条 Next 公开 route 未删除，legacy codegen/type 后门已删除并 fail closed。`@mahoshojo/hosted-runtime` 已建立低基数 no-op/registrable telemetry port；本 G25C 工作分支已启用 `apps/api` ownership RED，原子 release tuple RED 紧随其后建立。10 条 retained service 的唯一 runtime composition、真实 `apps/api`、完整 AI/D1/Redis 调用接线、Docker/CI/deploy ownership 与 G25C 独立审查仍未全部完成，不能据此判定 G25C stopping condition 达成。
+**执行检查点（2026-08-25）：** G25C 实现已收口，最终验收 `BLOCKED`。当前 inventory 为 `10 shared-service / 14 exited / 0 legacy-next`；10 条 retained service 的唯一 Node composition 已进入 `@mahoshojo/hosted-runtime`，真实 `apps/api` 已拥有 source/manifest/test/lint/build/env/health/Docker/CI/deploy lifecycle，AI/D1/Redis telemetry 与原子 release tuple 已进入代码。当前机器没有 Docker CLI，也没有隔离 D1 Gateway + Redis；因此同一 commit 的真实 Docker build/Compose 与 canonical built-runtime verifier 尚未通过，按 `GOAL-061` 不能勾选最终 stopping condition。完整验证、环境限制、独立审查和回滚证据见 [G25C 实施日志](../logs/2026-08-25_023625_平台重整G25C_apps-api真实应用激活与Telemetry收口实施日志.md)。
 
 ---
 
@@ -37,7 +39,7 @@ Stopping condition 验收表：
 | Docker/CI/deploy 只使用 app 真实 dependency closure | Dockerfile ordering/negative test + workflow test + local build |
 | Hono 不导入 Web/root internals | workspace boundary + generated registry dependency graph |
 | AI/D1/Redis telemetry 真实收口 | seam unit tests + Hono snapshot integration；secret/body canary negative test |
-| 无法观测的入口选择不伪造 | `selection.status=not-observed` 与 `failoverReason=null` contract |
+| 无法观测的入口选择不伪造 | `runtime.selection=not-observed` 与 `runtime.failoverReason=null` contract |
 | build/health/readiness/rollback 等价 | config/health/runtime tests、bundle smoke、compose config、deploy script tests |
 | 完整验证与独立 review | package/app/server/workspace/root/Next/OpenNext/Docker 验证，Critical/Important=0 open |
 
@@ -136,7 +138,7 @@ Expected: 10 条 Hono route 全为 `shared-service`；被退出 capability 的 N
 - Modify: root compatibility imports and `server/adapters/*`
 - Test: `packages/hosted-runtime/tests/*.test.ts`
 
-- [ ] **Step 1：写 package portability 与 composition RED**
+- [x] **Step 1：写 package portability 与 composition RED**
 
 测试要求 package 可从 clean workspace 独立 typecheck/bundle；10 个 default service 与 legacy Next adapter 使用同一 service identity；package source 不出现 `@/`、`app/`、`server/`、`next/*`、Hono、Cloudflare binding 或非字面量 module load。
 
@@ -145,7 +147,7 @@ expect(defaultGenerateFreeService).toBe(nextGenerateFreeService);
 expect(scanHostedRuntimeImports()).toEqual([]);
 ```
 
-- [ ] **Step 2：写 AI/D1 telemetry port RED**
+- [x] **Step 2：写 AI/D1 telemetry port RED**
 
 `beginAiUpstream()` 返回 attempt handle，支持一次 TTFB 与一次 terminal；`observeD1RoundTrip()` 接受 latency、rows 与 error class；输出只包含数值与固定枚举，不接受 URL、provider name、SQL、request body 或 credential。
 
@@ -156,7 +158,7 @@ attempt.finish({ outcome: 'aborted', durationMs: 30 });
 observer.observeD1RoundTrip({ durationMs: 8, rowsRead: 2, rowsWritten: 0, outcome: 'ok' });
 ```
 
-- [ ] **Step 3：运行 package RED**
+- [x] **Step 3：运行 package RED**
 
 ```bash
 pnpm --filter @mahoshojo/hosted-runtime test
@@ -164,15 +166,15 @@ pnpm --filter @mahoshojo/hosted-runtime test
 
 Expected: package/module 尚不存在导致失败。
 
-- [ ] **Step 4：最小提取 server-only runtime**
+- [x] **Step 4：最小提取 server-only runtime**
 
 以保持行为为第一目标移动唯一实现，不复制业务 handler；root Next adapter 改为只配置 OpenNext/D1 runtime 差异并从 package re-export，未来 `apps/api` 直接注入 Hono D1/telemetry adapter。共享 package 不读取 Hono Context，不导入 Next/OpenNext，也不持有 app source。
 
-- [ ] **Step 5：把 AI/D1 observer 接到真实调用 seam**
+- [x] **Step 5：把 AI/D1 observer 接到真实调用 seam**
 
 AI 非流式 attempt 记录 active/TTFB/duration/success/error/abort/timeout；流式 attempt 在首个 upstream chunk 记录 TTFB，在 complete/cancel/error 只结束一次。D1 HTTP transport 每个真实 round trip 记录 latency、rows read/written 与稳定 error class；safe-read retry 的每个 attempt 分开计数，mutation 仍不透明重放。
 
-- [ ] **Step 6：运行 GREEN 与边界验证**
+- [x] **Step 6：运行 GREEN 与边界验证**
 
 ```bash
 pnpm --filter @mahoshojo/hosted-runtime test
@@ -195,15 +197,15 @@ Expected: package/app boundary 无违规，10 条 route identity/contract 不漂
 - Move/refactor: `tests/server/**` -> `apps/api/tests/**`
 - Modify: `package.json`、`pnpm-lock.yaml`、`tsconfig.server.json`/root test config as needed
 
-- [ ] **Step 1：建立 app manifest 与 package-local alias**
+- [x] **Step 1：建立 app manifest 与 package-local alias**
 
 `@mahoshojo/api` 的生产依赖只声明实际运行需要的 Hono/Redis/shared packages；dev dependencies 自有 TypeScript/Vitest/ESLint/esbuild/tsx/dotenv。`#/*` 或相对路径只指向 `apps/api/src`，不得复用 root `@/*`。
 
-- [ ] **Step 2：迁移 source、generator、tests 与 runtime smoke**
+- [x] **Step 2：迁移 source、generator、tests 与 runtime smoke**
 
 生成器只允许 10 条 shared adapters；任何 `legacyRouteIds` 非空都 fail closed。route definitions 不引用 root Next path。health/live/ready、CORS、Bearer/Hybrid auth compatibility、Redis fail-open/required、request metadata、stream/socket lifecycle保持现有测试。
 
-- [ ] **Step 3：root scripts 变为 filter 兼容入口**
+- [x] **Step 3：root scripts 变为 filter 兼容入口**
 
 ```json
 "dev:server": "pnpm --filter @mahoshojo/api run dev",
@@ -214,7 +216,7 @@ Expected: package/app boundary 无违规，10 条 route identity/contract 不漂
 "test:server": "pnpm --filter @mahoshojo/api run test"
 ```
 
-- [ ] **Step 4：运行 app GREEN**
+- [x] **Step 4：运行 app GREEN**
 
 ```bash
 pnpm install --offline --trust-lockfile
@@ -239,7 +241,7 @@ Expected: app 自身生命周期全部 exit 0，bundle 只含 10 条 shared rout
 - Test: `apps/api/tests/redis-runtime.test.ts`
 - Test: `packages/hosted-runtime/tests/runtime-telemetry.test.ts`
 
-- [ ] **Step 1：写扩展 snapshot RED**
+- [x] **Step 1：写扩展 snapshot RED**
 
 固定 `schemaVersion=2`；原 process/event-loop/http 字段保持，新增：
 
@@ -252,19 +254,19 @@ type HostedTelemetrySnapshot = {
 };
 ```
 
-- [ ] **Step 2：写 Redis 真实采集 RED**
+- [x] **Step 2：写 Redis 真实采集 RED**
 
 每个 `ping`/`fixedWindow`/INFO command 记录 latency/error；周期采样 `INFO memory` 与 `INFO stats`，解析 `used_memory`、`evicted_keys`、`keyspace_hits`、`keyspace_misses`。Redis 未配置/不可用时保持 `null` 或 error counter，不伪造 0；telemetry fail-soft，不能改变 rate-limit/readiness authority。
 
-- [ ] **Step 3：写敏感信息和一次终态 RED**
+- [x] **Step 3：写敏感信息和一次终态 RED**
 
 在 env、request、SQL、provider 中放入 canary secret/body，断言 JSON snapshot 不包含；stream complete/cancel/error 重复触发只减少一次 active 并只增加一个 terminal counter。
 
-- [ ] **Step 4：实现聚合与接线**
+- [x] **Step 4：实现聚合与接线**
 
 app 启动时把同一 telemetry recorder 注册给 hosted runtime 和 Redis runtime；周期 export 等待外部 gauge 采样但使用 `unref()`，shutdown 输出最终快照。入口层未注入可信选择事实，因此保留 `not-observed/null`。
 
-- [ ] **Step 5：运行 telemetry GREEN**
+- [x] **Step 5：运行 telemetry GREEN**
 
 ```bash
 pnpm --filter @mahoshojo/hosted-runtime test
@@ -285,11 +287,11 @@ Expected: 指标 seam、stream once、Redis INFO、fail-soft、secret/body negat
 - Delete: `Dockerfile.hono`、空的 `deploy/hono/`
 - Test: ownership/workflow/app deploy tests
 
-- [ ] **Step 1：让 Docker dependency layer 只复制真实 closure**
+- [x] **Step 1：让 Docker dependency layer 只复制真实 closure**
 
 install 前仅复制 root workspace metadata、`apps/api/package.json` 及 `@mahoshojo/api` 的实际 workspace dependency manifests；使用 pnpm filter 安装 app closure。不得复制 `apps/d1-gateway`、未来 admin/desktop/mobile manifest。
 
-- [ ] **Step 2：迁移 workflow/artifact path**
+- [x] **Step 2：迁移 workflow/artifact path**
 
 统一 CI 仍执行 root/workspace no-regression；Hono targeted、Docker、bundle 和 artifact 使用 app scripts/paths。`deploy.if`、Environment、SSH host key、checksum、两分钟 readiness rollback 保持不变；public probe 改为 retained route，不触发生产执行。
 
@@ -302,6 +304,9 @@ docker compose -f apps/api/deploy/compose.yml config
 ```
 
 Expected: tests 与 Docker/Compose exit 0；若本机 Docker daemon 不可用，保留完整环境证据，不能弱化 Actions gate。
+
+实际结果：ownership/workflow/deploy contract 全部通过；本机 WSL 无 Docker CLI/Desktop integration，
+因此 local Docker/Compose execution 记录为环境 `BLOCKED`，没有删除或弱化 Actions 中的真实 Docker build gate。
 
 ### Task 6：Targeted、完整验证与 Builder self-review
 
@@ -322,7 +327,7 @@ pnpm run check:workspace:boundaries
 pnpm run workspace:verify
 ```
 
-- [ ] **Step 2：运行 root/Web/Cloudflare/CI 验证**
+- [x] **Step 2：运行 root/Web/Cloudflare/CI 验证**
 
 ```bash
 pnpm exec vitest run --reporter=dot --maxWorkers=4
@@ -333,9 +338,13 @@ pnpm run ci:verify
 git diff --check
 ```
 
-- [ ] **Step 3：Builder self-review**
+- [x] **Step 3：Builder self-review**
 
 逐项检查 accepted ADR/spec、app/package/runtime 依赖方向、secret/auth/authority、D1 no-replay、Redis non-authority、Next/Hono wire、schema/producer-consumer、shutdown/rollback、测试 adequacy。任何行为 finding 先写失败测试再修。
+
+实际结果：package/app/server/workspace/root/Next/OpenNext/CI 验证均通过；需要隔离 D1 Gateway/Redis
+的 runtime verifier 因当前环境缺失而 fail closed，因此本步骤尚未全部完成。未连接 production 资源；
+完整命令和结果见实施日志。
 
 ### Task 7：Independent review、修复与文档收口
 
@@ -344,7 +353,7 @@ git diff --check
 - Create: `docs/logs/2026-08-24_平台重整G25C_apps-api真实应用激活与Telemetry收口实施日志.md`（实施完成时在日期后补实际 `HHmmss`，正文和 topic 只引用最终文件名）
 - Modify: topic、Goal plan、apps/packages README、Hono deployment guide and navigation
 
-- [ ] **Step 1：独立 review**
+- [x] **Step 1：独立 review**
 
 至少分离 Builder 视角覆盖：
 
@@ -355,11 +364,15 @@ git diff --check
 
 Critical/Important 必须关闭；Minor 修复或给出不阻塞 stopping condition 的可复核理由。
 
+当前结果：最终 review 发现的 server authority 敏感词 fail-open 与 D1 HTTP redirect mutation replay
+两个代码 Important 已按 RED/GREEN 修复；未实际运行 Docker build/Compose 和 canonical built-runtime
+verifier 仍各保留一个 Important。在隔离环境取得实际 PASS 前 `Ready: no`。
+
 - [ ] **Step 2：修复后重跑 affected + final verification**
 
 任何 finding 修复先运行对应 targeted RED/GREEN，再重跑 Task 6 的高影响集合与 Docker/workflow gate。
 
-- [ ] **Step 3：写最终实施日志与更新 current state**
+- [x] **Step 3：写最终实施日志与更新 current state**
 
 日志必须记录 source/plan/实现/review commits、10 retained / 14 exited capability、退出理由、实际命令/结果、PASS/NOT_APPLICABLE/DEFERRED/BLOCKED、rollback、production/schema/secret/release 影响、剩余 Phase 2.5 与下一 Goal 重估。
 
