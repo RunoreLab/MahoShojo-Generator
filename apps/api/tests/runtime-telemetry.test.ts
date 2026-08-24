@@ -1,4 +1,9 @@
 import { EventEmitter } from 'node:events';
+import {
+  beginAiUpstream,
+  observeD1RoundTrip,
+  registerHostedRuntimeObserver,
+} from '@mahoshojo/hosted-runtime/telemetry';
 import { describe, expect, it, vi } from 'vitest';
 import {
   HonoRuntimeTelemetry,
@@ -19,7 +24,7 @@ describe('Hono runtime telemetry', () => {
     const snapshot = telemetry.snapshot();
 
     expect(snapshot).toMatchObject({
-      schemaVersion: 1,
+      schemaVersion: 2,
       service: 'mahoshojo-hono',
       runtime: {
         origin: 'hono-node',
@@ -53,11 +58,195 @@ describe('Hono runtime telemetry', () => {
     });
   });
 
+  it('聚合 AI upstream、D1 和 Redis 的低基数运行时指标', () => {
+    const telemetry = new HonoRuntimeTelemetry();
+    const unregister = registerHostedRuntimeObserver(telemetry);
+    try {
+      const successfulAttempt = beginAiUpstream();
+      successfulAttempt.recordTtfb(12);
+      successfulAttempt.finish({ outcome: 'success', durationMs: 30 });
+      const activeAttempt = beginAiUpstream();
+      activeAttempt.recordTtfb(18);
+
+      observeD1RoundTrip({
+        durationMs: 7,
+        rowsRead: 3,
+        rowsWritten: 1,
+        outcome: 'ok',
+      });
+      observeD1RoundTrip({
+        durationMs: 11,
+        rowsRead: 0,
+        rowsWritten: 0,
+        outcome: 'error',
+        errorClass: 'timeout',
+      });
+
+      telemetry.observeRedisOperation({
+        operation: 'connect',
+        outcome: 'ok',
+        durationMs: 4,
+      });
+      telemetry.observeRedisOperation({
+        operation: 'ping',
+        outcome: 'error',
+        durationMs: 6,
+      });
+      telemetry.observeRedisOperation({
+        operation: 'rate-limit',
+        outcome: 'ok',
+        durationMs: 8,
+      });
+      telemetry.observeRedisServerStats({
+        usedMemoryBytes: 1_024,
+        evictedKeys: 2,
+        keyspaceHits: 5,
+        keyspaceMisses: 3,
+      });
+
+      expect(telemetry.snapshot()).toMatchObject({
+        schemaVersion: 2,
+        aiUpstream: {
+          attempts: {
+            active: 1,
+            peakActive: 1,
+            started: 2,
+            completed: 1,
+            outcomes: { success: 1, error: 0, aborted: 0, timeout: 0 },
+          },
+          ttfb: { samples: 2, totalMilliseconds: 30, maxMilliseconds: 18 },
+          duration: { samples: 1, totalMilliseconds: 30, maxMilliseconds: 30 },
+        },
+        d1: {
+          roundTrips: 2,
+          outcomes: { ok: 1, error: 1 },
+          errorClasses: {
+            none: 1,
+            aborted: 0,
+            timeout: 1,
+            transport: 0,
+            response: 0,
+            unknown: 0,
+          },
+          latency: { samples: 2, totalMilliseconds: 18, maxMilliseconds: 11 },
+          rows: { read: 3, written: 1 },
+        },
+        redis: {
+          commands: 3,
+          outcomes: { ok: 2, error: 1, unavailable: 0 },
+          byOperation: { connect: 1, ping: 1, 'rate-limit': 1, info: 0 },
+          latency: { samples: 3, totalMilliseconds: 18, maxMilliseconds: 8 },
+          server: {
+            status: 'observed',
+            usedMemoryBytes: 1_024,
+            evictedKeys: 2,
+            keyspaceHits: 5,
+            keyspaceMisses: 3,
+          },
+        },
+      });
+
+      activeAttempt.finish({ outcome: 'aborted', durationMs: 21 });
+    } finally {
+      unregister();
+    }
+  });
+
+  it('区间导出后重置完成计数并保留 active AI 与 Redis server gauges', () => {
+    const logger = vi.fn();
+    const telemetry = new HonoRuntimeTelemetry({ logger });
+    const activeAttempt = telemetry.beginAiUpstream();
+    telemetry.observeD1RoundTrip({
+      durationMs: 3,
+      rowsRead: 1,
+      rowsWritten: 0,
+      outcome: 'ok',
+      errorClass: 'none',
+    });
+    telemetry.observeRedisServerStats({
+      usedMemoryBytes: 2_048,
+      evictedKeys: 4,
+      keyspaceHits: 8,
+      keyspaceMisses: 1,
+    });
+
+    telemetry.emitSnapshot();
+
+    expect(telemetry.snapshot()).toMatchObject({
+      aiUpstream: {
+        attempts: { active: 1, peakActive: 1, started: 0, completed: 0 },
+      },
+      d1: { roundTrips: 0 },
+      redis: {
+        commands: 0,
+        server: {
+          status: 'observed',
+          usedMemoryBytes: 2_048,
+          evictedKeys: 4,
+          keyspaceHits: 8,
+          keyspaceMisses: 1,
+        },
+      },
+    });
+    activeAttempt.finish({ outcome: 'success', durationMs: 5 });
+  });
+
+  it('Redis unavailable 计入固定结果但不伪造 round-trip latency', () => {
+    const telemetry = new HonoRuntimeTelemetry();
+    telemetry.observeRedisOperation({
+      operation: 'ping',
+      outcome: 'unavailable',
+      durationMs: 50,
+    });
+
+    expect(telemetry.snapshot().redis).toMatchObject({
+      commands: 1,
+      outcomes: { ok: 0, error: 0, unavailable: 1 },
+      latency: { samples: 0, totalMilliseconds: 0, maxMilliseconds: null },
+    });
+  });
+
+  it('资源导出先执行 Redis sampler，采样失败则 fail-soft 并继续导出', async () => {
+    const logger = vi.fn();
+    const errorLogger = vi.fn();
+    const telemetry = new HonoRuntimeTelemetry({ logger, errorLogger });
+    const detachSampler = telemetry.setRedisResourceSampler(async () => {
+      telemetry.observeRedisServerStats({
+        usedMemoryBytes: 8_192,
+        evictedKeys: 1,
+        keyspaceHits: 9,
+        keyspaceMisses: 2,
+      });
+    });
+
+    await telemetry.emitSnapshotWithResources();
+    expect(JSON.parse(String(logger.mock.calls[0]?.[0])).redis.server).toMatchObject({
+      status: 'observed',
+      usedMemoryBytes: 8_192,
+    });
+
+    detachSampler();
+    telemetry.setRedisResourceSampler(async () => {
+      throw new Error('redis info unavailable');
+    });
+    await expect(telemetry.emitSnapshotWithResources()).resolves.toBeUndefined();
+    expect(errorLogger).toHaveBeenCalledWith(
+      '[hono][telemetry] Redis 资源采样失败',
+      expect.any(Error),
+    );
+    expect(logger).toHaveBeenCalledTimes(2);
+  });
+
   it('以不含请求正文和凭据的结构化日志导出快照', () => {
     vi.stubEnv('AI_API_KEY', 'telemetry-secret-canary');
     vi.stubEnv('D1_GATEWAY_HMAC_SECRET', 'telemetry-hmac-canary');
     const logger = vi.fn();
     const telemetry = new HonoRuntimeTelemetry({ logger });
+    telemetry.observeRedisOperation({
+      operation: 'redis-secret-canary' as 'info',
+      outcome: 'redis-outcome-canary' as 'error',
+      durationMs: 1,
+    });
     try {
       telemetry.emitSnapshot();
 

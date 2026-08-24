@@ -1,4 +1,5 @@
 import { serve } from '@hono/node-server';
+import { registerHostedRuntimeObserver } from '@mahoshojo/hosted-runtime/telemetry';
 import { createHonoApp } from '#/app';
 import { readHonoServerConfig } from '#/config';
 import { RedisRuntime } from '#/redis/runtime';
@@ -21,10 +22,14 @@ const config = readHonoServerConfig();
 if (process.env.HONO_CONFIG_CHECK_ONLY === 'true') {
   console.info(`[hono] 配置检查通过：authMode=${config.authMode}`);
 } else {
-  const redis = new RedisRuntime(config.redisUrl, config.redisRequired);
+  const telemetry = new HonoRuntimeTelemetry();
+  const unregisterHostedRuntimeObserver = registerHostedRuntimeObserver(telemetry);
+  const redis = new RedisRuntime(config.redisUrl, config.redisRequired, telemetry);
+  const stopSamplingRedis = telemetry.setRedisResourceSampler(
+    () => redis.sampleServerStats(),
+  );
   await redis.connect();
 
-  const telemetry = new HonoRuntimeTelemetry();
   telemetry.start();
   const app = createHonoApp(config, redis, telemetry);
   const server = serve({
@@ -72,8 +77,10 @@ if (process.env.HONO_CONFIG_CHECK_ONLY === 'true') {
       }
     } finally {
       stopObservingConnections();
-      telemetry.emitSnapshot();
       telemetry.stop();
+      await telemetry.flushSnapshot();
+      stopSamplingRedis();
+      unregisterHostedRuntimeObserver();
     }
   });
 
