@@ -1,9 +1,9 @@
 import { z } from 'zod/v3';
 
 const mocks = vi.hoisted(() => ({
-  createDeepSeek: vi.fn(() => () => ({})),
-  createGoogleGenerativeAI: vi.fn(() => () => ({})),
-  createOpenAI: vi.fn(() => ({ chat: () => ({}) })),
+  createDeepSeek: vi.fn((_options?: Record<string, unknown>) => () => ({})),
+  createGoogleGenerativeAI: vi.fn((_options?: Record<string, unknown>) => () => ({})),
+  createOpenAI: vi.fn((_options?: Record<string, unknown>) => ({ chat: () => ({}) })),
   generateObject: vi.fn(),
 }));
 
@@ -56,7 +56,7 @@ describe('Node AI provider fetch injection', () => {
       baseURL: 'https://example.invalid/v1',
       fetch: expect.any(Function),
     }));
-    const configuredFetch = factory.mock.calls[0]?.[0]?.fetch as typeof fetch;
+    const configuredFetch = (factory.mock.calls[0]?.[0] as { fetch: typeof fetch }).fetch;
     await configuredFetch('https://upstream.invalid/test');
     expect(injectedFetch).toHaveBeenCalledTimes(1);
   });
