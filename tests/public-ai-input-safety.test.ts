@@ -1,11 +1,49 @@
 import { beforeEach, describe, expect, vi, test } from 'vitest';
 
-const state = {
+const state = vi.hoisted(() => ({
   rateLimitCalls: [] as Array<Record<string, unknown>>,
   safetyCalls: [] as Array<Record<string, unknown>>,
   safetyResponse: null as Response | null,
-};
+}));
 
+vi.mock('@mahoshojo/hosted-runtime/node-runtime/public-rate-limit', () => ({
+  OFFICIAL_KEY_QUESTIONNAIRE_CHARACTER_COOLDOWN_MS: 60_000,
+  createPublicAiRateLimiter: vi.fn(() => ({
+    acquirePublicAiRateLimit: vi.fn(async (input: Record<string, unknown>) => {
+      state.rateLimitCalls.push(input);
+      return {
+        allowed: true,
+        retryAfterSeconds: 0,
+        identityScope: 'ip',
+      };
+    }),
+  })),
+  buildPublicAiRateLimitResponse: (result: Record<string, unknown>) =>
+    new Response(JSON.stringify(result), {
+      status: 429,
+      headers: { 'Content-Type': 'application/json' },
+    }),
+}));
+
+vi.mock('@mahoshojo/hosted-runtime/node-runtime/content-safety', () => ({
+  createContentSafetyService: vi.fn(() => ({
+    enforceTextSafety: vi.fn(async (input: Record<string, unknown>) => {
+      state.safetyCalls.push(input);
+      return state.safetyResponse;
+    }),
+  })),
+}));
+
+vi.mock('@mahoshojo/hosted-runtime/node-runtime/data-ports', () => ({
+  createNodeDataPorts: vi.fn(() => ({
+    getDataCardById: vi.fn(async () => null),
+    recordAiChannelOutcome: vi.fn(),
+    recordUserActivityFromRequest: vi.fn(),
+    touchUserLastActivity: vi.fn(),
+  })),
+}));
+
+// generate-magical-girl-details 仍是 Next-owned exited route；在退出完成前保留旧 port mock。
 vi.mock('@/lib/ai/public-rate-limit', () => ({
   acquirePublicAiRateLimit: async (input: Record<string, unknown>) => {
     state.rateLimitCalls.push(input);

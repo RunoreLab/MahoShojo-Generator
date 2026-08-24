@@ -1,49 +1,59 @@
 import { beforeEach, describe, expect, vi, test } from 'vitest';
 
-const state = {
+const state = vi.hoisted(() => ({
   safetyCalls: [] as Array<Record<string, unknown>>,
   blockedTexts: new Set<string>(),
-};
+}));
 
-vi.mock('@/lib/ai/public-rate-limit', () => ({
-  acquirePublicAiRateLimit: async () => ({
-    allowed: true,
-    retryAfterSeconds: 0,
-    identityScope: 'ip',
-  }),
+vi.mock('@mahoshojo/hosted-runtime/node-runtime/public-rate-limit', () => ({
+  OFFICIAL_KEY_QUESTIONNAIRE_CHARACTER_COOLDOWN_MS: 60_000,
+  createPublicAiRateLimiter: vi.fn(() => ({
+    acquirePublicAiRateLimit: vi.fn(async () => ({
+      allowed: true,
+      retryAfterSeconds: 0,
+      identityScope: 'ip',
+    })),
+  })),
   buildPublicAiRateLimitResponse: (result: Record<string, unknown>) =>
     new Response(JSON.stringify(result), {
       status: 429,
       headers: { 'Content-Type': 'application/json' },
     }),
-  inferPublicAiProviderMode: () => 'system',
 }));
 
-vi.mock('@/lib/content-safety/server', () => ({
-  enforceTextSafety: async (input: Record<string, unknown>) => {
-    state.safetyCalls.push(input);
-    const text = typeof input.text === 'string' ? input.text : '';
-    if (!state.blockedTexts.has(text)) return null;
-    return new Response(
-      JSON.stringify({
-        error: '输入内容不合规',
-        shouldRedirect: true,
-        reason: '在自由补充说明中使用了危险符文',
-      }),
-      {
-        status: 400,
-        headers: { 'Content-Type': 'application/json' },
-      },
-    );
-  },
+vi.mock('@mahoshojo/hosted-runtime/node-runtime/content-safety', () => ({
+  createContentSafetyService: vi.fn(() => ({
+    enforceTextSafety: vi.fn(async (input: Record<string, unknown>) => {
+      state.safetyCalls.push(input);
+      const text = typeof input.text === 'string' ? input.text : '';
+      if (!state.blockedTexts.has(text)) return null;
+      return new Response(
+        JSON.stringify({
+          error: '输入内容不合规',
+          shouldRedirect: true,
+          reason: '在自由补充说明中使用了危险符文',
+        }),
+        {
+          status: 400,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      );
+    }),
+  })),
 }));
 
-vi.mock('@/lib/user-activity/record', () => ({
-  recordUserActivityFromRequest: () => {},
+vi.mock('@mahoshojo/hosted-runtime/node-runtime/data-ports', () => ({
+  createNodeDataPorts: vi.fn(() => ({
+    getDataCardById: vi.fn(async () => null),
+    recordAiChannelOutcome: vi.fn(),
+    recordUserActivityFromRequest: vi.fn(),
+    touchUserLastActivity: vi.fn(),
+  })),
 }));
 
-vi.mock('@/lib/ai', () => ({
-  generateWithAI: async () => ({
+vi.mock('@mahoshojo/hosted-runtime/node-runtime/structured-ai', () => ({
+  createNodeStructuredAiRuntime: vi.fn(() => ({
+    generateWithAI: vi.fn(async () => ({
     codename: '测试魔法少女',
     appearance: {
       outfit: '',
@@ -80,25 +90,25 @@ vi.mock('@/lib/ai', () => ({
         bonds: '',
       },
     },
-  }),
-  LoadBalanceStrategy: {
-    CUSTOM: 'custom',
-    SEQUENTIAL: 'sequential',
-  },
+    })),
+  })),
 }));
 
-vi.mock('@/lib/stream/raw-ai', () => ({
-  generateWithStreamAI: async () => {
-    throw new Error('stream ai should not run in request guard tests');
-  },
-  LoadBalanceStrategy: {
-    CUSTOM: 'custom',
-    SEQUENTIAL: 'sequential',
-  },
+vi.mock('@mahoshojo/hosted-runtime/node-runtime/raw-stream-ai', () => ({
+  createNodeRawStreamAiRuntime: vi.fn(() => ({
+    generateWithStreamAI: vi.fn(async () => {
+      throw new Error('stream ai should not run in request guard tests');
+    }),
+  })),
 }));
 
-vi.mock('@/lib/signature', () => ({
-  generateSignature: async () => 'test-signature',
+vi.mock('@mahoshojo/hosted-runtime/node-runtime/env-signature', () => ({
+  generateSignature: vi.fn(async () => 'test-signature'),
+  verifySignature: vi.fn(async () => false),
+  createEnvSignatureService: vi.fn(() => ({
+    generateSignature: vi.fn(async () => 'test-signature'),
+    verifySignature: vi.fn(async () => false),
+  })),
 }));
 
 describe('creator request guards', () => {

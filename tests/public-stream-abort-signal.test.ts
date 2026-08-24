@@ -1,28 +1,9 @@
 import { beforeEach, describe, expect, vi, test } from 'vitest';
 
-let capturedOptions: any = null;
-
-vi.mock('@/lib/ai/public-rate-limit', () => ({
-  acquirePublicAiRateLimit: async () => ({ allowed: true }),
-  buildPublicAiRateLimitResponse: () => new Response(null, { status: 429 }),
-  inferPublicAiProviderMode: () => 'system',
-}));
-
-vi.mock('@/lib/content-safety/server', () => ({
-  enforceTextSafety: async () => null,
-}));
-
-vi.mock('@/lib/user-activity/record', () => ({
-  recordUserActivityFromRequest: () => {},
-}));
-
-vi.mock('@/lib/stream/raw-ai', () => ({
-  LoadBalanceStrategy: {
-    CUSTOM: 'custom',
-    SEQUENTIAL: 'sequential',
-  },
-  generateWithStreamAI: async (_config: unknown, options: unknown) => {
-    capturedOptions = options;
+const mocks = vi.hoisted(() => ({
+  capturedOptions: null as any,
+  generateWithStreamAI: vi.fn(async (_config: unknown, options: unknown) => {
+    mocks.capturedOptions = options;
     return {
       response: new Response('ok', {
         headers: {
@@ -33,12 +14,42 @@ vi.mock('@/lib/stream/raw-ai', () => ({
       usagePromise: Promise.resolve({}),
       telemetry: {},
     };
-  },
+  }),
+}));
+
+vi.mock('@mahoshojo/hosted-runtime/node-runtime/public-rate-limit', () => ({
+  OFFICIAL_KEY_QUESTIONNAIRE_CHARACTER_COOLDOWN_MS: 60_000,
+  createPublicAiRateLimiter: vi.fn(() => ({
+    acquirePublicAiRateLimit: vi.fn(async () => ({ allowed: true })),
+  })),
+  buildPublicAiRateLimitResponse: vi.fn(),
+}));
+
+vi.mock('@mahoshojo/hosted-runtime/node-runtime/content-safety', () => ({
+  createContentSafetyService: vi.fn(() => ({
+    enforceTextSafety: vi.fn(async () => null),
+  })),
+}));
+
+vi.mock('@mahoshojo/hosted-runtime/node-runtime/data-ports', () => ({
+  createNodeDataPorts: vi.fn(() => ({
+    getDataCardById: vi.fn(async () => null),
+    recordAiChannelOutcome: vi.fn(),
+    recordUserActivityFromRequest: vi.fn(),
+    touchUserLastActivity: vi.fn(),
+  })),
+}));
+
+vi.mock('@mahoshojo/hosted-runtime/node-runtime/raw-stream-ai', () => ({
+  createNodeRawStreamAiRuntime: vi.fn(() => ({
+    generateWithStreamAI: mocks.generateWithStreamAI,
+  })),
 }));
 
 describe('public stream abort signal', () => {
   beforeEach(() => {
-    capturedOptions = null;
+    mocks.capturedOptions = null;
+    vi.clearAllMocks();
   });
 
   test('generate-free-stream 将 Request.signal 传给上游流式生成层', async () => {
@@ -61,10 +72,10 @@ describe('public stream abort signal', () => {
     expect(response.status).toBe(200);
     expect(response.headers.get('x-upstream-stream')).toBe('preserved');
     expect(await response.text()).toBe('ok');
-    expect(capturedOptions?.abortSignal).toBeInstanceOf(AbortSignal);
-    expect(capturedOptions?.abortSignal.aborted).toBe(false);
+    expect(mocks.capturedOptions?.abortSignal).toBeInstanceOf(AbortSignal);
+    expect(mocks.capturedOptions?.abortSignal.aborted).toBe(false);
     controller.abort('test-abort');
-    expect(capturedOptions?.abortSignal.aborted).toBe(true);
+    expect(mocks.capturedOptions?.abortSignal.aborted).toBe(true);
   });
 
   test('generate-scenario-stream 将 Request.signal 传给上游流式生成层', async () => {
@@ -86,10 +97,10 @@ describe('public stream abort signal', () => {
     expect(response.status).toBe(200);
     expect(response.headers.get('x-upstream-stream')).toBe('preserved');
     expect(await response.text()).toBe('ok');
-    expect(capturedOptions?.abortSignal).toBeInstanceOf(AbortSignal);
-    expect(capturedOptions?.abortSignal.aborted).toBe(false);
+    expect(mocks.capturedOptions?.abortSignal).toBeInstanceOf(AbortSignal);
+    expect(mocks.capturedOptions?.abortSignal.aborted).toBe(false);
     controller.abort('test-abort');
-    expect(capturedOptions?.abortSignal.aborted).toBe(true);
+    expect(mocks.capturedOptions?.abortSignal.aborted).toBe(true);
   });
 
   test.each([
@@ -136,9 +147,9 @@ describe('public stream abort signal', () => {
     expect(response.status).toBe(200);
     expect(response.headers.get('x-upstream-stream')).toBe('preserved');
     expect(await response.text()).toBe('ok');
-    expect(capturedOptions?.abortSignal).toBe(request.signal);
-    expect(capturedOptions?.abortSignal.aborted).toBe(false);
+    expect(mocks.capturedOptions?.abortSignal).toBe(request.signal);
+    expect(mocks.capturedOptions?.abortSignal.aborted).toBe(false);
     controller.abort('test-abort');
-    expect(capturedOptions?.abortSignal.aborted).toBe(true);
+    expect(mocks.capturedOptions?.abortSignal.aborted).toBe(true);
   });
 });
