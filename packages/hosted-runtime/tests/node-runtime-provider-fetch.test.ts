@@ -5,12 +5,13 @@ const mocks = vi.hoisted(() => ({
   createGoogleGenerativeAI: vi.fn((_options?: Record<string, unknown>) => () => ({})),
   createOpenAI: vi.fn((_options?: Record<string, unknown>) => ({ chat: () => ({}) })),
   generateObject: vi.fn(),
+  streamText: vi.fn(),
 }));
 
 vi.mock('ai', () => ({
   generateObject: mocks.generateObject,
   generateText: vi.fn(),
-  streamText: vi.fn(),
+  streamText: mocks.streamText,
   NoObjectGeneratedError: { isInstance: () => false },
 }));
 vi.mock('@ai-sdk/openai', () => ({ createOpenAI: mocks.createOpenAI }));
@@ -24,6 +25,15 @@ describe('Node AI provider fetch injection', () => {
     mocks.createOpenAI.mockClear();
     mocks.generateObject.mockReset();
     mocks.generateObject.mockResolvedValue({ object: { ok: true }, usage: {}, finishReason: 'stop' });
+    mocks.streamText.mockReset();
+    mocks.streamText.mockReturnValue({
+      fullStream: new ReadableStream({
+        start(controller) {
+          controller.enqueue({ type: 'text-delta', text: 'valid output' });
+          controller.close();
+        },
+      }),
+    });
   });
 
   test.each([
@@ -56,6 +66,32 @@ describe('Node AI provider fetch injection', () => {
       baseURL: 'https://example.invalid/v1',
       fetch: expect.any(Function),
     }));
+    const configuredFetch = (factory.mock.calls[0]?.[0] as { fetch: typeof fetch }).fetch;
+    await configuredFetch('https://upstream.invalid/test');
+    expect(injectedFetch).toHaveBeenCalledTimes(1);
+  });
+
+  test.each([
+    { type: 'google' as const, factory: mocks.createGoogleGenerativeAI },
+    { type: 'deepseek' as const, factory: mocks.createDeepSeek },
+  ])('raw stream 的 $type provider factory 也使用显式注入 fetch', async ({ type, factory }) => {
+    const injectedFetch = vi.fn(async () => new Response('{}')) as unknown as typeof fetch;
+    const { createNodeRawStreamAiRuntime } = await import('../src/node-runtime');
+    const runtime = createNodeRawStreamAiRuntime({
+      providers: [{
+        name: `${type}-stream-test`,
+        apiKey: 'test-key',
+        baseUrl: 'https://example.invalid/v1',
+        model: 'test-model',
+        type,
+        retryCount: 1,
+      }],
+      fetch: injectedFetch,
+    });
+
+    const result = await runtime.generateWithStreamAI({ prompt: 'provider fetch' });
+    await expect(result.response.text()).resolves.toBe('valid output');
+
     const configuredFetch = (factory.mock.calls[0]?.[0] as { fetch: typeof fetch }).fetch;
     await configuredFetch('https://upstream.invalid/test');
     expect(injectedFetch).toHaveBeenCalledTimes(1);
