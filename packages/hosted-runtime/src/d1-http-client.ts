@@ -216,7 +216,7 @@ const rowsRead = (result: {
   meta?: Record<string, unknown>;
 }): number => {
   const rawRows = asObject(result.results)?.rows;
-  return finite(result.meta?.rows_read)
+  return finite(result.meta?.['rows_read'])
     ?? (Array.isArray(result.results)
       ? result.results.length
       : Array.isArray(result.rows)
@@ -229,7 +229,7 @@ const rowsWritten = (result: {
   rows?: unknown;
   meta?: Record<string, unknown>;
 }): number => (
-  finite(result.meta?.rows_written) ?? finite(result.meta?.changes) ?? 0
+  finite(result.meta?.['rows_written']) ?? finite(result.meta?.changes) ?? 0
 );
 
 const observeSuccess = (started: number, result: {
