@@ -38,8 +38,8 @@ describe('generate scenario stream hosted runtime', () => {
         events.push('rate-limit');
         return null;
       },
-      enforceSafety: async () => {
-        events.push('safety');
+      enforceSafety: async ({ logMeta }) => {
+        events.push(`safety:${logMeta.answersCount}`);
         return null;
       },
       shouldUseReasoningSse: () => true,
@@ -93,7 +93,7 @@ describe('generate scenario stream hosted runtime', () => {
     expect(await response.text()).toBe('scenario markdown');
     expect(events).toEqual([
       'rate-limit',
-      'safety',
+      'safety:2',
       'reasoning:情景卡（流式）',
       'generate',
       'reasoning-event',

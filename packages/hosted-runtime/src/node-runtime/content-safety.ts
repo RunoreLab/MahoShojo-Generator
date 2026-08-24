@@ -49,6 +49,23 @@ const json = (payload: unknown, status: number): Response => new Response(
   { status, headers: { 'Content-Type': 'application/json' } },
 );
 
+const sanitizeSafetyLogMeta = (
+  meta: Record<string, unknown> | undefined,
+): Record<string, number> | undefined => {
+  if (!meta) return undefined;
+  const safeEntries = [
+    'answersCount',
+    'attachmentsCount',
+    'attachmentsChars',
+  ].flatMap((key): Array<[string, number]> => {
+    const value = meta[key];
+    return typeof value === 'number' && Number.isFinite(value)
+      ? [[key, value]]
+      : [];
+  });
+  return safeEntries.length > 0 ? Object.fromEntries(safeEntries) : undefined;
+};
+
 const SafetyCheckSchema = z.object({
   isUnsafe: z.boolean().describe(
     '如果内容违背公序良俗、涉及或影射政治、现实、脏话、性、色情、暴力、仇恨言论、歧视、犯罪、争议性内容，则为 true，否则为 false。',
@@ -86,6 +103,7 @@ export const createContentSafetyService = (
   dependencies: ContentSafetyDependencies,
 ): ContentSafetyService => Object.freeze({
   enforceTextSafety: async (params): Promise<Response | null> => {
+    const safeLogMeta = sanitizeSafetyLogMeta(params.logMeta);
     const enableSensitiveWordFilter = params.enableSensitiveWordFilter
       ?? dependencies.defaults.enableSensitiveWordFilter;
 
@@ -93,7 +111,7 @@ export const createContentSafetyService = (
       try {
         const localCheck = await dependencies.quickCheck(params.text);
         if (localCheck.hasSensitiveWords) {
-          params.log?.warn('检测到敏感词，请求被拒绝', params.logMeta);
+          params.log?.warn('检测到敏感词，请求被拒绝', safeLogMeta);
           const reason = typeof params.sensitiveWordReason === 'string'
             ? params.sensitiveWordReason.trim()
             : '';
@@ -104,7 +122,7 @@ export const createContentSafetyService = (
           }, 400);
         }
       } catch {
-        params.log?.error('敏感词检查失败', params.logMeta);
+        params.log?.error('敏感词检查失败', safeLogMeta);
         return json({ error: '内容安全检查服务暂时不可用，请稍后重试' }, 503);
       }
     }
@@ -120,14 +138,14 @@ export const createContentSafetyService = (
       );
       if (!safetyResult.isUnsafe) return null;
 
-      params.log?.warn('AI 检测到不安全内容，请求被拒绝', params.logMeta);
+      params.log?.warn('AI 检测到不安全内容，请求被拒绝', safeLogMeta);
       return json({
         error: '输入内容不合规',
         shouldRedirect: true,
         reason: safetyResult.reason || '内容安全策略',
       }, 400);
     } catch {
-      params.log?.error('安全检查 AI 调用失败', params.logMeta);
+      params.log?.error('安全检查 AI 调用失败', safeLogMeta);
       return json({ error: '内容安全检查服务暂时不可用，请稍后重试' }, 503);
     }
   },

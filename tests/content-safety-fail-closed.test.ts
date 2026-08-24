@@ -46,12 +46,18 @@ describe('content safety authority', () => {
     const response = await enforceTextSafety({
       text: '用户秘密正文',
       log: { warn, error: vi.fn() },
-      logMeta: { requestId: 'request-1' },
+      logMeta: {
+        requestId: 'request-1',
+        answers: { answer: '用户秘密正文' },
+        verificationCode: 123456,
+        answersCount: 1,
+      },
     });
 
     expect(response?.status).toBe(400);
     expect(state.events).toEqual(['local:用户秘密正文']);
-    expect(JSON.stringify(warn.mock.calls)).not.toContain('用户秘密正文');
+    expect(JSON.stringify(warn.mock.calls)).not.toMatch(/用户秘密正文|123456/);
+    expect(warn).toHaveBeenCalledWith('检测到敏感词，请求被拒绝', { answersCount: 1 });
   });
 
   test('AI 检查失败返回 503，且不把异常中的 secret/body 写入日志', async () => {
@@ -61,11 +67,16 @@ describe('content safety authority', () => {
     const response = await enforceTextSafety({
       text: '用户秘密正文',
       log: { warn: vi.fn(), error },
-      logMeta: { requestId: 'request-2' },
+      logMeta: {
+        requestId: 'request-2',
+        answers: { answer: '用户秘密正文' },
+        answersCount: 1,
+      },
     });
 
     expect(response?.status).toBe(503);
     expect(state.events).toEqual(['local:用户秘密正文', 'ai:用户秘密正文']);
     expect(JSON.stringify(error.mock.calls)).not.toMatch(/secret=abc|用户秘密正文/);
+    expect(error).toHaveBeenCalledWith('安全检查 AI 调用失败', { answersCount: 1 });
   });
 });

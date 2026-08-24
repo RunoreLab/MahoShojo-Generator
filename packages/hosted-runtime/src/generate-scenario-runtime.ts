@@ -67,7 +67,7 @@ export interface GenerateScenarioRuntimeDependencies
   enforceSafety(_input: {
     request: Request;
     text: string;
-    logMeta: { answers: Record<string, unknown> };
+    logMeta: { answersCount: number };
     sensitiveWordReason: '使用危险符文';
     aiPromptTemplate: 'scenario';
   }): Promise<Response | null>;
@@ -195,7 +195,7 @@ export const createGenerateScenarioRuntime = (
     enforceSafety: (request, input, safetyText) => ports.enforceSafety({
       request,
       text: safetyText,
-      logMeta: { answers: input.answers },
+      logMeta: { answersCount: Object.keys(input.answers).length },
       sensitiveWordReason: '使用危险符文',
       aiPromptTemplate: 'scenario',
     }),

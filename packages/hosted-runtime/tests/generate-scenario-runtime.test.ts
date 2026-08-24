@@ -33,8 +33,8 @@ describe('generate scenario hosted runtime', () => {
         events.push(`rate-limit:${actionType}:${providerMode}`);
         return null;
       },
-      enforceSafety: async ({ text, aiPromptTemplate }) => {
-        events.push(`safety:${text}:${aiPromptTemplate}`);
+      enforceSafety: async ({ text, aiPromptTemplate, logMeta }) => {
+        events.push(`safety:${text}:${aiPromptTemplate}:${logMeta.answersCount}`);
         return null;
       },
       generateWithAI: async (input, config, options) => {
@@ -118,7 +118,7 @@ describe('generate scenario hosted runtime', () => {
     });
     expect(events).toEqual([
       'rate-limit:scenario_generate:custom',
-      'safety:旧图书馆 :scenario',
+      'safety:旧图书馆 :scenario:2',
       'generate:null',
       'activity',
       'sign:2026-08-24T02:03:04.000Z',

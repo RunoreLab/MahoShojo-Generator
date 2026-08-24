@@ -105,11 +105,18 @@ describe('package-owned protective Node ports', () => {
     const response = await service.enforceTextSafety({
       text: '用户秘密正文',
       log: { warn: vi.fn(), error },
-      logMeta: { requestId: 'request-1' },
+      logMeta: {
+        requestId: 'request-1',
+        answers: { secret: '用户秘密正文' },
+        credential: 'secret=abc',
+        verificationCode: 123456,
+        answersCount: 1,
+      },
     });
     expect(response?.status).toBe(503);
     expect(events).toEqual(['local:用户秘密正文', 'ai:用户秘密正文']);
-    expect(JSON.stringify(error.mock.calls)).not.toMatch(/secret=abc|用户秘密正文/);
+    expect(JSON.stringify(error.mock.calls)).not.toMatch(/secret=abc|用户秘密正文|123456/);
+    expect(error).toHaveBeenCalledWith('安全检查 AI 调用失败', { answersCount: 1 });
   });
 
   test('env signature 缺失或密钥导入失败均返回 null，不生成伪签名', async () => {
