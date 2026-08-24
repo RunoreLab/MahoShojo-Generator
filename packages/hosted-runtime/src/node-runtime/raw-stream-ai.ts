@@ -395,7 +395,43 @@ async function generateWithStreamAIUsing(
 	                const prefetchedChunks: RawUnifiedStreamChunk[] = [];
 	                let prefetchedText = '';
 	                let prefetchedDone = false;
+	                let trivialCandidate = '';
+	                let pendingWhitespace = false;
+	                let definitelyNonTrivial = false;
+	                let atOutputStart = true;
 	                const MAX_PREFETCH_PARTS = 16;
+
+                    const couldStillBeTrivial = (candidate: string): boolean => {
+                        if (!candidate) return true;
+                        if ('null'.startsWith(candidate) || 'undefined'.startsWith(candidate)) return true;
+                        if (/^\{\s*\}?$/.test(candidate)) return true;
+                        return /^\[\s*\]?$/.test(candidate);
+                    };
+
+                    const observeTextForEmptyOutput = (text: string): void => {
+                        if (definitelyNonTrivial || !text) return;
+                        for (const character of text) {
+                            if (atOutputStart && character === '\uFEFF') continue;
+                            if (/\s/.test(character)) {
+                                if (trivialCandidate) pendingWhitespace = true;
+                                continue;
+                            }
+                            atOutputStart = false;
+                            if (pendingWhitespace) {
+                                trivialCandidate += ' ';
+                                pendingWhitespace = false;
+                            }
+                            trivialCandidate += character;
+                            if (!couldStillBeTrivial(trivialCandidate)) {
+                                definitelyNonTrivial = true;
+                                trivialCandidate = '';
+                                return;
+                            }
+                        }
+                    };
+
+                    const isTrivialAtTerminal = (): boolean =>
+                        !definitelyNonTrivial && looksLikeTrivialEmptyOutput(trivialCandidate);
 
 		                for (let i = 0; i < MAX_PREFETCH_PARTS; i++) {
 		                    const part = await readWithTimeout(reader);
@@ -408,6 +444,7 @@ async function generateWithStreamAIUsing(
 	                    prefetchedChunks.push(mapped);
 	                    if (mapped.type === 'text-delta') {
 	                        prefetchedText += mapped.text;
+                            observeTextForEmptyOutput(mapped.text);
 	                    }
                     runtimeAttempt.recordTtfb();
 	                    // 低延迟优先：拿到首个有效 chunk（文本或 reasoning）后立即交由上层持续消费。
@@ -441,6 +478,16 @@ async function generateWithStreamAIUsing(
                             while (true) {
                                 const { done, value } = await readWithTimeout(reader);
                                 if (done) {
+                                    if (isTrivialAtTerminal()) {
+                                        const emptyOutputError = new Error(EMPTY_OUTPUT_ERROR_MESSAGE);
+                                        outcomeRecorder.recordClassification({
+                                            outcome: 'failure',
+                                            errorClass: 'empty_output',
+                                        });
+                                        runtimeAttempt.finish('error');
+                                        controller.error(emptyOutputError);
+                                        return;
+                                    }
                                     outcomeRecorder.recordSuccess();
                                     runtimeAttempt.finish('success');
                                     controller.close();
@@ -450,6 +497,9 @@ async function generateWithStreamAIUsing(
                                 const mapped = mapToUnifiedChunk(value);
                                 if (!mapped) continue;
                                 runtimeAttempt.recordTtfb();
+                                if (mapped.type === 'text-delta') {
+                                    observeTextForEmptyOutput(mapped.text);
+                                }
                                 emitReasoningEvent(mapped);
                                 controller.enqueue(mapped);
                                 return;
