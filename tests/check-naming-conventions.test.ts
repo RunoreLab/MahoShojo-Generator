@@ -58,4 +58,21 @@ describe('workspace naming ratchet', () => {
     ]);
     expect(reportOnlyFields).not.toContain('legacy_name');
   });
+
+  it('does not rewrite canonical third-party code in the hosted-runtime vendor boundary', async () => {
+    const rootDir = await createFixture({
+      'packages/hosted-runtime/src/node-runtime/vendor/upstream.mjs': [
+        'const node = { m_values: {} };',
+        'void node.m_values;',
+      ].join('\n'),
+      'packages/hosted-runtime/src/runtime.ts': 'const value = {} as any; void value.internal_name;\n',
+    });
+
+    const result = checkNamingConventions(rootDir, { workspaceOnly: true });
+    const allFields = [...result.blockingViolations, ...result.reportOnlyViolations]
+      .map((violation) => violation.field);
+
+    expect(allFields).not.toContain('m_values');
+    expect(allFields).toContain('internal_name');
+  });
 });

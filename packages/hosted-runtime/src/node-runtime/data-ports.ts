@@ -135,24 +135,24 @@ const normalizeSeenAt = (value: string | undefined, fallback: Date): string => {
 
 const toDataCard = (row: Record<string, unknown>): HostedDataCard => ({
   id: typeof row.id === 'string' ? row.id : '',
-  user_id: asFiniteInt(row.user_id),
+  user_id: asFiniteInt(row['user_id']),
   type: typeof row.type === 'string' ? row.type : 'character',
   name: typeof row.name === 'string' ? row.name : '',
   description: asNullableString(row.description),
   data: typeof row.data === 'string' ? row.data : '',
-  is_public: asFiniteInt(row.is_public),
-  public_since: asNullableString(row.public_since),
-  usage_count: asFiniteInt(row.usage_count),
-  like_count: asFiniteInt(row.like_count),
-  favorite_count: asFiniteInt(row.favorite_count),
-  review_status: asNullableString(row.review_status),
-  is_recommended: asFiniteInt(row.is_recommended),
-  created_at: asNullableString(row.created_at),
-  updated_at: asNullableString(row.updated_at),
-  deleted_at: asNullableString(row.deleted_at),
+  is_public: asFiniteInt(row['is_public']),
+  public_since: asNullableString(row['public_since']),
+  usage_count: asFiniteInt(row['usage_count']),
+  like_count: asFiniteInt(row['like_count']),
+  favorite_count: asFiniteInt(row['favorite_count']),
+  review_status: asNullableString(row['review_status']),
+  is_recommended: asFiniteInt(row['is_recommended']),
+  created_at: asNullableString(row['created_at']),
+  updated_at: asNullableString(row['updated_at']),
+  deleted_at: asNullableString(row['deleted_at']),
   username: typeof row.username === 'string' ? row.username : '',
-  tag_ids: asNullableString(row.tag_ids),
-  tagIds: (typeof row.tag_ids === 'string' ? row.tag_ids : '')
+  tag_ids: asNullableString(row['tag_ids']),
+  tagIds: (typeof row['tag_ids'] === 'string' ? row['tag_ids'] : '')
     .split(',')
     .map((id) => id.trim())
     .filter(Boolean),

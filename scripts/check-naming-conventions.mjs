@@ -8,7 +8,10 @@ import ts from 'typescript';
 const LEGACY_INCLUDE_DIRS = ['app', 'pages', 'components', 'lib'];
 const WORKSPACE_INCLUDE_DIRS = ['apps', 'packages'];
 const IGNORED_DIRECTORIES = new Set(['.next', '.open-next', 'build', 'coverage', 'dist', 'node_modules', 'out']);
-const BLOCK_EXCLUDE_PREFIXES = ['lib/vendor/'];
+const BLOCK_EXCLUDE_PREFIXES = [
+  'lib/vendor/',
+  'packages/hosted-runtime/src/node-runtime/vendor/',
+];
 const REPORT_ONLY_DIR_PREFIXES = ['lib/db/', 'lib/database/'];
 const FILE_EXTS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs']);
 const MAX_BLOCK_REPORT_ITEMS = 80;
