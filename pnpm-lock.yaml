@@ -367,6 +367,9 @@ importers:
 
   packages/domain:
     dependencies:
+      '@mahoshojo/contracts':
+        specifier: workspace:*
+        version: link:../contracts
       zod:
         specifier: ^4.1.13
         version: 4.3.6
@@ -417,6 +420,12 @@ importers:
 
   packages/hosted-runtime:
     dependencies:
+      '@mahoshojo/ai-core':
+        specifier: workspace:*
+        version: link:../ai-core
+      '@mahoshojo/contracts':
+        specifier: workspace:*
+        version: link:../contracts
       '@mahoshojo/domain':
         specifier: workspace:*
         version: link:../domain
@@ -1086,11 +1095,11 @@ packages:
 
   '@esbuild-kit/core-utils@3.3.2':
     resolution: {integrity: sha512-sPRAnw9CdSsRmEtnsl2WXWdyquogVpB3yZ3dgwJfe8zrOzTsV7cJvmwrKVa+0ma5BoiGJ+BoqkMvawbayKUsqQ==}
-    deprecated: 'Merged into tsx: https://tsx.hirok.io'
+    deprecated: 'Merged into tsx: https://tsx.hiroki.io'
 
   '@esbuild-kit/esm-loader@2.6.5':
     resolution: {integrity: sha512-FxEMIkJKnodyA1OaCUoEvbYRkoZlLZ4d/eXFu9Fh8CbBBgP5EmZxrfTRyN0qpXZ4vOvqnE5YdRdcrmUUXuU+dA==}
-    deprecated: 'Merged into tsx: https://tsx.hirok.io'
+    deprecated: 'Merged into tsx: https://tsx.hiroki.io'
 
   '@esbuild/aix-ppc64@0.25.4':
     resolution: {integrity: sha512-1VCICWypeQKhVbE9oW/sJaAmjLxhVqacdkvPLEjwlttjfwENRSClS8EjBz0KzRyFSCPDIkuXW34Je/vk7zdB7Q==}

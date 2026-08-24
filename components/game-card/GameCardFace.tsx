@@ -11,12 +11,14 @@ import {
   type GameCardElement,
   type GameCardImageAspectRatio,
   type ImageTransform,
+} from '@/lib/schemas/game-card';
+import {
   RARITY_LABELS,
   CARD_TYPE_LABELS,
   ELEMENT_LABELS,
   RARITY_COLORS,
   ELEMENT_COLORS,
-} from '@/lib/schemas/game-card';
+} from '@/lib/game-card/presentation';
 import {
   DEFAULT_GAME_CARD_IMAGE_ASPECT_RATIO,
   DEFAULT_IMAGE_TRANSFORM,

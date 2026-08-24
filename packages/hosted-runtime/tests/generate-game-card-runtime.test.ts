@@ -7,8 +7,8 @@ import {
 } from '@mahoshojo/hosted-runtime/generate-game-card-runtime';
 import {
   GAME_CARD_GENERATION_CONFIG,
-  type GameCardFaceData,
-} from '@mahoshojo/domain/game-card';
+} from '@mahoshojo/ai-core/game-card-generation';
+import type { GameCardFaceData } from '@mahoshojo/contracts/game-card';
 
 const generatedFaceData: GameCardFaceData = {
   cardName: '测试卡牌',

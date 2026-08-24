@@ -19,6 +19,11 @@
       "import": "./src/data-cards.ts",
       "default": "./src/data-cards.ts"
     },
+    "./game-card": {
+      "types": "./src/game-card.ts",
+      "import": "./src/game-card.ts",
+      "default": "./src/game-card.ts"
+    },
     "./ai-execution": {
       "types": "./src/ai-execution.ts",
       "import": "./src/ai-execution.ts",

@@ -1,9 +1,9 @@
 import { inferCharacterKind, type CharacterKind } from '@mahoshojo/domain/data-cards';
 import {
   GAME_CARD_GENERATION_CONFIG,
-  type GameCardFaceData,
   type GameCardGenerationInput,
-} from '@mahoshojo/domain/game-card';
+} from '@mahoshojo/ai-core/game-card-generation';
+import type { GameCardFaceData } from '@mahoshojo/contracts/game-card';
 import {
   createGenerateGameCardService,
   type GenerateGameCardInput,

@@ -18,6 +18,11 @@
       "types": "./src/stream-events.ts",
       "import": "./src/stream-events.ts",
       "default": "./src/stream-events.ts"
+    },
+    "./game-card-generation": {
+      "types": "./src/game-card-generation.ts",
+      "import": "./src/game-card-generation.ts",
+      "default": "./src/game-card-generation.ts"
     }
   },
   "scripts": {

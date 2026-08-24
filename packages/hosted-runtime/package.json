@@ -46,6 +46,8 @@
     "build": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
+    "@mahoshojo/ai-core": "workspace:*",
+    "@mahoshojo/contracts": "workspace:*",
     "@mahoshojo/domain": "workspace:*",
     "@mahoshojo/hosted-api": "workspace:*",
     "zod": "^4.1.13"

@@ -6,10 +6,12 @@ import { useSearchParams } from 'next/navigation';
 import {
   type GameCardFaceData,
   type GameCardImageAspectRatio,
+} from '@/lib/schemas/game-card';
+import {
   RARITY_LABELS,
   CARD_TYPE_LABELS,
   ELEMENT_LABELS,
-} from '@/lib/schemas/game-card';
+} from '@/lib/game-card/presentation';
 import { GameCardFace, type ImageTransform, DEFAULT_IMAGE_TRANSFORM } from '@/components/game-card/GameCardFace';
 import { ImageCropEditor } from '@/components/card-forge/ImageCropEditor';
 import BattleDataModal from '@/components/BattleDataModal';
