@@ -271,14 +271,4 @@ export const config = {
     modelFallbacks: [...STRICT_RANKED_MODEL_FALLBACKS],
   },
 
-  // 魔法少女生成配置
-  MAGICAL_GIRL_GENERATION: {
-    temperature: 0.8,
-    systemPrompt: `你是一个专业的魔法少女角色设计师。请根据用户输入的真名，设计一个独特的魔法少女角色。
-设计要求：
-1. 魔法少女名字应该以花名为主题，要与用户的真名有某种关联性或呼应
-2. 外貌特征要协调统一，符合魔法少女的设定
-3. 变身咒语要朗朗上口，充满魔法感
-请严格按照提供的 JSON schema 格式返回结果。`
-  }
 }

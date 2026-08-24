@@ -7,6 +7,26 @@ const mocks = vi.hoisted(() => ({
   generateWithAI: vi.fn(async (_input: unknown, config: unknown, options: any) => {
     mocks.events.push('generate');
     const taskName = (config as { taskName?: string })?.taskName;
+    if (taskName === '生成魔法少女') {
+      return {
+        flowerName: '铃兰',
+        flowerDescription: '幸福归来',
+        appearance: {
+          height: '155cm',
+          weight: '45kg',
+          hairColor: '银白色',
+          hairStyle: '及腰长发',
+          eyeColor: '碧绿色',
+          skinTone: '白皙',
+          wearing: '白绿礼服',
+          specialFeature: '安静微笑',
+          mainColor: '绿色',
+          firstPageColor: '#E8FFF0',
+          secondPageColor: '#5BAF72',
+        },
+        spell: '测试咒语',
+      };
+    }
     options.telemetry.model = taskName === '生成残兽档案'
       ? 'canshou-test-model'
       : taskName === '生成魔法少女详细信息'
@@ -119,6 +139,45 @@ const redis: RedisService = {
 };
 
 describe('常规生成 Hono production composition', () => {
+  it('经 dispatcher 复用名字生成的 AI、活动与签名 composition', async () => {
+    mocks.events.length = 0;
+    const app = createHonoApp(config, redis);
+    const response = await app.request('/api/generate-magical-girl', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Mahoshojo-Activity-Token': 'activity-token',
+      },
+      body: JSON.stringify({ name: '  小满  ', language: ' zh-CN ' }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('x-backend-runtime')).toBe('hono-node');
+    expect(await response.json()).toEqual({
+      flowerName: '铃兰',
+      flowerDescription: '幸福归来',
+      appearance: {
+        height: '155cm',
+        weight: '45kg',
+        hairColor: '银白色',
+        hairStyle: '及腰长发',
+        eyeColor: '碧绿色',
+        skinTone: '白皙',
+        wearing: '白绿礼服',
+        specialFeature: '安静微笑',
+        mainColor: '绿色',
+        firstPageColor: '#E8FFF0',
+        secondPageColor: '#5BAF72',
+      },
+      spell: '测试咒语',
+      templateId: '魔法少女/心之花/魔法少女（名字生成）',
+      signature: 'test-signature',
+    });
+    expect(mocks.events).toEqual(['generate', 'activity', 'signature']);
+    expect(mocks.generateSignature).toHaveBeenCalledOnce();
+    expect(mocks.recordActivity).toHaveBeenCalledOnce();
+  });
+
   it('经 dispatcher 保留 Scenario 签名、AI meta、活动 header 与副作用顺序', async () => {
     mocks.events.length = 0;
     const app = createHonoApp(config, redis);

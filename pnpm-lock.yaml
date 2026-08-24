@@ -416,6 +416,12 @@ importers:
       '@mahoshojo/domain':
         specifier: workspace:*
         version: link:../domain
+      '@mahoshojo/hosted-api':
+        specifier: workspace:*
+        version: link:../hosted-api
+      zod:
+        specifier: ^4.1.13
+        version: 4.3.6
     devDependencies:
       '@types/node':
         specifier: ^20

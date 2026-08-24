@@ -14,6 +14,11 @@
       "import": "./src/data-cards.ts",
       "default": "./src/data-cards.ts"
     },
+    "./main-color": {
+      "types": "./src/main-color.ts",
+      "import": "./src/main-color.ts",
+      "default": "./src/main-color.ts"
+    },
     "./questionnaire": {
       "types": "./src/questionnaire.ts",
       "import": "./src/questionnaire.ts",

@@ -2,9 +2,10 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { snapdom } from '@zumer/snapdom';
-// TODO: 从这里引入怪怪的，但是先这样吧！
-import type { AIGeneratedMagicalGirl } from '@/app/api/generate-magical-girl/handler';
-import { MainColor } from '@/lib/main-color';
+import type {
+  MagicalGirlGenerationResult as AIGeneratedMagicalGirl,
+} from '@mahoshojo/hosted-api/generate-magical-girl';
+import { COLOR_GRADIENTS as gradientColors, MainColor } from '@/lib/main-color';
 import Link from 'next/link';
 import { useCooldown } from '@/lib/cooldown';
 import { getSensitiveWordRedirectTarget } from '@/lib/content-safety/client';
@@ -54,18 +55,6 @@ const levels = [
   { name: '花', emoji: '🌺' },
   { name: '宝石权杖', emoji: '💎' }
 ];
-
-// 定义8套渐变配色方案，与 MainColor 枚举顺序对应
-const gradientColors: Record<string, { first: string; second: string }> = {
-  [MainColor.Red]: { first: '#ff6b6b', second: '#ee5a6f' },
-  [MainColor.Orange]: { first: '#ff922b', second: '#ffa94d' },
-  [MainColor.Cyan]: { first: '#22b8cf', second: '#66d9e8' },
-  [MainColor.Blue]: { first: '#5c7cfa', second: '#748ffc' },
-  [MainColor.Purple]: { first: '#9775fa', second: '#b197fc' },
-  [MainColor.Pink]: { first: '#ff9a9e', second: '#fecfef' },
-  [MainColor.Yellow]: { first: '#f59f00', second: '#fcc419' },
-  [MainColor.Green]: { first: '#51cf66', second: '#8ce99a' }
-};
 
 const NAME_PREFERENCE_KEY = 'mahoshojo.name.preferences.v1';
 
@@ -414,7 +403,9 @@ export function NamePage() {
                 className="result-card"
                 style={{
                   background: (() => {
-                    const colors = gradientColors[magicalGirl.appearance.mainColor] || gradientColors[MainColor.Pink];
+                    const colors = gradientColors[
+                      magicalGirl.appearance.mainColor as keyof typeof gradientColors
+                    ] || gradientColors[MainColor.Pink];
                     return `linear-gradient(135deg, ${colors.first} 0%, ${colors.second} 100%)`;
                   })()
                 }}

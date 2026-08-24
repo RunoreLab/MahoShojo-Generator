@@ -6,7 +6,7 @@ export {
   generateMagicalGirlWithAI,
   type MainColor,
 } from '@/lib/hosted-api/generate-magical-girl';
-import { createDefaultGenerateMagicalGirlService } from '@/lib/hosted-api/generate-magical-girl';
+import { defaultGenerateMagicalGirlService } from '@/lib/hosted-api/generate-magical-girl';
 
-export const appRouteHandler = createDefaultGenerateMagicalGirlService();
+export const appRouteHandler = defaultGenerateMagicalGirlService;
 export default appRouteHandler;

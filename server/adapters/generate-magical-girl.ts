@@ -1,6 +1,6 @@
-import { createDefaultGenerateMagicalGirlService } from '@/lib/hosted-api/generate-magical-girl';
+import { defaultGenerateMagicalGirlService } from '@/lib/hosted-api/generate-magical-girl';
 
-const honoRouteHandler = createDefaultGenerateMagicalGirlService();
+const honoRouteHandler = defaultGenerateMagicalGirlService;
 
 export const GET = honoRouteHandler;
 export const HEAD = honoRouteHandler;

@@ -9,6 +9,11 @@
       "import": "./src/d1-http-client.ts",
       "default": "./src/d1-http-client.ts"
     },
+    "./generate-magical-girl-runtime": {
+      "types": "./src/generate-magical-girl-runtime.ts",
+      "import": "./src/generate-magical-girl-runtime.ts",
+      "default": "./src/generate-magical-girl-runtime.ts"
+    },
     "./ai-upstream": {
       "types": "./src/ai-upstream.ts",
       "import": "./src/ai-upstream.ts",
@@ -36,7 +41,9 @@
     "build": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@mahoshojo/domain": "workspace:*"
+    "@mahoshojo/domain": "workspace:*",
+    "@mahoshojo/hosted-api": "workspace:*",
+    "zod": "^4.1.13"
   },
   "devDependencies": {
     "@types/node": "^20",
