@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   generateObject: vi.fn(),
   generateText: vi.fn(),
   streamText: vi.fn(),
+  recordAiChannelOutcome: vi.fn(),
 }));
 
 vi.mock('ai', () => ({
@@ -61,9 +62,9 @@ vi.mock('@/lib/ai/utils/error-extraction', () => ({
   enhanceErrorWithUpstreamMessage: (error: unknown) => error,
 }));
 vi.mock('@/lib/ai/availability', () => ({
-  classifySuccess: () => ({}),
+  classifySuccess: () => ({ outcome: 'success' }),
   classifyOutcome: () => ({}),
-  recordAiChannelOutcome: vi.fn(),
+  recordAiChannelOutcome: mocks.recordAiChannelOutcome,
   createAttemptOutcomeRecorder: () => ({
     recordFromError: vi.fn(),
     recordFromCancel: vi.fn(),
@@ -244,6 +245,7 @@ describe('Hosted structured output acceptance boundary', () => {
       },
       observeD1RoundTrip: () => undefined,
     });
+    mocks.recordAiChannelOutcome.mockClear();
     mocks.generateObject.mockRejectedValueOnce(new Error('json mode is not enabled')); // should trigger text fallback
     mocks.generateText.mockResolvedValueOnce({
       text: '{"ok":true}',
@@ -261,13 +263,22 @@ describe('Hosted structured output acceptance boundary', () => {
           schema: z.object({ ok: z.boolean() }),
           taskName: 'Fallback 测试',
         },
-        { loadBalanceStrategy: LoadBalanceStrategy.SEQUENTIAL },
+        {
+          loadBalanceStrategy: LoadBalanceStrategy.SEQUENTIAL,
+          channelContext: { providerId: 'system', modelId: 'fallback-model' },
+        },
       );
 
       expect(output).toEqual({ ok: true });
       expect(attemptTerminals).toHaveLength(2);
       expect(attemptTerminals[0]).toEqual([expect.objectContaining({ outcome: 'error' })]);
       expect(attemptTerminals[1]).toEqual([expect.objectContaining({ outcome: 'success' })]);
+      expect(mocks.recordAiChannelOutcome).toHaveBeenCalledTimes(1);
+      expect(mocks.recordAiChannelOutcome).toHaveBeenCalledWith({
+        providerId: 'system',
+        modelId: 'fallback-model',
+        outcome: 'success',
+      });
     } finally {
       resetHostedRuntimeObserverForTests();
     }
@@ -287,6 +298,8 @@ describe('Hosted structured output acceptance boundary', () => {
       observeD1RoundTrip: () => undefined,
     });
     mocks.generateObject.mockReset();
+    mocks.generateText.mockReset();
+    mocks.recordAiChannelOutcome.mockClear();
     mocks.generateText.mockResolvedValueOnce({
       text: '{"ok":true}',
       usage: {},
@@ -304,13 +317,24 @@ describe('Hosted structured output acceptance boundary', () => {
           taskName: 'Forced Text 测试',
           modelOverride: 'gemma-2-text',
         },
-        { loadBalanceStrategy: LoadBalanceStrategy.SEQUENTIAL },
+        {
+          loadBalanceStrategy: LoadBalanceStrategy.SEQUENTIAL,
+          channelContext: { providerId: 'system', modelId: 'forced-text-model' },
+        },
       );
 
       expect(output).toEqual({ ok: true });
-      expect(mocks.generateObject).not.toHaveBeenCalled();
+      expect(mocks.generateText).toHaveBeenCalledTimes(1);
+      expect(mocks.generateObject).toHaveBeenCalledTimes(0);
       expect(attemptTerminals).toHaveLength(1);
       expect(attemptTerminals[0]).toEqual([expect.objectContaining({ outcome: 'success' })]);
+      expect(JSON.stringify(attemptTerminals)).not.toMatch(/forced-text-(?:scenario|system|prompt)/);
+      expect(mocks.recordAiChannelOutcome).toHaveBeenCalledTimes(1);
+      expect(mocks.recordAiChannelOutcome).toHaveBeenCalledWith({
+        providerId: 'system',
+        modelId: 'forced-text-model',
+        outcome: 'success',
+      });
     } finally {
       resetHostedRuntimeObserverForTests();
     }

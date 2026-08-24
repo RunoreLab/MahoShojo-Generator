@@ -402,12 +402,6 @@ export async function generateWithAI<T, I = string>(
     // 对当前提供商进行重试
     for (let attempt = 0; attempt < retryCount; attempt++) {
       let runtimeAttempt: ReturnType<typeof createAiUpstreamAttemptRuntime> | null = null;
-      const getRuntimeAttempt = () => {
-        if (runtimeAttempt === null) {
-          runtimeAttempt = createAiUpstreamAttemptRuntime();
-        }
-        return runtimeAttempt;
-      };
       try {
         log.debug(`开始尝试: 提供商: ${provider.name} 模型: ${selectedModel} 尝试次数: ${attempt + 1} / ${retryCount}`);
 
@@ -506,6 +500,10 @@ export async function generateWithAI<T, I = string>(
               options.telemetry.finishReason = textResult.finishReason;
               options.telemetry.reasoning = buildNonStreamReasoningEnvelope(textResult.reasoningText, textResult.usage);
             }
+            if (options?.channelContext) {
+              const ctx = options.channelContext;
+              void recordAiChannelOutcome({ providerId: ctx.providerId, modelId: ctx.modelId, ...classifySuccess() });
+            }
 
             fallbackRuntime.recordTtfb();
             fallbackRuntime.finish('success');
@@ -530,8 +528,8 @@ export async function generateWithAI<T, I = string>(
         let finishReason: unknown;
         let reasoning: AIReasoningEnvelope | null = null;
 
+        runtimeAttempt = createAiUpstreamAttemptRuntime();
         try {
-          getRuntimeAttempt();
           const result = await tryGenerateObject();
           object = validateStructuredJsonValueWithSchema(result.object, generationConfig.schema, {
             taskName: generationConfig.taskName,
@@ -559,11 +557,11 @@ export async function generateWithAI<T, I = string>(
                 options.telemetry.reasoning = buildNonStreamReasoningEnvelope(undefined, rawError.usage);
               }
 
-              getRuntimeAttempt().recordTtfb();
-              getRuntimeAttempt().finish('success');
+              runtimeAttempt.recordTtfb();
+              runtimeAttempt.finish('success');
               return repaired.data as T;
             } catch {
-              getRuntimeAttempt().finish(classifyAiUpstreamOutcome(rawError));
+              runtimeAttempt.finish(classifyAiUpstreamOutcome(rawError));
               // 本地修复失败时，再尝试一次“文本 JSON 回退重试”
               try {
                 return await runTextJsonFallback('NoObjectGeneratedError 分支');
@@ -577,7 +575,7 @@ export async function generateWithAI<T, I = string>(
 
           // 2) 上游不支持 JSON 模式：退化为“纯文本生成 JSON + 本地解析/修复”
           if (isJsonModeNotSupportedError(enhancedError)) {
-            getRuntimeAttempt().finish(classifyAiUpstreamOutcome(enhancedError));
+            runtimeAttempt.finish(classifyAiUpstreamOutcome(enhancedError));
             log.warn('检测到上游不支持 JSON 模式，启用兼容回退（文本生成 JSON + 本地解析）', {
               provider: provider.name,
               model: selectedModel,
@@ -594,7 +592,7 @@ export async function generateWithAI<T, I = string>(
             maybeApiCallError?.name === 'AI_APICallError' && apiCallStatusCode !== 401 && apiCallStatusCode !== 403 && apiCallStatusCode !== 429;
 
           if (shouldTryTextFallback) {
-            getRuntimeAttempt().finish(classifyAiUpstreamOutcome(enhancedError));
+            runtimeAttempt.finish(classifyAiUpstreamOutcome(enhancedError));
             log.warn('generateObject 触发 APICallError，尝试兼容回退（文本生成 JSON + 本地解析）', {
               provider: provider.name,
               model: selectedModel,
@@ -622,8 +620,8 @@ export async function generateWithAI<T, I = string>(
           options.telemetry.finishReason = finishReason;
           options.telemetry.reasoning = reasoning;
         }
-        getRuntimeAttempt().recordTtfb();
-        getRuntimeAttempt().finish('success');
+        runtimeAttempt.recordTtfb();
+        runtimeAttempt.finish('success');
         return object as T;
       } catch (error) {
         runtimeAttempt?.finish(classifyAiUpstreamOutcome(error));
