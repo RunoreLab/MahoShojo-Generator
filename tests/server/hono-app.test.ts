@@ -136,6 +136,30 @@ describe('Hono server app', () => {
     });
   });
 
+  it('Redis 必需但不可用时 health alias 仍表达 liveness 与 readiness', async () => {
+    const redis = createRedisStub();
+    redis.consumeFixedWindow = vi.fn(async () => null);
+    const app = createHonoApp({ ...config, redisRequired: true }, redis);
+
+    const liveResponse = await app.request('/api/health/live');
+    expect(liveResponse.status).toBe(200);
+    expect(await liveResponse.json()).toMatchObject({
+      ok: true,
+      service: 'mahoshojo-hono',
+      runtime: 'node',
+    });
+
+    const readyResponse = await app.request('/api/health/ready');
+    expect(readyResponse.status).toBe(503);
+    expect(await readyResponse.json()).toMatchObject({
+      ok: false,
+      dependencies: {
+        redis: { configured: false, required: true, ready: false },
+      },
+    });
+    expect(redis.consumeFixedWindow).not.toHaveBeenCalled();
+  });
+
   it('全局 API 限速按客户端 IP 计数', async () => {
     const redis = createRedisStub();
     let capturedIdentity: string | null = null;

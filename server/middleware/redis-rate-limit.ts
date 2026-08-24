@@ -13,9 +13,15 @@ export const redisRateLimit = (
     limit: number;
     windowSeconds: number;
     failureMode: 'open' | 'closed';
+    bypassPaths?: ReadonlySet<string>;
   },
 ): MiddlewareHandler<{ Variables: HonoAppVariables }> => {
   return async (context, next) => {
+    if (options.bypassPaths?.has(context.req.path)) {
+      await next();
+      return;
+    }
+
     let result;
     try {
       result = await redis.consumeFixedWindow({

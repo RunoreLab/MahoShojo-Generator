@@ -12,6 +12,11 @@ import {
   type RuntimeTelemetryService,
 } from '@/server/telemetry/runtime';
 
+const REDIS_RATE_LIMIT_BYPASS_PATHS = new Set([
+  '/api/health/live',
+  '/api/health/ready',
+]);
+
 const matchesWildcardOrigin = (origin: string, rule: string): boolean => {
   const wildcardPrefix = /^(https?):\/\/\*\./i;
   if (!wildcardPrefix.test(rule)) return false;
@@ -76,6 +81,7 @@ export const createHonoApp = (
     limit: 600,
     windowSeconds: 60,
     failureMode: config.redisRequired ? 'closed' : 'open',
+    bypassPaths: REDIS_RATE_LIMIT_BYPASS_PATHS,
   }));
   app.use('/api/auth/*', redisRateLimit(redis, {
     namespace: 'auth',

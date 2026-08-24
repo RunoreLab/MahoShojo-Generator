@@ -49,7 +49,8 @@ Hono 执行范围只包括 machine-readable 清单中明确保留的 API；具�
 
 ## 限速
 
-Hono 对全部 `/api/*` 使用 Redis 固定窗口限速：每个客户端 IP 每 60 秒 600 次。客户端 IP 按
+除 `/api/health/live` 与 `/api/health/ready` 由各自 handler 独立表达 liveness/readiness 外，Hono 对
+其余 `/api/*` 使用 Redis 固定窗口限速：每个客户端 IP 每 60 秒 600 次。客户端 IP 按
 `CF-Connecting-IP`、`X-Forwarded-For` 首项、`X-Real-IP` 的顺序解析；生产反向代理必须清理外部传入的
 这些请求头。无法识别 IP 的请求共享 `unknown` 身份。Redis 不可用且 `REDIS_REQUIRED=false` 时中间件会
 记录错误并降级放行；`REDIS_REQUIRED=true` 时会稳定返回 `503 RATE_LIMIT_UNAVAILABLE`，同时应让流量入口
