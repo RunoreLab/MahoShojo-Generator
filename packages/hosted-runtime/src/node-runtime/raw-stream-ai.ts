@@ -24,6 +24,7 @@ import type {
     RawReasoningStreamEvent,
 } from './types';
 import { LoadBalanceStrategy } from './types';
+import { isAbortRequested, throwIfAborted } from './abort';
 import {
     classifyAiUpstreamOutcome,
     createAiUpstreamAttemptRuntime,
@@ -154,6 +155,7 @@ async function generateWithStreamAIUsing(
 }> {
     const log = dependencies.logger ?? silentLogger;
     const fetchImpl = dependencies.fetch ?? globalThis.fetch;
+    throwIfAborted(options?.abortSignal);
     const baseProviders: AIProvider[] = [
         ...(options?.providerOverride ? [options.providerOverride] : []),
         ...dependencies.providers.map((provider) => ({
@@ -243,6 +245,7 @@ async function generateWithStreamAIUsing(
 
         // 对当前提供商进行重试
 	        for (let attempt = 0; attempt < retryCount; attempt++) {
+            throwIfAborted(options?.abortSignal);
             // 同一 attempt 只记一次：在流真正结束（成功/失败/取消）时落分，而非首包时
             const outcomeRecorder = createAttemptOutcomeRecorder(
                 options?.channelContext,
@@ -519,6 +522,11 @@ async function generateWithStreamAIUsing(
                 // 预检/建连失败：attempt 在返回 Response 前结束（与 onError 共用 once recorder）
                 outcomeRecorder.recordFromError(enhancedError);
                 runtimeAttempt.finish(classifyAiUpstreamOutcome(enhancedError));
+
+                if (isAbortRequested(options?.abortSignal, error)) {
+                    outcomeRecorder.recordFromCancel('abort');
+                    throw error;
+                }
 
                 // 如果不是最后一次尝试，等待后再重试
                 if (attempt < retryCount - 1) {

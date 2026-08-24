@@ -21,6 +21,7 @@ import type {
   NodeAiRuntimeDependencies,
 } from './types';
 import { LoadBalanceStrategy } from './types';
+import { isAbortRequested, throwIfAborted } from './abort';
 import {
   createAiUpstreamAttemptRuntime,
   classifyAiUpstreamOutcome,
@@ -271,6 +272,7 @@ async function generateWithAIUsing<T, I = string>(
   const log = dependencies.logger ?? silentLogger;
   const recordAiChannelOutcome = dependencies.recordAiChannelOutcome ?? (() => undefined);
   const fetchImpl = dependencies.fetch ?? globalThis.fetch;
+  throwIfAborted(options?.abortSignal);
   const baseProviders: AIProvider[] = [
     ...(options?.providerOverride ? [options.providerOverride] : []),
     ...dependencies.providers.map((provider) => ({
@@ -360,6 +362,7 @@ async function generateWithAIUsing<T, I = string>(
 
     // 对当前提供商进行重试
     for (let attempt = 0; attempt < retryCount; attempt++) {
+      throwIfAborted(options?.abortSignal);
       let runtimeAttempt: ReturnType<typeof createAiUpstreamAttemptRuntime> | null = null;
       try {
         log.debug(`开始尝试: 提供商: ${provider.name} 模型: ${selectedModel} 尝试次数: ${attempt + 1} / ${retryCount}`);
@@ -423,6 +426,7 @@ async function generateWithAIUsing<T, I = string>(
             prompt: buildPromptMessages(systemPrompt),
             schema: generationConfig.schema,
             maxRetries: 0,
+            ...(options?.abortSignal ? { abortSignal: options.abortSignal } : {}),
             ...resolvedSettings.standardOptions,
             ...(resolvedSettings.providerOptions ? { providerOptions: resolvedSettings.providerOptions } : {}),
           });
@@ -439,6 +443,7 @@ async function generateWithAIUsing<T, I = string>(
               model,
               prompt: buildPromptMessages(guidedPrompt),
               maxRetries: 0,
+              ...(options?.abortSignal ? { abortSignal: options.abortSignal } : {}),
               ...resolvedSettings.standardOptions,
               ...(resolvedSettings.providerOptions ? { providerOptions: resolvedSettings.providerOptions } : {}),
             });
@@ -497,6 +502,9 @@ async function generateWithAIUsing<T, I = string>(
           finishReason = result.finishReason;
           reasoning = buildNonStreamReasoningEnvelope((result as { reasoning?: unknown }).reasoning, result.usage);
         } catch (rawError) {
+          if (isAbortRequested(options?.abortSignal, rawError)) {
+            throw rawError;
+          }
           // 1) Schema/JSON 生成失败：尝试直接从 error.text 做解析/修复（无需额外调用模型）
           if (NoObjectGeneratedError.isInstance(rawError) && typeof rawError.text === 'string') {
             try {
@@ -524,7 +532,10 @@ async function generateWithAIUsing<T, I = string>(
               // 本地修复失败时，再尝试一次“文本 JSON 回退重试”
               try {
                 return await runTextJsonFallback('NoObjectGeneratedError 分支');
-              } catch {
+              } catch (fallbackError) {
+                if (isAbortRequested(options?.abortSignal, fallbackError)) {
+                  throw fallbackError;
+                }
                 // ignore，继续走后续回退策略
               }
             }
@@ -561,7 +572,10 @@ async function generateWithAIUsing<T, I = string>(
 
             try {
               return await runTextJsonFallback('APICallError 分支');
-            } catch {
+            } catch (fallbackError) {
+              if (isAbortRequested(options?.abortSignal, fallbackError)) {
+                throw fallbackError;
+              }
               // ignore，继续抛出增强后的错误
             }
           }
@@ -602,6 +616,10 @@ async function generateWithAIUsing<T, I = string>(
           const ctx = options.channelContext;
           const outcome = classifyOutcome(ctx.providerId === 'system', error);
           void recordAiChannelOutcome({ providerId: ctx.providerId, modelId: ctx.modelId, ...outcome });
+        }
+
+        if (isAbortRequested(options?.abortSignal, error)) {
+          throw error;
         }
 
         // 如果不是最后一次尝试，等待后再重试
