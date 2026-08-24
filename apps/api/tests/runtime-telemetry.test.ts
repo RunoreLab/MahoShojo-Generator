@@ -210,14 +210,12 @@ describe('Hono runtime telemetry', () => {
     const logger = vi.fn();
     const errorLogger = vi.fn();
     const telemetry = new HonoRuntimeTelemetry({ logger, errorLogger });
-    const detachSampler = telemetry.setRedisResourceSampler(async () => {
-      telemetry.observeRedisServerStats({
-        usedMemoryBytes: 8_192,
-        evictedKeys: 1,
-        keyspaceHits: 9,
-        keyspaceMisses: 2,
-      });
-    });
+    const detachSampler = telemetry.setRedisResourceSampler(async () => ({
+      usedMemoryBytes: 8_192,
+      evictedKeys: 1,
+      keyspaceHits: 9,
+      keyspaceMisses: 2,
+    }));
 
     await telemetry.emitSnapshotWithResources();
     expect(JSON.parse(String(logger.mock.calls[0]?.[0])).redis.server).toMatchObject({
@@ -235,6 +233,77 @@ describe('Hono runtime telemetry', () => {
       expect.any(Error),
     );
     expect(logger).toHaveBeenCalledTimes(2);
+  });
+
+  it('Redis sampler 永久 pending 时有界导出，且迟到结果不污染后续周期', async () => {
+    vi.useFakeTimers();
+    const logger = vi.fn();
+    const errorLogger = vi.fn();
+    let resolveFirst = (value: {
+      usedMemoryBytes: number;
+      evictedKeys: number;
+      keyspaceHits: number;
+      keyspaceMisses: number;
+    }): void => {
+      void value;
+    };
+    const firstSample = new Promise<{
+      usedMemoryBytes: number;
+      evictedKeys: number;
+      keyspaceHits: number;
+      keyspaceMisses: number;
+    }>((resolve) => {
+      resolveFirst = resolve;
+    });
+    const sampler = vi.fn()
+      .mockReturnValueOnce(firstSample)
+      .mockResolvedValueOnce({
+        usedMemoryBytes: 2_048,
+        evictedKeys: 2,
+        keyspaceHits: 4,
+        keyspaceMisses: 1,
+      })
+      .mockReturnValueOnce(new Promise(() => undefined));
+    const telemetry = new HonoRuntimeTelemetry({
+      logger,
+      errorLogger,
+      sampleIntervalMs: 1_000,
+      resourceSampleTimeoutMs: 100,
+    });
+    telemetry.setRedisResourceSampler(sampler);
+    try {
+      const firstExport = telemetry.emitSnapshotWithResources();
+      await vi.advanceTimersByTimeAsync(100);
+      await expect(firstExport).resolves.toBeUndefined();
+      expect(logger).toHaveBeenCalledTimes(1);
+      expect(errorLogger).toHaveBeenCalledWith(
+        '[hono][telemetry] Redis 资源采样超时',
+        expect.any(Error),
+      );
+
+      await telemetry.emitSnapshotWithResources();
+      expect(JSON.parse(String(logger.mock.calls[1]?.[0])).redis.server).toMatchObject({
+        status: 'observed',
+        usedMemoryBytes: 2_048,
+      });
+
+      resolveFirst({
+        usedMemoryBytes: 999_999,
+        evictedKeys: 9,
+        keyspaceHits: 9,
+        keyspaceMisses: 9,
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(telemetry.snapshot().redis.server.usedMemoryBytes).toBe(2_048);
+
+      const flush = telemetry.flushSnapshot();
+      await vi.advanceTimersByTimeAsync(100);
+      await expect(flush).resolves.toBeUndefined();
+      expect(logger).toHaveBeenCalledTimes(3);
+    } finally {
+      telemetry.stop();
+      vi.useRealTimers();
+    }
   });
 
   it('以不含请求正文和凭据的结构化日志导出快照', () => {
@@ -276,6 +345,10 @@ describe('Hono runtime telemetry', () => {
     expect(() => new HonoRuntimeTelemetry({ sampleIntervalMs: Number.POSITIVE_INFINITY })).toThrow(
       /sampleIntervalMs/,
     );
+    expect(() => new HonoRuntimeTelemetry({
+      sampleIntervalMs: 1_000,
+      resourceSampleTimeoutMs: 1_000,
+    })).toThrow(/resourceSampleTimeoutMs/);
 
     const errorLogger = vi.fn();
     const telemetry = new HonoRuntimeTelemetry({

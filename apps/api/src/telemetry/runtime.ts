@@ -15,6 +15,7 @@ import type {
 
 const TELEMETRY_EVENT = 'hono.runtime.telemetry';
 const DEFAULT_SAMPLE_INTERVAL_MS = 60_000;
+const DEFAULT_RESOURCE_SAMPLE_TIMEOUT_MS = 5_000;
 const EVENT_LOOP_DELAY_RESOLUTION_MS = 20;
 const NANOSECONDS_PER_MILLISECOND = 1_000_000;
 
@@ -130,7 +131,36 @@ export type HonoRuntimeTelemetryOptions = {
   logger?: (line: string) => void;
   errorLogger?: (message: string, error: unknown) => void;
   sampleIntervalMs?: number;
+  resourceSampleTimeoutMs?: number;
 };
+
+type ResourceSampleResult = RedisServerStatsObservation | null;
+
+type SettledResourceSample =
+  | { outcome: 'ok'; value: ResourceSampleResult }
+  | { outcome: 'error'; error: unknown }
+  | { outcome: 'timeout' };
+
+const settleResourceSample = (
+  sampler: () => Promise<ResourceSampleResult>,
+  timeoutMs: number,
+): Promise<SettledResourceSample> => new Promise((resolve) => {
+  let settled = false;
+  const finish = (result: SettledResourceSample): void => {
+    if (settled) return;
+    settled = true;
+    clearTimeout(timeout);
+    resolve(result);
+  };
+  const timeout = setTimeout(() => finish({ outcome: 'timeout' }), timeoutMs);
+  timeout.unref();
+  void Promise.resolve()
+    .then(sampler)
+    .then(
+      (value) => finish({ outcome: 'ok', value }),
+      (error: unknown) => finish({ outcome: 'error', error }),
+    );
+});
 
 class ActiveGauge {
   private active = 0;
@@ -275,6 +305,8 @@ export class HonoRuntimeTelemetry implements
 
   private readonly sampleIntervalMs: number;
 
+  private readonly resourceSampleTimeoutMs: number;
+
   private previousCpuUsage = process.cpuUsage();
 
   private previousSampleAt = performance.now();
@@ -283,7 +315,7 @@ export class HonoRuntimeTelemetry implements
 
   private sampleTimer: ReturnType<typeof setInterval> | null = null;
 
-  private redisResourceSampler: (() => Promise<void>) | null = null;
+  private redisResourceSampler: (() => Promise<ResourceSampleResult>) | null = null;
 
   private resourceSnapshotInFlight: Promise<void> | null = null;
 
@@ -292,10 +324,20 @@ export class HonoRuntimeTelemetry implements
     if (!Number.isFinite(sampleIntervalMs) || sampleIntervalMs < 1_000) {
       throw new Error('sampleIntervalMs 必须是大于或等于 1000 的有限数字');
     }
+    const resourceSampleTimeoutMs = options.resourceSampleTimeoutMs
+      ?? Math.min(DEFAULT_RESOURCE_SAMPLE_TIMEOUT_MS, sampleIntervalMs - 1);
+    if (
+      !Number.isFinite(resourceSampleTimeoutMs)
+      || resourceSampleTimeoutMs < 1
+      || resourceSampleTimeoutMs >= sampleIntervalMs
+    ) {
+      throw new Error('resourceSampleTimeoutMs 必须是小于采样周期的正有限数字');
+    }
     this.logger = options.logger ?? ((line) => console.info(line));
     this.errorLogger = options.errorLogger
       ?? ((message, error) => console.error(message, error));
     this.sampleIntervalMs = sampleIntervalMs;
+    this.resourceSampleTimeoutMs = resourceSampleTimeoutMs;
   }
 
   beginRequest(): FinishObservation {
@@ -400,7 +442,7 @@ export class HonoRuntimeTelemetry implements
     };
   }
 
-  setRedisResourceSampler(sampler: () => Promise<void>): () => void {
+  setRedisResourceSampler(sampler: () => Promise<ResourceSampleResult>): () => void {
     this.redisResourceSampler = sampler;
     return () => {
       if (this.redisResourceSampler === sampler) this.redisResourceSampler = null;
@@ -563,10 +605,19 @@ export class HonoRuntimeTelemetry implements
     if (this.resourceSnapshotInFlight) return this.resourceSnapshotInFlight;
     const run = async (): Promise<void> => {
       if (this.redisResourceSampler) {
-        try {
-          await this.redisResourceSampler();
-        } catch (error) {
-          this.reportFailure('[hono][telemetry] Redis 资源采样失败', error);
+        const result = await settleResourceSample(
+          this.redisResourceSampler,
+          this.resourceSampleTimeoutMs,
+        );
+        if (result.outcome === 'ok') {
+          if (result.value) this.observeRedisServerStats(result.value);
+        } else if (result.outcome === 'timeout') {
+          this.reportFailure(
+            '[hono][telemetry] Redis 资源采样超时',
+            new Error('REDIS_RESOURCE_SAMPLE_TIMEOUT'),
+          );
+        } else {
+          this.reportFailure('[hono][telemetry] Redis 资源采样失败', result.error);
         }
       }
       this.emitSnapshot();

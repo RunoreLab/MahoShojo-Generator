@@ -2,6 +2,8 @@ import { createHash } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 import { createClient } from 'redis';
 
+const DEFAULT_REDIS_COMMAND_TIMEOUT_MS = 4_000;
+
 export type RedisRuntimeOperation = 'connect' | 'ping' | 'rate-limit' | 'info';
 
 export type RedisRuntimeOperationOutcome = 'ok' | 'error' | 'unavailable';
@@ -97,6 +99,30 @@ const readInfoMetric = (payload: string | null, key: string): number | null => {
   return normalizeMetricInteger(Number(line.slice(prefix.length).trim()));
 };
 
+const executeWithTimeout = <T>(
+  operation: () => Promise<T>,
+  timeoutMs: number,
+): Promise<T> => new Promise((resolve, reject) => {
+  let settled = false;
+  const finish = (callback: () => void): void => {
+    if (settled) return;
+    settled = true;
+    clearTimeout(timeout);
+    callback();
+  };
+  const timeout = setTimeout(
+    () => finish(() => reject(new Error('REDIS_COMMAND_TIMEOUT'))),
+    timeoutMs,
+  );
+  timeout.unref();
+  void Promise.resolve()
+    .then(operation)
+    .then(
+      (value) => finish(() => resolve(value)),
+      (error: unknown) => finish(() => reject(error)),
+    );
+});
+
 export class RedisRuntime implements RedisService {
   private client: NodeRedisClient | null = null;
   private lastError: string | null = null;
@@ -105,7 +131,12 @@ export class RedisRuntime implements RedisService {
     private readonly redisUrl: string | null,
     private readonly required: boolean,
     private readonly observer: RedisRuntimeObserver = noopRedisRuntimeObserver,
-  ) {}
+    private readonly commandTimeoutMs: number = DEFAULT_REDIS_COMMAND_TIMEOUT_MS,
+  ) {
+    if (!Number.isFinite(commandTimeoutMs) || commandTimeoutMs < 1) {
+      throw new Error('commandTimeoutMs 必须是正有限数字');
+    }
+  }
 
   private observeOperation(observation: RedisRuntimeOperationObservation): void {
     try {
@@ -208,18 +239,38 @@ export class RedisRuntime implements RedisService {
     const limit = Math.max(1, Math.floor(input.limit));
     const windowMs = Math.max(1_000, Math.floor(input.windowSeconds * 1_000));
     const key = `mahoshojo:rate-limit:${input.namespace}:${hashKeyPart(input.identity)}`;
-    let rawResult: unknown;
     const startedAt = performance.now();
     try {
-      rawResult = await this.client.eval(FIXED_WINDOW_SCRIPT, {
+      const rawResult = await this.client.eval(FIXED_WINDOW_SCRIPT, {
         keys: [key],
         arguments: [String(windowMs)],
       });
+      if (!Array.isArray(rawResult) || rawResult.length !== 2) {
+        throw new Error('REDIS_RATE_LIMIT_RESPONSE_INVALID');
+      }
+      const [current, ttlMs] = rawResult;
+      if (
+        typeof current !== 'number'
+        || !Number.isSafeInteger(current)
+        || current < 1
+        || typeof ttlMs !== 'number'
+        || !Number.isSafeInteger(ttlMs)
+        || ttlMs < 1
+        || ttlMs > windowMs
+      ) {
+        throw new Error('REDIS_RATE_LIMIT_RESPONSE_INVALID');
+      }
       this.observeOperation({
         operation: 'rate-limit',
         outcome: 'ok',
         durationMs: Math.max(0, performance.now() - startedAt),
       });
+      return {
+        allowed: current <= limit,
+        limit,
+        remaining: Math.max(0, limit - current),
+        retryAfterSeconds: Math.max(1, Math.ceil(ttlMs / 1_000)),
+      };
     } catch (error) {
       this.lastError = toErrorMessage(error);
       this.observeOperation({
@@ -229,29 +280,22 @@ export class RedisRuntime implements RedisService {
       });
       throw error;
     }
-    const values = Array.isArray(rawResult) ? rawResult : [];
-    const current = Number(values[0] ?? 0);
-    const ttlMs = Math.max(1, Number(values[1] ?? windowMs));
-
-    return {
-      allowed: current <= limit,
-      limit,
-      remaining: Math.max(0, limit - current),
-      retryAfterSeconds: Math.max(1, Math.ceil(ttlMs / 1_000)),
-    };
   }
 
-  async sampleServerStats(): Promise<void> {
+  async sampleServerStats(): Promise<RedisServerStatsObservation | null> {
     const client = this.client;
     if (!client?.isReady) {
       this.observeOperation({ operation: 'info', outcome: 'unavailable', durationMs: 0 });
-      return;
+      return null;
     }
 
     const readInfo = async (section: 'memory' | 'stats'): Promise<string | null> => {
       const startedAt = performance.now();
       try {
-        const payload = await client.info(section);
+        const payload = await executeWithTimeout(
+          () => client.info(section),
+          this.commandTimeoutMs,
+        );
         this.observeOperation({
           operation: 'info',
           outcome: 'ok',
@@ -273,14 +317,14 @@ export class RedisRuntime implements RedisService {
       readInfo('memory'),
       readInfo('stats'),
     ]);
-    if (memoryInfo === null && statsInfo === null) return;
+    if (memoryInfo === null && statsInfo === null) return null;
 
-    this.observeServerStats({
+    return {
       usedMemoryBytes: readInfoMetric(memoryInfo, 'used_memory'),
       evictedKeys: readInfoMetric(statsInfo, 'evicted_keys'),
       keyspaceHits: readInfoMetric(statsInfo, 'keyspace_hits'),
       keyspaceMisses: readInfoMetric(statsInfo, 'keyspace_misses'),
-    });
+    };
   }
 
   async close(): Promise<void> {

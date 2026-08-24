@@ -53,7 +53,12 @@ describe('RedisRuntime shutdown', () => {
       limit: 10,
       windowSeconds: 60,
     })).resolves.toMatchObject({ allowed: true, remaining: 8 });
-    await redis.sampleServerStats();
+    await expect(redis.sampleServerStats()).resolves.toEqual({
+      usedMemoryBytes: 4_096,
+      evictedKeys: 7,
+      keyspaceHits: 13,
+      keyspaceMisses: 5,
+    });
 
     expect(observeRedisOperation).toHaveBeenCalledTimes(5);
     expect(observeRedisOperation).toHaveBeenCalledWith(expect.objectContaining({
@@ -73,12 +78,7 @@ describe('RedisRuntime shutdown', () => {
       operation: 'info',
       outcome: 'ok',
     }));
-    expect(observeRedisServerStats).toHaveBeenCalledWith({
-      usedMemoryBytes: 4_096,
-      evictedKeys: 7,
-      keyspaceHits: 13,
-      keyspaceMisses: 5,
-    });
+    expect(observeRedisServerStats).not.toHaveBeenCalled();
     expect(JSON.stringify(observeRedisOperation.mock.calls)).not.toContain(
       'sensitive-user-id',
     );
@@ -94,13 +94,68 @@ describe('RedisRuntime shutdown', () => {
     });
     await redis.connect();
 
-    await expect(redis.sampleServerStats()).resolves.toBeUndefined();
+    await expect(redis.sampleServerStats()).resolves.toBeNull();
     expect(observeRedisOperation).toHaveBeenCalledWith(expect.objectContaining({
       operation: 'info',
       outcome: 'error',
     }));
     expect(observeRedisServerStats).not.toHaveBeenCalled();
     expect(JSON.stringify(observeRedisOperation.mock.calls)).not.toContain('endpoint secret');
+  });
+
+  it.each([
+    ['非数组', { current: 1, ttl: 1_000 }],
+    ['缺少 TTL', [1]],
+    ['current 为零', [0, 1_000]],
+    ['current 非整数', [1.5, 1_000]],
+    ['TTL 为零', [1, 0]],
+    ['TTL 超出窗口', [1, 60_001]],
+    ['包含 NaN', [Number.NaN, 1_000]],
+  ])('固定窗口拒绝异常 Redis 响应并记录 error：%s', async (_label, rawResult) => {
+    redisClient.eval.mockResolvedValueOnce(rawResult);
+    const observeRedisOperation = vi.fn<RedisRuntimeObserver['observeRedisOperation']>();
+    const redis = new RedisRuntime('redis://example.test:6379', true, {
+      observeRedisOperation,
+      observeRedisServerStats: vi.fn(),
+    });
+    await redis.connect();
+
+    await expect(redis.consumeFixedWindow({
+      namespace: 'api',
+      identity: 'malformed-response-user',
+      limit: 10,
+      windowSeconds: 60,
+    })).rejects.toThrow('REDIS_RATE_LIMIT_RESPONSE_INVALID');
+    expect(observeRedisOperation).toHaveBeenCalledWith(expect.objectContaining({
+      operation: 'rate-limit',
+      outcome: 'error',
+    }));
+    expect(observeRedisOperation).not.toHaveBeenCalledWith(expect.objectContaining({
+      operation: 'rate-limit',
+      outcome: 'ok',
+    }));
+  });
+
+  it('INFO 永久 pending 时按命令超时 fail-soft，不阻塞资源采样', async () => {
+    vi.useFakeTimers();
+    redisClient.info.mockImplementation(() => new Promise(() => undefined));
+    const observeRedisOperation = vi.fn<RedisRuntimeObserver['observeRedisOperation']>();
+    const redis = new RedisRuntime('redis://example.test:6379', true, {
+      observeRedisOperation,
+      observeRedisServerStats: vi.fn(),
+    }, 100);
+    try {
+      await redis.connect();
+      const sample = redis.sampleServerStats();
+      await vi.advanceTimersByTimeAsync(100);
+
+      await expect(sample).resolves.toBeNull();
+      expect(observeRedisOperation.mock.calls.filter(([observation]) => (
+        observation.operation === 'info' && observation.outcome === 'error'
+      ))).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('在请求与后台任务 drain 后直接 destroy，避免 close 后无法强制断连', async () => {
