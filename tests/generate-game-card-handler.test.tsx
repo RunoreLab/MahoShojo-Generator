@@ -42,16 +42,12 @@ vi.mock('@/lib/ai', () => ({
   LoadBalanceStrategy: { CUSTOM: 'custom', SEQUENTIAL: 'sequential' },
   generateWithAI: mocks.generateWithAI,
 }));
-vi.mock('@/lib/ai/availability', () => ({
-  buildChannelContextFromPayload: vi.fn(() => undefined),
-}));
 vi.mock('@/lib/ai/meta-response', () => ({
   buildJsonResponseWithOptionalAiMeta: mocks.buildJsonResponseWithOptionalAiMeta,
 }));
 vi.mock('@/lib/ai/public-rate-limit', () => ({
   acquirePublicAiRateLimit: mocks.acquirePublicAiRateLimit,
   buildPublicAiRateLimitResponse: vi.fn(),
-  inferPublicAiProviderMode: vi.fn(() => 'system'),
 }));
 vi.mock('@/lib/content-safety/server', () => ({
   enforceTextSafety: mocks.enforceTextSafety,
@@ -168,6 +164,35 @@ test('卡牌生成保留 custom Provider 的 legacy SEQUENTIAL 策略', async ()
     apiKey: 'test-provider-key',
   });
   expect(mocks.recordUserActivityFromRequest).toHaveBeenCalledOnce();
+});
+
+test('DeepSeek legacy alias 仅规范化 Provider override，availability channel 保留原 modelId', async () => {
+  const response = await handler(
+    new Request('https://example.test/api/generate-game-card', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sourceCardJson: '{"safe":true}',
+        customProvider: {
+          providerId: 'deepseek',
+          modelId: 'deepseek-v4-flash-0731',
+          apiKey: ' test-provider-key ',
+        },
+      }),
+    }),
+  );
+
+  expect(response.status).toBe(200);
+  const aiOptions = mocks.generateWithAI.mock.calls[0]?.[2] as any;
+  expect(aiOptions.providerOverride).toMatchObject({
+    providerId: 'deepseek',
+    model: 'deepseek-v4-flash',
+    apiKey: 'test-provider-key',
+  });
+  expect(aiOptions.channelContext).toEqual({
+    providerId: 'deepseek',
+    modelId: 'deepseek-v4-flash-0731',
+  });
 });
 
 test('卡牌工坊展示 Token 指示器', () => {

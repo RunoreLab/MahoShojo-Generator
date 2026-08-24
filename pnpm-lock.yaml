@@ -366,6 +366,10 @@ importers:
         version: 4.1.7(@opentelemetry/api@1.9.1)(@types/node@20.19.27)(msw@2.15.0(@types/node@20.19.27)(typescript@5.9.3))(vite@8.0.16(@types/node@20.19.27)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.16.9)(tsx@4.22.4)(yaml@2.9.0))
 
   packages/domain:
+    dependencies:
+      zod:
+        specifier: ^4.1.13
+        version: 4.3.6
     devDependencies:
       '@types/node':
         specifier: ^20

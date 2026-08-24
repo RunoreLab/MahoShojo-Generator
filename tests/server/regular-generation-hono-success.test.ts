@@ -38,6 +38,25 @@ const mocks = vi.hoisted(() => ({
     if (taskName === '生成魔法少女详细信息') {
       return { codename: '测试花名' };
     }
+    if (taskName === 'generate-game-card') {
+      options.telemetry.model = 'game-card-test-model';
+      return {
+        cardName: '测试卡牌',
+        rarity: 'common',
+        cardType: 'character',
+        element: 'neutral',
+        cost: 1,
+        attack: 1,
+        defense: 1,
+        hp: 1,
+        effects: [{ type: '被动', description: '测试效果' }],
+        traits: ['测试'],
+        flavorText: '测试',
+        powerLevel: 'C',
+        description: '测试卡面',
+        themeColor: '#ffffff',
+      };
+    }
     return {
       title: '测试情景',
       scenario_type: '日常',
@@ -175,6 +194,50 @@ describe('常规生成 Hono production composition', () => {
     });
     expect(mocks.events).toEqual(['generate', 'activity', 'signature']);
     expect(mocks.generateSignature).toHaveBeenCalledOnce();
+    expect(mocks.recordActivity).toHaveBeenCalledOnce();
+  });
+
+  it('经 dispatcher 复用 Game Card 的 AI、输出策略、活动与 AI meta composition', async () => {
+    mocks.events.length = 0;
+    const app = createHonoApp(config, redis);
+    const response = await app.request('/api/generate-game-card', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Mahoshojo-AI-Meta': 'true',
+        'X-Mahoshojo-Activity-Token': 'activity-token',
+      },
+      body: JSON.stringify({
+        sourceCardJson: '{"templateId":"魔法少女/心之花/魔法少女（名字生成）"}',
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('x-backend-runtime')).toBe('hono-node');
+    expect(await response.json()).toEqual({
+      data: {
+        faceData: {
+          cardName: '测试卡牌',
+          rarity: 'common',
+          cardType: 'character',
+          element: 'neutral',
+          cost: 1,
+          attack: 1,
+          defense: 1,
+          hp: 1,
+          effects: [{ type: '被动', description: '测试效果' }],
+          traits: ['测试'],
+          flavorText: '测试',
+          powerLevel: 'C',
+          description: '测试卡面',
+          themeColor: '#ffffff',
+        },
+        sourceCardKind: 'magical-girl',
+      },
+      aiMeta: { aiModel: 'game-card-test-model' },
+    });
+    expect(mocks.events).toEqual(['generate', 'activity']);
+    expect(mocks.generateSignature).not.toHaveBeenCalled();
     expect(mocks.recordActivity).toHaveBeenCalledOnce();
   });
 

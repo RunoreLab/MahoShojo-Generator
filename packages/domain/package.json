@@ -14,6 +14,11 @@
       "import": "./src/data-cards.ts",
       "default": "./src/data-cards.ts"
     },
+    "./game-card": {
+      "types": "./src/game-card.ts",
+      "import": "./src/game-card.ts",
+      "default": "./src/game-card.ts"
+    },
     "./main-color": {
       "types": "./src/main-color.ts",
       "import": "./src/main-color.ts",
@@ -29,6 +34,9 @@
     "test": "vitest run --config vitest.config.ts",
     "lint": "eslint src tests --config eslint.config.mjs",
     "build": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "zod": "^4.1.13"
   },
   "devDependencies": {
     "@types/node": "^20",

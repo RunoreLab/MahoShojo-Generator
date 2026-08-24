@@ -14,6 +14,11 @@
       "import": "./src/generate-magical-girl-runtime.ts",
       "default": "./src/generate-magical-girl-runtime.ts"
     },
+    "./generate-game-card-runtime": {
+      "types": "./src/generate-game-card-runtime.ts",
+      "import": "./src/generate-game-card-runtime.ts",
+      "default": "./src/generate-game-card-runtime.ts"
+    },
     "./ai-upstream": {
       "types": "./src/ai-upstream.ts",
       "import": "./src/ai-upstream.ts",
