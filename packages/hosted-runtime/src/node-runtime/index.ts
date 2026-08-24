@@ -7,6 +7,15 @@ export {
 export { parseAIProvidersFromEnv } from './providers';
 export { getProviderFetch } from './provider-fetch';
 export {
+  CANSHOU_LORE,
+  QUESTIONNAIRE_PRESET_INDEX,
+  getRandomFlowers,
+  getRandomFlowersArray,
+  randomChooseHanaName,
+  randomChooseOneHanaName,
+  type Flower,
+} from './static-assets';
+export {
   createNodeD1ClientFromEnvironment,
   getDefaultNodeD1Client,
   type CreateNodeD1ClientOptions,

@@ -1,0 +1,153 @@
+{
+  "presets": [
+    {
+      "id": "magical-girl-default",
+      "kind": "magical-girl",
+      "title": "魔法少女调查问卷 ~ 奇妙妖精大调查",
+      "description": "回答问卷，生成您的专属魔法少女",
+      "path": "/questionnaires/presets/magical-girl-default.json",
+      "isDefault": true
+    },
+    {
+      "id": "magical-girl-heart-compass",
+      "kind": "magical-girl",
+      "title": "魔法少女潜力测试：心之罗盘",
+      "description": "偏测试/预测型问卷：用选择与短回答描绘你的倾向，其余细节交给 AI 补完。",
+      "path": "/questionnaires/presets/magical-girl-heart-compass.json"
+    },
+    {
+      "id": "magical-girl-squad-dynamics",
+      "kind": "magical-girl",
+      "title": "魔法少女小队定位测验：并肩与裂痕",
+      "description": "偏测试/预测型问卷：通过团队情境题推断你的小队位置、关系线与成长矛盾。",
+      "path": "/questionnaires/presets/magical-girl-squad-dynamics.json"
+    },
+    {
+      "id": "magical-girl-immersive-vn",
+      "kind": "magical-girl",
+      "title": "沉浸式剧情车卡问卷：分歧之路",
+      "description": "像视觉小说一样做选择：普通人→心之种→成长/普通人结局；包含条件显示与跳题。",
+      "path": "/questionnaires/presets/magical-girl-immersive-vn.json"
+    },
+    {
+      "id": "girl-band-taiban-war-1.1",
+      "kind": "magical-girl",
+      "title": "乐队少女问卷",
+      "description": "用于生成“少女乐队/对邦”世界线的角色档案：乐队经历、位置/担当、乐器与设备、曲风、技术、现实压力、关系性引信等。支持：流式通用角色卡（直接输出少女乐队设定）/ 非流式魔法少女 Schema（将少女乐队设定映射进字段）。",
+      "path": "/questionnaires/presets/girl-band-taiban-war-1.1.json"
+    },
+    {
+      "id": "magical-girl-afterwork-world",
+      "kind": "magical-girl",
+      "title": "原作世界观向：魔法少女成长路线问卷",
+      "description": "面向原作世界观：城市/阵营/等阶/魔力属性/基础魔力技艺/本相/魔装/术式/奇境/盛开/繁开等设定补全（可跳过）。",
+      "path": "/questionnaires/presets/magical-girl-afterwork-world.json"
+    },
+    {
+      "id": "magical-girl-afterwork-world-lore-core",
+      "kind": "magical-girl",
+      "title": "设定卡（原作）：世界结构与势力速查",
+      "description": "纯设定卡：三界结构、王庭五院、核心势力/组织等速查（默认不选，可选叠加）。",
+      "path": "/questionnaires/presets/magical-girl-afterwork-world-lore-core.json"
+    },
+    {
+      "id": "magical-girl-afterwork-world-lore-power-system",
+      "kind": "magical-girl",
+      "title": "设定卡（原作）：心之花体系与能力边界（留空规则）",
+      "description": "纯设定卡：心之花解锁顺序 + 魔力属性/基础技艺边界 + 越级禁令与留空规则（默认不选，可选叠加）。",
+      "path": "/questionnaires/presets/magical-girl-afterwork-world-lore-power-system.json"
+    },
+    {
+      "id": "magical-girl-wastetrace-traveler",
+      "kind": "magical-girl",
+      "title": "废土行迹世界观向：旅人角色问卷",
+      "description": "用于生成废土世界的角色档案：推荐用于通用角色卡，生成废土旅人、调查者、护送者、探路者等角色。",
+      "path": "/questionnaires/presets/magical-girl-wastetrace-traveler.json"
+    },
+    {
+      "id": "canshou-default",
+      "kind": "canshou",
+      "title": "研究院残兽调查",
+      "description": "前进吧，残兽！",
+      "path": "/questionnaires/presets/canshou-default.json",
+      "isDefault": true
+    },
+    {
+      "id": "canshou-hunger-shape",
+      "kind": "canshou",
+      "title": "残兽本能测试：饥饿的形状",
+      "description": "偏测试/预测型问卷：用本能、狩猎与恐惧的选择题勾勒残兽，其余细节交给 AI 补完。",
+      "path": "/questionnaires/presets/canshou-hunger-shape.json"
+    },
+    {
+      "id": "canshou-nest-echo",
+      "kind": "canshou",
+      "title": "残兽生态测试：巢与回声",
+      "description": "偏测试/预测型问卷：用“领地、规则、传播方式”的选择题描出残兽生态与对抗要点。",
+      "path": "/questionnaires/presets/canshou-nest-echo.json"
+    },
+    {
+      "id": "canshou-afterwork-world",
+      "kind": "canshou",
+      "title": "原作世界观向：残兽设定与进化路线问卷",
+      "description": "面向原作世界观：核心概念/进化阶段/巢穴与规则/出现方式/社会影响等设定补全（可跳过）。",
+      "path": "/questionnaires/presets/canshou-afterwork-world.json"
+    },
+    {
+      "id": "canshou-afterwork-world-lore-core",
+      "kind": "canshou",
+      "title": "设定卡（原作）：世界结构与势力速查",
+      "description": "纯设定卡：三界结构、王庭五院、核心势力/组织等速查（默认不选，可选叠加）。",
+      "path": "/questionnaires/presets/canshou-afterwork-world-lore-core.json"
+    },
+    {
+      "id": "canshou-afterwork-world-lore-evolution",
+      "kind": "canshou",
+      "title": "设定卡（原作）：残兽生态与进化速查",
+      "description": "纯设定卡：进化阶段、巢穴与规则、对抗常识等速查（默认不选，可选叠加）。",
+      "path": "/questionnaires/presets/canshou-afterwork-world-lore-evolution.json"
+    },
+    {
+      "id": "magical-girl-full-profile",
+      "kind": "magical-girl",
+      "title": "魔法少女全面角色设定问卷",
+      "description": "更细致地描绘魔法少女的外观、能力与人生轨迹",
+      "path": "/questionnaires/presets/magical-girl-full-profile.json"
+    },
+    {
+      "id": "canshou-full-profile",
+      "kind": "canshou",
+      "title": "残兽全面设定问卷",
+      "description": "更完整的残兽外观、能力与动机设定",
+      "path": "/questionnaires/presets/canshou-full-profile.json"
+    },
+    {
+      "id": "magical-girl-mbti-profile",
+      "kind": "magical-girl",
+      "title": "魔法少女个人信息 + 性格倾向（MBTI）问卷",
+      "description": "可全空、可跳过；支持简版/完整版；用于角色塑造的 MBTI 风格倾向题",
+      "path": "/questionnaires/presets/magical-girl-mbti-profile.json"
+    },
+    {
+      "id": "canshou-mbti-profile",
+      "kind": "canshou",
+      "title": "残兽个人信息 + 行为倾向（MBTI）问卷",
+      "description": "可全空、可跳过；支持简版/完整版；用于残兽塑造的 MBTI 风格倾向题",
+      "path": "/questionnaires/presets/canshou-mbti-profile.json"
+    },
+    {
+      "id": "magical-girl-100-questions",
+      "kind": "magical-girl",
+      "title": "魔法少女百题大问卷（深度版）",
+      "description": "基于百题大问卷，适合深度塑造魔法少女角色",
+      "path": "/questionnaires/presets/magical-girl-100-questions.json"
+    },
+    {
+      "id": "canshou-100-questions",
+      "kind": "canshou",
+      "title": "残兽百题大问卷（深度版）",
+      "description": "基于百题改编，强化残兽核心概念与对抗设定",
+      "path": "/questionnaires/presets/canshou-100-questions.json"
+    }
+  ]
+}

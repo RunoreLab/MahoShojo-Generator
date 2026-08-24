@@ -69,6 +69,66 @@
       "import": "./src/node-runtime/data-ports.ts",
       "default": "./src/node-runtime/data-ports.ts"
     },
+    "./node-runtime/static-assets": {
+      "types": "./src/node-runtime/static-assets.ts",
+      "import": "./src/node-runtime/static-assets.ts",
+      "default": "./src/node-runtime/static-assets.ts"
+    },
+    "./creator/build-rule-projection": {
+      "types": "./src/creator/build-rule-projection.ts",
+      "import": "./src/creator/build-rule-projection.ts",
+      "default": "./src/creator/build-rule-projection.ts"
+    },
+    "./creator/build-rule-request": {
+      "types": "./src/creator/build-rule-request.ts",
+      "import": "./src/creator/build-rule-request.ts",
+      "default": "./src/creator/build-rule-request.ts"
+    },
+    "./creator/build-rule-runtime": {
+      "types": "./src/creator/build-rule-runtime.ts",
+      "import": "./src/creator/build-rule-runtime.ts",
+      "default": "./src/creator/build-rule-runtime.ts"
+    },
+    "./creator/build-rules": {
+      "types": "./src/creator/build-rules.ts",
+      "import": "./src/creator/build-rules.ts",
+      "default": "./src/creator/build-rules.ts"
+    },
+    "./creator/card-metadata": {
+      "types": "./src/creator/card-metadata.ts",
+      "import": "./src/creator/card-metadata.ts",
+      "default": "./src/creator/card-metadata.ts"
+    },
+    "./creator/prompt": {
+      "types": "./src/creator/prompt.ts",
+      "import": "./src/creator/prompt.ts",
+      "default": "./src/creator/prompt.ts"
+    },
+    "./creator/server": {
+      "types": "./src/creator/server.ts",
+      "import": "./src/creator/server.ts",
+      "default": "./src/creator/server.ts"
+    },
+    "./creator/templates": {
+      "types": "./src/creator/templates.ts",
+      "import": "./src/creator/templates.ts",
+      "default": "./src/creator/templates.ts"
+    },
+    "./creator/types": {
+      "types": "./src/creator/types.ts",
+      "import": "./src/creator/types.ts",
+      "default": "./src/creator/types.ts"
+    },
+    "./canshou-lore": {
+      "types": "./src/canshou-lore.ts",
+      "import": "./src/canshou-lore.ts",
+      "default": "./src/canshou-lore.ts"
+    },
+    "./random-choose-hana-name": {
+      "types": "./src/random-choose-hana-name.ts",
+      "import": "./src/random-choose-hana-name.ts",
+      "default": "./src/random-choose-hana-name.ts"
+    },
     "./node-runtime/env-signature": {
       "types": "./src/node-runtime/env-signature.ts",
       "import": "./src/node-runtime/env-signature.ts",
