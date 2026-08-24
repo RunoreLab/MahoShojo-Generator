@@ -8,7 +8,7 @@ import {
   normalizeQuestionnaires,
   resolveAnswerItems,
   resolveNativeQuestionnaires,
-} from '@/lib/hosted-api/questionnaire-generation-runtime';
+} from '../src/questionnaire-generation-runtime';
 
 const questionnaire = (overrides: Record<string, unknown> = {}) => ({
   id: 'mg-default',

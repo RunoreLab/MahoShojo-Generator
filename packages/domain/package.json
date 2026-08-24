@@ -13,6 +13,11 @@
       "types": "./src/data-cards.ts",
       "import": "./src/data-cards.ts",
       "default": "./src/data-cards.ts"
+    },
+    "./questionnaire": {
+      "types": "./src/questionnaire.ts",
+      "import": "./src/questionnaire.ts",
+      "default": "./src/questionnaire.ts"
     }
   },
   "scripts": {

@@ -19,6 +19,11 @@
       "import": "./src/signature.ts",
       "default": "./src/signature.ts"
     },
+    "./questionnaire-generation-runtime": {
+      "types": "./src/questionnaire-generation-runtime.ts",
+      "import": "./src/questionnaire-generation-runtime.ts",
+      "default": "./src/questionnaire-generation-runtime.ts"
+    },
     "./telemetry": {
       "types": "./src/telemetry.ts",
       "import": "./src/telemetry.ts",
@@ -29,6 +34,9 @@
     "test": "vitest run --config vitest.config.ts",
     "lint": "eslint src tests --config eslint.config.mjs",
     "build": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@mahoshojo/domain": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^20",
