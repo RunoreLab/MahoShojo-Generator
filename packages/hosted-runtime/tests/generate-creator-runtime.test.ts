@@ -105,7 +105,7 @@ describe('generate creator hosted runtime', () => {
       loadDataCard: async () => null,
       resolveBuildRules: (raw) => {
         events.push(`build-rules:${Array.isArray(raw) ? raw.length : -1}`);
-        return [buildRule];
+        return Array.isArray(raw) && raw.length > 0 ? [buildRule] : [];
       },
       validateCreatorRequest: (input) => {
         events.push(`validate:${input.template}:${input.primaryRuleId}`);
@@ -117,12 +117,14 @@ describe('generate creator hosted runtime', () => {
           userIntent: input.freeformBrief ?? '',
           questionnaireSummary: '问卷摘要',
           buildRuleProjection: {
-            primary: {
-              ruleId: 'rule-primary',
-              template: input.template,
-              facts: buildRule,
-              summary: '力量固定为 3',
-            },
+            primary: input.buildRules.length > 0
+              ? {
+                  ruleId: 'rule-primary',
+                  template: input.template,
+                  facts: buildRule,
+                  summary: '力量固定为 3',
+                }
+              : null,
             references: [],
           },
         };
@@ -131,7 +133,7 @@ describe('generate creator hosted runtime', () => {
         template: input.template,
         freeformBrief: input.freeformBrief,
         buildRules: input.buildRules,
-        primaryRuleId: input.primaryRuleId,
+        ...('primaryRuleId' in input ? { primaryRuleId: input.primaryRuleId } : {}),
       }),
       getRandomFlowers: () => '雾灯花：守望',
       checkRateLimit: async ({ actionType, providerMode }) => {
@@ -147,7 +149,11 @@ describe('generate creator hosted runtime', () => {
         const prompt = config.promptBuilder(input);
         expect(config.taskName).toBe('生成魔法少女详细信息');
         expect(config.schema.safeParse(generatedMagicalGirl).success).toBe(true);
-        expect(prompt).toContain('【主规则事实】\n力量固定为 3');
+        if (events.filter((event) => event.startsWith('generate:')).length === 1) {
+          expect(prompt).toContain('【主规则事实】\n力量固定为 3');
+        } else {
+          expect(prompt).not.toContain('【主规则事实】');
+        }
         expect(prompt).toContain('【参考设定】\n【设定来源：原生魔法少女问卷】\n原生世界观事实');
         expect(prompt).toContain('Q: 你守护什么？\nA: 迷路的人');
         expect(prompt).toContain('雾灯花：守望');
@@ -237,5 +243,38 @@ describe('generate creator hosted runtime', () => {
       'response:canonical-model',
     ]);
     expect(JSON.stringify(events)).not.toContain('top-secret-key');
+
+    const noRuleResponse = await runtime.service(createRequest({
+      template: 'magical-girl',
+      language: 'zh-CN',
+      allowNativeSignature: true,
+      freeformBrief: '无 build rule',
+      questionnaires: [presetQuestionnaire],
+      questionnaireSelections: [{
+        source: 'preset',
+        kind: 'magical-girl',
+        presetId: 'native-magical-girl',
+      }],
+      answers: [{
+        questionnaireId: 'native-magical-girl',
+        questionId: 'q-1',
+        answer: '迷路的人',
+      }],
+      customProvider: {
+        providerId: 'deepseek',
+        modelId: 'alias-model',
+        apiKey: 'top-secret-key',
+      },
+    }));
+    const noRuleBody = await noRuleResponse.json() as {
+      data: { creationInputs: Record<string, unknown>; buildState?: unknown };
+    };
+    expect(noRuleResponse.status).toBe(200);
+    expect(noRuleBody.data.creationInputs).toEqual({
+      template: 'magical-girl',
+      freeformBrief: '无 build rule',
+      buildRules: [],
+    });
+    expect(noRuleBody.data).not.toHaveProperty('buildState');
   });
 });

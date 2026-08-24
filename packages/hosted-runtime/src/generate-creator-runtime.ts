@@ -156,7 +156,7 @@ export interface GenerateCreatorRuntimeDependencies
     template: CreatorTemplateId;
     freeformBrief: string | null;
     buildRules: CreatorBuildRuleRuntimeResult[];
-    primaryRuleId: string | null;
+    primaryRuleId?: string | null;
   }): unknown;
   getRandomFlowers(): string;
   checkRateLimit(_input: {
@@ -391,7 +391,7 @@ export const createGenerateCreatorRuntime = (
         template: input.template,
         freeformBrief: input.freeformBrief,
         buildRules: input.buildRules,
-        primaryRuleId: input.primaryRuleId,
+        ...(input.primaryRuleId ? { primaryRuleId: input.primaryRuleId } : {}),
       });
       const buildState = input.buildRules.length > 0
         ? {
