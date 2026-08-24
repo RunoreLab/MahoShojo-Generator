@@ -26,12 +26,18 @@ describe('graceful shutdown signal wiring', () => {
     ['SIGTERM', 'SIGTERM'],
     ['SIGINT', 'SIGINT'],
     ['SIGTERM', 'SIGINT'],
-  ])('收到 %s 后 cleanup 中再收到 %s 仍只完成一条退出链', async (first, second) => {
+  ])('收到 %s 后 cleanup 中再收到 %s 会强制失败退出', async (first, second) => {
     const signalSource = new EventEmitter();
     const deferred = createDeferred();
     const shutdown = vi.fn(() => deferred.promise);
     const exit = vi.fn();
-    disposers.push(wireGracefulShutdownSignals({ exit, shutdown, signalSource }));
+    const forceExitLogger = vi.fn();
+    disposers.push(wireGracefulShutdownSignals({
+      exit,
+      forceExitLogger,
+      shutdown,
+      signalSource,
+    }));
 
     signalSource.emit(first);
     signalSource.emit(second);
@@ -39,13 +45,16 @@ describe('graceful shutdown signal wiring', () => {
 
     expect(shutdown).toHaveBeenCalledTimes(1);
     expect(shutdown).toHaveBeenCalledWith(first);
-    expect(exit).not.toHaveBeenCalled();
+    expect(forceExitLogger).toHaveBeenCalledWith(
+      `[hono] 优雅退出期间再次收到 ${second}，立即强制退出`,
+    );
+    expect(exit).toHaveBeenCalledTimes(1);
+    expect(exit).toHaveBeenCalledWith(1);
 
     deferred.resolve();
     await new Promise<void>((resolve) => setImmediate(resolve));
 
     expect(exit).toHaveBeenCalledTimes(1);
-    expect(exit).toHaveBeenCalledWith(0);
 
     signalSource.emit(first);
     signalSource.emit(second);
@@ -70,7 +79,6 @@ describe('graceful shutdown signal wiring', () => {
     }));
 
     signalSource.emit('SIGTERM');
-    signalSource.emit('SIGINT');
     await new Promise<void>((resolve) => setImmediate(resolve));
 
     expect(shutdown).toHaveBeenCalledTimes(1);
@@ -98,7 +106,6 @@ describe('graceful shutdown signal wiring', () => {
 
     process.on('unhandledRejection', onUnhandledRejection);
     try {
-      signalSource.emit('SIGTERM');
       signalSource.emit('SIGTERM');
       await new Promise<void>((resolve) => setImmediate(resolve));
     } finally {
@@ -189,7 +196,7 @@ const waitForMarker = async (
 };
 
 describe('graceful shutdown real Node signals', () => {
-  it('第二个 SIGTERM 不会中断已开始的 cleanup', async () => {
+  it('第二个 SIGTERM 会中断已开始的 cleanup 并失败退出', async () => {
     const fixture = path.join(
       process.cwd(),
       'tests/server/fixtures/shutdown-signal-child.ts',
@@ -230,11 +237,10 @@ describe('graceful shutdown real Node signals', () => {
           NodeJS.Signals | null,
         ];
         expect(signal).toBeNull();
-        expect(code).toBe(0);
+        expect(code).toBe(1);
         const markers = await readMarkers(markerPath);
-        expect(markers).toContain('cleanup-marker\n');
-        expect(markers.match(/cleanup-marker/g)).toHaveLength(1);
-        expect(stderr).toBe('');
+        expect(markers).not.toContain('cleanup-marker\n');
+        expect(stderr).toContain('立即强制退出');
       } finally {
         if (child.exitCode === null && child.signalCode === null) {
           const childExited = once(child, 'exit');

@@ -4,6 +4,7 @@ import { readHonoServerConfig } from '@/server/config';
 import { RedisRuntime } from '@/server/redis/runtime';
 import {
   createSingleRunShutdown,
+  DEFAULT_DEPENDENCY_CLOSE_GRACE_TIMEOUT_MS,
   DEFAULT_SERVER_CLOSE_GRACE_TIMEOUT_MS,
   DEFAULT_WAIT_UNTIL_DRAIN_TIMEOUT_MS,
   nodeExecutionContextCoordinator,
@@ -42,7 +43,9 @@ if (process.env.HONO_CONFIG_CHECK_ONLY === 'true') {
       const drainResult = await shutdownWithWaitUntilDrain({
         closeDependencies: () => redis.close(),
         coordinator: nodeExecutionContextCoordinator,
+        dependencyCloseTimeoutMs: DEFAULT_DEPENDENCY_CLOSE_GRACE_TIMEOUT_MS,
         drainTimeoutMs: DEFAULT_WAIT_UNTIL_DRAIN_TIMEOUT_MS,
+        forceCloseDependencies: () => redis.forceClose(),
         stopAcceptingRequests: async () => {
           const closeResult = await stopAcceptingRequestsWithGrace(server, {
             timeoutMs: DEFAULT_SERVER_CLOSE_GRACE_TIMEOUT_MS,
@@ -59,6 +62,12 @@ if (process.env.HONO_CONFIG_CHECK_ONLY === 'true') {
         console.error(
           `[hono][waitUntil] 优雅退出等待 ${DEFAULT_WAIT_UNTIL_DRAIN_TIMEOUT_MS}ms 后超时，`
           + `仍有 ${drainResult.pendingTaskCount} 个后台任务`,
+        );
+      }
+      if (drainResult.dependencyCloseTimedOut) {
+        console.error(
+          `[hono][shutdown] 依赖关闭等待 ${DEFAULT_DEPENDENCY_CLOSE_GRACE_TIMEOUT_MS}ms 后超时，`
+          + '已强制断开剩余依赖连接',
         );
       }
     } finally {

@@ -2,8 +2,10 @@ import type { NodeExecutionContext } from '@/server/routes/types';
 
 export const DEFAULT_WAIT_UNTIL_DRAIN_TIMEOUT_MS = 10_000;
 export const DEFAULT_SERVER_CLOSE_GRACE_TIMEOUT_MS = 10_000;
+export const DEFAULT_DEPENDENCY_CLOSE_GRACE_TIMEOUT_MS = 10_000;
 
 type ErrorLogger = (message: string, error: unknown) => void | PromiseLike<void>;
+type MessageLogger = (message: string) => void | PromiseLike<void>;
 
 type CoordinatorOptions = {
   errorLogger?: ErrorLogger;
@@ -20,6 +22,20 @@ export type WaitUntilDrainResult = {
   pendingTaskCount: number;
   timedOut: boolean;
 };
+
+export type ShutdownDrainResult = WaitUntilDrainResult & {
+  dependencyCloseTimedOut: boolean;
+};
+
+export class ShutdownCleanupError extends Error {
+  readonly errors: readonly unknown[];
+
+  constructor(errors: readonly unknown[]) {
+    super('停止接流或 drain 与依赖关闭均失败');
+    this.name = 'ShutdownCleanupError';
+    this.errors = errors;
+  }
+}
 
 type HttpServerShutdownControls = {
   close: (callback: () => void) => unknown;
@@ -74,26 +90,85 @@ export const createSingleRunShutdown = <Trigger>(
   };
 };
 
+export const closeDependenciesWithGrace = (
+  closeDependencies: () => Promise<void>,
+  forceCloseDependencies: () => void,
+  { timeoutMs }: { timeoutMs: number },
+): Promise<{ timedOut: boolean }> => {
+  if (!Number.isFinite(timeoutMs) || timeoutMs < 0) {
+    throw new Error('dependency close grace timeoutMs 必须是非负有限数');
+  }
+
+  const closePromise = Promise.resolve().then(closeDependencies);
+  return new Promise<{ timedOut: boolean }>((resolve, reject) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      try {
+        forceCloseDependencies();
+        resolve({ timedOut: true });
+      } catch (error) {
+        reject(error);
+      }
+    }, timeoutMs);
+
+    void closePromise.then(
+      () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve({ timedOut: false });
+      },
+      (error: unknown) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+};
+
 export const wireGracefulShutdownSignals = ({
   errorLogger = console.error,
   exit = (code) => process.exit(code),
+  forceExitLogger = console.error,
   shutdown,
   signalSource = process,
 }: {
   errorLogger?: ErrorLogger;
   exit?: (code: number) => void;
+  forceExitLogger?: MessageLogger;
   shutdown: (signal: ShutdownSignal) => Promise<void>;
   signalSource?: ShutdownSignalSource;
 }): (() => void) => {
   let exitCompletion: Promise<void> | undefined;
+  let exitRequested = false;
   const listeners = new Map<ShutdownSignal, () => void>();
 
+  const exitOnce = (code: number): void => {
+    if (exitRequested) return;
+    exitRequested = true;
+    exit(code);
+  };
+
   const beginShutdown = (signal: ShutdownSignal): void => {
-    if (exitCompletion) return;
+    if (exitCompletion) {
+      if (exitRequested) return;
+      try {
+        const logging = forceExitLogger(`[hono] 优雅退出期间再次收到 ${signal}，立即强制退出`);
+        void Promise.resolve(logging).catch(() => undefined);
+      } catch {
+        // 日志 sink 失败不能阻止第二次 termination signal 强制退出。
+      }
+      exitOnce(1);
+      return;
+    }
     exitCompletion = Promise.resolve()
       .then(() => shutdown(signal))
       .then(
-        () => exit(0),
+        () => exitOnce(0),
         (error: unknown) => {
           try {
             const logging = errorLogger('[hono] 优雅退出失败', error);
@@ -101,7 +176,7 @@ export const wireGracefulShutdownSignals = ({
           } catch {
             // 日志 sink 失败不能阻止进程按失败状态退出。
           }
-          exit(1);
+          exitOnce(1);
         },
       );
   };
@@ -206,16 +281,45 @@ export const nodeExecutionContextCoordinator = new NodeExecutionContextCoordinat
 export const shutdownWithWaitUntilDrain = async ({
   closeDependencies,
   coordinator,
+  dependencyCloseTimeoutMs,
   drainTimeoutMs,
+  forceCloseDependencies,
   stopAcceptingRequests,
 }: {
   closeDependencies: () => Promise<void>;
   coordinator: NodeExecutionContextCoordinator;
+  dependencyCloseTimeoutMs: number;
   drainTimeoutMs: number;
+  forceCloseDependencies: () => void;
   stopAcceptingRequests: () => Promise<void>;
-}): Promise<WaitUntilDrainResult> => {
-  await stopAcceptingRequests();
-  const drainResult = await coordinator.drain({ timeoutMs: drainTimeoutMs });
-  await closeDependencies();
-  return drainResult;
+}): Promise<ShutdownDrainResult> => {
+  let drainResult: WaitUntilDrainResult | undefined;
+  let lifecycleFailure: { error: unknown } | undefined;
+  try {
+    await stopAcceptingRequests();
+    drainResult = await coordinator.drain({ timeoutMs: drainTimeoutMs });
+  } catch (error) {
+    lifecycleFailure = { error };
+  }
+
+  let dependencyCloseResult: { timedOut: boolean };
+  try {
+    dependencyCloseResult = await closeDependenciesWithGrace(
+      closeDependencies,
+      forceCloseDependencies,
+      { timeoutMs: dependencyCloseTimeoutMs },
+    );
+  } catch (error) {
+    if (lifecycleFailure) {
+      throw new ShutdownCleanupError([lifecycleFailure.error, error]);
+    }
+    throw error;
+  }
+
+  if (lifecycleFailure) throw lifecycleFailure.error;
+  if (!drainResult) throw new Error('shutdown drain 未返回结果');
+  return {
+    ...drainResult,
+    dependencyCloseTimedOut: dependencyCloseResult.timedOut,
+  };
 };

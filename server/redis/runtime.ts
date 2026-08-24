@@ -142,9 +142,12 @@ export class RedisRuntime implements RedisService {
   }
 
   async close(): Promise<void> {
+    this.forceClose();
+  }
+
+  forceClose(): void {
     const client = this.client;
     this.client = null;
-    if (!client?.isOpen) return;
-    await client.quit();
+    if (client?.isOpen) client.destroy();
   }
 }

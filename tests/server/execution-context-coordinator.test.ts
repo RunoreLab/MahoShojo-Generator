@@ -191,7 +191,11 @@ describe('Node waitUntil execution context coordinator', () => {
         events.push('dependencies-closed');
       },
       coordinator,
+      dependencyCloseTimeoutMs: 1_000,
       drainTimeoutMs: 1_000,
+      forceCloseDependencies: () => {
+        events.push('dependencies-force-closed');
+      },
       stopAcceptingRequests: async () => {
         events.push('accepting-stopped');
       },
@@ -202,6 +206,7 @@ describe('Node waitUntil execution context coordinator', () => {
     expect(events).toEqual(['accepting-stopped']);
     deferred.resolve();
     await expect(shutdownPromise).resolves.toEqual({
+      dependencyCloseTimedOut: false,
       pendingTaskCount: 0,
       timedOut: false,
     });
@@ -222,12 +227,15 @@ describe('Node waitUntil execution context coordinator', () => {
       const shutdownPromise = shutdownWithWaitUntilDrain({
         closeDependencies,
         coordinator,
+        dependencyCloseTimeoutMs: 500,
         drainTimeoutMs: 500,
+        forceCloseDependencies: vi.fn(),
         stopAcceptingRequests: vi.fn(async () => undefined),
       });
       await vi.advanceTimersByTimeAsync(500);
 
       await expect(shutdownPromise).resolves.toEqual({
+        dependencyCloseTimedOut: false,
         pendingTaskCount: 1,
         timedOut: true,
       });
@@ -235,5 +243,113 @@ describe('Node waitUntil execution context coordinator', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('dependency cleanup 超时后强制关闭并完成 shutdown', async () => {
+    vi.useFakeTimers();
+    try {
+      const coordinator = new NodeExecutionContextCoordinator();
+      const closeDeferred = createDeferred();
+      const forceCloseDependencies = vi.fn();
+      const shutdownPromise = shutdownWithWaitUntilDrain({
+        closeDependencies: () => closeDeferred.promise,
+        coordinator,
+        dependencyCloseTimeoutMs: 750,
+        drainTimeoutMs: 500,
+        forceCloseDependencies,
+        stopAcceptingRequests: vi.fn(async () => undefined),
+      });
+      let completed = false;
+      void shutdownPromise.then(() => {
+        completed = true;
+      });
+
+      await vi.advanceTimersByTimeAsync(749);
+      expect(completed).toBe(false);
+      expect(forceCloseDependencies).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(shutdownPromise).resolves.toEqual({
+        dependencyCloseTimedOut: true,
+        pendingTaskCount: 0,
+        timedOut: false,
+      });
+      expect(forceCloseDependencies).toHaveBeenCalledTimes(1);
+
+      closeDeferred.reject(new Error('late close failure'));
+      await Promise.resolve();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('停止接流失败时仍关闭依赖并保留原始错误', async () => {
+    const stopError = new Error('server close failed');
+    const closeDependencies = vi.fn(async () => undefined);
+    const forceCloseDependencies = vi.fn();
+
+    const shutdownPromise = shutdownWithWaitUntilDrain({
+      closeDependencies,
+      coordinator: new NodeExecutionContextCoordinator(),
+      dependencyCloseTimeoutMs: 1_000,
+      drainTimeoutMs: 1_000,
+      forceCloseDependencies,
+      stopAcceptingRequests: vi.fn(async () => {
+        throw stopError;
+      }),
+    });
+
+    await expect(shutdownPromise).rejects.toBe(stopError);
+    expect(closeDependencies).toHaveBeenCalledTimes(1);
+    expect(forceCloseDependencies).not.toHaveBeenCalled();
+  });
+
+  it('停止接流失败且依赖关闭挂起时仍按 deadline 强制关闭', async () => {
+    vi.useFakeTimers();
+    try {
+      const stopError = new Error('server close failed');
+      const forceCloseDependencies = vi.fn();
+      const shutdownPromise = shutdownWithWaitUntilDrain({
+        closeDependencies: () => new Promise(() => {}),
+        coordinator: new NodeExecutionContextCoordinator(),
+        dependencyCloseTimeoutMs: 600,
+        drainTimeoutMs: 1_000,
+        forceCloseDependencies,
+        stopAcceptingRequests: vi.fn(async () => {
+          throw stopError;
+        }),
+      });
+      const rejection = expect(shutdownPromise).rejects.toBe(stopError);
+
+      await vi.advanceTimersByTimeAsync(600);
+
+      await rejection;
+      expect(forceCloseDependencies).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('前置阶段与依赖关闭同时失败时保留两个原始错误', async () => {
+    const stopError = new Error('server close failed');
+    const dependencyError = new Error('redis destroy failed');
+    const shutdownPromise = shutdownWithWaitUntilDrain({
+      closeDependencies: async () => {
+        throw dependencyError;
+      },
+      coordinator: new NodeExecutionContextCoordinator(),
+      dependencyCloseTimeoutMs: 1_000,
+      drainTimeoutMs: 1_000,
+      forceCloseDependencies: vi.fn(),
+      stopAcceptingRequests: vi.fn(async () => {
+        throw stopError;
+      }),
+    });
+
+    await expect(shutdownPromise).rejects.toMatchObject({
+      errors: [stopError, dependencyError],
+      message: '停止接流或 drain 与依赖关闭均失败',
+      name: 'ShutdownCleanupError',
+    });
   });
 });
