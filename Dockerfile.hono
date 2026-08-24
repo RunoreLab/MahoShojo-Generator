@@ -10,6 +10,7 @@ COPY packages/config/package.json ./packages/config/package.json
 COPY packages/contracts/package.json ./packages/contracts/package.json
 COPY packages/domain/package.json ./packages/domain/package.json
 COPY packages/hosted-api/package.json ./packages/hosted-api/package.json
+COPY packages/hosted-runtime/package.json ./packages/hosted-runtime/package.json
 COPY packages/local-library/package.json ./packages/local-library/package.json
 COPY packages/multiplayer-core/package.json ./packages/multiplayer-core/package.json
 RUN pnpm install --frozen-lockfile
