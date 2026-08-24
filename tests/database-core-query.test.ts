@@ -78,14 +78,20 @@ describe('database/core queryD1Payload', () => {
       globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
         calledUrl = String(input);
         calledInit = init;
-        return new Response(JSON.stringify({ success: true, result: [{ ok: true }] }), {
+        return new Response(JSON.stringify({
+          success: true,
+          result: [{ success: true, results: [{ ok: true }], meta: {} }],
+        }), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
         });
       }) as typeof globalThis.fetch;
 
       const result = await queryD1Payload('SELECT * FROM users WHERE id = ?', [123]);
-      expect(result).toEqual({ success: true, result: [{ ok: true }] });
+      expect(result).toEqual({
+        success: true,
+        result: [{ success: true, results: [{ ok: true }], meta: {} }],
+      });
       expect(calledUrl).toBe(
         'https://api.cloudflare.com/client/v4/accounts/account_x/d1/database/db_x/query',
       );
@@ -103,7 +109,7 @@ describe('database/core queryD1Payload', () => {
     }
   });
 
-  test('HTTP 非 2xx 时抛出带状态与响应体的错误', async () => {
+  test('HTTP 非 2xx 时仅抛出数字状态错误', async () => {
     const envSnapshot = readEnvSnapshot();
     const originalFetch = globalThis.fetch;
 
@@ -117,7 +123,7 @@ describe('database/core queryD1Payload', () => {
 
       await withSilencedConsoleError(async () => {
         await expect(queryD1Payload('SELECT 1', [])).rejects.toThrow(
-          'D1 API 错误: 400 Bad Request - bad request body',
+          'D1 API 错误: 400',
         );
       });
     } finally {
@@ -144,7 +150,7 @@ describe('database/core queryD1Payload', () => {
 
       await withSilencedConsoleError(async () => {
         await expect(queryD1Payload('SELECT 1 AS ok', [], { retry: 'safe-read' }))
-          .rejects.toThrow('D1 API 返回失败 envelope: D1 query failed');
+          .rejects.toThrow('D1 HTTP 执行失败');
       });
     } finally {
       globalThis.fetch = originalFetch;
@@ -184,13 +190,19 @@ describe('database/core queryD1Payload', () => {
     try {
       setMinimalEnv();
       globalThis.fetch = (async () =>
-        new Response(JSON.stringify({ success: true, result: [{ alias: true }] }), {
+        new Response(JSON.stringify({
+          success: true,
+          result: [{ success: true, results: [{ alias: true }], meta: {} }],
+        }), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
         })) as typeof globalThis.fetch;
 
       const result = await queryFromD1('SELECT 1', []);
-      expect(result).toEqual({ success: true, result: [{ alias: true }] });
+      expect(result).toEqual({
+        success: true,
+        result: [{ success: true, results: [{ alias: true }], meta: {} }],
+      });
     } finally {
       globalThis.fetch = originalFetch;
       restoreEnvSnapshot(envSnapshot);
@@ -209,14 +221,28 @@ describe('database/core queryD1Payload', () => {
       globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
         calledUrl = String(input);
         calledInit = init;
-        return new Response(JSON.stringify({ success: true, result: [{ raw: true }] }), {
+        return new Response(JSON.stringify({
+          success: true,
+          result: [{
+            success: true,
+            results: { columns: ['raw'], rows: [[true]] },
+            meta: {},
+          }],
+        }), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
         });
       }) as typeof globalThis.fetch;
 
       const result = await queryD1RawPayload('SELECT id, name FROM badges', []);
-      expect(result).toEqual({ success: true, result: [{ raw: true }] });
+      expect(result).toEqual({
+        success: true,
+        result: [{
+          success: true,
+          results: { columns: ['raw'], rows: [[true]] },
+          meta: {},
+        }],
+      });
       expect(calledUrl).toBe(
         'https://api.cloudflare.com/client/v4/accounts/account_x/d1/database/db_x/raw',
       );
@@ -337,14 +363,20 @@ describe('database/core queryD1Payload', () => {
             headers: { 'Retry-After': '0' },
           });
         }
-        return new Response(JSON.stringify({ success: true, result: [{ ok: 1 }] }), {
+        return new Response(JSON.stringify({
+          success: true,
+          result: [{ success: true, results: [{ ok: 1 }], meta: {} }],
+        }), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
         });
       }) as typeof globalThis.fetch;
 
       const result = await queryD1Payload('SELECT 1 AS ok', [], { retry: 'safe-read' });
-      expect(result).toEqual({ success: true, result: [{ ok: 1 }] });
+      expect(result).toEqual({
+        success: true,
+        result: [{ success: true, results: [{ ok: 1 }], meta: {} }],
+      });
       expect(fetchCalls).toBe(2);
     } finally {
       globalThis.fetch = originalFetch;
@@ -403,7 +435,10 @@ describe('database/core queryD1Payload', () => {
             headers: { 'Retry-After': '0' },
           });
         }
-        return new Response(JSON.stringify({ success: true, result: [{ ok: 1 }] }), {
+        return new Response(JSON.stringify({
+          success: true,
+          result: [{ success: true, results: [{ ok: 1 }], meta: {} }],
+        }), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
         });

@@ -34,13 +34,7 @@ describe('package-owned D1 HTTP transport', () => {
         prepare: (_sql: string) => { all: () => Promise<unknown> };
       };
       await client.prepare('SELECT id FROM users').all();
-      expect(observations).toEqual([{
-        durationMs: expect.any(Number),
-        rowsRead: 1,
-        rowsWritten: 0,
-        outcome: 'ok',
-        errorClass: 'none',
-      }]);
+      expect(observations).toEqual([]);
     } finally {
       resetHostedRuntimeObserverForTests();
     }

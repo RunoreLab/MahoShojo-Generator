@@ -29,6 +29,49 @@ const restoreEnvSnapshot = (snapshot: EnvSnapshot) => {
 };
 
 describe('db/d1-http-client', () => {
+  test('同一环境配置下替换 fetch seam 会重建 client，不复用旧 transport', async () => {
+    const envSnapshot = readEnvSnapshot();
+    const originalFetch = globalThis.fetch;
+    let firstCalls = 0;
+    let secondCalls = 0;
+    const response = () => new Response(JSON.stringify({
+      success: true,
+      result: [{ success: true, results: [], meta: {} }],
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+
+    try {
+      process.env.CLOUDFLARE_API_TOKEN = 'cache-token';
+      process.env.CLOUDFLARE_ACCOUNT_ID = 'cache-account';
+      process.env.D1_DATABASE_ID = 'cache-database';
+      const { createHttpD1ClientFromEnv } = await import('@/lib/db/d1-http-client');
+
+      globalThis.fetch = (async () => {
+        firstCalls += 1;
+        return response();
+      }) as typeof fetch;
+      const first = createHttpD1ClientFromEnv();
+
+      globalThis.fetch = (async () => {
+        secondCalls += 1;
+        return response();
+      }) as typeof fetch;
+      const second = createHttpD1ClientFromEnv();
+
+      expect(first).not.toBeNull();
+      expect(second).not.toBe(first);
+      await second!.prepare('SELECT 1').all();
+      expect(firstCalls).toBe(0);
+      expect(secondCalls).toBe(1);
+
+      process.env.CLOUDFLARE_API_TOKEN = 'cache-token-rotated';
+      const rotated = createHttpD1ClientFromEnv();
+      expect(rotated).not.toBe(second);
+    } finally {
+      restoreEnvSnapshot(envSnapshot);
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   test('每个真实 D1 HTTP round trip 都写入低基数 observation', async () => {
     const envSnapshot = readEnvSnapshot();
     const originalFetch = globalThis.fetch;
