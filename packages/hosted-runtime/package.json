@@ -39,6 +39,26 @@
       "import": "./src/generate-scenario-stream-runtime.ts",
       "default": "./src/generate-scenario-stream-runtime.ts"
     },
+    "./generate-creator-runtime": {
+      "types": "./src/generate-creator-runtime.ts",
+      "import": "./src/generate-creator-runtime.ts",
+      "default": "./src/generate-creator-runtime.ts"
+    },
+    "./generate-creator-stream-runtime": {
+      "types": "./src/generate-creator-stream-runtime.ts",
+      "import": "./src/generate-creator-stream-runtime.ts",
+      "default": "./src/generate-creator-stream-runtime.ts"
+    },
+    "./generate-canshou-runtime": {
+      "types": "./src/generate-canshou-runtime.ts",
+      "import": "./src/generate-canshou-runtime.ts",
+      "default": "./src/generate-canshou-runtime.ts"
+    },
+    "./generate-canshou-stream-runtime": {
+      "types": "./src/generate-canshou-stream-runtime.ts",
+      "import": "./src/generate-canshou-stream-runtime.ts",
+      "default": "./src/generate-canshou-stream-runtime.ts"
+    },
     "./ai-upstream": {
       "types": "./src/ai-upstream.ts",
       "import": "./src/ai-upstream.ts",
