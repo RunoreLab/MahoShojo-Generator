@@ -51,7 +51,7 @@ export type D1HttpTransport = {
 };
 
 export type D1ForeignBatchStatement = {
-  run(): Promise<D1LikeStatementResult>;
+  run(_options?: D1QueryOptions): Promise<D1LikeStatementResult>;
 };
 
 export type D1BatchStatement = D1PreparedStatement | D1ForeignBatchStatement;
@@ -770,12 +770,12 @@ export class D1PreparedStatement {
     return new D1PreparedStatement(this.sqlText, this.transport, params);
   }
 
-  async run(): Promise<D1LikeStatementResult> {
-    return parseLike(await this.transport.query(this.sqlText, this.params));
+  async run(options?: D1QueryOptions): Promise<D1LikeStatementResult> {
+    return parseLike(await this.transport.query(this.sqlText, this.params, options));
   }
 
-  async all(): Promise<D1LikeStatementResult> {
-    return this.run();
+  async all(options?: D1QueryOptions): Promise<D1LikeStatementResult> {
+    return this.run(options);
   }
 
   async first<T = unknown>(columnName?: string): Promise<T | null> {

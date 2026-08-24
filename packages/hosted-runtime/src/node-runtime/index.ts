@@ -7,6 +7,25 @@ export {
 export { parseAIProvidersFromEnv } from './providers';
 export { getProviderFetch } from './provider-fetch';
 export {
+  createNodeD1ClientFromEnvironment,
+  getDefaultNodeD1Client,
+  type CreateNodeD1ClientOptions,
+  type NodeD1Environment,
+} from './d1-client';
+export {
+  createNodeDataPorts,
+  getDataCardById,
+  recordAiChannelOutcome,
+  recordUserActivityFromRequest,
+  touchUserLastActivity,
+  type HostedDataCard,
+  type NodeDataD1Client,
+  type NodeDataD1Statement,
+  type NodeDataPortDependencies,
+  type NodeDataPorts,
+  type RecordOutcomeInput,
+} from './data-ports';
+export {
   enhanceErrorWithUpstreamMessage,
   extractUpstreamErrorMessage,
 } from './error-extraction';

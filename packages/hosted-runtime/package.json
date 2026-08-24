@@ -59,6 +59,16 @@
       "import": "./src/node-runtime/content-safety.ts",
       "default": "./src/node-runtime/content-safety.ts"
     },
+    "./node-runtime/d1-client": {
+      "types": "./src/node-runtime/d1-client.ts",
+      "import": "./src/node-runtime/d1-client.ts",
+      "default": "./src/node-runtime/d1-client.ts"
+    },
+    "./node-runtime/data-ports": {
+      "types": "./src/node-runtime/data-ports.ts",
+      "import": "./src/node-runtime/data-ports.ts",
+      "default": "./src/node-runtime/data-ports.ts"
+    },
     "./node-runtime/env-signature": {
       "types": "./src/node-runtime/env-signature.ts",
       "import": "./src/node-runtime/env-signature.ts",

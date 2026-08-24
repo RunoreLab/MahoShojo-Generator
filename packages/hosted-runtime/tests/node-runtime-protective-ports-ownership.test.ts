@@ -13,6 +13,8 @@ describe('protective Node ports ownership', () => {
   const expectedEntries = {
     './node-runtime/activity-token': './src/node-runtime/activity-token.ts',
     './node-runtime/content-safety': './src/node-runtime/content-safety.ts',
+    './node-runtime/d1-client': './src/node-runtime/d1-client.ts',
+    './node-runtime/data-ports': './src/node-runtime/data-ports.ts',
     './node-runtime/env-signature': './src/node-runtime/env-signature.ts',
     './node-runtime/provider-catalog': './src/node-runtime/provider-catalog.ts',
     './node-runtime/public-rate-limit': './src/node-runtime/public-rate-limit.ts',
@@ -46,6 +48,7 @@ describe('protective Node ports ownership', () => {
       'lib/shield-word-filter.ts',
       'lib/card-forge/content-safety.ts',
       'lib/signature.ts',
+      'lib/db/d1-http-client.ts',
     ];
 
     for (const wrapper of wrappers) {
