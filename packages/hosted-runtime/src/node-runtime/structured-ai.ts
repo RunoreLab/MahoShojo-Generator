@@ -437,6 +437,7 @@ async function generateWithAIUsing<T, I = string>(
         };
 
         const runTextJsonFallback = async (label: string): Promise<T> => {
+          throwIfAborted(options?.abortSignal);
           const fallbackRuntime = createAiUpstreamAttemptRuntime();
           try {
             const guidedPrompt =
@@ -480,7 +481,11 @@ async function generateWithAIUsing<T, I = string>(
             fallbackRuntime.finish('success');
             return parsed.data as T;
           } catch (error) {
-            fallbackRuntime.finish(classifyAiUpstreamOutcome(error));
+            fallbackRuntime.finish(
+              isAbortRequested(options?.abortSignal, error)
+                ? 'aborted'
+                : classifyAiUpstreamOutcome(error),
+            );
             throw error;
           }
         };
@@ -607,7 +612,10 @@ async function generateWithAIUsing<T, I = string>(
         runtimeAttempt.finish('success');
         return object as T;
       } catch (error) {
-        runtimeAttempt?.finish(classifyAiUpstreamOutcome(error));
+        const abortRequested = isAbortRequested(options?.abortSignal, error);
+        runtimeAttempt?.finish(
+          abortRequested ? 'aborted' : classifyAiUpstreamOutcome(error),
+        );
         lastError = error;
         log.error(`提供商 ${provider.name} 第 ${attempt + 1} 次失败`, { error });
 
@@ -624,14 +632,16 @@ async function generateWithAIUsing<T, I = string>(
         // 记录本次 attempt 的失败 outcome
         if (options?.channelContext) {
           const ctx = options.channelContext;
-          const outcome = classifyOutcome(ctx.providerId === 'system', error);
+          const outcome = abortRequested
+            ? { outcome: 'excluded' as const, errorClass: 'user_cancel' }
+            : classifyOutcome(ctx.providerId === 'system', error);
           recordAiChannelOutcomeSafely(
             recordAiChannelOutcome,
             { providerId: ctx.providerId, modelId: ctx.modelId, ...outcome },
           );
         }
 
-        if (isAbortRequested(options?.abortSignal, error)) {
+        if (abortRequested) {
           throw error;
         }
 

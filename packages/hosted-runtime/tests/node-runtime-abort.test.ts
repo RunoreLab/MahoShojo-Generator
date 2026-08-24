@@ -111,4 +111,40 @@ describe('Node AI runtime abort contract', () => {
     expect(mocks.streamText).toHaveBeenCalledTimes(1);
     expect(terminals).toEqual([expect.objectContaining({ outcome: 'aborted' })]);
   });
+
+  test('signal 已中止时，即使 SDK 抛普通 Error，structured attempt 仍以 aborted 结束', async () => {
+    const terminals: unknown[] = [];
+    registerHostedRuntimeObserver({
+      beginAiUpstream: () => ({
+        recordTtfb: () => undefined,
+        finish: (value) => terminals.push(value),
+      }),
+      observeD1RoundTrip: () => undefined,
+    });
+    const controller = new AbortController();
+    mocks.generateObject.mockImplementationOnce(() => {
+      controller.abort('user');
+      throw new Error('transport closed unexpectedly');
+    });
+    const { createNodeStructuredAiRuntime, LoadBalanceStrategy } = await import('../src/node-runtime');
+    const runtime = createNodeStructuredAiRuntime({ providers: [provider('structured-abort')] });
+
+    await expect(runtime.generateWithAI(
+      'input',
+      {
+        systemPrompt: 'system',
+        promptBuilder: () => 'prompt',
+        schema: z.object({ ok: z.boolean() }),
+        taskName: 'abort terminal',
+      },
+      {
+        abortSignal: controller.signal,
+        loadBalanceStrategy: LoadBalanceStrategy.SEQUENTIAL,
+      },
+    )).rejects.toThrow('transport closed');
+
+    expect(mocks.generateObject).toHaveBeenCalledTimes(1);
+    expect(mocks.generateText).not.toHaveBeenCalled();
+    expect(terminals).toEqual([expect.objectContaining({ outcome: 'aborted' })]);
+  });
 });

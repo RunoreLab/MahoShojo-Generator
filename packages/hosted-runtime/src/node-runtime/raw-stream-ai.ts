@@ -255,6 +255,17 @@ async function generateWithStreamAIUsing(
                 dependencies.recordAiChannelOutcome,
             );
 	            const runtimeAttempt = createAiUpstreamAttemptRuntime();
+            const finishAttemptFromError = (error: unknown): boolean => {
+                const abortRequested = isAbortRequested(options?.abortSignal, error);
+                if (abortRequested) {
+                    outcomeRecorder.recordFromCancel('abort');
+                    runtimeAttempt.finish('aborted');
+                } else {
+                    outcomeRecorder.recordFromError(error);
+                    runtimeAttempt.finish(classifyAiUpstreamOutcome(error));
+                }
+                return abortRequested;
+            };
 	            try {
                 log.debug(`开始尝试: 提供商: ${provider.name} 模型: ${selectedModel} 尝试次数: ${attempt + 1} / ${retryCount}`);
 
@@ -321,8 +332,7 @@ async function generateWithStreamAIUsing(
                         capturedError = error;
                         log.error(`流式传输过程中出错: 提供商: ${provider.name} 模型: ${selectedModel}`, { error });
                         // 流中错误：先记 failure（后续 body close/cancel 不会重复记分）
-                        outcomeRecorder.recordFromError(error);
-                        runtimeAttempt.finish(classifyAiUpstreamOutcome(error));
+                        finishAttemptFromError(error);
                     },
                     onAbort: () => {
                         outcomeRecorder.recordFromCancel('abort');
@@ -508,8 +518,7 @@ async function generateWithStreamAIUsing(
                                 return;
                             }
                         } catch (streamError) {
-                            outcomeRecorder.recordFromError(streamError);
-                            runtimeAttempt.finish(classifyAiUpstreamOutcome(streamError));
+                            finishAttemptFromError(streamError);
                             try {
                                 controller.error(streamError);
                             } catch {
@@ -573,11 +582,7 @@ async function generateWithStreamAIUsing(
                 }
 
                 // 预检/建连失败：attempt 在返回 Response 前结束（与 onError 共用 once recorder）
-                outcomeRecorder.recordFromError(enhancedError);
-                runtimeAttempt.finish(classifyAiUpstreamOutcome(enhancedError));
-
-                if (isAbortRequested(options?.abortSignal, error)) {
-                    outcomeRecorder.recordFromCancel('abort');
+                if (finishAttemptFromError(enhancedError)) {
                     throw error;
                 }
 
