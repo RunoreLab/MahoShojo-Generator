@@ -1,4 +1,4 @@
-import { defaultGenerateCanshouService } from '@/lib/hosted-api/generate-canshou';
+import { defaultGenerateCanshouService } from '@mahoshojo/hosted-runtime/node-runtime/default-services';
 
 const honoRouteHandler = defaultGenerateCanshouService;
 

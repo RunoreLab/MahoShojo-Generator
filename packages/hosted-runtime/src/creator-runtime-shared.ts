@@ -1,59 +1,23 @@
-import type { QuestionnaireAnswerItem } from '@mahoshojo/domain/questionnaire';
+import type {
+  BuildRuleRuntimeResult,
+  CreatorPromptInput as CanonicalCreatorPromptInput,
+  CreatorQuestionnaireRef as CanonicalCreatorQuestionnaireRef,
+  CreatorRequestInput as CanonicalCreatorRequestInput,
+  ProjectedBuildRuleForPrompt,
+} from './creator/types';
+import {
+  CREATOR_TEMPLATE_IDS,
+  type CreatorGenerationMode,
+  type CreatorTemplateId,
+} from './creator/templates';
 
-export const CREATOR_TEMPLATE_IDS = [
-  'magical-girl',
-  'canshou',
-  'general',
-  'scenario',
-  'general-scenario',
-] as const;
-
-export type CreatorTemplateId = (typeof CREATOR_TEMPLATE_IDS)[number];
-export type CreatorGenerationMode = 'non-stream' | 'stream';
-
-export type CreatorBuildRuleRuntimeResult = {
-  ruleId: string;
-  version: string;
-  blockResults: Record<string, unknown>;
-  derived: Record<string, unknown>;
-  validationSummary: {
-    valid: boolean;
-    issues: string[];
-    missingRequiredBlockKeys: string[];
-    budget?: unknown;
-  };
-};
-
-export type CreatorQuestionnaireRef = {
-  questionnaireId: string;
-  title?: string;
-};
-
-export type CreatorRequestInput = {
-  template: CreatorTemplateId;
-  freeformBrief: string | null;
-  questionnaires: CreatorQuestionnaireRef[];
-  questionnaireAnswers: QuestionnaireAnswerItem[];
-  buildRules: CreatorBuildRuleRuntimeResult[];
-  primaryRuleId: string | null;
-};
-
-export type CreatorProjectedBuildRule = {
-  ruleId: string;
-  template: CreatorTemplateId;
-  facts: CreatorBuildRuleRuntimeResult;
-  summary: string;
-};
-
-export type CreatorPromptInput = {
-  template: CreatorTemplateId;
-  userIntent: string;
-  questionnaireSummary: string;
-  buildRuleProjection: {
-    primary: CreatorProjectedBuildRule | null;
-    references: CreatorProjectedBuildRule[];
-  };
-};
+export { CREATOR_TEMPLATE_IDS };
+export type { CreatorGenerationMode, CreatorTemplateId };
+export type CreatorBuildRuleRuntimeResult = BuildRuleRuntimeResult;
+export type CreatorQuestionnaireRef = CanonicalCreatorQuestionnaireRef;
+export type CreatorRequestInput = CanonicalCreatorRequestInput;
+export type CreatorProjectedBuildRule = ProjectedBuildRuleForPrompt;
+export type CreatorPromptInput = CanonicalCreatorPromptInput;
 
 export interface CreatorDomainRuntimeDependencies {
   resolveBuildRules(_raw: unknown): CreatorBuildRuleRuntimeResult[];

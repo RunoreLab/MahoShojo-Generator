@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   FREE_GENERATION_ACTION_TYPE,
   createGenerateFreeRuntime,
+  validateFreeOutput,
   type GenerateFreeRuntimeDependencies,
 } from '@mahoshojo/hosted-runtime/generate-free-runtime';
 
@@ -19,6 +20,36 @@ const createRequest = (body: unknown): Request => new Request(
 );
 
 describe('generate free hosted runtime', () => {
+  it('default output validator 保留 canonical template/metadata 字段', () => {
+    expect(validateFreeOutput({
+      schemaId: 'general',
+      data: { name: '测试角色', content: '测试正文', templateId: '通用角色' },
+    })).toEqual({
+      name: '测试角色',
+      content: '测试正文',
+      templateId: '通用角色',
+    });
+    expect(validateFreeOutput({
+      schemaId: 'scenario',
+      data: {
+        title: '雨夜车站',
+        scenario_type: '',
+        description: '',
+        elements: {
+          scene: { time: '', place: '', features: '' },
+          roles: [],
+          events: '',
+          atmosphere: '',
+          development: [],
+        },
+        metadata: { created_at: '2026-08-24T01:02:03.000Z' },
+      },
+    })).toMatchObject({
+      title: '雨夜车站',
+      metadata: { created_at: '2026-08-24T01:02:03.000Z' },
+    });
+  });
+
   it('按 rate-limit→safety→AI→activity→output-policy→response 执行并持有 schema/prompt/custom-provider 语义', async () => {
     const events: string[] = [];
     const dependencies: GenerateFreeRuntimeDependencies = {

@@ -1,4 +1,4 @@
-import { defaultGenerateCreatorStreamService } from '@/lib/hosted-api/generate-creator-stream';
+import { defaultGenerateCreatorStreamService } from '@mahoshojo/hosted-runtime/node-runtime/default-services';
 
 const honoRouteHandler = defaultGenerateCreatorStreamService;
 

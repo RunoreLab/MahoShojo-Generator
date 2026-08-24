@@ -1,7 +1,7 @@
 import { ACTIVITY_TOKEN_HEADER, verifyActivityToken } from './activity-token';
 
 const USER_PROVIDED_KEY_COOLDOWN_MS = 3_000;
-const OFFICIAL_KEY_QUESTIONNAIRE_CHARACTER_COOLDOWN_MS = 60_000;
+export const OFFICIAL_KEY_QUESTIONNAIRE_CHARACTER_COOLDOWN_MS = 60_000;
 const OFFICIAL_KEY_MAX_AI_COOLDOWN_MS = 120_000;
 
 export type PublicAiRateLimitAction =

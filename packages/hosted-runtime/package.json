@@ -14,6 +14,11 @@
       "import": "./src/node-runtime/index.ts",
       "default": "./src/node-runtime/index.ts"
     },
+    "./node-runtime/default-services": {
+      "types": "./src/node-runtime/default-services.ts",
+      "import": "./src/node-runtime/default-services.ts",
+      "default": "./src/node-runtime/default-services.ts"
+    },
     "./node-runtime/availability": {
       "types": "./src/node-runtime/availability.ts",
       "import": "./src/node-runtime/availability.ts",
@@ -73,6 +78,11 @@
       "types": "./src/node-runtime/static-assets.ts",
       "import": "./src/node-runtime/static-assets.ts",
       "default": "./src/node-runtime/static-assets.ts"
+    },
+    "./node-runtime/structured-ai": {
+      "types": "./src/node-runtime/structured-ai.ts",
+      "import": "./src/node-runtime/structured-ai.ts",
+      "default": "./src/node-runtime/structured-ai.ts"
     },
     "./creator/build-rule-projection": {
       "types": "./src/creator/build-rule-projection.ts",

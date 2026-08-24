@@ -1,4 +1,4 @@
-import { defaultGenerateFreeService } from '@/lib/hosted-api/generate-free';
+import { defaultGenerateFreeService } from '@mahoshojo/hosted-runtime/node-runtime/default-services';
 
 const honoRouteHandler = defaultGenerateFreeService;
 

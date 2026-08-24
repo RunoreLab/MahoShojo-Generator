@@ -1,4 +1,4 @@
-import { defaultGenerateScenarioStreamService } from '@/lib/hosted-api/generate-scenario-stream';
+import { defaultGenerateScenarioStreamService } from '@mahoshojo/hosted-runtime/node-runtime/default-services';
 
 const honoRouteHandler = defaultGenerateScenarioStreamService;
 

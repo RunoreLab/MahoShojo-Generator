@@ -5,32 +5,36 @@ const mocks = vi.hoisted(() => ({
   recordUserActivityFromRequest: vi.fn(),
 }));
 
-vi.mock('@/lib/ai', () => ({
-  LoadBalanceStrategy: { CUSTOM: 'custom', SEQUENTIAL: 'sequential' },
-  generateWithAI: mocks.generateWithAI,
+vi.mock('@mahoshojo/hosted-runtime/node-runtime/structured-ai', () => ({
+  createNodeStructuredAiRuntime: vi.fn(() => ({
+    generateWithAI: mocks.generateWithAI,
+  })),
 }));
-vi.mock('@/lib/ai/availability', () => ({
-  buildChannelContextFromPayload: vi.fn(() => undefined),
-}));
-vi.mock('@/lib/ai/meta-response', () => ({
+vi.mock('@mahoshojo/hosted-runtime/node-runtime/meta-response', () => ({
   buildJsonResponseWithOptionalAiMeta: vi.fn(({ data }: { data: unknown }) => new Response(
     JSON.stringify(data),
     { status: 200, headers: { 'Content-Type': 'application/json' } },
   )),
 }));
-vi.mock('@/lib/ai/public-rate-limit', () => ({
-  acquirePublicAiRateLimit: vi.fn(async () => ({ allowed: true })),
+vi.mock('@mahoshojo/hosted-runtime/node-runtime/public-rate-limit', () => ({
+  OFFICIAL_KEY_QUESTIONNAIRE_CHARACTER_COOLDOWN_MS: 60_000,
+  createPublicAiRateLimiter: vi.fn(() => ({
+    acquirePublicAiRateLimit: vi.fn(async () => ({ allowed: true })),
+  })),
   buildPublicAiRateLimitResponse: vi.fn(),
-  inferPublicAiProviderMode: vi.fn(() => 'system'),
 }));
-vi.mock('@/lib/content-safety/server', () => ({
-  enforceTextSafety: vi.fn(async () => null),
+vi.mock('@mahoshojo/hosted-runtime/node-runtime/content-safety', () => ({
+  createContentSafetyService: vi.fn(() => ({
+    enforceTextSafety: vi.fn(async () => null),
+  })),
 }));
-vi.mock('@/lib/logger', () => ({
-  getLogger: vi.fn(() => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() })),
-}));
-vi.mock('@/lib/user-activity/record', () => ({
-  recordUserActivityFromRequest: mocks.recordUserActivityFromRequest,
+vi.mock('@mahoshojo/hosted-runtime/node-runtime/data-ports', () => ({
+  createNodeDataPorts: vi.fn(() => ({
+    getDataCardById: vi.fn(async () => null),
+    recordAiChannelOutcome: vi.fn(),
+    recordUserActivityFromRequest: mocks.recordUserActivityFromRequest,
+    touchUserLastActivity: vi.fn(),
+  })),
 }));
 
 import handler from '@/app/api/generate-free/handler';
@@ -75,7 +79,11 @@ test('Free 非流式保留 custom Provider 的 CUSTOM 策略和成功活动记�
   }));
 
   expect(response.status).toBe(200);
-  expect(await response.json()).toMatchObject({ name: '测试角色', content: '测试正文' });
+  expect(await response.json()).toMatchObject({
+    name: '测试角色',
+    content: '测试正文',
+    templateId: '通用角色',
+  });
   const aiOptions = mocks.generateWithAI.mock.calls[0]?.[2] as any;
   expect(aiOptions.loadBalanceStrategy).toBe('custom');
   expect(aiOptions.providerOverride).toMatchObject({

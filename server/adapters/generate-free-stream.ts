@@ -1,4 +1,4 @@
-import { defaultGenerateFreeStreamService } from '@/lib/hosted-api/generate-free-stream';
+import { defaultGenerateFreeStreamService } from '@mahoshojo/hosted-runtime/node-runtime/default-services';
 
 const honoRouteHandler = defaultGenerateFreeStreamService;
 

@@ -214,6 +214,37 @@ const schemaMap: Record<FreeSchemaId, z.ZodType> = {
   'general-scenario': FreeGeneralScenarioSchema,
 };
 
+export const validateFreeOutput = (
+  input: { schemaId: FreeSchemaId; data: unknown },
+): unknown => {
+  const parsed = schemaMap[input.schemaId].parse(input.data) as Record<string, unknown>;
+  switch (input.schemaId) {
+    case 'magical-girl':
+      return {
+        ...parsed,
+        templateId: '魔法少女/心之花/魔法少女（自由生成）',
+      };
+    case 'canshou':
+      return {
+        ...parsed,
+        templateId: '魔法少女/心之花/残兽（自由生成）',
+      };
+    case 'general':
+      return { ...parsed, templateId: GENERAL_CHARACTER_TEMPLATE_ID };
+    case 'general-scenario':
+      return { ...parsed, templateId: GENERAL_SCENARIO_TEMPLATE_ID };
+    case 'scenario': {
+      const record = input.data as { metadata?: { created_at?: unknown } };
+      return {
+        ...parsed,
+        metadata: {
+          created_at: z.string().parse(record.metadata?.created_at),
+        },
+      };
+    }
+  }
+};
+
 const sanitizeFreeCard = (
   schemaId: FreeSchemaId,
   data: unknown,

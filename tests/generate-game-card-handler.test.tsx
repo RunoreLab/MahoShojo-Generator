@@ -38,28 +38,36 @@ const mocks = vi.hoisted(() => ({
   recordUserActivityFromRequest: vi.fn(),
 }));
 
-vi.mock('@/lib/ai', () => ({
-  LoadBalanceStrategy: { CUSTOM: 'custom', SEQUENTIAL: 'sequential' },
-  generateWithAI: mocks.generateWithAI,
+vi.mock('@mahoshojo/hosted-runtime/node-runtime/structured-ai', () => ({
+  createNodeStructuredAiRuntime: vi.fn(() => ({
+    generateWithAI: mocks.generateWithAI,
+  })),
 }));
-vi.mock('@/lib/ai/meta-response', () => ({
+vi.mock('@mahoshojo/hosted-runtime/node-runtime/meta-response', () => ({
   buildJsonResponseWithOptionalAiMeta: mocks.buildJsonResponseWithOptionalAiMeta,
 }));
-vi.mock('@/lib/ai/public-rate-limit', () => ({
-  acquirePublicAiRateLimit: mocks.acquirePublicAiRateLimit,
+vi.mock('@mahoshojo/hosted-runtime/node-runtime/public-rate-limit', () => ({
+  OFFICIAL_KEY_QUESTIONNAIRE_CHARACTER_COOLDOWN_MS: 60_000,
+  createPublicAiRateLimiter: vi.fn(() => ({
+    acquirePublicAiRateLimit: mocks.acquirePublicAiRateLimit,
+  })),
   buildPublicAiRateLimitResponse: vi.fn(),
 }));
-vi.mock('@/lib/content-safety/server', () => ({
-  enforceTextSafety: mocks.enforceTextSafety,
+vi.mock('@mahoshojo/hosted-runtime/node-runtime/content-safety', () => ({
+  createContentSafetyService: vi.fn(() => ({
+    enforceTextSafety: mocks.enforceTextSafety,
+  })),
 }));
-vi.mock('@/lib/sensitive-word-filter', () => ({
+vi.mock('@mahoshojo/hosted-runtime/node-runtime/sensitive-word-filter', () => ({
   quickCheck: mocks.quickCheck,
 }));
-vi.mock('@/lib/logger', () => ({
-  getLogger: vi.fn(() => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() })),
-}));
-vi.mock('@/lib/user-activity/record', () => ({
-  recordUserActivityFromRequest: mocks.recordUserActivityFromRequest,
+vi.mock('@mahoshojo/hosted-runtime/node-runtime/data-ports', () => ({
+  createNodeDataPorts: vi.fn(() => ({
+    getDataCardById: vi.fn(async () => null),
+    recordAiChannelOutcome: vi.fn(),
+    recordUserActivityFromRequest: mocks.recordUserActivityFromRequest,
+    touchUserLastActivity: vi.fn(),
+  })),
 }));
 vi.mock('next/navigation', () => ({
   useSearchParams: () => new URLSearchParams(),
