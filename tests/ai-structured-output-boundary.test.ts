@@ -230,4 +230,46 @@ describe('Hosted structured output acceptance boundary', () => {
       resetHostedRuntimeObserverForTests();
     }
   });
+
+  it('counts 两次真实 upstream（generateObject 失败后 fallback generateText）并为每次补全 terminal', async () => {
+    const attemptTerminals: unknown[][] = [];
+    registerHostedRuntimeObserver({
+      beginAiUpstream: () => {
+        const terminal: unknown[] = [];
+        attemptTerminals.push(terminal);
+        return {
+          recordTtfb: () => undefined,
+          finish: (value) => terminal.push(value),
+        };
+      },
+      observeD1RoundTrip: () => undefined,
+    });
+    mocks.generateObject.mockRejectedValueOnce(new Error('json mode is not enabled')); // should trigger text fallback
+    mocks.generateText.mockResolvedValueOnce({
+      text: '{"ok":true}',
+      usage: {},
+      finishReason: 'stop',
+    });
+
+    try {
+      const { generateWithAI, LoadBalanceStrategy } = await import('@/lib/ai');
+      const output = await generateWithAI(
+        'fallback-scenario',
+        {
+          systemPrompt: 'fallback-system',
+          promptBuilder: () => 'fallback-prompt',
+          schema: z.object({ ok: z.boolean() }),
+          taskName: 'Fallback 测试',
+        },
+        { loadBalanceStrategy: LoadBalanceStrategy.SEQUENTIAL },
+      );
+
+      expect(output).toEqual({ ok: true });
+      expect(attemptTerminals).toHaveLength(2);
+      expect(attemptTerminals[0]).toEqual([expect.objectContaining({ outcome: 'error' })]);
+      expect(attemptTerminals[1]).toEqual([expect.objectContaining({ outcome: 'success' })]);
+    } finally {
+      resetHostedRuntimeObserverForTests();
+    }
+  });
 });
