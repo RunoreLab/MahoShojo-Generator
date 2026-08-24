@@ -11,3 +11,14 @@ export const silentLogger: NodeAiLogger = {
   warn: () => undefined,
   error: () => undefined,
 };
+
+/**
+ * AI runtime 的调用参数、Provider 与上游 Error 均可能含 secret/正文/URL。
+ * 该投影只保留固定低基数事件，不把动态 message/context 交给实际 sink。
+ */
+export const createSafeAiRuntimeLogger = (sink: NodeAiLogger): NodeAiLogger => ({
+  debug: () => sink.debug('[ai-runtime] debug'),
+  info: () => sink.info('[ai-runtime] info'),
+  warn: () => sink.warn('[ai-runtime] warning'),
+  error: () => sink.error('[ai-runtime] error'),
+});

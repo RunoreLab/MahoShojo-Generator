@@ -15,7 +15,7 @@ import {
     STREAM_READ_TOTAL_TIMEOUT_MS,
     type StreamReadTimeoutMode,
 } from './stream-timeout';
-import { silentLogger } from './logger';
+import { createSafeAiRuntimeLogger, silentLogger } from './logger';
 import type {
     AIProvider,
     GenerateWithAIOptions,
@@ -34,8 +34,12 @@ export const classifyStreamRuntimeOutcome = classifyAiUpstreamOutcome;
 
 // 延迟函数
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-const createAIClient = (provider: AIProvider, fetchImpl: typeof fetch) => {
-    const providerFetch = getProviderFetch(provider, fetchImpl);
+const createAIClient = (
+    provider: AIProvider,
+    fetchImpl: typeof fetch,
+    onDispatch: () => void,
+) => {
+    const providerFetch = getProviderFetch(provider, fetchImpl, onDispatch);
     if (provider.type === 'google') {
         return createGoogleGenerativeAI({
             apiKey: provider.apiKey,
@@ -156,7 +160,7 @@ async function generateWithStreamAIUsing(
     finishReasonPromise?: Promise<unknown>;
     telemetry?: GenerateWithAIOptions['telemetry'];
 }> {
-    const log = dependencies.logger ?? silentLogger;
+    const log = createSafeAiRuntimeLogger(dependencies.logger ?? silentLogger);
     const fetchImpl = dependencies.fetch ?? globalThis.fetch;
     throwIfAborted(options?.abortSignal);
     const baseProviders: AIProvider[] = [
@@ -249,6 +253,7 @@ async function generateWithStreamAIUsing(
         // 对当前提供商进行重试
 	        for (let attempt = 0; attempt < retryCount; attempt++) {
             throwIfAborted(options?.abortSignal);
+            let providerRequestDispatched = false;
             // 同一 attempt 只记一次：在流真正结束（成功/失败/取消）时落分，而非首包时
             const outcomeRecorder = createAttemptOutcomeRecorder(
                 options?.channelContext,
@@ -278,7 +283,9 @@ async function generateWithStreamAIUsing(
                     options.telemetry.attempt = attempt + 1;
                 }
 
-	                const llm = createAIClient(provider, fetchImpl);
+	                const llm = createAIClient(provider, fetchImpl, () => {
+                        providerRequestDispatched = true;
+                    });
 	                const resolvedSettings = resolveGenerationSettings({
 	                    providerId: options?.generationSettingsContext?.providerId ?? generationConfig.generationSettingsContext?.providerId ?? provider.providerId ?? provider.type,
 	                    modelId: selectedModel,
@@ -586,6 +593,10 @@ async function generateWithStreamAIUsing(
                     throw error;
                 }
 
+                if (providerRequestDispatched) {
+                    throw enhancedError;
+                }
+
                 // 如果不是最后一次尝试，等待后再重试
                 if (attempt < retryCount - 1) {
                     const waitTime = (attempt + 1) * 200; // 递增等待时间
@@ -598,8 +609,8 @@ async function generateWithStreamAIUsing(
         log.warn(`提供商所有尝试都失败了: ${provider.name}`);
     }
 
-    log.error(`所有提供商都失败了: ${lastError}`);
-    throw new Error(`失败: ${lastError instanceof Error ? lastError.message : String(lastError)}`);
+    log.error('所有 AI Provider 尝试均失败');
+    throw enhanceErrorWithUpstreamMessage(lastError);
 }
 
 export const createNodeRawStreamAiRuntime = (dependencies: NodeAiRuntimeDependencies) => ({

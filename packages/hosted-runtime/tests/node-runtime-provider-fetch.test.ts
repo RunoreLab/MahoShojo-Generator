@@ -96,4 +96,41 @@ describe('Node AI provider fetch injection', () => {
     await configuredFetch('https://upstream.invalid/test');
     expect(injectedFetch).toHaveBeenCalledTimes(1);
   });
+
+  test.each([301, 302, 303, 307, 308])(
+    'Provider POST 遇到 %s redirect 时 fail closed，且不向新 Origin 重放 secret/body',
+    async (status) => {
+      const injectedFetch = vi.fn(async (_input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+        expect(init?.redirect).toBe('manual');
+        return new Response(null, {
+          status,
+          headers: { location: 'https://redirect-canary.invalid/steal' },
+        });
+      }) as unknown as typeof fetch;
+      const { getProviderFetch } = await import('../src/node-runtime/provider-fetch');
+      const guardedFetch = getProviderFetch({
+        name: 'google-test',
+        apiKey: 'provider-secret-canary',
+        baseUrl: 'https://origin.invalid/v1',
+        model: 'test-model',
+        type: 'google',
+      }, injectedFetch);
+
+      const error = await guardedFetch('https://origin.invalid/v1/generate', {
+        method: 'POST',
+        headers: {
+          'x-goog-api-key': 'provider-secret-canary',
+          'content-type': 'application/json',
+        },
+        body: 'prompt-body-canary',
+      }).catch((caught: unknown) => caught as Error);
+
+      expect(injectedFetch).toHaveBeenCalledTimes(1);
+      if (!(error instanceof Error)) throw new Error('expected redirect failure');
+      expect(error).toMatchObject({ message: 'AI_PROVIDER_REDIRECT_BLOCKED' });
+      expect(`${error.name}:${error.message}`).not.toMatch(
+        /provider-secret-canary|prompt-body-canary|redirect-canary/u,
+      );
+    },
+  );
 });

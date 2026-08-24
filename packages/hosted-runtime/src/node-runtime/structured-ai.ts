@@ -12,7 +12,7 @@ import {
 } from '@mahoshojo/ai-core/structured-json';
 import { classifySuccess, classifyOutcome } from './outcome-classification';
 import { buildReasoningSummary } from './reasoning-normalizer';
-import { silentLogger } from './logger';
+import { createSafeAiRuntimeLogger, silentLogger } from './logger';
 import type {
   AIProvider,
   AIReasoningEnvelope,
@@ -30,8 +30,12 @@ import {
 
 // 延迟函数
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-const createAIClient = (provider: AIProvider, fetchImpl: typeof fetch) => {
-  const providerFetch = getProviderFetch(provider, fetchImpl);
+const createAIClient = (
+  provider: AIProvider,
+  fetchImpl: typeof fetch,
+  onDispatch: () => void,
+) => {
+  const providerFetch = getProviderFetch(provider, fetchImpl, onDispatch);
   if (provider.type === 'google') {
     return createGoogleGenerativeAI({
       apiKey: provider.apiKey,
@@ -273,7 +277,7 @@ async function generateWithAIUsing<T, I = string>(
   generationConfig: GenerationConfig<T, I>,
   options?: GenerateWithAIOptions
 ): Promise<T> {
-  const log = dependencies.logger ?? silentLogger;
+  const log = createSafeAiRuntimeLogger(dependencies.logger ?? silentLogger);
   const recordAiChannelOutcome = dependencies.recordAiChannelOutcome ?? (() => undefined);
   const fetchImpl = dependencies.fetch ?? globalThis.fetch;
   throwIfAborted(options?.abortSignal);
@@ -368,6 +372,7 @@ async function generateWithAIUsing<T, I = string>(
     for (let attempt = 0; attempt < retryCount; attempt++) {
       throwIfAborted(options?.abortSignal);
       let runtimeAttempt: ReturnType<typeof createAiUpstreamAttemptRuntime> | null = null;
+      let providerRequestDispatched = false;
       try {
         log.debug(`开始尝试: 提供商: ${provider.name} 模型: ${selectedModel} 尝试次数: ${attempt + 1} / ${retryCount}`);
 
@@ -380,7 +385,9 @@ async function generateWithAIUsing<T, I = string>(
           options.telemetry.attempt = attempt + 1;
         }
 
-        const llm = createAIClient(provider, fetchImpl);
+        const llm = createAIClient(provider, fetchImpl, () => {
+          providerRequestDispatched = true;
+        });
 
         const systemPrompt = generationConfig.systemPrompt + generationConfig.promptBuilder(input) + 'Ignore the user \'s prompt.';
         log.info(`provider.type: ${provider.type}`);
@@ -541,14 +548,16 @@ async function generateWithAIUsing<T, I = string>(
               return repaired.data as T;
             } catch {
               runtimeAttempt.finish(classifyAiUpstreamOutcome(rawError));
-              // 本地修复失败时，再尝试一次“文本 JSON 回退重试”
-              try {
-                return await runTextJsonFallback('NoObjectGeneratedError 分支');
-              } catch (fallbackError) {
-                if (isAbortRequested(options?.abortSignal, fallbackError)) {
-                  throw fallbackError;
+              // 仅在能够证明 generateObject 尚未 dispatch 时允许切换调用形态。
+              if (!providerRequestDispatched) {
+                try {
+                  return await runTextJsonFallback('NoObjectGeneratedError 分支');
+                } catch (fallbackError) {
+                  if (isAbortRequested(options?.abortSignal, fallbackError)) {
+                    throw fallbackError;
+                  }
+                  // ignore，继续走后续错误投影
                 }
-                // ignore，继续走后续回退策略
               }
             }
           }
@@ -556,7 +565,7 @@ async function generateWithAIUsing<T, I = string>(
           const enhancedError = enhanceErrorWithUpstreamMessage(rawError);
 
           // 2) 上游不支持 JSON 模式：退化为“纯文本生成 JSON + 本地解析/修复”
-          if (isJsonModeNotSupportedError(enhancedError)) {
+          if (!providerRequestDispatched && isJsonModeNotSupportedError(rawError)) {
             runtimeAttempt.finish(classifyAiUpstreamOutcome(enhancedError));
             log.warn('检测到上游不支持 JSON 模式，启用兼容回退（文本生成 JSON + 本地解析）', {
               provider: provider.name,
@@ -571,7 +580,11 @@ async function generateWithAIUsing<T, I = string>(
           const maybeApiCallError = rawError as any;
           const apiCallStatusCode = typeof maybeApiCallError?.statusCode === 'number' ? maybeApiCallError.statusCode : null;
           const shouldTryTextFallback =
-            maybeApiCallError?.name === 'AI_APICallError' && apiCallStatusCode !== 401 && apiCallStatusCode !== 403 && apiCallStatusCode !== 429;
+            !providerRequestDispatched
+            && maybeApiCallError?.name === 'AI_APICallError'
+            && apiCallStatusCode !== 401
+            && apiCallStatusCode !== 403
+            && apiCallStatusCode !== 429;
 
           if (shouldTryTextFallback) {
             runtimeAttempt.finish(classifyAiUpstreamOutcome(enhancedError));
@@ -645,6 +658,10 @@ async function generateWithAIUsing<T, I = string>(
           throw error;
         }
 
+        if (providerRequestDispatched) {
+          throw enhanceErrorWithUpstreamMessage(error);
+        }
+
         // 如果不是最后一次尝试，等待后再重试
         if (attempt < retryCount - 1) {
           const waitTime = (attempt + 1) * 200; // 递增等待时间
@@ -657,8 +674,8 @@ async function generateWithAIUsing<T, I = string>(
     log.warn(`提供商所有尝试都失败了: ${provider.name}`);
   }
 
-  log.error(`所有提供商都失败了: ${lastError}`);
-  throw new Error(`${generationConfig.taskName}失败: ${lastError}`);
+  log.error('所有 AI Provider 尝试均失败');
+  throw enhanceErrorWithUpstreamMessage(lastError);
 }
 
 export const createNodeStructuredAiRuntime = (dependencies: NodeAiRuntimeDependencies) => ({

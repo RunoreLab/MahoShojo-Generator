@@ -65,10 +65,10 @@ export const encodeSseEvent = (event: string, payload: unknown): Uint8Array => {
   let data = 'null';
   try {
     data = JSON.stringify(payload ?? null);
-  } catch (error) {
+  } catch {
     data = JSON.stringify({
       ok: false,
-      error: error instanceof Error ? error.message : String(error ?? 'json stringify failed'),
+      error: 'SSE_EVENT_SERIALIZATION_FAILED',
     });
   }
   return encoder.encode(`event: ${event}\ndata: ${data}\n\n`);
@@ -213,13 +213,13 @@ export const createReasoningSseBridge = (label?: string): ReasoningSseBridge => 
           streamClosed = true;
           activeController = null;
           controller.close();
-        } catch (error) {
+        } catch {
           flushQueuedEvents(controller);
           enqueueReasoningDoneIfNeeded(controller);
           controller.enqueue(
             encodeSseEvent('error', {
               ok: false,
-              error: error instanceof Error ? error.message : String(error ?? '上游流读取失败'),
+              error: 'AI_UPSTREAM_REQUEST_FAILED',
             })
           );
           streamClosed = true;

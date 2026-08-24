@@ -96,7 +96,7 @@ describe('Hosted structured output acceptance boundary', () => {
       { loadBalanceStrategy: LoadBalanceStrategy.SEQUENTIAL },
     );
 
-    await expect(execution).rejects.toThrow('边界测试失败');
+    await expect(execution).rejects.toThrow('AI_UPSTREAM_REQUEST_FAILED');
     await expect(execution).rejects.not.toThrow('must-not-leak');
   });
 

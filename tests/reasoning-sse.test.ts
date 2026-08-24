@@ -1,6 +1,10 @@
 import { describe, expect, test } from 'vitest';
 
-import { createReasoningSseBridge, shouldUseClientSse } from '@/lib/stream/reasoning-sse';
+import {
+  createReasoningSseBridge,
+  encodeSseEvent,
+  shouldUseClientSse,
+} from '@/lib/stream/reasoning-sse';
 
 describe('stream/reasoning-sse', () => {
   test('shouldUseClientSse 支持 query 与 Accept 双判定', () => {
@@ -90,5 +94,29 @@ describe('stream/reasoning-sse', () => {
     const sseRaw = await sseResponse.text();
     expect(sseRaw).toContain('"status":"unavailable"');
     expect(sseRaw).toContain('event: done');
+  });
+
+  test('SSE 序列化失败时不泄漏异常消息', () => {
+    const cyclic: { self?: unknown; secret: string } = { secret: 'sse-secret-canary' };
+    cyclic.self = cyclic;
+
+    const serialized = new TextDecoder().decode(encodeSseEvent('test', cyclic));
+
+    expect(serialized).toContain('SSE_EVENT_SERIALIZATION_FAILED');
+    expect(serialized).not.toContain('sse-secret-canary');
+  });
+
+  test('上游流读取失败时只返回固定错误码', async () => {
+    const bridge = createReasoningSseBridge('流错误投影测试');
+    const response = bridge.toResponse(new Response(new ReadableStream<Uint8Array>({
+      pull(controller) {
+        controller.error(new Error('stream-secret-canary'));
+      },
+    })));
+
+    const serialized = await response.text();
+
+    expect(serialized).toContain('AI_UPSTREAM_REQUEST_FAILED');
+    expect(serialized).not.toContain('stream-secret-canary');
   });
 });
