@@ -14,7 +14,7 @@
 
 **Preserves:** `AI-006`、`AUTHORITY-001..006`、`DR-004..011`、`DR-013..014`、`COMPAT-001..002`、`ACCEPT-008`；不改变 Arena v1 wire/authority，也不把 generation 标记为可透明重放。
 
-**执行检查点（2026-08-25）：** G25C 实现已收口，最终验收 `BLOCKED`。当前 inventory 为 `10 shared-service / 14 exited / 0 legacy-next`；10 条 retained service 的唯一 Node composition 已进入 `@mahoshojo/hosted-runtime`，真实 `apps/api` 已拥有 source/manifest/test/lint/build/env/health/Docker/CI/deploy lifecycle，AI/D1/Redis telemetry 与原子 release tuple 已进入代码。当前机器没有 Docker CLI，也没有隔离 D1 Gateway + Redis；因此同一 commit 的真实 Docker build/Compose 与 canonical built-runtime verifier 尚未通过，按 `GOAL-061` 不能勾选最终 stopping condition。完整验证、环境限制、独立审查和回滚证据见 [G25C 实施日志](../logs/2026-08-25_023625_平台重整G25C_apps-api真实应用激活与Telemetry收口实施日志.md)。
+**执行检查点（2026-08-25）：** G25C 实现已收口，最终验收 `BLOCKED`。当前 inventory 为 `10 shared-service / 14 exited / 0 legacy-next`；10 条 retained service 的唯一 Node composition 已进入 `@mahoshojo/hosted-runtime`，真实 `apps/api` 已拥有 source/manifest/test/lint/build/env/health/Docker/CI/deploy lifecycle，AI/D1/Redis telemetry 与原子 release tuple 已进入代码。`fe3e3ff8` 又把 Compose config、真实 Redis service、local Wrangler D1 Gateway 与 canonical built-runtime verifier 固化为 fail-closed CI gate；但该 workflow 尚未实际运行，当前机器的 Docker Desktop integration 不可用，Wrangler local runtime 也受沙盒网络接口权限限制，因此同一 HEAD 的真实 Docker/Compose/runtime 组合仍未取得 PASS。按 `GOAL-061` 不能勾选最终 stopping condition。完整验证、环境限制、独立审查和回滚证据见 [G25C 实施日志](../logs/2026-08-25_023625_平台重整G25C_apps-api真实应用激活与Telemetry收口实施日志.md)。
 
 ---
 
@@ -305,8 +305,10 @@ docker compose -f apps/api/deploy/compose.yml config
 
 Expected: tests 与 Docker/Compose exit 0；若本机 Docker daemon 不可用，保留完整环境证据，不能弱化 Actions gate。
 
-实际结果：ownership/workflow/deploy contract 全部通过；本机 WSL 无 Docker CLI/Desktop integration，
-因此 local Docker/Compose execution 记录为环境 `BLOCKED`，没有删除或弱化 Actions 中的真实 Docker build gate。
+实际结果：ownership/workflow/deploy contract 全部通过；`fe3e3ff8` 在 Actions build job 中加入
+Compose config，并为 built-runtime verifier 配置 ephemeral Redis 与 local Wrangler D1。当前 WSL 的
+Docker Desktop integration 不可用，该 workflow 又未推送执行，因此 Docker/Compose execution 仍记录为
+环境 `BLOCKED`；Actions gate 已 fail closed，不能由静态 contract 代替真实 PASS。
 
 ### Task 6：Targeted、完整验证与 Builder self-review
 
@@ -342,8 +344,9 @@ git diff --check
 
 逐项检查 accepted ADR/spec、app/package/runtime 依赖方向、secret/auth/authority、D1 no-replay、Redis non-authority、Next/Hono wire、schema/producer-consumer、shutdown/rollback、测试 adequacy。任何行为 finding 先写失败测试再修。
 
-实际结果：package/app/server/workspace/root/Next/OpenNext/CI 验证均通过；需要隔离 D1 Gateway/Redis
-的 runtime verifier 因当前环境缺失而 fail closed，因此本步骤尚未全部完成。未连接 production 资源；
+实际结果：package/app/server/workspace/root/Next/OpenNext/CI 验证均通过；Actions 已具备隔离
+D1 Gateway/Redis runtime verifier gate，但当前沙盒启动 Wrangler 时被 `uv_interface_addresses`
+系统权限错误阻断，且没有本地 Redis server，因此本步骤尚未全部完成。未连接 production 资源；
 完整命令和结果见实施日志。
 
 ### Task 7：Independent review、修复与文档收口
@@ -365,8 +368,11 @@ git diff --check
 Critical/Important 必须关闭；Minor 修复或给出不阻塞 stopping condition 的可复核理由。
 
 当前结果：最终 review 发现的 server authority 敏感词 fail-open 与 D1 HTTP redirect mutation replay
-两个代码 Important 已按 RED/GREEN 修复；未实际运行 Docker build/Compose 和 canonical built-runtime
-verifier 仍各保留一个 Important。在隔离环境取得实际 PASS 前 `Ready: no`。
+两个代码 Important 已按 RED/GREEN 修复；环境 gate 复审又发现 workflow contract 可被 shell/YAML
+skip 与 boolean continuation 绕过，已在 `fe3e3ff8` 以 dedicated mutation tests、显式
+`set -euo pipefail` 和 terminal gate 顺序关闭。最终代码/contract review 为 Critical 0、Important 0、
+Minor 0；未实际运行 Docker build/Compose 和 canonical built-runtime verifier 仍各保留一个环境
+Important。在隔离环境取得实际 PASS 前整个 G25C `Ready: no`。
 
 - [ ] **Step 2：修复后重跑 affected + final verification**
 

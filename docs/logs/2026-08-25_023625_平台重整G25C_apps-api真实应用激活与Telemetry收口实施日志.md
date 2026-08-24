@@ -6,9 +6,9 @@
 
 - Goal：`G25C`
 - source commit：`dbc073f7`
-- 最终实现 commit：`99032cb6`
+- 最终实现 commit：`fe3e3ff8`
 - 主要 independent review remediation commits：`2547b998`、`537510b1`、`51e72669`、
-  `ab5a3213`、`5981c6e4`、`d385452b`、`99032cb6`
+  `ab5a3213`、`5981c6e4`、`d385452b`、`99032cb6`、`fe3e3ff8`
 - 文档收口 commit：本日志所在提交
 - 实施计划：[`2026-08-24_053840_G25C_apps-api真实应用激活与HonoTelemetry收口实施计划.md`](../plans/2026-08-24_053840_G25C_apps-api真实应用激活与HonoTelemetry收口实施计划.md)
 - Implements/validates within G25C slice：`MONO-003`、`MONO-004`、`MONO-005`、`MONO-006`、`RESOURCE-005`
@@ -111,6 +111,9 @@ Next 执行更安全。G25C 没有删除或改写它们的 Next 公开 route。
   `apps/d1-gateway` 或未来 Admin/Desktop/Mobile 进入 image；
 - workflow 保留受保护生产分支、Environment、SSH host key 和 `cancel-in-progress: false`；
   build/container/artifact 路径只引用 app owner；
+- build job 使用 ephemeral `redis:7-alpine` 和 `wrangler dev --local` D1，bundle 生成后运行
+  canonical `verify:server:runtime`；Docker build 与 `compose config --no-env-resolution` 同为
+  fail-closed gate，隔离运行时通过后才允许上传 artifact；
 - release ID 为覆盖 bundle、Compose 和 release-local deploy script 的 manifest SHA-256；
   `install-bundle.sh` 在随机 staging 上传后持同一 deploy lock 复验精确 tuple，使用
   `mv -Tn` no-clobber 原子纳管并 post-verify；
@@ -130,8 +133,11 @@ Next 执行更安全。G25C 没有删除或改写它们的 Next 公开 route。
 - `pnpm --filter @mahoshojo/hosted-api test/lint/build`：3 files / 29 tests，lint/typecheck 通过；
 - `pnpm --filter @mahoshojo/api` 的 test/lint/build/build:bundle：最终 15 files / 105 tests，生成
   10 条 shared route 和 5.3 MB single-file bundle；
-- deploy release-contract/installer/script/workflow：4 files / 57 tests；两个 shell 的 `sh -n`、
+- deploy release-contract/installer/script/workflow：4 files / 62 tests；两个 shell 的 `sh -n`、
   `dash -n` 及 affected ESLint 通过；
+- `fe3e3ff8` 最终 affected 复验：apps ownership、hosted-runtime ownership 与 deploy/workflow
+  6 files / 68 tests；workflow YAML 成功解析为 2 jobs、10 build steps，affected ESLint 与
+  `git diff --check` 通过；
 - `pnpm run build:server`：生成 10 shared / 0 legacy bundle；同一 artifact 以 dummy-only
   `HONO_CONFIG_CHECK_ONLY=true` 生产配置成功加载，没有连接外部服务；
 - `pnpm run check:workspace:boundaries`：通过；
@@ -157,12 +163,17 @@ naming/boundary gate，也没有展开全仓命名清债。
 
 ### 4.2 BLOCKED（阻塞 G25C stopping condition）
 
-- `pnpm run verify:server:runtime`：当前机器没有配置安全隔离的 `D1_GATEWAY_URL`、Redis
-  server 与对应测试凭据，verifier 在第一个必需配置处 fail closed；没有为验收连接生产
-  Gateway/Redis。其 config-only artifact smoke、health/readiness/D1/Redis 行为测试和 bundle 均已 PASS；
-- `docker build --file apps/api/Dockerfile .` 与 `docker compose ... config`：当前 WSL 没有
-  Docker CLI/Desktop integration。Dockerfile closure、Compose path、workflow/container gate 及 deploy behavior 已由
-  contract tests 覆盖，GitHub Actions 中的真实 Docker build gate 未被删除或弱化。
+- `pnpm run verify:server:runtime`：当前机器没有 Redis server；尝试以隔离状态目录启动
+  `wrangler dev --local --ip 127.0.0.1` 时，当前沙盒在 `uv_interface_addresses` 返回系统权限错误，
+  Gateway 未开始监听，因此没有继续伪造 runtime PASS，也没有连接 production Gateway/Redis。
+  config-only artifact smoke、health/readiness/D1/Redis 行为测试和 bundle 均已 PASS；
+- `docker build --file apps/api/Dockerfile .` 与 `docker compose ... config`：当前 WSL 只暴露不可用的
+  Docker Desktop stub，调用因 WSL integration/socket 错误失败，也没有其他本地 container runtime。
+  Dockerfile closure、Compose path、workflow/container gate 及 deploy behavior 已由 contract tests 覆盖。
+
+`fe3e3ff8` 已让 GitHub Actions build job 在真实 Docker、ephemeral Redis、local D1 上顺序运行上述
+两类验收，并禁止 `if`/`continue-on-error`、remote D1、关闭 errexit 或 shell boolean continuation
+绕过 terminal gate；但当前分支未推送，workflow 尚无实际 run，不能把“门禁存在”记为“门禁通过”。
 
 上述两项是当前机器缺失隔离运行时的环境证据，不是代码/contract `FAIL`，也不要求
 production 授权；但它们属于 G25C 专用计划明确列出的适用 build/integration 验证。静态 contract、
@@ -182,7 +193,7 @@ config-only smoke 与“workflow 中保留 gate”不能替代对同一 commit �
 
 ## 5. Builder self-review 与 independent review
 
-Builder 按 `GOAL-050` 复核了 `dbc073f7..99032cb6`：
+Builder 按 `GOAL-050` 复核了 `dbc073f7..fe3e3ff8`：
 
 - app/package/runtime 依赖方向与 root runtime dependency ownership；
 - auth/secret/authority、D1 mutation no-replay、Redis non-authority 与 Provider 失败语义；
@@ -202,11 +213,15 @@ test adequacy。审查期间曾提出的 Important 包括：
 5. 默认 Hosted composition 误用吞扫描异常的兼容 `quickCheck`，以及 D1 fetch 默认 follow
    301/302/303/307/308 可能透明重放 mutation；runtime verifier 对已提前退出子进程可能错过
    `exit` 事件并永久等待。
+6. Docker/Compose/runtime workflow contract 只检查宽松字符串，可能被 step skip、关闭 errexit、
+   remote credential 或裸/反斜线 shell boolean continuation 绕过。
 
-上述代码层 Critical/Important/Minor 均在对应原子提交修复并重跑 affected validation；最后三项由
+上述代码层 Critical/Important/Minor 均在对应原子提交修复并重跑 affected validation；第 5 项由
 `99032cb6` 关闭，fresh evidence 为 hosted-runtime 31/145、API 15/105、root affected 3/7、
-scripts ESLint、package lint/typecheck 与 API bundle 全部通过。独立 security 与 protective review
-对最终代码 checkpoint 均给出 Critical 0、Important 0、Minor 0 与 `Ready: yes`。整个 G25C
+scripts ESLint、package lint/typecheck 与 API bundle 全部通过；第 6 项由 `fe3e3ff8` 关闭，RED
+mutation 证明裸 boolean continuation 可吞 verifier，GREEN 后 workflow 13/13、最终 affected 6/68、
+YAML parse、ESLint 与 diff-check 通过。独立 architecture、security 与 protective review 对最终
+代码/contract checkpoint 均给出 Critical 0、Important 0、Minor 0 与 `Ready: yes`。整个 G25C
 的最终文档与验收结论仍对验收充分性保留以下开放 Important：
 
 1. 当前 commit 尚未在 Docker-capable 环境实际通过 `docker build` 与 `docker compose config`；
@@ -228,9 +243,9 @@ scripts ESLint、package lint/typecheck 与 API bundle 全部通过。独立 sec
 | 不伪造入口选择 | `PASS` | `not-observed` / `null` contract 与 canary negative tests |
 | build artifact、health/readiness、rollback 等价 | `BLOCKED` | bundle config smoke、app/deploy fault tests、Next/OpenNext builds PASS；built-runtime integration 未执行 |
 | full server/workspace/CI verification | `BLOCKED` | workspace/root/Next/OpenNext/静态 CI contract PASS；Docker/runtime 两项适用验证未闭合 |
-| independent review | `BLOCKED` | architecture/security/compatibility/test adequacy；2 个环境验收 Important open |
+| independent review | `BLOCKED` | 最终代码/contract review 0 finding；2 个环境验收 Important 仍 open |
 | production deploy/cutover | `NOT_APPLICABLE` | 未授权、未执行 |
-| local external runtime/Docker execution | `BLOCKED` | 机器无隔离 Gateway/Redis 与 Docker CLI；不弱化 CI/preview gate |
+| local external runtime/Docker execution | `BLOCKED` | Docker Desktop integration 不可用；Wrangler 被沙盒网络接口权限阻断；无 Redis server |
 | G25D Web relocation / G25E Hosted DR | `DEFERRED` | 后续独立 Goal |
 
 G25C 的代码 objective 已实现，但必需 stopping condition 尚未全部闭合；当前没有 `FAIL` 或开放
@@ -239,8 +254,8 @@ Critical，仍有 2 个阻塞目标的 `BLOCKED`/Important，因此不能报告 
 ## 7. 回滚
 
 1. 文档收口可独立 revert，不改运行时；
-2. 最终安全修复可独立 revert `99032cb6`；deploy hardening 从 `d385452b` 向前按原子提交逆序
-   revert；若未执行生产发布，无远程回滚；
+2. CI 环境 gate 可独立 revert `fe3e3ff8`；最终安全修复可独立 revert `99032cb6`；deploy
+   hardening 从 `d385452b` 向前按原子提交逆序 revert；若未执行生产发布，无远程回滚；
 3. `apps/api` relocation 可回退 `76cff7dc`及后续 app/deploy 提交，恢复上一 root `server/`
    artifact；必须连同 manifest/scripts/tests 一起回退，不得保留 app→root 半迁移结构；
 4. hosted-runtime extraction 可按 composition 提取提交逆序 revert，Next wrapper 恢复旧组合；
@@ -264,7 +279,8 @@ Redis flush、credential rotation 或远程 artifact 操作。
 - G25E-2：Hono/Redis/D1 Gateway/D1/mid-flight/version-skew 的隔离 fault harness/drill；
 - Phase 2.5 最终退出审计。
 
-当前立即下一入口仍是 G25C 验收收口，环境具备后重估约 `0.5–1.5h`；不得在它闭合前
+当前立即下一入口仍是 G25C 验收收口；门禁已自动化，取得 push/CI 授权并实际全绿后重估约
+`0.25–1h` 完成证据核对、审查关闭与 stopping audit；不得在它闭合前
 启动 G25D。其后 root Web 仍有约 783 个 `app/components/public` 及相关文件，303 个 `app/` 文件、
 213 个静态资产、49 个 root 生产依赖、187 个静态生成页面，而 `apps/web` 尚未激活。
 这个范围明显高于一次简单目录移动，下一 Goal 建议按 G25D 的既有拆分触发器收窄为：
