@@ -2,19 +2,20 @@ import { readFileSync } from 'node:fs';
 
 import * as packageRuntime from '@mahoshojo/hosted-runtime/generate-magical-girl-runtime';
 import * as domainMainColor from '@mahoshojo/domain/main-color';
+import { defaultGenerateMagicalGirlService } from '@mahoshojo/hosted-runtime/node-runtime/default-services';
 import { appRouteHandler as nextHandler } from '@/app/api/generate-magical-girl/handler';
 import * as legacyRuntime from '@/lib/hosted-api/generate-magical-girl';
 import * as legacyMainColor from '@/lib/main-color';
-import { POST as honoHandler } from '@/server/adapters/generate-magical-girl';
 
 describe('generate magical girl runtime ownership', () => {
-  test('package 唯一持有 schema，Next/Hono 绑定同一 default service', () => {
+  test('package 唯一持有 schema，Next 绑定 package default service', () => {
     expect(packageRuntime.MAGICAL_GIRL_GENERATION_CONFIG.schema)
       .toBe(packageRuntime.MAGICAL_GIRL_GENERATION_SCHEMA);
     expect('MagicalGirlGenerationSchema' in legacyRuntime).toBe(false);
     expect('defaultGenerateMagicalGirlRuntime' in legacyRuntime).toBe(false);
     expect(nextHandler).toBe(legacyRuntime.defaultGenerateMagicalGirlService);
-    expect(honoHandler).toBe(legacyRuntime.defaultGenerateMagicalGirlService);
+    expect(defaultGenerateMagicalGirlService)
+      .toBe(legacyRuntime.defaultGenerateMagicalGirlService);
   });
 
   test('root main-color 复用 domain canonical identity', () => {

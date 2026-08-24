@@ -23,16 +23,16 @@ const PACKAGE_DIRECTORY = path.join(ROOT_DIRECTORY, 'packages', 'hosted-runtime'
 const PACKAGE_MANIFEST_PATH = path.join(PACKAGE_DIRECTORY, 'package.json');
 
 const ADAPTER_SOURCE_FILES = [
-  'server/adapters/generate-free.ts',
-  'server/adapters/generate-free-stream.ts',
-  'server/adapters/generate-scenario.ts',
-  'server/adapters/generate-scenario-stream.ts',
-  'server/adapters/generate-canshou.ts',
-  'server/adapters/generate-canshou-stream.ts',
-  'server/adapters/generate-magical-girl.ts',
-  'server/adapters/generate-game-card.ts',
-  'server/adapters/creator/generate.ts',
-  'server/adapters/creator/generate-stream.ts',
+  'apps/api/src/adapters/generate-free.ts',
+  'apps/api/src/adapters/generate-free-stream.ts',
+  'apps/api/src/adapters/generate-scenario.ts',
+  'apps/api/src/adapters/generate-scenario-stream.ts',
+  'apps/api/src/adapters/generate-canshou.ts',
+  'apps/api/src/adapters/generate-canshou-stream.ts',
+  'apps/api/src/adapters/generate-magical-girl.ts',
+  'apps/api/src/adapters/generate-game-card.ts',
+  'apps/api/src/adapters/creator/generate.ts',
+  'apps/api/src/adapters/creator/generate-stream.ts',
 ];
 
 const FORBIDDEN_ADAPTER_LEGACY_ROOTS = ['app', 'components', 'lib', 'pages', 'types', 'server'];
@@ -52,7 +52,7 @@ const collectAdapterClosureInputs = async (entryFile: string) => {
     packages: 'external',
     logLevel: 'silent',
     platform: 'node',
-    tsconfig: path.join(ROOT_DIRECTORY, 'tsconfig.server.json'),
+    tsconfig: path.join(ROOT_DIRECTORY, 'apps', 'api', 'tsconfig.json'),
   });
 
   return Object.keys(result.metafile?.inputs ?? {})
@@ -65,7 +65,7 @@ const isForbiddenLegacyLocalDependency = (sourceFile: string) => {
   const relative = toPosixPath(path.relative(ROOT_DIRECTORY, sourceFile));
   if (!relative || relative.startsWith('../') || path.isAbsolute(relative)) return false;
 
-  if (relative.startsWith('server/adapters/')) return false;
+  if (relative.startsWith('apps/api/src/adapters/')) return false;
   const topLevelDirectory = relative.split('/')[0] ?? '';
   return FORBIDDEN_ADAPTER_LEGACY_ROOTS.includes(topLevelDirectory);
 };
@@ -97,7 +97,7 @@ describe('hosted-runtime ownership boundary', () => {
     }
   });
 
-  test('server/adapters 生产闭包依赖不允许依赖 legacy root 或动态模块加载', async () => {
+  test('apps/api adapters 生产闭包依赖不允许依赖 legacy root 或动态模块加载', async () => {
     const boundaryViolations = checkWorkspaceBoundaries(ROOT_DIRECTORY);
     const adapterClosures = await Promise.all(ADAPTER_SOURCE_FILES.map((adapter) => collectAdapterClosureInputs(adapter)));
     const allClosureInputs = new Set(adapterClosures.flat());

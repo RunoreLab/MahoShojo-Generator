@@ -433,6 +433,10 @@ function localSourceTargetFromSpecifier(rootDirectory, filePath, moduleSpecifier
     unresolvedTarget = path.resolve(path.dirname(filePath), moduleSpecifier);
   } else if (moduleSpecifier.startsWith('@/')) {
     unresolvedTarget = path.resolve(rootDirectory, moduleSpecifier.slice(2));
+  } else if (moduleSpecifier.startsWith('#/')) {
+    const apiSourceDirectory = path.join(rootDirectory, 'apps', 'api', 'src');
+    if (!isWithin(filePath, apiSourceDirectory)) return null;
+    unresolvedTarget = path.resolve(apiSourceDirectory, moduleSpecifier.slice(2));
   } else {
     return null;
   }
@@ -732,7 +736,13 @@ export function checkWorkspaceBoundaries(rootDirectory = process.cwd()) {
     }
   }
 
-  const honoAdapterDirectory = path.join(normalizedRoot, 'server', 'adapters');
+  const honoAdapterDirectory = path.join(
+    normalizedRoot,
+    'apps',
+    'api',
+    'src',
+    'adapters',
+  );
   const visitedHonoDependencies = new Set();
   const inspectHonoDependency = (sourceFile) => {
     if (visitedHonoDependencies.has(sourceFile)) return;

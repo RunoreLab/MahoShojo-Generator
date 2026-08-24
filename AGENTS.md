@@ -17,7 +17,7 @@
 - `package.json`、`pnpm-workspace.yaml`：依赖、脚本和 workspace；
 - `apps/README.md`：应用迁移状态与部署边界；
 - `packages/README.md`：共享 package 职责、exports 与依赖边界；
-- `server/README.md`、`config/hono-api-routes.json`：迁移期 Hono/API 现状；
+- `apps/api/README.md`、`config/hono-api-routes.json`：Hono/API 应用现状；
 - `.github/workflows/`：当前 CI、发布和部署自动化。
 
 **目标与规范性口径**从 `docs/README.md` 进入。

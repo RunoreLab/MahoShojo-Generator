@@ -84,6 +84,11 @@
       "import": "./src/node-runtime/structured-ai.ts",
       "default": "./src/node-runtime/structured-ai.ts"
     },
+    "./node-runtime/raw-stream-ai": {
+      "types": "./src/node-runtime/raw-stream-ai.ts",
+      "import": "./src/node-runtime/raw-stream-ai.ts",
+      "default": "./src/node-runtime/raw-stream-ai.ts"
+    },
     "./creator/build-rule-projection": {
       "types": "./src/creator/build-rule-projection.ts",
       "import": "./src/creator/build-rule-projection.ts",

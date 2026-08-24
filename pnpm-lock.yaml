@@ -30,9 +30,6 @@ importers:
       '@ai-sdk/react':
         specifier: ^3.0.186
         version: 3.0.186(react@19.2.3)(zod@4.3.6)
-      '@hono/node-server':
-        specifier: ^2.1.1
-        version: 2.1.1(hono@4.13.3)
       '@hookform/resolvers':
         specifier: ^5.2.2
         version: 5.4.0(react-hook-form@7.68.0(react@19.2.3))
@@ -93,9 +90,6 @@ importers:
       fflate:
         specifier: ^0.8.2
         version: 0.8.3
-      hono:
-        specifier: ^4.13.3
-        version: 4.13.3
       jieba-wasm:
         specifier: ^2.4.0
         version: 2.4.0
@@ -138,9 +132,6 @@ importers:
       react-markdown:
         specifier: ^10.1.0
         version: 10.1.0(@types/react@19.2.15)(react@19.2.3)
-      redis:
-        specifier: ^6.2.1
-        version: 6.2.1(@opentelemetry/api@1.9.1)
       rehype-katex:
         specifier: ^7.0.1
         version: 7.0.1
@@ -238,6 +229,46 @@ importers:
       wrangler:
         specifier: ^4.125.0
         version: 4.125.0
+
+  apps/api:
+    dependencies:
+      '@hono/node-server':
+        specifier: ^2.1.1
+        version: 2.1.1(hono@4.13.3)
+      '@mahoshojo/hosted-runtime':
+        specifier: workspace:*
+        version: link:../../packages/hosted-runtime
+      dotenv:
+        specifier: ^17.4.2
+        version: 17.4.2
+      hono:
+        specifier: ^4.13.3
+        version: 4.13.3
+      redis:
+        specifier: ^6.2.1
+        version: 6.2.1(@opentelemetry/api@1.9.1)
+    devDependencies:
+      '@types/node':
+        specifier: ^20
+        version: 20.19.27
+      '@typescript-eslint/parser':
+        specifier: ^8.50.0
+        version: 8.50.0(eslint@9.39.2(jiti@2.7.0))(typescript@5.9.3)
+      esbuild:
+        specifier: ^0.28.1
+        version: 0.28.1
+      eslint:
+        specifier: ^9
+        version: 9.39.2(jiti@2.7.0)
+      tsx:
+        specifier: ^4.21.0
+        version: 4.22.4
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.7
+        version: 4.1.7(@opentelemetry/api@1.9.1)(@types/node@20.19.27)(msw@2.15.0(@types/node@20.19.27)(typescript@5.9.3))(vite@8.0.16(@types/node@20.19.27)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.16.9)(tsx@4.22.4)(yaml@2.9.0))
 
   apps/d1-gateway:
     devDependencies:

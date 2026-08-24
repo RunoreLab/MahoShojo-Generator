@@ -1,0 +1,36 @@
+{
+  "name": "@mahoshojo/api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "imports": {
+    "#/*": "./src/*.ts"
+  },
+  "scripts": {
+    "dev": "node scripts/generate-route-manifest.mjs && tsx watch src/index.ts",
+    "start": "node dist/index.mjs",
+    "test": "vitest run --config vitest.config.ts",
+    "lint": "eslint src tests --config eslint.config.mjs",
+    "build": "tsc --noEmit -p tsconfig.json",
+    "build:bundle": "node scripts/generate-route-manifest.mjs && node scripts/build.mjs",
+    "routes": "node scripts/generate-route-manifest.mjs",
+    "verify:runtime": "node scripts/verify-runtime.mjs",
+    "deploy:prepare": "node scripts/generate-route-manifest.mjs && node scripts/build.mjs"
+  },
+  "dependencies": {
+    "@hono/node-server": "^2.1.1",
+    "@mahoshojo/hosted-runtime": "workspace:*",
+    "dotenv": "^17.4.2",
+    "hono": "^4.13.3",
+    "redis": "^6.2.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "@typescript-eslint/parser": "^8.50.0",
+    "esbuild": "^0.28.1",
+    "eslint": "^9",
+    "tsx": "^4.21.0",
+    "typescript": "^5",
+    "vitest": "^4.1.7"
+  }
+}

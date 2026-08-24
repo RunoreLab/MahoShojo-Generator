@@ -2,13 +2,13 @@ import { readFileSync } from 'node:fs';
 
 import * as aiCoreGameCard from '@mahoshojo/ai-core/game-card-generation';
 import * as contractsGameCard from '@mahoshojo/contracts/game-card';
+import { defaultGenerateGameCardService } from '@mahoshojo/hosted-runtime/node-runtime/default-services';
 import * as packageRuntime from '@mahoshojo/hosted-runtime/generate-game-card-runtime';
 import { handler as nextHandler } from '@/app/api/generate-game-card/handler';
 import * as rootGameCardConfig from '@/lib/game-card/config';
 import * as gameCardPresentation from '@/lib/game-card/presentation';
 import * as legacyRuntime from '@/lib/hosted-api/generate-game-card';
 import * as rootGameCardSchema from '@/lib/schemas/game-card';
-import { POST as honoHandler } from '@/server/adapters/generate-game-card';
 
 describe('generate game card runtime ownership', () => {
   test('contracts 与 ai-core 分别持有 canonical schema/config identity', () => {
@@ -29,9 +29,9 @@ describe('generate game card runtime ownership', () => {
     expect(rootGameCardSchema.ELEMENT_COLORS).toBe(gameCardPresentation.ELEMENT_COLORS);
   });
 
-  test('hosted-runtime 持有唯一 composition，Next/Hono 绑定同一 singleton', () => {
+  test('hosted-runtime 持有唯一 composition，Next 绑定 package singleton', () => {
     expect(nextHandler).toBe(legacyRuntime.defaultGenerateGameCardService);
-    expect(honoHandler).toBe(legacyRuntime.defaultGenerateGameCardService);
+    expect(defaultGenerateGameCardService).toBe(legacyRuntime.defaultGenerateGameCardService);
     expect('createDefaultGenerateGameCardService' in legacyRuntime).toBe(false);
     expect('defaultGenerateGameCardRuntime' in legacyRuntime).toBe(false);
     expect('resolveCustomProviderRuntime' in packageRuntime).toBe(false);

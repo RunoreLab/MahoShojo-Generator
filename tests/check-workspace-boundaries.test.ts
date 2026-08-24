@@ -153,8 +153,8 @@ describe('workspace dependency boundaries', () => {
       'app/api/generate/handler.ts': 'export const appRouteHandler = () => new Response();\n',
       'pages/api/legacy.ts': 'export default function legacy() {}\n',
       'lib/hosted-api/generate.ts': 'export const sharedService = () => new Response();\n',
-      'server/adapters/generate.ts': [
-        "export { appRouteHandler } from '../../app/api/generate/handler';",
+      'apps/api/src/adapters/generate.ts': [
+        "export { appRouteHandler } from '../../../../app/api/generate/handler';",
         "export { default as legacy } from '@/pages/api/legacy';",
         "export { sharedService } from '@/lib/hosted-api/generate';",
       ].join('\n'),
@@ -166,14 +166,14 @@ describe('workspace dependency boundaries', () => {
 
     expect(violations).toHaveLength(2);
     expect(violations.map((violation) => violation.module)).toEqual([
-      '../../app/api/generate/handler',
+      '../../../../app/api/generate/handler',
       '@/pages/api/legacy',
     ]);
   });
 
   it('rejects non-literal module loads reachable from Hono shared adapters', async () => {
     const rootDir = await createWorkspaceFixture({
-      'server/adapters/generate.ts': [
+      'apps/api/src/adapters/generate.ts': [
         "const routePath = '../../app/api/generate/handler';",
         'export const load = () => import(routePath);',
       ].join('\n'),
@@ -184,15 +184,15 @@ describe('workspace dependency boundaries', () => {
     );
 
     expect(violations).toHaveLength(1);
-    expect(violations[0]?.file).toMatch(/server\/adapters\/generate\.ts$/);
+    expect(violations[0]?.file).toMatch(/apps\/api\/src\/adapters\/generate\.ts$/);
     expect(violations[0]?.module).toBe('<dynamic-import>');
   });
 
   it('rejects indirect local bridges from Hono adapters to legacy Next routes', async () => {
     const rootDir = await createWorkspaceFixture({
       'app/api/generate/handler.ts': 'export const handler = () => new Response();\n',
-      'lib/bridge.ts': "export { handler } from '@/app/api/generate/handler';\n",
-      'server/adapters/generate.ts': "export { handler as POST } from '@/lib/bridge';\n",
+      'apps/api/src/bridge.ts': "export { handler } from '@/app/api/generate/handler';\n",
+      'apps/api/src/adapters/generate.ts': "export { handler as POST } from '#/bridge';\n",
     });
 
     const violations = checkWorkspaceBoundaries(rootDir).filter(
@@ -200,7 +200,7 @@ describe('workspace dependency boundaries', () => {
     );
 
     expect(violations).toHaveLength(1);
-    expect(violations[0]?.file).toMatch(/lib\/bridge\.ts$/);
+    expect(violations[0]?.file).toMatch(/apps\/api\/src\/bridge\.ts$/);
     expect(violations[0]?.module).toBe('@/app/api/generate/handler');
   });
 
