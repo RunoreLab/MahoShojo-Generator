@@ -144,12 +144,26 @@ Admin/Desktop/Mobile app 带入 Hono image。
 `.github/workflows/hono-deploy.yml` 继续保留受保护生产分支、Environment、SSH host key 和
 `cancel-in-progress: false` 门禁，但 build/container/artifact 路径只引用 `apps/api` owner。发布物由
 `index.mjs`、release-local `compose.yml` 和 `deploy-bundle.sh` 组成；`release.manifest` 覆盖完整 tuple，
-其 SHA-256 才是 release id。远端先验证两层 checksum，再执行 release-local deploy script。
+其 SHA-256 才是 release id。workflow 通过 `install-bundle.sh` 在 canonical `releases` 下创建随机 staging，
+上传后持 deploy lock 复验精确 tuple，再原子纳管最终目录；不会在校验前向最终 release 路径写文件。之后才
+执行 release-local deploy script。
 
 部署事务只有在配置预检、本机 readiness、`/health/ready` 和 retained shared route
 `/api/generate-magical-girl` 的公网 wire/CORS contract 全部通过后才原子 promotion `current`；任一步失败都
-恢复 previous release-local compose 与环境。已有 `.env` 若指向不含 release-local compose 的旧 release，
-脚本会在改变运行状态前 fail closed，需要运维先完成一次性迁移准备，不能以不可回滚方式强行发布。
+恢复经过 checksum 与 `docker compose config` 复验的 previous release-local tuple。脚本以非阻塞
+`flock` 阻止并发部署，并在激活前原子写入 `deploy.transaction`；TERM/INT/HUP 会触发回滚，进程被强制
+终止时则由下一次部署先恢复未完成事务。journal 缺字段、重复/额外字段或指向非 content-addressed release
+时保留证据并 fail closed。
+
+首次从旧生产布局升级时，脚本只接受旧手册记录的精确 schema：根 `.env` 单字段指向
+`releases/<64hex>`，该目录含普通 `index.mjs` 与精确 `index.mjs.sha256`，根目录含普通
+`compose.yml`/`deploy-bundle.sh`，且尚无 `current` 和 `deployment-format`。脚本复验 checksum、Compose
+config 与旧 runtime 生产配置后，才复制成带 `legacy-layout` 标记的可校验 tuple并登记为 rollback baseline；
+新版 contract 失败会真实重启该 baseline。至少在首次新版成功并度过约定 rollback window 前，不得改写或
+删除旧 release 的 `index.mjs`/`index.mjs.sha256` 或根 `compose.yml`。一旦写入
+`deployment-format=release-tuple-v2`，managed `.env`/`current` 缺失、不一致、checksum 损坏、含符号链接或
+config 无效都会在激活前 fail closed，不会重新降级纳管。部署主机必须提供 `flock`、`mktemp`、`realpath`、
+`sha256sum`、GNU `find -printf`、`cmp`、Docker Compose、`curl` 和标准 POSIX 工具。
 G25C 只实现并在本地/fault-injection 验证该流程，没有执行 production deploy、切流或 credential 变更。
 
 生产切流只应将 `config/hono-api-routes.json` 中的精确路径转发到 Hono origin；其他 `/api/*` 继续访问 Next.js。前端继续使用

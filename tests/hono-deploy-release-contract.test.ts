@@ -34,11 +34,54 @@ describe('Hono content-addressed release transaction', () => {
 
     expect(script).toContain('compose_file="$release_dir/compose.yml"');
     expect(script).not.toContain('compose_file="$root_dir/compose.yml"');
-    expect(script).toMatch(/previous_release_dir=.*HONO_RELEASE_DIR/);
-    expect(script).toContain('previous_compose_file="$previous_release_dir/compose.yml"');
-    expect(script).toContain('rollback_release');
+    expect(script).toMatch(/candidate_previous=.*HONO_RELEASE_DIR/);
+    expect(script).toContain('restore_previous_tuple');
+    expect(script).toContain('rollback_transaction');
     expect(script).toContain('current.next');
     expect(script).toMatch(/mv\s+-Tf\s+["']?\$root_dir\/current\.next/);
+    expect(script).toContain('verify_release_tuple "$previous_release_dir"');
+    expect(script).toContain('validate_release_compose "$previous_release_dir"');
+  });
+
+  test('部署事务有跨进程互斥、持久 journal、信号回滚与 next-start recovery', () => {
+    const script = readDeployScript();
+    if (!script) return;
+
+    expect(script).toMatch(/flock\s+-n\s+9/u);
+    expect(script).toContain('transaction_file="$root_dir/deploy.transaction"');
+    expect(script).toContain('write_transaction');
+    expect(script).toContain('recover_pending_transaction');
+    expect(script).toMatch(/trap\s+[^\n]*(?:HUP|INT|TERM)/u);
+
+    const recovery = script.indexOf('recover_pending_transaction');
+    const activation = script.indexOf('if activate_release');
+    expect(recovery).toBeGreaterThan(-1);
+    expect(activation).toBeGreaterThan(recovery);
+  });
+
+  test('显式纳管旧文档布局并用 format marker 禁止 managed 状态降级', () => {
+    const script = readDeployScript();
+    if (!script) return;
+
+    expect(script).toContain('adopt_legacy_layout');
+    expect(script).toContain('legacy-layout');
+    expect(script).toContain('index.mjs.sha256');
+    expect(script).toContain('$root_dir/compose.yml');
+    expect(script).toContain('format_file="$root_dir/deployment-format"');
+    expect(script).toContain('release-tuple-v2');
+    expect(script).toContain('verify_legacy_release');
+  });
+
+  test('metadata 与 probe 使用安全临时文件，candidate/previous 运行同等级生产预检', () => {
+    const script = readDeployScript();
+    if (!script) return;
+
+    expect(script).toContain('mktemp "$root_dir/.env.next.XXXXXX"');
+    expect(script).toContain('mktemp "$root_dir/.deploy.transaction.next.XXXXXX"');
+    expect(script).toContain('mktemp -d /tmp/mahoshojo-hono-probe.XXXXXX');
+    expect(script).toContain('validate_release_runtime "$release_dir"');
+    expect(script).toContain('validate_release_runtime "$previous_release_dir"');
+    expect(script).toContain('run_cancellable curl');
   });
 
   test('公网 retained-route contract probe 位于部署事务内，失败会进入 rollback', () => {
@@ -52,14 +95,14 @@ describe('Hono content-addressed release transaction', () => {
     expect(script).toContain('verify_public_contract');
     expect(script).toContain('/health/ready');
     expect(script).toContain('/api/generate-magical-girl');
-    expect(script).toContain("test \"$probe_status\" = '400'");
+    expect(script).toContain('[ "$probe_status" = \'400\' ]');
     expect(script).toContain('Name is required');
     expect(script).toContain('Access-Control-Allow-Origin');
 
     const transactionStart = script.indexOf('if activate_release');
     const publicProbe = script.indexOf('verify_public_contract', transactionStart);
     const promotion = script.indexOf('promote_release', transactionStart);
-    const rollback = script.indexOf('rollback_release', transactionStart);
+    const rollback = script.indexOf('rollback_transaction', transactionStart);
     expect(transactionStart).toBeGreaterThan(-1);
     expect(publicProbe).toBeGreaterThan(transactionStart);
     expect(promotion).toBeGreaterThan(publicProbe);

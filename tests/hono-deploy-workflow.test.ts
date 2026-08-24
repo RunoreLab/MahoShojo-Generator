@@ -5,6 +5,7 @@ import { describe, expect, test } from 'vitest';
 const HONO_WORKFLOW_PATH = resolve(process.cwd(), '.github/workflows/hono-deploy.yml');
 const CLOUDFLARE_WORKFLOW_PATH = resolve(process.cwd(), '.github/workflows/cloudflare-deploy.yml');
 const HONO_DEPLOY_SCRIPT_PATH = resolve(process.cwd(), 'apps/api/deploy/deploy-bundle.sh');
+const HONO_INSTALL_SCRIPT_PATH = resolve(process.cwd(), 'apps/api/deploy/install-bundle.sh');
 const PRODUCTION_BRANCH = 'refs/heads/feature/v0.2.0_Battle_Growth_MahoShojo';
 
 function escapeRegExp(value: string): string {
@@ -54,7 +55,7 @@ describe('Hono deployment workflow', () => {
     expect(routeInventory.sharedRouteIds).toContain(probePath);
     expect(routeInventory.exitedRouteIds).not.toContain(probePath);
     expect(deployScript).toContain('--request POST');
-    expect(deployScript).toContain("test \"$probe_status\" = '400'");
+    expect(deployScript).toContain("[ \"$probe_status\" = '400' ]");
     expect(deployScript).toContain('Name is required');
     expect(workflow).not.toContain('- name: Verify public endpoint');
   });
@@ -93,6 +94,31 @@ describe('Hono deployment workflow', () => {
     expect(buildJob.indexOf(containerBuildStep)).toBeLessThan(
       buildJob.indexOf('- name: Build single-file server'),
     );
+  });
+
+  test('uploads to random staging and atomically installs under the deploy lock', () => {
+    const workflow = readFileSync(HONO_WORKFLOW_PATH, 'utf8');
+    const installer = readFileSync(HONO_INSTALL_SCRIPT_PATH, 'utf8');
+    const uploadStep = getStep(getJob(workflow, 'deploy'), 'Upload release');
+
+    expect(uploadStep).toContain("'sh -s -- create' < apps/api/deploy/install-bundle.sh");
+    expect(uploadStep).toContain('"sh -s -- install');
+    expect(uploadStep).toContain('< apps/api/deploy/install-bundle.sh');
+    expect(uploadStep).toContain('/releases/.upload.');
+    expect(uploadStep).not.toContain('install -d -m 755 /opt/mahoshojo-hono/releases/$release_id');
+    expect(uploadStep).toContain("''|*[!0-9a-f]*)");
+    expect(uploadStep).toContain('test "${#release_id}" -eq 64');
+    expect(uploadStep).toContain("''|*[!A-Za-z0-9]*)");
+    expect(uploadStep.indexOf("case \"$release_id\"")).toBeLessThan(
+      uploadStep.indexOf("\"sh -s -- install '$release_id' '$upload_dir'\""),
+    );
+    expect(uploadStep.indexOf('case "$upload_suffix"')).toBeLessThan(
+      uploadStep.indexOf('scp -i ~/.ssh/deploy_key'),
+    );
+    expect(installer).toContain('flock -n 9');
+    expect(installer).toContain('mktemp -d "$releases_dir/.upload.XXXXXX"');
+    expect(installer).toContain('mv -Tn "$staging_dir" "$final_dir"');
+    expect(installer.match(/verify_uploaded_tuple "\$final_dir" "\$release_id"/gu)).toHaveLength(2);
   });
 
   test('所有 Hono artifact 与部署生命周期都引用 apps/api owner', () => {

@@ -42,7 +42,7 @@ jobs:
       - name: Verify Hono authentication and runtime
         run: |
           pnpm --filter @mahoshojo/api run test
-          pnpm exec vitest run tests/apps-api-source-ownership.test.ts tests/hosted-runtime-ownership.test.ts tests/hono-deploy-workflow.test.ts tests/hono-deploy-release-contract.test.ts tests/hono-deploy-script.test.ts
+          pnpm exec vitest run tests/apps-api-source-ownership.test.ts tests/hosted-runtime-ownership.test.ts tests/hono-deploy-workflow.test.ts tests/hono-deploy-release-contract.test.ts tests/hono-deploy-installer.test.ts tests/hono-deploy-script.test.ts
 
       - name: Verify Hono container build
         run: docker build --file apps/api/Dockerfile .
@@ -75,6 +75,9 @@ jobs:
     runs-on: ubuntu-latest
     environment: hono-production
     steps:
+      - name: Checkout deployment installer
+        uses: actions/checkout@v6
+
       - name: Download bundle
         uses: actions/download-artifact@v5
         with:
@@ -93,7 +96,21 @@ jobs:
       - name: Upload release
         run: |
           release_id="$(awk '{print $1}' artifact/release.sha256)"
-          ssh -i ~/.ssh/deploy_key "$VPS_USER@$VPS_HOST" "install -d -m 755 /opt/mahoshojo-hono/releases/$release_id"
-          scp -i ~/.ssh/deploy_key artifact/index.mjs artifact/compose.yml artifact/deploy-bundle.sh artifact/release.manifest artifact/release.sha256 "$VPS_USER@$VPS_HOST:/opt/mahoshojo-hono/releases/$release_id/"
-          ssh -i ~/.ssh/deploy_key "$VPS_USER@$VPS_HOST" "cd /opt/mahoshojo-hono/releases/$release_id && printf '%s  release.manifest\\n' '$release_id' | sha256sum -c - && sha256sum -c release.manifest && chmod 755 deploy-bundle.sh"
-          ssh -i ~/.ssh/deploy_key "$VPS_USER@$VPS_HOST" "/opt/mahoshojo-hono/releases/$release_id/deploy-bundle.sh $release_id https://homura.colanns.me"
+          case "$release_id" in
+            ''|*[!0-9a-f]*) echo "artifact release id 非法" >&2; exit 1 ;;
+          esac
+          test "${#release_id}" -eq 64
+          upload_dir="$(ssh -i ~/.ssh/deploy_key "$VPS_USER@$VPS_HOST" 'sh -s -- create' < apps/api/deploy/install-bundle.sh)"
+          case "$upload_dir" in
+            /opt/mahoshojo-hono/releases/.upload.*) ;;
+            *) echo "远端返回了非法 upload staging" >&2; exit 1 ;;
+          esac
+          upload_suffix="${upload_dir##*/.upload.}"
+          case "$upload_suffix" in
+            ''|*[!A-Za-z0-9]*) echo "远端 upload staging 后缀非法" >&2; exit 1 ;;
+          esac
+          scp -i ~/.ssh/deploy_key artifact/index.mjs artifact/compose.yml artifact/deploy-bundle.sh artifact/release.manifest artifact/release.sha256 "$VPS_USER@$VPS_HOST:$upload_dir/"
+          installed_dir="$(ssh -i ~/.ssh/deploy_key "$VPS_USER@$VPS_HOST" "sh -s -- install '$release_id' '$upload_dir'" < apps/api/deploy/install-bundle.sh)"
+          expected_dir="/opt/mahoshojo-hono/releases/$release_id"
+          test "$installed_dir" = "$expected_dir"
+          ssh -i ~/.ssh/deploy_key "$VPS_USER@$VPS_HOST" "$installed_dir/deploy-bundle.sh $release_id https://homura.colanns.me"
