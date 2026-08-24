@@ -61,7 +61,7 @@ const readInput = async (
   if (throwOnNullBody && parsedBody === null) {
     // 非流式 legacy handler 直接对 JSON 结果解构；JSON null 因此进入 500 分支。
     const { answers: _answers } = await Promise.resolve(
-      parsedBody as Record<string, unknown>,
+      parsedBody as unknown as Record<string, unknown>,
     );
     void _answers;
   }

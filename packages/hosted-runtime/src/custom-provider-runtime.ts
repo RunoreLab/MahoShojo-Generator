@@ -41,7 +41,7 @@ export type CustomProviderRuntimeOptions = {
     providerId: string;
     modelId: string;
   };
-  loadBalanceStrategy?: 'sequential';
+  loadBalanceStrategy?: 'sequential' | 'custom';
   providerOverride?: RuntimeProviderOverride;
   generationSettingsContext?: {
     providerId: string;
@@ -50,8 +50,22 @@ export type CustomProviderRuntimeOptions = {
 };
 
 export type CustomProviderRuntimeResult =
-  | { options: CustomProviderRuntimeOptions; response?: undefined }
+  | {
+    options: CustomProviderRuntimeOptions;
+    modelOverride?: string;
+    response?: undefined;
+  }
   | { options?: undefined; response: Response };
+
+export type CustomProviderRuntimePolicy = {
+  /**
+   * 默认保持新 runtime 已审计的 sequential 行为；legacy composition
+   * 必须显式选择 custom，避免自定义通道失败后轮询系统 Provider。
+   */
+  nonSystemLoadBalanceStrategy?: 'sequential' | 'custom';
+  /** 旧 Free/Scenario 会把空 baseUrl 的 canonical model 放入 generation config。 */
+  exposeEmptyBaseUrlModelOverride?: boolean;
+};
 
 export const inferCustomProviderMode = (payload: unknown): CustomProviderMode => {
   if (!payload || typeof payload !== 'object') return 'system';
@@ -69,6 +83,7 @@ const errorResponse = (error: string): Response => new Response(
 export const resolveCustomProviderRuntime = (
   payload: CustomProviderRequest | undefined,
   dependencies: CustomProviderRuntimeDependencies,
+  policy: CustomProviderRuntimePolicy = {},
 ): CustomProviderRuntimeResult => {
   if (!payload) {
     return {
@@ -101,6 +116,9 @@ export const resolveCustomProviderRuntime = (
       ? { userOverrides: payload.generationOverrides }
       : {}),
   };
+  const nonSystemLoadBalanceStrategy = provider.id !== 'system'
+    ? policy.nonSystemLoadBalanceStrategy
+    : undefined;
   const baseUrl = provider.baseUrl?.trim() ?? '';
   if (!baseUrl) {
     return {
@@ -111,8 +129,15 @@ export const resolveCustomProviderRuntime = (
             ? payload.modelId
             : modelResolution.modelId,
         },
+        ...(nonSystemLoadBalanceStrategy
+          ? { loadBalanceStrategy: nonSystemLoadBalanceStrategy }
+          : {}),
         generationSettingsContext,
       },
+      ...(policy.exposeEmptyBaseUrlModelOverride
+        && modelResolution.modelId !== 'default'
+        ? { modelOverride: modelResolution.modelId }
+        : {}),
     };
   }
 
@@ -123,7 +148,7 @@ export const resolveCustomProviderRuntime = (
         providerId: payload.providerId,
         modelId: payload.modelId,
       },
-      loadBalanceStrategy: 'sequential',
+      loadBalanceStrategy: nonSystemLoadBalanceStrategy ?? 'sequential',
       providerOverride: {
         name: provider.name,
         apiKey,

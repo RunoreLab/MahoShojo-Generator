@@ -19,6 +19,26 @@
       "import": "./src/generate-game-card-runtime.ts",
       "default": "./src/generate-game-card-runtime.ts"
     },
+    "./generate-free-runtime": {
+      "types": "./src/generate-free-runtime.ts",
+      "import": "./src/generate-free-runtime.ts",
+      "default": "./src/generate-free-runtime.ts"
+    },
+    "./generate-free-stream-runtime": {
+      "types": "./src/generate-free-stream-runtime.ts",
+      "import": "./src/generate-free-stream-runtime.ts",
+      "default": "./src/generate-free-stream-runtime.ts"
+    },
+    "./generate-scenario-runtime": {
+      "types": "./src/generate-scenario-runtime.ts",
+      "import": "./src/generate-scenario-runtime.ts",
+      "default": "./src/generate-scenario-runtime.ts"
+    },
+    "./generate-scenario-stream-runtime": {
+      "types": "./src/generate-scenario-stream-runtime.ts",
+      "import": "./src/generate-scenario-stream-runtime.ts",
+      "default": "./src/generate-scenario-stream-runtime.ts"
+    },
     "./ai-upstream": {
       "types": "./src/ai-upstream.ts",
       "import": "./src/ai-upstream.ts",

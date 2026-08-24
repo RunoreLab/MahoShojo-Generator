@@ -116,4 +116,41 @@ describe('custom provider runtime helper', () => {
     expect(missingKey.response?.status).toBe(400);
     expect(await missingKey.response?.json()).toEqual({ error: 'API Key 不能为空' });
   });
+
+  it('仅在调用方显式选择 legacy policy 时禁用非 system 轮询并暴露空 baseUrl modelOverride', () => {
+    const legacyDependencies: CustomProviderRuntimeDependencies = {
+      findProvider: () => ({
+        id: 'proxy',
+        name: 'Proxy',
+        baseUrl: '   ',
+        type: 'openai',
+      }),
+      resolveModel: () => ({ modelId: 'canonical-model' }),
+    };
+    const payload = {
+      providerId: 'proxy',
+      modelId: 'model-alias',
+      apiKey: 'secret-key',
+    };
+
+    const defaultResult = resolveCustomProviderRuntime(payload, legacyDependencies);
+    if (defaultResult.response) throw new Error('default policy unexpectedly failed');
+    expect(defaultResult.options).toEqual({
+      channelContext: { providerId: 'proxy', modelId: 'canonical-model' },
+      generationSettingsContext: { providerId: 'proxy' },
+    });
+    expect(defaultResult.modelOverride).toBeUndefined();
+
+    const legacyResult = resolveCustomProviderRuntime(payload, legacyDependencies, {
+      nonSystemLoadBalanceStrategy: 'custom',
+      exposeEmptyBaseUrlModelOverride: true,
+    });
+    if (legacyResult.response) throw new Error('legacy policy unexpectedly failed');
+    expect(legacyResult.options).toEqual({
+      channelContext: { providerId: 'proxy', modelId: 'canonical-model' },
+      loadBalanceStrategy: 'custom',
+      generationSettingsContext: { providerId: 'proxy' },
+    });
+    expect(legacyResult.modelOverride).toBe('canonical-model');
+  });
 });
