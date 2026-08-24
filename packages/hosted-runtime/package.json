@@ -14,6 +14,11 @@
       "import": "./src/ai-upstream.ts",
       "default": "./src/ai-upstream.ts"
     },
+    "./signature": {
+      "types": "./src/signature.ts",
+      "import": "./src/signature.ts",
+      "default": "./src/signature.ts"
+    },
     "./telemetry": {
       "types": "./src/telemetry.ts",
       "import": "./src/telemetry.ts",
