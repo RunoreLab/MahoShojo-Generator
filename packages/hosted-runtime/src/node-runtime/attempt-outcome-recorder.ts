@@ -12,6 +12,7 @@ import {
   type OutcomeClassification,
 } from './outcome-classification';
 import type { RecordAiChannelOutcome } from './types';
+import { recordAiChannelOutcomeSafely } from './record-outcome-safely';
 
 export type AttemptChannelContext = {
   providerId: string;
@@ -57,7 +58,7 @@ export function createAttemptOutcomeRecorder(
   const commit = (classification: OutcomeClassification): void => {
     if (!channelContext || settled) return;
     settled = true;
-    void recordAiChannelOutcome({
+    recordAiChannelOutcomeSafely(recordAiChannelOutcome, {
       providerId: channelContext.providerId,
       modelId: channelContext.modelId,
       ...classification,

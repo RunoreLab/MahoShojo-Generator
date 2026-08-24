@@ -22,6 +22,7 @@ import type {
 } from './types';
 import { LoadBalanceStrategy } from './types';
 import { isAbortRequested, throwIfAborted } from './abort';
+import { recordAiChannelOutcomeSafely } from './record-outcome-safely';
 import {
   createAiUpstreamAttemptRuntime,
   classifyAiUpstreamOutcome,
@@ -466,7 +467,10 @@ async function generateWithAIUsing<T, I = string>(
             }
             if (options?.channelContext) {
               const ctx = options.channelContext;
-              void recordAiChannelOutcome({ providerId: ctx.providerId, modelId: ctx.modelId, ...classifySuccess() });
+              recordAiChannelOutcomeSafely(
+                recordAiChannelOutcome,
+                { providerId: ctx.providerId, modelId: ctx.modelId, ...classifySuccess() },
+              );
             }
 
             fallbackRuntime.recordTtfb();
@@ -586,7 +590,10 @@ async function generateWithAIUsing<T, I = string>(
         log.info(`提供商生成成功: 提供商: ${provider.name} 尝试次数: ${attempt + 1}`);
         if (options?.channelContext) {
           const ctx = options.channelContext;
-          void recordAiChannelOutcome({ providerId: ctx.providerId, modelId: ctx.modelId, ...classifySuccess() });
+          recordAiChannelOutcomeSafely(
+            recordAiChannelOutcome,
+            { providerId: ctx.providerId, modelId: ctx.modelId, ...classifySuccess() },
+          );
         }
         if (options?.telemetry) {
           options.telemetry.usage = usage;
@@ -615,7 +622,10 @@ async function generateWithAIUsing<T, I = string>(
         if (options?.channelContext) {
           const ctx = options.channelContext;
           const outcome = classifyOutcome(ctx.providerId === 'system', error);
-          void recordAiChannelOutcome({ providerId: ctx.providerId, modelId: ctx.modelId, ...outcome });
+          recordAiChannelOutcomeSafely(
+            recordAiChannelOutcome,
+            { providerId: ctx.providerId, modelId: ctx.modelId, ...outcome },
+          );
         }
 
         if (isAbortRequested(options?.abortSignal, error)) {
