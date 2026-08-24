@@ -1,3 +1,4 @@
+import { writeSync } from 'node:fs';
 import type { NodeExecutionContext } from '#/routes/types';
 
 export const DEFAULT_WAIT_UNTIL_DRAIN_TIMEOUT_MS = 10_000;
@@ -6,6 +7,10 @@ export const DEFAULT_DEPENDENCY_CLOSE_GRACE_TIMEOUT_MS = 10_000;
 
 type ErrorLogger = (message: string, error: unknown) => void | PromiseLike<void>;
 type MessageLogger = (message: string) => void | PromiseLike<void>;
+
+const writeForceExitMessage = (message: string): void => {
+  writeSync(process.stderr.fd, `${message}\n`);
+};
 
 type CoordinatorOptions = {
   errorLogger?: ErrorLogger;
@@ -133,7 +138,7 @@ export const closeDependenciesWithGrace = (
 export const wireGracefulShutdownSignals = ({
   errorLogger = console.error,
   exit = (code) => process.exit(code),
-  forceExitLogger = console.error,
+  forceExitLogger = writeForceExitMessage,
   shutdown,
   signalSource = process,
 }: {
