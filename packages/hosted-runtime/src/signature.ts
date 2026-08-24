@@ -16,6 +16,7 @@ export type SignatureService = {
 
 export type SignatureServicePorts = {
   getSigningKey(): Promise<SigningKey | null>;
+  subtle?: typeof globalThis.crypto.subtle;
 };
 
 type StripResult<T> = {
@@ -163,8 +164,8 @@ const hexToBytes = (value: string): Uint8Array<ArrayBuffer> | null => {
 
 export const createSignatureService = ({
   getSigningKey,
+  subtle = globalThis.crypto.subtle,
 }: SignatureServicePorts): SignatureService => {
-  const subtle = globalThis.crypto.subtle;
   const generateSignature = async (
     data: object,
     options: GenerateSignatureOptions = {},

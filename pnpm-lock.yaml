@@ -444,6 +444,9 @@ importers:
       ai:
         specifier: ^6.0.184
         version: 6.0.184(zod@4.3.6)
+      pinyin-pro:
+        specifier: ^3.27.0
+        version: 3.28.1
       zod:
         specifier: ^4.1.13
         version: 4.3.6

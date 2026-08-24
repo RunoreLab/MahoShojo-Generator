@@ -44,6 +44,46 @@
       "import": "./src/node-runtime/providers.ts",
       "default": "./src/node-runtime/providers.ts"
     },
+    "./node-runtime/provider-catalog": {
+      "types": "./src/node-runtime/provider-catalog.ts",
+      "import": "./src/node-runtime/provider-catalog.ts",
+      "default": "./src/node-runtime/provider-catalog.ts"
+    },
+    "./node-runtime/activity-token": {
+      "types": "./src/node-runtime/activity-token.ts",
+      "import": "./src/node-runtime/activity-token.ts",
+      "default": "./src/node-runtime/activity-token.ts"
+    },
+    "./node-runtime/content-safety": {
+      "types": "./src/node-runtime/content-safety.ts",
+      "import": "./src/node-runtime/content-safety.ts",
+      "default": "./src/node-runtime/content-safety.ts"
+    },
+    "./node-runtime/env-signature": {
+      "types": "./src/node-runtime/env-signature.ts",
+      "import": "./src/node-runtime/env-signature.ts",
+      "default": "./src/node-runtime/env-signature.ts"
+    },
+    "./node-runtime/public-rate-limit": {
+      "types": "./src/node-runtime/public-rate-limit.ts",
+      "import": "./src/node-runtime/public-rate-limit.ts",
+      "default": "./src/node-runtime/public-rate-limit.ts"
+    },
+    "./node-runtime/sensitive-word-filter": {
+      "types": "./src/node-runtime/sensitive-word-filter.ts",
+      "import": "./src/node-runtime/sensitive-word-filter.ts",
+      "default": "./src/node-runtime/sensitive-word-filter.ts"
+    },
+    "./node-runtime/shield-word-filter": {
+      "types": "./src/node-runtime/shield-word-filter.ts",
+      "import": "./src/node-runtime/shield-word-filter.ts",
+      "default": "./src/node-runtime/shield-word-filter.ts"
+    },
+    "./node-runtime/game-card-content-safety": {
+      "types": "./src/node-runtime/game-card-content-safety.ts",
+      "import": "./src/node-runtime/game-card-content-safety.ts",
+      "default": "./src/node-runtime/game-card-content-safety.ts"
+    },
     "./node-runtime/reasoning": {
       "types": "./src/node-runtime/reasoning-normalizer.ts",
       "import": "./src/node-runtime/reasoning-normalizer.ts",
@@ -154,6 +194,7 @@
     "@mahoshojo/domain": "workspace:*",
     "@mahoshojo/hosted-api": "workspace:*",
     "ai": "^6.0.184",
+    "pinyin-pro": "^3.27.0",
     "zod": "^4.1.13"
   },
   "devDependencies": {

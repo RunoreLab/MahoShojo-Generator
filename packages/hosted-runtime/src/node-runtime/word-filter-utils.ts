@@ -1,6 +1,6 @@
 // lib/word-filter-utils.ts
-import { WordsSearch } from '@/lib/vendor/toolgood/ToolGood.Words.WordsSearch.mjs';
-import { Translate } from '@/lib/vendor/toolgood/ToolGood.Words.Translate.mjs';
+import { WordsSearch } from './vendor/toolgood/ToolGood.Words.WordsSearch.mjs';
+import { Translate } from './vendor/toolgood/ToolGood.Words.Translate.mjs';
 
 export type WordSearchMatch = {
   Keyword: string;
@@ -129,7 +129,7 @@ export const buildLatinTokenMappingForPinyinCheck = (
 
 export const buildKeepCharsMapping = (
   text: string,
-  keepChar: (ch: string) => boolean
+  keepChar: (_ch: string) => boolean
 ): { normalized: string; indexMap: number[] } => {
   const normalizedChars: string[] = [];
   const indexMap: number[] = [];
@@ -235,7 +235,7 @@ export const createWordsSearch = (keywords: string[]): InstanceType<typeof Words
   return ws;
 };
 
-export const uniqBy = <T>(items: T[], keyOf: (item: T) => string): T[] => {
+export const uniqBy = <T>(items: T[], keyOf: (_item: T) => string): T[] => {
   const seen = new Set<string>();
   const out: T[] = [];
   for (const item of items) {
