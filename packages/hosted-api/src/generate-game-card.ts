@@ -1,6 +1,8 @@
 import { z } from 'zod/v3';
 import {
   CustomProviderRequestSchema,
+  HOSTED_GENERATION_INTERNAL_MESSAGE,
+  createSafeHostedGenerationError,
   jsonResponse,
   type CustomProviderRequest,
   type StepResult,
@@ -87,11 +89,11 @@ export const createGenerateGameCardService = <Generated, Output>(
     dependencies.recordActivity(request);
     dependencies.logSuccess(input, output.value);
     return await dependencies.buildResponse(request, input, output.value);
-  } catch (error) {
-    dependencies.logError(error);
+  } catch {
+    dependencies.logError(createSafeHostedGenerationError());
     return jsonResponse({
       error: '卡牌卡面生成失败',
-      message: String(error),
+      message: HOSTED_GENERATION_INTERNAL_MESSAGE,
     }, 500);
   }
 };

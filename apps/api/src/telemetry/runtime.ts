@@ -335,7 +335,7 @@ export class HonoRuntimeTelemetry implements
     }
     this.logger = options.logger ?? ((line) => console.info(line));
     this.errorLogger = options.errorLogger
-      ?? ((message, error) => console.error(message, error));
+      ?? ((message, context) => console.error(message, context));
     this.sampleIntervalMs = sampleIntervalMs;
     this.resourceSampleTimeoutMs = resourceSampleTimeoutMs;
   }
@@ -574,9 +574,9 @@ export class HonoRuntimeTelemetry implements
     };
   }
 
-  private reportFailure(message: string, error: unknown): void {
+  private reportFailure(message: string, _error: unknown): void {
     try {
-      this.errorLogger(message, error);
+      this.errorLogger(message, { errorClass: 'telemetry_operation_failed' });
     } catch {
       // Telemetry transport 失败不得影响请求处理或进程存活。
     }

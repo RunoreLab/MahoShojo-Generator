@@ -63,8 +63,10 @@ export const stopAcceptingRequestsWithGrace = (
       settled = true;
       try {
         server.closeAllConnections?.();
-      } catch (error) {
-        console.error('[hono][shutdown] 强制关闭 HTTP 连接失败', error);
+      } catch {
+        console.error('[hono][shutdown] 强制关闭 HTTP 连接失败', {
+          errorClass: 'force_close_failed',
+        });
       }
       resolve({ timedOut: true });
     }, timeoutMs);
@@ -174,9 +176,11 @@ export const wireGracefulShutdownSignals = ({
       .then(() => shutdown(signal))
       .then(
         () => exitOnce(0),
-        (error: unknown) => {
+        (_error: unknown) => {
           try {
-            const logging = errorLogger('[hono] 优雅退出失败', error);
+            const logging = errorLogger('[hono] 优雅退出失败', {
+              errorClass: 'shutdown_failed',
+            });
             void Promise.resolve(logging).catch(() => undefined);
           } catch {
             // 日志 sink 失败不能阻止进程按失败状态退出。
@@ -243,11 +247,11 @@ export class NodeExecutionContextCoordinator {
   #track(promise: Promise<unknown>, routeId: string): void {
     const tracked = Promise.resolve(promise).then(
       () => undefined,
-      (error: unknown) => {
+      (_error: unknown) => {
         try {
           const logging = this.#errorLogger(
             `[hono][waitUntil][${routeId}] 后台任务失败`,
-            error,
+            { errorClass: 'background_task_failed' },
           );
           void Promise.resolve(logging).catch(() => undefined);
         } catch {

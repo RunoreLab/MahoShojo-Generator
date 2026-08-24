@@ -22,6 +22,8 @@ import {
 } from '#/redis/runtime';
 
 beforeEach(() => {
+  vi.restoreAllMocks();
+  redisClient.on.mockReset();
   redisClient.connect.mockResolvedValue(undefined);
   redisClient.eval.mockResolvedValue([1, 60_000]);
   redisClient.info.mockResolvedValue('');
@@ -31,6 +33,32 @@ beforeEach(() => {
 });
 
 describe('RedisRuntime shutdown', () => {
+  it('Redis client 错误只保留固定状态码与低基数日志', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const redis = new RedisRuntime('redis://user:secret@example.test:6379', false);
+    await redis.connect();
+    const errorListener = redisClient.on.mock.calls.find(([event]) => event === 'error')?.[1];
+
+    expect(errorListener).toBeTypeOf('function');
+    errorListener?.(new Error('redis://user:secret@example.test:6379 connection lost'));
+
+    expect(redis.getStatus().lastError).toBe('REDIS_CONNECTION_ERROR');
+    expect(errorSpy).toHaveBeenCalledWith('[hono][redis] 连接异常', {
+      errorClass: 'connection_error',
+    });
+    expect(JSON.stringify(errorSpy.mock.calls)).not.toMatch(/user:secret|example\.test/u);
+  });
+
+  it('Redis required 连接失败时只抛出固定错误码', async () => {
+    redisClient.connect.mockRejectedValueOnce(
+      new Error('redis://user:secret@example.test:6379 connect failed'),
+    );
+    const redis = new RedisRuntime('redis://user:secret@example.test:6379', true);
+
+    await expect(redis.connect()).rejects.toThrow('REDIS_CONNECT_FAILED');
+    expect(redis.getStatus().lastError).toBe('REDIS_CONNECT_FAILED');
+  });
+
   it('观测 Redis 命令延迟并从 INFO 读取 memory、eviction 和 hit/miss', async () => {
     redisClient.eval.mockResolvedValueOnce([2, 4_000]);
     redisClient.info.mockImplementation(async (section: string) => {

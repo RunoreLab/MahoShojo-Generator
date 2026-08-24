@@ -141,7 +141,7 @@ describe('Node waitUntil execution context coordinator', () => {
   it('吸收 waitUntil rejection、记录 route，且 drain 仍正常完成', async () => {
     const errorLogger = vi.fn();
     const coordinator = new NodeExecutionContextCoordinator({ errorLogger });
-    const backgroundError = new Error('activity write failed');
+    const backgroundError = new Error('wait-until-request-secret-canary');
 
     coordinator
       .createExecutionContext('creator/generate')
@@ -153,8 +153,9 @@ describe('Node waitUntil execution context coordinator', () => {
     });
     expect(errorLogger).toHaveBeenCalledWith(
       '[hono][waitUntil][creator/generate] 后台任务失败',
-      backgroundError,
+      { errorClass: 'background_task_failed' },
     );
+    expect(JSON.stringify(errorLogger.mock.calls)).not.toContain('wait-until-request-secret-canary');
   });
 
   it('异步 error logger 自身 rejection 时不产生 unhandled rejection', async () => {

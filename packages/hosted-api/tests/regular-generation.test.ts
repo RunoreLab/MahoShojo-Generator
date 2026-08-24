@@ -111,7 +111,7 @@ describe('regular hosted generation services', () => {
       enforceSafety: async () => null,
       checkRateLimit: async () => null,
       generate: async () => {
-        throw new Error('upstream failed');
+        throw new Error('game-card-secret-url-provider-canary');
       },
       applyOutputPolicy: async () => completeStep({}),
       recordActivity: () => undefined,
@@ -124,17 +124,54 @@ describe('regular hosted generation services', () => {
     const methodResponse = await service(request('generate-game-card', null, 'GET'));
     const invalidResponse = await service(request('generate-game-card', { sourceCardJson: '' }));
     const failureResponse = await service(request('generate-game-card', { sourceCardJson: '{}' }));
+    const failurePayload = await json(failureResponse);
 
     expect(methodResponse.status).toBe(405);
     expect(await json(methodResponse)).toEqual({ error: 'Method not allowed' });
     expect(invalidResponse.status).toBe(400);
     expect(await json(invalidResponse)).toMatchObject({ error: '请求参数无效' });
     expect(failureResponse.status).toBe(500);
-    expect(await json(failureResponse)).toEqual({
+    expect(failurePayload).toEqual({
       error: '卡牌卡面生成失败',
-      message: 'Error: upstream failed',
+      message: '服务器内部错误',
     });
-    expect(errors).toHaveLength(1);
+    expect(errors).toEqual([expect.objectContaining({ message: 'HOSTED_GENERATION_FAILED' })]);
+    expect(JSON.stringify({
+      response: failurePayload,
+      errors: errors.map((error) => error instanceof Error ? error.message : String(error)),
+    })).not.toContain('game-card-secret-url-provider-canary');
+  });
+
+  it('Free 异常边界不向响应或日志投影请求与 Provider 错误', async () => {
+    const errors: unknown[] = [];
+    const service = createGenerateFreeService({
+      checkRateLimit: async () => null,
+      enforceSafety: async () => null,
+      generate: async () => {
+        throw new Error('free-prompt-secret-provider-url-canary');
+      },
+      normalizeOutput: async () => completeStep({}),
+      recordActivity: () => undefined,
+      buildResponse: () => new Response(null),
+      logError: (error) => errors.push(error),
+    });
+
+    const response = await service(request('generate-free', {
+      schema: 'general',
+      prompt: 'request-body-canary',
+      attachments: [],
+    }));
+    const serialized = JSON.stringify({
+      response: await response.json(),
+      errors: errors.map((error) => error instanceof Error ? error.message : String(error)),
+    });
+
+    expect(response.status).toBe(500);
+    expect(JSON.parse(serialized).response).toEqual({
+      error: '生成失败',
+      message: '服务器内部错误',
+    });
+    expect(serialized).not.toMatch(/free-prompt-secret-provider-url-canary|request-body-canary/u);
   });
 
   it('Free 非流式保持 rate-limit -> safety -> generate -> activity -> normalize -> response 顺序', async () => {
@@ -390,8 +427,11 @@ describe('regular hosted generation services', () => {
     expect(streamNull.status).toBe(400);
     expect(await nonStreamNull.json()).toEqual({
       error: '生成失败',
-      message: "Cannot destructure property 'answers' of '(intermediate value)' as it is null.",
+      message: '服务器内部错误',
     });
     expect(errors).toHaveLength(3);
+    expect(errors).toEqual(Array(3).fill(
+      expect.objectContaining({ message: 'HOSTED_GENERATION_FAILED' }),
+    ));
   });
 });

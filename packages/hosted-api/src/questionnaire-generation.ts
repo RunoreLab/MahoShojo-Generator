@@ -1,4 +1,6 @@
 import {
+  HOSTED_GENERATION_INTERNAL_MESSAGE,
+  createSafeHostedGenerationError,
   jsonResponse,
   type StepResult,
 } from './regular-generation';
@@ -41,11 +43,10 @@ const runGeneration = async <Prepared, Execution, Generated>(
   options: QuestionnaireGenerationOptions,
   dependencies: QuestionnaireGenerationDependencies<Prepared, Execution, Generated>,
 ): Promise<Response> => {
-  let preparedInput: Prepared | undefined;
   try {
     const prepared = await dependencies.prepare(request, body);
     if (!prepared.completed) return prepared.response;
-    preparedInput = prepared.value;
+    const preparedInput = prepared.value;
 
     let execution: StepResult<Execution> | undefined;
     if (options.executionOrder === 'before-policies') {
@@ -77,9 +78,10 @@ const runGeneration = async <Prepared, Execution, Generated>(
 
     dependencies.recordActivity(request);
     return await dependencies.buildResponse(request, preparedInput, generated.value);
-  } catch (error) {
-    dependencies.logError(error, preparedInput);
-    return options.buildErrorResponse(error);
+  } catch {
+    const safeError = createSafeHostedGenerationError();
+    dependencies.logError(safeError);
+    return options.buildErrorResponse(safeError);
   }
 };
 
@@ -102,19 +104,20 @@ export const createQuestionnaireGenerationService = <Prepared, Execution, Genera
   try {
     const body = await request.json();
     return await runGeneration(request, body, options, dependencies);
-  } catch (error) {
-    dependencies.logError(error);
-    return options.buildErrorResponse(error);
+  } catch {
+    const safeError = createSafeHostedGenerationError();
+    dependencies.logError(safeError);
+    return options.buildErrorResponse(safeError);
   }
 };
 
 export const generationErrorResponse = (
-  error: unknown,
+  _error: unknown,
   publicMessage: string,
 ): Response => jsonResponse(
   {
     error: publicMessage,
-    message: error instanceof Error ? error.message : '服务器内部错误',
+    message: HOSTED_GENERATION_INTERNAL_MESSAGE,
   },
   500,
 );

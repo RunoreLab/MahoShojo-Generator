@@ -98,12 +98,11 @@ export const createHonoApp = (
     code: 'NOT_FOUND',
   }, 404));
 
-  app.onError((error, context) => {
+  app.onError((_error, context) => {
     console.error('[hono][error] 未处理异常', {
       requestId: context.get('requestId'),
       method: context.req.method,
-      path: context.req.path,
-      error,
+      errorClass: 'unhandled',
     });
     return context.json({
       error: 'Internal server error',

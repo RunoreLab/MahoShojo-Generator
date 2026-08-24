@@ -65,7 +65,7 @@ describe('graceful shutdown signal wiring', () => {
 
   it('shutdown rejection 只触发一次失败退出', async () => {
     const signalSource = new EventEmitter();
-    const shutdownError = new Error('redis close failed');
+    const shutdownError = new Error('redis-close-url-secret-canary');
     const shutdown = vi.fn(async () => {
       throw shutdownError;
     });
@@ -82,7 +82,10 @@ describe('graceful shutdown signal wiring', () => {
     await new Promise<void>((resolve) => setImmediate(resolve));
 
     expect(shutdown).toHaveBeenCalledTimes(1);
-    expect(errorLogger).toHaveBeenCalledWith('[hono] 优雅退出失败', shutdownError);
+    expect(errorLogger).toHaveBeenCalledWith('[hono] 优雅退出失败', {
+      errorClass: 'shutdown_failed',
+    });
+    expect(JSON.stringify(errorLogger.mock.calls)).not.toContain('redis-close-url-secret-canary');
     expect(exit).toHaveBeenCalledTimes(1);
     expect(exit).toHaveBeenCalledWith(1);
   });

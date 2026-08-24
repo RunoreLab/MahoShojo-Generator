@@ -84,7 +84,7 @@ export interface GenerateMagicalGirlRuntimeDependencies {
   ): Promise<AIGeneratedMagicalGirl>;
   sign(_payload: MagicalGirlGenerationResult & { templateId: string }): Promise<string | null>;
   recordActivity(_request: Request): void;
-  logError(_error: unknown, _context: { name: string }): void;
+  logError(_error: unknown, _context: { nameLength: number }): void;
   cooldownMs: number;
 }
 

@@ -108,7 +108,7 @@ describe('generate magical girl hosted runtime', () => {
   });
 
   it('快照依赖并冻结 runtime，保留失败 wire 与 cooldown 换算', async () => {
-    const failure = new Error('upstream failed');
+    const failure = new Error('magical-girl-runtime-secret-canary');
     const errors: unknown[] = [];
     const dependencies: GenerateMagicalGirlRuntimeDependencies = {
       checkRateLimit: async () => null,
@@ -129,12 +129,16 @@ describe('generate magical girl hosted runtime', () => {
     const response = await runtime.service(createRequest({ name: '小满' }));
 
     expect(Object.isFrozen(runtime)).toBe(true);
-    expect(errors).toEqual([failure]);
+    expect(errors).toEqual([
+      expect.objectContaining({ message: 'HOSTED_GENERATION_FAILED' }),
+    ]);
     expect(response.status).toBe(500);
     expect(await response.json()).toEqual({
       error: '生成失败，当前服务器可能正忙，请稍后重试',
-      message: 'upstream failed',
+      message: '服务器内部错误',
       retryAfterSeconds: 61,
     });
+    expect(errors.map((error) => error instanceof Error ? error.message : String(error))).not
+      .toContain('magical-girl-runtime-secret-canary');
   });
 });

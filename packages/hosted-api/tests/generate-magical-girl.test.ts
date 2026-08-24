@@ -29,7 +29,7 @@ type DependencyState = {
   generatedInputs: Array<{ realName: string; language: string }>;
   signedPayloads: unknown[];
   recordedRequests: Request[];
-  errors: Array<{ error: unknown; name: string }>;
+  errors: Array<{ error: unknown; nameLength: number }>;
 };
 
 const createDependencies = (
@@ -56,7 +56,7 @@ const createDependencies = (
       state.recordedRequests.push(request);
     },
     logError: (error, context) => {
-      state.errors.push({ error, name: context.name });
+      state.errors.push({ error, nameLength: context.nameLength });
     },
     retryAfterSeconds: 60,
     ...overrides,
@@ -191,8 +191,8 @@ describe('generate magical girl hosted application service', () => {
     expect(safetyCase.state.generatedInputs).toHaveLength(0);
   });
 
-  it('生成失败时保留日志上下文和 retryAfterSeconds 响应', async () => {
-    const failure = new Error('upstream failed');
+  it('生成失败时只记录固定错误与名字长度', async () => {
+    const failure = new Error('magical-girl-name-provider-url-canary');
     const { dependencies, state } = createDependencies({
       generate: async () => {
         throw failure;
@@ -204,11 +204,15 @@ describe('generate magical girl hosted application service', () => {
     const response = await service(createRequest({ name: '小满' }));
 
     expect(response.status).toBe(500);
-    expect(state.errors).toEqual([{ error: failure, name: '小满' }]);
+    expect(state.errors).toEqual([{
+      error: expect.objectContaining({ message: 'HOSTED_GENERATION_FAILED' }),
+      nameLength: 2,
+    }]);
     expect(await response.json()).toEqual({
       error: '生成失败，当前服务器可能正忙，请稍后重试',
-      message: 'upstream failed',
+      message: '服务器内部错误',
       retryAfterSeconds: 17,
     });
+    expect(JSON.stringify(state.errors)).not.toMatch(/小满|magical-girl-name-provider-url-canary/u);
   });
 });

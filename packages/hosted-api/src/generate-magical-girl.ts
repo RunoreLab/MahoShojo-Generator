@@ -1,4 +1,8 @@
 import { z } from 'zod';
+import {
+  HOSTED_GENERATION_INTERNAL_MESSAGE,
+  createSafeHostedGenerationError,
+} from './regular-generation';
 
 export const MAGICAL_GIRL_NAME_MAX_LENGTH = 300;
 export const MAGICAL_GIRL_TEMPLATE_ID = '魔法少女/心之花/魔法少女（名字生成）';
@@ -41,7 +45,7 @@ export interface GenerateMagicalGirlServiceDependencies {
   generate(_input: GenerateMagicalGirlInput): Promise<MagicalGirlGenerationResult>;
   sign(_payload: MagicalGirlGenerationResult & { templateId: string }): Promise<string | null>;
   recordActivity(_request: Request): void;
-  logError(_error: unknown, _context: { name: string }): void;
+  logError(_error: unknown, _context: { nameLength: number }): void;
   retryAfterSeconds: number;
 }
 
@@ -97,11 +101,11 @@ export const createGenerateMagicalGirlService = (
       ...dataToSign,
       signature,
     }, 200);
-  } catch (error) {
-    dependencies.logError(error, { name });
+  } catch {
+    dependencies.logError(createSafeHostedGenerationError(), { nameLength: name.length });
     return jsonResponse({
       error: '生成失败，当前服务器可能正忙，请稍后重试',
-      message: error instanceof Error ? error.message : '服务器内部错误',
+      message: HOSTED_GENERATION_INTERNAL_MESSAGE,
       retryAfterSeconds: dependencies.retryAfterSeconds,
     }, 500);
   }

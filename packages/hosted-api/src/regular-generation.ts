@@ -1,6 +1,14 @@
 import { z } from 'zod/v3';
 
 export const MAX_CUSTOM_PROVIDER_OUTPUT_TOKENS = 1_000_000;
+export const HOSTED_GENERATION_INTERNAL_MESSAGE = '服务器内部错误';
+export const HOSTED_GENERATION_ERROR_CODE = 'HOSTED_GENERATION_FAILED';
+
+export const createSafeHostedGenerationError = (): Error => {
+  const error = new Error(HOSTED_GENERATION_ERROR_CODE);
+  error.name = 'HostedGenerationError';
+  return error;
+};
 
 const ThinkingEffortSchema = z.enum([
   'minimal',

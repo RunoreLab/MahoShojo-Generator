@@ -225,13 +225,14 @@ describe('Hono runtime telemetry', () => {
 
     detachSampler();
     telemetry.setRedisResourceSampler(async () => {
-      throw new Error('redis info unavailable');
+      throw new Error('redis-info-url-secret-canary');
     });
     await expect(telemetry.emitSnapshotWithResources()).resolves.toBeUndefined();
     expect(errorLogger).toHaveBeenCalledWith(
       '[hono][telemetry] Redis 资源采样失败',
-      expect.any(Error),
+      { errorClass: 'telemetry_operation_failed' },
     );
+    expect(JSON.stringify(errorLogger.mock.calls)).not.toContain('redis-info-url-secret-canary');
     expect(logger).toHaveBeenCalledTimes(2);
   });
 
@@ -278,7 +279,7 @@ describe('Hono runtime telemetry', () => {
       expect(logger).toHaveBeenCalledTimes(1);
       expect(errorLogger).toHaveBeenCalledWith(
         '[hono][telemetry] Redis 资源采样超时',
-        expect.any(Error),
+        { errorClass: 'telemetry_operation_failed' },
       );
 
       await telemetry.emitSnapshotWithResources();
@@ -353,15 +354,16 @@ describe('Hono runtime telemetry', () => {
     const errorLogger = vi.fn();
     const telemetry = new HonoRuntimeTelemetry({
       logger: () => {
-        throw new Error('log transport unavailable');
+        throw new Error('telemetry-sink-secret-canary');
       },
       errorLogger,
     });
     expect(() => telemetry.emitSnapshot()).not.toThrow();
     expect(errorLogger).toHaveBeenCalledWith(
       '[hono][telemetry] 导出失败',
-      expect.any(Error),
+      { errorClass: 'telemetry_operation_failed' },
     );
+    expect(JSON.stringify(errorLogger.mock.calls)).not.toContain('telemetry-sink-secret-canary');
   });
 
   it('瞬时 sink 失败后恢复时不混用上一采样周期的 peak', () => {

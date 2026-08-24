@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { HonoServerConfig } from '#/config';
 import { createHonoApp, isAllowedOrigin } from '#/app';
 import type { RedisService } from '#/redis/runtime';
@@ -28,6 +28,10 @@ const createRedisStub = (): RedisService => ({
   getStatus: () => ({ configured: false, connected: false, ready: false, lastError: null }),
   ping: async () => false,
   consumeFixedWindow: async () => null,
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 
 describe('Hono server app', () => {
@@ -113,9 +117,10 @@ describe('Hono server app', () => {
   });
 
   it('Redis 命令异常且非必需时按文档降级放行', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const redis = createRedisStub();
     redis.consumeFixedWindow = async () => {
-      throw new Error('redis connection dropped');
+      throw new Error('redis-url-secret-canary');
     };
     const app = createHonoApp(config, redis);
 
@@ -123,9 +128,15 @@ describe('Hono server app', () => {
 
     expect(response.status).toBe(404);
     expect(await response.json()).toMatchObject({ code: 'NOT_FOUND' });
+    expect(errorSpy).toHaveBeenCalledWith('[hono][redis] 限速命令失败', {
+      namespace: 'api',
+      errorClass: 'command_failed',
+    });
+    expect(JSON.stringify(errorSpy.mock.calls)).not.toContain('redis-url-secret-canary');
   });
 
   it('Redis 命令异常且为必需依赖时稳定返回 503', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const redis = createRedisStub();
     redis.consumeFixedWindow = async () => {
       throw new Error('redis connection dropped');
@@ -140,6 +151,39 @@ describe('Hono server app', () => {
       error: '限速服务暂时不可用',
       code: 'RATE_LIMIT_UNAVAILABLE',
     });
+  });
+
+  it('全局异常响应与日志不投影 path 或原始 Error', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const redis = createRedisStub();
+    redis.consumeFixedWindow = async () => ({
+      get allowed(): boolean {
+        throw new Error('hono-error-provider-url-secret-canary');
+      },
+      limit: 600,
+      remaining: 599,
+      retryAfterSeconds: 60,
+    });
+    const app = createHonoApp(config, redis);
+
+    const response = await app.request('/api/path-secret-canary', {
+      headers: { 'x-request-id': 'safe-request-id' },
+    });
+    const payload = await response.json();
+    const serialized = JSON.stringify({ payload, logs: errorSpy.mock.calls });
+
+    expect(response.status).toBe(500);
+    expect(payload).toEqual({
+      error: 'Internal server error',
+      code: 'INTERNAL_SERVER_ERROR',
+      requestId: 'safe-request-id',
+    });
+    expect(errorSpy).toHaveBeenCalledWith('[hono][error] 未处理异常', {
+      requestId: 'safe-request-id',
+      method: 'GET',
+      errorClass: 'unhandled',
+    });
+    expect(serialized).not.toMatch(/path-secret-canary|provider-url-secret-canary/u);
   });
 
   it('Redis 必需但不可用时 health alias 仍表达 liveness 与 readiness', async () => {

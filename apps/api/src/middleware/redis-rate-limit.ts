@@ -30,10 +30,10 @@ export const redisRateLimit = (
         windowSeconds: options.windowSeconds,
         identity: resolveIdentity(context.req.raw),
       });
-    } catch (error) {
+    } catch {
       console.error('[hono][redis] 限速命令失败', {
         namespace: options.namespace,
-        error,
+        errorClass: 'command_failed',
       });
       if (options.failureMode === 'open') {
         await next();

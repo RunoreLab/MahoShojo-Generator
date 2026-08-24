@@ -11,13 +11,22 @@ export type HonoAppVariables = {
   requestId: string;
 };
 
+const SAFE_REQUEST_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/u;
+
+const resolveRequestId = (candidate: string | undefined): string => {
+  const normalized = candidate?.trim();
+  return normalized && SAFE_REQUEST_ID_PATTERN.test(normalized)
+    ? normalized
+    : randomUUID();
+};
+
 export const requestMetadata = (
   telemetry: RuntimeTelemetryService = noopRuntimeTelemetry,
 ): MiddlewareHandler<{ Variables: HonoAppVariables }> => {
   return async (context, next) => {
     const finishRequest = telemetry.beginRequest();
     try {
-      const requestId = context.req.header('x-request-id')?.trim() || randomUUID();
+      const requestId = resolveRequestId(context.req.header('x-request-id'));
       const startedAt = performance.now();
       context.set('requestId', requestId);
       context.header('x-request-id', requestId);
@@ -38,7 +47,6 @@ export const requestMetadata = (
       console.info('[hono][request]', {
         requestId,
         method: context.req.method,
-        path: context.req.path,
         status: context.res.status,
         durationMs,
       });

@@ -1,4 +1,6 @@
 import {
+  HOSTED_GENERATION_INTERNAL_MESSAGE,
+  createSafeHostedGenerationError,
   jsonResponse,
   type StepResult,
 } from './regular-generation';
@@ -135,11 +137,10 @@ const createScenarioService = <Input extends GenerateScenarioInput, Output>(opti
 
     options.dependencies.recordActivity(request);
     return await options.dependencies.buildResponse(request, input, generated.value);
-  } catch (error) {
-    options.dependencies.logError(error);
-    const message = error instanceof Error ? error.message : '未知错误';
+  } catch {
+    options.dependencies.logError(createSafeHostedGenerationError());
     return jsonResponse(
-      { error: '生成失败', message },
+      { error: '生成失败', message: HOSTED_GENERATION_INTERNAL_MESSAGE },
       500,
       options.includeJsonContentType,
     );

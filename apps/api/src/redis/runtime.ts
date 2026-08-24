@@ -67,10 +67,7 @@ local ttl = redis.call('PTTL', KEYS[1])
 return { current, ttl }
 `;
 
-const toErrorMessage = (error: unknown): string => {
-  if (error instanceof Error && error.message.trim()) return error.message.trim();
-  return String(error || 'unknown redis error');
-};
+const createRedisOperationError = (code: string): Error => new Error(code);
 
 const hashKeyPart = (value: string): string =>
   createHash('sha256').update(value).digest('hex').slice(0, 32);
@@ -159,9 +156,11 @@ export class RedisRuntime implements RedisService {
 
     const client = createRedisClient(this.redisUrl);
 
-    client.on('error', (error: unknown) => {
-      this.lastError = toErrorMessage(error);
-      console.error('[hono][redis] 连接异常：', this.lastError);
+    client.on('error', (_error: unknown) => {
+      this.lastError = 'REDIS_CONNECTION_ERROR';
+      console.error('[hono][redis] 连接异常', {
+        errorClass: 'connection_error',
+      });
     });
     client.on('ready', () => {
       this.lastError = null;
@@ -173,10 +172,10 @@ export class RedisRuntime implements RedisService {
     let outcome: RedisRuntimeOperationOutcome = 'ok';
     try {
       await client.connect();
-    } catch (error) {
+    } catch {
       outcome = 'error';
-      this.lastError = toErrorMessage(error);
-      if (this.required) throw error;
+      this.lastError = 'REDIS_CONNECT_FAILED';
+      if (this.required) throw createRedisOperationError(this.lastError);
       console.warn('[hono][redis] Redis 非必需，服务将以降级模式启动');
     } finally {
       this.observeOperation({
@@ -210,8 +209,8 @@ export class RedisRuntime implements RedisService {
         durationMs: Math.max(0, performance.now() - startedAt),
       });
       return ready;
-    } catch (error) {
-      this.lastError = toErrorMessage(error);
+    } catch {
+      this.lastError = 'REDIS_PING_FAILED';
       this.observeOperation({
         operation: 'ping',
         outcome: 'error',
@@ -272,13 +271,17 @@ export class RedisRuntime implements RedisService {
         retryAfterSeconds: Math.max(1, Math.ceil(ttlMs / 1_000)),
       };
     } catch (error) {
-      this.lastError = toErrorMessage(error);
+      const errorCode = error instanceof Error
+        && error.message === 'REDIS_RATE_LIMIT_RESPONSE_INVALID'
+        ? 'REDIS_RATE_LIMIT_RESPONSE_INVALID'
+        : 'REDIS_RATE_LIMIT_COMMAND_FAILED';
+      this.lastError = errorCode;
       this.observeOperation({
         operation: 'rate-limit',
         outcome: 'error',
         durationMs: Math.max(0, performance.now() - startedAt),
       });
-      throw error;
+      throw createRedisOperationError(errorCode);
     }
   }
 
@@ -302,8 +305,8 @@ export class RedisRuntime implements RedisService {
           durationMs: Math.max(0, performance.now() - startedAt),
         });
         return payload;
-      } catch (error) {
-        this.lastError = toErrorMessage(error);
+      } catch {
+        this.lastError = 'REDIS_INFO_FAILED';
         this.observeOperation({
           operation: 'info',
           outcome: 'error',

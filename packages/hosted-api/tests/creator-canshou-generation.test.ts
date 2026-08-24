@@ -138,10 +138,34 @@ describe('Creator / 残兽 shared generation services', () => {
     expect(response.status).toBe(500);
     expect(await response.json()).toEqual({
       error: '生成失败，当前服务器可能正忙，请稍后重试',
-      message: expect.any(String),
+      message: '服务器内部错误',
     });
-    expect(events[0]).toMatch(/^error:/u);
+    expect(events[0]).toBe('error:HOSTED_GENERATION_FAILED');
     expect(deps.prepare).not.toHaveBeenCalled();
+  });
+
+  it('Questionnaire 生成异常不把错误或 prepared input 交给响应与日志', async () => {
+    const events: string[] = [];
+    const deps = dependencies(events);
+    deps.generate.mockImplementationOnce(async () => {
+      throw new Error('questionnaire-provider-url-secret-canary');
+    });
+    const service = createGenerateCanshouService<Prepared, Execution, Generated>(deps);
+
+    const response = await service(request(JSON.stringify({ template: 'prepared-input-canary' })));
+    const payload = await response.json();
+
+    expect(response.status).toBe(500);
+    expect(payload).toEqual({
+      error: '生成失败，当前服务器可能正忙，请稍后重试',
+      message: '服务器内部错误',
+    });
+    expect(deps.logError).toHaveBeenCalledWith(
+      expect.objectContaining({ message: 'HOSTED_GENERATION_FAILED' }),
+    );
+    expect(JSON.stringify({ payload, events, logCalls: deps.logError.mock.calls })).not.toMatch(
+      /questionnaire-provider-url-secret-canary|prepared-input-canary/u,
+    );
   });
 
   it('任一步骤短路后不得执行 Provider、生成、活动或响应', async () => {
