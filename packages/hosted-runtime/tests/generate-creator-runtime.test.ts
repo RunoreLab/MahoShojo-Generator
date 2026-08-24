@@ -82,6 +82,7 @@ const createRequest = (body: unknown): Request => new Request(
 describe('generate creator hosted runtime', () => {
   it('持有原生问卷信任、build rule、prompt/schema 与持久化/签名 finalize 顺序', async () => {
     const events: string[] = [];
+    const signedPayloads: Record<string, unknown>[] = [];
     const dependencies: GenerateCreatorRuntimeDependencies = {
       presetIndex: {
         presets: [{
@@ -163,6 +164,7 @@ describe('generate creator hosted runtime', () => {
         return generatedMagicalGirl;
       },
       sign: async (payload) => {
+        signedPayloads.push(payload);
         events.push(`sign:${payload.templateId}`);
         return 'native-signature';
       },
@@ -276,5 +278,12 @@ describe('generate creator hosted runtime', () => {
       buildRules: [],
     });
     expect(noRuleBody.data).not.toHaveProperty('buildState');
+    expect(signedPayloads).toHaveLength(2);
+    expect(signedPayloads[1]?.creationInputs).toEqual({
+      template: 'magical-girl',
+      freeformBrief: '无 build rule',
+      buildRules: [],
+    });
+    expect(signedPayloads[1]).not.toHaveProperty('buildState');
   });
 });
