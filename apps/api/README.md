@@ -28,19 +28,24 @@ Hono source、manifest、测试、生成器和 bundle 构建已由 `apps/api` �
 ## 容量遥测
 
 Hono 主进程启动 `HonoRuntimeTelemetry`，默认每 60 秒向 stdout 输出一行固定
-`schemaVersion=1`、`event=hono.runtime.telemetry` 的 JSON。当前快照包含：
+`schemaVersion=2`、`event=hono.runtime.telemetry` 的 JSON。当前快照包含：
 
 - process 累计 CPU 时间与采样间隔 utilization、RSS、heap used/total/limit；
 - event-loop utilization、active/idle 时间与 delay samples/mean/p99/max；
 - active/peak HTTP request、response stream 和 Node socket。request 在 handler 结束时释放，stream
   在响应体消费、取消或异常时释放，socket 在连接关闭时释放；
+- AI upstream active/peak/started/completed attempt、固定终态分类、TTFB 和 duration；
+- 每次 D1 HTTP round trip 的 latency、固定 outcome/error class、rows read/written；
+- Redis connect/ping/rate-limit/INFO 的固定 operation/outcome 与 latency；周期 `INFO MEMORY/STATS`
+  提供 used memory、eviction 和 keyspace hit/miss。Redis 未连接时只记录 `unavailable`，不伪造 round-trip latency，
+  server stats 尚未采到时显式为 `not-observed`；
 - runtime origin 明确为 `hono-node`。当前 Hono 进程看不到入口层的真实 DR 选择，因此
   `selection` 诚实记为 `not-observed`，不根据部署角色推断实际流量来源。
 
 该日志不记录 URL、request ID、用户标识、header、Prompt 或输出正文，也不新增公网
-metrics endpoint。当前批次只完成 `RESOURCE-005` 中的 Node 容量导出基础；AI upstream、
-D1、Redis 和可信控制面的 DR selection/failover reason 仍需从各自真实调用 seam 注入，
-不得将当前实现描述为 `RESOURCE-005` 已全部完成。
+metrics endpoint。`RESOURCE-005` 中可由 Hono 进程、Hosted 调用 seam 和 Redis client 真实观测的最小集合
+已收口；入口控制面没有注入可信 DR selection/failover reason，继续显式 `not-observed/null`，不得根据部署
+角色或错误猜测。
 
 Hono 执行范围只包括 machine-readable 清单中明确保留的 API；具体清单以
 `config/hono-api-routes.json` 为准。已退出的 capability 与 `/api/tachie/generate` 继续由 Next.js Route Handler 承载。
@@ -120,8 +125,15 @@ pnpm run start:server
 ```
 
 根命令只是 `@mahoshojo/api` workspace script 的兼容代理；bundle 输出为
-`apps/api/dist/index.mjs`。旧根 `Dockerfile.hono`、compose 和部署 workflow 尚未组成 app-owned 原子
-release tuple，在 G25C 后续部署 checkpoint 完成前不得把当前源码迁移视为可发布 cutover。
+`apps/api/dist/index.mjs`。容器与本地 Compose 也由 app 持有：
+
+```bash
+docker build --file apps/api/Dockerfile .
+docker compose -f apps/api/compose.local.yml config
+```
+
+Docker install layer 只复制 `@mahoshojo/api...` 的实际 workspace manifest 闭包，不把 D1 Gateway 或未来
+Admin/Desktop/Mobile app 带入 Hono image。
 
 生产启动会检查以下配置并在缺失时直接失败：Redis、有效 AI provider、32 字符以上的
 `SIGNATURE_SECRET_KEY`、明确的生产 CORS，以及 D1 Gateway 凭据（或临时使用 Cloudflare 管理 API
@@ -129,9 +141,16 @@ release tuple，在 G25C 后续部署 checkpoint 完成前不得把当前源码�
 
 ## GitHub Actions 自动发布
 
-现有 `.github/workflows/hono-deploy.yml` 与根部署资产仍是迁移前 owner。G25C 下一 checkpoint 会把
-Dockerfile、compose、部署脚本、artifact identity 与 workflow 同步迁入 `apps/api` 并建立 fail-closed 的
-原子 release tuple；完成前不应从当前 workflow 执行生产发布。
+`.github/workflows/hono-deploy.yml` 继续保留受保护生产分支、Environment、SSH host key 和
+`cancel-in-progress: false` 门禁，但 build/container/artifact 路径只引用 `apps/api` owner。发布物由
+`index.mjs`、release-local `compose.yml` 和 `deploy-bundle.sh` 组成；`release.manifest` 覆盖完整 tuple，
+其 SHA-256 才是 release id。远端先验证两层 checksum，再执行 release-local deploy script。
+
+部署事务只有在配置预检、本机 readiness、`/health/ready` 和 retained shared route
+`/api/generate-magical-girl` 的公网 wire/CORS contract 全部通过后才原子 promotion `current`；任一步失败都
+恢复 previous release-local compose 与环境。已有 `.env` 若指向不含 release-local compose 的旧 release，
+脚本会在改变运行状态前 fail closed，需要运维先完成一次性迁移准备，不能以不可回滚方式强行发布。
+G25C 只实现并在本地/fault-injection 验证该流程，没有执行 production deploy、切流或 credential 变更。
 
 生产切流只应将 `config/hono-api-routes.json` 中的精确路径转发到 Hono origin；其他 `/api/*` 继续访问 Next.js。前端继续使用
 同源相对路径，旧 Next API 至少保留两个发布周期用于回滚。当前阶段不提供 `/ws`。

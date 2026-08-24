@@ -1,8 +1,8 @@
 services:
   api:
     build:
-      context: .
-      dockerfile: Dockerfile.hono
+      context: ../..
+      dockerfile: apps/api/Dockerfile
     restart: unless-stopped
     ports:
       - "${HONO_PORT:-8787}:8787"

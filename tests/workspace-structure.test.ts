@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { parse } from 'comment-json';
 
@@ -36,33 +36,6 @@ describe('phase 1 workspace structure', () => {
     expect(packageJson.scripts['ci:verify']).toBe(
       'pnpm run workspace:verify && pnpm test && pnpm lint',
     );
-  });
-
-  it('copies every workspace manifest before the Hono container installs dependencies', () => {
-    const dockerfile = readFileSync(path.join(rootDirectory, 'Dockerfile.hono'), 'utf8');
-    const installIndex = dockerfile.indexOf('RUN pnpm install --frozen-lockfile');
-    expect(installIndex).toBeGreaterThan(-1);
-
-    const workspaceDirectories = ['apps', 'packages'].flatMap((workspaceRoot) =>
-      readdirSync(path.join(rootDirectory, workspaceRoot), { withFileTypes: true })
-        .filter(
-          (entry) =>
-            entry.isDirectory() &&
-            existsSync(path.join(rootDirectory, workspaceRoot, entry.name, 'package.json')),
-        )
-        .map((entry) => `${workspaceRoot}/${entry.name}`),
-    );
-
-    expect(workspaceDirectories.length).toBeGreaterThan(0);
-    for (const workspaceDirectory of workspaceDirectories) {
-      const copyInstruction =
-        `COPY ${workspaceDirectory}/package.json ./${workspaceDirectory}/package.json`;
-      const copyIndex = dockerfile.indexOf(copyInstruction);
-      expect(copyIndex, `Dockerfile.hono must copy ${workspaceDirectory}/package.json`).toBeGreaterThan(-1);
-      expect(copyIndex, `${workspaceDirectory}/package.json must be copied before pnpm install`).toBeLessThan(
-        installIndex,
-      );
-    }
   });
 
   it('ignores workspace-local generated artifacts with exact glob rules', () => {
@@ -217,6 +190,7 @@ describe('phase 2.5C Hono API workspace app ownership', () => {
       'README.md',
       'env.example',
       'Dockerfile',
+      'compose.local.yml',
       'src/index.ts',
       'tests/route-manifest.test.ts',
       'scripts/build.mjs',
@@ -233,6 +207,7 @@ describe('phase 2.5C Hono API workspace app ownership', () => {
 
     expect(existsSync(path.join(rootDirectory, 'server/index.ts'))).toBe(false);
     expect(existsSync(path.join(rootDirectory, 'Dockerfile.hono'))).toBe(false);
+    expect(existsSync(path.join(rootDirectory, 'compose.hono.yml'))).toBe(false);
     expect(existsSync(path.join(rootDirectory, 'deploy/hono'))).toBe(false);
   });
 
@@ -284,15 +259,24 @@ describe('phase 2.5C Hono API workspace app ownership', () => {
     const dockerfile = readFileSync(dockerfilePath, 'utf8');
     const installIndex = dockerfile.indexOf('RUN pnpm install --frozen-lockfile');
     expect(installIndex).toBeGreaterThan(-1);
-    for (const manifestPath of [
+    const dependencyClosure = [
       'apps/api/package.json',
+      'packages/ai-core/package.json',
+      'packages/contracts/package.json',
+      'packages/domain/package.json',
       'packages/hosted-api/package.json',
       'packages/hosted-runtime/package.json',
-    ]) {
+    ];
+    for (const manifestPath of dependencyClosure) {
       const copyIndex = dockerfile.indexOf(`COPY ${manifestPath} ./${manifestPath}`);
       expect(copyIndex, `${manifestPath} must be copied before install`).toBeGreaterThan(-1);
       expect(copyIndex).toBeLessThan(installIndex);
     }
-    expect(dockerfile).not.toContain('apps/d1-gateway/package.json');
+    const copiedWorkspaceManifests = Array.from(
+      dockerfile.matchAll(/^COPY ((?:apps|packages)\/[^/]+\/package\.json) \.\/\1$/gm),
+      (match) => match[1],
+    );
+    expect(copiedWorkspaceManifests).toEqual(dependencyClosure);
+    expect(dockerfile).toContain('pnpm install --frozen-lockfile --filter @mahoshojo/api...');
   });
 });

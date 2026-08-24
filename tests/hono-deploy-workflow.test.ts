@@ -4,6 +4,7 @@ import { describe, expect, test } from 'vitest';
 
 const HONO_WORKFLOW_PATH = resolve(process.cwd(), '.github/workflows/hono-deploy.yml');
 const CLOUDFLARE_WORKFLOW_PATH = resolve(process.cwd(), '.github/workflows/cloudflare-deploy.yml');
+const HONO_DEPLOY_SCRIPT_PATH = resolve(process.cwd(), 'apps/api/deploy/deploy-bundle.sh');
 const PRODUCTION_BRANCH = 'refs/heads/feature/v0.2.0_Battle_Growth_MahoShojo';
 
 function escapeRegExp(value: string): string {
@@ -42,19 +43,20 @@ function getStep(job: string, stepName: string): string {
 describe('Hono deployment workflow', () => {
   test('public probe exercises a retained shared route instead of a generic CORS preflight', () => {
     const workflow = readFileSync(HONO_WORKFLOW_PATH, 'utf8');
-    const verificationStep = getStep(getJob(workflow, 'deploy'), 'Verify public endpoint');
+    const deployScript = readFileSync(HONO_DEPLOY_SCRIPT_PATH, 'utf8');
     const routeInventory = JSON.parse(readFileSync(
       resolve(process.cwd(), 'config/hono-api-routes.json'),
       'utf8',
     )) as { exitedRouteIds: string[]; sharedRouteIds: string[] };
-    const probePath = verificationStep.match(/https:\/\/homura\.colanns\.me\/api\/([^\s\\]+)/)?.[1];
+    const probePath = deployScript.match(/\$public_base_url\/api\/([A-Za-z0-9-]+)/)?.[1];
 
     expect(probePath).toBeDefined();
     expect(routeInventory.sharedRouteIds).toContain(probePath);
     expect(routeInventory.exitedRouteIds).not.toContain(probePath);
-    expect(verificationStep).toContain('--request POST');
-    expect(verificationStep).toContain("test \"$probe_status\" = '400'");
-    expect(verificationStep).toContain('Name is required');
+    expect(deployScript).toContain('--request POST');
+    expect(deployScript).toContain("test \"$probe_status\" = '400'");
+    expect(deployScript).toContain('Name is required');
+    expect(workflow).not.toContain('- name: Verify public endpoint');
   });
 
   test('gates the deploy job to the production branch', () => {
@@ -66,8 +68,10 @@ describe('Hono deployment workflow', () => {
     );
 
     const verificationStep = getStep(getJob(workflow, 'build'), 'Verify Hono authentication and runtime');
-    expect(verificationStep).toContain('run: pnpm exec vitest run');
+    expect(verificationStep).toContain('pnpm --filter @mahoshojo/api run test');
+    expect(verificationStep).toContain('pnpm exec vitest run');
     expect(verificationStep).toContain('tests/hono-deploy-workflow.test.ts');
+    expect(verificationStep).toContain('tests/hono-deploy-script.test.ts');
   });
 
   test.each([
@@ -103,6 +107,7 @@ describe('Hono deployment workflow', () => {
     expect(workflow).not.toContain('Dockerfile.hono');
     expect(workflow).not.toContain('deploy/hono/');
     expect(deployJob).toContain('artifact/release.sha256');
+    expect(deployJob).not.toContain('artifact/index.mjs.sha256');
   });
 
   test('finds a quoted deploy job key with an inline comment', () => {
