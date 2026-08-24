@@ -272,4 +272,47 @@ describe('Hosted structured output acceptance boundary', () => {
       resetHostedRuntimeObserverForTests();
     }
   });
+
+  it('forced text-only model only starts one upstream attempt and never calls generateObject', async () => {
+    const attemptTerminals: unknown[][] = [];
+    registerHostedRuntimeObserver({
+      beginAiUpstream: () => {
+        const terminal: unknown[] = [];
+        attemptTerminals.push(terminal);
+        return {
+          recordTtfb: () => undefined,
+          finish: (value) => terminal.push(value),
+        };
+      },
+      observeD1RoundTrip: () => undefined,
+    });
+    mocks.generateObject.mockReset();
+    mocks.generateText.mockResolvedValueOnce({
+      text: '{"ok":true}',
+      usage: {},
+      finishReason: 'stop',
+    });
+
+    try {
+      const { generateWithAI, LoadBalanceStrategy } = await import('@/lib/ai');
+      const output = await generateWithAI(
+        'forced-text-scenario',
+        {
+          systemPrompt: 'forced-text-system',
+          promptBuilder: () => 'forced-text-prompt',
+          schema: z.object({ ok: z.boolean() }),
+          taskName: 'Forced Text 测试',
+          modelOverride: 'gemma-2-text',
+        },
+        { loadBalanceStrategy: LoadBalanceStrategy.SEQUENTIAL },
+      );
+
+      expect(output).toEqual({ ok: true });
+      expect(mocks.generateObject).not.toHaveBeenCalled();
+      expect(attemptTerminals).toHaveLength(1);
+      expect(attemptTerminals[0]).toEqual([expect.objectContaining({ outcome: 'success' })]);
+    } finally {
+      resetHostedRuntimeObserverForTests();
+    }
+  });
 });
