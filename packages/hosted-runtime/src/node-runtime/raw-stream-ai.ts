@@ -35,22 +35,25 @@ export const classifyStreamRuntimeOutcome = classifyAiUpstreamOutcome;
 // 延迟函数
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 const createAIClient = (provider: AIProvider, fetchImpl: typeof fetch) => {
+    const providerFetch = getProviderFetch(provider, fetchImpl);
     if (provider.type === 'google') {
         return createGoogleGenerativeAI({
             apiKey: provider.apiKey,
             baseURL: provider.baseUrl,
+            fetch: providerFetch,
         });
     } else if (provider.type === 'deepseek') {
         return createDeepSeek({
             apiKey: provider.apiKey,
             baseURL: provider.baseUrl,
+            fetch: providerFetch,
         });
     }
     else {
         return createOpenAI({
             apiKey: provider.apiKey,
             baseURL: provider.baseUrl,
-            fetch: getProviderFetch(provider, fetchImpl)
+            fetch: providerFetch,
         });
     }
 };
