@@ -63,8 +63,10 @@ export type CustomProviderRuntimePolicy = {
    * 必须显式选择 custom，避免自定义通道失败后轮询系统 Provider。
    */
   nonSystemLoadBalanceStrategy?: 'sequential' | 'custom';
-  /** 旧 Free/Scenario 会把空 baseUrl 的 canonical model 放入 generation config。 */
+  /** Legacy composition 会把空 baseUrl 的 canonical model 放入 generation config。 */
   exposeEmptyBaseUrlModelOverride?: boolean;
+  /** 兼容入口用于恢复空 baseUrl 回落系统通道的结构化可观测事件。 */
+  onEmptyBaseUrl?(_input: { providerId: string; model: string }): void;
 };
 
 export const inferCustomProviderMode = (payload: unknown): CustomProviderMode => {
@@ -121,6 +123,10 @@ export const resolveCustomProviderRuntime = (
     : undefined;
   const baseUrl = provider.baseUrl?.trim() ?? '';
   if (!baseUrl) {
+    policy.onEmptyBaseUrl?.({
+      providerId: provider.id,
+      model: modelResolution.modelId,
+    });
     return {
       options: {
         channelContext: {

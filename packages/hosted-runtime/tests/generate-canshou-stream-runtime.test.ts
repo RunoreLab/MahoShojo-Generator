@@ -70,6 +70,7 @@ describe('generate canshou stream hosted runtime', () => {
         };
       },
       recordActivity: () => events.push('activity'),
+      logInfo: (message, meta) => events.push(`${message}:${JSON.stringify(meta)}`),
       logWarn: () => events.push('warn'),
       logError: () => events.push('error'),
     };
@@ -104,6 +105,7 @@ describe('generate canshou stream hosted runtime', () => {
     expect(events).toEqual([
       'rate-limit:canshou_generate:custom',
       'safety:盐雾里的影子:在残兽问卷中使用了危险符文',
+      '检测到 baseUrl 为空的自定义供应商，改用系统默认通道，仅覆盖模型参数:{"providerId":"proxy","model":"canonical-model"}',
       'reasoning:残兽档案（流式）',
       'generate',
       'reasoning-event',

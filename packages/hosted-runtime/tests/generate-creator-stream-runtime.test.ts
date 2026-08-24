@@ -81,6 +81,7 @@ describe('generate creator stream hosted runtime', () => {
         };
       },
       recordActivity: () => events.push('activity'),
+      logInfo: (message, meta) => events.push(`${message}:${JSON.stringify(meta)}`),
       logWarn: () => events.push('warn'),
       logError: () => events.push('error'),
     };
@@ -118,6 +119,7 @@ describe('generate creator stream hosted runtime', () => {
       'rate-limit:magical_girl_details_generate:custom',
       'safety:失踪船只',
       'safety:自由补充的港口调查',
+      '检测到 baseUrl 为空的自定义供应商，改用系统默认通道，仅覆盖模型参数:{"providerId":"proxy","model":"canonical-model"}',
       'reasoning:魔法少女档案（流式）',
       'generate',
       'reasoning-event',

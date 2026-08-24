@@ -81,6 +81,9 @@ export const createDefaultGenerateCanshouStreamService = (): GenerateCanshouServ
       mapStreamOptions(options),
     ),
     recordActivity: recordUserActivityFromRequest,
+    logInfo: (message, meta) => {
+      log.info(message, meta);
+    },
     logWarn: (message, meta) => {
       log.warn(message, meta);
     },

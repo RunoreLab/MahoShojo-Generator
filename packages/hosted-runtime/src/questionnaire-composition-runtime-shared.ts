@@ -38,6 +38,7 @@ export const compactQuestionnaireAnswerItems = (
 });
 
 export type LegacyProviderRuntimeLogger = {
+  logInfo(_message: string, _meta: Record<string, unknown>): void;
   logWarn(_message: string, _meta: Record<string, unknown>): void;
 };
 
@@ -72,5 +73,11 @@ export const resolveLegacyQuestionnaireProviderRuntime = (
   return resolveCustomProviderRuntime(parsed.data, ports, {
     nonSystemLoadBalanceStrategy: 'custom',
     exposeEmptyBaseUrlModelOverride: true,
+    onEmptyBaseUrl: (meta) => {
+      ports.logInfo(
+        '检测到 baseUrl 为空的自定义供应商，改用系统默认通道，仅覆盖模型参数',
+        meta,
+      );
+    },
   });
 };
