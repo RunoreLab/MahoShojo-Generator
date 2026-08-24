@@ -98,13 +98,19 @@ describe('workspace dependency boundaries', () => {
   it('rejects workspace apps importing legacy root app internals', async () => {
     const rootDir = await createWorkspaceFixture({
       'app/api/generate/route.ts': 'export const POST = () => new Response();\n',
+      'pages/api/legacy.ts': 'export default function legacy() {}\n',
+      'components/button.ts': 'export const Button = () => null;\n',
       'lib/ai.ts': 'export const generate = () => null;\n',
       'server/app.ts': 'export const createApp = () => null;\n',
+      'types/user.ts': 'export type User = { id: string };\n',
       'apps/api/package.json': manifest('@mahoshojo/api'),
       'apps/api/src/index.ts': [
         "export { POST } from '../../../app/api/generate/route';",
         "export { generate } from '@/lib/ai';",
         "export { createApp } from '@/server/app';",
+        "export { default as legacy } from '../../../pages/api/legacy';",
+        "export { Button } from '@/components/button';",
+        "export type { User } from '@/types/user';",
       ].join('\n'),
     });
 
@@ -112,11 +118,33 @@ describe('workspace dependency boundaries', () => {
       (violation) => violation.rule === 'MONO-003-LEGACY-APP',
     );
 
-    expect(violations).toHaveLength(3);
+    expect(violations).toHaveLength(6);
     expect(violations.map((violation) => violation.module)).toEqual(expect.arrayContaining([
       '../../../app/api/generate/route',
       '@/lib/ai',
       '@/server/app',
+      '../../../pages/api/legacy',
+      '@/components/button',
+      '@/types/user',
+    ]));
+  });
+
+  it('rejects an apps/api workspace-package bridge that reaches legacy root internals', async () => {
+    const rootDir = await createWorkspaceFixture({
+      'lib/ai.ts': 'export const generate = () => null;\n',
+      'apps/api/package.json': manifest('@mahoshojo/api'),
+      'apps/api/src/index.ts': "export { generate } from '@mahoshojo/runtime-bridge';\n",
+      'packages/runtime-bridge/package.json': manifest('@mahoshojo/runtime-bridge'),
+      'packages/runtime-bridge/src/index.ts': "export { generate } from '@/lib/ai';\n",
+    });
+
+    const violations = checkWorkspaceBoundaries(rootDir);
+
+    expect(violations).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        rule: 'MONO-005-PACKAGE-LEGACY-APP',
+        module: '@/lib/ai',
+      }),
     ]));
   });
 
