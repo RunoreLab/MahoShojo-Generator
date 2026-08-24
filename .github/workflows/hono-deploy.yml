@@ -20,6 +20,16 @@ env:
 jobs:
   build:
     runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 12
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -45,7 +55,12 @@ jobs:
           pnpm exec vitest run tests/apps-api-source-ownership.test.ts tests/hosted-runtime-ownership.test.ts tests/hono-deploy-workflow.test.ts tests/hono-deploy-release-contract.test.ts tests/hono-deploy-installer.test.ts tests/hono-deploy-script.test.ts
 
       - name: Verify Hono container build
-        run: docker build --file apps/api/Dockerfile .
+        env:
+          HONO_RELEASE_DIR: /tmp/mahoshojo-hono-release
+        run: |
+          set -euo pipefail
+          docker build --file apps/api/Dockerfile .
+          docker compose -f apps/api/deploy/compose.yml config --no-env-resolution
 
       - name: Build single-file server
         run: |
@@ -55,6 +70,50 @@ jobs:
           cd apps/api/dist
           sha256sum index.mjs compose.yml deploy-bundle.sh > release.manifest
           sha256sum release.manifest > release.sha256
+
+      - name: Verify Hono built runtime integration
+        env:
+          REDIS_URL: redis://127.0.0.1:6379
+          D1_GATEWAY_URL: http://127.0.0.1:8788
+          D1_GATEWAY_HMAC_SECRET: g25c-ci-only-d1-gateway-hmac-secret
+          HONO_AUTH_MODE: bearer
+          HONO_CORS_ORIGINS: https://g25c-ci.example.invalid
+          AI_API_KEY: g25c-ci-only-provider-placeholder
+          SIGNATURE_SECRET_KEY: g25c-ci-only-signature-secret-value
+        run: |
+          set -euo pipefail
+          gateway_log="$RUNNER_TEMP/d1-gateway.log"
+          pnpm --filter @mahoshojo/d1-gateway exec wrangler dev --local \
+            --ip 127.0.0.1 \
+            --port 8788 \
+            --persist-to "$RUNNER_TEMP/d1-gateway-state" \
+            --var "D1_GATEWAY_HMAC_SECRET:$D1_GATEWAY_HMAC_SECRET" \
+            --show-interactive-dev-session false \
+            >"$gateway_log" 2>&1 &
+          gateway_pid=$!
+          cleanup() {
+            kill "$gateway_pid" 2>/dev/null || true
+            wait "$gateway_pid" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+
+          gateway_ready=false
+          for _ in {1..100}; do
+            if curl --fail --silent --show-error "$D1_GATEWAY_URL/health" >/dev/null; then
+              gateway_ready=true
+              break
+            fi
+            if ! kill -0 "$gateway_pid" 2>/dev/null; then
+              break
+            fi
+            sleep 0.2
+          done
+          if [ "$gateway_ready" != true ]; then
+            cat "$gateway_log" >&2
+            exit 1
+          fi
+
+          pnpm run verify:server:runtime
 
       - name: Upload bundle
         uses: actions/upload-artifact@v4

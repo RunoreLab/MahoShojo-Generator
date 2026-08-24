@@ -41,7 +41,40 @@ function getStep(job: string, stepName: string): string {
   return job.slice(start, end);
 }
 
+function getActiveStepLines(step: string): string[] {
+  return step
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0 && !line.startsWith('#'));
+}
+
+function getActiveRunLines(step: string): string[] {
+  const runMarker = step.match(/^        run: \|\s*$/m);
+  expect(runMarker, 'required gate step must use a literal run block').not.toBeNull();
+  return getActiveStepLines(step.slice(runMarker!.index! + runMarker![0].length));
+}
+
+function hasShellBooleanContinuation(lines: string[]): boolean {
+  return lines.some((line) => /(?:&&|\|\|)\s*\\?$/u.test(line));
+}
+
+function expectRequiredGateStep(step: string): void {
+  expect(step).not.toMatch(/^        (?:continue-on-error|if):/m);
+  const runLines = getActiveRunLines(step);
+  const runBody = runLines.join('\n');
+  expect(runLines[0]).toBe('set -euo pipefail');
+  expect(runBody).not.toMatch(/\bset\s+\+(?:e\b|o\s+(?:errexit|pipefail)\b)/u);
+  expect(hasShellBooleanContinuation(runLines)).toBe(false);
+}
+
 describe('Hono deployment workflow', () => {
+  test.each(['true ||', 'false &&', 'true || \\', 'false && \\'])(
+    'recognizes a %s shell continuation that could bypass a terminal gate',
+    (line) => {
+      expect(hasShellBooleanContinuation([line])).toBe(true);
+    },
+  );
+
   test('public probe exercises a retained shared route instead of a generic CORS preflight', () => {
     const workflow = readFileSync(HONO_WORKFLOW_PATH, 'utf8');
     const deployScript = readFileSync(HONO_DEPLOY_SCRIPT_PATH, 'utf8');
@@ -89,10 +122,58 @@ describe('Hono deployment workflow', () => {
     const workflow = readFileSync(HONO_WORKFLOW_PATH, 'utf8');
     const buildJob = getJob(workflow, 'build');
     const containerBuildStep = getStep(buildJob, 'Verify Hono container build');
+    const activeLines = getActiveRunLines(containerBuildStep);
+    const containerCommands = [
+      'docker build --file apps/api/Dockerfile .',
+      'docker compose -f apps/api/deploy/compose.yml config --no-env-resolution',
+    ];
 
-    expect(containerBuildStep).toContain('run: docker build --file apps/api/Dockerfile .');
+    expectRequiredGateStep(containerBuildStep);
+    expect(containerBuildStep).toContain('HONO_RELEASE_DIR: /tmp/mahoshojo-hono-release');
+    expect(activeLines.slice(-2)).toEqual(containerCommands);
     expect(buildJob.indexOf(containerBuildStep)).toBeLessThan(
       buildJob.indexOf('- name: Build single-file server'),
+    );
+  });
+
+  test('verifies the built runtime against isolated local D1 and real Redis', () => {
+    const workflow = readFileSync(HONO_WORKFLOW_PATH, 'utf8');
+    const buildJob = getJob(workflow, 'build');
+    const runtimeStep = getStep(buildJob, 'Verify Hono built runtime integration');
+    const activeJobLines = getActiveStepLines(buildJob);
+    const activeStepLines = getActiveStepLines(runtimeStep);
+    const activeLines = getActiveRunLines(runtimeStep);
+    const gatewayCommand = 'pnpm --filter @mahoshojo/d1-gateway exec wrangler dev --local \\';
+    const healthProbe = 'if curl --fail --silent --show-error "$D1_GATEWAY_URL/health" >/dev/null; then';
+    const runtimeVerifier = 'pnpm run verify:server:runtime';
+
+    expectRequiredGateStep(runtimeStep);
+    expect(buildJob).toMatch(/^    services:\s*\n      redis:\s*$/m);
+    expect(activeJobLines).toContain('image: redis:7-alpine');
+    expect(activeJobLines).toContain('- 6379:6379');
+    expect(activeJobLines).toContain('--health-cmd "redis-cli ping"');
+    expect(activeStepLines).toContain('REDIS_URL: redis://127.0.0.1:6379');
+    expect(activeStepLines).toContain('D1_GATEWAY_URL: http://127.0.0.1:8788');
+    expect(activeStepLines).toContain(
+      'D1_GATEWAY_HMAC_SECRET: g25c-ci-only-d1-gateway-hmac-secret',
+    );
+    expect(runtimeStep).not.toContain('${{ secrets.');
+    expect(runtimeStep).not.toContain('--remote');
+    expect(runtimeStep).not.toMatch(/CLOUDFLARE_(?:ACCOUNT_ID|API_TOKEN)|D1_DATABASE_ID/u);
+    expect(activeLines).toContain(gatewayCommand);
+    expect(activeLines).toContain('--ip 127.0.0.1 \\');
+    expect(activeLines).toContain('--port 8788 \\');
+    expect(activeLines).toContain('--persist-to "$RUNNER_TEMP/d1-gateway-state" \\');
+    expect(activeLines).toContain(healthProbe);
+    expect(activeLines).toContain('trap cleanup EXIT');
+    expect(activeLines.at(-1)).toBe(runtimeVerifier);
+    expect(activeLines.indexOf(gatewayCommand)).toBeLessThan(activeLines.indexOf(healthProbe));
+    expect(activeLines.indexOf(healthProbe)).toBeLessThan(activeLines.indexOf(runtimeVerifier));
+    expect(buildJob.indexOf('- name: Build single-file server')).toBeLessThan(
+      buildJob.indexOf(runtimeStep),
+    );
+    expect(buildJob.indexOf(runtimeStep)).toBeLessThan(
+      buildJob.indexOf('- name: Upload bundle'),
     );
   });
 
