@@ -28,14 +28,14 @@ describe('phase 1 workspace structure', () => {
     expect(packageJson.scripts['workspace:verify']).not.toContain('pnpm test');
   });
 
-  it('provides one CI entrypoint that verifies workspaces and the legacy root', () => {
+  it('provides one CI entrypoint that verifies workspaces and repository gates', () => {
     const packageJson = JSON.parse(readFileSync(path.join(rootDirectory, 'package.json'), 'utf8')) as {
       scripts: Record<string, string>;
     };
 
-    expect(packageJson.scripts['ci:verify']).toBe(
-      'pnpm run workspace:verify && pnpm test && pnpm lint',
-    );
+    expect(packageJson.scripts['ci:verify']).toContain('workspace:verify');
+    expect(packageJson.scripts['ci:verify']).toContain('test:repo');
+    expect(packageJson.scripts['ci:verify']).toContain('lint:repo');
   });
 
   it('ignores workspace-local generated artifacts with exact glob rules', () => {
@@ -45,6 +45,7 @@ describe('phase 1 workspace structure', () => {
       'apps/*/coverage/',
       'apps/*/build/',
       'apps/*/out/',
+      'apps/*/.next/',
       'apps/*/.open-next/',
       'packages/*/coverage/',
       'packages/*/build/',
@@ -71,6 +72,68 @@ describe('phase 1 workspace structure', () => {
     expect(existsSync(path.join(rootDirectory, 'packages/config/tsconfig.build.json'))).toBe(false);
     expect(packagesReadme).toContain('source-export');
     expect(packagesReadme).toContain('esbuild');
+  });
+});
+
+describe('G25D Web workspace app ownership', () => {
+  const appDirectory = path.join(rootDirectory, 'apps/web');
+  const appManifestPath = path.join(appDirectory, 'package.json');
+
+  it('moves every legacy Web ownership root into apps/web', () => {
+    for (const relativePath of [
+      'package.json',
+      'README.md',
+      'env.example',
+      'app/layout.tsx',
+      'components',
+      'lib',
+      'public',
+      'tests',
+      'next.config.ts',
+      'open-next.config.ts',
+      'wrangler.jsonc',
+      'vitest.config.ts',
+    ]) {
+      expect(existsSync(path.join(appDirectory, relativePath)), `apps/web/${relativePath} must exist`).toBe(true);
+    }
+
+    for (const retiredRoot of ['app', 'components', 'lib', 'public', 'styles', 'types']) {
+      expect(existsSync(path.join(rootDirectory, retiredRoot)), `${retiredRoot}/ must be retired`).toBe(false);
+    }
+  });
+
+  it('declares an independently testable, buildable and deployable Web lifecycle', () => {
+    expect(existsSync(appManifestPath)).toBe(true);
+    if (!existsSync(appManifestPath)) return;
+
+    const appManifest = JSON.parse(readFileSync(appManifestPath, 'utf8')) as {
+      name?: string;
+      private?: boolean;
+      scripts?: Record<string, string>;
+      dependencies?: Record<string, string>;
+    };
+
+    expect(appManifest).toMatchObject({ name: '@mahoshojo/web', private: true });
+    for (const scriptName of ['dev', 'test', 'lint', 'build', 'build:cf', 'preview', 'deploy', 'start']) {
+      expect(appManifest.scripts?.[scriptName], `missing scripts.${scriptName}`).toEqual(expect.any(String));
+    }
+    for (const dependencyName of ['next', 'react', 'react-dom', '@opennextjs/cloudflare']) {
+      expect(appManifest.dependencies?.[dependencyName], `missing dependency ${dependencyName}`).toEqual(expect.any(String));
+    }
+  });
+
+  it('keeps root commands as filtered compatibility entrypoints without runtime dependencies', () => {
+    const rootManifest = JSON.parse(readFileSync(path.join(rootDirectory, 'package.json'), 'utf8')) as {
+      scripts: Record<string, string>;
+      dependencies?: Record<string, string>;
+    };
+
+    for (const scriptName of ['dev', 'test', 'lint', 'build', 'build:cf', 'preview', 'deploy', 'start']) {
+      expect(rootManifest.scripts[scriptName], `root scripts.${scriptName}`).toContain(
+        'pnpm --filter @mahoshojo/web',
+      );
+    }
+    expect(rootManifest.dependencies ?? {}).toEqual({});
   });
 });
 
