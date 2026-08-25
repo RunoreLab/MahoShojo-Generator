@@ -3,6 +3,7 @@ import { isExpectedClientDisconnect } from '@mahoshojo/hosted-runtime/node-runti
 import { registerHostedRuntimeObserver } from '@mahoshojo/hosted-runtime/telemetry';
 import { createHonoApp } from '#/app';
 import { readHonoServerConfig } from '#/config';
+import { configureHonoArenaGenerationRuntime } from '#/arena-generation/runtime';
 import { RedisRuntime } from '#/redis/runtime';
 import {
   createSingleRunShutdown,
@@ -30,6 +31,7 @@ if (process.env.HONO_CONFIG_CHECK_ONLY === 'true') {
     () => redis.sampleServerStats(),
   );
   await redis.connect();
+  configureHonoArenaGenerationRuntime(redis, { observer: telemetry });
 
   telemetry.start();
   const app = createHonoApp(config, redis, telemetry);

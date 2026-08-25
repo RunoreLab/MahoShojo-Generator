@@ -8,6 +8,10 @@ import type {
   HostedRuntimeObserver,
 } from '@mahoshojo/hosted-runtime/telemetry';
 import type {
+  ArenaGenerationObservation,
+  ArenaGenerationObserver,
+} from '@mahoshojo/hosted-api/arena-generation/service';
+import type {
   RedisRuntimeObserver,
   RedisRuntimeOperationObservation,
   RedisServerStatsObservation,
@@ -25,6 +29,14 @@ type DurationSummary = {
   samples: number;
   totalMilliseconds: number;
   maxMilliseconds: number | null;
+  p50Milliseconds: number | null;
+  p95Milliseconds: number | null;
+  p99Milliseconds: number | null;
+};
+
+type OutcomeDurationSummary = {
+  outcomes: { success: number; failure: number };
+  duration: DurationSummary;
 };
 
 export interface RuntimeTelemetryService {
@@ -35,7 +47,7 @@ export interface RuntimeTelemetryService {
 
 export type HonoRuntimeTelemetrySnapshot = {
   event: 'hono.runtime.telemetry';
-  schemaVersion: 2;
+  schemaVersion: 3;
   service: 'mahoshojo-hono';
   capturedAt: string;
   runtime: {
@@ -113,6 +125,7 @@ export type HonoRuntimeTelemetrySnapshot = {
       connect: number;
       ping: number;
       'rate-limit': number;
+      generation: number;
       info: number;
     };
     latency: DurationSummary;
@@ -124,6 +137,49 @@ export type HonoRuntimeTelemetrySnapshot = {
       keyspaceHits: number | null;
       keyspaceMisses: number | null;
     };
+  };
+  arenaGeneration: {
+    requests: {
+      created: number;
+      reused: number;
+      conflicts: number;
+      unavailable: number;
+      secondProviderPreventions: number;
+      inputBytes: number;
+    };
+    clientDisconnects: number;
+    resume: {
+      attempts: number;
+      successes: number;
+      failures: {
+        unauthorized: number;
+        notFound: number;
+        stateUnavailable: number;
+        cursorConflict: number;
+        unknown: number;
+      };
+      latency: DurationSummary;
+    };
+    replay: { events: number; bytes: number; snapshotBootstraps: number };
+    provider: {
+      started: number;
+      outcomes: { success: number; failure: number; cancelled: number };
+      duration: DurationSummary;
+    };
+    phases: {
+      safety: OutcomeDurationSummary;
+      assembly: OutcomeDurationSummary;
+      finalization: OutcomeDurationSummary;
+    };
+    r2: {
+      outcomes: { success: number; failure: number };
+      bytes: number;
+      latency: DurationSummary;
+    };
+    cancels: { user: number };
+    producerLost: number;
+    redisDegraded: number;
+    terminals: { completed: number; failed: number; cancelled: number; producerLost: number };
   };
 };
 
@@ -140,6 +196,26 @@ type SettledResourceSample =
   | { outcome: 'ok'; value: ResourceSampleResult }
   | { outcome: 'error'; error: unknown }
   | { outcome: 'timeout' };
+
+type ArenaGenerationAudit = {
+  providerStarted: boolean;
+  subscriberDisconnects: number;
+  resumeAttempts: number;
+  snapshotBootstrap: boolean;
+  secondProviderPrevention: boolean;
+  finalization: 'success' | 'failure' | 'not-observed';
+  r2: 'success' | 'failure' | 'not-observed';
+};
+
+const createArenaGenerationAudit = (): ArenaGenerationAudit => ({
+  providerStarted: false,
+  subscriberDisconnects: 0,
+  resumeAttempts: 0,
+  snapshotBootstrap: false,
+  secondProviderPrevention: false,
+  finalization: 'not-observed',
+  r2: 'not-observed',
+});
 
 const settleResourceSample = (
   sampler: () => Promise<ResourceSampleResult>,
@@ -194,11 +270,21 @@ class DurationAccumulator {
 
   private maxMilliseconds: number | null = null;
 
+  private readonly values: number[] = [];
+
   observe(durationMs: number): void {
     const normalized = normalizeDuration(durationMs);
     this.samples += 1;
     this.totalMilliseconds += normalized;
     this.maxMilliseconds = Math.max(this.maxMilliseconds ?? 0, normalized);
+    if (this.values.length < 4_096) this.values.push(normalized);
+  }
+
+  private percentile(percentile: number): number | null {
+    if (this.values.length === 0) return null;
+    const sorted = [...this.values].sort((left, right) => left - right);
+    const index = Math.max(0, Math.ceil((percentile / 100) * sorted.length) - 1);
+    return round(sorted[index] ?? 0, 3);
   }
 
   read(): DurationSummary {
@@ -208,6 +294,9 @@ class DurationAccumulator {
       maxMilliseconds: this.maxMilliseconds === null
         ? null
         : round(this.maxMilliseconds, 3),
+      p50Milliseconds: this.percentile(50),
+      p95Milliseconds: this.percentile(95),
+      p99Milliseconds: this.percentile(99),
     };
   }
 
@@ -215,6 +304,7 @@ class DurationAccumulator {
     this.samples = 0;
     this.totalMilliseconds = 0;
     this.maxMilliseconds = null;
+    this.values.length = 0;
   }
 }
 
@@ -240,7 +330,8 @@ const normalizeMetricInteger = (value: number | null): number | null => {
 export class HonoRuntimeTelemetry implements
   RuntimeTelemetryService,
   HostedRuntimeObserver,
-  RedisRuntimeObserver {
+  RedisRuntimeObserver,
+  ArenaGenerationObserver {
   private readonly requests = new ActiveGauge();
 
   private readonly streams = new ActiveGauge();
@@ -282,7 +373,13 @@ export class HonoRuntimeTelemetry implements
 
   private readonly redisOutcomes = { ok: 0, error: 0, unavailable: 0 };
 
-  private readonly redisByOperation = { connect: 0, ping: 0, 'rate-limit': 0, info: 0 };
+  private readonly redisByOperation = {
+    connect: 0,
+    ping: 0,
+    'rate-limit': 0,
+    generation: 0,
+    info: 0,
+  };
 
   private readonly redisLatency = new DurationAccumulator();
 
@@ -294,6 +391,72 @@ export class HonoRuntimeTelemetry implements
     keyspaceHits: null,
     keyspaceMisses: null,
   };
+
+  private readonly arenaRequests = {
+    created: 0,
+    reused: 0,
+    conflicts: 0,
+    unavailable: 0,
+    secondProviderPreventions: 0,
+    inputBytes: 0,
+  };
+
+  private arenaClientDisconnects = 0;
+
+  private arenaResumeAttempts = 0;
+
+  private arenaResumeSuccesses = 0;
+
+  private readonly arenaResumeFailures = {
+    unauthorized: 0,
+    notFound: 0,
+    stateUnavailable: 0,
+    cursorConflict: 0,
+    unknown: 0,
+  };
+
+  private readonly arenaResumeLatency = new DurationAccumulator();
+
+  private readonly arenaReplay = { events: 0, bytes: 0, snapshotBootstraps: 0 };
+
+  private arenaProviderStarted = 0;
+
+  private readonly arenaProviderOutcomes = { success: 0, failure: 0, cancelled: 0 };
+
+  private readonly arenaProviderDuration = new DurationAccumulator();
+
+  private readonly arenaPhaseOutcomes = {
+    safety: { success: 0, failure: 0 },
+    prompt: { success: 0, failure: 0 },
+    finalization: { success: 0, failure: 0 },
+  };
+
+  private readonly arenaPhaseDurations = {
+    safety: new DurationAccumulator(),
+    prompt: new DurationAccumulator(),
+    finalization: new DurationAccumulator(),
+  };
+
+  private readonly arenaR2Outcomes = { success: 0, failure: 0 };
+
+  private readonly arenaR2Latency = new DurationAccumulator();
+
+  private arenaR2Bytes = 0;
+
+  private arenaUserCancels = 0;
+
+  private arenaProducerLost = 0;
+
+  private arenaRedisDegraded = 0;
+
+  private readonly arenaTerminals = {
+    completed: 0,
+    failed: 0,
+    cancelled: 0,
+    producerLost: 0,
+  };
+
+  private readonly arenaAudits = new Map<string, ArenaGenerationAudit>();
 
   private readonly delayMonitor = monitorEventLoopDelay({
     resolution: EVENT_LOOP_DELAY_RESOLUTION_MS,
@@ -420,6 +583,7 @@ export class HonoRuntimeTelemetry implements
       case 'connect':
       case 'ping':
       case 'rate-limit':
+      case 'generation':
       case 'info':
         this.redisByOperation[observation.operation] += 1;
         break;
@@ -440,6 +604,128 @@ export class HonoRuntimeTelemetry implements
       keyspaceHits: normalizeMetricInteger(observation.keyspaceHits),
       keyspaceMisses: normalizeMetricInteger(observation.keyspaceMisses),
     };
+  }
+
+  private getArenaAudit(generationId: string): ArenaGenerationAudit {
+    const existing = this.arenaAudits.get(generationId);
+    if (existing) return existing;
+    if (this.arenaAudits.size >= 10_000) {
+      const oldest = this.arenaAudits.keys().next().value as string | undefined;
+      if (oldest) this.arenaAudits.delete(oldest);
+    }
+    const created = createArenaGenerationAudit();
+    this.arenaAudits.set(generationId, created);
+    return created;
+  }
+
+  observeArenaGeneration(observation: ArenaGenerationObservation): void {
+    switch (observation.event) {
+      case 'request': {
+        this.arenaRequests.inputBytes += Math.max(0, Math.floor(observation.inputBytes));
+        if (observation.outcome === 'created') this.arenaRequests.created += 1;
+        else if (observation.outcome === 'reused') {
+          this.arenaRequests.reused += 1;
+          this.arenaRequests.secondProviderPreventions += 1;
+          this.getArenaAudit(observation.generationId).secondProviderPrevention = true;
+        } else if (observation.outcome === 'conflict') this.arenaRequests.conflicts += 1;
+        else this.arenaRequests.unavailable += 1;
+        if (observation.outcome === 'created') this.getArenaAudit(observation.generationId);
+        break;
+      }
+      case 'client_disconnect':
+        this.arenaClientDisconnects += 1;
+        this.getArenaAudit(observation.generationId).subscriberDisconnects += 1;
+        break;
+      case 'resume': {
+        if (observation.outcome === 'attempt') {
+          this.arenaResumeAttempts += 1;
+          this.getArenaAudit(observation.generationId).resumeAttempts += 1;
+        } else if (observation.outcome === 'success') {
+          this.arenaResumeSuccesses += 1;
+          this.arenaResumeLatency.observe(observation.latencyMs ?? 0);
+        } else {
+          const key = observation.reason === 'not_found'
+            ? 'notFound'
+            : observation.reason === 'state_unavailable'
+              ? 'stateUnavailable'
+              : observation.reason === 'cursor_conflict'
+                ? 'cursorConflict'
+                : observation.reason === 'unauthorized'
+                  ? 'unauthorized'
+                  : 'unknown';
+          this.arenaResumeFailures[key] += 1;
+          this.arenaResumeLatency.observe(observation.latencyMs ?? 0);
+        }
+        break;
+      }
+      case 'replay':
+        this.arenaReplay.events += Math.max(0, Math.floor(observation.events));
+        this.arenaReplay.bytes += Math.max(0, Math.floor(observation.bytes));
+        if (observation.snapshotBootstrap) {
+          this.arenaReplay.snapshotBootstraps += 1;
+          this.getArenaAudit(observation.generationId).snapshotBootstrap = true;
+        }
+        break;
+      case 'provider':
+        if (observation.outcome === 'started') {
+          this.arenaProviderStarted += 1;
+          this.getArenaAudit(observation.generationId).providerStarted = true;
+        } else {
+          this.arenaProviderOutcomes[observation.outcome] += 1;
+          this.arenaProviderDuration.observe(observation.durationMs ?? 0);
+        }
+        break;
+      case 'phase':
+        this.arenaPhaseOutcomes[observation.phase][observation.outcome] += 1;
+        this.arenaPhaseDurations[observation.phase].observe(observation.durationMs);
+        if (observation.phase === 'finalization' && observation.generationId) {
+          this.getArenaAudit(observation.generationId).finalization = observation.outcome;
+        }
+        break;
+      case 'storage':
+        this.arenaR2Outcomes[observation.outcome] += 1;
+        this.arenaR2Latency.observe(observation.durationMs);
+        this.arenaR2Bytes += Math.max(0, Math.floor(observation.bytes ?? 0));
+        this.getArenaAudit(observation.generationId).r2 = observation.outcome;
+        break;
+      case 'cancel':
+        this.arenaUserCancels += 1;
+        break;
+      case 'producer_lost':
+        this.arenaProducerLost += 1;
+        break;
+      case 'redis_degraded':
+        this.arenaRedisDegraded += 1;
+        break;
+      case 'terminal': {
+        const terminalKey = observation.status === 'producer_lost'
+          ? 'producerLost'
+          : observation.status;
+        this.arenaTerminals[terminalKey] += 1;
+        const audit = this.getArenaAudit(observation.generationId);
+        try {
+          this.logger(JSON.stringify({
+            event: 'arena.generation.terminal.audit',
+            schemaVersion: 1,
+            generationId: observation.generationId,
+            providerStarted: audit.providerStarted,
+            subscriberDisconnects: audit.subscriberDisconnects,
+            resumeAttempts: audit.resumeAttempts,
+            snapshotBootstrap: audit.snapshotBootstrap,
+            secondProviderPrevention: audit.secondProviderPrevention,
+            terminal: { status: observation.status, code: observation.code },
+            finalization: audit.finalization,
+            r2: audit.r2,
+          }));
+        } catch {
+          // Terminal audit transport failures never affect the producer.
+        }
+        this.arenaAudits.delete(observation.generationId);
+        break;
+      }
+      default:
+        break;
+    }
   }
 
   setRedisResourceSampler(sampler: () => Promise<ResourceSampleResult>): () => void {
@@ -499,7 +785,7 @@ export class HonoRuntimeTelemetry implements
 
     return {
       event: TELEMETRY_EVENT,
-      schemaVersion: 2,
+      schemaVersion: 3,
       service: 'mahoshojo-hono',
       capturedAt,
       runtime: {
@@ -570,6 +856,45 @@ export class HonoRuntimeTelemetry implements
         byOperation: { ...this.redisByOperation },
         latency: this.redisLatency.read(),
         server: { ...this.redisServerStats },
+      },
+      arenaGeneration: {
+        requests: { ...this.arenaRequests },
+        clientDisconnects: this.arenaClientDisconnects,
+        resume: {
+          attempts: this.arenaResumeAttempts,
+          successes: this.arenaResumeSuccesses,
+          failures: { ...this.arenaResumeFailures },
+          latency: this.arenaResumeLatency.read(),
+        },
+        replay: { ...this.arenaReplay },
+        provider: {
+          started: this.arenaProviderStarted,
+          outcomes: { ...this.arenaProviderOutcomes },
+          duration: this.arenaProviderDuration.read(),
+        },
+        phases: {
+          safety: {
+            outcomes: { ...this.arenaPhaseOutcomes.safety },
+            duration: this.arenaPhaseDurations.safety.read(),
+          },
+          assembly: {
+            outcomes: { ...this.arenaPhaseOutcomes.prompt },
+            duration: this.arenaPhaseDurations.prompt.read(),
+          },
+          finalization: {
+            outcomes: { ...this.arenaPhaseOutcomes.finalization },
+            duration: this.arenaPhaseDurations.finalization.read(),
+          },
+        },
+        r2: {
+          outcomes: { ...this.arenaR2Outcomes },
+          bytes: this.arenaR2Bytes,
+          latency: this.arenaR2Latency.read(),
+        },
+        cancels: { user: this.arenaUserCancels },
+        producerLost: this.arenaProducerLost,
+        redisDegraded: this.arenaRedisDegraded,
+        terminals: { ...this.arenaTerminals },
       },
     };
   }
@@ -656,8 +981,53 @@ export class HonoRuntimeTelemetry implements
     this.d1RowsWritten = 0;
     this.redisCommands = 0;
     Object.assign(this.redisOutcomes, { ok: 0, error: 0, unavailable: 0 });
-    Object.assign(this.redisByOperation, { connect: 0, ping: 0, 'rate-limit': 0, info: 0 });
+    Object.assign(this.redisByOperation, {
+      connect: 0,
+      ping: 0,
+      'rate-limit': 0,
+      generation: 0,
+      info: 0,
+    });
     this.redisLatency.reset();
+    Object.assign(this.arenaRequests, {
+      created: 0,
+      reused: 0,
+      conflicts: 0,
+      unavailable: 0,
+      secondProviderPreventions: 0,
+      inputBytes: 0,
+    });
+    this.arenaClientDisconnects = 0;
+    this.arenaResumeAttempts = 0;
+    this.arenaResumeSuccesses = 0;
+    Object.assign(this.arenaResumeFailures, {
+      unauthorized: 0,
+      notFound: 0,
+      stateUnavailable: 0,
+      cursorConflict: 0,
+      unknown: 0,
+    });
+    this.arenaResumeLatency.reset();
+    Object.assign(this.arenaReplay, { events: 0, bytes: 0, snapshotBootstraps: 0 });
+    this.arenaProviderStarted = 0;
+    Object.assign(this.arenaProviderOutcomes, { success: 0, failure: 0, cancelled: 0 });
+    this.arenaProviderDuration.reset();
+    for (const phase of ['safety', 'prompt', 'finalization'] as const) {
+      Object.assign(this.arenaPhaseOutcomes[phase], { success: 0, failure: 0 });
+      this.arenaPhaseDurations[phase].reset();
+    }
+    Object.assign(this.arenaR2Outcomes, { success: 0, failure: 0 });
+    this.arenaR2Latency.reset();
+    this.arenaR2Bytes = 0;
+    this.arenaUserCancels = 0;
+    this.arenaProducerLost = 0;
+    this.arenaRedisDegraded = 0;
+    Object.assign(this.arenaTerminals, {
+      completed: 0,
+      failed: 0,
+      cancelled: 0,
+      producerLost: 0,
+    });
   }
 }
 

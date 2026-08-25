@@ -14,6 +14,11 @@
       "import": "./src/arena-generation/sse.ts",
       "default": "./src/arena-generation/sse.ts"
     },
+    "./arena-generation/memory-replay-store": {
+      "types": "./src/arena-generation/memory-replay-store.ts",
+      "import": "./src/arena-generation/memory-replay-store.ts",
+      "default": "./src/arena-generation/memory-replay-store.ts"
+    },
     "./generate-canshou": {
       "types": "./src/generate-canshou.ts",
       "import": "./src/generate-canshou.ts",

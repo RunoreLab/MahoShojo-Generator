@@ -417,10 +417,11 @@ export const createRedisGenerationReplayStore = (
     },
 
     async writeSnapshot(input) {
-      await options.getClient().eval(SNAPSHOT_SCRIPT, {
+      const result = await options.getClient().eval(SNAPSHOT_SCRIPT, {
         keys: [stateKey(input.generationId)],
         arguments: [JSON.stringify(input.snapshot), input.now, String(activeTtlMs)],
       });
+      if (result !== 1) throw new Error('REDIS_GENERATION_STATE_NOT_FOUND');
     },
 
     async readSnapshot(input) {

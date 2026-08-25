@@ -4,6 +4,11 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./arena-generation": {
+      "types": "./src/arena-generation/index.ts",
+      "import": "./src/arena-generation/index.ts",
+      "default": "./src/arena-generation/index.ts"
+    },
     "./d1-http-client": {
       "types": "./src/d1-http-client.ts",
       "import": "./src/d1-http-client.ts",
@@ -279,6 +284,7 @@
     "@mahoshojo/domain": "workspace:*",
     "@mahoshojo/hosted-api": "workspace:*",
     "ai": "^6.0.184",
+    "aws4fetch": "^1.0.20",
     "pinyin-pro": "^3.27.0",
     "zod": "^4.1.13"
   },

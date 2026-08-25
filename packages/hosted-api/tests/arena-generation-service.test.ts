@@ -17,6 +17,7 @@ class MemoryReplayStore implements GenerationReplayStore {
   readonly events = new Map<string, GenerationStreamEvent[]>();
   reserveUnavailable = false;
   markRunningUnavailable = false;
+  appendUnavailable = false;
   readonly appendBatches: Array<GenerationStreamEvent[]> = [];
 
   async reserve(input: Parameters<GenerationReplayStore['reserve']>[0]) {
@@ -70,6 +71,7 @@ class MemoryReplayStore implements GenerationReplayStore {
   }
 
   async appendEvents(input: Parameters<GenerationReplayStore['appendEvents']>[0]) {
+    if (this.appendUnavailable) throw new Error('redis append unavailable');
     const current = this.events.get(input.generationId) ?? [];
     const appended = input.events.map((event, index) => ({
       ...event,
@@ -156,11 +158,16 @@ const createService = (
     deltaFlushBytes?: number;
     heartbeatIntervalMs?: number;
     terminalStore?: ArenaGenerationTerminalStore;
+    actorResponseHeaders?: Record<string, string>;
+    observer?: { observeArenaGeneration(_observation: unknown): void };
   } = {},
 ) => createArenaGenerationService({
   store,
   executor,
-  resolveActor: async () => ({ actorKey: 'user:42' }),
+  resolveActor: async () => ({
+    actorKey: 'user:42',
+    responseHeaders: options.actorResponseHeaders,
+  }),
   createGenerationId: () => 'generation-1',
   now: () => new Date('2026-08-25T04:00:00.000Z'),
   hashPayload: async (payload) => `hash:${JSON.stringify(payload)}`,
@@ -170,9 +177,23 @@ const createService = (
   deltaFlushIntervalMs: options.deltaFlushIntervalMs ?? 5,
   deltaFlushBytes: options.deltaFlushBytes ?? 1_024,
   ...(options.terminalStore ? { terminalStore: options.terminalStore } : {}),
+  ...(options.observer ? { observer: options.observer } : {}),
 });
 
 describe('Arena generation lifecycle service', () => {
+  test('returns newly issued actor credential without treating generation id as credential', async () => {
+    const store = new MemoryReplayStore();
+    const service = createService(
+      store,
+      { execute: async () => ({ status: 'completed' }) },
+      { actorResponseHeaders: { 'X-Mahoshojo-Generation-Actor-Token': 'signed-token' } },
+    );
+
+    const response = await service.create(createRequest('request-1'));
+    expect(response.headers.get('x-mahoshojo-generation-actor-token')).toBe('signed-token');
+    await response.text();
+  });
+
   test('same actor/request/payload reuses one generation and starts only one producer', async () => {
     const store = new MemoryReplayStore();
     let release!: () => void;
@@ -195,6 +216,81 @@ describe('Arena generation lifecycle service', () => {
     release();
     await readResponseText(first);
     await readResponseText(second);
+  });
+
+  test('reports bounded resume lifecycle telemetry without actor or payload data', async () => {
+    const store = new MemoryReplayStore();
+    const observeArenaGeneration = vi.fn();
+    const service = createService(store, {
+      execute: vi.fn(async ({ emit }) => {
+        await emit({ type: 'markdown', data: { chunk: '正文' } });
+        return { status: 'completed' as const };
+      }),
+    }, { observer: { observeArenaGeneration } });
+
+    const initial = await service.create(createRequest('request-1'));
+    await initial.text();
+    const reused = await service.create(createRequest('request-1'));
+    await reused.body?.cancel('subscriber closed');
+    const resumed = await service.resume(new Request(
+      'https://example.test/api/arena/generations/generation-1/stream?after=trimmed-1',
+    ), { generationId: 'generation-1' });
+    await resumed.text();
+
+    expect(observeArenaGeneration).toHaveBeenCalledWith(expect.objectContaining({
+      event: 'request',
+      outcome: 'created',
+      generationId: 'generation-1',
+      inputBytes: expect.any(Number),
+    }));
+    expect(observeArenaGeneration).toHaveBeenCalledWith(expect.objectContaining({
+      event: 'request',
+      outcome: 'reused',
+    }));
+    expect(observeArenaGeneration).toHaveBeenCalledWith(expect.objectContaining({
+      event: 'client_disconnect',
+    }));
+    expect(observeArenaGeneration).toHaveBeenCalledWith(expect.objectContaining({
+      event: 'resume',
+      outcome: 'success',
+      latencyMs: expect.any(Number),
+    }));
+    expect(observeArenaGeneration).toHaveBeenCalledWith(expect.objectContaining({
+      event: 'replay',
+      snapshotBootstrap: true,
+    }));
+    expect(JSON.stringify(observeArenaGeneration.mock.calls)).not.toMatch(/user:42|正文/u);
+  });
+
+  test('prepares validation and semantic hash before reservation without dropping execution secrets', async () => {
+    const store = new MemoryReplayStore();
+    const prepare = vi.fn(async ({ payload }) => ({
+      executionPayload: payload,
+      semanticPayload: { value: payload.value },
+    }));
+    const execute = vi.fn(async ({ payload }) => {
+      expect(payload.providerSecret).toBe('server-use-only');
+      return { status: 'completed' as const };
+    });
+    const service = createService(store, { prepare, execute });
+    const request = new Request('https://example.test/api/arena/generate-stream?format=sse', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        generationRequestId: 'request-1',
+        value: 'same',
+        providerSecret: 'server-use-only',
+      }),
+    });
+
+    const response = await service.create(request);
+    await readResponseText(response);
+
+    expect(prepare).toHaveBeenCalledTimes(1);
+    expect(store.states.get('generation-1')?.payloadHash).toBe(
+      'hash:{"value":"same"}',
+    );
+    expect(execute).toHaveBeenCalledTimes(1);
   });
 
   test('same request id with conflicting semantic payload fails closed', async () => {
@@ -236,6 +332,32 @@ describe('Arena generation lifecycle service', () => {
     expect(await response.json()).toMatchObject({ code: 'GENERATION_OWNERSHIP_UNAVAILABLE' });
     expect(execute).not.toHaveBeenCalled();
     expect(store.states.get('generation-1')?.terminal?.status).toBe('producer_lost');
+  });
+
+  test('transient replay writes may degrade but never start a second provider', async () => {
+    const store = new MemoryReplayStore();
+    store.appendUnavailable = true;
+    const observeArenaGeneration = vi.fn();
+    const execute = vi.fn(async ({ emit }) => {
+      await emit({ type: 'markdown', data: { chunk: '仍完成' } });
+      return { status: 'completed' as const, resultRef: 'r2://terminal' };
+    });
+    const service = createService(store, { execute }, {
+      observer: { observeArenaGeneration },
+    });
+
+    const response = await service.create(createRequest('request-1'));
+    await response.text();
+
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(store.states.get('generation-1')?.terminal).toMatchObject({
+      status: 'completed',
+      resultRef: 'r2://terminal',
+    });
+    expect(observeArenaGeneration).toHaveBeenCalledWith(expect.objectContaining({
+      event: 'redis_degraded',
+      generationId: 'generation-1',
+    }));
   });
 
   test('subscriber cancellation does not abort producer or mark it terminal', async () => {

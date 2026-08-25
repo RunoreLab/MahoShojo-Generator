@@ -123,7 +123,18 @@ export type ArenaGenerationExecutionInput = {
   emit: (_event: GenerationEventInput) => Promise<void>;
 };
 
+export type PreparedArenaGeneration = {
+  executionPayload: Record<string, unknown>;
+  semanticPayload: Record<string, unknown>;
+  responseHeaders?: Readonly<Record<string, string>>;
+};
+
 export interface ArenaGenerationExecutor {
+  prepare?(_input: {
+    request: Request;
+    actorKey: string;
+    payload: Record<string, unknown>;
+  }): Promise<PreparedArenaGeneration | Response>;
   execute(_input: ArenaGenerationExecutionInput): Promise<GenerationTerminal>;
 }
 
@@ -144,8 +155,71 @@ export interface ArenaGenerationTerminalStore {
   }): Promise<ArenaGenerationTerminalRecord | null>;
 }
 
+export type ArenaGenerationObservation =
+  | {
+    event: 'request';
+    generationId: string;
+    outcome: 'created' | 'reused' | 'conflict' | 'unavailable';
+    inputBytes: number;
+  }
+  | { event: 'client_disconnect'; generationId: string }
+  | {
+    event: 'resume';
+    generationId: string;
+    outcome: 'attempt' | 'success' | 'failure';
+    latencyMs?: number;
+    reason?: 'unauthorized' | 'not_found' | 'state_unavailable' | 'cursor_conflict' | 'unknown';
+  }
+  | {
+    event: 'replay';
+    generationId: string;
+    events: number;
+    bytes: number;
+    snapshotBootstrap: boolean;
+  }
+  | {
+    event: 'provider';
+    generationId: string;
+    outcome: 'started' | 'success' | 'failure' | 'cancelled';
+    durationMs?: number;
+  }
+  | {
+    event: 'phase';
+    generationId?: string;
+    phase: 'safety' | 'prompt' | 'finalization';
+    outcome: 'success' | 'failure';
+    durationMs: number;
+  }
+  | {
+    event: 'storage';
+    generationId: string;
+    storage: 'r2';
+    outcome: 'success' | 'failure';
+    durationMs: number;
+    bytes?: number;
+  }
+  | {
+    event: 'cancel';
+    generationId: string;
+    reason: 'user';
+    outcome: 'accepted' | 'terminal';
+  }
+  | { event: 'producer_lost'; generationId: string; reason: string }
+  | { event: 'redis_degraded'; generationId: string; operation: string }
+  | {
+    event: 'terminal';
+    generationId: string;
+    status: GenerationTerminal['status'];
+    code: string | null;
+  };
+
+export interface ArenaGenerationObserver {
+  observeArenaGeneration(_observation: ArenaGenerationObservation): void;
+}
+
 export type ArenaGenerationActor = {
   actorKey: string;
+  responseHeaders?: Readonly<Record<string, string>>;
 };
 
 export type ArenaGenerationServiceDependencies = {
@@ -161,6 +235,7 @@ export type ArenaGenerationServiceDependencies = {
   deltaFlushIntervalMs?: number;
   deltaFlushBytes?: number;
   terminalStore?: ArenaGenerationTerminalStore;
+  observer?: ArenaGenerationObserver;
 };
 
 export type ArenaGenerationRouteParams = {
@@ -189,6 +264,20 @@ const jsonResponse = (payload: unknown, status: number): Response => new Respons
     },
   },
 );
+
+const withActorHeaders = (
+  response: Response,
+  actor: ArenaGenerationActor,
+): Response => {
+  if (!actor.responseHeaders || Object.keys(actor.responseHeaders).length === 0) return response;
+  const headers = new Headers(response.headers);
+  for (const [name, value] of Object.entries(actor.responseHeaders)) headers.set(name, value);
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+};
 
 const parseCreatePayload = async (
   request: Request,
@@ -234,6 +323,20 @@ export const createArenaGenerationService = (
   const deltaFlushIntervalMs = dependencies.deltaFlushIntervalMs ?? 75;
   const deltaFlushBytes = dependencies.deltaFlushBytes ?? 1_024;
   const activeProducers = new Map<string, ActiveProducer>();
+  const observe = (observation: ArenaGenerationObservation): void => {
+    try {
+      dependencies.observer?.observeArenaGeneration(observation);
+    } catch {
+      // Telemetry must never change generation behavior.
+    }
+  };
+  const encodedBytes = (value: unknown): number => {
+    try {
+      return new TextEncoder().encode(JSON.stringify(value) ?? '').byteLength;
+    } catch {
+      return 0;
+    }
+  };
 
   if (!Number.isFinite(deltaFlushIntervalMs) || deltaFlushIntervalMs < 1) {
     throw new Error('deltaFlushIntervalMs 必须是正有限数字');
@@ -273,19 +376,24 @@ export const createArenaGenerationService = (
       now: string,
       terminalResultRef: string | null = null,
     ): Promise<void> => {
-      await dependencies.store.writeSnapshot({
-        generationId,
-        snapshot: snapshot(status, now, terminalResultRef),
-        now,
-      }).catch(() => undefined);
+      try {
+        await dependencies.store.writeSnapshot({
+          generationId,
+          snapshot: snapshot(status, now, terminalResultRef),
+          now,
+        });
+      } catch {
+        observe({ event: 'redis_degraded', generationId, operation: 'write_snapshot' });
+      }
     };
 
     const append = async (events: GenerationEventInput[], now: string): Promise<void> => {
-      const result = await dependencies.store.appendEvents({
-        generationId,
-        events,
-        now,
-      }).catch(() => null);
+      let result: Awaited<ReturnType<GenerationReplayStore['appendEvents']>> | null = null;
+      try {
+        result = await dependencies.store.appendEvents({ generationId, events, now });
+      } catch {
+        observe({ event: 'redis_degraded', generationId, operation: 'append_events' });
+      }
       lastEventId = result?.events.at(-1)?.id ?? lastEventId;
       await writeSnapshot('running', now);
     };
@@ -373,6 +481,12 @@ export const createArenaGenerationService = (
             now,
           }).catch(() => ({ applied: false }));
           await writeSnapshot(terminal.status, now, terminal.resultRef ?? null);
+          observe({
+            event: 'terminal',
+            generationId,
+            status: terminal.status,
+            code: terminal.code ?? null,
+          });
         });
       },
     });
@@ -389,13 +503,14 @@ export const createArenaGenerationService = (
     const actor = await dependencies.resolveActor(request);
     if (!actor) return jsonResponse({ code: 'UNAUTHORIZED', error: 'Unauthorized' }, 401);
     let state: GenerationReplayStoreState | null;
+    let terminalFallback: ArenaGenerationTerminalRecord | null = null;
     try {
       state = await dependencies.store.readState({
         generationId,
         actorKey: actor.actorKey,
       });
     } catch {
-      const terminalFallback = await dependencies.terminalStore?.readOwnedTerminal({
+      terminalFallback = await dependencies.terminalStore?.readOwnedTerminal({
         generationId,
         actorKey: actor.actorKey,
       }) ?? null;
@@ -408,12 +523,11 @@ export const createArenaGenerationService = (
       state = null;
     }
 
-    let terminalFallback: ArenaGenerationTerminalRecord | null = null;
     if (!state) {
-      terminalFallback = await dependencies.terminalStore?.readOwnedTerminal({
-        generationId,
-        actorKey: actor.actorKey,
-      }) ?? null;
+      terminalFallback ??= await dependencies.terminalStore?.readOwnedTerminal({
+          generationId,
+          actorKey: actor.actorKey,
+        }) ?? null;
       if (!terminalFallback) {
         return jsonResponse({ code: 'GENERATION_NOT_FOUND', error: 'Generation not found' }, 404);
       }
@@ -474,6 +588,11 @@ export const createArenaGenerationService = (
           terminal,
           now,
         }).catch(() => ({ applied: false }));
+        observe({
+          event: 'producer_lost',
+          generationId,
+          reason: 'lease_expired',
+        });
         state = {
           ...state,
           status: 'producer_lost',
@@ -497,24 +616,33 @@ export const createArenaGenerationService = (
       updatedAt: terminal.updatedAt,
       terminalResultRef: terminal.resultRef,
     };
+    const snapshotEvent = encodeGenerationSseEvent({
+      id: '0-0',
+      type: 'snapshot',
+      data: snapshot,
+    });
+    const terminalEvent = encodeGenerationSseEvent({
+      id: '0-1',
+      type: terminal.status === 'failed' || terminal.status === 'producer_lost'
+        ? 'error'
+        : 'done',
+      data: {
+        ok: terminal.status === 'completed',
+        status: terminal.status,
+        ...(terminal.resultRef ? { resultRef: terminal.resultRef } : {}),
+      },
+    });
     const stream = new ReadableStream<Uint8Array>({
       start(controller) {
-        controller.enqueue(encodeGenerationSseEvent({
-          id: '0-0',
-          type: 'snapshot',
-          data: snapshot,
-        }));
-        controller.enqueue(encodeGenerationSseEvent({
-          id: '0-1',
-          type: terminal.status === 'failed' || terminal.status === 'producer_lost'
-            ? 'error'
-            : 'done',
-          data: {
-            ok: terminal.status === 'completed',
-            status: terminal.status,
-            ...(terminal.resultRef ? { resultRef: terminal.resultRef } : {}),
-          },
-        }));
+        controller.enqueue(snapshotEvent);
+        controller.enqueue(terminalEvent);
+        observe({
+          event: 'replay',
+          generationId: terminal.generationId,
+          events: 2,
+          bytes: snapshotEvent.byteLength + terminalEvent.byteLength,
+          snapshotBootstrap: true,
+        });
         controller.close();
       },
     });
@@ -534,6 +662,7 @@ export const createArenaGenerationService = (
     generationId: string,
     generationRequestId: string,
     after: string | null,
+    responseHeaders: Readonly<Record<string, string>> = {},
   ): Response => {
     let cancelled = false;
     let cursor = after;
@@ -561,17 +690,37 @@ export const createArenaGenerationService = (
                   return;
                 }
                 const snapshotCursor = snapshot.lastEventId ?? cursor ?? '0-0';
-                controller.enqueue(encodeGenerationSseEvent({
+                const encoded = encodeGenerationSseEvent({
                   id: snapshotCursor,
                   type: 'snapshot',
                   data: snapshot,
-                }));
+                });
+                controller.enqueue(encoded);
+                observe({
+                  event: 'replay',
+                  generationId,
+                  events: 1,
+                  bytes: encoded.byteLength,
+                  snapshotBootstrap: true,
+                });
                 cursor = snapshot.lastEventId;
               } else {
+                let replayBytes = 0;
                 for (const event of batch.events) {
                   if (cancelled) return;
-                  controller.enqueue(encodeGenerationSseEvent(event));
+                  const encoded = encodeGenerationSseEvent(event);
+                  controller.enqueue(encoded);
+                  replayBytes += encoded.byteLength;
                   cursor = event.id;
+                }
+                if (batch.events.length > 0) {
+                  observe({
+                    event: 'replay',
+                    generationId,
+                    events: batch.events.length,
+                    bytes: replayBytes,
+                    snapshotBootstrap: false,
+                  });
                 }
               }
 
@@ -595,6 +744,7 @@ export const createArenaGenerationService = (
             }
           } catch (error) {
             if (cancelled) return;
+            observe({ event: 'redis_degraded', generationId, operation: 'read_replay' });
             controller.error(error);
           }
         };
@@ -602,17 +752,20 @@ export const createArenaGenerationService = (
       },
       cancel() {
         cancelled = true;
+        observe({ event: 'client_disconnect', generationId });
       },
     });
 
+    const headers = new Headers({
+      'Cache-Control': 'no-cache, no-transform',
+      'Content-Type': 'text/event-stream; charset=utf-8',
+      'X-Mahoshojo-Generation-Id': generationId,
+      'X-Mahoshojo-Generation-Request-Id': generationRequestId,
+    });
+    for (const [name, value] of Object.entries(responseHeaders)) headers.set(name, value);
     return new Response(stream, {
       status: 200,
-      headers: {
-        'Cache-Control': 'no-cache, no-transform',
-        'Content-Type': 'text/event-stream; charset=utf-8',
-        'X-Mahoshojo-Generation-Id': generationId,
-        'X-Mahoshojo-Generation-Request-Id': generationRequestId,
-      },
+      headers,
     });
   };
 
@@ -679,8 +832,21 @@ export const createArenaGenerationService = (
       const actor = await dependencies.resolveActor(request);
       if (!actor) return jsonResponse({ code: 'UNAUTHORIZED', error: 'Unauthorized' }, 401);
 
+      const prepared = dependencies.executor.prepare
+        ? await dependencies.executor.prepare({
+          request,
+          actorKey: actor.actorKey,
+          payload: parsed.payload,
+        })
+        : {
+          executionPayload: parsed.payload,
+          semanticPayload: parsed.payload,
+        };
+      if (prepared instanceof Response) return prepared;
+
       const generationId = dependencies.createGenerationId();
-      const payloadHash = await dependencies.hashPayload(parsed.payload);
+      const inputBytes = encodedBytes(prepared.semanticPayload);
+      const payloadHash = await dependencies.hashPayload(prepared.semanticPayload);
       const now = dependencies.now();
       let reservation: Awaited<ReturnType<GenerationReplayStore['reserve']>>;
       try {
@@ -693,6 +859,8 @@ export const createArenaGenerationService = (
           leaseExpiresAt: addLeaseDuration(now, leaseDurationMs),
         });
       } catch {
+        observe({ event: 'request', generationId, outcome: 'unavailable', inputBytes });
+        observe({ event: 'redis_degraded', generationId, operation: 'reserve' });
         return jsonResponse({
           code: 'GENERATION_RESERVATION_UNAVAILABLE',
           error: '无法确认 generation reservation',
@@ -700,18 +868,25 @@ export const createArenaGenerationService = (
       }
 
       if (reservation.kind === 'conflict') {
+        observe({ event: 'request', generationId, outcome: 'conflict', inputBytes });
         return jsonResponse({
           code: 'GENERATION_REQUEST_CONFLICT',
           error: 'generationRequestId 已用于不同请求',
         }, 409);
       }
+      observe({
+        event: 'request',
+        generationId: reservation.generationId,
+        outcome: reservation.kind,
+        inputBytes,
+      });
       if (reservation.kind === 'created') {
         try {
           await launchProducer({
             generationId: reservation.generationId,
             generationRequestId: parsed.generationRequestId,
             actorKey: actor.actorKey,
-            payload: parsed.payload,
+            payload: prepared.executionPayload,
           });
         } catch {
           await dependencies.store.markTerminal({
@@ -719,35 +894,81 @@ export const createArenaGenerationService = (
             terminal: { status: 'producer_lost', code: 'PRODUCER_OWNERSHIP_UNAVAILABLE' },
             now: dependencies.now().toISOString(),
           }).catch(() => ({ applied: false }));
+          observe({
+            event: 'producer_lost',
+            generationId: reservation.generationId,
+            reason: 'ownership_unavailable',
+          });
           return jsonResponse({
             code: 'GENERATION_OWNERSHIP_UNAVAILABLE',
             error: '无法建立 generation producer ownership',
           }, 503);
         }
       }
-      return createReplayResponse(
-        reservation.generationId,
-        parsed.generationRequestId,
-        null,
+      return withActorHeaders(
+        createReplayResponse(
+          reservation.generationId,
+          parsed.generationRequestId,
+          null,
+          prepared.responseHeaders,
+        ),
+        actor,
       );
     },
 
     async resume(request: Request, params: ArenaGenerationRouteParams): Promise<Response> {
+      const startedAt = Date.now();
+      observe({ event: 'resume', generationId: params.generationId, outcome: 'attempt' });
       const owned = await resolveOwnedState(request, params.generationId);
-      if (owned instanceof Response) return owned;
+      if (owned instanceof Response) {
+        const reason = owned.status === 401
+          ? 'unauthorized'
+          : owned.status === 404
+            ? 'not_found'
+            : owned.status === 503
+              ? 'state_unavailable'
+              : 'unknown';
+        observe({
+          event: 'resume',
+          generationId: params.generationId,
+          outcome: 'failure',
+          reason,
+          latencyMs: Date.now() - startedAt,
+        });
+        return owned;
+      }
       let after: string | null;
       try {
         after = resolveResumeCursor(request);
       } catch {
+        observe({
+          event: 'resume',
+          generationId: params.generationId,
+          outcome: 'failure',
+          reason: 'cursor_conflict',
+          latencyMs: Date.now() - startedAt,
+        });
         return jsonResponse({ code: 'RESUME_CURSOR_CONFLICT', error: '恢复游标冲突' }, 400);
       }
+      observe({
+        event: 'resume',
+        generationId: params.generationId,
+        outcome: 'success',
+        latencyMs: Date.now() - startedAt,
+      });
       if (owned.terminalFallback) {
-        return createTerminalFallbackResponse(owned.terminalFallback);
+        return withActorHeaders(
+          createTerminalFallbackResponse(owned.terminalFallback),
+          owned.actor,
+        );
       }
-      return createReplayResponse(
-        owned.state.generationId,
-        owned.state.generationRequestId,
-        after,
+      return withActorHeaders(
+        createReplayResponse(
+          owned.state.generationId,
+          owned.state.generationRequestId,
+          after,
+        ),
+        owned.actor,
       );
     },
 
@@ -755,7 +976,7 @@ export const createArenaGenerationService = (
       const owned = await resolveOwnedState(request, params.generationId);
       if (owned instanceof Response) return owned;
       const { state } = owned;
-      return jsonResponse({
+      return withActorHeaders(jsonResponse({
         generationId: state.generationId,
         generationRequestId: state.generationRequestId,
         status: state.status,
@@ -763,7 +984,7 @@ export const createArenaGenerationService = (
         lastEventId: state.lastEventId,
         updatedAt: state.updatedAt,
         ...(state.terminal?.resultRef ? { resultRef: state.terminal.resultRef } : {}),
-      }, 200);
+      }, 200), owned.actor);
     },
 
     async cancel(request: Request, params: ArenaGenerationRouteParams): Promise<Response> {
@@ -779,18 +1000,30 @@ export const createArenaGenerationService = (
         return jsonResponse({ code: 'GENERATION_NOT_FOUND', error: 'Generation not found' }, 404);
       }
       if (result.kind === 'terminal') {
-        return jsonResponse({
+        observe({
+          event: 'cancel',
+          generationId: params.generationId,
+          reason: 'user',
+          outcome: 'terminal',
+        });
+        return withActorHeaders(jsonResponse({
           generationId: params.generationId,
           status: result.status,
           cancelled: result.status === 'cancelled',
-        }, 200);
+        }, 200), owned.actor);
       }
+      observe({
+        event: 'cancel',
+        generationId: params.generationId,
+        reason: 'user',
+        outcome: 'accepted',
+      });
       activeProducers.get(params.generationId)?.controller.abort('user');
-      return jsonResponse({
+      return withActorHeaders(jsonResponse({
         generationId: params.generationId,
         status: 'cancelling',
         cancelled: true,
-      }, 202);
+      }, 202), owned.actor);
     },
   };
   return Object.freeze(service);

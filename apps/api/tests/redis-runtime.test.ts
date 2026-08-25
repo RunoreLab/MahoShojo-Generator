@@ -215,6 +215,41 @@ describe('RedisRuntime shutdown', () => {
     }
   });
 
+  it('generation reservation 永久 pending 时有界 fail closed 并记录固定 error 指标', async () => {
+    vi.useFakeTimers();
+    redisClient.eval.mockImplementation(() => new Promise(() => undefined));
+    const observeRedisOperation = vi.fn<RedisRuntimeObserver['observeRedisOperation']>();
+    const redis = new RedisRuntime('redis://example.test:6379', true, {
+      observeRedisOperation,
+      observeRedisServerStats: vi.fn(),
+    }, 100);
+    try {
+      await redis.connect();
+      const reservation = redis.getGenerationReplayStore().reserve({
+        actorKey: 'user:42',
+        generationRequestId: 'request-timeout',
+        generationId: 'generation-timeout',
+        payloadHash: 'payload-hash',
+        now: '2026-08-25T04:00:00.000Z',
+        leaseExpiresAt: '2026-08-25T04:01:00.000Z',
+      });
+      const rejectedReservation = expect(reservation).rejects.toThrow(
+        'REDIS_GENERATION_COMMAND_TIMEOUT',
+      );
+      await vi.advanceTimersByTimeAsync(100);
+
+      await rejectedReservation;
+      expect(redis.getStatus().lastError).toBe('REDIS_GENERATION_COMMAND_TIMEOUT');
+      expect(observeRedisOperation).toHaveBeenCalledWith(expect.objectContaining({
+        operation: 'generation',
+        outcome: 'error',
+      }));
+      expect(JSON.stringify(observeRedisOperation.mock.calls)).not.toMatch(/user:42|payload-hash/u);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('在请求与后台任务 drain 后直接 destroy，避免 close 后无法强制断连', async () => {
     const redis = new RedisRuntime('redis://example.test:6379', true);
     await redis.connect();

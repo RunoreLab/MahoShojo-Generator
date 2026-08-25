@@ -24,7 +24,7 @@ describe('Hono runtime telemetry', () => {
     const snapshot = telemetry.snapshot();
 
     expect(snapshot).toMatchObject({
-      schemaVersion: 2,
+      schemaVersion: 3,
       service: 'mahoshojo-hono',
       runtime: {
         origin: 'hono-node',
@@ -97,6 +97,11 @@ describe('Hono runtime telemetry', () => {
         outcome: 'ok',
         durationMs: 8,
       });
+      telemetry.observeRedisOperation({
+        operation: 'generation',
+        outcome: 'ok',
+        durationMs: 10,
+      });
       telemetry.observeRedisServerStats({
         usedMemoryBytes: 1_024,
         evictedKeys: 2,
@@ -105,7 +110,7 @@ describe('Hono runtime telemetry', () => {
       });
 
       expect(telemetry.snapshot()).toMatchObject({
-        schemaVersion: 2,
+        schemaVersion: 3,
         aiUpstream: {
           attempts: {
             active: 1,
@@ -132,10 +137,16 @@ describe('Hono runtime telemetry', () => {
           rows: { read: 3, written: 1 },
         },
         redis: {
-          commands: 3,
-          outcomes: { ok: 2, error: 1, unavailable: 0 },
-          byOperation: { connect: 1, ping: 1, 'rate-limit': 1, info: 0 },
-          latency: { samples: 3, totalMilliseconds: 18, maxMilliseconds: 8 },
+          commands: 4,
+          outcomes: { ok: 3, error: 1, unavailable: 0 },
+          byOperation: {
+            connect: 1,
+            ping: 1,
+            'rate-limit': 1,
+            generation: 1,
+            info: 0,
+          },
+          latency: { samples: 4, totalMilliseconds: 28, maxMilliseconds: 10 },
           server: {
             status: 'observed',
             usedMemoryBytes: 1_024,
@@ -204,6 +215,94 @@ describe('Hono runtime telemetry', () => {
       outcomes: { ok: 0, error: 0, unavailable: 1 },
       latency: { samples: 0, totalMilliseconds: 0, maxMilliseconds: null },
     });
+  });
+
+  it('聚合 Arena resume/replay/provider/finalization 指标并输出无正文的 terminal audit', () => {
+    const logger = vi.fn();
+    const telemetry = new HonoRuntimeTelemetry({ logger });
+    telemetry.observeArenaGeneration({
+      event: 'request', generationId: 'generation-1', outcome: 'created', inputBytes: 128,
+    });
+    telemetry.observeArenaGeneration({
+      event: 'request', generationId: 'generation-1', outcome: 'reused', inputBytes: 128,
+    });
+    telemetry.observeArenaGeneration({ event: 'client_disconnect', generationId: 'generation-1' });
+    telemetry.observeArenaGeneration({
+      event: 'resume', generationId: 'generation-1', outcome: 'attempt',
+    });
+    telemetry.observeArenaGeneration({
+      event: 'resume', generationId: 'generation-1', outcome: 'success', latencyMs: 12,
+    });
+    telemetry.observeArenaGeneration({
+      event: 'replay', generationId: 'generation-1', events: 3, bytes: 512,
+      snapshotBootstrap: true,
+    });
+    telemetry.observeArenaGeneration({
+      event: 'provider', generationId: 'generation-1', outcome: 'started',
+    });
+    telemetry.observeArenaGeneration({
+      event: 'provider', generationId: 'generation-1', outcome: 'failure', durationMs: 42,
+    });
+    telemetry.observeArenaGeneration({
+      event: 'phase', generationId: 'generation-1', phase: 'finalization',
+      outcome: 'success', durationMs: 9,
+    });
+    telemetry.observeArenaGeneration({
+      event: 'storage', generationId: 'generation-1', storage: 'r2',
+      outcome: 'success', durationMs: 5, bytes: 256,
+    });
+    telemetry.observeArenaGeneration({
+      event: 'terminal', generationId: 'generation-1', status: 'failed', code: 'GENERATION_FAILED',
+    });
+
+    expect(telemetry.snapshot().arenaGeneration).toMatchObject({
+      requests: {
+        created: 1,
+        reused: 1,
+        conflicts: 0,
+        unavailable: 0,
+        secondProviderPreventions: 1,
+        inputBytes: 256,
+      },
+      clientDisconnects: 1,
+      resume: {
+        attempts: 1,
+        successes: 1,
+        failures: { unauthorized: 0, notFound: 0, stateUnavailable: 0, cursorConflict: 0, unknown: 0 },
+        latency: { samples: 1, totalMilliseconds: 12, maxMilliseconds: 12 },
+      },
+      replay: { events: 3, bytes: 512, snapshotBootstraps: 1 },
+      provider: {
+        started: 1,
+        outcomes: { success: 0, failure: 1, cancelled: 0 },
+        duration: { samples: 1, totalMilliseconds: 42, maxMilliseconds: 42 },
+      },
+      phases: {
+        finalization: {
+          outcomes: { success: 1, failure: 0 },
+          duration: { samples: 1, totalMilliseconds: 9, maxMilliseconds: 9 },
+        },
+      },
+      r2: {
+        outcomes: { success: 1, failure: 0 },
+        bytes: 256,
+        latency: { samples: 1, totalMilliseconds: 5, maxMilliseconds: 5 },
+      },
+      terminals: { completed: 0, failed: 1, cancelled: 0, producerLost: 0 },
+    });
+    expect(JSON.parse(String(logger.mock.calls[0]?.[0]))).toMatchObject({
+      event: 'arena.generation.terminal.audit',
+      generationId: 'generation-1',
+      providerStarted: true,
+      subscriberDisconnects: 1,
+      resumeAttempts: 1,
+      snapshotBootstrap: true,
+      secondProviderPrevention: true,
+      terminal: { status: 'failed', code: 'GENERATION_FAILED' },
+      finalization: 'success',
+      r2: 'success',
+    });
+    expect(JSON.stringify(logger.mock.calls)).not.toMatch(/prompt|正文|user:42/u);
   });
 
   it('资源导出先执行 Redis sampler，采样失败则 fail-soft 并继续导出', async () => {

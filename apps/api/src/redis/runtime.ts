@@ -9,7 +9,7 @@ import {
 
 const DEFAULT_REDIS_COMMAND_TIMEOUT_MS = 4_000;
 
-export type RedisRuntimeOperation = 'connect' | 'ping' | 'rate-limit' | 'info';
+export type RedisRuntimeOperation = 'connect' | 'ping' | 'rate-limit' | 'generation' | 'info';
 
 export type RedisRuntimeOperationOutcome = 'ok' | 'error' | 'unavailable';
 
@@ -157,6 +157,33 @@ export class RedisRuntime implements RedisService {
     }
   }
 
+  private async executeGenerationCommand<T>(operation: () => Promise<T>): Promise<T> {
+    if (!this.client?.isReady) {
+      this.observeOperation({ operation: 'generation', outcome: 'unavailable', durationMs: 0 });
+      throw createRedisOperationError('REDIS_GENERATION_REPLAY_UNAVAILABLE');
+    }
+    const startedAt = performance.now();
+    try {
+      const result = await executeWithTimeout(operation, this.commandTimeoutMs);
+      this.observeOperation({
+        operation: 'generation',
+        outcome: 'ok',
+        durationMs: Math.max(0, performance.now() - startedAt),
+      });
+      return result;
+    } catch (error) {
+      this.lastError = error instanceof Error && error.message === 'REDIS_COMMAND_TIMEOUT'
+        ? 'REDIS_GENERATION_COMMAND_TIMEOUT'
+        : 'REDIS_GENERATION_COMMAND_FAILED';
+      this.observeOperation({
+        operation: 'generation',
+        outcome: 'error',
+        durationMs: Math.max(0, performance.now() - startedAt),
+      });
+      throw createRedisOperationError(this.lastError);
+    }
+  }
+
   async connect(): Promise<void> {
     if (!this.redisUrl || this.client) return;
 
@@ -203,12 +230,23 @@ export class RedisRuntime implements RedisService {
 
   getGenerationReplayStore(): GenerationReplayStore {
     this.generationReplayStore ??= createRedisGenerationReplayStore({
-      getClient: () => {
-        if (!this.client?.isReady) {
-          throw createRedisOperationError('REDIS_GENERATION_REPLAY_UNAVAILABLE');
-        }
-        return this.client as unknown as RedisGenerationClient;
-      },
+      getClient: () => ({
+        eval: (script, options) => this.executeGenerationCommand(async () => {
+          const client = this.client;
+          if (!client?.isReady) throw new Error('REDIS_GENERATION_REPLAY_UNAVAILABLE');
+          return client.eval(script, options);
+        }),
+        get: (key) => this.executeGenerationCommand(async () => {
+          const client = this.client;
+          if (!client?.isReady) throw new Error('REDIS_GENERATION_REPLAY_UNAVAILABLE');
+          return client.get(key);
+        }),
+        xRead: (streams, options) => this.executeGenerationCommand(async () => {
+          const client = this.client;
+          if (!client?.isReady) throw new Error('REDIS_GENERATION_REPLAY_UNAVAILABLE');
+          return client.xRead(streams, options) as unknown as ReturnType<RedisGenerationClient['xRead']>;
+        }),
+      }),
     });
     return this.generationReplayStore;
   }
