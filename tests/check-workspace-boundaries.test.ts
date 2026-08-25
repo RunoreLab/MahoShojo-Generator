@@ -51,6 +51,50 @@ describe('workspace dependency boundaries', () => {
     expect(checkWorkspaceBoundaries(rootDir)).toEqual([]);
   });
 
+  it('rejects root tooling imports into app source through every supported resolution form', async () => {
+    const rootDir = await createWorkspaceFixture({
+      'apps/web/package.json': manifest('@mahoshojo/web'),
+      'apps/web/lib/runtime.ts': 'export const value = 1;\n',
+      'eslint.config.mjs': "export { value } from 'apps/web/lib/runtime';\n",
+      'scripts/alias-import.ts': "export { value } from '@/lib/runtime';\n",
+      'tests/relative-import.ts': "export { value } from '../apps/web/lib/runtime';\n",
+      'tsconfig.json': JSON.stringify({ compilerOptions: { paths: { '@/*': ['apps/web/*'] } } }),
+      'vitest.config.ts': "export { value } from '@mahoshojo/web';\n",
+    });
+
+    const violations = checkWorkspaceBoundaries(rootDir).filter(
+      (violation) => violation.rule === 'MONO-001-ROOT-APP-IMPORT',
+    );
+
+    expect(violations).toHaveLength(4);
+    expect(violations.map((violation) => violation.module)).toEqual([
+      'apps/web/lib/runtime',
+      '@/lib/runtime',
+      '../apps/web/lib/runtime',
+      '@mahoshojo/web',
+    ]);
+  });
+
+  it('allows root data paths and imports through workspace package exports', async () => {
+    const rootDir = await createWorkspaceFixture({
+      'apps/web/package.json': manifest('@mahoshojo/web'),
+      'apps/web/lib/db/schema/index.ts': 'export const schema = {};\n',
+      'drizzle.config.ts': [
+        "import { defineConfig } from 'drizzle-kit';",
+        "export default defineConfig({ schema: './apps/web/lib/db/schema/**/*.ts' });",
+      ].join('\n'),
+      'packages/config/package.json': manifest('@mahoshojo/config'),
+      'packages/config/src/index.ts': 'export const value = 1;\n',
+      'scripts/repository-tool.ts': "export { value } from '@mahoshojo/config';\n",
+    });
+
+    const violations = checkWorkspaceBoundaries(rootDir).filter(
+      (violation) => violation.rule === 'MONO-001-ROOT-APP-IMPORT',
+    );
+
+    expect(violations).toEqual([]);
+  });
+
   it('rejects package imports into apps through relative paths and root aliases', async () => {
     const rootDir = await createWorkspaceFixture({
       'apps/web/src/index.ts': 'export const value = 1;\n',

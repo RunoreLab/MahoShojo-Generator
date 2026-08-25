@@ -5,6 +5,7 @@ import parser from '@typescript-eslint/parser';
 
 const SOURCE_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.mts', '.cts']);
 const IGNORED_DIRECTORIES = new Set(['.git', '.next', '.open-next', 'build', 'coverage', 'dist', 'node_modules', 'out']);
+const ROOT_TOOLING_DIRECTORIES = ['scripts', 'tests'];
 const CLIENT_PACKAGE_NAMES = new Set(['ai-direct', 'local-library', 'cloud-client', 'ui-web']);
 const REQUIRED_WORKSPACE_SCRIPTS = ['test', 'lint', 'build'];
 const LEGACY_ROOT_APP_DIRECTORIES = new Set([
@@ -134,6 +135,17 @@ function discoverUnits(rootDirectory, kind) {
         sourceFiles: collectSourceFiles(directory),
       };
     });
+}
+
+function collectRootToolingSourceFiles(rootDirectory) {
+  const rootConfigFiles = readdirSync(rootDirectory, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && SOURCE_EXTENSIONS.has(path.extname(entry.name)))
+    .map((entry) => path.join(rootDirectory, entry.name));
+  const toolingFiles = ROOT_TOOLING_DIRECTORIES.flatMap((directory) => (
+    collectSourceFiles(path.join(rootDirectory, directory))
+  ));
+
+  return [...new Set([...rootConfigFiles, ...toolingFiles])].sort();
 }
 
 function isWithin(targetPath, parentDirectory) {
@@ -391,6 +403,36 @@ function appTargetFromSpecifier(rootDirectory, moduleSpecifier, apps) {
   return matchingApp ? () => matchingApp : () => null;
 }
 
+function rootAliasTargetFromSpecifier(rootDirectory, moduleSpecifier, aliases) {
+  if (!aliases || typeof aliases !== 'object') return null;
+
+  for (const [aliasPattern, targets] of Object.entries(aliases)) {
+    if (!Array.isArray(targets) || typeof targets[0] !== 'string') continue;
+    const starIndex = aliasPattern.indexOf('*');
+    if (starIndex < 0) {
+      if (moduleSpecifier === aliasPattern) return path.resolve(rootDirectory, targets[0]);
+      continue;
+    }
+
+    const prefix = aliasPattern.slice(0, starIndex);
+    const suffix = aliasPattern.slice(starIndex + 1);
+    if (!moduleSpecifier.startsWith(prefix) || !moduleSpecifier.endsWith(suffix)) continue;
+    const wildcard = moduleSpecifier.slice(prefix.length, moduleSpecifier.length - suffix.length);
+    return path.resolve(rootDirectory, targets[0].replace('*', wildcard));
+  }
+
+  return null;
+}
+
+function rootToolingAppTargetFromSpecifier(rootDirectory, filePath, moduleSpecifier, apps, aliases) {
+  const aliasTarget = rootAliasTargetFromSpecifier(rootDirectory, moduleSpecifier, aliases);
+  if (aliasTarget) {
+    return apps.find((app) => isWithin(aliasTarget, app.directory)) ?? null;
+  }
+
+  return appTargetFromSpecifier(rootDirectory, moduleSpecifier, apps)(filePath);
+}
+
 function packageTargetFromSpecifier(moduleSpecifier, packages) {
   return packages
     .filter((pkg) => moduleSpecifier === pkg.name || moduleSpecifier.startsWith(`${pkg.name}/`))
@@ -555,6 +597,7 @@ export function checkWorkspaceBoundaries(rootDirectory = process.cwd()) {
   const apps = discoverUnits(normalizedRoot, 'apps');
   const packages = discoverUnits(normalizedRoot, 'packages');
   const units = [...apps, ...packages];
+  const rootAliases = readManifest(path.join(normalizedRoot, 'tsconfig.json'))?.compilerOptions?.paths;
   const violations = [];
   for (const unit of units) {
     if (!unit.manifest || !unit.packageJsonPath) continue;
@@ -579,6 +622,43 @@ export function checkWorkspaceBoundaries(rootDirectory = process.cwd()) {
         pkg.packageJsonPath ?? pkg.directory,
         pkg.name,
         'workspace package must declare an explicit exports map',
+      );
+    }
+  }
+
+  for (const sourceFile of collectRootToolingSourceFiles(normalizedRoot)) {
+    let imports;
+    try {
+      ({ imports } = collectSourceDependencies(readFileSync(sourceFile, 'utf8'), sourceFile));
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      addViolation(
+        violations,
+        'MONO-001-ROOT-TOOLING-PARSE',
+        sourceFile,
+        '<parse>',
+        `cannot parse repository tooling source: ${reason}`,
+      );
+      continue;
+    }
+
+    for (const { module: moduleSpecifier, line } of imports) {
+      const appTarget = rootToolingAppTargetFromSpecifier(
+        normalizedRoot,
+        sourceFile,
+        moduleSpecifier,
+        apps,
+        rootAliases,
+      );
+      if (!appTarget) continue;
+
+      addViolation(
+        violations,
+        'MONO-001-ROOT-APP-IMPORT',
+        sourceFile,
+        moduleSpecifier,
+        `repository tooling must not import app ${appTarget.name} source`,
+        line,
       );
     }
   }
