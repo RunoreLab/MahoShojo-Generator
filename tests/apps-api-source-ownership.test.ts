@@ -52,6 +52,7 @@ describe('apps/api source ownership', () => {
     };
     expect(Object.keys(manifest.dependencies ?? {}).sort()).toEqual([
       '@hono/node-server',
+      '@mahoshojo/hosted-api',
       '@mahoshojo/hosted-runtime',
       'dotenv',
       'hono',

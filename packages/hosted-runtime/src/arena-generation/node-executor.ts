@@ -207,14 +207,14 @@ const normalizeLegacyPayloadDefaults = (payload: Record<string, unknown>): void 
         const entry = value as Record<string, unknown>;
         const content = readString(entry.content);
         if (!content) return [];
-        const createdAt = readString(entry.createdAt) || readString(entry.created_at)
+        const createdAt = readString(entry.createdAt) || readString(entry['created_at'])
           || new Date(0).toISOString();
         return [{
           ...entry,
           title: readString(entry.title) || '未命名战报',
           content,
           createdAt,
-          updatedAt: readString(entry.updatedAt) || readString(entry.updated_at) || createdAt,
+          updatedAt: readString(entry.updatedAt) || readString(entry['updated_at']) || createdAt,
         }];
       }).sort((left, right) => Date.parse(left.createdAt) - Date.parse(right.createdAt))
       : [];

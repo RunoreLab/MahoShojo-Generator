@@ -534,10 +534,10 @@ export const formatNarrativeHistoryForPrompt = (history: ArenaPromptNarrativeHis
             const content = typeof entry?.content === 'string' ? entry.content.trim() : '';
             const createdAt = typeof (entry as any)?.createdAt === 'string'
                 ? (entry as any).createdAt
-                : (typeof (entry as any)?.created_at === 'string' ? (entry as any).created_at : '');
+                : (typeof (entry as any)?.['created_at'] === 'string' ? (entry as any)['created_at'] : '');
             const updatedAt = typeof (entry as any)?.updatedAt === 'string'
                 ? (entry as any).updatedAt
-                : (typeof (entry as any)?.updated_at === 'string' ? (entry as any).updated_at : '');
+                : (typeof (entry as any)?.['updated_at'] === 'string' ? (entry as any)['updated_at'] : '');
             if (!content) return null;
             return {
                 title: title || '未命名战报',

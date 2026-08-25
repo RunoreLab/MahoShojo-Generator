@@ -25,7 +25,6 @@ import {
   isStrictEligible,
   parseCombatantEntity,
   parseGenerationCombatantsFallback,
-  settleArenaRatingsForGeneration,
   type ArenaEntity,
   type ArenaEligibilitySnapshot,
 } from '@/lib/database/arena-ratings';
@@ -309,11 +308,6 @@ async function handler(req: NextRequest, options: HandlerOptions = {}) {
     if (!db) {
       return buildApiResponse({ success: false, generationId, error: '数据库绑定不可用，请检查 Cloudflare D1 配置' }, 503);
     }
-
-    // Hono finalization uses an authenticated bridge, but a transient bridge
-    // failure must remain repairable. Rating event ids are generation-scoped,
-    // so this public read is a safe idempotent reconciliation point.
-    if (!isInternalRead) await settleArenaRatingsForGeneration(generationId);
 
     const snapshot = await getArenaEligibilitySnapshotByGenerationId(generationId);
     if (!snapshot) {

@@ -448,8 +448,8 @@ LIMIT 1
         : null;
     const requestId = stringOf(extra?.generationRequestId);
     if (!status || !requestId) return null;
-    const r2Key = stringOf(row.r2_key);
-    let markdown = stringOf(row.output_preview) ?? '';
+    const r2Key = stringOf(row['r2_key']);
+    let markdown = stringOf(row['output_preview']) ?? '';
     if (r2Key && options.objectStore) {
       markdown = await options.objectStore.getText(r2Key).catch(() => markdown);
     }
@@ -457,7 +457,7 @@ LIMIT 1
       generationId: input.generationId,
       generationRequestId: requestId,
       status,
-      updatedAt: stringOf(row.updated_at) ?? new Date(0).toISOString(),
+      updatedAt: stringOf(row['updated_at']) ?? new Date(0).toISOString(),
       resultRef: stringOf(extra?.resultRef),
       markdown,
       reasoning: '',
