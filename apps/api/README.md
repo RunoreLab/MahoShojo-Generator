@@ -15,10 +15,11 @@ Phase 2.5C 建立的 10 条 shared-service route包括 `generate-magical-girl`�
 `generate-game-card`、Free generate/stream、Scenario generate/stream，以及 G25B-2 收口的 Creator、残兽
 generate/stream。Hono 从 `apps/api/src/adapters/*` 加载这些 adapter，不再动态导入对应 Next route；Next wrapper
 继续保留，两个 runtime 使用同一默认 service composition，业务顺序与错误 wire 由
-`@mahoshojo/hosted-api` 负责。G25R 又让 `arena/generate-stream` 与 generation stream/status/cancel 三条控制面
+`@mahoshojo/hosted-api` 负责。G25R 又让 `arena/generate-stream` 与 generation request lookup/stream/status/cancel 四条控制面
 通过 server-owned lifecycle 精确进入 shared manifest；稳定逻辑入口为：
 
 - `POST /api/arena/generate-stream`；
+- `GET /api/arena/generation-requests/:generationRequestId`；
 - `GET /api/arena/generations/:generationId/stream`；
 - `GET /api/arena/generations/:generationId`；
 - `POST /api/arena/generations/:generationId/cancel`。
@@ -29,7 +30,7 @@ D1 claim 与确定性 R2 snapshot 兜底，只有显式 cancel 才中止 generat
 14 条 capability 从 Hono 执行清单退出；G25R 只让 `arena/generate-stream` 精确 re-entry，当前仍有 13 条对应
 Next 公开 route 保持原有实现、wire、鉴权和数据语义，未来若要重新进入 Hono，必须先形成 shared seam 和
 副作用/replay 证据。生成器在 `legacyRouteIds` 非空时 fail closed，生成的 registry 也不再拥有动态导入
-legacy Next handler 的 adapter 类型或代码路径。当前 registry 为 `14 shared-service / 13 exited / 0 legacy-next`；
+legacy Next handler 的 adapter 类型或代码路径。当前 registry 为 `15 shared-service / 13 exited / 0 legacy-next`；
 Hono source、manifest、测试、生成器和 bundle 构建已由 `apps/api` 独占。生成后的实际 registry 为
 `apps/api/src/generated/routes.ts`，不得手工修改。
 

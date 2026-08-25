@@ -209,7 +209,8 @@ class MemoryReplayStore implements GenerationReplayStore {
   }
 
   async readState(input: Parameters<GenerationReplayStore['readState']>[0]) {
-    return this.states.get(input.generationId) ?? null;
+    const state = this.states.get(input.generationId) ?? null;
+    return !state || (input.actorKey && state.actorKey !== input.actorKey) ? null : state;
   }
 
   async requestCancel(input: Parameters<GenerationReplayStore['requestCancel']>[0]) {
@@ -256,6 +257,7 @@ const createService = (
     now?: () => Date;
     terminalStore?: ArenaGenerationTerminalStore;
     authenticated?: boolean;
+    actorKey?: string;
     actorResponseHeaders?: Record<string, string>;
     observer?: { observeArenaGeneration(_observation: unknown): void };
   } = {},
@@ -263,7 +265,7 @@ const createService = (
   store,
   executor,
   resolveActor: async () => options.authenticated === false ? null : ({
-    actorKey: 'user:42',
+    actorKey: options.actorKey ?? 'user:42',
     responseHeaders: options.actorResponseHeaders,
   }),
   deriveGenerationId: async () => 'generation-1',
@@ -317,6 +319,60 @@ describe('Arena generation lifecycle service', () => {
     release();
     await readResponseText(first);
     await readResponseText(second);
+  });
+
+  test('looks up an actor-owned generation by stable request id', async () => {
+    const store = new MemoryReplayStore();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const service = createService(store, {
+      execute: vi.fn(async () => {
+        await gate;
+        return { status: 'completed' as const };
+      }),
+    }, {
+      actorResponseHeaders: { 'X-Mahoshojo-Generation-Actor-Token': 'signed-token' },
+    });
+    const created = await service.create(createRequest('request-lookup'));
+
+    const lookedUp = await service.lookup(new Request(
+      'https://example.test/api/arena/generation-requests/request-lookup',
+    ), { generationRequestId: 'request-lookup' });
+
+    expect(lookedUp.status).toBe(200);
+    expect(lookedUp.headers.get('x-mahoshojo-generation-actor-token')).toBe('signed-token');
+    expect(await lookedUp.json()).toMatchObject({
+      generationId: 'generation-1',
+      generationRequestId: 'request-lookup',
+      status: expect.stringMatching(/^(reserved|running)$/u),
+      resumable: true,
+    });
+    release();
+    await created.text();
+  });
+
+  test('validates and actor-scopes request-id lookup', async () => {
+    const store = new MemoryReplayStore();
+    const ownerService = createService(store, {
+      execute: vi.fn(async () => ({ status: 'completed' as const })),
+    });
+    const created = await ownerService.create(createRequest('request-lookup'));
+    await created.text();
+
+    const invalid = await ownerService.lookup(new Request(
+      'https://example.test/api/arena/generation-requests/short',
+    ), { generationRequestId: 'short' });
+    const otherActorService = createService(store, {
+      execute: vi.fn(async () => ({ status: 'completed' as const })),
+    }, { actorKey: 'user:other' });
+    const hidden = await otherActorService.lookup(new Request(
+      'https://example.test/api/arena/generation-requests/request-lookup',
+    ), { generationRequestId: 'request-lookup' });
+
+    expect(invalid.status).toBe(400);
+    expect(await invalid.json()).toMatchObject({ code: 'GENERATION_REQUEST_ID_INVALID' });
+    expect(hidden.status).toBe(404);
+    expect(await hidden.json()).toMatchObject({ code: 'GENERATION_REQUEST_NOT_FOUND' });
   });
 
   test('reports bounded resume lifecycle telemetry without actor or payload data', async () => {

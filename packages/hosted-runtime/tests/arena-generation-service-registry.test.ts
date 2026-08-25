@@ -17,9 +17,11 @@ describe('Arena generation service registry', () => {
   it('delegates every route to one configured business service', async () => {
     const response = new Response('ok');
     const create = vi.fn(async () => response);
+    const lookup = vi.fn(async () => response);
     configureArenaGenerationService({
       create,
       cancelRequest: vi.fn(async () => response),
+      lookup,
       resume: vi.fn(async () => response),
       status: vi.fn(async () => response),
       cancel: vi.fn(async () => response),
@@ -28,5 +30,12 @@ describe('Arena generation service registry', () => {
       new Request('https://example.test'),
     )).resolves.toBe(response);
     expect(create).toHaveBeenCalledTimes(1);
+    await expect(registeredArenaGenerationService.lookup(
+      new Request('https://example.test'),
+      { generationRequestId: 'request-1' },
+    )).resolves.toBe(response);
+    expect(lookup).toHaveBeenCalledWith(expect.any(Request), {
+      generationRequestId: 'request-1',
+    });
   });
 });

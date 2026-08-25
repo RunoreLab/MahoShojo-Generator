@@ -15,6 +15,12 @@ export const routeDefinitions: RouteDefinition[] = [
     load: () => import("../adapters/arena/generations/[generationId]/stream") as unknown as Promise<RouteModule>,
   },
   {
+    id: "arena/generation-requests/[generationRequestId]",
+    pattern: "/api/arena/generation-requests/:generationRequestId",
+    adapter: "shared-service",
+    load: () => import("../adapters/arena/generation-requests/[generationRequestId]") as unknown as Promise<RouteModule>,
+  },
+  {
     id: "arena/generations/[generationId]",
     pattern: "/api/arena/generations/:generationId",
     adapter: "shared-service",

@@ -360,9 +360,17 @@ export type ArenaGenerationRouteParams = {
   generationId: string;
 };
 
+export type ArenaGenerationRequestRouteParams = {
+  generationRequestId: string;
+};
+
 export interface ArenaGenerationService {
   create(_request: Request): Promise<Response>;
   cancelRequest(_request: Request): Promise<Response>;
+  lookup(
+    _request: Request,
+    _params: ArenaGenerationRequestRouteParams,
+  ): Promise<Response>;
   resume(_request: Request, _params: ArenaGenerationRouteParams): Promise<Response>;
   status(_request: Request, _params: ArenaGenerationRouteParams): Promise<Response>;
   cancel(_request: Request, _params: ArenaGenerationRouteParams): Promise<Response>;
@@ -397,6 +405,10 @@ const withActorHeaders = (
     headers,
   });
 };
+
+const isGenerationRequestId = (value: string): boolean => (
+  /^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/u.test(value)
+);
 
 const invalidCancelReasonResponse = (): Response => jsonResponse({
   code: 'GENERATION_CANCEL_REASON_INVALID',
@@ -518,7 +530,7 @@ const parseCreatePayload = async (
   const generationRequestId = typeof payload.generationRequestId === 'string'
     ? payload.generationRequestId.trim()
     : '';
-  if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/u.test(generationRequestId)) {
+  if (!isGenerationRequestId(generationRequestId)) {
     return jsonResponse({
       code: 'INVALID_GENERATION_REQUEST_ID',
       error: 'generationRequestId 无效',
@@ -877,16 +889,14 @@ export const createArenaGenerationService = (
     };
   };
 
-  const resolveOwnedState = async (
-    request: Request,
+  const resolveOwnedStateForActor = async (
+    actor: ArenaGenerationActor,
     generationId: string,
   ): Promise<{
     actor: ArenaGenerationActor;
     state: GenerationReplayStoreState;
     terminalFallback: ArenaGenerationTerminalRecord | null;
   } | Response> => {
-    const actor = await dependencies.resolveActor(request);
-    if (!actor) return jsonResponse({ code: 'UNAUTHORIZED', error: 'Unauthorized' }, 401);
     let state: GenerationReplayStoreState | null;
     let terminalFallback: ArenaGenerationTerminalRecord | null = null;
     try {
@@ -961,6 +971,34 @@ export const createArenaGenerationService = (
     if (terminalFallback) return { actor, state, terminalFallback };
     return reconcileOwnedActiveState(actor, state);
   };
+
+  const resolveOwnedState = async (
+    request: Request,
+    generationId: string,
+  ): Promise<{
+    actor: ArenaGenerationActor;
+    state: GenerationReplayStoreState;
+    terminalFallback: ArenaGenerationTerminalRecord | null;
+  } | Response> => {
+    const actor = await dependencies.resolveActor(request);
+    if (!actor) return jsonResponse({ code: 'UNAUTHORIZED', error: 'Unauthorized' }, 401);
+    return resolveOwnedStateForActor(actor, generationId);
+  };
+
+  const createStatusResponse = (
+    state: GenerationReplayStoreState,
+    actor: ArenaGenerationActor,
+  ): Response => withActorHeaders(jsonResponse({
+    generationId: state.generationId,
+    generationRequestId: state.generationRequestId,
+    status: state.status,
+    resumable: state.status === 'reserved'
+      || state.status === 'running'
+      || state.status === 'finalizing',
+    lastEventId: state.lastEventId,
+    updatedAt: state.updatedAt,
+    ...(state.terminal?.resultRef ? { resultRef: state.terminal.resultRef } : {}),
+  }, 200), actor);
 
   const createTerminalFallbackResponse = (
     terminal: ArenaGenerationTerminalRecord,
@@ -1627,7 +1665,7 @@ export const createArenaGenerationService = (
         : null;
       if (
         typeof generationRequestId !== 'string'
-        || !/^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/u.test(generationRequestId)
+        || !isGenerationRequestId(generationRequestId)
       ) {
         return jsonResponse({
           code: 'GENERATION_REQUEST_ID_INVALID',
@@ -1703,6 +1741,39 @@ export const createArenaGenerationService = (
       }, 200), actor);
     },
 
+    async lookup(
+      request: Request,
+      params: ArenaGenerationRequestRouteParams,
+    ): Promise<Response> {
+      const actor = await dependencies.resolveActor(request);
+      if (!actor) return jsonResponse({ code: 'UNAUTHORIZED', error: 'Unauthorized' }, 401);
+      if (!isGenerationRequestId(params.generationRequestId)) {
+        return jsonResponse({
+          code: 'GENERATION_REQUEST_ID_INVALID',
+          error: 'generationRequestId is invalid',
+        }, 400);
+      }
+      const generationId = await dependencies.deriveGenerationId({
+        actorKey: actor.actorKey,
+        generationRequestId: params.generationRequestId,
+      });
+      const owned = await resolveOwnedStateForActor(actor, generationId);
+      if (owned instanceof Response) {
+        if (owned.status !== 404) return owned;
+        return jsonResponse({
+          code: 'GENERATION_REQUEST_NOT_FOUND',
+          error: 'Generation request not found',
+        }, 404);
+      }
+      if (owned.state.generationRequestId !== params.generationRequestId) {
+        return jsonResponse({
+          code: 'GENERATION_REQUEST_NOT_FOUND',
+          error: 'Generation request not found',
+        }, 404);
+      }
+      return createStatusResponse(owned.state, owned.actor);
+    },
+
     async resume(request: Request, params: ArenaGenerationRouteParams): Promise<Response> {
       const startedAt = Date.now();
       observe({ event: 'resume', generationId: params.generationId, outcome: 'attempt' });
@@ -1763,18 +1834,7 @@ export const createArenaGenerationService = (
     async status(request: Request, params: ArenaGenerationRouteParams): Promise<Response> {
       const owned = await resolveOwnedState(request, params.generationId);
       if (owned instanceof Response) return owned;
-      const { state } = owned;
-      return withActorHeaders(jsonResponse({
-        generationId: state.generationId,
-        generationRequestId: state.generationRequestId,
-        status: state.status,
-        resumable: state.status === 'reserved'
-          || state.status === 'running'
-          || state.status === 'finalizing',
-        lastEventId: state.lastEventId,
-        updatedAt: state.updatedAt,
-        ...(state.terminal?.resultRef ? { resultRef: state.terminal.resultRef } : {}),
-      }, 200), owned.actor);
+      return createStatusResponse(owned.state, owned.actor);
     },
 
     async cancel(request: Request, params: ArenaGenerationRouteParams): Promise<Response> {

@@ -17,6 +17,7 @@
   "legacyRouteIds": [],
   "sharedRouteIds": [
     "arena/generate-stream",
+    "arena/generation-requests/[generationRequestId]",
     "arena/generations/[generationId]/cancel",
     "arena/generations/[generationId]",
     "arena/generations/[generationId]/stream",

@@ -1,4 +1,5 @@
 import type {
+  ArenaGenerationRequestRouteParams,
   ArenaGenerationRouteParams,
   ArenaGenerationService,
 } from '@mahoshojo/hosted-api/arena-generation/service';
@@ -28,6 +29,9 @@ export const registeredArenaGenerationService: ArenaGenerationService = Object.f
   ),
   cancelRequest: (request: Request) => (
     configuredService?.cancelRequest(request) ?? Promise.resolve(unavailable())
+  ),
+  lookup: (request: Request, params: ArenaGenerationRequestRouteParams) => (
+    configuredService?.lookup(request, params) ?? Promise.resolve(unavailable())
   ),
   resume: (request: Request, params: ArenaGenerationRouteParams) => (
     configuredService?.resume(request, params) ?? Promise.resolve(unavailable())

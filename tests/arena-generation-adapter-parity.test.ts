@@ -6,6 +6,7 @@ const root = process.cwd();
 
 const routes = [
   { route: 'generate-stream', method: 'create' },
+  { route: 'generation-requests/[generationRequestId]', method: 'lookup' },
   { route: 'generations/[generationId]/stream', method: 'resume' },
   { route: 'generations/[generationId]', method: 'status' },
   { route: 'generations/[generationId]/cancel', method: 'cancel' },

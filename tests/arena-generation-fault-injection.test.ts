@@ -255,12 +255,19 @@ const createServiceBridge = (
   const fetcher = async (url: string, init?: RequestInit): Promise<Response> => {
     const target = new URL(url, 'https://example.test');
     const method = init?.method ?? 'GET';
+    const requestLookupMatch = target.pathname.match(
+      /\/api\/arena\/generation-requests\/([^/]+)$/u,
+    );
     const generationMatch = target.pathname.match(/\/api\/arena\/generations\/([^/]+)(?:\/(stream|cancel))?$/u);
     let response: Response;
     let replay = false;
     if (method === 'DELETE') {
       observation.cancelAttempts += 1;
       response = await service.cancelRequest(new Request(target, init));
+    } else if (requestLookupMatch) {
+      response = await service.lookup(new Request(target, init), {
+        generationRequestId: decodeURIComponent(requestLookupMatch[1]!),
+      });
     } else if (generationMatch?.[2] === 'cancel') {
       observation.cancelAttempts += 1;
       response = await service.cancel(new Request(target, init), {
@@ -519,15 +526,23 @@ describe.sequential('Arena resumable generation fault-injection matrix', () => {
       const { service, provider } = createHarness({ ports: successfulPorts(counts) });
       const bridge = createServiceBridge(service, { lostHeaders: 1 });
       const storage = new MemoryStorage();
+      let hideInitialLookup = true;
+      const beforeRefresh = async (url: string, init?: RequestInit): Promise<Response> => {
+        if (hideInitialLookup && url.includes('/generation-requests/')) {
+          hideInitialLookup = false;
+          return new Response(null, { status: 404 });
+        }
+        return bridge.fetcher(url, init);
+      };
       await expect(openArenaGenerationStream({
         endpoint: '/api/arena/generate-stream',
         body,
         headers: {},
-        fetcher: bridge.fetcher,
+        fetcher: beforeRefresh,
         storage,
         generationRequestId: 'fault-web-refresh-003',
         maxReconnectAttempts: 0,
-      })).rejects.toThrow('response headers lost');
+      })).rejects.toThrow('ARENA_GENERATION_STATE_UNKNOWN');
       const refreshed = await open(bridge, storage, 'ignored-after-refresh');
       expect(await refreshed.text()).toContain('event: done');
       const evidence = completedEvidence({
@@ -539,7 +554,7 @@ describe.sequential('Arena resumable generation fault-injection matrix', () => {
         bridge,
       });
       expect(new Set(bridge.observation.generationRequestIds)).toEqual(new Set(['fault-web-refresh-003']));
-      expect(evidence).toMatchObject({ providerStarts: 1, createAttempts: 2 });
+      expect(evidence).toMatchObject({ providerStarts: 1, createAttempts: 1 });
     }
 
     {
@@ -557,7 +572,7 @@ describe.sequential('Arena resumable generation fault-injection matrix', () => {
         bridge,
       });
       expect(new Set(bridge.observation.generationRequestIds)).toEqual(new Set(['fault-web-header-loss-004']));
-      expect(evidence).toMatchObject({ providerStarts: 1, createAttempts: 2, disconnects: 1 });
+      expect(evidence).toMatchObject({ providerStarts: 1, createAttempts: 1, disconnects: 1 });
     }
 
     {

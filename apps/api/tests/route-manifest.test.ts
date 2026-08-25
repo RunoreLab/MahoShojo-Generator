@@ -23,9 +23,10 @@ const EXITED_ROUTE_IDS = [
 ] as const;
 
 describe('Hono route manifest', () => {
-  it('只挂载已经脱离 legacy Next import 的十四条 shared capability', () => {
+  it('只挂载已经脱离 legacy Next import 的十五条 shared capability', () => {
     expect(routeDefinitions.map((route) => route.id).sort()).toEqual([
       'arena/generate-stream',
+      'arena/generation-requests/[generationRequestId]',
       'arena/generations/[generationId]',
       'arena/generations/[generationId]/cancel',
       'arena/generations/[generationId]/stream',
@@ -40,7 +41,7 @@ describe('Hono route manifest', () => {
       'generate-scenario',
       'generate-scenario-stream',
     ]);
-    expect(routeDefinitions).toHaveLength(14);
+    expect(routeDefinitions).toHaveLength(15);
     expect(routeDefinitions.some((route) => route.pattern === '/api/auth/*')).toBe(false);
     expect(routeDefinitions.some((route) => route.pattern.startsWith('/api/pvp/'))).toBe(false);
   });
@@ -49,6 +50,7 @@ describe('Hono route manifest', () => {
     const sharedDefinitions = routeDefinitions.filter((route) => route.adapter === 'shared-service');
     expect(sharedDefinitions.map((route) => route.id).sort()).toEqual([
       'arena/generate-stream',
+      'arena/generation-requests/[generationRequestId]',
       'arena/generations/[generationId]',
       'arena/generations/[generationId]/cancel',
       'arena/generations/[generationId]/stream',
@@ -73,7 +75,7 @@ describe('Hono route manifest', () => {
     };
     expect(routeInventory.exitedRouteIds).toEqual(EXITED_ROUTE_IDS);
     expect(routeInventory.legacyRouteIds).toEqual([]);
-    expect(routeInventory.sharedRouteIds?.length).toBe(14);
+    expect(routeInventory.sharedRouteIds?.length).toBe(15);
 
     for (const definition of sharedDefinitions) {
       const routeModule = await definition.load();

@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocked = vi.hoisted(() => ({
   create: vi.fn(),
   cancelRequest: vi.fn(),
+  lookup: vi.fn(),
   resume: vi.fn(),
   status: vi.fn(),
   cancel: vi.fn(),
@@ -13,6 +14,7 @@ vi.mock('@/app/api/arena/generation-runtime', () => ({
 }));
 
 import { appRouteHandler as create } from '@/app/api/arena/generate-stream/handler';
+import { appRouteHandler as lookup } from '@/app/api/arena/generation-requests/[generationRequestId]/handler';
 import { appRouteHandler as cancel } from '@/app/api/arena/generations/[generationId]/cancel/handler';
 import { appRouteHandler as status } from '@/app/api/arena/generations/[generationId]/handler';
 import { appRouteHandler as resume } from '@/app/api/arena/generations/[generationId]/stream/handler';
@@ -32,6 +34,7 @@ describe('Next/OpenNext Arena generation adapter behavior', () => {
   beforeEach(() => {
     mocked.create.mockResolvedValue(response('create'));
     mocked.cancelRequest.mockResolvedValue(response('cancel-request'));
+    mocked.lookup.mockResolvedValue(response('lookup'));
     mocked.resume.mockResolvedValue(response('resume'));
     mocked.status.mockResolvedValue(response('status'));
     mocked.cancel.mockResolvedValue(response('cancel'));
@@ -39,16 +42,21 @@ describe('Next/OpenNext Arena generation adapter behavior', () => {
 
   it('preserves method, route params, SSE ids, and generation headers', async () => {
     const context = { params: Promise.resolve({ generationId: 'generation-1' }) };
+    const requestContext = { params: Promise.resolve({ generationRequestId: 'request-1' }) };
     const responses = await Promise.all([
       create(new Request('https://example.test/api/arena/generate-stream', { method: 'POST' })),
       create(new Request('https://example.test/api/arena/generate-stream', { method: 'DELETE' })),
       resume(new Request('https://example.test/stream'), context),
       status(new Request('https://example.test/status'), context),
       cancel(new Request('https://example.test/cancel', { method: 'POST' }), context),
+      lookup(new Request('https://example.test/request'), requestContext),
     ]);
 
     expect(mocked.create).toHaveBeenCalledWith(expect.objectContaining({ method: 'POST' }));
     expect(mocked.cancelRequest).toHaveBeenCalledWith(expect.objectContaining({ method: 'DELETE' }));
+    expect(mocked.lookup).toHaveBeenCalledWith(expect.any(Request), {
+      generationRequestId: 'request-1',
+    });
     expect(mocked.resume).toHaveBeenCalledWith(expect.any(Request), { generationId: 'generation-1' });
     expect(mocked.status).toHaveBeenCalledWith(expect.any(Request), { generationId: 'generation-1' });
     expect(mocked.cancel).toHaveBeenCalledWith(expect.any(Request), { generationId: 'generation-1' });

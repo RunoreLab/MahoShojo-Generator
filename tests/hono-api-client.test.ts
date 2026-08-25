@@ -29,6 +29,7 @@ describe('Hono API 客户端', () => {
   test('只匹配迁移白名单，且 Tachie 始终不匹配', () => {
     expect(isHonoApiPath('/api/generate-free?format=sse')).toBe(true);
     expect(isHonoApiPath('/api/arena/generate-stream?format=sse')).toBe(true);
+    expect(isHonoApiPath('/api/arena/generation-requests/request-1')).toBe(true);
     expect(isHonoApiPath('/api/arena/generations/generation-1/stream?after=8-0')).toBe(true);
     expect(isHonoApiPath('/api/arena/generations/generation-1')).toBe(true);
     expect(isHonoApiPath('/api/arena/generations/generation-1/cancel')).toBe(true);

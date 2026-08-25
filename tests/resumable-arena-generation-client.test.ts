@@ -23,6 +23,21 @@ const response = (body: ReadableStream<Uint8Array> | string, generationId = 'gen
   },
 });
 
+const lookupResponse = (
+  generationId = 'generation-1',
+  generationRequestId = 'request-1234',
+  lastEventId: string | null = null,
+) => new Response(JSON.stringify({
+  generationId,
+  generationRequestId,
+  status: 'running',
+  resumable: true,
+  lastEventId,
+}), {
+  status: 200,
+  headers: { 'Content-Type': 'application/json' },
+});
+
 describe('resumable Arena generation client', () => {
   it('persists a bootstrap actor credential before the first POST', async () => {
     const storage = new MemoryStorage();
@@ -85,34 +100,215 @@ describe('resumable Arena generation client', () => {
     });
   });
 
-  it('retries a lost initial handshake with the identical idempotency identity', async () => {
+  it('recovers a lost initial handshake by request-id lookup without another POST', async () => {
     const storage = new MemoryStorage();
-    const seen: Array<{ body: string; actor: string | null }> = [];
-    const fetcher = vi.fn(async (_url: string, init?: RequestInit) => {
-      seen.push({
-        body: String(init?.body ?? ''),
-        actor: new Headers(init?.headers).get(ARENA_GENERATION_ACTOR_TOKEN_HEADER),
-      });
-      if (seen.length === 1) throw new TypeError('response headers lost');
-      return response('id: 1-0\nevent: done\ndata: {"status":"completed"}\n\n');
-    });
+    const fetcher = vi.fn()
+      .mockRejectedValueOnce(new TypeError('response headers lost'))
+      .mockResolvedValueOnce(new Response(null, { status: 404 }))
+      .mockResolvedValueOnce(lookupResponse('generation-1', 'request-1234', '99-0'))
+      .mockResolvedValueOnce(response(
+        'id: 1-0\nevent: done\ndata: {"status":"completed"}\n\n',
+      ));
     const opened = await openArenaGenerationStream({
       endpoint: '/api/arena/generate-stream', body: {}, headers: {}, fetcher, storage,
       generationRequestId: 'request-1234', baseReconnectDelayMs: 1, random: () => 0,
     });
     await opened.text();
 
-    expect(fetcher).toHaveBeenCalledTimes(2);
-    expect(seen[0]).toEqual(seen[1]);
-    expect(JSON.parse(seen[0]!.body)).toMatchObject({ generationRequestId: 'request-1234' });
+    expect(fetcher.mock.calls.map(([url, init]) => [url, init?.method])).toEqual([
+      ['/api/arena/generate-stream', 'POST'],
+      ['/api/arena/generation-requests/request-1234', 'GET'],
+      ['/api/arena/generation-requests/request-1234', 'GET'],
+      ['/api/arena/generations/generation-1/stream', 'GET'],
+    ]);
+    expect(JSON.parse(String(fetcher.mock.calls[0]?.[1]?.body))).toMatchObject({
+      generationRequestId: 'request-1234',
+    });
+  });
+
+  it.each([429, 502, 503, 504])(
+    'recovers an ambiguous initial HTTP %s without replaying POST',
+    async (status) => {
+      const requestId = `request-http-${status}`;
+      const fetcher = vi.fn()
+        .mockResolvedValueOnce(new Response(JSON.stringify({ code: 'TRANSIENT' }), { status }))
+        .mockResolvedValueOnce(lookupResponse('generation-http', requestId))
+        .mockResolvedValueOnce(response(
+          'id: 1-0\nevent: done\ndata: {"status":"completed"}\n\n',
+          'generation-http',
+        ));
+
+      const opened = await openArenaGenerationStream({
+        endpoint: '/api/arena/generate-stream',
+        body: { status },
+        headers: {},
+        fetcher,
+        storage: new MemoryStorage(),
+        generationRequestId: requestId,
+        baseReconnectDelayMs: 1,
+        random: () => 0,
+      });
+      await opened.text();
+
+      expect(fetcher.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1);
+      expect(fetcher.mock.calls.map(([, init]) => init?.method)).toEqual(['POST', 'GET', 'GET']);
+    },
+  );
+
+  it('returns a definite create rejection without lookup or retry', async () => {
+    const fetcher = vi.fn(async () => new Response(JSON.stringify({
+      code: 'GENERATION_REQUEST_CONFLICT',
+    }), {
+      status: 409,
+      headers: { 'Content-Type': 'application/json' },
+    }));
+
+    const rejected = await openArenaGenerationStream({
+      endpoint: '/api/arena/generate-stream',
+      body: { mode: 'classic' },
+      headers: {},
+      fetcher,
+      storage: new MemoryStorage(),
+      generationRequestId: 'request-definite-rejection',
+    });
+
+    expect(rejected.status).toBe(409);
+    expect(fetcher).toHaveBeenCalledOnce();
+    expect(fetcher.mock.calls[0]?.[1]?.method).toBe('POST');
+  });
+
+  it('propagates a non-explicit abort while request-id lookup is in flight', async () => {
+    const storage = new MemoryStorage();
+    const abort = new AbortController();
+    let markLookupStarted!: () => void;
+    const lookupStarted = new Promise<void>((resolve) => { markLookupStarted = resolve; });
+    const fetcher = vi.fn(async (_url: string, init?: RequestInit): Promise<Response> => {
+      if (init?.method === 'POST') throw new TypeError('initial response lost');
+      markLookupStarted();
+      return new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener(
+          'abort',
+          () => reject(new Error('lookup aborted')),
+          { once: true },
+        );
+      });
+    });
+    const opening = openArenaGenerationStream({
+      endpoint: '/api/arena/generate-stream',
+      body: { mode: 'classic' },
+      headers: {},
+      fetcher,
+      storage,
+      signal: abort.signal,
+      generationRequestId: 'request-lookup-abort',
+    });
+    await lookupStarted;
+
+    abort.abort('timeout');
+
+    await expect(opening).rejects.toThrow('lookup aborted');
+    expect(fetcher.mock.calls.map(([, init]) => init?.method)).toEqual(['POST', 'GET']);
+    expect(JSON.parse(storage.getItem(ARENA_GENERATION_CLIENT_STATE_KEY)!)).toMatchObject({
+      generationId: null,
+      state: 'recovering_initial',
+    });
+  });
+
+  it('propagates abort while reading a successful lookup response body', async () => {
+    const storage = new MemoryStorage();
+    const abort = new AbortController();
+    let markBodyStarted!: () => void;
+    const bodyStarted = new Promise<void>((resolve) => { markBodyStarted = resolve; });
+    const fetcher = vi.fn(async (_url: string, init?: RequestInit): Promise<Response> => {
+      if (init?.method === 'POST') throw new TypeError('initial response lost');
+      return new Response(new ReadableStream<Uint8Array>({
+        start(controller) {
+          markBodyStarted();
+          init?.signal?.addEventListener(
+            'abort',
+            () => controller.error(new Error('lookup body aborted')),
+            { once: true },
+          );
+        },
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    });
+    const opening = openArenaGenerationStream({
+      endpoint: '/api/arena/generate-stream',
+      body: { mode: 'classic' },
+      headers: {},
+      fetcher,
+      storage,
+      signal: abort.signal,
+      generationRequestId: 'request-lookup-body-abort',
+    });
+    await bodyStarted;
+
+    abort.abort('timeout');
+
+    await expect(opening).rejects.toThrow('lookup body aborted');
+    expect(fetcher.mock.calls.map(([, init]) => init?.method)).toEqual(['POST', 'GET']);
+    expect(JSON.parse(storage.getItem(ARENA_GENERATION_CLIENT_STATE_KEY)!)).toMatchObject({
+      generationId: null,
+      state: 'recovering_initial',
+    });
+  });
+
+  it('keeps a looked-up generation id when the first resume attempt fails', async () => {
+    const storage = new MemoryStorage();
+    const requestId = 'request-known-after-lookup';
+    const firstFetcher = vi.fn()
+      .mockRejectedValueOnce(new TypeError('initial response lost'))
+      .mockResolvedValueOnce(lookupResponse('generation-known', requestId))
+      .mockRejectedValueOnce(new TypeError('resume offline'));
+
+    await expect(openArenaGenerationStream({
+      endpoint: '/api/arena/generate-stream',
+      body: { mode: 'classic' },
+      headers: {},
+      fetcher: firstFetcher,
+      storage,
+      generationRequestId: requestId,
+      maxReconnectAttempts: 0,
+    })).rejects.toThrow('resume offline');
+    expect(JSON.parse(storage.getItem(ARENA_GENERATION_CLIENT_STATE_KEY)!)).toMatchObject({
+      generationRequestId: requestId,
+      generationId: 'generation-known',
+      state: 'resuming',
+    });
+
+    const afterRefresh = vi.fn(async () => response(
+      'id: 1-0\nevent: done\ndata: {"status":"completed"}\n\n',
+      'generation-known',
+    ));
+    const resumed = await openArenaGenerationStream({
+      endpoint: '/api/arena/generate-stream',
+      body: { mode: 'classic' },
+      headers: {},
+      fetcher: afterRefresh,
+      storage,
+    });
+    await resumed.text();
+
+    expect(afterRefresh.mock.calls.map(([url, init]) => [url, init?.method])).toEqual([
+      ['/api/arena/generations/generation-known/stream', 'GET'],
+    ]);
   });
 
   it('reuses a persisted pending handshake after refresh without changing request identity', async () => {
     const storage = new MemoryStorage();
     const seenRequestIds: string[] = [];
     const lostHandshake = vi.fn(async (_url: string, init?: RequestInit) => {
-      seenRequestIds.push(JSON.parse(String(init?.body)).generationRequestId as string);
-      throw new TypeError('response headers lost before refresh');
+      if (init?.method === 'POST') {
+        seenRequestIds.push(JSON.parse(String(init.body)).generationRequestId as string);
+        throw new TypeError('response headers lost before refresh');
+      }
+      return new Response(JSON.stringify({ code: 'GENERATION_REQUEST_NOT_FOUND' }), {
+        status: 404,
+        headers: { 'Content-Type': 'application/json' },
+      });
     });
 
     await expect(openArenaGenerationStream({
@@ -123,11 +319,25 @@ describe('resumable Arena generation client', () => {
       storage,
       maxReconnectAttempts: 0,
       random: () => 0,
-    })).rejects.toThrow('response headers lost before refresh');
+    })).rejects.toThrow('ARENA_GENERATION_STATE_UNKNOWN');
 
-    const afterRefresh = vi.fn(async (_url: string, init?: RequestInit) => {
-      seenRequestIds.push(JSON.parse(String(init?.body)).generationRequestId as string);
-      return response('id: 1-0\nevent: done\ndata: {"status":"completed"}\n\n');
+    expect(lostHandshake.mock.calls.map(([url, init]) => [url, init?.method])).toEqual([
+      ['/api/arena/generate-stream', 'POST'],
+      [expect.stringMatching(/^\/api\/arena\/generation-requests\//u), 'GET'],
+    ]);
+    expect(JSON.parse(storage.getItem(ARENA_GENERATION_CLIENT_STATE_KEY)!)).toMatchObject({
+      generationId: null,
+      state: 'unknown',
+    });
+
+    const afterRefresh = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.includes('/generation-requests/')) {
+        return lookupResponse('generation-after-refresh', seenRequestIds[0]);
+      }
+      return response(
+        'id: 1-0\nevent: done\ndata: {"status":"completed"}\n\n',
+        'generation-after-refresh',
+      );
     });
     const opened = await openArenaGenerationStream({
       endpoint: '/api/arena/generate-stream',
@@ -138,8 +348,11 @@ describe('resumable Arena generation client', () => {
     });
     await opened.text();
 
-    expect(seenRequestIds).toHaveLength(2);
-    expect(seenRequestIds[0]).toBe(seenRequestIds[1]);
+    expect(seenRequestIds).toHaveLength(1);
+    expect(afterRefresh.mock.calls.map(([url, init]) => [url, init?.method])).toEqual([
+      [`/api/arena/generation-requests/${seenRequestIds[0]}`, 'GET'],
+      ['/api/arena/generations/generation-after-refresh/stream', 'GET'],
+    ]);
   });
 
   it('does not reuse a pending request identity for a different semantic body', async () => {
@@ -150,12 +363,15 @@ describe('resumable Arena generation client', () => {
       body: { mode: 'classic' },
       headers: {},
       fetcher: vi.fn(async (_url: string, init?: RequestInit) => {
-        firstRequestId = JSON.parse(String(init?.body)).generationRequestId as string;
-        throw new TypeError('lost');
+        if (init?.method === 'POST') {
+          firstRequestId = JSON.parse(String(init.body)).generationRequestId as string;
+          throw new TypeError('lost');
+        }
+        return new Response(null, { status: 404 });
       }),
       storage,
       maxReconnectAttempts: 0,
-    })).rejects.toThrow('lost');
+    })).rejects.toThrow('ARENA_GENERATION_STATE_UNKNOWN');
 
     let secondRequestId = '';
     const opened = await openArenaGenerationStream({
@@ -334,19 +550,17 @@ describe('resumable Arena generation client', () => {
     });
   });
 
-  it('retries an incomplete 200 handshake with the same request identity', async () => {
+  it('recovers an incomplete 200 handshake by request-id lookup without another POST', async () => {
     const storage = new MemoryStorage();
-    const seenRequestIds: string[] = [];
-    const fetcher = vi.fn(async (_url: string, init?: RequestInit) => {
-      seenRequestIds.push(JSON.parse(String(init?.body)).generationRequestId as string);
-      if (seenRequestIds.length === 1) {
-        return new Response('upstream bytes without generation header', {
-          status: 200,
-          headers: { 'Content-Type': 'text/event-stream' },
-        });
-      }
-      return response('id: 1-0\nevent: done\ndata: {"status":"completed"}\n\n');
-    });
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(new Response('upstream bytes without generation header', {
+        status: 200,
+        headers: { 'Content-Type': 'text/event-stream' },
+      }))
+      .mockResolvedValueOnce(lookupResponse('generation-1', 'request-incomplete'))
+      .mockResolvedValueOnce(response(
+        'id: 1-0\nevent: done\ndata: {"status":"completed"}\n\n',
+      ));
 
     const opened = await openArenaGenerationStream({
       endpoint: '/api/arena/generate-stream',
@@ -354,13 +568,20 @@ describe('resumable Arena generation client', () => {
       headers: {},
       fetcher,
       storage,
+      generationRequestId: 'request-incomplete',
       baseReconnectDelayMs: 1,
       random: () => 0,
     });
     await opened.text();
 
-    expect(fetcher.mock.calls.map(([, init]) => init?.method)).toEqual(['POST', 'POST']);
-    expect(seenRequestIds[0]).toBe(seenRequestIds[1]);
+    expect(fetcher.mock.calls.map(([url, init]) => [url, init?.method])).toEqual([
+      ['/api/arena/generate-stream', 'POST'],
+      [expect.stringMatching(/^\/api\/arena\/generation-requests\//u), 'GET'],
+      ['/api/arena/generations/generation-1/stream', 'GET'],
+    ]);
+    expect(JSON.parse(String(fetcher.mock.calls[0]?.[1]?.body))).toHaveProperty(
+      'generationRequestId',
+    );
   });
 
   it('ignores replayed SSE blocks whose ids do not advance the local cursor', async () => {

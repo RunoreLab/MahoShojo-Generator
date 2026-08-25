@@ -11,12 +11,14 @@ export const ARENA_GENERATION_ACTOR_TOKEN_HEADER = 'X-Mahoshojo-Generation-Actor
 export type ArenaGenerationConnectionState =
   | 'connecting'
   | 'generating'
+  | 'recovering_initial'
   | 'reconnecting'
   | 'resuming'
   | 'completed'
   | 'failed'
   | 'cancelled'
-  | 'producer_lost';
+  | 'producer_lost'
+  | 'unknown';
 
 export type PersistedArenaGeneration = {
   version: 1 | 2;
@@ -268,7 +270,14 @@ export const openArenaGenerationStream = async (
       previous.endpoint === options.endpoint
       && previous.bodyHash === bodyHash
     )
-    && ['connecting', 'generating', 'reconnecting', 'resuming'].includes(previous.state)
+    && [
+      'connecting',
+      'generating',
+      'recovering_initial',
+      'reconnecting',
+      'resuming',
+      'unknown',
+    ].includes(previous.state)
     ? previous
     : null;
   const generationRequestId = resumablePrevious?.generationRequestId
@@ -278,10 +287,13 @@ export const openArenaGenerationStream = async (
   let lastEventId = resumablePrevious?.lastEventId ?? null;
   let state: ArenaGenerationConnectionState = resumablePrevious?.generationId
     ? 'resuming'
-    : 'connecting';
+    : resumablePrevious
+      ? 'recovering_initial'
+      : 'connecting';
   let currentReader: ReadableStreamDefaultReader<Uint8Array> | null = null;
   let stopped = false;
   let terminal = false;
+  let connectedViaResume = false;
   const updateState = (next: ArenaGenerationConnectionState): void => {
     state = next;
     options.onStateChange?.(next);
@@ -301,6 +313,7 @@ export const openArenaGenerationStream = async (
     if (!generationId) throw new Error('ARENA_GENERATION_ID_MISSING');
     const cursor = lastEventId ? `?after=${encodeURIComponent(lastEventId)}` : '';
     updateState('resuming');
+    connectedViaResume = true;
     return options.fetcher(`/api/arena/generations/${encodeURIComponent(generationId)}/stream${cursor}`, {
       method: 'GET',
       headers: withActorToken({ Accept: 'text/event-stream' }, actorStorage),
@@ -341,59 +354,154 @@ export const openArenaGenerationStream = async (
   options.signal?.addEventListener('abort', cancelOnExplicitAbort, { once: true });
   if (options.signal?.aborted) cancelOnExplicitAbort();
   if (stopped) throw new Error('ARENA_GENERATION_CANCELLED');
-  const fetchInitial = (): Promise<Response> => resumablePrevious?.generationId
-    ? fetchResume()
-    : options.fetcher(options.endpoint, {
+  const fetchCreate = (): Promise<Response> => options.fetcher(options.endpoint, {
       method: 'POST',
       headers: initialHeaders,
       body: createBody,
       signal: options.signal,
     });
-  let initialAttempt = 0;
-  let response: Response;
-  while (true) {
-    try {
-      response = await fetchInitial();
-      captureActorToken(actorStorage, response);
-      generationId = response.headers.get('x-mahoshojo-generation-id')?.trim() || generationId;
-      const incompleteSuccess = response.ok && (!response.body || !generationId);
-      const transientFailure = [429, 502, 503, 504].includes(response.status);
-      if (!incompleteSuccess && !transientFailure) break;
-      await response.body?.cancel('retry incomplete generation handshake').catch(() => undefined);
-      if (options.signal?.aborted || initialAttempt >= maxAttempts) {
-        if (!incompleteSuccess) break;
-        response = new Response(JSON.stringify({
-          code: 'ARENA_GENERATION_HANDSHAKE_INCOMPLETE',
-          error: 'Arena generation handshake incomplete',
-        }), {
-          status: 502,
-          headers: { 'Content-Type': 'application/json; charset=utf-8' },
-        });
-        break;
+  const fetchLookup = (): Promise<Response> => options.fetcher(
+    `/api/arena/generation-requests/${encodeURIComponent(generationRequestId)}`,
+    {
+      method: 'GET',
+      headers: withActorToken({ Accept: 'application/json' }, actorStorage),
+      signal: options.signal,
+    },
+  );
+  const fetchResumeWithRetry = async (): Promise<Response> => {
+    let attempt = 0;
+    while (true) {
+      try {
+        const resumed = await fetchResume();
+        captureActorToken(actorStorage, resumed);
+        const transient = resumed.status === 408
+          || resumed.status === 429
+          || resumed.status >= 500;
+        if (!transient || attempt >= maxAttempts) return resumed;
+        await resumed.body?.cancel('retry initial generation resume').catch(() => undefined);
+      } catch (error) {
+        if (options.signal?.aborted || attempt >= maxAttempts) throw error;
       }
       updateState('reconnecting');
-      const exponential = Math.min(30_000, baseDelayMs * (2 ** initialAttempt));
+      const exponential = Math.min(30_000, baseDelayMs * (2 ** attempt));
       await waitForReconnectOpportunity(
         Math.floor(exponential * (0.75 + random() * 0.5)),
         options.signal,
       );
-      initialAttempt += 1;
-    } catch (error) {
-      if (options.signal?.aborted || initialAttempt >= maxAttempts) throw error;
-      updateState('reconnecting');
-      const exponential = Math.min(30_000, baseDelayMs * (2 ** initialAttempt));
-      await waitForReconnectOpportunity(
-        Math.floor(exponential * (0.75 + random() * 0.5)),
-        options.signal,
-      );
-      initialAttempt += 1;
+      attempt += 1;
     }
+  };
+  const isKnownGenerationStatus = (value: unknown): boolean => (
+    typeof value === 'string'
+    && [
+      'reserved',
+      'running',
+      'finalizing',
+      'completed',
+      'failed',
+      'cancelled',
+      'producer_lost',
+    ].includes(value)
+  );
+  const recoverInitial = async (): Promise<Response> => {
+    updateState('recovering_initial');
+    const lookupAttempts = Math.max(1, maxAttempts + 1);
+    for (let attempt = 0; attempt < lookupAttempts; attempt += 1) {
+      if (attempt > 0) {
+        const exponential = Math.min(30_000, baseDelayMs * (2 ** (attempt - 1)));
+        await waitForReconnectOpportunity(
+          Math.floor(exponential * (0.75 + random() * 0.5)),
+          options.signal,
+        );
+      }
+      if (options.signal?.aborted) throw new Error('ARENA_GENERATION_CANCELLED');
+      let lookup: Response;
+      try {
+        lookup = await fetchLookup();
+      } catch (error) {
+        if (options.signal?.aborted) throw error;
+        continue;
+      }
+      captureActorToken(actorStorage, lookup);
+      if (lookup.ok) {
+        let payload: unknown = null;
+        try {
+          payload = await lookup.json();
+        } catch (error) {
+          if (options.signal?.aborted) throw error;
+          // A malformed success is ambiguous and consumes the same lookup budget.
+        }
+        if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
+          const record = payload as Record<string, unknown>;
+          if (
+            record.generationRequestId === generationRequestId
+            && typeof record.generationId === 'string'
+            && record.generationId.length > 0
+            && isKnownGenerationStatus(record.status)
+          ) {
+            generationId = record.generationId;
+            return fetchResumeWithRetry();
+          }
+        }
+        continue;
+      }
+      const retryable = lookup.status === 404
+        || lookup.status === 408
+        || lookup.status === 429
+        || lookup.status >= 500;
+      if (!retryable) {
+        updateState('unknown');
+        return lookup;
+      }
+      await lookup.body?.cancel('retry generation request lookup').catch(() => undefined);
+    }
+    updateState('unknown');
+    throw new Error('ARENA_GENERATION_STATE_UNKNOWN');
+  };
+  let response!: Response;
+  try {
+    if (resumablePrevious?.generationId) {
+      response = await fetchResumeWithRetry();
+    } else if (resumablePrevious) {
+      response = await recoverInitial();
+    } else {
+      let created: Response | null = null;
+      try {
+        created = await fetchCreate();
+      } catch (error) {
+        if (options.signal?.aborted) throw error;
+        response = await recoverInitial();
+      }
+      if (created) {
+        captureActorToken(actorStorage, created);
+        generationId = created.headers.get('x-mahoshojo-generation-id')?.trim() || generationId;
+        const completeSuccess = created.ok && created.body && generationId;
+        const ambiguous = (created.ok && !completeSuccess)
+          || created.status === 408
+          || created.status === 429
+          || created.status >= 500;
+        if (completeSuccess) {
+          response = created;
+        } else if (ambiguous) {
+          await created.body?.cancel('recover incomplete generation handshake').catch(() => undefined);
+          response = generationId ? await fetchResumeWithRetry() : await recoverInitial();
+        } else {
+          updateState('failed');
+          response = created;
+        }
+      }
+    }
+  } catch (error) {
+    options.signal?.removeEventListener('abort', cancelOnExplicitAbort);
+    throw error;
   }
+  captureActorToken(actorStorage, response);
+  generationId = response.headers.get('x-mahoshojo-generation-id')?.trim() || generationId;
   if (!response.ok || !response.body || !generationId) {
     options.signal?.removeEventListener('abort', cancelOnExplicitAbort);
     return response;
   }
-  updateState(resumablePrevious?.generationId ? 'resuming' : 'generating');
+  updateState(connectedViaResume ? 'resuming' : 'generating');
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream<Uint8Array>({
