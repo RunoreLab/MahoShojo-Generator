@@ -3,12 +3,15 @@ import { describe, expect, it } from 'vitest';
 import { createMemoryGenerationReplayStore } from '../src/arena-generation/memory-replay-store';
 
 const producerToken = 'producer-token-1';
+const preparationSeed = '11'.repeat(32);
 
 const reserve = (store: ReturnType<typeof createMemoryGenerationReplayStore>) => store.reserve({
   actorKey: 'user:1',
   generationRequestId: 'request-1',
   generationId: 'generation-1',
   payloadHash: 'hash-1',
+  preparationSeed,
+  preparationVersion: 'arena-runtime-v1',
   producerToken,
   now: '2026-08-25T00:00:00.000Z',
   leaseExpiresAt: '2026-08-25T00:01:00.000Z',
@@ -21,11 +24,33 @@ describe('memory generation replay store', () => {
     await expect(reserve(store)).resolves.toEqual({
       kind: 'reused',
       generationId: 'generation-1',
+      preparationSeed,
+      preparationVersion: 'arena-runtime-v1',
+    });
+    await expect(store.readState({ generationId: 'generation-1' })).resolves.toMatchObject({
+      preparationSeed,
+      preparationVersion: 'arena-runtime-v1',
     });
     await expect(store.readState({
       generationId: 'generation-1',
       actorKey: 'user:2',
     })).resolves.toBeNull();
+  });
+
+  it('rejects incomplete preparation metadata before writing a reservation', async () => {
+    const store = createMemoryGenerationReplayStore();
+
+    await expect(store.reserve({
+      actorKey: 'user:1',
+      generationRequestId: 'request-invalid',
+      generationId: 'generation-invalid',
+      payloadHash: 'hash-invalid',
+      preparationSeed,
+      producerToken,
+      now: '2026-08-25T00:00:00.000Z',
+      leaseExpiresAt: '2026-08-25T00:01:00.000Z',
+    })).rejects.toThrow('MEMORY_GENERATION_PREPARATION_INVALID');
+    await expect(store.readState({ generationId: 'generation-invalid' })).resolves.toBeNull();
   });
 
   it('propagates a fixed content-policy cancel reason through heartbeat and finalization claim', async () => {
@@ -224,6 +249,8 @@ describe('memory generation replay store', () => {
     await expect(reserve(store)).resolves.toEqual({
       kind: 'created',
       generationId: 'generation-1',
+      preparationSeed,
+      preparationVersion: 'arena-runtime-v1',
     });
   });
 });

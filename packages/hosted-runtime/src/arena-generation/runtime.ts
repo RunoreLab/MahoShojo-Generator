@@ -1,6 +1,7 @@
 import {
   ArenaGenerationFinalizationPendingError,
   generationCancelCode,
+  isArenaPreparationSeed,
   isGenerationCancelReason,
 } from '@mahoshojo/hosted-api/arena-generation/service';
 import type {
@@ -9,6 +10,8 @@ import type {
   ArenaGenerationObserver,
   GenerationEventInput,
   GenerationTerminal,
+  MaterializedArenaGeneration,
+  PreflightedArenaGeneration,
   PreparedArenaGeneration,
 } from '@mahoshojo/hosted-api/arena-generation/service';
 import { createArenaStreamProjector } from './stream-projector';
@@ -20,6 +23,8 @@ const MAX_ARENA_QUESTIONNAIRES = 50;
 const MAX_ARENA_NARRATIVE_HISTORY = 50;
 export const MAX_ARENA_COMBATANTS = 32;
 const PREPARED_PAYLOAD_KEY = '__arenaGenerationRuntimeV1';
+export const ARENA_GENERATION_MATERIALIZATION_VERSION = 'arena-runtime-v1';
+const ARENA_RANDOM_DRAW_BUDGET = 4_096;
 
 export type ArenaReasoningEvent =
   | { type: 'reasoning-start' }
@@ -56,7 +61,6 @@ export type ArenaGenerationFinalizationResult = {
 };
 
 export interface ArenaGenerationRuntimeDependencies {
-  random?(): number;
   preparePayload?(_input: {
     request: Request;
     actorKey: string;
@@ -70,6 +74,7 @@ export interface ArenaGenerationRuntimeDependencies {
   buildPrompt(_input: {
     actorKey: string;
     payload: Record<string, unknown>;
+    random: () => number;
   }): Promise<ArenaGenerationPrompt>;
   generate(_input: {
     generationId: string;
@@ -189,6 +194,38 @@ const redactSemanticValue = (value: unknown): unknown => {
 const redactSemanticPayload = (
   payload: Record<string, unknown>,
 ): Record<string, unknown> => redactSemanticValue(payload) as Record<string, unknown>;
+
+const createSeededRandom = async (preparationSeed: string): Promise<() => number> => {
+  if (!isArenaPreparationSeed(preparationSeed)) {
+    throw new Error('ARENA_GENERATION_PREPARATION_SEED_INVALID');
+  }
+  const keyBytes = Uint8Array.from(
+    preparationSeed.match(/.{2}/gu) ?? [],
+    (value) => Number.parseInt(value, 16),
+  );
+  const key = await crypto.subtle.importKey(
+    'raw',
+    keyBytes,
+    { name: 'AES-CTR' },
+    false,
+    ['encrypt'],
+  );
+  const randomBytes = new Uint8Array(await crypto.subtle.encrypt(
+    { name: 'AES-CTR', counter: new Uint8Array(16), length: 64 },
+    key,
+    new Uint8Array(ARENA_RANDOM_DRAW_BUDGET * Uint32Array.BYTES_PER_ELEMENT),
+  ));
+  const view = new DataView(randomBytes.buffer, randomBytes.byteOffset, randomBytes.byteLength);
+  let offset = 0;
+  return (): number => {
+    if (offset >= randomBytes.byteLength) {
+      throw new Error('ARENA_GENERATION_RANDOM_BUDGET_EXHAUSTED');
+    }
+    const value = view.getUint32(offset, false) / 0x1_0000_0000;
+    offset += Uint32Array.BYTES_PER_ELEMENT;
+    return value;
+  };
+};
 
 type AdjudicationEvent = {
   type?: unknown;
@@ -316,35 +353,26 @@ export const createArenaGenerationRuntime = (
       // Observability is deliberately fail-soft.
     }
   };
-  const prepare: NonNullable<ArenaGenerationExecutor['prepare']> = async ({
+  const preflight: NonNullable<ArenaGenerationExecutor['preflight']> = async ({
     request,
     actorKey,
     payload,
-  }): Promise<PreparedArenaGeneration | Response> => {
+  }): Promise<PreflightedArenaGeneration | Response> => {
     const authorizedPayload = dependencies.preparePayload
       ? await dependencies.preparePayload({ request, actorKey, payload: { ...payload } })
       : { ...payload };
     if (authorizedPayload instanceof Response) return authorizedPayload;
     const invalid = validatePayload(authorizedPayload);
     if (invalid) return invalid;
-    const executionPayload = { ...authorizedPayload };
-    delete executionPayload.adjudicationResults;
-    if (
-      Array.isArray(authorizedPayload.adjudicationEvents)
-      && authorizedPayload.adjudicationEvents.length > 0
-    ) {
-      executionPayload.adjudicationResults = resolveAdjudicationEvents(
-        authorizedPayload.adjudicationEvents,
-        dependencies.random ?? Math.random,
-      );
-    }
+    const materializationPayload = { ...authorizedPayload };
+    delete materializationPayload.adjudicationResults;
     const safetyStartedAt = performance.now();
     let safetyResponse: Response | null;
     try {
       safetyResponse = await dependencies.checkSafety({
         request,
         actorKey,
-        payload: executionPayload,
+        payload: materializationPayload,
       });
       observe({
         event: 'phase',
@@ -362,10 +390,40 @@ export const createArenaGenerationRuntime = (
       throw error;
     }
     if (safetyResponse) return safetyResponse;
+    return {
+      semanticPayload: redactSemanticPayload(authorizedPayload),
+      materializationPayload,
+    };
+  };
+
+  const materialize: NonNullable<ArenaGenerationExecutor['materialize']> = async ({
+    actorKey,
+    payload,
+    preparationSeed,
+    preparationVersion,
+  }): Promise<MaterializedArenaGeneration | Response> => {
+    if (preparationVersion !== ARENA_GENERATION_MATERIALIZATION_VERSION) {
+      return jsonResponse({
+        code: 'ARENA_MATERIALIZATION_VERSION_UNSUPPORTED',
+        error: 'Generation materialization version unsupported',
+      }, 503);
+    }
+    const random = await createSeededRandom(preparationSeed);
+    const executionPayload = { ...payload };
+    delete executionPayload.adjudicationResults;
+    if (
+      Array.isArray(payload.adjudicationEvents)
+      && payload.adjudicationEvents.length > 0
+    ) {
+      executionPayload.adjudicationResults = resolveAdjudicationEvents(
+        payload.adjudicationEvents,
+        random,
+      );
+    }
     const promptStartedAt = performance.now();
     let prepared: ArenaGenerationPrompt;
     try {
-      prepared = await dependencies.buildPrompt({ actorKey, payload: executionPayload });
+      prepared = await dependencies.buildPrompt({ actorKey, payload: executionPayload, random });
       observe({
         event: 'phase',
         phase: 'prompt',
@@ -400,7 +458,6 @@ export const createArenaGenerationRuntime = (
         : {}),
     };
     return {
-      semanticPayload: redactSemanticPayload(authorizedPayload),
       executionPayload: {
         ...executionPayload,
         [PREPARED_PAYLOAD_KEY]: prepared,
@@ -409,6 +466,26 @@ export const createArenaGenerationRuntime = (
         'X-Mahoshojo-Stream-Meta': encodeURIComponent(JSON.stringify(streamMeta)),
       },
     };
+  };
+
+  const prepare: NonNullable<ArenaGenerationExecutor['prepare']> = async (input): Promise<
+    PreparedArenaGeneration | Response
+  > => {
+    const preflighted = await preflight(input);
+    if (preflighted instanceof Response) return preflighted;
+    const seedBytes = crypto.getRandomValues(new Uint8Array(32));
+    const preparationSeed = Array.from(
+      seedBytes,
+      (byte) => byte.toString(16).padStart(2, '0'),
+    ).join('');
+    const materialized = await materialize({
+      ...input,
+      payload: preflighted.materializationPayload,
+      preparationSeed,
+      preparationVersion: ARENA_GENERATION_MATERIALIZATION_VERSION,
+    });
+    if (materialized instanceof Response) return materialized;
+    return { ...materialized, semanticPayload: preflighted.semanticPayload };
   };
 
   const execute = async (
@@ -652,5 +729,11 @@ export const createArenaGenerationRuntime = (
     }
   };
 
-  return Object.freeze({ prepare, execute });
+  return Object.freeze({
+    materializationVersion: ARENA_GENERATION_MATERIALIZATION_VERSION,
+    preflight,
+    materialize,
+    prepare,
+    execute,
+  });
 };

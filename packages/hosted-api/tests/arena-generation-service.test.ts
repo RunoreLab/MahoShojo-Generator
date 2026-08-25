@@ -14,7 +14,12 @@ import {
 const readResponseText = async (response: Response): Promise<string> => response.text();
 
 class MemoryReplayStore implements GenerationReplayStore {
-  readonly requests = new Map<string, { payloadHash: string; generationId: string }>();
+  readonly requests = new Map<string, {
+    payloadHash: string;
+    generationId: string;
+    preparationSeed: string | null;
+    preparationVersion: string | null;
+  }>();
   readonly states = new Map<string, GenerationReplayStoreState>();
   readonly events = new Map<string, GenerationStreamEvent[]>();
   reserveUnavailable = false;
@@ -31,12 +36,19 @@ class MemoryReplayStore implements GenerationReplayStore {
     const previous = this.requests.get(key);
     if (previous) {
       return previous.payloadHash === input.payloadHash
-        ? { kind: 'reused' as const, generationId: previous.generationId }
+        ? {
+          kind: 'reused' as const,
+          generationId: previous.generationId,
+          preparationSeed: previous.preparationSeed,
+          preparationVersion: previous.preparationVersion,
+        }
         : { kind: 'conflict' as const };
     }
     this.requests.set(key, {
       payloadHash: input.payloadHash,
       generationId: input.generationId,
+      preparationSeed: input.preparationSeed ?? null,
+      preparationVersion: input.preparationVersion ?? null,
     });
     this.states.set(input.generationId, {
       actorKey: input.actorKey,
@@ -52,8 +64,15 @@ class MemoryReplayStore implements GenerationReplayStore {
       terminal: null,
       cancelRequested: false,
       cancelReason: null,
+      preparationSeed: input.preparationSeed ?? null,
+      preparationVersion: input.preparationVersion ?? null,
     });
-    return { kind: 'created' as const, generationId: input.generationId };
+    return {
+      kind: 'created' as const,
+      generationId: input.generationId,
+      preparationSeed: input.preparationSeed ?? null,
+      preparationVersion: input.preparationVersion ?? null,
+    };
   }
 
   async markRunning(input: Parameters<GenerationReplayStore['markRunning']>[0]) {
@@ -450,6 +469,152 @@ describe('Arena generation lifecycle service', () => {
     expect(execute).toHaveBeenCalledTimes(1);
   });
 
+  test('freezes one reservation seed for reused materialization and Provider execution', async () => {
+    const store = new MemoryReplayStore();
+    const materializedSeeds: string[] = [];
+    const materializedRolls: number[] = [];
+    let releaseMaterialization!: () => void;
+    const materializationGate = new Promise<void>((resolve) => {
+      releaseMaterialization = resolve;
+    });
+    const execute = vi.fn(async ({ payload: input }) => {
+      expect(input.adjudicationRoll).toBe(materializedRolls[0]);
+      return { status: 'completed' as const };
+    });
+    const executor = {
+      materializationVersion: 'test-materialization-v1',
+      preflight: vi.fn(async ({ payload: input }) => ({
+        materializationPayload: { ...input, apiKey: 'provider-secret' },
+        semanticPayload: { value: input.value },
+      })),
+      materialize: vi.fn(async ({ payload: input, preparationSeed }) => {
+        const adjudicationRoll = Number.parseInt(preparationSeed.slice(0, 2), 16) % 100;
+        materializedSeeds.push(preparationSeed);
+        materializedRolls.push(adjudicationRoll);
+        if (materializedSeeds.length === 2) releaseMaterialization();
+        await materializationGate;
+        return {
+          executionPayload: { ...input, adjudicationRoll },
+          responseHeaders: { 'X-Test-Meta': String(adjudicationRoll) },
+        };
+      }),
+      execute,
+    } as unknown as ArenaGenerationExecutor;
+    const service = createService(store, executor);
+
+    const [first, second] = await Promise.all([
+      service.create(createRequest('request-seeded')),
+      service.create(createRequest('request-seeded')),
+    ]);
+
+    expect(materializedSeeds).toHaveLength(2);
+    expect(new Set(materializedSeeds).size).toBe(1);
+    expect(first.headers.get('x-test-meta')).toBe(String(materializedRolls[0]));
+    expect(second.headers.get('x-test-meta')).toBe(String(materializedRolls[0]));
+    expect(execute).toHaveBeenCalledOnce();
+    expect(JSON.stringify(store.states.get('generation-1'))).not.toContain('provider-secret');
+    expect(JSON.stringify(store.requests)).not.toContain('provider-secret');
+    await first.text();
+    await second.text();
+  });
+
+  test('replays a legacy seedless reservation without rerolling metadata or restarting Provider', async () => {
+    const store = new MemoryReplayStore();
+    await store.reserve({
+      actorKey: 'user:42',
+      generationRequestId: 'request-legacy',
+      generationId: 'generation-1',
+      payloadHash: 'hash:{"value":"same"}',
+      producerToken: 'legacy-producer',
+      now: '2026-08-25T04:00:00.000Z',
+      leaseExpiresAt: '2026-08-25T04:02:00.000Z',
+    });
+    const materialize = vi.fn(async () => ({
+      executionPayload: { shouldNotRun: true },
+      responseHeaders: { 'X-Test-Seed': 'rerolled' },
+    }));
+    const execute = vi.fn(async () => ({ status: 'completed' as const }));
+    const service = createService(store, {
+      materializationVersion: 'test-materialization-v1',
+      preflight: async ({ payload: input }) => ({
+        materializationPayload: input,
+        semanticPayload: { value: input.value },
+      }),
+      materialize,
+      execute,
+    });
+
+    const response = await service.create(createRequest('request-legacy'));
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('x-test-seed')).toBeNull();
+    expect(materialize).not.toHaveBeenCalled();
+    expect(execute).not.toHaveBeenCalled();
+    await response.body?.cancel();
+  });
+
+  test('fails an old materialization path closed against a new seeded reservation', async () => {
+    const store = new MemoryReplayStore();
+    const seededExecute = vi.fn(async () => ({ status: 'completed' as const }));
+    const seededService = createService(store, {
+      materializationVersion: 'test-materialization-v1',
+      preflight: async ({ payload: input }) => ({
+        materializationPayload: input,
+        semanticPayload: { value: input.value },
+      }),
+      materialize: async ({ payload: input }) => ({
+        executionPayload: input,
+        responseHeaders: { 'X-Test-Meta': 'frozen' },
+      }),
+      execute: seededExecute,
+    });
+    const legacyExecute = vi.fn(async () => ({ status: 'completed' as const }));
+    const legacyService = createService(store, {
+      prepare: async ({ payload: input }) => ({
+        executionPayload: input,
+        semanticPayload: { value: input.value },
+        responseHeaders: { 'X-Test-Meta': 'rerolled-by-old-instance' },
+      }),
+      execute: legacyExecute,
+    });
+
+    const seeded = await seededService.create(createRequest('request-version-skew'));
+    const legacyRetry = await legacyService.create(createRequest('request-version-skew'));
+
+    expect(legacyRetry.status).toBe(409);
+    expect(legacyRetry.headers.get('x-test-meta')).toBeNull();
+    expect(legacyExecute).not.toHaveBeenCalled();
+    expect(seededExecute).toHaveBeenCalledOnce();
+    await seeded.text();
+  });
+
+  test.each([
+    ['response', async () => new Response('invalid materialization', { status: 422 }), 422],
+    ['exception', async () => { throw new Error('materialization failed'); }, 500],
+  ] as const)(
+    'releases a new reservation when materialization returns a %s failure',
+    async (_kind, materialize, expectedStatus) => {
+      const store = new MemoryReplayStore();
+      const execute = vi.fn(async () => ({ status: 'completed' as const }));
+      const service = createService(store, {
+        materializationVersion: 'test-materialization-v1',
+        preflight: async ({ payload: input }) => ({
+          materializationPayload: input,
+          semanticPayload: { value: input.value },
+        }),
+        materialize,
+        execute,
+      });
+
+      const response = await service.create(createRequest('request-materialization-failure'));
+
+      expect(response.status).toBe(expectedStatus);
+      expect(store.requests.size).toBe(0);
+      expect(store.states.size).toBe(0);
+      expect(execute).not.toHaveBeenCalled();
+    },
+  );
+
   test('same request id with conflicting semantic payload fails closed', async () => {
     const store = new MemoryReplayStore();
     const execute = vi.fn(async () => ({ status: 'completed' as const }));
@@ -608,6 +773,43 @@ describe('Arena generation lifecycle service', () => {
     expect(response.status).toBe(200);
     expect(response.headers.get('content-type')).toContain('text/event-stream');
     expect(await response.text()).toContain('durable terminal');
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  test('seeded runtime accepts a matching legacy durable hash without rematerializing metadata', async () => {
+    const store = new MemoryReplayStore();
+    store.reserveUnavailable = true;
+    const materialize = vi.fn(async () => ({ executionPayload: {} }));
+    const execute = vi.fn(async () => ({ status: 'completed' as const }));
+    const service = createService(store, {
+      materializationVersion: 'test-materialization-v1',
+      preflight: async ({ payload: input }) => ({
+        materializationPayload: input,
+        semanticPayload: { value: input.value },
+      }),
+      materialize,
+      execute,
+    }, {
+      terminalStore: {
+        readOwnedTerminal: vi.fn(async () => ({
+          generationId: 'generation-1',
+          generationRequestId: 'request-legacy-durable',
+          status: 'completed' as const,
+          updatedAt: '2026-08-25T03:59:00.000Z',
+          resultRef: 'arena-reports/generation-1.json',
+          markdown: 'legacy durable terminal',
+          reasoning: '',
+          payloadHash: 'hash:{"value":"same"}',
+          contentAvailable: true,
+        })),
+      },
+    });
+
+    const response = await service.create(createRequest('request-legacy-durable'));
+
+    expect(response.status).toBe(200);
+    expect(await response.text()).toContain('legacy durable terminal');
+    expect(materialize).not.toHaveBeenCalled();
     expect(execute).not.toHaveBeenCalled();
   });
 

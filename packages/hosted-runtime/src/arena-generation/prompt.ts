@@ -47,13 +47,13 @@ const PUBLICATIONS = [
   '魔信公众号平台',
 ] as const;
 
-const randomReporter = (): { name: string; publication: string } => {
-  const journalist = JOURNALISTS[Math.floor(Math.random() * JOURNALISTS.length)]
+const randomReporter = (random: () => number): { name: string; publication: string } => {
+  const journalist = JOURNALISTS[Math.floor(random() * JOURNALISTS.length)]
     ?? ['佚名'];
   return {
     name: journalist[0],
     publication: journalist[1]
-      ?? PUBLICATIONS[Math.floor(Math.random() * PUBLICATIONS.length)]
+      ?? PUBLICATIONS[Math.floor(random() * PUBLICATIONS.length)]
       ?? '魔法国度时报',
   };
 };
@@ -78,8 +78,10 @@ export const isStrictRankedArenaRequest = (payload: Record<string, unknown>): bo
 export const buildArenaGenerationPrompt = async (input: {
   actorKey: string;
   payload: Record<string, unknown>;
+  random?: () => number;
 }): Promise<ArenaGenerationPrompt> => {
   const { payload } = input;
+  const random = input.random ?? Math.random;
   const mode = text(payload.mode) || 'classic';
   const language = text(payload.language) || 'zh-CN';
   const combatants = Array.isArray(payload.combatants) ? payload.combatants : [];
@@ -133,7 +135,7 @@ export const buildArenaGenerationPrompt = async (input: {
     const guidance = text(combatant?.characterGuidance);
     return characterName && guidance ? [{ characterName, guidance }] : [];
   });
-  const reporterInfo = randomReporter();
+  const reporterInfo = randomReporter(random);
 
   return {
     prompt: `${getSystemPrompt(mode, combatants)}\n\n${streamPrompt}`,

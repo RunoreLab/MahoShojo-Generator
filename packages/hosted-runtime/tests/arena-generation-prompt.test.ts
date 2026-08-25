@@ -42,4 +42,20 @@ describe('Arena generation prompt', () => {
     expect(result.metadata.expectsMeta).toBe(false);
     expect(result.prompt).toContain('请勿在任何位置追加 HTML 注释元数据');
   });
+
+  it('uses the injected random source for reporter metadata', async () => {
+    const random = () => 0;
+    const result = await buildArenaGenerationPrompt({
+      actorKey: 'user:42',
+      payload: {
+        combatants: [{ data: { name: 'A' } }, { data: { name: 'B' } }],
+      },
+      random,
+    });
+
+    expect(result.metadata.reporterInfo).toEqual({
+      name: '蓝星单推人',
+      publication: '兽扑',
+    });
+  });
 });

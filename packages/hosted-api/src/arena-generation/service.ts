@@ -6,6 +6,21 @@ import {
 
 export const MAX_ARENA_CREATE_BODY_BYTES = 12 * 1_024 * 1_024;
 export const MAX_ARENA_CANCEL_BODY_BYTES = 1_024;
+export const ARENA_PREPARATION_SEED_BYTES = 32;
+export const ARENA_SEEDED_RESERVATION_HASH_VERSION = 'arena-seeded-reservation-v1';
+const ARENA_PREPARATION_SEED_PATTERN = new RegExp(
+  `^[a-f0-9]{${ARENA_PREPARATION_SEED_BYTES * 2}}$`,
+  'u',
+);
+
+export const isArenaPreparationSeed = (value: unknown): value is string => (
+  typeof value === 'string'
+  && ARENA_PREPARATION_SEED_PATTERN.test(value)
+);
+
+export const isArenaPreparationVersion = (value: unknown): value is string => (
+  typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/u.test(value)
+);
 
 export class ArenaGenerationFinalizationPendingError extends Error {
   readonly originalError: unknown;
@@ -85,6 +100,8 @@ export type GenerationReplayStoreState = {
   terminal: GenerationTerminal | null;
   cancelRequested: boolean;
   cancelReason?: GenerationCancelReason | null;
+  preparationSeed?: string | null;
+  preparationVersion?: string | null;
 };
 
 export interface GenerationReplayStore {
@@ -93,13 +110,25 @@ export interface GenerationReplayStore {
     generationRequestId: string;
     generationId: string;
     payloadHash: string;
+    preparationSeed?: string;
+    preparationVersion?: string;
     producerToken: string;
     now: string;
     leaseExpiresAt: string;
     mode?: string;
   }): Promise<
-    | { kind: 'created'; generationId: string }
-    | { kind: 'reused'; generationId: string }
+    | {
+      kind: 'created';
+      generationId: string;
+      preparationSeed?: string | null;
+      preparationVersion?: string | null;
+    }
+    | {
+      kind: 'reused';
+      generationId: string;
+      preparationSeed?: string | null;
+      preparationVersion?: string | null;
+    }
     | { kind: 'conflict' }
   >;
   markRunning(_input: {
@@ -223,7 +252,30 @@ export type PreparedArenaGeneration = {
   responseHeaders?: Readonly<Record<string, string>>;
 };
 
+export type PreflightedArenaGeneration = {
+  materializationPayload: Record<string, unknown>;
+  semanticPayload: Record<string, unknown>;
+};
+
+export type MaterializedArenaGeneration = Omit<
+  PreparedArenaGeneration,
+  'semanticPayload'
+>;
+
 export interface ArenaGenerationExecutor {
+  materializationVersion?: string;
+  preflight?(_input: {
+    request: Request;
+    actorKey: string;
+    payload: Record<string, unknown>;
+  }): Promise<PreflightedArenaGeneration | Response>;
+  materialize?(_input: {
+    request: Request;
+    actorKey: string;
+    payload: Record<string, unknown>;
+    preparationSeed: string;
+    preparationVersion: string;
+  }): Promise<MaterializedArenaGeneration | Response>;
   prepare?(_input: {
     request: Request;
     actorKey: string;
@@ -344,6 +396,7 @@ export type ArenaGenerationServiceDependencies = {
     generationRequestId: string;
   }): Promise<string>;
   createProducerToken?(): string;
+  createPreparationSeed?(): string;
   hashPayload(_payload: Record<string, unknown>): Promise<string>;
   now(): Date;
   heartbeatIntervalMs?: number;
@@ -409,6 +462,11 @@ const withActorHeaders = (
 const isGenerationRequestId = (value: string): boolean => (
   /^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/u.test(value)
 );
+
+const createSecurePreparationSeed = (): string => {
+  const bytes = crypto.getRandomValues(new Uint8Array(ARENA_PREPARATION_SEED_BYTES));
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+};
 
 const invalidCancelReasonResponse = (): Response => jsonResponse({
   code: 'GENERATION_CANCEL_REASON_INVALID',
@@ -553,6 +611,10 @@ export const createArenaGenerationService = (
   const deltaFlushIntervalMs = dependencies.deltaFlushIntervalMs ?? 75;
   const deltaFlushBytes = dependencies.deltaFlushBytes ?? 1_024;
   const snapshotMaxBytes = dependencies.snapshotMaxBytes ?? 2 * 1_024 * 1_024;
+  const hasPreflight = typeof dependencies.executor.preflight === 'function';
+  const hasMaterialize = typeof dependencies.executor.materialize === 'function';
+  const splitMaterialization = hasPreflight && hasMaterialize;
+  const materializationVersion = dependencies.executor.materializationVersion;
   const activeProducers = new Map<string, ActiveProducer>();
   const observe = (observation: ArenaGenerationObservation): void => {
     try {
@@ -577,6 +639,12 @@ export const createArenaGenerationService = (
   }
   if (!Number.isFinite(snapshotMaxBytes) || snapshotMaxBytes < 1) {
     throw new Error('snapshotMaxBytes 必须是正有限数字');
+  }
+  if (hasPreflight !== hasMaterialize) {
+    throw new Error('Arena generation preflight/materialize 必须成对配置');
+  }
+  if (splitMaterialization && !isArenaPreparationVersion(materializationVersion)) {
+    throw new Error('Arena generation materializationVersion 无效');
   }
 
   const createReplayWriter = (
@@ -1469,25 +1537,57 @@ export const createArenaGenerationService = (
       const parsed = await parseCreatePayload(request);
       if (parsed instanceof Response) return parsed;
 
-      const prepared = dependencies.executor.prepare
-        ? await dependencies.executor.prepare({
+      let semanticPayload: Record<string, unknown>;
+      let materializationPayload: Record<string, unknown> | null = null;
+      let prepared: PreparedArenaGeneration | MaterializedArenaGeneration | null = null;
+      if (splitMaterialization) {
+        const preflighted = await dependencies.executor.preflight!({
           request,
           actorKey: actor.actorKey,
           payload: parsed.payload,
-        })
-        : {
+        });
+        if (preflighted instanceof Response) return preflighted;
+        semanticPayload = preflighted.semanticPayload;
+        materializationPayload = preflighted.materializationPayload;
+      } else {
+        const legacyPrepared = dependencies.executor.prepare
+          ? await dependencies.executor.prepare({
+            request,
+            actorKey: actor.actorKey,
+            payload: parsed.payload,
+          })
+          : {
           executionPayload: parsed.payload,
           semanticPayload: parsed.payload,
         };
-      if (prepared instanceof Response) return prepared;
+        if (legacyPrepared instanceof Response) return legacyPrepared;
+        prepared = legacyPrepared;
+        semanticPayload = legacyPrepared.semanticPayload;
+      }
 
       const generationId = await dependencies.deriveGenerationId({
         actorKey: actor.actorKey,
         generationRequestId: parsed.generationRequestId,
       });
       const producerToken = dependencies.createProducerToken?.() ?? crypto.randomUUID();
-      const inputBytes = encodedBytes(prepared.semanticPayload);
-      const payloadHash = await dependencies.hashPayload(prepared.semanticPayload);
+      const inputBytes = encodedBytes(semanticPayload);
+      const legacyPayloadHash = await dependencies.hashPayload(semanticPayload);
+      const payloadHash = splitMaterialization
+        ? await dependencies.hashPayload({
+          reservationHashVersion: ARENA_SEEDED_RESERVATION_HASH_VERSION,
+          semanticPayload,
+        })
+        : legacyPayloadHash;
+      const matchesPayloadHash = (candidate: string | null | undefined): boolean => (
+        candidate === payloadHash
+        || (splitMaterialization && candidate === legacyPayloadHash)
+      );
+      const preparationSeed = splitMaterialization
+        ? (dependencies.createPreparationSeed?.() ?? createSecurePreparationSeed())
+        : null;
+      if (preparationSeed !== null && !isArenaPreparationSeed(preparationSeed)) {
+        throw new Error('Arena generation preparation seed 无效');
+      }
       const now = dependencies.now();
       let reservation: Awaited<ReturnType<GenerationReplayStore['reserve']>>;
       try {
@@ -1496,8 +1596,12 @@ export const createArenaGenerationService = (
           generationRequestId: parsed.generationRequestId,
           generationId,
           payloadHash,
-          ...(typeof prepared.semanticPayload.mode === 'string'
-            ? { mode: prepared.semanticPayload.mode }
+          ...(preparationSeed ? { preparationSeed } : {}),
+          ...(splitMaterialization && materializationVersion
+            ? { preparationVersion: materializationVersion }
+            : {}),
+          ...(typeof semanticPayload.mode === 'string'
+            ? { mode: semanticPayload.mode }
             : {}),
           producerToken,
           now: now.toISOString(),
@@ -1513,7 +1617,7 @@ export const createArenaGenerationService = (
           // The response below remains fail closed when neither Redis nor D1 can prove ownership.
         }
         if (durable.kind === 'pending') {
-          if (durable.payloadHash && durable.payloadHash !== payloadHash) {
+          if (durable.payloadHash && !matchesPayloadHash(durable.payloadHash)) {
             return jsonResponse({
               code: 'GENERATION_REQUEST_CONFLICT',
               error: 'generationRequestId 已用于不同请求',
@@ -1526,7 +1630,7 @@ export const createArenaGenerationService = (
         }
         if (durable.kind === 'terminal') {
           const terminal = durable.terminal;
-          if (!terminal.payloadHash || terminal.payloadHash !== payloadHash) {
+          if (!matchesPayloadHash(terminal.payloadHash)) {
             observe({ event: 'request', generationId, outcome: 'conflict', inputBytes });
             return jsonResponse({
               code: 'GENERATION_REQUEST_CONFLICT',
@@ -1542,6 +1646,32 @@ export const createArenaGenerationService = (
         }, 503);
       }
 
+      if (reservation.kind === 'conflict' && splitMaterialization) {
+        try {
+          const legacyState = await dependencies.store.readState({
+            generationId,
+            actorKey: actor.actorKey,
+          });
+          if (
+            legacyState?.payloadHash === legacyPayloadHash
+            && !legacyState.preparationSeed
+            && !legacyState.preparationVersion
+          ) {
+            reservation = {
+              kind: 'reused',
+              generationId: legacyState.generationId,
+              preparationSeed: null,
+              preparationVersion: null,
+            };
+          }
+        } catch {
+          observe({ event: 'redis_degraded', generationId, operation: 'read_state' });
+          return jsonResponse({
+            code: 'GENERATION_STATE_UNAVAILABLE',
+            error: '无法确认 generation state',
+          }, 503);
+        }
+      }
       if (reservation.kind === 'conflict') {
         observe({ event: 'request', generationId, outcome: 'conflict', inputBytes });
         return jsonResponse({
@@ -1568,7 +1698,7 @@ export const createArenaGenerationService = (
             generationId,
             producerToken,
           }).catch(() => ({ released: false }));
-          if (durable.payloadHash && durable.payloadHash !== payloadHash) {
+          if (durable.payloadHash && !matchesPayloadHash(durable.payloadHash)) {
             return jsonResponse({
               code: 'GENERATION_REQUEST_CONFLICT',
               error: 'generationRequestId 已用于不同请求',
@@ -1581,7 +1711,7 @@ export const createArenaGenerationService = (
         }
         if (durable.kind === 'terminal') {
           const terminal = durable.terminal;
-          if (!terminal.payloadHash || terminal.payloadHash !== payloadHash) {
+          if (!matchesPayloadHash(terminal.payloadHash)) {
             await dependencies.store.releaseReservation({
               generationId,
               producerToken,
@@ -1605,6 +1735,63 @@ export const createArenaGenerationService = (
           return withActorHeaders(createTerminalFallbackResponse(terminal), actor);
         }
       }
+      if (splitMaterialization) {
+        const reservedSeed = reservation.preparationSeed ?? null;
+        const reservedVersion = reservation.preparationVersion ?? null;
+        if (
+          !isArenaPreparationSeed(reservedSeed)
+          || !isArenaPreparationVersion(reservedVersion)
+        ) {
+          if (reservation.kind === 'created') {
+            await dependencies.store.releaseReservation({
+              generationId: reservation.generationId,
+              producerToken,
+            }).catch(() => ({ released: false }));
+            return jsonResponse({
+              code: 'GENERATION_PREPARATION_UNAVAILABLE',
+              error: 'Generation preparation state unavailable',
+            }, 503);
+          }
+          prepared = {
+            executionPayload: materializationPayload!,
+          };
+        } else {
+          try {
+            const materialized = await dependencies.executor.materialize!({
+              request,
+              actorKey: actor.actorKey,
+              payload: materializationPayload!,
+              preparationSeed: reservedSeed,
+              preparationVersion: reservedVersion,
+            });
+            if (materialized instanceof Response) {
+              if (reservation.kind === 'created') {
+                await dependencies.store.releaseReservation({
+                  generationId: reservation.generationId,
+                  producerToken,
+                }).catch(() => ({ released: false }));
+                return materialized;
+              }
+              prepared = { executionPayload: materializationPayload! };
+            } else {
+              prepared = materialized;
+            }
+          } catch {
+            if (reservation.kind === 'created') {
+              await dependencies.store.releaseReservation({
+                generationId: reservation.generationId,
+                producerToken,
+              }).catch(() => ({ released: false }));
+              return jsonResponse({
+                code: 'GENERATION_MATERIALIZATION_FAILED',
+                error: 'Generation materialization failed',
+              }, 500);
+            }
+            prepared = { executionPayload: materializationPayload! };
+          }
+        }
+      }
+      if (!prepared) throw new Error('ARENA_GENERATION_NOT_MATERIALIZED');
       observe({
         event: 'request',
         generationId: reservation.generationId,

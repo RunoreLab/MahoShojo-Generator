@@ -1,11 +1,16 @@
 import { describe, expect, it, vi } from 'vitest';
-import { ArenaGenerationFinalizationPendingError } from '@mahoshojo/hosted-api/arena-generation/service';
+import { createMemoryGenerationReplayStore } from '@mahoshojo/hosted-api/arena-generation/memory-replay-store';
+import {
+  ArenaGenerationFinalizationPendingError,
+  createArenaGenerationService,
+} from '@mahoshojo/hosted-api/arena-generation/service';
 
 import {
   createArenaGenerationRuntime,
   MAX_ARENA_COMBATANTS,
   type ArenaGenerationRuntimeDependencies,
 } from '../src/arena-generation/runtime';
+import { buildArenaGenerationPrompt } from '../src/arena-generation/prompt';
 
 const payload = {
   combatants: [
@@ -53,6 +58,123 @@ const createDependencies = (
 });
 
 describe('Arena generation runtime', () => {
+  it('materializes adjudication and prompt deterministically from the reserved seed', async () => {
+    const buildPrompt = vi.fn(async ({ payload: input, random }) => ({
+      prompt: `prompt:${JSON.stringify(input.adjudicationResults)}:${random()}`,
+      metadata: {
+        adjudicationResults: input.adjudicationResults,
+        reporterInfo: { name: `reporter-${random()}`, publication: 'test' },
+      },
+    }));
+    const dependencies = createDependencies({ buildPrompt });
+    const runtime = createArenaGenerationRuntime(dependencies);
+    const request = new Request('https://example.test/api/arena/generate-stream');
+    const preflight = await runtime.preflight!({
+      request,
+      actorKey: 'user:42',
+      payload: {
+        ...payload,
+        adjudicationEvents: [{
+          type: 'binary',
+          description: 'seeded event',
+          probability: 50,
+        }],
+      },
+    });
+    if (preflight instanceof Response) throw new Error('unexpected response');
+    expect(buildPrompt).not.toHaveBeenCalled();
+
+    const materialize = (preparationSeed: string) => runtime.materialize!({
+      request,
+      actorKey: 'user:42',
+      payload: preflight.materializationPayload,
+      preparationSeed,
+      preparationVersion: runtime.materializationVersion!,
+    });
+    const first = await materialize('11'.repeat(32));
+    const second = await materialize('11'.repeat(32));
+    const different = await materialize('22'.repeat(32));
+    if (first instanceof Response || second instanceof Response || different instanceof Response) {
+      throw new Error('unexpected response');
+    }
+
+    expect(first).toEqual(second);
+    expect(first).not.toEqual(different);
+    expect(first.responseHeaders?.['X-Mahoshojo-Stream-Meta']).toBe(
+      second.responseHeaders?.['X-Mahoshojo-Stream-Meta'],
+    );
+    expect(JSON.stringify(preflight.semanticPayload)).not.toContain('byok-secret');
+    expect(JSON.stringify(first.executionPayload)).toContain('byok-secret');
+  });
+
+  it('keeps reused response metadata aligned with the one real Provider prompt', async () => {
+    const prompts: string[] = [];
+    const runtime = createArenaGenerationRuntime(createDependencies({
+      buildPrompt: buildArenaGenerationPrompt,
+      generate: vi.fn(async ({ prompt }) => {
+        prompts.push(prompt);
+        return { body: stream('battle body'), telemetry: {} };
+      }),
+    }));
+    const store = createMemoryGenerationReplayStore();
+    const service = createArenaGenerationService({
+      store,
+      executor: runtime,
+      resolveActor: async () => ({ actorKey: 'user:42' }),
+      deriveGenerationId: async () => 'generation-seeded-integration',
+      hashPayload: async (input) => `hash:${JSON.stringify(input)}`,
+      now: () => new Date('2026-08-25T04:00:00.000Z'),
+      heartbeatIntervalMs: 60_000,
+      leaseDurationMs: 120_000,
+      replayPollMs: 1,
+    });
+    const createRequest = () => new Request(
+      'https://example.test/api/arena/generate-stream?format=sse',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          generationRequestId: 'request-seeded-integration',
+          ...payload,
+          adjudicationEvents: [{
+            type: 'binary',
+            description: 'integration roll',
+            probability: 50,
+          }],
+        }),
+      },
+    );
+
+    const first = await service.create(createRequest());
+    const firstHeader = first.headers.get('x-mahoshojo-stream-meta');
+    await first.body?.cancel('simulate lost initial response');
+    const reused = await service.create(createRequest());
+    const reusedHeader = reused.headers.get('x-mahoshojo-stream-meta');
+    await reused.text();
+
+    expect(firstHeader).not.toBeNull();
+    expect(reusedHeader).toBe(firstHeader);
+    expect(prompts).toHaveLength(1);
+    const metadata = JSON.parse(decodeURIComponent(reusedHeader!)) as {
+      adjudicationResults: Array<{
+        description: string;
+        outcome: string;
+        details: string;
+      }>;
+      reporterInfo: { name: string; publication: string };
+    };
+    expect(metadata.reporterInfo.name).toBeTruthy();
+    expect(metadata.reporterInfo.publication).toBeTruthy();
+    expect(metadata.adjudicationResults).toHaveLength(1);
+    expect(prompts[0]).toContain(metadata.adjudicationResults[0]!.description);
+    expect(prompts[0]).toContain(metadata.adjudicationResults[0]!.outcome);
+    expect(prompts[0]).toContain(metadata.adjudicationResults[0]!.details);
+    expect(JSON.stringify(await store.readState({
+      generationId: 'generation-seeded-integration',
+      actorKey: 'user:42',
+    }))).not.toMatch(/byok-secret|以下是登场角色/u);
+  });
+
   it('在 hash 与执行前只接受 server-authorized internal guidance', async () => {
     const preparedPayloads: Array<Record<string, unknown>> = [];
     const dependencies = createDependencies({

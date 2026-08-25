@@ -16,6 +16,8 @@ const reserveInput = {
   generationRequestId: 'request-1234',
   generationId: 'generation-1234',
   payloadHash: 'payload-sha256',
+  preparationSeed: '22'.repeat(32),
+  preparationVersion: 'arena-runtime-v1',
   producerToken: 'producer-token-1234',
   now: '2026-08-25T04:00:00.000Z',
   leaseExpiresAt: '2026-08-25T04:01:00.000Z',
@@ -24,7 +26,12 @@ const reserveInput = {
 describe('RedisGenerationReplayStore', () => {
   it('用单次 Lua reservation 建立 request identity 与 producer ownership，key 不含明文 actor', async () => {
     const client = createClient();
-    vi.mocked(client.eval).mockResolvedValue(['created', 'generation-1234']);
+    vi.mocked(client.eval).mockResolvedValue([
+      'created',
+      'generation-1234',
+      reserveInput.preparationSeed,
+      reserveInput.preparationVersion,
+    ]);
     const store = createRedisGenerationReplayStore({
       getClient: () => client,
       activeTtlSeconds: 3_600,
@@ -33,6 +40,8 @@ describe('RedisGenerationReplayStore', () => {
     await expect(store.reserve(reserveInput)).resolves.toEqual({
       kind: 'created',
       generationId: 'generation-1234',
+      preparationSeed: reserveInput.preparationSeed,
+      preparationVersion: reserveInput.preparationVersion,
     });
 
     expect(client.eval).toHaveBeenCalledTimes(1);
@@ -45,10 +54,34 @@ describe('RedisGenerationReplayStore', () => {
     expect(options.keys[1]).toBe('mahoshojo:gen:v1:generation-1234:state');
     expect(options.keys.join('|')).not.toContain('sensitive-actor-id');
     expect(options.arguments).toContain('3600000');
+    expect(options.arguments).toContain(reserveInput.preparationSeed);
+    expect(options.arguments).toContain(reserveInput.preparationVersion);
+    expect(options.arguments.join('|')).not.toContain('sensitive-actor-id');
   });
 
   it.each([
-    [['reused', 'generation-existing'], { kind: 'reused', generationId: 'generation-existing' }],
+    [[
+      'reused',
+      'generation-existing',
+      reserveInput.preparationSeed,
+      reserveInput.preparationVersion,
+    ], {
+      kind: 'reused',
+      generationId: 'generation-existing',
+      preparationSeed: reserveInput.preparationSeed,
+      preparationVersion: reserveInput.preparationVersion,
+    }],
+    [[
+      'reused',
+      'generation-existing',
+      '',
+      '',
+    ], {
+      kind: 'reused',
+      generationId: 'generation-existing',
+      preparationSeed: null,
+      preparationVersion: null,
+    }],
     [['conflict', ''], { kind: 'conflict' }],
   ] as const)('严格解析 reservation 结果 %j', async (raw, expected) => {
     const client = createClient();
@@ -56,6 +89,17 @@ describe('RedisGenerationReplayStore', () => {
     const store = createRedisGenerationReplayStore({ getClient: () => client });
 
     await expect(store.reserve(reserveInput)).resolves.toEqual(expected);
+  });
+
+  it('rejects incomplete preparation metadata before evaluating Lua', async () => {
+    const client = createClient();
+    const store = createRedisGenerationReplayStore({ getClient: () => client });
+
+    await expect(store.reserve({
+      ...reserveInput,
+      preparationVersion: undefined,
+    })).rejects.toThrow('REDIS_GENERATION_PREPARATION_INVALID');
+    expect(client.eval).not.toHaveBeenCalled();
   });
 
   it('批量 XADD、容量 trim、state cursor 与 TTL 在同一 Lua 命令中更新', async () => {

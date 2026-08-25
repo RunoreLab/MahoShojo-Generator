@@ -11,6 +11,8 @@ const generationId = `generation-${token}`;
 const generationRequestId = `request-${token}`;
 const actorKey = `anonymous:${token}`;
 const producerToken = `producer-${token}`;
+const preparationSeed = '11'.repeat(32);
+const preparationVersion = 'arena-runtime-v1';
 const now = '2026-08-25T04:00:00.000Z';
 const leaseExpiresAt = '2026-08-25T04:01:00.000Z';
 const redis = new RedisRuntime(redisUrl, true);
@@ -28,6 +30,8 @@ try {
     generationRequestId,
     generationId,
     payloadHash: 'payload-a',
+    preparationSeed,
+    preparationVersion,
     producerToken,
     now,
     leaseExpiresAt,
@@ -50,7 +54,15 @@ try {
     now,
     leaseExpiresAt,
   });
-  if (created.kind !== 'created' || reused.kind !== 'reused' || conflict.kind !== 'conflict') {
+  if (
+    created.kind !== 'created'
+    || created.preparationSeed !== preparationSeed
+    || created.preparationVersion !== preparationVersion
+    || reused.kind !== 'reused'
+    || reused.preparationSeed !== preparationSeed
+    || reused.preparationVersion !== preparationVersion
+    || conflict.kind !== 'conflict'
+  ) {
     throw new Error('ARENA_REDIS_RESERVATION_CONTRACT_FAILED');
   }
 
@@ -177,7 +189,12 @@ try {
     throw new Error('ARENA_REDIS_TERMINAL_CAS_FAILED');
   }
   const state = await store.readState({ generationId, actorKey });
-  if (state?.status !== 'cancelled' || state.snapshot?.markdown !== 'A') {
+  if (
+    state?.status !== 'cancelled'
+    || state.snapshot?.markdown !== 'A'
+    || state.preparationSeed !== preparationSeed
+    || state.preparationVersion !== preparationVersion
+  ) {
     throw new Error('ARENA_REDIS_STATE_CONTRACT_FAILED');
   }
   const terminalStateTtl = await cleanup.pTTL(`mahoshojo:gen:v1:${generationId}:state`);

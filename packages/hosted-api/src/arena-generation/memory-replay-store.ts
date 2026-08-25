@@ -1,3 +1,7 @@
+import {
+  isArenaPreparationSeed,
+  isArenaPreparationVersion,
+} from './service';
 import type {
   GenerationReplayStore,
   GenerationReplayStoreState,
@@ -39,7 +43,12 @@ export const createMemoryGenerationReplayStore = (
   if (![activeTtlMs, terminalTtlMs].every((value) => Number.isFinite(value) && value > 0)) {
     throw new Error('memory replay TTL 必须是正有限数字');
   }
-  const requests = new Map<string, { payloadHash: string; generationId: string }>();
+  const requests = new Map<string, {
+    payloadHash: string;
+    generationId: string;
+    preparationSeed: string | null;
+    preparationVersion: string | null;
+  }>();
   const states = new Map<string, GenerationReplayStoreState>();
   const events = new Map<string, GenerationStreamEvent[]>();
   const sequences = new Map<string, number>();
@@ -84,17 +93,33 @@ export const createMemoryGenerationReplayStore = (
 
   const store: GenerationReplayStore = {
     async reserve(input) {
+      const preparationSeed = input.preparationSeed ?? null;
+      const preparationVersion = input.preparationVersion ?? null;
+      if (
+        (preparationSeed === null) !== (preparationVersion === null)
+        || (preparationSeed !== null && !isArenaPreparationSeed(preparationSeed))
+        || (preparationVersion !== null && !isArenaPreparationVersion(preparationVersion))
+      ) {
+        throw new Error('MEMORY_GENERATION_PREPARATION_INVALID');
+      }
       prune();
       const requestKey = `${input.actorKey}\u0000${input.generationRequestId}`;
       const previous = requests.get(requestKey);
       if (previous) {
         return previous.payloadHash === input.payloadHash
-          ? { kind: 'reused', generationId: previous.generationId }
+          ? {
+            kind: 'reused',
+            generationId: previous.generationId,
+            preparationSeed: previous.preparationSeed,
+            preparationVersion: previous.preparationVersion,
+          }
           : { kind: 'conflict' };
       }
       requests.set(requestKey, {
         payloadHash: input.payloadHash,
         generationId: input.generationId,
+        preparationSeed,
+        preparationVersion,
       });
       writeState({
         actorKey: input.actorKey,
@@ -111,8 +136,15 @@ export const createMemoryGenerationReplayStore = (
         terminal: null,
         cancelRequested: false,
         cancelReason: null,
+        preparationSeed,
+        preparationVersion,
       });
-      return { kind: 'created', generationId: input.generationId };
+      return {
+        kind: 'created',
+        generationId: input.generationId,
+        preparationSeed,
+        preparationVersion,
+      };
     },
 
     async markRunning(input) {

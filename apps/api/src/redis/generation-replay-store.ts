@@ -1,6 +1,10 @@
 import { createHash } from 'node:crypto';
 
-import { isGenerationCancelReason } from '@mahoshojo/hosted-api/arena-generation/service';
+import {
+  isArenaPreparationSeed,
+  isArenaPreparationVersion,
+  isGenerationCancelReason,
+} from '@mahoshojo/hosted-api/arena-generation/service';
 import type {
   GenerationEventInput,
   GenerationReplayStore,
@@ -57,7 +61,11 @@ local existing = redis.call('GET', KEYS[1])
 if existing then
   local reservation = cjson.decode(existing)
   if reservation.payloadHash == ARGV[1] then
-    return { 'reused', reservation.generationId }
+    local seed = reservation.preparationSeed
+    local version = reservation.preparationVersion
+    if seed == nil or seed == cjson.null then seed = '' end
+    if version == nil or version == cjson.null then version = '' end
+    return { 'reused', reservation.generationId, seed, version }
   end
   return { 'conflict', '' }
 end
@@ -66,7 +74,7 @@ if redis.call('EXISTS', KEYS[2]) == 1 then
 end
 redis.call('SET', KEYS[1], ARGV[2], 'PX', ARGV[3])
 redis.call('SET', KEYS[2], ARGV[4], 'PX', ARGV[3])
-return { 'created', ARGV[5] }
+return { 'created', ARGV[5], ARGV[6], ARGV[7] }
 `;
 
 const MARK_RUNNING_SCRIPT = `
@@ -326,7 +334,21 @@ const parseReservation = (
     throw new Error('REDIS_GENERATION_RESERVATION_INVALID');
   }
   if ((raw[0] === 'created' || raw[0] === 'reused') && typeof raw[1] === 'string') {
-    return { kind: raw[0], generationId: raw[1] };
+    const preparationSeed = raw[2] === undefined || raw[2] === '' ? null : raw[2];
+    const preparationVersion = raw[3] === undefined || raw[3] === '' ? null : raw[3];
+    if (
+      (preparationSeed === null) !== (preparationVersion === null)
+      || (preparationSeed !== null && !isArenaPreparationSeed(preparationSeed))
+      || (preparationVersion !== null && !isArenaPreparationVersion(preparationVersion))
+    ) {
+      throw new Error('REDIS_GENERATION_RESERVATION_INVALID');
+    }
+    return {
+      kind: raw[0],
+      generationId: raw[1],
+      preparationSeed,
+      preparationVersion,
+    };
   }
   if (raw[0] === 'conflict') return { kind: 'conflict' };
   throw new Error('REDIS_GENERATION_RESERVATION_INVALID');
@@ -356,6 +378,8 @@ const cancelReasonFromTaggedResult = (
 
 const parseStoredState = (raw: string): StoredGenerationState => {
   const parsed = JSON.parse(raw) as Partial<StoredGenerationState>;
+  const preparationSeed = parsed.preparationSeed ?? null;
+  const preparationVersion = parsed.preparationVersion ?? null;
   if (
     typeof parsed.actorHash !== 'string'
     || typeof parsed.reservationKey !== 'string'
@@ -365,6 +389,9 @@ const parseStoredState = (raw: string): StoredGenerationState => {
     || typeof parsed.producerToken !== 'string'
     || !isGenerationStatus(parsed.status)
     || typeof parsed.updatedAt !== 'string'
+    || ((preparationSeed === null) !== (preparationVersion === null))
+    || (preparationSeed !== null && !isArenaPreparationSeed(preparationSeed))
+    || (preparationVersion !== null && !isArenaPreparationVersion(preparationVersion))
   ) {
     throw new Error('REDIS_GENERATION_STATE_INVALID');
   }
@@ -388,6 +415,8 @@ const parseStoredState = (raw: string): StoredGenerationState => {
       : parsed.cancelRequested === true
         ? 'user'
         : null,
+    preparationSeed,
+    preparationVersion,
   };
 };
 
@@ -466,6 +495,15 @@ export const createRedisGenerationReplayStore = (
 
   return Object.freeze({
     async reserve(input) {
+      const preparationSeed = input.preparationSeed ?? null;
+      const preparationVersion = input.preparationVersion ?? null;
+      if (
+        (preparationSeed === null) !== (preparationVersion === null)
+        || (preparationSeed !== null && !isArenaPreparationSeed(preparationSeed))
+        || (preparationVersion !== null && !isArenaPreparationVersion(preparationVersion))
+      ) {
+        throw new Error('REDIS_GENERATION_PREPARATION_INVALID');
+      }
       const actorHash = hashKeyPart(input.actorKey);
       const identityKey = requestKey(input.actorKey, input.generationRequestId);
       const storedState: StoredGenerationState = {
@@ -484,6 +522,8 @@ export const createRedisGenerationReplayStore = (
         terminal: null,
         cancelRequested: false,
         cancelReason: null,
+        preparationSeed,
+        preparationVersion,
       };
       const raw = await options.getClient().eval(RESERVATION_SCRIPT, {
         keys: [
@@ -492,10 +532,17 @@ export const createRedisGenerationReplayStore = (
         ],
         arguments: [
           input.payloadHash,
-          JSON.stringify({ generationId: input.generationId, payloadHash: input.payloadHash }),
+          JSON.stringify({
+            generationId: input.generationId,
+            payloadHash: input.payloadHash,
+            preparationSeed,
+            preparationVersion,
+          }),
           String(activeTtlMs),
           JSON.stringify(storedState),
           input.generationId,
+          preparationSeed ?? '',
+          preparationVersion ?? '',
         ],
       });
       return parseReservation(raw);
