@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { parse } from 'comment-json';
+import { ESLint } from 'eslint';
 
 const rootDirectory = process.cwd();
 
@@ -136,6 +137,26 @@ describe('G25D Web workspace app ownership', () => {
     for (const dependencyName of ['next', 'react', 'react-dom', '@opennextjs/cloudflare']) {
       expect(appManifest.dependencies?.[dependencyName], `missing dependency ${dependencyName}`).toEqual(expect.any(String));
     }
+  });
+
+  it('owns the effective Web lint policy in a single flat config', async () => {
+    const flatConfigPath = path.join(appDirectory, 'eslint.config.mjs');
+    const legacyConfigPath = path.join(appDirectory, '.eslintrc.json');
+    const appManifest = JSON.parse(readFileSync(appManifestPath, 'utf8')) as {
+      scripts?: Record<string, string>;
+    };
+
+    expect(existsSync(flatConfigPath)).toBe(true);
+    expect(existsSync(legacyConfigPath)).toBe(false);
+    expect(appManifest.scripts?.lint).toBe('eslint app components lib');
+
+    const eslint = new ESLint({ cwd: appDirectory });
+    const effectiveConfig = await eslint.calculateConfigForFile(path.join(appDirectory, 'app/layout.tsx'));
+
+    expect(effectiveConfig?.rules?.['@typescript-eslint/no-unused-vars']?.[0]).toBe(1);
+    expect(effectiveConfig?.rules?.['@typescript-eslint/no-unused-expressions']?.[0]).toBe(1);
+    expect(effectiveConfig?.rules?.['@typescript-eslint/no-explicit-any']?.[0]).toBe(0);
+    expect(effectiveConfig?.rules?.['@next/next/no-img-element']?.[0]).toBe(0);
   });
 
   it('keeps root commands as filtered compatibility entrypoints without runtime dependencies', () => {

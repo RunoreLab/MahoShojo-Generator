@@ -12,7 +12,7 @@
     "preview": "pnpm run build:cf && opennextjs-cloudflare preview",
     "deploy": "pnpm run build:cf && opennextjs-cloudflare deploy",
     "start": "next start",
-    "lint": "next lint",
+    "lint": "eslint app components lib",
     "test": "vitest run --config vitest.config.ts",
     "test:watch": "vitest --config vitest.config.ts",
     "backfill:user-auth-links:dry": "pnpm exec tsx scripts/backfill-user-auth-links.ts --dry-run true --batch 200",
