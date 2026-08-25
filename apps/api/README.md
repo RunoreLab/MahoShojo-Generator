@@ -11,7 +11,7 @@
 - `/health/live` 和 `/health/ready` 分离进程存活与依赖就绪状态；
 - 每 60 秒以单行 JSON 日志导出 Node 进程、event-loop 和 HTTP 容量基线。
 
-Phase 2.5C 建立的 10 条 shared-service route包括 `generate-magical-girl`，G25B-1 收口的
+Phase 2.5C 建立的 10 条 shared-service route 包括 `generate-magical-girl`，G25B-1 收口的
 `generate-game-card`、Free generate/stream、Scenario generate/stream，以及 G25B-2 收口的 Creator、残兽
 generate/stream。Hono 从 `apps/api/src/adapters/*` 加载这些 adapter，不再动态导入对应 Next route；Next wrapper
 继续保留，两个 runtime 使用同一默认 service composition，业务顺序与错误 wire 由
@@ -26,16 +26,18 @@ generate/stream。Hono 从 `apps/api/src/adapters/*` 加载这些 adapter，不�
 
 create 使用稳定 `generationRequestId` 和 actor-scoped semantic hash；Redis reservation 保证单 producer，断线后的
 subscriber 只通过 `Last-Event-ID`/`after` 恢复同一 generation，不会把请求 signal 传播给 Provider。terminal 由
-D1 claim 与确定性 R2 snapshot 兜底，只有显式 cancel 才中止 generation-owned signal。Phase 2.5B 退出审计原将
-14 条 capability 从 Hono 执行清单退出；G25R 只让 `arena/generate-stream` 精确 re-entry，当前仍有 13 条对应
+D1 claim 与确定性 R2 snapshot 兜底，只有显式 cancel 才中止 generation-owned signal。Phase 2.5B 退出审计将
+14 条 capability 从 Hono 执行清单退出；G25R 只让 `arena/generate-stream` 精确 re-entry，另新增四条 generation
+控制面 shared route，因此当前 registry 为 15 条 shared route，同时仍有 13 条 exited capability 对应的
 Next 公开 route 保持原有实现、wire、鉴权和数据语义，未来若要重新进入 Hono，必须先形成 shared seam 和
 副作用/replay 证据。生成器在 `legacyRouteIds` 非空时 fail closed，生成的 registry 也不再拥有动态导入
 legacy Next handler 的 adapter 类型或代码路径。当前 registry 为 `15 shared-service / 13 exited / 0 legacy-next`；
 Hono source、manifest、测试、生成器和 bundle 构建已由 `apps/api` 独占。生成后的实际 registry 为
 `apps/api/src/generated/routes.ts`，不得手工修改。
 
-`check:workspace:boundaries` 还会扫描 `apps/api/src/adapters`，禁止 shared adapter 回导 legacy `app/api` 或 `pages/api`
-源码；新增 shared route 必须先形成 service/runtime composition，而不是把 Next handler 换一个入口继续加载。
+`check:workspace:boundaries` 还会扫描 `apps/api/src/adapters`，禁止 shared adapter 回导 root legacy route 或
+`apps/web/app/api`、`apps/web/pages/api` 源码；新增 shared route 必须先形成 service/runtime composition，而不是把
+Next handler 换一个入口继续加载。
 
 ## 容量遥测
 
@@ -128,7 +130,7 @@ Hono 服务配置相同的 `D1_GATEWAY_HMAC_SECRET`。生产建议再用 Cloudfl
 
 ## 前端直连开关
 
-前端和服务端内部调用是否将白名单内的生成 API 请求到 Hono，由 `config/hono-api.ts` 中的
+前端和服务端内部调用是否将白名单内的生成 API 请求到 Hono，由 `apps/web/config/hono-api.ts` 中的
 `honoApiConfig.enabled` 控制：`true` 使用稳定逻辑入口 `https://api.mahoshojo.colanns.me`，`false` 继续使用同源
 Next.js/Cloudflare 路由。`homura.colanns.me` 只允许作为物理 Hono deploy/health origin，不得重新编码进客户端。
 稳定入口的控制面必须按 active-passive 选择 Hono primary 或 Next/OpenNext DR，且必须关闭“连接失败后透明跨 runtime

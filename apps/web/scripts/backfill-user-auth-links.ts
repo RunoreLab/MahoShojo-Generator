@@ -1,7 +1,8 @@
 #!/usr/bin/env -S pnpm exec tsx
 
-import { loadEnvConfig } from '@next/env';
+import { fileURLToPath } from 'node:url';
 
+import { loadApplicationEnvironmentWithRootFallback } from '@/config/load-root-env-fallback';
 import {
   getExistingLinkByBusinessUserId,
   listBusinessUsersByEmailInsensitive,
@@ -141,8 +142,14 @@ const initStats = (): Stats => ({
   errors: 0,
 });
 
+const loadApplicationEnvironment = (): void => {
+  const applicationDirectory = fileURLToPath(new URL('../', import.meta.url));
+  const repositoryRoot = fileURLToPath(new URL('../../../', import.meta.url));
+  loadApplicationEnvironmentWithRootFallback(applicationDirectory, repositoryRoot, true);
+};
+
 async function main() {
-  loadEnvConfig(process.cwd(), true);
+  loadApplicationEnvironment();
 
   const argv = process.argv.slice(2);
   if (argv.includes('--help') || argv.includes('-h')) {

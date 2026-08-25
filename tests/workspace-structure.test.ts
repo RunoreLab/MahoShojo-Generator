@@ -97,7 +97,23 @@ describe('G25D Web workspace app ownership', () => {
       expect(existsSync(path.join(appDirectory, relativePath)), `apps/web/${relativePath} must exist`).toBe(true);
     }
 
-    for (const retiredRoot of ['app', 'components', 'lib', 'public', 'styles', 'types']) {
+    for (const retiredRoot of [
+      '.dev.vars',
+      '.eslintrc.json',
+      'app',
+      'components',
+      'components.json',
+      'env.example',
+      'lib',
+      'middleware.ts',
+      'next.config.ts',
+      'open-next.config.ts',
+      'postcss.config.mjs',
+      'public',
+      'styles',
+      'types',
+      'wrangler.jsonc',
+    ]) {
       expect(existsSync(path.join(rootDirectory, retiredRoot)), `${retiredRoot}/ must be retired`).toBe(false);
     }
   });
@@ -134,6 +150,20 @@ describe('G25D Web workspace app ownership', () => {
       );
     }
     expect(rootManifest.dependencies ?? {}).toEqual({});
+  });
+
+  it('keeps the root Drizzle generator able to resolve Web schema aliases', () => {
+    const rootTsconfig = JSON.parse(
+      readFileSync(path.join(rootDirectory, 'tsconfig.json'), 'utf8'),
+    ) as {
+      compilerOptions?: {
+        baseUrl?: string;
+        paths?: Record<string, string[]>;
+      };
+    };
+
+    expect(rootTsconfig.compilerOptions?.baseUrl).toBe('.');
+    expect(rootTsconfig.compilerOptions?.paths?.['@/*']).toEqual(['apps/web/*']);
   });
 });
 

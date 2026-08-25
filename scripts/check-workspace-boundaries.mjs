@@ -434,10 +434,15 @@ function isLegacyNextRouteSpecifier(rootDirectory, filePath, moduleSpecifier) {
   }
 
   const relativePath = path.relative(rootDirectory, targetPath).split(path.sep).join('/');
-  return relativePath === 'app/api'
-    || relativePath.startsWith('app/api/')
-    || relativePath === 'pages/api'
-    || relativePath.startsWith('pages/api/');
+  const pathSegments = relativePath.split('/');
+  const routeRelativePath = pathSegments[0] === 'apps' && pathSegments[1]
+    ? pathSegments.slice(2).join('/')
+    : relativePath;
+
+  return routeRelativePath === 'app/api'
+    || routeRelativePath.startsWith('app/api/')
+    || routeRelativePath === 'pages/api'
+    || routeRelativePath.startsWith('pages/api/');
 }
 
 function localSourceTargetFromSpecifier(rootDirectory, filePath, moduleSpecifier) {

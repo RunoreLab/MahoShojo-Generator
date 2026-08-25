@@ -327,7 +327,11 @@ const waitForMarker = async (
   throw new Error(`等待子进程 marker 超时：${marker}\n${await readMarkers(markerPath)}`);
 };
 
-const waitForReadyPort = async (child: ChildProcess, markerPath: string): Promise<number> => {
+const waitForReadyPort = async (
+  child: ChildProcess,
+  markerPath: string,
+  readStderr: () => string,
+): Promise<number> => {
   const deadline = Date.now() + 5_000;
   while (Date.now() < deadline) {
     const markers = await readMarkers(markerPath);
@@ -336,7 +340,7 @@ const waitForReadyPort = async (child: ChildProcess, markerPath: string): Promis
     if (child.exitCode !== null || child.signalCode !== null) {
       throw new Error(
         `子进程在 HTTP server ready 前退出：code=${String(child.exitCode)} `
-        + `signal=${String(child.signalCode)}\n${markers}`,
+        + `signal=${String(child.signalCode)}\n${markers}\n${readStderr()}`,
       );
     }
     await new Promise((resolve) => setTimeout(resolve, 20));
@@ -447,7 +451,7 @@ describe('graceful shutdown real Node signals', () => {
       });
 
       try {
-        const port = await waitForReadyPort(child, markerPath);
+        const port = await waitForReadyPort(child, markerPath, () => stderr);
         for (let index = 0; index < 10; index += 1) {
           await abortStreamAfterFirstChunk(port);
         }

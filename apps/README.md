@@ -1,12 +1,12 @@
 # 应用边界
 
-`apps/` 承载独立运行时与部署单元。Phase 2.5A 已激活 D1 Gateway，Phase 2.5C 已激活 Hono API
-的 source、manifest、测试和构建边界；其余应用仍按阶段计划渐进迁移，不能据此宣称 Phase 2.5 或
-MONO-002 已整体完成。
+`apps/` 承载独立运行时与部署单元。G25D 已激活 Next/OpenNext Web，Phase 2.5A 已激活 D1 Gateway，
+Phase 2.5C 已激活 Hono API 的 source、manifest、测试和构建边界；Admin 与其他 runtime 仍按阶段计划
+渐进迁移，不能据此宣称 Phase 2.5 已整体完成。
 
 长期目标边界如下：
 
-- `web`：现有 Web 产品的未来独立应用边界，当前仍在 legacy root；
+- `web`：已激活的 Next/OpenNext workspace app，独占 Web source、测试、静态资产、环境与 Cloudflare deployment lifecycle；
 - `admin`：管理端应用；
 - `api`：已激活的 Hono Node workspace app，持有 `15 shared-service / 13 exited / 0 legacy-next`
   的 source、manifest、测试、生成器、容器和原子部署入口，详见 [`api/README.md`](./api/README.md)；
@@ -15,6 +15,6 @@ MONO-002 已整体完成。
   不要求创建该应用或使用 Durable Object；
 - `desktop`、`mobile`：桌面端与移动端应用边界。
 
-除 `apps/api` 与 `apps/d1-gateway` 外，README 或空目录仍只表示路线图占位。当前没有迁移 Web、Admin、
-Desktop、Mobile 或完整 Arena Room runtime。应用之间不得直接导入彼此内部源码，共享能力应经
-`packages/*` 或版本化协议边界提供。
+除 `apps/web`、`apps/api` 与 `apps/d1-gateway` 外，README 或空目录仍只表示路线图占位。当前没有迁移
+Admin、Desktop、Mobile 或完整 Arena Room runtime。应用之间不得直接导入彼此内部源码，共享能力应经
+`packages/*` 或版本化协议边界提供。仓库根只保留 workspace 编排、统一门禁与跨 runtime route/migration tooling。

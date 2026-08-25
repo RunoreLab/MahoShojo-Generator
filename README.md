@@ -1,6 +1,6 @@
 <!-- markdownlint-disable MD033 MD041 -->
 <p align="center">
-  <img src="./public/logo.svg" width="300" height="200" alt="MahoGen">
+  <img src="./apps/web/public/logo.svg" width="300" height="200" alt="MahoGen">
 </p>
 
 <div align="center">
@@ -98,10 +98,10 @@
 pnpm install
 
 # 配置环境变量
-cp env.example .env.local
+cp apps/web/env.example apps/web/.env.local
 ```
 
-编辑 `.env.local` 配置你的 AI 提供商：
+编辑 `apps/web/.env.local` 配置你的 AI 提供商：
 
 ```shell
 AI_PROVIDERS_CONFIG='[
@@ -150,7 +150,7 @@ Cloudflare Pages 部署环境变量需显式设置 `PNPM_VERSION=11.3.0`，避�
 - 命名规范采用“分层统一 + 边界映射”，适用于全项目，不限于鉴权模块。
 - 详细说明见 [docs/NAMING_CONVENTIONS_2026-02-28.md](./docs/NAMING_CONVENTIONS_2026-02-28.md)。
 - 当前路由统一使用 App Router；历史迁移评估见 [docs/reports/2026-06-03_204053_App_Router迁移评估.md](./docs/reports/2026-06-03_204053_App_Router迁移评估.md)。
-- 新增 API 默认使用 `app/api/**/route.ts` Route Handler；不要新增 `pages/` 或 `pages/api/` 入口。
+- 新增 Web API 默认使用 `apps/web/app/api/**/route.ts` Route Handler；不要新增 `pages/` 或 `pages/api/` 入口。
 
 - [x] 核心 AI 生成系统
 - [x] 角色成长与竞技场系统
@@ -161,9 +161,9 @@ Cloudflare Pages 部署环境变量需显式设置 `PNPM_VERSION=11.3.0`，避�
 
 ### 项目结构与模块划分
 - 本项目基于 Next.js + `@opennextjs/cloudflare` + Cloudflare D1 数据库 + Tailwind 4 + Vercel AI SDK 编写。
-- `app/` 是当前统一路由体系，页面入口使用 `app/**/page.tsx`，API 入口使用 `app/api/**/route.ts`。
-- 可复用的卡片与模态组件存放于 `components/`，复杂业务逻辑优先放在所属路由目录，避免组件过度臃肿。
-- AI 相关能力封装在 `lib/`（`ai.ts`、`config.ts`、`signature.ts` 等）；共享类型位于 `types/arena.d.ts`；静态资源在 `public/`；全局样式集中于 `styles/`；工具脚本放在 `scripts/`；测试与夹具位于 `tests/`。
+- `apps/web/app/` 是当前统一 Web 路由体系，页面入口使用 `apps/web/app/**/page.tsx`，API 入口使用 `apps/web/app/api/**/route.ts`。
+- 可复用的卡片与模态组件存放于 `apps/web/components/`，复杂业务逻辑优先放在所属路由目录，避免组件过度臃肿。
+- Web AI 兼容层位于 `apps/web/lib/`；共享类型位于 `apps/web/types/arena.d.ts`；静态资源在 `apps/web/public/`；全局样式集中于 `apps/web/styles/`；Web 运维脚本与 tests 分别位于 `apps/web/scripts/`、`apps/web/tests/`。根 `scripts/` 与 `tests/` 只保留 repository gates/integration tests。
 
 ### 编码风格与命名约定
 - TypeScript 采用 `strict` 配置；React 19 组件文件使用 PascalCase 命名并导出具名函数，除非框架限制不得使用匿名默认导出。
@@ -185,14 +185,14 @@ Cloudflare Pages 部署环境变量需显式设置 `PNPM_VERSION=11.3.0`，避�
 
 ### API 的编写
 - 该项目部署在 Cloudflare 上，通过 `@opennextjs/cloudflare` 运行于 Cloudflare Workers/Pages 链路；不要引入不兼容的库或特性。
-- 新 API 默认使用 App Router Route Handler：路径形如 `app/api/<domain>/<resource>/route.ts`，导出 `GET`、`POST` 等方法，并直接返回 Web `Response`。
+- 新 Web API 默认使用 App Router Route Handler：路径形如 `apps/web/app/api/<domain>/<resource>/route.ts`，导出 `GET`、`POST` 等方法，并直接返回 Web `Response`。
 - 业务处理函数优先保持 `(req: Request) => Promise<Response>` 的 Web 标准形态，Route Handler 文件只负责 HTTP method 导出、动态参数接入和轻量组装。
 - 动态路由迁移时，优先通过 Route Handler 的 `context.params` 显式传参；避免在业务层零散解析 pathname，除非是为了兼容既有公共函数。
 
 ### 测试规范
 - 测试脚本逻辑基于 Vitest 执行；测试 API 从 `vitest` 导入，禁止新增 `bun:test` 依赖。
-- 在 `tests/` 下新建 `*.test.ts` 测试文件（仅针对遗留代码使用 `.test.js`），共用 `tests/test.json` 等夹具。
-- 随机逻辑需可复现，参考 `tests/getWeightedRandomFromSeed.test.js`：为辅助函数设定种子，并验证概率分布而非采样结果。
+- Web 行为测试在 `apps/web/tests/` 下新建 `*.test.ts`（仅针对遗留代码使用 `.test.js`），共用 `apps/web/tests/test.json` 等夹具；跨 app/repository contract 测试留在根 `tests/`。
+- 随机逻辑需可复现，参考 `apps/web/tests/getWeightedRandomFromSeed.test.js`：为辅助函数设定种子，并验证概率分布而非采样结果。
 - 每次提交前执行 `pnpm test`、`pnpm lint` 和 `pnpm build`，在 PR 描述中记录重要日志差异；任何结构性变更需同步更新夹具与类型声明。
 
 ## 📊 统计
@@ -216,24 +216,19 @@ Cloudflare Pages 部署环境变量需显式设置 `PNPM_VERSION=11.3.0`，避�
 
 ```
 MahoShojo-Generator/
-├── app/                    # App Router 页面、全局 layout 与 Route Handlers
-│   ├── api/                # Web Request/Response API 入口
-│   ├── layout.tsx          # 全局 HTML 壳、metadata、样式与 Providers
-│   └── **/page.tsx         # 页面路由入口
-├── lib/                    # 核心逻辑
-│   ├── ai/                 # AI 集成
-│   ├── ai-session/         # AI 连续会话（连续战报等）
-│   ├── database/           # 数据库访问
-│   ├── db/                 # Drizzle schema/repositories
-│   ├── d1.ts               # Cloudflare D1
-│   └── signature.ts        # 数据签名
-├── drizzle/                # D1 迁移 SQL
-├── components/             # UI 组件
-├── public/                 # 静态资源
-│   ├── announcements.json  # 公告
-│   ├── encyclopedia/       # 百科 Markdown
-│   └── presets/            # 预设数据
-└── types/                  # TypeScript 类型定义
+├── apps/
+│   ├── web/                # Next/OpenNext source、tests、assets 与 deploy unit
+│   │   ├── app/            # App Router 页面与 Route Handlers
+│   │   ├── components/     # Web UI 组件
+│   │   ├── lib/            # Web runtime/adapters
+│   │   └── public/         # 静态资源
+│   ├── api/                # Hono Node API deployment unit
+│   └── d1-gateway/         # Cloudflare D1 Gateway Worker
+├── packages/               # 显式 exports 的共享领域、contract 与 runtime core
+├── config/                 # 跨 runtime route inventory
+├── drizzle/                # D1 migration history
+├── scripts/                # repository boundary/naming/data tooling
+└── tests/                  # repository ownership/integration contracts
 ```
 
 ---

@@ -1,9 +1,9 @@
 import { initOpenNextCloudflareForDev } from "@opennextjs/cloudflare";
-import { loadEnvConfig } from "@next/env";
 import type { NextConfig } from "next";
 import { PHASE_DEVELOPMENT_SERVER } from "next/constants";
 import { fileURLToPath } from "node:url";
 
+import { loadRepositoryRootEnvFallback } from "./config/load-root-env-fallback";
 import { buildStaticBrowserSecurityHeaders } from "./lib/security/browser-headers";
 
 const repositoryRoot = fileURLToPath(new URL('../..', import.meta.url));
@@ -11,7 +11,7 @@ const repositoryRoot = fileURLToPath(new URL('../..', import.meta.url));
 const createNextConfig = (phase: string): NextConfig => {
   // G25D compatibility: app-local/explicit env remains authoritative while a
   // legacy ignored root .env* can still supply missing local values.
-  loadEnvConfig(repositoryRoot, phase === PHASE_DEVELOPMENT_SERVER);
+  loadRepositoryRootEnvFallback(repositoryRoot, phase === PHASE_DEVELOPMENT_SERVER);
 
   if (phase === PHASE_DEVELOPMENT_SERVER) {
     initOpenNextCloudflareForDev();

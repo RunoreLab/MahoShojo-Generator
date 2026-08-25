@@ -13,6 +13,7 @@ const REQUIRED_AUTH_TABLES = [
 ];
 
 const REQUIRED_USERS_COLUMNS = ['is_admin', 'is_review_exempt'];
+const WRANGLER_WORKSPACE = '@mahoshojo/web';
 
 const parseArgs = (argv) => {
   const args = {
@@ -135,16 +136,16 @@ const toInt = (value) => {
 };
 
 const buildWranglerCommandArgs = (options, sql) => {
-  const args = ['--yes', 'wrangler', 'd1', 'execute', options.database];
+  const args = ['--filter', WRANGLER_WORKSPACE, 'exec', 'wrangler', 'd1', 'execute', options.database];
 
   if (options.local) args.push('--local');
   if (options.remote) args.push('--remote');
   if (options.preview) args.push('--preview');
-  if (options.persistTo) args.push('--persist-to', options.persistTo);
-  if (options.config) args.push('--config', options.config);
+  if (options.persistTo) args.push('--persist-to', resolve(process.cwd(), options.persistTo));
+  if (options.config) args.push('--config', resolve(process.cwd(), options.config));
   if (options.env) args.push('--env', options.env);
   for (const envFile of options.envFiles) {
-    args.push('--env-file', envFile);
+    args.push('--env-file', resolve(process.cwd(), envFile));
   }
 
   args.push('--json', '--command', sql);
@@ -156,7 +157,7 @@ const executeSql = (options, sql) => {
   mkdirSync(xdgConfigHome, { recursive: true });
 
   const commandArgs = buildWranglerCommandArgs(options, sql);
-  const result = spawnSync('npx', commandArgs, {
+  const result = spawnSync('pnpm', commandArgs, {
     encoding: 'utf8',
     env: {
       ...process.env,

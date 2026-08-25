@@ -8,6 +8,10 @@
     "noEmit": true,
     "allowJs": true,
     "resolveJsonModule": true,
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["apps/web/*"]
+    },
     "types": ["node", "vitest/globals"]
   },
   "include": ["scripts/**/*", "tests/**/*", "drizzle.config.ts", "vitest.config.ts"]

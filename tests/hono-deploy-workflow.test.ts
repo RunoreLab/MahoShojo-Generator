@@ -119,6 +119,21 @@ describe('Hono deployment workflow', () => {
     expect(verificationStep).toContain('run: pnpm run ci:verify');
   });
 
+  test('builds and deploys Cloudflare Web through the apps/web lifecycle', () => {
+    const workflow = readFileSync(CLOUDFLARE_WORKFLOW_PATH, 'utf8');
+    const deployJob = getJob(workflow, 'deploy');
+
+    expect(getStep(deployJob, 'Build Cloudflare bundle')).toContain(
+      'run: pnpm --filter @mahoshojo/web run build:cf',
+    );
+    expect(getStep(deployJob, 'Deploy production')).toContain(
+      'run: pnpm --filter @mahoshojo/web exec wrangler deploy --env production',
+    );
+    expect(getStep(deployJob, 'Deploy preview')).toContain(
+      'run: pnpm --filter @mahoshojo/web exec wrangler deploy --env preview',
+    );
+  });
+
   test('builds the Hono container before assembling and uploading the deployment artifact', () => {
     const workflow = readFileSync(HONO_WORKFLOW_PATH, 'utf8');
     const compose = readFileSync(HONO_COMPOSE_PATH, 'utf8');

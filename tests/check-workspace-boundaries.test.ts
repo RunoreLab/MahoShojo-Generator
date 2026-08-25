@@ -204,6 +204,28 @@ describe('workspace dependency boundaries', () => {
     expect(violations[0]?.module).toBe('@/app/api/generate/handler');
   });
 
+  it('rejects direct and indirect Hono adapter imports into relocated Web routes', async () => {
+    const rootDir = await createWorkspaceFixture({
+      'apps/web/app/api/direct/route.ts': 'export const POST = () => new Response();\n',
+      'apps/web/app/api/indirect/route.ts': 'export const GET = () => new Response();\n',
+      'apps/api/src/bridge.ts': "export { GET } from '../../web/app/api/indirect/route';\n",
+      'apps/api/src/adapters/generate.ts': [
+        "export { POST } from '../../../web/app/api/direct/route';",
+        "export { GET } from '#/bridge';",
+      ].join('\n'),
+    });
+
+    const violations = checkWorkspaceBoundaries(rootDir).filter(
+      (violation) => violation.rule === 'MONO-009-HONO-ADAPTER-LEGACY',
+    );
+
+    expect(violations).toHaveLength(2);
+    expect(violations.map((violation) => violation.module)).toEqual([
+      '../../../web/app/api/direct/route',
+      '../../web/app/api/indirect/route',
+    ]);
+  });
+
   it('rejects app-to-app imports through relative and workspace package names while keeping @ app-local', async () => {
     const rootDir = await createWorkspaceFixture({
       'apps/web/package.json': manifest('@mahoshojo/web'),
