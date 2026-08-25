@@ -2,11 +2,11 @@
 
 日期：2026-08-25
 
-状态：`BLOCKED`（实现已收口，最终环境验收未闭合）
+状态：`COMPLETE`（实现与最终环境验收均已闭合）
 
 - Goal：`G25C`
 - source commit：`dbc073f7`
-- 最终实现 commit：`fe3e3ff8`
+- 最终实现 commit：`5a2780b2`
 - 主要 independent review remediation commits：`2547b998`、`537510b1`、`51e72669`、
   `ab5a3213`、`5981c6e4`、`d385452b`、`99032cb6`、`fe3e3ff8`
 - 文档收口 commit：本日志所在提交
@@ -20,10 +20,11 @@
 
 ## 1. Objective 与实际范围
 
-G25C 的代码已将 Hono Node runtime 从 legacy root `server/` 所有权迁入真实 `apps/api`
+G25C 已将 Hono Node runtime 从 legacy root `server/` 所有权迁入真实 `apps/api`
 workspace app，并一并收口 server-only runtime composition、AI/D1/Redis 容量 telemetry、
-bundle、Docker、CI 与 deploy ownership。最终验收仍缺同一 commit 的真实 Docker build/Compose
-和隔离 D1 Gateway + Redis built-runtime integration，因此本日志不把 G25C 报告为完成。
+bundle、Docker、CI 与 deploy ownership。`5a2780b2` 所在版本已通过本地真实 Docker build/Compose、
+隔离 D1 Gateway + Redis built-runtime integration，以及同一 SHA 的 GitHub Actions Hono build；
+因此本日志将 G25C stopping condition 记为完成。
 
 启动时已有后续 Phase 2.5B 证据显著改变原计划基线：14 条异构 `legacy-next`
 capability 已经过结构退出审计，当前 machine-readable inventory 为 `10 shared-service / 14 exited /
@@ -129,9 +130,9 @@ Next 执行更安全。G25C 没有删除或改写它们的 Next 公开 route。
 ### 4.1 PASS
 
 - `CI=true pnpm install --frozen-lockfile --offline --trust-lockfile`：12 个 workspace，lockfile 无变化；
-- `pnpm --filter @mahoshojo/hosted-runtime test/lint/build`：最终 31 files / 145 tests，lint/typecheck 通过；
+- `pnpm --filter @mahoshojo/hosted-runtime test/lint/build`：最终 31 files / 146 tests，lint/typecheck 通过；
 - `pnpm --filter @mahoshojo/hosted-api test/lint/build`：3 files / 29 tests，lint/typecheck 通过；
-- `pnpm --filter @mahoshojo/api` 的 test/lint/build/build:bundle：最终 15 files / 105 tests，生成
+- `pnpm --filter @mahoshojo/api` 的 test/lint/build/build:bundle：最终 15 files / 110 tests，生成
   10 条 shared route 和 5.3 MB single-file bundle；
 - deploy release-contract/installer/script/workflow：4 files / 62 tests；两个 shell 的 `sh -n`、
   `dash -n` 及 affected ESLint 通过；
@@ -142,15 +143,34 @@ Next 执行更安全。G25C 没有删除或改写它们的 Next 公开 route。
   `HONO_CONFIG_CHECK_ONLY=true` 生产配置成功加载，没有连接外部服务；
 - `pnpm run check:workspace:boundaries`：通过；
 - `pnpm run workspace:verify`：11 个实际 package/app 的 boundary、naming、test、lint、build 通过；
-- `pnpm exec vitest run --reporter=dot --maxWorkers=1`：329 files / 1796 tests 通过；
+- 环境收口前 checkpoint 的 `pnpm exec vitest run --reporter=dot --maxWorkers=1`：
+  329 files / 1796 tests 通过；最终断连修复合并后的 root 数量见下方 329 files / 1802 tests；
 - `pnpm lint`：0 warning/error；只有 Next 15 自身 `next lint` 弃用提示；
 - `pnpm build`：Next production build 通过，生成 187 个静态页面；
 - `XDG_CONFIG_HOME=$PWD/.tmp/xdg-config pnpm build:cf`：3 个 D1 ID 配置检查、Next build
   和 OpenNext Worker bundle 通过；仅保留既有 proxy、较旧 `compatibility_date` 和 `punycode`
   弃用提示；
-- `CI=true VITEST_MAX_WORKERS=1 pnpm run ci:verify`：workspace verify、329/1796 root tests
-  与 root lint 通过；
+- 环境收口前 checkpoint 的 `CI=true VITEST_MAX_WORKERS=1 pnpm run ci:verify`：workspace verify、
+  329/1796 root tests 与 root lint 通过；最终同一聚合入口的证据见下方 329/1802；
 - `git diff --check`：通过。
+
+最终环境收口在 `5a2780b2` 取得以下 fresh evidence：
+
+- `pnpm run ci:verify`：11 个 workspace 的 test/lint/build 通过，root 329 files / 1802 tests 与
+  root lint 通过；首次在受限沙盒内运行时，真实 TCP fixture 因 loopback `listen EPERM` 退出，
+  在允许 loopback 的同一环境重跑后 API 15 files / 110 tests 与聚合命令均通过；
+- workflow 明列的 ownership/runtime/deploy 集合为 6 files / 68 tests；
+- `docker build --file apps/api/Dockerfile .`：Node 22 Alpine image、filtered dependency closure 与
+  10 shared route / 5.3 MB bundle 构建通过；
+- 一次性 `docker:28-cli` root 环境使用未改写的 production Compose、`HONO_RELEASE_DIR` 与空
+  `/opt/mahoshojo-hono/.env.hono` 成功执行 `docker compose ... config --no-env-resolution`；
+- 隔离 Redis 7 与 local Wrangler D1 Gateway 启动后，`pnpm run verify:server:runtime` 的 live、ready、
+  Redis、D1、retained route `400`、exited route `404` 与 rate-limit key 七项均为 true；
+- [Deploy Hono run #25](https://github.com/RunoreLab/MahoShojo-Generator/actions/runs/32800983786)
+  的 build job 在 `5a2780b2` 上成功，container、single-file bundle、built-runtime integration 与
+  artifact upload steps 均实际执行并通过；deploy job 因非 production branch 按设计跳过；
+- [Cloudflare Workers run #88](https://github.com/RunoreLab/MahoShojo-Generator/actions/runs/32800983793)
+  的 preview build/deploy 同一 SHA 通过；没有执行 production deploy/cutover。
 
 最终定向复验时曾从仓库根错误调用
 `vitest --config packages/hosted-runtime/vitest.config.ts`；package config 的相对 `include` 因 cwd
@@ -161,32 +181,25 @@ Next 执行更安全。G25C 没有删除或改写它们的 Next 公开 route。
 snake_case 字段和字面量 mapper。检查按既有 report-only 契约退出为 0；G25C 没有放宽
 naming/boundary gate，也没有展开全仓命名清债。
 
-### 4.2 BLOCKED（阻塞 G25C stopping condition）
+### 4.2 已关闭的环境 BLOCKED
 
-- `pnpm run verify:server:runtime`：当前机器没有 Redis server；尝试以隔离状态目录启动
-  `wrangler dev --local --ip 127.0.0.1` 时，当前沙盒在 `uv_interface_addresses` 返回系统权限错误，
-  Gateway 未开始监听，因此没有继续伪造 runtime PASS，也没有连接 production Gateway/Redis。
-  config-only artifact smoke、health/readiness/D1/Redis 行为测试和 bundle 均已 PASS；
-- `docker build --file apps/api/Dockerfile .` 与 `docker compose ... config`：当前 WSL 只暴露不可用的
-  Docker Desktop stub，调用因 WSL integration/socket 错误失败，也没有其他本地 container runtime。
-  Dockerfile closure、Compose path、workflow/container gate 及 deploy behavior 已由 contract tests 覆盖。
+最终验收前，本机曾因 Docker Desktop integration 不可用、沙盒拒绝 Wrangler 网络接口枚举且缺少
+Redis server，无法运行 Docker/Compose 与 canonical built-runtime verifier；这两项因此按
+`GOAL-061` 记录为环境 `BLOCKED`，没有用静态 contract 或 production 资源伪造 PASS。
 
-`fe3e3ff8` 已让 GitHub Actions build job 在真实 Docker、ephemeral Redis、local D1 上顺序运行上述
-两类验收，并禁止 `if`/`continue-on-error`、remote D1、关闭 errexit 或 shell boolean continuation
-绕过 terminal gate；但当前分支未推送，workflow 尚无实际 run，不能把“门禁存在”记为“门禁通过”。
-
-上述两项是当前机器缺失隔离运行时的环境证据，不是代码/contract `FAIL`，也不要求
-production 授权；但它们属于 G25C 专用计划明确列出的适用 build/integration 验证。静态 contract、
-config-only smoke 与“workflow 中保留 gate”不能替代对同一 commit 的实际运行，因此按 `GOAL-061`
-阻塞当前 stopping condition。后续必须在 Docker-capable CI/preview 或隔离主机取得真实 PASS，
-不能连接 production 资源来绕过。
+2026-08-25 环境恢复后，两项均在本地取得真实 PASS；首次远端 run 又暴露
+`docker compose config --no-env-resolution` 仍要求绝对 `env_file` 存在。`5a2780b2` 在干净 runner
+原子创建 root-only 临时目录与空 env file，只向 sudo Compose 保留 `HONO_RELEASE_DIR`，并以 EXIT trap
+清理；没有把 production `env_file` 改成 optional。修复后本地 root 容器与 Deploy Hono run #25
+均通过，原两个环境 Important 与新增 CI Important 全部关闭。
 
 ### 4.3 NOT_APPLICABLE / DEFERRED
 
 - production deploy/cutover：`NOT_APPLICABLE`，G25C 默认授权明确排除；
 - production schema/data migration/write/restore：`NOT_APPLICABLE`，无 schema 或持久化格式变更；
 - secret/Access/credential change：`NOT_APPLICABLE`，无新 secret 值或权限操作；
-- release/tag/push：`NOT_APPLICABLE`，本 Goal 只形成本地原子提交；
+- release/tag：`NOT_APPLICABLE`；用户仅正常 push 当前非生产分支以触发最终 CI/preview 验证，
+  Hono production deploy 按分支门禁跳过；
 - 入口层 DR selection/failover reason、稳定逻辑入口、独立 Cloudflare D1 provider、
   version skew/expand-contract probe 与 fault drill：`DEFERRED` 到 G25E，不属于 G25C；
 - 生产容量阈值/SLA：`DEFERRED`，accepted plan 要求先采集真实基线，本 Goal 不伪造数字。
@@ -217,19 +230,14 @@ test adequacy。审查期间曾提出的 Important 包括：
    remote credential 或裸/反斜线 shell boolean continuation 绕过。
 
 上述代码层 Critical/Important/Minor 均在对应原子提交修复并重跑 affected validation；第 5 项由
-`99032cb6` 关闭，fresh evidence 为 hosted-runtime 31/145、API 15/105、root affected 3/7、
+`99032cb6` 关闭；该 checkpoint 当时的 fresh evidence 为 hosted-runtime 31/145、API 15/105、root affected 3/7、
 scripts ESLint、package lint/typecheck 与 API bundle 全部通过；第 6 项由 `fe3e3ff8` 关闭，RED
 mutation 证明裸 boolean continuation 可吞 verifier，GREEN 后 workflow 13/13、最终 affected 6/68、
-YAML parse、ESLint 与 diff-check 通过。独立 architecture、security 与 protective review 对最终
-代码/contract checkpoint 均给出 Critical 0、Important 0、Minor 0 与 `Ready: yes`。整个 G25C
-的最终文档与验收结论仍对验收充分性保留以下开放 Important：
-
-1. 当前 commit 尚未在 Docker-capable 环境实际通过 `docker build` 与 `docker compose config`；
-2. canonical `verify:server:runtime` 尚未连接隔离 D1 Gateway + Redis，证明真实 bundle 的
-   readiness、retained/exited route 与 Redis rate-limit integration。
-
-日志跟踪、计划状态矛盾与日期 Minor 已在本次文档收口修复；上述两项环境 finding 未关闭，
-最终结论为 `Ready: no`。
+YAML parse、ESLint 与 diff-check 通过。最终 CI 修复 review 又发现 `install -d` 会跟随末级 symlink 的
+TOCTOU Important，以及 cleanup 函数体断言不足的 Minor；先以行为探针确认根因，再按 RED/GREEN 改为
+原子 `mkdir -m 700 --`、创建成功后注册 trap，并精确锁定 cleanup 函数体。复审为 Critical 0、
+Important 0、Minor 0。独立 architecture、security 与 protective review 对最终 checkpoint 均给出
+`Ready: yes`，本地与 Actions 环境证据关闭先前两个环境 Important。
 
 ## 6. Stopping condition 状态矩阵
 
@@ -237,19 +245,20 @@ YAML parse、ESLint 与 diff-check 通过。独立 architecture、security 与 p
 | --- | --- | --- |
 | `apps/api` 真实 source/manifest/test/lint/build/env/health/deploy ownership | `PASS` | app lifecycle、README/env、bundle、Docker/Compose/workflow/deploy contract |
 | root 不持有 API runtime dependencies | `PASS` | manifest/lockfile ownership tests；Hono/Redis/node-server 只在 app |
-| Docker/CI/deploy 只要求 API dependency closure | `BLOCKED` | 静态 closure/workflow contract PASS；同一 commit 的真实 Docker build/Compose 未执行 |
+| Docker/CI/deploy 只要求 API dependency closure | `PASS` | 本地 Docker/Compose 与 Deploy Hono container step 同一 SHA 通过 |
 | Hono 不导入 Web/root internals | `PASS` | boundary/generator/ownership 测试，10 shared / 0 legacy registry |
-| AI/D1/Redis telemetry 真实收口 | `PASS` | 31/145 hosted-runtime 与 15/105 API tests，schema v2 integration |
+| AI/D1/Redis telemetry 真实收口 | `PASS` | 31/146 hosted-runtime 与 15/110 API tests，schema v2 integration |
 | 不伪造入口选择 | `PASS` | `not-observed` / `null` contract 与 canary negative tests |
-| build artifact、health/readiness、rollback 等价 | `BLOCKED` | bundle config smoke、app/deploy fault tests、Next/OpenNext builds PASS；built-runtime integration 未执行 |
-| full server/workspace/CI verification | `BLOCKED` | workspace/root/Next/OpenNext/静态 CI contract PASS；Docker/runtime 两项适用验证未闭合 |
-| independent review | `BLOCKED` | 最终代码/contract review 0 finding；2 个环境验收 Important 仍 open |
+| build artifact、health/readiness、rollback 等价 | `PASS` | bundle、built-runtime 7 项、deploy fault tests 与 Actions artifact upload 通过 |
+| full server/workspace/CI verification | `PASS` | local `ci:verify`、Docker/runtime 与两条 Actions run 同一 SHA 通过 |
+| independent review | `PASS` | 最终 CI fix 复审 Critical 0、Important 0、Minor 0，`Ready: yes` |
 | production deploy/cutover | `NOT_APPLICABLE` | 未授权、未执行 |
-| local external runtime/Docker execution | `BLOCKED` | Docker Desktop integration 不可用；Wrangler 被沙盒网络接口权限阻断；无 Redis server |
+| local external runtime/Docker execution | `PASS` | WSL Docker、isolated Redis、local Wrangler D1 与 canonical verifier 通过 |
 | G25D Web relocation / G25E Hosted DR | `DEFERRED` | 后续独立 Goal |
 
-G25C 的代码 objective 已实现，但必需 stopping condition 尚未全部闭合；当前没有 `FAIL` 或开放
-Critical，仍有 2 个阻塞目标的 `BLOCKED`/Important，因此不能报告 Goal 完成。
+G25C 的代码 objective、全部必要 stopping condition 与独立 review 已闭合；没有开放 `FAIL`、
+Critical、Important 或 Minor，Goal 状态为 `COMPLETE`。production deploy/cutover 仍是
+`NOT_APPLICABLE`，不能因本 Goal 完成而描述成已执行。
 
 ## 7. 回滚
 
@@ -270,18 +279,13 @@ Redis flush、credential rotation 或远程 artifact 操作。
 
 当前 Phase 2.5 仍剩：
 
-- G25C 最终环境验收：在同一 commit 上实际通过 Docker build/Compose 与隔离
-  D1 Gateway + Redis `verify:server:runtime`，关闭 2 个 Important 后重跑 stopping audit；
-
 - G25D：真实 `apps/web` 与 root orchestration ownership 行为等价迁移；
 - G25E-1：Hosted DR capability/replay manifest、稳定逻辑入口、独立 Cloudflare D1 provider 与
   compatibility probe；
 - G25E-2：Hono/Redis/D1 Gateway/D1/mid-flight/version-skew 的隔离 fault harness/drill；
 - Phase 2.5 最终退出审计。
 
-当前立即下一入口仍是 G25C 验收收口；门禁已自动化，取得 push/CI 授权并实际全绿后重估约
-`0.25–1h` 完成证据核对、审查关闭与 stopping audit；不得在它闭合前
-启动 G25D。其后 root Web 仍有约 783 个 `app/components/public` 及相关文件，303 个 `app/` 文件、
+当前立即下一入口为 G25D。root Web 仍有约 783 个 `app/components/public` 及相关文件，303 个 `app/` 文件、
 213 个静态资产、49 个 root 生产依赖、187 个静态生成页面，而 `apps/web` 尚未激活。
 这个范围明显高于一次简单目录移动，下一 Goal 建议按 G25D 的既有拆分触发器收窄为：
 

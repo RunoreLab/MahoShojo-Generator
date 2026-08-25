@@ -14,7 +14,7 @@
 
 **Preserves:** `AI-006`、`AUTHORITY-001..006`、`DR-004..011`、`DR-013..014`、`COMPAT-001..002`、`ACCEPT-008`；不改变 Arena v1 wire/authority，也不把 generation 标记为可透明重放。
 
-**执行检查点（2026-08-25）：** G25C 实现已收口，最终验收 `BLOCKED`。当前 inventory 为 `10 shared-service / 14 exited / 0 legacy-next`；10 条 retained service 的唯一 Node composition 已进入 `@mahoshojo/hosted-runtime`，真实 `apps/api` 已拥有 source/manifest/test/lint/build/env/health/Docker/CI/deploy lifecycle，AI/D1/Redis telemetry 与原子 release tuple 已进入代码。`fe3e3ff8` 又把 Compose config、真实 Redis service、local Wrangler D1 Gateway 与 canonical built-runtime verifier 固化为 fail-closed CI gate；但该 workflow 尚未实际运行，当前机器的 Docker Desktop integration 不可用，Wrangler local runtime 也受沙盒网络接口权限限制，因此同一 HEAD 的真实 Docker/Compose/runtime 组合仍未取得 PASS。按 `GOAL-061` 不能勾选最终 stopping condition。完整验证、环境限制、独立审查和回滚证据见 [G25C 实施日志](../logs/2026-08-25_023625_平台重整G25C_apps-api真实应用激活与Telemetry收口实施日志.md)。
+**执行检查点（2026-08-25）：** G25C stopping condition 已闭合，状态为 `COMPLETE`。当前 inventory 为 `10 shared-service / 14 exited / 0 legacy-next`；10 条 retained service 的唯一 Node composition 已进入 `@mahoshojo/hosted-runtime`，真实 `apps/api` 已拥有 source/manifest/test/lint/build/env/health/Docker/CI/deploy lifecycle，AI/D1/Redis telemetry 与原子 release tuple 已进入代码。`fe3e3ff8` 将 Compose config、真实 Redis service、local Wrangler D1 Gateway 与 canonical built-runtime verifier 固化为 fail-closed CI gate；`5a2780b2` 补齐干净 runner 的绝对 `env_file` 前置环境，并保持生产 Compose fail-closed。随后本地 Docker build、隔离 Compose config、Redis + D1 built-runtime verifier 均取得真实 PASS，[Deploy Hono run #25](https://github.com/RunoreLab/MahoShojo-Generator/actions/runs/32800983786) 也在同一 SHA 上完成 container、bundle、built-runtime 与 artifact upload；production deploy 按分支门禁跳过。完整验证、独立审查和回滚证据见 [G25C 实施日志](../logs/2026-08-25_023625_平台重整G25C_apps-api真实应用激活与Telemetry收口实施日志.md)。
 
 ---
 
@@ -295,24 +295,27 @@ install 前仅复制 root workspace metadata、`apps/api/package.json` 及 `@mah
 
 统一 CI 仍执行 root/workspace no-regression；Hono targeted、Docker、bundle 和 artifact 使用 app scripts/paths。`deploy.if`、Environment、SSH host key、checksum、两分钟 readiness rollback 保持不变；public probe 改为 retained route，不触发生产执行。
 
-- [ ] **Step 3：运行 deploy/Docker GREEN**
+- [x] **Step 3：运行 deploy/Docker GREEN**
 
 ```bash
 pnpm exec vitest run tests/workspace-structure.test.ts tests/hono-deploy-workflow.test.ts --reporter=verbose
 docker build --file apps/api/Dockerfile .
-docker compose -f apps/api/deploy/compose.yml config
+# production Compose 预检以 .github/workflows/hono-deploy.yml 的
+# "Verify Hono container build" run block 为可执行 source of truth
 ```
 
 Expected: tests 与 Docker/Compose exit 0；若本机 Docker daemon 不可用，保留完整环境证据，不能弱化 Actions gate。
 
 实际结果：ownership/workflow/deploy contract 全部通过；`fe3e3ff8` 在 Actions build job 中加入
-Compose config，并为 built-runtime verifier 配置 ephemeral Redis 与 local Wrangler D1。当前 WSL 的
-Docker Desktop integration 不可用，该 workflow 又未推送执行，因此 Docker/Compose execution 仍记录为
-环境 `BLOCKED`；Actions gate 已 fail closed，不能由静态 contract 代替真实 PASS。
+Compose config，并为 built-runtime verifier 配置 ephemeral Redis 与 local Wrangler D1。环境恢复后，
+本地 `docker build` 与一次性 root 容器中的 production Compose config 均通过；`5a2780b2` 修复干净
+runner 缺少绝对 `env_file` 的问题后，[Deploy Hono run #25](https://github.com/RunoreLab/MahoShojo-Generator/actions/runs/32800983786)
+的 `Verify Hono container build` 也实际通过。创建逻辑使用不跟随既有路径的原子 `mkdir`，独立复审为
+Critical 0、Important 0、Minor 0。
 
 ### Task 6：Targeted、完整验证与 Builder self-review
 
-- [ ] **Step 1：运行受影响层完整验证**
+- [x] **Step 1：运行受影响层完整验证**
 
 ```bash
 pnpm install --frozen-lockfile --offline --trust-lockfile
@@ -344,16 +347,16 @@ git diff --check
 
 逐项检查 accepted ADR/spec、app/package/runtime 依赖方向、secret/auth/authority、D1 no-replay、Redis non-authority、Next/Hono wire、schema/producer-consumer、shutdown/rollback、测试 adequacy。任何行为 finding 先写失败测试再修。
 
-实际结果：package/app/server/workspace/root/Next/OpenNext/CI 验证均通过；Actions 已具备隔离
-D1 Gateway/Redis runtime verifier gate，但当前沙盒启动 Wrangler 时被 `uv_interface_addresses`
-系统权限错误阻断，且没有本地 Redis server，因此本步骤尚未全部完成。未连接 production 资源；
-完整命令和结果见实施日志。
+实际结果：package/app/server/workspace/root/Next/OpenNext/CI 验证均通过；隔离 Redis 与 local Wrangler
+D1 Gateway 环境恢复后，canonical built-runtime verifier 对 live/ready、Redis/D1 readiness、retained/exited
+route 与 rate-limit key 的 7 项检查全部通过。GitHub Actions 同一 verifier step 也在 `5a2780b2` 上成功；
+未连接 production Redis/D1，完整命令和结果见实施日志。
 
 ### Task 7：Independent review、修复与文档收口
 
 **Files:**
 
-- Create: `docs/logs/2026-08-24_平台重整G25C_apps-api真实应用激活与Telemetry收口实施日志.md`（实施完成时在日期后补实际 `HHmmss`，正文和 topic 只引用最终文件名）
+- Create: `docs/logs/2026-08-25_023625_平台重整G25C_apps-api真实应用激活与Telemetry收口实施日志.md`
 - Modify: topic、Goal plan、apps/packages README、Hono deployment guide and navigation
 
 - [x] **Step 1：独立 review**
@@ -367,14 +370,15 @@ D1 Gateway/Redis runtime verifier gate，但当前沙盒启动 Wrangler 时被 `
 
 Critical/Important 必须关闭；Minor 修复或给出不阻塞 stopping condition 的可复核理由。
 
-当前结果：最终 review 发现的 server authority 敏感词 fail-open 与 D1 HTTP redirect mutation replay
+最终结果：最终 review 发现的 server authority 敏感词 fail-open 与 D1 HTTP redirect mutation replay
 两个代码 Important 已按 RED/GREEN 修复；环境 gate 复审又发现 workflow contract 可被 shell/YAML
 skip 与 boolean continuation 绕过，已在 `fe3e3ff8` 以 dedicated mutation tests、显式
 `set -euo pipefail` 和 terminal gate 顺序关闭。最终代码/contract review 为 Critical 0、Important 0、
-Minor 0；未实际运行 Docker build/Compose 和 canonical built-runtime verifier 仍各保留一个环境
-Important。在隔离环境取得实际 PASS 前整个 G25C `Ready: no`。
+Minor 0。最终环境验收又发现干净 runner 缺少 production Compose 绝对 `env_file`，`5a2780b2`
+以 root-only 临时目录、原子创建、最小环境继承和 EXIT cleanup 修复；独立复审关闭 TOCTOU 与测试覆盖
+finding 后为 Critical 0、Important 0、Minor 0，Docker/runtime 本地与 Actions 证据均已取得，`Ready: yes`。
 
-- [ ] **Step 2：修复后重跑 affected + final verification**
+- [x] **Step 2：修复后重跑 affected + final verification**
 
 任何 finding 修复先运行对应 targeted RED/GREEN，再重跑 Task 6 的高影响集合与 Docker/workflow gate。
 
@@ -382,7 +386,7 @@ Important。在隔离环境取得实际 PASS 前整个 G25C `Ready: no`。
 
 日志必须记录 source/plan/实现/review commits、10 retained / 14 exited capability、退出理由、实际命令/结果、PASS/NOT_APPLICABLE/DEFERRED/BLOCKED、rollback、production/schema/secret/release 影响、剩余 Phase 2.5 与下一 Goal 重估。
 
-- [ ] **Step 4：最终 stopping condition 审计**
+- [x] **Step 4：最终 stopping condition 审计**
 
 只有 Objective、所有必要 stopping condition、`GOAL-061` 与独立 review 均闭合后才完成 G25C；不得把未执行 production deploy/cutover 写成 PASS。
 
@@ -395,7 +399,7 @@ Important。在隔离环境取得实际 PASS 前整个 G25C `Ready: no`。
 
 ## 非目标与高风险边界
 
-- 不执行 production deploy/cutover、远程 D1 migration/write/restore、生产 Redis flush、secret/Access/credential 变更、release/tag、push、force push 或历史重写。
+- 不执行 production deploy/cutover、远程 D1 migration/write/restore、生产 Redis flush、secret/Access/credential 变更、release/tag、force push 或历史重写。最终验收只由用户将当前分支正常 push 以触发 CI/preview；Hono production deploy 按门禁跳过。
 - 不修改 Legacy/Better Auth 用户语义、Arena v1 wire/authority、签名算法、数据库 schema、持久化格式或 Hosted replay class。
 - 不在 G25C 重写 14 条退出 route 的业务 service；它们重新进入 Hono 必须由后续独立 Goal 提供证据。
 - 不设置无生产基线的 CPU/latency 告警阈值，不伪造入口层 DR selection/failover reason。
