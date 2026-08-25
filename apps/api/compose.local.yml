@@ -23,6 +23,11 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+    logging:
+      driver: json-file
+      options:
+        max-size: "100m"
+        max-file: "25"
 
   redis:
     image: redis:8.2-alpine

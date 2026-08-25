@@ -22,6 +22,11 @@ services:
       - "127.0.0.1:8080:8787"
     volumes:
       - "${HONO_RELEASE_DIR:?HONO_RELEASE_DIR 未配置}/index.mjs:/app/index.mjs:ro"
+    logging:
+      driver: json-file
+      options:
+        max-size: "100m"
+        max-file: "25"
     networks:
       - default
       - mahoshojo-redis

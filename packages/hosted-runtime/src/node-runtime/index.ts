@@ -1,4 +1,5 @@
 export { createNodeStructuredAiRuntime } from './structured-ai';
+export { isExpectedClientDisconnect } from './abort';
 export {
   buildStreamTextAbortOptions,
   classifyStreamRuntimeOutcome,

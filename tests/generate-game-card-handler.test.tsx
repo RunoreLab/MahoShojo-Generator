@@ -60,6 +60,7 @@ vi.mock('@mahoshojo/hosted-runtime/node-runtime/content-safety', () => ({
 }));
 vi.mock('@mahoshojo/hosted-runtime/node-runtime/sensitive-word-filter', () => ({
   quickCheck: mocks.quickCheck,
+  quickCheckForServer: mocks.quickCheck,
 }));
 vi.mock('@mahoshojo/hosted-runtime/node-runtime/data-ports', () => ({
   createNodeDataPorts: vi.fn(() => ({

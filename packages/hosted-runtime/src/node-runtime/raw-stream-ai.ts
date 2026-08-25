@@ -525,9 +525,10 @@ async function generateWithStreamAIUsing(
                                 return;
                             }
                         } catch (streamError) {
-                            finishAttemptFromError(streamError);
+                            const interrupted = finishAttemptFromError(streamError);
                             try {
-                                controller.error(streamError);
+                                if (interrupted) controller.close();
+                                else controller.error(streamError);
                             } catch {
                                 // controller 可能已关闭
                             }

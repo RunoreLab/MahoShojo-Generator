@@ -17,11 +17,25 @@ type CoordinatorOptions = {
 };
 
 type ShutdownSignal = 'SIGINT' | 'SIGTERM';
+export type ShutdownTrigger = ShutdownSignal | 'UNHANDLED_REJECTION';
 
 type ShutdownSignalSource = {
   off: (signal: ShutdownSignal, listener: () => void) => unknown;
   on: (signal: ShutdownSignal, listener: () => void) => unknown;
 };
+
+type UnhandledRejectionSource = {
+  off: (
+    event: 'unhandledRejection',
+    listener: (reason: unknown, promise: Promise<unknown>) => void,
+  ) => unknown;
+  on: (
+    event: 'unhandledRejection',
+    listener: (reason: unknown, promise: Promise<unknown>) => void,
+  ) => unknown;
+};
+
+type ProcessTerminationSource = ShutdownSignalSource & UnhandledRejectionSource;
 
 export type WaitUntilDrainResult = {
   pendingTaskCount: number;
@@ -140,19 +154,42 @@ export const closeDependenciesWithGrace = (
 export const wireGracefulShutdownSignals = ({
   errorLogger = console.error,
   exit = (code) => process.exit(code),
+  expectedRejectionLogger = console.info,
   forceExitLogger = writeForceExitMessage,
+  isExpectedUnhandledRejection = () => false,
   shutdown,
   signalSource = process,
 }: {
   errorLogger?: ErrorLogger;
   exit?: (code: number) => void;
+  expectedRejectionLogger?: MessageLogger;
   forceExitLogger?: MessageLogger;
-  shutdown: (signal: ShutdownSignal) => Promise<void>;
-  signalSource?: ShutdownSignalSource;
+  isExpectedUnhandledRejection?: (reason: unknown) => boolean;
+  shutdown: (trigger: ShutdownTrigger) => Promise<void>;
+  signalSource?: ProcessTerminationSource;
 }): (() => void) => {
   let exitCompletion: Promise<void> | undefined;
+  let completionExitCode: 0 | 1 = 0;
   let exitRequested = false;
   const listeners = new Map<ShutdownSignal, () => void>();
+
+  const logErrorFailSoft = (message: string, error: unknown): void => {
+    try {
+      const logging = errorLogger(message, error);
+      void Promise.resolve(logging).catch(() => undefined);
+    } catch {
+      // 终止路径的日志 sink 失败不能改变退出语义。
+    }
+  };
+
+  const logMessageFailSoft = (logger: MessageLogger, message: string): void => {
+    try {
+      const logging = logger(message);
+      void Promise.resolve(logging).catch(() => undefined);
+    } catch {
+      // 终止路径的日志 sink 失败不能改变退出语义。
+    }
+  };
 
   const exitOnce = (code: number): void => {
     if (exitRequested) return;
@@ -160,46 +197,68 @@ export const wireGracefulShutdownSignals = ({
     exit(code);
   };
 
-  const beginShutdown = (signal: ShutdownSignal): void => {
+  const beginShutdown = (trigger: ShutdownTrigger, successExitCode: 0 | 1): void => {
+    if (successExitCode === 1) completionExitCode = 1;
     if (exitCompletion) {
       if (exitRequested) return;
-      try {
-        const logging = forceExitLogger(`[hono] 优雅退出期间再次收到 ${signal}，立即强制退出`);
-        void Promise.resolve(logging).catch(() => undefined);
-      } catch {
-        // 日志 sink 失败不能阻止第二次 termination signal 强制退出。
+      if (trigger === 'UNHANDLED_REJECTION') {
+        // 重复 fatal rejection 复用已开始的 cleanup；失败码已在上方升级为 1。
+        return;
       }
+      logMessageFailSoft(
+        forceExitLogger,
+        `[hono] 优雅退出期间再次收到 ${trigger}，立即强制退出`,
+      );
       exitOnce(1);
       return;
     }
     exitCompletion = Promise.resolve()
-      .then(() => shutdown(signal))
+      .then(() => shutdown(trigger))
       .then(
-        () => exitOnce(0),
+        () => exitOnce(completionExitCode),
         (_error: unknown) => {
-          try {
-            const logging = errorLogger('[hono] 优雅退出失败', {
-              errorClass: 'shutdown_failed',
-            });
-            void Promise.resolve(logging).catch(() => undefined);
-          } catch {
-            // 日志 sink 失败不能阻止进程按失败状态退出。
-          }
+          logErrorFailSoft('[hono] 优雅退出失败', {
+            errorClass: 'shutdown_failed',
+          });
           exitOnce(1);
         },
       );
   };
 
   for (const signal of ['SIGINT', 'SIGTERM'] as const) {
-    const listener = () => beginShutdown(signal);
+    const listener = () => beginShutdown(signal, 0);
     listeners.set(signal, listener);
     signalSource.on(signal, listener);
   }
+
+  const unhandledRejectionListener = (reason: unknown): void => {
+    let expected = false;
+    try {
+      expected = isExpectedUnhandledRejection(reason);
+    } catch {
+      // 分类器失败时必须按未知 fatal rejection 处理。
+    }
+
+    if (expected) {
+      logMessageFailSoft(
+        expectedRejectionLogger,
+        '[hono] 客户端提前断开连接，已按请求取消处理',
+      );
+      return;
+    }
+
+    logErrorFailSoft('[hono] 未处理的 Promise rejection', {
+      errorClass: 'unhandled_rejection',
+    });
+    beginShutdown('UNHANDLED_REJECTION', 1);
+  };
+  signalSource.on('unhandledRejection', unhandledRejectionListener);
 
   return () => {
     for (const [signal, listener] of listeners) {
       signalSource.off(signal, listener);
     }
+    signalSource.off('unhandledRejection', unhandledRejectionListener);
   };
 };
 

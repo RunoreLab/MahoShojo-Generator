@@ -1,4 +1,5 @@
 import { serve } from '@hono/node-server';
+import { isExpectedClientDisconnect } from '@mahoshojo/hosted-runtime/node-runtime';
 import { registerHostedRuntimeObserver } from '@mahoshojo/hosted-runtime/telemetry';
 import { createHonoApp } from '#/app';
 import { readHonoServerConfig } from '#/config';
@@ -84,5 +85,8 @@ if (process.env.HONO_CONFIG_CHECK_ONLY === 'true') {
     }
   });
 
-  wireGracefulShutdownSignals({ shutdown });
+  wireGracefulShutdownSignals({
+    isExpectedUnhandledRejection: isExpectedClientDisconnect,
+    shutdown,
+  });
 }

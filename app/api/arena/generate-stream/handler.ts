@@ -1,6 +1,7 @@
 import { getRequestUrl } from '@/lib/request-url';
 // app/api/arena/generate-stream/handler.ts
 
+import { isExpectedClientDisconnect } from '@mahoshojo/hosted-runtime/node-runtime';
 import { getLogger } from '@/lib/logger';
 import magicalGirlQuestionnaire from '@/public/questionnaires/presets/magical-girl-default.json';
 import canshouQuestionnaire from '@/public/questionnaires/presets/canshou-default.json';
@@ -74,6 +75,7 @@ import { isArenaAbortFastPathEnabled } from '@/lib/arena/generate-stream-finaliz
 const log = getLogger('api-gen-battle-stream');
 
 const isInterruptedStreamError = (error: unknown): boolean => {
+    if (isExpectedClientDisconnect(error)) return true;
     if (error instanceof StreamReadTimeoutError) return true;
     if (!error) return false;
     const errorRecord = error as { name?: unknown; message?: unknown };
@@ -1717,8 +1719,17 @@ async function handler(req: NextRequest): Promise<Response> {
                         controller.enqueue(value);
                     }
                 } catch (streamError) {
-                    controller.error(streamError);
-                    const statusForRecord: 'aborted' | 'failed' = isInterruptedStreamError(streamError) ? 'aborted' : 'failed';
+                    const interrupted = isInterruptedStreamError(streamError);
+                    if (interrupted) {
+                        try {
+                            controller.close();
+                        } catch {
+                            // 客户端可能已经关闭响应流
+                        }
+                    } else {
+                        controller.error(streamError);
+                    }
+                    const statusForRecord: 'aborted' | 'failed' = interrupted ? 'aborted' : 'failed';
                     await finalizeOnce(statusForRecord, streamError instanceof Error ? streamError.message : 'stream error');
                 }
             },

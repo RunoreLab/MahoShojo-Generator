@@ -112,6 +112,29 @@ describe('Node AI runtime abort contract', () => {
     expect(terminals).toEqual([expect.objectContaining({ outcome: 'aborted' })]);
   });
 
+  test('raw stream 遇到 Hono 客户端断连时关闭响应而不向消费者传播进程级错误', async () => {
+    let failUpstream!: (_error: Error) => void;
+    const upstream = new ReadableStream<unknown>({
+      start(controller) {
+        controller.enqueue({ type: 'text-delta', text: 'partial output' });
+        failUpstream = (error) => controller.error(error);
+      },
+    });
+    mocks.streamText.mockReturnValueOnce({
+      fullStream: upstream,
+      usage: Promise.resolve({}),
+      finishReason: Promise.resolve(null),
+    });
+    const { createNodeRawStreamAiRuntime } = await import('../src/node-runtime');
+    const runtime = createNodeRawStreamAiRuntime({ providers: [provider('disconnect')] });
+
+    const result = await runtime.generateWithStreamAI({ prompt: 'disconnect raw stream' });
+    failUpstream(new Error('Client connection prematurely closed.'));
+
+    await expect(result.response.text()).resolves.toBe('partial output');
+    expect(mocks.streamText).toHaveBeenCalledTimes(1);
+  });
+
   test('signal 已中止时，即使 SDK 抛普通 Error，structured attempt 仍以 aborted 结束', async () => {
     const terminals: unknown[] = [];
     registerHostedRuntimeObserver({
