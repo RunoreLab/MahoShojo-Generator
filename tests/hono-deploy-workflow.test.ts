@@ -4,6 +4,7 @@ import { describe, expect, test } from 'vitest';
 
 const HONO_WORKFLOW_PATH = resolve(process.cwd(), '.github/workflows/hono-deploy.yml');
 const CLOUDFLARE_WORKFLOW_PATH = resolve(process.cwd(), '.github/workflows/cloudflare-deploy.yml');
+const HONO_COMPOSE_PATH = resolve(process.cwd(), 'apps/api/deploy/compose.yml');
 const HONO_DEPLOY_SCRIPT_PATH = resolve(process.cwd(), 'apps/api/deploy/deploy-bundle.sh');
 const HONO_INSTALL_SCRIPT_PATH = resolve(process.cwd(), 'apps/api/deploy/install-bundle.sh');
 const PRODUCTION_BRANCH = 'refs/heads/feature/v0.2.0_Battle_Growth_MahoShojo';
@@ -120,16 +121,63 @@ describe('Hono deployment workflow', () => {
 
   test('builds the Hono container before assembling and uploading the deployment artifact', () => {
     const workflow = readFileSync(HONO_WORKFLOW_PATH, 'utf8');
+    const compose = readFileSync(HONO_COMPOSE_PATH, 'utf8');
     const buildJob = getJob(workflow, 'build');
     const containerBuildStep = getStep(buildJob, 'Verify Hono container build');
     const activeLines = getActiveRunLines(containerBuildStep);
+    const composeConfigCommand = 'sudo --preserve-env=HONO_RELEASE_DIR docker compose -f apps/api/deploy/compose.yml config --no-env-resolution';
+    const composeEnvironmentSafetyCheck = 'sudo test ! -e "$COMPOSE_ENV_DIRECTORY"';
+    const composeEnvironmentSymlinkCheck = 'sudo test ! -L "$COMPOSE_ENV_DIRECTORY"';
+    const composeEnvironmentCleanupTrap = 'trap cleanup_compose_environment EXIT';
+    const composeEnvironmentDirectoryCreate = 'sudo mkdir -m 700 -- "$COMPOSE_ENV_DIRECTORY"';
+    const composeEnvironmentInstall = 'sudo install -m 600 /dev/null "$COMPOSE_ENV_FILE"';
+    const composeEnvironmentFileCleanup = 'sudo rm -f -- "$COMPOSE_ENV_FILE"';
+    const composeEnvironmentDirectoryCleanup = 'sudo rmdir -- "$COMPOSE_ENV_DIRECTORY"';
     const containerCommands = [
       'docker build --file apps/api/Dockerfile .',
-      'docker compose -f apps/api/deploy/compose.yml config --no-env-resolution',
+      composeConfigCommand,
     ];
 
     expectRequiredGateStep(containerBuildStep);
     expect(containerBuildStep).toContain('HONO_RELEASE_DIR: /tmp/mahoshojo-hono-release');
+    expect(containerBuildStep).toContain(
+      'COMPOSE_ENV_DIRECTORY: /opt/mahoshojo-hono',
+    );
+    expect(containerBuildStep).toContain(
+      'COMPOSE_ENV_FILE: /opt/mahoshojo-hono/.env.hono',
+    );
+    expect(compose).toContain('- /opt/mahoshojo-hono/.env.hono');
+    expect(activeLines).toContain(composeEnvironmentSafetyCheck);
+    expect(activeLines).toContain(composeEnvironmentSymlinkCheck);
+    expect(activeLines).toContain(composeEnvironmentCleanupTrap);
+    expect(activeLines).toContain(composeEnvironmentDirectoryCreate);
+    expect(activeLines).not.toContain('sudo install -d -m 700 "$COMPOSE_ENV_DIRECTORY"');
+    expect(activeLines).toContain(composeEnvironmentInstall);
+    expect(activeLines).toContain(composeEnvironmentFileCleanup);
+    expect(activeLines).toContain(composeEnvironmentDirectoryCleanup);
+    const cleanupStart = activeLines.indexOf('cleanup_compose_environment() {');
+    const cleanupEnd = activeLines.indexOf('}', cleanupStart);
+    expect(activeLines.slice(cleanupStart, cleanupEnd + 1)).toEqual([
+      'cleanup_compose_environment() {',
+      composeEnvironmentFileCleanup,
+      composeEnvironmentDirectoryCleanup,
+      '}',
+    ]);
+    expect(activeLines.indexOf(composeEnvironmentSafetyCheck)).toBeLessThan(
+      activeLines.indexOf(composeEnvironmentSymlinkCheck),
+    );
+    expect(activeLines.indexOf(composeEnvironmentSymlinkCheck)).toBeLessThan(
+      activeLines.indexOf(composeEnvironmentDirectoryCreate),
+    );
+    expect(activeLines.indexOf(composeEnvironmentDirectoryCreate)).toBeLessThan(
+      activeLines.indexOf(composeEnvironmentCleanupTrap),
+    );
+    expect(activeLines.indexOf(composeEnvironmentCleanupTrap)).toBeLessThan(
+      activeLines.indexOf(composeEnvironmentInstall),
+    );
+    expect(activeLines.indexOf(composeEnvironmentInstall)).toBeLessThan(
+      activeLines.indexOf(composeConfigCommand),
+    );
     expect(activeLines.slice(-2)).toEqual(containerCommands);
     expect(buildJob.indexOf(containerBuildStep)).toBeLessThan(
       buildJob.indexOf('- name: Build single-file server'),
