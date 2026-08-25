@@ -28,6 +28,50 @@ describe('memory generation replay store', () => {
     })).resolves.toBeNull();
   });
 
+  it('propagates a fixed content-policy cancel reason through heartbeat and finalization claim', async () => {
+    const store = createMemoryGenerationReplayStore();
+    await reserve(store);
+    await store.markRunning({
+      generationId: 'generation-1',
+      producerToken,
+      now: '2026-08-25T00:00:00.000Z',
+      leaseExpiresAt: '2026-08-25T00:01:00.000Z',
+    });
+    await store.requestCancel({
+      generationId: 'generation-1',
+      actorKey: 'user:1',
+      reason: 'content_policy',
+      now: '2026-08-25T00:00:01.000Z',
+    });
+    await expect(store.requestCancel({
+      generationId: 'generation-1',
+      actorKey: 'user:1',
+      reason: 'user',
+      now: '2026-08-25T00:00:01.500Z',
+    })).resolves.toEqual({ kind: 'accepted', cancelReason: 'content_policy' });
+
+    await expect(store.heartbeat({
+      generationId: 'generation-1',
+      producerToken,
+      now: '2026-08-25T00:00:02.000Z',
+      leaseExpiresAt: '2026-08-25T00:01:02.000Z',
+    })).resolves.toEqual({
+      owned: true,
+      cancelRequested: true,
+      cancelReason: 'content_policy',
+    });
+    await expect(store.claimFinalization({
+      generationId: 'generation-1',
+      producerToken,
+      now: '2026-08-25T00:00:03.000Z',
+      leaseExpiresAt: '2026-08-25T00:01:03.000Z',
+    })).resolves.toEqual({ kind: 'cancelled', cancelReason: 'content_policy' });
+    await expect(store.readState({ generationId: 'generation-1' })).resolves.toMatchObject({
+      cancelRequested: true,
+      cancelReason: 'content_policy',
+    });
+  });
+
   it('reports trimmed cursors without silently appending from the wrong point', async () => {
     const store = createMemoryGenerationReplayStore({ maxEvents: 2 });
     await reserve(store);

@@ -110,6 +110,7 @@ export const createMemoryGenerationReplayStore = (
         snapshot: null,
         terminal: null,
         cancelRequested: false,
+        cancelReason: null,
       });
       return { kind: 'created', generationId: input.generationId };
     },
@@ -132,7 +133,11 @@ export const createMemoryGenerationReplayStore = (
           updatedAt: input.now,
           leaseExpiresAt: input.leaseExpiresAt,
         });
-        return { owned: true, cancelRequested: true };
+        return {
+          owned: true,
+          cancelRequested: true,
+          cancelReason: state.cancelReason ?? 'user',
+        };
       }
       writeState({
         ...state,
@@ -158,7 +163,7 @@ export const createMemoryGenerationReplayStore = (
           updatedAt: input.now,
           leaseExpiresAt: input.leaseExpiresAt,
         });
-        return { kind: 'cancelled' };
+        return { kind: 'cancelled', cancelReason: state.cancelReason ?? 'user' };
       }
       if (state.status !== 'running' && state.status !== 'finalizing') return { kind: 'fenced' };
       writeState({
@@ -225,7 +230,13 @@ export const createMemoryGenerationReplayStore = (
         updatedAt: input.now,
         leaseExpiresAt: input.leaseExpiresAt,
       });
-      return { owned: true, cancelRequested: state.cancelRequested };
+      return state.cancelRequested
+        ? {
+          owned: true,
+          cancelRequested: true,
+          cancelReason: state.cancelReason ?? 'user',
+        }
+        : { owned: true, cancelRequested: false };
     },
 
     async appendEvents(input) {
@@ -339,12 +350,16 @@ export const createMemoryGenerationReplayStore = (
       if (state.actorKey !== input.actorKey) return { kind: 'forbidden' };
       if (state.terminal) return { kind: 'terminal', status: state.terminal.status };
       if (state.status === 'finalizing') return { kind: 'finalizing' };
+      const cancelReason = state.cancelRequested
+        ? state.cancelReason ?? 'user'
+        : input.reason;
       writeState({
         ...state,
         cancelRequested: true,
+        cancelReason,
         updatedAt: input.now,
       });
-      return { kind: 'accepted' };
+      return { kind: 'accepted', cancelReason };
     },
   };
   return Object.freeze(store);

@@ -6,6 +6,7 @@ import {
   ARENA_GENERATION_CLIENT_STATE_KEY,
   openArenaGenerationStream,
 } from '@/lib/arena/resumable-generation-client';
+import { STREAM_ABORT_REASON_CONTENT_POLICY } from '@/lib/stream/abort';
 
 class MemoryStorage {
   values = new Map<string, string>();
@@ -408,9 +409,36 @@ describe('resumable Arena generation client', () => {
     });
     abort.abort('user');
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(fetcher.mock.calls.some(([url]) => String(url).includes('/cancel'))).toBe(true);
+    const userCancel = fetcher.mock.calls.find(([url]) => String(url).includes('/cancel'));
+    expect(userCancel?.[1]).toMatchObject({
+      method: 'POST',
+      body: JSON.stringify({ reason: 'user' }),
+    });
     void second;
     void keepOpen;
+  });
+
+  it('content-policy abort explicitly cancels the server-owned producer with a fixed reason', async () => {
+    const fetcher = vi.fn(async (url: string) => {
+      if (url.includes('/cancel')) return new Response(null, { status: 202 });
+      return response(new ReadableStream<Uint8Array>({ start() {} }));
+    });
+    const abort = new AbortController();
+    const opened = await openArenaGenerationStream({
+      endpoint: '/api/arena/generate-stream',
+      body: {}, headers: {}, fetcher, storage: new MemoryStorage(),
+      generationRequestId: 'request-content-policy', signal: abort.signal,
+    });
+
+    abort.abort(STREAM_ABORT_REASON_CONTENT_POLICY);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const explicitCancel = fetcher.mock.calls.find(([url]) => String(url).includes('/cancel'));
+    expect(explicitCancel?.[1]).toMatchObject({
+      method: 'POST',
+      body: JSON.stringify({ reason: 'content_policy' }),
+    });
+    void opened;
   });
 
   it('cancels by stable request id when the user stops before POST response headers arrive', async () => {
@@ -443,6 +471,7 @@ describe('resumable Arena generation client', () => {
     expect(pendingCancel?.[0]).toBe('/api/arena/generate-stream');
     expect(pendingCancel?.[1]?.body).toBe(JSON.stringify({
       generationRequestId: 'request-pending-cancel',
+      reason: 'user',
     }));
   });
 

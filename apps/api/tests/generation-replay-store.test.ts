@@ -264,7 +264,7 @@ describe('RedisGenerationReplayStore', () => {
 
   it('markRunning 原子观察 reserved cancel，阻止旧 producer 启动 Provider', async () => {
     const client = createClient();
-    vi.mocked(client.eval).mockResolvedValue(2);
+    vi.mocked(client.eval).mockResolvedValue('cancelled:content_policy');
     const store = createRedisGenerationReplayStore({ getClient: () => client });
 
     await expect(store.markRunning({
@@ -272,11 +272,46 @@ describe('RedisGenerationReplayStore', () => {
       producerToken: reserveInput.producerToken,
       now: reserveInput.now,
       leaseExpiresAt: reserveInput.leaseExpiresAt,
-    })).resolves.toEqual({ owned: true, cancelRequested: true });
+    })).resolves.toEqual({
+      owned: true,
+      cancelRequested: true,
+      cancelReason: 'content_policy',
+    });
 
     expect(vi.mocked(client.eval).mock.calls[0]?.[0]).toContain(
       'state.cancelRequested == true',
     );
+    expect(vi.mocked(client.eval).mock.calls[0]?.[0]).toContain('state.cancelReason');
+  });
+
+  it('finalization claim returns the stored content-policy cancel reason', async () => {
+    const client = createClient();
+    vi.mocked(client.eval).mockResolvedValue('cancelled:content_policy');
+    const store = createRedisGenerationReplayStore({ getClient: () => client });
+
+    await expect(store.claimFinalization({
+      generationId: reserveInput.generationId,
+      producerToken: reserveInput.producerToken,
+      now: reserveInput.now,
+      leaseExpiresAt: reserveInput.leaseExpiresAt,
+    })).resolves.toEqual({ kind: 'cancelled', cancelReason: 'content_policy' });
+  });
+
+  it('requestCancel freezes and returns the actual allowlisted reason', async () => {
+    const client = createClient();
+    vi.mocked(client.eval).mockResolvedValue('accepted:content_policy');
+    const store = createRedisGenerationReplayStore({ getClient: () => client });
+
+    await expect(store.requestCancel({
+      generationId: reserveInput.generationId,
+      actorKey: reserveInput.actorKey,
+      reason: 'content_policy',
+      now: reserveInput.now,
+    })).resolves.toEqual({ kind: 'accepted', cancelReason: 'content_policy' });
+    const [script, options] = vi.mocked(client.eval).mock.calls[0]!;
+    expect(script).toContain('state.cancelRequested == true');
+    expect(script).toContain("return 'accepted:' .. state.cancelReason");
+    expect(options.arguments[1]).toBe('content_policy');
   });
 
   it.each(['claimed', 'cancelled', 'fenced'] as const)(
@@ -291,7 +326,9 @@ describe('RedisGenerationReplayStore', () => {
         producerToken: reserveInput.producerToken,
         now: reserveInput.now,
         leaseExpiresAt: reserveInput.leaseExpiresAt,
-      })).resolves.toEqual({ kind });
+      })).resolves.toEqual(kind === 'cancelled'
+        ? { kind, cancelReason: 'user' }
+        : { kind });
       expect(vi.mocked(client.eval).mock.calls[0]?.[0]).toContain(
         'GEN_CLAIM_FINALIZATION_V1',
       );

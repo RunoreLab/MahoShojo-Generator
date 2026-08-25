@@ -1,4 +1,8 @@
 import { parseGenerationSseBlock } from '@mahoshojo/hosted-api/arena-generation/sse';
+import {
+  STREAM_ABORT_REASON_CONTENT_POLICY,
+  STREAM_ABORT_REASON_USER,
+} from '@/lib/stream/abort';
 
 export const ARENA_GENERATION_CLIENT_STATE_KEY = 'mahoshojo:arena:generation:v1';
 export const ARENA_GENERATION_ACTOR_TOKEN_KEY = 'mahoshojo:arena:generation-actor:v1';
@@ -309,27 +313,33 @@ export const openArenaGenerationStream = async (
   initialHeaders.set('Accept', 'text/event-stream');
   initialHeaders.set('Content-Type', 'application/json');
   const createBody = JSON.stringify({ ...options.body, generationRequestId });
-  const cancelOnUserAbort = (): void => {
-    if (options.signal?.reason !== 'user' || terminal) return;
+  const cancelOnExplicitAbort = (): void => {
+    const cancelReason = options.signal?.reason === STREAM_ABORT_REASON_CONTENT_POLICY
+      ? 'content_policy'
+      : options.signal?.reason === STREAM_ABORT_REASON_USER
+        ? 'user'
+        : null;
+    if (!cancelReason || terminal) return;
     stopped = true;
-    void currentReader?.cancel('user').catch(() => undefined);
+    void currentReader?.cancel(cancelReason).catch(() => undefined);
     const cancelTarget = generationId
       ? `/api/arena/generations/${encodeURIComponent(generationId)}/cancel`
       : options.endpoint;
     void options.fetcher(cancelTarget, generationId
-      ? {
+        ? {
           method: 'POST',
           headers: withActorToken({ 'Content-Type': 'application/json' }, actorStorage),
+          body: JSON.stringify({ reason: cancelReason }),
         }
-      : {
+        : {
           method: 'DELETE',
           headers: withActorToken({ 'Content-Type': 'application/json' }, actorStorage),
-          body: JSON.stringify({ generationRequestId }),
+          body: JSON.stringify({ generationRequestId, reason: cancelReason }),
         }).catch(() => undefined);
     updateState('cancelled');
   };
-  options.signal?.addEventListener('abort', cancelOnUserAbort, { once: true });
-  if (options.signal?.aborted) cancelOnUserAbort();
+  options.signal?.addEventListener('abort', cancelOnExplicitAbort, { once: true });
+  if (options.signal?.aborted) cancelOnExplicitAbort();
   if (stopped) throw new Error('ARENA_GENERATION_CANCELLED');
   const fetchInitial = (): Promise<Response> => resumablePrevious?.generationId
     ? fetchResume()
@@ -380,7 +390,7 @@ export const openArenaGenerationStream = async (
     }
   }
   if (!response.ok || !response.body || !generationId) {
-    options.signal?.removeEventListener('abort', cancelOnUserAbort);
+    options.signal?.removeEventListener('abort', cancelOnExplicitAbort);
     return response;
   }
   updateState(resumablePrevious?.generationId ? 'resuming' : 'generating');
@@ -469,7 +479,7 @@ export const openArenaGenerationStream = async (
             controller.error(error);
           }
         } finally {
-          options.signal?.removeEventListener('abort', cancelOnUserAbort);
+          options.signal?.removeEventListener('abort', cancelOnExplicitAbort);
         }
       };
       void pump();
@@ -477,7 +487,7 @@ export const openArenaGenerationStream = async (
     cancel(reason) {
       stopped = true;
       void currentReader?.cancel(reason).catch(() => undefined);
-      options.signal?.removeEventListener('abort', cancelOnUserAbort);
+      options.signal?.removeEventListener('abort', cancelOnExplicitAbort);
     },
   });
 

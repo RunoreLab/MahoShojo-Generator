@@ -10,7 +10,10 @@ import { useProviderModeCooldown } from '@/lib/cooldown';
 import { quickCheck } from '@/lib/sensitive-word-filter';
 import { applyShieldWords } from '@/lib/shield-word-filter';
 import { buildStreamSensitiveArrestWarrantMarkdown } from '@/lib/stream/arrest-warrant';
-import { STREAM_ABORT_REASON_USER } from '@/lib/stream/abort';
+import {
+  STREAM_ABORT_REASON_CONTENT_POLICY,
+  STREAM_ABORT_REASON_USER,
+} from '@/lib/stream/abort';
 import { useBattleStore } from '../stores/useBattleStore';
 import { BattleAiImpact, BattleApiResponse, BattleStoreState, CombatantData } from '../types';
 import { useBattleActions } from './useBattleActions';
@@ -1055,11 +1058,7 @@ export const useBattleEngine = () => {
               setStreamingMarkdown(sanitizeTextByShieldWords(accumulatedText));
 
               shouldAbort = true;
-              try {
-                void reader!.cancel('sensitive').catch(() => {});
-              } catch {
-                // ignore
-              }
+              abortController.abort(STREAM_ABORT_REASON_CONTENT_POLICY);
               return true;
             };
 
@@ -1369,11 +1368,7 @@ export const useBattleEngine = () => {
                 setStreamingMarkdown(sanitizeTextByShieldWords(accumulatedText));
 
                 shouldAbort = true;
-                try {
-                  void reader.cancel('sensitive').catch(() => {});
-                } catch {
-                  // ignore
-                }
+                abortController.abort(STREAM_ABORT_REASON_CONTENT_POLICY);
                 break;
               }
 

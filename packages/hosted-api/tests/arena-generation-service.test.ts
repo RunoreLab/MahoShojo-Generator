@@ -51,6 +51,7 @@ class MemoryReplayStore implements GenerationReplayStore {
       snapshot: null,
       terminal: null,
       cancelRequested: false,
+      cancelReason: null,
     });
     return { kind: 'created' as const, generationId: input.generationId };
   }
@@ -66,10 +67,11 @@ class MemoryReplayStore implements GenerationReplayStore {
         ...state,
         status: 'finalizing',
         cancelRequested: true,
+        cancelReason: 'user',
         updatedAt: input.now,
         leaseExpiresAt: input.leaseExpiresAt,
       });
-      return { owned: true, cancelRequested: true };
+      return { owned: true, cancelRequested: true, cancelReason: 'user' as const };
     }
     this.states.set(input.generationId, {
       ...state,
@@ -89,7 +91,9 @@ class MemoryReplayStore implements GenerationReplayStore {
       updatedAt: input.now,
       leaseExpiresAt: input.leaseExpiresAt,
     });
-    return { kind: state.cancelRequested ? 'cancelled' as const : 'claimed' as const };
+    return state.cancelRequested
+      ? { kind: 'cancelled' as const, cancelReason: state.cancelReason ?? 'user' as const }
+      : { kind: 'claimed' as const };
   }
 
   async claimLeaseExpiry(input: Parameters<GenerationReplayStore['claimLeaseExpiry']>[0]) {
@@ -137,7 +141,13 @@ class MemoryReplayStore implements GenerationReplayStore {
       updatedAt: input.now,
       leaseExpiresAt: input.leaseExpiresAt,
     });
-    return { owned: true, cancelRequested: state.cancelRequested };
+    return state.cancelRequested
+      ? {
+        owned: true,
+        cancelRequested: true,
+        cancelReason: state.cancelReason ?? 'user' as const,
+      }
+      : { owned: true, cancelRequested: false };
   }
 
   async appendEvents(input: Parameters<GenerationReplayStore['appendEvents']>[0]) {
@@ -209,8 +219,15 @@ class MemoryReplayStore implements GenerationReplayStore {
     if (state.actorKey !== input.actorKey) return { kind: 'forbidden' as const };
     if (state.terminal) return { kind: 'terminal' as const, status: state.terminal.status };
     if (state.status === 'finalizing') return { kind: 'finalizing' as const };
-    this.states.set(input.generationId, { ...state, cancelRequested: true });
-    return { kind: 'accepted' as const };
+    const cancelReason = state.cancelRequested
+      ? state.cancelReason ?? 'user'
+      : input.reason;
+    this.states.set(input.generationId, {
+      ...state,
+      cancelRequested: true,
+      cancelReason,
+    });
+    return { kind: 'accepted' as const, cancelReason };
   }
 }
 
@@ -789,6 +806,121 @@ describe('Arena generation lifecycle service', () => {
     expect(store.states.get('generation-1')?.terminal?.status).toBe('cancelled');
   });
 
+  test('content-policy cancel reaches the matching producer with its fixed reason', async () => {
+    const store = new MemoryReplayStore();
+    let resolveAbort!: () => void;
+    const aborted = new Promise<void>((resolve) => { resolveAbort = resolve; });
+    let observedReason: unknown;
+    const service = createService(store, {
+      execute: vi.fn(async ({ signal }) => {
+        signal.addEventListener('abort', () => {
+          observedReason = signal.reason;
+          resolveAbort();
+        }, { once: true });
+        await aborted;
+        return {
+          status: 'cancelled' as const,
+          code: signal.reason === 'content_policy'
+            ? 'CONTENT_POLICY_CANCELLED'
+            : 'USER_CANCELLED',
+        };
+      }),
+    });
+    const response = await service.create(createRequest('request-1'));
+
+    const cancelled = await service.cancel(new Request(
+      'https://example.test/api/arena/generations/generation-1/cancel',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason: 'content_policy' }),
+      },
+    ), { generationId: 'generation-1' });
+
+    expect(cancelled.status).toBe(202);
+    await aborted;
+    await readResponseText(response);
+    expect(observedReason).toBe('content_policy');
+    expect(store.states.get('generation-1')).toMatchObject({
+      cancelRequested: true,
+      cancelReason: 'content_policy',
+      terminal: { status: 'cancelled', code: 'CONTENT_POLICY_CANCELLED' },
+    });
+  });
+
+  test('rejects cancel reasons outside the fixed allowlist before mutating producer state', async () => {
+    const store = new MemoryReplayStore();
+    let resolveAbort!: () => void;
+    const aborted = new Promise<void>((resolve) => { resolveAbort = resolve; });
+    const service = createService(store, {
+      execute: vi.fn(async ({ signal }) => {
+        signal.addEventListener('abort', resolveAbort, { once: true });
+        await aborted;
+        return { status: 'cancelled' as const, code: 'USER_CANCELLED' };
+      }),
+    });
+    const response = await service.create(createRequest('request-1'));
+
+    const invalid = await service.cancel(new Request(
+      'https://example.test/api/arena/generations/generation-1/cancel',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason: 'arbitrary-client-value' }),
+      },
+    ), { generationId: 'generation-1' });
+    const invalidStatus = invalid.status;
+    const cancelRequestedAfterInvalid = store.states.get('generation-1')?.cancelRequested;
+    const cleanup = await service.cancel(new Request(
+      'https://example.test/api/arena/generations/generation-1/cancel',
+      { method: 'POST' },
+    ), { generationId: 'generation-1' });
+    expect([200, 202]).toContain(cleanup.status);
+    await aborted;
+    await readResponseText(response);
+
+    expect(invalidStatus).toBe(400);
+    expect(cancelRequestedAfterInvalid).toBe(false);
+    await expect(invalid.json()).resolves.toMatchObject({ code: 'GENERATION_CANCEL_REASON_INVALID' });
+  });
+
+  test('rejects an oversized cancel body before mutating producer state', async () => {
+    const store = new MemoryReplayStore();
+    let resolveAbort!: () => void;
+    const aborted = new Promise<void>((resolve) => { resolveAbort = resolve; });
+    const service = createService(store, {
+      execute: vi.fn(async ({ signal }) => {
+        signal.addEventListener('abort', resolveAbort, { once: true });
+        await aborted;
+        return { status: 'cancelled' as const, code: 'USER_CANCELLED' };
+      }),
+    });
+    const response = await service.create(createRequest('request-1'));
+
+    const oversized = await service.cancel(new Request(
+      'https://example.test/api/arena/generations/generation-1/cancel',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason: 'user', padding: 'x'.repeat(2_048) }),
+      },
+    ), { generationId: 'generation-1' });
+    const oversizedStatus = oversized.status;
+    const cancelRequestedAfterOversized = store.states.get('generation-1')?.cancelRequested;
+    await service.cancel(new Request(
+      'https://example.test/api/arena/generations/generation-1/cancel',
+      { method: 'POST' },
+    ), { generationId: 'generation-1' });
+    await aborted;
+    await readResponseText(response);
+
+    expect(oversizedStatus).toBe(413);
+    expect(cancelRequestedAfterOversized).toBe(false);
+    await expect(oversized.json()).resolves.toMatchObject({
+      code: 'GENERATION_CANCEL_REQUEST_TOO_LARGE',
+    });
+  });
+
   test('cancels a pending handshake by actor-scoped request id', async () => {
     const store = new MemoryReplayStore();
     let resolveAbort!: () => void;
@@ -830,17 +962,21 @@ describe('Arena generation lifecycle service', () => {
     expect(store.states.get('generation-1')?.terminal?.status).toBe('cancelled');
   });
 
-  test('cancel routed to another server instance reaches the producer through heartbeat state', async () => {
+  test('content-policy cancel routed to another instance preserves its reason through heartbeat', async () => {
     vi.useFakeTimers();
     try {
       const store = new MemoryReplayStore();
       let resolveAbort!: () => void;
       const aborted = new Promise<void>((resolve) => { resolveAbort = resolve; });
+      let observedReason: unknown;
       const producer = createService(store, {
         execute: vi.fn(async ({ signal }) => {
-          signal.addEventListener('abort', resolveAbort, { once: true });
+          signal.addEventListener('abort', () => {
+            observedReason = signal.reason;
+            resolveAbort();
+          }, { once: true });
           await aborted;
-          return { status: 'cancelled' as const, code: 'USER_CANCELLED' };
+          return { status: 'cancelled' as const, code: 'CONTENT_POLICY_CANCELLED' };
         }),
       }, { heartbeatIntervalMs: 10 });
       const remoteInstance = createService(store, {
@@ -850,14 +986,22 @@ describe('Arena generation lifecycle service', () => {
 
       const cancel = await remoteInstance.cancel(new Request(
         'https://example.test/api/arena/generations/generation-1/cancel',
-        { method: 'POST' },
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ reason: 'content_policy' }),
+        },
       ), { generationId: 'generation-1' });
       expect(cancel.status).toBe(202);
       await vi.advanceTimersByTimeAsync(10);
       await aborted;
       await readResponseText(response);
 
-      expect(store.states.get('generation-1')?.terminal?.status).toBe('cancelled');
+      expect(observedReason).toBe('content_policy');
+      expect(store.states.get('generation-1')?.terminal).toMatchObject({
+        status: 'cancelled',
+        code: 'CONTENT_POLICY_CANCELLED',
+      });
     } finally {
       vi.useRealTimers();
     }

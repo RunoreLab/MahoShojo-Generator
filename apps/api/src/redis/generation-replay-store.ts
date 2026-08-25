@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 
+import { isGenerationCancelReason } from '@mahoshojo/hosted-api/arena-generation/service';
 import type {
   GenerationEventInput,
   GenerationReplayStore,
@@ -81,9 +82,10 @@ if state.cancelRequested == true then
   state.status = 'finalizing'
   state.updatedAt = ARGV[2]
   state.leaseExpiresAt = ARGV[3]
+  if state.cancelReason ~= 'content_policy' then state.cancelReason = 'user' end
   redis.call('SET', KEYS[1], cjson.encode(state), 'PX', ARGV[4])
   redis.call('PEXPIRE', state.reservationKey, ARGV[4])
-  return 2
+  return 'cancelled:' .. state.cancelReason
 end
 state.status = 'running'
 state.updatedAt = ARGV[2]
@@ -105,9 +107,14 @@ if state.leaseExpiresAt == nil or state.leaseExpiresAt == cjson.null or state.le
 state.status = 'finalizing'
 state.updatedAt = ARGV[2]
 state.leaseExpiresAt = ARGV[3]
+if state.cancelRequested == true and state.cancelReason ~= 'content_policy' then
+  state.cancelReason = 'user'
+end
 redis.call('SET', KEYS[1], cjson.encode(state), 'PX', ARGV[4])
 redis.call('PEXPIRE', state.reservationKey, ARGV[4])
-if state.cancelRequested == true then return 'cancelled' end
+if state.cancelRequested == true then
+  return 'cancelled:' .. state.cancelReason
+end
 return 'claimed'
 `;
 
@@ -157,9 +164,14 @@ if state.terminal ~= nil and state.terminal ~= cjson.null then return 0 end
 if state.leaseExpiresAt == nil or state.leaseExpiresAt == cjson.null or state.leaseExpiresAt <= ARGV[2] then return 0 end
 state.updatedAt = ARGV[2]
 state.leaseExpiresAt = ARGV[3]
+if state.cancelRequested == true and state.cancelReason ~= 'content_policy' then
+  state.cancelReason = 'user'
+end
 redis.call('SET', KEYS[1], cjson.encode(state), 'PX', ARGV[4])
 redis.call('PEXPIRE', state.reservationKey, ARGV[4])
-if state.cancelRequested == true then return 2 end
+if state.cancelRequested == true then
+  return 'cancelled:' .. state.cancelReason
+end
 return 1
 `;
 
@@ -241,12 +253,16 @@ if state.terminal ~= nil and state.terminal ~= cjson.null then
   return 'terminal:' .. state.terminal.status
 end
 if state.status == 'finalizing' then return 'finalizing' end
-state.cancelRequested = true
-state.cancelReason = ARGV[2]
+if state.cancelRequested == true then
+  if state.cancelReason ~= 'content_policy' then state.cancelReason = 'user' end
+else
+  state.cancelRequested = true
+  state.cancelReason = ARGV[2]
+end
 state.updatedAt = ARGV[3]
 redis.call('SET', KEYS[1], cjson.encode(state), 'PX', ARGV[4])
 redis.call('PEXPIRE', state.reservationKey, ARGV[4])
-return 'accepted'
+return 'accepted:' .. state.cancelReason
 `;
 
 const READ_SCRIPT = `
@@ -326,6 +342,18 @@ const isGenerationStatus = (value: unknown): value is GenerationStatus => [
   'producer_lost',
 ].includes(String(value));
 
+const cancelReasonFromTaggedResult = (
+  value: unknown,
+  prefix: 'accepted:' | 'cancelled:',
+): GenerationReplayStoreState['cancelReason'] => {
+  if (typeof value !== 'string' || !value.startsWith(prefix)) return null;
+  const reason = value.slice(prefix.length);
+  if (!isGenerationCancelReason(reason)) {
+    throw new Error('REDIS_GENERATION_CANCEL_REASON_INVALID');
+  }
+  return reason;
+};
+
 const parseStoredState = (raw: string): StoredGenerationState => {
   const parsed = JSON.parse(raw) as Partial<StoredGenerationState>;
   if (
@@ -355,6 +383,11 @@ const parseStoredState = (raw: string): StoredGenerationState => {
     snapshot: parsed.snapshot ?? null,
     terminal: parsed.terminal ?? null,
     cancelRequested: parsed.cancelRequested === true,
+    cancelReason: isGenerationCancelReason(parsed.cancelReason)
+      ? parsed.cancelReason
+      : parsed.cancelRequested === true
+        ? 'user'
+        : null,
   };
 };
 
@@ -450,6 +483,7 @@ export const createRedisGenerationReplayStore = (
         snapshot: null,
         terminal: null,
         cancelRequested: false,
+        cancelReason: null,
       };
       const raw = await options.getClient().eval(RESERVATION_SCRIPT, {
         keys: [
@@ -472,10 +506,16 @@ export const createRedisGenerationReplayStore = (
         keys: [stateKey(input.generationId)],
         arguments: [input.producerToken, input.now, input.leaseExpiresAt, String(activeTtlMs)],
       });
+      const cancelReason = cancelReasonFromTaggedResult(result, 'cancelled:');
+      if (cancelReason) {
+        return { owned: true, cancelRequested: true, cancelReason };
+      }
       if (result !== 2 && result !== 1 && result !== 0 && result !== -1) {
         throw new Error('REDIS_GENERATION_OWNERSHIP_INVALID');
       }
-      return { owned: result === 1 || result === 2, cancelRequested: result === 2 };
+      return result === 2
+        ? { owned: true, cancelRequested: true, cancelReason: 'user' }
+        : { owned: result === 1, cancelRequested: false };
     },
 
     async claimFinalization(input) {
@@ -488,10 +528,14 @@ export const createRedisGenerationReplayStore = (
           String(activeTtlMs),
         ],
       });
+      const cancelReason = cancelReasonFromTaggedResult(result, 'cancelled:');
+      if (cancelReason) return { kind: 'cancelled', cancelReason };
       if (result !== 'claimed' && result !== 'cancelled' && result !== 'fenced') {
         throw new Error('REDIS_GENERATION_FINALIZATION_CLAIM_INVALID');
       }
-      return { kind: result };
+      return result === 'cancelled'
+        ? { kind: 'cancelled', cancelReason: 'user' }
+        : { kind: result };
     },
 
     async claimLeaseExpiry(input) {
@@ -551,10 +595,16 @@ export const createRedisGenerationReplayStore = (
         keys: [stateKey(input.generationId)],
         arguments: [input.producerToken, input.now, input.leaseExpiresAt, String(activeTtlMs)],
       });
+      const cancelReason = cancelReasonFromTaggedResult(result, 'cancelled:');
+      if (cancelReason) {
+        return { owned: true, cancelRequested: true, cancelReason };
+      }
       if (result !== -1 && result !== 0 && result !== 1 && result !== 2) {
         throw new Error('REDIS_GENERATION_LEASE_INVALID');
       }
-      return { owned: result === 1 || result === 2, cancelRequested: result === 2 };
+      return result === 2
+        ? { owned: true, cancelRequested: true, cancelReason: 'user' }
+        : { owned: result === 1, cancelRequested: false };
     },
 
     async appendEvents(input) {
@@ -662,6 +712,9 @@ export const createRedisGenerationReplayStore = (
     },
 
     async requestCancel(input) {
+      if (!isGenerationCancelReason(input.reason)) {
+        throw new Error('REDIS_GENERATION_CANCEL_REASON_INVALID');
+      }
       const raw = await options.getClient().eval(CANCEL_SCRIPT, {
         keys: [stateKey(input.generationId)],
         arguments: [
@@ -671,14 +724,16 @@ export const createRedisGenerationReplayStore = (
           String(activeTtlMs),
         ],
       });
+      const cancelReason = cancelReasonFromTaggedResult(raw, 'accepted:');
+      if (cancelReason) return { kind: 'accepted', cancelReason };
       if (
-        raw === 'accepted'
-        || raw === 'finalizing'
+        raw === 'finalizing'
         || raw === 'forbidden'
         || raw === 'not-found'
       ) {
         return { kind: raw };
       }
+      if (raw === 'accepted') return { kind: 'accepted', cancelReason: input.reason };
       if (typeof raw === 'string' && raw.startsWith('terminal:')) {
         const status = raw.slice('terminal:'.length);
         if (status === 'completed' || status === 'failed' || status === 'cancelled'

@@ -136,11 +136,17 @@ try {
   const cancel = await store.requestCancel({
     generationId,
     actorKey,
-    reason: 'user',
+    reason: 'content_policy',
     now,
   });
   const heartbeat = await store.heartbeat({ generationId, producerToken, now, leaseExpiresAt });
-  if (cancel.kind !== 'accepted' || !heartbeat.owned || !heartbeat.cancelRequested) {
+  if (
+    cancel.kind !== 'accepted'
+    || cancel.cancelReason !== 'content_policy'
+    || !heartbeat.owned
+    || !heartbeat.cancelRequested
+    || heartbeat.cancelReason !== 'content_policy'
+  ) {
     throw new Error('ARENA_REDIS_CANCEL_CONTRACT_FAILED');
   }
   const finalizationClaim = await store.claimFinalization({
@@ -149,13 +155,16 @@ try {
     now,
     leaseExpiresAt,
   });
-  if (finalizationClaim.kind !== 'cancelled') {
+  if (
+    finalizationClaim.kind !== 'cancelled'
+    || finalizationClaim.cancelReason !== 'content_policy'
+  ) {
     throw new Error('ARENA_REDIS_CANCEL_FINALIZATION_ORDER_FAILED');
   }
   const terminal = await store.markTerminal({
     generationId,
     producerToken,
-    terminal: { status: 'cancelled', code: 'USER_CANCELLED' },
+    terminal: { status: 'cancelled', code: 'CONTENT_POLICY_CANCELLED' },
     now,
   });
   const duplicateTerminal = await store.markTerminal({

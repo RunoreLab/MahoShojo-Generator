@@ -5,6 +5,7 @@ import {
 } from './sse';
 
 export const MAX_ARENA_CREATE_BODY_BYTES = 12 * 1_024 * 1_024;
+export const MAX_ARENA_CANCEL_BODY_BYTES = 1_024;
 
 export class ArenaGenerationFinalizationPendingError extends Error {
   readonly originalError: unknown;
@@ -61,6 +62,14 @@ export type GenerationTerminal = {
   resultRef?: string | null;
 };
 
+export type GenerationCancelReason = 'user' | 'content_policy';
+
+export const isGenerationCancelReason = (value: unknown): value is GenerationCancelReason =>
+  value === 'user' || value === 'content_policy';
+
+export const generationCancelCode = (reason: GenerationCancelReason): string =>
+  reason === 'content_policy' ? 'CONTENT_POLICY_CANCELLED' : 'USER_CANCELLED';
+
 export type GenerationReplayStoreState = {
   actorKey: string;
   generationId: string;
@@ -75,6 +84,7 @@ export type GenerationReplayStoreState = {
   snapshot: GenerationSnapshot | null;
   terminal: GenerationTerminal | null;
   cancelRequested: boolean;
+  cancelReason?: GenerationCancelReason | null;
 };
 
 export interface GenerationReplayStore {
@@ -97,7 +107,11 @@ export interface GenerationReplayStore {
     producerToken: string;
     now: string;
     leaseExpiresAt: string;
-  }): Promise<{ owned: boolean; cancelRequested: boolean }>;
+  }): Promise<{
+    owned: boolean;
+    cancelRequested: boolean;
+    cancelReason?: GenerationCancelReason | null;
+  }>;
   claimFinalization(_input: {
     generationId: string;
     producerToken: string;
@@ -131,7 +145,11 @@ export interface GenerationReplayStore {
     producerToken: string;
     now: string;
     leaseExpiresAt: string;
-  }): Promise<{ owned: boolean; cancelRequested: boolean }>;
+  }): Promise<{
+    owned: boolean;
+    cancelRequested: boolean;
+    cancelReason?: GenerationCancelReason | null;
+  }>;
   appendEvents(_input: {
     generationId: string;
     producerToken: string;
@@ -171,10 +189,10 @@ export interface GenerationReplayStore {
   requestCancel(_input: {
     generationId: string;
     actorKey: string;
-    reason: string;
+    reason: GenerationCancelReason;
     now: string;
   }): Promise<
-    | { kind: 'accepted' }
+    | { kind: 'accepted'; cancelReason: GenerationCancelReason }
     | { kind: 'finalizing' }
     | { kind: 'terminal'; status: GenerationTerminal['status'] }
     | { kind: 'forbidden' }
@@ -196,7 +214,7 @@ export type ArenaGenerationExecutionInput = {
 
 export type ArenaGenerationFinalizationClaim =
   | { kind: 'claimed' }
-  | { kind: 'cancelled' }
+  | { kind: 'cancelled'; cancelReason?: GenerationCancelReason }
   | { kind: 'fenced' };
 
 export type PreparedArenaGeneration = {
@@ -296,7 +314,7 @@ export type ArenaGenerationObservation =
   | {
     event: 'cancel';
     generationId: string;
-    reason: 'user';
+    reason: GenerationCancelReason;
     outcome: 'accepted' | 'terminal';
   }
   | { event: 'producer_lost'; generationId: string; reason: string }
@@ -378,6 +396,69 @@ const withActorHeaders = (
     statusText: response.statusText,
     headers,
   });
+};
+
+const invalidCancelReasonResponse = (): Response => jsonResponse({
+  code: 'GENERATION_CANCEL_REASON_INVALID',
+  error: 'reason must be user or content_policy',
+}, 400);
+
+const cancelReasonFromPayload = (
+  payload: unknown,
+): GenerationCancelReason | Response => {
+  if (payload === null || payload === undefined) return 'user';
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return invalidCancelReasonResponse();
+  }
+  const reason = (payload as Record<string, unknown>).reason;
+  if (reason === undefined) return 'user';
+  return isGenerationCancelReason(reason) ? reason : invalidCancelReasonResponse();
+};
+
+const readOptionalCancelPayload = async (
+  request: Request,
+): Promise<unknown | Response> => {
+  const tooLarge = (): Response => jsonResponse({
+    code: 'GENERATION_CANCEL_REQUEST_TOO_LARGE',
+    error: 'Cancel request body exceeds the allowed size',
+  }, 413);
+  const contentLength = Number(request.headers.get('content-length'));
+  if (Number.isFinite(contentLength) && contentLength > MAX_ARENA_CANCEL_BODY_BYTES) {
+    return tooLarge();
+  }
+  if (!request.body) return null;
+
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let bodyBytes = 0;
+  try {
+    while (true) {
+      const next = await reader.read();
+      if (next.done) break;
+      bodyBytes += next.value.byteLength;
+      if (bodyBytes > MAX_ARENA_CANCEL_BODY_BYTES) {
+        await reader.cancel('arena cancel body exceeds byte limit').catch(() => undefined);
+        return tooLarge();
+      }
+      chunks.push(next.value);
+    }
+  } catch {
+    return jsonResponse({ code: 'INVALID_JSON', error: 'Invalid JSON body' }, 400);
+  } finally {
+    reader.releaseLock();
+  }
+  if (bodyBytes === 0) return null;
+  const body = new Uint8Array(bodyBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  try {
+    return JSON.parse(new TextDecoder().decode(body));
+  } catch {
+    return jsonResponse({ code: 'INVALID_JSON', error: 'Invalid JSON body' }, 400);
+  }
 };
 
 const parseCreatePayload = async (
@@ -871,6 +952,7 @@ export const createArenaGenerationService = (
           resultRef: terminalFallback.resultRef,
         },
         cancelRequested: terminalFallback.status === 'cancelled',
+        cancelReason: terminalFallback.status === 'cancelled' ? 'user' : null,
       };
     }
     if (state.actorKey !== actor.actorKey) {
@@ -1255,7 +1337,11 @@ export const createArenaGenerationService = (
     });
     if (!running.owned) throw new Error('GENERATION_PRODUCER_FENCED');
     if (running.cancelRequested) {
-      await replayWriter.finish({ status: 'cancelled', code: 'USER_CANCELLED' });
+      const cancelReason = running.cancelReason ?? 'user';
+      await replayWriter.finish({
+        status: 'cancelled',
+        code: generationCancelCode(cancelReason),
+      });
       return;
     }
 
@@ -1275,7 +1361,7 @@ export const createArenaGenerationService = (
         });
         if (claimed.kind === 'fenced') loseOwnership();
         if (claimed.kind === 'cancelled' && !controller.signal.aborted) {
-          controller.abort('user');
+          controller.abort(claimed.cancelReason ?? 'user');
         }
         return claimed;
       },
@@ -1295,7 +1381,7 @@ export const createArenaGenerationService = (
               loseOwnership();
               return;
             }
-            if (result.cancelRequested) controller.abort('user');
+            if (result.cancelRequested) controller.abort(result.cancelReason ?? 'user');
           }).catch(() => {
             observe({
               event: 'redis_degraded',
@@ -1310,7 +1396,14 @@ export const createArenaGenerationService = (
         const terminal: GenerationTerminal = controller.signal.reason === 'producer_lost'
           ? { status: 'producer_lost', code: 'PRODUCER_OWNERSHIP_LOST' }
           : controller.signal.aborted
-            ? { status: 'cancelled', code: 'USER_CANCELLED' }
+            ? {
+              status: 'cancelled',
+              code: generationCancelCode(
+                isGenerationCancelReason(controller.signal.reason)
+                  ? controller.signal.reason
+                  : 'user',
+              ),
+            }
           : { status: 'failed', code: 'GENERATION_FAILED' };
         await replayWriter.emit({
           type: 'telemetry',
@@ -1527,12 +1620,8 @@ export const createArenaGenerationService = (
     async cancelRequest(request: Request): Promise<Response> {
       const actor = await dependencies.resolveActor(request);
       if (!actor) return jsonResponse({ code: 'UNAUTHORIZED', error: 'Unauthorized' }, 401);
-      let payload: unknown;
-      try {
-        payload = await request.json();
-      } catch {
-        return jsonResponse({ code: 'INVALID_JSON', error: 'Invalid JSON body' }, 400);
-      }
+      const payload = await readOptionalCancelPayload(request);
+      if (payload instanceof Response) return payload;
       const generationRequestId = payload && typeof payload === 'object' && !Array.isArray(payload)
         ? (payload as Record<string, unknown>).generationRequestId
         : null;
@@ -1545,6 +1634,8 @@ export const createArenaGenerationService = (
           error: 'generationRequestId is required',
         }, 400);
       }
+      const cancelReason = cancelReasonFromPayload(payload);
+      if (cancelReason instanceof Response) return cancelReason;
       const generationId = await dependencies.deriveGenerationId({
         actorKey: actor.actorKey,
         generationRequestId,
@@ -1554,7 +1645,7 @@ export const createArenaGenerationService = (
         result = await dependencies.store.requestCancel({
           generationId,
           actorKey: actor.actorKey,
-          reason: 'user',
+          reason: cancelReason,
           now: dependencies.now().toISOString(),
         });
       } catch {
@@ -1584,11 +1675,11 @@ export const createArenaGenerationService = (
         return jsonResponse({ code: 'GENERATION_NOT_FOUND', error: 'Generation not found' }, 404);
       }
       if (result.kind === 'accepted') {
-        activeProducers.get(generationId)?.controller.abort('user');
+        activeProducers.get(generationId)?.controller.abort(result.cancelReason);
         observe({
           event: 'cancel',
           generationId,
-          reason: 'user',
+          reason: result.cancelReason,
           outcome: 'accepted',
         });
         return withActorHeaders(jsonResponse({
@@ -1689,6 +1780,10 @@ export const createArenaGenerationService = (
     async cancel(request: Request, params: ArenaGenerationRouteParams): Promise<Response> {
       const owned = await resolveOwnedState(request, params.generationId);
       if (owned instanceof Response) return owned;
+      const cancelPayload = await readOptionalCancelPayload(request);
+      if (cancelPayload instanceof Response) return cancelPayload;
+      const cancelReason = cancelReasonFromPayload(cancelPayload);
+      if (cancelReason instanceof Response) return cancelReason;
       if (owned.terminalFallback) {
         return withActorHeaders(jsonResponse({
           generationId: params.generationId,
@@ -1699,7 +1794,7 @@ export const createArenaGenerationService = (
       const result = await dependencies.store.requestCancel({
         generationId: params.generationId,
         actorKey: owned.actor.actorKey,
-        reason: 'user',
+        reason: cancelReason,
         now: dependencies.now().toISOString(),
       });
       if (result.kind === 'not-found' || result.kind === 'forbidden') {
@@ -1709,7 +1804,7 @@ export const createArenaGenerationService = (
         observe({
           event: 'cancel',
           generationId: params.generationId,
-          reason: 'user',
+          reason: cancelReason,
           outcome: 'terminal',
         });
         return withActorHeaders(jsonResponse({
@@ -1729,10 +1824,10 @@ export const createArenaGenerationService = (
       observe({
         event: 'cancel',
         generationId: params.generationId,
-        reason: 'user',
+        reason: result.cancelReason,
         outcome: 'accepted',
       });
-      activeProducers.get(params.generationId)?.controller.abort('user');
+      activeProducers.get(params.generationId)?.controller.abort(result.cancelReason);
       return withActorHeaders(jsonResponse({
         generationId: params.generationId,
         status: 'cancelling',

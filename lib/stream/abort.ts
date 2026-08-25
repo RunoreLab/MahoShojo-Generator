@@ -1,9 +1,11 @@
 export const STREAM_ABORT_REASON_USER = 'user';
+export const STREAM_ABORT_REASON_CONTENT_POLICY = 'content_policy';
 export const STREAM_ABORT_REASON_OUTPUT_SAFETY = 'output-safety';
 export const STREAM_ABORT_REASON_TIMEOUT = 'timeout';
 
 export type StreamAbortReason =
   | typeof STREAM_ABORT_REASON_USER
+  | typeof STREAM_ABORT_REASON_CONTENT_POLICY
   | typeof STREAM_ABORT_REASON_OUTPUT_SAFETY
   | typeof STREAM_ABORT_REASON_TIMEOUT;
 

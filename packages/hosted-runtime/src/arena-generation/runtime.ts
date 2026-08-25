@@ -1,4 +1,8 @@
-import { ArenaGenerationFinalizationPendingError } from '@mahoshojo/hosted-api/arena-generation/service';
+import {
+  ArenaGenerationFinalizationPendingError,
+  generationCancelCode,
+  isGenerationCancelReason,
+} from '@mahoshojo/hosted-api/arena-generation/service';
 import type {
   ArenaGenerationExecutor,
   ArenaGenerationExecutionInput,
@@ -293,7 +297,11 @@ const readWithAbort = async (
 
 const errorCodeOf = (error: unknown, signal: AbortSignal): string => {
   if (signal.reason === 'producer_lost') return 'PRODUCER_OWNERSHIP_LOST';
-  if (signal.aborted) return 'USER_CANCELLED';
+  if (signal.aborted) {
+    return generationCancelCode(
+      isGenerationCancelReason(signal.reason) ? signal.reason : 'user',
+    );
+  }
   if (error instanceof Error && error.name === 'AbortError') return 'GENERATION_ABORTED';
   return 'GENERATION_FAILED';
 };
@@ -416,6 +424,7 @@ export const createArenaGenerationRuntime = (
     let durableFinalizationAttempted = false;
     let finalizationClaimIndeterminate = false;
     let finalizationResult: ArenaGenerationFinalizationResult | null = null;
+    let claimedCancellationCode: string | null = null;
     let providerStartedAt: number | null = null;
     let providerSettled = false;
     const projector = createArenaStreamProjector({
@@ -439,6 +448,7 @@ export const createArenaGenerationRuntime = (
         const claim = await input.claimFinalization(terminal);
         finalizationClaimIndeterminate = false;
         if (claim.kind === 'cancelled') {
+          claimedCancellationCode = generationCancelCode(claim.cancelReason ?? 'user');
           durableFinalizationAttempted = true;
           finalizationResult = await dependencies.finalize({
             generationId: input.generationId,
@@ -450,7 +460,7 @@ export const createArenaGenerationRuntime = (
             markdown,
             telemetry,
             status: 'cancelled',
-            errorCode: 'USER_CANCELLED',
+            errorCode: claimedCancellationCode,
             signal: input.signal,
           });
           throw new Error('ARENA_GENERATION_CANCELLED');
@@ -614,7 +624,9 @@ export const createArenaGenerationRuntime = (
       }
       const cancellationFenced = error instanceof Error
         && error.message === 'ARENA_GENERATION_CANCELLED';
-      const code = cancellationFenced ? 'USER_CANCELLED' : errorCodeOf(error, input.signal);
+      const code = cancellationFenced
+        ? claimedCancellationCode ?? 'USER_CANCELLED'
+        : errorCodeOf(error, input.signal);
       const status = input.signal.reason === 'producer_lost'
         ? 'producer_lost'
         : input.signal.aborted || cancellationFenced

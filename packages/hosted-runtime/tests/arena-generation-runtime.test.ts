@@ -365,7 +365,10 @@ describe('Arena generation runtime', () => {
     expect(dependencies.finalize).not.toHaveBeenCalled();
   });
 
-  it('explicit generation abort reaches Provider/finalizer and maps to cancelled terminal', async () => {
+  it.each([
+    ['user', 'USER_CANCELLED'],
+    ['content_policy', 'CONTENT_POLICY_CANCELLED'],
+  ] as const)('explicit %s abort reaches Provider/finalizer as %s', async (reason, code) => {
     const finalize = vi.fn(async () => ({ resultRef: null, ranking: null }));
     const dependencies = createDependencies({
       generate: vi.fn(async ({ signal }) => {
@@ -397,12 +400,13 @@ describe('Arena generation runtime', () => {
       claimFinalization: vi.fn(async () => ({ kind: 'claimed' as const })),
     });
 
-    controller.abort('user');
+    controller.abort(reason);
 
-    await expect(execution).resolves.toMatchObject({ status: 'cancelled' });
+    await expect(execution).resolves.toMatchObject({ status: 'cancelled', code });
     expect(finalize).toHaveBeenCalledTimes(1);
     expect(finalize).toHaveBeenCalledWith(expect.objectContaining({
       status: 'cancelled',
+      errorCode: code,
       signal: controller.signal,
     }));
   });
@@ -427,13 +431,16 @@ describe('Arena generation runtime', () => {
       payload: prepared.executionPayload,
       signal: new AbortController().signal,
       emit: async () => undefined,
-      claimFinalization: vi.fn(async () => ({ kind: 'cancelled' as const })),
+      claimFinalization: vi.fn(async () => ({
+        kind: 'cancelled' as const,
+        cancelReason: 'content_policy' as const,
+      })),
     });
 
-    expect(terminal).toMatchObject({ status: 'cancelled', code: 'USER_CANCELLED' });
+    expect(terminal).toMatchObject({ status: 'cancelled', code: 'CONTENT_POLICY_CANCELLED' });
     expect(finalize).toHaveBeenCalledWith(expect.objectContaining({
       status: 'cancelled',
-      errorCode: 'USER_CANCELLED',
+      errorCode: 'CONTENT_POLICY_CANCELLED',
     }));
   });
 });
