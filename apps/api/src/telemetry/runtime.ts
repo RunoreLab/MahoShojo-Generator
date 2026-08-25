@@ -707,6 +707,7 @@ export class HonoRuntimeTelemetry implements
           this.logger(JSON.stringify({
             event: 'arena.generation.terminal.audit',
             schemaVersion: 1,
+            runtime: 'hono-node',
             generationId: observation.generationId,
             providerStarted: audit.providerStarted,
             subscriberDisconnects: audit.subscriberDisconnects,

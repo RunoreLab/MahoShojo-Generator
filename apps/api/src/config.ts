@@ -17,6 +17,21 @@ export type HonoServerConfig = {
 
 const hasText = (value: string | undefined): boolean => Boolean(value?.trim());
 
+const isTrustedHttpsOrigin = (value: string | undefined): boolean => {
+  if (!hasText(value)) return false;
+  try {
+    const url = new URL(value as string);
+    return url.protocol === 'https:'
+      && !url.username
+      && !url.password
+      && url.pathname === '/'
+      && !url.search
+      && !url.hash;
+  } catch {
+    return false;
+  }
+};
+
 const hasValidAiProviderConfig = (env: NodeJS.ProcessEnv): boolean => {
   if (hasText(env.AI_API_KEY)) return true;
   if (!hasText(env.AI_PROVIDERS_CONFIG)) return false;
@@ -71,6 +86,33 @@ const validateProductionEnvironment = (
     || !hasText(env.D1_DATABASE_ID)
     || !hasText(env.CLOUDFLARE_API_TOKEN)) {
     problems.push('D1 未配置（推荐 Gateway，或提供 Cloudflare 管理 API 三项配置）');
+  }
+
+  if (!isTrustedHttpsOrigin(env.ARENA_FINALIZATION_URL)) {
+    problems.push('ARENA_FINALIZATION_URL 必须是无凭据、路径、查询与片段的 HTTPS origin');
+  }
+  const arenaFinalizationSecret = env.ARENA_FINALIZATION_HMAC_SECRET?.trim() ?? '';
+  if (arenaFinalizationSecret.length < 32) {
+    problems.push('ARENA_FINALIZATION_HMAC_SECRET 必须至少 32 个字符');
+  } else if ([
+    env.SIGNATURE_SECRET_KEY,
+    env.D1_GATEWAY_HMAC_SECRET,
+    env.BETTER_AUTH_SECRET,
+  ].some((secret) => secret?.trim() === arenaFinalizationSecret)) {
+    problems.push('ARENA_FINALIZATION_HMAC_SECRET 必须使用独立 secret');
+  }
+
+  for (const name of ['R2_ACCESS_KEY_ID', 'R2_SECRET_ACCESS_KEY', 'R2_BUCKET_NAME'] as const) {
+    if (!hasText(env[name])) problems.push(`${name} 缺失`);
+  }
+  if (!hasText(env.R2_ACCOUNT_ID)
+    && !hasText(env.R2_ENDPOINT)
+    && !hasText(env.CF_ACCOUNT_ID)
+    && !hasText(env.CLOUDFLARE_ACCOUNT_ID)) {
+    problems.push('R2_ACCOUNT_ID/R2_ENDPOINT 缺失');
+  }
+  if (hasText(env.R2_ENDPOINT) && !isTrustedHttpsOrigin(env.R2_ENDPOINT)) {
+    problems.push('R2_ENDPOINT 必须是无凭据、路径、查询与片段的 HTTPS origin');
   }
 
   if (config.authMode === 'hybrid') {

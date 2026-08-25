@@ -10,6 +10,7 @@ import { getDefaultNodeD1Client } from '@mahoshojo/hosted-runtime/node-runtime/d
 
 import { readGenerationRankingForGeneration } from '@/app/api/arena/generation-ranking/handler';
 import { settleArenaRatingsForGeneration } from '@/lib/database/arena-ratings';
+import { cloudflareArenaGenerationObserver } from '@/app/api/arena/generation-telemetry';
 
 const globalKey = '__mahoshojoArenaGenerationDrServiceV1';
 
@@ -33,8 +34,11 @@ const buildService = (): ReturnType<typeof createNodeArenaGenerationService> => 
       ...(objectStore ? { objectStore } : {}),
     }),
     getD1Client,
+    observer: cloudflareArenaGenerationObserver,
     executorOptions: {
-      finalizer: createArenaGenerationFinalizer(persistence),
+      finalizer: createArenaGenerationFinalizer(persistence, {
+        observer: cloudflareArenaGenerationObserver,
+      }),
     },
   });
 };

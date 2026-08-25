@@ -194,6 +194,7 @@ describe('Hono deployment workflow', () => {
     const gatewayCommand = 'pnpm --filter @mahoshojo/d1-gateway exec wrangler dev --local \\';
     const healthProbe = 'if curl --fail --silent --show-error "$D1_GATEWAY_URL/health" >/dev/null; then';
     const runtimeVerifier = 'pnpm run verify:server:runtime';
+    const arenaRedisVerifier = 'pnpm --filter @mahoshojo/api run verify:arena-redis';
 
     expectRequiredGateStep(runtimeStep);
     expect(buildJob).toMatch(/^    services:\s*\n      redis:\s*$/m);
@@ -205,6 +206,10 @@ describe('Hono deployment workflow', () => {
     expect(activeStepLines).toContain(
       'D1_GATEWAY_HMAC_SECRET: g25c-ci-only-d1-gateway-hmac-secret',
     );
+    expect(activeStepLines).toContain(
+      'ARENA_FINALIZATION_HMAC_SECRET: g25r-ci-only-independent-finalization-secret',
+    );
+    expect(activeStepLines).toContain('R2_BUCKET_NAME: g25r-ci-only-r2-bucket');
     expect(runtimeStep).not.toContain('${{ secrets.');
     expect(runtimeStep).not.toContain('--remote');
     expect(runtimeStep).not.toMatch(/CLOUDFLARE_(?:ACCOUNT_ID|API_TOKEN)|D1_DATABASE_ID/u);
@@ -214,9 +219,13 @@ describe('Hono deployment workflow', () => {
     expect(activeLines).toContain('--persist-to "$RUNNER_TEMP/d1-gateway-state" \\');
     expect(activeLines).toContain(healthProbe);
     expect(activeLines).toContain('trap cleanup EXIT');
+    expect(activeLines).toContain(arenaRedisVerifier);
     expect(activeLines.at(-1)).toBe(runtimeVerifier);
     expect(activeLines.indexOf(gatewayCommand)).toBeLessThan(activeLines.indexOf(healthProbe));
     expect(activeLines.indexOf(healthProbe)).toBeLessThan(activeLines.indexOf(runtimeVerifier));
+    expect(activeLines.indexOf(arenaRedisVerifier)).toBeLessThan(
+      activeLines.indexOf(runtimeVerifier),
+    );
     expect(buildJob.indexOf('- name: Build single-file server')).toBeLessThan(
       buildJob.indexOf(runtimeStep),
     );

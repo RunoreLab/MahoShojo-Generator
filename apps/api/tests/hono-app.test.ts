@@ -249,7 +249,9 @@ describe('Hono server app', () => {
           'content-type',
           'x-mahoshojo-activity-token',
           'x-mahoshojo-ai-meta',
+          'x-mahoshojo-generation-actor-token',
           'x-mahoshojo-user-id',
+          'last-event-id',
         ].join(', '),
       },
     });
@@ -263,6 +265,12 @@ describe('Hono server app', () => {
     );
     expect(response.headers.get('access-control-allow-headers')?.toLowerCase()).toContain(
       'x-mahoshojo-ai-meta',
+    );
+    expect(response.headers.get('access-control-allow-headers')?.toLowerCase()).toContain(
+      'x-mahoshojo-generation-actor-token',
+    );
+    expect(response.headers.get('access-control-allow-headers')?.toLowerCase()).toContain(
+      'last-event-id',
     );
   });
 

@@ -23,12 +23,13 @@ export const applyPostBattleUpdates = async (
     impacts: { characterName: string; impact?: string; currentStateSummary?: string }[],
     userGuidance: string | null,
     scenario: any | null,
-    options: { writeArenaHistory: boolean; writeCurrentState: boolean }
+    options: { writeArenaHistory: boolean; writeCurrentState: boolean; generationId?: string }
 ): Promise<any[]> => {
     const updatedCombatants = [];
     const participantNames = combatants.map(c => c.data.codename || c.data.name);
     const nowISO = new Date().toISOString();
     const { writeArenaHistory, writeCurrentState } = options;
+    const generationId = options.generationId?.trim() || null;
 
     const nameToNativenessMap = new Map<string, boolean[]>();
     combatants.forEach(c => {
@@ -93,41 +94,46 @@ export const applyPostBattleUpdates = async (
                     },
                     entries: [],
                 };
-            } else {
-                history.attributes.updated_at = nowISO;
             }
+            const alreadyApplied = generationId && history.entries.some(
+                (entry: ArenaHistoryEntry) => entry.metadata?.generation_id === generationId
+            );
+            if (!alreadyApplied) {
+                history.attributes.updated_at = nowISO;
+                const lastEntryId = history.entries.length > 0 ? history.entries[history.entries.length - 1].id : 0;
+                const characterImpact = impacts.find(i => i.characterName === characterName)?.impact || "在此次事件中获得了成长。";
 
-            const lastEntryId = history.entries.length > 0 ? history.entries[history.entries.length - 1].id : 0;
-            const characterImpact = impacts.find(i => i.characterName === characterName)?.impact || "在此次事件中获得了成长。";
+                const newEntry: ArenaHistoryEntry = {
+                    id: lastEntryId + 1,
+                    type: report.mode as ArenaHistoryEntry['type'] || 'classic',
+                    title: report.headline,
+                    participants: participantNames,
+                    winner: report.officialReport.winner,
+                    impact: characterImpact,
+                    metadata: {
+                        user_guidance: userGuidance,
+                        ...(characterGuidance ? { character_guidance: characterGuidance } : {}),
+                        scenario_title: getScenarioTitle(scenario),
+                        non_native_data_involved: isAnyNonNative,
+                        ...(generationId ? { generation_id: generationId } : {}),
+                    },
+                };
 
-            const newEntry: ArenaHistoryEntry = {
-                id: lastEntryId + 1,
-                type: report.mode as ArenaHistoryEntry['type'] || 'classic',
-                title: report.headline,
-                participants: participantNames,
-                winner: report.officialReport.winner,
-                impact: characterImpact,
-                metadata: {
-                    user_guidance: userGuidance,
-                    ...(characterGuidance ? { character_guidance: characterGuidance } : {}),
-                    scenario_title: getScenarioTitle(scenario),
-                    non_native_data_involved: isAnyNonNative,
-                },
-            };
-
-            history.entries.push(newEntry);
-            characterData.arena_history = history;
-            didMutate = true;
+                history.entries.push(newEntry);
+                characterData.arena_history = history;
+                didMutate = true;
+            }
         }
 
         if (writeCurrentState) {
             const summary = impacts.find(i => i.characterName === characterName)?.currentStateSummary?.trim();
-            if (summary) {
+            if (summary && (!generationId || characterData.current_state?.generation_id !== generationId)) {
                 const nextState = characterData.current_state ?? { summary: '', fields: [] };
                 characterData.current_state = {
                     ...nextState,
                     summary,
                     updated_at: nowISO,
+                    ...(generationId ? { generation_id: generationId } : {}),
                 };
                 didMutate = true;
             }

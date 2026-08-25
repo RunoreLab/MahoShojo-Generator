@@ -23,6 +23,7 @@ async function handler(req: NextRequest): Promise<Response> {
     try {
         const body = await req.json();
         const {
+            generationId,
             combatants,
             report,
             impacts,
@@ -31,6 +32,14 @@ async function handler(req: NextRequest): Promise<Response> {
             writeArenaHistory = true,
             writeCurrentState = true,
         } = body;
+
+        if (
+            generationId !== undefined
+            && (typeof generationId !== 'string'
+                || !/^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/u.test(generationId.trim()))
+        ) {
+            return new Response(JSON.stringify({ error: 'generationId 无效' }), { status: 400 });
+        }
 
         // 验证必需字段
         if (!Array.isArray(combatants) || !report) {
@@ -82,10 +91,13 @@ async function handler(req: NextRequest): Promise<Response> {
             {
                 writeArenaHistory,
                 writeCurrentState,
+                ...(typeof generationId === 'string' ? { generationId: generationId.trim() } : {}),
             }
         );
 
-        log.info(`成功更新 ${updatedCombatants.length} 个角色的数据`);
+        log.info(`成功更新 ${updatedCombatants.length} 个角色的数据`, {
+            generationId: typeof generationId === 'string' ? generationId : null,
+        });
 
         return new Response(
             JSON.stringify({

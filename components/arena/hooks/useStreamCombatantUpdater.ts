@@ -3,12 +3,14 @@
 import { useState, useCallback } from 'react';
 import { getLogger } from '@/lib/logger';
 import { extractHeadlineFromMarkdown, extractWinnerFromText } from '@/lib/arena/battle-report-log-utils';
+import { runArenaGenerationEffectOnce } from '@/lib/arena/generation-effect-ledger';
 import { useBattleStore } from '../stores/useBattleStore';
 import { BattleStoreState, CombatantData } from '../types';
 
 const log = getLogger('stream-combatant-updater');
 
 interface UpdateCombatantsPayload {
+  generationId?: string;
   combatants: any[];
   report: {
     headline: string;
@@ -226,20 +228,42 @@ export const useStreamCombatantUpdater = () => {
     setUpdateError(null);
 
     try {
-      const response = await fetch('/api/arena/update-combatants-after-stream', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(payload),
-      });
+      const execute = async () => {
+        const response = await fetch('/api/arena/update-combatants-after-stream', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(payload),
+        });
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || '更新角色数据失败');
-      }
-
-      const result = await response.json();
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.error || '更新角色数据失败');
+        }
+        const result = await response.json();
+        return result;
+      };
+      const locks = typeof navigator !== 'undefined'
+        ? (navigator as Navigator & {
+          locks?: { request<T>(_name: string, _callback: () => Promise<T>): Promise<T> };
+        }).locks
+        : undefined;
+      const effectStorage = (() => {
+        try {
+          return typeof window === 'undefined' ? null : window.localStorage;
+        } catch {
+          return null;
+        }
+      })();
+      const result = payload.generationId
+        ? await runArenaGenerationEffectOnce({
+          generationId: payload.generationId,
+          storage: effectStorage,
+          locks,
+          effect: execute,
+        })
+        : await execute();
 
       if (result.updatedCombatants && result.updatedCombatants.length > 0) {
         setUpdatedCombatants(result.updatedCombatants);
@@ -292,7 +316,8 @@ export const useStreamCombatantUpdater = () => {
       metaOverride?: {
         report?: { headline?: string; winner?: string };
         impacts?: UpdateCombatantsPayload['impacts'];
-      }
+      },
+      generationId?: string | null,
     ) => {
       const parsed = getValidatedMarkdownReport(markdown, mode);
 
@@ -327,6 +352,7 @@ export const useStreamCombatantUpdater = () => {
       }
 
       const payload: UpdateCombatantsPayload = {
+        ...(generationId ? { generationId } : {}),
         combatants: combatants.map((c) => ({
           type: c.type,
           data: c.data,

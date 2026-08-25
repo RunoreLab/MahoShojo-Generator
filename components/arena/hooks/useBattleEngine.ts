@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useMemo } from 'react';
+import { useCallback, useEffect, useMemo } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 
 import type { NewsReport } from '@/components/BattleReportCard';
@@ -40,6 +40,10 @@ import {
 import { normalizeCustomStoryLength } from '@/lib/story-length';
 import { buildCustomProviderRequestPayload } from '@/lib/ai/custom-provider';
 import type { GenerationRankingResponse } from '@/lib/arena/generation-ranking';
+import {
+  openArenaGenerationStream,
+  readPersistedArenaGeneration,
+} from '@/lib/arena/resumable-generation-client';
 
 const sanitizeTextByShieldWords = (text: string): string => applyShieldWords(text).filteredText;
 
@@ -768,12 +772,29 @@ export const useBattleEngine = () => {
               } else {
                 delete requestHeaders.Accept;
               }
-		          const response = await generationApiFetch(endpoint, {
-		            method: 'POST',
-		            headers: requestHeaders,
-		            body: JSON.stringify(requestBody),
-		            signal: abortController.signal,
-		          });
+	          const response = streamTransportMode === 'sse'
+                ? await openArenaGenerationStream({
+                  endpoint,
+                  body: requestBody,
+                  headers: requestHeaders,
+                  signal: abortController.signal,
+                  fetcher: generationApiFetch,
+                  onStateChange: (state) => {
+                    if (state === 'reconnecting') {
+                      setError('网络连接暂时中断，战报仍在服务器生成，正在恢复连接。');
+                    } else if (state === 'resuming') {
+                      setError('正在恢复同一场战报生成。');
+                    } else if (state === 'producer_lost') {
+                      setError('生成进程已丢失，无法安全自动重试。');
+                    }
+                  },
+                })
+                : await generationApiFetch(endpoint, {
+                  method: 'POST',
+                  headers: requestHeaders,
+                  body: JSON.stringify(requestBody),
+                  signal: abortController.signal,
+                });
 
           if (!response.ok) {
             const text = await response.text();
@@ -803,6 +824,10 @@ export const useBattleEngine = () => {
 
 	          const contentType = response.headers.get('content-type') || '';
 	          const isSseResponse = contentType.includes('text/event-stream');
+              const resumableGenerationId = response.headers
+                .get('x-mahoshojo-generation-id')
+                ?.trim();
+              if (resumableGenerationId) setLastGenerationId(resumableGenerationId);
 	          if (debugSseEnabled) {
 	            console.info('SSE 调试：响应信息', {
 	              status: response.status,
@@ -1050,7 +1075,7 @@ export const useBattleEngine = () => {
               return true;
             };
 
-            const handleSseEvent = async (event: string, data: string) => {
+	            const handleSseEvent = async (event: string, data: string) => {
               let payload: any = null;
               try {
                 payload = data ? JSON.parse(data) : null;
@@ -1100,6 +1125,16 @@ export const useBattleEngine = () => {
                   if (await handleSensitiveIfNeeded()) return;
                   setStreamingMarkdown(sanitizeTextByShieldWords(accumulatedText));
                 }
+                return;
+              }
+
+              if (event === 'snapshot') {
+                const markdown = typeof payload?.markdown === 'string' ? payload.markdown : '';
+                const reasoning = typeof payload?.reasoning === 'string' ? payload.reasoning : '';
+                accumulatedText = markdown;
+                lastCheckedLength = 0;
+                setStreamingMarkdown(sanitizeTextByShieldWords(markdown));
+                if (reasoning) appendReasoningChunkToStore(reasoning, 'sdk');
                 return;
               }
 
@@ -1537,7 +1572,8 @@ export const useBattleEngine = () => {
                   writeCurrentState: settings.writeCurrentState,
                 },
                 shouldUseScenario ? scenario.content : null,
-                metaOverride
+                metaOverride,
+                resumableGenerationId,
               );
             } catch (updateError) {
               const message = updateError instanceof Error ? updateError.message : '发生未知错误，请重试。';
@@ -1659,6 +1695,21 @@ export const useBattleEngine = () => {
   const stopGeneration = useCallback(() => {
     sharedGenerationAbortController?.abort(STREAM_ABORT_REASON_USER);
   }, []);
+
+  useEffect(() => {
+    const pending = readPersistedArenaGeneration();
+    if (
+      !pending
+      || !pending.generationId
+      || !['connecting', 'generating', 'reconnecting', 'resuming'].includes(pending.state)
+      || isGenerating
+      || sharedGenerationAbortController
+    ) return;
+    const timer = window.setTimeout(() => {
+      void handleGenerate();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [handleGenerate, isGenerating]);
 
   const handleRedoUpdates = useCallback(async () => {
     if (isCooldown) {

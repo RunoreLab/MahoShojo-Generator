@@ -91,6 +91,12 @@ jobs:
           HONO_CORS_ORIGINS: https://g25c-ci.example.invalid
           AI_API_KEY: g25c-ci-only-provider-placeholder
           SIGNATURE_SECRET_KEY: g25c-ci-only-signature-secret-value
+          ARENA_FINALIZATION_URL: https://g25r-ci.example.invalid
+          ARENA_FINALIZATION_HMAC_SECRET: g25r-ci-only-independent-finalization-secret
+          R2_ACCESS_KEY_ID: g25r-ci-only-r2-access-key
+          R2_SECRET_ACCESS_KEY: g25r-ci-only-r2-secret-key
+          R2_BUCKET_NAME: g25r-ci-only-r2-bucket
+          R2_ACCOUNT_ID: g25r-ci-only-r2-account
         run: |
           set -euo pipefail
           gateway_log="$RUNNER_TEMP/d1-gateway.log"
@@ -124,6 +130,7 @@ jobs:
             exit 1
           fi
 
+          pnpm --filter @mahoshojo/api run verify:arena-redis
           pnpm run verify:server:runtime
 
       - name: Upload bundle

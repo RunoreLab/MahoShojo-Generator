@@ -3,6 +3,30 @@ import type { RouteDefinition, RouteModule } from '#/routes/types';
 
 export const routeDefinitions: RouteDefinition[] = [
   {
+    id: "arena/generations/[generationId]/cancel",
+    pattern: "/api/arena/generations/:generationId/cancel",
+    adapter: "shared-service",
+    load: () => import("../adapters/arena/generations/[generationId]/cancel") as unknown as Promise<RouteModule>,
+  },
+  {
+    id: "arena/generations/[generationId]/stream",
+    pattern: "/api/arena/generations/:generationId/stream",
+    adapter: "shared-service",
+    load: () => import("../adapters/arena/generations/[generationId]/stream") as unknown as Promise<RouteModule>,
+  },
+  {
+    id: "arena/generations/[generationId]",
+    pattern: "/api/arena/generations/:generationId",
+    adapter: "shared-service",
+    load: () => import("../adapters/arena/generations/[generationId]") as unknown as Promise<RouteModule>,
+  },
+  {
+    id: "arena/generate-stream",
+    pattern: "/api/arena/generate-stream",
+    adapter: "shared-service",
+    load: () => import("../adapters/arena/generate-stream") as unknown as Promise<RouteModule>,
+  },
+  {
     id: "creator/generate",
     pattern: "/api/creator/generate",
     adapter: "shared-service",
