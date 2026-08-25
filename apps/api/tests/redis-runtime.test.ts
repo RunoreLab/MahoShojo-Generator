@@ -5,11 +5,13 @@ const redisClient = vi.hoisted(() => ({
   connect: vi.fn(async () => undefined),
   destroy: vi.fn(),
   eval: vi.fn(),
+  get: vi.fn(async () => null),
   info: vi.fn(),
   isOpen: true,
   isReady: true,
   on: vi.fn(),
   ping: vi.fn(async () => 'PONG'),
+  xRead: vi.fn(async () => null),
 }));
 
 vi.mock('redis', () => ({
@@ -27,12 +29,39 @@ beforeEach(() => {
   redisClient.connect.mockResolvedValue(undefined);
   redisClient.eval.mockResolvedValue([1, 60_000]);
   redisClient.info.mockResolvedValue('');
+  redisClient.get.mockResolvedValue(null);
   redisClient.ping.mockResolvedValue('PONG');
+  redisClient.xRead.mockResolvedValue(null);
   redisClient.isOpen = true;
   redisClient.isReady = true;
 });
 
 describe('RedisRuntime shutdown', () => {
+  it('只向 route runtime 暴露窄 generation replay port，并在 Redis 未 ready 时 fail closed', async () => {
+    const redis = new RedisRuntime('redis://example.test:6379', true);
+    const store = redis.getGenerationReplayStore();
+
+    await expect(store.reserve({
+      actorKey: 'user:42',
+      generationRequestId: 'request-1234',
+      generationId: 'generation-1234',
+      payloadHash: 'payload-hash',
+      now: '2026-08-25T04:00:00.000Z',
+      leaseExpiresAt: '2026-08-25T04:01:00.000Z',
+    })).rejects.toThrow('REDIS_GENERATION_REPLAY_UNAVAILABLE');
+
+    await redis.connect();
+    redisClient.eval.mockResolvedValueOnce(['created', 'generation-1234']);
+    await expect(store.reserve({
+      actorKey: 'user:42',
+      generationRequestId: 'request-1234',
+      generationId: 'generation-1234',
+      payloadHash: 'payload-hash',
+      now: '2026-08-25T04:00:00.000Z',
+      leaseExpiresAt: '2026-08-25T04:01:00.000Z',
+    })).resolves.toMatchObject({ kind: 'created', generationId: 'generation-1234' });
+  });
+
   it('Redis client 错误只保留固定状态码与低基数日志', async () => {
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const redis = new RedisRuntime('redis://user:secret@example.test:6379', false);

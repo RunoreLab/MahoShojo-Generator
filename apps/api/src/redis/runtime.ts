@@ -1,6 +1,11 @@
 import { createHash } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 import { createClient } from 'redis';
+import type { GenerationReplayStore } from '@mahoshojo/hosted-api/arena-generation/service';
+import {
+  createRedisGenerationReplayStore,
+  type RedisGenerationClient,
+} from './generation-replay-store';
 
 const DEFAULT_REDIS_COMMAND_TIMEOUT_MS = 4_000;
 
@@ -123,6 +128,7 @@ const executeWithTimeout = <T>(
 export class RedisRuntime implements RedisService {
   private client: NodeRedisClient | null = null;
   private lastError: string | null = null;
+  private generationReplayStore: GenerationReplayStore | null = null;
 
   constructor(
     private readonly redisUrl: string | null,
@@ -193,6 +199,18 @@ export class RedisRuntime implements RedisService {
       ready: Boolean(this.client?.isReady),
       lastError: this.lastError,
     };
+  }
+
+  getGenerationReplayStore(): GenerationReplayStore {
+    this.generationReplayStore ??= createRedisGenerationReplayStore({
+      getClient: () => {
+        if (!this.client?.isReady) {
+          throw createRedisOperationError('REDIS_GENERATION_REPLAY_UNAVAILABLE');
+        }
+        return this.client as unknown as RedisGenerationClient;
+      },
+    });
+    return this.generationReplayStore;
   }
 
   async ping(): Promise<boolean> {

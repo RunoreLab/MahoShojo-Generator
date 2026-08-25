@@ -235,6 +235,9 @@ importers:
       '@hono/node-server':
         specifier: ^2.1.1
         version: 2.1.1(hono@4.13.3)
+      '@mahoshojo/hosted-api':
+        specifier: workspace:*
+        version: link:../../packages/hosted-api
       '@mahoshojo/hosted-runtime':
         specifier: workspace:*
         version: link:../../packages/hosted-runtime
