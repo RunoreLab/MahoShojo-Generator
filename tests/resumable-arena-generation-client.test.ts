@@ -718,6 +718,43 @@ describe('resumable Arena generation client', () => {
     ))).toBe(false);
   });
 
+  it('closes without waiting for backoff when reconnect state synchronously triggers stop', async () => {
+    const abort = new AbortController();
+    const fetcher = vi.fn(async (url: string, init?: RequestInit): Promise<Response> => {
+      if (url.includes('/cancel')) return new Response(null, { status: 202 });
+      if (init?.method === 'GET' && url.includes('/stream')) {
+        return new Promise<Response>(() => undefined);
+      }
+      return response(new ReadableStream<Uint8Array>({
+        start(controller) { controller.close(); },
+      }));
+    });
+    const opened = await openArenaGenerationStream({
+      endpoint: '/api/arena/generate-stream',
+      body: {},
+      headers: {},
+      fetcher,
+      storage: new MemoryStorage(),
+      generationRequestId: 'request-stop-from-reconnecting-state',
+      signal: abort.signal,
+      baseReconnectDelayMs: 30_000,
+      random: () => 0,
+      onStateChange(state) {
+        if (state === 'reconnecting') abort.abort('user');
+      },
+    });
+
+    await expect(readWithDeadline(opened.body!.getReader().read())).resolves.toEqual({
+      value: undefined,
+      done: true,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(fetcher.mock.calls.filter(([url]) => String(url).includes('/cancel'))).toHaveLength(1);
+    expect(fetcher.mock.calls.some(([url, init]) => (
+      init?.method === 'GET' && String(url).includes('/stream')
+    ))).toBe(false);
+  });
+
   it('cancels by stable request id when the user stops before POST response headers arrive', async () => {
     const abort = new AbortController();
     let markPostStarted!: () => void;

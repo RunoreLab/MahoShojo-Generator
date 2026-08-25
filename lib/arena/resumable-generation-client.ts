@@ -517,6 +517,7 @@ export const openArenaGenerationStream = async (
               throw new Error('ARENA_RESUME_ATTEMPTS_EXHAUSTED');
             }
             updateState('reconnecting');
+            if (stopped || terminal) return;
             const exponential = Math.min(30_000, baseDelayMs * (2 ** reconnectAttempt));
             await waitForReconnectOpportunity(
               Math.floor(exponential * (0.75 + random() * 0.5)),
