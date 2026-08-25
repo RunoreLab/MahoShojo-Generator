@@ -4,6 +4,16 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./arena-generation/service": {
+      "types": "./src/arena-generation/service.ts",
+      "import": "./src/arena-generation/service.ts",
+      "default": "./src/arena-generation/service.ts"
+    },
+    "./arena-generation/sse": {
+      "types": "./src/arena-generation/sse.ts",
+      "import": "./src/arena-generation/sse.ts",
+      "default": "./src/arena-generation/sse.ts"
+    },
     "./generate-canshou": {
       "types": "./src/generate-canshou.ts",
       "import": "./src/generate-canshou.ts",
