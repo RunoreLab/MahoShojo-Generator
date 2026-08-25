@@ -157,10 +157,6 @@ export const createArenaGenerationFinalizer = (
     }
   }
   if (!finalized) {
-    const failureCode = lastError instanceof Error && lastError.message
-      ? lastError.message.slice(0, 80)
-      : 'ARENA_TERMINAL_FINALIZATION_FAILED';
-    await ports.failTerminal({ ...claimInput, resultRef, failureCode });
     throw lastError ?? new Error('ARENA_TERMINAL_FINALIZATION_FAILED');
   }
 

@@ -164,21 +164,25 @@ describe('Arena generation finalization', () => {
     expect(ports.completeTerminal).toHaveBeenCalledTimes(1);
   });
 
-  it('persists an explicit failed terminal after bounded finalization retries are exhausted', async () => {
-    const failure = new Error('RATING_SETTLEMENT_UNAVAILABLE');
-    const ports = createPorts({
-      settleRatings: vi.fn(async () => { throw failure; }),
-    });
-    const finalize = createArenaGenerationFinalizer(ports);
+  it.each(['completed', 'failed', 'cancelled'] as const)(
+    '%s terminal 在 post-claim finalization 重试耗尽后保留真实终态并保持 pending',
+    async (status) => {
+      const failure = new Error('D1_POST_CLAIM_UNAVAILABLE');
+      const ports = createPorts({
+        persistCombatants: vi.fn(async () => { throw failure; }),
+      });
+      const finalize = createArenaGenerationFinalizer(ports);
 
-    await expect(finalize(input)).rejects.toThrow('RATING_SETTLEMENT_UNAVAILABLE');
-    expect(ports.claimTerminal).toHaveBeenCalledTimes(3);
-    expect(ports.failTerminal).toHaveBeenCalledWith(expect.objectContaining({
-      generationId: input.generationId,
-      failureCode: 'RATING_SETTLEMENT_UNAVAILABLE',
-    }));
-    expect(ports.completeTerminal).not.toHaveBeenCalled();
-  });
+      await expect(finalize({
+        ...input,
+        status,
+        errorCode: status === 'completed' ? null : `GENERATION_${status.toUpperCase()}`,
+      })).rejects.toThrow('D1_POST_CLAIM_UNAVAILABLE');
+      expect(ports.claimTerminal).toHaveBeenCalledTimes(3);
+      expect(ports.failTerminal).not.toHaveBeenCalled();
+      expect(ports.completeTerminal).not.toHaveBeenCalled();
+    },
+  );
 
   it.each(['failed', 'cancelled'] as const)(
     '%s 终态不写 completed R2、rating 或 story impacts',
