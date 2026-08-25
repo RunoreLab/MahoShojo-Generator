@@ -11,14 +11,25 @@
 - `/health/live` 和 `/health/ready` 分离进程存活与依赖就绪状态；
 - 每 60 秒以单行 JSON 日志导出 Node 进程、event-loop 和 HTTP 容量基线。
 
-Phase 2.5C 当前有 10 条 shared-service route：`generate-magical-girl`，G25B-1 收口的
+Phase 2.5C 建立的 10 条 shared-service route包括 `generate-magical-girl`，G25B-1 收口的
 `generate-game-card`、Free generate/stream、Scenario generate/stream，以及 G25B-2 收口的 Creator、残兽
 generate/stream。Hono 从 `apps/api/src/adapters/*` 加载这些 adapter，不再动态导入对应 Next route；Next wrapper
 继续保留，两个 runtime 使用同一默认 service composition，业务顺序与错误 wire 由
-`@mahoshojo/hosted-api` 负责。Phase 2.5B 退出审计已将其余 14 条 legacy capability 从 Hono 执行清单退出；对应
+`@mahoshojo/hosted-api` 负责。G25R 又让 `arena/generate-stream` 与 generation stream/status/cancel 三条控制面
+通过 server-owned lifecycle 精确进入 shared manifest；稳定逻辑入口为：
+
+- `POST /api/arena/generate-stream`；
+- `GET /api/arena/generations/:generationId/stream`；
+- `GET /api/arena/generations/:generationId`；
+- `POST /api/arena/generations/:generationId/cancel`。
+
+create 使用稳定 `generationRequestId` 和 actor-scoped semantic hash；Redis reservation 保证单 producer，断线后的
+subscriber 只通过 `Last-Event-ID`/`after` 恢复同一 generation，不会把请求 signal 传播给 Provider。terminal 由
+D1 claim 与确定性 R2 snapshot 兜底，只有显式 cancel 才中止 generation-owned signal。Phase 2.5B 退出审计原将
+14 条 capability 从 Hono 执行清单退出；G25R 只让 `arena/generate-stream` 精确 re-entry，当前仍有 13 条对应
 Next 公开 route 保持原有实现、wire、鉴权和数据语义，未来若要重新进入 Hono，必须先形成 shared seam 和
 副作用/replay 证据。生成器在 `legacyRouteIds` 非空时 fail closed，生成的 registry 也不再拥有动态导入
-legacy Next handler 的 adapter 类型或代码路径。当前 registry 为 `10 shared-service / 0 legacy-next`；
+legacy Next handler 的 adapter 类型或代码路径。当前 registry 为 `14 shared-service / 13 exited / 0 legacy-next`；
 Hono source、manifest、测试、生成器和 bundle 构建已由 `apps/api` 独占。生成后的实际 registry 为
 `apps/api/src/generated/routes.ts`，不得手工修改。
 
@@ -28,7 +39,7 @@ Hono source、manifest、测试、生成器和 bundle 构建已由 `apps/api` �
 ## 容量遥测
 
 Hono 主进程启动 `HonoRuntimeTelemetry`，默认每 60 秒向 stdout 输出一行固定
-`schemaVersion=2`、`event=hono.runtime.telemetry` 的 JSON。当前快照包含：
+`schemaVersion=3`、`event=hono.runtime.telemetry` 的 JSON。当前快照包含：
 
 - process 累计 CPU 时间与采样间隔 utilization、RSS、heap used/total/limit；
 - event-loop utilization、active/idle 时间与 delay samples/mean/p99/max；
@@ -39,6 +50,9 @@ Hono 主进程启动 `HonoRuntimeTelemetry`，默认每 60 秒向 stdout 输出�
 - Redis connect/ping/rate-limit/INFO 的固定 operation/outcome 与 latency；周期 `INFO MEMORY/STATS`
   提供 used memory、eviction 和 keyspace hit/miss。Redis 未连接时只记录 `unavailable`，不伪造 round-trip latency，
   server stats 尚未采到时显式为 `not-observed`；
+- Arena request/resume/replay bytes/snapshot、provider attempt、generation duration、D1/R2 phase、cancel、
+  producer-lost、Redis 与 terminal outcome 的固定低基数计数，以及 generation duration p50/p95/p99；terminal audit
+  只记录 generation ID、固定 outcome/runtime 与聚合故障事实，不记录 actor、request body、prompt、正文或凭据；
 - runtime origin 明确为 `hono-node`。当前 Hono 进程看不到入口层的真实 DR 选择，因此
   `selection` 诚实记为 `not-observed`，不根据部署角色推断实际流量来源。
 
@@ -114,8 +128,11 @@ Hono 服务配置相同的 `D1_GATEWAY_HMAC_SECRET`。生产建议再用 Cloudfl
 ## 前端直连开关
 
 前端和服务端内部调用是否将白名单内的生成 API 请求到 Hono，由 `config/hono-api.ts` 中的
-`honoApiConfig.enabled` 控制：`true` 使用 `https://homura.colanns.me`，`false` 继续使用同源
-Next.js/Cloudflare 路由。该开关只影响 `config/hono-api-routes.json` 中的路由，Tachie 始终使用原路由。
+`honoApiConfig.enabled` 控制：`true` 使用稳定逻辑入口 `https://api.mahoshojo.colanns.me`，`false` 继续使用同源
+Next.js/Cloudflare 路由。`homura.colanns.me` 只允许作为物理 Hono deploy/health origin，不得重新编码进客户端。
+稳定入口的控制面必须按 active-passive 选择 Hono primary 或 Next/OpenNext DR，且必须关闭“连接失败后透明跨 runtime
+重放 POST”的能力；generation 已有稳定 request ID 也不等于允许控制面盲目重试。该开关只影响
+`config/hono-api-routes.json` 中的路由，Tachie 始终使用原路由。
 
 ## 构建与容器运行
 
@@ -136,8 +153,26 @@ Docker install layer 只复制 `@mahoshojo/api...` 的实际 workspace manifest 
 Admin/Desktop/Mobile app 带入 Hono image。
 
 生产启动会检查以下配置并在缺失时直接失败：Redis、有效 AI provider、32 字符以上的
-`SIGNATURE_SECRET_KEY`、明确的生产 CORS，以及 D1 Gateway 凭据（或临时使用 Cloudflare 管理 API
-三项凭据）。可设置 `HONO_CONFIG_CHECK_ONLY=true` 只执行配置预检而不监听端口。
+`SIGNATURE_SECRET_KEY`、明确的生产 CORS、D1 Gateway 凭据（或临时使用 Cloudflare 管理 API三项凭据），
+以及 Arena terminal/finalization 所需的 `ARENA_FINALIZATION_URL`、独立且至少 32 字符的
+`ARENA_FINALIZATION_HMAC_SECRET`、R2 access key/secret/bucket/account（或显式 HTTPS endpoint）。finalization secret
+不得复用签名、D1 Gateway 或 Better Auth secret。可设置 `HONO_CONFIG_CHECK_ONLY=true` 只执行配置预检而不监听端口。
+
+Arena 可恢复生成不新增 D1 migration。共享 Redis 持有 reservation、producer token/lease、running/finalizing、
+snapshot 与 replay；Redis 不可用时 create 必须在 Provider 前 fail closed。D1 只复用现有
+`battle_report_generations` 保存终态及有界 reconciliation manifest，`large_objects`/R2 保存完整正文；完整本地卡片
+和更新结果不得写入 D1。Provider 已结束但 bounded finalization 尚未收口的 D1 行以
+`finalizationCompleted=false` 表达真实终态而不对外伪装完成；只有先取得 Redis expired-lease CAS 的 reaper 才能
+重试收口，create 遇到该状态必须 fail closed，不能启动第二 Provider。Next/OpenNext DR 没有共享 Redis 时也只允许
+恢复已完成 D1/R2 terminal，不以 process memory 替代 active lifecycle。
+
+Arena create 先认证，再按原始字节增量读取；超过 12 MiB 的首个字节立即取消并在 Provider 前返回 413。
+combatants 最多 32，裁定事件
+最多 100，questionnaire/narrative-history 各 50，aux-scenario/material 各 10。D1 terminal
+`extra_json` 最大 96 KiB，local reconciliation 候选最大 64 KiB，combatant fallback/终态角色行各最多
+32。blocking replay 唤醒后会通过 Lua 重新验证 cursor；过期 producer 的 heartbeat、append 和
+finalization mutation 均被 fenced。durable finalization 失败时 Redis 保持 `finalizing`，交给 expired-lease
+reaper 对账，不伪造可对外读取的 failed/completed 终态。
 
 ## GitHub Actions 自动发布
 
@@ -167,4 +202,6 @@ config 无效都会在激活前 fail closed，不会重新降级纳管。部署�
 G25C 只实现并在本地/fault-injection 验证该流程，没有执行 production deploy、切流或 credential 变更。
 
 生产切流只应将 `config/hono-api-routes.json` 中的精确路径转发到 Hono origin；其他 `/api/*` 继续访问 Next.js。前端继续使用
-同源相对路径，旧 Next API 至少保留两个发布周期用于回滚。当前阶段不提供 `/ws`。
+同源相对路径，旧 Next API 至少保留两个发布周期用于回滚。Arena generation 的 create 与后续 control 请求在一次 generation
+内不得跨 runtime 盲目 replay；回滚时应先把 `arena/generate-stream` 移回 exited manifest，并同步撤销三个 control surface 的
+入口转发，再回滚 Web resume。当前阶段不提供 `/ws`。
