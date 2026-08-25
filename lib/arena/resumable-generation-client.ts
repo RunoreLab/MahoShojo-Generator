@@ -292,6 +292,7 @@ export const openArenaGenerationStream = async (
       : 'connecting';
   let currentReader: ReadableStreamDefaultReader<Uint8Array> | null = null;
   let stopped = false;
+  let explicitlyAborted = false;
   let terminal = false;
   let connectedViaResume = false;
   const updateState = (next: ArenaGenerationConnectionState): void => {
@@ -333,6 +334,7 @@ export const openArenaGenerationStream = async (
         ? 'user'
         : null;
     if (!cancelReason || terminal) return;
+    explicitlyAborted = true;
     stopped = true;
     void currentReader?.cancel(cancelReason).catch(() => undefined);
     const cancelTarget = generationId
@@ -587,6 +589,14 @@ export const openArenaGenerationStream = async (
             controller.error(error);
           }
         } finally {
+          if (explicitlyAborted) {
+            try {
+              controller.close();
+            } catch {
+              // The consumer may have cancelled the wrapper while explicit abort
+              // was waiting for the server-response reader to settle.
+            }
+          }
           options.signal?.removeEventListener('abort', cancelOnExplicitAbort);
         }
       };

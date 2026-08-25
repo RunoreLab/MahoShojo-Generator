@@ -38,6 +38,23 @@ const lookupResponse = (
   headers: { 'Content-Type': 'application/json' },
 });
 
+const readWithDeadline = async <T>(
+  read: Promise<T>,
+  timeoutMs = 100,
+): Promise<T> => {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      read,
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error('stream read did not settle')), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+};
+
 describe('resumable Arena generation client', () => {
   it('persists a bootstrap actor credential before the first POST', async () => {
     const storage = new MemoryStorage();
@@ -606,41 +623,32 @@ describe('resumable Arena generation client', () => {
     expect(streamed).not.toContain('"chunk":"stale"');
   });
 
-  it('subscriber cancellation does not call explicit cancel, while user stop does', async () => {
-    let keepOpen!: ReadableStreamDefaultController<Uint8Array>;
-    const fetcher = vi.fn(async (url: string) => {
+  it('subscriber cancellation does not call explicit cancel', async () => {
+    const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
+      void init;
       if (url.includes('/cancel')) return new Response(null, { status: 202 });
-      return response(new ReadableStream<Uint8Array>({
-        start(controller) { keepOpen = controller; },
-      }));
+      return response(new ReadableStream<Uint8Array>({ start() {} }));
     });
-    const first = await openArenaGenerationStream({
+    const opened = await openArenaGenerationStream({
       endpoint: '/api/arena/generate-stream',
       body: {}, headers: {}, fetcher, storage: new MemoryStorage(),
       generationRequestId: 'request-1234',
     });
-    await first.body!.cancel('tab closed');
-    expect(fetcher).toHaveBeenCalledTimes(1);
+    await opened.body!.cancel('tab closed');
 
-    const abort = new AbortController();
-    const second = await openArenaGenerationStream({
-      endpoint: '/api/arena/generate-stream',
-      body: {}, headers: {}, fetcher, storage: new MemoryStorage(),
-      generationRequestId: 'request-5678', signal: abort.signal,
-    });
-    abort.abort('user');
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    const userCancel = fetcher.mock.calls.find(([url]) => String(url).includes('/cancel'));
-    expect(userCancel?.[1]).toMatchObject({
-      method: 'POST',
-      body: JSON.stringify({ reason: 'user' }),
-    });
-    void second;
-    void keepOpen;
+    expect(fetcher).toHaveBeenCalledTimes(1);
   });
 
-  it('content-policy abort explicitly cancels the server-owned producer with a fixed reason', async () => {
-    const fetcher = vi.fn(async (url: string) => {
+  it.each([
+    ['user stop', 'user', 'user'],
+    ['content-policy abort', STREAM_ABORT_REASON_CONTENT_POLICY, 'content_policy'],
+  ])('ends a pending wrapper read after %s and explicitly cancels the producer once', async (
+    _label,
+    abortReason,
+    cancelReason,
+  ) => {
+    const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
+      void init;
       if (url.includes('/cancel')) return new Response(null, { status: 202 });
       return response(new ReadableStream<Uint8Array>({ start() {} }));
     });
@@ -648,18 +656,23 @@ describe('resumable Arena generation client', () => {
     const opened = await openArenaGenerationStream({
       endpoint: '/api/arena/generate-stream',
       body: {}, headers: {}, fetcher, storage: new MemoryStorage(),
-      generationRequestId: 'request-content-policy', signal: abort.signal,
+      generationRequestId: `request-${cancelReason}`, signal: abort.signal,
     });
+    const pendingRead = opened.body!.getReader().read();
 
-    abort.abort(STREAM_ABORT_REASON_CONTENT_POLICY);
+    abort.abort(abortReason);
+    await expect(readWithDeadline(pendingRead)).resolves.toEqual({
+      value: undefined,
+      done: true,
+    });
     await new Promise((resolve) => setTimeout(resolve, 0));
 
-    const explicitCancel = fetcher.mock.calls.find(([url]) => String(url).includes('/cancel'));
-    expect(explicitCancel?.[1]).toMatchObject({
+    const explicitCancels = fetcher.mock.calls.filter(([url]) => String(url).includes('/cancel'));
+    expect(explicitCancels).toHaveLength(1);
+    expect(explicitCancels[0]?.[1]).toMatchObject({
       method: 'POST',
-      body: JSON.stringify({ reason: 'content_policy' }),
+      body: JSON.stringify({ reason: cancelReason }),
     });
-    void opened;
   });
 
   it('cancels by stable request id when the user stops before POST response headers arrive', async () => {
