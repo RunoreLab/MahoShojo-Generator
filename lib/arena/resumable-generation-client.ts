@@ -512,6 +512,7 @@ export const openArenaGenerationStream = async (
         let reconnectAttempt = 0;
         const reconnect = async (): Promise<void> => {
           while (true) {
+            if (stopped || terminal) return;
             if (reconnectAttempt >= maxAttempts) {
               throw new Error('ARENA_RESUME_ATTEMPTS_EXHAUSTED');
             }
@@ -521,12 +522,14 @@ export const openArenaGenerationStream = async (
               Math.floor(exponential * (0.75 + random() * 0.5)),
               options.signal,
             );
+            if (stopped || terminal) return;
             reconnectAttempt += 1;
             try {
               response = await fetchResume();
               captureActorToken(actorStorage, response);
               if (![429, 502, 503, 504].includes(response.status)) return;
             } catch (error) {
+              if (stopped || terminal) return;
               if (options.signal?.aborted || reconnectAttempt >= maxAttempts) throw error;
             }
           }
