@@ -1,13 +1,18 @@
 import { initOpenNextCloudflareForDev } from "@opennextjs/cloudflare";
+import { loadEnvConfig } from "@next/env";
 import type { NextConfig } from "next";
 import { PHASE_DEVELOPMENT_SERVER } from "next/constants";
 import { fileURLToPath } from "node:url";
 
 import { buildStaticBrowserSecurityHeaders } from "./lib/security/browser-headers";
 
-const projectRoot = fileURLToPath(new URL('.', import.meta.url));
+const repositoryRoot = fileURLToPath(new URL('../..', import.meta.url));
 
 const createNextConfig = (phase: string): NextConfig => {
+  // G25D compatibility: app-local/explicit env remains authoritative while a
+  // legacy ignored root .env* can still supply missing local values.
+  loadEnvConfig(repositoryRoot, phase === PHASE_DEVELOPMENT_SERVER);
+
   if (phase === PHASE_DEVELOPMENT_SERVER) {
     initOpenNextCloudflareForDev();
   }
@@ -19,7 +24,7 @@ const createNextConfig = (phase: string): NextConfig => {
   });
 
   return {
-    outputFileTracingRoot: projectRoot,
+    outputFileTracingRoot: repositoryRoot,
 
     // 图片优化配置（Cloudflare Workers 不支持默认的图片优化）
     images: {

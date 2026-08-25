@@ -44,7 +44,7 @@ const insertChunkBeforeIend = (bytes: Uint8Array, chunkBytes: Uint8Array): Uint8
 
 describe('tavern-card', () => {
   it('parses repo sample and prefers ccv3', async () => {
-    const bytes = new Uint8Array(await readFile('docs/雪沫（酒馆角色卡测试）.png'));
+    const bytes = new Uint8Array(await readFile('../../docs/雪沫（酒馆角色卡测试）.png'));
     const result = parseTavernCardFromPngBytes(bytes);
     if ('code' in result) {
       throw new Error(`解析失败：${result.code} ${result.message}`);
@@ -132,7 +132,7 @@ describe('tavern-card', () => {
   });
 
   it('overwrites existing ccv3/chara blocks by default', async () => {
-    const base = new Uint8Array(await readFile('docs/雪沫（酒馆角色卡测试）.png'));
+    const base = new Uint8Array(await readFile('../../docs/雪沫（酒馆角色卡测试）.png'));
     const card = createTavernV3Card({
       name: '覆盖测试',
       description: '覆盖已有块。',

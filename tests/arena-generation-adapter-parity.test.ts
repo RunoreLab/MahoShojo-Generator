@@ -3,6 +3,7 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const root = process.cwd();
+const webRoot = path.join(root, 'apps/web');
 
 const routes = [
   { route: 'generate-stream', method: 'create' },
@@ -18,7 +19,7 @@ describe('Arena generation adapter parity', () => {
     method,
   }) => {
     const nextSource = readFileSync(
-      path.join(root, 'app/api/arena', route, 'handler.ts'),
+      path.join(webRoot, 'app/api/arena', route, 'handler.ts'),
       'utf8',
     );
     const honoSource = readFileSync(
@@ -36,7 +37,7 @@ describe('Arena generation adapter parity', () => {
 
   it('both runtime compositions use the package-owned Node generation service', () => {
     const nextRuntime = readFileSync(
-      path.join(root, 'app/api/arena/generation-runtime.ts'),
+      path.join(webRoot, 'app/api/arena/generation-runtime.ts'),
       'utf8',
     );
     const honoRuntime = readFileSync(

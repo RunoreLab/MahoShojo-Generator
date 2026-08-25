@@ -5,8 +5,8 @@ const read = (path: string): string => readFileSync(path, 'utf8');
 
 describe('Arena resumable generation schema contract', () => {
   it('keeps transient lifecycle out of D1 and reuses the terminal battle-report schema', () => {
-    const bootstrap = read('lib/database/schema.sql');
-    const drizzle = read('lib/db/schema/business.ts');
+    const bootstrap = read('apps/web/lib/database/schema.sql');
+    const drizzle = read('apps/web/lib/db/schema/business.ts');
     const finalization = read('packages/hosted-runtime/src/arena-generation/d1-finalization.ts');
 
     for (const table of ['arena_generation_reservations', 'arena_generation_effects']) {

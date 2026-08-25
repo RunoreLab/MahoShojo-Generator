@@ -5,14 +5,14 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import ts from 'typescript';
 
-const LEGACY_INCLUDE_DIRS = ['app', 'pages', 'components', 'lib'];
+const WEB_INCLUDE_DIRS = ['apps/web/app', 'apps/web/pages', 'apps/web/components', 'apps/web/lib'];
 const WORKSPACE_INCLUDE_DIRS = ['apps', 'packages'];
 const IGNORED_DIRECTORIES = new Set(['.next', '.open-next', 'build', 'coverage', 'dist', 'node_modules', 'out']);
 const BLOCK_EXCLUDE_PREFIXES = [
-  'lib/vendor/',
+  'apps/web/lib/vendor/',
   'packages/hosted-runtime/src/node-runtime/vendor/',
 ];
-const REPORT_ONLY_DIR_PREFIXES = ['lib/db/', 'lib/database/'];
+const REPORT_ONLY_DIR_PREFIXES = ['apps/web/lib/db/', 'apps/web/lib/database/'];
 const FILE_EXTS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs']);
 const MAX_BLOCK_REPORT_ITEMS = 80;
 const MAX_REPORT_ONLY_ITEMS = 20;
@@ -224,7 +224,7 @@ const getObjectLiteralKey = (nameNode) => {
 
 const collectViolations = (root, workspaceOnly) => {
   const rows = [];
-  const includeDirs = workspaceOnly ? WORKSPACE_INCLUDE_DIRS : LEGACY_INCLUDE_DIRS;
+  const includeDirs = workspaceOnly ? WORKSPACE_INCLUDE_DIRS : WEB_INCLUDE_DIRS;
   const files = collectFiles(root, includeDirs);
 
   for (const file of files) {

@@ -150,7 +150,7 @@ describe('data-card meta season extrema schema', () => {
   });
 
   test('migration 只对 strict 回填 season extrema', () => {
-    const migrationPath = join(process.cwd(), 'drizzle/0005_strict_season_extrema.sql');
+    const migrationPath = join(process.cwd(), '../../drizzle/0005_strict_season_extrema.sql');
     const content = readFileSync(migrationPath, 'utf8');
 
     expect(content.includes("WHERE queue = 'strict'")).toBe(true);

@@ -46,7 +46,7 @@
       "binding": "DB",
       "database_name": "mahoshojo",
       "database_id": "8eb9b25c-5a00-4feb-b5cb-c5dd25cda1d3",
-      "migrations_dir": "drizzle"
+      "migrations_dir": "../../drizzle"
     }
   ],
   "env": {
@@ -92,7 +92,7 @@
           "binding": "DB",
           "database_name": "mahoshojo",
           "database_id": "8eb9b25c-5a00-4feb-b5cb-c5dd25cda1d3",
-          "migrations_dir": "drizzle"
+          "migrations_dir": "../../drizzle"
         }
       ]
     },
@@ -135,7 +135,7 @@
           "binding": "DB",
           "database_name": "mahoshojo",
           "database_id": "8eb9b25c-5a00-4feb-b5cb-c5dd25cda1d3",
-          "migrations_dir": "drizzle"
+          "migrations_dir": "../../drizzle"
         }
       ]
     }

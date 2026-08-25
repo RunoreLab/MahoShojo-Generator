@@ -28,7 +28,7 @@ describe('generate magical girl runtime ownership', () => {
   test('package 源码不回连 root/app/runtime framework 或环境变量', () => {
     const source = readFileSync(
       new URL(
-        '../packages/hosted-runtime/src/generate-magical-girl-runtime.ts',
+        '../../../packages/hosted-runtime/src/generate-magical-girl-runtime.ts',
         import.meta.url,
       ),
       'utf8',

@@ -112,9 +112,9 @@ describe('Hono deployment workflow', () => {
   test.each([
     ['Hono', HONO_WORKFLOW_PATH, 'build'],
     ['Cloudflare', CLOUDFLARE_WORKFLOW_PATH, 'deploy'],
-  ])('%s workflow verifies workspaces and the legacy root through the unified entrypoint', (_, path, jobKey) => {
+  ])('%s workflow verifies workspaces and repository gates through the unified entrypoint', (_, path, jobKey) => {
     const workflow = readFileSync(path, 'utf8');
-    const verificationStep = getStep(getJob(workflow, jobKey), 'Verify workspace and legacy root');
+    const verificationStep = getStep(getJob(workflow, jobKey), 'Verify workspace and repository gates');
 
     expect(verificationStep).toContain('run: pnpm run ci:verify');
   });

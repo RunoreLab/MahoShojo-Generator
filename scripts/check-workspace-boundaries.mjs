@@ -10,8 +10,6 @@ const REQUIRED_WORKSPACE_SCRIPTS = ['test', 'lint', 'build'];
 const LEGACY_ROOT_APP_DIRECTORIES = new Set([
   'app',
   'components',
-  'config',
-  'drizzle',
   'lib',
   'pages',
   'public',
@@ -371,8 +369,20 @@ function appTargetFromSpecifier(rootDirectory, moduleSpecifier, apps) {
     return () => appByDirectory(path.resolve(rootDirectory, moduleSpecifier));
   }
 
-  if (moduleSpecifier === '@/apps' || moduleSpecifier.startsWith('@/apps/')) {
-    return () => appByDirectory(path.resolve(rootDirectory, moduleSpecifier.slice(2)));
+  if (moduleSpecifier === '@' || moduleSpecifier.startsWith('@/')) {
+    return (filePath) => {
+      const sourceApp = appByDirectory(filePath);
+      if (sourceApp) {
+        const appLocalTarget = moduleSpecifier === '@'
+          ? sourceApp.directory
+          : path.resolve(sourceApp.directory, moduleSpecifier.slice(2));
+        return appByDirectory(appLocalTarget);
+      }
+      if (moduleSpecifier === '@/apps' || moduleSpecifier.startsWith('@/apps/')) {
+        return appByDirectory(path.resolve(rootDirectory, moduleSpecifier.slice(2)));
+      }
+      return null;
+    };
   }
 
   const matchingApp = apps
@@ -394,12 +404,15 @@ function packageTargetFromRelativeSpecifier(filePath, moduleSpecifier, packages)
   return packages.find((pkg) => isWithin(targetPath, pkg.directory)) ?? null;
 }
 
-function legacyRootAppTargetFromSpecifier(rootDirectory, filePath, moduleSpecifier) {
+function legacyRootAppTargetFromSpecifier(rootDirectory, filePath, moduleSpecifier, apps) {
   let targetPath;
   if (moduleSpecifier.startsWith('./') || moduleSpecifier.startsWith('../')) {
     targetPath = path.resolve(path.dirname(filePath), moduleSpecifier);
   } else if (moduleSpecifier === '@' || moduleSpecifier.startsWith('@/')) {
-    targetPath = path.resolve(rootDirectory, moduleSpecifier === '@' ? '.' : moduleSpecifier.slice(2));
+    const sourceApp = apps.find((app) => isWithin(filePath, app.directory)) ?? null;
+    targetPath = sourceApp
+      ? path.resolve(sourceApp.directory, moduleSpecifier === '@' ? '.' : moduleSpecifier.slice(2))
+      : path.resolve(rootDirectory, moduleSpecifier === '@' ? '.' : moduleSpecifier.slice(2));
   } else {
     return null;
   }
@@ -526,8 +539,8 @@ function addViolation(violations, rule, filePath, moduleSpecifier, message, line
 }
 
 /**
- * Check only future workspace units. The legacy root app is intentionally outside
- * the scan so this guard can be enabled before root sources are migrated.
+ * Check every workspace unit. Retired legacy root directories remain a fail-closed
+ * import target so a later change cannot silently recreate split app ownership.
  *
  * @param {string} rootDirectory
  * @returns {BoundaryViolation[]}
@@ -658,6 +671,7 @@ export function checkWorkspaceBoundaries(rootDirectory = process.cwd()) {
           normalizedRoot,
           sourceFile,
           moduleSpecifier,
+          apps,
         );
         if (legacyRootTarget) {
           addViolation(

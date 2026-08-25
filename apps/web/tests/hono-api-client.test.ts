@@ -16,7 +16,7 @@ import {
   resolveGenerationApiUrl,
 } from '@/lib/hono-api-client';
 import { honoApiConfig } from '@/config/hono-api';
-import honoApiRoutes from '@/config/hono-api-routes.json';
+import honoApiRoutes from '../../../config/hono-api-routes.json';
 
 const originalEnabled = honoApiConfig.enabled;
 

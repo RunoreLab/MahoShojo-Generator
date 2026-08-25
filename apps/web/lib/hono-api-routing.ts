@@ -1,5 +1,5 @@
 import { honoApiConfig } from '@/config/hono-api';
-import honoApiRoutes from '@/config/hono-api-routes.json';
+import honoApiRoutes from '../../../config/hono-api-routes.json';
 
 const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 

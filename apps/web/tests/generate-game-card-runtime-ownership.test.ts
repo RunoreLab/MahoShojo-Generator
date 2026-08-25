@@ -40,11 +40,11 @@ describe('generate game card runtime ownership', () => {
 
   test('package 源码不回连 root/app/runtime framework 或全局配置', () => {
     const runtimeSource = readFileSync(
-      new URL('../packages/hosted-runtime/src/generate-game-card-runtime.ts', import.meta.url),
+      new URL('../../../packages/hosted-runtime/src/generate-game-card-runtime.ts', import.meta.url),
       'utf8',
     );
     const providerSource = readFileSync(
-      new URL('../packages/hosted-runtime/src/custom-provider-runtime.ts', import.meta.url),
+      new URL('../../../packages/hosted-runtime/src/custom-provider-runtime.ts', import.meta.url),
       'utf8',
     );
     for (const source of [runtimeSource, providerSource]) {
@@ -70,7 +70,7 @@ describe('generate game card runtime ownership', () => {
       'utf8',
     );
     const domainSource = readFileSync(
-      new URL('../packages/domain/src/game-card.ts', import.meta.url),
+      new URL('../../../packages/domain/src/game-card.ts', import.meta.url),
       'utf8',
     );
     const presentationSource = readFileSync(

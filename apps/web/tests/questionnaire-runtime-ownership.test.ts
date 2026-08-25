@@ -18,7 +18,7 @@ describe('questionnaire runtime ownership', () => {
 
   test('hosted-runtime source 不回连 root/app/runtime framework', () => {
     const source = readFileSync(
-      new URL('../packages/hosted-runtime/src/questionnaire-generation-runtime.ts', import.meta.url),
+      new URL('../../../packages/hosted-runtime/src/questionnaire-generation-runtime.ts', import.meta.url),
       'utf8',
     );
     expect(source).not.toMatch(/from\s+['"]@\//);

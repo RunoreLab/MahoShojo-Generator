@@ -59,6 +59,23 @@ describe('workspace naming ratchet', () => {
     expect(reportOnlyFields).not.toContain('legacy_name');
   });
 
+  it('keeps the relocated Web baseline in strict scans instead of passing on retired root paths', async () => {
+    const rootDir = await createFixture({
+      'apps/web/lib/runtime.ts': 'const value = {} as any; void value.internal_name;\n',
+      'apps/web/lib/db/row.ts': 'const value = {} as any; void value.database_name;\n',
+      'lib/retired.ts': 'const value = {} as any; void value.retired_name;\n',
+    });
+
+    const result = checkNamingConventions(rootDir);
+
+    expect(result.blockingViolations).toEqual([
+      expect.objectContaining({ path: 'apps/web/lib/runtime.ts', field: 'internal_name', scope: 'block' }),
+    ]);
+    expect(result.reportOnlyViolations).toEqual([
+      expect.objectContaining({ path: 'apps/web/lib/db/row.ts', field: 'database_name', scope: 'report-only' }),
+    ]);
+  });
+
   it('does not rewrite canonical third-party code in the hosted-runtime vendor boundary', async () => {
     const rootDir = await createFixture({
       'packages/hosted-runtime/src/node-runtime/vendor/upstream.mjs': [

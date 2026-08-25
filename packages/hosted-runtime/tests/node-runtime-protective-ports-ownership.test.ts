@@ -38,28 +38,7 @@ describe('protective Node ports ownership', () => {
     }
   });
 
-  test('root 保留兼容层而不继续持有 Node authority 与 secret 装载', () => {
-    const wrappers = [
-      'lib/ai/constants.ts',
-      'lib/ai/public-rate-limit.ts',
-      'lib/auth/activity-token.ts',
-      'lib/content-safety/server.ts',
-      'lib/sensitive-word-filter.ts',
-      'lib/shield-word-filter.ts',
-      'lib/card-forge/content-safety.ts',
-      'lib/signature.ts',
-      'lib/db/d1-http-client.ts',
-    ];
-
-    for (const wrapper of wrappers) {
-      const source = read(wrapper);
-      expect(source).toContain('@mahoshojo/hosted-runtime/');
-      expect(source).not.toContain('process.env');
-      expect(source.split(/\r?\n/).length).toBeLessThanOrEqual(30);
-    }
-  });
-
-  test('protective ports 的完整生产闭包不反向依赖 root', async () => {
+  test('protective ports 的完整生产闭包不反向依赖 app 或 root', async () => {
     const result = await build({
       absWorkingDir: ROOT_DIRECTORY,
       entryPoints: Object.values(expectedEntries).map((source) =>

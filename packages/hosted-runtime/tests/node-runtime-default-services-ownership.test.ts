@@ -32,26 +32,6 @@ describe('default Hosted services ownership', () => {
     expect(existsSync(path.join(PACKAGE_DIRECTORY, ENTRY))).toBe(true);
   });
 
-  test('10 个 root Hosted modules 仅保留 runtime 配置与 package compatibility re-export', () => {
-    for (const wrapper of [
-      'lib/hosted-api/generate-free.ts',
-      'lib/hosted-api/generate-free-stream.ts',
-      'lib/hosted-api/generate-scenario.ts',
-      'lib/hosted-api/generate-scenario-stream.ts',
-      'lib/hosted-api/generate-canshou.ts',
-      'lib/hosted-api/generate-canshou-stream.ts',
-      'lib/hosted-api/generate-magical-girl.ts',
-      'lib/hosted-api/generate-game-card.ts',
-      'lib/hosted-api/generate-creator.ts',
-      'lib/hosted-api/generate-creator-stream.ts',
-    ]) {
-      const source = readFileSync(path.join(ROOT_DIRECTORY, wrapper), 'utf8');
-      expect(source).toContain('@mahoshojo/hosted-runtime/node-runtime/default-services');
-      expect(source).toContain("./configure-node-runtime");
-      expect(source.split(/\r?\n/).length).toBeLessThanOrEqual(10);
-    }
-  });
-
   test('已创建的 default services 可由 runtime adapter 注入 D1 binding resolver', () => {
     const d1Client = { prepare: () => ({}) } as unknown as NodeDataD1Client;
     configureDefaultNodeHostedD1ClientResolver(() => d1Client);

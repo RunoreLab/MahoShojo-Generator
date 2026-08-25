@@ -17,7 +17,7 @@ describe('data-card interactions schema contract', () => {
   });
 
   test('migration 创建 interaction 表和幂等唯一约束', () => {
-    const migrationPath = join(process.cwd(), 'drizzle/0012_data_card_interactions.sql');
+    const migrationPath = join(process.cwd(), '../../drizzle/0012_data_card_interactions.sql');
     const content = readFileSync(migrationPath, 'utf8');
 
     expect(content).toContain('CREATE TABLE IF NOT EXISTS data_card_interactions');

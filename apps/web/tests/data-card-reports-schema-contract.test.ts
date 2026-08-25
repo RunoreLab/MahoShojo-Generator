@@ -24,7 +24,7 @@ describe('data card reports schema contract', () => {
   });
 
   test('migration creates immutable submission events used by rate limiting', () => {
-    const migrationPath = join(process.cwd(), 'drizzle/0008_report_submission_events.sql');
+    const migrationPath = join(process.cwd(), '../../drizzle/0008_report_submission_events.sql');
     const content = readFileSync(migrationPath, 'utf8');
 
     expect(content.includes('CREATE TABLE IF NOT EXISTS report_submission_events')).toBe(true);

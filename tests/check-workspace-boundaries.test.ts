@@ -40,7 +40,7 @@ afterEach(async () => {
 });
 
 describe('workspace dependency boundaries', () => {
-  it('ignores the legacy root app while checking future apps and packages', async () => {
+  it('scans workspace apps and packages without treating unrelated root source as a workspace unit', async () => {
     const rootDir = await createWorkspaceFixture({
       'src/legacy.ts': "export { value } from '@/apps/admin/src/index';\n",
       'apps/admin/README.md': '# Future admin app\n',
@@ -106,11 +106,11 @@ describe('workspace dependency boundaries', () => {
       'apps/api/package.json': manifest('@mahoshojo/api'),
       'apps/api/src/index.ts': [
         "export { POST } from '../../../app/api/generate/route';",
-        "export { generate } from '@/lib/ai';",
-        "export { createApp } from '@/server/app';",
+        "export { generate } from '../../../lib/ai';",
+        "export { createApp } from '../../../server/app';",
         "export { default as legacy } from '../../../pages/api/legacy';",
-        "export { Button } from '@/components/button';",
-        "export type { User } from '@/types/user';",
+        "export { Button } from '../../../components/button';",
+        "export type { User } from '../../../types/user';",
       ].join('\n'),
     });
 
@@ -121,11 +121,11 @@ describe('workspace dependency boundaries', () => {
     expect(violations).toHaveLength(6);
     expect(violations.map((violation) => violation.module)).toEqual(expect.arrayContaining([
       '../../../app/api/generate/route',
-      '@/lib/ai',
-      '@/server/app',
+      '../../../lib/ai',
+      '../../../server/app',
       '../../../pages/api/legacy',
-      '@/components/button',
-      '@/types/user',
+      '../../../components/button',
+      '../../../types/user',
     ]));
   });
 
@@ -204,7 +204,7 @@ describe('workspace dependency boundaries', () => {
     expect(violations[0]?.module).toBe('@/app/api/generate/handler');
   });
 
-  it('rejects app-to-app imports through relative, alias, and workspace package names', async () => {
+  it('rejects app-to-app imports through relative and workspace package names while keeping @ app-local', async () => {
     const rootDir = await createWorkspaceFixture({
       'apps/web/package.json': manifest('@mahoshojo/web'),
       'apps/web/src/index.ts': [
@@ -217,10 +217,11 @@ describe('workspace dependency boundaries', () => {
     });
 
     const violations = checkWorkspaceBoundaries(rootDir);
-    expect(violations.filter((violation) => violation.rule === 'MONO-003')).toHaveLength(3);
+    expect(violations.filter((violation) => violation.rule === 'MONO-003')).toHaveLength(2);
     expect(violations.map((violation) => violation.module)).toEqual(
-      expect.arrayContaining(['../../admin/src/index', '@/apps/admin/src/index', '@mahoshojo/admin']),
+      expect.arrayContaining(['../../admin/src/index', '@mahoshojo/admin']),
     );
+    expect(violations.some((violation) => violation.module === '@/apps/admin/src/index')).toBe(false);
   });
 
   it('rejects framework and runtime imports from the domain package', async () => {

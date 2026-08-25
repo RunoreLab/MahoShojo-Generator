@@ -201,8 +201,8 @@ describe('advanced generation settings regressions', () => {
 
   it('内置系统通道在唯一 concrete runtime 与遗留 streamObject 入口都标记为 system capability namespace', async () => {
     for (const path of [
-      'packages/hosted-runtime/src/node-runtime/structured-ai.ts',
-      'packages/hosted-runtime/src/node-runtime/raw-stream-ai.ts',
+      '../../packages/hosted-runtime/src/node-runtime/structured-ai.ts',
+      '../../packages/hosted-runtime/src/node-runtime/raw-stream-ai.ts',
       'lib/stream/ai.ts',
     ]) {
       const source = await readFile(path, 'utf8');

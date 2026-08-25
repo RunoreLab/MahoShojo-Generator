@@ -50,7 +50,7 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Verify workspace and legacy root
+      - name: Verify workspace and repository gates
         run: pnpm run ci:verify
 
       - name: Build Cloudflare bundle
@@ -62,18 +62,18 @@ jobs:
           NEXT_PUBLIC_ENABLE_BUNDLE_SAFETY_CHECK: ${{ vars.NEXT_PUBLIC_ENABLE_BUNDLE_SAFETY_CHECK }}
           NEXT_PUBLIC_GA_ID: ${{ vars.NEXT_PUBLIC_GA_ID }}
           NEXT_PUBLIC_SAFETY_CHECK_POLICY: ${{ vars.NEXT_PUBLIC_SAFETY_CHECK_POLICY }}
-        run: pnpm run build:cf
+        run: pnpm --filter @mahoshojo/web run build:cf
 
       - name: Deploy production
         if: github.ref == 'refs/heads/feature/v0.2.0_Battle_Growth_MahoShojo'
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: pnpm exec wrangler deploy --env production
+        run: pnpm --filter @mahoshojo/web exec wrangler deploy --env production
 
       - name: Deploy preview
         if: github.ref != 'refs/heads/feature/v0.2.0_Battle_Growth_MahoShojo'
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: pnpm exec wrangler deploy --env preview
+        run: pnpm --filter @mahoshojo/web exec wrangler deploy --env preview

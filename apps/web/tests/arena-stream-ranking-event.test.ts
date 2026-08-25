@@ -2,11 +2,11 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, test } from 'vitest';
 
 const runtimeSource = readFileSync(
-  new URL('../packages/hosted-runtime/src/arena-generation/runtime.ts', import.meta.url),
+  new URL('../../../packages/hosted-runtime/src/arena-generation/runtime.ts', import.meta.url),
   'utf8',
 );
 const finalizationSource = readFileSync(
-  new URL('../packages/hosted-runtime/src/arena-generation/finalization.ts', import.meta.url),
+  new URL('../../../packages/hosted-runtime/src/arena-generation/finalization.ts', import.meta.url),
   'utf8',
 );
 

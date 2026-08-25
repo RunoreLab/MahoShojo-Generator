@@ -92,15 +92,6 @@ describe('Hono route manifest', () => {
     }
   });
 
-  it('退出 Hono 的 capability 继续保留 Next POST surface', () => {
-    for (const routeId of EXITED_ROUTE_IDS) {
-      const routeFile = path.join(REPOSITORY_ROOT, 'app', 'api', routeId, 'route.ts');
-      const source = readFileSync(routeFile, 'utf8');
-      expect(source).toContain("import { appRouteHandler } from './handler';");
-      expect(source).toContain('export const POST = appRouteHandler;');
-    }
-  });
-
   it('generator 与 route type 不再保留 legacy Next import 回退口', () => {
     const generatorSource = readFileSync(
       path.join(APP_ROOT, 'scripts/generate-route-manifest.mjs'),

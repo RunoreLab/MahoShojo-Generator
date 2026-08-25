@@ -70,8 +70,9 @@ describe('apps/api source ownership', () => {
 
     const rootTypeScriptConfig = JSON.parse(
       readFileSync(path.join(ROOT, 'tsconfig.json'), 'utf8'),
-    ) as { exclude?: string[] };
-    expect(rootTypeScriptConfig.exclude).toContain('apps');
+    ) as { include?: string[] };
+    expect(rootTypeScriptConfig.include).toContain('tests/**/*');
+    expect(rootTypeScriptConfig.include).not.toEqual(expect.arrayContaining(['apps/**/*', '**/*.ts']));
   });
 
   it('app-owned TypeScript/JavaScript 不导入 legacy root alias 或源码', () => {

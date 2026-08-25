@@ -2,11 +2,11 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, test } from 'vitest';
 
 const serviceSource = readFileSync(
-  new URL('../packages/hosted-api/src/arena-generation/service.ts', import.meta.url),
+  new URL('../../../packages/hosted-api/src/arena-generation/service.ts', import.meta.url),
   'utf8',
 );
 const runtimeSource = readFileSync(
-  new URL('../packages/hosted-runtime/src/arena-generation/runtime.ts', import.meta.url),
+  new URL('../../../packages/hosted-runtime/src/arena-generation/runtime.ts', import.meta.url),
   'utf8',
 );
 const battleEngineSource = readFileSync(

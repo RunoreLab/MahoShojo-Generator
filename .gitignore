@@ -28,7 +28,9 @@ packages/*/dist/
 apps/*/coverage/
 apps/*/build/
 apps/*/out/
+apps/*/.next/
 apps/*/.open-next/
+apps/*/.wrangler/
 packages/*/coverage/
 packages/*/build/
 packages/*/out/
