@@ -46,7 +46,10 @@ export const BattleSettingsSchema = z.object({
   readNarrativeHistoryLimit: z.number().min(1).max(999),
   isNarrativeHistoryUnlimited: z.boolean(),
   writeNarrativeHistory: z.boolean(),
-  streamTransport: z.enum(['sse', 'plain-stream']).default('sse'),
+  streamTransport: z.preprocess(
+    (value) => value === 'plain-stream' ? 'sse' : value,
+    z.literal('sse').default('sse'),
+  ),
   battleReportCardWidthMode: z.enum(['auto', 'manual']).optional(),
   battleReportCardWidthPx: z.number().min(BATTLE_REPORT_CARD_WIDTH_MIN).max(BATTLE_REPORT_CARD_WIDTH_MAX).optional(),
 });

@@ -12,26 +12,32 @@ class MemoryStorage {
 }
 
 describe('Arena generation effect ledger', () => {
+  const baseA = 'a'.repeat(64);
+  const baseB = 'b'.repeat(64);
+
   it('keeps multiple generations so an older resumed terminal does not repeat effects', async () => {
     const storage = new MemoryStorage();
     const effect = vi.fn(async (generationId: string) => ({ generationId, signed: true }));
 
     await runArenaGenerationEffectOnce({
-      generationId: 'generation-1', storage, effect: () => effect('generation-1'),
+      generationId: 'generation-1', baseRevisionHash: baseA,
+      storage, effect: () => effect('generation-1'),
     });
     await runArenaGenerationEffectOnce({
-      generationId: 'generation-2', storage, effect: () => effect('generation-2'),
+      generationId: 'generation-2', baseRevisionHash: baseB,
+      storage, effect: () => effect('generation-2'),
     });
     await expect(runArenaGenerationEffectOnce({
-      generationId: 'generation-1', storage, effect: () => effect('generation-1'),
+      generationId: 'generation-1', baseRevisionHash: baseA,
+      storage, effect: () => effect('generation-1'),
     })).resolves.toEqual({ generationId: 'generation-1', signed: true });
 
     expect(effect).toHaveBeenCalledTimes(2);
     expect(JSON.parse(storage.getItem(ARENA_GENERATION_EFFECT_LEDGER_KEY)!)).toMatchObject({
-      version: 1,
+      version: 2,
       entries: {
-        'generation-1': { result: { generationId: 'generation-1', signed: true } },
-        'generation-2': { result: { generationId: 'generation-2', signed: true } },
+        [`generation-1:${baseA}`]: { result: { generationId: 'generation-1', signed: true } },
+        [`generation-2:${baseB}`]: { result: { generationId: 'generation-2', signed: true } },
       },
     });
   });
@@ -45,8 +51,12 @@ describe('Arena generation effect ledger', () => {
       return { updatedCombatants: [{ name: 'A' }] };
     });
 
-    const first = runArenaGenerationEffectOnce({ generationId: 'generation-1', storage, effect });
-    const second = runArenaGenerationEffectOnce({ generationId: 'generation-1', storage, effect });
+    const first = runArenaGenerationEffectOnce({
+      generationId: 'generation-1', baseRevisionHash: baseA, storage, effect,
+    });
+    const second = runArenaGenerationEffectOnce({
+      generationId: 'generation-1', baseRevisionHash: baseA, storage, effect,
+    });
     release();
 
     await expect(Promise.all([first, second])).resolves.toEqual([
@@ -54,5 +64,19 @@ describe('Arena generation effect ledger', () => {
       { updatedCombatants: [{ name: 'A' }] },
     ]);
     expect(effect).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not reuse a cached local result for a different card base revision', async () => {
+    const storage = new MemoryStorage();
+    const effect = vi.fn(async () => ({ call: effect.mock.calls.length }));
+
+    await runArenaGenerationEffectOnce({
+      generationId: 'generation-1', baseRevisionHash: baseA, storage, effect,
+    });
+    await runArenaGenerationEffectOnce({
+      generationId: 'generation-1', baseRevisionHash: baseB, storage, effect,
+    });
+
+    expect(effect).toHaveBeenCalledTimes(2);
   });
 });

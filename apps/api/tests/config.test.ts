@@ -64,6 +64,26 @@ describe('Hono server config', () => {
     expect(() => readHonoServerConfig()).toThrow(/Redis 未配置.*SIGNATURE_SECRET_KEY/);
   });
 
+  it('生产模式拒绝 wildcard CORS', () => {
+    stubValidBearerProductionEnv();
+    vi.stubEnv('HONO_CORS_ORIGINS', '*');
+    expect(() => readHonoServerConfig()).toThrow(/HONO_CORS_ORIGINS/);
+  });
+
+  it('生产模式在创建 generation reservation 前拒绝不可信 provider URL', () => {
+    stubValidBearerProductionEnv();
+    vi.stubEnv('AI_API_KEY', '');
+    vi.stubEnv('AI_PROVIDERS_CONFIG', JSON.stringify([{
+      name: 'invalid-provider',
+      apiKey: 'test-key',
+      baseUrl: 'http://metadata.internal/v1',
+      model: 'model-1',
+      type: 'openai',
+    }]));
+
+    expect(() => readHonoServerConfig()).toThrow(/AI_PROVIDERS_CONFIG\/AI_API_KEY/);
+  });
+
   it('生产模式要求独立的 Arena finalization authority 与 R2 terminal store', () => {
     stubValidBearerProductionEnv();
     vi.stubEnv('ARENA_FINALIZATION_URL', '');

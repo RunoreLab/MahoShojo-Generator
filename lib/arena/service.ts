@@ -23,13 +23,20 @@ export const applyPostBattleUpdates = async (
     impacts: { characterName: string; impact?: string; currentStateSummary?: string }[],
     userGuidance: string | null,
     scenario: any | null,
-    options: { writeArenaHistory: boolean; writeCurrentState: boolean; generationId?: string }
+    options: {
+        writeArenaHistory: boolean;
+        writeCurrentState: boolean;
+        generationId?: string;
+        baseRevisionHash?: string;
+        scenarioNativeOverride?: boolean;
+    }
 ): Promise<any[]> => {
     const updatedCombatants = [];
     const participantNames = combatants.map(c => c.data.codename || c.data.name);
     const nowISO = new Date().toISOString();
     const { writeArenaHistory, writeCurrentState } = options;
     const generationId = options.generationId?.trim() || null;
+    const baseRevisionHash = options.baseRevisionHash?.trim() || null;
 
     const nameToNativenessMap = new Map<string, boolean[]>();
     combatants.forEach(c => {
@@ -50,7 +57,8 @@ export const applyPostBattleUpdates = async (
         }
     }
 
-    const isScenarioNative = scenario ? await verifySignature(scenario) : true;
+    const isScenarioNative = options.scenarioNativeOverride
+        ?? (scenario ? await verifySignature(scenario) : true);
     const isAnyNonNative = combatants.some(c => !c.isNative || conflictingNames.has(c.data.codename || c.data.name)) || (report.mode === 'scenario' && !isScenarioNative);
 
     for (const combatant of combatants) {
@@ -97,6 +105,9 @@ export const applyPostBattleUpdates = async (
             }
             const alreadyApplied = generationId && history.entries.some(
                 (entry: ArenaHistoryEntry) => entry.metadata?.generation_id === generationId
+                    && (!baseRevisionHash
+                        || !entry.metadata?.base_revision_hash
+                        || entry.metadata.base_revision_hash === baseRevisionHash)
             );
             if (!alreadyApplied) {
                 history.attributes.updated_at = nowISO;
@@ -116,6 +127,7 @@ export const applyPostBattleUpdates = async (
                         scenario_title: getScenarioTitle(scenario),
                         non_native_data_involved: isAnyNonNative,
                         ...(generationId ? { generation_id: generationId } : {}),
+                        ...(baseRevisionHash ? { base_revision_hash: baseRevisionHash } : {}),
                     },
                 };
 
@@ -127,13 +139,19 @@ export const applyPostBattleUpdates = async (
 
         if (writeCurrentState) {
             const summary = impacts.find(i => i.characterName === characterName)?.currentStateSummary?.trim();
-            if (summary && (!generationId || characterData.current_state?.generation_id !== generationId)) {
+            const currentStateAlreadyApplied = generationId
+                && characterData.current_state?.generation_id === generationId
+                && (!baseRevisionHash
+                    || !characterData.current_state?.base_revision_hash
+                    || characterData.current_state.base_revision_hash === baseRevisionHash);
+            if (summary && !currentStateAlreadyApplied) {
                 const nextState = characterData.current_state ?? { summary: '', fields: [] };
                 characterData.current_state = {
                     ...nextState,
                     summary,
                     updated_at: nowISO,
                     ...(generationId ? { generation_id: generationId } : {}),
+                    ...(baseRevisionHash ? { base_revision_hash: baseRevisionHash } : {}),
                 };
                 didMutate = true;
             }

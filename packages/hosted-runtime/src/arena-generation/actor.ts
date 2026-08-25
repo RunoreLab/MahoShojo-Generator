@@ -209,7 +209,7 @@ export const createArenaGenerationActorResolver = (
 
     if (authMode === 'hybrid' && hasBetterAuthSession(request)) {
       const userId = await readSessionUser(request, env, fetcher);
-      return userId ? { actorKey: `user:${userId}` } : null;
+      if (userId) return { actorKey: `user:${userId}` };
     }
     if (bearer) {
       if (!client) return null;

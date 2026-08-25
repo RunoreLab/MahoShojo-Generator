@@ -19,6 +19,7 @@ describe('Arena generation service registry', () => {
     const create = vi.fn(async () => response);
     configureArenaGenerationService({
       create,
+      cancelRequest: vi.fn(async () => response),
       resume: vi.fn(async () => response),
       status: vi.fn(async () => response),
       cancel: vi.fn(async () => response),

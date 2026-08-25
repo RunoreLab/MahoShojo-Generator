@@ -15,15 +15,19 @@ export type ArenaGenerationConnectionState =
   | 'producer_lost';
 
 export type PersistedArenaGeneration = {
-  version: 1;
+  version: 1 | 2;
   generationRequestId: string;
   generationId: string | null;
   lastEventId: string | null;
   state: ArenaGenerationConnectionState;
   updatedAt: string;
+  endpoint?: string;
+  bodyHash?: string;
 };
 
 type StoragePort = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
+
+let inMemoryActorToken: string | null = null;
 
 export type OpenArenaGenerationStreamOptions = {
   endpoint: string;
@@ -42,6 +46,14 @@ export type OpenArenaGenerationStreamOptions = {
 
 const defaultStorage = (): StoragePort | null => {
   try {
+    return typeof window === 'undefined' ? null : window.sessionStorage;
+  } catch {
+    return null;
+  }
+};
+
+const defaultActorStorage = (): StoragePort | null => {
+  try {
     return typeof window === 'undefined' ? null : window.localStorage;
   } catch {
     return null;
@@ -50,14 +62,15 @@ const defaultStorage = (): StoragePort | null => {
 
 export const readPersistedArenaGeneration = (
   storage: StoragePort | null = defaultStorage(),
+  key = ARENA_GENERATION_CLIENT_STATE_KEY,
 ): PersistedArenaGeneration | null => {
   if (!storage) return null;
   try {
-    const parsed = JSON.parse(storage.getItem(ARENA_GENERATION_CLIENT_STATE_KEY) ?? '') as unknown;
+    const parsed = JSON.parse(storage.getItem(key) ?? '') as unknown;
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
     const value = parsed as Partial<PersistedArenaGeneration>;
     if (
-      value.version !== 1
+      (value.version !== 1 && value.version !== 2)
       || typeof value.generationRequestId !== 'string'
       || !value.generationRequestId
       || (value.generationId !== null && typeof value.generationId !== 'string')
@@ -71,19 +84,61 @@ export const readPersistedArenaGeneration = (
   }
 };
 
-const save = (storage: StoragePort | null, value: PersistedArenaGeneration): void => {
+const save = (
+  storage: StoragePort | null,
+  key: string,
+  value: PersistedArenaGeneration,
+): void => {
   try {
-    storage?.setItem(ARENA_GENERATION_CLIENT_STATE_KEY, JSON.stringify(value));
+    const serialized = JSON.stringify(value);
+    storage?.setItem(key, serialized);
+    // Keep the legacy pointer for diagnostics and older callers. The resume path
+    // itself only reads the body-scoped key, so parallel tabs/intents cannot steal it.
+    storage?.setItem(ARENA_GENERATION_CLIENT_STATE_KEY, serialized);
   } catch {
     // Resume persistence is best effort; the live stream remains authoritative.
   }
 };
 
+const canonicalJson = (value: unknown): string => {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value) ?? 'null';
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+  return `{${Object.entries(value as Record<string, unknown>)
+    .filter(([, child]) => child !== undefined)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, child]) => `${JSON.stringify(key)}:${canonicalJson(child)}`)
+    .join(',')}}`;
+};
+
+const sha256 = async (value: string): Promise<string> => {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+};
+
+const compareDecimal = (left: string, right: string): number => {
+  const normalizedLeft = left.replace(/^0+(?=\d)/u, '');
+  const normalizedRight = right.replace(/^0+(?=\d)/u, '');
+  if (normalizedLeft.length !== normalizedRight.length) {
+    return normalizedLeft.length < normalizedRight.length ? -1 : 1;
+  }
+  return normalizedLeft < normalizedRight ? -1 : normalizedLeft > normalizedRight ? 1 : 0;
+};
+
+const compareStreamIds = (left: string, right: string): number | null => {
+  const leftMatch = left.match(/^(\d+)-(\d+)$/u);
+  const rightMatch = right.match(/^(\d+)-(\d+)$/u);
+  if (!leftMatch || !rightMatch) return null;
+  const milliseconds = compareDecimal(leftMatch[1]!, rightMatch[1]!);
+  return milliseconds !== 0 ? milliseconds : compareDecimal(leftMatch[2]!, rightMatch[2]!);
+};
+
 const actorToken = (storage: StoragePort | null): string | null => {
   try {
-    return storage?.getItem(ARENA_GENERATION_ACTOR_TOKEN_KEY)?.trim() || null;
+    const stored = storage?.getItem(ARENA_GENERATION_ACTOR_TOKEN_KEY)?.trim() || null;
+    if (stored) inMemoryActorToken = stored;
+    return stored ?? inMemoryActorToken;
   } catch {
-    return null;
+    return inMemoryActorToken;
   }
 };
 
@@ -91,6 +146,7 @@ const ensureActorToken = (storage: StoragePort | null): string | null => {
   const existing = actorToken(storage);
   if (existing) return existing;
   const bootstrap = `bootstrap.${crypto.randomUUID()}`;
+  inMemoryActorToken = bootstrap;
   try {
     storage?.setItem(ARENA_GENERATION_ACTOR_TOKEN_KEY, bootstrap);
     return bootstrap;
@@ -102,6 +158,7 @@ const ensureActorToken = (storage: StoragePort | null): string | null => {
 const captureActorToken = (storage: StoragePort | null, response: Response): void => {
   const token = response.headers.get(ARENA_GENERATION_ACTOR_TOKEN_HEADER)?.trim();
   if (!token) return;
+  inMemoryActorToken = token;
   try {
     storage?.setItem(ARENA_GENERATION_ACTOR_TOKEN_KEY, token);
   } catch {
@@ -174,17 +231,39 @@ const withActorToken = (
   return headers;
 };
 
+export const withArenaGenerationActorToken = (
+  headersInit: HeadersInit = {},
+  options: { storage?: StoragePort | null; createIfMissing?: boolean } = {},
+): Headers => withActorToken(
+  headersInit,
+  options.storage === undefined ? defaultActorStorage() : options.storage,
+  options.createIfMissing ?? true,
+);
+
+export const captureArenaGenerationActorToken = (
+  response: Response,
+  storage: StoragePort | null = defaultActorStorage(),
+): void => captureActorToken(storage, response);
+
 export const openArenaGenerationStream = async (
   options: OpenArenaGenerationStreamOptions,
 ): Promise<Response> => {
   const storage = options.storage === undefined ? defaultStorage() : options.storage;
+  const actorStorage = options.storage === undefined ? defaultActorStorage() : options.storage;
   const now = options.now ?? (() => new Date());
   const random = options.random ?? Math.random;
   const maxAttempts = options.maxReconnectAttempts ?? 8;
   const baseDelayMs = options.baseReconnectDelayMs ?? 500;
-  const previous = readPersistedArenaGeneration(storage);
+  const bodyHash = await sha256(canonicalJson(options.body));
+  const stateIdentity = await sha256(`${options.endpoint}\n${bodyHash}`);
+  const scopedStateKey = `${ARENA_GENERATION_CLIENT_STATE_KEY}:${stateIdentity}`;
+  const previous = readPersistedArenaGeneration(storage, scopedStateKey);
   const resumablePrevious = previous
-    && previous.generationId
+    && previous.version === 2
+    && (
+      previous.endpoint === options.endpoint
+      && previous.bodyHash === bodyHash
+    )
     && ['connecting', 'generating', 'reconnecting', 'resuming'].includes(previous.state)
     ? previous
     : null;
@@ -193,20 +272,24 @@ export const openArenaGenerationStream = async (
     ?? crypto.randomUUID();
   let generationId = resumablePrevious?.generationId ?? null;
   let lastEventId = resumablePrevious?.lastEventId ?? null;
-  let state: ArenaGenerationConnectionState = resumablePrevious ? 'resuming' : 'connecting';
+  let state: ArenaGenerationConnectionState = resumablePrevious?.generationId
+    ? 'resuming'
+    : 'connecting';
   let currentReader: ReadableStreamDefaultReader<Uint8Array> | null = null;
   let stopped = false;
   let terminal = false;
   const updateState = (next: ArenaGenerationConnectionState): void => {
     state = next;
     options.onStateChange?.(next);
-    save(storage, {
-      version: 1,
+    save(storage, scopedStateKey, {
+      version: 2,
       generationRequestId,
       generationId,
       lastEventId,
       state,
       updatedAt: now().toISOString(),
+      endpoint: options.endpoint,
+      bodyHash,
     });
   };
 
@@ -216,17 +299,39 @@ export const openArenaGenerationStream = async (
     updateState('resuming');
     return options.fetcher(`/api/arena/generations/${encodeURIComponent(generationId)}/stream${cursor}`, {
       method: 'GET',
-      headers: withActorToken({ Accept: 'text/event-stream' }, storage),
+      headers: withActorToken({ Accept: 'text/event-stream' }, actorStorage),
       signal: options.signal,
     });
   };
 
   updateState(state);
-  const initialHeaders = withActorToken(options.headers, storage, true);
+  const initialHeaders = withActorToken(options.headers, actorStorage, true);
   initialHeaders.set('Accept', 'text/event-stream');
   initialHeaders.set('Content-Type', 'application/json');
   const createBody = JSON.stringify({ ...options.body, generationRequestId });
-  const fetchInitial = (): Promise<Response> => resumablePrevious
+  const cancelOnUserAbort = (): void => {
+    if (options.signal?.reason !== 'user' || terminal) return;
+    stopped = true;
+    void currentReader?.cancel('user').catch(() => undefined);
+    const cancelTarget = generationId
+      ? `/api/arena/generations/${encodeURIComponent(generationId)}/cancel`
+      : options.endpoint;
+    void options.fetcher(cancelTarget, generationId
+      ? {
+          method: 'POST',
+          headers: withActorToken({ 'Content-Type': 'application/json' }, actorStorage),
+        }
+      : {
+          method: 'DELETE',
+          headers: withActorToken({ 'Content-Type': 'application/json' }, actorStorage),
+          body: JSON.stringify({ generationRequestId }),
+        }).catch(() => undefined);
+    updateState('cancelled');
+  };
+  options.signal?.addEventListener('abort', cancelOnUserAbort, { once: true });
+  if (options.signal?.aborted) cancelOnUserAbort();
+  if (stopped) throw new Error('ARENA_GENERATION_CANCELLED');
+  const fetchInitial = (): Promise<Response> => resumablePrevious?.generationId
     ? fetchResume()
     : options.fetcher(options.endpoint, {
       method: 'POST',
@@ -239,7 +344,30 @@ export const openArenaGenerationStream = async (
   while (true) {
     try {
       response = await fetchInitial();
-      break;
+      captureActorToken(actorStorage, response);
+      generationId = response.headers.get('x-mahoshojo-generation-id')?.trim() || generationId;
+      const incompleteSuccess = response.ok && (!response.body || !generationId);
+      const transientFailure = [429, 502, 503, 504].includes(response.status);
+      if (!incompleteSuccess && !transientFailure) break;
+      await response.body?.cancel('retry incomplete generation handshake').catch(() => undefined);
+      if (options.signal?.aborted || initialAttempt >= maxAttempts) {
+        if (!incompleteSuccess) break;
+        response = new Response(JSON.stringify({
+          code: 'ARENA_GENERATION_HANDSHAKE_INCOMPLETE',
+          error: 'Arena generation handshake incomplete',
+        }), {
+          status: 502,
+          headers: { 'Content-Type': 'application/json; charset=utf-8' },
+        });
+        break;
+      }
+      updateState('reconnecting');
+      const exponential = Math.min(30_000, baseDelayMs * (2 ** initialAttempt));
+      await waitForReconnectOpportunity(
+        Math.floor(exponential * (0.75 + random() * 0.5)),
+        options.signal,
+      );
+      initialAttempt += 1;
     } catch (error) {
       if (options.signal?.aborted || initialAttempt >= maxAttempts) throw error;
       updateState('reconnecting');
@@ -251,31 +379,47 @@ export const openArenaGenerationStream = async (
       initialAttempt += 1;
     }
   }
-  captureActorToken(storage, response);
-  generationId = response.headers.get('x-mahoshojo-generation-id')?.trim() || generationId;
-  if (!response.ok || !response.body || !generationId) return response;
-  updateState(resumablePrevious ? 'resuming' : 'generating');
-
-  const cancelOnUserAbort = (): void => {
-    if (!generationId || options.signal?.reason !== 'user' || terminal) return;
-    stopped = true;
-    void currentReader?.cancel('user').catch(() => undefined);
-    void options.fetcher(`/api/arena/generations/${encodeURIComponent(generationId)}/cancel`, {
-      method: 'POST',
-      headers: withActorToken({ 'Content-Type': 'application/json' }, storage),
-    }).catch(() => undefined);
-    updateState('cancelled');
-  };
-  options.signal?.addEventListener('abort', cancelOnUserAbort, { once: true });
+  if (!response.ok || !response.body || !generationId) {
+    options.signal?.removeEventListener('abort', cancelOnUserAbort);
+    return response;
+  }
+  updateState(resumablePrevious?.generationId ? 'resuming' : 'generating');
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
       const pump = async (): Promise<void> => {
         let reconnectAttempt = 0;
+        const reconnect = async (): Promise<void> => {
+          while (true) {
+            if (reconnectAttempt >= maxAttempts) {
+              throw new Error('ARENA_RESUME_ATTEMPTS_EXHAUSTED');
+            }
+            updateState('reconnecting');
+            const exponential = Math.min(30_000, baseDelayMs * (2 ** reconnectAttempt));
+            await waitForReconnectOpportunity(
+              Math.floor(exponential * (0.75 + random() * 0.5)),
+              options.signal,
+            );
+            reconnectAttempt += 1;
+            try {
+              response = await fetchResume();
+              captureActorToken(actorStorage, response);
+              if (![429, 502, 503, 504].includes(response.status)) return;
+            } catch (error) {
+              if (options.signal?.aborted || reconnectAttempt >= maxAttempts) throw error;
+            }
+          }
+        };
         try {
           while (!stopped && !terminal) {
-            if (!response.ok || !response.body) throw new Error(`ARENA_RESUME_HTTP_${response.status}`);
+            if (!response.ok || !response.body) {
+              if ([429, 502, 503, 504].includes(response.status)) {
+                await reconnect();
+                continue;
+              }
+              throw new Error(`ARENA_RESUME_HTTP_${response.status}`);
+            }
             currentReader = response.body.getReader();
             const decoder = new TextDecoder();
             let buffer = '';
@@ -289,7 +433,14 @@ export const openArenaGenerationStream = async (
                   const block = buffer.slice(0, separator);
                   buffer = buffer.slice(separator + 2);
                   const parsed = parseGenerationSseBlock(block);
-                  if (parsed?.id) lastEventId = parsed.id;
+                  if (parsed?.id) {
+                    const comparison = lastEventId ? compareStreamIds(parsed.id, lastEventId) : 1;
+                    if (comparison === null || comparison <= 0) {
+                      separator = buffer.indexOf('\n\n');
+                      continue;
+                    }
+                    lastEventId = parsed.id;
+                  }
                   const nextTerminal = parsed ? terminalState(parsed.event, parsed.data) : null;
                   controller.enqueue(encoder.encode(`${block}\n\n`));
                   updateState(nextTerminal ?? 'generating');
@@ -309,16 +460,7 @@ export const openArenaGenerationStream = async (
               currentReader = null;
             }
             if (stopped || terminal) break;
-            if (reconnectAttempt >= maxAttempts) throw new Error('ARENA_RESUME_ATTEMPTS_EXHAUSTED');
-            updateState('reconnecting');
-            const exponential = Math.min(30_000, baseDelayMs * (2 ** reconnectAttempt));
-            await waitForReconnectOpportunity(
-              Math.floor(exponential * (0.75 + random() * 0.5)),
-              options.signal,
-            );
-            reconnectAttempt += 1;
-            response = await fetchResume();
-            captureActorToken(storage, response);
+            await reconnect();
           }
           if (!stopped) controller.close();
         } catch (error) {

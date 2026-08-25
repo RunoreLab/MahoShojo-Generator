@@ -12,6 +12,23 @@ export type EncodableGenerationSseEvent = {
 
 const encoder = new TextEncoder();
 
+const compareDecimal = (left: string, right: string): number => {
+  const normalizedLeft = left.replace(/^0+(?=\d)/u, '');
+  const normalizedRight = right.replace(/^0+(?=\d)/u, '');
+  if (normalizedLeft.length !== normalizedRight.length) {
+    return normalizedLeft.length < normalizedRight.length ? -1 : 1;
+  }
+  return normalizedLeft < normalizedRight ? -1 : normalizedLeft > normalizedRight ? 1 : 0;
+};
+
+export const compareGenerationSseIds = (left: string, right: string): number => {
+  const leftMatch = left.match(/^(\d+)-(\d+)$/u);
+  const rightMatch = right.match(/^(\d+)-(\d+)$/u);
+  if (!leftMatch || !rightMatch) throw new Error('GENERATION_SSE_ID_INVALID');
+  const milliseconds = compareDecimal(leftMatch[1]!, rightMatch[1]!);
+  return milliseconds !== 0 ? milliseconds : compareDecimal(leftMatch[2]!, rightMatch[2]!);
+};
+
 export const encodeGenerationSseEvent = (
   event: EncodableGenerationSseEvent,
 ): Uint8Array => {
@@ -51,6 +68,9 @@ export const resolveResumeCursor = (request: Request): string | null => {
   if (headerCursor && queryCursor && headerCursor !== queryCursor) {
     throw new Error('RESUME_CURSOR_CONFLICT');
   }
-  return headerCursor ?? queryCursor;
+  const resolved = headerCursor ?? queryCursor;
+  if (resolved && !/^\d+-\d+$/u.test(resolved)) {
+    throw new Error('RESUME_CURSOR_INVALID');
+  }
+  return resolved;
 };
-

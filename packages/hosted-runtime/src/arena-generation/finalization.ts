@@ -14,6 +14,7 @@ export type ArenaTerminalClaimInput = Omit<
 export type ArenaTerminalClaimResult = {
   kind: 'created' | 'existing';
   resultRef: string | null;
+  finalized: boolean;
 };
 
 export interface ArenaGenerationFinalizationPorts {
@@ -24,6 +25,8 @@ export interface ArenaGenerationFinalizationPorts {
     signal: AbortSignal;
   }): Promise<{ resultRef: string | null }>;
   claimTerminal(_input: ArenaTerminalClaimInput): Promise<ArenaTerminalClaimResult>;
+  completeTerminal(_input: ArenaTerminalClaimInput): Promise<void>;
+  failTerminal(_input: ArenaTerminalClaimInput & { failureCode: string }): Promise<void>;
   persistCombatants(_input: ArenaTerminalClaimInput): Promise<void>;
   applyStoryImpacts(_input: ArenaTerminalClaimInput): Promise<void>;
   settleRatings(_input: ArenaTerminalClaimInput): Promise<void>;
@@ -52,13 +55,22 @@ export const createArenaGenerationFinalizer = (
   if (input.status === 'completed') {
     const startedAt = performance.now();
     const bytes = new TextEncoder().encode(input.markdown).byteLength;
-    try {
-      resultRef = await ports.storeOutput({
-        generationId: input.generationId,
-        actorKey: input.actorKey,
-        markdown: input.markdown,
-        signal: input.signal,
-      }).then((result) => result.resultRef);
+    let storageError: unknown = null;
+    for (let attempt = 0; attempt < 3 && !resultRef; attempt += 1) {
+      try {
+        resultRef = await ports.storeOutput({
+          generationId: input.generationId,
+          actorKey: input.actorKey,
+          markdown: input.markdown,
+          signal: input.signal,
+        }).then((result) => result.resultRef);
+        if (!resultRef) throw new Error('ARENA_R2_RESULT_REF_MISSING');
+      } catch (error) {
+        storageError = error;
+        resultRef = null;
+      }
+    }
+    if (resultRef) {
       observe({
         event: 'storage',
         generationId: input.generationId,
@@ -67,8 +79,7 @@ export const createArenaGenerationFinalizer = (
         durationMs: performance.now() - startedAt,
         bytes,
       });
-    } catch {
-      resultRef = null;
+    } else {
       observe({
         event: 'storage',
         generationId: input.generationId,
@@ -77,6 +88,39 @@ export const createArenaGenerationFinalizer = (
         durationMs: performance.now() - startedAt,
         bytes,
       });
+      const failedClaim: ArenaTerminalClaimInput = {
+        generationId: input.generationId,
+        generationRequestId: input.generationRequestId,
+        actorKey: input.actorKey,
+        payloadHash: input.payloadHash,
+        payload: input.payload,
+        metadata: input.metadata,
+        markdown: input.markdown,
+        telemetry: input.telemetry,
+        status: 'failed',
+        errorCode: 'ARENA_R2_STORAGE_FAILED',
+        resultRef: null,
+      };
+      let failureRecorded = false;
+      for (let attempt = 0; attempt < 3 && !failureRecorded; attempt += 1) {
+        try {
+          const claim = await ports.claimTerminal(failedClaim);
+          if (!claim.finalized) {
+            await ports.persistCombatants(failedClaim);
+            await ports.completeTerminal(failedClaim);
+          }
+          failureRecorded = true;
+        } catch {
+          // Bounded retry uses the deterministic terminal claim as the idempotency gate.
+        }
+      }
+      if (!failureRecorded) {
+        await ports.failTerminal({
+          ...failedClaim,
+          failureCode: 'ARENA_R2_STORAGE_FAILED',
+        }).catch(() => undefined);
+      }
+      throw storageError ?? new Error('ARENA_R2_STORAGE_FAILED');
     }
   }
 
@@ -84,6 +128,7 @@ export const createArenaGenerationFinalizer = (
     generationId: input.generationId,
     generationRequestId: input.generationRequestId,
     actorKey: input.actorKey,
+    payloadHash: input.payloadHash,
     payload: input.payload,
     metadata: input.metadata,
     markdown: input.markdown,
@@ -92,15 +137,31 @@ export const createArenaGenerationFinalizer = (
     errorCode: input.errorCode,
     resultRef,
   };
-  const claim = await ports.claimTerminal(claimInput);
-  resultRef = claim.resultRef;
-
-  if (claim.kind === 'created') {
-    await ports.persistCombatants({ ...claimInput, resultRef }).catch(() => undefined);
-    if (input.status === 'completed') {
-      await ports.applyStoryImpacts({ ...claimInput, resultRef }).catch(() => undefined);
-      await ports.settleRatings({ ...claimInput, resultRef }).catch(() => undefined);
+  let finalized = false;
+  let lastError: unknown = null;
+  for (let attempt = 0; attempt < 3 && !finalized; attempt += 1) {
+    try {
+      const claim = await ports.claimTerminal({ ...claimInput, resultRef });
+      resultRef = claim.resultRef;
+      if (!claim.finalized) {
+        await ports.persistCombatants({ ...claimInput, resultRef });
+        if (input.status === 'completed') {
+          await ports.applyStoryImpacts({ ...claimInput, resultRef });
+          await ports.settleRatings({ ...claimInput, resultRef });
+        }
+        await ports.completeTerminal({ ...claimInput, resultRef });
+      }
+      finalized = true;
+    } catch (error) {
+      lastError = error;
     }
+  }
+  if (!finalized) {
+    const failureCode = lastError instanceof Error && lastError.message
+      ? lastError.message.slice(0, 80)
+      : 'ARENA_TERMINAL_FINALIZATION_FAILED';
+    await ports.failTerminal({ ...claimInput, resultRef, failureCode });
+    throw lastError ?? new Error('ARENA_TERMINAL_FINALIZATION_FAILED');
   }
 
   const ranking = input.status === 'completed'

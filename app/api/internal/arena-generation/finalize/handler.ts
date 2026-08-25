@@ -38,7 +38,14 @@ export const appRouteHandler = async (request: Request): Promise<Response> => {
     return noStoreJson({ code: 'INVALID_REQUEST', error: 'Invalid request' }, 400);
   }
 
-  await settleArenaRatingsForGeneration(generationId);
-  const ranking = await readGenerationRankingForGeneration(generationId);
-  return noStoreJson({ success: true, ranking }, 200);
+  try {
+    await settleArenaRatingsForGeneration(generationId);
+    const ranking = await readGenerationRankingForGeneration(generationId);
+    return noStoreJson({ success: true, ranking }, 200);
+  } catch {
+    return noStoreJson({
+      code: 'ARENA_FINALIZATION_PENDING',
+      error: 'Arena finalization remains pending',
+    }, 503);
+  }
 };

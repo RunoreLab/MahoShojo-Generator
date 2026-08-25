@@ -4,6 +4,8 @@ import { useState, useCallback } from 'react';
 import { getLogger } from '@/lib/logger';
 import { extractHeadlineFromMarkdown, extractWinnerFromText } from '@/lib/arena/battle-report-log-utils';
 import { runArenaGenerationEffectOnce } from '@/lib/arena/generation-effect-ledger';
+import { withArenaGenerationActorToken } from '@/lib/arena/resumable-generation-client';
+import { hashArenaCombatantBaseRevision } from '@mahoshojo/domain/arena-reconciliation';
 import { useBattleStore } from '../stores/useBattleStore';
 import { BattleStoreState, CombatantData } from '../types';
 
@@ -11,6 +13,7 @@ const log = getLogger('stream-combatant-updater');
 
 interface UpdateCombatantsPayload {
   generationId?: string;
+  baseRevisionHash?: string;
   combatants: any[];
   report: {
     headline: string;
@@ -231,9 +234,9 @@ export const useStreamCombatantUpdater = () => {
       const execute = async () => {
         const response = await fetch('/api/arena/update-combatants-after-stream', {
           method: 'POST',
-          headers: {
+          headers: withArenaGenerationActorToken({
             'Content-Type': 'application/json',
-          },
+          }),
           body: JSON.stringify(payload),
         });
 
@@ -259,6 +262,7 @@ export const useStreamCombatantUpdater = () => {
       const result = payload.generationId
         ? await runArenaGenerationEffectOnce({
           generationId: payload.generationId,
+          baseRevisionHash: payload.baseRevisionHash ?? '',
           storage: effectStorage,
           locks,
           effect: execute,
@@ -351,15 +355,21 @@ export const useStreamCombatantUpdater = () => {
         }
       }
 
+      const projectedCombatants = combatants.map((c) => ({
+        type: c.type,
+        data: c.data,
+        isNative: c.isValid,
+        isPreset: c.isPreset,
+        characterGuidance: typeof (c as any).characterGuidance === 'string'
+          ? (c as any).characterGuidance
+          : null,
+      }));
       const payload: UpdateCombatantsPayload = {
         ...(generationId ? { generationId } : {}),
-        combatants: combatants.map((c) => ({
-          type: c.type,
-          data: c.data,
-          isNative: c.isValid, // 使用 isValid 作为原生性标记
-          isPreset: c.isPreset,
-          characterGuidance: typeof (c as any).characterGuidance === 'string' ? (c as any).characterGuidance : null,
-        })),
+        ...(generationId
+          ? { baseRevisionHash: await hashArenaCombatantBaseRevision(projectedCombatants) }
+          : {}),
+        combatants: projectedCombatants,
         report: {
           headline: headline || '魔法少女速报',
           mode: mode,

@@ -26,5 +26,23 @@ describe('narrative history store', () => {
     expect(Number.isFinite(Date.parse(created!.updatedAt))).toBe(true);
     expect(useNarrativeHistoryStore.getState().entries[0]!.id).toBe(created!.id);
   });
-});
 
+  test('appendEntry: 同一 generation 终态重放只写入一次', () => {
+    useNarrativeHistoryStore.getState().clear();
+
+    const first = useNarrativeHistoryStore.getState().appendEntry({
+      title: '首次',
+      content: '完整战报',
+      generationId: 'generation-1234',
+    });
+    const replay = useNarrativeHistoryStore.getState().appendEntry({
+      title: '重放',
+      content: '完整战报',
+      generationId: 'generation-1234',
+    });
+
+    expect(replay).toBe(first);
+    expect(first?.id).toBe('arena-generation:generation-1234');
+    expect(useNarrativeHistoryStore.getState().entries).toHaveLength(1);
+  });
+});

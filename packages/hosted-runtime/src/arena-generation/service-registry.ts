@@ -26,6 +26,9 @@ export const registeredArenaGenerationService: ArenaGenerationService = Object.f
   create: (request: Request) => (
     configuredService?.create(request) ?? Promise.resolve(unavailable())
   ),
+  cancelRequest: (request: Request) => (
+    configuredService?.cancelRequest(request) ?? Promise.resolve(unavailable())
+  ),
   resume: (request: Request, params: ArenaGenerationRouteParams) => (
     configuredService?.resume(request, params) ?? Promise.resolve(unavailable())
   ),

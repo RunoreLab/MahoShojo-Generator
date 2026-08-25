@@ -1,11 +1,36 @@
 import {
+  compareGenerationSseIds,
   encodeGenerationSseEvent,
   resolveResumeCursor,
 } from './sse';
 
+export const MAX_ARENA_CREATE_BODY_BYTES = 12 * 1_024 * 1_024;
+
+export class ArenaGenerationFinalizationPendingError extends Error {
+  readonly originalError: unknown;
+
+  constructor(originalError?: unknown) {
+    super('ARENA_GENERATION_FINALIZATION_PENDING');
+    this.name = 'ArenaGenerationFinalizationPendingError';
+    this.originalError = originalError;
+  }
+}
+
+const addSmallDecimal = (value: string, increment: 1 | 2): string => {
+  const digits = value.split('');
+  let carry: number = increment;
+  for (let index = digits.length - 1; index >= 0 && carry > 0; index -= 1) {
+    const sum = Number(digits[index]) + carry;
+    digits[index] = String(sum % 10);
+    carry = Math.floor(sum / 10);
+  }
+  return carry > 0 ? `${carry}${digits.join('')}` : digits.join('');
+};
+
 export type GenerationStatus =
   | 'reserved'
   | 'running'
+  | 'finalizing'
   | 'completed'
   | 'failed'
   | 'cancelled'
@@ -41,6 +66,8 @@ export type GenerationReplayStoreState = {
   generationId: string;
   generationRequestId: string;
   payloadHash: string;
+  mode?: string | null;
+  producerToken: string;
   status: GenerationStatus;
   lastEventId: string | null;
   updatedAt: string;
@@ -56,8 +83,10 @@ export interface GenerationReplayStore {
     generationRequestId: string;
     generationId: string;
     payloadHash: string;
+    producerToken: string;
     now: string;
     leaseExpiresAt: string;
+    mode?: string;
   }): Promise<
     | { kind: 'created'; generationId: string }
     | { kind: 'reused'; generationId: string }
@@ -65,24 +94,56 @@ export interface GenerationReplayStore {
   >;
   markRunning(_input: {
     generationId: string;
+    producerToken: string;
     now: string;
     leaseExpiresAt: string;
-  }): Promise<void>;
+  }): Promise<{ owned: boolean; cancelRequested: boolean }>;
+  claimFinalization(_input: {
+    generationId: string;
+    producerToken: string;
+    now: string;
+    leaseExpiresAt: string;
+  }): Promise<ArenaGenerationFinalizationClaim>;
+  claimLeaseExpiry(_input: {
+    generationId: string;
+    actorKey: string;
+    reaperToken: string;
+    now: string;
+    leaseExpiresAt: string;
+  }): Promise<
+    | {
+      kind: 'claimed';
+      generationRequestId: string;
+      payloadHash: string;
+      mode: string | null;
+    }
+    | { kind: 'terminal'; status: GenerationTerminal['status'] }
+    | { kind: 'not-expired' }
+    | { kind: 'forbidden' }
+    | { kind: 'not-found' }
+  >;
+  releaseReservation(_input: {
+    generationId: string;
+    producerToken: string;
+  }): Promise<{ released: boolean }>;
   heartbeat(_input: {
     generationId: string;
+    producerToken: string;
     now: string;
     leaseExpiresAt: string;
-  }): Promise<{ cancelRequested: boolean }>;
+  }): Promise<{ owned: boolean; cancelRequested: boolean }>;
   appendEvents(_input: {
     generationId: string;
+    producerToken: string;
     events: GenerationEventInput[];
     now: string;
-  }): Promise<{ events: GenerationStreamEvent[] }>;
+  }): Promise<{ owned: boolean; events: GenerationStreamEvent[] }>;
   writeSnapshot(_input: {
     generationId: string;
+    producerToken: string;
     snapshot: GenerationSnapshot;
     now: string;
-  }): Promise<void>;
+  }): Promise<{ owned: boolean }>;
   readSnapshot(_input: { generationId: string }): Promise<GenerationSnapshot | null>;
   readAfter(_input: {
     generationId: string;
@@ -91,12 +152,18 @@ export interface GenerationReplayStore {
   }): Promise<
     | { kind: 'events'; events: GenerationStreamEvent[] }
     | { kind: 'window-lost'; events: GenerationStreamEvent[] }
+    | { kind: 'stream-missing'; events: GenerationStreamEvent[] }
   >;
   markTerminal(_input: {
     generationId: string;
+    producerToken: string;
     terminal: GenerationTerminal;
     now: string;
-  }): Promise<{ applied: boolean }>;
+  }): Promise<{
+    owned: boolean;
+    applied: boolean;
+    status?: GenerationTerminal['status'];
+  }>;
   readState(_input: {
     generationId: string;
     actorKey?: string;
@@ -108,6 +175,7 @@ export interface GenerationReplayStore {
     now: string;
   }): Promise<
     | { kind: 'accepted' }
+    | { kind: 'finalizing' }
     | { kind: 'terminal'; status: GenerationTerminal['status'] }
     | { kind: 'forbidden' }
     | { kind: 'not-found' }
@@ -118,10 +186,18 @@ export type ArenaGenerationExecutionInput = {
   generationId: string;
   generationRequestId: string;
   actorKey: string;
+  producerToken: string;
+  payloadHash: string;
   payload: Record<string, unknown>;
   signal: AbortSignal;
   emit: (_event: GenerationEventInput) => Promise<void>;
+  claimFinalization(_terminal: GenerationTerminal): Promise<ArenaGenerationFinalizationClaim>;
 };
+
+export type ArenaGenerationFinalizationClaim =
+  | { kind: 'claimed' }
+  | { kind: 'cancelled' }
+  | { kind: 'fenced' };
 
 export type PreparedArenaGeneration = {
   executionPayload: Record<string, unknown>;
@@ -146,6 +222,8 @@ export type ArenaGenerationTerminalRecord = {
   resultRef: string | null;
   markdown: string;
   reasoning: string;
+  payloadHash?: string | null;
+  contentAvailable?: boolean;
 };
 
 export interface ArenaGenerationTerminalStore {
@@ -153,6 +231,23 @@ export interface ArenaGenerationTerminalStore {
     generationId: string;
     actorKey: string;
   }): Promise<ArenaGenerationTerminalRecord | null>;
+  inspectOwnedFinalization?(_input: {
+    generationId: string;
+    actorKey: string;
+  }): Promise<
+    | { kind: 'not-found' }
+    | { kind: 'pending'; payloadHash: string | null }
+    | { kind: 'terminal'; terminal: ArenaGenerationTerminalRecord }
+  >;
+  reconcileExpiredLease?(_input: {
+    generationId: string;
+    generationRequestId: string;
+    actorKey: string;
+    payloadHash: string;
+    mode: string | null;
+    updatedAt: string;
+    code: string;
+  }): Promise<ArenaGenerationTerminalRecord>;
 }
 
 export type ArenaGenerationObservation =
@@ -226,7 +321,11 @@ export type ArenaGenerationServiceDependencies = {
   store: GenerationReplayStore;
   executor: ArenaGenerationExecutor;
   resolveActor(_request: Request): Promise<ArenaGenerationActor | null>;
-  createGenerationId(): string;
+  deriveGenerationId(_input: {
+    actorKey: string;
+    generationRequestId: string;
+  }): Promise<string>;
+  createProducerToken?(): string;
   hashPayload(_payload: Record<string, unknown>): Promise<string>;
   now(): Date;
   heartbeatIntervalMs?: number;
@@ -234,6 +333,7 @@ export type ArenaGenerationServiceDependencies = {
   replayPollMs?: number;
   deltaFlushIntervalMs?: number;
   deltaFlushBytes?: number;
+  snapshotMaxBytes?: number;
   terminalStore?: ArenaGenerationTerminalStore;
   observer?: ArenaGenerationObserver;
 };
@@ -244,6 +344,7 @@ export type ArenaGenerationRouteParams = {
 
 export interface ArenaGenerationService {
   create(_request: Request): Promise<Response>;
+  cancelRequest(_request: Request): Promise<Response>;
   resume(_request: Request, _params: ArenaGenerationRouteParams): Promise<Response>;
   status(_request: Request, _params: ArenaGenerationRouteParams): Promise<Response>;
   cancel(_request: Request, _params: ArenaGenerationRouteParams): Promise<Response>;
@@ -286,9 +387,45 @@ const parseCreatePayload = async (
     return jsonResponse({ code: 'METHOD_NOT_ALLOWED', error: 'Method not allowed' }, 405);
   }
 
+  const contentLength = Number(request.headers.get('content-length'));
+  if (Number.isFinite(contentLength) && contentLength > MAX_ARENA_CREATE_BODY_BYTES) {
+    return jsonResponse({
+      code: 'ARENA_REQUEST_TOO_LARGE',
+      error: '请求体超过允许的大小',
+    }, 413);
+  }
+
   let body: unknown;
   try {
-    body = await request.json();
+    const reader = request.body?.getReader();
+    const chunks: Uint8Array[] = [];
+    let bodyBytes = 0;
+    if (reader) {
+      try {
+        while (true) {
+          const next = await reader.read();
+          if (next.done) break;
+          bodyBytes += next.value.byteLength;
+          if (bodyBytes > MAX_ARENA_CREATE_BODY_BYTES) {
+            await reader.cancel('arena create body exceeds byte limit').catch(() => undefined);
+            return jsonResponse({
+              code: 'ARENA_REQUEST_TOO_LARGE',
+              error: '请求体超过允许的大小',
+            }, 413);
+          }
+          chunks.push(next.value);
+        }
+      } finally {
+        reader.releaseLock();
+      }
+    }
+    const bodyBuffer = new Uint8Array(bodyBytes);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bodyBuffer.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    body = JSON.parse(new TextDecoder().decode(bodyBuffer));
   } catch {
     return jsonResponse({ code: 'INVALID_JSON', error: '请求体必须是 JSON' }, 400);
   }
@@ -322,6 +459,7 @@ export const createArenaGenerationService = (
   const replayPollMs = dependencies.replayPollMs ?? 1_000;
   const deltaFlushIntervalMs = dependencies.deltaFlushIntervalMs ?? 75;
   const deltaFlushBytes = dependencies.deltaFlushBytes ?? 1_024;
+  const snapshotMaxBytes = dependencies.snapshotMaxBytes ?? 2 * 1_024 * 1_024;
   const activeProducers = new Map<string, ActiveProducer>();
   const observe = (observation: ArenaGenerationObservation): void => {
     try {
@@ -344,8 +482,15 @@ export const createArenaGenerationService = (
   if (!Number.isFinite(deltaFlushBytes) || deltaFlushBytes < 1) {
     throw new Error('deltaFlushBytes 必须是正有限数字');
   }
+  if (!Number.isFinite(snapshotMaxBytes) || snapshotMaxBytes < 1) {
+    throw new Error('snapshotMaxBytes 必须是正有限数字');
+  }
 
-  const createReplayWriter = (generationId: string) => {
+  const createReplayWriter = (
+    generationId: string,
+    producerToken: string,
+    onOwnershipLost: () => void,
+  ) => {
     const textEncoder = new TextEncoder();
     let markdown = '';
     let reasoning = '';
@@ -376,12 +521,22 @@ export const createArenaGenerationService = (
       now: string,
       terminalResultRef: string | null = null,
     ): Promise<void> => {
+      const nextSnapshot = snapshot(status, now, terminalResultRef);
+      if (encodedBytes(nextSnapshot) > snapshotMaxBytes) {
+        observe({ event: 'redis_degraded', generationId, operation: 'snapshot_budget' });
+        return;
+      }
       try {
-        await dependencies.store.writeSnapshot({
+        const result = await dependencies.store.writeSnapshot({
           generationId,
-          snapshot: snapshot(status, now, terminalResultRef),
+          producerToken,
+          snapshot: nextSnapshot,
           now,
         });
+        if (!result.owned) {
+          onOwnershipLost();
+          throw new Error('GENERATION_PRODUCER_FENCED');
+        }
       } catch {
         observe({ event: 'redis_degraded', generationId, operation: 'write_snapshot' });
       }
@@ -390,7 +545,16 @@ export const createArenaGenerationService = (
     const append = async (events: GenerationEventInput[], now: string): Promise<void> => {
       let result: Awaited<ReturnType<GenerationReplayStore['appendEvents']>> | null = null;
       try {
-        result = await dependencies.store.appendEvents({ generationId, events, now });
+        result = await dependencies.store.appendEvents({
+          generationId,
+          producerToken,
+          events,
+          now,
+        });
+        if (!result.owned) {
+          onOwnershipLost();
+          throw new Error('GENERATION_PRODUCER_FENCED');
+        }
       } catch {
         observe({ event: 'redis_degraded', generationId, operation: 'append_events' });
       }
@@ -477,9 +641,10 @@ export const createArenaGenerationService = (
           }], now);
           await dependencies.store.markTerminal({
             generationId,
+            producerToken,
             terminal,
             now,
-          }).catch(() => ({ applied: false }));
+          }).catch(() => ({ owned: true, applied: false }));
           await writeSnapshot(terminal.status, now, terminal.resultRef ?? null);
           observe({
             event: 'terminal',
@@ -490,6 +655,145 @@ export const createArenaGenerationService = (
         });
       },
     });
+  };
+
+  const readOwnedTerminal = async (
+    generationId: string,
+    actorKey: string,
+  ): Promise<ArenaGenerationTerminalRecord | null> => {
+    return dependencies.terminalStore?.readOwnedTerminal({
+      generationId,
+      actorKey,
+    }) ?? null;
+  };
+
+  const inspectOwnedFinalization = async (
+    generationId: string,
+    actorKey: string,
+  ): Promise<
+    | { kind: 'not-found' }
+    | { kind: 'pending'; payloadHash: string | null }
+    | { kind: 'terminal'; terminal: ArenaGenerationTerminalRecord }
+  > => {
+    if (dependencies.terminalStore?.inspectOwnedFinalization) {
+      return dependencies.terminalStore.inspectOwnedFinalization({ generationId, actorKey });
+    }
+    const terminal = await readOwnedTerminal(generationId, actorKey);
+    return terminal ? { kind: 'terminal', terminal } : { kind: 'not-found' };
+  };
+
+  const reconcileOwnedActiveState = async (
+    actor: ArenaGenerationActor,
+    state: GenerationReplayStoreState,
+  ): Promise<{
+    actor: ArenaGenerationActor;
+    state: GenerationReplayStoreState;
+    terminalFallback: ArenaGenerationTerminalRecord | null;
+  } | Response> => {
+    const generationId = state.generationId;
+    const leaseExpired = (
+      state.status === 'reserved'
+      || state.status === 'running'
+      || state.status === 'finalizing'
+    )
+      && state.leaseExpiresAt !== null
+      && Date.parse(state.leaseExpiresAt) <= dependencies.now().getTime();
+    if (!leaseExpired) return { actor, state, terminalFallback: null };
+
+    let terminalFallback = await readOwnedTerminal(generationId, actor.actorKey);
+    if (terminalFallback) {
+      const terminal: GenerationTerminal = {
+        status: terminalFallback.status,
+        ...(terminalFallback.resultRef ? { resultRef: terminalFallback.resultRef } : {}),
+      };
+      await dependencies.store.markTerminal({
+        generationId,
+        producerToken: state.producerToken,
+        terminal,
+        now: dependencies.now().toISOString(),
+      }).catch(() => ({ owned: true, applied: false }));
+      return {
+        actor,
+        terminalFallback,
+        state: { ...state, status: terminal.status, leaseExpiresAt: null, terminal },
+      };
+    }
+
+    const now = dependencies.now().toISOString();
+    const reaperToken = dependencies.createProducerToken?.() ?? crypto.randomUUID();
+    const claimed = await dependencies.store.claimLeaseExpiry({
+      generationId,
+      actorKey: actor.actorKey,
+      reaperToken,
+      now,
+      leaseExpiresAt: addLeaseDuration(dependencies.now(), leaseDurationMs),
+    }).catch(() => null);
+    if (!claimed || claimed.kind === 'not-expired') {
+      return jsonResponse({
+        code: 'GENERATION_TERMINAL_RECONCILIATION_PENDING',
+        error: 'Generation terminal reconciliation pending',
+      }, 503);
+    }
+    if (claimed.kind === 'forbidden' || claimed.kind === 'not-found') {
+      return jsonResponse({ code: 'GENERATION_NOT_FOUND', error: 'Generation not found' }, 404);
+    }
+    if (claimed.kind === 'terminal') {
+      return {
+        actor,
+        terminalFallback: null,
+        state: {
+          ...state,
+          status: claimed.status,
+          leaseExpiresAt: null,
+          terminal: { status: claimed.status },
+        },
+      };
+    }
+    if (!dependencies.terminalStore?.reconcileExpiredLease) {
+      return jsonResponse({
+        code: 'GENERATION_TERMINAL_RECONCILIATION_PENDING',
+        error: 'Generation terminal reconciliation unavailable',
+      }, 503);
+    }
+    terminalFallback = await dependencies.terminalStore.reconcileExpiredLease({
+      generationId,
+      generationRequestId: claimed.generationRequestId,
+      actorKey: actor.actorKey,
+      payloadHash: claimed.payloadHash,
+      mode: claimed.mode,
+      updatedAt: now,
+      code: 'PRODUCER_LEASE_EXPIRED',
+    }).catch(() => null);
+    if (!terminalFallback) {
+      return jsonResponse({
+        code: 'GENERATION_TERMINAL_RECONCILIATION_PENDING',
+        error: 'Generation terminal reconciliation pending',
+      }, 503);
+    }
+    const terminal: GenerationTerminal = {
+      status: terminalFallback.status,
+      ...(terminalFallback.resultRef ? { resultRef: terminalFallback.resultRef } : {}),
+    };
+    await dependencies.store.markTerminal({
+      generationId,
+      producerToken: reaperToken,
+      terminal,
+      now,
+    }).catch(() => ({ owned: true, applied: false }));
+    if (terminalFallback.status === 'producer_lost') {
+      observe({ event: 'producer_lost', generationId, reason: 'lease_expired' });
+    }
+    return {
+      actor,
+      terminalFallback,
+      state: {
+        ...state,
+        status: terminalFallback.status,
+        updatedAt: now,
+        leaseExpiresAt: null,
+        terminal,
+      },
+    };
   };
 
   const resolveOwnedState = async (
@@ -510,11 +814,16 @@ export const createArenaGenerationService = (
         actorKey: actor.actorKey,
       });
     } catch {
-      terminalFallback = await dependencies.terminalStore?.readOwnedTerminal({
-        generationId,
-        actorKey: actor.actorKey,
-      }) ?? null;
-      if (!terminalFallback) {
+      const durable = await inspectOwnedFinalization(generationId, actor.actorKey)
+        .catch(() => ({ kind: 'not-found' as const }));
+      if (durable.kind === 'pending') {
+        return jsonResponse({
+          code: 'GENERATION_FINALIZATION_PENDING',
+          error: 'Generation durable finalization remains pending',
+        }, 503);
+      }
+      if (durable.kind === 'terminal') terminalFallback = durable.terminal;
+      if (durable.kind === 'not-found') {
         return jsonResponse({
           code: 'GENERATION_STATE_UNAVAILABLE',
           error: 'Generation state unavailable',
@@ -524,10 +833,17 @@ export const createArenaGenerationService = (
     }
 
     if (!state) {
-      terminalFallback ??= await dependencies.terminalStore?.readOwnedTerminal({
-          generationId,
-          actorKey: actor.actorKey,
-        }) ?? null;
+      if (!terminalFallback) {
+        const durable = await inspectOwnedFinalization(generationId, actor.actorKey)
+          .catch(() => ({ kind: 'not-found' as const }));
+        if (durable.kind === 'pending') {
+          return jsonResponse({
+            code: 'GENERATION_FINALIZATION_PENDING',
+            error: 'Generation durable finalization remains pending',
+          }, 503);
+        }
+        if (durable.kind === 'terminal') terminalFallback = durable.terminal;
+      }
       if (!terminalFallback) {
         return jsonResponse({ code: 'GENERATION_NOT_FOUND', error: 'Generation not found' }, 404);
       }
@@ -535,7 +851,9 @@ export const createArenaGenerationService = (
         actorKey: actor.actorKey,
         generationId: terminalFallback.generationId,
         generationRequestId: terminalFallback.generationRequestId,
-        payloadHash: '',
+        payloadHash: terminalFallback.payloadHash ?? '',
+        mode: null,
+        producerToken: '',
         status: terminalFallback.status,
         lastEventId: null,
         updatedAt: terminalFallback.updatedAt,
@@ -558,56 +876,31 @@ export const createArenaGenerationService = (
     if (state.actorKey !== actor.actorKey) {
       return jsonResponse({ code: 'GENERATION_NOT_FOUND', error: 'Generation not found' }, 404);
     }
-
-    const leaseExpired = (state.status === 'reserved' || state.status === 'running')
-      && state.leaseExpiresAt !== null
-      && Date.parse(state.leaseExpiresAt) <= dependencies.now().getTime();
-    if (leaseExpired) {
-      terminalFallback = await dependencies.terminalStore?.readOwnedTerminal({
-        generationId,
-        actorKey: actor.actorKey,
-      }) ?? null;
-      if (terminalFallback) {
-        state = {
-          ...state,
-          status: terminalFallback.status,
-          leaseExpiresAt: null,
-          terminal: {
-            status: terminalFallback.status,
-            resultRef: terminalFallback.resultRef,
-          },
-        };
-      } else {
-        const now = dependencies.now().toISOString();
-        const terminal: GenerationTerminal = {
-          status: 'producer_lost',
-          code: 'PRODUCER_LEASE_EXPIRED',
-        };
-        await dependencies.store.markTerminal({
-          generationId,
-          terminal,
-          now,
-        }).catch(() => ({ applied: false }));
-        observe({
-          event: 'producer_lost',
-          generationId,
-          reason: 'lease_expired',
-        });
-        state = {
-          ...state,
-          status: 'producer_lost',
-          updatedAt: now,
-          leaseExpiresAt: null,
-          terminal,
-        };
-      }
-    }
-    return { actor, state, terminalFallback };
+    if (terminalFallback) return { actor, state, terminalFallback };
+    return reconcileOwnedActiveState(actor, state);
   };
 
   const createTerminalFallbackResponse = (
     terminal: ArenaGenerationTerminalRecord,
+    after: string | null = null,
   ): Response => {
+    if (terminal.status === 'completed' && terminal.contentAvailable === false) {
+      return jsonResponse({
+        code: 'GENERATION_TERMINAL_CONTENT_UNAVAILABLE',
+        error: 'Generation terminal content is temporarily unavailable',
+      }, 503);
+    }
+    const [snapshotId, terminalId] = (() => {
+      if (!after) return ['0-0', '0-1'];
+      const match = after.match(/^(\d+)-(\d+)$/u);
+      if (!match) return ['0-0', '0-1'];
+      const milliseconds = match[1]!;
+      const sequence = match[2]!;
+      return [
+        `${milliseconds}-${addSmallDecimal(sequence, 1)}`,
+        `${milliseconds}-${addSmallDecimal(sequence, 2)}`,
+      ];
+    })();
     const snapshot: GenerationSnapshot = {
       status: terminal.status,
       markdown: terminal.markdown,
@@ -617,12 +910,12 @@ export const createArenaGenerationService = (
       terminalResultRef: terminal.resultRef,
     };
     const snapshotEvent = encodeGenerationSseEvent({
-      id: '0-0',
+      id: snapshotId,
       type: 'snapshot',
       data: snapshot,
     });
     const terminalEvent = encodeGenerationSseEvent({
-      id: '0-1',
+      id: terminalId,
       type: terminal.status === 'failed' || terminal.status === 'producer_lost'
         ? 'error'
         : 'done',
@@ -662,13 +955,94 @@ export const createArenaGenerationService = (
     generationId: string,
     generationRequestId: string,
     after: string | null,
+    actorKey: string,
     responseHeaders: Readonly<Record<string, string>> = {},
   ): Response => {
     let cancelled = false;
     let cursor = after;
+    let snapshotBootstrapped = false;
     const stream = new ReadableStream<Uint8Array>({
       start(controller) {
         const pump = async (): Promise<void> => {
+          const terminalFallback = async (): Promise<ArenaGenerationTerminalRecord | null> => (
+            readOwnedTerminal(generationId, actorKey)
+          );
+          const nextSyntheticId = (increment: 1 | 2 = 1): string => {
+            const match = cursor?.match(/^(\d+)-(\d+)$/u);
+            if (!match) return increment === 1 ? '0-0' : '0-1';
+            return `${match[1]}-${addSmallDecimal(match[2]!, increment)}`;
+          };
+          const monotonicSnapshotId = (candidate: string | null): string => {
+            if (!cursor) return candidate ?? '0-0';
+            return candidate && compareGenerationSseIds(candidate, cursor) > 0
+              ? candidate
+              : nextSyntheticId();
+          };
+          const enqueueReplayError = (code: string): void => {
+            const id = nextSyntheticId();
+            controller.enqueue(encodeGenerationSseEvent({
+              id,
+              type: 'error',
+              data: {
+                code,
+                status: code === 'GENERATION_STATE_LOST' ? 'producer_lost' : 'failed',
+              },
+            }));
+            cursor = id;
+            controller.close();
+          };
+          const enqueueTerminalSnapshot = (
+            snapshot: GenerationSnapshot,
+            terminal: GenerationTerminal,
+          ): void => {
+            const base = cursor?.match(/^(\d+)-(\d+)$/u);
+            const milliseconds = base?.[1] ?? '0';
+            const sequence = base?.[2] ?? null;
+            const snapshotId = `${milliseconds}-${sequence ? addSmallDecimal(sequence, 1) : '0'}`;
+            const terminalId = `${milliseconds}-${sequence ? addSmallDecimal(sequence, 2) : '1'}`;
+            const snapshotEvent = encodeGenerationSseEvent({
+              id: snapshotId,
+              type: 'snapshot',
+              data: { ...snapshot, status: terminal.status },
+            });
+            const terminalEvent = encodeGenerationSseEvent({
+              id: terminalId,
+              type: terminal.status === 'failed' || terminal.status === 'producer_lost'
+                ? 'error'
+                : 'done',
+              data: {
+                ok: terminal.status === 'completed',
+                status: terminal.status,
+                ...(terminal.code ? { code: terminal.code } : {}),
+                ...(terminal.resultRef ? { resultRef: terminal.resultRef } : {}),
+              },
+            });
+            controller.enqueue(snapshotEvent);
+            controller.enqueue(terminalEvent);
+            observe({
+              event: 'replay',
+              generationId,
+              events: 2,
+              bytes: snapshotEvent.byteLength + terminalEvent.byteLength,
+              snapshotBootstrap: true,
+            });
+            controller.close();
+          };
+          const pipeTerminalFallback = async (
+            fallback: ArenaGenerationTerminalRecord,
+          ): Promise<void> => {
+            if (fallback.status === 'completed' && fallback.contentAvailable === false) {
+              throw new Error('GENERATION_TERMINAL_CONTENT_UNAVAILABLE');
+            }
+            const fallbackResponse = createTerminalFallbackResponse(fallback, cursor);
+            const fallbackReader = fallbackResponse.body!.getReader();
+            while (true) {
+              const next = await fallbackReader.read();
+              if (next.done) break;
+              controller.enqueue(next.value);
+            }
+            controller.close();
+          };
           try {
             while (!cancelled) {
               const batch = await dependencies.store.readAfter({
@@ -681,15 +1055,24 @@ export const createArenaGenerationService = (
               if (batch.kind === 'window-lost') {
                 const snapshot = await dependencies.store.readSnapshot({ generationId });
                 if (!snapshot) {
-                  controller.enqueue(encodeGenerationSseEvent({
-                    id: cursor ?? '0-0',
-                    type: 'error',
-                    data: { code: 'REPLAY_WINDOW_LOST', status: 'producer_lost' },
-                  }));
-                  controller.close();
+                  const fallback = await terminalFallback();
+                  if (fallback) {
+                    await pipeTerminalFallback(fallback);
+                    return;
+                  }
+                  enqueueReplayError('REPLAY_WINDOW_LOST');
                   return;
                 }
-                const snapshotCursor = snapshot.lastEventId ?? cursor ?? '0-0';
+                const state = await dependencies.store.readState({ generationId });
+                if (state?.terminal) {
+                  enqueueTerminalSnapshot(snapshot, state.terminal);
+                  return;
+                }
+                if (snapshotBootstrapped) {
+                  enqueueReplayError('REPLAY_WINDOW_LOST');
+                  return;
+                }
+                const snapshotCursor = monotonicSnapshotId(snapshot.lastEventId);
                 const encoded = encodeGenerationSseEvent({
                   id: snapshotCursor,
                   type: 'snapshot',
@@ -703,15 +1086,58 @@ export const createArenaGenerationService = (
                   bytes: encoded.byteLength,
                   snapshotBootstrap: true,
                 });
-                cursor = snapshot.lastEventId;
+                cursor = snapshotCursor;
+                snapshotBootstrapped = true;
+              } else if (batch.kind === 'stream-missing') {
+                const state = await dependencies.store.readState({ generationId });
+                const snapshot = state?.snapshot
+                  ?? await dependencies.store.readSnapshot({ generationId });
+                if (state?.terminal && snapshot) {
+                  enqueueTerminalSnapshot(snapshot, state.terminal);
+                  return;
+                }
+                if (state?.terminal) {
+                  const fallback = await terminalFallback();
+                  if (fallback) {
+                    await pipeTerminalFallback(fallback);
+                    return;
+                  }
+                }
+                if (snapshot) {
+                  if (snapshotBootstrapped) {
+                    enqueueReplayError('REPLAY_STREAM_MISSING');
+                    return;
+                  }
+                  const snapshotId = monotonicSnapshotId(snapshot.lastEventId);
+                  const encoded = encodeGenerationSseEvent({
+                    id: snapshotId,
+                    type: 'snapshot',
+                    data: snapshot,
+                  });
+                  controller.enqueue(encoded);
+                  cursor = snapshotId;
+                  snapshotBootstrapped = true;
+                  observe({
+                    event: 'replay',
+                    generationId,
+                    events: 1,
+                    bytes: encoded.byteLength,
+                    snapshotBootstrap: true,
+                  });
+                } else {
+                  enqueueReplayError('REPLAY_STREAM_MISSING');
+                  return;
+                }
               } else {
                 let replayBytes = 0;
+                let sawTerminal = false;
                 for (const event of batch.events) {
                   if (cancelled) return;
                   const encoded = encodeGenerationSseEvent(event);
                   controller.enqueue(encoded);
                   replayBytes += encoded.byteLength;
                   cursor = event.id;
+                  if (event.type === 'done' || event.type === 'error') sawTerminal = true;
                 }
                 if (batch.events.length > 0) {
                   observe({
@@ -722,20 +1148,53 @@ export const createArenaGenerationService = (
                     snapshotBootstrap: false,
                   });
                 }
+                if (sawTerminal) {
+                  controller.close();
+                  return;
+                }
               }
 
-              const state = await dependencies.store.readState({ generationId });
+              let state = await dependencies.store.readState({ generationId });
               if (!state) {
-                controller.enqueue(encodeGenerationSseEvent({
-                  id: cursor ?? '0-0',
-                  type: 'error',
-                  data: { code: 'GENERATION_STATE_LOST', status: 'producer_lost' },
-                }));
-                controller.close();
+                const durable = await inspectOwnedFinalization(generationId, actorKey)
+                  .catch(() => ({ kind: 'not-found' as const }));
+                if (durable.kind === 'terminal') {
+                  await pipeTerminalFallback(durable.terminal);
+                  return;
+                }
+                if (durable.kind === 'pending') {
+                  await new Promise<void>((resolve) => setTimeout(resolve, replayPollMs));
+                  continue;
+                }
+                enqueueReplayError('GENERATION_STATE_LOST');
+                return;
+              }
+              const reconciled = await reconcileOwnedActiveState({ actorKey }, state);
+              if (reconciled instanceof Response) {
+                if (reconciled.status === 503) {
+                  await new Promise<void>((resolve) => setTimeout(resolve, replayPollMs));
+                  continue;
+                }
+                enqueueReplayError('GENERATION_STATE_LOST');
+                return;
+              }
+              state = reconciled.state;
+              if (reconciled.terminalFallback) {
+                await pipeTerminalFallback(reconciled.terminalFallback);
                 return;
               }
               if (state.terminal && batch.events.length === 0) {
-                controller.close();
+                const snapshot = state.snapshot ?? await dependencies.store.readSnapshot({ generationId });
+                if (snapshot) {
+                  enqueueTerminalSnapshot(snapshot, state.terminal);
+                  return;
+                }
+                const fallback = await terminalFallback();
+                if (fallback) {
+                  await pipeTerminalFallback(fallback);
+                  return;
+                }
+                enqueueReplayError('GENERATION_TERMINAL_EVIDENCE_MISSING');
                 return;
               }
               if (batch.events.length === 0) {
@@ -773,23 +1232,53 @@ export const createArenaGenerationService = (
     generationId: string;
     generationRequestId: string;
     actorKey: string;
+    producerToken: string;
+    payloadHash: string;
     payload: Record<string, unknown>;
   }): Promise<void> => {
     if (activeProducers.has(input.generationId)) return;
     const controller = new AbortController();
-    const replayWriter = createReplayWriter(input.generationId);
+    const loseOwnership = (): void => {
+      if (!controller.signal.aborted) controller.abort('producer_lost');
+    };
+    const replayWriter = createReplayWriter(
+      input.generationId,
+      input.producerToken,
+      loseOwnership,
+    );
     const now = dependencies.now();
-    await dependencies.store.markRunning({
+    const running = await dependencies.store.markRunning({
       generationId: input.generationId,
+      producerToken: input.producerToken,
       now: now.toISOString(),
       leaseExpiresAt: addLeaseDuration(now, leaseDurationMs),
     });
+    if (!running.owned) throw new Error('GENERATION_PRODUCER_FENCED');
+    if (running.cancelRequested) {
+      await replayWriter.finish({ status: 'cancelled', code: 'USER_CANCELLED' });
+      return;
+    }
 
     let heartbeat: ReturnType<typeof setInterval> | null = null;
     const executionPromise = dependencies.executor.execute({
       ...input,
       signal: controller.signal,
       emit: replayWriter.emit,
+      claimFinalization: async (_terminal) => {
+        if (controller.signal.reason === 'producer_lost') return { kind: 'fenced' };
+        const claimNow = dependencies.now();
+        const claimed = await dependencies.store.claimFinalization({
+          generationId: input.generationId,
+          producerToken: input.producerToken,
+          now: claimNow.toISOString(),
+          leaseExpiresAt: addLeaseDuration(claimNow, leaseDurationMs),
+        });
+        if (claimed.kind === 'fenced') loseOwnership();
+        if (claimed.kind === 'cancelled' && !controller.signal.aborted) {
+          controller.abort('user');
+        }
+        return claimed;
+      },
     });
 
     const promise = (async (): Promise<void> => {
@@ -798,22 +1287,36 @@ export const createArenaGenerationService = (
           const heartbeatNow = dependencies.now();
           void dependencies.store.heartbeat({
             generationId: input.generationId,
+            producerToken: input.producerToken,
             now: heartbeatNow.toISOString(),
             leaseExpiresAt: addLeaseDuration(heartbeatNow, leaseDurationMs),
           }).then((result) => {
+            if (!result.owned) {
+              loseOwnership();
+              return;
+            }
             if (result.cancelRequested) controller.abort('user');
-          }).catch(() => undefined);
+          }).catch(() => {
+            observe({
+              event: 'redis_degraded',
+              generationId: input.generationId,
+              operation: 'heartbeat',
+            });
+          });
         }, heartbeatIntervalMs);
         const terminal = await executionPromise;
         await replayWriter.finish(terminal);
       } catch (error) {
-        const terminal: GenerationTerminal = controller.signal.aborted
-          ? { status: 'cancelled', code: 'USER_CANCELLED' }
+        const terminal: GenerationTerminal = controller.signal.reason === 'producer_lost'
+          ? { status: 'producer_lost', code: 'PRODUCER_OWNERSHIP_LOST' }
+          : controller.signal.aborted
+            ? { status: 'cancelled', code: 'USER_CANCELLED' }
           : { status: 'failed', code: 'GENERATION_FAILED' };
         await replayWriter.emit({
           type: 'telemetry',
           data: { errorClass: error instanceof Error ? error.name : 'Error' },
         });
+        if (error instanceof ArenaGenerationFinalizationPendingError) return;
         await replayWriter.finish(terminal);
       } finally {
         if (heartbeat) clearInterval(heartbeat);
@@ -827,10 +1330,13 @@ export const createArenaGenerationService = (
 
   const service: ArenaGenerationService = {
     async create(request: Request): Promise<Response> {
-      const parsed = await parseCreatePayload(request);
-      if (parsed instanceof Response) return parsed;
+      if (request.method !== 'POST') {
+        return jsonResponse({ code: 'METHOD_NOT_ALLOWED', error: 'Method not allowed' }, 405);
+      }
       const actor = await dependencies.resolveActor(request);
       if (!actor) return jsonResponse({ code: 'UNAUTHORIZED', error: 'Unauthorized' }, 401);
+      const parsed = await parseCreatePayload(request);
+      if (parsed instanceof Response) return parsed;
 
       const prepared = dependencies.executor.prepare
         ? await dependencies.executor.prepare({
@@ -844,7 +1350,11 @@ export const createArenaGenerationService = (
         };
       if (prepared instanceof Response) return prepared;
 
-      const generationId = dependencies.createGenerationId();
+      const generationId = await dependencies.deriveGenerationId({
+        actorKey: actor.actorKey,
+        generationRequestId: parsed.generationRequestId,
+      });
+      const producerToken = dependencies.createProducerToken?.() ?? crypto.randomUUID();
       const inputBytes = encodedBytes(prepared.semanticPayload);
       const payloadHash = await dependencies.hashPayload(prepared.semanticPayload);
       const now = dependencies.now();
@@ -855,12 +1365,46 @@ export const createArenaGenerationService = (
           generationRequestId: parsed.generationRequestId,
           generationId,
           payloadHash,
+          ...(typeof prepared.semanticPayload.mode === 'string'
+            ? { mode: prepared.semanticPayload.mode }
+            : {}),
+          producerToken,
           now: now.toISOString(),
           leaseExpiresAt: addLeaseDuration(now, leaseDurationMs),
         });
       } catch {
         observe({ event: 'request', generationId, outcome: 'unavailable', inputBytes });
         observe({ event: 'redis_degraded', generationId, operation: 'reserve' });
+        let durable: Awaited<ReturnType<typeof inspectOwnedFinalization>> = { kind: 'not-found' };
+        try {
+          durable = await inspectOwnedFinalization(generationId, actor.actorKey);
+        } catch {
+          // The response below remains fail closed when neither Redis nor D1 can prove ownership.
+        }
+        if (durable.kind === 'pending') {
+          if (durable.payloadHash && durable.payloadHash !== payloadHash) {
+            return jsonResponse({
+              code: 'GENERATION_REQUEST_CONFLICT',
+              error: 'generationRequestId 已用于不同请求',
+            }, 409);
+          }
+          return jsonResponse({
+            code: 'GENERATION_FINALIZATION_PENDING',
+            error: 'Generation durable finalization remains pending',
+          }, 503);
+        }
+        if (durable.kind === 'terminal') {
+          const terminal = durable.terminal;
+          if (!terminal.payloadHash || terminal.payloadHash !== payloadHash) {
+            observe({ event: 'request', generationId, outcome: 'conflict', inputBytes });
+            return jsonResponse({
+              code: 'GENERATION_REQUEST_CONFLICT',
+              error: 'generationRequestId 已用于不同请求',
+            }, 409);
+          }
+          observe({ event: 'request', generationId, outcome: 'reused', inputBytes });
+          return withActorHeaders(createTerminalFallbackResponse(terminal), actor);
+        }
         return jsonResponse({
           code: 'GENERATION_RESERVATION_UNAVAILABLE',
           error: '无法确认 generation reservation',
@@ -874,6 +1418,62 @@ export const createArenaGenerationService = (
           error: 'generationRequestId 已用于不同请求',
         }, 409);
       }
+      if (reservation.kind === 'created' && dependencies.terminalStore) {
+        let durable: Awaited<ReturnType<typeof inspectOwnedFinalization>>;
+        try {
+          durable = await inspectOwnedFinalization(generationId, actor.actorKey);
+        } catch {
+          await dependencies.store.releaseReservation({
+            generationId,
+            producerToken,
+          }).catch(() => ({ released: false }));
+          return jsonResponse({
+            code: 'GENERATION_TERMINAL_LOOKUP_UNAVAILABLE',
+            error: '无法确认 generation terminal state',
+          }, 503);
+        }
+        if (durable.kind === 'pending') {
+          await dependencies.store.releaseReservation({
+            generationId,
+            producerToken,
+          }).catch(() => ({ released: false }));
+          if (durable.payloadHash && durable.payloadHash !== payloadHash) {
+            return jsonResponse({
+              code: 'GENERATION_REQUEST_CONFLICT',
+              error: 'generationRequestId 已用于不同请求',
+            }, 409);
+          }
+          return jsonResponse({
+            code: 'GENERATION_FINALIZATION_PENDING',
+            error: 'Generation durable finalization remains pending',
+          }, 503);
+        }
+        if (durable.kind === 'terminal') {
+          const terminal = durable.terminal;
+          if (!terminal.payloadHash || terminal.payloadHash !== payloadHash) {
+            await dependencies.store.releaseReservation({
+              generationId,
+              producerToken,
+            }).catch(() => ({ released: false }));
+            observe({ event: 'request', generationId, outcome: 'conflict', inputBytes });
+            return jsonResponse({
+              code: 'GENERATION_REQUEST_CONFLICT',
+              error: 'generationRequestId 已用于不同请求',
+            }, 409);
+          }
+          await dependencies.store.markTerminal({
+            generationId,
+            producerToken,
+            terminal: {
+              status: terminal.status,
+              ...(terminal.resultRef ? { resultRef: terminal.resultRef } : {}),
+            },
+            now: dependencies.now().toISOString(),
+          }).catch(() => ({ owned: true, applied: false }));
+          observe({ event: 'request', generationId, outcome: 'reused', inputBytes });
+          return withActorHeaders(createTerminalFallbackResponse(terminal), actor);
+        }
+      }
       observe({
         event: 'request',
         generationId: reservation.generationId,
@@ -886,14 +1486,21 @@ export const createArenaGenerationService = (
             generationId: reservation.generationId,
             generationRequestId: parsed.generationRequestId,
             actorKey: actor.actorKey,
+            producerToken,
+            payloadHash,
             payload: prepared.executionPayload,
           });
         } catch {
+          const lostTerminal: GenerationTerminal = {
+            status: 'producer_lost',
+            code: 'PRODUCER_OWNERSHIP_UNAVAILABLE',
+          };
           await dependencies.store.markTerminal({
             generationId: reservation.generationId,
-            terminal: { status: 'producer_lost', code: 'PRODUCER_OWNERSHIP_UNAVAILABLE' },
+            producerToken,
+            terminal: lostTerminal,
             now: dependencies.now().toISOString(),
-          }).catch(() => ({ applied: false }));
+          }).catch(() => ({ owned: true, applied: false }));
           observe({
             event: 'producer_lost',
             generationId: reservation.generationId,
@@ -910,15 +1517,117 @@ export const createArenaGenerationService = (
           reservation.generationId,
           parsed.generationRequestId,
           null,
+          actor.actorKey,
           prepared.responseHeaders,
         ),
         actor,
       );
     },
 
+    async cancelRequest(request: Request): Promise<Response> {
+      const actor = await dependencies.resolveActor(request);
+      if (!actor) return jsonResponse({ code: 'UNAUTHORIZED', error: 'Unauthorized' }, 401);
+      let payload: unknown;
+      try {
+        payload = await request.json();
+      } catch {
+        return jsonResponse({ code: 'INVALID_JSON', error: 'Invalid JSON body' }, 400);
+      }
+      const generationRequestId = payload && typeof payload === 'object' && !Array.isArray(payload)
+        ? (payload as Record<string, unknown>).generationRequestId
+        : null;
+      if (
+        typeof generationRequestId !== 'string'
+        || !/^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/u.test(generationRequestId)
+      ) {
+        return jsonResponse({
+          code: 'GENERATION_REQUEST_ID_INVALID',
+          error: 'generationRequestId is required',
+        }, 400);
+      }
+      const generationId = await dependencies.deriveGenerationId({
+        actorKey: actor.actorKey,
+        generationRequestId,
+      });
+      let result: Awaited<ReturnType<GenerationReplayStore['requestCancel']>>;
+      try {
+        result = await dependencies.store.requestCancel({
+          generationId,
+          actorKey: actor.actorKey,
+          reason: 'user',
+          now: dependencies.now().toISOString(),
+        });
+      } catch {
+        const durable = await inspectOwnedFinalization(generationId, actor.actorKey)
+          .catch(() => ({ kind: 'not-found' as const }));
+        if (durable.kind === 'terminal') {
+          return withActorHeaders(jsonResponse({
+            generationId,
+            status: durable.terminal.status,
+            cancelled: durable.terminal.status === 'cancelled',
+          }, 200), actor);
+        }
+        if (durable.kind === 'pending') {
+          return withActorHeaders(jsonResponse({
+            code: 'GENERATION_FINALIZATION_IN_PROGRESS',
+            generationId,
+            status: 'finalizing',
+            cancelled: false,
+          }, 409), actor);
+        }
+        return jsonResponse({
+          code: 'GENERATION_STATE_UNAVAILABLE',
+          error: 'Generation state unavailable',
+        }, 503);
+      }
+      if (result.kind === 'not-found' || result.kind === 'forbidden') {
+        return jsonResponse({ code: 'GENERATION_NOT_FOUND', error: 'Generation not found' }, 404);
+      }
+      if (result.kind === 'accepted') {
+        activeProducers.get(generationId)?.controller.abort('user');
+        observe({
+          event: 'cancel',
+          generationId,
+          reason: 'user',
+          outcome: 'accepted',
+        });
+        return withActorHeaders(jsonResponse({
+          generationId,
+          status: 'cancelling',
+          cancelled: true,
+        }, 202), actor);
+      }
+      if (result.kind === 'finalizing') {
+        return withActorHeaders(jsonResponse({
+          code: 'GENERATION_FINALIZATION_IN_PROGRESS',
+          generationId,
+          status: 'finalizing',
+          cancelled: false,
+        }, 409), actor);
+      }
+      return withActorHeaders(jsonResponse({
+        generationId,
+        status: result.status,
+        cancelled: result.status === 'cancelled',
+      }, 200), actor);
+    },
+
     async resume(request: Request, params: ArenaGenerationRouteParams): Promise<Response> {
       const startedAt = Date.now();
       observe({ event: 'resume', generationId: params.generationId, outcome: 'attempt' });
+      let after: string | null;
+      try {
+        after = resolveResumeCursor(request);
+      } catch {
+        observe({
+          event: 'resume',
+          generationId: params.generationId,
+          outcome: 'failure',
+          reason: 'cursor_conflict',
+          latencyMs: Date.now() - startedAt,
+        });
+        return jsonResponse({ code: 'RESUME_CURSOR_CONFLICT', error: '恢复游标冲突' }, 400);
+      }
       const owned = await resolveOwnedState(request, params.generationId);
       if (owned instanceof Response) {
         const reason = owned.status === 401
@@ -937,19 +1646,6 @@ export const createArenaGenerationService = (
         });
         return owned;
       }
-      let after: string | null;
-      try {
-        after = resolveResumeCursor(request);
-      } catch {
-        observe({
-          event: 'resume',
-          generationId: params.generationId,
-          outcome: 'failure',
-          reason: 'cursor_conflict',
-          latencyMs: Date.now() - startedAt,
-        });
-        return jsonResponse({ code: 'RESUME_CURSOR_CONFLICT', error: '恢复游标冲突' }, 400);
-      }
       observe({
         event: 'resume',
         generationId: params.generationId,
@@ -958,7 +1654,7 @@ export const createArenaGenerationService = (
       });
       if (owned.terminalFallback) {
         return withActorHeaders(
-          createTerminalFallbackResponse(owned.terminalFallback),
+          createTerminalFallbackResponse(owned.terminalFallback, after),
           owned.actor,
         );
       }
@@ -967,6 +1663,7 @@ export const createArenaGenerationService = (
           owned.state.generationId,
           owned.state.generationRequestId,
           after,
+          owned.actor.actorKey,
         ),
         owned.actor,
       );
@@ -980,7 +1677,9 @@ export const createArenaGenerationService = (
         generationId: state.generationId,
         generationRequestId: state.generationRequestId,
         status: state.status,
-        resumable: state.status === 'reserved' || state.status === 'running',
+        resumable: state.status === 'reserved'
+          || state.status === 'running'
+          || state.status === 'finalizing',
         lastEventId: state.lastEventId,
         updatedAt: state.updatedAt,
         ...(state.terminal?.resultRef ? { resultRef: state.terminal.resultRef } : {}),
@@ -990,6 +1689,13 @@ export const createArenaGenerationService = (
     async cancel(request: Request, params: ArenaGenerationRouteParams): Promise<Response> {
       const owned = await resolveOwnedState(request, params.generationId);
       if (owned instanceof Response) return owned;
+      if (owned.terminalFallback) {
+        return withActorHeaders(jsonResponse({
+          generationId: params.generationId,
+          status: owned.terminalFallback.status,
+          cancelled: owned.terminalFallback.status === 'cancelled',
+        }, 200), owned.actor);
+      }
       const result = await dependencies.store.requestCancel({
         generationId: params.generationId,
         actorKey: owned.actor.actorKey,
@@ -1011,6 +1717,14 @@ export const createArenaGenerationService = (
           status: result.status,
           cancelled: result.status === 'cancelled',
         }, 200), owned.actor);
+      }
+      if (result.kind === 'finalizing') {
+        return withActorHeaders(jsonResponse({
+          code: 'GENERATION_FINALIZATION_IN_PROGRESS',
+          generationId: params.generationId,
+          status: 'finalizing',
+          cancelled: false,
+        }, 409), owned.actor);
       }
       observe({
         event: 'cancel',

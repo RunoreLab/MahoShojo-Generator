@@ -3,6 +3,7 @@ import {
   readHonoAuthMode,
   type HonoAuthMode,
 } from '#/auth/config';
+import { parseAIProvidersFromEnv } from '@mahoshojo/hosted-runtime/node-runtime/providers';
 
 export type HonoServerConfig = {
   host: string;
@@ -32,29 +33,8 @@ const isTrustedHttpsOrigin = (value: string | undefined): boolean => {
   }
 };
 
-const hasValidAiProviderConfig = (env: NodeJS.ProcessEnv): boolean => {
-  if (hasText(env.AI_API_KEY)) return true;
-  if (!hasText(env.AI_PROVIDERS_CONFIG)) return false;
-  try {
-    const providers = JSON.parse(env.AI_PROVIDERS_CONFIG as string) as unknown;
-    return Array.isArray(providers) && providers.some((provider) => {
-      if (!provider || typeof provider !== 'object') return false;
-      const record = provider as Record<string, unknown>;
-      const model = record.model;
-      const hasModel = typeof model === 'string'
-        ? model.trim().length > 0
-        : Array.isArray(model) && model.some((item) => typeof item === 'string' && item.trim().length > 0);
-      const hasKey = typeof record.apiKey === 'string' && record.apiKey.trim().length > 0;
-      const allowsAnonymous = record.allowAnonymous === true && record.type === 'openai';
-      return hasModel
-        && typeof record.baseUrl === 'string'
-        && record.baseUrl.trim().length > 0
-        && (hasKey || allowsAnonymous);
-    });
-  } catch {
-    return false;
-  }
-};
+const hasValidAiProviderConfig = (env: NodeJS.ProcessEnv): boolean =>
+  parseAIProvidersFromEnv(env).length > 0;
 
 const validateProductionEnvironment = (
   env: NodeJS.ProcessEnv,
@@ -68,7 +48,11 @@ const validateProductionEnvironment = (
   if ((env.SIGNATURE_SECRET_KEY?.trim().length ?? 0) < 32) {
     problems.push('SIGNATURE_SECRET_KEY 必须至少 32 个字符');
   }
-  if (config.corsOrigins.length === 0 || config.corsOrigins.some((origin) => origin.includes('localhost'))) {
+  if (
+    config.corsOrigins.length === 0
+    || config.corsOrigins.includes('*')
+    || config.corsOrigins.some((origin) => origin.includes('localhost'))
+  ) {
     problems.push('HONO_CORS_ORIGINS 必须显式配置生产来源');
   }
 

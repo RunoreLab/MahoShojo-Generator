@@ -46,6 +46,74 @@ describe('Arena generation prompt compatibility', () => {
     expect(getSharedSystemPrompt(mode, combatants)).toBe(getLegacySystemPrompt(mode, combatants));
   });
 
+  it.each(['classic', 'kizuna', 'daily', 'scenario'] as const)(
+    '%s mode 的完整 prompt 与 legacy builder 一致',
+    async (mode) => {
+      const payload = {
+        mode,
+        language: 'zh-CN',
+        combatants,
+        userGuidance: '完整 parity 指引',
+        internalGuidance: '服务器内部判定',
+        scenario: mode === 'scenario'
+          ? { templateId: 'general-scenario', title: '测试场景', content: '场景正文' }
+          : null,
+        auxScenarios: null,
+        teams: { '1': ['星火'], '2': ['夜潮'] },
+        teamNames: { '1': '守护方', '2': '侵袭方' },
+        readArenaHistory: true,
+        arenaHistoryReadLimit: 2,
+        readCurrentState: true,
+        writeArenaHistory: true,
+        writeCurrentState: true,
+        forceStreamMeta: true,
+        adjudicationResults: null,
+        adjudicationEvents: [],
+        storyLength: 'standard',
+        customStoryLength: '',
+        narrativeHistory: null,
+        questionnaires: [],
+        materials: [{
+          name: '完整 parity 素材',
+          sourceType: 'fixture',
+          sourceKind: 'raw-json',
+          content: { mode },
+        }],
+      };
+      const legacyStreamPrompt = createStreamPromptBuilder(
+        {
+          ...DEFAULT_ARENA_PROMPT_QUESTIONS,
+          default: DEFAULT_ARENA_PROMPT_QUESTIONS.magicalGirl,
+        },
+        payload.userGuidance,
+        payload.internalGuidance,
+        false,
+        payload.language,
+        payload.mode,
+        payload.scenario,
+        payload.auxScenarios,
+        payload.teams,
+        payload.teamNames,
+        payload.readArenaHistory,
+        payload.arenaHistoryReadLimit,
+        payload.readCurrentState,
+        payload.writeArenaHistory,
+        payload.writeCurrentState,
+        payload.forceStreamMeta,
+        payload.adjudicationResults,
+        payload.storyLength,
+        payload.customStoryLength,
+        payload.narrativeHistory,
+        null,
+        true,
+        payload.materials,
+      )({ combatants });
+
+      const shared = await buildArenaGenerationPrompt({ actorKey: 'user:42', payload });
+      expect(shared.prompt).toBe(`${getLegacySystemPrompt(mode, combatants)}\n\n${legacyStreamPrompt}`);
+    },
+  );
+
   it('shared runtime 复用 legacy stream prompt 的完整语义', async () => {
     const payload = {
       mode: 'scenario',

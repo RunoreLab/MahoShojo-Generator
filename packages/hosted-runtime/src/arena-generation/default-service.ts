@@ -39,13 +39,31 @@ export const hashArenaGenerationPayload = async (
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
 };
 
+export const deriveArenaGenerationId = async (input: {
+  actorKey: string;
+  generationRequestId: string;
+}): Promise<string> => {
+  const bytes = new TextEncoder().encode(
+    `arena-generation-id-v1\u0000${input.actorKey}\u0000${input.generationRequestId}`,
+  );
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  const hex = Array.from(
+    new Uint8Array(digest),
+    (byte) => byte.toString(16).padStart(2, '0'),
+  ).join('');
+  return `arena_${hex}`;
+};
+
 export type NodeArenaGenerationServiceOptions = {
   store: GenerationReplayStore;
   terminalStore?: ArenaGenerationTerminalStore;
   env?: Readonly<Record<string, string | undefined>>;
   fetch?: typeof fetch;
   now?: () => Date;
-  createGenerationId?: () => string;
+  deriveGenerationId?(_input: {
+    actorKey: string;
+    generationRequestId: string;
+  }): Promise<string>;
   getD1Client(): NodeDataD1Client | null;
   signatures?: SignatureService;
   resolveActor?(_request: Request): Promise<ArenaGenerationActor | null>;
@@ -59,6 +77,7 @@ export type NodeArenaGenerationServiceOptions = {
   replayPollMs?: number;
   deltaFlushIntervalMs?: number;
   deltaFlushBytes?: number;
+  snapshotMaxBytes?: number;
   observer?: ArenaGenerationObserver;
 };
 
@@ -94,7 +113,7 @@ export const createNodeArenaGenerationService = (
     store: options.store,
     executor,
     resolveActor,
-    createGenerationId: options.createGenerationId ?? (() => crypto.randomUUID()),
+    deriveGenerationId: options.deriveGenerationId ?? deriveArenaGenerationId,
     hashPayload: hashArenaGenerationPayload,
     now: options.now ?? (() => new Date()),
     observer: options.observer,
@@ -108,5 +127,8 @@ export const createNodeArenaGenerationService = (
       ? { deltaFlushIntervalMs: options.deltaFlushIntervalMs }
       : {}),
     ...(options.deltaFlushBytes !== undefined ? { deltaFlushBytes: options.deltaFlushBytes } : {}),
+    ...(options.snapshotMaxBytes !== undefined
+      ? { snapshotMaxBytes: options.snapshotMaxBytes }
+      : {}),
   });
 };

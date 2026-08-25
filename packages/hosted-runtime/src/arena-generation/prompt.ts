@@ -58,6 +58,23 @@ const randomReporter = (): { name: string; publication: string } => {
   };
 };
 
+export const isStrictRankedArenaRequest = (payload: Record<string, unknown>): boolean => {
+  const mode = text(payload.mode) || 'classic';
+  const language = text(payload.language) || 'zh-CN';
+  const combatants = Array.isArray(payload.combatants) ? payload.combatants : [];
+  return mode === 'classic'
+    && language === 'zh-CN'
+    && !text(payload.userGuidance)
+    && (!Array.isArray(payload.materials) || payload.materials.length === 0)
+    && !questionnaireLore(payload.questionnaires)
+    && payload.readArenaHistory === false
+    && payload.readCurrentState === false
+    && payload.readNarrativeHistory === false
+    && (!Array.isArray(payload.adjudicationEvents) || payload.adjudicationEvents.length === 0)
+    && combatants.length === 2
+    && combatants.every((value) => !text(asRecord(value)?.characterGuidance));
+};
+
 export const buildArenaGenerationPrompt = async (input: {
   actorKey: string;
   payload: Record<string, unknown>;
@@ -72,17 +89,7 @@ export const buildArenaGenerationPrompt = async (input: {
   const adjudicationResults = Array.isArray(payload.adjudicationResults)
     ? payload.adjudicationResults
     : null;
-  const strictRankedMatch = mode === 'classic'
-    && language === 'zh-CN'
-    && !userGuidance
-    && materials.length === 0
-    && !lore
-    && payload.readArenaHistory === false
-    && payload.readCurrentState === false
-    && payload.readNarrativeHistory === false
-    && (!Array.isArray(payload.adjudicationEvents) || payload.adjudicationEvents.length === 0)
-    && combatants.length === 2
-    && combatants.every((value) => !text(asRecord(value)?.characterGuidance));
+  const strictRankedMatch = isStrictRankedArenaRequest(payload);
   const writeArenaHistory = payload.writeArenaHistory !== false;
   const writeCurrentState = payload.writeCurrentState !== false;
   const forceStreamMeta = payload.forceStreamMeta === true;

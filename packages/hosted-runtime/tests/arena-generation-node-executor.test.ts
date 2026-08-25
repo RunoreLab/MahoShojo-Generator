@@ -14,8 +14,14 @@ const validPayload = {
 };
 
 const finalizer = createArenaGenerationFinalizer({
-  storeOutput: vi.fn(async () => ({ resultRef: null })),
-  claimTerminal: vi.fn(async () => ({ kind: 'created' as const, resultRef: null })),
+  storeOutput: vi.fn(async () => ({ resultRef: 'r2://test/output' })),
+  claimTerminal: vi.fn(async () => ({
+    kind: 'created' as const,
+    resultRef: 'r2://test/output',
+    finalized: false,
+  })),
+  completeTerminal: vi.fn(async () => undefined),
+  failTerminal: vi.fn(async () => undefined),
   persistCombatants: vi.fn(async () => undefined),
   applyStoryImpacts: vi.fn(async () => undefined),
   settleRatings: vi.fn(async () => undefined),
@@ -27,7 +33,7 @@ const signatureService: SignatureService = {
   verifySignature: vi.fn(async (value) => (
     Boolean(value)
     && typeof value === 'object'
-    && (value as { signature?: unknown }).signature === 'valid'
+    && ['valid', 'generated'].includes(String((value as { signature?: unknown }).signature ?? ''))
   )),
 };
 
@@ -132,6 +138,7 @@ describe('Node Arena generation executor', () => {
     if (prepared instanceof Response) throw new Error('unexpected response');
     const combatants = safetyPayloads[0]?.combatants as Array<{ isNative: boolean }>;
     expect(combatants.map((item) => item.isNative)).toEqual([false, true]);
+    expect(signatureService.generateSignature).not.toHaveBeenCalled();
     expect(safetyPayloads[0]?.internalGuidance).toBeUndefined();
     expect(JSON.stringify(prepared.semanticPayload)).not.toContain('secret-value');
     expect(JSON.stringify(prepared.semanticPayload)).not.toContain('__arenaServerContextV1');
@@ -144,11 +151,123 @@ describe('Node Arena generation executor', () => {
       generationId: 'generation-1',
       generationRequestId: 'request-1',
       actorKey: 'anonymous:test',
+      producerToken: 'producer-token-1',
+      payloadHash: 'payload-hash-1',
       payload: prepared.executionPayload,
       signal: controller.signal,
       emit: vi.fn(async () => undefined),
+      claimFinalization: vi.fn(async () => ({ kind: 'claimed' as const })),
     });
     expect(terminal.status).toBe('completed');
     expect(generateWithStreamAI).toHaveBeenCalledTimes(1);
+  });
+
+  it('normalizes raw Arena materials before safety and prompt construction', async () => {
+    const safetyPayloads: Array<Record<string, unknown>> = [];
+    const executor = createNodeArenaGenerationExecutor({
+      env: {},
+      finalizer,
+      signatureService,
+      enforceSafety: vi.fn(async ({ payload }) => {
+        safetyPayloads.push(payload);
+        return null;
+      }),
+      generateWithStreamAI: vi.fn(),
+    });
+
+    const prepared = await executor.prepare!({
+      request: new Request('https://example.test/api/arena/generate-stream'),
+      actorKey: 'anonymous:test',
+      payload: {
+        ...validPayload,
+        materials: [
+          {
+            templateId: '通用情景',
+            title: '雨夜站台',
+            content: '末班车停靠。',
+            _cardId: 'card-1',
+            _cardName: '雨夜站台卡',
+            _updatedAt: '2026-08-25T04:00:00.000Z',
+          },
+          'primitive material',
+          { cardKind: 'lore', name: 'Wantu lore', content: 'world setting' },
+        ],
+      },
+    });
+
+    expect(prepared).not.toBeInstanceOf(Response);
+    const materials = safetyPayloads[0]?.materials as Array<Record<string, unknown>>;
+    expect(materials).toEqual([
+      expect.objectContaining({
+        name: '雨夜站台卡',
+        sourceKind: 'mahoshojo-data-card',
+        sourceType: '通用情景',
+        sourceDataCardId: 'card-1',
+        sourceDataCardUpdatedAt: '2026-08-25T04:00:00.000Z',
+        content: {
+          templateId: '通用情景',
+          title: '雨夜站台',
+          content: '末班车停靠。',
+        },
+      }),
+      expect.objectContaining({
+        name: '未命名素材',
+        sourceKind: 'raw-json',
+        sourceType: 'raw-json',
+        content: 'primitive material',
+      }),
+      expect.objectContaining({
+        name: 'Wantu lore',
+        sourceKind: 'wantu-card',
+        sourceType: 'lore',
+        content: expect.objectContaining({ content: 'world setting' }),
+      }),
+    ]);
+  });
+
+  it('uses the strict-ranked model fallback order until a provider attempt succeeds', async () => {
+    const generateWithStreamAI = vi.fn()
+      .mockRejectedValueOnce(new Error('first model unavailable'))
+      .mockResolvedValueOnce({ response: new Response('body') });
+    const executor = createNodeArenaGenerationExecutor({
+      env: {},
+      finalizer,
+      signatureService,
+      enforceSafety: vi.fn(async () => null),
+      generateWithStreamAI,
+    });
+    const prepared = await executor.prepare!({
+      request: new Request('https://example.test/api/arena/generate-stream'),
+      actorKey: 'anonymous:test',
+      payload: {
+        ...validPayload,
+        internalGuidance: undefined,
+        readArenaHistory: false,
+        readCurrentState: false,
+        readNarrativeHistory: false,
+        writeArenaHistory: false,
+        writeCurrentState: false,
+      },
+    });
+    if (prepared instanceof Response) throw new Error('unexpected response');
+
+    const terminal = await executor.execute({
+      generationId: 'generation-strict',
+      generationRequestId: 'request-strict',
+      actorKey: 'anonymous:test',
+      producerToken: 'producer-token-strict',
+      payloadHash: 'payload-hash-strict',
+      payload: prepared.executionPayload,
+      signal: new AbortController().signal,
+      emit: vi.fn(async () => undefined),
+      claimFinalization: vi.fn(async () => ({ kind: 'claimed' as const })),
+    });
+
+    expect(terminal.status).toBe('completed');
+    expect(generateWithStreamAI).toHaveBeenCalledTimes(2);
+    expect(generateWithStreamAI.mock.calls.map(([config]) => config.modelOverride)).toEqual([
+      'gemma-4-31b-it',
+      'gemma-3-27b-it',
+    ]);
   });
 });

@@ -3,6 +3,9 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   createNodeArenaGenerationFinalizationPorts,
   createNodeArenaGenerationTerminalStore,
+  MAX_ARENA_TERMINAL_COMBATANTS,
+  MAX_ARENA_TERMINAL_EXTRA_JSON_BYTES,
+  readNodeArenaGenerationReconciliation,
 } from '../src/arena-generation/d1-finalization';
 import type { NodeDataD1Client } from '../src/node-runtime/data-ports';
 
@@ -13,13 +16,16 @@ const result = (
 
 const sequentialD1 = (
   steps: Array<ReturnType<typeof result> | Error>,
-): NodeDataD1Client => ({
+): NodeDataD1Client & { boundCalls: unknown[][] } => {
+  const boundCalls: unknown[][] = [];
+  return {
+  boundCalls,
   prepare: vi.fn((sql: string) => {
     let params: unknown[] = [];
     return {
       bind(...next: unknown[]) {
         params = next;
-        void params;
+        boundCalls.push(next);
         return this;
       },
       run: vi.fn(async () => {
@@ -36,11 +42,13 @@ const sequentialD1 = (
       }),
     };
   }),
-});
+  };
+};
 
 const claimInput = {
   generationId: 'generation-1',
   generationRequestId: 'request-1',
+  payloadHash: 'payload-hash-1',
   actorKey: 'user:42',
   payload: {
     mode: 'classic',
@@ -57,7 +65,7 @@ const claimInput = {
   telemetry: { model: 'model-1', usage: { totalTokens: 9 } },
   status: 'completed' as const,
   errorCode: null,
-  resultRef: 'r2:v1/battle-report-generations/2026/08/25/generation-1/output.md',
+  resultRef: 'r2:v1/battle-report-generations/generation-1/output.md',
 };
 
 describe('Arena D1/R2 finalization ports', () => {
@@ -72,6 +80,8 @@ describe('Arena D1/R2 finalization ports', () => {
       extra_json: JSON.stringify({
         generationRequestId: 'request-1',
         generationOwnerHash: ownerHash,
+        generationPayloadHash: 'payload-hash-1',
+        finalizationCompleted: true,
         resultRef: claimInput.resultRef,
       }),
     };
@@ -88,10 +98,12 @@ describe('Arena D1/R2 finalization ports', () => {
     await expect(ports.claimTerminal(claimInput)).resolves.toEqual({
       kind: 'created',
       resultRef: claimInput.resultRef,
+      finalized: false,
     });
     await expect(ports.claimTerminal(claimInput)).resolves.toEqual({
       kind: 'existing',
       resultRef: claimInput.resultRef,
+      finalized: true,
     });
     expect(client.prepare).toHaveBeenCalledWith(expect.stringContaining('INSERT OR IGNORE'));
   });
@@ -109,6 +121,8 @@ describe('Arena D1/R2 finalization ports', () => {
         extra_json: JSON.stringify({
           generationRequestId: 'request-1',
           generationOwnerHash: ownerHash,
+          generationPayloadHash: 'payload-hash-1',
+          finalizationCompleted: true,
           resultRef: claimInput.resultRef,
         }),
       }]),
@@ -121,6 +135,7 @@ describe('Arena D1/R2 finalization ports', () => {
     await expect(ports.claimTerminal(claimInput)).resolves.toEqual({
       kind: 'existing',
       resultRef: claimInput.resultRef,
+      finalized: true,
     });
   });
 
@@ -139,13 +154,104 @@ describe('Arena D1/R2 finalization ports', () => {
       markdown: 'body',
       signal: new AbortController().signal,
     })).resolves.toEqual({
-      resultRef: 'r2:v1/battle-report-generations/2026/08/25/generation-1/output.md',
+      resultRef: 'r2:v1/battle-report-generations/generation-1/output.md',
     });
     expect(put).toHaveBeenCalledWith(expect.objectContaining({
-      key: 'v1/battle-report-generations/2026/08/25/generation-1/output.md',
+      key: 'v1/battle-report-generations/generation-1/output.md',
       body: 'body',
     }));
     expect(client.prepare).toHaveBeenCalledWith(expect.stringContaining('large_objects'));
+  });
+
+  it('keeps local card bodies out of the bounded D1 reconciliation manifest', async () => {
+    const client = sequentialD1([result([], 1)]);
+    const ports = createNodeArenaGenerationFinalizationPorts({
+      getD1Client: () => client,
+      now: () => new Date('2026-08-25T04:00:00.000Z'),
+    });
+
+    await ports.claimTerminal({
+      ...claimInput,
+      payload: {
+        ...claimInput.payload,
+        combatants: [{
+          type: 'magical-girl',
+          isNative: false,
+          data: { name: 'A', privateLocalCardBody: 'must-not-enter-d1-extra-json' },
+        }],
+      },
+    });
+
+    const serializedExtra = client.boundCalls
+      .flat()
+      .find((value) => typeof value === 'string' && value.includes('localCardReconciliation'));
+    expect(serializedExtra).toEqual(expect.any(String));
+    expect(serializedExtra).not.toContain('must-not-enter-d1-extra-json');
+    expect(serializedExtra).not.toContain('updatedCombatants');
+  });
+
+  it('bounds the existing D1 terminal manifest and combatant rows under adversarial input', async () => {
+    const client = sequentialD1(Array.from(
+      { length: MAX_ARENA_TERMINAL_COMBATANTS + 1 },
+      () => result([], 1),
+    ));
+    const ports = createNodeArenaGenerationFinalizationPorts({
+      getD1Client: () => client,
+      now: () => new Date('2026-08-25T04:00:00.000Z'),
+    });
+    const combatants = Array.from({ length: MAX_ARENA_TERMINAL_COMBATANTS + 20 }, (_, index) => ({
+      type: `type-${index}-${'x'.repeat(2_000)}`,
+      filename: `template-${index}-${'x'.repeat(2_000)}`,
+      sourceDataCardId: `card-${index}-${'x'.repeat(2_000)}`,
+      sourceDataCardUpdatedAt: `revision-${index}-${'x'.repeat(2_000)}`,
+      characterGuidance: 'x'.repeat(5_000),
+      data: { name: `combatant-${index}-${'x'.repeat(5_000)}` },
+    }));
+    const oversizedInput = {
+      ...claimInput,
+      payload: {
+        ...claimInput.payload,
+        combatants,
+        questionnaireLoreIds: Array.from({ length: 500 }, (_, index) => `q-${index}-${'x'.repeat(500)}`),
+        materialSourceTypes: Array.from({ length: 500 }, (_, index) => `m-${index}-${'x'.repeat(500)}`),
+        __arenaServerContextV1: {
+          season: {
+            authorityAvailable: true,
+            storyGuidance: 'x'.repeat(500_000),
+            questionnaireLorePresetIds: Array.from(
+              { length: 500 },
+              (_, index) => `season-${index}-${'x'.repeat(500)}`,
+            ),
+          },
+        },
+      },
+      metadata: {
+        streamMeta: {
+          impacts: Array.from({ length: 500 }, (_, index) => ({
+            characterName: `name-${index}-${'x'.repeat(500)}`,
+            impact: 'x'.repeat(10_000),
+            currentStateSummary: 'x'.repeat(10_000),
+          })),
+        },
+      },
+    };
+
+    await ports.claimTerminal(oversizedInput);
+    await ports.persistCombatants({
+      ...oversizedInput,
+    });
+
+    const serializedExtra = client.boundCalls
+      .flat()
+      .find((value) => typeof value === 'string' && value.includes('generationOwnerHash'));
+    expect(serializedExtra).toEqual(expect.any(String));
+    expect(new TextEncoder().encode(serializedExtra as string).byteLength)
+      .toBeLessThanOrEqual(MAX_ARENA_TERMINAL_EXTRA_JSON_BYTES);
+    expect(JSON.parse(serializedExtra as string).combatantsFallback)
+      .toHaveLength(MAX_ARENA_TERMINAL_COMBATANTS);
+    expect(vi.mocked(client.prepare).mock.calls.filter(([sql]) => (
+      sql.includes('INSERT OR IGNORE INTO battle_report_generation_combatants')
+    ))).toHaveLength(MAX_ARENA_TERMINAL_COMBATANTS);
   });
 
   it('authorizes terminal fallback by actor hash and reads full R2 output', async () => {
@@ -161,6 +267,8 @@ describe('Arena D1/R2 finalization ports', () => {
       extra_json: JSON.stringify({
         generationRequestId: 'request-1',
         generationOwnerHash: ownerHash,
+        generationPayloadHash: 'payload-hash-1',
+        finalizationCompleted: true,
         resultRef: 'r2:key',
       }),
       r2_key: 'key',
@@ -178,5 +286,179 @@ describe('Arena D1/R2 finalization ports', () => {
       generationId: 'generation-1',
       actorKey: 'anonymous:other-id',
     })).resolves.toBeNull();
+  });
+
+  it('marks completed terminal content unavailable instead of silently serving its preview', async () => {
+    const ownerHash = await crypto.subtle.digest(
+      'SHA-256',
+      new TextEncoder().encode('anonymous:anon-id-1'),
+    ).then((bytes) => Array.from(new Uint8Array(bytes), (byte) => byte.toString(16).padStart(2, '0')).join(''));
+    const client = sequentialD1([result([{
+      id: 'generation-1',
+      status: 'completed',
+      updated_at: '2026-08-25T04:00:00.000Z',
+      output_preview: 'truncated preview',
+      extra_json: JSON.stringify({
+        generationRequestId: 'request-1',
+        generationOwnerHash: ownerHash,
+        generationPayloadHash: 'payload-hash-1',
+        finalizationCompleted: true,
+        resultRef: 'r2:key',
+      }),
+      r2_key: 'key',
+    }])]);
+    const store = createNodeArenaGenerationTerminalStore({
+      getD1Client: () => client,
+      objectStore: {
+        put: vi.fn(),
+        getText: vi.fn(async () => { throw new Error('R2 unavailable'); }),
+      },
+    });
+
+    await expect(store.readOwnedTerminal({
+      generationId: 'generation-1',
+      actorKey: 'anonymous:anon-id-1',
+    })).resolves.toMatchObject({
+      markdown: 'truncated preview',
+      contentAvailable: false,
+    });
+  });
+
+  it('does not expose a completed preview when the required R2 object index is missing', async () => {
+    const ownerHash = await crypto.subtle.digest(
+      'SHA-256',
+      new TextEncoder().encode('anonymous:anon-id-1'),
+    ).then((bytes) => Array.from(new Uint8Array(bytes), (byte) => byte.toString(16).padStart(2, '0')).join(''));
+    const client = sequentialD1([result([{
+      id: 'generation-1',
+      status: 'completed',
+      updated_at: '2026-08-25T04:00:00.000Z',
+      output_preview: 'not the full report',
+      extra_json: JSON.stringify({
+        generationRequestId: 'request-1',
+        generationOwnerHash: ownerHash,
+        generationPayloadHash: 'payload-hash-1',
+        generationTerminalStatus: 'completed',
+        finalizationCompleted: true,
+        resultRef: 'r2:key',
+      }),
+      r2_key: null,
+    }])]);
+    const store = createNodeArenaGenerationTerminalStore({ getD1Client: () => client });
+
+    await expect(store.readOwnedTerminal({
+      generationId: 'generation-1',
+      actorKey: 'anonymous:anon-id-1',
+    })).resolves.toMatchObject({ contentAvailable: false });
+  });
+
+  it('reports an actor-owned incomplete finalization without treating it as not found', async () => {
+    const ownerHash = await crypto.subtle.digest(
+      'SHA-256',
+      new TextEncoder().encode('user:42'),
+    ).then((bytes) => Array.from(new Uint8Array(bytes), (byte) => byte.toString(16).padStart(2, '0')).join(''));
+    const client = sequentialD1([result([{
+      id: 'generation-1',
+      status: 'completed',
+      updated_at: '2026-08-25T04:00:00.000Z',
+      output_preview: 'preview',
+      extra_json: JSON.stringify({
+        generationRequestId: 'request-1',
+        generationOwnerHash: ownerHash,
+        generationPayloadHash: 'payload-hash-1',
+        generationTerminalStatus: 'completed',
+        finalizationCompleted: false,
+      }),
+      r2_key: 'key',
+    }])]);
+    const store = createNodeArenaGenerationTerminalStore({ getD1Client: () => client });
+
+    await expect(store.inspectOwnedFinalization?.({
+      generationId: 'generation-1',
+      actorKey: 'user:42',
+    })).resolves.toEqual({ kind: 'pending', payloadHash: 'payload-hash-1' });
+  });
+
+  it('repairs an incomplete durable terminal after the Redis producer lease expires', async () => {
+    const ownerHash = await crypto.subtle.digest(
+      'SHA-256',
+      new TextEncoder().encode('user:42'),
+    ).then((bytes) => Array.from(new Uint8Array(bytes), (byte) => byte.toString(16).padStart(2, '0')).join(''));
+    const pendingExtra = {
+      generationRequestId: 'request-1',
+      generationOwnerHash: ownerHash,
+      generationPayloadHash: 'payload-hash-1',
+      generationTerminalStatus: 'completed',
+      finalizationCompleted: false,
+      resultRef: 'r2:key',
+      combatantsFallback: [
+        { sortIndex: 0, name: 'A', type: 'magical-girl', isNative: false, isPreset: false },
+        { sortIndex: 1, name: 'B', type: 'magical-girl', isNative: false, isPreset: false },
+      ],
+    };
+    const finalizedExtra = { ...pendingExtra, finalizationCompleted: true };
+    const client = sequentialD1([
+      result([{
+        id: 'generation-1',
+        status: 'completed',
+        updated_at: '2026-08-25T04:00:00.000Z',
+        output_preview: 'preview',
+        extra_json: JSON.stringify(pendingExtra),
+        r2_key: null,
+      }]),
+      result([], 1),
+      result([], 1),
+      result([], 1),
+      result([{
+        id: 'generation-1',
+        status: 'completed',
+        updated_at: '2026-08-25T04:01:00.000Z',
+        output_preview: 'preview',
+        extra_json: JSON.stringify(finalizedExtra),
+        r2_key: null,
+      }]),
+    ]);
+    const settleRatings = vi.fn(async () => undefined);
+    const store = createNodeArenaGenerationTerminalStore({
+      getD1Client: () => client,
+      settleRatings,
+    });
+
+    await expect(store.reconcileExpiredLease?.({
+      generationId: 'generation-1',
+      generationRequestId: 'request-1',
+      actorKey: 'user:42',
+      payloadHash: 'payload-hash-1',
+      mode: 'classic',
+      updatedAt: '2026-08-25T04:01:00.000Z',
+      code: 'PRODUCER_LEASE_EXPIRED',
+    })).resolves.toMatchObject({
+      status: 'completed',
+      resultRef: 'r2:key',
+      markdown: 'preview',
+    });
+    expect(settleRatings).toHaveBeenCalledOnce();
+    expect(client.prepare).toHaveBeenCalledWith(expect.stringContaining(
+      'INSERT OR IGNORE INTO battle_report_generation_combatants',
+    ));
+  });
+
+  it('reads bounded local-card reconciliation authority without persisting client cards', async () => {
+    const payload = { rosterCount: 2, writeArenaHistory: true };
+    const client = sequentialD1([result([{
+      status: 'completed',
+      extra_json: JSON.stringify({
+        finalizationCompleted: true,
+        localCardReconciliation: payload,
+      }),
+    }])]);
+
+    await expect(readNodeArenaGenerationReconciliation({
+      client,
+      generationId: 'generation-1',
+    })).resolves.toEqual(payload);
+    expect(client.prepare).toHaveBeenCalledWith(expect.stringContaining(
+      'FROM battle_report_generations',
+    ));
   });
 });

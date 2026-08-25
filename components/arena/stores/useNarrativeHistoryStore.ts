@@ -22,7 +22,11 @@ interface NarrativeHistoryStoreState {
   sort: NarrativeHistorySort;
 
   setSort: (sort: NarrativeHistorySort) => void;
-  appendEntry: (payload: { title: string; content: string }) => NarrativeHistoryEntry | null;
+  appendEntry: (payload: {
+    title: string;
+    content: string;
+    generationId?: string | null;
+  }) => NarrativeHistoryEntry | null;
   updateEntry: (id: string, patch: { title?: string; content?: string }) => void;
   moveEntry: (id: string, direction: NarrativeHistoryReorderDirection) => void;
   reorderEntries: (movingId: string, targetId: string) => void;
@@ -63,7 +67,7 @@ export const useNarrativeHistoryStore = create<NarrativeHistoryStoreState>()(
 
       setSort: (sort) => set({ sort }),
 
-      appendEntry: ({ title, content }) => {
+      appendEntry: ({ title, content, generationId }) => {
         const trimmedContent = (content ?? '').toString().trim();
         if (!trimmedContent) {
           return null;
@@ -71,9 +75,16 @@ export const useNarrativeHistoryStore = create<NarrativeHistoryStoreState>()(
 
         const trimmedTitle = (title ?? '').toString().trim() || normalizeTitleFallback(trimmedContent);
         const createdAt = nowIso();
+        const stableGenerationId = typeof generationId === 'string' && generationId.trim()
+          ? `arena-generation:${generationId.trim()}`
+          : null;
+        const existing = stableGenerationId
+          ? get().entries.find((entry) => entry.id === stableGenerationId)
+          : null;
+        if (existing) return existing;
 
         const entry: NarrativeHistoryEntry = {
-          id: randomUUID(),
+          id: stableGenerationId ?? randomUUID(),
           title: trimmedTitle.slice(0, 120),
           content: trimmedContent,
           createdAt,

@@ -8,6 +8,7 @@ import {
 const input = {
   generationId: 'generation-1',
   generationRequestId: 'request-1',
+  payloadHash: 'payload-hash-1',
   actorKey: 'user:42',
   payload: {
     combatants: [{ data: { name: 'A' } }, { data: { name: 'B' } }],
@@ -30,7 +31,10 @@ const createPorts = (
   claimTerminal: vi.fn(async (claim) => ({
     kind: 'created' as const,
     resultRef: claim.resultRef,
+    finalized: false,
   })),
+  completeTerminal: vi.fn(async () => undefined),
+  failTerminal: vi.fn(async () => undefined),
   persistCombatants: vi.fn(async () => undefined),
   applyStoryImpacts: vi.fn(async () => undefined),
   settleRatings: vi.fn(async () => undefined),
@@ -48,11 +52,16 @@ describe('Arena generation finalization', () => {
       }),
       claimTerminal: vi.fn(async () => {
         order.push('claim');
-        return { kind: 'created' as const, resultRef: 'r2://battle/generation-1' };
+        return {
+          kind: 'created' as const,
+          resultRef: 'r2://battle/generation-1',
+          finalized: false,
+        };
       }),
       persistCombatants: vi.fn(async () => { order.push('combatants'); }),
       applyStoryImpacts: vi.fn(async () => { order.push('impacts'); }),
       settleRatings: vi.fn(async () => { order.push('ratings'); }),
+      completeTerminal: vi.fn(async () => { order.push('complete'); }),
       readRanking: vi.fn(async () => {
         order.push('ranking');
         return { success: true };
@@ -65,7 +74,9 @@ describe('Arena generation finalization', () => {
       ranking: { success: true },
     });
 
-    expect(order).toEqual(['r2', 'claim', 'combatants', 'impacts', 'ratings', 'ranking']);
+    expect(order).toEqual([
+      'r2', 'claim', 'combatants', 'impacts', 'ratings', 'complete', 'ranking',
+    ]);
     expect(ports.claimTerminal).toHaveBeenCalledWith(expect.objectContaining({
       generationId: 'generation-1',
       generationRequestId: 'request-1',
@@ -79,6 +90,7 @@ describe('Arena generation finalization', () => {
       claimTerminal: vi.fn(async () => ({
         kind: 'existing' as const,
         resultRef: 'r2://battle/existing',
+        finalized: true,
       })),
       readRanking: vi.fn(async () => ({ success: true, cached: true })),
     });
@@ -111,10 +123,13 @@ describe('Arena generation finalization', () => {
     }));
 
     observeArenaGeneration.mockClear();
-    const failed = createArenaGenerationFinalizer(createPorts({
+    const failedPorts = createPorts({
       storeOutput: vi.fn(async () => { throw new Error('r2-secret-canary'); }),
-    }), { observer: { observeArenaGeneration } });
-    await failed(input);
+    });
+    const failed = createArenaGenerationFinalizer(failedPorts, {
+      observer: { observeArenaGeneration },
+    });
+    await expect(failed(input)).rejects.toThrow('r2-secret-canary');
     expect(observeArenaGeneration).toHaveBeenCalledWith(expect.objectContaining({
       event: 'storage',
       storage: 'r2',
@@ -122,6 +137,47 @@ describe('Arena generation finalization', () => {
       generationId: 'generation-1',
     }));
     expect(JSON.stringify(observeArenaGeneration.mock.calls)).not.toContain('r2-secret-canary');
+    expect(failedPorts.storeOutput).toHaveBeenCalledTimes(3);
+    expect(failedPorts.claimTerminal).toHaveBeenCalledWith(expect.objectContaining({
+      generationId: input.generationId,
+      status: 'failed',
+      errorCode: 'ARENA_R2_STORAGE_FAILED',
+      resultRef: null,
+    }));
+    expect(failedPorts.completeTerminal).toHaveBeenCalledOnce();
+    expect(failedPorts.settleRatings).not.toHaveBeenCalled();
+  });
+
+  it('retries a transient post-claim failure through the idempotent D1 terminal claim', async () => {
+    const applyStoryImpacts = vi.fn()
+      .mockRejectedValueOnce(new Error('D1_TRANSIENT'))
+      .mockResolvedValueOnce(undefined);
+    const ports = createPorts({ applyStoryImpacts });
+    const finalize = createArenaGenerationFinalizer(ports);
+
+    await expect(finalize(input)).resolves.toEqual({
+      resultRef: 'r2://battle/generation-1',
+      ranking: { success: true },
+    });
+    expect(ports.claimTerminal).toHaveBeenCalledTimes(2);
+    expect(applyStoryImpacts).toHaveBeenCalledTimes(2);
+    expect(ports.completeTerminal).toHaveBeenCalledTimes(1);
+  });
+
+  it('persists an explicit failed terminal after bounded finalization retries are exhausted', async () => {
+    const failure = new Error('RATING_SETTLEMENT_UNAVAILABLE');
+    const ports = createPorts({
+      settleRatings: vi.fn(async () => { throw failure; }),
+    });
+    const finalize = createArenaGenerationFinalizer(ports);
+
+    await expect(finalize(input)).rejects.toThrow('RATING_SETTLEMENT_UNAVAILABLE');
+    expect(ports.claimTerminal).toHaveBeenCalledTimes(3);
+    expect(ports.failTerminal).toHaveBeenCalledWith(expect.objectContaining({
+      generationId: input.generationId,
+      failureCode: 'RATING_SETTLEMENT_UNAVAILABLE',
+    }));
+    expect(ports.completeTerminal).not.toHaveBeenCalled();
   });
 
   it.each(['failed', 'cancelled'] as const)(

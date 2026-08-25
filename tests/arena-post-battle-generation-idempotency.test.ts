@@ -23,6 +23,7 @@ describe('Arena post-battle generation idempotency', () => {
       writeArenaHistory: true,
       writeCurrentState: true,
       generationId: 'generation-1',
+      baseRevisionHash: 'a'.repeat(64),
     };
 
     const first = await applyPostBattleUpdates(combatants, report, impacts, null, null, options);
@@ -32,7 +33,9 @@ describe('Arena post-battle generation idempotency', () => {
 
     expect(first[0].arena_history.entries).toHaveLength(1);
     expect(first[0].arena_history.entries[0].metadata.generation_id).toBe('generation-1');
+    expect(first[0].arena_history.entries[0].metadata.base_revision_hash).toBe('a'.repeat(64));
     expect(first[0].current_state.generation_id).toBe('generation-1');
+    expect(first[0].current_state.base_revision_hash).toBe('a'.repeat(64));
     expect(second).toEqual([]);
   });
 });

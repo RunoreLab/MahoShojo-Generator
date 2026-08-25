@@ -1,3 +1,4 @@
+import { ArenaGenerationFinalizationPendingError } from '@mahoshojo/hosted-api/arena-generation/service';
 import type {
   ArenaGenerationExecutor,
   ArenaGenerationExecutionInput,
@@ -10,6 +11,10 @@ import { createArenaStreamProjector } from './stream-projector';
 
 const MAX_ARENA_MATERIALS = 10;
 const MAX_ARENA_AUX_SCENARIOS = 10;
+const MAX_ARENA_ADJUDICATION_EVENTS = 100;
+const MAX_ARENA_QUESTIONNAIRES = 50;
+const MAX_ARENA_NARRATIVE_HISTORY = 50;
+export const MAX_ARENA_COMBATANTS = 32;
 const PREPARED_PAYLOAD_KEY = '__arenaGenerationRuntimeV1';
 
 export type ArenaReasoningEvent =
@@ -31,11 +36,12 @@ export type ArenaGenerationFinalizationInput = {
   generationId: string;
   generationRequestId: string;
   actorKey: string;
+  payloadHash: string;
   payload: Record<string, unknown>;
   metadata: Record<string, unknown>;
   markdown: string;
   telemetry: Record<string, unknown>;
-  status: 'completed' | 'failed' | 'cancelled';
+  status: 'completed' | 'failed' | 'cancelled' | 'producer_lost';
   errorCode: string | null;
   signal: AbortSignal;
 };
@@ -100,6 +106,12 @@ const validatePayload = (payload: Record<string, unknown>): Response | null => {
       error: `该模式至少需要 ${minimum} 位角色`,
     }, 400);
   }
+  if (combatants.length > MAX_ARENA_COMBATANTS) {
+    return jsonResponse({
+      code: 'ARENA_PARTICIPANTS_LIMIT',
+      error: `角色最多 ${MAX_ARENA_COMBATANTS} 位`,
+    }, 413);
+  }
   if (
     Array.isArray(payload.auxScenarios)
     && payload.auxScenarios.length > MAX_ARENA_AUX_SCENARIOS
@@ -108,6 +120,33 @@ const validatePayload = (payload: Record<string, unknown>): Response | null => {
   }
   if (Array.isArray(payload.materials) && payload.materials.length > MAX_ARENA_MATERIALS) {
     return jsonResponse({ code: 'ARENA_MATERIALS_LIMIT', error: '素材最多 10 个' }, 400);
+  }
+  if (
+    Array.isArray(payload.adjudicationEvents)
+    && payload.adjudicationEvents.length > MAX_ARENA_ADJUDICATION_EVENTS
+  ) {
+    return jsonResponse({
+      code: 'ARENA_ADJUDICATION_EVENTS_LIMIT',
+      error: `裁定事件最多 ${MAX_ARENA_ADJUDICATION_EVENTS} 个`,
+    }, 413);
+  }
+  if (
+    Array.isArray(payload.questionnaires)
+    && payload.questionnaires.length > MAX_ARENA_QUESTIONNAIRES
+  ) {
+    return jsonResponse({
+      code: 'ARENA_QUESTIONNAIRES_LIMIT',
+      error: `问卷最多 ${MAX_ARENA_QUESTIONNAIRES} 份`,
+    }, 413);
+  }
+  if (
+    Array.isArray(payload.narrativeHistory)
+    && payload.narrativeHistory.length > MAX_ARENA_NARRATIVE_HISTORY
+  ) {
+    return jsonResponse({
+      code: 'ARENA_NARRATIVE_HISTORY_LIMIT',
+      error: `叙事历史最多 ${MAX_ARENA_NARRATIVE_HISTORY} 条`,
+    }, 413);
   }
   if (payload.pvpContext !== undefined) {
     const context = payload.pvpContext;
@@ -253,6 +292,7 @@ const readWithAbort = async (
 };
 
 const errorCodeOf = (error: unknown, signal: AbortSignal): string => {
+  if (signal.reason === 'producer_lost') return 'PRODUCER_OWNERSHIP_LOST';
   if (signal.aborted) return 'USER_CANCELLED';
   if (error instanceof Error && error.name === 'AbortError') return 'GENERATION_ABORTED';
   return 'GENERATION_FAILED';
@@ -373,6 +413,9 @@ export const createArenaGenerationRuntime = (
     let telemetry: Record<string, unknown> = {};
     let reasoningEnded = false;
     let finalizationStarted = false;
+    let durableFinalizationAttempted = false;
+    let finalizationClaimIndeterminate = false;
+    let finalizationResult: ArenaGenerationFinalizationResult | null = null;
     let providerStartedAt: number | null = null;
     let providerSettled = false;
     const projector = createArenaStreamProjector({
@@ -388,10 +431,39 @@ export const createArenaGenerationRuntime = (
       finalizationStarted = true;
       const startedAt = performance.now();
       try {
+        const terminal: GenerationTerminal = {
+          status,
+          ...(errorCode ? { code: errorCode } : {}),
+        };
+        finalizationClaimIndeterminate = true;
+        const claim = await input.claimFinalization(terminal);
+        finalizationClaimIndeterminate = false;
+        if (claim.kind === 'cancelled') {
+          durableFinalizationAttempted = true;
+          finalizationResult = await dependencies.finalize({
+            generationId: input.generationId,
+            generationRequestId: input.generationRequestId,
+            actorKey: input.actorKey,
+            payloadHash: input.payloadHash,
+            payload: input.payload,
+            metadata: executionMetadata,
+            markdown,
+            telemetry,
+            status: 'cancelled',
+            errorCode: 'USER_CANCELLED',
+            signal: input.signal,
+          });
+          throw new Error('ARENA_GENERATION_CANCELLED');
+        }
+        if (claim.kind !== 'claimed') {
+          throw new Error('ARENA_GENERATION_FINALIZATION_OWNERSHIP_LOST');
+        }
+        durableFinalizationAttempted = true;
         const result = await dependencies.finalize({
           generationId: input.generationId,
           generationRequestId: input.generationRequestId,
           actorKey: input.actorKey,
+          payloadHash: input.payloadHash,
           payload: input.payload,
           metadata: executionMetadata,
           markdown,
@@ -400,6 +472,7 @@ export const createArenaGenerationRuntime = (
           errorCode,
           signal: input.signal,
         });
+        finalizationResult = result;
         observe({
           event: 'phase',
           generationId: input.generationId,
@@ -533,11 +606,36 @@ export const createArenaGenerationRuntime = (
           durationMs: performance.now() - providerStartedAt,
         });
       }
-      const code = errorCodeOf(error, input.signal);
-      const status = input.signal.aborted ? 'cancelled' : 'failed';
-      const finalization = finalizationStarted
-        ? { resultRef: null, ranking: null }
-        : await finalizeOnce(status, code);
+      if (
+        (durableFinalizationAttempted || finalizationClaimIndeterminate)
+        && finalizationResult === null
+      ) {
+        throw new ArenaGenerationFinalizationPendingError(error);
+      }
+      const cancellationFenced = error instanceof Error
+        && error.message === 'ARENA_GENERATION_CANCELLED';
+      const code = cancellationFenced ? 'USER_CANCELLED' : errorCodeOf(error, input.signal);
+      const status = input.signal.reason === 'producer_lost'
+        ? 'producer_lost'
+        : input.signal.aborted || cancellationFenced
+          ? 'cancelled'
+          : 'failed';
+      let finalization: ArenaGenerationFinalizationResult;
+      if (finalizationStarted) {
+        finalization = finalizationResult ?? { resultRef: null, ranking: null };
+      } else {
+        try {
+          finalization = await finalizeOnce(status, code);
+        } catch (finalizationError) {
+          if (
+            (durableFinalizationAttempted || finalizationClaimIndeterminate)
+            && finalizationResult === null
+          ) {
+            throw new ArenaGenerationFinalizationPendingError(finalizationError);
+          }
+          throw finalizationError;
+        }
+      }
       return { status, code, resultRef: finalization.resultRef };
     }
   };

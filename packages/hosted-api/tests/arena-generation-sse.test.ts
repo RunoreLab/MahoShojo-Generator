@@ -45,5 +45,10 @@ describe('Arena resumable SSE contract', () => {
       { headers: { 'Last-Event-ID': '2-0' } },
     ))).toBe('2-0');
   });
-});
 
+  test('rejects malformed Redis cursors at the HTTP boundary', () => {
+    expect(() => resolveResumeCursor(new Request(
+      'https://example.test/api/arena/generations/generation-1/stream?after=not-a-stream-id',
+    ))).toThrow('RESUME_CURSOR_INVALID');
+  });
+});

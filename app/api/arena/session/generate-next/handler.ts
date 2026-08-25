@@ -32,6 +32,7 @@ const json = (payload: unknown, init?: ResponseInit): Response =>
 
 const BattleStoryRequestSchema = z.object({
   sessionId: z.string().min(1),
+  generationRequestId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/u),
   action: z.enum(['start', 'continue', 'branch', 'rewrite']),
   sourceChapterId: z.string().min(1).optional(),
   chapterIndex: z.number().int().positive().optional(),
@@ -108,26 +109,32 @@ const BattleStoryRequestSchema = z.object({
   customProvider: z.unknown().optional(),
 });
 
-const extractGenerationMeta = (response: Response): { generationId?: string } => {
-  const raw = response.headers.get('x-mahoshojo-stream-meta');
-  if (!raw) return {};
-  try {
-    const parsed = JSON.parse(decodeURIComponent(raw));
-    const generationId = typeof parsed?.generationId === 'string' ? parsed.generationId.trim() : '';
-    return generationId ? { generationId } : {};
-  } catch {
-    return {};
-  }
+const extractGenerationMeta = (response: Response): {
+  generationId?: string;
+  generationRequestId?: string;
+} => {
+  const generationId = response.headers.get('x-mahoshojo-generation-id')?.trim() ?? '';
+  const generationRequestId = response.headers
+    .get('x-mahoshojo-generation-request-id')?.trim() ?? '';
+  return {
+    ...(generationId ? { generationId } : {}),
+    ...(generationRequestId ? { generationRequestId } : {}),
+  };
 };
 
-const parseSseBlock = (block: string): { event: string; data: string } | null => {
+const parseSseBlock = (block: string): { id: string | null; event: string; data: string } | null => {
   const lines = block.split('\n');
+  let id: string | null = null;
   let event = 'message';
   const dataLines: string[] = [];
 
   for (const line of lines) {
     if (!line) continue;
     if (line.startsWith(':')) continue;
+    if (line.startsWith('id:')) {
+      id = line.slice('id:'.length).trim() || null;
+      continue;
+    }
     if (line.startsWith('event:')) {
       event = line.slice('event:'.length).trim() || 'message';
       continue;
@@ -138,11 +145,16 @@ const parseSseBlock = (block: string): { event: string; data: string } | null =>
   }
 
   if (dataLines.length === 0) return null;
-  return { event, data: dataLines.join('\n') };
+  return { id, event, data: dataLines.join('\n') };
 };
 
-const encodeSseEvent = (encoder: TextEncoder, event: string, payload: unknown): Uint8Array => {
-  return encoder.encode(`event: ${event}\ndata: ${JSON.stringify(payload ?? null)}\n\n`);
+const encodeSseEvent = (
+  encoder: TextEncoder,
+  event: string,
+  payload: unknown,
+  id: string | null = null,
+): Uint8Array => {
+  return encoder.encode(`${id ? `id: ${id}\n` : ''}event: ${event}\ndata: ${JSON.stringify(payload ?? null)}\n\n`);
 };
 
 const resolveOptionalReadLimit = (input: {
@@ -177,6 +189,7 @@ export const buildUpstreamRequestBody = (
     fallback: 10,
   });
   const requestBody: Record<string, unknown> = {
+    generationRequestId: payload.generationRequestId,
     combatants: payload.chapterContext.workingCombatants,
     mode: payload.seed.mode,
     userGuidance: payload.userGuidance,
@@ -364,6 +377,17 @@ async function handler(req: NextRequest): Promise<Response> {
     if (upstreamMetaHeader) {
       responseHeaders.set('x-mahoshojo-stream-meta', upstreamMetaHeader);
     }
+    const actorToken = upstreamResponse.headers.get('x-mahoshojo-generation-actor-token');
+    if (actorToken) {
+      responseHeaders.set('x-mahoshojo-generation-actor-token', actorToken);
+    }
+    for (const headerName of [
+      'x-mahoshojo-generation-id',
+      'x-mahoshojo-generation-request-id',
+    ]) {
+      const value = upstreamResponse.headers.get(headerName);
+      if (value) responseHeaders.set(headerName, value);
+    }
 
     let released = false;
     const releaseOnce = () => {
@@ -383,6 +407,9 @@ async function handler(req: NextRequest): Promise<Response> {
             ...(payload.sourceChapterId ? { sourceChapterId: payload.sourceChapterId } : {}),
             providerMode: providerResolved.value.providerMode,
             ...(generationMeta.generationId ? { generationId: generationMeta.generationId } : {}),
+            ...(generationMeta.generationRequestId
+              ? { generationRequestId: generationMeta.generationRequestId }
+              : {}),
             acceptedAt: Date.now(),
           })
         );
@@ -435,7 +462,12 @@ async function handler(req: NextRequest): Promise<Response> {
             );
           }
 
-          controller.enqueue(encodeSseEvent(encoder, parsedBlock.event, payloadJson ?? parsedBlock.data));
+          controller.enqueue(encodeSseEvent(
+            encoder,
+            parsedBlock.event,
+            payloadJson ?? parsedBlock.data,
+            parsedBlock.id,
+          ));
         };
 
         try {

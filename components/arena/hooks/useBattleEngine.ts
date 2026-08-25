@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo } from 'react';
+import { useCallback, useMemo } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 
 import type { NewsReport } from '@/components/BattleReportCard';
@@ -42,7 +42,6 @@ import { buildCustomProviderRequestPayload } from '@/lib/ai/custom-provider';
 import type { GenerationRankingResponse } from '@/lib/arena/generation-ranking';
 import {
   openArenaGenerationStream,
-  readPersistedArenaGeneration,
 } from '@/lib/arena/resumable-generation-client';
 
 const sanitizeTextByShieldWords = (text: string): string => applyShieldWords(text).filteredText;
@@ -203,6 +202,7 @@ const appendNarrativeHistoryIfEnabled = async (payload: {
   enabled: boolean;
   title: string;
   contentMarkdown: string;
+  generationId?: string | null;
 }): Promise<void> => {
   try {
     if (!payload.enabled) return;
@@ -218,6 +218,7 @@ const appendNarrativeHistoryIfEnabled = async (payload: {
     useNarrativeHistoryStore.getState().appendEntry({
       title: (titleCheck.filteredText || title || '未命名战报').trim(),
       content: (contentCheck.filteredText || content).trim(),
+      generationId: payload.generationId,
     });
   } catch (error) {
     // 叙事历史是“增强功能”，失败不应影响战报生成主流程（localStorage 配额/浏览器异常等）
@@ -730,6 +731,7 @@ export const useBattleEngine = () => {
             enabled: settings.writeNarrativeHistory,
             title: reportWithScenario.headline,
             contentMarkdown: toBattleReportMarkdown(reportWithScenario),
+            generationId: result.generationId,
           });
         } catch (error) {
           console.warn('写入叙事历史失败（已忽略）', error);
@@ -746,7 +748,6 @@ export const useBattleEngine = () => {
 
 		        try {
 		          setStreamCharacterGuidances(null);
-              const streamTransportMode = settings.streamTransport === 'plain-stream' ? 'plain-stream' : 'sse';
 		          const debugSseQuery = (() => {
 		            try {
 		              if (typeof window === 'undefined') return '';
@@ -758,22 +759,15 @@ export const useBattleEngine = () => {
 		              return '';
 		            }
 		          })();
-		          const debugSseEnabled = streamTransportMode === 'sse' && Boolean(debugSseQuery);
+		          const debugSseEnabled = Boolean(debugSseQuery);
               const query = new URLSearchParams();
-              if (streamTransportMode === 'sse') {
-                query.set('format', 'sse');
-              }
+              query.set('format', 'sse');
               if (debugSseQuery) {
                 query.set('debugSse', '1');
               }
               const endpoint = `/api/arena/generate-stream${query.toString() ? `?${query.toString()}` : ''}`;
-              if (streamTransportMode === 'sse') {
-                requestHeaders.Accept = 'text/event-stream';
-              } else {
-                delete requestHeaders.Accept;
-              }
-	          const response = streamTransportMode === 'sse'
-                ? await openArenaGenerationStream({
+              requestHeaders.Accept = 'text/event-stream';
+	          const response = await openArenaGenerationStream({
                   endpoint,
                   body: requestBody,
                   headers: requestHeaders,
@@ -788,12 +782,6 @@ export const useBattleEngine = () => {
                       setError('生成进程已丢失，无法安全自动重试。');
                     }
                   },
-                })
-                : await generationApiFetch(endpoint, {
-                  method: 'POST',
-                  headers: requestHeaders,
-                  body: JSON.stringify(requestBody),
-                  signal: abortController.signal,
                 });
 
           if (!response.ok) {
@@ -1134,7 +1122,12 @@ export const useBattleEngine = () => {
                 accumulatedText = markdown;
                 lastCheckedLength = 0;
                 setStreamingMarkdown(sanitizeTextByShieldWords(markdown));
-                if (reasoning) appendReasoningChunkToStore(reasoning, 'sdk');
+                setStreamReasoning(reasoning
+                  ? appendReasoningDelta(null, sanitizeTextByShieldWords(reasoning), {
+                    source: 'sdk',
+                    status: payload?.status === 'completed' ? 'done' : 'thinking',
+                  })
+                  : null);
                 return;
               }
 
@@ -1553,6 +1546,7 @@ export const useBattleEngine = () => {
               enabled: settings.writeNarrativeHistory,
               title: extractTitleFromBattleMarkdown(markdownForUi),
               contentMarkdown: markdownForUi,
+              generationId: resumableGenerationId,
             });
           } catch (error) {
             console.warn('写入叙事历史失败（已忽略）', error);
@@ -1695,21 +1689,6 @@ export const useBattleEngine = () => {
   const stopGeneration = useCallback(() => {
     sharedGenerationAbortController?.abort(STREAM_ABORT_REASON_USER);
   }, []);
-
-  useEffect(() => {
-    const pending = readPersistedArenaGeneration();
-    if (
-      !pending
-      || !pending.generationId
-      || !['connecting', 'generating', 'reconnecting', 'resuming'].includes(pending.state)
-      || isGenerating
-      || sharedGenerationAbortController
-    ) return;
-    const timer = window.setTimeout(() => {
-      void handleGenerate();
-    }, 0);
-    return () => window.clearTimeout(timer);
-  }, [handleGenerate, isGenerating]);
 
   const handleRedoUpdates = useCallback(async () => {
     if (isCooldown) {

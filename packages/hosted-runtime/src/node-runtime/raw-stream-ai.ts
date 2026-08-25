@@ -277,7 +277,6 @@ async function generateWithStreamAIUsing(
                 if (options?.telemetry) {
                     options.telemetry.providerName = provider.name;
                     options.telemetry.providerType = provider.type;
-                    options.telemetry.providerBaseUrl = provider.baseUrl;
                     options.telemetry.model = selectedModel;
                     options.telemetry.providerIndex = providerIndex;
                     options.telemetry.attempt = attempt + 1;

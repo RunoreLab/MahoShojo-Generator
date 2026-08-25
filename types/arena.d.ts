@@ -21,6 +21,8 @@ export interface CharacterCurrentState {
   updated_at?: string | null;
   /** 可恢复生成的幂等来源；只用于阻止同一终态重复应用。 */
   generation_id?: string | null;
+  /** 应用该 generation 时的本地卡片基线摘要。 */
+  base_revision_hash?: string | null;
 }
 
 export interface ArenaHistoryEntry {
@@ -38,6 +40,8 @@ export interface ArenaHistoryEntry {
     non_native_data_involved: boolean;
     /** 可恢复生成的幂等来源；旧记录可缺失。 */
     generation_id?: string | null;
+    /** 应用该 generation 时的本地卡片基线摘要。 */
+    base_revision_hash?: string | null;
   };
 }
 

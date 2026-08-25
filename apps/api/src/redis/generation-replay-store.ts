@@ -73,12 +73,76 @@ const MARK_RUNNING_SCRIPT = `
 local raw = redis.call('GET', KEYS[1])
 if not raw then return 0 end
 local state = cjson.decode(raw)
+if state.producerToken ~= ARGV[1] then return -1 end
+if state.status ~= 'reserved' then return -1 end
 if state.terminal ~= nil and state.terminal ~= cjson.null then return 0 end
+if state.leaseExpiresAt == nil or state.leaseExpiresAt == cjson.null or state.leaseExpiresAt <= ARGV[2] then return 0 end
+if state.cancelRequested == true then
+  state.status = 'finalizing'
+  state.updatedAt = ARGV[2]
+  state.leaseExpiresAt = ARGV[3]
+  redis.call('SET', KEYS[1], cjson.encode(state), 'PX', ARGV[4])
+  redis.call('PEXPIRE', state.reservationKey, ARGV[4])
+  return 2
+end
 state.status = 'running'
-state.updatedAt = ARGV[1]
-state.leaseExpiresAt = ARGV[2]
-redis.call('SET', KEYS[1], cjson.encode(state), 'PX', ARGV[3])
-redis.call('PEXPIRE', state.reservationKey, ARGV[3])
+state.updatedAt = ARGV[2]
+state.leaseExpiresAt = ARGV[3]
+redis.call('SET', KEYS[1], cjson.encode(state), 'PX', ARGV[4])
+redis.call('PEXPIRE', state.reservationKey, ARGV[4])
+return 1
+`;
+
+const CLAIM_FINALIZATION_SCRIPT = `
+-- GEN_CLAIM_FINALIZATION_V1
+local raw = redis.call('GET', KEYS[1])
+if not raw then return 'fenced' end
+local state = cjson.decode(raw)
+if state.producerToken ~= ARGV[1] then return 'fenced' end
+if state.terminal ~= nil and state.terminal ~= cjson.null then return 'fenced' end
+if state.status ~= 'running' and state.status ~= 'finalizing' then return 'fenced' end
+if state.leaseExpiresAt == nil or state.leaseExpiresAt == cjson.null or state.leaseExpiresAt <= ARGV[2] then return 'fenced' end
+state.status = 'finalizing'
+state.updatedAt = ARGV[2]
+state.leaseExpiresAt = ARGV[3]
+redis.call('SET', KEYS[1], cjson.encode(state), 'PX', ARGV[4])
+redis.call('PEXPIRE', state.reservationKey, ARGV[4])
+if state.cancelRequested == true then return 'cancelled' end
+return 'claimed'
+`;
+
+const CLAIM_LEASE_EXPIRY_SCRIPT = `
+-- GEN_CLAIM_LEASE_EXPIRY_V1
+local raw = redis.call('GET', KEYS[1])
+if not raw then return { 'not-found', '', '' } end
+local state = cjson.decode(raw)
+if state.actorHash ~= ARGV[1] then return { 'forbidden', '', '' } end
+if state.terminal ~= nil and state.terminal ~= cjson.null then
+  return { 'terminal:' .. state.terminal.status, '', '' }
+end
+if state.status ~= 'reserved' and state.status ~= 'running' and state.status ~= 'finalizing' then
+  return { 'not-expired', '', '' }
+end
+if state.leaseExpiresAt == nil or state.leaseExpiresAt == cjson.null or state.leaseExpiresAt > ARGV[2] then
+  return { 'not-expired', '', '' }
+end
+state.producerToken = ARGV[3]
+state.status = 'finalizing'
+state.updatedAt = ARGV[2]
+state.leaseExpiresAt = ARGV[4]
+redis.call('SET', KEYS[1], cjson.encode(state), 'PX', ARGV[5])
+redis.call('PEXPIRE', state.reservationKey, ARGV[5])
+return { 'claimed', state.generationRequestId, state.payloadHash, state.mode or '' }
+`;
+
+const RELEASE_RESERVATION_SCRIPT = `
+-- GEN_RELEASE_RESERVATION_V1
+local raw = redis.call('GET', KEYS[1])
+if not raw then return 0 end
+local state = cjson.decode(raw)
+if state.producerToken ~= ARGV[1] or state.status ~= 'reserved' then return 0 end
+redis.call('DEL', KEYS[1])
+redis.call('DEL', state.reservationKey)
 return 1
 `;
 
@@ -87,12 +151,14 @@ const HEARTBEAT_SCRIPT = `
 local raw = redis.call('GET', KEYS[1])
 if not raw then return 0 end
 local state = cjson.decode(raw)
-if state.status ~= 'running' then return 0 end
+if state.producerToken ~= ARGV[1] then return -1 end
+if state.status ~= 'running' and state.status ~= 'finalizing' then return 0 end
 if state.terminal ~= nil and state.terminal ~= cjson.null then return 0 end
-state.updatedAt = ARGV[1]
-state.leaseExpiresAt = ARGV[2]
-redis.call('SET', KEYS[1], cjson.encode(state), 'PX', ARGV[3])
-redis.call('PEXPIRE', state.reservationKey, ARGV[3])
+if state.leaseExpiresAt == nil or state.leaseExpiresAt == cjson.null or state.leaseExpiresAt <= ARGV[2] then return 0 end
+state.updatedAt = ARGV[2]
+state.leaseExpiresAt = ARGV[3]
+redis.call('SET', KEYS[1], cjson.encode(state), 'PX', ARGV[4])
+redis.call('PEXPIRE', state.reservationKey, ARGV[4])
 if state.cancelRequested == true then return 2 end
 return 1
 `;
@@ -100,9 +166,11 @@ return 1
 const APPEND_SCRIPT = `
 -- GEN_APPEND_V1
 local raw = redis.call('GET', KEYS[1])
-if not raw then return redis.error_reply('GENERATION_STATE_NOT_FOUND') end
+if not raw then return { 'fenced' } end
 local state = cjson.decode(raw)
-local events = cjson.decode(ARGV[1])
+if state.producerToken ~= ARGV[1] or (state.status ~= 'running' and state.status ~= 'finalizing') then return { 'fenced' } end
+if state.leaseExpiresAt == nil or state.leaseExpiresAt == cjson.null or state.leaseExpiresAt <= ARGV[5] then return { 'fenced' } end
+local events = cjson.decode(ARGV[2])
 local ids = {}
 for index, event in ipairs(events) do
   ids[index] = redis.call(
@@ -111,12 +179,12 @@ for index, event in ipairs(events) do
     'data', cjson.encode(event.data)
   )
 end
-redis.call('XTRIM', KEYS[2], 'MAXLEN', '~', ARGV[2])
-redis.call('PEXPIRE', KEYS[2], ARGV[3])
+redis.call('XTRIM', KEYS[2], 'MAXLEN', ARGV[3])
+redis.call('PEXPIRE', KEYS[2], ARGV[4])
 if #ids > 0 then state.lastEventId = ids[#ids] end
-state.updatedAt = ARGV[4]
-redis.call('SET', KEYS[1], cjson.encode(state), 'PX', ARGV[3])
-redis.call('PEXPIRE', state.reservationKey, ARGV[3])
+state.updatedAt = ARGV[5]
+redis.call('SET', KEYS[1], cjson.encode(state), 'PX', ARGV[4])
+redis.call('PEXPIRE', state.reservationKey, ARGV[4])
 return ids
 `;
 
@@ -125,10 +193,21 @@ const SNAPSHOT_SCRIPT = `
 local raw = redis.call('GET', KEYS[1])
 if not raw then return 0 end
 local state = cjson.decode(raw)
-state.snapshot = cjson.decode(ARGV[1])
-state.updatedAt = ARGV[2]
-redis.call('SET', KEYS[1], cjson.encode(state), 'PX', ARGV[3])
-redis.call('PEXPIRE', state.reservationKey, ARGV[3])
+if state.producerToken ~= ARGV[1] then return -1 end
+if state.leaseExpiresAt == nil or state.leaseExpiresAt == cjson.null or state.leaseExpiresAt <= ARGV[3] then return -1 end
+local snapshot = cjson.decode(ARGV[2])
+local terminal = state.terminal
+if state.status == 'running' or state.status == 'finalizing' then
+  if snapshot.status ~= 'running' then return -1 end
+elseif terminal ~= nil and terminal ~= cjson.null then
+  if snapshot.status ~= state.status then return -1 end
+else
+  return -1
+end
+state.snapshot = snapshot
+state.updatedAt = ARGV[3]
+redis.call('SET', KEYS[1], cjson.encode(state), 'PX', ARGV[4])
+redis.call('PEXPIRE', state.reservationKey, ARGV[4])
 return 1
 `;
 
@@ -137,15 +216,18 @@ const TERMINAL_SCRIPT = `
 local raw = redis.call('GET', KEYS[1])
 if not raw then return 0 end
 local state = cjson.decode(raw)
+if state.producerToken ~= ARGV[1] then return -1 end
 if state.terminal ~= nil and state.terminal ~= cjson.null then return 0 end
-local terminal = cjson.decode(ARGV[1])
+if state.status ~= 'running' and state.status ~= 'reserved' and state.status ~= 'finalizing' then return -1 end
+if state.leaseExpiresAt == nil or state.leaseExpiresAt == cjson.null or state.leaseExpiresAt <= ARGV[3] then return -1 end
+local terminal = cjson.decode(ARGV[2])
 state.status = terminal.status
 state.terminal = terminal
 state.leaseExpiresAt = cjson.null
-state.updatedAt = ARGV[2]
-redis.call('SET', KEYS[1], cjson.encode(state), 'PX', ARGV[3])
-redis.call('PEXPIRE', KEYS[2], ARGV[3])
-redis.call('PEXPIRE', state.reservationKey, ARGV[3])
+state.updatedAt = ARGV[3]
+redis.call('SET', KEYS[1], cjson.encode(state), 'PX', ARGV[4])
+redis.call('PEXPIRE', KEYS[2], ARGV[4])
+redis.call('PEXPIRE', state.reservationKey, ARGV[4])
 return 1
 `;
 
@@ -158,6 +240,7 @@ if state.actorHash ~= ARGV[1] then return 'forbidden' end
 if state.terminal ~= nil and state.terminal ~= cjson.null then
   return 'terminal:' .. state.terminal.status
 end
+if state.status == 'finalizing' then return 'finalizing' end
 state.cancelRequested = true
 state.cancelReason = ARGV[2]
 state.updatedAt = ARGV[3]
@@ -168,6 +251,7 @@ return 'accepted'
 
 const READ_SCRIPT = `
 -- GEN_READ_V1
+if redis.call('EXISTS', KEYS[1]) == 0 then return { 'stream-missing', '[]' } end
 local after = ARGV[1]
 if after ~= '' then
   local first = redis.call('XRANGE', KEYS[1], '-', '+', 'COUNT', 1)
@@ -191,6 +275,7 @@ for _, entry in ipairs(entries) do
     data = fields.data
   }
 end
+if #normalized == 0 then return { 'events', '[]' } end
 return { 'events', cjson.encode(normalized) }
 `;
 
@@ -234,6 +319,7 @@ const parseReservation = (
 const isGenerationStatus = (value: unknown): value is GenerationStatus => [
   'reserved',
   'running',
+  'finalizing',
   'completed',
   'failed',
   'cancelled',
@@ -248,6 +334,7 @@ const parseStoredState = (raw: string): StoredGenerationState => {
     || typeof parsed.generationId !== 'string'
     || typeof parsed.generationRequestId !== 'string'
     || typeof parsed.payloadHash !== 'string'
+    || typeof parsed.producerToken !== 'string'
     || !isGenerationStatus(parsed.status)
     || typeof parsed.updatedAt !== 'string'
   ) {
@@ -259,6 +346,8 @@ const parseStoredState = (raw: string): StoredGenerationState => {
     generationId: parsed.generationId,
     generationRequestId: parsed.generationRequestId,
     payloadHash: parsed.payloadHash,
+    mode: typeof parsed.mode === 'string' ? parsed.mode : null,
+    producerToken: parsed.producerToken,
     status: parsed.status,
     lastEventId: typeof parsed.lastEventId === 'string' ? parsed.lastEventId : null,
     updatedAt: parsed.updatedAt,
@@ -283,20 +372,23 @@ const parseEvent = (entry: RedisStreamMessage): GenerationStreamEvent => {
 };
 
 const parseAtomicRead = (raw: unknown): {
-  kind: 'events' | 'window-lost';
+  kind: 'events' | 'window-lost' | 'stream-missing';
   events: GenerationStreamEvent[];
 } => {
   if (
     !Array.isArray(raw)
-    || (raw[0] !== 'events' && raw[0] !== 'window-lost')
+    || (raw[0] !== 'events' && raw[0] !== 'window-lost' && raw[0] !== 'stream-missing')
     || typeof raw[1] !== 'string'
   ) {
     throw new Error('REDIS_GENERATION_READ_INVALID');
   }
   if (raw[0] === 'window-lost') return { kind: 'window-lost', events: [] };
+  if (raw[0] === 'stream-missing') return { kind: 'stream-missing', events: [] };
   let entries: unknown;
   try {
-    entries = JSON.parse(raw[1]);
+    // Redis Lua cjson encodes an empty table as `{}` unless the script emits an
+    // explicit `[]`. Accept the historical shape while all new evaluations use [].
+    entries = raw[1] === '{}' ? [] : JSON.parse(raw[1]);
   } catch {
     throw new Error('REDIS_GENERATION_READ_INVALID');
   }
@@ -349,6 +441,8 @@ export const createRedisGenerationReplayStore = (
         generationId: input.generationId,
         generationRequestId: input.generationRequestId,
         payloadHash: input.payloadHash,
+        mode: input.mode ?? null,
+        producerToken: input.producerToken,
         status: 'reserved',
         lastEventId: null,
         updatedAt: input.now,
@@ -376,31 +470,108 @@ export const createRedisGenerationReplayStore = (
     async markRunning(input) {
       const result = await options.getClient().eval(MARK_RUNNING_SCRIPT, {
         keys: [stateKey(input.generationId)],
-        arguments: [input.now, input.leaseExpiresAt, String(activeTtlMs)],
+        arguments: [input.producerToken, input.now, input.leaseExpiresAt, String(activeTtlMs)],
       });
-      if (result !== 1) throw new Error('REDIS_GENERATION_OWNERSHIP_LOST');
+      if (result !== 2 && result !== 1 && result !== 0 && result !== -1) {
+        throw new Error('REDIS_GENERATION_OWNERSHIP_INVALID');
+      }
+      return { owned: result === 1 || result === 2, cancelRequested: result === 2 };
+    },
+
+    async claimFinalization(input) {
+      const result = await options.getClient().eval(CLAIM_FINALIZATION_SCRIPT, {
+        keys: [stateKey(input.generationId)],
+        arguments: [
+          input.producerToken,
+          input.now,
+          input.leaseExpiresAt,
+          String(activeTtlMs),
+        ],
+      });
+      if (result !== 'claimed' && result !== 'cancelled' && result !== 'fenced') {
+        throw new Error('REDIS_GENERATION_FINALIZATION_CLAIM_INVALID');
+      }
+      return { kind: result };
+    },
+
+    async claimLeaseExpiry(input) {
+      const result = await options.getClient().eval(CLAIM_LEASE_EXPIRY_SCRIPT, {
+        keys: [stateKey(input.generationId)],
+        arguments: [
+          hashKeyPart(input.actorKey),
+          input.now,
+          input.reaperToken,
+          input.leaseExpiresAt,
+          String(activeTtlMs),
+        ],
+      });
+      if (!Array.isArray(result) || typeof result[0] !== 'string') {
+        throw new Error('REDIS_GENERATION_REAPER_CLAIM_INVALID');
+      }
+      const kind = result[0];
+      if (
+        kind === 'claimed'
+        && typeof result[1] === 'string'
+        && typeof result[2] === 'string'
+        && typeof result[3] === 'string'
+      ) {
+        return {
+          kind: 'claimed' as const,
+          generationRequestId: result[1],
+          payloadHash: result[2],
+          mode: result[3] || null,
+        };
+      }
+      if (kind === 'not-expired' || kind === 'forbidden' || kind === 'not-found') {
+        return { kind };
+      }
+      if (kind.startsWith('terminal:')) {
+        const status = kind.slice('terminal:'.length);
+        if (status === 'completed' || status === 'failed' || status === 'cancelled'
+          || status === 'producer_lost') {
+          return { kind: 'terminal' as const, status };
+        }
+      }
+      throw new Error('REDIS_GENERATION_REAPER_CLAIM_INVALID');
+    },
+
+    async releaseReservation(input) {
+      const result = await options.getClient().eval(RELEASE_RESERVATION_SCRIPT, {
+        keys: [stateKey(input.generationId)],
+        arguments: [input.producerToken],
+      });
+      if (result !== 0 && result !== 1) {
+        throw new Error('REDIS_GENERATION_RESERVATION_RELEASE_INVALID');
+      }
+      return { released: result === 1 };
     },
 
     async heartbeat(input) {
       const result = await options.getClient().eval(HEARTBEAT_SCRIPT, {
         keys: [stateKey(input.generationId)],
-        arguments: [input.now, input.leaseExpiresAt, String(activeTtlMs)],
+        arguments: [input.producerToken, input.now, input.leaseExpiresAt, String(activeTtlMs)],
       });
-      if (result !== 1 && result !== 2) throw new Error('REDIS_GENERATION_LEASE_LOST');
-      return { cancelRequested: result === 2 };
+      if (result !== -1 && result !== 0 && result !== 1 && result !== 2) {
+        throw new Error('REDIS_GENERATION_LEASE_INVALID');
+      }
+      return { owned: result === 1 || result === 2, cancelRequested: result === 2 };
     },
 
     async appendEvents(input) {
-      if (input.events.length === 0) return { events: [] };
+      if (input.events.length === 0) return { owned: true, events: [] };
       const raw = await options.getClient().eval(APPEND_SCRIPT, {
         keys: [stateKey(input.generationId), eventsKey(input.generationId)],
         arguments: [
+          input.producerToken,
           JSON.stringify(input.events),
           String(maxEvents),
           String(activeTtlMs),
           input.now,
         ],
       });
+      if (Array.isArray(raw) && raw.length === 1 && raw[0] === 'fenced') {
+        return { owned: false, events: [] };
+      }
       if (
         !Array.isArray(raw)
         || raw.length !== input.events.length
@@ -409,6 +580,7 @@ export const createRedisGenerationReplayStore = (
         throw new Error('REDIS_GENERATION_APPEND_INVALID');
       }
       return {
+        owned: true,
         events: input.events.map((event, index) => ({
           ...event,
           id: raw[index] as string,
@@ -419,9 +591,17 @@ export const createRedisGenerationReplayStore = (
     async writeSnapshot(input) {
       const result = await options.getClient().eval(SNAPSHOT_SCRIPT, {
         keys: [stateKey(input.generationId)],
-        arguments: [JSON.stringify(input.snapshot), input.now, String(activeTtlMs)],
+        arguments: [
+          input.producerToken,
+          JSON.stringify(input.snapshot),
+          input.now,
+          String(input.snapshot.status === 'running' ? activeTtlMs : terminalTtlMs),
+        ],
       });
-      if (result !== 1) throw new Error('REDIS_GENERATION_STATE_NOT_FOUND');
+      if (result !== -1 && result !== 0 && result !== 1) {
+        throw new Error('REDIS_GENERATION_SNAPSHOT_INVALID');
+      }
+      return { owned: result === 1 };
     },
 
     async readSnapshot(input) {
@@ -436,25 +616,38 @@ export const createRedisGenerationReplayStore = (
         keys: [key],
         arguments: [input.after ?? '', String(MAX_READ_EVENTS)],
       }));
-      if (immediate.kind === 'window-lost' || immediate.events.length > 0) return immediate;
+      if (immediate.kind !== 'events' || immediate.events.length > 0) return immediate;
 
       const tail = await client.xRead(
         [{ key, id: input.after ?? '0-0' }],
         { BLOCK: Math.max(1, Math.floor(input.blockMs)), COUNT: MAX_READ_EVENTS },
       );
-      return {
-        kind: 'events' as const,
-        events: (tail?.flatMap((stream) => stream.messages) ?? []).map(parseEvent),
-      };
+      if (!tail?.some((stream) => stream.messages.length > 0)) {
+        return { kind: 'events' as const, events: [] };
+      }
+      // XREAD cannot atomically prove that `after` survived an exact trim while it
+      // was blocked. Re-read through Lua and use that result as the authoritative
+      // batch so a removed cursor becomes window-lost instead of silently skipping.
+      return parseAtomicRead(await client.eval(READ_SCRIPT, {
+        keys: [key],
+        arguments: [input.after ?? '', String(MAX_READ_EVENTS)],
+      }));
     },
 
     async markTerminal(input) {
       const raw = await options.getClient().eval(TERMINAL_SCRIPT, {
         keys: [stateKey(input.generationId), eventsKey(input.generationId)],
-        arguments: [JSON.stringify(input.terminal), input.now, String(terminalTtlMs)],
+        arguments: [
+          input.producerToken,
+          JSON.stringify(input.terminal),
+          input.now,
+          String(terminalTtlMs),
+        ],
       });
-      if (raw !== 0 && raw !== 1) throw new Error('REDIS_GENERATION_TERMINAL_INVALID');
-      return { applied: raw === 1 };
+      if (raw !== -1 && raw !== 0 && raw !== 1) {
+        throw new Error('REDIS_GENERATION_TERMINAL_INVALID');
+      }
+      return { owned: raw !== -1, applied: raw === 1 };
     },
 
     async readState(input) {
@@ -478,7 +671,12 @@ export const createRedisGenerationReplayStore = (
           String(activeTtlMs),
         ],
       });
-      if (raw === 'accepted' || raw === 'forbidden' || raw === 'not-found') {
+      if (
+        raw === 'accepted'
+        || raw === 'finalizing'
+        || raw === 'forbidden'
+        || raw === 'not-found'
+      ) {
         return { kind: raw };
       }
       if (typeof raw === 'string' && raw.startsWith('terminal:')) {

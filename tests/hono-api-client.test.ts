@@ -54,7 +54,7 @@ describe('Hono API 客户端', () => {
   test('开关开启时将白名单路由切换到 Hono', () => {
     honoApiConfig.enabled = true;
     expect(resolveGenerationApiUrl('/api/generate-free?format=sse')).toBe(
-      'https://homura.colanns.me/api/generate-free?format=sse',
+      'https://api.mahoshojo.colanns.me/api/generate-free?format=sse',
     );
     expect(resolveGenerationApiUrl('/api/tachie/generate')).toBe('/api/tachie/generate');
   });
@@ -71,7 +71,8 @@ describe('Hono API 客户端', () => {
 
     const [target, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
     const headers = new Headers(init.headers);
-    expect(target).toBe('https://homura.colanns.me/api/generate-game-card');
+    expect(target).toBe('https://api.mahoshojo.colanns.me/api/generate-game-card');
+    expect(target).not.toContain('homura.colanns.me');
     expect(init.credentials).toBe('omit');
     expect(headers.get('Authorization')).toBe('Bearer auth-key');
     expect(headers.get('x-mahoshojo-activity-token')).toBe('activity-token');

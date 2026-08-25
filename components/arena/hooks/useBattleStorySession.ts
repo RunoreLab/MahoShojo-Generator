@@ -49,10 +49,15 @@ import { readJsonOrTextFromResponse, resolveApiErrorMessage } from '@/lib/client
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
 import { useProviderModeCooldown } from '@/lib/cooldown';
 import { extractHeadlineFromMarkdown, extractWinnerFromText } from '@/lib/arena/battle-report-log-utils';
+import {
+  captureArenaGenerationActorToken,
+  withArenaGenerationActorToken,
+} from '@/lib/arena/resumable-generation-client';
 import { readScenarioBattleStoryConfig } from '@/lib/scenario-battle-story';
 import { readTextAndReasoningStreamFromResponse } from '@/lib/stream/read-text-and-reasoning-stream';
 import { STREAM_ABORT_REASON_USER } from '@/lib/stream/abort';
 import { buildStreamSoftTimeoutMessage } from '@/lib/stream/timeout';
+import { hashArenaCombatantBaseRevision } from '@mahoshojo/domain/arena-reconciliation';
 
 import { useBattleStore } from '../stores/useBattleStore';
 import { BattleStoreState, Combatant, CombatantData } from '../types';
@@ -753,8 +758,9 @@ export function useBattleStorySession() {
       mode: BattleStorySessionSource['mode'];
       seed: BattleStorySessionSeed;
       workingCombatants: Array<Record<string, unknown>>;
-      userGuidance: string;
-      meta?: Record<string, unknown> | null;
+    userGuidance: string;
+    generationId: string | null;
+    meta?: Record<string, unknown> | null;
     }): Promise<{ workingCombatants: Array<Record<string, unknown>>; warning?: string }> => {
       if (!input.seed.settings.writeArenaHistory && !input.seed.settings.writeCurrentState) {
         return { workingCombatants: input.workingCombatants };
@@ -785,12 +791,15 @@ export function useBattleStorySession() {
           ? input.meta.impacts
           : (input.digest.impactDigest ?? []);
 
+      const baseRevisionHash = await hashArenaCombatantBaseRevision(input.workingCombatants);
       const response = await fetch('/api/arena/update-combatants-after-stream', {
         method: 'POST',
-        headers: {
+        headers: withArenaGenerationActorToken({
           'Content-Type': 'application/json',
-        },
+        }),
         body: JSON.stringify({
+          generationId: input.generationId,
+          baseRevisionHash,
           combatants: input.workingCombatants,
           report: {
             headline,
@@ -890,10 +899,11 @@ export function useBattleStorySession() {
       try {
       const response = await generationApiFetch('/api/arena/session/generate-next', {
           method: 'POST',
-          headers: await buildRequestHeaders(true),
+          headers: withArenaGenerationActorToken(await buildRequestHeaders(true)),
           signal: generationController.signal,
           body: JSON.stringify({
             sessionId: input.sessionId,
+            generationRequestId: crypto.randomUUID(),
             action: input.action,
             ...(input.sourceChapterId ? { sourceChapterId: input.sourceChapterId } : {}),
             ...(typeof input.chapterIndexHint === 'number' ? { chapterIndex: input.chapterIndexHint } : {}),
@@ -919,6 +929,7 @@ export function useBattleStorySession() {
             ...(customProviderPayload ? { customProvider: customProviderPayload } : {}),
           }),
         });
+        captureArenaGenerationActorToken(response);
         responseStatus = response.status;
 
         if (response.status === 429) {
@@ -984,7 +995,8 @@ export function useBattleStorySession() {
         const headerMeta = parseBattleStoryStreamMetaHeader(
           response.headers.get('x-mahoshojo-stream-meta')
         );
-        responseGenerationId = headerMeta.generationId;
+        responseGenerationId = response.headers.get('x-mahoshojo-generation-id')?.trim()
+          || headerMeta.generationId;
         if (Object.keys(headerMeta.snapshot).length > 0) {
           patchStreamCardSnapshot(headerMeta.snapshot);
         }
@@ -1127,6 +1139,7 @@ export function useBattleStorySession() {
           seed: input.seed,
           workingCombatants: input.workingCombatants,
           userGuidance: input.userGuidance,
+          generationId: responseGenerationId ?? readStringField(sessionMeta, 'generationId'),
           meta: metaPayload,
         });
 

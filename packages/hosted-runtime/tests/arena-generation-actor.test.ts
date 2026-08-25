@@ -146,4 +146,25 @@ describe('Arena generation actor resolver', () => {
       expect.objectContaining({ method: 'POST' }),
     );
   });
+
+  it('falls back to a valid legacy Bearer when a stale Better Auth cookie is rejected', async () => {
+    const signatures = await createSignatures();
+    const client = d1([{ id: 42, username: 'legacy-user', is_banned: null }]);
+    const resolveActor = createArenaGenerationActorResolver({
+      env: {
+        HONO_AUTH_MODE: 'hybrid',
+        BETTER_AUTH_URL: 'https://auth.example.test',
+      },
+      fetch: vi.fn(async () => new Response(null, { status: 401 })),
+      signatures,
+      getD1Client: () => client,
+    });
+
+    await expect(resolveActor(new Request('https://example.test', {
+      headers: {
+        Authorization: 'Bearer legacy-secret',
+        cookie: 'better-auth.session_token=expired',
+      },
+    }))).resolves.toMatchObject({ actorKey: 'user:42' });
+  });
 });

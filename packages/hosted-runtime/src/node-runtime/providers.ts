@@ -8,6 +8,34 @@ const hasValidModel = (model: AIProvider['model']): boolean =>
     ? model.trim().length > 0
     : Array.isArray(model) && model.some(hasNonEmptyText);
 
+const safeBaseUrl = (
+  value: unknown,
+  env: Readonly<Record<string, string | undefined>>,
+): string | null => {
+  if (!hasNonEmptyText(value)) return null;
+  try {
+    const url = new URL(value.trim());
+    const localHttp = env.NODE_ENV !== 'production'
+      && url.protocol === 'http:'
+      && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
+    if (
+      (url.protocol !== 'https:' && !localHttp)
+      || url.username
+      || url.password
+      || url.search
+      || url.hash
+    ) return null;
+    const allowedOrigins = (env.AI_PROVIDER_ALLOWED_ORIGINS ?? '')
+      .split(',')
+      .map((origin) => origin.trim())
+      .filter(Boolean);
+    if (allowedOrigins.length > 0 && !allowedOrigins.includes(url.origin)) return null;
+    return url.toString().replace(/\/$/u, '');
+  } catch {
+    return null;
+  }
+};
+
 export const parseAIProvidersFromEnv = (
   env: Readonly<Record<string, string | undefined>> = process.env,
 ): AIProvider[] => {
@@ -18,12 +46,13 @@ export const parseAIProvidersFromEnv = (
         .filter((provider) => {
           const canBeAnonymous = provider.allowAnonymous === true && provider.type === 'openai';
           return hasValidModel(provider.model)
-            && hasNonEmptyText(provider.baseUrl)
+            && safeBaseUrl(provider.baseUrl, env) !== null
             && hasNonEmptyText(provider.type)
             && (hasNonEmptyText(provider.apiKey) || canBeAnonymous);
         })
         .map((provider) => ({
           ...provider,
+          baseUrl: safeBaseUrl(provider.baseUrl, env)!,
           retryCount: provider.retryCount ?? 1,
           skipProbability: provider.skipProbability ?? 0,
         }));
@@ -35,12 +64,14 @@ export const parseAIProvidersFromEnv = (
   const apiKey = env.AI_API_KEY;
   if (!apiKey) return [];
   const baseUrl = env.AI_BASE_URL || 'https://api.openai.com/v1';
+  const normalizedBaseUrl = safeBaseUrl(baseUrl, env);
+  if (!normalizedBaseUrl) return [];
   return [{
     name: 'default_provider',
     apiKey,
-    baseUrl,
+    baseUrl: normalizedBaseUrl,
     model: env.AI_MODEL || 'gemini-2.0-flash',
-    type: baseUrl.includes('googleapis.com') ? 'google' : 'openai',
+    type: normalizedBaseUrl.includes('googleapis.com') ? 'google' : 'openai',
     retryCount: 1,
     skipProbability: 0,
   }];

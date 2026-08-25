@@ -48,10 +48,11 @@ export const configureHonoArenaGenerationRuntime = (
     accessClientSecret: process.env.CF_ACCESS_CLIENT_SECRET,
   });
   const objectStore = createArenaR2ObjectStoreFromEnvironment();
+  const settleRatings = options.settleRatings ?? bridge!.settleRatings;
   const persistence = createNodeArenaGenerationFinalizationPorts({
     getD1Client,
     ...(objectStore ? { objectStore } : {}),
-    settleRatings: options.settleRatings ?? bridge!.settleRatings,
+    settleRatings,
     readRanking: options.readRanking ?? bridge!.readRanking,
   });
   const finalizer = createArenaGenerationFinalizer(persistence, {
@@ -60,12 +61,31 @@ export const configureHonoArenaGenerationRuntime = (
   const terminalStore = createNodeArenaGenerationTerminalStore({
     getD1Client,
     ...(objectStore ? { objectStore } : {}),
+    settleRatings,
   });
   configureArenaGenerationService(createNodeArenaGenerationService({
     store: redis.getGenerationReplayStore(),
     terminalStore,
     getD1Client,
     observer: options.observer,
-    executorOptions: { finalizer, readSeasonContext },
+    executorOptions: {
+      finalizer,
+      readSeasonContext,
+      requireSeasonAuthority: true,
+      readinessCheck: async () => {
+        const signatureSecret = process.env.SIGNATURE_SECRET_KEY?.trim() ?? '';
+        const bridgeSecretReady = !bridge || finalizationSecret.length >= 32;
+        if (!getD1Client() || !objectStore || signatureSecret.length < 32 || !bridgeSecretReady) {
+          return new Response(JSON.stringify({
+            code: 'ARENA_GENERATION_CAPABILITY_UNAVAILABLE',
+            error: 'Arena generation durable capability unavailable',
+          }), {
+            status: 503,
+            headers: { 'Content-Type': 'application/json; charset=utf-8' },
+          });
+        }
+        return null;
+      },
+    },
   }));
 };

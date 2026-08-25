@@ -28,6 +28,16 @@
       "types": "./src/questionnaire.ts",
       "import": "./src/questionnaire.ts",
       "default": "./src/questionnaire.ts"
+    },
+    "./arena-ranked-model-policy": {
+      "types": "./src/arena-ranked-model-policy.ts",
+      "import": "./src/arena-ranked-model-policy.ts",
+      "default": "./src/arena-ranked-model-policy.ts"
+    },
+    "./arena-reconciliation": {
+      "types": "./src/arena-reconciliation.ts",
+      "import": "./src/arena-reconciliation.ts",
+      "default": "./src/arena-reconciliation.ts"
     }
   },
   "scripts": {

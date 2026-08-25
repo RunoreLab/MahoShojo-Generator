@@ -46,6 +46,7 @@ describe('RedisRuntime shutdown', () => {
       generationRequestId: 'request-1234',
       generationId: 'generation-1234',
       payloadHash: 'payload-hash',
+      producerToken: 'producer-token-1',
       now: '2026-08-25T04:00:00.000Z',
       leaseExpiresAt: '2026-08-25T04:01:00.000Z',
     })).rejects.toThrow('REDIS_GENERATION_REPLAY_UNAVAILABLE');
@@ -57,6 +58,7 @@ describe('RedisRuntime shutdown', () => {
       generationRequestId: 'request-1234',
       generationId: 'generation-1234',
       payloadHash: 'payload-hash',
+      producerToken: 'producer-token-1',
       now: '2026-08-25T04:00:00.000Z',
       leaseExpiresAt: '2026-08-25T04:01:00.000Z',
     })).resolves.toMatchObject({ kind: 'created', generationId: 'generation-1234' });
@@ -230,6 +232,7 @@ describe('RedisRuntime shutdown', () => {
         generationRequestId: 'request-timeout',
         generationId: 'generation-timeout',
         payloadHash: 'payload-hash',
+        producerToken: 'producer-token-timeout',
         now: '2026-08-25T04:00:00.000Z',
         leaseExpiresAt: '2026-08-25T04:01:00.000Z',
       });

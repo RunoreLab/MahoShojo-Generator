@@ -411,11 +411,6 @@ export const getStrictPairUsage = async (userId: number, pairKey: string): Promi
   }
 };
 
-const hasExceededStrictDailyLimit = async (userId: number): Promise<boolean> => {
-  const usage = await getStrictDailyUsage(userId);
-  return usage?.exceeded ?? false;
-};
-
 export const buildEntityKey = (entity: ArenaEntity): string => `${entity.entityType}:${entity.entityId}`;
 
 export const buildPairKey = (a: ArenaEntity, b: ArenaEntity): string => {
@@ -995,7 +990,8 @@ export const isFreeEligible = (snapshot: ArenaEligibilitySnapshot): boolean => {
 };
 
 const validateStrictPublicDataCardEntities = async (
-  entities: [ArenaEntity, ArenaEntity]
+  entities: [ArenaEntity, ArenaEntity],
+  requiredBundle?: ArenaRatingsRepoBundle,
 ): Promise<{ ok: true } | { ok: false; skipReason: 'strict-not-public' | 'strict-not-approved' | 'strict-not-character' | 'strict-card-missing' }> => {
   const dataCardIds = entities
     .filter((e) => e.entityType === 'data_card')
@@ -1005,8 +1001,11 @@ const validateStrictPublicDataCardEntities = async (
   if (dataCardIds.length === 0) return { ok: true };
 
   try {
-    const bundle = await readArenaRatingsRepoBundle();
-    if (!bundle) return { ok: false, skipReason: 'strict-card-missing' };
+    const bundle = requiredBundle ?? await readArenaRatingsRepoBundle();
+    if (!bundle) {
+      if (requiredBundle) throw new Error('ARENA_RATING_REPOSITORY_UNAVAILABLE');
+      return { ok: false, skipReason: 'strict-card-missing' };
+    }
     const rows = await bundle.getStrictQueueDataCardsByIds(bundle.db, dataCardIds);
 
     const byId = new Map<string, (typeof rows)[number]>();
@@ -1027,6 +1026,7 @@ const validateStrictPublicDataCardEntities = async (
 
     return { ok: true };
   } catch (error) {
+    if (requiredBundle) throw error;
     console.warn('校验严格排位数据卡可用性失败（降级为不计 strict）:', error);
     return { ok: false, skipReason: 'strict-card-missing' };
   }
@@ -1045,93 +1045,6 @@ export async function getArenaEligibilitySnapshotByGenerationId(
   }
 }
 
-const getGenerationCombatantsByGenerationId = async (
-  generationId: string,
-): Promise<BattleReportGenerationCombatantRow[]> => {
-  try {
-    const bundle = await readArenaRatingsRepoBundle();
-    if (!bundle) return [];
-    return await bundle.listGenerationCombatantsByGenerationId(bundle.db, generationId);
-  } catch (error) {
-    console.error('读取 battle_report_generation_combatants 失败:', error);
-    return [];
-  }
-};
-
-const ensureArenaRatingsExist = async (queue: ArenaQueue, entities: [ArenaEntity, ArenaEntity]): Promise<void> => {
-  const bundle = await readArenaRatingsRepoBundle();
-  if (!bundle) return;
-  const nowIso = new Date().toISOString();
-  await bundle.ensureArenaRatingsExist(bundle.db, queue, entities, INITIAL_RATING, nowIso);
-};
-
-const getArenaRatings = async (queue: ArenaQueue, entities: [ArenaEntity, ArenaEntity]): Promise<[ArenaRatingSnapshot, ArenaRatingSnapshot] | null> => {
-  const bundle = await readArenaRatingsRepoBundle();
-  if (!bundle) return null;
-  const rows = await bundle.getArenaRatingsByEntitiesForQueue(bundle.db, queue, entities);
-  const [a, b] = entities;
-
-  const toSnapshot = (row: typeof rows[number] | undefined): ArenaRatingSnapshot => ({
-    rating: typeof row?.rating === 'number' ? row.rating : INITIAL_RATING,
-    games: typeof row?.games === 'number' ? row.games : 0,
-    wins: typeof row?.wins === 'number' ? row.wins : 0,
-    losses: typeof row?.losses === 'number' ? row.losses : 0,
-    draws: typeof row?.draws === 'number' ? row.draws : 0,
-  });
-
-  const aRow = rows.find((row) => row.entityType === a.entityType && row.entityId === a.entityId);
-  const bRow = rows.find((row) => row.entityType === b.entityType && row.entityId === b.entityId);
-  if (!aRow || !bRow) return null;
-
-  return [toSnapshot(aRow), toSnapshot(bRow)];
-};
-
-const hasRecentAppliedEventForPair = async (
-  queue: ArenaQueue,
-  pairKey: string,
-  options: { userId: number } | { ipAnonymized: string },
-  windowMs: number
-): Promise<boolean> => {
-  const sinceIso = new Date(Date.now() - windowMs).toISOString();
-  try {
-    const bundle = await readArenaRatingsRepoBundle();
-    if (!bundle) return false;
-    return await bundle.hasRecentAppliedEventForPair(bundle.db, queue, pairKey, options, sinceIso);
-  } catch (error) {
-    console.error('查询排位风控去重失败:', error);
-    return false;
-  }
-};
-
-const insertArenaRatingEvent = async (
-  payload: {
-    id: string;
-    generationId: string;
-    queue: ArenaQueue;
-    status: ArenaRatingEventStatus;
-    skipReason: string | null;
-    userId: number | null;
-    ipAnonymized: string | null;
-    pairKey: string;
-    a: ArenaEntity;
-    b: ArenaEntity;
-    winnerSlot: WinnerSlot;
-    detailsJson?: Record<string, unknown> | null;
-  }
-): Promise<boolean> => {
-  try {
-    const bundle = await readArenaRatingsRepoBundle();
-    if (!bundle) return false;
-    return await bundle.insertArenaRatingEvent(bundle.db, {
-      ...payload,
-      createdAtIso: new Date().toISOString(),
-    });
-  } catch (error) {
-    console.error('写入 arena_rating_events 失败:', { eventId: payload.id, error });
-    return false;
-  }
-};
-
 interface ArenaRatingEventRowForApply {
   id: string;
   status: ArenaRatingEventStatus;
@@ -1149,17 +1062,6 @@ interface ArenaRatingEventRowForApply {
   b_after_games: number | null;
 }
 
-const getArenaRatingEventById = async (eventId: string): Promise<ArenaRatingEventRowForApply | null> => {
-  try {
-    const bundle = await readArenaRatingsRepoBundle();
-    if (!bundle) return null;
-    return await bundle.getArenaRatingEventById(bundle.db, eventId);
-  } catch (error) {
-    console.error('读取 arena_rating_events 失败:', { eventId, error });
-    return null;
-  }
-};
-
 interface ArenaRatingEventComputedPayload {
   aBefore: ArenaRatingSnapshot;
   bBefore: ArenaRatingSnapshot;
@@ -1170,50 +1072,69 @@ interface ArenaRatingEventComputedPayload {
   detailsJson: Record<string, unknown>;
 }
 
-const updateArenaRatingEventComputedFields = async (
-  eventId: string,
-  computed: ArenaRatingEventComputedPayload
-): Promise<void> => {
-  const bundle = await readArenaRatingsRepoBundle();
-  if (!bundle) return;
-  await bundle.updateArenaRatingEventComputedFields(bundle.db, eventId, computed);
-};
-
-const markArenaRatingEventStatus = async (
-  eventId: string,
-  status: ArenaRatingEventStatus,
-  options?: { skipReason?: string | null }
-): Promise<void> => {
-  const bundle = await readArenaRatingsRepoBundle();
-  if (!bundle) return;
-  if (status === 'applied') {
-    await bundle.markArenaRatingEventApplied(bundle.db, eventId, new Date().toISOString());
-    return;
-  }
-
-  await bundle.markArenaRatingEventStatus(bundle.db, eventId, status, options);
-};
-
-const applyArenaRatingsUpdateIfBothMatch = async (
-  queue: ArenaQueue,
-  entities: [ArenaEntity, ArenaEntity],
-  computed: ArenaRatingEventComputedPayload
-): Promise<'applied' | 'already-applied' | 'conflict'> => {
-  const bundle = await readArenaRatingsRepoBundle();
-  if (!bundle) return 'conflict';
-  return bundle.applyArenaRatingsUpdateIfBothMatch(bundle.db, queue, entities, computed, new Date().toISOString());
-};
-
 export async function settleArenaRatingsForGeneration(
   generationId: string
 ): Promise<void> {
   try {
-    const snapshot = await getArenaEligibilitySnapshotByGenerationId(generationId);
+    const repository = await readArenaRatingsRepoBundle();
+    if (!repository) throw new Error('ARENA_RATING_REPOSITORY_UNAVAILABLE');
+    type RatingEventInsert = Omit<
+      Parameters<ArenaRatingsRepoBundle['insertArenaRatingEvent']>[1],
+      'createdAtIso'
+    >;
+    const insertEvent = (payload: RatingEventInsert) => (
+      repository.insertArenaRatingEvent(repository.db, {
+        ...payload,
+        createdAtIso: new Date().toISOString(),
+      })
+    );
+    const markEventStatus = async (
+      eventId: string,
+      status: ArenaRatingEventStatus,
+      options?: { skipReason?: string | null },
+    ): Promise<void> => {
+      if (status === 'applied') {
+        await repository.markArenaRatingEventApplied(repository.db, eventId, new Date().toISOString());
+        return;
+      }
+      await repository.markArenaRatingEventStatus(repository.db, eventId, status, options);
+    };
+    const readCurrentRatings = async (
+      queue: ArenaQueue,
+      entities: [ArenaEntity, ArenaEntity],
+    ): Promise<[ArenaRatingSnapshot, ArenaRatingSnapshot] | null> => {
+      const rows = await repository.getArenaRatingsByEntitiesForQueue(
+        repository.db,
+        queue,
+        entities,
+      );
+      const [a, b] = entities;
+      const toSnapshot = (row: typeof rows[number] | undefined): ArenaRatingSnapshot => ({
+        rating: typeof row?.rating === 'number' ? row.rating : INITIAL_RATING,
+        games: typeof row?.games === 'number' ? row.games : 0,
+        wins: typeof row?.wins === 'number' ? row.wins : 0,
+        losses: typeof row?.losses === 'number' ? row.losses : 0,
+        draws: typeof row?.draws === 'number' ? row.draws : 0,
+      });
+      const aRow = rows.find((row) => row.entityType === a.entityType && row.entityId === a.entityId);
+      const bRow = rows.find((row) => row.entityType === b.entityType && row.entityId === b.entityId);
+      return aRow && bRow ? [toSnapshot(aRow), toSnapshot(bRow)] : null;
+    };
+    const snapshot = await repository.getArenaEligibilitySnapshotByGenerationId(
+      repository.db,
+      generationId,
+    );
     if (!snapshot) return;
-    if (snapshot.status !== 'completed') return;
+    if (snapshot.status !== 'completed' && snapshot.status !== 'finalizing') return;
     if (snapshot.combatantCount !== 2) return;
+    const eligibilitySnapshot = snapshot.status === 'finalizing'
+      ? { ...snapshot, status: 'completed' as const }
+      : snapshot;
 
-    let combatants = await getGenerationCombatantsByGenerationId(generationId);
+    let combatants = await repository.listGenerationCombatantsByGenerationId(
+      repository.db,
+      generationId,
+    );
     if (combatants.length !== 2) {
       const fallbackCombatants = parseGenerationCombatantsFallback(generationId, snapshot.extraJson);
       if (fallbackCombatants.length !== 2) return;
@@ -1227,14 +1148,14 @@ export async function settleArenaRatingsForGeneration(
     const pairKey = buildPairKey(aEntity, bEntity);
     const isNewStrictPolicy = readExtraJsonString(snapshot.extraJson, 'arenaStrictPolicy') === '1+3:v1';
 
-    let strictEligible = isStrictEligible(snapshot, combatants);
-    const freeEligible = isFreeEligible(snapshot);
+    let strictEligible = isStrictEligible(eligibilitySnapshot, combatants);
+    const freeEligible = isFreeEligible(eligibilitySnapshot);
     if (!strictEligible && !freeEligible) return;
 
     const winnerParse = parseWinnerSlot(snapshot.winner, [combatants[0].name, combatants[1].name]);
     if (!winnerParse.ok) {
       if (strictEligible) {
-        await insertArenaRatingEvent({
+        await insertEvent({
           id: buildArenaRatingEventId(generationId, 'strict'),
           generationId,
           queue: 'strict',
@@ -1249,7 +1170,7 @@ export async function settleArenaRatingsForGeneration(
         });
       }
       if (freeEligible) {
-        await insertArenaRatingEvent({
+        await insertEvent({
           id: buildArenaRatingEventId(generationId, 'free'),
           generationId,
           queue: 'free',
@@ -1272,9 +1193,33 @@ export async function settleArenaRatingsForGeneration(
     let shouldApplyStrict = strictEligible;
 
     if (shouldApplyStrict && isNewStrictPolicy && snapshot.userId != null) {
-      const pairUsage = await getStrictPairUsage(snapshot.userId, pairKey);
+      const daySinceIso = startOfUtcDayIso();
+      const windowSinceIso = new Date(Date.now() - STRICT_DEDUP_WINDOW_MS).toISOString();
+      const sinceIso = pickEarlierIso(daySinceIso, windowSinceIso);
+      const pairStats = await repository.getStrictUserPairAppliedStatsSince(
+        repository.db,
+        snapshot.userId,
+        pairKey,
+        sinceIso,
+        daySinceIso,
+      );
+      const recentAppliedAtIso = pairStats.latestAppliedAt;
+      const recentDeduped = typeof recentAppliedAtIso === 'string'
+        && recentAppliedAtIso >= windowSinceIso;
+      const pairUsage: StrictPairUsage = {
+        daySinceIso,
+        windowSinceIso,
+        usedToday: pairStats.pairUsedToday,
+        limit: STRICT_SAME_PAIR_DAILY_LIMIT,
+        exceeded: pairStats.pairUsedToday >= STRICT_SAME_PAIR_DAILY_LIMIT,
+        recentDeduped,
+        recentAppliedAtIso,
+        nextEligibleAtIso: recentDeduped
+          ? buildNextEligibleAtIso(recentAppliedAtIso, STRICT_DEDUP_WINDOW_MS)
+          : null,
+      };
       if (pairUsage?.recentDeduped) {
-        await insertArenaRatingEvent({
+        await insertEvent({
           id: buildArenaRatingEventId(generationId, 'strict'),
           generationId,
           queue: 'strict',
@@ -1290,7 +1235,7 @@ export async function settleArenaRatingsForGeneration(
         shouldApplyStrict = false;
         strictEligible = false;
       } else if (pairUsage?.exceeded) {
-        await insertArenaRatingEvent({
+        await insertEvent({
           id: buildArenaRatingEventId(generationId, 'strict'),
           generationId,
           queue: 'strict',
@@ -1309,9 +1254,13 @@ export async function settleArenaRatingsForGeneration(
     }
 
     if (shouldApplyStrict && snapshot.userId != null) {
-      const exceeded = await hasExceededStrictDailyLimit(snapshot.userId);
+      const exceeded = await repository.countStrictAppliedEventsSince(
+        repository.db,
+        snapshot.userId,
+        startOfUtcDayIso(),
+      ) >= STRICT_DAILY_LIMIT;
       if (exceeded) {
-        await insertArenaRatingEvent({
+        await insertEvent({
           id: buildArenaRatingEventId(generationId, 'strict'),
           generationId,
           queue: 'strict',
@@ -1339,14 +1288,15 @@ export async function settleArenaRatingsForGeneration(
         // strict 命中时同时更新 free：为保持 strict ⊆ free，free 不再额外按 IP 去重。
         // 否则可能出现 strict 已结算、但 free 被风控跳过的情况。
       } else if (queue === 'free' && snapshot.ipAnonymized != null) {
-        const deduped = await hasRecentAppliedEventForPair(
+        const deduped = await repository.hasRecentAppliedEventForPair(
+          repository.db,
           queue,
           pairKey,
           { ipAnonymized: snapshot.ipAnonymized },
-          FREE_DEDUP_WINDOW_MS
+          new Date(Date.now() - FREE_DEDUP_WINDOW_MS).toISOString(),
         );
         if (deduped) {
-          await insertArenaRatingEvent({
+          await insertEvent({
             id: eventId,
             generationId,
             queue,
@@ -1363,7 +1313,7 @@ export async function settleArenaRatingsForGeneration(
         }
       }
 
-      const inserted = await insertArenaRatingEvent({
+      const inserted = await insertEvent({
         id: eventId,
         generationId,
         queue,
@@ -1380,26 +1330,40 @@ export async function settleArenaRatingsForGeneration(
         },
       });
 
-      await ensureArenaRatingsExist(queue, [aEntity, bEntity]);
-      const current = await getArenaRatings(queue, [aEntity, bEntity]);
+      await repository.ensureArenaRatingsExist(
+        repository.db,
+        queue,
+        [aEntity, bEntity],
+        INITIAL_RATING,
+        new Date().toISOString(),
+      );
+      const current = await readCurrentRatings(queue, [aEntity, bEntity]);
       if (!current) {
-        await markArenaRatingEventStatus(eventId, 'failed', { skipReason: 'ratings-missing' });
-        continue;
+        await markEventStatus(eventId, 'failed', { skipReason: 'ratings-missing' });
+        throw new Error('ARENA_RATING_STATE_MISSING');
       }
       const [aCurrent, bCurrent] = current;
 
-      const existingEvent = !inserted ? await getArenaRatingEventById(eventId) : null;
+      const existingEvent = !inserted
+        ? await repository.getArenaRatingEventById(repository.db, eventId)
+        : null;
       if (!inserted && !existingEvent) {
-        continue;
+        throw new Error('ARENA_RATING_EVENT_RECONCILIATION_FAILED');
+      }
+      if (existingEvent?.status === 'failed') {
+        throw new Error('ARENA_RATING_EVENT_FAILED');
       }
       if (existingEvent && existingEvent.status !== 'pending') {
         continue;
       }
 
       if (queue === 'strict' && isNewStrictPolicy) {
-        const strictEntities = await validateStrictPublicDataCardEntities([aEntity, bEntity]);
+        const strictEntities = await validateStrictPublicDataCardEntities(
+          [aEntity, bEntity],
+          repository,
+        );
         if (!strictEntities.ok) {
-          await markArenaRatingEventStatus(eventId, 'skipped', { skipReason: strictEntities.skipReason });
+          await markEventStatus(eventId, 'skipped', { skipReason: strictEntities.skipReason });
           continue;
         }
 
@@ -1410,7 +1374,7 @@ export async function settleArenaRatingsForGeneration(
             { rating: bCurrent.rating, games: bCurrent.games },
           );
           if (rangeCheck && rangeCheck.exceededBy > 0) {
-            await markArenaRatingEventStatus(eventId, 'skipped', { skipReason: 'strict-out-of-range' });
+            await markEventStatus(eventId, 'skipped', { skipReason: 'strict-out-of-range' });
             continue;
           }
         }
@@ -1451,8 +1415,8 @@ export async function settleArenaRatingsForGeneration(
           bCurrent.rating === existingEvent.b_before_rating &&
           bCurrent.games === existingEvent.b_before_games;
         if (!alreadyApplied && !matchesBefore) {
-          await markArenaRatingEventStatus(eventId, 'failed', { skipReason: 'rating-conflict' });
-          continue;
+          await markEventStatus(eventId, 'failed', { skipReason: 'rating-conflict' });
+          throw new Error('ARENA_RATING_SETTLEMENT_CONFLICT');
         }
 
         computed = {
@@ -1529,17 +1493,30 @@ export async function settleArenaRatingsForGeneration(
       }
 
       if (shouldPersistComputedFields) {
-        await updateArenaRatingEventComputedFields(eventId, computed);
+        const updated = await repository.updateArenaRatingEventComputedFields(
+          repository.db,
+          eventId,
+          computed,
+        );
+        if (!updated) throw new Error('ARENA_RATING_EVENT_COMPUTED_FIELDS_CONFLICT');
       }
 
-      const applied = await applyArenaRatingsUpdateIfBothMatch(queue, [aEntity, bEntity], computed);
+      const applied = await repository.applyArenaRatingsUpdateIfBothMatch(
+        repository.db,
+        queue,
+        [aEntity, bEntity],
+        computed,
+        new Date().toISOString(),
+      );
       if (applied === 'applied' || applied === 'already-applied') {
-        await markArenaRatingEventStatus(eventId, 'applied');
+        await markEventStatus(eventId, 'applied');
       } else {
-        await markArenaRatingEventStatus(eventId, 'failed', { skipReason: 'rating-conflict' });
+        await markEventStatus(eventId, 'failed', { skipReason: 'rating-conflict' });
+        throw new Error('ARENA_RATING_SETTLEMENT_CONFLICT');
       }
     }
   } catch (error) {
     console.error('排位结算失败:', { generationId, error });
+    throw error;
   }
 }

@@ -59,6 +59,7 @@ const cloneEvent = (event: EventRow): EventRow => ({ ...event });
 
 const state = {
   generationId: 'gen_retry_promotion',
+  snapshotStatus: 'completed' as 'completed' | 'finalizing',
   eventId: '',
   applyCalls: 0,
   updateComputedCalls: 0,
@@ -69,7 +70,7 @@ const state = {
 };
 
 const buildSnapshot = () => ({
-  status: 'completed',
+  status: state.snapshotStatus,
   mode: 'classic',
   userId: 9527,
   ipAnonymized: '203.0.113.7',
@@ -309,6 +310,7 @@ describe('settleArenaRatingsForGeneration retry promotion recovery', () => {
     const { setArenaRatingsRepoBundleForTests } = await import('@/lib/database/arena-ratings');
     console.error = () => {};
     state.eventId = `${state.generationId}:strict`;
+    state.snapshotStatus = 'completed';
     state.applyCalls = 0;
     state.updateComputedCalls = 0;
     state.firstApplyShouldThrow = true;
@@ -323,8 +325,11 @@ describe('settleArenaRatingsForGeneration retry promotion recovery', () => {
 
   test('pending 事件重试时即使当前已在 after，也必须走 already-applied 仓储更新以补 promotion', async () => {
     const { settleArenaRatingsForGeneration } = await import('@/lib/database/arena-ratings');
+    state.snapshotStatus = 'finalizing';
 
-    await settleArenaRatingsForGeneration(state.generationId);
+    await expect(settleArenaRatingsForGeneration(state.generationId)).rejects.toThrow(
+      'promotion failed once',
+    );
 
     const firstEvent = state.events.get(state.eventId);
     expect(firstEvent).toBeTruthy();
@@ -349,6 +354,24 @@ describe('settleArenaRatingsForGeneration retry promotion recovery', () => {
     expect(secondEvent?.a_after_rating).toBe(auditSnapshotAfterFirst.a_after_rating);
     expect(secondEvent?.b_before_rating).toBe(auditSnapshotAfterFirst.b_before_rating);
     expect(secondEvent?.b_after_rating).toBe(auditSnapshotAfterFirst.b_after_rating);
+  });
+
+  test('权威 repository 读取失败时拒绝把 generation 当作已完成结算', async () => {
+    const {
+      setArenaRatingsRepoBundleForTests,
+      settleArenaRatingsForGeneration,
+    } = await import('@/lib/database/arena-ratings');
+    setArenaRatingsRepoBundleForTests({
+      db: { __mockDb: true },
+      ...mockRepo,
+      getArenaEligibilitySnapshotByGenerationId: async () => {
+        throw new Error('D1 unavailable');
+      },
+    });
+
+    await expect(settleArenaRatingsForGeneration(state.generationId)).rejects.toThrow(
+      'D1 unavailable',
+    );
   });
 
   afterAll(async () => {

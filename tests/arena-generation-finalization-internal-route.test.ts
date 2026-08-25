@@ -52,4 +52,24 @@ describe('Arena generation finalization internal route', () => {
     expect(response.status).toBe(401);
     expect(settle).not.toHaveBeenCalled();
   });
+
+  it('does not report success when durable rating settlement fails', async () => {
+    vi.stubEnv('ARENA_FINALIZATION_HMAC_SECRET', secret);
+    settle.mockRejectedValueOnce(new Error('D1 unavailable'));
+    const body = JSON.stringify({ version: 1, generationId: 'generation-1' });
+    const headers = await createArenaInternalAuthHeaders({
+      secret,
+      method: 'POST',
+      pathname: '/api/internal/arena-generation/finalize',
+      body,
+    });
+    const response = await appRouteHandler(new Request(
+      'https://web.example/api/internal/arena-generation/finalize',
+      { method: 'POST', headers, body },
+    ));
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toMatchObject({ code: 'ARENA_FINALIZATION_PENDING' });
+    expect(readRanking).not.toHaveBeenCalled();
+  });
 });

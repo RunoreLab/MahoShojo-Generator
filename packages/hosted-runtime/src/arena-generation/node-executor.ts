@@ -1,10 +1,12 @@
 import { z } from 'zod/v3';
+import { STRICT_RANKED_MODEL_FALLBACKS } from '@mahoshojo/domain/arena-ranked-model-policy';
 
 import type {
   ArenaGenerationExecutor,
   ArenaGenerationObserver,
 } from '@mahoshojo/hosted-api/arena-generation/service';
-import { buildArenaGenerationPrompt } from './prompt';
+import { buildArenaGenerationPrompt, isStrictRankedArenaRequest } from './prompt';
+import { MAX_ARENA_MATERIALS, normalizeNodeArenaMaterials } from './materials';
 import type { ArenaSeasonContext } from './season-context';
 import { createArenaInternalGuidanceAuthority } from './internal-authority';
 import {
@@ -93,7 +95,9 @@ export type NodeArenaGenerationExecutorOptions = {
     request: Request;
     payload: Readonly<Record<string, unknown>>;
   }): Promise<string | null>;
+  readinessCheck?(): Promise<Response | null>;
   readSeasonContext?(): Promise<ArenaSeasonContext>;
+  requireSeasonAuthority?: boolean;
   finalizer(
     _input: ArenaGenerationFinalizationInput,
   ): Promise<ArenaGenerationFinalizationResult>;
@@ -195,7 +199,10 @@ const normalizeLegacyPayloadDefaults = (payload: Record<string, unknown>): void 
   payload.auxScenarios = Array.isArray(payload.auxScenarios)
     ? payload.auxScenarios.filter((value) => value && typeof value === 'object' && !Array.isArray(value))
     : [];
-  payload.materials = Array.isArray(payload.materials) ? payload.materials : [];
+  const rawMaterials = Array.isArray(payload.materials) ? payload.materials : [];
+  payload.materials = rawMaterials.length <= MAX_ARENA_MATERIALS
+    ? normalizeNodeArenaMaterials(rawMaterials)
+    : rawMaterials;
   payload.questionnaires = Array.isArray(payload.questionnaires)
     ? payload.questionnaires.filter((value) => value && typeof value === 'object' && !Array.isArray(value))
     : [];
@@ -314,7 +321,10 @@ const normalizeNativeAuthority = async (
     payload.combatants = await Promise.all(payload.combatants.map(async (value) => {
       if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
       const combatant = { ...(value as Record<string, unknown>) };
-      const data = combatant.data;
+      const data = combatant.data && typeof combatant.data === 'object' && !Array.isArray(combatant.data)
+        ? { ...(combatant.data as Record<string, unknown>) }
+        : combatant.data;
+      combatant.data = data;
       combatant.isNative = await signatures.verifySignature(data);
       return combatant;
     }));
@@ -474,6 +484,8 @@ export const createNodeArenaGenerationExecutor = (
   return createArenaGenerationRuntime({
     observer: options.observer,
     preparePayload: async ({ request, payload }) => {
+      const readinessFailure = await options.readinessCheck?.() ?? null;
+      if (readinessFailure) return readinessFailure;
       const normalized = clonePayload(payload);
       normalizeLegacyPayloadDefaults(normalized);
       const customProvider = parseCustomProvider(normalized.customProvider);
@@ -488,10 +500,19 @@ export const createNodeArenaGenerationExecutor = (
       });
       if (trustedGuidance?.trim()) normalized.internalGuidance = trustedGuidance.trim();
       const season = await options.readSeasonContext?.().catch(() => null) ?? null;
+      if (options.requireSeasonAuthority && season?.authorityAvailable !== true) {
+        return jsonResponse({
+          code: 'ARENA_SEASON_AUTHORITY_UNAVAILABLE',
+          error: 'Arena season authority unavailable',
+        }, 503);
+      }
       normalized.__arenaServerContextV1 = {
         startedAt: now().toISOString(),
         ipAnonymized: anonymizeIp(requestIp(request)),
         season,
+        scenarioNative: normalized.scenario
+          ? await signatures.verifySignature(normalized.scenario)
+          : true,
       };
       return normalized;
     },
@@ -542,7 +563,6 @@ export const createNodeArenaGenerationExecutor = (
       const config: RawGenerationConfig = {
         prompt,
         temperature: 0.9,
-        ...(modelOverride ? { modelOverride } : {}),
         ...(customProvider ? {
           generationSettingsContext: {
             providerId: customProvider.providerId,
@@ -552,7 +572,7 @@ export const createNodeArenaGenerationExecutor = (
           },
         } : {}),
       };
-      const result = await generateWithStreamAI(config, {
+      const generationOptions: GenerateWithAIOptions = {
         abortSignal: signal,
         streamReadTimeoutMode: 'hard',
         telemetry,
@@ -567,7 +587,27 @@ export const createNodeArenaGenerationExecutor = (
             modelId: customProvider.modelId,
           },
         } : {}),
-      });
+      };
+      const modelFallbacks: Array<string | undefined> = modelOverride
+        ? [modelOverride]
+        : isStrictRankedArenaRequest(payload) && !customProvider
+          ? [...STRICT_RANKED_MODEL_FALLBACKS]
+          : [undefined];
+      let result: StreamAiResult | null = null;
+      let lastError: unknown = null;
+      for (const fallback of modelFallbacks) {
+        try {
+          result = await generateWithStreamAI({
+            ...config,
+            ...(fallback ? { modelOverride: fallback } : {}),
+          }, generationOptions);
+          break;
+        } catch (error) {
+          lastError = error;
+          if (signal.aborted) throw error;
+        }
+      }
+      if (!result) throw lastError ?? new Error('ARENA_PROVIDER_UNAVAILABLE');
       if (!result.response.body) throw new Error('ARENA_PROVIDER_STREAM_MISSING');
       return {
         body: wrapTelemetry(

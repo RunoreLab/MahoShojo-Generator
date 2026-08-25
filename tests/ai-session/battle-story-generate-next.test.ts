@@ -118,6 +118,7 @@ describe('battle story generate-next validation', () => {
     const body = buildUpstreamRequestBody(
       {
         sessionId: 'session-1',
+        generationRequestId: 'story-request-1234',
         action: 'continue',
         chapterContext: {
           recentChapters: [],
@@ -177,5 +178,6 @@ describe('battle story generate-next validation', () => {
     expect(body.narrativeHistoryReadLimit).toBe(9);
     expect(body.customStoryLength).toBe('1444');
     expect(body.forceStreamMeta).toBe(true);
+    expect(body.generationRequestId).toBe('story-request-1234');
   });
 });
