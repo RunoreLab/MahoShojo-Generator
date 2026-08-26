@@ -69,6 +69,9 @@ const { controlPlane = {} } = manifest;
 if (controlPlane.mode !== 'active-passive') {
   fail('controlPlane.mode 必须为 active-passive');
 }
+if (controlPlane.corsOriginsEnvironment !== 'HONO_CORS_ORIGINS') {
+  fail('controlPlane.corsOriginsEnvironment 必须与双 runtime CORS contract 一致');
+}
 if (!['not-provisioned', 'preview', 'production'].includes(controlPlane.provisioning)) {
   fail('controlPlane.provisioning 非法');
 }
@@ -147,6 +150,16 @@ if (!unique(capabilityRoutes)) {
 }
 if (!sameValues(capabilityIds, inventory.sharedRouteIds ?? [])) {
   fail('DR capability 必须与 sharedRouteIds 双向完全覆盖');
+}
+const generatedRoutesSource = readFileSync(argumentValue(
+  '--generated-routes',
+  path.join(repositoryRoot, 'apps/api/src/generated/routes.ts'),
+), 'utf8');
+const generatedRouteIds = [...generatedRoutesSource.matchAll(
+  /^\s+id:\s*"([^"]+)",$/gmu,
+)].map((match) => match[1]);
+if (!sameValues(generatedRouteIds, capabilityIds)) {
+  fail('generated Hono route registry 必须与 DR capability 双向完全覆盖');
 }
 for (const exitedRouteId of [
   ...(inventory.exitedRouteIds ?? []),
@@ -237,8 +250,18 @@ for (const capability of capabilities) {
       fail(`${label}: secret minLength 必须为正整数`);
     }
   }
-  if (!(capability.requiredBindings ?? []).includes('DB')) {
+  const requiredBindings = capability.requiredBindings ?? [];
+  if (!requiredBindings.includes('DB')) {
     fail(`${label}: shared Hosted capability 必须声明 DB binding`);
+  }
+  if (!requiredBindings.every((binding) => ['DB', 'R2_OBJECT_STORE'].includes(binding))) {
+    fail(`${label}: requiredBindings 包含未知 logical binding`);
+  }
+  if (requiredBindings.includes('R2_OBJECT_STORE')) {
+    const secretNames = (capability.requiredSecrets ?? []).map(({ name }) => name);
+    if (!['R2_ACCESS_KEY_ID', 'R2_SECRET_ACCESS_KEY'].every((name) => secretNames.includes(name))) {
+      fail(`${label}: R2_OBJECT_STORE 必须声明最小 R2 secret contract`);
+    }
   }
 
   const adapterPaths = [
@@ -298,6 +321,20 @@ if (
   || clientConfig.includes('hosted-dr-capabilities.json')
 ) {
   fail('客户端配置必须只消费生成后的 stable-origin 安全投影');
+}
+
+const webPackage = readJson('apps/web/package.json');
+for (const scriptName of ['build', 'build:cf']) {
+  if (!webPackage.scripts?.[scriptName]?.includes('pnpm run check:hosted-dr')) {
+    fail(`apps/web ${scriptName} 必须先执行 Hosted DR validator`);
+  }
+}
+const nextGuardSource = readFileSync(
+  path.join(repositoryRoot, 'apps/web/lib/hosted-dr/capability-guard.ts'),
+  'utf8',
+);
+if (!nextGuardSource.includes('isExecutableHostedDrMode(operation.drMode)')) {
+  fail('Next DR guard 必须对未知 drMode 运行时 fail closed');
 }
 const clientLiteralOrigins = [...clientConfig.matchAll(/['"](https:\/\/[^'"]+)['"]/gu)]
   .map((match) => match[1]);

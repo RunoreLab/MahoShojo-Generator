@@ -4,7 +4,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DatabaseProvider } from '@mahoshojo/hosted-runtime/database-provider';
 import hostedDrManifest from '../../../config/hosted-dr-capabilities.json';
 import routeInventory from '../../../config/hono-api-routes.json';
-import { withNextDrCapability } from '@/lib/hosted-dr/capability-guard';
+import {
+  isExecutableHostedDrMode,
+  withNextDrCapability,
+} from '@/lib/hosted-dr/capability-guard';
 
 const readyProvider: DatabaseProvider = {
   id: 'cloudflare-d1-binding',
@@ -217,6 +220,82 @@ describe('Next production DR capability guard', () => {
       ), 'utf8');
       expect(source, routeId).toContain('withNextDrCapability');
       expect(source, routeId).toContain(`'${routeId}'`);
+    }
+  });
+
+  it('未知 drMode 运行时 fail closed', () => {
+    expect(isExecutableHostedDrMode('safe-read')).toBe(true);
+    expect(isExecutableHostedDrMode('new-request-only')).toBe(true);
+    expect(isExecutableHostedDrMode('fail-closed')).toBe(false);
+    expect(isExecutableHostedDrMode('unknown-mode')).toBe(false);
+    expect(isExecutableHostedDrMode(undefined)).toBe(false);
+  });
+
+  it('逐项执行 23 capability 的 operation/secret/provider fail-closed 矩阵', async () => {
+    const completeEnvironment: Record<string, string> = {
+      HONO_CORS_ORIGINS: 'https://app.example.test',
+      SIGNATURE_SECRET_KEY: 's'.repeat(32),
+      R2_ACCESS_KEY_ID: 'local-access-key',
+      R2_SECRET_ACCESS_KEY: 'local-secret-key',
+      R2_BUCKET_NAME: 'local-bucket',
+      R2_ACCOUNT_ID: 'local-account',
+    };
+
+    for (const capability of hostedDrManifest.capabilities) {
+      for (const operation of capability.operations) {
+        const handler = vi.fn(async () => new Response('executed'));
+        const guarded = withNextDrCapability(capability.id, handler, {
+          ...productionOptions,
+          environment: completeEnvironment,
+        });
+        const response = await guarded(new Request(
+          `https://api.example.test${capability.route.replace(/\[[^\]]+\]/gu, 'test-id')}`,
+          { method: operation.method },
+        ));
+
+        if (operation.drMode === 'fail-closed') {
+          expect(response.status, `${capability.id}:${operation.method}`).toBe(503);
+          expect(handler, `${capability.id}:${operation.method}`).not.toHaveBeenCalled();
+        } else {
+          expect(response.status, `${capability.id}:${operation.method}`).toBe(200);
+          expect(handler, `${capability.id}:${operation.method}`).toHaveBeenCalledOnce();
+
+          const unavailableProviderHandler = vi.fn(async () => new Response('should-not-run'));
+          const unavailableProviderRoute = withNextDrCapability(
+            capability.id,
+            unavailableProviderHandler,
+            {
+              ...productionOptions,
+              environment: completeEnvironment,
+              provider: { id: 'cloudflare-d1-binding', openSession: () => null },
+            },
+          );
+          expect((await unavailableProviderRoute(new Request(
+            `https://api.example.test${capability.route.replace(/\[[^\]]+\]/gu, 'test-id')}`,
+            { method: operation.method },
+          ))).status, `${capability.id}:${operation.method}:provider`).toBe(503);
+          expect(unavailableProviderHandler).not.toHaveBeenCalled();
+        }
+      }
+
+      const executableOperation = capability.operations.find(
+        ({ drMode }) => drMode !== 'fail-closed',
+      );
+      if (!executableOperation) continue;
+      for (const secret of capability.requiredSecrets) {
+        const handler = vi.fn(async () => new Response('should-not-run'));
+        const environment = { ...completeEnvironment, [secret.name]: '' };
+        const guarded = withNextDrCapability(capability.id, handler, {
+          ...productionOptions,
+          environment,
+        });
+        const response = await guarded(new Request(
+          `https://api.example.test${capability.route.replace(/\[[^\]]+\]/gu, 'test-id')}`,
+          { method: executableOperation.method },
+        ));
+        expect(response.status, `${capability.id}:${secret.name}`).toBe(503);
+        expect(handler, `${capability.id}:${secret.name}`).not.toHaveBeenCalled();
+      }
     }
   });
 });

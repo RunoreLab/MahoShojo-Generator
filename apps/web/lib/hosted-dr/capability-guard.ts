@@ -120,6 +120,10 @@ const hasRequiredBindings = (
   return false;
 });
 
+export const isExecutableHostedDrMode = (value: unknown): boolean => (
+  value === 'safe-read' || value === 'new-request-only'
+);
+
 export const withNextDrCapability = <Args extends unknown[]>(
   capabilityId: string,
   handler: NextRouteHandler<Args>,
@@ -162,7 +166,7 @@ export const withNextDrCapability = <Args extends unknown[]>(
       capability.operations.map(({ method: allowed }) => allowed),
     ));
   }
-  if (operation.drMode === 'fail-closed') {
+  if (!isExecutableHostedDrMode(operation.drMode)) {
     logUnavailable({ capabilityId, category: 'dr-mode' });
     return respond(unavailableResponse());
   }

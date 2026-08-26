@@ -141,10 +141,38 @@ describe('Hosted DR machine contract', () => {
 
   it('把 validator 纳入 workspace gate', () => {
     const rootPackage = readJson<{ scripts: Record<string, string> }>('package.json');
+    const webPackage = readJson<{ scripts: Record<string, string> }>('apps/web/package.json');
 
     expect(existsSync(path.join(repositoryRoot, 'scripts/check-hosted-dr-contract.mjs'))).toBe(true);
     expect(rootPackage.scripts['check:hosted-dr']).toBe('node scripts/check-hosted-dr-contract.mjs');
     expect(rootPackage.scripts['workspace:verify']).toContain('pnpm run check:hosted-dr');
+    expect(webPackage.scripts.build).toContain('pnpm run check:hosted-dr');
+    expect(webPackage.scripts['build:cf']).toContain('pnpm run check:hosted-dr');
+  });
+
+  it('validator 对 generated Hono route registry drift fail closed', () => {
+    const temporaryRoot = mkdtempSync(path.join(os.tmpdir(), 'hosted-dr-routes-'));
+    try {
+      const source = readFileSync(
+        path.join(repositoryRoot, 'apps/api/src/generated/routes.ts'),
+        'utf8',
+      ).replace('id: "arena/generate",', 'id: "registry-drift",');
+      const generatedRoutesPath = path.join(temporaryRoot, 'routes.ts');
+      writeFileSync(generatedRoutesPath, source, 'utf8');
+      const result = spawnSync(process.execPath, [
+        path.join(repositoryRoot, 'scripts/check-hosted-dr-contract.mjs'),
+        '--generated-routes',
+        generatedRoutesPath,
+      ], {
+        cwd: repositoryRoot,
+        encoding: 'utf8',
+      });
+
+      expect(result.status).toBe(1);
+      expect(`${result.stdout}\n${result.stderr}`).toContain('generated Hono route registry');
+    } finally {
+      rmSync(temporaryRoot, { recursive: true, force: true });
+    }
   });
 
   it.each([
