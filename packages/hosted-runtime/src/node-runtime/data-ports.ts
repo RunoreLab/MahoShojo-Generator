@@ -35,11 +35,16 @@ export type NodeDataPorts = {
   recordUserActivityFromRequest(_request: Request, _seenAtIso?: string): void;
   recordAiChannelOutcome(_input: RecordOutcomeInput): Promise<void>;
   getDataCardById(_cardId: string, _publicOnly?: boolean): Promise<HostedDataCard | null>;
+  getAuthorizedDataCardById(
+    _request: Request,
+    _cardId: string,
+  ): Promise<HostedDataCard | null>;
 };
 
 export type NodeDataPortDependencies = {
   getD1Client(): NodeDataD1Client | null;
   getUserIdFromActivityHeaders(_headers: Headers): Promise<number | null>;
+  getAuthenticatedUserId?(_request: Request): Promise<number | null>;
   now(): Date;
   log?: { debug(_message: string): void };
 };
@@ -253,11 +258,37 @@ export const createNodeDataPorts = (
     }
   };
 
+  const getAuthorizedDataCardById = async (
+    request: Request,
+    cardId: string,
+  ): Promise<HostedDataCard | null> => {
+    const normalizedId = cardId.trim();
+    if (!normalizedId) return null;
+    const client = dependencies.getD1Client();
+    if (!client) return null;
+    const userId = await dependencies.getAuthenticatedUserId?.(request).catch(() => null) ?? null;
+    const sql = userId
+      ? `${DATA_CARD_SELECT_SQL}\n  AND (\n    dc.user_id = ?\n    OR (dc.is_public = 1 AND dc.review_status = 'approved')\n  )\nLIMIT 1`
+      : `${DATA_CARD_SELECT_SQL}\n  AND dc.is_public = 1\n  AND dc.review_status = 'approved'\nLIMIT 1`;
+    try {
+      const queryResult = await client
+        .prepare(sql)
+        .bind(...(userId ? [normalizedId, userId] : [normalizedId]))
+        .all({ retry: 'safe-read' });
+      const row = queryResult.results[0];
+      return row ? toDataCard(row) : null;
+    } catch {
+      dependencies.log?.debug('DataCard 授权读取失败');
+      return null;
+    }
+  };
+
   return Object.freeze({
     touchUserLastActivity,
     recordUserActivityFromRequest,
     recordAiChannelOutcome,
     getDataCardById,
+    getAuthorizedDataCardById,
   });
 };
 

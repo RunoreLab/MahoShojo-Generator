@@ -46,7 +46,7 @@ export interface GenerateMagicalGirlDetailsRuntimeDependencies
   LegacyProviderRuntimeLogger {
   presetIndex: unknown;
   loadPreset(_requestUrl: string, _path: string): Promise<unknown>;
-  loadDataCard(_id: string): Promise<QuestionnaireDataCard>;
+  loadDataCard(_request: Request, _id: string): Promise<QuestionnaireDataCard>;
   getRandomFlowers(): string;
   checkRateLimit(_input: {
     request: Request;
@@ -117,7 +117,7 @@ export const createGenerateMagicalGirlDetailsRuntime = (
             requiredQuestionnaireIds: extractAnswerQuestionnaireIds(rawAnswers),
             presetEntries,
             loadPreset: ports.loadPreset,
-            loadDataCard: ports.loadDataCard,
+            loadDataCard: (id) => ports.loadDataCard(request, id),
           });
           if (resolved.allowed && resolved.questionnaires.length > 0) {
             nativeAllowedByServer = true;

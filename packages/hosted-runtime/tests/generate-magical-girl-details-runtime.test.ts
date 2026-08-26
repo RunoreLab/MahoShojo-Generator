@@ -139,6 +139,70 @@ describe('generate magical girl details hosted runtime', () => {
     expect(sign).not.toHaveBeenCalled();
   });
 
+  it.each([
+    {
+      name: '缺少 selection',
+      selections: [],
+      loadDataCard: async () => ({ type: 'questionnaire', data: JSON.stringify(questionnaire) }),
+    },
+    {
+      name: '数据库 loader 抛错',
+      selections: [{ source: 'database', kind: 'magical-girl', dataCardId: 'card-1' }],
+      loadDataCard: async () => { throw new Error('private-loader-failure'); },
+    },
+    {
+      name: '数据库 payload 非法',
+      selections: [{ source: 'database', kind: 'magical-girl', dataCardId: 'card-1' }],
+      loadDataCard: async () => ({ type: 'questionnaire', data: '{' }),
+    },
+    {
+      name: '服务端问卷 ID 与答案不匹配',
+      selections: [{ source: 'database', kind: 'magical-girl', dataCardId: 'card-1' }],
+      loadDataCard: async () => ({
+        type: 'questionnaire',
+        data: JSON.stringify({ ...questionnaire, id: 'other-questionnaire' }),
+      }),
+    },
+  ])('$name 时仍可生成但 fail closed 不签名', async ({ selections, loadDataCard }) => {
+    const sign = vi.fn(async () => 'must-not-sign');
+    const generateWithAI = vi.fn(async () => generatedDetails);
+    const recordActivity = vi.fn();
+    const dependencies = {
+      ...providerPorts,
+      presetIndex: { presets: [] },
+      loadPreset: async () => null,
+      loadDataCard,
+      getRandomFlowers: () => '',
+      checkRateLimit: async () => null,
+      enforceSafety: async () => null,
+      generateWithAI,
+      sign,
+      recordActivity,
+      buildResponse: ({ data }: { data: Record<string, unknown> }) => (
+        new Response(JSON.stringify(data))
+      ),
+      logError: vi.fn(),
+    } satisfies GenerateMagicalGirlDetailsRuntimeDependencies;
+
+    const response = await createGenerateMagicalGirlDetailsRuntime(dependencies).service(request({
+      allowNativeSignature: true,
+      questionnaireSelections: selections,
+      questionnaires: [questionnaire],
+      answers: [{
+        questionnaireId: questionnaire.id,
+        questionId: 'q-1',
+        answer: '同伴',
+      }],
+    }));
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload).not.toHaveProperty('signature');
+    expect(generateWithAI).toHaveBeenCalledOnce();
+    expect(recordActivity).toHaveBeenCalledOnce();
+    expect(sign).not.toHaveBeenCalled();
+  });
+
   it('stream 透传 abort signal、reasoning SSE 与 questionnaire lore', async () => {
     const controller = new AbortController();
     const upstream = new Response('markdown');

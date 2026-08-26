@@ -55,7 +55,7 @@ export interface GenerateSublimationRuntimeDependencies
   defaultQuestions: { magicalGirl: string[]; canshou: string[] };
   allowGuidedNativeSigning: boolean;
   loadPreset(_requestUrl: string, _path: string): Promise<unknown>;
-  loadDataCard(_id: string): Promise<QuestionnaireDataCard>;
+  loadDataCard(_request: Request, _id: string): Promise<QuestionnaireDataCard>;
   checkRateLimit(_input: {
     request: Request;
     actionType: typeof SUBLIMATION_ACTION_TYPE;
@@ -131,7 +131,7 @@ const isTargetTemplate = (value: unknown): value is SublimationCharacterTemplate
   value === 'magical-girl' || value === 'canshou' || value === 'general'
 );
 const isSourceTemplate = (value: unknown): value is SublimationSourceTemplate => (
-  isTargetTemplate(value) || value === 'scenario'
+  isTargetTemplate(value) || value === 'scenario' || value === 'general-scenario'
 );
 
 const CONTROL_FIELDS = [
@@ -280,7 +280,7 @@ export const createGenerateSublimationRuntime = (
             selections: input.selections,
             presetEntries,
             loadPreset: ports.loadPreset,
-            loadDataCard: ports.loadDataCard,
+            loadDataCard: (id) => ports.loadDataCard(request, id),
           });
           if (resolved.allowed) {
             loreNativeAllowedByServer = true;

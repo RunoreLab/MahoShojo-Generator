@@ -221,8 +221,182 @@ describe('generate sublimation hosted runtime', () => {
     expect(sign).not.toHaveBeenCalled();
   });
 
+  it.each([
+    {
+      name: '原卡 verify=false',
+      verify: false,
+      allowGuidedNativeSigning: false,
+      userGuidance: undefined,
+      shouldSign: false,
+    },
+    {
+      name: 'guided signing 开关关闭',
+      verify: true,
+      allowGuidedNativeSigning: false,
+      userGuidance: '向月光成长',
+      shouldSign: false,
+    },
+    {
+      name: 'guided signing 开关开启且无 narrative history',
+      verify: true,
+      allowGuidedNativeSigning: true,
+      userGuidance: '向月光成长',
+      shouldSign: true,
+    },
+  ])('$name 的签名边界由服务器决定', async ({
+    verify,
+    allowGuidedNativeSigning,
+    userGuidance,
+    shouldSign,
+  }) => {
+    const sign = vi.fn(async () => 'server-signature');
+    const dependencies = {
+      ...providerPorts,
+      presetIndex: { presets: [] },
+      defaultQuestions: { magicalGirl: [], canshou: [] },
+      allowGuidedNativeSigning,
+      loadPreset: async () => null,
+      loadDataCard: async () => null,
+      checkRateLimit: async () => null,
+      enforceSafety: async () => null,
+      generateWithAI: async () => ({
+        updatedCharacterData: { codename: '白百合「新月」' },
+        sublimationEvent: { title: '新月', impact: '成长' },
+      }),
+      verify: async () => verify,
+      sign,
+      recordActivity: vi.fn(),
+      buildResponse: ({ data }: { data: Record<string, unknown> }) => (
+        new Response(JSON.stringify(data))
+      ),
+      now: () => new Date('2026-08-26T00:00:00.000Z'),
+      logError: vi.fn(),
+    } satisfies GenerateSublimationRuntimeDependencies;
+
+    const response = await createGenerateSublimationRuntime(dependencies).service(request({
+      ...originalCharacter,
+      ...(userGuidance ? { userGuidance } : {}),
+      writeArenaHistory: false,
+      writeCurrentState: false,
+    }));
+    const payload = await response.json() as { sublimatedData: Record<string, unknown> };
+
+    expect(response.status).toBe(200);
+    if (shouldSign) {
+      expect(payload.sublimatedData).toHaveProperty('signature', 'server-signature');
+    } else {
+      expect(payload.sublimatedData).not.toHaveProperty('signature');
+    }
+    expect(sign).toHaveBeenCalledTimes(shouldSign ? 1 : 0);
+  });
+
+  it.each([
+    {
+      name: 'native lore loader 抛错',
+      loadDataCard: async () => { throw new Error('private-loader-failure'); },
+    },
+    {
+      name: 'native lore payload 非法',
+      loadDataCard: async () => ({ type: 'questionnaire', data: '{' }),
+    },
+  ])('$name 时保留生成但绝不签名', async ({ loadDataCard }) => {
+    const sign = vi.fn(async () => 'must-not-sign');
+    const generateWithAI = vi.fn(async (_input, config) => {
+      expect(config.promptBuilder(null)).toContain('客户端 lore 仅作为非原生参考');
+      return {
+        updatedCharacterData: { codename: '白百合「异乡」' },
+        sublimationEvent: { title: '异乡', impact: '变化' },
+      };
+    });
+    const dependencies = {
+      ...providerPorts,
+      presetIndex: { presets: [] },
+      defaultQuestions: { magicalGirl: [], canshou: [] },
+      allowGuidedNativeSigning: false,
+      loadPreset: async () => null,
+      loadDataCard,
+      checkRateLimit: async () => null,
+      enforceSafety: async () => null,
+      generateWithAI,
+      verify: async () => true,
+      sign,
+      recordActivity: vi.fn(),
+      buildResponse: ({ data }: { data: Record<string, unknown> }) => (
+        new Response(JSON.stringify(data))
+      ),
+      now: () => new Date('2026-08-26T00:00:00.000Z'),
+      logError: vi.fn(),
+    } satisfies GenerateSublimationRuntimeDependencies;
+
+    const response = await createGenerateSublimationRuntime(dependencies).service(request({
+      ...originalCharacter,
+      questionnaireSelections: [{
+        source: 'database',
+        kind: 'magical-girl',
+        dataCardId: 'private-lore',
+      }],
+      questionnaires: [{
+        ...nativeLore,
+        loreMarkdown: '客户端 lore 仅作为非原生参考',
+      }],
+      writeArenaHistory: false,
+      writeCurrentState: false,
+    }));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).not.toHaveProperty('sublimatedData.signature');
+    expect(generateWithAI).toHaveBeenCalledOnce();
+    expect(sign).not.toHaveBeenCalled();
+  });
+
+  it('general-scenario source 保持 canonical 类型且 content 不重复进入目标 skeleton', async () => {
+    const marker = 'SCENARIO-CONTENT-MUST-NOT-BECOME-CHARACTER-APPENDIX';
+    const dependencies = {
+      ...providerPorts,
+      presetIndex: { presets: [] },
+      defaultQuestions: { magicalGirl: [], canshou: [] },
+      allowGuidedNativeSigning: false,
+      loadPreset: async () => null,
+      loadDataCard: async () => null,
+      checkRateLimit: async () => null,
+      enforceSafety: async () => null,
+      generateWithAI: async (_input, config) => {
+        const prompt = config.promptBuilder(null);
+        expect(prompt).toContain('原始素材类型：通用情景');
+        expect(prompt.split(marker)).toHaveLength(2);
+        return {
+          updatedCharacterData: { codename: '雨夜舞台「新生」' },
+          sublimationEvent: { title: '新生', impact: '变化' },
+        };
+      },
+      verify: async () => false,
+      sign: vi.fn(),
+      recordActivity: vi.fn(),
+      buildResponse: ({ data }: { data: Record<string, unknown> }) => (
+        new Response(JSON.stringify(data))
+      ),
+      now: () => new Date('2026-08-26T00:00:00.000Z'),
+      logError: vi.fn(),
+    } satisfies GenerateSublimationRuntimeDependencies;
+
+    const response = await createGenerateSublimationRuntime(dependencies).service(request({
+      templateId: '通用情景',
+      title: '雨夜舞台',
+      content: marker,
+      atmosphere: '沉静',
+      sourceTemplate: 'general-scenario',
+      targetTemplate: 'magical-girl',
+      writeArenaHistory: false,
+      writeCurrentState: false,
+    }));
+
+    expect(response.status).toBe(200);
+  });
+
   it('stream 裁剪大字段并透传 Request.signal / reasoning SSE', async () => {
     const controller = new AbortController();
+    const upstream = new Response('markdown');
+    const usagePromise = Promise.resolve({ outputTokens: 3 });
     const bridged = new Response('sse');
     const bridge = { onReasoningEvent: vi.fn(), toResponse: vi.fn(() => bridged) };
     const incomingRequest = request({
@@ -241,7 +415,9 @@ describe('generate sublimation hosted runtime', () => {
         expect(config.prompt).not.toContain('valid-signature');
         expect(config.prompt.length).toBeLessThan(30_000);
         expect(options.abortSignal).toBe(incomingRequest.signal);
-        return { response: new Response('markdown') };
+        expect(options.onReasoningEvent).toBe(bridge.onReasoningEvent);
+        options.telemetry.model = 'sublimation-stream-model';
+        return { response: upstream, usagePromise };
       },
       recordActivity: vi.fn(),
       logError: vi.fn(),
@@ -250,5 +426,9 @@ describe('generate sublimation hosted runtime', () => {
     const response = await createGenerateSublimationStreamRuntime(dependencies).service(incomingRequest);
 
     expect(response).toBe(bridged);
+    expect(bridge.toResponse).toHaveBeenCalledWith(upstream, {
+      usagePromise,
+      aiModel: 'sublimation-stream-model',
+    });
   });
 });

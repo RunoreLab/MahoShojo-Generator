@@ -43,7 +43,7 @@ vi.mock('@mahoshojo/hosted-runtime/node-runtime/data-ports', () => ({
   })),
 }));
 
-// generate-magical-girl-details 仍是 Next-owned exited route；在退出完成前保留旧 port mock。
+// 保留 Web compatibility port mock，确保同文件的 legacy public-safety seams 不触发真实上游。
 vi.mock('@/lib/ai/public-rate-limit', () => ({
   acquirePublicAiRateLimit: async (input: Record<string, unknown>) => {
     state.rateLimitCalls.push(input);

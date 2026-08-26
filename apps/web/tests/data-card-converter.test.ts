@@ -287,6 +287,21 @@ describe('data-card-converter', () => {
     expect(generalScenario.content).toContain('日常');
   });
 
+  it('does not append general-scenario content when converting it to a character', () => {
+    const source = {
+      templateId: '通用情景',
+      title: '雨夜舞台',
+      content: 'SCENARIO-CONTENT-MUST-NOT-BECOME-CHARACTER-APPENDIX',
+      atmosphere: '沉静',
+    };
+
+    const { data: magicalGirl } = convertDataCard(source, 'magical-girl', 'general-scenario');
+    const { data: canshou } = convertDataCard(source, 'canshou', 'general-scenario');
+
+    expect(JSON.stringify(magicalGirl)).not.toContain('SCENARIO-CONTENT');
+    expect(JSON.stringify(canshou)).not.toContain('SCENARIO-CONTENT');
+  });
+
   it('preserves _battle_story when converting between scenario and general-scenario', () => {
     const scenario = {
       title: '朝生暮死',

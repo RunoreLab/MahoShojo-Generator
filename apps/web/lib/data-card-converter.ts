@@ -363,7 +363,7 @@ function convertToMagicalGirl(data: any, sourceTemplate: InferableTemplate): Ass
   const converted = convertSublimationCharacterCard(
     data,
     'magical-girl',
-    sourceTemplate === 'general-scenario' ? 'scenario' : sourceTemplate,
+    sourceTemplate,
   );
   return { data: MagicalGirlSchema.parse(converted.data), warnings: converted.warnings };
 }
@@ -372,7 +372,7 @@ function convertToCanshou(data: any, sourceTemplate: InferableTemplate): AssignR
   const converted = convertSublimationCharacterCard(
     data,
     'canshou',
-    sourceTemplate === 'general-scenario' ? 'scenario' : sourceTemplate,
+    sourceTemplate,
   );
   return { data: CanshouSchema.parse(converted.data), warnings: converted.warnings };
 }

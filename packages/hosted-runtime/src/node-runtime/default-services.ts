@@ -68,6 +68,7 @@ import {
   type GenerateSublimationStreamRuntimeDependencies,
 } from '../generate-sublimation-stream-runtime';
 import { createActivityTokenService } from './activity-token';
+import { createAuthenticatedUserIdResolver } from './authenticated-user';
 import {
   createContentSafetyService,
   type AiSafetyPromptTemplate,
@@ -190,6 +191,13 @@ export const createNodeHostedServices = (
   const dataPorts = createNodeDataPorts({
     getD1Client,
     getUserIdFromActivityHeaders: activityTokenService.getUserIdFromActivityHeaders,
+    getAuthenticatedUserId: createAuthenticatedUserIdResolver({
+      env,
+      fetch: fetcher,
+      signatures: signatureService,
+      getD1Client,
+      now,
+    }),
     now,
     log: logger,
   });
@@ -373,7 +381,7 @@ export const createNodeHostedServices = (
     ...providerPorts,
     presetIndex: QUESTIONNAIRE_PRESET_INDEX,
     loadPreset,
-    loadDataCard: (id) => dataPorts.getDataCardById(id, false),
+    loadDataCard: (request, id) => dataPorts.getAuthorizedDataCardById(request, id),
     getRandomFlowers,
     checkRateLimit,
     enforceSafety,
@@ -417,7 +425,7 @@ export const createNodeHostedServices = (
       false,
     ),
     loadPreset,
-    loadDataCard: (id) => dataPorts.getDataCardById(id, false),
+    loadDataCard: (request, id) => dataPorts.getAuthorizedDataCardById(request, id),
     checkRateLimit,
     enforceSafety,
     generateWithAI: asStructuredPort<

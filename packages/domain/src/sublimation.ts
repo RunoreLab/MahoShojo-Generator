@@ -1,10 +1,15 @@
 import {
   GENERAL_CHARACTER_TEMPLATE_ID,
+  GENERAL_SCENARIO_TEMPLATE_ID,
   inferCharacterKind,
 } from './data-cards';
 
 export type SublimationCharacterTemplate = 'magical-girl' | 'canshou' | 'general';
-export type SublimationSourceTemplate = SublimationCharacterTemplate | 'scenario' | 'unknown';
+export type SublimationSourceTemplate =
+  | SublimationCharacterTemplate
+  | 'scenario'
+  | 'general-scenario'
+  | 'unknown';
 
 export const SUBLIMATION_TEMPLATE_LABELS: Record<SublimationCharacterTemplate, string> = {
   'magical-girl': '魔法少女',
@@ -251,6 +256,10 @@ const copyKnownMetadata = (
 };
 
 export const inferSublimationSourceTemplate = (value: unknown): SublimationSourceTemplate => {
+  if (
+    isObject(value)
+    && value.templateId === GENERAL_SCENARIO_TEMPLATE_ID
+  ) return 'general-scenario';
   const characterKind = inferCharacterKind(value);
   if (characterKind !== 'unknown') return characterKind;
   if (isObject(value) && typeof value.title === 'string') return 'scenario';
@@ -297,7 +306,7 @@ const convertToMagicalGirl = (
   for (const key of ['codename', 'name', 'title', 'creationInputs', 'buildState', '_battle_story']) {
     delete input[key];
   }
-  if (sourceTemplate === 'general') delete input.content;
+  if (sourceTemplate === 'general' || sourceTemplate === 'general-scenario') delete input.content;
   const unmatched = assignWithMeta(input, result, MAGICAL_GIRL_META);
   const appendix = formatUnmatchedFields(unmatched, [
     'arena_history', 'adjudicationEvents', 'current_state',
@@ -328,7 +337,7 @@ const convertToCanshou = (
   for (const key of ['codename', 'name', 'title', 'creationInputs', 'buildState', '_battle_story']) {
     delete input[key];
   }
-  if (sourceTemplate === 'general') delete input.content;
+  if (sourceTemplate === 'general' || sourceTemplate === 'general-scenario') delete input.content;
   const unmatched = assignWithMeta(input, result, CANSHOU_META);
   const appendix = formatUnmatchedFields(unmatched, [
     'arena_history', 'adjudicationEvents', 'current_state',

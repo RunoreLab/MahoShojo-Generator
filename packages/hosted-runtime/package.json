@@ -302,9 +302,10 @@
   },
   "scripts": {
     "assets:questionnaires": "node scripts/generate-questionnaire-assets.mjs",
+    "assets:questionnaires:check": "node scripts/generate-questionnaire-assets.mjs --check",
     "test": "vitest run --config vitest.config.ts",
     "lint": "eslint src tests --config eslint.config.mjs",
-    "build": "tsc --noEmit -p tsconfig.json"
+    "build": "node scripts/generate-questionnaire-assets.mjs --check && tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
     "@ai-sdk/deepseek": "^2.0.35",

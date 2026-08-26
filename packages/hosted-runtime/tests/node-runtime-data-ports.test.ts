@@ -176,4 +176,49 @@ describe('package-owned Node data ports', () => {
       tagIds: ['tag-a', 'tag-b'],
     });
   });
+
+  test('Hosted questionnaire DataCard 匿名只读公开 approved，且忽略自报 user id', async () => {
+    const { client, calls } = createD1Harness([result()]);
+    const getAuthenticatedUserId = vi.fn(async () => null);
+    const ports = createNodeDataPorts({
+      getD1Client: () => client,
+      getUserIdFromActivityHeaders: async () => null,
+      getAuthenticatedUserId,
+      now: () => new Date('2026-08-24T12:34:56.000Z'),
+    });
+    const request = new Request('https://api.example.test/generate', {
+      headers: { 'X-Mahoshojo-User-Id': '9' },
+    });
+
+    await ports.getAuthorizedDataCardById(request, ' private-card ');
+
+    expect(getAuthenticatedUserId).toHaveBeenCalledWith(request);
+    expect(calls[0]?.sql).toMatch(/dc\.is_public = 1[\s\S]+dc\.review_status = 'approved'/u);
+    expect(calls[0]?.sql).not.toMatch(/dc\.user_id = \?/u);
+    expect(calls[0]?.params).toEqual(['private-card']);
+    expect(calls[0]?.options).toEqual({ retry: 'safe-read' });
+  });
+
+  test('Hosted questionnaire DataCard 只允许可信 actor 自有卡或公开 approved 卡', async () => {
+    const { client, calls } = createD1Harness([result()]);
+    const request = new Request('https://api.example.test/generate', {
+      headers: { Authorization: 'Bearer verified-legacy-token' },
+    });
+    const ports = createNodeDataPorts({
+      getD1Client: () => client,
+      getUserIdFromActivityHeaders: async () => null,
+      getAuthenticatedUserId: async (incoming) => {
+        expect(incoming).toBe(request);
+        return 9;
+      },
+      now: () => new Date('2026-08-24T12:34:56.000Z'),
+    });
+
+    await ports.getAuthorizedDataCardById(request, 'owned-card');
+
+    expect(calls[0]?.sql).toMatch(/dc\.user_id = \?[\s\S]+dc\.is_public = 1/u);
+    expect(calls[0]?.sql).toMatch(/dc\.review_status = 'approved'/u);
+    expect(calls[0]?.params).toEqual(['owned-card', 9]);
+    expect(calls[0]?.options).toEqual({ retry: 'safe-read' });
+  });
 });

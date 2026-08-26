@@ -155,6 +155,18 @@ vi.mock('@mahoshojo/hosted-runtime/node-runtime/data-ports', () => ({
         questions: [{ id: 'q-1', question: '核心问题？', maxLength: 80 }],
       }),
     })),
+    getAuthorizedDataCardById: vi.fn(async (_request: Request, id: string) => ({
+      id,
+      type: 'questionnaire',
+      tagIds: [],
+      data: JSON.stringify({
+        id: id === 'canshou-card' ? 'canshou-native' : 'creator-native',
+        title: id === 'canshou-card' ? '残兽原生问卷' : 'Creator 原生问卷',
+        kind: id === 'canshou-card' ? 'canshou' : 'magical-girl',
+        nativeAllowed: true,
+        questions: [{ id: 'q-1', question: '核心问题？', maxLength: 80 }],
+      }),
+    })),
   })),
 }));
 
@@ -616,5 +628,59 @@ describe('常规生成 Hono production composition', () => {
     expect(mocks.streamAbortSignals[0]?.aborted).toBe(false);
     controller.abort('hono-caller-abort');
     expect(mocks.streamAbortSignals[0]?.aborted).toBe(true);
+  });
+
+  it.each([
+    {
+      operation: 'generate-magical-girl-details-stream',
+      path: '/api/generate-magical-girl-details-stream',
+      body: {
+        answers: ['守护同伴'],
+        questionnaires: [{
+          id: 'details-test',
+          title: 'Details 测试问卷',
+          kind: 'magical-girl',
+          questions: [{ id: 'q-1', question: '为何而战？' }],
+        }],
+      },
+    },
+    {
+      operation: 'generate-sublimation-stream',
+      path: '/api/generate-sublimation-stream',
+      body: {
+        templateId: '通用角色',
+        name: '测试角色',
+        content: '# 测试角色',
+        targetTemplate: 'general',
+      },
+    },
+  ] as const)('Hono $operation 在 stream body 自然完成后记录真实 success 终态', async ({
+    operation,
+    path,
+    body,
+  }) => {
+    const telemetry = new HonoRuntimeTelemetry();
+    const unregister = registerHostedRuntimeObserver(telemetry);
+    try {
+      const app = createHonoApp(config, redis, telemetry);
+      const response = await app.request(path, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Mahoshojo-Activity-Token': 'activity-token',
+        },
+        body: JSON.stringify(body),
+      });
+
+      expect(response.status).toBe(200);
+      expect(await response.text()).toBe('hono-stream-body');
+      expect(telemetry.snapshot().hostedGeneration).toMatchObject({
+        byOperation: { [operation]: 1 },
+        byPlacement: { honoPrimary: 1, nextDr: 0 },
+        outcomes: { success: 1 },
+      });
+    } finally {
+      unregister();
+    }
   });
 });

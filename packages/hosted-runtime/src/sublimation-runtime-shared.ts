@@ -151,6 +151,7 @@ const formatCurrentState = (state: unknown): string => {
 const sourceLabel = (template: SublimationSourceTemplate): string => {
   if (template === 'unknown') return '未知模板';
   if (template === 'scenario') return '情景';
+  if (template === 'general-scenario') return '通用情景';
   return SUBLIMATION_TEMPLATE_LABELS[template];
 };
 

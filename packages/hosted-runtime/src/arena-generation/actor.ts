@@ -2,8 +2,8 @@ import {
   MAX_ARENA_CREATE_BODY_BYTES,
   type ArenaGenerationActor,
 } from '@mahoshojo/hosted-api/arena-generation/service';
-import { createActivityTokenService } from '../node-runtime/activity-token';
 import type { NodeDataD1Client } from '../node-runtime/data-ports';
+import { createAuthenticatedUserIdResolver } from '../node-runtime/authenticated-user';
 import type { SignatureService } from '../signature';
 import {
   ARENA_PVP_GENERATION_SIGNATURE_HEADER,
@@ -77,99 +77,19 @@ const readBootstrapAnonymousId = (value: string): string | null => {
   return match?.[1]?.toLowerCase() ?? null;
 };
 
-const readUserId = (value: unknown): number | null => {
-  const parsed = typeof value === 'number' ? value : Number(value);
-  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
-};
-
-const readD1User = async (
-  client: NodeDataD1Client,
-  where: 'auth_key' | 'id',
-  value: string | number,
-): Promise<number | null> => {
-  const result = await client.prepare(`
-SELECT id, username, is_banned
-FROM users
-WHERE ${where} = ?
-LIMIT 1
-  `.trim()).bind(value).all({ retry: 'safe-read' });
-  return readUserId(result.results[0]?.id);
-};
-
-const hasBetterAuthSession = (request: Request): boolean => {
-  const cookie = request.headers.get('cookie') ?? '';
-  return /(?:^|;\s*)(?:__Secure-)?better-auth\.session_token=[^;]+/u.test(cookie);
-};
-
-const parseTrustedBetterAuthUrl = (
-  env: Readonly<Record<string, string | undefined>>,
-): URL | null => {
-  const raw = env.BETTER_AUTH_URL?.trim();
-  if (!raw) return null;
-  try {
-    const url = new URL(raw);
-    const localHttp = env.NODE_ENV !== 'production'
-      && url.protocol === 'http:'
-      && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
-    if (
-      (url.protocol !== 'https:' && !localHttp)
-      || url.username
-      || url.password
-      || url.pathname !== '/'
-      || url.search
-      || url.hash
-    ) return null;
-    return url;
-  } catch {
-    return null;
-  }
-};
-
-const readSessionUser = async (
-  request: Request,
-  env: Readonly<Record<string, string | undefined>>,
-  fetcher: typeof fetch,
-): Promise<number | null> => {
-  const base = parseTrustedBetterAuthUrl(env);
-  if (!base) return null;
-  const headers = new Headers({ 'Content-Type': 'application/json' });
-  for (const name of [
-    'cookie',
-    'user-agent',
-    'x-forwarded-for',
-    'x-real-ip',
-    'cf-connecting-ip',
-  ]) {
-    const value = request.headers.get(name);
-    if (value) headers.set(name, value);
-  }
-  if (env.CF_ACCESS_CLIENT_ID?.trim() && env.CF_ACCESS_CLIENT_SECRET?.trim()) {
-    headers.set('cf-access-client-id', env.CF_ACCESS_CLIENT_ID.trim());
-    headers.set('cf-access-client-secret', env.CF_ACCESS_CLIENT_SECRET.trim());
-  }
-  try {
-    const response = await fetcher(new URL('/api/auth/verify', base).toString(), {
-      method: 'POST',
-      headers,
-    });
-    if (!response.ok) return null;
-    const payload = await response.json().catch(() => null) as {
-      user?: { id?: unknown };
-    } | null;
-    return readUserId(payload?.user?.id);
-  } catch {
-    return null;
-  }
-};
-
 export const createArenaGenerationActorResolver = (
   options: ArenaGenerationActorResolverOptions,
 ): ArenaActorResolver => {
   const env = options.env ?? process.env;
-  const fetcher = options.fetch ?? globalThis.fetch;
   const now = options.now ?? (() => new Date());
   const createAnonymousId = options.createAnonymousId ?? (() => crypto.randomUUID());
-  const activityTokens = createActivityTokenService(options.signatures);
+  const resolveAuthenticatedUserId = createAuthenticatedUserIdResolver({
+    env,
+    fetch: options.fetch,
+    signatures: options.signatures,
+    getD1Client: options.getD1Client,
+    now,
+  });
   const pvpAuthority = options.pvpSignatures
     ? createArenaPvpGenerationAuthority(options.pvpSignatures)
     : null;
@@ -263,34 +183,17 @@ export const createArenaGenerationActorResolver = (
   };
 
   return async (request): Promise<ArenaGenerationActor | null> => {
+    const userId = await resolveAuthenticatedUserId(request);
+    const authenticatedActor: ArenaGenerationActor | null = userId
+      ? { actorKey: `user:${userId}` }
+      : null;
     const authorization = request.headers.get('authorization')?.trim() ?? '';
-    const bearer = authorization.startsWith('Bearer ')
-      ? authorization.slice('Bearer '.length).trim()
-      : '';
-    const client = options.getD1Client();
-    const authMode = env.HONO_AUTH_MODE?.trim().toLowerCase() || 'hybrid';
-    let authenticatedActor: ArenaGenerationActor | null = null;
-
-    if (authMode === 'hybrid' && hasBetterAuthSession(request)) {
-      const userId = await readSessionUser(request, env, fetcher);
-      if (userId) authenticatedActor = { actorKey: `user:${userId}` };
-    }
-    if (!authenticatedActor && bearer) {
-      if (!client) return null;
-      const userId = await readD1User(client, 'auth_key', bearer).catch(() => null);
-      if (!userId) return null;
-      authenticatedActor = { actorKey: `user:${userId}` };
-    }
-
-    const activityToken = request.headers.get('x-mahoshojo-activity-token')?.trim() ?? '';
-    if (!authenticatedActor && activityToken) {
-      if (!client) return null;
-      const verified = await activityTokens.verifyActivityToken(activityToken, { now: now() });
-      if (!verified) return null;
-      const userId = await readD1User(client, 'id', verified.userId).catch(() => null);
-      if (!userId) return null;
-      authenticatedActor = { actorKey: `user:${userId}` };
-    }
+    const hasStrictCredential = Boolean(
+      (authorization.startsWith('Bearer ')
+        && authorization.slice('Bearer '.length).trim())
+      || request.headers.get('x-mahoshojo-activity-token')?.trim(),
+    );
+    if (!authenticatedActor && hasStrictCredential) return null;
 
     const pvpSignature = request.headers.get(ARENA_PVP_GENERATION_SIGNATURE_HEADER)?.trim() ?? '';
     if (pvpSignature) {

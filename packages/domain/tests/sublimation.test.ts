@@ -50,6 +50,32 @@ describe('Sublimation domain authority', () => {
     expect(converted.warnings).toEqual(['部分字段已追加至预测依据。']);
   });
 
+  it('general-scenario 转角色时保持旧合同：content 不进入角色附录', () => {
+    const source = {
+      templateId: '通用情景',
+      title: '雨夜舞台',
+      content: 'SCENARIO-CONTENT-MUST-NOT-BECOME-CHARACTER-APPENDIX',
+      atmosphere: '沉静',
+    };
+
+    expect(inferSublimationSourceTemplate(source)).toBe('general-scenario');
+    const magicalGirl = convertSublimationCharacterCard(
+      source,
+      'magical-girl',
+      'general-scenario',
+    );
+    const canshou = convertSublimationCharacterCard(
+      source,
+      'canshou',
+      'general-scenario',
+    );
+
+    expect(JSON.stringify(magicalGirl.data)).not.toContain('SCENARIO-CONTENT');
+    expect(JSON.stringify(canshou.data)).not.toContain('SCENARIO-CONTENT');
+    expect(JSON.stringify(magicalGirl.data)).toContain('atmosphere');
+    expect(JSON.stringify(canshou.data)).toContain('atmosphere');
+  });
+
   it('Arena retention canonicalize id 并由 finalize 阻断关闭字段的 AI 注入', () => {
     const history = applySublimationArenaHistoryStrategy({
       sourceArenaHistory: {
