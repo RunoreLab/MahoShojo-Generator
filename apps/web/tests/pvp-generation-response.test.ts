@@ -1,10 +1,14 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import {
-  assertCompletedPvpGenerationSseDone,
   readDurablePvpGenerationId,
   readDurablePvpTerminalGenerationId,
 } from '@/lib/pvp/generation-authority';
+import {
+  assertCompletedPvpGenerationSseDone,
+  assertPvpGenerationSseCompletedBeforeEof,
+  readPvpGenerationSseSnapshot,
+} from '@/lib/pvp/generation-stream';
 import {
   claimPvpResolutionOwnership,
   handlePvpGenerationFailure,
@@ -80,6 +84,30 @@ describe('PVP generation response identity', () => {
       status: 'producer_lost',
       error: '生成生产者已丢失',
     })).toThrow('生成生产者已丢失');
+  });
+
+  it('replaces accumulated content from a durable completed snapshot', () => {
+    expect(readPvpGenerationSseSnapshot({
+      status: 'completed',
+      markdown: '# 持久战报\n\n完整正文',
+      reasoning: '完整推理',
+    })).toEqual({
+      status: 'completed',
+      markdown: '# 持久战报\n\n完整正文',
+      reasoning: '完整推理',
+    });
+    expect(() => readPvpGenerationSseSnapshot({
+      status: 'completed',
+      markdown: null,
+      reasoning: '',
+    })).toThrow('上游流式生成返回了无效快照');
+  });
+
+  it('fails closed when an SSE stream reaches EOF without completed done', () => {
+    expect(() => assertPvpGenerationSseCompletedBeforeEof(true, false))
+      .toThrow('上游流式生成在成功终态前结束');
+    expect(() => assertPvpGenerationSseCompletedBeforeEof(true, true)).not.toThrow();
+    expect(() => assertPvpGenerationSseCompletedBeforeEof(false, false)).not.toThrow();
   });
 
   it('preserves sensitive/ordinary control data and persists only marked durable failures', async () => {

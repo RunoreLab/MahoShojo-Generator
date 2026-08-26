@@ -36,7 +36,12 @@ import { mapDataCardRuntimeSourceInfo, mapPublicDataCardRowToBattleSelectionPayl
 	import { config as appConfig } from '@/lib/config';
 	import { useAuth } from '@/lib/useAuth';
 	import { buildCustomProviderRequestPayload, isUsingUserProvidedKey } from '@/lib/ai/custom-provider';
-	import { buildReasoningSummary, normalizeReasoningSource } from '@/lib/ai/reasoning-normalizer';
+import { buildReasoningSummary, normalizeReasoningSource } from '@/lib/ai/reasoning-normalizer';
+import {
+  assertCompletedPvpGenerationSseDone,
+  assertPvpGenerationSseCompletedBeforeEof,
+  readPvpGenerationSseSnapshot,
+} from '@/lib/pvp/generation-stream';
 	import { describePvpRoomCardRange, isPvpCombatantTypeAllowedByRange, isPvpDataCardStatsAllowedByRange, normalizePvpRoomCardRange } from '@/lib/pvp/card-range';
 	import { formatPvpDisplayName } from '@/lib/pvp/displayName';
 	import { inferPvpCombatantTypeFromJson } from '@/lib/pvp/logic';
@@ -1200,6 +1205,23 @@ export function PvpRoomPage() {
               payload = null;
             }
 
+            if (event === 'snapshot') {
+              const snapshot = readPvpGenerationSseSnapshot(payload);
+              accumulated = snapshot.markdown;
+              reasoningText = snapshot.reasoning;
+              reasoningStatus = snapshot.status === 'completed'
+                ? (reasoningText.trim() ? 'done' : 'unavailable')
+                : (reasoningText.trim() ? 'thinking' : 'unavailable');
+              setStreamingResolveMarkdown(accumulated);
+              patchReasoningMeta({
+                status: reasoningStatus,
+                source: reasoningSource === 'unknown' ? 'sdk' : reasoningSource,
+                text: reasoningText || null,
+                summary: buildReasoningSummary(reasoningText) ?? null,
+              });
+              return;
+            }
+
             if (event === 'markdown') {
               const chunk = typeof payload?.chunk === 'string' ? payload.chunk : '';
               if (!chunk) return;
@@ -1292,6 +1314,7 @@ export function PvpRoomPage() {
             }
 
             if (event === 'done') {
+              assertCompletedPvpGenerationSseDone(payload);
               sawDone = true;
             }
           };
@@ -1371,6 +1394,7 @@ export function PvpRoomPage() {
               if (sawDone) break;
               idx = sseBuffer.indexOf('\n\n');
             }
+            assertPvpGenerationSseCompletedBeforeEof(true, sawDone);
             if ((reasoningStatus as string) === 'thinking') {
               const status = reasoningText.trim() ? 'done' : 'unavailable';
               patchReasoningMeta({

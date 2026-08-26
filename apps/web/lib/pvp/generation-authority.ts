@@ -45,19 +45,6 @@ export const readDurablePvpTerminalGenerationId = (
   return normalizeGenerationId((body as { generationId?: unknown }).generationId);
 };
 
-export const assertCompletedPvpGenerationSseDone = (payload: unknown): void => {
-  const value = payload && typeof payload === 'object' && !Array.isArray(payload)
-    ? payload as { ok?: unknown; status?: unknown; error?: unknown }
-    : null;
-  if (value?.ok === true && value.status === 'completed') return;
-  const message = typeof value?.error === 'string' && value.error.trim()
-    ? value.error.trim()
-    : typeof value?.status === 'string' && value.status.trim()
-      ? `上游流式生成未成功完成：${value.status.trim()}`
-      : '上游流式生成未返回成功终态';
-  throw new Error(message);
-};
-
 export const readDurablePvpGenerationId = (
   response: Pick<Response, 'headers' | 'ok'>,
   body: unknown,

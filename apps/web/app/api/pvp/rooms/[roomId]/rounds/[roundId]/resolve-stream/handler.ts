@@ -37,10 +37,14 @@ import { extractWinnerLineFromMarkdown, parsePvpWinnerFromText } from '@/lib/pvp
 import type { AIReasoningSource, AIReasoningStatus } from '@/types/ai-reasoning';
 import { getRequestUrl } from '@/lib/request-url';
 import {
-  assertCompletedPvpGenerationSseDone,
   createPvpArenaGenerationAuthority,
   readDurablePvpTerminalGenerationId,
 } from '@/lib/pvp/generation-authority';
+import {
+  assertCompletedPvpGenerationSseDone,
+  assertPvpGenerationSseCompletedBeforeEof,
+  readPvpGenerationSseSnapshot,
+} from '@/lib/pvp/generation-stream';
 import {
   claimPvpResolutionOwnership,
   handlePvpGenerationFailure,
@@ -264,7 +268,7 @@ async function resolveStreamHandler(req: Request): Promise<Response> {
           const body = new ReadableStream<Uint8Array>({
             start(controller) {
               controller.enqueue(encodeSseEvent('markdown', { chunk: reportMarkdown }));
-              controller.enqueue(encodeSseEvent('done', { ok: true }));
+              controller.enqueue(encodeSseEvent('done', { ok: true, status: 'completed' }));
               controller.close();
             },
           });
@@ -566,7 +570,7 @@ async function resolveStreamHandler(req: Request): Promise<Response> {
         const body = new ReadableStream<Uint8Array>({
           start(controller) {
             controller.enqueue(encodeSseEvent('markdown', { chunk: markdown }));
-            controller.enqueue(encodeSseEvent('done', { ok: true }));
+            controller.enqueue(encodeSseEvent('done', { ok: true, status: 'completed' }));
             controller.close();
           },
         });
@@ -695,6 +699,26 @@ async function resolveStreamHandler(req: Request): Promise<Response> {
       payload = parsed.data ? JSON.parse(parsed.data) : null;
     } catch {
       payload = null;
+    }
+
+    if (parsed.event === 'snapshot') {
+      const previousMarkdown = accumulatedText;
+      const snapshot = readPvpGenerationSseSnapshot(payload);
+      accumulatedText = snapshot.markdown;
+      reasoningText = snapshot.reasoning;
+      reasoningStatus = snapshot.status === 'completed'
+        ? (reasoningText.trim() ? 'done' : 'unavailable')
+        : (reasoningText.trim() ? 'thinking' : 'unavailable');
+      if (wantsClientSse) {
+        controller.enqueue(encodeSseEvent('snapshot', snapshot));
+      } else {
+        if (!snapshot.markdown.startsWith(previousMarkdown)) {
+          throw new Error('上游快照无法安全投影到文本流');
+        }
+        const suffix = snapshot.markdown.slice(previousMarkdown.length);
+        if (suffix) controller.enqueue(new TextEncoder().encode(suffix));
+      }
+      return;
     }
 
     if (parsed.event === 'markdown') {
@@ -1148,6 +1172,7 @@ async function resolveStreamHandler(req: Request): Promise<Response> {
         if (upstreamStreamErrorMessage) {
           throw new Error(upstreamStreamErrorMessage);
         }
+        assertPvpGenerationSseCompletedBeforeEof(isSseUpstream, sawSseDone);
         await finalizeAndPersist(accumulatedText);
         clearUpstreamTimeout();
         if (wantsClientSse) {
@@ -1163,7 +1188,7 @@ async function resolveStreamHandler(req: Request): Promise<Response> {
               })
             );
           }
-          controller.enqueue(encodeSseEvent('done', { ok: true }));
+          controller.enqueue(encodeSseEvent('done', { ok: true, status: 'completed' }));
         }
         controller.close();
       } catch (e) {
