@@ -140,9 +140,13 @@ describe('Hono deployment workflow', () => {
 
   test('preview 分支串行发布隔离 Hono 后再发布 Cloudflare', () => {
     const workflow = readFileSync(PREVIEW_WORKFLOW_PATH, 'utf8');
+    const verifyJob = getJob(workflow, 'verify-and-build-hono');
     const honoJob = getJob(workflow, 'deploy-hono-preview');
     const cloudflareJob = getJob(workflow, 'deploy-cloudflare-preview');
 
+    for (const job of [verifyJob, honoJob, cloudflareJob]) {
+      expect(job).toMatch(/^    if: github\.ref == 'refs\/heads\/preview'\s*$/m);
+    }
     expect(workflow).toMatch(/branches:\s*\n\s*- preview/u);
     expect(honoJob).toContain('HONO_DEPLOY_ROOT_DIR: /opt/mahoshojo-hono-preview');
     expect(honoJob).toContain('HONO_CONTAINER_NAME: mahoshojo-hono-preview');
