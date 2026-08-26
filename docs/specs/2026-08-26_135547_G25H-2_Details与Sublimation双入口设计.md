@@ -1,6 +1,6 @@
 # G25H-2 Details 与 Sublimation 双入口设计
 
-> 状态：active implementation design
+> 状态：implemented
 > Goal：`G25H-2 Details / Sublimation re-entry`
 > 基线：`05b64453`（`refactor/platform-rearchitecture`）
 > 适用上位口径：平台重整 accepted ADR/architecture/spec、Hosted 长生成断网可恢复流规格、Goal 自治执行与验收规格
@@ -93,3 +93,7 @@ Hono runtime snapshot 聚合上述维度，并与既有 process CPU/event-loop/A
 - G25H-3（Magic Tea Party / Tavern / battle report regenerate）；
 - 为已有 unrelated warning/audit/naming debt 做全仓清债；
 - 为普通 Details/Sublimation 请求新增透明重放或可恢复长生成协议。
+
+## 7. 实施终点
+
+2026-08-26 按本设计完成实施：四路 inventory 为 `22 shared / 6 exited / 0 legacy`，Hono/Next 使用同一默认 service，Sublimation 纯规则及 questionnaire static assets 已归位 package。实施期额外将私有 DataCard 读取收紧到受信 Better Auth / Legacy Bearer / activity token actor，未认证请求只能使用 public + approved 问卷；这是对“客户端不可信”不变量的闭合，没有改变 accepted ADR。详见 [实施与退出审计](../logs/2026-08-26_160740_平台重整G25H-2_Details与Sublimation双入口实施与退出审计.md)。

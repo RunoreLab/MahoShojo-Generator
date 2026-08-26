@@ -1,5 +1,7 @@
 # G25H-2 Details 与 Sublimation 双入口实施计划
 
+> 状态：`completed`（2026-08-26）
+
 > **执行要求：** 使用 executing-plans；每项行为修改遵循 test-driven-development；完成前使用 verification-before-completion 与独立 review。
 
 **Goal：** 四条 Details / Sublimation 路由采用 Hono primary + Next DR 的同一 shared service，保留签名、问卷、安全、Provider、Arena history/finalize 与 wire 兼容，并形成可比较的 operation/placement telemetry。
@@ -83,7 +85,7 @@ pnpm --filter @mahoshojo/api lint
 pnpm --filter @mahoshojo/web test
 pnpm --filter @mahoshojo/web lint
 pnpm server:routes
-pnpm server:verify-runtime
+pnpm verify:server:runtime
 pnpm build:server
 pnpm build:cf
 pnpm test
@@ -92,3 +94,7 @@ pnpm typecheck
 ```
 
 若 manifest、边界或 contract 跨 workspace 证据需要，追加仓库既有 `ci:verify`；不得把未运行命令写成通过。
+
+## 完成记录
+
+五个 checkpoint 及 review 整改已按可回滚提交闭合。最终实现满足 22/6/0 inventory、同 service 双入口、DataCard ownership 与 native signature fail-closed、Sublimation history/finalize 权威、固定 operation/placement telemetry 和流式终态最多一次。完整命令、审查 finding、状态矩阵与回滚顺序见 [G25H-2 实施与退出审计](../logs/2026-08-26_160740_平台重整G25H-2_Details与Sublimation双入口实施与退出审计.md)。
