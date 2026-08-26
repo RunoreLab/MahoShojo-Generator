@@ -37,12 +37,13 @@
     "check:naming:strict": "node scripts/check-naming-conventions.mjs",
     "check:naming:workspace": "node scripts/check-naming-conventions.mjs --workspace-only",
     "check:workspace:boundaries": "node scripts/check-workspace-boundaries.mjs",
+    "check:hosted-dr": "node scripts/check-hosted-dr-contract.mjs",
     "test:repo": "vitest run --config vitest.config.ts",
     "lint:repo": "eslint scripts tests drizzle.config.ts --config eslint.config.mjs",
     "workspace:test": "pnpm --filter \"./packages/*\" --filter \"./apps/*\" --if-present run test",
     "workspace:lint": "pnpm --filter \"./packages/*\" --filter \"./apps/*\" --if-present run lint",
     "workspace:build": "pnpm --filter \"./packages/*\" --filter \"./apps/*\" --if-present run build",
-    "workspace:verify": "pnpm run check:workspace:boundaries && pnpm run check:naming:workspace && pnpm run workspace:test && pnpm run workspace:lint && pnpm run workspace:build",
+    "workspace:verify": "pnpm run check:workspace:boundaries && pnpm run check:naming:workspace && pnpm run check:hosted-dr && pnpm run workspace:test && pnpm run workspace:lint && pnpm run workspace:build",
     "ci:verify": "pnpm run workspace:verify && pnpm run test:repo && pnpm run lint:repo"
   },
   "devDependencies": {

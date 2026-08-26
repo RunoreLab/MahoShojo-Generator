@@ -4,6 +4,11 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./hosted-dr": {
+      "types": "./src/hosted-dr.ts",
+      "import": "./src/hosted-dr.ts",
+      "default": "./src/hosted-dr.ts"
+    },
     "./arena-generation/service": {
       "types": "./src/arena-generation/service.ts",
       "import": "./src/arena-generation/service.ts",
