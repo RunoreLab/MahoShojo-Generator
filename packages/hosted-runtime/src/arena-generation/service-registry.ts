@@ -24,6 +24,9 @@ const unavailable = (): Response => new Response(JSON.stringify({
 });
 
 export const registeredArenaGenerationService: ArenaGenerationService = Object.freeze({
+  createSubscription: (request: Request) => (
+    configuredService?.createSubscription(request) ?? Promise.resolve(unavailable())
+  ),
   create: (request: Request) => (
     configuredService?.create(request) ?? Promise.resolve(unavailable())
   ),

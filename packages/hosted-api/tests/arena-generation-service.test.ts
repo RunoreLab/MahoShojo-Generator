@@ -340,6 +340,59 @@ describe('Arena generation lifecycle service', () => {
     await readResponseText(second);
   });
 
+  test('exposes the replay lifecycle as typed subscriptions without starting a second producer', async () => {
+    const store = new MemoryReplayStore();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const execute = vi.fn(async ({ emit }) => {
+      await emit({ type: 'markdown', data: { chunk: 'typed' } });
+      await gate;
+      return { status: 'completed' as const, resultRef: 'arena/generation-1.md' };
+    });
+    const service = createService(store, { execute }, {
+      actorResponseHeaders: { 'X-Mahoshojo-Generation-Actor-Token': 'signed-token' },
+    });
+
+    const first = await (service as any).createSubscription(createRequest('request-typed'));
+    const second = await (service as any).createSubscription(createRequest('request-typed'));
+
+    expect(first).not.toBeInstanceOf(Response);
+    expect(second).not.toBeInstanceOf(Response);
+    expect(first).toMatchObject({
+      generationId: 'generation-1',
+      generationRequestId: 'request-typed',
+      headers: {
+        'X-Mahoshojo-Generation-Actor-Token': 'signed-token',
+      },
+    });
+    expect(execute).toHaveBeenCalledTimes(1);
+
+    release();
+    const readEvents = async (stream: ReadableStream<GenerationStreamEvent>) => {
+      const reader = stream.getReader();
+      const events: GenerationStreamEvent[] = [];
+      while (true) {
+        const next = await reader.read();
+        if (next.done) return events;
+        events.push(next.value);
+      }
+    };
+    const [firstEvents, secondEvents] = await Promise.all([
+      readEvents(first.events),
+      readEvents(second.events),
+    ]);
+
+    for (const events of [firstEvents, secondEvents]) {
+      expect(events).toEqual(expect.arrayContaining([
+        expect.objectContaining({ id: '1-0', type: 'markdown', data: { chunk: 'typed' } }),
+        expect.objectContaining({ type: 'done', data: expect.objectContaining({
+          ok: true,
+          status: 'completed',
+        }) }),
+      ]));
+    }
+  });
+
   test('looks up an actor-owned generation by stable request id', async () => {
     const store = new MemoryReplayStore();
     let release!: () => void;

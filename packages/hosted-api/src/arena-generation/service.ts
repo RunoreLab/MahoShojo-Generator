@@ -417,7 +417,17 @@ export type ArenaGenerationRequestRouteParams = {
   generationRequestId: string;
 };
 
+export type ArenaGenerationSubscription = Readonly<{
+  generationId: string;
+  generationRequestId: string;
+  headers: Readonly<Record<string, string>>;
+  events: ReadableStream<GenerationStreamEvent>;
+}>;
+
 export interface ArenaGenerationService {
+  createSubscription(
+    _request: Request,
+  ): Promise<ArenaGenerationSubscription | Response>;
   create(_request: Request): Promise<Response>;
   cancelRequest(_request: Request): Promise<Response>;
   lookup(
@@ -457,6 +467,57 @@ const withActorHeaders = (
     statusText: response.statusText,
     headers,
   });
+};
+
+const withActorSubscriptionHeaders = (
+  subscription: ArenaGenerationSubscription,
+  actor: ArenaGenerationActor,
+): ArenaGenerationSubscription => {
+  if (!actor.responseHeaders || Object.keys(actor.responseHeaders).length === 0) {
+    return subscription;
+  }
+  return Object.freeze({
+    ...subscription,
+    headers: Object.freeze({
+      ...subscription.headers,
+      ...actor.responseHeaders,
+    }),
+  });
+};
+
+const subscriptionToSseResponse = (
+  subscription: ArenaGenerationSubscription,
+): Response => {
+  const reader = subscription.events.getReader();
+  const body = new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      try {
+        const next = await reader.read();
+        if (next.done) {
+          reader.releaseLock();
+          controller.close();
+          return;
+        }
+        controller.enqueue(encodeGenerationSseEvent(next.value));
+      } catch (error) {
+        reader.releaseLock();
+        controller.error(error);
+      }
+    },
+    async cancel(reason) {
+      try {
+        await reader.cancel(reason);
+      } finally {
+        reader.releaseLock();
+      }
+    },
+  });
+  const headers = new Headers({
+    'Cache-Control': 'no-cache, no-transform',
+    'Content-Type': 'text/event-stream; charset=utf-8',
+    ...subscription.headers,
+  });
+  return new Response(body, { status: 200, headers });
 };
 
 const isGenerationRequestId = (value: string): boolean => (
@@ -1068,10 +1129,10 @@ export const createArenaGenerationService = (
     ...(state.terminal?.resultRef ? { resultRef: state.terminal.resultRef } : {}),
   }, 200), actor);
 
-  const createTerminalFallbackResponse = (
+  const createTerminalFallbackSubscription = (
     terminal: ArenaGenerationTerminalRecord,
     after: string | null = null,
-  ): Response => {
+  ): ArenaGenerationSubscription | Response => {
     if (terminal.status === 'completed' && terminal.contentAvailable === false) {
       return jsonResponse({
         code: 'GENERATION_TERMINAL_CONTENT_UNAVAILABLE',
@@ -1097,12 +1158,12 @@ export const createArenaGenerationService = (
       updatedAt: terminal.updatedAt,
       terminalResultRef: terminal.resultRef,
     };
-    const snapshotEvent = encodeGenerationSseEvent({
+    const snapshotEvent: GenerationStreamEvent = {
       id: snapshotId,
       type: 'snapshot',
       data: snapshot,
-    });
-    const terminalEvent = encodeGenerationSseEvent({
+    };
+    const terminalEvent: GenerationStreamEvent = {
       id: terminalId,
       type: terminal.status === 'failed' || terminal.status === 'producer_lost'
         ? 'error'
@@ -1112,8 +1173,8 @@ export const createArenaGenerationService = (
         status: terminal.status,
         ...(terminal.resultRef ? { resultRef: terminal.resultRef } : {}),
       },
-    });
-    const stream = new ReadableStream<Uint8Array>({
+    };
+    const stream = new ReadableStream<GenerationStreamEvent>({
       start(controller) {
         controller.enqueue(snapshotEvent);
         controller.enqueue(terminalEvent);
@@ -1121,35 +1182,46 @@ export const createArenaGenerationService = (
           event: 'replay',
           generationId: terminal.generationId,
           events: 2,
-          bytes: snapshotEvent.byteLength + terminalEvent.byteLength,
+          bytes: encodeGenerationSseEvent(snapshotEvent).byteLength
+            + encodeGenerationSseEvent(terminalEvent).byteLength,
           snapshotBootstrap: true,
         });
         controller.close();
       },
     });
-    return new Response(stream, {
-      status: 200,
-      headers: {
-        'Cache-Control': 'no-cache, no-transform',
-        'Content-Type': 'text/event-stream; charset=utf-8',
+    return Object.freeze({
+      generationId: terminal.generationId,
+      generationRequestId: terminal.generationRequestId,
+      headers: Object.freeze({
         'X-Mahoshojo-Generation-Id': terminal.generationId,
         'X-Mahoshojo-Generation-Request-Id': terminal.generationRequestId,
         'X-Mahoshojo-Generation-Fallback': 'terminal',
-      },
+      }),
+      events: stream,
     });
   };
 
-  const createReplayResponse = (
+  const createTerminalFallbackResponse = (
+    terminal: ArenaGenerationTerminalRecord,
+    after: string | null = null,
+  ): Response => {
+    const subscription = createTerminalFallbackSubscription(terminal, after);
+    return subscription instanceof Response
+      ? subscription
+      : subscriptionToSseResponse(subscription);
+  };
+
+  const createReplaySubscription = (
     generationId: string,
     generationRequestId: string,
     after: string | null,
     actorKey: string,
     responseHeaders: Readonly<Record<string, string>> = {},
-  ): Response => {
+  ): ArenaGenerationSubscription => {
     let cancelled = false;
     let cursor = after;
     let snapshotBootstrapped = false;
-    const stream = new ReadableStream<Uint8Array>({
+    const stream = new ReadableStream<GenerationStreamEvent>({
       start(controller) {
         const pump = async (): Promise<void> => {
           const terminalFallback = async (): Promise<ArenaGenerationTerminalRecord | null> => (
@@ -1168,14 +1240,14 @@ export const createArenaGenerationService = (
           };
           const enqueueReplayError = (code: string): void => {
             const id = nextSyntheticId();
-            controller.enqueue(encodeGenerationSseEvent({
+            controller.enqueue({
               id,
               type: 'error',
               data: {
                 code,
                 status: code === 'GENERATION_STATE_LOST' ? 'producer_lost' : 'failed',
               },
-            }));
+            });
             cursor = id;
             controller.close();
           };
@@ -1188,12 +1260,12 @@ export const createArenaGenerationService = (
             const sequence = base?.[2] ?? null;
             const snapshotId = `${milliseconds}-${sequence ? addSmallDecimal(sequence, 1) : '0'}`;
             const terminalId = `${milliseconds}-${sequence ? addSmallDecimal(sequence, 2) : '1'}`;
-            const snapshotEvent = encodeGenerationSseEvent({
+            const snapshotEvent: GenerationStreamEvent = {
               id: snapshotId,
               type: 'snapshot',
               data: { ...snapshot, status: terminal.status },
-            });
-            const terminalEvent = encodeGenerationSseEvent({
+            };
+            const terminalEvent: GenerationStreamEvent = {
               id: terminalId,
               type: terminal.status === 'failed' || terminal.status === 'producer_lost'
                 ? 'error'
@@ -1204,14 +1276,15 @@ export const createArenaGenerationService = (
                 ...(terminal.code ? { code: terminal.code } : {}),
                 ...(terminal.resultRef ? { resultRef: terminal.resultRef } : {}),
               },
-            });
+            };
             controller.enqueue(snapshotEvent);
             controller.enqueue(terminalEvent);
             observe({
               event: 'replay',
               generationId,
               events: 2,
-              bytes: snapshotEvent.byteLength + terminalEvent.byteLength,
+              bytes: encodeGenerationSseEvent(snapshotEvent).byteLength
+                + encodeGenerationSseEvent(terminalEvent).byteLength,
               snapshotBootstrap: true,
             });
             controller.close();
@@ -1222,8 +1295,11 @@ export const createArenaGenerationService = (
             if (fallback.status === 'completed' && fallback.contentAvailable === false) {
               throw new Error('GENERATION_TERMINAL_CONTENT_UNAVAILABLE');
             }
-            const fallbackResponse = createTerminalFallbackResponse(fallback, cursor);
-            const fallbackReader = fallbackResponse.body!.getReader();
+            const fallbackSubscription = createTerminalFallbackSubscription(fallback, cursor);
+            if (fallbackSubscription instanceof Response) {
+              throw new Error('GENERATION_TERMINAL_CONTENT_UNAVAILABLE');
+            }
+            const fallbackReader = fallbackSubscription.events.getReader();
             while (true) {
               const next = await fallbackReader.read();
               if (next.done) break;
@@ -1261,17 +1337,17 @@ export const createArenaGenerationService = (
                   return;
                 }
                 const snapshotCursor = monotonicSnapshotId(snapshot.lastEventId);
-                const encoded = encodeGenerationSseEvent({
+                const event: GenerationStreamEvent = {
                   id: snapshotCursor,
                   type: 'snapshot',
                   data: snapshot,
-                });
-                controller.enqueue(encoded);
+                };
+                controller.enqueue(event);
                 observe({
                   event: 'replay',
                   generationId,
                   events: 1,
-                  bytes: encoded.byteLength,
+                  bytes: encodeGenerationSseEvent(event).byteLength,
                   snapshotBootstrap: true,
                 });
                 cursor = snapshotCursor;
@@ -1297,19 +1373,19 @@ export const createArenaGenerationService = (
                     return;
                   }
                   const snapshotId = monotonicSnapshotId(snapshot.lastEventId);
-                  const encoded = encodeGenerationSseEvent({
+                  const event: GenerationStreamEvent = {
                     id: snapshotId,
                     type: 'snapshot',
                     data: snapshot,
-                  });
-                  controller.enqueue(encoded);
+                  };
+                  controller.enqueue(event);
                   cursor = snapshotId;
                   snapshotBootstrapped = true;
                   observe({
                     event: 'replay',
                     generationId,
                     events: 1,
-                    bytes: encoded.byteLength,
+                    bytes: encodeGenerationSseEvent(event).byteLength,
                     snapshotBootstrap: true,
                   });
                 } else {
@@ -1321,9 +1397,8 @@ export const createArenaGenerationService = (
                 let sawTerminal = false;
                 for (const event of batch.events) {
                   if (cancelled) return;
-                  const encoded = encodeGenerationSseEvent(event);
-                  controller.enqueue(encoded);
-                  replayBytes += encoded.byteLength;
+                  controller.enqueue(event);
+                  replayBytes += encodeGenerationSseEvent(event).byteLength;
                   cursor = event.id;
                   if (event.type === 'done' || event.type === 'error') sawTerminal = true;
                 }
@@ -1403,18 +1478,31 @@ export const createArenaGenerationService = (
       },
     });
 
-    const headers = new Headers({
-      'Cache-Control': 'no-cache, no-transform',
-      'Content-Type': 'text/event-stream; charset=utf-8',
+    return Object.freeze({
+      generationId,
+      generationRequestId,
+      headers: Object.freeze({
       'X-Mahoshojo-Generation-Id': generationId,
       'X-Mahoshojo-Generation-Request-Id': generationRequestId,
-    });
-    for (const [name, value] of Object.entries(responseHeaders)) headers.set(name, value);
-    return new Response(stream, {
-      status: 200,
-      headers,
+        ...responseHeaders,
+      }),
+      events: stream,
     });
   };
+
+  const createReplayResponse = (
+    generationId: string,
+    generationRequestId: string,
+    after: string | null,
+    actorKey: string,
+    responseHeaders: Readonly<Record<string, string>> = {},
+  ): Response => subscriptionToSseResponse(createReplaySubscription(
+    generationId,
+    generationRequestId,
+    after,
+    actorKey,
+    responseHeaders,
+  ));
 
   const launchProducer = async (input: {
     generationId: string;
@@ -1529,6 +1617,15 @@ export const createArenaGenerationService = (
 
   const service: ArenaGenerationService = {
     async create(request: Request): Promise<Response> {
+      const subscription = await service.createSubscription(request);
+      return subscription instanceof Response
+        ? subscription
+        : subscriptionToSseResponse(subscription);
+    },
+
+    async createSubscription(
+      request: Request,
+    ): Promise<ArenaGenerationSubscription | Response> {
       if (request.method !== 'POST') {
         return jsonResponse({ code: 'METHOD_NOT_ALLOWED', error: 'Method not allowed' }, 405);
       }
@@ -1638,7 +1735,10 @@ export const createArenaGenerationService = (
             }, 409);
           }
           observe({ event: 'request', generationId, outcome: 'reused', inputBytes });
-          return withActorHeaders(createTerminalFallbackResponse(terminal), actor);
+          const fallback = createTerminalFallbackSubscription(terminal);
+          return fallback instanceof Response
+            ? withActorHeaders(fallback, actor)
+            : withActorSubscriptionHeaders(fallback, actor);
         }
         return jsonResponse({
           code: 'GENERATION_RESERVATION_UNAVAILABLE',
@@ -1732,7 +1832,10 @@ export const createArenaGenerationService = (
             now: dependencies.now().toISOString(),
           }).catch(() => ({ owned: true, applied: false }));
           observe({ event: 'request', generationId, outcome: 'reused', inputBytes });
-          return withActorHeaders(createTerminalFallbackResponse(terminal), actor);
+          const fallback = createTerminalFallbackSubscription(terminal);
+          return fallback instanceof Response
+            ? withActorHeaders(fallback, actor)
+            : withActorSubscriptionHeaders(fallback, actor);
         }
       }
       if (splitMaterialization) {
@@ -1830,8 +1933,8 @@ export const createArenaGenerationService = (
           }, 503);
         }
       }
-      return withActorHeaders(
-        createReplayResponse(
+      return withActorSubscriptionHeaders(
+        createReplaySubscription(
           reservation.generationId,
           parsed.generationRequestId,
           null,
