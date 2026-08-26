@@ -86,12 +86,18 @@ const extractSectionContent = (markdown: string, headingRegex: RegExp): string |
   return joined ? joined : null;
 };
 
+const stripBlockquoteMarkers = (text: string): string => (
+  text.replace(/^[\t ]*>[\t ]?/gm, '').trim()
+);
+
 const extractBodyFromMarkdown = (markdown: string): { body: string; analysis: string } => {
   const normalized = normalizeText(markdown).trim();
   if (!normalized) return { body: '', analysis: '' };
 
   const newsBody = extractSectionContent(normalized, /^##\s*(?:新闻正文|正文)\s*$/);
-  const reporterAnalysis = extractSectionContent(normalized, /^##\s*(?:记者点评|点评|记者评论)\s*$/) ?? '';
+  const reporterAnalysis = stripBlockquoteMarkers(
+    extractSectionContent(normalized, /^##\s*(?:记者点评|点评|记者评论)\s*$/) ?? ''
+  );
   if (newsBody) return { body: newsBody, analysis: reporterAnalysis };
 
   const lines = normalized.split('\n');
@@ -124,6 +130,10 @@ const extractBodyFromMarkdown = (markdown: string): { body: string; analysis: st
   const body = lines.slice(cursor, stop).join('\n').trim();
   return { body, analysis: reporterAnalysis };
 };
+
+const extractConclusionFromMarkdown = (markdown: string): string => (
+  extractSectionContent(markdown, /^##\s*(?:最终结果|结论|结果)\s*$/) ?? ''
+);
 
 const safeMode = (mode: unknown): NewsReport['mode'] | undefined => {
   if (mode === 'classic' || mode === 'kizuna' || mode === 'daily' || mode === 'scenario') return mode;
@@ -166,8 +176,11 @@ export async function hydrateBattleReportCardFromGenerationRecord(input: {
     reasoning_tokens: input.reasoningTokens,
   });
 
-  // 1) 非流式：优先复用 JSON（若未被截断）；否则至少不要把 JSON 当作正文。
-  if (generationMode === 'non-stream' || (looksLikeJsonText(rawPreview) && generationMode !== 'stream')) {
+  const shouldUseLegacyJsonFallback = generationMode !== 'stream'
+    && (!rawPreview.trim() || looksLikeJsonText(rawPreview));
+
+  // 1) 非流式旧记录按实际内容识别 JSON（包括只剩起始括号的截断 preview）。
+  if (shouldUseLegacyJsonFallback) {
     const parsed = parseJsonSafely(rawPreview);
     const reportCandidate = (() => {
       if (isNewsReportLike(parsed)) return parsed;
@@ -222,7 +235,7 @@ export async function hydrateBattleReportCardFromGenerationRecord(input: {
     return { report: merged };
   }
 
-  // 2) 流式：复用原始 Markdown（liveBody），并从 telemetry 注释中提取 usage / narrativeHistoryReadCount。
+  // 2) 其余非空内容按 Markdown 解析；只有 stream consumer 需要保留 liveBody。
   const telemetryExtracted = rawPreview ? await extractStreamTelemetryMeta(rawPreview) : null;
   const streamSummary = await summarizeStreamBattleReportPreview({
     preview: rawPreview,
@@ -241,6 +254,7 @@ export async function hydrateBattleReportCardFromGenerationRecord(input: {
     '未知';
 
   const { body, analysis } = extractBodyFromMarkdown(stripped);
+  const conclusion = extractConclusionFromMarkdown(stripped);
 
   const report: NewsReport = {
     headline,
@@ -250,7 +264,7 @@ export async function hydrateBattleReportCardFromGenerationRecord(input: {
       publication: endpoint || 'A.R.E.N.A.',
     },
     article: { body, analysis },
-    officialReport: { winner: stripMarkdown(winner), conclusion: '' },
+    officialReport: { winner: stripMarkdown(winner), conclusion },
     ...(safeMode(input.mode) ? { mode: safeMode(input.mode) } : {}),
     ...(userGuidance ? { userGuidance } : {}),
   };
@@ -270,5 +284,7 @@ export async function hydrateBattleReportCardFromGenerationRecord(input: {
     report.narrativeHistoryReadCount = telemetryExtracted.meta.narrativeHistoryReadCount;
   }
 
-  return { report, liveBody: stripped };
+  return generationMode === 'stream'
+    ? { report, liveBody: stripped }
+    : { report };
 }

@@ -194,10 +194,17 @@ const bodyFromMarkdown = (markdown: string): string => {
   const start = lines.findIndex((line) => /^#\s+/u.test(line.trim()));
   const bodyStart = start >= 0 ? start + 1 : 0;
   const end = lines.findIndex((line, index) => (
-    index >= bodyStart && /^##\s*(?:胜利者|winner)\s*$/iu.test(line.trim())
+    index >= bodyStart
+    && /^##\s*(?:记者点评|点评|记者评论|reporter analysis|commentary|胜利者|winner)\s*$/iu.test(line.trim())
   ));
   return lines.slice(bodyStart, end >= 0 ? end : lines.length).join('\n').trim();
 };
+
+const analysisFromMarkdown = (markdown: string): string => (
+  section(markdown, '(?:记者点评|点评|记者评论|reporter analysis|commentary)')
+    .replace(/^[\t ]*>[\t ]?/gmu, '')
+    .trim()
+);
 
 const normalizeImpacts = (value: unknown): ArenaCompanionImpact[] => {
   if (!Array.isArray(value)) return [];
@@ -366,7 +373,7 @@ export const createArenaCompanionService = (
       reporterInfo,
       article: {
         body: bodyFromMarkdown(collected.markdown),
-        analysis: '',
+        analysis: analysisFromMarkdown(collected.markdown),
       },
       officialReport: { winner, conclusion },
       mode,

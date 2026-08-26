@@ -149,4 +149,106 @@ winner: 假赢家
     expect(result.report.aiUsage?.promptTokens).toBe(10);
     expect(result.report.narrativeHistoryReadCount).toBe(1);
   });
+
+  it('hydrates G25H non-stream Markdown into structured body and reporter analysis', async () => {
+    const markdown = [
+      '# 星海决战',
+      '',
+      '正文段落。',
+      '',
+      '## 记者点评',
+      '> 这一胜利暴露了旧秩序的裂缝。',
+      '',
+      '## 胜利者',
+      '角色甲',
+      '',
+      '## 最终结果',
+      '世界恢复平静。',
+    ].join('\n');
+
+    const result = await hydrateBattleReportCardFromGenerationRecord({
+      generationMode: 'non-stream',
+      endpoint: 'api/arena/generate',
+      mode: 'classic',
+      scenarioTitle: null,
+      headline: null,
+      winner: null,
+      outputPreview: markdown,
+      aiModel: null,
+      promptTokens: null,
+      completionTokens: null,
+      totalTokens: null,
+      cachedTokens: null,
+      reasoningTokens: null,
+    });
+
+    expect(result.report.headline).toBe('星海决战');
+    expect(result.report.article).toEqual({
+      body: '正文段落。',
+      analysis: '这一胜利暴露了旧秩序的裂缝。',
+    });
+    expect(result.report.officialReport).toEqual({
+      winner: '角色甲',
+      conclusion: '世界恢复平静。',
+    });
+    expect(result.liveBody).toBeUndefined();
+  });
+
+  it('detects non-stream Markdown from content without depending on endpoint or a leading heading', async () => {
+    const markdown = [
+      '正文段落。',
+      '',
+      '## 记者点评',
+      '点评内容。',
+      '',
+      '## 胜利者',
+      '角色乙',
+    ].join('\n');
+
+    const result = await hydrateBattleReportCardFromGenerationRecord({
+      generationMode: 'non-stream',
+      endpoint: 'api/custom-battle-route',
+      mode: 'classic',
+      scenarioTitle: null,
+      headline: '外部标题',
+      winner: null,
+      outputPreview: markdown,
+      aiModel: null,
+      promptTokens: null,
+      completionTokens: null,
+      totalTokens: null,
+      cachedTokens: null,
+      reasoningTokens: null,
+    });
+
+    expect(result.report.article).toEqual({
+      body: '正文段落。',
+      analysis: '点评内容。',
+    });
+    expect(result.report.officialReport.winner).toBe('角色乙');
+    expect(result.liveBody).toBeUndefined();
+  });
+
+  it('keeps a truncated non-stream JSON preview on the legacy JSON fallback path', async () => {
+    const result = await hydrateBattleReportCardFromGenerationRecord({
+      generationMode: 'non-stream',
+      endpoint: 'api/custom-battle-route',
+      mode: 'classic',
+      scenarioTitle: null,
+      headline: '已知标题',
+      winner: '已知赢家',
+      outputPreview: '{',
+      aiModel: null,
+      promptTokens: null,
+      completionTokens: null,
+      totalTokens: null,
+      cachedTokens: null,
+      reasoningTokens: null,
+    });
+
+    expect(result.report.headline).toBe('已知标题');
+    expect(result.report.article).toEqual({ body: '', analysis: '' });
+    expect(result.report.officialReport.winner).toBe('已知赢家');
+    expect(result.liveBody).toBeUndefined();
+  });
 });

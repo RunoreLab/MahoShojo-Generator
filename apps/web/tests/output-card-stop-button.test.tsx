@@ -93,6 +93,22 @@ describe('输出卡片停止生成按钮', () => {
     expect(streamingHtml).toContain('停止生成');
   });
 
+  test('非流式战报只在点评非空时渲染记者点评区块', () => {
+    const withAnalysis = renderToStaticMarkup(<BattleReportCard report={report} />);
+    const withoutAnalysis = renderToStaticMarkup(
+      <BattleReportCard
+        report={{
+          ...report,
+          article: { ...report.article, analysis: '   ' },
+        }}
+      />
+    );
+
+    expect(withAnalysis).toContain('🎤 记者点评');
+    expect(withAnalysis).toContain('点评');
+    expect(withoutAnalysis).not.toContain('🎤 记者点评');
+  });
+
   test('三种角色卡片在生成中显示停止生成按钮', () => {
     const magicalGirlHtml = renderToStaticMarkup(
       <MagicalGirlCard

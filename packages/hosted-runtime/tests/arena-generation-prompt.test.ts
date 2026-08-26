@@ -43,6 +43,29 @@ describe('Arena generation prompt', () => {
     expect(result.prompt).toContain('请勿在任何位置追加 HTML 注释元数据');
   });
 
+  it('为 stream 与 companion 冻结可投影的记者点评 section', async () => {
+    const result = await buildArenaGenerationPrompt({
+      actorKey: 'anonymous:test',
+      payload: {
+        combatants: [{ data: { name: 'A' } }, { data: { name: 'B' } }],
+        writeArenaHistory: false,
+        writeCurrentState: false,
+      },
+    });
+
+    const bodyIndex = result.prompt.indexOf('随后紧跟故事或者战报的正文');
+    const analysisIndex = result.prompt.indexOf('## 记者点评');
+    const winnerIndex = result.prompt.indexOf('## 胜利者');
+    const conclusionIndex = result.prompt.indexOf('## 最终结果');
+
+    expect(bodyIndex).toBeGreaterThan(-1);
+    expect(analysisIndex).toBeGreaterThan(bodyIndex);
+    expect(winnerIndex).toBeGreaterThan(analysisIndex);
+    expect(conclusionIndex).toBeGreaterThan(winnerIndex);
+    expect(result.prompt).toContain('100-150字');
+    expect(result.prompt).toContain('直接输出纯文本');
+  });
+
   it('uses the injected random source for reporter metadata', async () => {
     const random = () => 0;
     const result = await buildArenaGenerationPrompt({

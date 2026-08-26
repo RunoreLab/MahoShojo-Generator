@@ -85,7 +85,8 @@ describe('Arena companion service', () => {
         });
         return subscription([
           { id: '1-0', type: 'markdown', data: { chunk: '# 星海决战\n\n正文段落\n' } },
-          { id: '2-0', type: 'markdown', data: { chunk: '\n## 胜利者\n角色甲\n\n## 最终结果\n世界恢复平静。' } },
+          { id: '2-0', type: 'markdown', data: { chunk: '\n## 记者点' } },
+          { id: '2-1', type: 'markdown', data: { chunk: '评\n> 这一胜利暴露了旧秩序的裂缝。\n\n## 胜利者\n角色甲\n\n## 最终结果\n世界恢复平静。' } },
           {
             id: '3-0',
             type: 'meta',
@@ -132,7 +133,10 @@ describe('Arena companion service', () => {
       report: {
         headline: '星海决战',
         reporterInfo: { name: '记者甲', publication: '魔法记录报' },
-        article: { body: '正文段落' },
+        article: {
+          body: '正文段落',
+          analysis: '这一胜利暴露了旧秩序的裂缝。',
+        },
         officialReport: { winner: '角色甲', conclusion: '世界恢复平静。' },
         aiModel: 'model-a',
         aiUsage: { totalTokens: 42 },
@@ -149,6 +153,48 @@ describe('Arena companion service', () => {
       writeArenaHistory: true,
       writeCurrentState: false,
     }));
+  });
+
+  it('从 snapshot replay 投影记者点评且不把点评混入正文', async () => {
+    const service = createArenaCompanionService({
+      generationService: generationService(async () => subscription([
+        {
+          id: '20-0',
+          type: 'snapshot',
+          data: {
+            markdown: [
+              '# 重放战报',
+              '',
+              '重放正文。',
+              '',
+              '## 记者点评',
+              '重放仍应保持同一份点评。',
+              '',
+              '## 胜利者',
+              '角色甲',
+              '',
+              '## 最终结果',
+              '重放完成。',
+            ].join('\n'),
+          },
+        },
+        { id: '21-0', type: 'done', data: { ok: true, status: 'completed' } },
+      ])),
+      createGenerationRequestId: () => 'request-12345678',
+      projectUpdatedCombatants: async () => [],
+    });
+
+    const result = await service.generate(new Request('https://example.test/api/generate-battle-story', {
+      method: 'POST',
+      body: '{}',
+    }));
+    const json = await result.json() as Record<string, any>;
+
+    expect(result.status).toBe(200);
+    expect(json.report.article).toEqual({
+      body: '重放正文。',
+      analysis: '重放仍应保持同一份点评。',
+    });
   });
 
   it('沿用调用方 generationRequestId 并透传 preflight 失败响应', async () => {

@@ -113,7 +113,7 @@ const BattleReportCard: React.FC<BattleReportCardProps> = ({
   const reporterName = typeof report?.reporterInfo?.name === 'string' ? report.reporterInfo.name : '';
   const reporterPublication = typeof report?.reporterInfo?.publication === 'string' ? report.reporterInfo.publication : '';
   const bodyContent = fixNestedListIndentation((liveBody ?? report.article?.body ?? '').trimEnd());
-  const analysisContent = (report.article?.analysis ?? '').trimEnd();
+  const analysisContent = (report.article?.analysis ?? '').trim();
   const officialWinner = (report.officialReport?.winner ?? '').trim();
   const officialConclusion = (report.officialReport?.conclusion ?? '').trimEnd();
   const reportReasoning = report.aiReasoning ?? null;
@@ -600,12 +600,14 @@ ${adjudicationMarkdown}
           </div>
         </div>
 
-        <div className="result-item" style={{ borderLeft: '4px solid #ff6b9d', background: 'rgba(0,0,0,0.2)' }}>
-          <div className="result-label">🎤 记者点评</div>
-          <div className="result-value">
-            <p className="text-sm opacity-90 italic">{analysisContent}</p>
+        {analysisContent && (
+          <div className="result-item" style={{ borderLeft: '4px solid #ff6b9d', background: 'rgba(0,0,0,0.2)' }}>
+            <div className="result-label">🎤 记者点评</div>
+            <div className="result-value">
+              <p className="text-sm opacity-90 italic">{analysisContent}</p>
+            </div>
           </div>
-        </div>
+        )}
 
         <div className="result-item">
           <div className="result-value">

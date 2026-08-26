@@ -24,6 +24,20 @@ describe('Arena stream projector', () => {
     });
   });
 
+  it('逐字保留跨 chunk 的记者点评 section 且只隐藏尾部 meta', () => {
+    const projector = createArenaStreamProjector({ expectsMeta: true });
+    const visibleMarkdown = '# 标题\n\n正文\n\n## 记者点评\n点评内容\n\n## 胜利者\nA\n';
+    const markdown = [
+      ...projector.push('# 标题\n\n正文\n\n## 记者点'),
+      ...projector.push('评\n点评内容\n\n## 胜利者\nA\n<!-- MAHOSHOJO_ARENA_META '),
+      ...projector.push('{"version":1,"report":{"winner":"A"}} -->'),
+      ...projector.finish().markdown,
+    ].join('');
+
+    expect(markdown).toBe(visibleMarkdown);
+    expect(projector.result().metaEvent?.type).toBe('meta');
+  });
+
   it('未要求 meta 时不会吞掉普通 markdown', () => {
     const projector = createArenaStreamProjector({ expectsMeta: false });
     const chunks = [
