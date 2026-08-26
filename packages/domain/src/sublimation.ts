@@ -576,7 +576,7 @@ export const buildFinalSublimationData = (
         : Array.isArray(state.fields)
           ? cloneJson(state.fields)
           : [];
-      state.updated_at = nowISO;
+      state['updated_at'] = nowISO;
       result.current_state = state;
     }
   } else if (input.originalCharacterData.current_state != null) {
