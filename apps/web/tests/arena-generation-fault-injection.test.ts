@@ -13,6 +13,7 @@ import {
   type ArenaGenerationFinalizationPorts,
   type ArenaGenerationRuntimeDependencies,
 } from '@mahoshojo/hosted-runtime/arena-generation';
+import { selectHostedDrRuntime } from '@mahoshojo/hosted-api/hosted-dr';
 
 import { openArenaGenerationStream } from '@/lib/arena/resumable-generation-client';
 
@@ -734,6 +735,38 @@ describe.sequential('Arena resumable generation fault-injection matrix', () => {
       sideEffects: {
         storage: 1, claim: 1, combatants: 1, impacts: 1, ratings: 1, complete: 1,
       },
+    });
+  });
+
+  it('G25E2-MIDFLIGHT-DISCONNECT：accepted operation 在 Hono 故障后 fail closed，不跨 runtime 重放', async () => {
+    let release!: () => void;
+    const providerGate = new Promise<void>((resolve) => { release = resolve; });
+    const counts = emptyCounts();
+    const { provider, service } = createHarness({
+      ports: successfulPorts(counts),
+      providerGate,
+    });
+
+    const accepted = await service.create(request());
+    await vi.waitFor(() => expect(provider).toHaveBeenCalledOnce());
+
+    expect(selectHostedDrRuntime({
+      requestClass: 'non-idempotent-operation',
+      dispatchState: 'unknown',
+      primaryHealth: 'unavailable',
+      hasDurableIdempotencyProof: false,
+    })).toBe('fail-closed');
+
+    await accepted.body?.cancel('G25E2 fault-injected mid-flight disconnect');
+    release();
+    const resumed = await service.resume(new Request(
+      `https://example.test/api/arena/generations/${generationId}/stream`,
+    ), { generationId });
+
+    expect(await resumed.text()).toContain('terminal body');
+    expect(provider).toHaveBeenCalledOnce();
+    expect(counts).toEqual({
+      storage: 1, claim: 1, combatants: 1, impacts: 1, ratings: 1, complete: 1,
     });
   });
 
