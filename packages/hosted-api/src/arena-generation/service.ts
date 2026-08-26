@@ -325,7 +325,7 @@ export type ArenaGenerationObservation =
     event: 'companion';
     operation: 'arena/generate' | 'generate-battle-story' | 'arena/session/generate-next';
     placement: 'hono-primary' | 'next-dr';
-    outcome: 'success' | 'rejected' | 'failure';
+    outcome: 'success' | 'rejected' | 'failure' | 'cancelled';
     durationMs: number;
   }
   | {

@@ -55,6 +55,7 @@ describe('Arena session companion service', () => {
   it('直接消费 typed subscription、签名内部引导并保留上游事件 id', async () => {
     const captured: Array<{ headers: Headers; body: Record<string, unknown> }> = [];
     const release = vi.fn();
+    const observeLifecycle = vi.fn();
     const generationService: ArenaGenerationService = {
       createSubscription: async (request) => {
         captured.push({
@@ -97,6 +98,7 @@ describe('Arena session companion service', () => {
       acquireRateLimit: () => ({ allowed: true, retryAfterSeconds: 0, release }),
       deriveChapterId: async () => 'chapter-stable-1',
       now: () => new Date('2026-08-26T01:02:03.000Z'),
+      observeLifecycle,
     });
 
     const result = await service.generateNext(new Request(
@@ -140,6 +142,10 @@ describe('Arena session companion service', () => {
       winner: '角色甲',
     });
     expect(release).toHaveBeenCalledTimes(1);
+    expect(observeLifecycle).toHaveBeenCalledWith({
+      outcome: 'success',
+      durationMs: expect.any(Number),
+    });
   });
 
   it('内部引导无法签名时 fail closed，且不会创建 producer', async () => {
@@ -173,6 +179,7 @@ describe('Arena session companion service', () => {
   it('subscriber disconnect 只取消 typed subscription 并 exactly-once release lease', async () => {
     const upstreamCancel = vi.fn();
     const rateRelease = vi.fn();
+    const observeLifecycle = vi.fn();
     const service = createArenaSessionCompanionService({
       generationService: {
         createSubscription: async () => ({
@@ -200,6 +207,7 @@ describe('Arena session companion service', () => {
         release: rateRelease,
       }),
       deriveChapterId: async () => 'chapter-stable-1',
+      observeLifecycle,
     });
     const result = await service.generateNext(new Request(
       'https://example.test/api/arena/session/generate-next',
@@ -212,6 +220,51 @@ describe('Arena session companion service', () => {
     await vi.waitFor(() => {
       expect(upstreamCancel).toHaveBeenCalledWith('client disconnected');
       expect(rateRelease).toHaveBeenCalledTimes(1);
+      expect(observeLifecycle).toHaveBeenCalledWith({
+        outcome: 'cancelled',
+        durationMs: expect.any(Number),
+      });
+    });
+  });
+
+  it('typed terminal error 记录真实失败而不是 SSE 建链成功', async () => {
+    const observeLifecycle = vi.fn();
+    const service = createArenaSessionCompanionService({
+      generationService: {
+        createSubscription: async () => ({
+          generationId: 'arena_story_generation',
+          generationRequestId: 'story-request-1234',
+          headers: {},
+          events: streamOf(
+            { id: '10-0', type: 'error', data: { code: 'PROVIDER_FAILED', status: 'failed' } },
+          ),
+        }),
+        create: () => response(),
+        cancelRequest: () => response(),
+        lookup: () => response(),
+        resume: () => response(),
+        status: () => response(),
+        cancel: () => response(),
+      },
+      signatures: {
+        generateSignature: async () => 'guidance-signature',
+        verifySignature: async () => true,
+      },
+      acquireRateLimit: () => ({ allowed: true, retryAfterSeconds: 0, release: vi.fn() }),
+      observeLifecycle,
+    });
+
+    const result = await service.generateNext(new Request(
+      'https://example.test/api/arena/session/generate-next',
+      { method: 'POST', body: JSON.stringify(requestBody()) },
+    ));
+    expect(result.status).toBe(200);
+    await result.text();
+
+    expect(observeLifecycle).toHaveBeenCalledTimes(1);
+    expect(observeLifecycle).toHaveBeenCalledWith({
+      outcome: 'failure',
+      durationMs: expect.any(Number),
     });
   });
 
@@ -250,6 +303,41 @@ describe('Arena session companion service', () => {
     expect(result.status).toBe(500);
     expect(rateRelease).toHaveBeenCalledTimes(1);
     expect(createSubscription).not.toHaveBeenCalled();
+  });
+
+  it('subscription stream 已锁定时 fail closed 并释放 lease', async () => {
+    const rateRelease = vi.fn();
+    const events = streamOf();
+    events.getReader();
+    const service = createArenaSessionCompanionService({
+      generationService: {
+        createSubscription: async () => ({
+          generationId: 'arena_story_generation',
+          generationRequestId: 'story-request-1234',
+          headers: {},
+          events,
+        }),
+        create: () => response(),
+        cancelRequest: () => response(),
+        lookup: () => response(),
+        resume: () => response(),
+        status: () => response(),
+        cancel: () => response(),
+      },
+      signatures: {
+        generateSignature: async () => 'guidance-signature',
+        verifySignature: async () => true,
+      },
+      acquireRateLimit: () => ({ allowed: true, retryAfterSeconds: 0, release: rateRelease }),
+    });
+
+    const result = await service.generateNext(new Request(
+      'https://example.test/api/arena/session/generate-next',
+      { method: 'POST', body: JSON.stringify(requestBody()) },
+    ));
+
+    expect(result.status).toBe(500);
+    expect(rateRelease).toHaveBeenCalledTimes(1);
   });
 
   it('复用请求体投影并保留自定义 provider 与读取上限语义', () => {

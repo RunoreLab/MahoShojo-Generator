@@ -115,6 +115,10 @@ export type ArenaSessionCompanionOptions = {
   }): Promise<string>;
   now?(): Date;
   recordActivity?(_request: Request): void;
+  observeLifecycle?(_input: {
+    outcome: 'success' | 'failure' | 'cancelled';
+    durationMs: number;
+  }): void;
 };
 
 export interface ArenaSessionCompanionService {
@@ -236,6 +240,20 @@ export const createArenaSessionCompanionService = (
   options: ArenaSessionCompanionOptions,
 ): ArenaSessionCompanionService => Object.freeze({
   async generateNext(request: Request): Promise<Response> {
+    const lifecycleStartedAt = Date.now();
+    let lifecycleObserved = false;
+    const observeLifecycleOnce = (outcome: 'success' | 'failure' | 'cancelled'): void => {
+      if (lifecycleObserved) return;
+      lifecycleObserved = true;
+      try {
+        options.observeLifecycle?.({
+          outcome,
+          durationMs: Math.max(0, Date.now() - lifecycleStartedAt),
+        });
+      } catch {
+        // Telemetry transport failures must not affect session execution.
+      }
+    };
     const raw = await readArenaCompanionJsonPayload(request);
     if (raw instanceof Response) return raw;
     const parsed = SessionRequestSchema.safeParse(raw);
@@ -366,7 +384,17 @@ export const createArenaSessionCompanionService = (
       releaseOnce();
       return subscription;
     }
-    const reader = subscription.events.getReader();
+    let reader: ReadableStreamDefaultReader<GenerationStreamEvent>;
+    try {
+      reader = subscription.events.getReader();
+    } catch {
+      releaseOnce();
+      return jsonResponse({
+        code: 'ARENA_SESSION_STREAM_UNAVAILABLE',
+        error: 'Arena session stream unavailable',
+        generationId: subscription.generationId,
+      }, 500, subscription.headers);
+    }
     let readerReleased = false;
     const releaseReaderOnce = (): void => {
       if (readerReleased) return;
@@ -394,6 +422,7 @@ export const createArenaSessionCompanionService = (
         }));
         let markdown = '';
         let latestMeta: Record<string, unknown> | null = null;
+        let terminalOutcome: 'success' | 'failure' | 'cancelled' | null = null;
         try {
           while (true) {
             const next = await reader.read();
@@ -407,6 +436,7 @@ export const createArenaSessionCompanionService = (
             } else if (event.type === 'meta') {
               latestMeta = recordOf(data.meta) ?? latestMeta;
             } else if (event.type === 'done' && data.ok === true) {
+              terminalOutcome = 'success';
               const digest = buildBattleStoryDeterministicDigest({
                 markdown,
                 reportJson: latestMeta ? { report: latestMeta.report } : undefined,
@@ -425,19 +455,26 @@ export const createArenaSessionCompanionService = (
                 ...(digest.bodyExcerpt ? { bodyExcerpt: digest.bodyExcerpt } : {}),
                 ...(digest.impactDigest ? { impactDigest: digest.impactDigest } : {}),
               }));
+            } else if (event.type === 'done') {
+              terminalOutcome = data.status === 'cancelled' ? 'cancelled' : 'failure';
+            } else if (event.type === 'error') {
+              terminalOutcome = 'failure';
             }
             controller.enqueue(encodeGenerationSseEvent(event));
           }
+          observeLifecycleOnce(terminalOutcome ?? 'failure');
           releaseOnce();
           releaseReaderOnce();
           controller.close();
         } catch (error) {
+          observeLifecycleOnce('failure');
           releaseOnce();
           releaseReaderOnce();
           controller.error(error);
         }
       },
       async cancel(reason) {
+        observeLifecycleOnce('cancelled');
         releaseOnce();
         try {
           await reader.cancel(reason);

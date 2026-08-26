@@ -103,8 +103,9 @@ describe('Node Arena generation executor', () => {
 
   it('does not trust client native/internal fields and keeps BYOK only at provider boundary', async () => {
     const safetyPayloads: Array<Record<string, unknown>> = [];
-    const generateWithStreamAI = vi.fn(async (_config, options) => {
+    const generateWithStreamAI = vi.fn(async (config, options) => {
       expect(options.providerOverride.apiKey).toBe('secret-value');
+      expect(config.modelOverride).toBe('gpt-5.4');
       expect(options.abortSignal).toBeInstanceOf(AbortSignal);
       return {
         response: new Response('body'),
@@ -135,6 +136,7 @@ describe('Node Arena generation executor', () => {
           modelId: 'gpt-5.4',
           apiKey: 'secret-value',
         },
+        isDowngrade: true,
       },
     });
 

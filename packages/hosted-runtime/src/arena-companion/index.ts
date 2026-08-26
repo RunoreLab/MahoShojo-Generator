@@ -31,6 +31,23 @@ export const createArenaCompanionRouteService = (input: {
   now?(): Date;
   recordActivity?(_request: Request): void;
 }): ArenaCompanionRouteService => {
+  const observe = (
+    operation: 'arena/generate' | 'generate-battle-story' | 'arena/session/generate-next',
+    outcome: 'success' | 'rejected' | 'failure' | 'cancelled',
+    durationMs: number,
+  ): void => {
+    try {
+      input.observer?.observeArenaGeneration({
+        event: 'companion',
+        operation,
+        placement: input.placement,
+        outcome,
+        durationMs,
+      });
+    } catch {
+      // Telemetry transport failures must not affect companion execution.
+    }
+  };
   const generation = createArenaCompanionService({
     generationService: input.generationService,
     projectUpdatedCombatants: createArenaPostBattleProjector({
@@ -47,29 +64,28 @@ export const createArenaCompanionRouteService = (input: {
     }),
     now: input.now,
     recordActivity: input.recordActivity,
+    observeLifecycle: ({ outcome, durationMs }) => observe(
+      'arena/session/generate-next',
+      outcome,
+      durationMs,
+    ),
   });
   const observeCall = async (
     operation: 'arena/generate' | 'generate-battle-story' | 'arena/session/generate-next',
     call: () => Promise<Response>,
+    deferSuccessfulStream = false,
   ): Promise<Response> => {
     const startedAt = Date.now();
-    let outcome: 'success' | 'rejected' | 'failure' = 'failure';
     try {
       const response = await call();
-      outcome = response.ok ? 'success' : response.status < 500 ? 'rejected' : 'failure';
-      return response;
-    } finally {
-      try {
-        input.observer?.observeArenaGeneration({
-          event: 'companion',
-          operation,
-          placement: input.placement,
-          outcome,
-          durationMs: Math.max(0, Date.now() - startedAt),
-        });
-      } catch {
-        // Telemetry transport failures must not affect companion execution.
+      if (!deferSuccessfulStream || !response.ok || !response.body) {
+        const outcome = response.ok ? 'success' : response.status < 500 ? 'rejected' : 'failure';
+        observe(operation, outcome, Math.max(0, Date.now() - startedAt));
       }
+      return response;
+    } catch (error) {
+      observe(operation, 'failure', Math.max(0, Date.now() - startedAt));
+      throw error;
     }
   };
   return Object.freeze({
@@ -86,6 +102,7 @@ export const createArenaCompanionRouteService = (input: {
     generateNext: (request: Request) => observeCall(
       'arena/session/generate-next',
       () => session.generateNext(request),
+      true,
     ),
   });
 };

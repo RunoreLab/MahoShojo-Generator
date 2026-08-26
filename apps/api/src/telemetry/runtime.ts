@@ -154,7 +154,7 @@ export type HonoRuntimeTelemetrySnapshot = {
         arenaSessionGenerateNext: number;
       };
       byPlacement: { honoPrimary: number; nextDr: number };
-      outcomes: { success: number; rejected: number; failure: number };
+      outcomes: { success: number; rejected: number; failure: number; cancelled: number };
       duration: DurationSummary;
     };
     clientDisconnects: number;
@@ -419,7 +419,12 @@ export class HonoRuntimeTelemetry implements
 
   private readonly arenaCompanionByPlacement = { honoPrimary: 0, nextDr: 0 };
 
-  private readonly arenaCompanionOutcomes = { success: 0, rejected: 0, failure: 0 };
+  private readonly arenaCompanionOutcomes = {
+    success: 0,
+    rejected: 0,
+    failure: 0,
+    cancelled: 0,
+  };
 
   private readonly arenaCompanionDuration = new DurationAccumulator();
 
@@ -1045,7 +1050,12 @@ export class HonoRuntimeTelemetry implements
       arenaSessionGenerateNext: 0,
     });
     Object.assign(this.arenaCompanionByPlacement, { honoPrimary: 0, nextDr: 0 });
-    Object.assign(this.arenaCompanionOutcomes, { success: 0, rejected: 0, failure: 0 });
+    Object.assign(this.arenaCompanionOutcomes, {
+      success: 0,
+      rejected: 0,
+      failure: 0,
+      cancelled: 0,
+    });
     this.arenaCompanionDuration.reset();
     this.arenaClientDisconnects = 0;
     this.arenaResumeAttempts = 0;

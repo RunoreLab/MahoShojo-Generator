@@ -278,7 +278,7 @@ describe('Hono runtime telemetry', () => {
           arenaSessionGenerateNext: 1,
         },
         byPlacement: { honoPrimary: 1, nextDr: 0 },
-        outcomes: { success: 1, rejected: 0, failure: 0 },
+        outcomes: { success: 1, rejected: 0, failure: 0, cancelled: 0 },
         duration: { samples: 1, totalMilliseconds: 18, maxMilliseconds: 18 },
       },
       clientDisconnects: 1,
