@@ -22,10 +22,15 @@ case "$public_base_url" in
 esac
 
 root_dir="${HONO_DEPLOY_ROOT_DIR:-/opt/mahoshojo-hono}"
+bind_port="${HONO_BIND_PORT:-8080}"
+redis_key_prefix="${HONO_REDIS_KEY_PREFIX:-}"
 case "$root_dir" in
   /) echo "部署根目录不得为文件系统根目录" >&2; exit 2 ;;
   /*) ;;
   *) echo "部署根目录必须是绝对路径" >&2; exit 2 ;;
+esac
+case "$bind_port" in
+  ''|*[!0-9]*) echo "HONO_BIND_PORT 必须是数字" >&2; exit 2 ;;
 esac
 
 releases_dir="$root_dir/releases"
@@ -199,6 +204,7 @@ validate_release_runtime() {
     -e REDIS_HOST=redis \
     -e REDIS_PORT=6379 \
     -e REDIS_REQUIRED=true \
+    -e REDIS_KEY_PREFIX="$redis_key_prefix" \
     -e D1_REQUIRED=true \
     -e HONO_CONFIG_CHECK_ONLY=true \
     -v "$tuple_dir/index.mjs:/app/index.mjs:ro" \
@@ -272,7 +278,7 @@ wait_for_local_readiness() {
   attempt=0
   while [ "$attempt" -lt 24 ]; do
     if run_cancellable curl --fail --silent --show-error --connect-timeout 2 --max-time 4 \
-      http://127.0.0.1:8080/health/ready >/dev/null; then
+      "http://127.0.0.1:$bind_port/health/ready" >/dev/null; then
       return 0
     fi
     attempt=$((attempt + 1))

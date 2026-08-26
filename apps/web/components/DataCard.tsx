@@ -279,7 +279,7 @@ export default function DataCard({
             {pending && (
               <Link
                 href="/encyclopedia/review"
-                onClick={(e) => e.stopPropagation()}
+                onClick={(event: React.MouseEvent<HTMLAnchorElement>) => event.stopPropagation()}
                 className="text-xs px-2 py-1 rounded-full flex items-center gap-1 bg-amber-100 text-amber-800 border border-amber-200 hover:underline"
                 title="了解公开与审核机制"
               >
@@ -289,7 +289,7 @@ export default function DataCard({
             {reviewStatus === 'pending' && isPublic === 1 && (
               <Link
                 href="/encyclopedia/review"
-                onClick={(e) => e.stopPropagation()}
+                onClick={(event: React.MouseEvent<HTMLAnchorElement>) => event.stopPropagation()}
                 className="text-xs px-2 py-1 rounded-full flex items-center gap-1 bg-yellow-100 text-yellow-800 border border-yellow-200 hover:underline"
                 title="了解公开与审核机制"
               >
@@ -300,7 +300,7 @@ export default function DataCard({
             {reviewStatus === 'rejected' && (
               <Link
                 href="/encyclopedia/review"
-                onClick={(e) => e.stopPropagation()}
+                onClick={(event: React.MouseEvent<HTMLAnchorElement>) => event.stopPropagation()}
                 className="text-xs px-2 py-1 rounded-full flex items-center gap-1 bg-red-100 text-red-800 border border-red-200 hover:underline"
                 title="了解公开与审核机制"
               >

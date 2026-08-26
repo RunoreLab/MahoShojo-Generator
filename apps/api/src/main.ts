@@ -28,7 +28,13 @@ if (process.env.HONO_CONFIG_CHECK_ONLY === 'true') {
 } else {
   const telemetry = new HonoRuntimeTelemetry();
   const unregisterHostedRuntimeObserver = registerHostedRuntimeObserver(telemetry);
-  const redis = new RedisRuntime(config.redisUrl, config.redisRequired, telemetry);
+  const redis = new RedisRuntime(
+    config.redisUrl,
+    config.redisRequired,
+    telemetry,
+    undefined,
+    config.redisKeyPrefix,
+  );
   const stopSamplingRedis = telemetry.setRedisResourceSampler(
     () => redis.sampleServerStats(),
   );

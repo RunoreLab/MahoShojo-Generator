@@ -59,6 +59,28 @@ describe('RedisGenerationReplayStore', () => {
     expect(options.arguments.join('|')).not.toContain('sensitive-actor-id');
   });
 
+  it('共用 Redis 时给 generation replay key 增加环境前缀', async () => {
+    const client = createClient();
+    vi.mocked(client.eval).mockResolvedValue([
+      'created',
+      'generation-1234',
+      reserveInput.preparationSeed,
+      reserveInput.preparationVersion,
+    ]);
+    const store = createRedisGenerationReplayStore({
+      getClient: () => client,
+      keyPrefix: 'preview',
+    });
+
+    await store.reserve(reserveInput);
+
+    const [, options] = vi.mocked(client.eval).mock.calls[0]!;
+    expect(options.keys).toEqual([
+      expect.stringMatching(/^mahoshojo:gen:v1:preview:req:user:/u),
+      'mahoshojo:gen:v1:preview:generation-1234:state',
+    ]);
+  });
+
   it.each([
     [[
       'reused',

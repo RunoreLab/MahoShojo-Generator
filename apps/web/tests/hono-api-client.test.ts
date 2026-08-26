@@ -38,6 +38,7 @@ describe('Hono API 客户端', () => {
 
     expect(honoApiConfig.origin).toBe(hostedDrManifest.controlPlane.stableOrigin);
     expect(source).toContain('hosted-dr-client.generated');
+    expect(source).toContain('NEXT_PUBLIC_HONO_API_ORIGIN');
     expect(source).not.toContain('hosted-dr-capabilities.json');
     expect(generatedSource).toContain(hostedDrManifest.controlPlane.stableOrigin);
     for (const physicalOrigin of [

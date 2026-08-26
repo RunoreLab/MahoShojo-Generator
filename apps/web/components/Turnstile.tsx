@@ -1,6 +1,21 @@
 'use client';
 import Script from 'next/script';
-import { useCallback, useEffect, useRef, useState, memo, useImperativeHandle, forwardRef } from 'react';
+import {
+    useCallback,
+    useEffect,
+    useRef,
+    useState,
+    memo,
+    useImperativeHandle,
+    forwardRef,
+    type ComponentType,
+} from 'react';
+
+const LazyScript = Script as ComponentType<{
+    src: string;
+    onLoad: () => void;
+    strategy: 'lazyOnload';
+}>;
 
 interface TurnstileWidgetProps {
     onVerify: (token: string) => void;
@@ -108,7 +123,7 @@ const TurnstileWidget = memo(forwardRef<TurnstileRef, TurnstileWidgetProps>(({
 
     return (
         <>
-            <Script
+            <LazyScript
                 src="https://challenges.cloudflare.com/turnstile/v0/api.js"
                 onLoad={handleScriptLoad}
                 strategy="lazyOnload"
