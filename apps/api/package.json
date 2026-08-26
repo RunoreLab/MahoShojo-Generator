@@ -16,6 +16,7 @@
     "routes": "node scripts/generate-route-manifest.mjs",
     "verify:runtime": "node scripts/verify-runtime.mjs",
     "verify:arena-redis": "tsx scripts/verify-arena-redis.ts",
+    "verify:hosted-dr:redis": "tsx scripts/verify-hosted-dr-redis.ts",
     "deploy:prepare": "node scripts/generate-route-manifest.mjs && node scripts/build.mjs"
   },
   "dependencies": {

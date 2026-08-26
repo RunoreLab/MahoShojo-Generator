@@ -42,6 +42,13 @@ describe('Hosted DR version skew gate', () => {
     expect(evaluate(input)).toMatchObject({ allowed: false });
   });
 
+  it('未知阶段 fail closed，而不是落入兼容分支', () => {
+    expect(evaluate({ stage: 'unknown' as HostedDrVersionGateInput['stage'] })).toMatchObject({
+      allowed: false,
+      reason: 'invalid-stage',
+    });
+  });
+
   it('版本不一致时阻断 destructive contract cleanup', () => {
     expect(evaluateHostedDrVersionGate({
       stage: 'contract',

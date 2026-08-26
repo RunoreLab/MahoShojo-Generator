@@ -33,7 +33,7 @@
       "fault": "redis-empty",
       "scope": ["arena/generate-stream", "hosted-runtime/data-authority"],
       "status": "verified",
-      "evidenceTests": ["apps/api/tests/hosted-dr-fault-matrix.test.ts", "apps/web/tests/arena-generation-fault-injection.test.ts"],
+      "evidenceTests": ["apps/api/scripts/verify-hosted-dr-redis.ts", "apps/api/tests/hosted-dr-fault-matrix.test.ts", "apps/web/tests/arena-generation-fault-injection.test.ts"],
       "recoverySteps": ["清空隔离 Redis namespace", "从 D1/DO/R2 fixture 读取权威事实", "不得把 cache/replay/presence 提升为 authority"]
     },
     {

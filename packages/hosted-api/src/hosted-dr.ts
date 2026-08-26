@@ -25,6 +25,7 @@ export type HostedDrVersionGateInput = {
 export type HostedDrVersionGateReason =
   | 'compatible'
   | 'invalid-version'
+  | 'invalid-stage'
   | 'family-mismatch'
   | 'skew-too-large'
   | 'client-incompatible'
@@ -103,6 +104,9 @@ const deniedHostedDrVersionGate = (
 export const evaluateHostedDrVersionGate = (
   input: HostedDrVersionGateInput,
 ): HostedDrVersionGateResult => {
+  if (input.stage !== 'expand' && input.stage !== 'rollout' && input.stage !== 'contract') {
+    return deniedHostedDrVersionGate('invalid-stage');
+  }
   const primary = parseHostedDrContractVersion(input.primaryContractVersion);
   const dr = parseHostedDrContractVersion(input.drContractVersion);
   const client = parseHostedDrContractVersion(input.clientContractVersion);
