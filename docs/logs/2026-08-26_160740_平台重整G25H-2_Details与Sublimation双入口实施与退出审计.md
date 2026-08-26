@@ -8,7 +8,7 @@
 
 起点：`05b64453`
 
-代码终点：`37ab0b67`
+代码终点：`330200f6`
 
 适用设计：[G25H-2 Details 与 Sublimation 双入口设计](../specs/2026-08-26_135547_G25H-2_Details与Sublimation双入口设计.md)
 
@@ -58,13 +58,16 @@
 | `97fde647` | 保留 Sublimation 外部 snake_case wire 并通过 naming gate |
 | `5069f271` | 闭合 Hono stream cancel 终态竞态与文档 diff-check Minor |
 | `37ab0b67` | 让 root ownership tests 复用单次 workspace boundary scan，避免 build 后重复全仓解析超时 |
+| `8fc8e597` | 封闭封禁认证 fallback 与 activity token 私有 DataCard 越权 |
+| `978ded87` | 统一生成 questionnaire index/assets 并加强生成时语义校验 |
+| `330200f6` | 在 D1 SQL 边界显式映射封禁字段并通过 strict naming gate |
 
 ## 4. 验证证据
 
 ### 4.1 最终聚合门禁
 
-- `pnpm ci:verify`：exit 0。workspace test/lint/build 全部通过；workspace tests 为 455 files / 2,600 tests，其中 hosted-api 7/117、domain 7/18、hosted-runtime 54/295、apps/api 18/152、apps/web 336/1,792；root 另为 14 files / 139 tests。
-- boundary check 通过；workspace naming 保留 1,377 条既有 report-only 审计项并以 0 退出，本 Goal 没有放宽 gate。
+- `pnpm ci:verify`：本轮整改后的完整新鲜重跑 exit 0。workspace test/lint/build 全部通过；workspace tests 为 456 files / 2,605 tests，其中 hosted-api 7/117、domain 7/18、hosted-runtime 55/300、apps/api 18/152、apps/web 336/1,792；root 另为 14 files / 140 tests。
+- boundary check 通过；workspace naming 保留 1,376 条既有 report-only 审计项并以 0 退出，本 Goal 没有放宽 gate。整改后的首次聚合运行曾因新增 `row.is_banned` 违反 strict naming 而停止，未计为 PASS；`330200f6` 在 SQL boundary 显式映射为 `isBanned` 后，定向 gate 与完整聚合运行均通过。
 - workspace lint 与 root lint 通过；workspace build 包括 questionnaire assets `--check`、D1 Gateway Wrangler dry-run、API tsc 与 Web Next production build（187 页）。
 - 收口期一次 `pnpm ci:verify` 在 workspace test/lint/build 全过后，root ownership 的两个用例因各自重复调用全仓 boundary parser 而超过 15 秒；该次 exit 1 没有计为 PASS。`37ab0b67` 把 boundary scan 移到一次 `beforeAll` 并在两个断言间复用；targeted ownership 4/4 与 root 14 files / 139 tests 通过，随后聚合命令整体重跑 exit 0。
 
@@ -72,12 +75,12 @@
 
 - `pnpm server:routes`：生成 22 条 shared route。
 - `pnpm build:server`：exit 0，单文件 Hono bundle `dist/index.mjs` 约 6.4 MB。
-- `XDG_CONFIG_HOME=$PWD/.tmp/xdg-config pnpm build:cf`：exit 0；3 个 D1 ID 配置检查、Next 187 页与 OpenNext Worker bundle 通过。输出包含既有 proxy、`compatibility_date`、Node `punycode` 警告，独立复跑还观察到不影响 exit 0 的偶发 webpack cache `ENOENT` warning；本 Goal 未将这些 no-new-regression 项扩张为全仓清债。
-- 使用临时 Docker Redis 7、Wrangler local D1 和本地专用占位 secret 运行 `pnpm verify:server:runtime`：第一次因两个占位 HMAC 不足 32 字符被 production config fail-closed 拒绝，不计 PASS；合规长度重跑 exit 0，live、ready、Redis、D1、migrated `400`、exited `404` 与 rate-limit key 七项均为 true。临时容器与本地 D1 状态随后已删除，未连接 production。
+- `XDG_CONFIG_HOME=$PWD/.tmp/xdg-config pnpm build:cf`：本轮整改后重跑 exit 0；3 个 D1 ID 配置检查、Next 187 页与 OpenNext Worker bundle 通过。输出包含既有 proxy、`compatibility_date` 与 Node `punycode` 警告；本次没有再次观察到 webpack cache `ENOENT`。这些 no-new-regression 项未扩张为本 Goal 的全仓清债。
+- 使用临时 Docker Redis 7、Wrangler local D1 和本地专用占位 secret 重跑 `pnpm verify:server:runtime`：exit 0；live、ready、Redis、D1、migrated API、unmigrated API 拒绝与 Redis rate-limit key 七项均为 true。清理钩子已停止临时容器，未连接 production。
 
 ### 4.3 定向回归
 
-- hosted-api：7 files / 117 tests；domain：7 / 18；hosted-runtime：54 / 295；apps/api：18 / 152；apps/web：336 / 1,792，均在最终聚合门禁通过。
+- hosted-api：7 files / 117 tests；domain：7 / 18；hosted-runtime：55 / 300；apps/api：18 / 152；apps/web：336 / 1,792，均在最终聚合门禁通过。
 - review 整改的定向证据包括：DataCard/Arena actor/Details/Sublimation 4 files / 29 tests；Hono composition 1 / 16；lifecycle 1 / 11；Next DR + public safety 2 / 11；四路 custom Provider/policy/signature 矩阵均通过。
 - `git diff --check 05b64453..HEAD`、route inventory 与 source self-hop/AI-direct scan 通过；四个 Hono adapter 与四个 Web handler 无 `fetch()` 对跳。
 
@@ -109,6 +112,11 @@ Builder 逐项核对 accepted MUST/MUST NOT/ACCEPT、双入口 service identity�
 - 关闭：认证解析显式区分 `authenticated / anonymous / denied`；Better Auth 403 与 D1 封禁终止 fallback，401 stale cookie 仍可回退有效 Legacy Bearer。DataCard 默认只接受 Better Auth / Legacy Bearer，Arena 显式保留既有 activity actor。封禁或被拒 actor 不会降级成匿名 owner/arena actor。
 - 回归：覆盖 banned Legacy Bearer、banned activity actor、Better Auth 403 + valid Legacy Bearer、403 cookie-only、401 stale-cookie fallback、DataCard denied 不执行匿名查询，以及 DataCard 默认不接受 activity token。最终 Critical 0 / Important 0 open。
 
+### 5.6 后续 questionnaire drift 复审
+
+- 复审意见称现有 gate 没有覆盖 hosted-runtime 的手写 preset index；该主张不完全属实：整改前 root compatibility test 已逐字节比较 Web public index、runtime index 与 bundled assets，完整 `ci:verify` 能发现 drift。不过 package-local generator/build 的 `--check` 确实没有直接拥有该 runtime index，留下重复 source-of-truth 与局部门禁缺口。
+- 关闭：`978ded87` 删除手写 runtime index，由同一 generator 同时产生 index 和 assets；生成器同时校验 canonical ID、kind、相对路径、重复路径、重复 `(kind, id)` 与 asset key。root compatibility test 继续对 public source 逐项校验，并断言旧 index 不得恢复。最终无 open finding。
+
 ## 6. Stopping condition 与状态矩阵
 
 | 项目 | 状态 | 证据/说明 |
@@ -122,15 +130,18 @@ Builder 逐项核对 accepted MUST/MUST NOT/ACCEPT、双入口 service identity�
 | production deploy/cutover / remote DB/Redis / production drill | `DEFERRED` | 未授权且不是 G25H-2 stopping condition；进入 G25E-2 |
 | production schema/data migration | `NOT_APPLICABLE` | 无 schema、migration 或持久化 wire 变更 |
 | secret/Access/credential 变更 | `NOT_APPLICABLE` | 无新 secret 名称/值/权限；仅本地一次性占位值 |
-| release/tag/push | `NOT_APPLICABLE` | 未执行 |
+| release/tag | `NOT_APPLICABLE` | 未执行 |
+| branch push / Hono validation | `PASS` | source commit `cc3567ad` 已 push；[Hono workflow](https://github.com/RunoreLab/MahoShojo-Generator/actions/runs/32948816336) build/verify 成功，deploy step skipped |
+| Cloudflare preview | `PASS` | [Cloudflare workflow](https://github.com/RunoreLab/MahoShojo-Generator/actions/runs/32948816348) production step skipped，preview deploy 成功 |
 | blocker | `BLOCKED: none` | G25H-2 stopping condition 无未闭合项 |
 
 ## 7. 生产、schema、secret 与 release 影响
 
-- 本 Goal 只修改代码、测试、机器可读 route manifest 与文档；没有 production deploy/cutover、远程 DB/Redis 写入、secret/Access/credential 修改、release/tag 或 push。
+- source commit `cc3567ad` 已由远程 branch push 触发既有 workflows：Hono build/verify 成功且 deploy step skipped；Cloudflare production step skipped且 preview deploy 成功。本轮审查整改没有再次 push 或触发部署。
+- 整个 G25H-2 至今没有 production deploy/cutover、远程 production DB/Redis 写入、secret/Access/credential 修改或 release/tag。
 - 无 schema/migration/持久化格式变化。Hono telemetry snapshot schema 从 3 扩展到 4 只是本地运维观测 contract，不是业务持久化 schema。
 - 无新增 secret 名称。私有 DataCard 读取复用 Better Auth verify / Legacy Bearer，且每次 D1 lookup 检查封禁状态；activity token 不获得私有读取 scope。未携带受保护凭据时只允许 public + approved，明确认证拒绝 fail closed。
-- 部署后四路默认 primary 将落在 Hono；Next/OpenNext 仍保留同核 DR adapter。自动切换、稳定逻辑入口与 Cloudflare 独立 DatabaseProvider 尚未实现，不得将本 Goal 描述为 production DR 已完成。
+- 未来 production deploy/cutover 后，四路默认 primary 才会落在 Hono；Next/OpenNext 仍保留同核 DR adapter。自动切换、稳定逻辑入口与 Cloudflare 独立 DatabaseProvider 尚未实现，不得将本 Goal 描述为 production DR 已完成。
 
 ## 8. 回滚
 
@@ -138,6 +149,9 @@ Builder 逐项核对 accepted MUST/MUST NOT/ACCEPT、双入口 service identity�
 
 ```text
 本文档收口提交
+330200f6
+978ded87
+8fc8e597
 37ab0b67
 5069f271
 97fde647
