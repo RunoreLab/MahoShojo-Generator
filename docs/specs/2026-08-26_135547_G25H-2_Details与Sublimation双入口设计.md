@@ -96,4 +96,4 @@ Hono runtime snapshot 聚合上述维度，并与既有 process CPU/event-loop/A
 
 ## 7. 实施终点
 
-2026-08-26 按本设计完成实施：四路 inventory 为 `22 shared / 6 exited / 0 legacy`，Hono/Next 使用同一默认 service，Sublimation 纯规则及 questionnaire static assets 已归位 package。实施期额外将私有 DataCard 读取收紧到受信 Better Auth / Legacy Bearer / activity token actor，未认证请求只能使用 public + approved 问卷；这是对“客户端不可信”不变量的闭合，没有改变 accepted ADR。详见 [实施与退出审计](../logs/2026-08-26_160740_平台重整G25H-2_Details与Sublimation双入口实施与退出审计.md)。
+2026-08-26 按本设计完成实施：四路 inventory 为 `22 shared / 6 exited / 0 legacy`，Hono/Next 使用同一默认 service，Sublimation 纯规则及 questionnaire static assets 已归位 package。私有 DataCard 读取只接受受信 Better Auth / Legacy Bearer actor；activity token 继续仅用于既有 activity / Arena actor，不获得 owner-private DataCard scope。未认证请求只能使用 public + approved 问卷；这是对“客户端不可信”与既有 Legacy/Better Auth authority 不变量的闭合。详见 [实施与退出审计](../logs/2026-08-26_160740_平台重整G25H-2_Details与Sublimation双入口实施与退出审计.md)。

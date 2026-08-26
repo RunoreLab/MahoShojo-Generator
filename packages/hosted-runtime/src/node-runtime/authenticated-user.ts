@@ -8,9 +8,19 @@ export type AuthenticatedUserIdResolverOptions = {
   signatures: SignatureService;
   getD1Client(): NodeDataD1Client | null;
   now?: () => Date;
+  allowActivityToken?: boolean;
 };
 
+export type AuthenticationResolution =
+  | Readonly<{ status: 'authenticated'; userId: number }>
+  | Readonly<{ status: 'anonymous' }>
+  | Readonly<{ status: 'denied' }>;
+
+export type AuthenticationResolver = (_request: Request) => Promise<AuthenticationResolution>;
 export type AuthenticatedUserIdResolver = (_request: Request) => Promise<number | null>;
+
+const ANONYMOUS_AUTHENTICATION = Object.freeze({ status: 'anonymous' } as const);
+const DENIED_AUTHENTICATION = Object.freeze({ status: 'denied' } as const);
 
 const readUserId = (value: unknown): number | null => {
   const parsed = typeof value === 'number' ? value : Number(value);
@@ -21,14 +31,20 @@ const readD1User = async (
   client: NodeDataD1Client,
   where: 'auth_key' | 'id',
   value: string | number,
-): Promise<number | null> => {
+): Promise<AuthenticationResolution> => {
   const result = await client.prepare(`
 SELECT id, username, is_banned
 FROM users
 WHERE ${where} = ?
 LIMIT 1
   `.trim()).bind(value).all({ retry: 'safe-read' });
-  return readUserId(result.results[0]?.id);
+  const row = result.results[0];
+  const userId = readUserId(row?.id);
+  if (!row || !userId) return DENIED_AUTHENTICATION;
+  if (typeof row.is_banned === 'string' && row.is_banned.trim()) {
+    return DENIED_AUTHENTICATION;
+  }
+  return Object.freeze({ status: 'authenticated', userId });
 };
 
 const hasBetterAuthSession = (request: Request): boolean => {
@@ -64,9 +80,9 @@ const readSessionUser = async (
   request: Request,
   env: Readonly<Record<string, string | undefined>>,
   fetcher: typeof fetch,
-): Promise<number | null> => {
+): Promise<AuthenticationResolution> => {
   const base = parseTrustedBetterAuthUrl(env);
-  if (!base) return null;
+  if (!base) return ANONYMOUS_AUTHENTICATION;
   const headers = new Headers({ 'Content-Type': 'application/json' });
   for (const name of [
     'cookie',
@@ -87,25 +103,32 @@ const readSessionUser = async (
       method: 'POST',
       headers,
     });
-    if (!response.ok) return null;
+    if (!response.ok) {
+      return response.status === 403
+        ? DENIED_AUTHENTICATION
+        : ANONYMOUS_AUTHENTICATION;
+    }
     const payload = await response.json().catch(() => null) as {
       user?: { id?: unknown };
     } | null;
-    return readUserId(payload?.user?.id);
+    const userId = readUserId(payload?.user?.id);
+    return userId
+      ? Object.freeze({ status: 'authenticated', userId })
+      : ANONYMOUS_AUTHENTICATION;
   } catch {
-    return null;
+    return ANONYMOUS_AUTHENTICATION;
   }
 };
 
-export const createAuthenticatedUserIdResolver = (
+export const createAuthenticationResolver = (
   options: AuthenticatedUserIdResolverOptions,
-): AuthenticatedUserIdResolver => {
+): AuthenticationResolver => {
   const env = options.env ?? process.env;
   const fetcher = options.fetch ?? globalThis.fetch;
   const now = options.now ?? (() => new Date());
   const activityTokens = createActivityTokenService(options.signatures);
 
-  return async (request): Promise<number | null> => {
+  return async (request): Promise<AuthenticationResolution> => {
     const authorization = request.headers.get('authorization')?.trim() ?? '';
     const bearer = authorization.startsWith('Bearer ')
       ? authorization.slice('Bearer '.length).trim()
@@ -114,21 +137,30 @@ export const createAuthenticatedUserIdResolver = (
     const authMode = env.HONO_AUTH_MODE?.trim().toLowerCase() || 'hybrid';
 
     if (authMode === 'hybrid' && hasBetterAuthSession(request)) {
-      const userId = await readSessionUser(request, env, fetcher);
-      if (userId) return userId;
+      const resolution = await readSessionUser(request, env, fetcher);
+      if (resolution.status !== 'anonymous') return resolution;
     }
     if (bearer) {
-      if (!client) return null;
-      const userId = await readD1User(client, 'auth_key', bearer).catch(() => null);
-      if (userId) return userId;
-      return null;
+      if (!client) return DENIED_AUTHENTICATION;
+      return readD1User(client, 'auth_key', bearer).catch(() => DENIED_AUTHENTICATION);
     }
 
+    if (!options.allowActivityToken) return ANONYMOUS_AUTHENTICATION;
     const activityToken = request.headers.get('x-mahoshojo-activity-token')?.trim() ?? '';
-    if (!activityToken) return null;
-    if (!client) return null;
+    if (!activityToken) return ANONYMOUS_AUTHENTICATION;
+    if (!client) return DENIED_AUTHENTICATION;
     const verified = await activityTokens.verifyActivityToken(activityToken, { now: now() });
-    if (!verified) return null;
-    return readD1User(client, 'id', verified.userId).catch(() => null);
+    if (!verified) return DENIED_AUTHENTICATION;
+    return readD1User(client, 'id', verified.userId).catch(() => DENIED_AUTHENTICATION);
+  };
+};
+
+export const createAuthenticatedUserIdResolver = (
+  options: AuthenticatedUserIdResolverOptions,
+): AuthenticatedUserIdResolver => {
+  const resolveAuthentication = createAuthenticationResolver(options);
+  return async (request): Promise<number | null> => {
+    const resolution = await resolveAuthentication(request);
+    return resolution.status === 'authenticated' ? resolution.userId : null;
   };
 };

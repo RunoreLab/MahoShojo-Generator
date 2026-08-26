@@ -221,4 +221,22 @@ describe('package-owned Node data ports', () => {
     expect(calls[0]?.params).toEqual(['owned-card', 9]);
     expect(calls[0]?.options).toEqual({ retry: 'safe-read' });
   });
+
+  test('Hosted questionnaire DataCard 遇到明确认证拒绝时不降级为匿名查询', async () => {
+    const { client, calls } = createD1Harness();
+    const ports = createNodeDataPorts({
+      getD1Client: () => client,
+      getUserIdFromActivityHeaders: async () => null,
+      resolveAuthentication: async () => ({ status: 'denied' }),
+      now: () => new Date('2026-08-24T12:34:56.000Z'),
+    });
+
+    await expect(ports.getAuthorizedDataCardById(
+      new Request('https://api.example.test/generate', {
+        headers: { Authorization: 'Bearer banned-user' },
+      }),
+      'public-card',
+    )).resolves.toBeNull();
+    expect(calls).toEqual([]);
+  });
 });

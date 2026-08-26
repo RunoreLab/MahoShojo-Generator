@@ -68,7 +68,7 @@ import {
   type GenerateSublimationStreamRuntimeDependencies,
 } from '../generate-sublimation-stream-runtime';
 import { createActivityTokenService } from './activity-token';
-import { createAuthenticatedUserIdResolver } from './authenticated-user';
+import { createAuthenticationResolver } from './authenticated-user';
 import {
   createContentSafetyService,
   type AiSafetyPromptTemplate,
@@ -191,7 +191,7 @@ export const createNodeHostedServices = (
   const dataPorts = createNodeDataPorts({
     getD1Client,
     getUserIdFromActivityHeaders: activityTokenService.getUserIdFromActivityHeaders,
-    getAuthenticatedUserId: createAuthenticatedUserIdResolver({
+    resolveAuthentication: createAuthenticationResolver({
       env,
       fetch: fetcher,
       signatures: signatureService,

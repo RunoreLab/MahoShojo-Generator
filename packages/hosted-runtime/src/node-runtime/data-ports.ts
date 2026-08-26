@@ -2,6 +2,7 @@ import type {
   D1LikeStatementResult,
   D1QueryOptions,
 } from '../d1-http-client';
+import type { AuthenticationResolution } from './authenticated-user';
 import { getUserIdFromActivityHeaders } from './activity-token';
 import { getDefaultNodeD1Client } from './d1-client';
 import { MAX_CUSTOM_AI_MODEL_ID_LENGTH } from './provider-catalog';
@@ -44,6 +45,7 @@ export type NodeDataPorts = {
 export type NodeDataPortDependencies = {
   getD1Client(): NodeDataD1Client | null;
   getUserIdFromActivityHeaders(_headers: Headers): Promise<number | null>;
+  resolveAuthentication?(_request: Request): Promise<AuthenticationResolution>;
   getAuthenticatedUserId?(_request: Request): Promise<number | null>;
   now(): Date;
   log?: { debug(_message: string): void };
@@ -264,9 +266,18 @@ export const createNodeDataPorts = (
   ): Promise<HostedDataCard | null> => {
     const normalizedId = cardId.trim();
     if (!normalizedId) return null;
+    let userId: number | null = null;
+    if (dependencies.resolveAuthentication) {
+      const resolution = await dependencies.resolveAuthentication(request).catch(() => ({
+        status: 'denied' as const,
+      }));
+      if (resolution.status === 'denied') return null;
+      userId = resolution.status === 'authenticated' ? resolution.userId : null;
+    } else {
+      userId = await dependencies.getAuthenticatedUserId?.(request).catch(() => null) ?? null;
+    }
     const client = dependencies.getD1Client();
     if (!client) return null;
-    const userId = await dependencies.getAuthenticatedUserId?.(request).catch(() => null) ?? null;
     const sql = userId
       ? `${DATA_CARD_SELECT_SQL}\n  AND (\n    dc.user_id = ?\n    OR (dc.is_public = 1 AND dc.review_status = 'approved')\n  )\nLIMIT 1`
       : `${DATA_CARD_SELECT_SQL}\n  AND dc.is_public = 1\n  AND dc.review_status = 'approved'\nLIMIT 1`;

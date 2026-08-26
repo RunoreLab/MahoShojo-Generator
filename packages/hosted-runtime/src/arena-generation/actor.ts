@@ -3,7 +3,7 @@ import {
   type ArenaGenerationActor,
 } from '@mahoshojo/hosted-api/arena-generation/service';
 import type { NodeDataD1Client } from '../node-runtime/data-ports';
-import { createAuthenticatedUserIdResolver } from '../node-runtime/authenticated-user';
+import { createAuthenticationResolver } from '../node-runtime/authenticated-user';
 import type { SignatureService } from '../signature';
 import {
   ARENA_PVP_GENERATION_SIGNATURE_HEADER,
@@ -83,12 +83,13 @@ export const createArenaGenerationActorResolver = (
   const env = options.env ?? process.env;
   const now = options.now ?? (() => new Date());
   const createAnonymousId = options.createAnonymousId ?? (() => crypto.randomUUID());
-  const resolveAuthenticatedUserId = createAuthenticatedUserIdResolver({
+  const resolveAuthentication = createAuthenticationResolver({
     env,
     fetch: options.fetch,
     signatures: options.signatures,
     getD1Client: options.getD1Client,
     now,
+    allowActivityToken: true,
   });
   const pvpAuthority = options.pvpSignatures
     ? createArenaPvpGenerationAuthority(options.pvpSignatures)
@@ -183,7 +184,11 @@ export const createArenaGenerationActorResolver = (
   };
 
   return async (request): Promise<ArenaGenerationActor | null> => {
-    const userId = await resolveAuthenticatedUserId(request);
+    const authentication = await resolveAuthentication(request);
+    if (authentication.status === 'denied') return null;
+    const userId = authentication.status === 'authenticated'
+      ? authentication.userId
+      : null;
     const authenticatedActor: ArenaGenerationActor | null = userId
       ? { actorKey: `user:${userId}` }
       : null;

@@ -30,7 +30,7 @@
 
 - 保留 questionnaire answer mapping、逐答案 safety、限速、custom Provider、AI meta、reasoning SSE、activity、native questionnaire 服务端重解析与签名 fail-closed。
 - preset 以 package generator 生成的可验证静态 TypeScript asset 随 Node bundle 携带；`--check` 在 hosted-runtime build 中阻断 drift。服务端不再经公开 URL 自跳取 preset。
-- 审查期发现并闭合私有 DataCard ownership 缺口：只接受经 Better Auth verify、Legacy Bearer 或签名 activity token 解析的受信 actor；伪造 `X-Mahoshojo-User-Id` 无效。已认证用户可读自己的卡或 public + approved，匿名只能读 public + approved，解析失败 fail closed。
+- 审查期发现并闭合私有 DataCard ownership 缺口，后续 authority 复审进一步收紧凭据 scope：只接受经 Better Auth verify 或 Legacy Bearer 解析且未封禁的受信 actor；签名 activity token 继续用于 activity / Arena actor，但不能读取 owner-private DataCard。伪造 `X-Mahoshojo-User-Id` 无效；已认证用户可读自己的卡或 public + approved，匿名只能读 public + approved，明确认证拒绝 fail closed。
 
 ### 2.3 Sublimation 领域规则与兼容
 
@@ -103,6 +103,12 @@ Builder 逐项核对 accepted MUST/MUST NOT/ACCEPT、双入口 service identity�
 - 首轮关闭：`79323586` 补齐全部矩阵。复审又给出 Minor 2：真实 Hono cancel/read-error telemetry 与 Markdown 尾随空格。
 - 最终关闭：`5069f271` 的真实 Hono composition 红测反而捕获 cancel/EOF 竞态，修复后 Hono 16 tests 与 lifecycle 11 tests 通过；`git diff --check` 恢复 clean。最终 Critical 0 / Important 0 / Minor 0 open。
 
+### 5.5 后续 security / authority 复审
+
+- 复审：Critical 0；Important 2。D1 actor lookup 读取但未判定 `is_banned`，Better Auth 明确 403 仍可回退其他凭据；同时 90 天 activity token 被新增为 owner-private DataCard 凭据，但既有 accepted authority 未授予该 scope。
+- 关闭：认证解析显式区分 `authenticated / anonymous / denied`；Better Auth 403 与 D1 封禁终止 fallback，401 stale cookie 仍可回退有效 Legacy Bearer。DataCard 默认只接受 Better Auth / Legacy Bearer，Arena 显式保留既有 activity actor。封禁或被拒 actor 不会降级成匿名 owner/arena actor。
+- 回归：覆盖 banned Legacy Bearer、banned activity actor、Better Auth 403 + valid Legacy Bearer、403 cookie-only、401 stale-cookie fallback、DataCard denied 不执行匿名查询，以及 DataCard 默认不接受 activity token。最终 Critical 0 / Important 0 open。
+
 ## 6. Stopping condition 与状态矩阵
 
 | 项目 | 状态 | 证据/说明 |
@@ -123,7 +129,7 @@ Builder 逐项核对 accepted MUST/MUST NOT/ACCEPT、双入口 service identity�
 
 - 本 Goal 只修改代码、测试、机器可读 route manifest 与文档；没有 production deploy/cutover、远程 DB/Redis 写入、secret/Access/credential 修改、release/tag 或 push。
 - 无 schema/migration/持久化格式变化。Hono telemetry snapshot schema 从 3 扩展到 4 只是本地运维观测 contract，不是业务持久化 schema。
-- 无新增 secret 名称。私有 DataCard 读取复用 Arena 已有 Better Auth verify / Legacy Bearer / activity token 解析；相关配置缺失时退化为只允许 public + approved，fail closed。
+- 无新增 secret 名称。私有 DataCard 读取复用 Better Auth verify / Legacy Bearer，且每次 D1 lookup 检查封禁状态；activity token 不获得私有读取 scope。未携带受保护凭据时只允许 public + approved，明确认证拒绝 fail closed。
 - 部署后四路默认 primary 将落在 Hono；Next/OpenNext 仍保留同核 DR adapter。自动切换、稳定逻辑入口与 Cloudflare 独立 DatabaseProvider 尚未实现，不得将本 Goal 描述为 production DR 已完成。
 
 ## 8. 回滚

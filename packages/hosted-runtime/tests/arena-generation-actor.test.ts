@@ -170,6 +170,24 @@ describe('Arena generation actor resolver', () => {
     expect(forged?.actorKey).toBe('anonymous:anon-id-2');
   });
 
+  it('拒绝已封禁用户的 Legacy Bearer，不降级为匿名 actor', async () => {
+    const signatures = await createSignatures();
+    const resolveActor = createArenaGenerationActorResolver({
+      env: { HONO_AUTH_MODE: 'bearer' },
+      signatures,
+      getD1Client: () => d1([{
+        id: 42,
+        username: 'banned-legacy-user',
+        is_banned: '2026-08-26T00:00:00.000Z',
+      }]),
+      createAnonymousId: () => 'must-not-be-issued',
+    });
+
+    await expect(resolveActor(new Request('https://example.test', {
+      headers: { Authorization: 'Bearer banned-legacy-secret' },
+    }))).resolves.toBeNull();
+  });
+
   it('accepts verified activity identity and uses only configured Better Auth origin', async () => {
     const signatures = await createSignatures();
     const activity = createActivityTokenService(signatures);
@@ -200,6 +218,52 @@ describe('Arena generation actor resolver', () => {
       'https://auth.example.test/api/auth/verify',
       expect.objectContaining({ method: 'POST' }),
     );
+  });
+
+  it('拒绝已封禁用户的 activity token，不降级为匿名 actor', async () => {
+    const signatures = await createSignatures();
+    const activity = createActivityTokenService(signatures);
+    const activityToken = await activity.issueActivityToken(7);
+    const resolveActor = createArenaGenerationActorResolver({
+      env: { HONO_AUTH_MODE: 'bearer' },
+      signatures,
+      getD1Client: () => d1([{
+        id: 7,
+        username: 'banned-activity-user',
+        is_banned: '2026-08-26T00:00:00.000Z',
+      }]),
+      createAnonymousId: () => 'must-not-be-issued',
+    });
+
+    await expect(resolveActor(new Request('https://example.test', {
+      headers: { 'x-mahoshojo-activity-token': activityToken! },
+    }))).resolves.toBeNull();
+  });
+
+  it('Better Auth 明确 403 时终止 Legacy Bearer fallback', async () => {
+    const signatures = await createSignatures();
+    const client = d1([{ id: 42, username: 'legacy-user', is_banned: null }]);
+    const resolveActor = createArenaGenerationActorResolver({
+      env: {
+        HONO_AUTH_MODE: 'hybrid',
+        BETTER_AUTH_URL: 'https://auth.example.test',
+      },
+      fetch: vi.fn(async () => new Response(null, { status: 403 })),
+      signatures,
+      getD1Client: () => client,
+    });
+
+    await expect(resolveActor(new Request('https://example.test', {
+      headers: {
+        Authorization: 'Bearer legacy-secret',
+        cookie: 'better-auth.session_token=banned',
+      },
+    }))).resolves.toBeNull();
+    expect(client.prepare).not.toHaveBeenCalled();
+
+    await expect(resolveActor(new Request('https://example.test', {
+      headers: { cookie: 'better-auth.session_token=banned-without-bearer' },
+    }))).resolves.toBeNull();
   });
 
   it('falls back to a valid legacy Bearer when a stale Better Auth cookie is rejected', async () => {
