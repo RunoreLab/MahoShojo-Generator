@@ -9,7 +9,6 @@ import {
   type GeneralScenarioData,
   type MagicalGirlData,
   type ScenarioData,
-  GENERAL_CHARACTER_TEMPLATE_ID,
   GENERAL_SCENARIO_TEMPLATE_ID,
   inferCharacterKind,
   isGeneralScenario,
@@ -19,6 +18,10 @@ import {
   readScenarioBattleStoryConfig,
   toScenarioBattleStoryExtension,
 } from '@/lib/scenario-battle-story';
+import {
+  convertSublimationCharacterCard,
+  createBlankSublimationCharacterCard,
+} from '@mahoshojo/domain/sublimation';
 
 const NON_SUBSTANTIVE_KEYS = new Set(['signature', 'templateId']);
 const CREATOR_META_KEYS = ['creationInputs', 'buildState'] as const;
@@ -59,92 +62,6 @@ interface UnmatchedField {
   value: unknown;
 }
 
-const MAGICAL_GIRL_META: Record<string, FieldMeta> = {
-  codename: { type: 'string' },
-  appearance: {
-    type: 'object',
-    children: {
-      outfit: { type: 'string' },
-      accessories: { type: 'string' },
-      colorScheme: { type: 'string' },
-      overallLook: { type: 'string' }
-    }
-  },
-  magicConstruct: {
-    type: 'object',
-    children: {
-      name: { type: 'string' },
-      form: { type: 'string' },
-      basicAbilities: { type: 'arrayOfString' },
-      description: { type: 'string' }
-    }
-  },
-  wonderlandRule: {
-    type: 'object',
-    children: {
-      name: { type: 'string' },
-      description: { type: 'string' },
-      tendency: { type: 'string' },
-      activation: { type: 'string' }
-    }
-  },
-  blooming: {
-    type: 'object',
-    children: {
-      name: { type: 'string' },
-      evolvedAbilities: { type: 'arrayOfString' },
-      evolvedForm: { type: 'string' },
-      evolvedOutfit: { type: 'string' },
-      powerLevel: { type: 'string' }
-    }
-  },
-  analysis: {
-    type: 'object',
-    children: {
-      personalityAnalysis: { type: 'string' },
-      abilityReasoning: { type: 'string' },
-      coreTraits: { type: 'arrayOfString' },
-      predictionBasis: { type: 'string' },
-      background: {
-        type: 'object',
-        children: {
-          belief: { type: 'string' },
-          bonds: { type: 'string' }
-        }
-      }
-    }
-  },
-  userAnswers: { type: 'unknown' },
-  signature: { type: 'string' },
-  templateId: { type: 'string' },
-  isPreset: { type: 'boolean' },
-  arena_history: { type: 'unknown' },
-  adjudicationEvents: { type: 'unknown' },
-  current_state: { type: 'unknown' }
-};
-
-const CANSHOU_META: Record<string, FieldMeta> = {
-  name: { type: 'string' },
-  appearance: { type: 'string' },
-  materialAndSkin: { type: 'string' },
-  featuresAndAppendages: { type: 'string' },
-  coreConcept: { type: 'string' },
-  coreEmotion: { type: 'string' },
-  evolutionStage: { type: 'string' },
-  attackMethod: { type: 'string' },
-  specialAbility: { type: 'string' },
-  origin: { type: 'string' },
-  birthEnvironment: { type: 'string' },
-  researcherNotes: { type: 'string' },
-  templateId: { type: 'string' },
-  userAnswers: { type: 'unknown' },
-  isPreset: { type: 'boolean' },
-  signature: { type: 'string' },
-  adjudicationEvents: { type: 'unknown' },
-  arena_history: { type: 'unknown' },
-  current_state: { type: 'unknown' }
-};
-
 const SCENARIO_META: Record<string, FieldMeta> = {
   title: { type: 'string' },
   scenario_type: { type: 'string' },
@@ -177,64 +94,6 @@ const SCENARIO_META: Record<string, FieldMeta> = {
   _battle_story: { type: 'unknown' }
 };
 
-const DEFAULT_MAGICAL_GIRL: MagicalGirlData = {
-  codename: '未命名魔法少女',
-  appearance: {
-    outfit: '',
-    accessories: '',
-    colorScheme: '',
-    overallLook: ''
-  },
-  magicConstruct: {
-    name: '',
-    form: '',
-    basicAbilities: [],
-    description: ''
-  },
-  wonderlandRule: {
-    name: '',
-    description: '',
-    tendency: '',
-    activation: ''
-  },
-  blooming: {
-    name: '',
-    evolvedAbilities: [],
-    evolvedForm: '',
-    evolvedOutfit: '',
-    powerLevel: ''
-  },
-  analysis: {
-    personalityAnalysis: '',
-    abilityReasoning: '',
-    coreTraits: [],
-    predictionBasis: '',
-    background: {
-      belief: '',
-      bonds: ''
-    }
-  },
-  userAnswers: [],
-  adjudicationEvents: [],
-  templateId: '魔法少女/心之花/魔法少女（问卷生成）'
-};
-
-const DEFAULT_CANSHOU: CanshouData = {
-  name: '未命名残兽',
-  appearance: '',
-  materialAndSkin: '',
-  featuresAndAppendages: '',
-  coreConcept: '',
-  coreEmotion: '',
-  evolutionStage: '',
-  attackMethod: '',
-  specialAbility: '',
-  origin: '',
-  birthEnvironment: '',
-  researcherNotes: '',
-  templateId: '魔法少女/心之花/残兽（问卷生成）',
-};
-
 const DEFAULT_SCENARIO: ScenarioData = {
   title: '未命名情景',
   description: '',
@@ -259,12 +118,6 @@ const DEFAULT_GENERAL_SCENARIO: GeneralScenarioData = {
   content: '请在此处补充情景设定，建议使用 Markdown 书写。',
 };
 
-const DEFAULT_GENERAL: GeneralCharacterData = {
-  templateId: GENERAL_CHARACTER_TEMPLATE_ID,
-  name: '未命名角色',
-  content: '请在此处补充角色设定，建议使用 Markdown 书写。',
-};
-
 export function inferTemplate(data: unknown): InferableTemplate {
   if (isGeneralScenario(data)) return 'general-scenario';
   const kind = inferCharacterKind(data);
@@ -276,16 +129,16 @@ export function inferTemplate(data: unknown): InferableTemplate {
 export function createBlankDataCard(template: DataCardTemplate): MagicalGirlData | CanshouData | GeneralCharacterData | ScenarioData | GeneralScenarioData {
   switch (template) {
     case 'magical-girl':
-      return JSON.parse(JSON.stringify(DEFAULT_MAGICAL_GIRL));
+      return MagicalGirlSchema.parse(createBlankSublimationCharacterCard(template));
     case 'canshou':
-      return JSON.parse(JSON.stringify(DEFAULT_CANSHOU));
+      return CanshouSchema.parse(createBlankSublimationCharacterCard(template));
     case 'scenario':
       return JSON.parse(JSON.stringify(DEFAULT_SCENARIO));
     case 'general-scenario':
       return JSON.parse(JSON.stringify(DEFAULT_GENERAL_SCENARIO));
     case 'general':
     default:
-      return JSON.parse(JSON.stringify(DEFAULT_GENERAL));
+      return GeneralCharacterSchema.parse(createBlankSublimationCharacterCard('general'));
   }
 }
 
@@ -459,33 +312,8 @@ function copyKnownMetadata(
 }
 
 function convertToGeneral(data: any): AssignResult<GeneralCharacterData> {
-  const name = data?.codename || data?.name || data?.title || '未命名角色';
-  const rest = { ...data };
-  delete rest.codename;
-  delete rest.name;
-  delete rest.title;
-  delete rest.templateId;
-  delete rest.creationInputs;
-  delete rest.buildState;
-  delete rest._battle_story;
-
-  const content = toMarkdownContent(rest);
-  const result: GeneralCharacterData = {
-    templateId: GENERAL_CHARACTER_TEMPLATE_ID,
-    name,
-    content
-  };
-  if (data?.arena_history) {
-    (result as any).arena_history = JSON.parse(JSON.stringify(data.arena_history));
-  }
-  if (data?.adjudicationEvents) {
-    (result as any).adjudicationEvents = JSON.parse(JSON.stringify(data.adjudicationEvents));
-  }
-  if (data?.current_state) {
-    (result as any).current_state = JSON.parse(JSON.stringify(data.current_state));
-  }
-  copyKnownMetadata(data, result as Record<string, unknown>, CREATOR_META_KEYS);
-  return { data: GeneralCharacterSchema.parse(result), warnings: [] };
+  const converted = convertSublimationCharacterCard(data, 'general');
+  return { data: GeneralCharacterSchema.parse(converted.data), warnings: converted.warnings };
 }
 
 function convertToGeneralScenario(data: any, sourceTemplate: InferableTemplate): AssignResult<GeneralScenarioData> {
@@ -532,76 +360,21 @@ function convertToGeneralScenario(data: any, sourceTemplate: InferableTemplate):
 }
 
 function convertToMagicalGirl(data: any, sourceTemplate: InferableTemplate): AssignResult<MagicalGirlData> {
-  const base: MagicalGirlData = JSON.parse(JSON.stringify(DEFAULT_MAGICAL_GIRL));
-  base.codename = data?.codename || data?.name || data?.title || base.codename;
-
-  const source = { ...data };
-  delete source.codename;
-  delete source.name;
-  delete source.title;
-  delete source.creationInputs;
-  delete source.buildState;
-  delete source._battle_story;
-  if (sourceTemplate === 'general' || sourceTemplate === 'general-scenario') {
-    delete source.content;
-  }
-
-  const unmatched = assignWithMeta(source, base as Record<string, any>, MAGICAL_GIRL_META);
-  const appendix = formatUnmatchedFields(unmatched, ['arena_history', 'adjudicationEvents', 'current_state']);
-  if (appendix) {
-    if (!base.analysis) base.analysis = { predictionBasis: '' };
-    base.analysis.predictionBasis = `${base.analysis?.predictionBasis?.trim() || ''}\n${appendix}`.trim();
-  }
-
-  if (data?.arena_history) {
-    base.arena_history = JSON.parse(JSON.stringify(data.arena_history));
-  }
-  if (data?.adjudicationEvents) {
-    base.adjudicationEvents = JSON.parse(JSON.stringify(data.adjudicationEvents));
-  }
-  if (data?.current_state) {
-    (base as any).current_state = JSON.parse(JSON.stringify(data.current_state));
-  }
-  copyKnownMetadata(data, base as Record<string, unknown>, CREATOR_META_KEYS);
-
-  base.templateId = '魔法少女/心之花/魔法少女（问卷生成）';
-  return { data: MagicalGirlSchema.parse(base), warnings: unmatched.length ? ['部分字段已追加至预测依据。'] : [] };
+  const converted = convertSublimationCharacterCard(
+    data,
+    'magical-girl',
+    sourceTemplate === 'general-scenario' ? 'scenario' : sourceTemplate,
+  );
+  return { data: MagicalGirlSchema.parse(converted.data), warnings: converted.warnings };
 }
 
 function convertToCanshou(data: any, sourceTemplate: InferableTemplate): AssignResult<CanshouData> {
-  const base: CanshouData = JSON.parse(JSON.stringify(DEFAULT_CANSHOU));
-  base.name = data?.name || data?.codename || data?.title || base.name;
-
-  const source = { ...data };
-  delete source.codename;
-  delete source.name;
-  delete source.title;
-  delete source.creationInputs;
-  delete source.buildState;
-  delete source._battle_story;
-  if (sourceTemplate === 'general' || sourceTemplate === 'general-scenario') {
-    delete source.content;
-  }
-
-  const unmatched = assignWithMeta(source, base as Record<string, any>, CANSHOU_META);
-  const appendix = formatUnmatchedFields(unmatched, ['arena_history', 'adjudicationEvents', 'current_state']);
-  if (appendix) {
-    base.researcherNotes = `${base.researcherNotes?.trim() || ''}\n${appendix}`.trim();
-  }
-
-  if (data?.arena_history) {
-    base.arena_history = JSON.parse(JSON.stringify(data.arena_history));
-  }
-  if (data?.adjudicationEvents) {
-    base.adjudicationEvents = JSON.parse(JSON.stringify(data.adjudicationEvents));
-  }
-  if (data?.current_state) {
-    (base as any).current_state = JSON.parse(JSON.stringify(data.current_state));
-  }
-  copyKnownMetadata(data, base as Record<string, unknown>, CREATOR_META_KEYS);
-
-  base.templateId = '魔法少女/心之花/残兽（问卷生成）';
-  return { data: CanshouSchema.parse(base), warnings: unmatched.length ? ['部分字段已附加到研究员注记。'] : [] };
+  const converted = convertSublimationCharacterCard(
+    data,
+    'canshou',
+    sourceTemplate === 'general-scenario' ? 'scenario' : sourceTemplate,
+  );
+  return { data: CanshouSchema.parse(converted.data), warnings: converted.warnings };
 }
 
 function convertToScenario(data: any, sourceTemplate: InferableTemplate): AssignResult<ScenarioData> {

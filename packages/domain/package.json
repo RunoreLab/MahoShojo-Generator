@@ -29,6 +29,11 @@
       "import": "./src/questionnaire.ts",
       "default": "./src/questionnaire.ts"
     },
+    "./sublimation": {
+      "types": "./src/sublimation.ts",
+      "import": "./src/sublimation.ts",
+      "default": "./src/sublimation.ts"
+    },
     "./arena-ranked-model-policy": {
       "types": "./src/arena-ranked-model-policy.ts",
       "import": "./src/arena-ranked-model-policy.ts",
