@@ -24,7 +24,7 @@ describe('Hosted authenticated user resolver', () => {
         bind: vi.fn().mockReturnThis(),
         all: vi.fn(async () => ({
           success: true,
-          results: [{ id: 7, username: 'activity-user', is_banned: null }],
+          results: [{ id: 7, username: 'activity-user', isBanned: null }],
           meta: {},
         })),
         run: vi.fn(),

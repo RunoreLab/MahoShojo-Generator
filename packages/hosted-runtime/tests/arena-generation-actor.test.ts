@@ -151,7 +151,7 @@ describe('Arena generation actor resolver', () => {
 
   it('preserves legacy Bearer and ignores an unverified user-id header', async () => {
     const signatures = await createSignatures();
-    const client = d1([{ id: 42, username: 'legacy-user', is_banned: null }]);
+    const client = d1([{ id: 42, username: 'legacy-user', isBanned: null }]);
     const resolveActor = createArenaGenerationActorResolver({
       env: { HONO_AUTH_MODE: 'bearer' },
       signatures,
@@ -178,7 +178,7 @@ describe('Arena generation actor resolver', () => {
       getD1Client: () => d1([{
         id: 42,
         username: 'banned-legacy-user',
-        is_banned: '2026-08-26T00:00:00.000Z',
+        isBanned: '2026-08-26T00:00:00.000Z',
       }]),
       createAnonymousId: () => 'must-not-be-issued',
     });
@@ -230,7 +230,7 @@ describe('Arena generation actor resolver', () => {
       getD1Client: () => d1([{
         id: 7,
         username: 'banned-activity-user',
-        is_banned: '2026-08-26T00:00:00.000Z',
+        isBanned: '2026-08-26T00:00:00.000Z',
       }]),
       createAnonymousId: () => 'must-not-be-issued',
     });
@@ -242,7 +242,7 @@ describe('Arena generation actor resolver', () => {
 
   it('Better Auth 明确 403 时终止 Legacy Bearer fallback', async () => {
     const signatures = await createSignatures();
-    const client = d1([{ id: 42, username: 'legacy-user', is_banned: null }]);
+    const client = d1([{ id: 42, username: 'legacy-user', isBanned: null }]);
     const resolveActor = createArenaGenerationActorResolver({
       env: {
         HONO_AUTH_MODE: 'hybrid',
@@ -268,7 +268,7 @@ describe('Arena generation actor resolver', () => {
 
   it('falls back to a valid legacy Bearer when a stale Better Auth cookie is rejected', async () => {
     const signatures = await createSignatures();
-    const client = d1([{ id: 42, username: 'legacy-user', is_banned: null }]);
+    const client = d1([{ id: 42, username: 'legacy-user', isBanned: null }]);
     const resolveActor = createArenaGenerationActorResolver({
       env: {
         HONO_AUTH_MODE: 'hybrid',

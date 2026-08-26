@@ -33,7 +33,7 @@ const readD1User = async (
   value: string | number,
 ): Promise<AuthenticationResolution> => {
   const result = await client.prepare(`
-SELECT id, username, is_banned
+SELECT id, username, is_banned AS isBanned
 FROM users
 WHERE ${where} = ?
 LIMIT 1
@@ -41,7 +41,8 @@ LIMIT 1
   const row = result.results[0];
   const userId = readUserId(row?.id);
   if (!row || !userId) return DENIED_AUTHENTICATION;
-  if (typeof row.is_banned === 'string' && row.is_banned.trim()) {
+  const bannedAt = row.isBanned;
+  if (typeof bannedAt === 'string' && bannedAt.trim()) {
     return DENIED_AUTHENTICATION;
   }
   return Object.freeze({ status: 'authenticated', userId });
