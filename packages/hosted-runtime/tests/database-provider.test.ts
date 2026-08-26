@@ -143,6 +143,29 @@ describe('Cloudflare D1 binding DatabaseProvider', () => {
     ]);
   });
 
+  it('binding 返回 malformed result 时不得伪装成功', async () => {
+    const provider = createCloudflareD1BindingDatabaseProvider(() => ({
+      withSession: () => ({
+        getBookmark: () => null,
+        prepare: () => {
+          const statement = {
+            bind: () => statement,
+            all: async () => ({}),
+            run: async () => ({}),
+          };
+          return statement;
+        },
+      }),
+    }));
+    const session = provider.openSession({ consistency: 'replica-ok' });
+
+    expect(await session?.client.prepare('SELECT 1').all()).toEqual({
+      success: false,
+      results: [],
+      meta: {},
+    });
+  });
+
   it('binding、withSession 或 session shape 缺失时 fail closed', () => {
     expect(createCloudflareD1BindingDatabaseProvider(() => null).openSession({
       consistency: 'primary',

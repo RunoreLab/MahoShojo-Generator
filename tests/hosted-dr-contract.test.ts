@@ -1,5 +1,13 @@
-import { existsSync, readFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
 
 type RouteInventory = {
@@ -121,5 +129,72 @@ describe('Hosted DR machine contract', () => {
     expect(existsSync(path.join(repositoryRoot, 'scripts/check-hosted-dr-contract.mjs'))).toBe(true);
     expect(rootPackage.scripts['check:hosted-dr']).toBe('node scripts/check-hosted-dr-contract.mjs');
     expect(rootPackage.scripts['workspace:verify']).toContain('pnpm run check:hosted-dr');
+  });
+
+  it.each([
+    {
+      label: 'route drift',
+      mutate: (manifest: HostedDrManifest) => {
+        manifest.capabilities.pop();
+      },
+      expected: '双向完全覆盖',
+    },
+    {
+      label: 'unsafe non-idempotent replay',
+      mutate: (manifest: HostedDrManifest) => {
+        const operation = manifest.capabilities.find(({ id }) => id === 'generate-free')
+          ?.operations[0];
+        if (operation) operation.replayPolicy = 'safe-read-only';
+      },
+      expected: '非幂等 operation 不得配置 safe replay',
+    },
+    {
+      label: 'embedded secret value',
+      mutate: (manifest: HostedDrManifest) => {
+        const secret = manifest.capabilities.find(({ requiredSecrets }) => (
+          requiredSecrets.length > 0
+        ))?.requiredSecrets[0] as { name: string; minLength?: number; value?: string } | undefined;
+        if (secret) secret.value = 'manifest-secret-canary';
+      },
+      expected: 'requiredSecrets 只能保存 name/minLength',
+    },
+    {
+      label: 'false production provisioning',
+      mutate: (manifest: HostedDrManifest) => {
+        manifest.controlPlane.provisioning = 'production';
+      },
+      expected: '缺少显式生产证据文件',
+    },
+    {
+      label: 'missing contract test',
+      mutate: (manifest: HostedDrManifest) => {
+        manifest.capabilities[0]!.contractTests = ['tests/not-present.test.ts'];
+      },
+      expected: 'contract test 不存在',
+    },
+  ])('validator 对 $label fail closed', ({ mutate, expected }) => {
+    const temporaryRoot = mkdtempSync(path.join(os.tmpdir(), 'hosted-dr-contract-'));
+    try {
+      const manifest = readJson<HostedDrManifest>('config/hosted-dr-capabilities.json');
+      mutate(manifest);
+      const manifestPath = path.join(temporaryRoot, 'manifest.json');
+      writeFileSync(manifestPath, `${JSON.stringify(manifest)}\n`, 'utf8');
+
+      const result = spawnSync(process.execPath, [
+        path.join(repositoryRoot, 'scripts/check-hosted-dr-contract.mjs'),
+        '--manifest',
+        manifestPath,
+      ], {
+        cwd: repositoryRoot,
+        encoding: 'utf8',
+      });
+      const output = `${result.stdout}\n${result.stderr}`;
+
+      expect(result.status).toBe(1);
+      expect(output).toContain(expected);
+      expect(output).not.toContain('manifest-secret-canary');
+    } finally {
+      rmSync(temporaryRoot, { recursive: true, force: true });
+    }
   });
 });

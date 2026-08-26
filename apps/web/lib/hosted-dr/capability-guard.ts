@@ -1,5 +1,8 @@
 import 'server-only';
-import type { DatabaseProvider } from '@mahoshojo/hosted-runtime/database-provider';
+import type {
+  DatabaseProvider,
+  DatabaseSession,
+} from '@mahoshojo/hosted-runtime/database-provider';
 import hostedDrManifest from '../../../../config/hosted-dr-capabilities.json';
 
 import { cloudflareDrDatabaseProvider } from '@/lib/hosted-dr/database-provider';
@@ -122,7 +125,12 @@ export const withNextDrCapability = <Args extends unknown[]>(
     logUnavailable({ capabilityId, category: 'database-provider' });
     return unavailableResponse();
   }
-  const session = provider.openSession({ consistency: capability.consistency });
+  let session: DatabaseSession | null;
+  try {
+    session = provider.openSession({ consistency: capability.consistency });
+  } catch {
+    session = null;
+  }
   if (!session) {
     logUnavailable({ capabilityId, category: 'database-provider' });
     return unavailableResponse();

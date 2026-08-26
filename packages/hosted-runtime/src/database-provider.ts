@@ -77,7 +77,7 @@ const normalizeD1Result = (value: unknown): D1LikeStatementResult => {
   const record = isObject(value) ? value : {};
   const error = typeof record.error === 'string' ? record.error : undefined;
   return {
-    success: record.success !== false,
+    success: record.success === true,
     results: asRows(record.results),
     meta: isObject(record.meta) ? record.meta : {},
     ...(error ? { error } : {}),

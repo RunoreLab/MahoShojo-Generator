@@ -15,6 +15,7 @@ import {
 const REDIS_RATE_LIMIT_BYPASS_PATHS = new Set([
   '/api/health/live',
   '/api/health/ready',
+  '/api/hosted/dr-readiness',
 ]);
 
 const matchesWildcardOrigin = (origin: string, rule: string): boolean => {

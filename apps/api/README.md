@@ -5,7 +5,7 @@
 - 通过 `config/hono-api-routes.json` 的 `sharedRouteIds` 挂载经裁决保留的生成类 API，并用 `exitedRouteIds` 冻结继续由 Next 承载的退出清单；
 - shared route 由 Hono adapter 与 Next Route Adapter 调用同一 `@mahoshojo/hosted-api` application service；
 - 为旧 handler 提供 Node 版 `waitUntil`；
-- D1 访问优先经过内部 Gateway Worker，保留 Cloudflare 管理 API 作为迁移回退；
+- D1 访问经 `hono-d1-primary` DatabaseProvider 使用内部 Gateway Worker，并保留 Cloudflare 管理 API 作为 Hono 迁移回退；该 provider 始终给出 primary 强语义，不伪造 Cloudflare D1 Session bookmark；
 - Redis 提供跨实例 API 限流；
 - 生产 Hono 默认使用 `HONO_AUTH_MODE=bearer`，受保护端点只接受用户 `authkey`；
 - `/health/live` 和 `/health/ready` 分离进程存活与依赖就绪状态；
@@ -31,10 +31,12 @@ D1 claim 与确定性 R2 snapshot 兜底，只有显式 cancel 才中止 generat
 控制面 shared route。G25H-1 又将 `arena/generate`、`generate-battle-story` 与
 `arena/session/generate-next` 归位为 Hono primary + Next DR shared companion service。G25H-2 继续将
 Details 与 Sublimation 的 generate/stream 四路归位到同一 shared service/runtime；Next/OpenNext 只保留带
-`next-dr` lifecycle observation 的薄 adapter，Hono 不通过公开 Web URL 回取 preset 或执行 AI self-hop。因此当前 registry
-为 22 条 shared route，同时仍有 6 条 exited capability 对应的 Next 公开 route 保持原有实现、wire、鉴权和数据语义，未来若要重新进入 Hono，必须先形成 shared seam 和
+`next-dr` lifecycle observation 的薄 adapter，Hono 不通过公开 Web URL 回取 preset 或执行 AI self-hop。G25E-1
+增加 `GET|HEAD /api/hosted/dr-readiness` 代表性 safe-read 双入口；Hono adapter 使用同一 application contract 与
+`hono-d1-primary` provider，固定执行 `SELECT 1 AS ok`，并绕过 Redis 限速依赖以免把 Redis 故障伪装成 D1 capability
+结果。因此当前 registry 为 23 条 shared route，同时仍有 6 条 exited capability 对应的 Next 公开 route 保持原有实现、wire、鉴权和数据语义，未来若要重新进入 Hono，必须先形成 shared seam 和
 副作用/replay 证据。生成器在 `legacyRouteIds` 非空时 fail closed，生成的 registry 也不再拥有动态导入
-legacy Next handler 的 adapter 类型或代码路径。当前 registry 为 `22 shared-service / 6 exited / 0 legacy-next`；
+legacy Next handler 的 adapter 类型或代码路径。当前 registry 为 `23 shared-service / 6 exited / 0 legacy-next`；
 Hono source、manifest、测试、生成器和 bundle 构建已由 `apps/api` 独占。生成后的实际 registry 为
 `apps/api/src/generated/routes.ts`，不得手工修改。
 
@@ -79,7 +81,8 @@ Hono 执行范围只包括 machine-readable 清单中明确保留的 API；具�
 
 ## 限速
 
-除 `/api/health/live` 与 `/api/health/ready` 由各自 handler 独立表达 liveness/readiness 外，Hono 对
+除 `/api/health/live`、`/api/health/ready` 与代表性 `/api/hosted/dr-readiness` 由各自 handler 独立表达
+liveness/dependency/capability readiness 外，Hono 对
 其余 `/api/*` 使用 Redis 固定窗口限速：每个客户端 IP 每 60 秒 600 次。客户端 IP 按
 `CF-Connecting-IP`、`X-Forwarded-For` 首项、`X-Real-IP` 的顺序解析；生产反向代理必须清理外部传入的
 这些请求头。无法识别 IP 的请求共享 `unknown` 身份。Redis 不可用且 `REDIS_REQUIRED=false` 时中间件会
@@ -139,11 +142,15 @@ Hono 服务配置相同的 `D1_GATEWAY_HMAC_SECRET`。生产建议再用 Cloudfl
 ## 前端直连开关
 
 前端和服务端内部调用是否将白名单内的生成 API 请求到 Hono，由 `apps/web/config/hono-api.ts` 中的
-`honoApiConfig.enabled` 控制：`true` 使用稳定逻辑入口 `https://api.mahoshojo.colanns.me`，`false` 继续使用同源
+`honoApiConfig.enabled` 控制：`true` 使用 `config/hosted-dr-capabilities.json` 的 `stableOrigin`，`false` 继续使用同源
 Next.js/Cloudflare 路由。`homura.colanns.me` 只允许作为物理 Hono deploy/health origin，不得重新编码进客户端。
 稳定入口的控制面必须按 active-passive 选择 Hono primary 或 Next/OpenNext DR，且必须关闭“连接失败后透明跨 runtime
 重放 POST”的能力；generation 已有稳定 request ID 也不等于允许控制面盲目重试。该开关只影响
 `config/hono-api-routes.json` 中的路由，Tachie 始终使用原路由。
+
+`config/hosted-dr-capabilities.json` 是 replay/secret/provider/contract/control-plane 的机器事实；当前
+`provisioning=not-provisioned`，只建立稳定入口 seam，不表示 Cloudflare LB/DNS 已启用。`pnpm check:hosted-dr`
+会阻断 route drift、不安全 replay、secret 值、缺 adapter/test/guard 与伪 production 状态。
 
 ## 构建与容器运行
 

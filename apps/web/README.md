@@ -10,7 +10,8 @@
 - environment contract：`env.example` 与 `.dev.vars`；真实 secret 不进入仓库；
 - tests/operations：`tests/` 与 app-specific `scripts/`。
 
-跨 runtime 的 Hono route inventory 仍由仓库根 `config/hono-api-routes.json` 持有；D1 migration history 仍由根 `drizzle/` 持有。Web 不导入其他 app source。
+跨 runtime 的 Hono route inventory 仍由仓库根 `config/hono-api-routes.json` 持有，replay/secret/provider/control-plane
+契约由 `config/hosted-dr-capabilities.json` 持有；D1 migration history 仍由根 `drizzle/` 持有。Web 不导入其他 app source。
 
 ## Local lifecycle
 
@@ -26,11 +27,19 @@ pnpm --filter @mahoshojo/web build:cf
 
 ## Readiness
 
-Web 应用不新增一个会绕过真实页面、Route Handler 或 DR capability 检查的通用“假健康”接口。G25D 的
+Web 应用不提供会绕过真实 Route Handler 或 DR capability 检查的通用“假健康”接口。G25E-1 新增的
+`GET|HEAD /api/hosted/dr-readiness` 是 manifest 中明确登记的代表性 safe-read capability：它与 Hono 共用
+`@mahoshojo/hosted-api` contract，只通过 native `DB.withSession()` 执行固定查询，缺 binding/session/query 时固定
+503，且不返回 bookmark、SQL、URL 或 secret；它不代表全部业务 readiness。G25D 的
 发布前 readiness 定义为：`check:wrangler:d1`、全量 test/lint、Next production build、OpenNext Cloudflare
 build 与 `wrangler deploy --dry-run --env preview` 全部通过；运行时的 capability readiness 继续由各个
-server-owned adapter fail closed。Hosted 主执行面、DR 选择和综合容量 readiness 仍由 `apps/api` 与后续
-G25E 控制面负责，G25D 不启用自动 failover。
+server-owned adapter fail closed。所有 manifest shared Next route 在 production 进入 service 前经过统一 guard；
+`fail-closed` capability、缺必要 secret 或缺 native D1 Sessions 时不调用 handler，也不回退 Hono HTTP D1 路径。
+Hosted 主执行面、实际 DR 选择和综合容量 readiness 仍由外部控制面负责；当前 manifest 明确为
+`not-provisioned`，未启用自动 failover。
+
+客户端 `honoApiConfig.origin` 只读取 manifest 的 `stableOrigin`，不读取或选择物理 primary/DR origin，也不在
+Hono 失败后自行重放请求。实际 LB/DNS/Worker 产品配置与故障演练属于 G25E-2/后续生产授权范围。
 
 ## Deploy 与 rollback
 

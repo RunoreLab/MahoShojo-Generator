@@ -210,6 +210,25 @@ describe('Hono server app', () => {
     expect(redis.consumeFixedWindow).not.toHaveBeenCalled();
   });
 
+  it('Hosted DR safe-read 探针不依赖 Redis 限速状态', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const redis = createRedisStub();
+    redis.consumeFixedWindow = vi.fn(async () => {
+      throw new Error('redis unavailable');
+    });
+    const app = createHonoApp({ ...config, redisRequired: true }, redis);
+
+    const response = await app.request('/api/hosted/dr-readiness');
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      ok: false,
+      code: 'HOSTED_DR_CAPABILITY_UNAVAILABLE',
+      contractVersion: 'g25e1-v1',
+    });
+    expect(redis.consumeFixedWindow).not.toHaveBeenCalled();
+  });
+
   it('全局 API 限速按客户端 IP 计数', async () => {
     const redis = createRedisStub();
     let capturedIdentity: string | null = null;

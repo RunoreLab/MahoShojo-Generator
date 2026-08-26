@@ -84,6 +84,30 @@ describe('Next production DR capability guard', () => {
     });
   });
 
+  it('binding/session 初始化抛错时仍固定 fail closed', async () => {
+    const handler = vi.fn(async () => new Response('should-not-run'));
+    const guarded = withNextDrCapability('generate-free', handler, {
+      ...productionOptions,
+      provider: {
+        id: 'cloudflare-d1-binding',
+        openSession: () => {
+          throw new Error('database-binding-secret-canary');
+        },
+      },
+    });
+
+    const response = await guarded(new Request(
+      'https://next.test/api/generate-free',
+      { method: 'POST' },
+    ));
+
+    expect(response.status).toBe(503);
+    expect(handler).not.toHaveBeenCalled();
+    expect(JSON.stringify(productionOptions.logUnavailable.mock.calls)).not.toContain(
+      'database-binding-secret-canary',
+    );
+  });
+
   it('ready capability 原样透传 handler response，不实现 retry/fallback', async () => {
     const original = new Response('original-body', {
       status: 202,

@@ -38,6 +38,7 @@
     "check:naming:workspace": "node scripts/check-naming-conventions.mjs --workspace-only",
     "check:workspace:boundaries": "node scripts/check-workspace-boundaries.mjs",
     "check:hosted-dr": "node scripts/check-hosted-dr-contract.mjs",
+    "generate:hosted-dr-client": "node scripts/generate-hosted-dr-client-config.mjs",
     "test:repo": "vitest run --config vitest.config.ts",
     "lint:repo": "eslint scripts tests drizzle.config.ts --config eslint.config.mjs",
     "workspace:test": "pnpm --filter \"./packages/*\" --filter \"./apps/*\" --if-present run test",

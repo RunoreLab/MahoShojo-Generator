@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
+import { renderHostedDrClientConfig } from './hosted-dr-client-config.mjs';
 
 const repositoryRoot = path.resolve(import.meta.dirname, '..');
 const failures = [];
@@ -26,8 +27,23 @@ const unique = (values) => new Set(values).size === values.length;
 const sorted = (values) => [...values].sort((left, right) => left.localeCompare(right));
 const sameValues = (left, right) => JSON.stringify(sorted(left)) === JSON.stringify(sorted(right));
 
-const inventory = readJson('config/hono-api-routes.json');
-const manifest = readJson('config/hosted-dr-capabilities.json');
+const argumentValue = (name, fallback) => {
+  const index = process.argv.indexOf(name);
+  if (index < 0) return fallback;
+  const value = process.argv[index + 1];
+  if (!value) throw new Error(`${name} 缺少路径参数`);
+  return path.isAbsolute(value) ? value : path.join(repositoryRoot, value);
+};
+const readInputJson = (filePath) => JSON.parse(readFileSync(filePath, 'utf8'));
+
+const inventory = readInputJson(argumentValue(
+  '--inventory',
+  path.join(repositoryRoot, 'config/hono-api-routes.json'),
+));
+const manifest = readInputJson(argumentValue(
+  '--manifest',
+  path.join(repositoryRoot, 'config/hosted-dr-capabilities.json'),
+));
 
 if (manifest.schemaVersion !== 1) {
   fail('schemaVersion 必须为 1');
@@ -248,6 +264,31 @@ const clientConfig = readFileSync(
   path.join(repositoryRoot, 'apps/web/config/hono-api.ts'),
   'utf8',
 );
+const clientProjectionPath = path.join(
+  repositoryRoot,
+  'apps/web/config/hosted-dr-client.generated.ts',
+);
+if (!existsSync(clientProjectionPath)) {
+  fail('客户端 stable-origin 投影不存在');
+} else {
+  const clientProjection = readFileSync(clientProjectionPath, 'utf8');
+  const expectedProjection = renderHostedDrClientConfig(controlPlane.stableOrigin);
+  if (clientProjection !== expectedProjection) {
+    fail('客户端 stable-origin 投影与 DR manifest drift；运行 pnpm generate:hosted-dr-client');
+  }
+  if (
+    clientProjection.includes(controlPlane.primaryOrigin)
+    || clientProjection.includes(controlPlane.drOrigin)
+  ) {
+    fail('客户端投影不得包含物理 primary/DR origin');
+  }
+}
+if (
+  !clientConfig.includes('hosted-dr-client.generated')
+  || clientConfig.includes('hosted-dr-capabilities.json')
+) {
+  fail('客户端配置必须只消费生成后的 stable-origin 安全投影');
+}
 const clientLiteralOrigins = [...clientConfig.matchAll(/['"](https:\/\/[^'"]+)['"]/gu)]
   .map((match) => match[1]);
 for (const origin of clientLiteralOrigins) {

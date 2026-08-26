@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 
 vi.mock('@/lib/auth', () => ({
@@ -16,6 +18,7 @@ import {
   resolveGenerationApiUrl,
 } from '@/lib/hono-api-client';
 import { honoApiConfig } from '@/config/hono-api';
+import hostedDrManifest from '../../../config/hosted-dr-capabilities.json';
 import honoApiRoutes from '../../../config/hono-api-routes.json';
 
 const originalEnabled = honoApiConfig.enabled;
@@ -26,6 +29,25 @@ afterEach(() => {
 });
 
 describe('Hono API 客户端', () => {
+  test('stable origin 只从 Hosted DR manifest 读取，客户端配置不编码物理 origin', () => {
+    const source = readFileSync(path.join(process.cwd(), 'config/hono-api.ts'), 'utf8');
+    const generatedSource = readFileSync(
+      path.join(process.cwd(), 'config/hosted-dr-client.generated.ts'),
+      'utf8',
+    );
+
+    expect(honoApiConfig.origin).toBe(hostedDrManifest.controlPlane.stableOrigin);
+    expect(source).toContain('hosted-dr-client.generated');
+    expect(source).not.toContain('hosted-dr-capabilities.json');
+    expect(generatedSource).toContain(hostedDrManifest.controlPlane.stableOrigin);
+    for (const physicalOrigin of [
+      hostedDrManifest.controlPlane.primaryOrigin,
+      hostedDrManifest.controlPlane.drOrigin,
+    ]) {
+      expect(`${source}\n${generatedSource}`).not.toContain(physicalOrigin);
+    }
+  });
+
   test('只匹配迁移白名单，且 Tachie 始终不匹配', () => {
     expect(isHonoApiPath('/api/generate-free?format=sse')).toBe(true);
     expect(isHonoApiPath('/api/arena/generate-stream?format=sse')).toBe(true);
