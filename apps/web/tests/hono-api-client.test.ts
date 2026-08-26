@@ -17,7 +17,7 @@ import {
   isHonoApiPath,
   resolveGenerationApiUrl,
 } from '@/lib/hono-api-client';
-import { honoApiConfig } from '@/config/hono-api';
+import { honoApiConfig, resolveHostedApiOrigin } from '@/config/hono-api';
 import hostedDrManifest from '../../../config/hosted-dr-capabilities.json';
 import honoApiRoutes from '../../../config/hono-api-routes.json';
 
@@ -41,12 +41,28 @@ describe('Hono API 客户端', () => {
     expect(source).toContain('NEXT_PUBLIC_HONO_API_ORIGIN');
     expect(source).not.toContain('hosted-dr-capabilities.json');
     expect(generatedSource).toContain(hostedDrManifest.controlPlane.stableOrigin);
+    expect(generatedSource).toContain(hostedDrManifest.controlPlane.previewOrigin);
     for (const physicalOrigin of [
       hostedDrManifest.controlPlane.primaryOrigin,
       hostedDrManifest.controlPlane.drOrigin,
     ]) {
       expect(`${source}\n${generatedSource}`).not.toContain(physicalOrigin);
     }
+  });
+
+  test('preview origin 必须是 manifest 声明的环境入口，生产拒绝任意 env 覆盖', () => {
+    expect(resolveHostedApiOrigin(undefined, 'production'))
+      .toBe(hostedDrManifest.controlPlane.stableOrigin);
+    expect(resolveHostedApiOrigin(
+      hostedDrManifest.controlPlane.previewOrigin,
+      'production',
+    )).toBe(hostedDrManifest.controlPlane.previewOrigin);
+    expect(() => resolveHostedApiOrigin('https://untrusted.example.test', 'production'))
+      .toThrow(/NEXT_PUBLIC_HONO_API_ORIGIN/);
+    expect(resolveHostedApiOrigin('http://127.0.0.1:8787', 'development'))
+      .toBe('http://127.0.0.1:8787');
+    expect(() => resolveHostedApiOrigin('https://homura.colanns.me', 'production'))
+      .toThrow(/NEXT_PUBLIC_HONO_API_ORIGIN/);
   });
 
   test('只匹配迁移白名单，且 Tachie 始终不匹配', () => {

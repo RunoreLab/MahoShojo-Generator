@@ -41,8 +41,10 @@ localhost/loopback 或非法 origin 均 fail closed，OPTIONS 与实际响应复
 Hosted 主执行面、实际 DR 选择和综合容量 readiness 仍由外部控制面负责；当前 manifest 明确为
 `not-provisioned`，未启用自动 failover。
 
-客户端 `honoApiConfig.origin` 只读取 manifest 的 `stableOrigin`，不读取或选择物理 primary/DR origin，也不在
-Hono 失败后自行重放请求。实际 LB/DNS/Worker 产品配置与故障演练属于 G25E-2/后续生产授权范围。
+生产/default 客户端的 `honoApiConfig.origin` 使用 manifest 的 `stableOrigin`；preview build 只能显式使用同一
+manifest 声明的 `previewOrigin`。两者都不读取或选择物理 primary/DR origin，也不在 Hono 失败后自行重放请求；
+任意其他 production build-time origin 都会 fail closed，非 production 本地开发只允许 loopback origin。preview
+origin 是环境隔离的构建入口，不是生产 failover。实际 LB/DNS/Worker 产品配置与故障演练属于 G25E-2/后续生产授权范围。
 
 ## Deploy 与 rollback
 

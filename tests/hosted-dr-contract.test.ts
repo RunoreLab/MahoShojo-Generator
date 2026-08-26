@@ -21,6 +21,7 @@ type HostedDrManifest = {
   contractVersion: string;
   controlPlane: {
     stableOrigin: string;
+    previewOrigin: string;
     primaryOrigin: string;
     drOrigin: string;
     mode: string;
@@ -91,13 +92,20 @@ describe('Hosted DR machine contract', () => {
 
   it('分离稳定与物理 HTTPS origin，且不伪报 production provisioning', () => {
     const manifest = readJson<HostedDrManifest>('config/hosted-dr-capabilities.json');
-    const { stableOrigin, primaryOrigin, drOrigin, mode, provisioning } = manifest.controlPlane;
+    const {
+      stableOrigin,
+      previewOrigin,
+      primaryOrigin,
+      drOrigin,
+      mode,
+      provisioning,
+    } = manifest.controlPlane;
 
     expect(mode).toBe('active-passive');
     expect(provisioning).toBe('not-provisioned');
     expect(manifest.controlPlane.corsOriginsEnvironment).toBe('HONO_CORS_ORIGINS');
-    expect(new Set([stableOrigin, primaryOrigin, drOrigin])).toHaveLength(3);
-    for (const origin of [stableOrigin, primaryOrigin, drOrigin]) {
+    expect(new Set([stableOrigin, previewOrigin, primaryOrigin, drOrigin])).toHaveLength(4);
+    for (const origin of [stableOrigin, previewOrigin, primaryOrigin, drOrigin]) {
       const parsed = new URL(origin);
       expect(parsed.protocol).toBe('https:');
       expect(parsed.pathname).toBe('/');

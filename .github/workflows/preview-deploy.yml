@@ -16,6 +16,7 @@ permissions:
 jobs:
   verify-and-build-hono:
     name: Verify and build Hono preview
+    if: github.ref == 'refs/heads/preview'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -62,6 +63,7 @@ jobs:
 
   deploy-hono-preview:
     name: Deploy Hono preview
+    if: github.ref == 'refs/heads/preview'
     needs: verify-and-build-hono
     runs-on: ubuntu-latest
     environment: hono-preview
@@ -116,6 +118,7 @@ jobs:
 
   deploy-cloudflare-preview:
     name: Deploy Cloudflare preview
+    if: github.ref == 'refs/heads/preview'
     needs: deploy-hono-preview
     runs-on: ubuntu-latest
     environment: preview

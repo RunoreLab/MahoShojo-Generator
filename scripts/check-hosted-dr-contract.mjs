@@ -201,6 +201,7 @@ if (
 
 const origins = [
   controlPlane.stableOrigin,
+  controlPlane.previewOrigin,
   controlPlane.primaryOrigin,
   controlPlane.drOrigin,
 ];
@@ -425,7 +426,10 @@ if (!existsSync(clientProjectionPath)) {
   fail('客户端 stable-origin 投影不存在');
 } else {
   const clientProjection = readFileSync(clientProjectionPath, 'utf8');
-  const expectedProjection = renderHostedDrClientConfig(controlPlane.stableOrigin);
+  const expectedProjection = renderHostedDrClientConfig(
+    controlPlane.stableOrigin,
+    controlPlane.previewOrigin,
+  );
   if (clientProjection !== expectedProjection) {
     fail('客户端 stable-origin 投影与 DR manifest drift；运行 pnpm generate:hosted-dr-client');
   }

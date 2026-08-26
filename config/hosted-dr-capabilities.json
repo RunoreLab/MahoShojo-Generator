@@ -3,6 +3,7 @@
   "contractVersion": "g25e1-v1",
   "controlPlane": {
     "stableOrigin": "https://api.mahoshojo.colanns.me",
+    "previewOrigin": "https://homura-preview.colanns.me",
     "primaryOrigin": "https://homura.colanns.me",
     "drOrigin": "https://mahoshojo.colanns.me",
     "mode": "active-passive",
