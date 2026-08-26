@@ -15,6 +15,8 @@ const RUNTIME_SUBPATHS = [
   './generate-canshou-runtime',
   './generate-canshou-stream-runtime',
   './generate-magical-girl-runtime',
+  './generate-magical-girl-details-runtime',
+  './generate-magical-girl-details-stream-runtime',
   './generate-game-card-runtime',
 ];
 

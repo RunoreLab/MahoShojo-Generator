@@ -31,6 +31,8 @@ const hostedServiceWrappers = [
   'apps/web/lib/hosted-api/generate-game-card.ts',
   'apps/web/lib/hosted-api/generate-creator.ts',
   'apps/web/lib/hosted-api/generate-creator-stream.ts',
+  'apps/web/lib/hosted-api/generate-magical-girl-details.ts',
+  'apps/web/lib/hosted-api/generate-magical-girl-details-stream.ts',
 ] as const;
 
 const protectivePortWrappers = [

@@ -9,6 +9,8 @@ import {
   defaultGenerateFreeStreamService as packageFreeStream,
   defaultGenerateGameCardService as packageGameCard,
   defaultGenerateMagicalGirlService as packageMagicalGirl,
+  defaultGenerateMagicalGirlDetailsService as packageMagicalGirlDetails,
+  defaultGenerateMagicalGirlDetailsStreamService as packageMagicalGirlDetailsStream,
   defaultGenerateScenarioService as packageScenario,
   defaultGenerateScenarioStreamService as packageScenarioStream,
 } from '@mahoshojo/hosted-runtime/node-runtime/default-services';
@@ -20,10 +22,12 @@ import { defaultGenerateFreeService } from '@/lib/hosted-api/generate-free';
 import { defaultGenerateFreeStreamService } from '@/lib/hosted-api/generate-free-stream';
 import { defaultGenerateGameCardService } from '@/lib/hosted-api/generate-game-card';
 import { defaultGenerateMagicalGirlService } from '@/lib/hosted-api/generate-magical-girl';
+import { defaultGenerateMagicalGirlDetailsService } from '@/lib/hosted-api/generate-magical-girl-details';
+import { defaultGenerateMagicalGirlDetailsStreamService } from '@/lib/hosted-api/generate-magical-girl-details-stream';
 import { defaultGenerateScenarioService } from '@/lib/hosted-api/generate-scenario';
 import { defaultGenerateScenarioStreamService } from '@/lib/hosted-api/generate-scenario-stream';
 
-describe('10 retained Hosted services identity', () => {
+describe('12 retained / staged Hosted services identity', () => {
   test('legacy Next compatibility 与 package Node composition 复用同一实例', () => {
     expect([
       defaultGenerateFreeService,
@@ -36,6 +40,8 @@ describe('10 retained Hosted services identity', () => {
       defaultGenerateGameCardService,
       defaultGenerateCreatorService,
       defaultGenerateCreatorStreamService,
+      defaultGenerateMagicalGirlDetailsService,
+      defaultGenerateMagicalGirlDetailsStreamService,
     ]).toEqual([
       packageFree,
       packageFreeStream,
@@ -47,6 +53,8 @@ describe('10 retained Hosted services identity', () => {
       packageGameCard,
       packageCreator,
       packageCreatorStream,
+      packageMagicalGirlDetails,
+      packageMagicalGirlDetailsStream,
     ]);
   });
 });

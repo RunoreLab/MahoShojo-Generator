@@ -209,6 +209,16 @@
       "import": "./src/generate-magical-girl-runtime.ts",
       "default": "./src/generate-magical-girl-runtime.ts"
     },
+    "./generate-magical-girl-details-runtime": {
+      "types": "./src/generate-magical-girl-details-runtime.ts",
+      "import": "./src/generate-magical-girl-details-runtime.ts",
+      "default": "./src/generate-magical-girl-details-runtime.ts"
+    },
+    "./generate-magical-girl-details-stream-runtime": {
+      "types": "./src/generate-magical-girl-details-stream-runtime.ts",
+      "import": "./src/generate-magical-girl-details-stream-runtime.ts",
+      "default": "./src/generate-magical-girl-details-stream-runtime.ts"
+    },
     "./generate-game-card-runtime": {
       "types": "./src/generate-game-card-runtime.ts",
       "import": "./src/generate-game-card-runtime.ts",

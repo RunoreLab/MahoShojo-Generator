@@ -1,6 +1,7 @@
 import type { GenerateCanshouService } from '@mahoshojo/hosted-api/generate-canshou';
 import type { GenerateCreatorService } from '@mahoshojo/hosted-api/generate-creator';
 import type { GenerateFreeService } from '@mahoshojo/hosted-api/generate-free';
+import type { GenerateMagicalGirlDetailsService } from '@mahoshojo/hosted-api/generate-magical-girl-details';
 import type { GenerateScenarioService } from '@mahoshojo/hosted-api/generate-scenario';
 
 import { resolveBuildRuleRuntimeResultsFromRequest } from '../creator/build-rule-request';
@@ -41,6 +42,14 @@ import {
   type GenerateMagicalGirlRuntimeDependencies,
   type MainColor,
 } from '../generate-magical-girl-runtime';
+import {
+  createGenerateMagicalGirlDetailsRuntime,
+  type GenerateMagicalGirlDetailsRuntimeDependencies,
+} from '../generate-magical-girl-details-runtime';
+import {
+  createGenerateMagicalGirlDetailsStreamRuntime,
+  type GenerateMagicalGirlDetailsStreamRuntimeDependencies,
+} from '../generate-magical-girl-details-stream-runtime';
 import {
   createGenerateScenarioRuntime,
   type GenerateScenarioRuntimeDependencies,
@@ -99,6 +108,8 @@ export type NodeHostedServices = Readonly<{
   generateScenarioStreamService: GenerateScenarioService;
   generateCanshouService: GenerateCanshouService;
   generateCanshouStreamService: GenerateCanshouService;
+  generateMagicalGirlDetailsService: GenerateMagicalGirlDetailsService;
+  generateMagicalGirlDetailsStreamService: GenerateMagicalGirlDetailsService;
   generateMagicalGirlService: ReturnType<typeof createGenerateMagicalGirlRuntime>['service'];
   generateMagicalGirlWithAI: ReturnType<
     typeof createGenerateMagicalGirlRuntime
@@ -348,6 +359,41 @@ export const createNodeHostedServices = (
     logError: logError('流式生成残兽通用角色卡失败'),
   }).service;
 
+  const generateMagicalGirlDetailsService = createGenerateMagicalGirlDetailsRuntime({
+    ...providerPorts,
+    presetIndex: QUESTIONNAIRE_PRESET_INDEX,
+    loadPreset,
+    loadDataCard: (id) => dataPorts.getDataCardById(id, false),
+    getRandomFlowers,
+    checkRateLimit,
+    enforceSafety,
+    generateWithAI: asStructuredPort<
+      GenerateMagicalGirlDetailsRuntimeDependencies['generateWithAI']
+    >(structuredAi.generateWithAI),
+    sign,
+    recordActivity,
+    buildResponse,
+    logInfo,
+    logWarn,
+    logError: logError('生成魔法少女详细信息失败'),
+  }).service;
+
+  const generateMagicalGirlDetailsStreamService = createGenerateMagicalGirlDetailsStreamRuntime({
+    ...providerPorts,
+    getRandomFlowers,
+    checkRateLimit,
+    enforceSafety,
+    shouldUseReasoningSse: shouldUseClientSse,
+    createReasoningSseBridge,
+    generateWithStreamAI: asStreamPort<
+      GenerateMagicalGirlDetailsStreamRuntimeDependencies['generateWithStreamAI']
+    >(streamAi.generateWithStreamAI),
+    recordActivity,
+    logInfo,
+    logWarn,
+    logError: logError('流式生成魔法少女档案失败'),
+  }).service;
+
   const magicalGirlRuntime = createGenerateMagicalGirlRuntime({
     checkRateLimit,
     enforceSafety: ({ request: _request, name, language }) => contentSafety.enforceTextSafety({
@@ -443,6 +489,8 @@ export const createNodeHostedServices = (
     generateScenarioStreamService,
     generateCanshouService,
     generateCanshouStreamService,
+    generateMagicalGirlDetailsService,
+    generateMagicalGirlDetailsStreamService,
     generateMagicalGirlService: magicalGirlRuntime.service,
     generateMagicalGirlWithAI: magicalGirlRuntime.generateMagicalGirlWithAI,
     generateGameCardService,
@@ -472,6 +520,12 @@ export const createDefaultGenerateCanshouService = createDefaultService(
 export const createDefaultGenerateCanshouStreamService = createDefaultService(
   'generateCanshouStreamService',
 );
+export const createDefaultGenerateMagicalGirlDetailsService = createDefaultService(
+  'generateMagicalGirlDetailsService',
+);
+export const createDefaultGenerateMagicalGirlDetailsStreamService = createDefaultService(
+  'generateMagicalGirlDetailsStreamService',
+);
 export const createDefaultGenerateCreatorService = createDefaultService('generateCreatorService');
 export const createDefaultGenerateCreatorStreamService = createDefaultService(
   'generateCreatorStreamService',
@@ -487,6 +541,10 @@ export const defaultGenerateScenarioService = defaultServices.generateScenarioSe
 export const defaultGenerateScenarioStreamService = defaultServices.generateScenarioStreamService;
 export const defaultGenerateCanshouService = defaultServices.generateCanshouService;
 export const defaultGenerateCanshouStreamService = defaultServices.generateCanshouStreamService;
+export const defaultGenerateMagicalGirlDetailsService =
+  defaultServices.generateMagicalGirlDetailsService;
+export const defaultGenerateMagicalGirlDetailsStreamService =
+  defaultServices.generateMagicalGirlDetailsStreamService;
 export const defaultGenerateMagicalGirlService = defaultServices.generateMagicalGirlService;
 export const generateMagicalGirlWithAI = defaultServices.generateMagicalGirlWithAI;
 export const defaultGenerateGameCardService = defaultServices.generateGameCardService;
