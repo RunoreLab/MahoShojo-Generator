@@ -43,6 +43,7 @@ const hostedServiceWrappers = [
 ] as const;
 
 const protectivePortWrappers = [
+  'apps/web/lib/hosted-api/observed-next-dr.ts',
   'apps/web/lib/ai/constants.ts',
   'apps/web/lib/ai/public-rate-limit.ts',
   'apps/web/lib/auth/activity-token.ts',
@@ -52,6 +53,13 @@ const protectivePortWrappers = [
   'apps/web/lib/card-forge/content-safety.ts',
   'apps/web/lib/signature.ts',
   'apps/web/lib/db/d1-http-client.ts',
+] as const;
+
+const g25h2RouteHandlers = [
+  'apps/web/app/api/generate-magical-girl-details/handler.ts',
+  'apps/web/app/api/generate-magical-girl-details-stream/handler.ts',
+  'apps/web/app/api/generate-sublimation/handler.ts',
+  'apps/web/app/api/generate-sublimation-stream/handler.ts',
 ] as const;
 
 const assetMirrors = [
@@ -79,6 +87,15 @@ describe('apps/web 与 hosted-runtime compatibility 边界', () => {
       expect(source).toContain('@mahoshojo/hosted-runtime/node-runtime/default-services');
       expect(source).toContain('./configure-node-runtime');
       expect(source.split(/\r?\n/).length).toBeLessThanOrEqual(18);
+    }
+  });
+
+  test('G25H-2 Route Handler 只保留 Next DR service adapter', () => {
+    for (const handler of g25h2RouteHandlers) {
+      const source = read(handler);
+      expect(source).toContain('@/lib/hosted-api/');
+      expect(source).not.toMatch(/fetch\(|generateWithAI|generateWithStreamAI/u);
+      expect(source.split(/\r?\n/).length).toBeLessThanOrEqual(5);
     }
   });
 

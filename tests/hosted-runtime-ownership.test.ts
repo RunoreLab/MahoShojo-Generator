@@ -131,4 +131,22 @@ describe('hosted-runtime ownership boundary', () => {
 
     expect(violations).toEqual([]);
   });
+
+  test('G25H-2 preset 与 AI runtime 不经公开 Web URL self-hop', () => {
+    const defaultServices = readFileSync(
+      path.join(PACKAGE_DIRECTORY, 'src/node-runtime/default-services.ts'),
+      'utf8',
+    );
+    expect(defaultServices).toContain('requireQuestionnairePresetAsset(path)');
+    expect(defaultServices).not.toContain('new URL(path, requestUrl)');
+    for (const runtime of [
+      'generate-magical-girl-details-runtime.ts',
+      'generate-magical-girl-details-stream-runtime.ts',
+      'generate-sublimation-runtime.ts',
+      'generate-sublimation-stream-runtime.ts',
+    ]) {
+      const source = readFileSync(path.join(PACKAGE_DIRECTORY, 'src', runtime), 'utf8');
+      expect(source, runtime).not.toMatch(/fetch\(|apps\/web|app\/api/u);
+    }
+  });
 });

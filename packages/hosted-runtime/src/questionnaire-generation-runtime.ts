@@ -456,7 +456,7 @@ export const resolveNativeLoreQuestionnaires = async (input: {
   loadDataCard(_id: string): Promise<QuestionnaireDataCard>;
 }): Promise<{ allowed: boolean; questionnaires: RequestQuestionnaire[] }> => {
   const loreSelections = input.selections.filter((selection) => selection.useLore !== false);
-  if (loreSelections.length === 0) return { allowed: true, questionnaires: [] };
+  if (loreSelections.length === 0) return deniedNativeQuestionnaires();
 
   const payloads: unknown[] = [];
   for (const selection of loreSelections) {

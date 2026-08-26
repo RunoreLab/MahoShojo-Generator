@@ -6,6 +6,7 @@ import {
   CANSHOU_LORE,
   QUESTIONNAIRE_PRESET_INDEX,
   loadQuestionnairePresetAsset,
+  requireQuestionnairePresetAsset,
   getRandomFlowers,
 } from '../src/node-runtime/static-assets';
 
@@ -53,6 +54,8 @@ describe('package-owned Creator runtime and static assets', () => {
       const bundled = loadQuestionnairePresetAsset(preset.path);
       expect(bundled).toEqual(expect.objectContaining({ id: preset.id, kind: preset.kind }));
     }
+    expect(() => requireQuestionnairePresetAsset('/questionnaires/presets/not-bundled.json'))
+      .toThrow('QUESTIONNAIRE_PRESET_NOT_BUNDLED');
     expect(CANSHOU_LORE).toContain('残兽设定整理');
     expect(getRandomFlowers(2).split('\n')).toHaveLength(2);
   });

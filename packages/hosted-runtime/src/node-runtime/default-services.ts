@@ -99,7 +99,7 @@ import {
   DEFAULT_MAGICAL_GIRL_QUESTION_TEXTS,
   QUESTIONNAIRE_PRESET_INDEX,
   getRandomFlowers,
-  loadQuestionnairePresetAsset,
+  requireQuestionnairePresetAsset,
 } from './static-assets';
 import { parseAIProvidersFromEnv } from './providers';
 import type { GenerateWithAIOptions } from './types';
@@ -268,15 +268,9 @@ export const createNodeHostedServices = (
     status: 200,
     headers: { 'Content-Type': 'application/json' },
   });
-  const loadPreset = async (requestUrl: string, path: string): Promise<unknown> => {
-    const bundled = loadQuestionnairePresetAsset(path);
-    if (bundled !== null) return bundled;
-    const response = await fetcher(new URL(path, requestUrl), { method: 'GET' });
-    if (!response.ok) {
-      throw new Error(`加载预设问卷失败: ${response.status} ${response.statusText}`);
-    }
-    return response.json();
-  };
+  const loadPreset = async (_requestUrl: string, path: string): Promise<unknown> => (
+    requireQuestionnairePresetAsset(path)
+  );
   const recordActivity = dataPorts.recordUserActivityFromRequest;
   const sign = signatureService.generateSignature;
   const logInfo = (message: string): void => logger.info(message);

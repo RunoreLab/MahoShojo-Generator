@@ -186,6 +186,41 @@ describe('generate sublimation hosted runtime', () => {
     expect(sign).not.toHaveBeenCalled();
   });
 
+  it('客户端提供 lore 但没有服务端 selection 时保留生成参考并拒绝签名', async () => {
+    const sign = vi.fn(async () => 'must-not-sign');
+    const dependencies = {
+      ...providerPorts,
+      presetIndex: { presets: [] },
+      defaultQuestions: { magicalGirl: [], canshou: [] },
+      allowGuidedNativeSigning: false,
+      loadPreset: async () => null,
+      loadDataCard: async () => null,
+      checkRateLimit: async () => null,
+      enforceSafety: async () => null,
+      generateWithAI: async (_input, config) => {
+        expect(config.promptBuilder(null)).toContain('仅客户端提供的 lore');
+        return {
+          updatedCharacterData: { codename: '白百合「异乡」' },
+          sublimationEvent: { title: '异乡', impact: '变化' },
+        };
+      },
+      verify: async () => true,
+      sign,
+      recordActivity: vi.fn(),
+      buildResponse: ({ data }: { data: Record<string, unknown> }) => new Response(JSON.stringify(data)),
+      now: () => new Date('2026-08-26T00:00:00.000Z'),
+      logError: vi.fn(),
+    } satisfies GenerateSublimationRuntimeDependencies;
+    const response = await createGenerateSublimationRuntime(dependencies).service(request({
+      ...originalCharacter,
+      questionnaires: [{ ...nativeLore, loreMarkdown: '仅客户端提供的 lore' }],
+    }));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).not.toHaveProperty('sublimatedData.signature');
+    expect(sign).not.toHaveBeenCalled();
+  });
+
   it('stream 裁剪大字段并透传 Request.signal / reasoning SSE', async () => {
     const controller = new AbortController();
     const bridged = new Response('sse');

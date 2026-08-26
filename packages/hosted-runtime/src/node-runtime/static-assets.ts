@@ -18,6 +18,12 @@ export const loadQuestionnairePresetAsset = (path: string): unknown => {
   return asset === undefined ? null : structuredClone(asset);
 };
 
+export const requireQuestionnairePresetAsset = (path: string): unknown => {
+  const asset = loadQuestionnairePresetAsset(path);
+  if (asset === null) throw new Error('QUESTIONNAIRE_PRESET_NOT_BUNDLED');
+  return asset;
+};
+
 export const DEFAULT_MAGICAL_GIRL_QUESTION_TEXTS =
   DEFAULT_ARENA_PROMPT_QUESTIONS.magicalGirl;
 export const DEFAULT_CANSHOU_QUESTION_TEXTS = DEFAULT_ARENA_PROMPT_QUESTIONS.canshou;
