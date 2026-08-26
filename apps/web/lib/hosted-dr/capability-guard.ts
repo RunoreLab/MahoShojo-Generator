@@ -5,6 +5,7 @@ import type {
 } from '@mahoshojo/hosted-runtime/database-provider';
 import {
   createHostedApiCorsPreflightResponse,
+  hasValidHostedApiProductionCorsOrigins,
   HOSTED_API_CORS_ORIGINS_ENVIRONMENT,
   withHostedApiCorsHeaders,
 } from '@mahoshojo/hosted-api/hosted-dr';
@@ -146,7 +147,7 @@ export const withNextDrCapability = <Args extends unknown[]>(
     .map((origin) => origin.trim())
     .filter(Boolean);
   const requestOrigin = request.headers.get('Origin');
-  if (requestOrigin && allowedOrigins.length === 0) {
+  if (requestOrigin && !hasValidHostedApiProductionCorsOrigins(allowedOrigins)) {
     logUnavailable({ capabilityId, category: 'cors' });
     return unavailableResponse();
   }

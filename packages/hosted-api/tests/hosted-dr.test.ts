@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   createHostedApiCorsPreflightResponse,
   createHostedDrReadinessService,
+  hasValidHostedApiProductionCorsOrigins,
   HOSTED_API_CORS_ALLOW_HEADERS,
   HOSTED_API_CORS_ALLOW_METHODS,
   resolveHostedApiCorsOrigin,
@@ -23,6 +24,11 @@ describe('Hosted API cross-runtime CORS contract', () => {
     expect(resolveHostedApiCorsOrigin('https://colanns.me', allowedOrigins)).toBe('');
     expect(HOSTED_API_CORS_ALLOW_METHODS).toContain('POST');
     expect(HOSTED_API_CORS_ALLOW_HEADERS).toContain('Authorization');
+    expect(hasValidHostedApiProductionCorsOrigins(allowedOrigins)).toBe(true);
+    expect(hasValidHostedApiProductionCorsOrigins(['*'])).toBe(false);
+    expect(hasValidHostedApiProductionCorsOrigins(['http://localhost:3000'])).toBe(false);
+    expect(hasValidHostedApiProductionCorsOrigins(['https://127.0.0.1'])).toBe(false);
+    expect(hasValidHostedApiProductionCorsOrigins(['not-an-origin'])).toBe(false);
   });
 
   it('为合法浏览器 preflight 返回无凭据的 204 contract', () => {

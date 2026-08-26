@@ -85,6 +85,35 @@ export const resolveHostedApiCorsOrigin = (
   )) ? origin : '';
 };
 
+const HOSTED_API_LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
+
+export const hasValidHostedApiProductionCorsOrigins = (
+  allowedOrigins: readonly string[],
+): boolean => allowedOrigins.length > 0 && allowedOrigins.every((rule) => {
+  if (!rule || rule === '*') return false;
+  const wildcardPrefix = /^https:\/\/\*\./iu;
+  const wildcardHostPrefix = 'cors-wildcard.';
+  const normalizedRule = wildcardPrefix.test(rule)
+    ? rule.replace(wildcardPrefix, `https://${wildcardHostPrefix}`)
+    : rule;
+  try {
+    const origin = new URL(normalizedRule);
+    const hostname = origin.hostname.startsWith(wildcardHostPrefix)
+      ? origin.hostname.slice(wildcardHostPrefix.length)
+      : origin.hostname;
+    return origin.protocol === 'https:'
+      && Boolean(hostname)
+      && !HOSTED_API_LOOPBACK_HOSTS.has(hostname)
+      && !origin.username
+      && !origin.password
+      && origin.pathname === '/'
+      && !origin.search
+      && !origin.hash;
+  } catch {
+    return false;
+  }
+});
+
 const appendVaryOrigin = (headers: Headers): void => {
   const current = headers.get('Vary')
     ?.split(',')

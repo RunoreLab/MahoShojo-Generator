@@ -4,6 +4,7 @@ import {
   type HonoAuthMode,
 } from '#/auth/config';
 import { parseAIProvidersFromEnv } from '@mahoshojo/hosted-runtime/node-runtime/providers';
+import { hasValidHostedApiProductionCorsOrigins } from '@mahoshojo/hosted-api/hosted-dr';
 
 export type HonoServerConfig = {
   host: string;
@@ -48,11 +49,7 @@ const validateProductionEnvironment = (
   if ((env.SIGNATURE_SECRET_KEY?.trim().length ?? 0) < 32) {
     problems.push('SIGNATURE_SECRET_KEY 必须至少 32 个字符');
   }
-  if (
-    config.corsOrigins.length === 0
-    || config.corsOrigins.includes('*')
-    || config.corsOrigins.some((origin) => origin.includes('localhost'))
-  ) {
+  if (!hasValidHostedApiProductionCorsOrigins(config.corsOrigins)) {
     problems.push('HONO_CORS_ORIGINS 必须显式配置生产来源');
   }
 

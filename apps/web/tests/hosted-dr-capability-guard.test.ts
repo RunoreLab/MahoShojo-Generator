@@ -180,6 +180,32 @@ describe('Next production DR capability guard', () => {
     expect(handler).toHaveBeenCalledOnce();
   });
 
+  it('production wildcard/localhost CORS 配置 fail closed，不反射任意 Origin', async () => {
+    for (const configuredOrigins of ['*', 'http://localhost:3000']) {
+      const handler = vi.fn(async () => new Response('should-not-run'));
+      const guarded = withNextDrCapability('generate-free', handler, {
+        ...productionOptions,
+        environment: { HONO_CORS_ORIGINS: configuredOrigins },
+      });
+      const response = await guarded(new Request(
+        'https://api.example.test/api/generate-free',
+        {
+          method: 'POST',
+          headers: { Origin: 'https://evil.example' },
+        },
+      ));
+
+      expect(response.status, configuredOrigins).toBe(503);
+      expect(response.headers.get('access-control-allow-origin')).toBeNull();
+      expect(handler).not.toHaveBeenCalled();
+      expect(productionOptions.logUnavailable).toHaveBeenCalledWith({
+        capabilityId: 'generate-free',
+        category: 'cors',
+      });
+      productionOptions.logUnavailable.mockClear();
+    }
+  });
+
   it('Arena terminal safe-read 缺 R2 logical binding 配置时不进入 handler', async () => {
     const handler = vi.fn(async () => new Response('should-not-run'));
     const guarded = withNextDrCapability(
