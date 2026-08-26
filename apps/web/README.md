@@ -35,6 +35,9 @@ Web 应用不提供会绕过真实 Route Handler 或 DR capability 检查的通�
 build 与 `wrangler deploy --dry-run --env preview` 全部通过；运行时的 capability readiness 继续由各个
 server-owned adapter fail closed。所有 manifest shared Next route 在 production 进入 service 前经过统一 guard；
 `fail-closed` capability、缺必要 secret 或缺 native D1 Sessions 时不调用 handler，也不回退 Hono HTTP D1 路径。
+production cross-origin 请求还必须配置 manifest 指定的 `HONO_CORS_ORIGINS`；空值、`*`、HTTP、
+localhost/loopback 或非法 origin 均 fail closed，OPTIONS 与实际响应复用同一 policy。非 production 本地开发可显式
+使用既有 HTTP D1 adapter，但不会被标记成 native binding，也不能作为 DR 验收证据。
 Hosted 主执行面、实际 DR 选择和综合容量 readiness 仍由外部控制面负责；当前 manifest 明确为
 `not-provisioned`，未启用自动 failover。
 

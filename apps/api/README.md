@@ -93,6 +93,8 @@ liveness/dependency/capability readiness 外，Hono 对
 
 `HONO_CORS_ORIGINS` 支持逗号分隔的精确来源，也支持形如 `https://*.colanns.me` 的子域通配符。
 通配符只匹配相同协议和端口下的子域（包括多级子域），不匹配裸域 `colanns.me`。
+Hosted DR manifest shared route 的 Hono 与 Next/OpenNext adapter 复用同一 CORS policy；production 配置拒绝
+空值、`*`、HTTP、localhost/loopback 和非法 origin，不允许两侧出现宽松度漂移。
 
 ## 鉴权
 
