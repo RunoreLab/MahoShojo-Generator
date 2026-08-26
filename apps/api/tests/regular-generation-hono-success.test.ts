@@ -683,4 +683,111 @@ describe('常规生成 Hono production composition', () => {
       unregister();
     }
   });
+
+  it('Hono stream body cancel 只记录一次 cancelled 终态并向上游传播取消', async () => {
+    let upstreamCancelCount = 0;
+    mocks.generateWithStreamAI.mockImplementationOnce(async (_input: unknown, options: any) => {
+      mocks.events.push('generate-stream');
+      mocks.streamAbortSignals.push(options.abortSignal);
+      options.telemetry.model = 'stream-cancel-test-model';
+      return {
+        response: new Response(new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode('partial-stream-body'));
+          },
+          cancel() {
+            upstreamCancelCount += 1;
+          },
+        }), {
+          headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+        }),
+        usagePromise: Promise.resolve({}),
+      };
+    });
+
+    const telemetry = new HonoRuntimeTelemetry();
+    const unregister = registerHostedRuntimeObserver(telemetry);
+    try {
+      const app = createHonoApp(config, redis, telemetry);
+      const response = await app.request('/api/generate-magical-girl-details-stream', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Mahoshojo-Activity-Token': 'activity-token',
+        },
+        body: JSON.stringify({
+          answers: ['守护同伴'],
+          questionnaires: [{
+            id: 'details-test',
+            title: 'Details 测试问卷',
+            kind: 'magical-girl',
+            questions: [{ id: 'q-1', question: '为何而战？' }],
+          }],
+        }),
+      });
+
+      const reader = response.body?.getReader();
+      expect(reader).toBeDefined();
+      expect(new TextDecoder().decode((await reader?.read())?.value)).toBe('partial-stream-body');
+      await reader?.cancel('hono-client-cancel');
+
+      expect(upstreamCancelCount).toBe(1);
+      expect(telemetry.snapshot().hostedGeneration).toMatchObject({
+        byOperation: { 'generate-magical-girl-details-stream': 1 },
+        byPlacement: { honoPrimary: 1, nextDr: 0 },
+        outcomes: { success: 0, rejected: 0, failure: 0, cancelled: 1 },
+      });
+    } finally {
+      unregister();
+    }
+  });
+
+  it('Hono upstream stream read error 只记录一次 failure 终态并保留读取错误', async () => {
+    const upstreamError = new Error('hono-upstream-read-error');
+    mocks.generateWithStreamAI.mockImplementationOnce(async (_input: unknown, options: any) => {
+      mocks.events.push('generate-stream');
+      mocks.streamAbortSignals.push(options.abortSignal);
+      options.telemetry.model = 'stream-error-test-model';
+      return {
+        response: new Response(new ReadableStream<Uint8Array>({
+          pull(controller) {
+            controller.error(upstreamError);
+          },
+        }), {
+          headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+        }),
+        usagePromise: Promise.resolve({}),
+      };
+    });
+
+    const telemetry = new HonoRuntimeTelemetry();
+    const unregister = registerHostedRuntimeObserver(telemetry);
+    try {
+      const app = createHonoApp(config, redis, telemetry);
+      const response = await app.request('/api/generate-sublimation-stream', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Mahoshojo-Activity-Token': 'activity-token',
+        },
+        body: JSON.stringify({
+          templateId: '通用角色',
+          name: '测试角色',
+          content: '# 测试角色',
+          targetTemplate: 'general',
+        }),
+      });
+
+      const reader = response.body?.getReader();
+      expect(reader).toBeDefined();
+      await expect(reader?.read()).rejects.toThrow('hono-upstream-read-error');
+      expect(telemetry.snapshot().hostedGeneration).toMatchObject({
+        byOperation: { 'generate-sublimation-stream': 1 },
+        byPlacement: { honoPrimary: 1, nextDr: 0 },
+        outcomes: { success: 0, rejected: 0, failure: 1, cancelled: 0 },
+      });
+    } finally {
+      unregister();
+    }
+  });
 });

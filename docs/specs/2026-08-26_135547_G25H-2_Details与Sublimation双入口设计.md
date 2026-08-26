@@ -1,8 +1,8 @@
 # G25H-2 Details 与 Sublimation 双入口设计
 
-> 状态：active implementation design  
-> Goal：`G25H-2 Details / Sublimation re-entry`  
-> 基线：`05b64453`（`refactor/platform-rearchitecture`）  
+> 状态：active implementation design
+> Goal：`G25H-2 Details / Sublimation re-entry`
+> 基线：`05b64453`（`refactor/platform-rearchitecture`）
 > 适用上位口径：平台重整 accepted ADR/architecture/spec、Hosted 长生成断网可恢复流规格、Goal 自治执行与验收规格
 
 ## 1. Objective 与当前事实

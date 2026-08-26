@@ -79,11 +79,8 @@ const instrumentStreamLifecycle = (
       }
     },
     async cancel(reason) {
-      try {
-        await reader.cancel(reason);
-      } finally {
-        finish('cancelled');
-      }
+      finish('cancelled');
+      await reader.cancel(reason);
     },
   });
   return new Response(body, {
