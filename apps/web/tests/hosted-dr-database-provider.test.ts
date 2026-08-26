@@ -1,21 +1,34 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { getRuntimeD1ClientWithoutHttpFallback } = vi.hoisted(() => ({
+const {
+  adaptRuntimeD1ClientForNodeDataPorts,
+  getRuntimeD1Client,
+  getRuntimeD1ClientWithoutHttpFallback,
+} = vi.hoisted(() => ({
+  adaptRuntimeD1ClientForNodeDataPorts: vi.fn((client) => ({ adapted: client })),
+  getRuntimeD1Client: vi.fn(),
   getRuntimeD1ClientWithoutHttpFallback: vi.fn(),
 }));
 
 vi.mock('@/lib/db/drizzle', () => ({
+  getRuntimeD1Client,
   getRuntimeD1ClientWithoutHttpFallback,
+}));
+vi.mock('@/lib/db/node-data-port-adapter', () => ({
+  adaptRuntimeD1ClientForNodeDataPorts,
 }));
 
 import {
   cloudflareDrDatabaseProvider,
   getCloudflareDrD1Client,
+  getNextHostedD1Client,
 } from '@/lib/hosted-dr/database-provider';
 
 describe('Next/OpenNext Hosted DR D1 provider', () => {
   beforeEach(() => {
     getRuntimeD1ClientWithoutHttpFallback.mockReset();
+    getRuntimeD1Client.mockReset();
+    adaptRuntimeD1ClientForNodeDataPorts.mockClear();
   });
 
   it('只使用 native binding + Sessions，不读取 HTTP fallback', () => {
@@ -40,5 +53,18 @@ describe('Next/OpenNext Hosted DR D1 provider', () => {
 
     getRuntimeD1ClientWithoutHttpFallback.mockReturnValue({ prepare: vi.fn() });
     expect(getCloudflareDrD1Client()).toBeNull();
+  });
+
+  it('production 只接受 binding，非 production 可显式保留旧 HTTP local adapter', () => {
+    getRuntimeD1ClientWithoutHttpFallback.mockReturnValue(null);
+    getRuntimeD1Client.mockReturnValue({ prepare: vi.fn() });
+
+    expect(getNextHostedD1Client({ executionEnvironment: 'production' })).toBeNull();
+    expect(getRuntimeD1Client).not.toHaveBeenCalled();
+
+    expect(getNextHostedD1Client({ executionEnvironment: 'development' })).toEqual({
+      adapted: getRuntimeD1Client.mock.results.at(-1)?.value,
+    });
+    expect(adaptRuntimeD1ClientForNodeDataPorts).toHaveBeenCalledOnce();
   });
 });

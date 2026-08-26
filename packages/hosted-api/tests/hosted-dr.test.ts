@@ -1,9 +1,64 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  createHostedApiCorsPreflightResponse,
   createHostedDrReadinessService,
+  HOSTED_API_CORS_ALLOW_HEADERS,
+  HOSTED_API_CORS_ALLOW_METHODS,
+  resolveHostedApiCorsOrigin,
   selectHostedDrRuntime,
+  withHostedApiCorsHeaders,
   type HostedDrReadinessDatabaseProvider,
 } from '../src/hosted-dr';
+
+describe('Hosted API cross-runtime CORS contract', () => {
+  const allowedOrigins = ['https://app.example.test', 'https://*.colanns.me'];
+
+  it('Hono/Next 共用 exact/wildcard origin 与固定 allow contract', () => {
+    expect(resolveHostedApiCorsOrigin('https://app.example.test', allowedOrigins)).toBe(
+      'https://app.example.test',
+    );
+    expect(resolveHostedApiCorsOrigin('https://mahoshojo.colanns.me', allowedOrigins)).toBe(
+      'https://mahoshojo.colanns.me',
+    );
+    expect(resolveHostedApiCorsOrigin('https://colanns.me', allowedOrigins)).toBe('');
+    expect(HOSTED_API_CORS_ALLOW_METHODS).toContain('POST');
+    expect(HOSTED_API_CORS_ALLOW_HEADERS).toContain('Authorization');
+  });
+
+  it('为合法浏览器 preflight 返回无凭据的 204 contract', () => {
+    const response = createHostedApiCorsPreflightResponse(new Request(
+      'https://api.example.test/api/generate-free',
+      {
+        method: 'OPTIONS',
+        headers: {
+          Origin: 'https://app.example.test',
+          'Access-Control-Request-Method': 'POST',
+        },
+      },
+    ), allowedOrigins);
+
+    expect(response.status).toBe(204);
+    expect(response.headers.get('access-control-allow-origin')).toBe('https://app.example.test');
+    expect(response.headers.get('access-control-allow-methods')).toContain('POST');
+    expect(response.headers.get('access-control-allow-headers')).toContain('Authorization');
+    expect(response.headers.get('access-control-allow-credentials')).toBeNull();
+  });
+
+  it('只给允许的实际跨域响应附加公开 CORS header', () => {
+    const request = new Request('https://api.example.test/api/generate-free', {
+      headers: { Origin: 'https://app.example.test' },
+    });
+    const response = withHostedApiCorsHeaders(
+      request,
+      new Response('ok', { headers: { 'X-Request-Id': 'request-1' } }),
+      allowedOrigins,
+    );
+
+    expect(response.headers.get('access-control-allow-origin')).toBe('https://app.example.test');
+    expect(response.headers.get('access-control-expose-headers')).toContain('X-Request-Id');
+    expect(response.headers.get('vary')).toContain('Origin');
+  });
+});
 
 describe('Hosted DR runtime selector', () => {
   it('把尚未 dispatch 的 safe read 在 primary unavailable 时交给 Next DR', () => {

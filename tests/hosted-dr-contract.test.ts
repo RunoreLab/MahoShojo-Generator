@@ -25,6 +25,7 @@ type HostedDrManifest = {
     drOrigin: string;
     mode: string;
     provisioning: string;
+    corsOriginsEnvironment: string;
   };
   capabilities: Array<{
     id: string;
@@ -69,6 +70,7 @@ describe('Hosted DR machine contract', () => {
 
     expect(mode).toBe('active-passive');
     expect(provisioning).toBe('not-provisioned');
+    expect(manifest.controlPlane.corsOriginsEnvironment).toBe('HONO_CORS_ORIGINS');
     expect(new Set([stableOrigin, primaryOrigin, drOrigin])).toHaveLength(3);
     for (const origin of [stableOrigin, primaryOrigin, drOrigin]) {
       const parsed = new URL(origin);
@@ -106,6 +108,20 @@ describe('Hosted DR machine contract', () => {
         expect(secret.name).toMatch(/^[A-Z][A-Z0-9_]+$/u);
       }
     }
+  });
+
+  it('声明 structured scenario 签名与 Arena terminal R2 logical binding', () => {
+    const manifest = readJson<HostedDrManifest>('config/hosted-dr-capabilities.json');
+    const scenario = manifest.capabilities.find(({ id }) => id === 'generate-scenario');
+    const arenaStream = manifest.capabilities.find(
+      ({ id }) => id === 'arena/generations/[generationId]/stream',
+    );
+
+    expect(scenario?.requiredSecrets).toContainEqual({
+      name: 'SIGNATURE_SECRET_KEY',
+      minLength: 32,
+    });
+    expect(arenaStream?.requiredBindings).toContain('R2_OBJECT_STORE');
   });
 
   it('禁止把非幂等 operation 配成 safe replay', () => {

@@ -3,6 +3,11 @@ import type {
   DatabaseProvider,
   DatabaseSession,
 } from '@mahoshojo/hosted-runtime/database-provider';
+import {
+  createHostedApiCorsPreflightResponse,
+  HOSTED_API_CORS_ORIGINS_ENVIRONMENT,
+  withHostedApiCorsHeaders,
+} from '@mahoshojo/hosted-api/hosted-dr';
 import hostedDrManifest from '../../../../config/hosted-dr-capabilities.json';
 
 import { cloudflareDrDatabaseProvider } from '@/lib/hosted-dr/database-provider';
@@ -23,6 +28,7 @@ type GuardUnavailableCategory =
   | 'contract'
   | 'method'
   | 'dr-mode'
+  | 'cors'
   | 'secret'
   | 'binding'
   | 'database-provider';
@@ -80,6 +86,40 @@ const methodNotAllowedResponse = (allow: string[]): Response => new Response(JSO
   },
 });
 
+const hasR2ObjectStoreConfiguration = (
+  environment: Readonly<Record<string, string | undefined>>,
+): boolean => {
+  if (!environment.R2_BUCKET_NAME?.trim()) return false;
+  const configuredEndpoint = environment.R2_ENDPOINT?.trim();
+  if (configuredEndpoint) {
+    try {
+      const endpoint = new URL(configuredEndpoint);
+      return endpoint.protocol === 'https:'
+        && !endpoint.username
+        && !endpoint.password
+        && endpoint.pathname === '/'
+        && !endpoint.search
+        && !endpoint.hash;
+    } catch {
+      return false;
+    }
+  }
+  return [
+    environment.R2_ACCOUNT_ID,
+    environment.CF_ACCOUNT_ID,
+    environment.CLOUDFLARE_ACCOUNT_ID,
+  ].some((value) => Boolean(value?.trim()));
+};
+
+const hasRequiredBindings = (
+  bindings: readonly string[],
+  environment: Readonly<Record<string, string | undefined>>,
+): boolean => bindings.every((binding) => {
+  if (binding === 'DB') return true;
+  if (binding === 'R2_OBJECT_STORE') return hasR2ObjectStoreConfiguration(environment);
+  return false;
+});
+
 export const withNextDrCapability = <Args extends unknown[]>(
   capabilityId: string,
   handler: NextRouteHandler<Args>,
@@ -96,34 +136,53 @@ export const withNextDrCapability = <Args extends unknown[]>(
     logUnavailable({ capabilityId, category: 'contract' });
     return unavailableResponse();
   }
+  const environment = options.environment ?? process.env;
+  const allowedOrigins = (environment[HOSTED_API_CORS_ORIGINS_ENVIRONMENT] ?? '')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+  const requestOrigin = request.headers.get('Origin');
+  if (requestOrigin && allowedOrigins.length === 0) {
+    logUnavailable({ capabilityId, category: 'cors' });
+    return unavailableResponse();
+  }
+  if (request.method.toUpperCase() === 'OPTIONS') {
+    return createHostedApiCorsPreflightResponse(request, allowedOrigins);
+  }
+  const respond = (response: Response): Response => withHostedApiCorsHeaders(
+    request,
+    response,
+    allowedOrigins,
+  );
   const method = request.method.toUpperCase();
   const operation = capability.operations.find((candidate) => candidate.method === method);
   if (!operation) {
     logUnavailable({ capabilityId, category: 'method' });
-    return methodNotAllowedResponse(capability.operations.map(({ method: allowed }) => allowed));
+    return respond(methodNotAllowedResponse(
+      capability.operations.map(({ method: allowed }) => allowed),
+    ));
   }
   if (operation.drMode === 'fail-closed') {
     logUnavailable({ capabilityId, category: 'dr-mode' });
-    return unavailableResponse();
+    return respond(unavailableResponse());
   }
 
-  const environment = options.environment ?? process.env;
   for (const secret of capability.requiredSecrets) {
     const value = environment[secret.name]?.trim() ?? '';
     if (!value || (secret.minLength !== undefined && value.length < secret.minLength)) {
       logUnavailable({ capabilityId, category: 'secret' });
-      return unavailableResponse();
+      return respond(unavailableResponse());
     }
   }
-  if (capability.requiredBindings.some((binding) => binding !== 'DB')) {
+  if (!hasRequiredBindings(capability.requiredBindings, environment)) {
     logUnavailable({ capabilityId, category: 'binding' });
-    return unavailableResponse();
+    return respond(unavailableResponse());
   }
 
   const provider = options.provider ?? cloudflareDrDatabaseProvider;
   if (provider.id !== capability.drDatabaseProvider) {
     logUnavailable({ capabilityId, category: 'database-provider' });
-    return unavailableResponse();
+    return respond(unavailableResponse());
   }
   let session: DatabaseSession | null;
   try {
@@ -133,8 +192,8 @@ export const withNextDrCapability = <Args extends unknown[]>(
   }
   if (!session) {
     logUnavailable({ capabilityId, category: 'database-provider' });
-    return unavailableResponse();
+    return respond(unavailableResponse());
   }
 
-  return handler(request, ...args);
+  return respond(await handler(request, ...args));
 };

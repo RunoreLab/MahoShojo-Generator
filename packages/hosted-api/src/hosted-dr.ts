@@ -18,6 +18,125 @@ export type HostedDrSelectionInput = {
 
 export const HOSTED_DR_CONTRACT_VERSION = 'g25e1-v1' as const;
 export const HOSTED_DR_READINESS_SQL = 'SELECT 1 AS ok' as const;
+export const HOSTED_API_CORS_ORIGINS_ENVIRONMENT = 'HONO_CORS_ORIGINS' as const;
+export const HOSTED_API_CORS_ALLOW_HEADERS = [
+  'Content-Type',
+  'Authorization',
+  'X-Request-Id',
+  'X-Mahoshojo-Activity-Token',
+  'X-Mahoshojo-Generation-Actor-Token',
+  'X-Mahoshojo-User-Id',
+  'X-Mahoshojo-AI-Meta',
+  'Last-Event-ID',
+] as const;
+export const HOSTED_API_CORS_EXPOSE_HEADERS = [
+  'X-Request-Id',
+  'X-RateLimit-Limit',
+  'X-RateLimit-Remaining',
+  'Retry-After',
+  'X-Mahoshojo-Generation-Actor-Token',
+  'X-Mahoshojo-Generation-Id',
+  'X-Mahoshojo-Generation-Request-Id',
+  'X-Mahoshojo-Generation-Fallback',
+  'X-Mahoshojo-Stream-Meta',
+  'X-Mahoshojo-Arena-Companion-Operation',
+  'X-Mahoshojo-Arena-Execution-Placement',
+] as const;
+export const HOSTED_API_CORS_ALLOW_METHODS = [
+  'GET',
+  'HEAD',
+  'OPTIONS',
+  'POST',
+  'PUT',
+  'PATCH',
+  'DELETE',
+] as const;
+
+const matchesHostedWildcardOrigin = (origin: string, rule: string): boolean => {
+  const wildcardPrefix = /^(https?):\/\/\*\./iu;
+  if (!wildcardPrefix.test(rule)) return false;
+
+  try {
+    const wildcardHostPrefix = 'cors-wildcard.';
+    const ruleUrl = new URL(rule.replace(wildcardPrefix, `$1://${wildcardHostPrefix}`));
+    const originUrl = new URL(origin);
+    const baseHostname = ruleUrl.hostname.slice(wildcardHostPrefix.length);
+    return Boolean(baseHostname)
+      && !ruleUrl.username
+      && !ruleUrl.password
+      && ruleUrl.pathname === '/'
+      && !ruleUrl.search
+      && !ruleUrl.hash
+      && originUrl.protocol === ruleUrl.protocol
+      && originUrl.port === ruleUrl.port
+      && originUrl.hostname.endsWith(`.${baseHostname}`);
+  } catch {
+    return false;
+  }
+};
+
+export const resolveHostedApiCorsOrigin = (
+  origin: string,
+  allowedOrigins: readonly string[],
+): string => {
+  if (allowedOrigins.includes('*')) return origin;
+  return allowedOrigins.some((rule) => (
+    rule === origin || matchesHostedWildcardOrigin(origin, rule)
+  )) ? origin : '';
+};
+
+const appendVaryOrigin = (headers: Headers): void => {
+  const current = headers.get('Vary')
+    ?.split(',')
+    .map((value) => value.trim())
+    .filter(Boolean) ?? [];
+  if (!current.some((value) => value.toLowerCase() === 'origin')) current.push('Origin');
+  headers.set('Vary', current.join(', '));
+};
+
+const applyHostedApiCorsHeaders = (
+  headers: Headers,
+  origin: string,
+  allowedOrigins: readonly string[],
+): boolean => {
+  const allowedOrigin = resolveHostedApiCorsOrigin(origin, allowedOrigins);
+  appendVaryOrigin(headers);
+  if (!allowedOrigin) return false;
+  headers.set('Access-Control-Allow-Origin', allowedOrigin);
+  return true;
+};
+
+export const createHostedApiCorsPreflightResponse = (
+  request: Request,
+  allowedOrigins: readonly string[],
+): Response => {
+  const headers = new Headers({
+    'Access-Control-Allow-Headers': HOSTED_API_CORS_ALLOW_HEADERS.join(', '),
+    'Access-Control-Allow-Methods': HOSTED_API_CORS_ALLOW_METHODS.join(', '),
+    'Access-Control-Max-Age': '600',
+    'Cache-Control': 'no-store',
+  });
+  applyHostedApiCorsHeaders(headers, request.headers.get('Origin') ?? '', allowedOrigins);
+  return new Response(null, { status: 204, headers });
+};
+
+export const withHostedApiCorsHeaders = (
+  request: Request,
+  response: Response,
+  allowedOrigins: readonly string[],
+): Response => {
+  const origin = request.headers.get('Origin');
+  if (!origin) return response;
+  const headers = new Headers(response.headers);
+  if (applyHostedApiCorsHeaders(headers, origin, allowedOrigins)) {
+    headers.set('Access-Control-Expose-Headers', HOSTED_API_CORS_EXPOSE_HEADERS.join(', '));
+  }
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+};
 
 type HostedDrReadinessStatementResult = {
   success: boolean;

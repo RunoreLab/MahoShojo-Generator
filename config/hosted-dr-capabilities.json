@@ -7,6 +7,7 @@
     "drOrigin": "https://mahoshojo.colanns.me",
     "mode": "active-passive",
     "provisioning": "not-provisioned",
+    "corsOriginsEnvironment": "HONO_CORS_ORIGINS",
     "primaryProbePath": "/api/health/ready",
     "drProbePath": "/api/hosted/dr-readiness"
   },
@@ -58,7 +59,7 @@
         { "name": "R2_SECRET_ACCESS_KEY", "minLength": 1 },
         { "name": "SIGNATURE_SECRET_KEY", "minLength": 32 }
       ],
-      "requiredBindings": ["DB"],
+      "requiredBindings": ["DB", "R2_OBJECT_STORE"],
       "primaryDatabaseProvider": "hono-d1-primary",
       "drDatabaseProvider": "cloudflare-d1-binding",
       "consistency": "primary",
@@ -137,7 +138,7 @@
         { "name": "R2_ACCESS_KEY_ID", "minLength": 1 },
         { "name": "R2_SECRET_ACCESS_KEY", "minLength": 1 }
       ],
-      "requiredBindings": ["DB"],
+      "requiredBindings": ["DB", "R2_OBJECT_STORE"],
       "primaryDatabaseProvider": "hono-d1-primary",
       "drDatabaseProvider": "cloudflare-d1-binding",
       "consistency": "primary",
@@ -399,7 +400,9 @@
       "operations": [
         { "method": "POST", "requestClass": "non-idempotent-operation", "drMode": "new-request-only", "replayPolicy": "never-after-dispatch" }
       ],
-      "requiredSecrets": [],
+      "requiredSecrets": [
+        { "name": "SIGNATURE_SECRET_KEY", "minLength": 32 }
+      ],
       "requiredBindings": ["DB"],
       "primaryDatabaseProvider": "hono-d1-primary",
       "drDatabaseProvider": "cloudflare-d1-binding",

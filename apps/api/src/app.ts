@@ -1,6 +1,12 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { secureHeaders } from 'hono/secure-headers';
+import {
+  HOSTED_API_CORS_ALLOW_HEADERS,
+  HOSTED_API_CORS_ALLOW_METHODS,
+  HOSTED_API_CORS_EXPOSE_HEADERS,
+  resolveHostedApiCorsOrigin,
+} from '@mahoshojo/hosted-api/hosted-dr';
 import type { HonoServerConfig } from '#/config';
 import { registerHealthRoutes } from '#/health';
 import { redisRateLimit } from '#/middleware/redis-rate-limit';
@@ -18,38 +24,8 @@ const REDIS_RATE_LIMIT_BYPASS_PATHS = new Set([
   '/api/hosted/dr-readiness',
 ]);
 
-const matchesWildcardOrigin = (origin: string, rule: string): boolean => {
-  const wildcardPrefix = /^(https?):\/\/\*\./i;
-  if (!wildcardPrefix.test(rule)) return false;
-
-  try {
-    const wildcardHostPrefix = 'cors-wildcard.';
-    const ruleUrl = new URL(rule.replace(wildcardPrefix, `$1://${wildcardHostPrefix}`));
-    const originUrl = new URL(origin);
-    const baseHostname = ruleUrl.hostname.slice(wildcardHostPrefix.length);
-
-    if (!baseHostname
-      || ruleUrl.username
-      || ruleUrl.password
-      || ruleUrl.pathname !== '/'
-      || ruleUrl.search
-      || ruleUrl.hash) {
-      return false;
-    }
-
-    return originUrl.protocol === ruleUrl.protocol
-      && originUrl.port === ruleUrl.port
-      && originUrl.hostname.endsWith(`.${baseHostname}`);
-  } catch {
-    return false;
-  }
-};
-
 export const isAllowedOrigin = (origin: string, allowedOrigins: string[]): string => {
-  if (allowedOrigins.includes('*')) return origin;
-  return allowedOrigins.some((rule) => rule === origin || matchesWildcardOrigin(origin, rule))
-    ? origin
-    : '';
+  return resolveHostedApiCorsOrigin(origin, allowedOrigins);
 };
 
 export const createHonoApp = (
@@ -64,30 +40,9 @@ export const createHonoApp = (
   app.use('/api/*', cors({
     origin: (origin) => isAllowedOrigin(origin, config.corsOrigins),
     credentials: false,
-    allowHeaders: [
-      'Content-Type',
-      'Authorization',
-      'X-Request-Id',
-      'X-Mahoshojo-Activity-Token',
-      'X-Mahoshojo-Generation-Actor-Token',
-      'X-Mahoshojo-User-Id',
-      'X-Mahoshojo-AI-Meta',
-      'Last-Event-ID',
-    ],
-    exposeHeaders: [
-      'X-Request-Id',
-      'X-RateLimit-Limit',
-      'X-RateLimit-Remaining',
-      'Retry-After',
-      'X-Mahoshojo-Generation-Actor-Token',
-      'X-Mahoshojo-Generation-Id',
-      'X-Mahoshojo-Generation-Request-Id',
-      'X-Mahoshojo-Generation-Fallback',
-      'X-Mahoshojo-Stream-Meta',
-      'X-Mahoshojo-Arena-Companion-Operation',
-      'X-Mahoshojo-Arena-Execution-Placement',
-    ],
-    allowMethods: ['GET', 'HEAD', 'OPTIONS', 'POST', 'PUT', 'PATCH', 'DELETE'],
+    allowHeaders: [...HOSTED_API_CORS_ALLOW_HEADERS],
+    exposeHeaders: [...HOSTED_API_CORS_EXPOSE_HEADERS],
+    allowMethods: [...HOSTED_API_CORS_ALLOW_METHODS],
     maxAge: 600,
   }));
 

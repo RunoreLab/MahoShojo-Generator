@@ -18,7 +18,9 @@ const readyProvider: DatabaseProvider = {
 
 const productionOptions = {
   executionEnvironment: 'production' as const,
-  environment: {} as Record<string, string | undefined>,
+  environment: {
+    HONO_CORS_ORIGINS: 'https://app.example.test',
+  } as Record<string, string | undefined>,
   provider: readyProvider,
   logUnavailable: vi.fn(),
 };
@@ -141,6 +143,65 @@ describe('Next production DR capability guard', () => {
     });
     expect(await (await local(new Request('https://next.test/api/generate-free'))).text()).toBe('local');
     expect(handler).toHaveBeenCalledOnce();
+  });
+
+  it('在 capability method 判断前处理合法 preflight，并给实际响应附加同核 CORS', async () => {
+    const handler = vi.fn(async () => new Response('ok', {
+      headers: { 'X-Request-Id': 'request-1' },
+    }));
+    const guarded = withNextDrCapability('generate-free', handler, productionOptions);
+    const requestHeaders = {
+      Origin: 'https://app.example.test',
+      'Access-Control-Request-Method': 'POST',
+      'Access-Control-Request-Headers': 'authorization, content-type',
+    };
+
+    const preflight = await guarded(new Request(
+      'https://api.example.test/api/generate-free',
+      { method: 'OPTIONS', headers: requestHeaders },
+    ));
+    expect(preflight.status).toBe(204);
+    expect(preflight.headers.get('access-control-allow-origin')).toBe('https://app.example.test');
+    expect(preflight.headers.get('access-control-allow-headers')?.toLowerCase()).toContain(
+      'authorization',
+    );
+    expect(handler).not.toHaveBeenCalled();
+
+    const response = await guarded(new Request(
+      'https://api.example.test/api/generate-free',
+      { method: 'POST', headers: { Origin: 'https://app.example.test' } },
+    ));
+    expect(response.status).toBe(200);
+    expect(response.headers.get('access-control-allow-origin')).toBe('https://app.example.test');
+    expect(response.headers.get('access-control-expose-headers')).toContain('X-Request-Id');
+    expect(handler).toHaveBeenCalledOnce();
+  });
+
+  it('Arena terminal safe-read 缺 R2 logical binding 配置时不进入 handler', async () => {
+    const handler = vi.fn(async () => new Response('should-not-run'));
+    const guarded = withNextDrCapability(
+      'arena/generations/[generationId]/stream',
+      handler,
+      {
+        ...productionOptions,
+        environment: {
+          HONO_CORS_ORIGINS: 'https://app.example.test',
+          R2_ACCESS_KEY_ID: 'local-access-key',
+          R2_SECRET_ACCESS_KEY: 'local-secret-key',
+        },
+      },
+    );
+
+    const response = await guarded(new Request(
+      'https://api.example.test/api/arena/generations/generation-1/stream',
+    ));
+
+    expect(response.status).toBe(503);
+    expect(handler).not.toHaveBeenCalled();
+    expect(productionOptions.logUnavailable).toHaveBeenCalledWith({
+      capabilityId: 'arena/generations/[generationId]/stream',
+      category: 'binding',
+    });
   });
 
   it('每条 shared Next route 都显式包裹同一 guard', () => {
