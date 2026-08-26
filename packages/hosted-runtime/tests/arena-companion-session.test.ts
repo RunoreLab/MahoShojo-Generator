@@ -268,6 +268,90 @@ describe('Arena session companion service', () => {
     });
   });
 
+  it('typed stream 未给 terminal 就 EOF 时记录 failure 并释放 lease', async () => {
+    const observeLifecycle = vi.fn();
+    const rateRelease = vi.fn();
+    const service = createArenaSessionCompanionService({
+      generationService: {
+        createSubscription: async () => ({
+          generationId: 'arena_story_generation',
+          generationRequestId: 'story-request-1234',
+          headers: {},
+          events: streamOf({ id: '10-0', type: 'markdown', data: { chunk: '未完成' } }),
+        }),
+        create: () => response(),
+        cancelRequest: () => response(),
+        lookup: () => response(),
+        resume: () => response(),
+        status: () => response(),
+        cancel: () => response(),
+      },
+      signatures: {
+        generateSignature: async () => 'guidance-signature',
+        verifySignature: async () => true,
+      },
+      acquireRateLimit: () => ({ allowed: true, retryAfterSeconds: 0, release: rateRelease }),
+      observeLifecycle,
+    });
+
+    const result = await service.generateNext(new Request(
+      'https://example.test/api/arena/session/generate-next',
+      { method: 'POST', body: JSON.stringify(requestBody()) },
+    ));
+    await result.text();
+
+    expect(observeLifecycle).toHaveBeenCalledTimes(1);
+    expect(observeLifecycle).toHaveBeenCalledWith({
+      outcome: 'failure',
+      durationMs: expect.any(Number),
+    });
+    expect(rateRelease).toHaveBeenCalledTimes(1);
+  });
+
+  it('typed reader rejection 记录 failure 并释放 lease', async () => {
+    const observeLifecycle = vi.fn();
+    const rateRelease = vi.fn();
+    const service = createArenaSessionCompanionService({
+      generationService: {
+        createSubscription: async () => ({
+          generationId: 'arena_story_generation',
+          generationRequestId: 'story-request-1234',
+          headers: {},
+          events: new ReadableStream<GenerationStreamEvent>({
+            start(controller) {
+              controller.error(new Error('reader failed'));
+            },
+          }),
+        }),
+        create: () => response(),
+        cancelRequest: () => response(),
+        lookup: () => response(),
+        resume: () => response(),
+        status: () => response(),
+        cancel: () => response(),
+      },
+      signatures: {
+        generateSignature: async () => 'guidance-signature',
+        verifySignature: async () => true,
+      },
+      acquireRateLimit: () => ({ allowed: true, retryAfterSeconds: 0, release: rateRelease }),
+      observeLifecycle,
+    });
+
+    const result = await service.generateNext(new Request(
+      'https://example.test/api/arena/session/generate-next',
+      { method: 'POST', body: JSON.stringify(requestBody()) },
+    ));
+    await expect(result.text()).rejects.toThrow('reader failed');
+
+    expect(observeLifecycle).toHaveBeenCalledTimes(1);
+    expect(observeLifecycle).toHaveBeenCalledWith({
+      outcome: 'failure',
+      durationMs: expect.any(Number),
+    });
+    expect(rateRelease).toHaveBeenCalledTimes(1);
+  });
+
   it('取得 lease 后 chapter identity 构造失败也 exactly-once release', async () => {
     const rateRelease = vi.fn();
     const createSubscription = vi.fn();
