@@ -36,6 +36,7 @@ type HostedDrManifest = {
       drMode: string;
       replayPolicy: string;
     }>;
+    drillStatus: string;
     requiredSecrets: Array<{ name: string; minLength?: number }>;
     requiredBindings: string[];
     contractTests: string[];
@@ -48,6 +49,10 @@ type HostedDrDrillManifest = {
   environment: string;
   controlPlaneProvisioning: string;
   productionStatus: string;
+  versionGate: {
+    maxContractVersionSkew: number;
+    stages: string[];
+  };
   cases: Array<{
     id: string;
     acceptance: string[];
@@ -55,6 +60,11 @@ type HostedDrDrillManifest = {
     scope: string[];
     evidenceTests: string[];
   }>;
+  productionDrill: {
+    status: string;
+    requiredAuthorization: string[];
+    runbook: string;
+  };
 };
 
 const repositoryRoot = process.cwd();
@@ -94,6 +104,12 @@ describe('Hosted DR machine contract', () => {
       expect(parsed.search).toBe('');
       expect(parsed.hash).toBe('');
     }
+  });
+
+  it('把已执行的 G25E-2 safe-read drill 记录在 capability manifest', () => {
+    const manifest = readJson<HostedDrManifest>('config/hosted-dr-capabilities.json');
+    expect(manifest.capabilities.find(({ id }) => id === 'hosted/dr-readiness')?.drillStatus)
+      .toBe('verified');
   });
 
   it('每项 capability 都有双 adapter、contract tests 且不保存 secret 值', () => {
@@ -182,6 +198,50 @@ describe('Hosted DR machine contract', () => {
       for (const evidenceTest of entry.evidenceTests) {
         expect(existsSync(path.join(repositoryRoot, evidenceTest)), `${entry.id}:${evidenceTest}`).toBe(true);
       }
+    }
+  });
+
+  it.each([
+    {
+      label: '缺少 fault case',
+      mutate: (drill: HostedDrDrillManifest) => drill.cases.pop(),
+      expected: '完整 fault matrix',
+    },
+    {
+      label: '非法 case status',
+      mutate: (drill: HostedDrDrillManifest) => {
+        drill.cases[0]!.status = 'passing';
+      },
+      expected: 'drill status 非法',
+    },
+    {
+      label: '伪报 production drill',
+      mutate: (drill: HostedDrDrillManifest) => {
+        drill.productionStatus = 'verified';
+      },
+      expected: 'production drill 必须保持 deferred',
+    },
+  ])('validator 对 G25E-2 $label fail closed', ({ mutate, expected }) => {
+    const temporaryRoot = mkdtempSync(path.join(os.tmpdir(), 'hosted-dr-drills-'));
+    try {
+      const drill = readJson<HostedDrDrillManifest>('config/hosted-dr-drills.json');
+      mutate(drill);
+      const drillsPath = path.join(temporaryRoot, 'drills.json');
+      writeFileSync(drillsPath, `${JSON.stringify(drill)}\n`, 'utf8');
+
+      const result = spawnSync(process.execPath, [
+        path.join(repositoryRoot, 'scripts/check-hosted-dr-contract.mjs'),
+        '--drills',
+        drillsPath,
+      ], {
+        cwd: repositoryRoot,
+        encoding: 'utf8',
+      });
+
+      expect(result.status).toBe(1);
+      expect(`${result.stdout}\n${result.stderr}`).toContain(expected);
+    } finally {
+      rmSync(temporaryRoot, { recursive: true, force: true });
     }
   });
 

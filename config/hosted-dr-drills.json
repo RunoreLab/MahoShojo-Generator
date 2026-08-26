@@ -11,7 +11,7 @@
   "cases": [
     {
       "id": "G25E2-HONO-UNAVAILABLE",
-      "acceptance": ["ACCEPT-012"],
+      "acceptance": ["DR-001", "DR-002", "ACCEPT-012"],
       "fault": "hono-primary-unavailable",
       "scope": ["hosted/dr-readiness"],
       "status": "verified",
@@ -20,7 +20,7 @@
     },
     {
       "id": "G25E2-REDIS-UNAVAILABLE",
-      "acceptance": ["ACCEPT-014"],
+      "acceptance": ["DR-006", "ACCEPT-014"],
       "fault": "redis-unavailable",
       "scope": ["api/health", "arena/generate-stream"],
       "status": "verified",
@@ -29,7 +29,7 @@
     },
     {
       "id": "G25E2-REDIS-EMPTY",
-      "acceptance": ["ACCEPT-014"],
+      "acceptance": ["DR-005", "DR-006", "ACCEPT-014"],
       "fault": "redis-empty",
       "scope": ["arena/generate-stream", "hosted-runtime/data-authority"],
       "status": "verified",
@@ -38,7 +38,7 @@
     },
     {
       "id": "G25E2-GATEWAY-UNAVAILABLE",
-      "acceptance": ["ACCEPT-015"],
+      "acceptance": ["DR-007", "DR-011", "ACCEPT-015"],
       "fault": "d1-gateway-unavailable",
       "scope": ["api/health/ready", "hosted/dr-readiness"],
       "status": "verified",
@@ -47,7 +47,7 @@
     },
     {
       "id": "G25E2-MIDFLIGHT-DISCONNECT",
-      "acceptance": ["ACCEPT-013"],
+      "acceptance": ["DR-008", "ACCEPT-013"],
       "fault": "accepted-generation-subscriber-disconnect",
       "scope": ["arena/generate-stream", "arena/generations/[generationId]/stream"],
       "status": "verified",
@@ -56,7 +56,7 @@
     },
     {
       "id": "G25E2-D1-UNAVAILABLE",
-      "acceptance": ["ACCEPT-016"],
+      "acceptance": ["DR-005", "DR-007", "ACCEPT-016"],
       "fault": "d1-authority-unavailable",
       "scope": ["hosted/dr-readiness", "arena/generations/[generationId]"],
       "status": "verified",
@@ -65,7 +65,7 @@
     },
     {
       "id": "G25E2-DR-SECRET-MISSING",
-      "acceptance": ["DR-013", "ACCEPT-012"],
+      "acceptance": ["DR-010"],
       "fault": "dr-required-secret-missing",
       "scope": ["creator/generate", "generate-scenario"],
       "status": "verified",

@@ -259,6 +259,9 @@ if (
 const capabilities = manifest.capabilities ?? [];
 const capabilityIds = capabilities.map(({ id }) => id);
 const capabilityRoutes = capabilities.map(({ route }) => route);
+if (!capabilities.some(({ id, drillStatus }) => id === 'hosted/dr-readiness' && drillStatus === 'verified')) {
+  fail('G25E-2 必须验证代表性 hosted/dr-readiness safe-read capability');
+}
 if (!unique(capabilityIds)) {
   fail('capability.id 不得重复');
 }
