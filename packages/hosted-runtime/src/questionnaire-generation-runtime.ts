@@ -447,3 +447,56 @@ export const resolveNativeQuestionnaires = async ({
     )),
   };
 };
+
+export const resolveNativeLoreQuestionnaires = async (input: {
+  requestUrl: string;
+  selections: RequestQuestionnaireSelection[];
+  presetEntries: QuestionnairePresetIndexEntry[];
+  loadPreset(_requestUrl: string, _path: string): Promise<unknown>;
+  loadDataCard(_id: string): Promise<QuestionnaireDataCard>;
+}): Promise<{ allowed: boolean; questionnaires: RequestQuestionnaire[] }> => {
+  const loreSelections = input.selections.filter((selection) => selection.useLore !== false);
+  if (loreSelections.length === 0) return { allowed: true, questionnaires: [] };
+
+  const payloads: unknown[] = [];
+  for (const selection of loreSelections) {
+    let payload: unknown;
+    if (selection.source === 'preset') {
+      const preset = input.presetEntries.find((entry) => (
+        entry.kind === selection.kind && entry.id === selection.presetId?.trim()
+      ));
+      if (!preset || !isSafePresetPath(preset.path)) return deniedNativeQuestionnaires();
+      payload = await input.loadPreset(input.requestUrl, preset.path);
+    } else if (selection.source === 'database') {
+      const dataCardId = selection.dataCardId?.trim() ?? '';
+      if (!dataCardId) return deniedNativeQuestionnaires();
+      const card = await input.loadDataCard(dataCardId);
+      if (card?.type !== 'questionnaire' || typeof card.data !== 'string') {
+        return deniedNativeQuestionnaires();
+      }
+      try {
+        payload = JSON.parse(card.data);
+      } catch {
+        return deniedNativeQuestionnaires();
+      }
+    } else {
+      return deniedNativeQuestionnaires();
+    }
+
+    const record = payload && typeof payload === 'object'
+      ? payload as Record<string, unknown>
+      : null;
+    const hasLore = typeof record?.loreMarkdown === 'string'
+      && Boolean(record.loreMarkdown.trim());
+    const nativeAllowed = selection.source === 'preset'
+      ? record?.nativeAllowed !== false
+      : record?.nativeAllowed === true;
+    if (hasLore && !nativeAllowed) return deniedNativeQuestionnaires();
+    payloads.push(payload);
+  }
+
+  const questionnaires = normalizeQuestionnaires(payloads);
+  return questionnaires.length === payloads.length
+    ? { allowed: true, questionnaires }
+    : deniedNativeQuestionnaires();
+};

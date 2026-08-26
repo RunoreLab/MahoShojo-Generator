@@ -17,6 +17,8 @@ const RUNTIME_SUBPATHS = [
   './generate-magical-girl-runtime',
   './generate-magical-girl-details-runtime',
   './generate-magical-girl-details-stream-runtime',
+  './generate-sublimation-runtime',
+  './generate-sublimation-stream-runtime',
   './generate-game-card-runtime',
 ];
 

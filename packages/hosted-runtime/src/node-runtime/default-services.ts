@@ -3,6 +3,7 @@ import type { GenerateCreatorService } from '@mahoshojo/hosted-api/generate-crea
 import type { GenerateFreeService } from '@mahoshojo/hosted-api/generate-free';
 import type { GenerateMagicalGirlDetailsService } from '@mahoshojo/hosted-api/generate-magical-girl-details';
 import type { GenerateScenarioService } from '@mahoshojo/hosted-api/generate-scenario';
+import type { GenerateSublimationService } from '@mahoshojo/hosted-api/generate-sublimation';
 
 import { resolveBuildRuleRuntimeResultsFromRequest } from '../creator/build-rule-request';
 import { buildPersistedCreationInputs } from '../creator/card-metadata';
@@ -58,6 +59,14 @@ import {
   createGenerateScenarioStreamRuntime,
   type GenerateScenarioStreamRuntimeDependencies,
 } from '../generate-scenario-stream-runtime';
+import {
+  createGenerateSublimationRuntime,
+  type GenerateSublimationRuntimeDependencies,
+} from '../generate-sublimation-runtime';
+import {
+  createGenerateSublimationStreamRuntime,
+  type GenerateSublimationStreamRuntimeDependencies,
+} from '../generate-sublimation-stream-runtime';
 import { createActivityTokenService } from './activity-token';
 import {
   createContentSafetyService,
@@ -86,8 +95,11 @@ import { quickCheckForServer } from './sensitive-word-filter';
 import { createNodeStructuredAiRuntime } from './structured-ai';
 import {
   CANSHOU_LORE,
+  DEFAULT_CANSHOU_QUESTION_TEXTS,
+  DEFAULT_MAGICAL_GIRL_QUESTION_TEXTS,
   QUESTIONNAIRE_PRESET_INDEX,
   getRandomFlowers,
+  loadQuestionnairePresetAsset,
 } from './static-assets';
 import { parseAIProvidersFromEnv } from './providers';
 import type { GenerateWithAIOptions } from './types';
@@ -110,6 +122,8 @@ export type NodeHostedServices = Readonly<{
   generateCanshouStreamService: GenerateCanshouService;
   generateMagicalGirlDetailsService: GenerateMagicalGirlDetailsService;
   generateMagicalGirlDetailsStreamService: GenerateMagicalGirlDetailsService;
+  generateSublimationService: GenerateSublimationService;
+  generateSublimationStreamService: GenerateSublimationService;
   generateMagicalGirlService: ReturnType<typeof createGenerateMagicalGirlRuntime>['service'];
   generateMagicalGirlWithAI: ReturnType<
     typeof createGenerateMagicalGirlRuntime
@@ -255,6 +269,8 @@ export const createNodeHostedServices = (
     headers: { 'Content-Type': 'application/json' },
   });
   const loadPreset = async (requestUrl: string, path: string): Promise<unknown> => {
+    const bundled = loadQuestionnairePresetAsset(path);
+    if (bundled !== null) return bundled;
     const response = await fetcher(new URL(path, requestUrl), { method: 'GET' });
     if (!response.ok) {
       throw new Error(`加载预设问卷失败: ${response.status} ${response.statusText}`);
@@ -394,6 +410,50 @@ export const createNodeHostedServices = (
     logError: logError('流式生成魔法少女档案失败'),
   }).service;
 
+  const generateSublimationService = createGenerateSublimationRuntime({
+    ...providerPorts,
+    presetIndex: QUESTIONNAIRE_PRESET_INDEX,
+    defaultQuestions: {
+      magicalGirl: [...DEFAULT_MAGICAL_GIRL_QUESTION_TEXTS],
+      canshou: [...DEFAULT_CANSHOU_QUESTION_TEXTS],
+    },
+    allowGuidedNativeSigning: flagEnabled(
+      env,
+      'ALLOW_GUIDED_SUBLIMATION_NATIVE_SIGNING',
+      false,
+    ),
+    loadPreset,
+    loadDataCard: (id) => dataPorts.getDataCardById(id, false),
+    checkRateLimit,
+    enforceSafety,
+    generateWithAI: asStructuredPort<
+      GenerateSublimationRuntimeDependencies['generateWithAI']
+    >(structuredAi.generateWithAI),
+    verify: signatureService.verifySignature,
+    sign,
+    recordActivity,
+    buildResponse,
+    now,
+    logInfo,
+    logWarn,
+    logError: logError('成长升华失败'),
+  }).service;
+
+  const generateSublimationStreamService = createGenerateSublimationStreamRuntime({
+    ...providerPorts,
+    checkRateLimit,
+    enforceSafety,
+    shouldUseReasoningSse: shouldUseClientSse,
+    createReasoningSseBridge,
+    generateWithStreamAI: asStreamPort<
+      GenerateSublimationStreamRuntimeDependencies['generateWithStreamAI']
+    >(streamAi.generateWithStreamAI),
+    recordActivity,
+    logInfo,
+    logWarn,
+    logError: logError('流式升华失败'),
+  }).service;
+
   const magicalGirlRuntime = createGenerateMagicalGirlRuntime({
     checkRateLimit,
     enforceSafety: ({ request: _request, name, language }) => contentSafety.enforceTextSafety({
@@ -491,6 +551,8 @@ export const createNodeHostedServices = (
     generateCanshouStreamService,
     generateMagicalGirlDetailsService,
     generateMagicalGirlDetailsStreamService,
+    generateSublimationService,
+    generateSublimationStreamService,
     generateMagicalGirlService: magicalGirlRuntime.service,
     generateMagicalGirlWithAI: magicalGirlRuntime.generateMagicalGirlWithAI,
     generateGameCardService,
@@ -526,6 +588,12 @@ export const createDefaultGenerateMagicalGirlDetailsService = createDefaultServi
 export const createDefaultGenerateMagicalGirlDetailsStreamService = createDefaultService(
   'generateMagicalGirlDetailsStreamService',
 );
+export const createDefaultGenerateSublimationService = createDefaultService(
+  'generateSublimationService',
+);
+export const createDefaultGenerateSublimationStreamService = createDefaultService(
+  'generateSublimationStreamService',
+);
 export const createDefaultGenerateCreatorService = createDefaultService('generateCreatorService');
 export const createDefaultGenerateCreatorStreamService = createDefaultService(
   'generateCreatorStreamService',
@@ -545,6 +613,9 @@ export const defaultGenerateMagicalGirlDetailsService =
   defaultServices.generateMagicalGirlDetailsService;
 export const defaultGenerateMagicalGirlDetailsStreamService =
   defaultServices.generateMagicalGirlDetailsStreamService;
+export const defaultGenerateSublimationService = defaultServices.generateSublimationService;
+export const defaultGenerateSublimationStreamService =
+  defaultServices.generateSublimationStreamService;
 export const defaultGenerateMagicalGirlService = defaultServices.generateMagicalGirlService;
 export const generateMagicalGirlWithAI = defaultServices.generateMagicalGirlWithAI;
 export const defaultGenerateGameCardService = defaultServices.generateGameCardService;

@@ -1,6 +1,11 @@
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 
+import {
+  QUESTIONNAIRE_PRESET_INDEX,
+  loadQuestionnairePresetAsset,
+} from '../packages/hosted-runtime/src/node-runtime/static-assets';
+
 const ROOT_DIRECTORY = process.cwd();
 
 const read = (relativePath: string): string =>
@@ -33,6 +38,8 @@ const hostedServiceWrappers = [
   'apps/web/lib/hosted-api/generate-creator-stream.ts',
   'apps/web/lib/hosted-api/generate-magical-girl-details.ts',
   'apps/web/lib/hosted-api/generate-magical-girl-details-stream.ts',
+  'apps/web/lib/hosted-api/generate-sublimation.ts',
+  'apps/web/lib/hosted-api/generate-sublimation-stream.ts',
 ] as const;
 
 const protectivePortWrappers = [
@@ -88,6 +95,11 @@ describe('apps/web 与 hosted-runtime compatibility 边界', () => {
     for (const [publicAsset, packageAsset] of assetMirrors) {
       expect(existsSync(path.join(ROOT_DIRECTORY, packageAsset))).toBe(true);
       expect(read(packageAsset)).toBe(read(publicAsset));
+    }
+    for (const preset of QUESTIONNAIRE_PRESET_INDEX.presets) {
+      expect(loadQuestionnairePresetAsset(preset.path)).toEqual(
+        JSON.parse(read(`apps/web/public${preset.path}`)),
+      );
     }
   });
 });

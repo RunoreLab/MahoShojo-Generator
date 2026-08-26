@@ -5,6 +5,7 @@ import { buildCreatorPromptInput, validateCreatorRequest } from '../src/creator/
 import {
   CANSHOU_LORE,
   QUESTIONNAIRE_PRESET_INDEX,
+  loadQuestionnairePresetAsset,
   getRandomFlowers,
 } from '../src/node-runtime/static-assets';
 
@@ -48,6 +49,10 @@ describe('package-owned Creator runtime and static assets', () => {
     expect(QUESTIONNAIRE_PRESET_INDEX.presets.every((preset) => (
       preset.path.startsWith('/questionnaires/presets/')
     ))).toBe(true);
+    for (const preset of QUESTIONNAIRE_PRESET_INDEX.presets) {
+      const bundled = loadQuestionnairePresetAsset(preset.path);
+      expect(bundled).toEqual(expect.objectContaining({ id: preset.id, kind: preset.kind }));
+    }
     expect(CANSHOU_LORE).toContain('残兽设定整理');
     expect(getRandomFlowers(2).split('\n')).toHaveLength(2);
   });

@@ -90,7 +90,7 @@ describe('Details / Sublimation shared application services', () => {
     ['Details', createGenerateMagicalGirlDetailsService, '生成失败，当前服务器可能正忙，请稍后重试'],
     ['Details stream', createGenerateMagicalGirlDetailsStreamService, '生成失败'],
     ['Sublimation', createGenerateSublimationService, '角色成长升华失败: HOSTED_GENERATION_FAILED'],
-    ['Sublimation stream', createGenerateSublimationStreamService, '流式生成失败'],
+    ['Sublimation stream', createGenerateSublimationStreamService, '生成失败'],
   ] as const)('%s 异常响应不泄漏原始错误', async (_name, factory, publicError) => {
     const deps = dependencies([]);
     deps.generate.mockRejectedValueOnce(new Error('provider-secret-canary'));

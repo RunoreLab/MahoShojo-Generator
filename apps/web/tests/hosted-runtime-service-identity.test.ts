@@ -13,6 +13,8 @@ import {
   defaultGenerateMagicalGirlDetailsStreamService as packageMagicalGirlDetailsStream,
   defaultGenerateScenarioService as packageScenario,
   defaultGenerateScenarioStreamService as packageScenarioStream,
+  defaultGenerateSublimationService as packageSublimation,
+  defaultGenerateSublimationStreamService as packageSublimationStream,
 } from '@mahoshojo/hosted-runtime/node-runtime/default-services';
 import { defaultGenerateCanshouService } from '@/lib/hosted-api/generate-canshou';
 import { defaultGenerateCanshouStreamService } from '@/lib/hosted-api/generate-canshou-stream';
@@ -26,8 +28,10 @@ import { defaultGenerateMagicalGirlDetailsService } from '@/lib/hosted-api/gener
 import { defaultGenerateMagicalGirlDetailsStreamService } from '@/lib/hosted-api/generate-magical-girl-details-stream';
 import { defaultGenerateScenarioService } from '@/lib/hosted-api/generate-scenario';
 import { defaultGenerateScenarioStreamService } from '@/lib/hosted-api/generate-scenario-stream';
+import { defaultGenerateSublimationService } from '@/lib/hosted-api/generate-sublimation';
+import { defaultGenerateSublimationStreamService } from '@/lib/hosted-api/generate-sublimation-stream';
 
-describe('12 retained / staged Hosted services identity', () => {
+describe('14 retained / staged Hosted services identity', () => {
   test('legacy Next compatibility 与 package Node composition 复用同一实例', () => {
     expect([
       defaultGenerateFreeService,
@@ -42,6 +46,8 @@ describe('12 retained / staged Hosted services identity', () => {
       defaultGenerateCreatorStreamService,
       defaultGenerateMagicalGirlDetailsService,
       defaultGenerateMagicalGirlDetailsStreamService,
+      defaultGenerateSublimationService,
+      defaultGenerateSublimationStreamService,
     ]).toEqual([
       packageFree,
       packageFreeStream,
@@ -55,6 +61,8 @@ describe('12 retained / staged Hosted services identity', () => {
       packageCreatorStream,
       packageMagicalGirlDetails,
       packageMagicalGirlDetailsStream,
+      packageSublimation,
+      packageSublimationStream,
     ]);
   });
 });

@@ -36,7 +36,7 @@ export const createGenerateSublimationStreamService = <Prepared, Execution, Gene
     invalidJsonResponse: 'route-error',
     executionOrder: 'after-policies',
     buildErrorResponse: () => jsonResponse({
-      error: '流式生成失败',
+      error: '生成失败',
       message: HOSTED_GENERATION_ERROR_CODE,
     }, 500),
   },

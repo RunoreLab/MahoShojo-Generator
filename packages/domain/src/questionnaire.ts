@@ -206,6 +206,37 @@ export const normalizeUserAnswers = (
   return [];
 };
 
+export const extractQuestionTextsFromUserAnswers = (userAnswers: unknown): string[] => {
+  if (!userAnswers) return [];
+  const add = (items: string[], value: unknown): void => {
+    if (typeof value === 'string' && value.trim()) items.push(value.trim());
+  };
+  if (Array.isArray(userAnswers)) {
+    const questions: string[] = [];
+    for (const item of userAnswers) {
+      if (item && typeof item === 'object' && !Array.isArray(item)) {
+        add(questions, (item as Record<string, unknown>).question);
+      }
+    }
+    return questions;
+  }
+  if (typeof userAnswers === 'object') {
+    const questions: string[] = [];
+    for (const [key, value] of Object.entries(userAnswers as Record<string, unknown>)) {
+      if (value && typeof value === 'object' && !Array.isArray(value)) {
+        const question = (value as Record<string, unknown>).question;
+        if (typeof question === 'string' && question.trim()) {
+          questions.push(question.trim());
+          continue;
+        }
+      }
+      add(questions, key);
+    }
+    return questions;
+  }
+  return [];
+};
+
 export const QUESTIONNAIRE_NATIVE_MAX_ANSWER_CHARS = 500;
 
 export type AnswerLimitSource = 'question' | 'global' | 'none';

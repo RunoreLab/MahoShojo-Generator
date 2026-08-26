@@ -244,6 +244,16 @@
       "import": "./src/generate-scenario-stream-runtime.ts",
       "default": "./src/generate-scenario-stream-runtime.ts"
     },
+    "./generate-sublimation-runtime": {
+      "types": "./src/generate-sublimation-runtime.ts",
+      "import": "./src/generate-sublimation-runtime.ts",
+      "default": "./src/generate-sublimation-runtime.ts"
+    },
+    "./generate-sublimation-stream-runtime": {
+      "types": "./src/generate-sublimation-stream-runtime.ts",
+      "import": "./src/generate-sublimation-stream-runtime.ts",
+      "default": "./src/generate-sublimation-stream-runtime.ts"
+    },
     "./generate-creator-runtime": {
       "types": "./src/generate-creator-runtime.ts",
       "import": "./src/generate-creator-runtime.ts",
@@ -286,6 +296,7 @@
     }
   },
   "scripts": {
+    "assets:questionnaires": "node scripts/generate-questionnaire-assets.mjs",
     "test": "vitest run --config vitest.config.ts",
     "lint": "eslint src tests --config eslint.config.mjs",
     "build": "tsc --noEmit -p tsconfig.json"
