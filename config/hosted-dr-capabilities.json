@@ -472,6 +472,26 @@
       ],
       "contractStatus": "verified",
       "drillStatus": "pending-g25e-2"
+    },
+    {
+      "id": "hosted/dr-readiness",
+      "route": "/api/hosted/dr-readiness",
+      "operations": [
+        { "method": "GET", "requestClass": "safe-read", "drMode": "safe-read", "replayPolicy": "safe-read-only" },
+        { "method": "HEAD", "requestClass": "safe-read", "drMode": "safe-read", "replayPolicy": "safe-read-only" }
+      ],
+      "requiredSecrets": [],
+      "requiredBindings": ["DB"],
+      "primaryDatabaseProvider": "hono-d1-primary",
+      "drDatabaseProvider": "cloudflare-d1-binding",
+      "consistency": "replica-ok",
+      "contractTests": [
+        "packages/hosted-api/tests/hosted-dr.test.ts",
+        "apps/api/tests/hosted-dr-readiness-adapter.test.ts",
+        "apps/web/tests/hosted-dr-readiness.test.ts"
+      ],
+      "contractStatus": "verified",
+      "drillStatus": "pending-g25e-2"
     }
   ]
 }

@@ -30,6 +30,7 @@
     "generate-scenario",
     "generate-scenario-stream",
     "generate-sublimation",
-    "generate-sublimation-stream"
+    "generate-sublimation-stream",
+    "hosted/dr-readiness"
   ]
 }

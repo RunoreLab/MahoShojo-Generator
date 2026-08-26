@@ -1,9 +1,12 @@
+import { withNextDrCapability } from '@/lib/hosted-dr/capability-guard';
 import { appRouteHandler } from './handler';
 
-export const GET = appRouteHandler;
-export const HEAD = appRouteHandler;
-export const OPTIONS = appRouteHandler;
-export const POST = appRouteHandler;
-export const PUT = appRouteHandler;
-export const PATCH = appRouteHandler;
-export const DELETE = appRouteHandler;
+const guardedRouteHandler = withNextDrCapability('generate-sublimation', appRouteHandler);
+
+export const GET = guardedRouteHandler;
+export const HEAD = guardedRouteHandler;
+export const OPTIONS = guardedRouteHandler;
+export const POST = guardedRouteHandler;
+export const PUT = guardedRouteHandler;
+export const PATCH = guardedRouteHandler;
+export const DELETE = guardedRouteHandler;

@@ -13,8 +13,8 @@ const routeInventory = JSON.parse(readFileSync(
 };
 
 describe('Hono/Next route ownership parity', () => {
-  it('keeps the accepted 22 shared / 6 exited / 0 legacy inventory', () => {
-    expect(routeInventory.sharedRouteIds).toHaveLength(22);
+  it('keeps the accepted 23 shared / 6 exited / 0 legacy inventory', () => {
+    expect(routeInventory.sharedRouteIds).toHaveLength(23);
     expect(routeInventory.exitedRouteIds).toHaveLength(6);
     expect(routeInventory.legacyRouteIds).toEqual([]);
   });

@@ -1,4 +1,7 @@
+import { withNextDrCapability } from '@/lib/hosted-dr/capability-guard';
 import { appRouteHandler } from './handler';
 
-export const POST = appRouteHandler;
-export const DELETE = appRouteHandler;
+const guardedRouteHandler = withNextDrCapability('arena/generate-stream', appRouteHandler);
+
+export const POST = guardedRouteHandler;
+export const DELETE = guardedRouteHandler;

@@ -16,7 +16,7 @@ const EXITED_ROUTE_IDS = [
 ] as const;
 
 describe('Hono route manifest', () => {
-  it('只挂载已经脱离 legacy Next import 的二十二条 shared capability', () => {
+  it('只挂载已经脱离 legacy Next import 的二十三条 shared capability', () => {
     expect(routeDefinitions.map((route) => route.id).sort()).toEqual([
       'arena/generate',
       'arena/generate-stream',
@@ -40,8 +40,9 @@ describe('Hono route manifest', () => {
       'generate-scenario-stream',
       'generate-sublimation',
       'generate-sublimation-stream',
+      'hosted/dr-readiness',
     ]);
-    expect(routeDefinitions).toHaveLength(22);
+    expect(routeDefinitions).toHaveLength(23);
     expect(routeDefinitions.some((route) => route.pattern === '/api/auth/*')).toBe(false);
     expect(routeDefinitions.some((route) => route.pattern.startsWith('/api/pvp/'))).toBe(false);
   });
@@ -71,6 +72,7 @@ describe('Hono route manifest', () => {
       'generate-scenario-stream',
       'generate-sublimation',
       'generate-sublimation-stream',
+      'hosted/dr-readiness',
     ]);
     const routeInventory = JSON.parse(readFileSync(
       path.join(REPOSITORY_ROOT, 'config/hono-api-routes.json'),
@@ -82,7 +84,7 @@ describe('Hono route manifest', () => {
     };
     expect(routeInventory.exitedRouteIds).toEqual(EXITED_ROUTE_IDS);
     expect(routeInventory.legacyRouteIds).toEqual([]);
-    expect(routeInventory.sharedRouteIds?.length).toBe(22);
+    expect(routeInventory.sharedRouteIds?.length).toBe(23);
 
     for (const definition of sharedDefinitions) {
       const routeModule = await definition.load();

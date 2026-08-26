@@ -1,5 +1,9 @@
-import { describe, expect, it } from 'vitest';
-import { selectHostedDrRuntime } from '../src/hosted-dr';
+import { describe, expect, it, vi } from 'vitest';
+import {
+  createHostedDrReadinessService,
+  selectHostedDrRuntime,
+  type HostedDrReadinessDatabaseProvider,
+} from '../src/hosted-dr';
 
 describe('Hosted DR runtime selector', () => {
   it('把尚未 dispatch 的 safe read 在 primary unavailable 时交给 Next DR', () => {
@@ -71,5 +75,143 @@ describe('Hosted DR runtime selector', () => {
       primaryHealth: 'unknown',
       hasDurableIdempotencyProof: false,
     })).toBe('fail-closed');
+  });
+});
+
+const readinessProvider = (
+  result: unknown = { success: true, results: [{ ok: 1 }], meta: {} },
+): {
+  provider: HostedDrReadinessDatabaseProvider;
+  sql: string[];
+  options: unknown[];
+} => {
+  const sql: string[] = [];
+  const options: unknown[] = [];
+  return {
+    provider: {
+      id: 'cloudflare-d1-binding',
+      openSession: ({ consistency }) => ({
+        consistency,
+        initialBookmark: 'bookmark-secret-canary',
+        getBookmark: () => 'bookmark-secret-canary',
+        client: {
+          prepare: (statementSql) => {
+            sql.push(statementSql);
+            return {
+              bind: () => {
+                throw new Error('readiness SQL 不得 bind 任意输入');
+              },
+              run: async () => {
+                throw new Error('readiness 必须使用 all safe-read');
+              },
+              all: async (queryOptions) => {
+                options.push(queryOptions);
+                return result as never;
+              },
+            };
+          },
+        },
+      }),
+    },
+    sql,
+    options,
+  };
+};
+
+describe('Hosted DR readiness application contract', () => {
+  it('只执行固定 SELECT 1 safe-read 并返回最小公开 contract', async () => {
+    const { provider, sql, options } = readinessProvider();
+    const service = createHostedDrReadinessService({
+      placement: 'next-dr',
+      provider,
+    });
+
+    const response = await service(new Request('https://example.test/api/hosted/dr-readiness'));
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('cache-control')).toBe('no-store');
+    expect(await response.json()).toEqual({
+      ok: true,
+      contractVersion: 'g25e1-v1',
+      placement: 'next-dr',
+      databaseProvider: 'cloudflare-d1-binding',
+      consistency: 'replica-ok',
+    });
+    expect(sql).toEqual(['SELECT 1 AS ok']);
+    expect(options).toEqual([{ retry: 'safe-read' }]);
+  });
+
+  it('HEAD 保持状态与 header parity 且 body 为空', async () => {
+    const { provider } = readinessProvider();
+    const service = createHostedDrReadinessService({
+      placement: 'hono-primary',
+      provider,
+    });
+
+    const response = await service(new Request(
+      'https://example.test/api/hosted/dr-readiness',
+      { method: 'HEAD' },
+    ));
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toBe('application/json; charset=utf-8');
+    expect(response.headers.get('cache-control')).toBe('no-store');
+    expect(await response.text()).toBe('');
+  });
+
+  it.each([
+    ['missing provider', null],
+    ['query failure', new Error('db-url-secret-canary')],
+    ['invalid result', { success: true, results: [{ ok: 0 }], meta: {} }],
+  ] as const)('%s 时返回固定 503 且不泄漏内部值', async (_label, outcome) => {
+    const provider = outcome === null
+      ? { id: 'cloudflare-d1-binding' as const, openSession: () => null }
+      : readinessProvider(outcome).provider;
+    if (outcome instanceof Error) {
+      provider.openSession = () => ({
+        consistency: 'replica-ok',
+        initialBookmark: 'bookmark-secret-canary',
+        getBookmark: () => 'bookmark-secret-canary',
+        client: {
+          prepare: () => ({
+            bind: () => { throw outcome; },
+            run: async () => { throw outcome; },
+            all: async () => { throw outcome; },
+          }),
+        },
+      });
+    }
+    const service = createHostedDrReadinessService({
+      placement: 'next-dr',
+      provider,
+    });
+
+    const response = await service(new Request('https://example.test/api/hosted/dr-readiness'));
+    const body = await response.text();
+
+    expect(response.status).toBe(503);
+    expect(JSON.parse(body)).toEqual({
+      ok: false,
+      code: 'HOSTED_DR_CAPABILITY_UNAVAILABLE',
+      contractVersion: 'g25e1-v1',
+    });
+    expect(body).not.toMatch(/bookmark-secret-canary|db-url-secret-canary|SELECT 1/u);
+  });
+
+  it('拒绝 GET/HEAD 之外的方法且不打开 provider session', async () => {
+    const openSession = vi.fn();
+    const service = createHostedDrReadinessService({
+      placement: 'next-dr',
+      provider: { id: 'cloudflare-d1-binding', openSession },
+    });
+
+    const response = await service(new Request(
+      'https://example.test/api/hosted/dr-readiness',
+      { method: 'POST' },
+    ));
+
+    expect(response.status).toBe(405);
+    expect(response.headers.get('allow')).toBe('GET, HEAD');
+    expect(openSession).not.toHaveBeenCalled();
   });
 });

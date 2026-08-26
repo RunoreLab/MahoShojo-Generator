@@ -57,6 +57,12 @@ export const routeDefinitions: RouteDefinition[] = [
     load: () => import("../adapters/creator/generate-stream") as unknown as Promise<RouteModule>,
   },
   {
+    id: "hosted/dr-readiness",
+    pattern: "/api/hosted/dr-readiness",
+    adapter: "shared-service",
+    load: () => import("../adapters/hosted/dr-readiness") as unknown as Promise<RouteModule>,
+  },
+  {
     id: "generate-battle-story",
     pattern: "/api/generate-battle-story",
     adapter: "shared-service",

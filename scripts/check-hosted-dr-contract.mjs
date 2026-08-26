@@ -224,6 +224,16 @@ for (const capability of capabilities) {
       fail(`${label}: 缺少 adapter ${adapterPath}`);
     }
   }
+  const nextRoutePath = `apps/web/app/api/${label}/route.ts`;
+  if (existsSync(path.join(repositoryRoot, nextRoutePath))) {
+    const nextRouteSource = readFileSync(path.join(repositoryRoot, nextRoutePath), 'utf8');
+    if (
+      !nextRouteSource.includes('withNextDrCapability')
+      || !nextRouteSource.includes(`'${label}'`)
+    ) {
+      fail(`${label}: Next route 未显式包裹 Hosted DR capability guard`);
+    }
+  }
   if (!Array.isArray(capability.contractTests) || capability.contractTests.length === 0) {
     fail(`${label}: contractTests 不得为空`);
   }
