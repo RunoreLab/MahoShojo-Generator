@@ -14,9 +14,9 @@ import {
   createArenaCompanionRouteService,
 } from '@mahoshojo/hosted-runtime/arena-companion';
 import type { ArenaGenerationObserver } from '@mahoshojo/hosted-api/arena-generation/service';
-import { getDefaultNodeD1Client } from '@mahoshojo/hosted-runtime/node-runtime/d1-client';
 import { recordUserActivityFromRequest } from '@mahoshojo/hosted-runtime/node-runtime/data-ports';
 import { createEnvSignatureService } from '@mahoshojo/hosted-runtime/node-runtime/env-signature';
+import { getHonoPrimaryD1Client } from '#/d1/provider';
 import type { RedisRuntime } from '#/redis/runtime';
 
 export type HonoArenaGenerationRuntimeOptions = {
@@ -48,7 +48,7 @@ export const configureHonoArenaGenerationRuntime = (
       accessClientId: process.env.CF_ACCESS_CLIENT_ID,
       accessClientSecret: process.env.CF_ACCESS_CLIENT_SECRET,
     });
-  const getD1Client = () => getDefaultNodeD1Client();
+  const getD1Client = getHonoPrimaryD1Client;
   const readSeasonContext = createArenaSeasonContextReader({
     baseUrl: finalizationBaseUrl,
     accessClientId: process.env.CF_ACCESS_CLIENT_ID,

@@ -7,11 +7,11 @@ import {
   createNodeArenaGenerationService,
   createNodeArenaGenerationTerminalStore,
 } from '@mahoshojo/hosted-runtime/arena-generation';
-import { getDefaultNodeD1Client } from '@mahoshojo/hosted-runtime/node-runtime/d1-client';
 
 import { readGenerationRankingForGeneration } from '@/app/api/arena/generation-ranking/handler';
 import { settleArenaRatingsForGeneration } from '@/lib/database/arena-ratings';
 import { cloudflareArenaGenerationObserver } from '@/app/api/arena/generation-telemetry';
+import { getCloudflareDrD1Client } from '@/lib/hosted-dr/database-provider';
 
 const globalKey = '__mahoshojoArenaGenerationDrServiceV2';
 
@@ -20,7 +20,7 @@ type GlobalWithArenaGeneration = typeof globalThis & {
 };
 
 const buildService = (): ReturnType<typeof createNodeArenaGenerationService> => {
-  const getD1Client = () => getDefaultNodeD1Client();
+  const getD1Client = getCloudflareDrD1Client;
   const objectStore = createArenaR2ObjectStoreFromEnvironment();
   const seasonContextBaseUrl = process.env.ARENA_SEASON_CONTEXT_URL?.trim()
     || process.env.BETTER_AUTH_URL?.trim()

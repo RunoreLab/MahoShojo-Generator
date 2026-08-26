@@ -1,7 +1,5 @@
-import {
-  getDefaultNodeD1Client,
-} from '@mahoshojo/hosted-runtime/node-runtime/d1-client';
 import type { NodeDataD1Client } from '@mahoshojo/hosted-runtime/node-runtime/data-ports';
+import { getHonoPrimaryD1Client } from '#/d1/provider';
 
 const isReadinessRow = (value: unknown): value is { ok: number } => (
   typeof value === 'object'
@@ -10,7 +8,7 @@ const isReadinessRow = (value: unknown): value is { ok: number } => (
 );
 
 export const probeD1Readiness = async (
-  client: NodeDataD1Client | null = getDefaultNodeD1Client(),
+  client: NodeDataD1Client | null = getHonoPrimaryD1Client(),
 ): Promise<boolean> => {
   if (!client) return false;
   try {

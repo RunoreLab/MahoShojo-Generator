@@ -1,9 +1,11 @@
 import { serve } from '@hono/node-server';
 import { isExpectedClientDisconnect } from '@mahoshojo/hosted-runtime/node-runtime';
 import { registerHostedRuntimeObserver } from '@mahoshojo/hosted-runtime/telemetry';
+import { configureDefaultNodeHostedD1ClientResolver } from '@mahoshojo/hosted-runtime/node-runtime/default-services';
 import { createHonoApp } from '#/app';
 import { readHonoServerConfig } from '#/config';
 import { configureHonoArenaGenerationRuntime } from '#/arena-generation/runtime';
+import { getHonoPrimaryD1Client } from '#/d1/provider';
 import { RedisRuntime } from '#/redis/runtime';
 import {
   createSingleRunShutdown,
@@ -31,6 +33,7 @@ if (process.env.HONO_CONFIG_CHECK_ONLY === 'true') {
     () => redis.sampleServerStats(),
   );
   await redis.connect();
+  configureDefaultNodeHostedD1ClientResolver(getHonoPrimaryD1Client);
   configureHonoArenaGenerationRuntime(redis, { observer: telemetry });
 
   telemetry.start();

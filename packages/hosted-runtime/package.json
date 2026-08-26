@@ -4,6 +4,11 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./database-provider": {
+      "types": "./src/database-provider.ts",
+      "import": "./src/database-provider.ts",
+      "default": "./src/database-provider.ts"
+    },
     "./arena-companion": {
       "types": "./src/arena-companion/index.ts",
       "import": "./src/arena-companion/index.ts",
