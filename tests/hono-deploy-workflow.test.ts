@@ -128,13 +128,13 @@ describe('Hono deployment workflow', () => {
       'run: pnpm --filter @mahoshojo/web run build:cf',
     );
     expect(getStep(deployJob, 'Deploy production')).toContain(
-      'run: pnpm --filter @mahoshojo/web exec wrangler deploy --env production',
+      'run: pnpm --filter @mahoshojo/web exec wrangler deploy --env production --keep-vars',
     );
     expect(deployJob).not.toContain('- name: Deploy preview');
 
     const previewWorkflow = readFileSync(PREVIEW_WORKFLOW_PATH, 'utf8');
     expect(getStep(getJob(previewWorkflow, 'deploy-cloudflare-preview'), 'Deploy Cloudflare preview')).toContain(
-      'run: pnpm --filter @mahoshojo/web exec wrangler deploy --env preview',
+      'run: pnpm --filter @mahoshojo/web exec wrangler deploy --env preview --keep-vars',
     );
   });
 
