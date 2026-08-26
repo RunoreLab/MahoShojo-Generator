@@ -31,7 +31,20 @@ describe('Hono server config', () => {
       nodeEnv: 'production',
       authMode: 'bearer',
       corsOrigins: ['https://*.colanns.me'],
+      redisKeyPrefix: '',
     });
+  });
+
+  it('读取共享 Redis 的环境隔离前缀', () => {
+    stubValidBearerProductionEnv();
+    vi.stubEnv('REDIS_KEY_PREFIX', 'preview');
+    expect(readHonoServerConfig().redisKeyPrefix).toBe('preview');
+  });
+
+  it('拒绝可能造成 Redis key 越界的环境前缀', () => {
+    stubValidBearerProductionEnv();
+    vi.stubEnv('REDIS_KEY_PREFIX', 'preview:api');
+    expect(() => readHonoServerConfig()).toThrow(/REDIS_KEY_PREFIX/);
   });
 
   it('hybrid 生产模式仍要求 Better Auth 配置', () => {

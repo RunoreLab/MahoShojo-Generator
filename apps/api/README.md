@@ -1,5 +1,10 @@
 # Hono 独立服务端
 
+`preview` 分支由 `.github/workflows/preview-deploy.yml` 发布到同一 VPS 上的独立实例：部署目录
+`/opt/mahoshojo-hono-preview`、容器 `mahoshojo-hono-preview`、回环端口 `8081`、公网域名
+`homura-preview.colanns.me`。它与生产共用 D1 和 Redis，但通过 `REDIS_KEY_PREFIX=preview` 隔离限流与
+可恢复生成状态。完整初始化及回滚约束见 `docs/2026-08-26_223558_预览环境自动部署说明.md`。
+
 当前实现建立了可并行验证的 Hono Node 服务，不会改变原有 `pnpm dev` 和 Cloudflare Next 部署：
 
 - 通过 `config/hono-api-routes.json` 的 `sharedRouteIds` 挂载经裁决保留的生成类 API，并用 `exitedRouteIds` 冻结继续由 Next 承载的退出清单；

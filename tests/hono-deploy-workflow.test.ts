@@ -4,6 +4,7 @@ import { describe, expect, test } from 'vitest';
 
 const HONO_WORKFLOW_PATH = resolve(process.cwd(), '.github/workflows/hono-deploy.yml');
 const CLOUDFLARE_WORKFLOW_PATH = resolve(process.cwd(), '.github/workflows/cloudflare-deploy.yml');
+const PREVIEW_WORKFLOW_PATH = resolve(process.cwd(), '.github/workflows/preview-deploy.yml');
 const HONO_COMPOSE_PATH = resolve(process.cwd(), 'apps/api/deploy/compose.yml');
 const HONO_DEPLOY_SCRIPT_PATH = resolve(process.cwd(), 'apps/api/deploy/deploy-bundle.sh');
 const HONO_INSTALL_SCRIPT_PATH = resolve(process.cwd(), 'apps/api/deploy/install-bundle.sh');
@@ -129,8 +130,28 @@ describe('Hono deployment workflow', () => {
     expect(getStep(deployJob, 'Deploy production')).toContain(
       'run: pnpm --filter @mahoshojo/web exec wrangler deploy --env production',
     );
-    expect(getStep(deployJob, 'Deploy preview')).toContain(
+    expect(deployJob).not.toContain('- name: Deploy preview');
+
+    const previewWorkflow = readFileSync(PREVIEW_WORKFLOW_PATH, 'utf8');
+    expect(getStep(getJob(previewWorkflow, 'deploy-cloudflare-preview'), 'Deploy Cloudflare preview')).toContain(
       'run: pnpm --filter @mahoshojo/web exec wrangler deploy --env preview',
+    );
+  });
+
+  test('preview 分支串行发布隔离 Hono 后再发布 Cloudflare', () => {
+    const workflow = readFileSync(PREVIEW_WORKFLOW_PATH, 'utf8');
+    const honoJob = getJob(workflow, 'deploy-hono-preview');
+    const cloudflareJob = getJob(workflow, 'deploy-cloudflare-preview');
+
+    expect(workflow).toMatch(/branches:\s*\n\s*- preview/u);
+    expect(honoJob).toContain('HONO_DEPLOY_ROOT_DIR: /opt/mahoshojo-hono-preview');
+    expect(honoJob).toContain('HONO_CONTAINER_NAME: mahoshojo-hono-preview');
+    expect(honoJob).toContain("HONO_BIND_PORT: '8081'");
+    expect(honoJob).toContain('HONO_REDIS_KEY_PREFIX: preview');
+    expect(honoJob).toContain('https://homura-preview.colanns.me');
+    expect(cloudflareJob).toContain('needs: deploy-hono-preview');
+    expect(cloudflareJob).toContain(
+      'NEXT_PUBLIC_HONO_API_ORIGIN: https://homura-preview.colanns.me',
     );
   });
 
@@ -161,7 +182,9 @@ describe('Hono deployment workflow', () => {
     expect(containerBuildStep).toContain(
       'COMPOSE_ENV_FILE: /opt/mahoshojo-hono/.env.hono',
     );
-    expect(compose).toContain('- /opt/mahoshojo-hono/.env.hono');
+    expect(compose).toContain(
+      '- ${HONO_DEPLOY_ROOT_DIR:-/opt/mahoshojo-hono}/.env.hono',
+    );
     expect(activeLines).toContain(composeEnvironmentSafetyCheck);
     expect(activeLines).toContain(composeEnvironmentSymlinkCheck);
     expect(activeLines).toContain(composeEnvironmentCleanupTrap);

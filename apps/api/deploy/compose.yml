@@ -1,13 +1,13 @@
 services:
   hono:
     image: node:22-alpine
-    container_name: mahoshojo-hono
+    container_name: ${HONO_CONTAINER_NAME:-mahoshojo-hono}
     init: true
     restart: unless-stopped
     user: node
     command: ["node", "/app/index.mjs"]
     env_file:
-      - /opt/mahoshojo-hono/.env.hono
+      - ${HONO_DEPLOY_ROOT_DIR:-/opt/mahoshojo-hono}/.env.hono
     environment:
       NODE_ENV: production
       HONO_HOST: 0.0.0.0
@@ -17,9 +17,10 @@ services:
       REDIS_HOST: redis
       REDIS_PORT: 6379
       REDIS_REQUIRED: "true"
+      REDIS_KEY_PREFIX: ${HONO_REDIS_KEY_PREFIX:-}
       D1_REQUIRED: "true"
     ports:
-      - "127.0.0.1:8080:8787"
+      - "127.0.0.1:${HONO_BIND_PORT:-8080}:8787"
     volumes:
       - "${HONO_RELEASE_DIR:?HONO_RELEASE_DIR 未配置}/index.mjs:/app/index.mjs:ro"
     logging:

@@ -25,6 +25,7 @@ const config: HonoServerConfig = {
   port: 8787,
   nodeEnv: 'test',
   redisUrl: null,
+  redisKeyPrefix: '',
   redisRequired: false,
   d1Required: true,
   corsOrigins: ['http://localhost:3000'],

@@ -16,6 +16,7 @@ const config: HonoServerConfig = {
   port: 8787,
   nodeEnv: 'test',
   redisUrl: null,
+  redisKeyPrefix: '',
   redisRequired: false,
   d1Required: false,
   corsOrigins: ['http://localhost:3000'],
@@ -133,6 +134,20 @@ describe('Hono server app', () => {
       errorClass: 'command_failed',
     });
     expect(JSON.stringify(errorSpy.mock.calls)).not.toContain('redis-url-secret-canary');
+  });
+
+  it('共用 Redis 时使用环境前缀隔离限流键', async () => {
+    const redis = createRedisStub();
+    const capturedNamespaces: string[] = [];
+    redis.consumeFixedWindow = async (input) => {
+      capturedNamespaces.push(input.namespace);
+      return null;
+    };
+    const app = createHonoApp({ ...config, redisKeyPrefix: 'preview' }, redis);
+
+    await app.request('/api/auth/not-existing');
+
+    expect(capturedNamespaces).toEqual(['preview:api', 'preview:auth']);
   });
 
   it('Redis 命令异常且为必需依赖时稳定返回 503', async () => {

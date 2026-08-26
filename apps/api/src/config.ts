@@ -11,6 +11,7 @@ export type HonoServerConfig = {
   port: number;
   nodeEnv: string;
   redisUrl: string | null;
+  redisKeyPrefix: string;
   redisRequired: boolean;
   d1Required: boolean;
   corsOrigins: string[];
@@ -158,6 +159,14 @@ const readRedisUrl = (): string | null => {
   return `${protocol}://${credentials}${host}:${port}`;
 };
 
+const readRedisKeyPrefix = (): string => {
+  const prefix = process.env.REDIS_KEY_PREFIX?.trim() || '';
+  if (prefix && !/^[a-z0-9_-]{1,32}$/u.test(prefix)) {
+    throw new Error('REDIS_KEY_PREFIX 只能包含 1-32 个小写字母、数字、下划线或连字符');
+  }
+  return prefix;
+};
+
 export const readHonoServerConfig = (): HonoServerConfig => {
   const nodeEnv = process.env.NODE_ENV?.trim() || 'development';
   const redisUrl = readRedisUrl();
@@ -167,6 +176,7 @@ export const readHonoServerConfig = (): HonoServerConfig => {
     port: readPort(),
     nodeEnv,
     redisUrl,
+    redisKeyPrefix: readRedisKeyPrefix(),
     redisRequired: readBoolean('REDIS_REQUIRED', nodeEnv === 'production'),
     d1Required: readBoolean('D1_REQUIRED', nodeEnv === 'production'),
     corsOrigins: readCorsOrigins(),

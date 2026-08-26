@@ -135,6 +135,7 @@ export class RedisRuntime implements RedisService {
     private readonly required: boolean,
     private readonly observer: RedisRuntimeObserver = noopRedisRuntimeObserver,
     private readonly commandTimeoutMs: number = DEFAULT_REDIS_COMMAND_TIMEOUT_MS,
+    private readonly keyPrefix: string = '',
   ) {
     if (!Number.isFinite(commandTimeoutMs) || commandTimeoutMs < 1) {
       throw new Error('commandTimeoutMs 必须是正有限数字');
@@ -230,6 +231,7 @@ export class RedisRuntime implements RedisService {
 
   getGenerationReplayStore(): GenerationReplayStore {
     this.generationReplayStore ??= createRedisGenerationReplayStore({
+      keyPrefix: this.keyPrefix,
       getClient: () => ({
         eval: (script, options) => this.executeGenerationCommand(async () => {
           const client = this.client;

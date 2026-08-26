@@ -45,6 +45,7 @@ export interface RedisGenerationClient {
 
 export type RedisGenerationReplayStoreOptions = {
   getClient(): RedisGenerationClient;
+  keyPrefix?: string;
   activeTtlSeconds?: number;
   terminalTtlSeconds?: number;
   maxEvents?: number;
@@ -311,15 +312,6 @@ const actorScope = (actorKey: string): string => {
   return /^[a-z0-9_-]{1,24}$/u.test(candidate) ? candidate : 'actor';
 };
 
-const stateKey = (generationId: string): string =>
-  `${KEY_PREFIX}:${generationId}:state`;
-
-const eventsKey = (generationId: string): string =>
-  `${KEY_PREFIX}:${generationId}:events`;
-
-const requestKey = (actorKey: string, generationRequestId: string): string =>
-  `${KEY_PREFIX}:req:${actorScope(actorKey)}:${hashKeyPart(actorKey)}:${generationRequestId}`;
-
 const ttlMs = (seconds: number, optionName: string): number => {
   if (!Number.isFinite(seconds) || seconds < 1) {
     throw new Error(`${optionName} 必须是正有限数字`);
@@ -480,6 +472,15 @@ const parseAtomicRead = (raw: unknown): {
 export const createRedisGenerationReplayStore = (
   options: RedisGenerationReplayStoreOptions,
 ): GenerationReplayStore => {
+  const environmentPrefix = options.keyPrefix?.trim();
+  if (environmentPrefix && !/^[a-z0-9_-]{1,32}$/u.test(environmentPrefix)) {
+    throw new Error('keyPrefix 必须是安全的环境标识');
+  }
+  const keyPrefix = environmentPrefix ? `${KEY_PREFIX}:${environmentPrefix}` : KEY_PREFIX;
+  const stateKey = (generationId: string): string => `${keyPrefix}:${generationId}:state`;
+  const eventsKey = (generationId: string): string => `${keyPrefix}:${generationId}:events`;
+  const requestKey = (actorKey: string, generationRequestId: string): string =>
+    `${keyPrefix}:req:${actorScope(actorKey)}:${hashKeyPart(actorKey)}:${generationRequestId}`;
   const activeTtlMs = ttlMs(
     options.activeTtlSeconds ?? DEFAULT_ACTIVE_TTL_SECONDS,
     'activeTtlSeconds',

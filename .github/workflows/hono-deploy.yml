@@ -3,7 +3,7 @@ name: Deploy Hono
 on:
   push:
     branches:
-      - '**'
+      - feature/v0.2.0_Battle_Growth_MahoShojo
   workflow_dispatch:
 
 concurrency:
