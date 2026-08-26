@@ -1,6 +1,8 @@
-import questionnairePresetIndex from '../assets/questionnaires/presets/index.json';
 import { DEFAULT_ARENA_PROMPT_QUESTIONS } from '../arena-generation/compatibility-prompt';
-import { QUESTIONNAIRE_PRESET_ASSETS } from '../generated/questionnaire-presets';
+import {
+  QUESTIONNAIRE_PRESET_ASSETS,
+  QUESTIONNAIRE_PRESET_INDEX,
+} from '../generated/questionnaire-presets';
 
 export { CANSHOU_LORE } from '../canshou-lore';
 export {
@@ -11,7 +13,7 @@ export {
   type Flower,
 } from '../random-choose-hana-name';
 
-export const QUESTIONNAIRE_PRESET_INDEX = questionnairePresetIndex;
+export { QUESTIONNAIRE_PRESET_INDEX };
 
 export const loadQuestionnairePresetAsset = (path: string): unknown => {
   const asset = QUESTIONNAIRE_PRESET_ASSETS[path];

@@ -68,7 +68,6 @@ const assetMirrors = [
   ['apps/web/public/build-rules/presets/dnd-5e-lite.json', 'packages/hosted-runtime/src/assets/build-rules/presets/dnd-5e-lite.json'],
   ['apps/web/public/build-rules/presets/coc-7e-lite.json', 'packages/hosted-runtime/src/assets/build-rules/presets/coc-7e-lite.json'],
   ['apps/web/public/build-rules/presets/terrorinfinity-fx-v137.json', 'packages/hosted-runtime/src/assets/build-rules/presets/terrorinfinity-fx-v137.json'],
-  ['apps/web/public/questionnaires/presets/index.json', 'packages/hosted-runtime/src/assets/questionnaires/presets/index.json'],
   ['apps/web/public/flowers.json', 'packages/hosted-runtime/src/assets/flowers.json'],
 ] as const;
 
@@ -113,10 +112,28 @@ describe('apps/web 与 hosted-runtime compatibility 边界', () => {
       expect(existsSync(path.join(ROOT_DIRECTORY, packageAsset))).toBe(true);
       expect(read(packageAsset)).toBe(read(publicAsset));
     }
+    expect(QUESTIONNAIRE_PRESET_INDEX).toEqual(
+      JSON.parse(read('apps/web/public/questionnaires/presets/index.json')),
+    );
     for (const preset of QUESTIONNAIRE_PRESET_INDEX.presets) {
       expect(loadQuestionnairePresetAsset(preset.path)).toEqual(
         JSON.parse(read(`apps/web/public${preset.path}`)),
       );
     }
+  });
+
+  test('questionnaire runtime index 与 assets 由同一生成文件持有', () => {
+    expect(existsSync(path.join(
+      ROOT_DIRECTORY,
+      'packages/hosted-runtime/src/assets/questionnaires/presets/index.json',
+    ))).toBe(false);
+    const generatedSource = read(
+      'packages/hosted-runtime/src/generated/questionnaire-presets.ts',
+    );
+    const staticAssetSource = read(
+      'packages/hosted-runtime/src/node-runtime/static-assets.ts',
+    );
+    expect(generatedSource).toContain('export const QUESTIONNAIRE_PRESET_INDEX');
+    expect(staticAssetSource).not.toContain('../assets/questionnaires/presets/index.json');
   });
 });
