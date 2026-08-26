@@ -1,5 +1,9 @@
-import { registeredArenaCompanionRouteService } from '@mahoshojo/hosted-runtime/arena-companion';
+import {
+  registeredArenaCompanionRouteService,
+  withArenaCompanionResponseMarkers,
+} from '@mahoshojo/hosted-runtime/arena-companion';
 
-export const POST = (request: Request): Promise<Response> => (
-  registeredArenaCompanionRouteService.generate(request, 'generate-battle-story')
+export const POST = async (request: Request): Promise<Response> => withArenaCompanionResponseMarkers(
+  await registeredArenaCompanionRouteService.generate(request, 'generate-battle-story'),
+  { operation: 'generate-battle-story', placement: 'hono-primary' },
 );

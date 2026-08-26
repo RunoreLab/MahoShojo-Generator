@@ -83,6 +83,8 @@ export const createHonoApp = (
       'X-Mahoshojo-Generation-Request-Id',
       'X-Mahoshojo-Generation-Fallback',
       'X-Mahoshojo-Stream-Meta',
+      'X-Mahoshojo-Arena-Companion-Operation',
+      'X-Mahoshojo-Arena-Execution-Placement',
     ],
     allowMethods: ['GET', 'HEAD', 'OPTIONS', 'POST', 'PUT', 'PATCH', 'DELETE'],
     maxAge: 600,

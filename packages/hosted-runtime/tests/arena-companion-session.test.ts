@@ -170,6 +170,51 @@ describe('Arena session companion service', () => {
     expect(createSubscription).not.toHaveBeenCalled();
   });
 
+  it('subscriber disconnect 只取消 typed subscription 并 exactly-once release lease', async () => {
+    const upstreamCancel = vi.fn();
+    const rateRelease = vi.fn();
+    const service = createArenaSessionCompanionService({
+      generationService: {
+        createSubscription: async () => ({
+          generationId: 'arena_story_generation',
+          generationRequestId: 'story-request-1234',
+          headers: {},
+          events: new ReadableStream<GenerationStreamEvent>({
+            cancel: upstreamCancel,
+          }),
+        }),
+        create: () => response(),
+        cancelRequest: () => response(),
+        lookup: () => response(),
+        resume: () => response(),
+        status: () => response(),
+        cancel: () => response(),
+      },
+      signatures: {
+        generateSignature: async () => 'guidance-signature',
+        verifySignature: async () => true,
+      },
+      acquireRateLimit: () => ({
+        allowed: true,
+        retryAfterSeconds: 0,
+        release: rateRelease,
+      }),
+      deriveChapterId: async () => 'chapter-stable-1',
+    });
+    const result = await service.generateNext(new Request(
+      'https://example.test/api/arena/session/generate-next',
+      { method: 'POST', body: JSON.stringify(requestBody()) },
+    ));
+    const reader = result.body!.getReader();
+    expect((await reader.read()).done).toBe(false);
+    await reader.cancel('client disconnected');
+
+    await vi.waitFor(() => {
+      expect(upstreamCancel).toHaveBeenCalledWith('client disconnected');
+      expect(rateRelease).toHaveBeenCalledTimes(1);
+    });
+  });
+
   it('复用请求体投影并保留自定义 provider 与读取上限语义', () => {
     const body = requestBody();
     (body.seed.settings as Record<string, unknown>).readArenaHistoryLimit = 5;

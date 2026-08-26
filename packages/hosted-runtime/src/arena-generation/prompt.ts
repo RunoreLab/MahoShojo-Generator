@@ -147,6 +147,9 @@ export const buildArenaGenerationPrompt = async (input: {
       pvpContext: asRecord(payload.pvpContext),
       scenarioTitle: text(payload.scenarioTitle) || text(asRecord(payload.scenario)?.title) || null,
       userGuidance,
+      narrativeHistoryReadCount: typeof payload.narrativeHistoryReadCount === 'number'
+        ? payload.narrativeHistoryReadCount
+        : 0,
       characterGuidances,
       adjudicationResults,
       reporterInfo,

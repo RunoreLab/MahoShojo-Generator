@@ -456,6 +456,9 @@ export const createArenaGenerationRuntime = (
         && prepared.metadata.adjudicationResults.length > 0
         ? { adjudicationResults: prepared.metadata.adjudicationResults }
         : {}),
+      ...(typeof prepared.metadata.narrativeHistoryReadCount === 'number'
+        ? { narrativeHistoryReadCount: prepared.metadata.narrativeHistoryReadCount }
+        : {}),
     };
     return {
       executionPayload: {

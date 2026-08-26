@@ -38,6 +38,7 @@ const subscription = (events: GenerationStreamEvent[]): ArenaGenerationSubscript
     'X-Mahoshojo-Stream-Meta': encodeURIComponent(JSON.stringify({
       reporterInfo: { name: '记者甲', publication: '魔法记录报' },
       userGuidance: '延续上一章',
+      narrativeHistoryReadCount: 2,
       adjudicationResults: [{ type: 'binary', outcome: 'success' }],
     })),
   },
@@ -107,6 +108,7 @@ describe('Arena companion service', () => {
         officialReport: { winner: '角色甲', conclusion: '世界恢复平静。' },
         aiModel: 'model-a',
         aiUsage: { totalTokens: 42 },
+        narrativeHistoryReadCount: 2,
       },
       updatedCombatants: [{ codename: '角色甲' }],
       adjudicationResults: [{ type: 'binary', outcome: 'success' }],
@@ -115,6 +117,7 @@ describe('Arena companion service', () => {
     expect(projectUpdatedCombatants).toHaveBeenCalledTimes(1);
     expect(projectUpdatedCombatants).toHaveBeenCalledWith(expect.objectContaining({
       generationId: 'arena_generation_1',
+      occurredAt: '1970-01-01T00:00:00.001Z',
       writeArenaHistory: true,
       writeCurrentState: false,
     }));
@@ -165,6 +168,58 @@ describe('Arena companion service', () => {
     expect(await result.json()).toEqual({
       code: 'PROVIDER_FAILED',
       error: 'Arena generation failed',
+      generationId: 'arena_generation_1',
+    });
+  });
+
+  it('typed stream 读取失败仍返回已分配的稳定 generationId', async () => {
+    const service = createArenaCompanionService({
+      generationService: generationService(async () => ({
+        ...subscription([]),
+        events: new ReadableStream<GenerationStreamEvent>({
+          start(controller) {
+            controller.error(new Error('replay transport failed'));
+          },
+        }),
+      })),
+      createGenerationRequestId: () => 'request-12345678',
+      projectUpdatedCombatants: async () => [],
+    });
+
+    const result = await service.generate(new Request('https://example.test/api/arena/generate', {
+      method: 'POST',
+      body: '{}',
+    }));
+
+    expect(result.status).toBe(502);
+    expect(await result.json()).toEqual({
+      code: 'GENERATION_STREAM_FAILED',
+      error: 'Arena generation stream failed',
+      generationId: 'arena_generation_1',
+    });
+  });
+
+  it('本地投影失败不会伪装成功且保留稳定 generationId', async () => {
+    const service = createArenaCompanionService({
+      generationService: generationService(async () => subscription([
+        { id: '1-0', type: 'markdown', data: { chunk: '# 完整战报' } },
+        { id: '2-0', type: 'done', data: { ok: true, status: 'completed' } },
+      ])),
+      createGenerationRequestId: () => 'request-12345678',
+      projectUpdatedCombatants: async () => {
+        throw new Error('projection failed');
+      },
+    });
+
+    const result = await service.generate(new Request('https://example.test/api/arena/generate', {
+      method: 'POST',
+      body: '{}',
+    }));
+
+    expect(result.status).toBe(500);
+    expect(await result.json()).toEqual({
+      code: 'ARENA_COMPANION_PROJECTION_FAILED',
+      error: 'Arena companion projection failed',
       generationId: 'arena_generation_1',
     });
   });

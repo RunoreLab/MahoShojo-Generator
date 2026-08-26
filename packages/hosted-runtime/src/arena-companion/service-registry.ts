@@ -1,5 +1,10 @@
-import type { ArenaCompanionRouteService } from './index';
-import type { ArenaCompanionOperation } from './service';
+import type {
+  ArenaCompanionOperation,
+  ArenaCompanionService,
+} from './service';
+import type { ArenaSessionCompanionService } from './session';
+
+type ArenaCompanionRouteService = ArenaCompanionService & ArenaSessionCompanionService;
 
 let configuredService: ArenaCompanionRouteService | null = null;
 

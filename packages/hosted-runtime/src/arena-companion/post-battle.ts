@@ -58,7 +58,9 @@ export const createArenaPostBattleProjector = (
 ) => async (
   input: ArenaCompanionProjectInput,
 ): Promise<Array<Record<string, unknown>>> => {
-  const nowIso = (options.now?.() ?? new Date()).toISOString();
+  const nowIso = Number.isFinite(Date.parse(input.occurredAt))
+    ? new Date(input.occurredAt).toISOString()
+    : (options.now?.() ?? new Date()).toISOString();
   const combatants = await Promise.all(input.combatants.map(async (value, index) => {
     const combatant = recordOf(value);
     const sourceData = recordOf(combatant?.data);

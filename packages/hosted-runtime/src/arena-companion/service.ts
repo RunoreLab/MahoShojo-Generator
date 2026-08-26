@@ -6,8 +6,29 @@ import {
 } from '@mahoshojo/hosted-api/arena-generation/service';
 
 export const ARENA_COMPANION_OPERATION_HEADER = 'x-mahoshojo-arena-companion-operation';
+export const ARENA_COMPANION_PLACEMENT_HEADER = 'x-mahoshojo-arena-execution-placement';
 
 export type ArenaCompanionOperation = 'arena/generate' | 'generate-battle-story';
+export type ArenaCompanionResponseOperation = ArenaCompanionOperation
+  | 'arena/session/generate-next';
+export type ArenaCompanionPlacement = 'hono-primary' | 'next-dr';
+
+export const withArenaCompanionResponseMarkers = (
+  response: Response,
+  input: {
+    operation: ArenaCompanionResponseOperation;
+    placement: ArenaCompanionPlacement;
+  },
+): Response => {
+  const headers = new Headers(response.headers);
+  headers.set(ARENA_COMPANION_OPERATION_HEADER, input.operation);
+  headers.set(ARENA_COMPANION_PLACEMENT_HEADER, input.placement);
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+};
 
 export type ArenaCompanionImpact = {
   characterName: string;
@@ -24,6 +45,7 @@ export type ArenaCompanionProjectInput = {
   writeArenaHistory: boolean;
   writeCurrentState: boolean;
   generationId: string;
+  occurredAt: string;
   baseRevisionHash: string | null;
 };
 
@@ -200,6 +222,19 @@ type CollectedGeneration = {
   telemetry: Record<string, unknown>;
   terminalError: string | null;
   completed: boolean;
+  occurredAt: string | null;
+};
+
+const occurredAtFromEventId = (id: string): string | null => {
+  const match = id.match(/^(\d+)-\d+$/u);
+  if (!match) return null;
+  const milliseconds = Number(match[1]);
+  if (!Number.isFinite(milliseconds) || milliseconds < 0) return null;
+  try {
+    return new Date(milliseconds).toISOString();
+  } catch {
+    return null;
+  }
 };
 
 const collectSubscription = async (
@@ -211,6 +246,7 @@ const collectSubscription = async (
   let telemetry: Record<string, unknown> = {};
   let terminalError: string | null = null;
   let completed = false;
+  let occurredAt: string | null = null;
   const reader = subscription.events.getReader();
   try {
     while (true) {
@@ -218,12 +254,16 @@ const collectSubscription = async (
       if (next.done) break;
       const event = next.value;
       const data = eventData(event);
+      occurredAt ??= occurredAtFromEventId(event.id);
       if (event.type === 'markdown') markdown += rawTextOf(data.chunk);
       if (event.type === 'reasoning') reasoning += rawTextOf(data.chunk);
       if (event.type === 'snapshot') {
         markdown = typeof data.markdown === 'string' ? data.markdown : markdown;
         reasoning = typeof data.reasoning === 'string' ? data.reasoning : reasoning;
         telemetry = recordOf(data.telemetry) ?? telemetry;
+        if (typeof data.updatedAt === 'string' && Number.isFinite(Date.parse(data.updatedAt))) {
+          occurredAt = new Date(data.updatedAt).toISOString();
+        }
       }
       if (event.type === 'meta') meta = recordOf(data.meta) ?? meta;
       if (event.type === 'telemetry') telemetry = { ...telemetry, ...data };
@@ -239,7 +279,7 @@ const collectSubscription = async (
   } finally {
     reader.releaseLock();
   }
-  return { markdown, reasoning, meta, telemetry, terminalError, completed };
+  return { markdown, reasoning, meta, telemetry, terminalError, completed, occurredAt };
 };
 
 const operationFromRequest = (request: Request): ArenaCompanionOperation => (
@@ -293,7 +333,16 @@ export const createArenaCompanionService = (
       rebuildRequest(request, payload, generationRequestId, operation),
     );
     if (upstream instanceof Response) return upstream;
-    const collected = await collectSubscription(upstream);
+    let collected: CollectedGeneration;
+    try {
+      collected = await collectSubscription(upstream);
+    } catch {
+      return jsonResponse({
+        code: 'GENERATION_STREAM_FAILED',
+        error: 'Arena generation stream failed',
+        generationId: upstream.generationId,
+      }, 502, upstream.headers);
+    }
     if (!collected.completed) {
       return jsonResponse({
         code: collected.terminalError ?? 'GENERATION_STREAM_INCOMPLETE',
@@ -327,21 +376,34 @@ export const createArenaCompanionService = (
         : {}),
       ...(usage ? { aiUsage: usage } : {}),
       ...(model ? { aiModel: model } : {}),
+      ...(typeof headerMeta.narrativeHistoryReadCount === 'number'
+        ? { narrativeHistoryReadCount: headerMeta.narrativeHistoryReadCount }
+        : {}),
       ...(collected.reasoning
         ? { aiReasoning: { text: collected.reasoning, status: 'complete' } }
         : {}),
     };
-    const updatedCombatants = await options.projectUpdatedCombatants({
-      combatants: Array.isArray(payload.combatants) ? payload.combatants : [],
-      report,
-      impacts,
-      userGuidance: textOf(headerMeta.userGuidance) || null,
-      scenario: recordOf(payload.scenario),
-      writeArenaHistory: booleanOf(payload.writeArenaHistory, true),
-      writeCurrentState: booleanOf(payload.writeCurrentState, true),
-      generationId: upstream.generationId,
-      baseRevisionHash: textOf(payload.baseRevisionHash) || null,
-    });
+    let updatedCombatants: Array<Record<string, unknown>>;
+    try {
+      updatedCombatants = await options.projectUpdatedCombatants({
+        combatants: Array.isArray(payload.combatants) ? payload.combatants : [],
+        report,
+        impacts,
+        userGuidance: textOf(headerMeta.userGuidance) || null,
+        scenario: recordOf(payload.scenario),
+        writeArenaHistory: booleanOf(payload.writeArenaHistory, true),
+        writeCurrentState: booleanOf(payload.writeCurrentState, true),
+        generationId: upstream.generationId,
+        occurredAt: collected.occurredAt ?? new Date(0).toISOString(),
+        baseRevisionHash: textOf(payload.baseRevisionHash) || null,
+      });
+    } catch {
+      return jsonResponse({
+        code: 'ARENA_COMPANION_PROJECTION_FAILED',
+        error: 'Arena companion projection failed',
+        generationId: upstream.generationId,
+      }, 500, upstream.headers);
+    }
     return jsonResponse({
       report,
       updatedCombatants,

@@ -18,12 +18,22 @@ describe('Next Arena companion DR adapters', () => {
   });
 
   it('三条 adapter 只委托共享 DR service', async () => {
-    await arenaGenerate(new Request('https://example.test/api/arena/generate', { method: 'POST' }) as any);
-    await battleStory(new Request('https://example.test/api/generate-battle-story', { method: 'POST' }) as any);
-    await sessionNext(new Request('https://example.test/api/arena/session/generate-next', { method: 'POST' }) as any);
+    const responses = await Promise.all([
+      arenaGenerate(new Request('https://example.test/api/arena/generate', { method: 'POST' }) as any),
+      battleStory(new Request('https://example.test/api/generate-battle-story', { method: 'POST' }) as any),
+      sessionNext(new Request('https://example.test/api/arena/session/generate-next', { method: 'POST' }) as any),
+    ]);
 
     expect(generate).toHaveBeenNthCalledWith(1, expect.any(Request), 'arena/generate');
     expect(generate).toHaveBeenNthCalledWith(2, expect.any(Request), 'generate-battle-story');
     expect(generateNext).toHaveBeenCalledWith(expect.any(Request));
+    expect(responses.map((response) => [
+      response.headers.get('x-mahoshojo-arena-companion-operation'),
+      response.headers.get('x-mahoshojo-arena-execution-placement'),
+    ])).toEqual([
+      ['arena/generate', 'next-dr'],
+      ['generate-battle-story', 'next-dr'],
+      ['arena/session/generate-next', 'next-dr'],
+    ]);
   });
 });

@@ -25,6 +25,14 @@ describe('Hono Arena companion adapters', () => {
     expect(service.generate).toHaveBeenNthCalledWith(1, expect.any(Request), 'arena/generate');
     expect(service.generate).toHaveBeenNthCalledWith(2, expect.any(Request), 'generate-battle-story');
     expect(service.generateNext).toHaveBeenCalledTimes(1);
+    expect(responses.map((response) => [
+      response.headers.get('x-mahoshojo-arena-companion-operation'),
+      response.headers.get('x-mahoshojo-arena-execution-placement'),
+    ])).toEqual([
+      ['arena/generate', 'hono-primary'],
+      ['generate-battle-story', 'hono-primary'],
+      ['arena/session/generate-next', 'hono-primary'],
+    ]);
     expect(await Promise.all(responses.map((response) => response.text())))
       .toEqual(['arena/generate', 'generate-battle-story', 'session']);
   });
