@@ -5,6 +5,7 @@ import {
   createArenaGenerationService,
   MAX_ARENA_CREATE_BODY_BYTES,
   type ArenaGenerationExecutor,
+  type ArenaGenerationRejectedTerminalRecorder,
   type ArenaGenerationTerminalStore,
   type GenerationReplayStore,
   type GenerationReplayStoreState,
@@ -279,6 +280,7 @@ const createService = (
     actorKey?: string;
     actorResponseHeaders?: Record<string, string>;
     observer?: { observeArenaGeneration(_observation: unknown): void };
+    rejectedTerminalRecorder?: ArenaGenerationRejectedTerminalRecorder;
   } = {},
 ) => createArenaGenerationService({
   store,
@@ -300,9 +302,493 @@ const createService = (
     : {}),
   ...(options.terminalStore ? { terminalStore: options.terminalStore } : {}),
   ...(options.observer ? { observer: options.observer } : {}),
+  ...(options.rejectedTerminalRecorder
+    ? { rejectedTerminalRecorder: options.rejectedTerminalRecorder }
+    : {}),
 });
 
 describe('Arena generation lifecycle service', () => {
+  test('durably records an auditable preflight rejection before exposing its stable identity', async () => {
+    const store = new MemoryReplayStore();
+    const reserve = vi.spyOn(store, 'reserve');
+    const execute = vi.fn(async () => ({ status: 'completed' as const }));
+    const record = vi.fn(async () => ({ kind: 'recorded' as const }));
+    const service = createService(store, {
+      materializationVersion: 'test-materialization-v1',
+      preflight: vi.fn(async () => ({
+        kind: 'auditable-rejection' as const,
+        actorKey: 'user:42',
+        generationRequestId: 'request-auditable',
+        response: Response.json({
+          error: '输入内容不合规',
+          shouldRedirect: true,
+          reason: '使用危险符文',
+        }, { status: 400 }),
+        code: 'ARENA_CONTENT_POLICY_REJECTED',
+        stage: 'safety-policy',
+        fingerprintPayload: { mode: 'classic', combatants: ['redacted'] },
+        audit: {
+          endpoint: 'api/generate-battle-story',
+          generationMode: 'non-stream' as const,
+          startedAt: '2026-08-25T04:00:00.000Z',
+          mode: 'classic',
+          pvpContext: { roomId: 'room-1', matchId: 'match-1', roundId: 'round-1' },
+        },
+      })),
+      materialize: vi.fn(),
+      execute,
+    }, { rejectedTerminalRecorder: { record } });
+
+    const response = await service.create(createRequest('request-auditable'));
+
+    expect(response.status).toBe(400);
+    expect(response.headers.get('x-mahoshojo-generation-id')).toBe('generation-1');
+    expect(response.headers.get('x-mahoshojo-generation-terminal-status')).toBe('failed');
+    expect(response.headers.get('x-mahoshojo-generation-request-id')).toBe('request-auditable');
+    await expect(response.json()).resolves.toEqual({
+      error: '输入内容不合规',
+      shouldRedirect: true,
+      reason: '使用危险符文',
+      generationId: 'generation-1',
+    });
+    expect(record).toHaveBeenCalledWith(expect.objectContaining({
+      generationId: 'generation-1',
+      generationRequestId: 'request-auditable',
+      actorKey: 'user:42',
+      payloadHash: 'hash:{"mode":"classic","combatants":["redacted"]}',
+      code: 'ARENA_CONTENT_POLICY_REJECTED',
+      stage: 'safety-policy',
+      pvpContext: { roomId: 'room-1', matchId: 'match-1', roundId: 'round-1' },
+    }));
+    expect(reserve).toHaveBeenCalledTimes(1);
+    expect(store.states.get('generation-1')?.terminal).toMatchObject({
+      status: 'failed',
+      code: 'ARENA_CONTENT_POLICY_REJECTED',
+    });
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  test('snapshots rejection bytes before committing and preserves non-JSON bodies exactly', async () => {
+    const record = vi.fn(async () => ({ kind: 'recorded' as const }));
+    const bytes = new Uint8Array([0, 255, 1, 128, 10]);
+    const service = createService(new MemoryReplayStore(), {
+      materializationVersion: 'test-materialization-v1',
+      preflight: vi.fn(async () => ({
+        kind: 'auditable-rejection' as const,
+        actorKey: 'user:42',
+        generationRequestId: 'request-binary-rejection',
+        response: new Response(bytes, {
+          status: 400,
+          headers: { 'Content-Type': 'application/octet-stream' },
+        }),
+        code: 'ARENA_BINARY_REJECTED',
+        stage: 'payload-validation',
+        fingerprintPayload: { value: 'same' },
+        audit: {
+          endpoint: 'api/generate-battle-story',
+          generationMode: 'non-stream' as const,
+          startedAt: '2026-08-25T04:00:00.000Z',
+          mode: 'classic',
+          pvpContext: { roomId: 'room-1', matchId: 'match-1', roundId: 'round-1' },
+        },
+      })),
+      materialize: vi.fn(),
+      execute: vi.fn(async () => ({ status: 'completed' as const })),
+    }, { rejectedTerminalRecorder: { record } });
+
+    const response = await service.create(createRequest('request-binary-rejection'));
+
+    expect(response.headers.get('x-mahoshojo-generation-terminal-status')).toBe('failed');
+    expect(new Uint8Array(await response.arrayBuffer())).toEqual(bytes);
+    expect(record).toHaveBeenCalledTimes(1);
+  });
+
+  test('does not commit when an auditable rejection response cannot be snapshotted', async () => {
+    const usedResponse = Response.json({ error: 'already read' }, { status: 400 });
+    await usedResponse.text();
+    const throwingResponse = new Response(new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.error(new Error('stream failed'));
+      },
+    }), { status: 400 });
+    const record = vi.fn(async () => ({ kind: 'recorded' as const }));
+    const buildService = (response: Response, generationRequestId: string) => createService(
+      new MemoryReplayStore(),
+      {
+        materializationVersion: 'test-materialization-v1',
+        preflight: vi.fn(async () => ({
+          kind: 'auditable-rejection' as const,
+          actorKey: 'user:42',
+          generationRequestId,
+          response,
+          code: 'ARENA_REJECTION_RESPONSE_INVALID',
+          stage: 'payload-validation',
+          fingerprintPayload: { value: 'same' },
+          audit: {
+            endpoint: 'api/generate-battle-story',
+            generationMode: 'non-stream' as const,
+            startedAt: '2026-08-25T04:00:00.000Z',
+            mode: 'classic',
+            pvpContext: { roomId: 'room-1', matchId: 'match-1', roundId: 'round-1' },
+          },
+        })),
+        materialize: vi.fn(),
+        execute: vi.fn(async () => ({ status: 'completed' as const })),
+      },
+      { rejectedTerminalRecorder: { record } },
+    );
+
+    const used = await buildService(usedResponse, 'request-used-response')
+      .create(createRequest('request-used-response'));
+    const throwing = await buildService(throwingResponse, 'request-throwing-response')
+      .create(createRequest('request-throwing-response'));
+
+    expect(used.headers.get('x-mahoshojo-generation-id')).toBeNull();
+    expect(throwing.headers.get('x-mahoshojo-generation-id')).toBeNull();
+    expect(record).not.toHaveBeenCalled();
+  });
+
+  test('keeps the durable identity when Redis terminal projection fails after D1 commit', async () => {
+    const store = new MemoryReplayStore();
+    vi.spyOn(store, 'markTerminal').mockRejectedValue(new Error('Redis unavailable'));
+    const record = vi.fn(async () => ({ kind: 'recorded' as const }));
+    const service = createService(store, {
+      materializationVersion: 'test-materialization-v1',
+      preflight: vi.fn(async () => ({
+        kind: 'auditable-rejection' as const,
+        actorKey: 'user:42',
+        generationRequestId: 'request-d1-durable',
+        response: Response.json({ error: 'rejected' }, { status: 400 }),
+        code: 'ARENA_CONTENT_POLICY_REJECTED',
+        stage: 'safety-policy',
+        fingerprintPayload: { value: 'same' },
+        audit: {
+          endpoint: 'api/generate-battle-story',
+          generationMode: 'non-stream' as const,
+          startedAt: '2026-08-25T04:00:00.000Z',
+          mode: 'classic',
+          pvpContext: { roomId: 'room-1', matchId: 'match-1', roundId: 'round-1' },
+        },
+      })),
+      materialize: vi.fn(),
+      execute: vi.fn(async () => ({ status: 'completed' as const })),
+    }, { rejectedTerminalRecorder: { record } });
+
+    const response = await service.create(createRequest('request-d1-durable'));
+
+    expect(response.headers.get('x-mahoshojo-generation-id')).toBe('generation-1');
+    expect(response.headers.get('x-mahoshojo-generation-terminal-status')).toBe('failed');
+    expect(record).toHaveBeenCalledTimes(1);
+    expect(store.states.has('generation-1')).toBe(true);
+  });
+
+  test('fails an auditable rejection soft without returning a dangling generation identity', async () => {
+    const store = new MemoryReplayStore();
+    const reserve = vi.spyOn(store, 'reserve');
+    const service = createService(store, {
+      materializationVersion: 'test-materialization-v1',
+      preflight: vi.fn(async () => ({
+        kind: 'auditable-rejection' as const,
+        actorKey: 'user:42',
+        generationRequestId: 'request-audit-failed',
+        response: Response.json({ error: '业务校验失败' }, { status: 400 }),
+        code: 'ARENA_PARTICIPANTS_INVALID',
+        stage: 'payload-validation',
+        fingerprintPayload: { value: 'same' },
+        audit: {
+          endpoint: 'api/generate-battle-story',
+          generationMode: 'non-stream' as const,
+          startedAt: '2026-08-25T04:00:00.000Z',
+          mode: 'classic',
+          pvpContext: { roomId: 'room-1', matchId: 'match-1', roundId: 'round-1' },
+        },
+      })),
+      materialize: vi.fn(),
+      execute: vi.fn(async () => ({ status: 'completed' as const })),
+    }, {
+      rejectedTerminalRecorder: {
+        record: vi.fn(async () => { throw new Error('D1 unavailable'); }),
+      },
+    });
+
+    const response = await service.create(createRequest('request-audit-failed'));
+
+    expect(response.status).toBe(400);
+    expect(response.headers.get('x-mahoshojo-generation-id')).toBeNull();
+    await expect(response.json()).resolves.toEqual({ error: '业务校验失败' });
+    expect(reserve).toHaveBeenCalledTimes(1);
+    expect(store.states.size).toBe(0);
+  });
+
+  test('fails a conflicting auditable rejection closed without reusing the durable identity', async () => {
+    const store = new MemoryReplayStore();
+    const service = createService(store, {
+      materializationVersion: 'test-materialization-v1',
+      preflight: vi.fn(async () => ({
+        kind: 'auditable-rejection' as const,
+        actorKey: 'user:42',
+        generationRequestId: 'request-audit-conflict',
+        response: Response.json({ error: '业务校验失败' }, { status: 400 }),
+        code: 'ARENA_PARTICIPANTS_INVALID',
+        stage: 'payload-validation',
+        fingerprintPayload: { value: 'changed' },
+        audit: {
+          endpoint: 'api/generate-battle-story',
+          generationMode: 'non-stream' as const,
+          startedAt: '2026-08-25T04:00:00.000Z',
+          mode: 'classic',
+          pvpContext: { roomId: 'room-1', matchId: 'match-1', roundId: 'round-1' },
+        },
+      })),
+      materialize: vi.fn(),
+      execute: vi.fn(async () => ({ status: 'completed' as const })),
+    }, {
+      rejectedTerminalRecorder: {
+        record: vi.fn(async () => ({ kind: 'conflict' as const })),
+      },
+    });
+
+    const response = await service.create(createRequest('request-audit-conflict'));
+
+    expect(response.status).toBe(409);
+    expect(response.headers.get('x-mahoshojo-generation-id')).toBeNull();
+    await expect(response.json()).resolves.toMatchObject({ code: 'GENERATION_REQUEST_CONFLICT' });
+    expect(store.states.size).toBe(0);
+  });
+
+  test('fences a concurrent valid create while an auditable rejection becomes durable', async () => {
+    const store = new MemoryReplayStore();
+    let releaseRecord!: () => void;
+    let notifyRecordStarted!: () => void;
+    const recordGate = new Promise<void>((resolve) => { releaseRecord = resolve; });
+    const recordStarted = new Promise<void>((resolve) => { notifyRecordStarted = resolve; });
+    const record = vi.fn(async () => {
+      notifyRecordStarted();
+      await recordGate;
+      return { kind: 'recorded' as const };
+    });
+    const execute = vi.fn(async () => ({ status: 'completed' as const }));
+    let preflightCalls = 0;
+    const service = createService(store, {
+      materializationVersion: 'test-materialization-v1',
+      preflight: vi.fn(async ({ actorKey, generationRequestId, payload }) => {
+        preflightCalls += 1;
+        if (preflightCalls === 1) {
+          return {
+            kind: 'auditable-rejection' as const,
+            actorKey,
+            generationRequestId,
+            response: Response.json({ error: '业务校验失败' }, { status: 400 }),
+            code: 'ARENA_PARTICIPANTS_INVALID',
+            stage: 'payload-validation',
+            fingerprintPayload: { value: payload.value },
+            audit: {
+              endpoint: 'api/generate-battle-story',
+              generationMode: 'non-stream' as const,
+              startedAt: '2026-08-25T04:00:00.000Z',
+              mode: 'classic',
+              pvpContext: { roomId: 'room-1', matchId: 'match-1', roundId: 'round-1' },
+            },
+          };
+        }
+        return {
+          semanticPayload: { value: payload.value },
+          materializationPayload: { value: payload.value },
+        };
+      }),
+      materialize: vi.fn(async ({ payload }) => ({ executionPayload: payload })),
+      execute,
+    }, { rejectedTerminalRecorder: { record } });
+
+    const rejectionPromise = service.createSubscription(
+      createRequest('request-concurrent-audit'),
+    );
+    await recordStarted;
+    const concurrent = await service.createSubscription(
+      createRequest('request-concurrent-audit'),
+    );
+
+    expect(concurrent).not.toBeInstanceOf(Response);
+    expect(execute).not.toHaveBeenCalled();
+    releaseRecord();
+    const rejection = await rejectionPromise;
+    expect(rejection).toBeInstanceOf(Response);
+    expect((rejection as Response).headers.get('x-mahoshojo-generation-id'))
+      .toBe('generation-1');
+    expect(store.states.get('generation-1')?.terminal?.status).toBe('failed');
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  test('converts an owned reservation directly into an auditable materialization terminal', async () => {
+    const store = new MemoryReplayStore();
+    const releaseReservation = vi.spyOn(store, 'releaseReservation');
+    const record = vi.fn(async () => ({ kind: 'recorded' as const }));
+    const execute = vi.fn(async () => ({ status: 'completed' as const }));
+    const service = createService(store, {
+      materializationVersion: 'test-materialization-v1',
+      preflight: vi.fn(async ({ payload }) => ({
+        semanticPayload: payload,
+        materializationPayload: payload,
+      })),
+      materialize: vi.fn(async () => ({
+        kind: 'auditable-rejection' as const,
+        actorKey: 'user:42',
+        generationRequestId: 'request-materialization-audit',
+        response: Response.json({ error: '生成准备失败' }, { status: 422 }),
+        code: 'ARENA_MATERIALIZATION_REJECTED',
+        stage: 'materialization',
+        fingerprintPayload: { value: 'same' },
+        audit: {
+          endpoint: 'api/generate-battle-story',
+          generationMode: 'non-stream' as const,
+          startedAt: '2026-08-25T04:00:00.000Z',
+          mode: 'classic',
+          pvpContext: { roomId: 'room-1', matchId: 'match-1', roundId: 'round-1' },
+        },
+      })),
+      execute,
+    }, { rejectedTerminalRecorder: { record } });
+
+    const response = await service.create(createRequest('request-materialization-audit'));
+
+    expect(response.status).toBe(422);
+    expect(response.headers.get('x-mahoshojo-generation-id')).toBe('generation-1');
+    expect(releaseReservation).not.toHaveBeenCalled();
+    expect(store.requests.size).toBe(1);
+    expect(store.states.get('generation-1')?.terminal?.status).toBe('failed');
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  test('keeps materialization rejection ownership fenced while D1 becomes durable', async () => {
+    const store = new MemoryReplayStore();
+    let releaseRecord!: () => void;
+    let notifyRecordStarted!: () => void;
+    const recordGate = new Promise<void>((resolve) => { releaseRecord = resolve; });
+    const recordStarted = new Promise<void>((resolve) => { notifyRecordStarted = resolve; });
+    const record = vi.fn(async () => {
+      notifyRecordStarted();
+      await recordGate;
+      return { kind: 'recorded' as const };
+    });
+    const execute = vi.fn(async () => ({ status: 'completed' as const }));
+    let materializeCalls = 0;
+    const service = createService(store, {
+      materializationVersion: 'test-materialization-v1',
+      preflight: vi.fn(async ({ payload }) => ({
+        semanticPayload: payload,
+        materializationPayload: payload,
+      })),
+      materialize: vi.fn(async ({ actorKey, generationRequestId, payload }) => {
+        materializeCalls += 1;
+        if (materializeCalls === 1) {
+          return {
+            kind: 'auditable-rejection' as const,
+            actorKey,
+            generationRequestId,
+            response: Response.json({ error: '生成准备失败' }, { status: 422 }),
+            code: 'ARENA_MATERIALIZATION_REJECTED',
+            stage: 'materialization',
+            fingerprintPayload: payload,
+            audit: {
+              endpoint: 'api/generate-battle-story',
+              generationMode: 'non-stream' as const,
+              startedAt: '2026-08-25T04:00:00.000Z',
+              mode: 'classic',
+              pvpContext: { roomId: 'room-1', matchId: 'match-1', roundId: 'round-1' },
+            },
+          };
+        }
+        return { executionPayload: payload };
+      }),
+      execute,
+    }, { rejectedTerminalRecorder: { record } });
+
+    const rejected = service.createSubscription(createRequest('request-materialization-race'));
+    await recordStarted;
+    const concurrent = await service.createSubscription(createRequest('request-materialization-race'));
+
+    expect(concurrent).not.toBeInstanceOf(Response);
+    expect(execute).not.toHaveBeenCalled();
+    releaseRecord();
+    const response = await rejected;
+    expect(response).toBeInstanceOf(Response);
+    expect((response as Response).headers.get('x-mahoshojo-generation-id'))
+      .toBe('generation-1');
+    expect(store.states.get('generation-1')?.terminal?.status).toBe('failed');
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  test('does not expose identity when materialization recorder and fence release both fail', async () => {
+    const store = new MemoryReplayStore();
+    vi.spyOn(store, 'releaseReservation').mockRejectedValue(new Error('Redis unavailable'));
+    const record = vi.fn(async () => { throw new Error('D1 unavailable'); });
+    const service = createService(store, {
+      materializationVersion: 'test-materialization-v1',
+      preflight: vi.fn(async ({ payload }) => ({
+        semanticPayload: payload,
+        materializationPayload: payload,
+      })),
+      materialize: vi.fn(async () => ({
+        kind: 'auditable-rejection' as const,
+        actorKey: 'user:42',
+        generationRequestId: 'request-materialization-release-failed',
+        response: Response.json({ error: '生成准备失败' }, { status: 422 }),
+        code: 'ARENA_MATERIALIZATION_REJECTED',
+        stage: 'materialization',
+        fingerprintPayload: { value: 'same' },
+        audit: {
+          endpoint: 'api/generate-battle-story',
+          generationMode: 'non-stream' as const,
+          startedAt: '2026-08-25T04:00:00.000Z',
+          mode: 'classic',
+          pvpContext: { roomId: 'room-1', matchId: 'match-1', roundId: 'round-1' },
+        },
+      })),
+      execute: vi.fn(async () => ({ status: 'completed' as const })),
+    }, { rejectedTerminalRecorder: { record } });
+
+    const response = await service.create(
+      createRequest('request-materialization-release-failed'),
+    );
+
+    expect(response.status).toBe(422);
+    expect(response.headers.get('x-mahoshojo-generation-id')).toBeNull();
+    await expect(response.json()).resolves.toEqual({ error: '生成准备失败' });
+    expect(record).toHaveBeenCalledTimes(1);
+  });
+
+  test('does not audit a typed rejection whose identity does not match the request', async () => {
+    const store = new MemoryReplayStore();
+    const record = vi.fn(async () => ({ kind: 'recorded' as const }));
+    const service = createService(store, {
+      materializationVersion: 'test-materialization-v1',
+      preflight: vi.fn(async () => ({
+        kind: 'auditable-rejection' as const,
+        actorKey: 'user:42',
+        generationRequestId: 'different-request-id',
+        response: Response.json({ error: '业务校验失败' }, { status: 400 }),
+        code: 'ARENA_PARTICIPANTS_INVALID',
+        stage: 'payload-validation',
+        fingerprintPayload: { value: 'same' },
+        audit: {
+          endpoint: 'api/generate-battle-story',
+          generationMode: 'non-stream' as const,
+          startedAt: '2026-08-25T04:00:00.000Z',
+          mode: 'classic',
+          pvpContext: { roomId: 'room-1', matchId: 'match-1', roundId: 'round-1' },
+        },
+      })),
+      materialize: vi.fn(),
+      execute: vi.fn(async () => ({ status: 'completed' as const })),
+    }, { rejectedTerminalRecorder: { record } });
+
+    const response = await service.create(createRequest('request-identity-mismatch'));
+
+    expect(response.status).toBe(400);
+    expect(response.headers.get('x-mahoshojo-generation-id')).toBeNull();
+    expect(record).not.toHaveBeenCalled();
+  });
+
   test('returns newly issued actor credential without treating generation id as credential', async () => {
     const store = new MemoryReplayStore();
     const service = createService(

@@ -1,7 +1,14 @@
-import type { ArenaGenerationActor } from '@mahoshojo/hosted-api/arena-generation/service';
+import {
+  MAX_ARENA_CREATE_BODY_BYTES,
+  type ArenaGenerationActor,
+} from '@mahoshojo/hosted-api/arena-generation/service';
 import { createActivityTokenService } from '../node-runtime/activity-token';
 import type { NodeDataD1Client } from '../node-runtime/data-ports';
 import type { SignatureService } from '../signature';
+import {
+  ARENA_PVP_GENERATION_SIGNATURE_HEADER,
+  createArenaPvpGenerationAuthority,
+} from './internal-authority';
 
 export const ARENA_ANONYMOUS_TOKEN_HEADER = 'X-Mahoshojo-Generation-Actor-Token';
 
@@ -18,6 +25,7 @@ export type ArenaGenerationActorResolverOptions = {
   env?: Readonly<Record<string, string | undefined>>;
   fetch?: typeof fetch;
   signatures: SignatureService;
+  pvpSignatures?: SignatureService;
   getD1Client(): NodeDataD1Client | null;
   createAnonymousId?: () => string;
   now?: () => Date;
@@ -162,6 +170,61 @@ export const createArenaGenerationActorResolver = (
   const now = options.now ?? (() => new Date());
   const createAnonymousId = options.createAnonymousId ?? (() => crypto.randomUUID());
   const activityTokens = createActivityTokenService(options.signatures);
+  const pvpAuthority = options.pvpSignatures
+    ? createArenaPvpGenerationAuthority(options.pvpSignatures)
+    : null;
+
+  const readPvpOperationActor = async (
+    request: Request,
+  ): Promise<ArenaGenerationActor | null> => {
+    if (!pvpAuthority) return null;
+    const signature = request.headers.get(ARENA_PVP_GENERATION_SIGNATURE_HEADER)?.trim() ?? '';
+    if (!/^[0-9a-f]{64}$/u.test(signature)) return null;
+    const contentLength = Number(request.headers.get('content-length'));
+    if (Number.isFinite(contentLength) && contentLength > MAX_ARENA_CREATE_BODY_BYTES) return null;
+    try {
+      const reader = request.clone().body?.getReader();
+      const chunks: Uint8Array[] = [];
+      let bodyBytes = 0;
+      if (reader) {
+        try {
+          while (true) {
+            const next = await reader.read();
+            if (next.done) break;
+            bodyBytes += next.value.byteLength;
+            if (bodyBytes > MAX_ARENA_CREATE_BODY_BYTES) {
+              await reader.cancel('arena PVP actor body exceeds byte limit').catch(() => undefined);
+              return null;
+            }
+            chunks.push(next.value);
+          }
+        } finally {
+          reader.releaseLock();
+        }
+      }
+      const body = new Uint8Array(bodyBytes);
+      let offset = 0;
+      for (const chunk of chunks) {
+        body.set(chunk, offset);
+        offset += chunk.byteLength;
+      }
+      const parsed = JSON.parse(new TextDecoder().decode(body)) as unknown;
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+      const requestPayload = { ...(parsed as Record<string, unknown>) };
+      const generationRequestId = typeof requestPayload.generationRequestId === 'string'
+        ? requestPayload.generationRequestId
+        : '';
+      delete requestPayload.generationRequestId;
+      const pvpContext = await pvpAuthority.resolve({
+        request,
+        generationRequestId,
+        payload: requestPayload,
+      });
+      return pvpContext ? { actorKey: `pvp-room:${pvpContext.roomId}` } : null;
+    } catch {
+      return null;
+    }
+  };
 
   const issueAnonymousActor = async (
     anonymousId: string,
@@ -206,25 +269,35 @@ export const createArenaGenerationActorResolver = (
       : '';
     const client = options.getD1Client();
     const authMode = env.HONO_AUTH_MODE?.trim().toLowerCase() || 'hybrid';
+    let authenticatedActor: ArenaGenerationActor | null = null;
 
     if (authMode === 'hybrid' && hasBetterAuthSession(request)) {
       const userId = await readSessionUser(request, env, fetcher);
-      if (userId) return { actorKey: `user:${userId}` };
+      if (userId) authenticatedActor = { actorKey: `user:${userId}` };
     }
-    if (bearer) {
+    if (!authenticatedActor && bearer) {
       if (!client) return null;
       const userId = await readD1User(client, 'auth_key', bearer).catch(() => null);
-      return userId ? { actorKey: `user:${userId}` } : null;
+      if (!userId) return null;
+      authenticatedActor = { actorKey: `user:${userId}` };
     }
 
     const activityToken = request.headers.get('x-mahoshojo-activity-token')?.trim() ?? '';
-    if (activityToken) {
+    if (!authenticatedActor && activityToken) {
       if (!client) return null;
       const verified = await activityTokens.verifyActivityToken(activityToken, { now: now() });
       if (!verified) return null;
       const userId = await readD1User(client, 'id', verified.userId).catch(() => null);
-      return userId ? { actorKey: `user:${userId}` } : null;
+      if (!userId) return null;
+      authenticatedActor = { actorKey: `user:${userId}` };
     }
+
+    const pvpSignature = request.headers.get(ARENA_PVP_GENERATION_SIGNATURE_HEADER)?.trim() ?? '';
+    if (pvpSignature) {
+      if (!authenticatedActor) return null;
+      return readPvpOperationActor(request);
+    }
+    if (authenticatedActor) return authenticatedActor;
     return readAnonymousActor(request);
   };
 };

@@ -5,6 +5,10 @@ import {
   ARENA_ANONYMOUS_TOKEN_HEADER,
   createArenaGenerationActorResolver,
 } from '../src/arena-generation/actor';
+import {
+  ARENA_PVP_GENERATION_SIGNATURE_HEADER,
+  createArenaPvpGenerationAuthority,
+} from '../src/arena-generation/internal-authority';
 import { createSignatureService } from '../src/signature';
 
 const createSignatures = async () => {
@@ -27,6 +31,57 @@ const d1 = (rows: Record<string, unknown>[]) => ({
 });
 
 describe('Arena generation actor resolver', () => {
+  it('maps signed PVP requests from different callers to one room-scoped operation actor', async () => {
+    const signatures = await createSignatures();
+    const authority = createArenaPvpGenerationAuthority(signatures);
+    const pvpContext = { roomId: 'room-1', matchId: 'match-1', roundId: 'round-1' };
+    const generationRequestId = 'pvp_request_1234';
+    const internalGuidance = 'server-owned-guidance';
+    const payload = { internalGuidance, pvpContext, combatants: ['A', 'B'] };
+    const signature = await authority.sign({
+      generationRequestId,
+      payload,
+    });
+    const resolveActor = createArenaGenerationActorResolver({
+      env: { HONO_AUTH_MODE: 'bearer' },
+      signatures,
+      pvpSignatures: signatures,
+      getD1Client: () => d1([{ id: 42 }]),
+    });
+    const request = (authorization: string) => new Request('https://example.test', {
+      method: 'POST',
+      headers: {
+        Authorization: authorization,
+        'Content-Type': 'application/json',
+        [ARENA_PVP_GENERATION_SIGNATURE_HEADER]: signature!,
+      },
+      body: JSON.stringify({ generationRequestId, ...payload }),
+    });
+
+    await expect(resolveActor(request('Bearer caller-one'))).resolves.toEqual({
+      actorKey: 'pvp-room:room-1',
+    });
+    await expect(resolveActor(request('Bearer caller-two'))).resolves.toEqual({
+      actorKey: 'pvp-room:room-1',
+    });
+    await expect(resolveActor(new Request('https://example.test', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        [ARENA_PVP_GENERATION_SIGNATURE_HEADER]: signature!,
+      },
+      body: JSON.stringify({ generationRequestId, ...payload }),
+    }))).resolves.toBeNull();
+
+    const rejectInvalidBearer = createArenaGenerationActorResolver({
+      env: { HONO_AUTH_MODE: 'bearer' },
+      signatures,
+      pvpSignatures: signatures,
+      getD1Client: () => d1([]),
+    });
+    await expect(rejectInvalidBearer(request('Bearer invalid-caller'))).resolves.toBeNull();
+  });
+
   it('keeps anonymous ownership stable across network changes with a signed token', async () => {
     const signatures = await createSignatures();
     const resolveActor = createArenaGenerationActorResolver({

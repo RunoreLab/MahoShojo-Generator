@@ -5,6 +5,7 @@ import {
   createArenaR2ObjectStoreFromEnvironment,
   createArenaSeasonContextReader,
   createNodeArenaGenerationFinalizationPorts,
+  createNodeArenaRejectedTerminalRecorder,
   createNodeArenaGenerationService,
   createNodeArenaGenerationTerminalStore,
 } from '@mahoshojo/hosted-runtime/arena-generation';
@@ -73,6 +74,7 @@ export const configureHonoArenaGenerationRuntime = (
   const generationService = createNodeArenaGenerationService({
     store: redis.getGenerationReplayStore(),
     terminalStore,
+    rejectedTerminalRecorder: createNodeArenaRejectedTerminalRecorder({ getD1Client }),
     getD1Client,
     signatures,
     observer: options.observer,

@@ -1,18 +1,21 @@
 import {
   ArenaGenerationFinalizationPendingError,
   generationCancelCode,
+  isArenaGenerationAuditableRejection,
   isArenaPreparationSeed,
   isGenerationCancelReason,
 } from '@mahoshojo/hosted-api/arena-generation/service';
 import type {
   ArenaGenerationExecutor,
   ArenaGenerationExecutionInput,
+  ArenaGenerationAuditableRejection,
   ArenaGenerationObserver,
   GenerationEventInput,
   GenerationTerminal,
   MaterializedArenaGeneration,
   PreflightedArenaGeneration,
   PreparedArenaGeneration,
+  ArenaTrustedPvpContext,
 } from '@mahoshojo/hosted-api/arena-generation/service';
 import { createArenaStreamProjector } from './stream-projector';
 
@@ -64,8 +67,9 @@ export interface ArenaGenerationRuntimeDependencies {
   preparePayload?(_input: {
     request: Request;
     actorKey: string;
+    generationRequestId: string;
     payload: Record<string, unknown>;
-  }): Promise<Record<string, unknown> | Response>;
+  }): Promise<Record<string, unknown> | ArenaGenerationAuditableRejection | Response>;
   checkSafety(_input: {
     request: Request;
     actorKey: string;
@@ -105,62 +109,81 @@ const jsonResponse = (payload: unknown, status: number): Response => new Respons
   },
 );
 
-const validatePayload = (payload: Record<string, unknown>): Response | null => {
+type ArenaPayloadValidationFailure = {
+  response: Response;
+  code: string;
+};
+
+const validationFailure = (
+  code: string,
+  error: string,
+  status: number,
+): ArenaPayloadValidationFailure => ({
+  code,
+  response: jsonResponse({ code, error }, status),
+});
+
+const validatePayload = (payload: Record<string, unknown>): ArenaPayloadValidationFailure | null => {
   const mode = typeof payload.mode === 'string' ? payload.mode : 'classic';
   const combatants = payload.combatants;
   const minimum = mode === 'daily' || mode === 'scenario' ? 1 : 2;
   if (!Array.isArray(combatants) || combatants.length < minimum) {
-    return jsonResponse({
-      code: 'ARENA_PARTICIPANTS_INVALID',
-      error: `该模式至少需要 ${minimum} 位角色`,
-    }, 400);
+    return validationFailure(
+      'ARENA_PARTICIPANTS_INVALID',
+      `该模式至少需要 ${minimum} 位角色`,
+      400,
+    );
   }
   if (combatants.length > MAX_ARENA_COMBATANTS) {
-    return jsonResponse({
-      code: 'ARENA_PARTICIPANTS_LIMIT',
-      error: `角色最多 ${MAX_ARENA_COMBATANTS} 位`,
-    }, 413);
+    return validationFailure(
+      'ARENA_PARTICIPANTS_LIMIT',
+      `角色最多 ${MAX_ARENA_COMBATANTS} 位`,
+      413,
+    );
   }
   if (
     Array.isArray(payload.auxScenarios)
     && payload.auxScenarios.length > MAX_ARENA_AUX_SCENARIOS
   ) {
-    return jsonResponse({ code: 'ARENA_AUX_SCENARIOS_LIMIT', error: '辅助情景最多 10 个' }, 400);
+    return validationFailure('ARENA_AUX_SCENARIOS_LIMIT', '辅助情景最多 10 个', 400);
   }
   if (Array.isArray(payload.materials) && payload.materials.length > MAX_ARENA_MATERIALS) {
-    return jsonResponse({ code: 'ARENA_MATERIALS_LIMIT', error: '素材最多 10 个' }, 400);
+    return validationFailure('ARENA_MATERIALS_LIMIT', '素材最多 10 个', 400);
   }
   if (
     Array.isArray(payload.adjudicationEvents)
     && payload.adjudicationEvents.length > MAX_ARENA_ADJUDICATION_EVENTS
   ) {
-    return jsonResponse({
-      code: 'ARENA_ADJUDICATION_EVENTS_LIMIT',
-      error: `裁定事件最多 ${MAX_ARENA_ADJUDICATION_EVENTS} 个`,
-    }, 413);
+    return validationFailure(
+      'ARENA_ADJUDICATION_EVENTS_LIMIT',
+      `裁定事件最多 ${MAX_ARENA_ADJUDICATION_EVENTS} 个`,
+      413,
+    );
   }
   if (
     Array.isArray(payload.questionnaires)
     && payload.questionnaires.length > MAX_ARENA_QUESTIONNAIRES
   ) {
-    return jsonResponse({
-      code: 'ARENA_QUESTIONNAIRES_LIMIT',
-      error: `问卷最多 ${MAX_ARENA_QUESTIONNAIRES} 份`,
-    }, 413);
+    return validationFailure(
+      'ARENA_QUESTIONNAIRES_LIMIT',
+      `问卷最多 ${MAX_ARENA_QUESTIONNAIRES} 份`,
+      413,
+    );
   }
   if (
     Array.isArray(payload.narrativeHistory)
     && payload.narrativeHistory.length > MAX_ARENA_NARRATIVE_HISTORY
   ) {
-    return jsonResponse({
-      code: 'ARENA_NARRATIVE_HISTORY_LIMIT',
-      error: `叙事历史最多 ${MAX_ARENA_NARRATIVE_HISTORY} 条`,
-    }, 413);
+    return validationFailure(
+      'ARENA_NARRATIVE_HISTORY_LIMIT',
+      `叙事历史最多 ${MAX_ARENA_NARRATIVE_HISTORY} 条`,
+      413,
+    );
   }
   if (payload.pvpContext !== undefined) {
     const context = payload.pvpContext;
     if (!context || typeof context !== 'object' || Array.isArray(context)) {
-      return jsonResponse({ code: 'ARENA_PVP_CONTEXT_INVALID', error: 'pvpContext 无效' }, 400);
+      return validationFailure('ARENA_PVP_CONTEXT_INVALID', 'pvpContext 无效', 400);
     }
     const record = context as Record<string, unknown>;
     if (['roomId', 'matchId', 'roundId'].some((key) => (
@@ -168,7 +191,7 @@ const validatePayload = (payload: Record<string, unknown>): Response | null => {
       || !(record[key] as string).trim()
       || (record[key] as string).trim().length > 128
     ))) {
-      return jsonResponse({ code: 'ARENA_PVP_CONTEXT_INVALID', error: 'pvpContext 无效' }, 400);
+      return validationFailure('ARENA_PVP_CONTEXT_INVALID', 'pvpContext 无效', 400);
     }
   }
   return null;
@@ -191,9 +214,61 @@ const redactSemanticValue = (value: unknown): unknown => {
   return output;
 };
 
-const redactSemanticPayload = (
+export const redactArenaGenerationSemanticPayload = (
   payload: Record<string, unknown>,
 ): Record<string, unknown> => redactSemanticValue(payload) as Record<string, unknown>;
+
+const readAuditablePvpContext = (
+  payload: Record<string, unknown>,
+): ArenaGenerationAuditableRejection['audit'] | null => {
+  const serverContext = payload.__arenaServerContextV1;
+  if (!serverContext || typeof serverContext !== 'object' || Array.isArray(serverContext)) return null;
+  const record = serverContext as Record<string, unknown>;
+  const pvpValue = record.trustedPvpContext;
+  if (!pvpValue || typeof pvpValue !== 'object' || Array.isArray(pvpValue)) return null;
+  const pvpRecord = pvpValue as Record<string, unknown>;
+  const pvpContext = {
+    roomId: typeof pvpRecord.roomId === 'string' ? pvpRecord.roomId : '',
+    matchId: typeof pvpRecord.matchId === 'string' ? pvpRecord.matchId : '',
+    roundId: typeof pvpRecord.roundId === 'string' ? pvpRecord.roundId : '',
+  } satisfies ArenaTrustedPvpContext;
+  if (Object.values(pvpContext).some((value) => !value || value.length > 128)) return null;
+  const endpoint = typeof record.endpoint === 'string' ? record.endpoint : '';
+  const deliveryMode = record.deliveryMode;
+  const startedAt = typeof record.startedAt === 'string' ? record.startedAt : '';
+  if (!endpoint || !startedAt || (deliveryMode !== 'stream' && deliveryMode !== 'non-stream')) {
+    return null;
+  }
+  return {
+    endpoint,
+    generationMode: deliveryMode,
+    startedAt,
+    mode: typeof payload.mode === 'string' && payload.mode.trim() ? payload.mode.trim() : 'classic',
+    pvpContext,
+  };
+};
+
+const auditablePvpRejection = (input: {
+  actorKey: string;
+  generationRequestId: string;
+  payload: Record<string, unknown>;
+  response: Response;
+  code: string;
+  stage: string;
+}): ArenaGenerationAuditableRejection | Response => {
+  const audit = readAuditablePvpContext(input.payload);
+  if (!audit || !input.actorKey || !input.generationRequestId) return input.response;
+  return {
+    kind: 'auditable-rejection',
+    response: input.response,
+    actorKey: input.actorKey,
+    generationRequestId: input.generationRequestId,
+    code: input.code,
+    stage: input.stage,
+    fingerprintPayload: redactArenaGenerationSemanticPayload(input.payload),
+    audit,
+  };
+};
 
 const createSeededRandom = async (preparationSeed: string): Promise<() => number> => {
   if (!isArenaPreparationSeed(preparationSeed)) {
@@ -356,14 +431,30 @@ export const createArenaGenerationRuntime = (
   const preflight: NonNullable<ArenaGenerationExecutor['preflight']> = async ({
     request,
     actorKey,
+    generationRequestId,
     payload,
-  }): Promise<PreflightedArenaGeneration | Response> => {
+  }): Promise<PreflightedArenaGeneration | ArenaGenerationAuditableRejection | Response> => {
     const authorizedPayload = dependencies.preparePayload
-      ? await dependencies.preparePayload({ request, actorKey, payload: { ...payload } })
+      ? await dependencies.preparePayload({
+        request,
+        actorKey,
+        generationRequestId,
+        payload: { ...payload },
+      })
       : { ...payload };
     if (authorizedPayload instanceof Response) return authorizedPayload;
+    if (isArenaGenerationAuditableRejection(authorizedPayload)) return authorizedPayload;
     const invalid = validatePayload(authorizedPayload);
-    if (invalid) return invalid;
+    if (invalid) {
+      return auditablePvpRejection({
+        actorKey,
+        generationRequestId,
+        payload: authorizedPayload,
+        response: invalid.response,
+        code: invalid.code,
+        stage: 'payload-validation',
+      });
+    }
     const materializationPayload = { ...authorizedPayload };
     delete materializationPayload.adjudicationResults;
     const safetyStartedAt = performance.now();
@@ -389,9 +480,20 @@ export const createArenaGenerationRuntime = (
       });
       throw error;
     }
-    if (safetyResponse) return safetyResponse;
+    if (safetyResponse) {
+      return safetyResponse.status === 400
+        ? auditablePvpRejection({
+          actorKey,
+          generationRequestId,
+          payload: authorizedPayload,
+          response: safetyResponse,
+          code: 'ARENA_CONTENT_POLICY_REJECTED',
+          stage: 'safety-policy',
+        })
+        : safetyResponse;
+    }
     return {
-      semanticPayload: redactSemanticPayload(authorizedPayload),
+      semanticPayload: redactArenaGenerationSemanticPayload(authorizedPayload),
       materializationPayload,
     };
   };
@@ -472,10 +574,11 @@ export const createArenaGenerationRuntime = (
   };
 
   const prepare: NonNullable<ArenaGenerationExecutor['prepare']> = async (input): Promise<
-    PreparedArenaGeneration | Response
+    PreparedArenaGeneration | ArenaGenerationAuditableRejection | Response
   > => {
     const preflighted = await preflight(input);
     if (preflighted instanceof Response) return preflighted;
+    if (isArenaGenerationAuditableRejection(preflighted)) return preflighted;
     const seedBytes = crypto.getRandomValues(new Uint8Array(32));
     const preparationSeed = Array.from(
       seedBytes,
@@ -488,6 +591,7 @@ export const createArenaGenerationRuntime = (
       preparationVersion: ARENA_GENERATION_MATERIALIZATION_VERSION,
     });
     if (materialized instanceof Response) return materialized;
+    if (isArenaGenerationAuditableRejection(materialized)) return materialized;
     return { ...materialized, semanticPayload: preflighted.semanticPayload };
   };
 

@@ -7,11 +7,18 @@ export type GenerateSignatureOptions = {
   sanitizeIgnoredKeys?: boolean;
 };
 
+export type VerifySignatureOptions = {
+  acceptSanitizedPayload?: boolean;
+};
+
 export type SigningKey = Parameters<typeof globalThis.crypto.subtle.sign>[1];
 
 export type SignatureService = {
   generateSignature(_data: object, _options?: GenerateSignatureOptions): Promise<string | null>;
-  verifySignature(_dataWithSignature: unknown): Promise<boolean>;
+  verifySignature(
+    _dataWithSignature: unknown,
+    _options?: VerifySignatureOptions,
+  ): Promise<boolean>;
 };
 
 export type SignatureServicePorts = {
@@ -177,7 +184,10 @@ export const createSignatureService = ({
     return bytesToHex(signature);
   };
 
-  const verifySignature = async (dataWithSignature: unknown): Promise<boolean> => {
+  const verifySignature = async (
+    dataWithSignature: unknown,
+    options: VerifySignatureOptions = {},
+  ): Promise<boolean> => {
     const key = await getSigningKey();
     if (!key) return false;
 
@@ -185,9 +195,11 @@ export const createSignatureService = ({
     if (!payload) return false;
 
     const candidates = [...payload.candidates];
-    for (const candidate of payload.candidates) {
-      const sanitized = stripIgnoredKeysDeep(candidate, DEFAULT_SANITIZATION_OPTIONS);
-      if (sanitized.changed) candidates.push(sanitized.value);
+    if (options.acceptSanitizedPayload !== false) {
+      for (const candidate of payload.candidates) {
+        const sanitized = stripIgnoredKeysDeep(candidate, DEFAULT_SANITIZATION_OPTIONS);
+        if (sanitized.changed) candidates.push(sanitized.value);
+      }
     }
 
     const signatureBytes = payload.signatures
@@ -195,11 +207,11 @@ export const createSignatureService = ({
       .filter((value): value is Uint8Array<ArrayBuffer> => value !== null);
 
     for (const candidate of candidates) {
-      for (const options of [
-        { sanitizeIgnoredKeys: true },
-        { sanitizeIgnoredKeys: false },
-      ] satisfies GenerateSignatureOptions[]) {
-        const data = canonicalBytes(candidate, options);
+      const canonicalOptions = options.acceptSanitizedPayload === false
+        ? [{ sanitizeIgnoredKeys: false }]
+        : [{ sanitizeIgnoredKeys: true }, { sanitizeIgnoredKeys: false }];
+      for (const canonicalOption of canonicalOptions satisfies GenerateSignatureOptions[]) {
+        const data = canonicalBytes(candidate, canonicalOption);
         for (const signature of signatureBytes) {
           if (await subtle.verify('HMAC', key, signature, data)) return true;
         }

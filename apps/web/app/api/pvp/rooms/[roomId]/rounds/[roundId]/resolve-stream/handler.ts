@@ -36,7 +36,13 @@ import { buildSubrequestAuthHeaders } from '@/lib/subrequest-auth';
 import { extractWinnerLineFromMarkdown, parsePvpWinnerFromText } from '@/lib/pvp/winner-parse';
 import type { AIReasoningSource, AIReasoningStatus } from '@/types/ai-reasoning';
 import { getRequestUrl } from '@/lib/request-url';
-import { createPvpArenaGenerationAuthority } from '@/lib/pvp/generation-authority';
+import {
+  createPvpArenaGenerationAuthority,
+} from '@/lib/pvp/generation-authority';
+import {
+  claimPvpResolutionOwnership,
+  handlePvpGenerationFailure,
+} from '@/lib/pvp/generation-lifecycle';
 
 type ResolveBody = { expectedVersion?: number; customProvider?: unknown; force?: boolean };
 
@@ -85,14 +91,6 @@ const moveToDiscard = (hand: PvpHandState, snapshotId: string): PvpHandState => 
   const cards = hand.cards.filter((c) => c.kind === 'snapshot' && c.id !== snapshotId);
   const discarded = [...hand.discarded, { kind: 'snapshot', id: snapshotId } as PvpSnapshotRef];
   return { ...hand, cards, discarded };
-};
-
-const isJsonLike = (contentType: string | null, rawText: string): boolean => {
-  const ct = (contentType || '').toLowerCase();
-  if (ct.includes('text/html')) return false;
-  if (ct.includes('application/json') || ct.includes('+json') || ct.includes('text/json')) return true;
-  const trimmed = rawText.trimStart();
-  return trimmed.startsWith('{') || trimmed.startsWith('[');
 };
 
 const stripPrivateKeys = (value: any): any => {
@@ -374,13 +372,19 @@ async function resolveStreamHandler(req: Request): Promise<Response> {
 
   // CAS：进入 resolving（避免重复触发）
   if (room.phase === 'choosing') {
-    const ok = await updatePvpRoomCas(roomId, expectedVersion, { phase: 'resolving', last_activity_at: new Date().toISOString() });
-    if (!ok) {
-      const refreshed = await getPvpRoomById(roomId);
-      if (!refreshed) return json({ error: '房间不存在' }, { status: 404 });
-      if (refreshed.phase !== 'resolving' && refreshed.phase !== 'finished') {
-        return json({ error: '版本冲突，请刷新后重试', code: 'VERSION_CONFLICT' }, { status: 409 });
-      }
+    const ownership = await claimPvpResolutionOwnership({
+      tryClaim: () => updatePvpRoomCas(roomId, expectedVersion, {
+        phase: 'resolving',
+        last_activity_at: new Date().toISOString(),
+      }),
+      readPhase: async () => (await getPvpRoomById(roomId))?.phase ?? null,
+    });
+    if (ownership.kind === 'missing') return json({ error: '房间不存在' }, { status: 404 });
+    if (ownership.kind === 'resolving') {
+      return json({ error: '正在结算中，请稍后刷新', code: 'ROOM_RESOLVING' }, { status: 409 });
+    }
+    if (ownership.kind === 'conflict') {
+      return json({ error: '版本冲突，请刷新后重试', code: 'VERSION_CONFLICT' }, { status: 409 });
     }
   }
   const resolvingVersion = room.phase === 'choosing' ? expectedVersion + 1 : expectedVersion;
@@ -424,12 +428,44 @@ async function resolveStreamHandler(req: Request): Promise<Response> {
     '';
 
   const internalGuidance = buildGuidance();
+  const generationPayload = {
+    combatants: picked.map((p) => ({
+      type: p.snapshot.card_type,
+      data: JSON.parse(p.snapshot.data_json),
+      isNative: false,
+      isPreset: false,
+      characterGuidance: p.characterGuidance ?? null,
+    })),
+    mode: rules.mode,
+    ...(rules.mode === 'scenario' && scenarioPayload
+      ? {
+          scenario: scenarioPayload,
+          scenarioTitle: (scenarioSelection ? getPvpScenarioTitle(scenarioSelection) : null) || undefined,
+          scenarioSourceDataCardId: scenarioSourceDataCardId || undefined,
+          scenarioSourceDataCardUpdatedAt: scenarioSourceDataCardUpdatedAt || undefined,
+        }
+      : {}),
+    ...(rules.language?.trim() ? { language: rules.language.trim() } : {}),
+    ...(rules.storyLength ? { storyLength: rules.storyLength } : {}),
+    ...(rules.userGuidance?.trim() ? { userGuidance: rules.userGuidance.trim() } : {}),
+    forceStreamMeta: true,
+    readArenaHistory: rules.readArenaHistory,
+    ...(rules.readArenaHistory
+      ? { arenaHistoryReadLimit: rules.isArenaHistoryUnlimited ? null : rules.readArenaHistoryLimit }
+      : {}),
+    writeArenaHistory: rules.writeArenaHistory,
+    readCurrentState: rules.readCurrentState,
+    writeCurrentState: rules.writeCurrentState,
+    adjudicationEvents: resolvePvpAdjudicationEvents({ roomEvents: rules.adjudicationEvents, scenarioPayload }),
+    ...(customProvider ? { customProvider } : {}),
+  };
   const generationAuthority = await createPvpArenaGenerationAuthority({
     roomId,
     matchId,
     roundId,
     attempt: 0,
     internalGuidance,
+    payload: generationPayload,
   });
   const upstreamRes = await fetch(new URL(
     resolveGenerationApiUrl('/api/arena/generate-stream?format=sse'),
@@ -446,35 +482,7 @@ async function resolveStreamHandler(req: Request): Promise<Response> {
     },
     body: JSON.stringify({
       generationRequestId: generationAuthority.generationRequestId,
-      combatants: picked.map((p) => ({
-        type: p.snapshot.card_type,
-        data: JSON.parse(p.snapshot.data_json),
-        isNative: false,
-        isPreset: false,
-        characterGuidance: p.characterGuidance ?? null,
-      })),
-      mode: rules.mode,
-      ...(rules.mode === 'scenario' && scenarioPayload
-        ? {
-            scenario: scenarioPayload,
-            scenarioTitle: (scenarioSelection ? getPvpScenarioTitle(scenarioSelection) : null) || undefined,
-            scenarioSourceDataCardId: scenarioSourceDataCardId || undefined,
-            scenarioSourceDataCardUpdatedAt: scenarioSourceDataCardUpdatedAt || undefined,
-          }
-        : {}),
-      ...(rules.language?.trim() ? { language: rules.language.trim() } : {}),
-      ...(rules.storyLength ? { storyLength: rules.storyLength } : {}),
-      ...(rules.userGuidance?.trim() ? { userGuidance: rules.userGuidance.trim() } : {}),
-      internalGuidance,
-      forceStreamMeta: true,
-      readArenaHistory: rules.readArenaHistory,
-      ...(rules.readArenaHistory ? { arenaHistoryReadLimit: rules.isArenaHistoryUnlimited ? null : rules.readArenaHistoryLimit } : {}),
-      writeArenaHistory: rules.writeArenaHistory,
-      readCurrentState: rules.readCurrentState,
-      writeCurrentState: rules.writeCurrentState,
-      adjudicationEvents: resolvePvpAdjudicationEvents({ roomEvents: rules.adjudicationEvents, scenarioPayload }),
-      ...(customProvider ? { customProvider } : {}),
-      pvpContext: { roomId, matchId, roundId },
+      ...generationAuthority.payload,
     }),
     signal: upstreamAbortController.signal,
   });
@@ -482,23 +490,16 @@ async function resolveStreamHandler(req: Request): Promise<Response> {
   if (!upstreamRes.ok) {
     clearUpstreamTimeout();
     const raw = await upstreamRes.text();
-    let shouldRedirect = false;
-    let redirectReason: string | null = null;
-    let errorMessage: string | null = null;
+    const failure = await handlePvpGenerationFailure({
+      response: upstreamRes,
+      raw,
+      persistGenerationId: (generationId) => updatePvpRound(roundId, {
+        battleGenerationId: generationId,
+      }),
+    });
 
-    if (isJsonLike(upstreamRes.headers.get('content-type'), raw)) {
-      try {
-        const parsed = JSON.parse(raw);
-        errorMessage = typeof parsed?.error === 'string' ? parsed.error : null;
-        shouldRedirect = Boolean(parsed?.shouldRedirect) || parsed?.redirect === '/arrested';
-        redirectReason = typeof parsed?.reason === 'string' ? parsed.reason : null;
-      } catch {
-        // ignore
-      }
-    }
-
-    if (shouldRedirect) {
-      const report = buildPvpSensitiveArrestWarrantReport({ reason: redirectReason, roomId, matchId, roundId, issuedAt: new Date() });
+    if (failure.shouldRedirect) {
+      const report = buildPvpSensitiveArrestWarrantReport({ reason: failure.redirectReason, roomId, matchId, roundId, issuedAt: new Date() });
       const markdown = buildMarkdownFromArrestReport(report);
 
       const resultJson = JSON.stringify({
@@ -576,7 +577,7 @@ async function resolveStreamHandler(req: Request): Promise<Response> {
       {
         error: '战报生成失败，请稍后重试',
         code: 'BATTLE_REPORT_GENERATION_FAILED',
-        detail: errorMessage || raw || 'unknown',
+        detail: failure.errorMessage || raw || 'unknown',
         attempts: 1,
       },
       { status: 502 }

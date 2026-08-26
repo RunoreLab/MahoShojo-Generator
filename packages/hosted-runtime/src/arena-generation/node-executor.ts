@@ -1,19 +1,25 @@
 import { STRICT_RANKED_MODEL_FALLBACKS } from '@mahoshojo/domain/arena-ranked-model-policy';
 
 import type {
+  ArenaGenerationAuditableRejection,
   ArenaGenerationExecutor,
   ArenaGenerationObserver,
+  ArenaTrustedPvpContext,
 } from '@mahoshojo/hosted-api/arena-generation/service';
 import { buildArenaGenerationPrompt, isStrictRankedArenaRequest } from './prompt';
 import { MAX_ARENA_MATERIALS, normalizeNodeArenaMaterials } from './materials';
 import type { ArenaSeasonContext } from './season-context';
-import { createArenaInternalGuidanceAuthority } from './internal-authority';
+import {
+  createArenaInternalGuidanceAuthority,
+  createArenaPvpGenerationAuthority,
+} from './internal-authority';
 import {
   resolveArenaCustomProvider,
   type ResolvedArenaCustomProvider,
 } from './custom-provider';
 import {
   createArenaGenerationRuntime,
+  redactArenaGenerationSemanticPayload,
   type ArenaGenerationFinalizationInput,
   type ArenaGenerationFinalizationResult,
 } from './runtime';
@@ -62,6 +68,7 @@ export type NodeArenaGenerationExecutorOptions = {
   logger?: NodeAiLogger;
   now?: () => Date;
   signatureService?: SignatureService;
+  pvpSignatureService?: SignatureService;
   generateWithStreamAI?: GenerateWithStreamAI;
   generateWithStructuredAI?(
     _input: string,
@@ -72,6 +79,11 @@ export type NodeArenaGenerationExecutorOptions = {
     request: Request;
     payload: Readonly<Record<string, unknown>>;
   }): Promise<string | null>;
+  resolveTrustedPvpContext?(_input: {
+    request: Request;
+    generationRequestId: string;
+    payload: Readonly<Record<string, unknown>>;
+  }): Promise<ArenaTrustedPvpContext | null>;
   readinessCheck?(): Promise<Response | null>;
   readSeasonContext?(): Promise<ArenaSeasonContext>;
   requireSeasonAuthority?: boolean;
@@ -418,6 +430,9 @@ export const createNodeArenaGenerationExecutor = (
   const signatures = options.signatureService ?? createEnvSignatureService({ env, logger });
   const now = options.now ?? (() => new Date());
   const internalGuidanceAuthority = createArenaInternalGuidanceAuthority(signatures);
+  const pvpGenerationAuthority = options.pvpSignatureService
+    ? createArenaPvpGenerationAuthority(options.pvpSignatureService)
+    : null;
   const aiDependencies = {
     providers: parseAIProvidersFromEnv(env),
     loadBalanceStrategy: env.AI_LOAD_BALANCE_STRATEGY || 'random',
@@ -456,21 +471,64 @@ export const createNodeArenaGenerationExecutor = (
 
   return createArenaGenerationRuntime({
     observer: options.observer,
-    preparePayload: async ({ request, payload }) => {
+    preparePayload: async ({ request, actorKey, generationRequestId, payload }) => {
       const readinessFailure = await options.readinessCheck?.() ?? null;
       if (readinessFailure) return readinessFailure;
-      const normalized = clonePayload(payload);
-      normalizeLegacyPayloadDefaults(normalized);
-      const customProvider = parseCustomProvider(normalized.customProvider);
-      if (customProvider instanceof Response) return customProvider;
-      await normalizeNativeAuthority(normalized, signatures);
-      delete normalized.internalGuidance;
+      const startedAt = now().toISOString();
+      const requestAuditContext = arenaRequestAuditContext(request);
       const trustedGuidance = await (
         options.resolveTrustedInternalGuidance ?? internalGuidanceAuthority.resolve
       )({
         request,
         payload,
       });
+      const trustedPvpContext = await (
+        options.resolveTrustedPvpContext
+        ?? ((input) => pvpGenerationAuthority
+          ? pvpGenerationAuthority.resolve({
+            request: input.request,
+            generationRequestId: input.generationRequestId,
+            payload: input.payload,
+          })
+          : Promise.resolve(null))
+      )({ request, generationRequestId, payload });
+      const normalized = clonePayload(payload);
+      normalizeLegacyPayloadDefaults(normalized);
+      const customProviderResolution = resolveArenaCustomProvider(normalized.customProvider);
+      if (!customProviderResolution.ok) {
+        const response = jsonResponse({
+          code: customProviderResolution.code,
+          error: customProviderResolution.error,
+        }, customProviderResolution.status);
+        if (!trustedPvpContext) return response;
+        const rejection: ArenaGenerationAuditableRejection = {
+          kind: 'auditable-rejection',
+          response,
+          actorKey,
+          generationRequestId,
+          code: customProviderResolution.code,
+          stage: 'custom-provider-validation',
+          fingerprintPayload: redactArenaGenerationSemanticPayload(normalized),
+          audit: {
+            endpoint: requestAuditContext.endpoint,
+            generationMode: requestAuditContext.deliveryMode,
+            startedAt,
+            mode: typeof normalized.mode === 'string' ? normalized.mode : 'classic',
+            pvpContext: trustedPvpContext,
+          },
+        };
+        return rejection;
+      }
+      if (normalized.pvpContext !== undefined && !trustedPvpContext) {
+        return jsonResponse({
+          code: 'ARENA_PVP_AUTHORITY_INVALID',
+          error: 'PVP generation authority is invalid',
+        }, 400);
+      }
+      if (trustedPvpContext) normalized.pvpContext = trustedPvpContext;
+      else delete normalized.pvpContext;
+      await normalizeNativeAuthority(normalized, signatures);
+      delete normalized.internalGuidance;
       if (trustedGuidance?.trim()) normalized.internalGuidance = trustedGuidance.trim();
       const season = await options.readSeasonContext?.().catch(() => null) ?? null;
       if (options.requireSeasonAuthority && season?.authorityAvailable !== true) {
@@ -480,9 +538,10 @@ export const createNodeArenaGenerationExecutor = (
         }, 503);
       }
       normalized.__arenaServerContextV1 = {
-        startedAt: now().toISOString(),
+        startedAt,
         ipAnonymized: anonymizeIp(requestIp(request)),
-        ...arenaRequestAuditContext(request),
+        ...requestAuditContext,
+        ...(trustedPvpContext ? { trustedPvpContext } : {}),
         season,
         scenarioNative: normalized.scenario
           ? await signatures.verifySignature(normalized.scenario)

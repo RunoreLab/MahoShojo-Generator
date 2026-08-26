@@ -10,6 +10,7 @@ export type EnvSignatureServiceOptions = {
   env?: Readonly<Record<string, string | undefined>>;
   logger?: EnvSignatureLogger;
   subtle?: typeof globalThis.crypto.subtle;
+  purpose?: string;
 };
 
 export const createEnvSignatureService = (
@@ -33,6 +34,28 @@ export const createEnvSignatureService = (
       }
 
       try {
+        const purpose = options.purpose?.trim() ?? '';
+        if (purpose) {
+          const baseKey = await subtle.importKey(
+            'raw',
+            new TextEncoder().encode(secret),
+            'HKDF',
+            false,
+            ['deriveKey'],
+          );
+          return subtle.deriveKey(
+            {
+              name: 'HKDF',
+              hash: 'SHA-256',
+              salt: new TextEncoder().encode('mahoshojo-signature-purpose-v1'),
+              info: new TextEncoder().encode(purpose),
+            },
+            baseKey,
+            { name: 'HMAC', hash: 'SHA-256', length: 256 },
+            false,
+            ['sign', 'verify'],
+          );
+        }
         return await subtle.importKey(
           'raw',
           new TextEncoder().encode(secret),

@@ -22,7 +22,7 @@ describe('generate-battle-story context wiring', () => {
     const runtime = readSharedRuntimeSource('runtime.ts');
     const prompt = readSharedRuntimeSource('prompt.ts');
 
-    expect(runtime).toContain("code: 'ARENA_AUX_SCENARIOS_LIMIT'");
+    expect(runtime).toContain("validationFailure('ARENA_AUX_SCENARIOS_LIMIT'");
     expect(prompt).toContain('Array.isArray(payload.auxScenarios)');
   });
 });

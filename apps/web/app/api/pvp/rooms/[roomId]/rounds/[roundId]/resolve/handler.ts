@@ -28,7 +28,14 @@ import type { PvpHandState, PvpSnapshotRef } from '@/lib/pvp/types';
 import { createPvpWinnerVoteState } from '@/lib/pvp/winner-vote';
 import { buildSubrequestAuthHeaders } from '@/lib/subrequest-auth';
 import { resolvePvpAdjudicationEvents } from '@/lib/pvp/adjudication-events';
-import { createPvpArenaGenerationAuthority } from '@/lib/pvp/generation-authority';
+import {
+  createPvpArenaGenerationAuthority,
+  readDurablePvpGenerationId,
+} from '@/lib/pvp/generation-authority';
+import {
+  claimPvpResolutionOwnership,
+  handlePvpGenerationFailure,
+} from '@/lib/pvp/generation-lifecycle';
 
 type ResolveBody = { expectedVersion?: number; customProvider?: unknown; force?: boolean };
 
@@ -319,14 +326,19 @@ async function resolveHandler(req: Request): Promise<Response> {
 
   // CAS：进入 resolving（避免重复触发）
   if (room.phase === 'choosing') {
-    const ok = await updatePvpRoomCas(roomId, expectedVersion, { phase: 'resolving', last_activity_at: new Date().toISOString() });
-    if (!ok) {
-      // 竞争下可能被其它请求先推进，读取最新状态后继续（幂等）
-      const refreshed = await getPvpRoomById(roomId);
-      if (!refreshed) return json({ error: '房间不存在' }, { status: 404 });
-      if (refreshed.phase !== 'resolving' && refreshed.phase !== 'finished') {
-        return json({ error: '版本冲突，请刷新后重试', code: 'VERSION_CONFLICT' }, { status: 409 });
-      }
+    const ownership = await claimPvpResolutionOwnership({
+      tryClaim: () => updatePvpRoomCas(roomId, expectedVersion, {
+        phase: 'resolving',
+        last_activity_at: new Date().toISOString(),
+      }),
+      readPhase: async () => (await getPvpRoomById(roomId))?.phase ?? null,
+    });
+    if (ownership.kind === 'missing') return json({ error: '房间不存在' }, { status: 404 });
+    if (ownership.kind === 'resolving') {
+      return json({ error: '正在结算中，请稍后刷新', code: 'ROOM_RESOLVING' }, { status: 409 });
+    }
+    if (ownership.kind === 'conflict') {
+      return json({ error: '版本冲突，请刷新后重试', code: 'VERSION_CONFLICT' }, { status: 409 });
     }
   }
   const resolvingVersion = room.phase === 'choosing' ? expectedVersion + 1 : expectedVersion;
@@ -366,12 +378,43 @@ async function resolveHandler(req: Request): Promise<Response> {
     attempts = attempt + 1;
     try {
       const internalGuidance = buildGuidance(attempt);
+      const generationPayload = {
+        combatants: picked.map((p) => ({
+          type: p.snapshot.card_type,
+          data: JSON.parse(p.snapshot.data_json),
+          isNative: false,
+          isPreset: false,
+          characterGuidance: p.characterGuidance ?? null,
+        })),
+        mode: rules.mode,
+        ...(rules.mode === 'scenario' && scenarioPayload
+          ? {
+              scenario: scenarioPayload,
+              scenarioTitle: (scenarioSelection ? getPvpScenarioTitle(scenarioSelection) : null) || undefined,
+              scenarioSourceDataCardId: scenarioSourceDataCardId || undefined,
+              scenarioSourceDataCardUpdatedAt: scenarioSourceDataCardUpdatedAt || undefined,
+            }
+          : {}),
+        ...(rules.language?.trim() ? { language: rules.language.trim() } : {}),
+        ...(rules.storyLength ? { storyLength: rules.storyLength } : {}),
+        ...(rules.userGuidance?.trim() ? { userGuidance: rules.userGuidance.trim() } : {}),
+        readArenaHistory: rules.readArenaHistory,
+        ...(rules.readArenaHistory
+          ? { arenaHistoryReadLimit: rules.isArenaHistoryUnlimited ? null : rules.readArenaHistoryLimit }
+          : {}),
+        writeArenaHistory: rules.writeArenaHistory,
+        readCurrentState: rules.readCurrentState,
+        writeCurrentState: rules.writeCurrentState,
+        adjudicationEvents: resolvePvpAdjudicationEvents({ roomEvents: rules.adjudicationEvents, scenarioPayload }),
+        ...(customProvider ? { customProvider } : {}),
+      };
       const generationAuthority = await createPvpArenaGenerationAuthority({
         roomId,
         matchId,
         roundId,
         attempt,
         internalGuidance,
+        payload: generationPayload,
       });
       const res = await fetch(new URL(resolveGenerationApiUrl('/api/generate-battle-story'), origin).toString(), {
         method: 'POST',
@@ -381,73 +424,27 @@ async function resolveHandler(req: Request): Promise<Response> {
           ...subrequestAuthHeaders,
           ...generationAuthority.headers,
         },
-      body: JSON.stringify({
-        generationRequestId: generationAuthority.generationRequestId,
-        combatants: picked.map((p) => ({
-          type: p.snapshot.card_type,
-          data: JSON.parse(p.snapshot.data_json),
-          isNative: false,
-          isPreset: false,
-          characterGuidance: p.characterGuidance ?? null,
-        })),
-        mode: rules.mode,
-          ...(rules.mode === 'scenario' && scenarioPayload
-            ? {
-                scenario: scenarioPayload,
-                scenarioTitle: (scenarioSelection ? getPvpScenarioTitle(scenarioSelection) : null) || undefined,
-                scenarioSourceDataCardId: scenarioSourceDataCardId || undefined,
-                scenarioSourceDataCardUpdatedAt: scenarioSourceDataCardUpdatedAt || undefined,
-              }
-            : {}),
-          ...(rules.language?.trim() ? { language: rules.language.trim() } : {}),
-          ...(rules.storyLength ? { storyLength: rules.storyLength } : {}),
-          internalGuidance,
-          ...(rules.userGuidance?.trim() ? { userGuidance: rules.userGuidance.trim() } : {}),
-          readArenaHistory: rules.readArenaHistory,
-          ...(rules.readArenaHistory
-            ? { arenaHistoryReadLimit: rules.isArenaHistoryUnlimited ? null : rules.readArenaHistoryLimit }
-            : {}),
-          writeArenaHistory: rules.writeArenaHistory,
-          readCurrentState: rules.readCurrentState,
-          writeCurrentState: rules.writeCurrentState,
-          adjudicationEvents: resolvePvpAdjudicationEvents({ roomEvents: rules.adjudicationEvents, scenarioPayload }),
-          ...(customProvider ? { customProvider } : {}),
-          pvpContext: {
-            roomId,
-            matchId,
-            roundId,
-          },
+        body: JSON.stringify({
+          generationRequestId: generationAuthority.generationRequestId,
+          ...generationAuthority.payload,
         }),
       });
 
       const raw = await res.text();
 
       if (!res.ok) {
-        let generationId: string | null = null;
-        let errorMessage: string | null = null;
-        let shouldRedirect = false;
-        let redirectReason: string | null = null;
-        if (isJsonLike(res.headers.get('content-type'), raw)) {
-          try {
-            const parsed = JSON.parse(raw);
-            generationId = typeof parsed?.generationId === 'string' ? parsed.generationId : null;
-            errorMessage = typeof parsed?.error === 'string' ? parsed.error : null;
-            shouldRedirect = Boolean(parsed?.shouldRedirect) || parsed?.redirect === '/arrested';
-            redirectReason = typeof parsed?.reason === 'string' ? parsed.reason : null;
-          } catch {
-            generationId = null;
-            errorMessage = null;
-          }
-        }
-
-        if (generationId) {
-          await updatePvpRound(roundId, { battleGenerationId: generationId });
-        }
+        const failure = await handlePvpGenerationFailure({
+          response: res,
+          raw,
+          persistGenerationId: (generationId) => updatePvpRound(roundId, {
+            battleGenerationId: generationId,
+          }),
+        });
 
         // PVP 特殊处理：敏感词触发逮捕时，不跳转 /arrested，而是将战报改为“逮捕令”并判定平局。
-        if (shouldRedirect) {
+        if (failure.shouldRedirect) {
           report = buildPvpSensitiveArrestWarrantReport({
-            reason: redirectReason,
+            reason: failure.redirectReason,
             roomId,
             matchId,
             roundId,
@@ -467,11 +464,15 @@ async function resolveHandler(req: Request): Promise<Response> {
           continue;
         }
 
-        lastError = errorMessage || raw || '战报生成失败';
+        lastError = failure.errorMessage || raw || '战报生成失败';
         continue;
       }
 
       if (!isJsonLike(res.headers.get('content-type'), raw)) {
+        const generationId = readDurablePvpGenerationId(res, null);
+        if (generationId) {
+          await updatePvpRound(roundId, { battleGenerationId: generationId });
+        }
         const preview = raw.trim().slice(0, 160);
         const contentType = res.headers.get('content-type') || 'unknown';
         lastError = `战报生成接口返回的不是 JSON（Content-Type: ${contentType}）${preview ? `\n预览：${preview}` : ''}`;
@@ -488,7 +489,7 @@ async function resolveHandler(req: Request): Promise<Response> {
         continue;
       }
 
-      const generationId = typeof data?.generationId === 'string' ? data.generationId : null;
+      const generationId = readDurablePvpGenerationId(res, data);
       if (generationId) {
         await updatePvpRound(roundId, { battleGenerationId: generationId });
       }

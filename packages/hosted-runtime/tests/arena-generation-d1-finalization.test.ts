@@ -2,12 +2,14 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
   createNodeArenaGenerationFinalizationPorts,
+  createNodeArenaRejectedTerminalRecorder,
   createNodeArenaGenerationTerminalStore,
   MAX_ARENA_TERMINAL_COMBATANTS,
   MAX_ARENA_TERMINAL_EXTRA_JSON_BYTES,
   readNodeArenaGenerationReconciliation,
 } from '../src/arena-generation/d1-finalization';
 import type { NodeDataD1Client } from '../src/node-runtime/data-ports';
+import type { ArenaGenerationRejectedTerminalRecordInput } from '@mahoshojo/hosted-api/arena-generation/service';
 
 const result = (
   results: Record<string, unknown>[] = [],
@@ -68,7 +70,147 @@ const claimInput = {
   resultRef: 'r2:v1/battle-report-generations/generation-1/output.md',
 };
 
+const rejectedInput: ArenaGenerationRejectedTerminalRecordInput = {
+  generationId: 'generation-rejected-1',
+  generationRequestId: 'pvp_request_1234',
+  actorKey: 'user:42',
+  payloadHash: 'payload-hash-rejected-1',
+  code: 'ARENA_CONTENT_POLICY_REJECTED',
+  stage: 'safety-policy',
+  endpoint: 'api/generate-battle-story',
+  generationMode: 'non-stream',
+  startedAt: '2026-08-25T03:59:59.000Z',
+  mode: 'classic',
+  pvpContext: { roomId: 'room-1', matchId: 'match-1', roundId: 'round-1' },
+};
+
 describe('Arena D1/R2 finalization ports', () => {
+  it('records a bounded failed PVP rejection without success-side-effect data', async () => {
+    const client = sequentialD1([result([], 1)]);
+    const recorder = createNodeArenaRejectedTerminalRecorder({
+      getD1Client: () => client,
+      now: () => new Date('2026-08-25T04:00:00.000Z'),
+    });
+
+    await expect(recorder.record({
+      ...rejectedInput,
+      customProviderApiKey: 'must-not-enter-d1',
+      sensitiveText: 'must-not-enter-d1',
+      authoritySignature: 'must-not-enter-d1-signature',
+      rawPayload: { prompt: 'must-not-enter-d1-raw-payload' },
+    } as ArenaGenerationRejectedTerminalRecordInput)).resolves.toEqual({ kind: 'recorded' });
+
+    const insertSql = vi.mocked(client.prepare).mock.calls[0]?.[0] ?? '';
+    expect(insertSql).toContain('INSERT OR IGNORE INTO battle_report_generations');
+    const columns = insertSql
+      .match(/battle_report_generations\s*\(([\s\S]*?)\)\s*VALUES/u)?.[1]
+      ?.split(',')
+      .map((column) => column.trim()) ?? [];
+    expect(columns).toEqual(expect.arrayContaining([
+      'id',
+      'started_at',
+      'ended_at',
+      'duration_ms',
+      'status',
+      'generation_mode',
+      'endpoint',
+      'mode',
+      'created_at',
+      'updated_at',
+    ]));
+    expect(client.prepare).not.toHaveBeenCalledWith(expect.stringContaining(
+      'battle_report_generation_combatants',
+    ));
+    const serialized = JSON.stringify(client.boundCalls);
+    expect(serialized).not.toContain('must-not-enter-d1');
+    expect(serialized).not.toContain('must-not-enter-d1-signature');
+    expect(serialized).not.toContain('must-not-enter-d1-raw-payload');
+    expect(serialized).toContain('ARENA_CONTENT_POLICY_REJECTED');
+    expect(serialized).toContain('safety-policy');
+    expect(serialized).toContain('room-1');
+  });
+
+  it('reconciles duplicate and indeterminate rejected-terminal inserts by identity', async () => {
+    const ownerHash = await crypto.subtle.digest(
+      'SHA-256',
+      new TextEncoder().encode(rejectedInput.actorKey),
+    ).then((bytes) => Array.from(
+      new Uint8Array(bytes),
+      (byte) => byte.toString(16).padStart(2, '0'),
+    ).join(''));
+    const stored = {
+      id: rejectedInput.generationId,
+      status: 'failed',
+      extra_json: JSON.stringify({
+        generationRequestId: rejectedInput.generationRequestId,
+        generationOwnerHash: ownerHash,
+        generationPayloadHash: rejectedInput.payloadHash,
+        generationTerminalStatus: 'failed',
+        finalizationCompleted: true,
+        rejectedBeforeProvider: true,
+      }),
+    };
+    const duplicateClient = sequentialD1([result([], 0), result([stored])]);
+    const indeterminateClient = sequentialD1([
+      new Error('D1_TRANSPORT_TIMEOUT'),
+      result([stored]),
+    ]);
+
+    await expect(createNodeArenaRejectedTerminalRecorder({
+      getD1Client: () => duplicateClient,
+    }).record(rejectedInput)).resolves.toEqual({ kind: 'recorded' });
+    await expect(createNodeArenaRejectedTerminalRecorder({
+      getD1Client: () => indeterminateClient,
+    }).record(rejectedInput)).resolves.toEqual({ kind: 'recorded' });
+  });
+
+  it('reports an identity mismatch instead of reusing a conflicting rejected terminal', async () => {
+    const client = sequentialD1([
+      result([], 0),
+      result([{
+        id: rejectedInput.generationId,
+        status: 'failed',
+        extra_json: JSON.stringify({
+          generationRequestId: rejectedInput.generationRequestId,
+          generationOwnerHash: 'different-owner',
+          generationPayloadHash: 'different-payload',
+          generationTerminalStatus: 'failed',
+          finalizationCompleted: true,
+          rejectedBeforeProvider: true,
+        }),
+      }]),
+    ]);
+    const recorder = createNodeArenaRejectedTerminalRecorder({ getD1Client: () => client });
+
+    await expect(recorder.record(rejectedInput)).resolves.toEqual({ kind: 'conflict' });
+  });
+
+  it('does not reinterpret an existing successful generation as the rejected terminal', async () => {
+    const client = sequentialD1([
+      result([], 0),
+      result([{
+        id: rejectedInput.generationId,
+        status: 'completed',
+        extra_json: JSON.stringify({
+          generationRequestId: rejectedInput.generationRequestId,
+          generationOwnerHash: await crypto.subtle.digest(
+            'SHA-256',
+            new TextEncoder().encode(rejectedInput.actorKey),
+          ).then((bytes) => Array.from(
+            new Uint8Array(bytes),
+            (byte) => byte.toString(16).padStart(2, '0'),
+          ).join('')),
+          generationPayloadHash: rejectedInput.payloadHash,
+          generationTerminalStatus: 'completed',
+          finalizationCompleted: true,
+        }),
+      }]),
+    ]);
+    const recorder = createNodeArenaRejectedTerminalRecorder({ getD1Client: () => client });
+
+    await expect(recorder.record(rejectedInput)).resolves.toEqual({ kind: 'conflict' });
+  });
+
   it('uses server-derived companion endpoint and delivery mode in generation audit rows', async () => {
     const client = sequentialD1([result([], 1)]);
     const ports = createNodeArenaGenerationFinalizationPorts({
@@ -89,6 +231,45 @@ describe('Arena D1/R2 finalization ports', () => {
 
     expect(client.boundCalls[0]?.[5]).toBe('non-stream');
     expect(client.boundCalls[0]?.[6]).toBe('api/generate-battle-story');
+  });
+
+  it('writes PVP columns only from the trusted server context', async () => {
+    const unsignedClient = sequentialD1([result([], 1)]);
+    const unsignedPorts = createNodeArenaGenerationFinalizationPorts({
+      getD1Client: () => unsignedClient,
+    });
+    await unsignedPorts.claimTerminal({
+      ...claimInput,
+      payload: {
+        ...claimInput.payload,
+        pvpContext: { roomId: 'forged-room', matchId: 'forged-match', roundId: 'forged-round' },
+      },
+    });
+    expect(unsignedClient.boundCalls[0]?.slice(15, 18)).toEqual([null, null, null]);
+
+    const trustedClient = sequentialD1([result([], 1)]);
+    const trustedPorts = createNodeArenaGenerationFinalizationPorts({
+      getD1Client: () => trustedClient,
+    });
+    await trustedPorts.claimTerminal({
+      ...claimInput,
+      payload: {
+        ...claimInput.payload,
+        pvpContext: { roomId: 'forged-room', matchId: 'forged-match', roundId: 'forged-round' },
+        __arenaServerContextV1: {
+          trustedPvpContext: {
+            roomId: 'trusted-room',
+            matchId: 'trusted-match',
+            roundId: 'trusted-round',
+          },
+        },
+      },
+    });
+    expect(trustedClient.boundCalls[0]?.slice(15, 18)).toEqual([
+      'trusted-room',
+      'trusted-match',
+      'trusted-round',
+    ]);
   });
 
   it('claims the D1 terminal row with INSERT OR IGNORE and distinguishes retries', async () => {

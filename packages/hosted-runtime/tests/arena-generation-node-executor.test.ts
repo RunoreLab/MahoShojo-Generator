@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { isArenaGenerationAuditableRejection } from '@mahoshojo/hosted-api/arena-generation/service';
 
 import { createArenaGenerationFinalizer } from '../src/arena-generation/finalization';
 import { createNodeArenaGenerationExecutor } from '../src/arena-generation/node-executor';
@@ -42,6 +43,239 @@ const signatureService: SignatureService = {
 };
 
 describe('Node Arena generation executor', () => {
+  it('classifies a trusted PVP safety rejection as auditable without dispatching Provider', async () => {
+    const generateWithStreamAI = vi.fn();
+    const executor = createNodeArenaGenerationExecutor({
+      env: {},
+      finalizer,
+      signatureService,
+      resolveTrustedPvpContext: vi.fn(async () => ({
+        roomId: 'room-1',
+        matchId: 'match-1',
+        roundId: 'round-1',
+      })),
+      enforceSafety: vi.fn(async () => Response.json({
+        error: '输入内容不合规',
+        shouldRedirect: true,
+        reason: '使用危险符文',
+      }, { status: 400 })),
+      generateWithStreamAI,
+    });
+
+    const result = await executor.prepare!({
+      request: new Request('https://example.test/api/generate-battle-story'),
+      actorKey: 'user:42',
+      generationRequestId: 'pvp_request_1234',
+      payload: {
+        ...validPayload,
+        pvpContext: { roomId: 'room-1', matchId: 'match-1', roundId: 'round-1' },
+      },
+    });
+
+    expect(isArenaGenerationAuditableRejection(result)).toBe(true);
+    if (!isArenaGenerationAuditableRejection(result)) throw new Error('expected auditable rejection');
+    expect(result).toMatchObject({
+      code: 'ARENA_CONTENT_POLICY_REJECTED',
+      stage: 'safety-policy',
+      audit: {
+        endpoint: 'api/generate-battle-story',
+        generationMode: 'non-stream',
+        pvpContext: { roomId: 'room-1', matchId: 'match-1', roundId: 'round-1' },
+      },
+    });
+    expect(result.response.status).toBe(400);
+    expect(generateWithStreamAI).not.toHaveBeenCalled();
+  });
+
+  it('keeps operational readiness failures non-auditable even for trusted PVP input', async () => {
+    const executor = createNodeArenaGenerationExecutor({
+      env: {},
+      finalizer,
+      signatureService,
+      readinessCheck: vi.fn(async () => Response.json({
+        code: 'ARENA_GENERATION_CAPABILITY_UNAVAILABLE',
+      }, { status: 503 })),
+      resolveTrustedPvpContext: vi.fn(async () => ({
+        roomId: 'room-1', matchId: 'match-1', roundId: 'round-1',
+      })),
+      generateWithStreamAI: vi.fn(),
+    });
+
+    const result = await executor.prepare!({
+      request: new Request('https://example.test/api/generate-battle-story'),
+      actorKey: 'user:42',
+      generationRequestId: 'pvp_request_1234',
+      payload: {
+        ...validPayload,
+        pvpContext: { roomId: 'room-1', matchId: 'match-1', roundId: 'round-1' },
+      },
+    });
+
+    expect(result).toBeInstanceOf(Response);
+    expect((result as Response).status).toBe(503);
+  });
+
+  it('keeps non-policy safety failures non-auditable for trusted PVP input', async () => {
+    const generateWithStreamAI = vi.fn();
+    const executor = createNodeArenaGenerationExecutor({
+      env: {},
+      finalizer,
+      signatureService,
+      resolveTrustedPvpContext: vi.fn(async () => ({
+        roomId: 'room-1', matchId: 'match-1', roundId: 'round-1',
+      })),
+      enforceSafety: vi.fn(async () => Response.json({
+        code: 'ARENA_SAFETY_SERVICE_UNAVAILABLE',
+      }, { status: 503 })),
+      generateWithStreamAI,
+    });
+
+    const result = await executor.prepare!({
+      request: new Request('https://example.test/api/generate-battle-story'),
+      actorKey: 'user:42',
+      generationRequestId: 'pvp_request_1234',
+      payload: {
+        ...validPayload,
+        pvpContext: { roomId: 'room-1', matchId: 'match-1', roundId: 'round-1' },
+      },
+    });
+
+    expect(result).toBeInstanceOf(Response);
+    expect(isArenaGenerationAuditableRejection(result)).toBe(false);
+    expect((result as Response).status).toBe(503);
+    expect(generateWithStreamAI).not.toHaveBeenCalled();
+  });
+
+  it('redacts a trusted PVP custom-provider rejection fingerprint before audit', async () => {
+    const executor = createNodeArenaGenerationExecutor({
+      env: {},
+      finalizer,
+      signatureService,
+      resolveTrustedPvpContext: vi.fn(async () => ({
+        roomId: 'room-1', matchId: 'match-1', roundId: 'round-1',
+      })),
+      generateWithStreamAI: vi.fn(),
+    });
+
+    const result = await executor.prepare!({
+      request: new Request('https://example.test/api/generate-battle-story'),
+      actorKey: 'user:42',
+      generationRequestId: 'pvp_request_1234',
+      payload: {
+        ...validPayload,
+        pvpContext: { roomId: 'room-1', matchId: 'match-1', roundId: 'round-1' },
+        customProvider: {
+          providerId: 'unknown',
+          modelId: 'model',
+          apiKey: 'must-not-enter-audit',
+        },
+      },
+    });
+
+    expect(isArenaGenerationAuditableRejection(result)).toBe(true);
+    if (!isArenaGenerationAuditableRejection(result)) throw new Error('expected auditable rejection');
+    expect(result.code).toBe('ARENA_PROVIDER_UNKNOWN');
+    expect(result.stage).toBe('custom-provider-validation');
+    expect(JSON.stringify(result.fingerprintPayload)).not.toContain('must-not-enter-audit');
+    expect(JSON.stringify(result.fingerprintPayload)).not.toContain('signature');
+  });
+
+  it('classifies trusted PVP business validation failures without trusting body context alone', async () => {
+    const trustedExecutor = createNodeArenaGenerationExecutor({
+      env: {},
+      finalizer,
+      signatureService,
+      resolveTrustedPvpContext: vi.fn(async () => ({
+        roomId: 'room-1', matchId: 'match-1', roundId: 'round-1',
+      })),
+      enforceSafety: vi.fn(async () => null),
+      generateWithStreamAI: vi.fn(),
+    });
+    const untrustedExecutor = createNodeArenaGenerationExecutor({
+      env: {},
+      finalizer,
+      signatureService,
+      resolveTrustedPvpContext: vi.fn(async () => null),
+      enforceSafety: vi.fn(async () => null),
+      generateWithStreamAI: vi.fn(),
+    });
+    const input = {
+      request: new Request('https://example.test/api/generate-battle-story'),
+      actorKey: 'user:42',
+      generationRequestId: 'pvp_request_1234',
+      payload: {
+        ...validPayload,
+        combatants: [],
+        pvpContext: { roomId: 'room-1', matchId: 'match-1', roundId: 'round-1' },
+      },
+    };
+
+    const trusted = await trustedExecutor.prepare!(input);
+    const untrusted = await untrustedExecutor.prepare!(input);
+
+    expect(isArenaGenerationAuditableRejection(trusted)).toBe(true);
+    if (!isArenaGenerationAuditableRejection(trusted)) throw new Error('expected auditable rejection');
+    expect(trusted).toMatchObject({
+      code: 'ARENA_PARTICIPANTS_INVALID',
+      stage: 'payload-validation',
+    });
+    expect(untrusted).toBeInstanceOf(Response);
+    expect((untrusted as Response).status).toBe(400);
+  });
+
+  it('rejects unsigned PVP context and overwrites signed input with the trusted exact context', async () => {
+    const unsignedExecutor = createNodeArenaGenerationExecutor({
+      env: {},
+      finalizer,
+      signatureService,
+      resolveTrustedPvpContext: vi.fn(async () => null),
+      enforceSafety: vi.fn(async () => null),
+      generateWithStreamAI: vi.fn(),
+    });
+    const unsigned = await unsignedExecutor.prepare!({
+      request: new Request('https://example.test/api/generate-battle-story'),
+      actorKey: 'user:42',
+      generationRequestId: 'pvp_request_1234',
+      payload: {
+        ...validPayload,
+        pvpContext: { roomId: 'forged-room', matchId: 'match-1', roundId: 'round-1' },
+      },
+    });
+
+    expect(unsigned).toBeInstanceOf(Response);
+    await expect((unsigned as Response).json()).resolves.toMatchObject({
+      code: 'ARENA_PVP_AUTHORITY_INVALID',
+    });
+
+    const trustedContext = { roomId: 'room-1', matchId: 'match-1', roundId: 'round-1' };
+    const signedExecutor = createNodeArenaGenerationExecutor({
+      env: {},
+      finalizer,
+      signatureService,
+      resolveTrustedPvpContext: vi.fn(async () => trustedContext),
+      enforceSafety: vi.fn(async () => null),
+      generateWithStreamAI: vi.fn(),
+    });
+    const signed = await signedExecutor.prepare!({
+      request: new Request('https://example.test/api/generate-battle-story'),
+      actorKey: 'pvp-room:room-1',
+      generationRequestId: 'pvp_request_1234',
+      payload: {
+        ...validPayload,
+        pvpContext: { roomId: 'body-room', matchId: 'body-match', roundId: 'body-round' },
+      },
+    });
+
+    expect(signed).not.toBeInstanceOf(Response);
+    if (signed instanceof Response || isArenaGenerationAuditableRejection(signed)) {
+      throw new Error('unexpected response');
+    }
+    expect(signed.executionPayload.pvpContext).toEqual(trustedContext);
+    expect(signed.executionPayload.__arenaServerContextV1).toEqual(expect.objectContaining({
+      trustedPvpContext: trustedContext,
+    }));
+  });
+
   it('preserves the configured AI safety gate before reservation', async () => {
     const generateWithStreamAI = vi.fn();
     const generateWithStructuredAI = vi.fn(async () => ({
@@ -62,6 +296,7 @@ describe('Node Arena generation executor', () => {
     const result = await executor.prepare!({
       request: new Request('https://example.test/api/arena/generate-stream'),
       actorKey: 'anonymous:test',
+      generationRequestId: 'request-direct-node',
       payload: validPayload,
     });
 
@@ -86,6 +321,7 @@ describe('Node Arena generation executor', () => {
         headers: { 'cf-connecting-ip': '192.0.2.44' },
       }),
       actorKey: 'anonymous:test',
+      generationRequestId: 'request-direct-node',
       payload: {
         ...validPayload,
         customProvider: {
@@ -129,6 +365,7 @@ describe('Node Arena generation executor', () => {
         headers: { 'cf-connecting-ip': '192.0.2.44' },
       }),
       actorKey: 'anonymous:test',
+      generationRequestId: 'request-direct-node',
       payload: {
         ...validPayload,
         customProvider: {
@@ -141,7 +378,10 @@ describe('Node Arena generation executor', () => {
     });
 
     expect(prepared).not.toBeInstanceOf(Response);
-    if (prepared instanceof Response) throw new Error('unexpected response');
+    if (
+      prepared instanceof Response
+      || isArenaGenerationAuditableRejection(prepared)
+    ) throw new Error('unexpected response');
     const combatants = safetyPayloads[0]?.combatants as Array<{ isNative: boolean }>;
     expect(combatants.map((item) => item.isNative)).toEqual([false, true]);
     expect(signatureService.generateSignature).not.toHaveBeenCalled();
@@ -186,6 +426,7 @@ describe('Node Arena generation executor', () => {
     const prepared = await executor.prepare!({
       request: new Request('https://example.test/api/arena/generate-stream'),
       actorKey: 'anonymous:test',
+      generationRequestId: 'request-direct-node',
       payload: {
         ...validPayload,
         materials: [
@@ -244,11 +485,13 @@ describe('Node Arena generation executor', () => {
     const tooManyAux = await executor.prepare!({
       request: new Request('https://example.test/api/generate-battle-story'),
       actorKey: 'anonymous:test',
+      generationRequestId: 'request-direct-node',
       payload: { ...validPayload, auxScenarios: Array.from({ length: 11 }, () => ({})) },
     });
     const tooManyMaterials = await executor.prepare!({
       request: new Request('https://example.test/api/arena/generate'),
       actorKey: 'anonymous:test',
+      generationRequestId: 'request-direct-node',
       payload: { ...validPayload, materials: Array.from({ length: 11 }, () => ({})) },
     });
 
@@ -278,6 +521,7 @@ describe('Node Arena generation executor', () => {
     const prepared = await executor.prepare!({
       request: new Request('https://example.test/api/arena/generate-stream'),
       actorKey: 'anonymous:test',
+      generationRequestId: 'request-direct-node',
       payload: {
         ...validPayload,
         internalGuidance: undefined,
@@ -289,7 +533,10 @@ describe('Node Arena generation executor', () => {
         isDowngrade: true,
       },
     });
-    if (prepared instanceof Response) throw new Error('unexpected response');
+    if (
+      prepared instanceof Response
+      || isArenaGenerationAuditableRejection(prepared)
+    ) throw new Error('unexpected response');
 
     const terminal = await executor.execute({
       generationId: 'generation-strict',
@@ -326,13 +573,17 @@ describe('Node Arena generation executor', () => {
     const prepared = await executor.prepare!({
       request: new Request('https://example.test/api/arena/generate'),
       actorKey: 'anonymous:test',
+      generationRequestId: 'request-direct-node',
       payload: {
         ...validPayload,
         userGuidance: '非排位叙事',
         isDowngrade: true,
       },
     });
-    if (prepared instanceof Response) throw new Error('unexpected response');
+    if (
+      prepared instanceof Response
+      || isArenaGenerationAuditableRejection(prepared)
+    ) throw new Error('unexpected response');
 
     const terminal = await executor.execute({
       generationId: 'generation-downgrade',

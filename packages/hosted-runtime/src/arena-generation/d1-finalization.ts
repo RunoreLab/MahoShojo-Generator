@@ -1,4 +1,6 @@
 import type {
+  ArenaGenerationRejectedTerminalRecorder,
+  ArenaGenerationRejectedTerminalRecordInput,
   ArenaGenerationTerminalRecord,
   ArenaGenerationTerminalStore,
 } from '@mahoshojo/hosted-api/arena-generation/service';
@@ -37,6 +39,11 @@ export type NodeArenaGenerationPersistenceOptions = {
   settleRatings?(_generationId: string): Promise<void>;
   readRanking?(_generationId: string): Promise<unknown | null>;
 };
+
+export type NodeArenaRejectedTerminalRecorderOptions = Pick<
+  NodeArenaGenerationPersistenceOptions,
+  'getD1Client' | 'now'
+>;
 
 const sha256 = async (value: string): Promise<string> => {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
@@ -99,6 +106,90 @@ const parseExtra = (value: unknown): Record<string, unknown> | null => {
     return null;
   }
 };
+
+const readRejectedTerminalIdentity = async (
+  client: NodeDataD1Client,
+  input: ArenaGenerationRejectedTerminalRecordInput,
+): Promise<'recorded' | 'conflict'> => {
+  const result = await client.prepare(`
+SELECT id, status, extra_json
+FROM battle_report_generations
+WHERE id = ?
+LIMIT 1
+  `.trim()).bind(input.generationId).all({ retry: 'safe-read' });
+  const row = result.results[0];
+  if (!row) throw new Error('ARENA_REJECTED_TERMINAL_NOT_FOUND');
+  const extra = parseExtra(row.extra_json);
+  const matches = row.status === 'failed'
+    && extra?.generationRequestId === input.generationRequestId
+    && extra?.generationOwnerHash === await sha256(input.actorKey)
+    && extra?.generationPayloadHash === input.payloadHash
+    && extra?.generationTerminalStatus === 'failed'
+    && extra?.finalizationCompleted === true
+    && extra?.rejectedBeforeProvider === true;
+  return matches ? 'recorded' : 'conflict';
+};
+
+export const createNodeArenaRejectedTerminalRecorder = (
+  options: NodeArenaRejectedTerminalRecorderOptions,
+): ArenaGenerationRejectedTerminalRecorder => Object.freeze({
+  async record(
+    input: ArenaGenerationRejectedTerminalRecordInput,
+  ): Promise<{ kind: 'recorded' } | { kind: 'conflict' }> {
+    const client = options.getD1Client();
+    if (!client) throw new Error('ARENA_D1_UNAVAILABLE');
+    const endedAt = (options.now ?? (() => new Date()))();
+    const startedAtMs = Date.parse(input.startedAt);
+    const durationMs = Number.isFinite(startedAtMs)
+      ? Math.max(0, endedAt.getTime() - startedAtMs)
+      : 0;
+    const extraJson = JSON.stringify({
+      generationRequestId: boundedString(input.generationRequestId, 128),
+      generationOwnerHash: await sha256(input.actorKey),
+      generationPayloadHash: boundedString(input.payloadHash, 128),
+      generationTerminalStatus: 'failed',
+      finalizationCompleted: true,
+      rejectedBeforeProvider: true,
+      rejectionCode: boundedString(input.code, 80),
+      rejectionStage: boundedString(input.stage, 80),
+    });
+    let inserted: Awaited<ReturnType<ReturnType<NodeDataD1Client['prepare']>['run']>>;
+    try {
+      inserted = await client.prepare(`
+INSERT OR IGNORE INTO battle_report_generations (
+  id, started_at, ended_at, duration_ms, status, generation_mode, endpoint,
+  mode, user_id, pvp_room_id, pvp_match_id, pvp_round_id, extra_json,
+  created_at, updated_at
+)
+VALUES (?, ?, ?, ?, 'failed', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `.trim()).bind(
+        input.generationId,
+        input.startedAt,
+        endedAt.toISOString(),
+        durationMs,
+        input.generationMode,
+        boundedString(input.endpoint, 128) ?? 'api/generate-battle-story',
+        boundedString(input.mode, 64) ?? 'classic',
+        actorUserId(input.actorKey),
+        boundedString(input.pvpContext.roomId, 128),
+        boundedString(input.pvpContext.matchId, 128),
+        boundedString(input.pvpContext.roundId, 128),
+        extraJson,
+        endedAt.toISOString(),
+        endedAt.toISOString(),
+      ).run({ retry: 'none' });
+    } catch (error) {
+      try {
+        const reconciled = await readRejectedTerminalIdentity(client, input);
+        return { kind: reconciled };
+      } catch {
+        throw error;
+      }
+    }
+    if ((numberOf(inserted.meta.changes) ?? 0) > 0) return { kind: 'recorded' };
+    return { kind: await readRejectedTerminalIdentity(client, input) };
+  },
+});
 
 const streamReport = (metadata: Record<string, unknown>): Record<string, unknown> | null => {
   const streamMeta = recordOf(metadata.streamMeta);
@@ -523,7 +614,7 @@ ON CONFLICT(kind, owner_ref_id) DO UPDATE SET
         : 0;
       const report = streamReport(input.metadata);
       const customProvider = recordOf(input.payload.customProvider);
-      const pvp = recordOf(input.payload.pvpContext);
+      const pvp = recordOf(serverContext?.trustedPvpContext);
       const usage = recordOf(input.telemetry.usage);
       const extraJson = await buildExtraJson(input);
       const markdownBytes = new TextEncoder().encode(input.markdown).byteLength;

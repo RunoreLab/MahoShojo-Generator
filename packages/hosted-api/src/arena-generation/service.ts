@@ -257,6 +257,42 @@ export type PreflightedArenaGeneration = {
   semanticPayload: Record<string, unknown>;
 };
 
+export type ArenaTrustedPvpContext = Readonly<{
+  roomId: string;
+  matchId: string;
+  roundId: string;
+}>;
+
+export const ARENA_GENERATION_TERMINAL_STATUS_HEADER =
+  'x-mahoshojo-generation-terminal-status';
+
+export type ArenaGenerationAuditableRejection = Readonly<{
+  kind: 'auditable-rejection';
+  response: Response;
+  actorKey: string;
+  generationRequestId: string;
+  code: string;
+  stage: string;
+  fingerprintPayload: Record<string, unknown>;
+  audit: Readonly<{
+    endpoint: string;
+    generationMode: 'stream' | 'non-stream';
+    startedAt: string;
+    mode: string;
+    pvpContext: ArenaTrustedPvpContext;
+  }>;
+}>;
+
+export const isArenaGenerationAuditableRejection = (
+  value: unknown,
+): value is ArenaGenerationAuditableRejection => Boolean(
+  value
+  && typeof value === 'object'
+  && !Array.isArray(value)
+  && (value as { kind?: unknown }).kind === 'auditable-rejection'
+  && (value as { response?: unknown }).response instanceof Response,
+);
+
 export type MaterializedArenaGeneration = Omit<
   PreparedArenaGeneration,
   'semanticPayload'
@@ -267,20 +303,23 @@ export interface ArenaGenerationExecutor {
   preflight?(_input: {
     request: Request;
     actorKey: string;
+    generationRequestId: string;
     payload: Record<string, unknown>;
-  }): Promise<PreflightedArenaGeneration | Response>;
+  }): Promise<PreflightedArenaGeneration | ArenaGenerationAuditableRejection | Response>;
   materialize?(_input: {
     request: Request;
     actorKey: string;
+    generationRequestId: string;
     payload: Record<string, unknown>;
     preparationSeed: string;
     preparationVersion: string;
-  }): Promise<MaterializedArenaGeneration | Response>;
+  }): Promise<MaterializedArenaGeneration | ArenaGenerationAuditableRejection | Response>;
   prepare?(_input: {
     request: Request;
     actorKey: string;
+    generationRequestId: string;
     payload: Record<string, unknown>;
-  }): Promise<PreparedArenaGeneration | Response>;
+  }): Promise<PreparedArenaGeneration | ArenaGenerationAuditableRejection | Response>;
   execute(_input: ArenaGenerationExecutionInput): Promise<GenerationTerminal>;
 }
 
@@ -318,6 +357,27 @@ export interface ArenaGenerationTerminalStore {
     updatedAt: string;
     code: string;
   }): Promise<ArenaGenerationTerminalRecord>;
+}
+
+export type ArenaGenerationRejectedTerminalRecordInput = Readonly<{
+  generationId: string;
+  generationRequestId: string;
+  actorKey: string;
+  payloadHash: string;
+  code: string;
+  stage: string;
+  endpoint: string;
+  generationMode: 'stream' | 'non-stream';
+  startedAt: string;
+  mode: string;
+  pvpContext: ArenaTrustedPvpContext;
+}>;
+
+export interface ArenaGenerationRejectedTerminalRecorder {
+  record(_input: ArenaGenerationRejectedTerminalRecordInput): Promise<
+    | { kind: 'recorded' }
+    | { kind: 'conflict' }
+  >;
 }
 
 export type ArenaGenerationObservation =
@@ -413,6 +473,7 @@ export type ArenaGenerationServiceDependencies = {
   deltaFlushBytes?: number;
   snapshotMaxBytes?: number;
   terminalStore?: ArenaGenerationTerminalStore;
+  rejectedTerminalRecorder?: ArenaGenerationRejectedTerminalRecorder;
   observer?: ArenaGenerationObserver;
 };
 
@@ -461,6 +522,57 @@ const jsonResponse = (payload: unknown, status: number): Response => new Respons
     },
   },
 );
+
+type RejectedResponseSnapshot = Readonly<{
+  body: ArrayBuffer;
+  headers: Headers;
+  status: number;
+  statusText: string;
+}>;
+
+const snapshotRejectedResponse = async (
+  response: Response,
+): Promise<RejectedResponseSnapshot> => {
+  if (response.bodyUsed) throw new Error('ARENA_REJECTED_RESPONSE_ALREADY_USED');
+  return {
+    body: await response.clone().arrayBuffer(),
+    headers: new Headers(response.headers),
+    status: response.status,
+    statusText: response.statusText,
+  };
+};
+
+const withRejectedGenerationIdentity = (
+  snapshot: RejectedResponseSnapshot,
+  generationId: string,
+  generationRequestId: string,
+): Response => {
+  const headers = new Headers(snapshot.headers);
+  headers.set('X-Mahoshojo-Generation-Id', generationId);
+  headers.set('X-Mahoshojo-Generation-Request-Id', generationRequestId);
+  headers.set(ARENA_GENERATION_TERMINAL_STATUS_HEADER, 'failed');
+  const contentType = headers.get('content-type')?.toLowerCase() ?? '';
+  let projectedBody: ArrayBuffer | string = snapshot.body;
+  if (contentType.includes('json')) {
+    try {
+      const parsed = JSON.parse(new TextDecoder().decode(snapshot.body)) as unknown;
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        projectedBody = JSON.stringify({
+          ...(parsed as Record<string, unknown>),
+          generationId,
+        });
+      }
+    } catch {
+      // Explicitly typed non-JSON rejection bodies retain their original bytes and use headers only.
+    }
+  }
+  headers.delete('content-length');
+  return new Response(projectedBody, {
+    status: snapshot.status,
+    statusText: snapshot.statusText,
+    headers,
+  });
+};
 
 const withActorHeaders = (
   response: Response,
@@ -1622,6 +1734,135 @@ export const createArenaGenerationService = (
     void promise.catch(() => undefined);
   };
 
+  const recordAuditableRejection = async (input: {
+    rejection: ArenaGenerationAuditableRejection;
+    actor: ArenaGenerationActor;
+    generationRequestId: string;
+    claimedTerminalFence?: Readonly<{
+      generationId: string;
+      producerToken: string;
+    }>;
+  }): Promise<Response> => {
+    const original = (): Response => withActorHeaders(input.rejection.response, input.actor);
+    let terminalFence: {
+      created: boolean;
+      producerToken: string;
+    } | null = input.claimedTerminalFence
+      ? { created: true, producerToken: input.claimedTerminalFence.producerToken }
+      : null;
+    let generationId: string | undefined = input.claimedTerminalFence?.generationId;
+    const releaseClaimedFence = async (): Promise<void> => {
+      if (!terminalFence?.created || !generationId) return;
+      await dependencies.store.releaseReservation({
+        generationId,
+        producerToken: terminalFence.producerToken,
+      }).catch(() => ({ released: false }));
+    };
+    if (
+      input.rejection.actorKey !== input.actor.actorKey
+      || input.rejection.generationRequestId !== input.generationRequestId
+    ) {
+      await releaseClaimedFence();
+      return original();
+    }
+    if (!dependencies.rejectedTerminalRecorder) {
+      await releaseClaimedFence();
+      return original();
+    }
+    let responseSnapshot: RejectedResponseSnapshot;
+    try {
+      responseSnapshot = await snapshotRejectedResponse(input.rejection.response);
+    } catch {
+      await releaseClaimedFence();
+      return original();
+    }
+    let payloadHash: string;
+    try {
+      generationId ??= await dependencies.deriveGenerationId({
+        actorKey: input.actor.actorKey,
+        generationRequestId: input.generationRequestId,
+      });
+      payloadHash = await dependencies.hashPayload(input.rejection.fingerprintPayload);
+      if (!terminalFence) {
+        const reservationPayloadHash = splitMaterialization
+          ? await dependencies.hashPayload({
+            reservationHashVersion: ARENA_SEEDED_RESERVATION_HASH_VERSION,
+            semanticPayload: input.rejection.fingerprintPayload,
+          })
+          : payloadHash;
+        const producerToken = dependencies.createProducerToken?.() ?? crypto.randomUUID();
+        const now = dependencies.now();
+        const reservation = await dependencies.store.reserve({
+          actorKey: input.actor.actorKey,
+          generationRequestId: input.generationRequestId,
+          generationId,
+          payloadHash: reservationPayloadHash,
+          producerToken,
+          now: now.toISOString(),
+          leaseExpiresAt: addLeaseDuration(now, leaseDurationMs),
+          mode: input.rejection.audit.mode,
+        });
+        if (reservation.kind === 'conflict') {
+          return withActorHeaders(jsonResponse({
+            code: 'GENERATION_REQUEST_CONFLICT',
+            error: 'generationRequestId 已用于不同请求',
+          }, 409), input.actor);
+        }
+        terminalFence = {
+          created: reservation.kind === 'created',
+          producerToken,
+        };
+        if (reservation.kind === 'reused') {
+          const state = await dependencies.store.readState({
+            generationId,
+            actorKey: input.actor.actorKey,
+          });
+          if (!state?.terminal) return original();
+        }
+      }
+      const recorded = await dependencies.rejectedTerminalRecorder.record({
+        generationId,
+        generationRequestId: input.generationRequestId,
+        actorKey: input.actor.actorKey,
+        payloadHash,
+        code: input.rejection.code,
+        stage: input.rejection.stage,
+        endpoint: input.rejection.audit.endpoint,
+        generationMode: input.rejection.audit.generationMode,
+        startedAt: input.rejection.audit.startedAt,
+        mode: input.rejection.audit.mode,
+        pvpContext: input.rejection.audit.pvpContext,
+      });
+      if (recorded.kind === 'conflict') {
+        if (terminalFence.created) {
+          await releaseClaimedFence();
+        }
+        return withActorHeaders(jsonResponse({
+          code: 'GENERATION_REQUEST_CONFLICT',
+          error: 'generationRequestId 已用于不同请求',
+        }, 409), input.actor);
+      }
+      if (terminalFence?.created) {
+        await dependencies.store.markTerminal({
+          generationId,
+          producerToken: terminalFence.producerToken,
+          terminal: { status: 'failed', code: input.rejection.code },
+          now: dependencies.now().toISOString(),
+        }).catch(() => ({ owned: false, applied: false }));
+      }
+    } catch {
+      if (terminalFence?.created) {
+        await releaseClaimedFence();
+      }
+      return original();
+    }
+    return withActorHeaders(withRejectedGenerationIdentity(
+      responseSnapshot,
+      generationId!,
+      input.generationRequestId,
+    ), input.actor);
+  };
+
   const service: ArenaGenerationService = {
     async create(request: Request): Promise<Response> {
       const subscription = await service.createSubscription(request);
@@ -1648,9 +1889,17 @@ export const createArenaGenerationService = (
         const preflighted = await dependencies.executor.preflight!({
           request,
           actorKey: actor.actorKey,
+          generationRequestId: parsed.generationRequestId,
           payload: parsed.payload,
         });
         if (preflighted instanceof Response) return preflighted;
+        if (isArenaGenerationAuditableRejection(preflighted)) {
+          return recordAuditableRejection({
+            rejection: preflighted,
+            actor,
+            generationRequestId: parsed.generationRequestId,
+          });
+        }
         semanticPayload = preflighted.semanticPayload;
         materializationPayload = preflighted.materializationPayload;
       } else {
@@ -1658,6 +1907,7 @@ export const createArenaGenerationService = (
           ? await dependencies.executor.prepare({
             request,
             actorKey: actor.actorKey,
+            generationRequestId: parsed.generationRequestId,
             payload: parsed.payload,
           })
           : {
@@ -1665,6 +1915,13 @@ export const createArenaGenerationService = (
           semanticPayload: parsed.payload,
         };
         if (legacyPrepared instanceof Response) return legacyPrepared;
+        if (isArenaGenerationAuditableRejection(legacyPrepared)) {
+          return recordAuditableRejection({
+            rejection: legacyPrepared,
+            actor,
+            generationRequestId: parsed.generationRequestId,
+          });
+        }
         prepared = legacyPrepared;
         semanticPayload = legacyPrepared.semanticPayload;
       }
@@ -1870,10 +2127,23 @@ export const createArenaGenerationService = (
             const materialized = await dependencies.executor.materialize!({
               request,
               actorKey: actor.actorKey,
+              generationRequestId: parsed.generationRequestId,
               payload: materializationPayload!,
               preparationSeed: reservedSeed,
               preparationVersion: reservedVersion,
             });
+            if (isArenaGenerationAuditableRejection(materialized)) {
+              if (reservation.kind !== 'created') return materialized.response;
+              return recordAuditableRejection({
+                rejection: materialized,
+                actor,
+                generationRequestId: parsed.generationRequestId,
+                claimedTerminalFence: {
+                  generationId: reservation.generationId,
+                  producerToken,
+                },
+              });
+            }
             if (materialized instanceof Response) {
               if (reservation.kind === 'created') {
                 await dependencies.store.releaseReservation({

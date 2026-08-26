@@ -3,6 +3,7 @@ import {
   type ArenaGenerationActor,
   type ArenaGenerationExecutor,
   type ArenaGenerationObserver,
+  type ArenaGenerationRejectedTerminalRecorder,
   type ArenaGenerationService,
   type ArenaGenerationTerminalStore,
   type GenerationReplayStore,
@@ -16,6 +17,7 @@ import { createEnvSignatureService } from '../node-runtime/env-signature';
 import { silentLogger } from '../node-runtime/logger';
 import type { NodeDataD1Client } from '../node-runtime/data-ports';
 import type { SignatureService } from '../signature';
+import { ARENA_PVP_GENERATION_SIGNATURE_PURPOSE } from './internal-authority';
 
 const sortCanonical = (value: unknown): unknown => {
   if (Array.isArray(value)) return value.map(sortCanonical);
@@ -57,6 +59,7 @@ export const deriveArenaGenerationId = async (input: {
 export type NodeArenaGenerationServiceOptions = {
   store: GenerationReplayStore;
   terminalStore?: ArenaGenerationTerminalStore;
+  rejectedTerminalRecorder?: ArenaGenerationRejectedTerminalRecorder;
   env?: Readonly<Record<string, string | undefined>>;
   fetch?: typeof fetch;
   now?: () => Date;
@@ -66,6 +69,7 @@ export type NodeArenaGenerationServiceOptions = {
   }): Promise<string>;
   getD1Client(): NodeDataD1Client | null;
   signatures?: SignatureService;
+  pvpSignatures?: SignatureService;
   resolveActor?(_request: Request): Promise<ArenaGenerationActor | null>;
   executor?: ArenaGenerationExecutor;
   executorOptions?: Omit<
@@ -89,10 +93,16 @@ export const createNodeArenaGenerationService = (
     env,
     logger: options.executorOptions?.logger ?? silentLogger,
   });
+  const pvpSignatures = options.pvpSignatures ?? createEnvSignatureService({
+    env,
+    logger: options.executorOptions?.logger ?? silentLogger,
+    purpose: ARENA_PVP_GENERATION_SIGNATURE_PURPOSE,
+  });
   const resolveActor = options.resolveActor ?? createArenaGenerationActorResolver({
     env,
     fetch: options.fetch,
     signatures,
+    pvpSignatures,
     getD1Client: options.getD1Client,
     now: options.now,
   });
@@ -106,6 +116,7 @@ export const createNodeArenaGenerationService = (
       env,
       fetch: options.fetch,
       signatureService: signatures,
+      pvpSignatureService: pvpSignatures,
       observer: options.observer,
     });
   }
@@ -118,6 +129,9 @@ export const createNodeArenaGenerationService = (
     now: options.now ?? (() => new Date()),
     observer: options.observer,
     ...(options.terminalStore ? { terminalStore: options.terminalStore } : {}),
+    ...(options.rejectedTerminalRecorder
+      ? { rejectedTerminalRecorder: options.rejectedTerminalRecorder }
+      : {}),
     ...(options.heartbeatIntervalMs !== undefined
       ? { heartbeatIntervalMs: options.heartbeatIntervalMs }
       : {}),

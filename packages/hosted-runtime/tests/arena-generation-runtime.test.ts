@@ -3,6 +3,7 @@ import { createMemoryGenerationReplayStore } from '@mahoshojo/hosted-api/arena-g
 import {
   ArenaGenerationFinalizationPendingError,
   createArenaGenerationService,
+  isArenaGenerationAuditableRejection,
 } from '@mahoshojo/hosted-api/arena-generation/service';
 
 import {
@@ -72,6 +73,7 @@ describe('Arena generation runtime', () => {
     const preflight = await runtime.preflight!({
       request,
       actorKey: 'user:42',
+      generationRequestId: 'request-direct-runtime',
       payload: {
         ...payload,
         adjudicationEvents: [{
@@ -81,12 +83,16 @@ describe('Arena generation runtime', () => {
         }],
       },
     });
-    if (preflight instanceof Response) throw new Error('unexpected response');
+    if (
+      preflight instanceof Response
+      || isArenaGenerationAuditableRejection(preflight)
+    ) throw new Error('unexpected response');
     expect(buildPrompt).not.toHaveBeenCalled();
 
     const materialize = (preparationSeed: string) => runtime.materialize!({
       request,
       actorKey: 'user:42',
+      generationRequestId: 'request-direct-runtime',
       payload: preflight.materializationPayload,
       preparationSeed,
       preparationVersion: runtime.materializationVersion!,
@@ -94,7 +100,14 @@ describe('Arena generation runtime', () => {
     const first = await materialize('11'.repeat(32));
     const second = await materialize('11'.repeat(32));
     const different = await materialize('22'.repeat(32));
-    if (first instanceof Response || second instanceof Response || different instanceof Response) {
+    if (
+      first instanceof Response
+      || second instanceof Response
+      || different instanceof Response
+      || isArenaGenerationAuditableRejection(first)
+      || isArenaGenerationAuditableRejection(second)
+      || isArenaGenerationAuditableRejection(different)
+    ) {
       throw new Error('unexpected response');
     }
 
@@ -191,6 +204,7 @@ describe('Arena generation runtime', () => {
     const prepared = await runtime.prepare!({
       request: new Request('https://example.test/api/arena/generate-stream'),
       actorKey: 'user:42',
+      generationRequestId: 'request-direct-runtime',
       payload: {
         ...payload,
         combatants: [
@@ -202,7 +216,10 @@ describe('Arena generation runtime', () => {
     });
 
     expect(prepared).not.toBeInstanceOf(Response);
-    if (prepared instanceof Response) throw new Error('unexpected response');
+    if (
+      prepared instanceof Response
+      || isArenaGenerationAuditableRejection(prepared)
+    ) throw new Error('unexpected response');
     expect(prepared.semanticPayload).toMatchObject({
       internalGuidance: 'server-authorized rule',
       combatants: [
@@ -222,11 +239,15 @@ describe('Arena generation runtime', () => {
     const prepared = await runtime.prepare!({
       request: new Request('https://example.test/api/arena/generate-stream'),
       actorKey: 'user:42',
+      generationRequestId: 'request-direct-runtime',
       payload,
     });
 
     expect(prepared).not.toBeInstanceOf(Response);
-    if (prepared instanceof Response) throw new Error('unexpected response');
+    if (
+      prepared instanceof Response
+      || isArenaGenerationAuditableRejection(prepared)
+    ) throw new Error('unexpected response');
     expect(dependencies.checkSafety).toHaveBeenCalledTimes(1);
     expect(JSON.stringify(prepared.semanticPayload)).not.toContain('byok-secret');
     expect(JSON.stringify(prepared.executionPayload)).toContain('byok-secret');
@@ -239,6 +260,7 @@ describe('Arena generation runtime', () => {
     const prepared = await runtime.prepare!({
       request: new Request('https://example.test/api/arena/generate-stream'),
       actorKey: 'user:42',
+      generationRequestId: 'request-direct-runtime',
       payload: { combatants: [] },
     });
 
@@ -258,6 +280,7 @@ describe('Arena generation runtime', () => {
     const prepared = await runtime.prepare!({
       request: new Request('https://example.test/api/arena/generate-stream'),
       actorKey: 'user:42',
+      generationRequestId: 'request-direct-runtime',
       payload: {
         ...payload,
         combatants: Array.from({ length: MAX_ARENA_COMBATANTS + 1 }, (_, index) => ({
@@ -282,9 +305,13 @@ describe('Arena generation runtime', () => {
     const prepared = await runtime.prepare!({
       request: new Request('https://example.test/api/arena/generate-stream'),
       actorKey: 'user:42',
+      generationRequestId: 'request-direct-runtime',
       payload,
     });
-    if (prepared instanceof Response) throw new Error('unexpected response');
+    if (
+      prepared instanceof Response
+      || isArenaGenerationAuditableRejection(prepared)
+    ) throw new Error('unexpected response');
     const emit = vi.fn(async () => undefined);
     const controller = new AbortController();
 
@@ -338,9 +365,13 @@ describe('Arena generation runtime', () => {
     const prepared = await runtime.prepare!({
       request: new Request('https://example.test/api/arena/generate-stream'),
       actorKey: 'user:42',
+      generationRequestId: 'request-direct-runtime',
       payload,
     });
-    if (prepared instanceof Response) throw new Error('unexpected response');
+    if (
+      prepared instanceof Response
+      || isArenaGenerationAuditableRejection(prepared)
+    ) throw new Error('unexpected response');
 
     await runtime.execute({
       generationId: 'generation-1',
@@ -385,9 +416,13 @@ describe('Arena generation runtime', () => {
     const prepared = await runtime.prepare!({
       request: new Request('https://example.test/api/arena/generate-stream'),
       actorKey: 'user:42',
+      generationRequestId: 'request-direct-runtime',
       payload,
     });
-    if (prepared instanceof Response) throw new Error('unexpected response');
+    if (
+      prepared instanceof Response
+      || isArenaGenerationAuditableRejection(prepared)
+    ) throw new Error('unexpected response');
     const emitted: string[] = [];
 
     await runtime.execute({
@@ -420,9 +455,13 @@ describe('Arena generation runtime', () => {
     const prepared = await runtime.prepare!({
       request: new Request('https://example.test/api/arena/generate-stream'),
       actorKey: 'user:42',
+      generationRequestId: 'request-direct-runtime',
       payload,
     });
-    if (prepared instanceof Response) throw new Error('unexpected response');
+    if (
+      prepared instanceof Response
+      || isArenaGenerationAuditableRejection(prepared)
+    ) throw new Error('unexpected response');
 
     await expect(runtime.execute({
       generationId: 'generation-1',
@@ -446,9 +485,13 @@ describe('Arena generation runtime', () => {
     const prepared = await runtime.prepare!({
       request: new Request('https://example.test/api/arena/generate-stream'),
       actorKey: 'user:42',
+      generationRequestId: 'request-direct-runtime',
       payload,
     });
-    if (prepared instanceof Response) throw new Error('unexpected response');
+    if (
+      prepared instanceof Response
+      || isArenaGenerationAuditableRejection(prepared)
+    ) throw new Error('unexpected response');
 
     await expect(runtime.execute({
       generationId: 'generation-1',
@@ -469,9 +512,13 @@ describe('Arena generation runtime', () => {
     const prepared = await runtime.prepare!({
       request: new Request('https://example.test/api/arena/generate-stream'),
       actorKey: 'user:42',
+      generationRequestId: 'request-direct-runtime',
       payload,
     });
-    if (prepared instanceof Response) throw new Error('unexpected response');
+    if (
+      prepared instanceof Response
+      || isArenaGenerationAuditableRejection(prepared)
+    ) throw new Error('unexpected response');
 
     await expect(runtime.execute({
       generationId: 'generation-1',
@@ -506,9 +553,13 @@ describe('Arena generation runtime', () => {
     const prepared = await runtime.prepare!({
       request: new Request('https://example.test/api/arena/generate-stream'),
       actorKey: 'user:42',
+      generationRequestId: 'request-direct-runtime',
       payload,
     });
-    if (prepared instanceof Response) throw new Error('unexpected response');
+    if (
+      prepared instanceof Response
+      || isArenaGenerationAuditableRejection(prepared)
+    ) throw new Error('unexpected response');
     const controller = new AbortController();
     const execution = runtime.execute({
       generationId: 'generation-1',
@@ -540,9 +591,13 @@ describe('Arena generation runtime', () => {
     const prepared = await runtime.prepare!({
       request: new Request('https://example.test/api/arena/generate-stream'),
       actorKey: 'user:42',
+      generationRequestId: 'request-direct-runtime',
       payload,
     });
-    if (prepared instanceof Response) throw new Error('unexpected response');
+    if (
+      prepared instanceof Response
+      || isArenaGenerationAuditableRejection(prepared)
+    ) throw new Error('unexpected response');
 
     const terminal = await runtime.execute({
       generationId: 'generation-cancel-race',
