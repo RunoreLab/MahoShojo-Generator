@@ -133,6 +133,13 @@ describe('Hosted DR machine contract', () => {
 
   it.each([
     {
+      label: 'application contract version drift',
+      mutate: (manifest: HostedDrManifest) => {
+        manifest.contractVersion = 'g25e1-v2';
+      },
+      expected: 'application contractVersion',
+    },
+    {
       label: 'route drift',
       mutate: (manifest: HostedDrManifest) => {
         manifest.capabilities.pop();

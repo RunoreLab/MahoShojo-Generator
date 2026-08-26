@@ -51,6 +51,16 @@ if (manifest.schemaVersion !== 1) {
 if (!/^g25e1-v\d+$/u.test(manifest.contractVersion ?? '')) {
   fail('contractVersion 必须使用 g25e1-vN');
 }
+const hostedDrServiceSource = readFileSync(
+  path.join(repositoryRoot, 'packages/hosted-api/src/hosted-dr.ts'),
+  'utf8',
+);
+const applicationContractVersion = hostedDrServiceSource.match(
+  /HOSTED_DR_CONTRACT_VERSION\s*=\s*['"]([^'"]+)['"]/u,
+)?.[1];
+if (applicationContractVersion !== manifest.contractVersion) {
+  fail('application contractVersion 必须与 Hosted DR manifest 一致');
+}
 if (inventory.legacyRouteIds?.length !== 0) {
   fail('legacyRouteIds 必须保持为空');
 }
