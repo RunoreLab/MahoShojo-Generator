@@ -49,10 +49,20 @@
       "import": "./src/generate-magical-girl.ts",
       "default": "./src/generate-magical-girl.ts"
     },
+    "./generate-magical-girl-details": {
+      "types": "./src/generate-magical-girl-details.ts",
+      "import": "./src/generate-magical-girl-details.ts",
+      "default": "./src/generate-magical-girl-details.ts"
+    },
     "./generate-scenario": {
       "types": "./src/generate-scenario.ts",
       "import": "./src/generate-scenario.ts",
       "default": "./src/generate-scenario.ts"
+    },
+    "./generate-sublimation": {
+      "types": "./src/generate-sublimation.ts",
+      "import": "./src/generate-sublimation.ts",
+      "default": "./src/generate-sublimation.ts"
     },
     "./regular-generation": {
       "types": "./src/regular-generation.ts",
