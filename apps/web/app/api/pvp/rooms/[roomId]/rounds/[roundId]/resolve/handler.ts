@@ -28,6 +28,7 @@ import type { PvpHandState, PvpSnapshotRef } from '@/lib/pvp/types';
 import { createPvpWinnerVoteState } from '@/lib/pvp/winner-vote';
 import { buildSubrequestAuthHeaders } from '@/lib/subrequest-auth';
 import { resolvePvpAdjudicationEvents } from '@/lib/pvp/adjudication-events';
+import { createPvpArenaGenerationAuthority } from '@/lib/pvp/generation-authority';
 
 type ResolveBody = { expectedVersion?: number; customProvider?: unknown; force?: boolean };
 
@@ -364,14 +365,24 @@ async function resolveHandler(req: Request): Promise<Response> {
   for (let attempt = 0; attempt < 2; attempt++) {
     attempts = attempt + 1;
     try {
+      const internalGuidance = buildGuidance(attempt);
+      const generationAuthority = await createPvpArenaGenerationAuthority({
+        roomId,
+        matchId,
+        roundId,
+        attempt,
+        internalGuidance,
+      });
       const res = await fetch(new URL(resolveGenerationApiUrl('/api/generate-battle-story'), origin).toString(), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           ...(authHeader ? { Authorization: authHeader } : {}),
           ...subrequestAuthHeaders,
+          ...generationAuthority.headers,
         },
       body: JSON.stringify({
+        generationRequestId: generationAuthority.generationRequestId,
         combatants: picked.map((p) => ({
           type: p.snapshot.card_type,
           data: JSON.parse(p.snapshot.data_json),
@@ -390,7 +401,7 @@ async function resolveHandler(req: Request): Promise<Response> {
             : {}),
           ...(rules.language?.trim() ? { language: rules.language.trim() } : {}),
           ...(rules.storyLength ? { storyLength: rules.storyLength } : {}),
-          internalGuidance: buildGuidance(attempt),
+          internalGuidance,
           ...(rules.userGuidance?.trim() ? { userGuidance: rules.userGuidance.trim() } : {}),
           readArenaHistory: rules.readArenaHistory,
           ...(rules.readArenaHistory

@@ -24,6 +24,7 @@ describe('Hono Arena generation adapters', () => {
       },
     );
     const service = {
+      createSubscription: vi.fn(async () => response('subscription')),
       create: vi.fn(async () => response('create')),
       resume: vi.fn(async () => response('resume')),
       status: vi.fn(async () => response('status')),

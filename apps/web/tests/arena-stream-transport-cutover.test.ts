@@ -42,11 +42,14 @@ describe('Arena resumable stream transport cutover', () => {
 
   it('preserves nested battle-story generation identity, SSE ids and base revision fencing', () => {
     const proxySource = readFileSync('app/api/arena/session/generate-next/handler.ts', 'utf8');
+    const serviceSource = readFileSync('../../packages/hosted-runtime/src/arena-companion/session.ts', 'utf8');
     const hookSource = readFileSync('components/arena/hooks/useBattleStorySession.ts', 'utf8');
 
-    expect(proxySource).toContain("x-mahoshojo-generation-id");
-    expect(proxySource).toContain('generationRequestId: payload.generationRequestId');
-    expect(proxySource).toContain('parsedBlock.id');
+    expect(proxySource).toContain('getCloudflareDrArenaCompanionService');
+    expect(serviceSource).toContain('generationRequestId: payload.generationRequestId');
+    expect(serviceSource).toContain('encodeGenerationSseEvent(event)');
+    expect(serviceSource).not.toContain('parseGenerationSseBlock');
+    expect(serviceSource).not.toMatch(/\bfetch\s*\(/u);
     expect(hookSource).toContain('baseRevisionHash');
     expect(hookSource).toContain('generationRequestId: crypto.randomUUID()');
   });

@@ -596,7 +596,9 @@ export const useBattleEngine = () => {
         })()
         : undefined;
 
+      const generationRequestId = crypto.randomUUID();
       const requestBody: Record<string, unknown> = {
+        generationRequestId,
         combatants: freshCombatants.map((combatant) => ({
           type: combatant.type,
           data: combatant.data,
@@ -770,9 +772,10 @@ export const useBattleEngine = () => {
               }
               const endpoint = `/api/arena/generate-stream${query.toString() ? `?${query.toString()}` : ''}`;
               requestHeaders.Accept = 'text/event-stream';
-	          const response = await openArenaGenerationStream({
+                const response = await openArenaGenerationStream({
                   endpoint,
                   body: requestBody,
+                  generationRequestId,
                   headers: requestHeaders,
                   signal: abortController.signal,
                   fetcher: generationApiFetch,

@@ -8,8 +8,14 @@ import {
   createNodeArenaGenerationService,
   createNodeArenaGenerationTerminalStore,
 } from '@mahoshojo/hosted-runtime/arena-generation';
+import {
+  configureArenaCompanionRouteService,
+  createArenaCompanionRouteService,
+} from '@mahoshojo/hosted-runtime/arena-companion';
 import type { ArenaGenerationObserver } from '@mahoshojo/hosted-api/arena-generation/service';
 import { getDefaultNodeD1Client } from '@mahoshojo/hosted-runtime/node-runtime/d1-client';
+import { recordUserActivityFromRequest } from '@mahoshojo/hosted-runtime/node-runtime/data-ports';
+import { createEnvSignatureService } from '@mahoshojo/hosted-runtime/node-runtime/env-signature';
 import type { RedisRuntime } from '#/redis/runtime';
 
 export type HonoArenaGenerationRuntimeOptions = {
@@ -63,10 +69,12 @@ export const configureHonoArenaGenerationRuntime = (
     ...(objectStore ? { objectStore } : {}),
     settleRatings,
   });
-  configureArenaGenerationService(createNodeArenaGenerationService({
+  const signatures = createEnvSignatureService();
+  const generationService = createNodeArenaGenerationService({
     store: redis.getGenerationReplayStore(),
     terminalStore,
     getD1Client,
+    signatures,
     observer: options.observer,
     executorOptions: {
       finalizer,
@@ -87,5 +95,11 @@ export const configureHonoArenaGenerationRuntime = (
         return null;
       },
     },
+  });
+  configureArenaGenerationService(generationService);
+  configureArenaCompanionRouteService(createArenaCompanionRouteService({
+    generationService,
+    signatures,
+    recordActivity: recordUserActivityFromRequest,
   }));
 };

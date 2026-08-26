@@ -1,8 +1,5 @@
 {
   "exitedRouteIds": [
-    "arena/generate",
-    "arena/session/generate-next",
-    "generate-battle-story",
     "generate-magical-girl-details",
     "generate-magical-girl-details-stream",
     "generate-sublimation",
@@ -16,13 +13,16 @@
   ],
   "legacyRouteIds": [],
   "sharedRouteIds": [
+    "arena/generate",
     "arena/generate-stream",
     "arena/generation-requests/[generationRequestId]",
     "arena/generations/[generationId]/cancel",
     "arena/generations/[generationId]",
     "arena/generations/[generationId]/stream",
+    "arena/session/generate-next",
     "creator/generate",
     "creator/generate-stream",
+    "generate-battle-story",
     "generate-canshou",
     "generate-canshou-stream",
     "generate-free",

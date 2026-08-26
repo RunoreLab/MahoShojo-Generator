@@ -7,9 +7,6 @@ const APP_ROOT = path.resolve(import.meta.dirname, '..');
 const REPOSITORY_ROOT = path.resolve(APP_ROOT, '..', '..');
 
 const EXITED_ROUTE_IDS = [
-  'arena/generate',
-  'arena/session/generate-next',
-  'generate-battle-story',
   'generate-magical-girl-details',
   'generate-magical-girl-details-stream',
   'generate-sublimation',
@@ -23,15 +20,18 @@ const EXITED_ROUTE_IDS = [
 ] as const;
 
 describe('Hono route manifest', () => {
-  it('只挂载已经脱离 legacy Next import 的十五条 shared capability', () => {
+  it('只挂载已经脱离 legacy Next import 的十八条 shared capability', () => {
     expect(routeDefinitions.map((route) => route.id).sort()).toEqual([
+      'arena/generate',
       'arena/generate-stream',
       'arena/generation-requests/[generationRequestId]',
       'arena/generations/[generationId]',
       'arena/generations/[generationId]/cancel',
       'arena/generations/[generationId]/stream',
+      'arena/session/generate-next',
       'creator/generate',
       'creator/generate-stream',
+      'generate-battle-story',
       'generate-canshou',
       'generate-canshou-stream',
       'generate-free',
@@ -41,7 +41,7 @@ describe('Hono route manifest', () => {
       'generate-scenario',
       'generate-scenario-stream',
     ]);
-    expect(routeDefinitions).toHaveLength(15);
+    expect(routeDefinitions).toHaveLength(18);
     expect(routeDefinitions.some((route) => route.pattern === '/api/auth/*')).toBe(false);
     expect(routeDefinitions.some((route) => route.pattern.startsWith('/api/pvp/'))).toBe(false);
   });
@@ -49,13 +49,16 @@ describe('Hono route manifest', () => {
   it('把常规生成 shared service 路由从 legacy Next 动态导入中移除', async () => {
     const sharedDefinitions = routeDefinitions.filter((route) => route.adapter === 'shared-service');
     expect(sharedDefinitions.map((route) => route.id).sort()).toEqual([
+      'arena/generate',
       'arena/generate-stream',
       'arena/generation-requests/[generationRequestId]',
       'arena/generations/[generationId]',
       'arena/generations/[generationId]/cancel',
       'arena/generations/[generationId]/stream',
+      'arena/session/generate-next',
       'creator/generate',
       'creator/generate-stream',
+      'generate-battle-story',
       'generate-canshou',
       'generate-canshou-stream',
       'generate-free',
@@ -75,7 +78,7 @@ describe('Hono route manifest', () => {
     };
     expect(routeInventory.exitedRouteIds).toEqual(EXITED_ROUTE_IDS);
     expect(routeInventory.legacyRouteIds).toEqual([]);
-    expect(routeInventory.sharedRouteIds?.length).toBe(15);
+    expect(routeInventory.sharedRouteIds?.length).toBe(18);
 
     for (const definition of sharedDefinitions) {
       const routeModule = await definition.load();

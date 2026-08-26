@@ -36,6 +36,7 @@ import { buildSubrequestAuthHeaders } from '@/lib/subrequest-auth';
 import { extractWinnerLineFromMarkdown, parsePvpWinnerFromText } from '@/lib/pvp/winner-parse';
 import type { AIReasoningSource, AIReasoningStatus } from '@/types/ai-reasoning';
 import { getRequestUrl } from '@/lib/request-url';
+import { createPvpArenaGenerationAuthority } from '@/lib/pvp/generation-authority';
 
 type ResolveBody = { expectedVersion?: number; customProvider?: unknown; force?: boolean };
 
@@ -422,6 +423,14 @@ async function resolveStreamHandler(req: Request): Promise<Response> {
     req.headers.get('x-real-ip')?.trim() ||
     '';
 
+  const internalGuidance = buildGuidance();
+  const generationAuthority = await createPvpArenaGenerationAuthority({
+    roomId,
+    matchId,
+    roundId,
+    attempt: 0,
+    internalGuidance,
+  });
   const upstreamRes = await fetch(new URL(
     resolveGenerationApiUrl('/api/arena/generate-stream?format=sse'),
     origin,
@@ -433,8 +442,10 @@ async function resolveStreamHandler(req: Request): Promise<Response> {
       ...(forwardedFor ? { 'x-forwarded-for': forwardedFor } : {}),
       ...(authHeader ? { Authorization: authHeader } : {}),
       ...subrequestAuthHeaders,
+      ...generationAuthority.headers,
     },
     body: JSON.stringify({
+      generationRequestId: generationAuthority.generationRequestId,
       combatants: picked.map((p) => ({
         type: p.snapshot.card_type,
         data: JSON.parse(p.snapshot.data_json),
@@ -454,7 +465,7 @@ async function resolveStreamHandler(req: Request): Promise<Response> {
       ...(rules.language?.trim() ? { language: rules.language.trim() } : {}),
       ...(rules.storyLength ? { storyLength: rules.storyLength } : {}),
       ...(rules.userGuidance?.trim() ? { userGuidance: rules.userGuidance.trim() } : {}),
-      internalGuidance: buildGuidance(),
+      internalGuidance,
       forceStreamMeta: true,
       readArenaHistory: rules.readArenaHistory,
       ...(rules.readArenaHistory ? { arenaHistoryReadLimit: rules.isArenaHistoryUnlimited ? null : rules.readArenaHistoryLimit } : {}),

@@ -15,6 +15,12 @@ export const routeDefinitions: RouteDefinition[] = [
     load: () => import("../adapters/arena/generations/[generationId]/stream") as unknown as Promise<RouteModule>,
   },
   {
+    id: "arena/session/generate-next",
+    pattern: "/api/arena/session/generate-next",
+    adapter: "shared-service",
+    load: () => import("../adapters/arena/session/generate-next") as unknown as Promise<RouteModule>,
+  },
+  {
     id: "arena/generation-requests/[generationRequestId]",
     pattern: "/api/arena/generation-requests/:generationRequestId",
     adapter: "shared-service",
@@ -25,6 +31,12 @@ export const routeDefinitions: RouteDefinition[] = [
     pattern: "/api/arena/generations/:generationId",
     adapter: "shared-service",
     load: () => import("../adapters/arena/generations/[generationId]") as unknown as Promise<RouteModule>,
+  },
+  {
+    id: "arena/generate",
+    pattern: "/api/arena/generate",
+    adapter: "shared-service",
+    load: () => import("../adapters/arena/generate") as unknown as Promise<RouteModule>,
   },
   {
     id: "arena/generate-stream",
@@ -43,6 +55,12 @@ export const routeDefinitions: RouteDefinition[] = [
     pattern: "/api/creator/generate-stream",
     adapter: "shared-service",
     load: () => import("../adapters/creator/generate-stream") as unknown as Promise<RouteModule>,
+  },
+  {
+    id: "generate-battle-story",
+    pattern: "/api/generate-battle-story",
+    adapter: "shared-service",
+    load: () => import("../adapters/generate-battle-story") as unknown as Promise<RouteModule>,
   },
   {
     id: "generate-canshou",
