@@ -28,10 +28,11 @@ create 使用稳定 `generationRequestId` 和 actor-scoped semantic hash；Redis
 subscriber 只通过 `Last-Event-ID`/`after` 恢复同一 generation，不会把请求 signal 传播给 Provider。terminal 由
 D1 claim 与确定性 R2 snapshot 兜底，只有显式 cancel 才中止 generation-owned signal。Phase 2.5B 退出审计将
 14 条 capability 从 Hono 执行清单退出；G25R 只让 `arena/generate-stream` 精确 re-entry，另新增四条 generation
-控制面 shared route，因此当前 registry 为 15 条 shared route，同时仍有 13 条 exited capability 对应的
-Next 公开 route 保持原有实现、wire、鉴权和数据语义，未来若要重新进入 Hono，必须先形成 shared seam 和
+控制面 shared route。G25H-1 又将 `arena/generate`、`generate-battle-story` 与
+`arena/session/generate-next` 归位为 Hono primary + Next DR shared companion service，因此当前 registry
+为 18 条 shared route，同时仍有 10 条 exited capability 对应的 Next 公开 route 保持原有实现、wire、鉴权和数据语义，未来若要重新进入 Hono，必须先形成 shared seam 和
 副作用/replay 证据。生成器在 `legacyRouteIds` 非空时 fail closed，生成的 registry 也不再拥有动态导入
-legacy Next handler 的 adapter 类型或代码路径。当前 registry 为 `15 shared-service / 13 exited / 0 legacy-next`；
+legacy Next handler 的 adapter 类型或代码路径。当前 registry 为 `18 shared-service / 10 exited / 0 legacy-next`；
 Hono source、manifest、测试、生成器和 bundle 构建已由 `apps/api` 独占。生成后的实际 registry 为
 `apps/api/src/generated/routes.ts`，不得手工修改。
 
@@ -56,6 +57,8 @@ Hono 主进程启动 `HonoRuntimeTelemetry`，默认每 60 秒向 stdout 输出�
 - Arena request/resume/replay bytes/snapshot、provider attempt、generation duration、D1/R2 phase、cancel、
   producer-lost、Redis 与 terminal outcome 的固定低基数计数，以及 generation duration p50/p95/p99；terminal audit
   只记录 generation ID、固定 outcome/runtime 与聚合故障事实，不记录 actor、request body、prompt、正文或凭据；
+- Arena companion 的受信 operation、Hono primary / Next DR placement、固定 outcome 与 duration；Hono 聚合
+  到 runtime snapshot，Cloudflare DR 使用同一 bounded observation vocabulary 输出结构化日志；
 - runtime origin 明确为 `hono-node`。当前 Hono 进程看不到入口层的真实 DR 选择，因此
   `selection` 诚实记为 `not-observed`，不根据部署角色推断实际流量来源。
 

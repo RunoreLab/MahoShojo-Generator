@@ -324,27 +324,28 @@ export const createArenaSessionCompanionService = (
       released = true;
       rateLimit.release();
     };
-    const chapterId = await (options.deriveChapterId ?? deterministicChapterId)({
-      sessionId: payload.sessionId,
-      generationRequestId: payload.generationRequestId,
-      chapterIndex,
-    });
-    const customProviderPayload: ArenaCustomProvider | null = resolvedCustomProvider
-      ? {
-        providerId: resolvedCustomProvider.providerId,
-        modelId: resolvedCustomProvider.modelId,
-        apiKey: resolvedCustomProvider.apiKey,
-        ...(resolvedCustomProvider.maxOutputTokens !== undefined
-          ? { maxOutputTokens: resolvedCustomProvider.maxOutputTokens }
-          : {}),
-        ...(resolvedCustomProvider.generationOverrides
-          ? { generationOverrides: resolvedCustomProvider.generationOverrides }
-          : {}),
-      }
-      : null;
-    options.recordActivity?.(request);
+    let chapterId: string;
     let subscription;
     try {
+      chapterId = await (options.deriveChapterId ?? deterministicChapterId)({
+        sessionId: payload.sessionId,
+        generationRequestId: payload.generationRequestId,
+        chapterIndex,
+      });
+      const customProviderPayload: ArenaCustomProvider | null = resolvedCustomProvider
+        ? {
+          providerId: resolvedCustomProvider.providerId,
+          modelId: resolvedCustomProvider.modelId,
+          apiKey: resolvedCustomProvider.apiKey,
+          ...(resolvedCustomProvider.maxOutputTokens !== undefined
+            ? { maxOutputTokens: resolvedCustomProvider.maxOutputTokens }
+            : {}),
+          ...(resolvedCustomProvider.generationOverrides
+            ? { generationOverrides: resolvedCustomProvider.generationOverrides }
+            : {}),
+        }
+        : null;
+      options.recordActivity?.(request);
       subscription = await options.generationService.createSubscription(createUpstreamRequest({
         request,
         body: buildArenaSessionUpstreamRequestBody(

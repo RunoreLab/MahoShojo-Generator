@@ -6,6 +6,7 @@ import { recordUserActivityFromRequest } from '@mahoshojo/hosted-runtime/node-ru
 import { createEnvSignatureService } from '@mahoshojo/hosted-runtime/node-runtime/env-signature';
 
 import { getCloudflareDrArenaGenerationService } from './generation-runtime';
+import { cloudflareArenaGenerationObserver } from './generation-telemetry';
 
 const globalKey = '__mahoshojoArenaCompanionDrServiceV1';
 
@@ -16,6 +17,8 @@ type GlobalWithArenaCompanion = typeof globalThis & {
 const buildService = (): ArenaCompanionRouteService => createArenaCompanionRouteService({
   generationService: getCloudflareDrArenaGenerationService(),
   signatures: createEnvSignatureService(),
+  placement: 'next-dr',
+  observer: cloudflareArenaGenerationObserver,
   recordActivity: recordUserActivityFromRequest,
 });
 

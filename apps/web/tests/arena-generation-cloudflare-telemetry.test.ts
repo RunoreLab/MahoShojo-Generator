@@ -25,4 +25,27 @@ describe('Cloudflare Arena generation telemetry', () => {
     });
     expect(JSON.stringify(info.mock.calls)).not.toMatch(/authorization|cookie|prompt|output|actor/u);
   });
+
+  it('records trusted companion operation and Next DR placement', () => {
+    const info = vi.spyOn(console, 'info').mockImplementation(() => undefined);
+    cloudflareArenaGenerationObserver.observeArenaGeneration({
+      event: 'companion',
+      operation: 'generate-battle-story',
+      placement: 'next-dr',
+      outcome: 'failure',
+      durationMs: 25,
+    });
+
+    expect(JSON.parse(String(info.mock.calls[0]?.[0]))).toMatchObject({
+      event: 'arena.generation.telemetry',
+      runtime: 'cloudflare-worker',
+      observation: {
+        event: 'companion',
+        operation: 'generate-battle-story',
+        placement: 'next-dr',
+        outcome: 'failure',
+        durationMs: 25,
+      },
+    });
+  });
 });

@@ -4,6 +4,7 @@ import type {
   ArenaGenerationSubscription,
   GenerationStreamEvent,
 } from '@mahoshojo/hosted-api/arena-generation/service';
+import { createArenaCompanionRouteService } from '../src/arena-companion';
 import { createArenaCompanionService } from '../src/arena-companion/service';
 
 const response = (): Promise<Response> => Promise.resolve(new Response(null));
@@ -46,6 +47,33 @@ const subscription = (events: GenerationStreamEvent[]): ArenaGenerationSubscript
 });
 
 describe('Arena companion service', () => {
+  it('emits trusted route/placement telemetry for rejected companion calls', async () => {
+    const observeArenaGeneration = vi.fn();
+    const service = createArenaCompanionRouteService({
+      generationService: generationService(vi.fn()),
+      signatures: {
+        generateSignature: async () => 'signature',
+        verifySignature: async () => false,
+      },
+      placement: 'next-dr',
+      observer: { observeArenaGeneration },
+    });
+
+    const result = await service.generate(
+      new Request('https://example.test/api/generate-battle-story'),
+      'generate-battle-story',
+    );
+
+    expect(result.status).toBe(405);
+    expect(observeArenaGeneration).toHaveBeenCalledWith({
+      event: 'companion',
+      operation: 'generate-battle-story',
+      placement: 'next-dr',
+      outcome: 'rejected',
+      durationMs: expect.any(Number),
+    });
+  });
+
   it('通过 typed subscription 复用唯一 producer 并投影兼容 JSON', async () => {
     const captured: Array<{ url: string; body: Record<string, unknown> }> = [];
     const projectUpdatedCombatants = vi.fn(async () => [{ codename: '角色甲' }]);

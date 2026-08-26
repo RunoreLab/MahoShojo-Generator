@@ -226,6 +226,13 @@ describe('Hono runtime telemetry', () => {
     telemetry.observeArenaGeneration({
       event: 'request', generationId: 'generation-1', outcome: 'reused', inputBytes: 128,
     });
+    telemetry.observeArenaGeneration({
+      event: 'companion',
+      operation: 'arena/session/generate-next',
+      placement: 'hono-primary',
+      outcome: 'success',
+      durationMs: 18,
+    });
     telemetry.observeArenaGeneration({ event: 'client_disconnect', generationId: 'generation-1' });
     telemetry.observeArenaGeneration({
       event: 'resume', generationId: 'generation-1', outcome: 'attempt',
@@ -263,6 +270,16 @@ describe('Hono runtime telemetry', () => {
         unavailable: 0,
         secondProviderPreventions: 1,
         inputBytes: 256,
+      },
+      companion: {
+        byOperation: {
+          arenaGenerate: 0,
+          generateBattleStory: 0,
+          arenaSessionGenerateNext: 1,
+        },
+        byPlacement: { honoPrimary: 1, nextDr: 0 },
+        outcomes: { success: 1, rejected: 0, failure: 0 },
+        duration: { samples: 1, totalMilliseconds: 18, maxMilliseconds: 18 },
       },
       clientDisconnects: 1,
       resume: {

@@ -100,6 +100,8 @@ export const configureHonoArenaGenerationRuntime = (
   configureArenaCompanionRouteService(createArenaCompanionRouteService({
     generationService,
     signatures,
+    placement: 'hono-primary',
+    observer: options.observer,
     recordActivity: recordUserActivityFromRequest,
   }));
 };

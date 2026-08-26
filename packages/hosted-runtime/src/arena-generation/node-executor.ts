@@ -566,7 +566,9 @@ export const createNodeArenaGenerationExecutor = (
         ? [modelOverride]
         : isStrictRankedArenaRequest(payload) && !customProvider
           ? [...STRICT_RANKED_MODEL_FALLBACKS]
-          : [undefined];
+          : payload.isDowngrade === true && !customProvider
+            ? ['gemini-2.5-flash-lite']
+            : [undefined];
       let result: StreamAiResult | null = null;
       let lastError: unknown = null;
       for (const fallback of modelFallbacks) {

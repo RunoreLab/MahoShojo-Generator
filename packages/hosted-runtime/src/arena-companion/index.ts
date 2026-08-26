@@ -1,9 +1,13 @@
-import type { ArenaGenerationService } from '@mahoshojo/hosted-api/arena-generation/service';
+import type {
+  ArenaGenerationObserver,
+  ArenaGenerationService,
+} from '@mahoshojo/hosted-api/arena-generation/service';
 import type { SignatureService } from '../signature';
 import { createArenaPostBattleProjector } from './post-battle';
 import { acquireArenaSessionSoftRateLimit } from './rate-limit';
 import {
   createArenaCompanionService,
+  type ArenaCompanionOperation,
   type ArenaCompanionService,
 } from './service';
 import {
@@ -22,6 +26,8 @@ export type ArenaCompanionRouteService = ArenaCompanionService & ArenaSessionCom
 export const createArenaCompanionRouteService = (input: {
   generationService: ArenaGenerationService;
   signatures: SignatureService;
+  placement: 'hono-primary' | 'next-dr';
+  observer?: ArenaGenerationObserver;
   now?(): Date;
   recordActivity?(_request: Request): void;
 }): ArenaCompanionRouteService => {
@@ -42,8 +48,44 @@ export const createArenaCompanionRouteService = (input: {
     now: input.now,
     recordActivity: input.recordActivity,
   });
+  const observeCall = async (
+    operation: 'arena/generate' | 'generate-battle-story' | 'arena/session/generate-next',
+    call: () => Promise<Response>,
+  ): Promise<Response> => {
+    const startedAt = Date.now();
+    let outcome: 'success' | 'rejected' | 'failure' = 'failure';
+    try {
+      const response = await call();
+      outcome = response.ok ? 'success' : response.status < 500 ? 'rejected' : 'failure';
+      return response;
+    } finally {
+      try {
+        input.observer?.observeArenaGeneration({
+          event: 'companion',
+          operation,
+          placement: input.placement,
+          outcome,
+          durationMs: Math.max(0, Date.now() - startedAt),
+        });
+      } catch {
+        // Telemetry transport failures must not affect companion execution.
+      }
+    }
+  };
   return Object.freeze({
-    generate: generation.generate,
-    generateNext: session.generateNext,
+    generate: (request: Request, operation?: ArenaCompanionOperation) => {
+      const resolvedOperation: ArenaCompanionOperation = operation
+        ?? (new URL(request.url).pathname.endsWith('/generate-battle-story')
+          ? 'generate-battle-story'
+          : 'arena/generate');
+      return observeCall(
+        resolvedOperation,
+        () => generation.generate(request, resolvedOperation),
+      );
+    },
+    generateNext: (request: Request) => observeCall(
+      'arena/session/generate-next',
+      () => session.generateNext(request),
+    ),
   });
 };

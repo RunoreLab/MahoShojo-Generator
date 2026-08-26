@@ -215,6 +215,43 @@ describe('Arena session companion service', () => {
     });
   });
 
+  it('取得 lease 后 chapter identity 构造失败也 exactly-once release', async () => {
+    const rateRelease = vi.fn();
+    const createSubscription = vi.fn();
+    const service = createArenaSessionCompanionService({
+      generationService: {
+        createSubscription,
+        create: () => response(),
+        cancelRequest: () => response(),
+        lookup: () => response(),
+        resume: () => response(),
+        status: () => response(),
+        cancel: () => response(),
+      },
+      signatures: {
+        generateSignature: async () => 'guidance-signature',
+        verifySignature: async () => true,
+      },
+      acquireRateLimit: () => ({
+        allowed: true,
+        retryAfterSeconds: 0,
+        release: rateRelease,
+      }),
+      deriveChapterId: async () => {
+        throw new Error('chapter id unavailable');
+      },
+    });
+
+    const result = await service.generateNext(new Request(
+      'https://example.test/api/arena/session/generate-next',
+      { method: 'POST', body: JSON.stringify(requestBody()) },
+    ));
+
+    expect(result.status).toBe(500);
+    expect(rateRelease).toHaveBeenCalledTimes(1);
+    expect(createSubscription).not.toHaveBeenCalled();
+  });
+
   it('复用请求体投影并保留自定义 provider 与读取上限语义', () => {
     const body = requestBody();
     (body.seed.settings as Record<string, unknown>).readArenaHistoryLimit = 5;

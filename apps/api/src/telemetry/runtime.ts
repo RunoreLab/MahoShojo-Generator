@@ -147,6 +147,16 @@ export type HonoRuntimeTelemetrySnapshot = {
       secondProviderPreventions: number;
       inputBytes: number;
     };
+    companion: {
+      byOperation: {
+        arenaGenerate: number;
+        generateBattleStory: number;
+        arenaSessionGenerateNext: number;
+      };
+      byPlacement: { honoPrimary: number; nextDr: number };
+      outcomes: { success: number; rejected: number; failure: number };
+      duration: DurationSummary;
+    };
     clientDisconnects: number;
     resume: {
       attempts: number;
@@ -401,6 +411,18 @@ export class HonoRuntimeTelemetry implements
     inputBytes: 0,
   };
 
+  private readonly arenaCompanionByOperation = {
+    arenaGenerate: 0,
+    generateBattleStory: 0,
+    arenaSessionGenerateNext: 0,
+  };
+
+  private readonly arenaCompanionByPlacement = { honoPrimary: 0, nextDr: 0 };
+
+  private readonly arenaCompanionOutcomes = { success: 0, rejected: 0, failure: 0 };
+
+  private readonly arenaCompanionDuration = new DurationAccumulator();
+
   private arenaClientDisconnects = 0;
 
   private arenaResumeAttempts = 0;
@@ -620,6 +642,19 @@ export class HonoRuntimeTelemetry implements
 
   observeArenaGeneration(observation: ArenaGenerationObservation): void {
     switch (observation.event) {
+      case 'companion': {
+        const operation = observation.operation === 'arena/generate'
+          ? 'arenaGenerate'
+          : observation.operation === 'generate-battle-story'
+            ? 'generateBattleStory'
+            : 'arenaSessionGenerateNext';
+        const placement = observation.placement === 'hono-primary' ? 'honoPrimary' : 'nextDr';
+        this.arenaCompanionByOperation[operation] += 1;
+        this.arenaCompanionByPlacement[placement] += 1;
+        this.arenaCompanionOutcomes[observation.outcome] += 1;
+        this.arenaCompanionDuration.observe(observation.durationMs);
+        break;
+      }
       case 'request': {
         this.arenaRequests.inputBytes += Math.max(0, Math.floor(observation.inputBytes));
         if (observation.outcome === 'created') this.arenaRequests.created += 1;
@@ -860,6 +895,12 @@ export class HonoRuntimeTelemetry implements
       },
       arenaGeneration: {
         requests: { ...this.arenaRequests },
+        companion: {
+          byOperation: { ...this.arenaCompanionByOperation },
+          byPlacement: { ...this.arenaCompanionByPlacement },
+          outcomes: { ...this.arenaCompanionOutcomes },
+          duration: this.arenaCompanionDuration.read(),
+        },
         clientDisconnects: this.arenaClientDisconnects,
         resume: {
           attempts: this.arenaResumeAttempts,
@@ -998,6 +1039,14 @@ export class HonoRuntimeTelemetry implements
       secondProviderPreventions: 0,
       inputBytes: 0,
     });
+    Object.assign(this.arenaCompanionByOperation, {
+      arenaGenerate: 0,
+      generateBattleStory: 0,
+      arenaSessionGenerateNext: 0,
+    });
+    Object.assign(this.arenaCompanionByPlacement, { honoPrimary: 0, nextDr: 0 });
+    Object.assign(this.arenaCompanionOutcomes, { success: 0, rejected: 0, failure: 0 });
+    this.arenaCompanionDuration.reset();
     this.arenaClientDisconnects = 0;
     this.arenaResumeAttempts = 0;
     this.arenaResumeSuccesses = 0;

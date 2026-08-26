@@ -148,10 +148,11 @@ const readScenarioPlan = (
   value: unknown,
 ): { totalChapters: number; planMode: 'suggested' | 'fixed' } | null => {
   if (!isRecord(value) || !isRecord(value._battle_story)) return null;
-  const totalChapters = normalizeScenarioTotalChapters(value._battle_story.total_chapters);
-  const planMode = value._battle_story.plan_mode === 'fixed'
+  const battleStory = value._battle_story;
+  const totalChapters = normalizeScenarioTotalChapters(battleStory['total_chapters']);
+  const planMode = battleStory['plan_mode'] === 'fixed'
     ? 'fixed'
-    : value._battle_story.plan_mode === 'suggested' || value._battle_story.plan_mode === undefined
+    : battleStory['plan_mode'] === 'suggested' || battleStory['plan_mode'] === undefined
       ? 'suggested'
       : null;
   return totalChapters && planMode ? { totalChapters, planMode } : null;

@@ -2,6 +2,10 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { createArenaGenerationFinalizer } from '../src/arena-generation/finalization';
 import { createNodeArenaGenerationExecutor } from '../src/arena-generation/node-executor';
+import type {
+  GenerateWithAIOptions,
+  RawGenerationConfig,
+} from '../src/node-runtime/types';
 import type { SignatureService } from '../src/signature';
 
 const validPayload = {
@@ -280,6 +284,7 @@ describe('Node Arena generation executor', () => {
         readNarrativeHistory: false,
         writeArenaHistory: false,
         writeCurrentState: false,
+        isDowngrade: true,
       },
     });
     if (prepared instanceof Response) throw new Error('unexpected response');
@@ -302,5 +307,47 @@ describe('Node Arena generation executor', () => {
       'gemma-4-31b-it',
       'gemma-3-27b-it',
     ]);
+  });
+
+  it('preserves the public non-strict downgrade model contract', async () => {
+    const generateWithStreamAI = vi.fn(async (
+      _config: RawGenerationConfig,
+      _options?: GenerateWithAIOptions,
+    ) => ({ response: new Response('body') }));
+    const executor = createNodeArenaGenerationExecutor({
+      env: {},
+      finalizer,
+      signatureService,
+      enforceSafety: vi.fn(async () => null),
+      generateWithStreamAI,
+    });
+    const prepared = await executor.prepare!({
+      request: new Request('https://example.test/api/arena/generate'),
+      actorKey: 'anonymous:test',
+      payload: {
+        ...validPayload,
+        userGuidance: '非排位叙事',
+        isDowngrade: true,
+      },
+    });
+    if (prepared instanceof Response) throw new Error('unexpected response');
+
+    const terminal = await executor.execute({
+      generationId: 'generation-downgrade',
+      generationRequestId: 'request-downgrade',
+      actorKey: 'anonymous:test',
+      producerToken: 'producer-token-downgrade',
+      payloadHash: 'payload-hash-downgrade',
+      payload: prepared.executionPayload,
+      signal: new AbortController().signal,
+      emit: vi.fn(async () => undefined),
+      claimFinalization: vi.fn(async () => ({ kind: 'claimed' as const })),
+    });
+
+    expect(terminal.status).toBe('completed');
+    expect(generateWithStreamAI).toHaveBeenCalledTimes(1);
+    expect(generateWithStreamAI.mock.calls[0]?.[0]).toMatchObject({
+      modelOverride: 'gemini-2.5-flash-lite',
+    });
   });
 });

@@ -44,8 +44,8 @@ const matchesAppliedRevision = (
   generationId: string,
   baseRevisionHash: string | null,
 ): boolean => {
-  if (textOf(record?.generation_id) !== generationId) return false;
-  const appliedBase = textOf(record?.base_revision_hash);
+  if (textOf(record?.['generation_id']) !== generationId) return false;
+  const appliedBase = textOf(record?.['base_revision_hash']);
   return !baseRevisionHash || !appliedBase || appliedBase === baseRevisionHash;
 };
 
