@@ -1,7 +1,6 @@
 import {
   and,
   asc,
-  count,
   desc,
   eq,
   exists,
@@ -13,7 +12,6 @@ import {
   notExists,
   or,
   sql,
-  sum,
   type SQL,
 } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/sqlite-core';
@@ -28,10 +26,8 @@ export type { ArenaRatingEventReadRow, ArenaRatingSnapshotRow } from '@/lib/db/r
 import {
   arenaRatingEvents,
   arenaRatings,
-  battles,
   battleReportGenerationCombatants,
   battleReportGenerations,
-  characters,
   dataCardMetrics,
   dataCards,
   dataCardTags,
@@ -42,7 +38,6 @@ export type ArenaReadQueue = 'strict' | 'free';
 export type ArenaReadEntityType = 'data_card' | 'preset';
 export type ArenaReadSort = 'rating' | 'tech';
 export type ArenaReadSortOrder = 'asc' | 'desc';
-export type StatsLeaderboardMode = 'all' | 'preset' | 'user';
 
 type ArenaLeaderboardCommonOptions = {
   queue: ArenaReadQueue;
@@ -104,19 +99,6 @@ export type ArenaEntityRatingHistoryRow = {
     userId: number | null;
     username: string | null;
   };
-};
-
-export type CharacterWinRateRankRow = {
-  name: string;
-  isPreset: boolean;
-  wins: number;
-  participations: number;
-};
-
-export type CharacterCountRankRow = {
-  name: string;
-  isPreset: boolean;
-  count: number;
 };
 
 const toInteger = (value: unknown, fallback = 0): number => {
@@ -379,12 +361,6 @@ const selectArenaLeaderboardRows = async (
     ...row,
     tagIds: row.entityType === 'data_card' ? tagMap.get(row.entityId) ?? [] : [],
   }));
-};
-
-const buildCharactersModeCondition = (mode: StatsLeaderboardMode): SQL | null => {
-  if (mode === 'preset') return eq(characters.isPreset, true);
-  if (mode === 'user') return eq(characters.isPreset, false);
-  return null;
 };
 
 export const getArenaRatingByEntity = async (
@@ -746,137 +722,4 @@ export const searchArenaLeaderboardRows = async (
     )!,
   ];
   return selectArenaLeaderboardRows(db, options, whereExtras, 0);
-};
-
-export const getTotalBattleCount = async (db: AppDrizzleDb): Promise<number> => {
-  const rows = await db
-    .select({
-      count: count(),
-    })
-    .from(battles);
-
-  return Math.max(0, toInteger(rows[0]?.count, 0));
-};
-
-export const getTotalCharacterParticipations = async (db: AppDrizzleDb): Promise<number> => {
-  const rows = await db
-    .select({
-      total: sum(characters.participations),
-    })
-    .from(characters);
-
-  return Math.max(0, toInteger(rows[0]?.total, 0));
-};
-
-export const listCharacterWinRateRanks = async (
-  db: AppDrizzleDb,
-  mode: StatsLeaderboardMode,
-  limit: number,
-): Promise<CharacterWinRateRankRow[]> => {
-  const whereConditions: SQL[] = [gte(characters.participations, 3)];
-  const modeCondition = buildCharactersModeCondition(mode);
-  if (modeCondition) whereConditions.push(modeCondition);
-
-  const rows = await db
-    .select({
-      name: characters.name,
-      isPreset: characters.isPreset,
-      wins: characters.wins,
-      participations: characters.participations,
-    })
-    .from(characters)
-    .where(and(...whereConditions))
-    .orderBy(
-      desc(sql<number>`(CAST(${characters.wins} AS REAL) / ${characters.participations})`),
-      desc(characters.wins),
-    )
-    .limit(normalizeLimit(limit, 1, 100));
-
-  return rows.map((row) => ({
-    name: row.name,
-    isPreset: Boolean(row.isPreset),
-    wins: Math.max(0, toInteger(row.wins, 0)),
-    participations: Math.max(1, toInteger(row.participations, 1)),
-  }));
-};
-
-export const listCharacterParticipationRanks = async (
-  db: AppDrizzleDb,
-  mode: StatsLeaderboardMode,
-  limit: number,
-): Promise<CharacterCountRankRow[]> => {
-  const whereConditions: SQL[] = [];
-  const modeCondition = buildCharactersModeCondition(mode);
-  if (modeCondition) whereConditions.push(modeCondition);
-
-  const rows = await db
-    .select({
-      name: characters.name,
-      isPreset: characters.isPreset,
-      participations: characters.participations,
-    })
-    .from(characters)
-    .where(whereConditions.length > 0 ? and(...whereConditions) : undefined)
-    .orderBy(desc(characters.participations))
-    .limit(normalizeLimit(limit, 1, 100));
-
-  return rows.map((row) => ({
-    name: row.name,
-    isPreset: Boolean(row.isPreset),
-    count: Math.max(0, toInteger(row.participations, 0)),
-  }));
-};
-
-export const listCharacterWinsRanks = async (
-  db: AppDrizzleDb,
-  mode: StatsLeaderboardMode,
-  limit: number,
-): Promise<CharacterCountRankRow[]> => {
-  const whereConditions: SQL[] = [];
-  const modeCondition = buildCharactersModeCondition(mode);
-  if (modeCondition) whereConditions.push(modeCondition);
-
-  const rows = await db
-    .select({
-      name: characters.name,
-      isPreset: characters.isPreset,
-      wins: characters.wins,
-    })
-    .from(characters)
-    .where(whereConditions.length > 0 ? and(...whereConditions) : undefined)
-    .orderBy(desc(characters.wins))
-    .limit(normalizeLimit(limit, 1, 100));
-
-  return rows.map((row) => ({
-    name: row.name,
-    isPreset: Boolean(row.isPreset),
-    count: Math.max(0, toInteger(row.wins, 0)),
-  }));
-};
-
-export const listCharacterLossesRanks = async (
-  db: AppDrizzleDb,
-  mode: StatsLeaderboardMode,
-  limit: number,
-): Promise<CharacterCountRankRow[]> => {
-  const whereConditions: SQL[] = [];
-  const modeCondition = buildCharactersModeCondition(mode);
-  if (modeCondition) whereConditions.push(modeCondition);
-
-  const rows = await db
-    .select({
-      name: characters.name,
-      isPreset: characters.isPreset,
-      losses: characters.losses,
-    })
-    .from(characters)
-    .where(whereConditions.length > 0 ? and(...whereConditions) : undefined)
-    .orderBy(desc(characters.losses))
-    .limit(normalizeLimit(limit, 1, 100));
-
-  return rows.map((row) => ({
-    name: row.name,
-    isPreset: Boolean(row.isPreset),
-    count: Math.max(0, toInteger(row.losses, 0)),
-  }));
 };

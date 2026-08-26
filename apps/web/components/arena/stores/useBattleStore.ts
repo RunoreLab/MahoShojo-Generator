@@ -149,7 +149,6 @@ export const useBattleStore = create<BattleStoreState>()(
       isMatching: null,
       loadingPreset: null,
       userProviderConfig: null,
-      stats: null,
 
       setBattleMode: (mode) => set({ battleMode: mode }),
       setGenerationMode: (mode) => set({ generationMode: mode }),
@@ -422,7 +421,6 @@ export const useBattleStore = create<BattleStoreState>()(
       setIsMatching: (target) => set({ isMatching: target }),
       setLoadingPreset: (filename) => set({ loadingPreset: filename }),
       setUserProviderConfig: (config) => set({ userProviderConfig: config }),
-      setStats: (stats) => set({ stats }),
 
       addQuestionnaireSelection: (incoming) =>
         set((state) => {

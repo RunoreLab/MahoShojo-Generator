@@ -1,4 +1,3 @@
-import { config as appConfig } from '@/lib/config';
 import { getLogger } from '@/lib/logger';
 import { NewsReport } from '@/components/BattleReportCard';
 import { ArenaHistoryEntry } from '@/types/arena';
@@ -330,37 +329,4 @@ export const redoPostBattleUpdates = async (
     }
 
     return updatedCombatants;
-};
-
-export const updateBattleStats = async (winnerName: string, participants: any[]) => {
-    if (!appConfig.SHOW_STAT_DATA) return;
-
-    try {
-        const [{ getDrizzleDbFromRuntime }, { recordBattleStats }] = await Promise.all([
-            import('@/lib/db/drizzle'),
-            import('@/lib/db/repositories/arena-legacy-stats'),
-        ]);
-        const db = getDrizzleDbFromRuntime();
-        if (!db) {
-            log.warn('统计写入已跳过：Drizzle 数据库绑定不可用');
-            return;
-        }
-
-        const isCompetitiveMode = !winnerName.includes('、') && !winnerName.includes(',');
-        const statsParticipants = participants.map((participant) => {
-            const name = participant.data.codename || participant.data.name;
-            const isPreset = !!participant.data.isPreset;
-            return {
-                name,
-                isPreset,
-                isWinner: isCompetitiveMode && name === winnerName && winnerName !== '平局',
-                isLoser: isCompetitiveMode && name !== winnerName && winnerName !== '平局',
-            };
-        });
-        await recordBattleStats(db, winnerName, statsParticipants);
-
-        log.info('成功更新事件统计数据到 D1');
-    } catch (error) {
-        log.error('更新 D1 数据库失败:', { error });
-    }
 };

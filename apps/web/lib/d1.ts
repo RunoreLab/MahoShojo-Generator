@@ -106,15 +106,6 @@ export {
   getUserDeckFavoriteIds
 } from './database/deck-favorites';
 
-// 重新导出竞技场相关功能
-export {
-  getOrCreateCharacter,
-  updateCharacterStats,
-  recordBattle,
-  getCharacterLeaderboard,
-  getRecentBattles
-} from './database/arena';
-
 // 重新导出 PVP 相关功能
 export {
   createPvpRoom,

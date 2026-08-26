@@ -7,8 +7,6 @@ import DataCardDetailsModal from '@/components/DataCardDetailsModal';
 import Footer from '@/components/Footer';
 import { ErrorMessage } from '@/components/ErrorMessage';
 import { useAuth } from '@/lib/useAuth';
-import { config as appConfig } from '@/lib/config';
-import type { Preset } from '@/lib/presets';
 import { CollapsibleSection } from '@/components/shared/CollapsibleSection';
 import { ONLINE_DATA_CARD_TYPES } from '@mahoshojo/contracts/data-cards';
 
@@ -28,7 +26,6 @@ import { BattleResult } from './components/BattleResult';
 import { BattleStorySessionPanel } from './components/BattleStorySessionPanel';
 import { BattleModeSwitcher } from './components/BattleModeSwitcher';
 import { GenerationModeSwitcher } from './components/GenerationModeSwitcher';
-import { ArenaStatistics } from './components/ArenaStatistics';
 import { RankingQuickActions } from './components/RankingQuickActions';
 import { useBattleStore } from './stores/useBattleStore';
 import {
@@ -41,7 +38,7 @@ import {
   MAX_COMBATANTS,
 } from './types';
 import { useBattleActions } from './hooks/useBattleActions';
-import { usePresetQuery, useLanguagesQuery, useStatsQuery } from './hooks/useArenaData';
+import { useLanguagesQuery } from './hooks/useArenaData';
 import { ArenaRankingModal } from './components/ArenaRankingModal';
 import { ArenaCommunitySection } from './shared/ArenaCommunitySection';
 import { ArenaPageLinks } from './shared/ArenaPageLinks';
@@ -73,9 +70,7 @@ export function ArenaPage() {
     handleToggleMaterialDataCard,
   } = useBattleActions();
 
-  const { grouped: presetGrouped } = usePresetQuery();
   const { data: languages } = useLanguagesQuery();
-  const { data: stats, isLoading: isLoadingStats } = useStatsQuery();
 
   const presetCombatantCount = useMemo(
     () => combatants.filter((item) => 'data' in item && (item as CombatantData).isPreset).length,
@@ -91,15 +86,6 @@ export function ArenaPage() {
     const auxCount = auxScenarios.length;
     return auxCount > 0 ? `主情景：${main}｜辅助：${auxCount}` : `主情景：${main}`;
   }, [auxScenarios.length, battleMode, scenario.content, scenario.fileName]);
-
-  const presetInfo = useMemo(() => {
-    const map = new Map<string, string>();
-    if (presetGrouped) {
-      presetGrouped.magicalGirl.forEach((preset: Preset) => map.set(preset.name, preset.description));
-      presetGrouped.canshou.forEach((preset: Preset) => map.set(preset.name, preset.description));
-    }
-    return map;
-  }, [presetGrouped]);
 
   const selectedCharacterDataCardIds = useMemo(() => {
     const out: string[] = [];
@@ -366,10 +352,6 @@ export function ArenaPage() {
 
           <BattleResult onSaveImage={handleSaveImage} />
           <BattleStorySessionPanel onSaveImage={handleSaveImage} />
-
-          {appConfig.SHOW_STAT_DATA && (
-            <ArenaStatistics stats={stats} isLoading={isLoadingStats} presetInfo={presetInfo} />
-          )}
 
           <div className="text-center" style={{ marginTop: '2rem' }}>
             <button onClick={() => window.location.assign('/')} className="footer-link">

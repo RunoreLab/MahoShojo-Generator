@@ -1,7 +1,6 @@
 import type { NewsReport } from '@/components/BattleReportCard';
 import type { UserAIProviderConfig } from '@/components/AiProviderSelector';
 import type { Preset } from '@/lib/presets';
-import type { StatsData } from '@/app/api/get-stats/handler';
 import type { AdjudicatorEvent, AdjudicationResult, CharacterCurrentState } from '@/types/arena';
 import type { NormalizedStreamUpdateMeta } from '@/lib/arena/stream-meta';
 import type { QuestionnaireDefinition } from '@/lib/questionnaires';
@@ -211,7 +210,6 @@ export interface BattleStoreState {
   isMatching: 'character' | 'scenario' | null;
   loadingPreset: string | null;
   userProviderConfig: UserAIProviderConfig | null;
-  stats: StatsData | null;
 
   setBattleMode: (mode: BattleMode) => void;
   setGenerationMode: (mode: GenerationMode) => void;
@@ -279,7 +277,6 @@ export interface BattleStoreState {
   setIsMatching: (target: 'character' | 'scenario' | null) => void;
   setLoadingPreset: (filename: string | null) => void;
   setUserProviderConfig: (config: UserAIProviderConfig | null) => void;
-  setStats: (stats: StatsData | null) => void;
 
   addQuestionnaireSelection: (selection: QuestionnaireSelection) => void;
   removeQuestionnaireSelection: (selectionId: string) => void;

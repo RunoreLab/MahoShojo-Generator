@@ -45,24 +45,6 @@ const getLoadBalanceStrategy = (): string => {
   return process.env.AI_LOAD_BALANCE_STRATEGY || 'random';
 };
 
-// 获取统计数据显示开关
-const getShowStatData = (): boolean => {
-  const showStat = process.env.SHOW_STAT_DATA || 'false';
-  if (showStat === 'false' || showStat === '0') {
-    return false;
-  }
-  return true; // 默认显示统计数据
-};
-
-// 获取排行榜模式
-const getLeaderboardMode = (): 'all' | 'preset' | 'user' => {
-  const mode = process.env.LEADERBOARD_MODE;
-  if (mode === 'preset' || mode === 'user') {
-    return mode;
-  }
-  return 'all'; // 默认为 'all'
-};
-
 // 获取竞技场用户引导功能开关
 const getEnableArenaUserGuidance = (): boolean => {
   const enabled = process.env.NEXT_PUBLIC_ENABLE_ARENA_USER_GUIDANCE ?? 'true';
@@ -155,12 +137,6 @@ export const config = {
   MODEL: getDefaultModel(),
   PROVIDERS: getAPIProviders(),
   LOAD_BALANCE_STRATEGY: getLoadBalanceStrategy(),
-
-  // 统计数据显示开关配置
-  SHOW_STAT_DATA: getShowStatData(),
-
-  // 排行榜模式配置
-  LEADERBOARD_MODE: getLeaderboardMode(),
 
   // 竞技场用户引导功能开关
   ENABLE_ARENA_USER_GUIDANCE: getEnableArenaUserGuidance(),

@@ -3,10 +3,8 @@
 import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 
-import { config as appConfig } from '@/lib/config';
 import type { Preset } from '@/lib/presets';
 import type { ScenarioPreset } from '@/lib/scenario-presets';
-import type { StatsData } from '@/app/api/get-stats/handler';
 
 import { LanguageOption, PresetCollections } from '../types';
 
@@ -33,14 +31,6 @@ export const usePresetQuery = () => {
   }, [query.data]);
 
   return { ...query, grouped };
-};
-
-export const useStatsQuery = () => {
-  return useQuery<StatsData>({
-    queryKey: ['arena', 'stats'],
-    queryFn: () => fetcher('/api/get-stats'),
-    enabled: Boolean(appConfig.SHOW_STAT_DATA),
-  });
 };
 
 export const useLanguagesQuery = () => {
