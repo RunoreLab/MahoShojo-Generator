@@ -38,6 +38,11 @@
       "types": "./src/arena-reconciliation.ts",
       "import": "./src/arena-reconciliation.ts",
       "default": "./src/arena-reconciliation.ts"
+    },
+    "./arena-battle-story-session": {
+      "types": "./src/arena-battle-story-session.ts",
+      "import": "./src/arena-battle-story-session.ts",
+      "default": "./src/arena-battle-story-session.ts"
     }
   },
   "scripts": {
