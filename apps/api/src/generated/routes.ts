@@ -99,6 +99,18 @@ export const routeDefinitions: RouteDefinition[] = [
     load: () => import("../adapters/generate-magical-girl") as unknown as Promise<RouteModule>,
   },
   {
+    id: "generate-magical-girl-details",
+    pattern: "/api/generate-magical-girl-details",
+    adapter: "shared-service",
+    load: () => import("../adapters/generate-magical-girl-details") as unknown as Promise<RouteModule>,
+  },
+  {
+    id: "generate-magical-girl-details-stream",
+    pattern: "/api/generate-magical-girl-details-stream",
+    adapter: "shared-service",
+    load: () => import("../adapters/generate-magical-girl-details-stream") as unknown as Promise<RouteModule>,
+  },
+  {
     id: "generate-scenario",
     pattern: "/api/generate-scenario",
     adapter: "shared-service",
@@ -109,6 +121,18 @@ export const routeDefinitions: RouteDefinition[] = [
     pattern: "/api/generate-scenario-stream",
     adapter: "shared-service",
     load: () => import("../adapters/generate-scenario-stream") as unknown as Promise<RouteModule>,
+  },
+  {
+    id: "generate-sublimation",
+    pattern: "/api/generate-sublimation",
+    adapter: "shared-service",
+    load: () => import("../adapters/generate-sublimation") as unknown as Promise<RouteModule>,
+  },
+  {
+    id: "generate-sublimation-stream",
+    pattern: "/api/generate-sublimation-stream",
+    adapter: "shared-service",
+    load: () => import("../adapters/generate-sublimation-stream") as unknown as Promise<RouteModule>,
   },
 ];
 

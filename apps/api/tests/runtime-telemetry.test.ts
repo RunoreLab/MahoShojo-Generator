@@ -1,6 +1,7 @@
 import { EventEmitter } from 'node:events';
 import {
   beginAiUpstream,
+  observeHostedGenerationLifecycle,
   observeD1RoundTrip,
   registerHostedRuntimeObserver,
 } from '@mahoshojo/hosted-runtime/telemetry';
@@ -24,7 +25,7 @@ describe('Hono runtime telemetry', () => {
     const snapshot = telemetry.snapshot();
 
     expect(snapshot).toMatchObject({
-      schemaVersion: 3,
+      schemaVersion: 4,
       service: 'mahoshojo-hono',
       runtime: {
         origin: 'hono-node',
@@ -110,7 +111,7 @@ describe('Hono runtime telemetry', () => {
       });
 
       expect(telemetry.snapshot()).toMatchObject({
-        schemaVersion: 3,
+        schemaVersion: 4,
         aiUpstream: {
           attempts: {
             active: 1,
@@ -158,6 +159,44 @@ describe('Hono runtime telemetry', () => {
       });
 
       activeAttempt.finish({ outcome: 'aborted', durationMs: 21 });
+    } finally {
+      unregister();
+    }
+  });
+
+  it('聚合 G25H fixed operation/placement/outcome，且不接收请求载荷', () => {
+    const telemetry = new HonoRuntimeTelemetry();
+    const unregister = registerHostedRuntimeObserver(telemetry);
+    try {
+      observeHostedGenerationLifecycle({
+        event: 'hosted-generation',
+        operation: 'generate-magical-girl-details',
+        placement: 'hono-primary',
+        outcome: 'success',
+        durationMs: 13,
+      });
+      observeHostedGenerationLifecycle({
+        event: 'hosted-generation',
+        operation: 'generate-sublimation-stream',
+        placement: 'next-dr',
+        outcome: 'cancelled',
+        durationMs: 21,
+      });
+
+      expect(telemetry.snapshot()).toMatchObject({
+        schemaVersion: 4,
+        hostedGeneration: {
+          byOperation: {
+            'generate-magical-girl-details': 1,
+            'generate-magical-girl-details-stream': 0,
+            'generate-sublimation': 0,
+            'generate-sublimation-stream': 1,
+          },
+          byPlacement: { honoPrimary: 1, nextDr: 1 },
+          outcomes: { success: 1, rejected: 0, failure: 0, cancelled: 1 },
+          duration: { samples: 2, totalMilliseconds: 34, maxMilliseconds: 21 },
+        },
+      });
     } finally {
       unregister();
     }

@@ -293,6 +293,11 @@
       "types": "./src/telemetry.ts",
       "import": "./src/telemetry.ts",
       "default": "./src/telemetry.ts"
+    },
+    "./generation-lifecycle": {
+      "types": "./src/generation-lifecycle.ts",
+      "import": "./src/generation-lifecycle.ts",
+      "default": "./src/generation-lifecycle.ts"
     }
   },
   "scripts": {

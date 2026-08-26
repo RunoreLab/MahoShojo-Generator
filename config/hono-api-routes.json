@@ -1,9 +1,5 @@
 {
   "exitedRouteIds": [
-    "generate-magical-girl-details",
-    "generate-magical-girl-details-stream",
-    "generate-sublimation",
-    "generate-sublimation-stream",
     "magic-tavern/generate-choices",
     "magic-tavern/generate-stream",
     "magic-tea-party/generate-choices",
@@ -29,7 +25,11 @@
     "generate-free-stream",
     "generate-game-card",
     "generate-magical-girl",
+    "generate-magical-girl-details",
+    "generate-magical-girl-details-stream",
     "generate-scenario",
-    "generate-scenario-stream"
+    "generate-scenario-stream",
+    "generate-sublimation",
+    "generate-sublimation-stream"
   ]
 }

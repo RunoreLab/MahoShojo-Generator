@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
 
 import {
   defaultGenerateCanshouService as packageCanshou,
@@ -24,15 +24,27 @@ import { defaultGenerateFreeService } from '@/lib/hosted-api/generate-free';
 import { defaultGenerateFreeStreamService } from '@/lib/hosted-api/generate-free-stream';
 import { defaultGenerateGameCardService } from '@/lib/hosted-api/generate-game-card';
 import { defaultGenerateMagicalGirlService } from '@/lib/hosted-api/generate-magical-girl';
-import { defaultGenerateMagicalGirlDetailsService } from '@/lib/hosted-api/generate-magical-girl-details';
-import { defaultGenerateMagicalGirlDetailsStreamService } from '@/lib/hosted-api/generate-magical-girl-details-stream';
+import {
+  defaultGenerateMagicalGirlDetailsService,
+  hostedService as magicalGirlDetailsCore,
+} from '@/lib/hosted-api/generate-magical-girl-details';
+import {
+  defaultGenerateMagicalGirlDetailsStreamService,
+  hostedService as magicalGirlDetailsStreamCore,
+} from '@/lib/hosted-api/generate-magical-girl-details-stream';
 import { defaultGenerateScenarioService } from '@/lib/hosted-api/generate-scenario';
 import { defaultGenerateScenarioStreamService } from '@/lib/hosted-api/generate-scenario-stream';
-import { defaultGenerateSublimationService } from '@/lib/hosted-api/generate-sublimation';
-import { defaultGenerateSublimationStreamService } from '@/lib/hosted-api/generate-sublimation-stream';
+import {
+  defaultGenerateSublimationService,
+  hostedService as sublimationCore,
+} from '@/lib/hosted-api/generate-sublimation';
+import {
+  defaultGenerateSublimationStreamService,
+  hostedService as sublimationStreamCore,
+} from '@/lib/hosted-api/generate-sublimation-stream';
 
 describe('14 retained / staged Hosted services identity', () => {
-  test('legacy Next compatibility 与 package Node composition 复用同一实例', () => {
+  test('Next DR 与 Hono 使用同一 package Node core composition', () => {
     expect([
       defaultGenerateFreeService,
       defaultGenerateFreeStreamService,
@@ -44,10 +56,10 @@ describe('14 retained / staged Hosted services identity', () => {
       defaultGenerateGameCardService,
       defaultGenerateCreatorService,
       defaultGenerateCreatorStreamService,
-      defaultGenerateMagicalGirlDetailsService,
-      defaultGenerateMagicalGirlDetailsStreamService,
-      defaultGenerateSublimationService,
-      defaultGenerateSublimationStreamService,
+      magicalGirlDetailsCore,
+      magicalGirlDetailsStreamCore,
+      sublimationCore,
+      sublimationStreamCore,
     ]).toEqual([
       packageFree,
       packageFreeStream,
@@ -64,5 +76,31 @@ describe('14 retained / staged Hosted services identity', () => {
       packageSublimation,
       packageSublimationStream,
     ]);
+    expect(defaultGenerateMagicalGirlDetailsService).not.toBe(magicalGirlDetailsCore);
+    expect(defaultGenerateMagicalGirlDetailsStreamService).not.toBe(magicalGirlDetailsStreamCore);
+    expect(defaultGenerateSublimationService).not.toBe(sublimationCore);
+    expect(defaultGenerateSublimationStreamService).not.toBe(sublimationStreamCore);
+  });
+
+  test('Next DR lifecycle 输出固定 schema 且不记录请求 URL', async () => {
+    const info = vi.spyOn(console, 'info').mockImplementation(() => undefined);
+    try {
+      const response = await defaultGenerateMagicalGirlDetailsService(new Request(
+        'https://next-dr-secret-canary.test/api/generate-magical-girl-details',
+        { method: 'GET' },
+      ));
+      expect(response.status).toBe(405);
+      const payload = JSON.parse(String(info.mock.calls[0]?.[0]));
+      expect(payload).toEqual(expect.objectContaining({
+        event: 'hosted.generation.lifecycle',
+        schemaVersion: 1,
+        operation: 'generate-magical-girl-details',
+        placement: 'next-dr',
+        outcome: 'rejected',
+      }));
+      expect(JSON.stringify(info.mock.calls)).not.toContain('next-dr-secret-canary');
+    } finally {
+      info.mockRestore();
+    }
   });
 });

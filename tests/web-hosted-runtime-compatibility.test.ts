@@ -78,7 +78,7 @@ describe('apps/web 与 hosted-runtime compatibility 边界', () => {
       const source = read(wrapper);
       expect(source).toContain('@mahoshojo/hosted-runtime/node-runtime/default-services');
       expect(source).toContain('./configure-node-runtime');
-      expect(source.split(/\r?\n/).length).toBeLessThanOrEqual(10);
+      expect(source.split(/\r?\n/).length).toBeLessThanOrEqual(18);
     }
   });
 

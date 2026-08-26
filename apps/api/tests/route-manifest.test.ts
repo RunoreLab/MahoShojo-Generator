@@ -7,10 +7,6 @@ const APP_ROOT = path.resolve(import.meta.dirname, '..');
 const REPOSITORY_ROOT = path.resolve(APP_ROOT, '..', '..');
 
 const EXITED_ROUTE_IDS = [
-  'generate-magical-girl-details',
-  'generate-magical-girl-details-stream',
-  'generate-sublimation',
-  'generate-sublimation-stream',
   'magic-tavern/generate-choices',
   'magic-tavern/generate-stream',
   'magic-tea-party/generate-choices',
@@ -20,7 +16,7 @@ const EXITED_ROUTE_IDS = [
 ] as const;
 
 describe('Hono route manifest', () => {
-  it('只挂载已经脱离 legacy Next import 的十八条 shared capability', () => {
+  it('只挂载已经脱离 legacy Next import 的二十二条 shared capability', () => {
     expect(routeDefinitions.map((route) => route.id).sort()).toEqual([
       'arena/generate',
       'arena/generate-stream',
@@ -38,10 +34,14 @@ describe('Hono route manifest', () => {
       'generate-free-stream',
       'generate-game-card',
       'generate-magical-girl',
+      'generate-magical-girl-details',
+      'generate-magical-girl-details-stream',
       'generate-scenario',
       'generate-scenario-stream',
+      'generate-sublimation',
+      'generate-sublimation-stream',
     ]);
-    expect(routeDefinitions).toHaveLength(18);
+    expect(routeDefinitions).toHaveLength(22);
     expect(routeDefinitions.some((route) => route.pattern === '/api/auth/*')).toBe(false);
     expect(routeDefinitions.some((route) => route.pattern.startsWith('/api/pvp/'))).toBe(false);
   });
@@ -65,8 +65,12 @@ describe('Hono route manifest', () => {
       'generate-free-stream',
       'generate-game-card',
       'generate-magical-girl',
+      'generate-magical-girl-details',
+      'generate-magical-girl-details-stream',
       'generate-scenario',
       'generate-scenario-stream',
+      'generate-sublimation',
+      'generate-sublimation-stream',
     ]);
     const routeInventory = JSON.parse(readFileSync(
       path.join(REPOSITORY_ROOT, 'config/hono-api-routes.json'),
@@ -78,7 +82,7 @@ describe('Hono route manifest', () => {
     };
     expect(routeInventory.exitedRouteIds).toEqual(EXITED_ROUTE_IDS);
     expect(routeInventory.legacyRouteIds).toEqual([]);
-    expect(routeInventory.sharedRouteIds?.length).toBe(18);
+    expect(routeInventory.sharedRouteIds?.length).toBe(22);
 
     for (const definition of sharedDefinitions) {
       const routeModule = await definition.load();

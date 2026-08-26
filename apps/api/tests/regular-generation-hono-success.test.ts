@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
+import { registerHostedRuntimeObserver } from '@mahoshojo/hosted-runtime/telemetry';
 import type { HonoServerConfig } from '#/config';
 import type { RedisService } from '#/redis/runtime';
+import { HonoRuntimeTelemetry } from '#/telemetry/runtime';
 
 const mocks = vi.hoisted(() => ({
   events: [] as string[],
@@ -31,12 +33,23 @@ const mocks = vi.hoisted(() => ({
       ? 'canshou-test-model'
       : taskName === '生成魔法少女详细信息'
         ? 'creator-test-model'
+        : taskName === '角色成长升华'
+          ? 'sublimation-test-model'
         : 'scenario-test-model';
     if (taskName === '生成残兽档案') {
       return { name: '测试残兽', coreConcept: '测试核心' };
     }
     if (taskName === '生成魔法少女详细信息') {
       return { codename: '测试花名' };
+    }
+    if (taskName === '角色成长升华') {
+      return {
+        updatedCharacterData: {
+          name: '测试角色「新生」',
+          content: '# 测试角色\n\n完成成长。',
+        },
+        sublimationEvent: { title: '新生', impact: '完成成长' },
+      };
     }
     if (taskName === 'generate-game-card') {
       options.telemetry.model = 'game-card-test-model';
@@ -167,6 +180,42 @@ const redis: RedisService = {
 };
 
 describe('常规生成 Hono production composition', () => {
+  it('四路 adapter 将固定 Hono placement lifecycle 交给 runtime telemetry', async () => {
+    const telemetry = new HonoRuntimeTelemetry();
+    const unregister = registerHostedRuntimeObserver(telemetry);
+    try {
+      const app = createHonoApp(config, redis, telemetry);
+      const response = await app.request('/api/generate-magical-girl-details', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Mahoshojo-Activity-Token': 'activity-token',
+        },
+        body: JSON.stringify({
+          answers: ['telemetry-payload-must-not-appear'],
+          questionnaires: [{
+            id: 'details-test',
+            title: 'Details 测试问卷',
+            kind: 'magical-girl',
+            questions: [{ id: 'q-1', question: '为何而战？' }],
+          }],
+        }),
+      });
+      const responsePayload = await response.clone().json();
+      expect(response.status, JSON.stringify(responsePayload)).toBe(200);
+
+      const snapshot = telemetry.snapshot();
+      expect(snapshot.hostedGeneration).toMatchObject({
+        byOperation: { 'generate-magical-girl-details': 1 },
+        byPlacement: { honoPrimary: 1, nextDr: 0 },
+        outcomes: { success: 1 },
+      });
+      expect(JSON.stringify(snapshot)).not.toContain('telemetry-payload-must-not-appear');
+    } finally {
+      unregister();
+    }
+  });
+
   it('经 dispatcher 复用名字生成的 AI、活动与签名 composition', async () => {
     mocks.events.length = 0;
     const app = createHonoApp(config, redis);
@@ -417,6 +466,78 @@ describe('常规生成 Hono production composition', () => {
     expect(mocks.recordActivity).toHaveBeenCalledOnce();
   });
 
+  it('经 dispatcher 保留 Details AI meta、问卷答案与活动顺序', async () => {
+    mocks.events.length = 0;
+    const app = createHonoApp(config, redis);
+    const response = await app.request('/api/generate-magical-girl-details', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Mahoshojo-AI-Meta': 'true',
+        'X-Mahoshojo-Activity-Token': 'activity-token',
+      },
+      body: JSON.stringify({
+        answers: ['守护同伴'],
+        questionnaires: [{
+          id: 'details-test',
+          title: 'Details 测试问卷',
+          kind: 'magical-girl',
+          questions: [{ id: 'q-1', question: '为何而战？' }],
+        }],
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('x-backend-runtime')).toBe('hono-node');
+    expect(await response.json()).toEqual({
+      data: {
+        codename: '测试花名',
+        templateId: '魔法少女/心之花/魔法少女（问卷生成）',
+        userAnswers: [{ question: '为何而战？', answer: '守护同伴', questionId: 'q-1' }],
+      },
+      aiMeta: { aiModel: 'creator-test-model' },
+    });
+    expect(mocks.events).toEqual(['generate', 'activity']);
+  });
+
+  it('经 dispatcher 保留 Sublimation finalize、签名、AI meta 与活动顺序', async () => {
+    mocks.events.length = 0;
+    const app = createHonoApp(config, redis);
+    const response = await app.request('/api/generate-sublimation', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Mahoshojo-AI-Meta': 'true',
+        'X-Mahoshojo-Activity-Token': 'activity-token',
+      },
+      body: JSON.stringify({
+        templateId: '通用角色',
+        name: '测试角色',
+        content: '# 测试角色',
+        targetTemplate: 'general',
+        writeArenaHistory: false,
+        writeCurrentState: false,
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('x-backend-runtime')).toBe('hono-node');
+    expect(await response.json()).toEqual({
+      data: {
+        sublimatedData: {
+          templateId: '通用角色',
+          name: '测试角色「新生」',
+          content: '# 测试角色\n\n完成成长。',
+          signature: 'test-signature',
+        },
+        unchangedFields: [],
+        targetTemplate: 'general',
+      },
+      aiMeta: { aiModel: 'sublimation-test-model' },
+    });
+    expect(mocks.events).toEqual(['generate', 'activity', 'signature']);
+  });
+
   it.each([
     {
       name: 'Creator stream',
@@ -444,6 +565,29 @@ describe('常规生成 Hono production composition', () => {
           kind: 'canshou',
           questions: [{ id: 'q-1', question: '核心概念？' }],
         }],
+      },
+    },
+    {
+      name: 'Details stream',
+      path: '/api/generate-magical-girl-details-stream',
+      body: {
+        answers: ['守护同伴'],
+        questionnaires: [{
+          id: 'details-test',
+          title: 'Details 测试问卷',
+          kind: 'magical-girl',
+          questions: [{ id: 'q-1', question: '为何而战？' }],
+        }],
+      },
+    },
+    {
+      name: 'Sublimation stream',
+      path: '/api/generate-sublimation-stream',
+      body: {
+        templateId: '通用角色',
+        name: '测试角色',
+        content: '# 测试角色',
+        targetTemplate: 'general',
       },
     },
   ])('经 Hono dispatcher 保留 $name 原始 body/header 与 abort signal', async ({ path, body }) => {

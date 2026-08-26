@@ -20,6 +20,7 @@ const RUNTIME_SUBPATHS = [
   './generate-sublimation-runtime',
   './generate-sublimation-stream-runtime',
   './generate-game-card-runtime',
+  './generation-lifecycle',
 ];
 
 const ROOT_DIRECTORY = process.cwd();
@@ -34,6 +35,10 @@ const ADAPTER_SOURCE_FILES = [
   'apps/api/src/adapters/generate-canshou.ts',
   'apps/api/src/adapters/generate-canshou-stream.ts',
   'apps/api/src/adapters/generate-magical-girl.ts',
+  'apps/api/src/adapters/generate-magical-girl-details.ts',
+  'apps/api/src/adapters/generate-magical-girl-details-stream.ts',
+  'apps/api/src/adapters/generate-sublimation.ts',
+  'apps/api/src/adapters/generate-sublimation-stream.ts',
   'apps/api/src/adapters/generate-game-card.ts',
   'apps/api/src/adapters/creator/generate.ts',
   'apps/api/src/adapters/creator/generate-stream.ts',

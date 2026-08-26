@@ -1,4 +1,12 @@
 import { ObserverRegistry } from './observer-registry';
+import type {
+  HostedGenerationLifecycleObservation,
+  HostedGenerationOperation,
+  HostedGenerationOutcome,
+  HostedGenerationPlacement,
+} from './generation-lifecycle';
+
+export type { HostedGenerationLifecycleObservation } from './generation-lifecycle';
 
 export type AiUpstreamOutcome = 'success' | 'error' | 'aborted' | 'timeout';
 
@@ -41,6 +49,7 @@ export type D1RoundTripObservation = {
 export interface HostedRuntimeObserver {
   beginAiUpstream(): AiUpstreamAttemptObserver;
   observeD1RoundTrip(_observation: D1RoundTripObservation): void;
+  observeHostedGenerationLifecycle?(_observation: HostedGenerationLifecycleObservation): void;
 }
 
 const noopAttemptObserver: AiUpstreamAttemptObserver = Object.freeze({
@@ -51,6 +60,7 @@ const noopAttemptObserver: AiUpstreamAttemptObserver = Object.freeze({
 export const noopHostedRuntimeObserver: HostedRuntimeObserver = Object.freeze({
   beginAiUpstream: () => noopAttemptObserver,
   observeD1RoundTrip: () => undefined,
+  observeHostedGenerationLifecycle: () => undefined,
 });
 
 const observerRegistry = new ObserverRegistry<HostedRuntimeObserver>();
@@ -155,4 +165,49 @@ export const observeD1RoundTrip = (observation: D1RoundTripInput): void => {
     errorClass: normalizeD1ErrorClass(observation.errorClass, outcome),
   };
   safely(() => currentObserver().observeD1RoundTrip(normalized));
+};
+
+const normalizeHostedGenerationOperation = (
+  value: HostedGenerationOperation,
+): HostedGenerationOperation => {
+  switch (value) {
+    case 'generate-magical-girl-details':
+    case 'generate-magical-girl-details-stream':
+    case 'generate-sublimation':
+    case 'generate-sublimation-stream':
+      return value;
+    default:
+      return 'generate-sublimation';
+  }
+};
+
+const normalizeHostedGenerationPlacement = (
+  value: HostedGenerationPlacement,
+): HostedGenerationPlacement => value === 'hono-primary' ? value : 'next-dr';
+
+const normalizeHostedGenerationOutcome = (
+  value: HostedGenerationOutcome,
+): HostedGenerationOutcome => {
+  switch (value) {
+    case 'success':
+    case 'rejected':
+    case 'failure':
+    case 'cancelled':
+      return value;
+    default:
+      return 'failure';
+  }
+};
+
+export const observeHostedGenerationLifecycle = (
+  observation: HostedGenerationLifecycleObservation,
+): void => {
+  const normalized: HostedGenerationLifecycleObservation = {
+    event: 'hosted-generation',
+    operation: normalizeHostedGenerationOperation(observation.operation),
+    placement: normalizeHostedGenerationPlacement(observation.placement),
+    outcome: normalizeHostedGenerationOutcome(observation.outcome),
+    durationMs: normalizeNonNegativeFinite(observation.durationMs),
+  };
+  safely(() => currentObserver().observeHostedGenerationLifecycle?.(normalized));
 };

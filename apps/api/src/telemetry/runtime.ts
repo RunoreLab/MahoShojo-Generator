@@ -5,6 +5,7 @@ import type {
   AiUpstreamAttemptObserver,
   AiUpstreamFinishObservation,
   D1RoundTripObservation,
+  HostedGenerationLifecycleObservation,
   HostedRuntimeObserver,
 } from '@mahoshojo/hosted-runtime/telemetry';
 import type {
@@ -47,7 +48,7 @@ export interface RuntimeTelemetryService {
 
 export type HonoRuntimeTelemetrySnapshot = {
   event: 'hono.runtime.telemetry';
-  schemaVersion: 3;
+  schemaVersion: 4;
   service: 'mahoshojo-hono';
   capturedAt: string;
   runtime: {
@@ -102,6 +103,17 @@ export type HonoRuntimeTelemetrySnapshot = {
       };
     };
     ttfb: DurationSummary;
+    duration: DurationSummary;
+  };
+  hostedGeneration: {
+    byOperation: {
+      'generate-magical-girl-details': number;
+      'generate-magical-girl-details-stream': number;
+      'generate-sublimation': number;
+      'generate-sublimation-stream': number;
+    };
+    byPlacement: { honoPrimary: number; nextDr: number };
+    outcomes: { success: number; rejected: number; failure: number; cancelled: number };
     duration: DurationSummary;
   };
   d1: {
@@ -360,6 +372,24 @@ export class HonoRuntimeTelemetry implements
 
   private readonly aiDuration = new DurationAccumulator();
 
+  private readonly hostedGenerationByOperation = {
+    'generate-magical-girl-details': 0,
+    'generate-magical-girl-details-stream': 0,
+    'generate-sublimation': 0,
+    'generate-sublimation-stream': 0,
+  };
+
+  private readonly hostedGenerationByPlacement = { honoPrimary: 0, nextDr: 0 };
+
+  private readonly hostedGenerationOutcomes = {
+    success: 0,
+    rejected: 0,
+    failure: 0,
+    cancelled: 0,
+  };
+
+  private readonly hostedGenerationDuration = new DurationAccumulator();
+
   private d1RoundTrips = 0;
 
   private readonly d1Outcomes = { ok: 0, error: 0 };
@@ -595,6 +625,14 @@ export class HonoRuntimeTelemetry implements
     }
   }
 
+  observeHostedGenerationLifecycle(observation: HostedGenerationLifecycleObservation): void {
+    this.hostedGenerationByOperation[observation.operation] += 1;
+    const placement = observation.placement === 'hono-primary' ? 'honoPrimary' : 'nextDr';
+    this.hostedGenerationByPlacement[placement] += 1;
+    this.hostedGenerationOutcomes[observation.outcome] += 1;
+    this.hostedGenerationDuration.observe(observation.durationMs);
+  }
+
   observeRedisOperation(observation: RedisRuntimeOperationObservation): void {
     this.redisCommands += 1;
     switch (observation.outcome) {
@@ -826,7 +864,7 @@ export class HonoRuntimeTelemetry implements
 
     return {
       event: TELEMETRY_EVENT,
-      schemaVersion: 3,
+      schemaVersion: 4,
       service: 'mahoshojo-hono',
       capturedAt,
       runtime: {
@@ -883,6 +921,12 @@ export class HonoRuntimeTelemetry implements
         },
         ttfb: this.aiTtfb.read(),
         duration: this.aiDuration.read(),
+      },
+      hostedGeneration: {
+        byOperation: { ...this.hostedGenerationByOperation },
+        byPlacement: { ...this.hostedGenerationByPlacement },
+        outcomes: { ...this.hostedGenerationOutcomes },
+        duration: this.hostedGenerationDuration.read(),
       },
       d1: {
         roundTrips: this.d1RoundTrips,
@@ -1013,6 +1057,20 @@ export class HonoRuntimeTelemetry implements
     Object.assign(this.aiOutcomes, { success: 0, error: 0, aborted: 0, timeout: 0 });
     this.aiTtfb.reset();
     this.aiDuration.reset();
+    Object.assign(this.hostedGenerationByOperation, {
+      'generate-magical-girl-details': 0,
+      'generate-magical-girl-details-stream': 0,
+      'generate-sublimation': 0,
+      'generate-sublimation-stream': 0,
+    });
+    Object.assign(this.hostedGenerationByPlacement, { honoPrimary: 0, nextDr: 0 });
+    Object.assign(this.hostedGenerationOutcomes, {
+      success: 0,
+      rejected: 0,
+      failure: 0,
+      cancelled: 0,
+    });
+    this.hostedGenerationDuration.reset();
     this.d1RoundTrips = 0;
     Object.assign(this.d1Outcomes, { ok: 0, error: 0 });
     Object.assign(this.d1ErrorClasses, {
