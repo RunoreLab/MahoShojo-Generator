@@ -248,4 +248,80 @@ describe('Hosted DR machine contract', () => {
       rmSync(temporaryRoot, { recursive: true, force: true });
     }
   });
+
+  it('validator 只接受符合 schema 的 production evidence', () => {
+    const temporaryRoot = mkdtempSync(path.join(os.tmpdir(), 'hosted-dr-production-evidence-'));
+    try {
+      const manifest = readJson<HostedDrManifest>('config/hosted-dr-capabilities.json');
+      manifest.controlPlane.provisioning = 'production';
+      const manifestPath = path.join(temporaryRoot, 'manifest.json');
+      const evidencePath = path.join(temporaryRoot, 'hosted-dr-production-evidence.json');
+      writeFileSync(manifestPath, `${JSON.stringify(manifest)}\n`, 'utf8');
+      writeFileSync(evidencePath, `${JSON.stringify({
+        schemaVersion: 1,
+        environment: 'production',
+        controlPlane: { provisioning: 'production' },
+        evidence: [{ kind: 'cloudflare-deployment', reference: 'workflow:12345' }],
+        verifiedAt: '2026-08-26T12:00:00Z',
+      })}\n`, 'utf8');
+
+      const result = spawnSync(process.execPath, [
+        path.join(repositoryRoot, 'scripts/check-hosted-dr-contract.mjs'),
+        '--manifest',
+        manifestPath,
+        '--production-evidence',
+        evidencePath,
+      ], {
+        cwd: repositoryRoot,
+        encoding: 'utf8',
+      });
+
+      expect(result.status).toBe(0);
+      expect(`${result.stdout}\n${result.stderr}`).toContain('Hosted DR contract OK');
+    } finally {
+      rmSync(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    { label: '空文件', content: '' },
+    { label: '不可解析 JSON', content: '{not-json' },
+    { label: '空对象', content: '{}\n' },
+    {
+      label: '缺少 evidence entry',
+      content: `${JSON.stringify({
+        schemaVersion: 1,
+        environment: 'production',
+        controlPlane: { provisioning: 'production' },
+        evidence: [],
+        verifiedAt: '2026-08-26T12:00:00Z',
+      })}\n`,
+    },
+  ])('validator 拒绝$label的 production evidence', ({ content }) => {
+    const temporaryRoot = mkdtempSync(path.join(os.tmpdir(), 'hosted-dr-production-evidence-'));
+    try {
+      const manifest = readJson<HostedDrManifest>('config/hosted-dr-capabilities.json');
+      manifest.controlPlane.provisioning = 'production';
+      const manifestPath = path.join(temporaryRoot, 'manifest.json');
+      const evidencePath = path.join(temporaryRoot, 'hosted-dr-production-evidence.json');
+      writeFileSync(manifestPath, `${JSON.stringify(manifest)}\n`, 'utf8');
+      writeFileSync(evidencePath, content, 'utf8');
+
+      const result = spawnSync(process.execPath, [
+        path.join(repositoryRoot, 'scripts/check-hosted-dr-contract.mjs'),
+        '--manifest',
+        manifestPath,
+        '--production-evidence',
+        evidencePath,
+      ], {
+        cwd: repositoryRoot,
+        encoding: 'utf8',
+      });
+
+      expect(result.status).toBe(1);
+      expect(`${result.stdout}\n${result.stderr}`).toContain('production evidence schema');
+    } finally {
+      rmSync(temporaryRoot, { recursive: true, force: true });
+    }
+  });
 });

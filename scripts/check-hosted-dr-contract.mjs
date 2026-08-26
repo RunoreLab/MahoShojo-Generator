@@ -35,6 +35,35 @@ const argumentValue = (name, fallback) => {
   return path.isAbsolute(value) ? value : path.join(repositoryRoot, value);
 };
 const readInputJson = (filePath) => JSON.parse(readFileSync(filePath, 'utf8'));
+const readOptionalJson = (filePath) => {
+  try {
+    return readInputJson(filePath);
+  } catch {
+    return null;
+  }
+};
+const isRecord = (value) => (
+  typeof value === 'object' && value !== null && !Array.isArray(value)
+);
+const isNonEmptyString = (value) => typeof value === 'string' && value.trim().length > 0;
+const isValidTimestamp = (value) => (
+  isNonEmptyString(value) && !Number.isNaN(Date.parse(value))
+);
+const isValidHostedDrProductionEvidence = (value) => (
+  isRecord(value)
+  && value.schemaVersion === 1
+  && value.environment === 'production'
+  && isRecord(value.controlPlane)
+  && value.controlPlane.provisioning === 'production'
+  && Array.isArray(value.evidence)
+  && value.evidence.length > 0
+  && value.evidence.every((entry) => (
+    isRecord(entry)
+    && isNonEmptyString(entry.kind)
+    && isNonEmptyString(entry.reference)
+  ))
+  && isValidTimestamp(value.verifiedAt)
+);
 
 const inventory = readInputJson(argumentValue(
   '--inventory',
@@ -44,6 +73,10 @@ const manifest = readInputJson(argumentValue(
   '--manifest',
   path.join(repositoryRoot, 'config/hosted-dr-capabilities.json'),
 ));
+const productionEvidencePath = argumentValue(
+  '--production-evidence',
+  path.join(repositoryRoot, 'config/hosted-dr-production-evidence.json'),
+);
 
 if (manifest.schemaVersion !== 1) {
   fail('schemaVersion 必须为 1');
@@ -77,9 +110,19 @@ if (!['not-provisioned', 'preview', 'production'].includes(controlPlane.provisio
 }
 if (
   controlPlane.provisioning === 'production'
-  && !existsSync(path.join(repositoryRoot, 'config/hosted-dr-production-evidence.json'))
+  && !existsSync(productionEvidencePath)
 ) {
   fail('production provisioning 缺少显式生产证据文件');
+}
+if (
+  controlPlane.provisioning === 'production'
+  && existsSync(productionEvidencePath)
+  && !isValidHostedDrProductionEvidence(readOptionalJson(productionEvidencePath))
+) {
+  fail(
+    'production evidence schema 必须包含 schemaVersion=1、environment=production、'
+    + 'controlPlane.provisioning=production、非空 evidence entry 和合法 verifiedAt',
+  );
 }
 
 const origins = [
