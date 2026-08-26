@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { readDurablePvpGenerationId } from '@/lib/pvp/generation-authority';
+import {
+  assertCompletedPvpGenerationSseDone,
+  readDurablePvpGenerationId,
+  readDurablePvpTerminalGenerationId,
+} from '@/lib/pvp/generation-authority';
 import {
   claimPvpResolutionOwnership,
   handlePvpGenerationFailure,
@@ -44,6 +48,38 @@ describe('PVP generation response identity', () => {
     expect(readDurablePvpGenerationId(durableRejection, {
       generationId: 'durable-generation-1',
     })).toBe('durable-generation-1');
+
+    expect(readDurablePvpTerminalGenerationId(new Response('event: error', {
+      status: 200,
+      headers: {
+        'X-Mahoshojo-Generation-Id': 'durable-fallback-1',
+        'X-Mahoshojo-Generation-Terminal-Status': 'failed',
+      },
+    }), null)).toBe('durable-fallback-1');
+
+    expect(readDurablePvpTerminalGenerationId(new Response('event: done', {
+      status: 200,
+      headers: {
+        'X-Mahoshojo-Generation-Id': 'durable-completed-1',
+        'X-Mahoshojo-Generation-Terminal-Status': 'completed',
+      },
+    }), null)).toBe('durable-completed-1');
+  });
+
+  it('accepts only a completed successful SSE done terminal', () => {
+    expect(() => assertCompletedPvpGenerationSseDone({
+      ok: true,
+      status: 'completed',
+    })).not.toThrow();
+    expect(() => assertCompletedPvpGenerationSseDone({
+      ok: false,
+      status: 'cancelled',
+    })).toThrow('上游流式生成未成功完成：cancelled');
+    expect(() => assertCompletedPvpGenerationSseDone({
+      ok: false,
+      status: 'producer_lost',
+      error: '生成生产者已丢失',
+    })).toThrow('生成生产者已丢失');
   });
 
   it('preserves sensitive/ordinary control data and persists only marked durable failures', async () => {

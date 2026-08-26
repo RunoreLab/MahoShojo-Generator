@@ -37,7 +37,9 @@ import { extractWinnerLineFromMarkdown, parsePvpWinnerFromText } from '@/lib/pvp
 import type { AIReasoningSource, AIReasoningStatus } from '@/types/ai-reasoning';
 import { getRequestUrl } from '@/lib/request-url';
 import {
+  assertCompletedPvpGenerationSseDone,
   createPvpArenaGenerationAuthority,
+  readDurablePvpTerminalGenerationId,
 } from '@/lib/pvp/generation-authority';
 import {
   claimPvpResolutionOwnership,
@@ -487,15 +489,22 @@ async function resolveStreamHandler(req: Request): Promise<Response> {
     signal: upstreamAbortController.signal,
   });
 
+  if (upstreamRes.ok) {
+    const terminalGenerationId = readDurablePvpTerminalGenerationId(upstreamRes, null);
+    if (terminalGenerationId) {
+      await updatePvpRound(roundId, { battleGenerationId: terminalGenerationId });
+    }
+  }
+
   if (!upstreamRes.ok) {
     clearUpstreamTimeout();
     const raw = await upstreamRes.text();
     const failure = await handlePvpGenerationFailure({
       response: upstreamRes,
       raw,
-      persistGenerationId: (generationId) => updatePvpRound(roundId, {
-        battleGenerationId: generationId,
-      }),
+      persistGenerationId: async (generationId) => {
+        await updatePvpRound(roundId, { battleGenerationId: generationId });
+      },
     });
 
     if (failure.shouldRedirect) {
@@ -801,6 +810,14 @@ async function resolveStreamHandler(req: Request): Promise<Response> {
     }
 
     if (parsed.event === 'done') {
+      try {
+        assertCompletedPvpGenerationSseDone(payload);
+      } catch (error) {
+        upstreamStreamErrorMessage = error instanceof Error
+          ? error.message
+          : '上游流式生成未成功完成';
+        throw error;
+      }
       sawSseDone = true;
     }
   };

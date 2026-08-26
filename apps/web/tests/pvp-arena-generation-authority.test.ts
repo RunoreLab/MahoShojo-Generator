@@ -24,7 +24,7 @@ describe('PVP Arena generation authority', () => {
       roundId: 'round-1',
       attempt: 0,
       internalGuidance: '服务器裁判规则',
-      payload: { combatants: ['A', 'B'], mode: 'classic' },
+      payload: { combatants: ['A', 'B'], mode: 'classic', forceStreamMeta: true },
     });
     const second = await createPvpArenaGenerationAuthority({
       roomId: 'room-1',
@@ -32,7 +32,7 @@ describe('PVP Arena generation authority', () => {
       roundId: 'round-1',
       attempt: 0,
       internalGuidance: '服务器裁判规则',
-      payload: { combatants: ['A', 'B'], mode: 'classic' },
+      payload: { combatants: ['A', 'B'], mode: 'classic', forceStreamMeta: true },
     });
     const retry = await createPvpArenaGenerationAuthority({
       roomId: 'room-1',
@@ -40,7 +40,7 @@ describe('PVP Arena generation authority', () => {
       roundId: 'round-1',
       attempt: 1,
       internalGuidance: '服务器裁判规则',
-      payload: { combatants: ['A', 'B'], mode: 'classic' },
+      payload: { combatants: ['A', 'B'], mode: 'classic', forceStreamMeta: true },
     });
 
     expect(first.generationRequestId).toBe(second.generationRequestId);
@@ -55,6 +55,7 @@ describe('PVP Arena generation authority', () => {
       payload: {
         combatants: ['A', 'B'],
         mode: 'classic',
+        forceStreamMeta: true,
         internalGuidance: '服务器裁判规则',
         pvpContext: { roomId: 'room-1', matchId: 'match-1', roundId: 'round-1' },
       },

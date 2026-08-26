@@ -6,6 +6,13 @@ import type {
 } from '@mahoshojo/hosted-api/arena-generation/service';
 import { createArenaCompanionRouteService } from '../src/arena-companion';
 import { createArenaCompanionService } from '../src/arena-companion/service';
+import { createArenaGenerationActorResolver } from '../src/arena-generation/actor';
+import {
+  ARENA_PVP_GENERATION_SIGNATURE_HEADER,
+  ARENA_PVP_GENERATION_SIGNATURE_PURPOSE,
+  createArenaPvpGenerationAuthority,
+} from '../src/arena-generation/internal-authority';
+import { createEnvSignatureService } from '../src/node-runtime/env-signature';
 
 const response = (): Promise<Response> => Promise.resolve(new Response(null));
 
@@ -47,6 +54,101 @@ const subscription = (events: GenerationStreamEvent[]): ArenaGenerationSubscript
 });
 
 describe('Arena companion service', () => {
+  it('preserves the strict PVP payload signature through non-stream request rebuild', async () => {
+    const env = { SIGNATURE_SECRET_KEY: 'test-only-companion-pvp-purpose-secret' };
+    const signatures = createEnvSignatureService({ env });
+    const pvpSignatures = createEnvSignatureService({
+      env,
+      purpose: ARENA_PVP_GENERATION_SIGNATURE_PURPOSE,
+    });
+    const pvpAuthority = createArenaPvpGenerationAuthority(pvpSignatures);
+    const generationRequestId = 'pvp_request_companion';
+    const payload = {
+      combatants: [{ name: 'A' }, { name: 'B' }],
+      mode: 'classic',
+      forceStreamMeta: true,
+      internalGuidance: 'server-owned PVP rule',
+      pvpContext: { roomId: 'room-1', matchId: 'match-1', roundId: 'round-1' },
+    };
+    const signature = await pvpAuthority.sign({ generationRequestId, payload });
+    const resolveActor = createArenaGenerationActorResolver({
+      env: { ...env, HONO_AUTH_MODE: 'bearer' },
+      signatures,
+      pvpSignatures,
+      getD1Client: () => ({
+        prepare: vi.fn(() => ({
+          bind: vi.fn().mockReturnThis(),
+          all: vi.fn(async () => ({ success: true, results: [{ id: 42 }], meta: {} })),
+          run: vi.fn(async () => ({ success: true, results: [], meta: {} })),
+        })),
+      }),
+    });
+    const createSubscription = vi.fn(async (request: Request) => {
+      await expect(resolveActor(request)).resolves.toEqual({ actorKey: 'pvp-room:room-1' });
+      return Response.json({ code: 'TEST_STOP' }, { status: 409 });
+    });
+    const service = createArenaCompanionService({
+      generationService: generationService(createSubscription),
+      createGenerationRequestId: () => generationRequestId,
+      projectUpdatedCombatants: vi.fn(async () => []),
+    });
+
+    const result = await service.generate(new Request(
+      'https://example.test/api/generate-battle-story',
+      {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer caller-token',
+          'Content-Type': 'application/json',
+          [ARENA_PVP_GENERATION_SIGNATURE_HEADER]: signature!,
+        },
+        body: JSON.stringify({ generationRequestId, ...payload }),
+      },
+    ));
+
+    expect(result.status).toBe(409);
+    expect(createSubscription).toHaveBeenCalledTimes(1);
+  });
+
+  it('preserves the durable terminal marker when projecting a failed fallback', async () => {
+    const failedFallback: ArenaGenerationSubscription = {
+      generationId: 'arena_generation_failed',
+      generationRequestId: 'request-failed-fallback',
+      headers: {
+        'X-Mahoshojo-Generation-Id': 'arena_generation_failed',
+        'X-Mahoshojo-Generation-Request-Id': 'request-failed-fallback',
+        'X-Mahoshojo-Generation-Fallback': 'terminal',
+        'x-mahoshojo-generation-terminal-status': 'failed',
+      },
+      events: streamOf({
+        id: '1-0',
+        type: 'error',
+        data: { ok: false, status: 'failed', code: 'PROVIDER_FAILED' },
+      }),
+    };
+    const service = createArenaCompanionService({
+      generationService: generationService(async () => failedFallback),
+      projectUpdatedCombatants: vi.fn(async () => []),
+    });
+
+    const response = await service.generate(new Request(
+      'https://example.test/api/generate-battle-story',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          generationRequestId: 'request-failed-fallback',
+          combatants: [{ name: 'A' }, { name: 'B' }],
+        }),
+      },
+    ));
+
+    expect(response.status).toBe(502);
+    expect(response.headers.get('x-mahoshojo-generation-id'))
+      .toBe('arena_generation_failed');
+    expect(response.headers.get('x-mahoshojo-generation-terminal-status')).toBe('failed');
+  });
+
   it('emits trusted route/placement telemetry for rejected companion calls', async () => {
     const observeArenaGeneration = vi.fn();
     const service = createArenaCompanionRouteService({

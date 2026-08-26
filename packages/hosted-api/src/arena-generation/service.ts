@@ -1315,6 +1315,7 @@ export const createArenaGenerationService = (
         'X-Mahoshojo-Generation-Id': terminal.generationId,
         'X-Mahoshojo-Generation-Request-Id': terminal.generationRequestId,
         'X-Mahoshojo-Generation-Fallback': 'terminal',
+        [ARENA_GENERATION_TERMINAL_STATUS_HEADER]: terminal.status,
       }),
       events: stream,
     });

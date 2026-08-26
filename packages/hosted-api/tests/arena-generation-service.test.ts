@@ -1315,6 +1315,35 @@ describe('Arena generation lifecycle service', () => {
     expect(execute).not.toHaveBeenCalled();
   });
 
+  test('marks failed durable terminal fallback identities explicitly', async () => {
+    const store = new MemoryReplayStore();
+    store.reserveUnavailable = true;
+    const service = createService(store, {
+      execute: vi.fn(async () => ({ status: 'completed' as const })),
+    }, {
+      terminalStore: {
+        readOwnedTerminal: vi.fn(async () => ({
+          generationId: 'generation-1',
+          generationRequestId: 'request-1',
+          status: 'failed' as const,
+          updatedAt: '2026-08-25T03:59:00.000Z',
+          resultRef: null,
+          markdown: '',
+          reasoning: '',
+          payloadHash: 'hash:{"value":"same"}',
+          contentAvailable: true,
+        })),
+      },
+    });
+
+    const response = await service.create(createRequest('request-1'));
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('x-mahoshojo-generation-fallback')).toBe('terminal');
+    expect(response.headers.get('x-mahoshojo-generation-terminal-status')).toBe('failed');
+    expect(await response.text()).toContain('event: error');
+  });
+
   test('seeded runtime accepts a matching legacy durable hash without rematerializing metadata', async () => {
     const store = new MemoryReplayStore();
     store.reserveUnavailable = true;

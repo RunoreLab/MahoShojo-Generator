@@ -398,6 +398,7 @@ async function resolveHandler(req: Request): Promise<Response> {
         ...(rules.language?.trim() ? { language: rules.language.trim() } : {}),
         ...(rules.storyLength ? { storyLength: rules.storyLength } : {}),
         ...(rules.userGuidance?.trim() ? { userGuidance: rules.userGuidance.trim() } : {}),
+        forceStreamMeta: true,
         readArenaHistory: rules.readArenaHistory,
         ...(rules.readArenaHistory
           ? { arenaHistoryReadLimit: rules.isArenaHistoryUnlimited ? null : rules.readArenaHistoryLimit }
@@ -436,9 +437,9 @@ async function resolveHandler(req: Request): Promise<Response> {
         const failure = await handlePvpGenerationFailure({
           response: res,
           raw,
-          persistGenerationId: (generationId) => updatePvpRound(roundId, {
-            battleGenerationId: generationId,
-          }),
+        persistGenerationId: async (generationId) => {
+          await updatePvpRound(roundId, { battleGenerationId: generationId });
+        },
         });
 
         // PVP 特殊处理：敏感词触发逮捕时，不跳转 /arrested，而是将战报改为“逮捕令”并判定平局。

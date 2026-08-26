@@ -16,6 +16,12 @@ const pvpGenerationAuthority = createArenaPvpGenerationAuthority(
 );
 
 const GENERATION_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/u;
+const PVP_GENERATION_TERMINAL_STATUSES = new Set([
+  'completed',
+  'failed',
+  'cancelled',
+  'producer_lost',
+]);
 
 const normalizeGenerationId = (value: unknown): string | null => {
   if (typeof value !== 'string') return null;
@@ -23,16 +29,40 @@ const normalizeGenerationId = (value: unknown): string | null => {
   return GENERATION_ID_PATTERN.test(normalized) ? normalized : null;
 };
 
+export const readDurablePvpTerminalGenerationId = (
+  response: Pick<Response, 'headers'>,
+  body: unknown,
+): string | null => {
+  const status = response.headers
+    .get(ARENA_GENERATION_TERMINAL_STATUS_HEADER)
+    ?.trim() ?? '';
+  if (!PVP_GENERATION_TERMINAL_STATUSES.has(status)) return null;
+  const headerGenerationId = normalizeGenerationId(
+    response.headers.get('X-Mahoshojo-Generation-Id'),
+  );
+  if (headerGenerationId) return headerGenerationId;
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return null;
+  return normalizeGenerationId((body as { generationId?: unknown }).generationId);
+};
+
+export const assertCompletedPvpGenerationSseDone = (payload: unknown): void => {
+  const value = payload && typeof payload === 'object' && !Array.isArray(payload)
+    ? payload as { ok?: unknown; status?: unknown; error?: unknown }
+    : null;
+  if (value?.ok === true && value.status === 'completed') return;
+  const message = typeof value?.error === 'string' && value.error.trim()
+    ? value.error.trim()
+    : typeof value?.status === 'string' && value.status.trim()
+      ? `上游流式生成未成功完成：${value.status.trim()}`
+      : '上游流式生成未返回成功终态';
+  throw new Error(message);
+};
+
 export const readDurablePvpGenerationId = (
   response: Pick<Response, 'headers' | 'ok'>,
   body: unknown,
 ): string | null => {
-  if (
-    !response.ok
-    && response.headers.get(ARENA_GENERATION_TERMINAL_STATUS_HEADER)?.trim() !== 'failed'
-  ) {
-    return null;
-  }
+  if (!response.ok) return readDurablePvpTerminalGenerationId(response, body);
   const headerGenerationId = normalizeGenerationId(
     response.headers.get('X-Mahoshojo-Generation-Id'),
   );
