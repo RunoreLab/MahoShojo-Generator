@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - feature/v0.2.0_Battle_Growth_MahoShojo
-      - preview
   workflow_dispatch:
 
 concurrency:
@@ -19,13 +18,7 @@ env:
   VPS_USER: ${{ vars.VPS_USER }}
 
 jobs:
-  preview:
-    if: github.ref == 'refs/heads/preview'
-    uses: ./.github/workflows/preview-deploy.yml
-    secrets: inherit
-
   build:
-    if: github.ref == 'refs/heads/feature/v0.2.0_Battle_Growth_MahoShojo'
     runs-on: ubuntu-latest
     services:
       redis:
