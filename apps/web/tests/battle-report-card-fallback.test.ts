@@ -251,4 +251,67 @@ winner: 假赢家
     expect(result.report.officialReport.winner).toBe('已知赢家');
     expect(result.liveBody).toBeUndefined();
   });
+
+  it('hydrates English companion headings with the same semantics as the immediate projector', async () => {
+    const markdown = [
+      '# Nightfall Clash',
+      '',
+      'The battle ends before dawn.',
+      '',
+      '## Reporter Analysis',
+      'The victory exposes a fragile alliance.',
+      '',
+      '## Winner',
+      'Alice',
+      '',
+      '## Final Result',
+      'The city returns to calm.',
+    ].join('\n');
+
+    const result = await hydrateBattleReportCardFromGenerationRecord({
+      generationMode: 'non-stream',
+      endpoint: 'api/generate-battle-story',
+      mode: 'classic',
+      scenarioTitle: null,
+      headline: null,
+      winner: null,
+      outputPreview: markdown,
+      aiModel: null,
+      promptTokens: null,
+      completionTokens: null,
+      totalTokens: null,
+      cachedTokens: null,
+      reasoningTokens: null,
+    });
+
+    expect(result.report.article).toEqual({
+      body: 'The battle ends before dawn.',
+      analysis: 'The victory exposes a fragile alliance.',
+    });
+    expect(result.report.officialReport).toEqual({
+      winner: 'Alice',
+      conclusion: 'The city returns to calm.',
+    });
+  });
+
+  it('does not mistake bracket-leading Markdown for legacy JSON', async () => {
+    const result = await hydrateBattleReportCardFromGenerationRecord({
+      generationMode: 'non-stream',
+      endpoint: 'api/custom-battle-route',
+      mode: 'classic',
+      scenarioTitle: null,
+      headline: '括号开场',
+      winner: null,
+      outputPreview: '{传闻并非事实}\n\n正文仍是 Markdown。\n\n## 胜利者\n角色丙',
+      aiModel: null,
+      promptTokens: null,
+      completionTokens: null,
+      totalTokens: null,
+      cachedTokens: null,
+      reasoningTokens: null,
+    });
+
+    expect(result.report.article.body).toContain('{传闻并非事实}');
+    expect(result.report.officialReport.winner).toBe('角色丙');
+  });
 });

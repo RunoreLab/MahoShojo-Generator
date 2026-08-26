@@ -94,9 +94,12 @@ const extractBodyFromMarkdown = (markdown: string): { body: string; analysis: st
   const normalized = normalizeText(markdown).trim();
   if (!normalized) return { body: '', analysis: '' };
 
-  const newsBody = extractSectionContent(normalized, /^##\s*(?:新闻正文|正文)\s*$/);
+  const newsBody = extractSectionContent(normalized, /^##\s*(?:新闻正文|正文|News Body|Body)\s*$/iu);
   const reporterAnalysis = stripBlockquoteMarkers(
-    extractSectionContent(normalized, /^##\s*(?:记者点评|点评|记者评论)\s*$/) ?? ''
+    extractSectionContent(
+      normalized,
+      /^##\s*(?:记者点评|点评|记者评论|Reporter Analysis|Commentary)\s*$/iu,
+    ) ?? ''
   );
   if (newsBody) return { body: newsBody, analysis: reporterAnalysis };
 
@@ -109,12 +112,12 @@ const extractBodyFromMarkdown = (markdown: string): { body: string; analysis: st
   while (cursor < lines.length && !lines[cursor]?.trim()) cursor += 1;
 
   const stopHeadings = [
-    /^##\s*(?:胜利者|获胜者|优胜者)\s*$/,
-    /^##\s*(?:最终结果|结论|结果)\s*$/,
-    /^##\s*(?:官方通报)\s*$/,
-    /^##\s*(?:记者点评|点评|记者评论)\s*$/,
-    /^##\s*(?:故事引导)\s*$/,
-    /^##\s*(?:随机判定记录)\s*$/,
+    /^##\s*(?:胜利者|获胜者|优胜者|Winner)\s*$/iu,
+    /^##\s*(?:最终结果|结论|结果|Final Result|Conclusion|Result)\s*$/iu,
+    /^##\s*(?:官方通报|Official Report)\s*$/iu,
+    /^##\s*(?:记者点评|点评|记者评论|Reporter Analysis|Commentary)\s*$/iu,
+    /^##\s*(?:故事引导|Story Guidance)\s*$/iu,
+    /^##\s*(?:随机判定记录|Adjudication Record)\s*$/iu,
   ];
 
   let stop = lines.length;
@@ -132,7 +135,14 @@ const extractBodyFromMarkdown = (markdown: string): { body: string; analysis: st
 };
 
 const extractConclusionFromMarkdown = (markdown: string): string => (
-  extractSectionContent(markdown, /^##\s*(?:最终结果|结论|结果)\s*$/) ?? ''
+  extractSectionContent(
+    markdown,
+    /^##\s*(?:最终结果|结论|结果|Final Result|Conclusion|Result)\s*$/iu,
+  ) ?? ''
+);
+
+const extractWinnerFromMarkdown = (markdown: string): string => (
+  extractSectionContent(markdown, /^##\s*(?:胜利者|获胜者|优胜者|Winner)\s*$/iu) ?? ''
 );
 
 const safeMode = (mode: unknown): NewsReport['mode'] | undefined => {
@@ -176,17 +186,23 @@ export async function hydrateBattleReportCardFromGenerationRecord(input: {
     reasoning_tokens: input.reasoningTokens,
   });
 
+  const parsedPreview = parseJsonSafely(rawPreview);
+  const parsedReportCandidate = (() => {
+    if (isNewsReportLike(parsedPreview)) return parsedPreview;
+    if (isRecord(parsedPreview) && isNewsReportLike(parsedPreview.report)) {
+      return parsedPreview.report;
+    }
+    return null;
+  })();
+  const trimmedPreview = rawPreview.trim();
+  const isTruncatedLegacyJson = looksLikeJsonText(rawPreview)
+    && (trimmedPreview === '{' || trimmedPreview === '[' || trimmedPreview.includes('……'));
   const shouldUseLegacyJsonFallback = generationMode !== 'stream'
-    && (!rawPreview.trim() || looksLikeJsonText(rawPreview));
+    && (!trimmedPreview || parsedReportCandidate !== null || isTruncatedLegacyJson);
 
   // 1) 非流式旧记录按实际内容识别 JSON（包括只剩起始括号的截断 preview）。
   if (shouldUseLegacyJsonFallback) {
-    const parsed = parseJsonSafely(rawPreview);
-    const reportCandidate = (() => {
-      if (isNewsReportLike(parsed)) return parsed;
-      if (isRecord(parsed) && isNewsReportLike((parsed as any).report)) return (parsed as any).report as any;
-      return null;
-    })();
+    const reportCandidate = parsedReportCandidate;
 
     const headline =
       (typeof input.headline === 'string' && input.headline.trim()) ||
@@ -251,6 +267,7 @@ export async function hydrateBattleReportCardFromGenerationRecord(input: {
   const winner =
     streamSummary.winner ||
     (typeof input.winner === 'string' && input.winner.trim()) ||
+    extractWinnerFromMarkdown(stripped) ||
     '未知';
 
   const { body, analysis } = extractBodyFromMarkdown(stripped);
