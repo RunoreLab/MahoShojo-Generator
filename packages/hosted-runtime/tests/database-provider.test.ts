@@ -85,12 +85,12 @@ describe('Cloudflare D1 binding DatabaseProvider', () => {
               all: async (...args: unknown[]) => {
                 queryCalls.push({ kind: 'all', args });
                 bookmark = 'bookmark-after-query';
-                return { success: true, results: [{ ok: 1 }], meta: { rows_read: 1 } };
+                return { success: true, results: [{ ok: 1 }], meta: { duration: 1 } };
               },
               run: async (...args: unknown[]) => {
                 queryCalls.push({ kind: 'run', args });
                 bookmark = 'bookmark-after-query';
-                return { success: true, results: [], meta: { rows_written: 1 } };
+                return { success: true, results: [], meta: { duration: 2 } };
               },
             };
             return runtimeStatement;
@@ -126,7 +126,7 @@ describe('Cloudflare D1 binding DatabaseProvider', () => {
     expect(queryResult).toEqual({
       success: true,
       results: [{ ok: 1 }],
-      meta: { rows_read: 1 },
+      meta: { duration: 1 },
     });
     expect(session?.getBookmark()).toBe('bookmark-after-query');
   });
