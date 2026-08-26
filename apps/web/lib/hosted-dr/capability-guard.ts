@@ -147,7 +147,7 @@ export const withNextDrCapability = <Args extends unknown[]>(
     .map((origin) => origin.trim())
     .filter(Boolean);
   const requestOrigin = request.headers.get('Origin');
-  if (requestOrigin && !hasValidHostedApiProductionCorsOrigins(allowedOrigins)) {
+  if (!hasValidHostedApiProductionCorsOrigins(allowedOrigins)) {
     logUnavailable({ capabilityId, category: 'cors' });
     return unavailableResponse();
   }

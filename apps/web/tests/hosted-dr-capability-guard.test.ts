@@ -206,6 +206,33 @@ describe('Next production DR capability guard', () => {
     }
   });
 
+  it('production 缺失或非法 CORS 配置在无 Origin 的 GET/HEAD/POST 上也 fail closed', async () => {
+    for (const configuredOrigins of [undefined, '*', 'http://localhost:3000']) {
+      for (const method of ['GET', 'HEAD', 'POST']) {
+        const handler = vi.fn(async () => new Response('should-not-run'));
+        const guarded = withNextDrCapability('generate-free', handler, {
+          ...productionOptions,
+          environment: configuredOrigins === undefined
+            ? {}
+            : { HONO_CORS_ORIGINS: configuredOrigins },
+        });
+        const response = await guarded(new Request(
+          'https://api.example.test/api/generate-free',
+          { method },
+        ));
+
+        const label = `${method}:${configuredOrigins ?? '<missing>'}`;
+        expect(response.status, label).toBe(503);
+        expect(handler, label).not.toHaveBeenCalled();
+        expect(productionOptions.logUnavailable, label).toHaveBeenCalledWith({
+          capabilityId: 'generate-free',
+          category: 'cors',
+        });
+        productionOptions.logUnavailable.mockClear();
+      }
+    }
+  });
+
   it('Arena terminal safe-read 缺 R2 logical binding 配置时不进入 handler', async () => {
     const handler = vi.fn(async () => new Response('should-not-run'));
     const guarded = withNextDrCapability(
