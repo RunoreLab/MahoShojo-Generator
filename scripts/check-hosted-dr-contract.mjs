@@ -17,6 +17,18 @@ const allowedReplayPolicies = new Set([
   'operation-id-required',
   'never-after-dispatch',
 ]);
+const requiredDrillCaseIds = [
+  'G25E2-HONO-UNAVAILABLE',
+  'G25E2-REDIS-UNAVAILABLE',
+  'G25E2-REDIS-EMPTY',
+  'G25E2-GATEWAY-UNAVAILABLE',
+  'G25E2-MIDFLIGHT-DISCONNECT',
+  'G25E2-D1-UNAVAILABLE',
+  'G25E2-DR-SECRET-MISSING',
+  'G25E2-VERSION-SKEW',
+  'G25E2-CUTBACK',
+];
+const allowedDrillStatuses = new Set(['verified', 'deferred', 'blocked', 'not-applicable']);
 
 const fail = (message) => failures.push(message);
 const readJson = (relativePath) => JSON.parse(readFileSync(
@@ -73,6 +85,10 @@ const manifest = readInputJson(argumentValue(
   '--manifest',
   path.join(repositoryRoot, 'config/hosted-dr-capabilities.json'),
 ));
+const drills = readInputJson(argumentValue(
+  '--drills',
+  path.join(repositoryRoot, 'config/hosted-dr-drills.json'),
+));
 const productionEvidencePath = argumentValue(
   '--production-evidence',
   path.join(repositoryRoot, 'config/hosted-dr-production-evidence.json'),
@@ -83,6 +99,64 @@ if (manifest.schemaVersion !== 1) {
 }
 if (!/^g25e1-v\d+$/u.test(manifest.contractVersion ?? '')) {
   fail('contractVersion 必须使用 g25e1-vN');
+}
+if (
+  drills.schemaVersion !== 1
+  || drills.drillVersion !== 'g25e2-v1'
+  || drills.environment !== 'local-fault-injection'
+  || drills.controlPlaneProvisioning !== 'not-provisioned'
+) {
+  fail('G25E-2 drill manifest 必须声明 schemaVersion=1、g25e2-v1、local-fault-injection 和 not-provisioned');
+}
+if (drills.productionStatus !== 'deferred') {
+  fail('G25E-2 production drill 必须保持 deferred，不能伪报生产 PASS');
+}
+if (
+  drills.versionGate?.maxContractVersionSkew !== 1
+  || JSON.stringify(drills.versionGate?.stages) !== JSON.stringify(['expand', 'rollout', 'contract'])
+) {
+  fail('G25E-2 versionGate 必须声明一个版本偏差窗口和 expand/rollout/contract 阶段');
+}
+const drillCases = Array.isArray(drills.cases) ? drills.cases : [];
+const drillCaseIds = drillCases.map(({ id }) => id);
+if (JSON.stringify(drillCaseIds) !== JSON.stringify(requiredDrillCaseIds)) {
+  fail('G25E-2 drill cases 必须按完整 fault matrix 顺序覆盖且不得漏项');
+}
+if (!unique(drillCaseIds)) {
+  fail('G25E-2 drill case id 不得重复');
+}
+for (const drillCase of drillCases) {
+  const label = drillCase.id ?? '<missing-drill-id>';
+  if (!allowedDrillStatuses.has(drillCase.status)) {
+    fail(`${label}: drill status 非法`);
+  }
+  if (!Array.isArray(drillCase.acceptance) || drillCase.acceptance.length === 0) {
+    fail(`${label}: acceptance 不得为空`);
+  }
+  if (!Array.isArray(drillCase.scope) || drillCase.scope.length === 0) {
+    fail(`${label}: scope 不得为空`);
+  }
+  if (!Array.isArray(drillCase.evidenceTests) || drillCase.evidenceTests.length === 0) {
+    fail(`${label}: evidenceTests 不得为空`);
+  }
+  for (const evidenceTest of drillCase.evidenceTests ?? []) {
+    if (!isNonEmptyString(evidenceTest) || !existsSync(path.join(repositoryRoot, evidenceTest))) {
+      fail(`${label}: evidence test 不存在 ${evidenceTest}`);
+    }
+  }
+  if (!Array.isArray(drillCase.recoverySteps) || drillCase.recoverySteps.length === 0) {
+    fail(`${label}: recoverySteps 不得为空`);
+  }
+}
+if (
+  drills.productionDrill?.status !== 'deferred'
+  || !Array.isArray(drills.productionDrill?.requiredAuthorization)
+  || drills.productionDrill.requiredAuthorization.length === 0
+  || !isNonEmptyString(drills.productionDrill?.runbook)
+) {
+  fail('G25E-2 productionDrill 必须包含 deferred、授权前置条件和 runbook');
+} else if (!existsSync(path.join(repositoryRoot, drills.productionDrill.runbook))) {
+  fail(`G25E-2 productionDrill runbook 不存在 ${drills.productionDrill.runbook}`);
 }
 const hostedDrServiceSource = readFileSync(
   path.join(repositoryRoot, 'packages/hosted-api/src/hosted-dr.ts'),

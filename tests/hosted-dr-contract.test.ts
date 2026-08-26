@@ -42,6 +42,21 @@ type HostedDrManifest = {
   }>;
 };
 
+type HostedDrDrillManifest = {
+  schemaVersion: number;
+  drillVersion: string;
+  environment: string;
+  controlPlaneProvisioning: string;
+  productionStatus: string;
+  cases: Array<{
+    id: string;
+    acceptance: string[];
+    status: string;
+    scope: string[];
+    evidenceTests: string[];
+  }>;
+};
+
 const repositoryRoot = process.cwd();
 const readJson = <T>(relativePath: string): T => JSON.parse(readFileSync(
   path.join(repositoryRoot, relativePath),
@@ -139,12 +154,46 @@ describe('Hosted DR machine contract', () => {
     }
   });
 
+  it('G25E-2 fault matrix 覆盖完整 case 且生产演练保持 deferred', () => {
+    const drill = readJson<HostedDrDrillManifest>('config/hosted-dr-drills.json');
+    const requiredCaseIds = [
+      'G25E2-HONO-UNAVAILABLE',
+      'G25E2-REDIS-UNAVAILABLE',
+      'G25E2-REDIS-EMPTY',
+      'G25E2-GATEWAY-UNAVAILABLE',
+      'G25E2-MIDFLIGHT-DISCONNECT',
+      'G25E2-D1-UNAVAILABLE',
+      'G25E2-DR-SECRET-MISSING',
+      'G25E2-VERSION-SKEW',
+      'G25E2-CUTBACK',
+    ];
+
+    expect(drill.schemaVersion).toBe(1);
+    expect(drill.drillVersion).toBe('g25e2-v1');
+    expect(drill.environment).toBe('local-fault-injection');
+    expect(drill.controlPlaneProvisioning).toBe('not-provisioned');
+    expect(drill.productionStatus).toBe('deferred');
+    expect(drill.cases.map(({ id }) => id)).toEqual(requiredCaseIds);
+    for (const entry of drill.cases) {
+      expect(entry.acceptance.length, entry.id).toBeGreaterThan(0);
+      expect(entry.scope.length, entry.id).toBeGreaterThan(0);
+      expect(entry.evidenceTests.length, entry.id).toBeGreaterThan(0);
+      expect(entry.status, entry.id).toBe('verified');
+      for (const evidenceTest of entry.evidenceTests) {
+        expect(existsSync(path.join(repositoryRoot, evidenceTest)), `${entry.id}:${evidenceTest}`).toBe(true);
+      }
+    }
+  });
+
   it('把 validator 纳入 workspace gate', () => {
     const rootPackage = readJson<{ scripts: Record<string, string> }>('package.json');
     const webPackage = readJson<{ scripts: Record<string, string> }>('apps/web/package.json');
 
     expect(existsSync(path.join(repositoryRoot, 'scripts/check-hosted-dr-contract.mjs'))).toBe(true);
+    expect(existsSync(path.join(repositoryRoot, 'config/hosted-dr-drills.json'))).toBe(true);
     expect(rootPackage.scripts['check:hosted-dr']).toBe('node scripts/check-hosted-dr-contract.mjs');
+    expect(rootPackage.scripts['verify:hosted-dr']).toContain('tests/hosted-dr-fault-matrix.test.ts');
+    expect(rootPackage.scripts['ci:verify']).toContain('pnpm run verify:hosted-dr');
     expect(rootPackage.scripts['workspace:verify']).toContain('pnpm run check:hosted-dr');
     expect(webPackage.scripts.build).toContain('pnpm run check:hosted-dr');
     expect(webPackage.scripts['build:cf']).toContain('pnpm run check:hosted-dr');
