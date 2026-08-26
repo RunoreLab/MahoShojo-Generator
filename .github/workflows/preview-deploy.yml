@@ -1,7 +1,10 @@
 name: Deploy preview
 
 on:
-  workflow_call:
+  push:
+    branches:
+      - preview
+  workflow_dispatch:
 
 concurrency:
   group: deploy-preview
