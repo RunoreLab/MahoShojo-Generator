@@ -139,11 +139,17 @@ describe('Hono deployment workflow', () => {
   });
 
   test('preview 分支串行发布隔离 Hono 后再发布 Cloudflare', () => {
+    const entryWorkflow = readFileSync(HONO_WORKFLOW_PATH, 'utf8');
     const workflow = readFileSync(PREVIEW_WORKFLOW_PATH, 'utf8');
     const honoJob = getJob(workflow, 'deploy-hono-preview');
     const cloudflareJob = getJob(workflow, 'deploy-cloudflare-preview');
 
-    expect(workflow).toMatch(/branches:\s*\n\s*- preview/u);
+    expect(entryWorkflow).toMatch(/branches:\s*[\s\S]*?\n\s*- preview/u);
+    const previewJob = getJob(entryWorkflow, 'preview');
+    expect(previewJob).toContain("if: github.ref == 'refs/heads/preview'");
+    expect(previewJob).toContain('uses: ./.github/workflows/preview-deploy.yml');
+    expect(previewJob).toContain('secrets: inherit');
+    expect(workflow).toMatch(/on:\s*\n\s*workflow_call:/u);
     expect(honoJob).toContain('HONO_DEPLOY_ROOT_DIR: /opt/mahoshojo-hono-preview');
     expect(honoJob).toContain('HONO_CONTAINER_NAME: mahoshojo-hono-preview');
     expect(honoJob).toContain("HONO_BIND_PORT: '8081'");
