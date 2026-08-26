@@ -144,6 +144,8 @@ describe('Node Arena generation executor', () => {
     expect(JSON.stringify(prepared.semanticPayload)).not.toContain('__arenaServerContextV1');
     expect(prepared.executionPayload.__arenaServerContextV1).toEqual(expect.objectContaining({
       ipAnonymized: '192.0.2.0',
+      endpoint: 'api/arena/generate-stream',
+      deliveryMode: 'stream',
     }));
 
     const controller = new AbortController();
@@ -223,6 +225,37 @@ describe('Node Arena generation executor', () => {
         content: expect.objectContaining({ content: 'world setting' }),
       }),
     ]);
+  });
+
+  it('在 reservation 前拒绝超过 companion 兼容上限的辅助情景与素材', async () => {
+    const executor = createNodeArenaGenerationExecutor({
+      env: {},
+      finalizer,
+      signatureService,
+      enforceSafety: vi.fn(async () => null),
+      generateWithStreamAI: vi.fn(),
+    });
+    const tooManyAux = await executor.prepare!({
+      request: new Request('https://example.test/api/generate-battle-story'),
+      actorKey: 'anonymous:test',
+      payload: { ...validPayload, auxScenarios: Array.from({ length: 11 }, () => ({})) },
+    });
+    const tooManyMaterials = await executor.prepare!({
+      request: new Request('https://example.test/api/arena/generate'),
+      actorKey: 'anonymous:test',
+      payload: { ...validPayload, materials: Array.from({ length: 11 }, () => ({})) },
+    });
+
+    expect(tooManyAux).toBeInstanceOf(Response);
+    expect((tooManyAux as Response).status).toBe(400);
+    expect(await (tooManyAux as Response).json()).toMatchObject({
+      code: 'ARENA_AUX_SCENARIOS_LIMIT',
+    });
+    expect(tooManyMaterials).toBeInstanceOf(Response);
+    expect((tooManyMaterials as Response).status).toBe(400);
+    expect(await (tooManyMaterials as Response).json()).toMatchObject({
+      code: 'ARENA_MATERIALS_LIMIT',
+    });
   });
 
   it('uses the strict-ranked model fallback order until a provider attempt succeeds', async () => {

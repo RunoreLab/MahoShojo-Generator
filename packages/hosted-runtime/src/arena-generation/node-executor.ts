@@ -1,4 +1,3 @@
-import { z } from 'zod/v3';
 import { STRICT_RANKED_MODEL_FALLBACKS } from '@mahoshojo/domain/arena-ranked-model-policy';
 
 import type {
@@ -9,6 +8,10 @@ import { buildArenaGenerationPrompt, isStrictRankedArenaRequest } from './prompt
 import { MAX_ARENA_MATERIALS, normalizeNodeArenaMaterials } from './materials';
 import type { ArenaSeasonContext } from './season-context';
 import { createArenaInternalGuidanceAuthority } from './internal-authority';
+import {
+  resolveArenaCustomProvider,
+  type ResolvedArenaCustomProvider,
+} from './custom-provider';
 import {
   createArenaGenerationRuntime,
   type ArenaGenerationFinalizationInput,
@@ -22,7 +25,6 @@ import {
 } from '../node-runtime/content-safety';
 import { createEnvSignatureService } from '../node-runtime/env-signature';
 import { silentLogger, type NodeAiLogger } from '../node-runtime/logger';
-import { AI_PROVIDER_CATALOG, resolveAIProviderModel } from '../node-runtime/provider-catalog';
 import { parseAIProvidersFromEnv } from '../node-runtime/providers';
 import { createNodeRawStreamAiRuntime } from '../node-runtime/raw-stream-ai';
 import { createNodeStructuredAiRuntime } from '../node-runtime/structured-ai';
@@ -34,31 +36,6 @@ import {
   type GenerateWithAIOptions,
   type RawGenerationConfig,
 } from '../node-runtime/types';
-
-const MAX_CUSTOM_PROVIDER_OUTPUT_TOKENS = 1_000_000;
-
-const ThinkingSchema = z.union([
-  z.object({ mode: z.literal('default') }).strict(),
-  z.object({ mode: z.literal('disabled') }).strict(),
-  z.object({
-    mode: z.literal('enabled'),
-    effort: z.enum(['minimal', 'low', 'medium', 'high', 'xhigh', 'max']).optional(),
-  }).strict(),
-]);
-
-const GenerationOverridesSchema = z.object({
-  maxOutputTokens: z.number().int().min(1).max(MAX_CUSTOM_PROVIDER_OUTPUT_TOKENS).optional(),
-  temperature: z.number().finite().min(0).optional(),
-  thinking: ThinkingSchema.optional(),
-}).strict();
-
-const CustomProviderSchema = z.object({
-  providerId: z.string().min(1),
-  modelId: z.string().min(1),
-  apiKey: z.string(),
-  maxOutputTokens: z.number().int().min(1).max(MAX_CUSTOM_PROVIDER_OUTPUT_TOKENS).optional(),
-  generationOverrides: GenerationOverridesSchema.optional(),
-}).strict();
 
 type StreamAiResult = {
   response: Response;
@@ -102,11 +79,6 @@ export type NodeArenaGenerationExecutorOptions = {
     _input: ArenaGenerationFinalizationInput,
   ): Promise<ArenaGenerationFinalizationResult>;
   observer?: ArenaGenerationObserver;
-};
-
-type ParsedCustomProvider = z.infer<typeof CustomProviderSchema> & {
-  provider: (typeof AI_PROVIDER_CATALOG)[number];
-  modelId: string;
 };
 
 const jsonResponse = (payload: unknown, status: number): Response => new Response(
@@ -160,6 +132,23 @@ const readSafetyPolicy = (
 const clonePayload = (payload: Record<string, unknown>): Record<string, unknown> => (
   structuredClone(payload)
 );
+
+const arenaRequestAuditContext = (request: Request): {
+  endpoint: string;
+  deliveryMode: 'stream' | 'non-stream';
+} => {
+  const pathname = new URL(request.url).pathname;
+  if (pathname === '/api/arena/generate') {
+    return { endpoint: 'api/arena/generate', deliveryMode: 'non-stream' };
+  }
+  if (pathname === '/api/generate-battle-story') {
+    return { endpoint: 'api/generate-battle-story', deliveryMode: 'non-stream' };
+  }
+  if (pathname === '/api/arena/session/generate-next') {
+    return { endpoint: 'api/arena/session/generate-next', deliveryMode: 'stream' };
+  }
+  return { endpoint: 'api/arena/generate-stream', deliveryMode: 'stream' };
+};
 
 const normalizeLegacyPayloadDefaults = (payload: Record<string, unknown>): void => {
   payload.mode = readString(payload.mode) || 'classic';
@@ -290,27 +279,11 @@ const requestIp = (request: Request): string => (
 
 const parseCustomProvider = (
   value: unknown,
-): ParsedCustomProvider | Response | null => {
-  if (value === undefined || value === null) return null;
-  const parsed = CustomProviderSchema.safeParse(value);
-  if (!parsed.success) {
-    return jsonResponse({
-      code: 'ARENA_CUSTOM_PROVIDER_INVALID',
-      error: '自定义 AI 供应商配置无效',
-    }, 400);
-  }
-  const provider = AI_PROVIDER_CATALOG.find((item) => item.id === parsed.data.providerId);
-  if (!provider) {
-    return jsonResponse({ code: 'ARENA_PROVIDER_UNKNOWN', error: '未知的模型供应商 ID' }, 400);
-  }
-  const model = resolveAIProviderModel(provider, parsed.data.modelId);
-  if (!model) {
-    return jsonResponse({ code: 'ARENA_MODEL_UNKNOWN', error: '未知的模型 ID' }, 400);
-  }
-  if (provider.id !== 'system' && !parsed.data.apiKey.trim()) {
-    return jsonResponse({ code: 'ARENA_PROVIDER_KEY_EMPTY', error: 'API Key 不能为空' }, 400);
-  }
-  return { ...parsed.data, provider, modelId: model.modelId };
+): ResolvedArenaCustomProvider | Response | null => {
+  const resolved = resolveArenaCustomProvider(value);
+  return resolved.ok
+    ? resolved.value
+    : jsonResponse({ code: resolved.code, error: resolved.error }, resolved.status);
 };
 
 const normalizeNativeAuthority = async (
@@ -509,6 +482,7 @@ export const createNodeArenaGenerationExecutor = (
       normalized.__arenaServerContextV1 = {
         startedAt: now().toISOString(),
         ipAnonymized: anonymizeIp(requestIp(request)),
+        ...arenaRequestAuditContext(request),
         season,
         scenarioNative: normalized.scenario
           ? await signatures.verifySignature(normalized.scenario)

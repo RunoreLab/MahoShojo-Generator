@@ -4,6 +4,11 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./arena-companion": {
+      "types": "./src/arena-companion/index.ts",
+      "import": "./src/arena-companion/index.ts",
+      "default": "./src/arena-companion/index.ts"
+    },
     "./arena-generation": {
       "types": "./src/arena-generation/index.ts",
       "import": "./src/arena-generation/index.ts",

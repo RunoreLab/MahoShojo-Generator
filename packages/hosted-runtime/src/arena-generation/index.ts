@@ -1,5 +1,6 @@
 export * from './actor';
 export * from './compatibility-prompt';
+export * from './custom-provider';
 export * from './d1-finalization';
 export * from './default-service';
 export * from './finalization';

@@ -69,6 +69,28 @@ const claimInput = {
 };
 
 describe('Arena D1/R2 finalization ports', () => {
+  it('uses server-derived companion endpoint and delivery mode in generation audit rows', async () => {
+    const client = sequentialD1([result([], 1)]);
+    const ports = createNodeArenaGenerationFinalizationPorts({
+      getD1Client: () => client,
+      now: () => new Date('2026-08-25T04:00:00.000Z'),
+    });
+
+    await ports.claimTerminal({
+      ...claimInput,
+      payload: {
+        ...claimInput.payload,
+        __arenaServerContextV1: {
+          endpoint: 'api/generate-battle-story',
+          deliveryMode: 'non-stream',
+        },
+      },
+    });
+
+    expect(client.boundCalls[0]?.[5]).toBe('non-stream');
+    expect(client.boundCalls[0]?.[6]).toBe('api/generate-battle-story');
+  });
+
   it('claims the D1 terminal row with INSERT OR IGNORE and distinguishes retries', async () => {
     const ownerHash = await crypto.subtle.digest(
       'SHA-256',

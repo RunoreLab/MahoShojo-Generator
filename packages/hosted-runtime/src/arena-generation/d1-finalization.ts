@@ -139,6 +139,23 @@ const terminalStatus = (value: ArenaTerminalClaimInput['status']): string => (
   value === 'cancelled' ? 'aborted' : value === 'producer_lost' ? 'failed' : value
 );
 
+const generationAuditContext = (serverContext: Record<string, unknown> | null): {
+  generationMode: 'stream' | 'non-stream';
+  endpoint: string;
+} => {
+  const endpoint = stringOf(serverContext?.endpoint);
+  if (endpoint === 'api/arena/generate') {
+    return { generationMode: 'non-stream', endpoint };
+  }
+  if (endpoint === 'api/generate-battle-story') {
+    return { generationMode: 'non-stream', endpoint };
+  }
+  if (endpoint === 'api/arena/session/generate-next') {
+    return { generationMode: 'stream', endpoint };
+  }
+  return { generationMode: 'stream', endpoint: 'api/arena/generate-stream' };
+};
+
 const buildExtraJson = async (
   input: ArenaTerminalClaimInput,
 ): Promise<Record<string, unknown>> => {
@@ -498,6 +515,7 @@ ON CONFLICT(kind, owner_ref_id) DO UPDATE SET
       if (!client) throw new Error('ARENA_D1_UNAVAILABLE');
       const endedAt = now();
       const serverContext = recordOf(input.payload.__arenaServerContextV1);
+      const auditContext = generationAuditContext(serverContext);
       const startedAtIso = stringOf(serverContext?.startedAt) ?? endedAt.toISOString();
       const startedAtMs = Date.parse(startedAtIso);
       const durationMs = Number.isFinite(startedAtMs)
@@ -526,7 +544,7 @@ INSERT OR IGNORE INTO battle_report_generations (
   user_guidance_preview, output_preview, extra_json, created_at, updated_at
 )
 VALUES (
-  ?, ?, ?, ?, ?, 'stream', 'api/arena/generate-stream',
+  ?, ?, ?, ?, ?, ?, ?,
   ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
   ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
 )
@@ -536,6 +554,8 @@ VALUES (
         endedAt.toISOString(),
         durationMs,
         terminalStatus(input.status),
+        auditContext.generationMode,
+        auditContext.endpoint,
         boundedString(serverContext?.ipAnonymized, 128),
         boundedString(input.payload.mode, 64) ?? 'classic',
         actorUserId(input.actorKey),

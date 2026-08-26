@@ -127,7 +127,7 @@ const DEFAULT_ARENA_HISTORY_LIMIT = 3;
 const DEFAULT_BODY_EXCERPT_CHARS = 240;
 const DEFAULT_MAX_IMPACT_ITEMS = 8;
 const MIN_TOTAL_CHAPTERS = 1;
-const MAX_TOTAL_CHAPTERS = 20;
+export const BATTLE_STORY_MAX_TOTAL_CHAPTERS = 20;
 
 const isRecord = (value: unknown): value is Record<string, unknown> => (
   typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -141,7 +141,7 @@ const normalizeScenarioTotalChapters = (value: unknown): number | null => {
   if (typeof value !== 'number' || !Number.isFinite(value) || Math.floor(value) !== value) {
     return null;
   }
-  return value >= MIN_TOTAL_CHAPTERS && value <= MAX_TOTAL_CHAPTERS ? value : null;
+  return value >= MIN_TOTAL_CHAPTERS && value <= BATTLE_STORY_MAX_TOTAL_CHAPTERS ? value : null;
 };
 
 const readScenarioPlan = (
