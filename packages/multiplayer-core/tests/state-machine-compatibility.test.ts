@@ -38,6 +38,9 @@ describe('Arena Room state-machine compatibility and portability', () => {
         accountUserId: 101 + index,
         member,
       })),
+      generationLedger: [],
+      terminalProposalIds: [],
+      collaborativeChanges: [],
     };
 
     const parsedCurrent = parseArenaRoomAuthorityState(currentAuthority);

@@ -60,6 +60,13 @@ export const ArenaRoomGenerationRecordSchema = z.object({
   generationRecordId: OpaqueKeySchema.optional(),
   errorCode: ArenaErrorCodeSchema.optional(),
 }).strict().superRefine((record, context) => {
+  if (!CanonicalSnapshotDigestSchema.safeParse(record.mirror.snapshotDigest).success) {
+    context.addIssue({
+      code: 'custom',
+      path: ['mirror', 'snapshotDigest'],
+      message: 'authority generation records require a canonical snapshot digest',
+    });
+  }
   if (record.mirror.state === 'completed' && record.generationRecordId === undefined) {
     context.addIssue({ code: 'custom', path: ['generationRecordId'], message: 'completed requires generationRecordId' });
   }
@@ -80,17 +87,13 @@ export const ArenaRoomAuthorityStateSchema = z.object({
   lifecycle: ArenaRoomLifecycleSchema,
   snapshot: ArenaRoomSnapshotSchema,
   memberAuthority: z.array(ArenaRoomMemberAuthorityRecordSchema)
-    .max(MAX_ROOM_MEMBER_AUTHORITY_RECORDS)
-    .default([]),
+    .max(MAX_ROOM_MEMBER_AUTHORITY_RECORDS),
   generationLedger: z.array(ArenaRoomGenerationRecordSchema)
-    .max(MAX_ROOM_GENERATION_RECORDS)
-    .default([]),
+    .max(MAX_ROOM_GENERATION_RECORDS),
   terminalProposalIds: z.array(OpaqueKeySchema)
-    .max(MAX_ROOM_PROPOSAL_TOMBSTONES)
-    .default([]),
+    .max(MAX_ROOM_PROPOSAL_TOMBSTONES),
   collaborativeChanges: z.array(ArenaProposalChangeSchema)
-    .max(MAX_ROOM_COLLABORATIVE_CHANGES)
-    .default([]),
+    .max(MAX_ROOM_COLLABORATIVE_CHANGES),
 }).strict().superRefine((state, context) => {
   const memberUserIds = state.memberAuthority.map((entry) => entry.member.userId);
   const accountUserIds = state.memberAuthority.map((entry) => entry.accountUserId);
@@ -290,6 +293,30 @@ export const parseArenaRoomAuthorityContext = (input: unknown): ArenaRoomAuthori
   return generationPublisherCapabilities.has(input) ? parsed.data : null;
 };
 
+export const ArenaRoomTrustedTimeSchema = z.object({
+  kind: z.literal('trusted-server-time'),
+  now: IsoTimestampSchema,
+}).strict();
+export type ArenaRoomTrustedTime = z.infer<typeof ArenaRoomTrustedTimeSchema>;
+
+const trustedTimeCapabilities = new WeakSet<object>();
+
+/** Adapter-issued server time; client frames must never be parsed into it. */
+export const issueArenaRoomTrustedTime = (input: { readonly now: string }): ArenaRoomTrustedTime => {
+  const capability = Object.freeze(ArenaRoomTrustedTimeSchema.parse({
+    kind: 'trusted-server-time',
+    now: input.now,
+  }));
+  trustedTimeCapabilities.add(capability);
+  return capability;
+};
+
+export const parseArenaRoomTrustedTime = (input: unknown): ArenaRoomTrustedTime | null => {
+  const parsed = ArenaRoomTrustedTimeSchema.safeParse(input);
+  if (!parsed.success || typeof input !== 'object' || input === null) return null;
+  return trustedTimeCapabilities.has(input) ? parsed.data : null;
+};
+
 export const CreateArenaRoomCommandSchema = z.object({
   type: z.literal('create'),
   roomId: OpaqueKeySchema,
@@ -439,6 +466,9 @@ export type ArenaRoomTransitionFailureReason =
   | 'generation-terminal-conflict'
   | 'authority-scope-mismatch'
   | 'authority-scope-expired'
+  | 'invalid-trusted-time'
+  | 'command-timestamp-mismatch'
+  | 'command-timestamp-regression'
   | 'collaborative-history-limit-reached'
   | 'room-snapshot-too-large';
 

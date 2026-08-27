@@ -3,6 +3,8 @@ import type { ArenaProposalChange } from '@mahoshojo/contracts/arena-room';
 import {
   issueArenaRoomGenerationPublisherAuthority,
   issueArenaRoomGenerationReservationAuthority,
+  issueArenaRoomTrustedTime,
+  transitionArenaRoom,
 } from '../src/index';
 
 export const TEST_TIMESTAMP = '2026-08-27T16:00:00.000Z';
@@ -55,6 +57,23 @@ export const generationPublisherAuthority = (
   attempt,
   expiresAt: '2026-08-27T16:30:00.000Z',
 });
+
+export const trustedTime = (now: string) => issueArenaRoomTrustedTime({ now });
+
+export const transitionArenaRoomAt = (
+  state: unknown | null,
+  command: unknown,
+  authority: unknown,
+  now?: string,
+) => {
+  const commandTimestamp = command
+    && typeof command === 'object'
+    && 'timestamp' in command
+    && typeof command.timestamp === 'string'
+    ? command.timestamp
+    : TEST_TIMESTAMP;
+  return transitionArenaRoom(state, command, authority, trustedTime(now ?? commandTimestamp));
+};
 
 export const historySettings = () => ({
   readArenaHistory: true,

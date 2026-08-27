@@ -23,6 +23,7 @@ import {
   MAX_ROOM_PROPOSAL_TOMBSTONES,
   checkpointPredecessorOf,
   parseArenaRoomAuthorityContext,
+  parseArenaRoomTrustedTime,
   transitionFailure,
   transitionSuccess,
   type ArenaRoomAuthorityContext,
@@ -31,6 +32,7 @@ import {
   type ArenaRoomGenerationRecord,
   type ArenaRoomMemberAuthorityRecord,
   type ArenaRoomTransitionResult,
+  type ArenaRoomTrustedTime,
 } from './state-machine-model';
 import { deepClone, deepEqual } from './utils';
 
@@ -531,6 +533,7 @@ const reserveGeneration = (
   state: ArenaRoomAuthorityState,
   command: Extract<ArenaRoomCommand, { type: 'reserve-generation' }>,
   context: ArenaRoomAuthorityContext,
+  trustedTime: ArenaRoomTrustedTime,
 ): ArenaRoomTransitionResult => {
   if (context.kind !== 'generation-reserver') {
     return transitionFailure('forbidden', 'invalid-authority-context');
@@ -551,7 +554,14 @@ const reserveGeneration = (
     || scope.attempt !== command.attempt) {
     return transitionFailure('forbidden', 'authority-scope-mismatch');
   }
-  if (Date.parse(command.timestamp) > Date.parse(scope.expiresAt)) {
+  const now = Date.parse(trustedTime.now);
+  if (Date.parse(command.timestamp) !== now) {
+    return transitionFailure('forbidden', 'command-timestamp-mismatch');
+  }
+  if (now < Date.parse(state.lifecycle.updatedAt)) {
+    return transitionFailure('stale', 'command-timestamp-regression');
+  }
+  if (now >= Date.parse(scope.expiresAt)) {
     return transitionFailure('forbidden', 'authority-scope-expired');
   }
   const historical = state.generationLedger.find((record) => (
@@ -623,6 +633,7 @@ const mirrorGeneration = (
   state: ArenaRoomAuthorityState,
   command: Extract<ArenaRoomCommand, { type: 'mirror-generation' }>,
   context: ArenaRoomAuthorityContext,
+  trustedTime: ArenaRoomTrustedTime,
 ): ArenaRoomTransitionResult => {
   if (context.kind !== 'generation-publisher') {
     return transitionFailure('forbidden', 'invalid-authority-context');
@@ -635,7 +646,14 @@ const mirrorGeneration = (
     || scope.attempt !== command.attempt) {
     return transitionFailure('forbidden', 'authority-scope-mismatch');
   }
-  if (Date.parse(command.timestamp) > Date.parse(scope.expiresAt)) {
+  const now = Date.parse(trustedTime.now);
+  if (Date.parse(command.timestamp) !== now) {
+    return transitionFailure('forbidden', 'command-timestamp-mismatch');
+  }
+  if (now < Date.parse(state.lifecycle.updatedAt)) {
+    return transitionFailure('stale', 'command-timestamp-regression');
+  }
+  if (now >= Date.parse(scope.expiresAt)) {
     return transitionFailure('forbidden', 'authority-scope-expired');
   }
   const active = state.snapshot.activeGeneration;
@@ -712,6 +730,7 @@ export const transitionArenaRoom = (
   stateInput: unknown | null,
   commandInput: unknown,
   authorityContextInput: unknown,
+  trustedTimeInput?: unknown,
 ): ArenaRoomTransitionResult => {
   const parsedCommand = ArenaRoomCommandSchema.safeParse(commandInput);
   if (!parsedCommand.success) return transitionFailure('validation-failed', 'invalid-command');
@@ -778,8 +797,12 @@ export const transitionArenaRoom = (
     case 'withdraw-proposal':
       return withdrawProposal(state, command, context);
     case 'reserve-generation':
-      return reserveGeneration(state, command, context);
-    case 'mirror-generation':
-      return mirrorGeneration(state, command, context);
+    case 'mirror-generation': {
+      const trustedTime = parseArenaRoomTrustedTime(trustedTimeInput);
+      if (!trustedTime) return transitionFailure('forbidden', 'invalid-trusted-time');
+      return command.type === 'reserve-generation'
+        ? reserveGeneration(state, command, context, trustedTime)
+        : mirrorGeneration(state, command, context, trustedTime);
+    }
   }
 };
