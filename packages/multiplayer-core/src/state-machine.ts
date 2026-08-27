@@ -217,6 +217,9 @@ const recoverRoom = (
   if (command.nextRoomEpoch === command.expectedRoomEpoch) {
     return transitionFailure('stale', 'room-epoch-reuse');
   }
+  if (Date.parse(command.timestamp) < Date.parse(state.lifecycle.updatedAt)) {
+    return transitionFailure('stale', 'command-timestamp-regression');
+  }
   const next = cloneState(state);
   next.snapshot.roomEpoch = command.nextRoomEpoch;
   next.snapshot.controlSeq = 0;

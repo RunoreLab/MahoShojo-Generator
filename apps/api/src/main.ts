@@ -5,6 +5,7 @@ import { configureDefaultNodeHostedD1ClientResolver } from '@mahoshojo/hosted-ru
 import { createHonoApp } from '#/app';
 import { readHonoServerConfig } from '#/config';
 import { configureHonoArenaGenerationRuntime } from '#/arena-generation/runtime';
+import { createRoomActorRegistry } from '#/arena-room/room-actor-registry';
 import { getHonoPrimaryD1Client } from '#/d1/provider';
 import { RedisRuntime } from '#/redis/runtime';
 import {
@@ -41,6 +42,13 @@ if (process.env.HONO_CONFIG_CHECK_ONLY === 'true') {
   await redis.connect();
   configureDefaultNodeHostedD1ClientResolver(getHonoPrimaryD1Client);
   configureHonoArenaGenerationRuntime(redis, { observer: telemetry });
+  const roomActors = createRoomActorRegistry({
+    store: redis.getRoomStore(),
+    onBackgroundError: () => {
+      console.error('[hono][room-actor] idle sweep failed');
+    },
+  });
+  roomActors.startIdleSweeper();
 
   telemetry.start();
   const app = createHonoApp(config, redis, telemetry);
@@ -58,12 +66,22 @@ if (process.env.HONO_CONFIG_CHECK_ONLY === 'true') {
 
     try {
       const drainResult = await shutdownWithWaitUntilDrain({
-        closeDependencies: () => redis.close(),
+        closeDependencies: async () => {
+          try {
+            await roomActors.shutdown();
+          } finally {
+            await redis.close();
+          }
+        },
         coordinator: nodeExecutionContextCoordinator,
         dependencyCloseTimeoutMs: DEFAULT_DEPENDENCY_CLOSE_GRACE_TIMEOUT_MS,
         drainTimeoutMs: DEFAULT_WAIT_UNTIL_DRAIN_TIMEOUT_MS,
-        forceCloseDependencies: () => redis.forceClose(),
+        forceCloseDependencies: () => {
+          roomActors.forceClose();
+          redis.forceClose();
+        },
         stopAcceptingRequests: async () => {
+          roomActors.stopAccepting();
           const closeResult = await stopAcceptingRequestsWithGrace(server, {
             timeoutMs: DEFAULT_SERVER_CLOSE_GRACE_TIMEOUT_MS,
           });

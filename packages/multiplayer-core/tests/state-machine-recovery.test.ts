@@ -89,6 +89,22 @@ describe('Arena Room recovery transition', () => {
       reuseAuthority,
     )).toMatchObject({ ok: false, code: 'stale', reason: 'room-epoch-reuse' });
 
+    const oldTimestamp = '2026-08-27T15:59:00.000Z';
+    const regressedAuthority = issueArenaRoomRecoveryAuthority({
+      roomId: 'room-1',
+      previousRoomEpoch: 'epoch-1',
+      nextRoomEpoch: 'epoch-2',
+      timestamp: oldTimestamp,
+    });
+    expect(transitionArenaRoom(created.nextState, {
+      ...recoverCommand(),
+      timestamp: oldTimestamp,
+    }, regressedAuthority)).toMatchObject({
+      ok: false,
+      code: 'stale',
+      reason: 'command-timestamp-regression',
+    });
+
     const closed = transitionArenaRoom(created.nextState, {
       type: 'close',
       expectedRoomEpoch: 'epoch-1',

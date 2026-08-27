@@ -15,6 +15,7 @@ import {
   createRedisRoomStore,
   type RedisRoomClient,
 } from '../src/arena-room/redis-room-store';
+import { createRoomActorRegistry } from '../src/arena-room/room-actor-registry';
 import { RedisRuntime } from '../src/redis/runtime';
 
 const redisUrl = process.env.REDIS_URL?.trim();
@@ -59,6 +60,7 @@ const invalidDeleteFenceRoomId = `room-invalid-delete-fence-${token}`;
 const invalidExpireFenceRoomId = `room-invalid-expire-fence-${token}`;
 const fullMutationFenceRoomId = `room-full-mutation-fence-${token}`;
 const recoveryRoomId = `room-recovery-${token}`;
+const actorRoomId = `room-actor-${token}`;
 const roomHash = (id: string): string => createHash('sha256').update(id).digest('hex');
 const roomKey = (id: string): string => (
   `mahoshojo:room:v1:${keyPrefix}:${roomHash(id)}:checkpoint`
@@ -512,6 +514,51 @@ try {
       if (nextIncarnation.kind !== 'saved') {
         throw new Error('ROOM_REDIS_NEW_INCARNATION_FAILED');
       }
+
+      const oldActorRegistry = createRoomActorRegistry({ store: writerStore });
+      const actorCreated = await oldActorRegistry.execute({
+        roomId: actorRoomId,
+        command: {
+          type: 'create',
+          roomId: actorRoomId,
+          roomEpoch: 'actor-epoch-1',
+          host: {
+            userId: 'host-1',
+            role: 'host',
+            displayName: 'Host',
+            membershipState: 'active',
+            joinedAt: TIMESTAMP,
+          },
+          sharedConfig: sharedConfig(),
+          timestamp: TIMESTAMP,
+        },
+        authority: hostAuthority,
+      });
+      if (!actorCreated.ok) throw new Error('ROOM_ACTOR_CREATE_FAILED');
+      const recoveredActorRegistry = createRoomActorRegistry({
+        store: readerStore,
+        createRoomEpoch: () => 'actor-epoch-2',
+        recoveryTimestamp: () => NEXT_TIMESTAMP,
+      });
+      const recoveredActor = await recoveredActorRegistry.get(actorRoomId);
+      if (recoveredActor?.getSnapshot()?.snapshot.roomEpoch !== 'actor-epoch-2') {
+        throw new Error('ROOM_ACTOR_WARM_RECOVERY_FAILED');
+      }
+      await fixedError(oldActorRegistry.execute({
+        roomId: actorRoomId,
+        command: {
+          type: 'publish-config',
+          expectedRoomEpoch: 'actor-epoch-1',
+          expectedRevision: 0,
+          sharedConfig: { ...sharedConfig(), userGuidance: 'late-old-actor' },
+          timestamp: NEXT_TIMESTAMP,
+        },
+        authority: hostAuthority,
+      }), 'ROOM_ACTOR_CHECKPOINT_CONFLICT');
+      if ((await readerStore.load(actorRoomId))?.snapshot.roomEpoch !== 'actor-epoch-2') {
+        throw new Error('ROOM_ACTOR_OLD_WRITER_MUTATED_RECOVERY');
+      }
+      await Promise.all([oldActorRegistry.shutdown(), recoveredActorRegistry.shutdown()]);
       console.info(JSON.stringify({
         roomRedis: true,
         phase: 'full',
@@ -527,6 +574,8 @@ try {
         fullPredecessorFence: true,
         oldEpochFence: true,
         recoveryEpochRollover: true,
+        roomActorWarmRecovery: true,
+        roomActorOldWriterFence: true,
         terminalTtl: true,
         monotonicExpiryFence: true,
         expireDelete: true,
@@ -554,6 +603,7 @@ try {
       ...roomKeys(invalidExpireFenceRoomId),
       ...roomKeys(fullMutationFenceRoomId),
       ...roomKeys(recoveryRoomId),
+      ...roomKeys(actorRoomId),
     ]);
   }
   await cleanup.quit();
