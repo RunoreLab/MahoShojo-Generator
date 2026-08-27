@@ -95,7 +95,7 @@ read authority / current state
 | --- | --- | --- | --- | --- |
 | `GMR-00` 文档 re-baseline | `DONE` | 无 | 双门禁、Hono+Redis 架构、Goal 指南一致 | 无 |
 | `GMR-01` runtime-neutral state machine | `DONE` | GMR-00 | pure transition + epoch/revision fixture | 不引入 Hono/Redis |
-| `GMR-02` Redis conditional checkpoint | `READY` | GMR-01 | CAS checkpoint + TTL + fail-closed | 不做 WSS/UI |
+| `GMR-02` Redis conditional checkpoint | `IN_PROGRESS` | GMR-01 | CAS checkpoint + TTL + fail-closed | 不做 WSS/UI |
 | `GMR-03` single-writer RoomActor | `BLOCKED` | GMR-02 | actor registry/queue/recovery/shutdown | 不做 multi-instance |
 | `GMR-04` Node WSS security skeleton | `BLOCKED` | GMR-03 | Node WS bootstrap + upgrade/security/backpressure | 不做产品 UI |
 | `GMR-05` ticket/membership/reconnect/lifecycle | `BLOCKED` | GMR-04 | membership/connection/epoch recovery | 不做 generation fan-out |

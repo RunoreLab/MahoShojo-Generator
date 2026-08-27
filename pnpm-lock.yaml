@@ -54,6 +54,9 @@ importers:
       '@mahoshojo/hosted-runtime':
         specifier: workspace:*
         version: link:../../packages/hosted-runtime
+      '@mahoshojo/multiplayer-core':
+        specifier: workspace:*
+        version: link:../../packages/multiplayer-core
       dotenv:
         specifier: ^17.4.2
         version: 17.4.2

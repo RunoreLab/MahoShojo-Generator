@@ -6,6 +6,11 @@ import {
   createRedisGenerationReplayStore,
   type RedisGenerationClient,
 } from './generation-replay-store';
+import {
+  createRedisRoomStore,
+  type RedisRoomClient,
+  type RedisRoomStore,
+} from '../arena-room/redis-room-store';
 
 const DEFAULT_REDIS_COMMAND_TIMEOUT_MS = 4_000;
 
@@ -129,6 +134,7 @@ export class RedisRuntime implements RedisService {
   private client: NodeRedisClient | null = null;
   private lastError: string | null = null;
   private generationReplayStore: GenerationReplayStore | null = null;
+  private roomStore: RedisRoomStore | null = null;
 
   constructor(
     private readonly redisUrl: string | null,
@@ -184,6 +190,20 @@ export class RedisRuntime implements RedisService {
         outcome: 'error',
         durationMs: Math.max(0, performance.now() - startedAt),
       });
+      throw createRedisOperationError(this.lastError);
+    }
+  }
+
+  private async executeRoomCommand<T>(operation: () => Promise<T>): Promise<T> {
+    if (!this.client?.isReady) {
+      throw createRedisOperationError('REDIS_ROOM_CHECKPOINT_UNAVAILABLE');
+    }
+    try {
+      return await executeWithTimeout(operation, this.commandTimeoutMs);
+    } catch (error) {
+      this.lastError = error instanceof Error && error.message === 'REDIS_COMMAND_TIMEOUT'
+        ? 'REDIS_ROOM_COMMAND_TIMEOUT'
+        : 'REDIS_ROOM_COMMAND_FAILED';
       throw createRedisOperationError(this.lastError);
     }
   }
@@ -254,6 +274,25 @@ export class RedisRuntime implements RedisService {
       }),
     });
     return this.generationReplayStore;
+  }
+
+  getRoomStore(): RedisRoomStore {
+    this.roomStore ??= createRedisRoomStore({
+      keyPrefix: this.keyPrefix,
+      getClient: () => ({
+        eval: (script, options) => this.executeRoomCommand(async () => {
+          const client = this.client;
+          if (!client?.isReady) throw new Error('REDIS_ROOM_CHECKPOINT_UNAVAILABLE');
+          return client.eval(script, options);
+        }),
+        get: (key) => this.executeRoomCommand(async () => {
+          const client = this.client;
+          if (!client?.isReady) throw new Error('REDIS_ROOM_CHECKPOINT_UNAVAILABLE');
+          return client.get(key);
+        }),
+      } satisfies RedisRoomClient),
+    });
+    return this.roomStore;
   }
 
   async ping(): Promise<boolean> {

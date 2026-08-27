@@ -37,6 +37,34 @@ beforeEach(() => {
 });
 
 describe('RedisRuntime shutdown', () => {
+  it('只向 Room runtime 暴露窄 checkpoint port，并在 Redis 未 ready 时 fail closed', async () => {
+    const redis = new RedisRuntime('redis://example.test:6379', true);
+    const store = redis.getRoomStore();
+
+    await expect(store.load('room-1')).rejects.toThrow('REDIS_ROOM_CHECKPOINT_UNAVAILABLE');
+
+    await redis.connect();
+    await expect(store.load('room-1')).resolves.toBeNull();
+  });
+
+  it('Room checkpoint 命令永久 pending 时有界 fail closed 且不反射 Redis secret', async () => {
+    vi.useFakeTimers();
+    redisClient.get.mockImplementation(() => new Promise(() => undefined));
+    const redis = new RedisRuntime('redis://user:secret@example.test:6379', true, undefined, 100);
+    try {
+      await redis.connect();
+      const checkpoint = redis.getRoomStore().load('room-1');
+      const rejectedCheckpoint = expect(checkpoint).rejects.toThrow('REDIS_ROOM_COMMAND_TIMEOUT');
+      await vi.advanceTimersByTimeAsync(100);
+
+      await rejectedCheckpoint;
+      expect(redis.getStatus().lastError).toBe('REDIS_ROOM_COMMAND_TIMEOUT');
+      expect(JSON.stringify(redis.getStatus())).not.toMatch(/user:secret|example\.test/u);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('只向 route runtime 暴露窄 generation replay port，并在 Redis 未 ready 时 fail closed', async () => {
     const redis = new RedisRuntime('redis://example.test:6379', true);
     const store = redis.getGenerationReplayStore();
