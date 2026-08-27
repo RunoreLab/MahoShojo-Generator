@@ -4,6 +4,23 @@
     "ref": "feature/v0.2.0_Battle_Growth_MahoShojo",
     "commit": "b9fed72f52b3edf5feddc7ddb8552daf4a3ec704"
   },
+  "auditCoverage": {
+    "status": "partial",
+    "automated": [
+      "route-inventory-and-method-wire",
+      "family-level-success-and-error-projection",
+      "exited-source-hash-and-basic-error-wire",
+      "arena-service-client-replay-cancel-seams",
+      "provider-public-error-and-secret-canaries",
+      "infrastructure-copy-map"
+    ],
+    "open": [
+      "all-18-shared-routes-default-vs-refactor-post-success-and-error-runtime-differential",
+      "all-6-exited-routes-auth-success-and-upstream-error-runtime-differential",
+      "real-browser-network-transition-and-background-suspension-journey",
+      "production-stable-control-plane-and-real-fault-drills"
+    ]
+  },
   "defaultRouteIds": [
     "arena/generate",
     "arena/generate-stream",

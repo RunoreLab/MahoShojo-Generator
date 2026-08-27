@@ -41,4 +41,14 @@ describe('Phase 2.5 exited Next API contract', () => {
     expect(response.status).toBe(400);
     expect(await response.json()).toEqual({ error: '请求参数无效' });
   });
+
+  it('me/battle-reports/[generationId]/regenerate preserves the default unauthenticated wire', async () => {
+    const response = await regenerate(new Request(
+      'https://example.test/api/me/battle-reports/generation-1/regenerate',
+      { method: 'POST' },
+    ) as never);
+
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual({ error: '未授权' });
+  });
 });

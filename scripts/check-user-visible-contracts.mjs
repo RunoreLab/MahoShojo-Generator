@@ -40,6 +40,14 @@ if (contracts.schemaVersion !== 1) fail('schemaVersion 必须为 1');
 if (!/^[0-9a-f]{40}$/u.test(contracts.baseline?.commit ?? '')) {
   fail('baseline.commit 必须固定为完整 40 位 commit SHA');
 }
+if (
+  contracts.auditCoverage?.status !== 'partial'
+  || !isStringArray(contracts.auditCoverage?.automated)
+  || !isStringArray(contracts.auditCoverage?.open)
+  || contracts.auditCoverage.open.length === 0
+) {
+  fail('auditCoverage 必须诚实登记为 partial，并列出 automated/open 维度');
+}
 
 for (const [label, values] of [
   ['defaultRouteIds', contracts.defaultRouteIds],
@@ -143,7 +151,9 @@ if (failures.length > 0) {
 }
 
 console.log(
-  `User-visible contracts OK: ${contracts.sharedWithDefaultRouteIds.length} shared, `
+  `User-visible structural contracts OK (${contracts.auditCoverage.status.toUpperCase()} coverage): `
+  + `${contracts.sharedWithDefaultRouteIds.length} shared, `
   + `${exitedRoutes.length} exited, ${contracts.requiredEvidenceTests.length} evidence suites; `
+  + `${contracts.auditCoverage.open.length} dimensions remain open; `
   + 'production control plane remains fail-closed/deferred.',
 );

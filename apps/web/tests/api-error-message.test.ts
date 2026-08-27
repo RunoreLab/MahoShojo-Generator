@@ -1,9 +1,12 @@
 import { describe, expect, test } from 'vitest';
 
-import { resolveApiErrorMessage } from '@/lib/client/apiError';
+import { INFRASTRUCTURE_ERROR_MESSAGES, resolveApiErrorMessage } from '@/lib/client/apiError';
 import userVisibleContracts from '../../../config/user-visible-contracts.json';
 
 describe('resolveApiErrorMessage', () => {
+  test('keeps the executable copy map exactly synchronized with the audited contract', () => {
+    expect(INFRASTRUCTURE_ERROR_MESSAGES).toEqual(userVisibleContracts.infrastructureMessages);
+  });
   test('prefer payload.message over generic payload.error', () => {
     expect(
       resolveApiErrorMessage({
