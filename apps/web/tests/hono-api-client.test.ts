@@ -17,7 +17,7 @@ import {
   isHonoApiPath,
   resolveGenerationApiUrl,
 } from '@/lib/hono-api-client';
-import { honoApiConfig, resolveHostedApiOrigin } from '@/config/hono-api';
+import { honoApiConfig, resolveHostedApiConfig } from '@/config/hono-api';
 import hostedDrManifest from '../../../config/hosted-dr-capabilities.json';
 import honoApiRoutes from '../../../config/hono-api-routes.json';
 
@@ -37,11 +37,14 @@ describe('Hono API 客户端', () => {
     );
 
     expect(honoApiConfig.origin).toBe(hostedDrManifest.controlPlane.stableOrigin);
+    expect(honoApiConfig.enabled).toBe(false);
     expect(source).toContain('hosted-dr-client.generated');
     expect(source).toContain('NEXT_PUBLIC_HONO_API_ORIGIN');
     expect(source).not.toContain('hosted-dr-capabilities.json');
     expect(generatedSource).toContain(hostedDrManifest.controlPlane.stableOrigin);
     expect(generatedSource).toContain(hostedDrManifest.controlPlane.previewOrigin);
+    expect(generatedSource).toContain('hostedDrControlPlaneProvisioning');
+    expect(generatedSource).toContain('hostedDrProductionFallbackReadiness');
     for (const physicalOrigin of [
       hostedDrManifest.controlPlane.primaryOrigin,
       hostedDrManifest.controlPlane.drOrigin,
@@ -50,24 +53,58 @@ describe('Hono API 客户端', () => {
     }
   });
 
-  test('preview origin 必须与显式部署环境匹配，生产拒绝 preview 入口', () => {
-    expect(resolveHostedApiOrigin(undefined, 'production'))
-      .toBe(hostedDrManifest.controlPlane.stableOrigin);
-    expect(() => resolveHostedApiOrigin(
+  test('显式 deployment target 与 activation state 共同决定 Hosted placement', () => {
+    expect(resolveHostedApiConfig(undefined, undefined)).toEqual({
+      enabled: false,
+      origin: hostedDrManifest.controlPlane.stableOrigin,
+      target: 'local',
+    });
+    expect(() => resolveHostedApiConfig(undefined, 'production'))
+      .toThrow(/production.*未就绪/);
+    expect(resolveHostedApiConfig(undefined, 'production', {
+      controlPlaneProvisioning: 'not-provisioned',
+      productionFallbackReadiness: 'verified',
+    })).toEqual({
+      enabled: false,
+      origin: hostedDrManifest.controlPlane.stableOrigin,
+      target: 'production',
+    });
+    expect(resolveHostedApiConfig(undefined, 'production', {
+      controlPlaneProvisioning: 'production',
+      productionFallbackReadiness: 'deferred',
+    })).toEqual({
+      enabled: true,
+      origin: hostedDrManifest.controlPlane.stableOrigin,
+      target: 'production',
+    });
+    expect(() => resolveHostedApiConfig(
       hostedDrManifest.controlPlane.previewOrigin,
       'production',
     )).toThrow(/production.*stable/);
-    expect(resolveHostedApiOrigin(
+    expect(resolveHostedApiConfig(
       hostedDrManifest.controlPlane.previewOrigin,
       'preview',
-    )).toBe(hostedDrManifest.controlPlane.previewOrigin);
-    expect(() => resolveHostedApiOrigin(undefined, 'preview'))
+    )).toEqual({
+      enabled: true,
+      origin: hostedDrManifest.controlPlane.previewOrigin,
+      target: 'preview',
+    });
+    expect(() => resolveHostedApiConfig(undefined, 'preview')).toThrow(/preview origin/);
+    expect(() => resolveHostedApiConfig(
+      hostedDrManifest.controlPlane.stableOrigin,
+      'preview',
+    ))
       .toThrow(/preview origin/);
-    expect(() => resolveHostedApiOrigin('https://untrusted.example.test', 'production'))
+    expect(() => resolveHostedApiConfig('https://untrusted.example.test', 'production'))
       .toThrow(/NEXT_PUBLIC_HONO_API_ORIGIN/);
-    expect(resolveHostedApiOrigin('http://127.0.0.1:8787', 'development'))
-      .toBe('http://127.0.0.1:8787');
-    expect(() => resolveHostedApiOrigin('https://homura.colanns.me', 'production'))
+    expect(resolveHostedApiConfig('http://127.0.0.1:8787', 'local')).toEqual({
+      enabled: true,
+      origin: 'http://127.0.0.1:8787',
+      target: 'local',
+    });
+    expect(() => resolveHostedApiConfig('http://127.0.0.1:8787', 'unknown'))
+      .toThrow(/deployment target/);
+    expect(() => resolveHostedApiConfig('https://homura.colanns.me', 'production'))
       .toThrow(/NEXT_PUBLIC_HONO_API_ORIGIN/);
   });
 

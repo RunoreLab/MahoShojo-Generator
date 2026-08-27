@@ -27,6 +27,11 @@ type HostedDrManifest = {
     mode: string;
     provisioning: string;
     corsOriginsEnvironment: string;
+    productionFallback: {
+      mode: string;
+      artifactReadiness: string;
+      productionPlacement: string;
+    };
   };
   capabilities: Array<{
     id: string;
@@ -102,10 +107,16 @@ describe('Hosted DR machine contract', () => {
       drOrigin,
       mode,
       provisioning,
+      productionFallback,
     } = manifest.controlPlane;
 
     expect(mode).toBe('active-passive');
     expect(provisioning).toBe('not-provisioned');
+    expect(productionFallback).toEqual({
+      mode: 'same-origin-next',
+      artifactReadiness: 'deferred',
+      productionPlacement: 'not-observed',
+    });
     expect(manifest.controlPlane.corsOriginsEnvironment).toBe('HONO_CORS_ORIGINS');
     expect(new Set([stableOrigin, previewOrigin, primaryOrigin, drOrigin])).toHaveLength(4);
     for (const origin of [stableOrigin, previewOrigin, primaryOrigin, drOrigin]) {
@@ -347,6 +358,17 @@ describe('Hosted DR machine contract', () => {
       expected: '缺少显式生产证据文件',
     },
     {
+      label: 'unsafe production fallback readiness',
+      mutate: (manifest: HostedDrManifest) => {
+        manifest.controlPlane.productionFallback = {
+          mode: 'same-origin-next',
+          artifactReadiness: 'verified',
+          productionPlacement: 'not-observed',
+        };
+      },
+      expected: 'production fallback 不得覆盖 fail-closed operation',
+    },
+    {
       label: 'missing contract test',
       mutate: (manifest: HostedDrManifest) => {
         manifest.capabilities[0]!.contractTests = ['tests/not-present.test.ts'];
@@ -386,7 +408,19 @@ describe('Hosted DR machine contract', () => {
       manifest.controlPlane.provisioning = 'production';
       const manifestPath = path.join(temporaryRoot, 'manifest.json');
       const evidencePath = path.join(temporaryRoot, 'hosted-dr-production-evidence.json');
+      const clientProjectionPath = path.join(temporaryRoot, 'hosted-dr-client.generated.ts');
       writeFileSync(manifestPath, `${JSON.stringify(manifest)}\n`, 'utf8');
+      writeFileSync(
+        clientProjectionPath,
+        readFileSync(
+          path.join(repositoryRoot, 'apps/web/config/hosted-dr-client.generated.ts'),
+          'utf8',
+        ).replace(
+          'hostedDrControlPlaneProvisioning = "not-provisioned"',
+          'hostedDrControlPlaneProvisioning = "production"',
+        ),
+        'utf8',
+      );
       writeFileSync(evidencePath, `${JSON.stringify({
         schemaVersion: 1,
         environment: 'production',
@@ -401,6 +435,8 @@ describe('Hosted DR machine contract', () => {
         manifestPath,
         '--production-evidence',
         evidencePath,
+        '--client-projection',
+        clientProjectionPath,
       ], {
         cwd: repositoryRoot,
         encoding: 'utf8',

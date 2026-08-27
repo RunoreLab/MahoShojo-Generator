@@ -8,6 +8,11 @@
     "drOrigin": "https://mahoshojo.colanns.me",
     "mode": "active-passive",
     "provisioning": "not-provisioned",
+    "productionFallback": {
+      "mode": "same-origin-next",
+      "artifactReadiness": "deferred",
+      "productionPlacement": "not-observed"
+    },
     "corsOriginsEnvironment": "HONO_CORS_ORIGINS",
     "primaryProbePath": "/api/health/ready",
     "drProbePath": "/api/hosted/dr-readiness"

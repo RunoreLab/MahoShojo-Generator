@@ -213,6 +213,20 @@ if (controlPlane.corsOriginsEnvironment !== 'HONO_CORS_ORIGINS') {
 if (!['not-provisioned', 'preview', 'production'].includes(controlPlane.provisioning)) {
   fail('controlPlane.provisioning 非法');
 }
+const productionFallback = controlPlane.productionFallback;
+if (
+  productionFallback?.mode !== 'same-origin-next'
+  || !['deferred', 'verified'].includes(productionFallback?.artifactReadiness)
+  || !['not-observed', 'observed'].includes(productionFallback?.productionPlacement)
+) {
+  fail('controlPlane.productionFallback 必须声明合法 mode/readiness/placement');
+}
+if (
+  productionFallback?.productionPlacement === 'observed'
+  && productionFallback?.artifactReadiness !== 'verified'
+) {
+  fail('production fallback placement observed 必须先有 verified artifact readiness');
+}
 if (
   controlPlane.provisioning === 'production'
   && !existsSync(productionEvidencePath)
@@ -302,6 +316,14 @@ if (!unique(capabilityRoutes)) {
 }
 if (!sameValues(capabilityIds, inventory.sharedRouteIds ?? [])) {
   fail('DR capability 必须与 sharedRouteIds 双向完全覆盖');
+}
+if (
+  productionFallback?.artifactReadiness === 'verified'
+  && capabilities.some(({ operations = [] }) => (
+    operations.some(({ drMode }) => drMode === 'fail-closed')
+  ))
+) {
+  fail('production fallback 不得覆盖 fail-closed operation');
 }
 const generatedRoutesSource = readFileSync(argumentValue(
   '--generated-routes',
@@ -449,9 +471,9 @@ const clientConfig = readFileSync(
   path.join(repositoryRoot, 'apps/web/config/hono-api.ts'),
   'utf8',
 );
-const clientProjectionPath = path.join(
-  repositoryRoot,
-  'apps/web/config/hosted-dr-client.generated.ts',
+const clientProjectionPath = argumentValue(
+  '--client-projection',
+  path.join(repositoryRoot, 'apps/web/config/hosted-dr-client.generated.ts'),
 );
 if (!existsSync(clientProjectionPath)) {
   fail('客户端 stable-origin 投影不存在');
@@ -460,6 +482,8 @@ if (!existsSync(clientProjectionPath)) {
   const expectedProjection = renderHostedDrClientConfig(
     controlPlane.stableOrigin,
     controlPlane.previewOrigin,
+    controlPlane.provisioning,
+    productionFallback?.artifactReadiness,
   );
   if (clientProjection !== expectedProjection) {
     fail('客户端 stable-origin 投影与 DR manifest drift；运行 pnpm generate:hosted-dr-client');

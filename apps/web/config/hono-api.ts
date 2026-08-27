@@ -1,5 +1,7 @@
 import {
+  hostedDrControlPlaneProvisioning,
   hostedDrPreviewOrigin,
+  hostedDrProductionFallbackReadiness,
   hostedDrStableOrigin,
 } from './hosted-dr-client.generated';
 
@@ -20,43 +22,77 @@ const isLoopbackDevelopmentOrigin = (origin: string): boolean => {
   }
 };
 
-export const resolveHostedApiOrigin = (
-  configuredOrigin: string | undefined,
-  environment: string | undefined,
-): string => {
-  const origin = configuredOrigin?.trim();
-  const normalizedEnvironment = environment?.trim().toLowerCase() || 'development';
+type HostedApiDeploymentTarget = 'production' | 'preview' | 'local' | 'test';
 
-  if (normalizedEnvironment === 'production') {
-    if (!origin || origin === hostedDrStableOrigin) return hostedDrStableOrigin;
-    throw new Error(
-      'production 环境的 NEXT_PUBLIC_HONO_API_ORIGIN 只能使用 manifest 声明的 stable origin',
-    );
+type HostedApiActivation = {
+  controlPlaneProvisioning: 'not-provisioned' | 'preview' | 'production';
+  productionFallbackReadiness: 'deferred' | 'verified';
+};
+
+type HostedApiConfig = {
+  enabled: boolean;
+  origin: string;
+  target: HostedApiDeploymentTarget;
+};
+
+const resolveDeploymentTarget = (value: string | undefined): HostedApiDeploymentTarget => {
+  const target = value?.trim().toLowerCase();
+  if (!target) return 'local';
+  if (target === 'production' || target === 'preview' || target === 'local' || target === 'test') {
+    return target;
+  }
+  throw new Error(`NEXT_PUBLIC_HOSTED_API_ENVIRONMENT deployment target 非法: ${target}`);
+};
+
+export const resolveHostedApiConfig = (
+  configuredOrigin: string | undefined,
+  deploymentTarget: string | undefined,
+  activation: HostedApiActivation = {
+    controlPlaneProvisioning: hostedDrControlPlaneProvisioning,
+    productionFallbackReadiness: hostedDrProductionFallbackReadiness,
+  },
+): HostedApiConfig => {
+  const origin = configuredOrigin?.trim();
+  const target = resolveDeploymentTarget(deploymentTarget);
+
+  if (target === 'production') {
+    if (origin && origin !== hostedDrStableOrigin) {
+      throw new Error(
+        'production 环境的 NEXT_PUBLIC_HONO_API_ORIGIN 只能使用 manifest 声明的 stable origin',
+      );
+    }
+    if (activation.controlPlaneProvisioning === 'production') {
+      return { enabled: true, origin: hostedDrStableOrigin, target };
+    }
+    if (!origin && activation.productionFallbackReadiness === 'verified') {
+      return { enabled: false, origin: hostedDrStableOrigin, target };
+    }
+    throw new Error('production Hosted placement 未就绪，拒绝构建');
   }
 
-  if (normalizedEnvironment === 'preview') {
-    if (origin === hostedDrPreviewOrigin) return hostedDrPreviewOrigin;
+  if (target === 'preview') {
+    if (origin === hostedDrPreviewOrigin) {
+      return { enabled: true, origin: hostedDrPreviewOrigin, target };
+    }
     throw new Error(
       'preview 环境必须显式使用 manifest 声明的 preview origin，且不得回退到 stable origin',
     );
   }
 
-  if (!origin || origin === hostedDrStableOrigin || origin === hostedDrPreviewOrigin) {
-    return origin || hostedDrStableOrigin;
+  if (!origin) {
+    return { enabled: false, origin: hostedDrStableOrigin, target };
   }
-  if (environment !== 'production' && isLoopbackDevelopmentOrigin(origin)) return origin;
+  if (isLoopbackDevelopmentOrigin(origin)) {
+    return { enabled: true, origin, target };
+  }
   throw new Error(
-    'NEXT_PUBLIC_HONO_API_ORIGIN 必须是 manifest 声明的 stable/preview origin，'
-    + '或非 production 的 loopback origin',
+    'local/test 的 NEXT_PUBLIC_HONO_API_ORIGIN 只能使用 loopback origin',
   );
 };
 
-export const honoApiConfig = {
-  enabled: true,
+export const honoApiConfig: HostedApiConfig = resolveHostedApiConfig(
+  process.env.NEXT_PUBLIC_HONO_API_ORIGIN,
+  process.env.NEXT_PUBLIC_HOSTED_API_ENVIRONMENT,
   // Production clients consume stable/explicit preview logical entries only;
   // physical primary/DR origins remain server/control-plane contract details.
-  origin: resolveHostedApiOrigin(
-    process.env.NEXT_PUBLIC_HONO_API_ORIGIN,
-    process.env.NEXT_PUBLIC_HOSTED_API_ENVIRONMENT?.trim() || process.env.NODE_ENV,
-  ),
-};
+);
