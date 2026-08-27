@@ -1,4 +1,5 @@
 import { z } from 'zod/v3';
+import { readSafePublicAiError } from '@mahoshojo/hosted-api/regular-generation';
 
 const mocks = vi.hoisted(() => ({
   configuredFetch: null as typeof fetch | null,
@@ -159,6 +160,37 @@ describe('Node AI non-idempotent generation replay boundary', () => {
     });
     expect(serialized).not.toMatch(
       /provider-key-canary|provider-url-canary|provider-model-canary|provider-canary|body-canary/u,
+    );
+  });
+
+  it('structured dispatch 前错误也使用当前 Provider 与 prompt 上下文脱敏', async () => {
+    mocks.createOpenAI.mockImplementation(() => {
+      throw Object.assign(new Error(
+        'provider-key-canary https://provider-url-canary.invalid/v1 system-body-canary prompt-body-canary',
+      ), {
+        name: 'AI_APICallError',
+        statusCode: 503,
+      });
+    });
+    const { createNodeStructuredAiRuntime, LoadBalanceStrategy } = await import('../src/node-runtime');
+    const runtime = createNodeStructuredAiRuntime({
+      providers: [{ ...provider('first-provider-canary'), retryCount: 1 }],
+    });
+
+    const caught = await runtime.generateWithAI(
+      'input-body-canary',
+      generationConfig,
+      { loadBalanceStrategy: LoadBalanceStrategy.SEQUENTIAL },
+    ).catch((failure: unknown) => failure as Error);
+    const projection = readSafePublicAiError(caught);
+
+    expect(projection).toEqual({
+      code: 'AI_UPSTREAM_REQUEST_FAILED',
+      message: '上游 AI 请求失败',
+      upstreamStatus: 503,
+    });
+    expect(JSON.stringify(projection)).not.toMatch(
+      /provider-key-canary|provider-url-canary|system-body-canary|prompt-body-canary/u,
     );
   });
 });

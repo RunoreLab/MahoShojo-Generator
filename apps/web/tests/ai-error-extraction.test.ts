@@ -127,7 +127,7 @@ describe('ai-error-extraction', () => {
     });
   });
 
-  test('恶意 getter、畸形 response body 与普通内部 Error 均 fail closed', () => {
+  test('恶意 getter 保留低风险 Provider 归类，普通内部 Error 不取得公共投影信任', () => {
     const hostile = Object.defineProperty({
       name: 'AI_APICallError',
       statusCode: 502,
@@ -148,10 +148,7 @@ describe('ai-error-extraction', () => {
       message: '上游 AI 请求失败',
       upstreamStatus: 502,
     });
-    expect(ordinaryProjection).toEqual({
-      code: 'AI_UPSTREAM_REQUEST_FAILED',
-      message: '上游 AI 请求失败',
-    });
+    expect(ordinaryProjection).toBeNull();
     expect(JSON.stringify([hostileProjection, ordinaryProjection])).not.toMatch(
       /getter-secret-canary|database-secret-canary/u,
     );
@@ -163,11 +160,7 @@ describe('ai-error-extraction', () => {
       responseBody: JSON.stringify({ error: { message: 'sql-secret-canary' } }),
     });
 
-    expect(readSafePublicAiError(enhanceErrorWithUpstreamMessage(internal))).toEqual({
-      code: 'AI_UPSTREAM_REQUEST_FAILED',
-      message: '上游 AI 请求失败',
-      upstreamStatus: 500,
-    });
+    expect(readSafePublicAiError(enhanceErrorWithUpstreamMessage(internal))).toBeNull();
   });
 
   test('Provider request ID 命中 secret 值时不进入公共投影', () => {

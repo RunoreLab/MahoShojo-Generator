@@ -257,6 +257,11 @@ export function enhanceErrorWithUpstreamMessage(
 
   const name = readSafeErrorName(error);
   const fixed = fixedProjection(name);
+  if (!fixed && !isRecognizedUpstreamError(error)) {
+    // 普通内部异常不得仅凭 status/responseBody 等形状取得 Provider 公共投影信任。
+    // 返回低基数 Error 供日志与分类使用，Hosted API 边界会将其投影为 generic 错误。
+    return new Error('AI_UPSTREAM_REQUEST_FAILED');
+  }
   const statusCode = readStatusCode(error);
   const upstreamRequestId = readUpstreamRequestId(error, options?.secrets);
   const projection = fixed ?? {
