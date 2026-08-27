@@ -95,8 +95,8 @@ read authority / current state
 | --- | --- | --- | --- | --- |
 | `GMR-00` 文档 re-baseline | `DONE` | 无 | 双门禁、Hono+Redis 架构、Goal 指南一致 | 无 |
 | `GMR-01` runtime-neutral state machine | `DONE` | GMR-00 | pure transition + epoch/revision fixture | 不引入 Hono/Redis |
-| `GMR-02` Redis conditional checkpoint | `IN_PROGRESS` | GMR-01 | CAS checkpoint + TTL + fail-closed | 不做 WSS/UI |
-| `GMR-03` single-writer RoomActor | `BLOCKED` | GMR-02 | actor registry/queue/recovery/shutdown | 不做 multi-instance |
+| `GMR-02` Redis conditional checkpoint | `DONE` | GMR-01 | CAS checkpoint + TTL + fail-closed | 不做 WSS/UI |
+| `GMR-03` single-writer RoomActor | `READY` | GMR-02 | actor registry/queue/recovery/shutdown | 不做 multi-instance |
 | `GMR-04` Node WSS security skeleton | `BLOCKED` | GMR-03 | Node WS bootstrap + upgrade/security/backpressure | 不做产品 UI |
 | `GMR-05` ticket/membership/reconnect/lifecycle | `BLOCKED` | GMR-04 | membership/connection/epoch recovery | 不做 generation fan-out |
 | `GMR-06` D1 directory/discovery | `BLOCKED` | GMR-05 | derived directory + orphan cleanup | 不执行生产 migration |
@@ -222,6 +222,24 @@ validate -> pure derive -> conditional checkpoint
 - Redis unavailable 不产生 memory-only fake success；
 - command timeout/conflict 有稳定内部错误；
 - targeted tests + `apps/api` test/typecheck/lint 通过。
+
+**Evidence（2026-08-28）**
+
+- Goal ID：`GMR-02`；source SHA：`c80e6d6b3a1827f1b5c1aaa0a9cf27a7549ad28b`；
+- changed files：`apps/api` 的 `RedisRoomStore`、`RedisRuntime` adapter、真实 Redis verifier、fixture/tests 与 verifier
+  tsconfig，`packages/multiplayer-core` 的一次性 transition checkpoint receipt，以及 CI/repository ownership gates；
+- validation：multiplayer-core `68/68`、API `207/207`、root `191/191`、Web `1893/1893` tests，受影响 package
+  typecheck/build/lint、workspace boundary、完整 `pnpm run ci:verify` 与 `git diff --check` 均通过；既有 naming audit
+  `1378` 条维持 report-only，physical D1 probe 与 preview environment 继续按既有口径 `DEFERRED`；
+- fault cases：stale/old epoch、完整 predecessor payload collision、v1 active/v2 expiring compatibility、一次性 receipt、
+  Redis unavailable/timeout/unknown response、malformed/secret-negative、delete/expire/TTL 后 same-epoch resurrection、
+  ledger type/容量 fail-closed 且不污染，以及 Redis 8.2 full 与 AOF write → restart → read recovery；
+- public wire/schema change：`no`；内部 Redis schema 增加 versioned checkpoint envelope 与每 `roomId` 最多 16 epoch
+  的无 TTL negative ledger；production/schema migration/secret/release action：`no`；
+- independent review：architecture、security/authority、compatibility/replay/data、test adequacy 最终均为 Critical `0` /
+  Important `0` / Minor `0`；先前 expiry 单调性、完整 predecessor、receipt/epoch resurrection 与 destructive test
+  coverage findings 均已关闭；
+- open findings：无；next READY Goal：`GMR-03`。
 
 ### GMR-03 single-writer RoomActor
 

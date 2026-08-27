@@ -14,6 +14,8 @@ const ACTIVE_ROOM_CHECKPOINT_VERSION = 1 as const;
 const EXPIRING_ROOM_CHECKPOINT_VERSION = 2 as const;
 const DEFAULT_ACTIVE_TTL_SECONDS = 3_600;
 const DEFAULT_TERMINAL_TTL_SECONDS = 300;
+// Checkpoint TTL 结束 Room incarnation；该有界负向 ledger 故意不设 TTL，避免迟到 create
+// receipt 在相同 roomEpoch 上复活已结束的 incarnation。达到配额后必须改用新 Room ID。
 const MAX_ROOM_INCARNATIONS = 16;
 const KEY_PREFIX = 'mahoshojo:room:v1';
 
