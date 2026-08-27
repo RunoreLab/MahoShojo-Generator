@@ -1,6 +1,7 @@
 import {
   transitionArenaRoom,
   type ArenaRoomAuthorityState,
+  type ArenaRoomTransitionSuccess,
 } from '@mahoshojo/multiplayer-core';
 
 export const ARENA_ROOM_TEST_TIMESTAMP = '2026-08-28T00:00:00.000Z';
@@ -40,7 +41,14 @@ const hostAuthority = {
   accountUserId: 101,
 };
 
-export const createArenaRoomState = (roomEpoch = 'epoch-1'): ArenaRoomAuthorityState => {
+const success = (result: ReturnType<typeof transitionArenaRoom>): ArenaRoomTransitionSuccess => {
+  if (!result.ok) throw new Error(`${result.code}:${result.reason}`);
+  return result;
+};
+
+export const createArenaRoomTransition = (
+  roomEpoch = 'epoch-1',
+): ArenaRoomTransitionSuccess => {
   const result = transitionArenaRoom(null, {
     type: 'create',
     roomId: 'room-1',
@@ -55,13 +63,16 @@ export const createArenaRoomState = (roomEpoch = 'epoch-1'): ArenaRoomAuthorityS
     sharedConfig: sharedConfig(),
     timestamp: ARENA_ROOM_TEST_TIMESTAMP,
   }, hostAuthority);
-  if (!result.ok) throw new Error(`${result.code}:${result.reason}`);
-  return result.nextState;
+  return success(result);
 };
 
-export const publishArenaRoomState = (
+export const createArenaRoomState = (roomEpoch = 'epoch-1'): ArenaRoomAuthorityState => (
+  createArenaRoomTransition(roomEpoch).nextState
+);
+
+export const publishArenaRoomTransition = (
   state: ArenaRoomAuthorityState,
-): ArenaRoomAuthorityState => {
+): ArenaRoomTransitionSuccess => {
   const result = transitionArenaRoom(state, {
     type: 'publish-config',
     expectedRoomEpoch: state.snapshot.roomEpoch,
@@ -69,19 +80,25 @@ export const publishArenaRoomState = (
     sharedConfig: { ...state.snapshot.sharedConfig, userGuidance: '已确认写入' },
     timestamp: ARENA_ROOM_NEXT_TIMESTAMP,
   }, hostAuthority);
-  if (!result.ok) throw new Error(`${result.code}:${result.reason}`);
-  return result.nextState;
+  return success(result);
 };
 
-export const closeArenaRoomState = (
+export const publishArenaRoomState = (
   state: ArenaRoomAuthorityState,
-): ArenaRoomAuthorityState => {
+): ArenaRoomAuthorityState => publishArenaRoomTransition(state).nextState;
+
+export const closeArenaRoomTransition = (
+  state: ArenaRoomAuthorityState,
+): ArenaRoomTransitionSuccess => {
   const result = transitionArenaRoom(state, {
     type: 'close',
     expectedRoomEpoch: state.snapshot.roomEpoch,
     reason: 'test-close',
     timestamp: ARENA_ROOM_NEXT_TIMESTAMP,
   }, hostAuthority);
-  if (!result.ok) throw new Error(`${result.code}:${result.reason}`);
-  return result.nextState;
+  return success(result);
 };
+
+export const closeArenaRoomState = (
+  state: ArenaRoomAuthorityState,
+): ArenaRoomAuthorityState => closeArenaRoomTransition(state).nextState;

@@ -2,8 +2,11 @@ import { createHash, randomUUID } from 'node:crypto';
 
 import {
   checkpointPredecessorOf,
+  createArenaRoomCheckpointCommit,
   transitionArenaRoom,
   type ArenaRoomAuthorityState,
+  type ArenaRoomCheckpointCommit,
+  type ArenaRoomTransitionSuccess,
 } from '@mahoshojo/multiplayer-core';
 import { createClient } from 'redis';
 
@@ -46,6 +49,8 @@ const NEXT_TIMESTAMP = '2026-08-28T00:01:00.000Z';
 const roomId = `room-restart-${token}`;
 const ttlRoomId = `room-ttl-${token}`;
 const epochRoomId = `room-epoch-${token}`;
+const expiryFenceRoomId = `room-expiry-fence-${token}`;
+const legacyRoomId = `room-legacy-v1-${token}`;
 const malformedRoomId = `room-malformed-${token}`;
 const roomKey = (id: string): string => (
   `mahoshojo:room:v1:${keyPrefix}:${createHash('sha256').update(id).digest('hex')}:checkpoint`
@@ -85,7 +90,12 @@ const hostAuthority = {
   accountUserId: 101,
 };
 
-const createState = (id: string, roomEpoch = 'epoch-1'): ArenaRoomAuthorityState => {
+const success = (result: ReturnType<typeof transitionArenaRoom>): ArenaRoomTransitionSuccess => {
+  if (!result.ok) throw new Error(`${result.code}:${result.reason}`);
+  return result;
+};
+
+const createRoom = (id: string, roomEpoch = 'epoch-1'): ArenaRoomTransitionSuccess => {
   const result = transitionArenaRoom(null, {
     type: 'create',
     roomId: id,
@@ -100,11 +110,10 @@ const createState = (id: string, roomEpoch = 'epoch-1'): ArenaRoomAuthorityState
     sharedConfig: sharedConfig(),
     timestamp: TIMESTAMP,
   }, hostAuthority);
-  if (!result.ok) throw new Error('ROOM_REDIS_FIXTURE_CREATE_FAILED');
-  return result.nextState;
+  return success(result);
 };
 
-const publish = (state: ArenaRoomAuthorityState): ArenaRoomAuthorityState => {
+const publish = (state: ArenaRoomAuthorityState): ArenaRoomTransitionSuccess => {
   const result = transitionArenaRoom(state, {
     type: 'publish-config',
     expectedRoomEpoch: state.snapshot.roomEpoch,
@@ -112,20 +121,22 @@ const publish = (state: ArenaRoomAuthorityState): ArenaRoomAuthorityState => {
     sharedConfig: { ...state.snapshot.sharedConfig, userGuidance: 'restart-recovery-acknowledged' },
     timestamp: NEXT_TIMESTAMP,
   }, hostAuthority);
-  if (!result.ok) throw new Error('ROOM_REDIS_FIXTURE_PUBLISH_FAILED');
-  return result.nextState;
+  return success(result);
 };
 
-const close = (state: ArenaRoomAuthorityState): ArenaRoomAuthorityState => {
+const close = (state: ArenaRoomAuthorityState): ArenaRoomTransitionSuccess => {
   const result = transitionArenaRoom(state, {
     type: 'close',
     expectedRoomEpoch: state.snapshot.roomEpoch,
     reason: 'verifier-close',
     timestamp: NEXT_TIMESTAMP,
   }, hostAuthority);
-  if (!result.ok) throw new Error('ROOM_REDIS_FIXTURE_CLOSE_FAILED');
-  return result.nextState;
+  return success(result);
 };
+
+const commit = (transition: ArenaRoomTransitionSuccess): ArenaRoomCheckpointCommit => (
+  createArenaRoomCheckpointCommit(transition)
+);
 
 const fixedError = async (operation: Promise<unknown>, expectedCode: string): Promise<void> => {
   try {
@@ -165,14 +176,14 @@ try {
     if (deleted.kind !== 'deleted') throw new Error('ROOM_REDIS_RESTART_CLEANUP_FAILED');
     console.info(JSON.stringify({ roomRedis: true, phase: 'read', restartRecovery: true }));
   } else {
-    const initial = createState(roomId);
-    const acknowledged = publish(initial);
-    const created = await writerStore.save({ checkpoint: initial, expected: null });
-    const duplicateCreate = await readerStore.save({ checkpoint: initial, expected: null });
-    const mutated = await writerStore.save({
-      checkpoint: acknowledged,
-      expected: checkpointPredecessorOf(initial),
-    });
+    const createdTransition = createRoom(roomId);
+    const initial = createdTransition.nextState;
+    const publishedTransition = publish(initial);
+    const acknowledged = structuredClone(publishedTransition.nextState);
+    publishedTransition.nextState.snapshot.sharedConfig.userGuidance = 'tampered-old-payload';
+    const created = await writerStore.save({ commit: commit(createdTransition) });
+    const duplicateCreate = await readerStore.save({ commit: commit(createdTransition) });
+    const mutated = await writerStore.save({ commit: commit(publishedTransition) });
     const recovered = await readerStore.load(roomId);
     if (
       created.kind !== 'saved'
@@ -187,26 +198,15 @@ try {
       console.info(JSON.stringify({ roomRedis: true, phase: 'write', acknowledged: true }));
     } else {
       const staleClose = close(initial);
-      const staleWriter = await readerStore.save({
-        checkpoint: staleClose,
-        expected: checkpointPredecessorOf(initial),
-      });
+      const staleWriter = await readerStore.save({ commit: commit(staleClose) });
       await fixedError(writerStore.save({
-        checkpoint: initial,
-        expected: checkpointPredecessorOf(acknowledged),
-      }), 'REDIS_ROOM_SUCCESSOR_INVALID');
-      await fixedError(writerStore.save({
-        checkpoint: createState(roomId, 'epoch-2'),
-        expected: checkpointPredecessorOf(acknowledged),
-      }), 'REDIS_ROOM_SUCCESSOR_INVALID');
+        commit: {} as ArenaRoomCheckpointCommit,
+      }), 'REDIS_ROOM_TRANSITION_COMMIT_INVALID');
 
-      const currentEpoch = createState(epochRoomId, 'epoch-2');
-      const epochCreated = await writerStore.save({ checkpoint: currentEpoch, expected: null });
-      const oldEpoch = createState(epochRoomId, 'epoch-1');
-      const oldEpochOverwrite = await readerStore.save({
-        checkpoint: close(oldEpoch),
-        expected: checkpointPredecessorOf(oldEpoch),
-      });
+      const currentEpoch = createRoom(epochRoomId, 'epoch-2');
+      const epochCreated = await writerStore.save({ commit: commit(currentEpoch) });
+      const oldEpoch = createRoom(epochRoomId, 'epoch-1');
+      const oldEpochOverwrite = await readerStore.save({ commit: commit(close(oldEpoch.nextState)) });
       if (
         staleWriter.kind !== 'conflict'
         || epochCreated.kind !== 'saved'
@@ -215,11 +215,9 @@ try {
         throw new Error('ROOM_REDIS_CAS_FENCING_FAILED');
       }
 
-      const closed = close(acknowledged);
-      const closedSaved = await writerStore.save({
-        checkpoint: closed,
-        expected: checkpointPredecessorOf(acknowledged),
-      });
+      const closedTransition = close(acknowledged);
+      const closed = closedTransition.nextState;
+      const closedSaved = await writerStore.save({ commit: commit(closedTransition) });
       const terminalTtl = await cleanup.pTTL(roomKey(roomId));
       if (
         closedSaved.kind !== 'saved'
@@ -239,17 +237,6 @@ try {
         expected: checkpointPredecessorOf(closed),
       });
       const repeatedExpiryTtl = await cleanup.pTTL(roomKey(roomId));
-      const resurrectionCandidate = {
-        ...closed,
-        snapshot: {
-          ...closed.snapshot,
-          controlSeq: closed.snapshot.controlSeq + 1,
-        },
-      };
-      const resurrection = await writerStore.save({
-        checkpoint: resurrectionCandidate,
-        expected: checkpointPredecessorOf(closed),
-      });
       const deleted = await writerStore.delete({
         roomId,
         expected: checkpointPredecessorOf(closed),
@@ -265,11 +252,27 @@ try {
         || firstExpiryTtl > 300_000
         || repeatedExpiryTtl <= 0
         || repeatedExpiryTtl > firstExpiryTtl
-        || resurrection.kind !== 'conflict'
         || deleted.kind !== 'deleted'
         || repeatedDelete.kind !== 'missing'
       ) {
         throw new Error('ROOM_REDIS_EXPIRY_DELETE_FAILED');
+      }
+
+      const expiryFenceCreated = createRoom(expiryFenceRoomId);
+      if ((await writerStore.save({ commit: commit(expiryFenceCreated) })).kind !== 'saved') {
+        throw new Error('ROOM_REDIS_EXPIRY_FENCE_CREATE_FAILED');
+      }
+      if ((await writerStore.expire({
+        roomId: expiryFenceRoomId,
+        expected: checkpointPredecessorOf(expiryFenceCreated.nextState),
+      })).kind !== 'expired') {
+        throw new Error('ROOM_REDIS_EXPIRY_FENCE_INSTALL_FAILED');
+      }
+      const resurrection = await writerStore.save({
+        commit: commit(publish(expiryFenceCreated.nextState)),
+      });
+      if (resurrection.kind !== 'conflict') {
+        throw new Error('ROOM_REDIS_EXPIRY_FENCE_RESURRECTION_FAILED');
       }
 
       const malformedRaw = '{provider-secret-canary';
@@ -285,6 +288,39 @@ try {
       }), 'REDIS_ROOM_CHECKPOINT_INVALID');
       if (await cleanup.get(malformedKey) !== malformedRaw) {
         throw new Error('ROOM_REDIS_MALFORMED_CHECKPOINT_MUTATED');
+      }
+
+      const legacyCreated = createRoom(legacyRoomId);
+      const legacyState = legacyCreated.nextState;
+      const legacyKey = roomKey(legacyRoomId);
+      await cleanup.set(legacyKey, JSON.stringify({
+        checkpointVersion: 1,
+        ...checkpointPredecessorOf(legacyState),
+        state: legacyState,
+      }), { PX: 3_600_000 });
+      if (JSON.stringify(await readerStore.load(legacyRoomId)) !== JSON.stringify(legacyState)) {
+        throw new Error('ROOM_REDIS_LEGACY_V1_LOAD_FAILED');
+      }
+      const legacyPublished = publish(legacyState);
+      if ((await writerStore.save({ commit: commit(legacyPublished) })).kind !== 'saved') {
+        throw new Error('ROOM_REDIS_LEGACY_V1_SAVE_FAILED');
+      }
+      if ((await writerStore.expire({
+        roomId: legacyRoomId,
+        expected: checkpointPredecessorOf(legacyPublished.nextState),
+      })).kind !== 'expired') {
+        throw new Error('ROOM_REDIS_LEGACY_V1_EXPIRE_FAILED');
+      }
+      const expiringLegacy = JSON.parse(await cleanup.get(legacyKey) || 'null') as unknown;
+      if (
+        typeof expiringLegacy !== 'object'
+        || expiringLegacy === null
+        || !('checkpointVersion' in expiringLegacy)
+        || expiringLegacy.checkpointVersion !== 2
+        || !('expiryFence' in expiringLegacy)
+        || expiringLegacy.expiryFence !== 'expiring'
+      ) {
+        throw new Error('ROOM_REDIS_LEGACY_V1_TOMBSTONE_FAILED');
       }
       await fixedError(writerStore.delete({
         roomId: malformedRoomId,
@@ -306,8 +342,8 @@ try {
         activeTtlSeconds: 1,
         terminalTtlSeconds: 1,
       });
-      const shortLived = createState(ttlRoomId);
-      if ((await shortTtlStore.save({ checkpoint: shortLived, expected: null })).kind !== 'saved') {
+      const shortLived = createRoom(ttlRoomId);
+      if ((await shortTtlStore.save({ commit: commit(shortLived) })).kind !== 'saved') {
         throw new Error('ROOM_REDIS_SHORT_TTL_CREATE_FAILED');
       }
       await new Promise<void>((resolve) => setTimeout(resolve, 1_100));
@@ -319,12 +355,13 @@ try {
         phase: 'full',
         createLoadMutate: true,
         stalePredecessor: true,
-        successorValidation: true,
+        transitionReceipt: true,
         oldEpochFence: true,
         terminalTtl: true,
         monotonicExpiryFence: true,
         expireDelete: true,
         malformedExisting: true,
+        baselineV1Compatibility: true,
         ttlExpiry: true,
       }));
     }
@@ -338,6 +375,8 @@ try {
       roomKey(roomId),
       roomKey(ttlRoomId),
       roomKey(epochRoomId),
+      roomKey(expiryFenceRoomId),
+      roomKey(legacyRoomId),
       roomKey(malformedRoomId),
     ]);
   }

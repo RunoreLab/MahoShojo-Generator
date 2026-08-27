@@ -4,11 +4,14 @@ import {
   ARENA_ROOM_AUTHORITY_STATE_VERSION,
   checkpointPredecessorOf,
   parseArenaRoomAuthorityState,
+  readArenaRoomCheckpointCommit,
   type ArenaRoomAuthorityState,
+  type ArenaRoomCheckpointCommit,
   type ArenaRoomCheckpointPredecessor,
 } from '@mahoshojo/multiplayer-core';
 
-const ROOM_CHECKPOINT_VERSION = 1 as const;
+const ACTIVE_ROOM_CHECKPOINT_VERSION = 1 as const;
+const EXPIRING_ROOM_CHECKPOINT_VERSION = 2 as const;
 const DEFAULT_ACTIVE_TTL_SECONDS = 3_600;
 const DEFAULT_TERMINAL_TTL_SECONDS = 300;
 const KEY_PREFIX = 'mahoshojo:room:v1';
@@ -18,7 +21,7 @@ const SAVE_SCRIPT = `
 local candidateDecoded, candidate = pcall(cjson.decode, ARGV[7])
 if not candidateDecoded or type(candidate) ~= 'table'
   or candidate.checkpointVersion ~= tonumber(ARGV[2])
-  or candidate.expiryFence ~= 'active'
+  or candidate.expiryFence ~= nil
   or candidate.roomId ~= ARGV[3] then
   return 'invalid-successor'
 end
@@ -39,8 +42,10 @@ elseif ARGV[1] == 'match' then
     or current.controlSeq ~= tonumber(ARGV[6]) then
     return 'conflict'
   end
-  if current.expiryFence == 'expiring' then return 'conflict' end
-  if current.expiryFence ~= 'active' then return 'invalid-existing' end
+  local currentActive = current.checkpointVersion == 1 and current.expiryFence == nil
+  local currentExpiring = current.checkpointVersion == 2 and current.expiryFence == 'expiring'
+  if currentExpiring then return 'conflict' end
+  if not currentActive then return 'invalid-existing' end
   if candidate.roomEpoch ~= current.roomEpoch
     or candidate.controlSeq <= current.controlSeq
     or candidate.revision < current.revision
@@ -60,14 +65,15 @@ local raw = redis.call('GET', KEYS[1])
 if not raw then return 'missing' end
 local decoded, current = pcall(cjson.decode, raw)
 if not decoded or type(current) ~= 'table' then return 'invalid-existing' end
-if current.checkpointVersion ~= tonumber(ARGV[1])
-  or current.roomId ~= ARGV[2]
+if current.roomId ~= ARGV[2]
   or current.roomEpoch ~= ARGV[3]
   or current.revision ~= tonumber(ARGV[4])
   or current.controlSeq ~= tonumber(ARGV[5]) then
   return 'conflict'
 end
-if current.expiryFence ~= 'active' and current.expiryFence ~= 'expiring' then
+local currentActive = current.checkpointVersion == 1 and current.expiryFence == nil
+local currentExpiring = current.checkpointVersion == 2 and current.expiryFence == 'expiring'
+if not currentActive and not currentExpiring then
   return 'invalid-existing'
 end
 redis.call('DEL', KEYS[1])
@@ -80,14 +86,15 @@ local raw = redis.call('GET', KEYS[1])
 if not raw then return 'missing' end
 local decoded, current = pcall(cjson.decode, raw)
 if not decoded or type(current) ~= 'table' then return 'invalid-existing' end
-if current.checkpointVersion ~= tonumber(ARGV[1])
-  or current.roomId ~= ARGV[2]
+if current.roomId ~= ARGV[2]
   or current.roomEpoch ~= ARGV[3]
   or current.revision ~= tonumber(ARGV[4])
   or current.controlSeq ~= tonumber(ARGV[5]) then
   return 'conflict'
 end
-if current.expiryFence ~= 'active' and current.expiryFence ~= 'expiring' then
+local currentActive = current.checkpointVersion == 1 and current.expiryFence == nil
+local currentExpiring = current.checkpointVersion == 2 and current.expiryFence == 'expiring'
+if not currentActive and not currentExpiring then
   return 'invalid-existing'
 end
 local currentTtl = redis.call('PTTL', KEYS[1])
@@ -99,6 +106,7 @@ local targetTtl = tonumber(ARGV[6])
 if currentTtl > 0 and currentTtl < targetTtl then
   targetTtl = currentTtl
 end
+current.checkpointVersion = 2
 current.expiryFence = 'expiring'
 redis.call('SET', KEYS[1], cjson.encode(current), 'PX', targetTtl)
 return 'expired'
@@ -126,8 +134,7 @@ export type RedisRoomStoreExpireResult = { readonly kind: 'expired' | 'missing' 
 export interface RedisRoomStore {
   load(roomId: string): Promise<ArenaRoomAuthorityState | null>;
   save(input: {
-    checkpoint: ArenaRoomAuthorityState;
-    expected: ArenaRoomCheckpointPredecessor | null;
+    commit: ArenaRoomCheckpointCommit;
   }): Promise<RedisRoomStoreSaveResult>;
   delete(input: {
     roomId: string;
@@ -140,8 +147,8 @@ export interface RedisRoomStore {
 }
 
 type StoredRoomCheckpoint = {
-  checkpointVersion: typeof ROOM_CHECKPOINT_VERSION;
-  expiryFence: 'active' | 'expiring';
+  checkpointVersion: typeof ACTIVE_ROOM_CHECKPOINT_VERSION | typeof EXPIRING_ROOM_CHECKPOINT_VERSION;
+  expiryFence?: 'expiring';
   roomId: string;
   roomEpoch: string;
   revision: number;
@@ -182,13 +189,20 @@ const parseStoredCheckpoint = (raw: string, expectedRoomId: string): StoredRoomC
     const candidate: unknown = JSON.parse(raw);
     if (!isRecord(candidate)) throw new Error('invalid');
     const keys = Object.keys(candidate).sort();
-    if (keys.join('|') !== 'checkpointVersion|controlSeq|expiryFence|revision|roomEpoch|roomId|state') {
+    const activeKeys = 'checkpointVersion|controlSeq|revision|roomEpoch|roomId|state';
+    const expiringKeys = 'checkpointVersion|controlSeq|expiryFence|revision|roomEpoch|roomId|state';
+    const serializedKeys = keys.join('|');
+    const activeEnvelope = candidate.checkpointVersion === ACTIVE_ROOM_CHECKPOINT_VERSION
+      && serializedKeys === activeKeys
+      && candidate.expiryFence === undefined;
+    const expiringEnvelope = candidate.checkpointVersion === EXPIRING_ROOM_CHECKPOINT_VERSION
+      && serializedKeys === expiringKeys
+      && candidate.expiryFence === 'expiring';
+    if (!activeEnvelope && !expiringEnvelope) {
       throw new Error('invalid');
     }
     if (
-      candidate.checkpointVersion !== ROOM_CHECKPOINT_VERSION
-      || (candidate.expiryFence !== 'active' && candidate.expiryFence !== 'expiring')
-      || candidate.roomId !== expectedRoomId
+      candidate.roomId !== expectedRoomId
       || !isRoomId(candidate.roomEpoch)
       || !Number.isSafeInteger(candidate.revision)
       || Number(candidate.revision) < 0
@@ -209,8 +223,8 @@ const parseStoredCheckpoint = (raw: string, expectedRoomId: string): StoredRoomC
       throw new Error('invalid');
     }
     return {
-      checkpointVersion: ROOM_CHECKPOINT_VERSION,
-      expiryFence: candidate.expiryFence,
+      checkpointVersion: candidate.checkpointVersion as StoredRoomCheckpoint['checkpointVersion'],
+      ...(candidate.expiryFence === 'expiring' ? { expiryFence: 'expiring' as const } : {}),
       roomId: predecessor.roomId,
       roomEpoch: predecessor.roomEpoch,
       revision: predecessor.revision,
@@ -231,8 +245,7 @@ const createStoredCheckpoint = (input: unknown): StoredRoomCheckpoint => {
   }
   const predecessor = checkpointPredecessorOf(state);
   return {
-    checkpointVersion: ROOM_CHECKPOINT_VERSION,
-    expiryFence: 'active',
+    checkpointVersion: ACTIVE_ROOM_CHECKPOINT_VERSION,
     roomId: predecessor.roomId,
     roomEpoch: predecessor.roomEpoch,
     revision: predecessor.revision,
@@ -242,7 +255,7 @@ const createStoredCheckpoint = (input: unknown): StoredRoomCheckpoint => {
 };
 
 const predecessorArguments = (expected: ArenaRoomCheckpointPredecessor): string[] => [
-  String(ROOM_CHECKPOINT_VERSION),
+  String(ACTIVE_ROOM_CHECKPOINT_VERSION),
   expected.roomId,
   expected.roomEpoch,
   String(expected.revision),
@@ -301,30 +314,37 @@ export const createRedisRoomStore = (options: RedisRoomStoreOptions): RedisRoomS
       const raw = await options.getClient().get(roomKey(roomId));
       if (raw === null) return null;
       const stored = parseStoredCheckpoint(raw, roomId);
-      return stored.expiryFence === 'expiring' ? null : stored.state;
+      return stored.checkpointVersion === EXPIRING_ROOM_CHECKPOINT_VERSION ? null : stored.state;
     },
 
     async save(input) {
-      const stored = createStoredCheckpoint(input.checkpoint);
-      if (input.expected !== null && !isCheckpointPredecessor(input.expected)) {
+      let commit;
+      try {
+        commit = readArenaRoomCheckpointCommit(input.commit);
+      } catch {
+        throw new Error('REDIS_ROOM_TRANSITION_COMMIT_INVALID');
+      }
+      const stored = createStoredCheckpoint(commit.nextState);
+      const expected = commit.predecessor;
+      if (expected !== null && !isCheckpointPredecessor(expected)) {
         throw new Error('REDIS_ROOM_PREDECESSOR_INVALID');
       }
-      if (input.expected !== null && input.expected.roomId !== stored.roomId) {
+      if (expected !== null && expected.roomId !== stored.roomId) {
         throw new Error('REDIS_ROOM_PREDECESSOR_INVALID');
       }
-      if (!isValidSuccessor(stored, input.expected)) {
+      if (!isValidSuccessor(stored, expected)) {
         throw new Error('REDIS_ROOM_SUCCESSOR_INVALID');
       }
-      const expectedArguments = input.expected === null
+      const expectedArguments = expected === null
         ? [
             'absent',
-            String(ROOM_CHECKPOINT_VERSION),
+            String(ACTIVE_ROOM_CHECKPOINT_VERSION),
             stored.roomId,
             '',
             '-1',
             '-1',
           ]
-        : ['match', ...predecessorArguments(input.expected)];
+        : ['match', ...predecessorArguments(expected)];
       const raw = await options.getClient().eval(SAVE_SCRIPT, {
         keys: [roomKey(stored.roomId)],
         arguments: [

@@ -510,17 +510,4 @@ export const transitionFailure = (
   reason: ArenaRoomTransitionFailureReason,
 ): ArenaRoomTransitionFailure => ({ ok: false, code, reason });
 
-export const transitionSuccess = (input: {
-  readonly kind: ArenaRoomTransitionSuccess['kind'];
-  readonly predecessor: ArenaRoomCheckpointPredecessor | null;
-  readonly nextState: ArenaRoomAuthorityState;
-  readonly events?: readonly ControlRoomEvent[];
-}): ArenaRoomTransitionSuccess => ({
-  ok: true,
-  kind: input.kind,
-  predecessor: input.predecessor,
-  nextState: input.nextState,
-  events: input.events ?? [],
-});
-
 export const parseAuthoritySnapshot = (snapshot: unknown): ArenaRoomSnapshot => ArenaRoomSnapshotSchema.parse(snapshot);

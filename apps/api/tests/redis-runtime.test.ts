@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { createArenaRoomCheckpointCommit } from '@mahoshojo/multiplayer-core';
+
 const redisClient = vi.hoisted(() => ({
   close: vi.fn(async () => undefined),
   connect: vi.fn(async () => undefined),
@@ -22,7 +24,7 @@ import {
   RedisRuntime,
   type RedisRuntimeObserver,
 } from '#/redis/runtime';
-import { createArenaRoomState } from './arena-room-fixtures';
+import { createArenaRoomTransition } from './arena-room-fixtures';
 
 beforeEach(() => {
   vi.restoreAllMocks();
@@ -43,7 +45,9 @@ describe('RedisRuntime shutdown', () => {
     const store = redis.getRoomStore();
 
     await expect(store.load('room-1')).rejects.toThrow('REDIS_ROOM_CHECKPOINT_UNAVAILABLE');
-    await expect(store.save({ checkpoint: createArenaRoomState(), expected: null }))
+    await expect(store.save({
+      commit: createArenaRoomCheckpointCommit(createArenaRoomTransition()),
+    }))
       .rejects.toThrow('REDIS_ROOM_CHECKPOINT_UNAVAILABLE');
 
     await redis.connect();

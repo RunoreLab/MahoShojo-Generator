@@ -12,6 +12,7 @@ import {
 } from '@mahoshojo/contracts/arena-room';
 
 import { applyArenaProposal } from './apply';
+import { transitionSuccessInternal } from './checkpoint-commit';
 import { mergeCollaborativeChanges, retainCollaborativeChanges } from './provenance';
 import {
   ArenaRoomAuthorityStateSchema,
@@ -25,7 +26,6 @@ import {
   parseArenaRoomAuthorityContext,
   parseArenaRoomTrustedTime,
   transitionFailure,
-  transitionSuccess,
   type ArenaRoomAuthorityContext,
   type ArenaRoomAuthorityState,
   type ArenaRoomCommand,
@@ -151,7 +151,7 @@ const finishApplied = (
   }
   const parsed = ArenaRoomAuthorityStateSchema.safeParse(next);
   if (!parsed.success) return transitionFailure('validation-failed', 'invalid-state');
-  return transitionSuccess({
+  return transitionSuccessInternal({
     kind: 'applied',
     predecessor: previous ? checkpointPredecessorOf(previous) : null,
     nextState: parsed.data,
@@ -159,7 +159,7 @@ const finishApplied = (
   });
 };
 
-const finishIdempotent = (state: ArenaRoomAuthorityState): ArenaRoomTransitionResult => transitionSuccess({
+const finishIdempotent = (state: ArenaRoomAuthorityState): ArenaRoomTransitionResult => transitionSuccessInternal({
   kind: 'idempotent',
   predecessor: checkpointPredecessorOf(state),
   nextState: deepClone(state),

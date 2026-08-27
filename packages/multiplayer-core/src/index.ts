@@ -1,4 +1,10 @@
 export * from './apply';
+export {
+  createArenaRoomCheckpointCommit,
+  readArenaRoomCheckpointCommit,
+  type ArenaRoomCheckpointCommit,
+  type ArenaRoomCheckpointCommitData,
+} from './checkpoint-commit';
 export * from './conflicts';
 export * from './diff';
 export * from './errors';

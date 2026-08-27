@@ -1,21 +1,31 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { checkpointPredecessorOf } from '@mahoshojo/multiplayer-core';
+import {
+  checkpointPredecessorOf,
+  createArenaRoomCheckpointCommit,
+  type ArenaRoomCheckpointCommit,
+  type ArenaRoomTransitionSuccess,
+} from '@mahoshojo/multiplayer-core';
 
 import {
   createRedisRoomStore,
   type RedisRoomClient,
 } from '#/arena-room/redis-room-store';
 import {
-  closeArenaRoomState,
+  closeArenaRoomTransition,
   createArenaRoomState,
-  publishArenaRoomState,
+  createArenaRoomTransition,
+  publishArenaRoomTransition,
 } from './arena-room-fixtures';
 
 const createClient = (): RedisRoomClient => ({
   eval: vi.fn(),
   get: vi.fn(async () => null),
 });
+
+const commit = (transition: ArenaRoomTransitionSuccess): ArenaRoomCheckpointCommit => (
+  createArenaRoomCheckpointCommit(transition)
+);
 
 describe('RedisRoomStore', () => {
   it('以单次 Lua create 写入 versioned checkpoint、环境隔离 key 和 active TTL', async () => {
@@ -26,9 +36,10 @@ describe('RedisRoomStore', () => {
       keyPrefix: 'preview',
       activeTtlSeconds: 3_600,
     });
-    const state = createArenaRoomState();
+    const created = createArenaRoomTransition();
+    const state = created.nextState;
 
-    await expect(store.save({ checkpoint: state, expected: null }))
+    await expect(store.save({ commit: commit(created) }))
       .resolves.toEqual({ kind: 'saved' });
 
     expect(client.eval).toHaveBeenCalledTimes(1);
@@ -44,9 +55,17 @@ describe('RedisRoomStore', () => {
     expect(options.arguments).toContain('3600000');
     const serialized = options.arguments.find((argument) => argument.startsWith('{'));
     expect(serialized).toBeDefined();
-    expect(JSON.parse(serialized!)).toMatchObject({
+    const parsed = JSON.parse(serialized!);
+    expect(Object.keys(parsed).sort()).toEqual([
+      'checkpointVersion',
+      'controlSeq',
+      'revision',
+      'roomEpoch',
+      'roomId',
+      'state',
+    ]);
+    expect(parsed).toMatchObject({
       checkpointVersion: 1,
-      expiryFence: 'active',
       ...checkpointPredecessorOf(state),
       state,
     });
@@ -58,39 +77,36 @@ describe('RedisRoomStore', () => {
     const store = createRedisRoomStore({ getClient: () => client });
     const state = createArenaRoomState();
 
-    await expect(store.save({
-      checkpoint: publishArenaRoomState(state),
-      expected: checkpointPredecessorOf(state),
-    })).resolves.toEqual({ kind: 'conflict' });
+    await expect(store.save({ commit: commit(publishArenaRoomTransition(state)) }))
+      .resolves.toEqual({ kind: 'conflict' });
   });
 
-  it('在 Redis I/O 前拒绝 rollback、计数器跳跃和隐式 epoch rollover 候选', async () => {
+  it('只接受 state machine 签发的 receipt，且 transition 返回后篡改不会进入 checkpoint', async () => {
     const client = createClient();
+    vi.mocked(client.eval).mockResolvedValue('saved');
     const store = createRedisRoomStore({ getClient: () => client });
     const initial = createArenaRoomState();
-    const acknowledged = publishArenaRoomState(initial);
+    const transition = publishArenaRoomTransition(initial);
 
     await expect(store.save({
-      checkpoint: initial,
-      expected: checkpointPredecessorOf(acknowledged),
-    })).rejects.toThrow('REDIS_ROOM_SUCCESSOR_INVALID');
-    await expect(store.save({
-      checkpoint: createArenaRoomState('epoch-2'),
-      expected: checkpointPredecessorOf(acknowledged),
-    })).rejects.toThrow('REDIS_ROOM_SUCCESSOR_INVALID');
-    await expect(store.save({
-      checkpoint: {
-        ...acknowledged,
-        snapshot: {
-          ...acknowledged.snapshot,
-          revision: acknowledged.snapshot.revision + 2,
-          controlSeq: acknowledged.snapshot.controlSeq + 1,
-        },
-      },
-      expected: checkpointPredecessorOf(acknowledged),
-    })).rejects.toThrow('REDIS_ROOM_SUCCESSOR_INVALID');
-
+      commit: {} as ArenaRoomCheckpointCommit,
+    })).rejects.toThrow('REDIS_ROOM_TRANSITION_COMMIT_INVALID');
     expect(client.eval).not.toHaveBeenCalled();
+
+    transition.nextState.snapshot.sharedConfig.userGuidance = 'tampered-old-payload';
+    await expect(store.save({ commit: commit(transition) }))
+      .resolves.toEqual({ kind: 'saved' });
+    const [, options] = vi.mocked(client.eval).mock.calls[0]!;
+    const serialized = options.arguments.find((argument) => argument.startsWith('{'))!;
+    expect(JSON.parse(serialized).state.snapshot.sharedConfig.userGuidance).toBe('已确认写入');
+
+    const closedTransition = closeArenaRoomTransition(initial);
+    closedTransition.nextState.lifecycle = structuredClone(initial.lifecycle);
+    await expect(store.save({ commit: commit(closedTransition) }))
+      .resolves.toEqual({ kind: 'saved' });
+    const [, closedOptions] = vi.mocked(client.eval).mock.calls[1]!;
+    const serializedClosed = closedOptions.arguments.find((argument) => argument.startsWith('{'))!;
+    expect(JSON.parse(serializedClosed).state.lifecycle.status).toBe('closed');
   });
 
   it('closed checkpoint 使用 terminal TTL，且序列化不会修改调用方 state', async () => {
@@ -102,13 +118,12 @@ describe('RedisRoomStore', () => {
       terminalTtlSeconds: 45,
     });
     const initial = createArenaRoomState();
-    const closed = closeArenaRoomState(initial);
+    const closedTransition = closeArenaRoomTransition(initial);
+    const closed = closedTransition.nextState;
     const before = structuredClone(closed);
 
-    await expect(store.save({
-      checkpoint: closed,
-      expected: checkpointPredecessorOf(initial),
-    })).resolves.toEqual({ kind: 'saved' });
+    await expect(store.save({ commit: commit(closedTransition) }))
+      .resolves.toEqual({ kind: 'saved' });
 
     const [, options] = vi.mocked(client.eval).mock.calls[0]!;
     expect(options.arguments.at(-1)).toBe('45000');
@@ -120,12 +135,11 @@ describe('RedisRoomStore', () => {
     const state = createArenaRoomState();
     const envelope = JSON.stringify({
       checkpointVersion: 1,
-      expiryFence: 'active',
       ...checkpointPredecessorOf(state),
       state,
     });
     const expiringEnvelope = JSON.stringify({
-      checkpointVersion: 1,
+      checkpointVersion: 2,
       expiryFence: 'expiring',
       ...checkpointPredecessorOf(state),
       state,
@@ -150,30 +164,19 @@ describe('RedisRoomStore', () => {
     }));
     vi.mocked(client.eval).mockResolvedValue('invalid-existing');
     const store = createRedisRoomStore({ getClient: () => client });
-    const state = createArenaRoomState();
+    const created = createArenaRoomTransition();
+    const receipt = commit(created);
 
     const invalidLoad = store.load('room-1');
     await expect(invalidLoad).rejects.toThrow('REDIS_ROOM_CHECKPOINT_INVALID');
     await expect(invalidLoad.catch((error: unknown) => String(error)))
       .resolves.not.toContain('provider-secret-canary');
-    await expect(store.save({ checkpoint: state, expected: null }))
+    await expect(store.save({ commit: receipt }))
       .rejects.toThrow('REDIS_ROOM_CHECKPOINT_INVALID');
 
     vi.mocked(client.eval).mockResolvedValueOnce({ status: 'saved' });
-    await expect(store.save({ checkpoint: state, expected: null }))
+    await expect(store.save({ commit: receipt }))
       .rejects.toThrow('REDIS_ROOM_CHECKPOINT_RESPONSE_INVALID');
-  });
-
-  it('在 Redis I/O 前拒绝 roomId 不一致的 predecessor', async () => {
-    const client = createClient();
-    const store = createRedisRoomStore({ getClient: () => client });
-    const state = createArenaRoomState();
-
-    await expect(store.save({
-      checkpoint: publishArenaRoomState(state),
-      expected: { ...checkpointPredecessorOf(state), roomId: 'room-other' },
-    })).rejects.toThrow('REDIS_ROOM_PREDECESSOR_INVALID');
-    expect(client.eval).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -203,6 +206,7 @@ describe('RedisRoomStore', () => {
       .resolves.toEqual({ kind: 'expired' });
     const [script, options] = vi.mocked(client.eval).mock.calls[0]!;
     expect(script).toContain('ROOM_CHECKPOINT_EXPIRE_V1');
+    expect(script).toContain('current.checkpointVersion = 2');
     expect(script).toContain("current.expiryFence = 'expiring'");
     expect(script).toContain("redis.call('PTTL', KEYS[1])");
     expect(script).toContain('if currentTtl > 0 and currentTtl < targetTtl then');
@@ -240,25 +244,23 @@ describe('RedisRoomStore', () => {
       }),
     };
     const firstProcess = createRedisRoomStore({ getClient: () => durableClient });
-    const initial = createArenaRoomState();
-    const acknowledged = publishArenaRoomState(initial);
-    expect(await firstProcess.save({ checkpoint: initial, expected: null })).toEqual({ kind: 'saved' });
-    expect(await firstProcess.save({
-      checkpoint: acknowledged,
-      expected: checkpointPredecessorOf(initial),
-    })).toEqual({ kind: 'saved' });
+    const created = createArenaRoomTransition();
+    const initial = created.nextState;
+    const published = publishArenaRoomTransition(initial);
+    const acknowledged = published.nextState;
+    expect(await firstProcess.save({ commit: commit(created) })).toEqual({ kind: 'saved' });
+    expect(await firstProcess.save({ commit: commit(published) })).toEqual({ kind: 'saved' });
 
     const restartedProcess = createRedisRoomStore({ getClient: () => durableClient });
     await expect(restartedProcess.load('room-1')).resolves.toEqual(acknowledged);
 
     values.clear();
-    const nextEpoch = createArenaRoomState('epoch-2');
-    expect(await restartedProcess.save({ checkpoint: nextEpoch, expected: null }))
+    const nextEpochCreated = createArenaRoomTransition('epoch-2');
+    const nextEpoch = nextEpochCreated.nextState;
+    expect(await restartedProcess.save({ commit: commit(nextEpochCreated) }))
       .toEqual({ kind: 'saved' });
-    expect(await firstProcess.save({
-      checkpoint: closeArenaRoomState(initial),
-      expected: checkpointPredecessorOf(initial),
-    })).toEqual({ kind: 'conflict' });
+    expect(await firstProcess.save({ commit: commit(closeArenaRoomTransition(initial)) }))
+      .toEqual({ kind: 'conflict' });
     await expect(restartedProcess.load('room-1')).resolves.toEqual(nextEpoch);
   });
 });
