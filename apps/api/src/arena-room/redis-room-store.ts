@@ -63,11 +63,10 @@ elseif ARGV[1] == 'match' then
 else
   return 'invalid-request'
 end
-if epochSeen == 0 and fenceCount >= tonumber(ARGV[11]) then
+if epochSeen == 0 and fenceCount >= tonumber(ARGV[10]) then
   return 'incarnation-limit'
 end
 redis.call('SADD', KEYS[2], candidate.roomEpoch)
-redis.call('PEXPIRE', KEYS[2], ARGV[10])
 redis.call('SET', KEYS[1], ARGV[7], 'PX', ARGV[8])
 return 'saved'
 `;
@@ -96,11 +95,10 @@ local fenceType = type(fenceTypeReply) == 'table' and fenceTypeReply.ok or fence
 if fenceType ~= 'none' and fenceType ~= 'set' then return 'invalid-fence' end
 local epochSeen = redis.call('SISMEMBER', KEYS[2], ARGV[3])
 local fenceCount = redis.call('SCARD', KEYS[2])
-if epochSeen == 0 and fenceCount >= tonumber(ARGV[9]) then
+if epochSeen == 0 and fenceCount >= tonumber(ARGV[8]) then
   return 'incarnation-limit'
 end
 redis.call('SADD', KEYS[2], ARGV[3])
-redis.call('PEXPIRE', KEYS[2], ARGV[8])
 redis.call('DEL', KEYS[1])
 return 'deleted'
 `;
@@ -129,11 +127,10 @@ local fenceType = type(fenceTypeReply) == 'table' and fenceTypeReply.ok or fence
 if fenceType ~= 'none' and fenceType ~= 'set' then return 'invalid-fence' end
 local epochSeen = redis.call('SISMEMBER', KEYS[2], ARGV[3])
 local fenceCount = redis.call('SCARD', KEYS[2])
-if epochSeen == 0 and fenceCount >= tonumber(ARGV[10]) then
+if epochSeen == 0 and fenceCount >= tonumber(ARGV[9]) then
   return 'incarnation-limit'
 end
 redis.call('SADD', KEYS[2], ARGV[3])
-redis.call('PEXPIRE', KEYS[2], ARGV[9])
 local currentTtl = redis.call('PTTL', KEYS[1])
 if currentTtl == 0 then
   redis.call('DEL', KEYS[1])
@@ -359,11 +356,6 @@ export const createRedisRoomStore = (options: RedisRoomStoreOptions): RedisRoomS
     options.terminalTtlSeconds ?? DEFAULT_TERMINAL_TTL_SECONDS,
     'terminalTtlSeconds',
   );
-  const incarnationFenceTtlMs = Math.max(activeTtlMs, terminalTtlMs) + terminalTtlMs;
-  if (!Number.isSafeInteger(incarnationFenceTtlMs)) {
-    throw new Error('Room incarnation fence TTL 超出安全范围');
-  }
-
   return Object.freeze({
     async load(roomId) {
       const raw = await options.getClient().get(roomKey(roomId));
@@ -424,7 +416,6 @@ export const createRedisRoomStore = (options: RedisRoomStoreOptions): RedisRoomS
           JSON.stringify(stored),
           String(stored.state.lifecycle.status === 'open' ? activeTtlMs : terminalTtlMs),
           expectedStored === null ? '' : JSON.stringify(expectedStored),
-          String(incarnationFenceTtlMs),
           String(MAX_ROOM_INCARNATIONS),
         ],
       });
@@ -441,7 +432,6 @@ export const createRedisRoomStore = (options: RedisRoomStoreOptions): RedisRoomS
           ...predecessorArguments(expected),
           JSON.stringify(active),
           JSON.stringify(expiring),
-          String(incarnationFenceTtlMs),
           String(MAX_ROOM_INCARNATIONS),
         ],
       });
@@ -459,7 +449,6 @@ export const createRedisRoomStore = (options: RedisRoomStoreOptions): RedisRoomS
           String(terminalTtlMs),
           JSON.stringify(active),
           JSON.stringify(expiring),
-          String(incarnationFenceTtlMs),
           String(MAX_ROOM_INCARNATIONS),
         ],
       });
