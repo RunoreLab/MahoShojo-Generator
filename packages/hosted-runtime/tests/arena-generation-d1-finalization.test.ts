@@ -442,6 +442,7 @@ describe('Arena D1/R2 finalization ports', () => {
     await ports.claimTerminal(oversizedInput);
     await ports.persistCombatants({
       ...oversizedInput,
+      idempotencyKey: 'arena-terminal:generation-1:combatants',
     });
 
     const serializedExtra = client.boundCalls
