@@ -145,8 +145,12 @@ describe('GMR-01 independent review regressions', () => {
       snapshotDigest: snapshotDigest(),
       expiresAt: '2026-08-27T16:03:59.999Z',
     });
-    expect(failure(transitionArenaRoomAt(state, command, expiredReservationCapability)))
+    const stateBeforeTrustedTimeFailures = structuredClone(state);
+    const expiredReservation = failure(transitionArenaRoomAt(state, command, expiredReservationCapability));
+    expect(expiredReservation)
       .toMatchObject({ code: 'forbidden', reason: 'authority-scope-expired' });
+    expect('events' in expiredReservation).toBe(false);
+    expect(state).toEqual(stateBeforeTrustedTimeFailures);
 
     const reserved = success(transitionArenaRoomAt(state, command, reservationCapability)).nextState;
     const runningCommand = {
@@ -174,40 +178,58 @@ describe('GMR-01 independent review regressions', () => {
       .toMatchObject({ code: 'forbidden', reason: 'authority-scope-mismatch' });
 
     const lateTrustedTime = issueArenaRoomTrustedTime({ now: '2026-08-27T16:31:00.000Z' });
-    expect(failure(transitionArenaRoom(
+    const lateReservationTimestampMismatch = failure(transitionArenaRoom(
       state,
       command,
       reservationCapability,
       lateTrustedTime,
-    ))).toMatchObject({ code: 'forbidden', reason: 'command-timestamp-mismatch' });
-    expect(failure(transitionArenaRoom(
+    ));
+    expect(lateReservationTimestampMismatch)
+      .toMatchObject({ code: 'forbidden', reason: 'command-timestamp-mismatch' });
+    expect('events' in lateReservationTimestampMismatch).toBe(false);
+    const lateReservationExpiry = failure(transitionArenaRoom(
       state,
       { ...command, timestamp: '2026-08-27T16:31:00.000Z' },
       reservationCapability,
       lateTrustedTime,
-    ))).toMatchObject({ code: 'forbidden', reason: 'authority-scope-expired' });
+    ));
+    expect(lateReservationExpiry)
+      .toMatchObject({ code: 'forbidden', reason: 'authority-scope-expired' });
+    expect('events' in lateReservationExpiry).toBe(false);
+    expect(state).toEqual(stateBeforeTrustedTimeFailures);
 
     const publisherCapability = generationPublisherAuthority();
-    expect(failure(transitionArenaRoom(
+    const reservedBeforeTrustedTimeFailures = structuredClone(reserved);
+    const latePublisherTimestampMismatch = failure(transitionArenaRoom(
       reserved,
       runningCommand,
       publisherCapability,
       lateTrustedTime,
-    ))).toMatchObject({ code: 'forbidden', reason: 'command-timestamp-mismatch' });
-    expect(failure(transitionArenaRoom(
+    ));
+    expect(latePublisherTimestampMismatch)
+      .toMatchObject({ code: 'forbidden', reason: 'command-timestamp-mismatch' });
+    expect('events' in latePublisherTimestampMismatch).toBe(false);
+    const latePublisherExpiry = failure(transitionArenaRoom(
       reserved,
       { ...runningCommand, timestamp: '2026-08-27T16:31:00.000Z' },
       publisherCapability,
       lateTrustedTime,
-    ))).toMatchObject({ code: 'forbidden', reason: 'authority-scope-expired' });
+    ));
+    expect(latePublisherExpiry)
+      .toMatchObject({ code: 'forbidden', reason: 'authority-scope-expired' });
+    expect('events' in latePublisherExpiry).toBe(false);
+    expect(reserved).toEqual(reservedBeforeTrustedTimeFailures);
 
     const exactExpiryTime = issueArenaRoomTrustedTime({ now: '2026-08-27T16:30:00.000Z' });
-    expect(failure(transitionArenaRoom(
+    const exactExpiry = failure(transitionArenaRoom(
       state,
       { ...command, timestamp: '2026-08-27T16:30:00.000Z' },
       reservationCapability,
       exactExpiryTime,
-    ))).toMatchObject({ code: 'forbidden', reason: 'authority-scope-expired' });
+    ));
+    expect(exactExpiry).toMatchObject({ code: 'forbidden', reason: 'authority-scope-expired' });
+    expect('events' in exactExpiry).toBe(false);
+    expect(state).toEqual(stateBeforeTrustedTimeFailures);
 
     const poisoned = structuredClone(reserved);
     if (!poisoned.snapshot.activeGeneration || !poisoned.generationLedger[0]) {
@@ -602,10 +624,12 @@ describe('GMR-01 independent review regressions', () => {
     }, memberAuthority())).nextState;
     const missingSidecar = structuredClone(withdrawn) as Partial<ArenaRoomAuthorityState>;
     delete missingSidecar.terminalProposalIds;
+    const missingSidecarBefore = structuredClone(missingSidecar);
 
     expect(() => parseArenaRoomAuthorityState(missingSidecar)).toThrowError(
       expect.objectContaining({ code: 'invalid-input' }),
     );
+    expect(missingSidecar).toEqual(missingSidecarBefore);
     const replay = transitionArenaRoomAt(missingSidecar, {
       type: 'submit-proposal',
       expectedRoomEpoch: 'epoch-1',
@@ -613,6 +637,8 @@ describe('GMR-01 independent review regressions', () => {
       timestamp: NEXT_TIMESTAMP,
     }, memberAuthority());
     expect(replay).toMatchObject({ ok: false, code: 'validation-failed', reason: 'invalid-state' });
+    expect('events' in replay).toBe(false);
+    expect(missingSidecar).toEqual(missingSidecarBefore);
   });
 
   it('makes non-idempotent replay outcomes explicit and side-effect free', () => {
