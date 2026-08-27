@@ -46,14 +46,20 @@ describe('RedisRoomStore', () => {
     const [script, options] = vi.mocked(client.eval).mock.calls[0]!;
     expect(script).toContain('ROOM_CHECKPOINT_SAVE_V1');
     expect(script).toContain('raw ~= ARGV[9]');
+    expect(script).toContain("redis.call('SISMEMBER', KEYS[2], candidate.roomEpoch)");
     expect(script).toContain("redis.call('GET', KEYS[1])");
     expect(script.indexOf("redis.call('GET', KEYS[1])"))
       .toBeLessThan(script.indexOf("redis.call('SET', KEYS[1]"));
     expect(options.keys).toEqual([
       expect.stringMatching(/^mahoshojo:room:v1:preview:[a-f0-9]{64}:checkpoint$/u),
+      expect.stringMatching(/^mahoshojo:room:v1:preview:[a-f0-9]{64}:incarnations$/u),
     ]);
     expect(options.keys[0]).not.toContain('room-1');
+    expect(options.keys[1]).not.toContain('room-1');
+    expect(options.keys[0]!.replace(':checkpoint', ''))
+      .toBe(options.keys[1]!.replace(':incarnations', ''));
     expect(options.arguments).toContain('3600000');
+    expect(options.arguments.at(-1)).toBe('16');
     const serialized = options.arguments.find((argument) => argument.startsWith('{'));
     expect(serialized).toBeDefined();
     const parsed = JSON.parse(serialized!);
@@ -127,7 +133,7 @@ describe('RedisRoomStore', () => {
       .resolves.toEqual({ kind: 'saved' });
 
     const [, options] = vi.mocked(client.eval).mock.calls[0]!;
-    expect(options.arguments.at(-2)).toBe('45000');
+    expect(options.arguments.at(-4)).toBe('45000');
     expect(closed).toEqual(before);
   });
 
@@ -176,8 +182,34 @@ describe('RedisRoomStore', () => {
       .rejects.toThrow('REDIS_ROOM_CHECKPOINT_INVALID');
 
     vi.mocked(client.eval).mockResolvedValueOnce({ status: 'saved' });
-    await expect(store.save({ commit: receipt }))
+    await expect(store.save({ commit: commit(createArenaRoomTransition()) }))
       .rejects.toThrow('REDIS_ROOM_CHECKPOINT_RESPONSE_INVALID');
+  });
+
+  it('每个 transition/receipt 只允许一次 checkpoint 尝试，Redis 未知结果也不得盲目重放', async () => {
+    const client = createClient();
+    vi.mocked(client.eval).mockRejectedValue(new Error('redis timeout'));
+    const store = createRedisRoomStore({ getClient: () => client });
+    const transition = createArenaRoomTransition();
+    const receipt = commit(transition);
+
+    expect(() => commit(transition)).toThrow('ARENA_ROOM_CHECKPOINT_COMMIT_INVALID');
+    await expect(store.save({ commit: receipt })).rejects.toThrow('redis timeout');
+    await expect(store.save({ commit: receipt }))
+      .rejects.toThrow('REDIS_ROOM_TRANSITION_COMMIT_INVALID');
+    expect(client.eval).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ['invalid-fence', 'REDIS_ROOM_INCARNATION_FENCE_INVALID'],
+    ['incarnation-limit', 'REDIS_ROOM_INCARNATION_LIMIT'],
+  ] as const)('把 incarnation fence 响应 %s 映射为稳定错误', async (raw, expected) => {
+    const client = createClient();
+    vi.mocked(client.eval).mockResolvedValue(raw);
+    const store = createRedisRoomStore({ getClient: () => client });
+
+    await expect(store.save({ commit: commit(createArenaRoomTransition()) }))
+      .rejects.toThrow(expected);
   });
 
   it.each([
@@ -212,11 +244,13 @@ describe('RedisRoomStore', () => {
     expect(script).toContain("redis.call('SET', KEYS[1], ARGV[8], 'PX', targetTtl)");
     expect(script).toContain('currentActive and raw ~= ARGV[7]');
     expect(script).toContain('currentExpiring and raw ~= ARGV[8]');
-    expect(options.arguments.at(-3)).toBe('60000');
-    expect(JSON.parse(options.arguments.at(-1)!)).toMatchObject({
+    expect(options.arguments.at(-5)).toBe('60000');
+    expect(JSON.parse(options.arguments.at(-3)!)).toMatchObject({
       checkpointVersion: 2,
       expiryFence: 'expiring',
     });
+    expect(options.arguments.at(-2)).toBe('3660000');
+    expect(options.arguments.at(-1)).toBe('16');
   });
 
   it('第二个 store 实例可恢复最后一次 acknowledged mutation，旧 epoch writer 不能覆盖', async () => {

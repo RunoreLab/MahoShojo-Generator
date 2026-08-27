@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   createArenaRoomCheckpointCommit,
-  readArenaRoomCheckpointCommit,
+  consumeArenaRoomCheckpointCommit,
   transitionArenaRoom,
   type ArenaRoomCheckpointCommit,
 } from '../src/index';
@@ -19,19 +19,23 @@ describe('Arena Room checkpoint commit receipt', () => {
     if (!transition.ok) throw new Error('expected transition success');
 
     const receipt = createArenaRoomCheckpointCommit(transition);
+    expect(() => createArenaRoomCheckpointCommit(transition))
+      .toThrow('ARENA_ROOM_CHECKPOINT_COMMIT_INVALID');
     const expected = structuredClone(transition.nextState);
     transition.nextState.snapshot.sharedConfig.userGuidance = 'tampered-after-transition';
 
     expect(JSON.stringify(receipt)).toBe('{}');
-    expect(readArenaRoomCheckpointCommit(receipt)).toEqual({
+    expect(consumeArenaRoomCheckpointCommit(receipt)).toEqual({
       predecessor: null,
       predecessorState: null,
       nextState: expected,
     });
+    expect(() => consumeArenaRoomCheckpointCommit(receipt))
+      .toThrow('ARENA_ROOM_CHECKPOINT_COMMIT_INVALID');
   });
 
   it('拒绝伪造 receipt、失败 transition 与 idempotent transition', () => {
-    expect(() => readArenaRoomCheckpointCommit({} as ArenaRoomCheckpointCommit))
+    expect(() => consumeArenaRoomCheckpointCommit({} as ArenaRoomCheckpointCommit))
       .toThrow('ARENA_ROOM_CHECKPOINT_COMMIT_INVALID');
 
     const failed = transitionArenaRoom(null, {
@@ -70,7 +74,7 @@ describe('Arena Room checkpoint commit receipt', () => {
     if (!published.ok) throw new Error('expected publish success');
 
     created.nextState.snapshot.sharedConfig.userGuidance = 'tampered-previous';
-    const data = readArenaRoomCheckpointCommit(createArenaRoomCheckpointCommit(published));
+    const data = consumeArenaRoomCheckpointCommit(createArenaRoomCheckpointCommit(published));
     expect(data.predecessorState).toEqual(previous);
   });
 });

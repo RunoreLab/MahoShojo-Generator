@@ -1,7 +1,7 @@
 export * from './apply';
 export {
   createArenaRoomCheckpointCommit,
-  readArenaRoomCheckpointCommit,
+  consumeArenaRoomCheckpointCommit,
   type ArenaRoomCheckpointCommit,
   type ArenaRoomCheckpointCommitData,
 } from './checkpoint-commit';

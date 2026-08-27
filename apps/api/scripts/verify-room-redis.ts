@@ -52,9 +52,16 @@ const epochRoomId = `room-epoch-${token}`;
 const expiryFenceRoomId = `room-expiry-fence-${token}`;
 const legacyRoomId = `room-legacy-v1-${token}`;
 const malformedRoomId = `room-malformed-${token}`;
+const invalidFenceRoomId = `room-invalid-fence-${token}`;
+const fullFenceRoomId = `room-full-fence-${token}`;
+const roomHash = (id: string): string => createHash('sha256').update(id).digest('hex');
 const roomKey = (id: string): string => (
-  `mahoshojo:room:v1:${keyPrefix}:${createHash('sha256').update(id).digest('hex')}:checkpoint`
+  `mahoshojo:room:v1:${keyPrefix}:${roomHash(id)}:checkpoint`
 );
+const roomFenceKey = (id: string): string => (
+  `mahoshojo:room:v1:${keyPrefix}:${roomHash(id)}:incarnations`
+);
+const roomKeys = (id: string): string[] => [roomKey(id), roomFenceKey(id)];
 
 const sharedConfig = () => ({
   battleMode: 'classic' as const,
@@ -171,15 +178,30 @@ try {
     }
     const deleted = await readerStore.delete({ checkpoint: recovered });
     if (deleted.kind !== 'deleted') throw new Error('ROOM_REDIS_RESTART_CLEANUP_FAILED');
-    console.info(JSON.stringify({ roomRedis: true, phase: 'read', restartRecovery: true }));
+    const sameEpochAfterRestartDelete = await readerStore.save({
+      commit: commit(createRoom(roomId)),
+    });
+    if (
+      sameEpochAfterRestartDelete.kind !== 'conflict'
+      || await cleanup.pTTL(roomFenceKey(roomId)) <= 0
+    ) {
+      throw new Error('ROOM_REDIS_RESTART_INCARNATION_FENCE_FAILED');
+    }
+    console.info(JSON.stringify({
+      roomRedis: true,
+      phase: 'read',
+      restartRecovery: true,
+      incarnationFence: true,
+    }));
   } else {
     const createdTransition = createRoom(roomId);
     const initial = createdTransition.nextState;
     const publishedTransition = publish(initial);
     const acknowledged = structuredClone(publishedTransition.nextState);
     publishedTransition.nextState.snapshot.sharedConfig.userGuidance = 'tampered-old-payload';
-    const created = await writerStore.save({ commit: commit(createdTransition) });
-    const duplicateCreate = await readerStore.save({ commit: commit(createdTransition) });
+    const createdReceipt = commit(createdTransition);
+    const created = await writerStore.save({ commit: createdReceipt });
+    const duplicateCreate = await readerStore.save({ commit: commit(createRoom(roomId)) });
     const mutated = await writerStore.save({ commit: commit(publishedTransition) });
     const recovered = await readerStore.load(roomId);
     if (
@@ -240,6 +262,14 @@ try {
       const repeatedExpiryTtl = await cleanup.pTTL(roomKey(roomId));
       const deleted = await writerStore.delete({ checkpoint: closed });
       const repeatedDelete = await writerStore.delete({ checkpoint: closed });
+      await fixedError(
+        writerStore.save({ commit: createdReceipt }),
+        'REDIS_ROOM_TRANSITION_COMMIT_INVALID',
+      );
+      const sameEpochAfterDelete = await writerStore.save({
+        commit: commit(createRoom(roomId)),
+      });
+      const incarnationFenceTtl = await cleanup.pTTL(roomFenceKey(roomId));
       if (
         expired.kind !== 'expired'
         || repeatedExpire.kind !== 'expired'
@@ -249,6 +279,8 @@ try {
         || repeatedExpiryTtl > firstExpiryTtl
         || deleted.kind !== 'deleted'
         || repeatedDelete.kind !== 'missing'
+        || sameEpochAfterDelete.kind !== 'conflict'
+        || incarnationFenceTtl <= 0
       ) {
         throw new Error('ROOM_REDIS_EXPIRY_DELETE_FAILED');
       }
@@ -291,6 +323,9 @@ try {
       if ((await writerStore.save({ commit: commit(legacyPublished) })).kind !== 'saved') {
         throw new Error('ROOM_REDIS_LEGACY_V1_SAVE_FAILED');
       }
+      if (!await cleanup.sIsMember(roomFenceKey(legacyRoomId), legacyState.snapshot.roomEpoch)) {
+        throw new Error('ROOM_REDIS_LEGACY_V1_FENCE_BOOTSTRAP_FAILED');
+      }
       if ((await writerStore.expire({ checkpoint: legacyPublished.nextState })).kind !== 'expired') {
         throw new Error('ROOM_REDIS_LEGACY_V1_EXPIRE_FAILED');
       }
@@ -308,6 +343,30 @@ try {
       await fixedError(writerStore.delete({ checkpoint: malformedExpected }), 'REDIS_ROOM_CHECKPOINT_INVALID');
       if (await cleanup.get(malformedKey) !== malformedRaw) {
         throw new Error('ROOM_REDIS_MALFORMED_CHECKPOINT_MUTATED');
+      }
+
+      await cleanup.set(roomFenceKey(invalidFenceRoomId), 'provider-secret-canary');
+      await fixedError(
+        writerStore.save({ commit: commit(createRoom(invalidFenceRoomId)) }),
+        'REDIS_ROOM_INCARNATION_FENCE_INVALID',
+      );
+      if (
+        await cleanup.get(roomKey(invalidFenceRoomId)) !== null
+        || await cleanup.get(roomFenceKey(invalidFenceRoomId)) !== 'provider-secret-canary'
+      ) {
+        throw new Error('ROOM_REDIS_INVALID_INCARNATION_FENCE_MUTATED');
+      }
+
+      await cleanup.sAdd(
+        roomFenceKey(fullFenceRoomId),
+        Array.from({ length: 16 }, (_, index) => `used-epoch-${index}`),
+      );
+      await fixedError(
+        writerStore.save({ commit: commit(createRoom(fullFenceRoomId, 'epoch-17')) }),
+        'REDIS_ROOM_INCARNATION_LIMIT',
+      );
+      if (await cleanup.get(roomKey(fullFenceRoomId)) !== null) {
+        throw new Error('ROOM_REDIS_FULL_INCARNATION_FENCE_MUTATED');
       }
 
       const shortTtlStore = createRedisRoomStore({
@@ -330,12 +389,24 @@ try {
       if (await shortTtlStore.load(ttlRoomId) !== null) {
         throw new Error('ROOM_REDIS_TTL_EXPIRY_FAILED');
       }
+      const ttlResurrection = await shortTtlStore.save({
+        commit: commit(createRoom(ttlRoomId)),
+      });
+      if (
+        ttlResurrection.kind !== 'conflict'
+        || await cleanup.pTTL(roomFenceKey(ttlRoomId)) <= 0
+      ) {
+        throw new Error('ROOM_REDIS_TTL_INCARNATION_FENCE_FAILED');
+      }
       console.info(JSON.stringify({
         roomRedis: true,
         phase: 'full',
         createLoadMutate: true,
         stalePredecessor: true,
         transitionReceipt: true,
+        oneShotReceipt: true,
+        incarnationFence: true,
+        incarnationFenceFailClosed: true,
         fullPredecessorFence: true,
         oldEpochFence: true,
         terminalTtl: true,
@@ -353,12 +424,14 @@ try {
   if (!cleanup.isOpen) await cleanup.connect();
   if (phase !== 'write') {
     await cleanup.unlink([
-      roomKey(roomId),
-      roomKey(ttlRoomId),
-      roomKey(epochRoomId),
-      roomKey(expiryFenceRoomId),
-      roomKey(legacyRoomId),
-      roomKey(malformedRoomId),
+      ...roomKeys(roomId),
+      ...roomKeys(ttlRoomId),
+      ...roomKeys(epochRoomId),
+      ...roomKeys(expiryFenceRoomId),
+      ...roomKeys(legacyRoomId),
+      ...roomKeys(malformedRoomId),
+      ...roomKeys(invalidFenceRoomId),
+      ...roomKeys(fullFenceRoomId),
     ]);
   }
   await cleanup.quit();

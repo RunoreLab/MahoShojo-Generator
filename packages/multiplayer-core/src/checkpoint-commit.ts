@@ -58,6 +58,7 @@ export const createArenaRoomCheckpointCommit = (
   if (!transition.ok || transition.kind !== 'applied') return invalidCommit();
   const snapshot = transitionSnapshots.get(transition);
   if (!snapshot || snapshot.result.kind !== 'applied') return invalidCommit();
+  transitionSnapshots.delete(transition);
   const receipt = Object.freeze(Object.create(null)) as ArenaRoomCheckpointCommit;
   checkpointCommits.set(receipt, {
     predecessor: deepClone(snapshot.result.predecessor),
@@ -67,11 +68,12 @@ export const createArenaRoomCheckpointCommit = (
   return receipt;
 };
 
-export const readArenaRoomCheckpointCommit = (
+export const consumeArenaRoomCheckpointCommit = (
   receipt: ArenaRoomCheckpointCommit,
 ): ArenaRoomCheckpointCommitData => {
   if (typeof receipt !== 'object' || receipt === null) return invalidCommit();
   const data = checkpointCommits.get(receipt);
   if (!data) return invalidCommit();
+  checkpointCommits.delete(receipt);
   return deepClone(data);
 };

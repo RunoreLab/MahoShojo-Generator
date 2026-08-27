@@ -3,8 +3,8 @@ import { createHash } from 'node:crypto';
 import {
   ARENA_ROOM_AUTHORITY_STATE_VERSION,
   checkpointPredecessorOf,
+  consumeArenaRoomCheckpointCommit,
   parseArenaRoomAuthorityState,
-  readArenaRoomCheckpointCommit,
   type ArenaRoomAuthorityState,
   type ArenaRoomCheckpointCommit,
   type ArenaRoomCheckpointPredecessor,
@@ -14,6 +14,7 @@ const ACTIVE_ROOM_CHECKPOINT_VERSION = 1 as const;
 const EXPIRING_ROOM_CHECKPOINT_VERSION = 2 as const;
 const DEFAULT_ACTIVE_TTL_SECONDS = 3_600;
 const DEFAULT_TERMINAL_TTL_SECONDS = 300;
+const MAX_ROOM_INCARNATIONS = 16;
 const KEY_PREFIX = 'mahoshojo:room:v1';
 
 const SAVE_SCRIPT = `
@@ -26,8 +27,14 @@ if not candidateDecoded or type(candidate) ~= 'table'
   return 'invalid-successor'
 end
 local raw = redis.call('GET', KEYS[1])
+local fenceTypeReply = redis.call('TYPE', KEYS[2])
+local fenceType = type(fenceTypeReply) == 'table' and fenceTypeReply.ok or fenceTypeReply
+if fenceType ~= 'none' and fenceType ~= 'set' then return 'invalid-fence' end
+local epochSeen = redis.call('SISMEMBER', KEYS[2], candidate.roomEpoch)
+local fenceCount = redis.call('SCARD', KEYS[2])
 if ARGV[1] == 'absent' then
   if raw then return 'conflict' end
+  if epochSeen == 1 then return 'conflict' end
   if candidate.revision ~= 0 or candidate.controlSeq ~= 0 then
     return 'invalid-successor'
   end
@@ -56,6 +63,11 @@ elseif ARGV[1] == 'match' then
 else
   return 'invalid-request'
 end
+if epochSeen == 0 and fenceCount >= tonumber(ARGV[11]) then
+  return 'incarnation-limit'
+end
+redis.call('SADD', KEYS[2], candidate.roomEpoch)
+redis.call('PEXPIRE', KEYS[2], ARGV[10])
 redis.call('SET', KEYS[1], ARGV[7], 'PX', ARGV[8])
 return 'saved'
 `;
@@ -79,6 +91,16 @@ if not currentActive and not currentExpiring then
 end
 if currentActive and raw ~= ARGV[6] then return 'conflict' end
 if currentExpiring and raw ~= ARGV[7] then return 'conflict' end
+local fenceTypeReply = redis.call('TYPE', KEYS[2])
+local fenceType = type(fenceTypeReply) == 'table' and fenceTypeReply.ok or fenceTypeReply
+if fenceType ~= 'none' and fenceType ~= 'set' then return 'invalid-fence' end
+local epochSeen = redis.call('SISMEMBER', KEYS[2], ARGV[3])
+local fenceCount = redis.call('SCARD', KEYS[2])
+if epochSeen == 0 and fenceCount >= tonumber(ARGV[9]) then
+  return 'incarnation-limit'
+end
+redis.call('SADD', KEYS[2], ARGV[3])
+redis.call('PEXPIRE', KEYS[2], ARGV[8])
 redis.call('DEL', KEYS[1])
 return 'deleted'
 `;
@@ -102,6 +124,16 @@ if not currentActive and not currentExpiring then
 end
 if currentActive and raw ~= ARGV[7] then return 'conflict' end
 if currentExpiring and raw ~= ARGV[8] then return 'conflict' end
+local fenceTypeReply = redis.call('TYPE', KEYS[2])
+local fenceType = type(fenceTypeReply) == 'table' and fenceTypeReply.ok or fenceTypeReply
+if fenceType ~= 'none' and fenceType ~= 'set' then return 'invalid-fence' end
+local epochSeen = redis.call('SISMEMBER', KEYS[2], ARGV[3])
+local fenceCount = redis.call('SCARD', KEYS[2])
+if epochSeen == 0 and fenceCount >= tonumber(ARGV[10]) then
+  return 'incarnation-limit'
+end
+redis.call('SADD', KEYS[2], ARGV[3])
+redis.call('PEXPIRE', KEYS[2], ARGV[9])
 local currentTtl = redis.call('PTTL', KEYS[1])
 if currentTtl == 0 then
   redis.call('DEL', KEYS[1])
@@ -296,6 +328,8 @@ const parseMutationResult = <T extends string>(
   allowed: readonly T[],
 ): { readonly kind: T } => {
   if (raw === 'invalid-existing') throw new Error('REDIS_ROOM_CHECKPOINT_INVALID');
+  if (raw === 'invalid-fence') throw new Error('REDIS_ROOM_INCARNATION_FENCE_INVALID');
+  if (raw === 'incarnation-limit') throw new Error('REDIS_ROOM_INCARNATION_LIMIT');
   if (raw === 'invalid-successor') throw new Error('REDIS_ROOM_SUCCESSOR_INVALID');
   if (typeof raw !== 'string' || !allowed.includes(raw as T)) {
     throw new Error('REDIS_ROOM_CHECKPOINT_RESPONSE_INVALID');
@@ -309,11 +343,14 @@ export const createRedisRoomStore = (options: RedisRoomStoreOptions): RedisRoomS
     throw new Error('keyPrefix 必须是安全的环境标识');
   }
   const keyPrefix = environmentPrefix ? `${KEY_PREFIX}:${environmentPrefix}` : KEY_PREFIX;
-  const roomKey = (roomId: string): string => {
+  const roomHash = (roomId: string): string => {
     if (!isRoomId(roomId)) throw new Error('REDIS_ROOM_ID_INVALID');
-    const roomHash = createHash('sha256').update(roomId).digest('hex');
-    return `${keyPrefix}:${roomHash}:checkpoint`;
+    return createHash('sha256').update(roomId).digest('hex');
   };
+  const roomKey = (roomId: string): string => `${keyPrefix}:${roomHash(roomId)}:checkpoint`;
+  const incarnationFenceKey = (roomId: string): string => (
+    `${keyPrefix}:${roomHash(roomId)}:incarnations`
+  );
   const activeTtlMs = ttlMs(
     options.activeTtlSeconds ?? DEFAULT_ACTIVE_TTL_SECONDS,
     'activeTtlSeconds',
@@ -322,6 +359,10 @@ export const createRedisRoomStore = (options: RedisRoomStoreOptions): RedisRoomS
     options.terminalTtlSeconds ?? DEFAULT_TERMINAL_TTL_SECONDS,
     'terminalTtlSeconds',
   );
+  const incarnationFenceTtlMs = Math.max(activeTtlMs, terminalTtlMs) + terminalTtlMs;
+  if (!Number.isSafeInteger(incarnationFenceTtlMs)) {
+    throw new Error('Room incarnation fence TTL 超出安全范围');
+  }
 
   return Object.freeze({
     async load(roomId) {
@@ -334,7 +375,7 @@ export const createRedisRoomStore = (options: RedisRoomStoreOptions): RedisRoomS
     async save(input) {
       let commit;
       try {
-        commit = readArenaRoomCheckpointCommit(input.commit);
+        commit = consumeArenaRoomCheckpointCommit(input.commit);
       } catch {
         throw new Error('REDIS_ROOM_TRANSITION_COMMIT_INVALID');
       }
@@ -377,12 +418,14 @@ export const createRedisRoomStore = (options: RedisRoomStoreOptions): RedisRoomS
           ]
         : ['match', ...predecessorArguments(expected)];
       const raw = await options.getClient().eval(SAVE_SCRIPT, {
-        keys: [roomKey(stored.roomId)],
+        keys: [roomKey(stored.roomId), incarnationFenceKey(stored.roomId)],
         arguments: [
           ...expectedArguments,
           JSON.stringify(stored),
           String(stored.state.lifecycle.status === 'open' ? activeTtlMs : terminalTtlMs),
           expectedStored === null ? '' : JSON.stringify(expectedStored),
+          String(incarnationFenceTtlMs),
+          String(MAX_ROOM_INCARNATIONS),
         ],
       });
       return parseMutationResult(raw, ['saved', 'conflict'] as const);
@@ -393,11 +436,13 @@ export const createRedisRoomStore = (options: RedisRoomStoreOptions): RedisRoomS
       const expiring = createExpiringStoredCheckpoint(active.state);
       const expected = checkpointPredecessorOf(active.state);
       const raw = await options.getClient().eval(DELETE_SCRIPT, {
-        keys: [roomKey(active.roomId)],
+        keys: [roomKey(active.roomId), incarnationFenceKey(active.roomId)],
         arguments: [
           ...predecessorArguments(expected),
           JSON.stringify(active),
           JSON.stringify(expiring),
+          String(incarnationFenceTtlMs),
+          String(MAX_ROOM_INCARNATIONS),
         ],
       });
       return parseMutationResult(raw, ['deleted', 'missing', 'conflict'] as const);
@@ -408,12 +453,14 @@ export const createRedisRoomStore = (options: RedisRoomStoreOptions): RedisRoomS
       const expiring = createExpiringStoredCheckpoint(active.state);
       const expected = checkpointPredecessorOf(active.state);
       const raw = await options.getClient().eval(EXPIRE_SCRIPT, {
-        keys: [roomKey(active.roomId)],
+        keys: [roomKey(active.roomId), incarnationFenceKey(active.roomId)],
         arguments: [
           ...predecessorArguments(expected),
           String(terminalTtlMs),
           JSON.stringify(active),
           JSON.stringify(expiring),
+          String(incarnationFenceTtlMs),
+          String(MAX_ROOM_INCARNATIONS),
         ],
       });
       return parseMutationResult(raw, ['expired', 'missing', 'conflict'] as const);
