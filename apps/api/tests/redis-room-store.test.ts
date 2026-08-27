@@ -179,12 +179,40 @@ describe('RedisRoomStore', () => {
       .mockResolvedValueOnce(expiringEnvelope)
       .mockResolvedValueOnce('{not-json')
       .mockResolvedValueOnce(envelope);
+    vi.mocked(client.eval).mockResolvedValue('seeded');
     const store = createRedisRoomStore({ getClient: () => client });
 
     await expect(store.load('room-1')).resolves.toEqual(state);
     await expect(store.load('room-1')).resolves.toBeNull();
     await expect(store.load('room-1')).rejects.toThrow('REDIS_ROOM_CHECKPOINT_INVALID');
     await expect(store.load('room-other')).rejects.toThrow('REDIS_ROOM_CHECKPOINT_INVALID');
+    const [script, options] = vi.mocked(client.eval).mock.calls[0]!;
+    expect(script).toContain('ROOM_CHECKPOINT_BOOTSTRAP_FENCE_V1');
+    expect(script).toContain("raw ~= ARGV[1]");
+    expect(script).toContain("redis.call('SADD', KEYS[2], current.roomEpoch)");
+    expect(options.arguments.at(-1)).toBe('16');
+  });
+
+  it('legacy fence bootstrap 与并发 checkpoint 变化冲突时重读，不返回未围住的旧 state', async () => {
+    const client = createClient();
+    const first = createArenaRoomState('epoch-1');
+    const second = createArenaRoomState('epoch-2');
+    const envelope = (state: typeof first) => JSON.stringify({
+      checkpointVersion: 1,
+      ...checkpointPredecessorOf(state),
+      state,
+    });
+    vi.mocked(client.get)
+      .mockResolvedValueOnce(envelope(first))
+      .mockResolvedValueOnce(envelope(second));
+    vi.mocked(client.eval)
+      .mockResolvedValueOnce('conflict')
+      .mockResolvedValueOnce('seeded');
+    const store = createRedisRoomStore({ getClient: () => client });
+
+    await expect(store.load('room-1')).resolves.toEqual(second);
+    expect(client.get).toHaveBeenCalledTimes(2);
+    expect(client.eval).toHaveBeenCalledTimes(2);
   });
 
   it('Redis 垃圾与未知 Lua 响应只上浮固定错误，不反射 checkpoint 内容', async () => {
@@ -296,6 +324,9 @@ describe('RedisRoomStore', () => {
       eval: vi.fn(async (script, options) => {
         const key = options.keys[0]!;
         const currentRaw = values.get(key);
+        if (script.includes('ROOM_CHECKPOINT_BOOTSTRAP_FENCE_V1')) {
+          return currentRaw === options.arguments[0] ? 'seeded' : 'conflict';
+        }
         if (script.includes('ROOM_CHECKPOINT_SAVE_V1')) {
           const [expectedMode, expectedVersion, expectedRoomId, expectedRoomEpoch,
             expectedRevision, expectedControlSeq, serialized, , expectedRaw] = options.arguments;

@@ -55,6 +55,7 @@ const epochRoomId = `room-epoch-${token}`;
 const expiryFenceRoomId = `room-expiry-fence-${token}`;
 const legacyRoomId = `room-legacy-v1-${token}`;
 const legacyRecoveryRoomId = `room-legacy-recovery-${token}`;
+const legacyLoadTtlRoomId = `room-legacy-load-ttl-${token}`;
 const malformedRoomId = `room-malformed-${token}`;
 const invalidFenceRoomId = `room-invalid-fence-${token}`;
 const fullFenceRoomId = `room-full-fence-${token}`;
@@ -425,6 +426,9 @@ try {
       if (JSON.stringify(await readerStore.load(legacyRoomId)) !== JSON.stringify(legacyState)) {
         throw new Error('ROOM_REDIS_LEGACY_V1_LOAD_FAILED');
       }
+      if (!await cleanup.sIsMember(roomFenceKey(legacyRoomId), legacyState.snapshot.roomEpoch)) {
+        throw new Error('ROOM_REDIS_LEGACY_V1_LOAD_FENCE_BOOTSTRAP_FAILED');
+      }
       const legacyPublished = publish(legacyState);
       if ((await writerStore.save({ commit: commit(legacyPublished) })).kind !== 'saved') {
         throw new Error('ROOM_REDIS_LEGACY_V1_SAVE_FAILED');
@@ -581,6 +585,22 @@ try {
         terminalTtlSeconds: 1,
       });
       const delayedCreateReceipt = commit(createRoom(ttlRoomId));
+      const legacyLoadTtlState = createRoom(legacyLoadTtlRoomId, 'legacy-load-epoch').nextState;
+      await cleanup.set(roomKey(legacyLoadTtlRoomId), JSON.stringify({
+        checkpointVersion: 1,
+        ...checkpointPredecessorOf(legacyLoadTtlState),
+        state: legacyLoadTtlState,
+      }), { PX: 1_000 });
+      if (JSON.stringify(await shortTtlStore.load(legacyLoadTtlRoomId))
+        !== JSON.stringify(legacyLoadTtlState)) {
+        throw new Error('ROOM_REDIS_LEGACY_LOAD_TTL_BOOTSTRAP_FAILED');
+      }
+      if (!await cleanup.sIsMember(
+        roomFenceKey(legacyLoadTtlRoomId),
+        legacyLoadTtlState.snapshot.roomEpoch,
+      )) {
+        throw new Error('ROOM_REDIS_LEGACY_LOAD_TTL_FENCE_MISSING');
+      }
       const shortLived = createRoom(ttlRoomId);
       if ((await shortTtlStore.save({ commit: commit(shortLived) })).kind !== 'saved') {
         throw new Error('ROOM_REDIS_SHORT_TTL_CREATE_FAILED');
@@ -588,6 +608,14 @@ try {
       await new Promise<void>((resolve) => setTimeout(resolve, 2_100));
       if (await shortTtlStore.load(ttlRoomId) !== null) {
         throw new Error('ROOM_REDIS_TTL_EXPIRY_FAILED');
+      }
+      if (await shortTtlStore.load(legacyLoadTtlRoomId) !== null) {
+        throw new Error('ROOM_REDIS_LEGACY_LOAD_TTL_EXPIRY_FAILED');
+      }
+      if ((await shortTtlStore.save({
+        commit: commit(createRoom(legacyLoadTtlRoomId, 'legacy-load-epoch')),
+      })).kind !== 'conflict') {
+        throw new Error('ROOM_REDIS_LEGACY_LOAD_TTL_RESURRECTION_FAILED');
       }
       const ttlResurrection = await shortTtlStore.save({
         commit: delayedCreateReceipt,
@@ -665,6 +693,7 @@ try {
         oldEpochFence: true,
         recoveryEpochRollover: true,
         legacyRecoveryPredecessorFence: true,
+        legacyLoadFenceBootstrap: true,
         roomActorWarmRecovery: true,
         roomActorOldWriterFence: true,
         terminalTtl: true,
@@ -687,6 +716,7 @@ try {
       ...roomKeys(expiryFenceRoomId),
       ...roomKeys(legacyRoomId),
       ...roomKeys(legacyRecoveryRoomId),
+      ...roomKeys(legacyLoadTtlRoomId),
       ...roomKeys(malformedRoomId),
       ...roomKeys(invalidFenceRoomId),
       ...roomKeys(fullFenceRoomId),

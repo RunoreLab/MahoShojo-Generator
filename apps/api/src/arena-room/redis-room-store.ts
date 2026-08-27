@@ -19,6 +19,27 @@ const DEFAULT_TERMINAL_TTL_SECONDS = 300;
 const MAX_ROOM_INCARNATIONS = 16;
 const KEY_PREFIX = 'mahoshojo:room:v1';
 
+const BOOTSTRAP_FENCE_SCRIPT = `
+-- ROOM_CHECKPOINT_BOOTSTRAP_FENCE_V1
+local raw = redis.call('GET', KEYS[1])
+if not raw or raw ~= ARGV[1] then return 'conflict' end
+local decoded, current = pcall(cjson.decode, raw)
+if not decoded or type(current) ~= 'table'
+  or current.checkpointVersion ~= 1
+  or current.expiryFence ~= nil
+  or current.roomId ~= ARGV[2]
+  or current.roomEpoch ~= ARGV[3] then
+  return 'invalid-existing'
+end
+local fenceTypeReply = redis.call('TYPE', KEYS[2])
+local fenceType = type(fenceTypeReply) == 'table' and fenceTypeReply.ok or fenceTypeReply
+if fenceType ~= 'none' and fenceType ~= 'set' then return 'invalid-fence' end
+if redis.call('SISMEMBER', KEYS[2], current.roomEpoch) == 1 then return 'already' end
+if redis.call('SCARD', KEYS[2]) >= tonumber(ARGV[4]) then return 'incarnation-limit' end
+redis.call('SADD', KEYS[2], current.roomEpoch)
+return 'seeded'
+`;
+
 const SAVE_SCRIPT = `
 -- ROOM_CHECKPOINT_SAVE_V1
 local candidateDecoded, candidate = pcall(cjson.decode, ARGV[7])
@@ -378,10 +399,22 @@ export const createRedisRoomStore = (options: RedisRoomStoreOptions): RedisRoomS
   );
   return Object.freeze({
     async load(roomId) {
-      const raw = await options.getClient().get(roomKey(roomId));
-      if (raw === null) return null;
-      const stored = parseStoredCheckpoint(raw, roomId);
-      return stored.checkpointVersion === EXPIRING_ROOM_CHECKPOINT_VERSION ? null : stored.state;
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        const raw = await options.getClient().get(roomKey(roomId));
+        if (raw === null) return null;
+        const stored = parseStoredCheckpoint(raw, roomId);
+        if (stored.checkpointVersion === EXPIRING_ROOM_CHECKPOINT_VERSION) return null;
+        const bootstrapped = await options.getClient().eval(BOOTSTRAP_FENCE_SCRIPT, {
+          keys: [roomKey(roomId), incarnationFenceKey(roomId)],
+          arguments: [raw, roomId, stored.roomEpoch, String(MAX_ROOM_INCARNATIONS)],
+        });
+        const result = parseMutationResult(
+          bootstrapped,
+          ['seeded', 'already', 'conflict'] as const,
+        );
+        if (result.kind !== 'conflict') return stored.state;
+      }
+      throw new Error('REDIS_ROOM_CHECKPOINT_CONFLICT');
     },
 
     async save(input) {

@@ -5,6 +5,8 @@ import {
   consumeArenaRoomCheckpointCommit,
   issueArenaRoomGenerationReservationAuthority,
   issueArenaRoomTrustedTime,
+  ArenaRoomAuthorityStateSchema,
+  MAX_ROOM_COLLABORATIVE_CHANGES,
   MAX_ROOM_GENERATION_RECORDS,
   type ArenaRoomAuthorityState,
   type ArenaRoomCheckpointCommitData,
@@ -64,6 +66,25 @@ const sameState = (
   right: ArenaRoomAuthorityState | null,
 ): boolean => JSON.stringify(left) === JSON.stringify(right);
 
+const generationExhaustedState = (): ArenaRoomAuthorityState => {
+  const state = createArenaRoomState('epoch-1');
+  state.generationLedger = Array.from({ length: MAX_ROOM_GENERATION_RECORDS }, (_, index) => ({
+    mirror: {
+      generationRequestId: `used-request-${index}`,
+      generationId: `used-generation-${index}`,
+      attempt: 1,
+      state: 'cancelled' as const,
+      configRevision: 0,
+      snapshotDigest: `sha256:${'a'.repeat(64)}`,
+      collaborativeInfluence: false,
+      participantUserIds: [101],
+      startedAt: ARENA_ROOM_NEXT_TIMESTAMP,
+      finishedAt: ARENA_ROOM_NEXT_TIMESTAMP,
+    },
+  }));
+  return state;
+};
+
 class MemoryRoomStore implements RoomActorCheckpointStore {
   state: ArenaRoomAuthorityState | null = null;
   loadCalls = 0;
@@ -75,6 +96,7 @@ class MemoryRoomStore implements RoomActorCheckpointStore {
     call: number,
   ) => Promise<void>;
   saveFailure?: Error;
+  conflictAtCall?: number;
   beforeLoad?: () => Promise<void>;
 
   async load(roomId: string): Promise<ArenaRoomAuthorityState | null> {
@@ -92,6 +114,7 @@ class MemoryRoomStore implements RoomActorCheckpointStore {
     try {
       await this.beforeSave?.(data, call);
       if (this.saveFailure) throw this.saveFailure;
+      if (this.conflictAtCall === call) return { kind: 'conflict' as const };
       const current = this.state;
       if (data.predecessor === null) {
         if (current !== null) return { kind: 'conflict' as const };
@@ -466,22 +489,7 @@ describe('RoomActorRegistry', () => {
 
   it('exact replay quota 耗尽时以 opaque runtime capability checkpoint close，原请求稳定 fail closed', async () => {
     const store = new MemoryRoomStore();
-    const exhausted = createArenaRoomState('epoch-1');
-    exhausted.generationLedger = Array.from({ length: MAX_ROOM_GENERATION_RECORDS }, (_, index) => ({
-      mirror: {
-        generationRequestId: `used-request-${index}`,
-        generationId: `used-generation-${index}`,
-        attempt: 1,
-        state: 'cancelled' as const,
-        configRevision: 0,
-        snapshotDigest: `sha256:${'a'.repeat(64)}`,
-        collaborativeInfluence: false,
-        participantUserIds: [101],
-        startedAt: ARENA_ROOM_NEXT_TIMESTAMP,
-        finishedAt: ARENA_ROOM_NEXT_TIMESTAMP,
-      },
-    }));
-    store.state = exhausted;
+    store.state = generationExhaustedState();
     const registry = createRoomActorRegistry({
       store,
       createRoomEpoch: () => 'epoch-2',
@@ -532,25 +540,89 @@ describe('RoomActorRegistry', () => {
     }));
   });
 
+  it('collaborative provenance quota 也触发同一 runtime checkpoint close', async () => {
+    const store = new MemoryRoomStore();
+    const exhausted = createArenaRoomState('epoch-1');
+    exhausted.snapshot.members.push({
+      userId: 'member-1',
+      role: 'member',
+      displayName: 'Member',
+      membershipState: 'active',
+      joinedAt: ARENA_ROOM_NEXT_TIMESTAMP,
+    });
+    exhausted.memberAuthority.push({
+      accountUserId: 202,
+      member: exhausted.snapshot.members[1]!,
+    });
+    exhausted.collaborativeChanges = Array.from(
+      { length: MAX_ROOM_COLLABORATIVE_CHANGES },
+      (_, index) => ({
+        changeId: `removed-change-${index}`,
+        type: 'removeCombatant' as const,
+        combatantKey: `data-card:removed-character-${index}`,
+        expectedBase: {
+          kind: 'present' as const,
+          ref: {
+            id: `removed-character-${index}`,
+            kind: 'character' as const,
+            versionToken: 'v1',
+          },
+        },
+      }),
+    );
+    exhausted.snapshot.proposals = [{
+      proposalVersion: 1,
+      proposalId: 'proposal-remove-current',
+      roomId: 'room-1',
+      authorUserId: 'member-1',
+      baseRevision: 0,
+      status: 'submitted',
+      changes: [{
+        changeId: 'add-current-material',
+        type: 'addMaterial',
+        ref: { id: 'material-current', kind: 'material', versionToken: 'v1' },
+        expectedBase: { kind: 'absent' },
+      }],
+      createdAt: ARENA_ROOM_NEXT_TIMESTAMP,
+    }];
+    // RedisRoomStore.load() returns the strict schema projection. Keep this
+    // in-memory recovery fixture on the same canonical checkpoint boundary.
+    store.state = ArenaRoomAuthorityStateSchema.parse(exhausted);
+    const registry = createRoomActorRegistry({
+      store,
+      createRoomEpoch: () => 'epoch-2',
+      recoveryTimestamp: () => THIRD_TIMESTAMP,
+      quotaCloseTimestamp: () => FOURTH_TIMESTAMP,
+    });
+    const actor = await registry.recover('room-1');
+    if (!actor) throw new Error('expected actor');
+
+    await expect(registry.execute({
+      roomId: 'room-1',
+      command: {
+        type: 'resolve-proposal',
+        expectedRoomEpoch: 'epoch-2',
+        proposalId: 'proposal-remove-current',
+        resolution: 'accept-selected',
+        selectedChangeIds: ['add-current-material'],
+        timestamp: FOURTH_TIMESTAMP,
+      },
+      authority: hostAuthority,
+    })).resolves.toMatchObject({
+      ok: false,
+      code: 'capability-denied',
+      reason: 'collaborative-history-limit-reached',
+    });
+    expect(store.state?.lifecycle).toMatchObject({
+      status: 'closed',
+      closeReason: 'room-incarnation-limit',
+    });
+  });
+
   it('quota close checkpoint 暂时失败时保持本地 close-only，并在后续请求重试关闭', async () => {
     const store = new MemoryRoomStore();
     const observed = vi.fn();
-    const exhausted = createArenaRoomState('epoch-1');
-    exhausted.generationLedger = Array.from({ length: MAX_ROOM_GENERATION_RECORDS }, (_, index) => ({
-      mirror: {
-        generationRequestId: `used-request-${index}`,
-        generationId: `used-generation-${index}`,
-        attempt: 1,
-        state: 'cancelled' as const,
-        configRevision: 0,
-        snapshotDigest: `sha256:${'a'.repeat(64)}`,
-        collaborativeInfluence: false,
-        participantUserIds: [101],
-        startedAt: ARENA_ROOM_NEXT_TIMESTAMP,
-        finishedAt: ARENA_ROOM_NEXT_TIMESTAMP,
-      },
-    }));
-    store.state = exhausted;
+    store.state = generationExhaustedState();
     store.beforeSave = async (_data, call) => {
       if (call === 2) throw new Error('redis temporarily unavailable');
     };
@@ -608,6 +680,53 @@ describe('RoomActorRegistry', () => {
       snapshot: { sharedConfig: { userGuidance: '' } },
       lifecycle: { status: 'closed', closeReason: 'room-incarnation-limit' },
     });
+  });
+
+  it('quota close CAS conflict 立即 fence actor，不安装 close state 或 fan-out', async () => {
+    const store = new MemoryRoomStore();
+    store.state = generationExhaustedState();
+    store.conflictAtCall = 2;
+    const registry = createRoomActorRegistry({
+      store,
+      createRoomEpoch: () => 'epoch-2',
+      recoveryTimestamp: () => THIRD_TIMESTAMP,
+      quotaCloseTimestamp: () => FOURTH_TIMESTAMP,
+    });
+    const actor = await registry.recover('room-1');
+    if (!actor) throw new Error('expected actor');
+    const fanout = vi.fn();
+    actor.subscribe(fanout);
+    const authority = issueArenaRoomGenerationReservationAuthority({
+      actorUserId: 'host-1',
+      accountUserId: 101,
+      roomId: 'room-1',
+      roomEpoch: 'epoch-2',
+      configRevision: 0,
+      generationRequestId: 'next-request',
+      generationId: 'next-generation',
+      attempt: 1,
+      snapshotDigest: `sha256:${'b'.repeat(64)}`,
+      expiresAt: '2026-08-28T01:00:00.000Z',
+    });
+
+    await expect(registry.execute({
+      roomId: 'room-1',
+      command: {
+        type: 'reserve-generation',
+        expectedRoomEpoch: 'epoch-2',
+        expectedRevision: 0,
+        generationRequestId: 'next-request',
+        generationId: 'next-generation',
+        attempt: 1,
+        timestamp: FOURTH_TIMESTAMP,
+      },
+      authority,
+      trustedTime: issueArenaRoomTrustedTime({ now: FOURTH_TIMESTAMP }),
+    })).rejects.toThrow('ROOM_ACTOR_CHECKPOINT_CONFLICT');
+    expect(actor.getSnapshot()?.lifecycle.status).toBe('open');
+    expect(store.state?.lifecycle.status).toBe('open');
+    expect(fanout).not.toHaveBeenCalled();
+    expect(() => registry.get('room-1')).toThrow('ROOM_ACTOR_FENCED');
   });
 
   it('recovery 遇到 Redis incarnation quota 时关闭旧 epoch，而不是留下 active checkpoint', async () => {
