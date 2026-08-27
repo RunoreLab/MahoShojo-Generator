@@ -8,6 +8,7 @@ import {
   parseArenaRoomAuthorityState,
   transitionArenaRoom,
   type ArenaRoomAuthorityState,
+  type ArenaRoomCommand,
   type ArenaRoomTransitionResult,
   type ArenaRoomTransitionSuccess,
 } from '@mahoshojo/multiplayer-core';
@@ -24,6 +25,8 @@ export type RoomActorCheckpointStore = Pick<RedisRoomStore, 'load' | 'save'>;
 
 export type RoomActorErrorCode =
   | 'ROOM_ACTOR_CHECKPOINT_CONFLICT'
+  | 'ROOM_ACTOR_CREATE_IDENTITY_CONFLICT'
+  | 'ROOM_ACTOR_CREATE_REQUIRES_SERVER_IDENTITY'
   | 'ROOM_ACTOR_EPOCH_INVALID'
   | 'ROOM_ACTOR_FENCED'
   | 'ROOM_ACTOR_NOT_FOUND'
@@ -431,6 +434,11 @@ export type RoomActorRegistryOptions = {
   readonly maxFencedRooms?: number;
   readonly idleActorTtlMs?: number;
   readonly now?: () => number;
+  readonly createRoomIdentity?: () => {
+    readonly roomId: string;
+    readonly roomEpoch: string;
+  };
+  readonly createTimestamp?: () => string;
   readonly createRoomEpoch?: (roomId: string, previousRoomEpoch: string) => string;
   readonly recoveryTimestamp?: () => string;
   readonly quotaCloseTimestamp?: () => string;
@@ -440,6 +448,20 @@ export type RoomActorRegistryOptions = {
 
 export type RoomActorRegistryExecuteInput = RoomActorExecuteInput & {
   readonly roomId: string;
+};
+
+type ArenaRoomCreateCommand = Extract<ArenaRoomCommand, { readonly type: 'create' }>;
+
+export type RoomActorRegistryCreateInput = {
+  readonly host: Pick<ArenaRoomCreateCommand['host'], 'displayName' | 'userId'>;
+  readonly sharedConfig: ArenaRoomCreateCommand['sharedConfig'];
+  readonly authority: unknown;
+};
+
+export type RoomActorRegistryCreateResult = {
+  readonly roomId: string;
+  readonly roomEpoch: string;
+  readonly result: ArenaRoomTransitionResult;
 };
 
 export class RoomActorRegistry {
@@ -502,6 +524,51 @@ export class RoomActorRegistry {
     return hydration;
   }
 
+  async create(input: RoomActorRegistryCreateInput): Promise<RoomActorRegistryCreateResult> {
+    this.requireAccepting();
+    const identity = (this.options.createRoomIdentity ?? (() => ({
+      roomId: randomUUID(),
+      roomEpoch: randomUUID(),
+    })))();
+    const timestamp = (this.options.createTimestamp ?? (() => new Date().toISOString()))();
+    const command = ArenaRoomCommandSchema.safeParse({
+      type: 'create',
+      roomId: identity.roomId,
+      roomEpoch: identity.roomEpoch,
+      host: {
+        ...input.host,
+        role: 'host',
+        membershipState: 'active',
+        joinedAt: timestamp,
+      },
+      sharedConfig: input.sharedConfig,
+      timestamp,
+    });
+    if (!command.success || command.data.type !== 'create') {
+      return {
+        ...identity,
+        result: {
+          ok: false,
+          code: 'validation-failed',
+          reason: 'invalid-command',
+        },
+      };
+    }
+    if (
+      this.actors.has(identity.roomId)
+      || this.hydrations.has(identity.roomId)
+      || this.fencedRoomIds.has(identity.roomId)
+    ) return fail('ROOM_ACTOR_CREATE_IDENTITY_CONFLICT');
+    this.requireCapacity();
+    const actor = this.createActor(identity.roomId, null);
+    this.actors.set(identity.roomId, actor);
+    const result = await actor.execute({
+      authority: snapshotInputCapability(input.authority),
+      command: command.data,
+    });
+    return { ...identity, result };
+  }
+
   async execute(input: RoomActorRegistryExecuteInput): Promise<ArenaRoomTransitionResult> {
     this.requireAccepting();
     const command = ArenaRoomCommandSchema.safeParse(input.command);
@@ -511,6 +578,9 @@ export class RoomActorRegistry {
         code: 'validation-failed',
         reason: 'invalid-command',
       };
+    }
+    if (command.data.type === 'create') {
+      return fail('ROOM_ACTOR_CREATE_REQUIRES_SERVER_IDENTITY');
     }
     const stableInput: RoomActorRegistryExecuteInput = {
       ...input,
@@ -523,19 +593,7 @@ export class RoomActorRegistry {
     const hydration = this.hydrations.get(stableInput.roomId);
     if (!actor && hydration) actor = await hydration;
     this.requireAccepting();
-    if (!actor) {
-      this.requireCapacity();
-      if (
-        typeof stableInput.command !== 'object'
-        || stableInput.command === null
-        || !('type' in stableInput.command)
-        || stableInput.command.type !== 'create'
-      ) {
-        return fail('ROOM_ACTOR_NOT_FOUND');
-      }
-      actor = this.createActor(stableInput.roomId, null);
-      this.actors.set(stableInput.roomId, actor);
-    }
+    if (!actor) return fail('ROOM_ACTOR_NOT_FOUND');
     return actor.execute(stableInput);
   }
 

@@ -14,8 +14,10 @@ import {
 } from '@mahoshojo/multiplayer-core';
 
 import {
-  createRoomActorRegistry,
+  createRoomActorRegistry as createRuntimeRoomActorRegistry,
+  type RoomActorRegistry,
   type RoomActorCheckpointStore,
+  type RoomActorRegistryOptions,
 } from '#/arena-room/room-actor-registry';
 import {
   ARENA_ROOM_NEXT_TIMESTAMP,
@@ -29,6 +31,25 @@ const hostAuthority = {
   actorUserId: 'host-1',
   accountUserId: 101,
 };
+
+const createRoomActorRegistry = (options: RoomActorRegistryOptions): RoomActorRegistry => (
+  createRuntimeRoomActorRegistry({
+    createRoomIdentity: () => ({ roomId: 'room-1', roomEpoch: 'epoch-1' }),
+    createTimestamp: () => '2026-08-28T00:00:00.000Z',
+    ...options,
+  })
+);
+
+const createActorRoom = async (
+  registry: RoomActorRegistry,
+  authority: unknown = hostAuthority,
+): Promise<Awaited<ReturnType<RoomActorRegistry['create']>>['result']> => (
+  (await registry.create({
+    host: { userId: 'host-1', displayName: 'Host' },
+    sharedConfig: createArenaRoomState().snapshot.sharedConfig,
+    authority,
+  })).result
+);
 
 const createCommand = (roomEpoch = 'epoch-1', roomId = 'room-1'): ArenaRoomCommand => {
   const state = createArenaRoomState(roomEpoch);
@@ -152,12 +173,16 @@ describe('RoomActorRegistry', () => {
     expect(store.saveCalls).toBe(0);
   });
 
-  it('schema-valid 外部 command 不会隐式 hydrate/rollover，未授权 create 也不遗留空 actor', async () => {
+  it('schema-valid 外部 command 不会隐式 hydrate/rollover，Room identity 只能由服务端创建入口签发', async () => {
     const store = new MemoryRoomStore();
     const seed = createRoomActorRegistry({ store });
-    await seed.execute({ roomId: 'room-1', command: createCommand(), authority: hostAuthority });
+    await createActorRoom(seed);
     await seed.shutdown();
-    const registry = createRoomActorRegistry({ store, maxActors: 1 });
+    const registry = createRoomActorRegistry({
+      store,
+      maxActors: 1,
+      createRoomIdentity: () => ({ roomId: 'room-fresh', roomEpoch: 'epoch-fresh' }),
+    });
     const loadCalls = store.loadCalls;
 
     await expect(registry.execute({
@@ -170,43 +195,56 @@ describe('RoomActorRegistry', () => {
 
     store.state = null;
     await expect(registry.execute({
-      roomId: 'room-attacker',
-      command: createCommand('epoch-attacker'),
-      authority: { ...hostAuthority, actorUserId: 'attacker' },
-    })).resolves.toMatchObject({ ok: false, code: 'forbidden' });
-    await vi.waitFor(() => expect(registry.size).toBe(0));
-    await expect(registry.execute({
       roomId: 'room-1',
-      command: createCommand(),
-      authority: hostAuthority,
-    })).resolves.toMatchObject({ ok: true, kind: 'applied' });
+      command: createCommand('epoch-1', 'room-1'),
+      authority: { ...hostAuthority, actorUserId: 'attacker' },
+    })).rejects.toThrow('ROOM_ACTOR_CREATE_REQUIRES_SERVER_IDENTITY');
+    expect(store.saveCalls).toBe(1);
+    await expect(createActorRoom(
+      registry,
+      { ...hostAuthority, actorUserId: 'attacker' },
+    )).resolves.toMatchObject({ ok: false, code: 'forbidden' });
+    await vi.waitFor(() => expect(registry.size).toBe(0));
+    await expect(createActorRoom(registry)).resolves.toMatchObject({
+      ok: true,
+      kind: 'applied',
+      nextState: { snapshot: { roomId: 'room-fresh', roomEpoch: 'epoch-fresh' } },
+    });
   });
 
   it('registry room 容量有界，满额时在 load/transition/checkpoint 前 fail closed', async () => {
     const store = new MemoryRoomStore();
-    const registry = createRoomActorRegistry({ store, maxActors: 1 });
-    await registry.execute({ roomId: 'room-1', command: createCommand(), authority: hostAuthority });
+    let identityIndex = 0;
+    const identities = [
+      { roomId: 'room-1', roomEpoch: 'epoch-1' },
+      { roomId: 'room-overload', roomEpoch: 'epoch-overload' },
+    ];
+    const registry = createRoomActorRegistry({
+      store,
+      maxActors: 1,
+      createRoomIdentity: () => identities[identityIndex++]!,
+    });
+    await createActorRoom(registry);
 
-    await expect(registry.execute({
-      roomId: 'room-overload',
-      command: createCommand('epoch-overload'),
-      authority: hostAuthority,
-    })).rejects.toThrow('ROOM_ACTOR_REGISTRY_CAPACITY');
+    await expect(createActorRoom(registry)).rejects.toThrow('ROOM_ACTOR_REGISTRY_CAPACITY');
     expect(store.saveCalls).toBe(1);
   });
 
-  it('concurrent create 只建立一个 actor/writer，第二个 create 在同一队列内判定 duplicate', async () => {
+  it('服务端 identity 碰撞的 concurrent create 只建立一个 actor/writer', async () => {
     const store = new MemoryRoomStore();
     const registry = createRoomActorRegistry({ store });
 
     const results = await Promise.all([
-      registry.execute({ roomId: 'room-1', command: createCommand(), authority: hostAuthority }),
-      registry.execute({ roomId: 'room-1', command: createCommand(), authority: hostAuthority }),
+      createActorRoom(registry).then((result) => ({ status: 'fulfilled' as const, result })),
+      createActorRoom(registry).then(
+        (result) => ({ status: 'fulfilled' as const, result }),
+        (error: unknown) => ({ status: 'rejected' as const, error }),
+      ),
     ]);
 
     expect(results).toMatchObject([
-      { ok: true, kind: 'applied' },
-      { ok: false, code: 'duplicate', reason: 'state-already-exists' },
+      { status: 'fulfilled', result: { ok: true, kind: 'applied' } },
+      { status: 'rejected', error: { code: 'ROOM_ACTOR_CREATE_IDENTITY_CONFLICT' } },
     ]);
     expect(store.saveCalls).toBe(1);
     expect(store.maxActiveSaves).toBe(1);
@@ -216,11 +254,7 @@ describe('RoomActorRegistry', () => {
   it('同 room concurrent command 严格串行，并只在 checkpoint 后安装/fan-out', async () => {
     const store = new MemoryRoomStore();
     const registry = createRoomActorRegistry({ store });
-    const created = await registry.execute({
-      roomId: 'room-1',
-      command: createCommand(),
-      authority: hostAuthority,
-    });
+    const created = await createActorRoom(registry);
     if (!created.ok) throw new Error('expected create success');
     const actor = await registry.get('room-1');
     if (!actor) throw new Error('expected actor');
@@ -252,24 +286,17 @@ describe('RoomActorRegistry', () => {
     expect(fanout).toEqual(['first', 'second']);
   });
 
-  it('registry 在异步 hydration 前冻结普通 authority 输入，拒绝排队期间提权', async () => {
+  it('服务端 create 在排队前冻结普通 authority 输入，拒绝调用后提权', async () => {
     const store = new MemoryRoomStore();
-    const loadGate = deferred();
-    store.beforeLoad = () => loadGate.promise;
     const registry = createRoomActorRegistry({ store });
     const mutableAuthority = {
       kind: 'authenticated-user',
       actorUserId: 'attacker',
       accountUserId: 999,
     };
-    const result = registry.execute({
-      roomId: 'room-1',
-      command: createCommand(),
-      authority: mutableAuthority,
-    });
+    const result = createActorRoom(registry, mutableAuthority);
     mutableAuthority.actorUserId = 'host-1';
     mutableAuthority.accountUserId = 101;
-    loadGate.resolve();
 
     await expect(result).resolves.toMatchObject({
       ok: false,
@@ -282,11 +309,7 @@ describe('RoomActorRegistry', () => {
   it('bounded queue 满时稳定拒绝，不让过载 command 进入 transition/store', async () => {
     const store = new MemoryRoomStore();
     const registry = createRoomActorRegistry({ store, maxQueuedCommands: 1 });
-    const created = await registry.execute({
-      roomId: 'room-1',
-      command: createCommand(),
-      authority: hostAuthority,
-    });
+    const created = await createActorRoom(registry);
     if (!created.ok) throw new Error('expected create success');
     const gate = deferred();
     store.beforeSave = async (_data, call) => {
@@ -321,11 +344,7 @@ describe('RoomActorRegistry', () => {
   it('warm recovery 切新 epoch；旧 actor/callback 的已推导 mutation 被 Redis CAS fence', async () => {
     const store = new MemoryRoomStore();
     const oldRegistry = createRoomActorRegistry({ store });
-    const created = await oldRegistry.execute({
-      roomId: 'room-1',
-      command: createCommand(),
-      authority: hostAuthority,
-    });
+    const created = await createActorRoom(oldRegistry);
     if (!created.ok) throw new Error('expected create success');
 
     const recoveredRegistry = createRoomActorRegistry({
@@ -354,11 +373,7 @@ describe('RoomActorRegistry', () => {
   it('warm recovery 后旧 actor 的 idempotent success 也必须校验 Redis 并被 fence', async () => {
     const store = new MemoryRoomStore();
     const oldRegistry = createRoomActorRegistry({ store });
-    const created = await oldRegistry.execute({
-      roomId: 'room-1',
-      command: createCommand(),
-      authority: hostAuthority,
-    });
+    const created = await createActorRoom(oldRegistry);
     if (!created.ok) throw new Error('expected create success');
     const recoveredRegistry = createRoomActorRegistry({
       store,
@@ -382,12 +397,16 @@ describe('RoomActorRegistry', () => {
 
   it('本地 fenced tombstone 有独立上限且不占用 active actor capacity', async () => {
     const store = new MemoryRoomStore();
-    const oldRegistry = createRoomActorRegistry({ store, maxActors: 1, maxFencedRooms: 1 });
-    const created = await oldRegistry.execute({
-      roomId: 'room-1',
-      command: createCommand(),
-      authority: hostAuthority,
+    let createCount = 0;
+    const oldRegistry = createRoomActorRegistry({
+      store,
+      maxActors: 1,
+      maxFencedRooms: 1,
+      createRoomIdentity: () => createCount++ === 0
+        ? { roomId: 'room-1', roomEpoch: 'epoch-1' }
+        : { roomId: 'room-new', roomEpoch: 'epoch-new' },
     });
+    const created = await createActorRoom(oldRegistry);
     if (!created.ok) throw new Error('expected create success');
     const recoveredRegistry = createRoomActorRegistry({
       store,
@@ -403,18 +422,14 @@ describe('RoomActorRegistry', () => {
     expect(oldRegistry.size).toBe(0);
 
     store.state = null;
-    await expect(oldRegistry.execute({
-      roomId: 'room-new',
-      command: createCommand('epoch-new', 'room-new'),
-      authority: hostAuthority,
-    })).resolves.toMatchObject({ ok: true, kind: 'applied' });
+    await expect(createActorRoom(oldRegistry)).resolves.toMatchObject({ ok: true, kind: 'applied' });
     expect(oldRegistry.size).toBe(1);
   });
 
   it('并发 hydrate 只有一个 recovery writer，失败 registry 稳定进入本地 fence', async () => {
     const store = new MemoryRoomStore();
     const seed = createRoomActorRegistry({ store });
-    await seed.execute({ roomId: 'room-1', command: createCommand(), authority: hostAuthority });
+    await createActorRoom(seed);
     await seed.shutdown();
     const gate = deferred();
     store.beforeSave = async (_data, call) => {
@@ -449,11 +464,7 @@ describe('RoomActorRegistry', () => {
   it('closed checkpoint hydrate 保留 terminal actor 与 close idempotency，不切换 epoch', async () => {
     const store = new MemoryRoomStore();
     const first = createRoomActorRegistry({ store });
-    const created = await first.execute({
-      roomId: 'room-1',
-      command: createCommand(),
-      authority: hostAuthority,
-    });
+    const created = await createActorRoom(first);
     if (!created.ok) throw new Error('expected create success');
     const closed = await first.execute({
       roomId: 'room-1',
@@ -763,11 +774,7 @@ describe('RoomActorRegistry', () => {
       createRoomEpoch: () => epochs.shift() ?? 'epoch-unexpected',
       recoveryTimestamp: () => THIRD_TIMESTAMP,
     });
-    await registry.execute({
-      roomId: 'room-1',
-      command: createCommand(),
-      authority: hostAuthority,
-    });
+    await createActorRoom(registry);
     expect(setIntervalSpy).not.toHaveBeenCalled();
     const stopSweeper = registry.startIdleSweeper(10_000);
     expect(setIntervalSpy).toHaveBeenCalledTimes(1);
@@ -789,7 +796,7 @@ describe('RoomActorRegistry', () => {
       idleActorTtlMs: 50,
       now: () => now,
     });
-    await registry.execute({ roomId: 'room-1', command: createCommand(), authority: hostAuthority });
+    await createActorRoom(registry);
     const actor = await registry.get('room-1');
     if (!actor) throw new Error('expected actor');
     const unsubscribe = actor.subscribe(vi.fn());
@@ -803,11 +810,7 @@ describe('RoomActorRegistry', () => {
   it('graceful shutdown 先拒绝新 command，再 drain acknowledged checkpoint 并清理 fan-out', async () => {
     const store = new MemoryRoomStore();
     const registry = createRoomActorRegistry({ store });
-    const created = await registry.execute({
-      roomId: 'room-1',
-      command: createCommand(),
-      authority: hostAuthority,
-    });
+    const created = await createActorRoom(registry);
     if (!created.ok) throw new Error('expected create success');
     const actor = await registry.get('room-1');
     if (!actor) throw new Error('expected actor');
@@ -852,11 +855,7 @@ describe('RoomActorRegistry', () => {
   it('force close 不伪造已提交 checkpoint 的本进程 ack 或 fan-out', async () => {
     const store = new MemoryRoomStore();
     const registry = createRoomActorRegistry({ store });
-    const created = await registry.execute({
-      roomId: 'room-1',
-      command: createCommand(),
-      authority: hostAuthority,
-    });
+    const created = await createActorRoom(registry);
     if (!created.ok) throw new Error('expected create success');
     const actor = await registry.get('room-1');
     if (!actor) throw new Error('expected actor');
@@ -893,7 +892,7 @@ describe('RoomActorRegistry', () => {
   it('shutdown 等待进行中的 hydration 停止，且不得在停止接收后安装 recovery actor', async () => {
     const store = new MemoryRoomStore();
     const seed = createRoomActorRegistry({ store });
-    await seed.execute({ roomId: 'room-1', command: createCommand(), authority: hostAuthority });
+    await createActorRoom(seed);
     await seed.shutdown();
     const loadGate = deferred();
     store.beforeLoad = () => loadGate.promise;
@@ -919,11 +918,7 @@ describe('RoomActorRegistry', () => {
   it('checkpoint failure 不安装 state、不 fan-out；subscriber 容量也保持有界', async () => {
     const store = new MemoryRoomStore();
     const registry = createRoomActorRegistry({ store, maxSubscribersPerRoom: 1 });
-    const created = await registry.execute({
-      roomId: 'room-1',
-      command: createCommand(),
-      authority: hostAuthority,
-    });
+    const created = await createActorRoom(registry);
     if (!created.ok) throw new Error('expected create success');
     const actor = await registry.get('room-1');
     if (!actor) throw new Error('expected actor');
@@ -951,11 +946,7 @@ describe('RoomActorRegistry', () => {
         if (observedErrors.length === 1) throw new Error('observer-hook-failure');
       },
     });
-    const created = await registry.execute({
-      roomId: 'room-1',
-      command: createCommand(),
-      authority: hostAuthority,
-    });
+    const created = await createActorRoom(registry);
     if (!created.ok) throw new Error('expected create success');
     const actor = await registry.get('room-1');
     if (!actor) throw new Error('expected actor');
@@ -977,11 +968,7 @@ describe('RoomActorRegistry', () => {
   it('永不完成的 async subscriber 只占一个 in-flight slot，后续 fan-out 不再调用', async () => {
     const store = new MemoryRoomStore();
     const registry = createRoomActorRegistry({ store });
-    const created = await registry.execute({
-      roomId: 'room-1',
-      command: createCommand(),
-      authority: hostAuthority,
-    });
+    const created = await createActorRoom(registry);
     if (!created.ok) throw new Error('expected create success');
     const actor = await registry.get('room-1');
     if (!actor) throw new Error('expected actor');

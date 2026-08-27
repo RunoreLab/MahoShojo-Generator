@@ -57,6 +57,7 @@ const legacyRoomId = `room-legacy-v1-${token}`;
 const legacyRecoveryRoomId = `room-legacy-recovery-${token}`;
 const legacyLoadTtlRoomId = `room-legacy-load-ttl-${token}`;
 const legacyLoadRaceRoomId = `room-legacy-load-race-${token}`;
+const unobservedLegacyRoomId = `room-legacy-unobserved-${token}`;
 const malformedRoomId = `room-malformed-${token}`;
 const invalidFenceRoomId = `room-invalid-fence-${token}`;
 const fullFenceRoomId = `room-full-fence-${token}`;
@@ -237,25 +238,16 @@ try {
       incarnationFence: true,
     }));
   } else if (phase === 'write') {
-    const registry = createRoomActorRegistry({ store: writerStore });
-    const created = await registry.execute({
-      roomId,
-      command: {
-        type: 'create',
-        roomId,
-        roomEpoch: 'epoch-1',
-        host: {
-          userId: 'host-1',
-          role: 'host',
-          displayName: 'Host',
-          membershipState: 'active',
-          joinedAt: TIMESTAMP,
-        },
-        sharedConfig: sharedConfig(),
-        timestamp: TIMESTAMP,
-      },
-      authority: hostAuthority,
+    const registry = createRoomActorRegistry({
+      store: writerStore,
+      createRoomIdentity: () => ({ roomId, roomEpoch: 'epoch-1' }),
+      createTimestamp: () => TIMESTAMP,
     });
+    const created = (await registry.create({
+      host: { userId: 'host-1', displayName: 'Host' },
+      sharedConfig: sharedConfig(),
+      authority: hostAuthority,
+    })).result;
     if (!created.ok || created.kind !== 'applied') {
       throw new Error('ROOM_ACTOR_RESTART_WRITE_CREATE_FAILED');
     }
@@ -625,6 +617,15 @@ try {
         throw new Error('ROOM_REDIS_LEGACY_LOAD_EXPIRY_RACE_RESURRECTION_FAILED');
       }
       const legacyLoadTtlState = createRoom(legacyLoadTtlRoomId, 'legacy-load-epoch').nextState;
+      const unobservedLegacyState = createRoom(
+        unobservedLegacyRoomId,
+        'legacy-unobserved-epoch',
+      ).nextState;
+      await cleanup.set(roomKey(unobservedLegacyRoomId), JSON.stringify({
+        checkpointVersion: 1,
+        ...checkpointPredecessorOf(unobservedLegacyState),
+        state: unobservedLegacyState,
+      }), { PX: 1_000 });
       await cleanup.set(roomKey(legacyLoadTtlRoomId), JSON.stringify({
         checkpointVersion: 1,
         ...checkpointPredecessorOf(legacyLoadTtlState),
@@ -651,6 +652,35 @@ try {
       if (await shortTtlStore.load(legacyLoadTtlRoomId) !== null) {
         throw new Error('ROOM_REDIS_LEGACY_LOAD_TTL_EXPIRY_FAILED');
       }
+      if (await cleanup.get(roomKey(unobservedLegacyRoomId)) !== null) {
+        throw new Error('ROOM_REDIS_UNOBSERVED_LEGACY_TTL_EXPIRY_FAILED');
+      }
+      const untrustedCreateRegistry = createRoomActorRegistry({ store: shortTtlStore });
+      await fixedError(untrustedCreateRegistry.execute({
+        roomId: unobservedLegacyRoomId,
+        command: {
+          type: 'create',
+          roomId: unobservedLegacyRoomId,
+          roomEpoch: 'legacy-unobserved-epoch',
+          host: {
+            userId: 'host-1',
+            role: 'host',
+            displayName: 'Host',
+            membershipState: 'active',
+            joinedAt: TIMESTAMP,
+          },
+          sharedConfig: sharedConfig(),
+          timestamp: TIMESTAMP,
+        },
+        authority: hostAuthority,
+      }), 'ROOM_ACTOR_CREATE_REQUIRES_SERVER_IDENTITY');
+      await untrustedCreateRegistry.shutdown();
+      if (
+        await cleanup.get(roomKey(unobservedLegacyRoomId)) !== null
+        || await cleanup.exists(roomFenceKey(unobservedLegacyRoomId)) !== 0
+      ) {
+        throw new Error('ROOM_REDIS_UNTRUSTED_CREATE_MUTATED_EXPIRED_LEGACY');
+      }
       if ((await shortTtlStore.save({
         commit: commit(createRoom(legacyLoadTtlRoomId, 'legacy-load-epoch')),
       })).kind !== 'conflict') {
@@ -672,25 +702,19 @@ try {
         throw new Error('ROOM_REDIS_NEW_INCARNATION_FAILED');
       }
 
-      const oldActorRegistry = createRoomActorRegistry({ store: writerStore });
-      const actorCreated = await oldActorRegistry.execute({
-        roomId: actorRoomId,
-        command: {
-          type: 'create',
+      const oldActorRegistry = createRoomActorRegistry({
+        store: writerStore,
+        createRoomIdentity: () => ({
           roomId: actorRoomId,
           roomEpoch: 'actor-epoch-1',
-          host: {
-            userId: 'host-1',
-            role: 'host',
-            displayName: 'Host',
-            membershipState: 'active',
-            joinedAt: TIMESTAMP,
-          },
-          sharedConfig: sharedConfig(),
-          timestamp: TIMESTAMP,
-        },
-        authority: hostAuthority,
+        }),
+        createTimestamp: () => TIMESTAMP,
       });
+      const actorCreated = (await oldActorRegistry.create({
+        host: { userId: 'host-1', displayName: 'Host' },
+        sharedConfig: sharedConfig(),
+        authority: hostAuthority,
+      })).result;
       if (!actorCreated.ok) throw new Error('ROOM_ACTOR_CREATE_FAILED');
       const recoveredActorRegistry = createRoomActorRegistry({
         store: readerStore,
@@ -734,6 +758,7 @@ try {
         legacyRecoveryPredecessorFence: true,
         legacyLoadFenceBootstrap: true,
         legacyLoadExpiryRaceFence: true,
+        serverIssuedRoomIdentity: true,
         roomActorWarmRecovery: true,
         roomActorOldWriterFence: true,
         terminalTtl: true,
@@ -758,6 +783,7 @@ try {
       ...roomKeys(legacyRecoveryRoomId),
       ...roomKeys(legacyLoadTtlRoomId),
       ...roomKeys(legacyLoadRaceRoomId),
+      ...roomKeys(unobservedLegacyRoomId),
       ...roomKeys(malformedRoomId),
       ...roomKeys(invalidFenceRoomId),
       ...roomKeys(fullFenceRoomId),
