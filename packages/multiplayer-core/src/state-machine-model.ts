@@ -231,10 +231,21 @@ export const ArenaRoomGenerationPublisherContextSchema = z.object({
   scope: ArenaRoomGenerationPublisherScopeSchema,
 }).strict();
 
+export const ArenaRoomRecoveryAuthorityContextSchema = z.object({
+  kind: z.literal('room-recovery'),
+  scope: z.object({
+    roomId: OpaqueKeySchema,
+    previousRoomEpoch: OpaqueKeySchema,
+    nextRoomEpoch: OpaqueKeySchema,
+    timestamp: IsoTimestampSchema,
+  }).strict(),
+}).strict();
+
 export const ArenaRoomAuthorityContextSchema = z.discriminatedUnion('kind', [
   ArenaRoomUserAuthorityContextSchema,
   ArenaRoomGenerationReservationContextSchema,
   ArenaRoomGenerationPublisherContextSchema,
+  ArenaRoomRecoveryAuthorityContextSchema,
 ]);
 /**
  * Trusted server capability, supplied separately from any client command. A
@@ -252,6 +263,7 @@ type GenerationPublisherCapabilityInput = Omit<z.input<typeof ArenaRoomGeneratio
 
 const generationReservationCapabilities = new WeakSet<object>();
 const generationPublisherCapabilities = new WeakSet<object>();
+const roomRecoveryCapabilities = new WeakSet<object>();
 
 /** Issues an in-process capability that cannot survive wire serialization. */
 export const issueArenaRoomGenerationReservationAuthority = (
@@ -282,6 +294,19 @@ export const issueArenaRoomGenerationPublisherAuthority = (
   return capability;
 };
 
+/** Issues an in-process capability for one exact RoomActor epoch rollover. */
+export const issueArenaRoomRecoveryAuthority = (
+  input: z.input<typeof ArenaRoomRecoveryAuthorityContextSchema>['scope'],
+): Extract<ArenaRoomAuthorityContext, { kind: 'room-recovery' }> => {
+  const parsed = ArenaRoomRecoveryAuthorityContextSchema.parse({
+    kind: 'room-recovery',
+    scope: input,
+  });
+  const capability = Object.freeze({ ...parsed, scope: Object.freeze(parsed.scope) });
+  roomRecoveryCapabilities.add(capability);
+  return capability;
+};
+
 export const parseArenaRoomAuthorityContext = (input: unknown): ArenaRoomAuthorityContext | null => {
   const parsed = ArenaRoomAuthorityContextSchema.safeParse(input);
   if (!parsed.success) return null;
@@ -290,7 +315,10 @@ export const parseArenaRoomAuthorityContext = (input: unknown): ArenaRoomAuthori
   if (parsed.data.kind === 'generation-reserver') {
     return generationReservationCapabilities.has(input) ? parsed.data : null;
   }
-  return generationPublisherCapabilities.has(input) ? parsed.data : null;
+  if (parsed.data.kind === 'generation-publisher') {
+    return generationPublisherCapabilities.has(input) ? parsed.data : null;
+  }
+  return roomRecoveryCapabilities.has(input) ? parsed.data : null;
 };
 
 export const ArenaRoomTrustedTimeSchema = z.object({
@@ -347,6 +375,12 @@ export const CloseArenaRoomCommandSchema = z.object({
   type: z.literal('close'),
   ...epochCommand,
   reason: WireReasonSchema.optional(),
+}).strict();
+
+export const RecoverArenaRoomCommandSchema = z.object({
+  type: z.literal('recover'),
+  ...epochCommand,
+  nextRoomEpoch: OpaqueKeySchema,
 }).strict();
 
 export const PublishArenaRoomConfigCommandSchema = z.object({
@@ -420,6 +454,7 @@ export const ArenaRoomCommandSchema = z.union([
   LeaveArenaRoomMemberCommandSchema,
   KickArenaRoomMemberCommandSchema,
   CloseArenaRoomCommandSchema,
+  RecoverArenaRoomCommandSchema,
   PublishArenaRoomConfigCommandSchema,
   SubmitArenaRoomProposalCommandSchema,
   ResolveArenaRoomProposalCommandSchema,
@@ -441,6 +476,7 @@ export type ArenaRoomTransitionFailureReason =
   | 'state-required'
   | 'state-already-exists'
   | 'room-epoch-mismatch'
+  | 'room-epoch-reuse'
   | 'room-revision-mismatch'
   | 'room-closed'
   | 'host-required'

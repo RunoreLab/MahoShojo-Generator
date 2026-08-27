@@ -3,6 +3,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import {
   checkpointPredecessorOf,
   createArenaRoomCheckpointCommit,
+  issueArenaRoomRecoveryAuthority,
   transitionArenaRoom,
   type ArenaRoomAuthorityState,
   type ArenaRoomCheckpointCommit,
@@ -57,6 +58,7 @@ const fullFenceRoomId = `room-full-fence-${token}`;
 const invalidDeleteFenceRoomId = `room-invalid-delete-fence-${token}`;
 const invalidExpireFenceRoomId = `room-invalid-expire-fence-${token}`;
 const fullMutationFenceRoomId = `room-full-mutation-fence-${token}`;
+const recoveryRoomId = `room-recovery-${token}`;
 const roomHash = (id: string): string => createHash('sha256').update(id).digest('hex');
 const roomKey = (id: string): string => (
   `mahoshojo:room:v1:${keyPrefix}:${roomHash(id)}:checkpoint`
@@ -141,6 +143,24 @@ const close = (state: ArenaRoomAuthorityState): ArenaRoomTransitionSuccess => {
     reason: 'verifier-close',
     timestamp: NEXT_TIMESTAMP,
   }, hostAuthority);
+  return success(result);
+};
+
+const recover = (
+  state: ArenaRoomAuthorityState,
+  nextRoomEpoch: string,
+): ArenaRoomTransitionSuccess => {
+  const result = transitionArenaRoom(state, {
+    type: 'recover',
+    expectedRoomEpoch: state.snapshot.roomEpoch,
+    nextRoomEpoch,
+    timestamp: NEXT_TIMESTAMP,
+  }, issueArenaRoomRecoveryAuthority({
+    roomId: state.snapshot.roomId,
+    previousRoomEpoch: state.snapshot.roomEpoch,
+    nextRoomEpoch,
+    timestamp: NEXT_TIMESTAMP,
+  }));
   return success(result);
 };
 
@@ -245,6 +265,27 @@ try {
         || oldEpochOverwrite.kind !== 'conflict'
       ) {
         throw new Error('ROOM_REDIS_CAS_FENCING_FAILED');
+      }
+
+      const recoveryCreated = createRoom(recoveryRoomId, 'epoch-recovery-1');
+      if ((await writerStore.save({ commit: commit(recoveryCreated) })).kind !== 'saved') {
+        throw new Error('ROOM_REDIS_RECOVERY_CREATE_FAILED');
+      }
+      const delayedOldEpoch = publish(recoveryCreated.nextState);
+      const recoveredTransition = recover(recoveryCreated.nextState, 'epoch-recovery-2');
+      if ((await writerStore.save({ commit: commit(recoveredTransition) })).kind !== 'saved') {
+        throw new Error('ROOM_REDIS_RECOVERY_ROLLOVER_FAILED');
+      }
+      const delayedRecoveryResult = await writerStore.save({ commit: commit(delayedOldEpoch) });
+      const recoveredState = await readerStore.load(recoveryRoomId);
+      const reusedEpoch = recover(recoveredTransition.nextState, 'epoch-recovery-1');
+      const reusedEpochResult = await writerStore.save({ commit: commit(reusedEpoch) });
+      if (
+        delayedRecoveryResult.kind !== 'conflict'
+        || recoveredState?.snapshot.roomEpoch !== 'epoch-recovery-2'
+        || reusedEpochResult.kind !== 'conflict'
+      ) {
+        throw new Error('ROOM_REDIS_RECOVERY_FENCING_FAILED');
       }
 
       const closedTransition = close(acknowledged);
@@ -485,6 +526,7 @@ try {
         destructiveFenceFailClosed: true,
         fullPredecessorFence: true,
         oldEpochFence: true,
+        recoveryEpochRollover: true,
         terminalTtl: true,
         monotonicExpiryFence: true,
         expireDelete: true,
@@ -511,6 +553,7 @@ try {
       ...roomKeys(invalidDeleteFenceRoomId),
       ...roomKeys(invalidExpireFenceRoomId),
       ...roomKeys(fullMutationFenceRoomId),
+      ...roomKeys(recoveryRoomId),
     ]);
   }
   await cleanup.quit();

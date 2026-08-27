@@ -16,6 +16,7 @@ import {
   createArenaRoomState,
   createArenaRoomTransition,
   publishArenaRoomTransition,
+  recoverArenaRoomTransition,
 } from './arena-room-fixtures';
 
 const createClient = (): RedisRoomClient => ({
@@ -87,6 +88,24 @@ describe('RedisRoomStore', () => {
 
     await expect(store.save({ commit: commit(publishArenaRoomTransition(state)) }))
       .resolves.toEqual({ kind: 'conflict' });
+  });
+
+  it('以完整 predecessor CAS 接受 state-machine recovery epoch rollover', async () => {
+    const client = createClient();
+    vi.mocked(client.eval).mockResolvedValue('saved');
+    const store = createRedisRoomStore({ getClient: () => client });
+    const initial = createArenaRoomState();
+
+    await expect(store.save({ commit: commit(recoverArenaRoomTransition(initial)) }))
+      .resolves.toEqual({ kind: 'saved' });
+
+    const [script, options] = vi.mocked(client.eval).mock.calls[0]!;
+    expect(script).toContain('candidate.roomEpoch == current.roomEpoch');
+    expect(script).toContain("if epochSeen == 1 then return 'conflict' end");
+    expect(script).toContain('candidate.controlSeq ~= 0');
+    expect(options.arguments.at(-1)).toBe('16');
+    expect(JSON.parse(options.arguments.at(-4)!).roomEpoch).toBe('epoch-2');
+    expect(JSON.parse(options.arguments.at(-2)!).roomEpoch).toBe('epoch-1');
   });
 
   it('只接受 state machine 签发的 receipt，且 transition 返回后篡改不会进入 checkpoint', async () => {

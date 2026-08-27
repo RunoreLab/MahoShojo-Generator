@@ -56,11 +56,17 @@ elseif ARGV[1] == 'match' then
   if currentExpiring then return 'conflict' end
   if not currentActive then return 'invalid-existing' end
   if raw ~= ARGV[9] then return 'conflict' end
-  if candidate.roomEpoch ~= current.roomEpoch
-    or candidate.controlSeq <= current.controlSeq
-    or candidate.revision < current.revision
-    or candidate.revision > current.revision + 1 then
-    return 'invalid-successor'
+  if candidate.roomEpoch == current.roomEpoch then
+    if candidate.controlSeq <= current.controlSeq
+      or candidate.revision < current.revision
+      or candidate.revision > current.revision + 1 then
+      return 'invalid-successor'
+    end
+  else
+    if epochSeen == 1 then return 'conflict' end
+    if candidate.controlSeq ~= 0 or candidate.revision ~= current.revision then
+      return 'invalid-successor'
+    end
   end
 else
   return 'invalid-request'
@@ -316,10 +322,14 @@ const isValidSuccessor = (
       && stored.controlSeq === 0
       && stored.state.lifecycle.status === 'open';
   }
-  return stored.roomEpoch === expected.roomEpoch
-    && stored.controlSeq > expected.controlSeq
-    && stored.revision >= expected.revision
-    && stored.revision <= expected.revision + 1;
+  if (stored.roomEpoch === expected.roomEpoch) {
+    return stored.controlSeq > expected.controlSeq
+      && stored.revision >= expected.revision
+      && stored.revision <= expected.revision + 1;
+  }
+  return stored.state.lifecycle.status === 'open'
+    && stored.controlSeq === 0
+    && stored.revision === expected.revision;
 };
 
 const parseMutationResult = <T extends string>(

@@ -1,4 +1,5 @@
 import {
+  issueArenaRoomRecoveryAuthority,
   transitionArenaRoom,
   type ArenaRoomAuthorityState,
   type ArenaRoomTransitionSuccess,
@@ -102,3 +103,22 @@ export const closeArenaRoomTransition = (
 export const closeArenaRoomState = (
   state: ArenaRoomAuthorityState,
 ): ArenaRoomAuthorityState => closeArenaRoomTransition(state).nextState;
+
+export const recoverArenaRoomTransition = (
+  state: ArenaRoomAuthorityState,
+  nextRoomEpoch = 'epoch-2',
+): ArenaRoomTransitionSuccess => {
+  const timestamp = ARENA_ROOM_NEXT_TIMESTAMP;
+  const result = transitionArenaRoom(state, {
+    type: 'recover',
+    expectedRoomEpoch: state.snapshot.roomEpoch,
+    nextRoomEpoch,
+    timestamp,
+  }, issueArenaRoomRecoveryAuthority({
+    roomId: state.snapshot.roomId,
+    previousRoomEpoch: state.snapshot.roomEpoch,
+    nextRoomEpoch,
+    timestamp,
+  }));
+  return success(result);
+};

@@ -41,6 +41,7 @@ type MutableState = {
 };
 
 type UserAuthority = Extract<ArenaRoomAuthorityContext, { kind: 'authenticated-user' }>;
+type RecoveryAuthority = Extract<ArenaRoomAuthorityContext, { kind: 'room-recovery' }>;
 
 const parseState = (input: unknown): ArenaRoomAuthorityState | null => {
   const parsed = ArenaRoomAuthorityStateSchema.safeParse(input);
@@ -190,6 +191,38 @@ const closeRoom = (
     type: 'room.closing',
     payload: reason === undefined ? {} : { reason },
   })) return eventOverflow();
+  return finishApplied(state, next, events);
+};
+
+const recoverRoom = (
+  state: ArenaRoomAuthorityState,
+  command: Extract<ArenaRoomCommand, { type: 'recover' }>,
+  context: ArenaRoomAuthorityContext,
+): ArenaRoomTransitionResult => {
+  if (context.kind !== 'room-recovery') {
+    return transitionFailure('forbidden', 'invalid-authority-context');
+  }
+  const scope: RecoveryAuthority['scope'] = context.scope;
+  if (
+    scope.roomId !== state.snapshot.roomId
+    || scope.previousRoomEpoch !== command.expectedRoomEpoch
+    || scope.nextRoomEpoch !== command.nextRoomEpoch
+    || scope.timestamp !== command.timestamp
+  ) {
+    return transitionFailure('forbidden', 'authority-scope-mismatch');
+  }
+  if (state.lifecycle.status === 'closed') {
+    return transitionFailure('room-closed', 'room-closed');
+  }
+  if (command.nextRoomEpoch === command.expectedRoomEpoch) {
+    return transitionFailure('stale', 'room-epoch-reuse');
+  }
+  const next = cloneState(state);
+  next.snapshot.roomEpoch = command.nextRoomEpoch;
+  next.snapshot.controlSeq = 0;
+  next.lifecycle = { ...next.lifecycle, updatedAt: command.timestamp };
+  const events: ControlRoomEvent[] = [];
+  if (!pushSnapshotEvent(next, events, command.timestamp, false)) return eventOverflow();
   return finishApplied(state, next, events);
 };
 
@@ -762,6 +795,9 @@ export const transitionArenaRoom = (
     const authorization = requireRole(state, context, 'host');
     if (authorization) return authorization;
     return closeRoom(state, command.timestamp, command.reason);
+  }
+  if (command.type === 'recover') {
+    return recoverRoom(state, command, context);
   }
   if (state.lifecycle.status === 'closed') return transitionFailure('room-closed', 'room-closed');
 
