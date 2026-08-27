@@ -169,10 +169,7 @@ try {
     ) {
       throw new Error('ROOM_REDIS_RESTART_RECOVERY_FAILED');
     }
-    const deleted = await readerStore.delete({
-      roomId,
-      expected: checkpointPredecessorOf(recovered),
-    });
+    const deleted = await readerStore.delete({ checkpoint: recovered });
     if (deleted.kind !== 'deleted') throw new Error('ROOM_REDIS_RESTART_CLEANUP_FAILED');
     console.info(JSON.stringify({ roomRedis: true, phase: 'read', restartRecovery: true }));
   } else {
@@ -199,6 +196,12 @@ try {
     } else {
       const staleClose = close(initial);
       const staleWriter = await readerStore.save({ commit: commit(staleClose) });
+      const counterCollision = structuredClone(acknowledged);
+      counterCollision.snapshot.sharedConfig.userGuidance = '';
+      const collisionWriter = await readerStore.save({ commit: commit(close(counterCollision)) });
+      const collisionExpire = await readerStore.expire({ checkpoint: counterCollision });
+      const collisionDelete = await readerStore.delete({ checkpoint: counterCollision });
+      const collisionSurvivor = await readerStore.load(roomId);
       await fixedError(writerStore.save({
         commit: {} as ArenaRoomCheckpointCommit,
       }), 'REDIS_ROOM_TRANSITION_COMMIT_INVALID');
@@ -209,6 +212,10 @@ try {
       const oldEpochOverwrite = await readerStore.save({ commit: commit(close(oldEpoch.nextState)) });
       if (
         staleWriter.kind !== 'conflict'
+        || collisionWriter.kind !== 'conflict'
+        || collisionExpire.kind !== 'conflict'
+        || collisionDelete.kind !== 'conflict'
+        || JSON.stringify(collisionSurvivor) !== JSON.stringify(acknowledged)
         || epochCreated.kind !== 'saved'
         || oldEpochOverwrite.kind !== 'conflict'
       ) {
@@ -227,24 +234,12 @@ try {
         throw new Error('ROOM_REDIS_TERMINAL_TTL_FAILED');
       }
 
-      const expired = await writerStore.expire({
-        roomId,
-        expected: checkpointPredecessorOf(closed),
-      });
+      const expired = await writerStore.expire({ checkpoint: closed });
       const firstExpiryTtl = await cleanup.pTTL(roomKey(roomId));
-      const repeatedExpire = await writerStore.expire({
-        roomId,
-        expected: checkpointPredecessorOf(closed),
-      });
+      const repeatedExpire = await writerStore.expire({ checkpoint: closed });
       const repeatedExpiryTtl = await cleanup.pTTL(roomKey(roomId));
-      const deleted = await writerStore.delete({
-        roomId,
-        expected: checkpointPredecessorOf(closed),
-      });
-      const repeatedDelete = await writerStore.delete({
-        roomId,
-        expected: checkpointPredecessorOf(closed),
-      });
+      const deleted = await writerStore.delete({ checkpoint: closed });
+      const repeatedDelete = await writerStore.delete({ checkpoint: closed });
       if (
         expired.kind !== 'expired'
         || repeatedExpire.kind !== 'expired'
@@ -262,10 +257,7 @@ try {
       if ((await writerStore.save({ commit: commit(expiryFenceCreated) })).kind !== 'saved') {
         throw new Error('ROOM_REDIS_EXPIRY_FENCE_CREATE_FAILED');
       }
-      if ((await writerStore.expire({
-        roomId: expiryFenceRoomId,
-        expected: checkpointPredecessorOf(expiryFenceCreated.nextState),
-      })).kind !== 'expired') {
+      if ((await writerStore.expire({ checkpoint: expiryFenceCreated.nextState })).kind !== 'expired') {
         throw new Error('ROOM_REDIS_EXPIRY_FENCE_INSTALL_FAILED');
       }
       const resurrection = await writerStore.save({
@@ -277,15 +269,9 @@ try {
 
       const malformedRaw = '{provider-secret-canary';
       const malformedKey = roomKey(malformedRoomId);
-      const malformedExpected = {
-        ...checkpointPredecessorOf(initial),
-        roomId: malformedRoomId,
-      };
+      const malformedExpected = createRoom(malformedRoomId).nextState;
       await cleanup.set(malformedKey, malformedRaw);
-      await fixedError(writerStore.expire({
-        roomId: malformedRoomId,
-        expected: malformedExpected,
-      }), 'REDIS_ROOM_CHECKPOINT_INVALID');
+      await fixedError(writerStore.expire({ checkpoint: malformedExpected }), 'REDIS_ROOM_CHECKPOINT_INVALID');
       if (await cleanup.get(malformedKey) !== malformedRaw) {
         throw new Error('ROOM_REDIS_MALFORMED_CHECKPOINT_MUTATED');
       }
@@ -305,10 +291,7 @@ try {
       if ((await writerStore.save({ commit: commit(legacyPublished) })).kind !== 'saved') {
         throw new Error('ROOM_REDIS_LEGACY_V1_SAVE_FAILED');
       }
-      if ((await writerStore.expire({
-        roomId: legacyRoomId,
-        expected: checkpointPredecessorOf(legacyPublished.nextState),
-      })).kind !== 'expired') {
+      if ((await writerStore.expire({ checkpoint: legacyPublished.nextState })).kind !== 'expired') {
         throw new Error('ROOM_REDIS_LEGACY_V1_EXPIRE_FAILED');
       }
       const expiringLegacy = JSON.parse(await cleanup.get(legacyKey) || 'null') as unknown;
@@ -322,10 +305,7 @@ try {
       ) {
         throw new Error('ROOM_REDIS_LEGACY_V1_TOMBSTONE_FAILED');
       }
-      await fixedError(writerStore.delete({
-        roomId: malformedRoomId,
-        expected: malformedExpected,
-      }), 'REDIS_ROOM_CHECKPOINT_INVALID');
+      await fixedError(writerStore.delete({ checkpoint: malformedExpected }), 'REDIS_ROOM_CHECKPOINT_INVALID');
       if (await cleanup.get(malformedKey) !== malformedRaw) {
         throw new Error('ROOM_REDIS_MALFORMED_CHECKPOINT_MUTATED');
       }
@@ -356,6 +336,7 @@ try {
         createLoadMutate: true,
         stalePredecessor: true,
         transitionReceipt: true,
+        fullPredecessorFence: true,
         oldEpochFence: true,
         terminalTtl: true,
         monotonicExpiryFence: true,

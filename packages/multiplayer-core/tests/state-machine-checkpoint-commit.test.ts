@@ -25,6 +25,7 @@ describe('Arena Room checkpoint commit receipt', () => {
     expect(JSON.stringify(receipt)).toBe('{}');
     expect(readArenaRoomCheckpointCommit(receipt)).toEqual({
       predecessor: null,
+      predecessorState: null,
       nextState: expected,
     });
   });
@@ -53,5 +54,23 @@ describe('Arena Room checkpoint commit receipt', () => {
     expect(idempotent).toMatchObject({ ok: true, kind: 'idempotent' });
     expect(() => createArenaRoomCheckpointCommit(idempotent))
       .toThrow('ARENA_ROOM_CHECKPOINT_COMMIT_INVALID');
+  });
+
+  it('把 transition 实际读取的完整 predecessor state 固化进 receipt', () => {
+    const created = transitionArenaRoom(null, createRoomCommand(), hostAuthority());
+    if (!created.ok) throw new Error('expected create success');
+    const previous = structuredClone(created.nextState);
+    const published = transitionArenaRoom(created.nextState, {
+      type: 'publish-config',
+      expectedRoomEpoch: created.nextState.snapshot.roomEpoch,
+      expectedRevision: created.nextState.snapshot.revision,
+      sharedConfig: { ...created.nextState.snapshot.sharedConfig, userGuidance: 'next' },
+      timestamp: '2026-08-28T00:01:00.000Z',
+    }, hostAuthority());
+    if (!published.ok) throw new Error('expected publish success');
+
+    created.nextState.snapshot.sharedConfig.userGuidance = 'tampered-previous';
+    const data = readArenaRoomCheckpointCommit(createArenaRoomCheckpointCommit(published));
+    expect(data.predecessorState).toEqual(previous);
   });
 });

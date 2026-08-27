@@ -46,6 +46,7 @@ elseif ARGV[1] == 'match' then
   local currentExpiring = current.checkpointVersion == 2 and current.expiryFence == 'expiring'
   if currentExpiring then return 'conflict' end
   if not currentActive then return 'invalid-existing' end
+  if raw ~= ARGV[9] then return 'conflict' end
   if candidate.roomEpoch ~= current.roomEpoch
     or candidate.controlSeq <= current.controlSeq
     or candidate.revision < current.revision
@@ -76,6 +77,8 @@ local currentExpiring = current.checkpointVersion == 2 and current.expiryFence =
 if not currentActive and not currentExpiring then
   return 'invalid-existing'
 end
+if currentActive and raw ~= ARGV[6] then return 'conflict' end
+if currentExpiring and raw ~= ARGV[7] then return 'conflict' end
 redis.call('DEL', KEYS[1])
 return 'deleted'
 `;
@@ -97,6 +100,8 @@ local currentExpiring = current.checkpointVersion == 2 and current.expiryFence =
 if not currentActive and not currentExpiring then
   return 'invalid-existing'
 end
+if currentActive and raw ~= ARGV[7] then return 'conflict' end
+if currentExpiring and raw ~= ARGV[8] then return 'conflict' end
 local currentTtl = redis.call('PTTL', KEYS[1])
 if currentTtl == 0 then
   redis.call('DEL', KEYS[1])
@@ -106,9 +111,7 @@ local targetTtl = tonumber(ARGV[6])
 if currentTtl > 0 and currentTtl < targetTtl then
   targetTtl = currentTtl
 end
-current.checkpointVersion = 2
-current.expiryFence = 'expiring'
-redis.call('SET', KEYS[1], cjson.encode(current), 'PX', targetTtl)
+redis.call('SET', KEYS[1], ARGV[8], 'PX', targetTtl)
 return 'expired'
 `;
 
@@ -137,12 +140,10 @@ export interface RedisRoomStore {
     commit: ArenaRoomCheckpointCommit;
   }): Promise<RedisRoomStoreSaveResult>;
   delete(input: {
-    roomId: string;
-    expected: ArenaRoomCheckpointPredecessor;
+    checkpoint: ArenaRoomAuthorityState;
   }): Promise<RedisRoomStoreDeleteResult>;
   expire(input: {
-    roomId: string;
-    expected: ArenaRoomCheckpointPredecessor;
+    checkpoint: ArenaRoomAuthorityState;
   }): Promise<RedisRoomStoreExpireResult>;
 }
 
@@ -254,6 +255,19 @@ const createStoredCheckpoint = (input: unknown): StoredRoomCheckpoint => {
   };
 };
 
+const createExpiringStoredCheckpoint = (input: unknown): StoredRoomCheckpoint => {
+  const active = createStoredCheckpoint(input);
+  return {
+    checkpointVersion: EXPIRING_ROOM_CHECKPOINT_VERSION,
+    expiryFence: 'expiring',
+    roomId: active.roomId,
+    roomEpoch: active.roomEpoch,
+    revision: active.revision,
+    controlSeq: active.controlSeq,
+    state: active.state,
+  };
+};
+
 const predecessorArguments = (expected: ArenaRoomCheckpointPredecessor): string[] => [
   String(ACTIVE_ROOM_CHECKPOINT_VERSION),
   expected.roomId,
@@ -326,6 +340,12 @@ export const createRedisRoomStore = (options: RedisRoomStoreOptions): RedisRoomS
       }
       const stored = createStoredCheckpoint(commit.nextState);
       const expected = commit.predecessor;
+      const expectedStored = commit.predecessorState === null
+        ? null
+        : createStoredCheckpoint(commit.predecessorState);
+      if ((expected === null) !== (expectedStored === null)) {
+        throw new Error('REDIS_ROOM_TRANSITION_COMMIT_INVALID');
+      }
       if (expected !== null && !isCheckpointPredecessor(expected)) {
         throw new Error('REDIS_ROOM_PREDECESSOR_INVALID');
       }
@@ -334,6 +354,17 @@ export const createRedisRoomStore = (options: RedisRoomStoreOptions): RedisRoomS
       }
       if (!isValidSuccessor(stored, expected)) {
         throw new Error('REDIS_ROOM_SUCCESSOR_INVALID');
+      }
+      if (expected !== null && expectedStored !== null) {
+        const statePredecessor = checkpointPredecessorOf(expectedStored.state);
+        if (
+          statePredecessor.roomId !== expected.roomId
+          || statePredecessor.roomEpoch !== expected.roomEpoch
+          || statePredecessor.revision !== expected.revision
+          || statePredecessor.controlSeq !== expected.controlSeq
+        ) {
+          throw new Error('REDIS_ROOM_TRANSITION_COMMIT_INVALID');
+        }
       }
       const expectedArguments = expected === null
         ? [
@@ -351,33 +382,39 @@ export const createRedisRoomStore = (options: RedisRoomStoreOptions): RedisRoomS
           ...expectedArguments,
           JSON.stringify(stored),
           String(stored.state.lifecycle.status === 'open' ? activeTtlMs : terminalTtlMs),
+          expectedStored === null ? '' : JSON.stringify(expectedStored),
         ],
       });
       return parseMutationResult(raw, ['saved', 'conflict'] as const);
     },
 
     async delete(input) {
-      if (!isRoomId(input.roomId)
-        || !isCheckpointPredecessor(input.expected)
-        || input.expected.roomId !== input.roomId) {
-        throw new Error('REDIS_ROOM_PREDECESSOR_INVALID');
-      }
+      const active = createStoredCheckpoint(input.checkpoint);
+      const expiring = createExpiringStoredCheckpoint(active.state);
+      const expected = checkpointPredecessorOf(active.state);
       const raw = await options.getClient().eval(DELETE_SCRIPT, {
-        keys: [roomKey(input.roomId)],
-        arguments: predecessorArguments(input.expected),
+        keys: [roomKey(active.roomId)],
+        arguments: [
+          ...predecessorArguments(expected),
+          JSON.stringify(active),
+          JSON.stringify(expiring),
+        ],
       });
       return parseMutationResult(raw, ['deleted', 'missing', 'conflict'] as const);
     },
 
     async expire(input) {
-      if (!isRoomId(input.roomId)
-        || !isCheckpointPredecessor(input.expected)
-        || input.expected.roomId !== input.roomId) {
-        throw new Error('REDIS_ROOM_PREDECESSOR_INVALID');
-      }
+      const active = createStoredCheckpoint(input.checkpoint);
+      const expiring = createExpiringStoredCheckpoint(active.state);
+      const expected = checkpointPredecessorOf(active.state);
       const raw = await options.getClient().eval(EXPIRE_SCRIPT, {
-        keys: [roomKey(input.roomId)],
-        arguments: [...predecessorArguments(input.expected), String(terminalTtlMs)],
+        keys: [roomKey(active.roomId)],
+        arguments: [
+          ...predecessorArguments(expected),
+          String(terminalTtlMs),
+          JSON.stringify(active),
+          JSON.stringify(expiring),
+        ],
       });
       return parseMutationResult(raw, ['expired', 'missing', 'conflict'] as const);
     },

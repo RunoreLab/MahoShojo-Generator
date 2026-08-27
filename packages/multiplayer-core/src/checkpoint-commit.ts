@@ -1,5 +1,6 @@
 import { ArenaMultiplayerCoreError } from './errors';
 import type {
+  ArenaRoomAuthorityState,
   ArenaRoomCheckpointPredecessor,
   ArenaRoomTransitionResult,
   ArenaRoomTransitionSuccess,
@@ -14,10 +15,16 @@ export type ArenaRoomCheckpointCommit = {
 
 export type ArenaRoomCheckpointCommitData = {
   readonly predecessor: ArenaRoomCheckpointPredecessor | null;
+  readonly predecessorState: ArenaRoomAuthorityState | null;
   readonly nextState: ArenaRoomTransitionSuccess['nextState'];
 };
 
-const transitionSnapshots = new WeakMap<object, ArenaRoomTransitionSuccess>();
+type TransitionSnapshot = {
+  readonly result: ArenaRoomTransitionSuccess;
+  readonly predecessorState: ArenaRoomAuthorityState | null;
+};
+
+const transitionSnapshots = new WeakMap<object, TransitionSnapshot>();
 const checkpointCommits = new WeakMap<object, ArenaRoomCheckpointCommitData>();
 
 const invalidCommit = (): never => {
@@ -27,6 +34,7 @@ const invalidCommit = (): never => {
 export const transitionSuccessInternal = (input: {
   readonly kind: ArenaRoomTransitionSuccess['kind'];
   readonly predecessor: ArenaRoomCheckpointPredecessor | null;
+  readonly predecessorState: ArenaRoomAuthorityState | null;
   readonly nextState: ArenaRoomTransitionSuccess['nextState'];
   readonly events?: ArenaRoomTransitionSuccess['events'];
 }): ArenaRoomTransitionSuccess => {
@@ -37,7 +45,10 @@ export const transitionSuccessInternal = (input: {
     nextState: input.nextState,
     events: input.events ?? [],
   };
-  transitionSnapshots.set(result, deepClone(result));
+  transitionSnapshots.set(result, {
+    result: deepClone(result),
+    predecessorState: deepClone(input.predecessorState),
+  });
   return result;
 };
 
@@ -46,11 +57,12 @@ export const createArenaRoomCheckpointCommit = (
 ): ArenaRoomCheckpointCommit => {
   if (!transition.ok || transition.kind !== 'applied') return invalidCommit();
   const snapshot = transitionSnapshots.get(transition);
-  if (!snapshot || snapshot.kind !== 'applied') return invalidCommit();
+  if (!snapshot || snapshot.result.kind !== 'applied') return invalidCommit();
   const receipt = Object.freeze(Object.create(null)) as ArenaRoomCheckpointCommit;
   checkpointCommits.set(receipt, {
-    predecessor: deepClone(snapshot.predecessor),
-    nextState: deepClone(snapshot.nextState),
+    predecessor: deepClone(snapshot.result.predecessor),
+    predecessorState: deepClone(snapshot.predecessorState),
+    nextState: deepClone(snapshot.result.nextState),
   });
   return receipt;
 };

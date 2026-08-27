@@ -154,6 +154,7 @@ const finishApplied = (
   return transitionSuccessInternal({
     kind: 'applied',
     predecessor: previous ? checkpointPredecessorOf(previous) : null,
+    predecessorState: previous,
     nextState: parsed.data,
     events,
   });
@@ -162,6 +163,7 @@ const finishApplied = (
 const finishIdempotent = (state: ArenaRoomAuthorityState): ArenaRoomTransitionResult => transitionSuccessInternal({
   kind: 'idempotent',
   predecessor: checkpointPredecessorOf(state),
+  predecessorState: state,
   nextState: deepClone(state),
 });
 

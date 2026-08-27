@@ -45,6 +45,7 @@ describe('RedisRoomStore', () => {
     expect(client.eval).toHaveBeenCalledTimes(1);
     const [script, options] = vi.mocked(client.eval).mock.calls[0]!;
     expect(script).toContain('ROOM_CHECKPOINT_SAVE_V1');
+    expect(script).toContain('raw ~= ARGV[9]');
     expect(script).toContain("redis.call('GET', KEYS[1])");
     expect(script.indexOf("redis.call('GET', KEYS[1])"))
       .toBeLessThan(script.indexOf("redis.call('SET', KEYS[1]"));
@@ -126,7 +127,7 @@ describe('RedisRoomStore', () => {
       .resolves.toEqual({ kind: 'saved' });
 
     const [, options] = vi.mocked(client.eval).mock.calls[0]!;
-    expect(options.arguments.at(-1)).toBe('45000');
+    expect(options.arguments.at(-2)).toBe('45000');
     expect(closed).toEqual(before);
   });
 
@@ -190,9 +191,9 @@ describe('RedisRoomStore', () => {
     const client = createClient();
     vi.mocked(client.eval).mockResolvedValue(raw);
     const store = createRedisRoomStore({ getClient: () => client, terminalTtlSeconds: 60 });
-    const predecessor = checkpointPredecessorOf(createArenaRoomState());
+    const checkpoint = createArenaRoomState();
 
-    await expect(store[operation]({ roomId: 'room-1', expected: predecessor }))
+    await expect(store[operation]({ checkpoint }))
       .resolves.toEqual(expected);
   });
 
@@ -200,18 +201,22 @@ describe('RedisRoomStore', () => {
     const client = createClient();
     vi.mocked(client.eval).mockResolvedValue('expired');
     const store = createRedisRoomStore({ getClient: () => client, terminalTtlSeconds: 60 });
-    const predecessor = checkpointPredecessorOf(createArenaRoomState());
+    const checkpoint = createArenaRoomState();
 
-    await expect(store.expire({ roomId: 'room-1', expected: predecessor }))
+    await expect(store.expire({ checkpoint }))
       .resolves.toEqual({ kind: 'expired' });
     const [script, options] = vi.mocked(client.eval).mock.calls[0]!;
     expect(script).toContain('ROOM_CHECKPOINT_EXPIRE_V1');
-    expect(script).toContain('current.checkpointVersion = 2');
-    expect(script).toContain("current.expiryFence = 'expiring'");
     expect(script).toContain("redis.call('PTTL', KEYS[1])");
     expect(script).toContain('if currentTtl > 0 and currentTtl < targetTtl then');
-    expect(script).toContain("redis.call('SET', KEYS[1], cjson.encode(current), 'PX', targetTtl)");
-    expect(options.arguments.at(-1)).toBe('60000');
+    expect(script).toContain("redis.call('SET', KEYS[1], ARGV[8], 'PX', targetTtl)");
+    expect(script).toContain('currentActive and raw ~= ARGV[7]');
+    expect(script).toContain('currentExpiring and raw ~= ARGV[8]');
+    expect(options.arguments.at(-3)).toBe('60000');
+    expect(JSON.parse(options.arguments.at(-1)!)).toMatchObject({
+      checkpointVersion: 2,
+      expiryFence: 'expiring',
+    });
   });
 
   it('第二个 store 实例可恢复最后一次 acknowledged mutation，旧 epoch writer 不能覆盖', async () => {
@@ -223,11 +228,12 @@ describe('RedisRoomStore', () => {
         const currentRaw = values.get(key);
         if (script.includes('ROOM_CHECKPOINT_SAVE_V1')) {
           const [expectedMode, expectedVersion, expectedRoomId, expectedRoomEpoch,
-            expectedRevision, expectedControlSeq, serialized] = options.arguments;
+            expectedRevision, expectedControlSeq, serialized, , expectedRaw] = options.arguments;
           if (expectedMode === 'absent') {
             if (currentRaw !== undefined) return 'conflict';
           } else {
             if (currentRaw === undefined) return 'conflict';
+            if (currentRaw !== expectedRaw) return 'conflict';
             const current = JSON.parse(currentRaw) as Record<string, unknown>;
             if (
               current.checkpointVersion !== Number(expectedVersion)
