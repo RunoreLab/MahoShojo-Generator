@@ -5,6 +5,7 @@ import {
 } from '@mahoshojo/contracts/arena-room';
 
 import {
+  issueArenaRoomGenerationReservationAuthority,
   transitionArenaRoom,
   type ArenaRoomAuthorityState,
   type ArenaRoomTransitionResult,
@@ -13,11 +14,13 @@ import {
   NEXT_TIMESTAMP,
   createRoomCommand,
   generationPublisherAuthority,
+  generationReservationAuthority,
   guidanceChange,
   hostAuthority,
   joinMemberCommand,
   memberAuthority,
   proposal,
+  snapshotDigest,
 } from './state-machine-fixtures';
 
 const success = (result: ArenaRoomTransitionResult): Extract<ArenaRoomTransitionResult, { ok: true }> => {
@@ -250,7 +253,7 @@ describe('Arena Room Proposal authority transitions', () => {
       timestamp: '2026-08-27T16:02:00.000Z',
     }, hostAuthority()));
     expect(resolved.nextState.snapshot.revision).toBe(0);
-    expect(resolved.nextState.collaborativeConfigRevision).toBeNull();
+    expect(resolved.nextState.collaborativeChanges).toEqual([]);
     expect(resolved.events).toEqual([
       expect.objectContaining({
         type: 'proposal.resolved',
@@ -268,38 +271,46 @@ describe('Arena Room authoritative generation transitions', () => {
     generationRequestId: 'request-1',
     generationId: 'generation-1',
     attempt: 1,
-    snapshotDigest: 'digest-1',
     timestamp: '2026-08-27T16:04:00.000Z',
   });
 
   it('reserves one immutable attempt and treats an exact duplicate as idempotent', () => {
     const state = createJoinedState();
-    const reserved = success(transitionArenaRoom(state, reserveCommand(), hostAuthority()));
+    const reserved = success(transitionArenaRoom(state, reserveCommand(), generationReservationAuthority()));
     expect(reserved.nextState.snapshot.activeGeneration).toEqual({
       generationRequestId: 'request-1',
       generationId: 'generation-1',
       attempt: 1,
       state: 'starting',
       configRevision: 0,
-      snapshotDigest: 'digest-1',
+      snapshotDigest: expect.stringMatching(/^sha256:[0-9a-f]{64}$/u),
       collaborativeInfluence: false,
       participantUserIds: [101, 202],
       startedAt: '2026-08-27T16:04:00.000Z',
     });
     expect(reserved.events[0]).toMatchObject({ type: 'room.snapshot' });
 
-    const duplicate = success(transitionArenaRoom(reserved.nextState, reserveCommand(), hostAuthority()));
+    const duplicate = success(transitionArenaRoom(
+      reserved.nextState,
+      reserveCommand(),
+      generationReservationAuthority(),
+    ));
     expect(duplicate.kind).toBe('idempotent');
     expect(duplicate.events).toEqual([]);
 
     expect(failure(transitionArenaRoom(reserved.nextState, {
       ...reserveCommand(),
       generationId: 'generation-conflict',
-    }, hostAuthority()))).toMatchObject({ code: 'conflict', reason: 'generation-request-conflict' });
+    }, generationReservationAuthority('request-1', 'generation-conflict'))))
+      .toMatchObject({ code: 'conflict', reason: 'generation-request-conflict' });
   });
 
   it('derives participant and collaboration provenance from trusted authority state', () => {
-    const clean = success(transitionArenaRoom(createJoinedState(), reserveCommand(), hostAuthority()));
+    const clean = success(transitionArenaRoom(
+      createJoinedState(),
+      reserveCommand(),
+      generationReservationAuthority(),
+    ));
     expect(clean.nextState.snapshot.activeGeneration).toMatchObject({
       collaborativeInfluence: false,
       participantUserIds: [101, 202],
@@ -319,7 +330,7 @@ describe('Arena Room authoritative generation transitions', () => {
       expectedRevision: 1,
       generationRequestId: 'request-collaborative',
       generationId: 'generation-collaborative',
-    }, hostAuthority()));
+    }, generationReservationAuthority('request-collaborative', 'generation-collaborative', 1)));
     expect(collaborative.nextState.snapshot.activeGeneration).toMatchObject({
       collaborativeInfluence: true,
       participantUserIds: [101, 202],
@@ -338,8 +349,27 @@ describe('Arena Room authoritative generation transitions', () => {
       expectedRevision: 2,
       generationRequestId: 'request-host-override',
       generationId: 'generation-host-override',
-    }, hostAuthority()));
+    }, generationReservationAuthority('request-host-override', 'generation-host-override', 2)));
     expect(overridden.nextState.snapshot.activeGeneration?.collaborativeInfluence).toBe(false);
+
+    const unrelatedHostPublish = success(transitionArenaRoom(accepted, {
+      type: 'publish-config',
+      expectedRoomEpoch: 'epoch-1',
+      expectedRevision: 1,
+      sharedConfig: { ...accepted.snapshot.sharedConfig, battleMode: 'kizuna' },
+      timestamp: '2026-08-27T16:03:00.000Z',
+    }, hostAuthority())).nextState;
+    const retained = success(transitionArenaRoom(unrelatedHostPublish, {
+      ...reserveCommand(),
+      expectedRevision: 2,
+      generationRequestId: 'request-retained-collaboration',
+      generationId: 'generation-retained-collaboration',
+    }, generationReservationAuthority(
+      'request-retained-collaboration',
+      'generation-retained-collaboration',
+      2,
+    )));
+    expect(retained.nextState.snapshot.activeGeneration?.collaborativeInfluence).toBe(true);
 
     const untrusted = transitionArenaRoom(createJoinedState(), {
       ...reserveCommand(),
@@ -350,7 +380,11 @@ describe('Arena Room authoritative generation transitions', () => {
   });
 
   it('fences callbacks by epoch and attempt and refuses terminal regression', () => {
-    const reserved = success(transitionArenaRoom(createJoinedState(), reserveCommand(), hostAuthority())).nextState;
+    const reserved = success(transitionArenaRoom(
+      createJoinedState(),
+      reserveCommand(),
+      generationReservationAuthority(),
+    )).nextState;
     const runningCommand = {
       type: 'mirror-generation' as const,
       expectedRoomEpoch: 'epoch-1',
@@ -369,7 +403,8 @@ describe('Arena Room authoritative generation transitions', () => {
     expect(failure(transitionArenaRoom(reserved, {
       ...runningCommand,
       attempt: 2,
-    }, generationPublisherAuthority()))).toMatchObject({ code: 'stale', reason: 'generation-attempt-mismatch' });
+    }, generationPublisherAuthority('request-1', 'generation-1', 2))))
+      .toMatchObject({ code: 'stale', reason: 'generation-attempt-mismatch' });
 
     const running = success(transitionArenaRoom(reserved, runningCommand, generationPublisherAuthority()));
     expect(running.nextState.snapshot.activeGeneration?.state).toBe('running');
@@ -409,7 +444,11 @@ describe('Arena Room authoritative generation transitions', () => {
   });
 
   it('mirrors cancellation without inventing a new public wire event', () => {
-    const reserved = success(transitionArenaRoom(createJoinedState(), reserveCommand(), hostAuthority())).nextState;
+    const reserved = success(transitionArenaRoom(
+      createJoinedState(),
+      reserveCommand(),
+      generationReservationAuthority(),
+    )).nextState;
     const cancelled = success(transitionArenaRoom(reserved, {
       type: 'mirror-generation',
       expectedRoomEpoch: 'epoch-1',
@@ -433,13 +472,35 @@ describe('Arena Room authoritative generation transitions', () => {
     expect(failure(invalid)).toMatchObject({ code: 'validation-failed', reason: 'invalid-command' });
     expect(JSON.stringify(invalid)).not.toContain(secret);
 
-    expect(failure(transitionArenaRoom(state, {
-      ...reserveCommand(),
-    }, memberAuthority()))).toMatchObject({ code: 'forbidden', reason: 'host-required' });
+    expect(failure(transitionArenaRoom(state, reserveCommand(), memberAuthority())))
+      .toMatchObject({ code: 'forbidden', reason: 'invalid-authority-context' });
 
-    expect(failure(transitionArenaRoom(state, reserveCommand(), {
-      ...hostAuthority(),
-      accountUserId: 999,
-    }))).toMatchObject({ code: 'forbidden', reason: 'member-not-active' });
+    expect(failure(transitionArenaRoom(state, reserveCommand(),
+      issueArenaRoomGenerationReservationAuthority({
+        actorUserId: 'member-1',
+        accountUserId: 202,
+        roomId: 'room-1',
+        roomEpoch: 'epoch-1',
+        configRevision: 0,
+        generationRequestId: 'request-1',
+        generationId: 'generation-1',
+        attempt: 1,
+        snapshotDigest: snapshotDigest(),
+        expiresAt: '2026-08-27T16:30:00.000Z',
+      })))).toMatchObject({ code: 'forbidden', reason: 'host-required' });
+
+    expect(failure(transitionArenaRoom(state, reserveCommand(),
+      issueArenaRoomGenerationReservationAuthority({
+        actorUserId: 'host-1',
+        accountUserId: 999,
+        roomId: 'room-1',
+        roomEpoch: 'epoch-1',
+        configRevision: 0,
+        generationRequestId: 'request-1',
+        generationId: 'generation-1',
+        attempt: 1,
+        snapshotDigest: snapshotDigest(),
+        expiresAt: '2026-08-27T16:30:00.000Z',
+      })))).toMatchObject({ code: 'forbidden', reason: 'host-required' });
   });
 });

@@ -23,6 +23,7 @@ describe('Arena Room state-machine compatibility and portability', () => {
     const old = await loadFixture('arena-room-v0-unsupported.json');
     const next = await loadFixture('arena-room-v2-unsupported.json');
     const wrap = (snapshot: unknown) => ({
+      authorityStateVersion: 1,
       lifecycle: {
         status: 'open',
         createdAt: TEST_TIMESTAMP,
@@ -66,6 +67,12 @@ describe('Arena Room state-machine compatibility and portability', () => {
       expect.objectContaining({ code: 'invalid-input' }),
     );
     expect(() => parseArenaRoomAuthorityState(wrap(next))).toThrowError(
+      expect.objectContaining({ code: 'invalid-input' }),
+    );
+
+    const prePersistenceInternalShape = structuredClone(currentAuthority) as Record<string, unknown>;
+    delete prePersistenceInternalShape.authorityStateVersion;
+    expect(() => parseArenaRoomAuthorityState(prePersistenceInternalShape)).toThrowError(
       expect.objectContaining({ code: 'invalid-input' }),
     );
   });

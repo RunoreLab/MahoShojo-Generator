@@ -1,13 +1,17 @@
 import {
   ArenaErrorCodeSchema,
+  ArenaProposalChangeSchema,
   ArenaProposalSchema,
   ArenaRoomSharedConfigSchema,
   ArenaRoomSnapshotSchema,
+  GENERATION_BRIDGE_VERSION,
+  GenerationBridgeScopeSchema,
   GenerationMirrorSchema,
   IsoTimestampSchema,
   MAX_PROPOSAL_CHANGES,
   OpaqueKeySchema,
   RoomMemberSchema,
+  RoomEventSchema,
   RoomRevisionSchema,
   WireReasonSchema,
   type ArenaErrorCode,
@@ -17,6 +21,9 @@ import {
 import { z } from 'zod';
 
 import { ArenaMultiplayerCoreError } from './errors';
+import { hasCollaborativeChangeEffect } from './provenance';
+
+export const ARENA_ROOM_AUTHORITY_STATE_VERSION = 1 as const;
 
 export const ArenaRoomLifecycleSchema = z.discriminatedUnion('status', [
   z.object({
@@ -37,6 +44,10 @@ export type ArenaRoomLifecycle = z.infer<typeof ArenaRoomLifecycleSchema>;
 export const MAX_ROOM_MEMBER_AUTHORITY_RECORDS = 64;
 export const MAX_ROOM_GENERATION_RECORDS = 64;
 export const MAX_ROOM_PROPOSAL_TOMBSTONES = 256;
+export const MAX_ROOM_COLLABORATIVE_CHANGES = 256;
+
+export const CanonicalSnapshotDigestSchema = z.string()
+  .regex(/^sha256:[0-9a-f]{64}$/u, 'must be a lowercase SHA-256 digest');
 
 export const ArenaRoomMemberAuthorityRecordSchema = z.object({
   accountUserId: z.number().int().positive(),
@@ -65,6 +76,7 @@ export const ArenaRoomGenerationRecordSchema = z.object({
 export type ArenaRoomGenerationRecord = z.infer<typeof ArenaRoomGenerationRecordSchema>;
 
 export const ArenaRoomAuthorityStateSchema = z.object({
+  authorityStateVersion: z.literal(ARENA_ROOM_AUTHORITY_STATE_VERSION),
   lifecycle: ArenaRoomLifecycleSchema,
   snapshot: ArenaRoomSnapshotSchema,
   memberAuthority: z.array(ArenaRoomMemberAuthorityRecordSchema)
@@ -76,7 +88,9 @@ export const ArenaRoomAuthorityStateSchema = z.object({
   terminalProposalIds: z.array(OpaqueKeySchema)
     .max(MAX_ROOM_PROPOSAL_TOMBSTONES)
     .default([]),
-  collaborativeConfigRevision: RoomRevisionSchema.nullable().default(null),
+  collaborativeChanges: z.array(ArenaProposalChangeSchema)
+    .max(MAX_ROOM_COLLABORATIVE_CHANGES)
+    .default([]),
 }).strict().superRefine((state, context) => {
   const memberUserIds = state.memberAuthority.map((entry) => entry.member.userId);
   const accountUserIds = state.memberAuthority.map((entry) => entry.accountUserId);
@@ -113,9 +127,54 @@ export const ArenaRoomAuthorityStateSchema = z.object({
   if (new Set(state.terminalProposalIds).size !== state.terminalProposalIds.length) {
     context.addIssue({ code: 'custom', path: ['terminalProposalIds'], message: 'terminal proposal IDs must be unique' });
   }
-  if (state.collaborativeConfigRevision !== null
-    && state.collaborativeConfigRevision !== state.snapshot.revision) {
-    context.addIssue({ code: 'custom', path: ['collaborativeConfigRevision'], message: 'collaborative provenance must describe the current revision' });
+  const storedProposalIds = new Set(state.snapshot.proposals.map((proposal) => proposal.proposalId));
+  if (state.snapshot.proposals.some((proposal) => proposal.status !== 'submitted')) {
+    context.addIssue({
+      code: 'custom',
+      path: ['snapshot', 'proposals'],
+      message: 'authority checkpoints may only retain submitted proposals',
+    });
+  }
+  if (state.terminalProposalIds.some((proposalId) => storedProposalIds.has(proposalId))) {
+    context.addIssue({
+      code: 'custom',
+      path: ['terminalProposalIds'],
+      message: 'terminal proposal IDs must not remain in the public snapshot',
+    });
+  }
+  if (!RoomEventSchema.safeParse({
+    protocolVersion: state.snapshot.protocolVersion,
+    roomId: state.snapshot.roomId,
+    roomEpoch: state.snapshot.roomEpoch,
+    type: 'room.snapshot',
+    controlSeq: state.snapshot.controlSeq,
+    timestamp: state.lifecycle.updatedAt,
+    payload: state.snapshot,
+  }).success) {
+    context.addIssue({
+      code: 'custom',
+      path: ['snapshot'],
+      message: 'authority snapshot must fit one valid control frame',
+    });
+  }
+  state.collaborativeChanges.forEach((change, index) => {
+    if (!hasCollaborativeChangeEffect(state.snapshot.sharedConfig, change)) {
+      context.addIssue({
+        code: 'custom',
+        path: ['collaborativeChanges', index],
+        message: 'collaborative provenance must still affect the current config',
+      });
+    }
+  });
+  const collaborativeTargets = state.collaborativeChanges.map((change) => JSON.stringify([
+    change.type,
+    'combatantKey' in change ? change.combatantKey : null,
+    'scenarioKey' in change ? change.scenarioKey : null,
+    'materialKey' in change ? change.materialKey : null,
+    'ref' in change && change.ref !== null ? change.ref.id : null,
+  ]));
+  if (new Set(collaborativeTargets).size !== collaborativeTargets.length) {
+    context.addIssue({ code: 'custom', path: ['collaborativeChanges'], message: 'collaborative provenance targets must be unique' });
   }
 });
 export type ArenaRoomAuthorityState = z.infer<typeof ArenaRoomAuthorityStateSchema>;
@@ -142,12 +201,32 @@ export const ArenaRoomUserAuthorityContextSchema = z.object({
   accountUserId: z.number().int().positive(),
 }).strict();
 
+export const ArenaRoomGenerationReservationScopeSchema = z.object({
+  roomId: OpaqueKeySchema,
+  roomEpoch: OpaqueKeySchema,
+  configRevision: RoomRevisionSchema,
+  generationRequestId: OpaqueKeySchema,
+  generationId: OpaqueKeySchema,
+  attempt: z.number().int().min(1),
+  snapshotDigest: CanonicalSnapshotDigestSchema,
+  expiresAt: IsoTimestampSchema,
+}).strict();
+
+export const ArenaRoomGenerationReservationContextSchema = z.object({
+  kind: z.literal('generation-reserver'),
+  actorUserId: OpaqueKeySchema,
+  accountUserId: z.number().int().positive(),
+  scope: ArenaRoomGenerationReservationScopeSchema,
+}).strict();
+
 export const ArenaRoomGenerationPublisherContextSchema = z.object({
   kind: z.literal('generation-publisher'),
+  scope: GenerationBridgeScopeSchema,
 }).strict();
 
 export const ArenaRoomAuthorityContextSchema = z.discriminatedUnion('kind', [
   ArenaRoomUserAuthorityContextSchema,
+  ArenaRoomGenerationReservationContextSchema,
   ArenaRoomGenerationPublisherContextSchema,
 ]);
 /**
@@ -156,6 +235,56 @@ export const ArenaRoomAuthorityContextSchema = z.discriminatedUnion('kind', [
  * the generation-publisher variant MUST never be selectable by a client frame.
  */
 export type ArenaRoomAuthorityContext = z.infer<typeof ArenaRoomAuthorityContextSchema>;
+
+type GenerationReservationCapabilityInput = z.input<typeof ArenaRoomGenerationReservationScopeSchema> & {
+  readonly actorUserId: string;
+  readonly accountUserId: number;
+};
+
+type GenerationPublisherCapabilityInput = Omit<z.input<typeof GenerationBridgeScopeSchema>, 'bridgeVersion'>;
+
+const generationReservationCapabilities = new WeakSet<object>();
+const generationPublisherCapabilities = new WeakSet<object>();
+
+/** Issues an in-process capability that cannot survive wire serialization. */
+export const issueArenaRoomGenerationReservationAuthority = (
+  input: GenerationReservationCapabilityInput,
+): Extract<ArenaRoomAuthorityContext, { kind: 'generation-reserver' }> => {
+  const { actorUserId, accountUserId, ...scope } = input;
+  const parsed = ArenaRoomGenerationReservationContextSchema.parse({
+    kind: 'generation-reserver',
+    actorUserId,
+    accountUserId,
+    scope,
+  });
+  const capability = Object.freeze({ ...parsed, scope: Object.freeze(parsed.scope) });
+  generationReservationCapabilities.add(capability);
+  return capability;
+};
+
+/** Issues a request-scoped Generation Bridge capability for a trusted adapter. */
+export const issueArenaRoomGenerationPublisherAuthority = (
+  input: GenerationPublisherCapabilityInput,
+): Extract<ArenaRoomAuthorityContext, { kind: 'generation-publisher' }> => {
+  const parsed = ArenaRoomGenerationPublisherContextSchema.parse({
+    kind: 'generation-publisher',
+    scope: { bridgeVersion: GENERATION_BRIDGE_VERSION, ...input },
+  });
+  const capability = Object.freeze({ ...parsed, scope: Object.freeze(parsed.scope) });
+  generationPublisherCapabilities.add(capability);
+  return capability;
+};
+
+export const parseArenaRoomAuthorityContext = (input: unknown): ArenaRoomAuthorityContext | null => {
+  const parsed = ArenaRoomAuthorityContextSchema.safeParse(input);
+  if (!parsed.success) return null;
+  if (parsed.data.kind === 'authenticated-user') return parsed.data;
+  if (typeof input !== 'object' || input === null) return null;
+  if (parsed.data.kind === 'generation-reserver') {
+    return generationReservationCapabilities.has(input) ? parsed.data : null;
+  }
+  return generationPublisherCapabilities.has(input) ? parsed.data : null;
+};
 
 export const CreateArenaRoomCommandSchema = z.object({
   type: z.literal('create'),
@@ -227,10 +356,6 @@ export const ReserveArenaRoomGenerationCommandSchema = z.object({
   generationRequestId: OpaqueKeySchema,
   generationId: OpaqueKeySchema,
   attempt: z.number().int().min(1),
-  // Supplied by the trusted generation adapter after freezing the canonical
-  // generation input. The Room core intentionally never receives host-local
-  // payloads or credentials merely to recompute this digest.
-  snapshotDigest: OpaqueKeySchema,
 }).strict();
 
 export const MirrorArenaRoomGenerationCommandSchema = z.object({
@@ -308,6 +433,9 @@ export type ArenaRoomTransitionFailureReason =
   | 'generation-attempt-mismatch'
   | 'generation-transition-invalid'
   | 'generation-terminal-conflict'
+  | 'authority-scope-mismatch'
+  | 'authority-scope-expired'
+  | 'collaborative-history-limit-reached'
   | 'room-snapshot-too-large';
 
 export interface ArenaRoomTransitionFailure {

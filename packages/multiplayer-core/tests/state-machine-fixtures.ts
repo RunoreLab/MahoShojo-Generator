@@ -1,5 +1,10 @@
 import type { ArenaProposalChange } from '@mahoshojo/contracts/arena-room';
 
+import {
+  issueArenaRoomGenerationPublisherAuthority,
+  issueArenaRoomGenerationReservationAuthority,
+} from '../src/index';
+
 export const TEST_TIMESTAMP = '2026-08-27T16:00:00.000Z';
 export const NEXT_TIMESTAMP = '2026-08-27T16:01:00.000Z';
 
@@ -15,8 +20,39 @@ export const memberAuthority = () => ({
   accountUserId: 202,
 });
 
-export const generationPublisherAuthority = () => ({
-  kind: 'generation-publisher' as const,
+export const snapshotDigest = (request = 'request-1') => {
+  const digit = [...request].reduce((sum, value) => sum + value.codePointAt(0)!, 0).toString(16).at(-1)!;
+  return `sha256:${digit.repeat(64)}`;
+};
+
+export const generationReservationAuthority = (
+  request = 'request-1',
+  generation = 'generation-1',
+  configRevision = 0,
+  attempt = 1,
+) => issueArenaRoomGenerationReservationAuthority({
+  actorUserId: 'host-1',
+  accountUserId: 101,
+  roomId: 'room-1',
+  roomEpoch: 'epoch-1',
+  configRevision,
+  generationRequestId: request,
+  generationId: generation,
+  attempt,
+  snapshotDigest: snapshotDigest(request),
+  expiresAt: '2026-08-27T16:30:00.000Z',
+});
+
+export const generationPublisherAuthority = (
+  request = 'request-1',
+  generation = 'generation-1',
+  attempt = 1,
+) => issueArenaRoomGenerationPublisherAuthority({
+  roomId: 'room-1',
+  generationRequestId: request,
+  generationId: generation,
+  attempt,
+  expiresAt: '2026-08-27T16:30:00.000Z',
 });
 
 export const historySettings = () => ({

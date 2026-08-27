@@ -12,14 +12,17 @@ import {
 } from '@mahoshojo/contracts/arena-room';
 
 import { applyArenaProposal } from './apply';
+import { mergeCollaborativeChanges, retainCollaborativeChanges } from './provenance';
 import {
-  ArenaRoomAuthorityContextSchema,
   ArenaRoomAuthorityStateSchema,
   ArenaRoomCommandSchema,
+  ARENA_ROOM_AUTHORITY_STATE_VERSION,
+  MAX_ROOM_COLLABORATIVE_CHANGES,
   MAX_ROOM_GENERATION_RECORDS,
   MAX_ROOM_MEMBER_AUTHORITY_RECORDS,
   MAX_ROOM_PROPOSAL_TOMBSTONES,
   checkpointPredecessorOf,
+  parseArenaRoomAuthorityContext,
   transitionFailure,
   transitionSuccess,
   type ArenaRoomAuthorityContext,
@@ -141,11 +144,11 @@ const finishApplied = (
   next: MutableState,
   events: readonly ControlRoomEvent[],
 ): ArenaRoomTransitionResult => {
-  const parsed = ArenaRoomAuthorityStateSchema.safeParse(next);
-  if (!parsed.success) return transitionFailure('validation-failed', 'invalid-state');
-  if (!snapshotFitsControlFrame(parsed.data)) {
+  if (!snapshotFitsControlFrame(next)) {
     return transitionFailure('payload-too-large', 'room-snapshot-too-large');
   }
+  const parsed = ArenaRoomAuthorityStateSchema.safeParse(next);
+  if (!parsed.success) return transitionFailure('validation-failed', 'invalid-state');
   return transitionSuccess({
     kind: 'applied',
     predecessor: previous ? checkpointPredecessorOf(previous) : null,
@@ -216,10 +219,11 @@ const createRoom = (
       updatedAt: command.timestamp,
     },
     snapshot: snapshot.data,
+    authorityStateVersion: ARENA_ROOM_AUTHORITY_STATE_VERSION,
     memberAuthority: [{ accountUserId: context.accountUserId, member: command.host }],
     generationLedger: [],
     terminalProposalIds: [],
-    collaborativeConfigRevision: null,
+    collaborativeChanges: [],
   });
   if (!parsed.success) return transitionFailure('validation-failed', 'invalid-state');
   const next = cloneState(parsed.data);
@@ -331,7 +335,10 @@ const publishConfig = (
   const next = cloneState(state);
   next.snapshot.sharedConfig = deepClone(command.sharedConfig);
   next.snapshot.revision += 1;
-  next.collaborativeConfigRevision = null;
+  next.collaborativeChanges = retainCollaborativeChanges(
+    state.collaborativeChanges,
+    next.snapshot.sharedConfig,
+  );
   next.lifecycle = { ...next.lifecycle, updatedAt: command.timestamp };
   const events: ControlRoomEvent[] = [];
   if (!pushControlEvent(next, events, command.timestamp, {
@@ -384,15 +391,6 @@ const submitProposal = (
     return transitionFailure('capability-denied', 'member-limit-reached');
   }
   const next = cloneState(state);
-  const terminalProposalIds = next.snapshot.proposals
-    .filter((item) => item.status !== 'submitted')
-    .map((item) => item.proposalId)
-    .filter((proposalId) => !next.terminalProposalIds.includes(proposalId));
-  if (next.terminalProposalIds.length + terminalProposalIds.length > MAX_ROOM_PROPOSAL_TOMBSTONES) {
-    return transitionFailure('capability-denied', 'proposal-history-limit-reached');
-  }
-  next.snapshot.proposals = next.snapshot.proposals.filter((item) => item.status === 'submitted');
-  next.terminalProposalIds.push(...terminalProposalIds);
   next.snapshot.proposals.push(deepClone(command.proposal));
   next.lifecycle = { ...next.lifecycle, updatedAt: command.timestamp };
   const events: ControlRoomEvent[] = [];
@@ -462,7 +460,17 @@ const resolveProposal = (
   if (configChanged) {
     next.snapshot.sharedConfig = deepClone(applied.config);
     next.snapshot.revision = state.snapshot.revision + 1;
-    next.collaborativeConfigRevision = next.snapshot.revision;
+    const acceptedIds = new Set(applied.acceptedChangeIds);
+    const collaborativeChanges = mergeCollaborativeChanges({
+      previousChanges: state.collaborativeChanges,
+      acceptedChanges: proposal.changes.filter((change) => acceptedIds.has(change.changeId)),
+      previousConfig: state.snapshot.sharedConfig,
+      nextConfig: next.snapshot.sharedConfig,
+    });
+    if (collaborativeChanges.length > MAX_ROOM_COLLABORATIVE_CHANGES) {
+      return transitionFailure('capability-denied', 'collaborative-history-limit-reached');
+    }
+    next.collaborativeChanges = collaborativeChanges;
     if (!pushControlEvent(next, events, command.timestamp, {
       type: 'room.config.updated',
       payload: {
@@ -510,12 +518,13 @@ const withdrawProposal = (
 const sameReservation = (
   record: ArenaRoomGenerationRecord,
   command: Extract<ArenaRoomCommand, { type: 'reserve-generation' }>,
+  snapshotDigest: string,
 ): boolean => (
   record.mirror.generationRequestId === command.generationRequestId
   && record.mirror.generationId === command.generationId
   && record.mirror.attempt === command.attempt
   && record.mirror.configRevision === command.expectedRevision
-  && record.mirror.snapshotDigest === command.snapshotDigest
+  && record.mirror.snapshotDigest === snapshotDigest
 );
 
 const reserveGeneration = (
@@ -523,13 +532,33 @@ const reserveGeneration = (
   command: Extract<ArenaRoomCommand, { type: 'reserve-generation' }>,
   context: ArenaRoomAuthorityContext,
 ): ArenaRoomTransitionResult => {
-  const authorization = requireRole(state, context, 'host');
-  if (authorization) return authorization;
+  if (context.kind !== 'generation-reserver') {
+    return transitionFailure('forbidden', 'invalid-authority-context');
+  }
+  const authority = memberAuthorityRecord(state, context.actorUserId);
+  if (!authority
+    || authority.accountUserId !== context.accountUserId
+    || authority.member.membershipState !== 'active'
+    || authority.member.role !== 'host') {
+    return transitionFailure('forbidden', 'host-required');
+  }
+  const scope = context.scope;
+  if (scope.roomId !== state.snapshot.roomId
+    || scope.roomEpoch !== state.snapshot.roomEpoch
+    || scope.configRevision !== command.expectedRevision
+    || scope.generationRequestId !== command.generationRequestId
+    || scope.generationId !== command.generationId
+    || scope.attempt !== command.attempt) {
+    return transitionFailure('forbidden', 'authority-scope-mismatch');
+  }
+  if (Date.parse(command.timestamp) > Date.parse(scope.expiresAt)) {
+    return transitionFailure('forbidden', 'authority-scope-expired');
+  }
   const historical = state.generationLedger.find((record) => (
     record.mirror.generationRequestId === command.generationRequestId
   ));
   if (historical) {
-    return sameReservation(historical, command)
+    return sameReservation(historical, command, scope.snapshotDigest)
       ? finishIdempotent(state)
       : transitionFailure('conflict', 'generation-request-conflict');
   }
@@ -550,14 +579,14 @@ const reserveGeneration = (
     .filter((record) => record.member.membershipState === 'active')
     .map((record) => record.accountUserId)
     .sort((left, right) => left - right);
-  const collaborativeInfluence = state.collaborativeConfigRevision === state.snapshot.revision;
+  const collaborativeInfluence = state.collaborativeChanges.length > 0;
   const mirror: GenerationMirror = {
     generationRequestId: command.generationRequestId,
     generationId: command.generationId,
     attempt: command.attempt,
     state: 'starting',
     configRevision: state.snapshot.revision,
-    snapshotDigest: command.snapshotDigest,
+    snapshotDigest: scope.snapshotDigest,
     collaborativeInfluence,
     participantUserIds,
     startedAt: command.timestamp,
@@ -597,6 +626,16 @@ const mirrorGeneration = (
 ): ArenaRoomTransitionResult => {
   if (context.kind !== 'generation-publisher') {
     return transitionFailure('forbidden', 'invalid-authority-context');
+  }
+  const scope = context.scope;
+  if (scope.roomId !== state.snapshot.roomId
+    || scope.generationRequestId !== command.generationRequestId
+    || scope.generationId !== command.generationId
+    || scope.attempt !== command.attempt) {
+    return transitionFailure('forbidden', 'authority-scope-mismatch');
+  }
+  if (Date.parse(command.timestamp) > Date.parse(scope.expiresAt)) {
+    return transitionFailure('forbidden', 'authority-scope-expired');
   }
   const active = state.snapshot.activeGeneration;
   if (!active) return transitionFailure('not-found', 'generation-identity-mismatch');
@@ -684,9 +723,9 @@ export const transitionArenaRoom = (
         ? transitionFailure('duplicate', 'state-already-exists')
         : transitionFailure('validation-failed', 'invalid-state');
     }
-    const parsedContext = ArenaRoomAuthorityContextSchema.safeParse(authorityContextInput);
-    if (!parsedContext.success) return transitionFailure('forbidden', 'invalid-authority-context');
-    return createRoom(command, parsedContext.data);
+    const parsedContext = parseArenaRoomAuthorityContext(authorityContextInput);
+    if (!parsedContext) return transitionFailure('forbidden', 'invalid-authority-context');
+    return createRoom(command, parsedContext);
   }
   if (stateInput === null) return transitionFailure('not-found', 'state-required');
   const state = parseState(stateInput);
@@ -694,9 +733,8 @@ export const transitionArenaRoom = (
   if (command.expectedRoomEpoch !== state.snapshot.roomEpoch) {
     return transitionFailure('stale', 'room-epoch-mismatch');
   }
-  const parsedContext = ArenaRoomAuthorityContextSchema.safeParse(authorityContextInput);
-  if (!parsedContext.success) return transitionFailure('forbidden', 'invalid-authority-context');
-  const context = parsedContext.data;
+  const context = parseArenaRoomAuthorityContext(authorityContextInput);
+  if (!context) return transitionFailure('forbidden', 'invalid-authority-context');
 
   if (command.type === 'close') {
     const authorization = requireRole(state, context, 'host');
