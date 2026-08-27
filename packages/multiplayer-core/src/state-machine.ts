@@ -29,6 +29,7 @@ import {
   type ArenaRoomAuthorityContext,
   type ArenaRoomAuthorityState,
   type ArenaRoomCommand,
+  type ArenaRoomLifecycleDeadlines,
   type ArenaRoomGenerationRecord,
   type ArenaRoomMemberAuthorityRecord,
   type ArenaRoomTransitionResult,
@@ -42,6 +43,8 @@ type MutableState = {
 
 type UserAuthority = Extract<ArenaRoomAuthorityContext, { kind: 'authenticated-user' }>;
 type RecoveryAuthority = Extract<ArenaRoomAuthorityContext, { kind: 'room-recovery' }>;
+type PresenceAuthority = Extract<ArenaRoomAuthorityContext, { kind: 'room-presence' }>;
+type DeadlineCloseAuthority = Extract<ArenaRoomAuthorityContext, { kind: 'room-deadline-closer' }>;
 type QuotaCloseAuthority = Extract<ArenaRoomAuthorityContext, { kind: 'room-quota-closer' }>;
 
 const parseState = (input: unknown): ArenaRoomAuthorityState | null => {
@@ -173,6 +176,19 @@ const eventOverflow = (): ArenaRoomTransitionResult => (
   transitionFailure('payload-too-large', 'room-snapshot-too-large')
 );
 
+const deadlinesEqual = (
+  left: ArenaRoomLifecycleDeadlines,
+  right: ArenaRoomLifecycleDeadlines,
+): boolean => left.hostOfflineDeadline === right.hostOfflineDeadline
+  && left.roomIdleDeadline === right.roomIdleDeadline;
+
+const deadlinesDoNotPrecede = (
+  deadlines: ArenaRoomLifecycleDeadlines,
+  timestamp: string,
+): boolean => [deadlines.hostOfflineDeadline, deadlines.roomIdleDeadline].every(
+  (deadline) => deadline === null || Date.parse(deadline) >= Date.parse(timestamp),
+);
+
 const closeRoom = (
   state: ArenaRoomAuthorityState,
   timestamp: string,
@@ -190,6 +206,7 @@ const closeRoom = (
     closedAt: timestamp,
     ...(reason === undefined ? {} : { closeReason: reason }),
   };
+  next.deadlines = { hostOfflineDeadline: null, roomIdleDeadline: null };
   const events: ControlRoomEvent[] = [];
   if (!pushControlEvent(next, events, timestamp, {
     type: 'room.closing',
@@ -211,6 +228,7 @@ const recoverRoom = (
     scope.roomId !== state.snapshot.roomId
     || scope.previousRoomEpoch !== command.expectedRoomEpoch
     || scope.nextRoomEpoch !== command.nextRoomEpoch
+    || !deadlinesEqual(scope.absentPresenceDeadlines, command.absentPresenceDeadlines)
     || scope.timestamp !== command.timestamp
   ) {
     return transitionFailure('forbidden', 'authority-scope-mismatch');
@@ -224,9 +242,18 @@ const recoverRoom = (
   if (Date.parse(command.timestamp) < Date.parse(state.lifecycle.updatedAt)) {
     return transitionFailure('stale', 'command-timestamp-regression');
   }
+  if (!deadlinesDoNotPrecede(command.absentPresenceDeadlines, command.timestamp)) {
+    return transitionFailure('stale', 'command-timestamp-regression');
+  }
   const next = cloneState(state);
   next.snapshot.roomEpoch = command.nextRoomEpoch;
   next.snapshot.controlSeq = 0;
+  next.deadlines = {
+    hostOfflineDeadline: state.deadlines.hostOfflineDeadline
+      ?? command.absentPresenceDeadlines.hostOfflineDeadline,
+    roomIdleDeadline: state.deadlines.roomIdleDeadline
+      ?? command.absentPresenceDeadlines.roomIdleDeadline,
+  };
   next.lifecycle = { ...next.lifecycle, updatedAt: command.timestamp };
   const events: ControlRoomEvent[] = [];
   if (!pushSnapshotEvent(next, events, command.timestamp, false)) return eventOverflow();
@@ -242,6 +269,9 @@ const createRoom = (
     || command.host.role !== 'host'
     || command.host.membershipState !== 'active') {
     return transitionFailure('forbidden', 'host-required');
+  }
+  if (!deadlinesDoNotPrecede(command.deadlines, command.timestamp)) {
+    return transitionFailure('stale', 'command-timestamp-regression');
   }
   const snapshot = ArenaRoomSnapshotSchema.safeParse({
     protocolVersion: PROTOCOL_VERSION,
@@ -262,6 +292,7 @@ const createRoom = (
       createdAt: command.timestamp,
       updatedAt: command.timestamp,
     },
+    deadlines: command.deadlines,
     snapshot: snapshot.data,
     authorityStateVersion: ARENA_ROOM_AUTHORITY_STATE_VERSION,
     memberAuthority: [{ accountUserId: context.accountUserId, member: command.host }],
@@ -274,6 +305,53 @@ const createRoom = (
   const events: ControlRoomEvent[] = [];
   if (!pushSnapshotEvent(next, events, command.timestamp, false)) return eventOverflow();
   return finishApplied(null, next, events);
+};
+
+const syncPresence = (
+  state: ArenaRoomAuthorityState,
+  command: Extract<ArenaRoomCommand, { type: 'sync-presence' }>,
+  context: ArenaRoomAuthorityContext,
+): ArenaRoomTransitionResult => {
+  if (context.kind !== 'room-presence') {
+    return transitionFailure('forbidden', 'invalid-authority-context');
+  }
+  const scope: PresenceAuthority['scope'] = context.scope;
+  if (
+    scope.roomId !== state.snapshot.roomId
+    || scope.roomEpoch !== command.expectedRoomEpoch
+    || scope.timestamp !== command.timestamp
+    || !deadlinesEqual(scope.deadlines, command.deadlines)
+  ) {
+    return transitionFailure('forbidden', 'authority-scope-mismatch');
+  }
+  if (state.lifecycle.status === 'closed') {
+    return transitionFailure('room-closed', 'room-closed');
+  }
+  if (Date.parse(command.timestamp) < Date.parse(state.lifecycle.updatedAt)) {
+    return transitionFailure('stale', 'command-timestamp-regression');
+  }
+  if (!deadlinesDoNotPrecede(command.deadlines, command.timestamp)) {
+    return transitionFailure('stale', 'command-timestamp-regression');
+  }
+  if (deadlinesEqual(state.deadlines, command.deadlines)) return finishIdempotent(state);
+
+  const host = state.snapshot.members.find((member) => (
+    member.role === 'host' && member.membershipState === 'active'
+  ));
+  if (!host) return transitionFailure('validation-failed', 'invalid-state');
+  const previousHostOffline = state.deadlines.hostOfflineDeadline !== null;
+  const nextHostOffline = command.deadlines.hostOfflineDeadline !== null;
+  const next = cloneState(state);
+  next.deadlines = deepClone(command.deadlines);
+  next.lifecycle = { ...next.lifecycle, updatedAt: command.timestamp };
+  const events: ControlRoomEvent[] = [];
+  if (previousHostOffline !== nextHostOffline) {
+    if (!pushControlEvent(next, events, command.timestamp, {
+      type: nextHostOffline ? 'room.host.offline' : 'room.host.online',
+      payload: { member: deepClone(host) },
+    })) return eventOverflow();
+  } else if (!pushSnapshotEvent(next, events, command.timestamp)) return eventOverflow();
+  return finishApplied(state, next, events);
 };
 
 const joinMember = (
@@ -809,6 +887,28 @@ export const transitionArenaRoom = (
       ) {
         return transitionFailure('forbidden', 'authority-scope-mismatch');
       }
+    } else if (context.kind === 'room-deadline-closer') {
+      if (state.lifecycle.status === 'closed') {
+        return closeRoom(state, command.timestamp, command.reason);
+      }
+      const scope: DeadlineCloseAuthority['scope'] = context.scope;
+      const currentDeadline = scope.deadlineKind === 'host-offline'
+        ? state.deadlines.hostOfflineDeadline
+        : state.deadlines.roomIdleDeadline;
+      const expectedReason = scope.deadlineKind === 'host-offline'
+        ? 'host-offline-timeout'
+        : 'room-idle-timeout';
+      if (
+        scope.roomId !== state.snapshot.roomId
+        || scope.roomEpoch !== command.expectedRoomEpoch
+        || currentDeadline !== scope.deadline
+        || command.reason !== expectedReason
+      ) {
+        return transitionFailure('forbidden', 'authority-scope-mismatch');
+      }
+      if (Date.parse(command.timestamp) < Date.parse(scope.deadline)) {
+        return transitionFailure('stale', 'deadline-not-reached');
+      }
     } else {
       const authorization = requireRole(state, context, 'host');
       if (authorization) return authorization;
@@ -845,6 +945,8 @@ export const transitionArenaRoom = (
       if (target?.role === 'host') return transitionFailure('forbidden', 'host-required');
       return revokeMember(state, command.targetUserId, command.timestamp);
     }
+    case 'sync-presence':
+      return syncPresence(state, command, context);
     case 'publish-config':
       return publishConfig(state, command, context);
     case 'submit-proposal':

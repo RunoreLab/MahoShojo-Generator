@@ -7,6 +7,10 @@ import {
 
 export const ARENA_ROOM_TEST_TIMESTAMP = '2026-08-28T00:00:00.000Z';
 export const ARENA_ROOM_NEXT_TIMESTAMP = '2026-08-28T00:01:00.000Z';
+export const ARENA_ROOM_TEST_DEADLINES = {
+  hostOfflineDeadline: '2026-08-28T00:45:00.000Z',
+  roomIdleDeadline: '2026-08-28T12:00:00.000Z',
+} as const;
 
 const sharedConfig = () => ({
   battleMode: 'classic' as const,
@@ -62,6 +66,7 @@ export const createArenaRoomTransition = (
       joinedAt: ARENA_ROOM_TEST_TIMESTAMP,
     },
     sharedConfig: sharedConfig(),
+    deadlines: ARENA_ROOM_TEST_DEADLINES,
     timestamp: ARENA_ROOM_TEST_TIMESTAMP,
   }, hostAuthority);
   return success(result);
@@ -109,15 +114,21 @@ export const recoverArenaRoomTransition = (
   nextRoomEpoch = 'epoch-2',
 ): ArenaRoomTransitionSuccess => {
   const timestamp = ARENA_ROOM_NEXT_TIMESTAMP;
+  const absentPresenceDeadlines = {
+    hostOfflineDeadline: '2026-08-28T00:46:00.000Z',
+    roomIdleDeadline: '2026-08-28T12:01:00.000Z',
+  } as const;
   const result = transitionArenaRoom(state, {
     type: 'recover',
     expectedRoomEpoch: state.snapshot.roomEpoch,
     nextRoomEpoch,
+    absentPresenceDeadlines,
     timestamp,
   }, issueArenaRoomRecoveryAuthority({
     roomId: state.snapshot.roomId,
     previousRoomEpoch: state.snapshot.roomEpoch,
     nextRoomEpoch,
+    absentPresenceDeadlines,
     timestamp,
   }));
   return success(result);

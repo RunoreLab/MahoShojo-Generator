@@ -59,6 +59,7 @@ const createCommand = (roomEpoch = 'epoch-1', roomId = 'room-1'): ArenaRoomComma
     roomEpoch,
     host: state.snapshot.members[0]!,
     sharedConfig: state.snapshot.sharedConfig,
+    deadlines: state.deadlines,
     timestamp: state.lifecycle.createdAt,
   };
 };
@@ -110,6 +111,7 @@ class MemoryRoomStore implements RoomActorCheckpointStore {
   state: ArenaRoomAuthorityState | null = null;
   loadCalls = 0;
   saveCalls = 0;
+  refreshCalls = 0;
   activeSaves = 0;
   maxActiveSaves = 0;
   beforeSave?: (
@@ -119,6 +121,7 @@ class MemoryRoomStore implements RoomActorCheckpointStore {
   saveFailure?: Error;
   conflictAtCall?: number;
   beforeLoad?: () => Promise<void>;
+  refreshResult: 'refreshed' | 'missing' | 'conflict' = 'refreshed';
 
   async load(roomId: string): Promise<ArenaRoomAuthorityState | null> {
     this.loadCalls += 1;
@@ -151,6 +154,12 @@ class MemoryRoomStore implements RoomActorCheckpointStore {
     } finally {
       this.activeSaves -= 1;
     }
+  }
+
+  async refresh(input: { checkpoint: ArenaRoomAuthorityState }) {
+    this.refreshCalls += 1;
+    if (!sameState(this.state, input.checkpoint)) return { kind: 'conflict' as const };
+    return { kind: this.refreshResult };
   }
 
 }
@@ -762,33 +771,36 @@ describe('RoomActorRegistry', () => {
     expect(store.saveCalls).toBe(2);
   });
 
-  it('显式 idle eviction 不创建 per-room interval；再次 hydrate 必须切新 epoch', async () => {
+  it('单一 sweeper 保留带未来 deadline 的 idle actor，并在到期后关闭回收', async () => {
     let now = 0;
     const setIntervalSpy = vi.spyOn(globalThis, 'setInterval');
     const store = new MemoryRoomStore();
-    const epochs = ['epoch-2'];
     const registry = createRoomActorRegistry({
       store,
       idleActorTtlMs: 50,
       now: () => now,
-      createRoomEpoch: () => epochs.shift() ?? 'epoch-unexpected',
-      recoveryTimestamp: () => THIRD_TIMESTAMP,
     });
     await createActorRoom(registry);
     expect(setIntervalSpy).not.toHaveBeenCalled();
     const stopSweeper = registry.startIdleSweeper(10_000);
     expect(setIntervalSpy).toHaveBeenCalledTimes(1);
     stopSweeper();
-    now = 100;
+    now = Date.parse('2026-08-28T00:44:59.999Z');
 
-    await expect(registry.evictIdle()).resolves.toBe(1);
+    await expect(registry.evictIdle()).resolves.toBe(0);
+    expect(registry.size).toBe(1);
+    now = Date.parse('2026-08-28T00:45:00.000Z');
+    await registry.sweepRuntime();
     expect(registry.size).toBe(0);
     const recovered = await registry.recover('room-1');
-    expect(recovered?.getSnapshot()?.snapshot.roomEpoch).toBe('epoch-2');
+    expect(recovered?.getSnapshot()).toMatchObject({
+      snapshot: { roomEpoch: 'epoch-1' },
+      lifecycle: { status: 'closed', closeReason: 'host-offline-timeout' },
+    });
     setIntervalSpy.mockRestore();
   });
 
-  it('存在 subscriber 的 actor 不会被 idle eviction，退订后才可回收', async () => {
+  it('deadline 到期后存在 subscriber 的 actor 仍不 eviction，退订后才可回收', async () => {
     let now = 0;
     const store = new MemoryRoomStore();
     const registry = createRoomActorRegistry({
@@ -800,8 +812,9 @@ describe('RoomActorRegistry', () => {
     const actor = await registry.get('room-1');
     if (!actor) throw new Error('expected actor');
     const unsubscribe = actor.subscribe(vi.fn());
-    now = 100;
+    now = Date.parse('2026-08-28T00:45:00.000Z');
 
+    await expect(registry.expireDeadlines()).resolves.toBe(1);
     await expect(registry.evictIdle()).resolves.toBe(0);
     unsubscribe();
     await expect(registry.evictIdle()).resolves.toBe(1);
@@ -987,5 +1000,80 @@ describe('RoomActorRegistry', () => {
       authority: hostAuthority,
     })).resolves.toMatchObject({ ok: true, kind: 'applied' });
     expect(slow).toHaveBeenCalledTimes(1);
+  });
+
+  it('server-owned create 写入初始 host-offline/room-idle deadline', async () => {
+    const store = new MemoryRoomStore();
+    const registry = createRoomActorRegistry({
+      store,
+      hostOfflineGraceMs: 45 * 60_000,
+      roomIdleTtlMs: 12 * 60 * 60_000,
+    });
+
+    const created = await createActorRoom(registry);
+    expect(created).toMatchObject({
+      ok: true,
+      nextState: {
+        authorityStateVersion: 2,
+        deadlines: {
+          hostOfflineDeadline: '2026-08-28T00:45:00.000Z',
+          roomIdleDeadline: '2026-08-28T12:00:00.000Z',
+        },
+      },
+    });
+  });
+
+  it('单一 process sweep exact revalidation 后关闭到期 deadline，重复 cleanup 幂等', async () => {
+    const store = new MemoryRoomStore();
+    let now = Date.parse('2026-08-28T00:00:00.000Z');
+    const registry = createRoomActorRegistry({ store, now: () => now });
+    await createActorRoom(registry);
+
+    now = Date.parse('2026-08-28T00:45:00.000Z');
+    await expect(registry.expireDeadlines()).resolves.toBe(1);
+    expect(store.state?.lifecycle).toMatchObject({
+      status: 'closed',
+      closeReason: 'host-offline-timeout',
+    });
+    await expect(registry.expireDeadlines()).resolves.toBe(0);
+  });
+
+  it('lazy recovery 先关闭已到期 checkpoint，不通过 epoch rollover 延长 deadline', async () => {
+    const store = new MemoryRoomStore();
+    const seed = createRoomActorRegistry({ store });
+    await createActorRoom(seed);
+    await seed.shutdown();
+    const registry = createRoomActorRegistry({
+      store,
+      now: () => Date.parse('2026-08-28T00:46:00.000Z'),
+      createRoomEpoch: () => 'epoch-2',
+      recoveryTimestamp: () => '2026-08-28T00:46:00.000Z',
+    });
+
+    const actor = await registry.recover('room-1');
+    expect(actor?.getSnapshot()).toMatchObject({
+      lifecycle: { status: 'closed', closeReason: 'host-offline-timeout' },
+      snapshot: { roomEpoch: 'epoch-1' },
+    });
+  });
+
+  it('低频 process refresh 仅刷新 exact active checkpoint，missing/conflict 会 fence actor', async () => {
+    const store = new MemoryRoomStore();
+    let now = 0;
+    const registry = createRoomActorRegistry({
+      store,
+      now: () => now,
+      checkpointRefreshIntervalMs: 100,
+    });
+    await createActorRoom(registry);
+
+    now = 100;
+    await expect(registry.refreshActiveCheckpoints()).resolves.toBe(1);
+    expect(store.refreshCalls).toBe(1);
+
+    now = 200;
+    store.refreshResult = 'missing';
+    await expect(registry.refreshActiveCheckpoints()).resolves.toBe(0);
+    expect(() => registry.get('room-1')).toThrow('ROOM_ACTOR_FENCED');
   });
 });

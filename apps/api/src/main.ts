@@ -6,6 +6,12 @@ import { createHonoApp } from '#/app';
 import { readHonoServerConfig } from '#/config';
 import { configureHonoArenaGenerationRuntime } from '#/arena-generation/runtime';
 import { createRoomActorRegistry } from '#/arena-room/room-actor-registry';
+import { createArenaRoomMembershipService } from '#/arena-room/room-membership-service';
+import {
+  createArenaRoomTicketCodec,
+  createArenaRoomTicketSignatureService,
+} from '#/arena-room/room-ticket';
+import { createArenaRoomWebSocketAuthority } from '#/arena-room/room-websocket-authority';
 import { RoomWebSocketGateway } from '#/arena-room/room-websocket-gateway';
 import {
   createRoomRequestDispatcher,
@@ -55,10 +61,22 @@ if (process.env.HONO_CONFIG_CHECK_ONLY === 'true') {
     },
   });
   roomActors.startIdleSweeper();
+  const roomMemberships = createArenaRoomMembershipService({ actors: roomActors });
+  const roomWebSocketAuthority = config.arenaMultiplayerEnabled
+    ? createArenaRoomWebSocketAuthority({
+        actors: roomActors,
+        memberships: roomMemberships,
+        replay: redis.getRoomTicketReplayStore(),
+        tickets: createArenaRoomTicketCodec({
+          signatures: createArenaRoomTicketSignatureService(),
+        }),
+      })
+    : null;
   const roomWebSocketGateway = new RoomWebSocketGateway({
-    // GMR-05 will wire signed room-ticket authority and an explicit exact Origin list.
-    // Until then both browser and installed-client upgrade attempts remain fail-closed.
-    allowedBrowserOrigins: [],
+    // Production/preview config rejects this Development Gate feature flag. Disabled
+    // runtime keeps the GMR-04 empty-Origin/default-deny behavior unchanged.
+    allowedBrowserOrigins: roomWebSocketAuthority ? config.corsOrigins : [],
+    ...(roomWebSocketAuthority ? { authorize: roomWebSocketAuthority.authorize } : {}),
   });
   const roomWebSocketServer = createRoomWebSocketServer();
 

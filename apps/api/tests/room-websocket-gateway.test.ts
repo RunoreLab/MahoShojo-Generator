@@ -12,6 +12,7 @@ import {
   RoomWebSocketGateway,
   denyRoomWebSocketAuthorization,
   type RoomWebSocketAuthorization,
+  type RoomWebSocketConnectionAuthority,
   type RoomWebSocketReservation,
 } from '#/arena-room/room-websocket-gateway';
 
@@ -243,6 +244,52 @@ describe('RoomWebSocketGateway', () => {
     ]);
   });
 
+  it('scoped connection authority 可在 onOpen 后异步 attach、处理消息并在 close 时只 dispose 一次', async () => {
+    const dispose = vi.fn(async () => undefined);
+    const onMessage = vi.fn();
+    const connectionAuthority: RoomWebSocketConnectionAuthority = {
+      activate: async (peer) => {
+        peer.send({
+          protocolVersion: 1,
+          type: 'room.resync.required',
+          reason: 'replay-unavailable',
+        });
+        return {
+          dispose,
+          onMessage: (message) => {
+            onMessage(message);
+            peer.send({
+              protocolVersion: 1,
+              type: 'room.resync.required',
+              reason: 'state-not-attached',
+            });
+          },
+        };
+      },
+    };
+    const gateway = createGateway({
+      authorize: async () => ({
+        ...acceptedAuthorization(),
+        connectionAuthority,
+      }),
+    });
+    const decision = await gateway.prepareUpgrade(upgradeRequest());
+    if (!decision.accepted) throw new Error('expected accepted reservation');
+    const { events, socket } = openReservation(gateway, decision.reservation);
+
+    await vi.waitFor(() => expect(socket.sent).toHaveLength(1));
+    events.onMessage?.(new MessageEvent('message', {
+      data: JSON.stringify({ protocolVersion: 1, type: 'room.resync.request' }),
+    }), wsContext(socket));
+    await vi.waitFor(() => expect(onMessage).toHaveBeenCalledOnce());
+    expect(socket.sent).toHaveLength(2);
+
+    socket.readyState = 3;
+    events.onClose?.(new CloseEvent('close', { code: 1000 }), wsContext(socket));
+    events.onClose?.(new CloseEvent('close', { code: 1000 }), wsContext(socket));
+    await vi.waitFor(() => expect(dispose).toHaveBeenCalledOnce());
+  });
+
   it('拒绝 binary、超大和 malformed client frame', async () => {
     const gateway = createGateway();
     const decisions = await Promise.all([
@@ -314,6 +361,30 @@ describe('RoomWebSocketGateway', () => {
     expect(openedSecond.socket.closes).toEqual([]);
   });
 
+  it('服务器 connectionKey 跨房间统一约束同一账户的 occupancy', async () => {
+    let authorizationIndex = 0;
+    const gateway = createGateway({
+      authorize: async () => ({
+        accepted: true,
+        connectionKey: 'account:101',
+        roomId: `room-${++authorizationIndex}`,
+        userId: `room-user-${authorizationIndex}`,
+      }),
+      maxConnectionsPerUser: 1,
+    });
+    const first = await gateway.prepareUpgrade(upgradeRequest());
+    const second = await gateway.prepareUpgrade(upgradeRequest());
+    if (!first.accepted || !second.accepted) throw new Error('expected accepted reservations');
+
+    openReservation(gateway, first.reservation);
+    const rejected = openReservation(gateway, second.reservation);
+
+    expect(rejected.socket.closes.at(-1)).toEqual({
+      code: 1013,
+      reason: 'connection-limit',
+    });
+  });
+
   it('用单一 heartbeat sweep 终止不回应 pong 的 dead connection', async () => {
     vi.useFakeTimers();
     const gateway = createGateway({
@@ -364,6 +435,25 @@ describe('RoomWebSocketGateway', () => {
 
     await vi.advanceTimersByTimeAsync(100);
     await shutdown;
+    expect(socket.terminateCount).toBe(1);
+  });
+
+  it('authority activation 永不返回时 shutdown 仍在有界期限内完成', async () => {
+    vi.useFakeTimers();
+    const gateway = createGateway({
+      authorize: async () => ({
+        ...acceptedAuthorization(),
+        connectionAuthority: { activate: () => new Promise(() => undefined) },
+      }),
+      shutdownGraceMs: 100,
+    });
+    const decision = await gateway.prepareUpgrade(upgradeRequest());
+    if (!decision.accepted) throw new Error('expected accepted reservation');
+    const { socket } = openReservation(gateway, decision.reservation);
+
+    const shutdown = gateway.shutdown();
+    await vi.advanceTimersByTimeAsync(200);
+    await expect(shutdown).resolves.toBeUndefined();
     expect(socket.terminateCount).toBe(1);
   });
 });

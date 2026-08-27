@@ -12,7 +12,7 @@ import {
 
 const ACTIVE_ROOM_CHECKPOINT_VERSION = 1 as const;
 const EXPIRING_ROOM_CHECKPOINT_VERSION = 2 as const;
-const DEFAULT_ACTIVE_TTL_SECONDS = 3_600;
+const DEFAULT_ACTIVE_TTL_SECONDS = 24 * 60 * 60;
 const DEFAULT_TERMINAL_TTL_SECONDS = 300;
 // Checkpoint TTL 结束 Room incarnation；该有界负向 ledger 故意不设 TTL，避免迟到 create
 // receipt 在相同 roomEpoch 上复活已结束的 incarnation。达到配额后必须改用新 Room ID。
@@ -183,6 +183,25 @@ redis.call('SET', KEYS[1], ARGV[8], 'PX', targetTtl)
 return 'expired'
 `;
 
+const REFRESH_SCRIPT = `
+-- ROOM_CHECKPOINT_REFRESH_V1
+local raw = redis.call('GET', KEYS[1])
+if not raw then return 'missing' end
+local decoded, current = pcall(cjson.decode, raw)
+if not decoded or type(current) ~= 'table' then return 'invalid-existing' end
+if current.checkpointVersion ~= tonumber(ARGV[1])
+  or current.expiryFence ~= nil
+  or current.roomId ~= ARGV[2]
+  or current.roomEpoch ~= ARGV[3]
+  or current.revision ~= tonumber(ARGV[4])
+  or current.controlSeq ~= tonumber(ARGV[5]) then
+  return 'conflict'
+end
+if raw ~= ARGV[7] then return 'conflict' end
+redis.call('PEXPIRE', KEYS[1], ARGV[6])
+return 'refreshed'
+`;
+
 export interface RedisRoomClient {
   eval(
     script: string,
@@ -201,6 +220,7 @@ export type RedisRoomStoreOptions = {
 export type RedisRoomStoreSaveResult = { readonly kind: 'saved' | 'conflict' };
 export type RedisRoomStoreDeleteResult = { readonly kind: 'deleted' | 'missing' | 'conflict' };
 export type RedisRoomStoreExpireResult = { readonly kind: 'expired' | 'missing' | 'conflict' };
+export type RedisRoomStoreRefreshResult = { readonly kind: 'refreshed' | 'missing' | 'conflict' };
 
 export interface RedisRoomStore {
   load(roomId: string): Promise<ArenaRoomAuthorityState | null>;
@@ -213,6 +233,9 @@ export interface RedisRoomStore {
   expire(input: {
     checkpoint: ArenaRoomAuthorityState;
   }): Promise<RedisRoomStoreExpireResult>;
+  refresh(input: {
+    checkpoint: ArenaRoomAuthorityState;
+  }): Promise<RedisRoomStoreRefreshResult>;
 }
 
 type StoredRoomCheckpoint = {
@@ -509,6 +532,23 @@ export const createRedisRoomStore = (options: RedisRoomStoreOptions): RedisRoomS
         ],
       });
       return parseMutationResult(raw, ['expired', 'missing', 'conflict'] as const);
+    },
+
+    async refresh(input) {
+      const active = createStoredCheckpoint(input.checkpoint);
+      if (active.state.lifecycle.status !== 'open') {
+        throw new Error('REDIS_ROOM_REFRESH_TERMINAL');
+      }
+      const expected = checkpointPredecessorOf(active.state);
+      const raw = await options.getClient().eval(REFRESH_SCRIPT, {
+        keys: [roomKey(active.roomId)],
+        arguments: [
+          ...predecessorArguments(expected),
+          String(activeTtlMs),
+          JSON.stringify(active),
+        ],
+      });
+      return parseMutationResult(raw, ['refreshed', 'missing', 'conflict'] as const);
     },
   } satisfies RedisRoomStore);
 };

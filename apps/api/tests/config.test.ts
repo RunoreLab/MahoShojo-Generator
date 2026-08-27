@@ -34,7 +34,25 @@ describe('Hono server config', () => {
       authMode: 'bearer',
       corsOrigins: ['https://*.colanns.me'],
       redisKeyPrefix: '',
+      arenaMultiplayerEnabled: false,
     });
+  });
+
+  it('Arena multiplayer Development Gate 默认关闭，仅 local/test 可显式启用', () => {
+    vi.stubEnv('NODE_ENV', 'development');
+    vi.stubEnv('HOSTED_API_ENVIRONMENT', 'local');
+    expect(readHonoServerConfig().arenaMultiplayerEnabled).toBe(false);
+    vi.stubEnv('ARENA_MULTIPLAYER_ENABLED', 'true');
+    expect(readHonoServerConfig().arenaMultiplayerEnabled).toBe(true);
+  });
+
+  it.each(['production', 'preview'])('%s target 在 Production Gate 前拒绝激活 Arena multiplayer', (target) => {
+    stubValidBearerProductionEnv();
+    vi.stubEnv('HOSTED_API_ENVIRONMENT', target);
+    vi.stubEnv('REDIS_KEY_PREFIX', target === 'preview' ? 'preview' : '');
+    vi.stubEnv('ARENA_MULTIPLAYER_ENABLED', 'true');
+
+    expect(() => readHonoServerConfig()).toThrow(/ARENA_MULTIPLAYER_ENABLED.*Production Gate.*false/);
   });
 
   it('读取共享 Redis 的环境隔离前缀', () => {

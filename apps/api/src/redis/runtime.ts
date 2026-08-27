@@ -11,6 +11,11 @@ import {
   type RedisRoomClient,
   type RedisRoomStore,
 } from '../arena-room/redis-room-store';
+import {
+  createRedisRoomTicketReplayStore,
+  type RedisRoomTicketReplayClient,
+  type RedisRoomTicketReplayStore,
+} from '../arena-room/redis-room-ticket-replay-store';
 
 const DEFAULT_REDIS_COMMAND_TIMEOUT_MS = 4_000;
 
@@ -135,6 +140,7 @@ export class RedisRuntime implements RedisService {
   private lastError: string | null = null;
   private generationReplayStore: GenerationReplayStore | null = null;
   private roomStore: RedisRoomStore | null = null;
+  private roomTicketReplayStore: RedisRoomTicketReplayStore | null = null;
 
   constructor(
     private readonly redisUrl: string | null,
@@ -293,6 +299,20 @@ export class RedisRuntime implements RedisService {
       } satisfies RedisRoomClient),
     });
     return this.roomStore;
+  }
+
+  getRoomTicketReplayStore(): RedisRoomTicketReplayStore {
+    this.roomTicketReplayStore ??= createRedisRoomTicketReplayStore({
+      keyPrefix: this.keyPrefix,
+      getClient: () => ({
+        eval: (script, options) => this.executeRoomCommand(async () => {
+          const client = this.client;
+          if (!client?.isReady) throw new Error('REDIS_ROOM_CHECKPOINT_UNAVAILABLE');
+          return client.eval(script, options);
+        }),
+      } satisfies RedisRoomTicketReplayClient),
+    });
+    return this.roomTicketReplayStore;
   }
 
   async ping(): Promise<boolean> {

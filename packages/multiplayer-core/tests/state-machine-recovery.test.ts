@@ -20,10 +20,16 @@ import {
   transitionArenaRoomAt,
 } from './state-machine-fixtures';
 
+const RECOVERY_DEADLINES = {
+  hostOfflineDeadline: '2026-08-27T16:46:00.000Z',
+  roomIdleDeadline: '2026-08-28T04:01:00.000Z',
+} as const;
+
 const recoverCommand = () => ({
   type: 'recover' as const,
   expectedRoomEpoch: 'epoch-1',
   nextRoomEpoch: 'epoch-2',
+  absentPresenceDeadlines: RECOVERY_DEADLINES,
   timestamp: NEXT_TIMESTAMP,
 });
 
@@ -86,6 +92,7 @@ describe('Arena Room recovery transition', () => {
       roomId: 'room-1',
       previousRoomEpoch: 'epoch-1',
       nextRoomEpoch: 'epoch-2',
+      absentPresenceDeadlines: RECOVERY_DEADLINES,
       timestamp,
     });
 
@@ -93,6 +100,7 @@ describe('Arena Room recovery transition', () => {
       type: 'recover',
       expectedRoomEpoch: 'epoch-1',
       nextRoomEpoch: 'epoch-2',
+      absentPresenceDeadlines: RECOVERY_DEADLINES,
       timestamp,
     }, authority);
     if (!recovered.ok) throw new Error('expected recovery success');
@@ -118,6 +126,7 @@ describe('Arena Room recovery transition', () => {
       roomId: 'room-1',
       previousRoomEpoch: 'epoch-1',
       nextRoomEpoch: 'epoch-2',
+      absentPresenceDeadlines: RECOVERY_DEADLINES,
       timestamp: NEXT_TIMESTAMP,
     });
 
@@ -153,6 +162,7 @@ describe('Arena Room recovery transition', () => {
       roomId: 'room-1',
       previousRoomEpoch: 'epoch-1',
       nextRoomEpoch: 'epoch-2',
+      absentPresenceDeadlines: RECOVERY_DEADLINES,
       timestamp: NEXT_TIMESTAMP,
     });
 
@@ -171,6 +181,7 @@ describe('Arena Room recovery transition', () => {
       roomId: 'room-1',
       previousRoomEpoch: 'epoch-1',
       nextRoomEpoch: 'epoch-1',
+      absentPresenceDeadlines: RECOVERY_DEADLINES,
       timestamp: NEXT_TIMESTAMP,
     });
     expect(transitionArenaRoom(
@@ -184,6 +195,7 @@ describe('Arena Room recovery transition', () => {
       roomId: 'room-1',
       previousRoomEpoch: 'epoch-1',
       nextRoomEpoch: 'epoch-2',
+      absentPresenceDeadlines: RECOVERY_DEADLINES,
       timestamp: oldTimestamp,
     });
     expect(transitionArenaRoom(created.nextState, {

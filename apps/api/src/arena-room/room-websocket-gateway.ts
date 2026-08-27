@@ -2,6 +2,7 @@ import {
   ARENA_ROOM_WEBSOCKET_PROTOCOL,
   MAX_CONTROL_FRAME_BYTES,
   parseRoomClientTransportFrame,
+  type RoomClientTransportMessage,
   type RoomServerTransportMessage,
 } from '@mahoshojo/contracts/arena-room';
 import type { WebSocketLike } from '@hono/node-server';
@@ -34,6 +35,9 @@ export type RoomWebSocketAuthorization =
     accepted: true;
     roomId: string;
     userId: string;
+    connectionKey?: string;
+    role?: 'host' | 'member';
+    connectionAuthority?: RoomWebSocketConnectionAuthority;
   }
   | {
     accepted: false;
@@ -68,10 +72,26 @@ export interface RoomWebSocketGatewayOptions {
 
 export interface RoomWebSocketReservation {
   readonly [ROOM_WEBSOCKET_GRANT_STATE]: { claimed: boolean };
+  readonly connectionKey: string;
   readonly createdAt: number;
   readonly roomId: string;
   readonly userId: string;
+  readonly connectionAuthority?: RoomWebSocketConnectionAuthority;
 }
+
+export type RoomWebSocketPeer = {
+  send(message: RoomServerTransportMessage): boolean;
+  close(code: number, reason: string): void;
+};
+
+export type RoomWebSocketConnection = {
+  onMessage?(message: RoomClientTransportMessage): unknown;
+  dispose?(): unknown;
+};
+
+export type RoomWebSocketConnectionAuthority = {
+  activate(peer: RoomWebSocketPeer): Promise<RoomWebSocketConnection> | RoomWebSocketConnection;
+};
 
 export type RoomWebSocketUpgradeDecision =
   | { accepted: true; reservation: RoomWebSocketReservation }
@@ -136,6 +156,10 @@ class RoomWebSocketSession {
   private outboundBytes = 0;
   private readonly outboundQueue: OutboundFrame[] = [];
   private sending = false;
+  private connection: RoomWebSocketConnection | null = null;
+  private activationPromise: Promise<void> | null = null;
+  private disposeStarted = false;
+  private messageChain: Promise<void> = Promise.resolve();
 
   constructor(
     readonly reservation: RoomWebSocketReservation,
@@ -146,6 +170,25 @@ class RoomWebSocketSession {
     this.connectionRate = { count: 0, startedAt: now };
     this.socket.on('pong', this.handlePong);
     this.socket.once('close', this.handleSocketClose);
+  }
+
+  start(): void {
+    const authority = this.reservation.connectionAuthority;
+    if (!authority) return;
+    const activation = Promise.resolve()
+      .then(() => authority.activate(this.peer))
+      .then((connection) => {
+        if (this.closing) {
+          this.disposeConnection(connection);
+          return;
+        }
+        this.connection = connection;
+      })
+      .catch(() => {
+        if (!this.closing) this.close(CLOSE_TRY_AGAIN_LATER, 'authority-unavailable');
+      });
+    this.activationPromise = activation;
+    this.gateway.trackTask(activation);
   }
 
   handleMessage(data: WSMessageReceive): void {
@@ -161,14 +204,25 @@ class RoomWebSocketSession {
     const now = this.gateway.currentTime();
     if (
       !this.consumeConnectionRate(now)
-      || !this.gateway.consumeUserRate(this.reservation.userId, now)
+      || !this.gateway.consumeUserRate(this.reservation.connectionKey, now)
     ) {
       this.close(CLOSE_INVALID_MESSAGE, 'rate-limit');
       return;
     }
     try {
       const message = parseRoomClientTransportFrame(data);
-      if (message.type === 'room.resync.request') {
+      if (this.reservation.connectionAuthority) {
+        this.messageChain = this.messageChain
+          .then(() => this.activationPromise)
+          .then(async () => {
+            if (this.closing || !this.connection?.onMessage) return;
+            await this.connection.onMessage(message);
+          })
+          .catch(() => {
+            if (!this.closing) this.close(CLOSE_TRY_AGAIN_LATER, 'authority-unavailable');
+          });
+        this.gateway.trackTask(this.messageChain);
+      } else if (message.type === 'room.resync.request') {
         this.enqueue({
           protocolVersion: 1,
           reason: 'state-not-attached',
@@ -222,8 +276,14 @@ class RoomWebSocketSession {
       this.outboundBytes = 0;
       this.socket.off('pong', this.handlePong);
       this.socket.off('close', this.handleSocketClose);
+      if (this.connection) this.disposeConnection(this.connection);
     }
   }
+
+  private readonly peer: RoomWebSocketPeer = Object.freeze({
+    send: (message: RoomServerTransportMessage): boolean => this.enqueue(message),
+    close: (code: number, reason: string): void => this.close(code, reason),
+  });
 
   private readonly handlePong = (): void => {
     this.awaitingPongSince = undefined;
@@ -241,7 +301,8 @@ class RoomWebSocketSession {
     return this.connectionRate.count <= this.gateway.connectionMessageLimit;
   }
 
-  private enqueue(message: RoomServerTransportMessage): void {
+  private enqueue(message: RoomServerTransportMessage): boolean {
+    if (this.closing || this.socket.readyState !== WebSocket.OPEN) return false;
     const data = JSON.stringify(message);
     const bytes = Buffer.byteLength(data, 'utf8');
     if (
@@ -249,11 +310,12 @@ class RoomWebSocketSession {
       > this.gateway.outboundQueueMaxBytes
     ) {
       this.close(CLOSE_TRY_AGAIN_LATER, 'resync-required');
-      return;
+      return false;
     }
     this.outboundQueue.push({ bytes, data });
     this.outboundBytes += bytes;
     this.drainOutbound();
+    return true;
   }
 
   private drainOutbound(): void {
@@ -286,6 +348,14 @@ class RoomWebSocketSession {
       this.terminate();
     }
   }
+
+  private disposeConnection(connection: RoomWebSocketConnection): void {
+    if (this.disposeStarted) return;
+    this.disposeStarted = true;
+    if (!connection.dispose) return;
+    const disposal = Promise.resolve().then(() => connection.dispose?.()).then(() => undefined);
+    this.gateway.trackTask(disposal);
+  }
 }
 
 export class RoomWebSocketGateway {
@@ -308,6 +378,7 @@ export class RoomWebSocketGateway {
   private readonly userOccupancy = new Map<string, number>();
   private readonly userRates = new Map<string, RateWindow>();
   private readonly emptyWaiters = new Set<() => void>();
+  private readonly tasks = new Set<Promise<void>>();
 
   constructor(options: RoomWebSocketGatewayOptions) {
     this.allowedBrowserOrigins = new Set(options.allowedBrowserOrigins);
@@ -395,21 +466,27 @@ export class RoomWebSocketGateway {
     if (
       !isNonEmptyIdentity(authorization.userId)
       || !isNonEmptyIdentity(authorization.roomId)
+      || !isNonEmptyIdentity(authorization.connectionKey ?? authorization.userId)
     ) {
       return createRejection(403, 'ROOM_WEBSOCKET_INVALID_AUTHORITY');
     }
     if (!this.accepting) {
       return createRejection(503, 'ROOM_WEBSOCKET_DRAINING');
     }
-    if ((this.userOccupancy.get(authorization.userId) ?? 0) >= this.maxConnectionsPerUser) {
+    const connectionKey = authorization.connectionKey ?? authorization.userId;
+    if ((this.userOccupancy.get(connectionKey) ?? 0) >= this.maxConnectionsPerUser) {
       return createRejection(429, 'ROOM_WEBSOCKET_CONNECTION_LIMIT');
     }
 
     const reservation: RoomWebSocketReservation = {
       [ROOM_WEBSOCKET_GRANT_STATE]: { claimed: false },
+      connectionKey,
       createdAt: this.currentTime(),
       roomId: authorization.roomId,
       userId: authorization.userId,
+      ...(authorization.connectionAuthority
+        ? { connectionAuthority: authorization.connectionAuthority }
+        : {}),
     };
     return { accepted: true, reservation };
   }
@@ -461,6 +538,15 @@ export class RoomWebSocketGateway {
         ]);
       }
       for (const session of [...this.sessions]) session.terminate();
+      if (this.tasks.size > 0) {
+        await Promise.race([
+          Promise.allSettled([...this.tasks]).then(() => undefined),
+          new Promise<void>((resolve) => {
+            const timeout = setTimeout(resolve, this.shutdownGraceMs);
+            timeout.unref();
+          }),
+        ]);
+      }
       this.userRates.clear();
     })();
     return this.shutdownPromise;
@@ -487,9 +573,14 @@ export class RoomWebSocketGateway {
     return rate.count <= this.userMessageLimit;
   }
 
+  trackTask(task: Promise<void>): void {
+    this.tasks.add(task);
+    void task.finally(() => this.tasks.delete(task)).catch(() => undefined);
+  }
+
   removeSession(session: RoomWebSocketSession): boolean {
     if (!this.sessions.delete(session)) return false;
-    this.decrementOccupancy(session.reservation.userId);
+    this.decrementOccupancy(session.reservation.connectionKey);
     if (this.sessions.size === 0) {
       for (const resolve of this.emptyWaiters) resolve();
       this.emptyWaiters.clear();
@@ -512,10 +603,10 @@ export class RoomWebSocketGateway {
     if (this.currentTime() - reservation.createdAt >= this.reservationTtlMs) {
       return { accepted: false, code: CLOSE_INVALID_MESSAGE, reason: 'authorization-expired' };
     }
-    if ((this.userOccupancy.get(reservation.userId) ?? 0) >= this.maxConnectionsPerUser) {
+    if ((this.userOccupancy.get(reservation.connectionKey) ?? 0) >= this.maxConnectionsPerUser) {
       return { accepted: false, code: CLOSE_TRY_AGAIN_LATER, reason: 'connection-limit' };
     }
-    this.incrementOccupancy(reservation.userId);
+    this.incrementOccupancy(reservation.connectionKey);
     const session = new RoomWebSocketSession(
       reservation,
       socket,
@@ -523,6 +614,7 @@ export class RoomWebSocketGateway {
       this.currentTime(),
     );
     this.sessions.add(session);
+    session.start();
     return { accepted: true, session };
   }
 

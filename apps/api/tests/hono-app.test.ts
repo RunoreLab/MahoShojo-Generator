@@ -12,6 +12,7 @@ const honoApiRoutes = JSON.parse(readFileSync(
 )) as { exitedRouteIds: string[] };
 
 const config: HonoServerConfig = {
+  arenaMultiplayerEnabled: false,
   host: '127.0.0.1',
   port: 8787,
   nodeEnv: 'test',

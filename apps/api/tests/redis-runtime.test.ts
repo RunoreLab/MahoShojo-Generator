@@ -54,6 +54,17 @@ describe('RedisRuntime shutdown', () => {
     await expect(store.load('room-1')).resolves.toBeNull();
   });
 
+  it('Room ticket replay port 与 checkpoint 共用有界 Redis command/fail-closed 语义', async () => {
+    const redis = new RedisRuntime('redis://example.test:6379', true);
+    const replay = redis.getRoomTicketReplayStore();
+    const input = { jti: 'jti-1', nowMs: 1_000, expiresAtMs: 31_000 };
+
+    await expect(replay.consume(input)).rejects.toThrow('REDIS_ROOM_CHECKPOINT_UNAVAILABLE');
+    await redis.connect();
+    redisClient.eval.mockResolvedValueOnce('consumed');
+    await expect(replay.consume(input)).resolves.toEqual({ kind: 'consumed' });
+  });
+
   it('Room checkpoint 命令永久 pending 时有界 fail closed 且不反射 Redis secret', async () => {
     vi.useFakeTimers();
     redisClient.get.mockImplementation(() => new Promise(() => undefined));

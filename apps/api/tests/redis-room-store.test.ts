@@ -160,6 +160,33 @@ describe('RedisRoomStore', () => {
     expect(closed).toEqual(before);
   });
 
+  it('refresh 只对 exact active checkpoint 延长 TTL，missing/conflict 均不伪装成功', async () => {
+    const client = createClient();
+    vi.mocked(client.eval)
+      .mockResolvedValueOnce('refreshed')
+      .mockResolvedValueOnce('missing')
+      .mockResolvedValueOnce('conflict');
+    const store = createRedisRoomStore({
+      getClient: () => client,
+      activeTtlSeconds: 86_400,
+    });
+    const checkpoint = createArenaRoomState();
+
+    await expect(store.refresh({ checkpoint })).resolves.toEqual({ kind: 'refreshed' });
+    await expect(store.refresh({ checkpoint })).resolves.toEqual({ kind: 'missing' });
+    await expect(store.refresh({ checkpoint })).resolves.toEqual({ kind: 'conflict' });
+
+    const [script, options] = vi.mocked(client.eval).mock.calls[0]!;
+    expect(script).toContain('ROOM_CHECKPOINT_REFRESH_V1');
+    expect(script).toContain("redis.call('PEXPIRE', KEYS[1], ARGV[6])");
+    expect(script).toContain('raw ~= ARGV[7]');
+    expect(options.arguments.at(-2)).toBe('86400000');
+    expect(JSON.parse(options.arguments.at(-1)!)).toMatchObject({
+      checkpointVersion: 1,
+      ...checkpointPredecessorOf(checkpoint),
+    });
+  });
+
   it('严格 hydrate versioned envelope 并拒绝损坏或 roomId 不匹配的 Redis 数据', async () => {
     const client = createClient();
     const state = createArenaRoomState();

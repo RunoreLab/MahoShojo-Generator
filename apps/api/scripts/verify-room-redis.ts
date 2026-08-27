@@ -66,6 +66,7 @@ const invalidExpireFenceRoomId = `room-invalid-expire-fence-${token}`;
 const fullMutationFenceRoomId = `room-full-mutation-fence-${token}`;
 const recoveryRoomId = `room-recovery-${token}`;
 const actorRoomId = `room-actor-${token}`;
+const ticketJti = `verifier:${token}`;
 const roomHash = (id: string): string => createHash('sha256').update(id).digest('hex');
 const roomKey = (id: string): string => (
   `mahoshojo:room:v1:${keyPrefix}:${roomHash(id)}:checkpoint`
@@ -74,6 +75,8 @@ const roomFenceKey = (id: string): string => (
   `mahoshojo:room:v1:${keyPrefix}:${roomHash(id)}:incarnations`
 );
 const roomKeys = (id: string): string[] => [roomKey(id), roomFenceKey(id)];
+const ticketReplayKey = `mahoshojo:room-ticket:v1:${keyPrefix}:${createHash('sha256')
+  .update(ticketJti).digest('hex')}`;
 
 const sharedConfig = () => ({
   battleMode: 'classic' as const,
@@ -127,6 +130,10 @@ const createRoom = (id: string, roomEpoch = 'epoch-1'): ArenaRoomTransitionSucce
       joinedAt: TIMESTAMP,
     },
     sharedConfig: sharedConfig(),
+    deadlines: {
+      hostOfflineDeadline: '2026-08-28T00:45:00.000Z',
+      roomIdleDeadline: '2026-08-28T12:00:00.000Z',
+    },
     timestamp: TIMESTAMP,
   }, hostAuthority);
   return success(result);
@@ -157,15 +164,21 @@ const recover = (
   state: ArenaRoomAuthorityState,
   nextRoomEpoch: string,
 ): ArenaRoomTransitionSuccess => {
+  const absentPresenceDeadlines = {
+    hostOfflineDeadline: '2026-08-28T00:46:00.000Z',
+    roomIdleDeadline: '2026-08-28T12:01:00.000Z',
+  } as const;
   const result = transitionArenaRoom(state, {
     type: 'recover',
     expectedRoomEpoch: state.snapshot.roomEpoch,
     nextRoomEpoch,
+    absentPresenceDeadlines,
     timestamp: NEXT_TIMESTAMP,
   }, issueArenaRoomRecoveryAuthority({
     roomId: state.snapshot.roomId,
     previousRoomEpoch: state.snapshot.roomEpoch,
     nextRoomEpoch,
+    absentPresenceDeadlines,
     timestamp: NEXT_TIMESTAMP,
   }));
   return success(result);
@@ -294,6 +307,39 @@ try {
     ) {
       throw new Error('ROOM_REDIS_ACKNOWLEDGED_CHECKPOINT_FAILED');
     }
+
+      await cleanup.pExpire(roomKey(roomId), 1_000);
+      const refreshed = await writerStore.refresh({ checkpoint: acknowledged });
+      const staleRefresh = await readerStore.refresh({ checkpoint: initial });
+      const refreshedTtl = await cleanup.pTTL(roomKey(roomId));
+      if (
+        refreshed.kind !== 'refreshed'
+        || staleRefresh.kind !== 'conflict'
+        || refreshedTtl < 86_000_000
+        || refreshedTtl > 86_400_000
+      ) {
+        throw new Error('ROOM_REDIS_ACTIVE_TTL_REFRESH_FAILED');
+      }
+
+      const firstTicketUse = await writer.getRoomTicketReplayStore().consume({
+        jti: ticketJti,
+        nowMs: 1_000,
+        expiresAtMs: 46_000,
+      });
+      const replayedTicketUse = await reader.getRoomTicketReplayStore().consume({
+        jti: ticketJti,
+        nowMs: 2_000,
+        expiresAtMs: 46_000,
+      });
+      const ticketReplayTtl = await cleanup.pTTL(ticketReplayKey);
+      if (
+        firstTicketUse.kind !== 'consumed'
+        || replayedTicketUse.kind !== 'replayed'
+        || ticketReplayTtl <= 0
+        || ticketReplayTtl > 45_000
+      ) {
+        throw new Error('ROOM_REDIS_TICKET_REPLAY_FAILED');
+      }
 
       const staleClose = close(initial);
       const staleWriter = await readerStore.save({ commit: commit(staleClose) });
@@ -670,6 +716,10 @@ try {
             joinedAt: TIMESTAMP,
           },
           sharedConfig: sharedConfig(),
+          deadlines: {
+            hostOfflineDeadline: '2026-08-28T00:45:00.000Z',
+            roomIdleDeadline: '2026-08-28T12:00:00.000Z',
+          },
           timestamp: TIMESTAMP,
         },
         authority: hostAuthority,
@@ -761,6 +811,8 @@ try {
         serverIssuedRoomIdentity: true,
         roomActorWarmRecovery: true,
         roomActorOldWriterFence: true,
+        activeTtlRefresh: true,
+        ticketReplay: true,
         terminalTtl: true,
         monotonicExpiryFence: true,
         expireDelete: true,
@@ -792,6 +844,7 @@ try {
       ...roomKeys(fullMutationFenceRoomId),
       ...roomKeys(recoveryRoomId),
       ...roomKeys(actorRoomId),
+      ticketReplayKey,
     ]);
   }
   await cleanup.quit();

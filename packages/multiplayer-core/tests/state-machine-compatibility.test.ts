@@ -23,11 +23,15 @@ describe('Arena Room state-machine compatibility and portability', () => {
     const old = await loadFixture('arena-room-v0-unsupported.json');
     const next = await loadFixture('arena-room-v2-unsupported.json');
     const wrap = (snapshot: unknown) => ({
-      authorityStateVersion: 1,
+      authorityStateVersion: 2,
       lifecycle: {
         status: 'open',
         createdAt: TEST_TIMESTAMP,
         updatedAt: TEST_TIMESTAMP,
+      },
+      deadlines: {
+        hostOfflineDeadline: '2026-08-27T16:45:00.000Z',
+        roomIdleDeadline: '2026-08-28T04:00:00.000Z',
       },
       snapshot,
     });

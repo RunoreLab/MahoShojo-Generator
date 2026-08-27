@@ -1,8 +1,14 @@
 import { randomUUID } from 'node:crypto';
 
 import {
+  RoomEventSchema,
+  type ControlRoomEvent,
+  type RoomControlCursor,
+} from '@mahoshojo/contracts/arena-room';
+import {
   ArenaRoomCommandSchema,
   createArenaRoomCheckpointCommit,
+  issueArenaRoomDeadlineCloseAuthority,
   issueArenaRoomQuotaCloseAuthority,
   issueArenaRoomRecoveryAuthority,
   parseArenaRoomAuthorityState,
@@ -20,8 +26,12 @@ const DEFAULT_MAX_SUBSCRIBERS_PER_ROOM = 128;
 const DEFAULT_MAX_ACTORS = 1_024;
 const DEFAULT_MAX_FENCED_ROOMS = 1_024;
 const DEFAULT_IDLE_ACTOR_TTL_MS = 5 * 60 * 1_000;
+const DEFAULT_HOST_OFFLINE_GRACE_MS = 45 * 60 * 1_000;
+const DEFAULT_ROOM_IDLE_TTL_MS = 12 * 60 * 60 * 1_000;
+const DEFAULT_MAX_REPLAY_EVENTS = 128;
+const DEFAULT_CHECKPOINT_REFRESH_INTERVAL_MS = 4 * 60 * 60 * 1_000;
 
-export type RoomActorCheckpointStore = Pick<RedisRoomStore, 'load' | 'save'>;
+export type RoomActorCheckpointStore = Pick<RedisRoomStore, 'load' | 'refresh' | 'save'>;
 
 export type RoomActorErrorCode =
   | 'ROOM_ACTOR_CHECKPOINT_CONFLICT'
@@ -76,6 +86,8 @@ const snapshotInputCapability = (input: unknown): unknown => {
     if (
       kind === 'generation-reserver'
       || kind === 'generation-publisher'
+      || kind === 'room-deadline-closer'
+      || kind === 'room-presence'
       || kind === 'room-quota-closer'
       || kind === 'room-recovery'
       || kind === 'trusted-server-time'
@@ -96,6 +108,11 @@ export type RoomActorFanout = {
 };
 
 export type RoomActorSubscriber = (fanout: RoomActorFanout) => unknown;
+
+export type RoomActorControlSync = {
+  readonly kind: 'current' | 'replay' | 'snapshot';
+  readonly events: readonly ControlRoomEvent[];
+};
 
 export type RoomActorExecuteInput = {
   readonly command: unknown;
@@ -128,13 +145,44 @@ const isExactFenceQuotaReason = (reason: string): reason is ExactFenceQuotaReaso
   EXACT_FENCE_QUOTA_REASONS.has(reason as ExactFenceQuotaReason)
 );
 
+type ExpiredRoomDeadline = {
+  readonly kind: 'host-offline' | 'room-idle';
+  readonly deadline: string;
+};
+
+const expiredDeadline = (
+  state: ArenaRoomAuthorityState,
+  now: number,
+): ExpiredRoomDeadline | null => {
+  if (state.lifecycle.status === 'closed') return null;
+  const candidates: ExpiredRoomDeadline[] = [];
+  if (
+    state.deadlines.hostOfflineDeadline !== null
+    && Date.parse(state.deadlines.hostOfflineDeadline) <= now
+  ) {
+    candidates.push({ kind: 'host-offline', deadline: state.deadlines.hostOfflineDeadline });
+  }
+  if (
+    state.deadlines.roomIdleDeadline !== null
+    && Date.parse(state.deadlines.roomIdleDeadline) <= now
+  ) {
+    candidates.push({ kind: 'room-idle', deadline: state.deadlines.roomIdleDeadline });
+  }
+  candidates.sort((left, right) => Date.parse(left.deadline) - Date.parse(right.deadline)
+    || left.kind.localeCompare(right.kind));
+  return candidates[0] ?? null;
+};
+
 export class RoomActor {
   private phase: ActorPhase = 'accepting';
   private readonly queue: QueueEntry[] = [];
   private readonly subscribers = new Set<RoomActorSubscriber>();
   private readonly drainWaiters = new Set<() => void>();
   private running = false;
+  private maintenance = false;
   private lastActivityAt: number;
+  private lastCheckpointRefreshAt: number;
+  private readonly controlReplay: ControlRoomEvent[] = [];
 
   constructor(
     readonly roomId: string,
@@ -142,6 +190,8 @@ export class RoomActor {
     private readonly options: {
       readonly maxQueuedCommands: number;
       readonly maxSubscribers: number;
+      readonly maxReplayEvents: number;
+      readonly initialReplay: readonly ControlRoomEvent[];
       readonly now: () => number;
       readonly onAbandoned: (actor: RoomActor) => void;
       readonly onFenced: (actor: RoomActor) => void;
@@ -152,10 +202,12 @@ export class RoomActor {
     },
   ) {
     this.lastActivityAt = options.now();
+    this.lastCheckpointRefreshAt = this.lastActivityAt;
     this.state = initialState === null ? null : cloneState(initialState);
     if (this.state !== null && this.state.snapshot.roomId !== roomId) {
       return fail('ROOM_ACTOR_ROOM_ID_MISMATCH');
     }
+    this.rememberReplay(options.initialReplay);
   }
 
   private state: ArenaRoomAuthorityState | null;
@@ -167,11 +219,17 @@ export class RoomActor {
   }
 
   get isIdle(): boolean {
-    return !this.running && this.queue.length === 0;
+    return !this.running && !this.maintenance && this.queue.length === 0;
   }
 
   isIdleExpired(now: number, idleTtlMs: number): boolean {
-    return this.isIdle && this.subscribers.size === 0 && now - this.lastActivityAt >= idleTtlMs;
+    if (!this.isIdle || this.subscribers.size > 0) return false;
+    if (this.state?.lifecycle.status === 'closed') return true;
+    if (
+      this.state?.deadlines.hostOfflineDeadline !== null
+      || this.state?.deadlines.roomIdleDeadline !== null
+    ) return false;
+    return now - this.lastActivityAt >= idleTtlMs;
   }
 
   subscribe(subscriber: RoomActorSubscriber): () => void {
@@ -182,6 +240,45 @@ export class RoomActor {
     this.subscribers.add(subscriber);
     this.lastActivityAt = this.options.now();
     return () => this.subscribers.delete(subscriber);
+  }
+
+  resolveControlSync(cursor?: RoomControlCursor): RoomActorControlSync {
+    if (this.state === null) return fail('ROOM_ACTOR_NOT_FOUND');
+    const snapshot = this.state.snapshot;
+    if (cursor === undefined || cursor.roomEpoch !== snapshot.roomEpoch) {
+      return { kind: 'snapshot', events: [this.createSnapshotEvent()] };
+    }
+    if (cursor.controlSeq === snapshot.controlSeq) {
+      return { kind: 'current', events: [] };
+    }
+    if (cursor.controlSeq > snapshot.controlSeq) {
+      return { kind: 'snapshot', events: [this.createSnapshotEvent()] };
+    }
+    const events = this.controlReplay.filter((event) => (
+      event.roomEpoch === snapshot.roomEpoch && event.controlSeq > cursor.controlSeq
+    ));
+    const contiguous = events.length > 0
+      && events[0]?.controlSeq === cursor.controlSeq + 1
+      && events.at(-1)?.controlSeq === snapshot.controlSeq
+      && events.every((event, index) => (
+        index === 0 || event.controlSeq === events[index - 1]!.controlSeq + 1
+      ));
+    return contiguous
+      ? { kind: 'replay', events: structuredClone(events) }
+      : { kind: 'snapshot', events: [this.createSnapshotEvent()] };
+  }
+
+  subscribeWithControlSync(
+    cursor: RoomControlCursor | undefined,
+    subscriber: RoomActorSubscriber,
+  ): { readonly sync: RoomActorControlSync; readonly unsubscribe: () => void } {
+    const unsubscribe = this.subscribe(subscriber);
+    try {
+      return { sync: this.resolveControlSync(cursor), unsubscribe };
+    } catch (error) {
+      unsubscribe();
+      throw error;
+    }
   }
 
   execute(input: RoomActorExecuteInput): Promise<ArenaRoomTransitionResult> {
@@ -213,6 +310,59 @@ export class RoomActor {
       });
       this.pump();
     });
+  }
+
+  async closeForExpiredDeadline(now: number): Promise<boolean> {
+    if (this.phase !== 'accepting' || this.state === null || this.state.lifecycle.status === 'closed') {
+      return false;
+    }
+    const due = expiredDeadline(this.state, now);
+    if (!due) return false;
+    const timestamp = new Date(now).toISOString();
+    const result = await this.execute({
+      authority: issueArenaRoomDeadlineCloseAuthority({
+        roomId: this.roomId,
+        roomEpoch: this.state.snapshot.roomEpoch,
+        deadlineKind: due.kind,
+        deadline: due.deadline,
+      }),
+      command: {
+        type: 'close',
+        expectedRoomEpoch: this.state.snapshot.roomEpoch,
+        reason: due.kind === 'host-offline' ? 'host-offline-timeout' : 'room-idle-timeout',
+        timestamp,
+      },
+    });
+    return result.ok && result.kind === 'applied';
+  }
+
+  isCheckpointRefreshDue(now: number, intervalMs: number): boolean {
+    return this.phase === 'accepting'
+      && this.state?.lifecycle.status === 'open'
+      && now - this.lastCheckpointRefreshAt >= intervalMs;
+  }
+
+  async refreshCheckpoint(now: number): Promise<boolean> {
+    if (!this.isIdle || this.phase !== 'accepting' || this.state?.lifecycle.status !== 'open') {
+      return false;
+    }
+    this.maintenance = true;
+    const checkpoint = cloneState(this.state);
+    try {
+      const result = await this.options.store.refresh({ checkpoint });
+      if (this.phase !== 'accepting') return false;
+      if (result.kind !== 'refreshed') {
+        this.fence();
+        return false;
+      }
+      this.lastCheckpointRefreshAt = now;
+      return true;
+    } finally {
+      this.maintenance = false;
+      this.lastActivityAt = this.options.now();
+      this.pump();
+      this.resolveDrainWaitersIfIdle();
+    }
   }
 
   stopAccepting(): void {
@@ -250,7 +400,7 @@ export class RoomActor {
   }
 
   private pump(): void {
-    if (this.running) return;
+    if (this.running || this.maintenance) return;
     const entry = this.queue.shift();
     if (!entry) {
       this.resolveDrainWaitersIfIdle();
@@ -322,6 +472,8 @@ export class RoomActor {
     }
     this.requireInstallable();
     this.state = cloneState(transition.nextState);
+    this.lastCheckpointRefreshAt = this.options.now();
+    this.rememberReplay(transition.events);
     this.fanout(transition);
     return transition;
   }
@@ -375,9 +527,36 @@ export class RoomActor {
     }
     this.requireInstallable();
     this.state = cloneState(transition.nextState);
+    this.lastCheckpointRefreshAt = this.options.now();
     this.quotaExhausted = false;
     this.quotaExhaustedReason = null;
+    this.rememberReplay(transition.events);
     this.fanout(transition);
+  }
+
+  private createSnapshotEvent(): ControlRoomEvent {
+    if (this.state === null) return fail('ROOM_ACTOR_NOT_FOUND');
+    const event = RoomEventSchema.parse({
+      protocolVersion: this.state.snapshot.protocolVersion,
+      roomId: this.roomId,
+      roomEpoch: this.state.snapshot.roomEpoch,
+      type: 'room.snapshot',
+      controlSeq: this.state.snapshot.controlSeq,
+      timestamp: this.state.lifecycle.updatedAt,
+      payload: structuredClone(this.state.snapshot),
+    });
+    if (event.type === 'story.delta') return fail('ROOM_ACTOR_ROOM_ID_MISMATCH');
+    return event;
+  }
+
+  private rememberReplay(events: readonly ControlRoomEvent[]): void {
+    for (const event of events) {
+      if (event.roomEpoch !== this.state?.snapshot.roomEpoch) continue;
+      this.controlReplay.push(structuredClone(event));
+    }
+    if (this.controlReplay.length > this.options.maxReplayEvents) {
+      this.controlReplay.splice(0, this.controlReplay.length - this.options.maxReplayEvents);
+    }
   }
 
   private fanout(transition: ArenaRoomTransitionSuccess): void {
@@ -433,6 +612,10 @@ export type RoomActorRegistryOptions = {
   readonly maxActors?: number;
   readonly maxFencedRooms?: number;
   readonly idleActorTtlMs?: number;
+  readonly hostOfflineGraceMs?: number;
+  readonly roomIdleTtlMs?: number;
+  readonly maxReplayEvents?: number;
+  readonly checkpointRefreshIntervalMs?: number;
   readonly now?: () => number;
   readonly createRoomIdentity?: () => {
     readonly roomId: string;
@@ -473,10 +656,15 @@ export class RoomActorRegistry {
   private readonly idleTtlMs: number;
   private readonly maxActors: number;
   private readonly maxFencedRooms: number;
+  private readonly maxReplayEvents: number;
+  private readonly hostOfflineGraceMs: number;
+  private readonly roomIdleTtlMs: number;
+  private readonly checkpointRefreshIntervalMs: number;
   private readonly now: () => number;
   private accepting = true;
   private shutdownPromise: Promise<void> | null = null;
   private idleSweepTimer: ReturnType<typeof setInterval> | null = null;
+  private runtimeSweepPromise: Promise<void> | null = null;
 
   constructor(private readonly options: RoomActorRegistryOptions) {
     this.maxQueuedCommands = positiveInteger(
@@ -491,6 +679,22 @@ export class RoomActorRegistry {
     this.maxSubscribers = positiveInteger(
       options.maxSubscribersPerRoom ?? DEFAULT_MAX_SUBSCRIBERS_PER_ROOM,
       'maxSubscribersPerRoom',
+    );
+    this.maxReplayEvents = positiveInteger(
+      options.maxReplayEvents ?? DEFAULT_MAX_REPLAY_EVENTS,
+      'maxReplayEvents',
+    );
+    this.hostOfflineGraceMs = positiveFinite(
+      options.hostOfflineGraceMs ?? DEFAULT_HOST_OFFLINE_GRACE_MS,
+      'hostOfflineGraceMs',
+    );
+    this.roomIdleTtlMs = positiveFinite(
+      options.roomIdleTtlMs ?? DEFAULT_ROOM_IDLE_TTL_MS,
+      'roomIdleTtlMs',
+    );
+    this.checkpointRefreshIntervalMs = positiveFinite(
+      options.checkpointRefreshIntervalMs ?? DEFAULT_CHECKPOINT_REFRESH_INTERVAL_MS,
+      'checkpointRefreshIntervalMs',
     );
     this.idleTtlMs = positiveFinite(
       options.idleActorTtlMs ?? DEFAULT_IDLE_ACTOR_TTL_MS,
@@ -531,6 +735,11 @@ export class RoomActorRegistry {
       roomEpoch: randomUUID(),
     })))();
     const timestamp = (this.options.createTimestamp ?? (() => new Date().toISOString()))();
+    const timestampMs = Date.parse(timestamp);
+    const deadlines = {
+      hostOfflineDeadline: new Date(timestampMs + this.hostOfflineGraceMs).toISOString(),
+      roomIdleDeadline: new Date(timestampMs + this.roomIdleTtlMs).toISOString(),
+    };
     const command = ArenaRoomCommandSchema.safeParse({
       type: 'create',
       roomId: identity.roomId,
@@ -542,6 +751,7 @@ export class RoomActorRegistry {
         joinedAt: timestamp,
       },
       sharedConfig: input.sharedConfig,
+      deadlines,
       timestamp,
     });
     if (!command.success || command.data.type !== 'create') {
@@ -609,12 +819,15 @@ export class RoomActorRegistry {
     positiveFinite(intervalMs, 'idleSweepIntervalMs');
     if (this.idleSweepTimer !== null) return () => this.stopIdleSweeper();
     this.idleSweepTimer = setInterval(() => {
-      void this.evictIdle().catch((error: unknown) => {
+      if (this.runtimeSweepPromise) return;
+      this.runtimeSweepPromise = this.sweepRuntime().catch((error: unknown) => {
         try {
           this.options.onBackgroundError?.(error);
         } catch {
           // A diagnostic hook cannot escape the bounded background sweep.
         }
+      }).finally(() => {
+        this.runtimeSweepPromise = null;
       });
     }, intervalMs);
     this.idleSweepTimer.unref?.();
@@ -633,6 +846,32 @@ export class RoomActorRegistry {
     }
     await Promise.all(evictions);
     return evictions.length;
+  }
+
+  async expireDeadlines(): Promise<number> {
+    this.requireAccepting();
+    const now = this.now();
+    const results = await Promise.all([...this.actors.values()].map((actor) => (
+      actor.closeForExpiredDeadline(now)
+    )));
+    return results.filter(Boolean).length;
+  }
+
+  async refreshActiveCheckpoints(): Promise<number> {
+    this.requireAccepting();
+    const now = this.now();
+    let refreshed = 0;
+    for (const actor of [...this.actors.values()]) {
+      if (!actor.isCheckpointRefreshDue(now, this.checkpointRefreshIntervalMs)) continue;
+      if (await actor.refreshCheckpoint(now)) refreshed += 1;
+    }
+    return refreshed;
+  }
+
+  async sweepRuntime(): Promise<void> {
+    await this.expireDeadlines();
+    await this.refreshActiveCheckpoints();
+    await this.evictIdle();
   }
 
   shutdown(): Promise<void> {
@@ -665,6 +904,36 @@ export class RoomActorRegistry {
       this.actors.set(roomId, actor);
       return actor;
     }
+    const now = this.now();
+    const due = expiredDeadline(checkpoint, now);
+    if (due) {
+      const timestamp = new Date(now).toISOString();
+      const transition = transitionArenaRoom(checkpoint, {
+        type: 'close',
+        expectedRoomEpoch: checkpoint.snapshot.roomEpoch,
+        reason: due.kind === 'host-offline' ? 'host-offline-timeout' : 'room-idle-timeout',
+        timestamp,
+      }, issueArenaRoomDeadlineCloseAuthority({
+        roomId,
+        roomEpoch: checkpoint.snapshot.roomEpoch,
+        deadlineKind: due.kind,
+        deadline: due.deadline,
+      }));
+      if (!transition.ok || transition.kind !== 'applied') {
+        return fail('ROOM_ACTOR_RECOVERY_INVALID');
+      }
+      const saved = await this.options.store.save({
+        commit: createArenaRoomCheckpointCommit(transition),
+      });
+      if (saved.kind === 'conflict') {
+        this.rememberFenced(roomId);
+        return fail('ROOM_ACTOR_RECOVERY_CONFLICT');
+      }
+      this.requireAccepting();
+      const actor = this.createActor(roomId, transition.nextState, transition.events);
+      this.actors.set(roomId, actor);
+      return actor;
+    }
     const previousRoomEpoch = checkpoint.snapshot.roomEpoch;
     const nextRoomEpoch = (this.options.createRoomEpoch ?? (() => randomUUID()))(
       roomId,
@@ -674,15 +943,22 @@ export class RoomActorRegistry {
       return fail('ROOM_ACTOR_EPOCH_INVALID');
     }
     const timestamp = (this.options.recoveryTimestamp ?? (() => new Date().toISOString()))();
+    const timestampMs = Date.parse(timestamp);
+    const absentPresenceDeadlines = {
+      hostOfflineDeadline: new Date(timestampMs + this.hostOfflineGraceMs).toISOString(),
+      roomIdleDeadline: new Date(timestampMs + this.roomIdleTtlMs).toISOString(),
+    };
     const transition = transitionArenaRoom(checkpoint, {
       type: 'recover',
       expectedRoomEpoch: previousRoomEpoch,
       nextRoomEpoch,
+      absentPresenceDeadlines,
       timestamp,
     }, issueArenaRoomRecoveryAuthority({
       roomId,
       previousRoomEpoch,
       nextRoomEpoch,
+      absentPresenceDeadlines,
       timestamp,
     }));
     if (!transition.ok || transition.kind !== 'applied') {
@@ -705,16 +981,22 @@ export class RoomActorRegistry {
       return fail('ROOM_ACTOR_RECOVERY_CONFLICT');
     }
     this.requireAccepting();
-    const actor = this.createActor(roomId, transition.nextState);
+    const actor = this.createActor(roomId, transition.nextState, transition.events);
     this.actors.set(roomId, actor);
     return actor;
   }
 
-  private createActor(roomId: string, state: ArenaRoomAuthorityState | null): RoomActor {
+  private createActor(
+    roomId: string,
+    state: ArenaRoomAuthorityState | null,
+    initialReplay: readonly ControlRoomEvent[] = [],
+  ): RoomActor {
     let actor!: RoomActor;
     actor = new RoomActor(roomId, state, {
       maxQueuedCommands: this.maxQueuedCommands,
       maxSubscribers: this.maxSubscribers,
+      maxReplayEvents: this.maxReplayEvents,
+      initialReplay,
       now: this.now,
       onAbandoned: (abandonedActor) => {
         if (this.actors.get(roomId) === abandonedActor) this.actors.delete(roomId);

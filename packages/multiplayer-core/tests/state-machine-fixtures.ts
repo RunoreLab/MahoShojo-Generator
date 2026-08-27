@@ -9,6 +9,10 @@ import {
 
 export const TEST_TIMESTAMP = '2026-08-27T16:00:00.000Z';
 export const NEXT_TIMESTAMP = '2026-08-27T16:01:00.000Z';
+export const TEST_ROOM_DEADLINES = {
+  hostOfflineDeadline: '2026-08-27T16:45:00.000Z',
+  roomIdleDeadline: '2026-08-28T04:00:00.000Z',
+} as const;
 
 export const hostAuthority = () => ({
   kind: 'authenticated-user' as const,
@@ -117,6 +121,7 @@ export const createRoomCommand = () => ({
     joinedAt: TEST_TIMESTAMP,
   },
   sharedConfig: baseConfig(),
+  deadlines: TEST_ROOM_DEADLINES,
   timestamp: TEST_TIMESTAMP,
 });
 

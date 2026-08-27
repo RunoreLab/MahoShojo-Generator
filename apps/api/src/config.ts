@@ -23,6 +23,7 @@ export type HonoServerConfig = {
   d1Required: boolean;
   corsOrigins: string[];
   authMode: HonoAuthMode;
+  arenaMultiplayerEnabled: boolean;
 };
 
 const hasText = (value: string | undefined): boolean => Boolean(value?.trim());
@@ -86,6 +87,9 @@ const validateProductionEnvironment = (
   }
   if (deploymentTarget === 'production' && config.redisKeyPrefix !== '') {
     problems.push('production target 的 REDIS_KEY_PREFIX 必须为空');
+  }
+  if (protectedHostedTarget && config.arenaMultiplayerEnabled) {
+    problems.push('ARENA_MULTIPLAYER_ENABLED 在 Production Gate 前必须为 false');
   }
   if (!config.redisUrl) problems.push('Redis 未配置（REDIS_URL 或 REDIS_HOST）');
   if (!config.redisRequired) problems.push('REDIS_REQUIRED 生产模式必须为 true');
@@ -240,6 +244,7 @@ export const readHonoServerConfig = (): HonoServerConfig => {
     d1Required: readBoolean('D1_REQUIRED', nodeEnv === 'production' || protectedHostedTarget),
     corsOrigins: readCorsOrigins(),
     authMode: readHonoAuthMode(),
+    arenaMultiplayerEnabled: readBoolean('ARENA_MULTIPLAYER_ENABLED', false),
   };
   validateProductionEnvironment(process.env, config);
   return config;

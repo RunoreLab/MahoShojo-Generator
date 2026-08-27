@@ -23,7 +23,13 @@ import { z } from 'zod';
 import { ArenaMultiplayerCoreError } from './errors';
 import { hasCollaborativeChangeEffect } from './provenance';
 
-export const ARENA_ROOM_AUTHORITY_STATE_VERSION = 1 as const;
+export const ARENA_ROOM_AUTHORITY_STATE_VERSION = 2 as const;
+
+export const ArenaRoomLifecycleDeadlinesSchema = z.object({
+  hostOfflineDeadline: IsoTimestampSchema.nullable(),
+  roomIdleDeadline: IsoTimestampSchema.nullable(),
+}).strict();
+export type ArenaRoomLifecycleDeadlines = z.infer<typeof ArenaRoomLifecycleDeadlinesSchema>;
 
 export const ArenaRoomLifecycleSchema = z.discriminatedUnion('status', [
   z.object({
@@ -85,6 +91,7 @@ export type ArenaRoomGenerationRecord = z.infer<typeof ArenaRoomGenerationRecord
 export const ArenaRoomAuthorityStateSchema = z.object({
   authorityStateVersion: z.literal(ARENA_ROOM_AUTHORITY_STATE_VERSION),
   lifecycle: ArenaRoomLifecycleSchema,
+  deadlines: ArenaRoomLifecycleDeadlinesSchema,
   snapshot: ArenaRoomSnapshotSchema,
   memberAuthority: z.array(ArenaRoomMemberAuthorityRecordSchema)
     .max(MAX_ROOM_MEMBER_AUTHORITY_RECORDS),
@@ -237,7 +244,28 @@ export const ArenaRoomRecoveryAuthorityContextSchema = z.object({
     roomId: OpaqueKeySchema,
     previousRoomEpoch: OpaqueKeySchema,
     nextRoomEpoch: OpaqueKeySchema,
+    absentPresenceDeadlines: ArenaRoomLifecycleDeadlinesSchema,
     timestamp: IsoTimestampSchema,
+  }).strict(),
+}).strict();
+
+export const ArenaRoomPresenceAuthorityContextSchema = z.object({
+  kind: z.literal('room-presence'),
+  scope: z.object({
+    roomId: OpaqueKeySchema,
+    roomEpoch: OpaqueKeySchema,
+    deadlines: ArenaRoomLifecycleDeadlinesSchema,
+    timestamp: IsoTimestampSchema,
+  }).strict(),
+}).strict();
+
+export const ArenaRoomDeadlineCloseAuthorityContextSchema = z.object({
+  kind: z.literal('room-deadline-closer'),
+  scope: z.object({
+    roomId: OpaqueKeySchema,
+    roomEpoch: OpaqueKeySchema,
+    deadlineKind: z.enum(['host-offline', 'room-idle']),
+    deadline: IsoTimestampSchema,
   }).strict(),
 }).strict();
 
@@ -256,6 +284,8 @@ export const ArenaRoomAuthorityContextSchema = z.discriminatedUnion('kind', [
   ArenaRoomGenerationReservationContextSchema,
   ArenaRoomGenerationPublisherContextSchema,
   ArenaRoomRecoveryAuthorityContextSchema,
+  ArenaRoomPresenceAuthorityContextSchema,
+  ArenaRoomDeadlineCloseAuthorityContextSchema,
   ArenaRoomQuotaCloseAuthorityContextSchema,
 ]);
 /**
@@ -275,6 +305,8 @@ type GenerationPublisherCapabilityInput = Omit<z.input<typeof ArenaRoomGeneratio
 const generationReservationCapabilities = new WeakSet<object>();
 const generationPublisherCapabilities = new WeakSet<object>();
 const roomRecoveryCapabilities = new WeakSet<object>();
+const roomPresenceCapabilities = new WeakSet<object>();
+const roomDeadlineCloseCapabilities = new WeakSet<object>();
 const roomQuotaCloseCapabilities = new WeakSet<object>();
 
 /** Issues an in-process capability that cannot survive wire serialization. */
@@ -319,6 +351,38 @@ export const issueArenaRoomRecoveryAuthority = (
   return capability;
 };
 
+/** Issues an in-process capability for one exact durable presence projection. */
+export const issueArenaRoomPresenceAuthority = (
+  input: z.input<typeof ArenaRoomPresenceAuthorityContextSchema>['scope'],
+): Extract<ArenaRoomAuthorityContext, { kind: 'room-presence' }> => {
+  const parsed = ArenaRoomPresenceAuthorityContextSchema.parse({
+    kind: 'room-presence',
+    scope: input,
+  });
+  const capability = Object.freeze({
+    ...parsed,
+    scope: Object.freeze({
+      ...parsed.scope,
+      deadlines: Object.freeze(parsed.scope.deadlines),
+    }),
+  });
+  roomPresenceCapabilities.add(capability);
+  return capability;
+};
+
+/** Issues an in-process capability for one exact, already-persisted deadline. */
+export const issueArenaRoomDeadlineCloseAuthority = (
+  input: z.input<typeof ArenaRoomDeadlineCloseAuthorityContextSchema>['scope'],
+): Extract<ArenaRoomAuthorityContext, { kind: 'room-deadline-closer' }> => {
+  const parsed = ArenaRoomDeadlineCloseAuthorityContextSchema.parse({
+    kind: 'room-deadline-closer',
+    scope: input,
+  });
+  const capability = Object.freeze({ ...parsed, scope: Object.freeze(parsed.scope) });
+  roomDeadlineCloseCapabilities.add(capability);
+  return capability;
+};
+
 /** Issues an in-process capability for the runtime-mandated exact-fence quota close. */
 export const issueArenaRoomQuotaCloseAuthority = (
   input: z.input<typeof ArenaRoomQuotaCloseAuthorityContextSchema>['scope'],
@@ -345,6 +409,12 @@ export const parseArenaRoomAuthorityContext = (input: unknown): ArenaRoomAuthori
   }
   if (parsed.data.kind === 'room-recovery') {
     return roomRecoveryCapabilities.has(input) ? parsed.data : null;
+  }
+  if (parsed.data.kind === 'room-presence') {
+    return roomPresenceCapabilities.has(input) ? parsed.data : null;
+  }
+  if (parsed.data.kind === 'room-deadline-closer') {
+    return roomDeadlineCloseCapabilities.has(input) ? parsed.data : null;
   }
   return roomQuotaCloseCapabilities.has(input) ? parsed.data : null;
 };
@@ -379,6 +449,7 @@ export const CreateArenaRoomCommandSchema = z.object({
   roomEpoch: OpaqueKeySchema,
   host: RoomMemberSchema,
   sharedConfig: ArenaRoomSharedConfigSchema,
+  deadlines: ArenaRoomLifecycleDeadlinesSchema,
   timestamp: IsoTimestampSchema,
 }).strict();
 
@@ -409,6 +480,13 @@ export const RecoverArenaRoomCommandSchema = z.object({
   type: z.literal('recover'),
   ...epochCommand,
   nextRoomEpoch: OpaqueKeySchema,
+  absentPresenceDeadlines: ArenaRoomLifecycleDeadlinesSchema,
+}).strict();
+
+export const SyncArenaRoomPresenceCommandSchema = z.object({
+  type: z.literal('sync-presence'),
+  ...epochCommand,
+  deadlines: ArenaRoomLifecycleDeadlinesSchema,
 }).strict();
 
 export const PublishArenaRoomConfigCommandSchema = z.object({
@@ -483,6 +561,7 @@ export const ArenaRoomCommandSchema = z.union([
   KickArenaRoomMemberCommandSchema,
   CloseArenaRoomCommandSchema,
   RecoverArenaRoomCommandSchema,
+  SyncArenaRoomPresenceCommandSchema,
   PublishArenaRoomConfigCommandSchema,
   SubmitArenaRoomProposalCommandSchema,
   ResolveArenaRoomProposalCommandSchema,
@@ -530,6 +609,7 @@ export type ArenaRoomTransitionFailureReason =
   | 'generation-terminal-conflict'
   | 'authority-scope-mismatch'
   | 'authority-scope-expired'
+  | 'deadline-not-reached'
   | 'invalid-trusted-time'
   | 'command-timestamp-mismatch'
   | 'command-timestamp-regression'
