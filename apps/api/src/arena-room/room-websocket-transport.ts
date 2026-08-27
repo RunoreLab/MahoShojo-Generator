@@ -35,9 +35,17 @@ export const createRoomWebSocketServer = (): WebSocketServer => {
 };
 
 export const createRoomWebSocketApp = (gateway: RoomWebSocketGateway): NodeFetchApp => {
-  const app = new Hono();
+  const app = new Hono<{ Bindings: NodeBindings }>();
 
   app.all(ARENA_ROOM_WEBSOCKET_PATH, async (context) => {
+    // @hono/node-server currently rebuilds the upgrade Request without carrying
+    // IncomingMessage.method, so the raw Node method is the authority here.
+    if (context.env.incoming.method !== 'GET') {
+      return Response.json(
+        { code: 'ROOM_WEBSOCKET_METHOD_NOT_ALLOWED' },
+        { status: 405 },
+      );
+    }
     const decision = await gateway.prepareUpgrade(context.req.raw);
     if (!decision.accepted) return decision.response;
     return upgradeWebSocket(

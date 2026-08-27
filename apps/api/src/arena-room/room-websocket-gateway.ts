@@ -25,6 +25,9 @@ const DEFAULT_RATE_WINDOW_MS = 10_000;
 const DEFAULT_RESERVATION_TTL_MS = 10_000;
 const DEFAULT_SHUTDOWN_GRACE_MS = 5_000;
 const DEFAULT_USER_MESSAGE_LIMIT = 120;
+const WEBSOCKET_KEY_PATTERN = /^[+/0-9A-Za-z]{22}==$/u;
+const WEBSOCKET_PROTOCOL_TOKEN_PATTERN = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/u;
+const ROOM_WEBSOCKET_GRANT_STATE = Symbol('room-websocket-grant-state');
 
 export type RoomWebSocketAuthorization =
   | {
@@ -64,7 +67,8 @@ export interface RoomWebSocketGatewayOptions {
 }
 
 export interface RoomWebSocketReservation {
-  readonly id: symbol;
+  readonly [ROOM_WEBSOCKET_GRANT_STATE]: { claimed: boolean };
+  readonly createdAt: number;
   readonly roomId: string;
   readonly userId: string;
 }
@@ -72,10 +76,6 @@ export interface RoomWebSocketReservation {
 export type RoomWebSocketUpgradeDecision =
   | { accepted: true; reservation: RoomWebSocketReservation }
   | { accepted: false; response: Response };
-
-interface PendingReservation extends RoomWebSocketReservation {
-  createdAt: number;
-}
 
 interface RateWindow {
   count: number;
@@ -99,14 +99,31 @@ const createRejection = (status: number, code: string): RoomWebSocketUpgradeDeci
   response: Response.json({ code }, { status }),
 });
 
-const hasCanonicalProtocol = (request: Request): boolean => {
+const parseOfferedProtocols = (request: Request): ReadonlySet<string> | undefined => {
   const offered = request.headers.get('sec-websocket-protocol');
-  if (!offered) return false;
-  return offered
-    .split(',')
-    .map((protocol) => protocol.trim())
-    .includes(ARENA_ROOM_WEBSOCKET_PROTOCOL);
+  if (!offered) return undefined;
+  const protocols = new Set<string>();
+  for (const rawProtocol of offered.split(',')) {
+    const protocol = rawProtocol.trim();
+    if (
+      !WEBSOCKET_PROTOCOL_TOKEN_PATTERN.test(protocol)
+      || protocols.has(protocol)
+    ) {
+      return undefined;
+    }
+    protocols.add(protocol);
+  }
+  return protocols;
 };
+
+const hasValidHandshakeHeaders = (request: Request): boolean => {
+  return WEBSOCKET_KEY_PATTERN.test(request.headers.get('sec-websocket-key') ?? '')
+    && request.headers.get('sec-websocket-version') === '13';
+};
+
+type RoomWebSocketActivation =
+  | { accepted: true; session: RoomWebSocketSession }
+  | { accepted: false; code: number; reason: string };
 
 const isNonEmptyIdentity = (value: string): boolean => {
   return value.length > 0 && value.length <= 256;
@@ -283,7 +300,6 @@ export class RoomWebSocketGateway {
   private readonly heartbeatInterval: NodeJS.Timeout;
   private readonly maxConnectionsPerUser: number;
   private readonly now: () => number;
-  private readonly pending = new Map<symbol, PendingReservation>();
   private readonly reservationTtlMs: number;
   private readonly sessions = new Set<RoomWebSocketSession>();
   private readonly shutdownGraceMs: number;
@@ -349,7 +365,14 @@ export class RoomWebSocketGateway {
     if (request.headers.get('upgrade')?.toLowerCase() !== 'websocket') {
       return createRejection(426, 'ROOM_WEBSOCKET_UPGRADE_REQUIRED');
     }
-    if (!hasCanonicalProtocol(request)) {
+    if (!hasValidHandshakeHeaders(request)) {
+      return createRejection(400, 'ROOM_WEBSOCKET_INVALID_HANDSHAKE');
+    }
+    const protocols = parseOfferedProtocols(request);
+    if (!protocols) {
+      return createRejection(400, 'ROOM_WEBSOCKET_INVALID_PROTOCOL_HEADER');
+    }
+    if (!protocols.has(ARENA_ROOM_WEBSOCKET_PROTOCOL)) {
       return createRejection(426, 'ROOM_WEBSOCKET_PROTOCOL_REQUIRED');
     }
     const origin = request.headers.get('origin');
@@ -382,14 +405,12 @@ export class RoomWebSocketGateway {
       return createRejection(429, 'ROOM_WEBSOCKET_CONNECTION_LIMIT');
     }
 
-    const reservation: PendingReservation = {
+    const reservation: RoomWebSocketReservation = {
+      [ROOM_WEBSOCKET_GRANT_STATE]: { claimed: false },
       createdAt: this.currentTime(),
-      id: Symbol('room-websocket-reservation'),
       roomId: authorization.roomId,
       userId: authorization.userId,
     };
-    this.pending.set(reservation.id, reservation);
-    this.incrementOccupancy(reservation.userId);
     return { accepted: true, reservation };
   }
 
@@ -399,29 +420,23 @@ export class RoomWebSocketGateway {
       onOpen: (_event, context) => {
         // This gateway is constructed only with the official Node adapter backed by `ws`.
         const socket = context.raw as WebSocket | undefined;
-        if (!socket) {
-          this.releaseReservation(reservation.id);
+        if (!socket) return;
+        const activation = this.activateReservation(reservation, socket);
+        if (!activation.accepted) {
+          socket.close(activation.code, activation.reason);
           return;
         }
-        session = this.activateReservation(reservation, socket);
-        if (!session) {
-          socket.close(
-            CLOSE_SERVICE_RESTART,
-            this.accepting ? 'invalid-reservation' : 'service-restart',
-          );
-        }
+        session = activation.session;
       },
       onMessage: (event) => {
         session?.handleMessage(event.data);
       },
       onClose: () => {
-        if (session) session.cleanup();
-        else this.releaseReservation(reservation.id);
+        session?.cleanup();
       },
       onError: () => {
         // `ws` owns protocol-error close codes (for example 1009 for maxPayload)
         // and follows its error event with close. The close hook performs cleanup.
-        if (!session) this.releaseReservation(reservation.id);
       },
     };
   }
@@ -433,7 +448,6 @@ export class RoomWebSocketGateway {
   shutdown(): Promise<void> {
     if (this.shutdownPromise) return this.shutdownPromise;
     this.stopAccepting();
-    this.clearPendingReservations();
     clearInterval(this.heartbeatInterval);
     for (const session of this.sessions) session.requestShutdown();
     this.shutdownPromise = (async () => {
@@ -455,7 +469,6 @@ export class RoomWebSocketGateway {
   forceClose(): void {
     this.stopAccepting();
     clearInterval(this.heartbeatInterval);
-    this.clearPendingReservations();
     for (const session of [...this.sessions]) session.terminate();
     this.userRates.clear();
   }
@@ -487,18 +500,22 @@ export class RoomWebSocketGateway {
   private activateReservation(
     reservation: RoomWebSocketReservation,
     socket: WebSocket,
-  ): RoomWebSocketSession | undefined {
-    const pending = this.pending.get(reservation.id);
-    if (
-      !this.accepting
-      || !pending
-      || pending !== reservation
-      || this.currentTime() - pending.createdAt >= this.reservationTtlMs
-    ) {
-      this.releaseReservation(reservation.id);
-      return undefined;
+  ): RoomWebSocketActivation {
+    const grantState = reservation[ROOM_WEBSOCKET_GRANT_STATE];
+    if (!grantState || grantState.claimed) {
+      return { accepted: false, code: CLOSE_INVALID_MESSAGE, reason: 'invalid-reservation' };
     }
-    this.pending.delete(reservation.id);
+    grantState.claimed = true;
+    if (!this.accepting) {
+      return { accepted: false, code: CLOSE_SERVICE_RESTART, reason: 'service-restart' };
+    }
+    if (this.currentTime() - reservation.createdAt >= this.reservationTtlMs) {
+      return { accepted: false, code: CLOSE_INVALID_MESSAGE, reason: 'authorization-expired' };
+    }
+    if ((this.userOccupancy.get(reservation.userId) ?? 0) >= this.maxConnectionsPerUser) {
+      return { accepted: false, code: CLOSE_TRY_AGAIN_LATER, reason: 'connection-limit' };
+    }
+    this.incrementOccupancy(reservation.userId);
     const session = new RoomWebSocketSession(
       reservation,
       socket,
@@ -506,16 +523,11 @@ export class RoomWebSocketGateway {
       this.currentTime(),
     );
     this.sessions.add(session);
-    return session;
+    return { accepted: true, session };
   }
 
   private sweep(): void {
     const now = this.currentTime();
-    for (const reservation of this.pending.values()) {
-      if (now - reservation.createdAt >= this.reservationTtlMs) {
-        this.releaseReservation(reservation.id);
-      }
-    }
     for (const session of [...this.sessions]) session.heartbeat(now);
     for (const [userId, rate] of this.userRates) {
       if (
@@ -524,19 +536,6 @@ export class RoomWebSocketGateway {
       ) {
         this.userRates.delete(userId);
       }
-    }
-  }
-
-  private releaseReservation(id: symbol): void {
-    const reservation = this.pending.get(id);
-    if (!reservation) return;
-    this.pending.delete(id);
-    this.decrementOccupancy(reservation.userId);
-  }
-
-  private clearPendingReservations(): void {
-    for (const reservation of [...this.pending.values()]) {
-      this.releaseReservation(reservation.id);
     }
   }
 

@@ -1,4 +1,4 @@
-import type { Server } from 'node:http';
+import { request as httpRequest, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 
 import { createAdaptorServer } from '@hono/node-server';
@@ -134,6 +134,34 @@ const nextClose = (socket: WebSocket): Promise<{ code: number; reason: string }>
   });
 };
 
+const requestRawUpgrade = (
+  runtime: TestRuntime,
+  method: string,
+  secWebSocketKey: string | null = Buffer.alloc(16, 1).toString('base64'),
+): Promise<number | undefined> => {
+  return new Promise((resolve, reject) => {
+    const headers: Record<string, string> = {
+      connection: 'Upgrade',
+      origin: 'https://app.example.com',
+      'sec-websocket-protocol': ARENA_ROOM_WEBSOCKET_PROTOCOL,
+      'sec-websocket-version': '13',
+      upgrade: 'websocket',
+    };
+    if (secWebSocketKey !== null) headers['sec-websocket-key'] = secWebSocketKey;
+    const request = httpRequest(`${runtime.origin}${ARENA_ROOM_WEBSOCKET_PATH}`, {
+      headers,
+      method,
+    });
+    request.once('response', (response) => {
+      response.resume();
+      resolve(response.statusCode);
+    });
+    request.once('upgrade', () => reject(new Error('upgrade unexpectedly succeeded')));
+    request.once('error', reject);
+    request.end();
+  });
+};
+
 describe('Room WebSocket real Node upgrade', () => {
   const runtimes: TestRuntime[] = [];
 
@@ -185,6 +213,36 @@ describe('Room WebSocket real Node upgrade', () => {
     expect(authorize).not.toHaveBeenCalled();
   });
 
+  it('用原始 Node method 在 authorizer 前拒绝 POST upgrade 且不泄漏 cap', async () => {
+    const authorize = vi.fn(async () => acceptedAuthorization);
+    const runtime = await createRuntime({
+      authorize,
+      maxConnectionsPerUser: 1,
+      reservationTtlMs: 60_000,
+    });
+
+    await expect(requestRawUpgrade(runtime, 'POST')).resolves.toBe(405);
+    expect(authorize).not.toHaveBeenCalled();
+
+    await openSocket(runtime);
+    expect(authorize).toHaveBeenCalledOnce();
+  });
+
+  it('malformed handshake 不进入 authorizer、也不留下 pending cap', async () => {
+    const authorize = vi.fn(async () => acceptedAuthorization);
+    const runtime = await createRuntime({
+      authorize,
+      maxConnectionsPerUser: 1,
+      reservationTtlMs: 60_000,
+    });
+
+    await expect(requestRawUpgrade(runtime, 'GET', null)).resolves.toBe(400);
+    expect(authorize).not.toHaveBeenCalled();
+
+    await openSocket(runtime);
+    expect(authorize).toHaveBeenCalledOnce();
+  });
+
   it('未接入 GMR-05 ticket authority 前对所有客户端 fail-closed', async () => {
     const runtime = await createRuntime({
       allowedBrowserOrigins: [],
@@ -220,8 +278,12 @@ describe('Room WebSocket real Node upgrade', () => {
     await expect(floodClosed).resolves.toEqual({ code: 1008, reason: 'rate-limit' });
 
     const capRuntime = await createRuntime({ maxConnectionsPerUser: 1 });
-    await openSocket(capRuntime);
+    const first = await openSocket(capRuntime);
     await expectRejectedUpgrade(capRuntime, 429);
+    const firstClosed = nextClose(first);
+    first.close(1000, 'done');
+    await expect(firstClosed).resolves.toEqual({ code: 1000, reason: 'done' });
+    await openSocket(capRuntime);
   });
 
   it('heartbeat 会终止不回应 pong 的连接', async () => {

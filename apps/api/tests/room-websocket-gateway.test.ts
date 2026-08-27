@@ -74,7 +74,9 @@ const upgradeRequest = (headers: HeadersInit = {}): Request => new Request(
     headers: {
       connection: 'Upgrade',
       origin: 'https://app.example.com',
+      'sec-websocket-key': Buffer.alloc(16, 1).toString('base64'),
       'sec-websocket-protocol': ARENA_ROOM_WEBSOCKET_PROTOCOL,
+      'sec-websocket-version': '13',
       upgrade: 'websocket',
       ...headers,
     },
@@ -162,15 +164,19 @@ describe('RoomWebSocketGateway', () => {
     expect(decision).toMatchObject({ accepted: false, response: { status: 503 } });
   });
 
-  it('pending 与 active 连接共同占用 per-user cap，释放后才可重连', async () => {
+  it('pre-upgrade grant 不占 cap，onOpen 原子限制 active connection', async () => {
     const gateway = createGateway({ maxConnectionsPerUser: 1 });
     const first = await gateway.prepareUpgrade(upgradeRequest());
-    expect(first.accepted).toBe(true);
-
-    const whilePending = await gateway.prepareUpgrade(upgradeRequest());
-    expect(whilePending).toMatchObject({ accepted: false, response: { status: 429 } });
-    if (!first.accepted) throw new Error('expected accepted reservation');
+    const concurrent = await gateway.prepareUpgrade(upgradeRequest());
+    if (!first.accepted || !concurrent.accepted) {
+      throw new Error('expected accepted reservations');
+    }
     const { events, socket } = openReservation(gateway, first.reservation);
+    const rejectedConcurrent = openReservation(gateway, concurrent.reservation);
+    expect(rejectedConcurrent.socket.closes.at(-1)).toEqual({
+      code: 1013,
+      reason: 'connection-limit',
+    });
 
     const whileActive = await gateway.prepareUpgrade(upgradeRequest());
     expect(whileActive).toMatchObject({ accepted: false, response: { status: 429 } });
@@ -181,7 +187,7 @@ describe('RoomWebSocketGateway', () => {
     expect(afterClose.accepted).toBe(true);
   });
 
-  it('用同一 sweep 回收未完成 handshake 的过期 reservation', async () => {
+  it('未完成 handshake 不留 pending state，过期 grant 在 onOpen 拒绝', async () => {
     vi.useFakeTimers();
     const gateway = createGateway({
       heartbeatIntervalMs: 100,
@@ -189,15 +195,33 @@ describe('RoomWebSocketGateway', () => {
       maxConnectionsPerUser: 1,
       reservationTtlMs: 100,
     });
+    const expired = await gateway.prepareUpgrade(upgradeRequest());
+    expect(expired.accepted).toBe(true);
     expect((await gateway.prepareUpgrade(upgradeRequest())).accepted).toBe(true);
-    expect(await gateway.prepareUpgrade(upgradeRequest())).toMatchObject({
-      accepted: false,
-      response: { status: 429 },
-    });
 
     await vi.advanceTimersByTimeAsync(100);
 
+    if (!expired.accepted) throw new Error('expected accepted reservation');
+    const rejected = openReservation(gateway, expired.reservation);
+    expect(rejected.socket.closes.at(-1)).toEqual({
+      code: 1008,
+      reason: 'authorization-expired',
+    });
     expect((await gateway.prepareUpgrade(upgradeRequest())).accepted).toBe(true);
+  });
+
+  it('同一 authorization grant 只能激活一次', async () => {
+    const gateway = createGateway({ maxConnectionsPerUser: 4 });
+    const decision = await gateway.prepareUpgrade(upgradeRequest());
+    if (!decision.accepted) throw new Error('expected accepted reservation');
+
+    openReservation(gateway, decision.reservation);
+    const replayed = openReservation(gateway, decision.reservation);
+
+    expect(replayed.socket.closes.at(-1)).toEqual({
+      code: 1008,
+      reason: 'invalid-reservation',
+    });
   });
 
   it('对合法 resync 请求只返回 state-not-attached 骨架', async () => {
