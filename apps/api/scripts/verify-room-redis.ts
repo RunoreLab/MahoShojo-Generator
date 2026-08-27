@@ -45,6 +45,8 @@ const TIMESTAMP = '2026-08-28T00:00:00.000Z';
 const NEXT_TIMESTAMP = '2026-08-28T00:01:00.000Z';
 const roomId = `room-restart-${token}`;
 const ttlRoomId = `room-ttl-${token}`;
+const epochRoomId = `room-epoch-${token}`;
+const malformedRoomId = `room-malformed-${token}`;
 const roomKey = (id: string): string => (
   `mahoshojo:room:v1:${keyPrefix}:${createHash('sha256').update(id).digest('hex')}:checkpoint`
 );
@@ -125,6 +127,17 @@ const close = (state: ArenaRoomAuthorityState): ArenaRoomAuthorityState => {
   return result.nextState;
 };
 
+const fixedError = async (operation: Promise<unknown>, expectedCode: string): Promise<void> => {
+  try {
+    await operation;
+  } catch (error) {
+    const message = String(error);
+    if (message.includes(expectedCode) && !message.includes('provider-secret-canary')) return;
+    throw new Error('ROOM_REDIS_FIXED_ERROR_FAILED');
+  }
+  throw new Error('ROOM_REDIS_FIXED_ERROR_FAILED');
+};
+
 const reader = new RedisRuntime(redisUrl, true, undefined, undefined, keyPrefix);
 const writer = new RedisRuntime(redisUrl, true, undefined, undefined, keyPrefix);
 const cleanup = createClient({ url: redisUrl });
@@ -178,44 +191,107 @@ try {
         checkpoint: staleClose,
         expected: checkpointPredecessorOf(initial),
       });
-      const nextEpoch = createState(roomId, 'epoch-2');
-      const epochAdvanced = await writerStore.save({
-        checkpoint: nextEpoch,
+      await fixedError(writerStore.save({
+        checkpoint: initial,
         expected: checkpointPredecessorOf(acknowledged),
-      });
+      }), 'REDIS_ROOM_SUCCESSOR_INVALID');
+      await fixedError(writerStore.save({
+        checkpoint: createState(roomId, 'epoch-2'),
+        expected: checkpointPredecessorOf(acknowledged),
+      }), 'REDIS_ROOM_SUCCESSOR_INVALID');
+
+      const currentEpoch = createState(epochRoomId, 'epoch-2');
+      const epochCreated = await writerStore.save({ checkpoint: currentEpoch, expected: null });
+      const oldEpoch = createState(epochRoomId, 'epoch-1');
       const oldEpochOverwrite = await readerStore.save({
-        checkpoint: close(acknowledged),
-        expected: checkpointPredecessorOf(acknowledged),
+        checkpoint: close(oldEpoch),
+        expected: checkpointPredecessorOf(oldEpoch),
       });
       if (
         staleWriter.kind !== 'conflict'
-        || epochAdvanced.kind !== 'saved'
+        || epochCreated.kind !== 'saved'
         || oldEpochOverwrite.kind !== 'conflict'
       ) {
         throw new Error('ROOM_REDIS_CAS_FENCING_FAILED');
       }
 
+      const closed = close(acknowledged);
+      const closedSaved = await writerStore.save({
+        checkpoint: closed,
+        expected: checkpointPredecessorOf(acknowledged),
+      });
+      const terminalTtl = await cleanup.pTTL(roomKey(roomId));
+      if (
+        closedSaved.kind !== 'saved'
+        || terminalTtl <= 0
+        || terminalTtl > 300_000
+      ) {
+        throw new Error('ROOM_REDIS_TERMINAL_TTL_FAILED');
+      }
+
       const expired = await writerStore.expire({
         roomId,
-        expected: checkpointPredecessorOf(nextEpoch),
+        expected: checkpointPredecessorOf(closed),
       });
-      const expiryTtl = await cleanup.pTTL(roomKey(roomId));
+      const firstExpiryTtl = await cleanup.pTTL(roomKey(roomId));
+      const repeatedExpire = await writerStore.expire({
+        roomId,
+        expected: checkpointPredecessorOf(closed),
+      });
+      const repeatedExpiryTtl = await cleanup.pTTL(roomKey(roomId));
+      const resurrectionCandidate = {
+        ...closed,
+        snapshot: {
+          ...closed.snapshot,
+          controlSeq: closed.snapshot.controlSeq + 1,
+        },
+      };
+      const resurrection = await writerStore.save({
+        checkpoint: resurrectionCandidate,
+        expected: checkpointPredecessorOf(closed),
+      });
       const deleted = await writerStore.delete({
         roomId,
-        expected: checkpointPredecessorOf(nextEpoch),
+        expected: checkpointPredecessorOf(closed),
       });
       const repeatedDelete = await writerStore.delete({
         roomId,
-        expected: checkpointPredecessorOf(nextEpoch),
+        expected: checkpointPredecessorOf(closed),
       });
       if (
         expired.kind !== 'expired'
-        || expiryTtl <= 0
-        || expiryTtl > 300_000
+        || repeatedExpire.kind !== 'expired'
+        || firstExpiryTtl <= 0
+        || firstExpiryTtl > 300_000
+        || repeatedExpiryTtl <= 0
+        || repeatedExpiryTtl > firstExpiryTtl
+        || resurrection.kind !== 'conflict'
         || deleted.kind !== 'deleted'
         || repeatedDelete.kind !== 'missing'
       ) {
         throw new Error('ROOM_REDIS_EXPIRY_DELETE_FAILED');
+      }
+
+      const malformedRaw = '{provider-secret-canary';
+      const malformedKey = roomKey(malformedRoomId);
+      const malformedExpected = {
+        ...checkpointPredecessorOf(initial),
+        roomId: malformedRoomId,
+      };
+      await cleanup.set(malformedKey, malformedRaw);
+      await fixedError(writerStore.expire({
+        roomId: malformedRoomId,
+        expected: malformedExpected,
+      }), 'REDIS_ROOM_CHECKPOINT_INVALID');
+      if (await cleanup.get(malformedKey) !== malformedRaw) {
+        throw new Error('ROOM_REDIS_MALFORMED_CHECKPOINT_MUTATED');
+      }
+      await fixedError(writerStore.delete({
+        roomId: malformedRoomId,
+        expected: malformedExpected,
+      }), 'REDIS_ROOM_CHECKPOINT_INVALID');
+      if (await cleanup.get(malformedKey) !== malformedRaw) {
+        throw new Error('ROOM_REDIS_MALFORMED_CHECKPOINT_MUTATED');
       }
 
       const shortTtlStore = createRedisRoomStore({
@@ -243,8 +319,12 @@ try {
         phase: 'full',
         createLoadMutate: true,
         stalePredecessor: true,
+        successorValidation: true,
         oldEpochFence: true,
+        terminalTtl: true,
+        monotonicExpiryFence: true,
         expireDelete: true,
+        malformedExisting: true,
         ttlExpiry: true,
       }));
     }
@@ -254,7 +334,12 @@ try {
   await writer.close();
   if (!cleanup.isOpen) await cleanup.connect();
   if (phase !== 'write') {
-    await cleanup.unlink([roomKey(roomId), roomKey(ttlRoomId)]);
+    await cleanup.unlink([
+      roomKey(roomId),
+      roomKey(ttlRoomId),
+      roomKey(epochRoomId),
+      roomKey(malformedRoomId),
+    ]);
   }
   await cleanup.quit();
 }

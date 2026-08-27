@@ -7,7 +7,6 @@ import {
   type RedisRoomClient,
 } from '#/arena-room/redis-room-store';
 import {
-  ARENA_ROOM_NEXT_TIMESTAMP,
   closeArenaRoomState,
   createArenaRoomState,
   publishArenaRoomState,
@@ -47,6 +46,7 @@ describe('RedisRoomStore', () => {
     expect(serialized).toBeDefined();
     expect(JSON.parse(serialized!)).toMatchObject({
       checkpointVersion: 1,
+      expiryFence: 'active',
       ...checkpointPredecessorOf(state),
       state,
     });
@@ -62,6 +62,35 @@ describe('RedisRoomStore', () => {
       checkpoint: publishArenaRoomState(state),
       expected: checkpointPredecessorOf(state),
     })).resolves.toEqual({ kind: 'conflict' });
+  });
+
+  it('在 Redis I/O 前拒绝 rollback、计数器跳跃和隐式 epoch rollover 候选', async () => {
+    const client = createClient();
+    const store = createRedisRoomStore({ getClient: () => client });
+    const initial = createArenaRoomState();
+    const acknowledged = publishArenaRoomState(initial);
+
+    await expect(store.save({
+      checkpoint: initial,
+      expected: checkpointPredecessorOf(acknowledged),
+    })).rejects.toThrow('REDIS_ROOM_SUCCESSOR_INVALID');
+    await expect(store.save({
+      checkpoint: createArenaRoomState('epoch-2'),
+      expected: checkpointPredecessorOf(acknowledged),
+    })).rejects.toThrow('REDIS_ROOM_SUCCESSOR_INVALID');
+    await expect(store.save({
+      checkpoint: {
+        ...acknowledged,
+        snapshot: {
+          ...acknowledged.snapshot,
+          revision: acknowledged.snapshot.revision + 2,
+          controlSeq: acknowledged.snapshot.controlSeq + 1,
+        },
+      },
+      expected: checkpointPredecessorOf(acknowledged),
+    })).rejects.toThrow('REDIS_ROOM_SUCCESSOR_INVALID');
+
+    expect(client.eval).not.toHaveBeenCalled();
   });
 
   it('closed checkpoint 使用 terminal TTL，且序列化不会修改调用方 state', async () => {
@@ -91,16 +120,25 @@ describe('RedisRoomStore', () => {
     const state = createArenaRoomState();
     const envelope = JSON.stringify({
       checkpointVersion: 1,
+      expiryFence: 'active',
+      ...checkpointPredecessorOf(state),
+      state,
+    });
+    const expiringEnvelope = JSON.stringify({
+      checkpointVersion: 1,
+      expiryFence: 'expiring',
       ...checkpointPredecessorOf(state),
       state,
     });
     vi.mocked(client.get)
       .mockResolvedValueOnce(envelope)
+      .mockResolvedValueOnce(expiringEnvelope)
       .mockResolvedValueOnce('{not-json')
       .mockResolvedValueOnce(envelope);
     const store = createRedisRoomStore({ getClient: () => client });
 
     await expect(store.load('room-1')).resolves.toEqual(state);
+    await expect(store.load('room-1')).resolves.toBeNull();
     await expect(store.load('room-1')).rejects.toThrow('REDIS_ROOM_CHECKPOINT_INVALID');
     await expect(store.load('room-other')).rejects.toThrow('REDIS_ROOM_CHECKPOINT_INVALID');
   });
@@ -155,7 +193,7 @@ describe('RedisRoomStore', () => {
       .resolves.toEqual(expected);
   });
 
-  it('expire 在同一 Lua fence 后设置 terminal TTL', async () => {
+  it('expire 安装不可复活 fence，且重复执行只会单调缩短 TTL', async () => {
     const client = createClient();
     vi.mocked(client.eval).mockResolvedValue('expired');
     const store = createRedisRoomStore({ getClient: () => client, terminalTtlSeconds: 60 });
@@ -165,7 +203,10 @@ describe('RedisRoomStore', () => {
       .resolves.toEqual({ kind: 'expired' });
     const [script, options] = vi.mocked(client.eval).mock.calls[0]!;
     expect(script).toContain('ROOM_CHECKPOINT_EXPIRE_V1');
-    expect(script).toContain("redis.call('PEXPIRE', KEYS[1], ARGV[6])");
+    expect(script).toContain("current.expiryFence = 'expiring'");
+    expect(script).toContain("redis.call('PTTL', KEYS[1])");
+    expect(script).toContain('if currentTtl > 0 and currentTtl < targetTtl then');
+    expect(script).toContain("redis.call('SET', KEYS[1], cjson.encode(current), 'PX', targetTtl)");
     expect(options.arguments.at(-1)).toBe('60000');
   });
 
@@ -210,17 +251,13 @@ describe('RedisRoomStore', () => {
     const restartedProcess = createRedisRoomStore({ getClient: () => durableClient });
     await expect(restartedProcess.load('room-1')).resolves.toEqual(acknowledged);
 
+    values.clear();
     const nextEpoch = createArenaRoomState('epoch-2');
-    expect(await restartedProcess.save({
-      checkpoint: nextEpoch,
-      expected: checkpointPredecessorOf(acknowledged),
-    })).toEqual({ kind: 'saved' });
+    expect(await restartedProcess.save({ checkpoint: nextEpoch, expected: null }))
+      .toEqual({ kind: 'saved' });
     expect(await firstProcess.save({
-      checkpoint: {
-        ...acknowledged,
-        lifecycle: { ...acknowledged.lifecycle, updatedAt: ARENA_ROOM_NEXT_TIMESTAMP },
-      },
-      expected: checkpointPredecessorOf(acknowledged),
+      checkpoint: closeArenaRoomState(initial),
+      expected: checkpointPredecessorOf(initial),
     })).toEqual({ kind: 'conflict' });
     await expect(restartedProcess.load('room-1')).resolves.toEqual(nextEpoch);
   });
