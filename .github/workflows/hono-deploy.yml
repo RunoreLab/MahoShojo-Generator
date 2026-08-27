@@ -134,6 +134,7 @@ jobs:
           fi
 
           pnpm --filter @mahoshojo/api run verify:arena-redis
+          pnpm --filter @mahoshojo/api run verify:room-redis
           REDIS_URL=redis://127.0.0.1:6379/15 pnpm run verify:hosted-dr:redis
           pnpm run verify:server:runtime
 
