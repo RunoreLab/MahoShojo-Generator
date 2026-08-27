@@ -72,7 +72,10 @@ const createNextConfig = (phase: string): NextConfig => {
 
     // 其他配置
     typescript: {
-      ignoreBuildErrors: false,
+      // package build scripts run the fail-closed production tsc gate first,
+      // keeping the high-memory type checker and Next bundler in separate processes.
+      ignoreBuildErrors: true,
+      tsconfigPath: 'tsconfig.build.json',
     },
   };
 };

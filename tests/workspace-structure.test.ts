@@ -139,6 +139,46 @@ describe('G25D Web workspace app ownership', () => {
     }
   });
 
+  it('keeps production Web type-checking fail-closed without loading test fixtures', () => {
+    const buildTsconfigPath = path.join(appDirectory, 'tsconfig.build.json');
+    expect(existsSync(buildTsconfigPath)).toBe(true);
+    if (!existsSync(buildTsconfigPath)) return;
+
+    const buildTsconfig = JSON.parse(readFileSync(buildTsconfigPath, 'utf8')) as {
+      extends?: string;
+      exclude?: string[];
+    };
+    const appManifest = JSON.parse(readFileSync(appManifestPath, 'utf8')) as {
+      scripts?: Record<string, string>;
+    };
+    const nextConfig = readFileSync(path.join(appDirectory, 'next.config.ts'), 'utf8');
+    const openNextConfig = readFileSync(path.join(appDirectory, 'open-next.config.ts'), 'utf8');
+
+    expect(buildTsconfig.extends).toBe('./tsconfig.json');
+    expect(buildTsconfig.exclude).toEqual(expect.arrayContaining([
+      'node_modules',
+      'scripts',
+      'tests',
+      '.open-next',
+      '.wrangler',
+    ]));
+    expect(nextConfig).toContain("tsconfigPath: 'tsconfig.build.json'");
+    expect(nextConfig).toContain('ignoreBuildErrors: true');
+    expect(appManifest.scripts?.['typecheck:build']).toContain(
+      'tsc --noEmit --pretty false -p tsconfig.build.json',
+    );
+    expect(appManifest.scripts?.['typecheck:build']).toContain(
+      'NODE_OPTIONS=--max-old-space-size=3072',
+    );
+    expect(appManifest.scripts?.['build:next']).toMatch(
+      /^pnpm run clean:next && pnpm run typecheck:build && next build$/,
+    );
+    expect(appManifest.scripts?.build).toContain('pnpm run build:next');
+    expect(appManifest.scripts?.['build:cf']).toContain('opennextjs-cloudflare build');
+    expect(appManifest.scripts?.['build:cf']).not.toContain('--skipNextBuild');
+    expect(openNextConfig).toContain("buildCommand: 'pnpm run build:next'");
+  });
+
   it('owns the effective Web lint policy in a single flat config', async () => {
     const flatConfigPath = path.join(appDirectory, 'eslint.config.mjs');
     const legacyConfigPath = path.join(appDirectory, '.eslintrc.json');
