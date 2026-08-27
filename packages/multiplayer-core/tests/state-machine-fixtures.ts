@@ -3,6 +3,22 @@ import type { ArenaProposalChange } from '@mahoshojo/contracts/arena-room';
 export const TEST_TIMESTAMP = '2026-08-27T16:00:00.000Z';
 export const NEXT_TIMESTAMP = '2026-08-27T16:01:00.000Z';
 
+export const hostAuthority = () => ({
+  kind: 'authenticated-user' as const,
+  actorUserId: 'host-1',
+  accountUserId: 101,
+});
+
+export const memberAuthority = () => ({
+  kind: 'authenticated-user' as const,
+  actorUserId: 'member-1',
+  accountUserId: 202,
+});
+
+export const generationPublisherAuthority = () => ({
+  kind: 'generation-publisher' as const,
+});
+
 export const historySettings = () => ({
   readArenaHistory: true,
   readArenaHistoryLimit: 3,
@@ -50,7 +66,6 @@ export const createRoomCommand = () => ({
 
 export const joinMemberCommand = () => ({
   type: 'join-member' as const,
-  actorUserId: 'member-1',
   expectedRoomEpoch: 'epoch-1',
   member: {
     userId: 'member-1',

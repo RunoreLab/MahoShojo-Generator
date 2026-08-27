@@ -8,7 +8,7 @@ import {
   parseArenaRoomAuthorityState,
   transitionArenaRoom,
 } from '../src/index';
-import { TEST_TIMESTAMP, createRoomCommand } from './state-machine-fixtures';
+import { TEST_TIMESTAMP, createRoomCommand, hostAuthority } from './state-machine-fixtures';
 
 const fixtureDirectory = fileURLToPath(new URL('../../contracts/tests/fixtures', import.meta.url));
 const sourceDirectory = fileURLToPath(new URL('../src', import.meta.url));
@@ -30,9 +30,37 @@ describe('Arena Room state-machine compatibility and portability', () => {
       },
       snapshot,
     });
+    const currentSnapshot = current as { members: Array<Record<string, unknown>> };
+    const currentAuthority = {
+      ...wrap(current),
+      memberAuthority: currentSnapshot.members.map((member, index) => ({
+        accountUserId: 101 + index,
+        member,
+      })),
+    };
 
-    expect(parseArenaRoomAuthorityState(wrap(current))).toMatchObject({
+    const parsedCurrent = parseArenaRoomAuthorityState(currentAuthority);
+    expect(parsedCurrent).toMatchObject({
       snapshot: { protocolVersion: 1, schemaVersion: 1, revision: 7 },
+    });
+    const transitioned = transitionArenaRoom(parsedCurrent, {
+      type: 'publish-config',
+      expectedRoomEpoch: 'epoch_01JARENA',
+      expectedRevision: 7,
+      sharedConfig: {
+        ...parsedCurrent.snapshot.sharedConfig,
+        userGuidance: 'current fixture transition',
+      },
+      timestamp: '2026-08-27T16:10:00.000Z',
+    }, {
+      kind: 'authenticated-user',
+      actorUserId: 'user-host',
+      accountUserId: 101,
+    });
+    expect(transitioned).toMatchObject({
+      ok: true,
+      nextState: { snapshot: { revision: 8 } },
+      events: [{ type: 'room.config.updated', controlSeq: 25 }],
     });
     expect(() => parseArenaRoomAuthorityState(wrap(old))).toThrowError(
       expect.objectContaining({ code: 'invalid-input' }),
@@ -70,8 +98,28 @@ describe('Arena Room state-machine compatibility and portability', () => {
       lifecycle: { status: 'open', createdAt: TEST_TIMESTAMP, updatedAt: TEST_TIMESTAMP },
       snapshot: { protocolVersion: 1, apiKey: secret },
     };
-    const result = transitionArenaRoom(invalidState, createRoomCommand());
+    const result = transitionArenaRoom(invalidState, createRoomCommand(), hostAuthority());
     expect(result).toMatchObject({ ok: false, code: 'validation-failed', reason: 'invalid-state' });
     expect(JSON.stringify(result)).not.toContain(secret);
+
+    const created = transitionArenaRoom(null, createRoomCommand(), hostAuthority());
+    expect(created.ok).toBe(true);
+    if (!created.ok) throw new Error('expected room creation');
+    const invalidAuthority = transitionArenaRoom(created.nextState, {
+      type: 'publish-config',
+      expectedRoomEpoch: 'epoch-1',
+      expectedRevision: 0,
+      sharedConfig: created.nextState.snapshot.sharedConfig,
+      timestamp: TEST_TIMESTAMP,
+    }, {
+      ...hostAuthority(),
+      apiKey: secret,
+    });
+    expect(invalidAuthority).toMatchObject({
+      ok: false,
+      code: 'forbidden',
+      reason: 'invalid-authority-context',
+    });
+    expect(JSON.stringify(invalidAuthority)).not.toContain(secret);
   });
 });
