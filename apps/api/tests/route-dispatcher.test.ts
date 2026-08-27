@@ -80,6 +80,7 @@ describe('Hono route dispatcher', () => {
     const response = await app.request('/api/read-only', { method: 'POST' });
     expect(response.status).toBe(405);
     expect(response.headers.get('allow')).toBe('GET');
+    expect(await response.json()).toEqual({ error: 'Method not allowed' });
   });
 
   it('manifest method whitelist 优先于 adapter 意外导出的 handler', async () => {
@@ -103,6 +104,7 @@ describe('Hono route dispatcher', () => {
     const response = await app.request('/api/write-only');
     expect(response.status).toBe(405);
     expect(response.headers.get('allow')).toBe('POST');
+    expect(await response.json()).toEqual({ error: 'Method not allowed' });
     expect(loaded).toBe(false);
   });
 });

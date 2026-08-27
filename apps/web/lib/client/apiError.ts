@@ -1,5 +1,26 @@
 const safeString = (value: unknown): string => (typeof value === 'string' ? value : '');
 
+export const INFRASTRUCTURE_ERROR_MESSAGES = {
+  RATE_LIMIT_UNAVAILABLE: '限速服务暂时不可用，请稍后重试。',
+  HOSTED_DR_CAPABILITY_UNAVAILABLE: '备用生成服务暂时不可用，请稍后重试。',
+  ARENA_GENERATION_CAPABILITY_UNAVAILABLE: '战报生成服务暂时不可用，请稍后重试。',
+  GENERATION_RESERVATION_UNAVAILABLE: '暂时无法确认战报生成状态，请稍后重试；请勿重复提交同一场生成。',
+  GENERATION_STATE_UNAVAILABLE: '暂时无法确认战报生成状态，请稍后重试；请勿重复提交同一场生成。',
+  GENERATION_TERMINAL_LOOKUP_UNAVAILABLE: '暂时无法确认战报生成状态，请稍后重试；请勿重复提交同一场生成。',
+  GENERATION_PREPARATION_UNAVAILABLE: '暂时无法确认战报生成状态，请稍后重试；请勿重复提交同一场生成。',
+  GENERATION_OWNERSHIP_UNAVAILABLE: '暂时无法确认战报生成状态，请稍后重试；请勿重复提交同一场生成。',
+  GENERATION_TERMINAL_CONTENT_UNAVAILABLE: '战报已结束，但正文暂时不可读取，请稍后查看。',
+  HOSTED_GENERATION_FAILED: '生成服务暂时不可用，请稍后重试。',
+  INTERNAL_SERVER_ERROR: '服务器内部错误，请稍后重试。',
+} as const;
+
+const resolveInfrastructureErrorMessage = (code: unknown): string => {
+  if (typeof code !== 'string') return '';
+  return Object.prototype.hasOwnProperty.call(INFRASTRUCTURE_ERROR_MESSAGES, code)
+    ? INFRASTRUCTURE_ERROR_MESSAGES[code as keyof typeof INFRASTRUCTURE_ERROR_MESSAGES]
+    : '';
+};
+
 const normalizeText = (value: string): string => value.trim().replace(/\s+/g, ' ');
 
 const looksLikeHtml = (value: string): boolean => {
@@ -50,6 +71,8 @@ export const resolveApiErrorMessage = (params: { payload: unknown; fallback: str
   if (typeof payload !== 'object') return fallback;
 
   const record = payload as Record<string, unknown>;
+  const infrastructureMessage = resolveInfrastructureErrorMessage(record.code);
+  if (infrastructureMessage) return infrastructureMessage;
   const errorText = normalizeText(extractNestedErrorText(record.error));
   const messageText = normalizeText(safeString(record.message));
   const detailsText = normalizeText(safeString(record.details));

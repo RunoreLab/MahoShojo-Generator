@@ -36,7 +36,6 @@ export const dispatchRoute = async (
     return context.json(
       {
         error: 'Method not allowed',
-        code: 'METHOD_NOT_ALLOWED',
       },
       405,
       {
@@ -51,7 +50,6 @@ export const dispatchRoute = async (
     return context.json(
       {
         error: 'Method not allowed',
-        code: 'METHOD_NOT_ALLOWED',
       },
       405,
       {

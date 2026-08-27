@@ -1,0 +1,157 @@
+{
+  "schemaVersion": 1,
+  "baseline": {
+    "ref": "feature/v0.2.0_Battle_Growth_MahoShojo",
+    "commit": "b9fed72f52b3edf5feddc7ddb8552daf4a3ec704"
+  },
+  "defaultRouteIds": [
+    "arena/generate",
+    "arena/generate-stream",
+    "arena/session/generate-next",
+    "creator/generate",
+    "creator/generate-stream",
+    "generate-battle-story",
+    "generate-canshou",
+    "generate-canshou-stream",
+    "generate-free",
+    "generate-free-stream",
+    "generate-game-card",
+    "generate-magical-girl",
+    "generate-magical-girl-details",
+    "generate-magical-girl-details-stream",
+    "generate-scenario",
+    "generate-scenario-stream",
+    "generate-sublimation",
+    "generate-sublimation-stream",
+    "magic-tavern/generate-choices",
+    "magic-tavern/generate-stream",
+    "magic-tea-party/generate-choices",
+    "magic-tea-party/generate-stream",
+    "magic-tea-party/generate-updates",
+    "me/battle-reports/[generationId]/regenerate"
+  ],
+  "sharedWithDefaultRouteIds": [
+    "arena/generate",
+    "arena/generate-stream",
+    "arena/session/generate-next",
+    "creator/generate",
+    "creator/generate-stream",
+    "generate-battle-story",
+    "generate-canshou",
+    "generate-canshou-stream",
+    "generate-free",
+    "generate-free-stream",
+    "generate-game-card",
+    "generate-magical-girl",
+    "generate-magical-girl-details",
+    "generate-magical-girl-details-stream",
+    "generate-scenario",
+    "generate-scenario-stream",
+    "generate-sublimation",
+    "generate-sublimation-stream"
+  ],
+  "refactorOnlySharedRouteIds": [
+    "arena/generation-requests/[generationRequestId]",
+    "arena/generations/[generationId]",
+    "arena/generations/[generationId]/cancel",
+    "arena/generations/[generationId]/stream",
+    "hosted/dr-readiness"
+  ],
+  "exitedRoutes": [
+    {
+      "id": "magic-tavern/generate-choices",
+      "files": [
+        { "path": "apps/web/app/api/magic-tavern/generate-choices/handler.ts", "sha256": "0b82ff4d27ad87a60cf3a581bf38b076dcade65dc4c746ffc6318153ee31a7d4" },
+        { "path": "apps/web/app/api/magic-tavern/generate-choices/route.ts", "sha256": "9406f3e016d9a1a161d1dd28f9e003412ce75bc71cefd3510036e734a3f0c436" }
+      ]
+    },
+    {
+      "id": "magic-tavern/generate-stream",
+      "files": [
+        { "path": "apps/web/app/api/magic-tavern/generate-stream/handler.ts", "sha256": "0e81cf483076589b2b12a281c60b87ad1b15bde96bb119c34b9ee313106c5c40" },
+        { "path": "apps/web/app/api/magic-tavern/generate-stream/route.ts", "sha256": "9406f3e016d9a1a161d1dd28f9e003412ce75bc71cefd3510036e734a3f0c436" }
+      ]
+    },
+    {
+      "id": "magic-tea-party/generate-choices",
+      "files": [
+        { "path": "apps/web/app/api/magic-tea-party/generate-choices/handler.ts", "sha256": "3885de60748d0a2418064b8b916e59cfa0528780f1cad0dbd642205ced78f090" },
+        { "path": "apps/web/app/api/magic-tea-party/generate-choices/route.ts", "sha256": "9406f3e016d9a1a161d1dd28f9e003412ce75bc71cefd3510036e734a3f0c436" }
+      ]
+    },
+    {
+      "id": "magic-tea-party/generate-stream",
+      "files": [
+        { "path": "apps/web/app/api/magic-tea-party/generate-stream/handler.ts", "sha256": "5788af326994a5bc546d55d6f5af8ecf61df3166752fc2ad49dc340bbbfc4b43" },
+        { "path": "apps/web/app/api/magic-tea-party/generate-stream/route.ts", "sha256": "9406f3e016d9a1a161d1dd28f9e003412ce75bc71cefd3510036e734a3f0c436" }
+      ]
+    },
+    {
+      "id": "magic-tea-party/generate-updates",
+      "files": [
+        { "path": "apps/web/app/api/magic-tea-party/generate-updates/handler.ts", "sha256": "a5d5e0b83391ab9a02ade83637c3ccaf2cfbb0640e02e2637e025530064ec23d" },
+        { "path": "apps/web/app/api/magic-tea-party/generate-updates/route.ts", "sha256": "9406f3e016d9a1a161d1dd28f9e003412ce75bc71cefd3510036e734a3f0c436" }
+      ]
+    },
+    {
+      "id": "me/battle-reports/[generationId]/regenerate",
+      "files": [
+        { "path": "apps/web/app/api/me/battle-reports/[generationId]/regenerate/handler.ts", "sha256": "db8ded819b5814f22974253dc09b7b9c361f06f4235decafed9147067f496bec" },
+        { "path": "apps/web/app/api/me/battle-reports/[generationId]/regenerate/route.ts", "sha256": "9406f3e016d9a1a161d1dd28f9e003412ce75bc71cefd3510036e734a3f0c436" }
+      ]
+    }
+  ],
+  "allowedDifferences": [
+    {
+      "id": "method-not-allowed-allow-header",
+      "scope": "sharedWithDefaultRouteIds",
+      "rule": "405 response body remains the default {error} wire; an RFC-compliant Allow header is additive"
+    }
+  ],
+  "intentionalChanges": [
+    {
+      "id": "arena-fetch-sse-only",
+      "decision": "plain-stream-retired",
+      "authority": "docs/specs/2026-08-25_111500_Hosted长生成断网可恢复流实施规格.md"
+    },
+    {
+      "id": "arena-resumable-generation",
+      "decision": "network-disconnect-is-not-cancel-user-cancel-requires-server-confirmation-and-arena-generate-stream-adds-delete",
+      "authority": "docs/specs/2026-08-25_111500_Hosted长生成断网可恢复流实施规格.md"
+    },
+    {
+      "id": "safe-provider-public-error",
+      "decision": "provider-message-is-visible-after-secret-and-request-metadata-redaction"
+    },
+    {
+      "id": "arena-transient-public-error",
+      "decision": "redis-replay-may-carry-the-safe-message-but-durable-d1-r2-fallback-degrades-to-stable-code-and-generic-copy"
+    }
+  ],
+  "infrastructureMessages": {
+    "RATE_LIMIT_UNAVAILABLE": "限速服务暂时不可用，请稍后重试。",
+    "HOSTED_DR_CAPABILITY_UNAVAILABLE": "备用生成服务暂时不可用，请稍后重试。",
+    "ARENA_GENERATION_CAPABILITY_UNAVAILABLE": "战报生成服务暂时不可用，请稍后重试。",
+    "GENERATION_RESERVATION_UNAVAILABLE": "暂时无法确认战报生成状态，请稍后重试；请勿重复提交同一场生成。",
+    "GENERATION_STATE_UNAVAILABLE": "暂时无法确认战报生成状态，请稍后重试；请勿重复提交同一场生成。",
+    "GENERATION_TERMINAL_LOOKUP_UNAVAILABLE": "暂时无法确认战报生成状态，请稍后重试；请勿重复提交同一场生成。",
+    "GENERATION_PREPARATION_UNAVAILABLE": "暂时无法确认战报生成状态，请稍后重试；请勿重复提交同一场生成。",
+    "GENERATION_OWNERSHIP_UNAVAILABLE": "暂时无法确认战报生成状态，请稍后重试；请勿重复提交同一场生成。",
+    "GENERATION_TERMINAL_CONTENT_UNAVAILABLE": "战报已结束，但正文暂时不可读取，请稍后查看。",
+    "HOSTED_GENERATION_FAILED": "生成服务暂时不可用，请稍后重试。",
+    "INTERNAL_SERVER_ERROR": "服务器内部错误，请稍后重试。"
+  },
+  "requiredEvidenceTests": [
+    "apps/api/tests/user-visible-contract.test.ts",
+    "apps/api/tests/regular-generation-hono-success.test.ts",
+    "apps/api/tests/regular-generation-adapters.test.ts",
+    "apps/api/tests/hosted-dr-fault-matrix.test.ts",
+    "apps/web/tests/api-error-message.test.ts",
+    "apps/web/tests/arena-generation-fault-injection.test.ts",
+    "apps/web/tests/resumable-arena-generation-client.test.ts",
+    "packages/hosted-api/tests/public-ai-error.test.ts",
+    "packages/hosted-api/tests/regular-generation.test.ts",
+    "packages/hosted-api/tests/arena-generation-service.test.ts",
+    "apps/web/tests/ai-error-extraction.test.ts"
+  ]
+}

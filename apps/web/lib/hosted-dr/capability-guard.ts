@@ -78,7 +78,6 @@ const unavailableResponse = (): Response => new Response(JSON.stringify({
 });
 
 const methodNotAllowedResponse = (allow: string[]): Response => new Response(JSON.stringify({
-  code: 'METHOD_NOT_ALLOWED',
   error: 'Method not allowed',
 }), {
   status: 405,

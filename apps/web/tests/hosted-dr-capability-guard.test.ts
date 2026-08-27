@@ -175,6 +175,8 @@ describe('Next production DR capability guard', () => {
       { method: 'GET' },
     ));
     expect(methodResponse.status).toBe(405);
+    expect(methodResponse.headers.get('allow')).toBe('POST');
+    expect(await methodResponse.json()).toEqual({ error: 'Method not allowed' });
     expect(handler).not.toHaveBeenCalled();
 
     const local = withNextDrCapability('generate-free', handler, {

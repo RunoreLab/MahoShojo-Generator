@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest';
 
 import { resolveApiErrorMessage } from '@/lib/client/apiError';
+import userVisibleContracts from '../../../config/user-visible-contracts.json';
 
 describe('resolveApiErrorMessage', () => {
   test('prefer payload.message over generic payload.error', () => {
@@ -38,5 +39,28 @@ describe('resolveApiErrorMessage', () => {
       }),
     ).toBe('上游返回错误\n详情：request id: 20260101...');
   });
-});
 
+  test.each(Object.entries(userVisibleContracts.infrastructureMessages))(
+    'projects stable user copy for infrastructure code %s',
+    (code, expectedMessage) => {
+      expect(
+        resolveApiErrorMessage({
+          payload: { code, error: 'internal implementation detail' },
+          fallback: '请求失败',
+        }),
+      ).toBe(expectedMessage);
+    },
+  );
+
+  test('keeps safe Provider diagnostics instead of replacing AI upstream messages', () => {
+    expect(
+      resolveApiErrorMessage({
+        payload: {
+          code: 'AI_UPSTREAM_REQUEST_FAILED',
+          error: '余额不足，请充值后重试',
+        },
+        fallback: '请求失败',
+      }),
+    ).toBe('余额不足，请充值后重试');
+  });
+});

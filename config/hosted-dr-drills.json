@@ -23,7 +23,7 @@
     },
     {
       "id": "G25E2-REDIS-UNAVAILABLE",
-      "acceptance": ["DR-006", "ACCEPT-014"],
+      "acceptance": ["DR-006"],
       "fault": "redis-unavailable",
       "scope": ["api/health", "arena/generate-stream"],
       "status": "verified",
@@ -35,7 +35,7 @@
     },
     {
       "id": "G25E2-REDIS-EMPTY",
-      "acceptance": ["DR-005", "DR-006", "ACCEPT-014"],
+      "acceptance": ["DR-005", "DR-006"],
       "fault": "redis-empty",
       "scope": ["arena/generate-stream", "hosted-runtime/data-authority"],
       "status": "verified",
