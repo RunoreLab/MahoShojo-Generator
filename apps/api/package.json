@@ -22,15 +22,18 @@
   },
   "dependencies": {
     "@hono/node-server": "^2.1.1",
+    "@mahoshojo/contracts": "workspace:*",
     "@mahoshojo/hosted-api": "workspace:*",
     "@mahoshojo/hosted-runtime": "workspace:*",
     "@mahoshojo/multiplayer-core": "workspace:*",
     "dotenv": "^17.4.2",
     "hono": "^4.13.3",
-    "redis": "^6.2.1"
+    "redis": "^6.2.1",
+    "ws": "^8.21.3"
   },
   "devDependencies": {
     "@types/node": "^20",
+    "@types/ws": "^8.18.1",
     "@typescript-eslint/parser": "^8.50.0",
     "esbuild": "^0.28.1",
     "eslint": "^9",
