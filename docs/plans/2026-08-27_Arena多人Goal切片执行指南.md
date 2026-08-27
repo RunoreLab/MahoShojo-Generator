@@ -94,8 +94,8 @@ read authority / current state
 | Goal | 状态 | 依赖 | 主要结果 | 硬停止 |
 | --- | --- | --- | --- | --- |
 | `GMR-00` 文档 re-baseline | `DONE` | 无 | 双门禁、Hono+Redis 架构、Goal 指南一致 | 无 |
-| `GMR-01` runtime-neutral state machine | `READY` | GMR-00 | pure transition + epoch/revision fixture | 不引入 Hono/Redis |
-| `GMR-02` Redis conditional checkpoint | `BLOCKED` | GMR-01 | CAS checkpoint + TTL + fail-closed | 不做 WSS/UI |
+| `GMR-01` runtime-neutral state machine | `DONE` | GMR-00 | pure transition + epoch/revision fixture | 不引入 Hono/Redis |
+| `GMR-02` Redis conditional checkpoint | `READY` | GMR-01 | CAS checkpoint + TTL + fail-closed | 不做 WSS/UI |
 | `GMR-03` single-writer RoomActor | `BLOCKED` | GMR-02 | actor registry/queue/recovery/shutdown | 不做 multi-instance |
 | `GMR-04` Node WSS security skeleton | `BLOCKED` | GMR-03 | Node WS bootstrap + upgrade/security/backpressure | 不做产品 UI |
 | `GMR-05` ticket/membership/reconnect/lifecycle | `BLOCKED` | GMR-04 | membership/connection/epoch recovery | 不做 generation fan-out |
@@ -169,6 +169,16 @@ read authority / current state
 - current + new transition/epoch/secret-negative/old-new protocol fixtures 通过；
 - mutation 的 predecessor/next-state 语义可供 Redis adapter 使用；
 - package test/typecheck/lint 和仓库要求的相关 gate 通过。
+
+**Evidence（2026-08-28）**
+
+- Goal ID：`GMR-01`；source SHA：`b8c85ca08ae37f0a917471c335cf16fb033aa288`；
+- changed files：`packages/multiplayer-core` state machine/model/provenance/fixtures/tests、package manifest/lockfile，以及 `ROOMRT-006A` 与对应实施计划边界；
+- validation：multiplayer-core `65/65` tests、typecheck/build、lint、workspace boundary、全 workspace tests/lint/build 与 `git diff --check` 均通过；既有 naming audit `1378` 条维持 report-only，无新增阻断；
+- fault cases：old epoch/revision/control sequence、重复/冲突 replay、terminal regression、伪造/序列化 authority capability、可信时间回填/到期边界、checkpoint sidecar/digest poisoning、aggregate oversize 与配额耗尽 fail closed；
+- public wire/schema change：`no`（新增的是首次持久化前的内部 `authorityStateVersion=1` checkpoint schema）；production action：`no`；
+- independent review：architecture、security/authority、compatibility/replay/data、test adequacy 最终均为 Critical `0` / Important `0` / Minor `0`；
+- open findings：无；next READY Goal：`GMR-02`；完整证据见 [GMR-01 实施与审查整改日志](../logs/2026-08-28_014046_Arena多人GMR-01纯状态机实施与审查整改日志.md)。
 
 ### GMR-02 Redis conditional checkpoint
 
