@@ -22,6 +22,7 @@ import {
   RedisRuntime,
   type RedisRuntimeObserver,
 } from '#/redis/runtime';
+import { createArenaRoomState } from './arena-room-fixtures';
 
 beforeEach(() => {
   vi.restoreAllMocks();
@@ -42,6 +43,8 @@ describe('RedisRuntime shutdown', () => {
     const store = redis.getRoomStore();
 
     await expect(store.load('room-1')).rejects.toThrow('REDIS_ROOM_CHECKPOINT_UNAVAILABLE');
+    await expect(store.save({ checkpoint: createArenaRoomState(), expected: null }))
+      .rejects.toThrow('REDIS_ROOM_CHECKPOINT_UNAVAILABLE');
 
     await redis.connect();
     await expect(store.load('room-1')).resolves.toBeNull();

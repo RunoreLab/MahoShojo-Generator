@@ -1,94 +1,17 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import {
-  checkpointPredecessorOf,
-  transitionArenaRoom,
-  type ArenaRoomAuthorityState,
-} from '@mahoshojo/multiplayer-core';
+import { checkpointPredecessorOf } from '@mahoshojo/multiplayer-core';
 
 import {
   createRedisRoomStore,
   type RedisRoomClient,
 } from '#/arena-room/redis-room-store';
-
-const TIMESTAMP = '2026-08-28T00:00:00.000Z';
-const NEXT_TIMESTAMP = '2026-08-28T00:01:00.000Z';
-
-const sharedConfig = () => ({
-  battleMode: 'classic' as const,
-  combatants: [{
-    key: 'data-card:character-1',
-    ref: { id: 'character-1', kind: 'character' as const, versionToken: 'v1' },
-  }],
-  teams: [],
-  scenario: null,
-  auxScenarios: [],
-  materials: [],
-  userGuidance: '',
-  storyLength: 'standard' as const,
-  customStoryLength: null,
-  selectedLanguage: 'zh-CN',
-  historySettings: {
-    readArenaHistory: true,
-    readArenaHistoryLimit: 3,
-    isArenaHistoryUnlimited: false,
-    writeArenaHistory: true,
-    readCurrentState: true,
-    writeCurrentState: true,
-    readNarrativeHistory: false,
-    readNarrativeHistoryLimit: 10,
-    isNarrativeHistoryUnlimited: false,
-    writeNarrativeHistory: false,
-  },
-});
-
-const hostAuthority = {
-  kind: 'authenticated-user' as const,
-  actorUserId: 'host-1',
-  accountUserId: 101,
-};
-
-const createState = (roomEpoch = 'epoch-1'): ArenaRoomAuthorityState => {
-  const result = transitionArenaRoom(null, {
-    type: 'create',
-    roomId: 'room-1',
-    roomEpoch,
-    host: {
-      userId: 'host-1',
-      role: 'host',
-      displayName: 'Host',
-      membershipState: 'active',
-      joinedAt: TIMESTAMP,
-    },
-    sharedConfig: sharedConfig(),
-    timestamp: TIMESTAMP,
-  }, hostAuthority);
-  if (!result.ok) throw new Error(`${result.code}:${result.reason}`);
-  return result.nextState;
-};
-
-const publish = (state: ArenaRoomAuthorityState): ArenaRoomAuthorityState => {
-  const result = transitionArenaRoom(state, {
-    type: 'publish-config',
-    expectedRoomEpoch: state.snapshot.roomEpoch,
-    expectedRevision: state.snapshot.revision,
-    sharedConfig: { ...state.snapshot.sharedConfig, userGuidance: '已确认写入' },
-    timestamp: NEXT_TIMESTAMP,
-  }, hostAuthority);
-  if (!result.ok) throw new Error(`${result.code}:${result.reason}`);
-  return result.nextState;
-};
-
-const close = (state: ArenaRoomAuthorityState): ArenaRoomAuthorityState => {
-  const result = transitionArenaRoom(state, {
-    type: 'close',
-    expectedRoomEpoch: state.snapshot.roomEpoch,
-    reason: 'test-close',
-    timestamp: NEXT_TIMESTAMP,
-  }, hostAuthority);
-  if (!result.ok) throw new Error(`${result.code}:${result.reason}`);
-  return result.nextState;
-};
+import {
+  ARENA_ROOM_NEXT_TIMESTAMP,
+  closeArenaRoomState,
+  createArenaRoomState,
+  publishArenaRoomState,
+} from './arena-room-fixtures';
 
 const createClient = (): RedisRoomClient => ({
   eval: vi.fn(),
@@ -104,7 +27,7 @@ describe('RedisRoomStore', () => {
       keyPrefix: 'preview',
       activeTtlSeconds: 3_600,
     });
-    const state = createState();
+    const state = createArenaRoomState();
 
     await expect(store.save({ checkpoint: state, expected: null }))
       .resolves.toEqual({ kind: 'saved' });
@@ -133,10 +56,10 @@ describe('RedisRoomStore', () => {
     const client = createClient();
     vi.mocked(client.eval).mockResolvedValue('conflict');
     const store = createRedisRoomStore({ getClient: () => client });
-    const state = createState();
+    const state = createArenaRoomState();
 
     await expect(store.save({
-      checkpoint: publish(state),
+      checkpoint: publishArenaRoomState(state),
       expected: checkpointPredecessorOf(state),
     })).resolves.toEqual({ kind: 'conflict' });
   });
@@ -149,8 +72,8 @@ describe('RedisRoomStore', () => {
       activeTtlSeconds: 3_600,
       terminalTtlSeconds: 45,
     });
-    const initial = createState();
-    const closed = close(initial);
+    const initial = createArenaRoomState();
+    const closed = closeArenaRoomState(initial);
     const before = structuredClone(closed);
 
     await expect(store.save({
@@ -165,7 +88,7 @@ describe('RedisRoomStore', () => {
 
   it('严格 hydrate versioned envelope 并拒绝损坏或 roomId 不匹配的 Redis 数据', async () => {
     const client = createClient();
-    const state = createState();
+    const state = createArenaRoomState();
     const envelope = JSON.stringify({
       checkpointVersion: 1,
       ...checkpointPredecessorOf(state),
@@ -189,7 +112,7 @@ describe('RedisRoomStore', () => {
     }));
     vi.mocked(client.eval).mockResolvedValue('invalid-existing');
     const store = createRedisRoomStore({ getClient: () => client });
-    const state = createState();
+    const state = createArenaRoomState();
 
     const invalidLoad = store.load('room-1');
     await expect(invalidLoad).rejects.toThrow('REDIS_ROOM_CHECKPOINT_INVALID');
@@ -206,10 +129,10 @@ describe('RedisRoomStore', () => {
   it('在 Redis I/O 前拒绝 roomId 不一致的 predecessor', async () => {
     const client = createClient();
     const store = createRedisRoomStore({ getClient: () => client });
-    const state = createState();
+    const state = createArenaRoomState();
 
     await expect(store.save({
-      checkpoint: publish(state),
+      checkpoint: publishArenaRoomState(state),
       expected: { ...checkpointPredecessorOf(state), roomId: 'room-other' },
     })).rejects.toThrow('REDIS_ROOM_PREDECESSOR_INVALID');
     expect(client.eval).not.toHaveBeenCalled();
@@ -226,7 +149,7 @@ describe('RedisRoomStore', () => {
     const client = createClient();
     vi.mocked(client.eval).mockResolvedValue(raw);
     const store = createRedisRoomStore({ getClient: () => client, terminalTtlSeconds: 60 });
-    const predecessor = checkpointPredecessorOf(createState());
+    const predecessor = checkpointPredecessorOf(createArenaRoomState());
 
     await expect(store[operation]({ roomId: 'room-1', expected: predecessor }))
       .resolves.toEqual(expected);
@@ -236,7 +159,7 @@ describe('RedisRoomStore', () => {
     const client = createClient();
     vi.mocked(client.eval).mockResolvedValue('expired');
     const store = createRedisRoomStore({ getClient: () => client, terminalTtlSeconds: 60 });
-    const predecessor = checkpointPredecessorOf(createState());
+    const predecessor = checkpointPredecessorOf(createArenaRoomState());
 
     await expect(store.expire({ roomId: 'room-1', expected: predecessor }))
       .resolves.toEqual({ kind: 'expired' });
@@ -276,8 +199,8 @@ describe('RedisRoomStore', () => {
       }),
     };
     const firstProcess = createRedisRoomStore({ getClient: () => durableClient });
-    const initial = createState();
-    const acknowledged = publish(initial);
+    const initial = createArenaRoomState();
+    const acknowledged = publishArenaRoomState(initial);
     expect(await firstProcess.save({ checkpoint: initial, expected: null })).toEqual({ kind: 'saved' });
     expect(await firstProcess.save({
       checkpoint: acknowledged,
@@ -287,13 +210,16 @@ describe('RedisRoomStore', () => {
     const restartedProcess = createRedisRoomStore({ getClient: () => durableClient });
     await expect(restartedProcess.load('room-1')).resolves.toEqual(acknowledged);
 
-    const nextEpoch = createState('epoch-2');
+    const nextEpoch = createArenaRoomState('epoch-2');
     expect(await restartedProcess.save({
       checkpoint: nextEpoch,
       expected: checkpointPredecessorOf(acknowledged),
     })).toEqual({ kind: 'saved' });
     expect(await firstProcess.save({
-      checkpoint: { ...acknowledged, lifecycle: { ...acknowledged.lifecycle, updatedAt: NEXT_TIMESTAMP } },
+      checkpoint: {
+        ...acknowledged,
+        lifecycle: { ...acknowledged.lifecycle, updatedAt: ARENA_ROOM_NEXT_TIMESTAMP },
+      },
       expected: checkpointPredecessorOf(acknowledged),
     })).toEqual({ kind: 'conflict' });
     await expect(restartedProcess.load('room-1')).resolves.toEqual(nextEpoch);
