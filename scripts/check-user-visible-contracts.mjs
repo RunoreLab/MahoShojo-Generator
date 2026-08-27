@@ -13,14 +13,34 @@ const routeInventory = readJson('config/hono-api-routes.json');
 const hostedDrDrills = readJson('config/hosted-dr-drills.json');
 const capabilities = readJson('config/hosted-dr-capabilities.json');
 const failures = [];
-const canonicalAutomatedCoverage = [
-  'route-inventory-and-method-wire',
-  'family-level-success-and-error-projection',
-  'exited-source-hash-and-basic-error-wire',
-  'arena-service-client-replay-cancel-seams',
-  'provider-public-error-and-secret-canaries',
-  'infrastructure-copy-map',
-];
+const canonicalAutomatedEvidence = Object.freeze({
+  'route-inventory-and-method-wire': [
+    'apps/api/tests/user-visible-contract.test.ts',
+  ],
+  'family-level-success-and-error-projection': [
+    'apps/api/tests/regular-generation-hono-success.test.ts',
+    'apps/api/tests/regular-generation-adapters.test.ts',
+    'packages/hosted-api/tests/regular-generation.test.ts',
+  ],
+  'exited-source-hash-and-basic-error-wire': [
+    'apps/web/tests/exited-api-contract.test.ts',
+  ],
+  'arena-service-client-replay-cancel-seams': [
+    'apps/web/tests/arena-generation-fault-injection.test.ts',
+    'apps/web/tests/resumable-arena-generation-client.test.ts',
+    'packages/hosted-api/tests/arena-generation-service.test.ts',
+  ],
+  'provider-public-error-and-secret-canaries': [
+    'apps/web/tests/ai-error-extraction.test.ts',
+    'packages/hosted-api/tests/public-ai-error.test.ts',
+    'packages/hosted-api/tests/regular-generation.test.ts',
+  ],
+  'infrastructure-copy-map': [
+    'apps/api/tests/hosted-dr-fault-matrix.test.ts',
+    'apps/web/tests/api-error-message.test.ts',
+  ],
+});
+const canonicalAutomatedCoverage = Object.keys(canonicalAutomatedEvidence);
 const canonicalOpenCoverage = [
   'all-18-shared-routes-default-vs-refactor-post-success-and-error-runtime-differential',
   'all-6-exited-routes-auth-success-and-upstream-error-runtime-differential',
@@ -62,6 +82,8 @@ if (
 ) {
   fail('auditCoverage 必须诚实登记为 partial，并列出 automated/open 维度');
 } else {
+  assertUnique(contracts.auditCoverage.automated, 'auditCoverage.automated');
+  assertUnique(contracts.auditCoverage.open, 'auditCoverage.open');
   assertSameSet(
     contracts.auditCoverage.automated,
     canonicalAutomatedCoverage,
@@ -160,6 +182,12 @@ if (!automatedEvidence || typeof automatedEvidence !== 'object' || Array.isArray
       fail(`${dimension}: 必须绑定至少一个 evidence suite`);
       continue;
     }
+    assertUnique(evidencePaths, `${dimension} evidence suites`);
+    assertSameSet(
+      evidencePaths,
+      canonicalAutomatedEvidence[dimension],
+      `${dimension} canonical evidence suites`,
+    );
     for (const evidencePath of evidencePaths) {
       if (!requiredEvidence.has(evidencePath)) {
         fail(`${dimension}: evidence 未登记到 requiredEvidenceTests：${evidencePath}`);
