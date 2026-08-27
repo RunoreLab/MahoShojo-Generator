@@ -6,9 +6,10 @@
 `REDIS_KEY_PREFIX=preview`，不暴露 destructive Redis command；D1、R2 与 authority secret 在 preview
 资源未专用纳管前保持 fail-closed。完整初始化及回滚约束见 `docs/2026-08-26_223558_预览环境自动部署说明.md`。
 
-生产 Hono 使用 D1 Gateway 时，`D1_GATEWAY_URL` 必须是已登记的 HTTPS origin，并且必须出现在
-`D1_GATEWAY_ALLOWED_ORIGINS` 的精确 allowlist 中；服务拒绝带凭据、路径、查询或片段的 Gateway URL。loopback HTTP
-只可在显式 `HOSTED_DR_LOCAL_FAULT_INJECTION=true` 的 local/test fault-injection 中使用，不能作为生产例外。
+生产 Hono 使用 D1 Gateway 时，`D1_GATEWAY_URL` 必须是无凭据、路径、查询或片段的 HTTPS root origin，并要求
+HMAC 或 Bearer transport credential。loopback HTTP 只可在显式 `HOSTED_DR_LOCAL_FAULT_INJECTION=true` 的
+local/test fault-injection 中使用，不能作为生产例外。Gateway URL 与 runtime env 由同一 trust owner 管理，不使用
+同 owner 的重复 origin allowlist 自证安全；需要更强 egress policy 时应由独立 deploy/platform trust owner 提供。
 
 当前实现建立了可并行验证的 Hono Node 服务，不会改变原有 `pnpm dev` 和 Cloudflare Next 部署：
 

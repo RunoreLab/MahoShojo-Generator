@@ -9,7 +9,6 @@ const stubValidBearerProductionEnv = (): void => {
   vi.stubEnv('AI_API_KEY', 'test-ai-key');
   vi.stubEnv('SIGNATURE_SECRET_KEY', 'a'.repeat(32));
   vi.stubEnv('D1_GATEWAY_URL', 'https://d1.example.com');
-  vi.stubEnv('D1_GATEWAY_ALLOWED_ORIGINS', 'https://d1.example.com');
   vi.stubEnv('D1_GATEWAY_HMAC_SECRET', 'b'.repeat(32));
   vi.stubEnv('ARENA_FINALIZATION_URL', 'https://app.example.com');
   vi.stubEnv('ARENA_FINALIZATION_HMAC_SECRET', 'c'.repeat(32));
@@ -89,18 +88,27 @@ describe('Hono server config', () => {
 
   it.each([
     ['明文 URL', 'http://d1.example.com'],
+    ['带凭据 URL', 'https://user:pass@d1.example.com'],
     ['带路径 URL', 'https://d1.example.com/unsafe'],
-    ['未登记 origin', 'https://untrusted-d1.example.com'],
+    ['带 query URL', 'https://d1.example.com?database=production'],
+    ['带 fragment URL', 'https://d1.example.com#unsafe'],
   ])('生产模式拒绝不受信任的 D1 Gateway URL：%s', (_label, value) => {
     stubValidBearerProductionEnv();
     vi.stubEnv('D1_GATEWAY_URL', value);
-    expect(() => readHonoServerConfig()).toThrow(/D1_GATEWAY_URL.*(?:trusted|HTTPS|登记)/);
+    expect(() => readHonoServerConfig()).toThrow(/D1_GATEWAY_URL/);
+  });
+
+  it('生产模式要求 D1 Gateway transport credential', () => {
+    stubValidBearerProductionEnv();
+    vi.stubEnv('D1_GATEWAY_HMAC_SECRET', '');
+    vi.stubEnv('D1_GATEWAY_TOKEN', '');
+
+    expect(() => readHonoServerConfig()).toThrow(/D1 Gateway.*HMAC_SECRET.*TOKEN/);
   });
 
   it('仅允许显式 local fault-injection 使用 loopback 明文 Gateway', () => {
     stubValidBearerProductionEnv();
     vi.stubEnv('D1_GATEWAY_URL', 'http://127.0.0.1:8788');
-    vi.stubEnv('D1_GATEWAY_ALLOWED_ORIGINS', '');
     vi.stubEnv('HOSTED_DR_LOCAL_FAULT_INJECTION', 'true');
 
     expect(readHonoServerConfig().nodeEnv).toBe('production');

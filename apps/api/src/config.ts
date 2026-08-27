@@ -4,6 +4,7 @@ import {
   type HonoAuthMode,
 } from '#/auth/config';
 import { parseAIProvidersFromEnv } from '@mahoshojo/hosted-runtime/node-runtime/providers';
+import { parseTrustedD1GatewayOrigin } from '@mahoshojo/hosted-runtime/node-runtime/d1-client';
 import {
   evaluateHostedDrVersionGate,
   hasValidHostedApiProductionCorsOrigins,
@@ -46,31 +47,6 @@ const parseTrustedHttpsOrigin = (value: string | undefined): string | null => {
 const isTrustedHttpsOrigin = (value: string | undefined): boolean =>
   parseTrustedHttpsOrigin(value) !== null;
 
-const isLocalFaultInjectionGateway = (
-  value: string | undefined,
-  env: NodeJS.ProcessEnv,
-): boolean => {
-  if (env.HOSTED_DR_LOCAL_FAULT_INJECTION?.trim().toLowerCase() !== 'true') return false;
-  try {
-    const url = new URL(value ?? '');
-    return url.protocol === 'http:'
-      && ['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname)
-      && !url.username
-      && !url.password
-      && url.pathname === '/'
-      && !url.search
-      && !url.hash;
-  } catch {
-    return false;
-  }
-};
-
-const readConfiguredOrigins = (value: string | undefined): string[] =>
-  (value ?? '')
-    .split(',')
-    .map((origin) => origin.trim())
-    .filter(Boolean);
-
 const hasValidAiProviderConfig = (env: NodeJS.ProcessEnv): boolean =>
   parseAIProvidersFromEnv(env).length > 0;
 
@@ -112,26 +88,12 @@ const validateProductionEnvironment = (
 
   const gatewayUrl = env.D1_GATEWAY_URL?.trim();
   if (gatewayUrl) {
-    const gatewayOrigin = parseTrustedHttpsOrigin(gatewayUrl);
-    const localFaultInjectionGateway = isLocalFaultInjectionGateway(gatewayUrl, env);
-    if (!gatewayOrigin && !localFaultInjectionGateway) {
-      problems.push('D1_GATEWAY_URL 必须是已登记、无凭据、路径、查询与片段的 HTTPS origin');
-    }
-    const allowedGatewayOrigins = readConfiguredOrigins(env.D1_GATEWAY_ALLOWED_ORIGINS);
-    const invalidAllowedGatewayOrigins = allowedGatewayOrigins.filter(
-      (origin) => parseTrustedHttpsOrigin(origin) === null,
-    );
-    if (invalidAllowedGatewayOrigins.length > 0) {
-      problems.push('D1_GATEWAY_ALLOWED_ORIGINS 只能包含无凭据、路径、查询与片段的 HTTPS origin');
-    }
-    const canonicalAllowedGatewayOrigins = new Set(
-      allowedGatewayOrigins
-        .map((origin) => parseTrustedHttpsOrigin(origin))
-        .filter((origin): origin is string => origin !== null),
-    );
-    if (!localFaultInjectionGateway
-      && (!gatewayOrigin || !canonicalAllowedGatewayOrigins.has(gatewayOrigin))) {
-      problems.push('D1_GATEWAY_URL 必须匹配 D1_GATEWAY_ALLOWED_ORIGINS 中的已登记 origin');
+    const gatewayOrigin = parseTrustedD1GatewayOrigin(gatewayUrl, {
+      allowHttpLoopback:
+        env.HOSTED_DR_LOCAL_FAULT_INJECTION?.trim().toLowerCase() === 'true',
+    });
+    if (!gatewayOrigin) {
+      problems.push('D1_GATEWAY_URL 必须是无凭据、路径、查询与片段的 HTTPS root origin');
     }
     const gatewaySecret = env.D1_GATEWAY_HMAC_SECRET?.trim();
     const gatewayToken = env.D1_GATEWAY_TOKEN?.trim();
