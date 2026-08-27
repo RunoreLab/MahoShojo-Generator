@@ -7,6 +7,7 @@ import type {
   ChallengeCheckpointRecord,
   ChallengeNodeRecord,
   ChallengeNodeType,
+  ChallengeRunRecord,
   EncounterSnapshotV1,
   EventOptionV1,
   RewardOptionV1,
@@ -193,7 +194,7 @@ export const acceptBootstrapSnapshot = (
   }
 ): {
   runState: RunStateV1;
-  runRecordPatch: Record<string, unknown>;
+  runRecordPatch: Partial<ChallengeRunRecord>;
   checkpoint: ChallengeCheckpointRecord;
 } => {
   if (bootstrapState.playerSnapshot && bootstrapState.playerSnapshot.snapshotSeed !== input.snapshotSeed) {
