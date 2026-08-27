@@ -1232,7 +1232,10 @@ export const useBattleEngine = () => {
               }
 
 	              if (event === 'error') {
-	                const message = typeof payload?.error === 'string' ? payload.error : '服务器流式响应异常';
+	                const message = resolveApiErrorMessage({
+	                  payload,
+	                  fallback: '服务器流式响应异常',
+	                });
 	                const interruptedFromServer = isServerInterruptedPayload(payload, message);
 	                if (interruptedFromServer) {
 	                  isInterruptedAbort = true;
