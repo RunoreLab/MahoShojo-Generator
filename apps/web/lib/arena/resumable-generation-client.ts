@@ -14,11 +14,33 @@ export type ArenaGenerationConnectionState =
   | 'recovering_initial'
   | 'reconnecting'
   | 'resuming'
+  | 'cancelling'
   | 'completed'
   | 'failed'
   | 'cancelled'
+  | 'cancel_unconfirmed'
   | 'producer_lost'
   | 'unknown';
+
+export const arenaGenerationConnectionNotice = (
+  state: ArenaGenerationConnectionState,
+): string | null => {
+  if (state === 'reconnecting') {
+    return '网络连接暂时中断，战报仍在服务器生成，正在恢复连接。';
+  }
+  if (state === 'resuming' || state === 'recovering_initial') {
+    return '正在恢复同一场战报生成。';
+  }
+  if (state === 'producer_lost') return '生成进程已丢失，无法安全自动重试。';
+  if (state === 'cancelling') return '正在请求服务器停止生成，请稍候。';
+  if (state === 'cancelled') {
+    return '服务器已接受停止请求。当前预览可能不完整，但可继续查看。';
+  }
+  if (state === 'cancel_unconfirmed') {
+    return '未能确认服务器已收到停止请求；生成可能仍在后台继续，请稍后检查。';
+  }
+  return null;
+};
 
 export type PersistedArenaGeneration = {
   version: 1 | 2;
@@ -45,6 +67,7 @@ export type OpenArenaGenerationStreamOptions = {
   generationRequestId?: string;
   maxReconnectAttempts?: number;
   baseReconnectDelayMs?: number;
+  cancelConfirmationTimeoutMs?: number;
   random?: () => number;
   now?: () => Date;
   onStateChange?(_state: ArenaGenerationConnectionState): void;
@@ -260,6 +283,7 @@ export const openArenaGenerationStream = async (
   const random = options.random ?? Math.random;
   const maxAttempts = options.maxReconnectAttempts ?? 8;
   const baseDelayMs = options.baseReconnectDelayMs ?? 500;
+  const cancelConfirmationTimeoutMs = Math.max(1, options.cancelConfirmationTimeoutMs ?? 5_000);
   const bodyHash = await sha256(canonicalJson(options.body));
   const stateIdentity = await sha256(`${options.endpoint}\n${bodyHash}`);
   const scopedStateKey = `${ARENA_GENERATION_CLIENT_STATE_KEY}:${stateIdentity}`;
@@ -293,6 +317,7 @@ export const openArenaGenerationStream = async (
   let currentReader: ReadableStreamDefaultReader<Uint8Array> | null = null;
   let stopped = false;
   let explicitlyAborted = false;
+  let cancelConfirmationPromise: Promise<void> | null = null;
   let terminal = false;
   let connectedViaResume = false;
   const updateState = (next: ArenaGenerationConnectionState): void => {
@@ -336,26 +361,62 @@ export const openArenaGenerationStream = async (
     if (!cancelReason || terminal) return;
     explicitlyAborted = true;
     stopped = true;
+    updateState('cancelling');
     void currentReader?.cancel(cancelReason).catch(() => undefined);
     const cancelTarget = generationId
       ? `/api/arena/generations/${encodeURIComponent(generationId)}/cancel`
       : options.endpoint;
-    void options.fetcher(cancelTarget, generationId
-        ? {
-          method: 'POST',
-          headers: withActorToken({ 'Content-Type': 'application/json' }, actorStorage),
-          body: JSON.stringify({ reason: cancelReason }),
+    const cancelController = new AbortController();
+    const cancelRequest = options.fetcher(cancelTarget, generationId
+      ? {
+        method: 'POST',
+        headers: withActorToken({ 'Content-Type': 'application/json' }, actorStorage),
+        body: JSON.stringify({ reason: cancelReason }),
+        signal: cancelController.signal,
+      }
+      : {
+        method: 'DELETE',
+        headers: withActorToken({ 'Content-Type': 'application/json' }, actorStorage),
+        body: JSON.stringify({ generationRequestId, reason: cancelReason }),
+        signal: cancelController.signal,
+      }).then(async (response) => {
+        if (response.status === 202) {
+          await response.body?.cancel('cancel accepted').catch(() => undefined);
+          return true;
         }
-        : {
-          method: 'DELETE',
-          headers: withActorToken({ 'Content-Type': 'application/json' }, actorStorage),
-          body: JSON.stringify({ generationRequestId, reason: cancelReason }),
-        }).catch(() => undefined);
-    updateState('cancelled');
+        if (!response.ok) {
+          await response.body?.cancel('cancel rejected').catch(() => undefined);
+          return false;
+        }
+        try {
+          const payload = await response.json() as { cancelled?: unknown; status?: unknown };
+          return payload.cancelled === true
+            || payload.status === 'cancelling'
+            || payload.status === 'cancelled';
+        } catch {
+          return false;
+        }
+      }).catch(() => false);
+    cancelConfirmationPromise = new Promise<boolean>((resolve) => {
+      const timer = setTimeout(() => {
+        cancelController.abort('cancel-confirmation-timeout');
+        resolve(false);
+      }, cancelConfirmationTimeoutMs);
+      timer.unref?.();
+      void cancelRequest.then((confirmed) => {
+        clearTimeout(timer);
+        resolve(confirmed);
+      });
+    }).then((confirmed) => {
+      updateState(confirmed ? 'cancelled' : 'cancel_unconfirmed');
+    });
   };
   options.signal?.addEventListener('abort', cancelOnExplicitAbort, { once: true });
   if (options.signal?.aborted) cancelOnExplicitAbort();
-  if (stopped) throw new Error('ARENA_GENERATION_CANCELLED');
+  if (stopped) {
+    await cancelConfirmationPromise;
+    throw new Error('ARENA_GENERATION_CANCELLED');
+  }
   const fetchCreate = (): Promise<Response> => options.fetcher(options.endpoint, {
       method: 'POST',
       headers: initialHeaders,
@@ -494,6 +555,7 @@ export const openArenaGenerationStream = async (
       }
     }
   } catch (error) {
+    if (explicitlyAborted) await cancelConfirmationPromise;
     options.signal?.removeEventListener('abort', cancelOnExplicitAbort);
     throw error;
   }
@@ -594,6 +656,7 @@ export const openArenaGenerationStream = async (
           }
         } finally {
           if (explicitlyAborted) {
+            await cancelConfirmationPromise;
             try {
               controller.close();
             } catch {

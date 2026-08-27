@@ -44,7 +44,9 @@ import { normalizeCustomStoryLength } from '@/lib/story-length';
 import { buildCustomProviderRequestPayload } from '@/lib/ai/custom-provider';
 import type { GenerationRankingResponse } from '@/lib/arena/generation-ranking';
 import {
+  arenaGenerationConnectionNotice,
   openArenaGenerationStream,
+  type ArenaGenerationConnectionState,
 } from '@/lib/arena/resumable-generation-client';
 
 const sanitizeTextByShieldWords = (text: string): string => applyShieldWords(text).filteredText;
@@ -487,6 +489,8 @@ export const useBattleEngine = () => {
   );
 
   const handleGenerate = useCallback(async () => {
+    let lastArenaConnectionState: ArenaGenerationConnectionState | null = null;
+    let recoveryNoticeActive = false;
     if (isCooldown) {
       setError(`冷却中，请等待 ${remainingTime} 秒后再生成。`);
       return;
@@ -780,13 +784,24 @@ export const useBattleEngine = () => {
                   signal: abortController.signal,
                   fetcher: generationApiFetch,
                   onStateChange: (state) => {
-                    if (state === 'reconnecting') {
-                      setError('网络连接暂时中断，战报仍在服务器生成，正在恢复连接。');
-                    } else if (state === 'resuming') {
-                      setError('正在恢复同一场战报生成。');
-                    } else if (state === 'producer_lost') {
-                      setError('生成进程已丢失，无法安全自动重试。');
+                    const previousState = lastArenaConnectionState;
+                    lastArenaConnectionState = state;
+                    if (
+                      state === 'generating'
+                      && previousState
+                      && ['recovering_initial', 'reconnecting', 'resuming'].includes(previousState)
+                    ) {
+                      recoveryNoticeActive = true;
+                      setError('连接已恢复，继续接收同一场战报。');
+                      return;
                     }
+                    if (state === 'completed' && recoveryNoticeActive) {
+                      recoveryNoticeActive = false;
+                      setError(null);
+                      return;
+                    }
+                    const notice = arenaGenerationConnectionNotice(state);
+                    if (notice) setError(notice);
                   },
                 });
 
@@ -1624,7 +1639,8 @@ export const useBattleEngine = () => {
 	      if (shouldTreatAsInterrupted) {
           const abortReason = sharedGenerationAbortController?.signal.reason;
           if (abortReason === STREAM_ABORT_REASON_USER) {
-            setError('已手动停止生成。当前预览可能不完整，但可继续查看。');
+            setError(arenaGenerationConnectionNotice(lastArenaConnectionState ?? 'unknown')
+              ?? '停止请求状态尚未确认；生成可能仍在后台继续，请稍后检查。');
           } else {
             const details = error instanceof Error ? error.message : '连接被中断';
             setError(buildStreamInterruptedMessage(details));
