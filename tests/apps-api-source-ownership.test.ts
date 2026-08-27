@@ -52,16 +52,19 @@ describe('apps/api source ownership', () => {
     };
     expect(Object.keys(manifest.dependencies ?? {}).sort()).toEqual([
       '@hono/node-server',
+      '@mahoshojo/contracts',
       '@mahoshojo/hosted-api',
       '@mahoshojo/hosted-runtime',
       '@mahoshojo/multiplayer-core',
       'dotenv',
       'hono',
       'redis',
+      'ws',
     ]);
     expect(manifest.imports).toEqual({ '#/*': './src/*.ts' });
     expect(Object.keys(manifest.devDependencies ?? {})).toEqual(expect.arrayContaining([
       '@types/node',
+      '@types/ws',
       'esbuild',
       'eslint',
       'tsx',
