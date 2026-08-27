@@ -96,8 +96,8 @@ read authority / current state
 | `GMR-00` 文档 re-baseline | `DONE` | 无 | 双门禁、Hono+Redis 架构、Goal 指南一致 | 无 |
 | `GMR-01` runtime-neutral state machine | `DONE` | GMR-00 | pure transition + epoch/revision fixture | 不引入 Hono/Redis |
 | `GMR-02` Redis conditional checkpoint | `DONE` | GMR-01 | CAS checkpoint + TTL + fail-closed | 不做 WSS/UI |
-| `GMR-03` single-writer RoomActor | `READY` | GMR-02 | actor registry/queue/recovery/shutdown | 不做 multi-instance |
-| `GMR-04` Node WSS security skeleton | `BLOCKED` | GMR-03 | Node WS bootstrap + upgrade/security/backpressure | 不做产品 UI |
+| `GMR-03` single-writer RoomActor | `DONE` | GMR-02 | actor registry/queue/recovery/shutdown | 不做 multi-instance |
+| `GMR-04` Node WSS security skeleton | `READY` | GMR-03 | Node WS bootstrap + upgrade/security/backpressure | 不做产品 UI |
 | `GMR-05` ticket/membership/reconnect/lifecycle | `BLOCKED` | GMR-04 | membership/connection/epoch recovery | 不做 generation fan-out |
 | `GMR-06` D1 directory/discovery | `BLOCKED` | GMR-05 | derived directory + orphan cleanup | 不执行生产 migration |
 | `GMR-07` Arena room UI | `BLOCKED` | GMR-05 | feature-flagged create/join/status/reconnect | 不激活 production |
@@ -273,6 +273,31 @@ validate -> pure derive -> conditional checkpoint
 - old callback/actor rejected；
 - graceful shutdown/fault test；
 - single-writer invariant 可被测试证明。
+
+**Evidence（2026-08-28）**
+
+- Goal ID：`GMR-03`；source SHA：`2970400b7bda35b9e3ca2e11e1c42f4adb6a68bf`；
+- changed files：`packages/multiplayer-core` recovery/quota-close authority 与 tests，`apps/api` RoomActorRegistry、Redis
+  Room store、process lifecycle、真实 Redis verifier/tests，以及本 spec/plan/guide/log；
+- validation：multiplayer-core `73/73`、API `235/235`、root `191/191`、Web `1893/1893` tests；API/core
+  build/lint、workspace boundary、完整 `pnpm run ci:verify`、Next production build `188/188` pages 与
+  `git diff --check` 通过；首次全仓并发运行有 10 个 unrelated Web test timeout，isolated `50/50` 与第二次完整
+  Web `1893/1893` 均通过，未修改 timeout/测试实现；既有 naming audit `1378` 条保持 report-only，physical D1
+  probe 与 preview environment 保持既有 `DEFERRED`；
+- fault cases：同 Room 并发严格串行、bounded queue/actor/subscriber/fenced tombstone、checkpoint-before-install/fan-out、
+  CAS conflict fencing、idempotent old actor、rich warm recovery/new epoch、terminal hydrate、recovery/quota conflict、
+  exact replay quota runtime close、Redis unavailable retry、idle eviction、slow subscriber、graceful/force shutdown；
+  Redis 8.2 full 与 AOF write → restart → read 覆盖 legacy load/bootstrap、GET→TTL race、未观察 legacy TTL 后
+  client-chosen create 拒绝、old actor/epoch fence；
+- create authority：普通 `execute(create)` 在 Redis/actor 前拒绝；唯一 runtime create entry 由服务端签发随机
+  `roomId` / `roomEpoch` / timestamp，host role/membership/joinedAt 不取信客户端；
+- public wire/schema change：`no`；内部 Redis active v1 envelope 保持兼容，incarnation ledger/load bootstrap 语义补强；
+  production migration/secret/release action：`no`；当前没有 production Room 数据，activation 若发现 legacy key 必须
+  先阻断并迁移 ledger；
+- independent review：architecture/compatibility/replay/data、security/authority 与 test adequacy 最终均为 Critical `0` /
+  Important `0` / Minor `0`；发现的 idempotent stale actor、legacy predecessor resurrection、quota close、terminal
+  hydrate、容量/slow subscriber、legacy load TTL race 与 client-chosen identity findings 已全部关闭；
+- open findings：无；next READY Goal：`GMR-04`。
 
 ### GMR-04 Node WSS security skeleton
 
