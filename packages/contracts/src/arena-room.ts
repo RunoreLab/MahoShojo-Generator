@@ -8,3 +8,4 @@ export * from './protocol';
 export * from './shared-config';
 export * from './versions';
 export * from './wire-size';
+export * from './websocket-transport';
