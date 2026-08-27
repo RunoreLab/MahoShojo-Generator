@@ -238,6 +238,26 @@ describe('Arena Room Proposal authority transitions', () => {
       timestamp: NEXT_TIMESTAMP,
     }, memberAuthority()))).toMatchObject({ code: 'capability-denied', reason: 'member-limit-reached' });
   });
+
+  it('resolves a semantic no-op without incrementing revision or collaborative provenance', () => {
+    const noOp = submit(createJoinedState(), proposal([guidanceChange('')], 'proposal-no-op')).nextState;
+    const resolved = success(transitionArenaRoom(noOp, {
+      type: 'resolve-proposal',
+      expectedRoomEpoch: 'epoch-1',
+      proposalId: 'proposal-no-op',
+      resolution: 'accept-selected',
+      selectedChangeIds: ['guidance-1'],
+      timestamp: '2026-08-27T16:02:00.000Z',
+    }, hostAuthority()));
+    expect(resolved.nextState.snapshot.revision).toBe(0);
+    expect(resolved.nextState.collaborativeConfigRevision).toBeNull();
+    expect(resolved.events).toEqual([
+      expect.objectContaining({
+        type: 'proposal.resolved',
+        payload: expect.objectContaining({ status: 'accepted' }),
+      }),
+    ]);
+  });
 });
 
 describe('Arena Room authoritative generation transitions', () => {

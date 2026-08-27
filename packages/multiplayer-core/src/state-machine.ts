@@ -282,10 +282,14 @@ const revokeMember = (
   const member = activeMember(state, targetUserId);
   if (!member) return transitionFailure('validation-failed', 'invalid-state');
 
-  const pendingProposalIds = state.snapshot.proposals
-    .filter((item) => item.authorUserId === targetUserId)
+  const authoredProposals = state.snapshot.proposals.filter((item) => item.authorUserId === targetUserId);
+  const pendingProposalIds = authoredProposals
+    .filter((item) => item.status === 'submitted')
     .map((item) => item.proposalId);
-  if (state.terminalProposalIds.length + pendingProposalIds.length > MAX_ROOM_PROPOSAL_TOMBSTONES) {
+  const proposalIdsToTombstone = authoredProposals
+    .map((item) => item.proposalId)
+    .filter((proposalId) => !state.terminalProposalIds.includes(proposalId));
+  if (state.terminalProposalIds.length + proposalIdsToTombstone.length > MAX_ROOM_PROPOSAL_TOMBSTONES) {
     return transitionFailure('capability-denied', 'proposal-history-limit-reached');
   }
 
@@ -297,7 +301,7 @@ const revokeMember = (
     accountUserId: authority.accountUserId,
     member: revoked,
   };
-  next.terminalProposalIds.push(...pendingProposalIds);
+  next.terminalProposalIds.push(...proposalIdsToTombstone);
   next.lifecycle = { ...next.lifecycle, updatedAt: timestamp };
   const events: ControlRoomEvent[] = [];
   for (const proposalId of pendingProposalIds) {
@@ -366,14 +370,29 @@ const submitProposal = (
       ? finishIdempotent(state)
       : transitionFailure('duplicate', 'proposal-id-conflict');
   }
-  if (state.terminalProposalIds.length + state.snapshot.proposals.length >= MAX_ROOM_PROPOSAL_TOMBSTONES) {
+  const knownProposalIds = new Set([
+    ...state.terminalProposalIds,
+    ...state.snapshot.proposals.map((item) => item.proposalId),
+  ]);
+  if (knownProposalIds.size >= MAX_ROOM_PROPOSAL_TOMBSTONES) {
     return transitionFailure('capability-denied', 'proposal-history-limit-reached');
   }
-  const pendingCount = state.snapshot.proposals.filter((item) => item.authorUserId === actor.actorUserId).length;
+  const pendingCount = state.snapshot.proposals.filter((item) => (
+    item.authorUserId === actor.actorUserId && item.status === 'submitted'
+  )).length;
   if (pendingCount >= MAX_PENDING_PROPOSALS_PER_MEMBER) {
     return transitionFailure('capability-denied', 'member-limit-reached');
   }
   const next = cloneState(state);
+  const terminalProposalIds = next.snapshot.proposals
+    .filter((item) => item.status !== 'submitted')
+    .map((item) => item.proposalId)
+    .filter((proposalId) => !next.terminalProposalIds.includes(proposalId));
+  if (next.terminalProposalIds.length + terminalProposalIds.length > MAX_ROOM_PROPOSAL_TOMBSTONES) {
+    return transitionFailure('capability-denied', 'proposal-history-limit-reached');
+  }
+  next.snapshot.proposals = next.snapshot.proposals.filter((item) => item.status === 'submitted');
+  next.terminalProposalIds.push(...terminalProposalIds);
   next.snapshot.proposals.push(deepClone(command.proposal));
   next.lifecycle = { ...next.lifecycle, updatedAt: command.timestamp };
   const events: ControlRoomEvent[] = [];
