@@ -77,6 +77,24 @@ describe('Hono API 客户端', () => {
       origin: hostedDrManifest.controlPlane.stableOrigin,
       target: 'production',
     });
+    expect(resolveHostedApiConfig(undefined, 'production', {
+      activationCandidate: true,
+      controlPlaneProvisioning: 'not-provisioned',
+      productionFallbackReadiness: 'deferred',
+    })).toEqual({
+      enabled: false,
+      origin: hostedDrManifest.controlPlane.stableOrigin,
+      target: 'production',
+    });
+    expect(() => resolveHostedApiConfig(
+      hostedDrManifest.controlPlane.stableOrigin,
+      'production',
+      {
+        activationCandidate: true,
+        controlPlaneProvisioning: 'not-provisioned',
+        productionFallbackReadiness: 'deferred',
+      },
+    )).toThrow(/candidate.*NEXT_PUBLIC_HONO_API_ORIGIN/);
     expect(() => resolveHostedApiConfig(
       hostedDrManifest.controlPlane.previewOrigin,
       'production',

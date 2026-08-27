@@ -8,6 +8,10 @@ import {
   parseHostedApiDeploymentTarget,
   type HostedApiDeploymentTarget,
 } from '@mahoshojo/hosted-api/hosted-dr';
+import {
+  HOSTED_DR_ACTIVATION_CANDIDATE_ENVIRONMENT,
+  parseHostedDrActivationCandidate,
+} from '@/lib/hosted-dr/activation-candidate';
 
 const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
 
@@ -27,6 +31,7 @@ const isLoopbackDevelopmentOrigin = (origin: string): boolean => {
 };
 
 type HostedApiActivation = {
+  activationCandidate?: boolean;
   controlPlaneProvisioning: 'not-provisioned' | 'preview' | 'production';
   productionFallbackReadiness: 'deferred' | 'verified';
 };
@@ -48,6 +53,9 @@ export const resolveHostedApiConfig = (
   configuredOrigin: string | undefined,
   deploymentTarget: string | undefined,
   activation: HostedApiActivation = {
+    activationCandidate: parseHostedDrActivationCandidate(
+      process.env[HOSTED_DR_ACTIVATION_CANDIDATE_ENVIRONMENT],
+    ),
     controlPlaneProvisioning: hostedDrControlPlaneProvisioning,
     productionFallbackReadiness: hostedDrProductionFallbackReadiness,
   },
@@ -56,6 +64,14 @@ export const resolveHostedApiConfig = (
   const target = resolveDeploymentTarget(deploymentTarget);
 
   if (target === 'production') {
+    if (activation.activationCandidate === true) {
+      if (origin) {
+        throw new Error(
+          'production activation candidate 禁止配置 NEXT_PUBLIC_HONO_API_ORIGIN',
+        );
+      }
+      return { enabled: false, origin: hostedDrStableOrigin, target };
+    }
     if (origin && origin !== hostedDrStableOrigin) {
       throw new Error(
         'production 环境的 NEXT_PUBLIC_HONO_API_ORIGIN 只能使用 manifest 声明的 stable origin',

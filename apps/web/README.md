@@ -50,6 +50,15 @@ origin 是环境隔离的构建入口，不是生产 failover。实际 LB/DNS/Wo
 
 `pnpm --filter @mahoshojo/web deploy` 使用本目录 `wrangler.jsonc`。CI 分别以 `production` 或 `preview` environment 部署；G25D 本身不执行 deploy/cutover。
 
+首次 production control-plane 激活使用独立 `dr-candidate` Wrangler environment。只有显式同时设置
+`NEXT_PUBLIC_HOSTED_API_ENVIRONMENT=production` 与 `HOSTED_DR_ACTIVATION_CANDIDATE=true` 才允许在 manifest
+仍为 `not-provisioned` 时构建 bootstrap artifact；`dr-candidate` 强制 `assets.run_worker_first=true` 并使用独立的
+最外层 Worker entry，在 Cloudflare static assets、OpenNext image handler 与 Next middleware 之前只放行
+`GET|HEAD /api/hosted/dr-readiness`，其余路径固定 503。Next
+middleware 同时保留防御性限制，非法 candidate 开关同样 fail closed。candidate 使用独立
+Worker/service/rate-limit namespace，但复用 production D1 authority，只执行 readiness 的固定 safe-read 查询；不得用
+`dr-candidate` 覆盖 `production` environment，也不得把 bootstrap 探针描述为完整业务 DR readiness。
+
 回滚整个 G25D 时按提交逆序先 revert 最终审查整改/验收文档提交，再 revert `fb8dd77e`，最后 revert
 `39825c1f`。应用 relocation 与 root/CI ownership 位于同一原子提交，避免中间状态留下双 owner 或不可部署的
 半应用；不得只把部分 route 或静态资产移回根。
