@@ -13,10 +13,25 @@ const routeInventory = readJson('config/hono-api-routes.json');
 const hostedDrDrills = readJson('config/hosted-dr-drills.json');
 const capabilities = readJson('config/hosted-dr-capabilities.json');
 const failures = [];
+const canonicalAutomatedCoverage = [
+  'route-inventory-and-method-wire',
+  'family-level-success-and-error-projection',
+  'exited-source-hash-and-basic-error-wire',
+  'arena-service-client-replay-cancel-seams',
+  'provider-public-error-and-secret-canaries',
+  'infrastructure-copy-map',
+];
+const canonicalOpenCoverage = [
+  'all-18-shared-routes-default-vs-refactor-post-success-and-error-runtime-differential',
+  'all-6-exited-routes-auth-success-and-upstream-error-runtime-differential',
+  'real-browser-network-transition-and-background-suspension-journey',
+  'production-stable-control-plane-and-real-fault-drills',
+];
 
 const fail = (message) => failures.push(message);
 const isStringArray = (value) => (
   Array.isArray(value)
+  && value.length > 0
   && value.every((entry) => typeof entry === 'string' && entry.trim().length > 0)
 );
 const assertUnique = (values, label) => {
@@ -44,9 +59,19 @@ if (
   contracts.auditCoverage?.status !== 'partial'
   || !isStringArray(contracts.auditCoverage?.automated)
   || !isStringArray(contracts.auditCoverage?.open)
-  || contracts.auditCoverage.open.length === 0
 ) {
   fail('auditCoverage 必须诚实登记为 partial，并列出 automated/open 维度');
+} else {
+  assertSameSet(
+    contracts.auditCoverage.automated,
+    canonicalAutomatedCoverage,
+    'auditCoverage.automated canonical dimensions',
+  );
+  assertSameSet(
+    contracts.auditCoverage.open,
+    canonicalOpenCoverage,
+    'auditCoverage.open canonical dimensions',
+  );
 }
 
 for (const [label, values] of [
@@ -116,6 +141,30 @@ for (const route of exitedRoutes) {
 for (const evidencePath of contracts.requiredEvidenceTests ?? []) {
   if (!existsSync(path.join(repositoryRoot, evidencePath))) {
     fail(`用户可感知契约 evidence test 不存在：${evidencePath}`);
+  }
+}
+
+const automatedEvidence = contracts.auditCoverage?.automatedEvidence;
+if (!automatedEvidence || typeof automatedEvidence !== 'object' || Array.isArray(automatedEvidence)) {
+  fail('auditCoverage.automatedEvidence 必须把每个 automated dimension 绑定到实际 evidence suite');
+} else {
+  assertSameSet(
+    Object.keys(automatedEvidence),
+    canonicalAutomatedCoverage,
+    'auditCoverage.automatedEvidence keys',
+  );
+  const requiredEvidence = new Set(contracts.requiredEvidenceTests ?? []);
+  for (const dimension of canonicalAutomatedCoverage) {
+    const evidencePaths = automatedEvidence[dimension];
+    if (!isStringArray(evidencePaths)) {
+      fail(`${dimension}: 必须绑定至少一个 evidence suite`);
+      continue;
+    }
+    for (const evidencePath of evidencePaths) {
+      if (!requiredEvidence.has(evidencePath)) {
+        fail(`${dimension}: evidence 未登记到 requiredEvidenceTests：${evidencePath}`);
+      }
+    }
   }
 }
 
