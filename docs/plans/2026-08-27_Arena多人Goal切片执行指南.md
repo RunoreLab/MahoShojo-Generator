@@ -97,8 +97,8 @@ read authority / current state
 | `GMR-01` runtime-neutral state machine | `DONE` | GMR-00 | pure transition + epoch/revision fixture | 不引入 Hono/Redis |
 | `GMR-02` Redis conditional checkpoint | `DONE` | GMR-01 | CAS checkpoint + TTL + fail-closed | 不做 WSS/UI |
 | `GMR-03` single-writer RoomActor | `DONE` | GMR-02 | actor registry/queue/recovery/shutdown | 不做 multi-instance |
-| `GMR-04` Node WSS security skeleton | `READY` | GMR-03 | Node WS bootstrap + upgrade/security/backpressure | 不做产品 UI |
-| `GMR-05` ticket/membership/reconnect/lifecycle | `BLOCKED` | GMR-04 | membership/connection/epoch recovery | 不做 generation fan-out |
+| `GMR-04` Node WSS security skeleton | `DONE` | GMR-03 | Node WS bootstrap + upgrade/security/backpressure | 不做产品 UI |
+| `GMR-05` ticket/membership/reconnect/lifecycle | `READY` | GMR-04 | membership/connection/epoch recovery | 不做 generation fan-out |
 | `GMR-06` D1 directory/discovery | `BLOCKED` | GMR-05 | derived directory + orphan cleanup | 不执行生产 migration |
 | `GMR-07` Arena room UI | `BLOCKED` | GMR-05 | feature-flagged create/join/status/reconnect | 不激活 production |
 | `GMR-08` Proposal E2E | `BLOCKED` | GMR-05,GMR-07 | typed Proposal server/UI 闭环 | 不扩展 private sharing |
@@ -335,6 +335,34 @@ validate -> pure derive -> conditional checkpoint
 - slow consumer；
 - shutdown closes/drains sockets safely；
 - HTTP existing routes 无回归。
+
+**Evidence（2026-08-28）**
+
+- Goal ID：`GMR-04`；source SHA：`891ccec3380d75d0b49648dd780151e94d91225a`；
+- changed files：`packages/contracts` versioned Room WebSocket transport envelope/size parser/tests；`apps/api`
+  `ws` dependency、isolated Hono upgrade app、Node dispatcher/server、gateway policy、main lifecycle、unit/real-upgrade tests，
+  以及 root API production closure assertion；
+- transport：固定 path `/api/arena/rooms/v1/ws` 与 subprotocol `mahoshojo.arena-room.v1`；`WebSocketServer`
+  使用 `noServer`、64 KiB `maxPayload`、关闭 `perMessageDeflate`；HTTP middleware chain 与 upgrade route 隔离；
+- security/lifecycle：raw Node method、key/version/protocol grammar、exact Origin 在 authorizer 前校验；无 Origin 的
+  installed client 仍必须通过 authorizer；authorization grant 无 gateway-side pending state、使用 module-private brand
+  且只可消费一次，active cap 在 `onOpen` 同步占用；connection/user rate、heartbeat、bounded send queue、slow-consumer
+  close/resync、1012 graceful shutdown/timeout terminate 均已实现；
+- activation：`main.ts` 使用空 browser Origin allowlist 与默认 deny authorizer；browser 返回 403、无 Origin client
+  返回 503。成功 authorizer 只由测试注入，未实现或绕过 GMR-05 ticket/membership，未激活 production public WSS；
+- validation：real Node upgrade + gateway `23/23`、API `258/258`、contracts `118/118`、root `191/191`、Web
+  `1893/1893`、multiplayer-core `73/73`；API/contracts build/lint、API bundle、workspace boundary、完整
+  `pnpm run ci:verify`、Next production build `188/188` pages 与 `git diff --check` 通过；既有 naming audit `1378`
+  条保持 report-only，physical D1/preview 保持既有 `DEFERRED`；
+- fault cases：Origin suffix、wrong/malformed protocol、raw `POST + Upgrade`、missing key、default deny、malformed
+  handshake 后立即合法重连、grant replay/expiry/concurrent activation、active close/reconnect、binary/oversized/flood、
+  shared user rate、dead pong、slow consumer、shutdown/HTTP close ordering与普通 HTTP no-regression；
+- independent review：首轮发现 raw method 在 Hono adapter 重建 Request 后丢失，以及底层握手失败遗留 pending cap
+  两项 Important、real close/reconnect 一项 Minor；`891ccec3` 全部整改并回归，architecture/compatibility/lifecycle、
+  security/authority/backpressure 与 test adequacy 最终均为 Critical `0` / Important `0` / Minor `0`；
+- public wire/schema change：`yes`（新增 versioned internal Development Gate WSS transport contract），但当前无可成功
+  production authority；production/schema/secret/release action：`no`；
+- open findings：无；next READY Goal：`GMR-05`。
 
 ### GMR-05 ticket / membership / reconnect / lifecycle
 
