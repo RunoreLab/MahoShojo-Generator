@@ -182,7 +182,9 @@ docker compose -f apps/api/compose.local.yml config
 ```
 
 Docker install layer 只复制 `@mahoshojo/api...` 的实际 workspace manifest 闭包，不把 D1 Gateway 或未来
-Admin/Desktop/Mobile app 带入 Hono image。
+Admin/Desktop/Mobile app 带入 Hono image。生产 Dockerfile、release-local Compose 与部署脚本的 runtime
+预检必须使用同一 `node:22-alpine@sha256:<digest>`；更新时三处同步修改并通过 release contract 测试，禁止通过
+Arcane 单独拉取浮动 tag 更新生产容器。
 
 生产启动会检查以下配置并在缺失时直接失败：Redis、有效 AI provider、32 字符以上的
 `SIGNATURE_SECRET_KEY`、明确的生产 CORS、D1 Gateway 凭据（或临时使用 Cloudflare 管理 API三项凭据），
@@ -230,7 +232,9 @@ config 与旧 runtime 生产配置后，才复制成带 `legacy-layout` 标记�
 删除旧 release 的 `index.mjs`/`index.mjs.sha256` 或根 `compose.yml`。一旦写入
 `deployment-format=release-tuple-v2`，managed `.env`/`current` 缺失、不一致、checksum 损坏、含符号链接或
 config 无效都会在激活前 fail closed，不会重新降级纳管。部署主机必须提供 `flock`、`mktemp`、`realpath`、
-`sha256sum`、GNU `find -printf`、`cmp`、Docker Compose、`curl` 和标准 POSIX 工具。
+`stat`、`id`、`sha256sum`、GNU `find -printf`、`cmp`、Docker Compose、`curl` 和标准 POSIX 工具。
+`/opt/mahoshojo-hono/.env.hono` 必须是当前部署用户所有、权限为 `0600` 的普通文件且不得为符号链接；该门禁在
+创建部署锁和执行任何 Docker 命令前检查。
 G25C 只实现并在本地/fault-injection 验证该流程，没有执行 production deploy、切流或 credential 变更。
 
 生产切流只应将 `config/hono-api-routes.json` 中的精确路径转发到 Hono origin；其他 `/api/*` 继续访问 Next.js。前端继续使用

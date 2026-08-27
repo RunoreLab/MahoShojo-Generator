@@ -26,6 +26,7 @@ bind_port="${HONO_BIND_PORT:-8080}"
 redis_key_prefix="${HONO_REDIS_KEY_PREFIX:-}"
 redis_network_name="${HONO_REDIS_NETWORK_NAME:-mahoshojo-redis}"
 hosted_api_environment="${HONO_HOSTED_API_ENVIRONMENT:-}"
+runtime_image='node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32'
 case "$root_dir" in
   /) echo "部署根目录不得为文件系统根目录" >&2; exit 2 ;;
   /*) ;;
@@ -248,7 +249,7 @@ validate_release_runtime() {
     -e D1_REQUIRED=true \
     -e HONO_CONFIG_CHECK_ONLY=true \
     -v "$tuple_dir/index.mjs:/app/index.mjs:ro" \
-    node:22-alpine node /app/index.mjs >/dev/null
+    "$runtime_image" node /app/index.mjs >/dev/null
 }
 
 write_release_env() {
@@ -611,7 +612,7 @@ trap 'handle_signal 129' HUP
 trap 'handle_signal 130' INT
 trap 'handle_signal 143' TERM
 
-for required_command in flock mktemp realpath; do
+for required_command in flock id mktemp realpath stat; do
   command -v "$required_command" >/dev/null 2>&1 || {
     echo "部署主机缺少必需工具：$required_command" >&2
     exit 1
@@ -627,6 +628,17 @@ done
   echo "部署根目录与 releases 必须是无符号链接的 canonical 路径" >&2
   exit 1
 }
+[ -f "$runtime_env" ] && [ ! -L "$runtime_env" ] || {
+  echo "Hono runtime env 不存在或不是普通文件" >&2
+  exit 1
+}
+runtime_env_mode="$(stat -c '%a' "$runtime_env")"
+runtime_env_owner_uid="$(stat -c '%u' "$runtime_env")"
+deploy_uid="$(id -u)"
+[ "$runtime_env_mode" = '600' ] && [ "$runtime_env_owner_uid" = "$deploy_uid" ] || {
+  echo "Hono runtime env 必须由当前部署用户所有且权限为 0600" >&2
+  exit 1
+}
 prepare_lock_file || {
   echo "deploy.lock 必须是受管普通文件" >&2
   exit 1
@@ -637,10 +649,6 @@ if ! flock -n 9; then
   exit 1
 fi
 
-[ -f "$runtime_env" ] && [ ! -L "$runtime_env" ] || {
-  echo "Hono runtime env 不存在或不是普通文件" >&2
-  exit 1
-}
 probe_dir="$(mktemp -d /tmp/mahoshojo-hono-probe.XXXXXX)"
 probe_headers="$probe_dir/headers"
 probe_body="$probe_dir/body"

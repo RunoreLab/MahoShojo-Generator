@@ -21,6 +21,7 @@ import { afterEach, describe, expect, test } from 'vitest';
 
 const deployScriptPath = path.resolve('apps/api/deploy/deploy-bundle.sh');
 const temporaryDirectories: string[] = [];
+const realIdPath = spawnSync('which', ['id'], { encoding: 'utf8' }).stdout.trim();
 const realMvPath = spawnSync('which', ['mv'], { encoding: 'utf8' }).stdout.trim();
 const realRmPath = spawnSync('which', ['rm'], { encoding: 'utf8' }).stdout.trim();
 const realSleepPath = spawnSync('which', ['sleep'], { encoding: 'utf8' }).stdout.trim();
@@ -68,6 +69,7 @@ const createFixture = () => {
   mkdirSync(path.join(rootDirectory, 'releases'), { recursive: true });
   mkdirSync(commandDirectory, { recursive: true });
   writeFileSync(path.join(rootDirectory, '.env.hono'), 'FIXTURE=true\n');
+  chmodSync(path.join(rootDirectory, '.env.hono'), 0o600);
 
   const previousRelease = createRelease(rootDirectory, 'previous');
   writeFileSync(
@@ -123,6 +125,13 @@ if [ -n "\${HONO_DEPLOY_TEST_FAIL_DOWN_FOR:-}" ]; then
   esac
 fi
 exit 0
+`);
+  writeExecutable(path.join(commandDirectory, 'id'), `#!/bin/sh
+if [ "$1" = '-u' ] && [ -n "\${HONO_DEPLOY_TEST_DEPLOY_UID:-}" ]; then
+  printf '%s\n' "$HONO_DEPLOY_TEST_DEPLOY_UID"
+  exit 0
+fi
+exec "$HONO_DEPLOY_TEST_REAL_ID" "$@"
 `);
   writeExecutable(path.join(commandDirectory, 'mv'), `#!/bin/sh
 last=''
@@ -230,6 +239,7 @@ const runDeployment = (
     failPromotion?: boolean;
     failRuntimeFor?: string;
     failTransactionRemoval?: boolean;
+    deployUid?: string;
     holdFile?: string;
     hostedApiEnvironment?: string | null;
     probeStatus?: string;
@@ -263,10 +273,12 @@ const runDeployment = (
       HONO_DEPLOY_TEST_FAIL_RUNTIME_FOR: options.failRuntimeFor ?? '',
       HONO_DEPLOY_TEST_FAIL_TRANSACTION_REMOVAL:
         options.failTransactionRemoval ? 'true' : 'false',
+      HONO_DEPLOY_TEST_DEPLOY_UID: options.deployUid ?? '',
       HONO_DEPLOY_TEST_HOLD_FILE: options.holdFile ?? '',
       HONO_DEPLOY_TEST_COMMAND_LOG: fixture.commandLog,
       HONO_DEPLOY_TEST_PROBE_STATUS: options.probeStatus ?? '400',
       HONO_DEPLOY_TEST_RACE_ADOPTION_CANARY: options.raceAdoptionCanary ?? '',
+      HONO_DEPLOY_TEST_REAL_ID: realIdPath,
       HONO_DEPLOY_TEST_REAL_MV: realMvPath,
       HONO_DEPLOY_TEST_REAL_RM: realRmPath,
       HONO_DEPLOY_TEST_REAL_SLEEP: realSleepPath,
@@ -289,6 +301,7 @@ const spawnDeployment = (
       HONO_DEPLOY_TEST_COMMAND_LOG: fixture.commandLog,
       HONO_DEPLOY_TEST_FAIL_PROMOTION: 'false',
       HONO_DEPLOY_TEST_PROBE_STATUS: '400',
+      HONO_DEPLOY_TEST_REAL_ID: realIdPath,
       HONO_DEPLOY_TEST_REAL_MV: realMvPath,
       HONO_DEPLOY_TEST_REAL_RM: realRmPath,
       HONO_DEPLOY_TEST_REAL_SLEEP: realSleepPath,
@@ -386,6 +399,35 @@ afterEach(() => {
 });
 
 describe('Hono release-local deployment transaction', () => {
+  test('runtime env 权限过宽时在 Docker 与 metadata 前 fail closed', () => {
+    const fixture = createFixture();
+    chmodSync(path.join(fixture.rootDirectory, '.env.hono'), 0o644);
+
+    const result = runDeployment(fixture);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('0600');
+    expect(existsSync(fixture.commandLog)).toBe(false);
+    expect(readlinkSync(path.join(fixture.rootDirectory, 'current'))).toBe(
+      fixture.previousReleaseDirectory,
+    );
+  });
+
+  test('runtime env 不属于部署用户时在 Docker 与 metadata 前 fail closed', () => {
+    const fixture = createFixture();
+
+    const result = runDeployment(fixture, {
+      deployUid: String((process.getuid?.() ?? 0) + 1),
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('当前部署用户所有');
+    expect(existsSync(fixture.commandLog)).toBe(false);
+    expect(readlinkSync(path.join(fixture.rootDirectory, 'current'))).toBe(
+      fixture.previousReleaseDirectory,
+    );
+  });
+
   test('缺失显式 deployment target 时在 Docker 与 metadata 前 fail closed', () => {
     const fixture = createFixture();
 

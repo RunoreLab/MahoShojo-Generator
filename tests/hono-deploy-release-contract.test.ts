@@ -5,6 +5,8 @@ import { describe, expect, test } from 'vitest';
 const rootDirectory = process.cwd();
 const workflowPath = resolve(rootDirectory, '.github/workflows/hono-deploy.yml');
 const deployScriptPath = resolve(rootDirectory, 'apps/api/deploy/deploy-bundle.sh');
+const dockerfilePath = resolve(rootDirectory, 'apps/api/Dockerfile');
+const composePath = resolve(rootDirectory, 'apps/api/deploy/compose.yml');
 
 function readDeployScript(): string | null {
   expect(existsSync(deployScriptPath), 'apps/api 必须拥有 deploy-bundle.sh').toBe(true);
@@ -12,6 +14,26 @@ function readDeployScript(): string | null {
 }
 
 describe('Hono content-addressed release transaction', () => {
+  test('构建、Compose 与 runtime 预检使用同一 Node 镜像 digest', () => {
+    const dockerfile = readFileSync(dockerfilePath, 'utf8');
+    const compose = readFileSync(composePath, 'utf8');
+    const script = readDeployScript();
+    if (!script) return;
+
+    const imagePattern = 'node:22-alpine@sha256:[0-9a-f]{64}';
+    const dockerfileImages = [...dockerfile.matchAll(
+      new RegExp(`^FROM (${imagePattern})(?: AS [a-z]+)?$`, 'gmu'),
+    )].map((match) => match[1]);
+    const composeImage = compose.match(new RegExp(`^\\s*image: (${imagePattern})$`, 'mu'))?.[1];
+    const runtimeImage = script.match(
+      new RegExp(`^runtime_image='(${imagePattern})'$`, 'mu'),
+    )?.[1];
+
+    expect(dockerfileImages).toHaveLength(2);
+    expect(new Set(dockerfileImages)).toEqual(new Set([composeImage]));
+    expect(runtimeImage).toBe(composeImage);
+  });
+
   test('release id 覆盖 bundle、compose 与 deploy script 的完整 tuple', () => {
     const workflow = readFileSync(workflowPath, 'utf8');
 
