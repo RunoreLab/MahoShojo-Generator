@@ -61,22 +61,75 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  deploy-hono-preview:
-    name: Deploy Hono preview
+  verify-and-build-cloudflare:
+    name: Verify and build Cloudflare preview
     if: github.ref == 'refs/heads/preview'
     needs: verify-and-build-hono
     runs-on: ubuntu-latest
+    environment: preview
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 11.3.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build Cloudflare preview bundle
+        env:
+          NEXT_PUBLIC_TURNSTILE_SITE_KEY: ${{ secrets.NEXT_PUBLIC_TURNSTILE_SITE_KEY }}
+          NEXT_PUBLIC_AI_SAFETY_PROMPT_LEVEL: ${{ vars.NEXT_PUBLIC_AI_SAFETY_PROMPT_LEVEL }}
+          NEXT_PUBLIC_ENABLE_BUNDLE_SAFETY_CHECK: ${{ vars.NEXT_PUBLIC_ENABLE_BUNDLE_SAFETY_CHECK }}
+          NEXT_PUBLIC_GA_ID: ${{ vars.NEXT_PUBLIC_GA_ID }}
+          NEXT_PUBLIC_SAFETY_CHECK_POLICY: ${{ vars.NEXT_PUBLIC_SAFETY_CHECK_POLICY }}
+          NEXT_PUBLIC_HONO_API_ORIGIN: https://homura-preview.colanns.me
+          NEXT_PUBLIC_HOSTED_API_ENVIRONMENT: preview
+        run: pnpm --filter @mahoshojo/web run build:cf
+
+  deploy-hono-preview:
+    name: Deploy Hono preview
+    if: github.ref == 'refs/heads/preview'
+    needs:
+      - verify-and-build-hono
+      - verify-and-build-cloudflare
+    runs-on: ubuntu-latest
     environment: hono-preview
     env:
-      VPS_HOST: 38.76.205.9
-      VPS_USER: root
+      PREVIEW_VPS_HOST: ${{ vars.PREVIEW_VPS_HOST }}
+      PREVIEW_VPS_USER: ${{ vars.PREVIEW_VPS_USER }}
       HONO_DEPLOY_ROOT_DIR: /opt/mahoshojo-hono-preview
       HONO_CONTAINER_NAME: mahoshojo-hono-preview
       HONO_BIND_PORT: '8081'
-      HONO_REDIS_KEY_PREFIX: preview
+      HONO_REDIS_KEY_PREFIX: ${{ vars.PREVIEW_REDIS_KEY_PREFIX }}
+      HONO_REDIS_NETWORK_NAME: ${{ vars.PREVIEW_REDIS_NETWORK_NAME }}
     steps:
       - name: Checkout deployment installer
         uses: actions/checkout@v6
+
+      - name: Require preview resources and authority isolation
+        env:
+          PREVIEW_D1_DATABASE_ID: ${{ vars.PREVIEW_D1_DATABASE_ID }}
+          PREVIEW_VPS_HOST: ${{ vars.PREVIEW_VPS_HOST }}
+          PREVIEW_VPS_USER: ${{ vars.PREVIEW_VPS_USER }}
+          PREVIEW_VPS_HOST_KEY: ${{ secrets.PREVIEW_VPS_HOST_KEY }}
+          PREVIEW_VPS_SSH_PRIVATE_KEY: ${{ secrets.PREVIEW_VPS_SSH_PRIVATE_KEY }}
+          PREVIEW_REDIS_NETWORK_NAME: ${{ vars.PREVIEW_REDIS_NETWORK_NAME }}
+          PREVIEW_REDIS_KEY_PREFIX: ${{ vars.PREVIEW_REDIS_KEY_PREFIX }}
+          PREVIEW_DATA_ENVIRONMENT: ${{ vars.PREVIEW_DATA_ENVIRONMENT }}
+          PREVIEW_REDIS_ISOLATION: ${{ vars.PREVIEW_REDIS_ISOLATION }}
+          PREVIEW_ENV_FILE_PATH: ${{ vars.PREVIEW_ENV_FILE_PATH }}
+          PREVIEW_D1_SCHEMA_EVIDENCE_PATH: ${{ vars.PREVIEW_D1_SCHEMA_EVIDENCE_PATH }}
+        run: pnpm run check:preview:environment -- --require-provisioned
 
       - name: Download release tuple
         uses: actions/download-artifact@v5
@@ -86,13 +139,19 @@ jobs:
 
       - name: Configure SSH
         env:
-          VPS_SSH_PRIVATE_KEY: ${{ secrets.VPS_SSH_PRIVATE_KEY }}
+          PREVIEW_VPS_SSH_PRIVATE_KEY: ${{ secrets.PREVIEW_VPS_SSH_PRIVATE_KEY }}
+          PREVIEW_VPS_HOST_KEY: ${{ secrets.PREVIEW_VPS_HOST_KEY }}
         run: |
-          test -n "$VPS_SSH_PRIVATE_KEY"
+          set -euo pipefail
+          test -n "$PREVIEW_VPS_HOST"
+          test -n "$PREVIEW_VPS_USER"
+          test "$PREVIEW_VPS_USER" != root
+          test -n "$PREVIEW_VPS_SSH_PRIVATE_KEY"
+          test -n "$PREVIEW_VPS_HOST_KEY"
           install -m 700 -d ~/.ssh
-          printf '%s\n' "$VPS_SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
+          printf '%s\n' "$PREVIEW_VPS_SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
-          printf '%s %s\n' "$VPS_HOST" 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIARFAFVUCsUdVM8PtbbiOhkUD9zn5Q6MeK47hxEr/XuC' > ~/.ssh/known_hosts
+          printf '%s %s\n' "$PREVIEW_VPS_HOST" "$PREVIEW_VPS_HOST_KEY" > ~/.ssh/known_hosts
 
       - name: Upload and activate release
         run: |
@@ -102,7 +161,7 @@ jobs:
             ''|*[!0-9a-f]*) echo "artifact release id 非法" >&2; exit 1 ;;
           esac
           test "${#release_id}" -eq 64
-          upload_dir="$(ssh -i ~/.ssh/deploy_key "$VPS_USER@$VPS_HOST" "HONO_DEPLOY_ROOT_DIR='$HONO_DEPLOY_ROOT_DIR' sh -s -- create" < apps/api/deploy/install-bundle.sh)"
+          upload_dir="$(ssh -i ~/.ssh/deploy_key "$PREVIEW_VPS_USER@$PREVIEW_VPS_HOST" "HONO_DEPLOY_ROOT_DIR='$HONO_DEPLOY_ROOT_DIR' sh -s -- create" < apps/api/deploy/install-bundle.sh)"
           case "$upload_dir" in
             "$HONO_DEPLOY_ROOT_DIR"/releases/.upload.*) ;;
             *) echo "远端返回了非法 upload staging" >&2; exit 1 ;;
@@ -111,15 +170,17 @@ jobs:
           case "$upload_suffix" in
             ''|*[!A-Za-z0-9]*) echo "远端 upload staging 后缀非法" >&2; exit 1 ;;
           esac
-          scp -i ~/.ssh/deploy_key artifact/index.mjs artifact/compose.yml artifact/deploy-bundle.sh artifact/release.manifest artifact/release.sha256 "$VPS_USER@$VPS_HOST:$upload_dir/"
-          installed_dir="$(ssh -i ~/.ssh/deploy_key "$VPS_USER@$VPS_HOST" "HONO_DEPLOY_ROOT_DIR='$HONO_DEPLOY_ROOT_DIR' sh -s -- install '$release_id' '$upload_dir'" < apps/api/deploy/install-bundle.sh)"
+          scp -i ~/.ssh/deploy_key artifact/index.mjs artifact/compose.yml artifact/deploy-bundle.sh artifact/release.manifest artifact/release.sha256 "$PREVIEW_VPS_USER@$PREVIEW_VPS_HOST:$upload_dir/"
+          installed_dir="$(ssh -i ~/.ssh/deploy_key "$PREVIEW_VPS_USER@$PREVIEW_VPS_HOST" "HONO_DEPLOY_ROOT_DIR='$HONO_DEPLOY_ROOT_DIR' sh -s -- install '$release_id' '$upload_dir'" < apps/api/deploy/install-bundle.sh)"
           test "$installed_dir" = "$HONO_DEPLOY_ROOT_DIR/releases/$release_id"
-          ssh -i ~/.ssh/deploy_key "$VPS_USER@$VPS_HOST" "HONO_DEPLOY_ROOT_DIR='$HONO_DEPLOY_ROOT_DIR' HONO_CONTAINER_NAME='$HONO_CONTAINER_NAME' HONO_BIND_PORT='$HONO_BIND_PORT' HONO_REDIS_KEY_PREFIX='$HONO_REDIS_KEY_PREFIX' '$installed_dir/deploy-bundle.sh' '$release_id' https://homura-preview.colanns.me"
+          ssh -i ~/.ssh/deploy_key "$PREVIEW_VPS_USER@$PREVIEW_VPS_HOST" "HONO_DEPLOY_ROOT_DIR='$HONO_DEPLOY_ROOT_DIR' HONO_CONTAINER_NAME='$HONO_CONTAINER_NAME' HONO_BIND_PORT='$HONO_BIND_PORT' HONO_REDIS_KEY_PREFIX='$HONO_REDIS_KEY_PREFIX' HONO_REDIS_NETWORK_NAME='$HONO_REDIS_NETWORK_NAME' '$installed_dir/deploy-bundle.sh' '$release_id' https://homura-preview.colanns.me"
 
   deploy-cloudflare-preview:
     name: Deploy Cloudflare preview
     if: github.ref == 'refs/heads/preview'
-    needs: deploy-hono-preview
+    needs:
+      - deploy-hono-preview
+      - verify-and-build-cloudflare
     runs-on: ubuntu-latest
     environment: preview
     permissions:
@@ -151,6 +212,7 @@ jobs:
           NEXT_PUBLIC_GA_ID: ${{ vars.NEXT_PUBLIC_GA_ID }}
           NEXT_PUBLIC_SAFETY_CHECK_POLICY: ${{ vars.NEXT_PUBLIC_SAFETY_CHECK_POLICY }}
           NEXT_PUBLIC_HONO_API_ORIGIN: https://homura-preview.colanns.me
+          NEXT_PUBLIC_HOSTED_API_ENVIRONMENT: preview
         run: pnpm --filter @mahoshojo/web run build:cf
 
       - name: Deploy Cloudflare preview

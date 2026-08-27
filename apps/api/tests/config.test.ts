@@ -9,6 +9,7 @@ const stubValidBearerProductionEnv = (): void => {
   vi.stubEnv('AI_API_KEY', 'test-ai-key');
   vi.stubEnv('SIGNATURE_SECRET_KEY', 'a'.repeat(32));
   vi.stubEnv('D1_GATEWAY_URL', 'https://d1.example.com');
+  vi.stubEnv('D1_GATEWAY_ALLOWED_ORIGINS', 'https://d1.example.com');
   vi.stubEnv('D1_GATEWAY_HMAC_SECRET', 'b'.repeat(32));
   vi.stubEnv('ARENA_FINALIZATION_URL', 'https://app.example.com');
   vi.stubEnv('ARENA_FINALIZATION_HMAC_SECRET', 'c'.repeat(32));
@@ -77,6 +78,34 @@ describe('Hono server config', () => {
     expect(() => readHonoServerConfig()).toThrow(/Redis 未配置.*SIGNATURE_SECRET_KEY/);
   });
 
+  it.each([
+    ['REDIS_REQUIRED', 'REDIS_REQUIRED'],
+    ['D1_REQUIRED', 'D1_REQUIRED'],
+  ])('生产模式拒绝关闭必需依赖：%s', (_label, variable) => {
+    stubValidBearerProductionEnv();
+    vi.stubEnv(variable, 'false');
+    expect(() => readHonoServerConfig()).toThrow(new RegExp(`${variable}.*true`));
+  });
+
+  it.each([
+    ['明文 URL', 'http://d1.example.com'],
+    ['带路径 URL', 'https://d1.example.com/unsafe'],
+    ['未登记 origin', 'https://untrusted-d1.example.com'],
+  ])('生产模式拒绝不受信任的 D1 Gateway URL：%s', (_label, value) => {
+    stubValidBearerProductionEnv();
+    vi.stubEnv('D1_GATEWAY_URL', value);
+    expect(() => readHonoServerConfig()).toThrow(/D1_GATEWAY_URL.*(?:trusted|HTTPS|登记)/);
+  });
+
+  it('仅允许显式 local fault-injection 使用 loopback 明文 Gateway', () => {
+    stubValidBearerProductionEnv();
+    vi.stubEnv('D1_GATEWAY_URL', 'http://127.0.0.1:8788');
+    vi.stubEnv('D1_GATEWAY_ALLOWED_ORIGINS', '');
+    vi.stubEnv('HOSTED_DR_LOCAL_FAULT_INJECTION', 'true');
+
+    expect(readHonoServerConfig().nodeEnv).toBe('production');
+  });
+
   it('生产模式拒绝 wildcard CORS', () => {
     stubValidBearerProductionEnv();
     vi.stubEnv('HONO_CORS_ORIGINS', '*');
@@ -120,6 +149,26 @@ describe('Hono server config', () => {
     stubValidBearerProductionEnv();
     vi.stubEnv('ARENA_FINALIZATION_URL', value);
     expect(() => readHonoServerConfig()).toThrow(/ARENA_FINALIZATION_URL/);
+  });
+
+  it('G25E2-VERSION-SKEW：生产启动路径接受 rollout 阶段一个版本的兼容偏差', () => {
+    stubValidBearerProductionEnv();
+    vi.stubEnv('HOSTED_DR_GATE_STAGE', 'rollout');
+    vi.stubEnv('HOSTED_DR_PRIMARY_CONTRACT_VERSION', 'g25e1-v2');
+    vi.stubEnv('HOSTED_DR_DR_CONTRACT_VERSION', 'g25e1-v1');
+    vi.stubEnv('HOSTED_DR_CLIENT_CONTRACT_VERSION', 'g25e1-v1');
+    vi.stubEnv('HOSTED_DR_SCHEMA_STATE', 'expanded');
+
+    expect(readHonoServerConfig().nodeEnv).toBe('production');
+  });
+
+  it('G25E2-VERSION-SKEW：生产启动路径拒绝跨 family 或过大 skew', () => {
+    stubValidBearerProductionEnv();
+    vi.stubEnv('HOSTED_DR_PRIMARY_CONTRACT_VERSION', 'g25e2-v2');
+    vi.stubEnv('HOSTED_DR_DR_CONTRACT_VERSION', 'g25e1-v1');
+    vi.stubEnv('HOSTED_DR_CLIENT_CONTRACT_VERSION', 'g25e1-v1');
+
+    expect(() => readHonoServerConfig()).toThrow(/HOSTED_DR_VERSION_GATE/);
   });
 
   it('拒绝未知鉴权模式', () => {

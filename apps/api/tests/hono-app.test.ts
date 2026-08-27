@@ -136,7 +136,7 @@ describe('Hono server app', () => {
     expect(JSON.stringify(errorSpy.mock.calls)).not.toContain('redis-url-secret-canary');
   });
 
-  it('共用 Redis 时使用环境前缀隔离限流键', async () => {
+  it('共用 Redis 时将环境前缀交给 RedisRuntime 统一隔离限流键', async () => {
     const redis = createRedisStub();
     const capturedNamespaces: string[] = [];
     redis.consumeFixedWindow = async (input) => {
@@ -147,7 +147,7 @@ describe('Hono server app', () => {
 
     await app.request('/api/auth/not-existing');
 
-    expect(capturedNamespaces).toEqual(['preview:api', 'preview:auth']);
+    expect(capturedNamespaces).toEqual(['api', 'auth']);
   });
 
   it('Redis 命令异常且为必需依赖时稳定返回 503', async () => {

@@ -140,6 +140,9 @@ export class RedisRuntime implements RedisService {
     if (!Number.isFinite(commandTimeoutMs) || commandTimeoutMs < 1) {
       throw new Error('commandTimeoutMs 必须是正有限数字');
     }
+    if (keyPrefix && !/^[a-z0-9_-]{1,32}$/u.test(keyPrefix)) {
+      throw new Error('keyPrefix 必须是安全的环境标识');
+    }
   }
 
   private observeOperation(observation: RedisRuntimeOperationObservation): void {
@@ -295,7 +298,10 @@ export class RedisRuntime implements RedisService {
 
     const limit = Math.max(1, Math.floor(input.limit));
     const windowMs = Math.max(1_000, Math.floor(input.windowSeconds * 1_000));
-    const key = `mahoshojo:rate-limit:${input.namespace}:${hashKeyPart(input.identity)}`;
+    const namespacedNamespace = this.keyPrefix
+      ? `${this.keyPrefix}:${input.namespace}`
+      : input.namespace;
+    const key = `mahoshojo:rate-limit:${namespacedNamespace}:${hashKeyPart(input.identity)}`;
     const startedAt = performance.now();
     try {
       const rawResult = await this.client.eval(FIXED_WINDOW_SCRIPT, {

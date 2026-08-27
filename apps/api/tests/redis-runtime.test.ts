@@ -5,7 +5,7 @@ const redisClient = vi.hoisted(() => ({
   connect: vi.fn(async () => undefined),
   destroy: vi.fn(),
   eval: vi.fn(),
-  get: vi.fn(async () => null),
+  get: vi.fn<() => Promise<string | null>>(async () => null),
   info: vi.fn(),
   isOpen: true,
   isReady: true,
@@ -141,6 +141,78 @@ describe('RedisRuntime shutdown', () => {
     expect(JSON.stringify(observeRedisOperation.mock.calls)).not.toContain(
       'sensitive-user-id',
     );
+  });
+
+  it('G25E2-REDIS-PREFIX：RedisRuntime 本身为所有限流 namespace 加环境前缀', async () => {
+    const redis = new RedisRuntime(
+      'redis://example.test:6379',
+      true,
+      undefined,
+      undefined,
+      'preview',
+    );
+    await redis.connect();
+
+    await redis.consumeFixedWindow({
+      namespace: 'api',
+      identity: 'preview-user',
+      limit: 10,
+      windowSeconds: 60,
+    });
+
+    const [, options] = redisClient.eval.mock.calls.at(-1)! as unknown as [
+      string,
+      { keys: string[] },
+    ];
+    expect(options.keys[0]).toMatch(/^mahoshojo:rate-limit:preview:api:/u);
+  });
+
+  it('G25E2-REDIS-EMPTY：拒绝 malformed nested snapshot/terminal，避免把 Redis 垃圾投影成状态', async () => {
+    const redis = new RedisRuntime('redis://example.test:6379', true);
+    await redis.connect();
+    const store = redis.getGenerationReplayStore();
+    const baseState = {
+      actorHash: 'actor-hash',
+      reservationKey: 'reservation-key',
+      generationId: 'generation-nested-001',
+      generationRequestId: 'request-nested-001',
+      payloadHash: 'payload-hash',
+      producerToken: 'producer-token',
+      status: 'running',
+      updatedAt: '2026-08-25T04:00:00.000Z',
+      leaseExpiresAt: '2026-08-25T04:01:00.000Z',
+      cancelRequested: false,
+      snapshot: {
+        status: 'running',
+        markdown: 'partial',
+        reasoning: '',
+        lastEventId: null,
+        updatedAt: '2026-08-25T04:00:00.000Z',
+      },
+      terminal: null,
+    };
+
+    redisClient.get.mockResolvedValueOnce(JSON.stringify(baseState));
+    await expect(store.readState({ generationId: baseState.generationId })).resolves.toMatchObject({
+      snapshot: { status: 'running', markdown: 'partial' },
+      terminal: null,
+    });
+
+    redisClient.get.mockResolvedValueOnce(JSON.stringify({
+      ...baseState,
+      snapshot: { ...baseState.snapshot, status: 'not-a-generation-status' },
+    }));
+    await expect(store.readState({ generationId: baseState.generationId }))
+      .rejects.toThrow('REDIS_GENERATION_STATE_INVALID');
+
+    redisClient.get.mockResolvedValueOnce(JSON.stringify({
+      ...baseState,
+      snapshot: null,
+      status: 'completed',
+      terminal: { status: 'not-a-terminal-status', resultRef: null },
+    }));
+    await expect(store.readState({ generationId: baseState.generationId }))
+      .rejects.toThrow('REDIS_GENERATION_STATE_INVALID');
   });
 
   it('INFO 采样失败只产生固定错误指标，不抛出到 Redis 业务路径', async () => {

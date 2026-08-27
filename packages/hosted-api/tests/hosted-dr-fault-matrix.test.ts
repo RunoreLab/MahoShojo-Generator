@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   createHostedDrReadinessService,
   selectHostedDrRuntime,
@@ -34,6 +34,10 @@ const createProvider = (
 
 describe('G25E-2 Hosted DR fault matrix: selector/readiness/cutback', () => {
   it('G25E2-HONO-UNAVAILABLE：primary 不可达时 stable client 直接使用 DR readiness', async () => {
+    const primaryProbe = vi.fn(async () => {
+      throw new Error('Hono primary unavailable');
+    });
+    await expect(primaryProbe()).rejects.toThrow('Hono primary unavailable');
     const selected = selectHostedDrRuntime({
       requestClass: 'safe-read',
       dispatchState: 'not-dispatched',
@@ -49,7 +53,12 @@ describe('G25E-2 Hosted DR fault matrix: selector/readiness/cutback', () => {
       placement: 'next-dr',
       provider: createProvider('cloudflare-d1-binding'),
     });
-    const response = await dr(new Request('https://stable.test/api/hosted/dr-readiness'));
+    const drRequest = vi.fn((request: Request) => dr(request));
+    const response = selected === 'next-dr'
+      ? await drRequest(new Request('https://stable.test/api/hosted/dr-readiness'))
+      : new Response(null, { status: 500 });
+    expect(primaryProbe).toHaveBeenCalledOnce();
+    expect(drRequest).toHaveBeenCalledOnce();
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
       ok: true,
@@ -80,6 +89,8 @@ describe('G25E-2 Hosted DR fault matrix: selector/readiness/cutback', () => {
   });
 
   it('G25E2-CUTBACK：primary 恢复只影响新请求，旧 non-idempotent operation 不重发', () => {
+    const primaryDispatch = vi.fn();
+    const drDispatch = vi.fn();
     const newRead = selectHostedDrRuntime({
       requestClass: 'safe-read',
       dispatchState: 'not-dispatched',
@@ -102,5 +113,10 @@ describe('G25E-2 Hosted DR fault matrix: selector/readiness/cutback', () => {
     expect(newRead).toBe('hono-primary');
     expect(inFlight).toBe('fail-closed');
     expect(previousDispatch).toBe('fail-closed');
+    if (newRead === 'hono-primary') primaryDispatch('safe-read');
+    if (inFlight === 'next-dr') drDispatch('non-idempotent-operation');
+    if (previousDispatch === 'next-dr') drDispatch('non-idempotent-operation');
+    expect(primaryDispatch).toHaveBeenCalledWith('safe-read');
+    expect(drDispatch).not.toHaveBeenCalled();
   });
 });

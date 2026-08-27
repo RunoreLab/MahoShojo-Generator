@@ -14,13 +14,17 @@ import {
   createArenaCompanionRouteService,
 } from '@mahoshojo/hosted-runtime/arena-companion';
 import type { ArenaGenerationObserver } from '@mahoshojo/hosted-api/arena-generation/service';
+import type { ArenaTerminalEffectInput } from '@mahoshojo/hosted-runtime/arena-generation';
 import { recordUserActivityFromRequest } from '@mahoshojo/hosted-runtime/node-runtime/data-ports';
 import { createEnvSignatureService } from '@mahoshojo/hosted-runtime/node-runtime/env-signature';
 import { getHonoPrimaryD1Client } from '#/d1/provider';
 import type { RedisRuntime } from '#/redis/runtime';
 
 export type HonoArenaGenerationRuntimeOptions = {
-  settleRatings?(_generationId: string): Promise<void>;
+  settleRatings?(_input: Pick<
+    ArenaTerminalEffectInput,
+    'generationId' | 'idempotencyKey'
+  >): Promise<void>;
   readRanking?(_generationId: string): Promise<unknown | null>;
   finalizationBaseUrl?: string;
   finalizationSecret?: string;

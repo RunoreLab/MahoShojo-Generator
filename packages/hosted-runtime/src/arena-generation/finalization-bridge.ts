@@ -1,9 +1,14 @@
 import { createArenaInternalAuthHeaders } from './internal-http-auth';
+import { buildArenaTerminalEffectIdempotencyKey } from './finalization';
+import type { ArenaTerminalEffectInput } from './finalization';
 
 const FINALIZATION_PATH = '/api/internal/arena-generation/finalize';
 
 export type ArenaFinalizationBridge = {
-  settleRatings(_generationId: string): Promise<void>;
+  settleRatings(_input: Pick<
+    ArenaTerminalEffectInput,
+    'generationId' | 'idempotencyKey'
+  >): Promise<void>;
   readRanking(_generationId: string): Promise<unknown | null>;
 };
 
@@ -37,11 +42,18 @@ export const createArenaFinalizationBridge = (
   const timeoutMs = options.timeoutMs ?? 15_000;
   const rankings = new Map<string, unknown | null>();
 
-  const finalize = async (generationId: string): Promise<unknown | null> => {
+  const finalize = async (input: Pick<
+    ArenaTerminalEffectInput,
+    'generationId' | 'idempotencyKey'
+  >): Promise<unknown | null> => {
+    const { generationId, idempotencyKey } = input;
     if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/u.test(generationId)) {
       throw new Error('ARENA_GENERATION_ID_INVALID');
     }
-    const body = JSON.stringify({ version: 1, generationId });
+    if (idempotencyKey !== buildArenaTerminalEffectIdempotencyKey(generationId, 'ratings')) {
+      throw new Error('ARENA_FINALIZATION_IDEMPOTENCY_KEY_INVALID');
+    }
+    const body = JSON.stringify({ version: 1, generationId, idempotencyKey });
     const authHeaders = await createArenaInternalAuthHeaders({
       secret: options.secret,
       method: 'POST',
@@ -79,8 +91,8 @@ export const createArenaFinalizationBridge = (
   };
 
   return Object.freeze({
-    async settleRatings(generationId) {
-      await finalize(generationId);
+    async settleRatings(input) {
+      await finalize(input);
     },
     async readRanking(generationId) {
       if (rankings.has(generationId)) {
@@ -88,7 +100,10 @@ export const createArenaFinalizationBridge = (
         rankings.delete(generationId);
         return ranking;
       }
-      return finalize(generationId);
+      return finalize({
+        generationId,
+        idempotencyKey: buildArenaTerminalEffectIdempotencyKey(generationId, 'ratings'),
+      });
     },
   });
 };

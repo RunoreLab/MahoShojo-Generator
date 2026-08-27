@@ -47,14 +47,14 @@ export const createHonoApp = (
   }));
 
   app.use('/api/*', redisRateLimit(redis, {
-    namespace: `${config.redisKeyPrefix ? `${config.redisKeyPrefix}:` : ''}api`,
+    namespace: 'api',
     limit: 600,
     windowSeconds: 60,
     failureMode: config.redisRequired ? 'closed' : 'open',
     bypassPaths: REDIS_RATE_LIMIT_BYPASS_PATHS,
   }));
   app.use('/api/auth/*', redisRateLimit(redis, {
-    namespace: `${config.redisKeyPrefix ? `${config.redisKeyPrefix}:` : ''}auth`,
+    namespace: 'auth',
     limit: 30,
     windowSeconds: 60,
     failureMode: config.redisRequired ? 'closed' : 'open',

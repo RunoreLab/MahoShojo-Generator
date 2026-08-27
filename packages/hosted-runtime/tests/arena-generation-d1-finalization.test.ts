@@ -640,7 +640,10 @@ describe('Arena D1/R2 finalization ports', () => {
       resultRef: 'r2:key',
       markdown: 'preview',
     });
-    expect(settleRatings).toHaveBeenCalledOnce();
+    expect(settleRatings).toHaveBeenCalledWith({
+      generationId: 'generation-1',
+      idempotencyKey: 'arena-terminal:generation-1:ratings',
+    });
     expect(client.prepare).toHaveBeenCalledWith(expect.stringContaining(
       'INSERT OR IGNORE INTO battle_report_generation_combatants',
     ));

@@ -86,6 +86,7 @@ jobs:
         env:
           REDIS_URL: redis://127.0.0.1:6379
           D1_GATEWAY_URL: http://127.0.0.1:8788
+          HOSTED_DR_LOCAL_FAULT_INJECTION: 'true'
           D1_GATEWAY_HMAC_SECRET: g25c-ci-only-d1-gateway-hmac-secret
           HONO_AUTH_MODE: bearer
           HONO_CORS_ORIGINS: https://g25c-ci.example.invalid
@@ -131,6 +132,7 @@ jobs:
           fi
 
           pnpm --filter @mahoshojo/api run verify:arena-redis
+          REDIS_URL=redis://127.0.0.1:6379/15 pnpm run verify:hosted-dr:redis
           pnpm run verify:server:runtime
 
       - name: Upload bundle

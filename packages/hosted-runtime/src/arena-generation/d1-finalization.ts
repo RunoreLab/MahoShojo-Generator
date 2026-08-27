@@ -5,9 +5,11 @@ import type {
   ArenaGenerationTerminalStore,
 } from '@mahoshojo/hosted-api/arena-generation/service';
 import type {
+  ArenaTerminalEffectInput,
   ArenaGenerationFinalizationPorts,
   ArenaTerminalClaimInput,
 } from './finalization';
+import { buildArenaTerminalEffectIdempotencyKey } from './finalization';
 import type { NodeDataD1Client } from '../node-runtime/data-ports';
 import { hashArenaCombatantBaseRevision } from '@mahoshojo/domain/arena-reconciliation';
 
@@ -36,7 +38,10 @@ export type NodeArenaGenerationPersistenceOptions = {
   getD1Client(): NodeDataD1Client | null;
   objectStore?: ArenaGenerationObjectStore;
   now?: () => Date;
-  settleRatings?(_generationId: string): Promise<void>;
+  settleRatings?(_input: {
+    generationId: string;
+    idempotencyKey: string;
+  }): Promise<void>;
   readRanking?(_generationId: string): Promise<unknown | null>;
 };
 
@@ -794,7 +799,7 @@ WHERE id = ?
       }
     },
 
-    async persistCombatants(input) {
+    async persistCombatants(input: ArenaTerminalEffectInput) {
       const client = options.getD1Client();
       if (!client || !Array.isArray(input.payload.combatants)) return;
       const createdAt = now().toISOString();
@@ -832,13 +837,16 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       }
     },
 
-    async applyStoryImpacts() {
+    async applyStoryImpacts(_input: ArenaTerminalEffectInput) {
       // Local-card reconciliation authority is frozen into the existing battle
       // report extra_json during claimTerminal. The cards themselves stay local.
     },
 
     async settleRatings(input) {
-      await options.settleRatings?.(input.generationId);
+      await options.settleRatings?.({
+        generationId: input.generationId,
+        idempotencyKey: input.idempotencyKey,
+      });
     },
 
     async readRanking(input) {
@@ -928,7 +936,15 @@ export const createNodeArenaGenerationTerminalStore = (
           extra,
           createdAt: input.updatedAt,
         });
-        if (status === 'completed') await options.settleRatings?.(input.generationId);
+        if (status === 'completed') {
+          await options.settleRatings?.({
+            generationId: input.generationId,
+            idempotencyKey: buildArenaTerminalEffectIdempotencyKey(
+              input.generationId,
+              'ratings',
+            ),
+          });
+        }
         await client.prepare(`
 UPDATE battle_report_generations
 SET status = ?, ended_at = ?,

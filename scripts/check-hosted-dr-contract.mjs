@@ -29,6 +29,19 @@ const requiredDrillCaseIds = [
   'G25E2-CUTBACK',
 ];
 const allowedDrillStatuses = new Set(['verified', 'deferred', 'blocked', 'not-applicable']);
+const allowedDrillProofLevels = new Set([
+  'isolated-selector-adapter',
+  'isolated-runtime',
+  'isolated-behavioral',
+  'isolated-authority-gate',
+  'isolated-guard',
+  'isolated-contract',
+  'isolated-selector',
+]);
+const allowedDrillEvidenceCommands = new Set([
+  'pnpm run verify:hosted-dr',
+  'pnpm run verify:hosted-dr:redis',
+]);
 
 const fail = (message) => failures.push(message);
 const readJson = (relativePath) => JSON.parse(readFileSync(
@@ -139,10 +152,28 @@ for (const drillCase of drillCases) {
   if (!Array.isArray(drillCase.evidenceTests) || drillCase.evidenceTests.length === 0) {
     fail(`${label}: evidenceTests 不得为空`);
   }
+  if (!allowedDrillProofLevels.has(drillCase.proofLevel)) {
+    fail(`${label}: proofLevel 非法`);
+  }
+  if (!allowedDrillEvidenceCommands.has(drillCase.evidenceCommand)) {
+    fail(`${label}: evidenceCommand 必须使用受控 G25E-2 验证入口`);
+  }
+  if (!Array.isArray(drillCase.evidenceAssertions) || drillCase.evidenceAssertions.length === 0
+    || !drillCase.evidenceAssertions.every(isNonEmptyString)) {
+    fail(`${label}: evidenceAssertions 不得为空且必须为非空字符串`);
+  }
+  let hasCaseMarker = false;
   for (const evidenceTest of drillCase.evidenceTests ?? []) {
     if (!isNonEmptyString(evidenceTest) || !existsSync(path.join(repositoryRoot, evidenceTest))) {
       fail(`${label}: evidence test 不存在 ${evidenceTest}`);
+      continue;
     }
+    if (readFileSync(path.join(repositoryRoot, evidenceTest), 'utf8').includes(label)) {
+      hasCaseMarker = true;
+    }
+  }
+  if (!hasCaseMarker) {
+    fail(`${label}: evidenceTests 至少一个源码必须包含精确 case marker`);
   }
   if (!Array.isArray(drillCase.recoverySteps) || drillCase.recoverySteps.length === 0) {
     fail(`${label}: recoverySteps 不得为空`);

@@ -50,13 +50,19 @@ describe('Hono API 客户端', () => {
     }
   });
 
-  test('preview origin 必须是 manifest 声明的环境入口，生产拒绝任意 env 覆盖', () => {
+  test('preview origin 必须与显式部署环境匹配，生产拒绝 preview 入口', () => {
     expect(resolveHostedApiOrigin(undefined, 'production'))
       .toBe(hostedDrManifest.controlPlane.stableOrigin);
-    expect(resolveHostedApiOrigin(
+    expect(() => resolveHostedApiOrigin(
       hostedDrManifest.controlPlane.previewOrigin,
       'production',
+    )).toThrow(/production.*stable/);
+    expect(resolveHostedApiOrigin(
+      hostedDrManifest.controlPlane.previewOrigin,
+      'preview',
     )).toBe(hostedDrManifest.controlPlane.previewOrigin);
+    expect(() => resolveHostedApiOrigin(undefined, 'preview'))
+      .toThrow(/preview origin/);
     expect(() => resolveHostedApiOrigin('https://untrusted.example.test', 'production'))
       .toThrow(/NEXT_PUBLIC_HONO_API_ORIGIN/);
     expect(resolveHostedApiOrigin('http://127.0.0.1:8787', 'development'))

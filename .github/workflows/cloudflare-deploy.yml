@@ -13,6 +13,7 @@ concurrency:
 jobs:
   deploy:
     name: Build and deploy
+    if: github.ref == 'refs/heads/feature/v0.2.0_Battle_Growth_MahoShojo'
     runs-on: ubuntu-latest
     environment:
       name: production
@@ -62,6 +63,7 @@ jobs:
           NEXT_PUBLIC_ENABLE_BUNDLE_SAFETY_CHECK: ${{ vars.NEXT_PUBLIC_ENABLE_BUNDLE_SAFETY_CHECK }}
           NEXT_PUBLIC_GA_ID: ${{ vars.NEXT_PUBLIC_GA_ID }}
           NEXT_PUBLIC_SAFETY_CHECK_POLICY: ${{ vars.NEXT_PUBLIC_SAFETY_CHECK_POLICY }}
+          NEXT_PUBLIC_HOSTED_API_ENVIRONMENT: production
         run: pnpm --filter @mahoshojo/web run build:cf
 
       - name: Deploy production

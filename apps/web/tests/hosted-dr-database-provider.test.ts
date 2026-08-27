@@ -55,7 +55,7 @@ describe('Next/OpenNext Hosted DR D1 provider', () => {
     expect(getCloudflareDrD1Client()).toBeNull();
   });
 
-  it('production 只接受 binding，非 production 可显式保留旧 HTTP local adapter', () => {
+  it('G25E2-D1-UNAVAILABLE：production 只接受 binding，非 production 可显式保留旧 HTTP local adapter', () => {
     getRuntimeD1ClientWithoutHttpFallback.mockReturnValue(null);
     getRuntimeD1Client.mockReturnValue({ prepare: vi.fn() });
 

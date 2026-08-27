@@ -45,4 +45,4 @@ services:
 networks:
   mahoshojo-redis:
     external: true
-    name: mahoshojo-redis
+    name: ${HONO_REDIS_NETWORK_NAME:-mahoshojo-redis}

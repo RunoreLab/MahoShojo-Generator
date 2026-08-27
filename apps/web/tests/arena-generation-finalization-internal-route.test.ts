@@ -26,7 +26,11 @@ afterEach(() => {
 describe('Arena generation finalization internal route', () => {
   it('authenticates the caller and runs idempotent rating settlement before reading ranking', async () => {
     vi.stubEnv('ARENA_FINALIZATION_HMAC_SECRET', secret);
-    const body = JSON.stringify({ version: 1, generationId: 'generation-1' });
+    const body = JSON.stringify({
+      version: 1,
+      generationId: 'generation-1',
+      idempotencyKey: 'arena-terminal:generation-1:ratings',
+    });
     const headers = await createArenaInternalAuthHeaders({
       secret,
       method: 'POST',
@@ -39,7 +43,10 @@ describe('Arena generation finalization internal route', () => {
     ));
 
     expect(response.status).toBe(200);
-    expect(settle).toHaveBeenCalledWith('generation-1');
+    expect(settle).toHaveBeenCalledWith({
+      generationId: 'generation-1',
+      idempotencyKey: 'arena-terminal:generation-1:ratings',
+    });
     expect(readRanking).toHaveBeenCalledWith('generation-1');
   });
 
@@ -56,7 +63,11 @@ describe('Arena generation finalization internal route', () => {
   it('does not report success when durable rating settlement fails', async () => {
     vi.stubEnv('ARENA_FINALIZATION_HMAC_SECRET', secret);
     settle.mockRejectedValueOnce(new Error('D1 unavailable'));
-    const body = JSON.stringify({ version: 1, generationId: 'generation-1' });
+    const body = JSON.stringify({
+      version: 1,
+      generationId: 'generation-1',
+      idempotencyKey: 'arena-terminal:generation-1:ratings',
+    });
     const headers = await createArenaInternalAuthHeaders({
       secret,
       method: 'POST',

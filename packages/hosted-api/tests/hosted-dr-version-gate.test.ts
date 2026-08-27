@@ -16,7 +16,7 @@ const evaluate = (
 });
 
 describe('Hosted DR version skew gate', () => {
-  it('允许同一 contract family 内一个版本的 expand skew', () => {
+  it('G25E2-VERSION-SKEW：允许同一 contract family 内一个版本的 expand skew', () => {
     expect(evaluate({ stage: 'expand' })).toMatchObject({
       allowed: true,
       reason: 'compatible',

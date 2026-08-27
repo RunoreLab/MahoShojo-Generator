@@ -27,6 +27,7 @@ export type RouteDefinition = {
   id: string;
   pattern: string;
   adapter: RouteAdapter;
+  methods: HttpMethod[];
   load: () => Promise<RouteModule>;
 };
 

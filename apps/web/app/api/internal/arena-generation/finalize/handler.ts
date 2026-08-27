@@ -1,4 +1,7 @@
-import { verifyArenaInternalRequest } from '@mahoshojo/hosted-runtime/arena-generation';
+import {
+  buildArenaTerminalEffectIdempotencyKey,
+  verifyArenaInternalRequest,
+} from '@mahoshojo/hosted-runtime/arena-generation';
 
 import { readGenerationRankingForGeneration } from '@/app/api/arena/generation-ranking/handler';
 import { settleArenaRatingsForGeneration } from '@/lib/database/arena-ratings';
@@ -30,16 +33,22 @@ export const appRouteHandler = async (request: Request): Promise<Response> => {
     ? payload as Record<string, unknown>
     : {};
   const generationId = typeof input.generationId === 'string' ? input.generationId.trim() : '';
+  const idempotencyKey = typeof input.idempotencyKey === 'string'
+    ? input.idempotencyKey.trim()
+    : buildArenaTerminalEffectIdempotencyKey(generationId, 'ratings');
   if (
     input.version !== 1
     || !/^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/u.test(generationId)
-    || Object.keys(input).some((key) => key !== 'version' && key !== 'generationId')
+    || idempotencyKey !== buildArenaTerminalEffectIdempotencyKey(generationId, 'ratings')
+    || Object.keys(input).some((key) => (
+      key !== 'version' && key !== 'generationId' && key !== 'idempotencyKey'
+    ))
   ) {
     return noStoreJson({ code: 'INVALID_REQUEST', error: 'Invalid request' }, 400);
   }
 
   try {
-    await settleArenaRatingsForGeneration(generationId);
+    await settleArenaRatingsForGeneration({ generationId, idempotencyKey });
     const ranking = await readGenerationRankingForGeneration(generationId);
     return noStoreJson({ success: true, ranking }, 200);
   } catch {

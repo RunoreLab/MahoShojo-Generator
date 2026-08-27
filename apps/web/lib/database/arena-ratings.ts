@@ -3,6 +3,7 @@ import { PRESET_LIST } from '@/lib/presets';
 import { isStrictRankedModelBlacklisted } from '@/lib/arena/ranked-model-policy';
 import { computeArenaBaseTier, type ArenaBaseTier, type ArenaTier } from '@/lib/arena/tier';
 import { shouldEnforceStrictRangeLimit } from '@/lib/arena/strict-range';
+import { buildArenaTerminalEffectIdempotencyKey } from '@mahoshojo/hosted-runtime/arena-generation';
 
 export type ArenaQueue = 'strict' | 'free';
 export type ArenaEntityType = 'data_card' | 'preset';
@@ -1073,8 +1074,18 @@ interface ArenaRatingEventComputedPayload {
 }
 
 export async function settleArenaRatingsForGeneration(
-  generationId: string
+  input: string | {
+    generationId: string;
+    idempotencyKey: string;
+  },
 ): Promise<void> {
+  const generationId = typeof input === 'string' ? input : input.generationId;
+  const idempotencyKey = typeof input === 'string'
+    ? buildArenaTerminalEffectIdempotencyKey(generationId, 'ratings')
+    : input.idempotencyKey;
+  if (idempotencyKey !== buildArenaTerminalEffectIdempotencyKey(generationId, 'ratings')) {
+    throw new Error('ARENA_RATING_IDEMPOTENCY_KEY_INVALID');
+  }
   try {
     const repository = await readArenaRatingsRepoBundle();
     if (!repository) throw new Error('ARENA_RATING_REPOSITORY_UNAVAILABLE');

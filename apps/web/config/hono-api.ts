@@ -25,6 +25,22 @@ export const resolveHostedApiOrigin = (
   environment: string | undefined,
 ): string => {
   const origin = configuredOrigin?.trim();
+  const normalizedEnvironment = environment?.trim().toLowerCase() || 'development';
+
+  if (normalizedEnvironment === 'production') {
+    if (!origin || origin === hostedDrStableOrigin) return hostedDrStableOrigin;
+    throw new Error(
+      'production 环境的 NEXT_PUBLIC_HONO_API_ORIGIN 只能使用 manifest 声明的 stable origin',
+    );
+  }
+
+  if (normalizedEnvironment === 'preview') {
+    if (origin === hostedDrPreviewOrigin) return hostedDrPreviewOrigin;
+    throw new Error(
+      'preview 环境必须显式使用 manifest 声明的 preview origin，且不得回退到 stable origin',
+    );
+  }
+
   if (!origin || origin === hostedDrStableOrigin || origin === hostedDrPreviewOrigin) {
     return origin || hostedDrStableOrigin;
   }
@@ -41,6 +57,6 @@ export const honoApiConfig = {
   // physical primary/DR origins remain server/control-plane contract details.
   origin: resolveHostedApiOrigin(
     process.env.NEXT_PUBLIC_HONO_API_ORIGIN,
-    process.env.NODE_ENV,
+    process.env.NEXT_PUBLIC_HOSTED_API_ENVIRONMENT?.trim() || process.env.NODE_ENV,
   ),
 };

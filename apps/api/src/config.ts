@@ -4,7 +4,12 @@ import {
   type HonoAuthMode,
 } from '#/auth/config';
 import { parseAIProvidersFromEnv } from '@mahoshojo/hosted-runtime/node-runtime/providers';
-import { hasValidHostedApiProductionCorsOrigins } from '@mahoshojo/hosted-api/hosted-dr';
+import {
+  evaluateHostedDrVersionGate,
+  hasValidHostedApiProductionCorsOrigins,
+  HOSTED_DR_CONTRACT_VERSION,
+  type HostedDrVersionGateInput,
+} from '@mahoshojo/hosted-api/hosted-dr';
 
 export type HonoServerConfig = {
   host: string;
@@ -20,11 +25,36 @@ export type HonoServerConfig = {
 
 const hasText = (value: string | undefined): boolean => Boolean(value?.trim());
 
-const isTrustedHttpsOrigin = (value: string | undefined): boolean => {
-  if (!hasText(value)) return false;
+const parseTrustedHttpsOrigin = (value: string | undefined): string | null => {
+  if (!hasText(value)) return null;
   try {
     const url = new URL(value as string);
-    return url.protocol === 'https:'
+    if (url.protocol !== 'https:'
+      || url.username
+      || url.password
+      || url.pathname !== '/'
+      || url.search
+      || url.hash) {
+      return null;
+    }
+    return url.origin;
+  } catch {
+    return null;
+  }
+};
+
+const isTrustedHttpsOrigin = (value: string | undefined): boolean =>
+  parseTrustedHttpsOrigin(value) !== null;
+
+const isLocalFaultInjectionGateway = (
+  value: string | undefined,
+  env: NodeJS.ProcessEnv,
+): boolean => {
+  if (env.HOSTED_DR_LOCAL_FAULT_INJECTION?.trim().toLowerCase() !== 'true') return false;
+  try {
+    const url = new URL(value ?? '');
+    return url.protocol === 'http:'
+      && ['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname)
       && !url.username
       && !url.password
       && url.pathname === '/'
@@ -35,8 +65,32 @@ const isTrustedHttpsOrigin = (value: string | undefined): boolean => {
   }
 };
 
+const readConfiguredOrigins = (value: string | undefined): string[] =>
+  (value ?? '')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+
 const hasValidAiProviderConfig = (env: NodeJS.ProcessEnv): boolean =>
   parseAIProvidersFromEnv(env).length > 0;
+
+const validateHostedDrVersionGate = (env: NodeJS.ProcessEnv): void => {
+  const stage = env.HOSTED_DR_GATE_STAGE?.trim() || 'rollout';
+  const schemaState = env.HOSTED_DR_SCHEMA_STATE?.trim() || 'expanded';
+  const result = evaluateHostedDrVersionGate({
+    stage: stage as HostedDrVersionGateInput['stage'],
+    primaryContractVersion: env.HOSTED_DR_PRIMARY_CONTRACT_VERSION?.trim()
+      || HOSTED_DR_CONTRACT_VERSION,
+    drContractVersion: env.HOSTED_DR_DR_CONTRACT_VERSION?.trim() || HOSTED_DR_CONTRACT_VERSION,
+    clientContractVersion: env.HOSTED_DR_CLIENT_CONTRACT_VERSION?.trim()
+      || HOSTED_DR_CONTRACT_VERSION,
+    schemaState: schemaState as HostedDrVersionGateInput['schemaState'],
+    cleanupRequested: env.HOSTED_DR_CLEANUP_REQUESTED?.trim().toLowerCase() === 'true',
+  });
+  if (!result.allowed) {
+    throw new Error(`HOSTED_DR_VERSION_GATE_${result.reason.toUpperCase()}`);
+  }
+};
 
 const validateProductionEnvironment = (
   env: NodeJS.ProcessEnv,
@@ -46,6 +100,8 @@ const validateProductionEnvironment = (
 
   const problems: string[] = [];
   if (!config.redisUrl) problems.push('Redis 未配置（REDIS_URL 或 REDIS_HOST）');
+  if (!config.redisRequired) problems.push('REDIS_REQUIRED 生产模式必须为 true');
+  if (!config.d1Required) problems.push('D1_REQUIRED 生产模式必须为 true');
   if (!hasValidAiProviderConfig(env)) problems.push('AI_PROVIDERS_CONFIG/AI_API_KEY 缺失或无有效 provider');
   if ((env.SIGNATURE_SECRET_KEY?.trim().length ?? 0) < 32) {
     problems.push('SIGNATURE_SECRET_KEY 必须至少 32 个字符');
@@ -56,6 +112,27 @@ const validateProductionEnvironment = (
 
   const gatewayUrl = env.D1_GATEWAY_URL?.trim();
   if (gatewayUrl) {
+    const gatewayOrigin = parseTrustedHttpsOrigin(gatewayUrl);
+    const localFaultInjectionGateway = isLocalFaultInjectionGateway(gatewayUrl, env);
+    if (!gatewayOrigin && !localFaultInjectionGateway) {
+      problems.push('D1_GATEWAY_URL 必须是已登记、无凭据、路径、查询与片段的 HTTPS origin');
+    }
+    const allowedGatewayOrigins = readConfiguredOrigins(env.D1_GATEWAY_ALLOWED_ORIGINS);
+    const invalidAllowedGatewayOrigins = allowedGatewayOrigins.filter(
+      (origin) => parseTrustedHttpsOrigin(origin) === null,
+    );
+    if (invalidAllowedGatewayOrigins.length > 0) {
+      problems.push('D1_GATEWAY_ALLOWED_ORIGINS 只能包含无凭据、路径、查询与片段的 HTTPS origin');
+    }
+    const canonicalAllowedGatewayOrigins = new Set(
+      allowedGatewayOrigins
+        .map((origin) => parseTrustedHttpsOrigin(origin))
+        .filter((origin): origin is string => origin !== null),
+    );
+    if (!localFaultInjectionGateway
+      && (!gatewayOrigin || !canonicalAllowedGatewayOrigins.has(gatewayOrigin))) {
+      problems.push('D1_GATEWAY_URL 必须匹配 D1_GATEWAY_ALLOWED_ORIGINS 中的已登记 origin');
+    }
     const gatewaySecret = env.D1_GATEWAY_HMAC_SECRET?.trim();
     const gatewayToken = env.D1_GATEWAY_TOKEN?.trim();
     if (!gatewaySecret && !gatewayToken) {
@@ -170,6 +247,7 @@ const readRedisKeyPrefix = (): string => {
 export const readHonoServerConfig = (): HonoServerConfig => {
   const nodeEnv = process.env.NODE_ENV?.trim() || 'development';
   const redisUrl = readRedisUrl();
+  validateHostedDrVersionGate(process.env);
 
   const config: HonoServerConfig = {
     host: process.env.HONO_HOST?.trim() || '0.0.0.0',

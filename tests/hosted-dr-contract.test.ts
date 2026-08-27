@@ -60,6 +60,9 @@ type HostedDrDrillManifest = {
     status: string;
     scope: string[];
     evidenceTests: string[];
+    proofLevel: string;
+    evidenceCommand: string;
+    evidenceAssertions: string[];
   }>;
   productionDrill: {
     status: string;
@@ -202,6 +205,9 @@ describe('Hosted DR machine contract', () => {
       expect(entry.acceptance.length, entry.id).toBeGreaterThan(0);
       expect(entry.scope.length, entry.id).toBeGreaterThan(0);
       expect(entry.evidenceTests.length, entry.id).toBeGreaterThan(0);
+      expect(entry.proofLevel, entry.id).toMatch(/^isolated-/u);
+      expect(entry.evidenceCommand, entry.id).toMatch(/^pnpm run verify:hosted-dr(?::redis)?$/u);
+      expect(entry.evidenceAssertions.length, entry.id).toBeGreaterThan(0);
       expect(entry.status, entry.id).toBe('verified');
       for (const evidenceTest of entry.evidenceTests) {
         expect(existsSync(path.join(repositoryRoot, evidenceTest)), `${entry.id}:${evidenceTest}`).toBe(true);
@@ -221,6 +227,13 @@ describe('Hosted DR machine contract', () => {
         drill.cases[0]!.status = 'passing';
       },
       expected: 'drill status 非法',
+    },
+    {
+      label: '伪造 evidence path',
+      mutate: (drill: HostedDrDrillManifest) => {
+        drill.cases[0]!.evidenceTests = ['apps/api/tests/config.test.ts'];
+      },
+      expected: 'case marker',
     },
     {
       label: '伪报 production drill',
@@ -259,7 +272,7 @@ describe('Hosted DR machine contract', () => {
 
     expect(existsSync(path.join(repositoryRoot, 'scripts/check-hosted-dr-contract.mjs'))).toBe(true);
     expect(existsSync(path.join(repositoryRoot, 'config/hosted-dr-drills.json'))).toBe(true);
-    expect(rootPackage.scripts['check:hosted-dr']).toBe('node scripts/check-hosted-dr-contract.mjs');
+    expect(rootPackage.scripts['check:hosted-dr']).toContain('check:hosted-dr:schema');
     expect(rootPackage.scripts['verify:hosted-dr']).toContain('tests/hosted-dr-fault-matrix.test.ts');
     expect(rootPackage.scripts['ci:verify']).toContain('pnpm run verify:hosted-dr');
     expect(rootPackage.scripts['workspace:verify']).toContain('pnpm run check:hosted-dr');

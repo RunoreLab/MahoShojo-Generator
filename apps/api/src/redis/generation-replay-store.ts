@@ -356,6 +356,71 @@ const isGenerationStatus = (value: unknown): value is GenerationStatus => [
   'producer_lost',
 ].includes(String(value));
 
+const isTerminalStatus = (
+  value: unknown,
+): value is GenerationTerminal['status'] => (
+  value === 'completed'
+  || value === 'failed'
+  || value === 'cancelled'
+  || value === 'producer_lost'
+);
+
+const isRecord = (value: unknown): value is Record<string, unknown> => (
+  typeof value === 'object' && value !== null && !Array.isArray(value)
+);
+
+const nullableString = (value: unknown): value is string | null => (
+  value === null || typeof value === 'string'
+);
+
+const parseStoredSnapshot = (value: unknown): GenerationSnapshot | null => {
+  if (value === null || value === undefined) return null;
+  if (!isRecord(value)) throw new Error('REDIS_GENERATION_STATE_INVALID');
+  const lastEventId = value.lastEventId ?? null;
+  const telemetry = value.telemetry ?? null;
+  const terminalResultRef = value.terminalResultRef ?? null;
+  if (
+    !isGenerationStatus(value.status)
+    || typeof value.markdown !== 'string'
+    || typeof value.reasoning !== 'string'
+    || !nullableString(lastEventId)
+    || typeof value.updatedAt !== 'string'
+    || (telemetry !== null && !isRecord(telemetry))
+    || !nullableString(terminalResultRef)
+  ) {
+    throw new Error('REDIS_GENERATION_STATE_INVALID');
+  }
+  return {
+    status: value.status,
+    markdown: value.markdown,
+    reasoning: value.reasoning,
+    lastEventId,
+    updatedAt: value.updatedAt,
+    telemetry: telemetry as Record<string, unknown> | null,
+    terminalResultRef,
+  };
+};
+
+const parseStoredTerminal = (value: unknown): GenerationTerminal | null => {
+  if (value === null || value === undefined) return null;
+  if (!isRecord(value) || !isTerminalStatus(value.status)) {
+    throw new Error('REDIS_GENERATION_STATE_INVALID');
+  }
+  if (
+    ('code' in value && typeof value.code !== 'string')
+    || ('resultRef' in value && !nullableString(value.resultRef))
+  ) {
+    throw new Error('REDIS_GENERATION_STATE_INVALID');
+  }
+  const code = value.code;
+  const resultRef = value.resultRef;
+  return {
+    status: value.status,
+    ...(code === undefined ? {} : { code: code as string }),
+    ...(resultRef === undefined ? {} : { resultRef: resultRef as string | null }),
+  };
+};
+
 const cancelReasonFromTaggedResult = (
   value: unknown,
   prefix: 'accepted:' | 'cancelled:',
@@ -369,9 +434,18 @@ const cancelReasonFromTaggedResult = (
 };
 
 const parseStoredState = (raw: string): StoredGenerationState => {
-  const parsed = JSON.parse(raw) as Partial<StoredGenerationState>;
+  let parsed: Partial<StoredGenerationState>;
+  try {
+    const candidate: unknown = JSON.parse(raw);
+    if (!isRecord(candidate)) throw new Error('REDIS_GENERATION_STATE_INVALID');
+    parsed = candidate as Partial<StoredGenerationState>;
+  } catch {
+    throw new Error('REDIS_GENERATION_STATE_INVALID');
+  }
   const preparationSeed = parsed.preparationSeed ?? null;
   const preparationVersion = parsed.preparationVersion ?? null;
+  const snapshot = parseStoredSnapshot(parsed.snapshot);
+  const terminal = parseStoredTerminal(parsed.terminal);
   if (
     typeof parsed.actorHash !== 'string'
     || typeof parsed.reservationKey !== 'string'
@@ -384,6 +458,8 @@ const parseStoredState = (raw: string): StoredGenerationState => {
     || ((preparationSeed === null) !== (preparationVersion === null))
     || (preparationSeed !== null && !isArenaPreparationSeed(preparationSeed))
     || (preparationVersion !== null && !isArenaPreparationVersion(preparationVersion))
+    || (terminal !== null && terminal.status !== parsed.status)
+    || (terminal === null && isTerminalStatus(parsed.status))
   ) {
     throw new Error('REDIS_GENERATION_STATE_INVALID');
   }
@@ -399,8 +475,8 @@ const parseStoredState = (raw: string): StoredGenerationState => {
     lastEventId: typeof parsed.lastEventId === 'string' ? parsed.lastEventId : null,
     updatedAt: parsed.updatedAt,
     leaseExpiresAt: typeof parsed.leaseExpiresAt === 'string' ? parsed.leaseExpiresAt : null,
-    snapshot: parsed.snapshot ?? null,
-    terminal: parsed.terminal ?? null,
+    snapshot,
+    terminal,
     cancelRequested: parsed.cancelRequested === true,
     cancelReason: isGenerationCancelReason(parsed.cancelReason)
       ? parsed.cancelReason

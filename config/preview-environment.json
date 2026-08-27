@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "environment": "preview",
+  "status": "not-provisioned",
+  "activation": "fail-closed",
+  "resources": {
+    "d1": "dedicated",
+    "redis": "shared-prefix",
+    "r2": "dedicated",
+    "runtimeConfig": "scoped",
+    "secrets": "impact-classified",
+    "ai": "shared-allowed-quota"
+  },
+  "sharedOperationalInputs": [
+    "NEXT_PUBLIC_*",
+    "Turnstile site key",
+    "GA ID",
+    "non-sensitive feature flags",
+    "AI provider credentials when quota/billing coupling is explicitly accepted"
+  ],
+  "isolatedAuthorityInputs": [
+    "D1 binding and D1 Gateway authority",
+    "SIGNATURE_SECRET_KEY",
+    "ARENA_FINALIZATION_HMAC_SECRET",
+    "R2 write credentials and bucket"
+  ],
+  "schemaGate": {
+    "source": "config/hosted-dr-schema.json",
+    "physicalProbe": "deferred",
+    "activationRequires": "external-evidence"
+  },
+  "redisIsolation": {
+    "mode": "shared-network-logical-prefix",
+    "requiredKeyPrefix": "preview",
+    "destructiveCommands": "not-exposed-by-runtime",
+    "acceptedRisk": "Redis availability, capacity and quota remain operationally coupled; Redis is not an authority store."
+  }
+}

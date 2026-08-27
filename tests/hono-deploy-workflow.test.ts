@@ -124,6 +124,10 @@ describe('Hono deployment workflow', () => {
     const workflow = readFileSync(CLOUDFLARE_WORKFLOW_PATH, 'utf8');
     const deployJob = getJob(workflow, 'deploy');
 
+    expect(deployJob).toMatch(
+      new RegExp(`^    if: github\\.ref == '${escapeRegExp(PRODUCTION_BRANCH)}'\\s*$`, 'm'),
+    );
+
     expect(getStep(deployJob, 'Build Cloudflare bundle')).toContain(
       'run: pnpm --filter @mahoshojo/web run build:cf',
     );
@@ -141,6 +145,7 @@ describe('Hono deployment workflow', () => {
   test('preview 分支串行发布隔离 Hono 后再发布 Cloudflare', () => {
     const workflow = readFileSync(PREVIEW_WORKFLOW_PATH, 'utf8');
     const verifyJob = getJob(workflow, 'verify-and-build-hono');
+    const cloudflareBuildJob = getJob(workflow, 'verify-and-build-cloudflare');
     const honoJob = getJob(workflow, 'deploy-hono-preview');
     const cloudflareJob = getJob(workflow, 'deploy-cloudflare-preview');
 
@@ -151,9 +156,20 @@ describe('Hono deployment workflow', () => {
     expect(honoJob).toContain('HONO_DEPLOY_ROOT_DIR: /opt/mahoshojo-hono-preview');
     expect(honoJob).toContain('HONO_CONTAINER_NAME: mahoshojo-hono-preview');
     expect(honoJob).toContain("HONO_BIND_PORT: '8081'");
-    expect(honoJob).toContain('HONO_REDIS_KEY_PREFIX: preview');
+    expect(honoJob).toContain('HONO_REDIS_KEY_PREFIX: ${{ vars.PREVIEW_REDIS_KEY_PREFIX }}');
+    expect(honoJob).toContain('HONO_REDIS_NETWORK_NAME: ${{ vars.PREVIEW_REDIS_NETWORK_NAME }}');
+    expect(honoJob).toContain('PREVIEW_VPS_HOST: ${{ vars.PREVIEW_VPS_HOST }}');
+    expect(honoJob).toContain('PREVIEW_VPS_USER: ${{ vars.PREVIEW_VPS_USER }}');
+    expect(honoJob).toContain('PREVIEW_VPS_SSH_PRIVATE_KEY: ${{ secrets.PREVIEW_VPS_SSH_PRIVATE_KEY }}');
+    expect(honoJob).toContain('PREVIEW_VPS_HOST_KEY: ${{ secrets.PREVIEW_VPS_HOST_KEY }}');
+    expect(honoJob).toContain('check:preview:environment -- --require-provisioned');
     expect(honoJob).toContain('https://homura-preview.colanns.me');
-    expect(cloudflareJob).toContain('needs: deploy-hono-preview');
+    expect(cloudflareBuildJob).toContain('needs: verify-and-build-hono');
+    expect(cloudflareBuildJob).toContain('run: pnpm --filter @mahoshojo/web run build:cf');
+    expect(honoJob).toContain('- verify-and-build-hono');
+    expect(honoJob).toContain('- verify-and-build-cloudflare');
+    expect(cloudflareJob).toContain('- deploy-hono-preview');
+    expect(cloudflareJob).toContain('- verify-and-build-cloudflare');
     expect(cloudflareJob).toContain(
       'NEXT_PUBLIC_HONO_API_ORIGIN: https://homura-preview.colanns.me',
     );
@@ -237,6 +253,7 @@ describe('Hono deployment workflow', () => {
     const healthProbe = 'if curl --fail --silent --show-error "$D1_GATEWAY_URL/health" >/dev/null; then';
     const runtimeVerifier = 'pnpm run verify:server:runtime';
     const arenaRedisVerifier = 'pnpm --filter @mahoshojo/api run verify:arena-redis';
+    const hostedDrRedisVerifier = 'REDIS_URL=redis://127.0.0.1:6379/15 pnpm run verify:hosted-dr:redis';
 
     expectRequiredGateStep(runtimeStep);
     expect(buildJob).toMatch(/^    services:\s*\n      redis:\s*$/m);
@@ -262,10 +279,14 @@ describe('Hono deployment workflow', () => {
     expect(activeLines).toContain(healthProbe);
     expect(activeLines).toContain('trap cleanup EXIT');
     expect(activeLines).toContain(arenaRedisVerifier);
+    expect(activeLines).toContain(hostedDrRedisVerifier);
     expect(activeLines.at(-1)).toBe(runtimeVerifier);
     expect(activeLines.indexOf(gatewayCommand)).toBeLessThan(activeLines.indexOf(healthProbe));
     expect(activeLines.indexOf(healthProbe)).toBeLessThan(activeLines.indexOf(runtimeVerifier));
     expect(activeLines.indexOf(arenaRedisVerifier)).toBeLessThan(
+      activeLines.indexOf(runtimeVerifier),
+    );
+    expect(activeLines.indexOf(hostedDrRedisVerifier)).toBeLessThan(
       activeLines.indexOf(runtimeVerifier),
     );
     expect(buildJob.indexOf('- name: Build single-file server')).toBeLessThan(

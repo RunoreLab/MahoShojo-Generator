@@ -24,6 +24,7 @@ esac
 root_dir="${HONO_DEPLOY_ROOT_DIR:-/opt/mahoshojo-hono}"
 bind_port="${HONO_BIND_PORT:-8080}"
 redis_key_prefix="${HONO_REDIS_KEY_PREFIX:-}"
+redis_network_name="${HONO_REDIS_NETWORK_NAME:-mahoshojo-redis}"
 case "$root_dir" in
   /) echo "部署根目录不得为文件系统根目录" >&2; exit 2 ;;
   /*) ;;
@@ -31,6 +32,9 @@ case "$root_dir" in
 esac
 case "$bind_port" in
   ''|*[!0-9]*) echo "HONO_BIND_PORT 必须是数字" >&2; exit 2 ;;
+esac
+case "$redis_network_name" in
+  ''|*[!A-Za-z0-9_.-]*) echo "HONO_REDIS_NETWORK_NAME 必须是安全的 Docker network 名称" >&2; exit 2 ;;
 esac
 
 releases_dir="$root_dir/releases"
@@ -196,7 +200,7 @@ validate_release_compose() {
 validate_release_runtime() {
   tuple_dir="$1"
   run_cancellable docker run --rm \
-    --network mahoshojo-redis \
+    --network "$redis_network_name" \
     --env-file "$runtime_env" \
     -e NODE_ENV=production \
     -e HONO_AUTH_MODE=bearer \
