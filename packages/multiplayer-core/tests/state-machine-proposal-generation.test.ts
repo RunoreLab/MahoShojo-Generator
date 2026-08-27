@@ -379,6 +379,49 @@ describe('Arena Room authoritative generation transitions', () => {
     expect(failure(untrusted)).toMatchObject({ code: 'validation-failed', reason: 'invalid-command' });
   });
 
+  it('retains collaborative story-length provenance when omitted custom length is preserved', () => {
+    const created = success(transitionArenaRoom(null, {
+      ...createRoomCommand(),
+      sharedConfig: {
+        ...createRoomCommand().sharedConfig,
+        customStoryLength: '1200',
+      },
+    }, hostAuthority())).nextState;
+    const joined = success(transitionArenaRoom(created, joinMemberCommand(), memberAuthority())).nextState;
+    const submitted = submit(joined, proposal([{
+      changeId: 'story-length-1',
+      type: 'setStoryLength',
+      value: 'long',
+      expectedBase: {
+        kind: 'value',
+        value: { storyLength: 'standard', customStoryLength: '1200' },
+      },
+    }], 'proposal-story-length')).nextState;
+    const accepted = success(transitionArenaRoom(submitted, {
+      type: 'resolve-proposal',
+      expectedRoomEpoch: 'epoch-1',
+      proposalId: 'proposal-story-length',
+      resolution: 'accept-selected',
+      selectedChangeIds: ['story-length-1'],
+      timestamp: '2026-08-27T16:02:00.000Z',
+    }, hostAuthority())).nextState;
+
+    expect(accepted.snapshot.sharedConfig).toMatchObject({
+      storyLength: 'long',
+      customStoryLength: '1200',
+    });
+    expect(accepted.collaborativeChanges).toEqual([
+      expect.objectContaining({ type: 'setStoryLength', value: 'long' }),
+    ]);
+    const reserved = success(transitionArenaRoom(accepted, {
+      ...reserveCommand(),
+      expectedRevision: 1,
+      generationRequestId: 'request-story-length',
+      generationId: 'generation-story-length',
+    }, generationReservationAuthority('request-story-length', 'generation-story-length', 1)));
+    expect(reserved.nextState.snapshot.activeGeneration?.collaborativeInfluence).toBe(true);
+  });
+
   it('fences callbacks by epoch and attempt and refuses terminal regression', () => {
     const reserved = success(transitionArenaRoom(
       createJoinedState(),

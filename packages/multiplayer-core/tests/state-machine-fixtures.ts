@@ -49,6 +49,7 @@ export const generationPublisherAuthority = (
   attempt = 1,
 ) => issueArenaRoomGenerationPublisherAuthority({
   roomId: 'room-1',
+  roomEpoch: 'epoch-1',
   generationRequestId: request,
   generationId: generation,
   attempt,

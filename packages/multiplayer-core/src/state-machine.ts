@@ -629,6 +629,7 @@ const mirrorGeneration = (
   }
   const scope = context.scope;
   if (scope.roomId !== state.snapshot.roomId
+    || scope.roomEpoch !== state.snapshot.roomEpoch
     || scope.generationRequestId !== command.generationRequestId
     || scope.generationId !== command.generationId
     || scope.attempt !== command.attempt) {

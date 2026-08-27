@@ -144,6 +144,7 @@ describe('GMR-01 independent review regressions', () => {
 
     const wrongPublisherCapability = issueArenaRoomGenerationPublisherAuthority({
       roomId: 'room-1',
+      roomEpoch: 'epoch-1',
       generationRequestId: 'request-other',
       generationId: 'generation-1',
       attempt: 1,
@@ -151,6 +152,16 @@ describe('GMR-01 independent review regressions', () => {
     });
     expect(failure(transitionArenaRoom(reserved, runningCommand, wrongPublisherCapability)))
       .toMatchObject({ code: 'forbidden', reason: 'authority-scope-mismatch' });
+
+    const nextEpoch = structuredClone(reserved);
+    nextEpoch.snapshot.roomEpoch = 'epoch-2';
+    expect(failure(transitionArenaRoom(nextEpoch, {
+      ...runningCommand,
+      expectedRoomEpoch: 'epoch-2',
+    }, generationPublisherAuthority()))).toMatchObject({
+      code: 'forbidden',
+      reason: 'authority-scope-mismatch',
+    });
   });
 
   it('fences historical request IDs and generation IDs for the entire room lifetime', () => {

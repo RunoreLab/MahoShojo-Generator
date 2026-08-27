@@ -93,7 +93,8 @@ export const hasCollaborativeChangeEffect = (
       return config.userGuidance === change.value;
     case 'setStoryLength':
       return config.storyLength === change.value
-        && config.customStoryLength === (change.customStoryLength ?? null);
+        && (!Object.prototype.hasOwnProperty.call(change, 'customStoryLength')
+          || config.customStoryLength === (change.customStoryLength ?? null));
     case 'setHistorySettings':
       return deepEqual(config.historySettings, change.value);
   }

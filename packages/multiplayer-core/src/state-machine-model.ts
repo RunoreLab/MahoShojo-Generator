@@ -219,9 +219,13 @@ export const ArenaRoomGenerationReservationContextSchema = z.object({
   scope: ArenaRoomGenerationReservationScopeSchema,
 }).strict();
 
+export const ArenaRoomGenerationPublisherScopeSchema = GenerationBridgeScopeSchema.extend({
+  roomEpoch: OpaqueKeySchema,
+});
+
 export const ArenaRoomGenerationPublisherContextSchema = z.object({
   kind: z.literal('generation-publisher'),
-  scope: GenerationBridgeScopeSchema,
+  scope: ArenaRoomGenerationPublisherScopeSchema,
 }).strict();
 
 export const ArenaRoomAuthorityContextSchema = z.discriminatedUnion('kind', [
@@ -241,7 +245,7 @@ type GenerationReservationCapabilityInput = z.input<typeof ArenaRoomGenerationRe
   readonly accountUserId: number;
 };
 
-type GenerationPublisherCapabilityInput = Omit<z.input<typeof GenerationBridgeScopeSchema>, 'bridgeVersion'>;
+type GenerationPublisherCapabilityInput = Omit<z.input<typeof ArenaRoomGenerationPublisherScopeSchema>, 'bridgeVersion'>;
 
 const generationReservationCapabilities = new WeakSet<object>();
 const generationPublisherCapabilities = new WeakSet<object>();
