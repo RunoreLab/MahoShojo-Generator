@@ -19,6 +19,16 @@ jobs:
   verify:
     name: Verify repository
     runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -39,3 +49,8 @@ jobs:
 
       - name: Verify repository
         run: pnpm run ci:verify
+
+      - name: Verify Hosted DR Redis empty drill
+        env:
+          REDIS_URL: redis://127.0.0.1:6379/15
+        run: pnpm run verify:hosted-dr:redis

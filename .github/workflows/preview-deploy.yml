@@ -173,7 +173,7 @@ jobs:
           scp -i ~/.ssh/deploy_key artifact/index.mjs artifact/compose.yml artifact/deploy-bundle.sh artifact/release.manifest artifact/release.sha256 "$PREVIEW_VPS_USER@$PREVIEW_VPS_HOST:$upload_dir/"
           installed_dir="$(ssh -i ~/.ssh/deploy_key "$PREVIEW_VPS_USER@$PREVIEW_VPS_HOST" "HONO_DEPLOY_ROOT_DIR='$HONO_DEPLOY_ROOT_DIR' sh -s -- install '$release_id' '$upload_dir'" < apps/api/deploy/install-bundle.sh)"
           test "$installed_dir" = "$HONO_DEPLOY_ROOT_DIR/releases/$release_id"
-          ssh -i ~/.ssh/deploy_key "$PREVIEW_VPS_USER@$PREVIEW_VPS_HOST" "HONO_DEPLOY_ROOT_DIR='$HONO_DEPLOY_ROOT_DIR' HONO_CONTAINER_NAME='$HONO_CONTAINER_NAME' HONO_BIND_PORT='$HONO_BIND_PORT' HONO_REDIS_KEY_PREFIX='$HONO_REDIS_KEY_PREFIX' HONO_REDIS_NETWORK_NAME='$HONO_REDIS_NETWORK_NAME' '$installed_dir/deploy-bundle.sh' '$release_id' https://homura-preview.colanns.me"
+          ssh -i ~/.ssh/deploy_key "$PREVIEW_VPS_USER@$PREVIEW_VPS_HOST" "HONO_DEPLOY_ROOT_DIR='$HONO_DEPLOY_ROOT_DIR' HONO_CONTAINER_NAME='$HONO_CONTAINER_NAME' HONO_BIND_PORT='$HONO_BIND_PORT' HONO_REDIS_KEY_PREFIX='$HONO_REDIS_KEY_PREFIX' HONO_REDIS_NETWORK_NAME='$HONO_REDIS_NETWORK_NAME' HONO_HOSTED_API_ENVIRONMENT=preview '$installed_dir/deploy-bundle.sh' '$release_id' https://homura-preview.colanns.me"
 
   deploy-cloudflare-preview:
     name: Deploy Cloudflare preview

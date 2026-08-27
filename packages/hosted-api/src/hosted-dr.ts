@@ -9,6 +9,11 @@ export type HostedDrPrimaryHealth = 'healthy' | 'unavailable' | 'unknown';
 
 export type HostedDrRuntime = 'hono-primary' | 'next-dr' | 'fail-closed';
 
+export {
+  parseHostedApiDeploymentTarget,
+  type HostedApiDeploymentTarget,
+} from './deployment-target';
+
 export type HostedDrVersionGateStage = 'expand' | 'rollout' | 'contract';
 
 export type HostedDrVersionSchemaState = 'expanded' | 'contracted';

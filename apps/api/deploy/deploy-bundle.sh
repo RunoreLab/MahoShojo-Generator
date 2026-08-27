@@ -25,6 +25,7 @@ root_dir="${HONO_DEPLOY_ROOT_DIR:-/opt/mahoshojo-hono}"
 bind_port="${HONO_BIND_PORT:-8080}"
 redis_key_prefix="${HONO_REDIS_KEY_PREFIX:-}"
 redis_network_name="${HONO_REDIS_NETWORK_NAME:-mahoshojo-redis}"
+hosted_api_environment="${HONO_HOSTED_API_ENVIRONMENT:-}"
 case "$root_dir" in
   /) echo "部署根目录不得为文件系统根目录" >&2; exit 2 ;;
   /*) ;;
@@ -35,6 +36,40 @@ case "$bind_port" in
 esac
 case "$redis_network_name" in
   ''|*[!A-Za-z0-9_.-]*) echo "HONO_REDIS_NETWORK_NAME 必须是安全的 Docker network 名称" >&2; exit 2 ;;
+esac
+case "$hosted_api_environment" in
+  production|preview|local|test) ;;
+  *) echo "HONO_HOSTED_API_ENVIRONMENT 必须是 production、preview、local 或 test" >&2; exit 2 ;;
+esac
+case "$hosted_api_environment" in
+  production)
+    [ -z "$redis_key_prefix" ] || {
+      echo "production target 必须保持 HONO_REDIS_KEY_PREFIX 为空" >&2
+      exit 2
+    }
+    [ "$public_base_url" = 'https://homura.colanns.me' ] || {
+      echo "production target 必须使用 https://homura.colanns.me" >&2
+      exit 2
+    }
+    [ "$root_dir" = '/opt/mahoshojo-hono' ] || {
+      echo "production target 必须使用 /opt/mahoshojo-hono" >&2
+      exit 2
+    }
+    ;;
+  preview)
+    [ "$redis_key_prefix" = 'preview' ] || {
+      echo "preview target 必须显式设置 HONO_REDIS_KEY_PREFIX=preview" >&2
+      exit 2
+    }
+    [ "$public_base_url" = 'https://homura-preview.colanns.me' ] || {
+      echo "preview target 必须使用 https://homura-preview.colanns.me" >&2
+      exit 2
+    }
+    [ "$root_dir" = '/opt/mahoshojo-hono-preview' ] || {
+      echo "preview target 必须使用 /opt/mahoshojo-hono-preview" >&2
+      exit 2
+    }
+    ;;
 esac
 
 releases_dir="$root_dir/releases"
@@ -203,6 +238,7 @@ validate_release_runtime() {
     --network "$redis_network_name" \
     --env-file "$runtime_env" \
     -e NODE_ENV=production \
+    -e HOSTED_API_ENVIRONMENT="$hosted_api_environment" \
     -e HONO_AUTH_MODE=bearer \
     -e HONO_CORS_ORIGINS='https://*.colanns.me' \
     -e REDIS_HOST=redis \

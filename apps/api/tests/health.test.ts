@@ -77,6 +77,7 @@ const configureTransport = (transport: D1TransportCase['transport']) => {
 
   if (transport === 'gateway') {
     process.env.D1_GATEWAY_URL = 'https://gateway.example.test';
+    process.env.D1_GATEWAY_HMAC_SECRET = 'g'.repeat(32);
     return;
   }
 

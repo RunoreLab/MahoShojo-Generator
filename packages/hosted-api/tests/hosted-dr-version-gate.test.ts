@@ -35,11 +35,18 @@ describe('Hosted DR version skew gate', () => {
 
   it.each([
     ['跨 contract family', { primaryContractVersion: 'g25e2-v2' }],
-    ['过大版本偏差', { drContractVersion: 'g25e1-v3' }],
+    ['过大版本偏差', { drContractVersion: 'g25e1-v4', clientContractVersion: 'g25e1-v2' }],
     ['client 不在双端兼容窗口', { clientContractVersion: 'g25e1-v0' }],
     ['没有 expand schema', { schemaState: 'contracted' }],
   ] as const)('%s 时 fail closed', (_label, input) => {
     expect(evaluate(input)).toMatchObject({ allowed: false });
+  });
+
+  it('对超过一个版本的偏差返回 skew-too-large，而不是被其他分支偶然拒绝', () => {
+    expect(evaluate({
+      drContractVersion: 'g25e1-v4',
+      clientContractVersion: 'g25e1-v2',
+    })).toEqual({ allowed: false, reason: 'skew-too-large' });
   });
 
   it('未知阶段 fail closed，而不是落入兼容分支', () => {

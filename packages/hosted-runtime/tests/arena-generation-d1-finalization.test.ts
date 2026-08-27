@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { createRequire } from 'node:module';
 
 import {
   createNodeArenaGenerationFinalizationPorts,
@@ -10,6 +11,21 @@ import {
 } from '../src/arena-generation/d1-finalization';
 import type { NodeDataD1Client } from '../src/node-runtime/data-ports';
 import type { ArenaGenerationRejectedTerminalRecordInput } from '@mahoshojo/hosted-api/arena-generation/service';
+
+type SQLiteStatement = {
+  all(..._parameters: unknown[]): Record<string, unknown>[];
+  run(..._parameters: unknown[]): { changes: bigint | number };
+};
+
+type SQLiteDatabase = {
+  close(): void;
+  exec(_sql: string): void;
+  prepare(_sql: string): SQLiteStatement;
+};
+
+const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite') as {
+  DatabaseSync: new (_location: string) => SQLiteDatabase;
+};
 
 const result = (
   results: Record<string, unknown>[] = [],
@@ -46,6 +62,27 @@ const sequentialD1 = (
   }),
   };
 };
+
+const sqliteD1 = (database: SQLiteDatabase): NodeDataD1Client => ({
+  prepare(sql) {
+    const statement = database.prepare(sql);
+    let parameters: unknown[] = [];
+    const adapter = {
+      bind(...nextParameters: unknown[]) {
+        parameters = nextParameters;
+        return adapter;
+      },
+      async all() {
+        return result(statement.all(...parameters as never[]) as Record<string, unknown>[]);
+      },
+      async run() {
+        const execution = statement.run(...parameters as never[]);
+        return result([], Number(execution.changes));
+      },
+    };
+    return adapter;
+  },
+});
 
 const claimInput = {
   generationId: 'generation-1',
@@ -453,9 +490,72 @@ describe('Arena D1/R2 finalization ports', () => {
       .toBeLessThanOrEqual(MAX_ARENA_TERMINAL_EXTRA_JSON_BYTES);
     expect(JSON.parse(serializedExtra as string).combatantsFallback)
       .toHaveLength(MAX_ARENA_TERMINAL_COMBATANTS);
-    expect(vi.mocked(client.prepare).mock.calls.filter(([sql]) => (
-      sql.includes('INSERT OR IGNORE INTO battle_report_generation_combatants')
-    ))).toHaveLength(MAX_ARENA_TERMINAL_COMBATANTS);
+    const combatantWrites = vi.mocked(client.prepare).mock.calls.filter(([sql]) => (
+      sql.includes('battle_report_generation_combatants')
+      && sql.includes('WHERE NOT EXISTS')
+      && sql.includes('generation_id = ?')
+      && sql.includes('sort_index = ?')
+    ));
+    expect(combatantWrites).toHaveLength(MAX_ARENA_TERMINAL_COMBATANTS);
+  });
+
+  it('rejects a combatant effect whose idempotency identity does not match the generation', async () => {
+    const client = sequentialD1([]);
+    const ports = createNodeArenaGenerationFinalizationPorts({ getD1Client: () => client });
+
+    await expect(ports.persistCombatants({
+      ...claimInput,
+      idempotencyKey: 'arena-terminal:another-generation:combatants',
+    })).rejects.toThrow('ARENA_COMBATANTS_IDEMPOTENCY_KEY_INVALID');
+    expect(client.prepare).not.toHaveBeenCalled();
+  });
+
+  it('executes combatant idempotency SQL against SQLite and keeps one row per generation slot', async () => {
+    const database = new DatabaseSync(':memory:');
+    try {
+      database.exec(`
+CREATE TABLE battle_report_generation_combatants (
+  generation_id TEXT NOT NULL,
+  sort_index INTEGER NOT NULL,
+  name TEXT NOT NULL,
+  type TEXT,
+  template_id TEXT,
+  is_native INTEGER,
+  is_preset INTEGER,
+  team_id TEXT,
+  character_guidance TEXT,
+  data_card_id TEXT,
+  data_card_updated_at TEXT,
+  size_chars INTEGER,
+  size_bytes INTEGER,
+  created_at TEXT NOT NULL,
+  UNIQUE (generation_id, sort_index)
+)
+      `.trim());
+      const ports = createNodeArenaGenerationFinalizationPorts({
+        getD1Client: () => sqliteD1(database),
+        now: () => new Date('2026-08-25T04:00:00.000Z'),
+      });
+      const input = {
+        ...claimInput,
+        idempotencyKey: 'arena-terminal:generation-1:combatants',
+      };
+
+      await ports.persistCombatants(input);
+      await ports.persistCombatants(input);
+
+      const rows = database.prepare(`
+SELECT generation_id AS generationId, sort_index AS sortIndex, name
+FROM battle_report_generation_combatants
+ORDER BY sort_index
+      `.trim()).all().map((row) => ({ ...row }));
+      expect(rows).toEqual([
+        { generationId: 'generation-1', sortIndex: 0, name: 'A' },
+        { generationId: 'generation-1', sortIndex: 1, name: 'B' },
+      ]);
+    } finally {
+      database.close();
+    }
   });
 
   it('authorizes terminal fallback by actor hash and reads full R2 output', async () => {
@@ -645,8 +745,8 @@ describe('Arena D1/R2 finalization ports', () => {
       generationId: 'generation-1',
       idempotencyKey: 'arena-terminal:generation-1:ratings',
     });
-    expect(client.prepare).toHaveBeenCalledWith(expect.stringContaining(
-      'INSERT OR IGNORE INTO battle_report_generation_combatants',
+    expect(client.prepare).toHaveBeenCalledWith(expect.stringMatching(
+      /battle_report_generation_combatants[\s\S]*WHERE NOT EXISTS[\s\S]*generation_id = \?[\s\S]*sort_index = \?/u,
     ));
   });
 

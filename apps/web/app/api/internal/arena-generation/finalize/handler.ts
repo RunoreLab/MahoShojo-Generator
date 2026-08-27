@@ -2,9 +2,11 @@ import {
   buildArenaTerminalEffectIdempotencyKey,
   verifyArenaInternalRequest,
 } from '@mahoshojo/hosted-runtime/arena-generation';
+import { parseHostedApiDeploymentTarget } from '@mahoshojo/hosted-api/hosted-dr';
 
 import { readGenerationRankingForGeneration } from '@/app/api/arena/generation-ranking/handler';
 import { settleArenaRatingsForGeneration } from '@/lib/database/arena-ratings';
+import { getRuntimeD1ClientWithoutHttpFallback } from '@/lib/db/drizzle';
 
 const noStoreJson = (payload: unknown, status: number): Response => Response.json(payload, {
   status,
@@ -45,6 +47,20 @@ export const appRouteHandler = async (request: Request): Promise<Response> => {
     ))
   ) {
     return noStoreJson({ code: 'INVALID_REQUEST', error: 'Invalid request' }, 400);
+  }
+
+  const deploymentTarget = parseHostedApiDeploymentTarget(
+    process.env.NEXT_PUBLIC_HOSTED_API_ENVIRONMENT,
+  );
+  if (
+    !deploymentTarget
+    || ((deploymentTarget === 'production' || deploymentTarget === 'preview')
+      && !getRuntimeD1ClientWithoutHttpFallback())
+  ) {
+    return noStoreJson({
+      code: 'ARENA_FINALIZATION_PENDING',
+      error: 'Arena finalization remains pending',
+    }, 503);
   }
 
   try {

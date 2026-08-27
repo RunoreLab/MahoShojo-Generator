@@ -534,16 +534,21 @@ const persistFallbackCombatants = async (input: {
   for (let index = 0; index < fallback.length; index += 1) {
     const combatant = recordOf(fallback[index]);
     if (!combatant) continue;
+    const sortIndex = numberOf(combatant.sortIndex) ?? index;
     await input.client.prepare(`
-INSERT OR IGNORE INTO battle_report_generation_combatants (
+INSERT INTO battle_report_generation_combatants (
   generation_id, sort_index, name, type, template_id, is_native, is_preset,
   team_id, character_guidance, data_card_id, data_card_updated_at,
   size_chars, size_bytes, created_at
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?)
+SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?
+WHERE NOT EXISTS (
+  SELECT 1 FROM battle_report_generation_combatants
+  WHERE generation_id = ? AND sort_index = ?
+)
     `.trim()).bind(
       input.generationId,
-      numberOf(combatant.sortIndex) ?? index,
+      sortIndex,
       boundedString(combatant.name, 300) ?? `未知角色#${index + 1}`,
       boundedString(combatant.type, 64),
       boundedString(combatant.templateId, 256),
@@ -554,6 +559,8 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?)
       boundedString(combatant.dataCardId, 128),
       boundedString(combatant.dataCardUpdatedAt, 128),
       input.createdAt,
+      input.generationId,
+      sortIndex,
     ).run({ retry: 'none' });
   }
 };
@@ -800,6 +807,12 @@ WHERE id = ?
     },
 
     async persistCombatants(input: ArenaTerminalEffectInput) {
+      if (
+        input.idempotencyKey
+        !== buildArenaTerminalEffectIdempotencyKey(input.generationId, 'combatants')
+      ) {
+        throw new Error('ARENA_COMBATANTS_IDEMPOTENCY_KEY_INVALID');
+      }
       const client = options.getD1Client();
       if (!client || !Array.isArray(input.payload.combatants)) return;
       const createdAt = now().toISOString();
@@ -812,12 +825,16 @@ WHERE id = ?
           ?? boundedString(data?.name, 300)
           ?? `未知角色#${index + 1}`;
         await client.prepare(`
-INSERT OR IGNORE INTO battle_report_generation_combatants (
+INSERT INTO battle_report_generation_combatants (
   generation_id, sort_index, name, type, template_id, is_native, is_preset,
   team_id, character_guidance, data_card_id, data_card_updated_at,
   size_chars, size_bytes, created_at
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+WHERE NOT EXISTS (
+  SELECT 1 FROM battle_report_generation_combatants
+  WHERE generation_id = ? AND sort_index = ?
+)
         `.trim()).bind(
           input.generationId,
           index,
@@ -833,6 +850,8 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           serialized ? serialized.length : null,
           serialized ? new TextEncoder().encode(serialized).byteLength : null,
           createdAt,
+          input.generationId,
+          index,
         ).run({ retry: 'none' });
       }
     },

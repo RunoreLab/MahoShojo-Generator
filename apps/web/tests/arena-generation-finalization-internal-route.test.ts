@@ -2,9 +2,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createArenaInternalAuthHeaders } from '@mahoshojo/hosted-runtime/arena-generation';
 
-const { settle, readRanking } = vi.hoisted(() => ({
+const { settle, readRanking, getRuntimeD1ClientWithoutHttpFallback } = vi.hoisted(() => ({
   settle: vi.fn(async () => undefined),
   readRanking: vi.fn(async (generationId: string) => ({ success: true, generationId })),
+  getRuntimeD1ClientWithoutHttpFallback: vi.fn(() => ({ prepare: vi.fn() })),
 }));
 
 vi.mock('@/lib/database/arena-ratings', () => ({
@@ -12,6 +13,9 @@ vi.mock('@/lib/database/arena-ratings', () => ({
 }));
 vi.mock('@/app/api/arena/generation-ranking/handler', () => ({
   readGenerationRankingForGeneration: readRanking,
+}));
+vi.mock('@/lib/db/drizzle', () => ({
+  getRuntimeD1ClientWithoutHttpFallback,
 }));
 
 import { appRouteHandler } from '@/app/api/internal/arena-generation/finalize/handler';
@@ -81,6 +85,34 @@ describe('Arena generation finalization internal route', () => {
 
     expect(response.status).toBe(503);
     await expect(response.json()).resolves.toMatchObject({ code: 'ARENA_FINALIZATION_PENDING' });
+    expect(readRanking).not.toHaveBeenCalled();
+  });
+
+  it('production 无 native D1 binding 时即使 HTTP Gateway 存在也在结算前 fail closed', async () => {
+    vi.stubEnv('ARENA_FINALIZATION_HMAC_SECRET', secret);
+    vi.stubEnv('NEXT_PUBLIC_HOSTED_API_ENVIRONMENT', 'production');
+    vi.stubEnv('D1_GATEWAY_URL', 'https://gateway-secret-canary.example.test');
+    getRuntimeD1ClientWithoutHttpFallback.mockReturnValueOnce(null);
+    const body = JSON.stringify({
+      version: 1,
+      generationId: 'generation-1',
+      idempotencyKey: 'arena-terminal:generation-1:ratings',
+    });
+    const headers = await createArenaInternalAuthHeaders({
+      secret,
+      method: 'POST',
+      pathname: '/api/internal/arena-generation/finalize',
+      body,
+    });
+
+    const response = await appRouteHandler(new Request(
+      'https://web.example/api/internal/arena-generation/finalize',
+      { method: 'POST', headers, body },
+    ));
+
+    expect(response.status).toBe(503);
+    await expect(response.text()).resolves.not.toContain('gateway-secret-canary');
+    expect(settle).not.toHaveBeenCalled();
     expect(readRanking).not.toHaveBeenCalled();
   });
 });

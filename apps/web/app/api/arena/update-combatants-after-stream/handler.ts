@@ -5,9 +5,9 @@ import { verifySignature } from '@/lib/signature';
 import {
   readNodeArenaGenerationReconciliation,
 } from '@mahoshojo/hosted-runtime/arena-generation';
-import { getDefaultNodeD1Client } from '@mahoshojo/hosted-runtime/node-runtime/d1-client';
 import { NextRequest } from 'next/server';
 import { hashArenaCombatantBaseRevision } from '@mahoshojo/domain/arena-reconciliation';
+import { getNextHostedD1Client } from '@/lib/hosted-dr/database-provider';
 
 const log = getLogger('api-update-combatants-stream');
 const GENERATION_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/u;
@@ -58,7 +58,7 @@ async function handler(req: NextRequest): Promise<Response> {
     return json({ error: 'baseRevisionHash 无效' }, 400);
   }
 
-  const client = getDefaultNodeD1Client();
+  const client = getNextHostedD1Client();
   if (!client) {
     return json({
       code: 'ARENA_RECONCILIATION_CAPABILITY_UNAVAILABLE',

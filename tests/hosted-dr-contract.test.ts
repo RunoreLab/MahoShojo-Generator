@@ -247,6 +247,15 @@ describe('Hosted DR machine contract', () => {
       expected: 'case marker',
     },
     {
+      label: '只在规范文档中伪造 case marker',
+      mutate: (drill: HostedDrDrillManifest) => {
+        drill.cases[0]!.evidenceTests = [
+          'docs/specs/2026-08-26_230557_G25E-2_Hosted_DR故障演练与Phase2.5退出审计设计.md',
+        ];
+      },
+      expected: '可执行 evidence',
+    },
+    {
       label: '伪报 production drill',
       mutate: (drill: HostedDrDrillManifest) => {
         drill.productionStatus = 'verified';
@@ -282,9 +291,17 @@ describe('Hosted DR machine contract', () => {
     const webPackage = readJson<{ scripts: Record<string, string> }>('apps/web/package.json');
 
     expect(existsSync(path.join(repositoryRoot, 'scripts/check-hosted-dr-contract.mjs'))).toBe(true);
+    expect(existsSync(path.join(repositoryRoot, 'scripts/verify-hosted-dr.mjs'))).toBe(true);
+    const executableVerifier = readFileSync(
+      path.join(repositoryRoot, 'scripts/verify-hosted-dr.mjs'),
+      'utf8',
+    );
     expect(existsSync(path.join(repositoryRoot, 'config/hosted-dr-drills.json'))).toBe(true);
     expect(rootPackage.scripts['check:hosted-dr']).toContain('check:hosted-dr:schema');
-    expect(rootPackage.scripts['verify:hosted-dr']).toContain('tests/hosted-dr-fault-matrix.test.ts');
+    expect(rootPackage.scripts['verify:hosted-dr']).toContain('scripts/verify-hosted-dr.mjs');
+    expect(executableVerifier).toContain('G25E2-REDIS-EMPTY');
+    expect(executableVerifier).toContain('hosted.dr.evidence.integration.required');
+    expect(executableVerifier).not.toContain('drills.cases.length');
     expect(rootPackage.scripts['ci:verify']).toContain('pnpm run verify:hosted-dr');
     expect(rootPackage.scripts['workspace:verify']).toContain('pnpm run check:hosted-dr');
     expect(webPackage.scripts.build).toContain('pnpm run check:hosted-dr');
@@ -367,6 +384,17 @@ describe('Hosted DR machine contract', () => {
         };
       },
       expected: 'production fallback 不得覆盖 fail-closed operation',
+    },
+    {
+      label: 'observed fallback without verified artifact',
+      mutate: (manifest: HostedDrManifest) => {
+        manifest.controlPlane.productionFallback = {
+          mode: 'same-origin-next',
+          artifactReadiness: 'deferred',
+          productionPlacement: 'observed',
+        };
+      },
+      expected: 'placement observed 必须先有 verified artifact readiness',
     },
     {
       label: 'missing contract test',

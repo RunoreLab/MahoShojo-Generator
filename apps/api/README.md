@@ -8,7 +8,8 @@
 
 生产 Hono 使用 D1 Gateway 时，`D1_GATEWAY_URL` 必须是无凭据、路径、查询或片段的 HTTPS root origin，并要求
 HMAC 或 Bearer transport credential。loopback HTTP 只可在显式 `HOSTED_DR_LOCAL_FAULT_INJECTION=true` 的
-local/test fault-injection 中使用，不能作为生产例外。Gateway URL 与 runtime env 由同一 trust owner 管理，不使用
+local/test fault-injection 中使用；该身份由 `HOSTED_API_ENVIRONMENT` 显式声明，不从 `NODE_ENV` 推导，缺失或未知
+target 会在 production config check 中 fail closed。Gateway URL 与 runtime env 由同一 trust owner 管理，不使用
 同 owner 的重复 origin allowlist 自证安全；需要更强 egress policy 时应由独立 deploy/platform trust owner 提供。
 
 当前实现建立了可并行验证的 Hono Node 服务，不会改变原有 `pnpm dev` 和 Cloudflare Next 部署：

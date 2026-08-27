@@ -3,6 +3,7 @@ import { getCloudflareContext } from '@opennextjs/cloudflare';
 import { drizzle, type DrizzleD1Database } from 'drizzle-orm/d1';
 import * as schema from '@/lib/db/schema';
 import { createHttpD1ClientFromEnv } from '@/lib/db/d1-http-client';
+import { parseHostedApiDeploymentTarget } from '@mahoshojo/hosted-api/hosted-dr';
 
 export type AppDrizzleDb = DrizzleD1Database<typeof schema>;
 
@@ -83,7 +84,12 @@ type RuntimeD1ClientOptions = {
 const getRuntimeD1ClientWithOptions = (options: RuntimeD1ClientOptions = {}): DrizzleD1Client | null => {
   const boundClient = readD1FromCloudflareContext() ?? readD1FromGlobal();
   if (boundClient) return boundClient;
-  if (options.allowHttpFallback === false) return null;
+  const deploymentTarget = parseHostedApiDeploymentTarget(
+    process.env.NEXT_PUBLIC_HOSTED_API_ENVIRONMENT,
+  );
+  const allowHttpFallback = options.allowHttpFallback
+    ?? (deploymentTarget === 'local' || deploymentTarget === 'test');
+  if (!allowHttpFallback) return null;
   return readD1FromHttpEnv();
 };
 

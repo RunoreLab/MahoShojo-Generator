@@ -57,6 +57,7 @@ jobs:
       - name: Verify Hono container build
         env:
           HONO_RELEASE_DIR: /tmp/mahoshojo-hono-release
+          HONO_HOSTED_API_ENVIRONMENT: production
           COMPOSE_ENV_DIRECTORY: /opt/mahoshojo-hono
           COMPOSE_ENV_FILE: /opt/mahoshojo-hono/.env.hono
         run: |
@@ -71,7 +72,7 @@ jobs:
           trap cleanup_compose_environment EXIT
           sudo install -m 600 /dev/null "$COMPOSE_ENV_FILE"
           docker build --file apps/api/Dockerfile .
-          sudo --preserve-env=HONO_RELEASE_DIR docker compose -f apps/api/deploy/compose.yml config --no-env-resolution
+          sudo --preserve-env=HONO_RELEASE_DIR,HONO_HOSTED_API_ENVIRONMENT docker compose -f apps/api/deploy/compose.yml config --no-env-resolution
 
       - name: Build single-file server
         run: |
@@ -86,6 +87,7 @@ jobs:
         env:
           REDIS_URL: redis://127.0.0.1:6379
           D1_GATEWAY_URL: http://127.0.0.1:8788
+          HOSTED_API_ENVIRONMENT: local
           HOSTED_DR_LOCAL_FAULT_INJECTION: 'true'
           D1_GATEWAY_HMAC_SECRET: g25c-ci-only-d1-gateway-hmac-secret
           HONO_AUTH_MODE: bearer
@@ -192,4 +194,4 @@ jobs:
           installed_dir="$(ssh -i ~/.ssh/deploy_key "$VPS_USER@$VPS_HOST" "sh -s -- install '$release_id' '$upload_dir'" < apps/api/deploy/install-bundle.sh)"
           expected_dir="/opt/mahoshojo-hono/releases/$release_id"
           test "$installed_dir" = "$expected_dir"
-          ssh -i ~/.ssh/deploy_key "$VPS_USER@$VPS_HOST" "$installed_dir/deploy-bundle.sh $release_id https://homura.colanns.me"
+          ssh -i ~/.ssh/deploy_key "$VPS_USER@$VPS_HOST" "HONO_HOSTED_API_ENVIRONMENT=production '$installed_dir/deploy-bundle.sh' '$release_id' https://homura.colanns.me"

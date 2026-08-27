@@ -8,6 +8,8 @@ services:
       - "${HONO_PORT:-8787}:8787"
     environment:
       NODE_ENV: production
+      HOSTED_API_ENVIRONMENT: local
+      HOSTED_DR_LOCAL_FAULT_INJECTION: "true"
       HONO_HOST: 0.0.0.0
       HONO_PORT: 8787
       HONO_CORS_ORIGINS: ${HONO_CORS_ORIGINS:?请配置 HONO_CORS_ORIGINS}

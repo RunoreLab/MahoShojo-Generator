@@ -325,6 +325,13 @@ describe('phase 2.5C Hono API workspace app ownership', () => {
     expect(existsSync(path.join(rootDirectory, 'deploy/hono'))).toBe(false);
   });
 
+  it('本地 Hono Compose 显式声明 local target 与 loopback fault scope', () => {
+    const compose = readFileSync(path.join(appDirectory, 'compose.local.yml'), 'utf8');
+
+    expect(compose).toContain('HOSTED_API_ENVIRONMENT: local');
+    expect(compose).toContain('HOSTED_DR_LOCAL_FAULT_INJECTION: "true"');
+  });
+
   it('声明独立 app 生命周期，并由 root scripts 只做代理入口', () => {
     expect(existsSync(appManifestPath)).toBe(true);
     if (!existsSync(appManifestPath)) return;

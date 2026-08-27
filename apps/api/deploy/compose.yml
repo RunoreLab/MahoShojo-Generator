@@ -10,6 +10,7 @@ services:
       - ${HONO_DEPLOY_ROOT_DIR:-/opt/mahoshojo-hono}/.env.hono
     environment:
       NODE_ENV: production
+      HOSTED_API_ENVIRONMENT: ${HONO_HOSTED_API_ENVIRONMENT:?HONO_HOSTED_API_ENVIRONMENT must be explicit}
       HONO_HOST: 0.0.0.0
       HONO_PORT: 8787
       HONO_AUTH_MODE: bearer

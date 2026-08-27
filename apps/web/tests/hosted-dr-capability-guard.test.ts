@@ -20,7 +20,7 @@ const readyProvider: DatabaseProvider = {
 };
 
 const productionOptions = {
-  executionEnvironment: 'production' as const,
+  deploymentTarget: 'production' as const,
   environment: {
     HONO_CORS_ORIGINS: 'https://app.example.test',
   } as Record<string, string | undefined>,
@@ -48,6 +48,43 @@ describe('Next production DR capability guard', () => {
       capabilityId: 'arena/generate',
       category: 'dr-mode',
     });
+  });
+
+  it('只信显式 deployment target，不能用 NODE_ENV=development 绕过 production guard', async () => {
+    vi.stubEnv('NODE_ENV', 'development');
+    const handler = vi.fn(async () => new Response('should-not-run'));
+    const guarded = withNextDrCapability('arena/generate', handler, {
+      ...productionOptions,
+      deploymentTarget: 'production',
+    });
+
+    const response = await guarded(new Request(
+      'https://next.test/api/arena/generate',
+      { method: 'POST' },
+    ));
+
+    expect(response.status).toBe(503);
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it('缺失或未知 deployment target 时 fail closed', async () => {
+    vi.stubEnv('NEXT_PUBLIC_HOSTED_API_ENVIRONMENT', '');
+    for (const deploymentTarget of [undefined, 'staging']) {
+      const handler = vi.fn(async () => new Response('should-not-run'));
+      const guarded = withNextDrCapability('generate-free', handler, {
+        environment: productionOptions.environment,
+        provider: readyProvider,
+        logUnavailable: productionOptions.logUnavailable,
+        deploymentTarget,
+      });
+
+      const response = await guarded(new Request(
+        'https://next.test/api/generate-free',
+        { method: 'POST' },
+      ));
+      expect(response.status, deploymentTarget ?? '<missing>').toBe(503);
+      expect(handler).not.toHaveBeenCalled();
+    }
   });
 
   it('missing/short secret 时不调用 handler，且日志不投影 secret 值', async () => {
@@ -142,7 +179,7 @@ describe('Next production DR capability guard', () => {
 
     const local = withNextDrCapability('generate-free', handler, {
       ...productionOptions,
-      executionEnvironment: 'test',
+      deploymentTarget: 'test',
     });
     expect(await (await local(new Request('https://next.test/api/generate-free'))).text()).toBe('local');
     expect(handler).toHaveBeenCalledOnce();

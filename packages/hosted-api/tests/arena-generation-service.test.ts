@@ -11,6 +11,7 @@ import {
   type GenerationReplayStoreState,
   type GenerationStreamEvent,
 } from '../src/arena-generation/service';
+import { evaluateHostedDrVersionGate } from '../src/hosted-dr';
 
 const readResponseText = async (response: Response): Promise<string> => response.text();
 
@@ -308,6 +309,142 @@ const createService = (
 });
 
 describe('Arena generation lifecycle service', () => {
+  test('G25E2-VERSION-SKEW：rollout 保持 authenticated authority 读写与 public contract 兼容', async () => {
+    expect(evaluateHostedDrVersionGate({
+      stage: 'rollout',
+      primaryContractVersion: 'g25e1-v1',
+      drContractVersion: 'g25e1-v2',
+      clientContractVersion: 'g25e1-v1',
+      schemaState: 'expanded',
+    })).toEqual({ allowed: true, reason: 'compatible' });
+
+    const createVersionedRequest = (payload: Record<string, unknown>) => new Request(
+      'https://example.test/api/arena/generate-stream',
+      {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer version-skew-actor',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ generationRequestId: 'request-version-skew', ...payload }),
+      },
+    );
+    const canonicalPreflight = async ({ payload }: { payload: Record<string, unknown> }) => ({
+      semanticPayload: { value: payload.value ?? payload.legacyValue },
+      materializationPayload: payload,
+    });
+    const runAuthorityRead = async (
+      materializationVersion: string,
+      payload: Record<string, unknown>,
+    ) => {
+      const store = new MemoryReplayStore();
+      store.reserveUnavailable = true;
+      const readOwnedTerminal = vi.fn(async () => ({
+        generationId: 'generation-1',
+        generationRequestId: 'request-version-skew',
+        status: 'completed' as const,
+        updatedAt: '2026-08-25T04:00:00.000Z',
+        resultRef: 'r2:version-skew-terminal',
+        markdown: 'version-compatible-terminal',
+        reasoning: '',
+        payloadHash: 'hash:{"value":"same"}',
+        contentAvailable: true,
+      }));
+      const execute = vi.fn(async () => ({ status: 'completed' as const }));
+      const service = createService(store, {
+        materializationVersion,
+        preflight: canonicalPreflight,
+        materialize: vi.fn(),
+        execute,
+      }, {
+        actorResponseHeaders: { 'X-Mahoshojo-Generation-Actor-Token': 'signed-actor' },
+        terminalStore: { readOwnedTerminal },
+      });
+      const response = await service.create(createVersionedRequest(payload));
+      return {
+        actorHeader: response.headers.get('x-mahoshojo-generation-actor-token'),
+        body: await response.text(),
+        execute,
+        readOwnedTerminal,
+        status: response.status,
+      };
+    };
+
+    const [legacyRead, currentRead] = await Promise.all([
+      runAuthorityRead('g25e1-v1', { legacyValue: 'same' }),
+      runAuthorityRead('g25e1-v2', { value: 'same', optionalExpandedField: 'ignored-by-v1' }),
+    ]);
+    for (const result of [legacyRead, currentRead]) {
+      expect(result.status).toBe(200);
+      expect(result.actorHeader).toBe('signed-actor');
+      expect(result.body).toContain('version-compatible-terminal');
+      expect(result.readOwnedTerminal).toHaveBeenCalledWith({
+        actorKey: 'user:42',
+        generationId: 'generation-1',
+      });
+      expect(result.execute).not.toHaveBeenCalled();
+    }
+
+    const runAuthorityWrite = async (payload: Record<string, unknown>) => {
+      const authorityWrites: Array<Record<string, unknown>> = [];
+      const service = createService(new MemoryReplayStore(), {
+        materializationVersion: 'g25e1-v2',
+        preflight: async ({ actorKey, generationRequestId, payload: input }) => ({
+          kind: 'auditable-rejection' as const,
+          actorKey,
+          generationRequestId,
+          response: Response.json({ error: 'version-compatible-rejection' }, { status: 400 }),
+          code: 'ARENA_VERSION_COMPATIBILITY_REJECTED',
+          stage: 'payload-validation',
+          fingerprintPayload: { value: input.value ?? input.legacyValue },
+          audit: {
+            endpoint: 'api/arena/generate-stream',
+            generationMode: 'stream' as const,
+            startedAt: '2026-08-25T04:00:00.000Z',
+            mode: 'classic',
+            pvpContext: {
+              roomId: 'version-skew-room',
+              matchId: 'version-skew-match',
+              roundId: 'version-skew-round',
+            },
+          },
+        }),
+        materialize: vi.fn(),
+        execute: vi.fn(async () => ({ status: 'completed' as const })),
+      }, {
+        rejectedTerminalRecorder: {
+          record: vi.fn(async (input) => {
+            authorityWrites.push({
+              actorKey: input.actorKey,
+              code: input.code,
+              payloadHash: input.payloadHash,
+            });
+            return { kind: 'recorded' as const };
+          }),
+        },
+      });
+      const response = await service.create(createVersionedRequest(payload));
+      return { authorityWrites, body: await response.json(), status: response.status };
+    };
+    const [legacyWrite, currentWrite] = await Promise.all([
+      runAuthorityWrite({ legacyValue: 'same' }),
+      runAuthorityWrite({ value: 'same', optionalExpandedField: 'ignored-by-v1' }),
+    ]);
+    expect(legacyWrite).toEqual(currentWrite);
+    expect(currentWrite).toEqual({
+      authorityWrites: [{
+        actorKey: 'user:42',
+        code: 'ARENA_VERSION_COMPATIBILITY_REJECTED',
+        payloadHash: 'hash:{"value":"same"}',
+      }],
+      body: {
+        error: 'version-compatible-rejection',
+        generationId: 'generation-1',
+      },
+      status: 400,
+    });
+  });
+
   test('durably records an auditable preflight rejection before exposing its stable identity', async () => {
     const store = new MemoryReplayStore();
     const reserve = vi.spyOn(store, 'reserve');

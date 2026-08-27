@@ -42,8 +42,8 @@
       "evidenceTests": ["apps/api/scripts/verify-hosted-dr-redis.ts", "apps/api/tests/hosted-dr-fault-matrix.test.ts", "apps/web/tests/arena-generation-fault-injection.test.ts"],
       "proofLevel": "isolated-runtime",
       "evidenceCommand": "pnpm run verify:hosted-dr:redis",
-      "evidenceAssertions": ["loopback Redis DB is seeded under preview prefix then emptied", "post-empty replay read is absent", "Redis empty does not become external authority"],
-      "recoverySteps": ["清空隔离 Redis namespace", "从 D1/DO/R2 fixture 读取权威事实", "不得把 cache/replay/presence 提升为 authority"]
+      "evidenceAssertions": ["loopback Redis DB is seeded under preview prefix then emptied", "post-empty replay read is absent", "application arena terminal store still reads the same owner-gated D1/R2 authority"],
+      "recoverySteps": ["清空隔离 Redis namespace", "从应用 D1/R2 terminal store 读取权威事实", "不得把 cache/replay/presence 提升为 authority"]
     },
     {
       "id": "G25E2-GATEWAY-UNAVAILABLE",
@@ -99,10 +99,10 @@
       "fault": "hono-dr-compatible-version-skew",
       "scope": ["hosted/dr-readiness", "shared-hosted-contract"],
       "status": "verified",
-      "evidenceTests": ["packages/hosted-api/tests/hosted-dr-version-gate.test.ts", "packages/hosted-api/tests/hosted-dr-fault-matrix.test.ts"],
+      "evidenceTests": ["packages/hosted-api/tests/arena-generation-service.test.ts", "packages/hosted-api/tests/hosted-dr-version-gate.test.ts", "packages/hosted-api/tests/hosted-dr-fault-matrix.test.ts"],
       "proofLevel": "isolated-contract",
       "evidenceCommand": "pnpm run verify:hosted-dr",
-      "evidenceAssertions": ["one-version same-family skew is allowed only in expand/rollout", "unknown stage fails closed", "destructive cleanup is blocked until schema and versions align"],
+      "evidenceAssertions": ["authenticated old/new payloads preserve actor, authority read/write, and public response compatibility", "one-version same-family skew is allowed only in expand/rollout", "unknown stage and destructive cleanup fail closed until schema and versions align"],
       "recoverySteps": ["先以 backward-compatible expand 部署", "验证 shared core/双 adapter/client contract", "版本未对齐时阻断 destructive cleanup"]
     },
     {

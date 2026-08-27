@@ -82,6 +82,9 @@ describe('Hono content-addressed release transaction', () => {
     expect(script).toContain('validate_release_runtime "$release_dir"');
     expect(script).toContain('validate_release_runtime "$previous_release_dir"');
     expect(script).toContain('run_cancellable curl');
+    expect(script).toContain('hosted_api_environment="${HONO_HOSTED_API_ENVIRONMENT:-}"');
+    expect(script).not.toContain('HONO_HOSTED_API_ENVIRONMENT:-production');
+    expect(script).toContain('HONO_REDIS_KEY_PREFIX=preview');
   });
 
   test('公网 retained-route contract probe 位于部署事务内，失败会进入 rollback', () => {

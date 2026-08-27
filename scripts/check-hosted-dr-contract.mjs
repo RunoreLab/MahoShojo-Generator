@@ -51,6 +51,15 @@ const readJson = (relativePath) => JSON.parse(readFileSync(
 const unique = (values) => new Set(values).size === values.length;
 const sorted = (values) => [...values].sort((left, right) => left.localeCompare(right));
 const sameValues = (left, right) => JSON.stringify(sorted(left)) === JSON.stringify(sorted(right));
+const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+const hasExecutableCaseMarker = (relativePath, source, label) => {
+  if (!/\.test\.[cm]?[jt]sx?$/u.test(relativePath)) return false;
+  const quotePattern = "['\"`]";
+  return new RegExp(
+    `\\b(?:it|test|describe)\\s*\\(\\s*${quotePattern}${escapeRegExp(label)}`,
+    'u',
+  ).test(source);
+};
 
 const argumentValue = (name, fallback) => {
   const index = process.argv.indexOf(name);
@@ -168,12 +177,16 @@ for (const drillCase of drillCases) {
       fail(`${label}: evidence test 不存在 ${evidenceTest}`);
       continue;
     }
-    if (readFileSync(path.join(repositoryRoot, evidenceTest), 'utf8').includes(label)) {
+    if (hasExecutableCaseMarker(
+      evidenceTest,
+      readFileSync(path.join(repositoryRoot, evidenceTest), 'utf8'),
+      label,
+    )) {
       hasCaseMarker = true;
     }
   }
   if (!hasCaseMarker) {
-    fail(`${label}: evidenceTests 至少一个源码必须包含精确 case marker`);
+    fail(`${label}: evidenceTests 至少一个必须包含可执行 evidence case marker`);
   }
   if (!Array.isArray(drillCase.recoverySteps) || drillCase.recoverySteps.length === 0) {
     fail(`${label}: recoverySteps 不得为空`);

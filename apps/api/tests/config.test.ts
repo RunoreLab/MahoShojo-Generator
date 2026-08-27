@@ -3,9 +3,11 @@ import { readHonoServerConfig } from '#/config';
 
 const stubValidBearerProductionEnv = (): void => {
   vi.stubEnv('NODE_ENV', 'production');
+  vi.stubEnv('HOSTED_API_ENVIRONMENT', 'production');
   vi.stubEnv('HONO_AUTH_MODE', 'bearer');
   vi.stubEnv('HONO_CORS_ORIGINS', 'https://*.colanns.me');
   vi.stubEnv('REDIS_URL', 'redis://default:secret@redis:6379');
+  vi.stubEnv('REDIS_KEY_PREFIX', '');
   vi.stubEnv('AI_API_KEY', 'test-ai-key');
   vi.stubEnv('SIGNATURE_SECRET_KEY', 'a'.repeat(32));
   vi.stubEnv('D1_GATEWAY_URL', 'https://d1.example.com');
@@ -37,8 +39,27 @@ describe('Hono server config', () => {
 
   it('读取共享 Redis 的环境隔离前缀', () => {
     stubValidBearerProductionEnv();
+    vi.stubEnv('HOSTED_API_ENVIRONMENT', 'preview');
     vi.stubEnv('REDIS_KEY_PREFIX', 'preview');
     expect(readHonoServerConfig().redisKeyPrefix).toBe('preview');
+  });
+
+  it.each(['', 'preview-other'])(
+    'preview target 拒绝非 canonical Redis prefix：%j',
+    (prefix) => {
+      stubValidBearerProductionEnv();
+      vi.stubEnv('HOSTED_API_ENVIRONMENT', 'preview');
+      vi.stubEnv('REDIS_KEY_PREFIX', prefix);
+
+      expect(() => readHonoServerConfig()).toThrow(/preview.*REDIS_KEY_PREFIX.*preview/);
+    },
+  );
+
+  it('production target 拒绝使用 preview Redis namespace', () => {
+    stubValidBearerProductionEnv();
+    vi.stubEnv('REDIS_KEY_PREFIX', 'preview');
+
+    expect(() => readHonoServerConfig()).toThrow(/production.*REDIS_KEY_PREFIX.*为空/);
   });
 
   it('拒绝可能造成 Redis key 越界的环境前缀', () => {
@@ -77,6 +98,27 @@ describe('Hono server config', () => {
     expect(() => readHonoServerConfig()).toThrow(/Redis 未配置.*SIGNATURE_SECRET_KEY/);
   });
 
+  it.each(['production', 'preview'])(
+    '%s target 不受 NODE_ENV=development 绕过并默认要求 Redis/D1',
+    (deploymentTarget) => {
+      stubValidBearerProductionEnv();
+      vi.stubEnv('NODE_ENV', 'development');
+      vi.stubEnv('HOSTED_API_ENVIRONMENT', deploymentTarget);
+      vi.stubEnv('REDIS_KEY_PREFIX', deploymentTarget === 'preview' ? 'preview' : '');
+      vi.stubEnv('REDIS_URL', '');
+      vi.stubEnv('REDIS_HOST', '');
+
+      expect(() => readHonoServerConfig()).toThrow(/Redis 未配置/);
+    },
+  );
+
+  it('拒绝未知 deployment target，不能静默降级为本机模式', () => {
+    vi.stubEnv('NODE_ENV', 'development');
+    vi.stubEnv('HOSTED_API_ENVIRONMENT', 'prodution');
+
+    expect(() => readHonoServerConfig()).toThrow(/HOSTED_API_ENVIRONMENT/);
+  });
+
   it.each([
     ['REDIS_REQUIRED', 'REDIS_REQUIRED'],
     ['D1_REQUIRED', 'D1_REQUIRED'],
@@ -106,8 +148,17 @@ describe('Hono server config', () => {
     expect(() => readHonoServerConfig()).toThrow(/D1 Gateway.*HMAC_SECRET.*TOKEN/);
   });
 
-  it('仅允许显式 local fault-injection 使用 loopback 明文 Gateway', () => {
+  it('production target 即使设置 fault-injection 也拒绝 loopback 明文 Gateway', () => {
     stubValidBearerProductionEnv();
+    vi.stubEnv('D1_GATEWAY_URL', 'http://127.0.0.1:8788');
+    vi.stubEnv('HOSTED_DR_LOCAL_FAULT_INJECTION', 'true');
+
+    expect(() => readHonoServerConfig()).toThrow(/D1_GATEWAY_URL/);
+  });
+
+  it('仅允许显式 local target 的 fault-injection 使用 loopback 明文 Gateway', () => {
+    stubValidBearerProductionEnv();
+    vi.stubEnv('HOSTED_API_ENVIRONMENT', 'local');
     vi.stubEnv('D1_GATEWAY_URL', 'http://127.0.0.1:8788');
     vi.stubEnv('HOSTED_DR_LOCAL_FAULT_INJECTION', 'true');
 

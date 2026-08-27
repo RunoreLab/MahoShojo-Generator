@@ -9,10 +9,21 @@ describe('repository CI workflow', () => {
     const workflowPath = path.join(repositoryRoot, '.github/workflows/ci.yml');
     expect(existsSync(workflowPath)).toBe(true);
     const workflow = readFileSync(workflowPath, 'utf8');
+    const verifyJobStart = workflow.indexOf('\n  verify:');
+    expect(verifyJobStart).toBeGreaterThanOrEqual(0);
+    const verifyJob = workflow.slice(verifyJobStart);
+    const repositoryGate = verifyJob.indexOf('- name: Verify repository');
+    const redisGate = verifyJob.indexOf('- name: Verify Hosted DR Redis empty drill');
 
     expect(workflow).toContain('pull_request:');
     expect(workflow).toContain('refactor/platform-rearchitecture');
-    expect(workflow).toContain('run: pnpm run ci:verify');
+    expect(verifyJob).toContain('services:');
+    expect(verifyJob).toContain('image: redis:7-alpine');
+    expect(repositoryGate).toBeGreaterThanOrEqual(0);
+    expect(redisGate).toBeGreaterThan(repositoryGate);
+    expect(verifyJob.slice(repositoryGate, redisGate)).toContain('run: pnpm run ci:verify');
+    expect(verifyJob.slice(redisGate)).toContain('REDIS_URL: redis://127.0.0.1:6379/15');
+    expect(verifyJob.slice(redisGate)).toContain('run: pnpm run verify:hosted-dr:redis');
     expect(workflow).not.toContain('wrangler deploy');
     expect(workflow).not.toContain('scp ');
     expect(workflow).not.toContain('ssh ');

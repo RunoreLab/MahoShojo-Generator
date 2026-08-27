@@ -38,6 +38,32 @@ describe('Node D1 Gateway origin gate', () => {
         ...credential,
         D1_GATEWAY_URL: 'http://127.0.0.1:8788',
         HOSTED_DR_LOCAL_FAULT_INJECTION: 'true',
+        HOSTED_API_ENVIRONMENT: 'local',
+      },
+    })).not.toBeNull();
+  });
+
+  it('rejects loopback for production target even when fault injection is set', () => {
+    expect(() => createNodeD1ClientFromEnvironment({
+      env: {
+        ...credential,
+        D1_GATEWAY_URL: 'http://127.0.0.1:8788',
+        HOSTED_DR_LOCAL_FAULT_INJECTION: 'true',
+        HOSTED_API_ENVIRONMENT: 'production',
+      },
+    })).toThrow(/D1_GATEWAY_URL/);
+  });
+
+  it.each([
+    ['localhost', 'http://localhost:8788'],
+    ['IPv6 loopback', 'http://[::1]:8788'],
+  ])('accepts canonical %s only for explicit local target', (_label, gatewayUrl) => {
+    expect(createNodeD1ClientFromEnvironment({
+      env: {
+        ...credential,
+        D1_GATEWAY_URL: gatewayUrl,
+        HOSTED_DR_LOCAL_FAULT_INJECTION: 'true',
+        HOSTED_API_ENVIRONMENT: 'test',
       },
     })).not.toBeNull();
   });

@@ -4,6 +4,10 @@ import {
   hostedDrProductionFallbackReadiness,
   hostedDrStableOrigin,
 } from './hosted-dr-client.generated';
+import {
+  parseHostedApiDeploymentTarget,
+  type HostedApiDeploymentTarget,
+} from '@mahoshojo/hosted-api/hosted-dr';
 
 const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
 
@@ -22,8 +26,6 @@ const isLoopbackDevelopmentOrigin = (origin: string): boolean => {
   }
 };
 
-type HostedApiDeploymentTarget = 'production' | 'preview' | 'local' | 'test';
-
 type HostedApiActivation = {
   controlPlaneProvisioning: 'not-provisioned' | 'preview' | 'production';
   productionFallbackReadiness: 'deferred' | 'verified';
@@ -36,12 +38,10 @@ type HostedApiConfig = {
 };
 
 const resolveDeploymentTarget = (value: string | undefined): HostedApiDeploymentTarget => {
-  const target = value?.trim().toLowerCase();
-  if (!target) return 'local';
-  if (target === 'production' || target === 'preview' || target === 'local' || target === 'test') {
-    return target;
-  }
-  throw new Error(`NEXT_PUBLIC_HOSTED_API_ENVIRONMENT deployment target 非法: ${target}`);
+  if (!value?.trim()) return 'local';
+  const target = parseHostedApiDeploymentTarget(value);
+  if (target) return target;
+  throw new Error(`NEXT_PUBLIC_HOSTED_API_ENVIRONMENT deployment target 非法: ${value.trim()}`);
 };
 
 export const resolveHostedApiConfig = (

@@ -1,4 +1,10 @@
+import { DatabaseSync } from 'node:sqlite';
 import { createClient } from 'redis';
+import { createNodeArenaGenerationTerminalStore } from '@mahoshojo/hosted-runtime/arena-generation';
+import type {
+  NodeDataD1Client,
+  NodeDataD1Statement,
+} from '@mahoshojo/hosted-runtime/node-runtime/data-ports';
 
 import { RedisRuntime } from '../src/redis/runtime';
 
@@ -25,8 +31,125 @@ if (!/^[a-z0-9_-]{1,32}$/u.test(keyPrefix)) {
 const client = createClient({ url: redisUrl });
 client.on('error', () => undefined);
 const runtime = new RedisRuntime(redisUrl, true, undefined, undefined, keyPrefix);
+const authorityDatabase = new DatabaseSync(':memory:');
+
+const createSqliteD1Adapter = (database: DatabaseSync): NodeDataD1Client => ({
+  prepare(sql) {
+    const statement = database.prepare(sql);
+    let parameters: unknown[] = [];
+    const d1Statement: NodeDataD1Statement = {
+      bind(...nextParameters) {
+        parameters = nextParameters;
+        return d1Statement;
+      },
+      async all() {
+        return {
+          success: true,
+          results: statement.all(...parameters as never[]) as Record<string, unknown>[],
+          meta: {},
+        };
+      },
+      async run() {
+        const result = statement.run(...parameters as never[]);
+        return {
+          success: true,
+          results: [],
+          meta: { changes: Number(result.changes) },
+        };
+      },
+    };
+    return d1Statement;
+  },
+});
+
+const sha256 = async (value: string): Promise<string> => {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
+  return Array.from(
+    new Uint8Array(digest),
+    (byte) => byte.toString(16).padStart(2, '0'),
+  ).join('');
+};
 
 try {
+  const authorityGenerationId = 'g25e2-authority-generation';
+  const authorityRequestId = 'g25e2-authority-request';
+  const authorityActorKey = 'user:2502';
+  const authorityPayloadHash = 'g25e2-authority-payload';
+  const authorityR2Key = `v1/battle-report-generations/${authorityGenerationId}/output.md`;
+  const authorityMarkdown = '# G25E2 authority\n\nRedis empty drill must not change this terminal.';
+  authorityDatabase.exec(`
+CREATE TABLE battle_report_generations (
+  id TEXT PRIMARY KEY,
+  status TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  output_preview TEXT,
+  extra_json TEXT NOT NULL
+);
+CREATE TABLE large_objects (
+  id TEXT PRIMARY KEY,
+  kind TEXT NOT NULL,
+  owner_ref_id TEXT NOT NULL,
+  r2_key TEXT NOT NULL
+);
+  `.trim());
+  authorityDatabase.prepare(`
+INSERT INTO battle_report_generations (id, status, updated_at, output_preview, extra_json)
+VALUES (?, ?, ?, ?, ?)
+  `.trim()).run(
+    authorityGenerationId,
+    'completed',
+    '2026-08-25T04:00:00.000Z',
+    'bounded preview',
+    JSON.stringify({
+      generationRequestId: authorityRequestId,
+      generationOwnerHash: await sha256(authorityActorKey),
+      generationPayloadHash: authorityPayloadHash,
+      generationTerminalStatus: 'completed',
+      finalizationCompleted: true,
+      resultRef: `r2:${authorityR2Key}`,
+    }),
+  );
+  authorityDatabase.prepare(`
+INSERT INTO large_objects (id, kind, owner_ref_id, r2_key)
+VALUES (?, ?, ?, ?)
+  `.trim()).run(
+    `arena-output:${authorityGenerationId}`,
+    'battle_report_generation_output',
+    authorityGenerationId,
+    authorityR2Key,
+  );
+  const authorityStore = createNodeArenaGenerationTerminalStore({
+    getD1Client: () => createSqliteD1Adapter(authorityDatabase),
+    objectStore: {
+      async put() {
+        throw new Error('G25E2 authority fixture is read-only');
+      },
+      async getText(key) {
+        if (key !== authorityR2Key) throw new Error('G25E2 authority R2 key mismatch');
+        return authorityMarkdown;
+      },
+    },
+  });
+  const readAuthority = () => authorityStore.readOwnedTerminal({
+    generationId: authorityGenerationId,
+    actorKey: authorityActorKey,
+  });
+  const authorityBefore = await readAuthority();
+  if (
+    authorityBefore?.generationRequestId !== authorityRequestId
+    || authorityBefore.payloadHash !== authorityPayloadHash
+    || authorityBefore.markdown !== authorityMarkdown
+    || authorityBefore.contentAvailable !== true
+  ) {
+    throw new Error(`${DRILL_CASE_ID} 无法经应用 D1/R2 terminal store 读取 authority`);
+  }
+  if (await authorityStore.readOwnedTerminal({
+    generationId: authorityGenerationId,
+    actorKey: 'user:2503',
+  }) !== null) {
+    throw new Error(`${DRILL_CASE_ID} authority owner gate 未 fail closed`);
+  }
+
   await client.connect();
   const before = await client.dbSize();
   if (before !== 0) {
@@ -71,6 +194,10 @@ try {
   if (afterRead !== 0) {
     throw new Error(`${DRILL_CASE_ID} 读取后出现 ${afterRead} 个 key`);
   }
+  const authorityAfter = await readAuthority();
+  if (JSON.stringify(authorityAfter) !== JSON.stringify(authorityBefore)) {
+    throw new Error(`${DRILL_CASE_ID} Redis 清空改变了应用 D1/R2 terminal authority`);
+  }
 
   console.log(JSON.stringify({
     drillCase: DRILL_CASE_ID,
@@ -81,10 +208,13 @@ try {
     databaseSizeAfter: afterRead,
     runtimeReady: runtime.getStatus().ready,
     replayState: 'absent',
-    authority: 'external-d1-or-binding-not-replaced-by-redis',
+    authority: 'arena-terminal-d1-r2-path-unchanged',
+    authorityGenerationId,
+    authorityContentAvailable: authorityAfter?.contentAvailable === true,
     destructiveCommands: 'local-loopback-flushdb-only',
   }));
 } finally {
   await runtime.close();
   if (client.isOpen) await client.quit();
+  authorityDatabase.close();
 }

@@ -231,17 +231,28 @@ const runDeployment = (
     failRuntimeFor?: string;
     failTransactionRemoval?: boolean;
     holdFile?: string;
+    hostedApiEnvironment?: string | null;
     probeStatus?: string;
+    publicBaseUrl?: string;
     raceAdoptionCanary?: string;
+    redisKeyPrefix?: string;
   } = {},
 ) => spawnSync(
   'sh',
-  [path.join(fixture.releaseDirectory, 'deploy-bundle.sh'), fixture.releaseId, 'https://example.test'],
+  [
+    path.join(fixture.releaseDirectory, 'deploy-bundle.sh'),
+    fixture.releaseId,
+    options.publicBaseUrl ?? 'https://example.test',
+  ],
   {
     encoding: 'utf8',
     env: {
       ...process.env,
       HONO_DEPLOY_ROOT_DIR: fixture.rootDirectory,
+      HONO_HOSTED_API_ENVIRONMENT: options.hostedApiEnvironment === null
+        ? ''
+        : options.hostedApiEnvironment ?? 'test',
+      HONO_REDIS_KEY_PREFIX: options.redisKeyPrefix ?? '',
       HONO_DEPLOY_TEST_FAIL_CONFIG_FOR: options.failConfigFor ?? '',
       HONO_DEPLOY_TEST_FAIL_CURRENT_NEXT_REMOVAL:
         options.failCurrentNextRemoval ? 'true' : 'false',
@@ -274,6 +285,7 @@ const spawnDeployment = (
     env: {
       ...process.env,
       HONO_DEPLOY_ROOT_DIR: fixture.rootDirectory,
+      HONO_HOSTED_API_ENVIRONMENT: 'test',
       HONO_DEPLOY_TEST_COMMAND_LOG: fixture.commandLog,
       HONO_DEPLOY_TEST_FAIL_PROMOTION: 'false',
       HONO_DEPLOY_TEST_PROBE_STATUS: '400',
@@ -374,6 +386,111 @@ afterEach(() => {
 });
 
 describe('Hono release-local deployment transaction', () => {
+  test('缺失显式 deployment target 时在 Docker 与 metadata 前 fail closed', () => {
+    const fixture = createFixture();
+
+    const result = runDeployment(fixture, { hostedApiEnvironment: null });
+
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain('HONO_HOSTED_API_ENVIRONMENT');
+    expect(existsSync(fixture.commandLog)).toBe(false);
+  });
+
+  test('production target 拒绝 preview public origin', () => {
+    const fixture = createFixture();
+
+    const result = runDeployment(fixture, {
+      hostedApiEnvironment: 'production',
+      publicBaseUrl: 'https://homura-preview.colanns.me',
+    });
+
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain('production target');
+    expect(existsSync(fixture.commandLog)).toBe(false);
+  });
+
+  test('production target 拒绝 preview Redis namespace', () => {
+    const fixture = createFixture();
+
+    const result = runDeployment(fixture, {
+      hostedApiEnvironment: 'production',
+      publicBaseUrl: 'https://homura.colanns.me',
+      redisKeyPrefix: 'preview',
+    });
+
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain('production target 必须保持 HONO_REDIS_KEY_PREFIX 为空');
+    expect(existsSync(fixture.commandLog)).toBe(false);
+  });
+
+  test('production target 拒绝非 canonical root', () => {
+    const fixture = createFixture();
+
+    const result = runDeployment(fixture, {
+      hostedApiEnvironment: 'production',
+      publicBaseUrl: 'https://homura.colanns.me',
+    });
+
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain('production target 必须使用 /opt/mahoshojo-hono');
+    expect(existsSync(fixture.commandLog)).toBe(false);
+  });
+
+  test('preview target 缺少固定 Redis prefix 时 fail closed', () => {
+    const fixture = createFixture();
+
+    const result = runDeployment(fixture, {
+      hostedApiEnvironment: 'preview',
+      publicBaseUrl: 'https://homura-preview.colanns.me',
+    });
+
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain('HONO_REDIS_KEY_PREFIX=preview');
+    expect(existsSync(fixture.commandLog)).toBe(false);
+  });
+
+  test('preview target 拒绝非 canonical Redis prefix', () => {
+    const fixture = createFixture();
+
+    const result = runDeployment(fixture, {
+      hostedApiEnvironment: 'preview',
+      publicBaseUrl: 'https://homura-preview.colanns.me',
+      redisKeyPrefix: 'preview-other',
+    });
+
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain('HONO_REDIS_KEY_PREFIX=preview');
+    expect(existsSync(fixture.commandLog)).toBe(false);
+  });
+
+  test('preview target 拒绝 production public origin', () => {
+    const fixture = createFixture();
+
+    const result = runDeployment(fixture, {
+      hostedApiEnvironment: 'preview',
+      publicBaseUrl: 'https://homura.colanns.me',
+      redisKeyPrefix: 'preview',
+    });
+
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain('preview target 必须使用 https://homura-preview.colanns.me');
+    expect(existsSync(fixture.commandLog)).toBe(false);
+  });
+
+  test('preview target 拒绝非 canonical root', () => {
+    const fixture = createFixture();
+
+    const result = runDeployment(fixture, {
+      hostedApiEnvironment: 'preview',
+      publicBaseUrl: 'https://homura-preview.colanns.me',
+      redisKeyPrefix: 'preview',
+    });
+
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain('preview target 必须使用 /opt/mahoshojo-hono-preview');
+    expect(existsSync(fixture.commandLog)).toBe(false);
+  });
+
   test('完整 contract 通过后才原子 promotion 当前 release', () => {
     const fixture = createFixture();
 
@@ -386,7 +503,9 @@ describe('Hono release-local deployment transaction', () => {
     expect(readFileSync(path.join(fixture.rootDirectory, '.env'), 'utf8')).toBe(
       `HONO_RELEASE_DIR=${fixture.releaseDirectory}\n`,
     );
-    expect(readFileSync(fixture.commandLog, 'utf8')).toContain(
+    const commandLog = readFileSync(fixture.commandLog, 'utf8');
+    expect(commandLog).toContain('-e HOSTED_API_ENVIRONMENT=test');
+    expect(commandLog).toContain(
       `-f ${fixture.releaseDirectory}/compose.yml up -d --force-recreate hono`,
     );
   });

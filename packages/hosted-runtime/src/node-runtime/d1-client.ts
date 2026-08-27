@@ -3,6 +3,7 @@ import {
   createHttpD1Client,
   type D1HttpClient,
 } from '../d1-http-client';
+import { parseHostedApiDeploymentTarget } from '@mahoshojo/hosted-api/deployment-target';
 
 export type NodeD1Environment = Record<string, string | undefined>;
 
@@ -53,6 +54,8 @@ const configurationKey = (
   envValue(env, 'D1_GATEWAY_URL') ?? '',
   envValue(env, 'D1_DATABASE_ID') ?? '',
   envValue(env, 'CLOUDFLARE_ACCOUNT_ID') ?? '',
+  envValue(env, 'HOSTED_API_ENVIRONMENT') ?? '',
+  envValue(env, 'HOSTED_DR_LOCAL_FAULT_INJECTION') ?? '',
 ]);
 
 const credentialFingerprint = (
@@ -72,8 +75,13 @@ export const createNodeD1ClientFromEnvironment = (
   const fetcher = options.fetch ?? globalThis.fetch;
   const gatewayUrl = envValue(env, 'D1_GATEWAY_URL');
   if (gatewayUrl) {
+    const deploymentTarget = parseHostedApiDeploymentTarget(
+      envValue(env, 'HOSTED_API_ENVIRONMENT'),
+    );
     const baseUrl = parseTrustedD1GatewayOrigin(gatewayUrl, {
-      allowHttpLoopback: envValue(env, 'HOSTED_DR_LOCAL_FAULT_INJECTION')?.toLowerCase() === 'true',
+      allowHttpLoopback:
+        envValue(env, 'HOSTED_DR_LOCAL_FAULT_INJECTION')?.toLowerCase() === 'true'
+        && (deploymentTarget === 'local' || deploymentTarget === 'test'),
     });
     if (!baseUrl) {
       throw new Error('D1_GATEWAY_URL 必须是可信 HTTPS root origin');

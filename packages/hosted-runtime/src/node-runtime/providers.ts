@@ -1,4 +1,5 @@
 import type { AIProvider } from './types';
+import { parseHostedApiDeploymentTarget } from '@mahoshojo/hosted-api/deployment-target';
 
 const hasNonEmptyText = (value: unknown): value is string =>
   typeof value === 'string' && value.trim().length > 0;
@@ -15,7 +16,8 @@ const safeBaseUrl = (
   if (!hasNonEmptyText(value)) return null;
   try {
     const url = new URL(value.trim());
-    const localHttp = env.NODE_ENV !== 'production'
+    const deploymentTarget = parseHostedApiDeploymentTarget(env.HOSTED_API_ENVIRONMENT);
+    const localHttp = (deploymentTarget === 'local' || deploymentTarget === 'test')
       && url.protocol === 'http:'
       && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
     if (
