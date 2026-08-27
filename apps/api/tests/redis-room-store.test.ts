@@ -215,6 +215,28 @@ describe('RedisRoomStore', () => {
     expect(client.eval).toHaveBeenCalledTimes(2);
   });
 
+  it('legacy checkpoint 在 GET 后到期时仍补种旧 epoch fence，并返回 absent', async () => {
+    const client = createClient();
+    const state = createArenaRoomState('epoch-expired-during-load');
+    const raw = JSON.stringify({
+      checkpointVersion: 1,
+      ...checkpointPredecessorOf(state),
+      state,
+    });
+    vi.mocked(client.get).mockResolvedValue(raw);
+    vi.mocked(client.eval).mockResolvedValue('expired');
+    const store = createRedisRoomStore({ getClient: () => client });
+
+    await expect(store.load('room-1')).resolves.toBeNull();
+    expect(client.get).toHaveBeenCalledTimes(1);
+    expect(client.eval).toHaveBeenCalledWith(
+      expect.stringContaining('ROOM_CHECKPOINT_BOOTSTRAP_FENCE_V1'),
+      expect.objectContaining({
+        arguments: [raw, 'room-1', 'epoch-expired-during-load', '16'],
+      }),
+    );
+  });
+
   it('Redis 垃圾与未知 Lua 响应只上浮固定错误，不反射 checkpoint 内容', async () => {
     const client = createClient();
     vi.mocked(client.get).mockResolvedValue(JSON.stringify({

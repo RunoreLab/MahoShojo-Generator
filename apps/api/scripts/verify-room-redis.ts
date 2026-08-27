@@ -56,6 +56,7 @@ const expiryFenceRoomId = `room-expiry-fence-${token}`;
 const legacyRoomId = `room-legacy-v1-${token}`;
 const legacyRecoveryRoomId = `room-legacy-recovery-${token}`;
 const legacyLoadTtlRoomId = `room-legacy-load-ttl-${token}`;
+const legacyLoadRaceRoomId = `room-legacy-load-race-${token}`;
 const malformedRoomId = `room-malformed-${token}`;
 const invalidFenceRoomId = `room-invalid-fence-${token}`;
 const fullFenceRoomId = `room-full-fence-${token}`;
@@ -585,6 +586,44 @@ try {
         terminalTtlSeconds: 1,
       });
       const delayedCreateReceipt = commit(createRoom(ttlRoomId));
+      const legacyLoadRaceState = createRoom(
+        legacyLoadRaceRoomId,
+        'legacy-load-race-epoch',
+      ).nextState;
+      await cleanup.set(roomKey(legacyLoadRaceRoomId), JSON.stringify({
+        checkpointVersion: 1,
+        ...checkpointPredecessorOf(legacyLoadRaceState),
+        state: legacyLoadRaceState,
+      }), { PX: 1_000 });
+      let deleteLegacyRaceAfterGet = true;
+      const legacyLoadRaceStore = createRedisRoomStore({
+        keyPrefix,
+        getClient: () => ({
+          eval: (script, options) => cleanup.eval(script, options),
+          get: async (key) => {
+            const value = await cleanup.get(key);
+            if (key === roomKey(legacyLoadRaceRoomId) && deleteLegacyRaceAfterGet) {
+              deleteLegacyRaceAfterGet = false;
+              await cleanup.del(key);
+            }
+            return typeof value === 'string' ? value : null;
+          },
+        } satisfies RedisRoomClient),
+      });
+      if (await legacyLoadRaceStore.load(legacyLoadRaceRoomId) !== null) {
+        throw new Error('ROOM_REDIS_LEGACY_LOAD_EXPIRY_RACE_FAILED');
+      }
+      if (!await cleanup.sIsMember(
+        roomFenceKey(legacyLoadRaceRoomId),
+        legacyLoadRaceState.snapshot.roomEpoch,
+      )) {
+        throw new Error('ROOM_REDIS_LEGACY_LOAD_EXPIRY_RACE_FENCE_MISSING');
+      }
+      if ((await legacyLoadRaceStore.save({
+        commit: commit(createRoom(legacyLoadRaceRoomId, 'legacy-load-race-epoch')),
+      })).kind !== 'conflict') {
+        throw new Error('ROOM_REDIS_LEGACY_LOAD_EXPIRY_RACE_RESURRECTION_FAILED');
+      }
       const legacyLoadTtlState = createRoom(legacyLoadTtlRoomId, 'legacy-load-epoch').nextState;
       await cleanup.set(roomKey(legacyLoadTtlRoomId), JSON.stringify({
         checkpointVersion: 1,
@@ -694,6 +733,7 @@ try {
         recoveryEpochRollover: true,
         legacyRecoveryPredecessorFence: true,
         legacyLoadFenceBootstrap: true,
+        legacyLoadExpiryRaceFence: true,
         roomActorWarmRecovery: true,
         roomActorOldWriterFence: true,
         terminalTtl: true,
@@ -717,6 +757,7 @@ try {
       ...roomKeys(legacyRoomId),
       ...roomKeys(legacyRecoveryRoomId),
       ...roomKeys(legacyLoadTtlRoomId),
+      ...roomKeys(legacyLoadRaceRoomId),
       ...roomKeys(malformedRoomId),
       ...roomKeys(invalidFenceRoomId),
       ...roomKeys(fullFenceRoomId),

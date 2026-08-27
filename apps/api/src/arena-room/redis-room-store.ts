@@ -22,8 +22,8 @@ const KEY_PREFIX = 'mahoshojo:room:v1';
 const BOOTSTRAP_FENCE_SCRIPT = `
 -- ROOM_CHECKPOINT_BOOTSTRAP_FENCE_V1
 local raw = redis.call('GET', KEYS[1])
-if not raw or raw ~= ARGV[1] then return 'conflict' end
-local decoded, current = pcall(cjson.decode, raw)
+if raw and raw ~= ARGV[1] then return 'conflict' end
+local decoded, current = pcall(cjson.decode, ARGV[1])
 if not decoded or type(current) ~= 'table'
   or current.checkpointVersion ~= 1
   or current.expiryFence ~= nil
@@ -34,10 +34,12 @@ end
 local fenceTypeReply = redis.call('TYPE', KEYS[2])
 local fenceType = type(fenceTypeReply) == 'table' and fenceTypeReply.ok or fenceTypeReply
 if fenceType ~= 'none' and fenceType ~= 'set' then return 'invalid-fence' end
-if redis.call('SISMEMBER', KEYS[2], current.roomEpoch) == 1 then return 'already' end
+if redis.call('SISMEMBER', KEYS[2], current.roomEpoch) == 1 then
+  return raw and 'already' or 'expired'
+end
 if redis.call('SCARD', KEYS[2]) >= tonumber(ARGV[4]) then return 'incarnation-limit' end
 redis.call('SADD', KEYS[2], current.roomEpoch)
-return 'seeded'
+return raw and 'seeded' or 'expired'
 `;
 
 const SAVE_SCRIPT = `
@@ -410,8 +412,9 @@ export const createRedisRoomStore = (options: RedisRoomStoreOptions): RedisRoomS
         });
         const result = parseMutationResult(
           bootstrapped,
-          ['seeded', 'already', 'conflict'] as const,
+          ['seeded', 'already', 'expired', 'conflict'] as const,
         );
+        if (result.kind === 'expired') return null;
         if (result.kind !== 'conflict') return stored.state;
       }
       throw new Error('REDIS_ROOM_CHECKPOINT_CONFLICT');
