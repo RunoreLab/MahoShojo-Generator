@@ -4,8 +4,8 @@ import {
   ARENA_ROOM_WEBSOCKET_PROTOCOL,
   MAX_CONTROL_FRAME_BYTES,
 } from '@mahoshojo/contracts/arena-room';
+import type { WebSocketLike } from '@hono/node-server';
 import type { WSContext, WSEvents } from 'hono/ws';
-import type WebSocket from 'ws';
 
 import {
   ARENA_ROOM_WEBSOCKET_PATH,
@@ -81,15 +81,15 @@ const upgradeRequest = (headers: HeadersInit = {}): Request => new Request(
   },
 );
 
-const wsContext = (socket: FakeWebSocket): WSContext<WebSocket> => {
-  return { raw: socket } as unknown as WSContext<WebSocket>;
+const wsContext = (socket: FakeWebSocket): WSContext<WebSocketLike> => {
+  return { raw: socket } as unknown as WSContext<WebSocketLike>;
 };
 
 const openReservation = (
   gateway: RoomWebSocketGateway,
   reservation: RoomWebSocketReservation,
   socket = new FakeWebSocket(),
-): { events: WSEvents<WebSocket>; socket: FakeWebSocket } => {
+): { events: WSEvents<WebSocketLike>; socket: FakeWebSocket } => {
   const events = gateway.createEvents(reservation);
   events.onOpen?.(new Event('open'), wsContext(socket));
   return { events, socket };

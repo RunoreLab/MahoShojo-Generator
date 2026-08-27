@@ -4,6 +4,7 @@ import {
   parseRoomClientTransportFrame,
   type RoomServerTransportMessage,
 } from '@mahoshojo/contracts/arena-room';
+import type { WebSocketLike } from '@hono/node-server';
 import type { WSEvents, WSMessageReceive } from 'hono/ws';
 import WebSocket from 'ws';
 
@@ -342,6 +343,9 @@ export class RoomWebSocketGateway {
     if (new URL(request.url).pathname !== ARENA_ROOM_WEBSOCKET_PATH) {
       return createRejection(404, 'ROOM_WEBSOCKET_NOT_FOUND');
     }
+    if (request.method !== 'GET') {
+      return createRejection(405, 'ROOM_WEBSOCKET_METHOD_NOT_ALLOWED');
+    }
     if (request.headers.get('upgrade')?.toLowerCase() !== 'websocket') {
       return createRejection(426, 'ROOM_WEBSOCKET_UPGRADE_REQUIRED');
     }
@@ -389,11 +393,12 @@ export class RoomWebSocketGateway {
     return { accepted: true, reservation };
   }
 
-  createEvents(reservation: RoomWebSocketReservation): WSEvents<WebSocket> {
+  createEvents(reservation: RoomWebSocketReservation): WSEvents<WebSocketLike> {
     let session: RoomWebSocketSession | undefined;
     return {
       onOpen: (_event, context) => {
-        const socket = context.raw;
+        // This gateway is constructed only with the official Node adapter backed by `ws`.
+        const socket = context.raw as WebSocket | undefined;
         if (!socket) {
           this.releaseReservation(reservation.id);
           return;
@@ -414,8 +419,9 @@ export class RoomWebSocketGateway {
         else this.releaseReservation(reservation.id);
       },
       onError: () => {
-        if (session) session.terminate();
-        else this.releaseReservation(reservation.id);
+        // `ws` owns protocol-error close codes (for example 1009 for maxPayload)
+        // and follows its error event with close. The close hook performs cleanup.
+        if (!session) this.releaseReservation(reservation.id);
       },
     };
   }

@@ -6,6 +6,12 @@ import { createHonoApp } from '#/app';
 import { readHonoServerConfig } from '#/config';
 import { configureHonoArenaGenerationRuntime } from '#/arena-generation/runtime';
 import { createRoomActorRegistry } from '#/arena-room/room-actor-registry';
+import { RoomWebSocketGateway } from '#/arena-room/room-websocket-gateway';
+import {
+  createRoomRequestDispatcher,
+  createRoomWebSocketApp,
+  createRoomWebSocketServer,
+} from '#/arena-room/room-websocket-transport';
 import { getHonoPrimaryD1Client } from '#/d1/provider';
 import { RedisRuntime } from '#/redis/runtime';
 import {
@@ -49,13 +55,21 @@ if (process.env.HONO_CONFIG_CHECK_ONLY === 'true') {
     },
   });
   roomActors.startIdleSweeper();
+  const roomWebSocketGateway = new RoomWebSocketGateway({
+    // GMR-05 will wire signed room-ticket authority and an explicit exact Origin list.
+    // Until then both browser and installed-client upgrade attempts remain fail-closed.
+    allowedBrowserOrigins: [],
+  });
+  const roomWebSocketServer = createRoomWebSocketServer();
 
   telemetry.start();
   const app = createHonoApp(config, redis, telemetry);
+  const roomWebSocketApp = createRoomWebSocketApp(roomWebSocketGateway);
   const server = serve({
-    fetch: app.fetch,
+    fetch: createRoomRequestDispatcher(app, roomWebSocketApp),
     hostname: config.host,
     port: config.port,
+    websocket: { server: roomWebSocketServer },
   }, (info) => {
     console.info(`[hono] 服务已启动：http://${info.address}:${info.port}`);
   });
@@ -68,23 +82,30 @@ if (process.env.HONO_CONFIG_CHECK_ONLY === 'true') {
       const drainResult = await shutdownWithWaitUntilDrain({
         closeDependencies: async () => {
           try {
-            await roomActors.shutdown();
+            await roomWebSocketGateway.shutdown();
           } finally {
-            await redis.close();
+            try {
+              await roomActors.shutdown();
+            } finally {
+              await redis.close();
+            }
           }
         },
         coordinator: nodeExecutionContextCoordinator,
         dependencyCloseTimeoutMs: DEFAULT_DEPENDENCY_CLOSE_GRACE_TIMEOUT_MS,
         drainTimeoutMs: DEFAULT_WAIT_UNTIL_DRAIN_TIMEOUT_MS,
         forceCloseDependencies: () => {
+          roomWebSocketGateway.forceClose();
           roomActors.forceClose();
           redis.forceClose();
         },
         stopAcceptingRequests: async () => {
+          const roomWebSocketShutdown = roomWebSocketGateway.shutdown();
           roomActors.stopAccepting();
           const closeResult = await stopAcceptingRequestsWithGrace(server, {
             timeoutMs: DEFAULT_SERVER_CLOSE_GRACE_TIMEOUT_MS,
           });
+          await roomWebSocketShutdown;
           if (closeResult.timedOut) {
             console.error(
               `[hono][shutdown] HTTP 请求等待 ${DEFAULT_SERVER_CLOSE_GRACE_TIMEOUT_MS}ms 后超时，`
