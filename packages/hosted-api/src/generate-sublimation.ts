@@ -1,6 +1,8 @@
 import {
   HOSTED_GENERATION_ERROR_CODE,
+  buildHostedGenerationErrorPayload,
   jsonResponse,
+  readSafePublicAiError,
 } from './regular-generation';
 import {
   createQuestionnaireGenerationService,
@@ -13,7 +15,10 @@ export type GenerateSublimationServiceDependencies<Prepared, Execution, Generate
 
 export type GenerateSublimationService = QuestionnaireGenerationService;
 
-const sublimationErrorResponse = (): Response => {
+const sublimationErrorResponse = (error: unknown): Response => {
+  if (readSafePublicAiError(error)) {
+    return jsonResponse(buildHostedGenerationErrorPayload(error, '角色成长升华失败'), 500);
+  }
   const message = `角色成长升华失败: ${HOSTED_GENERATION_ERROR_CODE}`;
   return jsonResponse({ error: message, message }, 500);
 };
@@ -35,10 +40,12 @@ export const createGenerateSublimationStreamService = <Prepared, Execution, Gene
   {
     invalidJsonResponse: 'route-error',
     executionOrder: 'after-policies',
-    buildErrorResponse: () => jsonResponse({
-      error: '生成失败',
-      message: HOSTED_GENERATION_ERROR_CODE,
-    }, 500),
+    buildErrorResponse: (error) => readSafePublicAiError(error)
+      ? jsonResponse(buildHostedGenerationErrorPayload(error, '生成失败'), 500)
+      : jsonResponse({
+        error: '生成失败',
+        message: HOSTED_GENERATION_ERROR_CODE,
+      }, 500),
   },
   dependencies,
 );

@@ -328,6 +328,62 @@ describe('RedisGenerationReplayStore', () => {
     expect(vi.mocked(client.eval).mock.calls[0]?.[0]).toContain('GEN_TERMINAL_V1');
   });
 
+  it('只从 Redis 恢复有界的 Provider 安全投影', async () => {
+    const client = createClient();
+    const terminal = {
+      status: 'failed' as const,
+      code: 'AI_UPSTREAM_REQUEST_FAILED',
+      publicError: {
+        code: 'AI_UPSTREAM_REQUEST_FAILED' as const,
+        message: 'AI_APICallError: 余额不足（HTTP 402）',
+        upstreamStatus: 402,
+        upstreamRequestId: 'req-redis-402',
+      },
+    };
+    vi.mocked(client.get).mockResolvedValue(JSON.stringify({
+      actorHash: 'actor-hash',
+      reservationKey: 'reservation-key',
+      generationId: 'generation-1234',
+      generationRequestId: 'request-1234',
+      payloadHash: 'payload-sha256',
+      producerToken: reserveInput.producerToken,
+      status: 'failed',
+      lastEventId: '12-0',
+      updatedAt: reserveInput.now,
+      leaseExpiresAt: null,
+      snapshot: null,
+      terminal,
+      cancelRequested: false,
+    }));
+    const store = createRedisGenerationReplayStore({ getClient: () => client });
+
+    await expect(store.readState({ generationId: 'generation-1234' })).resolves.toMatchObject({
+      terminal,
+    });
+
+    vi.mocked(client.get).mockResolvedValue(JSON.stringify({
+      actorHash: 'actor-hash',
+      reservationKey: 'reservation-key',
+      generationId: 'generation-1234',
+      generationRequestId: 'request-1234',
+      payloadHash: 'payload-sha256',
+      producerToken: reserveInput.producerToken,
+      status: 'failed',
+      lastEventId: '12-0',
+      updatedAt: reserveInput.now,
+      leaseExpiresAt: null,
+      snapshot: null,
+      terminal: {
+        ...terminal,
+        publicError: { ...terminal.publicError, message: 'X'.repeat(2_001) },
+      },
+      cancelRequested: false,
+    }));
+    await expect(store.readState({ generationId: 'generation-1234' })).rejects.toThrow(
+      'REDIS_GENERATION_STATE_INVALID',
+    );
+  });
+
   it('markRunning 原子观察 reserved cancel，阻止旧 producer 启动 Provider', async () => {
     const client = createClient();
     vi.mocked(client.eval).mockResolvedValue('cancelled:content_policy');

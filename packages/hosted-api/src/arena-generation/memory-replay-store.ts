@@ -19,7 +19,12 @@ export type MemoryGenerationReplayStoreOptions = {
 const cloneState = (state: GenerationReplayStoreState): GenerationReplayStoreState => ({
   ...state,
   snapshot: state.snapshot ? { ...state.snapshot } : null,
-  terminal: state.terminal ? { ...state.terminal } : null,
+  terminal: state.terminal ? {
+    ...state.terminal,
+    ...(state.terminal.publicError
+      ? { publicError: { ...state.terminal.publicError } }
+      : {}),
+  } : null,
 });
 
 /**
@@ -361,7 +366,12 @@ export const createMemoryGenerationReplayStore = (
       writeState({
         ...state,
         status: input.terminal.status,
-        terminal: { ...input.terminal },
+        terminal: {
+          ...input.terminal,
+          ...(input.terminal.publicError
+            ? { publicError: { ...input.terminal.publicError } }
+            : {}),
+        },
         leaseExpiresAt: null,
         updatedAt: input.now,
       });

@@ -5,6 +5,7 @@ import {
   isArenaPreparationSeed,
   isGenerationCancelReason,
 } from '@mahoshojo/hosted-api/arena-generation/service';
+import { readSafePublicAiError } from '@mahoshojo/hosted-api/regular-generation';
 import type {
   ArenaGenerationExecutor,
   ArenaGenerationExecutionInput,
@@ -808,9 +809,10 @@ export const createArenaGenerationRuntime = (
       }
       const cancellationFenced = error instanceof Error
         && error.message === 'ARENA_GENERATION_CANCELLED';
+      const publicError = readSafePublicAiError(error);
       const code = cancellationFenced
         ? claimedCancellationCode ?? 'USER_CANCELLED'
-        : errorCodeOf(error, input.signal);
+        : publicError?.code ?? errorCodeOf(error, input.signal);
       const status = input.signal.reason === 'producer_lost'
         ? 'producer_lost'
         : input.signal.aborted || cancellationFenced
@@ -832,7 +834,12 @@ export const createArenaGenerationRuntime = (
           throw finalizationError;
         }
       }
-      return { status, code, resultRef: finalization.resultRef };
+      return {
+        status,
+        code,
+        resultRef: finalization.resultRef,
+        ...(status === 'failed' && publicError ? { publicError } : {}),
+      };
     }
   };
 

@@ -3,6 +3,7 @@ import {
   encodeGenerationSseEvent,
   resolveResumeCursor,
 } from './sse';
+import type { SafePublicAiErrorProjection } from '../regular-generation';
 
 export const MAX_ARENA_CREATE_BODY_BYTES = 12 * 1_024 * 1_024;
 export const MAX_ARENA_CANCEL_BODY_BYTES = 1_024;
@@ -75,6 +76,7 @@ export type GenerationTerminal = {
   status: Extract<GenerationStatus, 'completed' | 'failed' | 'cancelled' | 'producer_lost'>;
   code?: string;
   resultRef?: string | null;
+  publicError?: SafePublicAiErrorProjection;
 };
 
 export type GenerationCancelReason = 'user' | 'content_policy';
@@ -970,6 +972,7 @@ export const createArenaGenerationService = (
         return enqueue(async () => {
           await flushPending();
           const now = dependencies.now().toISOString();
+          const publicError = terminal.status === 'failed' ? terminal.publicError : undefined;
           await append([{
             type: terminal.status === 'failed' || terminal.status === 'producer_lost'
               ? 'error'
@@ -978,6 +981,16 @@ export const createArenaGenerationService = (
               ok: terminal.status === 'completed',
               status: terminal.status,
               ...(terminal.code ? { code: terminal.code } : {}),
+              ...(publicError ? {
+                error: publicError.message,
+                message: publicError.message,
+                ...(publicError.upstreamStatus === undefined
+                  ? {}
+                  : { upstreamStatus: publicError.upstreamStatus }),
+                ...(publicError.upstreamRequestId === undefined
+                  ? {}
+                  : { upstreamRequestId: publicError.upstreamRequestId }),
+              } : {}),
             },
           }], now);
           await dependencies.store.markTerminal({
@@ -1395,6 +1408,16 @@ export const createArenaGenerationService = (
                 status: terminal.status,
                 ...(terminal.code ? { code: terminal.code } : {}),
                 ...(terminal.resultRef ? { resultRef: terminal.resultRef } : {}),
+                ...(terminal.status === 'failed' && terminal.publicError ? {
+                  error: terminal.publicError.message,
+                  message: terminal.publicError.message,
+                  ...(terminal.publicError.upstreamStatus === undefined
+                    ? {}
+                    : { upstreamStatus: terminal.publicError.upstreamStatus }),
+                  ...(terminal.publicError.upstreamRequestId === undefined
+                    ? {}
+                    : { upstreamRequestId: terminal.publicError.upstreamRequestId }),
+                } : {}),
               },
             };
             controller.enqueue(snapshotEvent);

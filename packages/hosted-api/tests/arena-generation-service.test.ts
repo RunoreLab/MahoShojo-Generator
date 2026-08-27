@@ -2026,6 +2026,49 @@ describe('Arena generation lifecycle service', () => {
     });
   });
 
+  test('Provider 安全诊断进入 live/replay error event，但 observation 保持低基数', async () => {
+    const store = new MemoryReplayStore();
+    const observeArenaGeneration = vi.fn();
+    const service = createService(store, {
+      execute: vi.fn(async () => ({
+        status: 'failed' as const,
+        code: 'AI_UPSTREAM_REQUEST_FAILED',
+        publicError: {
+          code: 'AI_UPSTREAM_REQUEST_FAILED' as const,
+          message: 'AI_APICallError: 余额不足（HTTP 402）',
+          upstreamStatus: 402,
+          upstreamRequestId: 'req-arena-replay-402',
+        },
+      })),
+    }, {
+      observer: { observeArenaGeneration },
+    });
+
+    const first = await service.create(createRequest('request-provider-error'));
+    const firstBody = await first.text();
+    const replay = await service.resume(new Request(
+      'https://example.test/api/arena/generations/generation-1/stream',
+    ), { generationId: 'generation-1' });
+    const replayBody = await replay.text();
+    const windowLost = await service.resume(new Request(
+      'https://example.test/api/arena/generations/generation-1/stream?after=999-0',
+    ), { generationId: 'generation-1' });
+    const windowLostBody = await windowLost.text();
+
+    for (const body of [firstBody, replayBody, windowLostBody]) {
+      expect(body).toContain('AI_APICallError: 余额不足（HTTP 402）');
+      expect(body).toContain('"code":"AI_UPSTREAM_REQUEST_FAILED"');
+      expect(body).toContain('"upstreamStatus":402');
+      expect(body).toContain('req-arena-replay-402');
+    }
+    expect(store.states.get('generation-1')?.terminal).toMatchObject({
+      status: 'failed',
+      code: 'AI_UPSTREAM_REQUEST_FAILED',
+      publicError: { upstreamStatus: 402 },
+    });
+    expect(JSON.stringify(observeArenaGeneration.mock.calls)).not.toContain('余额不足');
+  });
+
   test('bounds Redis snapshot bytes while retaining the terminal fallback path', async () => {
     const store = new MemoryReplayStore();
     const observeArenaGeneration = vi.fn();

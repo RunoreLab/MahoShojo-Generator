@@ -14,6 +14,7 @@ import type {
   GenerationTerminal,
   GenerationStatus,
 } from '@mahoshojo/hosted-api/arena-generation/service';
+import { isSafePublicAiErrorProjection } from '@mahoshojo/hosted-api/regular-generation';
 
 const DEFAULT_ACTIVE_TTL_SECONDS = 3_600;
 const DEFAULT_TERMINAL_TTL_SECONDS = 2_700;
@@ -406,9 +407,11 @@ const parseStoredTerminal = (value: unknown): GenerationTerminal | null => {
   if (!isRecord(value) || !isTerminalStatus(value.status)) {
     throw new Error('REDIS_GENERATION_STATE_INVALID');
   }
+  const publicError = value.publicError;
   if (
     ('code' in value && typeof value.code !== 'string')
     || ('resultRef' in value && !nullableString(value.resultRef))
+    || (publicError !== undefined && !isSafePublicAiErrorProjection(publicError))
   ) {
     throw new Error('REDIS_GENERATION_STATE_INVALID');
   }
@@ -418,6 +421,7 @@ const parseStoredTerminal = (value: unknown): GenerationTerminal | null => {
     status: value.status,
     ...(code === undefined ? {} : { code: code as string }),
     ...(resultRef === undefined ? {} : { resultRef: resultRef as string | null }),
+    ...(publicError === undefined ? {} : { publicError: { ...publicError } }),
   };
 };
 

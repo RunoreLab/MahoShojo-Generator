@@ -5,6 +5,7 @@ import {
   createArenaGenerationService,
   isArenaGenerationAuditableRejection,
 } from '@mahoshojo/hosted-api/arena-generation/service';
+import { createSafePublicAiError } from '@mahoshojo/hosted-api/regular-generation';
 
 import {
   createArenaGenerationRuntime,
@@ -504,6 +505,60 @@ describe('Arena generation runtime', () => {
       emit: async () => undefined,
       claimFinalization: vi.fn(async () => ({ kind: 'claimed' as const })),
     })).rejects.toBeInstanceOf(ArenaGenerationFinalizationPendingError);
+  });
+
+  it('只把 Provider 安全诊断带到 transient terminal，durable finalizer 仍只接收 code', async () => {
+    const providerError = createSafePublicAiError({
+      code: 'AI_UPSTREAM_REQUEST_FAILED',
+      message: 'AI_APICallError: 余额不足（HTTP 402）',
+      upstreamStatus: 402,
+      upstreamRequestId: 'req-arena-402',
+    });
+    const finalize = vi.fn(async () => ({ resultRef: null, ranking: null }));
+    const dependencies = createDependencies({
+      generate: vi.fn(async () => { throw providerError; }),
+      finalize,
+    });
+    const runtime = createArenaGenerationRuntime(dependencies);
+    const prepared = await runtime.prepare!({
+      request: new Request('https://example.test/api/arena/generate-stream'),
+      actorKey: 'user:42',
+      generationRequestId: 'request-provider-error',
+      payload,
+    });
+    if (
+      prepared instanceof Response
+      || isArenaGenerationAuditableRejection(prepared)
+    ) throw new Error('unexpected response');
+
+    const terminal = await runtime.execute({
+      generationId: 'generation-provider-error',
+      generationRequestId: 'request-provider-error',
+      actorKey: 'user:42',
+      producerToken: 'producer-token-provider-error',
+      payloadHash: 'payload-hash-provider-error',
+      payload: prepared.executionPayload,
+      signal: new AbortController().signal,
+      emit: async () => undefined,
+      claimFinalization: vi.fn(async () => ({ kind: 'claimed' as const })),
+    });
+
+    expect(terminal).toEqual({
+      status: 'failed',
+      code: 'AI_UPSTREAM_REQUEST_FAILED',
+      resultRef: null,
+      publicError: {
+        code: 'AI_UPSTREAM_REQUEST_FAILED',
+        message: 'AI_APICallError: 余额不足（HTTP 402）',
+        upstreamStatus: 402,
+        upstreamRequestId: 'req-arena-402',
+      },
+    });
+    expect(finalize).toHaveBeenCalledWith(expect.objectContaining({
+      status: 'failed',
+      errorCode: 'AI_UPSTREAM_REQUEST_FAILED',
+    }));
+    expect(JSON.stringify(finalize.mock.calls)).not.toContain('余额不足');
   });
 
   it('treats an indeterminate Redis finalization claim as pending instead of failed', async () => {

@@ -1,3 +1,9 @@
+import {
+  HOSTED_GENERATION_ERROR_CODE,
+  HOSTED_GENERATION_INTERNAL_MESSAGE,
+  readSafePublicAiError,
+} from '@mahoshojo/hosted-api/regular-generation';
+
 import type { RawReasoningStreamEvent } from './types';
 import { normalizeUsage } from './usage';
 import {
@@ -213,13 +219,22 @@ export const createReasoningSseBridge = (label?: string): ReasoningSseBridge => 
           streamClosed = true;
           activeController = null;
           controller.close();
-        } catch {
+        } catch (error) {
           flushQueuedEvents(controller);
           enqueueReasoningDoneIfNeeded(controller);
+          const projection = readSafePublicAiError(error);
           controller.enqueue(
             encodeSseEvent('error', {
               ok: false,
-              error: 'AI_UPSTREAM_REQUEST_FAILED',
+              error: projection?.message ?? HOSTED_GENERATION_INTERNAL_MESSAGE,
+              message: projection?.message ?? HOSTED_GENERATION_INTERNAL_MESSAGE,
+              code: projection?.code ?? HOSTED_GENERATION_ERROR_CODE,
+              ...(projection?.upstreamStatus === undefined
+                ? {}
+                : { upstreamStatus: projection.upstreamStatus }),
+              ...(projection?.upstreamRequestId === undefined
+                ? {}
+                : { upstreamRequestId: projection.upstreamRequestId }),
             })
           );
           streamClosed = true;

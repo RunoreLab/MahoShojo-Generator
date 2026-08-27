@@ -1,5 +1,5 @@
 import {
-  HOSTED_GENERATION_INTERNAL_MESSAGE,
+  buildHostedGenerationErrorPayload,
   createSafeHostedGenerationError,
   jsonResponse,
   type StepResult,
@@ -137,10 +137,10 @@ const createScenarioService = <Input extends GenerateScenarioInput, Output>(opti
 
     options.dependencies.recordActivity(request);
     return await options.dependencies.buildResponse(request, input, generated.value);
-  } catch {
-    options.dependencies.logError(createSafeHostedGenerationError());
+  } catch (error) {
+    options.dependencies.logError(createSafeHostedGenerationError(error));
     return jsonResponse(
-      { error: '生成失败', message: HOSTED_GENERATION_INTERNAL_MESSAGE },
+      buildHostedGenerationErrorPayload(error, '生成失败'),
       500,
       options.includeJsonContentType,
     );

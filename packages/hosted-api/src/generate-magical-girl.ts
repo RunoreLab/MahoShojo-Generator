@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import {
-  HOSTED_GENERATION_INTERNAL_MESSAGE,
+  buildHostedGenerationErrorPayload,
   createSafeHostedGenerationError,
 } from './regular-generation';
 
@@ -101,11 +101,13 @@ export const createGenerateMagicalGirlService = (
       ...dataToSign,
       signature,
     }, 200);
-  } catch {
-    dependencies.logError(createSafeHostedGenerationError(), { nameLength: name.length });
+  } catch (error) {
+    dependencies.logError(createSafeHostedGenerationError(error), { nameLength: name.length });
     return jsonResponse({
-      error: '生成失败，当前服务器可能正忙，请稍后重试',
-      message: HOSTED_GENERATION_INTERNAL_MESSAGE,
+      ...buildHostedGenerationErrorPayload(
+        error,
+        '生成失败，当前服务器可能正忙，请稍后重试',
+      ),
       retryAfterSeconds: dependencies.retryAfterSeconds,
     }, 500);
   }

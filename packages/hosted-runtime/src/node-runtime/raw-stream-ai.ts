@@ -4,7 +4,7 @@ import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { createDeepSeek } from "@ai-sdk/deepseek";
 import { getProviderFetch } from './provider-fetch';
 import { resolveGenerationSettings } from './generation-settings/resolve';
-import { extractUpstreamErrorMessage, enhanceErrorWithUpstreamMessage } from './error-extraction';
+import { enhanceErrorWithUpstreamMessage } from './error-extraction';
 import {
     createAttemptOutcomeRecorder,
     pipeStreamWithAttemptOutcome,
@@ -476,7 +476,13 @@ async function generateWithStreamAIUsing(
 		                    } catch {
 		                        // ignore
 		                    }
-		                    throw new Error(extractUpstreamErrorMessage(capturedError, result, EMPTY_OUTPUT_ERROR_MESSAGE));
+		                    if (capturedError) {
+		                        throw enhanceErrorWithUpstreamMessage(capturedError, {
+		                            secrets: [provider.apiKey, provider.baseUrl],
+		                            sensitiveTexts: [generationConfig.prompt],
+		                        });
+		                    }
+		                    throw new Error(EMPTY_OUTPUT_ERROR_MESSAGE);
 		                }
 
 	                // 创建一个新的 ReadableStream，将已预取 part 与剩余流合并；正文走 text-delta，reasoning 走回调。
@@ -525,9 +531,16 @@ async function generateWithStreamAIUsing(
                             }
                         } catch (streamError) {
                             const interrupted = finishAttemptFromError(streamError);
+                            const projectedStreamError = enhanceErrorWithUpstreamMessage(
+                                capturedError ?? streamError,
+                                {
+                                    secrets: [provider.apiKey, provider.baseUrl],
+                                    sensitiveTexts: [generationConfig.prompt],
+                                },
+                            );
                             try {
                                 if (interrupted) controller.close();
-                                else controller.error(streamError);
+                                else controller.error(projectedStreamError);
                             } catch {
                                 // controller 可能已关闭
                             }
@@ -574,7 +587,10 @@ async function generateWithStreamAIUsing(
                 };
             } catch (error) {
                 // 使用工具函数增强错误信息
-                const enhancedError = enhanceErrorWithUpstreamMessage(error);
+                const enhancedError = enhanceErrorWithUpstreamMessage(error, {
+                    secrets: [provider.apiKey, provider.baseUrl],
+                    sensitiveTexts: [generationConfig.prompt],
+                });
                 lastError = enhancedError;
                 log.error(`提供商 ${provider.name} 第 ${attempt + 1} 次失败`, { error: enhancedError });
 
