@@ -592,6 +592,34 @@ ORDER BY sort_index
     })).resolves.toBeNull();
   });
 
+  it('materializes only the persisted stable terminal error code', async () => {
+    const ownerHash = await crypto.subtle.digest(
+      'SHA-256',
+      new TextEncoder().encode('anonymous:anon-id-1'),
+    ).then((bytes) => Array.from(new Uint8Array(bytes), (byte) => byte.toString(16).padStart(2, '0')).join(''));
+    const client = sequentialD1([result([{
+      id: 'generation-1',
+      status: 'failed',
+      updated_at: '2026-08-25T04:00:00.000Z',
+      output_preview: '',
+      extra_json: JSON.stringify({
+        generationRequestId: 'request-1',
+        generationOwnerHash: ownerHash,
+        generationPayloadHash: 'payload-hash-1',
+        generationTerminalStatus: 'failed',
+        finalizationCompleted: true,
+        errorCode: 'AI_UPSTREAM_REQUEST_FAILED',
+      }),
+      r2_key: null,
+    }])]);
+    const store = createNodeArenaGenerationTerminalStore({ getD1Client: () => client });
+
+    await expect(store.readOwnedTerminal({
+      generationId: 'generation-1',
+      actorKey: 'anonymous:anon-id-1',
+    })).resolves.toMatchObject({ errorCode: 'AI_UPSTREAM_REQUEST_FAILED' });
+  });
+
   it('marks completed terminal content unavailable instead of silently serving its preview', async () => {
     const ownerHash = await crypto.subtle.digest(
       'SHA-256',

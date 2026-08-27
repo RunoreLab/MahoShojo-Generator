@@ -112,6 +112,11 @@ const parseExtra = (value: unknown): Record<string, unknown> | null => {
   }
 };
 
+const stableErrorCodeOf = (value: unknown): string | null => {
+  const code = stringOf(value);
+  return code && /^[A-Z][A-Z0-9_]{1,79}$/u.test(code) ? code : null;
+};
+
 const readRejectedTerminalIdentity = async (
   client: NodeDataD1Client,
   input: ArenaGenerationRejectedTerminalRecordInput,
@@ -517,6 +522,9 @@ const materializeStoredTerminal = async (input: {
     resultRef,
     markdown,
     reasoning: '',
+    errorCode: stableErrorCodeOf(extra.finalizationFailureCode)
+      ?? stableErrorCodeOf(extra.errorCode)
+      ?? stableErrorCodeOf(extra.rejectionCode),
     payloadHash: stringOf(extra.generationPayloadHash),
     contentAvailable,
   };
@@ -1040,6 +1048,7 @@ VALUES (?, ?, ?, 0, 'failed', 'stream', 'api/arena/generate-stream',
       resultRef: null,
       markdown: '',
       reasoning: '',
+      errorCode: stableErrorCodeOf(input.code),
       payloadHash: input.payloadHash,
       contentAvailable: true,
     };

@@ -2217,6 +2217,34 @@ describe('Arena generation lifecycle service', () => {
     expect(execute).not.toHaveBeenCalled();
   });
 
+  test('durable failed terminal fallback emits only its stable code and no Provider message', async () => {
+    const store = new MemoryReplayStore();
+    const terminalStore: ArenaGenerationTerminalStore = {
+      readOwnedTerminal: vi.fn(async () => ({
+        generationId: 'generation-1',
+        generationRequestId: 'request-1',
+        status: 'failed' as const,
+        updatedAt: '2026-08-25T04:00:00.000Z',
+        resultRef: null,
+        markdown: '',
+        reasoning: '',
+        errorCode: 'AI_UPSTREAM_REQUEST_FAILED',
+      })),
+    };
+    const service = createService(store, {
+      execute: vi.fn(async () => ({ status: 'completed' as const })),
+    }, { terminalStore });
+
+    const response = await service.resume(new Request(
+      'https://example.test/api/arena/generations/generation-1/stream',
+    ), { generationId: 'generation-1' });
+    const replay = await response.text();
+
+    expect(replay).toContain('event: error');
+    expect(replay).toContain('"code":"AI_UPSTREAM_REQUEST_FAILED"');
+    expect(replay).not.toMatch(/message|余额不足|provider/u);
+  });
+
   test('validates the resume cursor before generation lookup and advances terminal fallback ids', async () => {
     const store = new MemoryReplayStore();
     const terminalStore: ArenaGenerationTerminalStore = {

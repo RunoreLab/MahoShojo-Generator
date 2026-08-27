@@ -333,6 +333,7 @@ export type ArenaGenerationTerminalRecord = {
   resultRef: string | null;
   markdown: string;
   reasoning: string;
+  errorCode?: string | null;
   payloadHash?: string | null;
   contentAvailable?: boolean;
 };
@@ -1303,6 +1304,16 @@ export const createArenaGenerationService = (
       data: {
         ok: terminal.status === 'completed',
         status: terminal.status,
+        ...(
+          terminal.status === 'failed' || terminal.status === 'producer_lost'
+            ? {
+              code: terminal.errorCode
+                ?? (terminal.status === 'producer_lost'
+                  ? 'PRODUCER_OWNERSHIP_LOST'
+                  : 'GENERATION_FAILED'),
+            }
+            : {}
+        ),
         ...(terminal.resultRef ? { resultRef: terminal.resultRef } : {}),
       },
     };
