@@ -102,6 +102,9 @@ describe('RedisRoomStore', () => {
     const [script, options] = vi.mocked(client.eval).mock.calls[0]!;
     expect(script).toContain('candidate.roomEpoch == current.roomEpoch');
     expect(script).toContain("if epochSeen == 1 then return 'conflict' end");
+    expect(script).toContain("redis.call('SISMEMBER', KEYS[2], current.roomEpoch)");
+    expect(script).toContain('fenceCount + requiredEpochs');
+    expect(script).toContain("redis.call('SADD', KEYS[2], currentEpochToFence)");
     expect(script).toContain('candidate.controlSeq ~= 0');
     expect(options.arguments.at(-1)).toBe('16');
     expect(JSON.parse(options.arguments.at(-4)!).roomEpoch).toBe('epoch-2');

@@ -3,6 +3,9 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   checkpointPredecessorOf,
   consumeArenaRoomCheckpointCommit,
+  issueArenaRoomGenerationReservationAuthority,
+  issueArenaRoomTrustedTime,
+  MAX_ROOM_GENERATION_RECORDS,
   type ArenaRoomAuthorityState,
   type ArenaRoomCheckpointCommitData,
   type ArenaRoomCommand,
@@ -25,11 +28,11 @@ const hostAuthority = {
   accountUserId: 101,
 };
 
-const createCommand = (roomEpoch = 'epoch-1'): ArenaRoomCommand => {
+const createCommand = (roomEpoch = 'epoch-1', roomId = 'room-1'): ArenaRoomCommand => {
   const state = createArenaRoomState(roomEpoch);
   return {
     type: 'create',
-    roomId: state.snapshot.roomId,
+    roomId,
     roomEpoch,
     host: state.snapshot.members[0]!,
     sharedConfig: state.snapshot.sharedConfig,
@@ -63,6 +66,7 @@ const sameState = (
 
 class MemoryRoomStore implements RoomActorCheckpointStore {
   state: ArenaRoomAuthorityState | null = null;
+  loadCalls = 0;
   saveCalls = 0;
   activeSaves = 0;
   maxActiveSaves = 0;
@@ -74,6 +78,7 @@ class MemoryRoomStore implements RoomActorCheckpointStore {
   beforeLoad?: () => Promise<void>;
 
   async load(roomId: string): Promise<ArenaRoomAuthorityState | null> {
+    this.loadCalls += 1;
     await this.beforeLoad?.();
     if (this.state?.snapshot.roomId !== roomId) return null;
     return structuredClone(this.state);
@@ -107,6 +112,53 @@ class MemoryRoomStore implements RoomActorCheckpointStore {
 }
 
 describe('RoomActorRegistry', () => {
+  it('无效 command 在 hydration/epoch rollover 前直接拒绝', async () => {
+    const store = new MemoryRoomStore();
+    const registry = createRoomActorRegistry({ store });
+
+    await expect(registry.execute({
+      roomId: 'room-1',
+      command: { type: 'publish-config', clientOnly: 'untrusted' },
+      authority: hostAuthority,
+    })).resolves.toMatchObject({
+      ok: false,
+      code: 'validation-failed',
+      reason: 'invalid-command',
+    });
+    expect(store.loadCalls).toBe(0);
+    expect(store.saveCalls).toBe(0);
+  });
+
+  it('schema-valid 外部 command 不会隐式 hydrate/rollover，未授权 create 也不遗留空 actor', async () => {
+    const store = new MemoryRoomStore();
+    const seed = createRoomActorRegistry({ store });
+    await seed.execute({ roomId: 'room-1', command: createCommand(), authority: hostAuthority });
+    await seed.shutdown();
+    const registry = createRoomActorRegistry({ store, maxActors: 1 });
+    const loadCalls = store.loadCalls;
+
+    await expect(registry.execute({
+      roomId: 'room-1',
+      command: publishCommand(store.state!, 0, 'unauthorized-rollover', THIRD_TIMESTAMP),
+      authority: { ...hostAuthority, actorUserId: 'attacker' },
+    })).rejects.toThrow('ROOM_ACTOR_NOT_FOUND');
+    expect(store.loadCalls).toBe(loadCalls);
+    expect(store.state?.snapshot.roomEpoch).toBe('epoch-1');
+
+    store.state = null;
+    await expect(registry.execute({
+      roomId: 'room-attacker',
+      command: createCommand('epoch-attacker'),
+      authority: { ...hostAuthority, actorUserId: 'attacker' },
+    })).resolves.toMatchObject({ ok: false, code: 'forbidden' });
+    await vi.waitFor(() => expect(registry.size).toBe(0));
+    await expect(registry.execute({
+      roomId: 'room-1',
+      command: createCommand(),
+      authority: hostAuthority,
+    })).resolves.toMatchObject({ ok: true, kind: 'applied' });
+  });
+
   it('registry room 容量有界，满额时在 load/transition/checkpoint 前 fail closed', async () => {
     const store = new MemoryRoomStore();
     const registry = createRoomActorRegistry({ store, maxActors: 1 });
@@ -258,7 +310,7 @@ describe('RoomActorRegistry', () => {
       createRoomEpoch: () => 'epoch-2',
       recoveryTimestamp: () => THIRD_TIMESTAMP,
     });
-    const recoveredActor = await recoveredRegistry.get('room-1');
+    const recoveredActor = await recoveredRegistry.recover('room-1');
     expect(recoveredActor?.getSnapshot()).toMatchObject({
       snapshot: { roomEpoch: 'epoch-2', controlSeq: 0 },
     });
@@ -274,6 +326,310 @@ describe('RoomActorRegistry', () => {
       authority: hostAuthority,
     })).rejects.toThrow('ROOM_ACTOR_FENCED');
     expect(store.state?.snapshot.roomEpoch).toBe('epoch-2');
+  });
+
+  it('warm recovery 后旧 actor 的 idempotent success 也必须校验 Redis 并被 fence', async () => {
+    const store = new MemoryRoomStore();
+    const oldRegistry = createRoomActorRegistry({ store });
+    const created = await oldRegistry.execute({
+      roomId: 'room-1',
+      command: createCommand(),
+      authority: hostAuthority,
+    });
+    if (!created.ok) throw new Error('expected create success');
+    const recoveredRegistry = createRoomActorRegistry({
+      store,
+      createRoomEpoch: () => 'epoch-2',
+      recoveryTimestamp: () => THIRD_TIMESTAMP,
+    });
+    await recoveredRegistry.recover('room-1');
+
+    await expect(oldRegistry.execute({
+      roomId: 'room-1',
+      command: publishCommand(
+        created.nextState,
+        0,
+        created.nextState.snapshot.sharedConfig.userGuidance,
+        FOURTH_TIMESTAMP,
+      ),
+      authority: hostAuthority,
+    })).rejects.toThrow('ROOM_ACTOR_CHECKPOINT_CONFLICT');
+    expect(() => oldRegistry.get('room-1')).toThrow('ROOM_ACTOR_FENCED');
+  });
+
+  it('本地 fenced tombstone 有独立上限且不占用 active actor capacity', async () => {
+    const store = new MemoryRoomStore();
+    const oldRegistry = createRoomActorRegistry({ store, maxActors: 1, maxFencedRooms: 1 });
+    const created = await oldRegistry.execute({
+      roomId: 'room-1',
+      command: createCommand(),
+      authority: hostAuthority,
+    });
+    if (!created.ok) throw new Error('expected create success');
+    const recoveredRegistry = createRoomActorRegistry({
+      store,
+      createRoomEpoch: () => 'epoch-2',
+      recoveryTimestamp: () => THIRD_TIMESTAMP,
+    });
+    await recoveredRegistry.recover('room-1');
+    await expect(oldRegistry.execute({
+      roomId: 'room-1',
+      command: publishCommand(created.nextState, 0, 'late', FOURTH_TIMESTAMP),
+      authority: hostAuthority,
+    })).rejects.toThrow('ROOM_ACTOR_CHECKPOINT_CONFLICT');
+    expect(oldRegistry.size).toBe(0);
+
+    store.state = null;
+    await expect(oldRegistry.execute({
+      roomId: 'room-new',
+      command: createCommand('epoch-new', 'room-new'),
+      authority: hostAuthority,
+    })).resolves.toMatchObject({ ok: true, kind: 'applied' });
+    expect(oldRegistry.size).toBe(1);
+  });
+
+  it('并发 hydrate 只有一个 recovery writer，失败 registry 稳定进入本地 fence', async () => {
+    const store = new MemoryRoomStore();
+    const seed = createRoomActorRegistry({ store });
+    await seed.execute({ roomId: 'room-1', command: createCommand(), authority: hostAuthority });
+    await seed.shutdown();
+    const gate = deferred();
+    store.beforeSave = async (_data, call) => {
+      if (call >= 2) await gate.promise;
+    };
+    const first = createRoomActorRegistry({
+      store,
+      createRoomEpoch: () => 'epoch-recovery-a',
+      recoveryTimestamp: () => THIRD_TIMESTAMP,
+    });
+    const second = createRoomActorRegistry({
+      store,
+      createRoomEpoch: () => 'epoch-recovery-b',
+      recoveryTimestamp: () => THIRD_TIMESTAMP,
+    });
+    const firstHydration = first.recover('room-1');
+    const secondHydration = second.recover('room-1');
+    await vi.waitFor(() => expect(store.saveCalls).toBe(3));
+    gate.resolve();
+    const settled = await Promise.allSettled([firstHydration, secondHydration]);
+    expect(settled.filter((item) => item.status === 'fulfilled')).toHaveLength(1);
+    const failedRegistry = settled[0]!.status === 'rejected' ? first : second;
+    const failure = settled.find((item) => item.status === 'rejected');
+    expect(failure).toMatchObject({
+      status: 'rejected',
+      reason: expect.objectContaining({ message: 'ROOM_ACTOR_RECOVERY_CONFLICT' }),
+    });
+    expect(() => failedRegistry.get('room-1')).toThrow('ROOM_ACTOR_FENCED');
+    expect(failedRegistry.size).toBe(0);
+  });
+
+  it('closed checkpoint hydrate 保留 terminal actor 与 close idempotency，不切换 epoch', async () => {
+    const store = new MemoryRoomStore();
+    const first = createRoomActorRegistry({ store });
+    const created = await first.execute({
+      roomId: 'room-1',
+      command: createCommand(),
+      authority: hostAuthority,
+    });
+    if (!created.ok) throw new Error('expected create success');
+    const closed = await first.execute({
+      roomId: 'room-1',
+      command: {
+        type: 'close',
+        expectedRoomEpoch: 'epoch-1',
+        reason: 'terminal-retry',
+        timestamp: ARENA_ROOM_NEXT_TIMESTAMP,
+      },
+      authority: hostAuthority,
+    });
+    if (!closed.ok) throw new Error('expected close success');
+    await first.shutdown();
+    const recovered = createRoomActorRegistry({
+      store,
+      createRoomEpoch: () => 'must-not-be-used',
+    });
+
+    const actor = await recovered.recover('room-1');
+    expect(actor?.getSnapshot()).toEqual(closed.nextState);
+    await expect(recovered.execute({
+      roomId: 'room-1',
+      command: {
+        type: 'close',
+        expectedRoomEpoch: 'epoch-1',
+        reason: 'terminal-retry',
+        timestamp: THIRD_TIMESTAMP,
+      },
+      authority: hostAuthority,
+    })).resolves.toMatchObject({ ok: true, kind: 'idempotent' });
+    expect(store.state?.snapshot.roomEpoch).toBe('epoch-1');
+  });
+
+  it('exact replay quota 耗尽时以 opaque runtime capability checkpoint close，原请求稳定 fail closed', async () => {
+    const store = new MemoryRoomStore();
+    const exhausted = createArenaRoomState('epoch-1');
+    exhausted.generationLedger = Array.from({ length: MAX_ROOM_GENERATION_RECORDS }, (_, index) => ({
+      mirror: {
+        generationRequestId: `used-request-${index}`,
+        generationId: `used-generation-${index}`,
+        attempt: 1,
+        state: 'cancelled' as const,
+        configRevision: 0,
+        snapshotDigest: `sha256:${'a'.repeat(64)}`,
+        collaborativeInfluence: false,
+        participantUserIds: [101],
+        startedAt: ARENA_ROOM_NEXT_TIMESTAMP,
+        finishedAt: ARENA_ROOM_NEXT_TIMESTAMP,
+      },
+    }));
+    store.state = exhausted;
+    const registry = createRoomActorRegistry({
+      store,
+      createRoomEpoch: () => 'epoch-2',
+      recoveryTimestamp: () => THIRD_TIMESTAMP,
+      quotaCloseTimestamp: () => FOURTH_TIMESTAMP,
+    });
+    const actor = await registry.recover('room-1');
+    if (!actor) throw new Error('expected actor');
+    const fanout = vi.fn();
+    actor.subscribe(fanout);
+    const authority = issueArenaRoomGenerationReservationAuthority({
+      actorUserId: 'host-1',
+      accountUserId: 101,
+      roomId: 'room-1',
+      roomEpoch: 'epoch-2',
+      configRevision: 0,
+      generationRequestId: 'next-request',
+      generationId: 'next-generation',
+      attempt: 1,
+      snapshotDigest: `sha256:${'b'.repeat(64)}`,
+      expiresAt: '2026-08-28T01:00:00.000Z',
+    });
+
+    await expect(registry.execute({
+      roomId: 'room-1',
+      command: {
+        type: 'reserve-generation',
+        expectedRoomEpoch: 'epoch-2',
+        expectedRevision: 0,
+        generationRequestId: 'next-request',
+        generationId: 'next-generation',
+        attempt: 1,
+        timestamp: FOURTH_TIMESTAMP,
+      },
+      authority,
+      trustedTime: issueArenaRoomTrustedTime({ now: FOURTH_TIMESTAMP }),
+    })).resolves.toMatchObject({
+      ok: false,
+      code: 'capability-denied',
+      reason: 'generation-history-limit-reached',
+    });
+    expect(store.state).toMatchObject({
+      snapshot: { roomEpoch: 'epoch-2' },
+      lifecycle: { status: 'closed', closeReason: 'room-incarnation-limit' },
+    });
+    expect(fanout).toHaveBeenCalledWith(expect.objectContaining({
+      events: [expect.objectContaining({ type: 'room.closing' })],
+    }));
+  });
+
+  it('quota close checkpoint 暂时失败时保持本地 close-only，并在后续请求重试关闭', async () => {
+    const store = new MemoryRoomStore();
+    const observed = vi.fn();
+    const exhausted = createArenaRoomState('epoch-1');
+    exhausted.generationLedger = Array.from({ length: MAX_ROOM_GENERATION_RECORDS }, (_, index) => ({
+      mirror: {
+        generationRequestId: `used-request-${index}`,
+        generationId: `used-generation-${index}`,
+        attempt: 1,
+        state: 'cancelled' as const,
+        configRevision: 0,
+        snapshotDigest: `sha256:${'a'.repeat(64)}`,
+        collaborativeInfluence: false,
+        participantUserIds: [101],
+        startedAt: ARENA_ROOM_NEXT_TIMESTAMP,
+        finishedAt: ARENA_ROOM_NEXT_TIMESTAMP,
+      },
+    }));
+    store.state = exhausted;
+    store.beforeSave = async (_data, call) => {
+      if (call === 2) throw new Error('redis temporarily unavailable');
+    };
+    const registry = createRoomActorRegistry({
+      store,
+      createRoomEpoch: () => 'epoch-2',
+      recoveryTimestamp: () => THIRD_TIMESTAMP,
+      quotaCloseTimestamp: () => FOURTH_TIMESTAMP,
+      onBackgroundError: observed,
+    });
+    await registry.recover('room-1');
+    const authority = issueArenaRoomGenerationReservationAuthority({
+      actorUserId: 'host-1',
+      accountUserId: 101,
+      roomId: 'room-1',
+      roomEpoch: 'epoch-2',
+      configRevision: 0,
+      generationRequestId: 'next-request',
+      generationId: 'next-generation',
+      attempt: 1,
+      snapshotDigest: `sha256:${'b'.repeat(64)}`,
+      expiresAt: '2026-08-28T01:00:00.000Z',
+    });
+    await expect(registry.execute({
+      roomId: 'room-1',
+      command: {
+        type: 'reserve-generation',
+        expectedRoomEpoch: 'epoch-2',
+        expectedRevision: 0,
+        generationRequestId: 'next-request',
+        generationId: 'next-generation',
+        attempt: 1,
+        timestamp: FOURTH_TIMESTAMP,
+      },
+      authority,
+      trustedTime: issueArenaRoomTrustedTime({ now: FOURTH_TIMESTAMP }),
+    })).resolves.toMatchObject({
+      ok: false,
+      code: 'capability-denied',
+      reason: 'generation-history-limit-reached',
+    });
+    expect(store.state?.lifecycle.status).toBe('open');
+    expect(observed).toHaveBeenCalledTimes(1);
+
+    await expect(registry.execute({
+      roomId: 'room-1',
+      command: publishCommand(store.state!, 0, 'must-not-apply', FOURTH_TIMESTAMP),
+      authority: hostAuthority,
+    })).resolves.toMatchObject({
+      ok: false,
+      code: 'capability-denied',
+      reason: 'generation-history-limit-reached',
+    });
+    expect(store.state).toMatchObject({
+      snapshot: { sharedConfig: { userGuidance: '' } },
+      lifecycle: { status: 'closed', closeReason: 'room-incarnation-limit' },
+    });
+  });
+
+  it('recovery 遇到 Redis incarnation quota 时关闭旧 epoch，而不是留下 active checkpoint', async () => {
+    const store = new MemoryRoomStore();
+    store.state = createArenaRoomState('epoch-1');
+    store.beforeSave = async (_data, call) => {
+      if (call === 1) throw new Error('REDIS_ROOM_INCARNATION_LIMIT');
+    };
+    const registry = createRoomActorRegistry({
+      store,
+      createRoomEpoch: () => 'epoch-2',
+      recoveryTimestamp: () => THIRD_TIMESTAMP,
+      quotaCloseTimestamp: () => FOURTH_TIMESTAMP,
+    });
+
+    const actor = await registry.recover('room-1');
+    expect(actor?.getSnapshot()).toMatchObject({
+      snapshot: { roomEpoch: 'epoch-1' },
+      lifecycle: { status: 'closed', closeReason: 'room-incarnation-limit' },
+    });
+    expect(store.state).toEqual(actor?.getSnapshot());
+    expect(store.saveCalls).toBe(2);
   });
 
   it('显式 idle eviction 不创建 per-room interval；再次 hydrate 必须切新 epoch', async () => {
@@ -301,7 +657,7 @@ describe('RoomActorRegistry', () => {
 
     await expect(registry.evictIdle()).resolves.toBe(1);
     expect(registry.size).toBe(0);
-    const recovered = await registry.get('room-1');
+    const recovered = await registry.recover('room-1');
     expect(recovered?.getSnapshot()?.snapshot.roomEpoch).toBe('epoch-2');
     setIntervalSpy.mockRestore();
   });
@@ -348,6 +704,11 @@ describe('RoomActorRegistry', () => {
       authority: hostAuthority,
     });
     await vi.waitFor(() => expect(store.activeSaves).toBe(1));
+    const queued = registry.execute({
+      roomId: 'room-1',
+      command: publishCommand(created.nextState, 1, 'queued-drain', THIRD_TIMESTAMP),
+      authority: hostAuthority,
+    });
 
     const shutdown = registry.shutdown();
     await expect(registry.execute({
@@ -362,8 +723,10 @@ describe('RoomActorRegistry', () => {
 
     gate.resolve();
     await expect(inFlight).resolves.toMatchObject({ ok: true, kind: 'applied' });
+    await expect(queued).resolves.toMatchObject({ ok: true, kind: 'applied' });
     await expect(shutdown).resolves.toBeUndefined();
-    expect(fanout).toHaveBeenCalledTimes(1);
+    expect(fanout).toHaveBeenCalledTimes(2);
+    expect(store.state?.snapshot.revision).toBe(2);
     expect(registry.size).toBe(0);
   });
 
@@ -390,8 +753,14 @@ describe('RoomActorRegistry', () => {
       authority: hostAuthority,
     });
     await vi.waitFor(() => expect(store.activeSaves).toBe(1));
+    const queued = registry.execute({
+      roomId: 'room-1',
+      command: publishCommand(created.nextState, 1, 'must-be-rejected', THIRD_TIMESTAMP),
+      authority: hostAuthority,
+    });
 
     registry.forceClose();
+    await expect(queued).rejects.toThrow('ROOM_ACTOR_SHUTTING_DOWN');
     gate.resolve();
     await expect(inFlight).rejects.toThrow('ROOM_ACTOR_SHUTTING_DOWN');
     expect(store.state?.snapshot).toMatchObject({
@@ -414,7 +783,7 @@ describe('RoomActorRegistry', () => {
       createRoomEpoch: () => 'epoch-2',
       recoveryTimestamp: () => THIRD_TIMESTAMP,
     });
-    const hydration = registry.get('room-1');
+    const hydration = registry.recover('room-1');
     const shutdown = registry.shutdown();
     let shutdownDone = false;
     void shutdown.then(() => { shutdownDone = true; });
@@ -484,5 +853,33 @@ describe('RoomActorRegistry', () => {
       'subscriber-failure',
       'async-subscriber-failure',
     ]));
+  });
+
+  it('永不完成的 async subscriber 只占一个 in-flight slot，后续 fan-out 不再调用', async () => {
+    const store = new MemoryRoomStore();
+    const registry = createRoomActorRegistry({ store });
+    const created = await registry.execute({
+      roomId: 'room-1',
+      command: createCommand(),
+      authority: hostAuthority,
+    });
+    if (!created.ok) throw new Error('expected create success');
+    const actor = await registry.get('room-1');
+    if (!actor) throw new Error('expected actor');
+    const slow = vi.fn(() => new Promise<void>(() => undefined));
+    actor.subscribe(slow);
+
+    const first = await registry.execute({
+      roomId: 'room-1',
+      command: publishCommand(created.nextState, 0, 'first', ARENA_ROOM_NEXT_TIMESTAMP),
+      authority: hostAuthority,
+    });
+    if (!first.ok) throw new Error('expected first publish success');
+    await expect(registry.execute({
+      roomId: 'room-1',
+      command: publishCommand(first.nextState, 1, 'second', THIRD_TIMESTAMP),
+      authority: hostAuthority,
+    })).resolves.toMatchObject({ ok: true, kind: 'applied' });
+    expect(slow).toHaveBeenCalledTimes(1);
   });
 });

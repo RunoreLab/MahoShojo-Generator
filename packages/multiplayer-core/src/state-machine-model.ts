@@ -241,11 +241,22 @@ export const ArenaRoomRecoveryAuthorityContextSchema = z.object({
   }).strict(),
 }).strict();
 
+export const ArenaRoomQuotaCloseAuthorityContextSchema = z.object({
+  kind: z.literal('room-quota-closer'),
+  scope: z.object({
+    roomId: OpaqueKeySchema,
+    roomEpoch: OpaqueKeySchema,
+    timestamp: IsoTimestampSchema,
+    reason: z.literal('room-incarnation-limit'),
+  }).strict(),
+}).strict();
+
 export const ArenaRoomAuthorityContextSchema = z.discriminatedUnion('kind', [
   ArenaRoomUserAuthorityContextSchema,
   ArenaRoomGenerationReservationContextSchema,
   ArenaRoomGenerationPublisherContextSchema,
   ArenaRoomRecoveryAuthorityContextSchema,
+  ArenaRoomQuotaCloseAuthorityContextSchema,
 ]);
 /**
  * Trusted server capability, supplied separately from any client command. A
@@ -264,6 +275,7 @@ type GenerationPublisherCapabilityInput = Omit<z.input<typeof ArenaRoomGeneratio
 const generationReservationCapabilities = new WeakSet<object>();
 const generationPublisherCapabilities = new WeakSet<object>();
 const roomRecoveryCapabilities = new WeakSet<object>();
+const roomQuotaCloseCapabilities = new WeakSet<object>();
 
 /** Issues an in-process capability that cannot survive wire serialization. */
 export const issueArenaRoomGenerationReservationAuthority = (
@@ -307,6 +319,19 @@ export const issueArenaRoomRecoveryAuthority = (
   return capability;
 };
 
+/** Issues an in-process capability for the runtime-mandated exact-fence quota close. */
+export const issueArenaRoomQuotaCloseAuthority = (
+  input: z.input<typeof ArenaRoomQuotaCloseAuthorityContextSchema>['scope'],
+): Extract<ArenaRoomAuthorityContext, { kind: 'room-quota-closer' }> => {
+  const parsed = ArenaRoomQuotaCloseAuthorityContextSchema.parse({
+    kind: 'room-quota-closer',
+    scope: input,
+  });
+  const capability = Object.freeze({ ...parsed, scope: Object.freeze(parsed.scope) });
+  roomQuotaCloseCapabilities.add(capability);
+  return capability;
+};
+
 export const parseArenaRoomAuthorityContext = (input: unknown): ArenaRoomAuthorityContext | null => {
   const parsed = ArenaRoomAuthorityContextSchema.safeParse(input);
   if (!parsed.success) return null;
@@ -318,7 +343,10 @@ export const parseArenaRoomAuthorityContext = (input: unknown): ArenaRoomAuthori
   if (parsed.data.kind === 'generation-publisher') {
     return generationPublisherCapabilities.has(input) ? parsed.data : null;
   }
-  return roomRecoveryCapabilities.has(input) ? parsed.data : null;
+  if (parsed.data.kind === 'room-recovery') {
+    return roomRecoveryCapabilities.has(input) ? parsed.data : null;
+  }
+  return roomQuotaCloseCapabilities.has(input) ? parsed.data : null;
 };
 
 export const ArenaRoomTrustedTimeSchema = z.object({

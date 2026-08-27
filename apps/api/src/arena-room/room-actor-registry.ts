@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import {
   ArenaRoomCommandSchema,
   createArenaRoomCheckpointCommit,
+  issueArenaRoomQuotaCloseAuthority,
   issueArenaRoomRecoveryAuthority,
   parseArenaRoomAuthorityState,
   transitionArenaRoom,
@@ -16,6 +17,7 @@ import type { RedisRoomStore } from './redis-room-store';
 const DEFAULT_MAX_QUEUED_COMMANDS = 64;
 const DEFAULT_MAX_SUBSCRIBERS_PER_ROOM = 128;
 const DEFAULT_MAX_ACTORS = 1_024;
+const DEFAULT_MAX_FENCED_ROOMS = 1_024;
 const DEFAULT_IDLE_ACTOR_TTL_MS = 5 * 60 * 1_000;
 
 export type RoomActorCheckpointStore = Pick<RedisRoomStore, 'load' | 'save'>;
@@ -25,6 +27,7 @@ export type RoomActorErrorCode =
   | 'ROOM_ACTOR_EPOCH_INVALID'
   | 'ROOM_ACTOR_FENCED'
   | 'ROOM_ACTOR_NOT_FOUND'
+  | 'ROOM_ACTOR_QUOTA_CLOSE_INVALID'
   | 'ROOM_ACTOR_QUEUE_OVERLOADED'
   | 'ROOM_ACTOR_REGISTRY_CAPACITY'
   | 'ROOM_ACTOR_RECOVERY_CONFLICT'
@@ -59,12 +62,18 @@ const cloneState = (state: ArenaRoomAuthorityState): ArenaRoomAuthorityState => 
   parseArenaRoomAuthorityState(state)
 );
 
+const sameState = (
+  left: ArenaRoomAuthorityState | null,
+  right: ArenaRoomAuthorityState | null,
+): boolean => JSON.stringify(left) === JSON.stringify(right);
+
 const snapshotInputCapability = (input: unknown): unknown => {
   if (typeof input === 'object' && input !== null && 'kind' in input) {
     const kind = input.kind;
     if (
       kind === 'generation-reserver'
       || kind === 'generation-publisher'
+      || kind === 'room-quota-closer'
       || kind === 'room-recovery'
       || kind === 'trusted-server-time'
     ) return input;
@@ -99,6 +108,23 @@ type QueueEntry = {
 
 type ActorPhase = 'accepting' | 'draining' | 'closed' | 'fenced';
 
+type ExactFenceQuotaReason =
+  | 'collaborative-history-limit-reached'
+  | 'generation-history-limit-reached'
+  | 'member-history-limit-reached'
+  | 'proposal-history-limit-reached';
+
+const EXACT_FENCE_QUOTA_REASONS = new Set<ExactFenceQuotaReason>([
+  'collaborative-history-limit-reached',
+  'generation-history-limit-reached',
+  'member-history-limit-reached',
+  'proposal-history-limit-reached',
+]);
+
+const isExactFenceQuotaReason = (reason: string): reason is ExactFenceQuotaReason => (
+  EXACT_FENCE_QUOTA_REASONS.has(reason as ExactFenceQuotaReason)
+);
+
 export class RoomActor {
   private phase: ActorPhase = 'accepting';
   private readonly queue: QueueEntry[] = [];
@@ -114,8 +140,11 @@ export class RoomActor {
       readonly maxQueuedCommands: number;
       readonly maxSubscribers: number;
       readonly now: () => number;
+      readonly onAbandoned: (actor: RoomActor) => void;
       readonly onFenced: (actor: RoomActor) => void;
       readonly onSubscriberError: (error: unknown) => void;
+      readonly onBackgroundError: (error: unknown) => void;
+      readonly quotaCloseTimestamp: () => string;
       readonly store: RoomActorCheckpointStore;
     },
   ) {
@@ -127,6 +156,8 @@ export class RoomActor {
   }
 
   private state: ArenaRoomAuthorityState | null;
+  private quotaExhausted = false;
+  private quotaExhaustedReason: ExactFenceQuotaReason | null = null;
 
   getSnapshot(): ArenaRoomAuthorityState | null {
     return this.state === null ? null : cloneState(this.state);
@@ -220,6 +251,7 @@ export class RoomActor {
     const entry = this.queue.shift();
     if (!entry) {
       this.resolveDrainWaitersIfIdle();
+      if (this.state === null && this.phase === 'accepting') this.options.onAbandoned(this);
       return;
     }
     this.running = true;
@@ -235,13 +267,47 @@ export class RoomActor {
   private async apply(input: RoomActorExecuteInput): Promise<ArenaRoomTransitionResult> {
     if (this.phase === 'closed') return fail('ROOM_ACTOR_SHUTTING_DOWN');
     if (this.phase === 'fenced') return fail('ROOM_ACTOR_FENCED');
+    if (
+      this.quotaExhausted
+      && typeof input.command === 'object'
+      && input.command !== null
+      && 'type' in input.command
+      && input.command.type !== 'close'
+    ) {
+      const failureReason = this.quotaExhaustedReason;
+      if (failureReason === null) return fail('ROOM_ACTOR_QUOTA_CLOSE_INVALID');
+      await this.enforceQuotaClose();
+      return {
+        ok: false,
+        code: 'capability-denied',
+        reason: failureReason,
+      };
+    }
     const transition = transitionArenaRoom(
       this.state,
       input.command,
       input.authority,
       input.trustedTime,
     );
-    if (!transition.ok || transition.kind === 'idempotent') return transition;
+    if (!transition.ok) {
+      if (
+        transition.code === 'capability-denied'
+        && isExactFenceQuotaReason(transition.reason)
+      ) {
+        this.quotaExhausted = true;
+        this.quotaExhaustedReason = transition.reason;
+        await this.enforceQuotaClose();
+      }
+      return transition;
+    }
+    if (transition.kind === 'idempotent') {
+      const current = await this.options.store.load(this.roomId);
+      if (!sameState(current, this.state)) {
+        this.fence();
+        return fail('ROOM_ACTOR_CHECKPOINT_CONFLICT');
+      }
+      return transition;
+    }
     if (transition.nextState.snapshot.roomId !== this.roomId) {
       return fail('ROOM_ACTOR_ROOM_ID_MISMATCH');
     }
@@ -257,6 +323,60 @@ export class RoomActor {
     return transition;
   }
 
+  async closeForQuota(): Promise<void> {
+    this.quotaExhausted = true;
+    await this.enforceQuotaClose();
+  }
+
+  private async enforceQuotaClose(): Promise<void> {
+    if (this.state === null || this.state.lifecycle.status === 'closed') {
+      this.quotaExhausted = false;
+      this.quotaExhaustedReason = null;
+      return;
+    }
+    const suppliedTimestamp = this.options.quotaCloseTimestamp();
+    const timestamp = Date.parse(suppliedTimestamp) < Date.parse(this.state.lifecycle.updatedAt)
+      ? this.state.lifecycle.updatedAt
+      : suppliedTimestamp;
+    const reason = 'room-incarnation-limit' as const;
+    const transition = transitionArenaRoom(this.state, {
+      type: 'close',
+      expectedRoomEpoch: this.state.snapshot.roomEpoch,
+      reason,
+      timestamp,
+    }, issueArenaRoomQuotaCloseAuthority({
+      roomId: this.roomId,
+      roomEpoch: this.state.snapshot.roomEpoch,
+      reason,
+      timestamp,
+    }));
+    if (!transition.ok || transition.kind !== 'applied') {
+      return fail('ROOM_ACTOR_QUOTA_CLOSE_INVALID');
+    }
+    let saved: { readonly kind: 'conflict' | 'saved' };
+    try {
+      saved = await this.options.store.save({
+        commit: createArenaRoomCheckpointCommit(transition),
+      });
+    } catch (error) {
+      try {
+        this.options.onBackgroundError(error);
+      } catch {
+        // Diagnostic hooks never weaken the local close-only fence.
+      }
+      return;
+    }
+    if (saved.kind === 'conflict') {
+      this.fence();
+      return fail('ROOM_ACTOR_CHECKPOINT_CONFLICT');
+    }
+    this.requireInstallable();
+    this.state = cloneState(transition.nextState);
+    this.quotaExhausted = false;
+    this.quotaExhaustedReason = null;
+    this.fanout(transition);
+  }
+
   private fanout(transition: ArenaRoomTransitionSuccess): void {
     if (transition.events.length === 0 || this.state === null) return;
     for (const subscriber of this.subscribers) {
@@ -267,8 +387,16 @@ export class RoomActor {
           snapshot: structuredClone(this.state.snapshot),
           events: structuredClone(transition.events),
         });
-        void Promise.resolve(completion)
-          .catch((error: unknown) => this.reportSubscriberError(error));
+        if (
+          (typeof completion === 'object' && completion !== null)
+          || typeof completion === 'function'
+        ) {
+          if ('then' in completion) {
+            this.subscribers.delete(subscriber);
+            void Promise.resolve(completion)
+              .catch((error: unknown) => this.reportSubscriberError(error));
+          }
+        }
       } catch (error) {
         this.reportSubscriberError(error);
       }
@@ -300,10 +428,12 @@ export type RoomActorRegistryOptions = {
   readonly maxQueuedCommands?: number;
   readonly maxSubscribersPerRoom?: number;
   readonly maxActors?: number;
+  readonly maxFencedRooms?: number;
   readonly idleActorTtlMs?: number;
   readonly now?: () => number;
   readonly createRoomEpoch?: (roomId: string, previousRoomEpoch: string) => string;
   readonly recoveryTimestamp?: () => string;
+  readonly quotaCloseTimestamp?: () => string;
   readonly onSubscriberError?: (error: unknown) => void;
   readonly onBackgroundError?: (error: unknown) => void;
 };
@@ -315,11 +445,12 @@ export type RoomActorRegistryExecuteInput = RoomActorExecuteInput & {
 export class RoomActorRegistry {
   private readonly actors = new Map<string, RoomActor>();
   private readonly hydrations = new Map<string, Promise<RoomActor | null>>();
-  private readonly fencedRoomIds = new Set<string>();
+  private readonly fencedRoomIds = new Map<string, true>();
   private readonly maxQueuedCommands: number;
   private readonly maxSubscribers: number;
   private readonly idleTtlMs: number;
   private readonly maxActors: number;
+  private readonly maxFencedRooms: number;
   private readonly now: () => number;
   private accepting = true;
   private shutdownPromise: Promise<void> | null = null;
@@ -331,6 +462,10 @@ export class RoomActorRegistry {
       'maxQueuedCommands',
     );
     this.maxActors = positiveInteger(options.maxActors ?? DEFAULT_MAX_ACTORS, 'maxActors');
+    this.maxFencedRooms = positiveInteger(
+      options.maxFencedRooms ?? DEFAULT_MAX_FENCED_ROOMS,
+      'maxFencedRooms',
+    );
     this.maxSubscribers = positiveInteger(
       options.maxSubscribersPerRoom ?? DEFAULT_MAX_SUBSCRIBERS_PER_ROOM,
       'maxSubscribersPerRoom',
@@ -346,7 +481,13 @@ export class RoomActorRegistry {
     return this.actors.size;
   }
 
-  async get(roomId: string): Promise<RoomActor | null> {
+  get(roomId: string): RoomActor | null {
+    this.requireAccepting();
+    if (this.fencedRoomIds.has(roomId)) return fail('ROOM_ACTOR_FENCED');
+    return this.actors.get(roomId) ?? null;
+  }
+
+  async recover(roomId: string): Promise<RoomActor | null> {
     this.requireAccepting();
     if (this.fencedRoomIds.has(roomId)) return fail('ROOM_ACTOR_FENCED');
     const current = this.actors.get(roomId);
@@ -364,17 +505,24 @@ export class RoomActorRegistry {
   async execute(input: RoomActorRegistryExecuteInput): Promise<ArenaRoomTransitionResult> {
     this.requireAccepting();
     const command = ArenaRoomCommandSchema.safeParse(input.command);
+    if (!command.success) {
+      return {
+        ok: false,
+        code: 'validation-failed',
+        reason: 'invalid-command',
+      };
+    }
     const stableInput: RoomActorRegistryExecuteInput = {
       ...input,
       authority: snapshotInputCapability(input.authority),
-      command: command.success ? command.data : null,
+      command: command.data,
       trustedTime: snapshotInputCapability(input.trustedTime),
     };
-    let actor = await this.get(stableInput.roomId);
+    if (this.fencedRoomIds.has(stableInput.roomId)) return fail('ROOM_ACTOR_FENCED');
+    let actor = this.actors.get(stableInput.roomId) ?? null;
+    const hydration = this.hydrations.get(stableInput.roomId);
+    if (!actor && hydration) actor = await hydration;
     this.requireAccepting();
-    if (!actor) {
-      actor = this.actors.get(stableInput.roomId) ?? null;
-    }
     if (!actor) {
       this.requireCapacity();
       if (
@@ -453,7 +601,12 @@ export class RoomActorRegistry {
   private async hydrate(roomId: string): Promise<RoomActor | null> {
     const checkpoint = await this.options.store.load(roomId);
     this.requireAccepting();
-    if (checkpoint === null || checkpoint.lifecycle.status === 'closed') return null;
+    if (checkpoint === null) return null;
+    if (checkpoint.lifecycle.status === 'closed') {
+      const actor = this.createActor(roomId, checkpoint);
+      this.actors.set(roomId, actor);
+      return actor;
+    }
     const previousRoomEpoch = checkpoint.snapshot.roomEpoch;
     const nextRoomEpoch = (this.options.createRoomEpoch ?? (() => randomUUID()))(
       roomId,
@@ -477,11 +630,20 @@ export class RoomActorRegistry {
     if (!transition.ok || transition.kind !== 'applied') {
       return fail('ROOM_ACTOR_RECOVERY_INVALID');
     }
-    const saved = await this.options.store.save({
-      commit: createArenaRoomCheckpointCommit(transition),
-    });
+    let saved;
+    try {
+      saved = await this.options.store.save({
+        commit: createArenaRoomCheckpointCommit(transition),
+      });
+    } catch (error) {
+      if (!(error instanceof Error) || error.message !== 'REDIS_ROOM_INCARNATION_LIMIT') throw error;
+      const actor = this.createActor(roomId, checkpoint);
+      this.actors.set(roomId, actor);
+      await actor.closeForQuota();
+      return actor;
+    }
     if (saved.kind === 'conflict') {
-      this.fencedRoomIds.add(roomId);
+      this.rememberFenced(roomId);
       return fail('ROOM_ACTOR_RECOVERY_CONFLICT');
     }
     this.requireAccepting();
@@ -496,11 +658,17 @@ export class RoomActorRegistry {
       maxQueuedCommands: this.maxQueuedCommands,
       maxSubscribers: this.maxSubscribers,
       now: this.now,
+      onAbandoned: (abandonedActor) => {
+        if (this.actors.get(roomId) === abandonedActor) this.actors.delete(roomId);
+        abandonedActor.forceClose();
+      },
       onFenced: (fencedActor) => {
         if (this.actors.get(roomId) === fencedActor) this.actors.delete(roomId);
-        this.fencedRoomIds.add(roomId);
+        this.rememberFenced(roomId);
       },
       onSubscriberError: this.options.onSubscriberError ?? (() => undefined),
+      onBackgroundError: this.options.onBackgroundError ?? (() => undefined),
+      quotaCloseTimestamp: this.options.quotaCloseTimestamp ?? (() => new Date().toISOString()),
       store: this.options.store,
     });
     return actor;
@@ -517,8 +685,18 @@ export class RoomActorRegistry {
   }
 
   private requireCapacity(): void {
-    if (this.actors.size + this.hydrations.size + this.fencedRoomIds.size >= this.maxActors) {
+    if (this.actors.size + this.hydrations.size >= this.maxActors) {
       return fail('ROOM_ACTOR_REGISTRY_CAPACITY');
+    }
+  }
+
+  private rememberFenced(roomId: string): void {
+    this.fencedRoomIds.delete(roomId);
+    this.fencedRoomIds.set(roomId, true);
+    while (this.fencedRoomIds.size > this.maxFencedRooms) {
+      const oldest = this.fencedRoomIds.keys().next().value as string | undefined;
+      if (oldest === undefined) break;
+      this.fencedRoomIds.delete(oldest);
     }
   }
 }

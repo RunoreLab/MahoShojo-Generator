@@ -34,6 +34,7 @@ local fenceType = type(fenceTypeReply) == 'table' and fenceTypeReply.ok or fence
 if fenceType ~= 'none' and fenceType ~= 'set' then return 'invalid-fence' end
 local epochSeen = redis.call('SISMEMBER', KEYS[2], candidate.roomEpoch)
 local fenceCount = redis.call('SCARD', KEYS[2])
+local currentEpochToFence = nil
 if ARGV[1] == 'absent' then
   if raw then return 'conflict' end
   if epochSeen == 1 then return 'conflict' end
@@ -56,6 +57,10 @@ elseif ARGV[1] == 'match' then
   if currentExpiring then return 'conflict' end
   if not currentActive then return 'invalid-existing' end
   if raw ~= ARGV[9] then return 'conflict' end
+  local currentEpochSeen = redis.call('SISMEMBER', KEYS[2], current.roomEpoch)
+  if current.roomEpoch ~= candidate.roomEpoch and currentEpochSeen == 0 then
+    currentEpochToFence = current.roomEpoch
+  end
   if candidate.roomEpoch == current.roomEpoch then
     if candidate.controlSeq <= current.controlSeq
       or candidate.revision < current.revision
@@ -71,9 +76,12 @@ elseif ARGV[1] == 'match' then
 else
   return 'invalid-request'
 end
-if epochSeen == 0 and fenceCount >= tonumber(ARGV[10]) then
+local requiredEpochs = epochSeen == 0 and 1 or 0
+if currentEpochToFence then requiredEpochs = requiredEpochs + 1 end
+if fenceCount + requiredEpochs > tonumber(ARGV[10]) then
   return 'incarnation-limit'
 end
+if currentEpochToFence then redis.call('SADD', KEYS[2], currentEpochToFence) end
 redis.call('SADD', KEYS[2], candidate.roomEpoch)
 redis.call('SET', KEYS[1], ARGV[7], 'PX', ARGV[8])
 return 'saved'

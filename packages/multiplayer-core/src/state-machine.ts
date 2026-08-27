@@ -42,6 +42,7 @@ type MutableState = {
 
 type UserAuthority = Extract<ArenaRoomAuthorityContext, { kind: 'authenticated-user' }>;
 type RecoveryAuthority = Extract<ArenaRoomAuthorityContext, { kind: 'room-recovery' }>;
+type QuotaCloseAuthority = Extract<ArenaRoomAuthorityContext, { kind: 'room-quota-closer' }>;
 
 const parseState = (input: unknown): ArenaRoomAuthorityState | null => {
   const parsed = ArenaRoomAuthorityStateSchema.safeParse(input);
@@ -178,6 +179,9 @@ const closeRoom = (
   reason?: string,
 ): ArenaRoomTransitionResult => {
   if (state.lifecycle.status === 'closed') return finishIdempotent(state);
+  if (Date.parse(timestamp) < Date.parse(state.lifecycle.updatedAt)) {
+    return transitionFailure('stale', 'command-timestamp-regression');
+  }
   const next = cloneState(state);
   next.lifecycle = {
     status: 'closed',
@@ -795,8 +799,20 @@ export const transitionArenaRoom = (
   if (!context) return transitionFailure('forbidden', 'invalid-authority-context');
 
   if (command.type === 'close') {
-    const authorization = requireRole(state, context, 'host');
-    if (authorization) return authorization;
+    if (context.kind === 'room-quota-closer') {
+      const scope: QuotaCloseAuthority['scope'] = context.scope;
+      if (
+        scope.roomId !== state.snapshot.roomId
+        || scope.roomEpoch !== command.expectedRoomEpoch
+        || scope.timestamp !== command.timestamp
+        || scope.reason !== command.reason
+      ) {
+        return transitionFailure('forbidden', 'authority-scope-mismatch');
+      }
+    } else {
+      const authorization = requireRole(state, context, 'host');
+      if (authorization) return authorization;
+    }
     return closeRoom(state, command.timestamp, command.reason);
   }
   if (command.type === 'recover') {

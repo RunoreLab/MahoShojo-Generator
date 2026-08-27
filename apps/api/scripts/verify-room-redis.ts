@@ -48,11 +48,13 @@ if (!/^[a-z0-9_-]{1,32}$/u.test(keyPrefix)) {
 
 const TIMESTAMP = '2026-08-28T00:00:00.000Z';
 const NEXT_TIMESTAMP = '2026-08-28T00:01:00.000Z';
+const THIRD_TIMESTAMP = '2026-08-28T00:02:00.000Z';
 const roomId = `room-restart-${token}`;
 const ttlRoomId = `room-ttl-${token}`;
 const epochRoomId = `room-epoch-${token}`;
 const expiryFenceRoomId = `room-expiry-fence-${token}`;
 const legacyRoomId = `room-legacy-v1-${token}`;
+const legacyRecoveryRoomId = `room-legacy-recovery-${token}`;
 const malformedRoomId = `room-malformed-${token}`;
 const invalidFenceRoomId = `room-invalid-fence-${token}`;
 const fullFenceRoomId = `room-full-fence-${token}`;
@@ -194,13 +196,25 @@ try {
   const writerStore = writer.getRoomStore();
 
   if (phase === 'read') {
-    const recovered = await readerStore.load(roomId);
+    const recoveredRegistry = createRoomActorRegistry({
+      store: readerStore,
+      createRoomEpoch: () => `restart-recovered-${token}`,
+      recoveryTimestamp: () => THIRD_TIMESTAMP,
+    });
+    const recoveredActor = await recoveredRegistry.recover(roomId);
+    const recovered = recoveredActor?.getSnapshot() ?? null;
     if (
       recovered?.snapshot.sharedConfig.userGuidance !== 'restart-recovery-acknowledged'
       || recovered.snapshot.revision !== 1
+      || recovered.snapshot.roomEpoch !== `restart-recovered-${token}`
     ) {
       throw new Error('ROOM_REDIS_RESTART_RECOVERY_FAILED');
     }
+    const delayedOldMutation = publish(createRoom(roomId).nextState);
+    if ((await writerStore.save({ commit: commit(delayedOldMutation) })).kind !== 'conflict') {
+      throw new Error('ROOM_REDIS_RESTART_OLD_ACTOR_FENCE_FAILED');
+    }
+    await recoveredRegistry.shutdown();
     const deleted = await readerStore.delete({ checkpoint: recovered });
     if (deleted.kind !== 'deleted') throw new Error('ROOM_REDIS_RESTART_CLEANUP_FAILED');
     const sameEpochAfterRestartDelete = await readerStore.save({
@@ -216,7 +230,56 @@ try {
       roomRedis: true,
       phase: 'read',
       restartRecovery: true,
+      roomActorRestartRecovery: true,
+      oldActorFence: true,
       incarnationFence: true,
+    }));
+  } else if (phase === 'write') {
+    const registry = createRoomActorRegistry({ store: writerStore });
+    const created = await registry.execute({
+      roomId,
+      command: {
+        type: 'create',
+        roomId,
+        roomEpoch: 'epoch-1',
+        host: {
+          userId: 'host-1',
+          role: 'host',
+          displayName: 'Host',
+          membershipState: 'active',
+          joinedAt: TIMESTAMP,
+        },
+        sharedConfig: sharedConfig(),
+        timestamp: TIMESTAMP,
+      },
+      authority: hostAuthority,
+    });
+    if (!created.ok || created.kind !== 'applied') {
+      throw new Error('ROOM_ACTOR_RESTART_WRITE_CREATE_FAILED');
+    }
+    const mutated = await registry.execute({
+      roomId,
+      command: {
+        type: 'publish-config',
+        expectedRoomEpoch: 'epoch-1',
+        expectedRevision: 0,
+        sharedConfig: { ...sharedConfig(), userGuidance: 'restart-recovery-acknowledged' },
+        timestamp: NEXT_TIMESTAMP,
+      },
+      authority: hostAuthority,
+    });
+    if (!mutated.ok || mutated.kind !== 'applied') {
+      throw new Error('ROOM_ACTOR_RESTART_WRITE_MUTATE_FAILED');
+    }
+    await registry.shutdown();
+    if (JSON.stringify(await readerStore.load(roomId)) !== JSON.stringify(mutated.nextState)) {
+      throw new Error('ROOM_ACTOR_RESTART_WRITE_CHECKPOINT_FAILED');
+    }
+    console.info(JSON.stringify({
+      roomRedis: true,
+      phase: 'write',
+      acknowledged: true,
+      roomActorCheckpoint: true,
     }));
   } else {
     const createdTransition = createRoom(roomId);
@@ -238,9 +301,6 @@ try {
       throw new Error('ROOM_REDIS_ACKNOWLEDGED_CHECKPOINT_FAILED');
     }
 
-    if (phase === 'write') {
-      console.info(JSON.stringify({ roomRedis: true, phase: 'write', acknowledged: true }));
-    } else {
       const staleClose = close(initial);
       const staleWriter = await readerStore.save({ commit: commit(staleClose) });
       const counterCollision = structuredClone(acknowledged);
@@ -385,6 +445,36 @@ try {
         || expiringLegacy.expiryFence !== 'expiring'
       ) {
         throw new Error('ROOM_REDIS_LEGACY_V1_TOMBSTONE_FAILED');
+      }
+
+      const legacyRecoveryState = createRoom(legacyRecoveryRoomId, 'legacy-epoch-1').nextState;
+      await cleanup.set(roomKey(legacyRecoveryRoomId), JSON.stringify({
+        checkpointVersion: 1,
+        ...checkpointPredecessorOf(legacyRecoveryState),
+        state: legacyRecoveryState,
+      }), { PX: 3_600_000 });
+      const legacyRecoveryRegistry = createRoomActorRegistry({
+        store: writerStore,
+        createRoomEpoch: () => 'legacy-epoch-2',
+        recoveryTimestamp: () => THIRD_TIMESTAMP,
+      });
+      const legacyRecoveredActor = await legacyRecoveryRegistry.recover(legacyRecoveryRoomId);
+      const legacyRecovered = legacyRecoveredActor?.getSnapshot() ?? null;
+      if (
+        legacyRecovered?.snapshot.roomEpoch !== 'legacy-epoch-2'
+        || !await cleanup.sIsMember(roomFenceKey(legacyRecoveryRoomId), 'legacy-epoch-1')
+        || !await cleanup.sIsMember(roomFenceKey(legacyRecoveryRoomId), 'legacy-epoch-2')
+      ) {
+        throw new Error('ROOM_REDIS_LEGACY_RECOVERY_FENCE_BOOTSTRAP_FAILED');
+      }
+      await legacyRecoveryRegistry.shutdown();
+      if ((await writerStore.delete({ checkpoint: legacyRecovered })).kind !== 'deleted') {
+        throw new Error('ROOM_REDIS_LEGACY_RECOVERY_DELETE_FAILED');
+      }
+      if ((await writerStore.save({
+        commit: commit(createRoom(legacyRecoveryRoomId, 'legacy-epoch-1')),
+      })).kind !== 'conflict') {
+        throw new Error('ROOM_REDIS_LEGACY_RECOVERY_RESURRECTION_FAILED');
       }
       await fixedError(writerStore.delete({ checkpoint: malformedExpected }), 'REDIS_ROOM_CHECKPOINT_INVALID');
       if (await cleanup.get(malformedKey) !== malformedRaw) {
@@ -540,7 +630,7 @@ try {
         createRoomEpoch: () => 'actor-epoch-2',
         recoveryTimestamp: () => NEXT_TIMESTAMP,
       });
-      const recoveredActor = await recoveredActorRegistry.get(actorRoomId);
+      const recoveredActor = await recoveredActorRegistry.recover(actorRoomId);
       if (recoveredActor?.getSnapshot()?.snapshot.roomEpoch !== 'actor-epoch-2') {
         throw new Error('ROOM_ACTOR_WARM_RECOVERY_FAILED');
       }
@@ -574,6 +664,7 @@ try {
         fullPredecessorFence: true,
         oldEpochFence: true,
         recoveryEpochRollover: true,
+        legacyRecoveryPredecessorFence: true,
         roomActorWarmRecovery: true,
         roomActorOldWriterFence: true,
         terminalTtl: true,
@@ -583,7 +674,6 @@ try {
         baselineV1Compatibility: true,
         ttlExpiry: true,
       }));
-    }
   }
 } finally {
   await reader.close();
@@ -596,6 +686,7 @@ try {
       ...roomKeys(epochRoomId),
       ...roomKeys(expiryFenceRoomId),
       ...roomKeys(legacyRoomId),
+      ...roomKeys(legacyRecoveryRoomId),
       ...roomKeys(malformedRoomId),
       ...roomKeys(invalidFenceRoomId),
       ...roomKeys(fullFenceRoomId),
