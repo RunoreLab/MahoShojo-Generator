@@ -1,5 +1,10 @@
 import {
+  ArenaRoomSnapshotSchema,
   parseArenaRoomSharedConfig,
+  OpaqueKeySchema,
+  RoomEventSchema,
+  type ArenaRoomSnapshot,
+  type ControlRoomEvent,
   type DataCardRef,
   type HostLocalCombatantStub,
   type HostLocalMaterialStub,
@@ -143,4 +148,108 @@ export const buildArenaRoomSharedConfig = (input: ArenaRoomNormalizedSource): Ar
 export const applyArenaRoomSharedConfig = (input: unknown): ArenaRoomSharedConfig => {
   const parsed = parseArenaRoomSharedConfig(input);
   return deepClone(parsed);
+};
+
+const parseViewerUserId = (input: string): string | null => {
+  const parsed = OpaqueKeySchema.safeParse(input);
+  return parsed.success ? parsed.data : null;
+};
+
+/**
+ * Projects the public snapshot for one active room member. The authority
+ * checkpoint remains unprojected; only this detached public copy is filtered.
+ */
+export const projectArenaRoomSnapshotForViewer = (
+  input: unknown,
+  viewerUserId: string,
+): ArenaRoomSnapshot => {
+  const snapshot = ArenaRoomSnapshotSchema.parse(input);
+  const viewerId = parseViewerUserId(viewerUserId);
+  const viewer = viewerId === null
+    ? undefined
+    : snapshot.members.find((member) => (
+      member.userId === viewerId && member.membershipState === 'active'
+    ));
+  const proposals = viewer?.role === 'host'
+    ? snapshot.proposals
+    : viewerId === null
+      ? []
+      : snapshot.proposals.filter((proposal) => proposal.authorUserId === viewerId);
+
+  return ArenaRoomSnapshotSchema.parse({
+    ...deepClone(snapshot),
+    proposals: deepClone(proposals),
+  });
+};
+
+/**
+ * Projects Proposal control events without creating a side-channel summary.
+ * A Proposal hidden from a member is replaced by a room.snapshot carrying the
+ * same controlSeq, so the viewer's control stream remains sequence-preserving.
+ * The predecessor snapshot is optional and lets an author see their own
+ * terminal proposal event without exposing another author's terminal ID.
+ */
+export const projectArenaRoomEventForViewer = (
+  eventInput: unknown,
+  snapshotInput: unknown,
+  viewerUserId: string,
+  predecessorSnapshotInput?: unknown,
+): ControlRoomEvent => {
+  const event = RoomEventSchema.parse(eventInput);
+  const snapshot = ArenaRoomSnapshotSchema.parse(snapshotInput);
+  if (event.roomId !== snapshot.roomId || event.roomEpoch !== snapshot.roomEpoch) {
+    throw new Error('event and projection snapshot must identify the same room epoch');
+  }
+
+  if (event.type === 'room.snapshot') {
+    return RoomEventSchema.parse({
+      ...deepClone(event),
+      payload: projectArenaRoomSnapshotForViewer(event.payload, viewerUserId),
+    }) as ControlRoomEvent;
+  }
+
+  if (
+    event.type !== 'proposal.submitted'
+    && event.type !== 'proposal.updated'
+    && event.type !== 'proposal.resolved'
+  ) {
+    return deepClone(event) as ControlRoomEvent;
+  }
+
+  const viewerId = parseViewerUserId(viewerUserId);
+  const viewer = viewerId === null
+    ? undefined
+    : snapshot.members.find((member) => (
+      member.userId === viewerId && member.membershipState === 'active'
+    ));
+  let proposalAuthorUserId: string | undefined;
+  if (event.type === 'proposal.submitted' || event.type === 'proposal.updated') {
+    proposalAuthorUserId = event.payload.proposal.authorUserId;
+  } else if (predecessorSnapshotInput !== undefined) {
+    const predecessor = ArenaRoomSnapshotSchema.parse(predecessorSnapshotInput);
+    if (predecessor.roomId !== event.roomId || predecessor.roomEpoch !== event.roomEpoch) {
+      throw new Error('event and predecessor snapshot must identify the same room epoch');
+    }
+    proposalAuthorUserId = predecessor.proposals.find(
+      (proposal) => proposal.proposalId === event.payload.proposalId,
+    )?.authorUserId;
+  }
+
+  const canViewProposal = viewer?.role === 'host'
+    || (viewerId !== null && proposalAuthorUserId === viewerId);
+  if (canViewProposal) return deepClone(event);
+
+  const projectedSnapshot = projectArenaRoomSnapshotForViewer(snapshot, viewerUserId);
+  return RoomEventSchema.parse({
+    protocolVersion: event.protocolVersion,
+    roomId: event.roomId,
+    roomEpoch: event.roomEpoch,
+    controlSeq: event.controlSeq,
+    timestamp: event.timestamp,
+    type: 'room.snapshot',
+    payload: {
+      ...projectedSnapshot,
+      controlSeq: event.controlSeq,
+    },
+  }) as ControlRoomEvent;
 };

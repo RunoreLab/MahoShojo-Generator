@@ -1,7 +1,12 @@
 import { z } from 'zod';
 
-import { ArenaRoomSnapshotSchema, RoomMemberSchema } from './protocol';
+import { ArenaRoomSnapshotSchema, RoomMemberSchema, RoomRevisionSchema } from './protocol';
 import { DisplayNameSchema, OpaqueKeySchema, WireErrorMessageSchema } from './primitives';
+import {
+  ArenaProposalChangesSchema,
+  ResolvedArenaProposalStatusSchema,
+} from './proposals';
+import { MAX_PROPOSAL_CHANGES } from './limits';
 import {
   RoomDirectoryTitleSchema,
   RoomDirectoryVisibilitySchema,
@@ -22,6 +27,9 @@ export const ARENA_ROOM_HTTP_ROUTES = Object.freeze({
   ticket: `${ARENA_ROOM_HTTP_BASE_PATH}/:roomId/ticket`,
   leave: `${ARENA_ROOM_HTTP_BASE_PATH}/:roomId/leave`,
   close: `${ARENA_ROOM_HTTP_BASE_PATH}/:roomId/close`,
+  proposals: `${ARENA_ROOM_HTTP_BASE_PATH}/:roomId/proposals`,
+  proposalResolve: `${ARENA_ROOM_HTTP_BASE_PATH}/:roomId/proposals/:proposalId/resolve`,
+  proposalWithdraw: `${ARENA_ROOM_HTTP_BASE_PATH}/:roomId/proposals/:proposalId/withdraw`,
 });
 
 export const MAX_ARENA_ROOM_HTTP_TICKET_BYTES = 4_096;
@@ -44,6 +52,33 @@ export const ArenaRoomTicketRequestSchema = z.object({
 }).strict();
 
 export const ArenaRoomEpochMutationRequestSchema = z.object({
+  expectedRoomEpoch: OpaqueKeySchema,
+}).strict();
+
+/** Client intent only; authority/provenance fields are injected by the server. */
+export const ArenaRoomProposalSubmitRequestSchema = z.object({
+  proposalId: OpaqueKeySchema,
+  expectedRoomEpoch: OpaqueKeySchema,
+  baseRevision: RoomRevisionSchema,
+  changes: ArenaProposalChangesSchema,
+}).strict();
+
+export const ArenaRoomProposalResolveRequestSchema = z.object({
+  expectedRoomEpoch: OpaqueKeySchema,
+  expectedRevision: RoomRevisionSchema,
+  resolution: z.enum(['accept-selected', 'reject']),
+  selectedChangeIds: z.array(OpaqueKeySchema).max(MAX_PROPOSAL_CHANGES).optional(),
+}).strict().superRefine((request, context) => {
+  if (request.resolution === 'reject' && request.selectedChangeIds !== undefined) {
+    context.addIssue({
+      code: 'custom',
+      path: ['selectedChangeIds'],
+      message: 'reject cannot select changes',
+    });
+  }
+});
+
+export const ArenaRoomProposalWithdrawRequestSchema = z.object({
   expectedRoomEpoch: OpaqueKeySchema,
 }).strict();
 
@@ -102,6 +137,24 @@ export const ArenaRoomLeaveResponseSchema = z.object({
   outcome: z.enum(['left', 'closed']),
 }).strict();
 
+export const ArenaRoomProposalMutationStatusSchema = z.union([
+  z.literal('submitted'),
+  ResolvedArenaProposalStatusSchema,
+]);
+
+export const ArenaRoomProposalMutationResultSchema = z.enum(['applied', 'idempotent']);
+
+export const ArenaRoomProposalMutationResponseSchema = z.object({
+  protocolVersion: z.literal(PROTOCOL_VERSION),
+  roomId: OpaqueKeySchema,
+  roomEpoch: OpaqueKeySchema,
+  controlSeq: z.number().int().nonnegative(),
+  revision: RoomRevisionSchema,
+  proposalId: OpaqueKeySchema,
+  status: ArenaRoomProposalMutationStatusSchema,
+  result: ArenaRoomProposalMutationResultSchema,
+}).strict();
+
 export const ArenaRoomHttpErrorCodeSchema = z.enum([
   'ROOM_AUTHENTICATION_REQUIRED',
   'ROOM_AUTHENTICATION_DENIED',
@@ -124,8 +177,14 @@ export type ArenaRoomCreateRequest = z.infer<typeof ArenaRoomCreateRequestSchema
 export type ArenaRoomJoinRequest = z.infer<typeof ArenaRoomJoinRequestSchema>;
 export type ArenaRoomTicketRequest = z.infer<typeof ArenaRoomTicketRequestSchema>;
 export type ArenaRoomEpochMutationRequest = z.infer<typeof ArenaRoomEpochMutationRequestSchema>;
+export type ArenaRoomProposalSubmitRequest = z.infer<typeof ArenaRoomProposalSubmitRequestSchema>;
+export type ArenaRoomProposalResolveRequest = z.infer<typeof ArenaRoomProposalResolveRequestSchema>;
+export type ArenaRoomProposalWithdrawRequest = z.infer<typeof ArenaRoomProposalWithdrawRequestSchema>;
 export type ArenaRoomSessionResponse = z.infer<typeof ArenaRoomSessionResponseSchema>;
 export type ArenaRoomTicketResponse = z.infer<typeof ArenaRoomTicketResponseSchema>;
 export type ArenaRoomLeaveResponse = z.infer<typeof ArenaRoomLeaveResponseSchema>;
+export type ArenaRoomProposalMutationStatus = z.infer<typeof ArenaRoomProposalMutationStatusSchema>;
+export type ArenaRoomProposalMutationResult = z.infer<typeof ArenaRoomProposalMutationResultSchema>;
+export type ArenaRoomProposalMutationResponse = z.infer<typeof ArenaRoomProposalMutationResponseSchema>;
 export type ArenaRoomHttpErrorCode = z.infer<typeof ArenaRoomHttpErrorCodeSchema>;
 export type ArenaRoomHttpErrorResponse = z.infer<typeof ArenaRoomHttpErrorResponseSchema>;

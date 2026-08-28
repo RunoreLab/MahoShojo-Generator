@@ -544,6 +544,9 @@ const resolveProposal = (
 ): ArenaRoomTransitionResult => {
   const authorization = requireRole(state, context, 'host');
   if (authorization) return authorization;
+  if (command.expectedRevision !== state.snapshot.revision) {
+    return transitionFailure('stale', 'room-revision-mismatch');
+  }
   const proposalIndex = state.snapshot.proposals.findIndex((item) => item.proposalId === command.proposalId);
   if (proposalIndex < 0) {
     return state.terminalProposalIds.includes(command.proposalId)

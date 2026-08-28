@@ -699,6 +699,7 @@ describe('RoomActorRegistry', () => {
       command: {
         type: 'resolve-proposal',
         expectedRoomEpoch: 'epoch-2',
+        expectedRevision: 0,
         proposalId: 'proposal-remove-current',
         resolution: 'accept-selected',
         selectedChangeIds: ['add-current-material'],

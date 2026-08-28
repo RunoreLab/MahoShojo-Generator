@@ -9,6 +9,10 @@ import {
   ArenaRoomHttpErrorResponseSchema,
   ArenaRoomJoinRequestSchema,
   ArenaRoomLeaveResponseSchema,
+  ArenaRoomProposalMutationResponseSchema,
+  ArenaRoomProposalResolveRequestSchema,
+  ArenaRoomProposalSubmitRequestSchema,
+  ArenaRoomProposalWithdrawRequestSchema,
   ArenaRoomSessionResponseSchema,
   ArenaRoomTicketRequestSchema,
   ArenaRoomTicketResponseSchema,
@@ -34,7 +38,103 @@ describe('Arena Room HTTP product contract', () => {
       ticket: '/api/arena/rooms/v1/:roomId/ticket',
       leave: '/api/arena/rooms/v1/:roomId/leave',
       close: '/api/arena/rooms/v1/:roomId/close',
+      proposals: '/api/arena/rooms/v1/:roomId/proposals',
+      proposalResolve: '/api/arena/rooms/v1/:roomId/proposals/:proposalId/resolve',
+      proposalWithdraw: '/api/arena/rooms/v1/:roomId/proposals/:proposalId/withdraw',
     });
+  });
+
+  it('Proposal mutation DTO 只接受 client intent 与 typed changes，并保持 strict', () => {
+    const change = {
+      changeId: 'guidance-1',
+      type: 'setUserGuidance' as const,
+      value: '建议',
+      expectedBase: { kind: 'value' as const, value: '' },
+    };
+    const submit = {
+      proposalId: 'proposal-1',
+      expectedRoomEpoch: 'epoch-1',
+      baseRevision: 3,
+      changes: [change],
+    };
+    expect(ArenaRoomProposalSubmitRequestSchema.parse(submit)).toEqual(submit);
+    for (const injected of [
+      { roomId: 'room-1' },
+      { authorUserId: 'spoofed' },
+      { proposalVersion: 1 },
+      { status: 'submitted' },
+      { createdAt: '2026-08-28T00:00:00.000Z' },
+      { accountUserId: 7 },
+      { role: 'member' },
+    ]) {
+      expect(ArenaRoomProposalSubmitRequestSchema.safeParse({ ...submit, ...injected }).success)
+        .toBe(false);
+    }
+    expect(ArenaRoomProposalSubmitRequestSchema.safeParse({
+      ...submit,
+      changes: [{ ...change, unexpected: true }],
+    }).success).toBe(false);
+    expect(ArenaRoomProposalSubmitRequestSchema.safeParse({
+      ...submit,
+      changes: [{ ...change, dependsOn: ['missing-change'] }],
+    }).success).toBe(false);
+    expect(ArenaRoomProposalSubmitRequestSchema.safeParse({
+      ...submit,
+      changes: [
+        { ...change, changeId: 'a', dependsOn: ['b'] },
+        { ...change, changeId: 'b', dependsOn: ['a'] },
+      ],
+    }).success).toBe(false);
+
+    const resolve = {
+      expectedRoomEpoch: 'epoch-1',
+      expectedRevision: 3,
+      resolution: 'accept-selected' as const,
+      selectedChangeIds: ['guidance-1'],
+    };
+    expect(ArenaRoomProposalResolveRequestSchema.parse(resolve)).toEqual(resolve);
+    expect(ArenaRoomProposalResolveRequestSchema.safeParse({
+      ...resolve,
+      expectedRevision: -1,
+    }).success).toBe(false);
+    expect(ArenaRoomProposalResolveRequestSchema.safeParse({
+      ...resolve,
+      resolution: 'reject',
+      selectedChangeIds: [],
+    }).success).toBe(false);
+    expect(ArenaRoomProposalResolveRequestSchema.safeParse({
+      ...resolve,
+      accountUserId: 7,
+    }).success).toBe(false);
+
+    const withdraw = { expectedRoomEpoch: 'epoch-1' };
+    expect(ArenaRoomProposalWithdrawRequestSchema.parse(withdraw)).toEqual(withdraw);
+    expect(ArenaRoomProposalWithdrawRequestSchema.safeParse({ ...withdraw, proposalId: 'p' }).success)
+      .toBe(false);
+  });
+
+  it('Proposal mutation response 只暴露公共 cursor、proposal status 与 result', () => {
+    const response = {
+      protocolVersion: 1,
+      roomId: 'room-1',
+      roomEpoch: 'epoch-1',
+      controlSeq: 4,
+      revision: 3,
+      proposalId: 'proposal-1',
+      status: 'partially_accepted' as const,
+      result: 'applied' as const,
+    };
+    expect(ArenaRoomProposalMutationResponseSchema.parse(response)).toEqual(response);
+    for (const internal of [
+      { accountUserId: 7 },
+      { deadlines: { hostOfflineDeadline: null } },
+      { terminalProposalIds: ['proposal-1'] },
+      { receipt: 'checkpoint-receipt' },
+      { authorityState: {} },
+    ]) {
+      expect(ArenaRoomProposalMutationResponseSchema.safeParse({ ...response, ...internal }).success)
+        .toBe(false);
+    }
   });
 
   it('create 只接受展示信息、directory 与 shared config', () => {

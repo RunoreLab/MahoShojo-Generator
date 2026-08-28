@@ -50,6 +50,30 @@ const submit = (state: ArenaRoomAuthorityState, proposalValue = proposal([guidan
 );
 
 describe('Arena Room Proposal authority transitions', () => {
+  it('requires an exact room revision fence before resolving a Proposal', () => {
+    const submitted = submit(createJoinedState()).nextState;
+    const stale = failure(transitionArenaRoomAt(submitted, {
+      type: 'resolve-proposal',
+      expectedRoomEpoch: 'epoch-1',
+      expectedRevision: 1,
+      proposalId: 'proposal-1',
+      resolution: 'reject',
+      timestamp: '2026-08-27T16:02:00.000Z',
+    }, hostAuthority()));
+    expect(stale).toMatchObject({ code: 'stale', reason: 'room-revision-mismatch' });
+    expect(submitted.snapshot.proposals).toHaveLength(1);
+
+    const resolved = success(transitionArenaRoomAt(submitted, {
+      type: 'resolve-proposal',
+      expectedRoomEpoch: 'epoch-1',
+      expectedRevision: 0,
+      proposalId: 'proposal-1',
+      resolution: 'reject',
+      timestamp: '2026-08-27T16:02:00.000Z',
+    }, hostAuthority()));
+    expect(resolved.nextState.snapshot.proposals).toEqual([]);
+  });
+
   it('submits once, rejects ID conflicts, and never accepts host-authored member proposals', () => {
     const state = createJoinedState();
     const submitted = submit(state);
@@ -88,6 +112,7 @@ describe('Arena Room Proposal authority transitions', () => {
     const resolved = success(transitionArenaRoomAt(submitted, {
       type: 'resolve-proposal',
       expectedRoomEpoch: 'epoch-1',
+      expectedRevision: 0,
       proposalId: 'proposal-1',
       resolution: 'accept-selected',
       selectedChangeIds: ['guidance-1'],
@@ -111,6 +136,7 @@ describe('Arena Room Proposal authority transitions', () => {
     const rejected = success(transitionArenaRoomAt(submitted, {
       type: 'resolve-proposal',
       expectedRoomEpoch: 'epoch-1',
+      expectedRevision: 0,
       proposalId: 'proposal-1',
       resolution: 'reject',
       timestamp: '2026-08-27T16:02:00.000Z',
@@ -145,6 +171,7 @@ describe('Arena Room Proposal authority transitions', () => {
     const result = failure(transitionArenaRoomAt(submitted, {
       type: 'resolve-proposal',
       expectedRoomEpoch: 'epoch-1',
+      expectedRevision: 0,
       proposalId: 'proposal-1',
       resolution: 'accept-selected',
       selectedChangeIds: ['guidance-1'],
@@ -168,6 +195,7 @@ describe('Arena Room Proposal authority transitions', () => {
     const partial = success(transitionArenaRoomAt(partialSubmitted, {
       type: 'resolve-proposal',
       expectedRoomEpoch: 'epoch-1',
+      expectedRevision: 0,
       proposalId: 'proposal-partial',
       resolution: 'accept-selected',
       selectedChangeIds: ['guidance-1'],
@@ -197,6 +225,7 @@ describe('Arena Room Proposal authority transitions', () => {
     expect(failure(transitionArenaRoomAt(atomicSubmitted, {
       type: 'resolve-proposal',
       expectedRoomEpoch: 'epoch-1',
+      expectedRevision: 0,
       proposalId: 'proposal-atomic',
       resolution: 'accept-selected',
       selectedChangeIds: ['battle-mode-atomic'],
@@ -219,6 +248,7 @@ describe('Arena Room Proposal authority transitions', () => {
     expect(failure(transitionArenaRoomAt(driftSubmitted, {
       type: 'resolve-proposal',
       expectedRoomEpoch: 'epoch-1',
+      expectedRevision: 0,
       proposalId: 'proposal-version-drift',
       resolution: 'accept-selected',
       selectedChangeIds: ['remove-character-1'],
@@ -247,6 +277,7 @@ describe('Arena Room Proposal authority transitions', () => {
     const resolved = success(transitionArenaRoomAt(noOp, {
       type: 'resolve-proposal',
       expectedRoomEpoch: 'epoch-1',
+      expectedRevision: 0,
       proposalId: 'proposal-no-op',
       resolution: 'accept-selected',
       selectedChangeIds: ['guidance-1'],
@@ -320,6 +351,7 @@ describe('Arena Room authoritative generation transitions', () => {
     const accepted = success(transitionArenaRoomAt(submitted, {
       type: 'resolve-proposal',
       expectedRoomEpoch: 'epoch-1',
+      expectedRevision: 0,
       proposalId: 'proposal-1',
       resolution: 'accept-selected',
       selectedChangeIds: ['guidance-1'],
@@ -400,6 +432,7 @@ describe('Arena Room authoritative generation transitions', () => {
     const accepted = success(transitionArenaRoomAt(submitted, {
       type: 'resolve-proposal',
       expectedRoomEpoch: 'epoch-1',
+      expectedRevision: 0,
       proposalId: 'proposal-story-length',
       resolution: 'accept-selected',
       selectedChangeIds: ['story-length-1'],

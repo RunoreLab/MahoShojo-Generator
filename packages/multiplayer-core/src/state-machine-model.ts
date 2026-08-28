@@ -505,6 +505,7 @@ export const SubmitArenaRoomProposalCommandSchema = z.object({
 export const ResolveArenaRoomProposalCommandSchema = z.object({
   type: z.literal('resolve-proposal'),
   ...epochCommand,
+  expectedRevision: RoomRevisionSchema,
   proposalId: OpaqueKeySchema,
   resolution: z.enum(['accept-selected', 'reject']),
   selectedChangeIds: z.array(OpaqueKeySchema).max(MAX_PROPOSAL_CHANGES).optional(),

@@ -49,6 +49,7 @@ describe('Arena Room recovery transition', () => {
     const resolved = transitionArenaRoom(submitted.nextState, {
       type: 'resolve-proposal',
       expectedRoomEpoch: 'epoch-1',
+      expectedRevision: 0,
       proposalId: 'proposal-1',
       resolution: 'accept-selected',
       selectedChangeIds: ['guidance-1'],

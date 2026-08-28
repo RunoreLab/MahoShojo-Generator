@@ -486,6 +486,7 @@ describe('GMR-01 independent review regressions', () => {
     const resolved = success(transitionArenaRoomAt(submitted.nextState, {
       type: 'resolve-proposal',
       expectedRoomEpoch: 'epoch-1',
+      expectedRevision: 1,
       proposalId: 'proposal-chain',
       resolution: 'accept-selected',
       selectedChangeIds: ['chain-guidance'],
@@ -553,6 +554,7 @@ describe('GMR-01 independent review regressions', () => {
       state = success(transitionArenaRoomAt(submitted, {
         type: 'resolve-proposal',
         expectedRoomEpoch: 'epoch-1',
+        expectedRevision: 0,
         proposalId,
         resolution: 'reject',
         timestamp: NEXT_TIMESTAMP,
@@ -671,6 +673,7 @@ describe('GMR-01 independent review regressions', () => {
     const resolveCommand = {
       type: 'resolve-proposal' as const,
       expectedRoomEpoch: 'epoch-1',
+      expectedRevision: 0,
       proposalId: 'replay-resolve',
       resolution: 'reject' as const,
       timestamp: NEXT_TIMESTAMP,
