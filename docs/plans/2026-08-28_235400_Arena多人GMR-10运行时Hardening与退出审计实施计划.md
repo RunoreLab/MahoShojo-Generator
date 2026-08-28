@@ -2,9 +2,13 @@
 
 日期：2026-08-28
 
-状态：`implementing`
+状态：`completed`
 
 实现基线：`14d0e58d`
+
+实现 checkpoints：`0684bb61`、`65bff17e`、`eb66f6d9`、`c68fcd39`
+
+审查整改 checkpoints：`c63cd9b4`、`3a0c833f`、`7cae4b7f`、`bf2bb98c`
 
 关联设计：[Arena 多人 GMR-10 运行时 Hardening 与退出审计设计](../specs/2026-08-28_235400_Arena多人GMR-10运行时Hardening与退出审计设计.md)
 
@@ -72,3 +76,4 @@ git diff --check
 ```
 
 既有 naming report-only、preview/physical production D1 与 production control plane 继续 no-new-regression / `DEFERRED`。
+本计划及五个 atomic checkpoint 已完成；最终验证、独立复审及状态矩阵记录在 GMR-10 实施与审查整改日志。

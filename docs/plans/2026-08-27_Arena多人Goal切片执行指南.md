@@ -104,11 +104,11 @@ read authority / current state
 | `GMR-07` Arena room UI | `DONE` | GMR-05 | feature-flagged create/join/status/reconnect | 不激活 production |
 | `GMR-08` Proposal E2E | `DONE` | GMR-05,GMR-07 | typed Proposal server/UI 闭环 | 不扩展 private sharing |
 | `GMR-09` generation publisher | `DONE` | GMR-03,GMR-05,GMR-06R,GMR-07 | single producer + Room safe fan-out/resync | 不复制 AI lifecycle |
-| `GMR-10` hardening/fault/load audit | `READY` | GMR-06R,GMR-08,GMR-09 | telemetry + failure drills + v1 exit audit | 不自动进入生产 |
+| `GMR-10` hardening/fault/load audit | `DONE` | GMR-06R,GMR-08,GMR-09 | telemetry + failure drills + v1 exit audit | 不自动进入生产 activation |
 | `GMR-11` production activation review | `DEFERRED` | GMR-10 + Production Gate | 独立生产 go/no-go | 必须人工/平台授权 |
 | `GMR-H` multi-instance / DO evaluation | `DEFERRED` | 真实指标触发 | 新 ADR/PoC 决策 | v1 不预建 |
 
-`GMR-06` 与 `GMR-07` 在 GMR-05 后 MAY 并行，但一个 `/goal` 仍只执行其中一个。2026-08-28 的 Redis-only superseding 修订把 `GMR-06R` 加为后续 generation/hardening 前置门禁；`GMR-08` 的已完成结果保留。GMR-09 已关闭，`GMR-10` 现为下一 READY Goal。
+`GMR-06` 与 `GMR-07` 在 GMR-05 后 MAY 并行，但一个 `/goal` 仍只执行其中一个。2026-08-28 的 Redis-only superseding 修订把 `GMR-06R` 加为后续 generation/hardening 前置门禁；`GMR-08` 的已完成结果保留。GMR-10 的代码、真实故障/负载证据、最终复审与 full gate 已完成；GMR-11 与 GMR-H 均保持 `DEFERRED`，不得由本 Goal 自动转为 `READY`。
 
 ## 6. Goal 详细定义
 
@@ -759,6 +759,28 @@ validate -> pure derive -> conditional checkpoint
 - no secret/content logging；
 - metrics support Phase H decision；
 - no fabricated production SLA。
+
+**Evidence（2026-08-29）**
+
+- telemetry：`hono.runtime.telemetry` 提升为 schema v5，新增固定低基数 `arenaRoom` actor/checkpoint/socket/sync/
+  publisher/incident 聚合；observer 异常 fail-soft，不记录 Room/user/ticket/generation ID、正文或 credential；
+- drills：machine-readable manifest 固定 ordered 10 场景并进入 `workspace:verify`。真实 loopback Redis 7.0.15 证明
+  两个 Hono adaptor server 前后恢复时 Redis `run_id` 稳定、checkpoint 停机窗口原文不变、旧 epoch fenced；精确 checkpoint
+  丢失只返回 replacement-required；VPS 组合故障显式 1012/unavailable 且不声称透明 failover；
+- side effects：真实 Redis duplicate finalization 的 rating settlement 与 story-impact gate invocation 均为 `1`；
+  `terminalEffectScope=invocation-gates`，当前 story-impact adapter 没有外部持久写，因此不虚报 external story write；SIGKILL 后
+  durable `producer_lost` marker/event/snapshot 一致，恢复与 retry Provider start 均为 `0`；
+- load：固定 32 Room × 4 真实 WSS × 20 transition（128 sockets / 640 计划 transition）完成；672 个 actor applied、
+  2176 个 client message 均按 workload 精确 gate，避免把额外 authority operation/fan-out 当 PASS；0 error、
+  0 slow-consumer close、0 eviction、隔离键清理后 0 remaining、foreign sentinel 保留、secret 未持久化；两次 AOF
+  `appendfsync always` 复跑总时长约 16.8/20.8 秒，只记录基线且 `serviceLevelObjective=null`；
+- safety：所有写 Redis verifier 只接受显式 `HOSTED_API_ENVIRONMENT=local|test`、loopback URL 与安全非默认 prefix，
+  production/preview/未知环境均在任何连接/SCAN/DEL 前 fail closed；未执行生产动作。完整命令、复审和回滚见
+  [GMR-10 实施与审查整改日志](../logs/2026-08-29_014921_Arena多人GMR-10运行时Hardening与退出审查整改日志.md)。
+- validation/review：API `47/470`、Web `358/1972`、Hosted runtime `57/330`、multiplayer-core `10/84`、
+  Next `188/188 pages`、root `21/211` 与最终 `pnpm ci:verify` 全部通过；architecture/authority、
+  security/compatibility/replay/data、test-adequacy/load/evidence 三路最终独立复审均为 Critical `0` /
+  Important `0` / Minor `0`。
 
 ### GMR-11 production activation review
 

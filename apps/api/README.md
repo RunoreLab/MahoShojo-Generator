@@ -59,7 +59,7 @@ Next handler 换一个入口继续加载。
 ## 容量遥测
 
 Hono 主进程启动 `HonoRuntimeTelemetry`，默认每 60 秒向 stdout 输出一行固定
-`schemaVersion=4`、`event=hono.runtime.telemetry` 的 JSON。当前快照包含：
+`schemaVersion=5`、`event=hono.runtime.telemetry` 的 JSON。当前快照包含：
 
 - process 累计 CPU 时间与采样间隔 utilization、RSS、heap used/total/limit；
 - event-loop utilization、active/idle 时间与 delay samples/mean/p99/max；
@@ -70,6 +70,9 @@ Hono 主进程启动 `HonoRuntimeTelemetry`，默认每 60 秒向 stdout 输出�
 - Redis connect/ping/rate-limit/INFO 的固定 operation/outcome 与 latency；周期 `INFO MEMORY/STATS`
   提供 used memory、eviction 和 keyspace hit/miss。Redis 未连接时只记录 `unavailable`，不伪造 round-trip latency，
   server stats 尚未采到时显式为 `not-observed`；
+- Arena Room 的 open active/resident actor、actor queue/operation latency、checkpoint operation/bytes/latency、Room socket、
+  reconnect/replay/snapshot/resync、publisher backlog/drop 与固定 incident outcome；observer 只接受低基数 union，
+  不接受 room/user/ticket/generation ID、正文、错误原文或任意 metadata，异常时 fail-soft；
 - Arena request/resume/replay bytes/snapshot、provider attempt、generation duration、D1/R2 phase、cancel、
   producer-lost、Redis 与 terminal outcome 的固定低基数计数，以及 generation duration p50/p95/p99；terminal audit
   只记录 generation ID、固定 outcome/runtime 与聚合故障事实，不记录 actor、request body、prompt、正文或凭据；
@@ -85,6 +88,13 @@ Hono 主进程启动 `HonoRuntimeTelemetry`，默认每 60 秒向 stdout 输出�
 metrics endpoint。`RESOURCE-005` 中可由 Hono 进程、Hosted 调用 seam 和 Redis client 真实观测的最小集合
 已收口；入口控制面没有注入可信 DR selection/failover reason，继续显式 `not-observed/null`，不得根据部署
 角色或错误猜测。
+
+GMR-10 的机器可读故障证据由根目录 `config/arena-room-hardening-evidence.json` 与
+`pnpm run check:arena-room-hardening` 固定为十类 drill。真实 Redis/WSS verifier 必须显式设置
+`HOSTED_API_ENVIRONMENT=local|test`、loopback `REDIS_URL`、对应 opt-in 与非默认隔离 prefix；清理只覆盖各
+verifier 声明的隔离 Room/generation namespace，且运行时拒绝 default/production/preview/local/test 等保留 prefix，
+禁止 `FLUSH*`。`verify:room-hardening-load` 的固定非生产 workload 是 32 Room × 4 个真实 WSS
+client × 20 次权威 transition；输出仅为本地容量事实，`serviceLevelObjective` 固定为 `null`，不得外推生产 SLA。
 
 Hono 执行范围只包括 machine-readable 清单中明确保留的 API；具体清单以
 `config/hono-api-routes.json` 为准。已退出的 capability 与 `/api/tachie/generate` 继续由 Next.js Route Handler 承载。

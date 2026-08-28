@@ -2,9 +2,13 @@
 
 日期：2026-08-28
 
-状态：`accepted goal / implementing`
+状态：`accepted goal / completed`
 
 实现基线：`14d0e58d`
+
+实现 checkpoints：`0684bb61`、`65bff17e`、`eb66f6d9`、`c68fcd39`
+
+审查整改 checkpoints：`c63cd9b4`、`3a0c833f`、`7cae4b7f`、`bf2bb98c`
 
 上位口径：
 
