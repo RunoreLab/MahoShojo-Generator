@@ -551,6 +551,9 @@ validate -> pure derive -> conditional checkpoint
 
 ### GMR-08 Proposal E2E
 
+实施设计与原子计划见 [GMR-08 Proposal 端到端设计](../specs/2026-08-28_143000_Arena多人GMR-08Proposal端到端设计.md)
+与 [GMR-08 Proposal 端到端实施计划](./2026-08-28_143000_Arena多人GMR-08Proposal端到端实施计划.md)。
+
 **Entry**
 
 - GMR-05、GMR-07 DONE。
