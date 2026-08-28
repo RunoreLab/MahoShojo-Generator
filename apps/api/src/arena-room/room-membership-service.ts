@@ -3,7 +3,10 @@ import { randomUUID } from 'node:crypto';
 import {
   ArenaRoomSharedConfigSchema,
   DisplayNameSchema,
+  RoomDirectoryTitleSchema,
+  RoomDirectoryVisibilitySchema,
   type ArenaRoomSharedConfig,
+  type RoomDirectoryVisibility,
   type RoomMember,
 } from '@mahoshojo/contracts/arena-room';
 import type { ArenaRoomAuthorityState } from '@mahoshojo/multiplayer-core';
@@ -12,6 +15,7 @@ import {
   RoomActor,
   RoomActorRegistry,
 } from './room-actor-registry';
+import type { ArenaRoomDirectoryService } from './room-directory-service';
 
 export type ArenaRoomMembershipErrorCode =
   | 'ROOM_CLOSED'
@@ -45,6 +49,10 @@ export type ArenaRoomMembershipService = {
     readonly accountUserId: number;
     readonly displayName: string;
     readonly sharedConfig: ArenaRoomSharedConfig;
+    readonly directory?: {
+      readonly title: string;
+      readonly visibility: RoomDirectoryVisibility;
+    };
   }): Promise<ArenaRoomMembershipView>;
   join(input: {
     readonly roomId: string;
@@ -73,7 +81,9 @@ export type ArenaRoomMembershipService = {
 export type ArenaRoomMembershipServiceOptions = {
   readonly actors: RoomActorRegistry;
   readonly createUserId?: () => string;
+  readonly directory?: Pick<ArenaRoomDirectoryService, 'registerOpen'>;
   readonly now?: () => string;
+  readonly onDirectoryError?: (error: unknown) => void;
 };
 
 const fail = (code: ArenaRoomMembershipErrorCode): never => {
@@ -99,6 +109,14 @@ export const createArenaRoomMembershipService = (
 ): ArenaRoomMembershipService => {
   const createUserId = options.createUserId ?? randomUUID;
   const now = options.now ?? (() => new Date().toISOString());
+
+  const reportDirectoryError = (error: unknown): void => {
+    try {
+      options.onDirectoryError?.(error);
+    } catch {
+      // Derived-directory diagnostics cannot alter an acknowledged Room checkpoint.
+    }
+  };
 
   const recoverOpenActor = async (roomId: string): Promise<{
     actor: RoomActor;
@@ -146,7 +164,20 @@ export const createArenaRoomMembershipService = (
     async create(input) {
       const displayName = DisplayNameSchema.safeParse(input.displayName);
       const sharedConfig = ArenaRoomSharedConfigSchema.safeParse(input.sharedConfig);
-      if (!validAccountUserId(input.accountUserId) || !displayName.success || !sharedConfig.success) {
+      const directoryTitle = input.directory === undefined
+        ? null
+        : RoomDirectoryTitleSchema.safeParse(input.directory.title);
+      const directoryVisibility = input.directory === undefined
+        ? null
+        : RoomDirectoryVisibilitySchema.safeParse(input.directory.visibility);
+      if (
+        !validAccountUserId(input.accountUserId)
+        || !displayName.success
+        || !sharedConfig.success
+        || (input.directory !== undefined && options.directory === undefined)
+        || (directoryTitle !== null && !directoryTitle.success)
+        || (directoryVisibility !== null && !directoryVisibility.success)
+      ) {
         return fail('ROOM_INPUT_INVALID');
       }
       const userId = createUserId();
@@ -162,6 +193,26 @@ export const createArenaRoomMembershipService = (
       if (!result.result.ok) return fail('ROOM_MEMBERSHIP_TRANSITION_DENIED');
       const member = result.result.nextState.snapshot.members.find((entry) => entry.userId === userId);
       if (!member) return fail('ROOM_MEMBERSHIP_TRANSITION_DENIED');
+      if (
+        options.directory !== undefined
+        && directoryTitle?.success
+        && directoryVisibility?.success
+      ) {
+        try {
+          await options.directory.registerOpen({
+            roomId: result.roomId,
+            roomEpoch: result.roomEpoch,
+            hostUserId: input.accountUserId,
+            title: directoryTitle.data,
+            visibility: directoryVisibility.data,
+            status: 'open',
+            createdAt: result.result.nextState.lifecycle.createdAt,
+            lastActivityAt: result.result.nextState.lifecycle.updatedAt,
+          });
+        } catch (error) {
+          reportDirectoryError(error);
+        }
+      }
       return view(result.roomId, result.roomEpoch, member);
     },
 

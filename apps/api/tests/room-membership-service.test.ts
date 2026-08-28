@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
   checkpointPredecessorOf,
@@ -85,6 +85,43 @@ describe('Arena Room membership service', () => {
         joinedAt: '2026-08-28T00:00:00.000Z',
       },
     });
+  });
+
+  it('create checkpoint 提交后投影公开目录，D1 失败不能反向否定 Redis 权威结果', async () => {
+    const store = new MemoryRoomStore();
+    const registry = createRoomActorRegistry({
+      store,
+      createRoomIdentity: () => ({ roomId: 'room-1', roomEpoch: 'epoch-1' }),
+      createTimestamp: () => '2026-08-28T00:00:00.000Z',
+      now: () => Date.parse('2026-08-28T00:00:00.000Z'),
+    });
+    const registerOpen = vi.fn(async () => { throw new Error('d1 unavailable'); });
+    const onDirectoryError = vi.fn(() => { throw new Error('observer unavailable'); });
+    const service = createArenaRoomMembershipService({
+      actors: registry,
+      createUserId: () => 'host-1',
+      directory: { registerOpen },
+      onDirectoryError,
+    });
+
+    await expect(service.create({
+      accountUserId: 101,
+      displayName: 'Host',
+      sharedConfig: createArenaRoomState().snapshot.sharedConfig,
+      directory: { title: '公开测试房', visibility: 'public' },
+    })).resolves.toMatchObject({ roomId: 'room-1', roomEpoch: 'epoch-1' });
+    expect(registerOpen).toHaveBeenCalledWith({
+      roomId: 'room-1',
+      roomEpoch: 'epoch-1',
+      hostUserId: 101,
+      title: '公开测试房',
+      visibility: 'public',
+      status: 'open',
+      createdAt: '2026-08-28T00:00:00.000Z',
+      lastActivityAt: '2026-08-28T00:00:00.000Z',
+    });
+    expect(onDirectoryError).toHaveBeenCalledOnce();
+    expect(store.state?.lifecycle.status).toBe('open');
   });
 
   it('同一 account multi-tab join 复用一个 membership，不重复 member', async () => {

@@ -5,6 +5,8 @@ import { configureDefaultNodeHostedD1ClientResolver } from '@mahoshojo/hosted-ru
 import { createHonoApp } from '#/app';
 import { readHonoServerConfig } from '#/config';
 import { configureHonoArenaGenerationRuntime } from '#/arena-generation/runtime';
+import { createD1RoomDirectoryStore } from '#/arena-room/d1-room-directory-store';
+import { createArenaRoomDirectoryService } from '#/arena-room/room-directory-service';
 import { createRoomActorRegistry } from '#/arena-room/room-actor-registry';
 import { createArenaRoomMembershipService } from '#/arena-room/room-membership-service';
 import {
@@ -54,14 +56,29 @@ if (process.env.HONO_CONFIG_CHECK_ONLY === 'true') {
   await redis.connect();
   configureDefaultNodeHostedD1ClientResolver(getHonoPrimaryD1Client);
   configureHonoArenaGenerationRuntime(redis, { observer: telemetry });
-  const roomActors = createRoomActorRegistry({
-    store: redis.getRoomStore(),
+  const roomStore = redis.getRoomStore();
+  const roomDirectory = createArenaRoomDirectoryService({
+    authority: roomStore,
+    store: createD1RoomDirectoryStore({ getClient: getHonoPrimaryD1Client }),
     onBackgroundError: () => {
-      console.error('[hono][room-actor] idle sweep failed');
+      console.error('[hono][room-directory] derived cleanup failed');
+    },
+  });
+  const roomActors = createRoomActorRegistry({
+    store: roomStore,
+    onCommittedClosed: (state) => roomDirectory.removeCommittedClosed(state),
+    onBackgroundError: () => {
+      console.error('[hono][room-actor] background task failed');
     },
   });
   roomActors.startIdleSweeper();
-  const roomMemberships = createArenaRoomMembershipService({ actors: roomActors });
+  const roomMemberships = createArenaRoomMembershipService({
+    actors: roomActors,
+    directory: roomDirectory,
+    onDirectoryError: () => {
+      console.error('[hono][room-directory] create projection failed');
+    },
+  });
   const roomWebSocketAuthority = config.arenaMultiplayerEnabled
     ? createArenaRoomWebSocketAuthority({
         actors: roomActors,

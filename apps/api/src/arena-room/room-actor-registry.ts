@@ -77,6 +77,27 @@ const cloneState = (state: ArenaRoomAuthorityState): ArenaRoomAuthorityState => 
   parseArenaRoomAuthorityState(state)
 );
 
+const reportCommittedClosed = (
+  state: ArenaRoomAuthorityState,
+  onCommittedClosed: ((state: ArenaRoomAuthorityState) => void | Promise<void>) | undefined,
+  onBackgroundError: (error: unknown) => void,
+): void => {
+  if (state.lifecycle.status !== 'closed' || onCommittedClosed === undefined) return;
+  const report = (error: unknown): void => {
+    try {
+      onBackgroundError(error);
+    } catch {
+      // Projection diagnostics cannot alter an acknowledged Room checkpoint.
+    }
+  };
+  try {
+    const completion = onCommittedClosed(cloneState(state));
+    if (completion !== undefined) void Promise.resolve(completion).catch(report);
+  } catch (error) {
+    report(error);
+  }
+};
+
 const sameState = (
   left: ArenaRoomAuthorityState | null,
   right: ArenaRoomAuthorityState | null,
@@ -200,6 +221,7 @@ export class RoomActor {
       readonly onFenced: (actor: RoomActor) => void;
       readonly onSubscriberError: (error: unknown) => void;
       readonly onBackgroundError: (error: unknown) => void;
+      readonly onCommittedClosed?: (state: ArenaRoomAuthorityState) => void | Promise<void>;
       readonly quotaCloseTimestamp: () => string;
       readonly store: RoomActorCheckpointStore;
     },
@@ -507,6 +529,11 @@ export class RoomActor {
     this.lastCheckpointRefreshAt = this.options.now();
     this.rememberReplay(transition.events);
     this.fanout(transition);
+    reportCommittedClosed(
+      this.state,
+      this.options.onCommittedClosed,
+      this.options.onBackgroundError,
+    );
     return transition;
   }
 
@@ -544,6 +571,11 @@ export class RoomActor {
     this.lastCheckpointRefreshAt = this.options.now();
     this.rememberReplay(transition.events);
     this.fanout(transition);
+    reportCommittedClosed(
+      this.state,
+      this.options.onCommittedClosed,
+      this.options.onBackgroundError,
+    );
     return true;
   }
 
@@ -601,6 +633,11 @@ export class RoomActor {
     this.quotaExhaustedReason = null;
     this.rememberReplay(transition.events);
     this.fanout(transition);
+    reportCommittedClosed(
+      this.state,
+      this.options.onCommittedClosed,
+      this.options.onBackgroundError,
+    );
   }
 
   private createSnapshotEvent(): ControlRoomEvent {
@@ -696,6 +733,7 @@ export type RoomActorRegistryOptions = {
   readonly quotaCloseTimestamp?: () => string;
   readonly onSubscriberError?: (error: unknown) => void;
   readonly onBackgroundError?: (error: unknown) => void;
+  readonly onCommittedClosed?: (state: ArenaRoomAuthorityState) => void | Promise<void>;
 };
 
 export type RoomActorRegistryExecuteInput = RoomActorExecuteInput & {
@@ -977,6 +1015,11 @@ export class RoomActorRegistry {
     if (checkpoint.lifecycle.status === 'closed') {
       const actor = this.createActor(roomId, checkpoint);
       this.actors.set(roomId, actor);
+      reportCommittedClosed(
+        checkpoint,
+        this.options.onCommittedClosed,
+        this.options.onBackgroundError ?? (() => undefined),
+      );
       return actor;
     }
     const now = this.now();
@@ -1007,6 +1050,11 @@ export class RoomActorRegistry {
       this.requireAccepting();
       const actor = this.createActor(roomId, transition.nextState, transition.events);
       this.actors.set(roomId, actor);
+      reportCommittedClosed(
+        transition.nextState,
+        this.options.onCommittedClosed,
+        this.options.onBackgroundError ?? (() => undefined),
+      );
       return actor;
     }
     const previousRoomEpoch = checkpoint.snapshot.roomEpoch;
@@ -1083,6 +1131,7 @@ export class RoomActorRegistry {
       },
       onSubscriberError: this.options.onSubscriberError ?? (() => undefined),
       onBackgroundError: this.options.onBackgroundError ?? (() => undefined),
+      onCommittedClosed: this.options.onCommittedClosed,
       quotaCloseTimestamp: this.options.quotaCloseTimestamp ?? (() => new Date().toISOString()),
       store: this.options.store,
     });

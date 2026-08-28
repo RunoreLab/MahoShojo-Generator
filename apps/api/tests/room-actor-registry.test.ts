@@ -509,6 +509,48 @@ describe('RoomActorRegistry', () => {
     expect(store.state?.snapshot.roomEpoch).toBe('epoch-1');
   });
 
+  it('只在 terminal checkpoint 提交后通知派生目录，observer 失败不反向改变 close', async () => {
+    const store = new MemoryRoomStore();
+    const onCommittedClosed = vi.fn<(state: ArenaRoomAuthorityState) => Promise<void>>(
+      async () => { throw new Error('d1 unavailable'); },
+    );
+    const onBackgroundError = vi.fn(() => { throw new Error('observer unavailable'); });
+    const registry = createRoomActorRegistry({ store, onCommittedClosed, onBackgroundError });
+    await createActorRoom(registry);
+
+    store.saveFailure = new Error('redis unavailable');
+    await expect(registry.execute({
+      roomId: 'room-1',
+      command: {
+        type: 'close',
+        expectedRoomEpoch: 'epoch-1',
+        reason: 'must-not-project-before-commit',
+        timestamp: ARENA_ROOM_NEXT_TIMESTAMP,
+      },
+      authority: hostAuthority,
+    })).rejects.toThrow('redis unavailable');
+    expect(onCommittedClosed).not.toHaveBeenCalled();
+
+    store.saveFailure = undefined;
+    await expect(registry.execute({
+      roomId: 'room-1',
+      command: {
+        type: 'close',
+        expectedRoomEpoch: 'epoch-1',
+        reason: 'terminal-projection-test',
+        timestamp: ARENA_ROOM_NEXT_TIMESTAMP,
+      },
+      authority: hostAuthority,
+    })).resolves.toMatchObject({ ok: true, kind: 'applied' });
+    await vi.waitFor(() => expect(onCommittedClosed).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(onBackgroundError).toHaveBeenCalledOnce());
+    expect(onCommittedClosed.mock.calls[0]?.[0]).toMatchObject({
+      snapshot: { roomId: 'room-1', roomEpoch: 'epoch-1' },
+      lifecycle: { status: 'closed' },
+    });
+    expect(store.state?.lifecycle.status).toBe('closed');
+  });
+
   it('exact replay quota 耗尽时以 opaque runtime capability checkpoint close，原请求稳定 fail closed', async () => {
     const store = new MemoryRoomStore();
     store.state = generationExhaustedState();
@@ -1217,11 +1259,13 @@ describe('RoomActorRegistry', () => {
     const seed = createRoomActorRegistry({ store });
     await createActorRoom(seed);
     await seed.shutdown();
+    const onCommittedClosed = vi.fn<(state: ArenaRoomAuthorityState) => void>();
     const registry = createRoomActorRegistry({
       store,
       now: () => Date.parse('2026-08-28T00:46:00.000Z'),
       createRoomEpoch: () => 'epoch-2',
       recoveryTimestamp: () => '2026-08-28T00:46:00.000Z',
+      onCommittedClosed,
     });
 
     const actor = await registry.recover('room-1');
@@ -1229,6 +1273,10 @@ describe('RoomActorRegistry', () => {
       lifecycle: { status: 'closed', closeReason: 'host-offline-timeout' },
       snapshot: { roomEpoch: 'epoch-1' },
     });
+    expect(onCommittedClosed).toHaveBeenCalledWith(expect.objectContaining({
+      snapshot: expect.objectContaining({ roomEpoch: 'epoch-1' }),
+      lifecycle: expect.objectContaining({ status: 'closed' }),
+    }));
   });
 
   it('低频 process refresh 仅刷新 exact active checkpoint，missing/conflict 会 fence actor', async () => {

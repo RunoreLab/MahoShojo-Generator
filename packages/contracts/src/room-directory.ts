@@ -9,6 +9,8 @@ export const MAX_ROOM_DIRECTORY_PAGE_SIZE = 50;
 
 export const RoomDirectoryVisibilitySchema = z.enum(['public', 'unlisted']);
 export const RoomDirectoryStatusSchema = z.literal('open');
+export const RoomDirectoryTitleSchema = z.string().trim().min(1)
+  .max(MAX_ROOM_DIRECTORY_TITLE_LENGTH);
 export const RoomDirectoryCursorSchema = z
   .string()
   .regex(/^[A-Za-z0-9_-]+$/u)
@@ -16,7 +18,7 @@ export const RoomDirectoryCursorSchema = z
 
 export const RoomDirectoryEntrySchema = z.object({
   roomId: OpaqueKeySchema,
-  title: z.string().trim().min(1).max(MAX_ROOM_DIRECTORY_TITLE_LENGTH),
+  title: RoomDirectoryTitleSchema,
   visibility: RoomDirectoryVisibilitySchema,
   status: RoomDirectoryStatusSchema,
   createdAt: IsoTimestampSchema,
