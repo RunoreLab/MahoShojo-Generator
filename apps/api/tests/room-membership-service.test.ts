@@ -66,6 +66,55 @@ const createHarness = () => {
 };
 
 describe('Arena Room membership service', () => {
+  it('只暴露安全 session snapshot，host close 使用固定 lifecycle seam', async () => {
+    const { service, store } = createHarness();
+    const created = await service.create({
+      accountUserId: 101,
+      displayName: 'Host',
+      sharedConfig: createArenaRoomState().snapshot.sharedConfig,
+    });
+
+    const session = await service.getSession({
+      roomId: created.roomId,
+      accountUserId: 101,
+    });
+    expect(session).toMatchObject({
+      roomId: created.roomId,
+      roomEpoch: created.roomEpoch,
+      member: { role: 'host' },
+      snapshot: { roomId: created.roomId, members: [{ role: 'host' }] },
+    });
+    expect(Object.keys(session).sort()).toEqual(['member', 'roomEpoch', 'roomId', 'snapshot']);
+    await expect(service.close({
+      roomId: created.roomId,
+      accountUserId: 101,
+    })).resolves.toMatchObject({ member: { role: 'host' } });
+    expect(store.state?.lifecycle.status).toBe('closed');
+    await expect(service.close({
+      roomId: created.roomId,
+      accountUserId: 101,
+    })).resolves.toMatchObject({ member: { role: 'host' } });
+  });
+
+  it('member 不能调用 host close seam', async () => {
+    const { service } = createHarness();
+    const created = await service.create({
+      accountUserId: 101,
+      displayName: 'Host',
+      sharedConfig: createArenaRoomState().snapshot.sharedConfig,
+    });
+    await service.join({
+      roomId: created.roomId,
+      accountUserId: 202,
+      displayName: 'Member',
+    });
+
+    await expect(service.close({
+      roomId: created.roomId,
+      accountUserId: 202,
+    })).rejects.toMatchObject({ code: 'ROOM_PERMISSION_DENIED' });
+  });
+
   it('create 的 room/user/role/joinedAt 都由 server-owned service 归一化', async () => {
     const { service } = createHarness();
     const created = await service.create({

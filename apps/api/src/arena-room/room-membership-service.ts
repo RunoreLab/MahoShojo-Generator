@@ -6,6 +6,7 @@ import {
   RoomDirectoryTitleSchema,
   RoomDirectoryVisibilitySchema,
   type ArenaRoomSharedConfig,
+  type ArenaRoomSnapshot,
   type RoomDirectoryVisibility,
   type RoomMember,
 } from '@mahoshojo/contracts/arena-room';
@@ -23,6 +24,7 @@ export type ArenaRoomMembershipErrorCode =
   | 'ROOM_MEMBERSHIP_NOT_ACTIVE'
   | 'ROOM_MEMBERSHIP_REVOKED'
   | 'ROOM_MEMBERSHIP_TRANSITION_DENIED'
+  | 'ROOM_PERMISSION_DENIED'
   | 'ROOM_NOT_FOUND';
 
 export class ArenaRoomMembershipError extends Error {
@@ -44,6 +46,10 @@ export type ResolvedArenaRoomMembership = ArenaRoomMembershipView & {
   readonly state: ArenaRoomAuthorityState;
 };
 
+export type ArenaRoomSessionView = ArenaRoomMembershipView & {
+  readonly snapshot: ArenaRoomSnapshot;
+};
+
 export type ArenaRoomMembershipService = {
   create(input: {
     readonly accountUserId: number;
@@ -63,6 +69,10 @@ export type ArenaRoomMembershipService = {
     readonly roomId: string;
     readonly accountUserId: number;
   }): Promise<ArenaRoomMembershipView>;
+  close(input: {
+    readonly roomId: string;
+    readonly accountUserId: number;
+  }): Promise<ArenaRoomMembershipView>;
   kick(input: {
     readonly roomId: string;
     readonly accountUserId: number;
@@ -76,6 +86,10 @@ export type ArenaRoomMembershipService = {
     readonly roomId: string;
     readonly userId: string;
   }): Promise<ResolvedArenaRoomMembership>;
+  getSession(input: {
+    readonly roomId: string;
+    readonly accountUserId: number;
+  }): Promise<ArenaRoomSessionView>;
 };
 
 export type ArenaRoomMembershipServiceOptions = {
@@ -118,7 +132,7 @@ export const createArenaRoomMembershipService = (
     }
   };
 
-  const recoverOpenActor = async (roomId: string): Promise<{
+  const recoverActor = async (roomId: string): Promise<{
     actor: RoomActor;
     state: ArenaRoomAuthorityState;
   }> => {
@@ -129,6 +143,14 @@ export const createArenaRoomMembershipService = (
     if (!actor) return fail('ROOM_NOT_FOUND');
     const state = actor.getSnapshot();
     if (!state) return fail('ROOM_NOT_FOUND');
+    return { actor, state };
+  };
+
+  const recoverOpenActor = async (roomId: string): Promise<{
+    actor: RoomActor;
+    state: ArenaRoomAuthorityState;
+  }> => {
+    const { actor, state } = await recoverActor(roomId);
     if (state.lifecycle.status === 'closed') return fail('ROOM_CLOSED');
     return { actor, state };
   };
@@ -297,6 +319,33 @@ export const createArenaRoomMembershipService = (
       return view(input.roomId, result.nextState.snapshot.roomEpoch, current);
     },
 
+    async close(input) {
+      if (!validAccountUserId(input.accountUserId)) return fail('ROOM_INPUT_INVALID');
+      const { actor, state } = await recoverActor(input.roomId);
+      const record = activeRecordByAccount(state, input.accountUserId);
+      if (!record || record.member.membershipState !== 'active') {
+        return fail('ROOM_MEMBERSHIP_NOT_ACTIVE');
+      }
+      if (record.member.role !== 'host') return fail('ROOM_PERMISSION_DENIED');
+      if (state.lifecycle.status === 'closed') {
+        return view(input.roomId, state.snapshot.roomEpoch, record.member);
+      }
+      const result = await actor.execute({
+        authority: {
+          kind: 'authenticated-user',
+          actorUserId: record.member.userId,
+          accountUserId: input.accountUserId,
+        },
+        command: {
+          type: 'leave-member',
+          expectedRoomEpoch: state.snapshot.roomEpoch,
+          timestamp: now(),
+        },
+      });
+      if (!result.ok) return fail('ROOM_MEMBERSHIP_TRANSITION_DENIED');
+      return view(input.roomId, result.nextState.snapshot.roomEpoch, record.member);
+    },
+
     async kick(input) {
       if (!validAccountUserId(input.accountUserId)) return fail('ROOM_INPUT_INVALID');
       const { actor, state } = await recoverOpenActor(input.roomId);
@@ -333,6 +382,15 @@ export const createArenaRoomMembershipService = (
 
     async resolveActiveByUser(input) {
       return resolveRecord(input);
+    },
+
+    async getSession(input) {
+      if (!validAccountUserId(input.accountUserId)) return fail('ROOM_INPUT_INVALID');
+      const membership = await resolveRecord(input);
+      return {
+        ...view(membership.roomId, membership.roomEpoch, membership.member),
+        snapshot: structuredClone(membership.state.snapshot),
+      };
     },
   });
 };
