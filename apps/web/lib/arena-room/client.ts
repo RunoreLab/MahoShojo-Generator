@@ -2,6 +2,8 @@ import {
   ARENA_ROOM_HTTP_BASE_PATH,
   ArenaRoomCreateRequestSchema,
   ArenaRoomEpochMutationRequestSchema,
+  ArenaRoomGenerationStartRequestSchema,
+  ArenaRoomGenerationViewResponseSchema,
   ArenaRoomHttpErrorResponseSchema,
   ArenaRoomJoinRequestSchema,
   ArenaRoomLeaveResponseSchema,
@@ -15,6 +17,8 @@ import {
   RoomDirectoryPageQuerySchema,
   RoomDirectoryPageSchema,
   type ArenaRoomCreateRequest,
+  type ArenaRoomGenerationStartRequest,
+  type ArenaRoomGenerationViewResponse,
   type ArenaRoomJoinRequest,
   type ArenaRoomLeaveResponse,
   type ArenaRoomProposalMutationResponse,
@@ -70,6 +74,14 @@ export type ArenaRoomClient = {
     proposalId: string,
     expectedRoomEpoch: string,
   ): Promise<ArenaRoomProposalMutationResponse>;
+  startGeneration(
+    roomId: string,
+    request: ArenaRoomGenerationStartRequest,
+  ): Promise<ArenaRoomGenerationViewResponse>;
+  getGenerationView(
+    roomId: string,
+    generationId: string,
+  ): Promise<ArenaRoomGenerationViewResponse>;
   buildWebSocketUrl(ticket: ArenaRoomTicketResponse): string;
 };
 
@@ -187,6 +199,24 @@ export const createArenaRoomClient = (options: ClientOptions): ArenaRoomClient =
     pathFor(roomId, `proposals/${encodeURIComponent(proposalId)}/${suffix}`)
   );
 
+  const assertGenerationViewIdentity = (
+    view: ArenaRoomGenerationViewResponse,
+    roomId: string,
+    generationId?: string,
+  ): ArenaRoomGenerationViewResponse => {
+    if (
+      view.roomId !== roomId
+      || (generationId !== undefined && view.generation.generationId !== generationId)
+    ) {
+      throw new ArenaRoomClientError(
+        'ROOM_RESPONSE_INVALID',
+        null,
+        '房间服务返回了无效响应',
+      );
+    }
+    return view;
+  };
+
   return Object.freeze({
     async discover(input = {}) {
       const query = RoomDirectoryPageQuerySchema.parse(input);
@@ -280,6 +310,37 @@ export const createArenaRoomClient = (options: ClientOptions): ArenaRoomClient =
         schema: ArenaRoomProposalMutationResponseSchema,
         unknownResult: true,
       });
+    },
+
+    async startGeneration(roomId, input) {
+      const parsed = ArenaRoomGenerationStartRequestSchema.parse(input);
+      const view = await request({
+        path: pathFor(roomId, 'generations'),
+        method: 'POST',
+        body: parsed,
+        schema: ArenaRoomGenerationViewResponseSchema,
+        unknownResult: true,
+      });
+      if (
+        view.roomId !== roomId
+        || view.roomEpoch !== parsed.expectedRoomEpoch
+        || view.generation.generationRequestId !== parsed.generationRequestId
+      ) {
+        throw new ArenaRoomClientError(
+          'ROOM_RESULT_UNKNOWN',
+          null,
+          '请求可能已提交，请先确认房间状态，不要重复提交',
+        );
+      }
+      return view;
+    },
+
+    async getGenerationView(roomId, generationId) {
+      const view = await request({
+        path: pathFor(roomId, `generations/${encodeURIComponent(generationId)}`),
+        schema: ArenaRoomGenerationViewResponseSchema,
+      });
+      return assertGenerationViewIdentity(view, roomId, generationId);
     },
 
     buildWebSocketUrl(ticket) {

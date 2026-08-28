@@ -65,6 +65,40 @@ const session = {
   snapshot,
 };
 
+const generationMirror = {
+  generationRequestId: 'request-12345678',
+  generationId: 'generation-1',
+  attempt: 1,
+  state: 'running' as const,
+  configRevision: 0,
+  snapshotDigest: 'sha256:generation-snapshot',
+  collaborativeInfluence: true,
+  participantUserIds: [1],
+  startedAt: '2026-08-28T00:01:00.000Z',
+};
+
+const generationView = {
+  protocolVersion: 1 as const,
+  roomId: 'room-1',
+  roomEpoch: 'epoch-1',
+  generation: generationMirror,
+  status: 'running' as const,
+  markdown: '权威基线',
+  nextChunkSeq: 0,
+  finalAuthoritative: false,
+};
+
+const generationStartRequest = {
+  expectedRoomEpoch: 'epoch-1',
+  expectedRevision: 0,
+  generationRequestId: 'request-12345678',
+  sharedConfig,
+  generation: {
+    prompt: '完整生成请求',
+    providerCredential: 'test-secret-canary',
+  },
+};
+
 class FakeSocket implements ArenaRoomSocket {
   onopen: (() => void) | null = null;
   onmessage: ((event: { data: unknown }) => void) | null = null;
@@ -136,6 +170,8 @@ const createHarness = () => {
       status: 'withdrawn' as const,
       result: 'applied' as const,
     })),
+    startGeneration: vi.fn(async () => generationView),
+    getGenerationView: vi.fn(async () => generationView),
     buildWebSocketUrl: vi.fn((issued) => `wss://room.test/ws?ticket=${issued.ticket}`),
   };
   const sockets: FakeSocket[] = [];
@@ -707,6 +743,481 @@ describe('Arena Room browser controller', () => {
       phase: 'replacement',
       notice: '原房间无法恢复，请房主创建新房间',
     });
+  });
+
+  it('只有 host 显式 start，完整 payload 不进入 controller state，unknown 后锁定重复 POST', async () => {
+    const host = createHarness();
+    await host.controller.create({
+      displayName: '房主',
+      directory: { title: '测试房', visibility: 'public' },
+      sharedConfig,
+    });
+    host.sockets[0]!.open();
+    await host.controller.startGeneration(generationStartRequest);
+
+    expect(host.client.startGeneration).toHaveBeenCalledOnce();
+    expect(host.client.startGeneration).toHaveBeenCalledWith('room-1', generationStartRequest);
+    expect(host.controller.getSnapshot().generation).toMatchObject({
+      phase: 'running',
+      mirror: generationMirror,
+      status: 'running',
+      markdown: '权威基线',
+      finalAuthoritative: false,
+      startResultUnknown: false,
+    });
+    expect(JSON.stringify(host.controller.getSnapshot())).not.toContain('test-secret-canary');
+
+    const unknown = createHarness();
+    vi.mocked(unknown.client.startGeneration).mockRejectedValueOnce(new ArenaRoomClientError(
+      'ROOM_RESULT_UNKNOWN',
+      503,
+      '请求可能已提交，请先确认房间状态，不要重复提交',
+    ));
+    await unknown.controller.create({
+      displayName: '房主',
+      directory: { title: '测试房', visibility: 'public' },
+      sharedConfig,
+    });
+    unknown.sockets[0]!.open();
+    await unknown.controller.startGeneration(generationStartRequest);
+    unknown.sockets[0]!.message(JSON.stringify({
+      protocolVersion: 1,
+      roomId: 'room-1',
+      roomEpoch: 'epoch-1',
+      controlSeq: 1,
+      timestamp: '2026-08-28T00:02:00.000Z',
+      type: 'room.snapshot',
+      payload: { ...snapshot, controlSeq: 1 },
+    }));
+    await unknown.controller.startGeneration(generationStartRequest);
+    unknown.controller.reconnect();
+
+    expect(unknown.client.startGeneration).toHaveBeenCalledOnce();
+    expect(unknown.controller.getSnapshot().generation).toMatchObject({
+      phase: 'unknown',
+      pendingRequestId: 'request-12345678',
+      startResultUnknown: true,
+    });
+
+    const member = createHarness();
+    vi.mocked(member.client.join).mockResolvedValueOnce({
+      ...session,
+      self: {
+        userId: 'user-member',
+        role: 'member',
+        displayName: '成员',
+        membershipState: 'active',
+      },
+      snapshot: {
+        ...snapshot,
+        members: [
+          snapshot.members[0]!,
+          {
+            userId: 'user-member',
+            role: 'member',
+            displayName: '成员',
+            membershipState: 'active',
+          },
+        ],
+      },
+    });
+    await member.controller.join('room-1', '成员');
+    await member.controller.startGeneration(generationStartRequest);
+    expect(member.client.startGeneration).not.toHaveBeenCalled();
+  });
+
+  it('start response 绑定 pending host config 时同步已 checkpoint 的 revision/config，不覆盖更新状态', async () => {
+    const host = createHarness();
+    const pendingConfig = { ...sharedConfig, userGuidance: '最终房主配置' };
+    vi.mocked(host.client.startGeneration).mockResolvedValueOnce({
+      ...generationView,
+      generation: { ...generationMirror, configRevision: 1 },
+    });
+    await host.controller.create({
+      displayName: '房主',
+      directory: { title: '测试房', visibility: 'public' },
+      sharedConfig,
+    });
+    await host.controller.startGeneration({
+      ...generationStartRequest,
+      sharedConfig: pendingConfig,
+    });
+    expect(host.controller.getSnapshot().session?.snapshot).toMatchObject({
+      revision: 1,
+      sharedConfig: pendingConfig,
+      activeGeneration: { generationId: 'generation-1', configRevision: 1 },
+    });
+  });
+
+  it('story 仅接受 0-based contiguous chunk，忽略重复并在 gap 冻结后 single-flight GET', async () => {
+    const { client, controller, sockets } = createHarness();
+    let resolveRecovery!: (value: typeof generationView) => void;
+    vi.mocked(client.getGenerationView).mockImplementation(() => new Promise((resolve) => {
+      resolveRecovery = resolve;
+    }));
+    await controller.create({
+      displayName: '房主',
+      directory: { title: '测试房', visibility: 'public' },
+      sharedConfig,
+    });
+    sockets[0]!.open();
+    sockets[0]!.message(JSON.stringify({
+      protocolVersion: 1,
+      roomId: 'room-1',
+      roomEpoch: 'epoch-1',
+      controlSeq: 1,
+      timestamp: '2026-08-28T00:01:00.000Z',
+      type: 'generation.started',
+      payload: {
+        generationRequestId: generationMirror.generationRequestId,
+        generationId: generationMirror.generationId,
+        attempt: generationMirror.attempt,
+        configRevision: generationMirror.configRevision,
+        snapshotDigest: generationMirror.snapshotDigest,
+        collaborativeInfluence: generationMirror.collaborativeInfluence,
+        participantUserIds: generationMirror.participantUserIds,
+      },
+    }));
+    const story = (chunkSeq: number, delta: string) => JSON.stringify({
+      protocolVersion: 1,
+      type: 'story.delta',
+      roomId: 'room-1',
+      roomEpoch: 'epoch-1',
+      generationId: 'generation-1',
+      chunkSeq,
+      timestamp: '2026-08-28T00:02:00.000Z',
+      payload: { delta },
+    });
+    sockets[0]!.message(story(0, 'A'));
+    sockets[0]!.message(story(0, '重复'));
+    sockets[0]!.message(story(1, 'B'));
+    expect(controller.getSnapshot().generation).toMatchObject({
+      markdown: 'AB',
+      storyCursor: { generationId: 'generation-1', chunkSeq: 1 },
+      gap: null,
+    });
+
+    sockets[0]!.message(story(3, '跳号'));
+    sockets[0]!.message(story(4, '继续跳号'));
+    sockets[0]!.message(JSON.stringify({
+      protocolVersion: 1,
+      type: 'room.resync.required',
+      reason: 'replay-unavailable',
+    }));
+    expect(controller.getSnapshot().generation).toMatchObject({
+      phase: 'resyncing',
+      markdown: 'AB',
+      gap: {
+        generationId: 'generation-1',
+        expectedChunkSeq: 2,
+        receivedChunkSeq: 3,
+      },
+    });
+    expect(client.getGenerationView).toHaveBeenCalledOnce();
+
+    resolveRecovery({
+      ...generationView,
+      markdown: '权威全文',
+      nextChunkSeq: 4,
+    });
+    await vi.waitFor(() => expect(controller.getSnapshot().generation).toMatchObject({
+      phase: 'running',
+      markdown: '权威全文',
+      authoritativeMarkdown: '权威全文',
+      storyCursor: { generationId: 'generation-1', chunkSeq: 3 },
+      gap: null,
+    }));
+  });
+
+  it('terminal control 先更新 mirror，再由权威 GET 恢复最终 markdown', async () => {
+    const { client, controller, sockets } = createHarness();
+    let resolveRecovery!: (value: typeof generationView) => void;
+    vi.mocked(client.getGenerationView).mockImplementation(() => new Promise((resolve) => {
+      resolveRecovery = resolve;
+    }));
+    await controller.create({
+      displayName: '房主',
+      directory: { title: '测试房', visibility: 'public' },
+      sharedConfig,
+    });
+    sockets[0]!.open();
+    sockets[0]!.message(JSON.stringify({
+      protocolVersion: 1,
+      roomId: 'room-1',
+      roomEpoch: 'epoch-1',
+      controlSeq: 1,
+      timestamp: '2026-08-28T00:01:00.000Z',
+      type: 'generation.started',
+      payload: {
+        generationRequestId: generationMirror.generationRequestId,
+        generationId: generationMirror.generationId,
+        attempt: generationMirror.attempt,
+        configRevision: generationMirror.configRevision,
+        snapshotDigest: generationMirror.snapshotDigest,
+        collaborativeInfluence: generationMirror.collaborativeInfluence,
+        participantUserIds: generationMirror.participantUserIds,
+      },
+    }));
+    sockets[0]!.message(JSON.stringify({
+      protocolVersion: 1,
+      roomId: 'room-1',
+      roomEpoch: 'epoch-1',
+      controlSeq: 2,
+      timestamp: '2026-08-28T00:03:00.000Z',
+      type: 'generation.completed',
+      payload: {
+        generationRequestId: generationMirror.generationRequestId,
+        generationId: generationMirror.generationId,
+        attempt: generationMirror.attempt,
+        configRevision: generationMirror.configRevision,
+        snapshotDigest: generationMirror.snapshotDigest,
+        collaborativeInfluence: generationMirror.collaborativeInfluence,
+        participantUserIds: generationMirror.participantUserIds,
+        generationRecordId: 'record-1',
+      },
+    }));
+
+    expect(controller.getSnapshot().session?.snapshot.activeGeneration).toMatchObject({
+      generationId: 'generation-1',
+      state: 'completed',
+    });
+    expect(controller.getSnapshot().generation).toMatchObject({
+      phase: 'resyncing',
+      finalAuthoritative: false,
+    });
+    expect(client.getGenerationView).toHaveBeenCalledOnce();
+
+    resolveRecovery({
+      ...generationView,
+      generation: {
+        ...generationMirror,
+        state: 'completed',
+        finishedAt: '2026-08-28T00:03:00.000Z',
+      },
+      status: 'completed',
+      markdown: '# 最终权威报告',
+      nextChunkSeq: 2,
+      finalAuthoritative: true,
+      generationRecordId: 'record-1',
+    });
+    await vi.waitFor(() => expect(controller.getSnapshot().generation).toMatchObject({
+      phase: 'completed',
+      status: 'completed',
+      markdown: '# 最终权威报告',
+      finalAuthoritative: true,
+      generationRecordId: 'record-1',
+    }));
+  });
+
+  it('terminal 使同 attempt 的旧 GET 失效，并在 single-flight 后补一次权威终态 GET', async () => {
+    const { client, controller, sockets } = createHarness();
+    const recoveryResolvers: Array<(value: typeof generationView) => void> = [];
+    vi.mocked(client.getGenerationView).mockImplementation(() => new Promise((resolve) => {
+      recoveryResolvers.push(resolve);
+    }));
+    await controller.create({
+      displayName: '房主',
+      directory: { title: '测试房', visibility: 'public' },
+      sharedConfig,
+    });
+    sockets[0]!.open();
+    const payload = {
+      generationRequestId: generationMirror.generationRequestId,
+      generationId: generationMirror.generationId,
+      attempt: generationMirror.attempt,
+      configRevision: generationMirror.configRevision,
+      snapshotDigest: generationMirror.snapshotDigest,
+      collaborativeInfluence: generationMirror.collaborativeInfluence,
+      participantUserIds: generationMirror.participantUserIds,
+    };
+    sockets[0]!.message(JSON.stringify({
+      protocolVersion: 1,
+      roomId: 'room-1',
+      roomEpoch: 'epoch-1',
+      controlSeq: 1,
+      timestamp: '2026-08-28T00:01:00.000Z',
+      type: 'generation.started',
+      payload,
+    }));
+    sockets[0]!.message(JSON.stringify({
+      protocolVersion: 1,
+      type: 'story.delta',
+      roomId: 'room-1',
+      roomEpoch: 'epoch-1',
+      generationId: 'generation-1',
+      chunkSeq: 2,
+      timestamp: '2026-08-28T00:02:00.000Z',
+      payload: { delta: '跳号' },
+    }));
+    expect(client.getGenerationView).toHaveBeenCalledOnce();
+
+    sockets[0]!.message(JSON.stringify({
+      protocolVersion: 1,
+      roomId: 'room-1',
+      roomEpoch: 'epoch-1',
+      controlSeq: 2,
+      timestamp: '2026-08-28T00:03:00.000Z',
+      type: 'generation.completed',
+      payload: { ...payload, generationRecordId: 'record-1' },
+    }));
+    expect(client.getGenerationView).toHaveBeenCalledOnce();
+
+    recoveryResolvers[0]!({
+      ...generationView,
+      markdown: '过期运行中基线',
+      nextChunkSeq: 3,
+    });
+    await vi.waitFor(() => expect(client.getGenerationView).toHaveBeenCalledTimes(2));
+    expect(controller.getSnapshot().generation.markdown).not.toBe('过期运行中基线');
+
+    recoveryResolvers[1]!({
+      ...generationView,
+      generation: {
+        ...generationMirror,
+        state: 'completed',
+        finishedAt: '2026-08-28T00:03:00.000Z',
+      },
+      status: 'completed',
+      markdown: '# 最终权威报告',
+      nextChunkSeq: 3,
+      finalAuthoritative: true,
+      generationRecordId: 'record-1',
+    });
+    await vi.waitFor(() => expect(controller.getSnapshot().generation).toMatchObject({
+      phase: 'completed',
+      markdown: '# 最终权威报告',
+      finalAuthoritative: true,
+    }));
+  });
+
+  it('generation GET 响应受 roomEpoch/generationId/dispose fence 约束', async () => {
+    const { client, controller, sockets } = createHarness();
+    const recoveryResolvers = new Map<string, (value: typeof generationView) => void>();
+    vi.mocked(client.getGenerationView).mockImplementation((_roomId, generationId) => (
+      new Promise((resolve) => recoveryResolvers.set(generationId, resolve))
+    ));
+    await controller.create({
+      displayName: '房主',
+      directory: { title: '测试房', visibility: 'public' },
+      sharedConfig,
+    });
+    sockets[0]!.open();
+    const payload = {
+      generationRequestId: generationMirror.generationRequestId,
+      generationId: generationMirror.generationId,
+      attempt: generationMirror.attempt,
+      configRevision: generationMirror.configRevision,
+      snapshotDigest: generationMirror.snapshotDigest,
+      collaborativeInfluence: generationMirror.collaborativeInfluence,
+      participantUserIds: generationMirror.participantUserIds,
+    };
+    sockets[0]!.message(JSON.stringify({
+      protocolVersion: 1,
+      roomId: 'room-1',
+      roomEpoch: 'epoch-1',
+      controlSeq: 1,
+      timestamp: '2026-08-28T00:01:00.000Z',
+      type: 'generation.started',
+      payload,
+    }));
+    sockets[0]!.message(JSON.stringify({
+      protocolVersion: 1,
+      type: 'story.delta',
+      roomId: 'room-1',
+      roomEpoch: 'epoch-1',
+      generationId: 'generation-1',
+      chunkSeq: 2,
+      timestamp: '2026-08-28T00:02:00.000Z',
+      payload: { delta: '跳号' },
+    }));
+
+    const generation2 = {
+      ...generationMirror,
+      generationRequestId: 'request-87654321',
+      generationId: 'generation-2',
+      startedAt: '2026-08-28T00:04:00.000Z',
+    };
+    sockets[0]!.message(JSON.stringify({
+      protocolVersion: 1,
+      roomId: 'room-1',
+      roomEpoch: 'epoch-2',
+      controlSeq: 1,
+      timestamp: '2026-08-28T00:04:00.000Z',
+      type: 'room.snapshot',
+      payload: {
+        ...snapshot,
+        roomEpoch: 'epoch-2',
+        controlSeq: 1,
+        activeGeneration: generation2,
+      },
+    }));
+    expect(client.getGenerationView).toHaveBeenCalledTimes(2);
+
+    recoveryResolvers.get('generation-1')!({
+      ...generationView,
+      markdown: '旧 epoch 不得覆盖',
+    });
+    await Promise.resolve();
+    expect(controller.getSnapshot().generation).toMatchObject({
+      mirror: { generationId: 'generation-2' },
+      markdown: '',
+    });
+
+    controller.dispose();
+    recoveryResolvers.get('generation-2')!({
+      ...generationView,
+      roomEpoch: 'epoch-2',
+      generation: generation2,
+      markdown: 'dispose 后不得写入',
+    });
+    await Promise.resolve();
+    expect(controller.getSnapshot().generation).toMatchObject({
+      mirror: { generationId: 'generation-2' },
+      markdown: '',
+    });
+  });
+
+  it('reconnect ticket 同时携带 control/story cursor，且 refresh/reconnect 只 GET 不 POST', async () => {
+    const { client, controller, runNextTimer, sockets } = createHarness();
+    vi.mocked(client.getGenerationView).mockResolvedValue({
+      ...generationView,
+      nextChunkSeq: 1,
+    });
+    await controller.create({
+      displayName: '房主',
+      directory: { title: '测试房', visibility: 'public' },
+      sharedConfig,
+    });
+    sockets[0]!.open();
+    sockets[0]!.message(JSON.stringify({
+      protocolVersion: 1,
+      roomId: 'room-1',
+      roomEpoch: 'epoch-1',
+      controlSeq: 1,
+      timestamp: '2026-08-28T00:01:00.000Z',
+      type: 'room.snapshot',
+      payload: {
+        ...snapshot,
+        controlSeq: 1,
+        activeGeneration: generationMirror,
+      },
+    }));
+    await vi.waitFor(() => expect(controller.getSnapshot().generation).toMatchObject({
+      phase: 'running',
+      storyCursor: { generationId: 'generation-1', chunkSeq: 0 },
+    }));
+    await Promise.resolve();
+    sockets[0]!.closed(1013, 'try-again-later');
+    await runNextTimer();
+
+    expect(client.issueTicket).toHaveBeenLastCalledWith('room-1', {
+      reconnect: {
+        control: { roomEpoch: 'epoch-1', controlSeq: 1 },
+        story: { generationId: 'generation-1', chunkSeq: 0 },
+      },
+    });
+    expect(client.getGenerationView).toHaveBeenCalledTimes(2);
+    expect(client.startGeneration).not.toHaveBeenCalled();
   });
 
   it('create 结果未知时冻结再次创建，要求先人工确认服务器状态', async () => {

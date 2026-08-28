@@ -56,6 +56,29 @@ const session = {
   snapshot,
 };
 
+const generationMirror = {
+  generationRequestId: 'request-12345678',
+  generationId: 'generation-1',
+  attempt: 1,
+  state: 'running' as const,
+  configRevision: 0,
+  snapshotDigest: 'sha256:generation-snapshot',
+  collaborativeInfluence: true,
+  participantUserIds: [1],
+  startedAt: '2026-08-28T00:01:00.000Z',
+};
+
+const generationView = {
+  protocolVersion: 1 as const,
+  roomId: 'room/1',
+  roomEpoch: 'epoch-1',
+  generation: generationMirror,
+  status: 'running' as const,
+  markdown: '权威基线',
+  nextChunkSeq: 2,
+  finalAuthoritative: false,
+};
+
 describe('Arena Room browser client', () => {
   it('没有 verified bearer 时不发请求', async () => {
     const fetcher = vi.fn<typeof fetch>();
@@ -261,6 +284,7 @@ describe('Arena Room browser client', () => {
         error: '房间运行时暂不可用',
       }, { status: 503 }),
       async () => Response.json({ ok: true, malformed: true }),
+      async () => Response.json({ ...generationView, roomId: 'room-other' }),
     ];
 
     for (const outcome of outcomes) {
@@ -275,5 +299,89 @@ describe('Arena Room browser client', () => {
       });
       expect(fetcher).toHaveBeenCalledOnce();
     }
+  });
+
+  it('generation start 只发送一次完整 transient payload，并严格使用 bearer/omit/encoded URL', async () => {
+    const fetcher = vi.fn<typeof fetch>(async () => Response.json(generationView, { status: 202 }));
+    const client = createArenaRoomClient({
+      origin: 'https://api.example.test',
+      fetch: fetcher,
+      getAuthHeader: async () => 'Bearer verified-key',
+    });
+    const request = {
+      expectedRoomEpoch: 'epoch-1',
+      expectedRevision: 0,
+      generationRequestId: 'request-12345678',
+      sharedConfig: snapshot.sharedConfig,
+      generation: {
+        prompt: '完整生成请求',
+        providerCredential: 'test-secret-canary',
+      },
+    };
+
+    await expect(client.startGeneration('room/1', request)).resolves.toEqual(generationView);
+
+    expect(fetcher).toHaveBeenCalledOnce();
+    const [url, init] = fetcher.mock.calls[0]!;
+    expect(String(url)).toBe('https://api.example.test/api/arena/rooms/v1/room%2F1/generations');
+    expect(init).toMatchObject({ method: 'POST', credentials: 'omit' });
+    expect(new Headers(init?.headers).get('authorization')).toBe('Bearer verified-key');
+    expect(JSON.parse(String(init?.body))).toEqual(request);
+  });
+
+  it('generation start 对 network/5xx/malformed success 均不自动重放并标记 unknown', async () => {
+    const request = {
+      expectedRoomEpoch: 'epoch-1',
+      expectedRevision: 0,
+      generationRequestId: 'request-12345678',
+      sharedConfig: snapshot.sharedConfig,
+      generation: { prompt: '完整生成请求' },
+    };
+    const outcomes: Array<() => Promise<Response>> = [
+      async () => { throw new TypeError('connection reset after write'); },
+      async () => Response.json({
+        code: 'ROOM_UNAVAILABLE',
+        error: '房间运行时暂不可用',
+      }, { status: 503 }),
+      async () => Response.json({ ok: true, malformed: true }),
+    ];
+
+    for (const outcome of outcomes) {
+      const fetcher = vi.fn<typeof fetch>(outcome);
+      const client = createArenaRoomClient({
+        origin: 'https://api.example.test',
+        fetch: fetcher,
+        getAuthHeader: async () => 'Bearer verified-key',
+      });
+      await expect(client.startGeneration('room-1', request)).rejects.toMatchObject({
+        code: 'ROOM_RESULT_UNKNOWN',
+      });
+      expect(fetcher).toHaveBeenCalledOnce();
+    }
+  });
+
+  it('generation view 使用纯 GET 严格解析 member-safe projection 与请求 identity', async () => {
+    const fetcher = vi.fn<typeof fetch>(async () => Response.json(generationView));
+    const client = createArenaRoomClient({
+      origin: 'https://api.example.test',
+      fetch: fetcher,
+      getAuthHeader: async () => 'Bearer verified-key',
+    });
+
+    await expect(client.getGenerationView('room/1', 'generation-1')).resolves.toEqual(generationView);
+    const [url, init] = fetcher.mock.calls[0]!;
+    expect(String(url)).toBe(
+      'https://api.example.test/api/arena/rooms/v1/room%2F1/generations/generation-1',
+    );
+    expect(init).toMatchObject({ method: 'GET', credentials: 'omit' });
+    expect(init?.body).toBeUndefined();
+
+    fetcher.mockResolvedValueOnce(Response.json({
+      ...generationView,
+      generation: { ...generationMirror, generationId: 'generation-other' },
+    }));
+    await expect(client.getGenerationView('room/1', 'generation-1')).rejects.toMatchObject({
+      code: 'ROOM_RESPONSE_INVALID',
+    });
   });
 });

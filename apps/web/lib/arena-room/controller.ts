@@ -1,13 +1,19 @@
 import {
   parseRoomServerTransportFrame,
   type ArenaRoomCreateRequest,
+  type ArenaRoomGenerationProjectionStatus,
+  type ArenaRoomGenerationStartRequest,
+  type ArenaRoomGenerationViewResponse,
   type ArenaRoomProposalResolveRequest,
   type ArenaRoomProposalSubmitRequest,
   type ArenaRoomSessionResponse,
+  type GenerationMirror,
   type RoomControlCursor,
   type RoomDirectoryEntry,
   type RoomEvent,
   type RoomServerTransportMessage,
+  type StoryDeltaEvent,
+  type StoryStreamCursor,
 } from '@mahoshojo/contracts/arena-room';
 
 import {
@@ -37,6 +43,39 @@ export type ArenaRoomControllerState = {
   readonly unknownOperation: 'create' | 'join' | null;
   readonly proposalOperation: 'resolve' | 'submit' | 'withdraw' | null;
   readonly proposalResultUnknown: boolean;
+  readonly generation: ArenaRoomGenerationControllerView;
+};
+
+export type ArenaRoomGenerationPhase =
+  | 'cancelled'
+  | 'completed'
+  | 'failed'
+  | 'idle'
+  | 'resyncing'
+  | 'running'
+  | 'starting'
+  | 'unavailable'
+  | 'unknown';
+
+export type ArenaRoomGenerationGap = {
+  readonly generationId: string;
+  readonly expectedChunkSeq: number;
+  readonly receivedChunkSeq: number;
+};
+
+export type ArenaRoomGenerationControllerView = {
+  readonly mirror: GenerationMirror | null;
+  readonly phase: ArenaRoomGenerationPhase;
+  readonly status: ArenaRoomGenerationProjectionStatus | null;
+  readonly authoritativeMarkdown: string;
+  readonly markdown: string;
+  readonly storyCursor: StoryStreamCursor | null;
+  readonly gap: ArenaRoomGenerationGap | null;
+  readonly finalAuthoritative: boolean;
+  readonly generationRecordId: string | null;
+  readonly errorCode: string | null;
+  readonly pendingRequestId: string | null;
+  readonly startResultUnknown: boolean;
 };
 
 type ProposalMutationOperation = 'resolve' | 'submit' | 'withdraw';
@@ -77,10 +116,26 @@ export type ArenaRoomController = {
   submitProposal(request: ArenaRoomProposalSubmitRequest): Promise<void>;
   resolveProposal(proposalId: string, request: ArenaRoomProposalResolveRequest): Promise<void>;
   withdrawProposal(proposalId: string): Promise<void>;
+  startGeneration(request: ArenaRoomGenerationStartRequest): Promise<void>;
   reconnect(): void;
   reset(): void;
   dispose(): void;
 };
+
+const EMPTY_GENERATION_VIEW: ArenaRoomGenerationControllerView = Object.freeze({
+  mirror: null,
+  phase: 'idle',
+  status: null,
+  authoritativeMarkdown: '',
+  markdown: '',
+  storyCursor: null,
+  gap: null,
+  finalAuthoritative: false,
+  generationRecordId: null,
+  errorCode: null,
+  pendingRequestId: null,
+  startResultUnknown: false,
+});
 
 const READY_STATE: ArenaRoomControllerState = Object.freeze({
   phase: 'ready',
@@ -91,6 +146,7 @@ const READY_STATE: ArenaRoomControllerState = Object.freeze({
   unknownOperation: null,
   proposalOperation: null,
   proposalResultUnknown: false,
+  generation: EMPTY_GENERATION_VIEW,
 });
 
 const phaseForAccess = (access: { enabled: boolean; authenticated: boolean }) => (
@@ -130,6 +186,98 @@ const replaceMember = (
   };
 };
 
+type GenerationControlEvent = Extract<RoomEvent, {
+  type: 'generation.completed' | 'generation.failed' | 'generation.started';
+}>;
+
+const projectionStatusForMirror = (
+  mirror: GenerationMirror,
+): ArenaRoomGenerationProjectionStatus => {
+  switch (mirror.state) {
+    case 'starting': return 'reserved';
+    case 'running': return 'running';
+    case 'completed': return 'completed';
+    case 'failed': return 'failed';
+    case 'cancelled': return 'cancelled';
+  }
+};
+
+const generationPhaseForStatus = (
+  status: ArenaRoomGenerationProjectionStatus,
+): ArenaRoomGenerationPhase => {
+  switch (status) {
+    case 'reserved': return 'starting';
+    case 'running':
+    case 'finalizing': return 'running';
+    case 'completed': return 'completed';
+    case 'failed':
+    case 'producer_lost': return 'failed';
+    case 'cancelled': return 'cancelled';
+  }
+};
+
+const mirrorFromGenerationControl = (
+  current: GenerationMirror | null,
+  event: GenerationControlEvent,
+): GenerationMirror => {
+  const sameAttempt = current?.generationId === event.payload.generationId
+    && current.attempt === event.payload.attempt;
+  const state = event.type === 'generation.started'
+    ? 'running' as const
+    : event.type === 'generation.completed'
+      ? 'completed' as const
+      : 'failed' as const;
+  return {
+    generationRequestId: event.payload.generationRequestId,
+    generationId: event.payload.generationId,
+    attempt: event.payload.attempt,
+    state,
+    configRevision: event.payload.configRevision,
+    snapshotDigest: event.payload.snapshotDigest,
+    collaborativeInfluence: event.payload.collaborativeInfluence,
+    participantUserIds: event.payload.participantUserIds,
+    startedAt: sameAttempt ? current.startedAt : event.timestamp,
+    ...(event.type === 'generation.started' ? {} : { finishedAt: event.timestamp }),
+  };
+};
+
+/** Pure control-plane reducer; story text and HTTP authority are handled separately. */
+const reduceGenerationControl = (
+  current: ArenaRoomGenerationControllerView,
+  event: GenerationControlEvent,
+): ArenaRoomGenerationControllerView => {
+  const mirror = mirrorFromGenerationControl(current.mirror, event);
+  const sameAttempt = current.mirror?.generationId === mirror.generationId
+    && current.mirror.attempt === mirror.attempt;
+  const base = sameAttempt ? current : EMPTY_GENERATION_VIEW;
+  if (event.type === 'generation.started') {
+    return {
+      ...base,
+      mirror,
+      phase: 'running',
+      status: 'running',
+      gap: null,
+      finalAuthoritative: false,
+      generationRecordId: null,
+      errorCode: null,
+      pendingRequestId: null,
+      startResultUnknown: false,
+    };
+  }
+  return {
+    ...base,
+    mirror,
+    phase: 'resyncing',
+    status: event.type === 'generation.completed' ? 'completed' : 'failed',
+    gap: null,
+    finalAuthoritative: false,
+    generationRecordId: null,
+    errorCode: event.type === 'generation.failed' ? event.payload.errorCode : null,
+    pendingRequestId: null,
+    startResultUnknown: false,
+  };
+};
+
 export const createArenaRoomController = (
   options: ArenaRoomControllerOptions,
 ): ArenaRoomController => {
@@ -151,11 +299,18 @@ export const createArenaRoomController = (
   let operationGeneration = 0;
   let proposalMutationGeneration = 0;
   let proposalMutationPending = false;
+  let generationStartOperation = 0;
+  let generationStartPending = false;
+  let generationFence = 0;
   let unknownProposalMutation: UnknownProposalMutation | null = null;
   let disposed = false;
   let unresolvedCreateResult = false;
   let unresolvedCreateNotice: string | null = null;
   let controlCursor: RoomControlCursor | undefined;
+  const generationRecoveries = new Map<string, {
+    promise: Promise<void>;
+    rerunAfterFlight: boolean;
+  }>();
   const listeners = new Set<() => void>();
 
   const publish = (patch: Partial<ArenaRoomControllerState>): void => {
@@ -234,6 +389,201 @@ export const createArenaRoomController = (
       && event.payload.proposal.proposalId === unknown.proposalId;
   };
 
+  const recoveryKeyFor = (
+    roomId: string,
+    roomEpoch: string,
+    mirror: GenerationMirror,
+  ): string => `${roomId}\u0000${roomEpoch}\u0000${mirror.generationId}\u0000${mirror.attempt}`;
+
+  const recoveryFenceIsCurrent = (input: {
+    readonly roomId: string;
+    readonly roomEpoch: string;
+    readonly generationId: string;
+    readonly attempt: number;
+    readonly fence: number;
+  }): boolean => {
+    const active = state.session?.snapshot.activeGeneration;
+    return !disposed
+      && generationFence === input.fence
+      && state.session?.roomId === input.roomId
+      && state.session.roomEpoch === input.roomEpoch
+      && active?.generationId === input.generationId
+      && active.attempt === input.attempt;
+  };
+
+  const installAuthoritativeGenerationView = (
+    view: ArenaRoomGenerationViewResponse,
+    expected: {
+      readonly roomId: string;
+      readonly roomEpoch: string;
+      readonly generationId: string;
+      readonly attempt: number;
+    },
+  ): boolean => {
+    const current = state.session;
+    if (
+      !current
+      || view.roomId !== expected.roomId
+      || view.roomEpoch !== expected.roomEpoch
+      || view.generation.generationId !== expected.generationId
+      || view.generation.attempt !== expected.attempt
+      || current.roomId !== expected.roomId
+      || current.roomEpoch !== expected.roomEpoch
+    ) return false;
+    const storyCursor = view.nextChunkSeq === 0
+      ? null
+      : { generationId: view.generation.generationId, chunkSeq: view.nextChunkSeq - 1 };
+    publish({
+      session: {
+        ...current,
+        snapshot: {
+          ...current.snapshot,
+          activeGeneration: view.generation,
+        },
+      },
+      generation: {
+        mirror: view.generation,
+        phase: generationPhaseForStatus(view.status),
+        status: view.status,
+        authoritativeMarkdown: view.markdown,
+        markdown: view.markdown,
+        storyCursor,
+        gap: null,
+        finalAuthoritative: view.finalAuthoritative,
+        generationRecordId: view.generationRecordId ?? null,
+        errorCode: view.errorCode ?? null,
+        pendingRequestId: null,
+        startResultUnknown: false,
+      },
+    });
+    return true;
+  };
+
+  const requestGenerationRecovery = (
+    reason: 'baseline' | 'gap' | 'reconnect' | 'resync' | 'terminal',
+  ): Promise<void> | null => {
+    const current = state.session;
+    const mirror = current?.snapshot.activeGeneration;
+    if (!current || !mirror || disposed) return null;
+    const key = recoveryKeyFor(current.roomId, current.roomEpoch, mirror);
+    const existing = generationRecoveries.get(key);
+    if (existing) {
+      if (reason === 'baseline' || reason === 'terminal') existing.rerunAfterFlight = true;
+      return existing.promise;
+    }
+    const captured = {
+      roomId: current.roomId,
+      roomEpoch: current.roomEpoch,
+      generationId: mirror.generationId,
+      attempt: mirror.attempt,
+      fence: generationFence,
+    };
+    publish({
+      generation: {
+        ...state.generation,
+        mirror,
+        phase: 'resyncing',
+        status: state.generation.status ?? projectionStatusForMirror(mirror),
+      },
+    });
+    const entry = {
+      promise: Promise.resolve(),
+      rerunAfterFlight: false,
+    };
+    entry.promise = options.client.getGenerationView(current.roomId, mirror.generationId)
+      .then((view) => {
+        if (!recoveryFenceIsCurrent(captured)) return;
+        installAuthoritativeGenerationView(view, captured);
+      })
+      .catch(() => {
+        if (!recoveryFenceIsCurrent(captured)) return;
+        publish({
+          generation: {
+            ...state.generation,
+            phase: 'unavailable',
+          },
+        });
+      })
+      .finally(() => {
+        if (generationRecoveries.get(key) !== entry) return;
+        generationRecoveries.delete(key);
+        if (entry.rerunAfterFlight && !disposed) void requestGenerationRecovery('terminal');
+      });
+    generationRecoveries.set(key, entry);
+    return entry.promise;
+  };
+
+  const generationViewForSnapshot = (
+    mirror: GenerationMirror | null,
+    resetPreview: boolean,
+  ): ArenaRoomGenerationControllerView => {
+    if (!mirror) {
+      return state.generation.startResultUnknown && !resetPreview
+        ? state.generation
+        : EMPTY_GENERATION_VIEW;
+    }
+    const sameAttempt = !resetPreview
+      && state.generation.mirror?.generationId === mirror.generationId
+      && state.generation.mirror.attempt === mirror.attempt;
+    const base = sameAttempt ? state.generation : EMPTY_GENERATION_VIEW;
+    return {
+      ...base,
+      mirror,
+      phase: 'resyncing',
+      status: projectionStatusForMirror(mirror),
+      gap: null,
+      finalAuthoritative: false,
+      generationRecordId: null,
+      errorCode: null,
+      pendingRequestId: null,
+      startResultUnknown: false,
+    };
+  };
+
+  const applyStoryEvent = (event: StoryDeltaEvent): void => {
+    const current = state.session;
+    const mirror = current?.snapshot.activeGeneration;
+    if (!current || !mirror) return;
+    if (event.roomId !== current.roomId) {
+      enterReplacement();
+      return;
+    }
+    if (
+      event.roomEpoch !== current.roomEpoch
+      || event.generationId !== mirror.generationId
+      || mirror.state !== 'running'
+    ) return;
+    const cursor = state.generation.storyCursor;
+    const lastChunkSeq = cursor?.generationId === event.generationId ? cursor.chunkSeq : -1;
+    if (event.chunkSeq <= lastChunkSeq) return;
+    const expectedChunkSeq = lastChunkSeq + 1;
+    if (state.generation.gap || state.generation.phase === 'resyncing') return;
+    if (event.chunkSeq !== expectedChunkSeq) {
+      publish({
+        generation: {
+          ...state.generation,
+          phase: 'resyncing',
+          gap: {
+            generationId: event.generationId,
+            expectedChunkSeq,
+            receivedChunkSeq: event.chunkSeq,
+          },
+        },
+      });
+      void requestGenerationRecovery('gap');
+      return;
+    }
+    publish({
+      generation: {
+        ...state.generation,
+        phase: 'running',
+        status: state.generation.status ?? 'running',
+        markdown: state.generation.markdown + event.payload.delta,
+        storyCursor: { generationId: event.generationId, chunkSeq: event.chunkSeq },
+      },
+    });
+  };
+
   const applyControlEvent = (event: Exclude<RoomEvent, { type: 'story.delta' }>): void => {
     const current = state.session;
     if (!current) return;
@@ -269,6 +619,7 @@ export const createArenaRoomController = (
       }
       const epochChanged = current.roomEpoch !== event.roomEpoch;
       unknownProposalMutation = null;
+      generationFence += 1;
       publish({
         session: {
           protocolVersion: 1,
@@ -277,10 +628,12 @@ export const createArenaRoomController = (
           self,
           snapshot: event.payload,
         },
+        generation: generationViewForSnapshot(event.payload.activeGeneration, epochChanged),
         ...(epochChanged ? { notice: '房间已由服务器恢复，需要重新同步' } : {}),
         proposalOperation: null,
         proposalResultUnknown: false,
       });
+      if (event.payload.activeGeneration) void requestGenerationRecovery('baseline');
       return;
     }
 
@@ -375,18 +728,33 @@ export const createArenaRoomController = (
       return;
     }
 
+    if (
+      event.type === 'generation.started'
+      || event.type === 'generation.completed'
+      || event.type === 'generation.failed'
+    ) {
+      const generation = reduceGenerationControl(state.generation, event);
+      generationFence += 1;
+      publish({
+        session: {
+          ...current,
+          snapshot: {
+            ...current.snapshot,
+            controlSeq: event.controlSeq,
+            activeGeneration: generation.mirror,
+          },
+        },
+        generation,
+      });
+      if (event.type !== 'generation.started') void requestGenerationRecovery('terminal');
+      return;
+    }
+
     if (event.type === 'room.closing') {
       detachSocket(true);
       publish({ phase: 'closed', notice: '房间已关闭', error: null });
       return;
     }
-
-    publish({
-      session: {
-        ...current,
-        snapshot: { ...current.snapshot, controlSeq: event.controlSeq },
-      },
-    });
   };
 
   const handleMessage = (raw: unknown): void => {
@@ -401,10 +769,14 @@ export const createArenaRoomController = (
       return;
     }
     if (message.type === 'room.resync.required') {
+      void requestGenerationRecovery('resync');
       scheduleReconnect(false);
       return;
     }
-    if (message.type === 'story.delta') return;
+    if (message.type === 'story.delta') {
+      applyStoryEvent(message);
+      return;
+    }
     applyControlEvent(message);
   };
 
@@ -420,11 +792,18 @@ export const createArenaRoomController = (
       notice: reconnecting ? '正在重新连接…' : '正在连接房间…',
       error: null,
     });
+    if (reconnecting && session.snapshot.activeGeneration) {
+      void requestGenerationRecovery('reconnect');
+    }
     try {
+      const reconnect = reconnecting
+        ? {
+          ...(controlCursor ? { control: controlCursor } : {}),
+          ...(state.generation.storyCursor ? { story: state.generation.storyCursor } : {}),
+        }
+        : null;
       const issued = await options.client.issueTicket(session.roomId, {
-        ...(reconnecting && controlCursor
-          ? { reconnect: { control: controlCursor } }
-          : {}),
+        ...(reconnect && Object.keys(reconnect).length > 0 ? { reconnect } : {}),
       });
       if (disposed || generation !== operationGeneration) return;
       const current = options.createSocket(
@@ -468,7 +847,10 @@ export const createArenaRoomController = (
     const generation = operationGeneration;
     if (!operationIsCurrent(generation)) return;
     unknownProposalMutation = null;
+    generationFence += 1;
     publish({
+      session,
+      generation: generationViewForSnapshot(session.snapshot.activeGeneration, true),
       ...(!unresolvedCreateResult ? { unknownOperation: null } : {}),
       proposalOperation: null,
       proposalResultUnknown: false,
@@ -478,6 +860,7 @@ export const createArenaRoomController = (
       roomEpoch: session.roomEpoch,
       controlSeq: session.snapshot.controlSeq,
     };
+    if (session.snapshot.activeGeneration) void requestGenerationRecovery('baseline');
     await connectSession(session, false, generation);
   };
 
@@ -505,13 +888,19 @@ export const createArenaRoomController = (
       };
       reconnectAttempts = 0;
       unknownProposalMutation = null;
+      generationFence += 1;
       publish({
         session: authoritative,
+        generation: generationViewForSnapshot(
+          authoritative.snapshot.activeGeneration,
+          authoritative.roomEpoch !== current.roomEpoch,
+        ),
         proposalOperation: null,
         proposalResultUnknown: false,
         notice: '已取得房间权威快照，正在重新连接…',
         error: null,
       });
+      if (authoritative.snapshot.activeGeneration) void requestGenerationRecovery('baseline');
       await connectSession(authoritative, true, generation);
     } catch {
       if (disposed || generation !== operationGeneration) return;
@@ -628,6 +1017,106 @@ export const createArenaRoomController = (
     }
   };
 
+  const runGenerationStart = async (
+    request: ArenaRoomGenerationStartRequest,
+  ): Promise<void> => {
+    const current = state.session;
+    const activeState = current?.snapshot.activeGeneration?.state;
+    if (
+      disposed
+      || !access.enabled
+      || !access.authenticated
+      || !current
+      || current.self.role !== 'host'
+      || request.expectedRoomEpoch !== current.roomEpoch
+      || request.expectedRevision !== current.snapshot.revision
+      || generationStartPending
+      || state.generation.startResultUnknown
+      || activeState === 'starting'
+      || activeState === 'running'
+    ) return;
+    generationStartPending = true;
+    generationStartOperation += 1;
+    const operation = generationStartOperation;
+    const expectedRoomId = current.roomId;
+    const expectedRoomEpoch = current.roomEpoch;
+    publish({
+      generation: {
+        ...EMPTY_GENERATION_VIEW,
+        phase: 'starting',
+        pendingRequestId: request.generationRequestId,
+      },
+      notice: '正在启动多人生成…',
+      error: null,
+    });
+    try {
+      const view = await options.client.startGeneration(current.roomId, request);
+      if (
+        disposed
+        || operation !== generationStartOperation
+        || state.session?.roomId !== expectedRoomId
+        || state.session.roomEpoch !== expectedRoomEpoch
+      ) return;
+      generationFence += 1;
+      if (!installAuthoritativeGenerationView(view, {
+        roomId: expectedRoomId,
+        roomEpoch: expectedRoomEpoch,
+        generationId: view.generation.generationId,
+        attempt: view.generation.attempt,
+      })) return;
+      const installedSession = state.session;
+      if (
+        installedSession
+        && installedSession.roomId === expectedRoomId
+        && installedSession.roomEpoch === expectedRoomEpoch
+        && installedSession.snapshot.revision === request.expectedRevision
+        && view.generation.configRevision === request.expectedRevision + 1
+      ) {
+        publish({
+          session: {
+            ...installedSession,
+            snapshot: {
+              ...installedSession.snapshot,
+              revision: view.generation.configRevision,
+              sharedConfig: request.sharedConfig,
+            },
+          },
+        });
+      }
+      publish({ notice: '多人生成已进入房间权威流程', error: null });
+    } catch (error) {
+      if (
+        disposed
+        || operation !== generationStartOperation
+        || state.session?.roomId !== expectedRoomId
+        || state.session.roomEpoch !== expectedRoomEpoch
+      ) return;
+      if (error instanceof ArenaRoomClientError && error.code === 'ROOM_RESULT_UNKNOWN') {
+        publish({
+          generation: {
+            ...EMPTY_GENERATION_VIEW,
+            phase: 'unknown',
+            pendingRequestId: request.generationRequestId,
+            startResultUnknown: true,
+          },
+          notice: error.message,
+          error: null,
+        });
+      } else {
+        publish({
+          generation: {
+            ...EMPTY_GENERATION_VIEW,
+            phase: 'unavailable',
+          },
+          notice: null,
+          error: safeErrorMessage(error),
+        });
+      }
+    } finally {
+      if (operation === generationStartOperation) generationStartPending = false;
+    }
+  };
+
   return Object.freeze({
     getSnapshot: () => state,
 
@@ -644,7 +1133,10 @@ export const createArenaRoomController = (
       access = nextAccess;
       operationGeneration += 1;
       proposalMutationGeneration += 1;
+      generationStartOperation += 1;
+      generationFence += 1;
       proposalMutationPending = false;
+      generationStartPending = false;
       clearReconnectTimer();
       detachSocket(true);
       reconnectAttempts = 0;
@@ -685,11 +1177,20 @@ export const createArenaRoomController = (
       if (unresolvedCreateResult) return;
       operationGeneration += 1;
       proposalMutationGeneration += 1;
+      generationStartOperation += 1;
+      generationFence += 1;
       proposalMutationPending = false;
+      generationStartPending = false;
       const generation = operationGeneration;
       clearReconnectTimer();
       detachSocket(true);
-      publish({ phase: 'connecting', session: null, notice: '正在创建房间…', error: null });
+      publish({
+        phase: 'connecting',
+        session: null,
+        generation: EMPTY_GENERATION_VIEW,
+        notice: '正在创建房间…',
+        error: null,
+      });
       try {
         const nextSession = await options.client.create(request);
         if (!operationIsCurrent(generation)) return;
@@ -703,11 +1204,20 @@ export const createArenaRoomController = (
       if (disposed || !access.enabled || !access.authenticated) return;
       operationGeneration += 1;
       proposalMutationGeneration += 1;
+      generationStartOperation += 1;
+      generationFence += 1;
       proposalMutationPending = false;
+      generationStartPending = false;
       const generation = operationGeneration;
       clearReconnectTimer();
       detachSocket(true);
-      publish({ phase: 'connecting', session: null, notice: '正在加入房间…', error: null });
+      publish({
+        phase: 'connecting',
+        session: null,
+        generation: EMPTY_GENERATION_VIEW,
+        notice: '正在加入房间…',
+        error: null,
+      });
       try {
         const nextSession = await options.client.join(roomId, { displayName });
         if (!operationIsCurrent(generation)) return;
@@ -721,7 +1231,10 @@ export const createArenaRoomController = (
       if (!state.session || disposed) return;
       operationGeneration += 1;
       proposalMutationGeneration += 1;
+      generationStartOperation += 1;
+      generationFence += 1;
       proposalMutationPending = false;
+      generationStartPending = false;
       const generation = operationGeneration;
       const { roomId, roomEpoch } = state.session;
       clearReconnectTimer();
@@ -739,7 +1252,10 @@ export const createArenaRoomController = (
       if (!state.session || state.session.self.role !== 'host' || disposed) return;
       operationGeneration += 1;
       proposalMutationGeneration += 1;
+      generationStartOperation += 1;
+      generationFence += 1;
       proposalMutationPending = false;
+      generationStartPending = false;
       const generation = operationGeneration;
       const { roomId, roomEpoch } = state.session;
       clearReconnectTimer();
@@ -771,6 +1287,10 @@ export const createArenaRoomController = (
       ));
     },
 
+    async startGeneration(request) {
+      await runGenerationStart(request);
+    },
+
     reconnect() {
       if (!state.session || disposed || !access.enabled || !access.authenticated) return;
       operationGeneration += 1;
@@ -787,7 +1307,10 @@ export const createArenaRoomController = (
     reset() {
       operationGeneration += 1;
       proposalMutationGeneration += 1;
+      generationStartOperation += 1;
+      generationFence += 1;
       proposalMutationPending = false;
+      generationStartPending = false;
       clearReconnectTimer();
       detachSocket(true);
       reconnectAttempts = 0;
@@ -802,7 +1325,10 @@ export const createArenaRoomController = (
       if (disposed) return;
       operationGeneration += 1;
       proposalMutationGeneration += 1;
+      generationStartOperation += 1;
+      generationFence += 1;
       proposalMutationPending = false;
+      generationStartPending = false;
       unknownProposalMutation = null;
       clearReconnectTimer();
       detachSocket(true);
