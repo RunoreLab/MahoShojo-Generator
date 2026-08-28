@@ -158,6 +158,7 @@ export type RoomActorFanout = {
   readonly roomId: string;
   readonly roomEpoch: string;
   readonly snapshot: ArenaRoomAuthorityState['snapshot'];
+  readonly predecessorSnapshot?: ArenaRoomAuthorityState['snapshot'];
   readonly events: ArenaRoomTransitionSuccess['events'];
   readonly terminal?: 'fenced';
 };
@@ -522,6 +523,9 @@ export class RoomActor {
         reason: failureReason,
       };
     }
+    const predecessorSnapshot = this.state === null
+      ? undefined
+      : structuredClone(this.state.snapshot);
     const transition = transitionArenaRoom(
       this.state,
       input.command,
@@ -564,7 +568,7 @@ export class RoomActor {
     this.state = cloneState(transition.nextState);
     this.lastCheckpointRefreshAt = this.options.now();
     this.rememberReplay(transition.events);
-    this.fanout(transition);
+    this.fanout(transition, predecessorSnapshot);
     reportCommittedClosed(
       this.state,
       this.options.onCommittedClosed,
@@ -581,6 +585,7 @@ export class RoomActor {
     const reason = due.kind === 'host-offline'
       ? 'host-offline-timeout' as const
       : 'room-idle-timeout' as const;
+    const predecessorSnapshot = structuredClone(this.state.snapshot);
     const transition = transitionArenaRoom(this.state, {
       type: 'close',
       expectedRoomEpoch: this.state.snapshot.roomEpoch,
@@ -606,7 +611,7 @@ export class RoomActor {
     this.state = cloneState(transition.nextState);
     this.lastCheckpointRefreshAt = this.options.now();
     this.rememberReplay(transition.events);
-    this.fanout(transition);
+    this.fanout(transition, predecessorSnapshot);
     reportCommittedClosed(
       this.state,
       this.options.onCommittedClosed,
@@ -631,6 +636,7 @@ export class RoomActor {
       ? this.state.lifecycle.updatedAt
       : suppliedTimestamp;
     const reason = 'room-incarnation-limit' as const;
+    const predecessorSnapshot = structuredClone(this.state.snapshot);
     const transition = transitionArenaRoom(this.state, {
       type: 'close',
       expectedRoomEpoch: this.state.snapshot.roomEpoch,
@@ -668,7 +674,7 @@ export class RoomActor {
     this.quotaExhausted = false;
     this.quotaExhaustedReason = null;
     this.rememberReplay(transition.events);
-    this.fanout(transition);
+    this.fanout(transition, predecessorSnapshot);
     reportCommittedClosed(
       this.state,
       this.options.onCommittedClosed,
@@ -701,7 +707,10 @@ export class RoomActor {
     }
   }
 
-  private fanout(transition: ArenaRoomTransitionSuccess): void {
+  private fanout(
+    transition: ArenaRoomTransitionSuccess,
+    predecessorSnapshot?: ArenaRoomAuthorityState['snapshot'],
+  ): void {
     if (transition.events.length === 0 || this.state === null) return;
     for (const subscriber of this.subscribers) {
       try {
@@ -709,6 +718,9 @@ export class RoomActor {
           roomId: this.roomId,
           roomEpoch: this.state.snapshot.roomEpoch,
           snapshot: structuredClone(this.state.snapshot),
+          ...(predecessorSnapshot === undefined
+            ? {}
+            : { predecessorSnapshot: structuredClone(predecessorSnapshot) }),
           events: structuredClone(transition.events),
         });
         if (

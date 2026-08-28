@@ -341,6 +341,128 @@ describe('Arena Room ticket -> membership -> presence WSS authority', () => {
     });
   });
 
+  it('WSS Proposal 事件对 host/author 可见，其他 member 获得同序号过滤 snapshot', async () => {
+    const harness = await createHarness();
+    const other = await harness.memberships.join({
+      roomId: harness.host.roomId,
+      accountUserId: 303,
+      displayName: 'Other',
+    });
+    const [hostPeer, authorPeer, otherPeer] = [createPeer(), createPeer(), createPeer()];
+    const connections: RoomWebSocketConnection[] = [];
+    for (const [accountUserId, connected] of [
+      [101, hostPeer],
+      [202, authorPeer],
+      [303, otherPeer],
+    ] as const) {
+      const ticket = await harness.authority.issue({ roomId: 'room-1', accountUserId });
+      connections.push(await activate(
+        await harness.authority.authorize(requestForTicket(ticket)),
+        connected.peer,
+      ));
+    }
+    const actor = harness.actors.get('room-1');
+    if (!actor) throw new Error('actor missing');
+    const submitted = await actor.execute({
+      authority: {
+        kind: 'authenticated-user',
+        actorUserId: harness.member.member.userId,
+        accountUserId: 202,
+      },
+      command: {
+        type: 'submit-proposal',
+        expectedRoomEpoch: 'epoch-1',
+        timestamp: '2026-08-28T00:01:00.000Z',
+        proposal: {
+          proposalVersion: 1,
+          proposalId: 'proposal-private',
+          roomId: 'room-1',
+          authorUserId: harness.member.member.userId,
+          baseRevision: 0,
+          status: 'submitted',
+          changes: [{
+            changeId: 'guidance-1',
+            type: 'setUserGuidance',
+            value: '成员建议',
+            expectedBase: { kind: 'value', value: '' },
+          }],
+          createdAt: '2026-08-28T00:01:00.000Z',
+        },
+      },
+    });
+    if (!submitted.ok) throw new Error(submitted.reason);
+    const submitSeq = submitted.nextState.snapshot.controlSeq;
+    expect(hostPeer.messages.at(-1)).toMatchObject({
+      type: 'proposal.submitted',
+      controlSeq: submitSeq,
+      payload: { proposal: { proposalId: 'proposal-private' } },
+    });
+    expect(authorPeer.messages.at(-1)).toMatchObject({
+      type: 'proposal.submitted',
+      controlSeq: submitSeq,
+      payload: { proposal: { proposalId: 'proposal-private' } },
+    });
+    expect(otherPeer.messages.at(-1)).toMatchObject({
+      type: 'room.snapshot',
+      controlSeq: submitSeq,
+      payload: { proposals: [] },
+    });
+    const otherReconnectPeer = createPeer();
+    const otherReconnectTicket = await harness.authority.issue({
+      roomId: 'room-1',
+      accountUserId: 303,
+      reconnect: {
+        control: { roomEpoch: 'epoch-1', controlSeq: submitSeq - 1 },
+      },
+    });
+    connections.push(await activate(
+      await harness.authority.authorize(requestForTicket(otherReconnectTicket)),
+      otherReconnectPeer.peer,
+    ));
+    expect(otherReconnectPeer.messages).toEqual([
+      expect.objectContaining({
+        type: 'room.snapshot',
+        controlSeq: submitSeq,
+        payload: expect.objectContaining({ proposals: [] }),
+      }),
+    ]);
+
+    const resolved = await actor.execute({
+      authority: {
+        kind: 'authenticated-user',
+        actorUserId: harness.host.member.userId,
+        accountUserId: 101,
+      },
+      command: {
+        type: 'resolve-proposal',
+        expectedRoomEpoch: 'epoch-1',
+        expectedRevision: 0,
+        proposalId: 'proposal-private',
+        resolution: 'reject',
+        timestamp: '2026-08-28T00:02:00.000Z',
+      },
+    });
+    if (!resolved.ok) throw new Error(resolved.reason);
+    const resolveSeq = resolved.nextState.snapshot.controlSeq;
+    expect(hostPeer.messages.at(-1)).toMatchObject({
+      type: 'proposal.resolved',
+      controlSeq: resolveSeq,
+      payload: { proposalId: 'proposal-private', status: 'rejected' },
+    });
+    expect(authorPeer.messages.at(-1)).toMatchObject({
+      type: 'proposal.resolved',
+      controlSeq: resolveSeq,
+      payload: { proposalId: 'proposal-private', status: 'rejected' },
+    });
+    expect(otherPeer.messages.at(-1)).toMatchObject({
+      type: 'room.snapshot',
+      controlSeq: resolveSeq,
+      payload: { proposals: [] },
+    });
+    expect(other.member.userId).not.toBe(harness.member.member.userId);
+    await Promise.all(connections.map(async (connection) => connection.dispose?.()));
+  });
+
   it('缺失/重复 query、无效签名和 replay store unavailable 全部 fail closed 且不反射 ticket', async () => {
     const harness = await createHarness();
     const ticket = await harness.authority.issue({ roomId: 'room-1', accountUserId: 101 });

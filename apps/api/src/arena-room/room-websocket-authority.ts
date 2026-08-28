@@ -4,7 +4,10 @@ import type {
   RoomServerTransportMessage,
   RoomTicketClaims,
 } from '@mahoshojo/contracts/arena-room';
-import { issueArenaRoomPresenceAuthority } from '@mahoshojo/multiplayer-core';
+import {
+  issueArenaRoomPresenceAuthority,
+  projectArenaRoomEventForViewer,
+} from '@mahoshojo/multiplayer-core';
 
 import {
   ArenaRoomMembershipError,
@@ -159,7 +162,28 @@ export const createArenaRoomWebSocketAuthority = (
     cursor?: RoomReconnectCursor,
   ): void => {
     const sync = membership.actor.resolveControlSync(cursor?.control);
-    for (const event of sync.events) peer.send(event);
+    const state = membership.actor.getSnapshot();
+    if (!state) throw new Error('ROOM_CONTROL_SYNC_STATE_MISSING');
+    const projected = sync.events.map((event) => projectArenaRoomEventForViewer(
+      event,
+      state.snapshot,
+      membership.member.userId,
+    ));
+    const hiddenReplay = sync.kind === 'replay' && projected.some((event, index) => (
+      event.type === 'room.snapshot' && sync.events[index]?.type !== 'room.snapshot'
+    ));
+    if (hiddenReplay) {
+      const current = membership.actor.resolveControlSync(undefined);
+      for (const event of current.events) {
+        peer.send(projectArenaRoomEventForViewer(
+          event,
+          state.snapshot,
+          membership.member.userId,
+        ));
+      }
+    } else {
+      for (const event of projected) peer.send(event);
+    }
     if (cursor?.story) {
       peer.send({
         protocolVersion: 1,
@@ -225,7 +249,12 @@ export const createArenaRoomWebSocketAuthority = (
           let closeCode: number | undefined;
           let closeReason: string | undefined;
           for (const event of fanout.events) {
-            peer.send(event as RoomServerTransportMessage);
+            peer.send(projectArenaRoomEventForViewer(
+              event,
+              fanout.snapshot,
+              claims.userId,
+              fanout.predecessorSnapshot,
+            ) as RoomServerTransportMessage);
             if (
               event.type === 'room.member.left'
               && event.payload.member.userId === claims.userId

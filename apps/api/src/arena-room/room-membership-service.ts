@@ -11,7 +11,10 @@ import {
   type RoomDirectoryVisibility,
   type RoomMember,
 } from '@mahoshojo/contracts/arena-room';
-import type { ArenaRoomAuthorityState } from '@mahoshojo/multiplayer-core';
+import {
+  projectArenaRoomSnapshotForViewer,
+  type ArenaRoomAuthorityState,
+} from '@mahoshojo/multiplayer-core';
 
 import {
   RoomActor,
@@ -128,7 +131,7 @@ const sessionView = (
   member: RoomMember,
 ): ArenaRoomSessionView => ({
   ...view(roomId, state.snapshot.roomEpoch, member),
-  snapshot: structuredClone(state.snapshot),
+  snapshot: projectArenaRoomSnapshotForViewer(state.snapshot, member.userId),
 });
 
 export const createArenaRoomMembershipService = (
@@ -408,10 +411,7 @@ export const createArenaRoomMembershipService = (
     async getSession(input) {
       if (!validAccountUserId(input.accountUserId)) return fail('ROOM_INPUT_INVALID');
       const membership = await resolveRecord(input);
-      return {
-        ...view(membership.roomId, membership.roomEpoch, membership.member),
-        snapshot: structuredClone(membership.state.snapshot),
-      };
+      return sessionView(membership.roomId, membership.state, membership.member);
     },
   });
 };

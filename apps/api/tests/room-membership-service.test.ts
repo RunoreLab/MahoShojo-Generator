@@ -212,6 +212,66 @@ describe('Arena Room membership service', () => {
       .toHaveLength(1);
   });
 
+  it('session snapshot 只向 host 暴露全部 Proposal，member 只能看到自己的 Proposal', async () => {
+    const { registry, service } = createHarness();
+    const host = await service.create({
+      accountUserId: 101,
+      displayName: 'Host',
+      sharedConfig: createArenaRoomState().snapshot.sharedConfig,
+    });
+    const author = await service.join({
+      roomId: host.roomId,
+      accountUserId: 202,
+      displayName: 'Author',
+    });
+    await service.join({
+      roomId: host.roomId,
+      accountUserId: 303,
+      displayName: 'Other',
+    });
+    const actor = registry.get(host.roomId);
+    if (!actor) throw new Error('actor missing');
+    const submitted = await actor.execute({
+      authority: {
+        kind: 'authenticated-user',
+        actorUserId: author.member.userId,
+        accountUserId: 202,
+      },
+      command: {
+        type: 'submit-proposal',
+        expectedRoomEpoch: host.roomEpoch,
+        timestamp: '2026-08-28T00:04:00.000Z',
+        proposal: {
+          proposalVersion: 1,
+          proposalId: 'proposal-private',
+          roomId: host.roomId,
+          authorUserId: author.member.userId,
+          baseRevision: 0,
+          status: 'submitted',
+          changes: [{
+            changeId: 'guidance-1',
+            type: 'setUserGuidance',
+            value: '仅作者与房主可见',
+            expectedBase: { kind: 'value', value: '' },
+          }],
+          createdAt: '2026-08-28T00:04:00.000Z',
+        },
+      },
+    });
+    expect(submitted.ok).toBe(true);
+
+    const [hostSession, authorSession, otherSession] = await Promise.all([
+      service.getSession({ roomId: host.roomId, accountUserId: 101 }),
+      service.getSession({ roomId: host.roomId, accountUserId: 202 }),
+      service.getSession({ roomId: host.roomId, accountUserId: 303 }),
+    ]);
+    expect(hostSession.snapshot.proposals.map((proposal) => proposal.proposalId))
+      .toEqual(['proposal-private']);
+    expect(authorSession.snapshot.proposals.map((proposal) => proposal.proposalId))
+      .toEqual(['proposal-private']);
+    expect(otherSession.snapshot.proposals).toEqual([]);
+  });
+
   it('member leave/kick revokes durable membership，host explicit leave closes room', async () => {
     const { service, store } = createHarness();
     const host = await service.create({
