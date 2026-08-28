@@ -11,6 +11,7 @@ import {
   issueArenaRoomDeadlineCloseAuthority,
   issueArenaRoomQuotaCloseAuthority,
   issueArenaRoomRecoveryAuthority,
+  parseArenaRoomAuthorityContext,
   parseArenaRoomAuthorityState,
   transitionArenaRoom,
   type ArenaRoomAuthorityState,
@@ -445,11 +446,9 @@ export class RoomActor {
     if (this.phase === 'closed') return fail('ROOM_ACTOR_SHUTTING_DOWN');
     if (this.phase === 'fenced') return fail('ROOM_ACTOR_FENCED');
     const command = input.command as ArenaRoomCommand;
+    const authority = parseArenaRoomAuthorityContext(input.authority);
     const deadlineClose = command.type === 'close'
-      && typeof input.authority === 'object'
-      && input.authority !== null
-      && 'kind' in input.authority
-      && input.authority.kind === 'room-deadline-closer';
+      && authority?.kind === 'room-deadline-closer';
     if (!deadlineClose && await this.enforceExpiredDeadlineAtBoundary(this.options.now())) {
       return { ok: false, code: 'room-closed', reason: 'room-closed' };
     }
