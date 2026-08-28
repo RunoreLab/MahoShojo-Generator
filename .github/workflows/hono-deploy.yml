@@ -137,7 +137,7 @@ jobs:
           fi
 
           pnpm --filter @mahoshojo/api run verify:arena-redis
-          ROOM_REDIS_VERIFY_KEY_PREFIX=gmr10-deploy-build \
+          ROOM_REDIS_VERIFY=true ROOM_REDIS_VERIFY_KEY_PREFIX=gmr10-deploy-build \
             pnpm --filter @mahoshojo/api run verify:room-redis
           REDIS_URL=redis://127.0.0.1:6379/15 pnpm run verify:hosted-dr:redis
           pnpm run verify:server:runtime

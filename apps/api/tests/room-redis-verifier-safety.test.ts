@@ -11,6 +11,7 @@ const CHILD_TIMEOUT_MS = 10_000;
 const runAgainstTcpSentinel = async (input: Readonly<{
   verifier: keyof typeof verifierPaths;
   hostedApiEnvironment: string;
+  roomRedisVerify?: string;
 }>) => {
   let connections = 0;
   const sockets = new Set<Socket>();
@@ -33,6 +34,7 @@ const runAgainstTcpSentinel = async (input: Readonly<{
       HOSTED_API_ENVIRONMENT: input.hostedApiEnvironment,
       NODE_ENV: 'test',
       REDIS_URL: `redis://127.0.0.1:${address.port}`,
+      ROOM_REDIS_VERIFY: input.roomRedisVerify ?? 'true',
       ROOM_REDIS_VERIFY_KEY_PREFIX: 'gmr10-room-safety',
       ROOM_GENERATION_REDIS_VERIFY: 'true',
       ROOM_GENERATION_REDIS_VERIFY_KEY_PREFIX: 'gmr10-generation-safety',
@@ -77,4 +79,21 @@ describe.each(['room', 'generation'] as const)('%s Redis verifier environment sa
       expect(result.stderr).toContain('只允许 HOSTED_API_ENVIRONMENT=local/test');
     },
   );
+});
+
+describe('Room Redis verifier opt-in safety', () => {
+  test('缺失 ROOM_REDIS_VERIFY=true 时在任何 Redis 副作用前 fail closed', async () => {
+    const result = await runAgainstTcpSentinel({
+      verifier: 'room',
+      hostedApiEnvironment: 'local',
+      roomRedisVerify: '',
+    });
+    expect(result).toMatchObject({
+      connections: 0,
+      exitCode: 1,
+      signal: null,
+      timedOut: false,
+    });
+    expect(result.stderr).toContain('只允许 ROOM_REDIS_VERIFY=true');
+  });
 });

@@ -68,7 +68,7 @@ const EXPECTED_DRILLS = Object.freeze([
       path: 'apps/api/scripts/verify-room-redis.ts',
       selector: 'directoryDisconnectedRuntimeFailClosed',
     },
-    command: 'HOSTED_API_ENVIRONMENT=local REDIS_URL=redis://127.0.0.1:6379 ROOM_REDIS_VERIFY_KEY_PREFIX=gmr10_unavailable pnpm --filter @mahoshojo/api run verify:room-redis',
+    command: 'HOSTED_API_ENVIRONMENT=local REDIS_URL=redis://127.0.0.1:6379 ROOM_REDIS_VERIFY=true ROOM_REDIS_VERIFY_KEY_PREFIX=gmr10_unavailable pnpm --filter @mahoshojo/api run verify:room-redis',
     recovery: {
       classification: 'recoverable',
       expectation: 'Redis seam 恢复后只能从已提交 checkpoint 继续或由调用方显式重试',
@@ -122,7 +122,7 @@ const EXPECTED_DRILLS = Object.freeze([
       path: 'apps/api/scripts/verify-room-redis.ts',
       selector: 'directoryStaleCleanup',
     },
-    command: 'HOSTED_API_ENVIRONMENT=local REDIS_URL=redis://127.0.0.1:6379 ROOM_REDIS_VERIFY_KEY_PREFIX=gmr10_directory pnpm --filter @mahoshojo/api run verify:room-redis',
+    command: 'HOSTED_API_ENVIRONMENT=local REDIS_URL=redis://127.0.0.1:6379 ROOM_REDIS_VERIFY=true ROOM_REDIS_VERIFY_KEY_PREFIX=gmr10_directory pnpm --filter @mahoshojo/api run verify:room-redis',
     recovery: {
       classification: 'recoverable',
       expectation: 'stale/orphan candidate 只做 exact lazy cleanup，并保留并发 replacement',

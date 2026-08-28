@@ -53,6 +53,9 @@ import { RedisRuntime } from '../src/redis/runtime';
 
 const redisUrl = process.env.REDIS_URL?.trim();
 if (!redisUrl) throw new Error('Room Redis verifier 需要 REDIS_URL');
+if (process.env.ROOM_REDIS_VERIFY?.trim().toLowerCase() !== 'true') {
+  throw new Error('Room Redis verifier 只允许 ROOM_REDIS_VERIFY=true');
+}
 const hostedApiEnvironment = process.env.HOSTED_API_ENVIRONMENT?.trim().toLowerCase();
 if (hostedApiEnvironment !== 'local' && hostedApiEnvironment !== 'test') {
   throw new Error('Room Redis verifier 只允许 HOSTED_API_ENVIRONMENT=local/test');

@@ -54,6 +54,7 @@ jobs:
         env:
           HOSTED_API_ENVIRONMENT: local
           REDIS_URL: redis://127.0.0.1:6379
+          ROOM_REDIS_VERIFY: 'true'
           ROOM_REDIS_VERIFY_KEY_PREFIX: gmr10-room-ci
         run: pnpm --filter @mahoshojo/api run verify:room-redis
 
@@ -77,6 +78,7 @@ jobs:
         env:
           HOSTED_API_ENVIRONMENT: local
           REDIS_URL: redis://127.0.0.1:6392
+          ROOM_REDIS_VERIFY: 'true'
           ROOM_REDIS_VERIFY_KEY_PREFIX: gmr10-restart-ci
         run: |
           set -euo pipefail
