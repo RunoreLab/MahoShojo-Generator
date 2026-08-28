@@ -2,6 +2,7 @@ import {
   OpaqueKeySchema,
   RoomRevisionSchema,
   type ArenaProposalChange,
+  type ArenaRoomProposalSubmitRequest,
   type ArenaRoomSharedConfig,
   type ArenaRoomSnapshot,
 } from '@mahoshojo/contracts/arena-room';
@@ -38,12 +39,7 @@ export type ArenaProposalPreview = {
  * The only mutation body that the Web editor may construct. The server adds
  * author, status, timestamp, and room identity from its authenticated context.
  */
-export type ArenaProposalSubmitIntent = {
-  readonly proposalId: string;
-  readonly expectedRoomEpoch: string;
-  readonly baseRevision: number;
-  readonly changes: readonly ArenaProposalChange[];
-};
+export type ArenaProposalSubmitIntent = ArenaRoomProposalSubmitRequest;
 
 export type ArenaProposalEditorErrorCode =
   | 'invalid-snapshot'

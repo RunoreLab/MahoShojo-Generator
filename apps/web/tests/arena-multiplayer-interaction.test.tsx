@@ -4,6 +4,7 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import type { ArenaRoomSharedConfig } from '@mahoshojo/contracts/arena-room';
 import type { ArenaRoomControllerState } from '@/lib/arena-room/controller';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -15,6 +16,9 @@ const mocks = vi.hoisted(() => ({
   discover: vi.fn(async () => undefined),
   join: vi.fn(async () => undefined),
   leave: vi.fn(async () => undefined),
+  submitProposal: vi.fn(async () => undefined),
+  resolveProposal: vi.fn(async () => undefined),
+  withdrawProposal: vi.fn(async () => undefined),
   reconnect: vi.fn(),
   reset: vi.fn(),
   state: null as ArenaRoomControllerState | null,
@@ -28,6 +32,9 @@ vi.mock('@/components/arena/multiplayer/useArenaRoom', () => ({
       discover: mocks.discover,
       join: mocks.join,
       leave: mocks.leave,
+      submitProposal: mocks.submitProposal,
+      resolveProposal: mocks.resolveProposal,
+      withdrawProposal: mocks.withdrawProposal,
       reconnect: mocks.reconnect,
       reset: mocks.reset,
     },
@@ -56,7 +63,7 @@ const readyState: ArenaRoomControllerState = {
   proposalResultUnknown: false,
 };
 
-const sharedConfig = {
+const sharedConfig: ArenaRoomSharedConfig = {
   battleMode: 'classic',
   combatants: [{
     key: 'host-local:character:1',
@@ -167,5 +174,46 @@ describe('Arena multiplayer panel real React interactions', () => {
     expect(mocks.create).not.toHaveBeenCalled();
     expect(mocks.discover).not.toHaveBeenCalled();
     expect(mocks.join).not.toHaveBeenCalled();
+  });
+
+  it('connected member 通过生产面板 wiring 获得 detached Proposal editor', async () => {
+    const host = {
+      userId: 'host-1',
+      role: 'host' as const,
+      displayName: '房主',
+      membershipState: 'active' as const,
+    };
+    const member = {
+      userId: 'member-1',
+      role: 'member' as const,
+      displayName: '成员',
+      membershipState: 'active' as const,
+    };
+    mocks.state = {
+      ...readyState,
+      phase: 'connected',
+      session: {
+        protocolVersion: 1,
+        roomId: 'room-1',
+        roomEpoch: 'epoch-1',
+        self: member,
+        snapshot: {
+          protocolVersion: 1,
+          schemaVersion: 1,
+          roomId: 'room-1',
+          roomEpoch: 'epoch-1',
+          revision: 0,
+          controlSeq: 0,
+          sharedConfig,
+          members: [host, member],
+          proposals: [],
+          activeGeneration: null,
+        },
+      },
+    };
+    await act(async () => root.render(<ArenaMultiplayerPanel {...props} />));
+    expect(container.textContent).toContain('Shared Config 草稿');
+    expect(container.textContent).toContain('同步当前房间配置');
+    expect(container.textContent).not.toContain('Proposal 审阅箱');
   });
 });

@@ -1,12 +1,13 @@
 'use client';
 
-import { useRef, useState, type ChangeEvent } from 'react';
+import { useRef, useState, type ChangeEvent, type ReactNode } from 'react';
 
 import type { RoomDirectoryVisibility } from '@mahoshojo/contracts/arena-room';
 
 import type { ArenaRoomControllerState } from '@/lib/arena-room/controller';
 import { buildArenaRoomSharedConfigFromBattleState } from '@/lib/arena-room/shared-config';
 import { useBattleStore } from '@/components/arena/stores/useBattleStore';
+import { ArenaProposalPanel } from './ArenaProposalPanel';
 import { useArenaRoom } from './useArenaRoom';
 
 export type ArenaMultiplayerPanelProps = {
@@ -21,6 +22,7 @@ export type ArenaMultiplayerPanelViewProps = {
   readonly state: ArenaRoomControllerState;
   readonly authLoading: boolean;
   readonly actionPending?: boolean;
+  readonly proposalContent?: ReactNode;
   readonly roomTitle: string;
   readonly visibility: RoomDirectoryVisibility;
   readonly joinCode: string;
@@ -122,6 +124,8 @@ export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps)
               ))}
             </ul>
           </div>
+
+          {props.proposalContent}
 
           <div className="flex flex-wrap gap-2">
             {state.phase === 'degraded' || state.phase === 'reconnecting' ? (
@@ -301,6 +305,7 @@ export function ArenaMultiplayerPanel(props: ArenaMultiplayerPanelProps) {
       state={viewState}
       authLoading={props.authLoading}
       actionPending={preparingCreate}
+      proposalContent={<ArenaProposalPanel state={viewState} controller={controller} />}
       roomTitle={roomTitle}
       visibility={visibility}
       joinCode={joinCode}
