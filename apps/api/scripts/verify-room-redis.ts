@@ -27,6 +27,7 @@ import {
   createRedisRoomDirectoryRegistrationStore,
 } from '../src/arena-room/redis-room-directory-registration-store';
 import { createArenaRoomMembershipService } from '../src/arena-room/room-membership-service';
+import { createArenaRoomProposalService } from '../src/arena-room/room-proposal-service';
 import {
   createArenaRoomTicketCodec,
   createArenaRoomTicketSignatureService,
@@ -90,6 +91,7 @@ const invalidExpireFenceRoomId = `room-invalid-expire-fence-${token}`;
 const fullMutationFenceRoomId = `room-full-mutation-fence-${token}`;
 const recoveryRoomId = `room-recovery-${token}`;
 const actorRoomId = `room-actor-${token}`;
+const proposalRoomId = `room-proposal-${token}`;
 const authorityRoomId = `room-authority-${token}`;
 const directoryRegistrationRoomId = `room-directory-registration-${token}`;
 const directoryPendingRoomId = `room-directory-pending-${token}`;
@@ -906,6 +908,81 @@ try {
       }
       await Promise.all([oldActorRegistry.shutdown(), recoveredActorRegistry.shutdown()]);
 
+      const proposalActors = createRoomActorRegistry({
+        store: writerStore,
+        createRoomIdentity: () => ({
+          roomId: proposalRoomId,
+          roomEpoch: 'proposal-epoch-1',
+        }),
+        createTimestamp: () => TIMESTAMP,
+        now: nowAt(THIRD_TIMESTAMP),
+      });
+      let proposalUserIndex = 0;
+      const proposalMemberships = createArenaRoomMembershipService({
+        actors: proposalActors,
+        createUserId: () => `proposal-user-${++proposalUserIndex}`,
+        now: () => NEXT_TIMESTAMP,
+      });
+      const proposalHost = await proposalMemberships.create({
+        accountUserId: 101,
+        displayName: 'Proposal host',
+        sharedConfig: sharedConfig(),
+      });
+      await proposalMemberships.join({
+        roomId: proposalHost.roomId,
+        accountUserId: 202,
+        displayName: 'Proposal member',
+      });
+      const proposalService = createArenaRoomProposalService({
+        memberships: proposalMemberships,
+        references: { verify: async ({ refs }) => refs },
+        now: () => THIRD_TIMESTAMP,
+      });
+      const proposalSubmitted = await proposalService.submit({
+        roomId: proposalRoomId,
+        accountUserId: 202,
+        request: {
+          proposalId: 'redis-proposal-1',
+          expectedRoomEpoch: proposalHost.roomEpoch,
+          baseRevision: 0,
+          changes: [{
+            changeId: 'guidance-1',
+            type: 'setUserGuidance',
+            value: 'redis-proposal-applied',
+            expectedBase: { kind: 'value', value: '' },
+          }],
+        },
+      });
+      if (
+        proposalSubmitted.status !== 'submitted'
+        || (await readerStore.load(proposalRoomId))?.snapshot.proposals[0]?.proposalId
+          !== 'redis-proposal-1'
+      ) {
+        throw new Error('ROOM_REDIS_PROPOSAL_SUBMIT_FAILED');
+      }
+      const proposalResolved = await proposalService.resolve({
+        roomId: proposalRoomId,
+        proposalId: 'redis-proposal-1',
+        accountUserId: 101,
+        request: {
+          expectedRoomEpoch: proposalHost.roomEpoch,
+          expectedRevision: 0,
+          resolution: 'accept-selected',
+          selectedChangeIds: ['guidance-1'],
+        },
+      });
+      const persistedProposalResolution = await readerStore.load(proposalRoomId);
+      if (
+        proposalResolved.status !== 'accepted'
+        || proposalResolved.revision !== 1
+        || persistedProposalResolution?.snapshot.sharedConfig.userGuidance
+          !== 'redis-proposal-applied'
+        || persistedProposalResolution.snapshot.proposals.length !== 0
+      ) {
+        throw new Error('ROOM_REDIS_PROPOSAL_RESOLVE_FAILED');
+      }
+      await proposalActors.shutdown();
+
       const directoryRegistrations = writer.getRoomDirectoryRegistrationStore();
       const directoryRegistration = {
         roomId: directoryRegistrationRoomId,
@@ -1478,6 +1555,7 @@ try {
         serverIssuedRoomIdentity: true,
         roomActorWarmRecovery: true,
         roomActorOldWriterFence: true,
+        proposalLifecycle: true,
         directoryRegistration: true,
         directoryRecoveryCompensation: true,
         directoryCloseCompensation: true,
@@ -1528,6 +1606,7 @@ try {
       ...roomKeys(fullMutationFenceRoomId),
       ...roomKeys(recoveryRoomId),
       ...roomKeys(actorRoomId),
+      ...roomKeys(proposalRoomId),
       ...roomKeys(authorityRoomId),
       ...roomKeys(directoryPendingRoomId),
       ...roomKeys(directoryPendingRaceRoomId),
