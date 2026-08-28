@@ -18,6 +18,7 @@ const CLOSE_SERVICE_RESTART = 1012;
 const CLOSE_TRY_AGAIN_LATER = 1013;
 
 const DEFAULT_CONNECTION_MESSAGE_LIMIT = 30;
+const DEFAULT_CLOSE_GRACE_MS = 5_000;
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 30_000;
 const DEFAULT_HEARTBEAT_TIMEOUT_MS = 10_000;
 const DEFAULT_MAX_CONNECTIONS_PER_USER = 4;
@@ -58,6 +59,7 @@ export const denyRoomWebSocketAuthorization: RoomWebSocketAuthorizer = () => ({
 export interface RoomWebSocketGatewayOptions {
   allowedBrowserOrigins: readonly string[];
   authorize?: RoomWebSocketAuthorizer;
+  closeGraceMs?: number;
   connectionMessageLimit?: number;
   heartbeatIntervalMs?: number;
   heartbeatTimeoutMs?: number;
@@ -152,6 +154,7 @@ const isNonEmptyIdentity = (value: string): boolean => {
 class RoomWebSocketSession {
   private awaitingPongSince: number | undefined;
   private closing = false;
+  private closeTimer: NodeJS.Timeout | null = null;
   private connectionRate: RateWindow;
   private outboundBytes = 0;
   private readonly outboundQueue: OutboundFrame[] = [];
@@ -274,6 +277,8 @@ class RoomWebSocketSession {
       this.closing = true;
       this.outboundQueue.length = 0;
       this.outboundBytes = 0;
+      if (this.closeTimer !== null) clearTimeout(this.closeTimer);
+      this.closeTimer = null;
       this.socket.off('pong', this.handlePong);
       this.socket.off('close', this.handleSocketClose);
       if (this.connection) this.disposeConnection(this.connection);
@@ -342,6 +347,8 @@ class RoomWebSocketSession {
   private close(code: number, reason: string): void {
     if (this.closing) return;
     this.closing = true;
+    this.closeTimer = setTimeout(() => this.terminate(), this.gateway.closeGraceMs);
+    this.closeTimer.unref();
     try {
       this.socket.close(code, reason);
     } catch {
@@ -359,6 +366,7 @@ class RoomWebSocketSession {
 }
 
 export class RoomWebSocketGateway {
+  readonly closeGraceMs: number;
   readonly connectionMessageLimit: number;
   readonly heartbeatTimeoutMs: number;
   readonly outboundQueueMaxBytes: number;
@@ -383,6 +391,10 @@ export class RoomWebSocketGateway {
   constructor(options: RoomWebSocketGatewayOptions) {
     this.allowedBrowserOrigins = new Set(options.allowedBrowserOrigins);
     this.authorize = options.authorize ?? denyRoomWebSocketAuthorization;
+    this.closeGraceMs = assertPositiveInteger(
+      'closeGraceMs',
+      options.closeGraceMs ?? DEFAULT_CLOSE_GRACE_MS,
+    );
     this.connectionMessageLimit = assertPositiveInteger(
       'connectionMessageLimit',
       options.connectionMessageLimit ?? DEFAULT_CONNECTION_MESSAGE_LIMIT,

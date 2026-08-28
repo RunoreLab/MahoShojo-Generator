@@ -1,5 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 
+import { ARENA_ROOM_WEBSOCKET_PROTOCOL } from '@mahoshojo/contracts/arena-room';
+
 import {
   checkpointPredecessorOf,
   createArenaRoomCheckpointCommit,
@@ -16,6 +18,18 @@ import {
   type RedisRoomClient,
 } from '../src/arena-room/redis-room-store';
 import { createRoomActorRegistry } from '../src/arena-room/room-actor-registry';
+import { createArenaRoomMembershipService } from '../src/arena-room/room-membership-service';
+import {
+  createArenaRoomTicketCodec,
+  createArenaRoomTicketSignatureService,
+} from '../src/arena-room/room-ticket';
+import {
+  createArenaRoomWebSocketAuthority,
+} from '../src/arena-room/room-websocket-authority';
+import {
+  ARENA_ROOM_WEBSOCKET_PATH,
+  RoomWebSocketGateway,
+} from '../src/arena-room/room-websocket-gateway';
 import { RedisRuntime } from '../src/redis/runtime';
 
 const redisUrl = process.env.REDIS_URL?.trim();
@@ -54,6 +68,7 @@ const ttlRoomId = `room-ttl-${token}`;
 const epochRoomId = `room-epoch-${token}`;
 const expiryFenceRoomId = `room-expiry-fence-${token}`;
 const legacyRoomId = `room-legacy-v1-${token}`;
+const legacyAuthorityRoomId = `room-authority-v1-${token}`;
 const legacyRecoveryRoomId = `room-legacy-recovery-${token}`;
 const legacyLoadTtlRoomId = `room-legacy-load-ttl-${token}`;
 const legacyLoadRaceRoomId = `room-legacy-load-race-${token}`;
@@ -66,7 +81,9 @@ const invalidExpireFenceRoomId = `room-invalid-expire-fence-${token}`;
 const fullMutationFenceRoomId = `room-full-mutation-fence-${token}`;
 const recoveryRoomId = `room-recovery-${token}`;
 const actorRoomId = `room-actor-${token}`;
+const authorityRoomId = `room-authority-${token}`;
 const ticketJti = `verifier:${token}`;
+const authorityTicketJti = `authority:${token}`;
 const roomHash = (id: string): string => createHash('sha256').update(id).digest('hex');
 const roomKey = (id: string): string => (
   `mahoshojo:room:v1:${keyPrefix}:${roomHash(id)}:checkpoint`
@@ -77,6 +94,8 @@ const roomFenceKey = (id: string): string => (
 const roomKeys = (id: string): string[] => [roomKey(id), roomFenceKey(id)];
 const ticketReplayKey = `mahoshojo:room-ticket:v1:${keyPrefix}:${createHash('sha256')
   .update(ticketJti).digest('hex')}`;
+const authorityTicketReplayKey = `mahoshojo:room-ticket:v1:${keyPrefix}:${createHash('sha256')
+  .update(authorityTicketJti).digest('hex')}`;
 
 const sharedConfig = () => ({
   battleMode: 'classic' as const,
@@ -212,6 +231,15 @@ try {
   const writerStore = writer.getRoomStore();
 
   if (phase === 'read') {
+    const replayNow = Date.now();
+    const persistedTicket = await reader.getRoomTicketReplayStore().consume({
+      jti: ticketJti,
+      nowMs: replayNow,
+      expiresAtMs: replayNow + 60_000,
+    });
+    if (persistedTicket.kind !== 'replayed') {
+      throw new Error('ROOM_REDIS_RESTART_TICKET_REPLAY_FAILED');
+    }
     const recoveredRegistry = createRoomActorRegistry({
       store: readerStore,
       createRoomEpoch: () => `restart-recovered-${token}`,
@@ -249,6 +277,7 @@ try {
       roomActorRestartRecovery: true,
       oldActorFence: true,
       incarnationFence: true,
+      ticketReplayAfterRestart: true,
     }));
   } else if (phase === 'write') {
     const registry = createRoomActorRegistry({
@@ -282,11 +311,21 @@ try {
     if (JSON.stringify(await readerStore.load(roomId)) !== JSON.stringify(mutated.nextState)) {
       throw new Error('ROOM_ACTOR_RESTART_WRITE_CHECKPOINT_FAILED');
     }
+    const replayNow = Date.now();
+    const consumedTicket = await writer.getRoomTicketReplayStore().consume({
+      jti: ticketJti,
+      nowMs: replayNow,
+      expiresAtMs: replayNow + 60_000,
+    });
+    if (consumedTicket.kind !== 'consumed') {
+      throw new Error('ROOM_REDIS_RESTART_TICKET_WRITE_FAILED');
+    }
     console.info(JSON.stringify({
       roomRedis: true,
       phase: 'write',
       acknowledged: true,
       roomActorCheckpoint: true,
+      ticketReplayPersisted: true,
     }));
   } else {
     const createdTransition = createRoom(roomId);
@@ -489,6 +528,40 @@ try {
       ) {
         throw new Error('ROOM_REDIS_LEGACY_V1_TOMBSTONE_FAILED');
       }
+
+      const legacyAuthorityV2 = createRoom(legacyAuthorityRoomId).nextState;
+      const legacyAuthorityV1 = structuredClone(legacyAuthorityV2) as unknown as Record<string, unknown>;
+      legacyAuthorityV1.authorityStateVersion = 1;
+      delete legacyAuthorityV1.deadlines;
+      await cleanup.set(roomKey(legacyAuthorityRoomId), JSON.stringify({
+        checkpointVersion: 1,
+        ...checkpointPredecessorOf(legacyAuthorityV2),
+        state: legacyAuthorityV1,
+      }), { PX: 3_600_000 });
+      const migratedAuthority = await readerStore.load(legacyAuthorityRoomId);
+      const migratedAuthorityRaw = JSON.parse(
+        await cleanup.get(roomKey(legacyAuthorityRoomId)) || 'null',
+      ) as { state?: { authorityStateVersion?: number } } | null;
+      if (
+        migratedAuthority?.authorityStateVersion !== 2
+        || migratedAuthority.deadlines.hostOfflineDeadline !== migratedAuthority.lifecycle.updatedAt
+        || migratedAuthorityRaw?.state?.authorityStateVersion !== 2
+      ) {
+        throw new Error('ROOM_REDIS_AUTHORITY_V1_MIGRATION_FAILED');
+      }
+      const legacyAuthorityRegistry = createRoomActorRegistry({
+        store: writerStore,
+        now: () => Date.parse(NEXT_TIMESTAMP),
+      });
+      const legacyAuthorityActor = await legacyAuthorityRegistry.recover(legacyAuthorityRoomId);
+      const legacyAuthoritySnapshot = legacyAuthorityActor?.getSnapshot();
+      if (
+        legacyAuthoritySnapshot?.lifecycle.status !== 'closed'
+        || legacyAuthoritySnapshot.lifecycle.closeReason !== 'host-offline-timeout'
+      ) {
+        throw new Error('ROOM_REDIS_AUTHORITY_V1_FAIL_CLOSED_FAILED');
+      }
+      await legacyAuthorityRegistry.shutdown();
 
       const legacyRecoveryState = createRoom(legacyRecoveryRoomId, 'legacy-epoch-1').nextState;
       await cleanup.set(roomKey(legacyRecoveryRoomId), JSON.stringify({
@@ -790,6 +863,68 @@ try {
         throw new Error('ROOM_ACTOR_OLD_WRITER_MUTATED_RECOVERY');
       }
       await Promise.all([oldActorRegistry.shutdown(), recoveredActorRegistry.shutdown()]);
+
+      const authorityActors = createRoomActorRegistry({
+        store: writerStore,
+        createRoomIdentity: () => ({ roomId: authorityRoomId, roomEpoch: 'authority-epoch-1' }),
+        createTimestamp: () => TIMESTAMP,
+      });
+      const authorityMemberships = createArenaRoomMembershipService({
+        actors: authorityActors,
+        createUserId: () => 'authority-host-1',
+        now: () => NEXT_TIMESTAMP,
+      });
+      await authorityMemberships.create({
+        accountUserId: 101,
+        displayName: 'Host',
+        sharedConfig: sharedConfig(),
+      });
+      const authority = createArenaRoomWebSocketAuthority({
+        actors: authorityActors,
+        memberships: authorityMemberships,
+        replay: writer.getRoomTicketReplayStore(),
+        tickets: createArenaRoomTicketCodec({
+          signatures: createArenaRoomTicketSignatureService({
+            env: { SIGNATURE_SECRET_KEY: 'room-redis-verifier-secret-at-least-32-characters' },
+            logger: { warn: () => undefined, error: () => undefined },
+          }),
+          createJti: () => authorityTicketJti,
+        }),
+      });
+      const gateway = new RoomWebSocketGateway({
+        allowedBrowserOrigins: ['https://app.example.test'],
+        authorize: authority.authorize,
+        heartbeatIntervalMs: 60_000,
+        heartbeatTimeoutMs: 60_000,
+      });
+      const authorityTicket = await authority.issue({
+        roomId: authorityRoomId,
+        accountUserId: 101,
+      });
+      const upgradeRequest = () => new Request(
+        `http://localhost${ARENA_ROOM_WEBSOCKET_PATH}?ticket=${encodeURIComponent(authorityTicket)}`,
+        {
+          headers: {
+            connection: 'Upgrade',
+            origin: 'https://app.example.test',
+            'sec-websocket-key': Buffer.alloc(16, 7).toString('base64'),
+            'sec-websocket-protocol': ARENA_ROOM_WEBSOCKET_PROTOCOL,
+            'sec-websocket-version': '13',
+            upgrade: 'websocket',
+          },
+        },
+      );
+      const authorizedUpgrade = await gateway.prepareUpgrade(upgradeRequest());
+      const replayedUpgrade = await gateway.prepareUpgrade(upgradeRequest());
+      if (
+        !authorizedUpgrade.accepted
+        || replayedUpgrade.accepted
+        || replayedUpgrade.response.status !== 401
+      ) {
+        throw new Error('ROOM_REDIS_AUTHORITY_GATEWAY_WIRING_FAILED');
+      }
+      gateway.forceClose();
+      await authorityActors.shutdown();
       console.info(JSON.stringify({
         roomRedis: true,
         phase: 'full',
@@ -813,11 +948,13 @@ try {
         roomActorOldWriterFence: true,
         activeTtlRefresh: true,
         ticketReplay: true,
+        authorityGatewayRedisWiring: true,
         terminalTtl: true,
         monotonicExpiryFence: true,
         expireDelete: true,
         malformedExisting: true,
         baselineV1Compatibility: true,
+        authorityStateV1Migration: true,
         ttlExpiry: true,
       }));
   }
@@ -832,6 +969,7 @@ try {
       ...roomKeys(epochRoomId),
       ...roomKeys(expiryFenceRoomId),
       ...roomKeys(legacyRoomId),
+      ...roomKeys(legacyAuthorityRoomId),
       ...roomKeys(legacyRecoveryRoomId),
       ...roomKeys(legacyLoadTtlRoomId),
       ...roomKeys(legacyLoadRaceRoomId),
@@ -844,7 +982,9 @@ try {
       ...roomKeys(fullMutationFenceRoomId),
       ...roomKeys(recoveryRoomId),
       ...roomKeys(actorRoomId),
+      ...roomKeys(authorityRoomId),
       ticketReplayKey,
+      authorityTicketReplayKey,
     ]);
   }
   await cleanup.quit();

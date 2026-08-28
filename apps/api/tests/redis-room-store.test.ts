@@ -220,6 +220,48 @@ describe('RedisRoomStore', () => {
     expect(options.arguments.at(-1)).toBe('16');
   });
 
+  it('exact-CAS 安装 authority state v1->v2 fail-closed migration 并保留 predecessor', async () => {
+    const client = createClient();
+    const current = createArenaRoomState();
+    const legacyState = structuredClone(current) as unknown as Record<string, unknown>;
+    legacyState.authorityStateVersion = 1;
+    delete legacyState.deadlines;
+    const raw = JSON.stringify({
+      checkpointVersion: 1,
+      ...checkpointPredecessorOf(current),
+      state: legacyState,
+    });
+    vi.mocked(client.get).mockResolvedValue(raw);
+    vi.mocked(client.eval)
+      .mockResolvedValueOnce('seeded')
+      .mockResolvedValueOnce('migrated');
+    const store = createRedisRoomStore({ getClient: () => client });
+
+    await expect(store.load('room-1')).resolves.toMatchObject({
+      authorityStateVersion: 2,
+      deadlines: {
+        hostOfflineDeadline: current.lifecycle.updatedAt,
+        roomIdleDeadline: current.lifecycle.updatedAt,
+      },
+      snapshot: checkpointPredecessorOf(current),
+    });
+    expect(vi.mocked(client.eval).mock.calls[0]?.[0])
+      .toContain('ROOM_CHECKPOINT_BOOTSTRAP_FENCE_V1');
+    expect(vi.mocked(client.eval).mock.calls[0]?.[1].arguments[0]).toBe(raw);
+    expect(vi.mocked(client.eval).mock.calls[1]?.[0])
+      .toContain('ROOM_CHECKPOINT_AUTHORITY_V1_MIGRATE_V2');
+    expect(vi.mocked(client.eval).mock.calls[1]?.[0]).toContain("'KEEPTTL'");
+    const migratedRaw = vi.mocked(client.eval).mock.calls[1]?.[1].arguments[1];
+    expect(JSON.parse(migratedRaw!).state).toMatchObject({
+      authorityStateVersion: 2,
+      deadlines: {
+        hostOfflineDeadline: current.lifecycle.updatedAt,
+        roomIdleDeadline: current.lifecycle.updatedAt,
+      },
+    });
+    expect(vi.mocked(client.eval).mock.calls[1]?.[1].arguments[0]).toBe(raw);
+  });
+
   it('legacy fence bootstrap 与并发 checkpoint 变化冲突时重读，不返回未围住的旧 state', async () => {
     const client = createClient();
     const first = createArenaRoomState('epoch-1');

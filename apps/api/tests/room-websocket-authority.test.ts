@@ -28,6 +28,7 @@ import { createArenaRoomState } from './arena-room-fixtures';
 
 class MemoryRoomStore implements RoomActorCheckpointStore {
   state: ArenaRoomAuthorityState | null = null;
+  refreshResult: 'conflict' | 'refreshed' = 'refreshed';
 
   async load(roomId: string) {
     return this.state?.snapshot.roomId === roomId ? structuredClone(this.state) : null;
@@ -47,7 +48,7 @@ class MemoryRoomStore implements RoomActorCheckpointStore {
   }
 
   async refresh() {
-    return { kind: 'refreshed' as const };
+    return { kind: this.refreshResult };
   }
 }
 
@@ -93,7 +94,7 @@ const activate = async (
   return grant.connectionAuthority.activate(peer);
 };
 
-const createHarness = async () => {
+const createHarness = async (maxSubscribersPerRoom?: number) => {
   const store = new MemoryRoomStore();
   const replay = new MemoryTicketReplayStore();
   let now = Date.parse('2026-08-28T00:00:00.000Z');
@@ -104,6 +105,7 @@ const createHarness = async () => {
     createRoomIdentity: () => ({ roomId: 'room-1', roomEpoch: 'epoch-1' }),
     createTimestamp: () => new Date(now).toISOString(),
     now: () => now,
+    ...(maxSubscribersPerRoom === undefined ? {} : { maxSubscribersPerRoom }),
   });
   const memberships = createArenaRoomMembershipService({
     actors,
@@ -364,5 +366,41 @@ describe('Arena Room ticket -> membership -> presence WSS authority', () => {
     });
     await expect(unavailable.authorize(requestForTicket(ticket)))
       .resolves.toEqual({ accepted: false, code: 'ROOM_TICKET_AUTH_UNAVAILABLE', status: 503 });
+  });
+
+  it('subscriber capacity 失败时回滚 connection presence，不遗留伪在线用户', async () => {
+    const harness = await createHarness(1);
+    const hostTicket = await harness.authority.issue({ roomId: 'room-1', accountUserId: 101 });
+    const memberTicket = await harness.authority.issue({ roomId: 'room-1', accountUserId: 202 });
+    const hostConnection = await activate(
+      await harness.authority.authorize(requestForTicket(hostTicket)),
+      createPeer().peer,
+    );
+
+    await expect(activate(
+      await harness.authority.authorize(requestForTicket(memberTicket)),
+      createPeer().peer,
+    )).rejects.toThrow('ROOM_ACTOR_SUBSCRIBER_LIMIT');
+
+    harness.setNow('2026-08-28T00:10:00.000Z');
+    await hostConnection.dispose?.();
+    expect(harness.store.state?.deadlines).toEqual({
+      hostOfflineDeadline: '2026-08-28T00:55:00.000Z',
+      roomIdleDeadline: '2026-08-28T12:10:00.000Z',
+    });
+  });
+
+  it('actor checkpoint fence 主动关闭已有 peer', async () => {
+    const harness = await createHarness();
+    const ticket = await harness.authority.issue({ roomId: 'room-1', accountUserId: 101 });
+    const connected = createPeer();
+    await activate(await harness.authority.authorize(requestForTicket(ticket)), connected.peer);
+    harness.store.refreshResult = 'conflict';
+    const actor = harness.actors.get('room-1');
+    if (!actor) throw new Error('actor missing');
+
+    await actor.refreshCheckpoint(Date.parse('2026-08-28T04:01:00.000Z'));
+
+    expect(connected.closes.at(-1)).toEqual({ code: 1013, reason: 'room-authority-fenced' });
   });
 });

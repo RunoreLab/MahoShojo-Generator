@@ -456,4 +456,32 @@ describe('RoomWebSocketGateway', () => {
     await expect(shutdown).resolves.toBeUndefined();
     expect(socket.terminateCount).toBe(1);
   });
+
+  it('server close 遇到半开客户端时在 close grace 后 terminate 并释放 authority', async () => {
+    vi.useFakeTimers();
+    const dispose = vi.fn();
+    const activate = vi.fn(async () => ({ dispose }));
+    const gateway = createGateway({
+      authorize: async () => ({
+        ...acceptedAuthorization(),
+        connectionAuthority: { activate },
+      }),
+      closeGraceMs: 100,
+      maxConnectionsPerUser: 1,
+    });
+    const decision = await gateway.prepareUpgrade(upgradeRequest());
+    if (!decision.accepted) throw new Error('expected accepted reservation');
+    const { events, socket } = openReservation(gateway, decision.reservation);
+    await vi.waitFor(() => expect(activate).toHaveBeenCalledOnce());
+
+    events.onMessage?.(new MessageEvent('message', { data: new ArrayBuffer(1) }), wsContext(socket));
+    expect(socket.closes.at(-1)).toEqual({ code: 1003, reason: 'binary-not-supported' });
+    expect(dispose).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(100);
+    expect(socket.terminateCount).toBe(1);
+    await vi.waitFor(() => expect(dispose).toHaveBeenCalledOnce());
+    await expect(gateway.prepareUpgrade(upgradeRequest()))
+      .resolves.toMatchObject({ accepted: true });
+  });
 });

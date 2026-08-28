@@ -25,6 +25,7 @@ const DEFAULT_HOST_OFFLINE_GRACE_MS = 45 * 60 * 1_000;
 const DEFAULT_ROOM_IDLE_TTL_MS = 12 * 60 * 60 * 1_000;
 const CLOSE_MEMBERSHIP_REVOKED = 1008;
 const CLOSE_ROOM_TERMINAL = 1000;
+const CLOSE_ROOM_AUTHORITY_UNAVAILABLE = 1013;
 
 export type ArenaRoomWebSocketAuthority = {
   issue(input: {
@@ -213,26 +214,38 @@ export const createArenaRoomWebSocketAuthority = (
       }
 
       let disposed = false;
-      const unsubscribe = membership.actor.subscribe((fanout) => {
-        if (disposed) return;
-        let closeCode: number | undefined;
-        let closeReason: string | undefined;
-        for (const event of fanout.events) {
-          peer.send(event as RoomServerTransportMessage);
-          if (
-            event.type === 'room.member.left'
-            && event.payload.member.userId === claims.userId
-          ) {
-            closeCode = CLOSE_MEMBERSHIP_REVOKED;
-            closeReason = 'membership-revoked';
-          } else if (event.type === 'room.closing') {
-            closeCode = CLOSE_ROOM_TERMINAL;
-            closeReason = 'room-closed';
+      let unsubscribe: (() => void) | undefined;
+      try {
+        unsubscribe = membership.actor.subscribe((fanout) => {
+          if (disposed) return;
+          if (fanout.terminal === 'fenced') {
+            peer.close(CLOSE_ROOM_AUTHORITY_UNAVAILABLE, 'room-authority-fenced');
+            return;
           }
-        }
-        if (closeCode !== undefined && closeReason) peer.close(closeCode, closeReason);
-      });
-      sendControlSync(membership, peer, claims.reconnect);
+          let closeCode: number | undefined;
+          let closeReason: string | undefined;
+          for (const event of fanout.events) {
+            peer.send(event as RoomServerTransportMessage);
+            if (
+              event.type === 'room.member.left'
+              && event.payload.member.userId === claims.userId
+            ) {
+              closeCode = CLOSE_MEMBERSHIP_REVOKED;
+              closeReason = 'membership-revoked';
+            } else if (event.type === 'room.closing') {
+              closeCode = CLOSE_ROOM_TERMINAL;
+              closeReason = 'room-closed';
+            }
+          }
+          if (closeCode !== undefined && closeReason) peer.close(closeCode, closeReason);
+        });
+        sendControlSync(membership, peer, claims.reconnect);
+      } catch (error) {
+        unsubscribe?.();
+        decrement(claims.roomId, claims.userId);
+        await syncPresence(membership);
+        throw error;
+      }
 
       const connection: RoomWebSocketConnection = {
         onMessage: async (message: RoomClientTransportMessage) => {
@@ -256,7 +269,7 @@ export const createArenaRoomWebSocketAuthority = (
         dispose: () => enqueueRoomOperation(claims.roomId, async () => {
           if (disposed) return;
           disposed = true;
-          unsubscribe();
+          unsubscribe?.();
           decrement(claims.roomId, claims.userId);
           await syncPresence(membership);
         }),

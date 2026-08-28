@@ -105,6 +105,7 @@ export type RoomActorFanout = {
   readonly roomEpoch: string;
   readonly snapshot: ArenaRoomAuthorityState['snapshot'];
   readonly events: ArenaRoomTransitionSuccess['events'];
+  readonly terminal?: 'fenced';
 };
 
 export type RoomActorSubscriber = (fanout: RoomActorFanout) => unknown;
@@ -336,6 +337,13 @@ export class RoomActor {
     return result.ok && result.kind === 'applied';
   }
 
+  hasExpiredDeadline(now: number): boolean {
+    return this.phase === 'accepting'
+      && this.state !== null
+      && this.state.lifecycle.status === 'open'
+      && expiredDeadline(this.state, now) !== null;
+  }
+
   isCheckpointRefreshDue(now: number, intervalMs: number): boolean {
     return this.phase === 'accepting'
       && this.state?.lifecycle.status === 'open'
@@ -395,6 +403,21 @@ export class RoomActor {
     this.phase = 'fenced';
     const error = new RoomActorError('ROOM_ACTOR_FENCED');
     for (const entry of this.queue.splice(0)) entry.reject(error);
+    if (this.state !== null) {
+      for (const subscriber of this.subscribers) {
+        try {
+          subscriber({
+            roomId: this.roomId,
+            roomEpoch: this.state.snapshot.roomEpoch,
+            snapshot: structuredClone(this.state.snapshot),
+            events: [],
+            terminal: 'fenced',
+          });
+        } catch (subscriberError) {
+          this.reportSubscriberError(subscriberError);
+        }
+      }
+    }
     this.subscribers.clear();
     this.options.onFenced(this);
   }
@@ -717,7 +740,11 @@ export class RoomActorRegistry {
     this.requireAccepting();
     if (this.fencedRoomIds.has(roomId)) return fail('ROOM_ACTOR_FENCED');
     const current = this.actors.get(roomId);
-    if (current) return current;
+    if (current) {
+      const now = this.now();
+      if (current.hasExpiredDeadline(now)) await current.closeForExpiredDeadline(now);
+      return current;
+    }
     const existingHydration = this.hydrations.get(roomId);
     if (existingHydration) return existingHydration;
     this.requireCapacity();
@@ -804,6 +831,8 @@ export class RoomActorRegistry {
     if (!actor && hydration) actor = await hydration;
     this.requireAccepting();
     if (!actor) return fail('ROOM_ACTOR_NOT_FOUND');
+    const now = this.now();
+    if (actor.hasExpiredDeadline(now)) await actor.closeForExpiredDeadline(now);
     return actor.execute(stableInput);
   }
 

@@ -745,7 +745,11 @@ describe('RoomActorRegistry', () => {
     })).rejects.toThrow('ROOM_ACTOR_CHECKPOINT_CONFLICT');
     expect(actor.getSnapshot()?.lifecycle.status).toBe('open');
     expect(store.state?.lifecycle.status).toBe('open');
-    expect(fanout).not.toHaveBeenCalled();
+    expect(fanout).toHaveBeenCalledOnce();
+    expect(fanout).toHaveBeenCalledWith(expect.objectContaining({
+      events: [],
+      terminal: 'fenced',
+    }));
     expect(() => registry.get('room-1')).toThrow('ROOM_ACTOR_FENCED');
   });
 
@@ -818,6 +822,31 @@ describe('RoomActorRegistry', () => {
     await expect(registry.evictIdle()).resolves.toBe(0);
     unsubscribe();
     await expect(registry.evictIdle()).resolves.toBe(1);
+  });
+
+  it('command entry 先执行 lazy deadline close，迟到命令不能复活或越过房间期限', async () => {
+    let now = Date.parse('2026-08-28T00:00:00.000Z');
+    const store = new MemoryRoomStore();
+    const registry = createRoomActorRegistry({ store, now: () => now });
+    const created = await createActorRoom(registry);
+    if (!created.ok) throw new Error('expected create success');
+    now = Date.parse('2026-08-28T00:45:00.000Z');
+
+    await expect(registry.execute({
+      roomId: 'room-1',
+      command: publishCommand(
+        created.nextState,
+        0,
+        'must-not-publish-after-deadline',
+        '2026-08-28T00:45:00.000Z',
+      ),
+      authority: hostAuthority,
+    })).resolves.toMatchObject({ ok: false, code: 'room-closed' });
+    expect(store.state?.lifecycle).toMatchObject({
+      status: 'closed',
+      closeReason: 'host-offline-timeout',
+    });
+    await expect(registry.expireDeadlines()).resolves.toBe(0);
   });
 
   it('graceful shutdown 先拒绝新 command，再 drain acknowledged checkpoint 并清理 fan-out', async () => {

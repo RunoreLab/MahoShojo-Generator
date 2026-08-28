@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 
 import {
+  migrateArenaRoomAuthorityStateV1,
   parseArenaRoomAuthorityState,
   transitionArenaRoom,
 } from '../src/index';
@@ -82,6 +83,19 @@ describe('Arena Room state-machine compatibility and portability', () => {
     expect(() => parseArenaRoomAuthorityState(prePersistenceInternalShape)).toThrowError(
       expect.objectContaining({ code: 'invalid-input' }),
     );
+
+    const authorityV1 = structuredClone(currentAuthority) as Record<string, unknown>;
+    authorityV1.authorityStateVersion = 1;
+    delete authorityV1.deadlines;
+    expect(migrateArenaRoomAuthorityStateV1(authorityV1)).toMatchObject({
+      authorityStateVersion: 2,
+      deadlines: {
+        hostOfflineDeadline: TEST_TIMESTAMP,
+        roomIdleDeadline: TEST_TIMESTAMP,
+      },
+      snapshot: { roomEpoch: 'epoch_01JARENA', revision: 7, controlSeq: 24 },
+    });
+    expect(migrateArenaRoomAuthorityStateV1({ ...authorityV1, unexpected: true })).toBeNull();
   });
 
   it.each(['browser', 'node', 'neutral'] as const)('bundles the public entry for %s without runtime globals', async (platform) => {

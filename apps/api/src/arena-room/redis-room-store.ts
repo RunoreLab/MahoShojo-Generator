@@ -4,6 +4,7 @@ import {
   ARENA_ROOM_AUTHORITY_STATE_VERSION,
   checkpointPredecessorOf,
   consumeArenaRoomCheckpointCommit,
+  migrateArenaRoomAuthorityStateV1,
   parseArenaRoomAuthorityState,
   type ArenaRoomAuthorityState,
   type ArenaRoomCheckpointCommit,
@@ -40,6 +41,33 @@ end
 if redis.call('SCARD', KEYS[2]) >= tonumber(ARGV[4]) then return 'incarnation-limit' end
 redis.call('SADD', KEYS[2], current.roomEpoch)
 return raw and 'seeded' or 'expired'
+`;
+
+const MIGRATE_AUTHORITY_V1_SCRIPT = `
+-- ROOM_CHECKPOINT_AUTHORITY_V1_MIGRATE_V2
+local raw = redis.call('GET', KEYS[1])
+if not raw then return 'missing' end
+if raw ~= ARGV[1] then return 'conflict' end
+local oldDecoded, old = pcall(cjson.decode, raw)
+local nextDecoded, successor = pcall(cjson.decode, ARGV[2])
+if not oldDecoded or type(old) ~= 'table'
+  or not nextDecoded or type(successor) ~= 'table'
+  or old.checkpointVersion ~= 1
+  or old.expiryFence ~= nil
+  or successor.checkpointVersion ~= 1
+  or successor.expiryFence ~= nil
+  or old.roomId ~= successor.roomId
+  or old.roomEpoch ~= successor.roomEpoch
+  or old.revision ~= successor.revision
+  or old.controlSeq ~= successor.controlSeq
+  or type(old.state) ~= 'table'
+  or old.state.authorityStateVersion ~= 1
+  or type(successor.state) ~= 'table'
+  or successor.state.authorityStateVersion ~= 2 then
+  return 'invalid-existing'
+end
+redis.call('SET', KEYS[1], ARGV[2], 'KEEPTTL')
+return 'migrated'
 `;
 
 const SAVE_SCRIPT = `
@@ -248,6 +276,11 @@ type StoredRoomCheckpoint = {
   state: ArenaRoomAuthorityState;
 };
 
+type ParsedStoredRoomCheckpoint = {
+  readonly migratedFromAuthorityV1: boolean;
+  readonly stored: StoredRoomCheckpoint;
+};
+
 const isRecord = (value: unknown): value is Record<string, unknown> => (
   typeof value === 'object' && value !== null && !Array.isArray(value)
 );
@@ -276,7 +309,10 @@ const ttlMs = (seconds: number, optionName: string): number => {
   return Math.floor(seconds * 1_000);
 };
 
-const parseStoredCheckpoint = (raw: string, expectedRoomId: string): StoredRoomCheckpoint => {
+const parseStoredCheckpoint = (
+  raw: string,
+  expectedRoomId: string,
+): ParsedStoredRoomCheckpoint => {
   try {
     const candidate: unknown = JSON.parse(raw);
     if (!isRecord(candidate)) throw new Error('invalid');
@@ -303,7 +339,16 @@ const parseStoredCheckpoint = (raw: string, expectedRoomId: string): StoredRoomC
     ) {
       throw new Error('invalid');
     }
-    const state = parseArenaRoomAuthorityState(candidate.state);
+    let state: ArenaRoomAuthorityState;
+    let migratedFromAuthorityV1 = false;
+    try {
+      state = parseArenaRoomAuthorityState(candidate.state);
+    } catch {
+      const migrated = migrateArenaRoomAuthorityStateV1(candidate.state);
+      if (!migrated) throw new Error('invalid');
+      state = migrated;
+      migratedFromAuthorityV1 = true;
+    }
     const predecessor = checkpointPredecessorOf(state);
     if (
       state.authorityStateVersion !== ARENA_ROOM_AUTHORITY_STATE_VERSION
@@ -315,13 +360,16 @@ const parseStoredCheckpoint = (raw: string, expectedRoomId: string): StoredRoomC
       throw new Error('invalid');
     }
     return {
-      checkpointVersion: candidate.checkpointVersion as StoredRoomCheckpoint['checkpointVersion'],
-      ...(candidate.expiryFence === 'expiring' ? { expiryFence: 'expiring' as const } : {}),
-      roomId: predecessor.roomId,
-      roomEpoch: predecessor.roomEpoch,
-      revision: predecessor.revision,
-      controlSeq: predecessor.controlSeq,
-      state,
+      migratedFromAuthorityV1,
+      stored: {
+        checkpointVersion: candidate.checkpointVersion as StoredRoomCheckpoint['checkpointVersion'],
+        ...(candidate.expiryFence === 'expiring' ? { expiryFence: 'expiring' as const } : {}),
+        roomId: predecessor.roomId,
+        roomEpoch: predecessor.roomEpoch,
+        revision: predecessor.revision,
+        controlSeq: predecessor.controlSeq,
+        state,
+      },
     };
   } catch {
     throw new Error('REDIS_ROOM_CHECKPOINT_INVALID');
@@ -427,7 +475,8 @@ export const createRedisRoomStore = (options: RedisRoomStoreOptions): RedisRoomS
       for (let attempt = 0; attempt < 3; attempt += 1) {
         const raw = await options.getClient().get(roomKey(roomId));
         if (raw === null) return null;
-        const stored = parseStoredCheckpoint(raw, roomId);
+        const parsed = parseStoredCheckpoint(raw, roomId);
+        const stored = parsed.stored;
         if (stored.checkpointVersion === EXPIRING_ROOM_CHECKPOINT_VERSION) return null;
         const bootstrapped = await options.getClient().eval(BOOTSTRAP_FENCE_SCRIPT, {
           keys: [roomKey(roomId), incarnationFenceKey(roomId)],
@@ -438,7 +487,21 @@ export const createRedisRoomStore = (options: RedisRoomStoreOptions): RedisRoomS
           ['seeded', 'already', 'expired', 'conflict'] as const,
         );
         if (result.kind === 'expired') return null;
-        if (result.kind !== 'conflict') return stored.state;
+        if (result.kind === 'conflict') continue;
+        if (parsed.migratedFromAuthorityV1) {
+          const migratedRaw = JSON.stringify(stored);
+          const migration = await options.getClient().eval(MIGRATE_AUTHORITY_V1_SCRIPT, {
+            keys: [roomKey(roomId)],
+            arguments: [raw, migratedRaw],
+          });
+          const migrationResult = parseMutationResult(
+            migration,
+            ['migrated', 'missing', 'conflict'] as const,
+          );
+          if (migrationResult.kind === 'missing') return null;
+          if (migrationResult.kind === 'conflict') continue;
+        }
+        return stored.state;
       }
       throw new Error('REDIS_ROOM_CHECKPOINT_CONFLICT');
     },

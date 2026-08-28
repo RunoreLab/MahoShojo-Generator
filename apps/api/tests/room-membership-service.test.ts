@@ -168,4 +168,33 @@ describe('Arena Room membership service', () => {
     })).rejects.toBeInstanceOf(ArenaRoomMembershipError);
     expect(store.state).toBeNull();
   });
+
+  it('lazy membership resolution 在 deadline 到期后先权威关闭，reconnect 不能清除期限', async () => {
+    const store = new MemoryRoomStore();
+    let now = '2026-08-28T00:00:00.000Z';
+    const registry = createRoomActorRegistry({
+      store,
+      createRoomIdentity: () => ({ roomId: 'room-1', roomEpoch: 'epoch-1' }),
+      createTimestamp: () => now,
+      now: () => Date.parse(now),
+    });
+    const service = createArenaRoomMembershipService({
+      actors: registry,
+      createUserId: () => 'host-1',
+      now: () => now,
+    });
+    await service.create({
+      accountUserId: 101,
+      displayName: 'Host',
+      sharedConfig: createArenaRoomState().snapshot.sharedConfig,
+    });
+    now = '2026-08-28T00:45:00.000Z';
+
+    await expect(service.resolveActiveByAccount({ roomId: 'room-1', accountUserId: 101 }))
+      .rejects.toMatchObject({ code: 'ROOM_CLOSED' });
+    expect(store.state?.lifecycle).toMatchObject({
+      status: 'closed',
+      closeReason: 'host-offline-timeout',
+    });
+  });
 });

@@ -640,6 +640,34 @@ export const parseArenaRoomAuthorityState = (input: unknown): ArenaRoomAuthority
   return parsed.data;
 };
 
+/**
+ * Development-Gate v1 checkpoints predate durable presence deadlines. Migrating
+ * an open room installs an already-due deadline so recovery terminates it
+ * fail-closed instead of inventing presence after a process boundary.
+ */
+export const migrateArenaRoomAuthorityStateV1 = (
+  input: unknown,
+): ArenaRoomAuthorityState | null => {
+  if (typeof input !== 'object' || input === null || Array.isArray(input)) return null;
+  const legacy = input as Record<string, unknown>;
+  if (legacy.authorityStateVersion !== 1 || 'deadlines' in legacy) return null;
+  const lifecycle = legacy.lifecycle;
+  if (typeof lifecycle !== 'object' || lifecycle === null || Array.isArray(lifecycle)) return null;
+  const lifecycleRecord = lifecycle as Record<string, unknown>;
+  const updatedAt = lifecycleRecord.updatedAt;
+  if (typeof updatedAt !== 'string') return null;
+  const open = lifecycleRecord.status === 'open';
+  const parsed = ArenaRoomAuthorityStateSchema.safeParse({
+    ...legacy,
+    authorityStateVersion: ARENA_ROOM_AUTHORITY_STATE_VERSION,
+    deadlines: {
+      hostOfflineDeadline: open ? updatedAt : null,
+      roomIdleDeadline: open ? updatedAt : null,
+    },
+  });
+  return parsed.success ? parsed.data : null;
+};
+
 export const checkpointPredecessorOf = (
   state: ArenaRoomAuthorityState,
 ): ArenaRoomCheckpointPredecessor => ({
