@@ -8,6 +8,10 @@ import {
   ArenaRoomEpochMutationRequestSchema,
   ArenaRoomJoinRequestSchema,
   ArenaRoomLeaveResponseSchema,
+  ArenaRoomProposalMutationResponseSchema,
+  ArenaRoomProposalResolveRequestSchema,
+  ArenaRoomProposalSubmitRequestSchema,
+  ArenaRoomProposalWithdrawRequestSchema,
   ArenaRoomSessionResponseSchema,
   ArenaRoomTicketRequestSchema,
   ArenaRoomTicketResponseSchema,
@@ -32,6 +36,11 @@ import {
   DEFAULT_ARENA_ROOM_TICKET_TTL_SECONDS,
 } from './room-ticket';
 import type { ArenaRoomWebSocketAuthority } from './room-websocket-authority';
+import {
+  ArenaRoomProposalError,
+  type ArenaRoomProposalService,
+  type ArenaRoomProposalMutationView,
+} from './room-proposal-service';
 
 type ArenaRoomHttpContext = Context<{ Variables: HonoAppVariables }>;
 
@@ -57,6 +66,7 @@ export type ArenaRoomHttpDependencies = {
   >;
   readonly directory: Pick<ArenaRoomDirectoryService, 'discoverPublic'>;
   readonly websocketAuthority: Pick<ArenaRoomWebSocketAuthority, 'issue'>;
+  readonly proposals: Pick<ArenaRoomProposalService, 'resolve' | 'submit' | 'withdraw'>;
   readonly rateLimit: (input: {
     readonly operation: ArenaRoomHttpOperation;
     readonly accountUserId: number;
@@ -76,6 +86,9 @@ type ArenaRoomHttpOperation =
   | 'discover'
   | 'join'
   | 'leave'
+  | 'proposalResolve'
+  | 'proposalSubmit'
+  | 'proposalWithdraw'
   | 'session'
   | 'ticket';
 
@@ -90,6 +103,9 @@ const OPERATION_LIMITS: Readonly<Record<
   ticket: { limit: 60, windowSeconds: 60 },
   leave: { limit: 20, windowSeconds: 60 },
   close: { limit: 10, windowSeconds: 60 },
+  proposalSubmit: { limit: 20, windowSeconds: 60 },
+  proposalResolve: { limit: 30, windowSeconds: 60 },
+  proposalWithdraw: { limit: 20, windowSeconds: 60 },
 });
 
 class ArenaRoomRequestError extends Error {
@@ -146,6 +162,26 @@ const mapServiceError = (context: ArenaRoomHttpContext, error: unknown): Respons
       case 'ROOM_DIRECTORY_STALE':
         return context.json(errorBody('ROOM_CONFLICT', '房间目录状态已发生变化'), 409);
       default:
+        return unavailable(context);
+    }
+  }
+  if (error instanceof ArenaRoomProposalError) {
+    switch (error.code) {
+      case 'ROOM_PROPOSAL_INPUT_INVALID':
+        return invalidRequest(context);
+      case 'ROOM_PERMISSION_DENIED':
+        return context.json(errorBody('ROOM_FORBIDDEN', '没有此房间操作权限'), 403);
+      case 'ROOM_PROPOSAL_NOT_FOUND':
+        return context.json(errorBody('ROOM_NOT_FOUND', 'Proposal 不存在'), 404);
+      case 'ROOM_EPOCH_STALE':
+      case 'ROOM_PROPOSAL_CONFLICT':
+      case 'ROOM_REFERENCE_DENIED':
+      case 'ROOM_REFERENCE_STALE':
+      case 'ROOM_REVISION_STALE':
+      case 'ROOM_TRANSITION_DENIED':
+        return context.json(errorBody('ROOM_CONFLICT', '房间状态已发生变化'), 409);
+      case 'ROOM_OPERATION_UNKNOWN':
+      case 'ROOM_REFERENCE_UNAVAILABLE':
         return unavailable(context);
     }
   }
@@ -212,8 +248,19 @@ const readBoundedBody = async (request: Request): Promise<unknown> => {
 };
 
 const parseRoomId = (context: ArenaRoomHttpContext): string | Response => {
-  const parsed = OpaqueKeySchema.safeParse(context.req.param('roomId'));
-  return parsed.success ? parsed.data : invalidRequest(context, 'roomId 无效');
+  const raw = context.req.param('roomId');
+  const parsed = OpaqueKeySchema.safeParse(raw);
+  return parsed.success && parsed.data === raw
+    ? parsed.data
+    : invalidRequest(context, 'roomId 无效');
+};
+
+const parseProposalId = (context: ArenaRoomHttpContext): string | Response => {
+  const raw = context.req.param('proposalId');
+  const parsed = OpaqueKeySchema.safeParse(raw);
+  return parsed.success && parsed.data === raw
+    ? parsed.data
+    : invalidRequest(context, 'proposalId 无效');
 };
 
 const authenticateAndLimit = async (
@@ -302,6 +349,13 @@ const sessionResponse = (session: Awaited<ReturnType<
   self: session.member,
   snapshot: session.snapshot,
 });
+
+const proposalResponse = (view: ArenaRoomProposalMutationView) => (
+  ArenaRoomProposalMutationResponseSchema.parse({
+    protocolVersion: PROTOCOL_VERSION,
+    ...view,
+  })
+);
 
 const noStore = (context: ArenaRoomHttpContext): void => {
   context.header('cache-control', 'no-store');
@@ -458,6 +512,93 @@ export const registerArenaRoomHttpRoutes = (
           protocol: ARENA_ROOM_WEBSOCKET_PROTOCOL,
         },
       }), 200);
+    } catch (error) {
+      return mapServiceError(context, error);
+    }
+  });
+
+  app.post(ARENA_ROOM_HTTP_ROUTES.proposals, async (context) => {
+    const roomId = parseRoomId(context);
+    if (roomId instanceof Response) return roomId;
+    const authorization = await authenticateAndLimit(
+      context,
+      dependencies,
+      options,
+      'proposalSubmit',
+      roomId,
+    );
+    if (!authorization.accepted) return authorization.response;
+    try {
+      const request = parseRequest(
+        ArenaRoomProposalSubmitRequestSchema,
+        await readBoundedBody(context.req.raw),
+      );
+      const result = await dependencies.proposals.submit({
+        roomId,
+        accountUserId: authorization.accountUserId,
+        request,
+      });
+      return context.json(proposalResponse(result), 200);
+    } catch (error) {
+      return mapServiceError(context, error);
+    }
+  });
+
+  app.post(ARENA_ROOM_HTTP_ROUTES.proposalResolve, async (context) => {
+    const roomId = parseRoomId(context);
+    if (roomId instanceof Response) return roomId;
+    const proposalId = parseProposalId(context);
+    if (proposalId instanceof Response) return proposalId;
+    const authorization = await authenticateAndLimit(
+      context,
+      dependencies,
+      options,
+      'proposalResolve',
+      roomId,
+    );
+    if (!authorization.accepted) return authorization.response;
+    try {
+      const request = parseRequest(
+        ArenaRoomProposalResolveRequestSchema,
+        await readBoundedBody(context.req.raw),
+      );
+      const result = await dependencies.proposals.resolve({
+        roomId,
+        proposalId,
+        accountUserId: authorization.accountUserId,
+        request,
+      });
+      return context.json(proposalResponse(result), 200);
+    } catch (error) {
+      return mapServiceError(context, error);
+    }
+  });
+
+  app.post(ARENA_ROOM_HTTP_ROUTES.proposalWithdraw, async (context) => {
+    const roomId = parseRoomId(context);
+    if (roomId instanceof Response) return roomId;
+    const proposalId = parseProposalId(context);
+    if (proposalId instanceof Response) return proposalId;
+    const authorization = await authenticateAndLimit(
+      context,
+      dependencies,
+      options,
+      'proposalWithdraw',
+      roomId,
+    );
+    if (!authorization.accepted) return authorization.response;
+    try {
+      const request = parseRequest(
+        ArenaRoomProposalWithdrawRequestSchema,
+        await readBoundedBody(context.req.raw),
+      );
+      const result = await dependencies.proposals.withdraw({
+        roomId,
+        proposalId,
+        accountUserId: authorization.accountUserId,
+        request,
+      });
+      return context.json(proposalResponse(result), 200);
     } catch (error) {
       return mapServiceError(context, error);
     }

@@ -10,10 +10,12 @@ import { createHonoApp } from '#/app';
 import { readHonoServerConfig } from '#/config';
 import { configureHonoArenaGenerationRuntime } from '#/arena-generation/runtime';
 import { createD1RoomDirectoryStore } from '#/arena-room/d1-room-directory-store';
+import { createArenaDataCardRefVerifier } from '#/arena-room/arena-data-card-ref-verifier';
 import { createArenaRoomDirectoryService } from '#/arena-room/room-directory-service';
 import type { ArenaRoomHttpDependencies } from '#/arena-room/room-http';
 import { createRoomActorRegistry } from '#/arena-room/room-actor-registry';
 import { createArenaRoomMembershipService } from '#/arena-room/room-membership-service';
+import { createArenaRoomProposalService } from '#/arena-room/room-proposal-service';
 import {
   createArenaRoomTicketCodec,
   createArenaRoomTicketSignatureService,
@@ -97,6 +99,10 @@ if (process.env.HONO_CONFIG_CHECK_ONLY === 'true') {
       console.error('[hono][room-directory] create projection failed');
     },
   });
+  const roomProposals = createArenaRoomProposalService({
+    memberships: roomMemberships,
+    references: createArenaDataCardRefVerifier({ getClient: getHonoPrimaryD1Client }),
+  });
   const roomWebSocketAuthority = config.arenaMultiplayerEnabled
     ? createArenaRoomWebSocketAuthority({
         actors: roomActors,
@@ -115,6 +121,7 @@ if (process.env.HONO_CONFIG_CHECK_ONLY === 'true') {
           allowActivityToken: false,
         }),
         memberships: roomMemberships,
+        proposals: roomProposals,
         directory: roomDirectory,
         websocketAuthority: roomWebSocketAuthority,
         rateLimit: ({ operation, accountUserId, roomId, limit, windowSeconds }) => (

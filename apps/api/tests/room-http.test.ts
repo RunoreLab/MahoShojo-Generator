@@ -7,6 +7,10 @@ import {
   ArenaRoomMembershipError,
   type ArenaRoomMembershipService,
 } from '#/arena-room/room-membership-service';
+import {
+  ArenaRoomProposalError,
+  type ArenaRoomProposalService,
+} from '#/arena-room/room-proposal-service';
 import type { RedisService } from '#/redis/runtime';
 import { createArenaRoomState } from './arena-room-fixtures';
 
@@ -95,6 +99,35 @@ const createDependencies = (
   websocketAuthority: {
     issue: vi.fn(async () => 'signed-room-ticket'),
   },
+  proposals: {
+    submit: vi.fn(async (input) => ({
+      roomId: input.roomId,
+      roomEpoch: session.roomEpoch,
+      controlSeq: 8,
+      revision: 0,
+      proposalId: (input.request as { proposalId: string }).proposalId,
+      status: 'submitted' as const,
+      result: 'applied' as const,
+    })),
+    resolve: vi.fn(async (input) => ({
+      roomId: input.roomId,
+      roomEpoch: session.roomEpoch,
+      controlSeq: 9,
+      revision: 1,
+      proposalId: input.proposalId,
+      status: 'accepted' as const,
+      result: 'applied' as const,
+    })),
+    withdraw: vi.fn(async (input) => ({
+      roomId: input.roomId,
+      roomEpoch: session.roomEpoch,
+      controlSeq: 9,
+      revision: 0,
+      proposalId: input.proposalId,
+      status: 'withdrawn' as const,
+      result: 'applied' as const,
+    })),
+  } satisfies ArenaRoomProposalService,
   rateLimit: vi.fn(async () => allowRateLimit()),
   ...overrides,
 });
@@ -304,6 +337,123 @@ describe('Arena Room HTTP product routes', () => {
     expect(dependencies.memberships.leave).not.toHaveBeenCalled();
     expect(stale.status).toBe(409);
     expect(await stale.json()).toMatchObject({ code: 'ROOM_CONFLICT' });
+  });
+
+  it('Proposal submit/resolve/withdraw 使用严格 intent DTO 与最小 versioned response', async () => {
+    const dependencies = createDependencies();
+    const app = createHonoApp(config, createRedisStub(), undefined, {
+      arenaRoom: dependencies,
+    });
+    const proposalId = 'proposal-http-1';
+    const submitRequest = {
+      proposalId,
+      expectedRoomEpoch: session.roomEpoch,
+      baseRevision: 0,
+      changes: [{
+        changeId: 'guidance-1',
+        type: 'setUserGuidance',
+        value: '成员建议',
+        expectedBase: { kind: 'value', value: '' },
+      }],
+    };
+    const submit = await app.request(
+      `/api/arena/rooms/v1/${session.roomId}/proposals`,
+      createRequest(submitRequest),
+    );
+    expect(submit.status).toBe(200);
+    expect(dependencies.proposals.submit).toHaveBeenCalledWith({
+      roomId: session.roomId,
+      accountUserId: 101,
+      request: submitRequest,
+    });
+    expect(await submit.json()).toEqual({
+      protocolVersion: 1,
+      roomId: session.roomId,
+      roomEpoch: session.roomEpoch,
+      controlSeq: 8,
+      revision: 0,
+      proposalId,
+      status: 'submitted',
+      result: 'applied',
+    });
+
+    const resolveRequest = {
+      expectedRoomEpoch: session.roomEpoch,
+      expectedRevision: 0,
+      resolution: 'accept-selected',
+      selectedChangeIds: ['guidance-1'],
+    };
+    const resolve = await app.request(
+      `/api/arena/rooms/v1/${session.roomId}/proposals/${proposalId}/resolve`,
+      createRequest(resolveRequest),
+    );
+    expect(resolve.status).toBe(200);
+    expect(dependencies.proposals.resolve).toHaveBeenCalledWith({
+      roomId: session.roomId,
+      proposalId,
+      accountUserId: 101,
+      request: resolveRequest,
+    });
+    expect(await resolve.json()).toMatchObject({
+      protocolVersion: 1,
+      proposalId,
+      status: 'accepted',
+      revision: 1,
+    });
+
+    const withdrawRequest = { expectedRoomEpoch: session.roomEpoch };
+    const withdraw = await app.request(
+      `/api/arena/rooms/v1/${session.roomId}/proposals/${proposalId}/withdraw`,
+      createRequest(withdrawRequest),
+    );
+    expect(withdraw.status).toBe(200);
+    expect(dependencies.proposals.withdraw).toHaveBeenCalledWith({
+      roomId: session.roomId,
+      proposalId,
+      accountUserId: 101,
+      request: withdrawRequest,
+    });
+
+    const untrustedAuthority = await app.request(
+      `/api/arena/rooms/v1/${session.roomId}/proposals`,
+      createRequest({ ...submitRequest, authorUserId: 'forged-author' }),
+    );
+    expect(untrustedAuthority.status).toBe(400);
+    expect(dependencies.proposals.submit).toHaveBeenCalledTimes(1);
+  });
+
+  it('Proposal stale/permission/unknown 使用稳定泛化错误，unknown 不自动重放', async () => {
+    for (const [proposalCode, status, code] of [
+      ['ROOM_REFERENCE_STALE', 409, 'ROOM_CONFLICT'],
+      ['ROOM_REFERENCE_DENIED', 409, 'ROOM_CONFLICT'],
+      ['ROOM_PERMISSION_DENIED', 403, 'ROOM_FORBIDDEN'],
+      ['ROOM_OPERATION_UNKNOWN', 503, 'ROOM_UNAVAILABLE'],
+    ] as const) {
+      const dependencies = createDependencies();
+      vi.mocked(dependencies.proposals.submit).mockRejectedValueOnce(
+        new ArenaRoomProposalError(proposalCode),
+      );
+      const app = createHonoApp(config, createRedisStub(), undefined, {
+        arenaRoom: dependencies,
+      });
+      const response = await app.request(
+        `/api/arena/rooms/v1/${session.roomId}/proposals`,
+        createRequest({
+          proposalId: 'proposal-error',
+          expectedRoomEpoch: session.roomEpoch,
+          baseRevision: 0,
+          changes: [{
+            changeId: 'guidance-1',
+            type: 'setUserGuidance',
+            value: '成员建议',
+            expectedBase: { kind: 'value', value: '' },
+          }],
+        }),
+      );
+      expect(response.status).toBe(status);
+      expect(await response.json()).toMatchObject({ code });
+      expect(dependencies.proposals.submit).toHaveBeenCalledOnce();
+    }
   });
 
   it('拒绝不受信任 Origin、cookie mutation 缺失 Origin、未知 query 与 oversized body', async () => {
