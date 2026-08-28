@@ -101,7 +101,7 @@ read authority / current state
 | `GMR-05` ticket/membership/reconnect/lifecycle | `DONE` | GMR-04 | membership/connection/epoch recovery | 不做 generation fan-out |
 | `GMR-06` D1 directory/discovery | `DONE` | GMR-05 | derived directory + orphan cleanup | 不执行生产 migration |
 | `GMR-07` Arena room UI | `DONE` | GMR-05 | feature-flagged create/join/status/reconnect | 不激活 production |
-| `GMR-08` Proposal E2E | `READY` | GMR-05,GMR-07 | typed Proposal server/UI 闭环 | 不扩展 private sharing |
+| `GMR-08` Proposal E2E | `DONE` | GMR-05,GMR-07 | typed Proposal server/UI 闭环 | 不扩展 private sharing |
 | `GMR-09` generation publisher | `READY` | GMR-03,GMR-05,GMR-07 | single producer + Room safe fan-out/resync | 不复制 AI lifecycle |
 | `GMR-10` hardening/fault/load audit | `BLOCKED` | GMR-06,GMR-08,GMR-09 | telemetry + failure drills + v1 exit audit | 不自动进入生产 |
 | `GMR-11` production activation review | `DEFERRED` | GMR-10 + Production Gate | 独立生产 go/no-go | 必须人工/平台授权 |
@@ -584,6 +584,31 @@ validate -> pure derive -> conditional checkpoint
 - old epoch；
 - Redis conflict/failure；
 - sensitive payload negative fixtures。
+
+**Evidence（2026-08-28）**
+
+- Goal ID：`GMR-08`；source SHA：`a3538a950faab9f608fd64fa4769d3abe0a00a2a`；
+- contract/authority：strict versioned submit/resolve/withdraw DTO，server-normalized author/status/time，stable intent identity，
+  exact Origin/cookie guard、Redis operation limit、minimal `no-store` response、old epoch/revision 和 checkpoint-before-ack；
+- data ownership：metadata-only D1 verifier 不读取/返回/记录卡正文，changed/deleted/permission/review/kind/version drift 均在
+  checkpoint 前 fail closed，member private card 不因 Room membership 扩权；
+- projection/replay：host 看全部 Proposal，author 只看自己，other member 不看 foreign ID/changes；initial/live/
+  same-epoch replay 保持连续 controlSeq，mixed visibility 不丢失作者 terminal event；
+- unknown/recovery：Redis save-result unknown 立即 quarantine Actor，不服务 stale state 且不重放 mutation；下次读从
+  checkpoint 恢复新 epoch。Web unknown 绑定 operation/proposalId，无关 event 不解锁，显式 `GET session` + fresh ticket
+  对账；
+- product/UI：member detached safe working copy、typed diff/preview、submit/withdraw，host per-change selection、dependency/
+  atomic validation、accept-selected/reject 闭环；dirty draft 遇 config update 保留并标记 stale；
+- validation：contracts `22 files / 131 tests`、core `10 / 82`、API `40 / 402`、Web `357 / 1955`；真实 Node
+  upgrade `2/2`；本机 Redis 7.0.15 隔离 lifecycle verifier 通过（`proposalLifecycle:true`）；contracts/core/API/Web
+  typecheck/lint/build、workspace boundary/generated/naming report-only/Hosted DR gates、Next `188/188 pages`、root `19 files /
+  191 tests` 与 `pnpm ci:verify` 通过；
+- independent review：architecture/compatibility/replay/data、security/authority/replay 与 test adequacy 最终均为
+  Critical `0` / Important `0` / Minor `0`；commit-then-throw stale Actor、withdraw oracle、wildcard Origin、terminal
+  replay、unknown current-cursor lock、mixed visibility、production UI chain 和 mutable D1 drift findings 已全部关闭；
+- production/schema/secret/release：未 deploy/cutover，未做 remote migration/write/Redis flush，未变更 secret/Access/
+  credential，未 release/tag/push/history rewrite；
+- open findings：无；next READY Goal：`GMR-09`。完整证据见 [GMR-08 实施与审查整改日志](../logs/2026-08-28_151800_Arena多人GMR-08Proposal端到端实施与审查整改日志.md)。
 
 ### GMR-09 authoritative generation publisher
 
