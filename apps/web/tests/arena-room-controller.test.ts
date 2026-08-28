@@ -132,6 +132,7 @@ const ticket = (value: string) => ({
 
 const createHarness = () => {
   let ticketIndex = 0;
+  let createRequestIndex = 0;
   const client: ArenaRoomClient = {
     discover: vi.fn(async () => ({ items: [], nextCursor: null })),
     create: vi.fn(async () => session),
@@ -196,6 +197,7 @@ const createHarness = () => {
       const index = queued.indexOf(handle as () => void);
       if (index >= 0) queued.splice(index, 1);
     },
+    createRequestId: () => `create-request-${String(++createRequestIndex).padStart(4, '0')}`,
   });
   const runNextTimer = async () => {
     queued.shift()?.();
@@ -1281,7 +1283,7 @@ describe('Arena Room browser controller', () => {
     expect(client.startGeneration).not.toHaveBeenCalled();
   });
 
-  it('create 结果未知时冻结再次创建，要求先人工确认服务器状态', async () => {
+  it('create 结果未知时冻结新意图，并以同一请求 ID 安全确认结果', async () => {
     const { client, controller } = createHarness();
     vi.mocked(client.create).mockRejectedValueOnce(new ArenaRoomClientError(
       'ROOM_RESULT_UNKNOWN',
@@ -1295,39 +1297,39 @@ describe('Arena Room browser controller', () => {
     };
 
     await controller.create(request);
-    await controller.discover();
-    vi.mocked(client.join).mockRejectedValueOnce(new ArenaRoomClientError(
-      'ROOM_NOT_FOUND',
-      404,
-      '房间不存在',
-    ));
-    await controller.join('stale-room', '房主');
     await controller.create(request);
 
     expect(client.create).toHaveBeenCalledTimes(1);
-    expect(client.discover).toHaveBeenCalledTimes(1);
     expect(controller.getSnapshot()).toMatchObject({
       phase: 'unknown',
       notice: '请求可能已提交，请先确认房间状态，不要重复提交',
       unknownOperation: 'create',
     });
 
-    await controller.join('other-public-room', '房主');
-    await controller.create(request);
-    expect(client.create).toHaveBeenCalledTimes(1);
-    expect(controller.getSnapshot().unknownOperation).toBe('create');
-
-    controller.reset();
-    await controller.create(request);
+    await controller.retryUnknownOperation();
     expect(client.create).toHaveBeenCalledTimes(2);
+    const firstRequest = vi.mocked(client.create).mock.calls[0]![0];
+    const retryRequest = vi.mocked(client.create).mock.calls[1]![0];
+    expect(firstRequest.creationRequestId).toBe('create-request-0001');
+    expect(retryRequest).toEqual(firstRequest);
+    expect(controller.getSnapshot()).toMatchObject({
+      phase: 'connecting',
+      unknownOperation: null,
+      session: { roomId: 'room-1' },
+    });
   });
 
-  it('join 结果未知与 create lock 分离，并显示独立 reconciliation 状态', async () => {
+  it('join 结果未知先 GET session 有界确认，失败后也不重放 join POST', async () => {
     const { client, controller } = createHarness();
     vi.mocked(client.join).mockRejectedValueOnce(new ArenaRoomClientError(
       'ROOM_RESULT_UNKNOWN',
       503,
       '加入请求结果未知，请先确认房间状态',
+    ));
+    vi.mocked(client.getSession).mockRejectedValueOnce(new ArenaRoomClientError(
+      'ROOM_NOT_FOUND',
+      404,
+      '房间不存在',
     ));
     await controller.join('room-1', '成员');
 
@@ -1336,14 +1338,36 @@ describe('Arena Room browser controller', () => {
       unknownOperation: 'join',
       notice: '加入请求结果未知，请先确认房间状态',
     });
+    expect(client.join).toHaveBeenCalledTimes(1);
+    expect(client.getSession).toHaveBeenCalledTimes(1);
 
-    controller.reset();
-    await controller.create({
-      displayName: '房主',
-      directory: { title: '新房间', visibility: 'public' },
-      sharedConfig,
+    await controller.retryUnknownOperation();
+    expect(client.join).toHaveBeenCalledTimes(1);
+    expect(client.getSession).toHaveBeenCalledTimes(2);
+    expect(controller.getSnapshot()).toMatchObject({
+      phase: 'connecting',
+      unknownOperation: null,
+      session: { roomId: 'room-1' },
     });
-    expect(client.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('join POST 响应丢失但 session 已提交时由一次 GET 直接恢复', async () => {
+    const { client, controller } = createHarness();
+    vi.mocked(client.join).mockRejectedValueOnce(new ArenaRoomClientError(
+      'ROOM_RESULT_UNKNOWN',
+      null,
+      '加入请求结果未知',
+    ));
+
+    await controller.join('room-1', '成员');
+
+    expect(client.join).toHaveBeenCalledTimes(1);
+    expect(client.getSession).toHaveBeenCalledTimes(1);
+    expect(controller.getSnapshot()).toMatchObject({
+      phase: 'connecting',
+      unknownOperation: null,
+      session: { roomId: 'room-1' },
+    });
   });
 
   it('按 close reason 区分 membership replacement、epoch recovery 与协议降级', async () => {

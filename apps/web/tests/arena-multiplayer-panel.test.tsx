@@ -103,6 +103,7 @@ const render = (state: ArenaRoomControllerState, overrides = {}) => renderToStat
     onLeave={vi.fn()}
     onClose={vi.fn()}
     onReconnect={vi.fn()}
+    onRetryUnknown={vi.fn()}
     onReset={vi.fn()}
     {...overrides}
   />,
@@ -223,7 +224,8 @@ describe('Arena multiplayer panel accessibility/permissions', () => {
       unknownOperation: 'create',
     });
     expect(html).toContain('服务器可能已经创建房间');
-    expect(html).toContain('检查公开房间');
+    expect(html).toContain('非公开房间');
+    expect(html).toContain('重新确认创建结果');
     expect(html).toContain('已确认状态，返回大厅');
     expect(html).not.toContain('创建多人房间');
 
@@ -233,7 +235,7 @@ describe('Arena multiplayer panel accessibility/permissions', () => {
       notice: '加入请求结果未知，请先确认房间状态',
       unknownOperation: 'join',
     });
-    expect(joinUnknown).toContain('不要直接重复加入');
-    expect(joinUnknown).not.toContain('检查公开房间');
+    expect(joinUnknown).toContain('不会重复提交加入');
+    expect(joinUnknown).toContain('重新确认加入结果');
   });
 });

@@ -79,6 +79,7 @@ if (process.env.HONO_CONFIG_CHECK_ONLY === 'true') {
   roomActors.startIdleSweeper();
   const roomMemberships = createArenaRoomMembershipService({
     actors: roomActors,
+    creationReceipts: roomStore,
   });
   const roomReferences = createArenaDataCardRefVerifier({
     getClient: getHonoPrimaryD1Client,

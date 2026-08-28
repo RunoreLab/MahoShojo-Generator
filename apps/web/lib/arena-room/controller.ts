@@ -102,15 +102,19 @@ type ArenaRoomControllerOptions = {
   readonly reconnectDelayMs?: (attempt: number) => number;
   readonly setTimer?: (callback: () => void, delayMs: number) => unknown;
   readonly clearTimer?: (handle: unknown) => void;
+  readonly createRequestId?: () => string;
 };
+
+export type ArenaRoomCreateIntent = Omit<ArenaRoomCreateRequest, 'creationRequestId'>;
 
 export type ArenaRoomController = {
   getSnapshot(): ArenaRoomControllerState;
   subscribe(listener: () => void): () => void;
   setAccess(access: { readonly enabled: boolean; readonly authenticated: boolean }): void;
   discover(): Promise<void>;
-  create(request: ArenaRoomCreateRequest): Promise<void>;
+  create(request: ArenaRoomCreateIntent): Promise<void>;
   join(roomId: string, displayName: string): Promise<void>;
+  retryUnknownOperation(): Promise<void>;
   leave(): Promise<void>;
   close(): Promise<void>;
   submitProposal(request: ArenaRoomProposalSubmitRequest): Promise<void>;
@@ -289,6 +293,7 @@ export const createArenaRoomController = (
   const reconnectDelayMs = options.reconnectDelayMs ?? defaultReconnectDelay;
   const setTimer = options.setTimer ?? ((callback, delayMs) => setTimeout(callback, delayMs));
   const clearTimer = options.clearTimer ?? ((handle) => clearTimeout(handle as ReturnType<typeof setTimeout>));
+  const createRequestId = options.createRequestId ?? (() => globalThis.crypto.randomUUID());
   let access = options.initialAccess ?? { enabled: false, authenticated: false };
   let state: ArenaRoomControllerState = {
     ...READY_STATE,
@@ -308,6 +313,8 @@ export const createArenaRoomController = (
   let disposed = false;
   let unresolvedCreateResult = false;
   let unresolvedCreateNotice: string | null = null;
+  let pendingCreateRequest: ArenaRoomCreateRequest | null = null;
+  let pendingJoinRoomId: string | null = null;
   let controlCursor: RoomControlCursor | undefined;
   const generationRecoveries = new Map<string, {
     promise: Promise<void>;
@@ -859,11 +866,15 @@ export const createArenaRoomController = (
     const generation = operationGeneration;
     if (!operationIsCurrent(generation)) return;
     unknownProposalMutation = null;
+    unresolvedCreateResult = false;
+    unresolvedCreateNotice = null;
+    pendingCreateRequest = null;
+    pendingJoinRoomId = null;
     generationFence += 1;
     publish({
       session,
       generation: generationViewForSnapshot(session.snapshot.activeGeneration, true),
-      ...(!unresolvedCreateResult ? { unknownOperation: null } : {}),
+      unknownOperation: null,
       proposalOperation: null,
       proposalResultUnknown: false,
     });
@@ -1209,6 +1220,12 @@ export const createArenaRoomController = (
     async create(request) {
       if (disposed || !access.enabled || !access.authenticated) return;
       if (unresolvedCreateResult) return;
+      const requestWithId: ArenaRoomCreateRequest = {
+        ...request,
+        creationRequestId: createRequestId(),
+      };
+      pendingCreateRequest = requestWithId;
+      pendingJoinRoomId = null;
       operationGeneration += 1;
       proposalMutationGeneration += 1;
       generationStartOperation += 1;
@@ -1227,16 +1244,20 @@ export const createArenaRoomController = (
         error: null,
       });
       try {
-        const nextSession = await options.client.create(request);
+        const nextSession = await options.client.create(requestWithId);
         if (!operationIsCurrent(generation)) return;
         await startSession(nextSession);
       } catch (error) {
         failOperation(error, generation, 'create');
+        if (!(error instanceof ArenaRoomClientError) || error.code !== 'ROOM_RESULT_UNKNOWN') {
+          pendingCreateRequest = null;
+        }
       }
     },
 
     async join(roomId, displayName) {
       if (disposed || !access.enabled || !access.authenticated) return;
+      if (unresolvedCreateResult) return;
       operationGeneration += 1;
       proposalMutationGeneration += 1;
       generationStartOperation += 1;
@@ -1244,6 +1265,8 @@ export const createArenaRoomController = (
       proposalMutationPending = false;
       generationStartPending = false;
       pendingGenerationStartRequest = null;
+      pendingCreateRequest = null;
+      pendingJoinRoomId = null;
       const generation = operationGeneration;
       clearReconnectTimer();
       detachSocket(true);
@@ -1259,7 +1282,55 @@ export const createArenaRoomController = (
         if (!operationIsCurrent(generation)) return;
         await startSession(nextSession);
       } catch (error) {
+        if (error instanceof ArenaRoomClientError && error.code === 'ROOM_RESULT_UNKNOWN') {
+          try {
+            const reconciled = await options.client.getSession(roomId);
+            if (!operationIsCurrent(generation)) return;
+            await startSession(reconciled);
+            return;
+          } catch {
+            if (!operationIsCurrent(generation)) return;
+            pendingJoinRoomId = roomId;
+          }
+        }
         failOperation(error, generation, 'join');
+      }
+    },
+
+    async retryUnknownOperation() {
+      if (disposed || !access.enabled || !access.authenticated || state.phase !== 'unknown') return;
+      const createRequest = pendingCreateRequest;
+      const joinRoomId = pendingJoinRoomId;
+      if (state.unknownOperation === 'create' && createRequest !== null) {
+        operationGeneration += 1;
+        const generation = operationGeneration;
+        publish({ phase: 'connecting', notice: '正在确认创建结果…', error: null });
+        try {
+          const nextSession = await options.client.create(createRequest);
+          if (!operationIsCurrent(generation)) return;
+          await startSession(nextSession);
+        } catch (error) {
+          failOperation(error, generation, 'create');
+        }
+        return;
+      }
+      if (state.unknownOperation === 'join' && joinRoomId !== null) {
+        operationGeneration += 1;
+        const generation = operationGeneration;
+        publish({ phase: 'connecting', notice: '正在确认加入结果…', error: null });
+        try {
+          const nextSession = await options.client.getSession(joinRoomId);
+          if (!operationIsCurrent(generation)) return;
+          await startSession(nextSession);
+        } catch (error) {
+          if (!operationIsCurrent(generation)) return;
+          publish({
+            phase: 'unknown',
+            notice: '加入结果仍无法确认；未重复提交加入请求',
+            error: safeErrorMessage(error),
+            unknownOperation: 'join',
+          });
+        }
       }
     },
 
@@ -1362,6 +1433,8 @@ export const createArenaRoomController = (
       controlCursor = undefined;
       unresolvedCreateResult = false;
       unresolvedCreateNotice = null;
+      pendingCreateRequest = null;
+      pendingJoinRoomId = null;
       unknownProposalMutation = null;
       publish({ ...READY_STATE, phase: phaseForAccess(access) });
     },
@@ -1375,6 +1448,8 @@ export const createArenaRoomController = (
       proposalMutationPending = false;
       generationStartPending = false;
       pendingGenerationStartRequest = null;
+      pendingCreateRequest = null;
+      pendingJoinRoomId = null;
       unknownProposalMutation = null;
       clearReconnectTimer();
       detachSocket(true);

@@ -70,7 +70,7 @@ export type ArenaRoomHttpDependencies = {
   ) => Promise<ArenaRoomAuthenticationResolution>;
   readonly memberships: Pick<
     ArenaRoomMembershipService,
-    'close' | 'create' | 'getSession' | 'join' | 'leave'
+    'close' | 'create' | 'getSession' | 'hasCreationReceipt' | 'join' | 'leave'
   >;
   readonly directory: Pick<ArenaRoomDirectoryService, 'discoverPublic'>;
   readonly websocketAuthority: Pick<ArenaRoomWebSocketAuthority, 'issue'>;
@@ -159,6 +159,8 @@ const mapServiceError = (context: ArenaRoomHttpContext, error: unknown): Respons
         return context.json(errorBody('ROOM_NOT_FOUND', '房间不存在或已关闭'), 404);
       case 'ROOM_EPOCH_STALE':
         return context.json(errorBody('ROOM_CONFLICT', '房间 incarnation 已发生变化'), 409);
+      case 'ROOM_CREATION_REQUEST_CONFLICT':
+        return context.json(errorBody('ROOM_CONFLICT', '创建请求已绑定其他意图或结果已过期'), 409);
       case 'ROOM_MEMBERSHIP_NOT_ACTIVE':
       case 'ROOM_MEMBERSHIP_REVOKED':
       case 'ROOM_PERMISSION_DENIED':
@@ -309,13 +311,42 @@ const parseGenerationId = (context: ArenaRoomHttpContext): string | Response => 
     : invalidRequest(context, 'generationId 无效');
 };
 
+const consumeRateLimit = async (
+  context: ArenaRoomHttpContext,
+  dependencies: ArenaRoomHttpDependencies,
+  accountUserId: number,
+  operation: ArenaRoomHttpOperation,
+  roomId?: string,
+): Promise<Response | null> => {
+  const policy = OPERATION_LIMITS[operation];
+  let result: ArenaRoomHttpRateLimitResult | null;
+  try {
+    result = await dependencies.rateLimit({
+      operation,
+      accountUserId,
+      ...(roomId === undefined ? {} : { roomId }),
+      ...policy,
+    });
+  } catch {
+    result = null;
+  }
+  if (!result) return unavailable(context);
+  context.header('x-ratelimit-limit', String(result.limit));
+  context.header('x-ratelimit-remaining', String(result.remaining));
+  if (result.allowed) return null;
+  context.header('retry-after', String(result.retryAfterSeconds));
+  return context.json(
+    errorBody('ROOM_RATE_LIMITED', 'Room 请求过于频繁', result.retryAfterSeconds),
+    429,
+  );
+};
+
 const authenticateAndLimit = async (
   context: ArenaRoomHttpContext,
   dependencies: ArenaRoomHttpDependencies,
   options: ArenaRoomHttpRegistrationOptions,
   operation: ArenaRoomHttpOperation,
   roomId?: string,
-  additionalOperations: readonly ArenaRoomHttpOperation[] = [],
 ): Promise<{ readonly accepted: true; readonly accountUserId: number } | {
   readonly accepted: false;
   readonly response: Response;
@@ -359,38 +390,14 @@ const authenticateAndLimit = async (
     };
   }
 
-  let lastResult: ArenaRoomHttpRateLimitResult | null = null;
-  for (const limitedOperation of [operation, ...additionalOperations]) {
-    const policy = OPERATION_LIMITS[limitedOperation];
-    let result: ArenaRoomHttpRateLimitResult | null;
-    try {
-      result = await dependencies.rateLimit({
-        operation: limitedOperation,
-        accountUserId: authentication.userId,
-        ...(roomId === undefined ? {} : { roomId }),
-        ...policy,
-      });
-    } catch {
-      result = null;
-    }
-    if (!result) return { accepted: false, response: unavailable(context) };
-    if (!result.allowed) {
-      context.header('x-ratelimit-limit', String(result.limit));
-      context.header('x-ratelimit-remaining', String(result.remaining));
-      context.header('retry-after', String(result.retryAfterSeconds));
-      return {
-        accepted: false,
-        response: context.json(
-          errorBody('ROOM_RATE_LIMITED', 'Room 请求过于频繁', result.retryAfterSeconds),
-          429,
-        ),
-      };
-    }
-    lastResult = result;
-  }
-  if (!lastResult) return { accepted: false, response: unavailable(context) };
-  context.header('x-ratelimit-limit', String(lastResult.limit));
-  context.header('x-ratelimit-remaining', String(lastResult.remaining));
+  const rateLimitResponse = await consumeRateLimit(
+    context,
+    dependencies,
+    authentication.userId,
+    operation,
+    roomId,
+  );
+  if (rateLimitResponse) return { accepted: false, response: rateLimitResponse };
   return { accepted: true, accountUserId: authentication.userId };
 };
 
@@ -464,8 +471,6 @@ export const registerArenaRoomHttpRoutes = (
       dependencies,
       options,
       'create',
-      undefined,
-      ['createBudget'],
     );
     if (!authorization.accepted) return authorization.response;
     try {
@@ -473,8 +478,23 @@ export const registerArenaRoomHttpRoutes = (
         ArenaRoomCreateRequestSchema,
         await readBoundedBody(context.req.raw),
       );
+      const existingReceipt = await dependencies.memberships.hasCreationReceipt({
+        accountUserId: authorization.accountUserId,
+        creationRequestId: request.creationRequestId,
+      });
+      if (!existingReceipt) {
+        const budgetResponse = await consumeRateLimit(
+          context,
+          dependencies,
+          authorization.accountUserId,
+          'createBudget',
+        );
+        if (budgetResponse) return budgetResponse;
+      }
       const session = await dependencies.memberships.create({
         accountUserId: authorization.accountUserId,
+        creationRequestId: request.creationRequestId,
+        requireExistingCreationReceipt: existingReceipt,
         displayName: request.displayName,
         directory: request.directory,
         sharedConfig: request.sharedConfig,

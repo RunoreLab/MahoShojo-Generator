@@ -90,6 +90,7 @@ const createDependencies = (
     userId: 101,
   })),
   memberships: {
+    hasCreationReceipt: vi.fn(async () => false),
     create: vi.fn(async () => ({
       roomId: session.roomId,
       roomEpoch: session.roomEpoch,
@@ -228,6 +229,7 @@ describe('Arena Room HTTP product routes', () => {
       arenaRoom: dependencies,
     });
     const invalid = await app.request('/api/arena/rooms/v1', createRequest({
+      creationRequestId: 'create-request-1234',
       displayName: '房主',
       directory: { title: '测试房', visibility: 'public' },
       sharedConfig: authority.snapshot.sharedConfig,
@@ -236,7 +238,16 @@ describe('Arena Room HTTP product routes', () => {
     expect(invalid.status).toBe(400);
     expect(dependencies.memberships.create).not.toHaveBeenCalled();
 
+    const missingRequestId = await app.request('/api/arena/rooms/v1', createRequest({
+      displayName: '房主',
+      directory: { title: '测试房', visibility: 'public' },
+      sharedConfig: authority.snapshot.sharedConfig,
+    }));
+    expect(missingRequestId.status).toBe(400);
+    expect(dependencies.memberships.create).not.toHaveBeenCalled();
+
     const response = await app.request('/api/arena/rooms/v1', createRequest({
+      creationRequestId: 'create-request-1234',
       displayName: '房主',
       directory: { title: '测试房', visibility: 'public' },
       sharedConfig: authority.snapshot.sharedConfig,
@@ -244,6 +255,8 @@ describe('Arena Room HTTP product routes', () => {
     expect(response.status).toBe(201);
     expect(dependencies.memberships.create).toHaveBeenCalledWith({
       accountUserId: 101,
+      creationRequestId: 'create-request-1234',
+      requireExistingCreationReceipt: false,
       displayName: '房主',
       directory: { title: '测试房', visibility: 'public' },
       sharedConfig: authority.snapshot.sharedConfig,
@@ -266,6 +279,7 @@ describe('Arena Room HTTP product routes', () => {
     });
 
     const created = await app.request('/api/arena/rooms/v1', createRequest({
+      creationRequestId: 'create-request-1234',
       displayName: '房主',
       directory: { title: '测试房', visibility: 'public' },
       sharedConfig: authority.snapshot.sharedConfig,
@@ -766,6 +780,7 @@ describe('Arena Room HTTP product routes', () => {
         arenaRoom: dependencies,
       });
       const response = await app.request('/api/arena/rooms/v1', createRequest({
+        creationRequestId: 'create-request-1234',
         displayName: '房主',
         directory: { title: '测试房', visibility: 'public' },
         sharedConfig: authority.snapshot.sharedConfig,
@@ -796,6 +811,7 @@ describe('Arena Room HTTP product routes', () => {
     });
 
     const response = await app.request('/api/arena/rooms/v1', createRequest({
+      creationRequestId: 'create-request-1234',
       displayName: '房主',
       directory: { title: '测试房', visibility: 'unlisted' },
       sharedConfig: authority.snapshot.sharedConfig,
@@ -817,6 +833,30 @@ describe('Arena Room HTTP product routes', () => {
       windowSeconds: 86_400,
     });
     expect(dependencies.memberships.create).not.toHaveBeenCalled();
+  });
+
+  it('已有 creation receipt 的结果确认只受突发限流，不重复消耗新 Room 日预算', async () => {
+    const dependencies = createDependencies();
+    vi.mocked(dependencies.memberships.hasCreationReceipt).mockResolvedValue(true);
+    const app = createHonoApp(config, createRedisStub(), undefined, {
+      arenaRoom: dependencies,
+    });
+
+    const response = await app.request('/api/arena/rooms/v1', createRequest({
+      creationRequestId: 'create-request-1234',
+      displayName: '房主',
+      directory: { title: '测试房', visibility: 'unlisted' },
+      sharedConfig: authority.snapshot.sharedConfig,
+    }));
+
+    expect(response.status).toBe(201);
+    expect(dependencies.rateLimit).toHaveBeenCalledTimes(1);
+    expect(dependencies.rateLimit).toHaveBeenCalledWith({
+      operation: 'create',
+      accountUserId: 101,
+      limit: 5,
+      windowSeconds: 60,
+    });
   });
 
   it('membership error 不泄漏 closed/not-found 差异，permission 与 conflict 可判别', async () => {

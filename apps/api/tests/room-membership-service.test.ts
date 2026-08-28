@@ -19,6 +19,12 @@ import { createArenaRoomState } from './arena-room-fixtures';
 class MemoryRoomStore implements RoomActorCheckpointStore {
   state: ArenaRoomAuthorityState | null = null;
   directories: Array<RoomDirectoryRecord | undefined> = [];
+  receipts = new Map<string, { requestDigest: string; roomId: string }>();
+  throwAfterSaveOnce = false;
+
+  async loadCreationReceipt(input: { accountUserId: number; creationRequestId: string }) {
+    return this.receipts.get(`${input.accountUserId}:${input.creationRequestId}`) ?? null;
+  }
 
   async load(roomId: string) {
     return this.state?.snapshot.roomId === roomId ? structuredClone(this.state) : null;
@@ -26,6 +32,12 @@ class MemoryRoomStore implements RoomActorCheckpointStore {
 
   async save(input: Parameters<RoomActorCheckpointStore['save']>[0]) {
     const data = consumeArenaRoomCheckpointCommit(input.commit);
+    const receiptKey = input.creationReceipt === undefined
+      ? null
+      : `${input.creationReceipt.accountUserId}:${input.creationReceipt.creationRequestId}`;
+    if (receiptKey !== null && this.receipts.has(receiptKey)) {
+      throw new Error('REDIS_ROOM_CREATION_RECEIPT_CONFLICT');
+    }
     this.directories.push(input.directory === undefined
       ? undefined
       : structuredClone(input.directory));
@@ -37,6 +49,16 @@ class MemoryRoomStore implements RoomActorCheckpointStore {
       || JSON.stringify(checkpointPredecessorOf(this.state)) !== JSON.stringify(data.predecessor)
     ) return { kind: 'conflict' as const };
     this.state = structuredClone(data.nextState);
+    if (receiptKey !== null && input.creationReceipt !== undefined) {
+      this.receipts.set(receiptKey, {
+        requestDigest: input.creationReceipt.requestDigest,
+        roomId: data.nextState.snapshot.roomId,
+      });
+    }
+    if (this.throwAfterSaveOnce) {
+      this.throwAfterSaveOnce = false;
+      throw new Error('redis reply lost');
+    }
     return { kind: 'saved' as const };
   }
 
@@ -64,6 +86,7 @@ const createHarness = () => {
   });
   const service = createArenaRoomMembershipService({
     actors: registry,
+    creationReceipts: store,
     createUserId: () => `server-user-${++userIndex}`,
     now: () => timestamps[Math.min(++nowIndex, timestamps.length - 1)]!,
   });
@@ -174,6 +197,72 @@ describe('Arena Room membership service', () => {
       lastActivityAt: '2026-08-28T00:00:00.000Z',
     }]);
     expect(store.state?.lifecycle.status).toBe('open');
+  });
+
+  it('unlisted create 响应丢失后以同一请求 ID 恢复，且不会创建 replacement Room', async () => {
+    const { service, store } = createHarness();
+    store.throwAfterSaveOnce = true;
+    const request = {
+      accountUserId: 101,
+      creationRequestId: 'create-request-1234',
+      displayName: 'Host',
+      sharedConfig: createArenaRoomState().snapshot.sharedConfig,
+      directory: { title: '非公开测试房', visibility: 'unlisted' as const },
+    };
+
+    await expect(service.create(request)).rejects.toThrow('redis reply lost');
+    await expect(service.hasCreationReceipt({
+      accountUserId: 101,
+      creationRequestId: 'create-request-1234',
+    })).resolves.toBe(true);
+    const recovered = await service.create(request);
+
+    expect(recovered).toMatchObject({ roomId: 'room-1', member: { role: 'host' } });
+    expect(store.receipts.size).toBe(1);
+    expect(store.directories.filter((record) => record !== undefined)).toHaveLength(1);
+  });
+
+  it('同一创建请求 ID 绑定 canonical intent，payload 变化或 receipt 悬空时返回 conflict', async () => {
+    const { service, store } = createHarness();
+    const request = {
+      accountUserId: 101,
+      creationRequestId: 'create-request-1234',
+      displayName: 'Host',
+      sharedConfig: createArenaRoomState().snapshot.sharedConfig,
+      directory: { title: '公开测试房', visibility: 'public' as const },
+    };
+    await service.create(request);
+
+    await expect(service.create({ ...request, displayName: 'Changed' }))
+      .rejects.toMatchObject({ code: 'ROOM_CREATION_REQUEST_CONFLICT' });
+    store.state = null;
+    const recoveredRegistry = createRoomActorRegistry({ store });
+    const recoveredService = createArenaRoomMembershipService({
+      actors: recoveredRegistry,
+      creationReceipts: store,
+    });
+    await expect(recoveredService.create(request))
+      .rejects.toMatchObject({ code: 'ROOM_CREATION_REQUEST_CONFLICT' });
+  });
+
+  it('HTTP 已观察到 receipt 后若它在二次读取前到期，也不能绕过日预算创建 replacement', async () => {
+    const { service, store } = createHarness();
+    const request = {
+      accountUserId: 101,
+      creationRequestId: 'create-request-1234',
+      displayName: 'Host',
+      sharedConfig: createArenaRoomState().snapshot.sharedConfig,
+      directory: { title: '非公开测试房', visibility: 'unlisted' as const },
+    };
+    await service.create(request);
+    store.receipts.clear();
+
+    await expect(service.create({
+      ...request,
+      requireExistingCreationReceipt: true,
+    })).rejects.toMatchObject({ code: 'ROOM_CREATION_REQUEST_CONFLICT' });
+    expect(store.state?.snapshot.roomId).toBe('room-1');
+    expect(store.directories.filter((record) => record !== undefined)).toHaveLength(1);
   });
 
   it('同一 account multi-tab join 复用一个 membership，不重复 member', async () => {

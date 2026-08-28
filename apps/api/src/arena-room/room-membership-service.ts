@@ -1,7 +1,8 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 
 import {
   ArenaRoomSharedConfigSchema,
+  ArenaRoomCreationRequestIdSchema,
   DisplayNameSchema,
   OpaqueKeySchema,
   RoomDirectoryTitleSchema,
@@ -20,11 +21,16 @@ import {
   RoomActor,
   RoomActorRegistry,
 } from './room-actor-registry';
+import type {
+  RedisRoomCreationReceipt,
+  RedisRoomStore,
+} from './redis-room-store';
 
 export type ArenaRoomMembershipErrorCode =
   | 'ROOM_CLOSED'
   | 'ROOM_EPOCH_STALE'
   | 'ROOM_INPUT_INVALID'
+  | 'ROOM_CREATION_REQUEST_CONFLICT'
   | 'ROOM_MEMBERSHIP_NOT_ACTIVE'
   | 'ROOM_MEMBERSHIP_REVOKED'
   | 'ROOM_MEMBERSHIP_TRANSITION_DENIED'
@@ -55,8 +61,14 @@ export type ArenaRoomSessionView = ArenaRoomMembershipView & {
 };
 
 export type ArenaRoomMembershipService = {
+  hasCreationReceipt(input: {
+    readonly accountUserId: number;
+    readonly creationRequestId: string;
+  }): Promise<boolean>;
   create(input: {
     readonly accountUserId: number;
+    readonly creationRequestId?: string;
+    readonly requireExistingCreationReceipt?: boolean;
     readonly displayName: string;
     readonly sharedConfig: ArenaRoomSharedConfig;
     readonly directory?: {
@@ -100,6 +112,7 @@ export type ArenaRoomMembershipService = {
 
 export type ArenaRoomMembershipServiceOptions = {
   readonly actors: RoomActorRegistry;
+  readonly creationReceipts?: Pick<RedisRoomStore, 'loadCreationReceipt'>;
   readonly createUserId?: () => string;
   readonly now?: () => string;
 };
@@ -111,6 +124,24 @@ const fail = (code: ArenaRoomMembershipErrorCode): never => {
 const validAccountUserId = (value: number): boolean => (
   Number.isSafeInteger(value) && value > 0
 );
+
+const canonicalJsonValue = (value: unknown): unknown => {
+  if (Array.isArray(value)) return value.map(canonicalJsonValue);
+  if (typeof value !== 'object' || value === null) return value;
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, entry]) => [key, canonicalJsonValue(entry)]),
+  );
+};
+
+const creationRequestDigest = (input: {
+  readonly displayName: string;
+  readonly directory?: { readonly title: string; readonly visibility: RoomDirectoryVisibility };
+  readonly sharedConfig: ArenaRoomSharedConfig;
+}): string => `sha256:${createHash('sha256')
+  .update(JSON.stringify(canonicalJsonValue(input)))
+  .digest('hex')}`;
 
 const view = (
   roomId: string,
@@ -170,6 +201,44 @@ export const createArenaRoomMembershipService = (
     userId: string,
   ) => state.memberAuthority.find((entry) => entry.member.userId === userId);
 
+  const sessionFromCreationReceipt = async (input: {
+    readonly accountUserId: number;
+    readonly creationRequestId: string;
+    readonly requestDigest: string;
+    readonly receipt?: RedisRoomCreationReceipt;
+  }): Promise<ArenaRoomSessionView | null> => {
+    if (!options.creationReceipts) throw new Error('ROOM_CREATION_RECEIPT_STORE_REQUIRED');
+    const receipt = input.receipt ?? await options.creationReceipts.loadCreationReceipt(input);
+    if (receipt === null) return null;
+    if (receipt.requestDigest !== input.requestDigest) {
+      return fail('ROOM_CREATION_REQUEST_CONFLICT');
+    }
+    let recovered: { actor: RoomActor; state: ArenaRoomAuthorityState } | null = null;
+    for (let attempt = 0; attempt < 2 && recovered === null; attempt += 1) {
+      try {
+        recovered = await recoverOpenActor(receipt.roomId);
+      } catch (error) {
+        if (
+          !(error instanceof ArenaRoomMembershipError)
+          || (error.code !== 'ROOM_NOT_FOUND' && error.code !== 'ROOM_CLOSED')
+        ) throw error;
+        if (error.code === 'ROOM_NOT_FOUND' && attempt === 0) {
+          // A concurrent winner may have committed its receipt/checkpoint but not yet
+          // installed the in-memory actor state. Yield once, then reconcile again.
+          await Promise.resolve();
+          continue;
+        }
+        return fail('ROOM_CREATION_REQUEST_CONFLICT');
+      }
+    }
+    if (recovered === null) return fail('ROOM_CREATION_REQUEST_CONFLICT');
+    const record = activeRecordByAccount(recovered.state, input.accountUserId);
+    if (!record || record.member.membershipState !== 'active') {
+      return fail('ROOM_CREATION_REQUEST_CONFLICT');
+    }
+    return sessionView(receipt.roomId, recovered.state, record.member);
+  };
+
   const resolveRecord = async (
     input: { roomId: string; accountUserId?: number; userId?: string },
   ): Promise<ResolvedArenaRoomMembership> => {
@@ -188,9 +257,26 @@ export const createArenaRoomMembershipService = (
   };
 
   return Object.freeze({
+    async hasCreationReceipt(input) {
+      const creationRequestId = ArenaRoomCreationRequestIdSchema.safeParse(
+        input.creationRequestId,
+      );
+      if (!validAccountUserId(input.accountUserId) || !creationRequestId.success) {
+        return fail('ROOM_INPUT_INVALID');
+      }
+      if (!options.creationReceipts) throw new Error('ROOM_CREATION_RECEIPT_STORE_REQUIRED');
+      return await options.creationReceipts.loadCreationReceipt({
+        accountUserId: input.accountUserId,
+        creationRequestId: creationRequestId.data,
+      }) !== null;
+    },
+
     async create(input) {
       const displayName = DisplayNameSchema.safeParse(input.displayName);
       const sharedConfig = ArenaRoomSharedConfigSchema.safeParse(input.sharedConfig);
+      const creationRequestId = input.creationRequestId === undefined
+        ? null
+        : ArenaRoomCreationRequestIdSchema.safeParse(input.creationRequestId);
       const directoryTitle = input.directory === undefined
         ? null
         : RoomDirectoryTitleSchema.safeParse(input.directory.title);
@@ -201,20 +287,14 @@ export const createArenaRoomMembershipService = (
         !validAccountUserId(input.accountUserId)
         || !displayName.success
         || !sharedConfig.success
+        || (creationRequestId !== null && !creationRequestId.success)
         || (directoryTitle !== null && !directoryTitle.success)
         || (directoryVisibility !== null && !directoryVisibility.success)
       ) {
         return fail('ROOM_INPUT_INVALID');
       }
-      const userId = createUserId();
-      const result = await options.actors.create({
-        authority: {
-          kind: 'authenticated-user',
-          actorUserId: userId,
-          accountUserId: input.accountUserId,
-        },
-        host: { userId, displayName: displayName.data },
-        sharedConfig: sharedConfig.data,
+      const digestInput = {
+        displayName: displayName.data,
         ...(directoryTitle?.success && directoryVisibility?.success
           ? {
               directory: {
@@ -223,7 +303,57 @@ export const createArenaRoomMembershipService = (
               },
             }
           : {}),
-      });
+        sharedConfig: sharedConfig.data,
+      };
+      const requestDigest = creationRequestDigest(digestInput);
+      const receiptIdentity = creationRequestId?.success
+        ? {
+            accountUserId: input.accountUserId,
+            creationRequestId: creationRequestId.data,
+            requestDigest,
+          }
+        : null;
+      if (receiptIdentity !== null) {
+        const existing = await sessionFromCreationReceipt(receiptIdentity);
+        if (existing !== null) return existing;
+        if (input.requireExistingCreationReceipt === true) {
+          return fail('ROOM_CREATION_REQUEST_CONFLICT');
+        }
+      } else if (input.requireExistingCreationReceipt === true) {
+        return fail('ROOM_INPUT_INVALID');
+      }
+      const userId = createUserId();
+      let result;
+      try {
+        result = await options.actors.create({
+          authority: {
+            kind: 'authenticated-user',
+            actorUserId: userId,
+            accountUserId: input.accountUserId,
+          },
+          host: { userId, displayName: displayName.data },
+          sharedConfig: sharedConfig.data,
+          ...(receiptIdentity === null ? {} : { creationReceipt: receiptIdentity }),
+          ...(directoryTitle?.success && directoryVisibility?.success
+            ? {
+                directory: {
+                  title: directoryTitle.data,
+                  visibility: directoryVisibility.data,
+                },
+              }
+            : {}),
+        });
+      } catch (error) {
+        if (
+          receiptIdentity !== null
+          && error instanceof Error
+          && error.message === 'REDIS_ROOM_CREATION_RECEIPT_CONFLICT'
+        ) {
+          const existing = await sessionFromCreationReceipt(receiptIdentity);
+          if (existing !== null) return existing;
+        }
+        throw error;
+      }
       if (!result.result.ok) return fail('ROOM_MEMBERSHIP_TRANSITION_DENIED');
       const member = result.result.nextState.snapshot.members.find((entry) => entry.userId === userId);
       if (!member) return fail('ROOM_MEMBERSHIP_TRANSITION_DENIED');

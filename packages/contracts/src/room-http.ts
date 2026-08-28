@@ -52,7 +52,11 @@ export const MAX_ARENA_ROOM_GENERATION_MARKDOWN_LENGTH = 12 * 1_024 * 1_024;
 export const ArenaGenerationRequestIdSchema = z.string()
   .regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/u);
 
+export const ArenaRoomCreationRequestIdSchema = z.string()
+  .regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/u);
+
 export const ArenaRoomCreateRequestSchema = z.object({
+  creationRequestId: ArenaRoomCreationRequestIdSchema,
   displayName: DisplayNameSchema,
   directory: z.object({
     title: RoomDirectoryTitleSchema,

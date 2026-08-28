@@ -123,6 +123,12 @@ path、query、fragment 或 wildcard 的精确网页 Origin，并且每一项还
 HTTP Room mutation 与浏览器 WebSocket 共用这份精确列表；这里填写发起请求的网页 Origin，不是 API/WSS
 目标 hostname。production/preview 在 GMR-11 前仍拒绝启用多人 writer，本配置不构成激活授权。
 
+Room create 叠加 `5/min` 突发限流与新 Room intent 的账号 `32/24h` 长窗口预算；已有 receipt 的结果确认
+不重复消耗新 Room 预算。公开 create 请求必须携带客户端生成的
+`creationRequestId`；服务端只在 Redis 保存账号绑定 key 下的请求摘要与 `roomId`，并与 checkpoint/directory
+同一 Lua 提交、保留 24 小时。同 ID、同 intent 可用于确认未知结果（包括 `unlisted` Room），同 ID 改 payload
+或 receipt 指向已结束 Room 时返回 `409`，不会创建 replacement。
+
 ## 鉴权
 
 独立 Hono 服务推荐设置 `HONO_AUTH_MODE=bearer`。需要登录的 handler 使用现有统一认证链，客户端通过

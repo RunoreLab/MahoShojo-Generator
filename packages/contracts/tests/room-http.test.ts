@@ -271,13 +271,18 @@ describe('Arena Room HTTP product contract', () => {
     }
   });
 
-  it('create 只接受展示信息、directory 与 shared config', () => {
+  it('create 只接受幂等请求 ID、展示信息、directory 与 shared config', () => {
     const request = {
+      creationRequestId: 'create-request-1234',
       displayName: '房主',
       directory: { title: '周末竞技场', visibility: 'public' },
       sharedConfig: canonicalRoomSnapshot.sharedConfig,
     };
     expect(ArenaRoomCreateRequestSchema.parse(request)).toEqual(request);
+    const missingRequestId = Object.fromEntries(
+      Object.entries(request).filter(([key]) => key !== 'creationRequestId'),
+    );
+    expect(ArenaRoomCreateRequestSchema.safeParse(missingRequestId).success).toBe(false);
     for (const authority of [
       { roomId: 'client-room' },
       { roomEpoch: 'client-epoch' },

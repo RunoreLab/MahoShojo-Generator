@@ -102,6 +102,7 @@ describe('Arena Room browser client', () => {
       getAuthHeader: async () => 'Bearer verified-key',
     });
     const request = {
+      creationRequestId: 'create-request-1234',
       displayName: '房主',
       directory: { title: '测试房', visibility: 'public' as const },
       sharedConfig: snapshot.sharedConfig,
@@ -116,7 +117,7 @@ describe('Arena Room browser client', () => {
     expect(JSON.parse(String(init?.body))).toEqual(request);
   });
 
-  it('非幂等 create/join 网络结果未知时不盲目重放', async () => {
+  it('create/join 网络结果未知时底层 client 不自动重放', async () => {
     const fetcher = vi.fn<typeof fetch>(async () => {
       throw new TypeError('connection reset after write');
     });
@@ -127,6 +128,7 @@ describe('Arena Room browser client', () => {
     });
 
     await expect(client.create({
+      creationRequestId: 'create-request-1234',
       displayName: '房主',
       directory: { title: '测试房', visibility: 'unlisted' },
       sharedConfig: snapshot.sharedConfig,
@@ -134,7 +136,7 @@ describe('Arena Room browser client', () => {
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
 
-  it('非幂等 create/join 的畸形成功响应也标记为结果未知', async () => {
+  it('create/join 的畸形成功响应也标记为结果未知', async () => {
     const fetcher = vi.fn<typeof fetch>(async () => Response.json({ ok: true }, { status: 201 }));
     const client = createArenaRoomClient({
       origin: 'http://127.0.0.1:8787',
@@ -143,6 +145,7 @@ describe('Arena Room browser client', () => {
     });
 
     await expect(client.create({
+      creationRequestId: 'create-request-1234',
       displayName: '房主',
       directory: { title: '测试房', visibility: 'unlisted' },
       sharedConfig: snapshot.sharedConfig,
@@ -150,7 +153,7 @@ describe('Arena Room browser client', () => {
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
 
-  it('非幂等 create/join 收到 5xx 也保守标记为结果未知', async () => {
+  it('create/join 收到 5xx 也保守标记为结果未知', async () => {
     const fetcher = vi.fn<typeof fetch>(async () => Response.json({
       code: 'ROOM_UNAVAILABLE',
       error: '房间运行时暂不可用',
@@ -163,6 +166,7 @@ describe('Arena Room browser client', () => {
     });
 
     await expect(client.create({
+      creationRequestId: 'create-request-1234',
       displayName: '房主',
       directory: { title: '测试房', visibility: 'unlisted' },
       sharedConfig: snapshot.sharedConfig,

@@ -31,6 +31,8 @@ const DEFAULT_TERMINAL_TTL_SECONDS = 300;
 const CREATE_ADMISSION_WINDOW_MS = 5 * 60 * 1_000;
 const CREATE_ADMISSION_MAX_CLOCK_SKEW_MS = 60 * 1_000;
 const INCARNATION_FENCE_RETENTION_MS = 15 * 60 * 1_000;
+const CREATION_RECEIPT_VERSION = 1 as const;
+const CREATION_RECEIPT_TTL_MS = 24 * 60 * 60 * 1_000;
 // absent-create Lua 使用 Redis TIME 拒绝超过 admission deadline 的迟到命令；因此
 // incarnation fence 可以在覆盖最大 admission horizon 后有限保留，而无需永久占用 Redis。
 const MAX_ROOM_INCARNATIONS = 16;
@@ -93,6 +95,10 @@ local directoryMutation = ARGV[15]
 if directoryMutation ~= 'mutate' and directoryMutation ~= 'preserve' then
   return 'invalid-request'
 end
+local creationReceiptMutation = ARGV[19]
+if creationReceiptMutation ~= 'create' and creationReceiptMutation ~= 'none' then
+  return 'invalid-request'
+end
 local candidateDecoded, candidate = pcall(cjson.decode, ARGV[7])
 if not candidateDecoded or type(candidate) ~= 'table'
   or candidate.checkpointVersion ~= tonumber(ARGV[2])
@@ -116,6 +122,26 @@ if directoryMutation == 'mutate' then
     or (directoryIndexType ~= 'none' and directoryIndexType ~= 'zset') then
     return 'directory-storage-invalid'
   end
+end
+if creationReceiptMutation == 'create' then
+  if ARGV[1] ~= 'absent' then return 'invalid-request' end
+  local receiptTypeReply = redis.call('TYPE', KEYS[5])
+  local receiptType = type(receiptTypeReply) == 'table' and receiptTypeReply.ok or receiptTypeReply
+  if receiptType ~= 'none' and receiptType ~= 'string' then
+    return 'creation-receipt-invalid'
+  end
+  if redis.call('GET', KEYS[5]) then return 'creation-receipt-conflict' end
+  local receiptDecoded, receipt = pcall(cjson.decode, ARGV[20])
+  if not receiptDecoded or type(receipt) ~= 'table'
+    or receipt.creationReceiptVersion ~= 1
+    or receipt.roomId ~= candidate.roomId
+    or type(receipt.requestDigest) ~= 'string'
+    or string.len(receipt.requestDigest) ~= 71
+    or not string.match(receipt.requestDigest, '^sha256:[a-f0-9]+$') then
+    return 'creation-receipt-invalid'
+  end
+elseif ARGV[20] ~= '' then
+  return 'invalid-request'
 end
 local raw = redis.call('GET', KEYS[1])
 local directoryRaw = nil
@@ -264,6 +290,9 @@ if currentEpochToFence then redis.call('SADD', KEYS[2], currentEpochToFence) end
 redis.call('SADD', KEYS[2], candidate.roomEpoch)
 redis.call('PEXPIRE', KEYS[2], ARGV[16])
 redis.call('SET', KEYS[1], ARGV[7], 'PX', ARGV[8])
+if creationReceiptMutation == 'create' then
+  redis.call('SET', KEYS[5], ARGV[20], 'PX', ARGV[21])
+end
 if directoryMutation == 'mutate' then
   if directoryStoredIndexMember then
     redis.call('ZREM', KEYS[4], directoryStoredIndexMember)
@@ -452,10 +481,26 @@ export type RedisRoomStoreDeleteResult = { readonly kind: 'deleted' | 'missing' 
 export type RedisRoomStoreExpireResult = { readonly kind: 'expired' | 'missing' | 'conflict' };
 export type RedisRoomStoreRefreshResult = { readonly kind: 'refreshed' | 'missing' | 'conflict' };
 
+export type RedisRoomCreationReceiptInput = {
+  readonly accountUserId: number;
+  readonly creationRequestId: string;
+  readonly requestDigest: string;
+};
+
+export type RedisRoomCreationReceipt = {
+  readonly requestDigest: string;
+  readonly roomId: string;
+};
+
 export interface RedisRoomStore {
+  loadCreationReceipt(input: Pick<
+    RedisRoomCreationReceiptInput,
+    'accountUserId' | 'creationRequestId'
+  >): Promise<RedisRoomCreationReceipt | null>;
   load(roomId: string): Promise<ArenaRoomAuthorityState | null>;
   save(input: {
     commit: ArenaRoomCheckpointCommit;
+    creationReceipt?: RedisRoomCreationReceiptInput;
     directory?: RoomDirectoryRecord;
     directoryMutation?: 'mutate' | 'preserve';
   }): Promise<RedisRoomStoreSaveResult>;
@@ -495,6 +540,30 @@ const isRoomId = (value: unknown): value is string => (
   && value.length <= 256
   && value.trim() === value
 );
+
+const isRequestDigest = (value: unknown): value is string => (
+  typeof value === 'string' && /^sha256:[a-f0-9]{64}$/u.test(value)
+);
+
+const parseCreationReceipt = (raw: string): RedisRoomCreationReceipt => {
+  try {
+    const candidate: unknown = JSON.parse(raw);
+    if (
+      !isRecord(candidate)
+      || Object.keys(candidate).sort().join('|')
+        !== 'creationReceiptVersion|requestDigest|roomId'
+      || candidate.creationReceiptVersion !== CREATION_RECEIPT_VERSION
+      || !isRequestDigest(candidate.requestDigest)
+      || !isRoomId(candidate.roomId)
+    ) throw new Error('invalid');
+    return Object.freeze({
+      requestDigest: candidate.requestDigest,
+      roomId: candidate.roomId,
+    });
+  } catch {
+    throw new Error('REDIS_ROOM_CREATION_RECEIPT_INVALID');
+  }
+};
 
 const isCheckpointPredecessor = (value: unknown): value is ArenaRoomCheckpointPredecessor => {
   if (!isRecord(value)) return false;
@@ -656,6 +725,12 @@ const parseMutationResult = <T extends string>(
   if (raw === 'create-admission-expired') {
     throw new Error('REDIS_ROOM_CREATE_ADMISSION_EXPIRED');
   }
+  if (raw === 'creation-receipt-conflict') {
+    throw new Error('REDIS_ROOM_CREATION_RECEIPT_CONFLICT');
+  }
+  if (raw === 'creation-receipt-invalid') {
+    throw new Error('REDIS_ROOM_CREATION_RECEIPT_INVALID');
+  }
   if (raw === 'invalid-successor') throw new Error('REDIS_ROOM_SUCCESSOR_INVALID');
   if (raw === 'directory-conflict') throw new Error('REDIS_ROOM_DIRECTORY_CONFLICT');
   if (raw === 'directory-create-invalid') throw new Error('REDIS_ROOM_DIRECTORY_INPUT_INVALID');
@@ -717,6 +792,14 @@ export const createRedisRoomStore = (options: RedisRoomStoreOptions): RedisRoomS
     'terminalTtlSeconds',
   );
   return Object.freeze({
+    async loadCreationReceipt(input) {
+      const raw = await options.getClient().get(keyspace.roomCreationReceiptKey(
+        input.accountUserId,
+        input.creationRequestId,
+      ));
+      return raw === null ? null : parseCreationReceipt(raw);
+    },
+
     async load(roomId) {
       const startedAt = performance.now();
       const observation: CheckpointObservationState = { outcome: 'error' };
@@ -831,6 +914,9 @@ export const createRedisRoomStore = (options: RedisRoomStoreOptions): RedisRoomS
         if (input.directory !== undefined && expected !== null) {
           throw new Error('REDIS_ROOM_DIRECTORY_INPUT_INVALID');
         }
+        if (input.creationReceipt !== undefined && expected !== null) {
+          throw new Error('REDIS_ROOM_CREATION_RECEIPT_INPUT_INVALID');
+        }
         const directoryMutation = input.directoryMutation ?? 'mutate';
         if (input.directory !== undefined && directoryMutation !== 'mutate') {
           throw new Error('REDIS_ROOM_DIRECTORY_INPUT_INVALID');
@@ -838,6 +924,15 @@ export const createRedisRoomStore = (options: RedisRoomStoreOptions): RedisRoomS
         const directory = input.directory === undefined
           ? null
           : createStoredRoomDirectoryRecord(input.directory);
+        const creationReceipt = input.creationReceipt;
+        if (creationReceipt !== undefined && (
+          !Number.isSafeInteger(creationReceipt.accountUserId)
+          || creationReceipt.accountUserId < 1
+          || !/^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/u.test(
+            creationReceipt.creationRequestId,
+          )
+          || !isRequestDigest(creationReceipt.requestDigest)
+        )) throw new Error('REDIS_ROOM_CREATION_RECEIPT_INPUT_INVALID');
         if (directory !== null) {
           const hostUserId = stored.state.memberAuthority.find((entry) => (
             entry.member.role === 'host' && entry.member.membershipState === 'active'
@@ -879,6 +974,12 @@ export const createRedisRoomStore = (options: RedisRoomStoreOptions): RedisRoomS
             keyspace.roomIncarnationFenceKey(stored.roomId),
             keyspace.roomDirectoryRecordKey(stored.roomId),
             keyspace.directoryPublicIndexKey,
+            creationReceipt === undefined
+              ? keyspace.unusedCreationReceiptKey
+              : keyspace.roomCreationReceiptKey(
+                  creationReceipt.accountUserId,
+                  creationReceipt.creationRequestId,
+                ),
           ],
           arguments: [
             ...expectedArguments,
@@ -899,6 +1000,15 @@ export const createRedisRoomStore = (options: RedisRoomStoreOptions): RedisRoomS
             String(INCARNATION_FENCE_RETENTION_MS),
             createAdmissionDeadlineMs === null ? '' : String(createAdmissionDeadlineMs),
             String(CREATE_ADMISSION_WINDOW_MS + CREATE_ADMISSION_MAX_CLOCK_SKEW_MS),
+            creationReceipt === undefined ? 'none' : 'create',
+            creationReceipt === undefined
+              ? ''
+              : JSON.stringify({
+                  creationReceiptVersion: CREATION_RECEIPT_VERSION,
+                  requestDigest: creationReceipt.requestDigest,
+                  roomId: stored.roomId,
+                }),
+            String(CREATION_RECEIPT_TTL_MS),
           ],
         });
         const result = parseMutationResult(raw, ['saved', 'conflict'] as const);

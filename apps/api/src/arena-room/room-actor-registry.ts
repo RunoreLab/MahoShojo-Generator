@@ -24,7 +24,10 @@ import {
   type ArenaRoomTransitionSuccess,
 } from '@mahoshojo/multiplayer-core';
 
-import type { RedisRoomStore } from './redis-room-store';
+import type {
+  RedisRoomCreationReceiptInput,
+  RedisRoomStore,
+} from './redis-room-store';
 import type { RoomDirectoryRecord } from './room-directory-record';
 import {
   observeArenaRoomRuntime,
@@ -48,6 +51,7 @@ export type RoomActorErrorCode =
   | 'ROOM_ACTOR_CHECKPOINT_CONFLICT'
   | 'ROOM_ACTOR_CREATE_IDENTITY_CONFLICT'
   | 'ROOM_ACTOR_CREATE_DIRECTORY_INVALID'
+  | 'ROOM_ACTOR_CREATE_RECEIPT_INVALID'
   | 'ROOM_ACTOR_CREATE_REQUIRES_SERVER_IDENTITY'
   | 'ROOM_ACTOR_DEADLINE_CLOSE_INVALID'
   | 'ROOM_ACTOR_EPOCH_INVALID'
@@ -252,6 +256,7 @@ export class RoomActor {
       readonly maxReplayEvents: number;
       readonly initialReplay: readonly ControlRoomEvent[];
       readonly creationDirectory: RoomDirectoryRecord | null;
+      readonly creationReceipt: RedisRoomCreationReceiptInput | null;
       readonly now: () => number;
       readonly onAbandoned: (actor: RoomActor) => void;
       readonly onFenced: (actor: RoomActor) => void;
@@ -783,6 +788,9 @@ export class RoomActor {
         ...(this.state === null && this.options.creationDirectory !== null
           ? { directory: this.options.creationDirectory }
           : {}),
+        ...(this.state === null && this.options.creationReceipt !== null
+          ? { creationReceipt: this.options.creationReceipt }
+          : {}),
       });
     } catch (error) {
       // The command may already be committed in Redis. Stop serving the stale
@@ -1082,6 +1090,7 @@ export type RoomActorRegistryCreateInput = {
   readonly host: Pick<ArenaRoomCreateCommand['host'], 'displayName' | 'userId'>;
   readonly sharedConfig: ArenaRoomCreateCommand['sharedConfig'];
   readonly authority: unknown;
+  readonly creationReceipt?: RedisRoomCreationReceiptInput;
   readonly directory?: {
     readonly title: string;
     readonly visibility: 'public' | 'unlisted';
@@ -1222,21 +1231,28 @@ export class RoomActorRegistry {
       || this.fencedRoomIds.has(identity.roomId)
     ) return fail('ROOM_ACTOR_CREATE_IDENTITY_CONFLICT');
     this.requireCapacity();
+    const createAuthority = parseArenaRoomAuthorityContext(input.authority);
+    if (
+      input.creationReceipt !== undefined
+      && (
+        createAuthority?.kind !== 'authenticated-user'
+        || createAuthority.accountUserId !== input.creationReceipt.accountUserId
+      )
+    ) return fail('ROOM_ACTOR_CREATE_RECEIPT_INVALID');
     let directoryRecord: RoomDirectoryRecord | null = null;
     if (input.directory !== undefined) {
       const title = RoomDirectoryTitleSchema.safeParse(input.directory.title);
       const visibility = RoomDirectoryVisibilitySchema.safeParse(input.directory.visibility);
-      const authority = parseArenaRoomAuthorityContext(input.authority);
       if (
         !title.success
         || !visibility.success
-        || authority?.kind !== 'authenticated-user'
-        || authority.actorUserId !== input.host.userId
+        || createAuthority?.kind !== 'authenticated-user'
+        || createAuthority.actorUserId !== input.host.userId
       ) return fail('ROOM_ACTOR_CREATE_DIRECTORY_INVALID');
       directoryRecord = {
         roomId: identity.roomId,
         roomEpoch: identity.roomEpoch,
-        hostUserId: authority.accountUserId,
+        hostUserId: createAuthority.accountUserId,
         title: title.data,
         visibility: visibility.data,
         status: 'open',
@@ -1249,6 +1265,7 @@ export class RoomActorRegistry {
       null,
       [],
       directoryRecord,
+      input.creationReceipt ?? null,
     );
     this.installActor(identity.roomId, actor);
     const result = await actor.execute({
@@ -1487,6 +1504,7 @@ export class RoomActorRegistry {
     state: ArenaRoomAuthorityState | null,
     initialReplay: readonly ControlRoomEvent[] = [],
     creationDirectory: RoomDirectoryRecord | null = null,
+    creationReceipt: RedisRoomCreationReceiptInput | null = null,
   ): RoomActor {
     let actor!: RoomActor;
     actor = new RoomActor(roomId, state, {
@@ -1495,6 +1513,7 @@ export class RoomActorRegistry {
       maxReplayEvents: this.maxReplayEvents,
       initialReplay,
       creationDirectory,
+      creationReceipt,
       now: this.now,
       onAbandoned: (abandonedActor) => {
         this.removeActor(roomId, abandonedActor);

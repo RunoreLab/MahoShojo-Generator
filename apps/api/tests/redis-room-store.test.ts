@@ -175,6 +175,7 @@ describe('RedisRoomStore', () => {
         /^mahoshojo:room-directory:v1:preview:entry:[a-f0-9]{64}$/u,
       ),
       'mahoshojo:room-directory:v1:preview:public',
+      'mahoshojo:room-create-receipt:v1:preview:unused',
     ]);
     expect(options.keys[0]).not.toContain('room-1');
     expect(options.keys[1]).not.toContain('room-1');
@@ -186,6 +187,9 @@ describe('RedisRoomStore', () => {
     expect(options.arguments[15]).toBe('900000');
     expect(options.arguments[16]).toBe('1300000');
     expect(options.arguments[17]).toBe('360000');
+    expect(options.arguments[18]).toBe('none');
+    expect(options.arguments[19]).toBe('');
+    expect(options.arguments[20]).toBe('86400000');
     const serialized = options.arguments.find((argument) => argument.startsWith('{'));
     expect(serialized).toBeDefined();
     const parsed = JSON.parse(serialized!);
@@ -202,6 +206,74 @@ describe('RedisRoomStore', () => {
       ...checkpointPredecessorOf(state),
       state,
     });
+  });
+
+  it('create receipt 与 checkpoint/directory 在同一 Lua 中按账号和请求 ID 隔离提交', async () => {
+    const client = createClient();
+    vi.mocked(client.eval).mockResolvedValue('saved');
+    const store = createRedisRoomStore({ getClient: () => client, keyPrefix: 'preview' });
+    const requestDigest = `sha256:${'a'.repeat(64)}`;
+
+    await expect(store.save({
+      commit: commit(createArenaRoomTransition()),
+      creationReceipt: {
+        accountUserId: 101,
+        creationRequestId: 'create-request-1234',
+        requestDigest,
+      },
+    })).resolves.toEqual({ kind: 'saved' });
+
+    const [script, options] = vi.mocked(client.eval).mock.calls[0]!;
+    expect(script).toContain("redis.call('GET', KEYS[5])");
+    expect(script).toContain("redis.call('SET', KEYS[5], ARGV[20], 'PX', ARGV[21])");
+    expect(options.keys[4]).toMatch(
+      /^mahoshojo:room-create-receipt:v1:preview:[a-f0-9]{64}$/u,
+    );
+    expect(options.keys[4]).not.toContain('create-request-1234');
+    expect(options.keys[4]).not.toContain('101');
+    expect(options.arguments[18]).toBe('create');
+    expect(JSON.parse(options.arguments[19]!)).toEqual({
+      creationReceiptVersion: 1,
+      requestDigest,
+      roomId: 'room-1',
+    });
+    expect(options.arguments[20]).toBe('86400000');
+  });
+
+  it('严格读取 creation receipt，损坏内容与同 key 并发冲突均 fail closed', async () => {
+    const client = createClient();
+    const requestDigest = `sha256:${'b'.repeat(64)}`;
+    vi.mocked(client.get)
+      .mockResolvedValueOnce(JSON.stringify({
+        creationReceiptVersion: 1,
+        requestDigest,
+        roomId: 'room-receipt',
+      }))
+      .mockResolvedValueOnce(JSON.stringify({
+        creationReceiptVersion: 1,
+        requestDigest,
+        roomId: 'room-receipt',
+        accountUserId: 101,
+      }));
+    vi.mocked(client.eval).mockResolvedValue('creation-receipt-conflict');
+    const store = createRedisRoomStore({ getClient: () => client, keyPrefix: 'preview' });
+
+    await expect(store.loadCreationReceipt({
+      accountUserId: 101,
+      creationRequestId: 'create-request-1234',
+    })).resolves.toEqual({ requestDigest, roomId: 'room-receipt' });
+    await expect(store.loadCreationReceipt({
+      accountUserId: 101,
+      creationRequestId: 'create-request-1234',
+    })).rejects.toThrow('REDIS_ROOM_CREATION_RECEIPT_INVALID');
+    await expect(store.save({
+      commit: commit(createArenaRoomTransition()),
+      creationReceipt: {
+        accountUserId: 101,
+        creationRequestId: 'create-request-1234',
+        requestDigest,
+      },
+    })).rejects.toThrow('REDIS_ROOM_CREATION_RECEIPT_CONFLICT');
   });
 
   it('把 stale predecessor 与 old epoch 映射为显式 conflict，不伪装成功', async () => {

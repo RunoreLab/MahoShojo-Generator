@@ -152,6 +152,14 @@ const authorityTicketReplayKey = `mahoshojo:room-ticket:v1:${keyPrefix}:${create
 const directoryPrefix = `mahoshojo:room-directory:v1:${keyPrefix}`;
 const directoryPublicIndexKey = `${directoryPrefix}:public`;
 const directoryRecordKey = (id: string): string => `${directoryPrefix}:entry:${roomHash(id)}`;
+const creationReceiptPrefix = `mahoshojo:room-create-receipt:v1:${keyPrefix}`;
+const creationReceiptKey = (accountUserId: number, creationRequestId: string): string => (
+  `${creationReceiptPrefix}:${createHash('sha256')
+    .update(String(accountUserId))
+    .update('\0')
+    .update(creationRequestId)
+    .digest('hex')}`
+);
 
 const sharedConfig = () => ({
   battleMode: 'classic' as const,
@@ -1743,12 +1751,17 @@ try {
 
       let throwAfterCommittedCreate = true;
       let unknownSaveEvalAttempts = 0;
+      let unknownAbsentCreateAttempts = 0;
+      const unknownCreationRequestId = `create-unknown-${token}`;
       const unknownCountedStore = createRedisRoomStore({
         keyPrefix,
         getClient: () => ({
           get: (key) => cleanup.get(key),
           eval: (script, options) => {
-            if (script.includes('ROOM_CHECKPOINT_SAVE_V1')) unknownSaveEvalAttempts += 1;
+            if (script.includes('ROOM_CHECKPOINT_SAVE_V1')) {
+              unknownSaveEvalAttempts += 1;
+              if (options.arguments[0] === 'absent') unknownAbsentCreateAttempts += 1;
+            }
             return cleanup.eval(script, options);
           },
         } satisfies RedisRoomClient),
@@ -1772,21 +1785,26 @@ try {
           roomEpoch: 'directory-unknown-epoch-1',
         }),
         createTimestamp: () => TIMESTAMP,
+        createRoomEpoch: () => 'directory-unknown-epoch-2',
+        recoveryTimestamp: () => NEXT_TIMESTAMP,
         now: nowAt(TIMESTAMP),
       });
       const unknownMemberships = createArenaRoomMembershipService({
         actors: unknownActors,
+        creationReceipts: unknownCountedStore,
         createUserId: () => 'directory-unknown-host',
         now: () => TIMESTAMP,
       });
+      const unknownCreateRequest = {
+        accountUserId: 505,
+        creationRequestId: unknownCreationRequestId,
+        displayName: 'Unknown Reply Host',
+        sharedConfig: sharedConfig(),
+        directory: { title: 'Unknown reply room', visibility: 'unlisted' as const },
+      };
       let unknownCreateRejected = false;
       try {
-        await unknownMemberships.create({
-          accountUserId: 505,
-          displayName: 'Unknown Reply Host',
-          sharedConfig: sharedConfig(),
-          directory: { title: 'Unknown reply room', visibility: 'public' },
-        });
+        await unknownMemberships.create(unknownCreateRequest);
       } catch (error) {
         unknownCreateRejected = error instanceof Error
           && error.message === 'SIMULATED_REDIS_REPLY_LOSS_AFTER_COMMIT';
@@ -1798,31 +1816,37 @@ try {
         || unknownActors.get(unknownDirectoryRoomId) !== null
         || await cleanup.get(roomKey(unknownDirectoryRoomId)) === null
         || await cleanup.get(directoryRecordKey(unknownDirectoryRoomId)) === null
-        || await cleanup.zScore(directoryPublicIndexKey, unknownOldIndex) !== 0
+        || await cleanup.zScore(directoryPublicIndexKey, unknownOldIndex) !== null
       ) {
         throw new Error('ROOM_DIRECTORY_REDIS_ONLY_CREATE_REPLY_LOSS_QUARANTINE_FAILED');
       }
-      await unknownActors.shutdown();
-      const unknownRecoveryActors = createRoomActorRegistry({
-        store: writerStore,
-        createRoomEpoch: () => 'directory-unknown-epoch-2',
-        recoveryTimestamp: () => NEXT_TIMESTAMP,
-        now: nowAt(NEXT_TIMESTAMP),
-      });
-      const unknownRecovered = await unknownRecoveryActors.recover(unknownDirectoryRoomId);
+      const receiptTtl = await cleanup.pTTL(creationReceiptKey(505, unknownCreationRequestId));
+      const unknownRecoveredSession = await unknownMemberships.create(unknownCreateRequest);
       const unknownNewIndex = roomDirectoryPublicIndexMember(
         unknownDirectoryRoomId,
         NEXT_TIMESTAMP,
       );
       if (
-        unknownRecovered?.getSnapshot()?.snapshot.roomEpoch !== 'directory-unknown-epoch-2'
+        unknownRecoveredSession.roomId !== unknownDirectoryRoomId
+        || unknownRecoveredSession.roomEpoch !== 'directory-unknown-epoch-2'
+        || unknownAbsentCreateAttempts !== 1
+        || receiptTtl <= 0
+        || receiptTtl > 86_400_000
+        || await unknownCountedStore.loadCreationReceipt({
+          accountUserId: 606,
+          creationRequestId: unknownCreationRequestId,
+        }) !== null
         || await cleanup.zScore(directoryPublicIndexKey, unknownOldIndex) !== null
-        || await cleanup.zScore(directoryPublicIndexKey, unknownNewIndex) !== 0
+        || await cleanup.zScore(directoryPublicIndexKey, unknownNewIndex) !== null
         || (await directory.lookup(unknownDirectoryRoomId))?.roomId !== unknownDirectoryRoomId
       ) {
         throw new Error('ROOM_DIRECTORY_REDIS_ONLY_CREATE_REPLY_LOSS_RECOVERY_FAILED');
       }
-      const closedUnknown = await unknownRecoveryActors.execute({
+      await fixedError(unknownMemberships.create({
+        ...unknownCreateRequest,
+        displayName: 'Changed replay payload',
+      }), 'ROOM_CREATION_REQUEST_CONFLICT');
+      const closedUnknown = await unknownActors.execute({
         roomId: unknownDirectoryRoomId,
         authority: {
           kind: 'authenticated-user',
@@ -1839,7 +1863,7 @@ try {
       if (!closedUnknown.ok || closedUnknown.kind !== 'applied') {
         throw new Error('ROOM_DIRECTORY_REDIS_ONLY_CREATE_REPLY_LOSS_CLOSE_FAILED');
       }
-      await unknownRecoveryActors.shutdown();
+      await unknownActors.shutdown();
 
       let paginationIdentity = 0;
       let paginationUser = 0;
@@ -2336,8 +2360,11 @@ try {
         generationTerminalAuthority: true,
         generationSecretIsolation: true,
         redisOnlyDirectory: true,
-        directoryAtomicCreateIndex: true,
-        directoryUnlistedKnownJoin: true,
+      directoryAtomicCreateIndex: true,
+      directoryUnlistedKnownJoin: true,
+      creationReceiptReplyLossRecovery: true,
+      creationReceiptIntentConflict: true,
+      creationReceiptAccountIsolation: true,
         directoryRecoveryRebind: true,
         directoryLifecycleTtlRefresh: true,
         directoryActiveSubscriberTtlRefresh: true,
@@ -2453,6 +2480,7 @@ try {
       directoryRecordKey(wrongHostDirectoryRoomId),
       directoryRecordKey(closedCandidateDirectoryRoomId),
       directoryRecordKey(expiredCandidateDirectoryRoomId),
+      creationReceiptKey(505, `create-unknown-${token}`),
       ...paginationDirectoryRoomIds.map(directoryRecordKey),
     ]);
   }

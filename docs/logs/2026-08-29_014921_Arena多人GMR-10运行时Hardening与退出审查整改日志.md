@@ -189,3 +189,24 @@ production writer/route activation。若只需停止 verifier，不运行显式 
 
 GMR-10 范围内无剩余工作。GMR-11 production activation 与 GMR-H multi-instance/DO evaluation 继续 `DEFERRED`，必须分别
 满足外部门禁并获得人工/平台 go/no-go 后另开 Goal；本 Goal 不把它们转为 `READY`。
+
+## 10. `a8e28802` 后续审查整改
+
+2026-08-29 对提交 `a8e28802` 的补充审查提出四项意见。逐项复核后的结论与处理如下：
+
+- Room exact Origin 与 production wildcard CORS 不兼容：事实成立，但 production/preview 配置仍拒绝开启 Room writer，
+  因此不是当前生产事故，而是 GMR-11 激活 blocker。`2007389d` 将 `ARENA_ROOM_ALLOWED_ORIGINS` 与普通
+  `HONO_CORS_ORIGINS` 解耦，并要求每个精确 Room Origin 仍被普通 CORS 覆盖；release 默认值保持 writer disabled。
+- per-room incarnation ledger 永久增长：事实成立。单纯增加 TTL 不安全，因为 Redis timeout 不会取消已经发出的 Lua。
+  `aa6ee649` 同时加入 Redis `TIME` 校验的 5 分钟 absent-create admission deadline（1 分钟最大时钟偏差）、
+  15 分钟有限 fence retention、每账号 `32/24h` create budget，以及真实 Redis expiry/replay 证据。
+- create unknown result 无法恢复 `unlisted` Room：事实成立。本次整改将 required `creationRequestId`、账号绑定请求摘要
+  receipt 与 checkpoint/directory 放入同一 Lua，receipt 保留 24 小时；同 intent 重试返回当前权威 session，payload
+  不一致或 receipt 悬空返回 conflict。Web 保留同一 ID 安全确认 create；join 只以 GET session 对账，不重放 POST。
+  该 public request 字段在 production activation 前加入；production/preview writer 仍 disabled，不存在已发布旧客户端迁移。
+- 当前 feature commit 无 GitHub Actions 成功记录：事实成立，属于远端 evidence/process gap，不是代码行为 finding。
+  workflow 已支持 PR 与手工 dispatch；本地验证不能冒充远端 Actions。创建 Draft PR 或对已推送 feature branch 执行
+  `workflow_dispatch` 仍需仓库操作者在远端完成，本整改未获授权 push、开 PR 或触发 workflow。
+
+上述整改不执行 production deploy、Redis migration、secret 变更或 GMR-11 激活。原第 9 节“无剩余工作”应理解为原退出时点；
+本节记录后续发现与闭合证据，并继续维持 GMR-11 / GMR-H `DEFERRED`。

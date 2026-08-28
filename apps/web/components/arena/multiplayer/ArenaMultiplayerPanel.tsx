@@ -35,6 +35,7 @@ export type ArenaMultiplayerPanelViewProps = {
   readonly onLeave: () => void;
   readonly onClose: () => void;
   readonly onReconnect: () => void;
+  readonly onRetryUnknown: () => void;
   readonly onReset: () => void;
 };
 
@@ -221,31 +222,17 @@ export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps)
         <div className="mt-4 rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100">
           <p>
             {state.unknownOperation === 'join'
-              ? '服务器可能已经处理加入请求。请先确认当前房间状态，不要直接重复加入。'
-              : '服务器可能已经创建房间。请先检查公开房间或其他已登录设备，不要直接重复创建。'}
+              ? '服务器可能已经处理加入请求。可以读取当前 membership 确认结果，不会重复提交加入。'
+              : '服务器可能已经创建房间。可以使用同一创建请求 ID 安全确认结果，包括非公开房间。'}
           </p>
           <div className="mt-3 flex flex-wrap gap-2">
-            {state.unknownOperation === 'create' ? (
-              <button type="button" className={secondaryButtonClass} onClick={props.onDiscover}>
-                检查公开房间
-              </button>
-            ) : null}
+            <button type="button" className={secondaryButtonClass} onClick={props.onRetryUnknown}>
+              {state.unknownOperation === 'join' ? '重新确认加入结果' : '重新确认创建结果'}
+            </button>
             <button type="button" className={secondaryButtonClass} onClick={props.onReset}>
               已确认状态，返回大厅
             </button>
           </div>
-          {state.rooms.length > 0 ? (
-            <ul className="mt-3 grid gap-2 sm:grid-cols-2" aria-label="可能已创建的公开房间">
-              {state.rooms.map((room) => (
-                <li key={room.roomId} className="flex items-center justify-between gap-3 rounded-xl border border-amber-300 bg-white/80 p-3 dark:border-amber-800 dark:bg-gray-900/70">
-                  <span className="min-w-0 truncate font-medium">{room.title}</span>
-                  <button type="button" className={secondaryButtonClass} onClick={() => props.onJoin(room.roomId)}>
-                    重新进入
-                  </button>
-                </li>
-              ))}
-            </ul>
-          ) : null}
         </div>
       ) : state.phase === 'replacement' || state.phase === 'closed' ? (
         <button type="button" className={`${secondaryButtonClass} mt-4`} onClick={props.onReset}>
@@ -415,6 +402,7 @@ function ArenaMultiplayerPanelRuntime({
       onLeave={() => { void controller.leave(); }}
       onClose={() => { void controller.close(); }}
       onReconnect={controller.reconnect}
+      onRetryUnknown={() => { void controller.retryUnknownOperation(); }}
       onReset={() => {
         setInputError(null);
         controller.reset();
