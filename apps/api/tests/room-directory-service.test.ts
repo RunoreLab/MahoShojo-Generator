@@ -5,7 +5,10 @@ import type {
   D1RoomDirectoryStore,
   RoomDirectoryRecord,
 } from '#/arena-room/d1-room-directory-store';
-import type { RedisRoomDirectoryRegistrationStore } from '#/arena-room/redis-room-directory-registration-store';
+import type {
+  RedisRoomDirectoryRegistrationStore,
+  RoomDirectoryRegistration,
+} from '#/arena-room/redis-room-directory-registration-store';
 import {
   createArenaRoomDirectoryService,
   RoomDirectoryServiceError,
@@ -31,6 +34,23 @@ const record = (
   lastActivityAt: '2026-08-28T00:01:00.000Z',
 });
 
+const registration = (
+  input = record(),
+  phase: RoomDirectoryRegistration['phase'] = 'active',
+  projectedRoomEpoch: string | null = phase === 'pending-create' ? null : input.roomEpoch,
+): RoomDirectoryRegistration => {
+  const { roomEpoch, ...metadata } = input;
+  return {
+    ...metadata,
+    registrationVersion: 2,
+    phase,
+    targetRoomEpoch: roomEpoch,
+    projectedRoomEpoch,
+    preparedAtMs: 100,
+    updatedAtMs: 100,
+  };
+};
+
 const createStore = () => ({
   upsertOpen: vi.fn<D1RoomDirectoryStore['upsertOpen']>(async () => undefined),
   rebindEpoch: vi.fn<D1RoomDirectoryStore['rebindEpoch']>(async () => undefined),
@@ -44,17 +64,23 @@ const createStore = () => ({
 }) satisfies D1RoomDirectoryStore;
 
 const createRegistrations = () => ({
-  put: vi.fn<RedisRoomDirectoryRegistrationStore['put']>(async () => undefined),
-  rebindEpoch: vi.fn<RedisRoomDirectoryRegistrationStore['rebindEpoch']>(
-    async () => ({ kind: 'rebound' }),
+  prepare: vi.fn<RedisRoomDirectoryRegistrationStore['prepare']>(async () => undefined),
+  advanceTarget: vi.fn<RedisRoomDirectoryRegistrationStore['advanceTarget']>(
+    async () => ({ kind: 'advanced' }),
+  ),
+  confirmProjected: vi.fn<RedisRoomDirectoryRegistrationStore['confirmProjected']>(
+    async () => ({ kind: 'confirmed' }),
+  ),
+  markClosing: vi.fn<RedisRoomDirectoryRegistrationStore['markClosing']>(
+    async () => ({ kind: 'marked' }),
   ),
   delete: vi.fn<RedisRoomDirectoryRegistrationStore['delete']>(
     async () => ({ kind: 'deleted' }),
   ),
   get: vi.fn<RedisRoomDirectoryRegistrationStore['get']>(async () => null),
   list: vi.fn<RedisRoomDirectoryRegistrationStore['list']>(async () => []),
-  touch: vi.fn<RedisRoomDirectoryRegistrationStore['touch']>(
-    async () => ({ kind: 'touched' }),
+  reschedule: vi.fn<RedisRoomDirectoryRegistrationStore['reschedule']>(
+    async () => ({ kind: 'rescheduled' }),
   ),
 }) satisfies RedisRoomDirectoryRegistrationStore;
 
@@ -66,7 +92,10 @@ describe('Arena Room directory service', () => {
     const service = createArenaRoomDirectoryService({ authority, store, registrations });
 
     await expect(service.prepareCreatedOpen(record())).resolves.toBeUndefined();
-    expect(registrations.put).toHaveBeenCalledWith(record());
+    expect(registrations.prepare).toHaveBeenCalledWith({
+      record: record(),
+      preparedAtMs: expect.any(Number),
+    });
     expect(authority.load).not.toHaveBeenCalled();
     expect(store.upsertOpen).not.toHaveBeenCalled();
   });
@@ -145,6 +174,24 @@ describe('Arena Room directory service', () => {
 
     await expect(service.listForHost(101, { limit: 1, cursor: page.nextCursor! }))
       .rejects.toMatchObject({ code: 'ROOM_DIRECTORY_CURSOR_INVALID' });
+  });
+
+  it('public page 的 stale cleanup 失败时不签发跳过 orphan 的 cursor', async () => {
+    const store = createStore();
+    store.listPublic.mockResolvedValue([
+      record('room-failed'),
+      record('room-next'),
+    ]);
+    store.delete.mockRejectedValueOnce(new Error('d1 unavailable'));
+    const service = createArenaRoomDirectoryService({
+      authority: { load: async () => null },
+      store,
+    });
+
+    await expect(service.discoverPublic({ limit: 1 })).rejects.toMatchObject({
+      code: 'ROOM_DIRECTORY_CLEANUP_FAILED',
+    });
+    expect(store.delete).toHaveBeenCalledOnce();
   });
 
   it('host list 对 host account 做 Redis 二次验证且可返回 unlisted metadata', async () => {
@@ -228,20 +275,28 @@ describe('Arena Room directory service', () => {
     const recovered = recoverArenaRoomTransition(createArenaRoomState(), 'epoch-2').nextState;
     const authority = { load: vi.fn(async () => recovered) };
     const store = createStore();
-    store.get.mockResolvedValue(record());
+    store.get
+      .mockResolvedValueOnce(record())
+      .mockResolvedValueOnce(record('room-1', 'epoch-2'));
     const registrations = createRegistrations();
-    registrations.get.mockResolvedValue({ ...record(), roomEpoch: 'epoch-2' });
-    const service = createArenaRoomDirectoryService({ authority, store, registrations });
+    registrations.get.mockResolvedValue(registration(record('room-1', 'epoch-2'), 'projecting', 'epoch-1'));
+    const service = createArenaRoomDirectoryService({
+      authority,
+      store,
+      registrations,
+      now: () => 200,
+    });
 
     await expect(service.rebindCommittedOpen({
       previousRoomEpoch: 'epoch-1',
       state: recovered,
     })).resolves.toBeUndefined();
-    expect(registrations.rebindEpoch).toHaveBeenCalledWith({
+    expect(registrations.advanceTarget).toHaveBeenCalledWith({
       roomId: 'room-1',
-      previousRoomEpoch: 'epoch-1',
-      nextRoomEpoch: 'epoch-2',
+      previousTargetRoomEpoch: 'epoch-1',
+      targetRoomEpoch: 'epoch-2',
       lastActivityAt: '2026-08-28T00:01:00.000Z',
+      updatedAtMs: 200,
     });
     expect(store.rebindEpoch).toHaveBeenCalledWith({
       roomId: 'room-1',
@@ -254,6 +309,12 @@ describe('Arena Room directory service', () => {
       ...record(),
       roomEpoch: 'epoch-2',
     });
+    expect(registrations.confirmProjected).toHaveBeenCalledWith({
+      roomId: 'room-1',
+      targetRoomEpoch: 'epoch-2',
+      updatedAtMs: 200,
+      score: 200,
+    });
   });
 
   it('迟到 recovery projection 遇到更新 registration epoch 时不得回退 D1', async () => {
@@ -261,8 +322,8 @@ describe('Arena Room directory service', () => {
     const store = createStore();
     store.get.mockResolvedValue({ ...record(), roomEpoch: 'epoch-3' });
     const registrations = createRegistrations();
-    registrations.rebindEpoch.mockResolvedValue({ kind: 'stale' });
-    registrations.get.mockResolvedValue({ ...record(), roomEpoch: 'epoch-3' });
+    registrations.advanceTarget.mockResolvedValue({ kind: 'stale' });
+    registrations.get.mockResolvedValue(registration(record('room-1', 'epoch-3')));
     const service = createArenaRoomDirectoryService({
       authority: { load: async () => recovered },
       store,
@@ -284,9 +345,16 @@ describe('Arena Room directory service', () => {
       load: vi.fn(async (roomId: string) => (roomId === 'room-1' ? createArenaRoomState() : null)),
     };
     const store = createStore();
-    store.get.mockResolvedValueOnce(null).mockResolvedValueOnce(orphan);
+    store.get
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(current)
+      .mockResolvedValueOnce(orphan)
+      .mockResolvedValueOnce(null);
     const registrations = createRegistrations();
-    registrations.list.mockResolvedValue([current, orphan]);
+    registrations.list.mockResolvedValue([
+      registration(current),
+      registration(orphan, 'pending-create', null),
+    ]);
     const service = createArenaRoomDirectoryService({ authority, store, registrations });
 
     await expect(service.reconcileRegistrations({ limit: 2, score: 1_787_904_000_000 }))
@@ -296,15 +364,49 @@ describe('Arena Room directory service', () => {
       roomId: 'room-orphan',
       roomEpoch: 'epoch-1',
     });
-    expect(registrations.delete).toHaveBeenCalledWith({
+    expect(registrations.markClosing).toHaveBeenCalledWith({
       roomId: 'room-orphan',
-      roomEpoch: 'epoch-1',
-    });
-    expect(registrations.touch).toHaveBeenCalledWith({
-      roomId: 'room-1',
-      roomEpoch: 'epoch-1',
+      targetRoomEpoch: 'epoch-1',
+      updatedAtMs: expect.any(Number),
       score: 1_787_904_000_000,
     });
+    expect(registrations.delete).toHaveBeenCalledWith({
+      roomId: 'room-orphan',
+      targetRoomEpoch: 'epoch-1',
+      phase: 'closing',
+    });
+    expect(registrations.confirmProjected).toHaveBeenCalledWith({
+      roomId: 'room-1',
+      targetRoomEpoch: 'epoch-1',
+      updatedAtMs: expect.any(Number),
+      score: 1_787_904_000_000,
+    });
+  });
+
+  it('pending-create 在 grace 内观察不到 checkpoint 时只重排，不误判 orphan', async () => {
+    const store = createStore();
+    const registrations = createRegistrations();
+    registrations.list.mockResolvedValue([
+      registration(record(), 'pending-create', null),
+    ]);
+    const service = createArenaRoomDirectoryService({
+      authority: { load: async () => null },
+      store,
+      registrations,
+      now: () => 200,
+      pendingCreateGraceMs: 1_000,
+    });
+
+    await expect(service.reconcileRegistrations({ limit: 1, score: 200 }))
+      .resolves.toEqual({ scanned: 1, projected: 0, removed: 0 });
+    expect(registrations.reschedule).toHaveBeenCalledWith({
+      roomId: 'room-1',
+      targetRoomEpoch: 'epoch-1',
+      phase: 'pending-create',
+      score: 1_100,
+    });
+    expect(store.get).not.toHaveBeenCalled();
+    expect(registrations.delete).not.toHaveBeenCalled();
   });
 
   it('低频 registration reconciler 单例有界运行、可停止且不会重叠', async () => {
@@ -313,7 +415,8 @@ describe('Arena Room directory service', () => {
       const state = createArenaRoomState();
       const store = createStore();
       const registrations = createRegistrations();
-      registrations.list.mockResolvedValue([record()]);
+      registrations.list.mockResolvedValue([registration(record())]);
+      store.get.mockResolvedValue(record());
       const service = createArenaRoomDirectoryService({
         authority: { load: async () => state },
         store,
@@ -335,7 +438,9 @@ describe('Arena Room directory service', () => {
   it('committed close projection 只接受 closed checkpoint，并 exact-delete 对应 epoch', async () => {
     const state = createArenaRoomState();
     const store = createStore();
+    store.get.mockResolvedValueOnce(record()).mockResolvedValueOnce(null);
     const registrations = createRegistrations();
+    registrations.get.mockResolvedValue(registration(record()));
     const service = createArenaRoomDirectoryService({
       authority: { load: async () => state },
       store,
@@ -348,9 +453,14 @@ describe('Arena Room directory service', () => {
     const closed = closeArenaRoomState(state);
     await expect(service.removeCommittedClosed(closed)).resolves.toBeUndefined();
     expect(store.delete).toHaveBeenCalledWith({ roomId: 'room-1', roomEpoch: 'epoch-1' });
+    expect(registrations.markClosing).toHaveBeenCalledWith(expect.objectContaining({
+      roomId: 'room-1',
+      targetRoomEpoch: 'epoch-1',
+    }));
     expect(registrations.delete).toHaveBeenCalledWith({
       roomId: 'room-1',
-      roomEpoch: 'epoch-1',
+      targetRoomEpoch: 'epoch-1',
+      phase: 'closing',
     });
   });
 
@@ -367,5 +477,29 @@ describe('Arena Room directory service', () => {
 
     await expect(service.removeCommittedClosed(state)).resolves.toBeUndefined();
     expect(onBackgroundError).toHaveBeenCalledOnce();
+  });
+
+  it('committed close 的 D1 删除失败保留 closing tombstone 供后续补偿', async () => {
+    const state = closeArenaRoomState(createArenaRoomState());
+    const store = createStore();
+    store.get.mockResolvedValueOnce(record());
+    store.delete.mockRejectedValueOnce(new Error('d1 unavailable'));
+    const registrations = createRegistrations();
+    registrations.get.mockResolvedValue(registration(record()));
+    const service = createArenaRoomDirectoryService({
+      authority: { load: async () => state },
+      store,
+      registrations,
+      now: () => 500,
+    });
+
+    await expect(service.removeCommittedClosed(state)).rejects.toThrow('d1 unavailable');
+    expect(registrations.markClosing).toHaveBeenCalledWith({
+      roomId: 'room-1',
+      targetRoomEpoch: 'epoch-1',
+      updatedAtMs: 500,
+      score: 500,
+    });
+    expect(registrations.delete).not.toHaveBeenCalled();
   });
 });

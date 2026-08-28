@@ -102,26 +102,30 @@ const reportCommittedClosed = (
   }
 };
 
-const reportCommittedRecovered = async (
+const reportCommittedRecovered = (
   input: { readonly previousRoomEpoch: string; readonly state: ArenaRoomAuthorityState },
   onCommittedRecovered: ((input: {
     readonly previousRoomEpoch: string;
     readonly state: ArenaRoomAuthorityState;
   }) => void | Promise<void>) | undefined,
   onBackgroundError: (error: unknown) => void,
-): Promise<void> => {
+): void => {
   if (onCommittedRecovered === undefined) return;
-  try {
-    await onCommittedRecovered({
-      previousRoomEpoch: input.previousRoomEpoch,
-      state: cloneState(input.state),
-    });
-  } catch (error) {
+  const report = (error: unknown): void => {
     try {
       onBackgroundError(error);
     } catch {
       // Projection diagnostics cannot alter an acknowledged recovery checkpoint.
     }
+  };
+  try {
+    const completion = onCommittedRecovered({
+      previousRoomEpoch: input.previousRoomEpoch,
+      state: cloneState(input.state),
+    });
+    if (completion !== undefined) void Promise.resolve(completion).catch(report);
+  } catch (error) {
+    report(error);
   }
 };
 
@@ -1162,13 +1166,13 @@ export class RoomActorRegistry {
       return fail('ROOM_ACTOR_RECOVERY_CONFLICT');
     }
     this.requireAccepting();
-    await reportCommittedRecovered(
+    const actor = this.createActor(roomId, transition.nextState, transition.events);
+    this.actors.set(roomId, actor);
+    reportCommittedRecovered(
       { previousRoomEpoch, state: transition.nextState },
       this.options.onCommittedRecovered,
       this.options.onBackgroundError ?? (() => undefined),
     );
-    const actor = this.createActor(roomId, transition.nextState, transition.events);
-    this.actors.set(roomId, actor);
     return actor;
   }
 

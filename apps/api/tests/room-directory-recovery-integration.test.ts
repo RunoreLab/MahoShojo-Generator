@@ -11,14 +11,16 @@ import {
   type ArenaRoomAuthorityState,
 } from '@mahoshojo/multiplayer-core';
 import Database from 'better-sqlite3';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
   createD1RoomDirectoryStore,
   type D1RoomDirectoryStore,
-  type RoomDirectoryRecord,
 } from '#/arena-room/d1-room-directory-store';
-import type { RedisRoomDirectoryRegistrationStore } from '#/arena-room/redis-room-directory-registration-store';
+import type {
+  RedisRoomDirectoryRegistrationStore,
+  RoomDirectoryRegistration,
+} from '#/arena-room/redis-room-directory-registration-store';
 import {
   createRoomActorRegistry,
   type RoomActorCheckpointStore,
@@ -55,33 +57,80 @@ class MemoryRoomStore implements RoomActorCheckpointStore {
 }
 
 class MemoryRegistrationStore implements RedisRoomDirectoryRegistrationStore {
-  private readonly records = new Map<string, RoomDirectoryRecord>();
+  private readonly records = new Map<string, RoomDirectoryRegistration>();
 
-  async put(input: RoomDirectoryRecord) {
-    const current = this.records.get(input.roomId);
-    if (current && JSON.stringify(current) !== JSON.stringify(input)) {
+  async prepare(input: Parameters<RedisRoomDirectoryRegistrationStore['prepare']>[0]) {
+    const current = this.records.get(input.record.roomId);
+    const { roomEpoch, ...metadata } = input.record;
+    const next: RoomDirectoryRegistration = {
+      ...metadata,
+      registrationVersion: 2,
+      phase: 'pending-create',
+      targetRoomEpoch: roomEpoch,
+      projectedRoomEpoch: null,
+      preparedAtMs: input.preparedAtMs,
+      updatedAtMs: input.preparedAtMs,
+    };
+    if (current && JSON.stringify(current) !== JSON.stringify(next)) {
       throw new Error('registration conflict');
     }
-    this.records.set(input.roomId, structuredClone(input));
+    this.records.set(input.record.roomId, structuredClone(next));
   }
 
-  async rebindEpoch(input: Parameters<RedisRoomDirectoryRegistrationStore['rebindEpoch']>[0]) {
+  async advanceTarget(input: Parameters<RedisRoomDirectoryRegistrationStore['advanceTarget']>[0]) {
     const current = this.records.get(input.roomId);
     if (!current) return { kind: 'missing' as const };
-    if (current.roomEpoch === input.nextRoomEpoch) return { kind: 'already' as const };
-    if (current.roomEpoch !== input.previousRoomEpoch) return { kind: 'stale' as const };
+    if (current.phase === 'closing') return { kind: 'stale' as const };
+    if (current.targetRoomEpoch === input.targetRoomEpoch) return { kind: 'already' as const };
+    if (current.targetRoomEpoch !== input.previousTargetRoomEpoch) {
+      return { kind: 'stale' as const };
+    }
     this.records.set(input.roomId, {
       ...current,
-      roomEpoch: input.nextRoomEpoch,
+      phase: 'projecting',
+      targetRoomEpoch: input.targetRoomEpoch,
       lastActivityAt: input.lastActivityAt,
+      updatedAtMs: input.updatedAtMs,
     });
-    return { kind: 'rebound' as const };
+    return { kind: 'advanced' as const };
+  }
+
+  async confirmProjected(
+    input: Parameters<RedisRoomDirectoryRegistrationStore['confirmProjected']>[0],
+  ) {
+    const current = this.records.get(input.roomId);
+    if (!current) return { kind: 'missing' as const };
+    if (current.phase === 'closing' || current.targetRoomEpoch !== input.targetRoomEpoch) {
+      return { kind: 'stale' as const };
+    }
+    this.records.set(input.roomId, {
+      ...current,
+      phase: 'active',
+      projectedRoomEpoch: input.targetRoomEpoch,
+      updatedAtMs: input.updatedAtMs,
+    });
+    return { kind: 'confirmed' as const };
+  }
+
+  async markClosing(input: Parameters<RedisRoomDirectoryRegistrationStore['markClosing']>[0]) {
+    const current = this.records.get(input.roomId);
+    if (!current) return { kind: 'missing' as const };
+    if (current.targetRoomEpoch !== input.targetRoomEpoch) return { kind: 'stale' as const };
+    if (current.phase === 'closing') return { kind: 'already' as const };
+    this.records.set(input.roomId, {
+      ...current,
+      phase: 'closing',
+      updatedAtMs: input.updatedAtMs,
+    });
+    return { kind: 'marked' as const };
   }
 
   async delete(input: Parameters<RedisRoomDirectoryRegistrationStore['delete']>[0]) {
     const current = this.records.get(input.roomId);
     if (!current) return { kind: 'missing' as const };
-    if (current.roomEpoch !== input.roomEpoch) return { kind: 'stale' as const };
+    if (current.targetRoomEpoch !== input.targetRoomEpoch || current.phase !== input.phase) {
+      return { kind: 'stale' as const };
+    }
     this.records.delete(input.roomId);
     return { kind: 'deleted' as const };
   }
@@ -95,10 +144,14 @@ class MemoryRegistrationStore implements RedisRoomDirectoryRegistrationStore {
     return [...this.records.values()].slice(0, input.limit).map((record) => structuredClone(record));
   }
 
-  async touch(input: Parameters<RedisRoomDirectoryRegistrationStore['touch']>[0]) {
+  async reschedule(input: Parameters<RedisRoomDirectoryRegistrationStore['reschedule']>[0]) {
     const current = this.records.get(input.roomId);
     if (!current) return { kind: 'missing' as const };
-    return { kind: current.roomEpoch === input.roomEpoch ? 'touched' as const : 'stale' as const };
+    return {
+      kind: current.targetRoomEpoch === input.targetRoomEpoch && current.phase === input.phase
+        ? 'rescheduled' as const
+        : 'stale' as const,
+    };
   }
 }
 
@@ -139,8 +192,13 @@ describe('Arena Room directory recovery integration', () => {
       sqlite.exec(readFileSync(migrationPath, 'utf8'));
       const rawD1 = createD1RoomDirectoryStore({ getClient: () => sqliteClient(sqlite) });
       let failCreateProjection = true;
+      let failRecoveryRead = false;
       const d1: D1RoomDirectoryStore = {
         ...rawD1,
+        async get(roomId) {
+          if (failRecoveryRead) throw new Error('d1 unavailable during recovery');
+          return rawD1.get(roomId);
+        },
         async upsertOpen(input) {
           if (failCreateProjection) throw new Error('d1 unavailable');
           await rawD1.upsertOpen(input);
@@ -176,7 +234,11 @@ describe('Arena Room directory recovery integration', () => {
       })).resolves.toMatchObject({ roomId: 'room-1', roomEpoch: 'epoch-1' });
       expect(authority.state?.lifecycle.status).toBe('open');
       await expect(rawD1.get('room-1')).resolves.toBeNull();
-      await expect(registrations.get('room-1')).resolves.toMatchObject({ roomEpoch: 'epoch-1' });
+      await expect(registrations.get('room-1')).resolves.toMatchObject({
+        targetRoomEpoch: 'epoch-1',
+        projectedRoomEpoch: null,
+        phase: 'pending-create',
+      });
 
       failCreateProjection = false;
       await expect(directory.reconcileRegistrations({ limit: 10, score: 1 }))
@@ -187,6 +249,8 @@ describe('Arena Room directory recovery integration', () => {
       });
 
       await firstActors.shutdown();
+      failRecoveryRead = true;
+      const onRecoveryProjectionError = vi.fn();
       const recoveredActors = createRoomActorRegistry({
         store: authority,
         createRoomEpoch: () => 'epoch-2',
@@ -195,12 +259,24 @@ describe('Arena Room directory recovery integration', () => {
         prepareCreatedOpen: directory.prepareCreatedOpen,
         onCommittedClosed: directory.removeCommittedClosed,
         onCommittedRecovered: directory.rebindCommittedOpen,
+        onBackgroundError: onRecoveryProjectionError,
       });
       await expect(recoveredActors.recover('room-1')).resolves.toMatchObject({ roomId: 'room-1' });
-      await expect(rawD1.get('room-1')).resolves.toMatchObject({
-        roomEpoch: 'epoch-2',
-        title: '可恢复公开房',
-        visibility: 'public',
+      await vi.waitFor(() => expect(onRecoveryProjectionError).toHaveBeenCalledOnce());
+      await expect(registrations.get('room-1')).resolves.toMatchObject({
+        phase: 'projecting',
+        projectedRoomEpoch: 'epoch-1',
+        targetRoomEpoch: 'epoch-2',
+      });
+      failRecoveryRead = false;
+      await expect(directory.reconcileRegistrations({ limit: 10, score: 2 }))
+        .resolves.toEqual({ scanned: 1, projected: 1, removed: 0 });
+      await vi.waitFor(async () => {
+        await expect(rawD1.get('room-1')).resolves.toMatchObject({
+          roomEpoch: 'epoch-2',
+          title: '可恢复公开房',
+          visibility: 'public',
+        });
       });
 
       await rawD1.upsertOpen({

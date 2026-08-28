@@ -17,7 +17,12 @@ import {
   createRedisRoomStore,
   type RedisRoomClient,
 } from '../src/arena-room/redis-room-store';
+import type {
+  D1RoomDirectoryStore,
+  RoomDirectoryRecord,
+} from '../src/arena-room/d1-room-directory-store';
 import { createRoomActorRegistry } from '../src/arena-room/room-actor-registry';
+import { createArenaRoomDirectoryService } from '../src/arena-room/room-directory-service';
 import { createArenaRoomMembershipService } from '../src/arena-room/room-membership-service';
 import {
   createArenaRoomTicketCodec,
@@ -99,9 +104,17 @@ const ticketReplayKey = `mahoshojo:room-ticket:v1:${keyPrefix}:${createHash('sha
 const authorityTicketReplayKey = `mahoshojo:room-ticket:v1:${keyPrefix}:${createHash('sha256')
   .update(authorityTicketJti).digest('hex')}`;
 const directoryRegistrationMember = roomHash(directoryRegistrationRoomId);
-const directoryRegistrationPrefix = `mahoshojo:room-directory-registration:v1:${keyPrefix}`;
+const directoryRegistrationPrefix = `mahoshojo:room-directory-registration:v2:${keyPrefix}`;
 const directoryRegistrationKey = `${directoryRegistrationPrefix}:entry:${directoryRegistrationMember}`;
 const directoryRegistrationIndexKey = `${directoryRegistrationPrefix}:index`;
+
+const eventually = async (check: () => boolean | Promise<boolean>): Promise<void> => {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    if (await check()) return;
+    await new Promise<void>((resolve) => { setTimeout(resolve, 10); });
+  }
+  throw new Error('ROOM_REDIS_EVENTUALLY_TIMEOUT');
+};
 
 const sharedConfig = () => ({
   battleMode: 'classic' as const,
@@ -886,52 +899,193 @@ try {
         createdAt: TIMESTAMP,
         lastActivityAt: NEXT_TIMESTAMP,
       };
-      await directoryRegistrations.put(directoryRegistration);
-      await directoryRegistrations.put(directoryRegistration);
+      await directoryRegistrations.prepare({
+        record: directoryRegistration,
+        preparedAtMs: Date.parse(TIMESTAMP),
+      });
+      await directoryRegistrations.prepare({
+        record: directoryRegistration,
+        preparedAtMs: Date.parse(TIMESTAMP),
+      });
       const storedDirectoryRegistration = await directoryRegistrations.get(
         directoryRegistrationRoomId,
       );
       if (
         storedDirectoryRegistration === null
-        || Object.entries(directoryRegistration).some(([key, value]) => (
-          storedDirectoryRegistration[key as keyof typeof storedDirectoryRegistration] !== value
-        ))
+        || storedDirectoryRegistration.targetRoomEpoch !== 'directory-epoch-1'
+        || storedDirectoryRegistration.projectedRoomEpoch !== null
+        || storedDirectoryRegistration.phase !== 'pending-create'
       ) {
-        throw new Error('ROOM_DIRECTORY_REGISTRATION_PUT_FAILED');
+        throw new Error('ROOM_DIRECTORY_REGISTRATION_PREPARE_FAILED');
       }
-      if ((await directoryRegistrations.rebindEpoch({
+      if ((await directoryRegistrations.advanceTarget({
         roomId: directoryRegistrationRoomId,
-        previousRoomEpoch: 'directory-epoch-1',
-        nextRoomEpoch: 'directory-epoch-2',
+        previousTargetRoomEpoch: 'directory-epoch-1',
+        targetRoomEpoch: 'directory-epoch-2',
         lastActivityAt: THIRD_TIMESTAMP,
-      })).kind !== 'rebound') {
-        throw new Error('ROOM_DIRECTORY_REGISTRATION_REBIND_FAILED');
+        updatedAtMs: Date.parse(THIRD_TIMESTAMP),
+      })).kind !== 'advanced') {
+        throw new Error('ROOM_DIRECTORY_REGISTRATION_ADVANCE_FAILED');
       }
-      if ((await directoryRegistrations.rebindEpoch({
+      if ((await directoryRegistrations.advanceTarget({
         roomId: directoryRegistrationRoomId,
-        previousRoomEpoch: 'directory-epoch-1',
-        nextRoomEpoch: 'directory-stale-epoch',
+        previousTargetRoomEpoch: 'directory-epoch-1',
+        targetRoomEpoch: 'directory-stale-epoch',
         lastActivityAt: THIRD_TIMESTAMP,
+        updatedAtMs: Date.parse(THIRD_TIMESTAMP),
       })).kind !== 'stale') {
-        throw new Error('ROOM_DIRECTORY_REGISTRATION_STALE_REBIND_FAILED');
+        throw new Error('ROOM_DIRECTORY_REGISTRATION_STALE_ADVANCE_FAILED');
       }
       const listedDirectoryRegistration = (await directoryRegistrations.list({ limit: 50 }))
         .find((entry) => entry.roomId === directoryRegistrationRoomId);
-      if (listedDirectoryRegistration?.roomEpoch !== 'directory-epoch-2') {
+      if (
+        listedDirectoryRegistration?.targetRoomEpoch !== 'directory-epoch-2'
+        || listedDirectoryRegistration.projectedRoomEpoch !== null
+        || listedDirectoryRegistration.phase !== 'projecting'
+      ) {
         throw new Error('ROOM_DIRECTORY_REGISTRATION_LIST_FAILED');
+      }
+      if ((await directoryRegistrations.confirmProjected({
+        roomId: directoryRegistrationRoomId,
+        targetRoomEpoch: 'directory-epoch-2',
+        updatedAtMs: Date.parse(THIRD_TIMESTAMP),
+        score: Date.parse(THIRD_TIMESTAMP),
+      })).kind !== 'confirmed') {
+        throw new Error('ROOM_DIRECTORY_REGISTRATION_CONFIRM_FAILED');
       }
       if ((await directoryRegistrations.delete({
         roomId: directoryRegistrationRoomId,
-        roomEpoch: 'directory-epoch-1',
+        targetRoomEpoch: 'directory-epoch-1',
+        phase: 'closing',
       })).kind !== 'stale') {
         throw new Error('ROOM_DIRECTORY_REGISTRATION_STALE_DELETE_FAILED');
       }
+      if ((await directoryRegistrations.markClosing({
+        roomId: directoryRegistrationRoomId,
+        targetRoomEpoch: 'directory-epoch-2',
+        updatedAtMs: Date.parse(THIRD_TIMESTAMP),
+        score: Date.parse(THIRD_TIMESTAMP),
+      })).kind !== 'marked') {
+        throw new Error('ROOM_DIRECTORY_REGISTRATION_MARK_CLOSING_FAILED');
+      }
       if ((await directoryRegistrations.delete({
         roomId: directoryRegistrationRoomId,
-        roomEpoch: 'directory-epoch-2',
+        targetRoomEpoch: 'directory-epoch-2',
+        phase: 'closing',
       })).kind !== 'deleted') {
         throw new Error('ROOM_DIRECTORY_REGISTRATION_DELETE_FAILED');
       }
+
+      const directoryRows = new Map<string, RoomDirectoryRecord>();
+      let failDirectoryRead = false;
+      const directoryD1: D1RoomDirectoryStore = {
+        async upsertOpen(input) {
+          const current = directoryRows.get(input.roomId);
+          if (
+            current === undefined
+            || (current.roomEpoch === input.roomEpoch
+              && current.lastActivityAt <= input.lastActivityAt)
+          ) directoryRows.set(input.roomId, structuredClone(input));
+        },
+        async rebindEpoch(input) {
+          const current = directoryRows.get(input.roomId);
+          if (
+            current?.roomEpoch === input.previousRoomEpoch
+            && current.hostUserId === input.hostUserId
+          ) {
+            directoryRows.set(input.roomId, {
+              ...current,
+              roomEpoch: input.nextRoomEpoch,
+              lastActivityAt: current.lastActivityAt > input.lastActivityAt
+                ? current.lastActivityAt
+                : input.lastActivityAt,
+            });
+          }
+        },
+        async delete(input) {
+          if (directoryRows.get(input.roomId)?.roomEpoch === input.roomEpoch) {
+            directoryRows.delete(input.roomId);
+          }
+        },
+        async get(inputRoomId) {
+          if (failDirectoryRead) throw new Error('ROOM_DIRECTORY_D1_FAULT_INJECTED');
+          const current = directoryRows.get(inputRoomId);
+          return current === undefined ? null : structuredClone(current);
+        },
+        async listPublic() { return []; },
+        async listByHost() { return []; },
+        async listReconciliationCandidates() { return []; },
+      };
+      const directory = createArenaRoomDirectoryService({
+        authority: writerStore,
+        registrations: directoryRegistrations,
+        store: directoryD1,
+        now: nowAt(NEXT_TIMESTAMP),
+      });
+      const firstDirectoryActors = createRoomActorRegistry({
+        store: writerStore,
+        createRoomIdentity: () => ({
+          roomId: directoryRegistrationRoomId,
+          roomEpoch: 'directory-epoch-1',
+        }),
+        createTimestamp: () => TIMESTAMP,
+        now: nowAt(NEXT_TIMESTAMP),
+        prepareCreatedOpen: directory.prepareCreatedOpen,
+        onCommittedRecovered: directory.rebindCommittedOpen,
+        onCommittedClosed: directory.removeCommittedClosed,
+      });
+      const directoryMemberships = createArenaRoomMembershipService({
+        actors: firstDirectoryActors,
+        createUserId: () => 'directory-host-1',
+        directory,
+      });
+      await directoryMemberships.create({
+        accountUserId: 101,
+        displayName: 'Directory host',
+        sharedConfig: sharedConfig(),
+        directory: { title: 'Redis recovery directory', visibility: 'public' },
+      });
+      if (directoryRows.get(directoryRegistrationRoomId)?.roomEpoch !== 'directory-epoch-1') {
+        throw new Error('ROOM_DIRECTORY_INITIAL_PROJECTION_FAILED');
+      }
+      await firstDirectoryActors.shutdown();
+      failDirectoryRead = true;
+      let directoryProjectionErrors = 0;
+      const recoveredDirectoryActors = createRoomActorRegistry({
+        store: readerStore,
+        createRoomEpoch: () => 'directory-epoch-2',
+        recoveryTimestamp: () => NEXT_TIMESTAMP,
+        now: nowAt(NEXT_TIMESTAMP),
+        prepareCreatedOpen: directory.prepareCreatedOpen,
+        onCommittedRecovered: directory.rebindCommittedOpen,
+        onCommittedClosed: directory.removeCommittedClosed,
+        onBackgroundError: () => { directoryProjectionErrors += 1; },
+      });
+      await recoveredDirectoryActors.recover(directoryRegistrationRoomId);
+      await eventually(async () => {
+        const current = await directoryRegistrations.get(directoryRegistrationRoomId);
+        return directoryProjectionErrors === 1
+          && current?.phase === 'projecting'
+          && current.projectedRoomEpoch === 'directory-epoch-1'
+          && current.targetRoomEpoch === 'directory-epoch-2';
+      });
+      failDirectoryRead = false;
+      const compensated = await directory.reconcileRegistrations({
+        limit: 50,
+        score: Date.parse(THIRD_TIMESTAMP),
+      });
+      const compensatedRegistration = await directoryRegistrations.get(
+        directoryRegistrationRoomId,
+      );
+      if (
+        compensated.projected !== 1
+        || directoryRows.get(directoryRegistrationRoomId)?.roomEpoch !== 'directory-epoch-2'
+        || compensatedRegistration?.phase !== 'active'
+        || compensatedRegistration.projectedRoomEpoch !== 'directory-epoch-2'
+      ) {
+        throw new Error('ROOM_DIRECTORY_RECOVERY_COMPENSATION_FAILED');
+      }
+      await recoveredDirectoryActors.shutdown();
 
       const authorityActors = createRoomActorRegistry({
         store: writerStore,
@@ -1017,6 +1171,7 @@ try {
         roomActorWarmRecovery: true,
         roomActorOldWriterFence: true,
         directoryRegistration: true,
+        directoryRecoveryCompensation: true,
         activeTtlRefresh: true,
         ticketReplay: true,
         authorityGatewayRedisWiring: true,

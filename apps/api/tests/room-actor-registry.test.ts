@@ -1336,6 +1336,29 @@ describe('RoomActorRegistry', () => {
     expect(store.state?.snapshot.roomEpoch).toBe('epoch-2');
   });
 
+  it('open recovery 不等待派生目录 I/O，已提交 actor 在 callback 前安装且可安全 shutdown', async () => {
+    const store = new MemoryRoomStore();
+    store.state = createArenaRoomState();
+    let resolveProjection!: () => void;
+    const projection = new Promise<void>((resolve) => { resolveProjection = resolve; });
+    const onCommittedRecovered = vi.fn(() => projection);
+    const registry = createRoomActorRegistry({
+      store,
+      createRoomEpoch: () => 'epoch-2',
+      recoveryTimestamp: () => ARENA_ROOM_NEXT_TIMESTAMP,
+      onCommittedRecovered,
+    });
+
+    const actor = await registry.recover('room-1');
+    expect(actor).not.toBeNull();
+    expect(registry.get('room-1')).toBe(actor);
+    expect(onCommittedRecovered).toHaveBeenCalledOnce();
+    await registry.shutdown();
+    expect(registry.size).toBe(0);
+    resolveProjection();
+    await projection;
+  });
+
   it('低频 process refresh 仅刷新 exact active checkpoint，missing/conflict 会 fence actor', async () => {
     const store = new MemoryRoomStore();
     let now = 0;

@@ -20,9 +20,13 @@ import type {
   RoomDirectoryPosition,
   RoomDirectoryRecord,
 } from './d1-room-directory-store';
-import type { RedisRoomDirectoryRegistrationStore } from './redis-room-directory-registration-store';
+import type {
+  RedisRoomDirectoryRegistrationStore,
+  RoomDirectoryRegistration,
+} from './redis-room-directory-registration-store';
 
 const DIRECTORY_CURSOR_VERSION = 1;
+const DEFAULT_PENDING_CREATE_GRACE_MS = 5 * 60_000;
 
 export type RoomDirectoryServiceErrorCode =
   | 'ROOM_DIRECTORY_AUTHORITY_UNAVAILABLE'
@@ -47,6 +51,8 @@ export type ArenaRoomDirectoryServiceOptions = {
   readonly authority: DirectoryAuthorityStore;
   readonly registrations?: RedisRoomDirectoryRegistrationStore;
   readonly store: D1RoomDirectoryStore;
+  readonly now?: () => number;
+  readonly pendingCreateGraceMs?: number;
   readonly onBackgroundError?: (error: unknown) => void;
 };
 
@@ -187,6 +193,11 @@ const activeHostUserId = (state: ArenaRoomAuthorityState): number | null => (
 export const createArenaRoomDirectoryService = (
   options: ArenaRoomDirectoryServiceOptions,
 ): ArenaRoomDirectoryService => {
+  const now = options.now ?? Date.now;
+  const pendingCreateGraceMs = options.pendingCreateGraceMs ?? DEFAULT_PENDING_CREATE_GRACE_MS;
+  if (!Number.isSafeInteger(pendingCreateGraceMs) || pendingCreateGraceMs < 1) {
+    return fail('ROOM_DIRECTORY_INPUT_INVALID');
+  }
   const reportBackgroundError = (error: unknown): void => {
     try {
       options.onBackgroundError?.(error);
@@ -260,7 +271,9 @@ export const createArenaRoomDirectoryService = (
     for (const candidate of scanned) {
       const record = parseRecord(candidate);
       if (!allow(record) || !(await isCurrent(record))) {
-        await deleteBestEffort({ roomId: record.roomId, roomEpoch: record.roomEpoch });
+        if (!await deleteBestEffort({ roomId: record.roomId, roomEpoch: record.roomEpoch })) {
+          return fail('ROOM_DIRECTORY_CLEANUP_FAILED');
+        }
         continue;
       }
       items.push(publicEntry(record));
@@ -271,6 +284,112 @@ export const createArenaRoomDirectoryService = (
     return RoomDirectoryPageSchema.parse({ items, nextCursor });
   };
 
+  const recordFromRegistration = (
+    registration: RoomDirectoryRegistration,
+    lastActivityAt = registration.lastActivityAt,
+  ): RoomDirectoryRecord => parseRecord({
+    roomId: registration.roomId,
+    roomEpoch: registration.targetRoomEpoch,
+    hostUserId: registration.hostUserId,
+    title: registration.title,
+    visibility: registration.visibility,
+    status: registration.status,
+    createdAt: registration.createdAt,
+    lastActivityAt,
+  });
+
+  const projectRegistration = async (
+    registration: RoomDirectoryRegistration,
+    state: ArenaRoomAuthorityState,
+    score: number,
+  ): Promise<void> => {
+    if (options.registrations === undefined || registration.phase === 'closing') {
+      return fail('ROOM_DIRECTORY_STALE');
+    }
+    const hostUserId = activeHostUserId(state);
+    if (
+      state.lifecycle.status !== 'open'
+      || state.snapshot.roomId !== registration.roomId
+      || state.snapshot.roomEpoch !== registration.targetRoomEpoch
+      || hostUserId !== registration.hostUserId
+    ) return fail('ROOM_DIRECTORY_STALE');
+    const projected = recordFromRegistration(
+      registration,
+      Date.parse(registration.lastActivityAt) > Date.parse(state.lifecycle.updatedAt)
+        ? registration.lastActivityAt
+        : state.lifecycle.updatedAt,
+    );
+    const current = await options.store.get(projected.roomId);
+    if (current === null) {
+      await options.store.upsertOpen(projected);
+    } else if (current.roomEpoch === projected.roomEpoch) {
+      if (current.hostUserId !== projected.hostUserId) return fail('ROOM_DIRECTORY_STALE');
+      await options.store.upsertOpen(projected);
+    } else {
+      if (
+        registration.projectedRoomEpoch === null
+        || current.roomEpoch !== registration.projectedRoomEpoch
+      ) return fail('ROOM_DIRECTORY_STALE');
+      if (current.hostUserId === projected.hostUserId) {
+        await options.store.rebindEpoch({
+          roomId: projected.roomId,
+          previousRoomEpoch: current.roomEpoch,
+          nextRoomEpoch: projected.roomEpoch,
+          hostUserId: projected.hostUserId,
+          lastActivityAt: projected.lastActivityAt,
+        });
+      } else {
+        await options.store.delete({ roomId: current.roomId, roomEpoch: current.roomEpoch });
+      }
+      await options.store.upsertOpen(projected);
+    }
+    const confirmed = await options.store.get(projected.roomId);
+    if (
+      confirmed === null
+      || confirmed.roomEpoch !== projected.roomEpoch
+      || confirmed.hostUserId !== projected.hostUserId
+    ) return fail('ROOM_DIRECTORY_STALE');
+    const confirmation = await options.registrations.confirmProjected({
+      roomId: projected.roomId,
+      targetRoomEpoch: projected.roomEpoch,
+      updatedAtMs: now(),
+      score,
+    });
+    if (confirmation.kind !== 'confirmed') return fail('ROOM_DIRECTORY_STALE');
+  };
+
+  const cleanupClosingRegistration = async (
+    registration: RoomDirectoryRegistration,
+    score: number,
+  ): Promise<void> => {
+    if (options.registrations === undefined) {
+      return fail('ROOM_DIRECTORY_REGISTRATION_UNAVAILABLE');
+    }
+    if (registration.phase !== 'closing') {
+      const marked = await options.registrations.markClosing({
+        roomId: registration.roomId,
+        targetRoomEpoch: registration.targetRoomEpoch,
+        updatedAtMs: now(),
+        score,
+      });
+      if (marked.kind === 'missing') return;
+      if (marked.kind === 'stale') return fail('ROOM_DIRECTORY_STALE');
+    }
+    const current = await options.store.get(registration.roomId);
+    if (current !== null) {
+      await options.store.delete({ roomId: current.roomId, roomEpoch: current.roomEpoch });
+    }
+    if (await options.store.get(registration.roomId) !== null) {
+      return fail('ROOM_DIRECTORY_CLEANUP_FAILED');
+    }
+    const removed = await options.registrations.delete({
+      roomId: registration.roomId,
+      targetRoomEpoch: registration.targetRoomEpoch,
+      phase: 'closing',
+    });
+    if (removed.kind === 'stale') return fail('ROOM_DIRECTORY_STALE');
+  };
+
   let service!: ArenaRoomDirectoryService;
   service = Object.freeze({
     async prepareCreatedOpen(input) {
@@ -278,18 +397,29 @@ export const createArenaRoomDirectoryService = (
       if (options.registrations === undefined) {
         return fail('ROOM_DIRECTORY_REGISTRATION_UNAVAILABLE');
       }
-      await options.registrations.put(record);
+      await options.registrations.prepare({ record, preparedAtMs: now() });
     },
 
     async registerOpen(input) {
       const record = parseRecord(input);
-      if (!(await isCurrent(record))) return fail('ROOM_DIRECTORY_STALE');
-      await options.store.upsertOpen(record);
-      await options.registrations?.touch({
-        roomId: record.roomId,
-        roomEpoch: record.roomEpoch,
-        score: Date.parse(record.lastActivityAt),
-      });
+      const state = await readAuthority(record.roomId);
+      if (
+        state === null
+        || state.lifecycle.status !== 'open'
+        || state.snapshot.roomEpoch !== record.roomEpoch
+        || !hostMatches(state, record.hostUserId)
+      ) return fail('ROOM_DIRECTORY_STALE');
+      if (options.registrations === undefined) {
+        await options.store.upsertOpen(record);
+        return;
+      }
+      const registration = await options.registrations.get(record.roomId);
+      if (
+        registration === null
+        || registration.targetRoomEpoch !== record.roomEpoch
+        || registration.hostUserId !== record.hostUserId
+      ) return fail('ROOM_DIRECTORY_STALE');
+      await projectRegistration(registration, state, now());
     },
 
     async rebindCommittedOpen(input) {
@@ -303,65 +433,25 @@ export const createArenaRoomDirectoryService = (
         || previousRoomEpoch.data === current.state.snapshot.roomEpoch
       ) return fail('ROOM_DIRECTORY_RECOVERY_INVALID');
 
-      const registrationRebind = await options.registrations.rebindEpoch({
+      const registrationRebind = await options.registrations.advanceTarget({
         roomId: current.state.snapshot.roomId,
-        previousRoomEpoch: previousRoomEpoch.data,
-        nextRoomEpoch: current.state.snapshot.roomEpoch,
+        previousTargetRoomEpoch: previousRoomEpoch.data,
+        targetRoomEpoch: current.state.snapshot.roomEpoch,
         lastActivityAt: current.state.lifecycle.updatedAt,
+        updatedAtMs: now(),
       });
-      if (registrationRebind.kind === 'stale') return fail('ROOM_DIRECTORY_STALE');
-      const d1Record = await options.store.get(current.state.snapshot.roomId);
-      let registration = await options.registrations.get(current.state.snapshot.roomId);
-      if (registration === null && d1Record !== null) {
-        registration = {
-          ...d1Record,
-          roomEpoch: current.state.snapshot.roomEpoch,
-          hostUserId: current.hostUserId,
-          lastActivityAt: current.state.lifecycle.updatedAt,
-        };
-        await options.registrations.put(registration);
+      if (registrationRebind.kind === 'stale' || registrationRebind.kind === 'missing') {
+        return fail('ROOM_DIRECTORY_STALE');
       }
+      const registration = await options.registrations.get(current.state.snapshot.roomId);
       if (
         registration === null
         || registration.hostUserId !== current.hostUserId
-        || registration.roomEpoch !== current.state.snapshot.roomEpoch
+        || registration.targetRoomEpoch !== current.state.snapshot.roomEpoch
       ) {
         return fail('ROOM_DIRECTORY_RECOVERY_INVALID');
       }
-      const projected = parseRecord({
-        ...registration,
-        roomEpoch: current.state.snapshot.roomEpoch,
-        lastActivityAt: Date.parse(registration.lastActivityAt)
-          > Date.parse(current.state.lifecycle.updatedAt)
-          ? registration.lastActivityAt
-          : current.state.lifecycle.updatedAt,
-      });
-      if (d1Record !== null && d1Record.roomEpoch !== projected.roomEpoch) {
-        if (d1Record.roomEpoch !== previousRoomEpoch.data) {
-          return fail('ROOM_DIRECTORY_STALE');
-        }
-        if (d1Record.hostUserId === current.hostUserId) {
-          await options.store.rebindEpoch({
-            roomId: projected.roomId,
-            previousRoomEpoch: d1Record.roomEpoch,
-            nextRoomEpoch: projected.roomEpoch,
-            hostUserId: current.hostUserId,
-            lastActivityAt: projected.lastActivityAt,
-          });
-        } else {
-          await options.store.delete({
-            roomId: d1Record.roomId,
-            roomEpoch: d1Record.roomEpoch,
-          });
-        }
-      }
-      await options.store.upsertOpen(projected);
-      const touched = await options.registrations.touch({
-        roomId: projected.roomId,
-        roomEpoch: projected.roomEpoch,
-        score: Date.parse(projected.lastActivityAt),
-      });
-      if (touched.kind !== 'touched') return fail('ROOM_DIRECTORY_STALE');
+      await projectRegistration(registration, current.state, now());
     },
 
     async lookup(inputRoomId) {
@@ -453,7 +543,7 @@ export const createArenaRoomDirectoryService = (
         return fail('ROOM_DIRECTORY_REGISTRATION_UNAVAILABLE');
       }
       const limit = input.limit ?? MAX_ROOM_DIRECTORY_PAGE_SIZE;
-      const score = input.score ?? Date.now();
+      const score = input.score ?? now();
       if (
         !Number.isSafeInteger(limit)
         || limit < 1
@@ -465,69 +555,51 @@ export const createArenaRoomDirectoryService = (
       let projected = 0;
       let removed = 0;
       for (const candidate of registrations) {
-        const registration = parseRecord(candidate);
+        let registration = candidate;
         const state = await readAuthority(registration.roomId);
         const hostUserId = state === null ? null : activeHostUserId(state);
-        if (
-          state === null
-          || state.lifecycle.status !== 'open'
-          || state.snapshot.roomId !== registration.roomId
-          || hostUserId !== registration.hostUserId
-        ) {
-          const stale = await options.store.get(registration.roomId);
-          if (stale !== null) {
-            await options.store.delete({ roomId: stale.roomId, roomEpoch: stale.roomEpoch });
+        if (state === null) {
+          if (
+            registration.phase === 'pending-create'
+            && score < registration.preparedAtMs + pendingCreateGraceMs
+          ) {
+            const deferred = await options.registrations.reschedule({
+              roomId: registration.roomId,
+              targetRoomEpoch: registration.targetRoomEpoch,
+              phase: registration.phase,
+              score: registration.preparedAtMs + pendingCreateGraceMs,
+            });
+            if (deferred.kind === 'stale') return fail('ROOM_DIRECTORY_STALE');
+            continue;
           }
-          await options.registrations.delete({
-            roomId: registration.roomId,
-            roomEpoch: registration.roomEpoch,
-          });
+          await cleanupClosingRegistration(registration, score);
           removed += 1;
           continue;
         }
-
-        const currentEpoch = state.snapshot.roomEpoch;
-        if (registration.roomEpoch !== currentEpoch) {
-          const rebound = await options.registrations.rebindEpoch({
+        if (state.snapshot.roomId !== registration.roomId) return fail('ROOM_DIRECTORY_STALE');
+        if (state.lifecycle.status !== 'open') {
+          await cleanupClosingRegistration(registration, score);
+          removed += 1;
+          continue;
+        }
+        if (hostUserId !== registration.hostUserId || registration.phase === 'closing') {
+          return fail('ROOM_DIRECTORY_STALE');
+        }
+        if (registration.targetRoomEpoch !== state.snapshot.roomEpoch) {
+          const advanced = await options.registrations.advanceTarget({
             roomId: registration.roomId,
-            previousRoomEpoch: registration.roomEpoch,
-            nextRoomEpoch: currentEpoch,
+            previousTargetRoomEpoch: registration.targetRoomEpoch,
+            targetRoomEpoch: state.snapshot.roomEpoch,
             lastActivityAt: state.lifecycle.updatedAt,
+            updatedAtMs: now(),
           });
-          if (rebound.kind === 'stale') return fail('ROOM_DIRECTORY_STALE');
+          if (advanced.kind === 'missing') continue;
+          if (advanced.kind === 'stale') return fail('ROOM_DIRECTORY_STALE');
+          const updated = await options.registrations.get(registration.roomId);
+          if (updated === null) continue;
+          registration = updated;
         }
-        const currentRecord = parseRecord({
-          ...registration,
-          roomEpoch: currentEpoch,
-          lastActivityAt: Date.parse(registration.lastActivityAt)
-            > Date.parse(state.lifecycle.updatedAt)
-            ? registration.lastActivityAt
-            : state.lifecycle.updatedAt,
-        });
-        const d1Record = await options.store.get(registration.roomId);
-        if (d1Record !== null && d1Record.roomEpoch !== currentEpoch) {
-          if (d1Record.roomEpoch !== registration.roomEpoch) {
-            return fail('ROOM_DIRECTORY_STALE');
-          }
-          if (d1Record.hostUserId === hostUserId) {
-            await options.store.rebindEpoch({
-              roomId: d1Record.roomId,
-              previousRoomEpoch: d1Record.roomEpoch,
-              nextRoomEpoch: currentEpoch,
-              hostUserId,
-              lastActivityAt: currentRecord.lastActivityAt,
-            });
-          } else {
-            await options.store.delete({ roomId: d1Record.roomId, roomEpoch: d1Record.roomEpoch });
-          }
-        }
-        await options.store.upsertOpen(currentRecord);
-        const touched = await options.registrations.touch({
-          roomId: currentRecord.roomId,
-          roomEpoch: currentRecord.roomEpoch,
-          score,
-        });
-        if (touched.kind !== 'touched') return fail('ROOM_DIRECTORY_STALE');
+        await projectRegistration(registration, state, score);
         projected += 1;
       }
       return { scanned: registrations.length, projected, removed };
@@ -548,7 +620,7 @@ export const createArenaRoomDirectoryService = (
       const timer = setInterval(() => {
         if (stopped || running) return;
         running = true;
-        void service.reconcileRegistrations({ limit, score: Date.now() })
+        void service.reconcileRegistrations({ limit, score: now() })
           .catch(reportBackgroundError)
           .finally(() => { running = false; });
       }, intervalMs);
@@ -568,18 +640,35 @@ export const createArenaRoomDirectoryService = (
         return fail('ROOM_DIRECTORY_CLOSE_INVALID');
       }
       if (state.lifecycle.status !== 'closed') return fail('ROOM_DIRECTORY_CLOSE_INVALID');
-      await deleteBestEffort({
-        roomId: state.snapshot.roomId,
-        roomEpoch: state.snapshot.roomEpoch,
-      });
-      try {
-        await options.registrations?.delete({
+      if (options.registrations === undefined) {
+        await deleteBestEffort({
           roomId: state.snapshot.roomId,
           roomEpoch: state.snapshot.roomEpoch,
         });
-      } catch (error) {
-        reportBackgroundError(error);
+        return;
       }
+      let registration = await options.registrations.get(state.snapshot.roomId);
+      if (registration === null) {
+        await deleteBestEffort({
+          roomId: state.snapshot.roomId,
+          roomEpoch: state.snapshot.roomEpoch,
+        });
+        return;
+      }
+      if (registration.targetRoomEpoch !== state.snapshot.roomEpoch) {
+        const advanced = await options.registrations.advanceTarget({
+          roomId: registration.roomId,
+          previousTargetRoomEpoch: registration.targetRoomEpoch,
+          targetRoomEpoch: state.snapshot.roomEpoch,
+          lastActivityAt: state.lifecycle.updatedAt,
+          updatedAtMs: now(),
+        });
+        if (advanced.kind === 'missing') return;
+        if (advanced.kind === 'stale') return fail('ROOM_DIRECTORY_STALE');
+        registration = await options.registrations.get(state.snapshot.roomId);
+        if (registration === null) return;
+      }
+      await cleanupClosingRegistration(registration, now());
     },
   });
   return service;
