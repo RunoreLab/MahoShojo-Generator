@@ -229,8 +229,14 @@ const deleteVerifierKeys = async (): Promise<number> => {
 
 try {
   await cleanupClient.connect();
-  await deleteVerifierKeys();
   await cleanupClient.set(foreignNamespaceSentinelKey, foreignNamespaceSentinelValue);
+  await deleteVerifierKeys();
+  const initialCleanupForeignNamespacePreserved = await cleanupClient.get(
+    foreignNamespaceSentinelKey,
+  ) === foreignNamespaceSentinelValue;
+  if (!initialCleanupForeignNamespacePreserved) {
+    throw new Error('ROOM_GENERATION_DURABLE_INITIAL_CLEANUP_NAMESPACE_ESCAPED');
+  }
 
   const d1 = createVerifierD1Adapter();
   const objectStore = {
@@ -645,6 +651,7 @@ try {
     duplicateFinalizationIdempotent: finalizerRuns === 2,
     terminalReexecution: false,
     deletedFaultInjectionKeys: deletedGenerationKeys,
+    initialCleanupForeignNamespacePreserved,
     foreignNamespacePreserved,
     secretPersisted,
   }));

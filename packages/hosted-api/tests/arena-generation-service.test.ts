@@ -2871,6 +2871,74 @@ describe('Arena generation lifecycle service', () => {
     expect(terminalStore.reconcileExpiredLease).not.toHaveBeenCalled();
   });
 
+  test('expired Redis lease adopts a durable cancelled finalization with exact terminal code', async () => {
+    const store = new MemoryReplayStore();
+    await store.reserve({
+      actorKey: 'user:42',
+      generationRequestId: 'request-1',
+      generationId: 'generation-1',
+      payloadHash: 'payload-hash',
+      producerToken: 'producer-token-1',
+      now: '2026-08-25T03:00:00.000Z',
+      leaseExpiresAt: '2026-08-25T03:01:00.000Z',
+    });
+    await store.markRunning({
+      generationId: 'generation-1',
+      producerToken: 'producer-token-1',
+      now: '2026-08-25T03:00:00.000Z',
+      leaseExpiresAt: '2026-08-25T03:01:00.000Z',
+    });
+    const terminalStore: ArenaGenerationTerminalStore = {
+      readOwnedTerminal: vi.fn(async () => ({
+        generationId: 'generation-1',
+        generationRequestId: 'request-1',
+        status: 'cancelled' as const,
+        updatedAt: '2026-08-25T03:30:00.000Z',
+        resultRef: null,
+        markdown: '',
+        reasoning: '',
+        errorCode: 'USER_CANCELLED',
+        payloadHash: 'payload-hash',
+        contentAvailable: false,
+      })),
+      reconcileExpiredLease: vi.fn(async () => {
+        throw new Error('existing durable cancellation must be adopted directly');
+      }),
+    };
+    const service = createService(store, {
+      execute: vi.fn(async () => ({ status: 'completed' as const })),
+    }, { terminalStore });
+
+    const response = await service.status(new Request(
+      'https://example.test/api/arena/generations/generation-1',
+    ), { generationId: 'generation-1' });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      status: 'cancelled',
+      resumable: false,
+    });
+    expect(store.states.get('generation-1')).toMatchObject({
+      status: 'cancelled',
+      terminal: { status: 'cancelled', code: 'USER_CANCELLED' },
+      leaseExpiresAt: null,
+      snapshot: {
+        status: 'cancelled',
+        markdown: '',
+        reasoning: '',
+      },
+    });
+    expect(store.events.get('generation-1')?.at(-1)).toEqual(expect.objectContaining({
+      type: 'done',
+      data: expect.objectContaining({
+        status: 'cancelled',
+        ok: false,
+        code: 'USER_CANCELLED',
+      }),
+    }));
+    expect(terminalStore.reconcileExpiredLease).not.toHaveBeenCalled();
+  });
+
   test.each([
     ['request identity', { generationRequestId: 'request-other', payloadHash: 'payload-hash' }],
     ['payload identity', { generationRequestId: 'request-1', payloadHash: 'payload-other' }],

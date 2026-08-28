@@ -1124,7 +1124,7 @@ export const createArenaGenerationService = (
       ? terminal.code ?? 'PRODUCER_OWNERSHIP_LOST'
       : terminal.status === 'failed'
         ? terminal.code ?? 'GENERATION_FAILED'
-        : null;
+        : terminal.code ?? null;
     return {
       terminal,
       terminalEvent: {

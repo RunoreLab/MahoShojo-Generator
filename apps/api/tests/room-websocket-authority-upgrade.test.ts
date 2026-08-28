@@ -14,16 +14,19 @@ import {
   issueArenaRoomTrustedTime,
   type ArenaRoomAuthorityState,
 } from '@mahoshojo/multiplayer-core';
+import { createMemoryGenerationReplayStore } from '@mahoshojo/hosted-api/arena-generation/memory-replay-store';
+import { createArenaGenerationService } from '@mahoshojo/hosted-api/arena-generation/service';
 import { Hono } from 'hono';
 import WebSocket from 'ws';
 
+import { createArenaRoomGenerationPort } from '#/arena-generation/room-generation-port';
 import {
   createRoomActorRegistry,
   type RoomActorCheckpointStore,
 } from '#/arena-room/room-actor-registry';
 import { createRoomGenerationPublisher } from '#/arena-room/room-generation-publisher';
+import { createArenaRoomGenerationSnapshot } from '#/arena-room/room-generation-snapshot';
 import { createArenaRoomMembershipService } from '#/arena-room/room-membership-service';
-import type { ArenaRoomGenerationEvent } from '#/arena-generation/room-generation-port';
 import type { RedisRoomTicketReplayStore } from '#/arena-room/redis-room-ticket-replay-store';
 import {
   createArenaRoomTicketCodec,
@@ -326,7 +329,17 @@ describe('Room signed-ticket real Node upgrade', () => {
         within(hostStoryMessage, 'real-websocket-host-story'),
       ])).resolves.toEqual([story, story]);
 
-      const memberPublisherStory = nextMatchingMessage(socket, (message) => (
+      const firstMemberPublisherStory = nextMatchingMessage(socket, (message) => (
+        message.type === 'story.delta'
+        && message.generationId === 'generation-real-ws-story'
+        && message.payload.delta === '房主在线时由 Hosted batch 合并发布'
+      ));
+      const firstHostPublisherStory = nextMatchingMessage(openedHost.socket, (message) => (
+        message.type === 'story.delta'
+        && message.generationId === 'generation-real-ws-story'
+        && message.payload.delta === '房主在线时由 Hosted batch 合并发布'
+      ));
+      const memberPublisherStoryAfterDisconnect = nextMatchingMessage(socket, (message) => (
         message.type === 'story.delta'
         && message.generationId === 'generation-real-ws-story'
         && message.payload.delta === '房主断线后仍由服务器继续发布'
@@ -336,54 +349,105 @@ describe('Room signed-ticket real Node upgrade', () => {
         && message.payload.generationId === 'generation-real-ws-story'
       ));
       let producerStarts = 0;
-      let generationController!: ReadableStreamDefaultController<ArenaRoomGenerationEvent>;
-      const generationEvents = new ReadableStream<ArenaRoomGenerationEvent>({
-        start(controller) {
-          producerStarts += 1;
-          generationController = controller;
+      let releaseFirstBatch!: () => void;
+      let releaseSecondBatch!: () => void;
+      const firstBatchGate = new Promise<void>((resolve) => { releaseFirstBatch = resolve; });
+      const secondBatchGate = new Promise<void>((resolve) => { releaseSecondBatch = resolve; });
+      const generationService = createArenaGenerationService({
+        store: createMemoryGenerationReplayStore(),
+        executor: {
+          async execute({ emit }) {
+            producerStarts += 1;
+            await firstBatchGate;
+            await emit({ type: 'markdown', data: { chunk: '房主在线时由 ' } });
+            await emit({ type: 'markdown', data: { chunk: 'Hosted batch 合并发布' } });
+            await secondBatchGate;
+            await emit({ type: 'markdown', data: { chunk: '房主断线后仍由' } });
+            await emit({ type: 'markdown', data: { chunk: '服务器继续发布' } });
+            return {
+              status: 'completed' as const,
+              resultRef: 'r2:real-ws-batched-report',
+            };
+          },
         },
+        resolveActor: async () => ({ actorKey: 'pvp-room:room-1' }),
+        deriveGenerationId: async () => 'generation-real-ws-story',
+        hashPayload: async (payload) => `test:${JSON.stringify(payload)}`,
+        now: () => new Date(timestamp),
+        replayPollMs: 1,
+        deltaFlushIntervalMs: 75,
+        deltaFlushBytes: 1_024,
       });
+      const generationPort = createArenaRoomGenerationPort({
+        generationService,
+        pvpAuthority: { sign: async () => 'real-ws-pvp-signature' },
+        internalGuidanceAuthority: { sign: async () => 'real-ws-guidance-signature' },
+        deriveGenerationId: async () => 'generation-real-ws-story',
+        canonicalizeSemanticPayload: async ({ payload }) => structuredClone(payload),
+      });
+      const started = await generationPort.startFromHostRequest({
+        request: new Request('https://api.example.test/api/arena/generate-stream', {
+          method: 'POST',
+          headers: { authorization: 'Bearer real-ws-host' },
+        }),
+        roomId: 'room-1',
+        generationRequestId: 'request-real-ws-story',
+        payload: { mode: 'classic' },
+        internalGuidance: 'server-owned real WebSocket batch test',
+        pvpContext: {
+          matchId: 'generation-real-ws-story',
+          roundId: 'attempt-1',
+        },
+        multiplayerSnapshot: createArenaRoomGenerationSnapshot(
+          authorityState,
+          'request-real-ws-story',
+        ),
+      });
+      if (started.kind !== 'subscribed') {
+        throw new Error(`real Hosted generation rejected:${started.code}`);
+      }
       const publisher = createRoomGenerationPublisher({
         actor,
         authority: publisherAuthority,
         now: () => Date.parse(timestamp),
       });
-      const publishing = publisher.attach({
-        generationId: 'generation-real-ws-story',
-        generationRequestId: 'request-real-ws-story',
-        events: generationEvents,
-      });
+      const publishing = publisher.attach(started.subscription);
+
+      releaseFirstBatch();
+      await expect(Promise.all([
+        within(firstMemberPublisherStory, 'member-real-hosted-batch'),
+        within(firstHostPublisherStory, 'host-real-hosted-batch'),
+      ])).resolves.toEqual([
+        expect.objectContaining({
+          type: 'story.delta',
+          chunkSeq: 1,
+          payload: { delta: '房主在线时由 Hosted batch 合并发布' },
+        }),
+        expect.objectContaining({
+          type: 'story.delta',
+          chunkSeq: 1,
+          payload: { delta: '房主在线时由 Hosted batch 合并发布' },
+        }),
+      ]);
 
       const hostDisconnected = nextClose(openedHost.socket);
       openedHost.socket.close(1000, 'host-client-disconnected');
       await expect(within(hostDisconnected, 'host-client-disconnected')).resolves.toMatchObject({
         code: 1000,
       });
-      generationController.enqueue({
-        id: 'publisher-1',
-        type: 'markdown',
-        chunk: '房主断线后仍由服务器继续发布',
-      });
-      generationController.enqueue({
-        id: 'publisher-2',
-        type: 'done',
-        status: 'completed',
-        generationRecordId: 'generation-real-ws-story',
-        resultAvailable: true,
-      });
-      generationController.close();
+      releaseSecondBatch();
 
       await expect(within(publishing, 'server-owned-publisher')).resolves.toEqual({
         kind: 'completed',
         generationRecordId: 'generation-real-ws-story',
       });
       await expect(Promise.all([
-        within(memberPublisherStory, 'member-publisher-story-after-host-disconnect'),
+        within(memberPublisherStoryAfterDisconnect, 'member-publisher-story-after-host-disconnect'),
         within(memberPublisherTerminal, 'member-publisher-terminal-after-host-disconnect'),
       ])).resolves.toEqual([
         expect.objectContaining({
           type: 'story.delta',
-          chunkSeq: 1,
+          chunkSeq: 2,
           payload: { delta: '房主断线后仍由服务器继续发布' },
         }),
         expect.objectContaining({
