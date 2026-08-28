@@ -534,6 +534,10 @@ export const createArenaRoomController = (
       && state.generation.mirror?.generationId === mirror.generationId
       && state.generation.mirror.attempt === mirror.attempt;
     const base = sameAttempt ? state.generation : EMPTY_GENERATION_VIEW;
+    const pendingRequestId = pendingGenerationStartRequest?.generationRequestId
+      === mirror.generationRequestId
+      ? mirror.generationRequestId
+      : null;
     return {
       ...base,
       mirror,
@@ -543,7 +547,7 @@ export const createArenaRoomController = (
       finalAuthoritative: false,
       generationRecordId: null,
       errorCode: null,
-      pendingRequestId: null,
+      pendingRequestId,
       startResultUnknown: false,
     };
   };
@@ -1030,6 +1034,9 @@ export const createArenaRoomController = (
     retry = false,
   ): Promise<void> => {
     const current = state.session;
+    const effectiveRequest = retry && current && request.expectedRoomEpoch !== current.roomEpoch
+      ? { ...request, expectedRoomEpoch: current.roomEpoch }
+      : request;
     const active = current?.snapshot.activeGeneration;
     const activeState = active?.state;
     const retryAllowed = retry && (
@@ -1049,8 +1056,8 @@ export const createArenaRoomController = (
       || !access.authenticated
       || !current
       || current.self.role !== 'host'
-      || request.expectedRoomEpoch !== current.roomEpoch
-      || (!retry && request.expectedRevision !== current.snapshot.revision)
+      || effectiveRequest.expectedRoomEpoch !== current.roomEpoch
+      || (!retry && effectiveRequest.expectedRevision !== current.snapshot.revision)
       || generationStartPending
       || (retry ? !retryAllowed : state.generation.startResultUnknown)
       || (!retry && (activeState === 'starting' || activeState === 'running'))
@@ -1072,7 +1079,7 @@ export const createArenaRoomController = (
       error: null,
     });
     try {
-      const view = await options.client.startGeneration(current.roomId, request);
+      const view = await options.client.startGeneration(current.roomId, effectiveRequest);
       if (
         disposed
         || operation !== generationStartOperation

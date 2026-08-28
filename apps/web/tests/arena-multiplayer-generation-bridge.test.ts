@@ -166,7 +166,11 @@ describe('Arena multiplayer generation bridge', () => {
         ...base.session!,
         snapshot: { ...base.session!.snapshot, activeGeneration: mirror },
       },
-      generation: { ...base.generation, mirror },
+      generation: {
+        ...base.generation,
+        mirror,
+        pendingRequestId: mirror.generationRequestId,
+      },
     };
     expect(resolveArenaRoomGenerationAction(state)).toMatchObject({
       canStart: false,
@@ -181,6 +185,15 @@ describe('Arena multiplayer generation bridge', () => {
     await expect(dispatchArenaRoomGenerationRetry({ controller, state }))
       .resolves.toBe('submitted');
     expect(retryGenerationStart).toHaveBeenCalledOnce();
+
+    expect(resolveArenaRoomGenerationAction({
+      ...state,
+      generation: { ...state.generation, pendingRequestId: null },
+    })).toMatchObject({
+      canStart: false,
+      canRetry: false,
+      reason: 'unknown',
+    });
   });
 
   it('构造共享配置期间 epoch/revision 改变时拒绝提交旧请求', async () => {

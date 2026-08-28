@@ -1,7 +1,11 @@
 import {
+  ArenaErrorCodeSchema,
+  GenerationMirrorSchema,
   MAX_PENDING_PROPOSALS_PER_MEMBER,
+  OpaqueKeySchema,
   type ArenaErrorCode,
 } from '@mahoshojo/contracts/arena-room';
+import { z } from 'zod';
 
 import {
   MAX_ROOM_GENERATION_RECORDS,
@@ -773,5 +777,48 @@ describe('GMR-01 independent review regressions', () => {
     expect(oversizedHydrate).toEqual(hydrateBefore);
     expect(() => transitionArenaRoomAt(state, reserveCommand(), generationReservationAuthority())).not.toThrow();
     expect(transitionArenaRoomAt(state, reserveCommand(), generationReservationAuthority()).ok).toBe(true);
+  });
+});
+
+describe('GMR-09 mixed-version checkpoint gate', () => {
+  const LegacyGenerationRecordSchema = z.object({
+    mirror: GenerationMirrorSchema,
+    generationRecordId: OpaqueKeySchema.optional(),
+    errorCode: ArenaErrorCodeSchema.optional(),
+  }).strict();
+
+  it('keeps pre-digest checkpoints readable but fails their historical retry closed', () => {
+    const state = createJoinedState();
+    const command = reserveCommand();
+    const reserved = success(transitionArenaRoomAt(
+      state,
+      command,
+      generationReservationAuthority(),
+    )).nextState;
+    const legacyCheckpoint = structuredClone(reserved);
+    delete legacyCheckpoint.generationLedger[0]?.generationPayloadDigest;
+
+    const parsedLegacyCheckpoint = parseArenaRoomAuthorityState(legacyCheckpoint);
+    expect(parsedLegacyCheckpoint.generationLedger[0]?.generationPayloadDigest).toBeUndefined();
+    expect(failure(transitionArenaRoomAt(
+      parsedLegacyCheckpoint,
+      command,
+      generationReservationAuthority(),
+    ))).toMatchObject({
+      code: 'conflict',
+      reason: 'generation-request-conflict',
+    });
+  });
+
+  it('proves writer activation is not rollback-safe for a legacy strict reader', () => {
+    const state = createJoinedState();
+    const reserved = success(transitionArenaRoomAt(
+      state,
+      reserveCommand(),
+      generationReservationAuthority(),
+    )).nextState;
+
+    expect(reserved.generationLedger[0]?.generationPayloadDigest).toBe(generationPayloadDigest());
+    expect(LegacyGenerationRecordSchema.safeParse(reserved.generationLedger[0]).success).toBe(false);
   });
 });

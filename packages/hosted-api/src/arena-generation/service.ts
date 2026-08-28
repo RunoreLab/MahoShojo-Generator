@@ -1291,6 +1291,27 @@ export const createArenaGenerationService = (
     if (state.actorKey !== actor.actorKey) {
       return jsonResponse({ code: 'GENERATION_NOT_FOUND', error: 'Generation not found' }, 404);
     }
+    if (
+      !terminalFallback
+      && state.status === 'completed'
+      && state.snapshot?.status !== 'completed'
+    ) {
+      const durable = await inspectOwnedFinalization(generationId, actor.actorKey)
+        .catch(() => ({ kind: 'not-found' as const }));
+      if (durable.kind === 'pending') {
+        return jsonResponse({
+          code: 'GENERATION_FINALIZATION_PENDING',
+          error: 'Generation durable finalization remains pending',
+        }, 503);
+      }
+      if (durable.kind === 'terminal') terminalFallback = durable.terminal;
+      if (durable.kind === 'not-found') {
+        return jsonResponse({
+          code: 'GENERATION_TERMINAL_CONTENT_UNAVAILABLE',
+          error: 'Generation terminal content unavailable',
+        }, 503);
+      }
+    }
     if (terminalFallback) return { actor, state, terminalFallback };
     return reconcileOwnedActiveState(actor, state);
   };

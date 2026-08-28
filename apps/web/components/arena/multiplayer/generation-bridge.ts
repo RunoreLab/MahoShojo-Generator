@@ -27,9 +27,16 @@ export const resolveArenaRoomGenerationAction = (
     && state.generation.phase === 'unknown'
     && state.generation.pendingRequestId !== null;
   const retryableNotFound = state.generation.phase === 'unavailable'
-    && state.generation.mirror?.state === 'starting';
+    && state.generation.mirror?.state === 'starting'
+    && state.generation.pendingRequestId === state.generation.mirror.generationRequestId;
   if (retryableUnknown || retryableNotFound) {
     return { inRoom: true, canStart: false, canRetry: true, reason: 'recovery' };
+  }
+  if (
+    state.generation.mirror?.state === 'starting'
+    || state.generation.mirror?.state === 'running'
+  ) {
+    return { inRoom: true, canStart: false, canRetry: false, reason: 'unknown' };
   }
   if (state.generation.startResultUnknown || state.generation.phase === 'unknown') {
     return { inRoom: true, canStart: false, canRetry: false, reason: 'unknown' };

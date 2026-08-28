@@ -46,14 +46,17 @@ describe('Hono server config', () => {
     expect(readHonoServerConfig().arenaMultiplayerEnabled).toBe(true);
   });
 
-  it.each(['production', 'preview'])('%s target 在 Production Gate 前拒绝激活 Arena multiplayer', (target) => {
-    stubValidBearerProductionEnv();
-    vi.stubEnv('HOSTED_API_ENVIRONMENT', target);
-    vi.stubEnv('REDIS_KEY_PREFIX', target === 'preview' ? 'preview' : '');
-    vi.stubEnv('ARENA_MULTIPLAYER_ENABLED', 'true');
+  it.each(['production', 'preview'])(
+    'GMR-09 mixed-version gate：%s target 在 compatible-reader-first/Production Gate 前拒绝激活 Arena multiplayer',
+    (target) => {
+      stubValidBearerProductionEnv();
+      vi.stubEnv('HOSTED_API_ENVIRONMENT', target);
+      vi.stubEnv('REDIS_KEY_PREFIX', target === 'preview' ? 'preview' : '');
+      vi.stubEnv('ARENA_MULTIPLAYER_ENABLED', 'true');
 
-    expect(() => readHonoServerConfig()).toThrow(/ARENA_MULTIPLAYER_ENABLED.*Production Gate.*false/);
-  });
+      expect(() => readHonoServerConfig()).toThrow(/ARENA_MULTIPLAYER_ENABLED.*Production Gate.*false/);
+    },
+  );
 
   it('读取共享 Redis 的环境隔离前缀', () => {
     stubValidBearerProductionEnv();

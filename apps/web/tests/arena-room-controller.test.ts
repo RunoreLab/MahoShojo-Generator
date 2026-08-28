@@ -860,6 +860,56 @@ describe('Arena Room browser controller', () => {
     });
   });
 
+  it('unknown 后 Room epoch 恢复时显式 retry 只重绑 epoch 并复用同一 intent/payload', async () => {
+    const recovered = createHarness();
+    vi.mocked(recovered.client.startGeneration).mockRejectedValueOnce(new ArenaRoomClientError(
+      'ROOM_RESULT_UNKNOWN',
+      503,
+      '请求可能已提交，请先确认房间状态，不要重复提交',
+    ));
+    await recovered.controller.create({
+      displayName: '房主',
+      directory: { title: '测试房', visibility: 'public' },
+      sharedConfig,
+    });
+    recovered.sockets[0]!.open();
+    await recovered.controller.startGeneration(generationStartRequest);
+    vi.mocked(recovered.client.getGenerationView).mockRejectedValueOnce(
+      new Error('generation projection unavailable'),
+    );
+    recovered.sockets[0]!.message(JSON.stringify({
+      protocolVersion: 1,
+      roomId: 'room-1',
+      roomEpoch: 'epoch-2',
+      controlSeq: 2,
+      timestamp: '2026-08-28T00:03:00.000Z',
+      type: 'room.snapshot',
+      payload: {
+        ...snapshot,
+        roomEpoch: 'epoch-2',
+        controlSeq: 2,
+        activeGeneration: { ...generationMirror, state: 'starting' },
+      },
+    }));
+    await vi.waitFor(() => {
+      expect(recovered.controller.getSnapshot().generation.phase).toBe('unavailable');
+    });
+    vi.mocked(recovered.client.startGeneration).mockResolvedValueOnce({
+      ...generationView,
+      roomEpoch: 'epoch-2',
+      generation: { ...generationMirror, state: 'running' },
+    });
+
+    await recovered.controller.retryGenerationStart();
+
+    expect(recovered.client.startGeneration).toHaveBeenCalledTimes(2);
+    expect(recovered.client.startGeneration).toHaveBeenLastCalledWith('room-1', {
+      ...generationStartRequest,
+      expectedRoomEpoch: 'epoch-2',
+    });
+    expect(recovered.controller.getSnapshot().generation.phase).toBe('running');
+  });
+
   it('story 仅接受 0-based contiguous chunk，忽略重复并在 gap 冻结后 single-flight GET', async () => {
     const { client, controller, sockets } = createHarness();
     let resolveRecovery!: (value: typeof generationView) => void;

@@ -2236,14 +2236,29 @@ describe('Arena generation lifecycle service', () => {
   test('bounds Redis snapshot bytes while retaining the terminal fallback path', async () => {
     const store = new MemoryReplayStore();
     const observeArenaGeneration = vi.fn();
+    let finalized = false;
+    const terminalStore: ArenaGenerationTerminalStore = {
+      readOwnedTerminal: vi.fn(async () => finalized ? ({
+        generationId: 'generation-1',
+        generationRequestId: 'request-1',
+        status: 'completed' as const,
+        updatedAt: '2026-08-25T04:00:00.000Z',
+        resultRef: 'r2://report/large',
+        markdown: 'X'.repeat(512),
+        reasoning: '',
+        contentAvailable: true,
+      }) : null),
+    };
     const service = createService(store, {
       execute: vi.fn(async ({ emit }) => {
         await emit({ type: 'markdown', data: { chunk: 'X'.repeat(512) } });
+        finalized = true;
         return { status: 'completed' as const, resultRef: 'r2://report/large' };
       }),
     }, {
       snapshotMaxBytes: 128,
       observer: { observeArenaGeneration },
+      terminalStore,
     });
 
     const response = await service.create(createRequest('request-1'));
@@ -2254,6 +2269,22 @@ describe('Arena generation lifecycle service', () => {
       event: 'redis_degraded',
       operation: 'snapshot_budget',
     }));
+    await expect(service.readOwnedProjection({
+      actorKey: 'user:42',
+      generationId: 'generation-1',
+    })).resolves.toMatchObject({
+      kind: 'found',
+      projection: {
+        status: 'completed',
+        markdown: 'X'.repeat(512),
+        finalAuthoritative: true,
+        resultAvailable: true,
+      },
+    });
+    expect(terminalStore.readOwnedTerminal).toHaveBeenCalledWith({
+      actorKey: 'user:42',
+      generationId: 'generation-1',
+    });
   });
 
   test('expired producer lease reconciles to producer_lost and never starts another provider', async () => {

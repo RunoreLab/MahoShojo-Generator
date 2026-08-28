@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 
 import {
   createArenaGenerationService,
@@ -6,7 +6,9 @@ import {
   type GenerationReplayStore,
 } from '@mahoshojo/hosted-api/arena-generation/service';
 import {
+  createArenaGenerationFinalizer,
   createNodeArenaGenerationTerminalStore,
+  createNodeArenaGenerationFinalizationPorts,
   deriveArenaGenerationId,
   hashArenaGenerationPayload,
 } from '@mahoshojo/hosted-runtime/arena-generation';
@@ -57,6 +59,7 @@ const cleanupClient = createClient({ url: redisUrl });
 cleanupClient.on('error', () => undefined);
 let runtime: RedisRuntime | null = null;
 let recoveredRuntime: RedisRuntime | null = null;
+let activeRecoveredActors: ReturnType<typeof createRoomActorRegistry> | null = null;
 
 const createVerifierD1Adapter = (): NodeDataD1Client => ({
   prepare(sql) {
@@ -67,11 +70,18 @@ const createVerifierD1Adapter = (): NodeDataD1Client => ({
         return d1Statement;
       },
       async all() {
+        const generationId = String(parameters[0] ?? '');
+        const generation = generationRows.get(generationId);
+        if (sql.includes('FROM battle_report_generations\nWHERE id = ?')) {
+          return {
+            success: true,
+            results: generation ? [{ ...generation }] : [],
+            meta: {},
+          };
+        }
         if (!sql.includes('FROM battle_report_generations AS brg')) {
           throw new Error('ROOM_GENERATION_DURABLE_D1_QUERY_UNEXPECTED');
         }
-        const generationId = String(parameters[0] ?? '');
-        const generation = generationRows.get(generationId);
         const object = objectRows.get(generationId);
         return {
           success: true,
@@ -80,6 +90,60 @@ const createVerifierD1Adapter = (): NodeDataD1Client => ({
         };
       },
       async run() {
+        if (sql.includes('INSERT INTO large_objects')) {
+          const generationId = String(parameters[2] ?? '');
+          objectRows.set(generationId, {
+            id: parameters[0],
+            kind: parameters[1],
+            owner_ref_id: generationId,
+            r2_key: parameters[4],
+          });
+          return { success: true, results: [], meta: { changes: 1 } };
+        }
+        if (sql.includes('INSERT OR IGNORE INTO battle_report_generations')) {
+          const generationId = String(parameters[0] ?? '');
+          if (generationRows.has(generationId)) {
+            return { success: true, results: [], meta: { changes: 0 } };
+          }
+          const extraIndex = parameters.findIndex((value) => (
+            typeof value === 'string' && value.includes('"generationRequestId"')
+          ));
+          if (extraIndex < 1) throw new Error('ROOM_GENERATION_DURABLE_D1_EXTRA_MISSING');
+          generationRows.set(generationId, {
+            id: generationId,
+            status: parameters[4],
+            updated_at: parameters.at(-1),
+            output_preview: parameters[extraIndex - 1],
+            extra_json: parameters[extraIndex],
+          });
+          return { success: true, results: [], meta: { changes: 1 } };
+        }
+        if (
+          sql.includes('UPDATE battle_report_generations')
+          && sql.includes("'$.finalizationCompleted'")
+        ) {
+          const generationId = String(parameters[4] ?? '');
+          const generation = generationRows.get(generationId);
+          if (!generation) return { success: true, results: [], meta: { changes: 0 } };
+          const extra = JSON.parse(String(generation.extra_json ?? '{}')) as Record<string, unknown>;
+          if (extra.finalizationCompleted === true) {
+            return { success: true, results: [], meta: { changes: 0 } };
+          }
+          generationRows.set(generationId, {
+            ...generation,
+            status: parameters[0],
+            updated_at: parameters[3],
+            extra_json: JSON.stringify({
+              ...extra,
+              generationTerminalStatus: parameters[2],
+              finalizationCompleted: true,
+            }),
+          });
+          return { success: true, results: [], meta: { changes: 1 } };
+        }
+        if (sql.includes('INSERT INTO battle_report_generation_combatants')) {
+          return { success: true, results: [], meta: { changes: 1 } };
+        }
         throw new Error('ROOM_GENERATION_DURABLE_D1_WRITE_UNEXPECTED');
       },
     };
@@ -155,26 +219,36 @@ try {
   await deleteIsolatedKeys(`mahoshojo:*:${keyPrefix}:*`);
 
   const d1 = createVerifierD1Adapter();
+  const objectStore = {
+    async put(input: {
+      key: string;
+      body: string | Uint8Array;
+      contentType: string;
+      signal: AbortSignal;
+    }) {
+      const markdown = typeof input.body === 'string'
+        ? input.body
+        : new TextDecoder().decode(input.body);
+      objects.set(input.key, markdown);
+      return {
+        bytes: new TextEncoder().encode(markdown).byteLength,
+        storedBytes: new TextEncoder().encode(markdown).byteLength,
+        contentEncoding: null,
+      };
+    },
+    async getText(key: string) {
+      const value = objects.get(key);
+      if (value === undefined) throw new Error('ROOM_GENERATION_DURABLE_R2_NOT_FOUND');
+      return value;
+    },
+  };
+  const finalizer = createArenaGenerationFinalizer(createNodeArenaGenerationFinalizationPorts({
+    getD1Client: () => d1,
+    objectStore,
+  }));
   const terminalStore = createNodeArenaGenerationTerminalStore({
     getD1Client: () => d1,
-    objectStore: {
-      async put(input) {
-        const markdown = typeof input.body === 'string'
-          ? input.body
-          : new TextDecoder().decode(input.body);
-        objects.set(input.key, markdown);
-        return {
-          bytes: new TextEncoder().encode(markdown).byteLength,
-          storedBytes: new TextEncoder().encode(markdown).byteLength,
-          contentEncoding: null,
-        };
-      },
-      async getText(key) {
-        const value = objects.get(key);
-        if (value === undefined) throw new Error('ROOM_GENERATION_DURABLE_R2_NOT_FOUND');
-        return value;
-      },
-    },
+    objectStore,
   });
 
   let releaseProvider!: () => void;
@@ -182,6 +256,7 @@ try {
   const providerGate = new Promise<void>((resolve) => { releaseProvider = resolve; });
   const firstChunk = new Promise<void>((resolve) => { providerFirstChunk = resolve; });
   let providerStarts = 0;
+  let finalizerRuns = 0;
   const expectedMarkdown = '# 第一批\n\n第二批\n';
   const executor: ArenaGenerationExecutor = {
     async execute(input) {
@@ -190,30 +265,30 @@ try {
       providerFirstChunk();
       await providerGate;
       await input.emit({ type: 'markdown', data: { chunk: '第二批\n' } });
-      const r2Key = `v1/verifier/${input.generationId}/output.md`;
-      objects.set(r2Key, expectedMarkdown);
-      const updatedAt = new Date().toISOString();
-      generationRows.set(input.generationId, {
-        id: input.generationId,
-        status: 'completed',
-        updated_at: updatedAt,
-        output_preview: expectedMarkdown.slice(0, 100),
-        extra_json: JSON.stringify({
-          generationRequestId: input.generationRequestId,
-          generationOwnerHash: createHash('sha256').update(input.actorKey).digest('hex'),
-          generationPayloadHash: input.payloadHash,
-          generationTerminalStatus: 'completed',
-          finalizationCompleted: true,
-          resultRef: `r2:${r2Key}`,
-        }),
-      });
-      objectRows.set(input.generationId, {
-        id: `arena-output:${input.generationId}`,
-        kind: 'battle_report_generation_output',
-        owner_ref_id: input.generationId,
-        r2_key: r2Key,
-      });
-      return { status: 'completed', resultRef: `r2:${r2Key}` };
+      const claim = await input.claimFinalization({ status: 'completed' });
+      if (claim.kind !== 'claimed') throw new Error('ROOM_GENERATION_DURABLE_FINALIZER_FENCED');
+      const finalizationInput = {
+        generationId: input.generationId,
+        generationRequestId: input.generationRequestId,
+        actorKey: input.actorKey,
+        payloadHash: input.payloadHash,
+        payload: input.payload,
+        metadata: {},
+        markdown: expectedMarkdown,
+        telemetry: {},
+        status: 'completed' as const,
+        errorCode: null,
+        signal: input.signal,
+      };
+      const firstFinalization = await finalizer(finalizationInput);
+      finalizerRuns += 1;
+      const duplicateFinalization = await finalizer(finalizationInput);
+      finalizerRuns += 1;
+      if (
+        !firstFinalization.resultRef
+        || duplicateFinalization.resultRef !== firstFinalization.resultRef
+      ) throw new Error('ROOM_GENERATION_DURABLE_FINALIZER_NOT_IDEMPOTENT');
+      return { status: 'completed', resultRef: firstFinalization.resultRef };
     },
   };
 
@@ -283,12 +358,22 @@ try {
     headers: { authorization: 'Bearer verifier' },
   });
 
-  await coordinator.start({
-    roomId,
-    accountUserId: 101,
-    request: generationRequest,
-    sourceRequest,
-  });
+  let responseLossInjected = false;
+  try {
+    await coordinator.start({
+      roomId,
+      accountUserId: 101,
+      request: generationRequest,
+      sourceRequest,
+    });
+    throw new Error('ROOM_GENERATION_DURABLE_INJECTED_RESPONSE_LOSS');
+  } catch (error) {
+    if (
+      error instanceof Error
+      && error.message === 'ROOM_GENERATION_DURABLE_INJECTED_RESPONSE_LOSS'
+    ) responseLossInjected = true;
+    else throw error;
+  }
   await firstChunk;
   const generationId = await port.deriveGenerationId({ roomId, generationRequestId });
   const firstProjection = await waitFor(
@@ -342,6 +427,34 @@ try {
   });
   if (resumed.kind !== 'subscribed') throw new Error('ROOM_GENERATION_DURABLE_RESUME_MISSING');
   const resumedEventsPromise = readAll(resumed.subscription.events);
+  roomActors.forceClose();
+  activeRecoveredActors = createRoomActorRegistry({
+    store: runtime.getRoomStore(),
+    createRoomEpoch: () => 'epoch-2',
+    recoveryTimestamp: () => new Date().toISOString(),
+    now: Date.now,
+  });
+  const activeRecoveredMemberships = createArenaRoomMembershipService({
+    actors: activeRecoveredActors,
+    now: () => new Date().toISOString(),
+  });
+  const activeRecoveredPort = createHostedPort(runtime.getGenerationReplayStore());
+  const activeRecoveredCoordinator = createArenaRoomGenerationService({
+    memberships: activeRecoveredMemberships,
+    references: { verify: async (input) => input.refs },
+    generation: activeRecoveredPort,
+    now: () => new Date().toISOString(),
+  });
+  const activeRecoveredView = await activeRecoveredCoordinator.read({
+    roomId,
+    generationId,
+    accountUserId: 202,
+  });
+  if (
+    activeRecoveredView.roomEpoch !== 'epoch-2'
+    || activeRecoveredView.status !== 'running'
+    || providerStarts !== 1
+  ) throw new Error('ROOM_GENERATION_DURABLE_ACTIVE_PROCESS_RECOVERY_INVALID');
   releaseProvider();
   const resumedEvents = await resumedEventsPromise;
   if (
@@ -377,7 +490,8 @@ try {
     || await terminalStore.readOwnedTerminal({ generationId, actorKey: `${actorKey}:other` }) !== null
   ) throw new Error('ROOM_GENERATION_DURABLE_D1_R2_AUTHORITY_INVALID');
 
-  roomActors.forceClose();
+  activeRecoveredActors.forceClose();
+  activeRecoveredActors = null;
   await runtime.close();
   runtime = null;
   const deletedGenerationKeys = await deleteIsolatedKeys(`mahoshojo:gen:v1:${keyPrefix}:*`);
@@ -387,7 +501,7 @@ try {
   await recoveredRuntime.connect();
   const recoveredActors = createRoomActorRegistry({
     store: recoveredRuntime.getRoomStore(),
-    createRoomEpoch: () => 'epoch-2',
+    createRoomEpoch: () => 'epoch-3',
     recoveryTimestamp: () => new Date().toISOString(),
     now: Date.now,
   });
@@ -408,7 +522,7 @@ try {
     accountUserId: 202,
   });
   if (
-    recoveredView.roomEpoch !== 'epoch-2'
+    recoveredView.roomEpoch !== 'epoch-3'
     || recoveredView.status !== 'completed'
     || recoveredView.markdown !== expectedMarkdown
     || recoveredView.generationRecordId !== generationId
@@ -418,7 +532,7 @@ try {
   await recoveredCoordinator.start({
     roomId,
     accountUserId: 101,
-    request: { ...generationRequest, expectedRoomEpoch: 'epoch-2' },
+    request: { ...generationRequest, expectedRoomEpoch: 'epoch-3' },
     sourceRequest,
   });
   if (providerStarts !== 1) throw new Error('ROOM_GENERATION_DURABLE_TERMINAL_REEXECUTED');
@@ -428,18 +542,23 @@ try {
     verifier: 'GMR09_ROOM_HOSTED_DURABLE_SEAM',
     redis: 'real-loopback',
     providerStarts,
+    responseLossInjected,
     duplicateSingleFlight: true,
     resume: true,
+    activeProcessRecoveryEpoch: activeRecoveredView.roomEpoch,
     atomicTerminalMarkerEventSnapshot: true,
     roomTerminal: roomTerminal?.snapshot.activeGeneration?.state,
     d1R2TerminalFallback: true,
     ownerMismatchHidden: true,
-    processRecoveryEpoch: recoveredView.roomEpoch,
+    terminalRecoveryEpoch: recoveredView.roomEpoch,
+    realFinalizerRuns: finalizerRuns,
+    duplicateFinalizationIdempotent: finalizerRuns === 2,
     terminalReexecution: false,
     deletedFaultInjectionKeys: deletedGenerationKeys,
     secretPersisted: false,
   }));
 } finally {
+  activeRecoveredActors?.forceClose();
   await runtime?.close().catch(() => undefined);
   await recoveredRuntime?.close().catch(() => undefined);
   if (!cleanupClient.isOpen) await cleanupClient.connect().catch(() => undefined);
