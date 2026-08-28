@@ -157,6 +157,9 @@ importers:
       '@mahoshojo/hosted-runtime':
         specifier: workspace:*
         version: link:../../packages/hosted-runtime
+      '@mahoshojo/multiplayer-core':
+        specifier: workspace:*
+        version: link:../../packages/multiplayer-core
       '@next/third-parties':
         specifier: 15.5.21
         version: 15.5.21(next@15.5.21(@babel/core@7.28.5)(@opentelemetry/api@1.9.1)(react-dom@19.2.3(react@19.2.3))(react@19.2.3))(react@19.2.3)
