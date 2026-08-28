@@ -981,6 +981,182 @@ try {
       ) {
         throw new Error('ROOM_REDIS_PROPOSAL_RESOLVE_FAILED');
       }
+
+      await proposalService.submit({
+        roomId: proposalRoomId,
+        accountUserId: 202,
+        request: {
+          proposalId: 'redis-proposal-withdraw',
+          expectedRoomEpoch: proposalHost.roomEpoch,
+          baseRevision: 1,
+          changes: [{
+            changeId: 'withdraw-mode',
+            type: 'setBattleMode',
+            value: 'kizuna',
+            expectedBase: { kind: 'value', value: 'classic' },
+          }],
+        },
+      });
+      const proposalWithdrawn = await proposalService.withdraw({
+        roomId: proposalRoomId,
+        proposalId: 'redis-proposal-withdraw',
+        accountUserId: 202,
+        request: { expectedRoomEpoch: proposalHost.roomEpoch },
+      });
+      if (
+        proposalWithdrawn.status !== 'withdrawn'
+        || proposalWithdrawn.revision !== 1
+        || (await readerStore.load(proposalRoomId))?.snapshot.proposals.length !== 0
+      ) throw new Error('ROOM_REDIS_PROPOSAL_WITHDRAW_FAILED');
+
+      await proposalService.submit({
+        roomId: proposalRoomId,
+        accountUserId: 202,
+        request: {
+          proposalId: 'redis-proposal-reject',
+          expectedRoomEpoch: proposalHost.roomEpoch,
+          baseRevision: 1,
+          changes: [{
+            changeId: 'reject-mode',
+            type: 'setBattleMode',
+            value: 'daily',
+            expectedBase: { kind: 'value', value: 'classic' },
+          }],
+        },
+      });
+      const proposalRejected = await proposalService.resolve({
+        roomId: proposalRoomId,
+        proposalId: 'redis-proposal-reject',
+        accountUserId: 101,
+        request: {
+          expectedRoomEpoch: proposalHost.roomEpoch,
+          expectedRevision: 1,
+          resolution: 'reject',
+        },
+      });
+      if (
+        proposalRejected.status !== 'rejected'
+        || proposalRejected.revision !== 1
+        || (await readerStore.load(proposalRoomId))?.snapshot.sharedConfig.battleMode !== 'classic'
+      ) throw new Error('ROOM_REDIS_PROPOSAL_REJECT_FAILED');
+
+      await proposalService.submit({
+        roomId: proposalRoomId,
+        accountUserId: 202,
+        request: {
+          proposalId: 'redis-proposal-atomic',
+          expectedRoomEpoch: proposalHost.roomEpoch,
+          baseRevision: 1,
+          changes: [
+            {
+              changeId: 'atomic-guidance',
+              type: 'setUserGuidance',
+              value: 'redis-atomic-applied',
+              expectedBase: { kind: 'value', value: 'redis-proposal-applied' },
+              atomicGroupId: 'atomic-group-1',
+            },
+            {
+              changeId: 'atomic-mode',
+              type: 'setBattleMode',
+              value: 'kizuna',
+              expectedBase: { kind: 'value', value: 'classic' },
+              dependsOn: ['atomic-guidance'],
+              atomicGroupId: 'atomic-group-1',
+            },
+          ],
+        },
+      });
+      await fixedError(proposalService.resolve({
+        roomId: proposalRoomId,
+        proposalId: 'redis-proposal-atomic',
+        accountUserId: 101,
+        request: {
+          expectedRoomEpoch: proposalHost.roomEpoch,
+          expectedRevision: 1,
+          resolution: 'accept-selected',
+          selectedChangeIds: ['atomic-mode'],
+        },
+      }), 'ROOM_PROPOSAL_CONFLICT');
+      const pendingAfterAtomicFailure = await readerStore.load(proposalRoomId);
+      if (
+        pendingAfterAtomicFailure?.snapshot.revision !== 1
+        || pendingAfterAtomicFailure.snapshot.proposals[0]?.proposalId !== 'redis-proposal-atomic'
+      ) throw new Error('ROOM_REDIS_PROPOSAL_ATOMIC_PARTIAL_MUTATED');
+      const atomicAccepted = await proposalService.resolve({
+        roomId: proposalRoomId,
+        proposalId: 'redis-proposal-atomic',
+        accountUserId: 101,
+        request: {
+          expectedRoomEpoch: proposalHost.roomEpoch,
+          expectedRevision: 1,
+          resolution: 'accept-selected',
+          selectedChangeIds: ['atomic-guidance', 'atomic-mode'],
+        },
+      });
+      if (
+        atomicAccepted.status !== 'accepted'
+        || atomicAccepted.revision !== 2
+        || (await readerStore.load(proposalRoomId))?.snapshot.sharedConfig.battleMode !== 'kizuna'
+      ) throw new Error('ROOM_REDIS_PROPOSAL_ATOMIC_ACCEPT_FAILED');
+
+      for (const [proposalId, value] of [
+        ['redis-proposal-competing-a', 'redis-competing-a'],
+        ['redis-proposal-competing-b', 'redis-competing-b'],
+      ] as const) {
+        await proposalService.submit({
+          roomId: proposalRoomId,
+          accountUserId: 202,
+          request: {
+            proposalId,
+            expectedRoomEpoch: proposalHost.roomEpoch,
+            baseRevision: 2,
+            changes: [{
+              changeId: `guidance-${proposalId}`,
+              type: 'setUserGuidance',
+              value,
+              expectedBase: { kind: 'value', value: 'redis-atomic-applied' },
+            }],
+          },
+        });
+      }
+      await proposalService.resolve({
+        roomId: proposalRoomId,
+        proposalId: 'redis-proposal-competing-a',
+        accountUserId: 101,
+        request: {
+          expectedRoomEpoch: proposalHost.roomEpoch,
+          expectedRevision: 2,
+          resolution: 'accept-selected',
+          selectedChangeIds: ['guidance-redis-proposal-competing-a'],
+        },
+      });
+      await fixedError(proposalService.resolve({
+        roomId: proposalRoomId,
+        proposalId: 'redis-proposal-competing-b',
+        accountUserId: 101,
+        request: {
+          expectedRoomEpoch: proposalHost.roomEpoch,
+          expectedRevision: 3,
+          resolution: 'accept-selected',
+          selectedChangeIds: ['guidance-redis-proposal-competing-b'],
+        },
+      }), 'ROOM_PROPOSAL_CONFLICT');
+      const competingState = await readerStore.load(proposalRoomId);
+      if (
+        competingState?.snapshot.revision !== 3
+        || competingState.snapshot.sharedConfig.userGuidance !== 'redis-competing-a'
+        || competingState.snapshot.proposals[0]?.proposalId !== 'redis-proposal-competing-b'
+      ) throw new Error('ROOM_REDIS_PROPOSAL_COMPETING_FAILED');
+      await proposalService.resolve({
+        roomId: proposalRoomId,
+        proposalId: 'redis-proposal-competing-b',
+        accountUserId: 101,
+        request: {
+          expectedRoomEpoch: proposalHost.roomEpoch,
+          expectedRevision: 3,
+          resolution: 'reject',
+        },
+      });
       await proposalActors.shutdown();
 
       const directoryRegistrations = writer.getRoomDirectoryRegistrationStore();
