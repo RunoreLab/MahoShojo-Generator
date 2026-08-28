@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { index, integer, primaryKey, real, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
+import { check, index, integer, primaryKey, real, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
 import type {
   DataCardReviewStatus as ContractDataCardReviewStatus,
   OnlineDataCardType,
@@ -46,6 +46,8 @@ export type CrowdReviewRoundStatus =
 export type CrowdReviewResultCode = 'violation' | 'no_violation' | 'tie' | 'escalated' | 'admin_override';
 export type CrowdReviewAssignmentStatus = 'assigned' | 'voted' | 'abstained' | 'expired' | 'revoked';
 export type CrowdReviewDecision = 'violation' | 'no_violation' | 'abstain';
+export type ArenaMultiplayerRoomVisibility = 'public' | 'unlisted';
+export type ArenaMultiplayerRoomStatus = 'open' | 'closed';
 
 /**
  * 业务主用户表（映射现有 users）
@@ -68,6 +70,48 @@ export const users = sqliteTable('users', {
   createdAt: text('created_at'),
   updatedAt: text('updated_at'),
 });
+
+export const arenaMultiplayerRooms = sqliteTable(
+  'arena_multiplayer_rooms',
+  {
+    id: text('id').primaryKey(),
+    roomEpoch: text('room_epoch').notNull(),
+    hostUserId: integer('host_user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    title: text('title').notNull(),
+    visibility: text('visibility').$type<ArenaMultiplayerRoomVisibility>().notNull(),
+    status: text('status').$type<ArenaMultiplayerRoomStatus>().notNull(),
+    createdAt: text('created_at').notNull(),
+    lastActivityAt: text('last_activity_at').notNull(),
+  },
+  (table) => ({
+    titleLengthCheck: check(
+      'arena_multiplayer_rooms_title_length_check',
+      sql`length(${table.title}) BETWEEN 1 AND 80`,
+    ),
+    visibilityCheck: check(
+      'arena_multiplayer_rooms_visibility_check',
+      sql`${table.visibility} IN ('public', 'unlisted')`,
+    ),
+    statusCheck: check(
+      'arena_multiplayer_rooms_status_check',
+      sql`${table.status} IN ('open', 'closed')`,
+    ),
+    publicPageIndex: index('idx_arena_multiplayer_rooms_public_page').on(
+      table.visibility,
+      table.status,
+      table.lastActivityAt,
+      table.id,
+    ),
+    hostPageIndex: index('idx_arena_multiplayer_rooms_host_page').on(
+      table.hostUserId,
+      table.status,
+      table.lastActivityAt,
+      table.id,
+    ),
+  }),
+);
 
 export const dataCards = sqliteTable('data_cards', {
   id: text('id').primaryKey(),
