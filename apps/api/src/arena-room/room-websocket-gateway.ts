@@ -1,4 +1,5 @@
 import {
+  ARENA_ROOM_WEBSOCKET_PATH,
   ARENA_ROOM_WEBSOCKET_PROTOCOL,
   MAX_CONTROL_FRAME_BYTES,
   parseRoomClientTransportFrame,
@@ -9,7 +10,7 @@ import type { WebSocketLike } from '@hono/node-server';
 import type { WSEvents, WSMessageReceive } from 'hono/ws';
 import WebSocket from 'ws';
 
-export const ARENA_ROOM_WEBSOCKET_PATH = '/api/arena/rooms/v1/ws';
+export { ARENA_ROOM_WEBSOCKET_PATH } from '@mahoshojo/contracts/arena-room';
 
 const CLOSE_BINARY_NOT_SUPPORTED = 1003;
 const CLOSE_INVALID_MESSAGE = 1008;

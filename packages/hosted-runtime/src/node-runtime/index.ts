@@ -1,6 +1,14 @@
 export { createNodeStructuredAiRuntime } from './structured-ai';
 export { isExpectedClientDisconnect } from './abort';
 export {
+  createAuthenticatedUserIdResolver,
+  createAuthenticationResolver,
+  type AuthenticatedUserIdResolver,
+  type AuthenticatedUserIdResolverOptions,
+  type AuthenticationResolution,
+  type AuthenticationResolver,
+} from './authenticated-user';
+export {
   buildStreamTextAbortOptions,
   classifyStreamRuntimeOutcome,
   createNodeRawStreamAiRuntime,

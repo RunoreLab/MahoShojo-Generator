@@ -1,5 +1,9 @@
 import { serve } from '@hono/node-server';
-import { isExpectedClientDisconnect } from '@mahoshojo/hosted-runtime/node-runtime';
+import {
+  createAuthenticationResolver,
+  isExpectedClientDisconnect,
+} from '@mahoshojo/hosted-runtime/node-runtime';
+import { createEnvSignatureService } from '@mahoshojo/hosted-runtime/node-runtime/env-signature';
 import { registerHostedRuntimeObserver } from '@mahoshojo/hosted-runtime/telemetry';
 import { configureDefaultNodeHostedD1ClientResolver } from '@mahoshojo/hosted-runtime/node-runtime/default-services';
 import { createHonoApp } from '#/app';
@@ -7,6 +11,7 @@ import { readHonoServerConfig } from '#/config';
 import { configureHonoArenaGenerationRuntime } from '#/arena-generation/runtime';
 import { createD1RoomDirectoryStore } from '#/arena-room/d1-room-directory-store';
 import { createArenaRoomDirectoryService } from '#/arena-room/room-directory-service';
+import type { ArenaRoomHttpDependencies } from '#/arena-room/room-http';
 import { createRoomActorRegistry } from '#/arena-room/room-actor-registry';
 import { createArenaRoomMembershipService } from '#/arena-room/room-membership-service';
 import {
@@ -102,6 +107,26 @@ if (process.env.HONO_CONFIG_CHECK_ONLY === 'true') {
         }),
       })
     : null;
+  const roomHttpDependencies: ArenaRoomHttpDependencies | undefined = roomWebSocketAuthority
+    ? {
+        resolveAuthentication: createAuthenticationResolver({
+          signatures: createEnvSignatureService(),
+          getD1Client: getHonoPrimaryD1Client,
+          allowActivityToken: false,
+        }),
+        memberships: roomMemberships,
+        directory: roomDirectory,
+        websocketAuthority: roomWebSocketAuthority,
+        rateLimit: ({ operation, accountUserId, roomId, limit, windowSeconds }) => (
+          redis.consumeFixedWindow({
+            namespace: `arena-room-http-${operation}`,
+            identity: `account:${accountUserId}${roomId ? `:room:${roomId}` : ''}`,
+            limit,
+            windowSeconds,
+          })
+        ),
+      }
+    : undefined;
   const roomWebSocketGateway = new RoomWebSocketGateway({
     // Production/preview config rejects this Development Gate feature flag. Disabled
     // runtime keeps the GMR-04 empty-Origin/default-deny behavior unchanged.
@@ -111,7 +136,9 @@ if (process.env.HONO_CONFIG_CHECK_ONLY === 'true') {
   const roomWebSocketServer = createRoomWebSocketServer();
 
   telemetry.start();
-  const app = createHonoApp(config, redis, telemetry);
+  const app = createHonoApp(config, redis, telemetry, {
+    ...(roomHttpDependencies ? { arenaRoom: roomHttpDependencies } : {}),
+  });
   const roomWebSocketApp = createRoomWebSocketApp(roomWebSocketGateway);
   const server = serve({
     fetch: createRoomRequestDispatcher(app, roomWebSocketApp),

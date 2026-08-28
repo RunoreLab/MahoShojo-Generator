@@ -8,6 +8,10 @@ import {
   resolveHostedApiCorsOrigin,
 } from '@mahoshojo/hosted-api/hosted-dr';
 import type { HonoServerConfig } from '#/config';
+import {
+  registerArenaRoomHttpRoutes,
+  type ArenaRoomHttpDependencies,
+} from '#/arena-room/room-http';
 import { registerHealthRoutes } from '#/health';
 import { redisRateLimit } from '#/middleware/redis-rate-limit';
 import { requestMetadata, type HonoAppVariables } from '#/middleware/request-metadata';
@@ -32,7 +36,11 @@ export const createHonoApp = (
   config: HonoServerConfig,
   redis: RedisService,
   telemetry: RuntimeTelemetryService = noopRuntimeTelemetry,
+  services: { readonly arenaRoom?: ArenaRoomHttpDependencies } = {},
 ) => {
+  if (config.arenaMultiplayerEnabled && !services.arenaRoom) {
+    throw new Error('Arena Room HTTP dependencies are required when multiplayer is enabled');
+  }
   const app = new Hono<{ Variables: HonoAppVariables }>();
 
   app.use('*', requestMetadata(telemetry));
@@ -61,6 +69,11 @@ export const createHonoApp = (
   }));
 
   registerHealthRoutes(app, config, redis);
+  if (config.arenaMultiplayerEnabled && services.arenaRoom) {
+    registerArenaRoomHttpRoutes(app, services.arenaRoom, {
+      isAllowedOrigin: (origin) => Boolean(isAllowedOrigin(origin, config.corsOrigins)),
+    });
+  }
   registerRoutes(app);
 
   app.notFound((context) => context.json({
