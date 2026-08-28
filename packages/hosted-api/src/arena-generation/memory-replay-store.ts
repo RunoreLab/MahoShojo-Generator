@@ -363,6 +363,17 @@ export const createMemoryGenerationReplayStore = (
         return { owned: false, applied: false };
       }
       if (state.terminal) return { owned: true, applied: false };
+      let terminalEvent: GenerationStreamEvent | undefined;
+      if (input.terminalEvent) {
+        let sequence = sequences.get(input.generationId) ?? 0;
+        sequence += 1;
+        terminalEvent = { ...input.terminalEvent, id: `${sequence}-0` };
+        sequences.set(input.generationId, sequence);
+        events.set(input.generationId, [
+          ...(events.get(input.generationId) ?? []),
+          terminalEvent,
+        ].slice(-maxEvents));
+      }
       writeState({
         ...state,
         status: input.terminal.status,
@@ -372,10 +383,21 @@ export const createMemoryGenerationReplayStore = (
             ? { publicError: { ...input.terminal.publicError } }
             : {}),
         },
+        lastEventId: terminalEvent?.id ?? state.lastEventId,
+        snapshot: input.terminalSnapshot ? {
+          ...input.terminalSnapshot,
+          lastEventId: terminalEvent?.id
+            ?? input.terminalSnapshot.lastEventId
+            ?? state.lastEventId,
+        } : state.snapshot,
         leaseExpiresAt: null,
         updatedAt: input.now,
       });
-      return { owned: true, applied: true };
+      return {
+        owned: true,
+        applied: true,
+        ...(terminalEvent ? { event: terminalEvent } : {}),
+      };
     },
 
     async readState(input) {

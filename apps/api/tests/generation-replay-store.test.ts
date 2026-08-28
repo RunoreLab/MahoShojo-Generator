@@ -312,20 +312,40 @@ describe('RedisGenerationReplayStore', () => {
     })).resolves.toEqual({ kind: 'forbidden' });
   });
 
-  it('terminal 更新使用 CAS，重复 finalization 不会再次生效', async () => {
+  it('terminal marker 与可见 terminal event 使用同一 CAS，重复 finalization 不会再次生效', async () => {
     const client = createClient();
-    vi.mocked(client.eval).mockResolvedValueOnce(1).mockResolvedValueOnce(0);
+    vi.mocked(client.eval)
+      .mockResolvedValueOnce([1, '1724570000000-9'])
+      .mockResolvedValueOnce(0);
     const store = createRedisGenerationReplayStore({ getClient: () => client });
     const input = {
       generationId: 'generation-1234',
       producerToken: reserveInput.producerToken,
       terminal: { status: 'completed' as const, resultRef: 'r2://report/1' },
+      terminalEvent: {
+        type: 'done',
+        data: { status: 'completed', ok: true, resultRef: 'r2://report/1' },
+      },
       now: reserveInput.now,
     };
 
-    await expect(store.markTerminal(input)).resolves.toEqual({ owned: true, applied: true });
+    await expect(store.markTerminal(input)).resolves.toEqual({
+      owned: true,
+      applied: true,
+      event: {
+        id: '1724570000000-9',
+        type: 'done',
+        data: { status: 'completed', ok: true, resultRef: 'r2://report/1' },
+      },
+    });
     await expect(store.markTerminal(input)).resolves.toEqual({ owned: true, applied: false });
-    expect(vi.mocked(client.eval).mock.calls[0]?.[0]).toContain('GEN_TERMINAL_V1');
+    const [script, options] = vi.mocked(client.eval).mock.calls[0]!;
+    expect(script).toContain('GEN_TERMINAL_V2');
+    expect(script).toContain('XADD');
+    expect(options.keys).toEqual([
+      'mahoshojo:gen:v1:generation-1234:state',
+      'mahoshojo:gen:v1:generation-1234:events',
+    ]);
   });
 
   it('只从 Redis 恢复有界的 Provider 安全投影', async () => {

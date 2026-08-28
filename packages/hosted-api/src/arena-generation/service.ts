@@ -207,11 +207,16 @@ export interface GenerationReplayStore {
     generationId: string;
     producerToken: string;
     terminal: GenerationTerminal;
+    /** Written in the same store transaction as the terminal marker when supplied. */
+    terminalEvent?: GenerationEventInput;
+    /** Terminal snapshot committed atomically with marker/event when supplied. */
+    terminalSnapshot?: GenerationSnapshot;
     now: string;
   }): Promise<{
     owned: boolean;
     applied: boolean;
     status?: GenerationTerminal['status'];
+    event?: GenerationStreamEvent;
   }>;
   readState(_input: {
     generationId: string;
@@ -1012,7 +1017,7 @@ export const createArenaGenerationService = (
           await flushPending();
           const now = dependencies.now().toISOString();
           const publicError = terminal.status === 'failed' ? terminal.publicError : undefined;
-          await append([{
+          const terminalEvent: GenerationEventInput = {
             type: terminal.status === 'failed' || terminal.status === 'producer_lost'
               ? 'error'
               : 'done',
@@ -1020,6 +1025,7 @@ export const createArenaGenerationService = (
               ok: terminal.status === 'completed',
               status: terminal.status,
               ...(terminal.code ? { code: terminal.code } : {}),
+              ...(terminal.resultRef ? { resultRef: terminal.resultRef } : {}),
               ...(publicError ? {
                 error: publicError.message,
                 message: publicError.message,
@@ -1031,14 +1037,31 @@ export const createArenaGenerationService = (
                   : { upstreamRequestId: publicError.upstreamRequestId }),
               } : {}),
             },
-          }], now);
-          await dependencies.store.markTerminal({
-            generationId,
-            producerToken,
-            terminal,
-            now,
-          }).catch(() => ({ owned: true, applied: false }));
-          await writeSnapshot(terminal.status, now, terminal.resultRef ?? null);
+          };
+          const terminalSnapshot = snapshot(terminal.status, now, terminal.resultRef ?? null);
+          const snapshotWithinBudget = encodedBytes(terminalSnapshot) <= snapshotMaxBytes;
+          if (!snapshotWithinBudget) {
+            observe({ event: 'redis_degraded', generationId, operation: 'snapshot_budget' });
+          }
+          let result: Awaited<ReturnType<GenerationReplayStore['markTerminal']>>;
+          try {
+            result = await dependencies.store.markTerminal({
+              generationId,
+              producerToken,
+              terminal,
+              terminalEvent,
+              ...(snapshotWithinBudget ? { terminalSnapshot } : {}),
+              now,
+            });
+          } catch (error) {
+            observe({ event: 'redis_degraded', generationId, operation: 'mark_terminal' });
+            throw error;
+          }
+          if (!result.owned) {
+            onOwnershipLost();
+            throw new Error('GENERATION_PRODUCER_FENCED');
+          }
+          lastEventId = result.event?.id ?? lastEventId;
           observe({
             event: 'terminal',
             generationId,

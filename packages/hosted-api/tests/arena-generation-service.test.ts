@@ -219,14 +219,25 @@ class MemoryReplayStore implements GenerationReplayStore {
     const state = this.states.get(input.generationId)!;
     if (state.producerToken !== input.producerToken) return { owned: false, applied: false };
     if (state.terminal) return { owned: true, applied: false };
+    const current = this.events.get(input.generationId) ?? [];
+    const event = input.terminalEvent ? {
+      ...input.terminalEvent,
+      id: `${current.length + 1}-0`,
+    } : undefined;
+    if (event) this.events.set(input.generationId, [...current, event]);
     this.states.set(input.generationId, {
       ...state,
       status: input.terminal.status,
       terminal: input.terminal,
+      lastEventId: event?.id ?? state.lastEventId,
+      snapshot: input.terminalSnapshot ? {
+        ...input.terminalSnapshot,
+        lastEventId: event?.id ?? input.terminalSnapshot.lastEventId,
+      } : state.snapshot,
       updatedAt: input.now,
       leaseExpiresAt: null,
     });
-    return { owned: true, applied: true };
+    return { owned: true, applied: true, ...(event ? { event } : {}) };
   }
 
   async readState(input: Parameters<GenerationReplayStore['readState']>[0]) {
@@ -2139,7 +2150,6 @@ describe('Arena generation lifecycle service', () => {
       ['markdown'],
       ['reasoning'],
       ['reasoning_done'],
-      ['done'],
     ]);
     expect(store.events.get('generation-1')?.[0]).toMatchObject({
       type: 'markdown',
@@ -2152,6 +2162,10 @@ describe('Arena generation lifecycle service', () => {
       terminalResultRef: 'r2://report/1',
     });
     expect(store.states.get('generation-1')?.snapshot?.lastEventId).toBe('4-0');
+    expect(store.events.get('generation-1')?.at(-1)).toMatchObject({
+      type: 'done',
+      data: { status: 'completed', resultRef: 'r2://report/1' },
+    });
   });
 
   test('flushes a delta batch early when its byte budget is reached', async () => {
