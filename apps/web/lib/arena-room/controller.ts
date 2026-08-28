@@ -32,6 +32,7 @@ export type ArenaRoomControllerState = {
   readonly session: ArenaRoomSessionResponse | null;
   readonly notice: string | null;
   readonly error: string | null;
+  readonly unknownOperation: 'create' | 'join' | null;
 };
 
 export type ArenaRoomSocket = {
@@ -73,6 +74,7 @@ const READY_STATE: ArenaRoomControllerState = Object.freeze({
   session: null,
   notice: null,
   error: null,
+  unknownOperation: null,
 });
 
 const phaseForAccess = (access: { enabled: boolean; authenticated: boolean }) => (
@@ -133,6 +135,7 @@ export const createArenaRoomController = (
   let operationGeneration = 0;
   let disposed = false;
   let unresolvedCreateResult = false;
+  let unresolvedCreateNotice: string | null = null;
   let controlCursor: RoomControlCursor | undefined;
   const listeners = new Set<() => void>();
 
@@ -373,7 +376,7 @@ export const createArenaRoomController = (
   const startSession = async (session: ArenaRoomSessionResponse): Promise<void> => {
     const generation = operationGeneration;
     if (!operationIsCurrent(generation)) return;
-    unresolvedCreateResult = false;
+    if (!unresolvedCreateResult) publish({ unknownOperation: null });
     reconnectAttempts = 0;
     controlCursor = {
       roomEpoch: session.roomEpoch,
@@ -382,14 +385,31 @@ export const createArenaRoomController = (
     await connectSession(session, false, generation);
   };
 
-  const failOperation = (error: unknown, generation: number): void => {
+  const failOperation = (
+    error: unknown,
+    generation: number,
+    operation?: 'create' | 'join',
+  ): void => {
     if (!operationIsCurrent(generation)) return;
     if (error instanceof ArenaRoomClientError && error.code === 'ROOM_RESULT_UNKNOWN') {
-      unresolvedCreateResult = true;
+      if (operation === 'create') {
+        unresolvedCreateResult = true;
+        unresolvedCreateNotice = error.message;
+      }
       publish({
         phase: 'unknown',
-        notice: error.message,
+        notice: unresolvedCreateResult ? unresolvedCreateNotice : error.message,
         error: null,
+        unknownOperation: unresolvedCreateResult ? 'create' : operation ?? null,
+      });
+      return;
+    }
+    if (unresolvedCreateResult) {
+      publish({
+        phase: 'unknown',
+        notice: unresolvedCreateNotice,
+        error: safeErrorMessage(error),
+        unknownOperation: 'create',
       });
       return;
     }
@@ -397,6 +417,7 @@ export const createArenaRoomController = (
       phase: state.session ? 'degraded' : 'ready',
       notice: null,
       error: safeErrorMessage(error),
+      unknownOperation: null,
     });
   };
 
@@ -420,6 +441,7 @@ export const createArenaRoomController = (
       reconnectAttempts = 0;
       controlCursor = undefined;
       unresolvedCreateResult = false;
+      unresolvedCreateNotice = null;
       publish({
         ...READY_STATE,
         phase: phaseForAccess(access),
@@ -461,7 +483,7 @@ export const createArenaRoomController = (
         if (!operationIsCurrent(generation)) return;
         await startSession(nextSession);
       } catch (error) {
-        failOperation(error, generation);
+        failOperation(error, generation, 'create');
       }
     },
 
@@ -477,7 +499,7 @@ export const createArenaRoomController = (
         if (!operationIsCurrent(generation)) return;
         await startSession(nextSession);
       } catch (error) {
-        failOperation(error, generation);
+        failOperation(error, generation, 'join');
       }
     },
 
@@ -527,6 +549,7 @@ export const createArenaRoomController = (
       reconnectAttempts = 0;
       controlCursor = undefined;
       unresolvedCreateResult = false;
+      unresolvedCreateNotice = null;
       publish({ ...READY_STATE, phase: phaseForAccess(access) });
     },
 

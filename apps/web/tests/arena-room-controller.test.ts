@@ -415,7 +415,7 @@ describe('Arena Room browser controller', () => {
 
   it('create 结果未知时冻结再次创建，要求先人工确认服务器状态', async () => {
     const { client, controller } = createHarness();
-    vi.mocked(client.create).mockRejectedValue(new ArenaRoomClientError(
+    vi.mocked(client.create).mockRejectedValueOnce(new ArenaRoomClientError(
       'ROOM_RESULT_UNKNOWN',
       503,
       '请求可能已提交，请先确认房间状态，不要重复提交',
@@ -428,6 +428,12 @@ describe('Arena Room browser controller', () => {
 
     await controller.create(request);
     await controller.discover();
+    vi.mocked(client.join).mockRejectedValueOnce(new ArenaRoomClientError(
+      'ROOM_NOT_FOUND',
+      404,
+      '房间不存在',
+    ));
+    await controller.join('stale-room', '房主');
     await controller.create(request);
 
     expect(client.create).toHaveBeenCalledTimes(1);
@@ -435,7 +441,41 @@ describe('Arena Room browser controller', () => {
     expect(controller.getSnapshot()).toMatchObject({
       phase: 'unknown',
       notice: '请求可能已提交，请先确认房间状态，不要重复提交',
+      unknownOperation: 'create',
     });
+
+    await controller.join('other-public-room', '房主');
+    await controller.create(request);
+    expect(client.create).toHaveBeenCalledTimes(1);
+    expect(controller.getSnapshot().unknownOperation).toBe('create');
+
+    controller.reset();
+    await controller.create(request);
+    expect(client.create).toHaveBeenCalledTimes(2);
+  });
+
+  it('join 结果未知与 create lock 分离，并显示独立 reconciliation 状态', async () => {
+    const { client, controller } = createHarness();
+    vi.mocked(client.join).mockRejectedValueOnce(new ArenaRoomClientError(
+      'ROOM_RESULT_UNKNOWN',
+      503,
+      '加入请求结果未知，请先确认房间状态',
+    ));
+    await controller.join('room-1', '成员');
+
+    expect(controller.getSnapshot()).toMatchObject({
+      phase: 'unknown',
+      unknownOperation: 'join',
+      notice: '加入请求结果未知，请先确认房间状态',
+    });
+
+    controller.reset();
+    await controller.create({
+      displayName: '房主',
+      directory: { title: '新房间', visibility: 'public' },
+      sharedConfig,
+    });
+    expect(client.create).toHaveBeenCalledTimes(1);
   });
 
   it('按 close reason 区分 membership replacement、epoch recovery 与协议降级', async () => {

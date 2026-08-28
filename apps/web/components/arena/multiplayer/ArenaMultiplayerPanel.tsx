@@ -146,11 +146,17 @@ export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps)
         </div>
       ) : state.phase === 'unknown' ? (
         <div className="mt-4 rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100">
-          <p>服务器可能已经创建房间。请先检查公开房间或其他已登录设备，不要直接重复创建。</p>
+          <p>
+            {state.unknownOperation === 'join'
+              ? '服务器可能已经处理加入请求。请先确认当前房间状态，不要直接重复加入。'
+              : '服务器可能已经创建房间。请先检查公开房间或其他已登录设备，不要直接重复创建。'}
+          </p>
           <div className="mt-3 flex flex-wrap gap-2">
-            <button type="button" className={secondaryButtonClass} onClick={props.onDiscover}>
-              检查公开房间
-            </button>
+            {state.unknownOperation === 'create' ? (
+              <button type="button" className={secondaryButtonClass} onClick={props.onDiscover}>
+                检查公开房间
+              </button>
+            ) : null}
             <button type="button" className={secondaryButtonClass} onClick={props.onReset}>
               已确认状态，返回大厅
             </button>
