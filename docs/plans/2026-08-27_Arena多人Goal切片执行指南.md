@@ -99,15 +99,16 @@ read authority / current state
 | `GMR-03` single-writer RoomActor | `DONE` | GMR-02 | actor registry/queue/recovery/shutdown | 不做 multi-instance |
 | `GMR-04` Node WSS security skeleton | `DONE` | GMR-03 | Node WS bootstrap + upgrade/security/backpressure | 不做产品 UI |
 | `GMR-05` ticket/membership/reconnect/lifecycle | `DONE` | GMR-04 | membership/connection/epoch recovery | 不做 generation fan-out |
-| `GMR-06` D1 directory/discovery | `DONE` | GMR-05 | derived directory + orphan cleanup | 不执行生产 migration |
+| `GMR-06` D1 directory/discovery | `DONE / SUPERSEDED` | GMR-05 | 历史 derived directory 实现，保留归档 | 不恢复为当前目标态 |
+| `GMR-06R` Redis-only directory amendment | `IN_PROGRESS` | GMR-06,GMR-07,GMR-08 | Redis 原子 directory index + 移除 D1/schema | 不执行远程 schema/Redis 写 |
 | `GMR-07` Arena room UI | `DONE` | GMR-05 | feature-flagged create/join/status/reconnect | 不激活 production |
 | `GMR-08` Proposal E2E | `DONE` | GMR-05,GMR-07 | typed Proposal server/UI 闭环 | 不扩展 private sharing |
-| `GMR-09` generation publisher | `READY` | GMR-03,GMR-05,GMR-07 | single producer + Room safe fan-out/resync | 不复制 AI lifecycle |
-| `GMR-10` hardening/fault/load audit | `BLOCKED` | GMR-06,GMR-08,GMR-09 | telemetry + failure drills + v1 exit audit | 不自动进入生产 |
+| `GMR-09` generation publisher | `BLOCKED` | GMR-03,GMR-05,GMR-06R,GMR-07 | single producer + Room safe fan-out/resync | 不复制 AI lifecycle |
+| `GMR-10` hardening/fault/load audit | `BLOCKED` | GMR-06R,GMR-08,GMR-09 | telemetry + failure drills + v1 exit audit | 不自动进入生产 |
 | `GMR-11` production activation review | `DEFERRED` | GMR-10 + Production Gate | 独立生产 go/no-go | 必须人工/平台授权 |
 | `GMR-H` multi-instance / DO evaluation | `DEFERRED` | 真实指标触发 | 新 ADR/PoC 决策 | v1 不预建 |
 
-`GMR-06` 与 `GMR-07` 在 GMR-05 后 MAY 并行，但一个 `/goal` 仍只执行其中一个。`GMR-08` 和 `GMR-09` 只有在各自依赖满足后才可按冲突最小的顺序推进。
+`GMR-06` 与 `GMR-07` 在 GMR-05 后 MAY 并行，但一个 `/goal` 仍只执行其中一个。2026-08-28 的 Redis-only superseding 修订把 `GMR-06R` 加为后续 generation/hardening 前置门禁；`GMR-08` 的已完成结果保留，`GMR-09` 必须等 `GMR-06R` 关闭后继续。
 
 ## 6. Goal 详细定义
 
@@ -491,6 +492,44 @@ validate -> pure derive -> conditional checkpoint
 - open findings：无；next READY Goal：`GMR-07`。完整证据见
   [GMR-06 实施与审查整改日志](../logs/2026-08-28_113000_Arena多人GMR-06D1目录发现实施与审查整改日志.md)。
 
+> **Superseding notice（2026-08-28）**：上述内容只证明历史 GMR-06 实现曾按当时口径完成，现已被
+> [Arena 多人 v1 Redis-only directory 规范修订](../specs/2026-08-28_150500_Arena多人v1移除D1目录RedisOnly规范修订.md)
+> 覆盖。D1 schema、projection、registration、tombstone 和 reconciler 不再是 v1 目标态；历史实现与恢复
+> 经验保存在 [GMR-06 D1 实现归档](../logs/2026-08-28_150500_Arena多人GMR06D1目录实现归档与恢复指南.md)。
+
+### GMR-06R Redis-only directory amendment
+
+**Entry**
+
+- GMR-06 历史实现、GMR-07 与 GMR-08 已有结果可审计；
+- Redis-only superseding spec 状态为 `accepted`；
+- 未授权 production/preview remote schema 或 Redis mutation。
+
+**Scope**
+
+- public Room Redis sorted-set derived index 与有界 directory record；
+- create/recovery/close 与 checkpoint 同一 Redis CAS/Lua 原子边界；
+- list/lookup 返回前严格重验 current checkpoint open/epoch/host；
+- exact-CAS lazy stale cleanup；
+- 删除 D1 Room adapter、`0014` migration/schema mirror、registration/compensation/reconciler；
+- 将真实 Redis verifier 与退出证据改为 Redis-only。
+
+**Forbidden**
+
+- directory index 成为 Room authority 或复活 absent/expired checkpoint；
+- checkpoint commit 后异步盲重放 directory mutation；
+- 为结构对称新增无产品入口的 host index；
+- 远程 `DROP TABLE`、production Redis write/flush 或机械回退 GMR-07/GMR-08 共享文件。
+
+**Done / Validation**
+
+- accepted 修订第 8 节 14 项门禁全部闭合；
+- GMR-07/GMR-08 contract、API、Web 与真实 Redis 验证无回归；
+- repository 不再含 `arena_multiplayer_rooms` schema/runtime D1 write；
+- architecture/security/data/test-adequacy 独立复审关闭全部 Critical/Important；
+- 完整 checkpoint 与命令见
+  [Redis-only directory 清理实施计划](./2026-08-28_154000_Arena多人RedisOnly目录清理实施计划.md)。
+
 ### GMR-07 Arena room UI
 
 **Entry**
@@ -652,7 +691,7 @@ validate -> pure derive -> conditional checkpoint
 
 **Entry**
 
-- GMR-06、GMR-08、GMR-09 DONE。
+- GMR-06R、GMR-08、GMR-09 DONE。
 
 **Scope**
 
@@ -673,7 +712,7 @@ validate -> pure derive -> conditional checkpoint
 3. Redis unavailable；
 4. Hono restart + Redis survives；
 5. Redis checkpoint loss；
-6. D1 orphan；
+6. Redis directory stale/orphan candidate；
 7. generation mid-flight process failure；
 8. slow consumer；
 9. oversized/flood；
