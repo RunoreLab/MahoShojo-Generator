@@ -28,8 +28,11 @@ const ACTIVE_ROOM_CHECKPOINT_VERSION = 1 as const;
 const EXPIRING_ROOM_CHECKPOINT_VERSION = 2 as const;
 const DEFAULT_ACTIVE_TTL_SECONDS = 24 * 60 * 60;
 const DEFAULT_TERMINAL_TTL_SECONDS = 300;
-// Checkpoint TTL 结束 Room incarnation；该有界负向 ledger 故意不设 TTL，避免迟到 create
-// receipt 在相同 roomEpoch 上复活已结束的 incarnation。达到配额后必须改用新 Room ID。
+const CREATE_ADMISSION_WINDOW_MS = 5 * 60 * 1_000;
+const CREATE_ADMISSION_MAX_CLOCK_SKEW_MS = 60 * 1_000;
+const INCARNATION_FENCE_RETENTION_MS = 15 * 60 * 1_000;
+// absent-create Lua 使用 Redis TIME 拒绝超过 admission deadline 的迟到命令；因此
+// incarnation fence 可以在覆盖最大 admission horizon 后有限保留，而无需永久占用 Redis。
 const MAX_ROOM_INCARNATIONS = 16;
 
 const BOOTSTRAP_FENCE_SCRIPT = `
@@ -48,10 +51,12 @@ local fenceTypeReply = redis.call('TYPE', KEYS[2])
 local fenceType = type(fenceTypeReply) == 'table' and fenceTypeReply.ok or fenceTypeReply
 if fenceType ~= 'none' and fenceType ~= 'set' then return 'invalid-fence' end
 if redis.call('SISMEMBER', KEYS[2], current.roomEpoch) == 1 then
+  redis.call('PEXPIRE', KEYS[2], ARGV[5])
   return raw and 'already' or 'expired'
 end
 if redis.call('SCARD', KEYS[2]) >= tonumber(ARGV[4]) then return 'incarnation-limit' end
 redis.call('SADD', KEYS[2], current.roomEpoch)
+redis.call('PEXPIRE', KEYS[2], ARGV[5])
 return raw and 'seeded' or 'expired'
 `;
 
@@ -130,6 +135,15 @@ local directoryStoredIndexMember = nil
 local directoryNextIndexMember = ''
 if ARGV[1] == 'absent' then
   if directoryMutation ~= 'mutate' then return 'invalid-request' end
+  local redisTime = redis.call('TIME')
+  local redisNowMs = tonumber(redisTime[1]) * 1000 + math.floor(tonumber(redisTime[2]) / 1000)
+  local createAdmissionDeadlineMs = tonumber(ARGV[17])
+  local createAdmissionMaxFutureMs = tonumber(ARGV[18])
+  if not createAdmissionDeadlineMs or not createAdmissionMaxFutureMs
+    or createAdmissionDeadlineMs < redisNowMs
+    or createAdmissionDeadlineMs > redisNowMs + createAdmissionMaxFutureMs then
+    return 'create-admission-expired'
+  end
   if raw then return 'conflict' end
   if epochSeen == 1 then return 'conflict' end
   if candidate.revision ~= 0 or candidate.controlSeq ~= 0 then
@@ -168,6 +182,7 @@ if ARGV[1] == 'absent' then
     directoryNextIndexMember = ARGV[12]
   end
 elseif ARGV[1] == 'match' then
+  if ARGV[17] ~= '' then return 'invalid-request' end
   if ARGV[11] ~= '' or ARGV[12] ~= '' then return 'directory-create-invalid' end
   if not raw then return 'conflict' end
   local decoded
@@ -247,6 +262,7 @@ if fenceCount + requiredEpochs > tonumber(ARGV[10]) then
 end
 if currentEpochToFence then redis.call('SADD', KEYS[2], currentEpochToFence) end
 redis.call('SADD', KEYS[2], candidate.roomEpoch)
+redis.call('PEXPIRE', KEYS[2], ARGV[16])
 redis.call('SET', KEYS[1], ARGV[7], 'PX', ARGV[8])
 if directoryMutation == 'mutate' then
   if directoryStoredIndexMember then
@@ -313,6 +329,7 @@ if directoryRaw then
 end
 if ARGV[9] ~= '' then redis.call('ZREM', KEYS[4], ARGV[9]) end
 redis.call('SADD', KEYS[2], ARGV[3])
+redis.call('PEXPIRE', KEYS[2], ARGV[10])
 redis.call('DEL', KEYS[1])
 return 'deleted'
 `;
@@ -365,6 +382,7 @@ if directoryRaw then
 end
 if ARGV[10] ~= '' then redis.call('ZREM', KEYS[4], ARGV[10]) end
 redis.call('SADD', KEYS[2], ARGV[3])
+redis.call('PEXPIRE', KEYS[2], ARGV[11])
 local currentTtl = redis.call('PTTL', KEYS[1])
 if currentTtl == 0 then
   redis.call('DEL', KEYS[1])
@@ -385,6 +403,9 @@ local recordType = type(recordTypeReply) == 'table' and recordTypeReply.ok or re
 if recordType ~= 'none' and recordType ~= 'string' then
   return 'directory-storage-invalid'
 end
+local fenceTypeReply = redis.call('TYPE', KEYS[3])
+local fenceType = type(fenceTypeReply) == 'table' and fenceTypeReply.ok or fenceTypeReply
+if fenceType ~= 'none' and fenceType ~= 'set' then return 'invalid-fence' end
 local raw = redis.call('GET', KEYS[1])
 if not raw then return 'missing' end
 local decoded, current = pcall(cjson.decode, raw)
@@ -398,6 +419,12 @@ if current.checkpointVersion ~= tonumber(ARGV[1])
   return 'conflict'
 end
 if raw ~= ARGV[7] then return 'conflict' end
+local epochSeen = redis.call('SISMEMBER', KEYS[3], current.roomEpoch)
+if epochSeen == 0 and redis.call('SCARD', KEYS[3]) >= tonumber(ARGV[8]) then
+  return 'incarnation-limit'
+end
+redis.call('SADD', KEYS[3], current.roomEpoch)
+redis.call('PEXPIRE', KEYS[3], ARGV[9])
 redis.call('PEXPIRE', KEYS[1], ARGV[6])
 if recordType == 'string' then redis.call('PEXPIRE', KEYS[2], ARGV[6]) end
 return 'refreshed'
@@ -416,6 +443,7 @@ export type RedisRoomStoreOptions = {
   keyPrefix?: string;
   activeTtlSeconds?: number;
   terminalTtlSeconds?: number;
+  now?: () => number;
   observer?: ArenaRoomRuntimeObserver;
 };
 
@@ -625,6 +653,9 @@ const parseMutationResult = <T extends string>(
   if (raw === 'invalid-existing') throw new Error('REDIS_ROOM_CHECKPOINT_INVALID');
   if (raw === 'invalid-fence') throw new Error('REDIS_ROOM_INCARNATION_FENCE_INVALID');
   if (raw === 'incarnation-limit') throw new Error('REDIS_ROOM_INCARNATION_LIMIT');
+  if (raw === 'create-admission-expired') {
+    throw new Error('REDIS_ROOM_CREATE_ADMISSION_EXPIRED');
+  }
   if (raw === 'invalid-successor') throw new Error('REDIS_ROOM_SUCCESSOR_INVALID');
   if (raw === 'directory-conflict') throw new Error('REDIS_ROOM_DIRECTORY_CONFLICT');
   if (raw === 'directory-create-invalid') throw new Error('REDIS_ROOM_DIRECTORY_INPUT_INVALID');
@@ -676,6 +707,7 @@ const observeCheckpoint = (
 
 export const createRedisRoomStore = (options: RedisRoomStoreOptions): RedisRoomStore => {
   const keyspace = createArenaRoomRedisKeyspace(options.keyPrefix);
+  const now = options.now ?? Date.now;
   const activeTtlMs = ttlMs(
     options.activeTtlSeconds ?? DEFAULT_ACTIVE_TTL_SECONDS,
     'activeTtlSeconds',
@@ -709,7 +741,13 @@ export const createRedisRoomStore = (options: RedisRoomStoreOptions): RedisRoomS
               keyspace.roomCheckpointKey(roomId),
               keyspace.roomIncarnationFenceKey(roomId),
             ],
-            arguments: [raw, roomId, stored.roomEpoch, String(MAX_ROOM_INCARNATIONS)],
+            arguments: [
+              raw,
+              roomId,
+              stored.roomEpoch,
+              String(MAX_ROOM_INCARNATIONS),
+              String(INCARNATION_FENCE_RETENTION_MS),
+            ],
           });
           const result = parseMutationResult(
             bootstrapped,
@@ -825,6 +863,15 @@ export const createRedisRoomStore = (options: RedisRoomStoreOptions): RedisRoomS
           : ['match', ...predecessorArguments(expected)];
         const storedRaw = JSON.stringify(stored);
         const expectedRaw = expectedStored === null ? '' : JSON.stringify(expectedStored);
+        const createAdmissionDeadlineMs = expected === null
+          ? Math.floor(now() + CREATE_ADMISSION_WINDOW_MS)
+          : null;
+        if (
+          createAdmissionDeadlineMs !== null
+          && !Number.isSafeInteger(createAdmissionDeadlineMs)
+        ) {
+          throw new Error('REDIS_ROOM_CREATE_ADMISSION_INVALID');
+        }
         observation.serializedBytes = serializedCheckpointBytes(storedRaw);
         const raw = await options.getClient().eval(SAVE_SCRIPT, {
           keys: [
@@ -849,6 +896,9 @@ export const createRedisRoomStore = (options: RedisRoomStoreOptions): RedisRoomS
                 ),
             roomDirectoryPublicIndexMember(stored.roomId, stored.state.lifecycle.updatedAt),
             directoryMutation,
+            String(INCARNATION_FENCE_RETENTION_MS),
+            createAdmissionDeadlineMs === null ? '' : String(createAdmissionDeadlineMs),
+            String(CREATE_ADMISSION_WINDOW_MS + CREATE_ADMISSION_MAX_CLOCK_SKEW_MS),
           ],
         });
         const result = parseMutationResult(raw, ['saved', 'conflict'] as const);
@@ -887,6 +937,7 @@ export const createRedisRoomStore = (options: RedisRoomStoreOptions): RedisRoomS
             expiringRaw,
             String(MAX_ROOM_INCARNATIONS),
             roomDirectoryPublicIndexMember(active.roomId, active.state.lifecycle.updatedAt),
+            String(INCARNATION_FENCE_RETENTION_MS),
           ],
         });
         const result = parseMutationResult(raw, ['deleted', 'missing', 'conflict'] as const);
@@ -926,6 +977,7 @@ export const createRedisRoomStore = (options: RedisRoomStoreOptions): RedisRoomS
             expiringRaw,
             String(MAX_ROOM_INCARNATIONS),
             roomDirectoryPublicIndexMember(active.roomId, active.state.lifecycle.updatedAt),
+            String(INCARNATION_FENCE_RETENTION_MS),
           ],
         });
         const result = parseMutationResult(raw, ['expired', 'missing', 'conflict'] as const);
@@ -956,11 +1008,14 @@ export const createRedisRoomStore = (options: RedisRoomStoreOptions): RedisRoomS
           keys: [
             keyspace.roomCheckpointKey(active.roomId),
             keyspace.roomDirectoryRecordKey(active.roomId),
+            keyspace.roomIncarnationFenceKey(active.roomId),
           ],
           arguments: [
             ...predecessorArguments(expected),
             String(activeTtlMs),
             activeRaw,
+            String(MAX_ROOM_INCARNATIONS),
+            String(INCARNATION_FENCE_RETENTION_MS),
           ],
         });
         const result = parseMutationResult(raw, ['refreshed', 'missing', 'conflict'] as const);

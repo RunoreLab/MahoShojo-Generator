@@ -150,6 +150,7 @@ describe('RedisRoomStore', () => {
       getClient: () => client,
       keyPrefix: 'preview',
       activeTtlSeconds: 3_600,
+      now: () => 1_000_000,
     });
     const created = createArenaRoomTransition();
     const state = created.nextState;
@@ -162,7 +163,8 @@ describe('RedisRoomStore', () => {
     expect(script).toContain('ROOM_CHECKPOINT_SAVE_V1');
     expect(script).toContain('raw ~= ARGV[9]');
     expect(script).toContain("redis.call('SISMEMBER', KEYS[2], candidate.roomEpoch)");
-    expect(script).not.toContain("redis.call('PEXPIRE', KEYS[2]");
+    expect(script).toContain("redis.call('TIME')");
+    expect(script).toContain("redis.call('PEXPIRE', KEYS[2], ARGV[16])");
     expect(script).toContain("redis.call('GET', KEYS[1])");
     expect(script.indexOf("redis.call('GET', KEYS[1])"))
       .toBeLessThan(script.indexOf("redis.call('SET', KEYS[1]"));
@@ -181,6 +183,9 @@ describe('RedisRoomStore', () => {
     expect(options.arguments[7]).toBe('3600000');
     expect(options.arguments[9]).toBe('16');
     expect(options.arguments[10]).toBe('');
+    expect(options.arguments[15]).toBe('900000');
+    expect(options.arguments[16]).toBe('1300000');
+    expect(options.arguments[17]).toBe('360000');
     const serialized = options.arguments.find((argument) => argument.startsWith('{'));
     expect(serialized).toBeDefined();
     const parsed = JSON.parse(serialized!);
@@ -359,7 +364,7 @@ describe('RedisRoomStore', () => {
     expect(closed).toEqual(before);
   });
 
-  it('低频 lifecycle refresh 在 exact checkpoint 边界只延长 checkpoint/record TTL，不重排 index', async () => {
+  it('低频 lifecycle refresh 在 exact checkpoint 边界延长 checkpoint/record/fence TTL，不重排 index', async () => {
     const client = createClient();
     vi.mocked(client.eval)
       .mockResolvedValueOnce('refreshed')
@@ -379,19 +384,24 @@ describe('RedisRoomStore', () => {
     expect(script).toContain('ROOM_CHECKPOINT_REFRESH_V1');
     expect(script).toContain("redis.call('PEXPIRE', KEYS[1], ARGV[6])");
     expect(script).toContain("redis.call('PEXPIRE', KEYS[2], ARGV[6])");
+    expect(script).toContain("redis.call('PEXPIRE', KEYS[3], ARGV[9])");
     expect(script).toContain("redis.call('TYPE', KEYS[2])");
+    expect(script).toContain("redis.call('TYPE', KEYS[3])");
     expect(script).not.toContain("redis.call('ZADD'");
     expect(script).not.toContain("redis.call('ZREM'");
     expect(script).toContain('raw ~= ARGV[7]');
     expect(options.keys).toEqual([
       expect.stringMatching(/^mahoshojo:room:v1:[a-f0-9]{64}:checkpoint$/u),
       expect.stringMatching(/^mahoshojo:room-directory:v1:entry:[a-f0-9]{64}$/u),
+      expect.stringMatching(/^mahoshojo:room:v1:[a-f0-9]{64}:incarnations$/u),
     ]);
-    expect(options.arguments.at(-2)).toBe('86400000');
-    expect(JSON.parse(options.arguments.at(-1)!)).toMatchObject({
+    expect(options.arguments[5]).toBe('86400000');
+    expect(JSON.parse(options.arguments[6]!)).toMatchObject({
       checkpointVersion: 1,
       ...checkpointPredecessorOf(checkpoint),
     });
+    expect(options.arguments[7]).toBe('16');
+    expect(options.arguments[8]).toBe('900000');
   });
 
   it('presence checkpoint 显式 preserve directory，不读取、改写或重排目录 key', async () => {
@@ -443,7 +453,9 @@ describe('RedisRoomStore', () => {
     expect(script).toContain('ROOM_CHECKPOINT_BOOTSTRAP_FENCE_V1');
     expect(script).toContain("raw ~= ARGV[1]");
     expect(script).toContain("redis.call('SADD', KEYS[2], current.roomEpoch)");
-    expect(options.arguments.at(-1)).toBe('16');
+    expect(script).toContain("redis.call('PEXPIRE', KEYS[2], ARGV[5])");
+    expect(options.arguments.at(-2)).toBe('16');
+    expect(options.arguments.at(-1)).toBe('900000');
   });
 
   it('exact-CAS 安装 authority state v1->v2 fail-closed migration 并保留 predecessor', async () => {
@@ -539,7 +551,7 @@ describe('RedisRoomStore', () => {
     expect(client.eval).toHaveBeenCalledWith(
       expect.stringContaining('ROOM_CHECKPOINT_BOOTSTRAP_FENCE_V1'),
       expect.objectContaining({
-        arguments: [raw, 'room-1', 'epoch-expired-during-load', '16'],
+        arguments: [raw, 'room-1', 'epoch-expired-during-load', '16', '900000'],
       }),
     );
   });
@@ -593,6 +605,7 @@ describe('RedisRoomStore', () => {
   it.each([
     ['invalid-fence', 'REDIS_ROOM_INCARNATION_FENCE_INVALID'],
     ['incarnation-limit', 'REDIS_ROOM_INCARNATION_LIMIT'],
+    ['create-admission-expired', 'REDIS_ROOM_CREATE_ADMISSION_EXPIRED'],
   ] as const)('把 incarnation fence 响应 %s 映射为稳定错误', async (raw, expected) => {
     const client = createClient();
     vi.mocked(client.eval).mockResolvedValue(raw);
@@ -618,8 +631,9 @@ describe('RedisRoomStore', () => {
     await expect(store[operation]({ checkpoint }))
       .resolves.toEqual(expected);
     const [script, options] = vi.mocked(client.eval).mock.calls[0]!;
-    expect(script).not.toContain("redis.call('PEXPIRE', KEYS[2]");
+    expect(script).toContain("redis.call('PEXPIRE', KEYS[2]");
     expect(options.keys[1]).toMatch(/:incarnations$/u);
+    expect(options.arguments.at(-1)).toBe('900000');
   });
 
   it('expire 安装不可复活 fence，且重复执行只会单调缩短 TTL', async () => {
@@ -632,7 +646,7 @@ describe('RedisRoomStore', () => {
       .resolves.toEqual({ kind: 'expired' });
     const [script, options] = vi.mocked(client.eval).mock.calls[0]!;
     expect(script).toContain('ROOM_CHECKPOINT_EXPIRE_V1');
-    expect(script).not.toContain("redis.call('PEXPIRE', KEYS[2]");
+    expect(script).toContain("redis.call('PEXPIRE', KEYS[2], ARGV[11])");
     expect(script).toContain("redis.call('PTTL', KEYS[1])");
     expect(script).toContain('if currentTtl > 0 and currentTtl < targetTtl then');
     expect(script).toContain("redis.call('SET', KEYS[1], ARGV[8], 'PX', targetTtl)");
@@ -645,6 +659,7 @@ describe('RedisRoomStore', () => {
     });
     expect(options.arguments[8]).toBe('16');
     expect(options.arguments[9]).toMatch(/^\d{15}:[a-f0-9]{64}$/u);
+    expect(options.arguments[10]).toBe('900000');
   });
 
   it('第二个 store 实例可恢复最后一次 acknowledged mutation，旧 epoch writer 不能覆盖', async () => {

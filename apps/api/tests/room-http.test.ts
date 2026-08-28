@@ -776,6 +776,49 @@ describe('Arena Room HTTP product routes', () => {
     }
   });
 
+  it('create 同时受分钟突发与账号日预算约束，长窗口耗尽时不创建 Room', async () => {
+    const rateLimit = vi.fn()
+      .mockResolvedValueOnce({
+        allowed: true,
+        limit: 5,
+        remaining: 4,
+        retryAfterSeconds: 1,
+      })
+      .mockResolvedValueOnce({
+        allowed: false,
+        limit: 32,
+        remaining: 0,
+        retryAfterSeconds: 3_600,
+      });
+    const dependencies = createDependencies({ rateLimit });
+    const app = createHonoApp(config, createRedisStub(), undefined, {
+      arenaRoom: dependencies,
+    });
+
+    const response = await app.request('/api/arena/rooms/v1', createRequest({
+      displayName: '房主',
+      directory: { title: '测试房', visibility: 'unlisted' },
+      sharedConfig: authority.snapshot.sharedConfig,
+    }));
+
+    expect(response.status).toBe(429);
+    expect(response.headers.get('x-ratelimit-limit')).toBe('32');
+    expect(response.headers.get('retry-after')).toBe('3600');
+    expect(rateLimit).toHaveBeenNthCalledWith(1, {
+      operation: 'create',
+      accountUserId: 101,
+      limit: 5,
+      windowSeconds: 60,
+    });
+    expect(rateLimit).toHaveBeenNthCalledWith(2, {
+      operation: 'createBudget',
+      accountUserId: 101,
+      limit: 32,
+      windowSeconds: 86_400,
+    });
+    expect(dependencies.memberships.create).not.toHaveBeenCalled();
+  });
+
   it('membership error 不泄漏 closed/not-found 差异，permission 与 conflict 可判别', async () => {
     for (const [membershipCode, status, code] of [
       ['ROOM_CLOSED', 404, 'ROOM_NOT_FOUND'],

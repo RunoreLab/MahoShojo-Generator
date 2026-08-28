@@ -92,6 +92,7 @@ export type ArenaRoomHttpRegistrationOptions = {
 type ArenaRoomHttpOperation =
   | 'close'
   | 'create'
+  | 'createBudget'
   | 'discover'
   | 'join'
   | 'leave'
@@ -108,6 +109,7 @@ const OPERATION_LIMITS: Readonly<Record<
   { readonly limit: number; readonly windowSeconds: number }
 >> = Object.freeze({
   create: { limit: 5, windowSeconds: 60 },
+  createBudget: { limit: 32, windowSeconds: 24 * 60 * 60 },
   discover: { limit: 60, windowSeconds: 60 },
   join: { limit: 20, windowSeconds: 60 },
   session: { limit: 120, windowSeconds: 60 },
@@ -313,6 +315,7 @@ const authenticateAndLimit = async (
   options: ArenaRoomHttpRegistrationOptions,
   operation: ArenaRoomHttpOperation,
   roomId?: string,
+  additionalOperations: readonly ArenaRoomHttpOperation[] = [],
 ): Promise<{ readonly accepted: true; readonly accountUserId: number } | {
   readonly accepted: false;
   readonly response: Response;
@@ -356,31 +359,38 @@ const authenticateAndLimit = async (
     };
   }
 
-  const policy = OPERATION_LIMITS[operation];
-  let result: ArenaRoomHttpRateLimitResult | null;
-  try {
-    result = await dependencies.rateLimit({
-      operation,
-      accountUserId: authentication.userId,
-      ...(roomId === undefined ? {} : { roomId }),
-      ...policy,
-    });
-  } catch {
-    result = null;
+  let lastResult: ArenaRoomHttpRateLimitResult | null = null;
+  for (const limitedOperation of [operation, ...additionalOperations]) {
+    const policy = OPERATION_LIMITS[limitedOperation];
+    let result: ArenaRoomHttpRateLimitResult | null;
+    try {
+      result = await dependencies.rateLimit({
+        operation: limitedOperation,
+        accountUserId: authentication.userId,
+        ...(roomId === undefined ? {} : { roomId }),
+        ...policy,
+      });
+    } catch {
+      result = null;
+    }
+    if (!result) return { accepted: false, response: unavailable(context) };
+    if (!result.allowed) {
+      context.header('x-ratelimit-limit', String(result.limit));
+      context.header('x-ratelimit-remaining', String(result.remaining));
+      context.header('retry-after', String(result.retryAfterSeconds));
+      return {
+        accepted: false,
+        response: context.json(
+          errorBody('ROOM_RATE_LIMITED', 'Room 请求过于频繁', result.retryAfterSeconds),
+          429,
+        ),
+      };
+    }
+    lastResult = result;
   }
-  if (!result) return { accepted: false, response: unavailable(context) };
-  context.header('x-ratelimit-limit', String(result.limit));
-  context.header('x-ratelimit-remaining', String(result.remaining));
-  if (!result.allowed) {
-    context.header('retry-after', String(result.retryAfterSeconds));
-    return {
-      accepted: false,
-      response: context.json(
-        errorBody('ROOM_RATE_LIMITED', 'Room 请求过于频繁', result.retryAfterSeconds),
-        429,
-      ),
-    };
-  }
+  if (!lastResult) return { accepted: false, response: unavailable(context) };
+  context.header('x-ratelimit-limit', String(lastResult.limit));
+  context.header('x-ratelimit-remaining', String(lastResult.remaining));
   return { accepted: true, accountUserId: authentication.userId };
 };
 
@@ -454,6 +464,8 @@ export const registerArenaRoomHttpRoutes = (
       dependencies,
       options,
       'create',
+      undefined,
+      ['createBudget'],
     );
     if (!authorization.accepted) return authorization.response;
     try {

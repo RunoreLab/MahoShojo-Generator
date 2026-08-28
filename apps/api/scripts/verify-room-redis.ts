@@ -345,9 +345,11 @@ try {
     const sameEpochAfterRestartDelete = await readerStore.save({
       commit: commit(createRoom(roomId)),
     });
+    const restartFenceTtl = await cleanup.pTTL(roomFenceKey(roomId));
     if (
       sameEpochAfterRestartDelete.kind !== 'conflict'
-      || await cleanup.pTTL(roomFenceKey(roomId)) !== -1
+      || restartFenceTtl <= 0
+      || restartFenceTtl > 900_000
     ) {
       throw new Error('ROOM_REDIS_RESTART_INCARNATION_FENCE_FAILED');
     }
@@ -552,7 +554,8 @@ try {
         || deleted.kind !== 'deleted'
         || repeatedDelete.kind !== 'missing'
         || sameEpochAfterDelete.kind !== 'conflict'
-        || incarnationLedgerTtl !== -1
+        || incarnationLedgerTtl <= 0
+        || incarnationLedgerTtl > 900_000
       ) {
         throw new Error('ROOM_REDIS_EXPIRY_DELETE_FAILED');
       }
@@ -900,11 +903,31 @@ try {
       const ttlResurrection = await shortTtlStore.save({
         commit: delayedCreateReceipt,
       });
+      const ttlFenceRetention = await cleanup.pTTL(roomFenceKey(ttlRoomId));
       if (
         ttlResurrection.kind !== 'conflict'
-        || await cleanup.pTTL(roomFenceKey(ttlRoomId)) !== -1
+        || ttlFenceRetention <= 0
+        || ttlFenceRetention > 900_000
       ) {
         throw new Error('ROOM_REDIS_TTL_INCARNATION_FENCE_FAILED');
+      }
+      await cleanup.del(roomFenceKey(ttlRoomId));
+      const expiredAdmissionStore = createRedisRoomStore({
+        keyPrefix,
+        getClient: () => ({
+          eval: (script, options) => cleanup.eval(script, options),
+          get: async (key) => {
+            const value = await cleanup.get(key);
+            return typeof value === 'string' ? value : null;
+          },
+        } satisfies RedisRoomClient),
+        now: () => Date.now() - 10 * 60 * 1_000,
+      });
+      await fixedError(expiredAdmissionStore.save({
+        commit: commit(createRoom(ttlRoomId, 'epoch-delayed')),
+      }), 'REDIS_ROOM_CREATE_ADMISSION_EXPIRED');
+      if (await cleanup.get(roomKey(ttlRoomId)) !== null) {
+        throw new Error('ROOM_REDIS_EXPIRED_CREATE_ADMISSION_MUTATED');
       }
       const nextIncarnation = await shortTtlStore.save({
         commit: commit(createRoom(ttlRoomId, 'epoch-2')),
@@ -2290,7 +2313,8 @@ try {
         transitionReceipt: true,
         oneShotReceipt: true,
         incarnationFence: true,
-        persistentIncarnationLedger: true,
+        boundedIncarnationFenceTtl: true,
+        expiredCreateAdmissionRejected: true,
         newEpochAfterExpiry: true,
         incarnationFenceFailClosed: true,
         destructiveFenceFailClosed: true,
