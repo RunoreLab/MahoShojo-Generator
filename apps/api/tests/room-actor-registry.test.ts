@@ -612,6 +612,7 @@ describe('RoomActorRegistry', () => {
       generationId: 'next-generation',
       attempt: 1,
       snapshotDigest: `sha256:${'b'.repeat(64)}`,
+      generationPayloadDigest: `sha256:${'d'.repeat(64)}`,
       expiresAt: '2026-08-28T01:00:00.000Z',
     });
 
@@ -624,6 +625,7 @@ describe('RoomActorRegistry', () => {
         generationRequestId: 'next-request',
         generationId: 'next-generation',
         attempt: 1,
+        generationPayloadDigest: `sha256:${'d'.repeat(64)}`,
         timestamp: FOURTH_TIMESTAMP,
       },
       authority,
@@ -749,6 +751,7 @@ describe('RoomActorRegistry', () => {
       generationId: 'next-generation',
       attempt: 1,
       snapshotDigest: `sha256:${'b'.repeat(64)}`,
+      generationPayloadDigest: `sha256:${'d'.repeat(64)}`,
       expiresAt: '2026-08-28T01:00:00.000Z',
     });
     await expect(registry.execute({
@@ -760,6 +763,7 @@ describe('RoomActorRegistry', () => {
         generationRequestId: 'next-request',
         generationId: 'next-generation',
         attempt: 1,
+        generationPayloadDigest: `sha256:${'d'.repeat(64)}`,
         timestamp: FOURTH_TIMESTAMP,
       },
       authority,
@@ -781,6 +785,7 @@ describe('RoomActorRegistry', () => {
       generationId: 'recovered-generation',
       attempt: 1,
       snapshotDigest: `sha256:${'c'.repeat(64)}`,
+      generationPayloadDigest: `sha256:${'e'.repeat(64)}`,
       expiresAt: '2026-08-28T01:00:00.000Z',
     });
 
@@ -793,6 +798,7 @@ describe('RoomActorRegistry', () => {
         generationRequestId: 'recovered-request',
         generationId: 'recovered-generation',
         attempt: 1,
+        generationPayloadDigest: `sha256:${'e'.repeat(64)}`,
         timestamp: FOURTH_TIMESTAMP,
       },
       authority: recoveredAuthority,
@@ -832,6 +838,7 @@ describe('RoomActorRegistry', () => {
       generationId: 'next-generation',
       attempt: 1,
       snapshotDigest: `sha256:${'b'.repeat(64)}`,
+      generationPayloadDigest: `sha256:${'d'.repeat(64)}`,
       expiresAt: '2026-08-28T01:00:00.000Z',
     });
 
@@ -844,6 +851,7 @@ describe('RoomActorRegistry', () => {
         generationRequestId: 'next-request',
         generationId: 'next-generation',
         attempt: 1,
+        generationPayloadDigest: `sha256:${'d'.repeat(64)}`,
         timestamp: FOURTH_TIMESTAMP,
       },
       authority,

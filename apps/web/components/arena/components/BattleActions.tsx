@@ -114,7 +114,7 @@ export function BattleActions({ showAdvancedUtilities = true }: { showAdvancedUt
   const narrativeEntries = useNarrativeHistoryStore((state) => state.entries);
   const roomAction = arenaRoomRuntime
     ? resolveArenaRoomGenerationAction(arenaRoomRuntime.state)
-    : { inRoom: false, canStart: true, reason: null } as const;
+    : { inRoom: false, canStart: true, canRetry: false, reason: null } as const;
 
   const estimatePayloadText = (() => {
     const readableCombatants = combatants.filter((item): item is any => 'data' in item);
@@ -220,6 +220,7 @@ export function BattleActions({ showAdvancedUtilities = true }: { showAdvancedUt
   const getButtonText = () => {
     if (roomAction.inRoom && roomAction.reason === 'member') return '等待房主开始生成';
     if (roomAction.inRoom && roomAction.reason === 'unknown') return '正在确认上次启动结果…';
+    if (roomAction.inRoom && roomAction.reason === 'recovery') return '确认并重试同一次启动';
     if (roomAction.inRoom && roomAction.reason === 'connection') return '等待房间重新连接…';
     if (roomAction.inRoom && roomAction.reason === 'active') return '房间战报生成中…';
     if (isCooldown) return `记者赶稿中...请等待 ${remainingTime} 秒`;
@@ -248,7 +249,7 @@ export function BattleActions({ showAdvancedUtilities = true }: { showAdvancedUt
           disabled={
             isGenerating ||
             isCooldown ||
-            (roomAction.inRoom && !roomAction.canStart) ||
+            (roomAction.inRoom && !roomAction.canStart && !roomAction.canRetry) ||
             (battleMode === 'daily' || battleMode === 'scenario'
               ? combatants.length < 1
               : combatants.length < 2)

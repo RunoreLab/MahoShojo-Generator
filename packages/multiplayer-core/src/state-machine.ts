@@ -650,6 +650,8 @@ const sameReservation = (
   && record.mirror.attempt === command.attempt
   && record.mirror.configRevision === command.expectedRevision
   && record.mirror.snapshotDigest === snapshotDigest
+  && record.generationPayloadDigest !== undefined
+  && record.generationPayloadDigest === command.generationPayloadDigest
 );
 
 const reserveGeneration = (
@@ -674,7 +676,8 @@ const reserveGeneration = (
     || scope.configRevision !== command.expectedRevision
     || scope.generationRequestId !== command.generationRequestId
     || scope.generationId !== command.generationId
-    || scope.attempt !== command.attempt) {
+    || scope.attempt !== command.attempt
+    || scope.generationPayloadDigest !== command.generationPayloadDigest) {
     return transitionFailure('forbidden', 'authority-scope-mismatch');
   }
   const now = Date.parse(trustedTime.now);
@@ -691,6 +694,9 @@ const reserveGeneration = (
     record.mirror.generationRequestId === command.generationRequestId
   ));
   if (historical) {
+    if (historical.mirror.state !== 'starting' && historical.mirror.state !== 'running') {
+      return transitionFailure('conflict', 'generation-terminal-conflict');
+    }
     return sameReservation(historical, command, scope.snapshotDigest)
       ? finishIdempotent(state)
       : transitionFailure('conflict', 'generation-request-conflict');
@@ -726,7 +732,10 @@ const reserveGeneration = (
   };
   const next = cloneState(state);
   next.snapshot.activeGeneration = mirror;
-  next.generationLedger.push({ mirror: deepClone(mirror) });
+  next.generationLedger.push({
+    mirror: deepClone(mirror),
+    generationPayloadDigest: command.generationPayloadDigest,
+  });
   next.lifecycle = { ...next.lifecycle, updatedAt: command.timestamp };
   const events: ControlRoomEvent[] = [];
   if (!pushSnapshotEvent(next, events, command.timestamp)) return eventOverflow();
@@ -818,6 +827,7 @@ const mirrorGeneration = (
   };
   next.snapshot.activeGeneration = nextMirror;
   next.generationLedger[recordIndex] = {
+    ...record,
     mirror: deepClone(nextMirror),
     ...(command.state === 'completed' ? { generationRecordId: command.generationRecordId } : {}),
     ...(command.state === 'failed' ? { errorCode: command.errorCode } : {}),

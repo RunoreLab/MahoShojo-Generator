@@ -170,7 +170,7 @@ describe('Arena multiplayer BattleActions authority gate', () => {
     expect(mocks.handleGenerate).not.toHaveBeenCalled();
   });
 
-  it('房主空闲时复用现有生成按钮，运行中或 unknown 时禁止重复提交', async () => {
+  it('房主空闲时复用现有生成按钮，运行中锁定；unknown 只显示显式同请求重试', async () => {
     mocks.roomState = stateFor('host');
     let button = await render();
     expect(button.disabled).toBe(false);
@@ -184,7 +184,7 @@ describe('Arena multiplayer BattleActions authority gate', () => {
 
     mocks.roomState = stateFor('host', 'unknown');
     button = await render();
-    expect(button.disabled).toBe(true);
-    expect(button.textContent).toContain('正在确认上次启动结果');
+    expect(button.disabled).toBe(false);
+    expect(button.textContent).toContain('确认并重试同一次启动');
   });
 });

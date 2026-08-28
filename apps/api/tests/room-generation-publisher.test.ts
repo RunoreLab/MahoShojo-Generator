@@ -103,6 +103,7 @@ const createRunningActor = async (options: { running?: boolean } = {}) => {
       generationId: GENERATION_ID,
       attempt: 1,
       snapshotDigest: SNAPSHOT_DIGEST,
+      generationPayloadDigest: `sha256:${'d'.repeat(64)}`,
       expiresAt: EXPIRES_AT,
     }),
     command: {
@@ -112,6 +113,7 @@ const createRunningActor = async (options: { running?: boolean } = {}) => {
       generationRequestId: GENERATION_REQUEST_ID,
       generationId: GENERATION_ID,
       attempt: 1,
+      generationPayloadDigest: `sha256:${'d'.repeat(64)}`,
       timestamp: new Date(now).toISOString(),
     },
     trustedTime: issueArenaRoomTrustedTime({ now: new Date(now).toISOString() }),
@@ -448,6 +450,70 @@ describe('RoomGenerationPublisher RoomActor transient story seam', () => {
 });
 
 describe('RoomGenerationPublisher typed generation consumer', () => {
+  it('同一 actor 重挂 publisher 时从 transient story cursor 继续而不重置 seq', async () => {
+    const harness = await createRunningActor({ running: false });
+    harness.setNow('2026-08-28T00:03:00.000Z');
+    const authority = issueArenaRoomGenerationPublisherAuthority({
+      roomId: ROOM_ID,
+      roomEpoch: ROOM_EPOCH,
+      generationRequestId: GENERATION_REQUEST_ID,
+      generationId: GENERATION_ID,
+      attempt: 1,
+      expiresAt: EXPIRES_AT,
+    });
+    const first = createRoomGenerationPublisher({
+      actor: harness.actor,
+      authority,
+      now: () => Date.parse('2026-08-28T00:03:00.000Z'),
+    });
+    await expect(first.attach(subscriptionOf([
+      { id: '1', type: 'markdown', chunk: 'A' },
+    ]))).resolves.toEqual({ kind: 'stream-ended' });
+
+    const second = createRoomGenerationPublisher({
+      actor: harness.actor,
+      authority,
+      now: () => Date.parse('2026-08-28T00:04:00.000Z'),
+      initial: { markdown: 'A', nextChunkSeq: 0 },
+    });
+    await expect(second.attach(subscriptionOf([
+      { id: '2', type: 'markdown', chunk: 'B' },
+    ]))).resolves.toEqual({ kind: 'stream-ended' });
+    expect(second.getProgress()).toEqual({ markdown: 'AB', nextChunkSeq: 2 });
+  });
+
+  it('publisher 早退会 cancel 未结束的 subscription，停止底层 replay pump', async () => {
+    const harness = await createRunningActor({ running: false });
+    harness.setNow('2026-08-28T00:03:00.000Z');
+    const cancelled = vi.fn();
+    const events = new ReadableStream<ArenaRoomGenerationEvent>({
+      start(controller) {
+        controller.enqueue({ id: '1', type: 'markdown', chunk: 'gap' });
+      },
+      cancel: cancelled,
+    });
+    const publisher = createRoomGenerationPublisher({
+      actor: harness.actor,
+      authority: issueArenaRoomGenerationPublisherAuthority({
+        roomId: ROOM_ID,
+        roomEpoch: ROOM_EPOCH,
+        generationRequestId: GENERATION_REQUEST_ID,
+        generationId: GENERATION_ID,
+        attempt: 1,
+        expiresAt: EXPIRES_AT,
+      }),
+      initial: { markdown: '', nextChunkSeq: 2 },
+      now: () => Date.parse('2026-08-28T00:03:00.000Z'),
+    });
+
+    await expect(publisher.attach({
+      generationId: GENERATION_ID,
+      generationRequestId: GENERATION_REQUEST_ID,
+      events,
+    })).resolves.toEqual({ kind: 'rejected', reason: 'story:story-sequence-gap' });
+    expect(cancelled).toHaveBeenCalledOnce();
+  });
+
   it('先幂等 mirror running，只广播 markdown，snapshot 仅作 baseline，末 delta 后再 terminal', async () => {
     const harness = await createRunningActor({ running: false });
     const fanoutTypes: string[] = [];

@@ -9,6 +9,7 @@ import {
 import {
   createRoomCommand,
   generationPublisherAuthority,
+  generationPayloadDigest,
   generationReservationAuthority,
   guidanceChange,
   hostAuthority,
@@ -74,6 +75,7 @@ describe('Arena Room recovery transition', () => {
       generationRequestId: 'request-1',
       generationId: 'generation-1',
       attempt: 1,
+      generationPayloadDigest: generationPayloadDigest(),
       timestamp: '2026-08-27T16:05:00.000Z',
     }, generationReservationAuthority('request-1', 'generation-1', 1));
     if (!reserved.ok) throw new Error('expected reservation success');

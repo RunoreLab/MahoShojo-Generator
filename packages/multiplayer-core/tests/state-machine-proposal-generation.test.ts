@@ -302,6 +302,7 @@ describe('Arena Room authoritative generation transitions', () => {
     generationRequestId: 'request-1',
     generationId: 'generation-1',
     attempt: 1,
+    generationPayloadDigest: `sha256:${'b'.repeat(64)}`,
     timestamp: '2026-08-27T16:04:00.000Z',
   });
 
@@ -319,6 +320,8 @@ describe('Arena Room authoritative generation transitions', () => {
       participantUserIds: [101, 202],
       startedAt: '2026-08-27T16:04:00.000Z',
     });
+    expect(reserved.nextState.generationLedger[0]?.generationPayloadDigest)
+      .toBe(`sha256:${'b'.repeat(64)}`);
     expect(reserved.events[0]).toMatchObject({ type: 'room.snapshot' });
 
     const duplicate = success(transitionArenaRoomAt(
@@ -328,6 +331,18 @@ describe('Arena Room authoritative generation transitions', () => {
     ));
     expect(duplicate.kind).toBe('idempotent');
     expect(duplicate.events).toEqual([]);
+
+    expect(failure(transitionArenaRoomAt(reserved.nextState, {
+      ...reserveCommand(),
+      generationPayloadDigest: `sha256:${'c'.repeat(64)}`,
+    }, generationReservationAuthority(
+      'request-1',
+      'generation-1',
+      0,
+      1,
+      `sha256:${'c'.repeat(64)}`,
+    ))))
+      .toMatchObject({ code: 'conflict', reason: 'generation-request-conflict' });
 
     expect(failure(transitionArenaRoomAt(reserved.nextState, {
       ...reserveCommand(),
@@ -484,6 +499,8 @@ describe('Arena Room authoritative generation transitions', () => {
 
     const running = success(transitionArenaRoomAt(reserved, runningCommand, generationPublisherAuthority()));
     expect(running.nextState.snapshot.activeGeneration?.state).toBe('running');
+    expect(running.nextState.generationLedger[0]?.generationPayloadDigest)
+      .toBe(`sha256:${'b'.repeat(64)}`);
     expect(running.events[0]).toMatchObject({ type: 'generation.started' });
 
     const completedCommand = {
@@ -501,6 +518,8 @@ describe('Arena Room authoritative generation transitions', () => {
       state: 'completed',
       finishedAt: '2026-08-27T16:06:00.000Z',
     });
+    expect(completed.nextState.generationLedger[0]?.generationPayloadDigest)
+      .toBe(`sha256:${'b'.repeat(64)}`);
     expect(completed.events[0]).toMatchObject({ type: 'generation.completed' });
 
     const replayed = success(transitionArenaRoomAt(completed.nextState, {
@@ -562,6 +581,7 @@ describe('Arena Room authoritative generation transitions', () => {
         generationId: 'generation-1',
         attempt: 1,
         snapshotDigest: snapshotDigest(),
+        generationPayloadDigest: `sha256:${'b'.repeat(64)}`,
         expiresAt: '2026-08-27T16:30:00.000Z',
       })))).toMatchObject({ code: 'forbidden', reason: 'host-required' });
 
@@ -576,6 +596,7 @@ describe('Arena Room authoritative generation transitions', () => {
         generationId: 'generation-1',
         attempt: 1,
         snapshotDigest: snapshotDigest(),
+        generationPayloadDigest: `sha256:${'b'.repeat(64)}`,
         expiresAt: '2026-08-27T16:30:00.000Z',
       })))).toMatchObject({ code: 'forbidden', reason: 'host-required' });
   });

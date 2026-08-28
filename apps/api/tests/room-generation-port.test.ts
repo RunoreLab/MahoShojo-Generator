@@ -5,7 +5,10 @@ import type {
   GenerationStreamEvent,
 } from '@mahoshojo/hosted-api/arena-generation/service';
 import { createArenaRoomGenerationSnapshot } from '#/arena-room/room-generation-snapshot';
-import { createArenaRoomGenerationPort } from '#/arena-generation/room-generation-port';
+import {
+  createArenaRoomGenerationPort,
+  hashArenaRoomGenerationPayload,
+} from '#/arena-generation/room-generation-port';
 import { createArenaRoomState } from './arena-room-fixtures';
 
 const eventStream = (events: readonly GenerationStreamEvent[]) => new ReadableStream({
@@ -27,6 +30,42 @@ const readAll = async <T>(stream: ReadableStream<T>): Promise<T[]> => {
 };
 
 describe('Arena Room generation internal port', () => {
+  it('binds the Room retry digest to server-normalized semantic payload without hashing secrets', async () => {
+    const generationRequestId = 'request-room-digest-1';
+    const multiplayerSnapshot = createArenaRoomGenerationSnapshot(
+      createArenaRoomState(),
+      generationRequestId,
+    );
+    const input = {
+      roomId: multiplayerSnapshot.roomId,
+      generationRequestId,
+      payload: {
+        mode: 'classic',
+        internalGuidance: 'client-forged-guidance',
+        pvpContext: { roomId: 'forged-room', matchId: 'forged', roundId: 'forged' },
+        customProvider: { apiKey: 'provider-secret-one' },
+      },
+      internalGuidance: 'server-owned-guidance',
+      pvpContext: { matchId: 'match-1', roundId: 'round-1' },
+      multiplayerSnapshot,
+    } as const;
+
+    const digest = await hashArenaRoomGenerationPayload(input);
+    await expect(hashArenaRoomGenerationPayload({
+      ...input,
+      payload: {
+        ...input.payload,
+        customProvider: { apiKey: 'provider-secret-two' },
+      },
+    })).resolves.toBe(digest);
+    await expect(hashArenaRoomGenerationPayload({
+      ...input,
+      payload: { ...input.payload, mode: 'scenario' },
+    })).resolves.not.toBe(digest);
+    expect(digest).toMatch(/^sha256:[0-9a-f]{64}$/u);
+    expect(digest).not.toContain('provider-secret');
+  });
+
   it('starts a direct body-bound PVP subscription with original auth/signal and owned snapshot', async () => {
     const generationRequestId = 'request-room-start-1';
     const multiplayerSnapshot = createArenaRoomGenerationSnapshot(

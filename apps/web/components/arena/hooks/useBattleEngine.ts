@@ -50,6 +50,7 @@ import {
 } from '@/lib/arena/resumable-generation-client';
 import { buildArenaRoomSharedConfigFromBattleState } from '@/lib/arena-room/shared-config';
 import {
+  dispatchArenaRoomGenerationRetry,
   dispatchArenaRoomGenerationStart,
   resolveArenaRoomGenerationAction,
 } from '../multiplayer/generation-bridge';
@@ -500,7 +501,19 @@ export const useBattleEngine = () => {
     let recoveryNoticeActive = false;
     const roomAction = arenaRoomRuntime
       ? resolveArenaRoomGenerationAction(arenaRoomRuntime.state)
-      : { inRoom: false, canStart: true, reason: null } as const;
+      : { inRoom: false, canStart: true, canRetry: false, reason: null } as const;
+    if (roomAction.inRoom && roomAction.canRetry && arenaRoomRuntime) {
+      const outcome = await dispatchArenaRoomGenerationRetry({
+        controller: arenaRoomRuntime.controller,
+        state: arenaRoomRuntime.state,
+      });
+      if (outcome !== 'submitted') {
+        setError(outcome === 'stale'
+          ? '⚠️ 房间状态已变化，请确认最新状态后再重试。'
+          : '⚠️ 当前没有可安全重试的多人生成请求。');
+      }
+      return;
+    }
     if (roomAction.inRoom && !roomAction.canStart) {
       const message = roomAction.reason === 'member'
         ? '⚠️ 多人房间仅房主可以启动生成，请等待房主操作。'

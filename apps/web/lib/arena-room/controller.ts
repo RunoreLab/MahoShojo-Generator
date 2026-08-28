@@ -117,6 +117,7 @@ export type ArenaRoomController = {
   resolveProposal(proposalId: string, request: ArenaRoomProposalResolveRequest): Promise<void>;
   withdrawProposal(proposalId: string): Promise<void>;
   startGeneration(request: ArenaRoomGenerationStartRequest): Promise<void>;
+  retryGenerationStart(): Promise<void>;
   reconnect(): void;
   reset(): void;
   dispose(): void;
@@ -301,6 +302,7 @@ export const createArenaRoomController = (
   let proposalMutationPending = false;
   let generationStartOperation = 0;
   let generationStartPending = false;
+  let pendingGenerationStartRequest: ArenaRoomGenerationStartRequest | null = null;
   let generationFence = 0;
   let unknownProposalMutation: UnknownProposalMutation | null = null;
   let disposed = false;
@@ -430,6 +432,12 @@ export const createArenaRoomController = (
       || current.roomId !== expected.roomId
       || current.roomEpoch !== expected.roomEpoch
     ) return false;
+    if (
+      view.status === 'completed'
+      || view.status === 'failed'
+      || view.status === 'cancelled'
+      || view.status === 'producer_lost'
+    ) pendingGenerationStartRequest = null;
     const storyCursor = view.nextChunkSeq === 0
       ? null
       : { generationId: view.generation.generationId, chunkSeq: view.nextChunkSeq - 1 };
@@ -1019,9 +1027,22 @@ export const createArenaRoomController = (
 
   const runGenerationStart = async (
     request: ArenaRoomGenerationStartRequest,
+    retry = false,
   ): Promise<void> => {
     const current = state.session;
-    const activeState = current?.snapshot.activeGeneration?.state;
+    const active = current?.snapshot.activeGeneration;
+    const activeState = active?.state;
+    const retryAllowed = retry && (
+      (
+        state.generation.startResultUnknown
+        && state.generation.pendingRequestId === request.generationRequestId
+      )
+      || (
+        state.generation.phase === 'unavailable'
+        && state.generation.mirror?.state === 'starting'
+        && state.generation.mirror.generationRequestId === request.generationRequestId
+      )
+    );
     if (
       disposed
       || !access.enabled
@@ -1029,12 +1050,12 @@ export const createArenaRoomController = (
       || !current
       || current.self.role !== 'host'
       || request.expectedRoomEpoch !== current.roomEpoch
-      || request.expectedRevision !== current.snapshot.revision
+      || (!retry && request.expectedRevision !== current.snapshot.revision)
       || generationStartPending
-      || state.generation.startResultUnknown
-      || activeState === 'starting'
-      || activeState === 'running'
+      || (retry ? !retryAllowed : state.generation.startResultUnknown)
+      || (!retry && (activeState === 'starting' || activeState === 'running'))
     ) return;
+    if (!retry) pendingGenerationStartRequest = request;
     generationStartPending = true;
     generationStartOperation += 1;
     const operation = generationStartOperation;
@@ -1042,9 +1063,10 @@ export const createArenaRoomController = (
     const expectedRoomEpoch = current.roomEpoch;
     publish({
       generation: {
-        ...EMPTY_GENERATION_VIEW,
+        ...(retry ? state.generation : EMPTY_GENERATION_VIEW),
         phase: 'starting',
         pendingRequestId: request.generationRequestId,
+        startResultUnknown: false,
       },
       notice: '正在启动多人生成…',
       error: null,
@@ -1103,6 +1125,10 @@ export const createArenaRoomController = (
           error: null,
         });
       } else {
+        const currentActive = state.session?.snapshot.activeGeneration;
+        if (currentActive?.state !== 'starting' && currentActive?.state !== 'running') {
+          pendingGenerationStartRequest = null;
+        }
         publish({
           generation: {
             ...EMPTY_GENERATION_VIEW,
@@ -1137,6 +1163,7 @@ export const createArenaRoomController = (
       generationFence += 1;
       proposalMutationPending = false;
       generationStartPending = false;
+      pendingGenerationStartRequest = null;
       clearReconnectTimer();
       detachSocket(true);
       reconnectAttempts = 0;
@@ -1181,6 +1208,7 @@ export const createArenaRoomController = (
       generationFence += 1;
       proposalMutationPending = false;
       generationStartPending = false;
+      pendingGenerationStartRequest = null;
       const generation = operationGeneration;
       clearReconnectTimer();
       detachSocket(true);
@@ -1208,6 +1236,7 @@ export const createArenaRoomController = (
       generationFence += 1;
       proposalMutationPending = false;
       generationStartPending = false;
+      pendingGenerationStartRequest = null;
       const generation = operationGeneration;
       clearReconnectTimer();
       detachSocket(true);
@@ -1235,6 +1264,7 @@ export const createArenaRoomController = (
       generationFence += 1;
       proposalMutationPending = false;
       generationStartPending = false;
+      pendingGenerationStartRequest = null;
       const generation = operationGeneration;
       const { roomId, roomEpoch } = state.session;
       clearReconnectTimer();
@@ -1256,6 +1286,7 @@ export const createArenaRoomController = (
       generationFence += 1;
       proposalMutationPending = false;
       generationStartPending = false;
+      pendingGenerationStartRequest = null;
       const generation = operationGeneration;
       const { roomId, roomEpoch } = state.session;
       clearReconnectTimer();
@@ -1291,6 +1322,12 @@ export const createArenaRoomController = (
       await runGenerationStart(request);
     },
 
+    async retryGenerationStart() {
+      const request = pendingGenerationStartRequest;
+      if (!request) return;
+      await runGenerationStart(request, true);
+    },
+
     reconnect() {
       if (!state.session || disposed || !access.enabled || !access.authenticated) return;
       operationGeneration += 1;
@@ -1311,6 +1348,7 @@ export const createArenaRoomController = (
       generationFence += 1;
       proposalMutationPending = false;
       generationStartPending = false;
+      pendingGenerationStartRequest = null;
       clearReconnectTimer();
       detachSocket(true);
       reconnectAttempts = 0;
@@ -1329,6 +1367,7 @@ export const createArenaRoomController = (
       generationFence += 1;
       proposalMutationPending = false;
       generationStartPending = false;
+      pendingGenerationStartRequest = null;
       unknownProposalMutation = null;
       clearReconnectTimer();
       detachSocket(true);

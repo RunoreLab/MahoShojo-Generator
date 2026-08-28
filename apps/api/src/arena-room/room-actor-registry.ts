@@ -152,6 +152,8 @@ export type RoomActorStoryPublishResult =
       readonly reason: string;
     };
 
+export type RoomActorStoryCursor = Readonly<{ nextChunkSeq: number }>;
+
 type CommandQueueEntry = {
   readonly kind: 'command';
   readonly input: RoomActorExecuteInput;
@@ -269,6 +271,26 @@ export class RoomActor {
   getSnapshot(): ArenaRoomAuthorityState | null {
     if (this.phase === 'fenced') return fail('ROOM_ACTOR_FENCED');
     return this.state === null ? null : cloneState(this.state);
+  }
+
+  getStoryCursor(scope: {
+    readonly roomEpoch: string;
+    readonly generationId: string;
+    readonly attempt: number;
+  }): RoomActorStoryCursor | null {
+    if (this.phase === 'fenced') return fail('ROOM_ACTOR_FENCED');
+    const active = this.state?.snapshot.activeGeneration;
+    const cursor = this.storySequenceCursor;
+    if (
+      !active
+      || !cursor
+      || this.state?.snapshot.roomEpoch !== scope.roomEpoch
+      || active.generationId !== scope.generationId
+      || active.attempt !== scope.attempt
+      || cursor.roomEpoch !== scope.roomEpoch
+      || cursor.generationId !== scope.generationId
+    ) return null;
+    return Object.freeze({ nextChunkSeq: cursor.nextChunkSeq });
   }
 
   get isIdle(): boolean {

@@ -6,6 +6,7 @@ import {
 } from '#/arena-room/room-actor-registry';
 import { createArenaRoomMembershipService } from '#/arena-room/room-membership-service';
 import {
+  ARENA_ROOM_INTERNAL_GUIDANCE,
   ArenaRoomGenerationError,
   createArenaRoomGenerationService,
 } from '#/arena-room/room-generation-service';
@@ -18,6 +19,8 @@ import type {
 import {
   checkpointPredecessorOf,
   consumeArenaRoomCheckpointCommit,
+  issueArenaRoomGenerationPublisherAuthority,
+  issueArenaRoomTrustedTime,
   type ArenaRoomAuthorityState,
 } from '@mahoshojo/multiplayer-core';
 
@@ -159,7 +162,6 @@ const startRequest = (config = sharedConfig()) => ({
   generationRequestId: 'request-1234',
   sharedConfig: config,
   generation: {
-    internalGuidance: '生成一场多人战斗',
     customProvider: { apiKey: 'provider-secret-canary' },
   },
 });
@@ -192,7 +194,7 @@ describe('Arena Room generation coordinator', () => {
       roomId: 'room-1',
       generationRequestId: 'request-1234',
       payload: request.generation,
-      internalGuidance: request.generation.internalGuidance,
+      internalGuidance: ARENA_ROOM_INTERNAL_GUIDANCE,
       pvpContext: { matchId: 'generation-1', roundId: 'attempt-1' },
       multiplayerSnapshot: {
         configRevision: 1,
@@ -282,6 +284,87 @@ describe('Arena Room generation coordinator', () => {
     expect(notFoundPort.startFromHostRequest).toHaveBeenCalledTimes(1);
   });
 
+  it('历史 not-found 只允许 exact semantic payload；terminal ledger 永不再次 POST', async () => {
+    const harness = await createHarness();
+    const request = startRequest();
+    await harness.service.start({
+      roomId: 'room-1',
+      accountUserId: 101,
+      request,
+      sourceRequest: sourceRequest(),
+    });
+    harness.finishPublisher();
+    await Promise.resolve();
+
+    const historicalPort = {
+      ...harness.generation,
+      startFromHostRequest: vi.fn(async () => ({
+        kind: 'subscribed' as const,
+        subscription: subscription(),
+      })),
+      readOwnedProjection: vi.fn(async () => ({ kind: 'not-found' as const })),
+    };
+    const restarted = createArenaRoomGenerationService({
+      memberships: harness.memberships,
+      references: harness.references,
+      generation: historicalPort,
+      createPublisher: harness.createPublisher,
+      now: () => '2026-08-28T00:02:00.000Z',
+    });
+    await expect(restarted.start({
+      roomId: 'room-1',
+      accountUserId: 101,
+      request: {
+        ...request,
+        generation: { ...request.generation, mode: 'scenario' },
+      },
+      sourceRequest: sourceRequest(),
+    })).rejects.toMatchObject({ code: 'ROOM_GENERATION_CONFLICT' });
+    expect(historicalPort.startFromHostRequest).not.toHaveBeenCalled();
+
+    const membership = await harness.memberships.resolveActiveByAccount({
+      roomId: 'room-1',
+      accountUserId: 101,
+    });
+    const authority = issueArenaRoomGenerationPublisherAuthority({
+      roomId: 'room-1',
+      roomEpoch: 'epoch-1',
+      generationRequestId: 'request-1234',
+      generationId: 'generation-1',
+      attempt: 1,
+      expiresAt: '2026-08-29T00:00:00.000Z',
+    });
+    for (const command of [
+      { state: 'running' as const, timestamp: '2026-08-28T00:03:00.000Z' },
+      {
+        state: 'completed' as const,
+        generationRecordId: 'generation-1',
+        timestamp: '2026-08-28T00:04:00.000Z',
+      },
+    ]) {
+      const result = await membership.actor.execute({
+        authority,
+        command: {
+          type: 'mirror-generation',
+          expectedRoomEpoch: 'epoch-1',
+          generationRequestId: 'request-1234',
+          generationId: 'generation-1',
+          attempt: 1,
+          ...command,
+        },
+        trustedTime: issueArenaRoomTrustedTime({ now: command.timestamp }),
+      });
+      expect(result.ok).toBe(true);
+    }
+    await expect(restarted.start({
+      roomId: 'room-1',
+      accountUserId: 101,
+      request,
+      sourceRequest: sourceRequest(),
+    })).rejects.toMatchObject({ code: 'ROOM_GENERATION_CONFLICT' });
+    expect(historicalPort.startFromHostRequest).not.toHaveBeenCalled();
+  });
+
   it('definitive preflight rejection 终结 Room attempt；5xx unknown 保留 starting 等待对账', async () => {
     const rejected = await createHarness();
     vi.mocked(rejected.generation.startFromHostRequest).mockResolvedValueOnce({
@@ -312,6 +395,20 @@ describe('Arena Room generation coordinator', () => {
     })).rejects.toMatchObject({ code: 'ROOM_OPERATION_UNKNOWN' });
     expect(unknown.store.state?.snapshot.activeGeneration?.state).toBe('starting');
     expect(unknown.publisher.attach).not.toHaveBeenCalled();
+
+    const conflict = await createHarness();
+    vi.mocked(conflict.generation.startFromHostRequest).mockResolvedValueOnce({
+      kind: 'rejected',
+      status: 409,
+      code: 'GENERATION_REQUEST_CONFLICT',
+    });
+    await expect(conflict.service.start({
+      roomId: 'room-1',
+      accountUserId: 101,
+      request: startRequest(),
+      sourceRequest: sourceRequest(),
+    })).rejects.toMatchObject({ code: 'ROOM_GENERATION_CONFLICT' });
+    expect(conflict.store.state?.snapshot.activeGeneration?.state).toBe('starting');
   });
 
   it('active member 只能读取 current generation；running projection 先 reconcile Room 再只读 resume attach', async () => {
@@ -420,5 +517,92 @@ describe('Arena Room generation coordinator', () => {
       generation: { state: 'completed' },
     });
     expect(harness.generation.resumeOwnedSubscription).not.toHaveBeenCalled();
+  });
+
+  it('Room terminal 先可见时重读 owned projection，不生成 mirror/status 不一致的 503', async () => {
+    const harness = await createHarness();
+    await harness.service.start({
+      roomId: 'room-1',
+      accountUserId: 101,
+      request: startRequest(),
+      sourceRequest: sourceRequest(),
+    });
+    harness.finishPublisher();
+    await Promise.resolve();
+    const membership = await harness.memberships.resolveActiveByAccount({
+      roomId: 'room-1',
+      accountUserId: 101,
+    });
+    const authority = issueArenaRoomGenerationPublisherAuthority({
+      roomId: 'room-1',
+      roomEpoch: 'epoch-1',
+      generationRequestId: 'request-1234',
+      generationId: 'generation-1',
+      attempt: 1,
+      expiresAt: '2026-08-29T00:00:00.000Z',
+    });
+    for (const command of [
+      { state: 'running' as const, timestamp: '2026-08-28T00:03:00.000Z' },
+      {
+        state: 'completed' as const,
+        generationRecordId: 'generation-1',
+        timestamp: '2026-08-28T00:04:00.000Z',
+      },
+    ]) {
+      await membership.actor.execute({
+        authority,
+        command: {
+          type: 'mirror-generation',
+          expectedRoomEpoch: 'epoch-1',
+          generationRequestId: 'request-1234',
+          generationId: 'generation-1',
+          attempt: 1,
+          ...command,
+        },
+        trustedTime: issueArenaRoomTrustedTime({ now: command.timestamp }),
+      });
+    }
+    const runningProjection = {
+      generationId: 'generation-1',
+      generationRequestId: 'request-1234',
+      status: 'running' as const,
+      markdown: '# 完整但 marker 尚不可见',
+      resumeCursor: '4-0',
+      updatedAt: '2026-08-28T00:04:00.000Z',
+      finalAuthoritative: false,
+      resultAvailable: false,
+      generationRecordId: null,
+      errorCode: null,
+    };
+    vi.mocked(harness.generation.readOwnedProjection)
+      .mockResolvedValueOnce({ kind: 'found', projection: runningProjection })
+      .mockResolvedValueOnce({
+        kind: 'found',
+        projection: {
+          ...runningProjection,
+          status: 'completed',
+          finalAuthoritative: true,
+          resultAvailable: true,
+          generationRecordId: 'generation-1',
+        },
+      });
+    const restarted = createArenaRoomGenerationService({
+      memberships: harness.memberships,
+      references: harness.references,
+      generation: harness.generation,
+      createPublisher: harness.createPublisher,
+      now: () => '2026-08-28T00:05:00.000Z',
+    });
+
+    await expect(restarted.read({
+      roomId: 'room-1',
+      generationId: 'generation-1',
+      accountUserId: 101,
+    })).resolves.toMatchObject({
+      status: 'completed',
+      generation: { state: 'completed' },
+      finalAuthoritative: true,
+    });
+    expect(harness.generation.readOwnedProjection).toHaveBeenCalledTimes(2);
   });
 });

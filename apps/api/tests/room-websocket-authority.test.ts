@@ -184,6 +184,7 @@ describe('Arena Room ticket -> membership -> presence WSS authority', () => {
         generationId: 'generation-1',
         attempt: 1,
         snapshotDigest,
+        generationPayloadDigest: `sha256:${'d'.repeat(64)}`,
         expiresAt,
       }),
       command: {
@@ -193,6 +194,7 @@ describe('Arena Room ticket -> membership -> presence WSS authority', () => {
         generationRequestId: 'request-1',
         generationId: 'generation-1',
         attempt: 1,
+        generationPayloadDigest: `sha256:${'d'.repeat(64)}`,
         timestamp: '2026-08-28T00:01:00.000Z',
       },
       trustedTime: issueArenaRoomTrustedTime({ now: '2026-08-28T00:01:00.000Z' }),

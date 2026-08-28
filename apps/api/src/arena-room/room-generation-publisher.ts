@@ -26,7 +26,7 @@ export type RoomGenerationPublisher = Readonly<{
 }>;
 
 export type RoomGenerationPublisherOptions = Readonly<{
-  actor: Pick<RoomActor, 'execute' | 'getSnapshot' | 'publishStory'>;
+  actor: Pick<RoomActor, 'execute' | 'getSnapshot' | 'getStoryCursor' | 'publishStory'>;
   authority: unknown;
   now?: () => number;
   initial?: RoomGenerationPublisherProgress;
@@ -54,8 +54,13 @@ export const createRoomGenerationPublisher = (
   ) {
     throw new TypeError('RoomGenerationPublisher initial progress is invalid');
   }
+  const actorCursor = options.actor.getStoryCursor({
+    roomEpoch: scope.roomEpoch,
+    generationId: scope.generationId,
+    attempt: scope.attempt,
+  });
   let markdown = initial.markdown;
-  let nextChunkSeq = initial.nextChunkSeq;
+  let nextChunkSeq = actorCursor?.nextChunkSeq ?? initial.nextChunkSeq;
   let attached = false;
 
   const timestamp = (): string => {
@@ -172,6 +177,7 @@ export const createRoomGenerationPublisher = (
           return terminalFailure ?? { kind: 'failed', errorCode: 'generation-failed' };
         }
       } finally {
+        await reader.cancel('room-generation-publisher-stopped').catch(() => undefined);
         reader.releaseLock();
       }
     } finally {

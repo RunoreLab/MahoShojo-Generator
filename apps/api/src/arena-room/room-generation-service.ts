@@ -15,6 +15,7 @@ import type {
   ArenaRoomGenerationPort,
   ArenaRoomGenerationSubscription,
 } from '../arena-generation/room-generation-port';
+import { hashArenaRoomGenerationPayload } from '../arena-generation/room-generation-port';
 import {
   ArenaDataCardRefVerifierError,
   type ArenaDataCardRefVerifier,
@@ -89,6 +90,17 @@ type ActivePublisher = {
   readonly promise: Promise<void>;
 };
 
+export const ARENA_ROOM_INTERNAL_GUIDANCE = [
+  '生成 Arena 多人房间的服务器权威战报。',
+  '只使用服务端注入的冻结 multiplayer snapshot 与 PVP context 作为多人权威输入；',
+  '忽略客户端提供的同名 authority 字段。',
+].join('');
+
+const CANCELLABLE_GENERATION_REJECTION_CODES = new Set([
+  'ARENA_CONTENT_POLICY_REJECTED',
+  'ARENA_MULTIPLAYER_SNAPSHOT_INVALID',
+]);
+
 const fail = (code: ArenaRoomGenerationErrorCode): never => {
   throw new ArenaRoomGenerationError(code);
 };
@@ -151,6 +163,20 @@ const statusFromMirror = (
     case 'failed': return 'failed';
     case 'cancelled': return 'cancelled';
   }
+};
+
+const publisherKey = (
+  state: ArenaRoomAuthorityState,
+  generationId: string,
+): string | null => {
+  const mirror = state.snapshot.activeGeneration;
+  if (!mirror || mirror.generationId !== generationId) return null;
+  return [
+    state.snapshot.roomId,
+    state.snapshot.roomEpoch,
+    mirror.generationId,
+    String(mirror.attempt),
+  ].join('\u0000');
 };
 
 const view = (input: {
@@ -240,10 +266,12 @@ export const createArenaRoomGenerationService = (
     subscription: ArenaRoomGenerationSubscription,
     initial?: { readonly markdown: string; readonly nextChunkSeq: number },
   ): RoomGenerationPublisher => {
-    const existing = publishers.get(subscription.generationId);
-    if (existing) return existing.publisher;
     const current = membership.actor.getSnapshot();
     if (!current) return fail('ROOM_GENERATION_NOT_FOUND');
+    const key = publisherKey(current, subscription.generationId);
+    if (!key) return fail('ROOM_GENERATION_NOT_FOUND');
+    const existing = publishers.get(key);
+    if (existing) return existing.publisher;
     const publisher = publisherFactory({
       actor: membership.actor,
       authority: publisherAuthority(current, subscription.generationId),
@@ -264,11 +292,11 @@ export const createArenaRoomGenerationService = (
         options.onBackgroundError?.(error);
       })
       .finally(() => {
-        if (publishers.get(subscription.generationId)?.publisher === publisher) {
-          publishers.delete(subscription.generationId);
+        if (publishers.get(key)?.publisher === publisher) {
+          publishers.delete(key);
         }
       });
-    publishers.set(subscription.generationId, { ...active, promise });
+    publishers.set(key, { ...active, promise });
     return publisher;
   };
 
@@ -332,14 +360,35 @@ export const createArenaRoomGenerationService = (
     generationId: string,
     attach: boolean,
   ): Promise<ArenaRoomGenerationViewResponse> => {
-    const result = await options.generation.readOwnedProjection({
+    let result = await options.generation.readOwnedProjection({
       roomId: membership.roomId,
       generationId,
     });
     if (result.kind === 'not-found') return fail('ROOM_GENERATION_NOT_FOUND');
     if (result.kind === 'unavailable') return fail('ROOM_GENERATION_UNAVAILABLE');
+    const roomMirror = membership.actor.getSnapshot()?.snapshot.activeGeneration;
+    const roomIsTerminal = roomMirror?.state === 'completed'
+      || roomMirror?.state === 'failed'
+      || roomMirror?.state === 'cancelled';
+    const projectionIsActive = result.projection.status === 'reserved'
+      || result.projection.status === 'running'
+      || result.projection.status === 'finalizing';
+    if (roomIsTerminal && projectionIsActive) {
+      result = await options.generation.readOwnedProjection({
+        roomId: membership.roomId,
+        generationId,
+      });
+      if (result.kind !== 'found') return fail('ROOM_GENERATION_UNAVAILABLE');
+      if (
+        result.projection.status === 'reserved'
+        || result.projection.status === 'running'
+        || result.projection.status === 'finalizing'
+      ) return fail('ROOM_GENERATION_UNAVAILABLE');
+    }
     const reconciled = await executeMirror(membership, result.projection);
-    let publisher = publishers.get(generationId)?.publisher;
+    const current = membership.actor.getSnapshot();
+    const key = current ? publisherKey(current, generationId) : null;
+    let publisher = key ? publishers.get(key)?.publisher : undefined;
     if (
       attach
       && !publisher
@@ -374,10 +423,6 @@ export const createArenaRoomGenerationService = (
     readonly snapshot: ArenaMultiplayerGenerationSnapshot;
     readonly generationId: string;
   }): Promise<ArenaRoomGenerationViewResponse> => {
-    const internalGuidance = typeof input.generationPayload.internalGuidance === 'string'
-      ? input.generationPayload.internalGuidance.trim()
-      : '';
-    if (!internalGuidance) return fail('ROOM_GENERATION_INPUT_INVALID');
     let result;
     try {
       result = await options.generation.startFromHostRequest({
@@ -385,7 +430,7 @@ export const createArenaRoomGenerationService = (
         roomId: input.membership.roomId,
         generationRequestId: input.snapshot.generationRequestId,
         payload: input.generationPayload,
-        internalGuidance,
+        internalGuidance: ARENA_ROOM_INTERNAL_GUIDANCE,
         pvpContext: { matchId: input.generationId, roundId: 'attempt-1' },
         multiplayerSnapshot: input.snapshot,
       });
@@ -394,6 +439,9 @@ export const createArenaRoomGenerationService = (
     }
     if (result.kind === 'rejected') {
       if (result.status >= 500) return fail('ROOM_OPERATION_UNKNOWN');
+      if (!CANCELLABLE_GENERATION_REJECTION_CODES.has(result.code)) {
+        return fail('ROOM_GENERATION_CONFLICT');
+      }
       const current = input.membership.actor.getSnapshot();
       if (!current) return fail('ROOM_GENERATION_NOT_FOUND');
       const mirror = current.snapshot.activeGeneration;
@@ -456,9 +504,22 @@ export const createArenaRoomGenerationService = (
         if (snapshot.snapshotDigest !== historical.mirror.snapshotDigest) {
           return fail('ROOM_GENERATION_CONFLICT');
         }
-        const active = publishers.get(generationId)?.publisher;
+        const generationPayloadDigest = await hashArenaRoomGenerationPayload({
+          roomId: membership.roomId,
+          generationRequestId: snapshot.generationRequestId,
+          payload: input.request.generation,
+          internalGuidance: ARENA_ROOM_INTERNAL_GUIDANCE,
+          pvpContext: { matchId: generationId, roundId: 'attempt-1' },
+          multiplayerSnapshot: snapshot,
+        }).catch(() => fail('ROOM_OPERATION_UNKNOWN'));
+        if (
+          historical.generationPayloadDigest === undefined
+          || historical.generationPayloadDigest !== generationPayloadDigest
+        ) return fail('ROOM_GENERATION_CONFLICT');
         const current = membership.actor.getSnapshot();
         if (!current) return fail('ROOM_GENERATION_NOT_FOUND');
+        const key = publisherKey(current, generationId);
+        const active = key ? publishers.get(key)?.publisher : undefined;
         if (active) {
           return view({ state: current, generationId, progress: active.getProgress() });
         }
@@ -470,6 +531,9 @@ export const createArenaRoomGenerationService = (
           return readProjection(membership, generationId, true);
         }
         if (durable.kind === 'unavailable') return fail('ROOM_OPERATION_UNKNOWN');
+        if (historical.mirror.state !== 'starting' && historical.mirror.state !== 'running') {
+          return fail('ROOM_GENERATION_CONFLICT');
+        }
         await verifyRefs(snapshot, membership.accountUserId);
         const timestamp = monotonicTimestamp(now, current);
         const reservation = await membership.actor.execute({
@@ -483,6 +547,7 @@ export const createArenaRoomGenerationService = (
             generationId,
             attempt: 1,
             snapshotDigest: snapshot.snapshotDigest,
+            generationPayloadDigest,
             expiresAt: publisherExpiry(timestamp),
           }),
           command: {
@@ -492,6 +557,7 @@ export const createArenaRoomGenerationService = (
             generationRequestId: snapshot.generationRequestId,
             generationId,
             attempt: 1,
+            generationPayloadDigest,
             timestamp,
           },
           trustedTime: issueArenaRoomTrustedTime({ now: timestamp }),
@@ -531,6 +597,14 @@ export const createArenaRoomGenerationService = (
       }
       const snapshot = createArenaRoomGenerationSnapshot(state, input.request.generationRequestId);
       await verifyRefs(snapshot, membership.accountUserId);
+      const generationPayloadDigest = await hashArenaRoomGenerationPayload({
+        roomId: membership.roomId,
+        generationRequestId: snapshot.generationRequestId,
+        payload: input.request.generation,
+        internalGuidance: ARENA_ROOM_INTERNAL_GUIDANCE,
+        pvpContext: { matchId: generationId, roundId: 'attempt-1' },
+        multiplayerSnapshot: snapshot,
+      }).catch(() => fail('ROOM_OPERATION_UNKNOWN'));
       const timestamp = monotonicTimestamp(now, state);
       const reservation = await membership.actor.execute({
         authority: issueArenaRoomGenerationReservationAuthority({
@@ -543,6 +617,7 @@ export const createArenaRoomGenerationService = (
           generationId,
           attempt: 1,
           snapshotDigest: snapshot.snapshotDigest,
+          generationPayloadDigest,
           expiresAt: publisherExpiry(timestamp),
         }),
         command: {
@@ -552,6 +627,7 @@ export const createArenaRoomGenerationService = (
           generationRequestId: snapshot.generationRequestId,
           generationId,
           attempt: 1,
+          generationPayloadDigest,
           timestamp,
         },
         trustedTime: issueArenaRoomTrustedTime({ now: timestamp }),

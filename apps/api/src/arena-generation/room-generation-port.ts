@@ -12,6 +12,8 @@ import type {
 import {
   ARENA_INTERNAL_GUIDANCE_SIGNATURE_HEADER,
   ARENA_PVP_GENERATION_SIGNATURE_HEADER,
+  hashArenaGenerationPayload,
+  redactArenaGenerationSemanticPayload,
 } from '@mahoshojo/hosted-runtime/arena-generation';
 
 type TerminalGenerationStatus = Extract<
@@ -75,6 +77,11 @@ export type ArenaRoomGenerationStartInput = Readonly<{
   multiplayerSnapshot: ArenaMultiplayerGenerationSnapshot;
 }>;
 
+export type ArenaRoomGenerationSemanticPayloadInput = Omit<
+  ArenaRoomGenerationStartInput,
+  'request'
+>;
+
 export type ArenaRoomGenerationOwnedInput = Readonly<{
   roomId: string;
   generationId: string;
@@ -114,6 +121,32 @@ type ArenaRoomGenerationPortDependencies = Readonly<{
 }>;
 
 const actorKeyForRoom = (roomId: string): string => `pvp-room:${roomId}`;
+
+export const buildArenaRoomGenerationPayload = (
+  input: ArenaRoomGenerationSemanticPayloadInput,
+): Readonly<Record<string, unknown>> => {
+  const callerPayload = { ...input.payload };
+  delete callerPayload.generationRequestId;
+  return Object.freeze({
+    ...callerPayload,
+    internalGuidance: input.internalGuidance.trim(),
+    pvpContext: Object.freeze({
+      roomId: input.roomId,
+      matchId: input.pvpContext.matchId,
+      roundId: input.pvpContext.roundId,
+    }),
+    multiplayerGenerationSnapshot: input.multiplayerSnapshot,
+  });
+};
+
+export const hashArenaRoomGenerationPayload = async (
+  input: ArenaRoomGenerationSemanticPayloadInput,
+): Promise<string> => {
+  const semanticPayload = redactArenaGenerationSemanticPayload({
+    ...buildArenaRoomGenerationPayload(input),
+  });
+  return `sha256:${await hashArenaGenerationPayload(semanticPayload)}`;
+};
 
 const recordOf = (value: unknown): Record<string, unknown> | null => (
   value && typeof value === 'object' && !Array.isArray(value)
@@ -288,18 +321,13 @@ export const createArenaRoomGenerationPort = (
       };
     }
     const internalGuidance = input.internalGuidance.trim();
-    const pvpContext = Object.freeze({
+    const payload = buildArenaRoomGenerationPayload({
       roomId: input.roomId,
-      matchId: input.pvpContext.matchId,
-      roundId: input.pvpContext.roundId,
-    });
-    const callerPayload = { ...input.payload };
-    delete callerPayload.generationRequestId;
-    const payload = Object.freeze({
-      ...callerPayload,
+      generationRequestId: input.generationRequestId,
+      payload: input.payload,
       internalGuidance,
-      pvpContext,
-      multiplayerGenerationSnapshot: parsedSnapshot.data,
+      pvpContext: input.pvpContext,
+      multiplayerSnapshot: parsedSnapshot.data,
     });
     const [pvpSignature, guidanceSignature] = await Promise.all([
       dependencies.pvpAuthority.sign({

@@ -745,7 +745,7 @@ describe('Arena Room browser controller', () => {
     });
   });
 
-  it('只有 host 显式 start，完整 payload 不进入 controller state，unknown 后锁定重复 POST', async () => {
+  it('只有 host 显式 start；unknown 不自动 POST，显式 retry 复用内存中的同一完整请求', async () => {
     const host = createHarness();
     await host.controller.create({
       displayName: '房主',
@@ -790,13 +790,23 @@ describe('Arena Room browser controller', () => {
       payload: { ...snapshot, controlSeq: 1 },
     }));
     await unknown.controller.startGeneration(generationStartRequest);
-    unknown.controller.reconnect();
 
     expect(unknown.client.startGeneration).toHaveBeenCalledOnce();
     expect(unknown.controller.getSnapshot().generation).toMatchObject({
       phase: 'unknown',
       pendingRequestId: 'request-12345678',
       startResultUnknown: true,
+    });
+    vi.mocked(unknown.client.startGeneration).mockResolvedValueOnce(generationView);
+    await unknown.controller.retryGenerationStart();
+    expect(unknown.client.startGeneration).toHaveBeenCalledTimes(2);
+    expect(unknown.client.startGeneration).toHaveBeenLastCalledWith(
+      'room-1',
+      generationStartRequest,
+    );
+    expect(unknown.controller.getSnapshot().generation).toMatchObject({
+      phase: 'running',
+      startResultUnknown: false,
     });
 
     const member = createHarness();
@@ -823,6 +833,7 @@ describe('Arena Room browser controller', () => {
     });
     await member.controller.join('room-1', '成员');
     await member.controller.startGeneration(generationStartRequest);
+    await member.controller.retryGenerationStart();
     expect(member.client.startGeneration).not.toHaveBeenCalled();
   });
 

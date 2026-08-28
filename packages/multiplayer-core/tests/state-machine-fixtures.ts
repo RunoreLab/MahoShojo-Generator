@@ -31,11 +31,20 @@ export const snapshotDigest = (request = 'request-1') => {
   return `sha256:${digit.repeat(64)}`;
 };
 
+export const generationPayloadDigest = (request = 'request-1') => {
+  const digit = [...`${request}:payload`]
+    .reduce((sum, value) => sum + value.codePointAt(0)!, 0)
+    .toString(16)
+    .at(-1)!;
+  return `sha256:${digit.repeat(64)}`;
+};
+
 export const generationReservationAuthority = (
   request = 'request-1',
   generation = 'generation-1',
   configRevision = 0,
   attempt = 1,
+  payloadDigest = generationPayloadDigest(),
 ) => issueArenaRoomGenerationReservationAuthority({
   actorUserId: 'host-1',
   accountUserId: 101,
@@ -46,6 +55,7 @@ export const generationReservationAuthority = (
   generationId: generation,
   attempt,
   snapshotDigest: snapshotDigest(request),
+  generationPayloadDigest: payloadDigest,
   expiresAt: '2026-08-27T16:30:00.000Z',
 });
 

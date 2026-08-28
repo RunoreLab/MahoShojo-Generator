@@ -26,6 +26,7 @@ import {
   joinMemberCommand,
   memberAuthority,
   proposal,
+  generationPayloadDigest,
   snapshotDigest,
   transitionArenaRoomAt,
 } from './state-machine-fixtures';
@@ -58,6 +59,7 @@ const reserveCommand = (
   generationRequestId: request,
   generationId: generation,
   attempt: 1,
+  generationPayloadDigest: generationPayloadDigest(),
   timestamp,
 });
 
@@ -128,6 +130,7 @@ describe('GMR-01 independent review regressions', () => {
       generationId: 'generation-1',
       attempt: 1,
       snapshotDigest: snapshotDigest(),
+      generationPayloadDigest: generationPayloadDigest(),
       expiresAt: '2026-08-27T16:30:00.000Z',
     });
     expect(failure(transitionArenaRoomAt(state, command, mismatchedReservationCapability)))
@@ -143,6 +146,7 @@ describe('GMR-01 independent review regressions', () => {
       generationId: 'generation-1',
       attempt: 1,
       snapshotDigest: snapshotDigest(),
+      generationPayloadDigest: generationPayloadDigest(),
       expiresAt: '2026-08-27T16:03:59.999Z',
     });
     const stateBeforeTrustedTimeFailures = structuredClone(state);
@@ -277,16 +281,16 @@ describe('GMR-01 independent review regressions', () => {
       generationRecordId: 'record-2',
     }, '2026-08-27T16:08:00.000Z', '2026-08-27T16:09:00.000Z');
 
-    expect(success(transitionArenaRoomAt(
+    expect(failure(transitionArenaRoomAt(
       secondDone,
       reserveCommand('request-1', 'generation-1', '2026-08-27T16:10:00.000Z'),
       generationReservationAuthority(),
-    )).kind).toBe('idempotent');
+    ))).toMatchObject({ code: 'conflict', reason: 'generation-terminal-conflict' });
     expect(failure(transitionArenaRoomAt(secondDone, {
       ...reserveCommand('request-1', 'generation-1', '2026-08-27T16:10:00.000Z'),
       generationId: 'generation-3',
     }, generationReservationAuthority('request-1', 'generation-3'))))
-      .toMatchObject({ code: 'conflict', reason: 'generation-request-conflict' });
+      .toMatchObject({ code: 'conflict', reason: 'generation-terminal-conflict' });
     expect(failure(transitionArenaRoomAt(
       secondDone,
       reserveCommand('request-3', 'generation-1', '2026-08-27T16:10:00.000Z'),

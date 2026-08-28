@@ -4,6 +4,7 @@ import type { ArenaRoomSharedConfig } from '@mahoshojo/contracts/arena-room';
 
 import {
   dispatchArenaRoomGenerationStart,
+  dispatchArenaRoomGenerationRetry,
   resolveArenaRoomGenerationAction,
 } from '@/components/arena/multiplayer/generation-bridge';
 import type {
@@ -106,7 +107,8 @@ describe('Arena multiplayer generation bridge', () => {
     expect(resolveArenaRoomGenerationAction(stateFor('host', 'unknown'))).toMatchObject({
       inRoom: true,
       canStart: false,
-      reason: 'unknown',
+      canRetry: true,
+      reason: 'recovery',
     });
   });
 
@@ -143,6 +145,42 @@ describe('Arena multiplayer generation bridge', () => {
     });
     expect(JSON.stringify(state)).toBe(before);
     expect(JSON.stringify(state)).not.toContain('secret-must-stay-transient');
+  });
+
+  it('starting/unavailable 只开放显式 retry，不把它误当成新 start', async () => {
+    const base = stateFor('host', 'unavailable');
+    const mirror = {
+      generationRequestId: 'request-stable-1',
+      generationId: 'generation-1',
+      attempt: 1,
+      state: 'starting' as const,
+      configRevision: 4,
+      snapshotDigest: `sha256:${'a'.repeat(64)}`,
+      collaborativeInfluence: false,
+      participantUserIds: [101],
+      startedAt: '2026-08-28T00:00:00.000Z',
+    };
+    const state: ArenaRoomControllerState = {
+      ...base,
+      session: {
+        ...base.session!,
+        snapshot: { ...base.session!.snapshot, activeGeneration: mirror },
+      },
+      generation: { ...base.generation, mirror },
+    };
+    expect(resolveArenaRoomGenerationAction(state)).toMatchObject({
+      canStart: false,
+      canRetry: true,
+      reason: 'recovery',
+    });
+    const retryGenerationStart = vi.fn(async () => {});
+    const controller = {
+      getSnapshot: () => state,
+      retryGenerationStart,
+    } as unknown as ArenaRoomController;
+    await expect(dispatchArenaRoomGenerationRetry({ controller, state }))
+      .resolves.toBe('submitted');
+    expect(retryGenerationStart).toHaveBeenCalledOnce();
   });
 
   it('构造共享配置期间 epoch/revision 改变时拒绝提交旧请求', async () => {

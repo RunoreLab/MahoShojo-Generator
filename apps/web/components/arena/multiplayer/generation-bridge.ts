@@ -8,27 +8,54 @@ import type {
 export type ArenaRoomGenerationAction = {
   readonly inRoom: boolean;
   readonly canStart: boolean;
-  readonly reason: 'active' | 'connection' | 'member' | 'unknown' | null;
+  readonly canRetry: boolean;
+  readonly reason: 'active' | 'connection' | 'member' | 'recovery' | 'unknown' | null;
 };
 
 export const resolveArenaRoomGenerationAction = (
   state: ArenaRoomControllerState,
 ): ArenaRoomGenerationAction => {
   const session = state.session;
-  if (!session) return { inRoom: false, canStart: true, reason: null };
+  if (!session) return { inRoom: false, canStart: true, canRetry: false, reason: null };
   if (session.self.role !== 'host') {
-    return { inRoom: true, canStart: false, reason: 'member' };
-  }
-  if (state.generation.startResultUnknown || state.generation.phase === 'unknown') {
-    return { inRoom: true, canStart: false, reason: 'unknown' };
-  }
-  if (['starting', 'running', 'resyncing'].includes(state.generation.phase)) {
-    return { inRoom: true, canStart: false, reason: 'active' };
+    return { inRoom: true, canStart: false, canRetry: false, reason: 'member' };
   }
   if (state.phase !== 'connected') {
-    return { inRoom: true, canStart: false, reason: 'connection' };
+    return { inRoom: true, canStart: false, canRetry: false, reason: 'connection' };
   }
-  return { inRoom: true, canStart: true, reason: null };
+  const retryableUnknown = state.generation.startResultUnknown
+    && state.generation.phase === 'unknown'
+    && state.generation.pendingRequestId !== null;
+  const retryableNotFound = state.generation.phase === 'unavailable'
+    && state.generation.mirror?.state === 'starting';
+  if (retryableUnknown || retryableNotFound) {
+    return { inRoom: true, canStart: false, canRetry: true, reason: 'recovery' };
+  }
+  if (state.generation.startResultUnknown || state.generation.phase === 'unknown') {
+    return { inRoom: true, canStart: false, canRetry: false, reason: 'unknown' };
+  }
+  if (['starting', 'running', 'resyncing'].includes(state.generation.phase)) {
+    return { inRoom: true, canStart: false, canRetry: false, reason: 'active' };
+  }
+  return { inRoom: true, canStart: true, canRetry: false, reason: null };
+};
+
+export const dispatchArenaRoomGenerationRetry = async (options: {
+  readonly controller: ArenaRoomController;
+  readonly state: ArenaRoomControllerState;
+}): Promise<'blocked' | 'stale' | 'submitted'> => {
+  const captured = options.state.session;
+  if (!captured || !resolveArenaRoomGenerationAction(options.state).canRetry) return 'blocked';
+  const current = options.controller.getSnapshot();
+  if (
+    !current.session
+    || current.session.roomId !== captured.roomId
+    || current.session.roomEpoch !== captured.roomEpoch
+    || current.session.self.userId !== captured.self.userId
+    || !resolveArenaRoomGenerationAction(current).canRetry
+  ) return 'stale';
+  await options.controller.retryGenerationStart();
+  return 'submitted';
 };
 
 type DispatchArenaRoomGenerationStartOptions = {

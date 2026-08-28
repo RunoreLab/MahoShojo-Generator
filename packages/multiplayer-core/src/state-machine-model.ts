@@ -63,6 +63,12 @@ export type ArenaRoomMemberAuthorityRecord = z.infer<typeof ArenaRoomMemberAutho
 
 export const ArenaRoomGenerationRecordSchema = z.object({
   mirror: GenerationMirrorSchema,
+  /**
+   * Safe digest of the server-normalized generation semantic payload. Optional
+   * only so checkpoints created before GMR-09 remediation remain readable;
+   * such legacy records are never eligible for a historical provider retry.
+   */
+  generationPayloadDigest: CanonicalSnapshotDigestSchema.optional(),
   generationRecordId: OpaqueKeySchema.optional(),
   errorCode: ArenaErrorCodeSchema.optional(),
 }).strict().superRefine((record, context) => {
@@ -219,6 +225,7 @@ export const ArenaRoomGenerationReservationScopeSchema = z.object({
   generationId: OpaqueKeySchema,
   attempt: z.number().int().min(1),
   snapshotDigest: CanonicalSnapshotDigestSchema,
+  generationPayloadDigest: CanonicalSnapshotDigestSchema,
   expiresAt: IsoTimestampSchema,
 }).strict();
 
@@ -528,6 +535,7 @@ export const ReserveArenaRoomGenerationCommandSchema = z.object({
   generationRequestId: OpaqueKeySchema,
   generationId: OpaqueKeySchema,
   attempt: z.number().int().min(1),
+  generationPayloadDigest: CanonicalSnapshotDigestSchema,
 }).strict();
 
 export const MirrorArenaRoomGenerationCommandSchema = z.object({
