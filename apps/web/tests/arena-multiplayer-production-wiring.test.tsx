@@ -5,6 +5,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ArenaMultiplayerPanel } from '@/components/arena/multiplayer/ArenaMultiplayerPanel';
+import { useBattleStore } from '@/components/arena/stores/useBattleStore';
 import { authStorage } from '@/lib/auth';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -92,6 +93,10 @@ class WiringSocket {
     this.onopen?.();
   }
 
+  message(data: unknown): void {
+    this.onmessage?.({ data });
+  }
+
   closed(code: number, reason: string): void {
     this.onclose?.({ code, reason });
   }
@@ -129,6 +134,16 @@ const enterJoinCode = async (): Promise<void> => {
   await act(async () => {
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
       ?.call(input, 'room-1');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+};
+
+const setTextArea = async (id: string, value: string): Promise<void> => {
+  const input = container.querySelector<HTMLTextAreaElement>(`#${id}`);
+  if (!input) throw new Error(`textarea not found: ${id}`);
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set
+      ?.call(input, value);
     input.dispatchEvent(new Event('input', { bubbles: true }));
   });
 };
@@ -270,5 +285,273 @@ describe('Arena multiplayer production client/hook wiring', () => {
     expect(container.textContent).toContain('原房间无法恢复');
     await act(async () => button('返回房间大厅').click());
     expect(container.textContent).toContain('创建多人房间');
+  });
+
+  it('member 通过 production panel/client/WSS 提交并撤回，HTTP ack 不越权修改 snapshot', async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const memberSession = sessionFor('member');
+    const battleBefore = useBattleStore.getState();
+    const fetcher = vi.fn<typeof fetch>(async (input, init) => {
+      const url = String(input);
+      calls.push({ url, init });
+      if (url.endsWith('/join')) return Response.json(memberSession);
+      if (url.endsWith('/ticket')) {
+        return Response.json({
+          protocolVersion: 1,
+          ticket: `ticket-${calls.length}`,
+          expiresInSeconds: 45,
+          websocket: {
+            path: '/api/arena/rooms/v1/ws',
+            protocol: 'mahoshojo.arena-room.v1',
+          },
+        });
+      }
+      if (url.endsWith('/proposals')) {
+        const intent = JSON.parse(String(init?.body)) as { proposalId: string };
+        return Response.json({
+          protocolVersion: 1,
+          roomId: 'room-1',
+          roomEpoch: 'epoch-1',
+          controlSeq: 1,
+          revision: 0,
+          proposalId: intent.proposalId,
+          status: 'submitted',
+          result: 'applied',
+        });
+      }
+      if (url.endsWith('/withdraw')) {
+        const proposalId = decodeURIComponent(url.split('/proposals/')[1]!.split('/')[0]!);
+        return Response.json({
+          protocolVersion: 1,
+          roomId: 'room-1',
+          roomEpoch: 'epoch-1',
+          controlSeq: 2,
+          revision: 0,
+          proposalId,
+          status: 'withdrawn',
+          result: 'applied',
+        });
+      }
+      throw new Error(`unexpected Room request: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetcher);
+    await act(async () => root.render(<ArenaMultiplayerPanel {...props} />));
+    await enterJoinCode();
+    await act(async () => button('加入房间').click());
+    await flush();
+    await act(async () => WiringSocket.instances[0]!.open());
+
+    await act(async () => button('同步当前房间配置').click());
+    await setTextArea('arena-proposal-user-guidance', 'production 成员建议');
+    await act(async () => button('预览 typed diff').click());
+    await act(async () => button('提交 Proposal').click());
+    await flush();
+
+    const submitCall = calls.find((call) => new URL(call.url).pathname.endsWith('/proposals'));
+    if (!submitCall) throw new Error('submit call missing');
+    const intent = JSON.parse(String(submitCall.init?.body)) as {
+      proposalId: string;
+      expectedRoomEpoch: string;
+      baseRevision: number;
+      changes: unknown[];
+    };
+    expect(intent).toMatchObject({
+      expectedRoomEpoch: 'epoch-1',
+      baseRevision: 0,
+      changes: [{
+        type: 'setUserGuidance',
+        value: 'production 成员建议',
+        expectedBase: { kind: 'value', value: '' },
+      }],
+    });
+    expect(JSON.stringify(intent)).not.toMatch(/providerApiKey|userProviderConfig|credential/u);
+    expect(container.textContent).not.toContain('我的待处理 Proposal');
+    expect(useBattleStore.getState()).toBe(battleBefore);
+
+    const proposal = {
+      proposalVersion: 1,
+      proposalId: intent.proposalId,
+      roomId: 'room-1',
+      authorUserId: 'user-member',
+      baseRevision: 0,
+      status: 'submitted',
+      changes: intent.changes,
+      createdAt: '2026-08-28T00:01:00.000Z',
+    };
+    await act(async () => WiringSocket.instances[0]!.message(JSON.stringify({
+      protocolVersion: 1,
+      roomId: 'room-1',
+      roomEpoch: 'epoch-1',
+      controlSeq: 1,
+      timestamp: '2026-08-28T00:01:00.000Z',
+      type: 'proposal.submitted',
+      payload: { proposal },
+    })));
+    expect(container.textContent).toContain('我的待处理 Proposal');
+
+    await act(async () => button('撤回 Proposal').click());
+    await flush();
+    const withdrawCall = calls.find((call) => new URL(call.url).pathname.endsWith('/withdraw'));
+    expect(JSON.parse(String(withdrawCall?.init?.body))).toEqual({
+      expectedRoomEpoch: 'epoch-1',
+    });
+    expect(container.textContent).toContain('我的待处理 Proposal');
+
+    await act(async () => WiringSocket.instances[0]!.message(JSON.stringify({
+      protocolVersion: 1,
+      roomId: 'room-1',
+      roomEpoch: 'epoch-1',
+      controlSeq: 2,
+      timestamp: '2026-08-28T00:02:00.000Z',
+      type: 'proposal.resolved',
+      payload: { proposalId: intent.proposalId, status: 'withdrawn' },
+    })));
+    expect(container.textContent).not.toContain(intent.proposalId);
+  });
+
+  it('host production Proposal 审阅携带 epoch/revision/selection fence，并等待 WSS resolve', async () => {
+    const proposal = {
+      proposalVersion: 1,
+      proposalId: 'proposal-host-review',
+      roomId: 'room-1',
+      authorUserId: 'user-member',
+      baseRevision: 0,
+      status: 'submitted',
+      changes: [{
+        changeId: 'guidance-1',
+        type: 'setUserGuidance',
+        value: '成员建议',
+        expectedBase: { kind: 'value', value: '' },
+      }],
+      createdAt: '2026-08-28T00:01:00.000Z',
+    };
+    const hostSession = sessionFor('host');
+    hostSession.snapshot.members.push({
+      userId: 'user-member',
+      role: 'member',
+      displayName: '成员',
+      membershipState: 'active',
+    });
+    hostSession.snapshot.proposals.push(proposal);
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const fetcher = vi.fn<typeof fetch>(async (input, init) => {
+      const url = String(input);
+      calls.push({ url, init });
+      if (url.endsWith('/join')) return Response.json(hostSession);
+      if (url.endsWith('/ticket')) return Response.json({
+        protocolVersion: 1,
+        ticket: 'ticket-host',
+        expiresInSeconds: 45,
+        websocket: {
+          path: '/api/arena/rooms/v1/ws',
+          protocol: 'mahoshojo.arena-room.v1',
+        },
+      });
+      if (url.endsWith('/resolve')) return Response.json({
+        protocolVersion: 1,
+        roomId: 'room-1',
+        roomEpoch: 'epoch-1',
+        controlSeq: 2,
+        revision: 1,
+        proposalId: proposal.proposalId,
+        status: 'accepted',
+        result: 'applied',
+      });
+      throw new Error(`unexpected Room request: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetcher);
+    await act(async () => root.render(<ArenaMultiplayerPanel {...props} />));
+    await enterJoinCode();
+    await act(async () => button('加入房间').click());
+    await flush();
+    await act(async () => WiringSocket.instances[0]!.open());
+
+    await act(async () => button('接受所选').click());
+    await flush();
+    const resolveCall = calls.find((call) => new URL(call.url).pathname.endsWith('/resolve'));
+    expect(JSON.parse(String(resolveCall?.init?.body))).toEqual({
+      expectedRoomEpoch: 'epoch-1',
+      expectedRevision: 0,
+      resolution: 'accept-selected',
+      selectedChangeIds: ['guidance-1'],
+    });
+    expect(container.textContent).toContain(proposal.proposalId);
+
+    await act(async () => WiringSocket.instances[0]!.message(JSON.stringify({
+      protocolVersion: 1,
+      roomId: 'room-1',
+      roomEpoch: 'epoch-1',
+      controlSeq: 1,
+      timestamp: '2026-08-28T00:02:00.000Z',
+      type: 'room.config.updated',
+      payload: { revision: 1, sharedConfig: { ...sharedConfig, userGuidance: '成员建议' } },
+    })));
+    await act(async () => WiringSocket.instances[0]!.message(JSON.stringify({
+      protocolVersion: 1,
+      roomId: 'room-1',
+      roomEpoch: 'epoch-1',
+      controlSeq: 2,
+      timestamp: '2026-08-28T00:02:00.000Z',
+      type: 'proposal.resolved',
+      payload: { proposalId: proposal.proposalId, status: 'accepted' },
+    })));
+    expect(container.textContent).not.toContain(proposal.proposalId);
+  });
+
+  it('malformed Proposal 2xx 只发一次并冻结，projected session snapshot 对账后才解锁', async () => {
+    const memberSession = sessionFor('member');
+    let proposalCalls = 0;
+    let ticketIndex = 0;
+    const fetcher = vi.fn<typeof fetch>(async (input) => {
+      const url = String(input);
+      if (url.endsWith('/join')) return Response.json(memberSession);
+      if (url.endsWith('/ticket')) {
+        ticketIndex += 1;
+        return Response.json({
+          protocolVersion: 1,
+          ticket: `ticket-${ticketIndex}`,
+          expiresInSeconds: 45,
+          websocket: {
+            path: '/api/arena/rooms/v1/ws',
+            protocol: 'mahoshojo.arena-room.v1',
+          },
+        });
+      }
+      if (url.endsWith('/proposals')) {
+        proposalCalls += 1;
+        return Response.json({ ok: true, malformed: true });
+      }
+      if (url.endsWith('/session')) {
+        return Response.json({
+          ...memberSession,
+          snapshot: { ...memberSession.snapshot, controlSeq: 1, proposals: [] },
+        });
+      }
+      throw new Error(`unexpected Room request: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetcher);
+    await act(async () => root.render(<ArenaMultiplayerPanel {...props} />));
+    await enterJoinCode();
+    await act(async () => button('加入房间').click());
+    await flush();
+    await act(async () => WiringSocket.instances[0]!.open());
+    await act(async () => button('同步当前房间配置').click());
+    await setTextArea('arena-proposal-user-guidance', 'unknown 对账建议');
+    await act(async () => button('预览 typed diff').click());
+    await act(async () => button('提交 Proposal').click());
+    await flush();
+
+    expect(proposalCalls).toBe(1);
+    expect(container.textContent).toContain('上次 Proposal 请求结果未知');
+    await act(async () => button('提交 Proposal').click());
+    await flush();
+    expect(proposalCalls).toBe(1);
+
+    await act(async () => button('重新连接并对账').click());
+    await flush();
+    expect(fetcher.mock.calls.some(([input]) => String(input).endsWith('/session'))).toBe(true);
+    expect(ticketIndex).toBe(2);
+    expect(WiringSocket.instances).toHaveLength(2);
+    expect(container.textContent).not.toContain('上次 Proposal 请求结果未知');
   });
 });

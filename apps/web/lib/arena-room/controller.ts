@@ -445,6 +445,43 @@ export const createArenaRoomController = (
     await connectSession(session, false, generation);
   };
 
+  const reconcileUnknownProposal = async (
+    current: ArenaRoomSessionResponse,
+    generation: number,
+  ): Promise<void> => {
+    clearReconnectTimer();
+    detachSocket(true);
+    publish({
+      phase: 'reconnecting',
+      notice: '正在获取房间权威快照并对账…',
+      error: null,
+    });
+    try {
+      const authoritative = await options.client.getSession(current.roomId);
+      if (
+        disposed
+        || generation !== operationGeneration
+        || authoritative.roomId !== current.roomId
+      ) return;
+      controlCursor = {
+        roomEpoch: authoritative.roomEpoch,
+        controlSeq: authoritative.snapshot.controlSeq,
+      };
+      reconnectAttempts = 0;
+      publish({
+        session: authoritative,
+        proposalOperation: null,
+        proposalResultUnknown: false,
+        notice: '已取得房间权威快照，正在重新连接…',
+        error: null,
+      });
+      await connectSession(authoritative, true, generation);
+    } catch {
+      if (disposed || generation !== operationGeneration) return;
+      scheduleReconnect(true);
+    }
+  };
+
   const failOperation = (
     error: unknown,
     generation: number,
@@ -694,7 +731,13 @@ export const createArenaRoomController = (
     reconnect() {
       if (!state.session || disposed || !access.enabled || !access.authenticated) return;
       operationGeneration += 1;
+      proposalMutationGeneration += 1;
+      proposalMutationPending = false;
       reconnectAttempts = 0;
+      if (state.proposalResultUnknown) {
+        void reconcileUnknownProposal(state.session, operationGeneration);
+        return;
+      }
       scheduleReconnect(false);
     },
 

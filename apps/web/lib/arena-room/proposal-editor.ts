@@ -1,4 +1,5 @@
 import {
+  ArenaProposalIdSchema,
   OpaqueKeySchema,
   RoomRevisionSchema,
   type ArenaProposalChange,
@@ -279,7 +280,7 @@ export const buildArenaProposalSubmitIntent = (
     );
   }
 
-  const parsedProposalId = OpaqueKeySchema.safeParse(proposalId);
+  const parsedProposalId = ArenaProposalIdSchema.safeParse(proposalId);
   if (!parsedProposalId.success || parsedProposalId.data !== proposalId) {
     throw new ArenaProposalEditorError('invalid-proposal-id', 'proposalId must be a non-empty opaque key');
   }

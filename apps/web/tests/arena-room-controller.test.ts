@@ -391,11 +391,10 @@ describe('Arena Room browser controller', () => {
       },
     };
     vi.mocked(client.join).mockResolvedValueOnce(memberSession);
-    vi.mocked(client.submitProposal).mockRejectedValueOnce(new ArenaRoomClientError(
-      'ROOM_RESULT_UNKNOWN',
-      503,
-      '请求可能已提交，请先确认房间状态，不要重复提交',
-    ));
+    let rejectMutation!: (error: unknown) => void;
+    vi.mocked(client.submitProposal).mockImplementationOnce(() => new Promise((_, reject) => {
+      rejectMutation = reject;
+    }));
     await controller.join('room-1', '成员');
     sockets[0]!.open();
     const intent = {
@@ -409,7 +408,32 @@ describe('Arena Room browser controller', () => {
         expectedBase: { kind: 'value' as const, value: '' },
       }],
     };
-    await controller.submitProposal(intent);
+    const mutation = controller.submitProposal(intent);
+    const proposal = {
+      proposalVersion: 1 as const,
+      proposalId: intent.proposalId,
+      roomId: 'room-1',
+      authorUserId: 'user-member',
+      baseRevision: 0,
+      status: 'submitted' as const,
+      changes: intent.changes,
+      createdAt: '2026-08-28T00:01:00.000Z',
+    };
+    sockets[0]!.message(JSON.stringify({
+      protocolVersion: 1,
+      roomId: 'room-1',
+      roomEpoch: 'epoch-1',
+      controlSeq: 1,
+      timestamp: '2026-08-28T00:01:00.000Z',
+      type: 'proposal.submitted',
+      payload: { proposal },
+    }));
+    rejectMutation(new ArenaRoomClientError(
+      'ROOM_RESULT_UNKNOWN',
+      503,
+      '请求可能已提交，请先确认房间状态，不要重复提交',
+    ));
+    await mutation;
     await controller.submitProposal(intent);
 
     expect(client.submitProposal).toHaveBeenCalledOnce();
@@ -420,6 +444,22 @@ describe('Arena Room browser controller', () => {
       notice: '请求可能已提交，请先确认房间状态，不要重复提交',
     });
     expect(sockets[0]!.close).not.toHaveBeenCalled();
+
+    vi.mocked(client.getSession).mockResolvedValueOnce({
+      ...memberSession,
+      snapshot: {
+        ...memberSession.snapshot,
+        controlSeq: 1,
+        proposals: [proposal],
+      },
+    });
+    controller.reconnect();
+    await vi.waitFor(() => expect(client.getSession).toHaveBeenCalledWith('room-1'));
+    await vi.waitFor(() => expect(controller.getSnapshot()).toMatchObject({
+      proposalResultUnknown: false,
+      session: { snapshot: { controlSeq: 1, proposals: [{ proposalId: 'proposal-stable' }] } },
+    }));
+    expect(client.issueTicket).toHaveBeenCalledTimes(2);
   });
 
   it('忽略重复 control event，跳号时请求 reconnect/resync', async () => {

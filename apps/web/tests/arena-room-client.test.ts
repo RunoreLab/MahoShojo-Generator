@@ -241,4 +241,39 @@ describe('Arena Room browser client', () => {
       .rejects.toMatchObject({ code: 'ROOM_RESULT_UNKNOWN' });
     expect(fetcher).toHaveBeenCalledTimes(3);
   });
+
+  it('Proposal network/5xx/malformed success 均不重放并统一进入 unknown', async () => {
+    const intent = {
+      proposalId: 'proposal-unknown-matrix',
+      expectedRoomEpoch: 'epoch-1',
+      baseRevision: 0,
+      changes: [{
+        changeId: 'guidance-1',
+        type: 'setUserGuidance' as const,
+        value: '成员建议',
+        expectedBase: { kind: 'value' as const, value: '' },
+      }],
+    };
+    const outcomes: Array<() => Promise<Response>> = [
+      async () => { throw new TypeError('connection reset after write'); },
+      async () => Response.json({
+        code: 'ROOM_UNAVAILABLE',
+        error: '房间运行时暂不可用',
+      }, { status: 503 }),
+      async () => Response.json({ ok: true, malformed: true }),
+    ];
+
+    for (const outcome of outcomes) {
+      const fetcher = vi.fn<typeof fetch>(outcome);
+      const client = createArenaRoomClient({
+        origin: 'http://127.0.0.1:8787',
+        fetch: fetcher,
+        getAuthHeader: async () => 'Bearer verified-key',
+      });
+      await expect(client.submitProposal('room-1', intent)).rejects.toMatchObject({
+        code: 'ROOM_RESULT_UNKNOWN',
+      });
+      expect(fetcher).toHaveBeenCalledOnce();
+    }
+  });
 });
