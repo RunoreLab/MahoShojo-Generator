@@ -14,6 +14,20 @@ const readyState: ArenaRoomControllerState = {
   unknownOperation: null,
   proposalOperation: null,
   proposalResultUnknown: false,
+  generation: {
+    mirror: null,
+    phase: 'idle',
+    status: null,
+    authoritativeMarkdown: '',
+    markdown: '',
+    storyCursor: null,
+    gap: null,
+    finalAuthoritative: false,
+    generationRecordId: null,
+    errorCode: null,
+    pendingRequestId: null,
+    startResultUnknown: false,
+  },
 };
 
 const session = {
@@ -137,6 +151,40 @@ describe('Arena multiplayer panel accessibility/permissions', () => {
     });
     expect(memberHtml).toContain('离开房间');
     expect(memberHtml).not.toContain('关闭房间');
+  });
+
+  it('显示多人生成预览，并明确区分权威终态与结果未知', () => {
+    const completed = render({
+      ...readyState,
+      phase: 'connected',
+      session,
+      generation: {
+        ...readyState.generation,
+        phase: 'completed',
+        status: 'completed',
+        markdown: '# 最终战报',
+        authoritativeMarkdown: '# 最终战报',
+        finalAuthoritative: true,
+        generationRecordId: 'record-1',
+      },
+    });
+    expect(completed).toContain('房间战报');
+    expect(completed).toContain('权威终态');
+    expect(completed).toContain('# 最终战报');
+
+    const unknown = render({
+      ...readyState,
+      phase: 'connected',
+      session,
+      generation: {
+        ...readyState.generation,
+        phase: 'unknown',
+        pendingRequestId: 'request-unknown-1',
+        startResultUnknown: true,
+      },
+    });
+    expect(unknown).toContain('启动结果尚未确认');
+    expect(unknown).toContain('不要重复提交');
   });
 
   it('重连/降级/replacement 文案明确，不声称透明 failover', () => {

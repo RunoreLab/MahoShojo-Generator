@@ -8,7 +8,7 @@ import type { ArenaRoomControllerState } from '@/lib/arena-room/controller';
 import { buildArenaRoomSharedConfigFromBattleState } from '@/lib/arena-room/shared-config';
 import { useBattleStore } from '@/components/arena/stores/useBattleStore';
 import { ArenaProposalPanel } from './ArenaProposalPanel';
-import { useArenaRoom } from './useArenaRoom';
+import { useArenaRoom, useArenaRoomContext } from './useArenaRoom';
 
 export type ArenaMultiplayerPanelProps = {
   readonly enabled: boolean;
@@ -48,6 +48,73 @@ const StatusNotice = ({ state }: { readonly state: ArenaRoomControllerState }) =
     {state.notice ?? (state.phase === 'connected' ? '房间已连接' : '')}
   </div>
 );
+
+const ArenaRoomGenerationReport = ({ state }: {
+  readonly state: ArenaRoomControllerState;
+}) => {
+  const generation = state.generation;
+  if (generation.phase === 'idle' && !generation.markdown) return null;
+
+  const statusLabel = generation.finalAuthoritative
+    ? '权威终态'
+    : generation.phase === 'completed'
+      ? '正在核对权威终态'
+      : generation.phase === 'unknown'
+        ? '启动结果尚未确认'
+        : generation.phase === 'resyncing'
+          ? '正在恢复缺口'
+          : generation.phase === 'running' || generation.phase === 'starting'
+            ? '服务器实时预览'
+            : generation.phase === 'failed'
+              ? '生成失败'
+              : generation.phase === 'cancelled'
+                ? '生成已取消'
+                : '暂不可用';
+
+  return (
+    <section
+      aria-labelledby="arena-room-generation-heading"
+      className="rounded-xl border border-fuchsia-200 bg-white/80 p-4 dark:border-fuchsia-900 dark:bg-gray-900/70"
+      data-arena-room-generation-report="v1"
+    >
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h3 id="arena-room-generation-heading" className="text-sm font-semibold text-gray-950 dark:text-gray-100">
+          房间战报
+        </h3>
+        <span className="rounded-full border border-fuchsia-300 px-2 py-0.5 text-xs font-medium text-fuchsia-900 dark:border-fuchsia-700 dark:text-fuchsia-100">
+          {statusLabel}
+        </span>
+      </div>
+      {generation.phase === 'unknown' ? (
+        <p role="status" className="mt-3 text-sm text-amber-800 dark:text-amber-200">
+          启动结果尚未确认；客户端会读取服务器状态，不要重复提交生成请求。
+        </p>
+      ) : null}
+      {generation.gap ? (
+        <p role="status" className="mt-3 text-sm text-amber-800 dark:text-amber-200">
+          检测到战报分片缺口，正在从服务器恢复权威基线。
+        </p>
+      ) : null}
+      {generation.errorCode ? (
+        <p role="alert" className="mt-3 text-sm text-red-700 dark:text-red-300">
+          错误代码：{generation.errorCode}
+        </p>
+      ) : null}
+      {generation.markdown ? (
+        <div className="mt-3 whitespace-pre-wrap break-words text-sm leading-7 text-gray-900 dark:text-gray-100">
+          {generation.markdown}
+        </div>
+      ) : generation.phase !== 'unknown' ? (
+        <p className="mt-3 text-sm text-gray-600 dark:text-gray-400">等待服务器发布战报内容…</p>
+      ) : null}
+      {generation.finalAuthoritative && generation.generationRecordId ? (
+        <p className="mt-3 text-xs text-gray-500 dark:text-gray-400">
+          最终内容已从生成记录恢复并核验。
+        </p>
+      ) : null}
+    </section>
+  );
+};
 
 export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps) {
   const { state } = props;
@@ -126,6 +193,8 @@ export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps)
           </div>
 
           {props.proposalContent}
+
+          <ArenaRoomGenerationReport state={state} />
 
           <div className="flex flex-wrap gap-2">
             {state.phase === 'degraded' || state.phase === 'reconnecting' ? (
@@ -270,6 +339,25 @@ export function ArenaMultiplayerPanel(props: ArenaMultiplayerPanelProps) {
     authenticated: props.isAuthenticated && !props.authLoading,
     origin: props.origin,
   });
+  return (
+    <ArenaMultiplayerPanelRuntime
+      {...props}
+      controller={controller}
+      state={state}
+    />
+  );
+}
+
+type ArenaMultiplayerPanelRuntimeProps = ArenaMultiplayerPanelProps & {
+  readonly controller: ReturnType<typeof useArenaRoom>['controller'];
+  readonly state: ReturnType<typeof useArenaRoom>['state'];
+};
+
+function ArenaMultiplayerPanelRuntime({
+  controller,
+  state,
+  ...props
+}: ArenaMultiplayerPanelRuntimeProps) {
   const [roomTitle, setRoomTitle] = useState(() => `${props.displayName || '玩家'} 的房间`);
   const [visibility, setVisibility] = useState<RoomDirectoryVisibility>('public');
   const [joinCode, setJoinCode] = useState('');
@@ -331,6 +419,19 @@ export function ArenaMultiplayerPanel(props: ArenaMultiplayerPanelProps) {
         setInputError(null);
         controller.reset();
       }}
+    />
+  );
+}
+
+/** Production page adapter: consumes the page-scoped controller shared with BattleActions. */
+export function ArenaMultiplayerContextPanel(props: ArenaMultiplayerPanelProps) {
+  const runtime = useArenaRoomContext();
+  if (!runtime) return null;
+  return (
+    <ArenaMultiplayerPanelRuntime
+      {...props}
+      controller={runtime.controller}
+      state={runtime.state}
     />
   );
 }

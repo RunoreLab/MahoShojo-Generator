@@ -48,6 +48,12 @@ import {
   openArenaGenerationStream,
   type ArenaGenerationConnectionState,
 } from '@/lib/arena/resumable-generation-client';
+import { buildArenaRoomSharedConfigFromBattleState } from '@/lib/arena-room/shared-config';
+import {
+  dispatchArenaRoomGenerationStart,
+  resolveArenaRoomGenerationAction,
+} from '../multiplayer/generation-bridge';
+import { useArenaRoomContext } from '../multiplayer/useArenaRoom';
 
 const sanitizeTextByShieldWords = (text: string): string => applyShieldWords(text).filteredText;
 
@@ -454,6 +460,7 @@ export const useBattleEngine = () => {
   const streamSoftTimeoutWarning = useBattleSelector((state) => state.streamSoftTimeoutWarning);
   const isRedoingUpdates = useBattleSelector((state) => state.isRedoingUpdates);
   const { handleResolveRandomPlaceholders } = useBattleActions();
+  const arenaRoomRuntime = useArenaRoomContext();
 
   const providerCooldownConfig = resolveArenaProviderCooldownConfig(userProviderConfig);
   const { currentMode: providerCooldownMode } = providerCooldownConfig;
@@ -491,6 +498,20 @@ export const useBattleEngine = () => {
   const handleGenerate = useCallback(async () => {
     let lastArenaConnectionState: ArenaGenerationConnectionState | null = null;
     let recoveryNoticeActive = false;
+    const roomAction = arenaRoomRuntime
+      ? resolveArenaRoomGenerationAction(arenaRoomRuntime.state)
+      : { inRoom: false, canStart: true, reason: null } as const;
+    if (roomAction.inRoom && !roomAction.canStart) {
+      const message = roomAction.reason === 'member'
+        ? '⚠️ 多人房间仅房主可以启动生成，请等待房主操作。'
+        : roomAction.reason === 'unknown'
+          ? '⚠️ 上一次多人生成启动结果尚未确认，请等待服务器状态恢复，不要重复提交。'
+          : roomAction.reason === 'connection'
+            ? '⚠️ 房间连接尚未恢复，暂不能启动多人生成。'
+            : '⚠️ 当前房间已有生成任务，请等待其结束。';
+      setError(message);
+      return;
+    }
     if (isCooldown) {
       setError(`冷却中，请等待 ${remainingTime} 秒后再生成。`);
       return;
@@ -662,6 +683,27 @@ export const useBattleEngine = () => {
       const customProviderPayload = buildCustomProviderRequestPayload(userProviderConfig);
       if (customProviderPayload) {
         requestBody.customProvider = customProviderPayload;
+      }
+
+      if (roomAction.inRoom && arenaRoomRuntime) {
+        const sharedConfig = await buildArenaRoomSharedConfigFromBattleState(
+          useBattleStore.getState(),
+        );
+        const outcome = await dispatchArenaRoomGenerationStart({
+          controller: arenaRoomRuntime.controller,
+          state: arenaRoomRuntime.state,
+          sharedConfig,
+          generationRequestId,
+          generation: requestBody,
+        });
+        if (outcome !== 'submitted') {
+          throw new Error(
+            outcome === 'stale'
+              ? '房间 epoch 或配置 revision 已变化，请确认最新房间状态后再试。'
+              : '当前房间状态不允许启动生成。',
+          );
+        }
+        return;
       }
 
       const authHeader = await authStorage.getAuthHeader();
@@ -1685,21 +1727,22 @@ export const useBattleEngine = () => {
     setIsGenerating,
     setIsStreaming,
     setStreamingMarkdown,
-	    setStreamReporterInfo,
-	    setStreamUserGuidance,
-	    setStreamCharacterGuidances,
-	    setStreamAiUsage,
-	    setStreamAiModel,
-	    setStreamNarrativeHistoryReadCount,
-      setStreamReasoning,
-      setStreamUpdateMetaDebug,
-      setStreamSoftTimeoutWarning,
-      setLatestAiImpacts,
-      setLastGenerationId,
-		    setCombatants,
-		    handleResolveRandomPlaceholders,
-	    redirectToArrested,
-	    startCooldown,
+    setStreamReporterInfo,
+    setStreamUserGuidance,
+    setStreamCharacterGuidances,
+    setStreamAiUsage,
+    setStreamAiModel,
+    setStreamNarrativeHistoryReadCount,
+    setStreamReasoning,
+    setStreamUpdateMetaDebug,
+    setStreamSoftTimeoutWarning,
+    setLatestAiImpacts,
+    setLastGenerationId,
+    setCombatants,
+    handleResolveRandomPlaceholders,
+    arenaRoomRuntime,
+    redirectToArrested,
+    startCooldown,
     updateFromMarkdown,
   ]);
 

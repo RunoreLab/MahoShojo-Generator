@@ -44,10 +44,11 @@ import { ArenaRankingModal } from './components/ArenaRankingModal';
 import { ArenaCommunitySection } from './shared/ArenaCommunitySection';
 import { ArenaPageLinks } from './shared/ArenaPageLinks';
 import { ArenaRankingLinks } from './shared/ArenaRankingLinks';
+import { ArenaRoomProvider } from './multiplayer/useArenaRoom';
 
 const ArenaMultiplayerPanel = dynamic(
   () => import('./multiplayer/ArenaMultiplayerPanel').then((module) => (
-    module.ArenaMultiplayerPanel
+    module.ArenaMultiplayerContextPanel
   )),
   { ssr: false },
 );
@@ -169,7 +170,7 @@ export function ArenaPage({ multiplayer }: ArenaPageProps = {}) {
     };
   }, [savedImageUrl]);
 
-  return (
+  const page = (
     <>
       <div className="magic-background-white">
         <div className="arena-page-shell mx-auto w-full max-w-[1380px] px-4 pb-8 pt-6 sm:px-6 lg:px-8">
@@ -498,6 +499,17 @@ export function ArenaPage({ multiplayer }: ArenaPageProps = {}) {
 
       <ArenaRankingModal isOpen={showRankingModal} onClose={() => setShowRankingModal(false)} />
     </>
+  );
+
+  if (!multiplayer?.enabled) return page;
+  return (
+    <ArenaRoomProvider
+      enabled
+      authenticated={isAuthenticated && !authLoading}
+      origin={multiplayer.origin}
+    >
+      {page}
+    </ArenaRoomProvider>
   );
 }
 

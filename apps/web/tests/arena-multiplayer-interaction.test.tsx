@@ -61,6 +61,20 @@ const readyState: ArenaRoomControllerState = {
   unknownOperation: null,
   proposalOperation: null,
   proposalResultUnknown: false,
+  generation: {
+    mirror: null,
+    phase: 'idle',
+    status: null,
+    authoritativeMarkdown: '',
+    markdown: '',
+    storyCursor: null,
+    gap: null,
+    finalAuthoritative: false,
+    generationRecordId: null,
+    errorCode: null,
+    pendingRequestId: null,
+    startResultUnknown: false,
+  },
 };
 
 const sharedConfig: ArenaRoomSharedConfig = {

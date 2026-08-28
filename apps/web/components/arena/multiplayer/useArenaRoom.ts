@@ -1,10 +1,14 @@
 'use client';
 
 import {
+  createContext,
+  createElement,
+  useContext,
   useEffect,
   useMemo,
   useRef,
   useSyncExternalStore,
+  type ReactNode,
 } from 'react';
 
 import { createArenaRoomClient } from '@/lib/arena-room/client';
@@ -69,3 +73,19 @@ export const useArenaRoom = (options: UseArenaRoomOptions) => {
 
   return { controller, state };
 };
+
+export type ArenaRoomRuntime = ReturnType<typeof useArenaRoom>;
+
+const ArenaRoomContext = createContext<ArenaRoomRuntime | null>(null);
+
+export const ArenaRoomProvider = ({
+  children,
+  ...options
+}: UseArenaRoomOptions & { readonly children: ReactNode }) => {
+  const runtime = useArenaRoom(options);
+  return createElement(ArenaRoomContext.Provider, { value: runtime }, children);
+};
+
+export const useArenaRoomContext = (): ArenaRoomRuntime | null => (
+  useContext(ArenaRoomContext)
+);
