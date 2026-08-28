@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto';
 
 import {
+  RoomDirectoryTitleSchema,
+  RoomDirectoryVisibilitySchema,
   RoomEventSchema,
   type ControlRoomEvent,
   type RoomControlCursor,
@@ -21,6 +23,7 @@ import {
 } from '@mahoshojo/multiplayer-core';
 
 import type { RedisRoomStore } from './redis-room-store';
+import type { RoomDirectoryRecord } from './d1-room-directory-store';
 
 const DEFAULT_MAX_QUEUED_COMMANDS = 64;
 const DEFAULT_MAX_SUBSCRIBERS_PER_ROOM = 128;
@@ -37,6 +40,7 @@ export type RoomActorCheckpointStore = Pick<RedisRoomStore, 'load' | 'refresh' |
 export type RoomActorErrorCode =
   | 'ROOM_ACTOR_CHECKPOINT_CONFLICT'
   | 'ROOM_ACTOR_CREATE_IDENTITY_CONFLICT'
+  | 'ROOM_ACTOR_CREATE_DIRECTORY_INVALID'
   | 'ROOM_ACTOR_CREATE_REQUIRES_SERVER_IDENTITY'
   | 'ROOM_ACTOR_DEADLINE_CLOSE_INVALID'
   | 'ROOM_ACTOR_EPOCH_INVALID'
@@ -95,6 +99,29 @@ const reportCommittedClosed = (
     if (completion !== undefined) void Promise.resolve(completion).catch(report);
   } catch (error) {
     report(error);
+  }
+};
+
+const reportCommittedRecovered = async (
+  input: { readonly previousRoomEpoch: string; readonly state: ArenaRoomAuthorityState },
+  onCommittedRecovered: ((input: {
+    readonly previousRoomEpoch: string;
+    readonly state: ArenaRoomAuthorityState;
+  }) => void | Promise<void>) | undefined,
+  onBackgroundError: (error: unknown) => void,
+): Promise<void> => {
+  if (onCommittedRecovered === undefined) return;
+  try {
+    await onCommittedRecovered({
+      previousRoomEpoch: input.previousRoomEpoch,
+      state: cloneState(input.state),
+    });
+  } catch (error) {
+    try {
+      onBackgroundError(error);
+    } catch {
+      // Projection diagnostics cannot alter an acknowledged recovery checkpoint.
+    }
   }
 };
 
@@ -734,6 +761,11 @@ export type RoomActorRegistryOptions = {
   readonly onSubscriberError?: (error: unknown) => void;
   readonly onBackgroundError?: (error: unknown) => void;
   readonly onCommittedClosed?: (state: ArenaRoomAuthorityState) => void | Promise<void>;
+  readonly onCommittedRecovered?: (input: {
+    readonly previousRoomEpoch: string;
+    readonly state: ArenaRoomAuthorityState;
+  }) => void | Promise<void>;
+  readonly prepareCreatedOpen?: (record: RoomDirectoryRecord) => Promise<void>;
 };
 
 export type RoomActorRegistryExecuteInput = RoomActorExecuteInput & {
@@ -746,6 +778,10 @@ export type RoomActorRegistryCreateInput = {
   readonly host: Pick<ArenaRoomCreateCommand['host'], 'displayName' | 'userId'>;
   readonly sharedConfig: ArenaRoomCreateCommand['sharedConfig'];
   readonly authority: unknown;
+  readonly directory?: {
+    readonly title: string;
+    readonly visibility: 'public' | 'unlisted';
+  };
 };
 
 export type RoomActorRegistryCreateResult = {
@@ -881,6 +917,28 @@ export class RoomActorRegistry {
       || this.fencedRoomIds.has(identity.roomId)
     ) return fail('ROOM_ACTOR_CREATE_IDENTITY_CONFLICT');
     this.requireCapacity();
+    if (input.directory !== undefined) {
+      const title = RoomDirectoryTitleSchema.safeParse(input.directory.title);
+      const visibility = RoomDirectoryVisibilitySchema.safeParse(input.directory.visibility);
+      const authority = parseArenaRoomAuthorityContext(input.authority);
+      if (
+        !title.success
+        || !visibility.success
+        || authority?.kind !== 'authenticated-user'
+        || authority.actorUserId !== input.host.userId
+        || this.options.prepareCreatedOpen === undefined
+      ) return fail('ROOM_ACTOR_CREATE_DIRECTORY_INVALID');
+      await this.options.prepareCreatedOpen({
+        roomId: identity.roomId,
+        roomEpoch: identity.roomEpoch,
+        hostUserId: authority.accountUserId,
+        title: title.data,
+        visibility: visibility.data,
+        status: 'open',
+        createdAt: command.data.timestamp,
+        lastActivityAt: command.data.timestamp,
+      });
+    }
     const actor = this.createActor(identity.roomId, null);
     this.actors.set(identity.roomId, actor);
     const result = await actor.execute({
@@ -1104,6 +1162,11 @@ export class RoomActorRegistry {
       return fail('ROOM_ACTOR_RECOVERY_CONFLICT');
     }
     this.requireAccepting();
+    await reportCommittedRecovered(
+      { previousRoomEpoch, state: transition.nextState },
+      this.options.onCommittedRecovered,
+      this.options.onBackgroundError ?? (() => undefined),
+    );
     const actor = this.createActor(roomId, transition.nextState, transition.events);
     this.actors.set(roomId, actor);
     return actor;

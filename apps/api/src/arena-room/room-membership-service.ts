@@ -189,6 +189,14 @@ export const createArenaRoomMembershipService = (
         },
         host: { userId, displayName: displayName.data },
         sharedConfig: sharedConfig.data,
+        ...(directoryTitle?.success && directoryVisibility?.success
+          ? {
+              directory: {
+                title: directoryTitle.data,
+                visibility: directoryVisibility.data,
+              },
+            }
+          : {}),
       });
       if (!result.result.ok) return fail('ROOM_MEMBERSHIP_TRANSITION_DENIED');
       const member = result.result.nextState.snapshot.members.find((entry) => entry.userId === userId);

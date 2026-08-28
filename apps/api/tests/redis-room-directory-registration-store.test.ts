@@ -66,12 +66,14 @@ describe('Redis Room directory registration store', () => {
 
   it('sorted registration queue listing 有界并严格解析，touch 只移动 exact epoch', async () => {
     const raw = JSON.stringify(registration);
-    const { client, evalCommand } = createClient([raw], 'touched', ['not-json']);
+    const { client, evalCommand } = createClient(raw, [raw], 'touched', ['not-json']);
     const store = createRedisRoomDirectoryRegistrationStore({ getClient: () => client });
 
+    await expect(store.get('room-1')).resolves.toEqual(registration);
+    expect(evalCommand.mock.calls[0]?.[0]).toContain('ROOM_DIRECTORY_REGISTRATION_GET_V1');
     await expect(store.list({ limit: 25 })).resolves.toEqual([registration]);
-    expect(evalCommand.mock.calls[0]?.[0]).toContain('ROOM_DIRECTORY_REGISTRATION_LIST_V1');
-    expect(evalCommand.mock.calls[0]?.[1].arguments).toEqual([
+    expect(evalCommand.mock.calls[1]?.[0]).toContain('ROOM_DIRECTORY_REGISTRATION_LIST_V1');
+    expect(evalCommand.mock.calls[1]?.[1].arguments).toEqual([
       '25',
       'mahoshojo:room-directory-registration:v1:entry:',
     ]);
@@ -80,7 +82,7 @@ describe('Redis Room directory registration store', () => {
       roomEpoch: 'epoch-1',
       score: 1_787_904_000_000,
     })).resolves.toEqual({ kind: 'touched' });
-    expect(evalCommand.mock.calls[1]?.[0]).toContain('ROOM_DIRECTORY_REGISTRATION_TOUCH_V1');
+    expect(evalCommand.mock.calls[2]?.[0]).toContain('ROOM_DIRECTORY_REGISTRATION_TOUCH_V1');
     await expect(store.list({ limit: 25 })).rejects.toThrow(
       'REDIS_ROOM_DIRECTORY_REGISTRATION_INVALID',
     );

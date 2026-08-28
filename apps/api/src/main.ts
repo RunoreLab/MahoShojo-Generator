@@ -59,6 +59,7 @@ if (process.env.HONO_CONFIG_CHECK_ONLY === 'true') {
   const roomStore = redis.getRoomStore();
   const roomDirectory = createArenaRoomDirectoryService({
     authority: roomStore,
+    registrations: redis.getRoomDirectoryRegistrationStore(),
     store: createD1RoomDirectoryStore({ getClient: getHonoPrimaryD1Client }),
     onBackgroundError: () => {
       console.error('[hono][room-directory] derived cleanup failed');
@@ -66,12 +67,17 @@ if (process.env.HONO_CONFIG_CHECK_ONLY === 'true') {
   });
   const roomActors = createRoomActorRegistry({
     store: roomStore,
+    prepareCreatedOpen: (record) => roomDirectory.prepareCreatedOpen(record),
     onCommittedClosed: (state) => roomDirectory.removeCommittedClosed(state),
+    onCommittedRecovered: (input) => roomDirectory.rebindCommittedOpen(input),
     onBackgroundError: () => {
       console.error('[hono][room-actor] background task failed');
     },
   });
   roomActors.startIdleSweeper();
+  const stopRoomDirectoryReconciler = config.arenaMultiplayerEnabled
+    ? roomDirectory.startRegistrationReconciler()
+    : () => undefined;
   const roomMemberships = createArenaRoomMembershipService({
     actors: roomActors,
     directory: roomDirectory,
@@ -130,11 +136,13 @@ if (process.env.HONO_CONFIG_CHECK_ONLY === 'true') {
         dependencyCloseTimeoutMs: DEFAULT_DEPENDENCY_CLOSE_GRACE_TIMEOUT_MS,
         drainTimeoutMs: DEFAULT_WAIT_UNTIL_DRAIN_TIMEOUT_MS,
         forceCloseDependencies: () => {
+          stopRoomDirectoryReconciler();
           roomWebSocketGateway.forceClose();
           roomActors.forceClose();
           redis.forceClose();
         },
         stopAcceptingRequests: async () => {
+          stopRoomDirectoryReconciler();
           const roomWebSocketShutdown = roomWebSocketGateway.shutdown();
           roomActors.stopAccepting();
           const closeResult = await stopAcceptingRequestsWithGrace(server, {

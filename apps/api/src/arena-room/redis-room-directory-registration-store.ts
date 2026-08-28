@@ -57,6 +57,11 @@ redis.call('ZREM', KEYS[2], ARGV[1])
 return 'deleted'
 `;
 
+const GET_SCRIPT = `
+-- ROOM_DIRECTORY_REGISTRATION_GET_V1
+return redis.call('GET', KEYS[1])
+`;
+
 const LIST_SCRIPT = `
 -- ROOM_DIRECTORY_REGISTRATION_LIST_V1
 local members = redis.call('ZRANGE', KEYS[1], 0, tonumber(ARGV[1]) - 1)
@@ -107,6 +112,7 @@ export type RedisRoomDirectoryRegistrationStore = {
     readonly roomId: string;
     readonly roomEpoch: string;
   }): Promise<{ readonly kind: 'deleted' | 'missing' | 'stale' }>;
+  get(roomId: string): Promise<RoomDirectoryRecord | null>;
   list(input: { readonly limit: number }): Promise<RoomDirectoryRecord[]>;
   touch(input: {
     readonly roomId: string;
@@ -226,6 +232,25 @@ export const createRedisRoomDirectoryRegistrationStore = (
       }
       if (response === 'invalid') return invalid('REDIS_ROOM_DIRECTORY_REGISTRATION_INVALID');
       return invalid('REDIS_ROOM_DIRECTORY_REGISTRATION_RESPONSE_INVALID');
+    },
+
+    async get(inputRoomId) {
+      const roomId = OpaqueKeySchema.safeParse(inputRoomId);
+      if (!roomId.success) return invalid('REDIS_ROOM_DIRECTORY_REGISTRATION_INPUT_INVALID');
+      const [entryKey] = keysFor(roomId.data);
+      const response = await options.getClient().eval(GET_SCRIPT, {
+        keys: [entryKey],
+        arguments: [],
+      });
+      if (response === null) return null;
+      if (typeof response !== 'string') {
+        return invalid('REDIS_ROOM_DIRECTORY_REGISTRATION_RESPONSE_INVALID');
+      }
+      try {
+        return parseRecord(JSON.parse(response));
+      } catch {
+        return invalid('REDIS_ROOM_DIRECTORY_REGISTRATION_INVALID');
+      }
     },
 
     async list(input) {

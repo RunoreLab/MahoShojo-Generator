@@ -20,14 +20,18 @@ import type {
   RoomDirectoryPosition,
   RoomDirectoryRecord,
 } from './d1-room-directory-store';
+import type { RedisRoomDirectoryRegistrationStore } from './redis-room-directory-registration-store';
 
 const DIRECTORY_CURSOR_VERSION = 1;
 
 export type RoomDirectoryServiceErrorCode =
   | 'ROOM_DIRECTORY_AUTHORITY_UNAVAILABLE'
+  | 'ROOM_DIRECTORY_CLEANUP_FAILED'
   | 'ROOM_DIRECTORY_CLOSE_INVALID'
   | 'ROOM_DIRECTORY_CURSOR_INVALID'
   | 'ROOM_DIRECTORY_INPUT_INVALID'
+  | 'ROOM_DIRECTORY_REGISTRATION_UNAVAILABLE'
+  | 'ROOM_DIRECTORY_RECOVERY_INVALID'
   | 'ROOM_DIRECTORY_STALE';
 
 export class RoomDirectoryServiceError extends Error {
@@ -41,6 +45,7 @@ type DirectoryAuthorityStore = Pick<RoomActorCheckpointStore, 'load'>;
 
 export type ArenaRoomDirectoryServiceOptions = {
   readonly authority: DirectoryAuthorityStore;
+  readonly registrations?: RedisRoomDirectoryRegistrationStore;
   readonly store: D1RoomDirectoryStore;
   readonly onBackgroundError?: (error: unknown) => void;
 };
@@ -58,11 +63,24 @@ export type RoomDirectoryReconcileResult = {
 };
 
 export type ArenaRoomDirectoryService = {
+  prepareCreatedOpen(record: RoomDirectoryRecord): Promise<void>;
   registerOpen(record: RoomDirectoryRecord): Promise<void>;
+  rebindCommittedOpen(input: {
+    readonly previousRoomEpoch: string;
+    readonly state: ArenaRoomAuthorityState;
+  }): Promise<void>;
   lookup(roomId: string): Promise<RoomDirectoryEntry | null>;
   discoverPublic(query: Partial<RoomDirectoryPageQuery>): Promise<RoomDirectoryPage>;
   listForHost(hostUserId: number, query: Partial<RoomDirectoryPageQuery>): Promise<RoomDirectoryPage>;
   reconcile(input: RoomDirectoryReconcileInput): Promise<RoomDirectoryReconcileResult>;
+  reconcileRegistrations(input: {
+    readonly limit?: number;
+    readonly score?: number;
+  }): Promise<{ readonly scanned: number; readonly projected: number; readonly removed: number }>;
+  startRegistrationReconciler(input?: {
+    readonly intervalMs?: number;
+    readonly limit?: number;
+  }): () => void;
   removeCommittedClosed(state: ArenaRoomAuthorityState): Promise<void>;
 };
 
@@ -160,9 +178,23 @@ const hostMatches = (state: ArenaRoomAuthorityState, hostUserId: number): boolea
   ))
 );
 
+const activeHostUserId = (state: ArenaRoomAuthorityState): number | null => (
+  state.memberAuthority.find((entry) => (
+    entry.member.role === 'host' && entry.member.membershipState === 'active'
+  ))?.accountUserId ?? null
+);
+
 export const createArenaRoomDirectoryService = (
   options: ArenaRoomDirectoryServiceOptions,
 ): ArenaRoomDirectoryService => {
+  const reportBackgroundError = (error: unknown): void => {
+    try {
+      options.onBackgroundError?.(error);
+    } catch {
+      // Observability must not change derived-directory outcomes.
+    }
+  };
+
   const readAuthority = async (roomId: string): Promise<ArenaRoomAuthorityState | null> => {
     try {
       return await options.authority.load(roomId);
@@ -180,6 +212,30 @@ export const createArenaRoomDirectoryService = (
       && hostMatches(state, record.hostUserId);
   };
 
+  const requireCurrentOpenState = async (
+    input: ArenaRoomAuthorityState,
+  ): Promise<{ readonly state: ArenaRoomAuthorityState; readonly hostUserId: number }> => {
+    let state: ArenaRoomAuthorityState;
+    try {
+      state = parseArenaRoomAuthorityState(input);
+    } catch {
+      return fail('ROOM_DIRECTORY_RECOVERY_INVALID');
+    }
+    const hostUserId = activeHostUserId(state);
+    if (state.lifecycle.status !== 'open' || hostUserId === null) {
+      return fail('ROOM_DIRECTORY_RECOVERY_INVALID');
+    }
+    const current = await readAuthority(state.snapshot.roomId);
+    if (
+      current === null
+      || current.lifecycle.status !== 'open'
+      || current.snapshot.roomId !== state.snapshot.roomId
+      || current.snapshot.roomEpoch !== state.snapshot.roomEpoch
+      || !hostMatches(current, hostUserId)
+    ) return fail('ROOM_DIRECTORY_STALE');
+    return { state, hostUserId };
+  };
+
   const deleteBestEffort = async (input: {
     readonly roomId: string;
     readonly roomEpoch: string;
@@ -188,11 +244,7 @@ export const createArenaRoomDirectoryService = (
       await options.store.delete(input);
       return true;
     } catch (error) {
-      try {
-        options.onBackgroundError?.(error);
-      } catch {
-        // Observability must not change the best-effort projection outcome.
-      }
+      reportBackgroundError(error);
       return false;
     }
   };
@@ -219,11 +271,97 @@ export const createArenaRoomDirectoryService = (
     return RoomDirectoryPageSchema.parse({ items, nextCursor });
   };
 
-  return Object.freeze({
+  let service!: ArenaRoomDirectoryService;
+  service = Object.freeze({
+    async prepareCreatedOpen(input) {
+      const record = parseRecord(input);
+      if (options.registrations === undefined) {
+        return fail('ROOM_DIRECTORY_REGISTRATION_UNAVAILABLE');
+      }
+      await options.registrations.put(record);
+    },
+
     async registerOpen(input) {
       const record = parseRecord(input);
       if (!(await isCurrent(record))) return fail('ROOM_DIRECTORY_STALE');
       await options.store.upsertOpen(record);
+      await options.registrations?.touch({
+        roomId: record.roomId,
+        roomEpoch: record.roomEpoch,
+        score: Date.parse(record.lastActivityAt),
+      });
+    },
+
+    async rebindCommittedOpen(input) {
+      if (options.registrations === undefined) {
+        return fail('ROOM_DIRECTORY_REGISTRATION_UNAVAILABLE');
+      }
+      const previousRoomEpoch = OpaqueKeySchema.safeParse(input.previousRoomEpoch);
+      const current = await requireCurrentOpenState(input.state);
+      if (
+        !previousRoomEpoch.success
+        || previousRoomEpoch.data === current.state.snapshot.roomEpoch
+      ) return fail('ROOM_DIRECTORY_RECOVERY_INVALID');
+
+      const registrationRebind = await options.registrations.rebindEpoch({
+        roomId: current.state.snapshot.roomId,
+        previousRoomEpoch: previousRoomEpoch.data,
+        nextRoomEpoch: current.state.snapshot.roomEpoch,
+        lastActivityAt: current.state.lifecycle.updatedAt,
+      });
+      if (registrationRebind.kind === 'stale') return fail('ROOM_DIRECTORY_STALE');
+      const d1Record = await options.store.get(current.state.snapshot.roomId);
+      let registration = await options.registrations.get(current.state.snapshot.roomId);
+      if (registration === null && d1Record !== null) {
+        registration = {
+          ...d1Record,
+          roomEpoch: current.state.snapshot.roomEpoch,
+          hostUserId: current.hostUserId,
+          lastActivityAt: current.state.lifecycle.updatedAt,
+        };
+        await options.registrations.put(registration);
+      }
+      if (
+        registration === null
+        || registration.hostUserId !== current.hostUserId
+        || registration.roomEpoch !== current.state.snapshot.roomEpoch
+      ) {
+        return fail('ROOM_DIRECTORY_RECOVERY_INVALID');
+      }
+      const projected = parseRecord({
+        ...registration,
+        roomEpoch: current.state.snapshot.roomEpoch,
+        lastActivityAt: Date.parse(registration.lastActivityAt)
+          > Date.parse(current.state.lifecycle.updatedAt)
+          ? registration.lastActivityAt
+          : current.state.lifecycle.updatedAt,
+      });
+      if (d1Record !== null && d1Record.roomEpoch !== projected.roomEpoch) {
+        if (d1Record.roomEpoch !== previousRoomEpoch.data) {
+          return fail('ROOM_DIRECTORY_STALE');
+        }
+        if (d1Record.hostUserId === current.hostUserId) {
+          await options.store.rebindEpoch({
+            roomId: projected.roomId,
+            previousRoomEpoch: d1Record.roomEpoch,
+            nextRoomEpoch: projected.roomEpoch,
+            hostUserId: current.hostUserId,
+            lastActivityAt: projected.lastActivityAt,
+          });
+        } else {
+          await options.store.delete({
+            roomId: d1Record.roomId,
+            roomEpoch: d1Record.roomEpoch,
+          });
+        }
+      }
+      await options.store.upsertOpen(projected);
+      const touched = await options.registrations.touch({
+        roomId: projected.roomId,
+        roomEpoch: projected.roomEpoch,
+        score: Date.parse(projected.lastActivityAt),
+      });
+      if (touched.kind !== 'touched') return fail('ROOM_DIRECTORY_STALE');
     },
 
     async lookup(inputRoomId) {
@@ -294,8 +432,12 @@ export const createArenaRoomDirectoryService = (
         const record = parseRecord(candidate);
         if (
           !(await isCurrent(record))
-          && await deleteBestEffort({ roomId: record.roomId, roomEpoch: record.roomEpoch })
-        ) removed += 1;
+        ) {
+          if (!await deleteBestEffort({ roomId: record.roomId, roomEpoch: record.roomEpoch })) {
+            return fail('ROOM_DIRECTORY_CLEANUP_FAILED');
+          }
+          removed += 1;
+        }
       }
       return {
         scanned: scanned.length,
@@ -303,6 +445,118 @@ export const createArenaRoomDirectoryService = (
         nextCursor: records.length > limit && scanned.length > 0
           ? encodeCursor(scope, positionOf(scanned[scanned.length - 1]!))
           : null,
+      };
+    },
+
+    async reconcileRegistrations(input) {
+      if (options.registrations === undefined) {
+        return fail('ROOM_DIRECTORY_REGISTRATION_UNAVAILABLE');
+      }
+      const limit = input.limit ?? MAX_ROOM_DIRECTORY_PAGE_SIZE;
+      const score = input.score ?? Date.now();
+      if (
+        !Number.isSafeInteger(limit)
+        || limit < 1
+        || limit > MAX_ROOM_DIRECTORY_PAGE_SIZE
+        || !Number.isSafeInteger(score)
+        || score < 0
+      ) return fail('ROOM_DIRECTORY_INPUT_INVALID');
+      const registrations = await options.registrations.list({ limit });
+      let projected = 0;
+      let removed = 0;
+      for (const candidate of registrations) {
+        const registration = parseRecord(candidate);
+        const state = await readAuthority(registration.roomId);
+        const hostUserId = state === null ? null : activeHostUserId(state);
+        if (
+          state === null
+          || state.lifecycle.status !== 'open'
+          || state.snapshot.roomId !== registration.roomId
+          || hostUserId !== registration.hostUserId
+        ) {
+          const stale = await options.store.get(registration.roomId);
+          if (stale !== null) {
+            await options.store.delete({ roomId: stale.roomId, roomEpoch: stale.roomEpoch });
+          }
+          await options.registrations.delete({
+            roomId: registration.roomId,
+            roomEpoch: registration.roomEpoch,
+          });
+          removed += 1;
+          continue;
+        }
+
+        const currentEpoch = state.snapshot.roomEpoch;
+        if (registration.roomEpoch !== currentEpoch) {
+          const rebound = await options.registrations.rebindEpoch({
+            roomId: registration.roomId,
+            previousRoomEpoch: registration.roomEpoch,
+            nextRoomEpoch: currentEpoch,
+            lastActivityAt: state.lifecycle.updatedAt,
+          });
+          if (rebound.kind === 'stale') return fail('ROOM_DIRECTORY_STALE');
+        }
+        const currentRecord = parseRecord({
+          ...registration,
+          roomEpoch: currentEpoch,
+          lastActivityAt: Date.parse(registration.lastActivityAt)
+            > Date.parse(state.lifecycle.updatedAt)
+            ? registration.lastActivityAt
+            : state.lifecycle.updatedAt,
+        });
+        const d1Record = await options.store.get(registration.roomId);
+        if (d1Record !== null && d1Record.roomEpoch !== currentEpoch) {
+          if (d1Record.roomEpoch !== registration.roomEpoch) {
+            return fail('ROOM_DIRECTORY_STALE');
+          }
+          if (d1Record.hostUserId === hostUserId) {
+            await options.store.rebindEpoch({
+              roomId: d1Record.roomId,
+              previousRoomEpoch: d1Record.roomEpoch,
+              nextRoomEpoch: currentEpoch,
+              hostUserId,
+              lastActivityAt: currentRecord.lastActivityAt,
+            });
+          } else {
+            await options.store.delete({ roomId: d1Record.roomId, roomEpoch: d1Record.roomEpoch });
+          }
+        }
+        await options.store.upsertOpen(currentRecord);
+        const touched = await options.registrations.touch({
+          roomId: currentRecord.roomId,
+          roomEpoch: currentRecord.roomEpoch,
+          score,
+        });
+        if (touched.kind !== 'touched') return fail('ROOM_DIRECTORY_STALE');
+        projected += 1;
+      }
+      return { scanned: registrations.length, projected, removed };
+    },
+
+    startRegistrationReconciler(input = {}) {
+      const intervalMs = input.intervalMs ?? 5 * 60_000;
+      const limit = input.limit ?? MAX_ROOM_DIRECTORY_PAGE_SIZE;
+      if (
+        !Number.isSafeInteger(intervalMs)
+        || intervalMs < 1
+        || !Number.isSafeInteger(limit)
+        || limit < 1
+        || limit > MAX_ROOM_DIRECTORY_PAGE_SIZE
+      ) return fail('ROOM_DIRECTORY_INPUT_INVALID');
+      let stopped = false;
+      let running = false;
+      const timer = setInterval(() => {
+        if (stopped || running) return;
+        running = true;
+        void service.reconcileRegistrations({ limit, score: Date.now() })
+          .catch(reportBackgroundError)
+          .finally(() => { running = false; });
+      }, intervalMs);
+      timer.unref?.();
+      return () => {
+        if (stopped) return;
+        stopped = true;
+        clearInterval(timer);
       };
     },
 
@@ -318,6 +572,15 @@ export const createArenaRoomDirectoryService = (
         roomId: state.snapshot.roomId,
         roomEpoch: state.snapshot.roomEpoch,
       });
+      try {
+        await options.registrations?.delete({
+          roomId: state.snapshot.roomId,
+          roomEpoch: state.snapshot.roomEpoch,
+        });
+      } catch (error) {
+        reportBackgroundError(error);
+      }
     },
   });
+  return service;
 };

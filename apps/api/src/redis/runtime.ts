@@ -7,6 +7,11 @@ import {
   type RedisGenerationClient,
 } from './generation-replay-store';
 import {
+  createRedisRoomDirectoryRegistrationStore,
+  type RedisRoomDirectoryRegistrationClient,
+  type RedisRoomDirectoryRegistrationStore,
+} from '../arena-room/redis-room-directory-registration-store';
+import {
   createRedisRoomStore,
   type RedisRoomClient,
   type RedisRoomStore,
@@ -140,6 +145,7 @@ export class RedisRuntime implements RedisService {
   private lastError: string | null = null;
   private generationReplayStore: GenerationReplayStore | null = null;
   private roomStore: RedisRoomStore | null = null;
+  private roomDirectoryRegistrationStore: RedisRoomDirectoryRegistrationStore | null = null;
   private roomTicketReplayStore: RedisRoomTicketReplayStore | null = null;
 
   constructor(
@@ -299,6 +305,20 @@ export class RedisRuntime implements RedisService {
       } satisfies RedisRoomClient),
     });
     return this.roomStore;
+  }
+
+  getRoomDirectoryRegistrationStore(): RedisRoomDirectoryRegistrationStore {
+    this.roomDirectoryRegistrationStore ??= createRedisRoomDirectoryRegistrationStore({
+      keyPrefix: this.keyPrefix,
+      getClient: () => ({
+        eval: (script, options) => this.executeRoomCommand(async () => {
+          const client = this.client;
+          if (!client?.isReady) throw new Error('REDIS_ROOM_CHECKPOINT_UNAVAILABLE');
+          return client.eval(script, options);
+        }),
+      } satisfies RedisRoomDirectoryRegistrationClient),
+    });
+    return this.roomDirectoryRegistrationStore;
   }
 
   getRoomTicketReplayStore(): RedisRoomTicketReplayStore {

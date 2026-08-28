@@ -5,6 +5,7 @@ import type {
   D1RoomDirectoryStore,
   RoomDirectoryRecord,
 } from '#/arena-room/d1-room-directory-store';
+import type { RedisRoomDirectoryRegistrationStore } from '#/arena-room/redis-room-directory-registration-store';
 import {
   createArenaRoomDirectoryService,
   RoomDirectoryServiceError,
@@ -12,6 +13,7 @@ import {
 import {
   closeArenaRoomState,
   createArenaRoomState,
+  recoverArenaRoomTransition,
 } from './arena-room-fixtures';
 
 const record = (
@@ -41,7 +43,34 @@ const createStore = () => ({
   ),
 }) satisfies D1RoomDirectoryStore;
 
+const createRegistrations = () => ({
+  put: vi.fn<RedisRoomDirectoryRegistrationStore['put']>(async () => undefined),
+  rebindEpoch: vi.fn<RedisRoomDirectoryRegistrationStore['rebindEpoch']>(
+    async () => ({ kind: 'rebound' }),
+  ),
+  delete: vi.fn<RedisRoomDirectoryRegistrationStore['delete']>(
+    async () => ({ kind: 'deleted' }),
+  ),
+  get: vi.fn<RedisRoomDirectoryRegistrationStore['get']>(async () => null),
+  list: vi.fn<RedisRoomDirectoryRegistrationStore['list']>(async () => []),
+  touch: vi.fn<RedisRoomDirectoryRegistrationStore['touch']>(
+    async () => ({ kind: 'touched' }),
+  ),
+}) satisfies RedisRoomDirectoryRegistrationStore;
+
 describe('Arena Room directory service', () => {
+  it('create commit 前先持久化 server-owned registration，且不借 D1/authority 创建 Room', async () => {
+    const authority = { load: vi.fn(async () => null) };
+    const store = createStore();
+    const registrations = createRegistrations();
+    const service = createArenaRoomDirectoryService({ authority, store, registrations });
+
+    await expect(service.prepareCreatedOpen(record())).resolves.toBeUndefined();
+    expect(registrations.put).toHaveBeenCalledWith(record());
+    expect(authority.load).not.toHaveBeenCalled();
+    expect(store.upsertOpen).not.toHaveBeenCalled();
+  });
+
   it('register 前以 Redis checkpoint 最终验证 epoch/host/open，D1 不可创建 Room', async () => {
     const state = createArenaRoomState();
     const authority = {
@@ -178,10 +207,140 @@ describe('Arena Room directory service', () => {
     })).resolves.toMatchObject({ scanned: 4, removed: 3 });
   });
 
+  it('reconciliation delete 失败显式中止且不签发跳过失败 orphan 的 cursor', async () => {
+    const authority = { load: vi.fn(async () => null) };
+    const store = createStore();
+    store.listReconciliationCandidates.mockResolvedValue([
+      record('room-failed'),
+      record('room-next'),
+    ]);
+    store.delete.mockRejectedValueOnce(new Error('d1 unavailable'));
+    const service = createArenaRoomDirectoryService({ authority, store });
+
+    await expect(service.reconcile({
+      inactiveBefore: '2026-08-28T01:00:00.000Z',
+      limit: 1,
+    })).rejects.toMatchObject({ code: 'ROOM_DIRECTORY_CLEANUP_FAILED' });
+    expect(store.delete).toHaveBeenCalledTimes(1);
+  });
+
+  it('committed recovery 以 predecessor epoch 精确重绑 D1/registration 并保留 metadata', async () => {
+    const recovered = recoverArenaRoomTransition(createArenaRoomState(), 'epoch-2').nextState;
+    const authority = { load: vi.fn(async () => recovered) };
+    const store = createStore();
+    store.get.mockResolvedValue(record());
+    const registrations = createRegistrations();
+    registrations.get.mockResolvedValue({ ...record(), roomEpoch: 'epoch-2' });
+    const service = createArenaRoomDirectoryService({ authority, store, registrations });
+
+    await expect(service.rebindCommittedOpen({
+      previousRoomEpoch: 'epoch-1',
+      state: recovered,
+    })).resolves.toBeUndefined();
+    expect(registrations.rebindEpoch).toHaveBeenCalledWith({
+      roomId: 'room-1',
+      previousRoomEpoch: 'epoch-1',
+      nextRoomEpoch: 'epoch-2',
+      lastActivityAt: '2026-08-28T00:01:00.000Z',
+    });
+    expect(store.rebindEpoch).toHaveBeenCalledWith({
+      roomId: 'room-1',
+      previousRoomEpoch: 'epoch-1',
+      nextRoomEpoch: 'epoch-2',
+      hostUserId: 101,
+      lastActivityAt: '2026-08-28T00:01:00.000Z',
+    });
+    expect(store.upsertOpen).toHaveBeenCalledWith({
+      ...record(),
+      roomEpoch: 'epoch-2',
+    });
+  });
+
+  it('迟到 recovery projection 遇到更新 registration epoch 时不得回退 D1', async () => {
+    const recovered = recoverArenaRoomTransition(createArenaRoomState(), 'epoch-2').nextState;
+    const store = createStore();
+    store.get.mockResolvedValue({ ...record(), roomEpoch: 'epoch-3' });
+    const registrations = createRegistrations();
+    registrations.rebindEpoch.mockResolvedValue({ kind: 'stale' });
+    registrations.get.mockResolvedValue({ ...record(), roomEpoch: 'epoch-3' });
+    const service = createArenaRoomDirectoryService({
+      authority: { load: async () => recovered },
+      store,
+      registrations,
+    });
+
+    await expect(service.rebindCommittedOpen({
+      previousRoomEpoch: 'epoch-1',
+      state: recovered,
+    })).rejects.toMatchObject({ code: 'ROOM_DIRECTORY_STALE' });
+    expect(store.rebindEpoch).not.toHaveBeenCalled();
+    expect(store.upsertOpen).not.toHaveBeenCalled();
+  });
+
+  it('registration reconciliation 可有界补建缺失 D1，authority absent 则 exact cleanup', async () => {
+    const current = record();
+    const orphan = record('room-orphan');
+    const authority = {
+      load: vi.fn(async (roomId: string) => (roomId === 'room-1' ? createArenaRoomState() : null)),
+    };
+    const store = createStore();
+    store.get.mockResolvedValueOnce(null).mockResolvedValueOnce(orphan);
+    const registrations = createRegistrations();
+    registrations.list.mockResolvedValue([current, orphan]);
+    const service = createArenaRoomDirectoryService({ authority, store, registrations });
+
+    await expect(service.reconcileRegistrations({ limit: 2, score: 1_787_904_000_000 }))
+      .resolves.toEqual({ scanned: 2, projected: 1, removed: 1 });
+    expect(store.upsertOpen).toHaveBeenCalledWith(current);
+    expect(store.delete).toHaveBeenCalledWith({
+      roomId: 'room-orphan',
+      roomEpoch: 'epoch-1',
+    });
+    expect(registrations.delete).toHaveBeenCalledWith({
+      roomId: 'room-orphan',
+      roomEpoch: 'epoch-1',
+    });
+    expect(registrations.touch).toHaveBeenCalledWith({
+      roomId: 'room-1',
+      roomEpoch: 'epoch-1',
+      score: 1_787_904_000_000,
+    });
+  });
+
+  it('低频 registration reconciler 单例有界运行、可停止且不会重叠', async () => {
+    vi.useFakeTimers();
+    try {
+      const state = createArenaRoomState();
+      const store = createStore();
+      const registrations = createRegistrations();
+      registrations.list.mockResolvedValue([record()]);
+      const service = createArenaRoomDirectoryService({
+        authority: { load: async () => state },
+        store,
+        registrations,
+      });
+      const stop = service.startRegistrationReconciler({ intervalMs: 100, limit: 1 });
+
+      await vi.advanceTimersByTimeAsync(100);
+      expect(registrations.list).toHaveBeenCalledWith({ limit: 1 });
+      expect(store.upsertOpen).toHaveBeenCalledOnce();
+      stop();
+      await vi.advanceTimersByTimeAsync(200);
+      expect(registrations.list).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('committed close projection 只接受 closed checkpoint，并 exact-delete 对应 epoch', async () => {
     const state = createArenaRoomState();
     const store = createStore();
-    const service = createArenaRoomDirectoryService({ authority: { load: async () => state }, store });
+    const registrations = createRegistrations();
+    const service = createArenaRoomDirectoryService({
+      authority: { load: async () => state },
+      store,
+      registrations,
+    });
 
     await expect(service.removeCommittedClosed(state)).rejects.toMatchObject({
       code: 'ROOM_DIRECTORY_CLOSE_INVALID',
@@ -189,6 +348,10 @@ describe('Arena Room directory service', () => {
     const closed = closeArenaRoomState(state);
     await expect(service.removeCommittedClosed(closed)).resolves.toBeUndefined();
     expect(store.delete).toHaveBeenCalledWith({ roomId: 'room-1', roomEpoch: 'epoch-1' });
+    expect(registrations.delete).toHaveBeenCalledWith({
+      roomId: 'room-1',
+      roomEpoch: 'epoch-1',
+    });
   });
 
   it('committed close 后的 D1/observer 失败不会反向改变权威结果', async () => {

@@ -20,6 +20,7 @@ import {
   type RoomActorCheckpointStore,
   type RoomActorRegistryOptions,
 } from '#/arena-room/room-actor-registry';
+import type { RoomDirectoryRecord } from '#/arena-room/d1-room-directory-store';
 import {
   ARENA_ROOM_NEXT_TIMESTAMP,
   createArenaRoomState,
@@ -167,6 +168,35 @@ class MemoryRoomStore implements RoomActorCheckpointStore {
 }
 
 describe('RoomActorRegistry', () => {
+  it('directory registration 必须先于 create checkpoint，prepare 失败不得创建 Room', async () => {
+    const store = new MemoryRoomStore();
+    const prepareCreatedOpen = vi.fn<(record: RoomDirectoryRecord) => Promise<void>>(
+      async () => { throw new Error('registration unavailable'); },
+    );
+    const registry = createRoomActorRegistry({ store, prepareCreatedOpen });
+
+    await expect(registry.create({
+      host: { userId: 'host-1', displayName: 'Host' },
+      sharedConfig: createArenaRoomState().snapshot.sharedConfig,
+      authority: hostAuthority,
+      directory: { title: '公开房间', visibility: 'public' },
+    })).rejects.toThrow('registration unavailable');
+    expect(store.saveCalls).toBe(0);
+    expect(store.state).toBeNull();
+
+    prepareCreatedOpen.mockResolvedValueOnce(undefined);
+    store.beforeSave = async () => {
+      expect(prepareCreatedOpen).toHaveBeenCalledTimes(2);
+    };
+    await expect(registry.create({
+      host: { userId: 'host-1', displayName: 'Host' },
+      sharedConfig: createArenaRoomState().snapshot.sharedConfig,
+      authority: hostAuthority,
+      directory: { title: '公开房间', visibility: 'public' },
+    })).resolves.toMatchObject({ result: { ok: true } });
+    expect(store.saveCalls).toBe(1);
+  });
+
   it('无效 command 在 hydration/epoch rollover 前直接拒绝', async () => {
     const store = new MemoryRoomStore();
     const registry = createRoomActorRegistry({ store });
@@ -1277,6 +1307,33 @@ describe('RoomActorRegistry', () => {
       snapshot: expect.objectContaining({ roomEpoch: 'epoch-1' }),
       lifecycle: expect.objectContaining({ status: 'closed' }),
     }));
+  });
+
+  it('open recovery checkpoint 提交后通知 predecessor/new epoch，派生失败不否定 recovery', async () => {
+    const store = new MemoryRoomStore();
+    store.state = createArenaRoomState();
+    const onCommittedRecovered = vi.fn(async () => { throw new Error('d1 unavailable'); });
+    const onBackgroundError = vi.fn();
+    const registry = createRoomActorRegistry({
+      store,
+      createRoomEpoch: () => 'epoch-2',
+      recoveryTimestamp: () => ARENA_ROOM_NEXT_TIMESTAMP,
+      onCommittedRecovered,
+      onBackgroundError,
+    });
+
+    await expect(registry.recover('room-1')).resolves.toMatchObject({
+      roomId: 'room-1',
+    });
+    expect(onCommittedRecovered).toHaveBeenCalledWith({
+      previousRoomEpoch: 'epoch-1',
+      state: expect.objectContaining({
+        snapshot: expect.objectContaining({ roomEpoch: 'epoch-2' }),
+        lifecycle: expect.objectContaining({ status: 'open' }),
+      }),
+    });
+    expect(onBackgroundError).toHaveBeenCalledOnce();
+    expect(store.state?.snapshot.roomEpoch).toBe('epoch-2');
   });
 
   it('低频 process refresh 仅刷新 exact active checkpoint，missing/conflict 会 fence actor', async () => {

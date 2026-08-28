@@ -83,6 +83,7 @@ const fullMutationFenceRoomId = `room-full-mutation-fence-${token}`;
 const recoveryRoomId = `room-recovery-${token}`;
 const actorRoomId = `room-actor-${token}`;
 const authorityRoomId = `room-authority-${token}`;
+const directoryRegistrationRoomId = `room-directory-registration-${token}`;
 const ticketJti = `verifier:${token}`;
 const authorityTicketJti = `authority:${token}`;
 const roomHash = (id: string): string => createHash('sha256').update(id).digest('hex');
@@ -97,6 +98,10 @@ const ticketReplayKey = `mahoshojo:room-ticket:v1:${keyPrefix}:${createHash('sha
   .update(ticketJti).digest('hex')}`;
 const authorityTicketReplayKey = `mahoshojo:room-ticket:v1:${keyPrefix}:${createHash('sha256')
   .update(authorityTicketJti).digest('hex')}`;
+const directoryRegistrationMember = roomHash(directoryRegistrationRoomId);
+const directoryRegistrationPrefix = `mahoshojo:room-directory-registration:v1:${keyPrefix}`;
+const directoryRegistrationKey = `${directoryRegistrationPrefix}:entry:${directoryRegistrationMember}`;
+const directoryRegistrationIndexKey = `${directoryRegistrationPrefix}:index`;
 
 const sharedConfig = () => ({
   battleMode: 'classic' as const,
@@ -870,6 +875,64 @@ try {
       }
       await Promise.all([oldActorRegistry.shutdown(), recoveredActorRegistry.shutdown()]);
 
+      const directoryRegistrations = writer.getRoomDirectoryRegistrationStore();
+      const directoryRegistration = {
+        roomId: directoryRegistrationRoomId,
+        roomEpoch: 'directory-epoch-1',
+        hostUserId: 101,
+        title: 'Redis verifier directory',
+        visibility: 'public' as const,
+        status: 'open' as const,
+        createdAt: TIMESTAMP,
+        lastActivityAt: NEXT_TIMESTAMP,
+      };
+      await directoryRegistrations.put(directoryRegistration);
+      await directoryRegistrations.put(directoryRegistration);
+      const storedDirectoryRegistration = await directoryRegistrations.get(
+        directoryRegistrationRoomId,
+      );
+      if (
+        storedDirectoryRegistration === null
+        || Object.entries(directoryRegistration).some(([key, value]) => (
+          storedDirectoryRegistration[key as keyof typeof storedDirectoryRegistration] !== value
+        ))
+      ) {
+        throw new Error('ROOM_DIRECTORY_REGISTRATION_PUT_FAILED');
+      }
+      if ((await directoryRegistrations.rebindEpoch({
+        roomId: directoryRegistrationRoomId,
+        previousRoomEpoch: 'directory-epoch-1',
+        nextRoomEpoch: 'directory-epoch-2',
+        lastActivityAt: THIRD_TIMESTAMP,
+      })).kind !== 'rebound') {
+        throw new Error('ROOM_DIRECTORY_REGISTRATION_REBIND_FAILED');
+      }
+      if ((await directoryRegistrations.rebindEpoch({
+        roomId: directoryRegistrationRoomId,
+        previousRoomEpoch: 'directory-epoch-1',
+        nextRoomEpoch: 'directory-stale-epoch',
+        lastActivityAt: THIRD_TIMESTAMP,
+      })).kind !== 'stale') {
+        throw new Error('ROOM_DIRECTORY_REGISTRATION_STALE_REBIND_FAILED');
+      }
+      const listedDirectoryRegistration = (await directoryRegistrations.list({ limit: 50 }))
+        .find((entry) => entry.roomId === directoryRegistrationRoomId);
+      if (listedDirectoryRegistration?.roomEpoch !== 'directory-epoch-2') {
+        throw new Error('ROOM_DIRECTORY_REGISTRATION_LIST_FAILED');
+      }
+      if ((await directoryRegistrations.delete({
+        roomId: directoryRegistrationRoomId,
+        roomEpoch: 'directory-epoch-1',
+      })).kind !== 'stale') {
+        throw new Error('ROOM_DIRECTORY_REGISTRATION_STALE_DELETE_FAILED');
+      }
+      if ((await directoryRegistrations.delete({
+        roomId: directoryRegistrationRoomId,
+        roomEpoch: 'directory-epoch-2',
+      })).kind !== 'deleted') {
+        throw new Error('ROOM_DIRECTORY_REGISTRATION_DELETE_FAILED');
+      }
+
       const authorityActors = createRoomActorRegistry({
         store: writerStore,
         createRoomIdentity: () => ({ roomId: authorityRoomId, roomEpoch: 'authority-epoch-1' }),
@@ -953,6 +1016,7 @@ try {
         serverIssuedRoomIdentity: true,
         roomActorWarmRecovery: true,
         roomActorOldWriterFence: true,
+        directoryRegistration: true,
         activeTtlRefresh: true,
         ticketReplay: true,
         authorityGatewayRedisWiring: true,
@@ -970,6 +1034,7 @@ try {
   await writer.close();
   if (!cleanup.isOpen) await cleanup.connect();
   if (phase !== 'write') {
+    await cleanup.zRem(directoryRegistrationIndexKey, directoryRegistrationMember);
     await cleanup.unlink([
       ...roomKeys(roomId),
       ...roomKeys(ttlRoomId),
@@ -992,6 +1057,7 @@ try {
       ...roomKeys(authorityRoomId),
       ticketReplayKey,
       authorityTicketReplayKey,
+      directoryRegistrationKey,
     ]);
   }
   await cleanup.quit();
