@@ -55,6 +55,7 @@ const createHarness = () => {
     store,
     createRoomIdentity: () => ({ roomId: 'room-1', roomEpoch: 'epoch-1' }),
     createTimestamp: () => timestamps[0]!,
+    now: () => Date.parse(timestamps[Math.min(nowIndex, timestamps.length - 1)]!),
   });
   const service = createArenaRoomMembershipService({
     actors: registry,

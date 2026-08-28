@@ -4,6 +4,7 @@ import {
   checkpointPredecessorOf,
   consumeArenaRoomCheckpointCommit,
   issueArenaRoomGenerationReservationAuthority,
+  issueArenaRoomPresenceAuthority,
   issueArenaRoomTrustedTime,
   ArenaRoomAuthorityStateSchema,
   MAX_ROOM_COLLABORATIVE_CHANGES,
@@ -36,6 +37,7 @@ const createRoomActorRegistry = (options: RoomActorRegistryOptions): RoomActorRe
   createRuntimeRoomActorRegistry({
     createRoomIdentity: () => ({ roomId: 'room-1', roomEpoch: 'epoch-1' }),
     createTimestamp: () => '2026-08-28T00:00:00.000Z',
+    now: () => Date.parse('2026-08-28T00:00:00.000Z'),
     ...options,
   })
 );
@@ -847,6 +849,49 @@ describe('RoomActorRegistry', () => {
       closeReason: 'host-offline-timeout',
     });
     await expect(registry.expireDeadlines()).resolves.toBe(0);
+  });
+
+  it('deadline 在线性化队列边界重检，排队中的 presence 不能清除已到期 deadline', async () => {
+    let now = Date.parse('2026-08-28T00:00:00.000Z');
+    const store = new MemoryRoomStore();
+    const registry = createRoomActorRegistry({ store, now: () => now });
+    const created = await createActorRoom(registry);
+    if (!created.ok) throw new Error('expected create success');
+    const actor = registry.get('room-1');
+    if (!actor) throw new Error('actor missing');
+    const gate = deferred();
+    store.beforeSave = async (_data, call) => {
+      if (call === 2) await gate.promise;
+    };
+    const inFlight = actor.execute({
+      command: publishCommand(created.nextState, 0, 'before-deadline', THIRD_TIMESTAMP),
+      authority: hostAuthority,
+    });
+    await vi.waitFor(() => expect(store.activeSaves).toBe(1));
+    now = Date.parse('2026-08-28T00:45:00.000Z');
+    const timestamp = '2026-08-28T00:45:00.000Z';
+    const queuedPresence = actor.execute({
+      authority: issueArenaRoomPresenceAuthority({
+        roomId: 'room-1',
+        roomEpoch: 'epoch-1',
+        deadlines: { hostOfflineDeadline: null, roomIdleDeadline: null },
+        timestamp,
+      }),
+      command: {
+        type: 'sync-presence',
+        expectedRoomEpoch: 'epoch-1',
+        deadlines: { hostOfflineDeadline: null, roomIdleDeadline: null },
+        timestamp,
+      },
+    });
+    gate.resolve();
+
+    await expect(inFlight).resolves.toMatchObject({ ok: true, kind: 'applied' });
+    await expect(queuedPresence).resolves.toMatchObject({ ok: false, code: 'room-closed' });
+    expect(store.state?.lifecycle).toMatchObject({
+      status: 'closed',
+      closeReason: 'host-offline-timeout',
+    });
   });
 
   it('graceful shutdown 先拒绝新 command，再 drain acknowledged checkpoint 并清理 fan-out', async () => {

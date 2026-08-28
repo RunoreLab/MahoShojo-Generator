@@ -63,6 +63,7 @@ if (!/^[a-z0-9_-]{1,32}$/u.test(keyPrefix)) {
 const TIMESTAMP = '2026-08-28T00:00:00.000Z';
 const NEXT_TIMESTAMP = '2026-08-28T00:01:00.000Z';
 const THIRD_TIMESTAMP = '2026-08-28T00:02:00.000Z';
+const nowAt = (timestamp: string) => () => Date.parse(timestamp);
 const roomId = `room-restart-${token}`;
 const ttlRoomId = `room-ttl-${token}`;
 const epochRoomId = `room-epoch-${token}`;
@@ -244,6 +245,7 @@ try {
       store: readerStore,
       createRoomEpoch: () => `restart-recovered-${token}`,
       recoveryTimestamp: () => THIRD_TIMESTAMP,
+      now: nowAt(THIRD_TIMESTAMP),
     });
     const recoveredActor = await recoveredRegistry.recover(roomId);
     const recovered = recoveredActor?.getSnapshot() ?? null;
@@ -284,6 +286,7 @@ try {
       store: writerStore,
       createRoomIdentity: () => ({ roomId, roomEpoch: 'epoch-1' }),
       createTimestamp: () => TIMESTAMP,
+      now: nowAt(NEXT_TIMESTAMP),
     });
     const created = (await registry.create({
       host: { userId: 'host-1', displayName: 'Host' },
@@ -573,6 +576,7 @@ try {
         store: writerStore,
         createRoomEpoch: () => 'legacy-epoch-2',
         recoveryTimestamp: () => THIRD_TIMESTAMP,
+        now: nowAt(THIRD_TIMESTAMP),
       });
       const legacyRecoveredActor = await legacyRecoveryRegistry.recover(legacyRecoveryRoomId);
       const legacyRecovered = legacyRecoveredActor?.getSnapshot() ?? null;
@@ -832,6 +836,7 @@ try {
           roomEpoch: 'actor-epoch-1',
         }),
         createTimestamp: () => TIMESTAMP,
+        now: nowAt(NEXT_TIMESTAMP),
       });
       const actorCreated = (await oldActorRegistry.create({
         host: { userId: 'host-1', displayName: 'Host' },
@@ -843,6 +848,7 @@ try {
         store: readerStore,
         createRoomEpoch: () => 'actor-epoch-2',
         recoveryTimestamp: () => NEXT_TIMESTAMP,
+        now: nowAt(NEXT_TIMESTAMP),
       });
       const recoveredActor = await recoveredActorRegistry.recover(actorRoomId);
       if (recoveredActor?.getSnapshot()?.snapshot.roomEpoch !== 'actor-epoch-2') {
@@ -868,6 +874,7 @@ try {
         store: writerStore,
         createRoomIdentity: () => ({ roomId: authorityRoomId, roomEpoch: 'authority-epoch-1' }),
         createTimestamp: () => TIMESTAMP,
+        now: nowAt(NEXT_TIMESTAMP),
       });
       const authorityMemberships = createArenaRoomMembershipService({
         actors: authorityActors,

@@ -37,6 +37,7 @@ export type RoomActorErrorCode =
   | 'ROOM_ACTOR_CHECKPOINT_CONFLICT'
   | 'ROOM_ACTOR_CREATE_IDENTITY_CONFLICT'
   | 'ROOM_ACTOR_CREATE_REQUIRES_SERVER_IDENTITY'
+  | 'ROOM_ACTOR_DEADLINE_CLOSE_INVALID'
   | 'ROOM_ACTOR_EPOCH_INVALID'
   | 'ROOM_ACTOR_FENCED'
   | 'ROOM_ACTOR_NOT_FOUND'
@@ -443,6 +444,15 @@ export class RoomActor {
   private async apply(input: RoomActorExecuteInput): Promise<ArenaRoomTransitionResult> {
     if (this.phase === 'closed') return fail('ROOM_ACTOR_SHUTTING_DOWN');
     if (this.phase === 'fenced') return fail('ROOM_ACTOR_FENCED');
+    const command = input.command as ArenaRoomCommand;
+    const deadlineClose = command.type === 'close'
+      && typeof input.authority === 'object'
+      && input.authority !== null
+      && 'kind' in input.authority
+      && input.authority.kind === 'room-deadline-closer';
+    if (!deadlineClose && await this.enforceExpiredDeadlineAtBoundary(this.options.now())) {
+      return { ok: false, code: 'room-closed', reason: 'room-closed' };
+    }
     if (
       this.quotaExhausted
       && typeof input.command === 'object'
@@ -499,6 +509,43 @@ export class RoomActor {
     this.rememberReplay(transition.events);
     this.fanout(transition);
     return transition;
+  }
+
+  private async enforceExpiredDeadlineAtBoundary(now: number): Promise<boolean> {
+    if (this.state === null || this.state.lifecycle.status === 'closed') return false;
+    const due = expiredDeadline(this.state, now);
+    if (!due) return false;
+    const timestamp = new Date(now).toISOString();
+    const reason = due.kind === 'host-offline'
+      ? 'host-offline-timeout' as const
+      : 'room-idle-timeout' as const;
+    const transition = transitionArenaRoom(this.state, {
+      type: 'close',
+      expectedRoomEpoch: this.state.snapshot.roomEpoch,
+      reason,
+      timestamp,
+    }, issueArenaRoomDeadlineCloseAuthority({
+      roomId: this.roomId,
+      roomEpoch: this.state.snapshot.roomEpoch,
+      deadlineKind: due.kind,
+      deadline: due.deadline,
+    }));
+    if (!transition.ok || transition.kind !== 'applied') {
+      return fail('ROOM_ACTOR_DEADLINE_CLOSE_INVALID');
+    }
+    const saved = await this.options.store.save({
+      commit: createArenaRoomCheckpointCommit(transition),
+    });
+    if (saved.kind === 'conflict') {
+      this.fence();
+      return fail('ROOM_ACTOR_CHECKPOINT_CONFLICT');
+    }
+    this.requireInstallable();
+    this.state = cloneState(transition.nextState);
+    this.lastCheckpointRefreshAt = this.options.now();
+    this.rememberReplay(transition.events);
+    this.fanout(transition);
+    return true;
   }
 
   async closeForQuota(): Promise<void> {

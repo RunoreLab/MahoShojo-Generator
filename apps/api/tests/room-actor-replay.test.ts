@@ -51,6 +51,7 @@ const createRegistry = (store: MemoryRoomStore, maxReplayEvents = 2) => createRo
   store,
   createRoomIdentity: () => ({ roomId: 'room-1', roomEpoch: 'epoch-1' }),
   createTimestamp: () => '2026-08-28T00:00:00.000Z',
+  now: () => Date.parse('2026-08-28T00:00:00.000Z'),
   hostOfflineGraceMs: 45 * 60_000,
   maxReplayEvents,
   roomIdleTtlMs: 12 * 60 * 60_000,

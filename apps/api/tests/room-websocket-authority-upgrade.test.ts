@@ -105,6 +105,7 @@ describe('Room signed-ticket real Node upgrade', () => {
       store,
       createRoomIdentity: () => ({ roomId: 'room-1', roomEpoch: 'epoch-1' }),
       createTimestamp: () => '2026-08-28T00:00:00.000Z',
+      now: () => Date.parse('2026-08-28T00:01:00.000Z'),
     });
     const memberships = createArenaRoomMembershipService({
       actors,
