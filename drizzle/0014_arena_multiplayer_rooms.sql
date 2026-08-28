@@ -15,3 +15,6 @@ CREATE INDEX IF NOT EXISTS idx_arena_multiplayer_rooms_public_page
 
 CREATE INDEX IF NOT EXISTS idx_arena_multiplayer_rooms_host_page
   ON arena_multiplayer_rooms (host_user_id, status, last_activity_at DESC, id DESC);
+
+CREATE INDEX IF NOT EXISTS idx_arena_multiplayer_rooms_reconcile_page
+  ON arena_multiplayer_rooms (status, last_activity_at DESC, id DESC);

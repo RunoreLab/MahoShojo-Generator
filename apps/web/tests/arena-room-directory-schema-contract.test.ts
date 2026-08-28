@@ -59,6 +59,7 @@ describe('Arena Room directory isolated D1 migration', () => {
     expect(indexes).toEqual(expect.arrayContaining([
       'idx_arena_multiplayer_rooms_public_page',
       'idx_arena_multiplayer_rooms_host_page',
+      'idx_arena_multiplayer_rooms_reconcile_page',
     ]));
     const publicPlan = sqlite.prepare(`
       EXPLAIN QUERY PLAN
@@ -68,5 +69,13 @@ describe('Arena Room directory isolated D1 migration', () => {
       LIMIT 20
     `).all().map((row) => String((row as { detail: string }).detail)).join('\n');
     expect(publicPlan).toContain('idx_arena_multiplayer_rooms_public_page');
+    const reconcilePlan = sqlite.prepare(`
+      EXPLAIN QUERY PLAN
+      SELECT id FROM arena_multiplayer_rooms
+      WHERE status = 'open' AND last_activity_at <= '2026-08-28T09:00:00.000Z'
+      ORDER BY last_activity_at DESC, id DESC
+      LIMIT 50
+    `).all().map((row) => String((row as { detail: string }).detail)).join('\n');
+    expect(reconcilePlan).toContain('idx_arena_multiplayer_rooms_reconcile_page');
   });
 });

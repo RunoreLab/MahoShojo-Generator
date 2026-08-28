@@ -110,6 +110,11 @@ export const arenaMultiplayerRooms = sqliteTable(
       table.lastActivityAt,
       table.id,
     ),
+    reconcilePageIndex: index('idx_arena_multiplayer_rooms_reconcile_page').on(
+      table.status,
+      table.lastActivityAt,
+      table.id,
+    ),
   }),
 );
 
