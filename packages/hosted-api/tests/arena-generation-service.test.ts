@@ -1016,6 +1016,156 @@ describe('Arena generation lifecycle service', () => {
     }
   });
 
+  test('projects actor-owned running state without reasoning, telemetry, or raw result refs', async () => {
+    const store = new MemoryReplayStore();
+    await store.reserve({
+      actorKey: 'pvp-room:room-1',
+      generationRequestId: 'request-owned-running',
+      generationId: 'generation-1',
+      payloadHash: 'payload-hash',
+      producerToken: 'producer-1',
+      now: '2026-08-25T04:00:00.000Z',
+      leaseExpiresAt: '2026-08-25T04:02:00.000Z',
+    });
+    await store.markRunning({
+      generationId: 'generation-1',
+      producerToken: 'producer-1',
+      now: '2026-08-25T04:00:00.000Z',
+      leaseExpiresAt: '2026-08-25T04:02:00.000Z',
+    });
+    await store.writeSnapshot({
+      generationId: 'generation-1',
+      producerToken: 'producer-1',
+      now: '2026-08-25T04:00:01.000Z',
+      snapshot: {
+        status: 'running',
+        markdown: 'authoritative markdown',
+        reasoning: 'private chain of thought',
+        telemetry: { providerRequestId: 'provider-secret-diagnostic' },
+        lastEventId: '7-0',
+        updatedAt: '2026-08-25T04:00:01.000Z',
+        terminalResultRef: 'r2:must-not-leak',
+      },
+    });
+    const service = createService(store, {
+      execute: vi.fn(async () => ({ status: 'completed' as const })),
+    });
+
+    const result = await service.readOwnedProjection({
+      actorKey: 'pvp-room:room-1',
+      generationId: 'generation-1',
+    });
+
+    expect(result).toEqual({
+      kind: 'found',
+      projection: {
+        generationId: 'generation-1',
+        generationRequestId: 'request-owned-running',
+        status: 'running',
+        markdown: 'authoritative markdown',
+        resumeCursor: '7-0',
+        updatedAt: '2026-08-25T04:00:01.000Z',
+        finalAuthoritative: false,
+        resultAvailable: false,
+        generationRecordId: null,
+        errorCode: null,
+      },
+    });
+    expect(JSON.stringify(result)).not.toMatch(/reasoning|telemetry|provider|r2:/u);
+  });
+
+  test('reads an actor-owned D1/R2 terminal as a safe authoritative projection', async () => {
+    const store = new MemoryReplayStore();
+    const terminalStore: ArenaGenerationTerminalStore = {
+      readOwnedTerminal: vi.fn(async ({ actorKey }) => actorKey === 'pvp-room:room-1'
+        ? {
+          generationId: 'generation-1',
+          generationRequestId: 'request-owned-terminal',
+          status: 'failed' as const,
+          updatedAt: '2026-08-25T04:05:00.000Z',
+          resultRef: 'r2:v1/private/output.md',
+          markdown: 'full authoritative markdown',
+          reasoning: 'must not leak',
+          errorCode: 'AI_UPSTREAM_REQUEST_FAILED',
+          contentAvailable: true,
+        }
+        : null),
+    };
+    const service = createService(store, {
+      execute: vi.fn(async () => ({ status: 'completed' as const })),
+    }, { terminalStore });
+
+    const owned = await service.readOwnedProjection({
+      actorKey: 'pvp-room:room-1',
+      generationId: 'generation-1',
+    });
+    const hidden = await service.readOwnedProjection({
+      actorKey: 'pvp-room:room-other',
+      generationId: 'generation-1',
+    });
+
+    expect(owned).toEqual({
+      kind: 'found',
+      projection: {
+        generationId: 'generation-1',
+        generationRequestId: 'request-owned-terminal',
+        status: 'failed',
+        markdown: 'full authoritative markdown',
+        resumeCursor: null,
+        updatedAt: '2026-08-25T04:05:00.000Z',
+        finalAuthoritative: true,
+        resultAvailable: true,
+        generationRecordId: 'generation-1',
+        errorCode: 'AI_UPSTREAM_REQUEST_FAILED',
+      },
+    });
+    expect(hidden).toEqual({ kind: 'not-found' });
+    expect(JSON.stringify(owned)).not.toMatch(/reasoning|r2:/u);
+  });
+
+  test('resumes an actor-owned generation as a typed subscription without a public Request', async () => {
+    const store = new MemoryReplayStore();
+    await store.reserve({
+      actorKey: 'pvp-room:room-1',
+      generationRequestId: 'request-owned-resume',
+      generationId: 'generation-1',
+      payloadHash: 'payload-hash',
+      producerToken: 'producer-1',
+      now: '2026-08-25T04:00:00.000Z',
+      leaseExpiresAt: '2026-08-25T04:02:00.000Z',
+    });
+    await store.markRunning({
+      generationId: 'generation-1',
+      producerToken: 'producer-1',
+      now: '2026-08-25T04:00:00.000Z',
+      leaseExpiresAt: '2026-08-25T04:02:00.000Z',
+    });
+    await store.appendEvents({
+      generationId: 'generation-1',
+      producerToken: 'producer-1',
+      now: '2026-08-25T04:00:01.000Z',
+      events: [{ type: 'markdown', data: { chunk: 'owned replay' } }],
+    });
+    const service = createService(store, {
+      execute: vi.fn(async () => ({ status: 'completed' as const })),
+    });
+
+    const result = await service.resumeOwnedSubscription({
+      actorKey: 'pvp-room:room-1',
+      generationId: 'generation-1',
+      after: null,
+    });
+
+    expect(result.kind).toBe('subscribed');
+    if (result.kind !== 'subscribed') throw new Error('expected owned subscription');
+    const reader = result.subscription.events.getReader();
+    await expect(reader.read()).resolves.toMatchObject({
+      done: false,
+      value: { id: '1-0', type: 'markdown', data: { chunk: 'owned replay' } },
+    });
+    await reader.cancel('test complete');
+  });
+
   test('looks up an actor-owned generation by stable request id', async () => {
     const store = new MemoryReplayStore();
     let release!: () => void;

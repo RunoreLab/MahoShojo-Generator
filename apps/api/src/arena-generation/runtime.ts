@@ -4,10 +4,14 @@ import {
   createArenaGenerationFinalizer,
   createArenaR2ObjectStoreFromEnvironment,
   createArenaSeasonContextReader,
+  createArenaInternalGuidanceAuthority,
+  createArenaPvpGenerationAuthority,
   createNodeArenaGenerationFinalizationPorts,
   createNodeArenaRejectedTerminalRecorder,
   createNodeArenaGenerationService,
   createNodeArenaGenerationTerminalStore,
+  deriveArenaGenerationId,
+  ARENA_PVP_GENERATION_SIGNATURE_PURPOSE,
 } from '@mahoshojo/hosted-runtime/arena-generation';
 import {
   configureArenaCompanionRouteService,
@@ -19,6 +23,10 @@ import { recordUserActivityFromRequest } from '@mahoshojo/hosted-runtime/node-ru
 import { createEnvSignatureService } from '@mahoshojo/hosted-runtime/node-runtime/env-signature';
 import { getHonoPrimaryD1Client } from '#/d1/provider';
 import type { RedisRuntime } from '#/redis/runtime';
+import {
+  createArenaRoomGenerationPort,
+  type ArenaRoomGenerationPort,
+} from './room-generation-port';
 
 export type HonoArenaGenerationRuntimeOptions = {
   settleRatings?(_input: Pick<
@@ -37,7 +45,7 @@ const DEVELOPMENT_FINALIZATION_SECRET = 'development-only-arena-finalization-sec
 export const configureHonoArenaGenerationRuntime = (
   redis: Pick<RedisRuntime, 'getGenerationReplayStore'>,
   options: HonoArenaGenerationRuntimeOptions = {},
-): void => {
+): ArenaRoomGenerationPort => {
   const finalizationBaseUrl = options.finalizationBaseUrl?.trim()
     || process.env.ARENA_FINALIZATION_URL?.trim()
     || DEVELOPMENT_FINALIZATION_URL;
@@ -75,12 +83,16 @@ export const configureHonoArenaGenerationRuntime = (
     settleRatings,
   });
   const signatures = createEnvSignatureService();
+  const pvpSignatures = createEnvSignatureService({
+    purpose: ARENA_PVP_GENERATION_SIGNATURE_PURPOSE,
+  });
   const generationService = createNodeArenaGenerationService({
     store: redis.getGenerationReplayStore(),
     terminalStore,
     rejectedTerminalRecorder: createNodeArenaRejectedTerminalRecorder({ getD1Client }),
     getD1Client,
     signatures,
+    pvpSignatures,
     observer: options.observer,
     executorOptions: {
       finalizer,
@@ -110,4 +122,10 @@ export const configureHonoArenaGenerationRuntime = (
     observer: options.observer,
     recordActivity: recordUserActivityFromRequest,
   }));
+  return createArenaRoomGenerationPort({
+    generationService,
+    pvpAuthority: createArenaPvpGenerationAuthority(pvpSignatures),
+    internalGuidanceAuthority: createArenaInternalGuidanceAuthority(signatures),
+    deriveGenerationId: deriveArenaGenerationId,
+  });
 };

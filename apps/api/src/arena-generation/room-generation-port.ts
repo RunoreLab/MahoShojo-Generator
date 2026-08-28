@@ -1,0 +1,356 @@
+import {
+  ArenaMultiplayerGenerationSnapshotSchema,
+  type ArenaMultiplayerGenerationSnapshot,
+} from '@mahoshojo/contracts/arena-room';
+import type {
+  ArenaGenerationApplicationService,
+  ArenaGenerationOwnedProjectionResult,
+  ArenaGenerationSubscription,
+  GenerationStatus,
+  GenerationStreamEvent,
+} from '@mahoshojo/hosted-api/arena-generation/service';
+import {
+  ARENA_INTERNAL_GUIDANCE_SIGNATURE_HEADER,
+  ARENA_PVP_GENERATION_SIGNATURE_HEADER,
+} from '@mahoshojo/hosted-runtime/arena-generation';
+
+type TerminalGenerationStatus = Extract<
+  GenerationStatus,
+  'completed' | 'failed' | 'cancelled' | 'producer_lost'
+>;
+
+export type ArenaRoomGenerationEvent =
+  | Readonly<{ id: string; type: 'markdown'; chunk: string }>
+  | Readonly<{
+    id: string;
+    type: 'snapshot';
+    status: GenerationStatus;
+    markdown: string;
+    updatedAt: string;
+    lastEventId: string | null;
+  }>
+  | Readonly<{
+    id: string;
+    type: 'done';
+    status: TerminalGenerationStatus;
+    generationRecordId: string | null;
+    resultAvailable: boolean;
+  }>
+  | Readonly<{
+    id: string;
+    type: 'error';
+    status: Extract<TerminalGenerationStatus, 'failed' | 'producer_lost'>;
+    code: string;
+  }>;
+
+export type ArenaRoomGenerationSubscription = Readonly<{
+  generationId: string;
+  generationRequestId: string;
+  events: ReadableStream<ArenaRoomGenerationEvent>;
+}>;
+
+export type ArenaRoomGenerationStartResult =
+  | Readonly<{ kind: 'subscribed'; subscription: ArenaRoomGenerationSubscription }>
+  | Readonly<{ kind: 'rejected'; status: number; code: string }>;
+
+export type ArenaRoomGenerationSubscriptionResult =
+  | Readonly<{ kind: 'subscribed'; subscription: ArenaRoomGenerationSubscription }>
+  | Readonly<{ kind: 'not-found' }>
+  | Readonly<{ kind: 'unavailable'; code: string }>;
+
+export type ArenaRoomGenerationProjectionResult = ArenaGenerationOwnedProjectionResult;
+
+export type ArenaRoomGenerationIdentityInput = Readonly<{
+  roomId: string;
+  generationRequestId: string;
+}>;
+
+export type ArenaRoomGenerationStartInput = Readonly<{
+  request: Request;
+  roomId: string;
+  generationRequestId: string;
+  payload: Readonly<Record<string, unknown>>;
+  internalGuidance: string;
+  pvpContext: Readonly<{ matchId: string; roundId: string }>;
+  multiplayerSnapshot: ArenaMultiplayerGenerationSnapshot;
+}>;
+
+export type ArenaRoomGenerationOwnedInput = Readonly<{
+  roomId: string;
+  generationId: string;
+}>;
+
+export type ArenaRoomGenerationResumeInput = ArenaRoomGenerationOwnedInput & Readonly<{
+  after: string | null;
+}>;
+
+export interface ArenaRoomGenerationPort {
+  deriveGenerationId(_input: ArenaRoomGenerationIdentityInput): Promise<string>;
+  startFromHostRequest(_input: ArenaRoomGenerationStartInput): Promise<ArenaRoomGenerationStartResult>;
+  readOwnedProjection(_input: ArenaRoomGenerationOwnedInput): Promise<ArenaRoomGenerationProjectionResult>;
+  resumeOwnedSubscription(
+    _input: ArenaRoomGenerationResumeInput,
+  ): Promise<ArenaRoomGenerationSubscriptionResult>;
+}
+
+type ArenaRoomGenerationPortDependencies = Readonly<{
+  generationService: Pick<
+    ArenaGenerationApplicationService,
+    'createSubscription' | 'readOwnedProjection' | 'resumeOwnedSubscription'
+  >;
+  pvpAuthority: Readonly<{
+    sign(_input: {
+      generationRequestId: string;
+      payload: Readonly<Record<string, unknown>>;
+    }): Promise<string | null>;
+  }>;
+  internalGuidanceAuthority: Readonly<{
+    sign(_guidance: string): Promise<string | null>;
+  }>;
+  deriveGenerationId(_input: {
+    actorKey: string;
+    generationRequestId: string;
+  }): Promise<string>;
+}>;
+
+const actorKeyForRoom = (roomId: string): string => `pvp-room:${roomId}`;
+
+const recordOf = (value: unknown): Record<string, unknown> | null => (
+  value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null
+);
+
+const isGenerationStatus = (value: unknown): value is GenerationStatus => (
+  value === 'reserved'
+  || value === 'running'
+  || value === 'finalizing'
+  || value === 'completed'
+  || value === 'failed'
+  || value === 'cancelled'
+  || value === 'producer_lost'
+);
+
+const safeErrorCode = (value: unknown, fallback: string): string => (
+  typeof value === 'string' && /^[A-Z][A-Z0-9_]{1,79}$/u.test(value)
+    ? value
+    : fallback
+);
+
+const projectEvent = (
+  generationId: string,
+  event: GenerationStreamEvent,
+): ArenaRoomGenerationEvent | null => {
+  const data = recordOf(event.data);
+  if (event.type === 'markdown') {
+    return typeof data?.chunk === 'string'
+      ? Object.freeze({ id: event.id, type: 'markdown', chunk: data.chunk })
+      : null;
+  }
+  if (event.type === 'snapshot') {
+    if (
+      !isGenerationStatus(data?.status)
+      || typeof data.markdown !== 'string'
+      || typeof data.updatedAt !== 'string'
+      || !(typeof data.lastEventId === 'string' || data.lastEventId === null)
+    ) return null;
+    return Object.freeze({
+      id: event.id,
+      type: 'snapshot',
+      status: data.status,
+      markdown: data.markdown,
+      updatedAt: data.updatedAt,
+      lastEventId: data.lastEventId,
+    });
+  }
+  if (event.type === 'done') {
+    const status = data?.status;
+    if (
+      status !== 'completed'
+      && status !== 'cancelled'
+      && status !== 'failed'
+      && status !== 'producer_lost'
+    ) return null;
+    const resultAvailable = typeof data?.resultRef === 'string' && data.resultRef.length > 0;
+    return Object.freeze({
+      id: event.id,
+      type: 'done',
+      status,
+      generationRecordId: resultAvailable ? generationId : null,
+      resultAvailable,
+    });
+  }
+  if (event.type === 'error') {
+    const status = data?.status === 'producer_lost' ? 'producer_lost' : 'failed';
+    return Object.freeze({
+      id: event.id,
+      type: 'error',
+      status,
+      code: safeErrorCode(
+        data?.code,
+        status === 'producer_lost' ? 'PRODUCER_OWNERSHIP_LOST' : 'GENERATION_FAILED',
+      ),
+    });
+  }
+  return null;
+};
+
+const projectSubscription = (
+  subscription: ArenaGenerationSubscription,
+): ArenaRoomGenerationSubscription => Object.freeze({
+  generationId: subscription.generationId,
+  generationRequestId: subscription.generationRequestId,
+  events: subscription.events.pipeThrough(new TransformStream<
+    GenerationStreamEvent,
+    ArenaRoomGenerationEvent
+  >({
+    transform(event, controller) {
+      const projected = projectEvent(subscription.generationId, event);
+      if (projected) controller.enqueue(projected);
+    },
+  })),
+});
+
+const projectOwnedProjectionResult = (
+  result: ArenaGenerationOwnedProjectionResult,
+): ArenaRoomGenerationProjectionResult => {
+  if (result.kind === 'not-found') return { kind: 'not-found' };
+  if (result.kind === 'unavailable') {
+    return {
+      kind: 'unavailable',
+      code: safeErrorCode(result.code, 'GENERATION_STATE_UNAVAILABLE'),
+    };
+  }
+  const projection = result.projection;
+  const errorCode = projection.status === 'failed' || projection.status === 'producer_lost'
+    ? safeErrorCode(
+      projection.errorCode,
+      projection.status === 'producer_lost'
+        ? 'PRODUCER_OWNERSHIP_LOST'
+        : 'GENERATION_FAILED',
+    )
+    : null;
+  return {
+    kind: 'found',
+    projection: Object.freeze({
+      generationId: projection.generationId,
+      generationRequestId: projection.generationRequestId,
+      status: projection.status,
+      markdown: projection.markdown,
+      resumeCursor: projection.resumeCursor,
+      updatedAt: projection.updatedAt,
+      finalAuthoritative: projection.finalAuthoritative,
+      resultAvailable: projection.resultAvailable,
+      generationRecordId: projection.generationRecordId,
+      errorCode,
+    }),
+  };
+};
+
+const projectRejectedResponse = async (response: Response): Promise<
+  Extract<ArenaRoomGenerationStartResult, { kind: 'rejected' }>
+> => {
+  let code = response.status >= 500
+    ? 'GENERATION_STATE_UNAVAILABLE'
+    : 'GENERATION_REQUEST_REJECTED';
+  try {
+    const body = await response.clone().json() as { code?: unknown };
+    code = safeErrorCode(body.code, code);
+  } catch {
+    // No response body or diagnostic crosses this server-only boundary.
+  }
+  return { kind: 'rejected', status: response.status, code };
+};
+
+export const createArenaRoomGenerationPort = (
+  dependencies: ArenaRoomGenerationPortDependencies,
+): ArenaRoomGenerationPort => Object.freeze({
+  deriveGenerationId: (input: ArenaRoomGenerationIdentityInput) => dependencies.deriveGenerationId({
+    actorKey: actorKeyForRoom(input.roomId),
+    generationRequestId: input.generationRequestId,
+  }),
+
+  async startFromHostRequest(
+    input: ArenaRoomGenerationStartInput,
+  ): Promise<ArenaRoomGenerationStartResult> {
+    const parsedSnapshot = ArenaMultiplayerGenerationSnapshotSchema.safeParse(
+      input.multiplayerSnapshot,
+    );
+    if (
+      !parsedSnapshot.success
+      || parsedSnapshot.data.roomId !== input.roomId
+      || parsedSnapshot.data.generationRequestId !== input.generationRequestId
+    ) {
+      return {
+        kind: 'rejected',
+        status: 400,
+        code: 'ARENA_MULTIPLAYER_SNAPSHOT_INVALID',
+      };
+    }
+    const internalGuidance = input.internalGuidance.trim();
+    const pvpContext = Object.freeze({
+      roomId: input.roomId,
+      matchId: input.pvpContext.matchId,
+      roundId: input.pvpContext.roundId,
+    });
+    const callerPayload = { ...input.payload };
+    delete callerPayload.generationRequestId;
+    const payload = Object.freeze({
+      ...callerPayload,
+      internalGuidance,
+      pvpContext,
+      multiplayerGenerationSnapshot: parsedSnapshot.data,
+    });
+    const [pvpSignature, guidanceSignature] = await Promise.all([
+      dependencies.pvpAuthority.sign({
+        generationRequestId: input.generationRequestId,
+        payload,
+      }),
+      dependencies.internalGuidanceAuthority.sign(internalGuidance),
+    ]);
+    if (!pvpSignature || !guidanceSignature) {
+      return {
+        kind: 'rejected',
+        status: 503,
+        code: 'ARENA_PVP_SIGNATURE_UNAVAILABLE',
+      };
+    }
+    const headers = new Headers(input.request.headers);
+    headers.delete('content-length');
+    headers.set('Accept', 'text/event-stream');
+    headers.set('Content-Type', 'application/json; charset=utf-8');
+    headers.set(ARENA_PVP_GENERATION_SIGNATURE_HEADER, pvpSignature);
+    headers.set(ARENA_INTERNAL_GUIDANCE_SIGNATURE_HEADER, guidanceSignature);
+    const request = new Request(input.request.url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ ...payload, generationRequestId: input.generationRequestId }),
+      signal: input.request.signal,
+    });
+    const subscription = await dependencies.generationService.createSubscription(request);
+    return subscription instanceof Response
+      ? projectRejectedResponse(subscription)
+      : { kind: 'subscribed', subscription: projectSubscription(subscription) };
+  },
+
+  async readOwnedProjection(input: ArenaRoomGenerationOwnedInput) {
+    const result = await dependencies.generationService.readOwnedProjection({
+      actorKey: actorKeyForRoom(input.roomId),
+      generationId: input.generationId,
+    });
+    return projectOwnedProjectionResult(result);
+  },
+
+  async resumeOwnedSubscription(
+    input: ArenaRoomGenerationResumeInput,
+  ): Promise<ArenaRoomGenerationSubscriptionResult> {
+    const result = await dependencies.generationService.resumeOwnedSubscription({
+      actorKey: actorKeyForRoom(input.roomId),
+      generationId: input.generationId,
+      after: input.after,
+    });
+    return result.kind === 'subscribed'
+      ? { kind: 'subscribed', subscription: projectSubscription(result.subscription) }
+      : result;
+  },
+});

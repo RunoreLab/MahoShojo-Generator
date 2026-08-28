@@ -495,6 +495,41 @@ export type ArenaGenerationSubscription = Readonly<{
   events: ReadableStream<GenerationStreamEvent>;
 }>;
 
+export type ArenaGenerationOwnedProjection = Readonly<{
+  generationId: string;
+  generationRequestId: string;
+  status: GenerationStatus;
+  markdown: string;
+  resumeCursor: string | null;
+  updatedAt: string;
+  finalAuthoritative: boolean;
+  resultAvailable: boolean;
+  generationRecordId: string | null;
+  errorCode: string | null;
+}>;
+
+export type ArenaGenerationOwnedProjectionResult =
+  | Readonly<{ kind: 'found'; projection: ArenaGenerationOwnedProjection }>
+  | Readonly<{ kind: 'not-found' }>
+  | Readonly<{ kind: 'unavailable'; code: string }>;
+
+export type ArenaGenerationOwnedSubscriptionResult =
+  | Readonly<{ kind: 'subscribed'; subscription: ArenaGenerationSubscription }>
+  | Readonly<{ kind: 'not-found' }>
+  | Readonly<{ kind: 'unavailable'; code: string }>;
+
+export interface ArenaGenerationTrustedOwnedService {
+  readOwnedProjection(_input: {
+    actorKey: string;
+    generationId: string;
+  }): Promise<ArenaGenerationOwnedProjectionResult>;
+  resumeOwnedSubscription(_input: {
+    actorKey: string;
+    generationId: string;
+    after: string | null;
+  }): Promise<ArenaGenerationOwnedSubscriptionResult>;
+}
+
 export interface ArenaGenerationService {
   createSubscription(
     _request: Request,
@@ -509,6 +544,9 @@ export interface ArenaGenerationService {
   status(_request: Request, _params: ArenaGenerationRouteParams): Promise<Response>;
   cancel(_request: Request, _params: ArenaGenerationRouteParams): Promise<Response>;
 }
+
+export type ArenaGenerationApplicationService = ArenaGenerationService
+  & ArenaGenerationTrustedOwnedService;
 
 type ActiveProducer = {
   controller: AbortController;
@@ -787,7 +825,7 @@ const addLeaseDuration = (now: Date, durationMs: number): string => new Date(
 
 export const createArenaGenerationService = (
   dependencies: ArenaGenerationServiceDependencies,
-): ArenaGenerationService => {
+): ArenaGenerationApplicationService => {
   const heartbeatIntervalMs = dependencies.heartbeatIntervalMs ?? 15_000;
   const leaseDurationMs = dependencies.leaseDurationMs ?? 45_000;
   const replayPollMs = dependencies.replayPollMs ?? 1_000;
@@ -1245,6 +1283,40 @@ export const createArenaGenerationService = (
     const actor = await dependencies.resolveActor(request);
     if (!actor) return jsonResponse({ code: 'UNAUTHORIZED', error: 'Unauthorized' }, 401);
     return resolveOwnedStateForActor(actor, generationId);
+  };
+
+  const ownedFailureFromResponse = async (
+    response: Response,
+  ): Promise<Extract<
+    ArenaGenerationOwnedProjectionResult,
+    { kind: 'not-found' | 'unavailable' }
+  >> => {
+    if (response.status === 404) return { kind: 'not-found' };
+    const allowedCodes = new Set([
+      'GENERATION_FINALIZATION_PENDING',
+      'GENERATION_STATE_UNAVAILABLE',
+      'GENERATION_TERMINAL_CONTENT_UNAVAILABLE',
+      'GENERATION_TERMINAL_RECONCILIATION_PENDING',
+    ]);
+    let code = 'GENERATION_STATE_UNAVAILABLE';
+    try {
+      const body = await response.clone().json() as { code?: unknown };
+      if (typeof body.code === 'string' && allowedCodes.has(body.code)) code = body.code;
+    } catch {
+      // The trusted seam intentionally projects no response body or diagnostic.
+    }
+    return { kind: 'unavailable', code };
+  };
+
+  const safeTerminalErrorCode = (
+    status: GenerationStatus,
+    candidate: string | null | undefined,
+  ): string | null => {
+    if (status !== 'failed' && status !== 'producer_lost') return null;
+    if (candidate && /^[A-Z][A-Z0-9_]{1,79}$/u.test(candidate)) return candidate;
+    return status === 'producer_lost'
+      ? 'PRODUCER_OWNERSHIP_LOST'
+      : 'GENERATION_FAILED';
   };
 
   const createStatusResponse = (
@@ -1898,7 +1970,73 @@ export const createArenaGenerationService = (
     ), input.actor);
   };
 
-  const service: ArenaGenerationService = {
+  const service: ArenaGenerationApplicationService = {
+    async readOwnedProjection(input): Promise<ArenaGenerationOwnedProjectionResult> {
+      const owned = await resolveOwnedStateForActor(
+        { actorKey: input.actorKey },
+        input.generationId,
+      );
+      if (owned instanceof Response) return ownedFailureFromResponse(owned);
+      if (
+        owned.terminalFallback?.status === 'completed'
+        && owned.terminalFallback.contentAvailable === false
+      ) {
+        return {
+          kind: 'unavailable',
+          code: 'GENERATION_TERMINAL_CONTENT_UNAVAILABLE',
+        };
+      }
+      const snapshot = owned.state.snapshot;
+      const finalAuthoritative = owned.state.status === 'completed'
+        || owned.state.status === 'failed'
+        || owned.state.status === 'cancelled'
+        || owned.state.status === 'producer_lost';
+      const resultAvailable = finalAuthoritative && Boolean(
+        owned.terminalFallback?.resultRef
+        ?? owned.state.terminal?.resultRef
+        ?? snapshot?.terminalResultRef,
+      );
+      return {
+        kind: 'found',
+        projection: Object.freeze({
+          generationId: owned.state.generationId,
+          generationRequestId: owned.state.generationRequestId,
+          status: owned.state.status,
+          markdown: owned.terminalFallback?.markdown ?? snapshot?.markdown ?? '',
+          resumeCursor: snapshot?.lastEventId ?? owned.state.lastEventId,
+          updatedAt: owned.terminalFallback?.updatedAt
+            ?? snapshot?.updatedAt
+            ?? owned.state.updatedAt,
+          finalAuthoritative,
+          resultAvailable,
+          generationRecordId: resultAvailable ? owned.state.generationId : null,
+          errorCode: safeTerminalErrorCode(
+            owned.state.status,
+            owned.terminalFallback?.errorCode ?? owned.state.terminal?.code,
+          ),
+        }),
+      };
+    },
+
+    async resumeOwnedSubscription(input): Promise<ArenaGenerationOwnedSubscriptionResult> {
+      const owned = await resolveOwnedStateForActor(
+        { actorKey: input.actorKey },
+        input.generationId,
+      );
+      if (owned instanceof Response) return ownedFailureFromResponse(owned);
+      const subscription = owned.terminalFallback
+        ? createTerminalFallbackSubscription(owned.terminalFallback, input.after)
+        : createReplaySubscription(
+          owned.state.generationId,
+          owned.state.generationRequestId,
+          input.after,
+          owned.actor.actorKey,
+          owned.actor.responseHeaders,
+        );
+      if (subscription instanceof Response) return ownedFailureFromResponse(subscription);
+      return { kind: 'subscribed', subscription };
+    },
+
     async create(request: Request): Promise<Response> {
       const subscription = await service.createSubscription(request);
       return subscription instanceof Response
