@@ -1188,27 +1188,71 @@ export const createArenaGenerationService = (
     }
     const terminal: GenerationTerminal = {
       status: terminalFallback.status,
+      ...(terminalFallback.errorCode ? { code: terminalFallback.errorCode } : {}),
       ...(terminalFallback.resultRef ? { resultRef: terminalFallback.resultRef } : {}),
     };
-    await dependencies.store.markTerminal({
+    const terminalCode = terminal.status === 'producer_lost'
+      ? terminal.code ?? 'PRODUCER_OWNERSHIP_LOST'
+      : terminal.status === 'failed'
+        ? terminal.code ?? 'GENERATION_FAILED'
+        : null;
+    const terminalEvent: GenerationEventInput = {
+      type: terminal.status === 'failed' || terminal.status === 'producer_lost'
+        ? 'error'
+        : 'done',
+      data: {
+        ok: terminal.status === 'completed',
+        status: terminal.status,
+        ...(terminalCode ? { code: terminalCode } : {}),
+        ...(terminal.resultRef ? { resultRef: terminal.resultRef } : {}),
+      },
+    };
+    const terminalSnapshot: GenerationSnapshot = {
+      status: terminal.status,
+      markdown: terminalFallback.markdown,
+      reasoning: terminalFallback.reasoning,
+      lastEventId: state.lastEventId,
+      updatedAt: now,
+      telemetry: state.snapshot?.telemetry ?? null,
+      terminalResultRef: terminal.resultRef ?? null,
+    };
+    const snapshotWithinBudget = encodedBytes(terminalSnapshot) <= snapshotMaxBytes;
+    if (!snapshotWithinBudget) {
+      observe({ event: 'redis_degraded', generationId, operation: 'snapshot_budget' });
+    }
+    const committed = await dependencies.store.markTerminal({
       generationId,
       producerToken: reaperToken,
       terminal,
+      terminalEvent,
+      ...(snapshotWithinBudget ? { terminalSnapshot } : {}),
       now,
-    }).catch(() => ({ owned: true, applied: false }));
+    }).catch(() => null);
+    const durableState = committed?.owned
+      ? await dependencies.store.readState({
+          generationId,
+          actorKey: actor.actorKey,
+        }).catch(() => null)
+      : null;
+    if (
+      !durableState
+      || durableState.status !== terminal.status
+      || durableState.terminal?.status !== terminal.status
+      || durableState.leaseExpiresAt !== null
+      || (snapshotWithinBudget && durableState.snapshot?.status !== terminal.status)
+    ) {
+      return jsonResponse({
+        code: 'GENERATION_TERMINAL_RECONCILIATION_PENDING',
+        error: 'Generation terminal reconciliation pending',
+      }, 503);
+    }
     if (terminalFallback.status === 'producer_lost') {
       observe({ event: 'producer_lost', generationId, reason: 'lease_expired' });
     }
     return {
       actor,
       terminalFallback,
-      state: {
-        ...state,
-        status: terminalFallback.status,
-        updatedAt: now,
-        leaseExpiresAt: null,
-        terminal,
-      },
+      state: durableState,
     };
   };
 

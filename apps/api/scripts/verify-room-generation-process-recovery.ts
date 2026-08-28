@@ -211,18 +211,26 @@ const deleteIsolatedKeys = async (): Promise<void> => {
   if (keys.length > 0) await cleanupClient.del(keys);
 };
 
-const assertSecretAbsent = async (): Promise<void> => {
+const inspectSecretPersistence = async (): Promise<Readonly<{
+  scannedKeys: number;
+  secretPersisted: boolean;
+}>> => {
+  let scannedKeys = 0;
   for (const key of await isolatedKeys()) {
+    scannedKeys += 1;
     const type = await cleanupClient.type(key);
     let value: unknown = null;
     if (type === 'string') value = await cleanupClient.get(key);
     else if (type === 'stream') value = await cleanupClient.xRange(key, '-', '+');
     else if (type === 'set') value = await cleanupClient.sMembers(key);
     else if (type === 'zset') value = await cleanupClient.zRangeWithScores(key, 0, -1);
+    else if (type === 'hash') value = await cleanupClient.hGetAll(key);
+    else if (type === 'list') value = await cleanupClient.lRange(key, 0, -1);
     if (JSON.stringify(value).includes(secretCanary)) {
-      throw new Error('ROOM_GENERATION_PROCESS_SECRET_PERSISTED');
+      return { scannedKeys, secretPersisted: true };
     }
   }
+  return { scannedKeys, secretPersisted: false };
 };
 
 const waitForProducerReady = (
@@ -329,7 +337,62 @@ const runParent = async (): Promise<void> => {
     if (checkpoint?.snapshot.activeGeneration?.state !== 'failed') {
       throw new Error('ROOM_GENERATION_PROCESS_ROOM_TERMINAL_INVALID');
     }
-    await assertSecretAbsent();
+    const replay = runtime.getGenerationReplayStore();
+    const durableState = await replay.readState({ generationId: ready.generationId, actorKey });
+    const durableEvents = await replay.readAfter({
+      generationId: ready.generationId,
+      after: null,
+      blockMs: 1,
+    });
+    const terminalEvent = durableEvents.events.find((event) => (
+      event.type === 'error'
+      && event.data
+      && typeof event.data === 'object'
+      && (event.data as { status?: unknown }).status === 'producer_lost'
+    ));
+    if (
+      durableState?.status !== 'producer_lost'
+      || durableState.terminal?.status !== 'producer_lost'
+      || durableState.leaseExpiresAt !== null
+      || durableState.snapshot?.status !== 'producer_lost'
+      || !terminalEvent
+      || durableState.lastEventId !== terminalEvent.id
+      || durableState.snapshot.lastEventId !== terminalEvent.id
+    ) throw new Error('ROOM_GENERATION_PROCESS_DURABLE_TERMINAL_INVALID');
+    const repeatedRead = await coordinator.read({
+      roomId,
+      generationId: ready.generationId,
+      accountUserId: 202,
+    });
+    if (repeatedRead.status !== 'producer_lost') {
+      throw new Error('ROOM_GENERATION_PROCESS_REPEATED_READ_INVALID');
+    }
+    const retry = await coordinator.start({
+      roomId,
+      accountUserId: 101,
+      request: {
+        expectedRoomEpoch: checkpoint.snapshot.roomEpoch,
+        expectedRevision: checkpoint.snapshot.revision,
+        generationRequestId,
+        sharedConfig: sharedConfig(),
+        generation: {
+          mode: 'classic',
+          combatants: [{ data: { name: 'Process verifier' } }],
+          customProvider: { apiKey: secretCanary },
+        },
+      },
+      sourceRequest: new Request('https://loopback.invalid/api/arena/rooms/generation', {
+        method: 'POST',
+        headers: { authorization: 'Bearer process-verifier' },
+      }),
+    });
+    if (retry.status !== 'producer_lost' || recoveryProviderStarts !== 0) {
+      throw new Error('ROOM_GENERATION_PROCESS_TERMINAL_RETRY_INVALID');
+    }
+    const secretInspection = await inspectSecretPersistence();
+    if (secretInspection.secretPersisted) {
+      throw new Error('ROOM_GENERATION_PROCESS_SECRET_PERSISTED');
+    }
     await actors.shutdown();
     console.log(JSON.stringify({
       verifier: 'GMR09_ROOM_GENERATION_PROCESS_RECOVERY',
@@ -340,8 +403,12 @@ const runParent = async (): Promise<void> => {
       recoveredRoomEpoch: recovered.roomEpoch,
       recoveredGenerationStatus: recovered.status,
       roomTerminal: checkpoint.snapshot.activeGeneration.state,
-      durableFact: 'producer_lost',
-      secretPersisted: false,
+      durableFact: durableState.status,
+      durableTerminalEvent: terminalEvent.type,
+      durableTerminalSnapshot: durableState.snapshot.status,
+      terminalRetryProviderStarts: recoveryProviderStarts,
+      secretKeysScanned: secretInspection.scannedKeys,
+      secretPersisted: secretInspection.secretPersisted,
     }));
   } finally {
     if (child) child.kill('SIGKILL');

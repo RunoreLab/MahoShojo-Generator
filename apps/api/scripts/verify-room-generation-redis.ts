@@ -259,6 +259,29 @@ try {
   let finalizerRuns = 0;
   const expectedMarkdown = '# 第一批\n\n第二批\n';
   const executor: ArenaGenerationExecutor = {
+    async prepare(input) {
+      const pvpContext = input.payload.pvpContext;
+      const trustedPvpContext = pvpContext
+        && typeof pvpContext === 'object'
+        && !Array.isArray(pvpContext)
+        ? pvpContext as { roomId: string; matchId: string; roundId: string }
+        : null;
+      const trustedInternalGuidance = typeof input.payload.internalGuidance === 'string'
+        ? input.payload.internalGuidance
+        : null;
+      return {
+        executionPayload: input.payload,
+        semanticPayload: await canonicalizeNodeArenaGenerationSemanticPayload({
+          payload: input.payload,
+          signatures: {
+            generateSignature: async () => null,
+            verifySignature: async () => false,
+          },
+          trustedInternalGuidance,
+          trustedPvpContext,
+        }),
+      };
+    },
     async execute(input) {
       providerStarts += 1;
       await input.emit({ type: 'markdown', data: { chunk: '# 第一批\n\n' } });
@@ -421,6 +444,17 @@ try {
       retryPayloadDigest,
     ].join(':'));
   }
+  const hostedSemanticState = await runtime.getGenerationReplayStore().readState({
+    generationId,
+    actorKey,
+  });
+  const hostedSemanticDigestMatched = Boolean(
+    hostedSemanticState
+    && historical.generationPayloadDigest === `sha256:${hostedSemanticState.payloadHash}`,
+  );
+  if (!hostedSemanticDigestMatched) {
+    throw new Error('ROOM_GENERATION_DURABLE_HOSTED_SEMANTIC_DIGEST_MISMATCH');
+  }
 
   await coordinator.start({
     roomId,
@@ -559,6 +593,7 @@ try {
     redis: 'real-loopback',
     providerStarts,
     responseLossInjected,
+    hostedSemanticDigestMatched,
     duplicateSingleFlight: true,
     resume: true,
     activeProcessRecoveryEpoch: activeRecoveredView.roomEpoch,

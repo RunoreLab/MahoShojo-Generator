@@ -2328,6 +2328,84 @@ describe('Arena generation lifecycle service', () => {
     expect(await response.json()).toMatchObject({ status: 'producer_lost', resumable: false });
     expect(terminalStore.reconcileExpiredLease).toHaveBeenCalledOnce();
     expect(execute).not.toHaveBeenCalled();
+    const durable = await store.readState({
+      actorKey: 'user:42',
+      generationId: 'generation-1',
+    });
+    const events = await store.readAfter({
+      generationId: 'generation-1',
+      after: null,
+      blockMs: 0,
+    });
+    expect(durable).toMatchObject({
+      status: 'producer_lost',
+      leaseExpiresAt: null,
+      terminal: { status: 'producer_lost' },
+      snapshot: {
+        status: 'producer_lost',
+        markdown: '',
+        reasoning: '',
+      },
+    });
+    expect(events.events).toEqual([
+      expect.objectContaining({
+        type: 'error',
+        data: expect.objectContaining({
+          status: 'producer_lost',
+          code: 'PRODUCER_OWNERSHIP_LOST',
+        }),
+      }),
+    ]);
+    expect(durable?.lastEventId).toBe(events.events[0]?.id);
+    expect(durable?.snapshot?.lastEventId).toBe(events.events[0]?.id);
+  });
+
+  test('expired producer lease stays unavailable when durable terminal commit fails', async () => {
+    const store = new MemoryReplayStore();
+    await store.reserve({
+      actorKey: 'user:42',
+      generationRequestId: 'request-1',
+      generationId: 'generation-1',
+      payloadHash: 'payload-hash',
+      producerToken: 'producer-token-1',
+      now: '2026-08-25T03:00:00.000Z',
+      leaseExpiresAt: '2026-08-25T03:01:00.000Z',
+    });
+    await store.markRunning({
+      generationId: 'generation-1',
+      producerToken: 'producer-token-1',
+      now: '2026-08-25T03:00:00.000Z',
+      leaseExpiresAt: '2026-08-25T03:01:00.000Z',
+    });
+    store.markTerminal = vi.fn(async () => {
+      throw new Error('redis terminal unavailable');
+    });
+    const execute = vi.fn(async () => ({ status: 'completed' as const }));
+    const service = createService(store, { execute }, {
+      terminalStore: {
+        readOwnedTerminal: vi.fn(async () => null),
+        reconcileExpiredLease: vi.fn(async (input) => ({
+          generationId: input.generationId,
+          generationRequestId: input.generationRequestId,
+          status: 'producer_lost' as const,
+          updatedAt: input.updatedAt,
+          resultRef: null,
+          markdown: '',
+          reasoning: '',
+          payloadHash: input.payloadHash,
+        })),
+      },
+    });
+
+    const response = await service.status(new Request(
+      'https://example.test/api/arena/generations/generation-1',
+    ), { generationId: 'generation-1' });
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toMatchObject({
+      code: 'GENERATION_TERMINAL_RECONCILIATION_PENDING',
+    });
+    expect(execute).not.toHaveBeenCalled();
   });
 
   test('expired Redis lease adopts a durable completed finalization instead of overwriting it', async () => {
