@@ -533,12 +533,102 @@ describe('Arena Room ticket -> membership -> presence WSS authority', () => {
     expect(otherReplay.messages).toEqual([
       expect.objectContaining({
         type: 'room.snapshot',
+        controlSeq: submitSeq,
+        payload: expect.objectContaining({ proposals: [] }),
+      }),
+      expect.objectContaining({
+        type: 'room.config.updated',
+        controlSeq: submitSeq + 1,
+        payload: expect.objectContaining({ revision: 1 }),
+      }),
+      expect.objectContaining({
+        type: 'room.snapshot',
         controlSeq: resolveSeq,
         payload: expect.objectContaining({ proposals: [], revision: 1 }),
       }),
     ]);
+    expect(JSON.stringify(otherReplay.messages)).not.toContain('proposal-private');
     expect(other.member.userId).not.toBe(harness.member.member.userId);
     await Promise.all(connections.map(async (connection) => connection.dispose?.()));
+  });
+
+  it('混合隐藏 Proposal replay 不丢失作者自己的 terminal event', async () => {
+    const harness = await createHarness();
+    const other = await harness.memberships.join({
+      roomId: harness.host.roomId,
+      accountUserId: 303,
+      displayName: 'Other',
+    });
+    const actor = harness.actors.get('room-1');
+    if (!actor) throw new Error('actor missing');
+    const cursorSeq = actor.getSnapshot()?.snapshot.controlSeq;
+    if (cursorSeq === undefined) throw new Error('snapshot missing');
+
+    for (const [author, accountUserId, proposalId, value, timestamp] of [
+      [other.member.userId, 303, 'proposal-hidden', '其他成员建议', '2026-08-28T00:01:00.000Z'],
+      [harness.member.member.userId, 202, 'proposal-author', '作者建议', '2026-08-28T00:02:00.000Z'],
+    ] as const) {
+      const submitted = await actor.execute({
+        authority: { kind: 'authenticated-user', actorUserId: author, accountUserId },
+        command: {
+          type: 'submit-proposal',
+          expectedRoomEpoch: 'epoch-1',
+          timestamp,
+          proposal: {
+            proposalVersion: 1,
+            proposalId,
+            roomId: 'room-1',
+            authorUserId: author,
+            baseRevision: 0,
+            status: 'submitted',
+            changes: [{
+              changeId: `${proposalId}-guidance`,
+              type: 'setUserGuidance',
+              value,
+              expectedBase: { kind: 'value', value: '' },
+            }],
+            createdAt: timestamp,
+          },
+        },
+      });
+      if (!submitted.ok) throw new Error(submitted.reason);
+    }
+
+    const resolved = await actor.execute({
+      authority: {
+        kind: 'authenticated-user',
+        actorUserId: harness.host.member.userId,
+        accountUserId: 101,
+      },
+      command: {
+        type: 'resolve-proposal',
+        expectedRoomEpoch: 'epoch-1',
+        expectedRevision: 0,
+        proposalId: 'proposal-author',
+        resolution: 'accept-selected',
+        selectedChangeIds: ['proposal-author-guidance'],
+        timestamp: '2026-08-28T00:03:00.000Z',
+      },
+    });
+    if (!resolved.ok) throw new Error(resolved.reason);
+
+    const replayPeer = createPeer();
+    const ticket = await harness.authority.issue({
+      roomId: 'room-1',
+      accountUserId: 202,
+      reconnect: { control: { roomEpoch: 'epoch-1', controlSeq: cursorSeq } },
+    });
+    const connection = await activate(
+      await harness.authority.authorize(requestForTicket(ticket)),
+      replayPeer.peer,
+    );
+
+    expect(replayPeer.messages).toContainEqual(expect.objectContaining({
+      type: 'proposal.resolved',
+      payload: { proposalId: 'proposal-author', status: 'accepted' },
+    }));
+    expect(JSON.stringify(replayPeer.messages)).not.toContain('proposal-hidden');
+    await connection.dispose?.();
   });
 
   it('缺失/重复 query、无效签名和 replay store unavailable 全部 fail closed 且不反射 ticket', async () => {

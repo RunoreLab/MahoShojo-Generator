@@ -171,21 +171,7 @@ export const createArenaRoomWebSocketAuthority = (
       undefined,
       sync.proposalAuthorUserIds?.[index] ?? undefined,
     ));
-    const hiddenReplay = sync.kind === 'replay' && projected.some((event, index) => (
-      event.type === 'room.snapshot' && sync.events[index]?.type !== 'room.snapshot'
-    ));
-    if (hiddenReplay) {
-      const current = membership.actor.resolveControlSync(undefined);
-      for (const event of current.events) {
-        peer.send(projectArenaRoomEventForViewer(
-          event,
-          state.snapshot,
-          membership.member.userId,
-        ));
-      }
-    } else {
-      for (const event of projected) peer.send(event);
-    }
+    for (const event of projected) peer.send(event);
     if (cursor?.story) {
       peer.send({
         protocolVersion: 1,

@@ -462,6 +462,117 @@ describe('Arena Room browser controller', () => {
     expect(client.issueTicket).toHaveBeenCalledTimes(2);
   });
 
+  it('Proposal unknown 只由同一 proposal 的权威事件解锁', async () => {
+    const memberSession = {
+      ...session,
+      self: {
+        userId: 'user-member',
+        role: 'member' as const,
+        displayName: '成员',
+        membershipState: 'active' as const,
+      },
+      snapshot: {
+        ...snapshot,
+        members: [
+          snapshot.members[0]!,
+          {
+            userId: 'user-member',
+            role: 'member' as const,
+            displayName: '成员',
+            membershipState: 'active' as const,
+          },
+        ],
+      },
+    };
+    const proposal = (proposalId: string) => ({
+      proposalVersion: 1 as const,
+      proposalId,
+      roomId: 'room-1',
+      authorUserId: 'user-member',
+      baseRevision: 0,
+      status: 'submitted' as const,
+      changes: [{
+        changeId: `${proposalId}-guidance`,
+        type: 'setUserGuidance' as const,
+        value: '成员建议',
+        expectedBase: { kind: 'value' as const, value: '' },
+      }],
+      createdAt: '2026-08-28T00:01:00.000Z',
+    });
+    const unknown = () => new ArenaRoomClientError(
+      'ROOM_RESULT_UNKNOWN',
+      503,
+      '请求可能已提交，请先确认房间状态，不要重复提交',
+    );
+    const submittedEvent = (proposalId: string, controlSeq: number) => JSON.stringify({
+      protocolVersion: 1,
+      roomId: 'room-1',
+      roomEpoch: 'epoch-1',
+      controlSeq,
+      timestamp: '2026-08-28T00:02:00.000Z',
+      type: 'proposal.submitted',
+      payload: { proposal: proposal(proposalId) },
+    });
+    const resolvedEvent = (
+      proposalId: string,
+      controlSeq: number,
+      status: 'accepted' | 'withdrawn',
+    ) => JSON.stringify({
+      protocolVersion: 1,
+      roomId: 'room-1',
+      roomEpoch: 'epoch-1',
+      controlSeq,
+      timestamp: '2026-08-28T00:03:00.000Z',
+      type: 'proposal.resolved',
+      payload: { proposalId, status },
+    });
+
+    const submit = createHarness();
+    vi.mocked(submit.client.join).mockResolvedValueOnce(memberSession);
+    vi.mocked(submit.client.submitProposal).mockRejectedValueOnce(unknown());
+    await submit.controller.join('room-1', '成员');
+    submit.sockets[0]!.open();
+    await submit.controller.submitProposal({
+      proposalId: 'proposal-submit-target',
+      expectedRoomEpoch: 'epoch-1',
+      baseRevision: 0,
+      changes: proposal('proposal-submit-target').changes,
+    });
+    submit.sockets[0]!.message(submittedEvent('proposal-unrelated', 1));
+    expect(submit.controller.getSnapshot().proposalResultUnknown).toBe(true);
+    submit.sockets[0]!.message(submittedEvent('proposal-submit-target', 2));
+    expect(submit.controller.getSnapshot().proposalResultUnknown).toBe(false);
+
+    const resolve = createHarness();
+    vi.mocked(resolve.client.resolveProposal).mockRejectedValueOnce(unknown());
+    await resolve.controller.create({
+      displayName: '房主',
+      directory: { title: '测试房', visibility: 'public' },
+      sharedConfig,
+    });
+    resolve.sockets[0]!.open();
+    await resolve.controller.resolveProposal('proposal-resolve-target', {
+      expectedRoomEpoch: 'epoch-1',
+      expectedRevision: 0,
+      resolution: 'reject',
+    });
+    resolve.sockets[0]!.message(submittedEvent('proposal-unrelated', 1));
+    expect(resolve.controller.getSnapshot().proposalResultUnknown).toBe(true);
+    resolve.sockets[0]!.message(resolvedEvent('proposal-resolve-target', 2, 'accepted'));
+    expect(resolve.controller.getSnapshot().proposalResultUnknown).toBe(false);
+
+    const withdraw = createHarness();
+    vi.mocked(withdraw.client.join).mockResolvedValueOnce(memberSession);
+    vi.mocked(withdraw.client.withdrawProposal).mockRejectedValueOnce(unknown());
+    await withdraw.controller.join('room-1', '成员');
+    withdraw.sockets[0]!.open();
+    await withdraw.controller.withdrawProposal('proposal-withdraw-target');
+    withdraw.sockets[0]!.message(resolvedEvent('proposal-unrelated', 1, 'withdrawn'));
+    expect(withdraw.controller.getSnapshot().proposalResultUnknown).toBe(true);
+    withdraw.sockets[0]!.message(resolvedEvent('proposal-withdraw-target', 2, 'withdrawn'));
+    expect(withdraw.controller.getSnapshot().proposalResultUnknown).toBe(false);
+  });
+
   it('忽略重复 control event，跳号时请求 reconnect/resync', async () => {
     const { client, controller, queued, sockets } = createHarness();
     await controller.create({

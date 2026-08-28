@@ -105,6 +105,8 @@ describe('Room signed-ticket real Node upgrade', () => {
       store,
       createRoomIdentity: () => ({ roomId: 'room-1', roomEpoch: 'epoch-1' }),
       createTimestamp: () => '2026-08-28T00:00:00.000Z',
+      createRoomEpoch: () => 'epoch-2',
+      recoveryTimestamp: () => '2026-08-28T00:01:00.000Z',
       now: () => Date.parse('2026-08-28T00:01:00.000Z'),
     });
     const memberships = createArenaRoomMembershipService({
@@ -143,7 +145,9 @@ describe('Room signed-ticket real Node upgrade', () => {
       closeGraceMs: 100,
       heartbeatIntervalMs: 1_000,
       heartbeatTimeoutMs: 1_000,
-      maxConnectionsPerUser: 1,
+      // This case verifies authority recovery and ticket replay, not the
+      // connection quota. Leave room for the closing socket's async cleanup.
+      maxConnectionsPerUser: 2,
       shutdownGraceMs: 100,
     });
     const http = new Hono();
@@ -179,7 +183,7 @@ describe('Room signed-ticket real Node upgrade', () => {
       store.saveFailure = true;
       const unavailableTicket = await authority.issue({ roomId: 'room-1', accountUserId: 202 });
       const unavailable = await open(unavailableTicket);
-      await expect(unavailable.close).resolves.toEqual({
+      await expect(within(unavailable.close, 'unavailable-close')).resolves.toEqual({
         code: 1013,
         reason: 'authority-unavailable',
       });
@@ -194,13 +198,13 @@ describe('Room signed-ticket real Node upgrade', () => {
       const ticket = await authority.issue({ roomId: 'room-1', accountUserId: 202 });
       const opened = await open(ticket);
       const socket = opened.socket;
-      await expect(opened.firstMessage).resolves.toMatchObject({
+      await expect(within(opened.firstMessage, 'recovered-snapshot')).resolves.toMatchObject({
         type: 'room.snapshot',
         roomId: 'room-1',
         payload: { members: expect.arrayContaining([member.member]) },
       });
 
-      await expect(new Promise<number>((resolve, reject) => {
+      await expect(within(new Promise<number>((resolve, reject) => {
         const replay = new WebSocket(
           `${origin}${ARENA_ROOM_WEBSOCKET_PATH}?ticket=${encodeURIComponent(ticket)}`,
           ARENA_ROOM_WEBSOCKET_PROTOCOL,
@@ -213,7 +217,7 @@ describe('Room signed-ticket real Node upgrade', () => {
           resolve(response.statusCode ?? 0);
         });
         replay.once('error', () => undefined);
-      })).resolves.toBe(401);
+      }), 'ticket-replay-response')).resolves.toBe(401);
 
       const close = nextClose(socket);
       await memberships.kick({
@@ -221,14 +225,17 @@ describe('Room signed-ticket real Node upgrade', () => {
         accountUserId: 101,
         targetUserId: member.member.userId,
       });
-      await expect(close).resolves.toEqual({ code: 1008, reason: 'membership-revoked' });
+      await expect(within(close, 'kick-close')).resolves.toEqual({
+        code: 1008,
+        reason: 'membership-revoked',
+      });
       expect(store.state?.memberAuthority.find((entry) => entry.accountUserId === 202)?.member)
         .toMatchObject({ membershipState: 'revoked' });
     } finally {
-      await gateway.shutdown();
+      await within(gateway.shutdown(), 'gateway-shutdown');
       for (const socket of sockets) if (socket.readyState !== WebSocket.CLOSED) socket.terminate();
-      await new Promise<void>((resolve) => server.close(() => resolve()));
-      await actors.shutdown();
+      await within(new Promise<void>((resolve) => server.close(() => resolve())), 'server-close');
+      await within(actors.shutdown(), 'actors-shutdown');
     }
   });
 
