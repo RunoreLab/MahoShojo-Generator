@@ -103,12 +103,12 @@ read authority / current state
 | `GMR-06R` Redis-only directory amendment | `DONE` | GMR-06,GMR-07,GMR-08 | Redis 原子 directory index + 移除 D1/schema | 不执行远程 schema/Redis 写 |
 | `GMR-07` Arena room UI | `DONE` | GMR-05 | feature-flagged create/join/status/reconnect | 不激活 production |
 | `GMR-08` Proposal E2E | `DONE` | GMR-05,GMR-07 | typed Proposal server/UI 闭环 | 不扩展 private sharing |
-| `GMR-09` generation publisher | `READY` | GMR-03,GMR-05,GMR-06R,GMR-07 | single producer + Room safe fan-out/resync | 不复制 AI lifecycle |
-| `GMR-10` hardening/fault/load audit | `BLOCKED` | GMR-06R,GMR-08,GMR-09 | telemetry + failure drills + v1 exit audit | 不自动进入生产 |
+| `GMR-09` generation publisher | `DONE` | GMR-03,GMR-05,GMR-06R,GMR-07 | single producer + Room safe fan-out/resync | 不复制 AI lifecycle |
+| `GMR-10` hardening/fault/load audit | `READY` | GMR-06R,GMR-08,GMR-09 | telemetry + failure drills + v1 exit audit | 不自动进入生产 |
 | `GMR-11` production activation review | `DEFERRED` | GMR-10 + Production Gate | 独立生产 go/no-go | 必须人工/平台授权 |
 | `GMR-H` multi-instance / DO evaluation | `DEFERRED` | 真实指标触发 | 新 ADR/PoC 决策 | v1 不预建 |
 
-`GMR-06` 与 `GMR-07` 在 GMR-05 后 MAY 并行，但一个 `/goal` 仍只执行其中一个。2026-08-28 的 Redis-only superseding 修订把 `GMR-06R` 加为后续 generation/hardening 前置门禁；`GMR-08` 的已完成结果保留。GMR-06R 已关闭，`GMR-09` 现为下一 READY Goal。
+`GMR-06` 与 `GMR-07` 在 GMR-05 后 MAY 并行，但一个 `/goal` 仍只执行其中一个。2026-08-28 的 Redis-only superseding 修订把 `GMR-06R` 加为后续 generation/hardening 前置门禁；`GMR-08` 的已完成结果保留。GMR-09 已关闭，`GMR-10` 现为下一 READY Goal。
 
 ## 6. Goal 详细定义
 
@@ -697,6 +697,27 @@ validate -> pure derive -> conditional checkpoint
 - story gap/resync；
 - process failure先 reconcile generation state；
 - final terminal/R2/D1 semantics 与现有 generation contract 一致。
+
+**Evidence（2026-08-28）**
+
+- contract/core/API/Web：host-only reservation-before-provider、frozen multiplayer snapshot、single producer、batched
+  `story.delta`、gap/resync、authoritative terminal 与显式 same-request retry 已闭环；Room 与 Hosted 使用同一 server-only
+  canonicalizer，真实 Redis verifier 输出 `hostedSemanticDigestMatched=true`；
+- durability：真实 loopback Redis 7.0.15 验证 response-loss、duplicate single-flight、active/terminal recovery、atomic
+  marker/event/snapshot、D1/R2-like fallback、finalizer idempotency 与 secret absence；300 个前置 replay event 还验证 terminal
+  位于首个 256-event batch 之外时按 exact ID 重读；独立 OS 子进程首块后 `SIGKILL`，新进程
+  直接验证 durable `producer_lost` marker/error event/snapshot/lease-null、重复 GET/retry provider `0`；
+- compatibility/release：machine-readable reader-first gate 进入 content-addressed production/preview tuple；writer-enabled
+  rollback 先重验 failed tuple，再以同 tuple 的 strict JSON schema validator 验证 target reader contract；历史
+  `legacy-layout + gate`、缺失/错误/malformed/nested/manifest 外 gate 均 fail closed；当前 writer activation 为 `disabled`，
+  未执行 production deploy/cutover；
+- validation：Hosted service package `182/182`、Hosted runtime `330/330`、API `418/418`、gate-only rollback
+  `57/57`、进程验证器安全负向 `2/2`、真实 Redis 三条 verifier、workspace tests/lint/build、Next `188/188`、Web
+  `1972/1972`、root `206/206` 与 `pnpm ci:verify` 全部通过；既有 naming report-only、
+  preview/physical D1 `DEFERRED` 保持 no-new-regression；
+- independent review：architecture、security/authority、compatibility/replay/data/test-adequacy 最终均为
+  Critical `0` / Important `0` / Minor `0`。完整证据见
+  [GMR-09 实施与审查整改日志](../logs/2026-08-28_204800_Arena多人GMR-09权威生成发布实施与审查整改日志.md)。
 
 ### GMR-10 hardening / fault / load audit
 

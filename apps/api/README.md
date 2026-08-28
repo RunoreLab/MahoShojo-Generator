@@ -212,8 +212,9 @@ reaper 对账，不伪造可对外读取的 failed/completed 终态。
 
 `.github/workflows/hono-deploy.yml` 继续保留受保护生产分支、Environment、SSH host key 和
 `cancel-in-progress: false` 门禁，但 build/container/artifact 路径只引用 `apps/api` owner。发布物由
-`index.mjs`、release-local `compose.yml` 和 `deploy-bundle.sh` 组成；`release.manifest` 覆盖完整 tuple，
-其 SHA-256 才是 release id。workflow 通过 `install-bundle.sh` 在 canonical `releases` 下创建随机 staging，
+`index.mjs`、release-local `compose.yml`、`deploy-bundle.sh`、Arena Room release gate 及其严格 schema validator
+组成；`release.manifest` 覆盖完整 tuple，其 SHA-256 才是 release id。workflow 通过 `install-bundle.sh` 在
+canonical `releases` 下创建随机 staging，
 上传后持 deploy lock 复验精确 tuple，再原子纳管最终目录；不会在校验前向最终 release 路径写文件。之后才
 执行 release-local deploy script。
 
@@ -223,6 +224,12 @@ reaper 对账，不伪造可对外读取的 failed/completed 终态。
 `flock` 阻止并发部署，并在激活前原子写入 `deploy.transaction`；TERM/INT/HUP 会触发回滚，进程被强制
 终止时则由下一次部署先恢复未完成事务。journal 缺字段、重复/额外字段或指向非 content-addressed release
 时保留证据并 fail closed。
+
+候选 gate 会在 Compose 激活前由无网络、只读、drop-all-capabilities 的固定 Node runtime 执行严格 JSON schema
+校验；回滚读取 failed gate 前会再次复验 failed tuple 的两层摘要。writer-enabled 回滚还会用同一 validator
+校验 target reader contract；历史 `legacy-layout + gate` tuple 被显式拒绝，不能冒认 compatible reader。
+初始 gate-only content-addressed tuple 只在字段与 accepted writer-disabled gate 完全精确匹配时使用隔离兼容 reader，供失败
+transaction 回滚；writer-enabled、malformed 或需要证明 target reader contract 的 gate-only tuple 均 fail closed。
 
 首次从旧生产布局升级时，脚本只接受旧手册记录的精确 schema：根 `.env` 单字段指向
 `releases/<64hex>`，该目录含普通 `index.mjs` 与精确 `index.mjs.sha256`，根目录含普通
