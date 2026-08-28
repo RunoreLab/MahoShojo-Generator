@@ -9,7 +9,6 @@ import { configureDefaultNodeHostedD1ClientResolver } from '@mahoshojo/hosted-ru
 import { createHonoApp } from '#/app';
 import { readHonoServerConfig } from '#/config';
 import { configureHonoArenaGenerationRuntime } from '#/arena-generation/runtime';
-import { createD1RoomDirectoryStore } from '#/arena-room/d1-room-directory-store';
 import { createArenaDataCardRefVerifier } from '#/arena-room/arena-data-card-ref-verifier';
 import { createArenaRoomDirectoryService } from '#/arena-room/room-directory-service';
 import type { ArenaRoomHttpDependencies } from '#/arena-room/room-http';
@@ -66,38 +65,17 @@ if (process.env.HONO_CONFIG_CHECK_ONLY === 'true') {
   const roomStore = redis.getRoomStore();
   const roomDirectory = createArenaRoomDirectoryService({
     authority: roomStore,
-    registrations: redis.getRoomDirectoryRegistrationStore(),
-    store: createD1RoomDirectoryStore({ getClient: getHonoPrimaryD1Client }),
-    onBackgroundError: () => {
-      console.error('[hono][room-directory] derived cleanup failed');
-    },
+    store: redis.getRoomDirectoryStore(),
   });
   const roomActors = createRoomActorRegistry({
     store: roomStore,
-    prepareCreatedOpen: (record) => roomDirectory.prepareCreatedOpen(record),
-    onCommittedClosed: (state) => roomDirectory.removeCommittedClosed(state),
-    onCommittedRecovered: (input) => roomDirectory.rebindCommittedOpen(input),
     onBackgroundError: () => {
       console.error('[hono][room-actor] background task failed');
     },
   });
   roomActors.startIdleSweeper();
-  const stopRoomDirectoryReconciler = config.arenaMultiplayerEnabled
-    ? (() => {
-        const stopRegistration = roomDirectory.startRegistrationReconciler();
-        const stopD1 = roomDirectory.startD1Reconciler();
-        return () => {
-          stopRegistration();
-          stopD1();
-        };
-      })()
-    : () => undefined;
   const roomMemberships = createArenaRoomMembershipService({
     actors: roomActors,
-    directory: roomDirectory,
-    onDirectoryError: () => {
-      console.error('[hono][room-directory] create projection failed');
-    },
   });
   const roomProposals = createArenaRoomProposalService({
     memberships: roomMemberships,
@@ -177,13 +155,11 @@ if (process.env.HONO_CONFIG_CHECK_ONLY === 'true') {
         dependencyCloseTimeoutMs: DEFAULT_DEPENDENCY_CLOSE_GRACE_TIMEOUT_MS,
         drainTimeoutMs: DEFAULT_WAIT_UNTIL_DRAIN_TIMEOUT_MS,
         forceCloseDependencies: () => {
-          stopRoomDirectoryReconciler();
           roomWebSocketGateway.forceClose();
           roomActors.forceClose();
           redis.forceClose();
         },
         stopAcceptingRequests: async () => {
-          stopRoomDirectoryReconciler();
           const roomWebSocketShutdown = roomWebSocketGateway.shutdown();
           roomActors.stopAccepting();
           const closeResult = await stopAcceptingRequestsWithGrace(server, {

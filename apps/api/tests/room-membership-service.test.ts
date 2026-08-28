@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import {
   checkpointPredecessorOf,
@@ -13,10 +13,12 @@ import {
   ArenaRoomMembershipError,
   createArenaRoomMembershipService,
 } from '#/arena-room/room-membership-service';
+import type { RoomDirectoryRecord } from '#/arena-room/room-directory-record';
 import { createArenaRoomState } from './arena-room-fixtures';
 
 class MemoryRoomStore implements RoomActorCheckpointStore {
   state: ArenaRoomAuthorityState | null = null;
+  directories: Array<RoomDirectoryRecord | undefined> = [];
 
   async load(roomId: string) {
     return this.state?.snapshot.roomId === roomId ? structuredClone(this.state) : null;
@@ -24,6 +26,9 @@ class MemoryRoomStore implements RoomActorCheckpointStore {
 
   async save(input: Parameters<RoomActorCheckpointStore['save']>[0]) {
     const data = consumeArenaRoomCheckpointCommit(input.commit);
+    this.directories.push(input.directory === undefined
+      ? undefined
+      : structuredClone(input.directory));
     if (data.predecessor === null) {
       if (this.state !== null) return { kind: 'conflict' as const };
     } else if (
@@ -139,23 +144,17 @@ describe('Arena Room membership service', () => {
     });
   });
 
-  it('create checkpoint 提交后投影公开目录，D1 失败不能反向否定 Redis 权威结果', async () => {
+  it('create 将 public directory record 与 checkpoint 一次性交给 Redis store', async () => {
     const store = new MemoryRoomStore();
-    const registerOpen = vi.fn(async () => { throw new Error('d1 unavailable'); });
-    const prepareCreatedOpen = vi.fn(async () => undefined);
-    const onDirectoryError = vi.fn(() => { throw new Error('observer unavailable'); });
     const preparedRegistry = createRoomActorRegistry({
       store,
       createRoomIdentity: () => ({ roomId: 'room-1', roomEpoch: 'epoch-1' }),
       createTimestamp: () => '2026-08-28T00:00:00.000Z',
       now: () => Date.parse('2026-08-28T00:00:00.000Z'),
-      prepareCreatedOpen,
     });
     const service = createArenaRoomMembershipService({
       actors: preparedRegistry,
       createUserId: () => 'host-1',
-      directory: { registerOpen },
-      onDirectoryError,
     });
 
     await expect(service.create({
@@ -164,7 +163,7 @@ describe('Arena Room membership service', () => {
       sharedConfig: createArenaRoomState().snapshot.sharedConfig,
       directory: { title: '公开测试房', visibility: 'public' },
     })).resolves.toMatchObject({ roomId: 'room-1', roomEpoch: 'epoch-1' });
-    expect(prepareCreatedOpen).toHaveBeenCalledWith({
+    expect(store.directories).toEqual([{
       roomId: 'room-1',
       roomEpoch: 'epoch-1',
       hostUserId: 101,
@@ -173,18 +172,7 @@ describe('Arena Room membership service', () => {
       status: 'open',
       createdAt: '2026-08-28T00:00:00.000Z',
       lastActivityAt: '2026-08-28T00:00:00.000Z',
-    });
-    expect(registerOpen).toHaveBeenCalledWith({
-      roomId: 'room-1',
-      roomEpoch: 'epoch-1',
-      hostUserId: 101,
-      title: '公开测试房',
-      visibility: 'public',
-      status: 'open',
-      createdAt: '2026-08-28T00:00:00.000Z',
-      lastActivityAt: '2026-08-28T00:00:00.000Z',
-    });
-    expect(onDirectoryError).toHaveBeenCalledOnce();
+    }]);
     expect(store.state?.lifecycle.status).toBe('open');
   });
 

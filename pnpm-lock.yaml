@@ -73,9 +73,6 @@ importers:
         specifier: ^8.21.3
         version: 8.21.3
     devDependencies:
-      '@types/better-sqlite3':
-        specifier: ^7.6.13
-        version: 7.6.13
       '@types/node':
         specifier: ^20
         version: 20.19.27
@@ -85,9 +82,6 @@ importers:
       '@typescript-eslint/parser':
         specifier: ^8.50.0
         version: 8.50.0(eslint@9.39.2(jiti@2.7.0))(typescript@5.9.3)
-      better-sqlite3:
-        specifier: ^12.10.0
-        version: 12.10.0
       esbuild:
         specifier: ^0.28.1
         version: 0.28.1

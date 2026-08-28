@@ -1,5 +1,3 @@
-import { createHash } from 'node:crypto';
-
 import {
   ARENA_ROOM_AUTHORITY_STATE_VERSION,
   checkpointPredecessorOf,
@@ -11,6 +9,14 @@ import {
   type ArenaRoomCheckpointPredecessor,
 } from '@mahoshojo/multiplayer-core';
 
+import { createArenaRoomRedisKeyspace } from './redis-room-keyspace';
+import {
+  createStoredRoomDirectoryRecord,
+  roomDirectoryPublicIndexMember,
+  serializeStoredRoomDirectoryRecord,
+  type RoomDirectoryRecord,
+} from './room-directory-record';
+
 const ACTIVE_ROOM_CHECKPOINT_VERSION = 1 as const;
 const EXPIRING_ROOM_CHECKPOINT_VERSION = 2 as const;
 const DEFAULT_ACTIVE_TTL_SECONDS = 24 * 60 * 60;
@@ -18,7 +24,6 @@ const DEFAULT_TERMINAL_TTL_SECONDS = 300;
 // Checkpoint TTL 结束 Room incarnation；该有界负向 ledger 故意不设 TTL，避免迟到 create
 // receipt 在相同 roomEpoch 上复活已结束的 incarnation。达到配额后必须改用新 Room ID。
 const MAX_ROOM_INCARNATIONS = 16;
-const KEY_PREFIX = 'mahoshojo:room:v1';
 
 const BOOTSTRAP_FENCE_SCRIPT = `
 -- ROOM_CHECKPOINT_BOOTSTRAP_FENCE_V1
@@ -76,48 +81,80 @@ local candidateDecoded, candidate = pcall(cjson.decode, ARGV[7])
 if not candidateDecoded or type(candidate) ~= 'table'
   or candidate.checkpointVersion ~= tonumber(ARGV[2])
   or candidate.expiryFence ~= nil
-  or candidate.roomId ~= ARGV[3] then
+  or candidate.roomId ~= ARGV[3]
+  or type(candidate.state) ~= 'table'
+  or type(candidate.state.lifecycle) ~= 'table'
+  or (candidate.state.lifecycle.status ~= 'open'
+    and candidate.state.lifecycle.status ~= 'closed')
+  or type(candidate.state.lifecycle.updatedAt) ~= 'string' then
   return 'invalid-successor'
 end
+local directoryRecordTypeReply = redis.call('TYPE', KEYS[3])
+local directoryRecordType = type(directoryRecordTypeReply) == 'table'
+  and directoryRecordTypeReply.ok or directoryRecordTypeReply
+local directoryIndexTypeReply = redis.call('TYPE', KEYS[4])
+local directoryIndexType = type(directoryIndexTypeReply) == 'table'
+  and directoryIndexTypeReply.ok or directoryIndexTypeReply
+if (directoryRecordType ~= 'none' and directoryRecordType ~= 'string')
+  or (directoryIndexType ~= 'none' and directoryIndexType ~= 'zset') then
+  return 'directory-storage-invalid'
+end
 local raw = redis.call('GET', KEYS[1])
+local directoryRaw = redis.call('GET', KEYS[3])
 local fenceTypeReply = redis.call('TYPE', KEYS[2])
 local fenceType = type(fenceTypeReply) == 'table' and fenceTypeReply.ok or fenceTypeReply
 if fenceType ~= 'none' and fenceType ~= 'set' then return 'invalid-fence' end
 local epochSeen = redis.call('SISMEMBER', KEYS[2], candidate.roomEpoch)
 local fenceCount = redis.call('SCARD', KEYS[2])
 local currentEpochToFence = nil
-local directoryRegistrationNext = nil
+local current = nil
+local directoryAction = 'none'
+local directoryNextRaw = nil
+local directoryStoredIndexMember = nil
+local directoryNextIndexMember = ''
 if ARGV[1] == 'absent' then
   if raw then return 'conflict' end
   if epochSeen == 1 then return 'conflict' end
   if candidate.revision ~= 0 or candidate.controlSeq ~= 0 then
     return 'invalid-successor'
   end
-  if ARGV[11] == 'required' then
-    local registrationRaw = redis.call('GET', KEYS[3])
-    if not registrationRaw then return 'directory-registration-missing' end
-    local registrationDecoded, registration = pcall(cjson.decode, registrationRaw)
-    if not registrationDecoded or type(registration) ~= 'table'
-      or registration.registrationVersion ~= 2
-      or registration.phase ~= 'pending-create'
-      or registration.roomId ~= candidate.roomId
-      or registration.targetRoomEpoch ~= candidate.roomEpoch
-      or (registration.projectedRoomEpoch ~= nil
-        and registration.projectedRoomEpoch ~= cjson.null) then
-      return 'directory-registration-invalid'
+  if directoryRaw then return 'directory-conflict' end
+  if ARGV[11] == '' then
+    if ARGV[12] ~= '' then return 'directory-create-invalid' end
+  else
+    local directoryDecoded, directory = pcall(cjson.decode, ARGV[11])
+    if not directoryDecoded or type(directory) ~= 'table'
+      or directory.directoryVersion ~= 1
+      or directory.roomId ~= candidate.roomId
+      or directory.roomEpoch ~= candidate.roomEpoch
+      or directory.status ~= 'open'
+      or type(candidate.state) ~= 'table'
+      or type(candidate.state.lifecycle) ~= 'table'
+      or candidate.state.lifecycle.status ~= 'open'
+      or directory.createdAt ~= candidate.state.lifecycle.createdAt
+      or directory.lastActivityAt ~= candidate.state.lifecycle.updatedAt then
+      return 'directory-create-invalid'
     end
-    registration.phase = 'projecting'
-    if registration.updatedAtMs < tonumber(ARGV[12]) then
-      registration.updatedAtMs = tonumber(ARGV[12])
+    if directory.visibility == 'public' then
+      if ARGV[12] == '' or directory.publicIndexMember ~= ARGV[12] then
+        return 'directory-create-invalid'
+      end
+    elseif directory.visibility == 'unlisted' then
+      if ARGV[12] ~= '' or directory.publicIndexMember ~= cjson.null then
+        return 'directory-create-invalid'
+      end
+    else
+      return 'directory-create-invalid'
     end
-    directoryRegistrationNext = cjson.encode(registration)
-  elseif ARGV[11] ~= 'optional' then
-    return 'invalid-request'
+    directoryAction = 'create'
+    directoryNextRaw = ARGV[11]
+    directoryNextIndexMember = ARGV[12]
   end
 elseif ARGV[1] == 'match' then
-  if ARGV[11] ~= 'optional' then return 'invalid-request' end
+  if ARGV[11] ~= '' or ARGV[12] ~= '' then return 'directory-create-invalid' end
   if not raw then return 'conflict' end
-  local decoded, current = pcall(cjson.decode, raw)
+  local decoded
+  decoded, current = pcall(cjson.decode, raw)
   if not decoded or type(current) ~= 'table' then return 'invalid-existing' end
   if current.checkpointVersion ~= tonumber(ARGV[2])
     or current.roomId ~= ARGV[3]
@@ -147,6 +184,40 @@ elseif ARGV[1] == 'match' then
       return 'invalid-successor'
     end
   end
+  if directoryRaw then
+    local directoryDecoded, directory = pcall(cjson.decode, directoryRaw)
+    if directoryDecoded and type(directory) == 'table'
+      and type(directory.publicIndexMember) == 'string' then
+      directoryStoredIndexMember = directory.publicIndexMember
+    end
+    if candidate.state.lifecycle.status == 'closed' then
+      directoryAction = 'remove'
+    else
+      local validDirectory = directoryDecoded and type(directory) == 'table'
+        and directory.directoryVersion == 1
+        and directory.roomId == candidate.roomId
+        and directory.roomEpoch == current.roomEpoch
+        and directory.status == 'open'
+        and (directory.visibility == 'public' or directory.visibility == 'unlisted')
+      if not validDirectory then
+        directoryAction = 'remove'
+      else
+        directory.roomEpoch = candidate.roomEpoch
+        directory.lastActivityAt = candidate.state.lifecycle.updatedAt
+        if directory.visibility == 'public' then
+          if ARGV[14] == '' then return 'directory-create-invalid' end
+          directory.publicIndexMember = ARGV[14]
+          directoryNextIndexMember = ARGV[14]
+        else
+          directory.publicIndexMember = cjson.null
+        end
+        directoryAction = 'update'
+        directoryNextRaw = cjson.encode(directory)
+      end
+    end
+  elseif candidate.state.lifecycle.status == 'closed' then
+    directoryAction = 'remove'
+  end
 else
   return 'invalid-request'
 end
@@ -158,12 +229,33 @@ end
 if currentEpochToFence then redis.call('SADD', KEYS[2], currentEpochToFence) end
 redis.call('SADD', KEYS[2], candidate.roomEpoch)
 redis.call('SET', KEYS[1], ARGV[7], 'PX', ARGV[8])
-if directoryRegistrationNext then redis.call('SET', KEYS[3], directoryRegistrationNext) end
+if directoryStoredIndexMember then
+  redis.call('ZREM', KEYS[4], directoryStoredIndexMember)
+end
+if ARGV[13] ~= '' then redis.call('ZREM', KEYS[4], ARGV[13]) end
+if directoryAction == 'create' or directoryAction == 'update' then
+  redis.call('SET', KEYS[3], directoryNextRaw, 'PX', ARGV[8])
+  if directoryNextIndexMember ~= '' then
+    redis.call('ZADD', KEYS[4], 0, directoryNextIndexMember)
+  end
+elseif directoryAction == 'remove' then
+  redis.call('DEL', KEYS[3])
+end
 return 'saved'
 `;
 
 const DELETE_SCRIPT = `
 -- ROOM_CHECKPOINT_DELETE_V1
+local directoryRecordTypeReply = redis.call('TYPE', KEYS[3])
+local directoryRecordType = type(directoryRecordTypeReply) == 'table'
+  and directoryRecordTypeReply.ok or directoryRecordTypeReply
+local directoryIndexTypeReply = redis.call('TYPE', KEYS[4])
+local directoryIndexType = type(directoryIndexTypeReply) == 'table'
+  and directoryIndexTypeReply.ok or directoryIndexTypeReply
+if (directoryRecordType ~= 'none' and directoryRecordType ~= 'string')
+  or (directoryIndexType ~= 'none' and directoryIndexType ~= 'zset') then
+  return 'directory-storage-invalid'
+end
 local raw = redis.call('GET', KEYS[1])
 if not raw then return 'missing' end
 local decoded, current = pcall(cjson.decode, raw)
@@ -189,6 +281,16 @@ local fenceCount = redis.call('SCARD', KEYS[2])
 if epochSeen == 0 and fenceCount >= tonumber(ARGV[8]) then
   return 'incarnation-limit'
 end
+local directoryRaw = redis.call('GET', KEYS[3])
+if directoryRaw then
+  local directoryDecoded, directory = pcall(cjson.decode, directoryRaw)
+  if directoryDecoded and type(directory) == 'table'
+    and type(directory.publicIndexMember) == 'string' then
+    redis.call('ZREM', KEYS[4], directory.publicIndexMember)
+  end
+  redis.call('DEL', KEYS[3])
+end
+if ARGV[9] ~= '' then redis.call('ZREM', KEYS[4], ARGV[9]) end
 redis.call('SADD', KEYS[2], ARGV[3])
 redis.call('DEL', KEYS[1])
 return 'deleted'
@@ -196,6 +298,16 @@ return 'deleted'
 
 const EXPIRE_SCRIPT = `
 -- ROOM_CHECKPOINT_EXPIRE_V1
+local directoryRecordTypeReply = redis.call('TYPE', KEYS[3])
+local directoryRecordType = type(directoryRecordTypeReply) == 'table'
+  and directoryRecordTypeReply.ok or directoryRecordTypeReply
+local directoryIndexTypeReply = redis.call('TYPE', KEYS[4])
+local directoryIndexType = type(directoryIndexTypeReply) == 'table'
+  and directoryIndexTypeReply.ok or directoryIndexTypeReply
+if (directoryRecordType ~= 'none' and directoryRecordType ~= 'string')
+  or (directoryIndexType ~= 'none' and directoryIndexType ~= 'zset') then
+  return 'directory-storage-invalid'
+end
 local raw = redis.call('GET', KEYS[1])
 if not raw then return 'missing' end
 local decoded, current = pcall(cjson.decode, raw)
@@ -221,6 +333,16 @@ local fenceCount = redis.call('SCARD', KEYS[2])
 if epochSeen == 0 and fenceCount >= tonumber(ARGV[9]) then
   return 'incarnation-limit'
 end
+local directoryRaw = redis.call('GET', KEYS[3])
+if directoryRaw then
+  local directoryDecoded, directory = pcall(cjson.decode, directoryRaw)
+  if directoryDecoded and type(directory) == 'table'
+    and type(directory.publicIndexMember) == 'string' then
+    redis.call('ZREM', KEYS[4], directory.publicIndexMember)
+  end
+  redis.call('DEL', KEYS[3])
+end
+if ARGV[10] ~= '' then redis.call('ZREM', KEYS[4], ARGV[10]) end
 redis.call('SADD', KEYS[2], ARGV[3])
 local currentTtl = redis.call('PTTL', KEYS[1])
 if currentTtl == 0 then
@@ -237,6 +359,11 @@ return 'expired'
 
 const REFRESH_SCRIPT = `
 -- ROOM_CHECKPOINT_REFRESH_V1
+local recordTypeReply = redis.call('TYPE', KEYS[2])
+local recordType = type(recordTypeReply) == 'table' and recordTypeReply.ok or recordTypeReply
+if recordType ~= 'none' and recordType ~= 'string' then
+  return 'directory-storage-invalid'
+end
 local raw = redis.call('GET', KEYS[1])
 if not raw then return 'missing' end
 local decoded, current = pcall(cjson.decode, raw)
@@ -251,6 +378,7 @@ if current.checkpointVersion ~= tonumber(ARGV[1])
 end
 if raw ~= ARGV[7] then return 'conflict' end
 redis.call('PEXPIRE', KEYS[1], ARGV[6])
+if recordType == 'string' then redis.call('PEXPIRE', KEYS[2], ARGV[6]) end
 return 'refreshed'
 `;
 
@@ -278,7 +406,7 @@ export interface RedisRoomStore {
   load(roomId: string): Promise<ArenaRoomAuthorityState | null>;
   save(input: {
     commit: ArenaRoomCheckpointCommit;
-    directoryRegistrationRequired?: boolean;
+    directory?: RoomDirectoryRecord;
   }): Promise<RedisRoomStoreSaveResult>;
   delete(input: {
     checkpoint: ArenaRoomAuthorityState;
@@ -475,12 +603,9 @@ const parseMutationResult = <T extends string>(
   if (raw === 'invalid-fence') throw new Error('REDIS_ROOM_INCARNATION_FENCE_INVALID');
   if (raw === 'incarnation-limit') throw new Error('REDIS_ROOM_INCARNATION_LIMIT');
   if (raw === 'invalid-successor') throw new Error('REDIS_ROOM_SUCCESSOR_INVALID');
-  if (raw === 'directory-registration-missing') {
-    throw new Error('REDIS_ROOM_DIRECTORY_REGISTRATION_REQUIRED');
-  }
-  if (raw === 'directory-registration-invalid') {
-    throw new Error('REDIS_ROOM_DIRECTORY_REGISTRATION_INVALID');
-  }
+  if (raw === 'directory-conflict') throw new Error('REDIS_ROOM_DIRECTORY_CONFLICT');
+  if (raw === 'directory-create-invalid') throw new Error('REDIS_ROOM_DIRECTORY_INPUT_INVALID');
+  if (raw === 'directory-storage-invalid') throw new Error('REDIS_ROOM_DIRECTORY_INVALID');
   if (typeof raw !== 'string' || !allowed.includes(raw as T)) {
     throw new Error('REDIS_ROOM_CHECKPOINT_RESPONSE_INVALID');
   }
@@ -488,25 +613,7 @@ const parseMutationResult = <T extends string>(
 };
 
 export const createRedisRoomStore = (options: RedisRoomStoreOptions): RedisRoomStore => {
-  const environmentPrefix = options.keyPrefix?.trim();
-  if (environmentPrefix && !/^[a-z0-9_-]{1,32}$/u.test(environmentPrefix)) {
-    throw new Error('keyPrefix 必须是安全的环境标识');
-  }
-  const keyPrefix = environmentPrefix ? `${KEY_PREFIX}:${environmentPrefix}` : KEY_PREFIX;
-  const directoryRegistrationPrefix = environmentPrefix
-    ? `mahoshojo:room-directory-registration:v2:${environmentPrefix}`
-    : 'mahoshojo:room-directory-registration:v2';
-  const roomHash = (roomId: string): string => {
-    if (!isRoomId(roomId)) throw new Error('REDIS_ROOM_ID_INVALID');
-    return createHash('sha256').update(roomId).digest('hex');
-  };
-  const roomKey = (roomId: string): string => `${keyPrefix}:${roomHash(roomId)}:checkpoint`;
-  const incarnationFenceKey = (roomId: string): string => (
-    `${keyPrefix}:${roomHash(roomId)}:incarnations`
-  );
-  const directoryRegistrationKey = (roomId: string): string => (
-    `${directoryRegistrationPrefix}:entry:${roomHash(roomId)}`
-  );
+  const keyspace = createArenaRoomRedisKeyspace(options.keyPrefix);
   const activeTtlMs = ttlMs(
     options.activeTtlSeconds ?? DEFAULT_ACTIVE_TTL_SECONDS,
     'activeTtlSeconds',
@@ -518,13 +625,16 @@ export const createRedisRoomStore = (options: RedisRoomStoreOptions): RedisRoomS
   return Object.freeze({
     async load(roomId) {
       for (let attempt = 0; attempt < 3; attempt += 1) {
-        const raw = await options.getClient().get(roomKey(roomId));
+        const raw = await options.getClient().get(keyspace.roomCheckpointKey(roomId));
         if (raw === null) return null;
         const parsed = parseStoredCheckpoint(raw, roomId);
         const stored = parsed.stored;
         if (stored.checkpointVersion === EXPIRING_ROOM_CHECKPOINT_VERSION) return null;
         const bootstrapped = await options.getClient().eval(BOOTSTRAP_FENCE_SCRIPT, {
-          keys: [roomKey(roomId), incarnationFenceKey(roomId)],
+          keys: [
+            keyspace.roomCheckpointKey(roomId),
+            keyspace.roomIncarnationFenceKey(roomId),
+          ],
           arguments: [raw, roomId, stored.roomEpoch, String(MAX_ROOM_INCARNATIONS)],
         });
         const result = parseMutationResult(
@@ -536,7 +646,7 @@ export const createRedisRoomStore = (options: RedisRoomStoreOptions): RedisRoomS
         if (parsed.migratedFromAuthorityV1) {
           const migratedRaw = JSON.stringify(stored);
           const migration = await options.getClient().eval(MIGRATE_AUTHORITY_V1_SCRIPT, {
-            keys: [roomKey(roomId)],
+            keys: [keyspace.roomCheckpointKey(roomId)],
             arguments: [raw, migratedRaw],
           });
           const migrationResult = parseMutationResult(
@@ -586,6 +696,25 @@ export const createRedisRoomStore = (options: RedisRoomStoreOptions): RedisRoomS
           throw new Error('REDIS_ROOM_TRANSITION_COMMIT_INVALID');
         }
       }
+      if (input.directory !== undefined && expected !== null) {
+        throw new Error('REDIS_ROOM_DIRECTORY_INPUT_INVALID');
+      }
+      const directory = input.directory === undefined
+        ? null
+        : createStoredRoomDirectoryRecord(input.directory);
+      if (directory !== null) {
+        const hostUserId = stored.state.memberAuthority.find((entry) => (
+          entry.member.role === 'host' && entry.member.membershipState === 'active'
+        ))?.accountUserId;
+        if (
+          directory.roomId !== stored.roomId
+          || directory.roomEpoch !== stored.roomEpoch
+          || directory.hostUserId !== hostUserId
+          || directory.createdAt !== stored.state.lifecycle.createdAt
+          || directory.lastActivityAt !== stored.state.lifecycle.updatedAt
+          || stored.state.lifecycle.status !== 'open'
+        ) throw new Error('REDIS_ROOM_DIRECTORY_INPUT_INVALID');
+      }
       const expectedArguments = expected === null
         ? [
             'absent',
@@ -598,9 +727,10 @@ export const createRedisRoomStore = (options: RedisRoomStoreOptions): RedisRoomS
         : ['match', ...predecessorArguments(expected)];
       const raw = await options.getClient().eval(SAVE_SCRIPT, {
         keys: [
-          roomKey(stored.roomId),
-          incarnationFenceKey(stored.roomId),
-          directoryRegistrationKey(stored.roomId),
+          keyspace.roomCheckpointKey(stored.roomId),
+          keyspace.roomIncarnationFenceKey(stored.roomId),
+          keyspace.roomDirectoryRecordKey(stored.roomId),
+          keyspace.directoryPublicIndexKey,
         ],
         arguments: [
           ...expectedArguments,
@@ -608,8 +738,15 @@ export const createRedisRoomStore = (options: RedisRoomStoreOptions): RedisRoomS
           String(stored.state.lifecycle.status === 'open' ? activeTtlMs : terminalTtlMs),
           expectedStored === null ? '' : JSON.stringify(expectedStored),
           String(MAX_ROOM_INCARNATIONS),
-          input.directoryRegistrationRequired === true ? 'required' : 'optional',
-          String(Date.now()),
+          directory === null ? '' : serializeStoredRoomDirectoryRecord(directory),
+          directory?.publicIndexMember ?? '',
+          expectedStored === null
+            ? ''
+            : roomDirectoryPublicIndexMember(
+                expectedStored.roomId,
+                expectedStored.state.lifecycle.updatedAt,
+              ),
+          roomDirectoryPublicIndexMember(stored.roomId, stored.state.lifecycle.updatedAt),
         ],
       });
       return parseMutationResult(raw, ['saved', 'conflict'] as const);
@@ -620,12 +757,18 @@ export const createRedisRoomStore = (options: RedisRoomStoreOptions): RedisRoomS
       const expiring = createExpiringStoredCheckpoint(active.state);
       const expected = checkpointPredecessorOf(active.state);
       const raw = await options.getClient().eval(DELETE_SCRIPT, {
-        keys: [roomKey(active.roomId), incarnationFenceKey(active.roomId)],
+        keys: [
+          keyspace.roomCheckpointKey(active.roomId),
+          keyspace.roomIncarnationFenceKey(active.roomId),
+          keyspace.roomDirectoryRecordKey(active.roomId),
+          keyspace.directoryPublicIndexKey,
+        ],
         arguments: [
           ...predecessorArguments(expected),
           JSON.stringify(active),
           JSON.stringify(expiring),
           String(MAX_ROOM_INCARNATIONS),
+          roomDirectoryPublicIndexMember(active.roomId, active.state.lifecycle.updatedAt),
         ],
       });
       return parseMutationResult(raw, ['deleted', 'missing', 'conflict'] as const);
@@ -636,13 +779,19 @@ export const createRedisRoomStore = (options: RedisRoomStoreOptions): RedisRoomS
       const expiring = createExpiringStoredCheckpoint(active.state);
       const expected = checkpointPredecessorOf(active.state);
       const raw = await options.getClient().eval(EXPIRE_SCRIPT, {
-        keys: [roomKey(active.roomId), incarnationFenceKey(active.roomId)],
+        keys: [
+          keyspace.roomCheckpointKey(active.roomId),
+          keyspace.roomIncarnationFenceKey(active.roomId),
+          keyspace.roomDirectoryRecordKey(active.roomId),
+          keyspace.directoryPublicIndexKey,
+        ],
         arguments: [
           ...predecessorArguments(expected),
           String(terminalTtlMs),
           JSON.stringify(active),
           JSON.stringify(expiring),
           String(MAX_ROOM_INCARNATIONS),
+          roomDirectoryPublicIndexMember(active.roomId, active.state.lifecycle.updatedAt),
         ],
       });
       return parseMutationResult(raw, ['expired', 'missing', 'conflict'] as const);
@@ -655,7 +804,10 @@ export const createRedisRoomStore = (options: RedisRoomStoreOptions): RedisRoomS
       }
       const expected = checkpointPredecessorOf(active.state);
       const raw = await options.getClient().eval(REFRESH_SCRIPT, {
-        keys: [roomKey(active.roomId)],
+        keys: [
+          keyspace.roomCheckpointKey(active.roomId),
+          keyspace.roomDirectoryRecordKey(active.roomId),
+        ],
         arguments: [
           ...predecessorArguments(expected),
           String(activeTtlMs),

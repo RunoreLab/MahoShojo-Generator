@@ -20,7 +20,7 @@ import {
   type RoomActorCheckpointStore,
   type RoomActorRegistryOptions,
 } from '#/arena-room/room-actor-registry';
-import type { RoomDirectoryRecord } from '#/arena-room/d1-room-directory-store';
+import type { RoomDirectoryRecord } from '#/arena-room/room-directory-record';
 import {
   ARENA_ROOM_NEXT_TIMESTAMP,
   createArenaRoomState,
@@ -114,7 +114,7 @@ class MemoryRoomStore implements RoomActorCheckpointStore {
   state: ArenaRoomAuthorityState | null = null;
   loadCalls = 0;
   saveCalls = 0;
-  directoryRegistrationRequirements: boolean[] = [];
+  directories: Array<RoomDirectoryRecord | undefined> = [];
   refreshCalls = 0;
   activeSaves = 0;
   maxActiveSaves = 0;
@@ -136,7 +136,9 @@ class MemoryRoomStore implements RoomActorCheckpointStore {
 
   async save(input: Parameters<RoomActorCheckpointStore['save']>[0]) {
     const data = consumeArenaRoomCheckpointCommit(input.commit);
-    this.directoryRegistrationRequirements.push(input.directoryRegistrationRequired === true);
+    this.directories.push(input.directory === undefined
+      ? undefined
+      : structuredClone(input.directory));
     const call = ++this.saveCalls;
     this.activeSaves += 1;
     this.maxActiveSaves = Math.max(this.maxActiveSaves, this.activeSaves);
@@ -170,34 +172,39 @@ class MemoryRoomStore implements RoomActorCheckpointStore {
 }
 
 describe('RoomActorRegistry', () => {
-  it('directory registration 必须先于 create checkpoint，prepare 失败不得创建 Room', async () => {
+  it('validated directory record 与 create checkpoint 使用同一次 store save，失败不留下 Room', async () => {
     const store = new MemoryRoomStore();
-    const prepareCreatedOpen = vi.fn<(record: RoomDirectoryRecord) => Promise<void>>(
-      async () => { throw new Error('registration unavailable'); },
-    );
-    const registry = createRoomActorRegistry({ store, prepareCreatedOpen });
+    store.saveFailure = new Error('redis unavailable');
+    const registry = createRoomActorRegistry({ store });
 
     await expect(registry.create({
       host: { userId: 'host-1', displayName: 'Host' },
       sharedConfig: createArenaRoomState().snapshot.sharedConfig,
       authority: hostAuthority,
       directory: { title: '公开房间', visibility: 'public' },
-    })).rejects.toThrow('registration unavailable');
-    expect(store.saveCalls).toBe(0);
+    })).rejects.toThrow('redis unavailable');
+    expect(store.saveCalls).toBe(1);
     expect(store.state).toBeNull();
+    expect(store.directories).toEqual([{
+      roomId: 'room-1',
+      roomEpoch: 'epoch-1',
+      hostUserId: 101,
+      title: '公开房间',
+      visibility: 'public',
+      status: 'open',
+      createdAt: '2026-08-28T00:00:00.000Z',
+      lastActivityAt: '2026-08-28T00:00:00.000Z',
+    }]);
 
-    prepareCreatedOpen.mockResolvedValueOnce(undefined);
-    store.beforeSave = async () => {
-      expect(prepareCreatedOpen).toHaveBeenCalledTimes(2);
-    };
+    store.saveFailure = undefined;
     await expect(registry.create({
       host: { userId: 'host-1', displayName: 'Host' },
       sharedConfig: createArenaRoomState().snapshot.sharedConfig,
       authority: hostAuthority,
       directory: { title: '公开房间', visibility: 'public' },
     })).resolves.toMatchObject({ result: { ok: true } });
-    expect(store.saveCalls).toBe(1);
-    expect(store.directoryRegistrationRequirements).toEqual([true]);
+    expect(store.saveCalls).toBe(2);
+    expect(store.directories).toHaveLength(2);
   });
 
   it('无效 command 在 hydration/epoch rollover 前直接拒绝', async () => {
@@ -542,16 +549,10 @@ describe('RoomActorRegistry', () => {
     expect(store.state?.snapshot.roomEpoch).toBe('epoch-1');
   });
 
-  it('只在 terminal checkpoint 提交后通知派生目录，observer 失败不反向改变 close', async () => {
+  it('terminal checkpoint 失败会 quarantine，成功 close 不产生第二个 directory create input', async () => {
     const store = new MemoryRoomStore();
-    const onCommittedClosed = vi.fn<(state: ArenaRoomAuthorityState) => Promise<void>>(
-      async () => { throw new Error('d1 unavailable'); },
-    );
-    const onBackgroundError = vi.fn(() => { throw new Error('observer unavailable'); });
     const registry = createRoomActorRegistry({
       store,
-      onCommittedClosed,
-      onBackgroundError,
       createRoomEpoch: () => 'epoch-2',
       recoveryTimestamp: () => THIRD_TIMESTAMP,
     });
@@ -568,7 +569,6 @@ describe('RoomActorRegistry', () => {
       },
       authority: hostAuthority,
     })).rejects.toThrow('redis unavailable');
-    expect(onCommittedClosed).not.toHaveBeenCalled();
     expect(registry.get('room-1')).toBeNull();
 
     store.saveFailure = undefined;
@@ -585,13 +585,8 @@ describe('RoomActorRegistry', () => {
       },
       authority: hostAuthority,
     })).resolves.toMatchObject({ ok: true, kind: 'applied' });
-    await vi.waitFor(() => expect(onCommittedClosed).toHaveBeenCalledOnce());
-    await vi.waitFor(() => expect(onBackgroundError).toHaveBeenCalledOnce());
-    expect(onCommittedClosed.mock.calls[0]?.[0]).toMatchObject({
-      snapshot: { roomId: 'room-1', roomEpoch: 'epoch-2' },
-      lifecycle: { status: 'closed' },
-    });
     expect(store.state?.lifecycle.status).toBe('closed');
+    expect(store.directories.every((directory) => directory === undefined)).toBe(true);
   });
 
   it('exact replay quota 耗尽时以 opaque runtime capability checkpoint close，原请求稳定 fail closed', async () => {
@@ -1332,13 +1327,11 @@ describe('RoomActorRegistry', () => {
     const seed = createRoomActorRegistry({ store });
     await createActorRoom(seed);
     await seed.shutdown();
-    const onCommittedClosed = vi.fn<(state: ArenaRoomAuthorityState) => void>();
     const registry = createRoomActorRegistry({
       store,
       now: () => Date.parse('2026-08-28T00:46:00.000Z'),
       createRoomEpoch: () => 'epoch-2',
       recoveryTimestamp: () => '2026-08-28T00:46:00.000Z',
-      onCommittedClosed,
     });
 
     const actor = await registry.recover('room-1');
@@ -1346,60 +1339,22 @@ describe('RoomActorRegistry', () => {
       lifecycle: { status: 'closed', closeReason: 'host-offline-timeout' },
       snapshot: { roomEpoch: 'epoch-1' },
     });
-    expect(onCommittedClosed).toHaveBeenCalledWith(expect.objectContaining({
-      snapshot: expect.objectContaining({ roomEpoch: 'epoch-1' }),
-      lifecycle: expect.objectContaining({ status: 'closed' }),
-    }));
   });
 
-  it('open recovery checkpoint 提交后通知 predecessor/new epoch，派生失败不否定 recovery', async () => {
+  it('open recovery 只提交 predecessor/new epoch checkpoint，不重建 directory metadata', async () => {
     const store = new MemoryRoomStore();
     store.state = createArenaRoomState();
-    const onCommittedRecovered = vi.fn(async () => { throw new Error('d1 unavailable'); });
-    const onBackgroundError = vi.fn();
     const registry = createRoomActorRegistry({
       store,
       createRoomEpoch: () => 'epoch-2',
       recoveryTimestamp: () => ARENA_ROOM_NEXT_TIMESTAMP,
-      onCommittedRecovered,
-      onBackgroundError,
     });
 
     await expect(registry.recover('room-1')).resolves.toMatchObject({
       roomId: 'room-1',
     });
-    expect(onCommittedRecovered).toHaveBeenCalledWith({
-      previousRoomEpoch: 'epoch-1',
-      state: expect.objectContaining({
-        snapshot: expect.objectContaining({ roomEpoch: 'epoch-2' }),
-        lifecycle: expect.objectContaining({ status: 'open' }),
-      }),
-    });
-    expect(onBackgroundError).toHaveBeenCalledOnce();
     expect(store.state?.snapshot.roomEpoch).toBe('epoch-2');
-  });
-
-  it('open recovery 不等待派生目录 I/O，已提交 actor 在 callback 前安装且可安全 shutdown', async () => {
-    const store = new MemoryRoomStore();
-    store.state = createArenaRoomState();
-    let resolveProjection!: () => void;
-    const projection = new Promise<void>((resolve) => { resolveProjection = resolve; });
-    const onCommittedRecovered = vi.fn(() => projection);
-    const registry = createRoomActorRegistry({
-      store,
-      createRoomEpoch: () => 'epoch-2',
-      recoveryTimestamp: () => ARENA_ROOM_NEXT_TIMESTAMP,
-      onCommittedRecovered,
-    });
-
-    const actor = await registry.recover('room-1');
-    expect(actor).not.toBeNull();
-    expect(registry.get('room-1')).toBe(actor);
-    expect(onCommittedRecovered).toHaveBeenCalledOnce();
-    await registry.shutdown();
-    expect(registry.size).toBe(0);
-    resolveProjection();
-    await projection;
+    expect(store.directories).toEqual([undefined]);
   });
 
   it('低频 process refresh 仅刷新 exact active checkpoint，missing/conflict 会 fence actor', async () => {

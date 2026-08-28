@@ -7,10 +7,10 @@ import {
   type RedisGenerationClient,
 } from './generation-replay-store';
 import {
-  createRedisRoomDirectoryRegistrationStore,
-  type RedisRoomDirectoryRegistrationClient,
-  type RedisRoomDirectoryRegistrationStore,
-} from '../arena-room/redis-room-directory-registration-store';
+  createRedisRoomDirectoryStore,
+  type RedisRoomDirectoryClient,
+  type RedisRoomDirectoryStore,
+} from '../arena-room/redis-room-directory-store';
 import {
   createRedisRoomStore,
   type RedisRoomClient,
@@ -145,7 +145,7 @@ export class RedisRuntime implements RedisService {
   private lastError: string | null = null;
   private generationReplayStore: GenerationReplayStore | null = null;
   private roomStore: RedisRoomStore | null = null;
-  private roomDirectoryRegistrationStore: RedisRoomDirectoryRegistrationStore | null = null;
+  private roomDirectoryStore: RedisRoomDirectoryStore | null = null;
   private roomTicketReplayStore: RedisRoomTicketReplayStore | null = null;
 
   constructor(
@@ -307,8 +307,8 @@ export class RedisRuntime implements RedisService {
     return this.roomStore;
   }
 
-  getRoomDirectoryRegistrationStore(): RedisRoomDirectoryRegistrationStore {
-    this.roomDirectoryRegistrationStore ??= createRedisRoomDirectoryRegistrationStore({
+  getRoomDirectoryStore(): RedisRoomDirectoryStore {
+    this.roomDirectoryStore ??= createRedisRoomDirectoryStore({
       keyPrefix: this.keyPrefix,
       getClient: () => ({
         eval: (script, options) => this.executeRoomCommand(async () => {
@@ -316,9 +316,14 @@ export class RedisRuntime implements RedisService {
           if (!client?.isReady) throw new Error('REDIS_ROOM_CHECKPOINT_UNAVAILABLE');
           return client.eval(script, options);
         }),
-      } satisfies RedisRoomDirectoryRegistrationClient),
+        get: (key) => this.executeRoomCommand(async () => {
+          const client = this.client;
+          if (!client?.isReady) throw new Error('REDIS_ROOM_CHECKPOINT_UNAVAILABLE');
+          return client.get(key);
+        }),
+      } satisfies RedisRoomDirectoryClient),
     });
-    return this.roomDirectoryRegistrationStore;
+    return this.roomDirectoryStore;
   }
 
   getRoomTicketReplayStore(): RedisRoomTicketReplayStore {

@@ -23,7 +23,7 @@ import {
 } from '@mahoshojo/multiplayer-core';
 
 import type { RedisRoomStore } from './redis-room-store';
-import type { RoomDirectoryRecord } from './d1-room-directory-store';
+import type { RoomDirectoryRecord } from './room-directory-record';
 
 const DEFAULT_MAX_QUEUED_COMMANDS = 64;
 const DEFAULT_MAX_SUBSCRIBERS_PER_ROOM = 128;
@@ -80,54 +80,6 @@ const positiveFinite = (value: number, name: string): number => {
 const cloneState = (state: ArenaRoomAuthorityState): ArenaRoomAuthorityState => (
   parseArenaRoomAuthorityState(state)
 );
-
-const reportCommittedClosed = (
-  state: ArenaRoomAuthorityState,
-  onCommittedClosed: ((state: ArenaRoomAuthorityState) => void | Promise<void>) | undefined,
-  onBackgroundError: (error: unknown) => void,
-): void => {
-  if (state.lifecycle.status !== 'closed' || onCommittedClosed === undefined) return;
-  const report = (error: unknown): void => {
-    try {
-      onBackgroundError(error);
-    } catch {
-      // Projection diagnostics cannot alter an acknowledged Room checkpoint.
-    }
-  };
-  try {
-    const completion = onCommittedClosed(cloneState(state));
-    if (completion !== undefined) void Promise.resolve(completion).catch(report);
-  } catch (error) {
-    report(error);
-  }
-};
-
-const reportCommittedRecovered = (
-  input: { readonly previousRoomEpoch: string; readonly state: ArenaRoomAuthorityState },
-  onCommittedRecovered: ((input: {
-    readonly previousRoomEpoch: string;
-    readonly state: ArenaRoomAuthorityState;
-  }) => void | Promise<void>) | undefined,
-  onBackgroundError: (error: unknown) => void,
-): void => {
-  if (onCommittedRecovered === undefined) return;
-  const report = (error: unknown): void => {
-    try {
-      onBackgroundError(error);
-    } catch {
-      // Projection diagnostics cannot alter an acknowledged recovery checkpoint.
-    }
-  };
-  try {
-    const completion = onCommittedRecovered({
-      previousRoomEpoch: input.previousRoomEpoch,
-      state: cloneState(input.state),
-    });
-    if (completion !== undefined) void Promise.resolve(completion).catch(report);
-  } catch (error) {
-    report(error);
-  }
-};
 
 const sameState = (
   left: ArenaRoomAuthorityState | null,
@@ -254,14 +206,13 @@ export class RoomActor {
       readonly maxSubscribers: number;
       readonly maxReplayEvents: number;
       readonly initialReplay: readonly ControlRoomEvent[];
-      readonly directoryRegistrationRequired: boolean;
+      readonly creationDirectory: RoomDirectoryRecord | null;
       readonly now: () => number;
       readonly onAbandoned: (actor: RoomActor) => void;
       readonly onFenced: (actor: RoomActor) => void;
       readonly onQuarantined: (actor: RoomActor) => void;
       readonly onSubscriberError: (error: unknown) => void;
       readonly onBackgroundError: (error: unknown) => void;
-      readonly onCommittedClosed?: (state: ArenaRoomAuthorityState) => void | Promise<void>;
       readonly quotaCloseTimestamp: () => string;
       readonly store: RoomActorCheckpointStore;
     },
@@ -580,8 +531,9 @@ export class RoomActor {
     try {
       saved = await this.options.store.save({
         commit: receipt,
-        directoryRegistrationRequired: this.state === null
-          && this.options.directoryRegistrationRequired,
+        ...(this.state === null && this.options.creationDirectory !== null
+          ? { directory: this.options.creationDirectory }
+          : {}),
       });
     } catch (error) {
       // The command may already be committed in Redis. Stop serving the stale
@@ -598,11 +550,6 @@ export class RoomActor {
     this.lastCheckpointRefreshAt = this.options.now();
     this.rememberReplay(transition.events, predecessorSnapshot);
     this.fanout(transition, predecessorSnapshot);
-    reportCommittedClosed(
-      this.state,
-      this.options.onCommittedClosed,
-      this.options.onBackgroundError,
-    );
     return transition;
   }
 
@@ -647,11 +594,6 @@ export class RoomActor {
     this.lastCheckpointRefreshAt = this.options.now();
     this.rememberReplay(transition.events, predecessorSnapshot);
     this.fanout(transition, predecessorSnapshot);
-    reportCommittedClosed(
-      this.state,
-      this.options.onCommittedClosed,
-      this.options.onBackgroundError,
-    );
     return true;
   }
 
@@ -711,11 +653,6 @@ export class RoomActor {
     this.quotaExhaustedReason = null;
     this.rememberReplay(transition.events, predecessorSnapshot);
     this.fanout(transition, predecessorSnapshot);
-    reportCommittedClosed(
-      this.state,
-      this.options.onCommittedClosed,
-      this.options.onBackgroundError,
-    );
   }
 
   private createSnapshotEvent(): ControlRoomEvent {
@@ -828,12 +765,6 @@ export type RoomActorRegistryOptions = {
   readonly quotaCloseTimestamp?: () => string;
   readonly onSubscriberError?: (error: unknown) => void;
   readonly onBackgroundError?: (error: unknown) => void;
-  readonly onCommittedClosed?: (state: ArenaRoomAuthorityState) => void | Promise<void>;
-  readonly onCommittedRecovered?: (input: {
-    readonly previousRoomEpoch: string;
-    readonly state: ArenaRoomAuthorityState;
-  }) => void | Promise<void>;
-  readonly prepareCreatedOpen?: (record: RoomDirectoryRecord) => Promise<void>;
 };
 
 export type RoomActorRegistryExecuteInput = RoomActorExecuteInput & {
@@ -985,6 +916,7 @@ export class RoomActorRegistry {
       || this.fencedRoomIds.has(identity.roomId)
     ) return fail('ROOM_ACTOR_CREATE_IDENTITY_CONFLICT');
     this.requireCapacity();
+    let directoryRecord: RoomDirectoryRecord | null = null;
     if (input.directory !== undefined) {
       const title = RoomDirectoryTitleSchema.safeParse(input.directory.title);
       const visibility = RoomDirectoryVisibilitySchema.safeParse(input.directory.visibility);
@@ -994,9 +926,8 @@ export class RoomActorRegistry {
         || !visibility.success
         || authority?.kind !== 'authenticated-user'
         || authority.actorUserId !== input.host.userId
-        || this.options.prepareCreatedOpen === undefined
       ) return fail('ROOM_ACTOR_CREATE_DIRECTORY_INVALID');
-      await this.options.prepareCreatedOpen({
+      directoryRecord = {
         roomId: identity.roomId,
         roomEpoch: identity.roomEpoch,
         hostUserId: authority.accountUserId,
@@ -1005,13 +936,13 @@ export class RoomActorRegistry {
         status: 'open',
         createdAt: command.data.timestamp,
         lastActivityAt: command.data.timestamp,
-      });
+      };
     }
     const actor = this.createActor(
       identity.roomId,
       null,
       [],
-      input.directory !== undefined,
+      directoryRecord,
     );
     this.actors.set(identity.roomId, actor);
     const result = await actor.execute({
@@ -1146,11 +1077,6 @@ export class RoomActorRegistry {
     if (checkpoint.lifecycle.status === 'closed') {
       const actor = this.createActor(roomId, checkpoint);
       this.actors.set(roomId, actor);
-      reportCommittedClosed(
-        checkpoint,
-        this.options.onCommittedClosed,
-        this.options.onBackgroundError ?? (() => undefined),
-      );
       return actor;
     }
     const now = this.now();
@@ -1181,11 +1107,6 @@ export class RoomActorRegistry {
       this.requireAccepting();
       const actor = this.createActor(roomId, transition.nextState, transition.events);
       this.actors.set(roomId, actor);
-      reportCommittedClosed(
-        transition.nextState,
-        this.options.onCommittedClosed,
-        this.options.onBackgroundError ?? (() => undefined),
-      );
       return actor;
     }
     const previousRoomEpoch = checkpoint.snapshot.roomEpoch;
@@ -1237,11 +1158,6 @@ export class RoomActorRegistry {
     this.requireAccepting();
     const actor = this.createActor(roomId, transition.nextState, transition.events);
     this.actors.set(roomId, actor);
-    reportCommittedRecovered(
-      { previousRoomEpoch, state: transition.nextState },
-      this.options.onCommittedRecovered,
-      this.options.onBackgroundError ?? (() => undefined),
-    );
     return actor;
   }
 
@@ -1249,7 +1165,7 @@ export class RoomActorRegistry {
     roomId: string,
     state: ArenaRoomAuthorityState | null,
     initialReplay: readonly ControlRoomEvent[] = [],
-    directoryRegistrationRequired = false,
+    creationDirectory: RoomDirectoryRecord | null = null,
   ): RoomActor {
     let actor!: RoomActor;
     actor = new RoomActor(roomId, state, {
@@ -1257,7 +1173,7 @@ export class RoomActorRegistry {
       maxSubscribers: this.maxSubscribers,
       maxReplayEvents: this.maxReplayEvents,
       initialReplay,
-      directoryRegistrationRequired,
+      creationDirectory,
       now: this.now,
       onAbandoned: (abandonedActor) => {
         if (this.actors.get(roomId) === abandonedActor) this.actors.delete(roomId);
@@ -1272,7 +1188,6 @@ export class RoomActorRegistry {
       },
       onSubscriberError: this.options.onSubscriberError ?? (() => undefined),
       onBackgroundError: this.options.onBackgroundError ?? (() => undefined),
-      onCommittedClosed: this.options.onCommittedClosed,
       quotaCloseTimestamp: this.options.quotaCloseTimestamp ?? (() => new Date().toISOString()),
       store: this.options.store,
     });

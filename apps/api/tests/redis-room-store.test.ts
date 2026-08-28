@@ -56,16 +56,17 @@ describe('RedisRoomStore', () => {
       expect.stringMatching(/^mahoshojo:room:v1:preview:[a-f0-9]{64}:checkpoint$/u),
       expect.stringMatching(/^mahoshojo:room:v1:preview:[a-f0-9]{64}:incarnations$/u),
       expect.stringMatching(
-        /^mahoshojo:room-directory-registration:v2:preview:entry:[a-f0-9]{64}$/u,
+        /^mahoshojo:room-directory:v1:preview:entry:[a-f0-9]{64}$/u,
       ),
+      'mahoshojo:room-directory:v1:preview:public',
     ]);
     expect(options.keys[0]).not.toContain('room-1');
     expect(options.keys[1]).not.toContain('room-1');
     expect(options.keys[0]!.replace(':checkpoint', ''))
       .toBe(options.keys[1]!.replace(':incarnations', ''));
-    expect(options.arguments).toContain('3600000');
-    expect(options.arguments.at(-3)).toBe('16');
-    expect(options.arguments.at(-2)).toBe('optional');
+    expect(options.arguments[7]).toBe('3600000');
+    expect(options.arguments[9]).toBe('16');
+    expect(options.arguments[10]).toBe('');
     const serialized = options.arguments.find((argument) => argument.startsWith('{'));
     expect(serialized).toBeDefined();
     const parsed = JSON.parse(serialized!);
@@ -94,30 +95,83 @@ describe('RedisRoomStore', () => {
       .resolves.toEqual({ kind: 'conflict' });
   });
 
-  it('directory create 把 checkpoint 与 pending registration 原子提交并在缺失时拒绝', async () => {
+  it('directory create 把 checkpoint、record 与 public index 放在同一次 Lua CAS', async () => {
     const client = createClient();
     vi.mocked(client.eval)
       .mockResolvedValueOnce('saved')
-      .mockResolvedValueOnce('directory-registration-missing');
+      .mockResolvedValueOnce('directory-conflict');
     const store = createRedisRoomStore({ getClient: () => client, keyPrefix: 'preview' });
     const created = createArenaRoomTransition();
+    const directory = {
+      roomId: 'room-1',
+      roomEpoch: 'epoch-1',
+      hostUserId: 101,
+      title: '公开测试房',
+      visibility: 'public' as const,
+      status: 'open' as const,
+      createdAt: created.nextState.lifecycle.createdAt,
+      lastActivityAt: created.nextState.lifecycle.updatedAt,
+    };
 
     await expect(store.save({
       commit: commit(created),
-      directoryRegistrationRequired: true,
+      directory,
     })).resolves.toEqual({ kind: 'saved' });
     const [script, options] = vi.mocked(client.eval).mock.calls[0]!;
-    expect(script).toContain("registration.phase ~= 'pending-create'");
-    expect(script).toContain("registration.phase = 'projecting'");
-    expect(options.arguments.at(-2)).toBe('required');
+    expect(script).toContain("redis.call('GET', KEYS[3])");
+    expect(script).toContain("redis.call('SET', KEYS[3], directoryNextRaw, 'PX', ARGV[8])");
+    expect(script).toContain("redis.call('ZADD', KEYS[4], 0, directoryNextIndexMember)");
+    expect(script).toContain("directoryIndexType ~= 'zset'");
+    expect(script.indexOf("directoryIndexType ~= 'zset'"))
+      .toBeLessThan(script.indexOf("redis.call('SET', KEYS[1], ARGV[7]"));
+    expect(script.indexOf("redis.call('GET', KEYS[3])"))
+      .toBeLessThan(script.indexOf("redis.call('SET', KEYS[1], ARGV[7]"));
+    expect(JSON.parse(options.arguments[10]!)).toMatchObject(directory);
+    expect(options.arguments[11]).toMatch(/^\d{15}:[a-f0-9]{64}$/u);
+    expect(options.arguments[12]).toBe('');
+    expect(options.arguments[13]).toBe(options.arguments[11]);
     expect(options.keys[2]).toMatch(
-      /^mahoshojo:room-directory-registration:v2:preview:entry:[a-f0-9]{64}$/u,
+      /^mahoshojo:room-directory:v1:preview:entry:[a-f0-9]{64}$/u,
     );
+    expect(options.keys[3]).toBe('mahoshojo:room-directory:v1:preview:public');
 
     await expect(store.save({
       commit: commit(createArenaRoomTransition()),
-      directoryRegistrationRequired: true,
-    })).rejects.toThrow('REDIS_ROOM_DIRECTORY_REGISTRATION_REQUIRED');
+      directory,
+    })).rejects.toThrow('REDIS_ROOM_DIRECTORY_CONFLICT');
+  });
+
+  it('unlisted directory 只原子保存 record，不加入 public index；host mismatch 在 EVAL 前拒绝', async () => {
+    const client = createClient();
+    vi.mocked(client.eval).mockResolvedValue('saved');
+    const store = createRedisRoomStore({ getClient: () => client });
+    const created = createArenaRoomTransition();
+    const baseDirectory = {
+      roomId: 'room-1',
+      roomEpoch: 'epoch-1',
+      hostUserId: 101,
+      title: '非公开测试房',
+      visibility: 'unlisted' as const,
+      status: 'open' as const,
+      createdAt: created.nextState.lifecycle.createdAt,
+      lastActivityAt: created.nextState.lifecycle.updatedAt,
+    };
+
+    await expect(store.save({ commit: commit(created), directory: baseDirectory }))
+      .resolves.toEqual({ kind: 'saved' });
+    const [, options] = vi.mocked(client.eval).mock.calls[0]!;
+    expect(JSON.parse(options.arguments[10]!)).toMatchObject({
+      visibility: 'unlisted',
+      publicIndexMember: null,
+    });
+    expect(options.arguments[11]).toBe('');
+
+    vi.mocked(client.eval).mockClear();
+    await expect(store.save({
+      commit: commit(createArenaRoomTransition()),
+      directory: { ...baseDirectory, hostUserId: 202 },
+    })).rejects.toThrow('REDIS_ROOM_DIRECTORY_INPUT_INVALID');
+    expect(client.eval).not.toHaveBeenCalled();
   });
 
   it('以完整 predecessor CAS 接受 state-machine recovery epoch rollover', async () => {
@@ -136,9 +190,10 @@ describe('RedisRoomStore', () => {
     expect(script).toContain('fenceCount + requiredEpochs');
     expect(script).toContain("redis.call('SADD', KEYS[2], currentEpochToFence)");
     expect(script).toContain('candidate.controlSeq ~= 0');
-    expect(options.arguments.at(-3)).toBe('16');
-    expect(JSON.parse(options.arguments.at(-6)!).roomEpoch).toBe('epoch-2');
-    expect(JSON.parse(options.arguments.at(-4)!).roomEpoch).toBe('epoch-1');
+    expect(options.arguments[9]).toBe('16');
+    expect(JSON.parse(options.arguments[6]!).roomEpoch).toBe('epoch-2');
+    expect(JSON.parse(options.arguments[8]!).roomEpoch).toBe('epoch-1');
+    expect(options.arguments[12]).not.toBe(options.arguments[13]);
   });
 
   it('只接受 state machine 签发的 receipt，且 transition 返回后篡改不会进入 checkpoint', async () => {
@@ -186,11 +241,11 @@ describe('RedisRoomStore', () => {
       .resolves.toEqual({ kind: 'saved' });
 
     const [, options] = vi.mocked(client.eval).mock.calls[0]!;
-    expect(options.arguments.at(-5)).toBe('45000');
+    expect(options.arguments[7]).toBe('45000');
     expect(closed).toEqual(before);
   });
 
-  it('refresh 只对 exact active checkpoint 延长 TTL，missing/conflict 均不伪装成功', async () => {
+  it('refresh 在 exact active checkpoint 同一边界延长 directory record TTL', async () => {
     const client = createClient();
     vi.mocked(client.eval)
       .mockResolvedValueOnce('refreshed')
@@ -209,7 +264,14 @@ describe('RedisRoomStore', () => {
     const [script, options] = vi.mocked(client.eval).mock.calls[0]!;
     expect(script).toContain('ROOM_CHECKPOINT_REFRESH_V1');
     expect(script).toContain("redis.call('PEXPIRE', KEYS[1], ARGV[6])");
+    expect(script).toContain("redis.call('PEXPIRE', KEYS[2], ARGV[6])");
+    expect(script.indexOf("recordType ~= 'string'"))
+      .toBeLessThan(script.indexOf("redis.call('PEXPIRE', KEYS[1], ARGV[6])"));
     expect(script).toContain('raw ~= ARGV[7]');
+    expect(options.keys).toEqual([
+      expect.stringMatching(/^mahoshojo:room:v1:[a-f0-9]{64}:checkpoint$/u),
+      expect.stringMatching(/^mahoshojo:room-directory:v1:entry:[a-f0-9]{64}$/u),
+    ]);
     expect(options.arguments.at(-2)).toBe('86400000');
     expect(JSON.parse(options.arguments.at(-1)!)).toMatchObject({
       checkpointVersion: 1,
@@ -430,12 +492,13 @@ describe('RedisRoomStore', () => {
     expect(script).toContain("redis.call('SET', KEYS[1], ARGV[8], 'PX', targetTtl)");
     expect(script).toContain('currentActive and raw ~= ARGV[7]');
     expect(script).toContain('currentExpiring and raw ~= ARGV[8]');
-    expect(options.arguments.at(-4)).toBe('60000');
-    expect(JSON.parse(options.arguments.at(-2)!)).toMatchObject({
+    expect(options.arguments[5]).toBe('60000');
+    expect(JSON.parse(options.arguments[7]!)).toMatchObject({
       checkpointVersion: 2,
       expiryFence: 'expiring',
     });
-    expect(options.arguments.at(-1)).toBe('16');
+    expect(options.arguments[8]).toBe('16');
+    expect(options.arguments[9]).toMatch(/^\d{15}:[a-f0-9]{64}$/u);
   });
 
   it('第二个 store 实例可恢复最后一次 acknowledged mutation，旧 epoch writer 不能覆盖', async () => {

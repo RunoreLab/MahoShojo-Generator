@@ -20,7 +20,6 @@ import {
   RoomActor,
   RoomActorRegistry,
 } from './room-actor-registry';
-import type { ArenaRoomDirectoryService } from './room-directory-service';
 
 export type ArenaRoomMembershipErrorCode =
   | 'ROOM_CLOSED'
@@ -102,9 +101,7 @@ export type ArenaRoomMembershipService = {
 export type ArenaRoomMembershipServiceOptions = {
   readonly actors: RoomActorRegistry;
   readonly createUserId?: () => string;
-  readonly directory?: Pick<ArenaRoomDirectoryService, 'registerOpen'>;
   readonly now?: () => string;
-  readonly onDirectoryError?: (error: unknown) => void;
 };
 
 const fail = (code: ArenaRoomMembershipErrorCode): never => {
@@ -139,14 +136,6 @@ export const createArenaRoomMembershipService = (
 ): ArenaRoomMembershipService => {
   const createUserId = options.createUserId ?? randomUUID;
   const now = options.now ?? (() => new Date().toISOString());
-
-  const reportDirectoryError = (error: unknown): void => {
-    try {
-      options.onDirectoryError?.(error);
-    } catch {
-      // Derived-directory diagnostics cannot alter an acknowledged Room checkpoint.
-    }
-  };
 
   const recoverActor = async (roomId: string): Promise<{
     actor: RoomActor;
@@ -212,7 +201,6 @@ export const createArenaRoomMembershipService = (
         !validAccountUserId(input.accountUserId)
         || !displayName.success
         || !sharedConfig.success
-        || (input.directory !== undefined && options.directory === undefined)
         || (directoryTitle !== null && !directoryTitle.success)
         || (directoryVisibility !== null && !directoryVisibility.success)
       ) {
@@ -239,26 +227,6 @@ export const createArenaRoomMembershipService = (
       if (!result.result.ok) return fail('ROOM_MEMBERSHIP_TRANSITION_DENIED');
       const member = result.result.nextState.snapshot.members.find((entry) => entry.userId === userId);
       if (!member) return fail('ROOM_MEMBERSHIP_TRANSITION_DENIED');
-      if (
-        options.directory !== undefined
-        && directoryTitle?.success
-        && directoryVisibility?.success
-      ) {
-        try {
-          await options.directory.registerOpen({
-            roomId: result.roomId,
-            roomEpoch: result.roomEpoch,
-            hostUserId: input.accountUserId,
-            title: directoryTitle.data,
-            visibility: directoryVisibility.data,
-            status: 'open',
-            createdAt: result.result.nextState.lifecycle.createdAt,
-            lastActivityAt: result.result.nextState.lifecycle.updatedAt,
-          });
-        } catch (error) {
-          reportDirectoryError(error);
-        }
-      }
       return sessionView(result.roomId, result.result.nextState, member);
     },
 
