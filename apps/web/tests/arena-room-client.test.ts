@@ -111,6 +111,59 @@ describe('Arena Room browser client', () => {
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
 
+  it('非幂等 create/join 的畸形成功响应也标记为结果未知', async () => {
+    const fetcher = vi.fn<typeof fetch>(async () => Response.json({ ok: true }, { status: 201 }));
+    const client = createArenaRoomClient({
+      origin: 'http://127.0.0.1:8787',
+      fetch: fetcher,
+      getAuthHeader: async () => 'Bearer verified-key',
+    });
+
+    await expect(client.create({
+      displayName: '房主',
+      directory: { title: '测试房', visibility: 'unlisted' },
+      sharedConfig: snapshot.sharedConfig,
+    })).rejects.toMatchObject({ code: 'ROOM_RESULT_UNKNOWN' });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it('非幂等 create/join 收到 5xx 也保守标记为结果未知', async () => {
+    const fetcher = vi.fn<typeof fetch>(async () => Response.json({
+      code: 'ROOM_UNAVAILABLE',
+      error: '房间运行时暂不可用',
+      retryAfterSeconds: 1,
+    }, { status: 503 }));
+    const client = createArenaRoomClient({
+      origin: 'http://127.0.0.1:8787',
+      fetch: fetcher,
+      getAuthHeader: async () => 'Bearer verified-key',
+    });
+
+    await expect(client.create({
+      displayName: '房主',
+      directory: { title: '测试房', visibility: 'unlisted' },
+      sharedConfig: snapshot.sharedConfig,
+    })).rejects.toMatchObject({ code: 'ROOM_RESULT_UNKNOWN' });
+  });
+
+  it('leave/close 携带 session epoch fence，身份仍不进入 body', async () => {
+    const fetcher = vi.fn<typeof fetch>(async () => Response.json({
+      protocolVersion: 1,
+      roomId: 'room-1',
+      outcome: 'left',
+    }));
+    const client = createArenaRoomClient({
+      origin: 'http://127.0.0.1:8787',
+      fetch: fetcher,
+      getAuthHeader: async () => 'Bearer verified-key',
+    });
+
+    await client.leave('room-1', 'epoch-1');
+    expect(JSON.parse(String(fetcher.mock.calls[0]?.[1]?.body))).toEqual({
+      expectedRoomEpoch: 'epoch-1',
+    });
+  });
+
   it('ticket 只返回内存值并构造 encoded WSS URL，不写 storage/log', async () => {
     const fetcher = vi.fn<typeof fetch>(async () => Response.json({
       protocolVersion: 1,

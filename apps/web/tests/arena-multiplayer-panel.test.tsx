@@ -163,4 +163,16 @@ describe('Arena multiplayer panel accessibility/permissions', () => {
       expect(html).not.toContain('透明');
     }
   });
+
+  it('create 结果未知时隐藏重复创建入口并提供显式对账动作', () => {
+    const html = render({
+      ...readyState,
+      phase: 'unknown',
+      notice: '请求可能已提交，请先确认房间状态，不要重复提交',
+    });
+    expect(html).toContain('服务器可能已经创建房间');
+    expect(html).toContain('检查公开房间');
+    expect(html).toContain('已确认状态，返回大厅');
+    expect(html).not.toContain('创建多人房间');
+  });
 });

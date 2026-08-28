@@ -1,6 +1,7 @@
 import {
   ARENA_ROOM_HTTP_BASE_PATH,
   ArenaRoomCreateRequestSchema,
+  ArenaRoomEpochMutationRequestSchema,
   ArenaRoomHttpErrorResponseSchema,
   ArenaRoomJoinRequestSchema,
   ArenaRoomLeaveResponseSchema,
@@ -46,8 +47,8 @@ export type ArenaRoomClient = {
   join(roomId: string, request: ArenaRoomJoinRequest): Promise<ArenaRoomSessionResponse>;
   getSession(roomId: string): Promise<ArenaRoomSessionResponse>;
   issueTicket(roomId: string, request: ArenaRoomTicketRequest): Promise<ArenaRoomTicketResponse>;
-  leave(roomId: string): Promise<ArenaRoomLeaveResponse>;
-  close(roomId: string): Promise<ArenaRoomLeaveResponse>;
+  leave(roomId: string, expectedRoomEpoch: string): Promise<ArenaRoomLeaveResponse>;
+  close(roomId: string, expectedRoomEpoch: string): Promise<ArenaRoomLeaveResponse>;
   buildWebSocketUrl(ticket: ArenaRoomTicketResponse): string;
 };
 
@@ -124,6 +125,13 @@ export const createArenaRoomClient = (options: ClientOptions): ArenaRoomClient =
     }
     const payload = await response.json().catch(() => null) as unknown;
     if (!response.ok) {
+      if (input.unknownResult && response.status >= 500) {
+        throw new ArenaRoomClientError(
+          'ROOM_RESULT_UNKNOWN',
+          response.status,
+          '请求可能已提交，请先确认房间状态，不要重复提交',
+        );
+      }
       const parsed = ArenaRoomHttpErrorResponseSchema.safeParse(payload);
       throw new ArenaRoomClientError(
         parsed.success ? parsed.data.code : 'ROOM_RESPONSE_INVALID',
@@ -132,7 +140,22 @@ export const createArenaRoomClient = (options: ClientOptions): ArenaRoomClient =
         parsed.success ? parsed.data.retryAfterSeconds : undefined,
       );
     }
-    return parseResponse(input.schema, payload);
+    try {
+      return parseResponse(input.schema, payload);
+    } catch (error) {
+      if (
+        input.unknownResult
+        && error instanceof ArenaRoomClientError
+        && error.code === 'ROOM_RESPONSE_INVALID'
+      ) {
+        throw new ArenaRoomClientError(
+          'ROOM_RESULT_UNKNOWN',
+          response.status,
+          '请求可能已提交，请先确认房间状态，不要重复提交',
+        );
+      }
+      throw error;
+    }
   };
 
   const pathFor = (roomId: string, suffix: string): string => (
@@ -186,20 +209,20 @@ export const createArenaRoomClient = (options: ClientOptions): ArenaRoomClient =
       });
     },
 
-    async leave(roomId) {
+    async leave(roomId, expectedRoomEpoch) {
       return request({
         path: pathFor(roomId, 'leave'),
         method: 'POST',
-        body: {},
+        body: ArenaRoomEpochMutationRequestSchema.parse({ expectedRoomEpoch }),
         schema: ArenaRoomLeaveResponseSchema,
       });
     },
 
-    async close(roomId) {
+    async close(roomId, expectedRoomEpoch) {
       return request({
         path: pathFor(roomId, 'close'),
         method: 'POST',
-        body: {},
+        body: ArenaRoomEpochMutationRequestSchema.parse({ expectedRoomEpoch }),
         schema: ArenaRoomLeaveResponseSchema,
       });
     },

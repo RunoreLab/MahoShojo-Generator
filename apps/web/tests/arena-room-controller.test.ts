@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type {
-  ArenaRoomClient,
+import {
   ArenaRoomClientError,
+  type ArenaRoomClient,
 } from '@/lib/arena-room/client';
 import {
   createArenaRoomController,
@@ -388,5 +388,91 @@ describe('Arena Room browser controller', () => {
     });
     second.controller.dispose();
     expect(second.queued).toHaveLength(0);
+  });
+
+  it('post-open 1013 不清零跨连接预算，重连最终有界熔断', async () => {
+    const { client, controller, runNextTimer, sockets } = createHarness();
+    await controller.create({
+      displayName: '房主',
+      directory: { title: '测试房', visibility: 'public' },
+      sharedConfig,
+    });
+    sockets[0]!.open();
+    sockets[0]!.closed(1013, 'authority-unavailable');
+    await runNextTimer();
+    sockets[1]!.open();
+    sockets[1]!.closed(1013, 'authority-unavailable');
+    await runNextTimer();
+    sockets[2]!.open();
+    sockets[2]!.closed(1013, 'authority-unavailable');
+
+    expect(client.issueTicket).toHaveBeenCalledTimes(3);
+    expect(controller.getSnapshot()).toMatchObject({
+      phase: 'replacement',
+      notice: '原房间无法恢复，请房主创建新房间',
+    });
+  });
+
+  it('create 结果未知时冻结再次创建，要求先人工确认服务器状态', async () => {
+    const { client, controller } = createHarness();
+    vi.mocked(client.create).mockRejectedValue(new ArenaRoomClientError(
+      'ROOM_RESULT_UNKNOWN',
+      503,
+      '请求可能已提交，请先确认房间状态，不要重复提交',
+    ));
+    const request = {
+      displayName: '房主',
+      directory: { title: '测试房', visibility: 'public' as const },
+      sharedConfig,
+    };
+
+    await controller.create(request);
+    await controller.discover();
+    await controller.create(request);
+
+    expect(client.create).toHaveBeenCalledTimes(1);
+    expect(client.discover).toHaveBeenCalledTimes(1);
+    expect(controller.getSnapshot()).toMatchObject({
+      phase: 'unknown',
+      notice: '请求可能已提交，请先确认房间状态，不要重复提交',
+    });
+  });
+
+  it('按 close reason 区分 membership replacement、epoch recovery 与协议降级', async () => {
+    const membership = createHarness();
+    await membership.controller.create({
+      displayName: '房主',
+      directory: { title: '测试房', visibility: 'public' },
+      sharedConfig,
+    });
+    membership.sockets[0]!.open();
+    membership.sockets[0]!.closed(1008, 'membership-revoked');
+    expect(membership.controller.getSnapshot().phase).toBe('replacement');
+    expect(membership.queued).toHaveLength(0);
+
+    const epoch = createHarness();
+    await epoch.controller.create({
+      displayName: '房主',
+      directory: { title: '测试房', visibility: 'public' },
+      sharedConfig,
+    });
+    epoch.sockets[0]!.open();
+    epoch.sockets[0]!.closed(1008, 'room-epoch-stale');
+    expect(epoch.controller.getSnapshot().phase).toBe('reconnecting');
+    expect(epoch.queued).toHaveLength(1);
+
+    const invalid = createHarness();
+    await invalid.controller.create({
+      displayName: '房主',
+      directory: { title: '测试房', visibility: 'public' },
+      sharedConfig,
+    });
+    invalid.sockets[0]!.open();
+    invalid.sockets[0]!.closed(1008, 'invalid-message');
+    expect(invalid.controller.getSnapshot()).toMatchObject({
+      phase: 'degraded',
+      notice: '房间运行时暂不可用，正在重试',
+    });
+    expect(invalid.queued).toHaveLength(1);
   });
 });

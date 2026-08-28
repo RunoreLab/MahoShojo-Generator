@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import {
   ArenaRoomSharedConfigSchema,
   DisplayNameSchema,
+  OpaqueKeySchema,
   RoomDirectoryTitleSchema,
   RoomDirectoryVisibilitySchema,
   type ArenaRoomSharedConfig,
@@ -20,6 +21,7 @@ import type { ArenaRoomDirectoryService } from './room-directory-service';
 
 export type ArenaRoomMembershipErrorCode =
   | 'ROOM_CLOSED'
+  | 'ROOM_EPOCH_STALE'
   | 'ROOM_INPUT_INVALID'
   | 'ROOM_MEMBERSHIP_NOT_ACTIVE'
   | 'ROOM_MEMBERSHIP_REVOKED'
@@ -59,19 +61,21 @@ export type ArenaRoomMembershipService = {
       readonly title: string;
       readonly visibility: RoomDirectoryVisibility;
     };
-  }): Promise<ArenaRoomMembershipView>;
+  }): Promise<ArenaRoomSessionView>;
   join(input: {
     readonly roomId: string;
     readonly accountUserId: number;
     readonly displayName: string;
-  }): Promise<ArenaRoomMembershipView>;
+  }): Promise<ArenaRoomSessionView>;
   leave(input: {
     readonly roomId: string;
     readonly accountUserId: number;
+    readonly expectedRoomEpoch: string;
   }): Promise<ArenaRoomMembershipView>;
   close(input: {
     readonly roomId: string;
     readonly accountUserId: number;
+    readonly expectedRoomEpoch: string;
   }): Promise<ArenaRoomMembershipView>;
   kick(input: {
     readonly roomId: string;
@@ -116,6 +120,15 @@ const view = (
   roomId,
   roomEpoch,
   member: structuredClone(member),
+});
+
+const sessionView = (
+  roomId: string,
+  state: ArenaRoomAuthorityState,
+  member: RoomMember,
+): ArenaRoomSessionView => ({
+  ...view(roomId, state.snapshot.roomEpoch, member),
+  snapshot: structuredClone(state.snapshot),
 });
 
 export const createArenaRoomMembershipService = (
@@ -243,7 +256,7 @@ export const createArenaRoomMembershipService = (
           reportDirectoryError(error);
         }
       }
-      return view(result.roomId, result.roomEpoch, member);
+      return sessionView(result.roomId, result.result.nextState, member);
     },
 
     async join(input) {
@@ -254,7 +267,7 @@ export const createArenaRoomMembershipService = (
       const initial = await recoverOpenActor(input.roomId);
       const existing = activeRecordByAccount(initial.state, input.accountUserId);
       if (existing?.member.membershipState === 'revoked') return fail('ROOM_MEMBERSHIP_REVOKED');
-      if (existing) return view(input.roomId, initial.state.snapshot.roomEpoch, existing.member);
+      if (existing) return sessionView(input.roomId, initial.state, existing.member);
 
       const userId = createUserId();
       const timestamp = now();
@@ -282,19 +295,23 @@ export const createArenaRoomMembershipService = (
         const current = initial.actor.getSnapshot();
         const concurrent = current && activeRecordByAccount(current, input.accountUserId);
         if (current && concurrent?.member.membershipState === 'active') {
-          return view(input.roomId, current.snapshot.roomEpoch, concurrent.member);
+          return sessionView(input.roomId, current, concurrent.member);
         }
         if (concurrent?.member.membershipState === 'revoked') return fail('ROOM_MEMBERSHIP_REVOKED');
         return fail('ROOM_MEMBERSHIP_TRANSITION_DENIED');
       }
       const member = result.nextState.snapshot.members.find((entry) => entry.userId === userId);
       if (!member) return fail('ROOM_MEMBERSHIP_TRANSITION_DENIED');
-      return view(input.roomId, result.nextState.snapshot.roomEpoch, member);
+      return sessionView(input.roomId, result.nextState, member);
     },
 
     async leave(input) {
-      if (!validAccountUserId(input.accountUserId)) return fail('ROOM_INPUT_INVALID');
+      const expectedRoomEpoch = OpaqueKeySchema.safeParse(input.expectedRoomEpoch);
+      if (!validAccountUserId(input.accountUserId) || !expectedRoomEpoch.success) {
+        return fail('ROOM_INPUT_INVALID');
+      }
       const { actor, state } = await recoverOpenActor(input.roomId);
+      if (state.snapshot.roomEpoch !== expectedRoomEpoch.data) return fail('ROOM_EPOCH_STALE');
       const record = activeRecordByAccount(state, input.accountUserId);
       if (!record) return fail('ROOM_MEMBERSHIP_NOT_ACTIVE');
       if (record.member.membershipState === 'revoked') {
@@ -308,7 +325,7 @@ export const createArenaRoomMembershipService = (
         },
         command: {
           type: 'leave-member',
-          expectedRoomEpoch: state.snapshot.roomEpoch,
+          expectedRoomEpoch: expectedRoomEpoch.data,
           timestamp: now(),
         },
       });
@@ -320,8 +337,12 @@ export const createArenaRoomMembershipService = (
     },
 
     async close(input) {
-      if (!validAccountUserId(input.accountUserId)) return fail('ROOM_INPUT_INVALID');
+      const expectedRoomEpoch = OpaqueKeySchema.safeParse(input.expectedRoomEpoch);
+      if (!validAccountUserId(input.accountUserId) || !expectedRoomEpoch.success) {
+        return fail('ROOM_INPUT_INVALID');
+      }
       const { actor, state } = await recoverActor(input.roomId);
+      if (state.snapshot.roomEpoch !== expectedRoomEpoch.data) return fail('ROOM_EPOCH_STALE');
       const record = activeRecordByAccount(state, input.accountUserId);
       if (!record || record.member.membershipState !== 'active') {
         return fail('ROOM_MEMBERSHIP_NOT_ACTIVE');
@@ -338,7 +359,7 @@ export const createArenaRoomMembershipService = (
         },
         command: {
           type: 'leave-member',
-          expectedRoomEpoch: state.snapshot.roomEpoch,
+          expectedRoomEpoch: expectedRoomEpoch.data,
           timestamp: now(),
         },
       });

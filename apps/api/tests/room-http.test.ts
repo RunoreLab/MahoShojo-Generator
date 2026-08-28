@@ -64,11 +64,13 @@ const createDependencies = (
       roomId: session.roomId,
       roomEpoch: session.roomEpoch,
       member: session.member,
+      snapshot: session.snapshot,
     })),
     join: vi.fn(async () => ({
       roomId: session.roomId,
       roomEpoch: session.roomEpoch,
       member: session.member,
+      snapshot: session.snapshot,
     })),
     leave: vi.fn(async () => ({
       roomId: session.roomId,
@@ -176,15 +178,36 @@ describe('Arena Room HTTP product routes', () => {
       directory: { title: '测试房', visibility: 'public' },
       sharedConfig: authority.snapshot.sharedConfig,
     });
-    expect(dependencies.memberships.getSession).toHaveBeenCalledWith({
-      accountUserId: 101,
-      roomId: session.roomId,
-    });
+    expect(dependencies.memberships.getSession).not.toHaveBeenCalled();
     expect(await response.json()).toMatchObject({
       protocolVersion: 1,
       roomId: session.roomId,
       self: { userId: self.userId, role: 'host' },
     });
+  });
+
+  it('create/join 使用同一次 checkpoint 结果返回 session，不做可制造 unknown result 的二次读取', async () => {
+    const dependencies = createDependencies();
+    vi.mocked(dependencies.memberships.getSession).mockRejectedValue(
+      new Error('late read unavailable'),
+    );
+    const app = createHonoApp(config, createRedisStub(), undefined, {
+      arenaRoom: dependencies,
+    });
+
+    const created = await app.request('/api/arena/rooms/v1', createRequest({
+      displayName: '房主',
+      directory: { title: '测试房', visibility: 'public' },
+      sharedConfig: authority.snapshot.sharedConfig,
+    }));
+    const joined = await app.request(
+      `/api/arena/rooms/v1/${session.roomId}/join`,
+      createRequest({ displayName: '成员' }),
+    );
+
+    expect(created.status).toBe(201);
+    expect(joined.status).toBe(200);
+    expect(dependencies.memberships.getSession).not.toHaveBeenCalled();
   });
 
   it('discover/join/session/ticket/leave/close 使用窄 service 且返回 versioned wire', async () => {
@@ -239,14 +262,48 @@ describe('Arena Room HTTP product routes', () => {
     });
 
     const leave = await app.request(`/api/arena/rooms/v1/${session.roomId}/leave`,
-      createRequest({}));
+      createRequest({ expectedRoomEpoch: session.roomEpoch }));
     expect(leave.status).toBe(200);
+    expect(dependencies.memberships.leave).toHaveBeenCalledWith({
+      roomId: session.roomId,
+      accountUserId: 101,
+      expectedRoomEpoch: session.roomEpoch,
+    });
     expect(await leave.json()).toMatchObject({ outcome: 'left' });
 
     const close = await app.request(`/api/arena/rooms/v1/${session.roomId}/close`,
-      createRequest({}));
+      createRequest({ expectedRoomEpoch: session.roomEpoch }));
     expect(close.status).toBe(200);
+    expect(dependencies.memberships.close).toHaveBeenCalledWith({
+      roomId: session.roomId,
+      accountUserId: 101,
+      expectedRoomEpoch: session.roomEpoch,
+    });
     expect(await close.json()).toMatchObject({ outcome: 'closed' });
+  });
+
+  it('leave/close 拒绝缺失或过期 epoch，旧 incarnation 请求不能作用于当前 Room', async () => {
+    const dependencies = createDependencies();
+    vi.mocked(dependencies.memberships.close).mockRejectedValue(
+      new ArenaRoomMembershipError('ROOM_EPOCH_STALE'),
+    );
+    const app = createHonoApp(config, createRedisStub(), undefined, {
+      arenaRoom: dependencies,
+    });
+
+    const missing = await app.request(
+      `/api/arena/rooms/v1/${session.roomId}/leave`,
+      createRequest({}),
+    );
+    const stale = await app.request(
+      `/api/arena/rooms/v1/${session.roomId}/close`,
+      createRequest({ expectedRoomEpoch: 'epoch-stale' }),
+    );
+
+    expect(missing.status).toBe(400);
+    expect(dependencies.memberships.leave).not.toHaveBeenCalled();
+    expect(stale.status).toBe(409);
+    expect(await stale.json()).toMatchObject({ code: 'ROOM_CONFLICT' });
   });
 
   it('拒绝不受信任 Origin、cookie mutation 缺失 Origin、未知 query 与 oversized body', async () => {

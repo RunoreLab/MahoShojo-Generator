@@ -5,7 +5,7 @@ import {
   ARENA_ROOM_WEBSOCKET_PATH,
   ARENA_ROOM_WEBSOCKET_PROTOCOL,
   ArenaRoomCreateRequestSchema,
-  ArenaRoomEmptyRequestSchema,
+  ArenaRoomEpochMutationRequestSchema,
   ArenaRoomJoinRequestSchema,
   ArenaRoomLeaveResponseSchema,
   ArenaRoomSessionResponseSchema,
@@ -126,6 +126,8 @@ const mapServiceError = (context: ArenaRoomHttpContext, error: unknown): Respons
       case 'ROOM_CLOSED':
       case 'ROOM_NOT_FOUND':
         return context.json(errorBody('ROOM_NOT_FOUND', '房间不存在或已关闭'), 404);
+      case 'ROOM_EPOCH_STALE':
+        return context.json(errorBody('ROOM_CONFLICT', '房间 incarnation 已发生变化'), 409);
       case 'ROOM_MEMBERSHIP_NOT_ACTIVE':
       case 'ROOM_MEMBERSHIP_REVOKED':
       case 'ROOM_PERMISSION_DENIED':
@@ -361,15 +363,11 @@ export const registerArenaRoomHttpRoutes = (
         ArenaRoomCreateRequestSchema,
         await readBoundedBody(context.req.raw),
       );
-      const created = await dependencies.memberships.create({
+      const session = await dependencies.memberships.create({
         accountUserId: authorization.accountUserId,
         displayName: request.displayName,
         directory: request.directory,
         sharedConfig: request.sharedConfig,
-      });
-      const session = await dependencies.memberships.getSession({
-        roomId: created.roomId,
-        accountUserId: authorization.accountUserId,
       });
       noStore(context);
       return context.json(sessionResponse(session), 201);
@@ -394,14 +392,10 @@ export const registerArenaRoomHttpRoutes = (
         ArenaRoomJoinRequestSchema,
         await readBoundedBody(context.req.raw),
       );
-      await dependencies.memberships.join({
+      const session = await dependencies.memberships.join({
         roomId,
         accountUserId: authorization.accountUserId,
         displayName: request.displayName,
-      });
-      const session = await dependencies.memberships.getSession({
-        roomId,
-        accountUserId: authorization.accountUserId,
       });
       noStore(context);
       return context.json(sessionResponse(session), 200);
@@ -486,10 +480,14 @@ export const registerArenaRoomHttpRoutes = (
       );
       if (!authorization.accepted) return authorization.response;
       try {
-        parseRequest(ArenaRoomEmptyRequestSchema, await readBoundedBody(context.req.raw));
+        const request = parseRequest(
+          ArenaRoomEpochMutationRequestSchema,
+          await readBoundedBody(context.req.raw),
+        );
         const result = await dependencies.memberships[input.operation]({
           roomId,
           accountUserId: authorization.accountUserId,
+          expectedRoomEpoch: request.expectedRoomEpoch,
         });
         noStore(context);
         return context.json(ArenaRoomLeaveResponseSchema.parse({

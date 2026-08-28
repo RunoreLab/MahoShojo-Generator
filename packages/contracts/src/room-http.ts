@@ -43,7 +43,9 @@ export const ArenaRoomTicketRequestSchema = z.object({
   reconnect: RoomReconnectCursorSchema.optional(),
 }).strict();
 
-export const ArenaRoomEmptyRequestSchema = z.object({}).strict();
+export const ArenaRoomEpochMutationRequestSchema = z.object({
+  expectedRoomEpoch: OpaqueKeySchema,
+}).strict();
 
 export const ArenaRoomSessionResponseSchema = z.object({
   protocolVersion: z.literal(PROTOCOL_VERSION),
@@ -121,6 +123,7 @@ export const ArenaRoomHttpErrorResponseSchema = z.object({
 export type ArenaRoomCreateRequest = z.infer<typeof ArenaRoomCreateRequestSchema>;
 export type ArenaRoomJoinRequest = z.infer<typeof ArenaRoomJoinRequestSchema>;
 export type ArenaRoomTicketRequest = z.infer<typeof ArenaRoomTicketRequestSchema>;
+export type ArenaRoomEpochMutationRequest = z.infer<typeof ArenaRoomEpochMutationRequestSchema>;
 export type ArenaRoomSessionResponse = z.infer<typeof ArenaRoomSessionResponseSchema>;
 export type ArenaRoomTicketResponse = z.infer<typeof ArenaRoomTicketResponseSchema>;
 export type ArenaRoomLeaveResponse = z.infer<typeof ArenaRoomLeaveResponseSchema>;

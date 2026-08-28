@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, type ChangeEvent } from 'react';
+import { useRef, useState, type ChangeEvent } from 'react';
 
 import type { RoomDirectoryVisibility } from '@mahoshojo/contracts/arena-room';
 
@@ -20,6 +20,7 @@ export type ArenaMultiplayerPanelProps = {
 export type ArenaMultiplayerPanelViewProps = {
   readonly state: ArenaRoomControllerState;
   readonly authLoading: boolean;
+  readonly actionPending?: boolean;
   readonly roomTitle: string;
   readonly visibility: RoomDirectoryVisibility;
   readonly joinCode: string;
@@ -50,7 +51,8 @@ export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps)
   const { state } = props;
   if (state.phase === 'disabled') return null;
 
-  const busy = ['connecting', 'listing', 'reconnecting'].includes(state.phase);
+  const busy = Boolean(props.actionPending)
+    || ['connecting', 'listing', 'reconnecting'].includes(state.phase);
   const session = state.session;
 
   return (
@@ -141,6 +143,30 @@ export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps)
               </button>
             )}
           </div>
+        </div>
+      ) : state.phase === 'unknown' ? (
+        <div className="mt-4 rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100">
+          <p>服务器可能已经创建房间。请先检查公开房间或其他已登录设备，不要直接重复创建。</p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button type="button" className={secondaryButtonClass} onClick={props.onDiscover}>
+              检查公开房间
+            </button>
+            <button type="button" className={secondaryButtonClass} onClick={props.onReset}>
+              已确认状态，返回大厅
+            </button>
+          </div>
+          {state.rooms.length > 0 ? (
+            <ul className="mt-3 grid gap-2 sm:grid-cols-2" aria-label="可能已创建的公开房间">
+              {state.rooms.map((room) => (
+                <li key={room.roomId} className="flex items-center justify-between gap-3 rounded-xl border border-amber-300 bg-white/80 p-3 dark:border-amber-800 dark:bg-gray-900/70">
+                  <span className="min-w-0 truncate font-medium">{room.title}</span>
+                  <button type="button" className={secondaryButtonClass} onClick={() => props.onJoin(room.roomId)}>
+                    重新进入
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : null}
         </div>
       ) : state.phase === 'replacement' || state.phase === 'closed' ? (
         <button type="button" className={`${secondaryButtonClass} mt-4`} onClick={props.onReset}>
@@ -238,9 +264,14 @@ export function ArenaMultiplayerPanel(props: ArenaMultiplayerPanelProps) {
   const [visibility, setVisibility] = useState<RoomDirectoryVisibility>('public');
   const [joinCode, setJoinCode] = useState('');
   const [inputError, setInputError] = useState<string | null>(null);
+  const [preparingCreate, setPreparingCreate] = useState(false);
+  const createLock = useRef(false);
   const viewState = inputError ? { ...state, error: inputError } : state;
 
   const createRoom = async (): Promise<void> => {
+    if (createLock.current) return;
+    createLock.current = true;
+    setPreparingCreate(true);
     setInputError(null);
     try {
       const sharedConfig = await buildArenaRoomSharedConfigFromBattleState(
@@ -253,6 +284,9 @@ export function ArenaMultiplayerPanel(props: ArenaMultiplayerPanelProps) {
       });
     } catch {
       setInputError('当前竞技场配置无法安全共享，请检查角色、版本与数量限制');
+    } finally {
+      createLock.current = false;
+      setPreparingCreate(false);
     }
   };
 
@@ -260,6 +294,7 @@ export function ArenaMultiplayerPanel(props: ArenaMultiplayerPanelProps) {
     <ArenaMultiplayerPanelView
       state={viewState}
       authLoading={props.authLoading}
+      actionPending={preparingCreate}
       roomTitle={roomTitle}
       visibility={visibility}
       joinCode={joinCode}

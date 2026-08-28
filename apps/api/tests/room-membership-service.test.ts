@@ -88,11 +88,13 @@ describe('Arena Room membership service', () => {
     await expect(service.close({
       roomId: created.roomId,
       accountUserId: 101,
+      expectedRoomEpoch: created.roomEpoch,
     })).resolves.toMatchObject({ member: { role: 'host' } });
     expect(store.state?.lifecycle.status).toBe('closed');
     await expect(service.close({
       roomId: created.roomId,
       accountUserId: 101,
+      expectedRoomEpoch: created.roomEpoch,
     })).resolves.toMatchObject({ member: { role: 'host' } });
   });
 
@@ -112,6 +114,7 @@ describe('Arena Room membership service', () => {
     await expect(service.close({
       roomId: created.roomId,
       accountUserId: 202,
+      expectedRoomEpoch: created.roomEpoch,
     })).rejects.toMatchObject({ code: 'ROOM_PERMISSION_DENIED' });
   });
 
@@ -232,7 +235,11 @@ describe('Arena Room membership service', () => {
       displayName: 'Member',
     })).rejects.toMatchObject({ code: 'ROOM_MEMBERSHIP_REVOKED' });
 
-    await service.leave({ roomId: host.roomId, accountUserId: 101 });
+    await service.leave({
+      roomId: host.roomId,
+      accountUserId: 101,
+      expectedRoomEpoch: host.roomEpoch,
+    });
     expect(store.state?.lifecycle).toMatchObject({ status: 'closed' });
   });
 
@@ -245,8 +252,8 @@ describe('Arena Room membership service', () => {
     });
     await service.join({ roomId: 'room-1', accountUserId: 202, displayName: 'Member' });
 
-    await service.leave({ roomId: 'room-1', accountUserId: 202 });
-    await service.leave({ roomId: 'room-1', accountUserId: 202 });
+    await service.leave({ roomId: 'room-1', accountUserId: 202, expectedRoomEpoch: 'epoch-1' });
+    await service.leave({ roomId: 'room-1', accountUserId: 202, expectedRoomEpoch: 'epoch-1' });
     expect(store.state?.lifecycle.status).toBe('open');
     expect(store.state?.memberAuthority.find((entry) => entry.accountUserId === 202)?.member)
       .toMatchObject({ membershipState: 'revoked' });
@@ -266,6 +273,48 @@ describe('Arena Room membership service', () => {
       sharedConfig: createArenaRoomState().snapshot.sharedConfig,
     })).rejects.toBeInstanceOf(ArenaRoomMembershipError);
     expect(store.state).toBeNull();
+  });
+
+  it('旧 epoch 的延迟 leave/close 不能作用于 recovery 后的新 incarnation', async () => {
+    const store = new MemoryRoomStore();
+    const originalRegistry = createRoomActorRegistry({
+      store,
+      createRoomIdentity: () => ({ roomId: 'room-1', roomEpoch: 'epoch-1' }),
+      createTimestamp: () => '2026-08-28T00:00:00.000Z',
+      now: () => Date.parse('2026-08-28T00:00:00.000Z'),
+    });
+    const original = createArenaRoomMembershipService({
+      actors: originalRegistry,
+      createUserId: () => 'host-1',
+    });
+    await original.create({
+      accountUserId: 101,
+      displayName: 'Host',
+      sharedConfig: createArenaRoomState().snapshot.sharedConfig,
+    });
+    const recoveredRegistry = createRoomActorRegistry({
+      store,
+      createRoomEpoch: () => 'epoch-2',
+      recoveryTimestamp: () => '2026-08-28T00:01:00.000Z',
+      now: () => Date.parse('2026-08-28T00:01:00.000Z'),
+    });
+    await recoveredRegistry.recover('room-1');
+    const recovered = createArenaRoomMembershipService({ actors: recoveredRegistry });
+
+    await expect(recovered.leave({
+      roomId: 'room-1',
+      accountUserId: 101,
+      expectedRoomEpoch: 'epoch-1',
+    })).rejects.toMatchObject({ code: 'ROOM_EPOCH_STALE' });
+    await expect(recovered.close({
+      roomId: 'room-1',
+      accountUserId: 101,
+      expectedRoomEpoch: 'epoch-1',
+    })).rejects.toMatchObject({ code: 'ROOM_EPOCH_STALE' });
+    expect(store.state).toMatchObject({
+      lifecycle: { status: 'open' },
+      snapshot: { roomEpoch: 'epoch-2' },
+    });
   });
 
   it('lazy membership resolution 在 deadline 到期后先权威关闭，reconnect 不能清除期限', async () => {

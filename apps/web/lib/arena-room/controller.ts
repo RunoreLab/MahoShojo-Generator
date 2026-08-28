@@ -23,6 +23,7 @@ export type ArenaRoomControllerPhase =
   | 'ready'
   | 'reconnecting'
   | 'replacement'
+  | 'unknown'
   | 'unauthenticated';
 
 export type ArenaRoomControllerState = {
@@ -131,6 +132,7 @@ export const createArenaRoomController = (
   let reconnectAttempts = 0;
   let operationGeneration = 0;
   let disposed = false;
+  let unresolvedCreateResult = false;
   let controlCursor: RoomControlCursor | undefined;
   const listeners = new Set<() => void>();
 
@@ -221,6 +223,7 @@ export const createArenaRoomController = (
       return;
     }
     controlCursor = { roomEpoch: event.roomEpoch, controlSeq: event.controlSeq };
+    reconnectAttempts = 0;
 
     if (event.type === 'room.snapshot') {
       const self = event.payload.members.find((member) => member.userId === current.self.userId);
@@ -338,7 +341,6 @@ export const createArenaRoomController = (
       socket = current;
       current.onopen = () => {
         if (socket !== current || disposed) return;
-        reconnectAttempts = 0;
         publish({ phase: 'connected', notice: null, error: null });
       };
       current.onmessage = (event) => {
@@ -356,11 +358,11 @@ export const createArenaRoomController = (
           publish({ phase: 'closed', notice: '房间已关闭', error: null });
           return;
         }
-        if (event.code === 1008) {
+        if (event.code === 1008 && event.reason === 'membership-revoked') {
           enterReplacement();
           return;
         }
-        scheduleReconnect(false);
+        scheduleReconnect(event.code === 1008 && event.reason !== 'room-epoch-stale');
       };
     } catch {
       if (disposed || generation !== operationGeneration) return;
@@ -371,6 +373,7 @@ export const createArenaRoomController = (
   const startSession = async (session: ArenaRoomSessionResponse): Promise<void> => {
     const generation = operationGeneration;
     if (!operationIsCurrent(generation)) return;
+    unresolvedCreateResult = false;
     reconnectAttempts = 0;
     controlCursor = {
       roomEpoch: session.roomEpoch,
@@ -381,6 +384,15 @@ export const createArenaRoomController = (
 
   const failOperation = (error: unknown, generation: number): void => {
     if (!operationIsCurrent(generation)) return;
+    if (error instanceof ArenaRoomClientError && error.code === 'ROOM_RESULT_UNKNOWN') {
+      unresolvedCreateResult = true;
+      publish({
+        phase: 'unknown',
+        notice: error.message,
+        error: null,
+      });
+      return;
+    }
     publish({
       phase: state.session ? 'degraded' : 'ready',
       notice: null,
@@ -407,6 +419,7 @@ export const createArenaRoomController = (
       detachSocket(true);
       reconnectAttempts = 0;
       controlCursor = undefined;
+      unresolvedCreateResult = false;
       publish({
         ...READY_STATE,
         phase: phaseForAccess(access),
@@ -421,14 +434,23 @@ export const createArenaRoomController = (
       try {
         const page = await options.client.discover({ limit: 20 });
         if (!operationIsCurrent(generation)) return;
-        publish({ phase: 'ready', rooms: page.items, error: null });
+        publish({
+          phase: unresolvedCreateResult ? 'unknown' : 'ready',
+          rooms: page.items,
+          error: null,
+        });
       } catch (error) {
-        failOperation(error, generation);
+        if (unresolvedCreateResult && operationIsCurrent(generation)) {
+          publish({ phase: 'unknown', error: safeErrorMessage(error) });
+        } else {
+          failOperation(error, generation);
+        }
       }
     },
 
     async create(request) {
       if (disposed || !access.enabled || !access.authenticated) return;
+      if (unresolvedCreateResult) return;
       operationGeneration += 1;
       const generation = operationGeneration;
       clearReconnectTimer();
@@ -463,11 +485,11 @@ export const createArenaRoomController = (
       if (!state.session || disposed) return;
       operationGeneration += 1;
       const generation = operationGeneration;
-      const roomId = state.session.roomId;
+      const { roomId, roomEpoch } = state.session;
       clearReconnectTimer();
       detachSocket(true);
       try {
-        await options.client.leave(roomId);
+        await options.client.leave(roomId, roomEpoch);
         if (!operationIsCurrent(generation)) return;
         publish({ phase: 'closed', notice: '已离开房间', error: null });
       } catch (error) {
@@ -479,11 +501,11 @@ export const createArenaRoomController = (
       if (!state.session || state.session.self.role !== 'host' || disposed) return;
       operationGeneration += 1;
       const generation = operationGeneration;
-      const roomId = state.session.roomId;
+      const { roomId, roomEpoch } = state.session;
       clearReconnectTimer();
       detachSocket(true);
       try {
-        await options.client.close(roomId);
+        await options.client.close(roomId, roomEpoch);
         if (!operationIsCurrent(generation)) return;
         publish({ phase: 'closed', notice: '房间已关闭', error: null });
       } catch (error) {
@@ -504,6 +526,7 @@ export const createArenaRoomController = (
       detachSocket(true);
       reconnectAttempts = 0;
       controlCursor = undefined;
+      unresolvedCreateResult = false;
       publish({ ...READY_STATE, phase: phaseForAccess(access) });
     },
 

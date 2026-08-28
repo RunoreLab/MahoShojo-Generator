@@ -5,6 +5,7 @@ import {
   ARENA_ROOM_HTTP_ROUTES,
   ARENA_ROOM_WEBSOCKET_PATH,
   ArenaRoomCreateRequestSchema,
+  ArenaRoomEpochMutationRequestSchema,
   ArenaRoomHttpErrorResponseSchema,
   ArenaRoomJoinRequestSchema,
   ArenaRoomLeaveResponseSchema,
@@ -70,6 +71,24 @@ describe('Arena Room HTTP product contract', () => {
     })).toEqual({ reconnect: { control: { roomEpoch: 'epoch-1', controlSeq: 3 } } });
     expect(ArenaRoomTicketRequestSchema.safeParse({ roleHint: 'host' }).success).toBe(false);
     expect(ArenaRoomTicketRequestSchema.safeParse({ roomEpoch: 'epoch-1' }).success).toBe(false);
+  });
+
+  it('leave/close 只接受 session epoch fence，不接受 identity 或 role', () => {
+    expect(ArenaRoomEpochMutationRequestSchema.parse({
+      expectedRoomEpoch: 'epoch-1',
+    })).toEqual({ expectedRoomEpoch: 'epoch-1' });
+    for (const authority of [
+      { userId: 'spoofed' },
+      { accountUserId: 7 },
+      { role: 'host' },
+      { roomEpoch: 'epoch-1' },
+      { apiKey: 'secret' },
+    ]) {
+      expect(ArenaRoomEpochMutationRequestSchema.safeParse({
+        expectedRoomEpoch: 'epoch-1',
+        ...authority,
+      }).success).toBe(false);
+    }
   });
 
   it('session 仅返回 public snapshot 与当前成员，不接受 authority state', () => {
