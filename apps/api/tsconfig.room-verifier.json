@@ -3,6 +3,7 @@
   "include": [
     "scripts/verify-room-redis.ts",
     "scripts/verify-room-generation-redis.ts",
-    "scripts/verify-room-generation-process-recovery.ts"
+    "scripts/verify-room-generation-process-recovery.ts",
+    "scripts/verify-room-hardening-faults.ts"
   ]
 }

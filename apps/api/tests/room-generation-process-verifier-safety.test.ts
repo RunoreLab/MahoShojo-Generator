@@ -10,6 +10,7 @@ const verifierPath = fileURLToPath(new URL(
 const runAgainstTcpSentinel = async (input: Readonly<{
   redisHostname: string;
   keyPrefix: string;
+  hostedApiEnvironment?: string;
 }>): Promise<Readonly<{
   connections: number;
   exitCode: number | null;
@@ -35,6 +36,8 @@ const runAgainstTcpSentinel = async (input: Readonly<{
   const child = spawn(process.execPath, ['--import', 'tsx', verifierPath], {
     env: {
       ...process.env,
+      HOSTED_API_ENVIRONMENT: input.hostedApiEnvironment ?? 'local',
+      NODE_ENV: 'test',
       REDIS_URL: `redis://${input.redisHostname}:${address.port}`,
       ROOM_GENERATION_PROCESS_VERIFY: 'true',
       ROOM_GENERATION_PROCESS_VERIFY_TOKEN: 'safety-test-token',
@@ -97,4 +100,22 @@ describe('Room generation process verifier safety boundary', () => {
     });
     expect(result.stderr).toContain('ROOM_REDIS_VERIFY_KEY_PREFIX 必须是安全环境标识');
   });
+
+  test.each(['production', 'preview', ''])(
+    'HOSTED_API_ENVIRONMENT=%j 在任何 TCP/Redis 副作用前 fail closed',
+    async (hostedApiEnvironment) => {
+      const result = await runAgainstTcpSentinel({
+        redisHostname: '127.0.0.1',
+        keyPrefix: 'gmr10-process-safety',
+        hostedApiEnvironment,
+      });
+      expect(result).toMatchObject({
+        connections: 0,
+        exitCode: 1,
+        signal: null,
+        timedOut: false,
+      });
+      expect(result.stderr).toContain('只允许 HOSTED_API_ENVIRONMENT=local/test');
+    },
+  );
 });

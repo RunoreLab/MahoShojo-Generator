@@ -53,6 +53,13 @@ import { RedisRuntime } from '../src/redis/runtime';
 
 const redisUrl = process.env.REDIS_URL?.trim();
 if (!redisUrl) throw new Error('Room Redis verifier 需要 REDIS_URL');
+const hostedApiEnvironment = process.env.HOSTED_API_ENVIRONMENT?.trim().toLowerCase();
+if (hostedApiEnvironment !== 'local' && hostedApiEnvironment !== 'test') {
+  throw new Error('Room Redis verifier 只允许 HOSTED_API_ENVIRONMENT=local/test');
+}
+if (process.env.NODE_ENV?.trim().toLowerCase() === 'production') {
+  throw new Error('Room Redis verifier 只允许非生产环境');
+}
 
 const parsedUrl = new URL(redisUrl);
 if (
@@ -74,8 +81,8 @@ const token = suppliedToken || randomUUID();
 if (!/^[a-zA-Z0-9_-]{1,64}$/u.test(token)) {
   throw new Error('ROOM_REDIS_VERIFY_TOKEN 必须是安全 opaque token');
 }
-const keyPrefix = process.env.ROOM_REDIS_VERIFY_KEY_PREFIX?.trim() || 'gmr02';
-if (!/^[a-z0-9_-]{1,32}$/u.test(keyPrefix)) {
+const keyPrefix = process.env.ROOM_REDIS_VERIFY_KEY_PREFIX?.trim();
+if (!keyPrefix || !/^[a-z0-9_-]{1,32}$/u.test(keyPrefix)) {
   throw new Error('ROOM_REDIS_VERIFY_KEY_PREFIX 必须是安全环境标识');
 }
 

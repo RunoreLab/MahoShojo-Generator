@@ -25,6 +25,13 @@ if (!redisUrl) throw new Error('Room generation process verifier 需要 REDIS_UR
 if (process.env.ROOM_GENERATION_PROCESS_VERIFY?.trim().toLowerCase() !== 'true') {
   throw new Error('Room generation process verifier 只允许 ROOM_GENERATION_PROCESS_VERIFY=true');
 }
+const hostedApiEnvironment = process.env.HOSTED_API_ENVIRONMENT?.trim().toLowerCase();
+if (hostedApiEnvironment !== 'local' && hostedApiEnvironment !== 'test') {
+  throw new Error('Room generation process verifier 只允许 HOSTED_API_ENVIRONMENT=local/test');
+}
+if (process.env.NODE_ENV?.trim().toLowerCase() === 'production') {
+  throw new Error('Room generation process verifier 只允许非生产环境');
+}
 const parsedUrl = new URL(redisUrl);
 if (
   !['redis:', 'rediss:'].includes(parsedUrl.protocol)
@@ -419,6 +426,7 @@ const runParent = async (): Promise<void> => {
       redis: 'real-loopback',
       killedSignal: exit.signal,
       providerStartsBeforeKill: ready.providerStarts,
+      producerLostAfterKill: true,
       recoveryProviderStarts,
       recoveredRoomEpoch: recovered.roomEpoch,
       recoveredGenerationStatus: recovered.status,

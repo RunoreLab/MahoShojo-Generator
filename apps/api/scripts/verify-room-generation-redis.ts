@@ -37,14 +37,21 @@ if (!redisUrl) throw new Error('Room generation Redis verifier 需要 REDIS_URL'
 if (process.env.ROOM_GENERATION_REDIS_VERIFY?.trim().toLowerCase() !== 'true') {
   throw new Error('Room generation Redis verifier 只允许 ROOM_GENERATION_REDIS_VERIFY=true');
 }
+const hostedApiEnvironment = process.env.HOSTED_API_ENVIRONMENT?.trim().toLowerCase();
+if (hostedApiEnvironment !== 'local' && hostedApiEnvironment !== 'test') {
+  throw new Error('Room generation Redis verifier 只允许 HOSTED_API_ENVIRONMENT=local/test');
+}
+if (process.env.NODE_ENV?.trim().toLowerCase() === 'production') {
+  throw new Error('Room generation Redis verifier 只允许非生产环境');
+}
 const parsedUrl = new URL(redisUrl);
 if (
   !['redis:', 'rediss:'].includes(parsedUrl.protocol)
   || !['localhost', '127.0.0.1', '[::1]'].includes(parsedUrl.hostname)
 ) throw new Error('Room generation Redis verifier 只允许连接 loopback Redis');
 
-const keyPrefix = process.env.ROOM_GENERATION_REDIS_VERIFY_KEY_PREFIX?.trim() || 'gmr09dur';
-if (!/^[a-z0-9_-]{1,32}$/u.test(keyPrefix)) {
+const keyPrefix = process.env.ROOM_GENERATION_REDIS_VERIFY_KEY_PREFIX?.trim();
+if (!keyPrefix || !/^[a-z0-9_-]{1,32}$/u.test(keyPrefix)) {
   throw new Error('ROOM_GENERATION_REDIS_VERIFY_KEY_PREFIX 必须是安全环境标识');
 }
 
@@ -262,10 +269,23 @@ try {
       return value;
     },
   };
-  const finalizer = createArenaGenerationFinalizer(createNodeArenaGenerationFinalizationPorts({
+  let ratingSettlementInvocations = 0;
+  let storyImpactGateInvocations = 0;
+  const persistence = createNodeArenaGenerationFinalizationPorts({
     getD1Client: () => d1,
     objectStore,
-  }));
+    settleRatings: async () => {
+      ratingSettlementInvocations += 1;
+    },
+  });
+  const applyStoryImpacts = persistence.applyStoryImpacts.bind(persistence);
+  const finalizer = createArenaGenerationFinalizer({
+    ...persistence,
+    async applyStoryImpacts(input) {
+      storyImpactGateInvocations += 1;
+      await applyStoryImpacts(input);
+    },
+  });
   const terminalStore = createNodeArenaGenerationTerminalStore({
     getD1Client: () => d1,
     objectStore,
@@ -617,6 +637,10 @@ try {
   if (providerStarts !== 1) throw new Error('ROOM_GENERATION_DURABLE_TERMINAL_REEXECUTED');
   await recoveredActors.shutdown();
 
+  if (ratingSettlementInvocations !== 1 || storyImpactGateInvocations !== 1) {
+    throw new Error('ROOM_GENERATION_DURABLE_TERMINAL_EFFECT_NOT_EXACTLY_ONCE');
+  }
+
   const secretPersisted = JSON.stringify({
     generationRows: [...generationRows.values()],
     objectRows: [...objectRows.values()],
@@ -649,6 +673,9 @@ try {
     terminalRecoveryEpoch: recoveredView.roomEpoch,
     realFinalizerRuns: finalizerRuns,
     duplicateFinalizationIdempotent: finalizerRuns === 2,
+    terminalEffectScope: 'invocation-gates',
+    ratingSettlementInvocations,
+    storyImpactGateInvocations,
     terminalReexecution: false,
     deletedFaultInjectionKeys: deletedGenerationKeys,
     initialCleanupForeignNamespacePreserved,
