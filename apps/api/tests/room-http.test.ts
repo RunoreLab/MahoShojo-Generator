@@ -11,6 +11,10 @@ import {
   ArenaRoomProposalError,
   type ArenaRoomProposalService,
 } from '#/arena-room/room-proposal-service';
+import {
+  ArenaRoomGenerationError,
+  type ArenaRoomGenerationService,
+} from '#/arena-room/room-generation-service';
 import type { RedisService } from '#/redis/runtime';
 import { createArenaRoomState } from './arena-room-fixtures';
 
@@ -54,6 +58,27 @@ const session = {
   roomEpoch: authority.snapshot.roomEpoch,
   member: self,
   snapshot: authority.snapshot,
+};
+
+const generationView = {
+  protocolVersion: 1 as const,
+  roomId: authority.snapshot.roomId,
+  roomEpoch: authority.snapshot.roomEpoch,
+  generation: {
+    generationRequestId: 'request-1234',
+    generationId: 'generation-1',
+    attempt: 1,
+    state: 'running' as const,
+    configRevision: authority.snapshot.revision,
+    snapshotDigest: `sha256:${'a'.repeat(64)}`,
+    collaborativeInfluence: false,
+    participantUserIds: [101],
+    startedAt: '2026-08-28T00:00:00.000Z',
+  },
+  status: 'running' as const,
+  markdown: '# 正文',
+  nextChunkSeq: 2,
+  finalAuthoritative: false,
 };
 
 const createDependencies = (
@@ -128,6 +153,10 @@ const createDependencies = (
       result: 'applied' as const,
     })),
   } satisfies ArenaRoomProposalService,
+  generations: {
+    start: vi.fn(async () => generationView),
+    read: vi.fn(async () => generationView),
+  } satisfies ArenaRoomGenerationService,
   rateLimit: vi.fn(async () => allowRateLimit()),
   ...overrides,
 });
@@ -248,6 +277,87 @@ describe('Arena Room HTTP product routes', () => {
     expect(created.status).toBe(201);
     expect(joined.status).toBe(200);
     expect(dependencies.memberships.getSession).not.toHaveBeenCalled();
+  });
+
+  it('多人 generation start 使用独立 12MiB 上限、strict intent 与 headers-only source context', async () => {
+    const dependencies = createDependencies();
+    const app = createHonoApp(config, createRedisStub(), undefined, {
+      arenaRoom: dependencies,
+    });
+    const secret = 'provider-secret-canary';
+    const body = {
+      expectedRoomEpoch: authority.snapshot.roomEpoch,
+      expectedRevision: authority.snapshot.revision,
+      generationRequestId: 'request-1234',
+      sharedConfig: authority.snapshot.sharedConfig,
+      generation: {
+        internalGuidance: '多人生成',
+        customProvider: { apiKey: secret },
+        padding: 'x'.repeat(70 * 1_024),
+      },
+    };
+    const response = await app.request(
+      `/api/arena/rooms/v1/${authority.snapshot.roomId}/generations`,
+      createRequest(body),
+    );
+    expect(response.status).toBe(202);
+    expect(dependencies.generations.start).toHaveBeenCalledTimes(1);
+    const call = vi.mocked(dependencies.generations.start).mock.calls[0]![0];
+    expect(call).toMatchObject({
+      roomId: authority.snapshot.roomId,
+      accountUserId: 101,
+      request: body,
+    });
+    expect(call.sourceRequest.headers.get('authorization')).toBe('Bearer legacy-key');
+    await expect(call.sourceRequest.text()).resolves.toBe('');
+    expect(JSON.stringify(await response.json())).not.toContain(secret);
+
+    const injected = await app.request(
+      `/api/arena/rooms/v1/${authority.snapshot.roomId}/generations`,
+      createRequest({ ...body, attempt: 2 }),
+    );
+    expect(injected.status).toBe(400);
+    expect(dependencies.generations.start).toHaveBeenCalledTimes(1);
+
+    const oversizedRequest = createRequest(body);
+    const oversized = await app.request(
+      `/api/arena/rooms/v1/${authority.snapshot.roomId}/generations`,
+      {
+        ...oversizedRequest,
+        headers: {
+          ...oversizedRequest.headers,
+          'content-length': String(12 * 1_024 * 1_024 + 1),
+        },
+      },
+    );
+    expect(oversized.status).toBe(413);
+  });
+
+  it('多人 generation read 只传认证 account/room/generation，并稳定映射恢复错误', async () => {
+    const dependencies = createDependencies();
+    const app = createHonoApp(config, createRedisStub(), undefined, {
+      arenaRoom: dependencies,
+    });
+    const response = await app.request(
+      `/api/arena/rooms/v1/${authority.snapshot.roomId}/generations/generation-1`,
+      { headers: { authorization: 'Bearer legacy-key' } },
+    );
+    expect(response.status).toBe(200);
+    expect(dependencies.generations.read).toHaveBeenCalledWith({
+      roomId: authority.snapshot.roomId,
+      generationId: 'generation-1',
+      accountUserId: 101,
+    });
+
+    vi.mocked(dependencies.generations.read).mockRejectedValueOnce(
+      new ArenaRoomGenerationError('ROOM_GENERATION_UNAVAILABLE'),
+    );
+    const unavailable = await app.request(
+      `/api/arena/rooms/v1/${authority.snapshot.roomId}/generations/generation-1`,
+      { headers: { authorization: 'Bearer legacy-key' } },
+    );
+    expect(unavailable.status).toBe(503);
+    expect(await unavailable.json()).toMatchObject({ code: 'ROOM_UNAVAILABLE' });
   });
 
   it('discover/join/session/ticket/leave/close 使用窄 service 且返回 versioned wire', async () => {

@@ -7,6 +7,8 @@ import {
   ARENA_ROOM_WEBSOCKET_PROTOCOL,
   ArenaRoomCreateRequestSchema,
   ArenaRoomEpochMutationRequestSchema,
+  ArenaRoomGenerationStartRequestSchema,
+  ArenaRoomGenerationViewResponseSchema,
   ArenaRoomJoinRequestSchema,
   ArenaRoomLeaveResponseSchema,
   ArenaRoomProposalMutationResponseSchema,
@@ -17,6 +19,7 @@ import {
   ArenaRoomTicketRequestSchema,
   ArenaRoomTicketResponseSchema,
   MAX_CONTROL_MESSAGE_BYTES,
+  MAX_ARENA_ROOM_GENERATION_START_BYTES,
   OpaqueKeySchema,
   PROTOCOL_VERSION,
   RoomDirectoryPageSchema,
@@ -42,6 +45,10 @@ import {
   type ArenaRoomProposalService,
   type ArenaRoomProposalMutationView,
 } from './room-proposal-service';
+import {
+  ArenaRoomGenerationError,
+  type ArenaRoomGenerationService,
+} from './room-generation-service';
 
 type ArenaRoomHttpContext = Context<{ Variables: HonoAppVariables }>;
 
@@ -68,6 +75,7 @@ export type ArenaRoomHttpDependencies = {
   readonly directory: Pick<ArenaRoomDirectoryService, 'discoverPublic'>;
   readonly websocketAuthority: Pick<ArenaRoomWebSocketAuthority, 'issue'>;
   readonly proposals: Pick<ArenaRoomProposalService, 'resolve' | 'submit' | 'withdraw'>;
+  readonly generations: Pick<ArenaRoomGenerationService, 'read' | 'start'>;
   readonly rateLimit: (input: {
     readonly operation: ArenaRoomHttpOperation;
     readonly accountUserId: number;
@@ -87,6 +95,8 @@ type ArenaRoomHttpOperation =
   | 'discover'
   | 'join'
   | 'leave'
+  | 'generationRead'
+  | 'generationStart'
   | 'proposalResolve'
   | 'proposalSubmit'
   | 'proposalWithdraw'
@@ -104,6 +114,8 @@ const OPERATION_LIMITS: Readonly<Record<
   ticket: { limit: 60, windowSeconds: 60 },
   leave: { limit: 20, windowSeconds: 60 },
   close: { limit: 10, windowSeconds: 60 },
+  generationStart: { limit: 5, windowSeconds: 60 },
+  generationRead: { limit: 120, windowSeconds: 60 },
   proposalSubmit: { limit: 20, windowSeconds: 60 },
   proposalResolve: { limit: 30, windowSeconds: 60 },
   proposalWithdraw: { limit: 20, windowSeconds: 60 },
@@ -186,6 +198,26 @@ const mapServiceError = (context: ArenaRoomHttpContext, error: unknown): Respons
         return unavailable(context);
     }
   }
+  if (error instanceof ArenaRoomGenerationError) {
+    switch (error.code) {
+      case 'ROOM_GENERATION_INPUT_INVALID':
+        return invalidRequest(context);
+      case 'ROOM_PERMISSION_DENIED':
+      case 'ROOM_REFERENCE_DENIED':
+        return context.json(errorBody('ROOM_FORBIDDEN', '没有此房间生成操作权限'), 403);
+      case 'ROOM_GENERATION_NOT_FOUND':
+        return context.json(errorBody('ROOM_NOT_FOUND', '房间生成不存在'), 404);
+      case 'ROOM_EPOCH_STALE':
+      case 'ROOM_GENERATION_CONFLICT':
+      case 'ROOM_REFERENCE_STALE':
+      case 'ROOM_REVISION_STALE':
+        return context.json(errorBody('ROOM_CONFLICT', '房间生成状态已发生变化'), 409);
+      case 'ROOM_GENERATION_UNAVAILABLE':
+      case 'ROOM_OPERATION_UNKNOWN':
+      case 'ROOM_REFERENCE_UNAVAILABLE':
+        return unavailable(context);
+    }
+  }
   return unavailable(context);
 };
 
@@ -202,14 +234,17 @@ const parseRequest = <T>(
   return parsed.data;
 };
 
-const readBoundedBody = async (request: Request): Promise<unknown> => {
+const readBoundedBody = async (
+  request: Request,
+  maxBytes = MAX_CONTROL_MESSAGE_BYTES,
+): Promise<unknown> => {
   const rawLength = request.headers.get('content-length');
   if (rawLength) {
     const contentLength = Number(rawLength);
     if (!Number.isSafeInteger(contentLength) || contentLength < 0) {
       throw new ArenaRoomRequestError('invalid');
     }
-    if (contentLength > MAX_CONTROL_MESSAGE_BYTES) {
+    if (contentLength > maxBytes) {
       throw new ArenaRoomRequestError('too-large');
     }
   }
@@ -225,7 +260,7 @@ const readBoundedBody = async (request: Request): Promise<unknown> => {
       const result = await reader.read();
       if (result.done) break;
       total += result.value.byteLength;
-      if (total > MAX_CONTROL_MESSAGE_BYTES) {
+      if (total > maxBytes) {
         await reader.cancel();
         throw new ArenaRoomRequestError('too-large');
       }
@@ -262,6 +297,14 @@ const parseProposalId = (context: ArenaRoomHttpContext): string | Response => {
   return parsed.success && parsed.data === raw
     ? parsed.data
     : invalidRequest(context, 'proposalId 无效');
+};
+
+const parseGenerationId = (context: ArenaRoomHttpContext): string | Response => {
+  const raw = context.req.param('generationId');
+  const parsed = OpaqueKeySchema.safeParse(raw);
+  return parsed.success && parsed.data === raw && raw !== '.' && raw !== '..'
+    ? parsed.data
+    : invalidRequest(context, 'generationId 无效');
 };
 
 const authenticateAndLimit = async (
@@ -540,6 +583,64 @@ export const registerArenaRoomHttpRoutes = (
         request,
       });
       return context.json(proposalResponse(result), 200);
+    } catch (error) {
+      return mapServiceError(context, error);
+    }
+  });
+
+  app.post(ARENA_ROOM_HTTP_ROUTES.generations, async (context) => {
+    const roomId = parseRoomId(context);
+    if (roomId instanceof Response) return roomId;
+    const authorization = await authenticateAndLimit(
+      context,
+      dependencies,
+      options,
+      'generationStart',
+      roomId,
+    );
+    if (!authorization.accepted) return authorization.response;
+    try {
+      const sourceRequest = new Request(context.req.url, {
+        method: 'POST',
+        headers: new Headers(context.req.raw.headers),
+        signal: context.req.raw.signal,
+      });
+      const request = parseRequest(
+        ArenaRoomGenerationStartRequestSchema,
+        await readBoundedBody(context.req.raw, MAX_ARENA_ROOM_GENERATION_START_BYTES),
+      );
+      const view = await dependencies.generations.start({
+        roomId,
+        accountUserId: authorization.accountUserId,
+        request,
+        sourceRequest,
+      });
+      return context.json(ArenaRoomGenerationViewResponseSchema.parse(view), 202);
+    } catch (error) {
+      return mapServiceError(context, error);
+    }
+  });
+
+  app.get(ARENA_ROOM_HTTP_ROUTES.generation, async (context) => {
+    const roomId = parseRoomId(context);
+    if (roomId instanceof Response) return roomId;
+    const generationId = parseGenerationId(context);
+    if (generationId instanceof Response) return generationId;
+    const authorization = await authenticateAndLimit(
+      context,
+      dependencies,
+      options,
+      'generationRead',
+      roomId,
+    );
+    if (!authorization.accepted) return authorization.response;
+    try {
+      const view = await dependencies.generations.read({
+        roomId,
+        generationId,
+        accountUserId: authorization.accountUserId,
+      });
+      return context.json(ArenaRoomGenerationViewResponseSchema.parse(view), 200);
     } catch (error) {
       return mapServiceError(context, error);
     }
