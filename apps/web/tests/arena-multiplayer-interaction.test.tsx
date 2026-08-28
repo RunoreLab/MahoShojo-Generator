@@ -51,6 +51,7 @@ const readyState: ArenaRoomControllerState = {
   session: null,
   notice: null,
   error: null,
+  unknownOperation: null,
 };
 
 const sharedConfig = {
