@@ -9,6 +9,8 @@ import {
   ArenaRoomHttpErrorResponseSchema,
   ArenaRoomJoinRequestSchema,
   ArenaRoomLeaveResponseSchema,
+  ArenaRoomGenerationStartRequestSchema,
+  ArenaRoomGenerationViewResponseSchema,
   ArenaRoomProposalMutationResponseSchema,
   ArenaRoomProposalResolveRequestSchema,
   ArenaRoomProposalSubmitRequestSchema,
@@ -41,7 +43,86 @@ describe('Arena Room HTTP product contract', () => {
       proposals: '/api/arena/rooms/v1/:roomId/proposals',
       proposalResolve: '/api/arena/rooms/v1/:roomId/proposals/:proposalId/resolve',
       proposalWithdraw: '/api/arena/rooms/v1/:roomId/proposals/:proposalId/withdraw',
+      generations: '/api/arena/rooms/v1/:roomId/generations',
+      generation: '/api/arena/rooms/v1/:roomId/generations/:generationId',
     });
+  });
+
+  it('多人生成 DTO 严格分离 client intent、完整临时 payload 与安全成员投影', () => {
+    const request = {
+      expectedRoomEpoch: 'epoch-1',
+      expectedRevision: 3,
+      generationRequestId: 'request-1234',
+      sharedConfig: canonicalRoomSnapshot.sharedConfig,
+      generation: {
+        mode: 'classic',
+        combatants: [{ name: '角色' }],
+        customProvider: { apiKey: 'request-only-secret' },
+      },
+    };
+    expect(ArenaRoomGenerationStartRequestSchema.parse(request)).toEqual(request);
+    for (const injected of [
+      { roomId: 'spoofed' },
+      { generationId: 'spoofed' },
+      { attempt: 7 },
+      { actorKey: 'pvp-room:spoofed' },
+      { snapshotDigest: 'sha256:spoofed' },
+      { participantUserIds: [99] },
+    ]) {
+      expect(ArenaRoomGenerationStartRequestSchema.safeParse({ ...request, ...injected }).success)
+        .toBe(false);
+    }
+    expect(ArenaRoomGenerationStartRequestSchema.safeParse({
+      ...request,
+      generationRequestId: 'short',
+    }).success).toBe(false);
+    expect(ArenaRoomGenerationStartRequestSchema.safeParse({
+      ...request,
+      generation: [],
+    }).success).toBe(false);
+
+    const response = {
+      protocolVersion: 1,
+      roomId: 'room-1',
+      roomEpoch: 'epoch-1',
+      generation: {
+        generationRequestId: 'request-1234',
+        generationId: 'generation-1',
+        attempt: 1,
+        state: 'running',
+        configRevision: 3,
+        snapshotDigest: `sha256:${'a'.repeat(64)}`,
+        collaborativeInfluence: true,
+        participantUserIds: [7, 9],
+        startedAt: '2026-08-28T00:00:00.000Z',
+      },
+      status: 'running',
+      markdown: '# 当前正文',
+      nextChunkSeq: 4,
+      finalAuthoritative: false,
+    };
+    expect(ArenaRoomGenerationViewResponseSchema.parse(response)).toEqual(response);
+    for (const leaked of [
+      { reasoning: 'private' },
+      { telemetry: { provider: 'secret' } },
+      { actorToken: 'secret' },
+      { pvpSignature: 'secret' },
+      { updatedCombatants: [{ private: true }] },
+    ]) {
+      expect(ArenaRoomGenerationViewResponseSchema.safeParse({ ...response, ...leaked }).success)
+        .toBe(false);
+    }
+    expect(ArenaRoomGenerationViewResponseSchema.safeParse({
+      ...response,
+      generationRecordId: 'must-not-appear-while-running',
+    }).success).toBe(false);
+    expect(ArenaRoomGenerationViewResponseSchema.safeParse({
+      ...response,
+      status: 'completed',
+      generation: { ...response.generation, state: 'completed' },
+      finalAuthoritative: false,
+      generationRecordId: 'r2:record',
+    }).success).toBe(false);
   });
 
   it('Proposal mutation DTO 只接受 client intent 与 typed changes，并保持 strict', () => {

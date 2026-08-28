@@ -1,7 +1,17 @@
 import { z } from 'zod';
 
-import { ArenaRoomSnapshotSchema, RoomMemberSchema, RoomRevisionSchema } from './protocol';
-import { DisplayNameSchema, OpaqueKeySchema, WireErrorMessageSchema } from './primitives';
+import {
+  ArenaRoomSnapshotSchema,
+  GenerationMirrorSchema,
+  RoomMemberSchema,
+  RoomRevisionSchema,
+} from './protocol';
+import {
+  DisplayNameSchema,
+  OpaqueKeySchema,
+  WireErrorMessageSchema,
+  WireReasonSchema,
+} from './primitives';
 import {
   ArenaProposalIdSchema,
   ArenaProposalChangesSchema,
@@ -31,9 +41,16 @@ export const ARENA_ROOM_HTTP_ROUTES = Object.freeze({
   proposals: `${ARENA_ROOM_HTTP_BASE_PATH}/:roomId/proposals`,
   proposalResolve: `${ARENA_ROOM_HTTP_BASE_PATH}/:roomId/proposals/:proposalId/resolve`,
   proposalWithdraw: `${ARENA_ROOM_HTTP_BASE_PATH}/:roomId/proposals/:proposalId/withdraw`,
+  generations: `${ARENA_ROOM_HTTP_BASE_PATH}/:roomId/generations`,
+  generation: `${ARENA_ROOM_HTTP_BASE_PATH}/:roomId/generations/:generationId`,
 });
 
 export const MAX_ARENA_ROOM_HTTP_TICKET_BYTES = 4_096;
+export const MAX_ARENA_ROOM_GENERATION_START_BYTES = 12 * 1_024 * 1_024;
+export const MAX_ARENA_ROOM_GENERATION_MARKDOWN_LENGTH = 12 * 1_024 * 1_024;
+
+export const ArenaGenerationRequestIdSchema = z.string()
+  .regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/u);
 
 export const ArenaRoomCreateRequestSchema = z.object({
   displayName: DisplayNameSchema,
@@ -82,6 +99,80 @@ export const ArenaRoomProposalResolveRequestSchema = z.object({
 export const ArenaRoomProposalWithdrawRequestSchema = z.object({
   expectedRoomEpoch: OpaqueKeySchema,
 }).strict();
+
+/** Full generation payload is request-scoped and MUST NOT enter Room durable/wire state. */
+export const ArenaRoomGenerationStartRequestSchema = z.object({
+  expectedRoomEpoch: OpaqueKeySchema,
+  expectedRevision: RoomRevisionSchema,
+  generationRequestId: ArenaGenerationRequestIdSchema,
+  sharedConfig: ArenaRoomSharedConfigSchema,
+  generation: z.record(z.string(), z.unknown()),
+}).strict();
+
+export const ArenaRoomGenerationProjectionStatusSchema = z.enum([
+  'reserved',
+  'running',
+  'finalizing',
+  'completed',
+  'failed',
+  'cancelled',
+  'producer_lost',
+]);
+
+export const ArenaRoomGenerationViewResponseSchema = z.object({
+  protocolVersion: z.literal(PROTOCOL_VERSION),
+  roomId: OpaqueKeySchema,
+  roomEpoch: OpaqueKeySchema,
+  generation: GenerationMirrorSchema,
+  status: ArenaRoomGenerationProjectionStatusSchema,
+  markdown: z.string().max(MAX_ARENA_ROOM_GENERATION_MARKDOWN_LENGTH),
+  nextChunkSeq: z.number().int().nonnegative(),
+  finalAuthoritative: z.boolean(),
+  generationRecordId: OpaqueKeySchema.optional(),
+  errorCode: WireReasonSchema.optional(),
+}).strict().superRefine((response, context) => {
+  const expectedMirrorState = (() => {
+    switch (response.status) {
+      case 'reserved': return 'starting' as const;
+      case 'running':
+      case 'finalizing': return 'running' as const;
+      case 'completed': return 'completed' as const;
+      case 'failed':
+      case 'producer_lost': return 'failed' as const;
+      case 'cancelled': return 'cancelled' as const;
+    }
+  })();
+  if (response.generation.state !== expectedMirrorState) {
+    context.addIssue({
+      code: 'custom',
+      path: ['generation', 'state'],
+      message: 'generation mirror state must match authoritative projection status',
+    });
+  }
+  if (response.status === 'completed') {
+    if (!response.finalAuthoritative || response.generationRecordId === undefined) {
+      context.addIssue({
+        code: 'custom',
+        path: ['finalAuthoritative'],
+        message: 'completed projection must identify authoritative final content',
+      });
+    }
+  } else if (response.finalAuthoritative || response.generationRecordId !== undefined) {
+    context.addIssue({
+      code: 'custom',
+      path: ['generationRecordId'],
+      message: 'only completed projection may expose an authoritative generation record',
+    });
+  }
+  const requiresError = response.status === 'failed' || response.status === 'producer_lost';
+  if (requiresError !== (response.errorCode !== undefined)) {
+    context.addIssue({
+      code: 'custom',
+      path: ['errorCode'],
+      message: 'failed projection must expose exactly one stable error code',
+    });
+  }
+});
 
 export const ArenaRoomSessionResponseSchema = z.object({
   protocolVersion: z.literal(PROTOCOL_VERSION),
@@ -181,6 +272,13 @@ export type ArenaRoomEpochMutationRequest = z.infer<typeof ArenaRoomEpochMutatio
 export type ArenaRoomProposalSubmitRequest = z.infer<typeof ArenaRoomProposalSubmitRequestSchema>;
 export type ArenaRoomProposalResolveRequest = z.infer<typeof ArenaRoomProposalResolveRequestSchema>;
 export type ArenaRoomProposalWithdrawRequest = z.infer<typeof ArenaRoomProposalWithdrawRequestSchema>;
+export type ArenaRoomGenerationStartRequest = z.infer<typeof ArenaRoomGenerationStartRequestSchema>;
+export type ArenaRoomGenerationProjectionStatus = z.infer<
+  typeof ArenaRoomGenerationProjectionStatusSchema
+>;
+export type ArenaRoomGenerationViewResponse = z.infer<
+  typeof ArenaRoomGenerationViewResponseSchema
+>;
 export type ArenaRoomSessionResponse = z.infer<typeof ArenaRoomSessionResponseSchema>;
 export type ArenaRoomTicketResponse = z.infer<typeof ArenaRoomTicketResponseSchema>;
 export type ArenaRoomLeaveResponse = z.infer<typeof ArenaRoomLeaveResponseSchema>;
