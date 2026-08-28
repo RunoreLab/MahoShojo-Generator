@@ -13,6 +13,10 @@ import type {
   ArenaGenerationObserver,
 } from '@mahoshojo/hosted-api/arena-generation/service';
 import type {
+  ArenaRoomRuntimeObservation,
+  ArenaRoomRuntimeObserver,
+} from '#/arena-room/runtime-observer';
+import type {
   RedisRuntimeObserver,
   RedisRuntimeOperationObservation,
   RedisServerStatsObservation,
@@ -48,7 +52,7 @@ export interface RuntimeTelemetryService {
 
 export type HonoRuntimeTelemetrySnapshot = {
   event: 'hono.runtime.telemetry';
-  schemaVersion: 4;
+  schemaVersion: 5;
   service: 'mahoshojo-hono';
   capturedAt: string;
   runtime: {
@@ -203,6 +207,82 @@ export type HonoRuntimeTelemetrySnapshot = {
     redisDegraded: number;
     terminals: { completed: number; failed: number; cancelled: number; producerLost: number };
   };
+  arenaRoom: {
+    registry: {
+      activeRooms: number;
+      peakActiveRooms: number;
+      residentActors: number;
+      peakResidentActors: number;
+    };
+    actor: {
+      queue: {
+        queuedCurrent: number;
+        peakQueued: number;
+        peakPerRoom: number;
+        overloads: number;
+      };
+      operations: {
+        byOperation: { command: number; story: number };
+        outcomes: { applied: number; idempotent: number; rejected: number; error: number };
+        latency: DurationSummary;
+      };
+    };
+    checkpoints: {
+      byOperation: {
+        load: number;
+        save: number;
+        refresh: number;
+        expire: number;
+        delete: number;
+      };
+      outcomes: {
+        ok: number;
+        missing: number;
+        conflict: number;
+        error: number;
+        unavailable: number;
+      };
+      serializedBytes: {
+        samples: number;
+        totalBytes: number;
+        maxBytes: number | null;
+      };
+      latency: DurationSummary;
+    };
+    sockets: {
+      active: number;
+      peakActive: number;
+      opened: number;
+      closed: number;
+      slowConsumerResyncCloses: number;
+      outbound: {
+        queuedFramesCurrent: number;
+        peakQueuedFrames: number;
+        queuedBytesCurrent: number;
+        peakQueuedBytes: number;
+      };
+    };
+    sync: {
+      reconnectAttempts: number;
+      deliveries: { current: number; replay: number; snapshot: number };
+      resync: { requested: number; required: number };
+    };
+    publishers: {
+      active: number;
+      peakActive: number;
+      started: number;
+      finished: number;
+      outcomes: { published: number; rejected: number; dropped: number; error: number };
+      inFlight: { current: number; peak: number };
+    };
+    incidents: {
+      created: number;
+      recovered: number;
+      fenced: number;
+      quarantined: number;
+      replacementRequired: number;
+    };
+  };
 };
 
 export type HonoRuntimeTelemetryOptions = {
@@ -285,6 +365,59 @@ class ActiveGauge {
   }
 }
 
+class CurrentPeakGauge {
+  private current = 0;
+
+  private peak = 0;
+
+  set(value: number): void {
+    this.current = normalizeMetricInteger(value) ?? 0;
+    this.peak = Math.max(this.peak, this.current);
+  }
+
+  increment(): void {
+    this.set(this.current + 1);
+  }
+
+  decrement(): void {
+    this.set(Math.max(0, this.current - 1));
+  }
+
+  read(): { current: number; peak: number } {
+    return { current: this.current, peak: this.peak };
+  }
+
+  resetPeak(): void {
+    this.peak = this.current;
+  }
+}
+
+class IntegerAccumulator {
+  private samples = 0;
+
+  private total = 0;
+
+  private max: number | null = null;
+
+  observe(value: number): void {
+    const normalized = normalizeMetricInteger(value);
+    if (normalized === null) return;
+    this.samples += 1;
+    this.total = Math.min(Number.MAX_SAFE_INTEGER, this.total + normalized);
+    this.max = Math.max(this.max ?? 0, normalized);
+  }
+
+  read(): { samples: number; total: number; max: number | null } {
+    return { samples: this.samples, total: this.total, max: this.max };
+  }
+
+  reset(): void {
+    this.samples = 0;
+    this.total = 0;
+    this.max = null;
+  }
+}
+
 class DurationAccumulator {
   private samples = 0;
 
@@ -353,7 +486,8 @@ export class HonoRuntimeTelemetry implements
   RuntimeTelemetryService,
   HostedRuntimeObserver,
   RedisRuntimeObserver,
-  ArenaGenerationObserver {
+  ArenaGenerationObserver,
+  ArenaRoomRuntimeObserver {
   private readonly requests = new ActiveGauge();
 
   private readonly streams = new ActiveGauge();
@@ -514,6 +648,88 @@ export class HonoRuntimeTelemetry implements
   };
 
   private readonly arenaAudits = new Map<string, ArenaGenerationAudit>();
+
+  private readonly roomActiveRooms = new CurrentPeakGauge();
+
+  private readonly roomResidentActors = new CurrentPeakGauge();
+
+  private readonly roomActorQueued = new CurrentPeakGauge();
+
+  private roomActorPeakPerRoom = 0;
+
+  private roomActorOverloads = 0;
+
+  private readonly roomActorOperations = { command: 0, story: 0 };
+
+  private readonly roomActorOutcomes = {
+    applied: 0,
+    idempotent: 0,
+    rejected: 0,
+    error: 0,
+  };
+
+  private readonly roomActorLatency = new DurationAccumulator();
+
+  private readonly roomCheckpointOperations = {
+    load: 0,
+    save: 0,
+    refresh: 0,
+    expire: 0,
+    delete: 0,
+  };
+
+  private readonly roomCheckpointOutcomes = {
+    ok: 0,
+    missing: 0,
+    conflict: 0,
+    error: 0,
+    unavailable: 0,
+  };
+
+  private readonly roomCheckpointBytes = new IntegerAccumulator();
+
+  private readonly roomCheckpointLatency = new DurationAccumulator();
+
+  private readonly roomSockets = new CurrentPeakGauge();
+
+  private roomSocketsOpened = 0;
+
+  private roomSocketsClosed = 0;
+
+  private roomSlowConsumerResyncCloses = 0;
+
+  private readonly roomOutboundQueuedFrames = new CurrentPeakGauge();
+
+  private readonly roomOutboundQueuedBytes = new CurrentPeakGauge();
+
+  private roomReconnectAttempts = 0;
+
+  private readonly roomSyncDeliveries = { current: 0, replay: 0, snapshot: 0 };
+
+  private readonly roomResync = { requested: 0, required: 0 };
+
+  private readonly roomPublishers = new CurrentPeakGauge();
+
+  private roomPublishersStarted = 0;
+
+  private roomPublishersFinished = 0;
+
+  private readonly roomPublisherOutcomes = {
+    published: 0,
+    rejected: 0,
+    dropped: 0,
+    error: 0,
+  };
+
+  private readonly roomPublisherInFlight = new CurrentPeakGauge();
+
+  private readonly roomIncidents = {
+    created: 0,
+    recovered: 0,
+    fenced: 0,
+    quarantined: 0,
+    replacementRequired: 0,
+  };
 
   private readonly delayMonitor = monitorEventLoopDelay({
     resolution: EVENT_LOOP_DELAY_RESOLUTION_MS,
@@ -807,6 +1023,147 @@ export class HonoRuntimeTelemetry implements
     }
   }
 
+  observeArenaRoomRuntime(observation: ArenaRoomRuntimeObservation): void {
+    switch (observation.event) {
+      case 'registry':
+        this.roomActiveRooms.set(observation.activeRooms);
+        this.roomResidentActors.set(observation.residentActors);
+        break;
+      case 'actor_queue': {
+        this.roomActorQueued.set(observation.queuedCurrent);
+        const roomQueued = normalizeMetricInteger(observation.roomQueuedCurrent) ?? 0;
+        this.roomActorPeakPerRoom = Math.max(this.roomActorPeakPerRoom, roomQueued);
+        if (observation.overloaded === true) this.roomActorOverloads += 1;
+        break;
+      }
+      case 'actor_operation':
+        switch (observation.operation) {
+          case 'command':
+          case 'story':
+            this.roomActorOperations[observation.operation] += 1;
+            break;
+          default:
+            break;
+        }
+        switch (observation.outcome) {
+          case 'applied':
+          case 'idempotent':
+          case 'rejected':
+          case 'error':
+            this.roomActorOutcomes[observation.outcome] += 1;
+            break;
+          default:
+            this.roomActorOutcomes.error += 1;
+        }
+        this.roomActorLatency.observe(observation.durationMs);
+        break;
+      case 'checkpoint':
+        switch (observation.operation) {
+          case 'load':
+          case 'save':
+          case 'refresh':
+          case 'expire':
+          case 'delete':
+            this.roomCheckpointOperations[observation.operation] += 1;
+            break;
+          default:
+            break;
+        }
+        switch (observation.outcome) {
+          case 'ok':
+          case 'missing':
+          case 'conflict':
+          case 'error':
+          case 'unavailable':
+            this.roomCheckpointOutcomes[observation.outcome] += 1;
+            break;
+          default:
+            this.roomCheckpointOutcomes.error += 1;
+        }
+        if (observation.serializedBytes !== undefined) {
+          this.roomCheckpointBytes.observe(observation.serializedBytes);
+        }
+        this.roomCheckpointLatency.observe(observation.durationMs);
+        break;
+      case 'socket':
+        if (observation.action === 'opened') {
+          this.roomSockets.increment();
+          this.roomSocketsOpened += 1;
+        } else if (observation.action === 'closed') {
+          this.roomSockets.decrement();
+          this.roomSocketsClosed += 1;
+        }
+        break;
+      case 'socket_backlog':
+        this.roomOutboundQueuedFrames.set(observation.queuedFrames);
+        this.roomOutboundQueuedBytes.set(observation.queuedBytes);
+        break;
+      case 'slow_consumer_resync_close':
+        this.roomSlowConsumerResyncCloses += 1;
+        break;
+      case 'sync':
+        if (observation.action === 'reconnect_attempt') {
+          this.roomReconnectAttempts += 1;
+        } else if (observation.action === 'delivery') {
+          switch (observation.mode) {
+            case 'current':
+            case 'replay':
+            case 'snapshot':
+              this.roomSyncDeliveries[observation.mode] += 1;
+              break;
+            default:
+              break;
+          }
+        } else if (observation.action === 'resync_requested') {
+          this.roomResync.requested += 1;
+        } else if (observation.action === 'resync_required') {
+          this.roomResync.required += 1;
+        }
+        break;
+      case 'publisher':
+        if (observation.action === 'started') {
+          this.roomPublishers.increment();
+          this.roomPublishersStarted += 1;
+        } else if (observation.action === 'finished') {
+          this.roomPublishers.decrement();
+          this.roomPublishersFinished += 1;
+        }
+        break;
+      case 'publisher_backlog':
+        this.roomPublisherInFlight.set(observation.inFlightCurrent);
+        break;
+      case 'publisher_outcome':
+        switch (observation.outcome) {
+          case 'published':
+          case 'rejected':
+          case 'dropped':
+          case 'error':
+            this.roomPublisherOutcomes[observation.outcome] += 1;
+            break;
+          default:
+            this.roomPublisherOutcomes.error += 1;
+        }
+        break;
+      case 'incident':
+        switch (observation.outcome) {
+          case 'created':
+          case 'recovered':
+          case 'fenced':
+          case 'quarantined':
+            this.roomIncidents[observation.outcome] += 1;
+            break;
+          case 'replacement_required':
+            this.roomIncidents.replacementRequired += 1;
+            break;
+          default:
+            break;
+        }
+        break;
+      default:
+        break;
+    }
+  }
+
   setRedisResourceSampler(sampler: () => Promise<ResourceSampleResult>): () => void {
     this.redisResourceSampler = sampler;
     return () => {
@@ -859,12 +1216,21 @@ export class HonoRuntimeTelemetry implements
     const streamGauge = this.streams.read();
     const socketGauge = this.sockets.read();
     const aiAttemptGauge = this.aiAttempts.read();
+    const roomActiveRooms = this.roomActiveRooms.read();
+    const roomResidentActors = this.roomResidentActors.read();
+    const roomActorQueued = this.roomActorQueued.read();
+    const roomCheckpointBytes = this.roomCheckpointBytes.read();
+    const roomSockets = this.roomSockets.read();
+    const roomOutboundQueuedFrames = this.roomOutboundQueuedFrames.read();
+    const roomOutboundQueuedBytes = this.roomOutboundQueuedBytes.read();
+    const roomPublishers = this.roomPublishers.read();
+    const roomPublisherInFlight = this.roomPublisherInFlight.read();
     const delaySamples = this.delayMonitor.count;
     const hasDelaySamples = delaySamples > 0;
 
     return {
       event: TELEMETRY_EVENT,
-      schemaVersion: 4,
+      schemaVersion: 5,
       service: 'mahoshojo-hono',
       capturedAt,
       runtime: {
@@ -987,6 +1353,67 @@ export class HonoRuntimeTelemetry implements
         redisDegraded: this.arenaRedisDegraded,
         terminals: { ...this.arenaTerminals },
       },
+      arenaRoom: {
+        registry: {
+          activeRooms: roomActiveRooms.current,
+          peakActiveRooms: roomActiveRooms.peak,
+          residentActors: roomResidentActors.current,
+          peakResidentActors: roomResidentActors.peak,
+        },
+        actor: {
+          queue: {
+            queuedCurrent: roomActorQueued.current,
+            peakQueued: roomActorQueued.peak,
+            peakPerRoom: this.roomActorPeakPerRoom,
+            overloads: this.roomActorOverloads,
+          },
+          operations: {
+            byOperation: { ...this.roomActorOperations },
+            outcomes: { ...this.roomActorOutcomes },
+            latency: this.roomActorLatency.read(),
+          },
+        },
+        checkpoints: {
+          byOperation: { ...this.roomCheckpointOperations },
+          outcomes: { ...this.roomCheckpointOutcomes },
+          serializedBytes: {
+            samples: roomCheckpointBytes.samples,
+            totalBytes: roomCheckpointBytes.total,
+            maxBytes: roomCheckpointBytes.max,
+          },
+          latency: this.roomCheckpointLatency.read(),
+        },
+        sockets: {
+          active: roomSockets.current,
+          peakActive: roomSockets.peak,
+          opened: this.roomSocketsOpened,
+          closed: this.roomSocketsClosed,
+          slowConsumerResyncCloses: this.roomSlowConsumerResyncCloses,
+          outbound: {
+            queuedFramesCurrent: roomOutboundQueuedFrames.current,
+            peakQueuedFrames: roomOutboundQueuedFrames.peak,
+            queuedBytesCurrent: roomOutboundQueuedBytes.current,
+            peakQueuedBytes: roomOutboundQueuedBytes.peak,
+          },
+        },
+        sync: {
+          reconnectAttempts: this.roomReconnectAttempts,
+          deliveries: { ...this.roomSyncDeliveries },
+          resync: { ...this.roomResync },
+        },
+        publishers: {
+          active: roomPublishers.current,
+          peakActive: roomPublishers.peak,
+          started: this.roomPublishersStarted,
+          finished: this.roomPublishersFinished,
+          outcomes: { ...this.roomPublisherOutcomes },
+          inFlight: {
+            current: roomPublisherInFlight.current,
+            peak: roomPublisherInFlight.peak,
+          },
+        },
+        incidents: { ...this.roomIncidents },
+      },
     };
   }
 
@@ -1010,6 +1437,14 @@ export class HonoRuntimeTelemetry implements
         this.streams.resetPeak();
         this.sockets.resetPeak();
         this.aiAttempts.resetPeak();
+        this.roomActiveRooms.resetPeak();
+        this.roomResidentActors.resetPeak();
+        this.roomActorQueued.resetPeak();
+        this.roomSockets.resetPeak();
+        this.roomOutboundQueuedFrames.resetPeak();
+        this.roomOutboundQueuedBytes.resetPeak();
+        this.roomPublishers.resetPeak();
+        this.roomPublisherInFlight.resetPeak();
         this.resetIntervalCounters();
       } catch (error) {
         this.reportFailure('[hono][telemetry] 采样状态重置失败', error);
@@ -1145,6 +1580,53 @@ export class HonoRuntimeTelemetry implements
       failed: 0,
       cancelled: 0,
       producerLost: 0,
+    });
+    this.roomActorPeakPerRoom = 0;
+    this.roomActorOverloads = 0;
+    Object.assign(this.roomActorOperations, { command: 0, story: 0 });
+    Object.assign(this.roomActorOutcomes, {
+      applied: 0,
+      idempotent: 0,
+      rejected: 0,
+      error: 0,
+    });
+    this.roomActorLatency.reset();
+    Object.assign(this.roomCheckpointOperations, {
+      load: 0,
+      save: 0,
+      refresh: 0,
+      expire: 0,
+      delete: 0,
+    });
+    Object.assign(this.roomCheckpointOutcomes, {
+      ok: 0,
+      missing: 0,
+      conflict: 0,
+      error: 0,
+      unavailable: 0,
+    });
+    this.roomCheckpointBytes.reset();
+    this.roomCheckpointLatency.reset();
+    this.roomSocketsOpened = 0;
+    this.roomSocketsClosed = 0;
+    this.roomSlowConsumerResyncCloses = 0;
+    this.roomReconnectAttempts = 0;
+    Object.assign(this.roomSyncDeliveries, { current: 0, replay: 0, snapshot: 0 });
+    Object.assign(this.roomResync, { requested: 0, required: 0 });
+    this.roomPublishersStarted = 0;
+    this.roomPublishersFinished = 0;
+    Object.assign(this.roomPublisherOutcomes, {
+      published: 0,
+      rejected: 0,
+      dropped: 0,
+      error: 0,
+    });
+    Object.assign(this.roomIncidents, {
+      created: 0,
+      recovered: 0,
+      fenced: 0,
+      quarantined: 0,
+      replacementRequired: 0,
     });
   }
 }
