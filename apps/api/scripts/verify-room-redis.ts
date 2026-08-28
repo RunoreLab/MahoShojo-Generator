@@ -94,6 +94,7 @@ const authorityRoomId = `room-authority-${token}`;
 const directoryRegistrationRoomId = `room-directory-registration-${token}`;
 const directoryPendingRoomId = `room-directory-pending-${token}`;
 const directoryPendingRaceRoomId = `room-directory-pending-race-${token}`;
+const directoryMalformedRaceRoomId = `room-directory-malformed-race-${token}`;
 const directoryLegacyRoomId = `room-directory-legacy-${token}`;
 const ticketJti = `verifier:${token}`;
 const authorityTicketJti = `authority:${token}`;
@@ -117,6 +118,8 @@ const directoryPendingMember = roomHash(directoryPendingRoomId);
 const directoryPendingKey = `${directoryRegistrationPrefix}:entry:${directoryPendingMember}`;
 const directoryPendingRaceMember = roomHash(directoryPendingRaceRoomId);
 const directoryPendingRaceKey = `${directoryRegistrationPrefix}:entry:${directoryPendingRaceMember}`;
+const directoryMalformedRaceMember = roomHash(directoryMalformedRaceRoomId);
+const directoryMalformedRaceKey = `${directoryRegistrationPrefix}:entry:${directoryMalformedRaceMember}`;
 const directoryLegacyMember = roomHash(directoryLegacyRoomId);
 const directoryLegacyV1Prefix = `mahoshojo:room-directory-registration:v1:${keyPrefix}`;
 const directoryLegacyV1Key = `${directoryLegacyV1Prefix}:entry:${directoryLegacyMember}`;
@@ -980,6 +983,7 @@ try {
         targetRoomEpoch: 'directory-epoch-2',
         updatedAtMs: Date.parse(THIRD_TIMESTAMP),
         score: Date.parse(THIRD_TIMESTAMP),
+        authorityState: null,
       })).kind !== 'marked') {
         throw new Error('ROOM_DIRECTORY_REGISTRATION_MARK_CLOSING_FAILED');
       }
@@ -1027,6 +1031,7 @@ try {
         targetRoomEpoch: 'directory-legacy-epoch-1',
         updatedAtMs: Date.parse(THIRD_TIMESTAMP),
         score: Date.parse(THIRD_TIMESTAMP),
+        authorityState: null,
       });
       await directoryRegistrations.delete({
         roomId: directoryLegacyRoomId,
@@ -1334,6 +1339,62 @@ try {
         throw new Error('ROOM_DIRECTORY_PENDING_SAVE_FIRST_RECOVERY_FAILED');
       }
 
+      const malformedRaceRecord = {
+        ...pendingRaceRecord,
+        roomId: directoryMalformedRaceRoomId,
+        roomEpoch: 'directory-malformed-race-epoch-1',
+        title: 'Malformed terminal-looking checkpoint race',
+      };
+      const malformedCheckpointRaw = JSON.stringify({
+        checkpointVersion: 1,
+        roomId: malformedRaceRecord.roomId,
+        roomEpoch: malformedRaceRecord.roomEpoch,
+        state: { lifecycle: { status: 'closed' } },
+      });
+      let injectedMalformedCheckpoint = false;
+      const malformedRaceRegistrations = createRedisRoomDirectoryRegistrationStore({
+        keyPrefix,
+        getClient: () => ({
+          async eval(script, options) {
+            if (
+              !injectedMalformedCheckpoint
+              && script.includes('ROOM_DIRECTORY_REGISTRATION_MARK_CLOSING_V2')
+            ) {
+              injectedMalformedCheckpoint = true;
+              await cleanup.set(roomKey(directoryMalformedRaceRoomId), malformedCheckpointRaw);
+            }
+            return cleanup.eval(script, options);
+          },
+        }),
+      });
+      await malformedRaceRegistrations.prepare({
+        record: malformedRaceRecord,
+        preparedAtMs: pendingPreparedAtMs,
+      });
+      directoryRows.set(directoryMalformedRaceRoomId, structuredClone(malformedRaceRecord));
+      const malformedRaceDirectory = createArenaRoomDirectoryService({
+        authority: readerStore,
+        registrations: malformedRaceRegistrations,
+        store: directoryD1,
+        now: () => pendingDueAtMs,
+        pendingCreateGraceMs: 5 * 60_000,
+      });
+      const malformedRaceCleanup = await malformedRaceDirectory.reconcileRegistrations({
+        limit: 50,
+        score: pendingDueAtMs,
+      });
+      if (
+        !injectedMalformedCheckpoint
+        || malformedRaceCleanup.removed !== 0
+        || directoryRows.get(directoryMalformedRaceRoomId)?.roomEpoch
+          !== malformedRaceRecord.roomEpoch
+        || (await malformedRaceRegistrations.get(directoryMalformedRaceRoomId))?.phase
+          !== 'pending-create'
+        || await cleanup.get(roomKey(directoryMalformedRaceRoomId)) !== malformedCheckpointRaw
+      ) {
+        throw new Error('ROOM_DIRECTORY_MALFORMED_AUTHORITY_FENCE_FAILED');
+      }
+
       const authorityActors = createRoomActorRegistry({
         store: writerStore,
         createRoomIdentity: () => ({ roomId: authorityRoomId, roomEpoch: 'authority-epoch-1' }),
@@ -1423,6 +1484,7 @@ try {
         directoryPendingCreateGrace: true,
         directoryAtomicCreateFence: true,
         directoryAtomicCleanupFence: true,
+        directoryMalformedAuthorityFence: true,
         directoryRegistrationV1Migration: true,
         activeTtlRefresh: true,
         ticketReplay: true,
@@ -1444,6 +1506,7 @@ try {
     await cleanup.zRem(directoryRegistrationIndexKey, directoryRegistrationMember);
     await cleanup.zRem(directoryRegistrationIndexKey, directoryPendingMember);
     await cleanup.zRem(directoryRegistrationIndexKey, directoryPendingRaceMember);
+    await cleanup.zRem(directoryRegistrationIndexKey, directoryMalformedRaceMember);
     await cleanup.zRem(directoryLegacyV1IndexKey, directoryLegacyMember);
     await cleanup.zRem(directoryRegistrationIndexKey, directoryLegacyMember);
     await cleanup.unlink([
@@ -1468,11 +1531,13 @@ try {
       ...roomKeys(authorityRoomId),
       ...roomKeys(directoryPendingRoomId),
       ...roomKeys(directoryPendingRaceRoomId),
+      ...roomKeys(directoryMalformedRaceRoomId),
       ticketReplayKey,
       authorityTicketReplayKey,
       directoryRegistrationKey,
       directoryPendingKey,
       directoryPendingRaceKey,
+      directoryMalformedRaceKey,
       directoryLegacyV1Key,
       directoryLegacyV2Key,
     ]);

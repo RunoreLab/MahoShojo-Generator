@@ -419,6 +419,14 @@ const createStoredCheckpoint = (input: unknown): StoredRoomCheckpoint => {
   };
 };
 
+export const serializeTerminalRoomCheckpointForFence = (input: unknown): string => {
+  const stored = createStoredCheckpoint(input);
+  if (stored.state.lifecycle.status !== 'closed') {
+    throw new Error('REDIS_ROOM_CHECKPOINT_TERMINAL_REQUIRED');
+  }
+  return JSON.stringify(stored);
+};
+
 const createExpiringStoredCheckpoint = (input: unknown): StoredRoomCheckpoint => {
   const active = createStoredCheckpoint(input);
   return {

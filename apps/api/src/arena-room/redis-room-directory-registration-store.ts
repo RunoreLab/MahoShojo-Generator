@@ -5,8 +5,10 @@ import {
   OpaqueKeySchema,
   RoomDirectoryEntrySchema,
 } from '@mahoshojo/contracts/arena-room';
+import type { ArenaRoomAuthorityState } from '@mahoshojo/multiplayer-core';
 
 import type { RoomDirectoryRecord } from './d1-room-directory-store';
+import { serializeTerminalRoomCheckpointForFence } from './redis-room-store';
 
 const KEY_PREFIX = 'mahoshojo:room-directory-registration:v2';
 const LEGACY_KEY_PREFIX = 'mahoshojo:room-directory-registration:v1';
@@ -81,21 +83,12 @@ if not decoded or type(current) ~= 'table' or current.roomId ~= ARGV[2] then
 end
 if current.targetRoomEpoch ~= ARGV[3] then return 'stale' end
 local checkpointRaw = redis.call('GET', KEYS[3])
-if checkpointRaw then
-  local checkpointDecoded, checkpoint = pcall(cjson.decode, checkpointRaw)
-  if not checkpointDecoded or type(checkpoint) ~= 'table'
-    or not ((checkpoint.checkpointVersion == 1 and checkpoint.expiryFence == nil)
-      or (checkpoint.checkpointVersion == 2 and checkpoint.expiryFence == 'expiring'))
-    or checkpoint.roomId ~= ARGV[2]
-    or type(checkpoint.roomEpoch) ~= 'string'
-    or type(checkpoint.state) ~= 'table'
-    or type(checkpoint.state.lifecycle) ~= 'table'
-    or (checkpoint.state.lifecycle.status ~= 'open'
-      and checkpoint.state.lifecycle.status ~= 'closed') then
-    return 'invalid-authority'
-  end
-  if checkpoint.roomEpoch ~= ARGV[3] then return 'stale' end
-  if checkpoint.state.lifecycle.status == 'open' then return 'authority-open' end
+if ARGV[6] == 'absent' then
+  if checkpointRaw then return 'authority-present' end
+elseif ARGV[6] == 'terminal' then
+  if checkpointRaw and checkpointRaw ~= ARGV[7] then return 'authority-present' end
+else
+  return 'invalid-request'
 end
 if current.phase == 'closing' then return 'already' end
 current.phase = 'closing'
@@ -244,8 +237,9 @@ export type RedisRoomDirectoryRegistrationStore = {
   markClosing(input: ExactRegistrationInput & {
     readonly score: number;
     readonly updatedAtMs: number;
+    readonly authorityState: ArenaRoomAuthorityState | null;
   }): Promise<{
-    readonly kind: 'already' | 'authority-open' | 'marked' | 'missing' | 'stale';
+    readonly kind: 'already' | 'authority-present' | 'marked' | 'missing' | 'stale';
   }>;
   delete(input: ExactRegistrationInput & {
     readonly phase: 'closing' | 'pending-create';
@@ -525,16 +519,30 @@ export const createRedisRoomDirectoryRegistrationStore = (
       const updatedAtMs = parseTime(input.updatedAtMs);
       const score = parseTime(input.score);
       const [entryKey, index, member] = keysFor(roomId);
+      const authorityMode = input.authorityState === null ? 'absent' : 'terminal';
+      const expectedAuthorityRaw = input.authorityState === null
+        ? ''
+        : serializeTerminalRoomCheckpointForFence(input.authorityState);
       const response = await options.getClient().eval(MARK_CLOSING_SCRIPT, {
         keys: [entryKey, index, roomCheckpointKey(roomId)],
-        arguments: [member, roomId, targetRoomEpoch, updatedAtMs, score],
+        arguments: [
+          member,
+          roomId,
+          targetRoomEpoch,
+          updatedAtMs,
+          score,
+          authorityMode,
+          expectedAuthorityRaw,
+        ],
       });
       if (response === 'already' || response === 'marked'
-        || response === 'authority-open' || response === 'missing' || response === 'stale') {
+        || response === 'authority-present' || response === 'missing' || response === 'stale') {
         return { kind: response };
       }
       if (response === 'invalid') return invalid('REDIS_ROOM_DIRECTORY_REGISTRATION_INVALID');
-      if (response === 'invalid-authority') return invalid('REDIS_ROOM_CHECKPOINT_INVALID');
+      if (response === 'invalid-request') {
+        return invalid('REDIS_ROOM_DIRECTORY_REGISTRATION_INPUT_INVALID');
+      }
       return invalid('REDIS_ROOM_DIRECTORY_REGISTRATION_RESPONSE_INVALID');
     },
 

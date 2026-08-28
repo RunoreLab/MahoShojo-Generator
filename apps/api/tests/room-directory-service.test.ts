@@ -371,6 +371,7 @@ describe('Arena Room directory service', () => {
       targetRoomEpoch: 'epoch-1',
       updatedAtMs: expect.any(Number),
       score: 1_787_904_000_000,
+      authorityState: null,
     });
     expect(registrations.delete).toHaveBeenCalledWith({
       roomId: 'room-orphan',
@@ -418,7 +419,7 @@ describe('Arena Room directory service', () => {
     registrations.list.mockResolvedValue([
       registration(record(), 'pending-create', null),
     ]);
-    registrations.markClosing.mockResolvedValue({ kind: 'authority-open' });
+    registrations.markClosing.mockResolvedValue({ kind: 'authority-present' });
     const service = createArenaRoomDirectoryService({
       authority: { load: async () => null },
       store,
@@ -528,6 +529,7 @@ describe('Arena Room directory service', () => {
     expect(registrations.markClosing).toHaveBeenCalledWith(expect.objectContaining({
       roomId: 'room-1',
       targetRoomEpoch: 'epoch-1',
+      authorityState: closed,
     }));
     expect(registrations.delete).toHaveBeenCalledWith({
       roomId: 'room-1',
@@ -571,6 +573,7 @@ describe('Arena Room directory service', () => {
       targetRoomEpoch: 'epoch-1',
       updatedAtMs: 500,
       score: 500,
+      authorityState: state,
     });
     expect(registrations.delete).not.toHaveBeenCalled();
   });

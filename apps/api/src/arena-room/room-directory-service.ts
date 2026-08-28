@@ -365,6 +365,7 @@ export const createArenaRoomDirectoryService = (
   const cleanupClosingRegistration = async (
     registration: RoomDirectoryRegistration,
     score: number,
+    authorityState: ArenaRoomAuthorityState | null,
   ): Promise<boolean> => {
     if (options.registrations === undefined) {
       return fail('ROOM_DIRECTORY_REGISTRATION_UNAVAILABLE');
@@ -376,9 +377,10 @@ export const createArenaRoomDirectoryService = (
       targetRoomEpoch: registration.targetRoomEpoch,
       updatedAtMs: now(),
       score,
+      authorityState,
     });
     if (marked.kind === 'missing') return false;
-    if (marked.kind === 'authority-open') return false;
+    if (marked.kind === 'authority-present') return false;
     if (marked.kind === 'stale') return fail('ROOM_DIRECTORY_STALE');
     const current = await options.store.get(registration.roomId);
     if (current !== null) {
@@ -582,12 +584,12 @@ export const createArenaRoomDirectoryService = (
             if (deferred.kind === 'stale') return fail('ROOM_DIRECTORY_STALE');
             continue;
           }
-          if (await cleanupClosingRegistration(registration, score)) removed += 1;
+          if (await cleanupClosingRegistration(registration, score, null)) removed += 1;
           continue;
         }
         if (state.snapshot.roomId !== registration.roomId) return fail('ROOM_DIRECTORY_STALE');
         if (state.lifecycle.status !== 'open') {
-          if (await cleanupClosingRegistration(registration, score)) removed += 1;
+          if (await cleanupClosingRegistration(registration, score, state)) removed += 1;
           continue;
         }
         if (hostUserId !== registration.hostUserId || registration.phase === 'closing') {
@@ -713,7 +715,7 @@ export const createArenaRoomDirectoryService = (
         registration = await options.registrations.get(state.snapshot.roomId);
         if (registration === null) return;
       }
-      await cleanupClosingRegistration(registration, now());
+      await cleanupClosingRegistration(registration, now(), state);
     },
   });
   return service;
