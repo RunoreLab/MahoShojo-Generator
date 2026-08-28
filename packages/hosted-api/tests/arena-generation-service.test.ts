@@ -518,6 +518,23 @@ describe('Arena generation lifecycle service', () => {
       status: 'failed',
       code: 'ARENA_CONTENT_POLICY_REJECTED',
     });
+    expect(store.states.get('generation-1')?.snapshot).toMatchObject({
+      status: 'failed',
+      markdown: '',
+      reasoning: '',
+      lastEventId: '1-0',
+    });
+    expect(store.events.get('generation-1')).toEqual([
+      expect.objectContaining({
+        id: '1-0',
+        type: 'error',
+        data: expect.objectContaining({
+          ok: false,
+          status: 'failed',
+          code: 'ARENA_CONTENT_POLICY_REJECTED',
+        }),
+      }),
+    ]);
     expect(execute).not.toHaveBeenCalled();
   });
 
@@ -1857,6 +1874,20 @@ describe('Arena generation lifecycle service', () => {
     expect(await response.json()).toMatchObject({ code: 'GENERATION_OWNERSHIP_UNAVAILABLE' });
     expect(execute).not.toHaveBeenCalled();
     expect(store.states.get('generation-1')?.terminal?.status).toBe('producer_lost');
+    expect(store.states.get('generation-1')?.snapshot).toMatchObject({
+      status: 'producer_lost',
+      lastEventId: '1-0',
+    });
+    expect(store.events.get('generation-1')).toEqual([
+      expect.objectContaining({
+        id: '1-0',
+        type: 'error',
+        data: expect.objectContaining({
+          status: 'producer_lost',
+          code: 'PRODUCER_OWNERSHIP_UNAVAILABLE',
+        }),
+      }),
+    ]);
   });
 
   test('transient replay writes may degrade but never start a second provider', async () => {

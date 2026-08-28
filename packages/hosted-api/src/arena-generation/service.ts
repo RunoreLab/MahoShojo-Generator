@@ -2134,12 +2134,39 @@ export const createArenaGenerationService = (
         }, 409), input.actor);
       }
       if (terminalFence?.created) {
-        await dependencies.store.markTerminal({
+        const terminalNow = dependencies.now().toISOString();
+        const priorState = await dependencies.store.readState({
           generationId,
-          producerToken: terminalFence.producerToken,
-          terminal: { status: 'failed', code: input.rejection.code },
-          now: dependencies.now().toISOString(),
-        }).catch(() => ({ owned: false, applied: false }));
+          actorKey: input.actor.actorKey,
+        }).catch(() => null);
+        if (priorState) {
+          const evidence = await commitOwnedTerminalEvidence({
+            generationId,
+            actorKey: input.actor.actorKey,
+            producerToken: terminalFence.producerToken,
+            record: {
+              generationId,
+              generationRequestId: input.generationRequestId,
+              status: 'failed',
+              updatedAt: terminalNow,
+              resultRef: null,
+              markdown: '',
+              reasoning: '',
+              errorCode: input.rejection.code,
+              payloadHash,
+              contentAvailable: true,
+            },
+            priorState,
+            now: terminalNow,
+          });
+          if (!evidence) {
+            observe({
+              event: 'redis_degraded',
+              generationId,
+              operation: 'rejection_terminal_evidence',
+            });
+          }
+        }
       }
     } catch {
       if (terminalFence?.created) {
@@ -2557,16 +2584,32 @@ export const createArenaGenerationService = (
             payload: prepared.executionPayload,
           });
         } catch {
-          const lostTerminal: GenerationTerminal = {
-            status: 'producer_lost',
-            code: 'PRODUCER_OWNERSHIP_UNAVAILABLE',
-          };
-          await dependencies.store.markTerminal({
+          const terminalNow = dependencies.now().toISOString();
+          const priorState = await dependencies.store.readState({
             generationId: reservation.generationId,
-            producerToken,
-            terminal: lostTerminal,
-            now: dependencies.now().toISOString(),
-          }).catch(() => ({ owned: true, applied: false }));
+            actorKey: actor.actorKey,
+          }).catch(() => null);
+          if (priorState) {
+            await commitOwnedTerminalEvidence({
+              generationId: reservation.generationId,
+              actorKey: actor.actorKey,
+              producerToken,
+              record: {
+                generationId: reservation.generationId,
+                generationRequestId: parsed.generationRequestId,
+                status: 'producer_lost',
+                updatedAt: terminalNow,
+                resultRef: null,
+                markdown: '',
+                reasoning: '',
+                errorCode: 'PRODUCER_OWNERSHIP_UNAVAILABLE',
+                payloadHash,
+                contentAvailable: true,
+              },
+              priorState,
+              now: terminalNow,
+            });
+          }
           observe({
             event: 'producer_lost',
             generationId: reservation.generationId,
