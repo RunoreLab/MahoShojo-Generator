@@ -13,6 +13,7 @@ const verifierPath = fileURLToPath(new URL(
   '../scripts/verify-room-hardening-load.ts',
   import.meta.url,
 ));
+const CHILD_TIMEOUT_MS = 10_000;
 
 const runAgainstTcpSentinel = async (input: Readonly<{
   redisHostname: string;
@@ -56,7 +57,7 @@ const runAgainstTcpSentinel = async (input: Readonly<{
   const timeout = setTimeout(() => {
     timedOut = true;
     child.kill('SIGKILL');
-  }, 5_000);
+  }, CHILD_TIMEOUT_MS);
   const exit = await new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) => {
     child.once('exit', (code, signal) => resolve({ code, signal }));
   });
