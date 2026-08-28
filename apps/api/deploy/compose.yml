@@ -15,6 +15,7 @@ services:
       HONO_PORT: 8787
       HONO_AUTH_MODE: bearer
       HONO_CORS_ORIGINS: "https://*.colanns.me"
+      ARENA_ROOM_ALLOWED_ORIGINS: "https://mahoshojo.colanns.me"
       REDIS_HOST: redis
       REDIS_PORT: 6379
       REDIS_REQUIRED: "true"

@@ -10,6 +10,7 @@ import {
   hasValidHostedApiProductionCorsOrigins,
   HOSTED_DR_CONTRACT_VERSION,
   parseHostedApiDeploymentTarget,
+  resolveHostedApiCorsOrigin,
   type HostedDrVersionGateInput,
 } from '@mahoshojo/hosted-api/hosted-dr';
 
@@ -22,6 +23,7 @@ export type HonoServerConfig = {
   redisRequired: boolean;
   d1Required: boolean;
   corsOrigins: string[];
+  arenaRoomAllowedOrigins: string[];
   authMode: HonoAuthMode;
   arenaMultiplayerEnabled: boolean;
 };
@@ -199,6 +201,50 @@ const readCorsOrigins = (): string[] => {
     .filter(Boolean);
 };
 
+const readArenaRoomAllowedOrigins = (): string[] => {
+  const raw = process.env.ARENA_ROOM_ALLOWED_ORIGINS?.trim();
+  if (!raw) return [];
+  return raw
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+};
+
+const isCanonicalArenaRoomOrigin = (value: string): boolean => {
+  if (value === '*' || value.includes('*')) return false;
+  try {
+    const url = new URL(value);
+    const loopbackHttp = url.protocol === 'http:'
+      && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
+    return (url.protocol === 'https:' || loopbackHttp)
+      && !url.username
+      && !url.password
+      && url.pathname === '/'
+      && !url.search
+      && !url.hash
+      && url.origin === value;
+  } catch {
+    return false;
+  }
+};
+
+const validateArenaRoomOrigins = (config: HonoServerConfig): void => {
+  if (!config.arenaMultiplayerEnabled) return;
+  if (
+    config.arenaRoomAllowedOrigins.length === 0
+    || config.arenaRoomAllowedOrigins.some((origin) => !isCanonicalArenaRoomOrigin(origin))
+  ) {
+    throw new Error(
+      'ARENA_ROOM_ALLOWED_ORIGINS 在 Arena multiplayer 启用时必须是非空、无 wildcard 的精确 HTTP(S) origin 列表',
+    );
+  }
+  if (config.arenaRoomAllowedOrigins.some((origin) => (
+    resolveHostedApiCorsOrigin(origin, config.corsOrigins) !== origin
+  ))) {
+    throw new Error('ARENA_ROOM_ALLOWED_ORIGINS 必须同时被 HONO_CORS_ORIGINS 覆盖');
+  }
+};
+
 const readRedisUrl = (): string | null => {
   const explicitUrl = process.env.REDIS_URL?.trim();
   if (explicitUrl) return explicitUrl;
@@ -243,9 +289,11 @@ export const readHonoServerConfig = (): HonoServerConfig => {
     redisRequired: readBoolean('REDIS_REQUIRED', nodeEnv === 'production' || protectedHostedTarget),
     d1Required: readBoolean('D1_REQUIRED', nodeEnv === 'production' || protectedHostedTarget),
     corsOrigins: readCorsOrigins(),
+    arenaRoomAllowedOrigins: readArenaRoomAllowedOrigins(),
     authMode: readHonoAuthMode(),
     arenaMultiplayerEnabled: readBoolean('ARENA_MULTIPLAYER_ENABLED', false),
   };
+  validateArenaRoomOrigins(config);
   validateProductionEnvironment(process.env, config);
   return config;
 };

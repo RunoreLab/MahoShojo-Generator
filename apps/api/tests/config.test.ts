@@ -6,6 +6,7 @@ const stubValidBearerProductionEnv = (): void => {
   vi.stubEnv('HOSTED_API_ENVIRONMENT', 'production');
   vi.stubEnv('HONO_AUTH_MODE', 'bearer');
   vi.stubEnv('HONO_CORS_ORIGINS', 'https://*.colanns.me');
+  vi.stubEnv('ARENA_ROOM_ALLOWED_ORIGINS', 'https://mahoshojo.colanns.me');
   vi.stubEnv('REDIS_URL', 'redis://default:secret@redis:6379');
   vi.stubEnv('REDIS_KEY_PREFIX', '');
   vi.stubEnv('AI_API_KEY', 'test-ai-key');
@@ -33,6 +34,7 @@ describe('Hono server config', () => {
       nodeEnv: 'production',
       authMode: 'bearer',
       corsOrigins: ['https://*.colanns.me'],
+      arenaRoomAllowedOrigins: ['https://mahoshojo.colanns.me'],
       redisKeyPrefix: '',
       arenaMultiplayerEnabled: false,
     });
@@ -43,7 +45,47 @@ describe('Hono server config', () => {
     vi.stubEnv('HOSTED_API_ENVIRONMENT', 'local');
     expect(readHonoServerConfig().arenaMultiplayerEnabled).toBe(false);
     vi.stubEnv('ARENA_MULTIPLAYER_ENABLED', 'true');
+    vi.stubEnv(
+      'ARENA_ROOM_ALLOWED_ORIGINS',
+      'http://localhost:3000,http://127.0.0.1:3000',
+    );
     expect(readHonoServerConfig().arenaMultiplayerEnabled).toBe(true);
+  });
+
+  it.each([
+    ['', /ARENA_ROOM_ALLOWED_ORIGINS.*非空/],
+    ['*', /ARENA_ROOM_ALLOWED_ORIGINS.*wildcard/],
+    ['https://*.example.com', /ARENA_ROOM_ALLOWED_ORIGINS.*wildcard/],
+    ['https://app.example.com/path', /ARENA_ROOM_ALLOWED_ORIGINS/],
+    ['http://app.example.com', /ARENA_ROOM_ALLOWED_ORIGINS/],
+  ])('Arena multiplayer 拒绝非精确 Room Origin：%j', (origins, expected) => {
+    vi.stubEnv('NODE_ENV', 'development');
+    vi.stubEnv('HOSTED_API_ENVIRONMENT', 'local');
+    vi.stubEnv('HONO_CORS_ORIGINS', 'https://*.example.com');
+    vi.stubEnv('ARENA_ROOM_ALLOWED_ORIGINS', origins);
+    vi.stubEnv('ARENA_MULTIPLAYER_ENABLED', 'true');
+
+    expect(() => readHonoServerConfig()).toThrow(expected);
+  });
+
+  it('Arena Room exact origin 必须同时被普通 Hosted CORS 覆盖', () => {
+    vi.stubEnv('NODE_ENV', 'development');
+    vi.stubEnv('HOSTED_API_ENVIRONMENT', 'local');
+    vi.stubEnv('HONO_CORS_ORIGINS', 'https://app.example.com');
+    vi.stubEnv('ARENA_ROOM_ALLOWED_ORIGINS', 'https://other.example.com');
+    vi.stubEnv('ARENA_MULTIPLAYER_ENABLED', 'true');
+
+    expect(() => readHonoServerConfig()).toThrow(/ARENA_ROOM_ALLOWED_ORIGINS.*HONO_CORS_ORIGINS/);
+  });
+
+  it('Arena Room exact origin 可由普通 Hosted CORS 的受限子域规则覆盖', () => {
+    vi.stubEnv('NODE_ENV', 'development');
+    vi.stubEnv('HOSTED_API_ENVIRONMENT', 'local');
+    vi.stubEnv('HONO_CORS_ORIGINS', 'https://*.example.com');
+    vi.stubEnv('ARENA_ROOM_ALLOWED_ORIGINS', 'https://app.example.com');
+    vi.stubEnv('ARENA_MULTIPLAYER_ENABLED', 'true');
+
+    expect(readHonoServerConfig().arenaRoomAllowedOrigins).toEqual(['https://app.example.com']);
   });
 
   it.each(['production', 'preview'])(

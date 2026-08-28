@@ -132,7 +132,7 @@ if (process.env.HONO_CONFIG_CHECK_ONLY === 'true') {
   const roomWebSocketGateway = new RoomWebSocketGateway({
     // Production/preview config rejects this Development Gate feature flag. Disabled
     // runtime keeps the GMR-04 empty-Origin/default-deny behavior unchanged.
-    allowedBrowserOrigins: roomWebSocketAuthority ? config.corsOrigins : [],
+    allowedBrowserOrigins: roomWebSocketAuthority ? config.arenaRoomAllowedOrigins : [],
     ...(roomWebSocketAuthority ? { authorize: roomWebSocketAuthority.authorize } : {}),
     observer: telemetry,
   });

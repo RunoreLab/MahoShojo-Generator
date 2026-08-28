@@ -118,6 +118,11 @@ liveness/dependency/capability readiness 外，Hono 对
 Hosted DR manifest shared route 的 Hono 与 Next/OpenNext adapter 复用同一 CORS policy；production 配置拒绝
 空值、`*`、HTTP、localhost/loopback 和非法 origin，不允许两侧出现宽松度漂移。
 
+Arena Room 使用独立的 `ARENA_ROOM_ALLOWED_ORIGINS`。多人功能启用时该列表必须非空，只能包含无凭据、
+path、query、fragment 或 wildcard 的精确网页 Origin，并且每一项还必须被 `HONO_CORS_ORIGINS` 覆盖。
+HTTP Room mutation 与浏览器 WebSocket 共用这份精确列表；这里填写发起请求的网页 Origin，不是 API/WSS
+目标 hostname。production/preview 在 GMR-11 前仍拒绝启用多人 writer，本配置不构成激活授权。
+
 ## 鉴权
 
 独立 Hono 服务推荐设置 `HONO_AUTH_MODE=bearer`。需要登录的 handler 使用现有统一认证链，客户端通过

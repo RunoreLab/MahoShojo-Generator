@@ -28,6 +28,7 @@ const config: HonoServerConfig = {
   redisRequired: true,
   d1Required: false,
   corsOrigins: ['http://localhost:3000'],
+  arenaRoomAllowedOrigins: ['http://localhost:3000'],
   authMode: 'hybrid',
 };
 
@@ -719,6 +720,7 @@ describe('Arena Room HTTP product routes', () => {
     const app = createHonoApp({
       ...config,
       corsOrigins: ['https://app.example.com', 'https://*.example.com', '*'],
+      arenaRoomAllowedOrigins: ['https://app.example.com'],
     }, createRedisStub(), undefined, { arenaRoom: dependencies });
     const request = {
       proposalId: 'proposal-exact-origin',

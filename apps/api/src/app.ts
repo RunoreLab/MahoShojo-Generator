@@ -75,7 +75,10 @@ export const createHonoApp = (
   registerHealthRoutes(app, config, redis);
   if (config.arenaMultiplayerEnabled && services.arenaRoom) {
     registerArenaRoomHttpRoutes(app, services.arenaRoom, {
-      isAllowedOrigin: (origin) => isExactAllowedOrigin(origin, config.corsOrigins),
+      isAllowedOrigin: (origin) => isExactAllowedOrigin(
+        origin,
+        config.arenaRoomAllowedOrigins,
+      ),
     });
   }
   registerRoutes(app);

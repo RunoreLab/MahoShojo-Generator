@@ -182,6 +182,7 @@ const config: HonoServerConfig = {
   redisRequired: false,
   d1Required: false,
   corsOrigins: ['http://localhost:3000'],
+  arenaRoomAllowedOrigins: ['http://localhost:3000'],
   authMode: 'hybrid',
 };
 

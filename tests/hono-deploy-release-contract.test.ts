@@ -55,6 +55,21 @@ describe('Hono content-addressed release transaction', () => {
     expect(script).toMatch(/sha256sum\s+-c\s+["']?release\.manifest/);
   });
 
+  test('release tuple 为 Arena Room 保留独立的精确网页 Origin 配置', () => {
+    const compose = readFileSync(composePath, 'utf8');
+    const script = readDeployScript();
+    if (!script) return;
+
+    expect(compose).toContain('HONO_CORS_ORIGINS: "https://*.colanns.me"');
+    expect(compose).toContain(
+      'ARENA_ROOM_ALLOWED_ORIGINS: "https://mahoshojo.colanns.me"',
+    );
+    expect(script).toContain("-e HONO_CORS_ORIGINS='https://*.colanns.me'");
+    expect(script).toContain(
+      "-e ARENA_ROOM_ALLOWED_ORIGINS='https://mahoshojo.colanns.me'",
+    );
+  });
+
   test('新旧版本都使用各自 release-local compose，失败时恢复整个旧 tuple', () => {
     const script = readDeployScript();
     if (!script) return;
