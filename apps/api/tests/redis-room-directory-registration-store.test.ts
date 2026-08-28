@@ -67,9 +67,43 @@ describe('Redis Room directory registration store', () => {
     expect(evalCommand.mock.calls[0]?.[0]).toContain(
       'ROOM_DIRECTORY_REGISTRATION_ADVANCE_TARGET_V2',
     );
+    expect(evalCommand.mock.calls[0]?.[0]).toContain(
+      'current.projectedRoomEpoch = current.targetRoomEpoch',
+    );
     expect(evalCommand.mock.calls[1]?.[0]).toContain(
       'ROOM_DIRECTORY_REGISTRATION_CONFIRM_PROJECTED_V2',
     );
+  });
+
+  it('get 对 v1 registration 做 strict parse 与 exact-CAS v2 migration', async () => {
+    const { roomEpoch, ...metadata } = record;
+    const migrated = {
+      ...metadata,
+      registrationVersion: 2,
+      phase: 'pending-create',
+      targetRoomEpoch: roomEpoch,
+      projectedRoomEpoch: null,
+      preparedAtMs: Date.parse(record.createdAt),
+      updatedAtMs: Date.parse(record.lastActivityAt),
+    } satisfies RoomDirectoryRegistration;
+    const { client, evalCommand } = createClient(
+      null,
+      JSON.stringify(record),
+      ['migrated', JSON.stringify(migrated)],
+    );
+    const store = createRedisRoomDirectoryRegistrationStore({ getClient: () => client });
+
+    await expect(store.get('room-1')).resolves.toEqual(migrated);
+    expect(evalCommand.mock.calls[1]?.[0]).toContain('ROOM_DIRECTORY_REGISTRATION_GET_LEGACY_V1');
+    expect(evalCommand.mock.calls[2]?.[0]).toContain(
+      'ROOM_DIRECTORY_REGISTRATION_MIGRATE_V1_TO_V2',
+    );
+    expect(evalCommand.mock.calls[2]?.[1].keys).toEqual([
+      expect.stringContaining('room-directory-registration:v1:entry:'),
+      'mahoshojo:room-directory-registration:v1:index',
+      expect.stringContaining('room-directory-registration:v2:entry:'),
+      'mahoshojo:room-directory-registration:v2:index',
+    ]);
   });
 
   it('closing tombstone 只允许 exact target/phase 删除', async () => {
@@ -93,7 +127,14 @@ describe('Redis Room directory registration store', () => {
 
   it('listing/get 严格解析 envelope，pending 可延迟重排', async () => {
     const raw = JSON.stringify(pending);
-    const { client, evalCommand } = createClient(raw, [raw], 'rescheduled', ['not-json']);
+    const { client, evalCommand } = createClient(
+      raw,
+      [],
+      [raw],
+      'rescheduled',
+      [],
+      ['not-json'],
+    );
     const store = createRedisRoomDirectoryRegistrationStore({ getClient: () => client });
 
     await expect(store.get('room-1')).resolves.toEqual(pending);
@@ -104,7 +145,7 @@ describe('Redis Room directory registration store', () => {
       phase: 'pending-create',
       score: 1_000,
     })).resolves.toEqual({ kind: 'rescheduled' });
-    expect(evalCommand.mock.calls[2]?.[0]).toContain(
+    expect(evalCommand.mock.calls[3]?.[0]).toContain(
       'ROOM_DIRECTORY_REGISTRATION_RESCHEDULE_V2',
     );
     await expect(store.list({ limit: 25 })).rejects.toThrow(

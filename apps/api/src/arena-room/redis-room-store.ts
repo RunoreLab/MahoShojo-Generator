@@ -86,13 +86,36 @@ if fenceType ~= 'none' and fenceType ~= 'set' then return 'invalid-fence' end
 local epochSeen = redis.call('SISMEMBER', KEYS[2], candidate.roomEpoch)
 local fenceCount = redis.call('SCARD', KEYS[2])
 local currentEpochToFence = nil
+local directoryRegistrationNext = nil
 if ARGV[1] == 'absent' then
   if raw then return 'conflict' end
   if epochSeen == 1 then return 'conflict' end
   if candidate.revision ~= 0 or candidate.controlSeq ~= 0 then
     return 'invalid-successor'
   end
+  if ARGV[11] == 'required' then
+    local registrationRaw = redis.call('GET', KEYS[3])
+    if not registrationRaw then return 'directory-registration-missing' end
+    local registrationDecoded, registration = pcall(cjson.decode, registrationRaw)
+    if not registrationDecoded or type(registration) ~= 'table'
+      or registration.registrationVersion ~= 2
+      or registration.phase ~= 'pending-create'
+      or registration.roomId ~= candidate.roomId
+      or registration.targetRoomEpoch ~= candidate.roomEpoch
+      or (registration.projectedRoomEpoch ~= nil
+        and registration.projectedRoomEpoch ~= cjson.null) then
+      return 'directory-registration-invalid'
+    end
+    registration.phase = 'projecting'
+    if registration.updatedAtMs < tonumber(ARGV[12]) then
+      registration.updatedAtMs = tonumber(ARGV[12])
+    end
+    directoryRegistrationNext = cjson.encode(registration)
+  elseif ARGV[11] ~= 'optional' then
+    return 'invalid-request'
+  end
 elseif ARGV[1] == 'match' then
+  if ARGV[11] ~= 'optional' then return 'invalid-request' end
   if not raw then return 'conflict' end
   local decoded, current = pcall(cjson.decode, raw)
   if not decoded or type(current) ~= 'table' then return 'invalid-existing' end
@@ -135,6 +158,7 @@ end
 if currentEpochToFence then redis.call('SADD', KEYS[2], currentEpochToFence) end
 redis.call('SADD', KEYS[2], candidate.roomEpoch)
 redis.call('SET', KEYS[1], ARGV[7], 'PX', ARGV[8])
+if directoryRegistrationNext then redis.call('SET', KEYS[3], directoryRegistrationNext) end
 return 'saved'
 `;
 
@@ -254,6 +278,7 @@ export interface RedisRoomStore {
   load(roomId: string): Promise<ArenaRoomAuthorityState | null>;
   save(input: {
     commit: ArenaRoomCheckpointCommit;
+    directoryRegistrationRequired?: boolean;
   }): Promise<RedisRoomStoreSaveResult>;
   delete(input: {
     checkpoint: ArenaRoomAuthorityState;
@@ -442,6 +467,12 @@ const parseMutationResult = <T extends string>(
   if (raw === 'invalid-fence') throw new Error('REDIS_ROOM_INCARNATION_FENCE_INVALID');
   if (raw === 'incarnation-limit') throw new Error('REDIS_ROOM_INCARNATION_LIMIT');
   if (raw === 'invalid-successor') throw new Error('REDIS_ROOM_SUCCESSOR_INVALID');
+  if (raw === 'directory-registration-missing') {
+    throw new Error('REDIS_ROOM_DIRECTORY_REGISTRATION_REQUIRED');
+  }
+  if (raw === 'directory-registration-invalid') {
+    throw new Error('REDIS_ROOM_DIRECTORY_REGISTRATION_INVALID');
+  }
   if (typeof raw !== 'string' || !allowed.includes(raw as T)) {
     throw new Error('REDIS_ROOM_CHECKPOINT_RESPONSE_INVALID');
   }
@@ -454,6 +485,9 @@ export const createRedisRoomStore = (options: RedisRoomStoreOptions): RedisRoomS
     throw new Error('keyPrefix 必须是安全的环境标识');
   }
   const keyPrefix = environmentPrefix ? `${KEY_PREFIX}:${environmentPrefix}` : KEY_PREFIX;
+  const directoryRegistrationPrefix = environmentPrefix
+    ? `mahoshojo:room-directory-registration:v2:${environmentPrefix}`
+    : 'mahoshojo:room-directory-registration:v2';
   const roomHash = (roomId: string): string => {
     if (!isRoomId(roomId)) throw new Error('REDIS_ROOM_ID_INVALID');
     return createHash('sha256').update(roomId).digest('hex');
@@ -461,6 +495,9 @@ export const createRedisRoomStore = (options: RedisRoomStoreOptions): RedisRoomS
   const roomKey = (roomId: string): string => `${keyPrefix}:${roomHash(roomId)}:checkpoint`;
   const incarnationFenceKey = (roomId: string): string => (
     `${keyPrefix}:${roomHash(roomId)}:incarnations`
+  );
+  const directoryRegistrationKey = (roomId: string): string => (
+    `${directoryRegistrationPrefix}:entry:${roomHash(roomId)}`
   );
   const activeTtlMs = ttlMs(
     options.activeTtlSeconds ?? DEFAULT_ACTIVE_TTL_SECONDS,
@@ -552,13 +589,19 @@ export const createRedisRoomStore = (options: RedisRoomStoreOptions): RedisRoomS
           ]
         : ['match', ...predecessorArguments(expected)];
       const raw = await options.getClient().eval(SAVE_SCRIPT, {
-        keys: [roomKey(stored.roomId), incarnationFenceKey(stored.roomId)],
+        keys: [
+          roomKey(stored.roomId),
+          incarnationFenceKey(stored.roomId),
+          directoryRegistrationKey(stored.roomId),
+        ],
         arguments: [
           ...expectedArguments,
           JSON.stringify(stored),
           String(stored.state.lifecycle.status === 'open' ? activeTtlMs : terminalTtlMs),
           expectedStored === null ? '' : JSON.stringify(expectedStored),
           String(MAX_ROOM_INCARNATIONS),
+          input.directoryRegistrationRequired === true ? 'required' : 'optional',
+          String(Date.now()),
         ],
       });
       return parseMutationResult(raw, ['saved', 'conflict'] as const);

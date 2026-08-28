@@ -76,7 +76,14 @@ if (process.env.HONO_CONFIG_CHECK_ONLY === 'true') {
   });
   roomActors.startIdleSweeper();
   const stopRoomDirectoryReconciler = config.arenaMultiplayerEnabled
-    ? roomDirectory.startRegistrationReconciler()
+    ? (() => {
+        const stopRegistration = roomDirectory.startRegistrationReconciler();
+        const stopD1 = roomDirectory.startD1Reconciler();
+        return () => {
+          stopRegistration();
+          stopD1();
+        };
+      })()
     : () => undefined;
   const roomMemberships = createArenaRoomMembershipService({
     actors: roomActors,

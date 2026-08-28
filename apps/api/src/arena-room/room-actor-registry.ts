@@ -247,6 +247,7 @@ export class RoomActor {
       readonly maxSubscribers: number;
       readonly maxReplayEvents: number;
       readonly initialReplay: readonly ControlRoomEvent[];
+      readonly directoryRegistrationRequired: boolean;
       readonly now: () => number;
       readonly onAbandoned: (actor: RoomActor) => void;
       readonly onFenced: (actor: RoomActor) => void;
@@ -550,7 +551,11 @@ export class RoomActor {
       return fail('ROOM_ACTOR_ROOM_ID_MISMATCH');
     }
     const receipt = createArenaRoomCheckpointCommit(transition);
-    const saved = await this.options.store.save({ commit: receipt });
+    const saved = await this.options.store.save({
+      commit: receipt,
+      directoryRegistrationRequired: this.state === null
+        && this.options.directoryRegistrationRequired,
+    });
     if (saved.kind === 'conflict') {
       this.fence();
       return fail('ROOM_ACTOR_CHECKPOINT_CONFLICT');
@@ -943,7 +948,12 @@ export class RoomActorRegistry {
         lastActivityAt: command.data.timestamp,
       });
     }
-    const actor = this.createActor(identity.roomId, null);
+    const actor = this.createActor(
+      identity.roomId,
+      null,
+      [],
+      input.directory !== undefined,
+    );
     this.actors.set(identity.roomId, actor);
     const result = await actor.execute({
       authority: snapshotInputCapability(input.authority),
@@ -1180,6 +1190,7 @@ export class RoomActorRegistry {
     roomId: string,
     state: ArenaRoomAuthorityState | null,
     initialReplay: readonly ControlRoomEvent[] = [],
+    directoryRegistrationRequired = false,
   ): RoomActor {
     let actor!: RoomActor;
     actor = new RoomActor(roomId, state, {
@@ -1187,6 +1198,7 @@ export class RoomActorRegistry {
       maxSubscribers: this.maxSubscribers,
       maxReplayEvents: this.maxReplayEvents,
       initialReplay,
+      directoryRegistrationRequired,
       now: this.now,
       onAbandoned: (abandonedActor) => {
         if (this.actors.get(roomId) === abandonedActor) this.actors.delete(roomId);

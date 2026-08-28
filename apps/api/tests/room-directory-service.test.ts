@@ -298,6 +298,8 @@ describe('Arena Room directory service', () => {
       lastActivityAt: '2026-08-28T00:01:00.000Z',
       updatedAtMs: 200,
     });
+    expect(registrations.get.mock.invocationCallOrder[0])
+      .toBeLessThan(registrations.advanceTarget.mock.invocationCallOrder[0]!);
     expect(store.rebindEpoch).toHaveBeenCalledWith({
       roomId: 'room-1',
       previousRoomEpoch: 'epoch-1',
@@ -430,6 +432,36 @@ describe('Arena Room directory service', () => {
       stop();
       await vi.advanceTimersByTimeAsync(200);
       expect(registrations.list).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('低频 D1 reconciler 独立扫描缺失 registration 的 orphan，且可停止', async () => {
+    vi.useFakeTimers();
+    try {
+      const store = createStore();
+      store.listReconciliationCandidates.mockResolvedValue([record('room-orphan')]);
+      const service = createArenaRoomDirectoryService({
+        authority: { load: async () => null },
+        store,
+        now: () => Date.parse('2026-08-28T02:00:00.000Z'),
+      });
+      const stop = service.startD1Reconciler({ intervalMs: 100, limit: 1 });
+
+      await vi.advanceTimersByTimeAsync(100);
+      expect(store.listReconciliationCandidates).toHaveBeenCalledWith({
+        inactiveBefore: '2026-08-28T02:00:00.000Z',
+        after: undefined,
+        limit: 2,
+      });
+      expect(store.delete).toHaveBeenCalledWith({
+        roomId: 'room-orphan',
+        roomEpoch: 'epoch-1',
+      });
+      stop();
+      await vi.advanceTimersByTimeAsync(200);
+      expect(store.listReconciliationCandidates).toHaveBeenCalledOnce();
     } finally {
       vi.useRealTimers();
     }

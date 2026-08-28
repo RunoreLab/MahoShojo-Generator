@@ -114,6 +114,7 @@ class MemoryRoomStore implements RoomActorCheckpointStore {
   state: ArenaRoomAuthorityState | null = null;
   loadCalls = 0;
   saveCalls = 0;
+  directoryRegistrationRequirements: boolean[] = [];
   refreshCalls = 0;
   activeSaves = 0;
   maxActiveSaves = 0;
@@ -135,6 +136,7 @@ class MemoryRoomStore implements RoomActorCheckpointStore {
 
   async save(input: Parameters<RoomActorCheckpointStore['save']>[0]) {
     const data = consumeArenaRoomCheckpointCommit(input.commit);
+    this.directoryRegistrationRequirements.push(input.directoryRegistrationRequired === true);
     const call = ++this.saveCalls;
     this.activeSaves += 1;
     this.maxActiveSaves = Math.max(this.maxActiveSaves, this.activeSaves);
@@ -195,6 +197,7 @@ describe('RoomActorRegistry', () => {
       directory: { title: '公开房间', visibility: 'public' },
     })).resolves.toMatchObject({ result: { ok: true } });
     expect(store.saveCalls).toBe(1);
+    expect(store.directoryRegistrationRequirements).toEqual([true]);
   });
 
   it('无效 command 在 hydration/epoch rollover 前直接拒绝', async () => {

@@ -9,12 +9,14 @@ import {
 import type { RoomDirectoryRecord } from './d1-room-directory-store';
 
 const KEY_PREFIX = 'mahoshojo:room-directory-registration:v2';
+const LEGACY_KEY_PREFIX = 'mahoshojo:room-directory-registration:v1';
 const MAX_REGISTRATION_BATCH_SIZE = 50;
 const REGISTRATION_VERSION = 2;
 
 const PREPARE_SCRIPT = `
 -- ROOM_DIRECTORY_REGISTRATION_PREPARE_V2
 local existing = redis.call('GET', KEYS[1])
+if not existing and redis.call('GET', KEYS[3]) then return 'conflict' end
 if existing and existing ~= ARGV[2] then return 'conflict' end
 if existing then
   redis.call('ZADD', KEYS[2], 'NX', ARGV[3], ARGV[1])
@@ -41,6 +43,9 @@ if current.targetRoomEpoch == ARGV[3] then
   return 'already'
 end
 if current.targetRoomEpoch ~= ARGV[2] then return 'stale' end
+if current.projectedRoomEpoch == nil or current.projectedRoomEpoch == cjson.null then
+  current.projectedRoomEpoch = current.targetRoomEpoch
+end
 current.targetRoomEpoch = ARGV[3]
 if current.lastActivityAt < ARGV[4] then current.lastActivityAt = ARGV[4] end
 current.phase = 'projecting'
@@ -118,6 +123,48 @@ for _, member in ipairs(members) do
   end
 end
 return result
+`;
+
+const LIST_LEGACY_SCRIPT = `
+-- ROOM_DIRECTORY_REGISTRATION_LIST_LEGACY_V1
+local members = redis.call('ZRANGE', KEYS[1], 0, tonumber(ARGV[1]) - 1)
+local result = {}
+for _, member in ipairs(members) do
+  local raw = redis.call('GET', ARGV[2] .. member)
+  if raw then
+    table.insert(result, raw)
+  else
+    redis.call('ZREM', KEYS[1], member)
+  end
+end
+return result
+`;
+
+const GET_LEGACY_SCRIPT = `
+-- ROOM_DIRECTORY_REGISTRATION_GET_LEGACY_V1
+return redis.call('GET', KEYS[1])
+`;
+
+const MIGRATE_LEGACY_SCRIPT = `
+-- ROOM_DIRECTORY_REGISTRATION_MIGRATE_V1_TO_V2
+local legacy = redis.call('GET', KEYS[1])
+local current = redis.call('GET', KEYS[3])
+if not legacy then
+  if current then return {'existing', current} end
+  return {'missing'}
+end
+if legacy ~= ARGV[2] then return {'conflict'} end
+if current then
+  redis.call('DEL', KEYS[1])
+  redis.call('ZREM', KEYS[2], ARGV[1])
+  return {'existing', current}
+end
+local score = redis.call('ZSCORE', KEYS[2], ARGV[1]) or ARGV[4]
+redis.call('SET', KEYS[3], ARGV[3])
+redis.call('ZADD', KEYS[4], score, ARGV[1])
+redis.call('DEL', KEYS[1])
+redis.call('ZREM', KEYS[2], ARGV[1])
+return {'migrated', ARGV[3]}
 `;
 
 const RESCHEDULE_SCRIPT = `
@@ -292,11 +339,89 @@ export const createRedisRoomDirectoryRegistrationStore = (
     throw new Error('keyPrefix 必须是安全的环境标识');
   }
   const keyPrefix = environmentPrefix ? `${KEY_PREFIX}:${environmentPrefix}` : KEY_PREFIX;
+  const legacyKeyPrefix = environmentPrefix
+    ? `${LEGACY_KEY_PREFIX}:${environmentPrefix}`
+    : LEGACY_KEY_PREFIX;
   const entryPrefix = `${keyPrefix}:entry:`;
   const indexKey = `${keyPrefix}:index`;
+  const legacyEntryPrefix = `${legacyKeyPrefix}:entry:`;
+  const legacyIndexKey = `${legacyKeyPrefix}:index`;
   const keysFor = (roomId: string): [string, string, string] => {
     const member = hashRoomId(roomId);
     return [`${entryPrefix}${member}`, indexKey, member];
+  };
+  const legacyKeysFor = (roomId: string): [string, string, string] => {
+    const member = hashRoomId(roomId);
+    return [`${legacyEntryPrefix}${member}`, legacyIndexKey, member];
+  };
+
+  const migrateLegacy = async (
+    inputRoomId: string,
+    initialRaw?: string,
+  ): Promise<RoomDirectoryRegistration | null> => {
+    const roomId = OpaqueKeySchema.safeParse(inputRoomId);
+    if (!roomId.success) return invalid('REDIS_ROOM_DIRECTORY_REGISTRATION_INPUT_INVALID');
+    let raw = initialRaw;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const [legacyEntry, legacyIndex, member] = legacyKeysFor(roomId.data);
+      if (raw === undefined) {
+        const loaded = await options.getClient().eval(GET_LEGACY_SCRIPT, {
+          keys: [legacyEntry],
+          arguments: [],
+        });
+        if (loaded === null) return null;
+        if (typeof loaded !== 'string') {
+          return invalid('REDIS_ROOM_DIRECTORY_REGISTRATION_RESPONSE_INVALID');
+        }
+        raw = loaded;
+      }
+      let record: RoomDirectoryRecord;
+      try {
+        record = parseRecord(JSON.parse(raw));
+      } catch {
+        return invalid('REDIS_ROOM_DIRECTORY_REGISTRATION_INVALID');
+      }
+      if (record.roomId !== roomId.data) {
+        return invalid('REDIS_ROOM_DIRECTORY_REGISTRATION_INVALID');
+      }
+      const { roomEpoch, ...metadata } = record;
+      const preparedAtMs = Date.parse(record.createdAt);
+      const updatedAtMs = Math.max(preparedAtMs, Date.parse(record.lastActivityAt));
+      const registration = parseRegistration({
+        ...metadata,
+        registrationVersion: REGISTRATION_VERSION,
+        phase: 'pending-create',
+        targetRoomEpoch: roomEpoch,
+        projectedRoomEpoch: null,
+        preparedAtMs,
+        updatedAtMs,
+      });
+      const [entry, index] = keysFor(roomId.data);
+      const response = await options.getClient().eval(MIGRATE_LEGACY_SCRIPT, {
+        keys: [legacyEntry, legacyIndex, entry, index],
+        arguments: [member, raw, JSON.stringify(registration), String(updatedAtMs)],
+      });
+      if (!Array.isArray(response) || typeof response[0] !== 'string') {
+        return invalid('REDIS_ROOM_DIRECTORY_REGISTRATION_RESPONSE_INVALID');
+      }
+      if (response[0] === 'missing') return null;
+      if (response[0] === 'conflict') {
+        raw = undefined;
+        continue;
+      }
+      if (
+        (response[0] === 'existing' || response[0] === 'migrated')
+        && typeof response[1] === 'string'
+      ) {
+        try {
+          return parseRegistration(JSON.parse(response[1]));
+        } catch {
+          return invalid('REDIS_ROOM_DIRECTORY_REGISTRATION_INVALID');
+        }
+      }
+      return invalid('REDIS_ROOM_DIRECTORY_REGISTRATION_RESPONSE_INVALID');
+    }
+    return invalid('REDIS_ROOM_DIRECTORY_REGISTRATION_CONFLICT');
   };
 
   return Object.freeze({
@@ -314,8 +439,9 @@ export const createRedisRoomDirectoryRegistrationStore = (
         updatedAtMs: input.preparedAtMs,
       });
       const [entryKey, index, member] = keysFor(record.roomId);
+      const [legacyEntry] = legacyKeysFor(record.roomId);
       const response = await options.getClient().eval(PREPARE_SCRIPT, {
-        keys: [entryKey, index],
+        keys: [entryKey, index, legacyEntry],
         arguments: [member, JSON.stringify(registration), preparedAtMs],
       });
       if (response === 'stored' || response === 'already') return;
@@ -409,7 +535,7 @@ export const createRedisRoomDirectoryRegistrationStore = (
         keys: [entryKey],
         arguments: [],
       });
-      if (response === null) return null;
+      if (response === null) return migrateLegacy(roomId.data);
       if (typeof response !== 'string') {
         return invalid('REDIS_ROOM_DIRECTORY_REGISTRATION_RESPONSE_INVALID');
       }
@@ -426,6 +552,25 @@ export const createRedisRoomDirectoryRegistrationStore = (
         || input.limit < 1
         || input.limit > MAX_REGISTRATION_BATCH_SIZE
       ) return invalid('REDIS_ROOM_DIRECTORY_REGISTRATION_INPUT_INVALID');
+      const legacyResponse = await options.getClient().eval(LIST_LEGACY_SCRIPT, {
+        keys: [legacyIndexKey],
+        arguments: [String(input.limit), legacyEntryPrefix],
+      });
+      if (!Array.isArray(legacyResponse) || legacyResponse.length > input.limit) {
+        return invalid('REDIS_ROOM_DIRECTORY_REGISTRATION_RESPONSE_INVALID');
+      }
+      for (const raw of legacyResponse) {
+        if (typeof raw !== 'string') {
+          return invalid('REDIS_ROOM_DIRECTORY_REGISTRATION_RESPONSE_INVALID');
+        }
+        let record: RoomDirectoryRecord;
+        try {
+          record = parseRecord(JSON.parse(raw));
+        } catch {
+          return invalid('REDIS_ROOM_DIRECTORY_REGISTRATION_INVALID');
+        }
+        await migrateLegacy(record.roomId, raw);
+      }
       const response = await options.getClient().eval(LIST_SCRIPT, {
         keys: [indexKey],
         arguments: [String(input.limit), entryPrefix],

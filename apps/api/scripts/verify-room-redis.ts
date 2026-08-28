@@ -90,6 +90,7 @@ const actorRoomId = `room-actor-${token}`;
 const authorityRoomId = `room-authority-${token}`;
 const directoryRegistrationRoomId = `room-directory-registration-${token}`;
 const directoryPendingRoomId = `room-directory-pending-${token}`;
+const directoryLegacyRoomId = `room-directory-legacy-${token}`;
 const ticketJti = `verifier:${token}`;
 const authorityTicketJti = `authority:${token}`;
 const roomHash = (id: string): string => createHash('sha256').update(id).digest('hex');
@@ -110,6 +111,11 @@ const directoryRegistrationKey = `${directoryRegistrationPrefix}:entry:${directo
 const directoryRegistrationIndexKey = `${directoryRegistrationPrefix}:index`;
 const directoryPendingMember = roomHash(directoryPendingRoomId);
 const directoryPendingKey = `${directoryRegistrationPrefix}:entry:${directoryPendingMember}`;
+const directoryLegacyMember = roomHash(directoryLegacyRoomId);
+const directoryLegacyV1Prefix = `mahoshojo:room-directory-registration:v1:${keyPrefix}`;
+const directoryLegacyV1Key = `${directoryLegacyV1Prefix}:entry:${directoryLegacyMember}`;
+const directoryLegacyV1IndexKey = `${directoryLegacyV1Prefix}:index`;
+const directoryLegacyV2Key = `${directoryRegistrationPrefix}:entry:${directoryLegacyMember}`;
 
 const eventually = async (check: () => boolean | Promise<boolean>): Promise<void> => {
   for (let attempt = 0; attempt < 100; attempt += 1) {
@@ -943,7 +949,7 @@ try {
         .find((entry) => entry.roomId === directoryRegistrationRoomId);
       if (
         listedDirectoryRegistration?.targetRoomEpoch !== 'directory-epoch-2'
-        || listedDirectoryRegistration.projectedRoomEpoch !== null
+        || listedDirectoryRegistration.projectedRoomEpoch !== 'directory-epoch-1'
         || listedDirectoryRegistration.phase !== 'projecting'
       ) {
         throw new Error('ROOM_DIRECTORY_REGISTRATION_LIST_FAILED');
@@ -978,6 +984,38 @@ try {
       })).kind !== 'deleted') {
         throw new Error('ROOM_DIRECTORY_REGISTRATION_DELETE_FAILED');
       }
+
+      const legacyDirectoryRegistration = {
+        ...directoryRegistration,
+        roomId: directoryLegacyRoomId,
+        roomEpoch: 'directory-legacy-epoch-1',
+      };
+      await cleanup.set(directoryLegacyV1Key, JSON.stringify(legacyDirectoryRegistration));
+      await cleanup.zAdd(directoryLegacyV1IndexKey, {
+        score: Date.parse(legacyDirectoryRegistration.createdAt),
+        value: directoryLegacyMember,
+      });
+      const migratedLegacyDirectory = await directoryRegistrations.get(directoryLegacyRoomId);
+      if (
+        migratedLegacyDirectory?.phase !== 'pending-create'
+        || migratedLegacyDirectory.targetRoomEpoch !== 'directory-legacy-epoch-1'
+        || migratedLegacyDirectory.projectedRoomEpoch !== null
+        || await cleanup.get(directoryLegacyV1Key) !== null
+        || await cleanup.get(directoryLegacyV2Key) === null
+      ) {
+        throw new Error('ROOM_DIRECTORY_REGISTRATION_V1_MIGRATION_FAILED');
+      }
+      await directoryRegistrations.markClosing({
+        roomId: directoryLegacyRoomId,
+        targetRoomEpoch: 'directory-legacy-epoch-1',
+        updatedAtMs: Date.parse(THIRD_TIMESTAMP),
+        score: Date.parse(THIRD_TIMESTAMP),
+      });
+      await directoryRegistrations.delete({
+        roomId: directoryLegacyRoomId,
+        targetRoomEpoch: 'directory-legacy-epoch-1',
+        phase: 'closing',
+      });
 
       const directoryRows = new Map<string, RoomDirectoryRecord>();
       let failDirectoryRead = false;
@@ -1021,9 +1059,21 @@ try {
         async listByHost() { return []; },
         async listReconciliationCandidates() { return []; },
       };
+      let failDirectoryConfirm = true;
+      const faultingDirectoryRegistrations = {
+        ...directoryRegistrations,
+        async confirmProjected(
+          input: Parameters<typeof directoryRegistrations.confirmProjected>[0],
+        ) {
+          if (failDirectoryConfirm) {
+            throw new Error('ROOM_DIRECTORY_CONFIRM_FAULT_INJECTED');
+          }
+          return directoryRegistrations.confirmProjected(input);
+        },
+      };
       const directory = createArenaRoomDirectoryService({
         authority: writerStore,
-        registrations: directoryRegistrations,
+        registrations: faultingDirectoryRegistrations,
         store: directoryD1,
         now: nowAt(NEXT_TIMESTAMP),
       });
@@ -1053,6 +1103,17 @@ try {
       if (directoryRows.get(directoryRegistrationRoomId)?.roomEpoch !== 'directory-epoch-1') {
         throw new Error('ROOM_DIRECTORY_INITIAL_PROJECTION_FAILED');
       }
+      const unconfirmedInitialProjection = await directoryRegistrations.get(
+        directoryRegistrationRoomId,
+      );
+      if (
+        unconfirmedInitialProjection?.phase !== 'projecting'
+        || unconfirmedInitialProjection.targetRoomEpoch !== 'directory-epoch-1'
+        || unconfirmedInitialProjection.projectedRoomEpoch !== null
+      ) {
+        throw new Error('ROOM_DIRECTORY_UNCONFIRMED_PROJECTION_FIXTURE_FAILED');
+      }
+      failDirectoryConfirm = false;
       await firstDirectoryActors.shutdown();
       failDirectoryRead = true;
       let directoryProjectionErrors = 0;
@@ -1171,6 +1232,13 @@ try {
       ) {
         throw new Error('ROOM_DIRECTORY_PENDING_EXPIRY_FAILED');
       }
+      await fixedError(writerStore.save({
+        commit: commit(createRoom(directoryPendingRoomId, 'directory-pending-epoch-1')),
+        directoryRegistrationRequired: true,
+      }), 'REDIS_ROOM_DIRECTORY_REGISTRATION_REQUIRED');
+      if (await writerStore.load(directoryPendingRoomId) !== null) {
+        throw new Error('ROOM_DIRECTORY_PENDING_CREATE_FENCE_FAILED');
+      }
 
       const authorityActors = createRoomActorRegistry({
         store: writerStore,
@@ -1259,6 +1327,8 @@ try {
         directoryRecoveryCompensation: true,
         directoryCloseCompensation: true,
         directoryPendingCreateGrace: true,
+        directoryAtomicCreateFence: true,
+        directoryRegistrationV1Migration: true,
         activeTtlRefresh: true,
         ticketReplay: true,
         authorityGatewayRedisWiring: true,
@@ -1278,6 +1348,8 @@ try {
   if (phase !== 'write') {
     await cleanup.zRem(directoryRegistrationIndexKey, directoryRegistrationMember);
     await cleanup.zRem(directoryRegistrationIndexKey, directoryPendingMember);
+    await cleanup.zRem(directoryLegacyV1IndexKey, directoryLegacyMember);
+    await cleanup.zRem(directoryRegistrationIndexKey, directoryLegacyMember);
     await cleanup.unlink([
       ...roomKeys(roomId),
       ...roomKeys(ttlRoomId),
@@ -1298,10 +1370,13 @@ try {
       ...roomKeys(recoveryRoomId),
       ...roomKeys(actorRoomId),
       ...roomKeys(authorityRoomId),
+      ...roomKeys(directoryPendingRoomId),
       ticketReplayKey,
       authorityTicketReplayKey,
       directoryRegistrationKey,
       directoryPendingKey,
+      directoryLegacyV1Key,
+      directoryLegacyV2Key,
     ]);
   }
   await cleanup.quit();

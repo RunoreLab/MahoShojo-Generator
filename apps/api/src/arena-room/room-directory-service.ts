@@ -87,6 +87,10 @@ export type ArenaRoomDirectoryService = {
     readonly intervalMs?: number;
     readonly limit?: number;
   }): () => void;
+  startD1Reconciler(input?: {
+    readonly intervalMs?: number;
+    readonly limit?: number;
+  }): () => void;
   removeCommittedClosed(state: ArenaRoomAuthorityState): Promise<void>;
 };
 
@@ -433,6 +437,10 @@ export const createArenaRoomDirectoryService = (
         || previousRoomEpoch.data === current.state.snapshot.roomEpoch
       ) return fail('ROOM_DIRECTORY_RECOVERY_INVALID');
 
+      const predecessorRegistration = await options.registrations.get(
+        current.state.snapshot.roomId,
+      );
+      if (predecessorRegistration === null) return fail('ROOM_DIRECTORY_STALE');
       const registrationRebind = await options.registrations.advanceTarget({
         roomId: current.state.snapshot.roomId,
         previousTargetRoomEpoch: previousRoomEpoch.data,
@@ -621,6 +629,43 @@ export const createArenaRoomDirectoryService = (
         if (stopped || running) return;
         running = true;
         void service.reconcileRegistrations({ limit, score: now() })
+          .catch(reportBackgroundError)
+          .finally(() => { running = false; });
+      }, intervalMs);
+      timer.unref?.();
+      return () => {
+        if (stopped) return;
+        stopped = true;
+        clearInterval(timer);
+      };
+    },
+
+    startD1Reconciler(input = {}) {
+      const intervalMs = input.intervalMs ?? 5 * 60_000;
+      const limit = input.limit ?? MAX_ROOM_DIRECTORY_PAGE_SIZE;
+      if (
+        !Number.isSafeInteger(intervalMs)
+        || intervalMs < 1
+        || !Number.isSafeInteger(limit)
+        || limit < 1
+        || limit > MAX_ROOM_DIRECTORY_PAGE_SIZE
+      ) return fail('ROOM_DIRECTORY_INPUT_INVALID');
+      let stopped = false;
+      let running = false;
+      let inactiveBefore = new Date(now()).toISOString();
+      let cursor: string | undefined;
+      const timer = setInterval(() => {
+        if (stopped || running) return;
+        running = true;
+        void service.reconcile({ inactiveBefore, cursor, limit })
+          .then((result) => {
+            if (result.nextCursor === null) {
+              cursor = undefined;
+              inactiveBefore = new Date(now()).toISOString();
+            } else {
+              cursor = result.nextCursor;
+            }
+          })
           .catch(reportBackgroundError)
           .finally(() => { running = false; });
       }, intervalMs);
