@@ -1,0 +1,450 @@
+import { createHash, randomUUID } from 'node:crypto';
+
+import {
+  createArenaGenerationService,
+  type ArenaGenerationExecutor,
+  type GenerationReplayStore,
+} from '@mahoshojo/hosted-api/arena-generation/service';
+import {
+  createNodeArenaGenerationTerminalStore,
+  deriveArenaGenerationId,
+  hashArenaGenerationPayload,
+} from '@mahoshojo/hosted-runtime/arena-generation';
+import type {
+  NodeDataD1Client,
+  NodeDataD1Statement,
+} from '@mahoshojo/hosted-runtime/node-runtime/data-ports';
+import { createClient } from 'redis';
+
+import {
+  createArenaRoomGenerationPort,
+  hashArenaRoomGenerationPayload,
+  type ArenaRoomGenerationPort,
+} from '../src/arena-generation/room-generation-port';
+import { createRoomActorRegistry } from '../src/arena-room/room-actor-registry';
+import { createArenaRoomGenerationSnapshotFromFrozen } from '../src/arena-room/room-generation-snapshot';
+import {
+  ARENA_ROOM_INTERNAL_GUIDANCE,
+  createArenaRoomGenerationService,
+} from '../src/arena-room/room-generation-service';
+import { createArenaRoomMembershipService } from '../src/arena-room/room-membership-service';
+import { RedisRuntime } from '../src/redis/runtime';
+
+const redisUrl = process.env.REDIS_URL?.trim();
+if (!redisUrl) throw new Error('Room generation Redis verifier 需要 REDIS_URL');
+if (process.env.ROOM_GENERATION_REDIS_VERIFY?.trim().toLowerCase() !== 'true') {
+  throw new Error('Room generation Redis verifier 只允许 ROOM_GENERATION_REDIS_VERIFY=true');
+}
+const parsedUrl = new URL(redisUrl);
+if (
+  !['redis:', 'rediss:'].includes(parsedUrl.protocol)
+  || !['localhost', '127.0.0.1', '[::1]'].includes(parsedUrl.hostname)
+) throw new Error('Room generation Redis verifier 只允许连接 loopback Redis');
+
+const keyPrefix = process.env.ROOM_GENERATION_REDIS_VERIFY_KEY_PREFIX?.trim() || 'gmr09dur';
+if (!/^[a-z0-9_-]{1,32}$/u.test(keyPrefix)) {
+  throw new Error('ROOM_GENERATION_REDIS_VERIFY_KEY_PREFIX 必须是安全环境标识');
+}
+
+const token = randomUUID();
+const roomId = `room-generation-durable-${token}`;
+const generationRequestId = `request-generation-durable-${token}`;
+const actorKey = `pvp-room:${roomId}`;
+const objects = new Map<string, string>();
+const generationRows = new Map<string, Record<string, unknown>>();
+const objectRows = new Map<string, Record<string, unknown>>();
+const cleanupClient = createClient({ url: redisUrl });
+cleanupClient.on('error', () => undefined);
+let runtime: RedisRuntime | null = null;
+let recoveredRuntime: RedisRuntime | null = null;
+
+const createVerifierD1Adapter = (): NodeDataD1Client => ({
+  prepare(sql) {
+    let parameters: unknown[] = [];
+    const d1Statement: NodeDataD1Statement = {
+      bind(...nextParameters) {
+        parameters = nextParameters;
+        return d1Statement;
+      },
+      async all() {
+        if (!sql.includes('FROM battle_report_generations AS brg')) {
+          throw new Error('ROOM_GENERATION_DURABLE_D1_QUERY_UNEXPECTED');
+        }
+        const generationId = String(parameters[0] ?? '');
+        const generation = generationRows.get(generationId);
+        const object = objectRows.get(generationId);
+        return {
+          success: true,
+          results: generation ? [{ ...generation, r2_key: object?.r2_key ?? null }] : [],
+          meta: {},
+        };
+      },
+      async run() {
+        throw new Error('ROOM_GENERATION_DURABLE_D1_WRITE_UNEXPECTED');
+      },
+    };
+    return d1Statement;
+  },
+});
+
+const sharedConfig = () => ({
+  battleMode: 'classic' as const,
+  combatants: [{
+    key: 'data-card:character-1',
+    ref: { id: 'character-1', kind: 'character' as const, versionToken: 'v1' },
+  }],
+  teams: [],
+  scenario: null,
+  auxScenarios: [],
+  materials: [],
+  userGuidance: '真实 Redis durable seam',
+  storyLength: 'standard' as const,
+  customStoryLength: null,
+  selectedLanguage: 'zh-CN',
+  historySettings: {
+    readArenaHistory: true,
+    readArenaHistoryLimit: 3,
+    isArenaHistoryUnlimited: false,
+    writeArenaHistory: true,
+    readCurrentState: true,
+    writeCurrentState: true,
+    readNarrativeHistory: false,
+    readNarrativeHistoryLimit: 10,
+    isNarrativeHistoryUnlimited: false,
+    writeNarrativeHistory: false,
+  },
+});
+
+const readAll = async <T>(stream: ReadableStream<T>): Promise<T[]> => {
+  const values: T[] = [];
+  const reader = stream.getReader();
+  try {
+    while (true) {
+      const next = await reader.read();
+      if (next.done) return values;
+      values.push(next.value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+};
+
+const waitFor = async <T>(
+  read: () => Promise<T>,
+  predicate: (value: T) => boolean,
+  code: string,
+): Promise<T> => {
+  for (let attempt = 0; attempt < 400; attempt += 1) {
+    const value = await read();
+    if (predicate(value)) return value;
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+  }
+  throw new Error(code);
+};
+
+const deleteIsolatedKeys = async (pattern: string): Promise<number> => {
+  const keys: string[] = [];
+  for await (const batch of cleanupClient.scanIterator({ MATCH: pattern, COUNT: 200 })) {
+    keys.push(...batch);
+  }
+  return keys.length === 0 ? 0 : cleanupClient.del(keys);
+};
+
+try {
+  await cleanupClient.connect();
+  await deleteIsolatedKeys(`mahoshojo:*:${keyPrefix}:*`);
+
+  const d1 = createVerifierD1Adapter();
+  const terminalStore = createNodeArenaGenerationTerminalStore({
+    getD1Client: () => d1,
+    objectStore: {
+      async put(input) {
+        const markdown = typeof input.body === 'string'
+          ? input.body
+          : new TextDecoder().decode(input.body);
+        objects.set(input.key, markdown);
+        return {
+          bytes: new TextEncoder().encode(markdown).byteLength,
+          storedBytes: new TextEncoder().encode(markdown).byteLength,
+          contentEncoding: null,
+        };
+      },
+      async getText(key) {
+        const value = objects.get(key);
+        if (value === undefined) throw new Error('ROOM_GENERATION_DURABLE_R2_NOT_FOUND');
+        return value;
+      },
+    },
+  });
+
+  let releaseProvider!: () => void;
+  let providerFirstChunk!: () => void;
+  const providerGate = new Promise<void>((resolve) => { releaseProvider = resolve; });
+  const firstChunk = new Promise<void>((resolve) => { providerFirstChunk = resolve; });
+  let providerStarts = 0;
+  const expectedMarkdown = '# 第一批\n\n第二批\n';
+  const executor: ArenaGenerationExecutor = {
+    async execute(input) {
+      providerStarts += 1;
+      await input.emit({ type: 'markdown', data: { chunk: '# 第一批\n\n' } });
+      providerFirstChunk();
+      await providerGate;
+      await input.emit({ type: 'markdown', data: { chunk: '第二批\n' } });
+      const r2Key = `v1/verifier/${input.generationId}/output.md`;
+      objects.set(r2Key, expectedMarkdown);
+      const updatedAt = new Date().toISOString();
+      generationRows.set(input.generationId, {
+        id: input.generationId,
+        status: 'completed',
+        updated_at: updatedAt,
+        output_preview: expectedMarkdown.slice(0, 100),
+        extra_json: JSON.stringify({
+          generationRequestId: input.generationRequestId,
+          generationOwnerHash: createHash('sha256').update(input.actorKey).digest('hex'),
+          generationPayloadHash: input.payloadHash,
+          generationTerminalStatus: 'completed',
+          finalizationCompleted: true,
+          resultRef: `r2:${r2Key}`,
+        }),
+      });
+      objectRows.set(input.generationId, {
+        id: `arena-output:${input.generationId}`,
+        kind: 'battle_report_generation_output',
+        owner_ref_id: input.generationId,
+        r2_key: r2Key,
+      });
+      return { status: 'completed', resultRef: `r2:${r2Key}` };
+    },
+  };
+
+  const createHostedPort = (store: GenerationReplayStore): ArenaRoomGenerationPort => {
+    const hosted = createArenaGenerationService({
+      store,
+      terminalStore,
+      executor,
+      resolveActor: async () => ({ actorKey }),
+      deriveGenerationId: deriveArenaGenerationId,
+      hashPayload: hashArenaGenerationPayload,
+      now: () => new Date(),
+      heartbeatIntervalMs: 10_000,
+      leaseDurationMs: 60_000,
+      replayPollMs: 5,
+      deltaFlushIntervalMs: 5,
+      deltaFlushBytes: 1,
+    });
+    return createArenaRoomGenerationPort({
+      generationService: hosted,
+      pvpAuthority: { sign: async () => 'verifier-pvp-signature' },
+      internalGuidanceAuthority: { sign: async () => 'verifier-guidance-signature' },
+      deriveGenerationId: deriveArenaGenerationId,
+    });
+  };
+
+  runtime = new RedisRuntime(redisUrl, true, undefined, undefined, keyPrefix);
+  await runtime.connect();
+  const roomActors = createRoomActorRegistry({
+    store: runtime.getRoomStore(),
+    createRoomIdentity: () => ({ roomId, roomEpoch: 'epoch-1' }),
+    createTimestamp: () => new Date().toISOString(),
+    now: Date.now,
+  });
+  let nextUser = 0;
+  const memberships = createArenaRoomMembershipService({
+    actors: roomActors,
+    createUserId: () => `durable-user-${++nextUser}`,
+    now: () => new Date().toISOString(),
+  });
+  const host = await memberships.create({
+    accountUserId: 101,
+    displayName: 'Durable Host',
+    sharedConfig: sharedConfig(),
+  });
+  await memberships.join({ roomId, accountUserId: 202, displayName: 'Durable Member' });
+  const port = createHostedPort(runtime.getGenerationReplayStore());
+  const coordinator = createArenaRoomGenerationService({
+    memberships,
+    references: { verify: async (input) => input.refs },
+    generation: port,
+    now: () => new Date().toISOString(),
+  });
+  const generationRequest = {
+    expectedRoomEpoch: host.roomEpoch,
+    expectedRevision: host.snapshot.revision,
+    generationRequestId,
+    sharedConfig: sharedConfig(),
+    generation: {
+      mode: 'classic',
+      combatants: [{ data: { name: 'Verifier' } }],
+      customProvider: { apiKey: `secret-${token}` },
+    },
+  };
+  const sourceRequest = new Request('https://loopback.invalid/api/arena/rooms/generation', {
+    method: 'POST',
+    headers: { authorization: 'Bearer verifier' },
+  });
+
+  await coordinator.start({
+    roomId,
+    accountUserId: 101,
+    request: generationRequest,
+    sourceRequest,
+  });
+  await firstChunk;
+  const generationId = await port.deriveGenerationId({ roomId, generationRequestId });
+  const firstProjection = await waitFor(
+    () => port.readOwnedProjection({ roomId, generationId }),
+    (value) => value.kind === 'found' && value.projection.markdown === '# 第一批\n\n',
+    'ROOM_GENERATION_DURABLE_FIRST_CHUNK_TIMEOUT',
+  );
+  if (firstProjection.kind !== 'found') throw new Error('ROOM_GENERATION_DURABLE_PROJECTION_MISSING');
+
+  const verificationActor = await roomActors.recover(roomId);
+  const verificationState = verificationActor?.getSnapshot();
+  const historical = verificationState?.generationLedger.find((record) => (
+    record.mirror.generationRequestId === generationRequestId
+  ));
+  if (!historical) throw new Error('ROOM_GENERATION_DURABLE_LEDGER_MISSING');
+  const retrySnapshot = createArenaRoomGenerationSnapshotFromFrozen({
+    roomId,
+    generationRequestId,
+    configRevision: historical.mirror.configRevision,
+    collaborativeInfluence: historical.mirror.collaborativeInfluence,
+    participantUserIds: historical.mirror.participantUserIds,
+    sharedConfig: generationRequest.sharedConfig,
+  });
+  const retryPayloadDigest = await hashArenaRoomGenerationPayload({
+    roomId,
+    generationRequestId,
+    payload: generationRequest.generation,
+    internalGuidance: ARENA_ROOM_INTERNAL_GUIDANCE,
+    pvpContext: { matchId: generationId, roundId: 'attempt-1' },
+    multiplayerSnapshot: retrySnapshot,
+  });
+  if (historical.generationPayloadDigest !== retryPayloadDigest) {
+    throw new Error([
+      'ROOM_GENERATION_DURABLE_PAYLOAD_DIGEST_UNSTABLE',
+      historical.generationPayloadDigest ?? 'legacy-missing',
+      retryPayloadDigest,
+    ].join(':'));
+  }
+
+  await coordinator.start({
+    roomId,
+    accountUserId: 101,
+    request: generationRequest,
+    sourceRequest,
+  });
+  if (providerStarts !== 1) throw new Error('ROOM_GENERATION_DURABLE_DUPLICATE_PROVIDER');
+  const resumed = await port.resumeOwnedSubscription({
+    roomId,
+    generationId,
+    after: firstProjection.projection.resumeCursor,
+  });
+  if (resumed.kind !== 'subscribed') throw new Error('ROOM_GENERATION_DURABLE_RESUME_MISSING');
+  const resumedEventsPromise = readAll(resumed.subscription.events);
+  releaseProvider();
+  const resumedEvents = await resumedEventsPromise;
+  if (
+    !resumedEvents.some((event) => event.type === 'markdown' && event.chunk === '第二批\n')
+    || !resumedEvents.some((event) => event.type === 'done' && event.status === 'completed')
+  ) throw new Error('ROOM_GENERATION_DURABLE_RESUME_INCOMPLETE');
+
+  const roomTerminal = await waitFor(
+    () => runtime!.getRoomStore().load(roomId),
+    (value) => value?.snapshot.activeGeneration?.state === 'completed',
+    'ROOM_GENERATION_DURABLE_ROOM_TERMINAL_TIMEOUT',
+  );
+  const replay = runtime.getGenerationReplayStore();
+  const replayState = await replay.readState({ generationId, actorKey });
+  const replayEvents = await replay.readAfter({ generationId, after: null, blockMs: 1 });
+  const terminalEvent = replayEvents.events.find((event) => event.type === 'done');
+  if (
+    replayState?.status !== 'completed'
+    || replayState.terminal?.status !== 'completed'
+    || replayState.snapshot?.status !== 'completed'
+    || replayState.snapshot.markdown !== expectedMarkdown
+    || !terminalEvent
+    || replayState.lastEventId !== terminalEvent.id
+    || replayState.snapshot.lastEventId !== terminalEvent.id
+    || JSON.stringify(roomTerminal).includes(`secret-${token}`)
+  ) throw new Error('ROOM_GENERATION_DURABLE_ATOMIC_TERMINAL_INVALID');
+
+  const terminal = await terminalStore.readOwnedTerminal({ generationId, actorKey });
+  if (
+    terminal?.markdown !== expectedMarkdown
+    || terminal.resultRef === null
+    || terminal.contentAvailable !== true
+    || await terminalStore.readOwnedTerminal({ generationId, actorKey: `${actorKey}:other` }) !== null
+  ) throw new Error('ROOM_GENERATION_DURABLE_D1_R2_AUTHORITY_INVALID');
+
+  roomActors.forceClose();
+  await runtime.close();
+  runtime = null;
+  const deletedGenerationKeys = await deleteIsolatedKeys(`mahoshojo:gen:v1:${keyPrefix}:*`);
+  if (deletedGenerationKeys < 2) throw new Error('ROOM_GENERATION_DURABLE_FAULT_INJECTION_MISSING');
+
+  recoveredRuntime = new RedisRuntime(redisUrl, true, undefined, undefined, keyPrefix);
+  await recoveredRuntime.connect();
+  const recoveredActors = createRoomActorRegistry({
+    store: recoveredRuntime.getRoomStore(),
+    createRoomEpoch: () => 'epoch-2',
+    recoveryTimestamp: () => new Date().toISOString(),
+    now: Date.now,
+  });
+  const recoveredMemberships = createArenaRoomMembershipService({
+    actors: recoveredActors,
+    now: () => new Date().toISOString(),
+  });
+  const recoveredPort = createHostedPort(recoveredRuntime.getGenerationReplayStore());
+  const recoveredCoordinator = createArenaRoomGenerationService({
+    memberships: recoveredMemberships,
+    references: { verify: async (input) => input.refs },
+    generation: recoveredPort,
+    now: () => new Date().toISOString(),
+  });
+  const recoveredView = await recoveredCoordinator.read({
+    roomId,
+    generationId,
+    accountUserId: 202,
+  });
+  if (
+    recoveredView.roomEpoch !== 'epoch-2'
+    || recoveredView.status !== 'completed'
+    || recoveredView.markdown !== expectedMarkdown
+    || recoveredView.generationRecordId !== generationId
+    || providerStarts !== 1
+  ) throw new Error('ROOM_GENERATION_DURABLE_PROCESS_RECOVERY_INVALID');
+
+  await recoveredCoordinator.start({
+    roomId,
+    accountUserId: 101,
+    request: { ...generationRequest, expectedRoomEpoch: 'epoch-2' },
+    sourceRequest,
+  });
+  if (providerStarts !== 1) throw new Error('ROOM_GENERATION_DURABLE_TERMINAL_REEXECUTED');
+  await recoveredActors.shutdown();
+
+  console.log(JSON.stringify({
+    verifier: 'GMR09_ROOM_HOSTED_DURABLE_SEAM',
+    redis: 'real-loopback',
+    providerStarts,
+    duplicateSingleFlight: true,
+    resume: true,
+    atomicTerminalMarkerEventSnapshot: true,
+    roomTerminal: roomTerminal?.snapshot.activeGeneration?.state,
+    d1R2TerminalFallback: true,
+    ownerMismatchHidden: true,
+    processRecoveryEpoch: recoveredView.roomEpoch,
+    terminalReexecution: false,
+    deletedFaultInjectionKeys: deletedGenerationKeys,
+    secretPersisted: false,
+  }));
+} finally {
+  await runtime?.close().catch(() => undefined);
+  await recoveredRuntime?.close().catch(() => undefined);
+  if (!cleanupClient.isOpen) await cleanupClient.connect().catch(() => undefined);
+  if (cleanupClient.isOpen) {
+    await deleteIsolatedKeys(`mahoshojo:*:${keyPrefix}:*`).catch(() => 0);
+    await cleanupClient.quit();
+  }
+}

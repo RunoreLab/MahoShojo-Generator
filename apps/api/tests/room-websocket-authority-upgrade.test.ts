@@ -9,6 +9,9 @@ import {
 import {
   checkpointPredecessorOf,
   consumeArenaRoomCheckpointCommit,
+  issueArenaRoomGenerationPublisherAuthority,
+  issueArenaRoomGenerationReservationAuthority,
+  issueArenaRoomTrustedTime,
   type ArenaRoomAuthorityState,
 } from '@mahoshojo/multiplayer-core';
 import { Hono } from 'hono';
@@ -82,6 +85,33 @@ const nextMessage = (socket: WebSocket): Promise<RoomServerTransportMessage> => 
   },
 );
 
+const nextMatchingMessage = (
+  socket: WebSocket,
+  predicate: (message: RoomServerTransportMessage) => boolean,
+): Promise<RoomServerTransportMessage> => new Promise((resolve, reject) => {
+  const onMessage = (data: WebSocket.RawData, binary: boolean) => {
+    if (binary) {
+      cleanup();
+      reject(new Error('unexpected binary frame'));
+      return;
+    }
+    const message = JSON.parse(data.toString()) as RoomServerTransportMessage;
+    if (!predicate(message)) return;
+    cleanup();
+    resolve(message);
+  };
+  const onError = (error: Error) => {
+    cleanup();
+    reject(error);
+  };
+  const cleanup = () => {
+    socket.off('message', onMessage);
+    socket.off('error', onError);
+  };
+  socket.on('message', onMessage);
+  socket.on('error', onError);
+});
+
 const nextClose = (socket: WebSocket) => new Promise<{ code: number; reason: string }>((resolve) => {
   socket.once('close', (code, reason) => resolve({ code, reason: reason.toString() }));
 });
@@ -114,7 +144,7 @@ describe('Room signed-ticket real Node upgrade', () => {
       createUserId: () => `server-user-${++userIndex}`,
       now: () => '2026-08-28T00:01:00.000Z',
     });
-    await memberships.create({
+    const host = await memberships.create({
       accountUserId: 101,
       displayName: 'Host',
       sharedConfig: createArenaRoomState().snapshot.sharedConfig,
@@ -203,6 +233,83 @@ describe('Room signed-ticket real Node upgrade', () => {
         roomId: 'room-1',
         payload: { members: expect.arrayContaining([member.member]) },
       });
+
+      const actor = actors.get('room-1');
+      if (!actor) throw new Error('actor missing');
+      const authorityState = actor.getSnapshot();
+      if (!authorityState) throw new Error('authority state missing');
+      const roomEpoch = authorityState.snapshot.roomEpoch;
+      const configRevision = authorityState.snapshot.revision;
+      const timestamp = '2026-08-28T00:01:00.000Z';
+      const expiresAt = '2026-08-28T01:00:00.000Z';
+      const storyMessage = nextMatchingMessage(socket, (message) => (
+        message.type === 'story.delta'
+        && message.generationId === 'generation-real-ws-story'
+      ));
+      const reservationAuthority = issueArenaRoomGenerationReservationAuthority({
+        actorUserId: host.member.userId,
+        accountUserId: 101,
+        roomId: 'room-1',
+        roomEpoch,
+        configRevision,
+        generationRequestId: 'request-real-ws-story',
+        generationId: 'generation-real-ws-story',
+        attempt: 1,
+        snapshotDigest: `sha256:${'a'.repeat(64)}`,
+        generationPayloadDigest: `sha256:${'b'.repeat(64)}`,
+        expiresAt,
+      });
+      await actor.execute({
+        authority: reservationAuthority,
+        command: {
+          type: 'reserve-generation',
+          expectedRoomEpoch: roomEpoch,
+          expectedRevision: configRevision,
+          generationRequestId: 'request-real-ws-story',
+          generationId: 'generation-real-ws-story',
+          attempt: 1,
+          generationPayloadDigest: `sha256:${'b'.repeat(64)}`,
+          timestamp,
+        },
+        trustedTime: issueArenaRoomTrustedTime({ now: timestamp }),
+      });
+      const publisherAuthority = issueArenaRoomGenerationPublisherAuthority({
+        roomId: 'room-1',
+        roomEpoch,
+        generationRequestId: 'request-real-ws-story',
+        generationId: 'generation-real-ws-story',
+        attempt: 1,
+        expiresAt,
+      });
+      await actor.execute({
+        authority: publisherAuthority,
+        command: {
+          type: 'mirror-generation',
+          expectedRoomEpoch: roomEpoch,
+          generationRequestId: 'request-real-ws-story',
+          generationId: 'generation-real-ws-story',
+          attempt: 1,
+          state: 'running',
+          timestamp,
+        },
+        trustedTime: issueArenaRoomTrustedTime({ now: timestamp }),
+      });
+      const story = {
+        protocolVersion: 1 as const,
+        type: 'story.delta' as const,
+        roomId: 'room-1',
+        roomEpoch,
+        generationId: 'generation-real-ws-story',
+        chunkSeq: 0,
+        timestamp,
+        payload: { delta: '真实 WebSocket 正文' },
+      };
+      await expect(actor.publishStory({
+        authority: publisherAuthority,
+        event: story,
+        trustedTime: issueArenaRoomTrustedTime({ now: timestamp }),
+      })).resolves.toEqual({ ok: true, kind: 'published' });
+      await expect(within(storyMessage, 'real-websocket-story')).resolves.toEqual(story);
 
       await expect(within(new Promise<number>((resolve, reject) => {
         const replay = new WebSocket(

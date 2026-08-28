@@ -1,4 +1,7 @@
 {
   "extends": "./tsconfig.json",
-  "include": ["scripts/verify-room-redis.ts"]
+  "include": [
+    "scripts/verify-room-redis.ts",
+    "scripts/verify-room-generation-redis.ts"
+  ]
 }
