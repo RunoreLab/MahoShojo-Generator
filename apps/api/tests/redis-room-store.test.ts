@@ -245,7 +245,7 @@ describe('RedisRoomStore', () => {
     expect(closed).toEqual(before);
   });
 
-  it('refresh 在 exact active checkpoint 同一边界延长 directory record TTL', async () => {
+  it('低频 lifecycle refresh 在 exact checkpoint 边界只延长 checkpoint/record TTL，不重排 index', async () => {
     const client = createClient();
     vi.mocked(client.eval)
       .mockResolvedValueOnce('refreshed')
@@ -265,8 +265,9 @@ describe('RedisRoomStore', () => {
     expect(script).toContain('ROOM_CHECKPOINT_REFRESH_V1');
     expect(script).toContain("redis.call('PEXPIRE', KEYS[1], ARGV[6])");
     expect(script).toContain("redis.call('PEXPIRE', KEYS[2], ARGV[6])");
-    expect(script.indexOf("recordType ~= 'string'"))
-      .toBeLessThan(script.indexOf("redis.call('PEXPIRE', KEYS[1], ARGV[6])"));
+    expect(script).toContain("redis.call('TYPE', KEYS[2])");
+    expect(script).not.toContain("redis.call('ZADD'");
+    expect(script).not.toContain("redis.call('ZREM'");
     expect(script).toContain('raw ~= ARGV[7]');
     expect(options.keys).toEqual([
       expect.stringMatching(/^mahoshojo:room:v1:[a-f0-9]{64}:checkpoint$/u),
@@ -277,6 +278,25 @@ describe('RedisRoomStore', () => {
       checkpointVersion: 1,
       ...checkpointPredecessorOf(checkpoint),
     });
+  });
+
+  it('presence checkpoint 显式 preserve directory，不读取、改写或重排目录 key', async () => {
+    const client = createClient();
+    vi.mocked(client.eval).mockResolvedValue('saved');
+    const store = createRedisRoomStore({ getClient: () => client });
+    const initial = createArenaRoomState();
+    const transition = publishArenaRoomTransition(initial);
+
+    await expect(store.save({
+      commit: commit(transition),
+      directoryMutation: 'preserve',
+    } as Parameters<typeof store.save>[0])).resolves.toEqual({ kind: 'saved' });
+
+    const [script, options] = vi.mocked(client.eval).mock.calls[0]!;
+    expect(script).toContain("local directoryMutation = ARGV[15]");
+    expect(script).toContain("directoryMutation ~= 'preserve'");
+    expect(script).toContain("if directoryMutation == 'mutate' then");
+    expect(options.arguments[14]).toBe('preserve');
   });
 
   it('严格 hydrate versioned envelope 并拒绝损坏或 roomId 不匹配的 Redis 数据', async () => {

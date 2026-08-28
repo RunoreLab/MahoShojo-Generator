@@ -29,12 +29,14 @@ import { createArenaRoomState } from './arena-room-fixtures';
 class MemoryRoomStore implements RoomActorCheckpointStore {
   state: ArenaRoomAuthorityState | null = null;
   refreshResult: 'conflict' | 'refreshed' = 'refreshed';
+  readonly directoryMutations: Array<'mutate' | 'preserve' | undefined> = [];
 
   async load(roomId: string) {
     return this.state?.snapshot.roomId === roomId ? structuredClone(this.state) : null;
   }
 
   async save(input: Parameters<RoomActorCheckpointStore['save']>[0]) {
+    this.directoryMutations.push(input.directoryMutation);
     const data = consumeArenaRoomCheckpointCommit(input.commit);
     if (data.predecessor === null) {
       if (this.state !== null) return { kind: 'conflict' as const };
@@ -241,6 +243,7 @@ describe('Arena Room ticket -> membership -> presence WSS authority', () => {
 
   it('multi-tab 只增加 connection presence；单 tab close/refresh 不 revoke membership，last close 才设置 deadline', async () => {
     const harness = await createHarness();
+    const beforePresence = harness.store.directoryMutations.length;
     const firstTicket = await harness.authority.issue({ roomId: 'room-1', accountUserId: 101 });
     const secondTicket = await harness.authority.issue({ roomId: 'room-1', accountUserId: 101 });
     const firstPeer = createPeer();
@@ -271,6 +274,10 @@ describe('Arena Room ticket -> membership -> presence WSS authority', () => {
       roomIdleDeadline: '2026-08-28T12:10:00.000Z',
     });
     expect(harness.store.state?.snapshot.members).toHaveLength(2);
+    expect(harness.store.directoryMutations.slice(beforePresence)).toEqual([
+      'preserve',
+      'preserve',
+    ]);
   });
 
   it('signed reconnect cursor 支持 same-epoch bounded replay；epoch changed 返回 full snapshot 并拒绝旧 ticket', async () => {

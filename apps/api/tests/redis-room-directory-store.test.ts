@@ -92,12 +92,13 @@ describe('RedisRoomDirectoryStore', () => {
     expect(script).toContain("if #result == 0 then return '[]' end");
   });
 
-  it('exact raw cleanup 不会删除并发 replacement record/index', async () => {
+  it('exact raw cleanup 区分旧 index 与当前 record，且不会删除并发 replacement', async () => {
     const redis = client();
     const stored = record();
     const raw = serializeStoredRoomDirectoryRecord(stored);
     vi.mocked(redis.eval)
       .mockResolvedValueOnce('removed')
+      .mockResolvedValueOnce('index-removed')
       .mockResolvedValueOnce('stale');
     const store = createRedisRoomDirectoryStore({ getClient: () => redis });
     const loaded = await store.candidateFromRaw({
@@ -107,11 +108,16 @@ describe('RedisRoomDirectoryStore', () => {
     });
 
     await expect(store.removeIfExact(loaded)).resolves.toEqual({ kind: 'removed' });
+    await expect(store.removeIfExact(loaded)).resolves.toEqual({ kind: 'index-removed' });
     await expect(store.removeIfExact(loaded)).resolves.toEqual({ kind: 'stale' });
     const [script, options] = vi.mocked(redis.eval).mock.calls[0]!;
     expect(script).toContain('ROOM_DIRECTORY_REMOVE_EXACT_V1');
     expect(script).toContain("indexType ~= 'zset'");
     expect(script).toContain('raw ~= ARGV[1]');
+    expect(script).toContain('directory.publicIndexMember ~= ARGV[2]');
+    expect(script).toContain("return 'index-removed'");
+    expect(script.indexOf('directory.publicIndexMember ~= ARGV[2]'))
+      .toBeLessThan(script.indexOf("redis.call('DEL', KEYS[1])"));
     expect(script.indexOf('raw ~= ARGV[1]'))
       .toBeLessThan(script.indexOf("redis.call('DEL', KEYS[1])"));
     expect(options.arguments).toEqual([raw, stored.publicIndexMember]);

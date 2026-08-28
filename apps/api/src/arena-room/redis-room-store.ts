@@ -77,6 +77,10 @@ return 'migrated'
 
 const SAVE_SCRIPT = `
 -- ROOM_CHECKPOINT_SAVE_V1
+local directoryMutation = ARGV[15]
+if directoryMutation ~= 'mutate' and directoryMutation ~= 'preserve' then
+  return 'invalid-request'
+end
 local candidateDecoded, candidate = pcall(cjson.decode, ARGV[7])
 if not candidateDecoded or type(candidate) ~= 'table'
   or candidate.checkpointVersion ~= tonumber(ARGV[2])
@@ -89,18 +93,23 @@ if not candidateDecoded or type(candidate) ~= 'table'
   or type(candidate.state.lifecycle.updatedAt) ~= 'string' then
   return 'invalid-successor'
 end
-local directoryRecordTypeReply = redis.call('TYPE', KEYS[3])
-local directoryRecordType = type(directoryRecordTypeReply) == 'table'
-  and directoryRecordTypeReply.ok or directoryRecordTypeReply
-local directoryIndexTypeReply = redis.call('TYPE', KEYS[4])
-local directoryIndexType = type(directoryIndexTypeReply) == 'table'
-  and directoryIndexTypeReply.ok or directoryIndexTypeReply
-if (directoryRecordType ~= 'none' and directoryRecordType ~= 'string')
-  or (directoryIndexType ~= 'none' and directoryIndexType ~= 'zset') then
-  return 'directory-storage-invalid'
+if directoryMutation == 'mutate' then
+  local directoryRecordTypeReply = redis.call('TYPE', KEYS[3])
+  local directoryRecordType = type(directoryRecordTypeReply) == 'table'
+    and directoryRecordTypeReply.ok or directoryRecordTypeReply
+  local directoryIndexTypeReply = redis.call('TYPE', KEYS[4])
+  local directoryIndexType = type(directoryIndexTypeReply) == 'table'
+    and directoryIndexTypeReply.ok or directoryIndexTypeReply
+  if (directoryRecordType ~= 'none' and directoryRecordType ~= 'string')
+    or (directoryIndexType ~= 'none' and directoryIndexType ~= 'zset') then
+    return 'directory-storage-invalid'
+  end
 end
 local raw = redis.call('GET', KEYS[1])
-local directoryRaw = redis.call('GET', KEYS[3])
+local directoryRaw = nil
+if directoryMutation == 'mutate' then
+  directoryRaw = redis.call('GET', KEYS[3])
+end
 local fenceTypeReply = redis.call('TYPE', KEYS[2])
 local fenceType = type(fenceTypeReply) == 'table' and fenceTypeReply.ok or fenceTypeReply
 if fenceType ~= 'none' and fenceType ~= 'set' then return 'invalid-fence' end
@@ -113,6 +122,7 @@ local directoryNextRaw = nil
 local directoryStoredIndexMember = nil
 local directoryNextIndexMember = ''
 if ARGV[1] == 'absent' then
+  if directoryMutation ~= 'mutate' then return 'invalid-request' end
   if raw then return 'conflict' end
   if epochSeen == 1 then return 'conflict' end
   if candidate.revision ~= 0 or candidate.controlSeq ~= 0 then
@@ -184,39 +194,41 @@ elseif ARGV[1] == 'match' then
       return 'invalid-successor'
     end
   end
-  if directoryRaw then
-    local directoryDecoded, directory = pcall(cjson.decode, directoryRaw)
-    if directoryDecoded and type(directory) == 'table'
-      and type(directory.publicIndexMember) == 'string' then
-      directoryStoredIndexMember = directory.publicIndexMember
-    end
-    if candidate.state.lifecycle.status == 'closed' then
-      directoryAction = 'remove'
-    else
-      local validDirectory = directoryDecoded and type(directory) == 'table'
-        and directory.directoryVersion == 1
-        and directory.roomId == candidate.roomId
-        and directory.roomEpoch == current.roomEpoch
-        and directory.status == 'open'
-        and (directory.visibility == 'public' or directory.visibility == 'unlisted')
-      if not validDirectory then
+  if directoryMutation == 'mutate' then
+    if directoryRaw then
+      local directoryDecoded, directory = pcall(cjson.decode, directoryRaw)
+      if directoryDecoded and type(directory) == 'table'
+        and type(directory.publicIndexMember) == 'string' then
+        directoryStoredIndexMember = directory.publicIndexMember
+      end
+      if candidate.state.lifecycle.status == 'closed' then
         directoryAction = 'remove'
       else
-        directory.roomEpoch = candidate.roomEpoch
-        directory.lastActivityAt = candidate.state.lifecycle.updatedAt
-        if directory.visibility == 'public' then
-          if ARGV[14] == '' then return 'directory-create-invalid' end
-          directory.publicIndexMember = ARGV[14]
-          directoryNextIndexMember = ARGV[14]
+        local validDirectory = directoryDecoded and type(directory) == 'table'
+          and directory.directoryVersion == 1
+          and directory.roomId == candidate.roomId
+          and directory.roomEpoch == current.roomEpoch
+          and directory.status == 'open'
+          and (directory.visibility == 'public' or directory.visibility == 'unlisted')
+        if not validDirectory then
+          directoryAction = 'remove'
         else
-          directory.publicIndexMember = cjson.null
+          directory.roomEpoch = candidate.roomEpoch
+          directory.lastActivityAt = candidate.state.lifecycle.updatedAt
+          if directory.visibility == 'public' then
+            if ARGV[14] == '' then return 'directory-create-invalid' end
+            directory.publicIndexMember = ARGV[14]
+            directoryNextIndexMember = ARGV[14]
+          else
+            directory.publicIndexMember = cjson.null
+          end
+          directoryAction = 'update'
+          directoryNextRaw = cjson.encode(directory)
         end
-        directoryAction = 'update'
-        directoryNextRaw = cjson.encode(directory)
       end
+    elseif candidate.state.lifecycle.status == 'closed' then
+      directoryAction = 'remove'
     end
-  elseif candidate.state.lifecycle.status == 'closed' then
-    directoryAction = 'remove'
   end
 else
   return 'invalid-request'
@@ -229,17 +241,19 @@ end
 if currentEpochToFence then redis.call('SADD', KEYS[2], currentEpochToFence) end
 redis.call('SADD', KEYS[2], candidate.roomEpoch)
 redis.call('SET', KEYS[1], ARGV[7], 'PX', ARGV[8])
-if directoryStoredIndexMember then
-  redis.call('ZREM', KEYS[4], directoryStoredIndexMember)
-end
-if ARGV[13] ~= '' then redis.call('ZREM', KEYS[4], ARGV[13]) end
-if directoryAction == 'create' or directoryAction == 'update' then
-  redis.call('SET', KEYS[3], directoryNextRaw, 'PX', ARGV[8])
-  if directoryNextIndexMember ~= '' then
-    redis.call('ZADD', KEYS[4], 0, directoryNextIndexMember)
+if directoryMutation == 'mutate' then
+  if directoryStoredIndexMember then
+    redis.call('ZREM', KEYS[4], directoryStoredIndexMember)
   end
-elseif directoryAction == 'remove' then
-  redis.call('DEL', KEYS[3])
+  if ARGV[13] ~= '' then redis.call('ZREM', KEYS[4], ARGV[13]) end
+  if directoryAction == 'create' or directoryAction == 'update' then
+    redis.call('SET', KEYS[3], directoryNextRaw, 'PX', ARGV[8])
+    if directoryNextIndexMember ~= '' then
+      redis.call('ZADD', KEYS[4], 0, directoryNextIndexMember)
+    end
+  elseif directoryAction == 'remove' then
+    redis.call('DEL', KEYS[3])
+  end
 end
 return 'saved'
 `;
@@ -407,6 +421,7 @@ export interface RedisRoomStore {
   save(input: {
     commit: ArenaRoomCheckpointCommit;
     directory?: RoomDirectoryRecord;
+    directoryMutation?: 'mutate' | 'preserve';
   }): Promise<RedisRoomStoreSaveResult>;
   delete(input: {
     checkpoint: ArenaRoomAuthorityState;
@@ -606,6 +621,7 @@ const parseMutationResult = <T extends string>(
   if (raw === 'directory-conflict') throw new Error('REDIS_ROOM_DIRECTORY_CONFLICT');
   if (raw === 'directory-create-invalid') throw new Error('REDIS_ROOM_DIRECTORY_INPUT_INVALID');
   if (raw === 'directory-storage-invalid') throw new Error('REDIS_ROOM_DIRECTORY_INVALID');
+  if (raw === 'invalid-request') throw new Error('REDIS_ROOM_DIRECTORY_INPUT_INVALID');
   if (typeof raw !== 'string' || !allowed.includes(raw as T)) {
     throw new Error('REDIS_ROOM_CHECKPOINT_RESPONSE_INVALID');
   }
@@ -699,6 +715,10 @@ export const createRedisRoomStore = (options: RedisRoomStoreOptions): RedisRoomS
       if (input.directory !== undefined && expected !== null) {
         throw new Error('REDIS_ROOM_DIRECTORY_INPUT_INVALID');
       }
+      const directoryMutation = input.directoryMutation ?? 'mutate';
+      if (input.directory !== undefined && directoryMutation !== 'mutate') {
+        throw new Error('REDIS_ROOM_DIRECTORY_INPUT_INVALID');
+      }
       const directory = input.directory === undefined
         ? null
         : createStoredRoomDirectoryRecord(input.directory);
@@ -747,6 +767,7 @@ export const createRedisRoomStore = (options: RedisRoomStoreOptions): RedisRoomS
                 expectedStored.state.lifecycle.updatedAt,
               ),
           roomDirectoryPublicIndexMember(stored.roomId, stored.state.lifecycle.updatedAt),
+          directoryMutation,
         ],
       });
       return parseMutationResult(raw, ['saved', 'conflict'] as const);

@@ -531,6 +531,7 @@ export class RoomActor {
     try {
       saved = await this.options.store.save({
         commit: receipt,
+        directoryMutation: command.type === 'sync-presence' ? 'preserve' : 'mutate',
         ...(this.state === null && this.options.creationDirectory !== null
           ? { directory: this.options.creationDirectory }
           : {}),

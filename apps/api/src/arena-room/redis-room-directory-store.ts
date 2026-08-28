@@ -48,7 +48,35 @@ if (recordType ~= 'none' and recordType ~= 'string')
   return 'invalid-storage'
 end
 local raw = redis.call('GET', KEYS[1])
-if not raw or raw ~= ARGV[1] then return 'stale' end
+if not raw then
+  if ARGV[2] ~= '' then
+    redis.call('ZREM', KEYS[2], ARGV[2])
+    return 'index-removed'
+  end
+  return 'stale'
+end
+if raw ~= ARGV[1] then
+  if ARGV[2] ~= '' then
+    local decoded, directory = pcall(cjson.decode, raw)
+    if decoded and type(directory) == 'table'
+      and directory.publicIndexMember ~= ARGV[2] then
+      redis.call('ZREM', KEYS[2], ARGV[2])
+      return 'index-removed'
+    end
+  end
+  return 'stale'
+end
+if ARGV[2] ~= '' then
+  local decoded, directory = pcall(cjson.decode, raw)
+  local validIndexField = decoded and type(directory) == 'table'
+    and directory.directoryVersion == 1
+    and (type(directory.publicIndexMember) == 'string'
+      or directory.publicIndexMember == cjson.null)
+  if validIndexField and directory.publicIndexMember ~= ARGV[2] then
+    redis.call('ZREM', KEYS[2], ARGV[2])
+    return 'index-removed'
+  end
+end
 redis.call('DEL', KEYS[1])
 if ARGV[2] ~= '' then redis.call('ZREM', KEYS[2], ARGV[2]) end
 return 'removed'
@@ -82,7 +110,7 @@ export type RedisRoomDirectoryStore = {
   }): Promise<RedisRoomDirectoryCandidate[]>;
   removeIfExact(
     candidate: RedisRoomDirectoryCandidate,
-  ): Promise<{ readonly kind: 'removed' | 'stale' }>;
+  ): Promise<{ readonly kind: 'index-removed' | 'removed' | 'stale' }>;
 };
 
 export type RedisRoomDirectoryStoreOptions = {
@@ -211,7 +239,7 @@ export const createRedisRoomDirectoryStore = (
         arguments: [candidate.raw, candidate.indexMember ?? ''],
       });
       if (raw === 'invalid-storage') return fail('REDIS_ROOM_DIRECTORY_INVALID');
-      if (raw !== 'removed' && raw !== 'stale') {
+      if (raw !== 'index-removed' && raw !== 'removed' && raw !== 'stale') {
         return fail('REDIS_ROOM_DIRECTORY_RESPONSE_INVALID');
       }
       return { kind: raw };

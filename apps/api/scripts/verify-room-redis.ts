@@ -5,6 +5,7 @@ import { ARENA_ROOM_WEBSOCKET_PROTOCOL } from '@mahoshojo/contracts/arena-room';
 import {
   checkpointPredecessorOf,
   createArenaRoomCheckpointCommit,
+  issueArenaRoomPresenceAuthority,
   issueArenaRoomRecoveryAuthority,
   transitionArenaRoom,
   type ArenaRoomAuthorityState,
@@ -17,7 +18,10 @@ import {
   createRedisRoomStore,
   type RedisRoomClient,
 } from '../src/arena-room/redis-room-store';
-import { createRoomActorRegistry } from '../src/arena-room/room-actor-registry';
+import {
+  createRoomActorRegistry,
+  type RoomActorCheckpointStore,
+} from '../src/arena-room/room-actor-registry';
 import { createArenaRoomDirectoryService } from '../src/arena-room/room-directory-service';
 import {
   createStoredRoomDirectoryRecord,
@@ -96,6 +100,16 @@ const unlistedDirectoryRoomId = `room-directory-unlisted-${token}`;
 const staleDirectoryRoomId = `room-directory-stale-${token}`;
 const malformedDirectoryRoomId = `room-directory-malformed-${token}`;
 const invalidDirectoryStorageRoomId = `room-directory-invalid-storage-${token}`;
+const invalidDirectoryRecordStorageRoomId = `room-directory-invalid-record-${token}`;
+const wrongEpochDirectoryRoomId = `room-directory-wrong-epoch-${token}`;
+const wrongHostDirectoryRoomId = `room-directory-wrong-host-${token}`;
+const closedCandidateDirectoryRoomId = `room-directory-closed-candidate-${token}`;
+const expiredCandidateDirectoryRoomId = `room-directory-expired-candidate-${token}`;
+const unknownDirectoryRoomId = `room-directory-unknown-${token}`;
+const paginationDirectoryRoomIds = Array.from(
+  { length: 52 },
+  (_, index) => `room-directory-page-${String(index).padStart(2, '0')}-${token}`,
+);
 const ticketJti = `verifier:${token}`;
 const authorityTicketJti = `authority:${token}`;
 const roomHash = (id: string): string => createHash('sha256').update(id).digest('hex');
@@ -1220,6 +1234,48 @@ try {
       ) {
         throw new Error('ROOM_DIRECTORY_REDIS_ONLY_ATOMIC_INDEX_FAILED');
       }
+      const publicActor = directoryActors.get(directoryRoomId);
+      const publicBeforePresence = await cleanup.get(directoryRecordKey(directoryRoomId));
+      const publicStateBeforePresence = publicActor?.getSnapshot();
+      if (!publicActor || !publicStateBeforePresence || publicBeforePresence === null) {
+        throw new Error('ROOM_DIRECTORY_REDIS_ONLY_PRESENCE_SETUP_FAILED');
+      }
+      await cleanup.pExpire(directoryRecordKey(directoryRoomId), 1_000);
+      const directoryTtlRefresh = await writerStore.refresh({
+        checkpoint: publicStateBeforePresence,
+      });
+      const refreshedDirectoryTtl = await cleanup.pTTL(directoryRecordKey(directoryRoomId));
+      if (
+        directoryTtlRefresh.kind !== 'refreshed'
+        || refreshedDirectoryTtl < 86_000_000
+        || refreshedDirectoryTtl > 86_400_000
+        || await cleanup.zScore(directoryPublicIndexKey, publicIndexMember) !== 0
+      ) {
+        throw new Error('ROOM_DIRECTORY_REDIS_ONLY_LIFECYCLE_TTL_REFRESH_FAILED');
+      }
+      const presence = await publicActor.execute({
+        authority: issueArenaRoomPresenceAuthority({
+          roomId: directoryRoomId,
+          roomEpoch: publicStateBeforePresence.snapshot.roomEpoch,
+          deadlines: { hostOfflineDeadline: null, roomIdleDeadline: null },
+          timestamp: NEXT_TIMESTAMP,
+        }),
+        command: {
+          type: 'sync-presence',
+          expectedRoomEpoch: publicStateBeforePresence.snapshot.roomEpoch,
+          deadlines: { hostOfflineDeadline: null, roomIdleDeadline: null },
+          timestamp: NEXT_TIMESTAMP,
+        },
+      });
+      if (
+        !presence.ok
+        || presence.kind !== 'applied'
+        || await cleanup.get(directoryRecordKey(directoryRoomId)) !== publicBeforePresence
+        || await cleanup.zScore(directoryPublicIndexKey, publicIndexMember) !== 0
+        || await cleanup.zCard(directoryPublicIndexKey) !== 1
+      ) {
+        throw new Error('ROOM_DIRECTORY_REDIS_ONLY_PRESENCE_WRITE_ISOLATION_FAILED');
+      }
       await directoryMemberships.join({
         roomId: unlistedRoom.roomId,
         accountUserId: 303,
@@ -1249,6 +1305,54 @@ try {
       ) {
         throw new Error('ROOM_DIRECTORY_REDIS_ONLY_RECOVERY_INDEX_FAILED');
       }
+      await cleanup.zAdd(directoryPublicIndexKey, { score: 0, value: publicIndexMember });
+      const staleIndexPage = await directory.discoverPublic({ limit: 50 });
+      if (
+        staleIndexPage.items.filter((item) => item.roomId === directoryRoomId).length !== 1
+        || await cleanup.get(directoryRecordKey(directoryRoomId)) === null
+        || await cleanup.zScore(directoryPublicIndexKey, publicIndexMember) !== null
+        || await cleanup.zScore(directoryPublicIndexKey, recoveredIndexMember) !== 0
+      ) {
+        throw new Error('ROOM_DIRECTORY_REDIS_ONLY_STALE_INDEX_RECORD_PRESERVATION_FAILED');
+      }
+      const directoryStore = writer.getRoomDirectoryStore();
+      const preReplacementRaw = await cleanup.get(directoryRecordKey(directoryRoomId));
+      if (preReplacementRaw === null) {
+        throw new Error('ROOM_DIRECTORY_REDIS_ONLY_REPLACEMENT_SETUP_FAILED');
+      }
+      const preReplacementCandidate = await directoryStore.candidateFromRaw({
+        roomId: directoryRoomId,
+        raw: preReplacementRaw,
+        indexMember: recoveredIndexMember,
+      });
+      const concurrentReplacement = createStoredRoomDirectoryRecord({
+        roomId: directoryRoomId,
+        roomEpoch: 'directory-epoch-2',
+        hostUserId: 101,
+        title: 'Redis public directory replacement',
+        visibility: 'public',
+        status: 'open',
+        createdAt: TIMESTAMP,
+        lastActivityAt: THIRD_TIMESTAMP,
+      });
+      const concurrentReplacementRaw = serializeStoredRoomDirectoryRecord(concurrentReplacement);
+      await cleanup.set(directoryRecordKey(directoryRoomId), concurrentReplacementRaw);
+      await cleanup.zAdd(directoryPublicIndexKey, {
+        score: 0,
+        value: concurrentReplacement.publicIndexMember!,
+      });
+      const replacementCleanup = await directoryStore.removeIfExact(preReplacementCandidate);
+      if (
+        replacementCleanup.kind !== 'index-removed'
+        || await cleanup.get(directoryRecordKey(directoryRoomId)) !== concurrentReplacementRaw
+        || await cleanup.zScore(directoryPublicIndexKey, recoveredIndexMember) !== null
+        || await cleanup.zScore(
+          directoryPublicIndexKey,
+          concurrentReplacement.publicIndexMember!,
+        ) !== 0
+      ) {
+        throw new Error('ROOM_DIRECTORY_REDIS_ONLY_CONCURRENT_REPLACEMENT_PRESERVATION_FAILED');
+      }
       const closedDirectory = await recoveredDirectoryActors.execute({
         roomId: directoryRoomId,
         command: {
@@ -1272,6 +1376,232 @@ try {
           .some((item) => item.roomId === directoryRoomId)
       ) {
         throw new Error('ROOM_DIRECTORY_REDIS_ONLY_ATOMIC_CLOSE_FAILED');
+      }
+
+      let throwAfterCommittedCreate = true;
+      const unknownReplyStore: RoomActorCheckpointStore = {
+        load: (id) => writerStore.load(id),
+        refresh: (input) => writerStore.refresh(input),
+        save: async (input) => {
+          const result = await writerStore.save(input);
+          if (throwAfterCommittedCreate && result.kind === 'saved') {
+            throwAfterCommittedCreate = false;
+            throw new Error('SIMULATED_REDIS_REPLY_LOSS_AFTER_COMMIT');
+          }
+          return result;
+        },
+      };
+      const unknownActors = createRoomActorRegistry({
+        store: unknownReplyStore,
+        createRoomIdentity: () => ({
+          roomId: unknownDirectoryRoomId,
+          roomEpoch: 'directory-unknown-epoch-1',
+        }),
+        createTimestamp: () => TIMESTAMP,
+        now: nowAt(TIMESTAMP),
+      });
+      const unknownMemberships = createArenaRoomMembershipService({
+        actors: unknownActors,
+        createUserId: () => 'directory-unknown-host',
+        now: () => TIMESTAMP,
+      });
+      let unknownCreateRejected = false;
+      try {
+        await unknownMemberships.create({
+          accountUserId: 505,
+          displayName: 'Unknown Reply Host',
+          sharedConfig: sharedConfig(),
+          directory: { title: 'Unknown reply room', visibility: 'public' },
+        });
+      } catch (error) {
+        unknownCreateRejected = error instanceof Error
+          && error.message === 'SIMULATED_REDIS_REPLY_LOSS_AFTER_COMMIT';
+      }
+      const unknownOldIndex = roomDirectoryPublicIndexMember(unknownDirectoryRoomId, TIMESTAMP);
+      if (
+        !unknownCreateRejected
+        || unknownActors.get(unknownDirectoryRoomId) !== null
+        || await cleanup.get(roomKey(unknownDirectoryRoomId)) === null
+        || await cleanup.get(directoryRecordKey(unknownDirectoryRoomId)) === null
+        || await cleanup.zScore(directoryPublicIndexKey, unknownOldIndex) !== 0
+      ) {
+        throw new Error('ROOM_DIRECTORY_REDIS_ONLY_CREATE_REPLY_LOSS_QUARANTINE_FAILED');
+      }
+      await unknownActors.shutdown();
+      const unknownRecoveryActors = createRoomActorRegistry({
+        store: writerStore,
+        createRoomEpoch: () => 'directory-unknown-epoch-2',
+        recoveryTimestamp: () => NEXT_TIMESTAMP,
+        now: nowAt(NEXT_TIMESTAMP),
+      });
+      const unknownRecovered = await unknownRecoveryActors.recover(unknownDirectoryRoomId);
+      const unknownNewIndex = roomDirectoryPublicIndexMember(
+        unknownDirectoryRoomId,
+        NEXT_TIMESTAMP,
+      );
+      if (
+        unknownRecovered?.getSnapshot()?.snapshot.roomEpoch !== 'directory-unknown-epoch-2'
+        || await cleanup.zScore(directoryPublicIndexKey, unknownOldIndex) !== null
+        || await cleanup.zScore(directoryPublicIndexKey, unknownNewIndex) !== 0
+        || (await directory.lookup(unknownDirectoryRoomId))?.roomId !== unknownDirectoryRoomId
+      ) {
+        throw new Error('ROOM_DIRECTORY_REDIS_ONLY_CREATE_REPLY_LOSS_RECOVERY_FAILED');
+      }
+      const closedUnknown = await unknownRecoveryActors.execute({
+        roomId: unknownDirectoryRoomId,
+        authority: {
+          kind: 'authenticated-user',
+          actorUserId: 'directory-unknown-host',
+          accountUserId: 505,
+        },
+        command: {
+          type: 'close',
+          expectedRoomEpoch: 'directory-unknown-epoch-2',
+          reason: 'reply-loss-verifier-complete',
+          timestamp: THIRD_TIMESTAMP,
+        },
+      });
+      if (!closedUnknown.ok || closedUnknown.kind !== 'applied') {
+        throw new Error('ROOM_DIRECTORY_REDIS_ONLY_CREATE_REPLY_LOSS_CLOSE_FAILED');
+      }
+      await unknownRecoveryActors.shutdown();
+
+      let paginationIdentity = 0;
+      let paginationUser = 0;
+      const paginationActors = createRoomActorRegistry({
+        store: writerStore,
+        createRoomIdentity: () => ({
+          roomId: paginationDirectoryRoomIds[paginationIdentity]!,
+          roomEpoch: `directory-page-epoch-${paginationIdentity++}`,
+        }),
+        createTimestamp: () => TIMESTAMP,
+        now: nowAt(TIMESTAMP),
+      });
+      const paginationMemberships = createArenaRoomMembershipService({
+        actors: paginationActors,
+        createUserId: () => `directory-page-host-${++paginationUser}`,
+        now: () => TIMESTAMP,
+      });
+      for (let index = 0; index < paginationDirectoryRoomIds.length; index += 1) {
+        await paginationMemberships.create({
+          accountUserId: 10_000 + index,
+          displayName: `Page Host ${index}`,
+          sharedConfig: sharedConfig(),
+          directory: { title: `Page room ${index}`, visibility: 'public' },
+        });
+      }
+      const firstDirectoryPage = await directory.discoverPublic({ limit: 50 });
+      if (firstDirectoryPage.nextCursor === null) {
+        throw new Error('ROOM_DIRECTORY_REDIS_ONLY_PAGINATION_CURSOR_MISSING');
+      }
+      const secondDirectoryPage = await directory.discoverPublic({
+        cursor: firstDirectoryPage.nextCursor,
+        limit: 50,
+      });
+      const pagedRoomIds = [
+        ...firstDirectoryPage.items.map((item) => item.roomId),
+        ...secondDirectoryPage.items.map((item) => item.roomId),
+      ];
+      if (
+        firstDirectoryPage.items.length !== 50
+        || secondDirectoryPage.items.length !== 2
+        || secondDirectoryPage.nextCursor !== null
+        || new Set(pagedRoomIds).size !== paginationDirectoryRoomIds.length
+        || paginationDirectoryRoomIds.some((id) => !pagedRoomIds.includes(id))
+      ) {
+        throw new Error('ROOM_DIRECTORY_REDIS_ONLY_PAGINATION_FAILED');
+      }
+      await paginationActors.shutdown();
+      await cleanup.zRem(
+        directoryPublicIndexKey,
+        paginationDirectoryRoomIds.map((id) => roomDirectoryPublicIndexMember(id, TIMESTAMP)),
+      );
+      await cleanup.unlink([
+        ...paginationDirectoryRoomIds.flatMap(roomKeys),
+        ...paginationDirectoryRoomIds.map(directoryRecordKey),
+      ]);
+
+      const malformedSortedSetMember = '!malformed-directory-member';
+      await cleanup.zAdd(directoryPublicIndexKey, {
+        score: 0,
+        value: malformedSortedSetMember,
+      });
+      await fixedError(
+        directory.discoverPublic({ limit: 1 }),
+        'REDIS_ROOM_DIRECTORY_RESPONSE_INVALID',
+      );
+      if (await cleanup.zScore(directoryPublicIndexKey, malformedSortedSetMember) !== null) {
+        throw new Error('ROOM_DIRECTORY_REDIS_ONLY_MALFORMED_MEMBER_CLEANUP_FAILED');
+      }
+
+      const authorityCandidateCases = [
+        {
+          id: wrongEpochDirectoryRoomId,
+          checkpoint: createRoom(wrongEpochDirectoryRoomId),
+          recordEpoch: 'wrong-epoch',
+          hostUserId: 101,
+          now: NEXT_TIMESTAMP,
+        },
+        {
+          id: wrongHostDirectoryRoomId,
+          checkpoint: createRoom(wrongHostDirectoryRoomId),
+          recordEpoch: 'epoch-1',
+          hostUserId: 999,
+          now: NEXT_TIMESTAMP,
+        },
+        {
+          id: closedCandidateDirectoryRoomId,
+          checkpoint: close(createRoom(closedCandidateDirectoryRoomId).nextState),
+          recordEpoch: 'epoch-1',
+          hostUserId: 101,
+          now: NEXT_TIMESTAMP,
+        },
+        {
+          id: expiredCandidateDirectoryRoomId,
+          checkpoint: createRoom(expiredCandidateDirectoryRoomId),
+          recordEpoch: 'epoch-1',
+          hostUserId: 101,
+          now: '2026-08-29T00:00:00.000Z',
+        },
+      ] as const;
+      for (const candidateCase of authorityCandidateCases) {
+        if (candidateCase.checkpoint.predecessor === null) {
+          await writerStore.save({ commit: commit(candidateCase.checkpoint) });
+        } else {
+          const createdCase = createRoom(candidateCase.id);
+          await writerStore.save({ commit: commit(createdCase) });
+          await writerStore.save({ commit: commit(candidateCase.checkpoint) });
+        }
+        const stored = createStoredRoomDirectoryRecord({
+          roomId: candidateCase.id,
+          roomEpoch: candidateCase.recordEpoch,
+          hostUserId: candidateCase.hostUserId,
+          title: 'Authority candidate',
+          visibility: 'public',
+          status: 'open',
+          createdAt: TIMESTAMP,
+          lastActivityAt: TIMESTAMP,
+        });
+        await cleanup.set(
+          directoryRecordKey(candidateCase.id),
+          serializeStoredRoomDirectoryRecord(stored),
+        );
+        await cleanup.zAdd(directoryPublicIndexKey, {
+          score: 0,
+          value: stored.publicIndexMember!,
+        });
+        const scopedDirectory = createArenaRoomDirectoryService({
+          authority: readerStore,
+          store: directoryStore,
+          now: nowAt(candidateCase.now),
+        });
+        if (
+          await scopedDirectory.lookup(candidateCase.id) !== null
+          || await cleanup.get(directoryRecordKey(candidateCase.id)) !== null
+          || await cleanup.zScore(directoryPublicIndexKey, stored.publicIndexMember!) !== null
+        ) {
+          throw new Error('ROOM_DIRECTORY_REDIS_ONLY_AUTHORITY_CANDIDATE_CLEANUP_FAILED');
+        }
       }
 
       const staleStored = createStoredRoomDirectoryRecord({
@@ -1315,11 +1645,73 @@ try {
       }
       await recoveredDirectoryActors.shutdown();
 
+      const invalidRecordCreated = createRoom(invalidDirectoryRecordStorageRoomId);
+      await writerStore.save({ commit: commit(invalidRecordCreated) });
+      const invalidRecordCheckpointRaw = await cleanup.get(
+        roomKey(invalidDirectoryRecordStorageRoomId),
+      );
+      await cleanup.sAdd(directoryRecordKey(invalidDirectoryRecordStorageRoomId), 'wrong-type');
+      await fixedError(writerStore.save({
+        commit: commit(publish(invalidRecordCreated.nextState)),
+      }), 'REDIS_ROOM_DIRECTORY_INVALID');
+      if (
+        await cleanup.get(roomKey(invalidDirectoryRecordStorageRoomId))
+          !== invalidRecordCheckpointRaw
+      ) {
+        throw new Error('ROOM_DIRECTORY_REDIS_ONLY_RECORD_WRONGTYPE_PARTIAL_COMMIT');
+      }
+      await cleanup.del(directoryRecordKey(invalidDirectoryRecordStorageRoomId));
+
+      const invalidDirectoryCreated = createRoom(invalidDirectoryStorageRoomId);
+      await writerStore.save({
+        commit: commit(invalidDirectoryCreated),
+        directory: {
+          roomId: invalidDirectoryStorageRoomId,
+          roomEpoch: 'epoch-1',
+          hostUserId: 101,
+          title: 'Directory WRONGTYPE verifier',
+          visibility: 'public',
+          status: 'open',
+          createdAt: TIMESTAMP,
+          lastActivityAt: TIMESTAMP,
+        },
+      });
+      const invalidDirectoryCheckpointRaw = await cleanup.get(
+        roomKey(invalidDirectoryStorageRoomId),
+      );
+      const invalidDirectoryRaw = await cleanup.get(
+        directoryRecordKey(invalidDirectoryStorageRoomId),
+      );
+      if (invalidDirectoryRaw === null) {
+        throw new Error('ROOM_DIRECTORY_REDIS_ONLY_STORAGE_TYPE_SETUP_FAILED');
+      }
+      await cleanup.del(directoryPublicIndexKey);
       await cleanup.set(directoryPublicIndexKey, 'wrong-type');
       await fixedError(writerStore.save({
-        commit: commit(createRoom(invalidDirectoryStorageRoomId)),
+        commit: commit(close(invalidDirectoryCreated.nextState)),
       }), 'REDIS_ROOM_DIRECTORY_INVALID');
-      if (await cleanup.get(roomKey(invalidDirectoryStorageRoomId)) !== null) {
+      await fixedError(writerStore.expire({
+        checkpoint: invalidDirectoryCreated.nextState,
+      }), 'REDIS_ROOM_DIRECTORY_INVALID');
+      await fixedError(writerStore.delete({
+        checkpoint: invalidDirectoryCreated.nextState,
+      }), 'REDIS_ROOM_DIRECTORY_INVALID');
+      const invalidDirectoryCandidate = await directoryStore.candidateFromRaw({
+        roomId: invalidDirectoryStorageRoomId,
+        raw: invalidDirectoryRaw,
+        indexMember: roomDirectoryPublicIndexMember(invalidDirectoryStorageRoomId, TIMESTAMP),
+      });
+      await fixedError(
+        directoryStore.removeIfExact(invalidDirectoryCandidate),
+        'REDIS_ROOM_DIRECTORY_INVALID',
+      );
+      await fixedError(directory.discoverPublic({ limit: 1 }), 'REDIS_ROOM_COMMAND_FAILED');
+      if (
+        await cleanup.get(roomKey(invalidDirectoryStorageRoomId))
+          !== invalidDirectoryCheckpointRaw
+        || await cleanup.get(directoryRecordKey(invalidDirectoryStorageRoomId))
+          !== invalidDirectoryRaw
+      ) {
         throw new Error('ROOM_DIRECTORY_REDIS_ONLY_STORAGE_TYPE_PARTIAL_COMMIT');
       }
       await cleanup.del(directoryPublicIndexKey);
@@ -1412,9 +1804,18 @@ try {
         directoryAtomicCreateIndex: true,
         directoryUnlistedKnownJoin: true,
         directoryRecoveryRebind: true,
+        directoryLifecycleTtlRefresh: true,
+        directoryPresenceWriteIsolation: true,
+        directoryStaleIndexRecordPreservation: true,
+        directoryConcurrentReplacementPreservation: true,
+        directoryCreateReplyLossRecovery: true,
+        directoryBoundedPagination: true,
         directoryAtomicClose: true,
         directoryStaleCleanup: true,
         directoryMalformedCleanup: true,
+        directoryMalformedMemberCleanup: true,
+        directoryAuthorityCandidateCleanup: true,
+        directoryFaultMatrixFailClosed: true,
         directoryStorageTypeFailClosed: true,
         activeTtlRefresh: true,
         ticketReplay: true,
@@ -1433,16 +1834,27 @@ try {
   await writer.close();
   if (!cleanup.isOpen) await cleanup.connect();
   if (phase !== 'write') {
-    await cleanup.zRem(directoryPublicIndexKey, [
+    const directoryIndexCleanupType = await cleanup.type(directoryPublicIndexKey);
+    if (directoryIndexCleanupType === 'zset') await cleanup.zRem(directoryPublicIndexKey, [
       roomDirectoryPublicIndexMember(roomId, TIMESTAMP),
       roomDirectoryPublicIndexMember(roomId, NEXT_TIMESTAMP),
       roomDirectoryPublicIndexMember(roomId, THIRD_TIMESTAMP),
       roomDirectoryPublicIndexMember(directoryRoomId, TIMESTAMP),
       roomDirectoryPublicIndexMember(directoryRoomId, NEXT_TIMESTAMP),
+      roomDirectoryPublicIndexMember(directoryRoomId, THIRD_TIMESTAMP),
       roomDirectoryPublicIndexMember(unlistedDirectoryRoomId, TIMESTAMP),
       roomDirectoryPublicIndexMember(staleDirectoryRoomId, TIMESTAMP),
       roomDirectoryPublicIndexMember(malformedDirectoryRoomId, TIMESTAMP),
+      roomDirectoryPublicIndexMember(unknownDirectoryRoomId, TIMESTAMP),
+      roomDirectoryPublicIndexMember(unknownDirectoryRoomId, NEXT_TIMESTAMP),
+      roomDirectoryPublicIndexMember(wrongEpochDirectoryRoomId, TIMESTAMP),
+      roomDirectoryPublicIndexMember(wrongHostDirectoryRoomId, TIMESTAMP),
+      roomDirectoryPublicIndexMember(closedCandidateDirectoryRoomId, TIMESTAMP),
+      roomDirectoryPublicIndexMember(expiredCandidateDirectoryRoomId, TIMESTAMP),
+      roomDirectoryPublicIndexMember(invalidDirectoryStorageRoomId, TIMESTAMP),
+      ...paginationDirectoryRoomIds.map((id) => roomDirectoryPublicIndexMember(id, TIMESTAMP)),
     ]);
+    else if (directoryIndexCleanupType !== 'none') await cleanup.del(directoryPublicIndexKey);
     await cleanup.unlink([
       ...roomKeys(roomId),
       ...roomKeys(ttlRoomId),
@@ -1469,6 +1881,13 @@ try {
       ...roomKeys(staleDirectoryRoomId),
       ...roomKeys(malformedDirectoryRoomId),
       ...roomKeys(invalidDirectoryStorageRoomId),
+      ...roomKeys(invalidDirectoryRecordStorageRoomId),
+      ...roomKeys(wrongEpochDirectoryRoomId),
+      ...roomKeys(wrongHostDirectoryRoomId),
+      ...roomKeys(closedCandidateDirectoryRoomId),
+      ...roomKeys(expiredCandidateDirectoryRoomId),
+      ...roomKeys(unknownDirectoryRoomId),
+      ...paginationDirectoryRoomIds.flatMap(roomKeys),
       ticketReplayKey,
       authorityTicketReplayKey,
       directoryRecordKey(roomId),
@@ -1476,6 +1895,14 @@ try {
       directoryRecordKey(unlistedDirectoryRoomId),
       directoryRecordKey(staleDirectoryRoomId),
       directoryRecordKey(malformedDirectoryRoomId),
+      directoryRecordKey(unknownDirectoryRoomId),
+      directoryRecordKey(invalidDirectoryStorageRoomId),
+      directoryRecordKey(invalidDirectoryRecordStorageRoomId),
+      directoryRecordKey(wrongEpochDirectoryRoomId),
+      directoryRecordKey(wrongHostDirectoryRoomId),
+      directoryRecordKey(closedCandidateDirectoryRoomId),
+      directoryRecordKey(expiredCandidateDirectoryRoomId),
+      ...paginationDirectoryRoomIds.map(directoryRecordKey),
     ]);
   }
   await cleanup.quit();
