@@ -37,16 +37,18 @@ describe('Hono content-addressed release transaction', () => {
   test('release id 覆盖 bundle、compose 与 deploy script 的完整 tuple', () => {
     const workflow = readFileSync(workflowPath, 'utf8');
 
-    expect(workflow).toMatch(/sha256sum\s+index\.mjs\s+compose\.yml\s+deploy-bundle\.sh\s*>\s*release\.manifest/);
+    expect(workflow).toMatch(/sha256sum\s+index\.mjs\s+compose\.yml\s+deploy-bundle\.sh\s+\\\s+arena-room-release-gate\.json\s*>\s*release\.manifest/);
     expect(workflow).toMatch(/sha256sum\s+release\.manifest\s*>\s*release\.sha256/);
     expect(workflow).toContain('artifact/release.manifest');
     expect(workflow).toContain('artifact/release.sha256');
+    expect(workflow).toContain('artifact/arena-room-release-gate.json');
     expect(workflow).toContain("release_id=\"$(awk '{print $1}' artifact/release.sha256)\"");
 
     const script = readDeployScript();
     if (!script) return;
     expect(script).toContain('release.manifest');
     expect(script).toContain('release.sha256');
+    expect(script).toContain('arena-room-release-gate.json');
     expect(script).toMatch(/sha256sum\s+-c\s+["']?release\.manifest/);
   });
 

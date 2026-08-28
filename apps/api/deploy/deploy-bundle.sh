@@ -155,10 +155,24 @@ verify_release_tuple() {
   }
 
   manifest_lines="$(wc -l < "$tuple_dir/release.manifest" | tr -d ' ')"
-  case "$manifest_lines" in
-    3) ;;
-    4)
-      grep -Eq '^[0-9a-f]{64}  legacy-layout$' "$tuple_dir/release.manifest" || return 1
+  optional_manifest_lines=0
+  arena_gate_lines="$(grep -Ec '^[0-9a-f]{64}  arena-room-release-gate\.json$' \
+    "$tuple_dir/release.manifest" || true)"
+  case "$arena_gate_lines" in
+    0) ;;
+    1)
+      optional_manifest_lines=$((optional_manifest_lines + 1))
+      [ -f "$tuple_dir/arena-room-release-gate.json" ] \
+        && [ ! -L "$tuple_dir/arena-room-release-gate.json" ] || return 1
+      ;;
+    *) return 1 ;;
+  esac
+  legacy_manifest_lines="$(grep -Ec '^[0-9a-f]{64}  legacy-layout$' \
+    "$tuple_dir/release.manifest" || true)"
+  case "$legacy_manifest_lines" in
+    0) ;;
+    1)
+      optional_manifest_lines=$((optional_manifest_lines + 1))
       [ -f "$tuple_dir/legacy-layout" ] && [ ! -L "$tuple_dir/legacy-layout" ] || return 1
       legacy_marker="$(cat "$tuple_dir/legacy-layout")"
       case "$legacy_marker" in
@@ -166,14 +180,15 @@ verify_release_tuple() {
         *) return 1 ;;
       esac
       ;;
-    *)
+    *) return 1 ;;
+  esac
+  if [ "$manifest_lines" -ne $((3 + optional_manifest_lines)) ]; then
       echo "release.manifest 必须只覆盖规范 tuple 文件" >&2
       return 1
-      ;;
-  esac
-  grep -Eq '^[0-9a-f]{64}  index\.mjs$' "$tuple_dir/release.manifest" || return 1
-  grep -Eq '^[0-9a-f]{64}  compose\.yml$' "$tuple_dir/release.manifest" || return 1
-  grep -Eq '^[0-9a-f]{64}  deploy-bundle\.sh$' "$tuple_dir/release.manifest" || return 1
+  fi
+  [ "$(grep -Ec '^[0-9a-f]{64}  index\.mjs$' "$tuple_dir/release.manifest")" -eq 1 ] || return 1
+  [ "$(grep -Ec '^[0-9a-f]{64}  compose\.yml$' "$tuple_dir/release.manifest")" -eq 1 ] || return 1
+  [ "$(grep -Ec '^[0-9a-f]{64}  deploy-bundle\.sh$' "$tuple_dir/release.manifest")" -eq 1 ] || return 1
 
   (cd "$tuple_dir" && sha256sum -c release.sha256 >/dev/null)
   (cd "$tuple_dir" && sha256sum -c release.manifest >/dev/null)
@@ -352,7 +367,8 @@ rollback_transaction() {
   rollback_previous_release_dir="$3"
   echo "新 release 未通过完整 contract，开始回滚 tuple" >&2
   if [ "$rollback_had_previous" = true ]; then
-    verify_arena_room_rollback_gate || return 1
+    verify_arena_room_rollback_gate \
+      "$failed_release_dir" "$rollback_previous_release_dir" || return 1
     restore_previous_tuple "$rollback_previous_release_dir" || return 1
     rm -f "$root_dir/current.next" || return 1
     return 0
@@ -370,17 +386,51 @@ rollback_transaction() {
 }
 
 verify_arena_room_rollback_gate() {
+  failed_release_dir="$1"
+  target_release_dir="$2"
   [ -f "$runtime_env" ] && [ ! -L "$runtime_env" ] || return 1
   arena_generation_start_state="$(
     sed -n 's/^ARENA_MULTIPLAYER_ENABLED=//p' "$runtime_env" | tail -n 1
   )"
   case "$arena_generation_start_state" in
-    ''|0|false|no|off) return 0 ;;
+    ''|0|false|no|off) ;;
     *)
       echo "Arena multiplayer generation start 未关闭，拒绝自动回滚旧 reader" >&2
       return 1
       ;;
   esac
+  failed_gate="$failed_release_dir/arena-room-release-gate.json"
+  if [ ! -e "$failed_gate" ] && [ ! -L "$failed_gate" ]; then
+    return 0
+  fi
+  [ -f "$failed_gate" ] && [ ! -L "$failed_gate" ] || return 1
+  writer_activation="$(
+    sed -n 's/^[[:space:]]*"writerActivation":[[:space:]]*"\([a-z]*\)"[,]*[[:space:]]*$/\1/p' \
+      "$failed_gate"
+  )"
+  case "$writer_activation" in
+    disabled) return 0 ;;
+    enabled) ;;
+    *)
+      echo "Arena Room release gate writerActivation 非法" >&2
+      return 1
+      ;;
+  esac
+  verify_release_tuple "$target_release_dir" || return 1
+  target_gate="$target_release_dir/arena-room-release-gate.json"
+  [ -f "$target_gate" ] && [ ! -L "$target_gate" ] || {
+    echo "rollback target reader contract 不兼容" >&2
+    return 1
+  }
+  target_reader_contract="$(
+    sed -n 's/^[[:space:]]*"checkpointContract":[[:space:]]*"\([A-Za-z0-9._:-]*\)"[,]*[[:space:]]*$/\1/p' \
+      "$target_gate"
+  )"
+  [ "$target_reader_contract" \
+    = 'arena-room-authority-v2-generation-payload-digest-v1' ] || {
+    echo "rollback target reader contract 不兼容" >&2
+    return 1
+  }
 }
 
 write_transaction() {
@@ -454,11 +504,14 @@ adopt_legacy_layout() {
   cp "$legacy_index" "$adoption_staging/index.mjs" || return 1
   cp "$legacy_compose" "$adoption_staging/compose.yml" || return 1
   cp "$release_dir/deploy-bundle.sh" "$adoption_staging/deploy-bundle.sh" || return 1
+  cp "$release_dir/arena-room-release-gate.json" \
+    "$adoption_staging/arena-room-release-gate.json" || return 1
   chmod 755 "$adoption_staging/deploy-bundle.sh" || return 1
   printf 'root-release-layout-v1:%s\n' \
     "$legacy_release_id" > "$adoption_staging/legacy-layout" || return 1
   (cd "$adoption_staging" && sha256sum \
-    index.mjs compose.yml deploy-bundle.sh legacy-layout > release.manifest) || return 1
+    index.mjs compose.yml deploy-bundle.sh arena-room-release-gate.json \
+    legacy-layout > release.manifest) || return 1
   adoption_id="$(sha256sum "$adoption_staging/release.manifest" | awk '{print $1}')"
   adoption_dir="$releases_dir/$adoption_id"
   printf '%s  release.manifest\n' "$adoption_id" > "$adoption_staging/release.sha256" || return 1

@@ -79,8 +79,10 @@ jobs:
           pnpm --filter @mahoshojo/api run deploy:prepare
           cp apps/api/deploy/compose.yml apps/api/dist/compose.yml
           cp apps/api/deploy/deploy-bundle.sh apps/api/dist/deploy-bundle.sh
+          cp config/arena-room-release-gate.json apps/api/dist/arena-room-release-gate.json
           cd apps/api/dist
-          sha256sum index.mjs compose.yml deploy-bundle.sh > release.manifest
+          sha256sum index.mjs compose.yml deploy-bundle.sh \
+            arena-room-release-gate.json > release.manifest
           sha256sum release.manifest > release.sha256
 
       - name: Verify Hono built runtime integration
@@ -146,6 +148,7 @@ jobs:
             apps/api/dist/index.mjs
             apps/api/dist/compose.yml
             apps/api/dist/deploy-bundle.sh
+            apps/api/dist/arena-room-release-gate.json
             apps/api/dist/release.manifest
             apps/api/dist/release.sha256
           if-no-files-found: error
@@ -191,7 +194,7 @@ jobs:
           case "$upload_suffix" in
             ''|*[!A-Za-z0-9]*) echo "远端 upload staging 后缀非法" >&2; exit 1 ;;
           esac
-          scp -i ~/.ssh/deploy_key artifact/index.mjs artifact/compose.yml artifact/deploy-bundle.sh artifact/release.manifest artifact/release.sha256 "$VPS_USER@$VPS_HOST:$upload_dir/"
+          scp -i ~/.ssh/deploy_key artifact/index.mjs artifact/compose.yml artifact/deploy-bundle.sh artifact/arena-room-release-gate.json artifact/release.manifest artifact/release.sha256 "$VPS_USER@$VPS_HOST:$upload_dir/"
           installed_dir="$(ssh -i ~/.ssh/deploy_key "$VPS_USER@$VPS_HOST" "sh -s -- install '$release_id' '$upload_dir'" < apps/api/deploy/install-bundle.sh)"
           expected_dir="/opt/mahoshojo-hono/releases/$release_id"
           test "$installed_dir" = "$expected_dir"
