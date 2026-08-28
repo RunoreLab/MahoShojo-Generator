@@ -386,7 +386,6 @@ const getLegacyAdoptionDirectory = (
       path.join(fixture.releaseDirectory, 'deploy-bundle.sh'),
       'utf8',
     ),
-    'arena-room-release-gate.json': readFileSync(arenaRoomReleaseGatePath, 'utf8'),
     'legacy-layout': `root-release-layout-v1:${legacy.legacyReleaseId}\n`,
   };
   const manifest = Object.entries(files)
@@ -612,6 +611,29 @@ describe('Hono release-local deployment transaction', () => {
     );
   });
 
+  test('manifest 外注入的 target gate 不能充当 reader contract attestation', () => {
+    const fixture = createFixture({
+      previousHasArenaRoomReleaseGate: false,
+      targetWriterActivation: 'enabled',
+    });
+    copyFileSync(
+      arenaRoomReleaseGatePath,
+      path.join(fixture.previousReleaseDirectory, 'arena-room-release-gate.json'),
+    );
+
+    const result = runDeployment(fixture, { probeStatus: '500' });
+    const commands = readFileSync(fixture.commandLog, 'utf8');
+
+    expect(result.status).toBe(1);
+    expect(commands).not.toContain(`-f ${fixture.releaseDirectory}/compose.yml up`);
+    expect(commands).not.toContain(
+      `-f ${fixture.previousReleaseDirectory}/compose.yml up -d --force-recreate hono`,
+    );
+    expect(readlinkSync(path.join(fixture.rootDirectory, 'current'))).toBe(
+      fixture.previousReleaseDirectory,
+    );
+  });
+
   test('writer-enabled rollback 只恢复声明 compatible contract 的 previous tuple', () => {
     const fixture = createFixture({ targetWriterActivation: 'enabled' });
 
@@ -620,6 +642,22 @@ describe('Hono release-local deployment transaction', () => {
     expect(result.status).toBe(1);
     expect(result.stderr).toContain('开始回滚 tuple');
     expect(readFileSync(fixture.commandLog, 'utf8')).toContain(
+      `-f ${fixture.previousReleaseDirectory}/compose.yml up -d --force-recreate hono`,
+    );
+  });
+
+  test('writer-enabled rollback 拒绝错误的 target reader contract', () => {
+    const fixture = createFixture({
+      previousCheckpointContract: 'legacy-reader-contract',
+      targetWriterActivation: 'enabled',
+    });
+
+    const result = runDeployment(fixture, { probeStatus: '500' });
+    const commands = readFileSync(fixture.commandLog, 'utf8');
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('rollback target reader contract 不兼容');
+    expect(commands).not.toContain(
       `-f ${fixture.previousReleaseDirectory}/compose.yml up -d --force-recreate hono`,
     );
   });

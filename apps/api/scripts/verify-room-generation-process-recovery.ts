@@ -147,10 +147,12 @@ const runProducerProcess = async (): Promise<never> => {
     sharedConfig: sharedConfig(),
   });
   await memberships.join({ roomId, accountUserId: 202, displayName: 'Process Member' });
+  let providerStarts = 0;
   let firstChunk!: () => void;
   const firstChunkWritten = new Promise<void>((resolve) => { firstChunk = resolve; });
   const executor: ArenaGenerationExecutor = {
     async execute(input) {
+      providerStarts += 1;
       await input.emit({ type: 'markdown', data: { chunk: '# process chunk\n' } });
       firstChunk();
       return new Promise<never>(() => undefined);
@@ -190,7 +192,7 @@ const runProducerProcess = async (): Promise<never> => {
       && value.projection.markdown === '# process chunk\n',
     'ROOM_GENERATION_PROCESS_FIRST_CHUNK_TIMEOUT',
   );
-  console.log(JSON.stringify({ event: 'producer-ready', generationId, providerStarts: 1 }));
+  console.log(JSON.stringify({ event: 'producer-ready', generationId, providerStarts }));
   return new Promise<never>(() => undefined);
 };
 

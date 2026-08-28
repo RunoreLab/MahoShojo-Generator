@@ -159,7 +159,10 @@ verify_release_tuple() {
   arena_gate_lines="$(grep -Ec '^[0-9a-f]{64}  arena-room-release-gate\.json$' \
     "$tuple_dir/release.manifest" || true)"
   case "$arena_gate_lines" in
-    0) ;;
+    0)
+      [ ! -e "$tuple_dir/arena-room-release-gate.json" ] \
+        && [ ! -L "$tuple_dir/arena-room-release-gate.json" ] || return 1
+      ;;
     1)
       optional_manifest_lines=$((optional_manifest_lines + 1))
       [ -f "$tuple_dir/arena-room-release-gate.json" ] \
@@ -170,7 +173,9 @@ verify_release_tuple() {
   legacy_manifest_lines="$(grep -Ec '^[0-9a-f]{64}  legacy-layout$' \
     "$tuple_dir/release.manifest" || true)"
   case "$legacy_manifest_lines" in
-    0) ;;
+    0)
+      [ ! -e "$tuple_dir/legacy-layout" ] && [ ! -L "$tuple_dir/legacy-layout" ] || return 1
+      ;;
     1)
       optional_manifest_lines=$((optional_manifest_lines + 1))
       [ -f "$tuple_dir/legacy-layout" ] && [ ! -L "$tuple_dir/legacy-layout" ] || return 1
@@ -504,14 +509,11 @@ adopt_legacy_layout() {
   cp "$legacy_index" "$adoption_staging/index.mjs" || return 1
   cp "$legacy_compose" "$adoption_staging/compose.yml" || return 1
   cp "$release_dir/deploy-bundle.sh" "$adoption_staging/deploy-bundle.sh" || return 1
-  cp "$release_dir/arena-room-release-gate.json" \
-    "$adoption_staging/arena-room-release-gate.json" || return 1
   chmod 755 "$adoption_staging/deploy-bundle.sh" || return 1
   printf 'root-release-layout-v1:%s\n' \
     "$legacy_release_id" > "$adoption_staging/legacy-layout" || return 1
   (cd "$adoption_staging" && sha256sum \
-    index.mjs compose.yml deploy-bundle.sh arena-room-release-gate.json \
-    legacy-layout > release.manifest) || return 1
+    index.mjs compose.yml deploy-bundle.sh legacy-layout > release.manifest) || return 1
   adoption_id="$(sha256sum "$adoption_staging/release.manifest" | awk '{print $1}')"
   adoption_dir="$releases_dir/$adoption_id"
   printf '%s  release.manifest\n' "$adoption_id" > "$adoption_staging/release.sha256" || return 1
