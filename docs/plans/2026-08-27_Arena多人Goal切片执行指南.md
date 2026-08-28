@@ -98,9 +98,9 @@ read authority / current state
 | `GMR-02` Redis conditional checkpoint | `DONE` | GMR-01 | CAS checkpoint + TTL + fail-closed | 不做 WSS/UI |
 | `GMR-03` single-writer RoomActor | `DONE` | GMR-02 | actor registry/queue/recovery/shutdown | 不做 multi-instance |
 | `GMR-04` Node WSS security skeleton | `DONE` | GMR-03 | Node WS bootstrap + upgrade/security/backpressure | 不做产品 UI |
-| `GMR-05` ticket/membership/reconnect/lifecycle | `READY` | GMR-04 | membership/connection/epoch recovery | 不做 generation fan-out |
-| `GMR-06` D1 directory/discovery | `BLOCKED` | GMR-05 | derived directory + orphan cleanup | 不执行生产 migration |
-| `GMR-07` Arena room UI | `BLOCKED` | GMR-05 | feature-flagged create/join/status/reconnect | 不激活 production |
+| `GMR-05` ticket/membership/reconnect/lifecycle | `DONE` | GMR-04 | membership/connection/epoch recovery | 不做 generation fan-out |
+| `GMR-06` D1 directory/discovery | `READY` | GMR-05 | derived directory + orphan cleanup | 不执行生产 migration |
+| `GMR-07` Arena room UI | `READY` | GMR-05 | feature-flagged create/join/status/reconnect | 不激活 production |
 | `GMR-08` Proposal E2E | `BLOCKED` | GMR-05,GMR-07 | typed Proposal server/UI 闭环 | 不扩展 private sharing |
 | `GMR-09` generation publisher | `BLOCKED` | GMR-03,GMR-05,GMR-07 | single producer + Room safe fan-out/resync | 不复制 AI lifecycle |
 | `GMR-10` hardening/fault/load audit | `BLOCKED` | GMR-06,GMR-08,GMR-09 | telemetry + failure drills + v1 exit audit | 不自动进入生产 |
@@ -400,6 +400,37 @@ validate -> pure derive -> conditional checkpoint
 - process restart warm recovery；
 - heartbeat/dead connection；
 - deadline cleanup 幂等。
+
+**Evidence（2026-08-28）**
+
+- Goal ID：`GMR-05`；source SHA：`d99c07e9e258507f0e9122c580723015b16dd683`；
+- changed files：`packages/contracts` ticket/reconnect transport contract，`packages/multiplayer-core` authority state v2、
+  membership/presence/deadline capability 与兼容 parser，`apps/api` ticket codec、Redis replay、membership service、
+  WebSocket authority/gateway、RoomActor lifecycle/replay/deadline、runtime composition、真实 Node/Redis tests/verifier；
+- ticket/authority：45 秒、最长 60 秒的 domain-separated signed ticket 绑定 protocol/room/epoch/user/role hint/iat/exp/jti/
+  reconnect cursor；upgrade 前 Redis 原子消费 `jti`，随后以 current checkpoint membership/role 覆盖 hint，kick/revoke、
+  epoch stale、replay 与 unavailable 均 fail closed；
+- membership/reconnect：account membership 与 connection presence 分离；multi-tab 复用同一 member，单 socket close 只
+  更新 presence；same epoch 使用有界 replay 或 snapshot，recovery/new epoch 使用 full snapshot，fence/terminal 会关闭 peers；
+- lifecycle：authority state v2 持久化 host-offline/idle deadline；严格 v1 load 以 exact-CAS + `KEEPTTL` 迁移，legacy
+  open state 得到已到期 deadline 并 fail closed；scheduler、lazy recovery/resolve 与每个 queued command 的 apply
+  线性化边界均重新验证 deadline，queued presence 不能在到期后清除期限；
+- activation：`ARENA_MULTIPLAYER_ENABLED` 默认关闭，production/preview 明确拒绝 `true`；当前没有 create/join/ticket
+  HTTP 产品入口，未激活 production WSS、DNS/LB/Access 或 secret；ticket 复用既有 server-owned signature service，
+  以 `arena-room-ticket-v1` purpose 隔离；
+- validation：API `300/300`、multiplayer-core `78/78`、contracts `120/120`，真实 Node authority upgrade/heartbeat、
+  API/core/contracts build/lint、真实 Redis 7.0.15 full verifier 与 AOF write → restart → read ticket replay/recovery，
+  完整 `pnpm run ci:verify` 与 `git diff --check` 通过；既有 naming/physical D1/preview debt 按原状态保留；
+- fault cases：ticket expiry/tamper/replay、current membership/role/epoch override、kick terminal close、multi-tab、subscriber
+  capacity rollback、checkpoint unavailable/fence peer close、half-open grace terminate、dead host heartbeat/reconnect、
+  v1→v2 migration/TTL、restart replay、deadline/presence queue race 与 Redis unavailable；
+- independent review：architecture/compatibility/replay/data、security/authority 与 test adequacy 最终均为 Critical `0` /
+  Important `0` / Minor `0`；首轮 lifecycle/migration/capacity/fence/half-open/Redis-AOF/heartbeat findings，以及 deadline
+  queued-presence、伪造 deadline capability bypass 与 idle deadline test-adequacy 复审 findings 已全部关闭；
+- public wire/schema change：`yes`（新增 ticket/reconnect server transport 与内部 authority state v2）；Redis v1 只做
+  lazy exact-CAS 兼容迁移，production D1/schema/secret/release action：`no`；
+- open findings：无；next READY Goals：`GMR-06`、`GMR-07`；当前按顺序先执行 `GMR-06`。完整证据见
+  [GMR-05 实施与审查整改日志](../logs/2026-08-28_083000_Arena多人GMR-05TicketMembership生命周期实施与审查整改日志.md)。
 
 ### GMR-06 D1 directory / discovery
 
