@@ -26,6 +26,16 @@ const digestSnapshot = (snapshot: Omit<
   return `sha256:${createHash('sha256').update(canonical).digest('hex')}`;
 };
 
+export const createArenaRoomGenerationSnapshotFromFrozen = (
+  input: Omit<ArenaMultiplayerGenerationSnapshot, 'snapshotDigest'>,
+): ArenaMultiplayerGenerationSnapshot => {
+  const frozen = structuredClone(input);
+  return ArenaMultiplayerGenerationSnapshotSchema.parse({
+    ...frozen,
+    snapshotDigest: digestSnapshot(frozen),
+  });
+};
+
 export const listArenaRoomGenerationRefs = (
   config: ArenaRoomSharedConfig,
 ): readonly DataCardRef[] => {
@@ -62,8 +72,5 @@ export const createArenaRoomGenerationSnapshot = (
       .sort((left, right) => left - right),
     sharedConfig: structuredClone(state.snapshot.sharedConfig),
   };
-  return ArenaMultiplayerGenerationSnapshotSchema.parse({
-    ...frozen,
-    snapshotDigest: digestSnapshot(frozen),
-  });
+  return createArenaRoomGenerationSnapshotFromFrozen(frozen);
 };

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   createArenaRoomGenerationSnapshot,
+  createArenaRoomGenerationSnapshotFromFrozen,
   listArenaRoomGenerationRefs,
 } from '#/arena-room/room-generation-snapshot';
 import { createArenaRoomState } from './arena-room-fixtures';
@@ -38,6 +39,14 @@ describe('Arena Room frozen generation snapshot', () => {
       sharedConfig: state.snapshot.sharedConfig,
     });
     expect(snapshot.snapshotDigest).toMatch(/^sha256:[0-9a-f]{64}$/u);
+    expect(createArenaRoomGenerationSnapshotFromFrozen({
+      roomId: snapshot.roomId,
+      generationRequestId: snapshot.generationRequestId,
+      configRevision: snapshot.configRevision,
+      collaborativeInfluence: snapshot.collaborativeInfluence,
+      participantUserIds: snapshot.participantUserIds,
+      sharedConfig: snapshot.sharedConfig,
+    })).toEqual(snapshot);
 
     state.snapshot.sharedConfig.userGuidance = '事后篡改';
     expect(snapshot.sharedConfig.userGuidance).toBe('协作建议');

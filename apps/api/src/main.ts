@@ -15,6 +15,7 @@ import type { ArenaRoomHttpDependencies } from '#/arena-room/room-http';
 import { createRoomActorRegistry } from '#/arena-room/room-actor-registry';
 import { createArenaRoomMembershipService } from '#/arena-room/room-membership-service';
 import { createArenaRoomProposalService } from '#/arena-room/room-proposal-service';
+import { createArenaRoomGenerationService } from '#/arena-room/room-generation-service';
 import {
   createArenaRoomTicketCodec,
   createArenaRoomTicketSignatureService,
@@ -61,7 +62,7 @@ if (process.env.HONO_CONFIG_CHECK_ONLY === 'true') {
   );
   await redis.connect();
   configureDefaultNodeHostedD1ClientResolver(getHonoPrimaryD1Client);
-  configureHonoArenaGenerationRuntime(redis, { observer: telemetry });
+  const roomGenerationPort = configureHonoArenaGenerationRuntime(redis, { observer: telemetry });
   const roomStore = redis.getRoomStore();
   const roomDirectory = createArenaRoomDirectoryService({
     authority: roomStore,
@@ -77,9 +78,20 @@ if (process.env.HONO_CONFIG_CHECK_ONLY === 'true') {
   const roomMemberships = createArenaRoomMembershipService({
     actors: roomActors,
   });
+  const roomReferences = createArenaDataCardRefVerifier({
+    getClient: getHonoPrimaryD1Client,
+  });
   const roomProposals = createArenaRoomProposalService({
     memberships: roomMemberships,
-    references: createArenaDataCardRefVerifier({ getClient: getHonoPrimaryD1Client }),
+    references: roomReferences,
+  });
+  const roomGenerations = createArenaRoomGenerationService({
+    memberships: roomMemberships,
+    references: roomReferences,
+    generation: roomGenerationPort,
+    onBackgroundError: () => {
+      console.error('[hono][room-generation] publisher task failed');
+    },
   });
   const roomWebSocketAuthority = config.arenaMultiplayerEnabled
     ? createArenaRoomWebSocketAuthority({
@@ -100,6 +112,7 @@ if (process.env.HONO_CONFIG_CHECK_ONLY === 'true') {
         }),
         memberships: roomMemberships,
         proposals: roomProposals,
+        generations: roomGenerations,
         directory: roomDirectory,
         websocketAuthority: roomWebSocketAuthority,
         rateLimit: ({ operation, accountUserId, roomId, limit, windowSeconds }) => (
