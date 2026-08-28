@@ -100,9 +100,9 @@ read authority / current state
 | `GMR-04` Node WSS security skeleton | `DONE` | GMR-03 | Node WS bootstrap + upgrade/security/backpressure | 不做产品 UI |
 | `GMR-05` ticket/membership/reconnect/lifecycle | `DONE` | GMR-04 | membership/connection/epoch recovery | 不做 generation fan-out |
 | `GMR-06` D1 directory/discovery | `DONE` | GMR-05 | derived directory + orphan cleanup | 不执行生产 migration |
-| `GMR-07` Arena room UI | `READY` | GMR-05 | feature-flagged create/join/status/reconnect | 不激活 production |
-| `GMR-08` Proposal E2E | `BLOCKED` | GMR-05,GMR-07 | typed Proposal server/UI 闭环 | 不扩展 private sharing |
-| `GMR-09` generation publisher | `BLOCKED` | GMR-03,GMR-05,GMR-07 | single producer + Room safe fan-out/resync | 不复制 AI lifecycle |
+| `GMR-07` Arena room UI | `DONE` | GMR-05 | feature-flagged create/join/status/reconnect | 不激活 production |
+| `GMR-08` Proposal E2E | `READY` | GMR-05,GMR-07 | typed Proposal server/UI 闭环 | 不扩展 private sharing |
+| `GMR-09` generation publisher | `READY` | GMR-03,GMR-05,GMR-07 | single producer + Room safe fan-out/resync | 不复制 AI lifecycle |
 | `GMR-10` hardening/fault/load audit | `BLOCKED` | GMR-06,GMR-08,GMR-09 | telemetry + failure drills + v1 exit audit | 不自动进入生产 |
 | `GMR-11` production activation review | `DEFERRED` | GMR-10 + Production Gate | 独立生产 go/no-go | 必须人工/平台授权 |
 | `GMR-H` multi-instance / DO evaluation | `DEFERRED` | 真实指标触发 | 新 ADR/PoC 决策 | v1 不预建 |
@@ -522,6 +522,32 @@ validate -> pure derive -> conditional checkpoint
 - reconnect/degraded copy 清晰；
 - auth/permission UI 与 server contract 对齐；
 - accessibility/interaction tests 通过。
+
+**Evidence（2026-08-28）**
+
+- Goal ID：`GMR-07`；source SHA：`34e8868107efc921e6b99a450107396716639e56`；
+- product entry：仅在既有 `/arena` 增加 feature-flagged 多人面板；未登录、flag off 与 `/arena-stream` 均不发
+  Room 请求或建立 WSS，production/preview 对启用值继续启动时 fail closed；
+- HTTP/authority：新增 create/list/join/session/ticket/leave/close 受鉴权 contract，严格 body、Origin/cookie mutation
+  guard、Redis 限速与 `no-store`；create/join 从同一已提交状态返回 session，leave/close 携带并校验
+  `expectedRoomEpoch`，ticket role hint 漂移在消费 jti 前拒绝；
+- client/replay：create/join 网络、5xx 或畸形 success 进入 `ROOM_RESULT_UNKNOWN` 且不自动重放；unknown create
+  与 unknown join 分离，前者只能由显式 reset/access transition 清除；reconnect 只使用 fresh ticket + cursor，validated
+  control frame 才重置预算，重复 1013 有界；epoch/sequence gap 进入 snapshot/reconnect；
+- UI：呈现 create/find/join、room/member/status、leave/close、reconnecting/degraded/replacement/unknown 状态；同步锁
+  阻止 async create 双击；只通过 `ArenaRoomSharedConfig` 白名单投影同步 BattleStore，不传私有卡完整内容、Provider
+  配置、credential、生成结果或 UI-only 状态；
+- validation：contracts `129/129`、API `354/354`、Web 当前 HEAD `1932/1932`、真实 WSS authority upgrade、
+  contracts/API/Web typecheck/lint/build、workspace boundary/generated/naming/Hosted DR gates、Next production build 与完整
+  `pnpm ci:verify` 通过；最后 wiring/unknown-state delta 另以真实 hook/client/auth/fake fetch+WebSocket interaction tests、
+  完整 Web suite、typecheck、lint 与 `git diff --check` 复验；
+- independent review：architecture/compatibility/replay/data、security/authority/replay 与 test adequacy 最终均为
+  Critical `0` / Important `0` / Minor `0`；create/join post-commit unknown、epoch-fenced exit、1013 reconnect budget、
+  production wiring、async double-click、close mapping 和 unknown-operation isolation findings 已全部关闭；
+- production/schema/secret/release：新增公开 Room HTTP contract、Web client 与 disabled-by-default UI；没有 production
+  deploy/cutover、remote migration/write、production Redis 操作、secret/Access/credential 变更、push、release 或 tag；
+- open findings：无；next READY Goals：`GMR-08`、`GMR-09`；按冲突最小顺序先执行 `GMR-08`。完整证据见
+  [GMR-07 实施与审查整改日志](../logs/2026-08-28_131500_Arena多人GMR-07房间产品入口与UI实施审查整改日志.md)。
 
 ### GMR-08 Proposal E2E
 
