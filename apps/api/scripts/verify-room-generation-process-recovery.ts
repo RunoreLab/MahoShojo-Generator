@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
@@ -19,6 +19,7 @@ import { createArenaRoomGenerationService } from '../src/arena-room/room-generat
 import { createRoomActorRegistry } from '../src/arena-room/room-actor-registry';
 import { createArenaRoomMembershipService } from '../src/arena-room/room-membership-service';
 import { RedisRuntime } from '../src/redis/runtime';
+import { requireSafeRoomVerifierPrefix } from './room-verifier-safety';
 
 const redisUrl = process.env.REDIS_URL?.trim();
 if (!redisUrl) throw new Error('Room generation process verifier 需要 REDIS_URL');
@@ -40,13 +41,17 @@ if (
   throw new Error('Room generation process verifier 只允许连接 loopback Redis');
 }
 
-const keyPrefix = process.env.ROOM_REDIS_VERIFY_KEY_PREFIX?.trim();
-if (!keyPrefix || !/^[a-z0-9_-]{1,32}$/u.test(keyPrefix)) {
-  throw new Error('ROOM_REDIS_VERIFY_KEY_PREFIX 必须是安全环境标识');
-}
+const keyPrefix = requireSafeRoomVerifierPrefix({
+  environmentName: 'ROOM_REDIS_VERIFY_KEY_PREFIX',
+  maxLength: 32,
+  value: process.env.ROOM_REDIS_VERIFY_KEY_PREFIX,
+});
 
 const token = process.env.ROOM_GENERATION_PROCESS_VERIFY_TOKEN?.trim() || randomUUID();
-const safeToken = token.replace(/[^a-z0-9]/giu, '').toLowerCase().slice(0, 18);
+if (!/^[a-zA-Z0-9_-]{8,64}$/u.test(token)) {
+  throw new Error('ROOM_GENERATION_PROCESS_VERIFY_TOKEN 必须是安全 opaque token');
+}
+const safeToken = createHash('sha256').update(token).digest('hex').slice(0, 24);
 const roomId = `room-process-${safeToken}`;
 const generationRequestId = `request-process-${safeToken}`;
 const secretCanary = `process-secret-${token}`;

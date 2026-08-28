@@ -31,6 +31,7 @@ import {
 } from '../src/arena-room/room-generation-service';
 import { createArenaRoomMembershipService } from '../src/arena-room/room-membership-service';
 import { RedisRuntime } from '../src/redis/runtime';
+import { requireSafeRoomVerifierPrefix } from './room-verifier-safety';
 
 const redisUrl = process.env.REDIS_URL?.trim();
 if (!redisUrl) throw new Error('Room generation Redis verifier 需要 REDIS_URL');
@@ -50,10 +51,11 @@ if (
   || !['localhost', '127.0.0.1', '[::1]'].includes(parsedUrl.hostname)
 ) throw new Error('Room generation Redis verifier 只允许连接 loopback Redis');
 
-const keyPrefix = process.env.ROOM_GENERATION_REDIS_VERIFY_KEY_PREFIX?.trim();
-if (!keyPrefix || !/^[a-z0-9_-]{1,32}$/u.test(keyPrefix)) {
-  throw new Error('ROOM_GENERATION_REDIS_VERIFY_KEY_PREFIX 必须是安全环境标识');
-}
+const keyPrefix = requireSafeRoomVerifierPrefix({
+  environmentName: 'ROOM_GENERATION_REDIS_VERIFY_KEY_PREFIX',
+  maxLength: 32,
+  value: process.env.ROOM_GENERATION_REDIS_VERIFY_KEY_PREFIX,
+});
 
 const token = randomUUID();
 const roomId = `room-generation-durable-${token}`;

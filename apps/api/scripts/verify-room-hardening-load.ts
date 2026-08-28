@@ -45,6 +45,7 @@ import {
   type RedisRuntimeObserver,
   type RedisServerStatsObservation,
 } from '../src/redis/runtime';
+import { requireSafeRoomVerifierPrefix } from './room-verifier-safety';
 
 const OUTBOUND_QUEUE_MAX_BYTES = 256 * 1_024;
 const ACTOR_QUEUE_MAX_COMMANDS = 64;
@@ -67,11 +68,11 @@ type HardeningLoadEnvironment = Readonly<{
 }>;
 
 const safeKeyPrefix = (value: string | undefined): string => {
-  const keyPrefix = value?.trim();
-  if (!keyPrefix || !/^[a-z0-9_-]{1,32}$/u.test(keyPrefix)) {
-    throw new Error('ROOM_HARDENING_LOAD_KEY_PREFIX 必须是安全环境标识');
-  }
-  return keyPrefix;
+  return requireSafeRoomVerifierPrefix({
+    environmentName: 'ROOM_HARDENING_LOAD_KEY_PREFIX',
+    maxLength: 32,
+    value,
+  });
 };
 
 export const parseRoomHardeningLoadEnvironment = (
@@ -739,7 +740,16 @@ const runRoomHardeningLoadVerifier = async (
     const workloadActorLatency = durationSummary(observer.actorOperationDurationsMs);
     const workloadCheckpointLatency = durationSummary(observer.checkpointDurationsMs);
     const workloadCheckpointBytesPeak = Math.max(0, ...observer.checkpointBytes);
-    if (appliedActorOperations < HARDENING_LOAD_WORKLOAD.totalAuthorityTransitions) {
+    const expectedActorOperations = HARDENING_LOAD_WORKLOAD.totalAuthorityTransitions
+      + HARDENING_LOAD_WORKLOAD.rooms;
+    const expectedClientMessages = HARDENING_LOAD_WORKLOAD.totalSockets
+      + HARDENING_LOAD_WORKLOAD.rooms
+        * HARDENING_LOAD_WORKLOAD.configTransitionsPerRoom
+        * HARDENING_LOAD_WORKLOAD.socketsPerRoom;
+    if (
+      appliedActorOperations !== expectedActorOperations
+      || clientCounters.messages !== expectedClientMessages
+    ) {
       throw new Error('ROOM_HARDENING_LOAD_APPLIED_TRANSITIONS_INVALID');
     }
     if (errorCount !== 0) throw new Error('ROOM_HARDENING_LOAD_ERRORS_OBSERVED');

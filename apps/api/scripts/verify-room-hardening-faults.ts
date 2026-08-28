@@ -30,6 +30,7 @@ import {
 } from '../src/arena-room/room-websocket-transport';
 import type { ArenaRoomRuntimeObservation } from '../src/arena-room/runtime-observer';
 import { RedisRuntime } from '../src/redis/runtime';
+import { requireSafeRoomVerifierPrefix } from './room-verifier-safety';
 
 const redisUrl = process.env.REDIS_URL?.trim();
 if (!redisUrl) throw new Error('Room hardening faults verifier 需要 REDIS_URL');
@@ -49,10 +50,11 @@ if (
   || !['localhost', '127.0.0.1', '[::1]'].includes(parsedUrl.hostname)
 ) throw new Error('Room hardening faults verifier 只允许连接 loopback Redis');
 
-const basePrefix = process.env.ROOM_HARDENING_VERIFY_KEY_PREFIX?.trim();
-if (!basePrefix || !/^[a-z0-9_-]{1,20}$/u.test(basePrefix)) {
-  throw new Error('ROOM_HARDENING_VERIFY_KEY_PREFIX 必须是安全环境标识');
-}
+const basePrefix = requireSafeRoomVerifierPrefix({
+  environmentName: 'ROOM_HARDENING_VERIFY_KEY_PREFIX',
+  maxLength: 20,
+  value: process.env.ROOM_HARDENING_VERIFY_KEY_PREFIX,
+});
 
 const scenarioPrefixes = Object.freeze({
   restart: `${basePrefix}_restart`,

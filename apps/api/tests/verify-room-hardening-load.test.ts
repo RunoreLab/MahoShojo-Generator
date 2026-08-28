@@ -134,7 +134,13 @@ describe('Room hardening load verifier contract', () => {
       REDIS_URL: 'redis://127.0.0.1:6379',
       ROOM_HARDENING_LOAD_VERIFY: 'true',
       ROOM_HARDENING_LOAD_KEY_PREFIX: '*',
-    })).toThrow(/安全环境标识/u);
+    })).toThrow(/安全非默认环境标识/u);
+    expect(() => parseRoomHardeningLoadEnvironment({
+      HOSTED_API_ENVIRONMENT: 'local',
+      REDIS_URL: 'redis://127.0.0.1:6379',
+      ROOM_HARDENING_LOAD_VERIFY: 'true',
+      ROOM_HARDENING_LOAD_KEY_PREFIX: 'production',
+    })).toThrow(/安全非默认环境标识/u);
   });
 
   test('隔离清理 pattern 只覆盖显式 Room namespace', () => {
@@ -143,7 +149,7 @@ describe('Room hardening load verifier contract', () => {
       'mahoshojo:room-directory:v1:gmr10-load-test:*',
       'mahoshojo:room-ticket:v1:gmr10-load-test:*',
     ]);
-    expect(() => isolatedRoomKeyPatterns('*')).toThrow(/安全环境标识/u);
+    expect(() => isolatedRoomKeyPatterns('*')).toThrow(/安全非默认环境标识/u);
   });
 
   test('verifier 源码不包含 Redis 宽泛清理命令', async () => {
@@ -169,20 +175,25 @@ describe('Room hardening load verifier safety boundary', () => {
     expect(result.stderr).toContain('只允许连接 loopback Redis');
   });
 
-  test('含通配符的 prefix 在任何 TCP/Redis 副作用前 fail closed', async () => {
-    const result = await runAgainstTcpSentinel({
-      redisHostname: '127.0.0.1',
-      keyPrefix: '*',
-    });
+  test.each(['*', 'production'])(
+    '危险 prefix %j 在任何 TCP/Redis 副作用前 fail closed',
+    async (keyPrefix) => {
+      const result = await runAgainstTcpSentinel({
+        redisHostname: '127.0.0.1',
+        keyPrefix,
+      });
 
-    expect(result).toMatchObject({
-      connections: 0,
-      exitCode: 1,
-      signal: null,
-      timedOut: false,
-    });
-    expect(result.stderr).toContain('ROOM_HARDENING_LOAD_KEY_PREFIX 必须是安全环境标识');
-  });
+      expect(result).toMatchObject({
+        connections: 0,
+        exitCode: 1,
+        signal: null,
+        timedOut: false,
+      });
+      expect(result.stderr).toContain(
+        'ROOM_HARDENING_LOAD_KEY_PREFIX 必须是安全非默认环境标识',
+      );
+    },
+  );
 
   test('production target 在任何 TCP/Redis 副作用前 fail closed', async () => {
     const result = await runAgainstTcpSentinel({

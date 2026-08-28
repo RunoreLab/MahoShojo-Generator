@@ -68,14 +68,19 @@ describe('Room hardening faults verifier safety boundary', () => {
     expect(result.stderr).toContain('只允许连接 loopback Redis');
   });
 
-  test('危险 key prefix 在任何 TCP/Redis 副作用前 fail closed', async () => {
-    const result = await runAgainstTcpSentinel({
-      redisHostname: '127.0.0.1',
-      keyPrefix: '*',
-    });
-    expect(result).toMatchObject({ connections: 0, exit: 1 });
-    expect(result.stderr).toContain('ROOM_HARDENING_VERIFY_KEY_PREFIX 必须是安全环境标识');
-  });
+  test.each(['*', 'production'])(
+    '危险 key prefix %j 在任何 TCP/Redis 副作用前 fail closed',
+    async (keyPrefix) => {
+      const result = await runAgainstTcpSentinel({
+        redisHostname: '127.0.0.1',
+        keyPrefix,
+      });
+      expect(result).toMatchObject({ connections: 0, exit: 1 });
+      expect(result.stderr).toContain(
+        'ROOM_HARDENING_VERIFY_KEY_PREFIX 必须是安全非默认环境标识',
+      );
+    },
+  );
 
   test('production target 在任何 TCP/Redis 副作用前 fail closed', async () => {
     const result = await runAgainstTcpSentinel({

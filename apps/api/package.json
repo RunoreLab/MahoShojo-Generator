@@ -10,7 +10,7 @@
     "dev": "node scripts/generate-route-manifest.mjs && tsx watch src/index.ts",
     "start": "node dist/index.mjs",
     "test": "vitest run --config vitest.config.ts",
-    "lint": "eslint src tests scripts/verify-room-redis.ts scripts/verify-room-generation-redis.ts scripts/verify-room-generation-process-recovery.ts scripts/verify-room-hardening-faults.ts scripts/verify-room-hardening-load.ts --config eslint.config.mjs",
+    "lint": "eslint src tests scripts/room-verifier-safety.ts scripts/verify-room-redis.ts scripts/verify-room-generation-redis.ts scripts/verify-room-generation-process-recovery.ts scripts/verify-room-hardening-faults.ts scripts/verify-room-hardening-load.ts --config eslint.config.mjs",
     "build": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.room-verifier.json",
     "build:bundle": "node scripts/generate-route-manifest.mjs && node scripts/build.mjs",
     "routes": "node scripts/generate-route-manifest.mjs",

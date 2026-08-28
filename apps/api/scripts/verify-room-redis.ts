@@ -50,6 +50,7 @@ import {
   RoomWebSocketGateway,
 } from '../src/arena-room/room-websocket-gateway';
 import { RedisRuntime } from '../src/redis/runtime';
+import { requireSafeRoomVerifierPrefix } from './room-verifier-safety';
 
 const redisUrl = process.env.REDIS_URL?.trim();
 if (!redisUrl) throw new Error('Room Redis verifier 需要 REDIS_URL');
@@ -84,10 +85,11 @@ const token = suppliedToken || randomUUID();
 if (!/^[a-zA-Z0-9_-]{1,64}$/u.test(token)) {
   throw new Error('ROOM_REDIS_VERIFY_TOKEN 必须是安全 opaque token');
 }
-const keyPrefix = process.env.ROOM_REDIS_VERIFY_KEY_PREFIX?.trim();
-if (!keyPrefix || !/^[a-z0-9_-]{1,32}$/u.test(keyPrefix)) {
-  throw new Error('ROOM_REDIS_VERIFY_KEY_PREFIX 必须是安全环境标识');
-}
+const keyPrefix = requireSafeRoomVerifierPrefix({
+  environmentName: 'ROOM_REDIS_VERIFY_KEY_PREFIX',
+  maxLength: 32,
+  value: process.env.ROOM_REDIS_VERIFY_KEY_PREFIX,
+});
 
 const TIMESTAMP = '2026-08-28T00:00:00.000Z';
 const NEXT_TIMESTAMP = '2026-08-28T00:01:00.000Z';

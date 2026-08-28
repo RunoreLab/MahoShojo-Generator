@@ -11,6 +11,8 @@ const CHILD_TIMEOUT_MS = 10_000;
 const runAgainstTcpSentinel = async (input: Readonly<{
   verifier: keyof typeof verifierPaths;
   hostedApiEnvironment: string;
+  generationKeyPrefix?: string;
+  roomKeyPrefix?: string;
   roomRedisVerify?: string;
 }>) => {
   let connections = 0;
@@ -35,9 +37,10 @@ const runAgainstTcpSentinel = async (input: Readonly<{
       NODE_ENV: 'test',
       REDIS_URL: `redis://127.0.0.1:${address.port}`,
       ROOM_REDIS_VERIFY: input.roomRedisVerify ?? 'true',
-      ROOM_REDIS_VERIFY_KEY_PREFIX: 'gmr10-room-safety',
+      ROOM_REDIS_VERIFY_KEY_PREFIX: input.roomKeyPrefix ?? 'gmr10-room-safety',
       ROOM_GENERATION_REDIS_VERIFY: 'true',
-      ROOM_GENERATION_REDIS_VERIFY_KEY_PREFIX: 'gmr10-generation-safety',
+      ROOM_GENERATION_REDIS_VERIFY_KEY_PREFIX:
+        input.generationKeyPrefix ?? 'gmr10-generation-safety',
     },
     stdio: ['ignore', 'ignore', 'pipe'],
   });
@@ -95,5 +98,23 @@ describe('Room Redis verifier opt-in safety', () => {
       timedOut: false,
     });
     expect(result.stderr).toContain('只允许 ROOM_REDIS_VERIFY=true');
+  });
+});
+
+describe.each(['room', 'generation'] as const)('%s Redis verifier prefix safety', (verifier) => {
+  test('保留 production prefix 在任何 Redis 副作用前 fail closed', async () => {
+    const result = await runAgainstTcpSentinel({
+      verifier,
+      hostedApiEnvironment: 'local',
+      roomKeyPrefix: 'production',
+      generationKeyPrefix: 'production',
+    });
+    expect(result).toMatchObject({
+      connections: 0,
+      exitCode: 1,
+      signal: null,
+      timedOut: false,
+    });
+    expect(result.stderr).toContain('必须是安全非默认环境标识');
   });
 });
