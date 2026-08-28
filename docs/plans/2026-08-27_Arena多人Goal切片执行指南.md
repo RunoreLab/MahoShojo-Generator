@@ -100,15 +100,15 @@ read authority / current state
 | `GMR-04` Node WSS security skeleton | `DONE` | GMR-03 | Node WS bootstrap + upgrade/security/backpressure | 不做产品 UI |
 | `GMR-05` ticket/membership/reconnect/lifecycle | `DONE` | GMR-04 | membership/connection/epoch recovery | 不做 generation fan-out |
 | `GMR-06` D1 directory/discovery | `DONE / SUPERSEDED` | GMR-05 | 历史 derived directory 实现，保留归档 | 不恢复为当前目标态 |
-| `GMR-06R` Redis-only directory amendment | `IN_PROGRESS` | GMR-06,GMR-07,GMR-08 | Redis 原子 directory index + 移除 D1/schema | 不执行远程 schema/Redis 写 |
+| `GMR-06R` Redis-only directory amendment | `DONE` | GMR-06,GMR-07,GMR-08 | Redis 原子 directory index + 移除 D1/schema | 不执行远程 schema/Redis 写 |
 | `GMR-07` Arena room UI | `DONE` | GMR-05 | feature-flagged create/join/status/reconnect | 不激活 production |
 | `GMR-08` Proposal E2E | `DONE` | GMR-05,GMR-07 | typed Proposal server/UI 闭环 | 不扩展 private sharing |
-| `GMR-09` generation publisher | `BLOCKED` | GMR-03,GMR-05,GMR-06R,GMR-07 | single producer + Room safe fan-out/resync | 不复制 AI lifecycle |
+| `GMR-09` generation publisher | `READY` | GMR-03,GMR-05,GMR-06R,GMR-07 | single producer + Room safe fan-out/resync | 不复制 AI lifecycle |
 | `GMR-10` hardening/fault/load audit | `BLOCKED` | GMR-06R,GMR-08,GMR-09 | telemetry + failure drills + v1 exit audit | 不自动进入生产 |
 | `GMR-11` production activation review | `DEFERRED` | GMR-10 + Production Gate | 独立生产 go/no-go | 必须人工/平台授权 |
 | `GMR-H` multi-instance / DO evaluation | `DEFERRED` | 真实指标触发 | 新 ADR/PoC 决策 | v1 不预建 |
 
-`GMR-06` 与 `GMR-07` 在 GMR-05 后 MAY 并行，但一个 `/goal` 仍只执行其中一个。2026-08-28 的 Redis-only superseding 修订把 `GMR-06R` 加为后续 generation/hardening 前置门禁；`GMR-08` 的已完成结果保留，`GMR-09` 必须等 `GMR-06R` 关闭后继续。
+`GMR-06` 与 `GMR-07` 在 GMR-05 后 MAY 并行，但一个 `/goal` 仍只执行其中一个。2026-08-28 的 Redis-only superseding 修订把 `GMR-06R` 加为后续 generation/hardening 前置门禁；`GMR-08` 的已完成结果保留。GMR-06R 已关闭，`GMR-09` 现为下一 READY Goal。
 
 ## 6. Goal 详细定义
 
@@ -529,6 +529,17 @@ validate -> pure derive -> conditional checkpoint
 - architecture/security/data/test-adequacy 独立复审关闭全部 Critical/Important；
 - 完整 checkpoint 与命令见
   [Redis-only directory 清理实施计划](./2026-08-28_154000_Arena多人RedisOnly目录清理实施计划.md)。
+
+**2026-08-28 完成证据**
+
+- Redis-only checkpoint/record/index 原子 lifecycle、exact authority revalidation、bounded pagination 与 stale cleanup
+  均已实现；仓库 runtime/schema 范围不再含 D1 Room directory；
+- 本机 Redis 7.0.15 完整 verifier 与 AOF restart、API `38/382`、workspace `pnpm ci:verify` 通过；production D1
+  只读 metadata 审计确认未应用 `0014`/未建表，preview D1 为 `NOT_APPLICABLE`；
+- architecture/data/compatibility、security/authority/replay/data、test adequacy 最终 Critical `0` / Important `0`，
+  Minor 已修复或给出不阻塞 stopping condition 的明确理由；
+- open findings：无；next READY Goal：`GMR-09`。完整证据见
+  [GMR-06R 实施与审查整改日志](../logs/2026-08-28_181500_Arena多人GMR06R_RedisOnly目录实施与审查整改日志.md)。
 
 ### GMR-07 Arena room UI
 
