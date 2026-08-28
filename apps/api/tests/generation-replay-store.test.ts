@@ -368,6 +368,7 @@ describe('RedisGenerationReplayStore', () => {
         type: 'done',
         data: { status: 'completed', ok: true, resultRef: 'r2://report/1' },
       },
+      clearTerminalSnapshot: true as const,
       now: reserveInput.now,
     };
 
@@ -388,6 +389,32 @@ describe('RedisGenerationReplayStore', () => {
       'mahoshojo:gen:v1:generation-1234:state',
       'mahoshojo:gen:v1:generation-1234:events',
     ]);
+  });
+
+  it('在执行 Lua 前拒绝 marker-only 或未决定 snapshot 的 terminal mutation', async () => {
+    const client = createClient();
+    const store = createRedisGenerationReplayStore({ getClient: () => client });
+    const unsafe = store as unknown as {
+      markTerminal(input: Record<string, unknown>): Promise<unknown>;
+    };
+
+    await expect(unsafe.markTerminal({
+      generationId: 'generation-1234',
+      producerToken: reserveInput.producerToken,
+      terminal: { status: 'failed', code: 'GENERATION_FAILED' },
+      now: reserveInput.now,
+    })).rejects.toThrow('REDIS_GENERATION_TERMINAL_EVIDENCE_INVALID');
+    await expect(unsafe.markTerminal({
+      generationId: 'generation-1234',
+      producerToken: reserveInput.producerToken,
+      terminal: { status: 'failed', code: 'GENERATION_FAILED' },
+      terminalEvent: {
+        type: 'error',
+        data: { ok: false, status: 'failed', code: 'GENERATION_FAILED' },
+      },
+      now: reserveInput.now,
+    })).rejects.toThrow('REDIS_GENERATION_TERMINAL_EVIDENCE_INVALID');
+    expect(client.eval).not.toHaveBeenCalled();
   });
 
   it('terminal snapshot 超预算时在同一 Lua CAS 清除旧 running snapshot', async () => {
@@ -445,6 +472,31 @@ describe('RedisGenerationReplayStore', () => {
     await expect(store.readState({ generationId: 'generation-1234' })).resolves.toMatchObject({
       terminal,
     });
+
+    vi.mocked(client.get).mockResolvedValue(JSON.stringify({
+      actorHash: 'actor-hash',
+      reservationKey: 'reservation-key',
+      generationId: 'generation-1234',
+      generationRequestId: 'request-1234',
+      payloadHash: 'payload-sha256',
+      producerToken: reserveInput.producerToken,
+      status: 'failed',
+      lastEventId: '12-0',
+      updatedAt: reserveInput.now,
+      leaseExpiresAt: null,
+      snapshot: {
+        status: 'running',
+        markdown: 'stale partial',
+        reasoning: '',
+        lastEventId: '11-0',
+        updatedAt: reserveInput.now,
+      },
+      terminal,
+      cancelRequested: false,
+    }));
+    await expect(store.readState({ generationId: 'generation-1234' })).rejects.toThrow(
+      'REDIS_GENERATION_STATE_INVALID',
+    );
 
     vi.mocked(client.get).mockResolvedValue(JSON.stringify({
       actorHash: 'actor-hash',

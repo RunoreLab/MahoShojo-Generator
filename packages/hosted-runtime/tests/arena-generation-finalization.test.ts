@@ -152,7 +152,11 @@ describe('Arena generation finalization', () => {
       status: 'failed',
       errorCode: 'ARENA_R2_STORAGE_FAILED',
       resultRef: null,
+      markdown: '',
     }));
+    expect(JSON.stringify(vi.mocked(failedPorts.claimTerminal).mock.calls)).not.toContain(
+      input.markdown,
+    );
     expect(failedPorts.completeTerminal).toHaveBeenCalledOnce();
     expect(failedPorts.settleRatings).not.toHaveBeenCalled();
   });

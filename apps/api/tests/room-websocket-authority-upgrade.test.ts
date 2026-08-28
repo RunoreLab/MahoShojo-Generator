@@ -21,7 +21,9 @@ import {
   createRoomActorRegistry,
   type RoomActorCheckpointStore,
 } from '#/arena-room/room-actor-registry';
+import { createRoomGenerationPublisher } from '#/arena-room/room-generation-publisher';
 import { createArenaRoomMembershipService } from '#/arena-room/room-membership-service';
+import type { ArenaRoomGenerationEvent } from '#/arena-generation/room-generation-port';
 import type { RedisRoomTicketReplayStore } from '#/arena-room/redis-room-ticket-replay-store';
 import {
   createArenaRoomTicketCodec,
@@ -323,6 +325,76 @@ describe('Room signed-ticket real Node upgrade', () => {
         within(memberStoryMessage, 'real-websocket-member-story'),
         within(hostStoryMessage, 'real-websocket-host-story'),
       ])).resolves.toEqual([story, story]);
+
+      const memberPublisherStory = nextMatchingMessage(socket, (message) => (
+        message.type === 'story.delta'
+        && message.generationId === 'generation-real-ws-story'
+        && message.payload.delta === '房主断线后仍由服务器继续发布'
+      ));
+      const memberPublisherTerminal = nextMatchingMessage(socket, (message) => (
+        message.type === 'generation.completed'
+        && message.payload.generationId === 'generation-real-ws-story'
+      ));
+      let producerStarts = 0;
+      let generationController!: ReadableStreamDefaultController<ArenaRoomGenerationEvent>;
+      const generationEvents = new ReadableStream<ArenaRoomGenerationEvent>({
+        start(controller) {
+          producerStarts += 1;
+          generationController = controller;
+        },
+      });
+      const publisher = createRoomGenerationPublisher({
+        actor,
+        authority: publisherAuthority,
+        now: () => Date.parse(timestamp),
+      });
+      const publishing = publisher.attach({
+        generationId: 'generation-real-ws-story',
+        generationRequestId: 'request-real-ws-story',
+        events: generationEvents,
+      });
+
+      const hostDisconnected = nextClose(openedHost.socket);
+      openedHost.socket.close(1000, 'host-client-disconnected');
+      await expect(within(hostDisconnected, 'host-client-disconnected')).resolves.toMatchObject({
+        code: 1000,
+      });
+      generationController.enqueue({
+        id: 'publisher-1',
+        type: 'markdown',
+        chunk: '房主断线后仍由服务器继续发布',
+      });
+      generationController.enqueue({
+        id: 'publisher-2',
+        type: 'done',
+        status: 'completed',
+        generationRecordId: 'generation-real-ws-story',
+        resultAvailable: true,
+      });
+      generationController.close();
+
+      await expect(within(publishing, 'server-owned-publisher')).resolves.toEqual({
+        kind: 'completed',
+        generationRecordId: 'generation-real-ws-story',
+      });
+      await expect(Promise.all([
+        within(memberPublisherStory, 'member-publisher-story-after-host-disconnect'),
+        within(memberPublisherTerminal, 'member-publisher-terminal-after-host-disconnect'),
+      ])).resolves.toEqual([
+        expect.objectContaining({
+          type: 'story.delta',
+          chunkSeq: 1,
+          payload: { delta: '房主断线后仍由服务器继续发布' },
+        }),
+        expect.objectContaining({
+          type: 'generation.completed',
+          payload: expect.objectContaining({
+            generationId: 'generation-real-ws-story',
+            generationRecordId: 'generation-real-ws-story',
+          }),
+        }),
+      ]);
+      expect(producerStarts).toBe(1);
 
       await expect(within(new Promise<number>((resolve, reject) => {
         const replay = new WebSocket(

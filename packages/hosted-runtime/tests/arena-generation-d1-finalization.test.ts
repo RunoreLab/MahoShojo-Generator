@@ -348,6 +348,25 @@ describe('Arena D1/R2 finalization ports', () => {
     expect(client.prepare).toHaveBeenCalledWith(expect.stringContaining('INSERT OR IGNORE'));
   });
 
+  it('does not persist failed terminal markdown as D1 preview or output metrics', async () => {
+    const client = sequentialD1([result([], 1)]);
+    const ports = createNodeArenaGenerationFinalizationPorts({
+      getD1Client: () => client,
+      now: () => new Date('2026-08-25T04:00:00.000Z'),
+    });
+    const failedMarkdown = 'failed terminal body must not enter D1 preview';
+
+    await ports.claimTerminal({
+      ...claimInput,
+      status: 'failed',
+      errorCode: 'ARENA_R2_STORAGE_FAILED',
+      resultRef: null,
+      markdown: failedMarkdown,
+    });
+
+    expect(JSON.stringify(client.boundCalls)).not.toContain(failedMarkdown);
+  });
+
   it('reconciles an indeterminate INSERT error before reporting terminal failure', async () => {
     const ownerHash = await crypto.subtle.digest(
       'SHA-256',
@@ -601,7 +620,7 @@ ORDER BY sort_index
       id: 'generation-1',
       status: 'failed',
       updated_at: '2026-08-25T04:00:00.000Z',
-      output_preview: '',
+      output_preview: 'failed terminal body must remain private',
       extra_json: JSON.stringify({
         generationRequestId: 'request-1',
         generationOwnerHash: ownerHash,
@@ -617,7 +636,11 @@ ORDER BY sort_index
     await expect(store.readOwnedTerminal({
       generationId: 'generation-1',
       actorKey: 'anonymous:anon-id-1',
-    })).resolves.toMatchObject({ errorCode: 'AI_UPSTREAM_REQUEST_FAILED' });
+    })).resolves.toMatchObject({
+      errorCode: 'AI_UPSTREAM_REQUEST_FAILED',
+      markdown: '',
+      contentAvailable: true,
+    });
   });
 
   it('marks completed terminal content unavailable instead of silently serving its preview', async () => {
@@ -651,7 +674,7 @@ ORDER BY sort_index
       generationId: 'generation-1',
       actorKey: 'anonymous:anon-id-1',
     })).resolves.toMatchObject({
-      markdown: 'truncated preview',
+      markdown: '',
       contentAvailable: false,
     });
   });

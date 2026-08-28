@@ -235,6 +235,9 @@ return 1
 
 const TERMINAL_SCRIPT = `
 -- GEN_TERMINAL_V2
+if ARGV[6] == '' then return redis.error_reply('GENERATION_TERMINAL_EVENT_REQUIRED') end
+if ARGV[7] == '' and ARGV[8] ~= '1' then return redis.error_reply('GENERATION_TERMINAL_SNAPSHOT_DECISION_REQUIRED') end
+if ARGV[7] ~= '' and ARGV[8] == '1' then return redis.error_reply('GENERATION_TERMINAL_SNAPSHOT_DECISION_CONFLICT') end
 local raw = redis.call('GET', KEYS[1])
 if not raw then return 0 end
 local state = cjson.decode(raw)
@@ -243,20 +246,21 @@ if state.terminal ~= nil and state.terminal ~= cjson.null then return 0 end
 if state.status ~= 'running' and state.status ~= 'reserved' and state.status ~= 'finalizing' then return -1 end
 if state.leaseExpiresAt == nil or state.leaseExpiresAt == cjson.null or state.leaseExpiresAt <= ARGV[3] then return -1 end
 local terminal = cjson.decode(ARGV[2])
-local terminalEventId = ''
-if ARGV[6] ~= '' then
-  local terminalEvent = cjson.decode(ARGV[6])
-  terminalEventId = redis.call(
-    'XADD', KEYS[2], '*',
-    'type', terminalEvent.type,
-    'data', cjson.encode(terminalEvent.data)
-  )
-  redis.call('XTRIM', KEYS[2], 'MAXLEN', ARGV[5])
-  state.lastEventId = terminalEventId
-end
+local terminalEvent = cjson.decode(ARGV[6])
+local terminalSnapshot = nil
 if ARGV[7] ~= '' then
-  local terminalSnapshot = cjson.decode(ARGV[7])
-  if terminalEventId ~= '' then terminalSnapshot.lastEventId = terminalEventId end
+  terminalSnapshot = cjson.decode(ARGV[7])
+  if terminalSnapshot.status ~= terminal.status then return redis.error_reply('GENERATION_TERMINAL_SNAPSHOT_STATUS_INVALID') end
+end
+local terminalEventId = redis.call(
+  'XADD', KEYS[2], '*',
+  'type', terminalEvent.type,
+  'data', cjson.encode(terminalEvent.data)
+)
+redis.call('XTRIM', KEYS[2], 'MAXLEN', ARGV[5])
+state.lastEventId = terminalEventId
+if terminalSnapshot ~= nil then
+  terminalSnapshot.lastEventId = terminalEventId
   state.snapshot = terminalSnapshot
 elseif ARGV[8] == '1' then
   state.snapshot = cjson.null
@@ -268,8 +272,7 @@ state.updatedAt = ARGV[3]
 redis.call('SET', KEYS[1], cjson.encode(state), 'PX', ARGV[4])
 redis.call('PEXPIRE', KEYS[2], ARGV[4])
 redis.call('PEXPIRE', state.reservationKey, ARGV[4])
-if terminalEventId ~= '' then return { 1, terminalEventId } end
-return 1
+return { 1, terminalEventId }
 `;
 
 const CANCEL_SCRIPT = `
@@ -498,6 +501,13 @@ const parseStoredState = (raw: string): StoredGenerationState => {
     || (preparationVersion !== null && !isArenaPreparationVersion(preparationVersion))
     || (terminal !== null && terminal.status !== parsed.status)
     || (terminal === null && isTerminalStatus(parsed.status))
+    || (terminal !== null && typeof parsed.lastEventId !== 'string')
+    || (terminal !== null && parsed.leaseExpiresAt !== null)
+    || (terminal !== null && snapshot !== null && (
+      snapshot.status !== terminal.status
+      || snapshot.lastEventId !== parsed.lastEventId
+      || (snapshot.terminalResultRef ?? null) !== (terminal.resultRef ?? null)
+    ))
   ) {
     throw new Error('REDIS_GENERATION_STATE_INVALID');
   }
@@ -880,6 +890,13 @@ export const createRedisGenerationReplayStore = (
     },
 
     async markTerminal(input) {
+      if (
+        !input.terminalEvent
+        || Boolean(input.terminalSnapshot) === (input.clearTerminalSnapshot === true)
+        || (input.terminalSnapshot && input.terminalSnapshot.status !== input.terminal.status)
+      ) {
+        throw new Error('REDIS_GENERATION_TERMINAL_EVIDENCE_INVALID');
+      }
       const raw = await options.getClient().eval(TERMINAL_SCRIPT, {
         keys: [stateKey(input.generationId), eventsKey(input.generationId)],
         arguments: [

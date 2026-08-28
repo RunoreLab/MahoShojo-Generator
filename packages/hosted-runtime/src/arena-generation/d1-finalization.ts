@@ -500,9 +500,9 @@ const materializeStoredTerminal = async (input: {
   const status = logicalTerminalStatus(input.row, extra);
   const requestId = stringOf(extra.generationRequestId);
   if (!status || !requestId) return null;
-  const resultRef = stringOf(extra.resultRef);
+  const resultRef = status === 'completed' ? stringOf(extra.resultRef) : null;
   const r2Key = stringOf(input.row['r2_key']);
-  let markdown = stringOf(input.row['output_preview']) ?? '';
+  let markdown = status === 'completed' ? stringOf(input.row['output_preview']) ?? '' : '';
   let contentAvailable = status !== 'completed';
   if (status === 'completed' && r2Key && resultRef) {
     if (input.objectStore) {
@@ -510,6 +510,7 @@ const materializeStoredTerminal = async (input: {
         markdown = await input.objectStore.getText(r2Key);
         contentAvailable = true;
       } catch {
+        markdown = '';
         contentAvailable = false;
       }
     }
@@ -637,8 +638,9 @@ ON CONFLICT(kind, owner_ref_id) DO UPDATE SET
       const pvp = recordOf(serverContext?.trustedPvpContext);
       const usage = recordOf(input.telemetry.usage);
       const extraJson = await buildExtraJson(input);
-      const markdownBytes = new TextEncoder().encode(input.markdown).byteLength;
-      const preview = input.markdown.slice(0, OUTPUT_PREVIEW_CHARS);
+      const terminalMarkdown = input.status === 'completed' ? input.markdown : '';
+      const markdownBytes = new TextEncoder().encode(terminalMarkdown).byteLength;
+      const preview = terminalMarkdown.slice(0, OUTPUT_PREVIEW_CHARS);
       let inserted: Awaited<ReturnType<ReturnType<NodeDataD1Client['prepare']>['run']>>;
       try {
         inserted = await client.prepare(`
@@ -697,9 +699,9 @@ VALUES (
         boundedString(input.telemetry.providerName, 128),
         boundedString(input.telemetry.providerType, 64),
         boundedString(input.telemetry.model, 256),
-        boundedString(report?.headline, 300) ?? headlineFromMarkdown(input.markdown),
-        boundedString(report?.winner, 300) ?? winnerFromMarkdown(input.markdown),
-        input.markdown.length,
+        boundedString(report?.headline, 300) ?? headlineFromMarkdown(terminalMarkdown),
+        boundedString(report?.winner, 300) ?? winnerFromMarkdown(terminalMarkdown),
+        terminalMarkdown.length,
         markdownBytes,
         numberOf(usage?.promptTokens),
         numberOf(usage?.completionTokens),

@@ -57,6 +57,13 @@ const generationRows = new Map<string, Record<string, unknown>>();
 const objectRows = new Map<string, Record<string, unknown>>();
 const cleanupClient = createClient({ url: redisUrl });
 cleanupClient.on('error', () => undefined);
+const isolatedKeyPatterns = [
+  `mahoshojo:room:v1:${keyPrefix}:*`,
+  `mahoshojo:room-directory:v1:${keyPrefix}:*`,
+  `mahoshojo:gen:v1:${keyPrefix}:*`,
+] as const;
+const foreignNamespaceSentinelKey = `mahoshojo:rate-limit:${keyPrefix}:${token}`;
+const foreignNamespaceSentinelValue = `preserve-${token}`;
 let runtime: RedisRuntime | null = null;
 let recoveredRuntime: RedisRuntime | null = null;
 let activeRecoveredActors: ReturnType<typeof createRoomActorRegistry> | null = null;
@@ -214,9 +221,16 @@ const deleteIsolatedKeys = async (pattern: string): Promise<number> => {
   return keys.length === 0 ? 0 : cleanupClient.del(keys);
 };
 
+const deleteVerifierKeys = async (): Promise<number> => {
+  let deleted = 0;
+  for (const pattern of isolatedKeyPatterns) deleted += await deleteIsolatedKeys(pattern);
+  return deleted;
+};
+
 try {
   await cleanupClient.connect();
-  await deleteIsolatedKeys(`mahoshojo:*:${keyPrefix}:*`);
+  await deleteVerifierKeys();
+  await cleanupClient.set(foreignNamespaceSentinelKey, foreignNamespaceSentinelValue);
 
   const d1 = createVerifierD1Adapter();
   const objectStore = {
@@ -604,6 +618,14 @@ try {
   }).includes(`secret-${token}`);
   if (secretPersisted) throw new Error('ROOM_GENERATION_DURABLE_SECRET_PERSISTED');
 
+  await deleteVerifierKeys();
+  const foreignNamespacePreserved = await cleanupClient.get(foreignNamespaceSentinelKey)
+    === foreignNamespaceSentinelValue;
+  if (!foreignNamespacePreserved) {
+    throw new Error('ROOM_GENERATION_DURABLE_CLEANUP_NAMESPACE_ESCAPED');
+  }
+  await cleanupClient.del(foreignNamespaceSentinelKey);
+
   console.log(JSON.stringify({
     verifier: 'GMR09_ROOM_HOSTED_DURABLE_SEAM',
     redis: 'real-loopback',
@@ -623,6 +645,7 @@ try {
     duplicateFinalizationIdempotent: finalizerRuns === 2,
     terminalReexecution: false,
     deletedFaultInjectionKeys: deletedGenerationKeys,
+    foreignNamespacePreserved,
     secretPersisted,
   }));
 } finally {
@@ -631,7 +654,8 @@ try {
   await recoveredRuntime?.close().catch(() => undefined);
   if (!cleanupClient.isOpen) await cleanupClient.connect().catch(() => undefined);
   if (cleanupClient.isOpen) {
-    await deleteIsolatedKeys(`mahoshojo:*:${keyPrefix}:*`).catch(() => 0);
+    await deleteVerifierKeys().catch(() => 0);
+    await cleanupClient.del(foreignNamespaceSentinelKey).catch(() => 0);
     await cleanupClient.quit();
   }
 }

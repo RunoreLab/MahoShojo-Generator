@@ -118,7 +118,7 @@ export const createArenaGenerationFinalizer = (
         payloadHash: input.payloadHash,
         payload: input.payload,
         metadata: input.metadata,
-        markdown: input.markdown,
+        markdown: '',
         telemetry: input.telemetry,
         status: 'failed',
         errorCode: 'ARENA_R2_STORAGE_FAILED',

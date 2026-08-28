@@ -177,12 +177,19 @@ try {
     generationId,
     producerToken,
     terminal: { status: 'cancelled', code: 'CONTENT_POLICY_CANCELLED' },
+    terminalEvent: {
+      type: 'done',
+      data: { ok: false, status: 'cancelled', code: 'CONTENT_POLICY_CANCELLED' },
+    },
+    clearTerminalSnapshot: true,
     now,
   });
   const duplicateTerminal = await store.markTerminal({
     generationId,
     producerToken,
     terminal: { status: 'completed' },
+    terminalEvent: { type: 'done', data: { ok: true, status: 'completed' } },
+    clearTerminalSnapshot: true,
     now,
   });
   if (!terminal.applied || duplicateTerminal.applied) {
@@ -191,7 +198,8 @@ try {
   const state = await store.readState({ generationId, actorKey });
   if (
     state?.status !== 'cancelled'
-    || state.snapshot?.markdown !== 'A'
+    || state.snapshot !== null
+    || state.lastEventId !== terminal.event?.id
     || state.preparationSeed !== preparationSeed
     || state.preparationVersion !== preparationVersion
   ) {

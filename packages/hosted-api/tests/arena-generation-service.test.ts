@@ -1144,12 +1144,12 @@ describe('Arena generation lifecycle service', () => {
         generationId: 'generation-1',
         generationRequestId: 'request-owned-terminal',
         status: 'failed',
-        markdown: 'full authoritative markdown',
+        markdown: '',
         resumeCursor: null,
         updatedAt: '2026-08-25T04:05:00.000Z',
         finalAuthoritative: true,
-        resultAvailable: true,
-        generationRecordId: 'generation-1',
+        resultAvailable: false,
+        generationRecordId: null,
         errorCode: 'AI_UPSTREAM_REQUEST_FAILED',
       },
     });
@@ -1851,6 +1851,71 @@ describe('Arena generation lifecycle service', () => {
     expect(execute).toHaveBeenCalledOnce();
   });
 
+  test.each([
+    ['request identity', { generationRequestId: 'request-other', payloadHash: 'payload-hash' }],
+    ['payload identity', { generationRequestId: 'request-1', payloadHash: 'payload-other' }],
+  ])('an already-open replay stream rejects a late durable terminal with mismatched %s', async (
+    _label,
+    terminalIdentity,
+  ) => {
+    const store = new MemoryReplayStore();
+    await store.reserve({
+      actorKey: 'user:42',
+      generationRequestId: 'request-1',
+      generationId: 'generation-1',
+      payloadHash: 'payload-hash',
+      producerToken: 'producer-token-1',
+      now: '2026-08-25T04:00:00.000Z',
+      leaseExpiresAt: '2026-08-25T04:10:00.000Z',
+    });
+    await store.markRunning({
+      generationId: 'generation-1',
+      producerToken: 'producer-token-1',
+      now: '2026-08-25T04:00:00.000Z',
+      leaseExpiresAt: '2026-08-25T04:10:00.000Z',
+    });
+    const runningState = structuredClone(store.states.get('generation-1')!);
+    const terminalState = {
+      ...structuredClone(runningState),
+      status: 'completed' as const,
+      leaseExpiresAt: null,
+      snapshot: null,
+      terminal: { status: 'completed' as const, resultRef: 'r2:must-not-project' },
+    };
+    const readState = vi.spyOn(store, 'readState');
+    readState
+      .mockResolvedValueOnce(runningState)
+      .mockResolvedValue(terminalState);
+    vi.spyOn(store as GenerationReplayStore, 'readAfter').mockResolvedValue({
+      kind: 'stream-missing',
+      events: [],
+    });
+    const service = createService(store, {
+      execute: vi.fn(async () => ({ status: 'completed' as const })),
+    }, {
+      terminalStore: {
+        readOwnedTerminal: vi.fn(async () => ({
+          generationId: 'generation-1',
+          ...terminalIdentity,
+          status: 'completed' as const,
+          updatedAt: '2026-08-25T04:01:00.000Z',
+          resultRef: 'r2:must-not-project',
+          markdown: 'must not be projected',
+          reasoning: '',
+          contentAvailable: true,
+        })),
+      },
+    });
+
+    const response = await service.resume(new Request(
+      'https://example.test/api/arena/generations/generation-1/stream',
+    ), { generationId: 'generation-1' });
+    const replay = await response.text();
+
+    expect(replay).toContain('GENERATION_TERMINAL_RECONCILIATION_PENDING');
+    expect(replay).not.toContain('must not be projected');
+  });
+
   test('cancel-by-request fails closed to durable terminal state when Redis is unavailable', async () => {
     const store = new MemoryReplayStore();
     store.cancelUnavailable = true;
@@ -1886,6 +1951,45 @@ describe('Arena generation lifecycle service', () => {
 
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({ status: 'completed', cancelled: false });
+  });
+
+  test('cancel-by-request does not project a durable terminal with another request identity', async () => {
+    const store = new MemoryReplayStore();
+    store.cancelUnavailable = true;
+    const service = createService(store, {
+      execute: vi.fn(async () => ({ status: 'completed' as const })),
+    }, {
+      terminalStore: {
+        readOwnedTerminal: vi.fn(async () => null),
+        inspectOwnedFinalization: vi.fn(async () => ({
+          kind: 'terminal' as const,
+          terminal: {
+            generationId: 'generation-1',
+            generationRequestId: 'request-other',
+            status: 'completed' as const,
+            updatedAt: '2026-08-25T04:00:00.000Z',
+            resultRef: 'r2:must-not-project',
+            markdown: 'must not be projected',
+            reasoning: '',
+            payloadHash: 'payload-hash',
+          },
+        })),
+      },
+    });
+
+    const response = await service.cancelRequest(new Request(
+      'https://example.test/api/arena/generate-stream',
+      {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ generationRequestId: 'request-1' }),
+      },
+    ));
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toMatchObject({
+      code: 'GENERATION_STATE_UNAVAILABLE',
+    });
   });
 
   test('producer ownership transition failure returns degraded and never calls provider', async () => {
@@ -3182,7 +3286,7 @@ describe('Arena generation lifecycle service', () => {
     });
   });
 
-  test('synthesizes a monotonic terminal event when the replay terminal entry was trimmed', async () => {
+  test('fails closed when the exact replay terminal entry was trimmed', async () => {
     const store = new MemoryReplayStore();
     const service = createService(store, {
       execute: vi.fn(async ({ emit }) => {
@@ -3197,24 +3301,31 @@ describe('Arena generation lifecycle service', () => {
     const resumed = await service.resume(new Request(
       'https://example.test/api/arena/generations/generation-1/stream?after=9-4',
     ), { generationId: 'generation-1' });
-    const replay = await resumed.text();
-
-    expect(replay).toContain('id: 9-5\nevent: snapshot');
-    expect(replay).toContain('id: 9-6\nevent: done');
-    expect(replay).toContain('"status":"completed"');
+    expect(resumed.status).toBe(503);
+    await expect(resumed.json()).resolves.toMatchObject({
+      code: 'GENERATION_TERMINAL_RECONCILIATION_PENDING',
+    });
   });
 
   test('synthesizes terminal cursors beyond the JavaScript safe integer range', async () => {
     const store = new MemoryReplayStore();
     const service = createService(store, {
-      execute: vi.fn(async () => ({
-        status: 'completed' as const,
-        resultRef: 'r2://report/large-cursor',
-      })),
+      execute: vi.fn(async () => ({ status: 'completed' as const })),
+    }, {
+      terminalStore: {
+        readOwnedTerminal: vi.fn(async () => ({
+          generationId: 'generation-1',
+          generationRequestId: 'request-1',
+          status: 'completed' as const,
+          updatedAt: '2026-08-25T04:00:00.000Z',
+          resultRef: 'r2://report/large-cursor',
+          markdown: '完整正文',
+          reasoning: '',
+          payloadHash: 'payload-hash',
+          contentAvailable: true,
+        })),
+      },
     });
-    const initial = await service.create(createRequest('request-large-cursor'));
-    await initial.text();
-    store.events.set('generation-1', []);
 
     const resumed = await service.resume(new Request(
       'https://example.test/api/arena/generations/generation-1/stream?after=9-999999999999999999999999999999',

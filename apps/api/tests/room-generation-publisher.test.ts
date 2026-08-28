@@ -428,6 +428,15 @@ describe('RoomGenerationPublisher RoomActor transient story seam', () => {
       reason: 'authority-scope-mismatch',
     });
     await expect(harness.actor.publishStory({
+      authority: authority(),
+      event: { ...event, generationId: 'generation-forged-by-event' },
+      trustedTime: issueArenaRoomTrustedTime({ now: timestamp }),
+    })).resolves.toEqual({
+      ok: false,
+      code: 'forbidden',
+      reason: 'authority-scope-mismatch',
+    });
+    await expect(harness.actor.publishStory({
       authority: authority({ expiresAt: timestamp }),
       event,
       trustedTime: issueArenaRoomTrustedTime({ now: timestamp }),

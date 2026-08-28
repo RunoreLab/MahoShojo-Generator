@@ -361,6 +361,13 @@ export const createMemoryGenerationReplayStore = (
 
     async markTerminal(input) {
       prune();
+      if (
+        !input.terminalEvent
+        || Boolean(input.terminalSnapshot) === (input.clearTerminalSnapshot === true)
+        || (input.terminalSnapshot && input.terminalSnapshot.status !== input.terminal.status)
+      ) {
+        throw new Error('MEMORY_GENERATION_TERMINAL_EVIDENCE_INVALID');
+      }
       const state = states.get(input.generationId);
       if (
         !state
@@ -370,17 +377,17 @@ export const createMemoryGenerationReplayStore = (
         return { owned: false, applied: false };
       }
       if (state.terminal) return { owned: true, applied: false };
-      let terminalEvent: GenerationStreamEvent | undefined;
-      if (input.terminalEvent) {
-        let sequence = sequences.get(input.generationId) ?? 0;
-        sequence += 1;
-        terminalEvent = { ...input.terminalEvent, id: `${sequence}-0` };
-        sequences.set(input.generationId, sequence);
-        events.set(input.generationId, [
-          ...(events.get(input.generationId) ?? []),
-          terminalEvent,
-        ].slice(-maxEvents));
-      }
+      let sequence = sequences.get(input.generationId) ?? 0;
+      sequence += 1;
+      const terminalEvent: GenerationStreamEvent = {
+        ...input.terminalEvent,
+        id: `${sequence}-0`,
+      };
+      sequences.set(input.generationId, sequence);
+      events.set(input.generationId, [
+        ...(events.get(input.generationId) ?? []),
+        terminalEvent,
+      ].slice(-maxEvents));
       writeState({
         ...state,
         status: input.terminal.status,
@@ -390,20 +397,18 @@ export const createMemoryGenerationReplayStore = (
             ? { publicError: { ...input.terminal.publicError } }
             : {}),
         },
-        lastEventId: terminalEvent?.id ?? state.lastEventId,
+        lastEventId: terminalEvent.id,
         snapshot: input.terminalSnapshot ? {
           ...input.terminalSnapshot,
-          lastEventId: terminalEvent?.id
-            ?? input.terminalSnapshot.lastEventId
-            ?? state.lastEventId,
-        } : input.clearTerminalSnapshot ? null : state.snapshot,
+          lastEventId: terminalEvent.id,
+        } : null,
         leaseExpiresAt: null,
         updatedAt: input.now,
       });
       return {
         owned: true,
         applied: true,
-        ...(terminalEvent ? { event: terminalEvent } : {}),
+        event: terminalEvent,
       };
     },
 

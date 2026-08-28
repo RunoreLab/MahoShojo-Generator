@@ -196,6 +196,8 @@ describe('memory generation replay store', () => {
       generationId: 'generation-1',
       producerToken,
       terminal: { status: 'completed' },
+      terminalEvent: { type: 'done', data: { ok: true, status: 'completed' } },
+      clearTerminalSnapshot: true,
       now: '2026-08-25T00:00:02.000Z',
     });
 
@@ -284,6 +286,8 @@ describe('memory generation replay store', () => {
       generationId: 'generation-1',
       producerToken,
       terminal: { status: 'completed' },
+      terminalEvent: { type: 'done', data: { ok: true, status: 'completed' } },
+      clearTerminalSnapshot: true,
       now: '2026-08-25T00:00:01.000Z',
     });
     timestamp = 101;
