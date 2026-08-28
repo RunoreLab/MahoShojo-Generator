@@ -155,7 +155,7 @@ const requestForTicket = (ticket: string): Request => new Request(
 );
 
 describe('Arena Room ticket -> membership -> presence WSS authority', () => {
-  it('ticket roleHint 不能覆盖 current membership，jti 只能授权一次', async () => {
+  it('ticket roleHint 与 current membership 不一致时 fail closed 且不消费 jti', async () => {
     const harness = await createHarness();
     const forgedHintTicket = await harness.codec.issue({
       roomId: 'room-1',
@@ -164,15 +164,11 @@ describe('Arena Room ticket -> membership -> presence WSS authority', () => {
       roleHint: 'host',
     });
 
-    const first = accepted(await harness.authority.authorize(requestForTicket(forgedHintTicket)));
-    expect(first).toMatchObject({
-      connectionKey: 'account:202',
-      roomId: 'room-1',
-      userId: harness.member.member.userId,
-      role: 'member',
-    });
     await expect(harness.authority.authorize(requestForTicket(forgedHintTicket)))
-      .resolves.toMatchObject({ accepted: false, code: 'ROOM_TICKET_REPLAYED', status: 401 });
+      .resolves.toMatchObject({ accepted: false, code: 'ROOM_TICKET_ROLE_STALE', status: 403 });
+    await expect(harness.authority.authorize(requestForTicket(forgedHintTicket)))
+      .resolves.toMatchObject({ accepted: false, code: 'ROOM_TICKET_ROLE_STALE', status: 403 });
+    expect(harness.replay.calls).toBe(0);
   });
 
   it('kick 后未消费的旧 ticket 被 current membership 拒绝，已有连接收到 close', async () => {

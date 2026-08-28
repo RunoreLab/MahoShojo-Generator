@@ -327,6 +327,9 @@ export const createArenaRoomWebSocketAuthority = (
       if (membership.roomEpoch !== claims.roomEpoch) {
         return rejected(403, 'ROOM_TICKET_EPOCH_STALE');
       }
+      if (membership.member.role !== claims.roleHint) {
+        return rejected(403, 'ROOM_TICKET_ROLE_STALE');
+      }
       try {
         const consumed = await options.replay.consume({
           jti: claims.jti,
