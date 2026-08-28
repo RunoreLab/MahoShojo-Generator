@@ -6,6 +6,7 @@ import {
   type GenerationReplayStore,
 } from '@mahoshojo/hosted-api/arena-generation/service';
 import {
+  canonicalizeNodeArenaGenerationSemanticPayload,
   createArenaGenerationFinalizer,
   createNodeArenaGenerationTerminalStore,
   createNodeArenaGenerationFinalizationPorts,
@@ -20,7 +21,6 @@ import { createClient } from 'redis';
 
 import {
   createArenaRoomGenerationPort,
-  hashArenaRoomGenerationPayload,
   type ArenaRoomGenerationPort,
 } from '../src/arena-generation/room-generation-port';
 import { createRoomActorRegistry } from '../src/arena-room/room-actor-registry';
@@ -312,6 +312,15 @@ try {
       pvpAuthority: { sign: async () => 'verifier-pvp-signature' },
       internalGuidanceAuthority: { sign: async () => 'verifier-guidance-signature' },
       deriveGenerationId: deriveArenaGenerationId,
+      canonicalizeSemanticPayload: (input) => canonicalizeNodeArenaGenerationSemanticPayload({
+        payload: input.payload,
+        signatures: {
+          generateSignature: async () => null,
+          verifySignature: async () => false,
+        },
+        trustedInternalGuidance: input.trustedInternalGuidance,
+        trustedPvpContext: input.trustedPvpContext,
+      }),
     });
   };
 
@@ -397,7 +406,7 @@ try {
     participantUserIds: historical.mirror.participantUserIds,
     sharedConfig: generationRequest.sharedConfig,
   });
-  const retryPayloadDigest = await hashArenaRoomGenerationPayload({
+  const retryPayloadDigest = await port.hashSemanticPayload({
     roomId,
     generationRequestId,
     payload: generationRequest.generation,
@@ -538,6 +547,13 @@ try {
   if (providerStarts !== 1) throw new Error('ROOM_GENERATION_DURABLE_TERMINAL_REEXECUTED');
   await recoveredActors.shutdown();
 
+  const secretPersisted = JSON.stringify({
+    generationRows: [...generationRows.values()],
+    objectRows: [...objectRows.values()],
+    objects: [...objects.entries()],
+  }).includes(`secret-${token}`);
+  if (secretPersisted) throw new Error('ROOM_GENERATION_DURABLE_SECRET_PERSISTED');
+
   console.log(JSON.stringify({
     verifier: 'GMR09_ROOM_HOSTED_DURABLE_SEAM',
     redis: 'real-loopback',
@@ -555,7 +571,7 @@ try {
     duplicateFinalizationIdempotent: finalizerRuns === 2,
     terminalReexecution: false,
     deletedFaultInjectionKeys: deletedGenerationKeys,
-    secretPersisted: false,
+    secretPersisted,
   }));
 } finally {
   activeRecoveredActors?.forceClose();

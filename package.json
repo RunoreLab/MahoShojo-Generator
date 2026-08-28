@@ -40,6 +40,7 @@
     "check:hosted-dr:schema": "node scripts/check-hosted-dr-schema.mjs",
     "check:hosted-dr": "pnpm run check:hosted-dr:schema && node scripts/check-hosted-dr-contract.mjs",
     "check:user-visible-contracts": "node scripts/check-user-visible-contracts.mjs",
+    "check:arena-room-release": "node scripts/check-arena-room-release-gate.mjs",
     "check:preview:environment": "node scripts/check-preview-environment.mjs",
     "generate:hosted-dr-client": "node scripts/generate-hosted-dr-client-config.mjs",
     "verify:hosted-dr": "node scripts/verify-hosted-dr.mjs",
@@ -50,7 +51,7 @@
     "workspace:lint": "pnpm --filter \"./packages/*\" --filter \"./apps/*\" --if-present run lint",
     "workspace:build": "pnpm --filter \"./packages/*\" --filter \"./apps/*\" --if-present run build",
     "workspace:verify": "pnpm run check:workspace:boundaries && pnpm run check:naming:workspace && pnpm run check:hosted-dr && pnpm run check:user-visible-contracts && pnpm run workspace:test && pnpm run workspace:lint && pnpm run workspace:build",
-    "ci:verify": "pnpm run workspace:verify && pnpm run check:preview:environment && pnpm run verify:hosted-dr && pnpm run test:repo && pnpm run lint:repo"
+    "ci:verify": "pnpm run workspace:verify && pnpm run check:preview:environment && pnpm run verify:hosted-dr && pnpm run check:arena-room-release && pnpm run test:repo && pnpm run lint:repo"
   },
   "devDependencies": {
     "@types/node": "^20",

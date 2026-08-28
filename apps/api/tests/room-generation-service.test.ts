@@ -114,6 +114,11 @@ const createHarness = async () => {
     deriveGenerationId: vi.fn<ArenaRoomGenerationPort['deriveGenerationId']>(
       async () => 'generation-1',
     ),
+    hashSemanticPayload: vi.fn<ArenaRoomGenerationPort['hashSemanticPayload']>(
+      async (input) => `sha256:${
+        input.payload.mode === 'scenario' ? 'b'.repeat(64) : 'a'.repeat(64)
+      }`,
+    ),
     startFromHostRequest: vi.fn<ArenaRoomGenerationPort['startFromHostRequest']>(async () => ({
       kind: 'subscribed' as const,
       subscription: subscription(),

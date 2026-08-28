@@ -233,6 +233,12 @@ describe('Room signed-ticket real Node upgrade', () => {
         roomId: 'room-1',
         payload: { members: expect.arrayContaining([member.member]) },
       });
+      const hostTicket = await authority.issue({ roomId: 'room-1', accountUserId: 101 });
+      const openedHost = await open(hostTicket);
+      await expect(within(openedHost.firstMessage, 'host-snapshot')).resolves.toMatchObject({
+        type: 'room.snapshot',
+        roomId: 'room-1',
+      });
 
       const actor = actors.get('room-1');
       if (!actor) throw new Error('actor missing');
@@ -242,7 +248,11 @@ describe('Room signed-ticket real Node upgrade', () => {
       const configRevision = authorityState.snapshot.revision;
       const timestamp = '2026-08-28T00:01:00.000Z';
       const expiresAt = '2026-08-28T01:00:00.000Z';
-      const storyMessage = nextMatchingMessage(socket, (message) => (
+      const memberStoryMessage = nextMatchingMessage(socket, (message) => (
+        message.type === 'story.delta'
+        && message.generationId === 'generation-real-ws-story'
+      ));
+      const hostStoryMessage = nextMatchingMessage(openedHost.socket, (message) => (
         message.type === 'story.delta'
         && message.generationId === 'generation-real-ws-story'
       ));
@@ -309,7 +319,10 @@ describe('Room signed-ticket real Node upgrade', () => {
         event: story,
         trustedTime: issueArenaRoomTrustedTime({ now: timestamp }),
       })).resolves.toEqual({ ok: true, kind: 'published' });
-      await expect(within(storyMessage, 'real-websocket-story')).resolves.toEqual(story);
+      await expect(Promise.all([
+        within(memberStoryMessage, 'real-websocket-member-story'),
+        within(hostStoryMessage, 'real-websocket-host-story'),
+      ])).resolves.toEqual([story, story]);
 
       await expect(within(new Promise<number>((resolve, reject) => {
         const replay = new WebSocket(

@@ -10,7 +10,7 @@
     "dev": "node scripts/generate-route-manifest.mjs && tsx watch src/index.ts",
     "start": "node dist/index.mjs",
     "test": "vitest run --config vitest.config.ts",
-    "lint": "eslint src tests scripts/verify-room-redis.ts scripts/verify-room-generation-redis.ts --config eslint.config.mjs",
+    "lint": "eslint src tests scripts/verify-room-redis.ts scripts/verify-room-generation-redis.ts scripts/verify-room-generation-process-recovery.ts --config eslint.config.mjs",
     "build": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.room-verifier.json",
     "build:bundle": "node scripts/generate-route-manifest.mjs && node scripts/build.mjs",
     "routes": "node scripts/generate-route-manifest.mjs",
@@ -18,8 +18,9 @@
     "verify:arena-redis": "tsx scripts/verify-arena-redis.ts",
     "verify:room-redis": "tsx scripts/verify-room-redis.ts",
     "verify:room-generation-redis": "tsx scripts/verify-room-generation-redis.ts",
+    "verify:room-generation-process-recovery": "tsx scripts/verify-room-generation-process-recovery.ts",
     "verify:hosted-dr:redis": "tsx scripts/verify-hosted-dr-redis.ts",
-    "deploy:prepare": "node scripts/generate-route-manifest.mjs && node scripts/build.mjs"
+    "deploy:prepare": "pnpm --dir ../.. run check:arena-room-release -- --mode deploy && node scripts/generate-route-manifest.mjs && node scripts/build.mjs"
   },
   "dependencies": {
     "@hono/node-server": "^2.1.1",

@@ -1242,6 +1242,9 @@ try {
         async deriveGenerationId() {
           return generationId;
         },
+        async hashSemanticPayload() {
+          return `sha256:${'a'.repeat(64)}`;
+        },
         async startFromHostRequest(input) {
           generationStartCount += 1;
           const persistedReservation = await readerStore.load(generationRoomId);

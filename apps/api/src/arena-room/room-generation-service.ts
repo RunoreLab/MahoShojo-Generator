@@ -15,7 +15,6 @@ import type {
   ArenaRoomGenerationPort,
   ArenaRoomGenerationSubscription,
 } from '../arena-generation/room-generation-port';
-import { hashArenaRoomGenerationPayload } from '../arena-generation/room-generation-port';
 import {
   ArenaDataCardRefVerifierError,
   type ArenaDataCardRefVerifier,
@@ -504,7 +503,7 @@ export const createArenaRoomGenerationService = (
         if (snapshot.snapshotDigest !== historical.mirror.snapshotDigest) {
           return fail('ROOM_GENERATION_CONFLICT');
         }
-        const generationPayloadDigest = await hashArenaRoomGenerationPayload({
+        const generationPayloadDigest = await options.generation.hashSemanticPayload({
           roomId: membership.roomId,
           generationRequestId: snapshot.generationRequestId,
           payload: input.request.generation,
@@ -597,7 +596,7 @@ export const createArenaRoomGenerationService = (
       }
       const snapshot = createArenaRoomGenerationSnapshot(state, input.request.generationRequestId);
       await verifyRefs(snapshot, membership.accountUserId);
-      const generationPayloadDigest = await hashArenaRoomGenerationPayload({
+      const generationPayloadDigest = await options.generation.hashSemanticPayload({
         roomId: membership.roomId,
         generationRequestId: snapshot.generationRequestId,
         payload: input.request.generation,

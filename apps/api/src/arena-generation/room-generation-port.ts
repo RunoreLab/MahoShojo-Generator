@@ -13,7 +13,6 @@ import {
   ARENA_INTERNAL_GUIDANCE_SIGNATURE_HEADER,
   ARENA_PVP_GENERATION_SIGNATURE_HEADER,
   hashArenaGenerationPayload,
-  redactArenaGenerationSemanticPayload,
 } from '@mahoshojo/hosted-runtime/arena-generation';
 
 type TerminalGenerationStatus = Extract<
@@ -93,6 +92,7 @@ export type ArenaRoomGenerationResumeInput = ArenaRoomGenerationOwnedInput & Rea
 
 export interface ArenaRoomGenerationPort {
   deriveGenerationId(_input: ArenaRoomGenerationIdentityInput): Promise<string>;
+  hashSemanticPayload(_input: ArenaRoomGenerationSemanticPayloadInput): Promise<string>;
   startFromHostRequest(_input: ArenaRoomGenerationStartInput): Promise<ArenaRoomGenerationStartResult>;
   readOwnedProjection(_input: ArenaRoomGenerationOwnedInput): Promise<ArenaRoomGenerationProjectionResult>;
   resumeOwnedSubscription(
@@ -118,6 +118,11 @@ type ArenaRoomGenerationPortDependencies = Readonly<{
     actorKey: string;
     generationRequestId: string;
   }): Promise<string>;
+  canonicalizeSemanticPayload(_input: Readonly<{
+    payload: Readonly<Record<string, unknown>>;
+    trustedInternalGuidance: string;
+    trustedPvpContext: Readonly<{ roomId: string; matchId: string; roundId: string }>;
+  }>): Promise<Record<string, unknown>>;
 }>;
 
 const actorKeyForRoom = (roomId: string): string => `pvp-room:${roomId}`;
@@ -141,9 +146,16 @@ export const buildArenaRoomGenerationPayload = (
 
 export const hashArenaRoomGenerationPayload = async (
   input: ArenaRoomGenerationSemanticPayloadInput,
+  canonicalizeSemanticPayload: ArenaRoomGenerationPortDependencies['canonicalizeSemanticPayload'],
 ): Promise<string> => {
-  const semanticPayload = redactArenaGenerationSemanticPayload({
-    ...buildArenaRoomGenerationPayload(input),
+  const semanticPayload = await canonicalizeSemanticPayload({
+    payload: buildArenaRoomGenerationPayload(input),
+    trustedInternalGuidance: input.internalGuidance.trim(),
+    trustedPvpContext: {
+      roomId: input.roomId,
+      matchId: input.pvpContext.matchId,
+      roundId: input.pvpContext.roundId,
+    },
   });
   return `sha256:${await hashArenaGenerationPayload(semanticPayload)}`;
 };
@@ -302,6 +314,10 @@ export const createArenaRoomGenerationPort = (
     actorKey: actorKeyForRoom(input.roomId),
     generationRequestId: input.generationRequestId,
   }),
+
+  hashSemanticPayload: (input: ArenaRoomGenerationSemanticPayloadInput) => (
+    hashArenaRoomGenerationPayload(input, dependencies.canonicalizeSemanticPayload)
+  ),
 
   async startFromHostRequest(
     input: ArenaRoomGenerationStartInput,

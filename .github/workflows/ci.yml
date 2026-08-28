@@ -55,6 +55,20 @@ jobs:
           REDIS_URL: redis://127.0.0.1:6379
         run: pnpm --filter @mahoshojo/api run verify:room-redis
 
+      - name: Verify Room generation Redis authority seam
+        env:
+          REDIS_URL: redis://127.0.0.1:6379
+          ROOM_GENERATION_REDIS_VERIFY: 'true'
+          ROOM_GENERATION_REDIS_VERIFY_KEY_PREFIX: gmr09-ci
+        run: pnpm --filter @mahoshojo/api run verify:room-generation-redis
+
+      - name: Verify Room generation process recovery
+        env:
+          REDIS_URL: redis://127.0.0.1:6379
+          ROOM_GENERATION_PROCESS_VERIFY: 'true'
+          ROOM_REDIS_VERIFY_KEY_PREFIX: gmr09-process-ci
+        run: pnpm --filter @mahoshojo/api run verify:room-generation-process-recovery
+
       - name: Verify Room Redis restart recovery
         env:
           REDIS_URL: redis://127.0.0.1:6392

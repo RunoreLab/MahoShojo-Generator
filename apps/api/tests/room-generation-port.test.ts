@@ -4,6 +4,7 @@ import type {
   ArenaGenerationApplicationService,
   GenerationStreamEvent,
 } from '@mahoshojo/hosted-api/arena-generation/service';
+import { canonicalizeNodeArenaGenerationSemanticPayload } from '@mahoshojo/hosted-runtime/arena-generation';
 import { createArenaRoomGenerationSnapshot } from '#/arena-room/room-generation-snapshot';
 import {
   createArenaRoomGenerationPort,
@@ -29,6 +30,24 @@ const readAll = async <T>(stream: ReadableStream<T>): Promise<T[]> => {
   return values;
 };
 
+const canonicalizeSemanticPayload = (input: {
+  payload: Readonly<Record<string, unknown>>;
+  trustedInternalGuidance: string;
+  trustedPvpContext: Readonly<{ roomId: string; matchId: string; roundId: string }>;
+}) => canonicalizeNodeArenaGenerationSemanticPayload({
+  payload: input.payload,
+  signatures: {
+    generateSignature: async () => null,
+    verifySignature: async (value) => Boolean(
+      value
+      && typeof value === 'object'
+      && (value as { signature?: unknown }).signature === 'valid'
+    ),
+  },
+  trustedInternalGuidance: input.trustedInternalGuidance,
+  trustedPvpContext: input.trustedPvpContext,
+});
+
 describe('Arena Room generation internal port', () => {
   it('binds the Room retry digest to server-normalized semantic payload without hashing secrets', async () => {
     const generationRequestId = 'request-room-digest-1';
@@ -40,7 +59,11 @@ describe('Arena Room generation internal port', () => {
       roomId: multiplayerSnapshot.roomId,
       generationRequestId,
       payload: {
-        mode: 'classic',
+        combatants: [{
+          type: 'magical-girl',
+          isNative: false,
+          data: { name: 'A', signature: 'valid' },
+        }],
         internalGuidance: 'client-forged-guidance',
         pvpContext: { roomId: 'forged-room', matchId: 'forged', roundId: 'forged' },
         customProvider: { apiKey: 'provider-secret-one' },
@@ -50,18 +73,54 @@ describe('Arena Room generation internal port', () => {
       multiplayerSnapshot,
     } as const;
 
-    const digest = await hashArenaRoomGenerationPayload(input);
+    const digest = await hashArenaRoomGenerationPayload(input, canonicalizeSemanticPayload);
     await expect(hashArenaRoomGenerationPayload({
       ...input,
       payload: {
         ...input.payload,
         customProvider: { apiKey: 'provider-secret-two' },
       },
-    })).resolves.toBe(digest);
+    }, canonicalizeSemanticPayload)).resolves.toBe(digest);
     await expect(hashArenaRoomGenerationPayload({
       ...input,
       payload: { ...input.payload, mode: 'scenario' },
-    })).resolves.not.toBe(digest);
+    }, canonicalizeSemanticPayload)).resolves.not.toBe(digest);
+    await expect(hashArenaRoomGenerationPayload({
+      ...input,
+      payload: {
+        ...input.payload,
+        combatants: [{
+          type: 'magical-girl',
+          isNative: true,
+          data: { name: 'A', signature: 'valid' },
+        }],
+      },
+    }, canonicalizeSemanticPayload)).resolves.toBe(digest);
+    await expect(hashArenaRoomGenerationPayload({
+      ...input,
+      payload: {
+        ...input.payload,
+        combatants: [{
+          type: 'magical-girl',
+          isNative: true,
+          data: { name: 'A', signature: 'forged' },
+        }],
+      },
+    }, canonicalizeSemanticPayload)).resolves.not.toBe(digest);
+    await expect(hashArenaRoomGenerationPayload({
+      ...input,
+      payload: {
+        ...input.payload,
+        mode: 'classic',
+        language: 'zh-CN',
+        readArenaHistory: true,
+        writeArenaHistory: true,
+        readCurrentState: true,
+        writeCurrentState: true,
+        readNarrativeHistory: false,
+        arenaFreeRankingEnabled: false,
+      },
+    }, canonicalizeSemanticPayload)).resolves.toBe(digest);
     expect(digest).toMatch(/^sha256:[0-9a-f]{64}$/u);
     expect(digest).not.toContain('provider-secret');
   });
@@ -115,6 +174,7 @@ describe('Arena Room generation internal port', () => {
       pvpAuthority: { sign: pvpSign },
       internalGuidanceAuthority: { sign: guidanceSign },
       deriveGenerationId: vi.fn(async () => 'arena_generation_1'),
+      canonicalizeSemanticPayload,
     });
     const hostRequest = new Request('https://example.test/api/arena/rooms/room-1/generation', {
       method: 'POST',
@@ -231,6 +291,7 @@ describe('Arena Room generation internal port', () => {
       pvpAuthority: { sign: vi.fn() },
       internalGuidanceAuthority: { sign: vi.fn() },
       deriveGenerationId,
+      canonicalizeSemanticPayload,
     });
 
     await expect(port.deriveGenerationId({

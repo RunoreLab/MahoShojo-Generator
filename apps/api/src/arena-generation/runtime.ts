@@ -1,4 +1,5 @@
 import {
+  canonicalizeNodeArenaGenerationSemanticPayload,
   configureArenaGenerationService,
   createArenaFinalizationBridge,
   createArenaGenerationFinalizer,
@@ -127,5 +128,11 @@ export const configureHonoArenaGenerationRuntime = (
     pvpAuthority: createArenaPvpGenerationAuthority(pvpSignatures),
     internalGuidanceAuthority: createArenaInternalGuidanceAuthority(signatures),
     deriveGenerationId: deriveArenaGenerationId,
+    canonicalizeSemanticPayload: (input) => canonicalizeNodeArenaGenerationSemanticPayload({
+      payload: input.payload,
+      signatures,
+      trustedInternalGuidance: input.trustedInternalGuidance,
+      trustedPvpContext: input.trustedPvpContext,
+    }),
   });
 };

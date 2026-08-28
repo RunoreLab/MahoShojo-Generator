@@ -352,6 +352,7 @@ rollback_transaction() {
   rollback_previous_release_dir="$3"
   echo "新 release 未通过完整 contract，开始回滚 tuple" >&2
   if [ "$rollback_had_previous" = true ]; then
+    verify_arena_room_rollback_gate || return 1
     restore_previous_tuple "$rollback_previous_release_dir" || return 1
     rm -f "$root_dir/current.next" || return 1
     return 0
@@ -366,6 +367,20 @@ rollback_transaction() {
   rm -f "$root_dir/current.next" || return 1
   rm -f "$release_env" || return 1
   rm -f "$format_file" || return 1
+}
+
+verify_arena_room_rollback_gate() {
+  [ -f "$runtime_env" ] && [ ! -L "$runtime_env" ] || return 1
+  arena_generation_start_state="$(
+    sed -n 's/^ARENA_MULTIPLAYER_ENABLED=//p' "$runtime_env" | tail -n 1
+  )"
+  case "$arena_generation_start_state" in
+    ''|0|false|no|off) return 0 ;;
+    *)
+      echo "Arena multiplayer generation start 未关闭，拒绝自动回滚旧 reader" >&2
+      return 1
+      ;;
+  esac
 }
 
 write_transaction() {
