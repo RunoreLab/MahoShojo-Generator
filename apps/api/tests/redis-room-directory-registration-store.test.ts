@@ -107,12 +107,15 @@ describe('Redis Room directory registration store', () => {
   });
 
   it('closing tombstone 只允许 exact target/phase 删除', async () => {
-    const { client, evalCommand } = createClient('marked', 'stale', 'deleted');
+    const { client, evalCommand } = createClient('marked', 'authority-open', 'stale', 'deleted');
     const store = createRedisRoomDirectoryRegistrationStore({ getClient: () => client });
 
     await expect(store.markClosing({
       roomId: 'room-1', targetRoomEpoch: 'epoch-2', updatedAtMs: 400, score: 400,
     })).resolves.toEqual({ kind: 'marked' });
+    await expect(store.markClosing({
+      roomId: 'room-1', targetRoomEpoch: 'epoch-2', updatedAtMs: 400, score: 400,
+    })).resolves.toEqual({ kind: 'authority-open' });
     await expect(store.delete({
       roomId: 'room-1', targetRoomEpoch: 'epoch-1', phase: 'closing',
     })).resolves.toEqual({ kind: 'stale' });
@@ -122,7 +125,11 @@ describe('Redis Room directory registration store', () => {
     expect(evalCommand.mock.calls[0]?.[0]).toContain(
       'ROOM_DIRECTORY_REGISTRATION_MARK_CLOSING_V2',
     );
-    expect(evalCommand.mock.calls[2]?.[0]).toContain('ROOM_DIRECTORY_REGISTRATION_DELETE_V2');
+    expect(evalCommand.mock.calls[0]?.[0]).toContain("checkpoint.state.lifecycle.status == 'open'");
+    expect(evalCommand.mock.calls[0]?.[1].keys[2]).toMatch(
+      /^mahoshojo:room:v1:[a-f0-9]{64}:checkpoint$/u,
+    );
+    expect(evalCommand.mock.calls[3]?.[0]).toContain('ROOM_DIRECTORY_REGISTRATION_DELETE_V2');
   });
 
   it('listing/get 严格解析 envelope，pending 可延迟重排', async () => {

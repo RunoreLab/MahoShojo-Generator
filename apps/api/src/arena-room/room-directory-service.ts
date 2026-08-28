@@ -365,20 +365,21 @@ export const createArenaRoomDirectoryService = (
   const cleanupClosingRegistration = async (
     registration: RoomDirectoryRegistration,
     score: number,
-  ): Promise<void> => {
+  ): Promise<boolean> => {
     if (options.registrations === undefined) {
       return fail('ROOM_DIRECTORY_REGISTRATION_UNAVAILABLE');
     }
-    if (registration.phase !== 'closing') {
-      const marked = await options.registrations.markClosing({
-        roomId: registration.roomId,
-        targetRoomEpoch: registration.targetRoomEpoch,
-        updatedAtMs: now(),
-        score,
-      });
-      if (marked.kind === 'missing') return;
-      if (marked.kind === 'stale') return fail('ROOM_DIRECTORY_STALE');
-    }
+    // This transition also reads the Redis checkpoint in the same Lua script. It closes the
+    // read-absent/create-save TOCTOU window before any derived D1 row can be deleted.
+    const marked = await options.registrations.markClosing({
+      roomId: registration.roomId,
+      targetRoomEpoch: registration.targetRoomEpoch,
+      updatedAtMs: now(),
+      score,
+    });
+    if (marked.kind === 'missing') return false;
+    if (marked.kind === 'authority-open') return false;
+    if (marked.kind === 'stale') return fail('ROOM_DIRECTORY_STALE');
     const current = await options.store.get(registration.roomId);
     if (current !== null) {
       await options.store.delete({ roomId: current.roomId, roomEpoch: current.roomEpoch });
@@ -392,6 +393,7 @@ export const createArenaRoomDirectoryService = (
       phase: 'closing',
     });
     if (removed.kind === 'stale') return fail('ROOM_DIRECTORY_STALE');
+    return removed.kind === 'deleted';
   };
 
   let service!: ArenaRoomDirectoryService;
@@ -580,14 +582,12 @@ export const createArenaRoomDirectoryService = (
             if (deferred.kind === 'stale') return fail('ROOM_DIRECTORY_STALE');
             continue;
           }
-          await cleanupClosingRegistration(registration, score);
-          removed += 1;
+          if (await cleanupClosingRegistration(registration, score)) removed += 1;
           continue;
         }
         if (state.snapshot.roomId !== registration.roomId) return fail('ROOM_DIRECTORY_STALE');
         if (state.lifecycle.status !== 'open') {
-          await cleanupClosingRegistration(registration, score);
-          removed += 1;
+          if (await cleanupClosingRegistration(registration, score)) removed += 1;
           continue;
         }
         if (hostUserId !== registration.hostUserId || registration.phase === 'closing') {

@@ -23,6 +23,9 @@ import type {
 } from '../src/arena-room/d1-room-directory-store';
 import { createRoomActorRegistry } from '../src/arena-room/room-actor-registry';
 import { createArenaRoomDirectoryService } from '../src/arena-room/room-directory-service';
+import {
+  createRedisRoomDirectoryRegistrationStore,
+} from '../src/arena-room/redis-room-directory-registration-store';
 import { createArenaRoomMembershipService } from '../src/arena-room/room-membership-service';
 import {
   createArenaRoomTicketCodec,
@@ -90,6 +93,7 @@ const actorRoomId = `room-actor-${token}`;
 const authorityRoomId = `room-authority-${token}`;
 const directoryRegistrationRoomId = `room-directory-registration-${token}`;
 const directoryPendingRoomId = `room-directory-pending-${token}`;
+const directoryPendingRaceRoomId = `room-directory-pending-race-${token}`;
 const directoryLegacyRoomId = `room-directory-legacy-${token}`;
 const ticketJti = `verifier:${token}`;
 const authorityTicketJti = `authority:${token}`;
@@ -111,6 +115,8 @@ const directoryRegistrationKey = `${directoryRegistrationPrefix}:entry:${directo
 const directoryRegistrationIndexKey = `${directoryRegistrationPrefix}:index`;
 const directoryPendingMember = roomHash(directoryPendingRoomId);
 const directoryPendingKey = `${directoryRegistrationPrefix}:entry:${directoryPendingMember}`;
+const directoryPendingRaceMember = roomHash(directoryPendingRaceRoomId);
+const directoryPendingRaceKey = `${directoryRegistrationPrefix}:entry:${directoryPendingRaceMember}`;
 const directoryLegacyMember = roomHash(directoryLegacyRoomId);
 const directoryLegacyV1Prefix = `mahoshojo:room-directory-registration:v1:${keyPrefix}`;
 const directoryLegacyV1Key = `${directoryLegacyV1Prefix}:entry:${directoryLegacyMember}`;
@@ -995,15 +1001,26 @@ try {
         score: Date.parse(legacyDirectoryRegistration.createdAt),
         value: directoryLegacyMember,
       });
-      const migratedLegacyDirectory = await directoryRegistrations.get(directoryLegacyRoomId);
+      const migratedLegacyDirectory = (await directoryRegistrations.list({ limit: 50 }))
+        .find((entry) => entry.roomId === directoryLegacyRoomId);
       if (
         migratedLegacyDirectory?.phase !== 'pending-create'
         || migratedLegacyDirectory.targetRoomEpoch !== 'directory-legacy-epoch-1'
         || migratedLegacyDirectory.projectedRoomEpoch !== null
         || await cleanup.get(directoryLegacyV1Key) !== null
+        || await cleanup.zScore(directoryLegacyV1IndexKey, directoryLegacyMember) !== null
         || await cleanup.get(directoryLegacyV2Key) === null
       ) {
         throw new Error('ROOM_DIRECTORY_REGISTRATION_V1_MIGRATION_FAILED');
+      }
+      const repeatedLegacyDirectory = (await directoryRegistrations.list({ limit: 50 }))
+        .find((entry) => entry.roomId === directoryLegacyRoomId);
+      if (
+        repeatedLegacyDirectory?.targetRoomEpoch !== 'directory-legacy-epoch-1'
+        || await cleanup.get(directoryLegacyV1Key) !== null
+        || await cleanup.zScore(directoryLegacyV1IndexKey, directoryLegacyMember) !== null
+      ) {
+        throw new Error('ROOM_DIRECTORY_REGISTRATION_V1_LIST_NOT_IDEMPOTENT');
       }
       await directoryRegistrations.markClosing({
         roomId: directoryLegacyRoomId,
@@ -1060,17 +1077,20 @@ try {
         async listReconciliationCandidates() { return []; },
       };
       let failDirectoryConfirm = true;
-      const faultingDirectoryRegistrations = {
-        ...directoryRegistrations,
-        async confirmProjected(
-          input: Parameters<typeof directoryRegistrations.confirmProjected>[0],
-        ) {
-          if (failDirectoryConfirm) {
-            throw new Error('ROOM_DIRECTORY_CONFIRM_FAULT_INJECTED');
-          }
-          return directoryRegistrations.confirmProjected(input);
-        },
-      };
+      const faultingDirectoryRegistrations = createRedisRoomDirectoryRegistrationStore({
+        keyPrefix,
+        getClient: () => ({
+          async eval(script, options) {
+            if (
+              failDirectoryConfirm
+              && script.includes('ROOM_DIRECTORY_REGISTRATION_CONFIRM_PROJECTED_V2')
+            ) {
+              throw new Error('ROOM_DIRECTORY_CONFIRM_EVAL_FAULT_INJECTED');
+            }
+            return cleanup.eval(script, options);
+          },
+        }),
+      });
       const directory = createArenaRoomDirectoryService({
         authority: writerStore,
         registrations: faultingDirectoryRegistrations,
@@ -1240,6 +1260,80 @@ try {
         throw new Error('ROOM_DIRECTORY_PENDING_CREATE_FENCE_FAILED');
       }
 
+      const pendingRaceRecord = {
+        roomId: directoryPendingRaceRoomId,
+        roomEpoch: 'directory-pending-race-epoch-1',
+        hostUserId: 101,
+        title: 'Pending Redis directory save-first race',
+        visibility: 'unlisted' as const,
+        status: 'open' as const,
+        createdAt: TIMESTAMP,
+        lastActivityAt: NEXT_TIMESTAMP,
+      };
+      let injectedPendingRaceSave = false;
+      const pendingRaceRegistrations = createRedisRoomDirectoryRegistrationStore({
+        keyPrefix,
+        getClient: () => ({
+          async eval(script, options) {
+            if (
+              !injectedPendingRaceSave
+              && script.includes('ROOM_DIRECTORY_REGISTRATION_MARK_CLOSING_V2')
+            ) {
+              injectedPendingRaceSave = true;
+              const saved = await writerStore.save({
+                commit: commit(createRoom(
+                  directoryPendingRaceRoomId,
+                  pendingRaceRecord.roomEpoch,
+                )),
+                directoryRegistrationRequired: true,
+              });
+              if (saved.kind !== 'saved') {
+                throw new Error('ROOM_DIRECTORY_PENDING_RACE_SAVE_FAILED');
+              }
+            }
+            return cleanup.eval(script, options);
+          },
+        }),
+      });
+      await pendingRaceRegistrations.prepare({
+        record: pendingRaceRecord,
+        preparedAtMs: pendingPreparedAtMs,
+      });
+      directoryRows.set(directoryPendingRaceRoomId, structuredClone(pendingRaceRecord));
+      const pendingRaceDirectory = createArenaRoomDirectoryService({
+        authority: readerStore,
+        registrations: pendingRaceRegistrations,
+        store: directoryD1,
+        now: () => pendingDueAtMs,
+        pendingCreateGraceMs: 5 * 60_000,
+      });
+      const pendingRaceCleanup = await pendingRaceDirectory.reconcileRegistrations({
+        limit: 50,
+        score: pendingDueAtMs,
+      });
+      if (
+        !injectedPendingRaceSave
+        || pendingRaceCleanup.removed !== 0
+        || directoryRows.get(directoryPendingRaceRoomId)?.roomEpoch
+          !== pendingRaceRecord.roomEpoch
+        || (await pendingRaceRegistrations.get(directoryPendingRaceRoomId))?.phase
+          !== 'projecting'
+        || (await writerStore.load(directoryPendingRaceRoomId))?.snapshot.roomEpoch
+          !== pendingRaceRecord.roomEpoch
+      ) {
+        throw new Error('ROOM_DIRECTORY_PENDING_SAVE_FIRST_FENCE_FAILED');
+      }
+      const pendingRaceProjection = await pendingRaceDirectory.reconcileRegistrations({
+        limit: 50,
+        score: pendingDueAtMs + 1,
+      });
+      if (
+        pendingRaceProjection.projected !== 1
+        || (await pendingRaceRegistrations.get(directoryPendingRaceRoomId))?.phase !== 'active'
+      ) {
+        throw new Error('ROOM_DIRECTORY_PENDING_SAVE_FIRST_RECOVERY_FAILED');
+      }
+
       const authorityActors = createRoomActorRegistry({
         store: writerStore,
         createRoomIdentity: () => ({ roomId: authorityRoomId, roomEpoch: 'authority-epoch-1' }),
@@ -1328,6 +1422,7 @@ try {
         directoryCloseCompensation: true,
         directoryPendingCreateGrace: true,
         directoryAtomicCreateFence: true,
+        directoryAtomicCleanupFence: true,
         directoryRegistrationV1Migration: true,
         activeTtlRefresh: true,
         ticketReplay: true,
@@ -1348,6 +1443,7 @@ try {
   if (phase !== 'write') {
     await cleanup.zRem(directoryRegistrationIndexKey, directoryRegistrationMember);
     await cleanup.zRem(directoryRegistrationIndexKey, directoryPendingMember);
+    await cleanup.zRem(directoryRegistrationIndexKey, directoryPendingRaceMember);
     await cleanup.zRem(directoryLegacyV1IndexKey, directoryLegacyMember);
     await cleanup.zRem(directoryRegistrationIndexKey, directoryLegacyMember);
     await cleanup.unlink([
@@ -1371,10 +1467,12 @@ try {
       ...roomKeys(actorRoomId),
       ...roomKeys(authorityRoomId),
       ...roomKeys(directoryPendingRoomId),
+      ...roomKeys(directoryPendingRaceRoomId),
       ticketReplayKey,
       authorityTicketReplayKey,
       directoryRegistrationKey,
       directoryPendingKey,
+      directoryPendingRaceKey,
       directoryLegacyV1Key,
       directoryLegacyV2Key,
     ]);

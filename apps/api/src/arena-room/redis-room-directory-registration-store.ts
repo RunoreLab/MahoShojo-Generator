@@ -80,6 +80,23 @@ if not decoded or type(current) ~= 'table' or current.roomId ~= ARGV[2] then
   return 'invalid'
 end
 if current.targetRoomEpoch ~= ARGV[3] then return 'stale' end
+local checkpointRaw = redis.call('GET', KEYS[3])
+if checkpointRaw then
+  local checkpointDecoded, checkpoint = pcall(cjson.decode, checkpointRaw)
+  if not checkpointDecoded or type(checkpoint) ~= 'table'
+    or not ((checkpoint.checkpointVersion == 1 and checkpoint.expiryFence == nil)
+      or (checkpoint.checkpointVersion == 2 and checkpoint.expiryFence == 'expiring'))
+    or checkpoint.roomId ~= ARGV[2]
+    or type(checkpoint.roomEpoch) ~= 'string'
+    or type(checkpoint.state) ~= 'table'
+    or type(checkpoint.state.lifecycle) ~= 'table'
+    or (checkpoint.state.lifecycle.status ~= 'open'
+      and checkpoint.state.lifecycle.status ~= 'closed') then
+    return 'invalid-authority'
+  end
+  if checkpoint.roomEpoch ~= ARGV[3] then return 'stale' end
+  if checkpoint.state.lifecycle.status == 'open' then return 'authority-open' end
+end
 if current.phase == 'closing' then return 'already' end
 current.phase = 'closing'
 current.updatedAtMs = tonumber(ARGV[4])
@@ -227,7 +244,9 @@ export type RedisRoomDirectoryRegistrationStore = {
   markClosing(input: ExactRegistrationInput & {
     readonly score: number;
     readonly updatedAtMs: number;
-  }): Promise<{ readonly kind: 'already' | 'marked' | 'missing' | 'stale' }>;
+  }): Promise<{
+    readonly kind: 'already' | 'authority-open' | 'marked' | 'missing' | 'stale';
+  }>;
   delete(input: ExactRegistrationInput & {
     readonly phase: 'closing' | 'pending-create';
   }): Promise<{ readonly kind: 'deleted' | 'missing' | 'stale' }>;
@@ -346,6 +365,9 @@ export const createRedisRoomDirectoryRegistrationStore = (
   const indexKey = `${keyPrefix}:index`;
   const legacyEntryPrefix = `${legacyKeyPrefix}:entry:`;
   const legacyIndexKey = `${legacyKeyPrefix}:index`;
+  const roomCheckpointPrefix = environmentPrefix
+    ? `mahoshojo:room:v1:${environmentPrefix}`
+    : 'mahoshojo:room:v1';
   const keysFor = (roomId: string): [string, string, string] => {
     const member = hashRoomId(roomId);
     return [`${entryPrefix}${member}`, indexKey, member];
@@ -354,6 +376,9 @@ export const createRedisRoomDirectoryRegistrationStore = (
     const member = hashRoomId(roomId);
     return [`${legacyEntryPrefix}${member}`, legacyIndexKey, member];
   };
+  const roomCheckpointKey = (roomId: string): string => (
+    `${roomCheckpointPrefix}:${hashRoomId(roomId)}:checkpoint`
+  );
 
   const migrateLegacy = async (
     inputRoomId: string,
@@ -501,12 +526,15 @@ export const createRedisRoomDirectoryRegistrationStore = (
       const score = parseTime(input.score);
       const [entryKey, index, member] = keysFor(roomId);
       const response = await options.getClient().eval(MARK_CLOSING_SCRIPT, {
-        keys: [entryKey, index],
+        keys: [entryKey, index, roomCheckpointKey(roomId)],
         arguments: [member, roomId, targetRoomEpoch, updatedAtMs, score],
       });
       if (response === 'already' || response === 'marked'
-        || response === 'missing' || response === 'stale') return { kind: response };
+        || response === 'authority-open' || response === 'missing' || response === 'stale') {
+        return { kind: response };
+      }
       if (response === 'invalid') return invalid('REDIS_ROOM_DIRECTORY_REGISTRATION_INVALID');
+      if (response === 'invalid-authority') return invalid('REDIS_ROOM_CHECKPOINT_INVALID');
       return invalid('REDIS_ROOM_DIRECTORY_REGISTRATION_RESPONSE_INVALID');
     },
 

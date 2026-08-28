@@ -411,6 +411,29 @@ describe('Arena Room directory service', () => {
     expect(registrations.delete).not.toHaveBeenCalled();
   });
 
+  it('absent 观察后 checkpoint 先提交时，原子 closing fence 阻止删除新 Room 目录', async () => {
+    const store = createStore();
+    store.get.mockResolvedValue(record());
+    const registrations = createRegistrations();
+    registrations.list.mockResolvedValue([
+      registration(record(), 'pending-create', null),
+    ]);
+    registrations.markClosing.mockResolvedValue({ kind: 'authority-open' });
+    const service = createArenaRoomDirectoryService({
+      authority: { load: async () => null },
+      store,
+      registrations,
+      now: () => 2_000,
+      pendingCreateGraceMs: 1_000,
+    });
+
+    await expect(service.reconcileRegistrations({ limit: 1, score: 2_000 }))
+      .resolves.toEqual({ scanned: 1, projected: 0, removed: 0 });
+    expect(registrations.markClosing).toHaveBeenCalledOnce();
+    expect(store.delete).not.toHaveBeenCalled();
+    expect(registrations.delete).not.toHaveBeenCalled();
+  });
+
   it('低频 registration reconciler 单例有界运行、可停止且不会重叠', async () => {
     vi.useFakeTimers();
     try {
@@ -437,31 +460,48 @@ describe('Arena Room directory service', () => {
     }
   });
 
-  it('低频 D1 reconciler 独立扫描缺失 registration 的 orphan，且可停止', async () => {
+  it('低频 D1 reconciler 不重叠，稳定推进 cursor 且失败后可重试', async () => {
     vi.useFakeTimers();
     try {
       const store = createStore();
-      store.listReconciliationCandidates.mockResolvedValue([record('room-orphan')]);
+      let resolveFirst!: (value: RoomDirectoryRecord[]) => void;
+      store.listReconciliationCandidates
+        .mockImplementationOnce(async () => new Promise<RoomDirectoryRecord[]>((resolve) => {
+          resolveFirst = resolve;
+        }))
+        .mockRejectedValueOnce(new Error('D1_RECONCILE_FAULT_INJECTED'))
+        .mockResolvedValueOnce([]);
+      const onBackgroundError = vi.fn();
       const service = createArenaRoomDirectoryService({
-        authority: { load: async () => null },
+        authority: { load: async () => createArenaRoomState() },
         store,
         now: () => Date.parse('2026-08-28T02:00:00.000Z'),
+        onBackgroundError,
       });
       const stop = service.startD1Reconciler({ intervalMs: 100, limit: 1 });
 
       await vi.advanceTimersByTimeAsync(100);
+      await vi.advanceTimersByTimeAsync(300);
+      expect(store.listReconciliationCandidates).toHaveBeenCalledOnce();
+      resolveFirst([record(), record('room-2')]);
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(100);
+      expect(store.listReconciliationCandidates).toHaveBeenCalledTimes(2);
+      const continuedCursor = store.listReconciliationCandidates.mock.calls[1]?.[0].after;
+      expect(continuedCursor).toEqual(expect.any(Object));
+      await vi.advanceTimersByTimeAsync(100);
+      expect(onBackgroundError).toHaveBeenCalledWith(
+        expect.objectContaining({ message: 'D1_RECONCILE_FAULT_INJECTED' }),
+      );
+      expect(store.listReconciliationCandidates).toHaveBeenCalledTimes(3);
       expect(store.listReconciliationCandidates).toHaveBeenCalledWith({
         inactiveBefore: '2026-08-28T02:00:00.000Z',
-        after: undefined,
+        after: continuedCursor,
         limit: 2,
-      });
-      expect(store.delete).toHaveBeenCalledWith({
-        roomId: 'room-orphan',
-        roomEpoch: 'epoch-1',
       });
       stop();
       await vi.advanceTimersByTimeAsync(200);
-      expect(store.listReconciliationCandidates).toHaveBeenCalledOnce();
+      expect(store.listReconciliationCandidates).toHaveBeenCalledTimes(3);
     } finally {
       vi.useRealTimers();
     }
