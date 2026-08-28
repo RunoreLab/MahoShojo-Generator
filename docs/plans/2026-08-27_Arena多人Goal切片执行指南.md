@@ -99,7 +99,7 @@ read authority / current state
 | `GMR-03` single-writer RoomActor | `DONE` | GMR-02 | actor registry/queue/recovery/shutdown | 不做 multi-instance |
 | `GMR-04` Node WSS security skeleton | `DONE` | GMR-03 | Node WS bootstrap + upgrade/security/backpressure | 不做产品 UI |
 | `GMR-05` ticket/membership/reconnect/lifecycle | `DONE` | GMR-04 | membership/connection/epoch recovery | 不做 generation fan-out |
-| `GMR-06` D1 directory/discovery | `READY` | GMR-05 | derived directory + orphan cleanup | 不执行生产 migration |
+| `GMR-06` D1 directory/discovery | `DONE` | GMR-05 | derived directory + orphan cleanup | 不执行生产 migration |
 | `GMR-07` Arena room UI | `READY` | GMR-05 | feature-flagged create/join/status/reconnect | 不激活 production |
 | `GMR-08` Proposal E2E | `BLOCKED` | GMR-05,GMR-07 | typed Proposal server/UI 闭环 | 不扩展 private sharing |
 | `GMR-09` generation publisher | `BLOCKED` | GMR-03,GMR-05,GMR-07 | single producer + Room safe fan-out/resync | 不复制 AI lifecycle |
@@ -461,6 +461,35 @@ validate -> pure derive -> conditional checkpoint
 - query bounded/indexed；
 - isolated migration round-trip；
 - no production resource mutation。
+
+**Evidence（2026-08-28）**
+
+- Goal ID：`GMR-06`；source SHA：`4f9b5295d4ed24a33294fb24b7bbc63ea9e394a8`；
+- contract/schema：`packages/contracts` 增加有界 room directory page/query contract；`drizzle/0014_arena_multiplayer_rooms.sql`
+  及两个 schema mirror 只保存 discovery metadata、`room_epoch` fence 和 public/host/reconciliation keyset indexes；
+- authority：D1 始终是 derived index；lookup/list/reconcile 必须以 Redis checkpoint 最终验证 open/epoch/
+  host，orphan D1 row 不能创建/恢复 Room；D1 write 不盲目重放，epoch rebind/delete 均 exact-fenced；
+- compensation：Redis registration v2 使用 `pending-create` / `projecting` / `active` / `closing`、
+  `targetRoomEpoch` / `projectedRoomEpoch` 保留可恢复 predecessor；v1 registration strict parse + exact-CAS
+  迁移；D1 与 registration 都有独立低频有界 reconciler；
+- atomic fences：create 的 pending registration 与 Redis checkpoint save 在同一 Lua CAS 验证/切换；cleanup
+  在同一 Lua 对仍 absent 的 checkpoint 或严格 canonical terminal raw 做 exact fence，open、malformed、
+  old/new epoch 或并发替换均 fail closed；`closing` tombstone 保留到 D1 删除确认完成；
+- validation：D1 real SQLite migration/schema/query-plan/fence tests，API `341/341`、contracts `123/123`、
+  multiplayer-core `78/78`、web `1895/1895`、root `191/191`、API/contracts/core/workspace lint/build、
+  Next production build `188/188` pages、`git diff --check` 与完整 `pnpm ci:verify` 通过；真实 Redis
+  7.0.15 full verifier 通过；
+- fault cases：D1 read/write/delete 与 Redis confirm 失败、recovery epoch 前进、close tombstone 重试、
+  pending grace、cleanup-first/save-first 竞态、malformed terminal-looking authority、v1 `get/list` 迁移、timer
+  in-flight/cursor/error retry，均有单测或真实 Redis 故障注入；
+- independent review：architecture/data/compatibility、security/authority 与 test adequacy 最终均为
+  Critical `0` / Important `0` / Minor `0`；predecessor 丢失、pending cleanup 两种交错、v1 迁移、
+  missing-registration D1 orphan、真实 EVAL/list/timer 证据与 malformed authority findings 均已关闭；
+- production/schema/secret/release：公开 directory contract 与 D1 migration code 已增加，但没有 production
+  migration/write/deploy/flag activation、secret 变更、push、release 或 tag；既有 naming/physical D1/preview debt
+  继续 report-only / `DEFERRED`；
+- open findings：无；next READY Goal：`GMR-07`。完整证据见
+  [GMR-06 实施与审查整改日志](../logs/2026-08-28_113000_Arena多人GMR-06D1目录发现实施与审查整改日志.md)。
 
 ### GMR-07 Arena room UI
 
