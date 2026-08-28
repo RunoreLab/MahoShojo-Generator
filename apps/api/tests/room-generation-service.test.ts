@@ -524,6 +524,79 @@ describe('Arena Room generation coordinator', () => {
     expect(harness.generation.resumeOwnedSubscription).not.toHaveBeenCalled();
   });
 
+  it.each([
+    {
+      status: 'completed' as const,
+      projectionMarkdown: '# authoritative completed body',
+      resultAvailable: true,
+      generationRecordId: 'generation-1',
+      errorCode: null,
+      expectedMarkdown: '# authoritative completed body',
+    },
+    {
+      status: 'failed' as const,
+      projectionMarkdown: '',
+      resultAvailable: false,
+      generationRecordId: null,
+      errorCode: 'GENERATION_FAILED',
+      expectedMarkdown: '',
+    },
+    {
+      status: 'cancelled' as const,
+      projectionMarkdown: '',
+      resultAvailable: false,
+      generationRecordId: null,
+      errorCode: null,
+      expectedMarkdown: '',
+    },
+    {
+      status: 'producer_lost' as const,
+      projectionMarkdown: '',
+      resultAvailable: false,
+      generationRecordId: null,
+      errorCode: 'GENERATION_PRODUCER_LOST',
+      expectedMarkdown: '',
+    },
+  ])('$status terminal view 不被存活 publisher partial 覆盖', async (scenario) => {
+    const harness = await createHarness();
+    await harness.service.start({
+      roomId: 'room-1',
+      accountUserId: 101,
+      request: startRequest(),
+      sourceRequest: sourceRequest(),
+    });
+    vi.mocked(harness.publisher.getProgress).mockReturnValue({
+      markdown: '# stale in-memory partial',
+      nextChunkSeq: 9,
+    });
+    vi.mocked(harness.generation.readOwnedProjection).mockResolvedValueOnce({
+      kind: 'found',
+      projection: {
+        generationId: 'generation-1',
+        generationRequestId: 'request-1234',
+        status: scenario.status,
+        markdown: scenario.projectionMarkdown,
+        resumeCursor: null,
+        updatedAt: '2026-08-28T00:03:00.000Z',
+        finalAuthoritative: scenario.status === 'completed',
+        resultAvailable: scenario.resultAvailable,
+        generationRecordId: scenario.generationRecordId,
+        errorCode: scenario.errorCode,
+      },
+    });
+
+    await expect(harness.service.read({
+      roomId: 'room-1',
+      generationId: 'generation-1',
+      accountUserId: 101,
+    })).resolves.toMatchObject({
+      status: scenario.status,
+      markdown: scenario.expectedMarkdown,
+      nextChunkSeq: 0,
+    });
+    harness.finishPublisher();
+  });
+
   it('Room terminal 先可见时重读 owned projection，不生成 mirror/status 不一致的 503', async () => {
     const harness = await createHarness();
     await harness.service.start({

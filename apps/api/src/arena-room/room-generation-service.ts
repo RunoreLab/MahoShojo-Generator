@@ -189,11 +189,16 @@ const view = (input: {
     return fail('ROOM_GENERATION_NOT_FOUND');
   }
   const status = input.projection?.status ?? statusFromMirror(mirror.state);
-  const markdown = input.progress?.markdown
-    || input.projection?.markdown
-    || '';
-  const nextChunkSeq = input.progress?.nextChunkSeq ?? 0;
   const completed = status === 'completed';
+  const active = status === 'reserved'
+    || status === 'running'
+    || status === 'finalizing';
+  const markdown = completed
+    ? input.projection?.markdown ?? ''
+    : active
+      ? input.progress?.markdown || input.projection?.markdown || ''
+      : '';
+  const nextChunkSeq = active ? input.progress?.nextChunkSeq ?? 0 : 0;
   const failed = status === 'failed' || status === 'producer_lost';
   if (completed && (!input.projection?.resultAvailable || !input.projection.generationRecordId)) {
     return fail('ROOM_GENERATION_UNAVAILABLE');
