@@ -25,11 +25,21 @@ if (!redisUrl) throw new Error('Room generation process verifier 需要 REDIS_UR
 if (process.env.ROOM_GENERATION_PROCESS_VERIFY?.trim().toLowerCase() !== 'true') {
   throw new Error('Room generation process verifier 只允许 ROOM_GENERATION_PROCESS_VERIFY=true');
 }
+const parsedUrl = new URL(redisUrl);
+if (
+  !['redis:', 'rediss:'].includes(parsedUrl.protocol)
+  || !['localhost', '127.0.0.1', '[::1]'].includes(parsedUrl.hostname)
+) {
+  throw new Error('Room generation process verifier 只允许连接 loopback Redis');
+}
+
+const keyPrefix = process.env.ROOM_REDIS_VERIFY_KEY_PREFIX?.trim();
+if (!keyPrefix || !/^[a-z0-9_-]{1,32}$/u.test(keyPrefix)) {
+  throw new Error('ROOM_REDIS_VERIFY_KEY_PREFIX 必须是安全环境标识');
+}
 
 const token = process.env.ROOM_GENERATION_PROCESS_VERIFY_TOKEN?.trim() || randomUUID();
 const safeToken = token.replace(/[^a-z0-9]/giu, '').toLowerCase().slice(0, 18);
-const keyPrefix = process.env.ROOM_REDIS_VERIFY_KEY_PREFIX?.trim()
-  || `gmr09proc_${safeToken}`;
 const roomId = `room-process-${safeToken}`;
 const generationRequestId = `request-process-${safeToken}`;
 const secretCanary = `process-secret-${token}`;
@@ -199,12 +209,20 @@ const runProducerProcess = async (): Promise<never> => {
 const cleanupClient = createClient({ url: redisUrl });
 cleanupClient.on('error', () => undefined);
 
+const isolatedKeyPatterns = Object.freeze([
+  `mahoshojo:room:v1:${keyPrefix}:*`,
+  `mahoshojo:room-directory:v1:${keyPrefix}:*`,
+  `mahoshojo:gen:v1:${keyPrefix}:*`,
+]);
+
 const isolatedKeys = async (): Promise<string[]> => {
   const keys: string[] = [];
-  for await (const batch of cleanupClient.scanIterator({
-    MATCH: `mahoshojo:*:${keyPrefix}:*`,
-    COUNT: 200,
-  })) keys.push(...batch);
+  for (const pattern of isolatedKeyPatterns) {
+    for await (const batch of cleanupClient.scanIterator({
+      MATCH: pattern,
+      COUNT: 200,
+    })) keys.push(...batch);
+  }
   return keys;
 };
 
