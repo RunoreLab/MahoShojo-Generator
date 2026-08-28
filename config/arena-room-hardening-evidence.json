@@ -75,8 +75,8 @@
       },
       "assertions": [
         "Hono runtime 重启期间 Redis process 保持存活且 checkpoint 不被重建或改写",
-        "新 actor 使用新 epoch warm recovery 并 fence 旧 writer",
-        "恢复前后的 Room identity 与 durable facts 保持一致"
+        "新 actor 使用新 epoch warm recovery，旧 epoch 已写入 incarnation fence set",
+        "停机窗口 checkpoint raw 保持一致，恢复后 roomId 与 member identity 可读"
       ]
     },
     {
@@ -182,7 +182,7 @@
         "expectation": "组合关闭 gateway、actor registry 与 Redis seam 后旧 Room 明确 unavailable；不得声称透明 failover"
       },
       "assertions": [
-        "gateway shutdown 停止新 upgrade 并有界关闭已连接 socket",
+        "已连接真实 socket 收到 1012；gateway.prepareUpgrade 在 shutdown 后返回 503",
         "actor registry force-close 不伪造未提交 checkpoint ack 或 fan-out",
         "Redis seam 关闭后旧 Room 不可继续，只能显式重启或 rebuild"
       ]
