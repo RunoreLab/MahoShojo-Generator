@@ -322,6 +322,21 @@ if #normalized == 0 then return { 'events', '[]' } end
 return { 'events', cjson.encode(normalized) }
 `;
 
+const READ_EVENT_SCRIPT = `
+-- GEN_READ_EVENT_V1
+local entries = redis.call('XRANGE', KEYS[1], ARGV[1], ARGV[1], 'COUNT', 1)
+if #entries == 0 then return { 'not-found', '' } end
+local fields = {}
+for index = 1, #entries[1][2], 2 do
+  fields[entries[1][2][index]] = entries[1][2][index + 1]
+end
+return { 'event', cjson.encode({
+  id = entries[1][1],
+  type = fields.type,
+  data = fields.data
+}) }
+`;
+
 const hashKeyPart = (value: string): string =>
   createHash('sha256').update(value).digest('hex').slice(0, 32);
 
@@ -566,6 +581,32 @@ const parseAtomicRead = (raw: unknown): {
   };
 };
 
+const parseExactEvent = (raw: unknown): GenerationStreamEvent | null => {
+  if (
+    !Array.isArray(raw)
+    || raw.length !== 2
+    || (raw[0] !== 'event' && raw[0] !== 'not-found')
+    || typeof raw[1] !== 'string'
+  ) throw new Error('REDIS_GENERATION_EVENT_READ_INVALID');
+  if (raw[0] === 'not-found') return null;
+  let entry: unknown;
+  try {
+    entry = JSON.parse(raw[1]);
+  } catch {
+    throw new Error('REDIS_GENERATION_EVENT_READ_INVALID');
+  }
+  if (!isRecord(entry)) throw new Error('REDIS_GENERATION_EVENT_READ_INVALID');
+  if (
+    typeof entry.id !== 'string'
+    || typeof entry.type !== 'string'
+    || typeof entry.data !== 'string'
+  ) throw new Error('REDIS_GENERATION_EVENT_READ_INVALID');
+  return parseEvent({
+    id: entry.id,
+    message: { type: entry.type, data: entry.data },
+  });
+};
+
 export const createRedisGenerationReplayStore = (
   options: RedisGenerationReplayStoreOptions,
 ): GenerationReplayStore => {
@@ -802,6 +843,13 @@ export const createRedisGenerationReplayStore = (
     async readSnapshot(input) {
       const raw = await options.getClient().get(stateKey(input.generationId));
       return raw ? parseStoredState(raw).snapshot : null;
+    },
+
+    async readEvent(input) {
+      return parseExactEvent(await options.getClient().eval(READ_EVENT_SCRIPT, {
+        keys: [eventsKey(input.generationId)],
+        arguments: [input.eventId],
+      }));
     },
 
     async readAfter(input) {

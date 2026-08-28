@@ -214,6 +214,11 @@ class MemoryReplayStore implements GenerationReplayStore {
       : { kind: 'events' as const, events: events.slice(index + 1) };
   }
 
+  async readEvent(input: Parameters<GenerationReplayStore['readEvent']>[0]) {
+    return (this.events.get(input.generationId) ?? [])
+      .find((event) => event.id === input.eventId) ?? null;
+  }
+
   async markTerminal(input: Parameters<GenerationReplayStore['markTerminal']>[0]) {
     this.markTerminalCalls += 1;
     const state = this.states.get(input.generationId)!;
@@ -2478,7 +2483,7 @@ describe('Arena generation lifecycle service', () => {
       now: '2026-08-25T03:00:00.000Z',
       leaseExpiresAt: '2026-08-25T03:01:00.000Z',
     });
-    vi.spyOn(store, 'readAfter').mockResolvedValue({ kind: 'events', events: [] });
+    vi.spyOn(store, 'readEvent').mockResolvedValue(null);
     const service = createService(store, {
       execute: vi.fn(async () => ({ status: 'completed' as const })),
     }, {
@@ -2609,6 +2614,18 @@ describe('Arena generation lifecycle service', () => {
       now: '2026-08-25T03:00:00.000Z',
       leaseExpiresAt: '2026-08-25T03:01:00.000Z',
     });
+    await store.appendEvents({
+      generationId: 'generation-1',
+      producerToken: 'producer-token-1',
+      events: Array.from({ length: 300 }, (_, index) => ({
+        type: 'markdown',
+        data: { chunk: `${index}` },
+      })),
+      now: '2026-08-25T03:00:30.000Z',
+    });
+    const boundedReplayRead = vi.spyOn(store, 'readAfter').mockRejectedValue(
+      new Error('terminal verification must use an exact event-id read'),
+    );
     const terminalStore: ArenaGenerationTerminalStore = {
       readOwnedTerminal: vi.fn(async () => ({
         generationId: 'generation-1',
@@ -2644,12 +2661,13 @@ describe('Arena generation lifecycle service', () => {
       markdown: 'durable completed report',
       terminalResultRef: 'r2:terminal',
     });
-    expect(store.events.get('generation-1')).toEqual([
-      expect.objectContaining({
-        type: 'done',
-        data: expect.objectContaining({ status: 'completed', ok: true }),
-      }),
-    ]);
+    expect(store.events.get('generation-1')).toHaveLength(301);
+    expect(store.events.get('generation-1')?.at(-1)).toEqual(expect.objectContaining({
+      id: '301-0',
+      type: 'done',
+      data: expect.objectContaining({ status: 'completed', ok: true }),
+    }));
+    expect(boundedReplayRead).not.toHaveBeenCalled();
     expect(terminalStore.reconcileExpiredLease).not.toHaveBeenCalled();
   });
 

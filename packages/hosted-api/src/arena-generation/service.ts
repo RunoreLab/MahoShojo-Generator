@@ -194,6 +194,11 @@ export interface GenerationReplayStore {
     now: string;
   }): Promise<{ owned: boolean }>;
   readSnapshot(_input: { generationId: string }): Promise<GenerationSnapshot | null>;
+  /** Reads one exact retained event without applying the bounded subscriber batch limit. */
+  readEvent(_input: {
+    generationId: string;
+    eventId: string;
+  }): Promise<GenerationStreamEvent | null>;
   readAfter(_input: {
     generationId: string;
     after: string | null;
@@ -1132,14 +1137,14 @@ export const createArenaGenerationService = (
       generationId: input.generationId,
       actorKey: input.actorKey,
     }).catch(() => null);
-    const durableEvents = durableState
-      ? await dependencies.store.readAfter({
+    const durableTerminalEvent = durableState?.lastEventId
+      ? await dependencies.store.readEvent({
           generationId: input.generationId,
-          after: null,
-          blockMs: 0,
+          eventId: durableState.lastEventId,
         }).catch(() => null)
       : null;
-    const durableTerminalEvent = durableEvents?.events.find((event) => {
+    const terminalEventMatches = durableTerminalEvent ? (() => {
+      const event = durableTerminalEvent;
       if (
         event.id !== durableState?.lastEventId
         || event.type !== terminalEvent.type
@@ -1156,15 +1161,14 @@ export const createArenaGenerationService = (
         && eventData.ok === (terminal.status === 'completed')
         && (eventData.code ?? null) === (expectedEventData.code ?? null)
         && (eventData.resultRef ?? null) === (expectedEventData.resultRef ?? null);
-    });
+    })() : false;
+    if (!durableState || !durableTerminalEvent || !terminalEventMatches) return null;
     if (
-      !durableState
-      || durableState.status !== terminal.status
+      durableState.status !== terminal.status
       || durableState.terminal?.status !== terminal.status
       || (durableState.terminal.resultRef ?? null) !== (terminal.resultRef ?? null)
       || (durableState.terminal.code ?? null) !== (terminal.code ?? null)
       || durableState.leaseExpiresAt !== null
-      || !durableTerminalEvent
       || (input.requireSnapshot && (
         durableState.snapshot?.status !== terminal.status
         || durableState.snapshot.lastEventId !== durableTerminalEvent.id

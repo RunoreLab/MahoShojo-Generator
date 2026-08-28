@@ -19,6 +19,7 @@ export const createUnavailableGenerationReplayStore = (): GenerationReplayStore 
   appendEvents: unavailable,
   writeSnapshot: unavailable,
   readSnapshot: unavailable,
+  readEvent: unavailable,
   readAfter: unavailable,
   markTerminal: unavailable,
   readState: unavailable,

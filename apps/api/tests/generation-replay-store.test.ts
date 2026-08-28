@@ -201,6 +201,48 @@ describe('RedisGenerationReplayStore', () => {
     expect(client.xRead).not.toHaveBeenCalled();
   });
 
+  it('按 event id 精确读取长事件流尾部，不受 replay batch 256 上限影响', async () => {
+    const client = createClient();
+    vi.mocked(client.eval).mockResolvedValueOnce([
+      'event',
+      JSON.stringify({
+        id: '1724570000000-300',
+        type: 'done',
+        data: '{"ok":true,"status":"completed"}',
+      }),
+    ]);
+    const store = createRedisGenerationReplayStore({ getClient: () => client });
+
+    await expect(store.readEvent({
+      generationId: 'generation-1234',
+      eventId: '1724570000000-300',
+    })).resolves.toEqual({
+      id: '1724570000000-300',
+      type: 'done',
+      data: { ok: true, status: 'completed' },
+    });
+
+    expect(client.eval).toHaveBeenCalledWith(
+      expect.stringContaining('GEN_READ_EVENT_V1'),
+      {
+        keys: ['mahoshojo:gen:v1:generation-1234:events'],
+        arguments: ['1724570000000-300'],
+      },
+    );
+    expect(client.xRead).not.toHaveBeenCalled();
+  });
+
+  it('精确 event 已被 trim 时返回 null', async () => {
+    const client = createClient();
+    vi.mocked(client.eval).mockResolvedValueOnce(['not-found', '']);
+    const store = createRedisGenerationReplayStore({ getClient: () => client });
+
+    await expect(store.readEvent({
+      generationId: 'generation-1234',
+      eventId: '1724570000000-1',
+    })).resolves.toBeNull();
+  });
+
   it('events key 被逐出时明确返回 stream-missing 且不进入 XREAD', async () => {
     const client = createClient();
     vi.mocked(client.eval).mockResolvedValueOnce(['stream-missing', '[]']);

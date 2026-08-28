@@ -329,6 +329,13 @@ export const createMemoryGenerationReplayStore = (
       return snapshot ? { ...snapshot } : null;
     },
 
+    async readEvent(input) {
+      prune();
+      const event = (events.get(input.generationId) ?? [])
+        .find((candidate) => candidate.id === input.eventId);
+      return event ? { ...event } : null;
+    },
+
     async readAfter(input) {
       prune();
       const retained = events.get(input.generationId) ?? [];

@@ -257,7 +257,11 @@ try {
   const firstChunk = new Promise<void>((resolve) => { providerFirstChunk = resolve; });
   let providerStarts = 0;
   let finalizerRuns = 0;
-  const expectedMarkdown = '# 第一批\n\n第二批\n';
+  const longStreamChunks = Array.from(
+    { length: 300 },
+    (_, index) => `长流事件-${String(index + 1).padStart(3, '0')}\n`,
+  );
+  const expectedMarkdown = `# 第一批\n\n${longStreamChunks.join('')}第二批\n`;
   const executor: ArenaGenerationExecutor = {
     async prepare(input) {
       const pvpContext = input.payload.pvpContext;
@@ -287,6 +291,9 @@ try {
       await input.emit({ type: 'markdown', data: { chunk: '# 第一批\n\n' } });
       providerFirstChunk();
       await providerGate;
+      for (const chunk of longStreamChunks) {
+        await input.emit({ type: 'markdown', data: { chunk } });
+      }
       await input.emit({ type: 'markdown', data: { chunk: '第二批\n' } });
       const claim = await input.claimFinalization({ status: 'completed' });
       if (claim.kind !== 'claimed') throw new Error('ROOM_GENERATION_DURABLE_FINALIZER_FENCED');
@@ -513,13 +520,22 @@ try {
   const replay = runtime.getGenerationReplayStore();
   const replayState = await replay.readState({ generationId, actorKey });
   const replayEvents = await replay.readAfter({ generationId, after: null, blockMs: 1 });
-  const terminalEvent = replayEvents.events.find((event) => event.type === 'done');
+  const terminalEvent = replayState?.lastEventId
+    ? await replay.readEvent({ generationId, eventId: replayState.lastEventId })
+    : null;
+  const terminalBeyondBoundedBatch = Boolean(
+    terminalEvent
+    && replayEvents.events.length === 256
+    && !replayEvents.events.some((event) => event.id === terminalEvent.id),
+  );
   if (
     replayState?.status !== 'completed'
     || replayState.terminal?.status !== 'completed'
     || replayState.snapshot?.status !== 'completed'
     || replayState.snapshot.markdown !== expectedMarkdown
     || !terminalEvent
+    || terminalEvent.type !== 'done'
+    || !terminalBeyondBoundedBatch
     || replayState.lastEventId !== terminalEvent.id
     || replayState.snapshot.lastEventId !== terminalEvent.id
     || JSON.stringify(roomTerminal).includes(`secret-${token}`)
@@ -598,6 +614,7 @@ try {
     resume: true,
     activeProcessRecoveryEpoch: activeRecoveredView.roomEpoch,
     atomicTerminalMarkerEventSnapshot: true,
+    terminalExactReadBeyondBatch: terminalBeyondBoundedBatch,
     roomTerminal: roomTerminal?.snapshot.activeGeneration?.state,
     d1R2TerminalFallback: true,
     ownerMismatchHidden: true,
