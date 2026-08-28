@@ -15,6 +15,7 @@ import {
   serializeStoredRoomDirectoryRecord,
   type StoredRoomDirectoryRecord,
 } from '#/arena-room/room-directory-record';
+import type { ArenaRoomRuntimeObserver } from '#/arena-room/runtime-observer';
 import { createArenaRoomState } from './arena-room-fixtures';
 
 const stored = (input: Partial<StoredRoomDirectoryRecord> = {}) => (
@@ -113,6 +114,28 @@ describe('Arena Room Redis-only directory service', () => {
 
     await expect(service.discoverPublic({})).resolves.toEqual({ items: [], nextCursor: null });
     expect(store.removeIfExact).toHaveBeenCalledWith(current);
+  });
+
+  it('directory 尚存但 authority checkpoint 缺失时记录 replacement-required 且 observer fail-soft', async () => {
+    const store = createStore();
+    const current = candidate(stored());
+    store.getCandidate.mockResolvedValue(current);
+    const observeArenaRoomRuntime = vi.fn<
+      ArenaRoomRuntimeObserver['observeArenaRoomRuntime']
+    >(() => { throw new Error('observer-secret-canary'); });
+    const service = createArenaRoomDirectoryService({
+      authority: createAuthority(new Map([['room-1', null]])),
+      store,
+      observer: { observeArenaRoomRuntime },
+    });
+
+    await expect(service.lookup('room-1')).resolves.toBeNull();
+    expect(store.removeIfExact).toHaveBeenCalledWith(current);
+    expect(observeArenaRoomRuntime).toHaveBeenCalledWith({
+      event: 'incident',
+      outcome: 'replacement_required',
+    });
+    expect(JSON.stringify(observeArenaRoomRuntime.mock.calls)).not.toContain('room-1');
   });
 
   it('deadline 已过的 open checkpoint 不再可发现', async () => {

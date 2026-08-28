@@ -27,6 +27,10 @@ import type {
   RoomWebSocketPeer,
 } from '#/arena-room/room-websocket-gateway';
 import type { RedisRoomTicketReplayStore } from '#/arena-room/redis-room-ticket-replay-store';
+import type {
+  ArenaRoomRuntimeObservation,
+  ArenaRoomRuntimeObserver,
+} from '#/arena-room/runtime-observer';
 import { createArenaRoomState } from './arena-room-fixtures';
 
 class MemoryRoomStore implements RoomActorCheckpointStore {
@@ -99,7 +103,10 @@ const activate = async (
   return grant.connectionAuthority.activate(peer);
 };
 
-const createHarness = async (maxSubscribersPerRoom?: number) => {
+const createHarness = async (
+  maxSubscribersPerRoom?: number,
+  observer?: ArenaRoomRuntimeObserver,
+) => {
   const store = new MemoryRoomStore();
   const replay = new MemoryTicketReplayStore();
   let now = Date.parse('2026-08-28T00:00:00.000Z');
@@ -131,6 +138,7 @@ const createHarness = async (maxSubscribersPerRoom?: number) => {
     replay,
     tickets: codec,
     now: () => now,
+    ...(observer === undefined ? {} : { observer }),
   });
   const host = await memberships.create({
     accountUserId: 101,
@@ -431,6 +439,112 @@ describe('Arena Room ticket -> membership -> presence WSS authority', () => {
       type: 'room.snapshot',
       roomEpoch: 'epoch-2',
       controlSeq: 1,
+    });
+  });
+
+  it('只记录无身份的 reconnect/sync/resync 结果，并覆盖 current/replay/snapshot delivery', async () => {
+    const observations: ArenaRoomRuntimeObservation[] = [];
+    const harness = await createHarness(undefined, {
+      observeArenaRoomRuntime: (observation) => {
+        observations.push(observation);
+      },
+    });
+    const initialPeer = createPeer();
+    const initialTicket = await harness.authority.issue({
+      roomId: 'room-1',
+      accountUserId: 101,
+    });
+    const initialConnection = await activate(
+      await harness.authority.authorize(requestForTicket(initialTicket)),
+      initialPeer.peer,
+    );
+    expect(initialPeer.messages[0]).toMatchObject({ type: 'room.snapshot' });
+
+    const currentSeq = harness.actors.get('room-1')?.getSnapshot()?.snapshot.controlSeq;
+    if (currentSeq === undefined) throw new Error('snapshot missing');
+    const reconnectPeer = createPeer();
+    const reconnectTicket = await harness.authority.issue({
+      roomId: 'room-1',
+      accountUserId: 202,
+      reconnect: {
+        control: { roomEpoch: 'epoch-1', controlSeq: currentSeq },
+        story: { generationId: 'generation-1', chunkSeq: 7 },
+      },
+    });
+    const reconnectConnection = await activate(
+      await harness.authority.authorize(requestForTicket(reconnectTicket)),
+      reconnectPeer.peer,
+    );
+    expect(reconnectPeer.messages).toEqual([{
+      protocolVersion: 1,
+      type: 'room.resync.required',
+      reason: 'replay-unavailable',
+    }]);
+
+    await reconnectConnection.onMessage?.({
+      protocolVersion: 1,
+      type: 'room.resync.request',
+      cursor: { control: { roomEpoch: 'epoch-1', controlSeq: 0 } },
+    });
+    expect(reconnectPeer.messages).toContainEqual(expect.objectContaining({
+      type: 'room.member.joined',
+    }));
+    expect(observations).toEqual(expect.arrayContaining([
+      { event: 'sync', action: 'delivery', mode: 'snapshot' },
+      { event: 'sync', action: 'reconnect_attempt' },
+      { event: 'sync', action: 'delivery', mode: 'current' },
+      { event: 'sync', action: 'resync_required' },
+      { event: 'sync', action: 'resync_requested' },
+      { event: 'sync', action: 'delivery', mode: 'replay' },
+    ]));
+    expect(JSON.stringify(observations)).not.toContain('room-1');
+    expect(JSON.stringify(observations)).not.toContain('generation-1');
+    expect(JSON.stringify(observations)).not.toContain('server-user');
+
+    await reconnectConnection.dispose?.();
+    await initialConnection.dispose?.();
+  });
+
+  it('peer 拒绝 enqueue 时不把 sync attempt 伪报为 delivery', async () => {
+    const observations: ArenaRoomRuntimeObservation[] = [];
+    const harness = await createHarness(undefined, {
+      observeArenaRoomRuntime: (observation) => { observations.push(observation); },
+    });
+    const ticket = await harness.authority.issue({ roomId: 'room-1', accountUserId: 101 });
+    const connection = await activate(
+      await harness.authority.authorize(requestForTicket(ticket)),
+      {
+        send: () => false,
+        close: () => undefined,
+      },
+    );
+
+    expect(observations).not.toContainEqual({
+      event: 'sync', action: 'delivery', mode: 'snapshot',
+    });
+    await connection.dispose?.();
+  });
+
+  it('observer 抛错不改变 sync delivery 或 presence cleanup', async () => {
+    const harness = await createHarness(undefined, {
+      observeArenaRoomRuntime: () => {
+        throw new Error('observer-secret-canary');
+      },
+    });
+    const peer = createPeer();
+    const ticket = await harness.authority.issue({ roomId: 'room-1', accountUserId: 101 });
+    const connection = await activate(
+      await harness.authority.authorize(requestForTicket(ticket)),
+      peer.peer,
+    );
+
+    expect(peer.messages[0]).toMatchObject({ type: 'room.snapshot' });
+    expect(harness.store.state?.deadlines.hostOfflineDeadline).toBeNull();
+    harness.setNow('2026-08-28T00:10:00.000Z');
+    await connection.dispose?.();
+    expect(harness.store.state?.deadlines).toEqual({
+      hostOfflineDeadline: '2026-08-28T00:55:00.000Z',
+      roomIdleDeadline: '2026-08-28T12:10:00.000Z',
     });
   });
 

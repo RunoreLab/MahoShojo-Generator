@@ -33,6 +33,10 @@ import {
   createArenaRoomGenerationSnapshotFromFrozen,
   listArenaRoomGenerationRefs,
 } from './room-generation-snapshot';
+import {
+  observeArenaRoomRuntime,
+  type ArenaRoomRuntimeObserver,
+} from './runtime-observer';
 
 export type ArenaRoomGenerationErrorCode =
   | 'ROOM_EPOCH_STALE'
@@ -77,6 +81,7 @@ export type ArenaRoomGenerationServiceOptions = {
   ) => RoomGenerationPublisher;
   readonly now?: () => string;
   readonly onBackgroundError?: (error: unknown) => void;
+  readonly observer?: ArenaRoomRuntimeObserver;
 };
 
 type OwnedProjection = Extract<
@@ -223,6 +228,15 @@ export const createArenaRoomGenerationService = (
   const now = options.now ?? (() => new Date().toISOString());
   const publisherFactory = options.createPublisher ?? createRoomGenerationPublisher;
   const publishers = new Map<string, ActivePublisher>();
+  let publisherInFlightCurrent = 0;
+
+  const changePublisherInFlight = (delta: 1 | -1): void => {
+    publisherInFlightCurrent = Math.max(0, publisherInFlightCurrent + delta);
+    observeArenaRoomRuntime(options.observer, {
+      event: 'publisher_backlog',
+      inFlightCurrent: publisherInFlightCurrent,
+    });
+  };
 
   const resolveMembership = async (
     roomId: string,
@@ -280,13 +294,17 @@ export const createArenaRoomGenerationService = (
       actor: membership.actor,
       authority: publisherAuthority(current, subscription.generationId),
       now: () => Date.parse(now()),
+      observer: options.observer,
+      onInFlightChange: changePublisherInFlight,
       ...(initial === undefined ? {} : { initial }),
     });
     const active: ActivePublisher = {
       publisher,
       promise: Promise.resolve(),
     };
-    const promise = publisher.attach(subscription)
+    observeArenaRoomRuntime(options.observer, { event: 'publisher', action: 'started' });
+    const promise = Promise.resolve()
+      .then(() => publisher.attach(subscription))
       .then((result) => {
         if (result.kind === 'rejected') {
           options.onBackgroundError?.(new Error(`ROOM_GENERATION_PUBLISH_REJECTED:${result.reason}`));
@@ -298,6 +316,10 @@ export const createArenaRoomGenerationService = (
       .finally(() => {
         if (publishers.get(key)?.publisher === publisher) {
           publishers.delete(key);
+          observeArenaRoomRuntime(options.observer, {
+            event: 'publisher',
+            action: 'finished',
+          });
         }
       });
     publishers.set(key, { ...active, promise });

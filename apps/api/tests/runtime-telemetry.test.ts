@@ -104,6 +104,11 @@ describe('Hono runtime telemetry', () => {
         outcome: 'ok',
         durationMs: 10,
       });
+      telemetry.observeRedisOperation({
+        operation: 'room',
+        outcome: 'unavailable',
+        durationMs: 0,
+      });
       telemetry.observeRedisServerStats({
         usedMemoryBytes: 1_024,
         evictedKeys: 2,
@@ -139,13 +144,14 @@ describe('Hono runtime telemetry', () => {
           rows: { read: 3, written: 1 },
         },
         redis: {
-          commands: 4,
-          outcomes: { ok: 3, error: 1, unavailable: 0 },
+          commands: 5,
+          outcomes: { ok: 3, error: 1, unavailable: 1 },
           byOperation: {
             connect: 1,
             ping: 1,
             'rate-limit': 1,
             generation: 1,
+            room: 1,
             info: 0,
           },
           latency: { samples: 4, totalMilliseconds: 28, maxMilliseconds: 10 },

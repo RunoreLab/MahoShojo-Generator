@@ -7,6 +7,10 @@ import {
 } from '@mahoshojo/multiplayer-core';
 
 import type { RoomActor } from './room-actor-registry';
+import {
+  observeArenaRoomRuntime,
+  type ArenaRoomRuntimeObserver,
+} from './runtime-observer';
 
 export type RoomGenerationPublisherProgress = Readonly<{
   markdown: string;
@@ -30,6 +34,8 @@ export type RoomGenerationPublisherOptions = Readonly<{
   authority: unknown;
   now?: () => number;
   initial?: RoomGenerationPublisherProgress;
+  observer?: ArenaRoomRuntimeObserver;
+  onInFlightChange?: (delta: 1 | -1) => void;
 }>;
 
 const rejected = (reason: string): RoomGenerationPublishResult => ({
@@ -62,6 +68,14 @@ export const createRoomGenerationPublisher = (
   let markdown = initial.markdown;
   let nextChunkSeq = actorCursor?.nextChunkSeq ?? initial.nextChunkSeq;
   let attached = false;
+
+  const changeInFlight = (delta: 1 | -1): void => {
+    try {
+      options.onInFlightChange?.(delta);
+    } catch {
+      // Telemetry failures never alter publisher ownership or story delivery.
+    }
+  };
 
   const timestamp = (): string => {
     const state = options.actor.getSnapshot();
@@ -98,26 +112,52 @@ export const createRoomGenerationPublisher = (
 
   const publishMarkdown = async (delta: string): Promise<RoomGenerationPublishResult | null> => {
     const issuedAt = timestamp();
-    const result = await options.actor.publishStory({
-      authority: options.authority,
-      event: {
-        protocolVersion: 1,
-        type: 'story.delta',
-        roomId: scope.roomId,
-        roomEpoch: scope.roomEpoch,
-        generationId: scope.generationId,
-        chunkSeq: nextChunkSeq,
-        timestamp: issuedAt,
-        payload: { delta },
-      },
-      trustedTime: issueArenaRoomTrustedTime({ now: issuedAt }),
-    });
-    if (!result.ok) return rejected(`story:${result.reason}`);
-    if (result.kind === 'published' || result.kind === 'idempotent') {
-      markdown += delta;
-      nextChunkSeq += 1;
+    changeInFlight(1);
+    try {
+      const result = await options.actor.publishStory({
+        authority: options.authority,
+        event: {
+          protocolVersion: 1,
+          type: 'story.delta',
+          roomId: scope.roomId,
+          roomEpoch: scope.roomEpoch,
+          generationId: scope.generationId,
+          chunkSeq: nextChunkSeq,
+          timestamp: issuedAt,
+          payload: { delta },
+        },
+        trustedTime: issueArenaRoomTrustedTime({ now: issuedAt }),
+      });
+      if (!result.ok) {
+        observeArenaRoomRuntime(options.observer, {
+          event: 'publisher_outcome',
+          outcome: 'rejected',
+        });
+        return rejected(`story:${result.reason}`);
+      }
+      if (result.kind === 'published' || result.kind === 'idempotent') {
+        markdown += delta;
+        nextChunkSeq += 1;
+        observeArenaRoomRuntime(options.observer, {
+          event: 'publisher_outcome',
+          outcome: 'published',
+        });
+      } else {
+        observeArenaRoomRuntime(options.observer, {
+          event: 'publisher_outcome',
+          outcome: 'dropped',
+        });
+      }
+      return null;
+    } catch (error) {
+      observeArenaRoomRuntime(options.observer, {
+        event: 'publisher_outcome',
+        outcome: 'error',
+      });
+      throw error;
+    } finally {
+      changeInFlight(-1);
     }
-    return null;
   };
 
   const attach = async (

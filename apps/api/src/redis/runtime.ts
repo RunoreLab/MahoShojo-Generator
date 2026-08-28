@@ -16,6 +16,10 @@ import {
   type RedisRoomClient,
   type RedisRoomStore,
 } from '../arena-room/redis-room-store';
+import type {
+  ArenaRoomRuntimeObservation,
+  ArenaRoomRuntimeObserver,
+} from '../arena-room/runtime-observer';
 import {
   createRedisRoomTicketReplayStore,
   type RedisRoomTicketReplayClient,
@@ -24,7 +28,13 @@ import {
 
 const DEFAULT_REDIS_COMMAND_TIMEOUT_MS = 4_000;
 
-export type RedisRuntimeOperation = 'connect' | 'ping' | 'rate-limit' | 'generation' | 'info';
+export type RedisRuntimeOperation =
+  | 'connect'
+  | 'ping'
+  | 'rate-limit'
+  | 'generation'
+  | 'room'
+  | 'info';
 
 export type RedisRuntimeOperationOutcome = 'ok' | 'error' | 'unavailable';
 
@@ -44,6 +54,7 @@ export type RedisServerStatsObservation = {
 export interface RedisRuntimeObserver {
   observeRedisOperation(_observation: RedisRuntimeOperationObservation): void;
   observeRedisServerStats(_observation: RedisServerStatsObservation): void;
+  observeArenaRoomRuntime?: ArenaRoomRuntimeObserver['observeArenaRoomRuntime'];
 }
 
 const noopRedisRuntimeObserver: RedisRuntimeObserver = Object.freeze({
@@ -208,14 +219,27 @@ export class RedisRuntime implements RedisService {
 
   private async executeRoomCommand<T>(operation: () => Promise<T>): Promise<T> {
     if (!this.client?.isReady) {
+      this.observeOperation({ operation: 'room', outcome: 'unavailable', durationMs: 0 });
       throw createRedisOperationError('REDIS_ROOM_CHECKPOINT_UNAVAILABLE');
     }
+    const startedAt = performance.now();
     try {
-      return await executeWithTimeout(operation, this.commandTimeoutMs);
+      const result = await executeWithTimeout(operation, this.commandTimeoutMs);
+      this.observeOperation({
+        operation: 'room',
+        outcome: 'ok',
+        durationMs: Math.max(0, performance.now() - startedAt),
+      });
+      return result;
     } catch (error) {
       this.lastError = error instanceof Error && error.message === 'REDIS_COMMAND_TIMEOUT'
         ? 'REDIS_ROOM_COMMAND_TIMEOUT'
         : 'REDIS_ROOM_COMMAND_FAILED';
+      this.observeOperation({
+        operation: 'room',
+        outcome: 'error',
+        durationMs: Math.max(0, performance.now() - startedAt),
+      });
       throw createRedisOperationError(this.lastError);
     }
   }
@@ -291,6 +315,11 @@ export class RedisRuntime implements RedisService {
   getRoomStore(): RedisRoomStore {
     this.roomStore ??= createRedisRoomStore({
       keyPrefix: this.keyPrefix,
+      observer: {
+        observeArenaRoomRuntime: (observation: ArenaRoomRuntimeObservation) => (
+          this.observer.observeArenaRoomRuntime?.(observation)
+        ),
+      },
       getClient: () => ({
         eval: (script, options) => this.executeRoomCommand(async () => {
           const client = this.client;

@@ -40,6 +40,71 @@ beforeEach(() => {
 });
 
 describe('RedisRuntime shutdown', () => {
+  it('Room Redis 命令记录固定 room latency/outcome，并向 checkpoint observer 透传', async () => {
+    const observeRedisOperation = vi.fn<RedisRuntimeObserver['observeRedisOperation']>();
+    const observeArenaRoomRuntime = vi.fn();
+    const redis = new RedisRuntime('redis://example.test:6379', true, {
+      observeRedisOperation,
+      observeRedisServerStats: vi.fn(),
+      observeArenaRoomRuntime,
+    });
+    const store = redis.getRoomStore();
+
+    await expect(store.load('room-1'))
+      .rejects.toThrow('REDIS_ROOM_CHECKPOINT_UNAVAILABLE');
+    await redis.connect();
+    await expect(store.load('room-1')).resolves.toBeNull();
+
+    expect(observeRedisOperation).toHaveBeenCalledWith({
+      operation: 'room',
+      outcome: 'unavailable',
+      durationMs: 0,
+    });
+    expect(observeRedisOperation).toHaveBeenCalledWith({
+      operation: 'room',
+      outcome: 'ok',
+      durationMs: expect.any(Number),
+    });
+    expect(observeArenaRoomRuntime).toHaveBeenCalledWith(expect.objectContaining({
+      event: 'checkpoint',
+      operation: 'load',
+      outcome: 'missing',
+    }));
+  });
+
+  it('Room Redis observer 抛错不改变 timeout fail-closed 结果', async () => {
+    vi.useFakeTimers();
+    redisClient.get.mockImplementation(() => new Promise(() => undefined));
+    const observeRedisOperation = vi.fn<RedisRuntimeObserver['observeRedisOperation']>(
+      (observation) => {
+        if (observation.operation === 'room') throw new Error('observer-secret-canary');
+      },
+    );
+    const redis = new RedisRuntime('redis://example.test:6379', true, {
+      observeRedisOperation,
+      observeRedisServerStats: vi.fn(),
+      observeArenaRoomRuntime: () => {
+        throw new Error('checkpoint-observer-secret-canary');
+      },
+    }, 100);
+    try {
+      await redis.connect();
+      const load = redis.getRoomStore().load('room-1');
+      const rejected = expect(load).rejects.toThrow('REDIS_ROOM_COMMAND_TIMEOUT');
+      await vi.advanceTimersByTimeAsync(100);
+
+      await rejected;
+      expect(redis.getStatus().lastError).toBe('REDIS_ROOM_COMMAND_TIMEOUT');
+      expect(observeRedisOperation).toHaveBeenCalledWith({
+        operation: 'room',
+        outcome: 'error',
+        durationMs: expect.any(Number),
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('只向 Room runtime 暴露窄 checkpoint port，并在 Redis 未 ready 时 fail closed', async () => {
     const redis = new RedisRuntime('redis://example.test:6379', true);
     const store = redis.getRoomStore();

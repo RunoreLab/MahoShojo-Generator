@@ -142,6 +142,7 @@ export type HonoRuntimeTelemetrySnapshot = {
       ping: number;
       'rate-limit': number;
       generation: number;
+      room: number;
       info: number;
     };
     latency: DurationSummary;
@@ -552,6 +553,7 @@ export class HonoRuntimeTelemetry implements
     ping: 0,
     'rate-limit': 0,
     generation: 0,
+    room: 0,
     info: 0,
   };
 
@@ -865,6 +867,7 @@ export class HonoRuntimeTelemetry implements
       case 'ping':
       case 'rate-limit':
       case 'generation':
+      case 'room':
       case 'info':
         this.redisByOperation[observation.operation] += 1;
         break;
@@ -1526,6 +1529,7 @@ export class HonoRuntimeTelemetry implements
       ping: 0,
       'rate-limit': 0,
       generation: 0,
+      room: 0,
       info: 0,
     });
     this.redisLatency.reset();

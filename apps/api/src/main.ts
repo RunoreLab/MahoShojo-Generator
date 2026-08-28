@@ -67,9 +67,11 @@ if (process.env.HONO_CONFIG_CHECK_ONLY === 'true') {
   const roomDirectory = createArenaRoomDirectoryService({
     authority: roomStore,
     store: redis.getRoomDirectoryStore(),
+    observer: telemetry,
   });
   const roomActors = createRoomActorRegistry({
     store: roomStore,
+    observer: telemetry,
     onBackgroundError: () => {
       console.error('[hono][room-actor] background task failed');
     },
@@ -89,6 +91,7 @@ if (process.env.HONO_CONFIG_CHECK_ONLY === 'true') {
     memberships: roomMemberships,
     references: roomReferences,
     generation: roomGenerationPort,
+    observer: telemetry,
     onBackgroundError: () => {
       console.error('[hono][room-generation] publisher task failed');
     },
@@ -101,6 +104,7 @@ if (process.env.HONO_CONFIG_CHECK_ONLY === 'true') {
         tickets: createArenaRoomTicketCodec({
           signatures: createArenaRoomTicketSignatureService(),
         }),
+        observer: telemetry,
       })
     : null;
   const roomHttpDependencies: ArenaRoomHttpDependencies | undefined = roomWebSocketAuthority
@@ -130,6 +134,7 @@ if (process.env.HONO_CONFIG_CHECK_ONLY === 'true') {
     // runtime keeps the GMR-04 empty-Origin/default-deny behavior unchanged.
     allowedBrowserOrigins: roomWebSocketAuthority ? config.corsOrigins : [],
     ...(roomWebSocketAuthority ? { authorize: roomWebSocketAuthority.authorize } : {}),
+    observer: telemetry,
   });
   const roomWebSocketServer = createRoomWebSocketServer();
 

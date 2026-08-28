@@ -21,6 +21,7 @@ import {
   type RoomActorRegistryOptions,
 } from '#/arena-room/room-actor-registry';
 import type { RoomDirectoryRecord } from '#/arena-room/room-directory-record';
+import type { ArenaRoomRuntimeObservation } from '#/arena-room/runtime-observer';
 import {
   ARENA_ROOM_NEXT_TIMESTAMP,
   createArenaRoomState,
@@ -390,6 +391,311 @@ describe('RoomActorRegistry', () => {
       { ok: true, kind: 'applied' },
     ]);
     expect(store.saveCalls).toBe(3);
+  });
+
+  it('上报全局 absolute queue、单 Room depth 与 overload，drain 后归零', async () => {
+    const observations: ArenaRoomRuntimeObservation[] = [];
+    const states = new Map<string, ArenaRoomAuthorityState>();
+    const gates = new Map([
+      ['room-1', deferred()],
+      ['room-2', deferred()],
+    ]);
+    const blockedRooms = new Set<string>();
+    let blockUpdates = false;
+    const store: RoomActorCheckpointStore = {
+      load: async (roomId) => {
+        const state = states.get(roomId);
+        return state === undefined ? null : structuredClone(state);
+      },
+      refresh: async ({ checkpoint }) => (
+        states.has(checkpoint.snapshot.roomId)
+          ? { kind: 'refreshed' as const }
+          : { kind: 'missing' as const }
+      ),
+      save: async ({ commit }) => {
+        const data = consumeArenaRoomCheckpointCommit(commit);
+        const roomId = data.nextState.snapshot.roomId;
+        if (blockUpdates && data.nextState.snapshot.revision === 1) {
+          blockedRooms.add(roomId);
+          await gates.get(roomId)!.promise;
+        }
+        states.set(roomId, structuredClone(data.nextState));
+        return { kind: 'saved' as const };
+      },
+    };
+    let identityIndex = 0;
+    const identities = [
+      { roomId: 'room-1', roomEpoch: 'epoch-1' },
+      { roomId: 'room-2', roomEpoch: 'epoch-2' },
+    ];
+    const registry = createRoomActorRegistry({
+      store,
+      maxQueuedCommands: 1,
+      maxActors: 2,
+      createRoomIdentity: () => identities[identityIndex++]!,
+      observer: {
+        observeArenaRoomRuntime: (observation) => { observations.push(observation); },
+      },
+    });
+    const firstCreated = await createActorRoom(registry);
+    const secondCreated = await createActorRoom(registry);
+    if (!firstCreated.ok || !secondCreated.ok) throw new Error('expected create success');
+    observations.length = 0;
+    blockUpdates = true;
+
+    const firstRoomInFlight = registry.execute({
+      roomId: 'room-1',
+      command: publishCommand(firstCreated.nextState, 0, 'first', ARENA_ROOM_NEXT_TIMESTAMP),
+      authority: hostAuthority,
+    });
+    await vi.waitFor(() => expect(blockedRooms).toContain('room-1'));
+    const firstRoomQueued = registry.execute({
+      roomId: 'room-1',
+      command: publishCommand(firstCreated.nextState, 1, 'queued-1', THIRD_TIMESTAMP),
+      authority: hostAuthority,
+    });
+    const secondRoomInFlight = registry.execute({
+      roomId: 'room-2',
+      command: publishCommand(secondCreated.nextState, 0, 'second', ARENA_ROOM_NEXT_TIMESTAMP),
+      authority: hostAuthority,
+    });
+    await vi.waitFor(() => expect(blockedRooms).toContain('room-2'));
+    const secondRoomQueued = registry.execute({
+      roomId: 'room-2',
+      command: publishCommand(secondCreated.nextState, 1, 'queued-2', THIRD_TIMESTAMP),
+      authority: hostAuthority,
+    });
+    await expect(registry.execute({
+      roomId: 'room-2',
+      command: publishCommand(secondCreated.nextState, 2, 'overload', FOURTH_TIMESTAMP),
+      authority: hostAuthority,
+    })).rejects.toThrow('ROOM_ACTOR_QUEUE_OVERLOADED');
+
+    expect(observations).toContainEqual({
+      event: 'actor_queue',
+      queuedCurrent: 2,
+      roomQueuedCurrent: 1,
+      overloaded: false,
+    });
+    expect(observations).toContainEqual({
+      event: 'actor_queue',
+      queuedCurrent: 2,
+      roomQueuedCurrent: 1,
+      overloaded: true,
+    });
+    expect(observations).toContainEqual({
+      event: 'actor_operation',
+      operation: 'command',
+      outcome: 'rejected',
+      durationMs: 0,
+    });
+
+    gates.get('room-1')!.resolve();
+    gates.get('room-2')!.resolve();
+    await Promise.all([
+      firstRoomInFlight,
+      firstRoomQueued,
+      secondRoomInFlight,
+      secondRoomQueued,
+    ]);
+    expect(observations.filter(({ event }) => event === 'actor_queue').at(-1)).toEqual({
+      event: 'actor_queue',
+      queuedCurrent: 0,
+      roomQueuedCurrent: 0,
+      overloaded: false,
+    });
+  });
+
+  it('command/story operation 上报 outcome 与 enqueue-to-complete latency', async () => {
+    const observations: ArenaRoomRuntimeObservation[] = [];
+    let now = 100;
+    const store = new MemoryRoomStore();
+    const registry = createRoomActorRegistry({
+      store,
+      now: () => now,
+      observer: {
+        observeArenaRoomRuntime: (observation) => { observations.push(observation); },
+      },
+    });
+    const created = await createActorRoom(registry);
+    if (!created.ok) throw new Error('expected create success');
+    observations.length = 0;
+    const gate = deferred();
+    store.beforeSave = async (_data, call) => {
+      if (call === 2) await gate.promise;
+    };
+
+    const command = registry.execute({
+      roomId: 'room-1',
+      command: publishCommand(created.nextState, 0, 'public-guidance', ARENA_ROOM_NEXT_TIMESTAMP),
+      authority: hostAuthority,
+    });
+    await vi.waitFor(() => expect(store.activeSaves).toBe(1));
+    now = 125;
+    gate.resolve();
+    await expect(command).resolves.toMatchObject({ ok: true, kind: 'applied' });
+    expect(observations).toContainEqual({
+      event: 'actor_operation',
+      operation: 'command',
+      outcome: 'applied',
+      durationMs: 25,
+    });
+
+    now = 130;
+    const idempotent = registry.execute({
+      roomId: 'room-1',
+      command: publishCommand(created.nextState, 1, 'public-guidance', ARENA_ROOM_NEXT_TIMESTAMP),
+      authority: hostAuthority,
+    });
+    now = 140;
+    await expect(idempotent).resolves.toMatchObject({ ok: true, kind: 'idempotent' });
+    expect(observations).toContainEqual({
+      event: 'actor_operation',
+      operation: 'command',
+      outcome: 'idempotent',
+      durationMs: 10,
+    });
+
+    now = 145;
+    const story = registry.get('room-1')!.publishStory({
+      authority: hostAuthority,
+      event: {
+        protocolVersion: 1,
+        type: 'story.delta',
+        roomId: 'room-1',
+        roomEpoch: 'epoch-1',
+        generationId: 'generation-1',
+        chunkSeq: 0,
+        timestamp: ARENA_ROOM_NEXT_TIMESTAMP,
+        payload: { delta: 'sensitive-story-content' },
+      },
+      trustedTime: issueArenaRoomTrustedTime({ now: ARENA_ROOM_NEXT_TIMESTAMP }),
+    });
+    now = 160;
+    await expect(story).resolves.toMatchObject({ ok: false, code: 'forbidden' });
+    expect(observations).toContainEqual({
+      event: 'actor_operation',
+      operation: 'story',
+      outcome: 'rejected',
+      durationMs: 15,
+    });
+    expect(JSON.stringify(observations)).not.toMatch(/room-1|public-guidance|sensitive-story-content/u);
+  });
+
+  it('registry gauge 区分 lifecycle=open 与 resident terminal actor，并记录 create/recover', async () => {
+    const observations: ArenaRoomRuntimeObservation[] = [];
+    const observer = {
+      observeArenaRoomRuntime: (observation: ArenaRoomRuntimeObservation) => {
+        observations.push(observation);
+      },
+    };
+    const store = new MemoryRoomStore();
+    const registry = createRoomActorRegistry({ store, observer });
+    const created = await createActorRoom(registry);
+    if (!created.ok) throw new Error('expected create success');
+
+    expect(observations).toContainEqual({
+      event: 'registry', activeRooms: 1, residentActors: 1,
+    });
+    expect(observations).toContainEqual({ event: 'incident', outcome: 'created' });
+
+    await expect(registry.execute({
+      roomId: 'room-1',
+      command: {
+        type: 'close',
+        expectedRoomEpoch: 'epoch-1',
+        reason: 'telemetry-terminal',
+        timestamp: ARENA_ROOM_NEXT_TIMESTAMP,
+      },
+      authority: hostAuthority,
+    })).resolves.toMatchObject({ ok: true, kind: 'applied' });
+    expect(observations).toContainEqual({
+      event: 'registry', activeRooms: 0, residentActors: 1,
+    });
+    await registry.shutdown();
+    expect(observations.filter(({ event }) => event === 'registry').at(-1)).toEqual({
+      event: 'registry', activeRooms: 0, residentActors: 0,
+    });
+
+    observations.length = 0;
+    const recovered = createRoomActorRegistry({ store, observer });
+    await expect(recovered.recover('room-1')).resolves.toBeTruthy();
+    expect(observations).toContainEqual({ event: 'incident', outcome: 'recovered' });
+    expect(observations).toContainEqual({
+      event: 'registry', activeRooms: 0, residentActors: 1,
+    });
+  });
+
+  it('fence/quarantine 记录低基数 incident，checkpoint 不确定态要求 replacement', async () => {
+    const observations: ArenaRoomRuntimeObservation[] = [];
+    const observer = {
+      observeArenaRoomRuntime: (observation: ArenaRoomRuntimeObservation) => {
+        observations.push(observation);
+      },
+    };
+    const conflictStore = new MemoryRoomStore();
+    const fenced = createRoomActorRegistry({ store: conflictStore, observer });
+    const created = await createActorRoom(fenced);
+    if (!created.ok) throw new Error('expected create success');
+    observations.length = 0;
+    conflictStore.conflictAtCall = 2;
+    await expect(fenced.execute({
+      roomId: 'room-1',
+      command: publishCommand(created.nextState, 0, 'fence', ARENA_ROOM_NEXT_TIMESTAMP),
+      authority: hostAuthority,
+    })).rejects.toThrow('ROOM_ACTOR_CHECKPOINT_CONFLICT');
+    expect(observations).toContainEqual({ event: 'incident', outcome: 'fenced' });
+
+    observations.length = 0;
+    const unavailableStore = new MemoryRoomStore();
+    const quarantined = createRoomActorRegistry({
+      store: unavailableStore,
+      observer,
+    });
+    const unavailableCreated = await createActorRoom(quarantined);
+    if (!unavailableCreated.ok) throw new Error('expected create success');
+    observations.length = 0;
+    unavailableStore.saveFailure = new Error('redis unavailable');
+    await expect(quarantined.execute({
+      roomId: 'room-1',
+      command: publishCommand(
+        unavailableCreated.nextState,
+        0,
+        'quarantine',
+        ARENA_ROOM_NEXT_TIMESTAMP,
+      ),
+      authority: hostAuthority,
+    })).rejects.toThrow('redis unavailable');
+    expect(observations).toContainEqual({ event: 'incident', outcome: 'quarantined' });
+    expect(observations).toContainEqual({
+      event: 'incident', outcome: 'replacement_required',
+    });
+    expect(observations).toContainEqual(expect.objectContaining({
+      event: 'actor_operation', operation: 'command', outcome: 'error',
+    }));
+  });
+
+  it('runtime observer 抛错不改变权威结果、fence 或清理', async () => {
+    const store = new MemoryRoomStore();
+    const registry = createRoomActorRegistry({
+      store,
+      observer: {
+        observeArenaRoomRuntime: () => { throw new Error('telemetry unavailable'); },
+      },
+    });
+    const created = await createActorRoom(registry);
+    if (!created.ok) throw new Error('expected create success');
+    await expect(registry.execute({
+      roomId: 'room-1',
+      command: publishCommand(created.nextState, 0, 'still-authoritative', ARENA_ROOM_NEXT_TIMESTAMP),
+      authority: hostAuthority,
+    })).resolves.toMatchObject({ ok: true, kind: 'applied' });
+    await expect(registry.shutdown()).resolves.toBeUndefined();
+    expect(store.state?.snapshot).toMatchObject({
+      revision: 1,
+      sharedConfig: { userGuidance: 'still-authoritative' },
+    });
+    expect(registry.size).toBe(0);
   });
 
   it('warm recovery 切新 epoch；旧 actor/callback 的已推导 mutation 被 Redis CAS fence', async () => {

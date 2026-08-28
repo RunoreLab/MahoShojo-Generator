@@ -26,6 +26,11 @@ import {
 
 import type { RedisRoomStore } from './redis-room-store';
 import type { RoomDirectoryRecord } from './room-directory-record';
+import {
+  observeArenaRoomRuntime,
+  type ArenaRoomActorOperationOutcome,
+  type ArenaRoomRuntimeObserver,
+} from './runtime-observer';
 
 const DEFAULT_MAX_QUEUED_COMMANDS = 64;
 const DEFAULT_MAX_SUBSCRIBERS_PER_ROOM = 128;
@@ -156,6 +161,7 @@ export type RoomActorStoryCursor = Readonly<{ nextChunkSeq: number }>;
 
 type CommandQueueEntry = {
   readonly kind: 'command';
+  readonly enqueuedAt: number;
   readonly input: RoomActorExecuteInput;
   readonly reject: (error: unknown) => void;
   readonly resolve: (result: ArenaRoomTransitionResult) => void;
@@ -163,6 +169,7 @@ type CommandQueueEntry = {
 
 type StoryQueueEntry = {
   readonly kind: 'story';
+  readonly enqueuedAt: number;
   readonly input: RoomActorStoryPublishInput;
   readonly reject: (error: unknown) => void;
   readonly resolve: (result: RoomActorStoryPublishResult) => void;
@@ -248,7 +255,18 @@ export class RoomActor {
       readonly now: () => number;
       readonly onAbandoned: (actor: RoomActor) => void;
       readonly onFenced: (actor: RoomActor) => void;
+      readonly onOperationComplete: (input: {
+        readonly operation: 'command' | 'story';
+        readonly outcome: ArenaRoomActorOperationOutcome;
+        readonly durationMs: number;
+      }) => void;
+      readonly onQueueChanged: (
+        actor: RoomActor,
+        roomQueuedCurrent: number,
+        overloaded: boolean,
+      ) => void;
       readonly onQuarantined: (actor: RoomActor) => void;
+      readonly onStateChanged: (actor: RoomActor) => void;
       readonly onSubscriberError: (error: unknown) => void;
       readonly onBackgroundError: (error: unknown) => void;
       readonly quotaCloseTimestamp: () => string;
@@ -271,6 +289,10 @@ export class RoomActor {
   getSnapshot(): ArenaRoomAuthorityState | null {
     if (this.phase === 'fenced') return fail('ROOM_ACTOR_FENCED');
     return this.state === null ? null : cloneState(this.state);
+  }
+
+  get isOpen(): boolean {
+    return this.phase !== 'fenced' && this.state?.lifecycle.status === 'open';
   }
 
   getStoryCursor(scope: {
@@ -362,15 +384,22 @@ export class RoomActor {
   }
 
   execute(input: RoomActorExecuteInput): Promise<ArenaRoomTransitionResult> {
-    if (this.phase === 'fenced') return Promise.reject(new RoomActorError('ROOM_ACTOR_FENCED'));
+    if (this.phase === 'fenced') {
+      this.reportImmediateRejection('command');
+      return Promise.reject(new RoomActorError('ROOM_ACTOR_FENCED'));
+    }
     if (this.phase !== 'accepting') {
+      this.reportImmediateRejection('command');
       return Promise.reject(new RoomActorError('ROOM_ACTOR_SHUTTING_DOWN'));
     }
     if (this.queue.length >= this.options.maxQueuedCommands) {
+      this.options.onQueueChanged(this, this.queue.length, true);
+      this.reportImmediateRejection('command');
       return Promise.reject(new RoomActorError('ROOM_ACTOR_QUEUE_OVERLOADED'));
     }
     const command = ArenaRoomCommandSchema.safeParse(input.command);
     if (!command.success) {
+      this.reportImmediateRejection('command');
       return Promise.resolve({
         ok: false,
         code: 'validation-failed',
@@ -380,6 +409,7 @@ export class RoomActor {
     return new Promise<ArenaRoomTransitionResult>((resolve, reject) => {
       this.queue.push({
         kind: 'command',
+        enqueuedAt: this.options.now(),
         input: {
           ...input,
           authority: snapshotInputCapability(input.authority),
@@ -389,20 +419,28 @@ export class RoomActor {
         reject,
         resolve,
       });
+      this.options.onQueueChanged(this, this.queue.length, false);
       this.pump();
     });
   }
 
   publishStory(input: RoomActorStoryPublishInput): Promise<RoomActorStoryPublishResult> {
-    if (this.phase === 'fenced') return Promise.reject(new RoomActorError('ROOM_ACTOR_FENCED'));
+    if (this.phase === 'fenced') {
+      this.reportImmediateRejection('story');
+      return Promise.reject(new RoomActorError('ROOM_ACTOR_FENCED'));
+    }
     if (this.phase !== 'accepting') {
+      this.reportImmediateRejection('story');
       return Promise.reject(new RoomActorError('ROOM_ACTOR_SHUTTING_DOWN'));
     }
     if (this.queue.length >= this.options.maxQueuedCommands) {
+      this.options.onQueueChanged(this, this.queue.length, true);
+      this.reportImmediateRejection('story');
       return Promise.reject(new RoomActorError('ROOM_ACTOR_QUEUE_OVERLOADED'));
     }
     const event = RoomEventSchema.safeParse(input.event);
     if (!event.success || event.data.type !== 'story.delta') {
+      this.reportImmediateRejection('story');
       return Promise.resolve({
         ok: false,
         code: 'validation-failed',
@@ -412,6 +450,7 @@ export class RoomActor {
     return new Promise<RoomActorStoryPublishResult>((resolve, reject) => {
       this.queue.push({
         kind: 'story',
+        enqueuedAt: this.options.now(),
         input: {
           authority: snapshotInputCapability(input.authority),
           event: event.data,
@@ -420,6 +459,7 @@ export class RoomActor {
         reject,
         resolve,
       });
+      this.options.onQueueChanged(this, this.queue.length, false);
       this.pump();
     });
   }
@@ -504,7 +544,7 @@ export class RoomActor {
     if (this.phase === 'closed' || this.phase === 'fenced') return;
     this.phase = 'closed';
     const error = new RoomActorError('ROOM_ACTOR_SHUTTING_DOWN');
-    for (const entry of this.queue.splice(0)) entry.reject(error);
+    this.rejectQueued(error);
     this.subscribers.clear();
     this.resolveDrainWaitersIfIdle();
   }
@@ -521,7 +561,7 @@ export class RoomActor {
     if (this.phase === 'fenced') return;
     this.phase = 'fenced';
     const error = new RoomActorError('ROOM_ACTOR_FENCED');
-    for (const entry of this.queue.splice(0)) entry.reject(error);
+    this.rejectQueued(error);
     if (this.state !== null) {
       for (const subscriber of this.subscribers) {
         try {
@@ -549,10 +589,41 @@ export class RoomActor {
       if (this.state === null && this.phase === 'accepting') this.options.onAbandoned(this);
       return;
     }
+    this.options.onQueueChanged(this, this.queue.length, false);
     this.running = true;
     const completion = entry.kind === 'command'
-      ? this.apply(entry.input).then(entry.resolve, entry.reject)
-      : this.applyStory(entry.input).then(entry.resolve, entry.reject);
+      ? this.apply(entry.input).then(
+        (result) => {
+          this.reportOperation(
+            'command',
+            result.ok
+              ? (result.kind === 'idempotent' ? 'idempotent' : 'applied')
+              : 'rejected',
+            entry.enqueuedAt,
+          );
+          entry.resolve(result);
+        },
+        (error: unknown) => {
+          this.reportOperation('command', 'error', entry.enqueuedAt);
+          entry.reject(error);
+        },
+      )
+      : this.applyStory(entry.input).then(
+        (result) => {
+          this.reportOperation(
+            'story',
+            result.ok
+              ? (result.kind === 'published' ? 'applied' : 'idempotent')
+              : 'rejected',
+            entry.enqueuedAt,
+          );
+          entry.resolve(result);
+        },
+        (error: unknown) => {
+          this.reportOperation('story', 'error', entry.enqueuedAt);
+          entry.reject(error);
+        },
+      );
     void completion
       .finally(() => {
         this.running = false;
@@ -726,6 +797,7 @@ export class RoomActor {
     this.requireInstallable();
     this.state = cloneState(transition.nextState);
     this.lastCheckpointRefreshAt = this.options.now();
+    this.options.onStateChanged(this);
     this.rememberReplay(transition.events, predecessorSnapshot);
     this.fanout(transition, predecessorSnapshot);
     return transition;
@@ -770,6 +842,7 @@ export class RoomActor {
     this.requireInstallable();
     this.state = cloneState(transition.nextState);
     this.lastCheckpointRefreshAt = this.options.now();
+    this.options.onStateChanged(this);
     this.rememberReplay(transition.events, predecessorSnapshot);
     this.fanout(transition, predecessorSnapshot);
     return true;
@@ -829,6 +902,7 @@ export class RoomActor {
     this.lastCheckpointRefreshAt = this.options.now();
     this.quotaExhausted = false;
     this.quotaExhaustedReason = null;
+    this.options.onStateChanged(this);
     this.rememberReplay(transition.events, predecessorSnapshot);
     this.fanout(transition, predecessorSnapshot);
   }
@@ -935,6 +1009,32 @@ export class RoomActor {
     }
   }
 
+  private rejectQueued(error: RoomActorError): void {
+    const queued = this.queue.splice(0);
+    if (queued.length > 0) this.options.onQueueChanged(this, 0, false);
+    for (const entry of queued) {
+      this.reportOperation(entry.kind, 'error', entry.enqueuedAt);
+      entry.reject(error);
+    }
+  }
+
+  private reportImmediateRejection(operation: 'command' | 'story'): void {
+    this.options.onOperationComplete({ operation, outcome: 'rejected', durationMs: 0 });
+  }
+
+  private reportOperation(
+    operation: 'command' | 'story',
+    outcome: ArenaRoomActorOperationOutcome,
+    enqueuedAt: number,
+  ): void {
+    const elapsed = this.options.now() - enqueuedAt;
+    this.options.onOperationComplete({
+      operation,
+      outcome,
+      durationMs: Number.isFinite(elapsed) ? Math.max(0, elapsed) : 0,
+    });
+  }
+
   private requireInstallable(): void {
     if (this.phase === 'closed') return fail('ROOM_ACTOR_SHUTTING_DOWN');
     if (this.phase === 'fenced') return fail('ROOM_ACTOR_FENCED');
@@ -949,6 +1049,7 @@ export class RoomActor {
 
 export type RoomActorRegistryOptions = {
   readonly store: RoomActorCheckpointStore;
+  readonly observer?: ArenaRoomRuntimeObserver;
   readonly maxQueuedCommands?: number;
   readonly maxSubscribersPerRoom?: number;
   readonly maxActors?: number;
@@ -995,6 +1096,7 @@ export type RoomActorRegistryCreateResult = {
 
 export class RoomActorRegistry {
   private readonly actors = new Map<string, RoomActor>();
+  private readonly actorQueued = new Map<RoomActor, number>();
   private readonly hydrations = new Map<string, Promise<RoomActor | null>>();
   private readonly fencedRoomIds = new Map<string, true>();
   private readonly maxQueuedCommands: number;
@@ -1148,11 +1250,14 @@ export class RoomActorRegistry {
       [],
       directoryRecord,
     );
-    this.actors.set(identity.roomId, actor);
+    this.installActor(identity.roomId, actor);
     const result = await actor.execute({
       authority: snapshotInputCapability(input.authority),
       command: command.data,
     });
+    if (result.ok && result.kind === 'applied') {
+      this.observeIncident('created');
+    }
     return { ...identity, result };
   }
 
@@ -1220,7 +1325,7 @@ export class RoomActorRegistry {
     for (const [roomId, actor] of this.actors) {
       if (!actor.isIdleExpired(now, this.idleTtlMs)) continue;
       actor.stopAccepting();
-      this.actors.delete(roomId);
+      this.removeActor(roomId, actor);
       evictions.push(actor.close());
     }
     await Promise.all(evictions);
@@ -1260,8 +1365,11 @@ export class RoomActorRegistry {
       .then(() => Promise.all([...this.actors.values()].map((actor) => actor.close())))
       .then(() => {
         this.actors.clear();
+        this.actorQueued.clear();
         this.fencedRoomIds.clear();
         this.hydrations.clear();
+        this.observeRegistry();
+        this.observeQueue(null, 0, false);
       });
     return this.shutdownPromise;
   }
@@ -1270,8 +1378,11 @@ export class RoomActorRegistry {
     this.stopAccepting();
     for (const actor of this.actors.values()) actor.forceClose();
     this.actors.clear();
+    this.actorQueued.clear();
     this.fencedRoomIds.clear();
     this.hydrations.clear();
+    this.observeRegistry();
+    this.observeQueue(null, 0, false);
   }
 
   private async hydrate(roomId: string): Promise<RoomActor | null> {
@@ -1280,7 +1391,8 @@ export class RoomActorRegistry {
     if (checkpoint === null) return null;
     if (checkpoint.lifecycle.status === 'closed') {
       const actor = this.createActor(roomId, checkpoint);
-      this.actors.set(roomId, actor);
+      this.installActor(roomId, actor);
+      this.observeIncident('recovered');
       return actor;
     }
     const now = this.now();
@@ -1305,12 +1417,14 @@ export class RoomActorRegistry {
         commit: createArenaRoomCheckpointCommit(transition),
       });
       if (saved.kind === 'conflict') {
+        this.observeIncident('fenced');
         this.rememberFenced(roomId);
         return fail('ROOM_ACTOR_RECOVERY_CONFLICT');
       }
       this.requireAccepting();
       const actor = this.createActor(roomId, transition.nextState, transition.events);
-      this.actors.set(roomId, actor);
+      this.installActor(roomId, actor);
+      this.observeIncident('recovered');
       return actor;
     }
     const previousRoomEpoch = checkpoint.snapshot.roomEpoch;
@@ -1351,17 +1465,20 @@ export class RoomActorRegistry {
     } catch (error) {
       if (!(error instanceof Error) || error.message !== 'REDIS_ROOM_INCARNATION_LIMIT') throw error;
       const actor = this.createActor(roomId, checkpoint);
-      this.actors.set(roomId, actor);
+      this.installActor(roomId, actor);
       await actor.closeForQuota();
+      this.observeIncident('recovered');
       return actor;
     }
     if (saved.kind === 'conflict') {
+      this.observeIncident('fenced');
       this.rememberFenced(roomId);
       return fail('ROOM_ACTOR_RECOVERY_CONFLICT');
     }
     this.requireAccepting();
     const actor = this.createActor(roomId, transition.nextState, transition.events);
-    this.actors.set(roomId, actor);
+    this.installActor(roomId, actor);
+    this.observeIncident('recovered');
     return actor;
   }
 
@@ -1380,15 +1497,30 @@ export class RoomActorRegistry {
       creationDirectory,
       now: this.now,
       onAbandoned: (abandonedActor) => {
-        if (this.actors.get(roomId) === abandonedActor) this.actors.delete(roomId);
+        this.removeActor(roomId, abandonedActor);
         abandonedActor.forceClose();
       },
       onFenced: (fencedActor) => {
-        if (this.actors.get(roomId) === fencedActor) this.actors.delete(roomId);
+        this.removeActor(roomId, fencedActor);
+        this.observeIncident('fenced');
         this.rememberFenced(roomId);
       },
+      onOperationComplete: (observation) => {
+        observeArenaRoomRuntime(this.options.observer, {
+          event: 'actor_operation',
+          ...observation,
+        });
+      },
+      onQueueChanged: (changedActor, roomQueuedCurrent, overloaded) => {
+        this.observeQueue(changedActor, roomQueuedCurrent, overloaded);
+      },
       onQuarantined: (quarantinedActor) => {
-        if (this.actors.get(roomId) === quarantinedActor) this.actors.delete(roomId);
+        this.removeActor(roomId, quarantinedActor);
+        this.observeIncident('quarantined');
+        this.observeIncident('replacement_required');
+      },
+      onStateChanged: (changedActor) => {
+        if (this.actors.get(roomId) === changedActor) this.observeRegistry();
       },
       onSubscriberError: this.options.onSubscriberError ?? (() => undefined),
       onBackgroundError: this.options.onBackgroundError ?? (() => undefined),
@@ -1402,6 +1534,57 @@ export class RoomActorRegistry {
     if (this.idleSweepTimer === null) return;
     clearInterval(this.idleSweepTimer);
     this.idleSweepTimer = null;
+  }
+
+  private installActor(roomId: string, actor: RoomActor): void {
+    this.actors.set(roomId, actor);
+    this.actorQueued.set(actor, 0);
+    this.observeRegistry();
+  }
+
+  private removeActor(roomId: string, actor: RoomActor): void {
+    if (this.actors.get(roomId) !== actor) return;
+    this.actors.delete(roomId);
+    this.actorQueued.delete(actor);
+    this.observeRegistry();
+    this.observeQueue(null, 0, false);
+  }
+
+  private observeRegistry(): void {
+    let activeRooms = 0;
+    for (const actor of this.actors.values()) {
+      if (actor.isOpen) activeRooms += 1;
+    }
+    observeArenaRoomRuntime(this.options.observer, {
+      event: 'registry',
+      activeRooms,
+      residentActors: this.actors.size,
+    });
+  }
+
+  private observeQueue(
+    actor: RoomActor | null,
+    roomQueuedCurrent: number,
+    overloaded: boolean,
+  ): void {
+    if (actor !== null) {
+      if (this.actors.get(actor.roomId) !== actor) return;
+      this.actorQueued.set(actor, roomQueuedCurrent);
+    }
+    let queuedCurrent = 0;
+    for (const queued of this.actorQueued.values()) queuedCurrent += queued;
+    observeArenaRoomRuntime(this.options.observer, {
+      event: 'actor_queue',
+      queuedCurrent,
+      roomQueuedCurrent,
+      overloaded,
+    });
+  }
+
+  private observeIncident(
+    outcome: 'created' | 'recovered' | 'fenced' | 'quarantined' | 'replacement_required',
+  ): void {
+    observeArenaRoomRuntime(this.options.observer, { event: 'incident', outcome });
   }
 
   private requireAccepting(): void {

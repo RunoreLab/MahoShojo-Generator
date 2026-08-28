@@ -10,6 +10,12 @@ import type { WebSocketLike } from '@hono/node-server';
 import type { WSEvents, WSMessageReceive } from 'hono/ws';
 import WebSocket from 'ws';
 
+import {
+  observeArenaRoomRuntime,
+  type ArenaRoomRuntimeObservation,
+  type ArenaRoomRuntimeObserver,
+} from './runtime-observer';
+
 export { ARENA_ROOM_WEBSOCKET_PATH } from '@mahoshojo/contracts/arena-room';
 
 const CLOSE_BINARY_NOT_SUPPORTED = 1003;
@@ -66,6 +72,7 @@ export interface RoomWebSocketGatewayOptions {
   heartbeatTimeoutMs?: number;
   maxConnectionsPerUser?: number;
   now?: () => number;
+  observer?: ArenaRoomRuntimeObserver;
   outboundQueueMaxBytes?: number;
   rateWindowMs?: number;
   reservationTtlMs?: number;
@@ -108,6 +115,7 @@ interface RateWindow {
 interface OutboundFrame {
   bytes: number;
   data: string;
+  pending: boolean;
 }
 
 const assertPositiveInteger = (name: string, value: number): number => {
@@ -159,6 +167,7 @@ class RoomWebSocketSession {
   private connectionRate: RateWindow;
   private outboundBytes = 0;
   private readonly outboundQueue: OutboundFrame[] = [];
+  private inFlightFrame: OutboundFrame | null = null;
   private sending = false;
   private connection: RoomWebSocketConnection | null = null;
   private activationPromise: Promise<void> | null = null;
@@ -276,7 +285,10 @@ class RoomWebSocketSession {
   cleanup(): void {
     if (this.gateway.removeSession(this)) {
       this.closing = true;
+      for (const frame of this.outboundQueue) this.releaseOutbound(frame);
       this.outboundQueue.length = 0;
+      if (this.inFlightFrame) this.releaseOutbound(this.inFlightFrame);
+      this.inFlightFrame = null;
       this.outboundBytes = 0;
       if (this.closeTimer !== null) clearTimeout(this.closeTimer);
       this.closeTimer = null;
@@ -315,11 +327,14 @@ class RoomWebSocketSession {
       this.socket.bufferedAmount + this.outboundBytes + bytes
       > this.gateway.outboundQueueMaxBytes
     ) {
+      this.gateway.observeRuntime({ event: 'slow_consumer_resync_close' });
       this.close(CLOSE_TRY_AGAIN_LATER, 'resync-required');
       return false;
     }
-    this.outboundQueue.push({ bytes, data });
+    const frame = { bytes, data, pending: true };
+    this.outboundQueue.push(frame);
     this.outboundBytes += bytes;
+    this.gateway.trackOutboundFrame(bytes);
     this.drainOutbound();
     return true;
   }
@@ -329,10 +344,12 @@ class RoomWebSocketSession {
     const frame = this.outboundQueue.shift();
     if (!frame) return;
     this.sending = true;
+    this.inFlightFrame = frame;
     try {
       this.socket.send(frame.data, { compress: false }, (error) => {
         this.sending = false;
-        this.outboundBytes = Math.max(0, this.outboundBytes - frame.bytes);
+        if (this.inFlightFrame === frame) this.inFlightFrame = null;
+        this.releaseOutbound(frame);
         if (error) {
           this.terminate();
           return;
@@ -343,6 +360,13 @@ class RoomWebSocketSession {
       this.sending = false;
       this.terminate();
     }
+  }
+
+  private releaseOutbound(frame: OutboundFrame): void {
+    if (!frame.pending) return;
+    frame.pending = false;
+    this.outboundBytes = Math.max(0, this.outboundBytes - frame.bytes);
+    this.gateway.releaseOutboundFrame(frame.bytes);
   }
 
   private close(code: number, reason: string): void {
@@ -379,6 +403,9 @@ export class RoomWebSocketGateway {
   private readonly heartbeatInterval: NodeJS.Timeout;
   private readonly maxConnectionsPerUser: number;
   private readonly now: () => number;
+  private readonly observer: ArenaRoomRuntimeObserver | undefined;
+  private outboundPendingBytes = 0;
+  private outboundPendingFrames = 0;
   private readonly reservationTtlMs: number;
   private readonly sessions = new Set<RoomWebSocketSession>();
   private readonly shutdownGraceMs: number;
@@ -413,6 +440,7 @@ export class RoomWebSocketGateway {
       options.maxConnectionsPerUser ?? DEFAULT_MAX_CONNECTIONS_PER_USER,
     );
     this.now = options.now ?? Date.now;
+    this.observer = options.observer;
     this.outboundQueueMaxBytes = assertPositiveInteger(
       'outboundQueueMaxBytes',
       options.outboundQueueMaxBytes ?? DEFAULT_OUTBOUND_QUEUE_MAX_BYTES,
@@ -591,9 +619,26 @@ export class RoomWebSocketGateway {
     void task.finally(() => this.tasks.delete(task)).catch(() => undefined);
   }
 
+  observeRuntime(observation: ArenaRoomRuntimeObservation): void {
+    observeArenaRoomRuntime(this.observer, observation);
+  }
+
+  trackOutboundFrame(bytes: number): void {
+    this.outboundPendingFrames += 1;
+    this.outboundPendingBytes += bytes;
+    this.observeOutboundBacklog();
+  }
+
+  releaseOutboundFrame(bytes: number): void {
+    this.outboundPendingFrames = Math.max(0, this.outboundPendingFrames - 1);
+    this.outboundPendingBytes = Math.max(0, this.outboundPendingBytes - bytes);
+    this.observeOutboundBacklog();
+  }
+
   removeSession(session: RoomWebSocketSession): boolean {
     if (!this.sessions.delete(session)) return false;
     this.decrementOccupancy(session.reservation.connectionKey);
+    this.observeRuntime({ event: 'socket', action: 'closed' });
     if (this.sessions.size === 0) {
       for (const resolve of this.emptyWaiters) resolve();
       this.emptyWaiters.clear();
@@ -627,6 +672,7 @@ export class RoomWebSocketGateway {
       this.currentTime(),
     );
     this.sessions.add(session);
+    this.observeRuntime({ event: 'socket', action: 'opened' });
     session.start();
     return { accepted: true, session };
   }
@@ -652,6 +698,14 @@ export class RoomWebSocketGateway {
     const next = (this.userOccupancy.get(userId) ?? 1) - 1;
     if (next <= 0) this.userOccupancy.delete(userId);
     else this.userOccupancy.set(userId, next);
+  }
+
+  private observeOutboundBacklog(): void {
+    this.observeRuntime({
+      event: 'socket_backlog',
+      queuedFrames: this.outboundPendingFrames,
+      queuedBytes: this.outboundPendingBytes,
+    });
   }
 
   private waitUntilEmpty(): Promise<void> {

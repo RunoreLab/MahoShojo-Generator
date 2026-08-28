@@ -11,6 +11,7 @@ import {
   createRedisRoomStore,
   type RedisRoomClient,
 } from '#/arena-room/redis-room-store';
+import type { ArenaRoomRuntimeObserver } from '#/arena-room/runtime-observer';
 import {
   closeArenaRoomTransition,
   createArenaRoomState,
@@ -29,6 +30,119 @@ const commit = (transition: ArenaRoomTransitionSuccess): ArenaRoomCheckpointComm
 );
 
 describe('RedisRoomStore', () => {
+  it('观测五类 checkpoint 的固定 outcome、延迟与实际 UTF-8 envelope bytes', async () => {
+    const client = createClient();
+    const initial = createArenaRoomState();
+    const published = publishArenaRoomTransition(initial);
+    const loadedRaw = JSON.stringify({
+      checkpointVersion: 1,
+      ...checkpointPredecessorOf(published.nextState),
+      state: published.nextState,
+    });
+    vi.mocked(client.get).mockResolvedValue(loadedRaw);
+    vi.mocked(client.eval)
+      .mockResolvedValueOnce('seeded')
+      .mockResolvedValueOnce('saved')
+      .mockResolvedValueOnce('refreshed')
+      .mockResolvedValueOnce('expired')
+      .mockResolvedValueOnce('deleted');
+    const observeArenaRoomRuntime = vi.fn<
+      ArenaRoomRuntimeObserver['observeArenaRoomRuntime']
+    >();
+    const store = createRedisRoomStore({
+      getClient: () => client,
+      observer: { observeArenaRoomRuntime },
+    });
+
+    await expect(store.load('room-1')).resolves.toEqual(published.nextState);
+    await expect(store.save({ commit: commit(publishArenaRoomTransition(initial)) }))
+      .resolves.toEqual({ kind: 'saved' });
+    await expect(store.refresh({ checkpoint: published.nextState }))
+      .resolves.toEqual({ kind: 'refreshed' });
+    await expect(store.expire({ checkpoint: published.nextState }))
+      .resolves.toEqual({ kind: 'expired' });
+    await expect(store.delete({ checkpoint: published.nextState }))
+      .resolves.toEqual({ kind: 'deleted' });
+
+    const evalCalls = vi.mocked(client.eval).mock.calls;
+    const saveRaw = evalCalls[1]![1].arguments[6]!;
+    const refreshRaw = evalCalls[2]![1].arguments[6]!;
+    const expireRaw = evalCalls[3]![1].arguments[7]!;
+    const deleteRaw = evalCalls[4]![1].arguments[5]!;
+    expect(observeArenaRoomRuntime.mock.calls.map(([observation]) => observation))
+      .toEqual([
+        {
+          event: 'checkpoint',
+          operation: 'load',
+          outcome: 'ok',
+          serializedBytes: new TextEncoder().encode(loadedRaw).byteLength,
+          durationMs: expect.any(Number),
+        },
+        {
+          event: 'checkpoint',
+          operation: 'save',
+          outcome: 'ok',
+          serializedBytes: new TextEncoder().encode(saveRaw).byteLength,
+          durationMs: expect.any(Number),
+        },
+        {
+          event: 'checkpoint',
+          operation: 'refresh',
+          outcome: 'ok',
+          serializedBytes: new TextEncoder().encode(refreshRaw).byteLength,
+          durationMs: expect.any(Number),
+        },
+        {
+          event: 'checkpoint',
+          operation: 'expire',
+          outcome: 'ok',
+          serializedBytes: new TextEncoder().encode(expireRaw).byteLength,
+          durationMs: expect.any(Number),
+        },
+        {
+          event: 'checkpoint',
+          operation: 'delete',
+          outcome: 'ok',
+          serializedBytes: new TextEncoder().encode(deleteRaw).byteLength,
+          durationMs: expect.any(Number),
+        },
+      ]);
+  });
+
+  it('checkpoint missing/conflict/unavailable/error 使用固定 outcome 且 observer fail-soft', async () => {
+    const client = createClient();
+    vi.mocked(client.get)
+      .mockResolvedValueOnce(null)
+      .mockRejectedValueOnce(new Error('REDIS_ROOM_CHECKPOINT_UNAVAILABLE'));
+    vi.mocked(client.eval)
+      .mockResolvedValueOnce('conflict')
+      .mockRejectedValueOnce(new Error('redis-secret-canary'));
+    const observations: unknown[] = [];
+    const observer: ArenaRoomRuntimeObserver = {
+      observeArenaRoomRuntime: (observation) => {
+        observations.push(observation);
+        throw new Error('observer-secret-canary');
+      },
+    };
+    const store = createRedisRoomStore({ getClient: () => client, observer });
+
+    await expect(store.load('room-1')).resolves.toBeNull();
+    await expect(store.save({ commit: commit(createArenaRoomTransition()) }))
+      .resolves.toEqual({ kind: 'conflict' });
+    await expect(store.load('room-1'))
+      .rejects.toThrow('REDIS_ROOM_CHECKPOINT_UNAVAILABLE');
+    await expect(store.refresh({ checkpoint: createArenaRoomState() }))
+      .rejects.toThrow('redis-secret-canary');
+
+    expect(observations).toEqual([
+      expect.objectContaining({ event: 'checkpoint', operation: 'load', outcome: 'missing' }),
+      expect.objectContaining({ event: 'checkpoint', operation: 'save', outcome: 'conflict' }),
+      expect.objectContaining({ event: 'checkpoint', operation: 'load', outcome: 'unavailable' }),
+      expect.objectContaining({ event: 'checkpoint', operation: 'refresh', outcome: 'error' }),
+    ]);
+    expect(JSON.stringify(observations)).not.toMatch(/redis-secret|observer-secret/u);
+  });
+
   it('以单次 Lua create 写入 versioned checkpoint、环境隔离 key 和 active TTL', async () => {
     const client = createClient();
     vi.mocked(client.eval).mockResolvedValue('saved');
@@ -347,7 +461,13 @@ describe('RedisRoomStore', () => {
     vi.mocked(client.eval)
       .mockResolvedValueOnce('seeded')
       .mockResolvedValueOnce('migrated');
-    const store = createRedisRoomStore({ getClient: () => client });
+    const observeArenaRoomRuntime = vi.fn<
+      ArenaRoomRuntimeObserver['observeArenaRoomRuntime']
+    >();
+    const store = createRedisRoomStore({
+      getClient: () => client,
+      observer: { observeArenaRoomRuntime },
+    });
 
     await expect(store.load('room-1')).resolves.toMatchObject({
       authorityStateVersion: 2,
@@ -372,6 +492,12 @@ describe('RedisRoomStore', () => {
       },
     });
     expect(vi.mocked(client.eval).mock.calls[1]?.[1].arguments[0]).toBe(raw);
+    expect(observeArenaRoomRuntime).toHaveBeenCalledWith(expect.objectContaining({
+      event: 'checkpoint',
+      operation: 'load',
+      outcome: 'ok',
+      serializedBytes: new TextEncoder().encode(migratedRaw!).byteLength,
+    }));
   });
 
   it('legacy fence bootstrap 与并发 checkpoint 变化冲突时重读，不返回未围住的旧 state', async () => {

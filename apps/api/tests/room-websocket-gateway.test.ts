@@ -13,8 +13,13 @@ import {
   denyRoomWebSocketAuthorization,
   type RoomWebSocketAuthorization,
   type RoomWebSocketConnectionAuthority,
+  type RoomWebSocketPeer,
   type RoomWebSocketReservation,
 } from '#/arena-room/room-websocket-gateway';
+import type {
+  ArenaRoomRuntimeObservation,
+  ArenaRoomRuntimeObserver,
+} from '#/arena-room/runtime-observer';
 
 class FakeWebSocket extends EventEmitter {
   readonly protocol = ARENA_ROOM_WEBSOCKET_PROTOCOL;
@@ -404,7 +409,15 @@ describe('RoomWebSocketGateway', () => {
   });
 
   it('bounded send queue 饱和时以 resync-required 关闭 slow consumer', async () => {
-    const gateway = createGateway({ outboundQueueMaxBytes: 150 });
+    const observations: ArenaRoomRuntimeObservation[] = [];
+    const gateway = createGateway({
+      observer: {
+        observeArenaRoomRuntime: (observation) => {
+          observations.push(observation);
+        },
+      },
+      outboundQueueMaxBytes: 150,
+    });
     const decision = await gateway.prepareUpgrade(upgradeRequest());
     if (!decision.accepted) throw new Error('expected accepted reservation');
     const socket = new FakeWebSocket();
@@ -418,6 +431,125 @@ describe('RoomWebSocketGateway', () => {
     events.onMessage?.(message, wsContext(socket));
 
     expect(socket.closes.at(-1)).toEqual({ code: 1013, reason: 'resync-required' });
+    expect(observations).toContainEqual({ event: 'slow_consumer_resync_close' });
+  });
+
+  it('聚合全局 socket 和含 in-flight 的 outbound pending，cleanup/callback 不双减', async () => {
+    const observations: ArenaRoomRuntimeObservation[] = [];
+    const peers: RoomWebSocketPeer[] = [];
+    const observer: ArenaRoomRuntimeObserver = {
+      observeArenaRoomRuntime: (observation) => {
+        observations.push(observation);
+      },
+    };
+    const gateway = createGateway({
+      authorize: async () => ({
+        ...acceptedAuthorization(),
+        connectionAuthority: {
+          activate: (peer) => {
+            peers.push(peer);
+            return {};
+          },
+        },
+      }),
+      maxConnectionsPerUser: 2,
+      observer,
+    });
+    const [first, second] = await Promise.all([
+      gateway.prepareUpgrade(upgradeRequest()),
+      gateway.prepareUpgrade(upgradeRequest()),
+    ]);
+    if (!first.accepted || !second.accepted) throw new Error('expected accepted reservations');
+    const firstSocket = new FakeWebSocket();
+    const secondSocket = new FakeWebSocket();
+    firstSocket.deferSendCallback = true;
+    secondSocket.deferSendCallback = true;
+    const firstOpened = openReservation(gateway, first.reservation, firstSocket);
+    const secondOpened = openReservation(gateway, second.reservation, secondSocket);
+    await vi.waitFor(() => expect(peers).toHaveLength(2));
+
+    const message = {
+      protocolVersion: 1 as const,
+      type: 'room.resync.required' as const,
+      reason: 'replay-unavailable' as const,
+    };
+    const frameBytes = Buffer.byteLength(JSON.stringify(message), 'utf8');
+    peers[0]?.send(message);
+    peers[1]?.send(message);
+
+    const backlogs = () => observations.filter((observation) => (
+      observation.event === 'socket_backlog'
+    ));
+    expect(backlogs().at(-1)).toEqual({
+      event: 'socket_backlog',
+      queuedFrames: 2,
+      queuedBytes: frameBytes * 2,
+    });
+    firstSocket.flushSend();
+    expect(backlogs().at(-1)).toEqual({
+      event: 'socket_backlog',
+      queuedFrames: 1,
+      queuedBytes: frameBytes,
+    });
+
+    secondSocket.readyState = 3;
+    secondOpened.events.onClose?.(
+      new CloseEvent('close', { code: 1000 }),
+      wsContext(secondSocket),
+    );
+    expect(backlogs().at(-1)).toEqual({
+      event: 'socket_backlog',
+      queuedFrames: 0,
+      queuedBytes: 0,
+    });
+    const observationCountAfterCleanup = observations.length;
+    secondSocket.flushSend();
+    expect(observations).toHaveLength(observationCountAfterCleanup);
+
+    firstSocket.readyState = 3;
+    firstOpened.events.onClose?.(
+      new CloseEvent('close', { code: 1000 }),
+      wsContext(firstSocket),
+    );
+    expect(observations.filter((observation) => observation.event === 'socket')).toEqual([
+      { event: 'socket', action: 'opened' },
+      { event: 'socket', action: 'opened' },
+      { event: 'socket', action: 'closed' },
+      { event: 'socket', action: 'closed' },
+    ]);
+    expect(JSON.stringify(observations)).not.toContain('room-1');
+    expect(JSON.stringify(observations)).not.toContain('user-1');
+  });
+
+  it('observer 同步抛错不改变 socket cleanup 和 authority dispose', async () => {
+    const dispose = vi.fn();
+    const activate = vi.fn(async () => ({ dispose }));
+    const gateway = createGateway({
+      authorize: async () => ({
+        ...acceptedAuthorization(),
+        connectionAuthority: { activate },
+      }),
+      maxConnectionsPerUser: 1,
+      observer: {
+        observeArenaRoomRuntime: () => {
+          throw new Error('observer-secret-canary');
+        },
+      },
+    });
+    const decision = await gateway.prepareUpgrade(upgradeRequest());
+    if (!decision.accepted) throw new Error('expected accepted reservation');
+    const opened = openReservation(gateway, decision.reservation);
+    await vi.waitFor(() => expect(activate).toHaveBeenCalledOnce());
+
+    opened.socket.readyState = 3;
+    opened.events.onClose?.(
+      new CloseEvent('close', { code: 1000 }),
+      wsContext(opened.socket),
+    );
+
+    await vi.waitFor(() => expect(dispose).toHaveBeenCalledOnce());
+    await expect(gateway.prepareUpgrade(upgradeRequest()))
+      .resolves.toMatchObject({ accepted: true });
   });
 
   it('graceful shutdown 停止新连接、发出 1012 并在期限后 terminate', async () => {

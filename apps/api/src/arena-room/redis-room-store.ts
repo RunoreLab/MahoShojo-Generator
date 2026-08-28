@@ -1,3 +1,4 @@
+import { performance } from 'node:perf_hooks';
 import {
   ARENA_ROOM_AUTHORITY_STATE_VERSION,
   checkpointPredecessorOf,
@@ -16,6 +17,12 @@ import {
   serializeStoredRoomDirectoryRecord,
   type RoomDirectoryRecord,
 } from './room-directory-record';
+import {
+  observeArenaRoomRuntime,
+  type ArenaRoomCheckpointOperation,
+  type ArenaRoomCheckpointOutcome,
+  type ArenaRoomRuntimeObserver,
+} from './runtime-observer';
 
 const ACTIVE_ROOM_CHECKPOINT_VERSION = 1 as const;
 const EXPIRING_ROOM_CHECKPOINT_VERSION = 2 as const;
@@ -409,6 +416,7 @@ export type RedisRoomStoreOptions = {
   keyPrefix?: string;
   activeTtlSeconds?: number;
   terminalTtlSeconds?: number;
+  observer?: ArenaRoomRuntimeObserver;
 };
 
 export type RedisRoomStoreSaveResult = { readonly kind: 'saved' | 'conflict' };
@@ -628,6 +636,44 @@ const parseMutationResult = <T extends string>(
   return { kind: raw as T };
 };
 
+const checkpointEncoder = new TextEncoder();
+
+const serializedCheckpointBytes = (raw: string): number => (
+  checkpointEncoder.encode(raw).byteLength
+);
+
+const checkpointErrorOutcome = (error: unknown): ArenaRoomCheckpointOutcome => {
+  if (error instanceof Error && error.message === 'REDIS_ROOM_CHECKPOINT_UNAVAILABLE') {
+    return 'unavailable';
+  }
+  if (error instanceof Error && error.message === 'REDIS_ROOM_CHECKPOINT_CONFLICT') {
+    return 'conflict';
+  }
+  return 'error';
+};
+
+type CheckpointObservationState = {
+  outcome: ArenaRoomCheckpointOutcome;
+  serializedBytes?: number;
+};
+
+const observeCheckpoint = (
+  observer: ArenaRoomRuntimeObserver | undefined,
+  operation: ArenaRoomCheckpointOperation,
+  state: CheckpointObservationState,
+  startedAt: number,
+): void => {
+  observeArenaRoomRuntime(observer, {
+    event: 'checkpoint',
+    operation,
+    outcome: state.outcome,
+    ...(state.serializedBytes === undefined
+      ? {}
+      : { serializedBytes: state.serializedBytes }),
+    durationMs: Math.max(0, performance.now() - startedAt),
+  });
+};
+
 export const createRedisRoomStore = (options: RedisRoomStoreOptions): RedisRoomStore => {
   const keyspace = createArenaRoomRedisKeyspace(options.keyPrefix);
   const activeTtlMs = ttlMs(
@@ -640,202 +686,294 @@ export const createRedisRoomStore = (options: RedisRoomStoreOptions): RedisRoomS
   );
   return Object.freeze({
     async load(roomId) {
-      for (let attempt = 0; attempt < 3; attempt += 1) {
-        const raw = await options.getClient().get(keyspace.roomCheckpointKey(roomId));
-        if (raw === null) return null;
-        const parsed = parseStoredCheckpoint(raw, roomId);
-        const stored = parsed.stored;
-        if (stored.checkpointVersion === EXPIRING_ROOM_CHECKPOINT_VERSION) return null;
-        const bootstrapped = await options.getClient().eval(BOOTSTRAP_FENCE_SCRIPT, {
-          keys: [
-            keyspace.roomCheckpointKey(roomId),
-            keyspace.roomIncarnationFenceKey(roomId),
-          ],
-          arguments: [raw, roomId, stored.roomEpoch, String(MAX_ROOM_INCARNATIONS)],
-        });
-        const result = parseMutationResult(
-          bootstrapped,
-          ['seeded', 'already', 'expired', 'conflict'] as const,
-        );
-        if (result.kind === 'expired') return null;
-        if (result.kind === 'conflict') continue;
-        if (parsed.migratedFromAuthorityV1) {
-          const migratedRaw = JSON.stringify(stored);
-          const migration = await options.getClient().eval(MIGRATE_AUTHORITY_V1_SCRIPT, {
-            keys: [keyspace.roomCheckpointKey(roomId)],
-            arguments: [raw, migratedRaw],
+      const startedAt = performance.now();
+      const observation: CheckpointObservationState = { outcome: 'error' };
+      try {
+        for (let attempt = 0; attempt < 3; attempt += 1) {
+          const raw = await options.getClient().get(keyspace.roomCheckpointKey(roomId));
+          observation.serializedBytes = raw === null
+            ? undefined
+            : serializedCheckpointBytes(raw);
+          if (raw === null) {
+            observation.outcome = 'missing';
+            return null;
+          }
+          const parsed = parseStoredCheckpoint(raw, roomId);
+          const stored = parsed.stored;
+          if (stored.checkpointVersion === EXPIRING_ROOM_CHECKPOINT_VERSION) {
+            observation.outcome = 'missing';
+            return null;
+          }
+          const bootstrapped = await options.getClient().eval(BOOTSTRAP_FENCE_SCRIPT, {
+            keys: [
+              keyspace.roomCheckpointKey(roomId),
+              keyspace.roomIncarnationFenceKey(roomId),
+            ],
+            arguments: [raw, roomId, stored.roomEpoch, String(MAX_ROOM_INCARNATIONS)],
           });
-          const migrationResult = parseMutationResult(
-            migration,
-            ['migrated', 'missing', 'conflict'] as const,
+          const result = parseMutationResult(
+            bootstrapped,
+            ['seeded', 'already', 'expired', 'conflict'] as const,
           );
-          if (migrationResult.kind === 'missing') return null;
-          if (migrationResult.kind === 'conflict') continue;
+          if (result.kind === 'expired') {
+            observation.outcome = 'missing';
+            return null;
+          }
+          if (result.kind === 'conflict') continue;
+          if (parsed.migratedFromAuthorityV1) {
+            const migratedRaw = JSON.stringify(stored);
+            const migration = await options.getClient().eval(MIGRATE_AUTHORITY_V1_SCRIPT, {
+              keys: [keyspace.roomCheckpointKey(roomId)],
+              arguments: [raw, migratedRaw],
+            });
+            const migrationResult = parseMutationResult(
+              migration,
+              ['migrated', 'missing', 'conflict'] as const,
+            );
+            if (migrationResult.kind === 'missing') {
+              observation.outcome = 'missing';
+              return null;
+            }
+            if (migrationResult.kind === 'conflict') continue;
+            observation.serializedBytes = serializedCheckpointBytes(migratedRaw);
+          }
+          observation.outcome = 'ok';
+          return stored.state;
         }
-        return stored.state;
+        observation.outcome = 'conflict';
+        throw new Error('REDIS_ROOM_CHECKPOINT_CONFLICT');
+      } catch (error) {
+        if (observation.outcome === 'error') {
+          observation.outcome = checkpointErrorOutcome(error);
+        }
+        throw error;
+      } finally {
+        observeCheckpoint(options.observer, 'load', observation, startedAt);
       }
-      throw new Error('REDIS_ROOM_CHECKPOINT_CONFLICT');
     },
 
     async save(input) {
-      let commit;
+      const startedAt = performance.now();
+      const observation: CheckpointObservationState = { outcome: 'error' };
       try {
-        commit = consumeArenaRoomCheckpointCommit(input.commit);
-      } catch {
-        throw new Error('REDIS_ROOM_TRANSITION_COMMIT_INVALID');
-      }
-      const stored = createStoredCheckpoint(commit.nextState);
-      const expected = commit.predecessor;
-      const expectedStored = commit.predecessorState === null
-        ? null
-        : createStoredCheckpoint(commit.predecessorState);
-      if ((expected === null) !== (expectedStored === null)) {
-        throw new Error('REDIS_ROOM_TRANSITION_COMMIT_INVALID');
-      }
-      if (expected !== null && !isCheckpointPredecessor(expected)) {
-        throw new Error('REDIS_ROOM_PREDECESSOR_INVALID');
-      }
-      if (expected !== null && expected.roomId !== stored.roomId) {
-        throw new Error('REDIS_ROOM_PREDECESSOR_INVALID');
-      }
-      if (!isValidSuccessor(stored, expected)) {
-        throw new Error('REDIS_ROOM_SUCCESSOR_INVALID');
-      }
-      if (expected !== null && expectedStored !== null) {
-        const statePredecessor = checkpointPredecessorOf(expectedStored.state);
-        if (
-          statePredecessor.roomId !== expected.roomId
-          || statePredecessor.roomEpoch !== expected.roomEpoch
-          || statePredecessor.revision !== expected.revision
-          || statePredecessor.controlSeq !== expected.controlSeq
-        ) {
+        let commit;
+        try {
+          commit = consumeArenaRoomCheckpointCommit(input.commit);
+        } catch {
           throw new Error('REDIS_ROOM_TRANSITION_COMMIT_INVALID');
         }
+        const stored = createStoredCheckpoint(commit.nextState);
+        const expected = commit.predecessor;
+        const expectedStored = commit.predecessorState === null
+          ? null
+          : createStoredCheckpoint(commit.predecessorState);
+        if ((expected === null) !== (expectedStored === null)) {
+          throw new Error('REDIS_ROOM_TRANSITION_COMMIT_INVALID');
+        }
+        if (expected !== null && !isCheckpointPredecessor(expected)) {
+          throw new Error('REDIS_ROOM_PREDECESSOR_INVALID');
+        }
+        if (expected !== null && expected.roomId !== stored.roomId) {
+          throw new Error('REDIS_ROOM_PREDECESSOR_INVALID');
+        }
+        if (!isValidSuccessor(stored, expected)) {
+          throw new Error('REDIS_ROOM_SUCCESSOR_INVALID');
+        }
+        if (expected !== null && expectedStored !== null) {
+          const statePredecessor = checkpointPredecessorOf(expectedStored.state);
+          if (
+            statePredecessor.roomId !== expected.roomId
+            || statePredecessor.roomEpoch !== expected.roomEpoch
+            || statePredecessor.revision !== expected.revision
+            || statePredecessor.controlSeq !== expected.controlSeq
+          ) {
+            throw new Error('REDIS_ROOM_TRANSITION_COMMIT_INVALID');
+          }
+        }
+        if (input.directory !== undefined && expected !== null) {
+          throw new Error('REDIS_ROOM_DIRECTORY_INPUT_INVALID');
+        }
+        const directoryMutation = input.directoryMutation ?? 'mutate';
+        if (input.directory !== undefined && directoryMutation !== 'mutate') {
+          throw new Error('REDIS_ROOM_DIRECTORY_INPUT_INVALID');
+        }
+        const directory = input.directory === undefined
+          ? null
+          : createStoredRoomDirectoryRecord(input.directory);
+        if (directory !== null) {
+          const hostUserId = stored.state.memberAuthority.find((entry) => (
+            entry.member.role === 'host' && entry.member.membershipState === 'active'
+          ))?.accountUserId;
+          if (
+            directory.roomId !== stored.roomId
+            || directory.roomEpoch !== stored.roomEpoch
+            || directory.hostUserId !== hostUserId
+            || directory.createdAt !== stored.state.lifecycle.createdAt
+            || directory.lastActivityAt !== stored.state.lifecycle.updatedAt
+            || stored.state.lifecycle.status !== 'open'
+          ) throw new Error('REDIS_ROOM_DIRECTORY_INPUT_INVALID');
+        }
+        const expectedArguments = expected === null
+          ? [
+              'absent',
+              String(ACTIVE_ROOM_CHECKPOINT_VERSION),
+              stored.roomId,
+              '',
+              '-1',
+              '-1',
+            ]
+          : ['match', ...predecessorArguments(expected)];
+        const storedRaw = JSON.stringify(stored);
+        const expectedRaw = expectedStored === null ? '' : JSON.stringify(expectedStored);
+        observation.serializedBytes = serializedCheckpointBytes(storedRaw);
+        const raw = await options.getClient().eval(SAVE_SCRIPT, {
+          keys: [
+            keyspace.roomCheckpointKey(stored.roomId),
+            keyspace.roomIncarnationFenceKey(stored.roomId),
+            keyspace.roomDirectoryRecordKey(stored.roomId),
+            keyspace.directoryPublicIndexKey,
+          ],
+          arguments: [
+            ...expectedArguments,
+            storedRaw,
+            String(stored.state.lifecycle.status === 'open' ? activeTtlMs : terminalTtlMs),
+            expectedRaw,
+            String(MAX_ROOM_INCARNATIONS),
+            directory === null ? '' : serializeStoredRoomDirectoryRecord(directory),
+            directory?.publicIndexMember ?? '',
+            expectedStored === null
+              ? ''
+              : roomDirectoryPublicIndexMember(
+                  expectedStored.roomId,
+                  expectedStored.state.lifecycle.updatedAt,
+                ),
+            roomDirectoryPublicIndexMember(stored.roomId, stored.state.lifecycle.updatedAt),
+            directoryMutation,
+          ],
+        });
+        const result = parseMutationResult(raw, ['saved', 'conflict'] as const);
+        observation.outcome = result.kind === 'saved' ? 'ok' : 'conflict';
+        return result;
+      } catch (error) {
+        if (observation.outcome === 'error') {
+          observation.outcome = checkpointErrorOutcome(error);
+        }
+        throw error;
+      } finally {
+        observeCheckpoint(options.observer, 'save', observation, startedAt);
       }
-      if (input.directory !== undefined && expected !== null) {
-        throw new Error('REDIS_ROOM_DIRECTORY_INPUT_INVALID');
-      }
-      const directoryMutation = input.directoryMutation ?? 'mutate';
-      if (input.directory !== undefined && directoryMutation !== 'mutate') {
-        throw new Error('REDIS_ROOM_DIRECTORY_INPUT_INVALID');
-      }
-      const directory = input.directory === undefined
-        ? null
-        : createStoredRoomDirectoryRecord(input.directory);
-      if (directory !== null) {
-        const hostUserId = stored.state.memberAuthority.find((entry) => (
-          entry.member.role === 'host' && entry.member.membershipState === 'active'
-        ))?.accountUserId;
-        if (
-          directory.roomId !== stored.roomId
-          || directory.roomEpoch !== stored.roomEpoch
-          || directory.hostUserId !== hostUserId
-          || directory.createdAt !== stored.state.lifecycle.createdAt
-          || directory.lastActivityAt !== stored.state.lifecycle.updatedAt
-          || stored.state.lifecycle.status !== 'open'
-        ) throw new Error('REDIS_ROOM_DIRECTORY_INPUT_INVALID');
-      }
-      const expectedArguments = expected === null
-        ? [
-            'absent',
-            String(ACTIVE_ROOM_CHECKPOINT_VERSION),
-            stored.roomId,
-            '',
-            '-1',
-            '-1',
-          ]
-        : ['match', ...predecessorArguments(expected)];
-      const raw = await options.getClient().eval(SAVE_SCRIPT, {
-        keys: [
-          keyspace.roomCheckpointKey(stored.roomId),
-          keyspace.roomIncarnationFenceKey(stored.roomId),
-          keyspace.roomDirectoryRecordKey(stored.roomId),
-          keyspace.directoryPublicIndexKey,
-        ],
-        arguments: [
-          ...expectedArguments,
-          JSON.stringify(stored),
-          String(stored.state.lifecycle.status === 'open' ? activeTtlMs : terminalTtlMs),
-          expectedStored === null ? '' : JSON.stringify(expectedStored),
-          String(MAX_ROOM_INCARNATIONS),
-          directory === null ? '' : serializeStoredRoomDirectoryRecord(directory),
-          directory?.publicIndexMember ?? '',
-          expectedStored === null
-            ? ''
-            : roomDirectoryPublicIndexMember(
-                expectedStored.roomId,
-                expectedStored.state.lifecycle.updatedAt,
-              ),
-          roomDirectoryPublicIndexMember(stored.roomId, stored.state.lifecycle.updatedAt),
-          directoryMutation,
-        ],
-      });
-      return parseMutationResult(raw, ['saved', 'conflict'] as const);
     },
 
     async delete(input) {
-      const active = createStoredCheckpoint(input.checkpoint);
-      const expiring = createExpiringStoredCheckpoint(active.state);
-      const expected = checkpointPredecessorOf(active.state);
-      const raw = await options.getClient().eval(DELETE_SCRIPT, {
-        keys: [
-          keyspace.roomCheckpointKey(active.roomId),
-          keyspace.roomIncarnationFenceKey(active.roomId),
-          keyspace.roomDirectoryRecordKey(active.roomId),
-          keyspace.directoryPublicIndexKey,
-        ],
-        arguments: [
-          ...predecessorArguments(expected),
-          JSON.stringify(active),
-          JSON.stringify(expiring),
-          String(MAX_ROOM_INCARNATIONS),
-          roomDirectoryPublicIndexMember(active.roomId, active.state.lifecycle.updatedAt),
-        ],
-      });
-      return parseMutationResult(raw, ['deleted', 'missing', 'conflict'] as const);
+      const startedAt = performance.now();
+      const observation: CheckpointObservationState = { outcome: 'error' };
+      try {
+        const active = createStoredCheckpoint(input.checkpoint);
+        const expiring = createExpiringStoredCheckpoint(active.state);
+        const expected = checkpointPredecessorOf(active.state);
+        const activeRaw = JSON.stringify(active);
+        const expiringRaw = JSON.stringify(expiring);
+        observation.serializedBytes = serializedCheckpointBytes(activeRaw);
+        const raw = await options.getClient().eval(DELETE_SCRIPT, {
+          keys: [
+            keyspace.roomCheckpointKey(active.roomId),
+            keyspace.roomIncarnationFenceKey(active.roomId),
+            keyspace.roomDirectoryRecordKey(active.roomId),
+            keyspace.directoryPublicIndexKey,
+          ],
+          arguments: [
+            ...predecessorArguments(expected),
+            activeRaw,
+            expiringRaw,
+            String(MAX_ROOM_INCARNATIONS),
+            roomDirectoryPublicIndexMember(active.roomId, active.state.lifecycle.updatedAt),
+          ],
+        });
+        const result = parseMutationResult(raw, ['deleted', 'missing', 'conflict'] as const);
+        observation.outcome = result.kind === 'deleted' ? 'ok' : result.kind;
+        return result;
+      } catch (error) {
+        if (observation.outcome === 'error') {
+          observation.outcome = checkpointErrorOutcome(error);
+        }
+        throw error;
+      } finally {
+        observeCheckpoint(options.observer, 'delete', observation, startedAt);
+      }
     },
 
     async expire(input) {
-      const active = createStoredCheckpoint(input.checkpoint);
-      const expiring = createExpiringStoredCheckpoint(active.state);
-      const expected = checkpointPredecessorOf(active.state);
-      const raw = await options.getClient().eval(EXPIRE_SCRIPT, {
-        keys: [
-          keyspace.roomCheckpointKey(active.roomId),
-          keyspace.roomIncarnationFenceKey(active.roomId),
-          keyspace.roomDirectoryRecordKey(active.roomId),
-          keyspace.directoryPublicIndexKey,
-        ],
-        arguments: [
-          ...predecessorArguments(expected),
-          String(terminalTtlMs),
-          JSON.stringify(active),
-          JSON.stringify(expiring),
-          String(MAX_ROOM_INCARNATIONS),
-          roomDirectoryPublicIndexMember(active.roomId, active.state.lifecycle.updatedAt),
-        ],
-      });
-      return parseMutationResult(raw, ['expired', 'missing', 'conflict'] as const);
+      const startedAt = performance.now();
+      const observation: CheckpointObservationState = { outcome: 'error' };
+      try {
+        const active = createStoredCheckpoint(input.checkpoint);
+        const expiring = createExpiringStoredCheckpoint(active.state);
+        const expected = checkpointPredecessorOf(active.state);
+        const activeRaw = JSON.stringify(active);
+        const expiringRaw = JSON.stringify(expiring);
+        observation.serializedBytes = serializedCheckpointBytes(expiringRaw);
+        const raw = await options.getClient().eval(EXPIRE_SCRIPT, {
+          keys: [
+            keyspace.roomCheckpointKey(active.roomId),
+            keyspace.roomIncarnationFenceKey(active.roomId),
+            keyspace.roomDirectoryRecordKey(active.roomId),
+            keyspace.directoryPublicIndexKey,
+          ],
+          arguments: [
+            ...predecessorArguments(expected),
+            String(terminalTtlMs),
+            activeRaw,
+            expiringRaw,
+            String(MAX_ROOM_INCARNATIONS),
+            roomDirectoryPublicIndexMember(active.roomId, active.state.lifecycle.updatedAt),
+          ],
+        });
+        const result = parseMutationResult(raw, ['expired', 'missing', 'conflict'] as const);
+        observation.outcome = result.kind === 'expired' ? 'ok' : result.kind;
+        return result;
+      } catch (error) {
+        if (observation.outcome === 'error') {
+          observation.outcome = checkpointErrorOutcome(error);
+        }
+        throw error;
+      } finally {
+        observeCheckpoint(options.observer, 'expire', observation, startedAt);
+      }
     },
 
     async refresh(input) {
-      const active = createStoredCheckpoint(input.checkpoint);
-      if (active.state.lifecycle.status !== 'open') {
-        throw new Error('REDIS_ROOM_REFRESH_TERMINAL');
+      const startedAt = performance.now();
+      const observation: CheckpointObservationState = { outcome: 'error' };
+      try {
+        const active = createStoredCheckpoint(input.checkpoint);
+        if (active.state.lifecycle.status !== 'open') {
+          throw new Error('REDIS_ROOM_REFRESH_TERMINAL');
+        }
+        const expected = checkpointPredecessorOf(active.state);
+        const activeRaw = JSON.stringify(active);
+        observation.serializedBytes = serializedCheckpointBytes(activeRaw);
+        const raw = await options.getClient().eval(REFRESH_SCRIPT, {
+          keys: [
+            keyspace.roomCheckpointKey(active.roomId),
+            keyspace.roomDirectoryRecordKey(active.roomId),
+          ],
+          arguments: [
+            ...predecessorArguments(expected),
+            String(activeTtlMs),
+            activeRaw,
+          ],
+        });
+        const result = parseMutationResult(raw, ['refreshed', 'missing', 'conflict'] as const);
+        observation.outcome = result.kind === 'refreshed' ? 'ok' : result.kind;
+        return result;
+      } catch (error) {
+        if (observation.outcome === 'error') {
+          observation.outcome = checkpointErrorOutcome(error);
+        }
+        throw error;
+      } finally {
+        observeCheckpoint(options.observer, 'refresh', observation, startedAt);
       }
-      const expected = checkpointPredecessorOf(active.state);
-      const raw = await options.getClient().eval(REFRESH_SCRIPT, {
-        keys: [
-          keyspace.roomCheckpointKey(active.roomId),
-          keyspace.roomDirectoryRecordKey(active.roomId),
-        ],
-        arguments: [
-          ...predecessorArguments(expected),
-          String(activeTtlMs),
-          JSON.stringify(active),
-        ],
-      });
-      return parseMutationResult(raw, ['refreshed', 'missing', 'conflict'] as const);
     },
   } satisfies RedisRoomStore);
 };

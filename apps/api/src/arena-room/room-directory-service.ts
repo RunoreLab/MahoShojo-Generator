@@ -20,6 +20,10 @@ import {
   RoomDirectoryRecordError,
   type StoredRoomDirectoryRecord,
 } from './room-directory-record';
+import {
+  observeArenaRoomRuntime,
+  type ArenaRoomRuntimeObserver,
+} from './runtime-observer';
 
 const DIRECTORY_CURSOR_VERSION = 2 as const;
 
@@ -42,6 +46,7 @@ export type ArenaRoomDirectoryServiceOptions = {
   readonly authority: DirectoryAuthorityStore;
   readonly store: RedisRoomDirectoryStore;
   readonly now?: () => number;
+  readonly observer?: ArenaRoomRuntimeObserver;
 };
 
 export type ArenaRoomDirectoryService = {
@@ -116,8 +121,14 @@ export const createArenaRoomDirectoryService = (
 
   const currentAuthority = async (record: StoredRoomDirectoryRecord): Promise<boolean> => {
     const state = await readAuthority(record.roomId);
-    return state !== null
-      && state.lifecycle.status === 'open'
+    if (state === null) {
+      observeArenaRoomRuntime(options.observer, {
+        event: 'incident',
+        outcome: 'replacement_required',
+      });
+      return false;
+    }
+    return state.lifecycle.status === 'open'
       && !deadlineExpired(state, now())
       && state.snapshot.roomId === record.roomId
       && state.snapshot.roomEpoch === record.roomEpoch

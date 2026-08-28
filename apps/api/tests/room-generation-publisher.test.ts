@@ -501,6 +501,8 @@ describe('RoomGenerationPublisher typed generation consumer', () => {
       },
       cancel: cancelled,
     });
+    const observeArenaRoomRuntime = vi.fn();
+    const inFlightDeltas: number[] = [];
     const publisher = createRoomGenerationPublisher({
       actor: harness.actor,
       authority: issueArenaRoomGenerationPublisherAuthority({
@@ -513,6 +515,8 @@ describe('RoomGenerationPublisher typed generation consumer', () => {
       }),
       initial: { markdown: '', nextChunkSeq: 2 },
       now: () => Date.parse('2026-08-28T00:03:00.000Z'),
+      observer: { observeArenaRoomRuntime },
+      onInFlightChange: (delta) => { inFlightDeltas.push(delta); },
     });
 
     await expect(publisher.attach({
@@ -521,6 +525,52 @@ describe('RoomGenerationPublisher typed generation consumer', () => {
       events,
     })).resolves.toEqual({ kind: 'rejected', reason: 'story:story-sequence-gap' });
     expect(cancelled).toHaveBeenCalledOnce();
+    expect(inFlightDeltas).toEqual([1, -1]);
+    expect(observeArenaRoomRuntime).toHaveBeenCalledWith({
+      event: 'publisher_outcome',
+      outcome: 'rejected',
+    });
+  });
+
+  it.each([
+    ['stale', { ok: true as const, kind: 'stale' as const }, 'dropped'],
+    ['throw', new Error('publish-story-failed'), 'error'],
+  ])('publisher %s outcome 进入固定低基数词汇', async (_label, result, outcome) => {
+    const harness = await createRunningActor({ running: false });
+    harness.setNow('2026-08-28T00:03:00.000Z');
+    const observeArenaRoomRuntime = vi.fn();
+    const actor = {
+      execute: harness.actor.execute.bind(harness.actor),
+      getSnapshot: harness.actor.getSnapshot.bind(harness.actor),
+      getStoryCursor: harness.actor.getStoryCursor.bind(harness.actor),
+      publishStory: vi.fn(async () => {
+        if (result instanceof Error) throw result;
+        return result;
+      }),
+    };
+    const publisher = createRoomGenerationPublisher({
+      actor,
+      authority: issueArenaRoomGenerationPublisherAuthority({
+        roomId: ROOM_ID,
+        roomEpoch: ROOM_EPOCH,
+        generationRequestId: GENERATION_REQUEST_ID,
+        generationId: GENERATION_ID,
+        attempt: 1,
+        expiresAt: EXPIRES_AT,
+      }),
+      observer: { observeArenaRoomRuntime },
+      now: () => Date.parse('2026-08-28T00:03:00.000Z'),
+    });
+
+    const publishing = publisher.attach(subscriptionOf([
+      { id: '1', type: 'markdown', chunk: 'observed' },
+    ]));
+    if (result instanceof Error) await expect(publishing).rejects.toThrow('publish-story-failed');
+    else await expect(publishing).resolves.toEqual({ kind: 'stream-ended' });
+    expect(observeArenaRoomRuntime).toHaveBeenCalledWith({
+      event: 'publisher_outcome',
+      outcome,
+    });
   });
 
   it('先幂等 mirror running，只广播 markdown，snapshot 仅作 baseline，末 delta 后再 terminal', async () => {
@@ -531,6 +581,8 @@ describe('RoomGenerationPublisher typed generation consumer', () => {
       fanoutTypes.push(...fanout.events.map((event) => event.type));
     });
     harness.setNow('2026-08-28T00:03:00.000Z');
+    const observeArenaRoomRuntime = vi.fn();
+    const inFlightDeltas: number[] = [];
     const publisher = createRoomGenerationPublisher({
       actor: harness.actor,
       authority: issueArenaRoomGenerationPublisherAuthority({
@@ -542,6 +594,8 @@ describe('RoomGenerationPublisher typed generation consumer', () => {
         expiresAt: EXPIRES_AT,
       }),
       now: () => Date.parse('2026-08-28T00:03:00.000Z'),
+      observer: { observeArenaRoomRuntime },
+      onInFlightChange: (delta) => { inFlightDeltas.push(delta); },
     });
 
     const result = await publisher.attach(subscriptionOf([
@@ -582,6 +636,47 @@ describe('RoomGenerationPublisher typed generation consumer', () => {
     ]);
     expect(JSON.stringify(fanoutTypes)).not.toContain('reasoning');
     expect(JSON.stringify(fanoutTypes)).not.toContain('telemetry');
+    expect(inFlightDeltas).toEqual([1, -1, 1, -1]);
+    expect(observeArenaRoomRuntime).toHaveBeenCalledTimes(2);
+    expect(observeArenaRoomRuntime).toHaveBeenNthCalledWith(1, {
+      event: 'publisher_outcome',
+      outcome: 'published',
+    });
+    expect(observeArenaRoomRuntime).toHaveBeenNthCalledWith(2, {
+      event: 'publisher_outcome',
+      outcome: 'published',
+    });
+  });
+
+  it('publisher metrics 同步/异步异常不改变 story 权威结果', async () => {
+    const harness = await createRunningActor({ running: false });
+    harness.setNow('2026-08-28T00:03:00.000Z');
+    const publisher = createRoomGenerationPublisher({
+      actor: harness.actor,
+      authority: issueArenaRoomGenerationPublisherAuthority({
+        roomId: ROOM_ID,
+        roomEpoch: ROOM_EPOCH,
+        generationRequestId: GENERATION_REQUEST_ID,
+        generationId: GENERATION_ID,
+        attempt: 1,
+        expiresAt: EXPIRES_AT,
+      }),
+      observer: {
+        observeArenaRoomRuntime: () => Promise.reject(new Error('observer-failed')),
+      },
+      onInFlightChange: () => {
+        throw new Error('backlog-observer-failed');
+      },
+      now: () => Date.parse('2026-08-28T00:03:00.000Z'),
+    });
+
+    await expect(publisher.attach(subscriptionOf([
+      { id: '1', type: 'markdown', chunk: 'still-authoritative' },
+    ]))).resolves.toEqual({ kind: 'stream-ended' });
+    expect(publisher.getProgress()).toEqual({
+      markdown: 'still-authoritative',
+      nextChunkSeq: 1,
+    });
   });
 
   it('把 typed error/无 result identity 的 completed 映射为稳定 generation-failed', async () => {

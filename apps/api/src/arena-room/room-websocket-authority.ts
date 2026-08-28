@@ -23,6 +23,10 @@ import type {
   RoomWebSocketConnectionAuthority,
   RoomWebSocketPeer,
 } from './room-websocket-gateway';
+import {
+  observeArenaRoomRuntime,
+  type ArenaRoomRuntimeObserver,
+} from './runtime-observer';
 
 const DEFAULT_HOST_OFFLINE_GRACE_MS = 45 * 60 * 1_000;
 const DEFAULT_ROOM_IDLE_TTL_MS = 12 * 60 * 60 * 1_000;
@@ -47,6 +51,7 @@ export type ArenaRoomWebSocketAuthorityOptions = {
   readonly now?: () => number;
   readonly hostOfflineGraceMs?: number;
   readonly roomIdleTtlMs?: number;
+  readonly observer?: ArenaRoomRuntimeObserver;
 };
 
 type PresenceCounts = {
@@ -79,6 +84,9 @@ export const createArenaRoomWebSocketAuthority = (
   }
   const counts = new Map<string, PresenceCounts>();
   const roomOperations = new Map<string, Promise<void>>();
+  const observe = (
+    observation: Parameters<ArenaRoomRuntimeObserver['observeArenaRoomRuntime']>[0],
+  ): void => observeArenaRoomRuntime(options.observer, observation);
 
   const enqueueRoomOperation = <T>(roomId: string, operation: () => Promise<T>): Promise<T> => {
     const previous = roomOperations.get(roomId) ?? Promise.resolve();
@@ -171,8 +179,13 @@ export const createArenaRoomWebSocketAuthority = (
       undefined,
       sync.proposalAuthorUserIds?.[index] ?? undefined,
     ));
-    for (const event of projected) peer.send(event);
+    let delivered = true;
+    for (const event of projected) {
+      if (!peer.send(event)) delivered = false;
+    }
+    if (delivered) observe({ event: 'sync', action: 'delivery', mode: sync.kind });
     if (cursor?.story) {
+      observe({ event: 'sync', action: 'resync_required' });
       peer.send({
         protocolVersion: 1,
         type: 'room.resync.required',
@@ -185,6 +198,9 @@ export const createArenaRoomWebSocketAuthority = (
     claims: RoomTicketClaims,
   ): RoomWebSocketConnectionAuthority => ({
     activate: (peer) => enqueueRoomOperation(claims.roomId, async () => {
+      if (claims.reconnect !== undefined) {
+        observe({ event: 'sync', action: 'reconnect_attempt' });
+      }
       let membership: ResolvedArenaRoomMembership;
       try {
         membership = await options.memberships.resolveActiveByUser({
@@ -272,6 +288,7 @@ export const createArenaRoomWebSocketAuthority = (
       const connection: RoomWebSocketConnection = {
         onMessage: async (message: RoomClientTransportMessage) => {
           if (disposed || message.type !== 'room.resync.request') return;
+          observe({ event: 'sync', action: 'resync_requested' });
           let current: ResolvedArenaRoomMembership;
           try {
             current = await options.memberships.resolveActiveByUser({

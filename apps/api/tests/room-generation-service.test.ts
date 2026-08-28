@@ -140,13 +140,16 @@ const createHarness = async () => {
   const createPublisher = vi.fn<(
     options: RoomGenerationPublisherOptions,
   ) => RoomGenerationPublisher>(() => publisher);
+  const observeArenaRoomRuntime = vi.fn();
+  const onBackgroundError = vi.fn();
   const service = createArenaRoomGenerationService({
     memberships,
     references,
     generation,
     createPublisher,
+    observer: { observeArenaRoomRuntime },
     now: () => '2026-08-28T00:01:00.000Z',
-    onBackgroundError: vi.fn(),
+    onBackgroundError,
   });
   return {
     store,
@@ -155,7 +158,9 @@ const createHarness = async () => {
     references,
     generation,
     publisher,
+    observeArenaRoomRuntime,
     createPublisher,
+    onBackgroundError,
     service,
     finishPublisher: () => attachResolve?.({ kind: 'stream-ended' }),
   };
@@ -215,6 +220,10 @@ describe('Arena Room generation coordinator', () => {
     expect(JSON.stringify(harness.store.state)).not.toContain('provider-secret-canary');
     expect(harness.createPublisher).toHaveBeenCalledTimes(1);
     expect(harness.publisher.attach).toHaveBeenCalledTimes(1);
+    expect(harness.observeArenaRoomRuntime).toHaveBeenCalledWith({
+      event: 'publisher',
+      action: 'started',
+    });
 
     await harness.service.start({
       roomId: 'room-1',
@@ -225,6 +234,30 @@ describe('Arena Room generation coordinator', () => {
     expect(harness.generation.startFromHostRequest).toHaveBeenCalledTimes(1);
     expect(harness.publisher.attach).toHaveBeenCalledTimes(1);
     harness.finishPublisher();
+    await vi.waitFor(() => expect(harness.observeArenaRoomRuntime).toHaveBeenCalledWith({
+      event: 'publisher',
+      action: 'finished',
+    }));
+  });
+
+  it('注入 publisher 同步抛错仍关闭 lifecycle gauge 并只走 background error', async () => {
+    const harness = await createHarness();
+    const error = new Error('publisher-sync-throw');
+    harness.publisher.attach.mockImplementationOnce(() => { throw error; });
+
+    await expect(harness.service.start({
+      roomId: 'room-1',
+      accountUserId: 101,
+      request: startRequest(),
+      sourceRequest: sourceRequest(),
+    })).resolves.toMatchObject({ status: 'reserved' });
+    await vi.waitFor(() => expect(harness.onBackgroundError).toHaveBeenCalledWith(error));
+    expect(harness.observeArenaRoomRuntime).toHaveBeenCalledWith({
+      event: 'publisher', action: 'started',
+    });
+    expect(harness.observeArenaRoomRuntime).toHaveBeenCalledWith({
+      event: 'publisher', action: 'finished',
+    });
   });
 
   it('历史 reservation 先对账：unavailable 不 POST；明确 not-found 才用同一 ID 补启动', async () => {
