@@ -17,6 +17,7 @@ import {
 } from './wire-size';
 
 export const ARENA_ROOM_WEBSOCKET_PROTOCOL = 'mahoshojo.arena-room.v1';
+export const ARENA_ROOM_WEBSOCKET_PATH = '/api/arena/rooms/v1/ws';
 export const ARENA_ROOM_TICKET_VERSION = 1 as const;
 
 export const RoomReconnectCursorSchema = z.object({

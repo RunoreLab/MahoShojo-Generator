@@ -6,6 +6,7 @@ export * from './primitives';
 export * from './proposals';
 export * from './protocol';
 export * from './room-directory';
+export * from './room-http';
 export * from './shared-config';
 export * from './versions';
 export * from './wire-size';
