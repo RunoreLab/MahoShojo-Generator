@@ -208,5 +208,11 @@ GMR-10 范围内无剩余工作。GMR-11 production activation 与 GMR-H multi-i
   workflow 已支持 PR 与手工 dispatch；本地验证不能冒充远端 Actions。创建 Draft PR 或对已推送 feature branch 执行
   `workflow_dispatch` 仍需仓库操作者在远端完成，本整改未获授权 push、开 PR 或触发 workflow。
 
+本次仓库级复跑还发现 generation process verifier 的 safety suite 在 API/Web workspace 并发负载下可能超过既有 10 秒
+child watchdog；失败时 TCP sentinel 连接数仍为 `0`，同一套件 standalone `7/7 PASS`，且本次业务差异未触及该 verifier。
+因此仅将这组较重的 `tsx` 子进程 watchdog 调整为 20 秒、测试上限调整为 25 秒，继续要求零连接、正常 exit code、无 signal
+且未触发 watchdog。调整后的并发 workspace test 为 API `47 files / 485 tests PASS`、Web `358 files / 1973 tests PASS`；
+其他 verifier safety suite 与生产代码门限不变。
+
 上述整改不执行 production deploy、Redis migration、secret 变更或 GMR-11 激活。原第 9 节“无剩余工作”应理解为原退出时点；
 本节记录后续发现与闭合证据，并继续维持 GMR-11 / GMR-H `DEFERRED`。

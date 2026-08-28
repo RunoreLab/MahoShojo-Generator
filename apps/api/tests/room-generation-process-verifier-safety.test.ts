@@ -6,7 +6,11 @@ const verifierPath = fileURLToPath(new URL(
   '../scripts/verify-room-generation-process-recovery.ts',
   import.meta.url,
 ));
-const CHILD_TIMEOUT_MS = 10_000;
+// 全仓测试会与 Web/其他 workspace 并发；tsx 冷启动在高负载下可能超过
+// 10 秒。watchdog 只负责终止真正挂起的子进程，不应把启动抖动误报为
+// fail-closed 失败。
+const CHILD_TIMEOUT_MS = 20_000;
+const TEST_TIMEOUT_MS = CHILD_TIMEOUT_MS + 5_000;
 
 const runAgainstTcpSentinel = async (input: Readonly<{
   redisHostname: string;
@@ -86,7 +90,7 @@ describe('Room generation process verifier safety boundary', () => {
       timedOut: false,
     });
     expect(result.stderr).toContain('只允许连接 loopback Redis');
-  });
+  }, TEST_TIMEOUT_MS);
 
   test.each(['*', 'production'])(
     '危险 key prefix %j 在任何 TCP/Redis 副作用前 fail closed',
@@ -106,6 +110,7 @@ describe('Room generation process verifier safety boundary', () => {
         'ROOM_REDIS_VERIFY_KEY_PREFIX 必须是安全非默认环境标识',
       );
     },
+    TEST_TIMEOUT_MS,
   );
 
   test.each(['production', 'preview', ''])(
@@ -124,6 +129,7 @@ describe('Room generation process verifier safety boundary', () => {
       });
       expect(result.stderr).toContain('只允许 HOSTED_API_ENVIRONMENT=local/test');
     },
+    TEST_TIMEOUT_MS,
   );
 
   test('不安全 token 在任何 TCP/Redis 副作用前 fail closed', async () => {
@@ -141,5 +147,5 @@ describe('Room generation process verifier safety boundary', () => {
     expect(result.stderr).toContain(
       'ROOM_GENERATION_PROCESS_VERIFY_TOKEN 必须是安全 opaque token',
     );
-  });
+  }, TEST_TIMEOUT_MS);
 });
