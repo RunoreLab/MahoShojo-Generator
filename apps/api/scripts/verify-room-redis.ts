@@ -7,6 +7,8 @@ import {
   createArenaRoomCheckpointCommit,
   issueArenaRoomPresenceAuthority,
   issueArenaRoomRecoveryAuthority,
+  issueArenaRoomGenerationPublisherAuthority,
+  issueArenaRoomTrustedTime,
   transitionArenaRoom,
   type ArenaRoomAuthorityState,
   type ArenaRoomCheckpointCommit,
@@ -30,6 +32,12 @@ import {
 } from '../src/arena-room/room-directory-record';
 import { createArenaRoomMembershipService } from '../src/arena-room/room-membership-service';
 import { createArenaRoomProposalService } from '../src/arena-room/room-proposal-service';
+import { createArenaRoomGenerationService } from '../src/arena-room/room-generation-service';
+import type { ArenaDataCardRefVerifier } from '../src/arena-room/arena-data-card-ref-verifier';
+import type {
+  ArenaRoomGenerationEvent,
+  ArenaRoomGenerationPort,
+} from '../src/arena-generation/room-generation-port';
 import {
   createArenaRoomTicketCodec,
   createArenaRoomTicketSignatureService,
@@ -94,6 +102,7 @@ const fullMutationFenceRoomId = `room-full-mutation-fence-${token}`;
 const recoveryRoomId = `room-recovery-${token}`;
 const actorRoomId = `room-actor-${token}`;
 const proposalRoomId = `room-proposal-${token}`;
+const generationRoomId = `room-generation-${token}`;
 const authorityRoomId = `room-authority-${token}`;
 const directoryRoomId = `room-directory-public-${token}`;
 const unlistedDirectoryRoomId = `room-directory-unlisted-${token}`;
@@ -1184,6 +1193,310 @@ try {
       });
       await proposalActors.shutdown();
 
+      let generationNow = Date.parse(THIRD_TIMESTAMP);
+      const generationActors = createRoomActorRegistry({
+        store: writerStore,
+        createRoomIdentity: () => ({
+          roomId: generationRoomId,
+          roomEpoch: 'generation-epoch-1',
+        }),
+        createTimestamp: () => TIMESTAMP,
+        now: () => generationNow,
+      });
+      let generationUserIndex = 0;
+      const generationMemberships = createArenaRoomMembershipService({
+        actors: generationActors,
+        createUserId: () => `generation-user-${++generationUserIndex}`,
+        now: () => NEXT_TIMESTAMP,
+      });
+      const generationHost = await generationMemberships.create({
+        accountUserId: 101,
+        displayName: 'Generation Host',
+        sharedConfig: sharedConfig(),
+      });
+      await generationMemberships.join({
+        roomId: generationRoomId,
+        accountUserId: 202,
+        displayName: 'Generation Member',
+      });
+      const generationId = `redis-generation-${token}`;
+      const generationRequestId = `redis-request-${token}`;
+      const generationSecretCanary = `provider-secret-${token}`;
+      let generationStartCount = 0;
+      let generationResumeCount = 0;
+      let referenceVerifyCount = 0;
+      let durableProjectionStatus: 'completed' | 'running' = 'running';
+      let primaryStreamController: ReadableStreamDefaultController<
+        ArenaRoomGenerationEvent
+      > | null = null;
+      const primarySubscription = {
+        generationId,
+        generationRequestId,
+        events: new ReadableStream<ArenaRoomGenerationEvent>({
+          start(controller) {
+            primaryStreamController = controller;
+          },
+        }),
+      };
+      const generationPort = {
+        async deriveGenerationId() {
+          return generationId;
+        },
+        async startFromHostRequest(input) {
+          generationStartCount += 1;
+          const persistedReservation = await readerStore.load(generationRoomId);
+          if (
+            persistedReservation?.snapshot.activeGeneration?.state !== 'starting'
+            || persistedReservation.snapshot.activeGeneration.generationId !== generationId
+            || JSON.stringify(persistedReservation).includes(generationSecretCanary)
+            || input.multiplayerSnapshot.participantUserIds.join(',') !== '101,202'
+          ) {
+            throw new Error('ROOM_REDIS_GENERATION_RESERVATION_ORDER_FAILED');
+          }
+          return { kind: 'subscribed' as const, subscription: primarySubscription };
+        },
+        async readOwnedProjection() {
+          return {
+            kind: 'found' as const,
+            projection: {
+              generationId,
+              generationRequestId,
+              status: durableProjectionStatus,
+              markdown: durableProjectionStatus === 'completed'
+                ? '# Redis 恢复后的权威终态\n'
+                : '# Redis 进程恢复基线\n',
+              resumeCursor: durableProjectionStatus === 'completed' ? '12-0' : '10-0',
+              updatedAt: new Date(generationNow).toISOString(),
+              finalAuthoritative: durableProjectionStatus === 'completed',
+              resultAvailable: durableProjectionStatus === 'completed',
+              generationRecordId: durableProjectionStatus === 'completed'
+                ? `generation-record-${token}`
+                : null,
+              errorCode: null,
+            },
+          };
+        },
+        async resumeOwnedSubscription() {
+          generationResumeCount += 1;
+          const events = new ReadableStream<ArenaRoomGenerationEvent>({
+            start(controller) {
+              controller.enqueue({
+                id: '11-0',
+                type: 'markdown',
+                chunk: '恢复后的增量\n',
+              });
+              controller.enqueue({
+                id: '12-0',
+                type: 'done',
+                status: 'completed',
+                generationRecordId: `generation-record-${token}`,
+                resultAvailable: true,
+              });
+              durableProjectionStatus = 'completed';
+              controller.close();
+            },
+          });
+          return {
+            kind: 'subscribed' as const,
+            subscription: { generationId, generationRequestId, events },
+          };
+        },
+      } satisfies ArenaRoomGenerationPort;
+      const generationReferences: ArenaDataCardRefVerifier = {
+        async verify(input) {
+          referenceVerifyCount += 1;
+          return input.refs;
+        },
+      };
+      const generationService = createArenaRoomGenerationService({
+        memberships: generationMemberships,
+        references: generationReferences,
+        generation: generationPort,
+        now: () => new Date(generationNow).toISOString(),
+      });
+      const generationConfig = sharedConfig();
+      generationConfig.userGuidance = 'Redis generation pending config';
+      const generationRequest = {
+        expectedRoomEpoch: generationHost.roomEpoch,
+        expectedRevision: 0,
+        generationRequestId,
+        sharedConfig: generationConfig,
+        generation: {
+          generationRequestId,
+          internalGuidance: '验证 Redis Room generation publisher',
+          customProvider: { apiKey: generationSecretCanary },
+        },
+      };
+      const sourceRequest = new Request('https://api.example.test/arena-room-generation', {
+        method: 'POST',
+        headers: { authorization: 'Bearer verifier-account' },
+      });
+      const generationActor = generationActors.get(generationRoomId);
+      if (!generationActor) throw new Error('ROOM_REDIS_GENERATION_ACTOR_MISSING');
+      const hostFanout: string[] = [];
+      const memberFanout: string[] = [];
+      const stopHostFanout = generationActor.subscribe((fanout) => {
+        hostFanout.push(...(fanout.storyEvents ?? []).map((event) => event.payload.delta));
+      });
+      generationActor.subscribe((fanout) => {
+        memberFanout.push(...(fanout.storyEvents ?? []).map((event) => event.payload.delta));
+      });
+      await generationService.start({
+        roomId: generationRoomId,
+        accountUserId: 101,
+        request: generationRequest,
+        sourceRequest,
+      });
+      const waitForGeneration = async (
+        predicate: (state: ArenaRoomAuthorityState | null) => boolean,
+        failure: string,
+      ): Promise<ArenaRoomAuthorityState> => {
+        for (let attempt = 0; attempt < 200; attempt += 1) {
+          const state = await readerStore.load(generationRoomId);
+          if (predicate(state)) return state!;
+          await new Promise<void>((resolve) => setTimeout(resolve, 5));
+        }
+        throw new Error(failure);
+      };
+      await waitForGeneration(
+        (state) => state?.snapshot.activeGeneration?.state === 'running',
+        'ROOM_REDIS_GENERATION_RUNNING_TIMEOUT',
+      );
+      await generationService.start({
+        roomId: generationRoomId,
+        accountUserId: 101,
+        request: generationRequest,
+        sourceRequest,
+      });
+      if (
+        generationStartCount !== 1
+        || referenceVerifyCount !== 1
+        || JSON.stringify(await readerStore.load(generationRoomId)).includes(generationSecretCanary)
+      ) {
+        throw new Error('ROOM_REDIS_GENERATION_DUPLICATE_OR_SECRET_FAILED');
+      }
+
+      // Closing the host-side subscriber must not own or stop the server publisher.
+      stopHostFanout();
+      const currentPrimaryStreamController = () => primaryStreamController;
+      currentPrimaryStreamController()?.enqueue({
+        id: '1-0',
+        type: 'markdown',
+        chunk: '# 房主连接断开后继续发布\n',
+      });
+      for (let attempt = 0; attempt < 100 && memberFanout.length === 0; attempt += 1) {
+        await new Promise<void>((resolve) => setTimeout(resolve, 5));
+      }
+      if (hostFanout.length !== 0 || memberFanout.join('') !== '# 房主连接断开后继续发布\n') {
+        throw new Error('ROOM_REDIS_GENERATION_HOST_DISCONNECT_PUBLISH_FAILED');
+      }
+
+      // Simulate process loss: discard in-memory actor/publisher, preserve Redis,
+      // then reconcile the durable generation projection before attaching resume.
+      generationActors.forceClose();
+      currentPrimaryStreamController()?.close();
+      generationNow = Date.parse('2026-08-28T00:03:00.000Z');
+      const recoveredGenerationActors = createRoomActorRegistry({
+        store: readerStore,
+        createRoomEpoch: () => 'generation-epoch-2',
+        recoveryTimestamp: () => new Date(generationNow).toISOString(),
+        now: () => generationNow,
+      });
+      const recoveredMemberships = createArenaRoomMembershipService({
+        actors: recoveredGenerationActors,
+        now: () => new Date(generationNow).toISOString(),
+      });
+      const recoveredGenerationService = createArenaRoomGenerationService({
+        memberships: recoveredMemberships,
+        references: generationReferences,
+        generation: generationPort,
+        now: () => new Date(generationNow).toISOString(),
+      });
+      const recoveredView = await recoveredGenerationService.read({
+        roomId: generationRoomId,
+        generationId,
+        accountUserId: 202,
+      });
+      if (
+        recoveredView.roomEpoch !== 'generation-epoch-2'
+        || !recoveredView.markdown.includes('Redis 进程恢复基线')
+        || generationResumeCount !== 1
+        || generationStartCount !== 1
+      ) {
+        throw new Error('ROOM_REDIS_GENERATION_PROCESS_RECONCILE_FAILED');
+      }
+      const completedGenerationState = await waitForGeneration(
+        (state) => state?.snapshot.activeGeneration?.state === 'completed',
+        'ROOM_REDIS_GENERATION_TERMINAL_TIMEOUT',
+      );
+      const recoveredGenerationActor = recoveredGenerationActors.get(generationRoomId);
+      if (!recoveredGenerationActor) {
+        throw new Error('ROOM_REDIS_GENERATION_RECOVERED_ACTOR_MISSING');
+      }
+      const staleTimestamp = new Date(generationNow).toISOString();
+      const rejectedScopes = await Promise.all([
+        recoveredGenerationActor.execute({
+          authority: issueArenaRoomGenerationPublisherAuthority({
+            roomId: generationRoomId,
+            roomEpoch: 'generation-epoch-1',
+            generationRequestId,
+            generationId,
+            attempt: 1,
+            expiresAt: '2026-08-29T00:00:00.000Z',
+          }),
+          command: {
+            type: 'mirror-generation',
+            expectedRoomEpoch: 'generation-epoch-1',
+            generationRequestId,
+            generationId,
+            attempt: 1,
+            state: 'completed',
+            generationRecordId: `generation-record-${token}`,
+            timestamp: staleTimestamp,
+          },
+          trustedTime: issueArenaRoomTrustedTime({ now: staleTimestamp }),
+        }),
+        recoveredGenerationActor.execute({
+          authority: issueArenaRoomGenerationPublisherAuthority({
+            roomId: generationRoomId,
+            roomEpoch: 'generation-epoch-2',
+            generationRequestId,
+            generationId,
+            attempt: 2,
+            expiresAt: '2026-08-29T00:00:00.000Z',
+          }),
+          command: {
+            type: 'mirror-generation',
+            expectedRoomEpoch: 'generation-epoch-2',
+            generationRequestId,
+            generationId,
+            attempt: 2,
+            state: 'completed',
+            generationRecordId: `generation-record-${token}`,
+            timestamp: staleTimestamp,
+          },
+          trustedTime: issueArenaRoomTrustedTime({ now: staleTimestamp }),
+        }),
+      ]);
+      if (rejectedScopes.some((result) => result.ok)) {
+        throw new Error('ROOM_REDIS_GENERATION_OLD_EPOCH_ATTEMPT_ACCEPTED');
+      }
+      const authoritativeFinal = await recoveredGenerationService.read({
+        roomId: generationRoomId,
+        generationId,
+        accountUserId: 202,
+      });
+      if (
+        completedGenerationState.snapshot.activeGeneration?.state !== 'completed'
+        || !authoritativeFinal.finalAuthoritative
+        || authoritativeFinal.generationRecordId !== `generation-record-${token}`
+        || authoritativeFinal.markdown !== '# Redis 恢复后的权威终态\n'
+        || JSON.stringify(completedGenerationState).includes(generationSecretCanary)
+      ) {
+        throw new Error('ROOM_REDIS_GENERATION_AUTHORITATIVE_FINAL_FAILED');
+      }
+      await recoveredGenerationActors.shutdown();
+
       const directoryIdentities = [
         { roomId: directoryRoomId, roomEpoch: 'directory-epoch-1' },
         { roomId: unlistedDirectoryRoomId, roomEpoch: 'directory-unlisted-epoch-1' },
@@ -1976,6 +2289,13 @@ try {
         roomActorWarmRecovery: true,
         roomActorOldWriterFence: true,
         proposalLifecycle: true,
+        generationReservationBeforeProducer: true,
+        generationSingleProducer: true,
+        generationHostDisconnectPublisher: true,
+        generationProcessRecovery: true,
+        generationOldEpochAttemptFence: true,
+        generationTerminalAuthority: true,
+        generationSecretIsolation: true,
         redisOnlyDirectory: true,
         directoryAtomicCreateIndex: true,
         directoryUnlistedKnownJoin: true,
@@ -2058,6 +2378,7 @@ try {
       ...roomKeys(recoveryRoomId),
       ...roomKeys(actorRoomId),
       ...roomKeys(proposalRoomId),
+      ...roomKeys(generationRoomId),
       ...roomKeys(authorityRoomId),
       ...roomKeys(directoryRoomId),
       ...roomKeys(unlistedDirectoryRoomId),

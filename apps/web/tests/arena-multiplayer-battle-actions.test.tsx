@@ -152,6 +152,15 @@ const render = async () => {
 };
 
 describe('Arena multiplayer BattleActions authority gate', () => {
+  it('feature-off / 非房间页面继续调用既有单人生成动作', async () => {
+    mocks.roomState = null;
+    const button = await render();
+    expect(button.disabled).toBe(false);
+    expect(button.textContent).toContain('生成独家新闻');
+    await act(async () => button.click());
+    expect(mocks.handleGenerate).toHaveBeenCalledTimes(1);
+  });
+
   it('成员只显示等待房主且按钮不可提交', async () => {
     mocks.roomState = stateFor('member');
     const button = await render();
