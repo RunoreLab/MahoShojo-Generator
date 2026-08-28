@@ -421,15 +421,77 @@ validate_arena_room_release_gate() {
   validated_schema="$2"
   shift 2
   [ -f "$validated_gate" ] && [ ! -L "$validated_gate" ] || return 1
-  [ -f "$validated_schema" ] && [ ! -L "$validated_schema" ] || return 1
-  run_cancellable docker run --rm \
+  if [ -e "$validated_schema" ] || [ -L "$validated_schema" ]; then
+    [ -f "$validated_schema" ] && [ ! -L "$validated_schema" ] || return 1
+    run_cancellable docker run --rm \
+      --network none \
+      --read-only \
+      --cap-drop ALL \
+      --security-opt no-new-privileges \
+      -v "$validated_gate:/gate.json:ro" \
+      -v "$validated_schema:/gate-schema.mjs:ro" \
+      "$runtime_image" node /gate-schema.mjs --manifest /gate.json "$@" >/dev/null
+    return
+  fi
+
+  # GMR-09 schema validator first appeared after the initial gate-only tuple
+  # rollout.  Keep a deliberately narrow compatibility reader for those
+  # immutable historical tuples: only the exact writer-disabled gate is
+  # accepted, and no caller may ask this path to attest another contract.
+  [ "$#" -eq 0 ] || return 1
+  if ! run_cancellable docker run --rm \
     --network none \
     --read-only \
     --cap-drop ALL \
     --security-opt no-new-privileges \
     -v "$validated_gate:/gate.json:ro" \
-    -v "$validated_schema:/gate-schema.mjs:ro" \
-    "$runtime_image" node /gate-schema.mjs --manifest /gate.json "$@" >/dev/null
+    "$runtime_image" node --input-type=module -e '
+import { readFileSync } from "node:fs";
+
+const candidate = JSON.parse(readFileSync(process.argv[1], "utf8"));
+const expectedGate = {
+  schemaVersion: 1,
+  checkpointContract: "arena-room-authority-v2-generation-payload-digest-v1",
+  writerActivation: "disabled",
+  compatibleReaderRolloutRequired: true,
+  productionGoNoGoRequired: true,
+  rollback: {
+    minimumReaderContract: "arena-room-authority-v2-generation-payload-digest-v1",
+    generationStartMustBeDisabled: true,
+  },
+  rolloutOrder: [
+    "compatible-reader",
+    "writer-disabled-validation",
+    "production-go-no-go",
+    "writer-activation",
+  ],
+  evidence: {
+    legacyCheckpointReaderTest: "GMR-09 mixed-version checkpoint gate",
+    productionFeatureGateTest: "GMR-09 mixed-version gate",
+    rollbackShellGate: "verify_arena_room_rollback_gate",
+  },
+};
+const normalize = (value) => {
+  if (Array.isArray(value)) return value.map(normalize);
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(Object.keys(value).sort().map((key) => [key, normalize(value[key])]));
+  }
+  return value;
+};
+if (JSON.stringify(normalize(candidate)) !== JSON.stringify(normalize(expectedGate))) {
+  console.error("[arena-room-release-gate-compat] gate fields are not the exact writer-disabled schema");
+  process.exit(1);
+}
+console.log(JSON.stringify({
+  gate: "ARENA_ROOM_RELEASE_GATE_COMPAT",
+  writerActivation: candidate.writerActivation,
+  checkpointContract: candidate.checkpointContract,
+  status: "PASS",
+}));
+' /gate.json >/dev/null; then
+    echo "历史 gate-only release gate 兼容校验失败" >&2
+    return 1
+  fi
 }
 
 verify_arena_room_rollback_gate() {

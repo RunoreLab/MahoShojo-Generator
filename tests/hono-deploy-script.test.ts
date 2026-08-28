@@ -42,6 +42,7 @@ const createRelease = (
   label = 'fixture',
   options: {
     includeArenaRoomReleaseGate?: boolean;
+    includeArenaRoomReleaseGateSchema?: boolean;
     writerActivation?: 'disabled' | 'enabled';
     checkpointContract?: string;
     releaseGateOverride?: Record<string, unknown>;
@@ -64,10 +65,12 @@ const createRelease = (
         null,
         2,
       )}\n`,
-      'arena-room-release-gate-schema.mjs': readFileSync(
-        arenaRoomReleaseGateSchemaPath,
-        'utf8',
-      ),
+      ...(options.includeArenaRoomReleaseGateSchema === false ? {} : {
+        'arena-room-release-gate-schema.mjs': readFileSync(
+          arenaRoomReleaseGateSchemaPath,
+          'utf8',
+        ),
+      }),
     }),
   };
   const manifest = Object.entries(files)
@@ -92,6 +95,7 @@ const createFixture = (options: {
   previousHasArenaRoomReleaseGate?: boolean;
   previousCheckpointContract?: string;
   targetWriterActivation?: 'disabled' | 'enabled';
+  targetIncludeArenaRoomReleaseGateSchema?: boolean;
   targetGateOverride?: Record<string, unknown>;
 } = {}) => {
   const temporaryDirectory = mkdtempSync(path.join(tmpdir(), 'mahoshojo-deploy-test-'));
@@ -118,6 +122,28 @@ const createFixture = (options: {
   writeExecutable(path.join(commandDirectory, 'docker'), `#!/bin/sh
 printf '%s\\n' "$*" >> "$HONO_DEPLOY_TEST_COMMAND_LOG"
 case "$*" in
+  *"node --input-type=module -e"*)
+    if [ "\${HONO_DEPLOY_TEST_VALIDATE_GATE_SCHEMA:-false}" != true ]; then
+      exit 0
+    fi
+    gate_path=''
+    inline_script=''
+    pending_option=''
+    for argument in "$@"; do
+      if [ -n "$pending_option" ]; then
+        if [ "$pending_option" = script ]; then
+          inline_script="$argument"
+        fi
+        pending_option=''
+        continue
+      fi
+      case "$argument" in
+        *:/gate.json:ro) gate_path="\${argument%:/gate.json:ro}" ;;
+        -e) pending_option=script ;;
+      esac
+    done
+    exec "$HONO_DEPLOY_TEST_REAL_NODE" --input-type=module -e "$inline_script" "$gate_path"
+    ;;
   *"node /gate-schema.mjs"*)
     if [ "\${HONO_DEPLOY_TEST_VALIDATE_GATE_SCHEMA:-false}" != true ]; then
       exit 0
@@ -295,6 +321,7 @@ exit 0
 `);
 
   const release = createRelease(rootDirectory, 'target', {
+    includeArenaRoomReleaseGateSchema: options.targetIncludeArenaRoomReleaseGateSchema,
     writerActivation: options.targetWriterActivation,
     releaseGateOverride: options.targetGateOverride,
   });
@@ -689,6 +716,97 @@ describe('Hono release-local deployment transaction', () => {
     expect(readFileSync(fixture.commandLog, 'utf8')).toContain(
       `-f ${fixture.previousReleaseDirectory}/compose.yml up -d --force-recreate hono`,
     );
+  });
+
+  test('writer-disabled 历史 gate-only target rollback 使用窄化兼容校验', () => {
+    const fixture = createFixture({
+      targetIncludeArenaRoomReleaseGateSchema: false,
+      targetWriterActivation: 'disabled',
+    });
+
+    const result = runDeployment(fixture, {
+      probeStatus: '500',
+      validateGateSchema: true,
+    });
+    const commands = existsSync(fixture.commandLog)
+      ? readFileSync(fixture.commandLog, 'utf8')
+      : '';
+
+    expect(result.status).toBe(1);
+    expect(commands).toContain('node --input-type=module -e');
+    expect(commands).toContain(
+      `-f ${fixture.previousReleaseDirectory}/compose.yml up -d --force-recreate hono`,
+    );
+  });
+
+  test('pending failed writer-disabled gate-only tuple 可恢复并继续发布', () => {
+    const fixture = createFixture({
+      targetIncludeArenaRoomReleaseGateSchema: false,
+      targetWriterActivation: 'disabled',
+    });
+    writeFileSync(
+      path.join(fixture.rootDirectory, '.env'),
+      `HONO_RELEASE_DIR=${fixture.releaseDirectory}\n`,
+    );
+    unlinkSync(path.join(fixture.rootDirectory, 'current'));
+    symlinkSync(fixture.releaseDirectory, path.join(fixture.rootDirectory, 'current'));
+    writeFileSync(path.join(fixture.rootDirectory, 'deploy.transaction'), [
+      'TRANSACTION_STATE=pending',
+      `TARGET_RELEASE_DIR=${fixture.releaseDirectory}`,
+      'HAD_PREVIOUS=true',
+      `PREVIOUS_RELEASE_DIR=${fixture.previousReleaseDirectory}`,
+      '',
+    ].join('\n'));
+
+    const result = runDeployment(fixture, { validateGateSchema: true });
+    const commands = readFileSync(fixture.commandLog, 'utf8');
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(commands).toContain('node --input-type=module -e');
+    expect(commands.indexOf(`-f ${fixture.previousReleaseDirectory}/compose.yml up`)).toBeLessThan(
+      commands.lastIndexOf(`-f ${fixture.releaseDirectory}/compose.yml up`),
+    );
+    expect(existsSync(path.join(fixture.rootDirectory, 'deploy.transaction'))).toBe(false);
+    expect(readlinkSync(path.join(fixture.rootDirectory, 'current'))).toBe(
+      fixture.releaseDirectory,
+    );
+  });
+
+  test('malformed gate-only tuple 在兼容迁移路径 fail closed', () => {
+    const fixture = createFixture({
+      targetIncludeArenaRoomReleaseGateSchema: false,
+      targetGateOverride: {
+        schemaVersion: 1,
+        writerActivation: 'disabled',
+      },
+    });
+
+    const result = runDeployment(fixture, { validateGateSchema: true });
+    const commands = existsSync(fixture.commandLog)
+      ? readFileSync(fixture.commandLog, 'utf8')
+      : '';
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('历史 gate-only release gate');
+    expect(commands).toContain('node --input-type=module -e');
+    expect(commands).not.toContain(`-f ${fixture.releaseDirectory}/compose.yml up`);
+  });
+
+  test('writer-enabled gate-only tuple 不得借用兼容迁移路径', () => {
+    const fixture = createFixture({
+      targetIncludeArenaRoomReleaseGateSchema: false,
+      targetWriterActivation: 'enabled',
+    });
+
+    const result = runDeployment(fixture, { validateGateSchema: true });
+    const commands = existsSync(fixture.commandLog)
+      ? readFileSync(fixture.commandLog, 'utf8')
+      : '';
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('历史 gate-only release gate');
+    expect(commands).toContain('node --input-type=module -e');
+    expect(commands).not.toContain(`-f ${fixture.releaseDirectory}/compose.yml up`);
   });
 
   test('writer-enabled rollback 在 target reader contract 缺失时 fail closed', () => {
