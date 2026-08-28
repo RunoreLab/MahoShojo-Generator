@@ -69,6 +69,14 @@ describe('Arena Room directory isolated D1 migration', () => {
       LIMIT 20
     `).all().map((row) => String((row as { detail: string }).detail)).join('\n');
     expect(publicPlan).toContain('idx_arena_multiplayer_rooms_public_page');
+    const hostPlan = sqlite.prepare(`
+      EXPLAIN QUERY PLAN
+      SELECT id FROM arena_multiplayer_rooms
+      WHERE host_user_id = 101 AND status = 'open'
+      ORDER BY last_activity_at DESC, id DESC
+      LIMIT 20
+    `).all().map((row) => String((row as { detail: string }).detail)).join('\n');
+    expect(hostPlan).toContain('idx_arena_multiplayer_rooms_host_page');
     const reconcilePlan = sqlite.prepare(`
       EXPLAIN QUERY PLAN
       SELECT id FROM arena_multiplayer_rooms

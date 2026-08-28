@@ -34,6 +34,13 @@ export type RoomDirectoryPosition = {
 
 export type D1RoomDirectoryStore = {
   upsertOpen(input: RoomDirectoryRecord): Promise<void>;
+  rebindEpoch(input: {
+    readonly roomId: string;
+    readonly previousRoomEpoch: string;
+    readonly nextRoomEpoch: string;
+    readonly hostUserId: number;
+    readonly lastActivityAt: string;
+  }): Promise<void>;
   delete(input: { readonly roomId: string; readonly roomEpoch: string }): Promise<void>;
   get(roomId: string): Promise<RoomDirectoryRecord | null>;
   listPublic(input: {
@@ -171,11 +178,22 @@ ON CONFLICT(id) DO UPDATE SET
   status = 'open',
   created_at = excluded.created_at,
   last_activity_at = excluded.last_activity_at
-WHERE excluded.last_activity_at > arena_multiplayer_rooms.last_activity_at
-   OR (
-     excluded.last_activity_at = arena_multiplayer_rooms.last_activity_at
-     AND excluded.room_epoch = arena_multiplayer_rooms.room_epoch
-   )
+WHERE excluded.room_epoch = arena_multiplayer_rooms.room_epoch
+  AND excluded.last_activity_at >= arena_multiplayer_rooms.last_activity_at
+`.trim();
+
+const REBIND_EPOCH_SQL = `
+UPDATE arena_multiplayer_rooms
+SET
+  room_epoch = ?,
+  last_activity_at = CASE
+    WHEN last_activity_at < ? THEN ?
+    ELSE last_activity_at
+  END
+WHERE id = ?
+  AND room_epoch = ?
+  AND host_user_id = ?
+  AND status = 'open'
 `.trim();
 
 const withCursor = (base: string, after: RoomDirectoryPosition | undefined): string => (
@@ -209,6 +227,33 @@ export const createD1RoomDirectoryStore = (
         record.visibility,
         record.createdAt,
         record.lastActivityAt,
+      )
+      .run({ retry: 'none' });
+    ensureWriteSucceeded(result);
+  },
+
+  async rebindEpoch(input) {
+    const roomId = OpaqueKeySchema.safeParse(input.roomId);
+    const previousRoomEpoch = OpaqueKeySchema.safeParse(input.previousRoomEpoch);
+    const nextRoomEpoch = OpaqueKeySchema.safeParse(input.nextRoomEpoch);
+    const lastActivityAt = IsoTimestampSchema.safeParse(input.lastActivityAt);
+    if (
+      !roomId.success
+      || !previousRoomEpoch.success
+      || !nextRoomEpoch.success
+      || previousRoomEpoch.data === nextRoomEpoch.data
+      || !positiveUserId(input.hostUserId)
+      || !lastActivityAt.success
+    ) return fail('ROOM_DIRECTORY_INPUT_INVALID');
+    const result = await readClient(options)
+      .prepare(REBIND_EPOCH_SQL)
+      .bind(
+        nextRoomEpoch.data,
+        lastActivityAt.data,
+        lastActivityAt.data,
+        roomId.data,
+        previousRoomEpoch.data,
+        input.hostUserId,
       )
       .run({ retry: 'none' });
     ensureWriteSucceeded(result);

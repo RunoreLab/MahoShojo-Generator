@@ -31,6 +31,7 @@ const record = (
 
 const createStore = () => ({
   upsertOpen: vi.fn<D1RoomDirectoryStore['upsertOpen']>(async () => undefined),
+  rebindEpoch: vi.fn<D1RoomDirectoryStore['rebindEpoch']>(async () => undefined),
   delete: vi.fn<D1RoomDirectoryStore['delete']>(async () => undefined),
   get: vi.fn<D1RoomDirectoryStore['get']>(async () => null),
   listPublic: vi.fn<D1RoomDirectoryStore['listPublic']>(async () => []),

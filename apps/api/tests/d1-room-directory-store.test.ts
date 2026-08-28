@@ -1,9 +1,12 @@
+import { readFileSync } from 'node:fs';
+
 import type { D1LikeStatementResult } from '@mahoshojo/hosted-runtime/d1-http-client';
 import type {
   NodeDataD1Client,
   NodeDataD1Statement,
 } from '@mahoshojo/hosted-runtime/node-runtime/data-ports';
 import { describe, expect, it, vi } from 'vitest';
+import Database from 'better-sqlite3';
 
 import {
   createD1RoomDirectoryStore,
@@ -74,6 +77,28 @@ const databaseRow = {
   last_activity_at: openRecord.lastActivityAt,
 };
 
+const migrationPath = new URL('../../../drizzle/0014_arena_multiplayer_rooms.sql', import.meta.url);
+
+const sqliteClient = (sqlite: Database.Database): NodeDataD1Client => ({
+  prepare(sql) {
+    let params: unknown[] = [];
+    const statement: NodeDataD1Statement = {
+      bind(...input) {
+        params = input;
+        return statement;
+      },
+      async all(_options) {
+        return success(sqlite.prepare(sql).all(...params) as Record<string, unknown>[]);
+      },
+      async run(_options) {
+        const result = sqlite.prepare(sql).run(...params);
+        return { success: true, results: [], meta: { changes: Number(result.changes) } };
+      },
+    };
+    return statement;
+  },
+});
+
 describe('D1 Room directory store', () => {
   it('open upsert 使用 epoch/activity 单调 fence，写入不盲目重放', async () => {
     const { client, calls } = createClient();
@@ -95,8 +120,34 @@ describe('D1 Room directory store', () => {
       ],
     });
     expect(calls[0]?.sql).toContain('ON CONFLICT(id) DO UPDATE');
-    expect(calls[0]?.sql).toContain('excluded.last_activity_at > arena_multiplayer_rooms.last_activity_at');
-    expect(calls[0]?.sql).toContain('excluded.room_epoch = arena_multiplayer_rooms.room_epoch');
+    expect(calls[0]?.sql).toContain('excluded.last_activity_at >= arena_multiplayer_rooms.last_activity_at');
+    expect(calls[0]?.sql).toContain('WHERE excluded.room_epoch = arena_multiplayer_rooms.room_epoch');
+  });
+
+  it('rebind 使用 room/previousEpoch/host exact fence 且写不启用 transport retry', async () => {
+    const { client, calls } = createClient();
+    const store = createD1RoomDirectoryStore({ getClient: () => client });
+
+    await store.rebindEpoch({
+      roomId: 'room-1',
+      previousRoomEpoch: 'epoch-1',
+      nextRoomEpoch: 'epoch-2',
+      hostUserId: 101,
+      lastActivityAt: '2026-08-28T08:20:00.000Z',
+    });
+    expect(calls[0]).toMatchObject({
+      mode: 'run',
+      options: { retry: 'none' },
+      params: [
+        'epoch-2',
+        '2026-08-28T08:20:00.000Z',
+        '2026-08-28T08:20:00.000Z',
+        'room-1',
+        'epoch-1',
+        101,
+      ],
+    });
+    expect(calls[0]?.sql).toContain("AND status = 'open'");
   });
 
   it('delete 绑定 exact roomEpoch 且幂等写不启用 transport retry', async () => {
@@ -180,5 +231,84 @@ describe('D1 Room directory store', () => {
     await expect(failed.upsertOpen({ ...openRecord, title: ' ' })).rejects.toMatchObject({
       code: 'ROOM_DIRECTORY_INPUT_INVALID',
     });
+  });
+
+  it('真实 SQLite 执行 store SQL：跨 epoch stale writer/delete 不能覆盖 rebind 后目录', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      sqlite.pragma('foreign_keys = ON');
+      sqlite.exec('CREATE TABLE users (id INTEGER PRIMARY KEY); INSERT INTO users (id) VALUES (101);');
+      sqlite.exec(readFileSync(migrationPath, 'utf8'));
+      const store = createD1RoomDirectoryStore({ getClient: () => sqliteClient(sqlite) });
+
+      await store.upsertOpen(openRecord);
+      await store.upsertOpen({
+        ...openRecord,
+        roomEpoch: 'epoch-untrusted-newer',
+        title: 'must-not-overwrite',
+        lastActivityAt: '2026-08-28T09:00:00.000Z',
+      });
+      await expect(store.get('room-1')).resolves.toEqual(openRecord);
+
+      await store.rebindEpoch({
+        roomId: 'room-1',
+        previousRoomEpoch: 'epoch-1',
+        nextRoomEpoch: 'epoch-2',
+        hostUserId: 101,
+        lastActivityAt: '2026-08-28T08:20:00.000Z',
+      });
+      await store.upsertOpen({
+        ...openRecord,
+        title: 'stale-epoch-writer',
+        lastActivityAt: '2026-08-28T09:00:00.000Z',
+      });
+      await store.delete({ roomId: 'room-1', roomEpoch: 'epoch-1' });
+      await expect(store.get('room-1')).resolves.toMatchObject({
+        roomEpoch: 'epoch-2',
+        title: '协作竞技场',
+        lastActivityAt: '2026-08-28T08:20:00.000Z',
+      });
+
+      await store.delete({ roomId: 'room-1', roomEpoch: 'epoch-2' });
+      await expect(store.get('room-1')).resolves.toBeNull();
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('真实 SQLite 执行 public/host/reconciliation keyset query 与 tie-break', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      sqlite.pragma('foreign_keys = ON');
+      sqlite.exec('CREATE TABLE users (id INTEGER PRIMARY KEY); INSERT INTO users (id) VALUES (101);');
+      sqlite.exec(readFileSync(migrationPath, 'utf8'));
+      const store = createD1RoomDirectoryStore({ getClient: () => sqliteClient(sqlite) });
+      for (const roomId of ['room-a', 'room-b', 'room-c']) {
+        await store.upsertOpen({ ...openRecord, roomId, roomEpoch: `epoch-${roomId}` });
+      }
+      await store.upsertOpen({
+        ...openRecord,
+        roomId: 'room-private',
+        roomEpoch: 'epoch-private',
+        visibility: 'unlisted',
+      });
+
+      const first = await store.listPublic({ limit: 2 });
+      expect(first.map((entry) => entry.roomId)).toEqual(['room-c', 'room-b']);
+      await expect(store.listPublic({
+        after: {
+          roomId: first[1]!.roomId,
+          lastActivityAt: first[1]!.lastActivityAt,
+        },
+        limit: 2,
+      })).resolves.toEqual([expect.objectContaining({ roomId: 'room-a' })]);
+      await expect(store.listByHost({ hostUserId: 101, limit: 5 })).resolves.toHaveLength(4);
+      await expect(store.listReconciliationCandidates({
+        inactiveBefore: '2026-08-28T08:10:00.000Z',
+        limit: 5,
+      })).resolves.toHaveLength(4);
+    } finally {
+      sqlite.close();
+    }
   });
 });
