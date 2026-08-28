@@ -1,6 +1,8 @@
 import {
   parseRoomServerTransportFrame,
   type ArenaRoomCreateRequest,
+  type ArenaRoomProposalResolveRequest,
+  type ArenaRoomProposalSubmitRequest,
   type ArenaRoomSessionResponse,
   type RoomControlCursor,
   type RoomDirectoryEntry,
@@ -33,6 +35,8 @@ export type ArenaRoomControllerState = {
   readonly notice: string | null;
   readonly error: string | null;
   readonly unknownOperation: 'create' | 'join' | null;
+  readonly proposalOperation: 'resolve' | 'submit' | 'withdraw' | null;
+  readonly proposalResultUnknown: boolean;
 };
 
 export type ArenaRoomSocket = {
@@ -63,6 +67,9 @@ export type ArenaRoomController = {
   join(roomId: string, displayName: string): Promise<void>;
   leave(): Promise<void>;
   close(): Promise<void>;
+  submitProposal(request: ArenaRoomProposalSubmitRequest): Promise<void>;
+  resolveProposal(proposalId: string, request: ArenaRoomProposalResolveRequest): Promise<void>;
+  withdrawProposal(proposalId: string): Promise<void>;
   reconnect(): void;
   reset(): void;
   dispose(): void;
@@ -75,6 +82,8 @@ const READY_STATE: ArenaRoomControllerState = Object.freeze({
   notice: null,
   error: null,
   unknownOperation: null,
+  proposalOperation: null,
+  proposalResultUnknown: false,
 });
 
 const phaseForAccess = (access: { enabled: boolean; authenticated: boolean }) => (
@@ -133,6 +142,8 @@ export const createArenaRoomController = (
   let reconnectTimer: unknown = null;
   let reconnectAttempts = 0;
   let operationGeneration = 0;
+  let proposalMutationGeneration = 0;
+  let proposalMutationPending = false;
   let disposed = false;
   let unresolvedCreateResult = false;
   let unresolvedCreateNotice: string | null = null;
@@ -244,6 +255,8 @@ export const createArenaRoomController = (
           snapshot: event.payload,
         },
         ...(epochChanged ? { notice: '房间已由服务器恢复，需要重新同步' } : {}),
+        proposalOperation: null,
+        proposalResultUnknown: false,
       });
       return;
     }
@@ -280,6 +293,53 @@ export const createArenaRoomController = (
             sharedConfig: event.payload.sharedConfig,
           },
         },
+      });
+      return;
+    }
+
+    if (event.type === 'proposal.submitted' || event.type === 'proposal.updated') {
+      const proposal = event.payload.proposal;
+      const proposals = current.snapshot.proposals.filter((item) => (
+        item.proposalId !== proposal.proposalId
+      ));
+      proposals.push(proposal);
+      publish({
+        session: {
+          ...current,
+          snapshot: {
+            ...current.snapshot,
+            controlSeq: event.controlSeq,
+            proposals,
+          },
+        },
+        proposalOperation: null,
+        proposalResultUnknown: false,
+        notice: event.type === 'proposal.submitted' ? 'Proposal 已进入房间' : 'Proposal 已更新',
+        error: null,
+      });
+      return;
+    }
+
+    if (event.type === 'proposal.resolved') {
+      publish({
+        session: {
+          ...current,
+          snapshot: {
+            ...current.snapshot,
+            controlSeq: event.controlSeq,
+            proposals: current.snapshot.proposals.filter((proposal) => (
+              proposal.proposalId !== event.payload.proposalId
+            )),
+          },
+        },
+        proposalOperation: null,
+        proposalResultUnknown: false,
+        notice: event.payload.status === 'withdrawn'
+          ? 'Proposal 已撤回'
+          : event.payload.status === 'rejected'
+            ? 'Proposal 已拒绝'
+            : 'Proposal 已应用',
+        error: null,
       });
       return;
     }
@@ -421,6 +481,74 @@ export const createArenaRoomController = (
     });
   };
 
+  const runProposalMutation = async (
+    operation: 'resolve' | 'submit' | 'withdraw',
+    requiredRole: 'host' | 'member',
+    execute: (session: ArenaRoomSessionResponse) => Promise<unknown>,
+  ): Promise<void> => {
+    const current = state.session;
+    if (
+      disposed
+      || !access.enabled
+      || !access.authenticated
+      || !current
+      || current.self.role !== requiredRole
+      || proposalMutationPending
+      || state.proposalResultUnknown
+    ) return;
+    proposalMutationPending = true;
+    proposalMutationGeneration += 1;
+    const generation = proposalMutationGeneration;
+    publish({
+      proposalOperation: operation,
+      notice: operation === 'submit'
+        ? '正在提交 Proposal…'
+        : operation === 'resolve'
+          ? '正在处理 Proposal…'
+          : '正在撤回 Proposal…',
+      error: null,
+    });
+    try {
+      await execute(current);
+      if (
+        disposed
+        || generation !== proposalMutationGeneration
+        || state.session?.roomId !== current.roomId
+        || state.session.roomEpoch !== current.roomEpoch
+      ) return;
+      publish({
+        proposalOperation: null,
+        proposalResultUnknown: false,
+        notice: '请求已确认，等待房间权威状态同步',
+        error: null,
+      });
+    } catch (error) {
+      if (
+        disposed
+        || generation !== proposalMutationGeneration
+        || state.session?.roomId !== current.roomId
+        || state.session.roomEpoch !== current.roomEpoch
+      ) return;
+      if (error instanceof ArenaRoomClientError && error.code === 'ROOM_RESULT_UNKNOWN') {
+        publish({
+          proposalOperation: null,
+          proposalResultUnknown: true,
+          notice: error.message,
+          error: null,
+        });
+      } else {
+        publish({
+          proposalOperation: null,
+          proposalResultUnknown: false,
+          notice: null,
+          error: safeErrorMessage(error),
+        });
+      }
+    } finally {
+      if (generation === proposalMutationGeneration) proposalMutationPending = false;
+    }
+  };
+
   return Object.freeze({
     getSnapshot: () => state,
 
@@ -436,6 +564,8 @@ export const createArenaRoomController = (
       ) return;
       access = nextAccess;
       operationGeneration += 1;
+      proposalMutationGeneration += 1;
+      proposalMutationPending = false;
       clearReconnectTimer();
       detachSocket(true);
       reconnectAttempts = 0;
@@ -474,6 +604,8 @@ export const createArenaRoomController = (
       if (disposed || !access.enabled || !access.authenticated) return;
       if (unresolvedCreateResult) return;
       operationGeneration += 1;
+      proposalMutationGeneration += 1;
+      proposalMutationPending = false;
       const generation = operationGeneration;
       clearReconnectTimer();
       detachSocket(true);
@@ -490,6 +622,8 @@ export const createArenaRoomController = (
     async join(roomId, displayName) {
       if (disposed || !access.enabled || !access.authenticated) return;
       operationGeneration += 1;
+      proposalMutationGeneration += 1;
+      proposalMutationPending = false;
       const generation = operationGeneration;
       clearReconnectTimer();
       detachSocket(true);
@@ -506,6 +640,8 @@ export const createArenaRoomController = (
     async leave() {
       if (!state.session || disposed) return;
       operationGeneration += 1;
+      proposalMutationGeneration += 1;
+      proposalMutationPending = false;
       const generation = operationGeneration;
       const { roomId, roomEpoch } = state.session;
       clearReconnectTimer();
@@ -522,6 +658,8 @@ export const createArenaRoomController = (
     async close() {
       if (!state.session || state.session.self.role !== 'host' || disposed) return;
       operationGeneration += 1;
+      proposalMutationGeneration += 1;
+      proposalMutationPending = false;
       const generation = operationGeneration;
       const { roomId, roomEpoch } = state.session;
       clearReconnectTimer();
@@ -535,6 +673,24 @@ export const createArenaRoomController = (
       }
     },
 
+    async submitProposal(request) {
+      await runProposalMutation('submit', 'member', (current) => (
+        options.client.submitProposal(current.roomId, request)
+      ));
+    },
+
+    async resolveProposal(proposalId, request) {
+      await runProposalMutation('resolve', 'host', (current) => (
+        options.client.resolveProposal(current.roomId, proposalId, request)
+      ));
+    },
+
+    async withdrawProposal(proposalId) {
+      await runProposalMutation('withdraw', 'member', (current) => (
+        options.client.withdrawProposal(current.roomId, proposalId, current.roomEpoch)
+      ));
+    },
+
     reconnect() {
       if (!state.session || disposed || !access.enabled || !access.authenticated) return;
       operationGeneration += 1;
@@ -544,6 +700,8 @@ export const createArenaRoomController = (
 
     reset() {
       operationGeneration += 1;
+      proposalMutationGeneration += 1;
+      proposalMutationPending = false;
       clearReconnectTimer();
       detachSocket(true);
       reconnectAttempts = 0;
@@ -556,6 +714,8 @@ export const createArenaRoomController = (
     dispose() {
       if (disposed) return;
       operationGeneration += 1;
+      proposalMutationGeneration += 1;
+      proposalMutationPending = false;
       clearReconnectTimer();
       detachSocket(true);
       listeners.clear();

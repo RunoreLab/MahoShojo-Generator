@@ -106,6 +106,36 @@ const createHarness = () => {
     issueTicket: vi.fn(async () => ticket(`ticket-${++ticketIndex}`)),
     leave: vi.fn(async () => ({ protocolVersion: 1, roomId: 'room-1', outcome: 'left' })),
     close: vi.fn(async () => ({ protocolVersion: 1, roomId: 'room-1', outcome: 'closed' })),
+    submitProposal: vi.fn(async (roomId, request) => ({
+      protocolVersion: 1,
+      roomId,
+      roomEpoch: 'epoch-1',
+      controlSeq: 1,
+      revision: 0,
+      proposalId: request.proposalId,
+      status: 'submitted' as const,
+      result: 'applied' as const,
+    })),
+    resolveProposal: vi.fn(async (roomId, proposalId) => ({
+      protocolVersion: 1,
+      roomId,
+      roomEpoch: 'epoch-1',
+      controlSeq: 2,
+      revision: 1,
+      proposalId,
+      status: 'accepted' as const,
+      result: 'applied' as const,
+    })),
+    withdrawProposal: vi.fn(async (roomId, proposalId) => ({
+      protocolVersion: 1,
+      roomId,
+      roomEpoch: 'epoch-1',
+      controlSeq: 2,
+      revision: 0,
+      proposalId,
+      status: 'withdrawn' as const,
+      result: 'applied' as const,
+    })),
     buildWebSocketUrl: vi.fn((issued) => `wss://room.test/ws?ticket=${issued.ticket}`),
   };
   const sockets: FakeSocket[] = [];
@@ -275,6 +305,121 @@ describe('Arena Room browser controller', () => {
 
     expect(controller.getSnapshot().session?.snapshot.members).toHaveLength(2);
     expect(sockets[0]!.send).not.toHaveBeenCalled();
+  });
+
+  it('Proposal mutation 不打断 WSS lifecycle，并只由权威事件更新 snapshot', async () => {
+    const { client, controller, sockets } = createHarness();
+    await controller.create({
+      displayName: '房主',
+      directory: { title: '测试房', visibility: 'public' },
+      sharedConfig,
+    });
+    sockets[0]!.open();
+    const proposal = {
+      proposalVersion: 1 as const,
+      proposalId: 'proposal-1',
+      roomId: 'room-1',
+      authorUserId: 'user-member',
+      baseRevision: 0,
+      status: 'submitted' as const,
+      changes: [{
+        changeId: 'guidance-1',
+        type: 'setUserGuidance' as const,
+        value: '成员建议',
+        expectedBase: { kind: 'value' as const, value: '' },
+      }],
+      createdAt: '2026-08-28T00:01:00.000Z',
+    };
+    sockets[0]!.message(JSON.stringify({
+      protocolVersion: 1,
+      roomId: 'room-1',
+      roomEpoch: 'epoch-1',
+      controlSeq: 1,
+      timestamp: '2026-08-28T00:01:00.000Z',
+      type: 'proposal.submitted',
+      payload: { proposal },
+    }));
+    expect(controller.getSnapshot().session?.snapshot.proposals).toEqual([proposal]);
+
+    await controller.resolveProposal('proposal-1', {
+      expectedRoomEpoch: 'epoch-1',
+      expectedRevision: 0,
+      resolution: 'reject',
+    });
+    expect(client.resolveProposal).toHaveBeenCalledOnce();
+    expect(controller.getSnapshot()).toMatchObject({
+      phase: 'connected',
+      proposalOperation: null,
+      proposalResultUnknown: false,
+    });
+    expect(sockets[0]!.close).not.toHaveBeenCalled();
+    expect(controller.getSnapshot().session?.snapshot.proposals).toHaveLength(1);
+
+    sockets[0]!.message(JSON.stringify({
+      protocolVersion: 1,
+      roomId: 'room-1',
+      roomEpoch: 'epoch-1',
+      controlSeq: 2,
+      timestamp: '2026-08-28T00:02:00.000Z',
+      type: 'proposal.resolved',
+      payload: { proposalId: 'proposal-1', status: 'rejected' },
+    }));
+    expect(controller.getSnapshot().session?.snapshot.proposals).toEqual([]);
+  });
+
+  it('Proposal 结果未知时冻结重复 mutation，等待 WSS/snapshot 对账', async () => {
+    const { client, controller, sockets } = createHarness();
+    const memberSession = {
+      ...session,
+      self: {
+        userId: 'user-member',
+        role: 'member' as const,
+        displayName: '成员',
+        membershipState: 'active' as const,
+      },
+      snapshot: {
+        ...snapshot,
+        members: [
+          snapshot.members[0]!,
+          {
+            userId: 'user-member',
+            role: 'member' as const,
+            displayName: '成员',
+            membershipState: 'active' as const,
+          },
+        ],
+      },
+    };
+    vi.mocked(client.join).mockResolvedValueOnce(memberSession);
+    vi.mocked(client.submitProposal).mockRejectedValueOnce(new ArenaRoomClientError(
+      'ROOM_RESULT_UNKNOWN',
+      503,
+      '请求可能已提交，请先确认房间状态，不要重复提交',
+    ));
+    await controller.join('room-1', '成员');
+    sockets[0]!.open();
+    const intent = {
+      proposalId: 'proposal-stable',
+      expectedRoomEpoch: 'epoch-1',
+      baseRevision: 0,
+      changes: [{
+        changeId: 'guidance-1',
+        type: 'setUserGuidance' as const,
+        value: '成员建议',
+        expectedBase: { kind: 'value' as const, value: '' },
+      }],
+    };
+    await controller.submitProposal(intent);
+    await controller.submitProposal(intent);
+
+    expect(client.submitProposal).toHaveBeenCalledOnce();
+    expect(controller.getSnapshot()).toMatchObject({
+      phase: 'connected',
+      proposalOperation: null,
+      proposalResultUnknown: true,
+      notice: '请求可能已提交，请先确认房间状态，不要重复提交',
+    });
+    expect(sockets[0]!.close).not.toHaveBeenCalled();
   });
 
   it('忽略重复 control event，跳号时请求 reconnect/resync', async () => {

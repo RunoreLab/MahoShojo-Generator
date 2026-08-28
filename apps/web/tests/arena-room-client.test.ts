@@ -185,4 +185,60 @@ describe('Arena Room browser client', () => {
       'wss://api.example.test/api/arena/rooms/v1/ws?ticket=signed.ticket%3Fsecret',
     );
   });
+
+  it('Proposal 三类 mutation 严格编码 intent，结果未知时每次只发送一次', async () => {
+    const response = {
+      protocolVersion: 1,
+      roomId: 'room-1',
+      roomEpoch: 'epoch-1',
+      controlSeq: 4,
+      revision: 0,
+      proposalId: 'proposal/1',
+      status: 'submitted',
+      result: 'applied',
+    };
+    const fetcher = vi.fn<typeof fetch>(async () => Response.json(response));
+    const client = createArenaRoomClient({
+      origin: 'http://127.0.0.1:8787',
+      fetch: fetcher,
+      getAuthHeader: async () => 'Bearer verified-key',
+    });
+    const submitIntent = {
+      proposalId: 'proposal/1',
+      expectedRoomEpoch: 'epoch-1',
+      baseRevision: 0,
+      changes: [{
+        changeId: 'guidance-1',
+        type: 'setUserGuidance' as const,
+        value: '成员建议',
+        expectedBase: { kind: 'value' as const, value: '' },
+      }],
+    };
+
+    await expect(client.submitProposal('room/1', submitIntent)).resolves.toEqual(response);
+    expect(String(fetcher.mock.calls[0]?.[0])).toBe(
+      'http://127.0.0.1:8787/api/arena/rooms/v1/room%2F1/proposals',
+    );
+    expect(JSON.parse(String(fetcher.mock.calls[0]?.[1]?.body))).toEqual(submitIntent);
+
+    fetcher.mockResolvedValueOnce(Response.json({
+      ...response,
+      status: 'accepted',
+      revision: 1,
+    }));
+    await client.resolveProposal('room/1', 'proposal/1', {
+      expectedRoomEpoch: 'epoch-1',
+      expectedRevision: 0,
+      resolution: 'accept-selected',
+      selectedChangeIds: ['guidance-1'],
+    });
+    expect(String(fetcher.mock.calls[1]?.[0])).toBe(
+      'http://127.0.0.1:8787/api/arena/rooms/v1/room%2F1/proposals/proposal%2F1/resolve',
+    );
+
+    fetcher.mockRejectedValueOnce(new TypeError('reset after write'));
+    await expect(client.withdrawProposal('room-1', 'proposal-1', 'epoch-1'))
+      .rejects.toMatchObject({ code: 'ROOM_RESULT_UNKNOWN' });
+    expect(fetcher).toHaveBeenCalledTimes(3);
+  });
 });

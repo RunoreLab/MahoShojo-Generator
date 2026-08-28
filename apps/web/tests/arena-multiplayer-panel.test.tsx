@@ -12,6 +12,8 @@ const readyState: ArenaRoomControllerState = {
   notice: null,
   error: null,
   unknownOperation: null,
+  proposalOperation: null,
+  proposalResultUnknown: false,
 };
 
 const session = {

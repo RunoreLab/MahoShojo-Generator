@@ -5,6 +5,10 @@ import {
   ArenaRoomHttpErrorResponseSchema,
   ArenaRoomJoinRequestSchema,
   ArenaRoomLeaveResponseSchema,
+  ArenaRoomProposalMutationResponseSchema,
+  ArenaRoomProposalResolveRequestSchema,
+  ArenaRoomProposalSubmitRequestSchema,
+  ArenaRoomProposalWithdrawRequestSchema,
   ArenaRoomSessionResponseSchema,
   ArenaRoomTicketRequestSchema,
   ArenaRoomTicketResponseSchema,
@@ -13,6 +17,9 @@ import {
   type ArenaRoomCreateRequest,
   type ArenaRoomJoinRequest,
   type ArenaRoomLeaveResponse,
+  type ArenaRoomProposalMutationResponse,
+  type ArenaRoomProposalResolveRequest,
+  type ArenaRoomProposalSubmitRequest,
   type ArenaRoomSessionResponse,
   type ArenaRoomTicketRequest,
   type ArenaRoomTicketResponse,
@@ -49,6 +56,20 @@ export type ArenaRoomClient = {
   issueTicket(roomId: string, request: ArenaRoomTicketRequest): Promise<ArenaRoomTicketResponse>;
   leave(roomId: string, expectedRoomEpoch: string): Promise<ArenaRoomLeaveResponse>;
   close(roomId: string, expectedRoomEpoch: string): Promise<ArenaRoomLeaveResponse>;
+  submitProposal(
+    roomId: string,
+    request: ArenaRoomProposalSubmitRequest,
+  ): Promise<ArenaRoomProposalMutationResponse>;
+  resolveProposal(
+    roomId: string,
+    proposalId: string,
+    request: ArenaRoomProposalResolveRequest,
+  ): Promise<ArenaRoomProposalMutationResponse>;
+  withdrawProposal(
+    roomId: string,
+    proposalId: string,
+    expectedRoomEpoch: string,
+  ): Promise<ArenaRoomProposalMutationResponse>;
   buildWebSocketUrl(ticket: ArenaRoomTicketResponse): string;
 };
 
@@ -162,6 +183,10 @@ export const createArenaRoomClient = (options: ClientOptions): ArenaRoomClient =
     `${ARENA_ROOM_HTTP_BASE_PATH}/${encodeURIComponent(roomId)}/${suffix}`
   );
 
+  const proposalPathFor = (roomId: string, proposalId: string, suffix: string): string => (
+    pathFor(roomId, `proposals/${encodeURIComponent(proposalId)}/${suffix}`)
+  );
+
   return Object.freeze({
     async discover(input = {}) {
       const query = RoomDirectoryPageQuerySchema.parse(input);
@@ -224,6 +249,36 @@ export const createArenaRoomClient = (options: ClientOptions): ArenaRoomClient =
         method: 'POST',
         body: ArenaRoomEpochMutationRequestSchema.parse({ expectedRoomEpoch }),
         schema: ArenaRoomLeaveResponseSchema,
+      });
+    },
+
+    async submitProposal(roomId, input) {
+      return request({
+        path: pathFor(roomId, 'proposals'),
+        method: 'POST',
+        body: ArenaRoomProposalSubmitRequestSchema.parse(input),
+        schema: ArenaRoomProposalMutationResponseSchema,
+        unknownResult: true,
+      });
+    },
+
+    async resolveProposal(roomId, proposalId, input) {
+      return request({
+        path: proposalPathFor(roomId, proposalId, 'resolve'),
+        method: 'POST',
+        body: ArenaRoomProposalResolveRequestSchema.parse(input),
+        schema: ArenaRoomProposalMutationResponseSchema,
+        unknownResult: true,
+      });
+    },
+
+    async withdrawProposal(roomId, proposalId, expectedRoomEpoch) {
+      return request({
+        path: proposalPathFor(roomId, proposalId, 'withdraw'),
+        method: 'POST',
+        body: ArenaRoomProposalWithdrawRequestSchema.parse({ expectedRoomEpoch }),
+        schema: ArenaRoomProposalMutationResponseSchema,
+        unknownResult: true,
       });
     },
 
