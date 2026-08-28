@@ -1,4 +1,5 @@
 import type { DataCardRef } from '@mahoshojo/contracts/arena-room';
+import { ONLINE_DATA_CARD_TYPES } from '@mahoshojo/contracts/data-cards';
 import type { D1LikeStatementResult } from '@mahoshojo/hosted-runtime/d1-http-client';
 import { describe, expect, it } from 'vitest';
 
@@ -123,13 +124,16 @@ describe('Arena DataCardRef verifier', () => {
     );
   });
 
-  it('material 可引用当前 ONLINE_DATA_CARD_TYPES 中的线上卡，但仍需 approved/public 或 host ownership', async () => {
-    const { client } = createClient(() => success([card({ type: 'history' })]));
+  it.each(ONLINE_DATA_CARD_TYPES)(
+    'material 可引用 ONLINE_DATA_CARD_TYPES 的 %s 卡',
+    async (type) => {
+    const { client } = createClient(() => success([card({ type })]));
     const verifier = createVerifier(client);
 
     await expect(verifier.verify({ refs: [ref({ kind: 'material' })], hostAccountUserId: 7 }))
       .resolves.toEqual([ref({ kind: 'material' })]);
-  });
+    },
+  );
 
   it('versionToken 必须精确匹配 updated_at，不得 fallback 到 latest', async () => {
     const { client } = createClient(() => success([card({ updated_at: '2026-08-28T08:00:01.000Z' })]));

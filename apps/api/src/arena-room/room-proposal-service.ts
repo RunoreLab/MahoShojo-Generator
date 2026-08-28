@@ -1,9 +1,9 @@
 import {
   ArenaProposalSchema,
+  ArenaProposalIdSchema,
   ArenaRoomProposalResolveRequestSchema,
   ArenaRoomProposalSubmitRequestSchema,
   ArenaRoomProposalWithdrawRequestSchema,
-  OpaqueKeySchema,
   type ArenaProposal,
   type ArenaProposalChange,
   type ArenaRoomProposalMutationResult,
@@ -92,7 +92,7 @@ const validAccountUserId = (value: number): boolean => (
 );
 
 const parsePath = (value: string): string => {
-  const parsed = OpaqueKeySchema.safeParse(value);
+  const parsed = ArenaProposalIdSchema.safeParse(value);
   if (!parsed.success || parsed.data !== value) return fail('ROOM_PROPOSAL_INPUT_INVALID');
   return parsed.data;
 };
@@ -382,11 +382,11 @@ export const createArenaRoomProposalService = (
       if (membership.member.role !== 'member') return fail('ROOM_PERMISSION_DENIED');
       const proposal = membership.state.snapshot.proposals.find((item) => item.proposalId === proposalId);
       if (!proposal) {
-        return membership.state.terminalProposalIds.includes(proposalId)
-          ? fail('ROOM_PROPOSAL_CONFLICT')
-          : fail('ROOM_PROPOSAL_NOT_FOUND');
+        return fail('ROOM_PROPOSAL_NOT_FOUND');
       }
-      if (proposal.authorUserId !== membership.member.userId) return fail('ROOM_PERMISSION_DENIED');
+      if (proposal.authorUserId !== membership.member.userId) {
+        return fail('ROOM_PROPOSAL_NOT_FOUND');
+      }
 
       const timestamp = monotonicTimestamp(now, membership.state);
       const transition = await executeOnce(membership, {

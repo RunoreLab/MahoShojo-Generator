@@ -194,6 +194,7 @@ export const projectArenaRoomEventForViewer = (
   snapshotInput: unknown,
   viewerUserId: string,
   predecessorSnapshotInput?: unknown,
+  proposalAuthorUserIdInput?: unknown,
 ): ControlRoomEvent => {
   const event = RoomEventSchema.parse(eventInput);
   const snapshot = ArenaRoomSnapshotSchema.parse(snapshotInput);
@@ -225,6 +226,10 @@ export const projectArenaRoomEventForViewer = (
   let proposalAuthorUserId: string | undefined;
   if (event.type === 'proposal.submitted' || event.type === 'proposal.updated') {
     proposalAuthorUserId = event.payload.proposal.authorUserId;
+  } else if (proposalAuthorUserIdInput !== undefined) {
+    const author = OpaqueKeySchema.safeParse(proposalAuthorUserIdInput);
+    if (!author.success) throw new Error('proposal author projection context must be an opaque key');
+    proposalAuthorUserId = author.data;
   } else if (predecessorSnapshotInput !== undefined) {
     const predecessor = ArenaRoomSnapshotSchema.parse(predecessorSnapshotInput);
     if (predecessor.roomId !== event.roomId || predecessor.roomEpoch !== event.roomEpoch) {

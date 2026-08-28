@@ -32,6 +32,10 @@ export const isAllowedOrigin = (origin: string, allowedOrigins: string[]): strin
   return resolveHostedApiCorsOrigin(origin, allowedOrigins);
 };
 
+export const isExactAllowedOrigin = (origin: string, allowedOrigins: readonly string[]): boolean => (
+  origin !== '*' && allowedOrigins.includes(origin)
+);
+
 export const createHonoApp = (
   config: HonoServerConfig,
   redis: RedisService,
@@ -71,7 +75,7 @@ export const createHonoApp = (
   registerHealthRoutes(app, config, redis);
   if (config.arenaMultiplayerEnabled && services.arenaRoom) {
     registerArenaRoomHttpRoutes(app, services.arenaRoom, {
-      isAllowedOrigin: (origin) => Boolean(isAllowedOrigin(origin, config.corsOrigins)),
+      isAllowedOrigin: (origin) => isExactAllowedOrigin(origin, config.corsOrigins),
     });
   }
   registerRoutes(app);

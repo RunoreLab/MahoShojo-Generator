@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { ArenaRoomSnapshotSchema, RoomMemberSchema, RoomRevisionSchema } from './protocol';
 import { DisplayNameSchema, OpaqueKeySchema, WireErrorMessageSchema } from './primitives';
 import {
+  ArenaProposalIdSchema,
   ArenaProposalChangesSchema,
   ResolvedArenaProposalStatusSchema,
 } from './proposals';
@@ -57,7 +58,7 @@ export const ArenaRoomEpochMutationRequestSchema = z.object({
 
 /** Client intent only; authority/provenance fields are injected by the server. */
 export const ArenaRoomProposalSubmitRequestSchema = z.object({
-  proposalId: OpaqueKeySchema,
+  proposalId: ArenaProposalIdSchema,
   expectedRoomEpoch: OpaqueKeySchema,
   baseRevision: RoomRevisionSchema,
   changes: ArenaProposalChangesSchema,
@@ -150,7 +151,7 @@ export const ArenaRoomProposalMutationResponseSchema = z.object({
   roomEpoch: OpaqueKeySchema,
   controlSeq: z.number().int().nonnegative(),
   revision: RoomRevisionSchema,
-  proposalId: OpaqueKeySchema,
+  proposalId: ArenaProposalIdSchema,
   status: ArenaRoomProposalMutationStatusSchema,
   result: ArenaRoomProposalMutationResultSchema,
 }).strict();

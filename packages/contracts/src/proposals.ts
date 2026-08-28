@@ -24,6 +24,12 @@ import { jsonUtf8ByteLength } from './wire-size';
 const ChangeIdSchema = z.string().trim().min(1).max(MAX_OPAQUE_KEY_LENGTH);
 const AtomicGroupIdSchema = z.string().trim().min(1).max(MAX_OPAQUE_KEY_LENGTH);
 
+/** Proposal IDs are reused as canonical URL path segments by resolve/withdraw. */
+export const ArenaProposalIdSchema = OpaqueKeySchema.refine(
+  (value) => value !== '.' && value !== '..',
+  { message: 'proposalId must be addressable as one URL path segment' },
+);
+
 export const AbsentExpectedBaseSchema = z
   .object({
     kind: z.literal('absent'),
@@ -245,7 +251,7 @@ export const ArenaProposalChangesSchema = z
 export const ArenaProposalSchema = z
   .object({
     proposalVersion: z.literal(PROPOSAL_VERSION),
-    proposalId: OpaqueKeySchema,
+    proposalId: ArenaProposalIdSchema,
     roomId: OpaqueKeySchema,
     authorUserId: OpaqueKeySchema,
     baseRevision: z.number().int().nonnegative(),

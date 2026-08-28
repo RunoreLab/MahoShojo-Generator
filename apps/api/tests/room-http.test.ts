@@ -142,6 +142,13 @@ const createRequest = (body: Record<string, unknown>) => ({
   body: JSON.stringify(body),
 });
 
+const guidanceChangeForHttp = () => ({
+  changeId: 'guidance-1',
+  type: 'setUserGuidance' as const,
+  value: '成员建议',
+  expectedBase: { kind: 'value' as const, value: '' },
+});
+
 describe('Arena Room HTTP product routes', () => {
   it('flag off 时不注册任何 Room 产品入口，也不调用 Room dependency', async () => {
     const redis = createRedisStub();
@@ -456,6 +463,109 @@ describe('Arena Room HTTP product routes', () => {
     }
   });
 
+  it('Proposal route 拒绝 arbitrary patch、secret/full payload 与 host-local 新引用且不反射 canary', async () => {
+    const dependencies = createDependencies();
+    const app = createHonoApp(config, createRedisStub(), undefined, {
+      arenaRoom: dependencies,
+    });
+    const canary = 'proposal-private-canary';
+    const base = {
+      proposalId: 'proposal-negative',
+      expectedRoomEpoch: session.roomEpoch,
+      baseRevision: 0,
+      changes: [guidanceChangeForHttp()],
+    };
+    const maliciousBodies = [
+      { ...base, changes: [{ op: 'replace', path: '/sharedConfig/userGuidance', value: canary }] },
+      {
+        ...base,
+        changes: [{
+          changeId: 'material-ref-data',
+          type: 'addMaterial',
+          ref: { id: 'material-1', kind: 'material', versionToken: 'v1', payload: { credential: canary } },
+          expectedBase: { kind: 'absent' },
+        }],
+      },
+      {
+        ...base,
+        changes: [{
+          changeId: 'host-local-full-base',
+          type: 'removeMaterial',
+          materialKey: 'host-local:material:1',
+          expectedBase: {
+            kind: 'present',
+            ref: {
+              key: 'host-local:material:1',
+              displayName: '本地材料',
+              type: 'material',
+              source: 'host-local',
+              fullPayload: { providerApiKey: canary },
+            },
+          },
+        }],
+      },
+      {
+        ...base,
+        changes: [{
+          changeId: 'host-local-new-ref',
+          type: 'addMaterial',
+          ref: {
+            key: 'host-local:material:2',
+            displayName: '本地材料',
+            type: 'material',
+            source: 'host-local',
+          },
+          expectedBase: { kind: 'absent' },
+        }],
+      },
+      { ...base, providerApiKey: canary, userProviderConfig: { credential: canary } },
+    ];
+
+    for (const body of maliciousBodies) {
+      const response = await app.request(
+        `/api/arena/rooms/v1/${session.roomId}/proposals`,
+        createRequest(body),
+      );
+      expect(response.status).toBe(400);
+      expect(await response.text()).not.toContain(canary);
+    }
+    expect(dependencies.proposals.submit).not.toHaveBeenCalled();
+  });
+
+  it('Proposal route 对 malformed JSON、bad UTF-8 与 oversized body 分别稳定返回 400/413', async () => {
+    const dependencies = createDependencies();
+    const app = createHonoApp(config, createRedisStub(), undefined, {
+      arenaRoom: dependencies,
+    });
+    const path = `/api/arena/rooms/v1/${session.roomId}/proposals`;
+    const headers = {
+      authorization: 'Bearer legacy-key',
+      'content-type': 'application/json',
+      origin: 'http://localhost:3000',
+    };
+    const malformed = await app.request(path, {
+      method: 'POST',
+      headers,
+      body: '{"proposalId":',
+    });
+    const invalidUtf8 = await app.request(path, {
+      method: 'POST',
+      headers,
+      body: new Uint8Array([0xff, 0xfe]),
+    });
+    const oversized = await app.request(path, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ padding: 'x'.repeat(64 * 1_024) }),
+    });
+
+    expect(malformed.status).toBe(400);
+    expect(invalidUtf8.status).toBe(400);
+    expect(oversized.status).toBe(413);
+    expect(await oversized.json()).toMatchObject({ code: 'ROOM_PAYLOAD_TOO_LARGE' });
+    expect(dependencies.proposals.submit).not.toHaveBeenCalled();
+  });
+
   it('拒绝不受信任 Origin、cookie mutation 缺失 Origin、未知 query 与 oversized body', async () => {
     const dependencies = createDependencies();
     const app = createHonoApp(config, createRedisStub(), undefined, {
@@ -492,6 +602,44 @@ describe('Arena Room HTTP product routes', () => {
     expect(oversized.status).toBe(413);
     expect(await oversized.json()).toMatchObject({ code: 'ROOM_PAYLOAD_TOO_LARGE' });
     expect(dependencies.memberships.create).not.toHaveBeenCalled();
+  });
+
+  it('Room mutation 只接受 exact Origin，不继承 Hosted CORS wildcard', async () => {
+    const dependencies = createDependencies();
+    const app = createHonoApp({
+      ...config,
+      corsOrigins: ['https://app.example.com', 'https://*.example.com', '*'],
+    }, createRedisStub(), undefined, { arenaRoom: dependencies });
+    const request = {
+      proposalId: 'proposal-exact-origin',
+      expectedRoomEpoch: session.roomEpoch,
+      baseRevision: 0,
+      changes: [guidanceChangeForHttp()],
+    };
+
+    for (const origin of [
+      'https://preview.example.com',
+      'https://evil.example.com',
+      'https://app.example.com.evil.test',
+    ]) {
+      const response = await app.request(
+        `/api/arena/rooms/v1/${session.roomId}/proposals`,
+        { ...createRequest(request), headers: { ...createRequest(request).headers, origin } },
+      );
+      expect(response.status).toBe(403);
+    }
+    expect(dependencies.resolveAuthentication).not.toHaveBeenCalled();
+    expect(dependencies.proposals.submit).not.toHaveBeenCalled();
+
+    const exact = await app.request(
+      `/api/arena/rooms/v1/${session.roomId}/proposals`,
+      {
+        ...createRequest(request),
+        headers: { ...createRequest(request).headers, origin: 'https://app.example.com' },
+      },
+    );
+    expect(exact.status).toBe(200);
+    expect(dependencies.proposals.submit).toHaveBeenCalledOnce();
   });
 
   it('account/operation limiter 不可用或超额时 fail closed，不触发 authority mutation', async () => {

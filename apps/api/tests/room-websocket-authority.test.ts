@@ -427,6 +427,41 @@ describe('Arena Room ticket -> membership -> presence WSS authority', () => {
       }),
     ]);
 
+    const [hostInitial, authorInitial, otherInitial] = [createPeer(), createPeer(), createPeer()];
+    for (const [accountUserId, connected] of [
+      [101, hostInitial],
+      [202, authorInitial],
+      [303, otherInitial],
+    ] as const) {
+      const ticket = await harness.authority.issue({ roomId: 'room-1', accountUserId });
+      connections.push(await activate(
+        await harness.authority.authorize(requestForTicket(ticket)),
+        connected.peer,
+      ));
+    }
+    expect(hostInitial.messages).toEqual([
+      expect.objectContaining({
+        type: 'room.snapshot',
+        payload: expect.objectContaining({
+          proposals: [expect.objectContaining({ proposalId: 'proposal-private' })],
+        }),
+      }),
+    ]);
+    expect(authorInitial.messages).toEqual([
+      expect.objectContaining({
+        type: 'room.snapshot',
+        payload: expect.objectContaining({
+          proposals: [expect.objectContaining({ proposalId: 'proposal-private' })],
+        }),
+      }),
+    ]);
+    expect(otherInitial.messages).toEqual([
+      expect.objectContaining({
+        type: 'room.snapshot',
+        payload: expect.objectContaining({ proposals: [] }),
+      }),
+    ]);
+
     const resolved = await actor.execute({
       authority: {
         kind: 'authenticated-user',
@@ -438,7 +473,8 @@ describe('Arena Room ticket -> membership -> presence WSS authority', () => {
         expectedRoomEpoch: 'epoch-1',
         expectedRevision: 0,
         proposalId: 'proposal-private',
-        resolution: 'reject',
+        resolution: 'accept-selected',
+        selectedChangeIds: ['guidance-1'],
         timestamp: '2026-08-28T00:02:00.000Z',
       },
     });
@@ -447,18 +483,60 @@ describe('Arena Room ticket -> membership -> presence WSS authority', () => {
     expect(hostPeer.messages.at(-1)).toMatchObject({
       type: 'proposal.resolved',
       controlSeq: resolveSeq,
-      payload: { proposalId: 'proposal-private', status: 'rejected' },
+      payload: { proposalId: 'proposal-private', status: 'accepted' },
+    });
+    expect(hostPeer.messages.at(-2)).toMatchObject({
+      type: 'room.config.updated',
+      controlSeq: resolveSeq - 1,
+      payload: { revision: 1, sharedConfig: { userGuidance: '成员建议' } },
     });
     expect(authorPeer.messages.at(-1)).toMatchObject({
       type: 'proposal.resolved',
       controlSeq: resolveSeq,
-      payload: { proposalId: 'proposal-private', status: 'rejected' },
+      payload: { proposalId: 'proposal-private', status: 'accepted' },
     });
     expect(otherPeer.messages.at(-1)).toMatchObject({
       type: 'room.snapshot',
       controlSeq: resolveSeq,
       payload: { proposals: [] },
     });
+
+    const [hostReplay, authorReplay, otherReplay] = [createPeer(), createPeer(), createPeer()];
+    for (const [accountUserId, connected] of [
+      [101, hostReplay],
+      [202, authorReplay],
+      [303, otherReplay],
+    ] as const) {
+      const ticket = await harness.authority.issue({
+        roomId: 'room-1',
+        accountUserId,
+        reconnect: {
+          control: { roomEpoch: 'epoch-1', controlSeq: submitSeq - 1 },
+        },
+      });
+      connections.push(await activate(
+        await harness.authority.authorize(requestForTicket(ticket)),
+        connected.peer,
+      ));
+    }
+    for (const visibleReplay of [hostReplay.messages, authorReplay.messages]) {
+      expect(visibleReplay).toEqual([
+        expect.objectContaining({ type: 'proposal.submitted', controlSeq: submitSeq }),
+        expect.objectContaining({ type: 'room.config.updated', controlSeq: submitSeq + 1 }),
+        expect.objectContaining({
+          type: 'proposal.resolved',
+          controlSeq: resolveSeq,
+          payload: { proposalId: 'proposal-private', status: 'accepted' },
+        }),
+      ]);
+    }
+    expect(otherReplay.messages).toEqual([
+      expect.objectContaining({
+        type: 'room.snapshot',
+        controlSeq: resolveSeq,
+        payload: expect.objectContaining({ proposals: [], revision: 1 }),
+      }),
+    ]);
     expect(other.member.userId).not.toBe(harness.member.member.userId);
     await Promise.all(connections.map(async (connection) => connection.dispose?.()));
   });

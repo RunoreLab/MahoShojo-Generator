@@ -58,6 +58,10 @@ describe('Arena Room HTTP product contract', () => {
       changes: [change],
     };
     expect(ArenaRoomProposalSubmitRequestSchema.parse(submit)).toEqual(submit);
+    for (const proposalId of ['.', '..']) {
+      expect(ArenaRoomProposalSubmitRequestSchema.safeParse({ ...submit, proposalId }).success)
+        .toBe(false);
+    }
     for (const injected of [
       { roomId: 'room-1' },
       { authorUserId: 'spoofed' },
@@ -85,6 +89,55 @@ describe('Arena Room HTTP product contract', () => {
         { ...change, changeId: 'b', dependsOn: ['a'] },
       ],
     }).success).toBe(false);
+
+    const canary = 'proposal-private-canary';
+    for (const malicious of [
+      { ...submit, changes: [{ op: 'replace', path: '/sharedConfig/userGuidance', value: canary }] },
+      {
+        ...submit,
+        changes: [{
+          changeId: 'material-ref-data',
+          type: 'addMaterial',
+          ref: { id: 'material-1', kind: 'material', versionToken: 'v1', data: { credential: canary } },
+          expectedBase: { kind: 'absent' },
+        }],
+      },
+      {
+        ...submit,
+        changes: [{
+          changeId: 'host-local-full-base',
+          type: 'removeMaterial',
+          materialKey: 'host-local:material:1',
+          expectedBase: {
+            kind: 'present',
+            ref: {
+              key: 'host-local:material:1',
+              displayName: '本地材料',
+              type: 'material',
+              source: 'host-local',
+              fullPayload: { providerApiKey: canary },
+            },
+          },
+        }],
+      },
+      {
+        ...submit,
+        changes: [{
+          changeId: 'host-local-new-ref',
+          type: 'addMaterial',
+          ref: {
+            key: 'host-local:material:2',
+            displayName: '本地材料',
+            type: 'material',
+            source: 'host-local',
+          },
+          expectedBase: { kind: 'absent' },
+        }],
+      },
+      { ...submit, provider: { apiKey: canary }, userProviderConfig: { credential: canary } },
+    ]) {
+      expect(ArenaRoomProposalSubmitRequestSchema.safeParse(malicious).success).toBe(false);
+    }
 
     const resolve = {
       expectedRoomEpoch: 'epoch-1',

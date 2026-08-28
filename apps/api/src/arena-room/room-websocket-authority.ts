@@ -164,10 +164,12 @@ export const createArenaRoomWebSocketAuthority = (
     const sync = membership.actor.resolveControlSync(cursor?.control);
     const state = membership.actor.getSnapshot();
     if (!state) throw new Error('ROOM_CONTROL_SYNC_STATE_MISSING');
-    const projected = sync.events.map((event) => projectArenaRoomEventForViewer(
+    const projected = sync.events.map((event, index) => projectArenaRoomEventForViewer(
       event,
       state.snapshot,
       membership.member.userId,
+      undefined,
+      sync.proposalAuthorUserIds?.[index] ?? undefined,
     ));
     const hiddenReplay = sync.kind === 'replay' && projected.some((event, index) => (
       event.type === 'room.snapshot' && sync.events[index]?.type !== 'room.snapshot'

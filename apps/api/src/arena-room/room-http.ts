@@ -2,6 +2,7 @@ import type { Context, Hono } from 'hono';
 import {
   ARENA_ROOM_HTTP_BASE_PATH,
   ARENA_ROOM_HTTP_ROUTES,
+  ArenaProposalIdSchema,
   ARENA_ROOM_WEBSOCKET_PATH,
   ARENA_ROOM_WEBSOCKET_PROTOCOL,
   ArenaRoomCreateRequestSchema,
@@ -257,7 +258,7 @@ const parseRoomId = (context: ArenaRoomHttpContext): string | Response => {
 
 const parseProposalId = (context: ArenaRoomHttpContext): string | Response => {
   const raw = context.req.param('proposalId');
-  const parsed = OpaqueKeySchema.safeParse(raw);
+  const parsed = ArenaProposalIdSchema.safeParse(raw);
   return parsed.success && parsed.data === raw
     ? parsed.data
     : invalidRequest(context, 'proposalId 无效');

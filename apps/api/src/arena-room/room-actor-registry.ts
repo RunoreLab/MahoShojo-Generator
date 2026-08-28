@@ -168,6 +168,12 @@ export type RoomActorSubscriber = (fanout: RoomActorFanout) => unknown;
 export type RoomActorControlSync = {
   readonly kind: 'current' | 'replay' | 'snapshot';
   readonly events: readonly ControlRoomEvent[];
+  readonly proposalAuthorUserIds?: readonly (string | null)[];
+};
+
+type RoomActorReplayEntry = {
+  readonly event: ControlRoomEvent;
+  readonly proposalAuthorUserId: string | null;
 };
 
 export type RoomActorExecuteInput = {
@@ -238,7 +244,7 @@ export class RoomActor {
   private maintenance = false;
   private lastActivityAt: number;
   private lastCheckpointRefreshAt: number;
-  private readonly controlReplay: ControlRoomEvent[] = [];
+  private readonly controlReplay: RoomActorReplayEntry[] = [];
 
   constructor(
     readonly roomId: string,
@@ -252,6 +258,7 @@ export class RoomActor {
       readonly now: () => number;
       readonly onAbandoned: (actor: RoomActor) => void;
       readonly onFenced: (actor: RoomActor) => void;
+      readonly onQuarantined: (actor: RoomActor) => void;
       readonly onSubscriberError: (error: unknown) => void;
       readonly onBackgroundError: (error: unknown) => void;
       readonly onCommittedClosed?: (state: ArenaRoomAuthorityState) => void | Promise<void>;
@@ -273,6 +280,7 @@ export class RoomActor {
   private quotaExhaustedReason: ExactFenceQuotaReason | null = null;
 
   getSnapshot(): ArenaRoomAuthorityState | null {
+    if (this.phase === 'fenced') return fail('ROOM_ACTOR_FENCED');
     return this.state === null ? null : cloneState(this.state);
   }
 
@@ -301,6 +309,7 @@ export class RoomActor {
   }
 
   resolveControlSync(cursor?: RoomControlCursor): RoomActorControlSync {
+    if (this.phase === 'fenced') return fail('ROOM_ACTOR_FENCED');
     if (this.state === null) return fail('ROOM_ACTOR_NOT_FOUND');
     const snapshot = this.state.snapshot;
     if (cursor === undefined || cursor.roomEpoch !== snapshot.roomEpoch) {
@@ -312,17 +321,21 @@ export class RoomActor {
     if (cursor.controlSeq > snapshot.controlSeq) {
       return { kind: 'snapshot', events: [this.createSnapshotEvent()] };
     }
-    const events = this.controlReplay.filter((event) => (
+    const entries = this.controlReplay.filter(({ event }) => (
       event.roomEpoch === snapshot.roomEpoch && event.controlSeq > cursor.controlSeq
     ));
-    const contiguous = events.length > 0
-      && events[0]?.controlSeq === cursor.controlSeq + 1
-      && events.at(-1)?.controlSeq === snapshot.controlSeq
-      && events.every((event, index) => (
-        index === 0 || event.controlSeq === events[index - 1]!.controlSeq + 1
+    const contiguous = entries.length > 0
+      && entries[0]?.event.controlSeq === cursor.controlSeq + 1
+      && entries.at(-1)?.event.controlSeq === snapshot.controlSeq
+      && entries.every(({ event }, index) => (
+        index === 0 || event.controlSeq === entries[index - 1]!.event.controlSeq + 1
       ));
     return contiguous
-      ? { kind: 'replay', events: structuredClone(events) }
+      ? {
+          kind: 'replay',
+          events: entries.map(({ event }) => structuredClone(event)),
+          proposalAuthorUserIds: entries.map(({ proposalAuthorUserId }) => proposalAuthorUserId),
+        }
       : { kind: 'snapshot', events: [this.createSnapshotEvent()] };
   }
 
@@ -456,6 +469,14 @@ export class RoomActor {
   }
 
   private fence(): void {
+    this.terminateAuthority(this.options.onFenced);
+  }
+
+  private quarantine(): void {
+    this.terminateAuthority(this.options.onQuarantined);
+  }
+
+  private terminateAuthority(onTerminal: (actor: RoomActor) => void): void {
     if (this.phase === 'fenced') return;
     this.phase = 'fenced';
     const error = new RoomActorError('ROOM_ACTOR_FENCED');
@@ -476,7 +497,7 @@ export class RoomActor {
       }
     }
     this.subscribers.clear();
-    this.options.onFenced(this);
+    onTerminal(this);
   }
 
   private pump(): void {
@@ -555,11 +576,19 @@ export class RoomActor {
       return fail('ROOM_ACTOR_ROOM_ID_MISMATCH');
     }
     const receipt = createArenaRoomCheckpointCommit(transition);
-    const saved = await this.options.store.save({
-      commit: receipt,
-      directoryRegistrationRequired: this.state === null
-        && this.options.directoryRegistrationRequired,
-    });
+    let saved: { readonly kind: 'conflict' | 'saved' };
+    try {
+      saved = await this.options.store.save({
+        commit: receipt,
+        directoryRegistrationRequired: this.state === null
+          && this.options.directoryRegistrationRequired,
+      });
+    } catch (error) {
+      // The command may already be committed in Redis. Stop serving the stale
+      // in-memory state; the registry will recover a fresh incarnation on demand.
+      this.quarantine();
+      throw error;
+    }
     if (saved.kind === 'conflict') {
       this.fence();
       return fail('ROOM_ACTOR_CHECKPOINT_CONFLICT');
@@ -567,7 +596,7 @@ export class RoomActor {
     this.requireInstallable();
     this.state = cloneState(transition.nextState);
     this.lastCheckpointRefreshAt = this.options.now();
-    this.rememberReplay(transition.events);
+    this.rememberReplay(transition.events, predecessorSnapshot);
     this.fanout(transition, predecessorSnapshot);
     reportCommittedClosed(
       this.state,
@@ -600,9 +629,15 @@ export class RoomActor {
     if (!transition.ok || transition.kind !== 'applied') {
       return fail('ROOM_ACTOR_DEADLINE_CLOSE_INVALID');
     }
-    const saved = await this.options.store.save({
-      commit: createArenaRoomCheckpointCommit(transition),
-    });
+    let saved: { readonly kind: 'conflict' | 'saved' };
+    try {
+      saved = await this.options.store.save({
+        commit: createArenaRoomCheckpointCommit(transition),
+      });
+    } catch (error) {
+      this.quarantine();
+      throw error;
+    }
     if (saved.kind === 'conflict') {
       this.fence();
       return fail('ROOM_ACTOR_CHECKPOINT_CONFLICT');
@@ -610,7 +645,7 @@ export class RoomActor {
     this.requireInstallable();
     this.state = cloneState(transition.nextState);
     this.lastCheckpointRefreshAt = this.options.now();
-    this.rememberReplay(transition.events);
+    this.rememberReplay(transition.events, predecessorSnapshot);
     this.fanout(transition, predecessorSnapshot);
     reportCommittedClosed(
       this.state,
@@ -662,7 +697,8 @@ export class RoomActor {
       } catch {
         // Diagnostic hooks never weaken the local close-only fence.
       }
-      return;
+      this.quarantine();
+      throw error;
     }
     if (saved.kind === 'conflict') {
       this.fence();
@@ -673,7 +709,7 @@ export class RoomActor {
     this.lastCheckpointRefreshAt = this.options.now();
     this.quotaExhausted = false;
     this.quotaExhaustedReason = null;
-    this.rememberReplay(transition.events);
+    this.rememberReplay(transition.events, predecessorSnapshot);
     this.fanout(transition, predecessorSnapshot);
     reportCommittedClosed(
       this.state,
@@ -697,10 +733,21 @@ export class RoomActor {
     return event;
   }
 
-  private rememberReplay(events: readonly ControlRoomEvent[]): void {
+  private rememberReplay(
+    events: readonly ControlRoomEvent[],
+    predecessorSnapshot?: ArenaRoomAuthorityState['snapshot'],
+  ): void {
     for (const event of events) {
       if (event.roomEpoch !== this.state?.snapshot.roomEpoch) continue;
-      this.controlReplay.push(structuredClone(event));
+      const proposalAuthorUserId = event.type === 'proposal.resolved'
+        ? predecessorSnapshot?.proposals.find((proposal) => (
+            proposal.proposalId === event.payload.proposalId
+          ))?.authorUserId ?? null
+        : null;
+      this.controlReplay.push({
+        event: structuredClone(event),
+        proposalAuthorUserId,
+      });
     }
     if (this.controlReplay.length > this.options.maxReplayEvents) {
       this.controlReplay.splice(0, this.controlReplay.length - this.options.maxReplayEvents);
@@ -1219,6 +1266,9 @@ export class RoomActorRegistry {
       onFenced: (fencedActor) => {
         if (this.actors.get(roomId) === fencedActor) this.actors.delete(roomId);
         this.rememberFenced(roomId);
+      },
+      onQuarantined: (quarantinedActor) => {
+        if (this.actors.get(roomId) === quarantinedActor) this.actors.delete(roomId);
       },
       onSubscriberError: this.options.onSubscriberError ?? (() => undefined),
       onBackgroundError: this.options.onBackgroundError ?? (() => undefined),

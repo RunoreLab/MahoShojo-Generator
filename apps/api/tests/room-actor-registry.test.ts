@@ -548,7 +548,13 @@ describe('RoomActorRegistry', () => {
       async () => { throw new Error('d1 unavailable'); },
     );
     const onBackgroundError = vi.fn(() => { throw new Error('observer unavailable'); });
-    const registry = createRoomActorRegistry({ store, onCommittedClosed, onBackgroundError });
+    const registry = createRoomActorRegistry({
+      store,
+      onCommittedClosed,
+      onBackgroundError,
+      createRoomEpoch: () => 'epoch-2',
+      recoveryTimestamp: () => THIRD_TIMESTAMP,
+    });
     await createActorRoom(registry);
 
     store.saveFailure = new Error('redis unavailable');
@@ -563,22 +569,26 @@ describe('RoomActorRegistry', () => {
       authority: hostAuthority,
     })).rejects.toThrow('redis unavailable');
     expect(onCommittedClosed).not.toHaveBeenCalled();
+    expect(registry.get('room-1')).toBeNull();
 
     store.saveFailure = undefined;
+    await expect(registry.recover('room-1')).resolves.toMatchObject({
+      roomId: 'room-1',
+    });
     await expect(registry.execute({
       roomId: 'room-1',
       command: {
         type: 'close',
-        expectedRoomEpoch: 'epoch-1',
+        expectedRoomEpoch: 'epoch-2',
         reason: 'terminal-projection-test',
-        timestamp: ARENA_ROOM_NEXT_TIMESTAMP,
+        timestamp: FOURTH_TIMESTAMP,
       },
       authority: hostAuthority,
     })).resolves.toMatchObject({ ok: true, kind: 'applied' });
     await vi.waitFor(() => expect(onCommittedClosed).toHaveBeenCalledOnce());
     await vi.waitFor(() => expect(onBackgroundError).toHaveBeenCalledOnce());
     expect(onCommittedClosed.mock.calls[0]?.[0]).toMatchObject({
-      snapshot: { roomId: 'room-1', roomEpoch: 'epoch-1' },
+      snapshot: { roomId: 'room-1', roomEpoch: 'epoch-2' },
       lifecycle: { status: 'closed' },
     });
     expect(store.state?.lifecycle.status).toBe('closed');
@@ -717,7 +727,7 @@ describe('RoomActorRegistry', () => {
     });
   });
 
-  it('quota close checkpoint 暂时失败时保持本地 close-only，并在后续请求重试关闭', async () => {
+  it('quota close checkpoint 回执失败时隔离旧 Actor，并在 recovery 后重新关闭', async () => {
     const store = new MemoryRoomStore();
     const observed = vi.fn();
     store.state = generationExhaustedState();
@@ -726,7 +736,9 @@ describe('RoomActorRegistry', () => {
     };
     const registry = createRoomActorRegistry({
       store,
-      createRoomEpoch: () => 'epoch-2',
+      createRoomEpoch: (_roomId, previousRoomEpoch) => (
+        previousRoomEpoch === 'epoch-1' ? 'epoch-2' : 'epoch-3'
+      ),
       recoveryTimestamp: () => THIRD_TIMESTAMP,
       quotaCloseTimestamp: () => FOURTH_TIMESTAMP,
       onBackgroundError: observed,
@@ -757,18 +769,39 @@ describe('RoomActorRegistry', () => {
       },
       authority,
       trustedTime: issueArenaRoomTrustedTime({ now: FOURTH_TIMESTAMP }),
-    })).resolves.toMatchObject({
-      ok: false,
-      code: 'capability-denied',
-      reason: 'generation-history-limit-reached',
-    });
+    })).rejects.toThrow('redis temporarily unavailable');
     expect(store.state?.lifecycle.status).toBe('open');
     expect(observed).toHaveBeenCalledTimes(1);
+    expect(registry.get('room-1')).toBeNull();
+
+    const recovered = await registry.recover('room-1');
+    expect(recovered?.getSnapshot()?.snapshot.roomEpoch).toBe('epoch-3');
+    const recoveredAuthority = issueArenaRoomGenerationReservationAuthority({
+      actorUserId: 'host-1',
+      accountUserId: 101,
+      roomId: 'room-1',
+      roomEpoch: 'epoch-3',
+      configRevision: 0,
+      generationRequestId: 'recovered-request',
+      generationId: 'recovered-generation',
+      attempt: 1,
+      snapshotDigest: `sha256:${'c'.repeat(64)}`,
+      expiresAt: '2026-08-28T01:00:00.000Z',
+    });
 
     await expect(registry.execute({
       roomId: 'room-1',
-      command: publishCommand(store.state!, 0, 'must-not-apply', FOURTH_TIMESTAMP),
-      authority: hostAuthority,
+      command: {
+        type: 'reserve-generation',
+        expectedRoomEpoch: 'epoch-3',
+        expectedRevision: 0,
+        generationRequestId: 'recovered-request',
+        generationId: 'recovered-generation',
+        attempt: 1,
+        timestamp: FOURTH_TIMESTAMP,
+      },
+      authority: recoveredAuthority,
+      trustedTime: issueArenaRoomTrustedTime({ now: FOURTH_TIMESTAMP }),
     })).resolves.toMatchObject({
       ok: false,
       code: 'capability-denied',
@@ -821,7 +854,7 @@ describe('RoomActorRegistry', () => {
       authority,
       trustedTime: issueArenaRoomTrustedTime({ now: FOURTH_TIMESTAMP }),
     })).rejects.toThrow('ROOM_ACTOR_CHECKPOINT_CONFLICT');
-    expect(actor.getSnapshot()?.lifecycle.status).toBe('open');
+    expect(() => actor.getSnapshot()).toThrow('ROOM_ACTOR_FENCED');
     expect(store.state?.lifecycle.status).toBe('open');
     expect(fanout).toHaveBeenCalledOnce();
     expect(fanout).toHaveBeenCalledWith(expect.objectContaining({
@@ -1178,7 +1211,7 @@ describe('RoomActorRegistry', () => {
     expect(store.state?.snapshot.roomEpoch).toBe('epoch-1');
   });
 
-  it('checkpoint failure 不安装 state、不 fan-out；subscriber 容量也保持有界', async () => {
+  it('checkpoint failure 不安装 state、隔离旧 Actor；subscriber 容量也保持有界', async () => {
     const store = new MemoryRoomStore();
     const registry = createRoomActorRegistry({ store, maxSubscribersPerRoom: 1 });
     const created = await createActorRoom(registry);
@@ -1195,8 +1228,14 @@ describe('RoomActorRegistry', () => {
       command: publishCommand(created.nextState, 0, 'must-not-install', ARENA_ROOM_NEXT_TIMESTAMP),
       authority: hostAuthority,
     })).rejects.toThrow('REDIS_ROOM_CHECKPOINT_UNAVAILABLE');
-    expect(actor.getSnapshot()?.snapshot.revision).toBe(0);
-    expect(fanout).not.toHaveBeenCalled();
+    expect(() => actor.getSnapshot()).toThrow('ROOM_ACTOR_FENCED');
+    expect(store.state?.snapshot.revision).toBe(0);
+    expect(fanout).toHaveBeenCalledOnce();
+    expect(fanout).toHaveBeenCalledWith(expect.objectContaining({
+      events: [],
+      terminal: 'fenced',
+    }));
+    expect(registry.get('room-1')).toBeNull();
   });
 
   it('同步/异步 subscriber 与诊断 hook 抛错也不反转已提交 command 的成功结果', async () => {

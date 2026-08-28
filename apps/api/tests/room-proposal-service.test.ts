@@ -2,7 +2,10 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
   ArenaDataCardRefVerifierError,
+  createArenaDataCardRefVerifier,
   type ArenaDataCardRefVerifier,
+  type ArenaDataCardRefVerifierD1Client,
+  type ArenaDataCardRefVerifierD1Statement,
 } from '#/arena-room/arena-data-card-ref-verifier';
 import {
   createRoomActorRegistry,
@@ -23,6 +26,7 @@ class MemoryRoomStore implements RoomActorCheckpointStore {
   state: ArenaRoomAuthorityState | null = null;
   saveCount = 0;
   failNextSave = false;
+  commitThenThrow = false;
   readonly order: string[] = [];
 
   async load(roomId: string) {
@@ -45,6 +49,10 @@ class MemoryRoomStore implements RoomActorCheckpointStore {
       || JSON.stringify(checkpointPredecessorOf(this.state)) !== JSON.stringify(data.predecessor)
     ) return { kind: 'conflict' as const };
     this.state = structuredClone(data.nextState);
+    if (this.commitThenThrow) {
+      this.commitThenThrow = false;
+      throw new Error('redis reply lost after commit');
+    }
     return { kind: 'saved' as const };
   }
 
@@ -76,6 +84,8 @@ const createHarness = async () => {
     createRoomIdentity: () => ({ roomId: 'room-1', roomEpoch: 'epoch-1' }),
     createTimestamp: () => timestamps[0]!,
     now: () => Date.parse(timestamps[Math.min(timestampIndex, timestamps.length - 1)]!),
+    createRoomEpoch: () => 'epoch-reconciled',
+    recoveryTimestamp: () => '2026-08-28T00:04:00.000Z',
   });
   const memberships = createArenaRoomMembershipService({
     actors,
@@ -228,6 +238,311 @@ describe('Arena Room Proposal application service', () => {
     expect(harness.store.state?.snapshot.proposals).toEqual([]);
   });
 
+  it('author withdraw and host reject checkpoint terminal lifecycle without changing revision', async () => {
+    const withdrawHarness = await createHarness();
+    await withdrawHarness.service.submit({
+      roomId: 'room-1',
+      accountUserId: 202,
+      request: {
+        proposalId: 'proposal-withdraw',
+        expectedRoomEpoch: 'epoch-1',
+        baseRevision: 0,
+        changes: [guidanceChange()],
+      },
+    });
+    const beforeWithdraw = withdrawHarness.store.saveCount;
+    const withdrawn = await withdrawHarness.service.withdraw({
+      roomId: 'room-1',
+      proposalId: 'proposal-withdraw',
+      accountUserId: 202,
+      request: { expectedRoomEpoch: 'epoch-1' },
+    });
+    expect(withdrawn).toMatchObject({ status: 'withdrawn', revision: 0, result: 'applied' });
+    expect(withdrawHarness.store.saveCount).toBe(beforeWithdraw + 1);
+    expect(withdrawHarness.store.state?.snapshot.proposals).toEqual([]);
+    expect(withdrawHarness.store.state?.terminalProposalIds).toContain('proposal-withdraw');
+
+    const rejectHarness = await createHarness();
+    await rejectHarness.service.submit({
+      roomId: 'room-1',
+      accountUserId: 202,
+      request: {
+        proposalId: 'proposal-reject',
+        expectedRoomEpoch: 'epoch-1',
+        baseRevision: 0,
+        changes: [guidanceChange()],
+      },
+    });
+    vi.mocked(rejectHarness.references.verify).mockClear();
+    const beforeReject = rejectHarness.store.saveCount;
+    const rejected = await rejectHarness.service.resolve({
+      roomId: 'room-1',
+      proposalId: 'proposal-reject',
+      accountUserId: 101,
+      request: {
+        expectedRoomEpoch: 'epoch-1',
+        expectedRevision: 0,
+        resolution: 'reject',
+      },
+    });
+    expect(rejected).toMatchObject({ status: 'rejected', revision: 0, result: 'applied' });
+    expect(rejectHarness.references.verify).not.toHaveBeenCalled();
+    expect(rejectHarness.store.saveCount).toBe(beforeReject + 1);
+    expect(rejectHarness.store.state?.snapshot.sharedConfig.userGuidance).toBe('');
+    expect(rejectHarness.store.state?.snapshot.proposals).toEqual([]);
+  });
+
+  it('dependency/atomic selection fails before checkpoint, while a closed partial selection applies once', async () => {
+    const harness = await createHarness();
+    await harness.service.submit({
+      roomId: 'room-1',
+      accountUserId: 202,
+      request: {
+        proposalId: 'proposal-atomic',
+        expectedRoomEpoch: 'epoch-1',
+        baseRevision: 0,
+        changes: [
+          { ...guidanceChange(), atomicGroupId: 'group-1' },
+          {
+            changeId: 'battle-mode-1',
+            type: 'setBattleMode',
+            value: 'kizuna',
+            expectedBase: { kind: 'value', value: 'classic' },
+            dependsOn: ['guidance-1'],
+            atomicGroupId: 'group-1',
+          },
+          {
+            changeId: 'story-length-1',
+            type: 'setStoryLength',
+            value: 'long',
+            expectedBase: {
+              kind: 'value',
+              value: { storyLength: 'standard', customStoryLength: null },
+            },
+          },
+        ],
+      },
+    });
+    const beforeInvalid = harness.store.saveCount;
+    await expect(harness.service.resolve({
+      roomId: 'room-1',
+      proposalId: 'proposal-atomic',
+      accountUserId: 101,
+      request: {
+        expectedRoomEpoch: 'epoch-1',
+        expectedRevision: 0,
+        resolution: 'accept-selected',
+        selectedChangeIds: ['battle-mode-1'],
+      },
+    })).rejects.toMatchObject({ code: 'ROOM_PROPOSAL_CONFLICT' });
+    expect(harness.store.saveCount).toBe(beforeInvalid);
+    expect(harness.store.state?.snapshot.proposals).toHaveLength(1);
+
+    const partial = await harness.service.resolve({
+      roomId: 'room-1',
+      proposalId: 'proposal-atomic',
+      accountUserId: 101,
+      request: {
+        expectedRoomEpoch: 'epoch-1',
+        expectedRevision: 0,
+        resolution: 'accept-selected',
+        selectedChangeIds: ['guidance-1', 'battle-mode-1'],
+      },
+    });
+    expect(partial).toMatchObject({ status: 'partially_accepted', revision: 1 });
+    expect(harness.store.state?.snapshot.sharedConfig).toMatchObject({
+      userGuidance: '成员建议',
+      battleMode: 'kizuna',
+      storyLength: 'standard',
+    });
+    expect(harness.store.saveCount).toBe(beforeInvalid + 1);
+  });
+
+  it('competing same-target Proposals fail closed after the first revision and preserve the loser', async () => {
+    const harness = await createHarness();
+    for (const [proposalId, value] of [
+      ['proposal-first', '先应用'],
+      ['proposal-second', '后应用'],
+    ] as const) {
+      await harness.service.submit({
+        roomId: 'room-1',
+        accountUserId: 202,
+        request: {
+          proposalId,
+          expectedRoomEpoch: 'epoch-1',
+          baseRevision: 0,
+          changes: [guidanceChange(value)],
+        },
+      });
+    }
+    await harness.service.resolve({
+      roomId: 'room-1',
+      proposalId: 'proposal-first',
+      accountUserId: 101,
+      request: {
+        expectedRoomEpoch: 'epoch-1',
+        expectedRevision: 0,
+        resolution: 'accept-selected',
+        selectedChangeIds: ['guidance-1'],
+      },
+    });
+    const beforeConflict = harness.store.saveCount;
+    await expect(harness.service.resolve({
+      roomId: 'room-1',
+      proposalId: 'proposal-second',
+      accountUserId: 101,
+      request: {
+        expectedRoomEpoch: 'epoch-1',
+        expectedRevision: 1,
+        resolution: 'accept-selected',
+        selectedChangeIds: ['guidance-1'],
+      },
+    })).rejects.toMatchObject({ code: 'ROOM_PROPOSAL_CONFLICT' });
+    expect(harness.store.saveCount).toBe(beforeConflict);
+    expect(harness.store.state?.snapshot.sharedConfig.userGuidance).toBe('先应用');
+    expect(harness.store.state?.snapshot.proposals).toMatchObject([
+      { proposalId: 'proposal-second', status: 'submitted' },
+    ]);
+  });
+
+  it.each([
+    ['ARENA_DATA_CARD_REF_VERSION_MISMATCH', 'ROOM_REFERENCE_STALE'],
+    ['ARENA_DATA_CARD_REF_NOT_READABLE', 'ROOM_REFERENCE_DENIED'],
+  ] as const)('resolve revalidates refs after metadata drift: %s', async (refCode, publicCode) => {
+    const harness = await createHarness();
+    await harness.service.submit({
+      roomId: 'room-1',
+      accountUserId: 202,
+      request: {
+        proposalId: `proposal-drift-${refCode}`,
+        expectedRoomEpoch: 'epoch-1',
+        baseRevision: 0,
+        changes: [{
+          changeId: 'scenario-1',
+          type: 'setScenario',
+          ref: { id: 'scenario-1', kind: 'scenario', versionToken: 'v1' },
+          expectedBase: { kind: 'ref', ref: null },
+        }],
+      },
+    });
+    vi.mocked(harness.references.verify).mockRejectedValueOnce(
+      new ArenaDataCardRefVerifierError(refCode),
+    );
+    const before = harness.store.saveCount;
+    const controlSeq = harness.store.state?.snapshot.controlSeq;
+
+    await expect(harness.service.resolve({
+      roomId: 'room-1',
+      proposalId: `proposal-drift-${refCode}`,
+      accountUserId: 101,
+      request: {
+        expectedRoomEpoch: 'epoch-1',
+        expectedRevision: 0,
+        resolution: 'accept-selected',
+        selectedChangeIds: ['scenario-1'],
+      },
+    })).rejects.toMatchObject({ code: publicCode });
+    expect(harness.store.saveCount).toBe(before);
+    expect(harness.store.state?.snapshot).toMatchObject({
+      controlSeq,
+      revision: 0,
+      proposals: [{ proposalId: `proposal-drift-${refCode}`, status: 'submitted' }],
+    });
+    expect(harness.store.state?.snapshot.sharedConfig.scenario).toBeNull();
+  });
+
+  it.each([
+    ['version changed', { updated_at: 'v2' }, 'ROOM_REFERENCE_STALE'],
+    ['deleted', { deleted_at: '2026-08-28T00:03:00.000Z' }, 'ROOM_REFERENCE_DENIED'],
+    ['permission changed', { is_public: 0, user_id: 202 }, 'ROOM_REFERENCE_DENIED'],
+    ['review changed', { review_status: 'pending' }, 'ROOM_REFERENCE_DENIED'],
+    ['kind changed', { type: 'character' }, 'ROOM_REFERENCE_DENIED'],
+  ] as const)('mutable D1 metadata drift (%s) is re-read before checkpoint', async (
+    _name,
+    drift,
+    publicCode,
+  ) => {
+    const harness = await createHarness();
+    const rows = new Map<string, Record<string, unknown>>([
+      ['character-1', {
+        id: 'character-1',
+        user_id: 101,
+        type: 'character',
+        is_public: 1,
+        review_status: 'approved',
+        updated_at: 'v1',
+        deleted_at: null,
+      }],
+      ['scenario-1', {
+        id: 'scenario-1',
+        user_id: 101,
+        type: 'scenario',
+        is_public: 1,
+        review_status: 'approved',
+        updated_at: 'v1',
+        deleted_at: null,
+      }],
+    ]);
+    const client: ArenaDataCardRefVerifierD1Client = {
+      prepare() {
+        let id = '';
+        const statement: ArenaDataCardRefVerifierD1Statement = {
+          bind(value) {
+            id = String(value);
+            return statement;
+          },
+          async all() {
+            const row = rows.get(id);
+            return { success: true, results: row ? [structuredClone(row)] : [] };
+          },
+        };
+        return statement;
+      },
+    };
+    const service = createArenaRoomProposalService({
+      memberships: harness.memberships,
+      references: createArenaDataCardRefVerifier({ getClient: () => client }),
+      now: () => '2026-08-28T00:03:00.000Z',
+    });
+    await service.submit({
+      roomId: 'room-1',
+      accountUserId: 202,
+      request: {
+        proposalId: `proposal-d1-${_name.replaceAll(' ', '-')}`,
+        expectedRoomEpoch: 'epoch-1',
+        baseRevision: 0,
+        changes: [{
+          changeId: 'scenario-1',
+          type: 'setScenario',
+          ref: { id: 'scenario-1', kind: 'scenario', versionToken: 'v1' },
+          expectedBase: { kind: 'ref', ref: null },
+        }],
+      },
+    });
+    rows.set('scenario-1', { ...rows.get('scenario-1')!, ...drift });
+    const before = harness.store.saveCount;
+    const beforeControlSeq = harness.store.state?.snapshot.controlSeq;
+
+    await expect(service.resolve({
+      roomId: 'room-1',
+      proposalId: `proposal-d1-${_name.replaceAll(' ', '-')}`,
+      accountUserId: 101,
+      request: {
+        expectedRoomEpoch: 'epoch-1',
+        expectedRevision: 0,
+        resolution: 'accept-selected',
+        selectedChangeIds: ['scenario-1'],
+      },
+    })).rejects.toMatchObject({ code: publicCode });
+    expect(harness.store.saveCount).toBe(before);
+    expect(harness.store.state?.snapshot).toMatchObject({
+      controlSeq: beforeControlSeq,
+      revision: 0,
+      proposals: [{ status: 'submitted' }],
+      sharedConfig: { scenario: null },
+    });
+  });
+
   it('stale revision and stale expectedBase preserve pending Proposal and avoid ref reads', async () => {
     const harness = await createHarness();
     await harness.service.submit({
@@ -310,6 +625,69 @@ describe('Arena Room Proposal application service', () => {
     })).rejects.toMatchObject({ code: 'ROOM_PERMISSION_DENIED' });
   });
 
+  it('foreign, absent and terminal Proposal withdraw are publicly indistinguishable', async () => {
+    const foreignHarness = await createHarness();
+    await foreignHarness.service.submit({
+      roomId: 'room-1',
+      accountUserId: 202,
+      request: {
+        proposalId: 'proposal-hidden',
+        expectedRoomEpoch: 'epoch-1',
+        baseRevision: 0,
+        changes: [guidanceChange()],
+      },
+    });
+    await foreignHarness.memberships.join({
+      roomId: 'room-1',
+      accountUserId: 303,
+      displayName: 'Other member',
+    });
+
+    const foreign = await foreignHarness.service.withdraw({
+      roomId: 'room-1',
+      proposalId: 'proposal-hidden',
+      accountUserId: 303,
+      request: { expectedRoomEpoch: 'epoch-1' },
+    }).catch((error: unknown) => error);
+    const absent = await foreignHarness.service.withdraw({
+      roomId: 'room-1',
+      proposalId: 'proposal-absent',
+      accountUserId: 303,
+      request: { expectedRoomEpoch: 'epoch-1' },
+    }).catch((error: unknown) => error);
+
+    const terminalHarness = await createHarness();
+    await terminalHarness.service.submit({
+      roomId: 'room-1',
+      accountUserId: 202,
+      request: {
+        proposalId: 'proposal-terminal',
+        expectedRoomEpoch: 'epoch-1',
+        baseRevision: 0,
+        changes: [guidanceChange()],
+      },
+    });
+    await terminalHarness.service.withdraw({
+      roomId: 'room-1',
+      proposalId: 'proposal-terminal',
+      accountUserId: 202,
+      request: { expectedRoomEpoch: 'epoch-1' },
+    });
+    const terminal = await terminalHarness.service.withdraw({
+      roomId: 'room-1',
+      proposalId: 'proposal-terminal',
+      accountUserId: 202,
+      request: { expectedRoomEpoch: 'epoch-1' },
+    }).catch((error: unknown) => error);
+
+    for (const error of [foreign, absent, terminal]) {
+      expect(error).toBeInstanceOf(ArenaRoomProposalError);
+      expect(error).toMatchObject({ code: 'ROOM_PROPOSAL_NOT_FOUND' });
+    }
+    expect(foreignHarness.store.state?.snapshot.proposals).toHaveLength(1);
+    expect(terminalHarness.store.state?.snapshot.proposals).toEqual([]);
+  });
+
   it('reference permission/version failures are stable and do not reach RoomActor', async () => {
     const harness = await createHarness();
     vi.mocked(harness.references.verify).mockRejectedValue(
@@ -358,7 +736,46 @@ describe('Arena Room Proposal application service', () => {
     expect(error).toBeInstanceOf(ArenaRoomProposalError);
     expect(error).toMatchObject({ code: 'ROOM_OPERATION_UNKNOWN' });
     expect(harness.store.saveCount).toBe(before + 1);
-    expect(fanout).not.toHaveBeenCalled();
+    expect(fanout).toHaveBeenCalledOnce();
+    expect(fanout).toHaveBeenCalledWith(expect.objectContaining({
+      events: [],
+      terminal: 'fenced',
+    }));
     expect(harness.store.state?.snapshot.proposals).toEqual([]);
+    expect(harness.actors.get('room-1')).toBeNull();
+  });
+
+  it('commit-then-reply-loss quarantines stale Actor and recovers from Redis without replay', async () => {
+    const harness = await createHarness();
+    const staleActor = await harness.actors.recover('room-1');
+    if (!staleActor) throw new Error('expected actor');
+    harness.store.commitThenThrow = true;
+    const before = harness.store.saveCount;
+
+    await expect(harness.service.submit({
+      roomId: 'room-1',
+      accountUserId: 202,
+      request: {
+        proposalId: 'proposal-commit-unknown',
+        expectedRoomEpoch: 'epoch-1',
+        baseRevision: 0,
+        changes: [guidanceChange()],
+      },
+    })).rejects.toMatchObject({ code: 'ROOM_OPERATION_UNKNOWN' });
+
+    expect(harness.store.saveCount).toBe(before + 1);
+    expect(harness.store.state?.snapshot.proposals).toHaveLength(1);
+    expect(() => staleActor.getSnapshot()).toThrow('ROOM_ACTOR_FENCED');
+    expect(harness.actors.get('room-1')).toBeNull();
+
+    const reconciled = await harness.memberships.getSession({
+      roomId: 'room-1',
+      accountUserId: 202,
+    });
+    expect(reconciled.roomEpoch).toBe('epoch-reconciled');
+    expect(reconciled.snapshot.proposals).toMatchObject([
+      { proposalId: 'proposal-commit-unknown', status: 'submitted' },
+    ]);
+    expect(harness.store.saveCount).toBe(before + 2);
   });
 });
