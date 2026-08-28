@@ -3,6 +3,9 @@ import { describe, expect, it } from 'vitest';
 import {
   checkpointPredecessorOf,
   consumeArenaRoomCheckpointCommit,
+  issueArenaRoomGenerationPublisherAuthority,
+  issueArenaRoomGenerationReservationAuthority,
+  issueArenaRoomTrustedTime,
   type ArenaRoomAuthorityState,
 } from '@mahoshojo/multiplayer-core';
 import {
@@ -157,6 +160,87 @@ const requestForTicket = (ticket: string): Request => new Request(
 );
 
 describe('Arena Room ticket -> membership -> presence WSS authority', () => {
+  it('把 transient story.delta 直接安全 fanout 给已连接 peer', async () => {
+    const harness = await createHarness();
+    const ticket = await harness.authority.issue({ roomId: 'room-1', accountUserId: 101 });
+    const connected = createPeer();
+    const connection = await activate(
+      await harness.authority.authorize(requestForTicket(ticket)),
+      connected.peer,
+    );
+    const actor = harness.actors.get('room-1');
+    if (!actor) throw new Error('actor missing');
+    const snapshotDigest = `sha256:${'a'.repeat(64)}`;
+    const expiresAt = '2026-08-28T01:00:00.000Z';
+    harness.setNow('2026-08-28T00:01:00.000Z');
+    await actor.execute({
+      authority: issueArenaRoomGenerationReservationAuthority({
+        actorUserId: harness.host.member.userId,
+        accountUserId: 101,
+        roomId: 'room-1',
+        roomEpoch: 'epoch-1',
+        configRevision: 0,
+        generationRequestId: 'request-1',
+        generationId: 'generation-1',
+        attempt: 1,
+        snapshotDigest,
+        expiresAt,
+      }),
+      command: {
+        type: 'reserve-generation',
+        expectedRoomEpoch: 'epoch-1',
+        expectedRevision: 0,
+        generationRequestId: 'request-1',
+        generationId: 'generation-1',
+        attempt: 1,
+        timestamp: '2026-08-28T00:01:00.000Z',
+      },
+      trustedTime: issueArenaRoomTrustedTime({ now: '2026-08-28T00:01:00.000Z' }),
+    });
+    harness.setNow('2026-08-28T00:02:00.000Z');
+    const publisherAuthority = issueArenaRoomGenerationPublisherAuthority({
+      roomId: 'room-1',
+      roomEpoch: 'epoch-1',
+      generationRequestId: 'request-1',
+      generationId: 'generation-1',
+      attempt: 1,
+      expiresAt,
+    });
+    await actor.execute({
+      authority: publisherAuthority,
+      command: {
+        type: 'mirror-generation',
+        expectedRoomEpoch: 'epoch-1',
+        generationRequestId: 'request-1',
+        generationId: 'generation-1',
+        attempt: 1,
+        state: 'running',
+        timestamp: '2026-08-28T00:02:00.000Z',
+      },
+      trustedTime: issueArenaRoomTrustedTime({ now: '2026-08-28T00:02:00.000Z' }),
+    });
+    harness.setNow('2026-08-28T00:03:00.000Z');
+    const story = {
+      protocolVersion: 1 as const,
+      type: 'story.delta' as const,
+      roomId: 'room-1',
+      roomEpoch: 'epoch-1',
+      generationId: 'generation-1',
+      chunkSeq: 0,
+      timestamp: '2026-08-28T00:03:00.000Z',
+      payload: { delta: '公开正文' },
+    };
+
+    await expect(actor.publishStory({
+      authority: publisherAuthority,
+      event: story,
+      trustedTime: issueArenaRoomTrustedTime({ now: story.timestamp }),
+    })).resolves.toEqual({ ok: true, kind: 'published' });
+
+    expect(connected.messages.at(-1)).toEqual(story);
+    await connection.dispose?.();
+  });
+
   it('ticket roleHint 与 current membership 不一致时 fail closed 且不消费 jti', async () => {
     const harness = await createHarness();
     const forgedHintTicket = await harness.codec.issue({

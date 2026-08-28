@@ -234,6 +234,11 @@ export const createArenaRoomWebSocketAuthority = (
             peer.close(CLOSE_ROOM_AUTHORITY_UNAVAILABLE, 'room-authority-fenced');
             return;
           }
+          for (const event of fanout.storyEvents ?? []) {
+            // story.delta is already a validated public room event. The gateway's
+            // peer owns its bounded outbound queue and closes on backpressure.
+            peer.send(event);
+          }
           let closeCode: number | undefined;
           let closeReason: string | undefined;
           for (const event of fanout.events) {

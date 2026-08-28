@@ -6,6 +6,7 @@ import {
   RoomEventSchema,
   type ControlRoomEvent,
   type RoomControlCursor,
+  type StoryDeltaEvent,
 } from '@mahoshojo/contracts/arena-room';
 import {
   ArenaRoomCommandSchema,
@@ -15,6 +16,7 @@ import {
   issueArenaRoomRecoveryAuthority,
   parseArenaRoomAuthorityContext,
   parseArenaRoomAuthorityState,
+  parseArenaRoomTrustedTime,
   transitionArenaRoom,
   type ArenaRoomAuthorityState,
   type ArenaRoomCommand,
@@ -112,6 +114,8 @@ export type RoomActorFanout = {
   readonly snapshot: ArenaRoomAuthorityState['snapshot'];
   readonly predecessorSnapshot?: ArenaRoomAuthorityState['snapshot'];
   readonly events: ArenaRoomTransitionSuccess['events'];
+  /** Transient lane: never retained in checkpoint/control replay. */
+  readonly storyEvents?: readonly StoryDeltaEvent[];
   readonly terminal?: 'fenced';
 };
 
@@ -134,10 +138,41 @@ export type RoomActorExecuteInput = {
   readonly trustedTime?: unknown;
 };
 
-type QueueEntry = {
+export type RoomActorStoryPublishInput = {
+  readonly authority: unknown;
+  readonly event: unknown;
+  readonly trustedTime: unknown;
+};
+
+export type RoomActorStoryPublishResult =
+  | { readonly ok: true; readonly kind: 'idempotent' | 'published' | 'stale' }
+  | {
+      readonly ok: false;
+      readonly code: 'conflict' | 'forbidden' | 'room-closed' | 'validation-failed';
+      readonly reason: string;
+    };
+
+type CommandQueueEntry = {
+  readonly kind: 'command';
   readonly input: RoomActorExecuteInput;
   readonly reject: (error: unknown) => void;
   readonly resolve: (result: ArenaRoomTransitionResult) => void;
+};
+
+type StoryQueueEntry = {
+  readonly kind: 'story';
+  readonly input: RoomActorStoryPublishInput;
+  readonly reject: (error: unknown) => void;
+  readonly resolve: (result: RoomActorStoryPublishResult) => void;
+};
+
+type QueueEntry = CommandQueueEntry | StoryQueueEntry;
+
+type StorySequenceCursor = {
+  readonly roomEpoch: string;
+  readonly generationId: string;
+  readonly lastEvent: StoryDeltaEvent;
+  readonly nextChunkSeq: number;
 };
 
 type ActorPhase = 'accepting' | 'draining' | 'closed' | 'fenced';
@@ -197,6 +232,7 @@ export class RoomActor {
   private lastActivityAt: number;
   private lastCheckpointRefreshAt: number;
   private readonly controlReplay: RoomActorReplayEntry[] = [];
+  private storySequenceCursor: StorySequenceCursor | null = null;
 
   constructor(
     readonly roomId: string,
@@ -321,10 +357,42 @@ export class RoomActor {
     }
     return new Promise<ArenaRoomTransitionResult>((resolve, reject) => {
       this.queue.push({
+        kind: 'command',
         input: {
           ...input,
           authority: snapshotInputCapability(input.authority),
           command: command.data,
+          trustedTime: snapshotInputCapability(input.trustedTime),
+        },
+        reject,
+        resolve,
+      });
+      this.pump();
+    });
+  }
+
+  publishStory(input: RoomActorStoryPublishInput): Promise<RoomActorStoryPublishResult> {
+    if (this.phase === 'fenced') return Promise.reject(new RoomActorError('ROOM_ACTOR_FENCED'));
+    if (this.phase !== 'accepting') {
+      return Promise.reject(new RoomActorError('ROOM_ACTOR_SHUTTING_DOWN'));
+    }
+    if (this.queue.length >= this.options.maxQueuedCommands) {
+      return Promise.reject(new RoomActorError('ROOM_ACTOR_QUEUE_OVERLOADED'));
+    }
+    const event = RoomEventSchema.safeParse(input.event);
+    if (!event.success || event.data.type !== 'story.delta') {
+      return Promise.resolve({
+        ok: false,
+        code: 'validation-failed',
+        reason: 'invalid-story-event',
+      });
+    }
+    return new Promise<RoomActorStoryPublishResult>((resolve, reject) => {
+      this.queue.push({
+        kind: 'story',
+        input: {
+          authority: snapshotInputCapability(input.authority),
+          event: event.data,
           trustedTime: snapshotInputCapability(input.trustedTime),
         },
         reject,
@@ -460,13 +528,100 @@ export class RoomActor {
       return;
     }
     this.running = true;
-    void this.apply(entry.input)
-      .then(entry.resolve, entry.reject)
+    const completion = entry.kind === 'command'
+      ? this.apply(entry.input).then(entry.resolve, entry.reject)
+      : this.applyStory(entry.input).then(entry.resolve, entry.reject);
+    void completion
       .finally(() => {
         this.running = false;
         this.lastActivityAt = this.options.now();
         this.pump();
       });
+  }
+
+  private async applyStory(
+    input: RoomActorStoryPublishInput,
+  ): Promise<RoomActorStoryPublishResult> {
+    if (this.phase === 'closed') return fail('ROOM_ACTOR_SHUTTING_DOWN');
+    if (this.phase === 'fenced') return fail('ROOM_ACTOR_FENCED');
+    const parsedEvent = RoomEventSchema.safeParse(input.event);
+    if (!parsedEvent.success || parsedEvent.data.type !== 'story.delta') {
+      return { ok: false, code: 'validation-failed', reason: 'invalid-story-event' };
+    }
+    const event = parsedEvent.data;
+    const authority = parseArenaRoomAuthorityContext(input.authority);
+    if (authority?.kind !== 'generation-publisher') {
+      return { ok: false, code: 'forbidden', reason: 'invalid-authority-context' };
+    }
+    const trustedTime = parseArenaRoomTrustedTime(input.trustedTime);
+    if (trustedTime === null) {
+      return { ok: false, code: 'forbidden', reason: 'invalid-trusted-time' };
+    }
+    if (this.state === null) {
+      return { ok: false, code: 'room-closed', reason: 'room-not-found' };
+    }
+    if (this.state.lifecycle.status === 'closed') {
+      return { ok: false, code: 'room-closed', reason: 'room-closed' };
+    }
+    if (await this.enforceExpiredDeadlineAtBoundary(this.options.now())) {
+      return { ok: false, code: 'room-closed', reason: 'room-closed' };
+    }
+    const scope = authority.scope;
+    const active = this.state.snapshot.activeGeneration;
+    if (
+      scope.roomId !== this.roomId
+      || scope.roomId !== event.roomId
+      || scope.roomEpoch !== this.state.snapshot.roomEpoch
+      || scope.roomEpoch !== event.roomEpoch
+      || scope.generationId !== event.generationId
+      || active === null
+      || scope.generationRequestId !== active.generationRequestId
+      || scope.generationId !== active.generationId
+      || scope.attempt !== active.attempt
+    ) {
+      return { ok: false, code: 'forbidden', reason: 'authority-scope-mismatch' };
+    }
+    if (trustedTime.now !== event.timestamp) {
+      return { ok: false, code: 'forbidden', reason: 'trusted-time-mismatch' };
+    }
+    if (Date.parse(trustedTime.now) < Date.parse(this.state.lifecycle.updatedAt)) {
+      return { ok: false, code: 'forbidden', reason: 'trusted-time-stale' };
+    }
+    if (Math.max(Date.parse(trustedTime.now), this.options.now()) >= Date.parse(scope.expiresAt)) {
+      return { ok: false, code: 'forbidden', reason: 'authority-scope-expired' };
+    }
+    if (active.state !== 'running') {
+      return { ok: false, code: 'conflict', reason: 'generation-not-running' };
+    }
+
+    const cursor = this.storySequenceCursor;
+    const sameGeneration = cursor !== null
+      && cursor.roomEpoch === event.roomEpoch
+      && cursor.generationId === event.generationId;
+    const nextChunkSeq = sameGeneration ? cursor.nextChunkSeq : 0;
+    if (event.chunkSeq > nextChunkSeq) {
+      return { ok: false, code: 'conflict', reason: 'story-sequence-gap' };
+    }
+    if (event.chunkSeq < nextChunkSeq) {
+      if (
+        sameGeneration
+        && event.chunkSeq === cursor.lastEvent.chunkSeq
+      ) {
+        return JSON.stringify(event) === JSON.stringify(cursor.lastEvent)
+          ? { ok: true, kind: 'idempotent' }
+          : { ok: false, code: 'conflict', reason: 'story-sequence-conflict' };
+      }
+      return { ok: true, kind: 'stale' };
+    }
+
+    this.storySequenceCursor = {
+      roomEpoch: event.roomEpoch,
+      generationId: event.generationId,
+      lastEvent: structuredClone(event),
+      nextChunkSeq: event.chunkSeq + 1,
+    };
+    this.fanoutStory(event);
+    return { ok: true, kind: 'published' };
   }
 
   private async apply(input: RoomActorExecuteInput): Promise<ArenaRoomTransitionResult> {
@@ -717,6 +872,32 @@ export class RoomActor {
             void Promise.resolve(completion)
               .catch((error: unknown) => this.reportSubscriberError(error));
           }
+        }
+      } catch (error) {
+        this.reportSubscriberError(error);
+      }
+    }
+  }
+
+  private fanoutStory(event: StoryDeltaEvent): void {
+    if (this.state === null) return;
+    for (const subscriber of this.subscribers) {
+      try {
+        const completion = subscriber({
+          roomId: this.roomId,
+          roomEpoch: this.state.snapshot.roomEpoch,
+          snapshot: structuredClone(this.state.snapshot),
+          events: [],
+          storyEvents: [structuredClone(event)],
+        });
+        if (
+          ((typeof completion === 'object' && completion !== null)
+            || typeof completion === 'function')
+          && 'then' in completion
+        ) {
+          this.subscribers.delete(subscriber);
+          void Promise.resolve(completion)
+            .catch((error: unknown) => this.reportSubscriberError(error));
         }
       } catch (error) {
         this.reportSubscriberError(error);
