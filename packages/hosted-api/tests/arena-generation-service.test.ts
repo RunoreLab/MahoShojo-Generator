@@ -238,7 +238,7 @@ class MemoryReplayStore implements GenerationReplayStore {
       snapshot: input.terminalSnapshot ? {
         ...input.terminalSnapshot,
         lastEventId: event?.id ?? input.terminalSnapshot.lastEventId,
-      } : state.snapshot,
+      } : input.clearTerminalSnapshot ? null : state.snapshot,
       updatedAt: input.now,
       leaseExpiresAt: null,
     });
@@ -1120,6 +1120,7 @@ describe('Arena generation lifecycle service', () => {
           markdown: 'full authoritative markdown',
           reasoning: 'must not leak',
           errorCode: 'AI_UPSTREAM_REQUEST_FAILED',
+          payloadHash: 'payload-hash',
           contentAvailable: true,
         }
         : null),
@@ -1154,6 +1155,31 @@ describe('Arena generation lifecycle service', () => {
     });
     expect(hidden).toEqual({ kind: 'not-found' });
     expect(JSON.stringify(owned)).not.toMatch(/reasoning|r2:/u);
+  });
+
+  test('rejects a durable terminal whose generation identity differs from the requested resource', async () => {
+    const store = new MemoryReplayStore();
+    const service = createService(store, {
+      execute: vi.fn(async () => ({ status: 'completed' as const })),
+    }, {
+      terminalStore: {
+        readOwnedTerminal: vi.fn(async () => ({
+          generationId: 'generation-other',
+          generationRequestId: 'request-owned-terminal',
+          status: 'failed' as const,
+          updatedAt: '2026-08-25T04:05:00.000Z',
+          resultRef: null,
+          markdown: '',
+          reasoning: '',
+          payloadHash: 'payload-hash',
+        })),
+      },
+    });
+
+    await expect(service.readOwnedProjection({
+      actorKey: 'user:42',
+      generationId: 'generation-1',
+    })).resolves.toEqual({ kind: 'not-found' });
   });
 
   test('resumes an actor-owned generation as a typed subscription without a public Request', async () => {
@@ -2282,6 +2308,7 @@ describe('Arena generation lifecycle service', () => {
         resultRef: 'r2://report/large',
         markdown: 'X'.repeat(512),
         reasoning: '',
+        payloadHash: 'hash:{"value":"same"}',
         contentAvailable: true,
       }) : null),
     };
@@ -2292,7 +2319,7 @@ describe('Arena generation lifecycle service', () => {
         return { status: 'completed' as const, resultRef: 'r2://report/large' };
       }),
     }, {
-      snapshotMaxBytes: 128,
+      snapshotMaxBytes: 256,
       observer: { observeArenaGeneration },
       terminalStore,
     });
@@ -2320,6 +2347,44 @@ describe('Arena generation lifecycle service', () => {
     expect(terminalStore.readOwnedTerminal).toHaveBeenCalledWith({
       actorKey: 'user:42',
       generationId: 'generation-1',
+    });
+  });
+
+  test('oversized failed terminal clears the old running partial and keeps bounded terminal evidence', async () => {
+    const store = new MemoryReplayStore();
+    const service = createService(store, {
+      execute: vi.fn(async ({ emit }) => {
+        await emit({ type: 'markdown', data: { chunk: 'small-running-partial' } });
+        await emit({ type: 'telemetry', data: { phase: 'after-small' } });
+        await emit({ type: 'markdown', data: { chunk: 'X'.repeat(512) } });
+        return { status: 'failed' as const, code: 'GENERATION_FAILED' };
+      }),
+    }, { snapshotMaxBytes: 256 });
+
+    const response = await service.create(createRequest('request-1'));
+    await response.text();
+
+    const state = store.states.get('generation-1');
+    expect(state).toMatchObject({
+      status: 'failed',
+      terminal: { status: 'failed', code: 'GENERATION_FAILED' },
+      snapshot: {
+        status: 'failed',
+        markdown: '',
+        reasoning: '',
+      },
+    });
+    expect(state?.snapshot?.markdown).not.toContain('small-running-partial');
+    await expect(service.readOwnedProjection({
+      actorKey: 'user:42',
+      generationId: 'generation-1',
+    })).resolves.toMatchObject({
+      kind: 'found',
+      projection: {
+        status: 'failed',
+        markdown: '',
+        errorCode: 'GENERATION_FAILED',
+      },
     });
   });
 
@@ -2702,6 +2767,54 @@ describe('Arena generation lifecycle service', () => {
     expect(terminalStore.reconcileExpiredLease).not.toHaveBeenCalled();
   });
 
+  test.each([
+    ['request identity', { generationRequestId: 'request-other', payloadHash: 'payload-hash' }],
+    ['payload identity', { generationRequestId: 'request-1', payloadHash: 'payload-other' }],
+  ])('expired lease rejects a D1 terminal with mismatched %s', async (_label, identity) => {
+    const store = new MemoryReplayStore();
+    await store.reserve({
+      actorKey: 'user:42',
+      generationRequestId: 'request-1',
+      generationId: 'generation-1',
+      payloadHash: 'payload-hash',
+      producerToken: 'producer-token-1',
+      now: '2026-08-25T03:00:00.000Z',
+      leaseExpiresAt: '2026-08-25T03:01:00.000Z',
+    });
+    await store.markRunning({
+      generationId: 'generation-1',
+      producerToken: 'producer-token-1',
+      now: '2026-08-25T03:00:00.000Z',
+      leaseExpiresAt: '2026-08-25T03:01:00.000Z',
+    });
+    const service = createService(store, {
+      execute: vi.fn(async () => ({ status: 'completed' as const })),
+    }, {
+      terminalStore: {
+        readOwnedTerminal: vi.fn(async () => ({
+          generationId: 'generation-1',
+          ...identity,
+          status: 'completed' as const,
+          updatedAt: '2026-08-25T03:30:00.000Z',
+          resultRef: 'r2:terminal',
+          markdown: 'must not be adopted',
+          reasoning: '',
+          contentAvailable: true,
+        })),
+      },
+    });
+
+    const response = await service.status(new Request(
+      'https://example.test/api/arena/generations/generation-1',
+    ), { generationId: 'generation-1' });
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toMatchObject({
+      code: 'GENERATION_TERMINAL_RECONCILIATION_PENDING',
+    });
+    expect(store.states.get('generation-1')?.terminal).toBeNull();
+  });
+
   test('expired lease never promotes an unavailable durable preview to completed content', async () => {
     const store = new MemoryReplayStore();
     await store.reserve({
@@ -2779,6 +2892,7 @@ describe('Arena generation lifecycle service', () => {
         resultRef: 'r2://report/1',
         markdown: '完整终态正文',
         reasoning: '',
+        payloadHash: 'payload-hash',
         contentAvailable: true,
       })),
     };
@@ -2817,6 +2931,7 @@ describe('Arena generation lifecycle service', () => {
         markdown: '',
         reasoning: '',
         errorCode: 'AI_UPSTREAM_REQUEST_FAILED',
+        payloadHash: 'payload-hash',
       })),
     };
     const service = createService(store, {
@@ -2844,6 +2959,7 @@ describe('Arena generation lifecycle service', () => {
         resultRef: 'r2://report/1',
         markdown: '完整终态正文',
         reasoning: '',
+        payloadHash: 'payload-hash',
         contentAvailable: true,
       })),
     };
@@ -2981,6 +3097,37 @@ describe('Arena generation lifecycle service', () => {
     });
   });
 
+  test.each([
+    ['request', { generationId: 'generation-1', generationRequestId: 'request-other' }],
+    ['generation', { generationId: 'generation-other', generationRequestId: 'request-1' }],
+  ])('D1 terminal reservation adoption rejects a mismatched %s identity', async (_label, identity) => {
+    const store = new MemoryReplayStore();
+    const execute = vi.fn(async () => ({ status: 'completed' as const }));
+    const service = createService(store, { execute }, {
+      terminalStore: {
+        readOwnedTerminal: vi.fn(async () => ({
+          ...identity,
+          status: 'completed' as const,
+          updatedAt: '2026-08-25T04:00:00.000Z',
+          resultRef: 'r2:terminal',
+          markdown: 'must not be adopted',
+          reasoning: '',
+          payloadHash: 'hash:{"value":"same"}',
+          contentAvailable: true,
+        })),
+      },
+    });
+
+    const response = await service.create(createRequest('request-1'));
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({
+      code: 'GENERATION_REQUEST_CONFLICT',
+    });
+    expect(execute).not.toHaveBeenCalled();
+    expect(store.states.has('generation-1')).toBe(false);
+  });
+
   test('rejects deterministic terminal identity reuse when the semantic payload hash differs', async () => {
     const store = new MemoryReplayStore();
     const terminalStore: ArenaGenerationTerminalStore = {
@@ -3017,6 +3164,7 @@ describe('Arena generation lifecycle service', () => {
         resultRef: 'r2://report/1',
         markdown: 'truncated preview',
         reasoning: '',
+        payloadHash: 'payload-hash',
         contentAvailable: false,
       })),
     };

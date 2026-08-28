@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { createMemoryGenerationReplayStore } from '@mahoshojo/hosted-api/arena-generation/memory-replay-store';
 import { createUnavailableGenerationReplayStore } from '@mahoshojo/hosted-api/arena-generation/unavailable-replay-store';
 
 import {
@@ -33,16 +34,12 @@ describe('Arena generation default service primitives', () => {
 
   it('passes the rejected-terminal recorder into the shared generation service', async () => {
     const record = vi.fn(async () => ({ kind: 'recorded' as const }));
-    const reserve = vi.fn(async (input: { generationId: string }) => ({
-      kind: 'created' as const,
-      generationId: input.generationId,
-    }));
-    const markTerminal = vi.fn(async () => ({ owned: true, applied: true }));
+    const memoryStore = createMemoryGenerationReplayStore();
+    const reserve = vi.fn(memoryStore.reserve.bind(memoryStore));
+    const markTerminal = vi.fn(memoryStore.markTerminal.bind(memoryStore));
+    const store = { ...memoryStore, reserve, markTerminal };
     const service = createNodeArenaGenerationService({
-      store: {
-        reserve,
-        markTerminal,
-      } as never,
+      store,
       executor: {
         materializationVersion: 'test-v1',
         preflight: vi.fn(async () => ({
@@ -87,6 +84,8 @@ describe('Arena generation default service primitives', () => {
         status: 'failed',
         code: 'ARENA_CONTENT_POLICY_REJECTED',
       },
+      terminalEvent: expect.objectContaining({ type: 'error' }),
+      terminalSnapshot: expect.objectContaining({ status: 'failed' }),
     }));
   });
 

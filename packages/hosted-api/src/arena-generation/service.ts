@@ -216,6 +216,8 @@ export interface GenerationReplayStore {
     terminalEvent?: GenerationEventInput;
     /** Terminal snapshot committed atomically with marker/event when supplied. */
     terminalSnapshot?: GenerationSnapshot;
+    /** Atomically removes an older running snapshot when no bounded terminal snapshot fits. */
+    clearTerminalSnapshot?: boolean;
     now: string;
   }): Promise<{
     owned: boolean;
@@ -1043,8 +1045,20 @@ export const createArenaGenerationService = (
               } : {}),
             },
           };
-          const terminalSnapshot = snapshot(terminal.status, now, terminal.resultRef ?? null);
-          const snapshotWithinBudget = encodedBytes(terminalSnapshot) <= snapshotMaxBytes;
+          const fullTerminalSnapshot = snapshot(terminal.status, now, terminal.resultRef ?? null);
+          const snapshotWithinBudget = encodedBytes(fullTerminalSnapshot) <= snapshotMaxBytes;
+          let terminalSnapshot = snapshotWithinBudget ? fullTerminalSnapshot : null;
+          if (!terminalSnapshot && terminal.status !== 'completed') {
+            const boundedTerminalSnapshot: GenerationSnapshot = {
+              ...fullTerminalSnapshot,
+              markdown: '',
+              reasoning: '',
+              telemetry: null,
+            };
+            if (encodedBytes(boundedTerminalSnapshot) <= snapshotMaxBytes) {
+              terminalSnapshot = boundedTerminalSnapshot;
+            }
+          }
           if (!snapshotWithinBudget) {
             observe({ event: 'redis_degraded', generationId, operation: 'snapshot_budget' });
           }
@@ -1055,7 +1069,7 @@ export const createArenaGenerationService = (
               producerToken,
               terminal,
               terminalEvent,
-              ...(snapshotWithinBudget ? { terminalSnapshot } : {}),
+              ...(terminalSnapshot ? { terminalSnapshot } : { clearTerminalSnapshot: true }),
               now,
             });
           } catch (error) {
@@ -1120,11 +1134,24 @@ export const createArenaGenerationService = (
     };
   };
 
+  const terminalRecordMatchesIdentity = (input: {
+    record: ArenaGenerationTerminalRecord;
+    generationId: string;
+    generationRequestId: string;
+    acceptedPayloadHashes: readonly string[];
+  }): boolean => Boolean(
+    input.record.generationId === input.generationId
+    && input.record.generationRequestId === input.generationRequestId
+    && typeof input.record.payloadHash === 'string'
+    && input.acceptedPayloadHashes.includes(input.record.payloadHash)
+  );
+
   const readBackTerminalEvidence = async (input: {
     generationId: string;
     actorKey: string;
     record: ArenaGenerationTerminalRecord;
     requireSnapshot: boolean;
+    acceptedPayloadHashes?: readonly string[];
   }): Promise<GenerationReplayStoreState | null> => {
     const { terminal, terminalEvent } = terminalEvidenceFromRecord(input.record);
     const expectedEventData = terminalEvent.data as {
@@ -1163,8 +1190,17 @@ export const createArenaGenerationService = (
         && (eventData.resultRef ?? null) === (expectedEventData.resultRef ?? null);
     })() : false;
     if (!durableState || !durableTerminalEvent || !terminalEventMatches) return null;
+    const acceptedPayloadHashes = input.acceptedPayloadHashes ?? [durableState.payloadHash];
     if (
-      durableState.status !== terminal.status
+      durableState.generationId !== input.generationId
+      || !acceptedPayloadHashes.includes(durableState.payloadHash)
+      || !terminalRecordMatchesIdentity({
+        record: input.record,
+        generationId: input.generationId,
+        generationRequestId: durableState.generationRequestId,
+        acceptedPayloadHashes,
+      })
+      || durableState.status !== terminal.status
       || durableState.terminal?.status !== terminal.status
       || (durableState.terminal.resultRef ?? null) !== (terminal.resultRef ?? null)
       || (durableState.terminal.code ?? null) !== (terminal.code ?? null)
@@ -1173,8 +1209,10 @@ export const createArenaGenerationService = (
         durableState.snapshot?.status !== terminal.status
         || durableState.snapshot.lastEventId !== durableTerminalEvent.id
       ))
-      || (durableState.snapshot?.status === terminal.status
-        && durableState.snapshot.lastEventId !== durableTerminalEvent.id)
+      || (durableState.snapshot !== null && (
+        durableState.snapshot.status !== terminal.status
+        || durableState.snapshot.lastEventId !== durableTerminalEvent.id
+      ))
     ) return null;
     return durableState;
   };
@@ -1186,6 +1224,7 @@ export const createArenaGenerationService = (
     record: ArenaGenerationTerminalRecord;
     priorState: GenerationReplayStoreState;
     now: string;
+    acceptedPayloadHashes?: readonly string[];
   }): Promise<GenerationReplayStoreState | null> => {
     const { terminal, terminalEvent } = terminalEvidenceFromRecord(input.record);
     const terminalSnapshot: GenerationSnapshot = {
@@ -1213,7 +1252,7 @@ export const createArenaGenerationService = (
       producerToken: input.producerToken,
       terminal,
       terminalEvent,
-      ...(persistTerminalSnapshot ? { terminalSnapshot } : {}),
+      ...(persistTerminalSnapshot ? { terminalSnapshot } : { clearTerminalSnapshot: true }),
       now: input.now,
     }).catch(() => null);
     if (!committed?.owned) return null;
@@ -1222,6 +1261,9 @@ export const createArenaGenerationService = (
       actorKey: input.actorKey,
       record: input.record,
       requireSnapshot: persistTerminalSnapshot,
+      ...(input.acceptedPayloadHashes
+        ? { acceptedPayloadHashes: input.acceptedPayloadHashes }
+        : {}),
     });
   };
 
@@ -1281,11 +1323,18 @@ export const createArenaGenerationService = (
       const concurrentTerminal = terminalFallback
         ?? await readOwnedTerminal(generationId, actor.actorKey).catch(() => null);
       const durableState = concurrentTerminal?.status === claimed.status
+        && terminalRecordMatchesIdentity({
+          record: concurrentTerminal,
+          generationId,
+          generationRequestId: state.generationRequestId,
+          acceptedPayloadHashes: [state.payloadHash],
+        })
         ? await readBackTerminalEvidence({
             generationId,
             actorKey: actor.actorKey,
             record: concurrentTerminal,
             requireSnapshot: false,
+            acceptedPayloadHashes: [state.payloadHash],
           })
         : null;
       if (!concurrentTerminal || !durableState) {
@@ -1299,6 +1348,26 @@ export const createArenaGenerationService = (
         terminalFallback: concurrentTerminal,
         state: durableState,
       };
+    }
+    if (
+      claimed.generationRequestId !== state.generationRequestId
+      || claimed.payloadHash !== state.payloadHash
+    ) {
+      return jsonResponse({
+        code: 'GENERATION_TERMINAL_RECONCILIATION_PENDING',
+        error: 'Generation terminal reconciliation pending',
+      }, 503);
+    }
+    if (terminalFallback && !terminalRecordMatchesIdentity({
+      record: terminalFallback,
+      generationId,
+      generationRequestId: claimed.generationRequestId,
+      acceptedPayloadHashes: [claimed.payloadHash],
+    })) {
+      return jsonResponse({
+        code: 'GENERATION_TERMINAL_RECONCILIATION_PENDING',
+        error: 'Generation terminal reconciliation pending',
+      }, 503);
     }
     if (!terminalFallback) {
       if (!dependencies.terminalStore?.reconcileExpiredLease) {
@@ -1317,7 +1386,15 @@ export const createArenaGenerationService = (
         code: 'PRODUCER_LEASE_EXPIRED',
       }).catch(() => null);
     }
-    if (!terminalFallback) {
+    if (
+      !terminalFallback
+      || !terminalRecordMatchesIdentity({
+        record: terminalFallback,
+        generationId,
+        generationRequestId: claimed.generationRequestId,
+        acceptedPayloadHashes: [claimed.payloadHash],
+      })
+    ) {
       return jsonResponse({
         code: 'GENERATION_TERMINAL_RECONCILIATION_PENDING',
         error: 'Generation terminal reconciliation pending',
@@ -1330,6 +1407,7 @@ export const createArenaGenerationService = (
       record: terminalFallback,
       priorState: state,
       now,
+      acceptedPayloadHashes: [claimed.payloadHash],
     });
     if (!durableState) {
       return jsonResponse({
@@ -1396,6 +1474,16 @@ export const createArenaGenerationService = (
       if (!terminalFallback) {
         return jsonResponse({ code: 'GENERATION_NOT_FOUND', error: 'Generation not found' }, 404);
       }
+      if (terminalFallback.generationId !== generationId) {
+        return jsonResponse({ code: 'GENERATION_NOT_FOUND', error: 'Generation not found' }, 404);
+      }
+      const expectedGenerationId = await dependencies.deriveGenerationId({
+        actorKey: actor.actorKey,
+        generationRequestId: terminalFallback.generationRequestId,
+      }).catch(() => null);
+      if (expectedGenerationId !== generationId) {
+        return jsonResponse({ code: 'GENERATION_NOT_FOUND', error: 'Generation not found' }, 404);
+      }
       state = {
         actorKey: actor.actorKey,
         generationId: terminalFallback.generationId,
@@ -1423,8 +1511,19 @@ export const createArenaGenerationService = (
         cancelReason: terminalFallback.status === 'cancelled' ? 'user' : null,
       };
     }
-    if (state.actorKey !== actor.actorKey) {
+    if (state.actorKey !== actor.actorKey || state.generationId !== generationId) {
       return jsonResponse({ code: 'GENERATION_NOT_FOUND', error: 'Generation not found' }, 404);
+    }
+    if (terminalFallback && !terminalRecordMatchesIdentity({
+      record: terminalFallback,
+      generationId: state.generationId,
+      generationRequestId: state.generationRequestId,
+      acceptedPayloadHashes: [state.payloadHash],
+    })) {
+      return jsonResponse({
+        code: 'GENERATION_TERMINAL_RECONCILIATION_PENDING',
+        error: 'Generation terminal reconciliation pending',
+      }, 503);
     }
     if (
       !terminalFallback
@@ -1446,6 +1545,17 @@ export const createArenaGenerationService = (
           error: 'Generation terminal content unavailable',
         }, 503);
       }
+    }
+    if (terminalFallback && !terminalRecordMatchesIdentity({
+      record: terminalFallback,
+      generationId: state.generationId,
+      generationRequestId: state.generationRequestId,
+      acceptedPayloadHashes: [state.payloadHash],
+    })) {
+      return jsonResponse({
+        code: 'GENERATION_TERMINAL_RECONCILIATION_PENDING',
+        error: 'Generation terminal reconciliation pending',
+      }, 503);
     }
     if (terminalFallback) return { actor, state, terminalFallback };
     return reconcileOwnedActiveState(actor, state);
@@ -2153,7 +2263,7 @@ export const createArenaGenerationService = (
               markdown: '',
               reasoning: '',
               errorCode: input.rejection.code,
-              payloadHash,
+              payloadHash: priorState.payloadHash,
               contentAvailable: true,
             },
             priorState,
@@ -2375,7 +2485,11 @@ export const createArenaGenerationService = (
         }
         if (durable.kind === 'terminal') {
           const terminal = durable.terminal;
-          if (!matchesPayloadHash(terminal.payloadHash)) {
+          if (
+            terminal.generationId !== generationId
+            || terminal.generationRequestId !== parsed.generationRequestId
+            || !matchesPayloadHash(terminal.payloadHash)
+          ) {
             observe({ event: 'request', generationId, outcome: 'conflict', inputBytes });
             return jsonResponse({
               code: 'GENERATION_REQUEST_CONFLICT',
@@ -2459,7 +2573,11 @@ export const createArenaGenerationService = (
         }
         if (durable.kind === 'terminal') {
           const terminal = durable.terminal;
-          if (!matchesPayloadHash(terminal.payloadHash)) {
+          if (
+            terminal.generationId !== generationId
+            || terminal.generationRequestId !== parsed.generationRequestId
+            || !matchesPayloadHash(terminal.payloadHash)
+          ) {
             await dependencies.store.releaseReservation({
               generationId,
               producerToken,
@@ -2482,6 +2600,9 @@ export const createArenaGenerationService = (
                 record: terminal,
                 priorState: reservedState,
                 now: dependencies.now().toISOString(),
+                acceptedPayloadHashes: splitMaterialization
+                  ? [payloadHash, legacyPayloadHash]
+                  : [payloadHash],
               })
             : null;
           if (!durableState) {

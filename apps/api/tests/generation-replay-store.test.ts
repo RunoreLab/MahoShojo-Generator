@@ -390,6 +390,29 @@ describe('RedisGenerationReplayStore', () => {
     ]);
   });
 
+  it('terminal snapshot 超预算时在同一 Lua CAS 清除旧 running snapshot', async () => {
+    const client = createClient();
+    vi.mocked(client.eval).mockResolvedValueOnce([1, '1724570000000-10']);
+    const store = createRedisGenerationReplayStore({ getClient: () => client });
+
+    await expect(store.markTerminal({
+      generationId: 'generation-1234',
+      producerToken: reserveInput.producerToken,
+      terminal: { status: 'failed', code: 'GENERATION_FAILED' },
+      terminalEvent: {
+        type: 'error',
+        data: { ok: false, status: 'failed', code: 'GENERATION_FAILED' },
+      },
+      clearTerminalSnapshot: true,
+      now: reserveInput.now,
+    })).resolves.toMatchObject({ owned: true, applied: true });
+
+    const [script, options] = vi.mocked(client.eval).mock.calls[0]!;
+    expect(script).toContain("ARGV[8] == '1'");
+    expect(script).toContain('state.snapshot = cjson.null');
+    expect(options.arguments.at(-1)).toBe('1');
+  });
+
   it('只从 Redis 恢复有界的 Provider 安全投影', async () => {
     const client = createClient();
     const terminal = {

@@ -229,6 +229,49 @@ describe('memory generation replay store', () => {
     });
   });
 
+  it('atomically clears an older running snapshot when terminal content exceeds its budget', async () => {
+    const store = createMemoryGenerationReplayStore();
+    await reserve(store);
+    await store.markRunning({
+      generationId: 'generation-1',
+      producerToken,
+      now: '2026-08-25T00:00:00.000Z',
+      leaseExpiresAt: '2026-08-25T00:01:00.000Z',
+    });
+    await store.writeSnapshot({
+      generationId: 'generation-1',
+      producerToken,
+      snapshot: {
+        status: 'running',
+        markdown: 'stale partial',
+        reasoning: '',
+        lastEventId: null,
+        updatedAt: '2026-08-25T00:00:01.000Z',
+      },
+      now: '2026-08-25T00:00:01.000Z',
+    });
+
+    await store.markTerminal({
+      generationId: 'generation-1',
+      producerToken,
+      terminal: { status: 'failed', code: 'GENERATION_FAILED' },
+      terminalEvent: {
+        type: 'error',
+        data: { ok: false, status: 'failed', code: 'GENERATION_FAILED' },
+      },
+      clearTerminalSnapshot: true,
+      now: '2026-08-25T00:00:02.000Z',
+    });
+
+    await expect(store.readSnapshot({ generationId: 'generation-1' })).resolves.toBeNull();
+    await expect(store.readState({ generationId: 'generation-1' })).resolves.toMatchObject({
+      status: 'failed',
+      lastEventId: '1-0',
+      snapshot: null,
+      terminal: { status: 'failed', code: 'GENERATION_FAILED' },
+    });
+  });
+
   it('expires terminal state and its request-id reservation within the configured bound', async () => {
     let timestamp = 0;
     const store = createMemoryGenerationReplayStore({

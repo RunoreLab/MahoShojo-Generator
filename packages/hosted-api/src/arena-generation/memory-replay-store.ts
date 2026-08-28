@@ -396,7 +396,7 @@ export const createMemoryGenerationReplayStore = (
           lastEventId: terminalEvent?.id
             ?? input.terminalSnapshot.lastEventId
             ?? state.lastEventId,
-        } : state.snapshot,
+        } : input.clearTerminalSnapshot ? null : state.snapshot,
         leaseExpiresAt: null,
         updatedAt: input.now,
       });

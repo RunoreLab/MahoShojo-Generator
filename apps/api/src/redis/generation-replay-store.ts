@@ -258,6 +258,8 @@ if ARGV[7] ~= '' then
   local terminalSnapshot = cjson.decode(ARGV[7])
   if terminalEventId ~= '' then terminalSnapshot.lastEventId = terminalEventId end
   state.snapshot = terminalSnapshot
+elseif ARGV[8] == '1' then
+  state.snapshot = cjson.null
 end
 state.status = terminal.status
 state.terminal = terminal
@@ -888,6 +890,7 @@ export const createRedisGenerationReplayStore = (
           String(maxEvents),
           input.terminalEvent ? JSON.stringify(input.terminalEvent) : '',
           input.terminalSnapshot ? JSON.stringify(input.terminalSnapshot) : '',
+          input.clearTerminalSnapshot ? '1' : '0',
         ],
       });
       if (
