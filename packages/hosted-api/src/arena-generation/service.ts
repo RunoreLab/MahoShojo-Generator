@@ -1117,24 +1117,6 @@ export const createArenaGenerationService = (
     if (!leaseExpired) return { actor, state, terminalFallback: null };
 
     let terminalFallback = await readOwnedTerminal(generationId, actor.actorKey);
-    if (terminalFallback) {
-      const terminal: GenerationTerminal = {
-        status: terminalFallback.status,
-        ...(terminalFallback.resultRef ? { resultRef: terminalFallback.resultRef } : {}),
-      };
-      await dependencies.store.markTerminal({
-        generationId,
-        producerToken: state.producerToken,
-        terminal,
-        now: dependencies.now().toISOString(),
-      }).catch(() => ({ owned: true, applied: false }));
-      return {
-        actor,
-        terminalFallback,
-        state: { ...state, status: terminal.status, leaseExpiresAt: null, terminal },
-      };
-    }
-
     const now = dependencies.now().toISOString();
     const reaperToken = dependencies.createProducerToken?.() ?? crypto.randomUUID();
     const claimed = await dependencies.store.claimLeaseExpiry({
@@ -1165,21 +1147,23 @@ export const createArenaGenerationService = (
         },
       };
     }
-    if (!dependencies.terminalStore?.reconcileExpiredLease) {
-      return jsonResponse({
-        code: 'GENERATION_TERMINAL_RECONCILIATION_PENDING',
-        error: 'Generation terminal reconciliation unavailable',
-      }, 503);
+    if (!terminalFallback) {
+      if (!dependencies.terminalStore?.reconcileExpiredLease) {
+        return jsonResponse({
+          code: 'GENERATION_TERMINAL_RECONCILIATION_PENDING',
+          error: 'Generation terminal reconciliation unavailable',
+        }, 503);
+      }
+      terminalFallback = await dependencies.terminalStore.reconcileExpiredLease({
+        generationId,
+        generationRequestId: claimed.generationRequestId,
+        actorKey: actor.actorKey,
+        payloadHash: claimed.payloadHash,
+        mode: claimed.mode,
+        updatedAt: now,
+        code: 'PRODUCER_LEASE_EXPIRED',
+      }).catch(() => null);
     }
-    terminalFallback = await dependencies.terminalStore.reconcileExpiredLease({
-      generationId,
-      generationRequestId: claimed.generationRequestId,
-      actorKey: actor.actorKey,
-      payloadHash: claimed.payloadHash,
-      mode: claimed.mode,
-      updatedAt: now,
-      code: 'PRODUCER_LEASE_EXPIRED',
-    }).catch(() => null);
     if (!terminalFallback) {
       return jsonResponse({
         code: 'GENERATION_TERMINAL_RECONCILIATION_PENDING',
@@ -1216,8 +1200,11 @@ export const createArenaGenerationService = (
       telemetry: state.snapshot?.telemetry ?? null,
       terminalResultRef: terminal.resultRef ?? null,
     };
+    const terminalContentAvailable = terminal.status !== 'completed'
+      || terminalFallback.contentAvailable === true;
     const snapshotWithinBudget = encodedBytes(terminalSnapshot) <= snapshotMaxBytes;
-    if (!snapshotWithinBudget) {
+    const persistTerminalSnapshot = terminalContentAvailable && snapshotWithinBudget;
+    if (terminalContentAvailable && !snapshotWithinBudget) {
       observe({ event: 'redis_degraded', generationId, operation: 'snapshot_budget' });
     }
     const committed = await dependencies.store.markTerminal({
@@ -1225,7 +1212,7 @@ export const createArenaGenerationService = (
       producerToken: reaperToken,
       terminal,
       terminalEvent,
-      ...(snapshotWithinBudget ? { terminalSnapshot } : {}),
+      ...(persistTerminalSnapshot ? { terminalSnapshot } : {}),
       now,
     }).catch(() => null);
     const durableState = committed?.owned
@@ -1234,12 +1221,30 @@ export const createArenaGenerationService = (
           actorKey: actor.actorKey,
         }).catch(() => null)
       : null;
+    const durableEvents = durableState
+      ? await dependencies.store.readAfter({
+          generationId,
+          after: null,
+          blockMs: 0,
+        }).catch(() => null)
+      : null;
+    const durableTerminalEvent = durableEvents?.events.find((event) => (
+      event.id === durableState?.lastEventId
+      && event.type === terminalEvent.type
+      && event.data
+      && typeof event.data === 'object'
+      && (event.data as { status?: unknown }).status === terminal.status
+    ));
     if (
       !durableState
       || durableState.status !== terminal.status
       || durableState.terminal?.status !== terminal.status
       || durableState.leaseExpiresAt !== null
-      || (snapshotWithinBudget && durableState.snapshot?.status !== terminal.status)
+      || !durableTerminalEvent
+      || (persistTerminalSnapshot && (
+        durableState.snapshot?.status !== terminal.status
+        || durableState.snapshot.lastEventId !== durableTerminalEvent.id
+      ))
     ) {
       return jsonResponse({
         code: 'GENERATION_TERMINAL_RECONCILIATION_PENDING',
@@ -1422,11 +1427,16 @@ export const createArenaGenerationService = (
     ...(state.terminal?.resultRef ? { resultRef: state.terminal.resultRef } : {}),
   }, 200), actor);
 
+  const createTerminalContentUnavailableResponse = (): Response => jsonResponse({
+    code: 'GENERATION_TERMINAL_CONTENT_UNAVAILABLE',
+    error: 'Generation terminal content is temporarily unavailable',
+  }, 503);
+
   const createTerminalFallbackSubscription = (
     terminal: ArenaGenerationTerminalRecord,
     after: string | null = null,
   ): ArenaGenerationSubscription | Response => {
-    if (terminal.status === 'completed' && terminal.contentAvailable === false) {
+    if (terminal.status === 'completed' && terminal.contentAvailable !== true) {
       return jsonResponse({
         code: 'GENERATION_TERMINAL_CONTENT_UNAVAILABLE',
         error: 'Generation terminal content is temporarily unavailable',
@@ -1606,7 +1616,7 @@ export const createArenaGenerationService = (
           const pipeTerminalFallback = async (
             fallback: ArenaGenerationTerminalRecord,
           ): Promise<void> => {
-            if (fallback.status === 'completed' && fallback.contentAvailable === false) {
+            if (fallback.status === 'completed' && fallback.contentAvailable !== true) {
               throw new Error('GENERATION_TERMINAL_CONTENT_UNAVAILABLE');
             }
             const fallbackSubscription = createTerminalFallbackSubscription(fallback, cursor);
@@ -2067,7 +2077,7 @@ export const createArenaGenerationService = (
       if (owned instanceof Response) return ownedFailureFromResponse(owned);
       if (
         owned.terminalFallback?.status === 'completed'
-        && owned.terminalFallback.contentAvailable === false
+        && owned.terminalFallback.contentAvailable !== true
       ) {
         return {
           kind: 'unavailable',
@@ -2599,6 +2609,12 @@ export const createArenaGenerationService = (
           error: 'Generation request not found',
         }, 404);
       }
+      if (
+        owned.terminalFallback?.status === 'completed'
+        && owned.terminalFallback.contentAvailable !== true
+      ) {
+        return createTerminalContentUnavailableResponse();
+      }
       return createStatusResponse(owned.state, owned.actor);
     },
 
@@ -2662,6 +2678,12 @@ export const createArenaGenerationService = (
     async status(request: Request, params: ArenaGenerationRouteParams): Promise<Response> {
       const owned = await resolveOwnedState(request, params.generationId);
       if (owned instanceof Response) return owned;
+      if (
+        owned.terminalFallback?.status === 'completed'
+        && owned.terminalFallback.contentAvailable !== true
+      ) {
+        return createTerminalContentUnavailableResponse();
+      }
       return createStatusResponse(owned.state, owned.actor);
     },
 

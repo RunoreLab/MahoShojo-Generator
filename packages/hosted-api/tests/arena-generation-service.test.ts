@@ -2408,6 +2408,105 @@ describe('Arena generation lifecycle service', () => {
     expect(execute).not.toHaveBeenCalled();
   });
 
+  test('existing durable terminal stays unavailable when Redis adoption commit fails', async () => {
+    const store = new MemoryReplayStore();
+    await store.reserve({
+      actorKey: 'user:42',
+      generationRequestId: 'request-1',
+      generationId: 'generation-1',
+      payloadHash: 'payload-hash',
+      producerToken: 'producer-token-1',
+      now: '2026-08-25T03:00:00.000Z',
+      leaseExpiresAt: '2026-08-25T03:01:00.000Z',
+    });
+    await store.markRunning({
+      generationId: 'generation-1',
+      producerToken: 'producer-token-1',
+      now: '2026-08-25T03:00:00.000Z',
+      leaseExpiresAt: '2026-08-25T03:01:00.000Z',
+    });
+    store.markTerminal = vi.fn(async () => {
+      throw new Error('redis terminal unavailable');
+    });
+    const reconcileExpiredLease = vi.fn(async () => {
+      throw new Error('existing durable terminal must not be overwritten');
+    });
+    const service = createService(store, {
+      execute: vi.fn(async () => ({ status: 'completed' as const })),
+    }, {
+      terminalStore: {
+        readOwnedTerminal: vi.fn(async () => ({
+          generationId: 'generation-1',
+          generationRequestId: 'request-1',
+          status: 'completed' as const,
+          updatedAt: '2026-08-25T03:30:00.000Z',
+          resultRef: 'r2:terminal',
+          markdown: 'durable completed report',
+          reasoning: '',
+          payloadHash: 'payload-hash',
+          contentAvailable: true,
+        })),
+        reconcileExpiredLease,
+      },
+    });
+
+    const response = await service.status(new Request(
+      'https://example.test/api/arena/generations/generation-1',
+    ), { generationId: 'generation-1' });
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toMatchObject({
+      code: 'GENERATION_TERMINAL_RECONCILIATION_PENDING',
+    });
+    expect(reconcileExpiredLease).not.toHaveBeenCalled();
+  });
+
+  test('expired lease adoption fails closed when the terminal event cannot be read back', async () => {
+    const store = new MemoryReplayStore();
+    await store.reserve({
+      actorKey: 'user:42',
+      generationRequestId: 'request-1',
+      generationId: 'generation-1',
+      payloadHash: 'payload-hash',
+      producerToken: 'producer-token-1',
+      now: '2026-08-25T03:00:00.000Z',
+      leaseExpiresAt: '2026-08-25T03:01:00.000Z',
+    });
+    await store.markRunning({
+      generationId: 'generation-1',
+      producerToken: 'producer-token-1',
+      now: '2026-08-25T03:00:00.000Z',
+      leaseExpiresAt: '2026-08-25T03:01:00.000Z',
+    });
+    vi.spyOn(store, 'readAfter').mockResolvedValue({ kind: 'events', events: [] });
+    const service = createService(store, {
+      execute: vi.fn(async () => ({ status: 'completed' as const })),
+    }, {
+      terminalStore: {
+        readOwnedTerminal: vi.fn(async () => ({
+          generationId: 'generation-1',
+          generationRequestId: 'request-1',
+          status: 'completed' as const,
+          updatedAt: '2026-08-25T03:30:00.000Z',
+          resultRef: 'r2:terminal',
+          markdown: 'durable completed report',
+          reasoning: '',
+          payloadHash: 'payload-hash',
+          contentAvailable: true,
+        })),
+      },
+    });
+
+    const response = await service.status(new Request(
+      'https://example.test/api/arena/generations/generation-1',
+    ), { generationId: 'generation-1' });
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toMatchObject({
+      code: 'GENERATION_TERMINAL_RECONCILIATION_PENDING',
+    });
+  });
+
   test('expired Redis lease adopts a durable completed finalization instead of overwriting it', async () => {
     const store = new MemoryReplayStore();
     await store.reserve({
@@ -2426,17 +2525,20 @@ describe('Arena generation lifecycle service', () => {
       leaseExpiresAt: '2026-08-25T03:01:00.000Z',
     });
     const terminalStore: ArenaGenerationTerminalStore = {
-      readOwnedTerminal: vi.fn(async () => null),
-      reconcileExpiredLease: vi.fn(async (input) => ({
-        generationId: input.generationId,
-        generationRequestId: input.generationRequestId,
+      readOwnedTerminal: vi.fn(async () => ({
+        generationId: 'generation-1',
+        generationRequestId: 'request-1',
         status: 'completed' as const,
-        updatedAt: input.updatedAt,
+        updatedAt: '2026-08-25T03:30:00.000Z',
         resultRef: 'r2:terminal',
         markdown: 'durable completed report',
         reasoning: '',
-        payloadHash: input.payloadHash,
+        payloadHash: 'payload-hash',
+        contentAvailable: true,
       })),
+      reconcileExpiredLease: vi.fn(async () => {
+        throw new Error('existing durable terminal must be adopted directly');
+      }),
     };
     const service = createService(store, {
       execute: vi.fn(async () => ({ status: 'completed' as const })),
@@ -2452,6 +2554,84 @@ describe('Arena generation lifecycle service', () => {
       status: 'completed',
       resultRef: 'r2:terminal',
     });
+    expect(store.states.get('generation-1')?.snapshot).toMatchObject({
+      status: 'completed',
+      markdown: 'durable completed report',
+      terminalResultRef: 'r2:terminal',
+    });
+    expect(store.events.get('generation-1')).toEqual([
+      expect.objectContaining({
+        type: 'done',
+        data: expect.objectContaining({ status: 'completed', ok: true }),
+      }),
+    ]);
+    expect(terminalStore.reconcileExpiredLease).not.toHaveBeenCalled();
+  });
+
+  test('expired lease never promotes an unavailable durable preview to completed content', async () => {
+    const store = new MemoryReplayStore();
+    await store.reserve({
+      actorKey: 'user:42',
+      generationRequestId: 'request-1',
+      generationId: 'generation-1',
+      payloadHash: 'payload-hash',
+      producerToken: 'producer-token-1',
+      now: '2026-08-25T03:00:00.000Z',
+      leaseExpiresAt: '2026-08-25T03:01:00.000Z',
+    });
+    await store.markRunning({
+      generationId: 'generation-1',
+      producerToken: 'producer-token-1',
+      now: '2026-08-25T03:00:00.000Z',
+      leaseExpiresAt: '2026-08-25T03:01:00.000Z',
+    });
+    const terminalStore: ArenaGenerationTerminalStore = {
+      readOwnedTerminal: vi.fn(async () => ({
+        generationId: 'generation-1',
+        generationRequestId: 'request-1',
+        status: 'completed' as const,
+        updatedAt: '2026-08-25T03:30:00.000Z',
+        resultRef: 'r2:terminal',
+        markdown: 'truncated preview must never become final',
+        reasoning: '',
+        payloadHash: 'payload-hash',
+        contentAvailable: false,
+      })),
+    };
+    const service = createService(store, {
+      execute: vi.fn(async () => ({ status: 'completed' as const })),
+    }, { terminalStore });
+    const statusRequest = () => new Request(
+      'https://example.test/api/arena/generations/generation-1',
+    );
+
+    const firstStatus = await service.status(statusRequest(), { generationId: 'generation-1' });
+    const secondStatus = await service.status(statusRequest(), { generationId: 'generation-1' });
+    const projection = await service.readOwnedProjection({
+      actorKey: 'user:42',
+      generationId: 'generation-1',
+    });
+    const resumed = await service.resume(new Request(
+      'https://example.test/api/arena/generations/generation-1/stream',
+    ), { generationId: 'generation-1' });
+
+    for (const response of [firstStatus, secondStatus, resumed]) {
+      expect(response.status).toBe(503);
+      await expect(response.json()).resolves.toMatchObject({
+        code: 'GENERATION_TERMINAL_CONTENT_UNAVAILABLE',
+      });
+    }
+    expect(projection).toEqual({
+      kind: 'unavailable',
+      code: 'GENERATION_TERMINAL_CONTENT_UNAVAILABLE',
+    });
+    expect(store.states.get('generation-1')).toMatchObject({
+      status: 'completed',
+      terminal: { status: 'completed', resultRef: 'r2:terminal' },
+      snapshot: null,
+      leaseExpiresAt: null,
+    });
+    expect(JSON.stringify(store.states.get('generation-1'))).not.toContain('truncated preview');
   });
 
   test('uses owned terminal storage when Redis state and replay have expired', async () => {
@@ -2465,6 +2645,7 @@ describe('Arena generation lifecycle service', () => {
         resultRef: 'r2://report/1',
         markdown: '完整终态正文',
         reasoning: '',
+        contentAvailable: true,
       })),
     };
     const execute = vi.fn(async () => ({ status: 'completed' as const }));
@@ -2529,6 +2710,7 @@ describe('Arena generation lifecycle service', () => {
         resultRef: 'r2://report/1',
         markdown: '完整终态正文',
         reasoning: '',
+        contentAvailable: true,
       })),
     };
     const service = createService(store, {
@@ -2608,6 +2790,7 @@ describe('Arena generation lifecycle service', () => {
         markdown: 'durable terminal body',
         reasoning: '',
         payloadHash: 'hash:{"value":"same"}',
+        contentAvailable: true,
       })),
     };
     const execute = vi.fn(async () => ({ status: 'completed' as const }));
