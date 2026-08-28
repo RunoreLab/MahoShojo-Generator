@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import dynamic from 'next/dynamic';
 
 import BattleDataModal from '@/components/BattleDataModal';
 import DataCardDetailsModal from '@/components/DataCardDetailsModal';
@@ -44,8 +45,22 @@ import { ArenaCommunitySection } from './shared/ArenaCommunitySection';
 import { ArenaPageLinks } from './shared/ArenaPageLinks';
 import { ArenaRankingLinks } from './shared/ArenaRankingLinks';
 
-export function ArenaPage() {
-  const { isAuthenticated } = useAuth();
+const ArenaMultiplayerPanel = dynamic(
+  () => import('./multiplayer/ArenaMultiplayerPanel').then((module) => (
+    module.ArenaMultiplayerPanel
+  )),
+  { ssr: false },
+);
+
+type ArenaPageProps = {
+  readonly multiplayer?: {
+    readonly enabled: boolean;
+    readonly origin: string;
+  };
+};
+
+export function ArenaPage({ multiplayer }: ArenaPageProps = {}) {
+  const { isAuthenticated, loading: authLoading, user } = useAuth();
   const [showBattleDataModal, setShowBattleDataModal] = useState(false);
   const [dataModalType, setDataModalType] = useState<'character' | 'scenario' | 'auxScenario' | 'material'>('character');
   const [selectedCombatant, setSelectedCombatant] = useState<CombatantData | null>(null);
@@ -172,6 +187,16 @@ export function ArenaPage() {
               <ArenaRankingLinks onOpenRankingModal={() => setShowRankingModal(true)} />
               <ArenaPageLinks variant="full" />
             </div>
+
+            {multiplayer?.enabled ? (
+              <ArenaMultiplayerPanel
+                enabled
+                origin={multiplayer.origin}
+                authLoading={authLoading}
+                isAuthenticated={isAuthenticated}
+                displayName={user?.username ?? '玩家'}
+              />
+            ) : null}
 
             <div className="mt-6 grid gap-5 xl:grid-cols-[minmax(320px,420px)_minmax(0,1fr)] 2xl:grid-cols-[minmax(340px,440px)_minmax(0,1fr)] xl:items-start">
               <div className="min-w-0 space-y-4">

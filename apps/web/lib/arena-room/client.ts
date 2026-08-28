@@ -112,7 +112,7 @@ export const createArenaRoomClient = (options: ClientOptions): ArenaRoomClient =
         },
         ...(input.body === undefined ? {} : { body: JSON.stringify(input.body) }),
       });
-    } catch (error) {
+    } catch {
       throw new ArenaRoomClientError(
         input.unknownResult ? 'ROOM_RESULT_UNKNOWN' : 'ROOM_UNAVAILABLE',
         null,
