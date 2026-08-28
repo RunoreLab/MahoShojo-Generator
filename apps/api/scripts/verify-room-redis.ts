@@ -89,6 +89,7 @@ const recoveryRoomId = `room-recovery-${token}`;
 const actorRoomId = `room-actor-${token}`;
 const authorityRoomId = `room-authority-${token}`;
 const directoryRegistrationRoomId = `room-directory-registration-${token}`;
+const directoryPendingRoomId = `room-directory-pending-${token}`;
 const ticketJti = `verifier:${token}`;
 const authorityTicketJti = `authority:${token}`;
 const roomHash = (id: string): string => createHash('sha256').update(id).digest('hex');
@@ -107,6 +108,8 @@ const directoryRegistrationMember = roomHash(directoryRegistrationRoomId);
 const directoryRegistrationPrefix = `mahoshojo:room-directory-registration:v2:${keyPrefix}`;
 const directoryRegistrationKey = `${directoryRegistrationPrefix}:entry:${directoryRegistrationMember}`;
 const directoryRegistrationIndexKey = `${directoryRegistrationPrefix}:index`;
+const directoryPendingMember = roomHash(directoryPendingRoomId);
+const directoryPendingKey = `${directoryRegistrationPrefix}:entry:${directoryPendingMember}`;
 
 const eventually = async (check: () => boolean | Promise<boolean>): Promise<void> => {
   for (let attempt = 0; attempt < 100; attempt += 1) {
@@ -978,6 +981,7 @@ try {
 
       const directoryRows = new Map<string, RoomDirectoryRecord>();
       let failDirectoryRead = false;
+      let failDirectoryDelete = false;
       const directoryD1: D1RoomDirectoryStore = {
         async upsertOpen(input) {
           const current = directoryRows.get(input.roomId);
@@ -1003,6 +1007,7 @@ try {
           }
         },
         async delete(input) {
+          if (failDirectoryDelete) throw new Error('ROOM_DIRECTORY_D1_DELETE_FAULT_INJECTED');
           if (directoryRows.get(input.roomId)?.roomEpoch === input.roomEpoch) {
             directoryRows.delete(input.roomId);
           }
@@ -1085,7 +1090,87 @@ try {
       ) {
         throw new Error('ROOM_DIRECTORY_RECOVERY_COMPENSATION_FAILED');
       }
+      failDirectoryDelete = true;
+      const closeResult = await recoveredDirectoryActors.execute({
+        roomId: directoryRegistrationRoomId,
+        command: {
+          type: 'close',
+          expectedRoomEpoch: 'directory-epoch-2',
+          reason: 'directory-tombstone-verifier',
+          timestamp: THIRD_TIMESTAMP,
+        },
+        authority: {
+          kind: 'authenticated-user',
+          actorUserId: 'directory-host-1',
+          accountUserId: 101,
+        },
+      });
+      if (!closeResult.ok) throw new Error('ROOM_DIRECTORY_CLOSE_CHECKPOINT_FAILED');
+      await eventually(async () => (
+        directoryProjectionErrors === 2
+        && (await directoryRegistrations.get(directoryRegistrationRoomId))?.phase === 'closing'
+      ));
+      if (directoryRows.get(directoryRegistrationRoomId)?.roomEpoch !== 'directory-epoch-2') {
+        throw new Error('ROOM_DIRECTORY_CLOSE_TOMBSTONE_LOST_D1_ROW');
+      }
+      failDirectoryDelete = false;
+      const closedCompensation = await directory.reconcileRegistrations({
+        limit: 50,
+        score: Date.parse(THIRD_TIMESTAMP),
+      });
+      if (
+        closedCompensation.removed !== 1
+        || directoryRows.has(directoryRegistrationRoomId)
+        || await directoryRegistrations.get(directoryRegistrationRoomId) !== null
+      ) {
+        throw new Error('ROOM_DIRECTORY_CLOSE_COMPENSATION_FAILED');
+      }
+      const repeatedCloseCompensation = await directory.reconcileRegistrations({
+        limit: 50,
+        score: Date.parse(THIRD_TIMESTAMP),
+      });
+      if (repeatedCloseCompensation.scanned !== 0) {
+        throw new Error('ROOM_DIRECTORY_CLOSE_COMPENSATION_NOT_IDEMPOTENT');
+      }
       await recoveredDirectoryActors.shutdown();
+
+      const pendingPreparedAtMs = Date.parse(THIRD_TIMESTAMP);
+      await directoryRegistrations.prepare({
+        record: {
+          roomId: directoryPendingRoomId,
+          roomEpoch: 'directory-pending-epoch-1',
+          hostUserId: 101,
+          title: 'Pending Redis directory',
+          visibility: 'unlisted',
+          status: 'open',
+          createdAt: TIMESTAMP,
+          lastActivityAt: NEXT_TIMESTAMP,
+        },
+        preparedAtMs: pendingPreparedAtMs,
+      });
+      const pendingDeferred = await directory.reconcileRegistrations({
+        limit: 50,
+        score: pendingPreparedAtMs + 1,
+      });
+      const pendingDueAtMs = pendingPreparedAtMs + 5 * 60_000;
+      if (
+        pendingDeferred.removed !== 0
+        || (await directoryRegistrations.get(directoryPendingRoomId))?.phase !== 'pending-create'
+        || await cleanup.zScore(directoryRegistrationIndexKey, directoryPendingMember)
+          !== pendingDueAtMs
+      ) {
+        throw new Error('ROOM_DIRECTORY_PENDING_GRACE_FAILED');
+      }
+      const pendingExpired = await directory.reconcileRegistrations({
+        limit: 50,
+        score: pendingDueAtMs,
+      });
+      if (
+        pendingExpired.removed !== 1
+        || await directoryRegistrations.get(directoryPendingRoomId) !== null
+      ) {
+        throw new Error('ROOM_DIRECTORY_PENDING_EXPIRY_FAILED');
+      }
 
       const authorityActors = createRoomActorRegistry({
         store: writerStore,
@@ -1172,6 +1257,8 @@ try {
         roomActorOldWriterFence: true,
         directoryRegistration: true,
         directoryRecoveryCompensation: true,
+        directoryCloseCompensation: true,
+        directoryPendingCreateGrace: true,
         activeTtlRefresh: true,
         ticketReplay: true,
         authorityGatewayRedisWiring: true,
@@ -1190,6 +1277,7 @@ try {
   if (!cleanup.isOpen) await cleanup.connect();
   if (phase !== 'write') {
     await cleanup.zRem(directoryRegistrationIndexKey, directoryRegistrationMember);
+    await cleanup.zRem(directoryRegistrationIndexKey, directoryPendingMember);
     await cleanup.unlink([
       ...roomKeys(roomId),
       ...roomKeys(ttlRoomId),
@@ -1213,6 +1301,7 @@ try {
       ticketReplayKey,
       authorityTicketReplayKey,
       directoryRegistrationKey,
+      directoryPendingKey,
     ]);
   }
   await cleanup.quit();
