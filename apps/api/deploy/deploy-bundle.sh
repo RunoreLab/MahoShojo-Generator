@@ -170,6 +170,21 @@ verify_release_tuple() {
       ;;
     *) return 1 ;;
   esac
+  arena_gate_validator_lines="$(grep -Ec \
+    '^[0-9a-f]{64}  arena-room-release-gate-schema\.mjs$' \
+    "$tuple_dir/release.manifest" || true)"
+  case "$arena_gate_validator_lines" in
+    0)
+      [ ! -e "$tuple_dir/arena-room-release-gate-schema.mjs" ] \
+        && [ ! -L "$tuple_dir/arena-room-release-gate-schema.mjs" ] || return 1
+      ;;
+    1)
+      optional_manifest_lines=$((optional_manifest_lines + 1))
+      [ -f "$tuple_dir/arena-room-release-gate-schema.mjs" ] \
+        && [ ! -L "$tuple_dir/arena-room-release-gate-schema.mjs" ] || return 1
+      ;;
+    *) return 1 ;;
+  esac
   legacy_manifest_lines="$(grep -Ec '^[0-9a-f]{64}  legacy-layout$' \
     "$tuple_dir/release.manifest" || true)"
   case "$legacy_manifest_lines" in
@@ -187,6 +202,14 @@ verify_release_tuple() {
       ;;
     *) return 1 ;;
   esac
+  if [ "$arena_gate_lines" -eq 1 ] && [ "$legacy_manifest_lines" -eq 1 ]; then
+    echo "legacy adoption tuple 不得声明 Arena Room reader capability" >&2
+    return 1
+  fi
+  if [ "$arena_gate_validator_lines" -eq 1 ] && [ "$arena_gate_lines" -ne 1 ]; then
+    echo "release gate schema validator 必须与 release gate 同时出现" >&2
+    return 1
+  fi
   if [ "$manifest_lines" -ne $((3 + optional_manifest_lines)) ]; then
       echo "release.manifest 必须只覆盖规范 tuple 文件" >&2
       return 1
@@ -371,6 +394,10 @@ rollback_transaction() {
   rollback_had_previous="$2"
   rollback_previous_release_dir="$3"
   echo "新 release 未通过完整 contract，开始回滚 tuple" >&2
+  verify_release_tuple "$failed_release_dir" || {
+    echo "failed release tuple 已漂移，拒绝读取 rollback gate" >&2
+    return 1
+  }
   if [ "$rollback_had_previous" = true ]; then
     verify_arena_room_rollback_gate \
       "$failed_release_dir" "$rollback_previous_release_dir" || return 1
@@ -379,7 +406,6 @@ rollback_transaction() {
     return 0
   fi
 
-  verify_release_tuple "$failed_release_dir" || return 1
   validate_release_compose "$failed_release_dir" || return 1
   run_cancellable docker compose \
     --project-directory "$root_dir" -f "$failed_release_dir/compose.yml" \
@@ -388,6 +414,22 @@ rollback_transaction() {
   rm -f "$root_dir/current.next" || return 1
   rm -f "$release_env" || return 1
   rm -f "$format_file" || return 1
+}
+
+validate_arena_room_release_gate() {
+  validated_gate="$1"
+  validated_schema="$2"
+  shift 2
+  [ -f "$validated_gate" ] && [ ! -L "$validated_gate" ] || return 1
+  [ -f "$validated_schema" ] && [ ! -L "$validated_schema" ] || return 1
+  run_cancellable docker run --rm \
+    --network none \
+    --read-only \
+    --cap-drop ALL \
+    --security-opt no-new-privileges \
+    -v "$validated_gate:/gate.json:ro" \
+    -v "$validated_schema:/gate-schema.mjs:ro" \
+    "$runtime_image" node /gate-schema.mjs --manifest /gate.json "$@" >/dev/null
 }
 
 verify_arena_room_rollback_gate() {
@@ -409,6 +451,11 @@ verify_arena_room_rollback_gate() {
     return 0
   fi
   [ -f "$failed_gate" ] && [ ! -L "$failed_gate" ] || return 1
+  failed_gate_schema="$failed_release_dir/arena-room-release-gate-schema.mjs"
+  validate_arena_room_release_gate "$failed_gate" "$failed_gate_schema" || {
+    echo "Arena Room release gate schema 校验失败" >&2
+    return 1
+  }
   writer_activation="$(
     sed -n 's/^[[:space:]]*"writerActivation":[[:space:]]*"\([a-z]*\)"[,]*[[:space:]]*$/\1/p' \
       "$failed_gate"
@@ -427,6 +474,12 @@ verify_arena_room_rollback_gate() {
     echo "rollback target reader contract 不兼容" >&2
     return 1
   }
+  validate_arena_room_release_gate \
+    "$target_gate" "$failed_gate_schema" \
+    --expect-contract 'arena-room-authority-v2-generation-payload-digest-v1' || {
+      echo "rollback target reader contract schema 不兼容" >&2
+      return 1
+    }
   target_reader_contract="$(
     sed -n 's/^[[:space:]]*"checkpointContract":[[:space:]]*"\([A-Za-z0-9._:-]*\)"[,]*[[:space:]]*$/\1/p' \
       "$target_gate"
@@ -726,6 +779,9 @@ probe_status_file="$probe_dir/status"
 
 recover_pending_transaction
 verify_release_tuple "$release_dir"
+validate_arena_room_release_gate \
+  "$release_dir/arena-room-release-gate.json" \
+  "$release_dir/arena-room-release-gate-schema.mjs"
 validate_release_compose "$release_dir"
 validate_release_runtime "$release_dir"
 resolve_previous_release

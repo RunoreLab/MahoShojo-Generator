@@ -5,6 +5,7 @@ import { spawnSync } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
 
 const script = resolve(process.cwd(), 'scripts/check-arena-room-release-gate.mjs');
+const schemaScript = resolve(process.cwd(), 'scripts/arena-room-release-gate-schema.mjs');
 const manifestPath = resolve(process.cwd(), 'config/arena-room-release-gate.json');
 
 const run = (args: string[], env: NodeJS.ProcessEnv = {}) => {
@@ -16,6 +17,17 @@ const run = (args: string[], env: NodeJS.ProcessEnv = {}) => {
     process.execPath,
     [script, ...args],
     { cwd: process.cwd(), encoding: 'utf8', env: childEnv },
+  );
+};
+
+const runSchema = (manifest: string, extraArgs: string[] = []) => {
+  const directory = mkdtempSync(join(tmpdir(), 'arena-room-release-gate-schema.'));
+  const candidatePath = join(directory, 'candidate.json');
+  writeFileSync(candidatePath, manifest);
+  return spawnSync(
+    process.execPath,
+    [schemaScript, '--manifest', candidatePath, ...extraArgs],
+    { cwd: process.cwd(), encoding: 'utf8', env: { PATH: process.env.PATH } },
   );
 };
 
@@ -58,5 +70,34 @@ describe('Arena Room release gate', () => {
       ARENA_MULTIPLAYER_GENERATION_START_STATE: 'disabled',
       ARENA_ROOM_TARGET_READER_CONTRACT: 'arena-room-authority-v2-generation-payload-digest-v1',
     }).status).toBe(0);
+  });
+
+  it('validates the complete release-gate JSON schema instead of matching nested text', () => {
+    const canonical = readFileSync(manifestPath, 'utf8');
+    expect(runSchema(canonical).status).toBe(0);
+
+    const malformed = runSchema('{"writerActivation":"disabled"');
+    expect(malformed.status).toBe(1);
+    expect(malformed.stderr).toMatch(/JSON/u);
+
+    const nestedOnly = runSchema(JSON.stringify({
+      metadata: {
+        writerActivation: 'disabled',
+        checkpointContract: 'arena-room-authority-v2-generation-payload-digest-v1',
+      },
+    }));
+    expect(nestedOnly.status).toBe(1);
+    expect(nestedOnly.stderr).toMatch(/字段/u);
+
+    const withUnexpectedField = JSON.parse(canonical) as Record<string, unknown>;
+    withUnexpectedField.untrusted = true;
+    expect(runSchema(JSON.stringify(withUnexpectedField)).status).toBe(1);
+
+    const wrongContract = JSON.parse(canonical) as Record<string, unknown>;
+    wrongContract.checkpointContract = 'legacy-reader';
+    expect(runSchema(JSON.stringify(wrongContract), [
+      '--expect-contract',
+      'arena-room-authority-v2-generation-payload-digest-v1',
+    ]).status).toBe(1);
   });
 });

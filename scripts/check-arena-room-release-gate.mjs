@@ -1,6 +1,11 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
+import {
+  ARENA_ROOM_CHECKPOINT_CONTRACT,
+  validateArenaRoomReleaseGate,
+} from './arena-room-release-gate-schema.mjs';
+
 const repositoryRoot = path.resolve(import.meta.dirname, '..');
 const argument = (name, fallback) => {
   const index = process.argv.indexOf(name);
@@ -15,34 +20,9 @@ const manifestPath = path.resolve(repositoryRoot, argument(
   'config/arena-room-release-gate.json',
 ));
 const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
-const failures = [];
+const failures = validateArenaRoomReleaseGate(manifest);
 const fail = (message) => failures.push(message);
-const expectedContract = 'arena-room-authority-v2-generation-payload-digest-v1';
-const expectedOrder = [
-  'compatible-reader',
-  'writer-disabled-validation',
-  'production-go-no-go',
-  'writer-activation',
-];
-
-if (manifest.schemaVersion !== 1) fail('schemaVersion 必须为 1');
-if (manifest.checkpointContract !== expectedContract) {
-  fail('checkpointContract 必须保持 GMR-09 generation payload digest reader contract');
-}
-if (!['disabled', 'enabled'].includes(manifest.writerActivation)) {
-  fail('writerActivation 必须是 disabled 或 enabled');
-}
-if (manifest.compatibleReaderRolloutRequired !== true) {
-  fail('compatible reader rollout 必须是强制门禁');
-}
-if (manifest.productionGoNoGoRequired !== true) fail('production go/no-go 必须是强制门禁');
-if (JSON.stringify(manifest.rolloutOrder) !== JSON.stringify(expectedOrder)) {
-  fail('rolloutOrder 必须保持 reader-first 与显式 production go/no-go');
-}
-if (
-  manifest.rollback?.minimumReaderContract !== expectedContract
-  || manifest.rollback?.generationStartMustBeDisabled !== true
-) fail('rollback 必须要求 compatible reader 且先关闭 generation start');
+const expectedContract = ARENA_ROOM_CHECKPOINT_CONTRACT;
 
 const sourceEvidence = [
   [

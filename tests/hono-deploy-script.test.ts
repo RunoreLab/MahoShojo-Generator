@@ -21,6 +21,9 @@ import { afterEach, describe, expect, test } from 'vitest';
 
 const deployScriptPath = path.resolve('apps/api/deploy/deploy-bundle.sh');
 const arenaRoomReleaseGatePath = path.resolve('config/arena-room-release-gate.json');
+const arenaRoomReleaseGateSchemaPath = path.resolve(
+  'scripts/arena-room-release-gate-schema.mjs',
+);
 const temporaryDirectories: string[] = [];
 const realIdPath = spawnSync('which', ['id'], { encoding: 'utf8' }).stdout.trim();
 const realMvPath = spawnSync('which', ['mv'], { encoding: 'utf8' }).stdout.trim();
@@ -41,6 +44,7 @@ const createRelease = (
     includeArenaRoomReleaseGate?: boolean;
     writerActivation?: 'disabled' | 'enabled';
     checkpointContract?: string;
+    releaseGateOverride?: Record<string, unknown>;
   } = {},
 ): { releaseDirectory: string; releaseId: string } => {
   const releaseGate = JSON.parse(
@@ -51,11 +55,19 @@ const createRelease = (
     'compose.yml': `services:\n  hono:\n    image: node:22-alpine\n    labels:\n      fixture: ${label}\n`,
     'deploy-bundle.sh': readFileSync(deployScriptPath, 'utf8'),
     ...(options.includeArenaRoomReleaseGate === false ? {} : {
-      'arena-room-release-gate.json': `${JSON.stringify({
-        ...releaseGate,
-        writerActivation: options.writerActivation ?? releaseGate.writerActivation,
-        checkpointContract: options.checkpointContract ?? releaseGate.checkpointContract,
-      }, null, 2)}\n`,
+      'arena-room-release-gate.json': `${JSON.stringify(
+        options.releaseGateOverride ?? {
+          ...releaseGate,
+          writerActivation: options.writerActivation ?? releaseGate.writerActivation,
+          checkpointContract: options.checkpointContract ?? releaseGate.checkpointContract,
+        },
+        null,
+        2,
+      )}\n`,
+      'arena-room-release-gate-schema.mjs': readFileSync(
+        arenaRoomReleaseGateSchemaPath,
+        'utf8',
+      ),
     }),
   };
   const manifest = Object.entries(files)
@@ -80,6 +92,7 @@ const createFixture = (options: {
   previousHasArenaRoomReleaseGate?: boolean;
   previousCheckpointContract?: string;
   targetWriterActivation?: 'disabled' | 'enabled';
+  targetGateOverride?: Record<string, unknown>;
 } = {}) => {
   const temporaryDirectory = mkdtempSync(path.join(tmpdir(), 'mahoshojo-deploy-test-'));
   temporaryDirectories.push(temporaryDirectory);
@@ -104,6 +117,46 @@ const createFixture = (options: {
 
   writeExecutable(path.join(commandDirectory, 'docker'), `#!/bin/sh
 printf '%s\\n' "$*" >> "$HONO_DEPLOY_TEST_COMMAND_LOG"
+case "$*" in
+  *"node /gate-schema.mjs"*)
+    if [ "\${HONO_DEPLOY_TEST_VALIDATE_GATE_SCHEMA:-false}" != true ]; then
+      exit 0
+    fi
+    gate_path=''
+    schema_path=''
+    expected_contract=''
+    expected_writer=''
+    pending_option=''
+    for argument in "$@"; do
+      if [ -n "$pending_option" ]; then
+        case "$pending_option" in
+          --expect-contract) expected_contract="$argument" ;;
+          --expect-writer) expected_writer="$argument" ;;
+        esac
+        pending_option=''
+        continue
+      fi
+      case "$argument" in
+        *:/gate.json:ro) gate_path="\${argument%:/gate.json:ro}" ;;
+        *:/gate-schema.mjs:ro) schema_path="\${argument%:/gate-schema.mjs:ro}" ;;
+        --expect-contract|--expect-writer) pending_option="$argument" ;;
+      esac
+    done
+    if [ -n "$expected_contract" ] && [ -n "$expected_writer" ]; then
+      exec "$HONO_DEPLOY_TEST_REAL_NODE" "$schema_path" --manifest "$gate_path" \
+        --expect-contract "$expected_contract" --expect-writer "$expected_writer"
+    fi
+    if [ -n "$expected_contract" ]; then
+      exec "$HONO_DEPLOY_TEST_REAL_NODE" "$schema_path" --manifest "$gate_path" \
+        --expect-contract "$expected_contract"
+    fi
+    if [ -n "$expected_writer" ]; then
+      exec "$HONO_DEPLOY_TEST_REAL_NODE" "$schema_path" --manifest "$gate_path" \
+        --expect-writer "$expected_writer"
+    fi
+    exec "$HONO_DEPLOY_TEST_REAL_NODE" "$schema_path" --manifest "$gate_path"
+    ;;
+esac
 if [ -n "\${HONO_DEPLOY_TEST_HOLD_DOCKER_MATCH:-}" ]; then
   case "$*" in
     *"$HONO_DEPLOY_TEST_HOLD_DOCKER_MATCH"*)
@@ -243,6 +296,7 @@ exit 0
 
   const release = createRelease(rootDirectory, 'target', {
     writerActivation: options.targetWriterActivation,
+    releaseGateOverride: options.targetGateOverride,
   });
   return {
     ...release,
@@ -271,6 +325,7 @@ const runDeployment = (
     publicBaseUrl?: string;
     raceAdoptionCanary?: string;
     redisKeyPrefix?: string;
+    validateGateSchema?: boolean;
   } = {},
 ) => spawnSync(
   'sh',
@@ -303,8 +358,10 @@ const runDeployment = (
       HONO_DEPLOY_TEST_COMMAND_LOG: fixture.commandLog,
       HONO_DEPLOY_TEST_PROBE_STATUS: options.probeStatus ?? '400',
       HONO_DEPLOY_TEST_RACE_ADOPTION_CANARY: options.raceAdoptionCanary ?? '',
+      HONO_DEPLOY_TEST_VALIDATE_GATE_SCHEMA: options.validateGateSchema ? 'true' : 'false',
       HONO_DEPLOY_TEST_REAL_ID: realIdPath,
       HONO_DEPLOY_TEST_REAL_MV: realMvPath,
+      HONO_DEPLOY_TEST_REAL_NODE: process.execPath,
       HONO_DEPLOY_TEST_REAL_RM: realRmPath,
       HONO_DEPLOY_TEST_REAL_SLEEP: realSleepPath,
       PATH: `${fixture.commandDirectory}:${process.env.PATH ?? ''}`,
@@ -328,6 +385,7 @@ const spawnDeployment = (
       HONO_DEPLOY_TEST_PROBE_STATUS: '400',
       HONO_DEPLOY_TEST_REAL_ID: realIdPath,
       HONO_DEPLOY_TEST_REAL_MV: realMvPath,
+      HONO_DEPLOY_TEST_REAL_NODE: process.execPath,
       HONO_DEPLOY_TEST_REAL_RM: realRmPath,
       HONO_DEPLOY_TEST_REAL_SLEEP: realSleepPath,
       PATH: `${fixture.commandDirectory}:${process.env.PATH ?? ''}`,
@@ -392,6 +450,44 @@ const getLegacyAdoptionDirectory = (
     .map(([name, content]) => `${sha256(content)}  ${name}`)
     .join('\n') + '\n';
   return path.join(fixture.rootDirectory, 'releases', sha256(manifest));
+};
+
+const installHistoricalGateBearingLegacyAdoption = (
+  fixture: ReturnType<typeof createFixture>,
+  legacy: ReturnType<typeof installDocumentedLegacyLayout>,
+): string => {
+  const files = {
+    'index.mjs': readFileSync(path.join(legacy.legacyReleaseDirectory, 'index.mjs'), 'utf8'),
+    'compose.yml': readFileSync(path.join(fixture.rootDirectory, 'compose.yml'), 'utf8'),
+    'deploy-bundle.sh': readFileSync(
+      path.join(fixture.releaseDirectory, 'deploy-bundle.sh'),
+      'utf8',
+    ),
+    'arena-room-release-gate.json': readFileSync(arenaRoomReleaseGatePath, 'utf8'),
+    'legacy-layout': `root-release-layout-v1:${legacy.legacyReleaseId}\n`,
+  };
+  const manifest = Object.entries(files)
+    .map(([name, content]) => `${sha256(content)}  ${name}`)
+    .join('\n') + '\n';
+  const adoptionId = sha256(manifest);
+  const adoptionDirectory = path.join(fixture.rootDirectory, 'releases', adoptionId);
+  mkdirSync(adoptionDirectory);
+  for (const [name, content] of Object.entries(files)) {
+    writeFileSync(path.join(adoptionDirectory, name), content);
+  }
+  chmodSync(path.join(adoptionDirectory, 'deploy-bundle.sh'), 0o755);
+  writeFileSync(path.join(adoptionDirectory, 'release.manifest'), manifest);
+  writeFileSync(
+    path.join(adoptionDirectory, 'release.sha256'),
+    `${adoptionId}  release.manifest\n`,
+  );
+  writeFileSync(
+    path.join(fixture.rootDirectory, '.env'),
+    `HONO_RELEASE_DIR=${adoptionDirectory}\n`,
+  );
+  symlinkSync(adoptionDirectory, path.join(fixture.rootDirectory, 'current'));
+  writeFileSync(path.join(fixture.rootDirectory, 'deployment-format'), 'release-tuple-v2\n');
+  return adoptionDirectory;
 };
 
 const waitForFile = async (filePath: string, timeoutMs = 2_000): Promise<void> => {
@@ -634,6 +730,28 @@ describe('Hono release-local deployment transaction', () => {
     );
   });
 
+  test('嵌套文本不能冒充规范 release gate 字段', () => {
+    const fixture = createFixture({
+      targetGateOverride: {
+        metadata: {
+          writerActivation: 'disabled',
+          checkpointContract: 'arena-room-authority-v2-generation-payload-digest-v1',
+        },
+      },
+    });
+
+    const result = runDeployment(fixture, { validateGateSchema: true });
+    const commands = readFileSync(fixture.commandLog, 'utf8');
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('顶层字段');
+    expect(commands).toContain('node /gate-schema.mjs --manifest /gate.json');
+    expect(commands).not.toContain(`-f ${fixture.releaseDirectory}/compose.yml up`);
+    expect(readlinkSync(path.join(fixture.rootDirectory, 'current'))).toBe(
+      fixture.previousReleaseDirectory,
+    );
+  });
+
   test('writer-enabled rollback 只恢复声明 compatible contract 的 previous tuple', () => {
     const fixture = createFixture({ targetWriterActivation: 'enabled' });
 
@@ -652,11 +770,14 @@ describe('Hono release-local deployment transaction', () => {
       targetWriterActivation: 'enabled',
     });
 
-    const result = runDeployment(fixture, { probeStatus: '500' });
+    const result = runDeployment(fixture, {
+      probeStatus: '500',
+      validateGateSchema: true,
+    });
     const commands = readFileSync(fixture.commandLog, 'utf8');
 
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain('rollback target reader contract 不兼容');
+    expect(result.stderr).toContain('rollback target reader contract schema 不兼容');
     expect(commands).not.toContain(
       `-f ${fixture.previousReleaseDirectory}/compose.yml up -d --force-recreate hono`,
     );
@@ -850,6 +971,34 @@ describe('Hono release-local deployment transaction', () => {
     expect(readlinkSync(path.join(fixture.rootDirectory, 'current'))).toBe(
       fixture.releaseDirectory,
     );
+  });
+
+  test('pending journal 恢复读取 gate 前必须重验 failed tuple', () => {
+    const fixture = createFixture();
+    writeFileSync(
+      path.join(fixture.rootDirectory, '.env'),
+      `HONO_RELEASE_DIR=${fixture.releaseDirectory}\n`,
+    );
+    unlinkSync(path.join(fixture.rootDirectory, 'current'));
+    symlinkSync(fixture.releaseDirectory, path.join(fixture.rootDirectory, 'current'));
+    writeFileSync(path.join(fixture.rootDirectory, 'deploy.transaction'), [
+      'TRANSACTION_STATE=pending',
+      `TARGET_RELEASE_DIR=${fixture.releaseDirectory}`,
+      'HAD_PREVIOUS=true',
+      `PREVIOUS_RELEASE_DIR=${fixture.previousReleaseDirectory}`,
+      '',
+    ].join('\n'));
+    unlinkSync(path.join(fixture.releaseDirectory, 'arena-room-release-gate.json'));
+
+    const result = runDeployment(fixture);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('failed release tuple 已漂移');
+    expect(existsSync(path.join(fixture.rootDirectory, 'deploy.transaction'))).toBe(true);
+    expect(readlinkSync(path.join(fixture.rootDirectory, 'current'))).toBe(
+      fixture.releaseDirectory,
+    );
+    expect(existsSync(fixture.commandLog)).toBe(false);
   });
 
   test('previous tuple checksum 损坏时在激活新版本前 fail closed', () => {
@@ -1147,6 +1296,25 @@ describe('Hono release-local deployment transaction', () => {
     expect(readFileSync(fixture.commandLog, 'utf8')).toContain(
       `-f ${adoptedDirectory}/compose.yml up -d --force-recreate hono`,
     );
+  });
+
+  test('历史 gate-bearing legacy adoption tuple 不得冒认 compatible reader', () => {
+    const fixture = createFixture();
+    const legacy = installDocumentedLegacyLayout(fixture);
+    const adoptionDirectory = installHistoricalGateBearingLegacyAdoption(fixture, legacy);
+
+    const result = runDeployment(fixture);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(
+      'legacy adoption tuple 不得声明 Arena Room reader capability',
+    );
+    expect(readlinkSync(path.join(fixture.rootDirectory, 'current'))).toBe(
+      adoptionDirectory,
+    );
+    const commands = readFileSync(fixture.commandLog, 'utf8');
+    expect(commands).not.toContain(`-f ${fixture.releaseDirectory}/compose.yml up`);
+    expect(commands).not.toContain(`-f ${adoptionDirectory}/compose.yml up`);
   });
 
   test('legacy 纳管目标是 dangling symlink 时保留链接与旧 metadata 并 fail closed', () => {
