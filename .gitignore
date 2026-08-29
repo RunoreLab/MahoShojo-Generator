@@ -66,6 +66,9 @@ next-env.d.ts
 # Doccuments
 /docs/temp
 /docs/logs
+!/docs/logs/
+/docs/logs/*
+!/docs/logs/2026-08-29_184200_Admin回归G3-P0安全基座实施与审查日志.md
 current_state.md
 
 # OS files
