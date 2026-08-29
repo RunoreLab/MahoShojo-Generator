@@ -52,48 +52,131 @@ const bindingNames = [...new Set(manifest.capabilities.flatMap((capability) => (
 const failures = [];
 const routingSources = [];
 
-const originPattern = /https?:\/\/(?:\[[^\]]+\]|[^/\s"'`;,)}]+)/giu;
-const dynamicIpv6OriginPattern = /^https?:\/\/\[\$\{[A-Za-z_$][A-Za-z0-9_.$]*\}\]$/iu;
-const frameworkOriginFixtures = new Map([
+const absoluteUrlStartPattern = /https?:\/\//giu;
+const absoluteUrlCandidatePattern = /^https?:\/\/(?:\[[^\]\s"'`\\]+\](?::\d+)?|[^/?#\s"'`\\;,)}]+)(?:\/[^\s"'`\\]*|[?#][^\s"'`\\]*)?/iu;
+const protocolRelativeUrlLiteralPattern = /(["'`])(\/\/[^\s"'`\\]+)\1/gu;
+const dynamicIpv6UrlCandidatePattern = /^(?:https?:)?\/\/\[\$\{[A-Za-z_$][A-Za-z0-9_.$]*\}\]$/iu;
+const protocolRelativeBase = 'https://bundle.invalid';
+const frameworkUrlFixtures = new Map([
   ['chunks/main-', new Set(['http://n', 'http://f'])],
   ['chunks/polyfills-', new Set([
     'https://a',
+    'https://a/c%20d?a=1&c=3',
     'https://a@b',
     'https://тест',
     'https://a#б',
     'https://x',
   ])],
 ]);
-const isAllowedSyntheticOrigin = (relativePath, source, origin, matchIndex) => {
-  for (const [prefix, origins] of frameworkOriginFixtures) {
-    if (relativePath.startsWith(prefix) && origins.has(origin)) return true;
+const publicUrlMetadataRules = [
+  {
+    hostname: 'api.kourichat.com',
+    pathname: '/register',
+    queryKeys: ['aff'],
+    hash: '',
+  },
+  {
+    hostname: 'chatboxai.app',
+    pathname: '/zh/',
+    queryKeys: [],
+    hash: '#pricing',
+  },
+  {
+    hostname: '88996.cloud',
+    pathname: '/register',
+    queryKeys: ['aff'],
+    hash: '',
+  },
+  {
+    hostname: 'nova.cervus.top',
+    pathname: '/register',
+    queryKeys: ['aff'],
+    hash: '',
+  },
+  {
+    hostname: 'qm.qq.com',
+    pathname: '/cgi-bin/qm/qr',
+    queryKeys: ['authKey', 'jump_from', 'k'],
+    hash: '',
+  },
+  {
+    hostname: 'qun.qq.com',
+    pathname: '/universal-share/share',
+    queryKeys: ['ac', 'authKey', 'busi_data', 'data', 'svctype', 'tempid'],
+    hash: '',
+  },
+  {
+    hostname: 'www.googletagmanager.com',
+    pathname: '/gtag/js',
+    queryKeys: ['id'],
+    hash: '',
+  },
+  {
+    hostname: 'nextjs.org',
+    pathname: '/docs/app/api-reference/functions/use-search-params',
+    queryKeys: [],
+    hash: '#updating-searchparams',
+  },
+];
+const isAllowedSyntheticUrl = (relativePath, source, candidate, matchIndex) => {
+  for (const [prefix, candidates] of frameworkUrlFixtures) {
+    if (relativePath.startsWith(prefix) && candidates.has(candidate)) return true;
   }
-  if (origin !== 'http://localhost') return false;
+  if (candidate !== 'http://localhost/') return false;
   const prefix = source.slice(Math.max(0, matchIndex - 64), matchIndex);
   return prefix.endsWith('location&&location.href?location.href:"')
     || prefix.endsWith('location?.href??"');
 };
+const isAllowedPublicUrlMetadata = (candidate, parsed) => {
+  if (!candidate.toLowerCase().startsWith('https://')) return false;
+  if (parsed.username || parsed.password) return false;
+  const queryKeys = [...parsed.searchParams.keys()].sort();
+  return publicUrlMetadataRules.some((rule) => (
+    parsed.hostname === rule.hostname
+    && parsed.pathname === rule.pathname
+    && parsed.hash === rule.hash
+    && queryKeys.length === rule.queryKeys.length
+    && queryKeys.every((key, index) => key === rule.queryKeys[index])
+  ));
+};
 
-const scanInternalOrigins = (relativePath, source) => {
-  for (const match of source.matchAll(originPattern)) {
-    const origin = match[0];
-    if (dynamicIpv6OriginPattern.test(origin)) continue;
+const listStaticUrlCandidates = function* (source) {
+  for (const match of source.matchAll(absoluteUrlStartPattern)) {
+    const matchIndex = match.index ?? 0;
+    const candidate = source.slice(matchIndex).match(absoluteUrlCandidatePattern)?.[0];
+    if (candidate) yield { candidate, matchIndex };
+  }
+  for (const match of source.matchAll(protocolRelativeUrlLiteralPattern)) {
+    const candidate = match[2];
+    if (!candidate) continue;
+    yield {
+      candidate,
+      matchIndex: (match.index ?? 0) + 1,
+    };
+  }
+};
+
+const scanStaticUrls = (relativePath, source) => {
+  for (const { candidate, matchIndex } of listStaticUrlCandidates(source)) {
+    if (dynamicIpv6UrlCandidatePattern.test(candidate)) continue;
     let parsed;
     try {
-      parsed = new URL(origin);
+      parsed = new URL(candidate, protocolRelativeBase);
     } catch {
       failures.push(`${relativePath}: client bundle 包含非法 origin`);
       continue;
     }
-    const allowedSyntheticOrigin = isAllowedSyntheticOrigin(
+    const allowedSyntheticUrl = isAllowedSyntheticUrl(
       relativePath,
       source,
-      origin,
-      match.index ?? 0,
+      candidate,
+      matchIndex,
     );
+    const allowedPublicUrlMetadata = isAllowedPublicUrlMetadata(candidate, parsed);
     if (
       (parsed.username || parsed.password || parsed.search || parsed.hash)
-      && !allowedSyntheticOrigin
+      && !allowedSyntheticUrl
+      && !allowedPublicUrlMetadata
     ) {
       failures.push(
         `${relativePath}: client bundle 包含 credential/query/fragment URL`,
@@ -113,9 +196,9 @@ const scanInternalOrigins = (relativePath, source) => {
       || hostname.endsWith('.internal');
     if (
       isInternal
-      && !allowedSyntheticOrigin
+      && !allowedSyntheticUrl
     ) {
-      failures.push(`${relativePath}: client bundle 包含 internal endpoint ${origin}`);
+      failures.push(`${relativePath}: client bundle 包含 internal endpoint`);
     }
   }
 };
@@ -140,7 +223,7 @@ for (const filePath of listJavaScript(staticRoot)) {
       failures.push(`${relativePath}: client bundle 包含 secret ${secretName}`);
     }
   }
-  scanInternalOrigins(relativePath, source);
+  scanStaticUrls(relativePath, source);
   scanBindings(relativePath, source);
   if (routingTokens.every((token) => source.includes(token))) {
     routingSources.push({ relativePath, source });

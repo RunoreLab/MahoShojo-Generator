@@ -139,13 +139,92 @@ describe('Hosted DR client bundle safety gate', () => {
   });
 
   it.each([
-    ['credential', 'https://user:bundle-secret@example.com'],
-    ['query', 'https://example.com?token=bundle-secret'],
-    ['fragment', 'https://example.com#bundle-secret'],
-  ])('拒绝客户端 chunk 的 %s URL 且不回显值', (_label, endpoint) => {
+    ['credential', 'https://user:bundle-secret@example.com', 'bundle-secret'],
+    ['query', 'https://example.com?token=bundle-secret', 'bundle-secret'],
+    ['fragment', 'https://example.com#bundle-secret', 'bundle-secret'],
+    ['path + query', 'https://example.com/path?token=bundle-secret', 'bundle-secret'],
+    ['nested path + fragment', 'https://example.com/a/b#bundle-secret', 'bundle-secret'],
+    [
+      'path + port + encoded query',
+      'https://example.com:8443/a;b?token=bundle%2Dsecret',
+      'bundle%2Dsecret',
+    ],
+    [
+      'punctuated path + encoded fragment',
+      'https://example.com/a,b(c)}#bundle%2Dsecret',
+      'bundle%2Dsecret',
+    ],
+    [
+      'IPv6 + port + path + query',
+      'https://[2001:db8::1]:8443/a?token=bundle-secret',
+      'bundle-secret',
+    ],
+    [
+      'protocol-relative path + query',
+      '//example.com/path?token=bundle-secret',
+      'bundle-secret',
+    ],
+  ])('拒绝客户端 chunk 的 %s URL 且不回显值', (_label, endpoint, marker) => {
     const result = runCheckerFiles({
       'routing.js': routingBundle(),
       'leaked.js': `const fallback="${endpoint}"`,
+    });
+    const output = `${result.stdout}\n${result.stderr}`;
+
+    expect(result.status).toBe(1);
+    expect(output).toContain('credential/query/fragment URL');
+    expect(output).not.toContain(marker);
+  });
+
+  it('拒绝协议相对 internal endpoint 且不回显 path', () => {
+    const result = runCheckerFiles({
+      'routing.js': routingBundle(),
+      'leaked.js': 'const fallback="//router.service.internal/private/bundle-secret"',
+    });
+    const output = `${result.stdout}\n${result.stderr}`;
+
+    expect(result.status).toBe(1);
+    expect(output).toContain('internal endpoint');
+    expect(output).not.toContain('bundle-secret');
+  });
+
+  it('接受不含 metadata 的公开 path URL', () => {
+    const result = runCheckerFiles({
+      'routing.js': routingBundle(),
+      'public.js': 'const docs="https://docs.example.com/a;b,c(d)}"',
+    });
+
+    expect(result.status).toBe(0);
+  });
+
+  it.each([
+    ['provider referral', 'https://api.kourichat.com/register?aff=public'],
+    ['provider fragment', 'https://chatboxai.app/zh/#pricing'],
+    [
+      'community invite',
+      'https://qm.qq.com/cgi-bin/qm/qr?k=public&jump_from=webapi&authKey=public',
+    ],
+    ['analytics script', 'https://www.googletagmanager.com/gtag/js?id=public'],
+    [
+      'framework docs',
+      'https://nextjs.org/docs/app/api-reference/functions/use-search-params#updating-searchparams',
+    ],
+  ])('接受已登记的公开 %s URL metadata shape', (_label, endpoint) => {
+    const result = runCheckerFiles({
+      'routing.js': routingBundle(),
+      'public.js': `const publicLink="${endpoint}"`,
+    });
+
+    expect(result.status).toBe(0);
+  });
+
+  it('公开 URL metadata allowlist 对额外 query key fail closed', () => {
+    const result = runCheckerFiles({
+      'routing.js': routingBundle(),
+      'leaked.js': [
+        'const fallback="https://qm.qq.com/cgi-bin/qm/qr',
+        '?k=public&jump_from=webapi&authKey=public&token=bundle-secret"',
+      ].join(''),
     });
     const output = `${result.stdout}\n${result.stderr}`;
 
@@ -158,7 +237,10 @@ describe('Hosted DR client bundle safety gate', () => {
     const result = runCheckerFiles({
       'routing.js': routingBundle(),
       'main-framework.js': 'new URL("/", "http://n")',
-      'polyfills-framework.js': 'new URL("/", "https://a")',
+      'polyfills-framework.js': [
+        'new URL("/", "https://a");',
+        'new URL("https://a/c%20d?a=1&c=3");',
+      ].join(''),
       'snapdom.js': 'location&&location.href?location.href:"http://localhost/"',
     });
 
