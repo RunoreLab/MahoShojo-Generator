@@ -558,6 +558,16 @@ for (const scriptName of ['build', 'build:cf']) {
     fail(`apps/web ${scriptName} 必须先执行 Hosted DR validator`);
   }
 }
+if (!webPackage.scripts?.['build:next']?.includes(
+  'check-hosted-dr-client-bundle.mjs --dir .next/static',
+)) {
+  fail('apps/web build:next 必须验证 Next client bundle 的 Hosted DR 安全投影');
+}
+if (!webPackage.scripts?.['build:cf']?.includes(
+  'check-hosted-dr-client-bundle.mjs --dir .open-next/assets/_next/static',
+)) {
+  fail('apps/web build:cf 必须验证 OpenNext client bundle 的 Hosted DR 安全投影');
+}
 const nextGuardSource = readFileSync(
   path.join(repositoryRoot, 'apps/web/lib/hosted-dr/capability-guard.ts'),
   'utf8',

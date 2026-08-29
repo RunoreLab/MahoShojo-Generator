@@ -42,6 +42,7 @@ const canonicalAutomatedEvidence = Object.freeze({
   'client-preflight-routing-and-zero-replay': [
     'apps/web/tests/hosted-dr-client-preflight.test.ts',
     'apps/web/tests/hono-api-client.test.ts',
+    'tests/hosted-dr-client-bundle.test.ts',
   ],
 });
 const canonicalAutomatedCoverage = Object.keys(canonicalAutomatedEvidence);
