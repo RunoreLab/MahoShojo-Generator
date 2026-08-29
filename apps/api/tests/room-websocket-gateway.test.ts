@@ -93,6 +93,15 @@ const wsContext = (socket: FakeWebSocket): WSContext<WebSocketLike> => {
   return { raw: socket } as unknown as WSContext<WebSocketLike>;
 };
 
+const closeEvent = (code = 1000): CloseEvent => Object.assign(
+  new Event('close'),
+  {
+    code,
+    reason: '',
+    wasClean: false,
+  },
+);
+
 const openReservation = (
   gateway: RoomWebSocketGateway,
   reservation: RoomWebSocketReservation,
@@ -188,7 +197,7 @@ describe('RoomWebSocketGateway', () => {
     expect(whileActive).toMatchObject({ accepted: false, response: { status: 429 } });
 
     socket.readyState = 3;
-    events.onClose?.(new CloseEvent('close', { code: 1000 }), wsContext(socket));
+    events.onClose?.(closeEvent(), wsContext(socket));
     const afterClose = await gateway.prepareUpgrade(upgradeRequest());
     expect(afterClose.accepted).toBe(true);
   });
@@ -290,8 +299,8 @@ describe('RoomWebSocketGateway', () => {
     expect(socket.sent).toHaveLength(2);
 
     socket.readyState = 3;
-    events.onClose?.(new CloseEvent('close', { code: 1000 }), wsContext(socket));
-    events.onClose?.(new CloseEvent('close', { code: 1000 }), wsContext(socket));
+    events.onClose?.(closeEvent(), wsContext(socket));
+    events.onClose?.(closeEvent(), wsContext(socket));
     await vi.waitFor(() => expect(dispose).toHaveBeenCalledOnce());
   });
 
@@ -494,7 +503,7 @@ describe('RoomWebSocketGateway', () => {
 
     secondSocket.readyState = 3;
     secondOpened.events.onClose?.(
-      new CloseEvent('close', { code: 1000 }),
+      closeEvent(),
       wsContext(secondSocket),
     );
     expect(backlogs().at(-1)).toEqual({
@@ -508,7 +517,7 @@ describe('RoomWebSocketGateway', () => {
 
     firstSocket.readyState = 3;
     firstOpened.events.onClose?.(
-      new CloseEvent('close', { code: 1000 }),
+      closeEvent(),
       wsContext(firstSocket),
     );
     expect(observations.filter((observation) => observation.event === 'socket')).toEqual([
@@ -543,7 +552,7 @@ describe('RoomWebSocketGateway', () => {
 
     opened.socket.readyState = 3;
     opened.events.onClose?.(
-      new CloseEvent('close', { code: 1000 }),
+      closeEvent(),
       wsContext(opened.socket),
     );
 
