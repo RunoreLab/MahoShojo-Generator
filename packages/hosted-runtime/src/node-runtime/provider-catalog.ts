@@ -108,20 +108,25 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 label: '默认策略',
                 description: '常规场景保持原有调用顺序，默认倾向使用 Gemini 2.5 Flash；排位优先使用轻量模型。'
             },
+            // {
+            //     value: 'big-pickle',
+            //     label: '实验性/推广模型',
+            //     description: '可能会随时更换的、处于实验或推广期的模型，或许能带来一些新奇的体验，但不建议发送敏感或私密数据。'
+            // },
+            // {
+            //     value: 'deepseek-v4-flash-0731',
+            //     label: 'DeepSeek V4 Flash',
+            //     description: 'DeepSeek V4 Flash 正式版，Agent 能力大幅增强，百万级上下文，兼顾质量与成本。'
+            // },
+            // {
+            //     value: 'deepseek-v4-pro',
+            //     label: 'DeepSeek V4 Pro',
+            //     description: 'DeepSeek V4 完全体，适合复杂分析、长文本写作与高质量生成。'
+            // },
             {
-                value: 'big-pickle',
-                label: '实验性/推广模型',
-                description: '可能会随时更换的、处于实验或推广期的模型，或许能带来一些新奇的体验，但不建议发送敏感或私密数据。'
-            },
-            {
-                value: 'deepseek-v4-flash-0731',
-                label: 'DeepSeek V4 Flash',
-                description: 'DeepSeek V4 Flash 正式版，Agent 能力大幅增强，百万级上下文，兼顾质量与成本。'
-            },
-            {
-                value: 'deepseek-v4-pro',
-                label: 'DeepSeek V4 Pro',
-                description: 'DeepSeek V4 完全体，适合复杂分析、长文本写作与高质量生成。'
+                value: 'gemini-3.7-flash',
+                label: 'Gemini 3.7 Flash',
+                description: 'Google 的新模型，据用户评测说很喜欢一惊一乍，还挺中二的。'
             },
             {
                 value: 'glm-5.2',
@@ -134,30 +139,25 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 description: '智谱通用模型，综合能力均衡，适合复杂指令、多轮对话与高质量创作。'
             },
             {
-                value: 'gemini-3.6-flash',
-                label: 'Gemini 3.6 Flash',
-                description: 'Google 的新模型，据用户评测说很喜欢一惊一乍，还挺中二的。'
-            },
-            {
                 value: 'gemini-3.5-flash-lite',
                 label: 'Gemini 3.5 Flash Lite',
                 description: 'Google 高速轻量模型，适合预算敏感与高并发生成场景。'
             },
-            {
-                value: 'gemma-4-31b-it',
-                label: 'Gemma 4 31B IT',
-                description: 'Gemma 4 指令模型（31B），适合作为高优先级的 Gemma 备用选择。'
-            },
-            {
-                value: 'gemma-4-26b-a4b-it',
-                label: 'Gemma 4 26B A4B IT',
-                description: 'Gemma 4 指令模型（26B A4B），建议先作为可选备用通道使用。'
-            },
-            {
-                value: 'gemma-3-27b-it',
-                label: 'Gemma 3 27B IT',
-                description: '更便宜但也更弱的 Gemma 3 指令模型（27B），建议仅作为流式输出的备用选择。'
-            }
+            // {
+            //     value: 'gemma-4-31b-it',
+            //     label: 'Gemma 4 31B IT',
+            //     description: 'Gemma 4 指令模型（31B），适合作为高优先级的 Gemma 备用选择。'
+            // },
+            // {
+            //     value: 'gemma-4-26b-a4b-it',
+            //     label: 'Gemma 4 26B A4B IT',
+            //     description: 'Gemma 4 指令模型（26B A4B），建议先作为可选备用通道使用。'
+            // },
+            // {
+            //     value: 'gemma-3-27b-it',
+            //     label: 'Gemma 3 27B IT',
+            //     description: '更便宜但也更弱的 Gemma 3 指令模型（27B），建议仅作为流式输出的备用选择。'
+            // }
         ]
     },
     {
