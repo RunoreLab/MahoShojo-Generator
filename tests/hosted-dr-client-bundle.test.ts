@@ -101,6 +101,16 @@ describe('Hosted DR client bundle safety gate', () => {
     expect(`${result.stdout}\n${result.stderr}`).toContain('internal endpoint');
   });
 
+  it('拒绝被拆分到非 routing chunk 的 IP endpoint', () => {
+    const result = runCheckerFiles({
+      'routing.js': routingBundle(),
+      'leaked.js': 'const fallback="http://10.0.0.8:8787"',
+    });
+
+    expect(result.status).toBe(1);
+    expect(`${result.stdout}\n${result.stderr}`).toContain('internal endpoint');
+  });
+
   it('缺少完整 client-preflight routing projection 时 fail closed', () => {
     const result = runChecker('https://homura.colanns.me;/api/health/ready');
 

@@ -53,24 +53,26 @@ const failures = [];
 const routingSources = [];
 
 const originPattern = /https?:\/\/(?:\[[^\]]+\]|[^/\s"'`;,)}]+)/gu;
-const scanInternalOrigins = (relativePath, source) => {
+const scanInternalOrigins = (relativePath, source, { strict }) => {
   for (const match of source.matchAll(originPattern)) {
     const origin = match[0];
     let parsed;
     try {
       parsed = new URL(origin);
     } catch {
-      failures.push(`${relativePath}: client bundle 包含非法 origin ${origin}`);
+      if (strict) failures.push(`${relativePath}: Hosted routing chunk 包含非法 origin ${origin}`);
       continue;
     }
-    const hostname = parsed.hostname.toLowerCase();
-    if (
-      isIP(hostname) !== 0
+    const hostname = parsed.hostname.toLowerCase().replace(/^\[|\]$/gu, '');
+    const isCrossChunkInternal = isIP(hostname) !== 0 || hostname.endsWith('.internal');
+    const isStrictInternal = isCrossChunkInternal
       || !hostname.includes('.')
       || hostname === 'localhost'
       || hostname.endsWith('.localhost')
-      || hostname.endsWith('.local')
-      || hostname.endsWith('.internal')
+      || hostname.endsWith('.local');
+    if (
+      (strict && isStrictInternal)
+      || (!strict && isCrossChunkInternal)
     ) {
       failures.push(`${relativePath}: client bundle 包含 internal endpoint ${origin}`);
     }
@@ -85,7 +87,7 @@ for (const filePath of listJavaScript(staticRoot)) {
       failures.push(`${relativePath}: client bundle 包含 secret ${secretName}`);
     }
   }
-  scanInternalOrigins(relativePath, source);
+  scanInternalOrigins(relativePath, source, { strict: false });
   if (routingTokens.every((token) => source.includes(token))) {
     routingSources.push({ relativePath, source });
   }
@@ -96,6 +98,7 @@ if (routingSources.length === 0) {
 }
 
 for (const { relativePath, source } of routingSources) {
+  scanInternalOrigins(relativePath, source, { strict: true });
   for (const bindingName of bindingNames) {
     const bindingIdentifier = new RegExp(
       `(^|[^A-Za-z0-9_$])${bindingName}([^A-Za-z0-9_$]|$)`,
