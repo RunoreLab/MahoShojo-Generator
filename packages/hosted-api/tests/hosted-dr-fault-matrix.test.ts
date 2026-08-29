@@ -33,7 +33,7 @@ const createProvider = (
 });
 
 describe('G25E-2 Hosted DR fault matrix: selector/readiness/cutback', () => {
-  it('G25E2-HONO-UNAVAILABLE：primary 不可达时 stable client 直接使用 DR readiness', async () => {
+  it('G25E2-HONO-UNAVAILABLE：primary 不可达时 safe-read 进入 DR readiness', async () => {
     const primaryProbe = vi.fn(async () => {
       throw new Error('Hono primary unavailable');
     });
@@ -46,8 +46,10 @@ describe('G25E-2 Hosted DR fault matrix: selector/readiness/cutback', () => {
     });
     expect(selected).toBe('next-dr');
     expect(clientProjection).toContain('https://api.mahoshojo.colanns.me');
-    expect(clientProjection).not.toContain('homura.colanns.me');
-    expect(clientProjection).not.toContain('https://mahoshojo.colanns.me');
+    expect(clientProjection).toContain('"defaultMode": "client-preflight"');
+    expect(clientProjection).toContain('"primaryOrigin": "https://homura.colanns.me"');
+    expect(clientProjection).toContain('"drOrigin": "https://mahoshojo.colanns.me"');
+    expect(clientProjection).not.toContain('SIGNATURE_SECRET_KEY');
 
     const dr = createHostedDrReadinessService({
       placement: 'next-dr',
