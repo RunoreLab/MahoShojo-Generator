@@ -37,6 +37,8 @@
     "check:naming:strict": "node scripts/check-naming-conventions.mjs",
     "check:naming:workspace": "node scripts/check-naming-conventions.mjs --workspace-only",
     "check:workspace:boundaries": "node scripts/check-workspace-boundaries.mjs",
+    "check:admin-inventory": "vitest run --config vitest.config.ts tests/admin-migration-inventory.test.ts",
+    "check:admin-boundary": "vitest run --config vitest.config.ts tests/admin-security-boundary.test.ts && node scripts/check-admin-security-boundary.mjs",
     "check:hosted-dr:schema": "node scripts/check-hosted-dr-schema.mjs",
     "check:hosted-dr": "pnpm run check:hosted-dr:schema && node scripts/check-hosted-dr-contract.mjs",
     "check:user-visible-contracts": "node scripts/check-user-visible-contracts.mjs",
@@ -52,7 +54,7 @@
     "workspace:test": "pnpm --filter \"./packages/*\" --filter \"./apps/*\" --if-present run test",
     "workspace:lint": "pnpm --filter \"./packages/*\" --filter \"./apps/*\" --if-present run lint",
     "workspace:build": "pnpm --filter \"./packages/*\" --filter \"./apps/*\" --if-present run build",
-    "workspace:verify": "pnpm run check:workspace:boundaries && pnpm run check:naming:workspace && pnpm run check:hosted-dr && pnpm run check:user-visible-contracts && pnpm run check:arena-room-hardening && pnpm run workspace:test && pnpm run workspace:lint && pnpm run workspace:build",
+    "workspace:verify": "pnpm run check:workspace:boundaries && pnpm run check:admin-inventory && pnpm run check:admin-boundary && pnpm run check:naming:workspace && pnpm run check:hosted-dr && pnpm run check:user-visible-contracts && pnpm run check:arena-room-hardening && pnpm run workspace:test && pnpm run workspace:lint && pnpm run workspace:build",
     "ci:verify": "pnpm run workspace:verify && pnpm run check:preview:environment && pnpm run verify:hosted-dr && pnpm run check:arena-room-release && pnpm run test:repo && pnpm run lint:repo"
   },
   "devDependencies": {
@@ -63,6 +65,7 @@
     "esbuild": "^0.28.1",
     "eslint": "^9",
     "typescript": "^5",
-    "vitest": "^4.1.7"
+    "vitest": "^4.1.7",
+    "yaml": "2.9.0"
   }
 }
