@@ -146,9 +146,14 @@ const wrapAmbiguousBodyErrors = (
         controller.error(ambiguousOutcomeError(decision));
       }
     },
-    cancel(reason) {
-      observeTerminal('cancelled');
-      return reader.cancel(reason);
+    async cancel(reason) {
+      observeTerminal('ambiguous');
+      try {
+        await reader.cancel(reason);
+      } catch {
+        // dispatch 后的取消结果始终按 ambiguous 投影，不泄漏底层 stream 错误。
+      }
+      throw ambiguousOutcomeError(decision);
     },
   });
   return new Response(body, {
@@ -211,13 +216,13 @@ export const createGenerationApiIntent = ({
         if (!headers.has(name)) headers.set(name, value);
       }
 
+      let response: Response;
       try {
-        const response = await fetcher(target, {
+        response = await fetcher(target, {
           ...init,
           headers,
           credentials: target === input ? (init.credentials ?? 'same-origin') : 'omit',
         });
-        return wrapAmbiguousBodyErrors(response, decision, observe);
       } catch {
         if (decision) {
           emitHostedDrClientTelemetry(
@@ -227,11 +232,21 @@ export const createGenerationApiIntent = ({
         }
         throw ambiguousOutcomeError(decision);
       }
+
+      if (decision && response.status >= 500) {
+        emitHostedDrClientTelemetry(
+          observe,
+          createHostedDrTerminalTelemetry(decision, 'ambiguous'),
+        );
+        try {
+          await response.body?.cancel();
+        } catch {
+          // 业务请求已经 dispatch；清理响应体失败不得覆盖 ambiguous 结果。
+        }
+        throw ambiguousOutcomeError(decision);
+      }
+
+      return wrapAmbiguousBodyErrors(response, decision, observe);
     },
   });
 };
-
-export const generationApiFetch = async (
-  input: string,
-  init: RequestInit = {},
-): Promise<Response> => createGenerationApiIntent().dispatch(input, init);

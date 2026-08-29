@@ -22,7 +22,7 @@ import { readJsonOrTextFromResponse, resolveApiErrorMessage } from '@/lib/client
 import { AI_META_REQUEST_HEADER, AI_META_REQUEST_VALUE, readJsonWithAiMeta } from '@/lib/client/read-json-with-ai-meta';
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
 import { authStorage } from '@/lib/auth';
-import { generationApiFetch } from '@/lib/hono-api-client';
+import { createGenerationApiIntent } from '@/lib/hono-api-client';
 import { STREAM_ABORT_REASON_USER } from '@/lib/stream/abort';
 import { buildCustomProviderRequestPayload } from '@/lib/ai/custom-provider';
 import {
@@ -336,7 +336,8 @@ export const ScenarioPage: React.FC = () => {
         streamAbortControllerRef.current?.abort(STREAM_ABORT_REASON_USER);
         streamAbortControllerRef.current = streamController;
       }
-      const response = await generationApiFetch(endpoint, {
+      const generationIntent = createGenerationApiIntent();
+      const response = await generationIntent.dispatch(endpoint, {
         method: 'POST',
         headers: requestHeaders,
         body: JSON.stringify({

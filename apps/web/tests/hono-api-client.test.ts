@@ -14,7 +14,6 @@ vi.mock('@/lib/auth', () => ({
 
 import {
   createGenerationApiIntent,
-  generationApiFetch,
   isHonoApiPath,
   resolveGenerationApiUrl,
 } from '@/lib/hono-api-client';
@@ -190,7 +189,7 @@ describe('Hono API 客户端', () => {
     const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
     vi.stubGlobal('fetch', fetchMock);
 
-    await generationApiFetch('/api/generate-game-card', {
+    await createGenerationApiIntent().dispatch('/api/generate-game-card', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
     });
@@ -219,7 +218,7 @@ describe('Hono API 客户端', () => {
       .mockResolvedValueOnce(new Response(null, { status: 204 }));
     vi.stubGlobal('fetch', fetchMock);
 
-    await generationApiFetch('/api/generate-free', {
+    await createGenerationApiIntent().dispatch('/api/generate-free', {
       method: 'POST',
       body: JSON.stringify({ prompt: 'client-body-canary' }),
     });
@@ -249,7 +248,7 @@ describe('Hono API 客户端', () => {
       .mockResolvedValueOnce(new Response(null, { status: 204 }));
     vi.stubGlobal('fetch', fetchMock);
 
-    await generationApiFetch('/api/generate-game-card', { method: 'POST' });
+    await createGenerationApiIntent().dispatch('/api/generate-game-card', { method: 'POST' });
 
     expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(fetchMock.mock.calls[2]?.[0]).toBe('/api/generate-game-card');
@@ -267,7 +266,7 @@ describe('Hono API 客户端', () => {
     const fetchMock = vi.fn(async () => Response.json({ ok: false }, { status: 503 }));
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(generationApiFetch('/api/arena/generate', { method: 'POST' }))
+    await expect(createGenerationApiIntent().dispatch('/api/arena/generate', { method: 'POST' }))
       .rejects.toMatchObject({ code: 'DR_NOT_ELIGIBLE' });
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
@@ -286,7 +285,10 @@ describe('Hono API 客户端', () => {
       .mockRejectedValueOnce(new TypeError('connection reset'));
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(generationApiFetch('/api/generate-canshou-stream', { method: 'POST' }))
+    await expect(createGenerationApiIntent().dispatch(
+      '/api/generate-canshou-stream',
+      { method: 'POST' },
+    ))
       .rejects.toMatchObject({ code: 'AMBIGUOUS_OPERATION_OUTCOME' });
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(fetchMock.mock.calls.some(([target]) => (
@@ -312,8 +314,8 @@ describe('Hono API 客户端', () => {
       }, { status: 500 }));
     const intent = createGenerationApiIntent({ fetcher: fetchMock, observe });
 
-    const response = await intent.dispatch('/api/generate-free', { method: 'POST' });
-    await response.json();
+    await expect(intent.dispatch('/api/generate-free', { method: 'POST' }))
+      .rejects.toMatchObject({ code: 'AMBIGUOUS_OPERATION_OUTCOME' });
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(observe).toHaveBeenLastCalledWith(expect.objectContaining({
@@ -335,9 +337,10 @@ describe('Hono API 客户端', () => {
       }, { headers: { 'Cache-Control': 'no-store' } }))
       .mockResolvedValueOnce(new Response(null, { status: 204 }));
     const intent = createGenerationApiIntent({ fetcher: fetchMock });
+    const repeatedCallback = () => intent.dispatch('/api/generate-free', { method: 'POST' });
 
-    await intent.dispatch('/api/generate-free', { method: 'POST' });
-    await expect(intent.dispatch('/api/generate-free', { method: 'POST' }))
+    await repeatedCallback();
+    await expect(repeatedCallback())
       .rejects.toMatchObject({ code: 'GENERATION_INTENT_ALREADY_DISPATCHED' });
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
@@ -365,10 +368,43 @@ describe('Hono API 客户端', () => {
       }));
     vi.stubGlobal('fetch', fetchMock);
 
-    const response = await generationApiFetch('/api/generate-free-stream', { method: 'POST' });
+    const response = await createGenerationApiIntent().dispatch(
+      '/api/generate-free-stream',
+      { method: 'POST' },
+    );
     await expect(response.text()).rejects.toMatchObject({
       code: 'AMBIGUOUS_OPERATION_OUTCOME',
     });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  test('业务 response body 被取消时向调用方投影 ambiguous outcome', async () => {
+    honoApiConfig.enabled = true;
+    honoApiConfig.origin = hostedDrManifest.controlPlane.primaryOrigin;
+    honoApiConfig.routingMode = 'client-preflight';
+    const observe = vi.fn();
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('partial'));
+      },
+    });
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({
+        ok: true,
+        service: 'mahoshojo-hono',
+        placement: 'hono-primary',
+        contractVersion: hostedDrManifest.contractVersion,
+      }, { headers: { 'Cache-Control': 'no-store' } }))
+      .mockResolvedValueOnce(new Response(stream, { status: 200 }));
+    const intent = createGenerationApiIntent({ fetcher: fetchMock, observe });
+
+    const response = await intent.dispatch('/api/generate-free-stream', { method: 'POST' });
+    await expect(response.body?.cancel('page-hidden'))
+      .rejects.toMatchObject({ code: 'AMBIGUOUS_OPERATION_OUTCOME' });
+    expect(observe).toHaveBeenLastCalledWith(expect.objectContaining({
+      phase: 'dispatch-terminal',
+      terminalClass: 'ambiguous',
+    }));
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
@@ -419,7 +455,7 @@ describe('Hono API 客户端', () => {
     const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
     vi.stubGlobal('fetch', fetchMock);
 
-    await generationApiFetch('/api/me/battle-reports/report-1/regenerate', {
+    await createGenerationApiIntent().dispatch('/api/me/battle-reports/report-1/regenerate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
     });

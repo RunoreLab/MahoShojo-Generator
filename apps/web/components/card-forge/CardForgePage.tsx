@@ -23,7 +23,7 @@ import AiProviderSelector, { type UserAIProviderConfig } from '@/components/AiPr
 import { buildCustomProviderRequestPayload } from '@/lib/ai/custom-provider';
 import { normalizeModelScopeToken } from '@/lib/tachie/modelscope/error';
 import { authStorage } from '@/lib/auth';
-import { generationApiFetch } from '@/lib/hono-api-client';
+import { createGenerationApiIntent } from '@/lib/hono-api-client';
 import { ONLINE_DATA_CARD_TYPES } from '@mahoshojo/contracts/data-cards';
 import { downloadBlob } from '@/lib/client/blobUrl';
 import { resolveApiErrorMessage, readJsonOrTextFromResponse } from '@/lib/client/apiError';
@@ -287,7 +287,8 @@ export function CardForgePage() {
         body.customProvider = customProviderPayload;
       }
 
-      const resp = await generationApiFetch('/api/generate-game-card', {
+      const generationIntent = createGenerationApiIntent();
+      const resp = await generationIntent.dispatch('/api/generate-game-card', {
         method: 'POST',
         headers,
         body: JSON.stringify(body),

@@ -24,7 +24,6 @@ export type HostedDrClientTelemetryEvent =
       | 'response-ok'
       | 'response-error'
       | 'ambiguous'
-      | 'cancelled'
       | 'not-dispatched';
   }>);
 

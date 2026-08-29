@@ -29,7 +29,7 @@ import {
   StreamReadTimeoutError,
 } from '@/lib/stream/timeout';
 import { authStorage } from '@/lib/auth';
-import { generationApiFetch } from '@/lib/hono-api-client';
+import { createGenerationApiIntent } from '@/lib/hono-api-client';
 import { useNarrativeHistoryStore } from '../stores/useNarrativeHistoryStore';
 import { resolveApiErrorMessage } from '@/lib/client/apiError';
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
@@ -831,13 +831,18 @@ export const useBattleEngine = () => {
               }
               const endpoint = `/api/arena/generate-stream${query.toString() ? `?${query.toString()}` : ''}`;
               requestHeaders.Accept = 'text/event-stream';
+              const generationIntent = createGenerationApiIntent();
                 const response = await openArenaGenerationStream({
                   endpoint,
                   body: requestBody,
                   generationRequestId,
                   headers: requestHeaders,
                   signal: abortController.signal,
-                  fetcher: generationApiFetch,
+                  fetcher: (input, init) => (
+                    input === endpoint && (init?.method ?? 'GET').toUpperCase() === 'POST'
+                      ? generationIntent.dispatch(input, init)
+                      : createGenerationApiIntent().dispatch(input, init)
+                  ),
                   onStateChange: (state) => {
                     const previousState = lastArenaConnectionState;
                     lastArenaConnectionState = state;
@@ -1659,7 +1664,8 @@ export const useBattleEngine = () => {
         }
       }
 
-      const response = await generationApiFetch('/api/generate-battle-story', {
+      const generationIntent = createGenerationApiIntent();
+      const response = await generationIntent.dispatch('/api/generate-battle-story', {
         method: 'POST',
         headers: requestHeaders,
         body: JSON.stringify(requestBody),

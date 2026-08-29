@@ -21,7 +21,7 @@ import { MagicTeaPartySummaryPanel } from '@/components/magic-tea-party/SummaryP
 import { MagicTeaPartyTachiePanel } from '@/components/magic-tea-party/TachiePanel';
 
 import { authStorage } from '@/lib/auth';
-import { generationApiFetch } from '@/lib/hono-api-client';
+import { createGenerationApiIntent } from '@/lib/hono-api-client';
 import { resolveApiErrorMessage } from '@/lib/client/apiError';
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
 import { estimateMagicTeaPartyTokens, resolveMagicTeaPartyTokenBudget } from '@/lib/magic-tea-party/budget';
@@ -590,7 +590,8 @@ export function MagicTeaPartyPage() {
 
     try {
       const activityHeaders = await authStorage.getActivityHeaders();
-      const response = await generationApiFetch('/api/magic-tea-party/generate-updates', {
+      const generationIntent = createGenerationApiIntent();
+      const response = await generationIntent.dispatch('/api/magic-tea-party/generate-updates', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...activityHeaders },
         body: JSON.stringify({

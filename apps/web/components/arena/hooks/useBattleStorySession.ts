@@ -44,7 +44,7 @@ import type {
   BattleStorySessionSource,
 } from '@/lib/ai-session/battle-story/types';
 import { authStorage } from '@/lib/auth';
-import { generationApiFetch } from '@/lib/hono-api-client';
+import { createGenerationApiIntent } from '@/lib/hono-api-client';
 import { readJsonOrTextFromResponse, resolveApiErrorMessage } from '@/lib/client/apiError';
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
 import { useProviderModeCooldown } from '@/lib/cooldown';
@@ -897,7 +897,8 @@ export function useBattleStorySession() {
       let cooldownHandled = false;
 
       try {
-      const response = await generationApiFetch('/api/arena/session/generate-next', {
+        const generationIntent = createGenerationApiIntent();
+        const response = await generationIntent.dispatch('/api/arena/session/generate-next', {
           method: 'POST',
           headers: withArenaGenerationActorToken(await buildRequestHeaders(true)),
           signal: generationController.signal,
