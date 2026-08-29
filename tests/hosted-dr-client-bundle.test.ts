@@ -147,6 +147,15 @@ describe('Hosted DR client bundle safety gate', () => {
     expect(result.status).toBe(0);
   });
 
+  it('不把 URL parser 的动态 IPv6 模板误判为静态 endpoint', () => {
+    const result = runCheckerFiles({
+      'routing.js': routingBundle(),
+      'url-parser.js': 'const origin=`http://[${value}]`',
+    });
+
+    expect(result.status).toBe(0);
+  });
+
   it('缺少完整 client-preflight routing projection 时 fail closed', () => {
     const result = runChecker('https://homura.colanns.me;/api/health/ready');
 

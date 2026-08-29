@@ -53,6 +53,7 @@ const failures = [];
 const routingSources = [];
 
 const originPattern = /https?:\/\/(?:\[[^\]]+\]|[^/\s"'`;,)}]+)/gu;
+const dynamicIpv6OriginPattern = /^https?:\/\/\[\$\{[A-Za-z_$][A-Za-z0-9_.$]*\}\]$/u;
 const frameworkOriginFixtures = new Map([
   ['chunks/main-', new Set(['http://n', 'http://f'])],
   ['chunks/polyfills-', new Set([
@@ -76,6 +77,7 @@ const isAllowedSyntheticOrigin = (relativePath, source, origin, matchIndex) => {
 const scanInternalOrigins = (relativePath, source) => {
   for (const match of source.matchAll(originPattern)) {
     const origin = match[0];
+    if (dynamicIpv6OriginPattern.test(origin)) continue;
     let parsed;
     try {
       parsed = new URL(origin);
