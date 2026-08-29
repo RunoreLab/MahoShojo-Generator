@@ -45,6 +45,7 @@ export type NextDrCapabilityGuardOptions = {
   deploymentTarget?: string;
   environment?: Readonly<Record<string, string | undefined>>;
   provider?: DatabaseProvider;
+  operationMethod?: string;
   logUnavailable?(_event: GuardUnavailableEvent): void;
 };
 
@@ -165,7 +166,7 @@ export const withNextDrCapability = <Args extends unknown[]>(
     response,
     allowedOrigins,
   );
-  const method = request.method.toUpperCase();
+  const method = (options.operationMethod ?? request.method).trim().toUpperCase();
   const operation = capability.operations.find((candidate) => candidate.method === method);
   if (!operation) {
     logUnavailable({ capabilityId, category: 'method' });

@@ -55,7 +55,10 @@ describe('Hosted DR client preflight selector', () => {
   it('eligible operation 在 primary non-ready 后只探测一次 DR 并固定 next-dr', async () => {
     const fetcher = vi.fn()
       .mockResolvedValueOnce(Response.json({ ok: false }, { status: 503 }))
-      .mockResolvedValueOnce(readyResponse('next-dr'));
+      .mockResolvedValueOnce(readyResponse('next-dr', {
+        capabilityId: 'creator/generate',
+        operationMethod: 'POST',
+      }));
 
     const decision = await selectHostedDrPlacement({
       path: '/api/creator/generate',
@@ -72,12 +75,33 @@ describe('Hosted DR client preflight selector', () => {
     expect(fetcher.mock.calls[1]?.[0]).toBe(
       'https://mahoshojo.colanns.me/api/hosted/dr-readiness',
     );
+    const headers = new Headers(fetcher.mock.calls[1]?.[1]?.headers);
+    expect(headers.get('x-mahoshojo-hosted-dr-capability')).toBe('creator/generate');
+    expect(headers.get('x-mahoshojo-hosted-dr-method')).toBe('POST');
+  });
+
+  it('DR readiness 必须回显目标 capability/method，否则 fail closed', async () => {
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(Response.json({ ok: false }, { status: 503 }))
+      .mockResolvedValueOnce(readyResponse('next-dr'));
+
+    const decision = await selectHostedDrPlacement({
+      path: '/api/generate-magical-girl',
+      method: 'POST',
+      fetcher,
+    });
+
+    expect(decision.placement).toBe('unavailable');
+    expect(decision.drProbe?.outcome).toBe('protocol-error');
   });
 
   it('隔离验证可以注入 loopback routing，而 production 默认仍来自 generated projection', async () => {
     const fetcher = vi.fn()
       .mockResolvedValueOnce(Response.json({ ok: false }, { status: 503 }))
-      .mockResolvedValueOnce(readyResponse('next-dr'));
+      .mockResolvedValueOnce(readyResponse('next-dr', {
+        capabilityId: 'generate-free',
+        operationMethod: 'POST',
+      }));
 
     const decision = await selectHostedDrPlacement({
       path: '/api/generate-free',
@@ -158,7 +182,10 @@ describe('Hosted DR client preflight selector', () => {
     });
     const fetcher = vi.fn()
       .mockResolvedValueOnce(cacheablePrimary)
-      .mockResolvedValueOnce(readyResponse('next-dr'));
+      .mockResolvedValueOnce(readyResponse('next-dr', {
+        capabilityId: 'generate-game-card',
+        operationMethod: 'POST',
+      }));
 
     const decision = await selectHostedDrPlacement({
       path: '/api/generate-game-card',
@@ -192,7 +219,11 @@ describe('Hosted DR client preflight selector', () => {
   it('旧 client 在 primary down 时接受相邻新版 DR', async () => {
     const fetcher = vi.fn()
       .mockResolvedValueOnce(Response.json({ ok: false }, { status: 503 }))
-      .mockResolvedValueOnce(readyResponse('next-dr', { contractVersion: 'g25e1-v2' }));
+      .mockResolvedValueOnce(readyResponse('next-dr', {
+        capabilityId: 'generate-free',
+        operationMethod: 'POST',
+        contractVersion: 'g25e1-v2',
+      }));
 
     const decision = await selectHostedDrPlacement({
       path: '/api/generate-free',
@@ -208,7 +239,11 @@ describe('Hosted DR client preflight selector', () => {
   it('超出相邻版本窗口的 readiness 继续 fail closed', async () => {
     const fetcher = vi.fn()
       .mockResolvedValueOnce(readyResponse('hono-primary', { contractVersion: 'g25e1-v3' }))
-      .mockResolvedValueOnce(readyResponse('next-dr', { contractVersion: 'g25e1-v3' }));
+      .mockResolvedValueOnce(readyResponse('next-dr', {
+        capabilityId: 'generate-free',
+        operationMethod: 'POST',
+        contractVersion: 'g25e1-v3',
+      }));
 
     const decision = await selectHostedDrPlacement({
       path: '/api/generate-free',

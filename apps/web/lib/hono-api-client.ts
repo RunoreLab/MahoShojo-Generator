@@ -100,16 +100,24 @@ const ambiguousOutcomeError = (
 
 const responseTerminalClass = (
   response: Response,
+  ambiguousServerOutcome = true,
 ): 'response-ok' | 'response-error' | 'ambiguous' => {
-  if (response.status >= 500) return 'ambiguous';
+  if (response.status >= 500) {
+    return ambiguousServerOutcome ? 'ambiguous' : 'response-error';
+  }
   return response.ok ? 'response-ok' : 'response-error';
 };
+
+const isPotentiallyMutatingMethod = (method: string): boolean => (
+  method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS'
+);
 
 const wrapAmbiguousBodyErrors = (
   response: Response,
   decision: HostedPlacementDecision | null,
   observe: HostedDrClientTelemetryObserver,
   settle: () => void,
+  ambiguousServerOutcome: boolean,
 ): Response => {
   if (!response.body) {
     if (decision) {
@@ -117,7 +125,7 @@ const wrapAmbiguousBodyErrors = (
         observe,
         createHostedDrTerminalTelemetry(
           decision,
-          responseTerminalClass(response),
+          responseTerminalClass(response, ambiguousServerOutcome),
         ),
       );
     }
@@ -125,6 +133,11 @@ const wrapAmbiguousBodyErrors = (
     return response;
   }
   const reader = response.body.getReader();
+  const isSse = response.headers.get('content-type')
+    ?.toLowerCase()
+    .includes('text/event-stream') === true;
+  const sseDecoder = isSse ? new TextDecoder() : null;
+  let sseTerminalBuffer = '';
   let terminalObserved = false;
   const observeTerminal = (
     terminalClass: Parameters<typeof createHostedDrTerminalTelemetry>[1],
@@ -139,27 +152,78 @@ const wrapAmbiguousBodyErrors = (
     }
     settle();
   };
+  const inspectSseTerminal = (
+    chunk?: Uint8Array,
+    flush = false,
+  ): 'response-ok' | 'response-error' | null => {
+    if (!sseDecoder) return null;
+    sseTerminalBuffer += chunk
+      ? sseDecoder.decode(chunk, { stream: true })
+      : sseDecoder.decode();
+    sseTerminalBuffer = sseTerminalBuffer.replace(/\r\n?/gu, '\n');
+    let separatorIndex = sseTerminalBuffer.indexOf('\n\n');
+    while (separatorIndex !== -1) {
+      const block = sseTerminalBuffer.slice(0, separatorIndex);
+      sseTerminalBuffer = sseTerminalBuffer.slice(separatorIndex + 2);
+      const event = block
+        .split('\n')
+        .find((line) => line.startsWith('event:'))
+        ?.slice('event:'.length)
+        .trim();
+      if (event === 'done') return 'response-ok';
+      if (event === 'error') return 'response-error';
+      separatorIndex = sseTerminalBuffer.indexOf('\n\n');
+    }
+    if (flush && sseTerminalBuffer.trim()) {
+      const event = sseTerminalBuffer
+        .split('\n')
+        .find((line) => line.startsWith('event:'))
+        ?.slice('event:'.length)
+        .trim();
+      sseTerminalBuffer = '';
+      if (event === 'done') return 'response-ok';
+      if (event === 'error') return 'response-error';
+    }
+    if (sseTerminalBuffer.length > 65_536) {
+      sseTerminalBuffer = sseTerminalBuffer.slice(-1024);
+    }
+    return null;
+  };
   const body = new ReadableStream<Uint8Array>({
     async pull(controller) {
       try {
         const chunk = await reader.read();
         if (chunk.done) {
-          observeTerminal(responseTerminalClass(response));
+          const sseTerminal = inspectSseTerminal(undefined, true);
+          if (sseTerminal) observeTerminal(sseTerminal);
+          if (isSse && !terminalObserved) {
+            observeTerminal('ambiguous');
+            controller.error(ambiguousOutcomeError(decision));
+            return;
+          }
+          if (!isSse) {
+            observeTerminal(responseTerminalClass(response, ambiguousServerOutcome));
+          }
           controller.close();
-        } else controller.enqueue(chunk.value);
+        } else {
+          const sseTerminal = inspectSseTerminal(chunk.value);
+          if (sseTerminal) observeTerminal(sseTerminal);
+          controller.enqueue(chunk.value);
+        }
       } catch {
         observeTerminal('ambiguous');
         controller.error(ambiguousOutcomeError(decision));
       }
     },
     async cancel(reason) {
-      observeTerminal('ambiguous');
+      const hadExplicitTerminal = terminalObserved;
+      if (!hadExplicitTerminal) observeTerminal('ambiguous');
       try {
         await reader.cancel(reason);
       } catch {
         // dispatch 后的取消结果始终按 ambiguous 投影，不泄漏底层 stream 错误。
       }
-      throw ambiguousOutcomeError(decision);
+      if (!hadExplicitTerminal) throw ambiguousOutcomeError(decision);
     },
   });
   return new Response(body, {
@@ -200,6 +264,8 @@ export const createGenerationApiIntent = ({
         );
       }
       consumed = true;
+      const operationMethod = (init.method ?? 'GET').trim().toUpperCase();
+      const ambiguousServerOutcome = isPotentiallyMutatingMethod(operationMethod);
 
       let target = resolveGenerationApiUrl(input);
       let decision: HostedPlacementDecision | null = null;
@@ -207,7 +273,7 @@ export const createGenerationApiIntent = ({
         try {
           decision = await selectPlacement({
             path: input,
-            method: init.method ?? 'GET',
+            method: operationMethod,
             fetcher,
           });
         } catch (error) {
@@ -262,11 +328,13 @@ export const createGenerationApiIntent = ({
         throw ambiguousOutcomeError(decision);
       }
 
-      if (decision && response.status >= 500) {
-        emitHostedDrClientTelemetry(
-          observe,
-          createHostedDrTerminalTelemetry(decision, 'ambiguous'),
-        );
+      if (ambiguousServerOutcome && response.status >= 500) {
+        if (decision) {
+          emitHostedDrClientTelemetry(
+            observe,
+            createHostedDrTerminalTelemetry(decision, 'ambiguous'),
+          );
+        }
         try {
           await response.body?.cancel();
         } catch {
@@ -276,7 +344,13 @@ export const createGenerationApiIntent = ({
         throw ambiguousOutcomeError(decision);
       }
 
-      return wrapAmbiguousBodyErrors(response, decision, observe, settle);
+      return wrapAmbiguousBodyErrors(
+        response,
+        decision,
+        observe,
+        settle,
+        ambiguousServerOutcome,
+      );
     },
   });
 };

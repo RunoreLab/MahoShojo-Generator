@@ -53,28 +53,64 @@ const failures = [];
 const routingSources = [];
 
 const originPattern = /https?:\/\/(?:\[[^\]]+\]|[^/\s"'`;,)}]+)/gu;
-const scanInternalOrigins = (relativePath, source, { strict }) => {
+const frameworkOriginFixtures = new Map([
+  ['chunks/main-', new Set(['http://n', 'http://f'])],
+  ['chunks/polyfills-', new Set([
+    'https://a',
+    'https://a@b',
+    'https://тест',
+    'https://a#б',
+    'https://x',
+  ])],
+]);
+const isAllowedSyntheticOrigin = (relativePath, source, origin, matchIndex) => {
+  for (const [prefix, origins] of frameworkOriginFixtures) {
+    if (relativePath.startsWith(prefix) && origins.has(origin)) return true;
+  }
+  if (origin !== 'http://localhost') return false;
+  const prefix = source.slice(Math.max(0, matchIndex - 64), matchIndex);
+  return prefix.endsWith('location&&location.href?location.href:"')
+    || prefix.endsWith('location?.href??"');
+};
+
+const scanInternalOrigins = (relativePath, source) => {
   for (const match of source.matchAll(originPattern)) {
     const origin = match[0];
     let parsed;
     try {
       parsed = new URL(origin);
     } catch {
-      if (strict) failures.push(`${relativePath}: Hosted routing chunk 包含非法 origin ${origin}`);
+      failures.push(`${relativePath}: client bundle 包含非法 origin ${origin}`);
       continue;
     }
-    const hostname = parsed.hostname.toLowerCase().replace(/^\[|\]$/gu, '');
-    const isCrossChunkInternal = isIP(hostname) !== 0 || hostname.endsWith('.internal');
-    const isStrictInternal = isCrossChunkInternal
+    const hostname = parsed.hostname
+      .toLowerCase()
+      .replace(/^\[|\]$/gu, '')
+      .replace(/\.+$/u, '');
+    const isInternal = hostname.length === 0
+      || isIP(hostname) !== 0
       || !hostname.includes('.')
       || hostname === 'localhost'
       || hostname.endsWith('.localhost')
-      || hostname.endsWith('.local');
+      || hostname.endsWith('.local')
+      || hostname.endsWith('.internal');
     if (
-      (strict && isStrictInternal)
-      || (!strict && isCrossChunkInternal)
+      isInternal
+      && !isAllowedSyntheticOrigin(relativePath, source, origin, match.index ?? 0)
     ) {
       failures.push(`${relativePath}: client bundle 包含 internal endpoint ${origin}`);
+    }
+  }
+};
+
+const scanBindings = (relativePath, source) => {
+  for (const bindingName of bindingNames) {
+    const bindingIdentifier = new RegExp(
+      `(^|[^A-Za-z0-9_$])${bindingName}([^A-Za-z0-9_$]|$)`,
+      'u',
+    );
+    if (bindingIdentifier.test(source)) {
+      failures.push(`${relativePath}: client bundle 包含 binding ${bindingName}`);
     }
   }
 };
@@ -87,7 +123,8 @@ for (const filePath of listJavaScript(staticRoot)) {
       failures.push(`${relativePath}: client bundle 包含 secret ${secretName}`);
     }
   }
-  scanInternalOrigins(relativePath, source, { strict: false });
+  scanInternalOrigins(relativePath, source);
+  scanBindings(relativePath, source);
   if (routingTokens.every((token) => source.includes(token))) {
     routingSources.push({ relativePath, source });
   }
@@ -95,19 +132,6 @@ for (const filePath of listJavaScript(staticRoot)) {
 
 if (routingSources.length === 0) {
   failures.push('client bundle 缺少完整 Hosted DR routing projection');
-}
-
-for (const { relativePath, source } of routingSources) {
-  scanInternalOrigins(relativePath, source, { strict: true });
-  for (const bindingName of bindingNames) {
-    const bindingIdentifier = new RegExp(
-      `(^|[^A-Za-z0-9_$])${bindingName}([^A-Za-z0-9_$]|$)`,
-      'u',
-    );
-    if (bindingIdentifier.test(source)) {
-      failures.push(`${relativePath}: Hosted routing chunk 包含 binding ${bindingName}`);
-    }
-  }
 }
 
 if (failures.length > 0) {

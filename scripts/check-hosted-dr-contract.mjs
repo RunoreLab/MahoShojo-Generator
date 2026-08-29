@@ -293,9 +293,13 @@ for (const origin of origins) {
     ) {
       fail(`origin 必须是无 path/query/hash 的 HTTPS origin: ${origin}`);
     }
-    const hostname = parsed.hostname.toLowerCase();
+    const hostname = parsed.hostname
+      .toLowerCase()
+      .replace(/^\[|\]$/gu, '')
+      .replace(/\.+$/u, '');
     if (
-      isIP(hostname) !== 0
+      hostname.length === 0
+      || isIP(hostname) !== 0
       || !hostname.includes('.')
       || hostname === 'localhost'
       || hostname.endsWith('.localhost')

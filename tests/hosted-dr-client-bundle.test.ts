@@ -84,6 +84,16 @@ describe('Hosted DR client bundle safety gate', () => {
     expect(`${result.stdout}\n${result.stderr}`).toContain('binding DB');
   });
 
+  it('拒绝被拆分到非 routing chunk 的 manifest binding 标识符', () => {
+    const result = runCheckerFiles({
+      'routing.js': routingBundle(),
+      'leaked.js': 'const hiddenBinding=DB',
+    });
+
+    expect(result.status).toBe(1);
+    expect(`${result.stdout}\n${result.stderr}`).toContain('binding DB');
+  });
+
   it('拒绝 Hosted routing chunk 中的 internal endpoint', () => {
     const result = runChecker(`${routingBundle()};https://router.service.internal`);
 
@@ -109,6 +119,32 @@ describe('Hosted DR client bundle safety gate', () => {
 
     expect(result.status).toBe(1);
     expect(`${result.stdout}\n${result.stderr}`).toContain('internal endpoint');
+  });
+
+  it.each([
+    'https://router.service.internal.',
+    'http://127.0.0.1.',
+    'http://localhost:8787',
+    'https://router.service.local',
+  ])('拒绝任意客户端 chunk 的内部 endpoint %s', (endpoint) => {
+    const result = runCheckerFiles({
+      'routing.js': routingBundle(),
+      'leaked.js': `const fallback="${endpoint}"`,
+    });
+
+    expect(result.status).toBe(1);
+    expect(`${result.stdout}\n${result.stderr}`).toContain('internal endpoint');
+  });
+
+  it('只豁免框架 URL parser 与 location fallback 的精确 synthetic origin', () => {
+    const result = runCheckerFiles({
+      'routing.js': routingBundle(),
+      'main-framework.js': 'new URL("/", "http://n")',
+      'polyfills-framework.js': 'new URL("/", "https://a")',
+      'snapdom.js': 'location&&location.href?location.href:"http://localhost/"',
+    });
+
+    expect(result.status).toBe(0);
   });
 
   it('缺少完整 client-preflight routing projection 时 fail closed', () => {

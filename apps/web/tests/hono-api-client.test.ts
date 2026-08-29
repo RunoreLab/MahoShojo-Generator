@@ -20,6 +20,7 @@ import {
 import { honoApiConfig, resolveHostedApiConfig } from '@/config/hono-api';
 import hostedDrManifest from '../../../config/hosted-dr-capabilities.json';
 import honoApiRoutes from '../../../config/hono-api-routes.json';
+import { readTextAndReasoningStreamFromResponse } from '@/lib/stream/read-text-and-reasoning-stream';
 
 const originalEnabled = honoApiConfig.enabled;
 const originalOrigin = honoApiConfig.origin;
@@ -244,6 +245,8 @@ describe('Hono API 客户端', () => {
         ok: true,
         placement: 'next-dr',
         contractVersion: hostedDrManifest.contractVersion,
+        capabilityId: 'generate-game-card',
+        operationMethod: 'POST',
       }, { headers: { 'Cache-Control': 'no-store' } }))
       .mockResolvedValueOnce(new Response(null, { status: 204 }));
     vi.stubGlobal('fetch', fetchMock);
@@ -321,6 +324,51 @@ describe('Hono API 客户端', () => {
     expect(observe).toHaveBeenLastCalledWith(expect.objectContaining({
       phase: 'dispatch-terminal',
       terminalClass: 'ambiguous',
+    }));
+  });
+
+  test('退出 Hono 的 non-idempotent POST 未知 5xx 同样投影 ambiguous', async () => {
+    honoApiConfig.enabled = true;
+    honoApiConfig.routingMode = 'client-preflight';
+    const onSettled = vi.fn();
+    const fetchMock = vi.fn(async () => Response.json({
+      code: 'INTERNAL_SERVER_ERROR',
+    }, { status: 500 }));
+    const intent = createGenerationApiIntent({ fetcher: fetchMock, onSettled });
+
+    await expect(intent.dispatch('/api/me/battle-reports/report-1/regenerate', {
+      method: 'POST',
+    })).rejects.toMatchObject({
+      code: 'AMBIGUOUS_OPERATION_OUTCOME',
+      decision: null,
+    });
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(onSettled).toHaveBeenCalledOnce();
+  });
+
+  test('safe-read 的 5xx 保持明确 response-error，不伪装写操作 ambiguity', async () => {
+    honoApiConfig.enabled = true;
+    honoApiConfig.origin = hostedDrManifest.controlPlane.primaryOrigin;
+    honoApiConfig.routingMode = 'client-preflight';
+    const observe = vi.fn();
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({
+        ok: true,
+        service: 'mahoshojo-hono',
+        placement: 'hono-primary',
+        contractVersion: hostedDrManifest.contractVersion,
+      }, { headers: { 'Cache-Control': 'no-store' } }))
+      .mockResolvedValueOnce(Response.json({ code: 'UNAVAILABLE' }, { status: 503 }));
+    const intent = createGenerationApiIntent({ fetcher: fetchMock, observe });
+
+    const response = await intent.dispatch('/api/arena/generation-requests/request-1', {
+      method: 'GET',
+    });
+    expect(response.status).toBe(503);
+    await response.json();
+    expect(observe).toHaveBeenLastCalledWith(expect.objectContaining({
+      terminalClass: 'response-error',
     }));
   });
 
@@ -408,6 +456,94 @@ describe('Hono API 客户端', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  test('SSE done 是明确成功终态并释放 intent latch', async () => {
+    honoApiConfig.enabled = true;
+    honoApiConfig.origin = hostedDrManifest.controlPlane.primaryOrigin;
+    honoApiConfig.routingMode = 'client-preflight';
+    const observe = vi.fn();
+    const onSettled = vi.fn();
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({
+        ok: true,
+        service: 'mahoshojo-hono',
+        placement: 'hono-primary',
+        contractVersion: hostedDrManifest.contractVersion,
+      }, { headers: { 'Cache-Control': 'no-store' } }))
+      .mockResolvedValueOnce(new Response([
+        'event: markdown\ndata: {"chunk":"完成"}\n\n',
+        'event: done\ndata: {"ok":true}\n\n',
+      ].join(''), { headers: { 'Content-Type': 'text/event-stream' } }));
+    const intent = createGenerationApiIntent({ fetcher: fetchMock, observe, onSettled });
+
+    const response = await intent.dispatch('/api/generate-free-stream', { method: 'POST' });
+    await expect(readTextAndReasoningStreamFromResponse(response)).resolves.toMatchObject({
+      text: '完成',
+      isSse: true,
+    });
+
+    expect(onSettled).toHaveBeenCalledOnce();
+    expect(observe).toHaveBeenLastCalledWith(expect.objectContaining({
+      terminalClass: 'response-ok',
+    }));
+  });
+
+  test('SSE EOF-before-done 是 ambiguous 并释放 intent latch', async () => {
+    honoApiConfig.enabled = true;
+    honoApiConfig.origin = hostedDrManifest.controlPlane.primaryOrigin;
+    honoApiConfig.routingMode = 'client-preflight';
+    const observe = vi.fn();
+    const onSettled = vi.fn();
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({
+        ok: true,
+        service: 'mahoshojo-hono',
+        placement: 'hono-primary',
+        contractVersion: hostedDrManifest.contractVersion,
+      }, { headers: { 'Cache-Control': 'no-store' } }))
+      .mockResolvedValueOnce(new Response(
+        'event: markdown\ndata: {"chunk":"partial"}\n\n',
+        { headers: { 'Content-Type': 'text/event-stream' } },
+      ));
+    const intent = createGenerationApiIntent({ fetcher: fetchMock, observe, onSettled });
+
+    const response = await intent.dispatch('/api/generate-free-stream', { method: 'POST' });
+    await expect(readTextAndReasoningStreamFromResponse(response))
+      .rejects.toMatchObject({ code: 'AMBIGUOUS_OPERATION_OUTCOME' });
+
+    expect(onSettled).toHaveBeenCalledOnce();
+    expect(observe).toHaveBeenLastCalledWith(expect.objectContaining({
+      terminalClass: 'ambiguous',
+    }));
+  });
+
+  test('SSE error 是明确失败终态并释放 intent latch', async () => {
+    honoApiConfig.enabled = true;
+    honoApiConfig.origin = hostedDrManifest.controlPlane.primaryOrigin;
+    honoApiConfig.routingMode = 'client-preflight';
+    const observe = vi.fn();
+    const onSettled = vi.fn();
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({
+        ok: true,
+        service: 'mahoshojo-hono',
+        placement: 'hono-primary',
+        contractVersion: hostedDrManifest.contractVersion,
+      }, { headers: { 'Cache-Control': 'no-store' } }))
+      .mockResolvedValueOnce(new Response(
+        'event: error\ndata: {"error":"upstream failed"}\n\n',
+        { headers: { 'Content-Type': 'text/event-stream' } },
+      ));
+    const intent = createGenerationApiIntent({ fetcher: fetchMock, observe, onSettled });
+
+    const response = await intent.dispatch('/api/generate-free-stream', { method: 'POST' });
+    await expect(readTextAndReasoningStreamFromResponse(response)).rejects.toThrow('upstream failed');
+
+    expect(onSettled).toHaveBeenCalledOnce();
+    expect(observe).toHaveBeenLastCalledWith(expect.objectContaining({
+      terminalClass: 'response-error',
+    }));
+  });
+
   test('只记录低基数 client-preflight decision/terminal telemetry', async () => {
     honoApiConfig.enabled = true;
     honoApiConfig.origin = hostedDrManifest.controlPlane.primaryOrigin;
@@ -419,6 +555,8 @@ describe('Hono API 客户端', () => {
         ok: true,
         placement: 'next-dr',
         contractVersion: hostedDrManifest.contractVersion,
+        capabilityId: 'generate-scenario',
+        operationMethod: 'POST',
       }, { headers: { 'Cache-Control': 'no-store' } }))
       .mockResolvedValueOnce(Response.json({ ok: true }));
     const intent = createGenerationApiIntent({ fetcher: fetchMock, observe });

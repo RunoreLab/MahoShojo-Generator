@@ -340,6 +340,10 @@ const isReadyResult = (value: HostedDrReadinessStatementResult): boolean => (
 export const createHostedDrReadinessService = (input: {
   placement: HostedDrReadinessPlacement;
   provider: HostedDrReadinessDatabaseProvider;
+  target?: Readonly<{
+    capabilityId: string;
+    operationMethod: string;
+  }>;
 }): HostedDrReadinessService => async (request) => {
   const method = request.method.toUpperCase();
   if (method !== 'GET' && method !== 'HEAD') {
@@ -362,6 +366,7 @@ export const createHostedDrReadinessService = (input: {
       placement: input.placement,
       databaseProvider: input.provider.id,
       consistency: 'replica-ok',
+      ...(input.target ?? {}),
     }, 200);
   } catch {
     return readinessResponse(request, {

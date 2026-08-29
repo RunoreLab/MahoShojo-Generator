@@ -93,6 +93,8 @@ const drServer = http.createServer((request, response) => {
       ok: true,
       placement: 'next-dr',
       contractVersion: hostedDrClientRouting.contractVersion,
+      capabilityId: request.headers['x-mahoshojo-hosted-dr-capability'],
+      operationMethod: request.headers['x-mahoshojo-hosted-dr-method'],
     });
     return;
   }

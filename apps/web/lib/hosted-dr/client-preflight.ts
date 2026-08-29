@@ -3,6 +3,10 @@ import {
   hostedDrClientRouting,
 } from '@/config/hosted-dr-client.generated';
 import { isHostedDrContractVersionCompatible } from '@mahoshojo/hosted-api/hosted-dr';
+import {
+  HOSTED_DR_CAPABILITY_HEADER,
+  HOSTED_DR_OPERATION_METHOD_HEADER,
+} from '@/lib/hosted-dr/probe-contract';
 
 export type HostedDrClientOperation = (typeof hostedDrClientOperations)[number];
 export type HostedDrClientRouting = Readonly<{
@@ -72,6 +76,7 @@ type ProbeInput = {
   expectedPlacement: Exclude<HostedDrPlacement, 'unavailable'>;
   contractVersion: string;
   now: () => number;
+  operation?: HostedDrClientOperation;
 };
 
 const escapeRegExp = (value: string): string => (
@@ -140,6 +145,7 @@ const probeOnce = async ({
   expectedPlacement,
   contractVersion,
   now,
+  operation,
 }: ProbeInput): Promise<HostedDrProbeResult> => {
   const startedAt = now();
   const controller = new AbortController();
@@ -156,6 +162,12 @@ const probeOnce = async ({
       cache: 'no-store',
       credentials: 'omit',
       signal: controller.signal,
+      ...(operation ? {
+        headers: {
+          [HOSTED_DR_CAPABILITY_HEADER]: operation.route.slice('/api/'.length),
+          [HOSTED_DR_OPERATION_METHOD_HEADER]: operation.method,
+        },
+      } : {}),
     });
     const durationMs = now() - startedAt;
     if (!response.ok) {
@@ -190,7 +202,11 @@ const probeOnce = async ({
       && record.placement === expectedPlacement
       && typeof record.contractVersion === 'string'
       && isHostedDrContractVersionCompatible(record.contractVersion, contractVersion)
-      && (!isPrimary || record.service === 'mahoshojo-hono');
+      && (!isPrimary || record.service === 'mahoshojo-hono')
+      && (!operation || (
+        record.capabilityId === operation.route.slice('/api/'.length)
+        && record.operationMethod === operation.method
+      ));
     return valid
       ? freezeProbe('ready', isPrimary ? 'PRIMARY_READY' : 'DR_READY', now() - startedAt)
       : freezeProbe(
@@ -286,6 +302,7 @@ export const selectHostedDrPlacement = async ({
     expectedPlacement: 'next-dr',
     contractVersion: routing.contractVersion,
     now,
+    operation,
   });
   return drProbe.outcome === 'ready'
     ? freezeDecision(

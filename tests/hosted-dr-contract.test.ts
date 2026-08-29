@@ -481,6 +481,27 @@ describe('Hosted DR machine contract', () => {
       expected: 'public HTTPS origin',
     },
     {
+      label: 'trailing-dot internal primary origin',
+      mutate: (manifest: HostedDrManifest) => {
+        manifest.controlPlane.primaryOrigin = 'https://router.service.internal.';
+      },
+      expected: 'public HTTPS origin',
+    },
+    {
+      label: 'trailing-dot IP primary origin',
+      mutate: (manifest: HostedDrManifest) => {
+        manifest.controlPlane.primaryOrigin = 'https://127.0.0.1.';
+      },
+      expected: 'public HTTPS origin',
+    },
+    {
+      label: 'IPv6 primary origin',
+      mutate: (manifest: HostedDrManifest) => {
+        manifest.controlPlane.primaryOrigin = 'https://[::1]';
+      },
+      expected: 'public HTTPS origin',
+    },
+    {
       label: 'embedded secret value',
       mutate: (manifest: HostedDrManifest) => {
         const secret = manifest.capabilities.find(({ requiredSecrets }) => (
