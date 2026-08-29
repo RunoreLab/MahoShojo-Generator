@@ -106,7 +106,7 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
             {
                 value: 'default',
                 label: '默认策略',
-                description: '常规场景保持原有调用顺序，默认倾向使用 Gemini 2.5 Flash；排位优先使用轻量模型。'
+                description: '常规场景保持原有调用顺序，默认倾向使用 GLM 5.3 Flash；排位优先使用轻量模型。'
             },
             // {
             //     value: 'big-pickle',
@@ -124,20 +124,35 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
             //     description: 'DeepSeek V4 完全体，适合复杂分析、长文本写作与高质量生成。'
             // },
             {
+                value: 'glm-5.3-flash',
+                label: 'GLM 5.3 Flash',
+                description: '牛来模型，智谱的最先进小模型。由 Kouri AI 热情赞助。'
+            },
+            {
+                value: 'deepseek-v4-flash-0731',
+                label: 'DeepSeek V4 Flash 0731',
+                description: '蓝色大肥鱼正式版，Agent 能力大幅增强，百万级上下文，兼顾质量与成本。由 Kouri AI 热情赞助。'
+            },
+            // {
+            //     value: 'glm-5.2',
+            //     label: 'GLM-5.2',
+            //     description: '智谱开源旗舰模型，支持 1M 无损上下文，编程能力领先，适合复杂长程任务。'
+            // },
+            {
+                value: 'glm-5.1',
+                label: 'GLM-5.1',
+                description: '智谱开源旗舰模型，适合复杂指令、多轮对话与高质量创作。由 Kouri AI 热情赞助。'
+            },
+            {
                 value: 'gemini-3.7-flash',
                 label: 'Gemini 3.7 Flash',
                 description: 'Google 的新模型，据用户评测说很喜欢一惊一乍，还挺中二的。'
             },
-            {
-                value: 'glm-5.2',
-                label: 'GLM-5.2',
-                description: '智谱开源旗舰模型，支持 1M 无损上下文，编程能力领先，适合复杂长程任务。'
-            },
-            {
-                value: 'glm-5.1',
-                label: 'GLM-5.1',
-                description: '智谱通用模型，综合能力均衡，适合复杂指令、多轮对话与高质量创作。'
-            },
+            // {
+            //     value: 'glm-5.2',
+            //     label: 'GLM-5.2',
+            //     description: '智谱开源旗舰模型，支持 1M 无损上下文，编程能力领先，适合复杂长程任务。'
+            // },
             {
                 value: 'gemini-3.5-flash-lite',
                 label: 'Gemini 3.5 Flash Lite',
