@@ -133,6 +133,7 @@ const isAllowedPublicUrlMetadata = (candidate, parsed) => {
   const queryKeys = [...parsed.searchParams.keys()].sort();
   return publicUrlMetadataRules.some((rule) => (
     parsed.hostname === rule.hostname
+    && parsed.port === ''
     && parsed.pathname === rule.pathname
     && parsed.hash === rule.hash
     && queryKeys.length === rule.queryKeys.length

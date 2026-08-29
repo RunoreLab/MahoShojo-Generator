@@ -199,6 +199,7 @@ describe('Hosted DR client bundle safety gate', () => {
 
   it.each([
     ['provider referral', 'https://api.kourichat.com/register?aff=public'],
+    ['provider referral on explicit default port', 'https://api.kourichat.com:443/register?aff=public'],
     ['provider fragment', 'https://chatboxai.app/zh/#pricing'],
     [
       'community invite',
@@ -232,6 +233,21 @@ describe('Hosted DR client bundle safety gate', () => {
     expect(output).toContain('credential/query/fragment URL');
     expect(output).not.toContain('bundle-secret');
   });
+
+  it.each([1, 8443])(
+    '公开 URL metadata allowlist 对非默认 HTTPS 端口 %i fail closed',
+    (port) => {
+      const result = runCheckerFiles({
+        'routing.js': routingBundle(),
+        'leaked.js': `const fallback="https://api.kourichat.com:${port}/register?aff=public"`,
+      });
+
+      expect(result.status).toBe(1);
+      expect(`${result.stdout}\n${result.stderr}`).toContain(
+        'credential/query/fragment URL',
+      );
+    },
+  );
 
   it('只豁免框架 URL parser 与 location fallback 的精确 synthetic origin', () => {
     const result = runCheckerFiles({
