@@ -30,7 +30,9 @@ pnpm --filter @mahoshojo/web build:cf
 Web 应用不提供会绕过真实 Route Handler 或 DR capability 检查的通用“假健康”接口。G25E-1 新增的
 `GET|HEAD /api/hosted/dr-readiness` 是 manifest 中明确登记的代表性 safe-read capability：它与 Hono 共用
 `@mahoshojo/hosted-api` contract，只通过 native `DB.withSession()` 执行固定查询，缺 binding/session/query 时固定
-503，且不返回 bookmark、SQL、URL 或 secret；它不代表全部业务 readiness。G25D 的
+503，且不返回 bookmark、SQL、URL 或 secret。client-preflight 会额外发送 generated canonical capability/method header；
+handler 复用同一 capability guard 检查目标 operation 的 secret、binding、database provider/consistency，并只接受精确
+回显，因此通用 readiness 不会被误当成全部业务 readiness。G25D 的
 发布前 readiness 定义为：`check:wrangler:d1`、全量 test/lint、Next production build、OpenNext Cloudflare
 build 与 `wrangler deploy --dry-run --env preview` 全部通过；运行时的 capability readiness 继续由各个
 server-owned adapter fail closed。所有 manifest shared Next route 在 production 进入 service 前经过统一 guard；
@@ -38,26 +40,32 @@ server-owned adapter fail closed。所有 manifest shared Next route 在 product
 production cross-origin 请求还必须配置 manifest 指定的 `HONO_CORS_ORIGINS`；空值、`*`、HTTP、
 localhost/loopback 或非法 origin 均 fail closed，OPTIONS 与实际响应复用同一 policy。非 production 本地开发可显式
 使用既有 HTTP D1 adapter，但不会被标记成 native binding，也不能作为 DR 验收证据。
-Hosted 主执行面、实际 DR 选择和综合容量 readiness 仍由外部控制面负责；当前 manifest 明确为
-`not-provisioned`，未启用自动 failover。
-
-生产/default 客户端的 `honoApiConfig.origin` 使用 manifest 的 `stableOrigin`；preview build 只能显式使用同一
-manifest 声明的 `previewOrigin`。两者都不读取或选择物理 primary/DR origin，也不在 Hono 失败后自行重放请求；
-任意其他 production build-time origin 都会 fail closed，非 production 本地开发只允许 loopback origin。preview
-origin 是环境隔离的构建入口，不是生产 failover。实际 LB/DNS/Worker 产品配置与故障演练属于 G25E-2/后续生产授权范围。
+production 默认使用 manifest 生成的 `client-preflight` 最小投影：每个新 generation intent 先以无凭据、`no-store`
+的有界 GET 探测 Hono primary；只有 primary non-ready 且 route + method 明确为 `safe-read` 或已验证
+`new-request-only` 时，才再探测同源 Next DR 并固定唯一 placement。`fail-closed`、未登记或 policy pending 的 operation
+不会探测或 dispatch DR；业务 fetch 一旦调用，写操作的 transport、未知 5xx、SSE EOF-before-done 或 stream 断链只记录
+ambiguous outcome，不跨 runtime 重放；明确 SSE `done` / `error` 分别作为成功/失败终态释放 intent latch。production 不接受
+`NEXT_PUBLIC_HONO_API_ORIGIN` 覆盖；preview 仍必须显式使用 manifest 的 `previewOrigin`，
+local/test 只允许 loopback。`controlPlane.provisioning=not-provisioned` 只表示可选 managed control plane 未纳管，
+不会阻断当前 client-preflight production build。Next 与 OpenNext build 在产物生成后都会执行 Hosted DR client bundle
+safety gate：完整公开 routing projection 必须存在，所有客户端 JavaScript 中的 manifest secret/binding 名称与静态 internal/IP
+endpoint 必须 absent；只对 framework URL parser 的精确 synthetic fixture 做受限豁免。该 gate 失败时构建 fail closed。
 
 ## Deploy 与 rollback
 
 `pnpm --filter @mahoshojo/web deploy` 使用本目录 `wrangler.jsonc`。CI 分别以 `production` 或 `preview` environment 部署；G25D 本身不执行 deploy/cutover。
 
-首次 production control-plane 激活使用独立 `dr-candidate` Wrangler environment。只有显式同时设置
+历史 production control-plane bootstrap seam 仍保留在独立 `dr-candidate` Wrangler environment，但状态是
+`optional-disabled` / `reference-only`，不进入默认 workflow 或 build。只有未来重新形成 accepted ADR、预算与生产授权后，
+才可显式同时设置
 `NEXT_PUBLIC_HOSTED_API_ENVIRONMENT=production` 与 `HOSTED_DR_ACTIVATION_CANDIDATE=true` 才允许在 manifest
 仍为 `not-provisioned` 时构建 bootstrap artifact；`dr-candidate` 强制 `assets.run_worker_first=true` 并使用独立的
 最外层 Worker entry，在 Cloudflare static assets、OpenNext image handler 与 Next middleware 之前只放行
 `GET|HEAD /api/hosted/dr-readiness`，其余路径固定 503。Next
 middleware 同时保留防御性限制，非法 candidate 开关同样 fail closed。candidate 使用独立
 Worker/service/rate-limit namespace，但复用 production D1 authority，只执行 readiness 的固定 safe-read 查询；不得用
-`dr-candidate` 覆盖 `production` environment，也不得把 bootstrap 探针描述为完整业务 DR readiness。
+`dr-candidate` 覆盖 `production` environment，也不得把 bootstrap 探针描述为完整业务 DR readiness。本轮没有部署该
+environment，没有创建 LB/DNS/monitor/Worker route，也没有修改 Access、secret 或生产数据。
 
 回滚整个 G25D 时按提交逆序先 revert 最终审查整改/验收文档提交，再 revert `fb8dd77e`，最后 revert
 `39825c1f`。应用 relocation 与 root/CI ownership 位于同一原子提交，避免中间状态留下双 owner 或不可部署的

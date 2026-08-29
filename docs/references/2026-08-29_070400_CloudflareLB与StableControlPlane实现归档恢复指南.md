@@ -8,6 +8,10 @@
 
 本文件不是生产激活证据，不表示 Cloudflare Load Balancing 已购买、配置或部署。
 
+当前实现补记：`34d79bec` 已把默认模式切为 `client-preflight`，并保留 stable origin、activation candidate Worker seam、
+Wrangler `dr-candidate` environment 与旧生产 runbook 作为 inert optional path。本轮没有修改其资源配置或默认 workflow；
+未来恢复 managed control plane 仍须遵守本文第 6 节的重新决策与预算/生产授权要求。
+
 ## 1. 归档时仓库位置
 
 - 仓库：`RunoreLab/MahoShojo-Generator`

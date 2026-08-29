@@ -174,18 +174,23 @@ pnpm run deploy:d1-gateway
 Hono 服务配置相同的 `D1_GATEWAY_HMAC_SECRET`。生产建议再用 Cloudflare Access Service Token
 限制 Gateway 域名，Gateway 不应暴露为公共数据库 API。
 
-## 前端直连开关
+## 前端 Hosted 路由
 
-前端和服务端内部调用是否将白名单内的生成 API 请求到 Hono，由 `apps/web/config/hono-api.ts` 中的
-`honoApiConfig.enabled` 控制：`true` 使用 `config/hosted-dr-capabilities.json` 的 `stableOrigin`，`false` 继续使用同源
-Next.js/Cloudflare 路由。`homura.colanns.me` 只允许作为物理 Hono deploy/health origin，不得重新编码进客户端。
-稳定入口的控制面必须按 active-passive 选择 Hono primary 或 Next/OpenNext DR，且必须关闭“连接失败后透明跨 runtime
-重放 POST”的能力；generation 已有稳定 request ID 也不等于允许控制面盲目重试。该开关只影响
-`config/hono-api-routes.json` 中的路由，Tachie 始终使用原路由。
+生产 Web 使用 `apps/web/config/hono-api.ts` 的 `client-preflight` 模式。客户端从生成后的最小投影读取公开 Hono primary
+origin、同源 Next DR placement、probe path、timeout 和 route/method policy；它不直接读取完整 manifest。每个新的
+generation intent 在业务 dispatch 前最多探测 primary 一次，并只对 manifest 明确允许的 operation 最多探测 DR 一次。
+选择后固定 placement；POST/stream 一旦越过 dispatch boundary，任何断线、timeout 或未知终态都不得改发另一 runtime。
+Tachie 与其他 exited route 继续使用原同源 Next 路由。
+
+Hono 的 `GET /api/health/ready` 返回 `service=mahoshojo-hono`、`placement=hono-primary`、共享
+`contractVersion` 与 `Cache-Control: no-store`，并复用严格 production CORS；readiness 绕过 Redis 业务 limiter，但不会
+绕过全局连接/平台保护。probe 不携带 Authorization、Cookie、业务 body 或用户标识。Next DR probe 另以 generated canonical
+capability/method 触发目标 capability guard，并要求响应精确回显；该低基数 identity 不包含真实资源 ID 或用户输入。
 
 `config/hosted-dr-capabilities.json` 是 replay/secret/provider/contract/control-plane 的机器事实；当前
-`provisioning=not-provisioned`，只建立稳定入口 seam，不表示 Cloudflare LB/DNS 已启用。`pnpm check:hosted-dr`
-会阻断 route drift、不安全 replay、secret 值、缺 adapter/test/guard 与伪 production 状态。
+`defaultMode=client-preflight`、`managedControlPlane=optional-disabled`、`provisioning=not-provisioned`；后者不表示
+Cloudflare LB/DNS 已启用，也不再单独阻断 client-preflight build。`pnpm check:hosted-dr` 会阻断 route drift、内部/IP
+origin、不安全 replay、secret 值、缺 adapter/test/guard、projection drift 与伪 production 状态。
 
 ## 构建与容器运行
 
