@@ -54,11 +54,12 @@ export type GenerationApiAuth = Readonly<{
   getActivityHeaders: () => Promise<Record<string, string>>;
 }>;
 
-type GenerationApiIntentDependencies = {
+export type GenerationApiIntentDependencies = {
   auth?: GenerationApiAuth;
   fetcher?: GenerationFetch;
   observe?: HostedDrClientTelemetryObserver;
   selectPlacement?: typeof selectHostedDrPlacement;
+  onSettled?: () => void;
 };
 
 export type GenerationApiIntent = Readonly<{
@@ -108,8 +109,9 @@ const wrapAmbiguousBodyErrors = (
   response: Response,
   decision: HostedPlacementDecision | null,
   observe: HostedDrClientTelemetryObserver,
+  settle: () => void,
 ): Response => {
-  if (!response.body || !decision) {
+  if (!response.body) {
     if (decision) {
       emitHostedDrClientTelemetry(
         observe,
@@ -119,6 +121,7 @@ const wrapAmbiguousBodyErrors = (
         ),
       );
     }
+    settle();
     return response;
   }
   const reader = response.body.getReader();
@@ -128,10 +131,13 @@ const wrapAmbiguousBodyErrors = (
   ) => {
     if (terminalObserved) return;
     terminalObserved = true;
-    emitHostedDrClientTelemetry(
-      observe,
-      createHostedDrTerminalTelemetry(decision, terminalClass),
-    );
+    if (decision) {
+      emitHostedDrClientTelemetry(
+        observe,
+        createHostedDrTerminalTelemetry(decision, terminalClass),
+      );
+    }
+    settle();
   };
   const body = new ReadableStream<Uint8Array>({
     async pull(controller) {
@@ -168,8 +174,19 @@ export const createGenerationApiIntent = ({
   fetcher = fetch,
   observe = observeHostedDrClientTelemetry,
   selectPlacement = selectHostedDrPlacement,
+  onSettled,
 }: GenerationApiIntentDependencies = {}): GenerationApiIntent => {
   let consumed = false;
+  let settled = false;
+  const settle = () => {
+    if (settled) return;
+    settled = true;
+    try {
+      onSettled?.();
+    } catch {
+      // lifecycle observer 不得改变客户端权威结果。
+    }
+  };
 
   return Object.freeze({
     async dispatch(
@@ -187,17 +204,23 @@ export const createGenerationApiIntent = ({
       let target = resolveGenerationApiUrl(input);
       let decision: HostedPlacementDecision | null = null;
       if (honoApiConfig.routingMode === 'client-preflight' && isHonoApiPath(input)) {
-        decision = await selectPlacement({
-          path: input,
-          method: init.method ?? 'GET',
-          fetcher,
-        });
+        try {
+          decision = await selectPlacement({
+            path: input,
+            method: init.method ?? 'GET',
+            fetcher,
+          });
+        } catch (error) {
+          settle();
+          throw error;
+        }
         emitHostedDrClientTelemetry(observe, createHostedDrSelectionTelemetry(decision));
         if (decision.placement === 'unavailable') {
           emitHostedDrClientTelemetry(
             observe,
             createHostedDrTerminalTelemetry(decision, 'not-dispatched'),
           );
+          settle();
           throw unavailableError(decision);
         }
         target = decision.placement === 'hono-primary'
@@ -206,14 +229,19 @@ export const createGenerationApiIntent = ({
       }
 
       const headers = new Headers(init.headers ?? {});
-      const authHeader = await auth.getAuthHeader();
-      if (authHeader && !headers.has('Authorization')) {
-        headers.set('Authorization', authHeader);
-      }
+      try {
+        const authHeader = await auth.getAuthHeader();
+        if (authHeader && !headers.has('Authorization')) {
+          headers.set('Authorization', authHeader);
+        }
 
-      const activityHeaders = await auth.getActivityHeaders();
-      for (const [name, value] of Object.entries(activityHeaders)) {
-        if (!headers.has(name)) headers.set(name, value);
+        const activityHeaders = await auth.getActivityHeaders();
+        for (const [name, value] of Object.entries(activityHeaders)) {
+          if (!headers.has(name)) headers.set(name, value);
+        }
+      } catch (error) {
+        settle();
+        throw error;
       }
 
       let response: Response;
@@ -230,6 +258,7 @@ export const createGenerationApiIntent = ({
             createHostedDrTerminalTelemetry(decision, 'ambiguous'),
           );
         }
+        settle();
         throw ambiguousOutcomeError(decision);
       }
 
@@ -243,10 +272,35 @@ export const createGenerationApiIntent = ({
         } catch {
           // 业务请求已经 dispatch；清理响应体失败不得覆盖 ambiguous 结果。
         }
+        settle();
         throw ambiguousOutcomeError(decision);
       }
 
-      return wrapAmbiguousBodyErrors(response, decision, observe);
+      return wrapAmbiguousBodyErrors(response, decision, observe, settle);
+    },
+  });
+};
+
+export type GenerationApiIntentLatch = Readonly<{
+  tryAcquire: () => GenerationApiIntent | null;
+}>;
+
+export const createGenerationApiIntentLatch = (
+  dependencies: GenerationApiIntentDependencies = {},
+): GenerationApiIntentLatch => {
+  let activeIntent: GenerationApiIntent | null = null;
+  return Object.freeze({
+    tryAcquire() {
+      if (activeIntent) return null;
+      const intent = createGenerationApiIntent({
+        ...dependencies,
+        onSettled: () => {
+          if (activeIntent === intent) activeIntent = null;
+          dependencies.onSettled?.();
+        },
+      });
+      activeIntent = intent;
+      return intent;
     },
   });
 };

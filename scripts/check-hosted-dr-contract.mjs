@@ -372,11 +372,30 @@ const generatedRoutesSource = readFileSync(argumentValue(
   '--generated-routes',
   path.join(repositoryRoot, 'apps/api/src/generated/routes.ts'),
 ), 'utf8');
-const generatedRouteIds = [...generatedRoutesSource.matchAll(
-  /^\s+id:\s*"([^"]+)",$/gmu,
-)].map((match) => match[1]);
+const generatedRoutes = [...generatedRoutesSource.matchAll(
+  /^\s+\{\n\s+id:\s*"([^"]+)",\n\s+pattern:\s*"([^"]+)",\n\s+adapter:\s*"[^"]+",\n\s+methods:\s*\[([^\]]*)\],/gmu,
+)].map((match) => ({
+  id: match[1],
+  pattern: match[2],
+  methods: [...match[3].matchAll(/"([A-Z]+)"/gu)].map((methodMatch) => methodMatch[1]),
+}));
+const generatedRouteIds = generatedRoutes.map(({ id }) => id);
 if (!sameValues(generatedRouteIds, capabilityIds)) {
   fail('generated Hono route registry 必须与 DR capability 双向完全覆盖');
+}
+for (const capability of capabilities) {
+  const generatedRoute = generatedRoutes.find(({ id }) => id === capability.id);
+  if (!generatedRoute) continue;
+  const expectedPattern = capability.route.replace(/\[([A-Za-z][A-Za-z0-9]*)\]/gu, ':$1');
+  if (generatedRoute.pattern !== expectedPattern) {
+    fail(`${capability.id}: generated Hono route pattern drift`);
+  }
+  if (!sameValues(
+    generatedRoute.methods,
+    (capability.operations ?? []).map(({ method }) => method),
+  )) {
+    fail(`${capability.id}: generated Hono route method drift`);
+  }
 }
 for (const exitedRouteId of [
   ...(inventory.exitedRouteIds ?? []),

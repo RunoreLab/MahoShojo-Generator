@@ -170,6 +170,58 @@ describe('Hosted DR client preflight selector', () => {
     expect(decision.primaryProbe.outcome).toBe('protocol-error');
   });
 
+  it.each([
+    ['旧 client 接受相邻新版 primary', 'g25e1-v1', 'g25e1-v2'],
+    ['新 client 接受相邻旧版 primary', 'g25e1-v2', 'g25e1-v1'],
+  ])('%s', async (_label, clientVersion, primaryVersion) => {
+    const fetcher = vi.fn(async () => readyResponse('hono-primary', {
+      contractVersion: primaryVersion,
+    }));
+
+    const decision = await selectHostedDrPlacement({
+      path: '/api/generate-free',
+      method: 'POST',
+      fetcher,
+      routing: { ...hostedDrClientRouting, contractVersion: clientVersion },
+    });
+
+    expect(decision.placement).toBe('hono-primary');
+    expect(decision.primaryProbe.outcome).toBe('ready');
+  });
+
+  it('旧 client 在 primary down 时接受相邻新版 DR', async () => {
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(Response.json({ ok: false }, { status: 503 }))
+      .mockResolvedValueOnce(readyResponse('next-dr', { contractVersion: 'g25e1-v2' }));
+
+    const decision = await selectHostedDrPlacement({
+      path: '/api/generate-free',
+      method: 'POST',
+      fetcher,
+      routing: { ...hostedDrClientRouting, contractVersion: 'g25e1-v1' },
+    });
+
+    expect(decision.placement).toBe('next-dr');
+    expect(decision.drProbe?.outcome).toBe('ready');
+  });
+
+  it('超出相邻版本窗口的 readiness 继续 fail closed', async () => {
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(readyResponse('hono-primary', { contractVersion: 'g25e1-v3' }))
+      .mockResolvedValueOnce(readyResponse('next-dr', { contractVersion: 'g25e1-v3' }));
+
+    const decision = await selectHostedDrPlacement({
+      path: '/api/generate-free',
+      method: 'POST',
+      fetcher,
+      routing: { ...hostedDrClientRouting, contractVersion: 'g25e1-v1' },
+    });
+
+    expect(decision.placement).toBe('unavailable');
+    expect(decision.primaryProbe.outcome).toBe('protocol-error');
+    expect(decision.drProbe?.outcome).toBe('protocol-error');
+  });
+
   it('primary 和 DR 都 non-ready 时返回 NO_READY_PLACEMENT', async () => {
     const fetcher = vi.fn(async () => Response.json({ ok: false }, { status: 503 }));
 

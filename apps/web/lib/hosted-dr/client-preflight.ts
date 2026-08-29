@@ -2,6 +2,7 @@ import {
   hostedDrClientOperations,
   hostedDrClientRouting,
 } from '@/config/hosted-dr-client.generated';
+import { isHostedDrContractVersionCompatible } from '@mahoshojo/hosted-api/hosted-dr';
 
 export type HostedDrClientOperation = (typeof hostedDrClientOperations)[number];
 export type HostedDrClientRouting = Readonly<{
@@ -187,7 +188,8 @@ const probeOnce = async ({
       : null;
     const valid = record?.ok === true
       && record.placement === expectedPlacement
-      && record.contractVersion === contractVersion
+      && typeof record.contractVersion === 'string'
+      && isHostedDrContractVersionCompatible(record.contractVersion, contractVersion)
       && (!isPrimary || record.service === 'mahoshojo-hono');
     return valid
       ? freezeProbe('ready', isPrimary ? 'PRIMARY_READY' : 'DR_READY', now() - startedAt)

@@ -386,6 +386,48 @@ describe('Hosted DR machine contract', () => {
 
   it.each([
     {
+      label: 'pattern',
+      mutate: (source: string) => source.replace(
+        'pattern: "/api/generate-free",',
+        'pattern: "/api/generate-free-drift",',
+      ),
+      expected: 'pattern drift',
+    },
+    {
+      label: 'method',
+      mutate: (source: string) => source.replace(
+        'id: "generate-free",\n    pattern: "/api/generate-free",\n    adapter: "shared-service",\n    methods: ["POST"],',
+        'id: "generate-free",\n    pattern: "/api/generate-free",\n    adapter: "shared-service",\n    methods: ["GET"],',
+      ),
+      expected: 'method drift',
+    },
+  ])('validator 对 generated Hono route $label drift fail closed', ({ mutate, expected }) => {
+    const temporaryRoot = mkdtempSync(path.join(os.tmpdir(), 'hosted-dr-routes-'));
+    try {
+      const source = mutate(readFileSync(
+        path.join(repositoryRoot, 'apps/api/src/generated/routes.ts'),
+        'utf8',
+      ));
+      const generatedRoutesPath = path.join(temporaryRoot, 'routes.ts');
+      writeFileSync(generatedRoutesPath, source, 'utf8');
+      const result = spawnSync(process.execPath, [
+        path.join(repositoryRoot, 'scripts/check-hosted-dr-contract.mjs'),
+        '--generated-routes',
+        generatedRoutesPath,
+      ], {
+        cwd: repositoryRoot,
+        encoding: 'utf8',
+      });
+
+      expect(result.status).toBe(1);
+      expect(`${result.stdout}\n${result.stderr}`).toContain(expected);
+    } finally {
+      rmSync(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    {
       label: 'application contract version drift',
       mutate: (manifest: HostedDrManifest) => {
         manifest.contractVersion = 'g25e1-v2';

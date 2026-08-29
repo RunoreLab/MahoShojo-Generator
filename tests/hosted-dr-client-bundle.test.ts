@@ -16,11 +16,13 @@ const checker = path.join(
   'apps/web/scripts/check-hosted-dr-client-bundle.mjs',
 );
 
-const runChecker = (source: string) => {
+const runCheckerFiles = (sources: Record<string, string>) => {
   const temporaryRoot = mkdtempSync(path.join(os.tmpdir(), 'hosted-dr-client-bundle-'));
   const staticRoot = path.join(temporaryRoot, 'static', 'chunks');
   mkdirSync(staticRoot, { recursive: true });
-  writeFileSync(path.join(staticRoot, 'client.js'), source, 'utf8');
+  for (const [fileName, source] of Object.entries(sources)) {
+    writeFileSync(path.join(staticRoot, fileName), source, 'utf8');
+  }
   const result = spawnSync(process.execPath, [checker, '--dir', path.dirname(staticRoot)], {
     cwd: repositoryRoot,
     encoding: 'utf8',
@@ -28,6 +30,8 @@ const runChecker = (source: string) => {
   rmSync(temporaryRoot, { recursive: true, force: true });
   return result;
 };
+
+const runChecker = (source: string) => runCheckerFiles({ 'client.js': source });
 
 const routingBundle = (extra = '') => [
   'https://homura.colanns.me',
@@ -73,8 +77,25 @@ describe('Hosted DR client bundle safety gate', () => {
     expect(`${result.stdout}\n${result.stderr}`).toContain('binding DB');
   });
 
+  it('拒绝 Hosted routing chunk 中未加引号的 manifest binding 标识符', () => {
+    const result = runChecker(`${routingBundle()};const bindings={DB:1}`);
+
+    expect(result.status).toBe(1);
+    expect(`${result.stdout}\n${result.stderr}`).toContain('binding DB');
+  });
+
   it('拒绝 Hosted routing chunk 中的 internal endpoint', () => {
     const result = runChecker(`${routingBundle()};https://router.service.internal`);
+
+    expect(result.status).toBe(1);
+    expect(`${result.stdout}\n${result.stderr}`).toContain('internal endpoint');
+  });
+
+  it('拒绝被拆分到非 routing chunk 的 internal endpoint', () => {
+    const result = runCheckerFiles({
+      'routing.js': routingBundle(),
+      'leaked.js': 'const fallback="https://router.service.internal"',
+    });
 
     expect(result.status).toBe(1);
     expect(`${result.stdout}\n${result.stderr}`).toContain('internal endpoint');

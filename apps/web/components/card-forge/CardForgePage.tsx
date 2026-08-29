@@ -23,7 +23,7 @@ import AiProviderSelector, { type UserAIProviderConfig } from '@/components/AiPr
 import { buildCustomProviderRequestPayload } from '@/lib/ai/custom-provider';
 import { normalizeModelScopeToken } from '@/lib/tachie/modelscope/error';
 import { authStorage } from '@/lib/auth';
-import { createGenerationApiIntent } from '@/lib/hono-api-client';
+import { useGenerationApiIntentLatch } from '@/lib/use-generation-api-intent-latch';
 import { ONLINE_DATA_CARD_TYPES } from '@mahoshojo/contracts/data-cards';
 import { downloadBlob } from '@/lib/client/blobUrl';
 import { resolveApiErrorMessage, readJsonOrTextFromResponse } from '@/lib/client/apiError';
@@ -163,6 +163,7 @@ function clearTachieCredentials() {
 }
 
 export function CardForgePage() {
+  const generationApiIntentLatch = useGenerationApiIntentLatch();
   const searchParams = useSearchParams();
   const [sourceCardJson, setSourceCardJson] = useState('');
   const [customInstructions, setCustomInstructions] = useState('');
@@ -287,7 +288,8 @@ export function CardForgePage() {
         body.customProvider = customProviderPayload;
       }
 
-      const generationIntent = createGenerationApiIntent();
+      const generationIntent = generationApiIntentLatch.tryAcquire();
+      if (!generationIntent) return;
       const resp = await generationIntent.dispatch('/api/generate-game-card', {
         method: 'POST',
         headers,
@@ -320,7 +322,7 @@ export function CardForgePage() {
       setGenErrorStatus(errorStatus);
       setGenStatus('error');
     }
-  }, [sourceCardJson, customInstructions, userProviderConfig]);
+  }, [generationApiIntentLatch, sourceCardJson, customInstructions, userProviderConfig]);
 
   const handleStopGeneration = useCallback(() => {
     genAbortRef.current?.abort(STREAM_ABORT_REASON_USER);

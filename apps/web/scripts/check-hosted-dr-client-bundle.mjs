@@ -52,38 +52,15 @@ const bindingNames = [...new Set(manifest.capabilities.flatMap((capability) => (
 const failures = [];
 const routingSources = [];
 
-for (const filePath of listJavaScript(staticRoot)) {
-  const source = readFileSync(filePath, 'utf8');
-  const relativePath = path.relative(staticRoot, filePath);
-  for (const secretName of secretNames) {
-    if (source.includes(secretName)) {
-      failures.push(`${relativePath}: client bundle 包含 secret ${secretName}`);
-    }
-  }
-  if (routingTokens.every((token) => source.includes(token))) {
-    routingSources.push({ relativePath, source });
-  }
-}
-
-if (routingSources.length === 0) {
-  failures.push('client bundle 缺少完整 Hosted DR routing projection');
-}
-
 const originPattern = /https?:\/\/(?:\[[^\]]+\]|[^/\s"'`;,)}]+)/gu;
-for (const { relativePath, source } of routingSources) {
-  for (const bindingName of bindingNames) {
-    const quotedBinding = new RegExp(`["']${bindingName}["']`, 'u');
-    if (quotedBinding.test(source)) {
-      failures.push(`${relativePath}: Hosted routing chunk 包含 binding ${bindingName}`);
-    }
-  }
+const scanInternalOrigins = (relativePath, source) => {
   for (const match of source.matchAll(originPattern)) {
     const origin = match[0];
     let parsed;
     try {
       parsed = new URL(origin);
     } catch {
-      failures.push(`${relativePath}: Hosted routing chunk 包含非法 origin ${origin}`);
+      failures.push(`${relativePath}: client bundle 包含非法 origin ${origin}`);
       continue;
     }
     const hostname = parsed.hostname.toLowerCase();
@@ -95,7 +72,37 @@ for (const { relativePath, source } of routingSources) {
       || hostname.endsWith('.local')
       || hostname.endsWith('.internal')
     ) {
-      failures.push(`${relativePath}: Hosted routing chunk 包含 internal endpoint ${origin}`);
+      failures.push(`${relativePath}: client bundle 包含 internal endpoint ${origin}`);
+    }
+  }
+};
+
+for (const filePath of listJavaScript(staticRoot)) {
+  const source = readFileSync(filePath, 'utf8');
+  const relativePath = path.relative(staticRoot, filePath);
+  for (const secretName of secretNames) {
+    if (source.includes(secretName)) {
+      failures.push(`${relativePath}: client bundle 包含 secret ${secretName}`);
+    }
+  }
+  scanInternalOrigins(relativePath, source);
+  if (routingTokens.every((token) => source.includes(token))) {
+    routingSources.push({ relativePath, source });
+  }
+}
+
+if (routingSources.length === 0) {
+  failures.push('client bundle 缺少完整 Hosted DR routing projection');
+}
+
+for (const { relativePath, source } of routingSources) {
+  for (const bindingName of bindingNames) {
+    const bindingIdentifier = new RegExp(
+      `(^|[^A-Za-z0-9_$])${bindingName}([^A-Za-z0-9_$]|$)`,
+      'u',
+    );
+    if (bindingIdentifier.test(source)) {
+      failures.push(`${relativePath}: Hosted routing chunk 包含 binding ${bindingName}`);
     }
   }
 }

@@ -6,7 +6,7 @@ import type { AppRouterAdapter } from '@/lib/app-router-adapter';
 import type { AIReasoningEnvelope } from '@/types/ai-reasoning';
 import { persistArrestedBackup } from '@/lib/arrested-backup';
 import { authStorage } from '@/lib/auth';
-import { createGenerationApiIntent } from '@/lib/hono-api-client';
+import { useGenerationApiIntentLatch } from '@/lib/use-generation-api-intent-latch';
 import { resolveApiErrorMessage } from '@/lib/client/apiError';
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
 import { getSensitiveWordRedirectTarget } from '@/lib/content-safety/client';
@@ -137,6 +137,7 @@ export type UseMagicTeaPartyChatResult = {
 };
 
 export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseMagicTeaPartyChatResult {
+  const generationApiIntentLatch = useGenerationApiIntentLatch();
   const {
     activeSession,
     activeSessionId,
@@ -450,7 +451,8 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
       };
 
       try {
-        const generationIntent = createGenerationApiIntent();
+        const generationIntent = generationApiIntentLatch.tryAcquire();
+        if (!generationIntent) return;
         const response = await generationIntent.dispatch('/api/magic-tea-party/generate-choices?format=sse', {
           method: 'POST',
           headers: await buildMagicTeaPartyRequestHeaders({ acceptSse: true }),
@@ -610,7 +612,7 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
         }
       }
     },
-    [buildChoiceNotices, buildRequestSettings, emitNotices, preferences.choiceCount, router, setMessages, userProviderConfig]
+    [buildChoiceNotices, buildRequestSettings, emitNotices, generationApiIntentLatch, preferences.choiceCount, router, setMessages, userProviderConfig]
   );
 
   const requestOutputPlanFallbacks = useCallback(
@@ -730,7 +732,8 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
             fromMessageId && toMessageId
               ? { fromMessageId, toMessageId, count: normalizedHistory.length }
               : undefined;
-          const generationIntent = createGenerationApiIntent();
+          const generationIntent = generationApiIntentLatch.tryAcquire();
+          if (!generationIntent) return;
           const response = await generationIntent.dispatch('/api/magic-tea-party/generate-updates', {
             method: 'POST',
             headers: await buildMagicTeaPartyRequestHeaders(),
@@ -816,6 +819,7 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
     [
       buildRequestSettings,
       emitNotices,
+      generationApiIntentLatch,
       isSummarizing,
       normalizeFallbackHistory,
       onSideChannels,
@@ -890,7 +894,8 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
       };
 
       try {
-        const generationIntent = createGenerationApiIntent();
+        const generationIntent = generationApiIntentLatch.tryAcquire();
+        if (!generationIntent) return null;
         const response = await generationIntent.dispatch('/api/magic-tea-party/generate-stream?format=sse', {
           method: 'POST',
           headers: await buildMagicTeaPartyRequestHeaders({ acceptSse: true }),
@@ -1160,6 +1165,7 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
       buildChoiceNotices,
       buildRequestSettings,
       emitNotices,
+      generationApiIntentLatch,
       onSideChannels,
       persistSession,
       requestOutputPlanFallbacks,
@@ -1602,7 +1608,8 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
       );
     };
     try {
-      const generationIntent = createGenerationApiIntent();
+      const generationIntent = generationApiIntentLatch.tryAcquire();
+      if (!generationIntent) return;
       const response = await generationIntent.dispatch('/api/magic-tea-party/generate-choices?format=sse', {
         method: 'POST',
         headers: await buildMagicTeaPartyRequestHeaders({ acceptSse: true }),
@@ -1761,6 +1768,7 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
     buildRequestSettings,
     emitNotices,
     ensureProviderReady,
+    generationApiIntentLatch,
     isGenerating,
     messages,
     onGlobalError,

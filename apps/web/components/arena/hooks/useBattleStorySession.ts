@@ -44,7 +44,7 @@ import type {
   BattleStorySessionSource,
 } from '@/lib/ai-session/battle-story/types';
 import { authStorage } from '@/lib/auth';
-import { createGenerationApiIntent } from '@/lib/hono-api-client';
+import { useGenerationApiIntentLatch } from '@/lib/use-generation-api-intent-latch';
 import { readJsonOrTextFromResponse, resolveApiErrorMessage } from '@/lib/client/apiError';
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
 import { useProviderModeCooldown } from '@/lib/cooldown';
@@ -318,6 +318,7 @@ const extractChapterGuidancesFromWorkingCombatants = (
 };
 
 export function useBattleStorySession() {
+  const generationApiIntentLatch = useGenerationApiIntentLatch();
   const useBattleSelector = <T,>(selector: (state: BattleStoreState) => T) => useBattleStore(selector);
   const combatants = useBattleSelector((state) => state.combatants);
   const battleMode = useBattleSelector((state) => state.battleMode);
@@ -897,7 +898,8 @@ export function useBattleStorySession() {
       let cooldownHandled = false;
 
       try {
-        const generationIntent = createGenerationApiIntent();
+        const generationIntent = generationApiIntentLatch.tryAcquire();
+        if (!generationIntent) throw new Error('已有生成请求正在处理中，请勿重复提交。');
         const response = await generationIntent.dispatch('/api/arena/session/generate-next', {
           method: 'POST',
           headers: withArenaGenerationActorToken(await buildRequestHeaders(true)),
@@ -1191,6 +1193,7 @@ export function useBattleStorySession() {
       }
     },
     [
+      generationApiIntentLatch,
       applyWorkingCombatantUpdates,
       buildRequestHeaders,
       cooldownMs,

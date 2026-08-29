@@ -20,7 +20,8 @@ import { readJsonOrTextFromResponse, resolveApiErrorMessage } from '@/lib/client
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
 import { ThemeImage } from '@/components/shared/ThemeImage';
 import { authStorage } from '@/lib/auth';
-import { createGenerationApiIntent } from '@/lib/hono-api-client';
+import type { GenerationApiIntent } from '@/lib/hono-api-client';
+import { useGenerationApiIntentLatch } from '@/lib/use-generation-api-intent-latch';
 
 // 注意：QueueStatus 组件及其相关逻辑已被移除，因为它在Serverless环境下无法正常工作。
 
@@ -93,10 +94,13 @@ function checkNameLength(name: string): boolean {
 }
 
 // 使用 API 路由生成魔法少女
-async function generateMagicalGirl(inputName: string, language: string): Promise<MagicalGirl> {
+async function generateMagicalGirl(
+  generationIntent: GenerationApiIntent,
+  inputName: string,
+  language: string,
+): Promise<MagicalGirl> {
   try {
     const activityHeaders = await authStorage.getActivityHeaders();
-    const generationIntent = createGenerationApiIntent();
     const response = await generationIntent.dispatch('/api/generate-magical-girl', {
       method: 'POST',
       headers: {
@@ -155,6 +159,7 @@ async function generateMagicalGirl(inputName: string, language: string): Promise
 }
 
 export function NamePage() {
+  const generationApiIntentLatch = useGenerationApiIntentLatch();
   const [inputName, setInputName] = useState('');
   const [magicalGirl, setMagicalGirl] = useState<MagicalGirl | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -215,12 +220,18 @@ export function NamePage() {
       router.push(redirectTarget);
       return;
     }
+    const generationIntent = generationApiIntentLatch.tryAcquire();
+    if (!generationIntent) return;
     setIsGenerating(true);
     setError(null);
     let nextCooldownMs = 60000;
 
     try {
-      const result = await generateMagicalGirl(inputName.trim(), selectedLanguage);
+      const result = await generateMagicalGirl(
+        generationIntent,
+        inputName.trim(),
+        selectedLanguage,
+      );
       setMagicalGirl(result);
       setError(null); // 成功时清除错误
     } catch (error) {

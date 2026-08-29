@@ -98,6 +98,20 @@ const parseHostedDrContractVersion = (
   return { family: match[1]!, version };
 };
 
+export const isHostedDrContractVersionCompatible = (
+  runtimeContractVersion: string,
+  clientContractVersion: string,
+): boolean => {
+  const runtime = parseHostedDrContractVersion(runtimeContractVersion);
+  const client = parseHostedDrContractVersion(clientContractVersion);
+  return Boolean(
+    runtime
+    && client
+    && runtime.family === client.family
+    && Math.abs(runtime.version - client.version) <= HOSTED_DR_MAX_VERSION_SKEW
+  );
+};
+
 const deniedHostedDrVersionGate = (
   reason: Exclude<HostedDrVersionGateReason, 'compatible'>,
 ): HostedDrVersionGateResult => ({ allowed: false, reason });
