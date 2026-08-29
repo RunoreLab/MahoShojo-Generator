@@ -39,13 +39,17 @@ const canonicalAutomatedEvidence = Object.freeze({
     'apps/api/tests/hosted-dr-fault-matrix.test.ts',
     'apps/web/tests/api-error-message.test.ts',
   ],
+  'client-preflight-routing-and-zero-replay': [
+    'apps/web/tests/hosted-dr-client-preflight.test.ts',
+    'apps/web/tests/hono-api-client.test.ts',
+  ],
 });
 const canonicalAutomatedCoverage = Object.keys(canonicalAutomatedEvidence);
 const canonicalOpenCoverage = [
   'all-18-shared-routes-default-vs-refactor-post-success-and-error-runtime-differential',
   'all-6-exited-routes-auth-success-and-upstream-error-runtime-differential',
   'real-browser-network-transition-and-background-suspension-journey',
-  'production-stable-control-plane-and-real-fault-drills',
+  'production-client-preflight-observability-and-authorized-fault-drill',
 ];
 
 const fail = (message) => failures.push(message);
@@ -218,7 +222,13 @@ if (
   || hostedDrDrills.productionStatus !== 'deferred'
   || hostedDrDrills.productionDrill?.status !== 'deferred'
 ) {
-  fail('production stable control plane 未闭合前必须保持 not-provisioned/deferred');
+  fail('optional managed control plane 未授权开通时必须保持 not-provisioned/deferred');
+}
+if (
+  capabilities.controlPlane?.defaultMode !== 'client-preflight'
+  || capabilities.controlPlane?.managedControlPlane !== 'optional-disabled'
+) {
+  fail('低成本 production 默认必须为 client-preflight，managed control plane 必须保持 optional-disabled');
 }
 
 if (failures.length > 0) {
@@ -232,5 +242,5 @@ console.log(
   + `${contracts.sharedWithDefaultRouteIds.length} shared, `
   + `${exitedRoutes.length} exited, ${contracts.requiredEvidenceTests.length} evidence suites; `
   + `${contracts.auditCoverage.open.length} dimensions remain open; `
-  + 'production control plane remains fail-closed/deferred.',
+  + 'client-preflight is the production default; optional managed control plane remains disabled/deferred.',
 );

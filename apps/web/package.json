@@ -18,6 +18,7 @@
     "lint": "eslint app components lib",
     "test": "vitest run --config vitest.config.ts",
     "test:watch": "vitest --config vitest.config.ts",
+    "verify:hosted-dr:client-preflight": "node --import tsx scripts/verify-hosted-dr-client-preflight.ts",
     "backfill:user-auth-links:dry": "pnpm exec tsx scripts/backfill-user-auth-links.ts --dry-run true --batch 200",
     "backfill:user-auth-links:write": "pnpm exec tsx scripts/backfill-user-auth-links.ts --write --batch 200"
   },

@@ -8,6 +8,9 @@
     "drOrigin": "https://mahoshojo.colanns.me",
     "mode": "active-passive",
     "provisioning": "not-provisioned",
+    "defaultMode": "client-preflight",
+    "managedControlPlane": "optional-disabled",
+    "preflightTimeoutMs": 1500,
     "productionFallback": {
       "mode": "same-origin-next",
       "artifactReadiness": "deferred",

@@ -45,6 +45,7 @@
     "check:preview:environment": "node scripts/check-preview-environment.mjs",
     "generate:hosted-dr-client": "node scripts/generate-hosted-dr-client-config.mjs",
     "verify:hosted-dr": "node scripts/verify-hosted-dr.mjs",
+    "verify:hosted-dr:client-preflight": "pnpm --filter @mahoshojo/web run verify:hosted-dr:client-preflight",
     "verify:hosted-dr:redis": "HOSTED_DR_LOCAL_FAULT_INJECTION=true pnpm --filter @mahoshojo/api run verify:hosted-dr:redis",
     "test:repo": "vitest run --config vitest.config.ts",
     "lint:repo": "eslint scripts tests drizzle.config.ts --config eslint.config.mjs",

@@ -75,6 +75,29 @@ describe('Hono server app', () => {
     });
   });
 
+  it('公开 readiness 对受信 Web origin 返回精确 CORS 与 no-store contract', async () => {
+    const app = createHonoApp({
+      ...config,
+      corsOrigins: ['https://mahoshojo.colanns.me'],
+    }, createRedisStub());
+
+    const response = await app.request('/api/health/ready', {
+      headers: { Origin: 'https://mahoshojo.colanns.me' },
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('access-control-allow-origin')).toBe(
+      'https://mahoshojo.colanns.me',
+    );
+    expect(response.headers.get('cache-control')).toBe('no-store');
+    expect(await response.json()).toMatchObject({
+      ok: true,
+      service: 'mahoshojo-hono',
+      placement: 'hono-primary',
+      contractVersion: 'g25e1-v1',
+    });
+  });
+
   it('telemetry 日志 transport 失败不改变 health/readiness', async () => {
     const telemetry = new HonoRuntimeTelemetry({
       logger: () => {

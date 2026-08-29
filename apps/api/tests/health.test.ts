@@ -114,9 +114,13 @@ describe.each(transportCases)('D1 readiness：$name', ({ transport, expectedUrl 
     const response = await createHealthApp().request('/health/ready');
 
     expect(response.status).toBe(200);
+    expect(response.headers.get('cache-control')).toBe('no-store');
     expect(requestedUrl).toBe(expectedUrl);
     expect(await response.json()).toMatchObject({
       ok: true,
+      service: 'mahoshojo-hono',
+      placement: 'hono-primary',
+      contractVersion: 'g25e1-v1',
       dependencies: {
         d1: { configured: true, required: true, ready: true, transport },
       },
@@ -146,8 +150,12 @@ describe.each(transportCases)('D1 readiness：$name', ({ transport, expectedUrl 
     const response = await createHealthApp().request('/health/ready');
 
     expect(response.status).toBe(503);
+    expect(response.headers.get('cache-control')).toBe('no-store');
     expect(await response.json()).toMatchObject({
       ok: false,
+      service: 'mahoshojo-hono',
+      placement: 'hono-primary',
+      contractVersion: 'g25e1-v1',
       dependencies: {
         d1: { configured: true, required: true, ready: false, transport },
       },

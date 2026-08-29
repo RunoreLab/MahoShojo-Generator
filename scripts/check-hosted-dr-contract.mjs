@@ -1,4 +1,5 @@
 import { existsSync, readFileSync } from 'node:fs';
+import { isIP } from 'node:net';
 import path from 'node:path';
 import process from 'node:process';
 import { renderHostedDrClientConfig } from './hosted-dr-client-config.mjs';
@@ -226,6 +227,19 @@ if (controlPlane.corsOriginsEnvironment !== 'HONO_CORS_ORIGINS') {
 if (!['not-provisioned', 'preview', 'production'].includes(controlPlane.provisioning)) {
   fail('controlPlane.provisioning 非法');
 }
+if (controlPlane.defaultMode !== 'client-preflight') {
+  fail('默认 routing mode 必须为 client-preflight');
+}
+if (controlPlane.managedControlPlane !== 'optional-disabled') {
+  fail('managed control plane 必须保持 optional-disabled');
+}
+if (
+  !Number.isInteger(controlPlane.preflightTimeoutMs)
+  || controlPlane.preflightTimeoutMs < 500
+  || controlPlane.preflightTimeoutMs > 3000
+) {
+  fail('preflightTimeoutMs 必须在 500..3000ms');
+}
 const productionFallback = controlPlane.productionFallback;
 if (
   productionFallback?.mode !== 'same-origin-next'
@@ -271,11 +285,24 @@ for (const origin of origins) {
     const parsed = new URL(origin);
     if (
       parsed.protocol !== 'https:'
+      || parsed.username !== ''
+      || parsed.password !== ''
       || parsed.pathname !== '/'
       || parsed.search !== ''
       || parsed.hash !== ''
     ) {
       fail(`origin 必须是无 path/query/hash 的 HTTPS origin: ${origin}`);
+    }
+    const hostname = parsed.hostname.toLowerCase();
+    if (
+      isIP(hostname) !== 0
+      || !hostname.includes('.')
+      || hostname === 'localhost'
+      || hostname.endsWith('.localhost')
+      || hostname.endsWith('.local')
+      || hostname.endsWith('.internal')
+    ) {
+      fail(`origin 必须是 public HTTPS origin: ${origin}`);
     }
   } catch {
     fail(`origin 非法: ${String(origin)}`);
@@ -285,7 +312,10 @@ for (const [name, probePath] of [
   ['primaryProbePath', controlPlane.primaryProbePath],
   ['drProbePath', controlPlane.drProbePath],
 ]) {
-  if (typeof probePath !== 'string' || !probePath.startsWith('/api/')) {
+  const expectedPath = name === 'primaryProbePath'
+    ? '/api/health/ready'
+    : '/api/hosted/dr-readiness';
+  if (probePath !== expectedPath) {
     fail(`${name} 必须是 /api/ 下的绝对路径`);
   }
 }
@@ -385,6 +415,12 @@ for (const capability of capabilities) {
   const methods = operations.map(({ method }) => method);
   if (operations.length === 0 || !unique(methods)) {
     fail(`${label}: operations 必须非空且 method 不重复`);
+  }
+  if (
+    capability.contractStatus === 'fail-closed-verified'
+    && operations.some(({ drMode }) => drMode !== 'fail-closed')
+  ) {
+    fail(`${label}: fail-closed contractStatus 不得投影为 DR eligible`);
   }
   for (const operation of operations) {
     if (!allowedMethods.has(operation.method)) {
@@ -492,27 +528,28 @@ if (!existsSync(clientProjectionPath)) {
   fail('客户端 stable-origin 投影不存在');
 } else {
   const clientProjection = readFileSync(clientProjectionPath, 'utf8');
-  const expectedProjection = renderHostedDrClientConfig(
-    controlPlane.stableOrigin,
-    controlPlane.previewOrigin,
-    controlPlane.provisioning,
-    productionFallback?.artifactReadiness,
-  );
+  const expectedProjection = renderHostedDrClientConfig(manifest);
   if (clientProjection !== expectedProjection) {
-    fail('客户端 stable-origin 投影与 DR manifest drift；运行 pnpm generate:hosted-dr-client');
+    fail('客户端 preflight 投影与 DR manifest drift；运行 pnpm generate:hosted-dr-client');
   }
-  if (
-    clientProjection.includes(controlPlane.primaryOrigin)
-    || clientProjection.includes(controlPlane.drOrigin)
-  ) {
-    fail('客户端投影不得包含物理 primary/DR origin');
+  for (const capability of capabilities) {
+    for (const secret of capability.requiredSecrets ?? []) {
+      if (clientProjection.includes(JSON.stringify(secret.name))) {
+        fail(`客户端投影不得包含 secret 名称: ${secret.name}`);
+      }
+    }
+    for (const binding of capability.requiredBindings ?? []) {
+      if (clientProjection.includes(JSON.stringify(binding))) {
+        fail(`客户端投影不得包含 binding: ${binding}`);
+      }
+    }
   }
 }
 if (
   !clientConfig.includes('hosted-dr-client.generated')
   || clientConfig.includes('hosted-dr-capabilities.json')
 ) {
-  fail('客户端配置必须只消费生成后的 stable-origin 安全投影');
+  fail('客户端配置必须只消费生成后的 preflight 安全投影');
 }
 
 const webPackage = readJson('apps/web/package.json');

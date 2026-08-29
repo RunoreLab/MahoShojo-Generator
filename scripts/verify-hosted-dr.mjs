@@ -63,6 +63,13 @@ try {
   process.stdout.write(contract.stdout);
   process.stderr.write(contract.stderr);
 
+  const clientPreflight = run(['run', 'verify:hosted-dr:client-preflight']);
+  if (clientPreflight.status !== 0) {
+    failCommand('Hosted DR client-preflight real-network evidence', clientPreflight);
+  }
+  process.stdout.write(clientPreflight.stdout);
+  process.stderr.write(clientPreflight.stderr);
+
   const executedAssertions = [];
   for (const suite of suites) {
     const outputFile = path.join(reportDirectory, `${suite.name}.json`);

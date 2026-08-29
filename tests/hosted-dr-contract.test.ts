@@ -26,6 +26,11 @@ type HostedDrManifest = {
     drOrigin: string;
     mode: string;
     provisioning: string;
+    defaultMode: string;
+    managedControlPlane: string;
+    primaryProbePath: string;
+    drProbePath: string;
+    preflightTimeoutMs: number;
     corsOriginsEnvironment: string;
     productionFallback: {
       mode: string;
@@ -42,6 +47,7 @@ type HostedDrManifest = {
       drMode: string;
       replayPolicy: string;
     }>;
+    contractStatus: string;
     drillStatus: string;
     requiredSecrets: Array<{ name: string; minLength?: number }>;
     requiredBindings: string[];
@@ -107,11 +113,21 @@ describe('Hosted DR machine contract', () => {
       drOrigin,
       mode,
       provisioning,
+      defaultMode,
+      managedControlPlane,
+      primaryProbePath,
+      drProbePath,
+      preflightTimeoutMs,
       productionFallback,
     } = manifest.controlPlane;
 
     expect(mode).toBe('active-passive');
     expect(provisioning).toBe('not-provisioned');
+    expect(defaultMode).toBe('client-preflight');
+    expect(managedControlPlane).toBe('optional-disabled');
+    expect(primaryProbePath).toBe('/api/health/ready');
+    expect(drProbePath).toBe('/api/hosted/dr-readiness');
+    expect(preflightTimeoutMs).toBe(1500);
     expect(productionFallback).toEqual({
       mode: 'same-origin-next',
       artifactReadiness: 'deferred',
@@ -125,6 +141,33 @@ describe('Hosted DR machine contract', () => {
       expect(parsed.pathname).toBe('/');
       expect(parsed.search).toBe('');
       expect(parsed.hash).toBe('');
+    }
+  });
+
+  it('客户端投影包含公开 preflight 路由和最小 operation policy，且不包含 secret/binding', () => {
+    const manifest = readJson<HostedDrManifest>('config/hosted-dr-capabilities.json');
+    const generatedSource = readFileSync(
+      path.join(repositoryRoot, 'apps/web/config/hosted-dr-client.generated.ts'),
+      'utf8',
+    );
+
+    expect(generatedSource).toContain('hostedDrClientRouting');
+    expect(generatedSource).toContain(manifest.controlPlane.primaryOrigin);
+    expect(generatedSource).toContain(manifest.controlPlane.drOrigin);
+    expect(generatedSource).toContain(manifest.controlPlane.primaryProbePath);
+    expect(generatedSource).toContain(manifest.controlPlane.drProbePath);
+    expect(generatedSource).toContain('hostedDrClientOperations');
+    expect(generatedSource).toContain('/api/generate-free');
+    expect(generatedSource).toContain('new-request-only');
+    expect(generatedSource).toContain('/api/arena/generate');
+    expect(generatedSource).toContain('fail-closed');
+    for (const capability of manifest.capabilities) {
+      for (const secret of capability.requiredSecrets) {
+        expect(generatedSource).not.toContain(secret.name);
+      }
+      for (const binding of capability.requiredBindings) {
+        expect(generatedSource).not.toContain(binding);
+      }
     }
   });
 
@@ -292,6 +335,10 @@ describe('Hosted DR machine contract', () => {
 
     expect(existsSync(path.join(repositoryRoot, 'scripts/check-hosted-dr-contract.mjs'))).toBe(true);
     expect(existsSync(path.join(repositoryRoot, 'scripts/verify-hosted-dr.mjs'))).toBe(true);
+    expect(existsSync(path.join(
+      repositoryRoot,
+      'apps/web/scripts/verify-hosted-dr-client-preflight.ts',
+    ))).toBe(true);
     const executableVerifier = readFileSync(
       path.join(repositoryRoot, 'scripts/verify-hosted-dr.mjs'),
       'utf8',
@@ -301,6 +348,10 @@ describe('Hosted DR machine contract', () => {
     expect(rootPackage.scripts['verify:hosted-dr']).toContain('scripts/verify-hosted-dr.mjs');
     expect(executableVerifier).toContain('G25E2-REDIS-EMPTY');
     expect(executableVerifier).toContain('hosted.dr.evidence.integration.required');
+    expect(executableVerifier).toContain('verify:hosted-dr:client-preflight');
+    expect(webPackage.scripts['verify:hosted-dr:client-preflight']).toContain(
+      'verify-hosted-dr-client-preflight.ts',
+    );
     expect(executableVerifier).not.toContain('drills.cases.length');
     expect(rootPackage.scripts['ci:verify']).toContain('pnpm run verify:hosted-dr');
     expect(rootPackage.scripts['workspace:verify']).toContain('pnpm run check:hosted-dr');
@@ -356,6 +407,36 @@ describe('Hosted DR machine contract', () => {
         if (operation) operation.replayPolicy = 'safe-read-only';
       },
       expected: '非幂等 operation 不得配置 safe replay',
+    },
+    {
+      label: 'fail-closed policy widening',
+      mutate: (manifest: HostedDrManifest) => {
+        const operation = manifest.capabilities.find(({ id }) => id === 'arena/generate')
+          ?.operations[0];
+        if (operation) operation.drMode = 'new-request-only';
+      },
+      expected: 'fail-closed contractStatus 不得投影为 DR eligible',
+    },
+    {
+      label: 'missing client preflight mode',
+      mutate: (manifest: HostedDrManifest) => {
+        manifest.controlPlane.defaultMode = 'managed-control-plane';
+      },
+      expected: '默认 routing mode 必须为 client-preflight',
+    },
+    {
+      label: 'invalid preflight timeout',
+      mutate: (manifest: HostedDrManifest) => {
+        manifest.controlPlane.preflightTimeoutMs = 30_000;
+      },
+      expected: 'preflightTimeoutMs 必须在 500..3000ms',
+    },
+    {
+      label: 'internal primary origin',
+      mutate: (manifest: HostedDrManifest) => {
+        manifest.controlPlane.primaryOrigin = 'https://127.0.0.1';
+      },
+      expected: 'public HTTPS origin',
     },
     {
       label: 'embedded secret value',

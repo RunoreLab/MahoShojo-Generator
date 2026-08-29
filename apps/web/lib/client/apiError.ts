@@ -3,6 +3,11 @@ const safeString = (value: unknown): string => (typeof value === 'string' ? valu
 export const INFRASTRUCTURE_ERROR_MESSAGES = {
   RATE_LIMIT_UNAVAILABLE: '限速服务暂时不可用，请稍后重试。',
   HOSTED_DR_CAPABILITY_UNAVAILABLE: '备用生成服务暂时不可用，请稍后重试。',
+  OPERATION_NOT_DECLARED: '此操作当前没有可用的 Hosted 路由，请稍后再试。',
+  DR_NOT_ELIGIBLE: '主服务当前不可用，且此操作不能安全切换到灾备服务。',
+  NO_READY_PLACEMENT: '主服务与灾备服务当前均不可用，请稍后再试。',
+  AMBIGUOUS_OPERATION_OUTCOME: '请求可能已经开始处理，请勿立即重复提交；可稍后查询结果或重新连接。',
+  GENERATION_INTENT_ALREADY_DISPATCHED: '同一个生成意图只能提交一次。',
   ARENA_GENERATION_CAPABILITY_UNAVAILABLE: '战报生成服务暂时不可用，请稍后重试。',
   GENERATION_RESERVATION_UNAVAILABLE: '暂时无法确认战报生成状态，请稍后重试；请勿重复提交同一场生成。',
   GENERATION_STATE_UNAVAILABLE: '暂时无法确认战报生成状态，请稍后重试；请勿重复提交同一场生成。',
