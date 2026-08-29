@@ -126,6 +126,8 @@ describe('Hosted DR client bundle safety gate', () => {
     'http://127.0.0.1.',
     'http://localhost:8787',
     'https://router.service.local',
+    'HTTP://127.0.0.1:8787',
+    'HtTp://router.service.internal',
   ])('拒绝任意客户端 chunk 的内部 endpoint %s', (endpoint) => {
     const result = runCheckerFiles({
       'routing.js': routingBundle(),
@@ -134,6 +136,22 @@ describe('Hosted DR client bundle safety gate', () => {
 
     expect(result.status).toBe(1);
     expect(`${result.stdout}\n${result.stderr}`).toContain('internal endpoint');
+  });
+
+  it.each([
+    ['credential', 'https://user:bundle-secret@example.com'],
+    ['query', 'https://example.com?token=bundle-secret'],
+    ['fragment', 'https://example.com#bundle-secret'],
+  ])('拒绝客户端 chunk 的 %s URL 且不回显值', (_label, endpoint) => {
+    const result = runCheckerFiles({
+      'routing.js': routingBundle(),
+      'leaked.js': `const fallback="${endpoint}"`,
+    });
+    const output = `${result.stdout}\n${result.stderr}`;
+
+    expect(result.status).toBe(1);
+    expect(output).toContain('credential/query/fragment URL');
+    expect(output).not.toContain('bundle-secret');
   });
 
   it('只豁免框架 URL parser 与 location fallback 的精确 synthetic origin', () => {

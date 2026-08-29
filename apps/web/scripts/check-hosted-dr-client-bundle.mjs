@@ -52,8 +52,8 @@ const bindingNames = [...new Set(manifest.capabilities.flatMap((capability) => (
 const failures = [];
 const routingSources = [];
 
-const originPattern = /https?:\/\/(?:\[[^\]]+\]|[^/\s"'`;,)}]+)/gu;
-const dynamicIpv6OriginPattern = /^https?:\/\/\[\$\{[A-Za-z_$][A-Za-z0-9_.$]*\}\]$/u;
+const originPattern = /https?:\/\/(?:\[[^\]]+\]|[^/\s"'`;,)}]+)/giu;
+const dynamicIpv6OriginPattern = /^https?:\/\/\[\$\{[A-Za-z_$][A-Za-z0-9_.$]*\}\]$/iu;
 const frameworkOriginFixtures = new Map([
   ['chunks/main-', new Set(['http://n', 'http://f'])],
   ['chunks/polyfills-', new Set([
@@ -82,7 +82,22 @@ const scanInternalOrigins = (relativePath, source) => {
     try {
       parsed = new URL(origin);
     } catch {
-      failures.push(`${relativePath}: client bundle 包含非法 origin ${origin}`);
+      failures.push(`${relativePath}: client bundle 包含非法 origin`);
+      continue;
+    }
+    const allowedSyntheticOrigin = isAllowedSyntheticOrigin(
+      relativePath,
+      source,
+      origin,
+      match.index ?? 0,
+    );
+    if (
+      (parsed.username || parsed.password || parsed.search || parsed.hash)
+      && !allowedSyntheticOrigin
+    ) {
+      failures.push(
+        `${relativePath}: client bundle 包含 credential/query/fragment URL`,
+      );
       continue;
     }
     const hostname = parsed.hostname
@@ -98,7 +113,7 @@ const scanInternalOrigins = (relativePath, source) => {
       || hostname.endsWith('.internal');
     if (
       isInternal
-      && !isAllowedSyntheticOrigin(relativePath, source, origin, match.index ?? 0)
+      && !allowedSyntheticOrigin
     ) {
       failures.push(`${relativePath}: client bundle 包含 internal endpoint ${origin}`);
     }
