@@ -493,6 +493,8 @@ export type ArenaGenerationServiceDependencies = {
   replayPollMs?: number;
   deltaFlushIntervalMs?: number;
   deltaFlushBytes?: number;
+  snapshotFlushIntervalMs?: number;
+  snapshotFlushBytes?: number;
   snapshotMaxBytes?: number;
   terminalStore?: ArenaGenerationTerminalStore;
   rejectedTerminalRecorder?: ArenaGenerationRejectedTerminalRecorder;
@@ -848,8 +850,11 @@ export const createArenaGenerationService = (
   const heartbeatIntervalMs = dependencies.heartbeatIntervalMs ?? 15_000;
   const leaseDurationMs = dependencies.leaseDurationMs ?? 45_000;
   const replayPollMs = dependencies.replayPollMs ?? 1_000;
-  const deltaFlushIntervalMs = dependencies.deltaFlushIntervalMs ?? 75;
-  const deltaFlushBytes = dependencies.deltaFlushBytes ?? 1_024;
+  const replayIdleDelayMs = Math.min(replayPollMs, 50);
+  const deltaFlushIntervalMs = dependencies.deltaFlushIntervalMs ?? 40;
+  const deltaFlushBytes = dependencies.deltaFlushBytes ?? 512;
+  const snapshotFlushIntervalMs = dependencies.snapshotFlushIntervalMs ?? 250;
+  const snapshotFlushBytes = dependencies.snapshotFlushBytes ?? 4_096;
   const snapshotMaxBytes = dependencies.snapshotMaxBytes ?? 2 * 1_024 * 1_024;
   const hasPreflight = typeof dependencies.executor.preflight === 'function';
   const hasMaterialize = typeof dependencies.executor.materialize === 'function';
@@ -877,6 +882,12 @@ export const createArenaGenerationService = (
   if (!Number.isFinite(deltaFlushBytes) || deltaFlushBytes < 1) {
     throw new Error('deltaFlushBytes 必须是正有限数字');
   }
+  if (!Number.isFinite(snapshotFlushIntervalMs) || snapshotFlushIntervalMs < 1) {
+    throw new Error('snapshotFlushIntervalMs 必须是正有限数字');
+  }
+  if (!Number.isFinite(snapshotFlushBytes) || snapshotFlushBytes < 1) {
+    throw new Error('snapshotFlushBytes 必须是正有限数字');
+  }
   if (!Number.isFinite(snapshotMaxBytes) || snapshotMaxBytes < 1) {
     throw new Error('snapshotMaxBytes 必须是正有限数字');
   }
@@ -900,6 +911,8 @@ export const createArenaGenerationService = (
     let pendingType: 'markdown' | 'reasoning' | null = null;
     let pendingChunks: string[] = [];
     let pendingBytes = 0;
+    let pendingSnapshotBytes = 0;
+    let lastSnapshotAtMs: number | null = null;
     let flushTimer: ReturnType<typeof setTimeout> | null = null;
     let operation = Promise.resolve();
 
@@ -921,11 +934,11 @@ export const createArenaGenerationService = (
       status: GenerationStatus,
       now: string,
       terminalResultRef: string | null = null,
-    ): Promise<void> => {
+    ): Promise<boolean> => {
       const nextSnapshot = snapshot(status, now, terminalResultRef);
       if (encodedBytes(nextSnapshot) > snapshotMaxBytes) {
         observe({ event: 'redis_degraded', generationId, operation: 'snapshot_budget' });
-        return;
+        return false;
       }
       try {
         const result = await dependencies.store.writeSnapshot({
@@ -938,12 +951,19 @@ export const createArenaGenerationService = (
           onOwnershipLost();
           throw new Error('GENERATION_PRODUCER_FENCED');
         }
+        return true;
       } catch {
         observe({ event: 'redis_degraded', generationId, operation: 'write_snapshot' });
+        return false;
       }
     };
 
-    const append = async (events: GenerationEventInput[], now: string): Promise<void> => {
+    const append = async (
+      events: GenerationEventInput[],
+      now: string,
+      snapshotDeltaBytes = 0,
+      forceSnapshot = false,
+    ): Promise<void> => {
       let result: Awaited<ReturnType<GenerationReplayStore['appendEvents']>> | null = null;
       try {
         result = await dependencies.store.appendEvents({
@@ -960,7 +980,16 @@ export const createArenaGenerationService = (
         observe({ event: 'redis_degraded', generationId, operation: 'append_events' });
       }
       lastEventId = result?.events.at(-1)?.id ?? lastEventId;
-      await writeSnapshot('running', now);
+      pendingSnapshotBytes += snapshotDeltaBytes;
+      const nowMs = Date.parse(now);
+      const snapshotDue = lastSnapshotAtMs === null
+        || forceSnapshot
+        || nowMs - lastSnapshotAtMs >= snapshotFlushIntervalMs
+        || pendingSnapshotBytes >= snapshotFlushBytes;
+      if (snapshotDue && await writeSnapshot('running', now)) {
+        lastSnapshotAtMs = nowMs;
+        pendingSnapshotBytes = 0;
+      }
     };
 
     const flushPending = async (): Promise<void> => {
@@ -971,12 +1000,17 @@ export const createArenaGenerationService = (
       if (!pendingType || pendingChunks.length === 0) return;
       const type = pendingType;
       const chunk = pendingChunks.join('');
+      const chunkBytes = pendingBytes;
       pendingType = null;
       pendingChunks = [];
       pendingBytes = 0;
       if (type === 'markdown') markdown += chunk;
       else reasoning += chunk;
-      await append([{ type, data: { chunk } }], dependencies.now().toISOString());
+      await append(
+        [{ type, data: { chunk } }],
+        dependencies.now().toISOString(),
+        chunkBytes,
+      );
     };
 
     const enqueue = (task: () => Promise<void>): Promise<void> => {
@@ -1013,7 +1047,7 @@ export const createArenaGenerationService = (
             ) {
               telemetry = { ...(event.data as Record<string, unknown>) };
             }
-            await append([event], dependencies.now().toISOString());
+            await append([event], dependencies.now().toISOString(), 0, true);
             return;
           }
 
@@ -2088,7 +2122,7 @@ export const createArenaGenerationService = (
                 return;
               }
               if (batch.events.length === 0) {
-                await new Promise<void>((resolve) => setTimeout(resolve, replayPollMs));
+                await new Promise<void>((resolve) => setTimeout(resolve, replayIdleDelayMs));
               }
             }
           } catch (error) {

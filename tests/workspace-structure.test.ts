@@ -376,6 +376,19 @@ describe('phase 2.5C Hono API workspace app ownership', () => {
     );
   });
 
+  it('在 env example 中列出本地 Hono Compose 的全部必填变量', () => {
+    const compose = readFileSync(path.join(appDirectory, 'compose.local.yml'), 'utf8');
+    const envExample = readFileSync(path.join(appDirectory, 'env.example'), 'utf8');
+    const requiredVariables = [
+      ...new Set([...compose.matchAll(/\$\{([A-Z][A-Z0-9_]*):\?/gu)].map((match) => match[1])),
+    ];
+    const missingVariables = requiredVariables.filter(
+      (variableName) => !new RegExp(`^${variableName}=`, 'mu').test(envExample),
+    );
+
+    expect(missingVariables).toEqual([]);
+  });
+
   it('声明独立 app 生命周期，并由 root scripts 只做代理入口', () => {
     expect(existsSync(appManifestPath)).toBe(true);
     if (!existsSync(appManifestPath)) return;

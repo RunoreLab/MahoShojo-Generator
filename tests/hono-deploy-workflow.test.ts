@@ -139,6 +139,28 @@ describe('Hono deployment workflow', () => {
     expect(getStep(deployJob, 'Build Cloudflare bundle')).toContain(
       'run: pnpm --filter @mahoshojo/web run build:cf',
     );
+    const roomActivationStep = getStep(deployJob, 'Verify Arena Room backend activation');
+    const webBuildStep = getStep(deployJob, 'Build Cloudflare bundle');
+    expectRequiredGateStep(roomActivationStep);
+    expect(deployJob.indexOf('Verify Arena Room backend activation')).toBeLessThan(
+      deployJob.indexOf('Build Cloudflare bundle'),
+    );
+    expect(roomActivationStep).toContain('NEXT_PUBLIC_ARENA_ROOM_ORIGIN');
+    expect(workflow).toContain('arena_room_backend_ready:');
+    expect(roomActivationStep).toContain('ARENA_ROOM_BACKEND_READY');
+    expect(roomActivationStep).toContain('production Hono backend-first activation 未确认');
+    expect(roomActivationStep).toContain('/api/arena/rooms/v1/ws');
+    expect(roomActivationStep).toContain('Sec-WebSocket-Protocol: mahoshojo.arena-room.v1');
+    expect(roomActivationStep).toContain('Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==');
+    for (const variable of [
+      'NEXT_PUBLIC_ARENA_MULTIPLAYER_ENABLED',
+      'NEXT_PUBLIC_ARENA_ROOM_ORIGIN',
+      'NEXT_PUBLIC_ARENA_ROOM_WRITER_ACTIVATION',
+      'NEXT_PUBLIC_ARENA_ROOM_READER_CONTRACT',
+      'NEXT_PUBLIC_ARENA_ROOM_GO_NO_GO',
+    ]) {
+      expect(webBuildStep).toContain(variable);
+    }
     expect(getStep(deployJob, 'Deploy production')).toContain(
       'run: pnpm --filter @mahoshojo/web exec wrangler deploy --env production --keep-vars',
     );
@@ -198,13 +220,52 @@ describe('Hono deployment workflow', () => {
     expect(honoJob).not.toContain('check:preview:environment');
     expect(cloudflareBuildJob).toContain('needs: verify-and-build-hono');
     expect(cloudflareBuildJob).toContain('run: pnpm --filter @mahoshojo/web run build:cf');
+    expect(cloudflareBuildJob).toContain('NEXT_PUBLIC_ARENA_ROOM_ORIGIN');
+    expect(cloudflareBuildJob).toContain('NEXT_PUBLIC_ARENA_ROOM_WRITER_ACTIVATION');
+    const releaseStep = getStep(verifyJob, 'Build release tuple');
+    expect(releaseStep).toContain('HONO_ARENA_ROOM_WRITER_ACTIVATION: enabled');
+    expect(releaseStep).toContain('ARENA_ROOM_READER_ROLLOUT_CONTRACT');
+    expect(releaseStep).toContain('ARENA_ROOM_PRODUCTION_GO_NO_GO: approved');
+    expect(releaseStep).toContain('scripts/prepare-arena-room-release-gate.mjs');
+    expect(releaseStep).not.toContain(
+      'cp config/arena-room-release-gate.json apps/api/dist/arena-room-release-gate.json',
+    );
     expect(honoJob).toContain('- verify-and-build-hono');
     expect(honoJob).toContain('- verify-and-build-cloudflare');
     expect(cloudflareJob).toContain('- deploy-hono-preview');
     expect(cloudflareJob).toContain('- verify-and-build-cloudflare');
+    const previewRoomActivationStep = getStep(
+      cloudflareJob,
+      'Verify Arena Room backend activation',
+    );
+    expectRequiredGateStep(previewRoomActivationStep);
+    expect(cloudflareJob.indexOf('Verify Arena Room backend activation')).toBeLessThan(
+      cloudflareJob.indexOf('Build Cloudflare preview bundle'),
+    );
+    expect(previewRoomActivationStep).toContain('NEXT_PUBLIC_ARENA_ROOM_ORIGIN');
+    expect(previewRoomActivationStep).toContain('/api/arena/rooms/v1/ws');
+    expect(previewRoomActivationStep).toContain(
+      'Sec-WebSocket-Protocol: mahoshojo.arena-room.v1',
+    );
+    expect(previewRoomActivationStep).toContain(
+      'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==',
+    );
     expect(cloudflareJob).toContain(
       'NEXT_PUBLIC_HONO_API_ORIGIN: https://homura-preview.colanns.me',
     );
+    for (const variable of [
+      'NEXT_PUBLIC_ARENA_MULTIPLAYER_ENABLED',
+      'NEXT_PUBLIC_ARENA_ROOM_ORIGIN',
+      'NEXT_PUBLIC_ARENA_ROOM_WRITER_ACTIVATION',
+      'NEXT_PUBLIC_ARENA_ROOM_READER_CONTRACT',
+      'NEXT_PUBLIC_ARENA_ROOM_GO_NO_GO',
+    ]) {
+      expect(cloudflareJob).toContain(variable);
+    }
+    expect(workflow).toContain('arena_multiplayer:');
+    expect(workflow).toContain("inputs.arena_multiplayer == 'disabled'");
+    expect(workflow).toContain('PREVIEW_ARENA_ROOM_ORIGIN: https://homura-preview.colanns.me');
+    expect(workflow).not.toContain('vars.NEXT_PUBLIC_ARENA_ROOM_');
   });
 
   test('builds the Hono container before assembling and uploading the deployment artifact', () => {
@@ -213,7 +274,7 @@ describe('Hono deployment workflow', () => {
     const buildJob = getJob(workflow, 'build');
     const containerBuildStep = getStep(buildJob, 'Verify Hono container build');
     const activeLines = getActiveRunLines(containerBuildStep);
-    const composeConfigCommand = 'sudo --preserve-env=HONO_RELEASE_DIR,HONO_HOSTED_API_ENVIRONMENT docker compose -f apps/api/deploy/compose.yml config --no-env-resolution';
+    const composeConfigCommand = 'sudo --preserve-env=HONO_RELEASE_DIR,HONO_HOSTED_API_ENVIRONMENT,HONO_DEPLOY_CORS_ORIGINS docker compose -f apps/api/deploy/compose.yml config --no-env-resolution';
     const composeEnvironmentSafetyCheck = 'sudo test ! -e "$COMPOSE_ENV_DIRECTORY"';
     const composeEnvironmentSymlinkCheck = 'sudo test ! -L "$COMPOSE_ENV_DIRECTORY"';
     const composeEnvironmentCleanupTrap = 'trap cleanup_compose_environment EXIT';
@@ -243,6 +304,9 @@ describe('Hono deployment workflow', () => {
     );
     expect(compose).toContain(
       'HOSTED_API_ENVIRONMENT: ${HONO_HOSTED_API_ENVIRONMENT:?HONO_HOSTED_API_ENVIRONMENT must be explicit}',
+    );
+    expect(compose).toContain(
+      'HONO_CORS_ORIGINS: ${HONO_DEPLOY_CORS_ORIGINS:?HONO_DEPLOY_CORS_ORIGINS must be explicit}',
     );
     expect(activeLines).toContain(composeEnvironmentSafetyCheck);
     expect(activeLines).toContain(composeEnvironmentSymlinkCheck);

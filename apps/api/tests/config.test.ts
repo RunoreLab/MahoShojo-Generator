@@ -89,16 +89,44 @@ describe('Hono server config', () => {
   });
 
   it.each(['production', 'preview'])(
-    'GMR-09 mixed-version gate：%s target 在 compatible-reader-first/Production Gate 前拒绝激活 Arena multiplayer',
+    'GMR-09 mixed-version gate：%s target 的 writer-disabled tuple 即使收到请求也保持 Arena multiplayer 关闭',
     (target) => {
       stubValidBearerProductionEnv();
       vi.stubEnv('HOSTED_API_ENVIRONMENT', target);
       vi.stubEnv('REDIS_KEY_PREFIX', target === 'preview' ? 'preview' : '');
       vi.stubEnv('ARENA_MULTIPLAYER_ENABLED', 'true');
 
-      expect(() => readHonoServerConfig()).toThrow(/ARENA_MULTIPLAYER_ENABLED.*Production Gate.*false/);
+      expect(readHonoServerConfig().arenaMultiplayerEnabled).toBe(false);
     },
   );
+
+  it.each(['production', 'preview'])(
+    '%s target 仅在 tuple-bound writer 与 reader/go-no-go 证明同时成立时激活',
+    (target) => {
+      stubValidBearerProductionEnv();
+      vi.stubEnv('HOSTED_API_ENVIRONMENT', target);
+      vi.stubEnv('REDIS_KEY_PREFIX', target === 'preview' ? 'preview' : '');
+      vi.stubEnv('ARENA_MULTIPLAYER_ENABLED', 'true');
+      vi.stubEnv('ARENA_ROOM_WRITER_ACTIVATION', 'enabled');
+
+      expect(() => readHonoServerConfig()).toThrow(/compatible reader rollout attestation/iu);
+
+      vi.stubEnv(
+        'ARENA_ROOM_READER_ROLLOUT_CONTRACT',
+        'arena-room-authority-v2-generation-payload-digest-v1',
+      );
+      vi.stubEnv('ARENA_ROOM_PRODUCTION_GO_NO_GO', 'approved');
+      vi.stubEnv('ARENA_ROOM_LOGICAL_ORIGIN', 'https://api.example.test');
+      expect(readHonoServerConfig().arenaMultiplayerEnabled).toBe(true);
+    },
+  );
+
+  it('protected target 拒绝非法 tuple-bound writer activation 状态', () => {
+    stubValidBearerProductionEnv();
+    vi.stubEnv('ARENA_ROOM_WRITER_ACTIVATION', 'sometimes');
+
+    expect(() => readHonoServerConfig()).toThrow(/ARENA_ROOM_WRITER_ACTIVATION/);
+  });
 
   it('读取共享 Redis 的环境隔离前缀', () => {
     stubValidBearerProductionEnv();

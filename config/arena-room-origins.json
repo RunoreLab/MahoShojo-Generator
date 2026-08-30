@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "authority": "hono-redis-single-writer",
+  "cloudflareDr": "excluded",
+  "targets": {
+    "production": {
+      "logicalOrigin": "https://api.mahoshojo.colanns.me",
+      "provisioning": "not-provisioned",
+      "allowedWebOrigins": [
+        "https://mahoshojo.colanns.me"
+      ]
+    },
+    "preview": {
+      "logicalOrigin": "https://homura-preview.colanns.me",
+      "provisioning": "provisioned",
+      "allowedWebOrigins": [
+        "https://mahoshojo.colanns.me",
+        "https://maho-preview.colanns.me",
+        "https://mahoshojo-next-preview.719147538.workers.dev"
+      ]
+    }
+  }
+}

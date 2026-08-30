@@ -116,7 +116,14 @@ const createFixture = (options: {
   const commandLog = path.join(temporaryDirectory, 'commands.log');
   mkdirSync(path.join(rootDirectory, 'releases'), { recursive: true });
   mkdirSync(commandDirectory, { recursive: true });
-  writeFileSync(path.join(rootDirectory, '.env.hono'), 'FIXTURE=true\n');
+  writeFileSync(path.join(rootDirectory, '.env.hono'), [
+    'FIXTURE=true',
+    ...(options.targetWriterActivation === 'enabled' ? [
+      'ARENA_ROOM_READER_ROLLOUT_CONTRACT=arena-room-authority-v2-generation-payload-digest-v1',
+      'ARENA_ROOM_PRODUCTION_GO_NO_GO=approved',
+    ] : []),
+    '',
+  ].join('\n'));
   chmodSync(path.join(rootDirectory, '.env.hono'), 0o600);
 
   const previousRelease = createRelease(rootDirectory, 'previous', {
@@ -304,6 +311,7 @@ exec "$HONO_DEPLOY_TEST_REAL_SLEEP" "$@"
 `);
   writeExecutable(path.join(commandDirectory, 'curl'), `#!/bin/sh
 all_arguments="$*"
+printf 'curl %s\n' "$all_arguments" >> "$HONO_DEPLOY_TEST_COMMAND_LOG"
 headers=''
 body=''
 while [ "$#" -gt 0 ]; do
@@ -332,9 +340,19 @@ if [ -n "$headers" ]; then
   printf 'Access-Control-Allow-Origin: https://mahoshojo.colanns.me\\r\\n' > "$headers"
 fi
 if [ -n "$body" ]; then
-  printf '%s' '{"error":"Name is required"}' > "$body"
+  case "$all_arguments" in
+    *"/api/arena/rooms/v1/ws"*) printf '%s' '{"code":"ROOM_TICKET_REQUIRED"}' > "$body" ;;
+    *"/api/arena/rooms/v1"*) printf '%s' '{"code":"ROOM_AUTHENTICATION_REQUIRED"}' > "$body" ;;
+    *) printf '%s' '{"error":"Name is required"}' > "$body" ;;
+  esac
 fi
-printf '%s' "\${HONO_DEPLOY_TEST_PROBE_STATUS:-400}"
+probe_status="\${HONO_DEPLOY_TEST_PROBE_STATUS:-400}"
+case "$all_arguments" in
+  *"/api/arena/rooms/v1"*)
+    [ "$probe_status" = 400 ] && probe_status=401
+    ;;
+esac
+printf '%s' "$probe_status"
 exit 0
 `);
 
@@ -928,8 +946,70 @@ describe('Hono release-local deployment transaction', () => {
     );
   });
 
-  test('writer-enabled current 在 generation start 未关闭时拒绝 rollback', () => {
+  test('writer-enabled current 回滚到 writer-disabled tuple 前也必须先关闭 generation start', () => {
     const fixture = createFixture({ previousWriterActivation: 'enabled' });
+    writeFileSync(
+      path.join(fixture.rootDirectory, '.env.hono'),
+      'FIXTURE=true\nARENA_MULTIPLAYER_ENABLED=true\n',
+    );
+    chmodSync(path.join(fixture.rootDirectory, '.env.hono'), 0o600);
+
+    const result = runRollback(fixture, { validateGateSchema: true });
+    const commands = readFileSync(fixture.commandLog, 'utf8');
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('generation start 未关闭');
+    expect(commands).not.toContain(`-f ${fixture.releaseDirectory}/compose.yml up`);
+    expect(readlinkSync(path.join(fixture.rootDirectory, 'current'))).toBe(
+      fixture.previousReleaseDirectory,
+    );
+  });
+
+  test('writer-enabled current 关闭 generation start 后可回滚到 writer-disabled tuple', () => {
+    const fixture = createFixture({ previousWriterActivation: 'enabled' });
+    writeFileSync(
+      path.join(fixture.rootDirectory, '.env.hono'),
+      'FIXTURE=true\nARENA_MULTIPLAYER_ENABLED=false\n',
+    );
+    chmodSync(path.join(fixture.rootDirectory, '.env.hono'), 0o600);
+
+    const result = runRollback(fixture, { validateGateSchema: true });
+    const commands = readFileSync(fixture.commandLog, 'utf8');
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(commands).toContain(`-f ${fixture.releaseDirectory}/compose.yml up`);
+    expect(readlinkSync(path.join(fixture.rootDirectory, 'current'))).toBe(
+      fixture.releaseDirectory,
+    );
+  });
+
+  test('generation start 未关闭时仍拒绝回滚到 writer-enabled target', () => {
+    const fixture = createFixture({
+      previousWriterActivation: 'enabled',
+      targetWriterActivation: 'enabled',
+    });
+    writeFileSync(
+      path.join(fixture.rootDirectory, '.env.hono'),
+      'FIXTURE=true\nARENA_MULTIPLAYER_ENABLED=true\n',
+    );
+    chmodSync(path.join(fixture.rootDirectory, '.env.hono'), 0o600);
+
+    const result = runRollback(fixture, { validateGateSchema: true });
+    const commands = readFileSync(fixture.commandLog, 'utf8');
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('generation start 未关闭');
+    expect(commands).not.toContain(`-f ${fixture.releaseDirectory}/compose.yml up`);
+    expect(readlinkSync(path.join(fixture.rootDirectory, 'current'))).toBe(
+      fixture.previousReleaseDirectory,
+    );
+  });
+
+  test('writer-disabled current 也不得绕过 writer-enabled target 的 generation start 门禁', () => {
+    const fixture = createFixture({
+      previousWriterActivation: 'disabled',
+      targetWriterActivation: 'enabled',
+    });
     writeFileSync(
       path.join(fixture.rootDirectory, '.env.hono'),
       'FIXTURE=true\nARENA_MULTIPLAYER_ENABLED=true\n',
@@ -1148,7 +1228,12 @@ describe('Hono release-local deployment transaction', () => {
     const fixture = createFixture({ previousWriterActivation: 'enabled' });
     writeFileSync(
       path.join(fixture.rootDirectory, '.env.hono'),
-      'FIXTURE=true\nARENA_MULTIPLAYER_ENABLED=true\n',
+      [
+        'FIXTURE=true',
+        'ARENA_MULTIPLAYER_ENABLED=true',
+        'ARENA_ROOM_LOGICAL_ORIGIN=https://api.example.test',
+        '',
+      ].join('\n'),
     );
     chmodSync(path.join(fixture.rootDirectory, '.env.hono'), 0o600);
 
@@ -1273,6 +1358,43 @@ describe('Hono release-local deployment transaction', () => {
     expect(result.stderr).toContain('历史 gate-only release gate');
     expect(commands).toContain('node --input-type=module -e');
     expect(commands).not.toContain(`-f ${fixture.releaseDirectory}/compose.yml up`);
+  });
+
+  test('writer-enabled candidate 缺少 reader/go-no-go attestation 时在激活前 fail closed', () => {
+    const fixture = createFixture({ targetWriterActivation: 'enabled' });
+    writeFileSync(path.join(fixture.rootDirectory, '.env.hono'), 'FIXTURE=true\n');
+    chmodSync(path.join(fixture.rootDirectory, '.env.hono'), 0o600);
+
+    const result = runDeployment(fixture, { validateGateSchema: true });
+    const commands = readFileSync(fixture.commandLog, 'utf8');
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('compatible reader rollout attestation');
+    expect(commands).not.toContain(`-f ${fixture.releaseDirectory}/compose.yml up`);
+  });
+
+  test('writer-enabled runtime 通过 logical origin 执行无凭据 Room HTTP/WSS 公网 probe', () => {
+    const fixture = createFixture({ targetWriterActivation: 'enabled' });
+    writeFileSync(path.join(fixture.rootDirectory, '.env.hono'), [
+      'FIXTURE=true',
+      'ARENA_MULTIPLAYER_ENABLED=true',
+      'ARENA_ROOM_READER_ROLLOUT_CONTRACT=arena-room-authority-v2-generation-payload-digest-v1',
+      'ARENA_ROOM_PRODUCTION_GO_NO_GO=approved',
+      'ARENA_ROOM_LOGICAL_ORIGIN=https://api.example.test',
+      '',
+    ].join('\n'));
+    chmodSync(path.join(fixture.rootDirectory, '.env.hono'), 0o600);
+
+    const result = runDeployment(fixture, { validateGateSchema: true });
+    const commands = readFileSync(fixture.commandLog, 'utf8');
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(commands).toContain('https://api.example.test/api/arena/rooms/v1');
+    expect(commands).toContain('https://api.example.test/api/arena/rooms/v1/ws');
+    expect(commands).toContain('--http1.1');
+    expect(commands).toContain('Origin: https://mahoshojo.colanns.me');
+    expect(commands).toContain('Sec-WebSocket-Protocol: mahoshojo.arena-room.v1');
+    expect(commands).toContain('Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==');
   });
 
   test('writer-enabled rollback 在 target reader contract 缺失时 fail closed', () => {

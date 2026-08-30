@@ -871,14 +871,18 @@ export const createRedisGenerationReplayStore = (
         keys: [key],
         arguments: [input.after ?? '', String(MAX_READ_EVENTS)],
       }));
-      if (immediate.kind !== 'events' || immediate.events.length > 0) return immediate;
+      const awaitingFirstEvent = immediate.kind === 'stream-missing' && !input.after;
+      if (
+        (!awaitingFirstEvent && immediate.kind !== 'events')
+        || immediate.events.length > 0
+      ) return immediate;
 
       const tail = await client.xRead(
         [{ key, id: input.after ?? '0-0' }],
         { BLOCK: Math.max(1, Math.floor(input.blockMs)), COUNT: MAX_READ_EVENTS },
       );
       if (!tail?.some((stream) => stream.messages.length > 0)) {
-        return { kind: 'events' as const, events: [] };
+        return immediate;
       }
       // XREAD cannot atomically prove that `after` survived an exact trim while it
       // was blocked. Re-read through Lua and use that result as the authoritative

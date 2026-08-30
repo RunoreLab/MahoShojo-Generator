@@ -5,6 +5,12 @@ on:
     branches:
       - feature/v0.2.0_Battle_Growth_MahoShojo
   workflow_dispatch:
+    inputs:
+      arena_room_backend_ready:
+        description: 已完成同分支 production Hono backend-first 激活并允许 Room Web 开关
+        required: false
+        default: false
+        type: boolean
 
 concurrency:
   group: cloudflare-workers-${{ github.ref }}
@@ -54,6 +60,51 @@ jobs:
       - name: Verify workspace and repository gates
         run: pnpm run ci:verify
 
+      - name: Verify Arena Room backend activation
+        env:
+          ARENA_ROOM_BACKEND_READY: ${{ inputs.arena_room_backend_ready }}
+          NEXT_PUBLIC_ARENA_MULTIPLAYER_ENABLED: ${{ vars.NEXT_PUBLIC_ARENA_MULTIPLAYER_ENABLED }}
+          NEXT_PUBLIC_ARENA_ROOM_ORIGIN: ${{ vars.NEXT_PUBLIC_ARENA_ROOM_ORIGIN }}
+          NEXT_PUBLIC_ARENA_ROOM_WRITER_ACTIVATION: ${{ vars.NEXT_PUBLIC_ARENA_ROOM_WRITER_ACTIVATION }}
+          NEXT_PUBLIC_ARENA_ROOM_READER_CONTRACT: ${{ vars.NEXT_PUBLIC_ARENA_ROOM_READER_CONTRACT }}
+          NEXT_PUBLIC_ARENA_ROOM_GO_NO_GO: ${{ vars.NEXT_PUBLIC_ARENA_ROOM_GO_NO_GO }}
+        run: |
+          set -euo pipefail
+          case "${NEXT_PUBLIC_ARENA_MULTIPLAYER_ENABLED,,}" in
+            ''|0|false|no|off) exit 0 ;;
+            1|true|yes|on) ;;
+            *) echo 'NEXT_PUBLIC_ARENA_MULTIPLAYER_ENABLED 非法' >&2; exit 1 ;;
+          esac
+          if [ "$ARENA_ROOM_BACKEND_READY" != true ]; then
+            echo 'production Hono backend-first activation 未确认；请在 Hono 激活后手工 dispatch' >&2
+            exit 1
+          fi
+          test "$NEXT_PUBLIC_ARENA_ROOM_WRITER_ACTIVATION" = enabled
+          test "$NEXT_PUBLIC_ARENA_ROOM_READER_CONTRACT" = arena-room-authority-v2-generation-payload-digest-v1
+          test "$NEXT_PUBLIC_ARENA_ROOM_GO_NO_GO" = approved
+          case "$NEXT_PUBLIC_ARENA_ROOM_ORIGIN" in
+            https://*) room_origin="${NEXT_PUBLIC_ARENA_ROOM_ORIGIN%/}" ;;
+            *) echo 'NEXT_PUBLIC_ARENA_ROOM_ORIGIN 必须是 HTTPS origin' >&2; exit 1 ;;
+          esac
+          probe_dir="$(mktemp -d)"
+          trap 'rm -rf -- "$probe_dir"' EXIT
+          status="$(curl --silent --show-error --connect-timeout 5 --max-time 15 \
+            --output "$probe_dir/http-body" --write-out '%{http_code}' \
+            --header 'Origin: https://mahoshojo.colanns.me' \
+            "$room_origin/api/arena/rooms/v1")"
+          test "$status" = 401
+          grep -Fq '"code":"ROOM_AUTHENTICATION_REQUIRED"' "$probe_dir/http-body"
+          status="$(curl --silent --show-error --connect-timeout 5 --max-time 15 --http1.1 \
+            --output "$probe_dir/ws-body" --write-out '%{http_code}' \
+            --header 'Origin: https://mahoshojo.colanns.me' \
+            --header 'Connection: Upgrade' \
+            --header 'Upgrade: websocket' \
+            --header 'Sec-WebSocket-Version: 13' \
+            --header 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' \
+            --header 'Sec-WebSocket-Protocol: mahoshojo.arena-room.v1' \
+            "$room_origin/api/arena/rooms/v1/ws")"
+          test "$status" = 401
+
       - name: Build Cloudflare bundle
         env:
           # NEXT_PUBLIC_* 变量在构建时被内联进客户端产物，必须在此步骤显式注入。
@@ -64,6 +115,11 @@ jobs:
           NEXT_PUBLIC_GA_ID: ${{ vars.NEXT_PUBLIC_GA_ID }}
           NEXT_PUBLIC_SAFETY_CHECK_POLICY: ${{ vars.NEXT_PUBLIC_SAFETY_CHECK_POLICY }}
           NEXT_PUBLIC_HOSTED_API_ENVIRONMENT: production
+          NEXT_PUBLIC_ARENA_MULTIPLAYER_ENABLED: ${{ vars.NEXT_PUBLIC_ARENA_MULTIPLAYER_ENABLED }}
+          NEXT_PUBLIC_ARENA_ROOM_ORIGIN: ${{ vars.NEXT_PUBLIC_ARENA_ROOM_ORIGIN }}
+          NEXT_PUBLIC_ARENA_ROOM_WRITER_ACTIVATION: ${{ vars.NEXT_PUBLIC_ARENA_ROOM_WRITER_ACTIVATION }}
+          NEXT_PUBLIC_ARENA_ROOM_READER_CONTRACT: ${{ vars.NEXT_PUBLIC_ARENA_ROOM_READER_CONTRACT }}
+          NEXT_PUBLIC_ARENA_ROOM_GO_NO_GO: ${{ vars.NEXT_PUBLIC_ARENA_ROOM_GO_NO_GO }}
         run: pnpm --filter @mahoshojo/web run build:cf
 
       - name: Deploy production

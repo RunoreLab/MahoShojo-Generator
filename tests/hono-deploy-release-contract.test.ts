@@ -55,7 +55,7 @@ describe('Hono content-addressed release transaction', () => {
     expect(script).toMatch(/sha256sum\s+-c\s+["']?release\.manifest/);
   });
 
-  test('release tuple 对 production 使用 canonical Web origin，并仅为 Preview 增加 colanns.me 子域规则', () => {
+  test('release tuple 对 production 使用 canonical Web origin，并为 Preview 增加子域与精确 workers.dev origin', () => {
     const compose = readFileSync(composePath, 'utf8');
     const script = readDeployScript();
     if (!script) return;
@@ -65,17 +65,46 @@ describe('Hono content-addressed release transaction', () => {
     expect(compose).toContain(
       'HONO_CORS_ORIGINS: ${HONO_DEPLOY_CORS_ORIGINS:?HONO_DEPLOY_CORS_ORIGINS must be explicit}',
     );
+    expect(compose).toContain(
+      'ARENA_ROOM_WRITER_ACTIVATION: ${HONO_ARENA_ROOM_WRITER_ACTIVATION:-disabled}',
+    );
     expect(compose).not.toMatch(/^\s+ARENA_ROOM_ALLOWED_ORIGINS:/mu);
     expect(script).toContain('--env-file "$runtime_env"');
     expect(script).toContain("web_origin='https://mahoshojo.colanns.me'");
+    expect(script).toContain("preview_web_origin='https://maho-preview.colanns.me'");
     expect(script).toContain("preview_cors_origin='https://*.colanns.me'");
+    expect(script).toContain(
+      "preview_cloudflare_web_origin='https://mahoshojo-next-preview.719147538.workers.dev'",
+    );
     expect(script).toContain('cors_origins="$web_origin"');
-    expect(script).toMatch(/preview\)\s+cors_origins="\$web_origin,\$preview_cors_origin"/u);
+    expect(script).toMatch(
+      /preview\)\s+cors_origins="\$web_origin,\$preview_cors_origin,\$preview_cloudflare_web_origin"/u,
+    );
     expect(script).toContain('HONO_DEPLOY_CORS_ORIGINS="$cors_origins"');
+    expect(script).toContain(
+      'room_allowed_origins="$web_origin,$preview_web_origin,$preview_cloudflare_web_origin"',
+    );
     expect(script).toContain('-e HONO_CORS_ORIGINS="$cors_origins"');
+    expect(script).toContain('-e ARENA_ROOM_WRITER_ACTIVATION="$tuple_writer_activation"');
+    expect(script).toContain(
+      'HONO_ARENA_ROOM_WRITER_ACTIVATION="$release_writer_activation"',
+    );
+    expect(script).toContain('validate_arena_room_activation_attestations "$release_dir"');
+    expect(script).toContain('validate_arena_room_runtime_allowed_origins "$release_dir"');
     expect(script).toContain('--header "Origin: $web_origin"');
     expect(script).toContain('"Access-Control-Allow-Origin: $web_origin"');
+    expect(script).toContain('--header "Origin: $room_probe_origin"');
+    expect(script).toContain('"Access-Control-Allow-Origin: $room_probe_origin"');
     expect(script).not.toMatch(/-e ARENA_ROOM_ALLOWED_ORIGINS=/u);
+    expect(script).toContain('$room_logical_origin/api/arena/rooms/v1');
+    expect(script).toContain('$room_logical_origin/api/arena/rooms/v1/ws');
+    expect(script).toContain("--header 'Upgrade: websocket'");
+    expect(script).toContain(
+      "--header 'Sec-WebSocket-Protocol: mahoshojo.arena-room.v1'",
+    );
+    expect(script).toContain(
+      "--header 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ=='",
+    );
   });
 
   test('新旧版本都使用各自 release-local compose，失败时恢复整个旧 tuple', () => {

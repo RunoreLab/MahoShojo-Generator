@@ -30,6 +30,7 @@ class MemoryReplayStore implements GenerationReplayStore {
   cancelUnavailable = false;
   cancelBeforeMarkRunning = false;
   markTerminalCalls = 0;
+  writeSnapshotCalls = 0;
   readonly appendBatches: Array<GenerationStreamEvent[]> = [];
 
   async reserve(input: Parameters<GenerationReplayStore['reserve']>[0]) {
@@ -191,6 +192,7 @@ class MemoryReplayStore implements GenerationReplayStore {
   }
 
   async writeSnapshot(input: Parameters<GenerationReplayStore['writeSnapshot']>[0]) {
+    this.writeSnapshotCalls += 1;
     const state = this.states.get(input.generationId)!;
     if (state.producerToken !== input.producerToken) return { owned: false };
     this.states.set(input.generationId, {
@@ -288,7 +290,10 @@ const createService = (
   options: {
     deltaFlushIntervalMs?: number;
     deltaFlushBytes?: number;
+    snapshotFlushIntervalMs?: number;
+    snapshotFlushBytes?: number;
     snapshotMaxBytes?: number;
+    replayPollMs?: number;
     heartbeatIntervalMs?: number;
     leaseDurationMs?: number;
     now?: () => Date;
@@ -298,6 +303,7 @@ const createService = (
     actorResponseHeaders?: Record<string, string>;
     observer?: { observeArenaGeneration(_observation: unknown): void };
     rejectedTerminalRecorder?: ArenaGenerationRejectedTerminalRecorder;
+    productionDeltaDefaults?: boolean;
   } = {},
 ) => createArenaGenerationService({
   store,
@@ -311,9 +317,17 @@ const createService = (
   hashPayload: async (payload) => `hash:${JSON.stringify(payload)}`,
   heartbeatIntervalMs: options.heartbeatIntervalMs ?? 60_000,
   leaseDurationMs: options.leaseDurationMs ?? 120_000,
-  replayPollMs: 1,
-  deltaFlushIntervalMs: options.deltaFlushIntervalMs ?? 5,
-  deltaFlushBytes: options.deltaFlushBytes ?? 1_024,
+  replayPollMs: options.replayPollMs ?? 1,
+  ...(options.productionDeltaDefaults ? {} : {
+    deltaFlushIntervalMs: options.deltaFlushIntervalMs ?? 5,
+    deltaFlushBytes: options.deltaFlushBytes ?? 1_024,
+  }),
+  ...(options.snapshotFlushIntervalMs === undefined
+    ? {}
+    : { snapshotFlushIntervalMs: options.snapshotFlushIntervalMs }),
+  ...(options.snapshotFlushBytes === undefined
+    ? {}
+    : { snapshotFlushBytes: options.snapshotFlushBytes }),
   ...(options.snapshotMaxBytes !== undefined
     ? { snapshotMaxBytes: options.snapshotMaxBytes }
     : {}),
@@ -2353,6 +2367,101 @@ describe('Arena generation lifecycle service', () => {
     expect(store.events.get('generation-1')?.[0]).toMatchObject({
       type: 'markdown',
       data: { chunk: 'ABCD' },
+    });
+  });
+
+  test('默认以 512 bytes 提前刷出 delta，避免长文本积压', async () => {
+    const store = new MemoryReplayStore();
+    let observedAppendCount = 0;
+    const service = createService(store, {
+      execute: vi.fn(async ({ emit }) => {
+        await emit({ type: 'markdown', data: { chunk: 'A'.repeat(512) } });
+        observedAppendCount = store.appendBatches.length;
+        return { status: 'completed' as const };
+      }),
+    }, { productionDeltaDefaults: true });
+
+    const response = await service.create(createRequest('request-default-byte-flush'));
+    await readResponseText(response);
+
+    expect(observedAppendCount).toBe(1);
+  });
+
+  test('默认在 40 ms 刷出小 delta，不等到生成结束', async () => {
+    const store = new MemoryReplayStore();
+    let observedAppendCount = 0;
+    const service = createService(store, {
+      execute: vi.fn(async ({ emit }) => {
+        await emit({ type: 'markdown', data: { chunk: 'A' } });
+        await new Promise<void>((resolve) => setTimeout(resolve, 50));
+        observedAppendCount = store.appendBatches.length;
+        return { status: 'completed' as const };
+      }),
+    }, { productionDeltaDefaults: true });
+
+    const response = await service.create(createRequest('request-default-time-flush'));
+    await readResponseText(response);
+
+    expect(observedAppendCount).toBe(1);
+  });
+
+  test('阻塞读空批次后不再额外等待完整 replay poll 周期', async () => {
+    class OneEmptyReadReplayStore extends MemoryReplayStore {
+      private returnEmptyOnce = true;
+
+      override async readAfter(input: Parameters<GenerationReplayStore['readAfter']>[0]) {
+        if (this.returnEmptyOnce) {
+          this.returnEmptyOnce = false;
+          return { kind: 'events' as const, events: [] };
+        }
+        return super.readAfter(input);
+      }
+    }
+
+    const store = new OneEmptyReadReplayStore();
+    const service = createService(store, {
+      execute: vi.fn(async ({ emit }) => {
+        await new Promise<void>((resolve) => setTimeout(resolve, 20));
+        await emit({ type: 'markdown', data: { chunk: 'A' } });
+        return { status: 'completed' as const };
+      }),
+    }, {
+      deltaFlushBytes: 1,
+      deltaFlushIntervalMs: 60_000,
+      replayPollMs: 1_000,
+    });
+
+    const startedAt = performance.now();
+    const response = await service.create(createRequest('request-no-double-poll'));
+    await readResponseText(response);
+
+    expect(performance.now() - startedAt).toBeLessThan(300);
+  });
+
+  test('高频 delta 保留细粒度 event，但按独立预算合并运行中全量 snapshot', async () => {
+    const store = new MemoryReplayStore();
+    const service = createService(store, {
+      execute: vi.fn(async ({ emit }) => {
+        for (let index = 0; index < 5; index += 1) {
+          await emit({ type: 'markdown', data: { chunk: 'ABCD' } });
+        }
+        return { status: 'completed' as const };
+      }),
+    }, {
+      deltaFlushBytes: 4,
+      deltaFlushIntervalMs: 60_000,
+      snapshotFlushBytes: 16,
+      snapshotFlushIntervalMs: 60_000,
+    });
+
+    const response = await service.create(createRequest('request-snapshot-budget'));
+    await readResponseText(response);
+
+    expect(store.appendBatches).toHaveLength(5);
+    expect(store.writeSnapshotCalls).toBe(2);
+    expect(store.states.get('generation-1')?.snapshot).toMatchObject({
+      status: 'completed',
+      markdown: 'ABCD'.repeat(5),
     });
   });
 

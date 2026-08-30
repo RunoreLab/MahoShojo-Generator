@@ -5,6 +5,15 @@ on:
     branches:
       - preview
   workflow_dispatch:
+    inputs:
+      arena_multiplayer:
+        description: Arena multiplayer Web exposure; use disabled as the first rollback step
+        required: true
+        default: enabled
+        type: choice
+        options:
+          - enabled
+          - disabled
 
 concurrency:
   group: deploy-preview
@@ -12,6 +21,14 @@ concurrency:
 
 permissions:
   contents: read
+
+env:
+  PREVIEW_ARENA_MULTIPLAYER_ENABLED: ${{ github.event_name == 'workflow_dispatch' && inputs.arena_multiplayer == 'disabled' && 'false' || 'true' }}
+  PREVIEW_ARENA_ROOM_ORIGIN: https://homura-preview.colanns.me
+  PREVIEW_ARENA_ROOM_ALLOWED_ORIGINS: https://mahoshojo.colanns.me,https://maho-preview.colanns.me,https://mahoshojo-next-preview.719147538.workers.dev
+  PREVIEW_ARENA_ROOM_WRITER_ACTIVATION: enabled
+  PREVIEW_ARENA_ROOM_READER_CONTRACT: arena-room-authority-v2-generation-payload-digest-v1
+  PREVIEW_ARENA_ROOM_GO_NO_GO: approved
 
 jobs:
   verify-and-build-hono:
@@ -40,11 +57,17 @@ jobs:
         run: pnpm run ci:verify
 
       - name: Build release tuple
+        env:
+          HONO_ARENA_ROOM_WRITER_ACTIVATION: enabled
+          ARENA_ROOM_READER_ROLLOUT_CONTRACT: arena-room-authority-v2-generation-payload-digest-v1
+          ARENA_ROOM_PRODUCTION_GO_NO_GO: approved
         run: |
           pnpm --filter @mahoshojo/api run deploy:prepare
           cp apps/api/deploy/compose.yml apps/api/dist/compose.yml
           cp apps/api/deploy/deploy-bundle.sh apps/api/dist/deploy-bundle.sh
-          cp config/arena-room-release-gate.json apps/api/dist/arena-room-release-gate.json
+          node scripts/prepare-arena-room-release-gate.mjs \
+            --writer "$HONO_ARENA_ROOM_WRITER_ACTIVATION" \
+            --output apps/api/dist/arena-room-release-gate.json
           cp scripts/arena-room-release-gate-schema.mjs apps/api/dist/arena-room-release-gate-schema.mjs
           cd apps/api/dist
           sha256sum index.mjs compose.yml deploy-bundle.sh \
@@ -99,6 +122,11 @@ jobs:
           NEXT_PUBLIC_SAFETY_CHECK_POLICY: ${{ vars.NEXT_PUBLIC_SAFETY_CHECK_POLICY }}
           NEXT_PUBLIC_HONO_API_ORIGIN: https://homura-preview.colanns.me
           NEXT_PUBLIC_HOSTED_API_ENVIRONMENT: preview
+          NEXT_PUBLIC_ARENA_MULTIPLAYER_ENABLED: ${{ env.PREVIEW_ARENA_MULTIPLAYER_ENABLED }}
+          NEXT_PUBLIC_ARENA_ROOM_ORIGIN: ${{ env.PREVIEW_ARENA_ROOM_ORIGIN }}
+          NEXT_PUBLIC_ARENA_ROOM_WRITER_ACTIVATION: ${{ env.PREVIEW_ARENA_ROOM_WRITER_ACTIVATION }}
+          NEXT_PUBLIC_ARENA_ROOM_READER_CONTRACT: ${{ env.PREVIEW_ARENA_ROOM_READER_CONTRACT }}
+          NEXT_PUBLIC_ARENA_ROOM_GO_NO_GO: ${{ env.PREVIEW_ARENA_ROOM_GO_NO_GO }}
         run: pnpm --filter @mahoshojo/web run build:cf
 
   deploy-hono-preview:
@@ -194,6 +222,53 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Verify Arena Room backend activation
+        env:
+          NEXT_PUBLIC_ARENA_MULTIPLAYER_ENABLED: ${{ env.PREVIEW_ARENA_MULTIPLAYER_ENABLED }}
+          NEXT_PUBLIC_ARENA_ROOM_ORIGIN: ${{ env.PREVIEW_ARENA_ROOM_ORIGIN }}
+          NEXT_PUBLIC_ARENA_ROOM_WRITER_ACTIVATION: ${{ env.PREVIEW_ARENA_ROOM_WRITER_ACTIVATION }}
+          NEXT_PUBLIC_ARENA_ROOM_READER_CONTRACT: ${{ env.PREVIEW_ARENA_ROOM_READER_CONTRACT }}
+          NEXT_PUBLIC_ARENA_ROOM_GO_NO_GO: ${{ env.PREVIEW_ARENA_ROOM_GO_NO_GO }}
+        run: |
+          set -euo pipefail
+          case "${NEXT_PUBLIC_ARENA_MULTIPLAYER_ENABLED,,}" in
+            ''|0|false|no|off) exit 0 ;;
+            1|true|yes|on) ;;
+            *) echo 'NEXT_PUBLIC_ARENA_MULTIPLAYER_ENABLED 非法' >&2; exit 1 ;;
+          esac
+          test "$NEXT_PUBLIC_ARENA_ROOM_WRITER_ACTIVATION" = enabled
+          test "$NEXT_PUBLIC_ARENA_ROOM_READER_CONTRACT" = arena-room-authority-v2-generation-payload-digest-v1
+          test "$NEXT_PUBLIC_ARENA_ROOM_GO_NO_GO" = approved
+          case "$NEXT_PUBLIC_ARENA_ROOM_ORIGIN" in
+            https://*) room_origin="${NEXT_PUBLIC_ARENA_ROOM_ORIGIN%/}" ;;
+            *) echo 'NEXT_PUBLIC_ARENA_ROOM_ORIGIN 必须是 HTTPS origin' >&2; exit 1 ;;
+          esac
+          probe_dir="$(mktemp -d)"
+          trap 'rm -rf -- "$probe_dir"' EXIT
+          IFS=',' read -r -a room_web_origins <<< "$PREVIEW_ARENA_ROOM_ALLOWED_ORIGINS"
+          test "${#room_web_origins[@]}" -eq 3
+          for room_web_origin in "${room_web_origins[@]}"; do
+            status="$(curl --silent --show-error --connect-timeout 5 --max-time 15 \
+              --dump-header "$probe_dir/http-headers" \
+              --output "$probe_dir/http-body" --write-out '%{http_code}' \
+              --header "Origin: $room_web_origin" \
+              "$room_origin/api/arena/rooms/v1")"
+            test "$status" = 401
+            grep -Fq '"code":"ROOM_AUTHENTICATION_REQUIRED"' "$probe_dir/http-body"
+            grep -Fqi "Access-Control-Allow-Origin: $room_web_origin" "$probe_dir/http-headers"
+            status="$(curl --silent --show-error --connect-timeout 5 --max-time 15 --http1.1 \
+              --dump-header "$probe_dir/ws-headers" \
+              --output "$probe_dir/ws-body" --write-out '%{http_code}' \
+              --header "Origin: $room_web_origin" \
+              --header 'Connection: Upgrade' \
+              --header 'Upgrade: websocket' \
+              --header 'Sec-WebSocket-Version: 13' \
+              --header 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' \
+              --header 'Sec-WebSocket-Protocol: mahoshojo.arena-room.v1' \
+              "$room_origin/api/arena/rooms/v1/ws")"
+            test "$status" = 401
+          done
+
       - name: Build Cloudflare preview bundle
         env:
           NEXT_PUBLIC_TURNSTILE_SITE_KEY: ${{ secrets.NEXT_PUBLIC_TURNSTILE_SITE_KEY }}
@@ -203,6 +278,11 @@ jobs:
           NEXT_PUBLIC_SAFETY_CHECK_POLICY: ${{ vars.NEXT_PUBLIC_SAFETY_CHECK_POLICY }}
           NEXT_PUBLIC_HONO_API_ORIGIN: https://homura-preview.colanns.me
           NEXT_PUBLIC_HOSTED_API_ENVIRONMENT: preview
+          NEXT_PUBLIC_ARENA_MULTIPLAYER_ENABLED: ${{ env.PREVIEW_ARENA_MULTIPLAYER_ENABLED }}
+          NEXT_PUBLIC_ARENA_ROOM_ORIGIN: ${{ env.PREVIEW_ARENA_ROOM_ORIGIN }}
+          NEXT_PUBLIC_ARENA_ROOM_WRITER_ACTIVATION: ${{ env.PREVIEW_ARENA_ROOM_WRITER_ACTIVATION }}
+          NEXT_PUBLIC_ARENA_ROOM_READER_CONTRACT: ${{ env.PREVIEW_ARENA_ROOM_READER_CONTRACT }}
+          NEXT_PUBLIC_ARENA_ROOM_GO_NO_GO: ${{ env.PREVIEW_ARENA_ROOM_GO_NO_GO }}
         run: pnpm --filter @mahoshojo/web run build:cf
 
       - name: Deploy Cloudflare preview
