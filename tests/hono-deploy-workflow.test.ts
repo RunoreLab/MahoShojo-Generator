@@ -104,12 +104,27 @@ describe('Hono deployment workflow', () => {
 
   test('gates the deploy job to the production branch', () => {
     const workflow = readFileSync(HONO_WORKFLOW_PATH, 'utf8');
+    const buildJob = getJob(workflow, 'build');
     const deployJob = getJob(workflow, 'deploy');
 
     expect(deployJob).toMatch(
-      new RegExp(`^    if: github\\.ref == '${escapeRegExp(PRODUCTION_BRANCH)}'\\s*$`, 'm'),
+      new RegExp(
+        `^    if: github\\.ref == '${escapeRegExp(PRODUCTION_BRANCH)}' && github\\.event_name == 'workflow_dispatch'\\s*$`,
+        'm',
+      ),
     );
     expect(deployJob).toContain('HONO_HOSTED_API_ENVIRONMENT=production');
+    expect(workflow).toContain('arena_room_writer_activation:');
+    expect(workflow).toContain('default: disabled');
+    expect(workflow).toContain('- enabled');
+    const releaseStep = getStep(buildJob, 'Build single-file server');
+    expect(releaseStep).toContain('scripts/prepare-arena-room-release-gate.mjs');
+    expect(releaseStep).toContain('--writer "$HONO_ARENA_ROOM_WRITER_ACTIVATION"');
+    expect(releaseStep).toContain("github.event_name == 'workflow_dispatch'");
+    expect(releaseStep).toContain('inputs.arena_room_writer_activation');
+    expect(releaseStep).not.toContain(
+      'cp config/arena-room-release-gate.json apps/api/dist/arena-room-release-gate.json',
+    );
 
     const verificationStep = getStep(getJob(workflow, 'build'), 'Verify Hono authentication and runtime');
     expect(verificationStep).toContain('pnpm --filter @mahoshojo/api run test');
@@ -135,6 +150,7 @@ describe('Hono deployment workflow', () => {
     expect(deployJob).toMatch(
       new RegExp(`^    if: github\\.ref == '${escapeRegExp(PRODUCTION_BRANCH)}'\\s*$`, 'm'),
     );
+    expect(workflow).toContain('cancel-in-progress: false');
 
     expect(getStep(deployJob, 'Build Cloudflare bundle')).toContain(
       'run: pnpm --filter @mahoshojo/web run build:cf',
@@ -146,12 +162,16 @@ describe('Hono deployment workflow', () => {
       deployJob.indexOf('Build Cloudflare bundle'),
     );
     expect(roomActivationStep).toContain('NEXT_PUBLIC_ARENA_ROOM_ORIGIN');
-    expect(workflow).toContain('arena_room_backend_ready:');
-    expect(roomActivationStep).toContain('ARENA_ROOM_BACKEND_READY');
-    expect(roomActivationStep).toContain('production Hono backend-first activation 未确认');
+    expect(workflow).not.toContain('arena_room_backend_ready:');
+    expect(roomActivationStep).not.toContain('ARENA_ROOM_BACKEND_READY');
     expect(roomActivationStep).toContain('/api/arena/rooms/v1/ws');
     expect(roomActivationStep).toContain('Sec-WebSocket-Protocol: mahoshojo.arena-room.v1');
     expect(roomActivationStep).toContain('Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==');
+    expect(roomActivationStep).toContain('--dump-header "$probe_dir/http-headers"');
+    expect(roomActivationStep).toContain("grep -ic '^Access-Control-Allow-Origin:'");
+    expect(roomActivationStep).toContain(
+      "grep -Fixq 'Access-Control-Allow-Origin: https://mahoshojo.colanns.me'",
+    );
     expect(roomActivationStep.match(
       /--retry 5 --retry-delay 3 --retry-max-time 120 --retry-connrefused/gu,
     )).toHaveLength(2);
@@ -167,6 +187,13 @@ describe('Hono deployment workflow', () => {
     expect(getStep(deployJob, 'Deploy production')).toContain(
       'run: pnpm --filter @mahoshojo/web exec wrangler deploy --env production --keep-vars',
     );
+    const productionReachabilityStep = getStep(deployJob, 'Verify production reachability');
+    expectRequiredGateStep(productionReachabilityStep);
+    expect(deployJob.indexOf('Deploy production')).toBeLessThan(
+      deployJob.indexOf('Verify production reachability'),
+    );
+    expect(productionReachabilityStep).toContain('https://mahoshojo.colanns.me/arena');
+    expect(productionReachabilityStep).toContain('https://homura.colanns.me/api/health/ready');
     expect(deployJob).not.toContain('- name: Deploy preview');
 
     const previewWorkflow = readFileSync(PREVIEW_WORKFLOW_PATH, 'utf8');
@@ -437,7 +464,9 @@ describe('Hono deployment workflow', () => {
   test('手工发布指南生成并上传当前七文件 release tuple', () => {
     const guide = readFileSync(HONO_DEPLOY_GUIDE_PATH, 'utf8');
 
-    expect(guide).toContain(
+    expect(guide).toContain('scripts/prepare-arena-room-release-gate.mjs');
+    expect(guide).toContain('--writer disabled');
+    expect(guide).not.toContain(
       'cp config/arena-room-release-gate.json apps/api/dist/arena-room-release-gate.json',
     );
     expect(guide).toContain(
