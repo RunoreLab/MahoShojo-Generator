@@ -47,9 +47,9 @@ redis_key_prefix="${HONO_REDIS_KEY_PREFIX:-}"
 redis_network_name="${HONO_REDIS_NETWORK_NAME:-mahoshojo-redis}"
 hosted_api_environment="${HONO_HOSTED_API_ENVIRONMENT:-}"
 web_origin='https://mahoshojo.colanns.me'
+preview_cors_origin='https://*.colanns.me'
+cors_origins="$web_origin"
 runtime_image='node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32'
-HONO_DEPLOY_CORS_ORIGINS="$web_origin"
-export HONO_DEPLOY_CORS_ORIGINS
 case "$root_dir" in
   /) echo "部署根目录不得为文件系统根目录" >&2; exit 2 ;;
   /*) ;;
@@ -81,6 +81,7 @@ case "$hosted_api_environment" in
     }
     ;;
   preview)
+    cors_origins="$web_origin,$preview_cors_origin"
     [ "$redis_key_prefix" = 'preview' ] || {
       echo "preview target 必须显式设置 HONO_REDIS_KEY_PREFIX=preview" >&2
       exit 2
@@ -95,6 +96,8 @@ case "$hosted_api_environment" in
     }
     ;;
 esac
+HONO_DEPLOY_CORS_ORIGINS="$cors_origins"
+export HONO_DEPLOY_CORS_ORIGINS
 if [ "$deploy_mode" = rollback ]; then
   case "$hosted_api_environment" in
     production) ;;
@@ -324,7 +327,7 @@ validate_release_runtime() {
     -e NODE_ENV=production \
     -e HOSTED_API_ENVIRONMENT="$hosted_api_environment" \
     -e HONO_AUTH_MODE=bearer \
-    -e HONO_CORS_ORIGINS="$web_origin" \
+    -e HONO_CORS_ORIGINS="$cors_origins" \
     -e REDIS_HOST=redis \
     -e REDIS_PORT=6379 \
     -e REDIS_REQUIRED=true \
