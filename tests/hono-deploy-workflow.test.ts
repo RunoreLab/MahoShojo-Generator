@@ -200,6 +200,30 @@ describe('Hono deployment workflow', () => {
     );
   });
 
+  test('preview Hono deploy 在资源门禁前初始化 pnpm、Node.js 与依赖', () => {
+    const workflow = readFileSync(PREVIEW_WORKFLOW_PATH, 'utf8');
+    const honoJob = getJob(workflow, 'deploy-hono-preview');
+    const setupPnpmStep = getStep(honoJob, 'Setup pnpm');
+    const setupNodeStep = getStep(honoJob, 'Setup Node.js');
+    const installStep = getStep(honoJob, 'Install dependencies');
+
+    expect(setupPnpmStep).toContain('uses: pnpm/action-setup@v6');
+    expect(setupPnpmStep).toContain('version: 11.3.0');
+    expect(setupNodeStep).toContain('uses: actions/setup-node@v6');
+    expect(setupNodeStep).toContain('node-version: 22');
+    expect(setupNodeStep).toContain('cache: pnpm');
+    expect(installStep).toContain('run: pnpm install --frozen-lockfile');
+
+    const setupPnpmIndex = honoJob.indexOf('- name: Setup pnpm');
+    const setupNodeIndex = honoJob.indexOf('- name: Setup Node.js');
+    const installIndex = honoJob.indexOf('- name: Install dependencies');
+    const gateIndex = honoJob.indexOf('- name: Require preview resources and authority isolation');
+
+    expect(setupNodeIndex).toBeGreaterThan(setupPnpmIndex);
+    expect(installIndex).toBeGreaterThan(setupNodeIndex);
+    expect(gateIndex).toBeGreaterThan(installIndex);
+  });
+
   test('builds the Hono container before assembling and uploading the deployment artifact', () => {
     const workflow = readFileSync(HONO_WORKFLOW_PATH, 'utf8');
     const compose = readFileSync(HONO_COMPOSE_PATH, 'utf8');
