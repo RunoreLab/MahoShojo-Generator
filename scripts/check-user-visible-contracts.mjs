@@ -29,6 +29,12 @@ const canonicalAutomatedEvidence = Object.freeze({
     'apps/web/tests/arena-generation-fault-injection.test.ts',
     'apps/web/tests/resumable-arena-generation-client.test.ts',
     'packages/hosted-api/tests/arena-generation-service.test.ts',
+    'packages/hosted-runtime/tests/arena-generation-prompt.test.ts',
+    'packages/hosted-runtime/tests/arena-generation-node-executor.test.ts',
+    'packages/hosted-runtime/tests/arena-companion-service.test.ts',
+    'packages/hosted-runtime/tests/structured-ai-compatibility.test.ts',
+    'apps/web/tests/arena-generation-prompt-parity.test.ts',
+    'apps/web/tests/ai-structured-output-boundary.test.ts',
   ],
   'provider-public-error-and-secret-canaries': [
     'apps/web/tests/ai-error-extraction.test.ts',

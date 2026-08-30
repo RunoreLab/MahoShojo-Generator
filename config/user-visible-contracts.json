@@ -30,7 +30,13 @@
       "arena-service-client-replay-cancel-seams": [
         "apps/web/tests/arena-generation-fault-injection.test.ts",
         "apps/web/tests/resumable-arena-generation-client.test.ts",
-        "packages/hosted-api/tests/arena-generation-service.test.ts"
+        "packages/hosted-api/tests/arena-generation-service.test.ts",
+        "packages/hosted-runtime/tests/arena-generation-prompt.test.ts",
+        "packages/hosted-runtime/tests/arena-generation-node-executor.test.ts",
+        "packages/hosted-runtime/tests/arena-companion-service.test.ts",
+        "packages/hosted-runtime/tests/structured-ai-compatibility.test.ts",
+        "apps/web/tests/arena-generation-prompt-parity.test.ts",
+        "apps/web/tests/ai-structured-output-boundary.test.ts"
       ],
       "provider-public-error-and-secret-canaries": [
         "apps/web/tests/ai-error-extraction.test.ts",
@@ -170,6 +176,26 @@
       "authority": "docs/specs/2026-08-25_111500_Hosted长生成断网可恢复流实施规格.md"
     },
     {
+      "id": "arena-dual-output-contract",
+      "decision": "stream-routes-use-free-markdown-without-required-reporter-analysis-while-arena-generate-and-generate-battle-story-use-schema-validated-structured-report",
+      "authority": "docs/specs/2026-08-31_063734_Arena双生成契约回归修正规格.md"
+    },
+    {
+      "id": "provider-non-idempotent-no-replay",
+      "decision": "after-provider-dispatch-ordinary-errors-do-not-retry-or-fail-over-explicit-structured-output-capability-rejection-may-fallback-once-to-text-json-on-the-same-provider-and-model",
+      "authority": "docs/specs/2026-08-31_063734_Arena双生成契约回归修正规格.md"
+    },
+    {
+      "id": "arena-durable-terminal-before-done",
+      "decision": "completed-output-requires-r2-and-d1-terminal-finalization-before-done-and-storage-failure-may-fail-an-ai-completed-request",
+      "authority": "docs/specs/2026-08-25_111500_Hosted长生成断网可恢复流实施规格.md"
+    },
+    {
+      "id": "arena-resource-and-native-authority",
+      "decision": "server-enforces-bounded-request-collections-and-reverifies-native-signatures-instead-of-trusting-client-isNative",
+      "authority": "docs/specs/2026-08-31_063734_Arena双生成契约回归修正规格.md"
+    },
+    {
       "id": "safe-provider-public-error",
       "decision": "provider-message-is-visible-after-secret-and-request-metadata-redaction"
     },
@@ -217,6 +243,12 @@
     "packages/hosted-api/tests/public-ai-error.test.ts",
     "packages/hosted-api/tests/regular-generation.test.ts",
     "packages/hosted-api/tests/arena-generation-service.test.ts",
+    "packages/hosted-runtime/tests/arena-generation-prompt.test.ts",
+    "packages/hosted-runtime/tests/arena-generation-node-executor.test.ts",
+    "packages/hosted-runtime/tests/arena-companion-service.test.ts",
+    "packages/hosted-runtime/tests/structured-ai-compatibility.test.ts",
+    "apps/web/tests/arena-generation-prompt-parity.test.ts",
+    "apps/web/tests/ai-structured-output-boundary.test.ts",
     "apps/web/tests/ai-error-extraction.test.ts"
   ]
 }
