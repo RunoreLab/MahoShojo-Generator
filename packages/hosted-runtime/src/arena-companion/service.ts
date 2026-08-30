@@ -4,6 +4,7 @@ import {
   type ArenaGenerationSubscription,
   type GenerationStreamEvent,
 } from '@mahoshojo/hosted-api/arena-generation/service';
+import { parseArenaStructuredReportJson } from '../arena-generation/structured-report';
 
 export const ARENA_COMPANION_OPERATION_HEADER = 'x-mahoshojo-arena-companion-operation';
 export const ARENA_COMPANION_PLACEMENT_HEADER = 'x-mahoshojo-arena-execution-placement';
@@ -371,21 +372,46 @@ export const createArenaCompanionService = (
     }
 
     const headerMeta = parseHeaderMeta(upstream.headers);
+    const writeArenaHistory = booleanOf(payload.writeArenaHistory, true);
+    const writeCurrentState = booleanOf(payload.writeCurrentState, true);
+    const structuredReport = parseArenaStructuredReportJson(collected.markdown, {
+      enableImpacts: writeArenaHistory || writeCurrentState,
+      enableImpactText: writeArenaHistory,
+      enableCurrentState: writeCurrentState,
+    });
+    const expectsStructuredReport = headerMeta.outputContract === 'structured-report'
+      || collected.markdown.trimStart().startsWith('{');
+    if (expectsStructuredReport && !structuredReport) {
+      return jsonResponse({
+        code: 'ARENA_STRUCTURED_REPORT_INVALID',
+        error: 'Arena structured report validation failed',
+        generationId: upstream.generationId,
+      }, 502, upstream.headers);
+    }
     const metaReport = recordOf(collected.meta.report) ?? {};
-    const headline = textOf(metaReport.headline) || headlineFromMarkdown(collected.markdown);
-    const winner = textOf(metaReport.winner) || section(collected.markdown, '(?:胜利者|winner)');
-    const conclusion = section(collected.markdown, '(?:最终结果|final result)');
-    const impacts = normalizeImpacts(collected.meta.impacts);
+    const structuredArticle = recordOf(structuredReport?.article);
+    const structuredOfficialReport = recordOf(structuredReport?.officialReport);
+    const headline = textOf(structuredReport?.headline)
+      || textOf(metaReport.headline)
+      || headlineFromMarkdown(collected.markdown);
+    const winner = textOf(structuredOfficialReport?.winner)
+      || textOf(metaReport.winner)
+      || section(collected.markdown, '(?:胜利者|winner)');
+    const conclusion = textOf(structuredOfficialReport?.conclusion)
+      || section(collected.markdown, '(?:最终结果|final result)');
+    const impacts = normalizeImpacts(structuredReport?.impacts ?? collected.meta.impacts);
     const reporterInfo = recordOf(headerMeta.reporterInfo) ?? { name: '', publication: '' };
     const usage = recordOf(collected.telemetry.usage);
+    const telemetryReasoning = recordOf(collected.telemetry.reasoning);
     const model = textOf(collected.telemetry.model);
     const mode = textOf(payload.mode) || 'classic';
     const report: Record<string, unknown> = {
+      ...(structuredReport ?? {}),
       headline,
       reporterInfo,
       article: {
-        body: bodyFromMarkdown(collected.markdown),
-        analysis: analysisFromMarkdown(collected.markdown),
+        body: textOf(structuredArticle?.body) || bodyFromMarkdown(collected.markdown),
+        analysis: textOf(structuredArticle?.analysis) || analysisFromMarkdown(collected.markdown),
       },
       officialReport: { winner, conclusion },
       mode,
@@ -398,7 +424,9 @@ export const createArenaCompanionService = (
       ...(typeof headerMeta.narrativeHistoryReadCount === 'number'
         ? { narrativeHistoryReadCount: headerMeta.narrativeHistoryReadCount }
         : {}),
-      ...(collected.reasoning
+      ...(telemetryReasoning
+        ? { aiReasoning: telemetryReasoning }
+        : collected.reasoning
         ? { aiReasoning: { text: collected.reasoning, status: 'complete' } }
         : {}),
     };
@@ -410,8 +438,8 @@ export const createArenaCompanionService = (
         impacts,
         userGuidance: textOf(headerMeta.userGuidance) || null,
         scenario: recordOf(payload.scenario),
-        writeArenaHistory: booleanOf(payload.writeArenaHistory, true),
-        writeCurrentState: booleanOf(payload.writeCurrentState, true),
+        writeArenaHistory,
+        writeCurrentState,
         generationId: upstream.generationId,
         occurredAt: collected.occurredAt ?? new Date(0).toISOString(),
         baseRevisionHash: textOf(payload.baseRevisionHash) || null,

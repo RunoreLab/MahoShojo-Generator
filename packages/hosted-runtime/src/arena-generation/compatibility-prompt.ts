@@ -693,7 +693,8 @@ export const createStreamPromptBuilder = (
     narrativeHistory?: ArenaPromptNarrativeHistoryEntry[] | null,
     loreText?: string | null,
     includeQuestionnaireAnswers: boolean = true,
-    materials?: unknown[] | null
+    materials?: unknown[] | null,
+    outputContract: 'stream-markdown' | 'structured-report' = 'stream-markdown'
 ) => (input: { combatants: any[] }): string => {
     const { combatants } = input;
     const profiles = buildCombatantProfilesForPrompt({
@@ -795,7 +796,9 @@ export const createStreamPromptBuilder = (
     const storyLengthRequirement = buildStoryLengthRequirementText({
         storyLength,
         customStoryLength,
-        targetLabel: '故事正文',
+        targetLabel: outputContract === 'structured-report'
+            ? '故事正文(article.body)'
+            : '故事正文',
     });
     if (storyLengthRequirement) {
         finalPrompt += `\n\n【字数要求】\n${storyLengthRequirement}`;
@@ -807,6 +810,8 @@ export const createStreamPromptBuilder = (
         finalPrompt += `\n\n【当前状态同步】请在输出的 impacts 数组中为每位角色填写 currentStateSummary 字段，精确描述事件结束后的即时状态（如身体状况、关系、心情或想法）。如果当前状态已有既定格式，请遵循该格式。如果当前状态中存在物品列表，请确保物品名称和数量准确反映事后情况。`;
     }
 
+    if (outputContract === 'structured-report') return finalPrompt;
+
     // 流式生成的关键：要求输出 Markdown 格式的战报
     const shouldAllowStreamMeta = forceStreamMeta || writeArenaHistory || writeCurrentState;
     finalPrompt += `\n\n【输出格式】\n请以 Markdown 格式输出战报，请严格按照格式输出，不要携带任何其他内容：\n` +
@@ -817,15 +822,13 @@ export const createStreamPromptBuilder = (
             : `  （请勿在任何位置追加 HTML 注释元数据；也不要输出任何类似 MAHOSHOJO_ARENA_META 的标记。）\n\n`) +
         `# 故事 / 战报标题\n` +
         `随后紧跟故事或者战报的正文，用段落呈现，保持流畅性和可读性\n` +
-        `## 记者点评\n` +
-        `记者的分析与猜测，允许带有主观色彩和有逻辑的引申，制造“爆点”，约100-150字；直接输出纯文本，不要使用引用块或重复标题\n` +
         `## 胜利者\n` +
         `胜利者名称（如无胜负，请列出所有核心参与角色的名字，并用顿号“、”分隔；如平局请写“平局”）\n` +
         `## 最终结果\n\n` +
         `- 使用一级标题(#)作为战报标题\n` +
         `- 使用二级标题(##)分隔各个板块\n` +
         `- 使用三级标题(###)标注内部小标题\n` +
-        `- 使用引用块(>)来强调记者点评以外的特殊说明\n` +
+        `- 使用引用块(>)来强调点评或特殊说明\n` +
         `- 使用列表来展示判定记录或关键信息`;
 
     // 如果用户开启了“写入历战记录/当前状态”，则要求模型在文末追加一段 HTML 注释元数据，
@@ -864,4 +867,58 @@ export const createStreamPromptBuilder = (
     }
 
     return finalPrompt;
+};
+
+// Non-stream Arena generation intentionally keeps a separate structured-output
+// contract while sharing all character/scenario/history/guidance construction.
+export const createPromptBuilder = (
+    questions: PromptFallbackQuestions,
+    userGuidance: string | null,
+    internalGuidance: string | null,
+    worldviewWarning: boolean,
+    language: string,
+    mode: string | undefined,
+    scenario: any | null,
+    auxScenarios: any[] | null,
+    teams: { [key: string]: string[] } | undefined,
+    teamNames: { [key: string]: string } | undefined,
+    readArenaHistory: boolean,
+    historyReadLimit: number | null,
+    readCurrentState: boolean,
+    writeCurrentState: boolean,
+    adjudicationResults: ArenaPromptAdjudicationResult[] | null,
+    storyLength: string | undefined,
+    customStoryLength: string | undefined,
+    narrativeHistory?: ArenaPromptNarrativeHistoryEntry[] | null,
+    loreText?: string | null,
+    includeQuestionnaireAnswers: boolean = true,
+    materials?: unknown[] | null
+) => (input: { combatants: any[] }): string => {
+    const structuredPrompt = createStreamPromptBuilder(
+        questions,
+        userGuidance,
+        internalGuidance,
+        worldviewWarning,
+        language,
+        mode,
+        scenario,
+        auxScenarios,
+        teams,
+        teamNames,
+        readArenaHistory,
+        historyReadLimit,
+        readCurrentState,
+        false,
+        writeCurrentState,
+        false,
+        adjudicationResults,
+        storyLength,
+        customStoryLength,
+        narrativeHistory,
+        loreText,
+        includeQuestionnaireAnswers,
+        materials,
+        'structured-report',
+    )(input);
+    return structuredPrompt;
 };

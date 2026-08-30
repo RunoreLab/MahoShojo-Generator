@@ -299,6 +299,99 @@ describe('Arena companion service', () => {
     });
   });
 
+  it('从 structured JSON snapshot 原样投影 non-stream 战报与 impacts', async () => {
+    const structured = {
+      headline: '结构化重放战报',
+      article: {
+        body: '正文中可以自由出现\n## 胜利者\n而不应被 Markdown parser 截断。',
+        analysis: '独立的记者点评。',
+      },
+      officialReport: { winner: '角色乙', conclusion: '结构化结论。' },
+      impacts: [{ characterName: '角色乙', impact: '获得成长' }],
+    };
+    const projectUpdatedCombatants = vi.fn(async () => []);
+    const service = createArenaCompanionService({
+      generationService: generationService(async () => subscription([
+        {
+          id: '30-0',
+          type: 'snapshot',
+          data: { markdown: JSON.stringify(structured) },
+        },
+        {
+          id: '30-1',
+          type: 'telemetry',
+          data: {
+            model: 'reasoning-model',
+            reasoning: {
+              status: 'done',
+              source: 'sdk',
+              summary: '推理摘要',
+              text: '结构化模型推理',
+              reasoningTokens: 8,
+            },
+          },
+        },
+        { id: '31-0', type: 'done', data: { ok: true, status: 'completed' } },
+      ])),
+      createGenerationRequestId: () => 'request-12345678',
+      projectUpdatedCombatants,
+    });
+
+    const result = await service.generate(new Request('https://example.test/api/arena/generate', {
+      method: 'POST',
+      body: JSON.stringify({ writeArenaHistory: true, writeCurrentState: false }),
+    }));
+    const json = await result.json() as Record<string, any>;
+
+    expect(result.status).toBe(200);
+    expect(json.report).toMatchObject(structured);
+    expect(json.report.aiReasoning).toEqual({
+      status: 'done',
+      source: 'sdk',
+      summary: '推理摘要',
+      text: '结构化模型推理',
+      reasoningTokens: 8,
+    });
+    expect(json.impacts).toEqual(structured.impacts);
+    expect(projectUpdatedCombatants).toHaveBeenCalledWith(expect.objectContaining({
+      report: expect.objectContaining(structured),
+      impacts: structured.impacts,
+    }));
+  });
+
+  it('当前 structured contract 的 malformed snapshot 必须 fail closed', async () => {
+    const malformed: ArenaGenerationSubscription = {
+      ...subscription([]),
+      headers: {
+        ...subscription([]).headers,
+        'X-Mahoshojo-Stream-Meta': encodeURIComponent(JSON.stringify({
+          outputContract: 'structured-report',
+        })),
+      },
+      events: streamOf(
+        { id: '40-0', type: 'snapshot', data: { markdown: 'not-json' } },
+        { id: '41-0', type: 'done', data: { ok: true, status: 'completed' } },
+      ),
+    };
+    const service = createArenaCompanionService({
+      generationService: generationService(async () => malformed),
+      createGenerationRequestId: () => 'request-12345678',
+      projectUpdatedCombatants: async () => [],
+    });
+
+    const result = await service.generate(new Request('https://example.test/api/arena/generate', {
+      method: 'POST',
+      body: '{}',
+    }));
+
+    expect(result.status).toBe(502);
+    expect(await result.json()).toEqual({
+      code: 'ARENA_STRUCTURED_REPORT_INVALID',
+      error: 'Arena structured report validation failed',
+      generationId: 'arena_generation_1',
+    });
+  });
+
   it('沿用调用方 generationRequestId 并透传 preflight 失败响应', async () => {
     const captured = vi.fn();
     const service = createArenaCompanionService({

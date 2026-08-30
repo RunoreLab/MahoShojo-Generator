@@ -6,7 +6,7 @@ import {
   getSystemPrompt as getSharedSystemPrompt,
 } from '@mahoshojo/hosted-runtime/arena-generation';
 import { getSystemPrompt as getLegacySystemPrompt } from '@/lib/arena/constants';
-import { createStreamPromptBuilder } from '@/lib/arena/logic';
+import { createPromptBuilder, createStreamPromptBuilder } from '@/lib/arena/logic';
 
 const combatants = [
   {
@@ -202,6 +202,75 @@ describe('Arena generation prompt compatibility', () => {
         characterName: '星火',
         guidance: '优先保护站台上的乘客',
       }],
+    });
+  });
+
+  it('受信 non-stream route 与 legacy structured prompt 完全一致', async () => {
+    const payload = {
+      mode: 'scenario',
+      language: 'zh-CN',
+      combatants,
+      userGuidance: '保留结构化战报框架',
+      internalGuidance: '服务器内部判定',
+      scenario: { templateId: 'general-scenario', title: '雨夜车站', content: '站台即将停电。' },
+      auxScenarios: [{ title: '补充', weather: '暴雨' }],
+      materials: [{
+        name: '红伞',
+        sourceType: 'fixture',
+        sourceKind: 'raw-json',
+        content: { color: 'red' },
+      }],
+      teams: { '1': ['星火'], '2': ['夜潮'] },
+      teamNames: { '1': '守护方', '2': '侵袭方' },
+      readArenaHistory: true,
+      arenaHistoryReadLimit: 3,
+      readCurrentState: true,
+      writeArenaHistory: true,
+      writeCurrentState: true,
+      adjudicationResults: null,
+      storyLength: 'standard',
+      customStoryLength: '',
+      narrativeHistory: null,
+      questionnaires: [],
+      __arenaServerContextV1: {
+        endpoint: 'api/arena/generate',
+        deliveryMode: 'non-stream',
+      },
+    };
+    const legacyStructuredPrompt = createPromptBuilder(
+      {
+        ...DEFAULT_ARENA_PROMPT_QUESTIONS,
+        default: DEFAULT_ARENA_PROMPT_QUESTIONS.magicalGirl,
+      },
+      payload.userGuidance,
+      payload.internalGuidance,
+      false,
+      payload.language,
+      payload.mode,
+      payload.scenario,
+      payload.auxScenarios,
+      payload.teams,
+      payload.teamNames,
+      payload.readArenaHistory,
+      payload.arenaHistoryReadLimit,
+      payload.readCurrentState,
+      payload.writeCurrentState,
+      payload.adjudicationResults,
+      payload.storyLength,
+      payload.customStoryLength,
+      payload.narrativeHistory,
+      null,
+      true,
+      payload.materials,
+    )({ combatants });
+
+    const shared = await buildArenaGenerationPrompt({ actorKey: 'user:42', payload });
+    expect(shared.prompt).toBe(
+      `${getLegacySystemPrompt(payload.mode, combatants)}\n\n${legacyStructuredPrompt}`,
+    );
+    expect(shared.metadata).toMatchObject({
+      outputContract: 'structured-report',
+      expectsMeta: false,
     });
   });
 });

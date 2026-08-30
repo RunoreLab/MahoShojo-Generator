@@ -9,6 +9,7 @@ import type {
   ArenaGenerationFinalizationPorts,
   ArenaTerminalClaimInput,
 } from './finalization';
+import { parseArenaStructuredReportJson } from './structured-report';
 import { buildArenaTerminalEffectIdempotencyKey } from './finalization';
 import type { NodeDataD1Client } from '../node-runtime/data-ports';
 import { hashArenaCombatantBaseRevision } from '@mahoshojo/domain/arena-reconciliation';
@@ -215,6 +216,29 @@ const streamImpacts = (metadata: Record<string, unknown>): Array<Record<string, 
     : [];
 };
 
+const structuredReport = (
+  input: Pick<ArenaTerminalClaimInput, 'markdown' | 'payload'>,
+): Record<string, unknown> | null => parseArenaStructuredReportJson(input.markdown, {
+  enableImpacts: input.payload.writeArenaHistory === true || input.payload.writeCurrentState === true,
+  enableImpactText: input.payload.writeArenaHistory === true,
+  enableCurrentState: input.payload.writeCurrentState === true,
+});
+
+const terminalReport = (
+  input: Pick<ArenaTerminalClaimInput, 'metadata' | 'markdown' | 'payload'>,
+): Record<string, unknown> | null => streamReport(input.metadata) ?? structuredReport(input);
+
+const terminalImpacts = (
+  input: Pick<ArenaTerminalClaimInput, 'metadata' | 'markdown' | 'payload'>,
+): Array<Record<string, unknown>> => {
+  const streamed = streamImpacts(input.metadata);
+  if (streamed.length > 0) return streamed;
+  const report = structuredReport(input);
+  return Array.isArray(report?.impacts)
+    ? report.impacts.flatMap((value) => recordOf(value) ? [recordOf(value)!] : [])
+    : [];
+};
+
 const headlineFromMarkdown = (markdown: string): string | null => {
   for (const line of markdown.split(/\r?\n/u)) {
     const match = line.trim().match(/^#{1,3}\s+(.+)$/u);
@@ -297,17 +321,21 @@ const buildExtraJson = async (
   const baseRevisionHash = await hashArenaCombatantBaseRevision(
     boundedCombatants,
   );
-  const report = streamReport(input.metadata);
+  const report = terminalReport(input);
+  const officialReport = recordOf(report?.officialReport);
   const scenario = recordOf(input.payload.scenario);
   const reconciliationCandidate = {
     report: {
       headline: boundedString(report?.headline, 300) ?? headlineFromMarkdown(input.markdown) ?? '',
       mode: boundedString(input.payload.mode, 64) ?? 'classic',
       officialReport: {
-        winner: boundedString(report?.winner, 300) ?? winnerFromMarkdown(input.markdown) ?? '',
+        winner: boundedString(report?.winner, 300)
+          ?? boundedString(officialReport?.winner, 300)
+          ?? winnerFromMarkdown(input.markdown)
+          ?? '',
       },
     },
-    impacts: streamImpacts(input.metadata).slice(0, MAX_ARENA_TERMINAL_IMPACTS).flatMap((impact) => {
+    impacts: terminalImpacts(input).slice(0, MAX_ARENA_TERMINAL_IMPACTS).flatMap((impact) => {
       const characterName = boundedString(impact.characterName, 300);
       if (!characterName) return [];
       return [{
@@ -587,7 +615,7 @@ export const createNodeArenaGenerationFinalizationPorts = (
       const stored = await options.objectStore.put({
         key,
         body: input.markdown,
-        contentType: 'text/markdown; charset=utf-8',
+        contentType: input.contentType,
         signal: input.signal,
       });
       const id = `arena-output:${input.generationId}`;
@@ -614,7 +642,7 @@ ON CONFLICT(kind, owner_ref_id) DO UPDATE SET
         stored.bytes,
         stored.storedBytes,
         null,
-        'text/markdown; charset=utf-8',
+        input.contentType,
         stored.contentEncoding,
         timestamp.toISOString(),
         timestamp.toISOString(),
@@ -633,7 +661,8 @@ ON CONFLICT(kind, owner_ref_id) DO UPDATE SET
       const durationMs = Number.isFinite(startedAtMs)
         ? Math.max(0, endedAt.getTime() - startedAtMs)
         : 0;
-      const report = streamReport(input.metadata);
+      const report = terminalReport(input);
+      const officialReport = recordOf(report?.officialReport);
       const customProvider = recordOf(input.payload.customProvider);
       const pvp = recordOf(serverContext?.trustedPvpContext);
       const usage = recordOf(input.telemetry.usage);
@@ -700,7 +729,9 @@ VALUES (
         boundedString(input.telemetry.providerType, 64),
         boundedString(input.telemetry.model, 256),
         boundedString(report?.headline, 300) ?? headlineFromMarkdown(terminalMarkdown),
-        boundedString(report?.winner, 300) ?? winnerFromMarkdown(terminalMarkdown),
+        boundedString(report?.winner, 300)
+          ?? boundedString(officialReport?.winner, 300)
+          ?? winnerFromMarkdown(terminalMarkdown),
         terminalMarkdown.length,
         markdownBytes,
         numberOf(usage?.promptTokens),

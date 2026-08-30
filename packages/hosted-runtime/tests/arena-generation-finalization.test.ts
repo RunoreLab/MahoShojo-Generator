@@ -94,6 +94,24 @@ describe('Arena generation finalization', () => {
     }));
   });
 
+  it('按输出契约为 R2 标注 Markdown 或 structured JSON', async () => {
+    const markdownPorts = createPorts();
+    await createArenaGenerationFinalizer(markdownPorts)(input);
+    expect(markdownPorts.storeOutput).toHaveBeenCalledWith(expect.objectContaining({
+      contentType: 'text/markdown; charset=utf-8',
+    }));
+
+    const structuredPorts = createPorts();
+    await createArenaGenerationFinalizer(structuredPorts)({
+      ...input,
+      metadata: { ...input.metadata, outputContract: 'structured-report' },
+      markdown: JSON.stringify({ headline: '结构化战报' }),
+    });
+    expect(structuredPorts.storeOutput).toHaveBeenCalledWith(expect.objectContaining({
+      contentType: 'application/json; charset=utf-8',
+    }));
+  });
+
   it('重复 terminal claim 只读取已有结果，不重复业务副作用', async () => {
     const ports = createPorts({
       claimTerminal: vi.fn(async () => ({

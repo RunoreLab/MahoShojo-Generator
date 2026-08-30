@@ -38,6 +38,7 @@ export interface ArenaGenerationFinalizationPorts {
     generationId: string;
     actorKey: string;
     markdown: string;
+    contentType: 'text/markdown; charset=utf-8' | 'application/json; charset=utf-8';
     signal: AbortSignal;
   }): Promise<{ resultRef: string | null }>;
   claimTerminal(_input: ArenaTerminalClaimInput): Promise<ArenaTerminalClaimResult>;
@@ -85,6 +86,9 @@ export const createArenaGenerationFinalizer = (
           generationId: input.generationId,
           actorKey: input.actorKey,
           markdown: input.markdown,
+          contentType: input.metadata.outputContract === 'structured-report'
+            ? 'application/json; charset=utf-8'
+            : 'text/markdown; charset=utf-8',
           signal: input.signal,
         }).then((result) => result.resultRef);
         if (!resultRef) throw new Error('ARENA_R2_RESULT_REF_MISSING');

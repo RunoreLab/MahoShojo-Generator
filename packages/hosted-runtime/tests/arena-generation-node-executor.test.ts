@@ -6,10 +6,6 @@ import {
   canonicalizeNodeArenaGenerationSemanticPayload,
   createNodeArenaGenerationExecutor,
 } from '../src/arena-generation/node-executor';
-import type {
-  GenerateWithAIOptions,
-  RawGenerationConfig,
-} from '../src/node-runtime/types';
 import type { SignatureService } from '../src/signature';
 
 const validPayload = {
@@ -361,6 +357,48 @@ describe('Node Arena generation executor', () => {
     expect(generateWithStreamAI).not.toHaveBeenCalled();
   });
 
+  it('keeps legacy non-stream guidance bounds before safety and prompting', async () => {
+    let inspectedText = '';
+    const inspected = vi.fn(async (input: { combinedText: string }) => {
+      inspectedText = input.combinedText;
+      return null;
+    });
+    const executor = createNodeArenaGenerationExecutor({
+      env: {},
+      finalizer,
+      signatureService,
+      enforceSafety: inspected,
+      generateWithStructuredAI: vi.fn(),
+      generateWithStreamAI: vi.fn(),
+    });
+    const userGuidance = `${'用'.repeat(200)}USER_TAIL`;
+    const characterGuidance = `${'角'.repeat(100)}CHARACTER_TAIL`;
+
+    const prepared = await executor.prepare!({
+      request: new Request('https://example.test/api/arena/generate'),
+      actorKey: 'anonymous:test',
+      generationRequestId: 'request-guidance-bounds',
+      payload: {
+        ...validPayload,
+        userGuidance,
+        combatants: validPayload.combatants.map((combatant, index) => ({
+          ...combatant,
+          ...(index === 0 ? { characterGuidance } : {}),
+        })),
+      },
+    });
+
+    if (
+      prepared instanceof Response
+      || isArenaGenerationAuditableRejection(prepared)
+    ) throw new Error('unexpected response');
+    expect(prepared.executionPayload.userGuidance).toBe('用'.repeat(200));
+    expect(inspected).toHaveBeenCalledWith(expect.objectContaining({
+      combinedText: expect.not.stringContaining('USER_TAIL'),
+    }));
+    expect(inspectedText).not.toContain('CHARACTER_TAIL');
+  });
+
   it('fail-closes invalid custom provider before reservation/provider dispatch', async () => {
     const generateWithStreamAI = vi.fn();
     const executor = createNodeArenaGenerationExecutor({
@@ -592,7 +630,6 @@ describe('Node Arena generation executor', () => {
       prepared instanceof Response
       || isArenaGenerationAuditableRejection(prepared)
     ) throw new Error('unexpected response');
-
     const terminal = await executor.execute({
       generationId: 'generation-strict',
       generationRequestId: 'request-strict',
@@ -614,15 +651,23 @@ describe('Node Arena generation executor', () => {
   });
 
   it('preserves the public non-strict downgrade model contract', async () => {
-    const generateWithStreamAI = vi.fn(async (
-      _config: RawGenerationConfig,
-      _options?: GenerateWithAIOptions,
-    ) => ({ response: new Response('body') }));
+    const generateWithStreamAI = vi.fn();
+    let receivedStructuredConfig: unknown = null;
+    const generateWithStructuredAI = vi.fn(async (_input: unknown, config: unknown) => {
+      receivedStructuredConfig = config;
+      return {
+        headline: '结构化战报',
+        article: { body: '正文', analysis: '记者点评' },
+        officialReport: { winner: 'A', conclusion: '结论' },
+        impacts: [],
+      };
+    });
     const executor = createNodeArenaGenerationExecutor({
       env: {},
       finalizer,
       signatureService,
       enforceSafety: vi.fn(async () => null),
+      generateWithStructuredAI,
       generateWithStreamAI,
     });
     const prepared = await executor.prepare!({
@@ -639,6 +684,10 @@ describe('Node Arena generation executor', () => {
       prepared instanceof Response
       || isArenaGenerationAuditableRejection(prepared)
     ) throw new Error('unexpected response');
+    const streamMeta = JSON.parse(decodeURIComponent(
+      prepared.responseHeaders['X-Mahoshojo-Stream-Meta'] ?? '',
+    )) as Record<string, unknown>;
+    expect(streamMeta.outputContract).toBe('structured-report');
 
     const terminal = await executor.execute({
       generationId: 'generation-downgrade',
@@ -653,9 +702,11 @@ describe('Node Arena generation executor', () => {
     });
 
     expect(terminal.status).toBe('completed');
-    expect(generateWithStreamAI).toHaveBeenCalledTimes(1);
-    expect(generateWithStreamAI.mock.calls[0]?.[0]).toMatchObject({
+    expect(generateWithStreamAI).not.toHaveBeenCalled();
+    expect(generateWithStructuredAI).toHaveBeenCalledTimes(1);
+    expect(receivedStructuredConfig).toMatchObject({
       modelOverride: 'gemini-2.5-flash-lite',
+      taskName: '生成classic模式故事',
     });
   });
 });

@@ -544,6 +544,10 @@ export const createArenaGenerationRuntime = (
     }
     const reporterInfo = prepared.metadata.reporterInfo;
     const streamMeta = {
+      ...(prepared.metadata.outputContract === 'structured-report'
+        || prepared.metadata.outputContract === 'stream-markdown'
+        ? { outputContract: prepared.metadata.outputContract }
+        : {}),
       ...(reporterInfo && typeof reporterInfo === 'object' && !Array.isArray(reporterInfo)
         ? { reporterInfo }
         : {}),

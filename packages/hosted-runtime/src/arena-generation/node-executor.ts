@@ -6,7 +6,13 @@ import type {
   ArenaGenerationObserver,
   ArenaTrustedPvpContext,
 } from '@mahoshojo/hosted-api/arena-generation/service';
-import { buildArenaGenerationPrompt, isStrictRankedArenaRequest } from './prompt';
+import {
+  buildArenaGenerationPrompt,
+  isStrictRankedArenaRequest,
+  resolveArenaGenerationOutputContract,
+} from './prompt';
+import { getSystemPrompt } from './compatibility-prompt';
+import { buildArenaStructuredReportSchema } from './structured-report';
 import { MAX_ARENA_MATERIALS, normalizeNodeArenaMaterials } from './materials';
 import type { ArenaSeasonContext } from './season-context';
 import {
@@ -39,6 +45,7 @@ import type { SignatureService } from '../signature';
 import {
   LoadBalanceStrategy,
   type AiTelemetry,
+  type GenerationConfig,
   type GenerateWithAIOptions,
   type RawGenerationConfig,
 } from '../node-runtime/types';
@@ -71,8 +78,9 @@ export type NodeArenaGenerationExecutorOptions = {
   pvpSignatureService?: SignatureService;
   generateWithStreamAI?: GenerateWithStreamAI;
   generateWithStructuredAI?(
-    _input: string,
+    _input: unknown,
     _config: unknown,
+    _options?: GenerateWithAIOptions,
   ): Promise<unknown>;
   enforceSafety?(_input: NodeArenaSafetyInput): Promise<Response | null>;
   resolveTrustedInternalGuidance?(_input: {
@@ -368,6 +376,8 @@ const buildSafetyText = async (
   policy: SafetyCheckPolicy,
   enableBundle: boolean,
 ): Promise<string> => {
+  const preserveLegacyNonStreamBounds = resolveArenaGenerationOutputContract(payload)
+    === 'structured-report';
   const inputs: Array<{
     type: keyof SafetyCheckPolicy;
     content: string;
@@ -381,10 +391,16 @@ const buildSafetyText = async (
       content: serializeForSafety(combatant.data),
       isNative: combatant.isNative === true,
     });
-    const guidance = readString(combatant.characterGuidance);
+    const rawGuidance = readString(combatant.characterGuidance);
+    const guidance = preserveLegacyNonStreamBounds
+      ? rawGuidance.slice(0, 100)
+      : rawGuidance;
     if (guidance) inputs.push({ type: 'userGuidance', content: guidance, isNative: false });
   }
-  const userGuidance = readString(payload.userGuidance);
+  const rawUserGuidance = readString(payload.userGuidance);
+  const userGuidance = preserveLegacyNonStreamBounds
+    ? rawUserGuidance.slice(0, 200)
+    : rawUserGuidance;
   if (userGuidance) inputs.push({ type: 'userGuidance', content: userGuidance, isNative: false });
   if (payload.readNarrativeHistory === true && Array.isArray(payload.narrativeHistory)) {
     inputs.push({
@@ -586,6 +602,9 @@ export const createNodeArenaGenerationExecutor = (
           ? await signatures.verifySignature(normalized.scenario)
           : true,
       };
+      if (resolveArenaGenerationOutputContract(normalized) === 'structured-report') {
+        normalized.userGuidance = readString(normalized.userGuidance).slice(0, 200) || null;
+      }
       return normalized;
     },
     checkSafety: async ({ request, actorKey, payload }) => {
@@ -667,6 +686,74 @@ export const createNodeArenaGenerationExecutor = (
           : payload.isDowngrade === true && !customProvider
             ? ['gemini-2.5-flash-lite']
             : [undefined];
+      if (resolveArenaGenerationOutputContract(payload) === 'structured-report') {
+        const mode = readString(payload.mode) || 'classic';
+        const combatants = Array.isArray(payload.combatants) ? payload.combatants : [];
+        const systemPrompt = getSystemPrompt(mode, combatants);
+        const combinedPrefix = `${systemPrompt}\n\n`;
+        const taskPrompt = prompt.startsWith(combinedPrefix)
+          ? prompt.slice(combinedPrefix.length)
+          : prompt;
+        const schema = buildArenaStructuredReportSchema({
+          enableImpacts: payload.writeArenaHistory === true || payload.writeCurrentState === true,
+          enableImpactText: payload.writeArenaHistory === true,
+          enableCurrentState: payload.writeCurrentState === true,
+        });
+        const structuredInput = { combatants };
+        const baseStructuredConfig: GenerationConfig<
+          Record<string, unknown>,
+          typeof structuredInput
+        > = {
+          systemPrompt,
+          temperature: 0.9,
+          promptBuilder: () => taskPrompt,
+          schema,
+          taskName: `生成${mode}模式故事`,
+          ...(customProvider ? {
+            generationSettingsContext: {
+              providerId: customProvider.providerId,
+              ...(customProvider.generationOverrides
+                ? { userOverrides: customProvider.generationOverrides }
+                : {}),
+            },
+          } : {}),
+        };
+        let structuredResult: unknown = null;
+        let lastStructuredError: unknown = null;
+        for (const fallback of modelFallbacks) {
+          try {
+            const structuredConfig = {
+              ...baseStructuredConfig,
+              ...(fallback ? { modelOverride: fallback } : {}),
+            };
+            structuredResult = await (options.generateWithStructuredAI
+              ? options.generateWithStructuredAI(
+                structuredInput,
+                structuredConfig,
+                generationOptions,
+              )
+              : structuredRuntime!.generateWithAI(
+                structuredInput,
+                structuredConfig,
+                generationOptions,
+              ));
+            break;
+          } catch (error) {
+            lastStructuredError = error;
+            if (signal.aborted) throw error;
+          }
+        }
+        if (!structuredResult || typeof structuredResult !== 'object') {
+          throw lastStructuredError ?? new Error('ARENA_PROVIDER_UNAVAILABLE');
+        }
+        const validatedStructuredResult = schema.parse(structuredResult);
+        const body = new Response(JSON.stringify(validatedStructuredResult)).body;
+        if (!body) throw new Error('ARENA_PROVIDER_STRUCTURED_RESULT_MISSING');
+        return {
+          body,
+          telemetry: telemetry as Record<string, unknown>,
+        };
+      }
       let result: StreamAiResult | null = null;
       let lastError: unknown = null;
       for (const fallback of modelFallbacks) {

@@ -270,6 +270,47 @@ describe('Arena D1/R2 finalization ports', () => {
     expect(client.boundCalls[0]?.[6]).toBe('api/generate-battle-story');
   });
 
+  it('indexes structured non-stream JSON without relying on Markdown headings', async () => {
+    const client = sequentialD1([result([], 1)]);
+    const ports = createNodeArenaGenerationFinalizationPorts({
+      getD1Client: () => client,
+      now: () => new Date('2026-08-25T04:00:00.000Z'),
+    });
+    const structured = {
+      headline: '原生 JSON 战报',
+      article: { body: '正文', analysis: '点评' },
+      officialReport: { winner: '角色B', conclusion: '结论' },
+      impacts: [{ characterName: '角色B', impact: '成长' }],
+    };
+
+    await ports.claimTerminal({
+      ...claimInput,
+      payload: {
+        ...claimInput.payload,
+        writeArenaHistory: true,
+        writeCurrentState: false,
+        __arenaServerContextV1: {
+          endpoint: 'api/arena/generate',
+          deliveryMode: 'non-stream',
+        },
+      },
+      metadata: { outputContract: 'structured-report' },
+      markdown: JSON.stringify(structured),
+    });
+
+    expect(client.boundCalls[0]?.[33]).toBe(structured.headline);
+    expect(client.boundCalls[0]?.[34]).toBe(structured.officialReport.winner);
+    const extraJson = client.boundCalls[0]?.[44];
+    expect(extraJson).toEqual(expect.any(String));
+    expect(JSON.parse(extraJson as string).localCardReconciliation).toMatchObject({
+      report: {
+        headline: structured.headline,
+        officialReport: { winner: structured.officialReport.winner },
+      },
+      impacts: structured.impacts,
+    });
+  });
+
   it('writes PVP columns only from the trusted server context', async () => {
     const unsignedClient = sequentialD1([result([], 1)]);
     const unsignedPorts = createNodeArenaGenerationFinalizationPorts({
@@ -411,6 +452,7 @@ describe('Arena D1/R2 finalization ports', () => {
       generationId: 'generation-1',
       actorKey: 'user:42',
       markdown: 'body',
+      contentType: 'text/markdown; charset=utf-8',
       signal: new AbortController().signal,
     })).resolves.toEqual({
       resultRef: 'r2:v1/battle-report-generations/generation-1/output.md',
@@ -418,6 +460,7 @@ describe('Arena D1/R2 finalization ports', () => {
     expect(put).toHaveBeenCalledWith(expect.objectContaining({
       key: 'v1/battle-report-generations/generation-1/output.md',
       body: 'body',
+      contentType: 'text/markdown; charset=utf-8',
     }));
     expect(client.prepare).toHaveBeenCalledWith(expect.stringContaining('large_objects'));
   });

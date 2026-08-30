@@ -1,9 +1,12 @@
 import type { ArenaGenerationPrompt } from './runtime';
 import {
+  createPromptBuilder,
   createStreamPromptBuilder,
   DEFAULT_ARENA_PROMPT_QUESTIONS,
   getSystemPrompt,
 } from './compatibility-prompt';
+
+export type ArenaGenerationOutputContract = 'stream-markdown' | 'structured-report';
 
 const text = (value: unknown): string => typeof value === 'string' ? value.trim() : '';
 
@@ -24,6 +27,17 @@ const asRecord = (value: unknown): Record<string, unknown> | null => (
     ? value as Record<string, unknown>
     : null
 );
+
+export const resolveArenaGenerationOutputContract = (
+  payload: Record<string, unknown>,
+): ArenaGenerationOutputContract => {
+  const serverContext = asRecord(payload.__arenaServerContextV1);
+  const endpoint = text(serverContext?.endpoint);
+  return serverContext?.deliveryMode === 'non-stream'
+    && (endpoint === 'api/arena/generate' || endpoint === 'api/generate-battle-story')
+    ? 'structured-report'
+    : 'stream-markdown';
+};
 
 const JOURNALISTS = [
   ['蓝星单推人', '兽扑'],
@@ -86,7 +100,16 @@ export const buildArenaGenerationPrompt = async (input: {
   const language = text(payload.language) || 'zh-CN';
   const combatants = Array.isArray(payload.combatants) ? payload.combatants : [];
   const lore = questionnaireLore(payload.questionnaires);
-  const userGuidance = text(payload.userGuidance) || null;
+  const outputContract = resolveArenaGenerationOutputContract(payload);
+  const rawUserGuidance = text(payload.userGuidance);
+  // Legacy non-stream handlers bounded this field before safety, prompting,
+  // response projection and history writes. Streaming intentionally remains
+  // free-form and keeps the full guidance text.
+  const userGuidance = (
+    outputContract === 'structured-report'
+      ? rawUserGuidance.slice(0, 200)
+      : rawUserGuidance
+  ) || null;
   const materials = Array.isArray(payload.materials) ? payload.materials : [];
   const adjudicationResults = Array.isArray(payload.adjudicationResults)
     ? payload.adjudicationResults
@@ -95,8 +118,40 @@ export const buildArenaGenerationPrompt = async (input: {
   const writeArenaHistory = payload.writeArenaHistory !== false;
   const writeCurrentState = payload.writeCurrentState !== false;
   const forceStreamMeta = payload.forceStreamMeta === true;
-  const expectsMeta = forceStreamMeta || writeArenaHistory || writeCurrentState;
-  const streamPrompt = createStreamPromptBuilder(
+  const expectsMeta = outputContract === 'stream-markdown'
+    && (forceStreamMeta || writeArenaHistory || writeCurrentState);
+  const promptBuilder = outputContract === 'structured-report'
+    ? createPromptBuilder(
+      {
+        ...DEFAULT_ARENA_PROMPT_QUESTIONS,
+        default: DEFAULT_ARENA_PROMPT_QUESTIONS.magicalGirl,
+      },
+      userGuidance,
+      text(payload.internalGuidance) || null,
+      false,
+      language,
+      mode,
+      asRecord(payload.scenario),
+      Array.isArray(payload.auxScenarios) ? payload.auxScenarios : null,
+      asRecord(payload.teams) as Record<string, string[]> | null ?? undefined,
+      asRecord(payload.teamNames) as Record<string, string> | null ?? undefined,
+      payload.readArenaHistory === true,
+      payload.arenaHistoryReadLimit === null
+        ? null
+        : typeof payload.arenaHistoryReadLimit === 'number'
+          ? payload.arenaHistoryReadLimit
+          : 3,
+      payload.readCurrentState === true,
+      writeCurrentState,
+      adjudicationResults,
+      text(payload.storyLength) || undefined,
+      text(payload.customStoryLength) || undefined,
+      Array.isArray(payload.narrativeHistory) ? payload.narrativeHistory : null,
+      lore || null,
+      !strictRankedMatch,
+      materials,
+    )
+    : createStreamPromptBuilder(
     {
       ...DEFAULT_ARENA_PROMPT_QUESTIONS,
       default: DEFAULT_ARENA_PROMPT_QUESTIONS.magicalGirl,
@@ -127,21 +182,23 @@ export const buildArenaGenerationPrompt = async (input: {
     lore || null,
     !strictRankedMatch,
     materials,
-  )({ combatants });
+  );
+  const taskPrompt = promptBuilder({ combatants });
   const characterGuidances = combatants.flatMap((value) => {
     const combatant = asRecord(value);
     const data = asRecord(combatant?.data);
     const characterName = text(data?.codename) || text(data?.name);
-    const guidance = text(combatant?.characterGuidance);
+    const guidance = text(combatant?.characterGuidance).slice(0, 100);
     return characterName && guidance ? [{ characterName, guidance }] : [];
   });
   const reporterInfo = randomReporter(random);
 
   return {
-    prompt: `${getSystemPrompt(mode, combatants)}\n\n${streamPrompt}`,
+    prompt: `${getSystemPrompt(mode, combatants)}\n\n${taskPrompt}`,
     metadata: {
       mode,
       language,
+      outputContract,
       expectsMeta,
       combatantCount: combatants.length,
       pvpContext: asRecord(payload.pvpContext),

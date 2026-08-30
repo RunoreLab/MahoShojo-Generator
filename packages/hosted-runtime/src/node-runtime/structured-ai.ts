@@ -571,7 +571,14 @@ async function generateWithAIUsing<T, I = string>(
           });
 
           // 2) 上游不支持 JSON 模式：退化为“纯文本生成 JSON + 本地解析/修复”
-          if (!providerRequestDispatched && isJsonModeNotSupportedError(rawError)) {
+          // An explicit capability rejection means the structured request was
+          // rejected before generation. Even when it crossed the fetch boundary,
+          // retrying the same provider/model as text JSON preserves the legacy
+          // compatibility contract without blindly replaying a billable result.
+          if (
+            isJsonModeNotSupportedError(rawError)
+            || isJsonModeNotSupportedError(enhancedError)
+          ) {
             runtimeAttempt.finish(classifyAiUpstreamOutcome(enhancedError));
             log.warn('检测到上游不支持 JSON 模式，启用兼容回退（文本生成 JSON + 本地解析）', {
               provider: provider.name,
