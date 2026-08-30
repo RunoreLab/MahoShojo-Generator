@@ -160,6 +160,40 @@ describe('RedisGenerationReplayStore', () => {
     expect(options.arguments).toContain('900000');
   });
 
+  it('将 event.data 预序列化后透传给 XADD，不经过 Lua cjson 重编码', async () => {
+    const client = createClient();
+    vi.mocked(client.eval).mockResolvedValue(['1724570000000-0']);
+    const store = createRedisGenerationReplayStore({ getClient: () => client });
+
+    await store.appendEvents({
+      generationId: 'generation-1234',
+      producerToken: reserveInput.producerToken,
+      events: [{
+        type: 'ranking',
+        data: {
+          success: true,
+          generationId: 'generation-1234',
+          state: 'ready',
+          participants: [],
+        },
+      }],
+      now: reserveInput.now,
+    });
+
+    const [script, options] = vi.mocked(client.eval).mock.calls[0]!;
+    expect(script).toContain("'data', event.dataJson");
+    expect(script).not.toContain('cjson.encode(event.data)');
+    expect(JSON.parse(options.arguments[1]!)).toEqual([{
+      type: 'ranking',
+      dataJson: JSON.stringify({
+        success: true,
+        generationId: 'generation-1234',
+        state: 'ready',
+        participants: [],
+      }),
+    }]);
+  });
+
   it('cursor 仍在窗口内时只返回严格晚于 cursor 的独立 subscriber 事件', async () => {
     const client = createClient();
     vi.mocked(client.eval).mockResolvedValueOnce([
@@ -417,6 +451,12 @@ describe('RedisGenerationReplayStore', () => {
       'mahoshojo:gen:v1:generation-1234:state',
       'mahoshojo:gen:v1:generation-1234:events',
     ]);
+    expect(script).toContain("'data', terminalEvent.dataJson");
+    expect(script).not.toContain('cjson.encode(terminalEvent.data)');
+    expect(JSON.parse(options.arguments[5]!)).toEqual({
+      type: 'done',
+      dataJson: JSON.stringify({ status: 'completed', ok: true, resultRef: 'r2://report/1' }),
+    });
   });
 
   it('在执行 Lua 前拒绝 marker-only 或未决定 snapshot 的 terminal mutation', async () => {

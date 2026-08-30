@@ -198,7 +198,7 @@ for index, event in ipairs(events) do
   ids[index] = redis.call(
     'XADD', KEYS[2], '*',
     'type', event.type,
-    'data', cjson.encode(event.data)
+    'data', event.dataJson
   )
 end
 redis.call('XTRIM', KEYS[2], 'MAXLEN', ARGV[3])
@@ -255,7 +255,7 @@ end
 local terminalEventId = redis.call(
   'XADD', KEYS[2], '*',
   'type', terminalEvent.type,
-  'data', cjson.encode(terminalEvent.data)
+  'data', terminalEvent.dataJson
 )
 redis.call('XTRIM', KEYS[2], 'MAXLEN', ARGV[5])
 state.lastEventId = terminalEventId
@@ -807,11 +807,15 @@ export const createRedisGenerationReplayStore = (
 
     async appendEvents(input) {
       if (input.events.length === 0) return { owned: true, events: [] };
+      const serializedEvents = input.events.map((event) => ({
+        type: event.type,
+        dataJson: JSON.stringify(event.data) ?? 'null',
+      }));
       const raw = await options.getClient().eval(APPEND_SCRIPT, {
         keys: [stateKey(input.generationId), eventsKey(input.generationId)],
         arguments: [
           input.producerToken,
-          JSON.stringify(input.events),
+          JSON.stringify(serializedEvents),
           String(maxEvents),
           String(activeTtlMs),
           input.now,
@@ -909,7 +913,12 @@ export const createRedisGenerationReplayStore = (
           input.now,
           String(terminalTtlMs),
           String(maxEvents),
-          input.terminalEvent ? JSON.stringify(input.terminalEvent) : '',
+          input.terminalEvent
+            ? JSON.stringify({
+                type: input.terminalEvent.type,
+                dataJson: JSON.stringify(input.terminalEvent.data) ?? 'null',
+              })
+            : '',
           input.terminalSnapshot ? JSON.stringify(input.terminalSnapshot) : '',
           input.clearTerminalSnapshot ? '1' : '0',
         ],

@@ -108,13 +108,36 @@ try {
   if (replay.kind !== 'events' || replay.events.length !== 1) {
     throw new Error('ARENA_REDIS_REPLAY_CONTRACT_FAILED');
   }
+  const rankingAppend = await store.appendEvents({
+    generationId,
+    producerToken,
+    events: [{
+      type: 'ranking',
+      data: {
+        success: true,
+        generationId,
+        state: 'ready',
+        snapshot: { status: 'completed', combatantCount: 5 },
+        participants: [],
+      },
+    }],
+    now,
+  });
+  const rankingEventId = rankingAppend.events[0]?.id;
+  const rankingEvent = rankingEventId
+    ? await store.readEvent({ generationId, eventId: rankingEventId })
+    : null;
+  const rankingData = rankingEvent?.data as { participants?: unknown } | undefined;
+  if (!Array.isArray(rankingData?.participants) || rankingData.participants.length !== 0) {
+    throw new Error('ARENA_REDIS_RANKING_ARRAY_ROUND_TRIP_FAILED');
+  }
   const trimEvents = Array.from({ length: 2_050 }, (_, index) => ({
     type: 'markdown',
     data: { chunk: String(index % 10) },
   }));
   const trimRace = store.readAfter({
     generationId,
-    after: appended.events.at(-1)?.id ?? null,
+    after: rankingEventId ?? null,
     blockMs: 1_000,
   });
   await new Promise<void>((resolve) => setTimeout(resolve, 25));
@@ -137,7 +160,7 @@ try {
   await cleanup.unlink(eventsKey);
   const missing = await store.readAfter({
     generationId,
-    after: appended.events.at(-1)?.id ?? null,
+    after: rankingEventId ?? null,
     blockMs: 10,
   });
   if (missing.kind !== 'stream-missing') {
@@ -258,6 +281,7 @@ try {
     arenaRedis: true,
     reservation: true,
     replay: true,
+    rankingArrayRoundTrip: true,
     ownerScope: true,
     cancel: true,
     terminalCas: true,

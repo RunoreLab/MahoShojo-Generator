@@ -46,7 +46,10 @@ import {
 } from '../utils/providerCooldown';
 import { normalizeCustomStoryLength } from '@/lib/story-length';
 import { buildCustomProviderRequestPayload } from '@/lib/ai/custom-provider';
-import type { GenerationRankingResponse } from '@/lib/arena/generation-ranking';
+import {
+  parseGenerationRankingResponse,
+  type GenerationRankingResponse,
+} from '@/lib/arena/generation-ranking';
 import {
   arenaGenerationConnectionNotice,
   openArenaGenerationStream,
@@ -1277,13 +1280,8 @@ export const useBattleEngine = () => {
               }
 
               if (event === 'ranking') {
-                const ranking = payload as GenerationRankingResponse | null;
-                if (
-                  ranking
-                  && typeof ranking === 'object'
-                  && typeof ranking.generationId === 'string'
-                  && ranking.generationId.trim()
-                ) {
+                const ranking = parseGenerationRankingResponse(payload);
+                if (ranking) {
                   queryClient.setQueryData<GenerationRankingResponse>(
                     ['arenaGenerationRanking', ranking.generationId],
                     ranking,

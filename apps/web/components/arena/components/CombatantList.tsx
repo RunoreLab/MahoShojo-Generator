@@ -9,7 +9,11 @@ import { TechBadge } from '@/components/ranking/TechBadge';
 import { computeEloExpectedScore } from '@/lib/arena/elo';
 import { authStorage } from '@/lib/auth';
 import { computeTechIndex } from '@/lib/metrics/techIndex';
-import type { GenerationRankingResponse } from '@/lib/arena/generation-ranking';
+import {
+  parseGenerationRankingResponse,
+  requireGenerationRankingResponse,
+  type GenerationRankingResponse,
+} from '@/lib/arena/generation-ranking';
 
 import { useBattleActions } from '../hooks/useBattleActions';
 import { useBattleStore } from '../stores/useBattleStore';
@@ -359,10 +363,13 @@ export function CombatantList({ onShowDetails }: CombatantListProps) {
   }, [metaQueries, metaTargets]);
 
   const generationRankingQueryKey = ['arenaGenerationRanking', lastGenerationId] as const;
-  const cachedGenerationRanking = queryClient.getQueryData<GenerationRankingResponse>(generationRankingQueryKey);
+  const cachedGenerationRanking = parseGenerationRankingResponse(
+    queryClient.getQueryData<unknown>(generationRankingQueryKey),
+  );
   const hasTerminalRanking = Boolean(
     cachedGenerationRanking?.success
       && cachedGenerationRanking.state === 'ready'
+      && Array.isArray(cachedGenerationRanking.participants)
       && !cachedGenerationRanking.participants.some((participant) =>
         (participant.queues.strict.eligible && ['missing', 'pending'].includes(participant.queues.strict.eventStatus))
         || (participant.queues.free.eligible && ['missing', 'pending'].includes(participant.queues.free.eventStatus)),
@@ -376,23 +383,24 @@ export function CombatantList({ onShowDetails }: CombatantListProps) {
 
   const generationRankingQuery = useQuery({
     queryKey: generationRankingQueryKey,
-    queryFn: ({ signal }) => {
+    queryFn: async ({ signal }) => {
       const generationId = lastGenerationId as string;
       if (generationRankingPollingRef.current.generationId !== generationId) {
         generationRankingPollingRef.current = { generationId, startedAt: Date.now(), attemptCount: 0 };
       }
       generationRankingPollingRef.current.attemptCount += 1;
-      return fetchJson<GenerationRankingResponse>(
+      const payload = await fetchJson<unknown>(
         `/api/arena/generation-ranking?generationId=${encodeURIComponent(lastGenerationId as string)}`,
         { signal },
       );
+      return requireGenerationRankingResponse(payload);
     },
     enabled: generationRankingRecoveryEnabled,
     retry: 1,
     refetchOnWindowFocus: false,
     refetchIntervalInBackground: false,
     refetchInterval: (query) => {
-      const data = query.state.data;
+      const data = parseGenerationRankingResponse(query.state.data);
       let pending = Boolean(data?.success && data.state === 'pending');
       if (data?.success && data.state === 'ready') {
         pending = data.participants.some((p) =>
@@ -409,10 +417,11 @@ export function CombatantList({ onShowDetails }: CombatantListProps) {
       });
     },
   });
+  const generationRankingData = parseGenerationRankingResponse(generationRankingQuery.data);
 
   const generationParticipantByEntityKey = useMemo(() => {
     const map = new Map<string, NonNullable<Extract<GenerationRankingResponse, { success: true; state: 'ready' }>>['participants'][number]>();
-    const data = generationRankingQuery.data;
+    const data = generationRankingData;
     if (!data || !data.success || data.state !== 'ready') return map;
     data.participants.forEach((p) => {
       if (typeof p.entityKey === 'string' && p.entityKey.trim()) {
@@ -420,10 +429,10 @@ export function CombatantList({ onShowDetails }: CombatantListProps) {
       }
     });
     return map;
-  }, [generationRankingQuery.data]);
+  }, [generationRankingData]);
 
   const generationRankingPollingStopped = (() => {
-    const data = generationRankingQuery.data;
+    const data = generationRankingData;
     if (!data?.success) return false;
     const pending = data.state === 'pending' || (data.state === 'ready' && data.participants.some((participant) =>
       (participant.queues.strict.eligible && ['missing', 'pending'].includes(participant.queues.strict.eventStatus))
@@ -696,7 +705,7 @@ export function CombatantList({ onShowDetails }: CombatantListProps) {
                 </div>
                 {!entityKey ? (
                   <div className="mt-0.5 text-[11px] text-gray-500">提示：未登记为数据卡/预设时，无法参与排位计分。</div>
-                ) : entityKey && lastGenerationId && !generationParticipant && generationRankingQuery.data?.success && generationRankingQuery.data.state === 'pending' ? (
+                ) : entityKey && lastGenerationId && !generationParticipant && generationRankingData?.success && generationRankingData.state === 'pending' ? (
                   <div className="mt-0.5 text-[11px] text-gray-500">
                     {generationRankingPollingStopped ? '排位结果暂未就绪，已停止自动查询。' : '排位结算中…（可能需要几秒钟）'}
                     {generationRankingPollingStopped ? (
