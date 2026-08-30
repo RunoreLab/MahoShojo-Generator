@@ -88,13 +88,17 @@ jobs:
           esac
           probe_dir="$(mktemp -d)"
           trap 'rm -rf -- "$probe_dir"' EXIT
-          status="$(curl --silent --show-error --connect-timeout 5 --max-time 15 \
+          status="$(curl --silent --show-error \
+            --retry 5 --retry-delay 3 --retry-max-time 120 --retry-connrefused \
+            --connect-timeout 5 --max-time 15 \
             --output "$probe_dir/http-body" --write-out '%{http_code}' \
             --header 'Origin: https://mahoshojo.colanns.me' \
             "$room_origin/api/arena/rooms/v1")"
           test "$status" = 401
           grep -Fq '"code":"ROOM_AUTHENTICATION_REQUIRED"' "$probe_dir/http-body"
-          status="$(curl --silent --show-error --connect-timeout 5 --max-time 15 --http1.1 \
+          status="$(curl --silent --show-error \
+            --retry 5 --retry-delay 3 --retry-max-time 120 --retry-connrefused \
+            --connect-timeout 5 --max-time 15 --http1.1 \
             --output "$probe_dir/ws-body" --write-out '%{http_code}' \
             --header 'Origin: https://mahoshojo.colanns.me' \
             --header 'Connection: Upgrade' \
