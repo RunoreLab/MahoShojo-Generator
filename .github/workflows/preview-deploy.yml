@@ -30,9 +30,11 @@ env:
   PREVIEW_ARENA_ROOM_READER_CONTRACT: arena-room-authority-v2-generation-payload-digest-v1
   PREVIEW_ARENA_ROOM_GO_NO_GO: approved
 
+# Preview 发布假定合并前已在本地或集成 CI 执行 `pnpm run ci:verify`；这里仅保留
+# 构建、发布与公网契约 canary，避免在每次 Preview 部署中重复执行耗时的整仓门禁。
 jobs:
   verify-and-build-hono:
-    name: Verify and build Hono preview
+    name: Build Hono preview
     if: github.ref == 'refs/heads/preview'
     runs-on: ubuntu-latest
     steps:
@@ -52,9 +54,6 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-
-      - name: Verify workspace and repository gates
-        run: pnpm run ci:verify
 
       - name: Build release tuple
         env:
@@ -90,7 +89,7 @@ jobs:
           retention-days: 7
 
   verify-and-build-cloudflare:
-    name: Verify and build Cloudflare preview
+    name: Build Cloudflare preview
     if: github.ref == 'refs/heads/preview'
     needs: verify-and-build-hono
     runs-on: ubuntu-latest
