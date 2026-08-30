@@ -16,10 +16,21 @@ const redisClient = vi.hoisted(() => ({
   xRead: vi.fn(async () => null),
 }));
 
-vi.mock('redis', () => ({
-  createClient: vi.fn(() => redisClient),
+const redisBlockingPool = vi.hoisted(() => ({
+  connect: vi.fn(async () => undefined),
+  destroy: vi.fn(),
+  isOpen: true,
+  on: vi.fn(),
+  ping: vi.fn(async () => 'PONG'),
+  xRead: vi.fn(async () => null),
 }));
 
+vi.mock('redis', () => ({
+  createClient: vi.fn(() => redisClient),
+  createClientPool: vi.fn(() => redisBlockingPool),
+}));
+
+import { createClientPool } from 'redis';
 import {
   RedisRuntime,
   type RedisRuntimeObserver,
@@ -37,6 +48,15 @@ beforeEach(() => {
   redisClient.xRead.mockResolvedValue(null);
   redisClient.isOpen = true;
   redisClient.isReady = true;
+  redisBlockingPool.connect.mockReset();
+  redisBlockingPool.connect.mockResolvedValue(undefined);
+  redisBlockingPool.destroy.mockReset();
+  redisBlockingPool.on.mockReset();
+  redisBlockingPool.ping.mockReset();
+  redisBlockingPool.ping.mockResolvedValue('PONG');
+  redisBlockingPool.xRead.mockReset();
+  redisBlockingPool.xRead.mockResolvedValue(null);
+  redisBlockingPool.isOpen = true;
 });
 
 describe('RedisRuntime shutdown', () => {
@@ -175,6 +195,55 @@ describe('RedisRuntime shutdown', () => {
     })).resolves.toMatchObject({ kind: 'created', generationId: 'generation-1234' });
   });
 
+  it('generation 阻塞读使用隔离连接池，不与 append/snapshot 写入串行', async () => {
+    const redis = new RedisRuntime('redis://example.test:6379', true);
+    await redis.connect();
+    redisClient.eval.mockResolvedValueOnce(['events', '[]']);
+
+    await expect(redis.getGenerationReplayStore().readAfter({
+      generationId: 'generation-streaming-1',
+      after: null,
+      blockMs: 1_000,
+    })).resolves.toEqual({ kind: 'events', events: [] });
+
+    expect(redisClient.eval).toHaveBeenCalledWith(
+      expect.stringContaining('GEN_READ_V1'),
+      expect.any(Object),
+    );
+    expect(redisBlockingPool.xRead).toHaveBeenCalledTimes(1);
+    expect(redisClient.xRead).not.toHaveBeenCalled();
+  });
+
+  it('generation 阻塞池用 socket inactivity timeout 回收失联的 blocking lease', async () => {
+    const redis = new RedisRuntime('redis://example.test:6379', true);
+
+    await redis.connect();
+
+    expect(vi.mocked(createClientPool)).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        socket: expect.objectContaining({
+          socketTimeout: 3_000,
+        }),
+      }),
+      expect.objectContaining({
+        acquireTimeout: 1_500,
+        maximum: 32,
+      }),
+    );
+  });
+
+  it('readiness ping 同时验证 generation blocking pool', async () => {
+    const redis = new RedisRuntime('redis://example.test:6379', true);
+    await redis.connect();
+    redisBlockingPool.ping.mockRejectedValueOnce(new Error('pool unavailable'));
+
+    await expect(redis.ping()).resolves.toBe(false);
+
+    expect(redisClient.ping).toHaveBeenCalledOnce();
+    expect(redisBlockingPool.ping).toHaveBeenCalledOnce();
+    expect(redis.getStatus().lastError).toBe('REDIS_PING_FAILED');
+  });
+
   it('Redis client 错误只保留固定状态码与低基数日志', async () => {
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const redis = new RedisRuntime('redis://user:secret@example.test:6379', false);
@@ -199,6 +268,31 @@ describe('RedisRuntime shutdown', () => {
 
     await expect(redis.connect()).rejects.toThrow('REDIS_CONNECT_FAILED');
     expect(redis.getStatus().lastError).toBe('REDIS_CONNECT_FAILED');
+  });
+
+  it('generation 阻塞读连接池启动失败时销毁双通道并 fail closed', async () => {
+    redisBlockingPool.connect.mockRejectedValueOnce(new Error('pool endpoint secret failed'));
+    const redis = new RedisRuntime('redis://user:secret@example.test:6379', true);
+
+    await expect(redis.connect()).rejects.toThrow('REDIS_CONNECT_FAILED');
+
+    expect(redisClient.destroy).toHaveBeenCalledTimes(1);
+    expect(redisBlockingPool.destroy).toHaveBeenCalledTimes(1);
+    expect(redis.getStatus()).toMatchObject({ connected: false, ready: false });
+    expect(JSON.stringify(redis.getStatus())).not.toMatch(/user:secret|example\.test/u);
+  });
+
+  it('generation 阻塞读连接池不可用时使读取有界 fail closed', async () => {
+    const redis = new RedisRuntime('redis://example.test:6379', true);
+    await redis.connect();
+    redisClient.eval.mockResolvedValueOnce(['events', '[]']);
+    redisBlockingPool.isOpen = false;
+
+    await expect(redis.getGenerationReplayStore().readAfter({
+      generationId: 'generation-streaming-unavailable',
+      after: null,
+      blockMs: 1_000,
+    })).rejects.toThrow('REDIS_GENERATION_REPLAY_UNAVAILABLE');
   });
 
   it('观测 Redis 命令延迟并从 INFO 读取 memory、eviction 和 hit/miss', async () => {
@@ -444,6 +538,7 @@ describe('RedisRuntime shutdown', () => {
 
     expect(redisClient.close).not.toHaveBeenCalled();
     expect(redisClient.destroy).toHaveBeenCalledTimes(1);
+    expect(redisBlockingPool.destroy).toHaveBeenCalledTimes(1);
   });
 
   it('forceClose 同步销毁尚未进入 dependency cleanup 的 active client', async () => {
@@ -453,5 +548,6 @@ describe('RedisRuntime shutdown', () => {
     redis.forceClose();
 
     expect(redisClient.destroy).toHaveBeenCalledTimes(1);
+    expect(redisBlockingPool.destroy).toHaveBeenCalledTimes(1);
   });
 });

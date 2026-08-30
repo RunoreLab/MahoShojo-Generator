@@ -256,6 +256,34 @@ describe('RedisGenerationReplayStore', () => {
     expect(client.xRead).not.toHaveBeenCalled();
   });
 
+  it('首个 event 前 stream 尚未创建时用 XREAD 等待首次 XADD 唤醒', async () => {
+    const client = createClient();
+    vi.mocked(client.eval)
+      .mockResolvedValueOnce(['stream-missing', '[]'])
+      .mockResolvedValueOnce([
+        'events',
+        JSON.stringify([{ id: '1-0', type: 'markdown', data: '{"chunk":"A"}' }]),
+      ]);
+    vi.mocked(client.xRead).mockResolvedValueOnce([{
+      name: 'mahoshojo:gen:v1:generation-1234:events',
+      messages: [{ id: '1-0', message: { type: 'markdown', data: '{"chunk":"A"}' } }],
+    }]);
+    const store = createRedisGenerationReplayStore({ getClient: () => client });
+
+    await expect(store.readAfter({
+      generationId: 'generation-1234',
+      after: null,
+      blockMs: 1_000,
+    })).resolves.toEqual({
+      kind: 'events',
+      events: [{ id: '1-0', type: 'markdown', data: { chunk: 'A' } }],
+    });
+    expect(client.xRead).toHaveBeenCalledWith(
+      [{ key: 'mahoshojo:gen:v1:generation-1234:events', id: '0-0' }],
+      { BLOCK: 1_000, COUNT: 256 },
+    );
+  });
+
   it('没有立即事件时使用 XREAD tail，不使用 consumer group', async () => {
     const client = createClient();
     vi.mocked(client.eval)

@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
-import { createClient } from 'redis';
+import { createClient, createClientPool } from 'redis';
 import type { GenerationReplayStore } from '@mahoshojo/hosted-api/arena-generation/service';
 import {
   createRedisGenerationReplayStore,
@@ -27,6 +27,10 @@ import {
 } from '../arena-room/redis-room-ticket-replay-store';
 
 const DEFAULT_REDIS_COMMAND_TIMEOUT_MS = 4_000;
+const GENERATION_BLOCKING_POOL_MAX_CONNECTIONS = 32;
+// Default XREAD blocks for 1s. Closing an otherwise silent socket at 3s keeps
+// a half-open command from retaining one of the bounded pool leases forever.
+const GENERATION_BLOCKING_SOCKET_TIMEOUT_MS = 3_000;
 
 export type RedisRuntimeOperation =
   | 'connect'
@@ -112,7 +116,22 @@ const createRedisClient = (redisUrl: string) => createClient({
   commandsQueueMaxLength: 1_000,
 });
 
+const createRedisBlockingPool = (redisUrl: string) => createClientPool({
+  url: redisUrl,
+  socket: {
+    connectTimeout: 5_000,
+    socketTimeout: GENERATION_BLOCKING_SOCKET_TIMEOUT_MS,
+    reconnectStrategy: (retries) => Math.min(100 + retries * 200, 3_000),
+  },
+  commandsQueueMaxLength: 1_000,
+}, {
+  minimum: 1,
+  maximum: GENERATION_BLOCKING_POOL_MAX_CONNECTIONS,
+  acquireTimeout: 1_500,
+});
+
 type NodeRedisClient = ReturnType<typeof createRedisClient>;
+type NodeRedisBlockingPool = ReturnType<typeof createRedisBlockingPool>;
 
 const normalizeMetricInteger = (value: number): number | null => {
   if (!Number.isFinite(value) || value < 0) return null;
@@ -153,6 +172,7 @@ const executeWithTimeout = <T>(
 
 export class RedisRuntime implements RedisService {
   private client: NodeRedisClient | null = null;
+  private generationBlockingPool: NodeRedisBlockingPool | null = null;
   private lastError: string | null = null;
   private generationReplayStore: GenerationReplayStore | null = null;
   private roomStore: RedisRoomStore | null = null;
@@ -217,6 +237,33 @@ export class RedisRuntime implements RedisService {
     }
   }
 
+  private async executeGenerationBlockingCommand<T>(operation: () => Promise<T>): Promise<T> {
+    if (!this.generationBlockingPool?.isOpen) {
+      this.observeOperation({ operation: 'generation', outcome: 'unavailable', durationMs: 0 });
+      throw createRedisOperationError('REDIS_GENERATION_REPLAY_UNAVAILABLE');
+    }
+    const startedAt = performance.now();
+    try {
+      const result = await executeWithTimeout(operation, this.commandTimeoutMs);
+      this.observeOperation({
+        operation: 'generation',
+        outcome: 'ok',
+        durationMs: Math.max(0, performance.now() - startedAt),
+      });
+      return result;
+    } catch (error) {
+      this.lastError = error instanceof Error && error.message === 'REDIS_COMMAND_TIMEOUT'
+        ? 'REDIS_GENERATION_COMMAND_TIMEOUT'
+        : 'REDIS_GENERATION_COMMAND_FAILED';
+      this.observeOperation({
+        operation: 'generation',
+        outcome: 'error',
+        durationMs: Math.max(0, performance.now() - startedAt),
+      });
+      throw createRedisOperationError(this.lastError);
+    }
+  }
+
   private async executeRoomCommand<T>(operation: () => Promise<T>): Promise<T> {
     if (!this.client?.isReady) {
       this.observeOperation({ operation: 'room', outcome: 'unavailable', durationMs: 0 });
@@ -248,6 +295,7 @@ export class RedisRuntime implements RedisService {
     if (!this.redisUrl || this.client) return;
 
     const client = createRedisClient(this.redisUrl);
+    const generationBlockingPool = createRedisBlockingPool(this.redisUrl);
 
     client.on('error', (_error: unknown) => {
       this.lastError = 'REDIS_CONNECTION_ERROR';
@@ -259,15 +307,29 @@ export class RedisRuntime implements RedisService {
       this.lastError = null;
       console.info('[hono][redis] 已连接');
     });
+    generationBlockingPool.on('error', (_error: unknown) => {
+      this.lastError = 'REDIS_CONNECTION_ERROR';
+      console.error('[hono][redis] generation 阻塞读连接异常', {
+        errorClass: 'connection_error',
+      });
+    });
 
     this.client = client;
+    this.generationBlockingPool = generationBlockingPool;
     const startedAt = performance.now();
     let outcome: RedisRuntimeOperationOutcome = 'ok';
     try {
-      await client.connect();
+      const connectionResults = await Promise.allSettled([
+        client.connect(),
+        generationBlockingPool.connect(),
+      ]);
+      if (connectionResults.some((result) => result.status === 'rejected')) {
+        throw new Error('REDIS_CONNECT_FAILED');
+      }
     } catch {
       outcome = 'error';
       this.lastError = 'REDIS_CONNECT_FAILED';
+      this.forceClose();
       if (this.required) throw createRedisOperationError(this.lastError);
       console.warn('[hono][redis] Redis 非必需，服务将以降级模式启动');
     } finally {
@@ -282,8 +344,8 @@ export class RedisRuntime implements RedisService {
   getStatus(): RedisRuntimeStatus {
     return {
       configured: Boolean(this.redisUrl),
-      connected: Boolean(this.client?.isOpen),
-      ready: Boolean(this.client?.isReady),
+      connected: Boolean(this.client?.isOpen && this.generationBlockingPool?.isOpen),
+      ready: Boolean(this.client?.isReady && this.generationBlockingPool?.isOpen),
       lastError: this.lastError,
     };
   }
@@ -302,10 +364,10 @@ export class RedisRuntime implements RedisService {
           if (!client?.isReady) throw new Error('REDIS_GENERATION_REPLAY_UNAVAILABLE');
           return client.get(key);
         }),
-        xRead: (streams, options) => this.executeGenerationCommand(async () => {
-          const client = this.client;
-          if (!client?.isReady) throw new Error('REDIS_GENERATION_REPLAY_UNAVAILABLE');
-          return client.xRead(streams, options) as unknown as ReturnType<RedisGenerationClient['xRead']>;
+        xRead: (streams, options) => this.executeGenerationBlockingCommand(async () => {
+          const pool = this.generationBlockingPool;
+          if (!pool?.isOpen) throw new Error('REDIS_GENERATION_REPLAY_UNAVAILABLE');
+          return pool.xRead(streams, options) as unknown as ReturnType<RedisGenerationClient['xRead']>;
         }),
       }),
     });
@@ -370,13 +432,20 @@ export class RedisRuntime implements RedisService {
   }
 
   async ping(): Promise<boolean> {
-    if (!this.client?.isReady) {
+    if (!this.client?.isReady || !this.generationBlockingPool?.isOpen) {
       this.observeOperation({ operation: 'ping', outcome: 'unavailable', durationMs: 0 });
       return false;
     }
     const startedAt = performance.now();
     try {
-      const ready = await this.client.ping() === 'PONG';
+      const [mainPing, blockingPoolPing] = await executeWithTimeout(
+        () => Promise.all([
+          this.client!.ping(),
+          this.generationBlockingPool!.ping(),
+        ]),
+        this.commandTimeoutMs,
+      );
+      const ready = mainPing === 'PONG' && blockingPoolPing === 'PONG';
       this.observeOperation({
         operation: 'ping',
         outcome: ready ? 'ok' : 'error',
@@ -513,7 +582,10 @@ export class RedisRuntime implements RedisService {
 
   forceClose(): void {
     const client = this.client;
+    const generationBlockingPool = this.generationBlockingPool;
     this.client = null;
+    this.generationBlockingPool = null;
     if (client?.isOpen) client.destroy();
+    if (generationBlockingPool?.isOpen) generationBlockingPool.destroy();
   }
 }

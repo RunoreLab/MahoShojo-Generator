@@ -32,8 +32,18 @@ const redisClient = vi.hoisted(() => ({
   xRead: vi.fn(async () => null),
 }));
 
+const redisBlockingPool = vi.hoisted(() => ({
+  connect: vi.fn(async () => undefined),
+  destroy: vi.fn(),
+  isOpen: true,
+  on: vi.fn(),
+  ping: vi.fn(async () => 'PONG'),
+  xRead: vi.fn(async () => null),
+}));
+
 vi.mock('redis', () => ({
   createClient: vi.fn(() => redisClient),
+  createClientPool: vi.fn(() => redisBlockingPool),
 }));
 
 const config: HonoServerConfig = {
@@ -90,6 +100,9 @@ beforeEach(() => {
   redisClient.xRead.mockResolvedValue(null);
   redisClient.isOpen = true;
   redisClient.isReady = true;
+  redisBlockingPool.connect.mockResolvedValue(undefined);
+  redisBlockingPool.ping.mockResolvedValue('PONG');
+  redisBlockingPool.isOpen = true;
 });
 
 afterEach(() => {
@@ -137,6 +150,7 @@ describe('G25E-2 Hosted DR fault matrix: Hono/Redis/Gateway/D1', () => {
 
     await redis.close();
     expect(redisClient.destroy).toHaveBeenCalledOnce();
+    expect(redisBlockingPool.destroy).toHaveBeenCalledOnce();
   });
 
   it('G25E2-GATEWAY-UNAVAILABLE：Hono readiness 503，但独立 Cloudflare binding readiness 仍可用', async () => {
