@@ -213,7 +213,7 @@ describe('Hono deployment workflow', () => {
     const buildJob = getJob(workflow, 'build');
     const containerBuildStep = getStep(buildJob, 'Verify Hono container build');
     const activeLines = getActiveRunLines(containerBuildStep);
-    const composeConfigCommand = 'sudo --preserve-env=HONO_RELEASE_DIR,HONO_HOSTED_API_ENVIRONMENT docker compose -f apps/api/deploy/compose.yml config --no-env-resolution';
+    const composeConfigCommand = 'sudo --preserve-env=HONO_RELEASE_DIR,HONO_HOSTED_API_ENVIRONMENT,HONO_DEPLOY_CORS_ORIGINS docker compose -f apps/api/deploy/compose.yml config --no-env-resolution';
     const composeEnvironmentSafetyCheck = 'sudo test ! -e "$COMPOSE_ENV_DIRECTORY"';
     const composeEnvironmentSymlinkCheck = 'sudo test ! -L "$COMPOSE_ENV_DIRECTORY"';
     const composeEnvironmentCleanupTrap = 'trap cleanup_compose_environment EXIT';
@@ -243,6 +243,9 @@ describe('Hono deployment workflow', () => {
     );
     expect(compose).toContain(
       'HOSTED_API_ENVIRONMENT: ${HONO_HOSTED_API_ENVIRONMENT:?HONO_HOSTED_API_ENVIRONMENT must be explicit}',
+    );
+    expect(compose).toContain(
+      'HONO_CORS_ORIGINS: ${HONO_DEPLOY_CORS_ORIGINS:?HONO_DEPLOY_CORS_ORIGINS must be explicit}',
     );
     expect(activeLines).toContain(composeEnvironmentSafetyCheck);
     expect(activeLines).toContain(composeEnvironmentSymlinkCheck);

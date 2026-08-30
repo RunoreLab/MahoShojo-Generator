@@ -73,7 +73,7 @@ jobs:
           trap cleanup_compose_environment EXIT
           sudo install -m 600 /dev/null "$COMPOSE_ENV_FILE"
           docker build --file apps/api/Dockerfile .
-          sudo --preserve-env=HONO_RELEASE_DIR,HONO_HOSTED_API_ENVIRONMENT docker compose -f apps/api/deploy/compose.yml config --no-env-resolution
+          sudo --preserve-env=HONO_RELEASE_DIR,HONO_HOSTED_API_ENVIRONMENT,HONO_DEPLOY_CORS_ORIGINS docker compose -f apps/api/deploy/compose.yml config --no-env-resolution
 
       - name: Build single-file server
         run: |
