@@ -3200,6 +3200,34 @@ describe('Arena generation lifecycle service', () => {
     expect(replay).toContain('REPLAY_STREAM_MISSING');
   });
 
+  test('waits for the first event when a new generation has state but no Redis stream yet', async () => {
+    const store = new MemoryReplayStore();
+    const readAfterFromMemory = store.readAfter.bind(store);
+    const readAfter = vi.spyOn(store as GenerationReplayStore, 'readAfter').mockImplementation(async (input) => {
+      if ((store.events.get(input.generationId) ?? []).length === 0) {
+        return { kind: 'stream-missing', events: [] };
+      }
+      return readAfterFromMemory(input);
+    });
+    let emitFirstEvent!: () => void;
+    const firstEventGate = new Promise<void>((resolve) => { emitFirstEvent = resolve; });
+    const execute = vi.fn(async ({ emit }) => {
+      await firstEventGate;
+      await emit({ type: 'markdown', data: { chunk: 'first event' } });
+      return { status: 'completed' as const };
+    });
+    const service = createService(store, { execute });
+
+    const response = await service.create(createRequest('request-first-event'));
+    await vi.waitFor(() => expect(readAfter).toHaveBeenCalled());
+    emitFirstEvent();
+    const replay = await response.text();
+
+    expect(replay).toContain('first event');
+    expect(replay).toContain('event: done');
+    expect(replay).not.toContain('REPLAY_STREAM_MISSING');
+  });
+
   test('reuses a deterministic D1 terminal after Redis TTL without starting Provider again', async () => {
     const store = new MemoryReplayStore();
     const terminalStore: ArenaGenerationTerminalStore = {

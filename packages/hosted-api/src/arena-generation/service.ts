@@ -1959,6 +1959,15 @@ export const createArenaGenerationService = (
                     return;
                   }
                 }
+                // Redis creates the stream lazily on the first append. Active state
+                // with no cursor proves that the stream has not been evicted.
+                const awaitingFirstEvent = state?.terminal === null
+                  && state.lastEventId === null
+                  && (
+                    state.status === 'reserved'
+                    || state.status === 'running'
+                    || state.status === 'finalizing'
+                  );
                 if (snapshot) {
                   if (snapshotBootstrapped) {
                     enqueueReplayError('REPLAY_STREAM_MISSING');
@@ -1980,7 +1989,7 @@ export const createArenaGenerationService = (
                     bytes: encodeGenerationSseEvent(event).byteLength,
                     snapshotBootstrap: true,
                   });
-                } else {
+                } else if (!awaitingFirstEvent) {
                   enqueueReplayError('REPLAY_STREAM_MISSING');
                   return;
                 }
