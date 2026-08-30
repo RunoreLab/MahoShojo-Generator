@@ -3,7 +3,11 @@ import {
   STREAM_ABORT_REASON_CONTENT_POLICY,
   STREAM_ABORT_REASON_USER,
 } from '@/lib/stream/abort';
-import { isGenerationApiClientErrorCode } from '@/lib/hono-api-client';
+import {
+  isGenerationApiClientErrorCode,
+  isGenerationApiRoutePin,
+  type GenerationApiRoutePin,
+} from '@/lib/hono-api-client';
 
 export const ARENA_GENERATION_CLIENT_STATE_KEY = 'mahoshojo:arena:generation:v1';
 export const ARENA_GENERATION_ACTOR_TOKEN_KEY = 'mahoshojo:arena:generation-actor:v1';
@@ -55,7 +59,7 @@ export const arenaGenerationConnectionNotice = (
 };
 
 export type PersistedArenaGeneration = {
-  version: 1 | 2;
+  version: 1 | 2 | 3;
   generationRequestId: string;
   generationId: string | null;
   lastEventId: string | null;
@@ -63,6 +67,7 @@ export type PersistedArenaGeneration = {
   updatedAt: string;
   endpoint?: string;
   bodyHash?: string;
+  routePin?: GenerationApiRoutePin | null;
 };
 
 type StoragePort = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
@@ -74,7 +79,12 @@ export type OpenArenaGenerationStreamOptions = {
   body: Record<string, unknown>;
   headers: HeadersInit;
   signal?: AbortSignal;
-  fetcher(_input: string, _init?: RequestInit): Promise<Response>;
+  fetcher(
+    _input: string,
+    _init?: RequestInit,
+    _routePin?: GenerationApiRoutePin,
+    _onRoutePinSelected?: (_routePin: GenerationApiRoutePin) => void,
+  ): Promise<Response>;
   storage?: StoragePort | null;
   generationRequestId?: string;
   maxReconnectAttempts?: number;
@@ -83,6 +93,7 @@ export type OpenArenaGenerationStreamOptions = {
   random?: () => number;
   now?: () => Date;
   isInitialCreateOutcomeAmbiguous?(_error: unknown): boolean;
+  getInitialRoutePin?(): GenerationApiRoutePin | null;
   onStateChange?(_state: ArenaGenerationConnectionState): void;
 };
 
@@ -112,12 +123,19 @@ export const readPersistedArenaGeneration = (
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
     const value = parsed as Partial<PersistedArenaGeneration>;
     if (
-      (value.version !== 1 && value.version !== 2)
+      (value.version !== 1 && value.version !== 2 && value.version !== 3)
       || !isGenerationIdentifier(value.generationRequestId)
       || (value.generationId !== null && !isGenerationIdentifier(value.generationId))
       || (value.lastEventId !== null && typeof value.lastEventId !== 'string')
       || typeof value.state !== 'string'
       || typeof value.updatedAt !== 'string'
+      || (
+        value.version === 3
+        && !(
+          Object.prototype.hasOwnProperty.call(value, 'routePin')
+          && (value.routePin === null || isGenerationApiRoutePin(value.routePin))
+        )
+      )
     ) return null;
     return value as PersistedArenaGeneration;
   } catch {
@@ -314,7 +332,7 @@ export const openArenaGenerationStream = async (
   const scopedStateKey = `${ARENA_GENERATION_CLIENT_STATE_KEY}:${stateIdentity}`;
   const previous = readPersistedArenaGeneration(storage, scopedStateKey);
   const resumablePrevious = previous
-    && previous.version === 2
+    && (previous.version === 1 || previous.version === 2 || previous.version === 3)
     && (
       previous.endpoint === options.endpoint
       && previous.bodyHash === bodyHash
@@ -334,6 +352,9 @@ export const openArenaGenerationStream = async (
     ?? crypto.randomUUID();
   let generationId = resumablePrevious?.generationId ?? null;
   let lastEventId = resumablePrevious?.lastEventId ?? null;
+  let routePin = resumablePrevious?.version === 3
+    ? resumablePrevious.routePin ?? null
+    : null;
   let state: ArenaGenerationConnectionState = resumablePrevious?.generationId
     ? 'resuming'
     : resumablePrevious
@@ -345,11 +366,9 @@ export const openArenaGenerationStream = async (
   let cancelConfirmationPromise: Promise<void> | null = null;
   let terminal = false;
   let connectedViaResume = false;
-  const updateState = (next: ArenaGenerationConnectionState): void => {
-    state = next;
-    options.onStateChange?.(next);
+  const persistCurrentState = (): void => {
     save(storage, scopedStateKey, {
-      version: 2,
+      version: 3,
       generationRequestId,
       generationId,
       lastEventId,
@@ -357,7 +376,23 @@ export const openArenaGenerationStream = async (
       updatedAt: now().toISOString(),
       endpoint: options.endpoint,
       bodyHash,
+      routePin,
     });
+  };
+  const acceptInitialRoutePin = (selected: GenerationApiRoutePin): void => {
+    if (routePin || !isGenerationApiRoutePin(selected)) return;
+    routePin = Object.freeze({ placement: selected.placement });
+    persistCurrentState();
+  };
+  const captureInitialRoutePin = (): void => {
+    if (routePin) return;
+    const selected = options.getInitialRoutePin?.() ?? null;
+    if (isGenerationApiRoutePin(selected)) acceptInitialRoutePin(selected);
+  };
+  const updateState = (next: ArenaGenerationConnectionState): void => {
+    state = next;
+    options.onStateChange?.(next);
+    persistCurrentState();
   };
 
   const fetchResume = async (): Promise<Response> => {
@@ -365,11 +400,15 @@ export const openArenaGenerationStream = async (
     const cursor = lastEventId ? `?after=${encodeURIComponent(lastEventId)}` : '';
     updateState('resuming');
     connectedViaResume = true;
-    return options.fetcher(`/api/arena/generations/${encodeURIComponent(generationId)}/stream${cursor}`, {
-      method: 'GET',
-      headers: withActorToken({ Accept: 'text/event-stream' }, actorStorage),
-      signal: options.signal,
-    });
+    return options.fetcher(
+      `/api/arena/generations/${encodeURIComponent(generationId)}/stream${cursor}`,
+      {
+        method: 'GET',
+        headers: withActorToken({ Accept: 'text/event-stream' }, actorStorage),
+        signal: options.signal,
+      },
+      routePin ?? undefined,
+    );
   };
 
   updateState(state);
@@ -442,12 +481,17 @@ export const openArenaGenerationStream = async (
     await cancelConfirmationPromise;
     throw new Error('ARENA_GENERATION_CANCELLED');
   }
-  const fetchCreate = (): Promise<Response> => options.fetcher(options.endpoint, {
+  const fetchCreate = (): Promise<Response> => options.fetcher(
+    options.endpoint,
+    {
       method: 'POST',
       headers: initialHeaders,
       body: createBody,
       signal: options.signal,
-    });
+    },
+    undefined,
+    acceptInitialRoutePin,
+  );
   const fetchLookup = (): Promise<Response> => options.fetcher(
     `/api/arena/generation-requests/${encodeURIComponent(generationRequestId)}`,
     {
@@ -455,6 +499,7 @@ export const openArenaGenerationStream = async (
       headers: withActorToken({ Accept: 'application/json' }, actorStorage),
       signal: options.signal,
     },
+    routePin ?? undefined,
   );
   const fetchResumeWithRetry = async (): Promise<Response> => {
     let attempt = 0;
@@ -557,6 +602,7 @@ export const openArenaGenerationStream = async (
         created = await fetchCreate();
       } catch (error) {
         if (options.signal?.aborted) throw error;
+        captureInitialRoutePin();
         if (!isInitialCreateOutcomeAmbiguous(error)) {
           updateState('failed');
           throw error;
@@ -564,6 +610,7 @@ export const openArenaGenerationStream = async (
         response = await recoverInitial();
       }
       if (created) {
+        captureInitialRoutePin();
         captureActorToken(actorStorage, created);
         generationId = generationIdFromResponse(created) ?? generationId;
         const completeSuccess = created.ok && created.body && generationId;

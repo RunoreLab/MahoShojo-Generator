@@ -13,8 +13,10 @@ vi.mock('@/lib/auth', () => ({
 }));
 
 import {
+  createPinnedGenerationApiSafeReadDispatcher,
   createGenerationApiIntent,
   isGenerationApiClientErrorCode,
+  isGenerationApiRoutePin,
   isHonoApiPath,
   resolveGenerationApiUrl,
 } from '@/lib/hono-api-client';
@@ -35,6 +37,146 @@ afterEach(() => {
 });
 
 describe('Hono API 客户端', () => {
+  test('intent 在业务 POST settle 前同步通知已选 route pin', async () => {
+    honoApiConfig.enabled = true;
+    honoApiConfig.origin = hostedDrManifest.controlPlane.primaryOrigin;
+    honoApiConfig.routingMode = 'client-preflight';
+    let resolveBusinessPost: ((response: Response) => void) | null = null;
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({
+        ok: true,
+        service: 'mahoshojo-hono',
+        placement: 'hono-primary',
+        contractVersion: hostedDrManifest.contractVersion,
+      }, { headers: { 'Cache-Control': 'no-store' } }))
+      .mockImplementationOnce(() => new Promise<Response>((resolve) => {
+        resolveBusinessPost = resolve;
+      }));
+    const observer = vi.fn(() => {
+      throw new Error('observer failure must not change dispatch');
+    });
+    const intent = createGenerationApiIntent({ fetcher: fetchMock });
+    intent.subscribeRoutePinSelected(observer);
+
+    const dispatched = intent.dispatch('/api/arena/generate-stream', { method: 'POST' });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+
+    expect(observer).toHaveBeenCalledOnce();
+    expect(observer).toHaveBeenCalledWith({ placement: 'hono-primary' });
+    resolveBusinessPost!(new Response(null, { status: 204 }));
+    await expect(dispatched).resolves.toMatchObject({ status: 204 });
+  });
+
+  test('primary intent 在 ambiguous 后保留 pin，pinned safe-read 不再 probe', async () => {
+    honoApiConfig.enabled = true;
+    honoApiConfig.origin = hostedDrManifest.controlPlane.primaryOrigin;
+    honoApiConfig.routingMode = 'client-preflight';
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({
+        ok: true,
+        service: 'mahoshojo-hono',
+        placement: 'hono-primary',
+        contractVersion: hostedDrManifest.contractVersion,
+      }, { headers: { 'Cache-Control': 'no-store' } }))
+      .mockRejectedValueOnce(new TypeError('create transport lost'))
+      .mockResolvedValueOnce(Response.json({ status: 'running' }))
+      .mockResolvedValueOnce(new Response(
+        'event: done\ndata: {"status":"completed"}\n\n',
+        { headers: { 'Content-Type': 'text/event-stream' } },
+      ));
+    const intent = createGenerationApiIntent({ fetcher: fetchMock });
+
+    expect(intent.getRoutePin()).toBeNull();
+    await expect(intent.dispatch('/api/arena/generate-stream', { method: 'POST' }))
+      .rejects.toMatchObject({ code: 'AMBIGUOUS_OPERATION_OUTCOME' });
+    expect(intent.getRoutePin()).toEqual({ placement: 'hono-primary' });
+
+    const pinned = createPinnedGenerationApiSafeReadDispatcher(
+      intent.getRoutePin()!,
+      { fetcher: fetchMock },
+    );
+    await (await pinned.dispatch(
+      '/api/arena/generation-requests/request-1234',
+      { method: 'GET' },
+    )).json();
+    await (await pinned.dispatch(
+      '/api/arena/generations/generation-1234/stream',
+      { method: 'GET' },
+    )).text();
+
+    expect(fetchMock.mock.calls.map(([target]) => target)).toEqual([
+      `${hostedDrManifest.controlPlane.primaryOrigin}/api/health/ready`,
+      `${hostedDrManifest.controlPlane.primaryOrigin}/api/arena/generate-stream`,
+      `${hostedDrManifest.controlPlane.primaryOrigin}/api/arena/generation-requests/request-1234`,
+      `${hostedDrManifest.controlPlane.primaryOrigin}/api/arena/generations/generation-1234/stream`,
+    ]);
+  });
+
+  test('next-dr pinned safe-read 保持同源 auth 与 credentials', async () => {
+    const fetchMock = vi.fn(async () => Response.json({ status: 'running' }));
+    const pinned = createPinnedGenerationApiSafeReadDispatcher(
+      { placement: 'next-dr' },
+      { fetcher: fetchMock },
+    );
+
+    await (await pinned.dispatch(
+      '/api/arena/generation-requests/request-1234',
+      { method: 'GET' },
+    )).json();
+    await (await pinned.dispatch(
+      '/api/arena/generation-requests/request-5678',
+      { method: 'GET', credentials: 'omit' },
+    )).json();
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const [target, init] = fetchMock.mock.calls[0]!;
+    expect(target).toBe('/api/arena/generation-requests/request-1234');
+    expect(init?.credentials).toBe('same-origin');
+    const headers = new Headers(init?.headers);
+    expect(headers.get('Authorization')).toBe('Bearer auth-key');
+    expect(headers.get('x-mahoshojo-activity-token')).toBe('activity-token');
+    expect(headers.get('x-mahoshojo-user-id')).toBe('7');
+    expect(fetchMock.mock.calls[1]?.[1]?.credentials).toBe('omit');
+  });
+
+  test('route pin shape 严格且 dispatcher 不受调用方后续 mutation 影响', async () => {
+    expect(isGenerationApiRoutePin({
+      placement: 'hono-primary',
+      origin: 'https://attacker.example.test',
+    })).toBe(false);
+
+    const mutablePin: { placement: 'hono-primary' | 'next-dr' } = {
+      placement: 'hono-primary',
+    };
+    const fetchMock = vi.fn(async () => Response.json({ status: 'running' }));
+    const pinned = createPinnedGenerationApiSafeReadDispatcher(mutablePin, {
+      fetcher: fetchMock,
+    });
+    mutablePin.placement = 'next-dr';
+
+    await pinned.dispatch('/api/arena/generation-requests/request-1234', {
+      method: 'GET',
+    });
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      `${hostedDrManifest.controlPlane.primaryOrigin}/api/arena/generation-requests/request-1234`,
+    );
+  });
+
+  test('pinned dispatcher 拒绝写操作与未声明 route', async () => {
+    const fetchMock = vi.fn();
+    const pinned = createPinnedGenerationApiSafeReadDispatcher(
+      { placement: 'hono-primary' },
+      { fetcher: fetchMock },
+    );
+
+    await expect(pinned.dispatch('/api/arena/generations/generation-1234/cancel', {
+      method: 'POST',
+    })).rejects.toThrow('PINNED_GENERATION_SAFE_READ_NOT_ALLOWED');
+    await expect(pinned.dispatch('/api/not-declared', { method: 'GET' }))
+      .rejects.toThrow('PINNED_GENERATION_SAFE_READ_NOT_ALLOWED');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   test('跨 realm 仍可按结构化 code 识别 GenerationApiClientError', () => {
     const crossRealmError = {
       name: 'GenerationApiClientError',
@@ -270,9 +412,11 @@ describe('Hono API 客户端', () => {
       .mockResolvedValueOnce(new Response(null, { status: 204 }));
     vi.stubGlobal('fetch', fetchMock);
 
-    await createGenerationApiIntent().dispatch('/api/generate-game-card', { method: 'POST' });
+    const intent = createGenerationApiIntent();
+    await intent.dispatch('/api/generate-game-card', { method: 'POST' });
 
     expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(intent.getRoutePin()).toEqual({ placement: 'next-dr' });
     expect(fetchMock.mock.calls[2]?.[0]).toBe('/api/generate-game-card');
     expect(fetchMock.mock.calls[2]?.[1]).toMatchObject({ credentials: 'same-origin' });
     const drHeaders = new Headers(fetchMock.mock.calls[2]?.[1]?.headers);
@@ -339,11 +483,25 @@ describe('Hono API 客户端', () => {
     await expect(intent.dispatch('/api/generate-free', { method: 'POST' }))
       .rejects.toMatchObject({ code: 'AMBIGUOUS_OPERATION_OUTCOME' });
 
+    expect(intent.getRoutePin()).toEqual({ placement: 'hono-primary' });
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(observe).toHaveBeenLastCalledWith(expect.objectContaining({
       phase: 'dispatch-terminal',
       terminalClass: 'ambiguous',
     }));
+  });
+
+  test('Arena route pin 在 useBattleEngine 中只路由 read，cancel 保持独立 intent', () => {
+    const source = readFileSync(
+      path.join(process.cwd(), 'components/arena/hooks/useBattleEngine.ts'),
+      'utf8',
+    );
+
+    expect(source).toContain('getInitialRoutePin');
+    expect(source).toContain('createPinnedGenerationApiSafeReadDispatcher');
+    expect(source).toContain('if (routePin)');
+    expect(source).toContain('generationIntent?.getRoutePin()');
+    expect(source).toContain('generationIntent.subscribeRoutePinSelected(onRoutePinSelected)');
   });
 
   test('退出 Hono 的 non-idempotent POST 未知 5xx 同样投影 ambiguous', async () => {

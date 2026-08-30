@@ -30,6 +30,7 @@ import {
 } from '@/lib/stream/timeout';
 import { authStorage } from '@/lib/auth';
 import {
+  createPinnedGenerationApiSafeReadDispatcher,
   createGenerationApiIntent,
   isGenerationApiClientErrorCode,
   type GenerationApiIntent,
@@ -841,25 +842,43 @@ export const useBattleEngine = () => {
               const endpoint = `/api/arena/generate-stream${query.toString() ? `?${query.toString()}` : ''}`;
               requestHeaders.Accept = 'text/event-stream';
               let generationIntent: GenerationApiIntent | null = null;
-                const response = await openArenaGenerationStream({
+              let pinnedReadDispatcher: {
+                placement: 'hono-primary' | 'next-dr';
+                dispatcher: ReturnType<typeof createPinnedGenerationApiSafeReadDispatcher>;
+              } | null = null;
+              const response = await openArenaGenerationStream({
                   endpoint,
                   body: requestBody,
                   generationRequestId,
                   headers: requestHeaders,
                   signal: abortController.signal,
-                  fetcher: (input, init) => {
+                  fetcher: (input, init, routePin, onRoutePinSelected) => {
+                    if (routePin) {
+                      if (pinnedReadDispatcher?.placement !== routePin.placement) {
+                        pinnedReadDispatcher = {
+                          placement: routePin.placement,
+                          dispatcher: createPinnedGenerationApiSafeReadDispatcher(routePin),
+                        };
+                      }
+                      return pinnedReadDispatcher.dispatcher.dispatch(input, init);
+                    }
                     if (input === endpoint && (init?.method ?? 'GET').toUpperCase() === 'POST') {
                       generationIntent ??= generationApiIntentLatch.tryAcquire();
                       if (!generationIntent) {
                         throw new Error('已有生成请求正在处理中，请勿重复提交。');
                       }
-                      return generationIntent.dispatch(input, init);
+                      const unsubscribe = onRoutePinSelected
+                        ? generationIntent.subscribeRoutePinSelected(onRoutePinSelected)
+                        : null;
+                      const dispatched = generationIntent.dispatch(input, init);
+                      return unsubscribe ? dispatched.finally(unsubscribe) : dispatched;
                     }
                     return createGenerationApiIntent().dispatch(input, init);
                   },
                   isInitialCreateOutcomeAmbiguous: (error) => (
                     isGenerationApiClientErrorCode(error, 'AMBIGUOUS_OPERATION_OUTCOME')
                   ),
+                  getInitialRoutePin: () => generationIntent?.getRoutePin() ?? null,
                   onStateChange: (state) => {
                     const previousState = lastArenaConnectionState;
                     lastArenaConnectionState = state;

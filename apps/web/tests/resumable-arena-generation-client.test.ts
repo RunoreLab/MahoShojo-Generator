@@ -6,11 +6,13 @@ import {
   ARENA_GENERATION_CLIENT_STATE_KEY,
   arenaGenerationConnectionNotice,
   openArenaGenerationStream,
+  readPersistedArenaGeneration,
 } from '@/lib/arena/resumable-generation-client';
 import {
   STREAM_ABORT_REASON_CONTENT_POLICY,
   STREAM_ABORT_REASON_USER,
 } from '@/lib/stream/abort';
+import type { GenerationApiRoutePin } from '@/lib/hono-api-client';
 import {
   GenerationApiClientError,
   isGenerationApiClientErrorCode,
@@ -71,6 +73,43 @@ describe('resumable Arena generation client', () => {
     expect(arenaGenerationConnectionNotice('reconnecting')).toContain('仍在服务器生成');
     expect(arenaGenerationConnectionNotice('completed')).toBeNull();
   });
+
+  it('严格验证 v3 persisted route pin', () => {
+    const storage = new MemoryStorage();
+    const base = {
+      version: 3,
+      generationRequestId: 'request-route-pin-state',
+      generationId: 'generation-route-pin-state',
+      lastEventId: '1-0',
+      state: 'generating',
+      updatedAt: '2026-08-31T00:00:00.000Z',
+      endpoint: '/api/arena/generate-stream',
+      bodyHash: 'body-hash',
+    };
+    storage.setItem('state', JSON.stringify({
+      ...base,
+      routePin: { placement: 'unknown-runtime' },
+    }));
+    expect(readPersistedArenaGeneration(storage, 'state')).toBeNull();
+
+    storage.setItem('state', JSON.stringify({
+      ...base,
+      routePin: { placement: 'next-dr' },
+    }));
+    expect(readPersistedArenaGeneration(storage, 'state')).toMatchObject({
+      version: 3,
+      routePin: { placement: 'next-dr' },
+    });
+
+    storage.setItem('state', JSON.stringify({
+      ...base,
+      routePin: null,
+    }));
+    expect(readPersistedArenaGeneration(storage, 'state')).toMatchObject({
+      version: 3,
+      routePin: null,
+    });
+  });
   it('persists a bootstrap actor credential before the first POST', async () => {
     const storage = new MemoryStorage();
     const fetcher = vi.fn(async (_url: string, init?: RequestInit) => {
@@ -119,12 +158,15 @@ describe('resumable Arena generation client', () => {
       generationRequestId: 'request-1234',
       baseReconnectDelayMs: 1,
       random: () => 0,
+      getInitialRoutePin: () => ({ placement: 'hono-primary' }),
     });
 
     await expect(opened.text()).resolves.toContain('data: {"chunk":"A"}');
     expect(fetcher).toHaveBeenCalledTimes(2);
     expect(fetcher.mock.calls[0]?.[1]?.method).toBe('POST');
     expect(fetcher.mock.calls[1]?.[0]).toBe('/api/arena/generations/generation-1/stream?after=1-0');
+    expect(fetcher.mock.calls[0]?.[2]).toBeUndefined();
+    expect(fetcher.mock.calls[1]?.[2]).toEqual({ placement: 'hono-primary' });
     expect(JSON.parse(storage.getItem(ARENA_GENERATION_CLIENT_STATE_KEY)!)).toMatchObject({
       generationId: 'generation-1',
       lastEventId: '3-0',
@@ -247,6 +289,7 @@ describe('resumable Arena generation client', () => {
       storage: new MemoryStorage(),
       generationRequestId: requestId,
       maxReconnectAttempts: 0,
+      getInitialRoutePin: () => ({ placement: 'hono-primary' }),
       onStateChange: (state) => states.push(state),
     });
     await opened.text();
@@ -256,7 +299,111 @@ describe('resumable Arena generation client', () => {
       [`/api/arena/generation-requests/${requestId}`, 'GET'],
       ['/api/arena/generations/generation-ambiguous/stream', 'GET'],
     ]);
+    expect(fetcher.mock.calls[0]?.[2]).toBeUndefined();
+    expect(fetcher.mock.calls[1]?.[2]).toEqual({ placement: 'hono-primary' });
+    expect(fetcher.mock.calls[2]?.[2]).toEqual({ placement: 'hono-primary' });
     expect(states).toContain('recovering_initial');
+  });
+
+  it('persists a v3 route pin and reuses it directly after refresh', async () => {
+    const storage = new MemoryStorage();
+    const pending = new ReadableStream<Uint8Array>({ start() {} });
+    let resolveCreate: ((response: Response) => void) | null = null;
+    const firstFetcher = vi.fn((
+      _input: string,
+      _init?: RequestInit,
+      _routePin?: GenerationApiRoutePin,
+      onRoutePinSelected?: (routePin: GenerationApiRoutePin) => void,
+    ) => {
+      onRoutePinSelected?.({ placement: 'hono-primary' });
+      return new Promise<Response>((resolve) => {
+        resolveCreate = resolve;
+      });
+    });
+    const firstOpening = openArenaGenerationStream({
+      endpoint: '/api/arena/generate-stream',
+      body: { mode: 'classic', routePinRefresh: true },
+      headers: {},
+      fetcher: firstFetcher,
+      storage,
+      generationRequestId: 'request-route-pin-refresh',
+    });
+    await vi.waitFor(() => expect(firstFetcher).toHaveBeenCalledOnce());
+    expect(JSON.parse(storage.getItem(ARENA_GENERATION_CLIENT_STATE_KEY)!)).toMatchObject({
+      version: 3,
+      generationId: null,
+      state: 'connecting',
+      routePin: { placement: 'hono-primary' },
+    });
+
+    resolveCreate!(response(pending, 'generation-pinned'));
+    const first = await firstOpening;
+    await first.body!.cancel('refresh');
+
+    expect(JSON.parse(storage.getItem(ARENA_GENERATION_CLIENT_STATE_KEY)!)).toMatchObject({
+      version: 3,
+      generationId: 'generation-pinned',
+      routePin: { placement: 'hono-primary' },
+    });
+
+    const refreshFetcher = vi.fn(async () => response(
+      'id: 1-0\nevent: done\ndata: {"status":"completed"}\n\n',
+      'generation-pinned',
+    ));
+    const refreshed = await openArenaGenerationStream({
+      endpoint: '/api/arena/generate-stream',
+      body: { mode: 'classic', routePinRefresh: true },
+      headers: {},
+      fetcher: refreshFetcher,
+      storage,
+    });
+    await refreshed.text();
+
+    expect(refreshFetcher.mock.calls.map(([url, init, routePin]) => [
+      url,
+      init?.method,
+      routePin,
+    ])).toEqual([[
+      '/api/arena/generations/generation-pinned/stream',
+      'GET',
+      { placement: 'hono-primary' },
+    ]]);
+  });
+
+  it('keeps v2 active persistence on the unpinned fallback path', async () => {
+    const storage = new MemoryStorage();
+    const pending = new ReadableStream<Uint8Array>({ start() {} });
+    const first = await openArenaGenerationStream({
+      endpoint: '/api/arena/generate-stream',
+      body: { mode: 'classic', v2Fallback: true },
+      headers: {},
+      fetcher: vi.fn(async () => response(pending, 'generation-v2-fallback')),
+      storage,
+      generationRequestId: 'request-v2-fallback',
+    });
+    await first.body!.cancel('prepare v2 fixture');
+    const scopedStateKey = Array.from(storage.values.keys()).find((key) => (
+      key.startsWith(`${ARENA_GENERATION_CLIENT_STATE_KEY}:`)
+    ))!;
+    const persisted = JSON.parse(storage.getItem(scopedStateKey)!);
+    delete persisted.routePin;
+    persisted.version = 2;
+    storage.setItem(scopedStateKey, JSON.stringify(persisted));
+
+    const refreshFetcher = vi.fn(async () => response(
+      'id: 1-0\nevent: done\ndata: {"status":"completed"}\n\n',
+      'generation-v2-fallback',
+    ));
+    const refreshed = await openArenaGenerationStream({
+      endpoint: '/api/arena/generate-stream',
+      body: { mode: 'classic', v2Fallback: true },
+      headers: {},
+      fetcher: refreshFetcher,
+      storage,
+    });
+    await refreshed.text();
+
+    expect(refreshFetcher.mock.calls[0]?.[2]).toBeUndefined();
   });
 
   it('allows a production classifier to reject an auth/application TypeError', async () => {
@@ -950,6 +1097,7 @@ describe('resumable Arena generation client', () => {
       endpoint: '/api/arena/generate-stream',
       body: {}, headers: {}, fetcher, storage: new MemoryStorage(),
       generationRequestId: `request-${cancelReason}`, signal: abort.signal,
+      getInitialRoutePin: () => ({ placement: 'hono-primary' }),
       onStateChange: (state) => states.push(state),
     });
     const pendingRead = opened.body!.getReader().read();
@@ -967,6 +1115,7 @@ describe('resumable Arena generation client', () => {
       method: 'POST',
       body: JSON.stringify({ reason: cancelReason }),
     });
+    expect(explicitCancels[0]?.[2]).toBeUndefined();
     expect(states).toContain('cancelling');
     expect(states.at(-1)).toBe('cancelled');
   });
