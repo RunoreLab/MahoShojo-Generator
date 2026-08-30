@@ -76,7 +76,7 @@ export const createArenaR2ObjectStoreFromEnvironment = (
         headers,
         body: compressed.body,
       });
-      const response = await fetcher(signed.url, { ...signed, signal: input.signal });
+      const response = await fetcher(signed, { signal: input.signal });
       if (!response.ok) throw new Error(`ARENA_R2_PUT_FAILED_${response.status}`);
       return {
         bytes: rawBytes,

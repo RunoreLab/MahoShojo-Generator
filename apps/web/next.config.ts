@@ -18,6 +18,7 @@ const createNextConfig = (phase: string): NextConfig => {
   }
 
   const staticSecurityHeaders = buildStaticBrowserSecurityHeaders({
+    allowCloudflareInsights: process.env.NODE_ENV === 'production',
     allowGoogleAnalytics: Boolean(process.env.NEXT_PUBLIC_GA_ID?.trim()),
     allowTurnstile: true,
     isProduction: process.env.NODE_ENV === 'production',
