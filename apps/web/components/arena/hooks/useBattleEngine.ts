@@ -31,6 +31,7 @@ import {
 import { authStorage } from '@/lib/auth';
 import {
   createGenerationApiIntent,
+  isGenerationApiClientErrorCode,
   type GenerationApiIntent,
 } from '@/lib/hono-api-client';
 import { useGenerationApiIntentLatch } from '@/lib/use-generation-api-intent-latch';
@@ -856,6 +857,9 @@ export const useBattleEngine = () => {
                     }
                     return createGenerationApiIntent().dispatch(input, init);
                   },
+                  isInitialCreateOutcomeAmbiguous: (error) => (
+                    isGenerationApiClientErrorCode(error, 'AMBIGUOUS_OPERATION_OUTCOME')
+                  ),
                   onStateChange: (state) => {
                     const previousState = lastArenaConnectionState;
                     lastArenaConnectionState = state;

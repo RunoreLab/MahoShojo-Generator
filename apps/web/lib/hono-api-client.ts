@@ -44,6 +44,15 @@ export class GenerationApiClientError extends Error {
   }
 }
 
+export const isGenerationApiClientErrorCode = (
+  error: unknown,
+  code: GenerationApiClientErrorCode,
+): boolean => {
+  if (!error || typeof error !== 'object' || Array.isArray(error)) return false;
+  const candidate = error as { name?: unknown; code?: unknown };
+  return candidate.name === 'GenerationApiClientError' && candidate.code === code;
+};
+
 type GenerationFetch = (
   input: string,
   init?: RequestInit,

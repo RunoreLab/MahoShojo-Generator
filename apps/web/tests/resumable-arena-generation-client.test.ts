@@ -11,7 +11,10 @@ import {
   STREAM_ABORT_REASON_CONTENT_POLICY,
   STREAM_ABORT_REASON_USER,
 } from '@/lib/stream/abort';
-import { GenerationApiClientError } from '@/lib/hono-api-client';
+import {
+  GenerationApiClientError,
+  isGenerationApiClientErrorCode,
+} from '@/lib/hono-api-client';
 
 class MemoryStorage {
   values = new Map<string, string>();
@@ -177,7 +180,7 @@ describe('resumable Arena generation client', () => {
     })).rejects.toBe(error);
 
     expect(fetcher.mock.calls.map(([, init]) => init?.method)).toEqual(['POST']);
-    expect(states).toEqual(['connecting']);
+    expect(states).toEqual(['connecting', 'failed']);
     expect(states).not.toContain('recovering_initial');
   });
 
@@ -185,28 +188,48 @@ describe('resumable Arena generation client', () => {
     const error = new Error('application precondition failed');
     const fetcher = vi.fn().mockRejectedValue(error);
     const states: string[] = [];
+    const storage = new MemoryStorage();
 
     await expect(openArenaGenerationStream({
       endpoint: '/api/arena/generate-stream',
       body: { mode: 'classic' },
       headers: {},
       fetcher,
-      storage: new MemoryStorage(),
+      storage,
       generationRequestId: 'request-application-error',
       maxReconnectAttempts: 0,
       onStateChange: (state) => states.push(state),
     })).rejects.toBe(error);
 
     expect(fetcher.mock.calls.map(([, init]) => init?.method)).toEqual(['POST']);
-    expect(states).toEqual(['connecting']);
+    expect(states).toEqual(['connecting', 'failed']);
+
+    const retryFetcher = vi.fn(async () => response(
+      'id: 1-0\nevent: done\ndata: {"status":"completed"}\n\n',
+      'generation-retry',
+    ));
+    const opened = await openArenaGenerationStream({
+      endpoint: '/api/arena/generate-stream',
+      body: { mode: 'classic' },
+      headers: {},
+      fetcher: retryFetcher,
+      storage,
+      generationRequestId: 'request-application-error',
+    });
+    await opened.text();
+
+    expect(retryFetcher.mock.calls.map(([url, init]) => [url, init?.method])).toEqual([
+      ['/api/arena/generate-stream', 'POST'],
+    ]);
   });
 
-  it('recovers AMBIGUOUS_OPERATION_OUTCOME by request-id lookup', async () => {
+  it('recovers a cross-realm AMBIGUOUS_OPERATION_OUTCOME by request-id lookup', async () => {
     const requestId = 'request-ambiguous-error';
-    const error = new GenerationApiClientError(
-      'AMBIGUOUS_OPERATION_OUTCOME',
-      'request outcome is ambiguous',
-    );
+    const error = {
+      name: 'GenerationApiClientError',
+      code: 'AMBIGUOUS_OPERATION_OUTCOME',
+      message: 'request outcome is ambiguous',
+    };
     const fetcher = vi.fn()
       .mockRejectedValueOnce(error)
       .mockResolvedValueOnce(lookupResponse('generation-ambiguous', requestId))
@@ -234,6 +257,114 @@ describe('resumable Arena generation client', () => {
       ['/api/arena/generations/generation-ambiguous/stream', 'GET'],
     ]);
     expect(states).toContain('recovering_initial');
+  });
+
+  it('allows a production classifier to reject an auth/application TypeError', async () => {
+    const error = new TypeError('auth storage unavailable');
+    const fetcher = vi.fn().mockRejectedValue(error);
+    const states: string[] = [];
+
+    await expect(openArenaGenerationStream({
+      endpoint: '/api/arena/generate-stream',
+      body: { mode: 'classic' },
+      headers: {},
+      fetcher,
+      storage: new MemoryStorage(),
+      generationRequestId: 'request-production-classifier',
+      maxReconnectAttempts: 0,
+      isInitialCreateOutcomeAmbiguous: (candidate) => (
+        isGenerationApiClientErrorCode(candidate, 'AMBIGUOUS_OPERATION_OUTCOME')
+      ),
+      onStateChange: (state) => states.push(state),
+    })).rejects.toBe(error);
+
+    expect(fetcher.mock.calls.map(([, init]) => init?.method)).toEqual(['POST']);
+    expect(states).toEqual(['connecting', 'failed']);
+  });
+
+  it('does not resume a malformed generation id returned by request lookup', async () => {
+    const requestId = 'request-invalid-lookup-id';
+    const fetcher = vi.fn()
+      .mockRejectedValueOnce(new TypeError('initial response lost'))
+      .mockResolvedValueOnce(lookupResponse('bad', requestId))
+      .mockResolvedValueOnce(response(
+        'id: 1-0\nevent: done\ndata: {"status":"completed"}\n\n',
+        'generation-unexpected',
+      ));
+
+    await expect(openArenaGenerationStream({
+      endpoint: '/api/arena/generate-stream',
+      body: { mode: 'classic' },
+      headers: {},
+      fetcher,
+      storage: new MemoryStorage(),
+      generationRequestId: requestId,
+      maxReconnectAttempts: 0,
+    })).rejects.toThrow('ARENA_GENERATION_STATE_UNKNOWN');
+
+    expect(fetcher.mock.calls.map(([url, init]) => [url, init?.method])).toEqual([
+      ['/api/arena/generate-stream', 'POST'],
+      [`/api/arena/generation-requests/${requestId}`, 'GET'],
+    ]);
+  });
+
+  it('recovers a successful create handshake with a malformed generation id header', async () => {
+    const requestId = 'request-invalid-create-header';
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(response(
+        'id: 1-0\nevent: done\ndata: {"status":"completed"}\n\n',
+        'bad',
+      ))
+      .mockResolvedValueOnce(lookupResponse('generation-recovered', requestId))
+      .mockResolvedValueOnce(response(
+        'id: 1-0\nevent: done\ndata: {"status":"completed"}\n\n',
+        'generation-recovered',
+      ));
+
+    const opened = await openArenaGenerationStream({
+      endpoint: '/api/arena/generate-stream',
+      body: { mode: 'classic' },
+      headers: {},
+      fetcher,
+      storage: new MemoryStorage(),
+      generationRequestId: requestId,
+      maxReconnectAttempts: 0,
+    });
+    await opened.text();
+
+    expect(fetcher.mock.calls.map(([url, init]) => [url, init?.method])).toEqual([
+      ['/api/arena/generate-stream', 'POST'],
+      [`/api/arena/generation-requests/${requestId}`, 'GET'],
+      ['/api/arena/generations/generation-recovered/stream', 'GET'],
+    ]);
+  });
+
+  it('does not replace a valid lookup id with a malformed resume response header', async () => {
+    const requestId = 'request-invalid-resume-header';
+    const storage = new MemoryStorage();
+    const fetcher = vi.fn()
+      .mockRejectedValueOnce(new TypeError('initial response lost'))
+      .mockResolvedValueOnce(lookupResponse('generation-valid', requestId))
+      .mockResolvedValueOnce(response(
+        'id: 1-0\nevent: done\ndata: {"status":"completed"}\n\n',
+        'bad',
+      ));
+
+    const opened = await openArenaGenerationStream({
+      endpoint: '/api/arena/generate-stream',
+      body: { mode: 'classic' },
+      headers: {},
+      fetcher,
+      storage,
+      generationRequestId: requestId,
+      maxReconnectAttempts: 0,
+    });
+    await opened.text();
+
+    expect(opened.headers.get('X-Mahoshojo-Generation-Id')).toBe('generation-valid');
+    expect(JSON.parse(storage.getItem(ARENA_GENERATION_CLIENT_STATE_KEY)!)).toMatchObject({
+      generationId: 'generation-valid',
+    });
   });
 
   it.each([429, 502, 503, 504])(

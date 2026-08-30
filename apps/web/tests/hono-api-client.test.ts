@@ -14,6 +14,7 @@ vi.mock('@/lib/auth', () => ({
 
 import {
   createGenerationApiIntent,
+  isGenerationApiClientErrorCode,
   isHonoApiPath,
   resolveGenerationApiUrl,
 } from '@/lib/hono-api-client';
@@ -34,6 +35,24 @@ afterEach(() => {
 });
 
 describe('Hono API 客户端', () => {
+  test('跨 realm 仍可按结构化 code 识别 GenerationApiClientError', () => {
+    const crossRealmError = {
+      name: 'GenerationApiClientError',
+      code: 'AMBIGUOUS_OPERATION_OUTCOME',
+      message: 'request outcome is ambiguous',
+    };
+
+    expect(isGenerationApiClientErrorCode(
+      crossRealmError,
+      'AMBIGUOUS_OPERATION_OUTCOME',
+    )).toBe(true);
+    expect(isGenerationApiClientErrorCode(crossRealmError, 'DR_NOT_ELIGIBLE')).toBe(false);
+    expect(isGenerationApiClientErrorCode(
+      new TypeError('auth storage unavailable'),
+      'AMBIGUOUS_OPERATION_OUTCOME',
+    )).toBe(false);
+  });
+
   test('客户端配置只消费 generated 最小投影，并包含 preflight 所需公开 origin/policy', () => {
     const source = readFileSync(path.join(process.cwd(), 'config/hono-api.ts'), 'utf8');
     const generatedSource = readFileSync(

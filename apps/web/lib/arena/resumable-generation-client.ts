@@ -3,7 +3,7 @@ import {
   STREAM_ABORT_REASON_CONTENT_POLICY,
   STREAM_ABORT_REASON_USER,
 } from '@/lib/stream/abort';
-import { GenerationApiClientError } from '@/lib/hono-api-client';
+import { isGenerationApiClientErrorCode } from '@/lib/hono-api-client';
 
 export const ARENA_GENERATION_CLIENT_STATE_KEY = 'mahoshojo:arena:generation:v1';
 export const ARENA_GENERATION_ACTOR_TOKEN_KEY = 'mahoshojo:arena:generation-actor:v1';
@@ -17,10 +17,7 @@ const isGenerationIdentifier = (value: unknown): value is string => (
 
 const shouldRecoverInitialCreateError = (error: unknown): boolean => (
   error instanceof TypeError
-  || (
-    error instanceof GenerationApiClientError
-    && error.code === 'AMBIGUOUS_OPERATION_OUTCOME'
-  )
+  || isGenerationApiClientErrorCode(error, 'AMBIGUOUS_OPERATION_OUTCOME')
 );
 
 export type ArenaGenerationConnectionState =
@@ -85,6 +82,7 @@ export type OpenArenaGenerationStreamOptions = {
   cancelConfirmationTimeoutMs?: number;
   random?: () => number;
   now?: () => Date;
+  isInitialCreateOutcomeAmbiguous?(_error: unknown): boolean;
   onStateChange?(_state: ArenaGenerationConnectionState): void;
 };
 
@@ -209,6 +207,11 @@ const captureActorToken = (storage: StoragePort | null, response: Response): voi
   }
 };
 
+const generationIdFromResponse = (response: Response): string | null => {
+  const value = response.headers.get('x-mahoshojo-generation-id')?.trim();
+  return isGenerationIdentifier(value) ? value : null;
+};
+
 const delay = (milliseconds: number): Promise<void> => new Promise((resolve) => {
   const timer = setTimeout(resolve, milliseconds);
   timer.unref?.();
@@ -304,6 +307,8 @@ export const openArenaGenerationStream = async (
   const maxAttempts = options.maxReconnectAttempts ?? 8;
   const baseDelayMs = options.baseReconnectDelayMs ?? 500;
   const cancelConfirmationTimeoutMs = Math.max(1, options.cancelConfirmationTimeoutMs ?? 5_000);
+  const isInitialCreateOutcomeAmbiguous = options.isInitialCreateOutcomeAmbiguous
+    ?? shouldRecoverInitialCreateError;
   const bodyHash = await sha256(canonicalJson(options.body));
   const stateIdentity = await sha256(`${options.endpoint}\n${bodyHash}`);
   const scopedStateKey = `${ARENA_GENERATION_CLIENT_STATE_KEY}:${stateIdentity}`;
@@ -356,7 +361,7 @@ export const openArenaGenerationStream = async (
   };
 
   const fetchResume = async (): Promise<Response> => {
-    if (!generationId) throw new Error('ARENA_GENERATION_ID_MISSING');
+    if (!isGenerationIdentifier(generationId)) throw new Error('ARENA_GENERATION_ID_MISSING');
     const cursor = lastEventId ? `?after=${encodeURIComponent(lastEventId)}` : '';
     updateState('resuming');
     connectedViaResume = true;
@@ -518,8 +523,7 @@ export const openArenaGenerationStream = async (
           const record = payload as Record<string, unknown>;
           if (
             record.generationRequestId === generationRequestId
-            && typeof record.generationId === 'string'
-            && record.generationId.length > 0
+            && isGenerationIdentifier(record.generationId)
             && isKnownGenerationStatus(record.status)
           ) {
             generationId = record.generationId;
@@ -553,12 +557,15 @@ export const openArenaGenerationStream = async (
         created = await fetchCreate();
       } catch (error) {
         if (options.signal?.aborted) throw error;
-        if (!shouldRecoverInitialCreateError(error)) throw error;
+        if (!isInitialCreateOutcomeAmbiguous(error)) {
+          updateState('failed');
+          throw error;
+        }
         response = await recoverInitial();
       }
       if (created) {
         captureActorToken(actorStorage, created);
-        generationId = created.headers.get('x-mahoshojo-generation-id')?.trim() || generationId;
+        generationId = generationIdFromResponse(created) ?? generationId;
         const completeSuccess = created.ok && created.body && generationId;
         const ambiguous = (created.ok && !completeSuccess)
           || created.status === 408
@@ -581,7 +588,7 @@ export const openArenaGenerationStream = async (
     throw error;
   }
   captureActorToken(actorStorage, response);
-  generationId = response.headers.get('x-mahoshojo-generation-id')?.trim() || generationId;
+  generationId = generationIdFromResponse(response) ?? generationId;
   if (!response.ok || !response.body || !generationId) {
     options.signal?.removeEventListener('abort', cancelOnExplicitAbort);
     return response;
