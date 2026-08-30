@@ -11,6 +11,7 @@ import {
   STREAM_ABORT_REASON_CONTENT_POLICY,
   STREAM_ABORT_REASON_USER,
 } from '@/lib/stream/abort';
+import { GenerationApiClientError } from '@/lib/hono-api-client';
 
 class MemoryStorage {
   values = new Map<string, string>();
@@ -152,6 +153,87 @@ describe('resumable Arena generation client', () => {
     expect(JSON.parse(String(fetcher.mock.calls[0]?.[1]?.body))).toMatchObject({
       generationRequestId: 'request-1234',
     });
+  });
+
+  it.each([
+    'DR_NOT_ELIGIBLE',
+    'NO_READY_PLACEMENT',
+    'OPERATION_NOT_DECLARED',
+    'GENERATION_INTENT_ALREADY_DISPATCHED',
+  ] as const)('does not recover a definite generation client error: %s', async (code) => {
+    const error = new GenerationApiClientError(code, `definite: ${code}`);
+    const fetcher = vi.fn().mockRejectedValue(error);
+    const states: string[] = [];
+
+    await expect(openArenaGenerationStream({
+      endpoint: '/api/arena/generate-stream',
+      body: { mode: 'classic' },
+      headers: {},
+      fetcher,
+      storage: new MemoryStorage(),
+      generationRequestId: `request-${code.toLowerCase().replaceAll('_', '-')}`,
+      maxReconnectAttempts: 0,
+      onStateChange: (state) => states.push(state),
+    })).rejects.toBe(error);
+
+    expect(fetcher.mock.calls.map(([, init]) => init?.method)).toEqual(['POST']);
+    expect(states).toEqual(['connecting']);
+    expect(states).not.toContain('recovering_initial');
+  });
+
+  it('does not recover an ordinary application Error from the initial POST', async () => {
+    const error = new Error('application precondition failed');
+    const fetcher = vi.fn().mockRejectedValue(error);
+    const states: string[] = [];
+
+    await expect(openArenaGenerationStream({
+      endpoint: '/api/arena/generate-stream',
+      body: { mode: 'classic' },
+      headers: {},
+      fetcher,
+      storage: new MemoryStorage(),
+      generationRequestId: 'request-application-error',
+      maxReconnectAttempts: 0,
+      onStateChange: (state) => states.push(state),
+    })).rejects.toBe(error);
+
+    expect(fetcher.mock.calls.map(([, init]) => init?.method)).toEqual(['POST']);
+    expect(states).toEqual(['connecting']);
+  });
+
+  it('recovers AMBIGUOUS_OPERATION_OUTCOME by request-id lookup', async () => {
+    const requestId = 'request-ambiguous-error';
+    const error = new GenerationApiClientError(
+      'AMBIGUOUS_OPERATION_OUTCOME',
+      'request outcome is ambiguous',
+    );
+    const fetcher = vi.fn()
+      .mockRejectedValueOnce(error)
+      .mockResolvedValueOnce(lookupResponse('generation-ambiguous', requestId))
+      .mockResolvedValueOnce(response(
+        'id: 1-0\nevent: done\ndata: {"status":"completed"}\n\n',
+        'generation-ambiguous',
+      ));
+    const states: string[] = [];
+
+    const opened = await openArenaGenerationStream({
+      endpoint: '/api/arena/generate-stream',
+      body: { mode: 'classic' },
+      headers: {},
+      fetcher,
+      storage: new MemoryStorage(),
+      generationRequestId: requestId,
+      maxReconnectAttempts: 0,
+      onStateChange: (state) => states.push(state),
+    });
+    await opened.text();
+
+    expect(fetcher.mock.calls.map(([url, init]) => [url, init?.method])).toEqual([
+      ['/api/arena/generate-stream', 'POST'],
+      [`/api/arena/generation-requests/${requestId}`, 'GET'],
+      ['/api/arena/generations/generation-ambiguous/stream', 'GET'],
+    ]);
+    expect(states).toContain('recovering_initial');
   });
 
   it.each([429, 502, 503, 504])(
@@ -381,6 +463,74 @@ describe('resumable Arena generation client', () => {
       [`/api/arena/generation-requests/${seenRequestIds[0]}`, 'GET'],
       ['/api/arena/generations/generation-after-refresh/stream', 'GET'],
     ]);
+  });
+
+  it.each([
+    ['generationRequestId', { generationRequestId: 'bad' }],
+    ['generationId', { generationId: 'bad' }],
+  ] as const)('ignores persisted state with invalid %s', async (_field, invalidPatch) => {
+    const storage = new MemoryStorage();
+    const seedFetcher = vi.fn()
+      .mockRejectedValueOnce(new TypeError('initial response lost'))
+      .mockResolvedValueOnce(new Response(null, { status: 404 }));
+    await expect(openArenaGenerationStream({
+      endpoint: '/api/arena/generate-stream',
+      body: { mode: 'classic', persistedValidation: _field },
+      headers: {},
+      fetcher: seedFetcher,
+      storage,
+      maxReconnectAttempts: 0,
+    })).rejects.toThrow('ARENA_GENERATION_STATE_UNKNOWN');
+
+    const scopedStateKey = Array.from(storage.values.keys()).find((key) => (
+      key.startsWith(`${ARENA_GENERATION_CLIENT_STATE_KEY}:`)
+    ));
+    expect(scopedStateKey).toBeTruthy();
+    const persisted = JSON.parse(storage.getItem(scopedStateKey!)!);
+    storage.setItem(scopedStateKey!, JSON.stringify({
+      ...persisted,
+      state: 'recovering_initial',
+      ...invalidPatch,
+    }));
+
+    const fetcher = vi.fn(async () => response(
+      'id: 1-0\nevent: done\ndata: {"status":"completed"}\n\n',
+      'generation-fresh',
+    ));
+    const opened = await openArenaGenerationStream({
+      endpoint: '/api/arena/generate-stream',
+      body: { mode: 'classic', persistedValidation: _field },
+      headers: {},
+      fetcher,
+      storage,
+      generationRequestId: 'request-fresh-1234',
+      maxReconnectAttempts: 0,
+    });
+    await opened.text();
+
+    expect(fetcher).toHaveBeenCalledOnce();
+    expect(fetcher.mock.calls[0]?.[0]).toBe('/api/arena/generate-stream');
+    expect(fetcher.mock.calls[0]?.[1]?.method).toBe('POST');
+    expect(JSON.parse(String(fetcher.mock.calls[0]?.[1]?.body))).toMatchObject({
+      generationRequestId: 'request-fresh-1234',
+    });
+  });
+
+  it('rejects an invalid explicit request id before persistence or fetch', async () => {
+    const storage = new MemoryStorage();
+    const fetcher = vi.fn();
+
+    await expect(openArenaGenerationStream({
+      endpoint: '/api/arena/generate-stream',
+      body: { mode: 'classic' },
+      headers: {},
+      fetcher,
+      storage,
+      generationRequestId: 'bad',
+    })).rejects.toThrow('ARENA_GENERATION_REQUEST_ID_INVALID');
+
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(storage.values.size).toBe(0);
   });
 
   it('does not reuse a pending request identity for a different semantic body', async () => {

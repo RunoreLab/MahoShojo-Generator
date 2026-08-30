@@ -3,10 +3,25 @@ import {
   STREAM_ABORT_REASON_CONTENT_POLICY,
   STREAM_ABORT_REASON_USER,
 } from '@/lib/stream/abort';
+import { GenerationApiClientError } from '@/lib/hono-api-client';
 
 export const ARENA_GENERATION_CLIENT_STATE_KEY = 'mahoshojo:arena:generation:v1';
 export const ARENA_GENERATION_ACTOR_TOKEN_KEY = 'mahoshojo:arena:generation-actor:v1';
 export const ARENA_GENERATION_ACTOR_TOKEN_HEADER = 'X-Mahoshojo-Generation-Actor-Token';
+
+const GENERATION_IDENTIFIER_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/u;
+
+const isGenerationIdentifier = (value: unknown): value is string => (
+  typeof value === 'string' && GENERATION_IDENTIFIER_PATTERN.test(value)
+);
+
+const shouldRecoverInitialCreateError = (error: unknown): boolean => (
+  error instanceof TypeError
+  || (
+    error instanceof GenerationApiClientError
+    && error.code === 'AMBIGUOUS_OPERATION_OUTCOME'
+  )
+);
 
 export type ArenaGenerationConnectionState =
   | 'connecting'
@@ -100,9 +115,8 @@ export const readPersistedArenaGeneration = (
     const value = parsed as Partial<PersistedArenaGeneration>;
     if (
       (value.version !== 1 && value.version !== 2)
-      || typeof value.generationRequestId !== 'string'
-      || !value.generationRequestId
-      || (value.generationId !== null && typeof value.generationId !== 'string')
+      || !isGenerationIdentifier(value.generationRequestId)
+      || (value.generationId !== null && !isGenerationIdentifier(value.generationId))
       || (value.lastEventId !== null && typeof value.lastEventId !== 'string')
       || typeof value.state !== 'string'
       || typeof value.updatedAt !== 'string'
@@ -277,6 +291,12 @@ export const captureArenaGenerationActorToken = (
 export const openArenaGenerationStream = async (
   options: OpenArenaGenerationStreamOptions,
 ): Promise<Response> => {
+  if (
+    options.generationRequestId !== undefined
+    && !isGenerationIdentifier(options.generationRequestId)
+  ) {
+    throw new Error('ARENA_GENERATION_REQUEST_ID_INVALID');
+  }
   const storage = options.storage === undefined ? defaultStorage() : options.storage;
   const actorStorage = options.storage === undefined ? defaultActorStorage() : options.storage;
   const now = options.now ?? (() => new Date());
@@ -533,6 +553,7 @@ export const openArenaGenerationStream = async (
         created = await fetchCreate();
       } catch (error) {
         if (options.signal?.aborted) throw error;
+        if (!shouldRecoverInitialCreateError(error)) throw error;
         response = await recoverInitial();
       }
       if (created) {
