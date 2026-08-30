@@ -47,8 +47,11 @@ redis_key_prefix="${HONO_REDIS_KEY_PREFIX:-}"
 redis_network_name="${HONO_REDIS_NETWORK_NAME:-mahoshojo-redis}"
 hosted_api_environment="${HONO_HOSTED_API_ENVIRONMENT:-}"
 web_origin='https://mahoshojo.colanns.me'
+preview_web_origin='https://maho-preview.colanns.me'
 preview_cors_origin='https://*.colanns.me'
+preview_cloudflare_web_origin='https://mahoshojo-next-preview.719147538.workers.dev'
 cors_origins="$web_origin"
+room_allowed_origins="$web_origin"
 runtime_image='node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32'
 case "$root_dir" in
   /) echo "部署根目录不得为文件系统根目录" >&2; exit 2 ;;
@@ -81,7 +84,8 @@ case "$hosted_api_environment" in
     }
     ;;
   preview)
-    cors_origins="$web_origin,$preview_cors_origin"
+    cors_origins="$web_origin,$preview_cors_origin,$preview_cloudflare_web_origin"
+    room_allowed_origins="$web_origin,$preview_web_origin,$preview_cloudflare_web_origin"
     [ "$redis_key_prefix" = 'preview' ] || {
       echo "preview target 必须显式设置 HONO_REDIS_KEY_PREFIX=preview" >&2
       exit 2
@@ -100,7 +104,7 @@ HONO_DEPLOY_CORS_ORIGINS="$cors_origins"
 export HONO_DEPLOY_CORS_ORIGINS
 if [ "$deploy_mode" = rollback ]; then
   case "$hosted_api_environment" in
-    production) ;;
+    production|preview) ;;
     test)
       case "$root_dir" in
         /opt/mahoshojo-hono|/opt/mahoshojo-hono-preview)
@@ -110,7 +114,7 @@ if [ "$deploy_mode" = rollback ]; then
       esac
       ;;
     *)
-      echo "显式 rollback 只允许 production target" >&2
+      echo "显式 rollback 只允许 production/preview target" >&2
       exit 2
       ;;
   esac
@@ -312,15 +316,38 @@ verify_legacy_source_if_needed() {
   }
 }
 
+read_arena_room_writer_activation() {
+  tuple_dir="$1"
+  tuple_gate="$tuple_dir/arena-room-release-gate.json"
+  if [ ! -e "$tuple_gate" ] && [ ! -L "$tuple_gate" ]; then
+    printf '%s\n' disabled
+    return 0
+  fi
+  [ -f "$tuple_gate" ] && [ ! -L "$tuple_gate" ] || return 1
+  tuple_writer_activation="$(
+    sed -n 's/^[[:space:]]*"writerActivation":[[:space:]]*"\([a-z]*\)"[,]*[[:space:]]*$/\1/p' \
+      "$tuple_gate"
+  )"
+  case "$tuple_writer_activation" in
+    disabled|enabled) printf '%s\n' "$tuple_writer_activation" ;;
+    *) return 1 ;;
+  esac
+}
+
 validate_release_compose() {
   tuple_dir="$1"
-  run_cancellable env HONO_RELEASE_DIR="$tuple_dir" docker compose \
+  tuple_writer_activation="$(read_arena_room_writer_activation "$tuple_dir")" || return 1
+  run_cancellable env \
+    HONO_RELEASE_DIR="$tuple_dir" \
+    HONO_ARENA_ROOM_WRITER_ACTIVATION="$tuple_writer_activation" \
+    docker compose \
     --project-directory "$root_dir" \
     -f "$tuple_dir/compose.yml" config >/dev/null
 }
 
 validate_release_runtime() {
   tuple_dir="$1"
+  tuple_writer_activation="$(read_arena_room_writer_activation "$tuple_dir")" || return 1
   run_cancellable docker run --rm \
     --network "$redis_network_name" \
     --env-file "$runtime_env" \
@@ -328,6 +355,7 @@ validate_release_runtime() {
     -e HOSTED_API_ENVIRONMENT="$hosted_api_environment" \
     -e HONO_AUTH_MODE=bearer \
     -e HONO_CORS_ORIGINS="$cors_origins" \
+    -e ARENA_ROOM_WRITER_ACTIVATION="$tuple_writer_activation" \
     -e REDIS_HOST=redis \
     -e REDIS_PORT=6379 \
     -e REDIS_REQUIRED=true \
@@ -421,7 +449,12 @@ restore_previous_tuple() {
   validate_release_compose "$target_release_dir" || return 1
   validate_release_runtime "$target_release_dir" || return 1
   write_release_env "$target_release_dir" || return 1
-  run_cancellable docker compose \
+  target_writer_activation="$(
+    read_arena_room_writer_activation "$target_release_dir"
+  )" || return 1
+  run_cancellable env \
+    HONO_ARENA_ROOM_WRITER_ACTIVATION="$target_writer_activation" \
+    docker compose \
     --project-directory "$root_dir" -f "$target_release_dir/compose.yml" \
     up -d --force-recreate hono || return 1
   wait_for_local_readiness || return 1
@@ -552,6 +585,63 @@ validate_arena_room_release_gate_if_present() {
   }
 }
 
+read_runtime_env_value() {
+  runtime_key="$1"
+  runtime_value_count="$(grep -Ec "^${runtime_key}=" "$runtime_env" || true)"
+  [ "$runtime_value_count" -le 1 ] || {
+    echo "Hono runtime env 存在重复键：$runtime_key" >&2
+    return 1
+  }
+  if [ "$runtime_value_count" -eq 0 ]; then
+    return 0
+  fi
+  sed -n "s/^${runtime_key}=//p" "$runtime_env"
+}
+
+validate_arena_room_activation_attestations() {
+  activated_release_dir="$1"
+  activated_writer="$(
+    read_arena_room_writer_activation "$activated_release_dir"
+  )" || return 1
+  [ "$activated_writer" = enabled ] || return 0
+
+  activated_reader_contract="$(
+    read_runtime_env_value ARENA_ROOM_READER_ROLLOUT_CONTRACT
+  )" || return 1
+  [ "$activated_reader_contract" \
+    = 'arena-room-authority-v2-generation-payload-digest-v1' ] || {
+    echo 'writer activation 前缺少 compatible reader rollout attestation' >&2
+    return 1
+  }
+  activated_go_no_go="$(
+    read_runtime_env_value ARENA_ROOM_PRODUCTION_GO_NO_GO
+  )" || return 1
+  [ "$activated_go_no_go" = approved ] || {
+    echo 'writer activation 前缺少独立 production go/no-go' >&2
+    return 1
+  }
+}
+
+validate_arena_room_runtime_allowed_origins() {
+  activated_release_dir="$1"
+  activated_writer="$(
+    read_arena_room_writer_activation "$activated_release_dir"
+  )" || return 1
+  [ "$activated_writer" = enabled ] || return 0
+  case "$hosted_api_environment" in
+    production|preview) ;;
+    *) return 0 ;;
+  esac
+
+  activated_allowed_origins="$(
+    read_runtime_env_value ARENA_ROOM_ALLOWED_ORIGINS
+  )" || return 1
+  [ "$activated_allowed_origins" = "$room_allowed_origins" ] || {
+    echo 'writer activation 前 ARENA_ROOM_ALLOWED_ORIGINS 与 target exact-set 不一致' >&2
+    return 1
+  }
+}
+
 verify_arena_room_rollback_gate() {
   failed_release_dir="$1"
   target_release_dir="$2"
@@ -577,17 +667,6 @@ verify_arena_room_rollback_gate() {
       return 1
       ;;
   esac
-  [ -f "$runtime_env" ] && [ ! -L "$runtime_env" ] || return 1
-  arena_generation_start_state="$(
-    sed -n 's/^ARENA_MULTIPLAYER_ENABLED=//p' "$runtime_env" | tail -n 1
-  )"
-  case "$arena_generation_start_state" in
-    ''|0|false|no|off) ;;
-    *)
-      echo "Arena multiplayer generation start 未关闭，拒绝自动回滚旧 reader" >&2
-      return 1
-      ;;
-  esac
   verify_release_tuple "$target_release_dir" || return 1
   target_gate="$target_release_dir/arena-room-release-gate.json"
   [ -f "$target_gate" ] && [ ! -L "$target_gate" ] || {
@@ -609,6 +688,32 @@ verify_arena_room_rollback_gate() {
     echo "rollback target reader contract 不兼容" >&2
     return 1
   }
+}
+
+verify_arena_room_explicit_rollback_start_gate() {
+  current_release_dir="$1"
+  target_release_dir="$2"
+  current_writer_activation="$(
+    read_arena_room_writer_activation "$current_release_dir"
+  )" || return 1
+  target_writer_activation="$(
+    read_arena_room_writer_activation "$target_release_dir"
+  )" || return 1
+  if [ "$current_writer_activation" != enabled ] \
+    && [ "$target_writer_activation" != enabled ]; then
+    return 0
+  fi
+
+  arena_generation_start_state="$(
+    read_runtime_env_value ARENA_MULTIPLAYER_ENABLED
+  )" || return 1
+  case "$arena_generation_start_state" in
+    ''|0|false|no|off) ;;
+    *)
+      echo "Arena multiplayer generation start 未关闭，拒绝回滚到 writer-enabled target" >&2
+      return 1
+      ;;
+  esac
 }
 
 write_transaction() {
@@ -818,7 +923,12 @@ verify_invoked_from_current_tuple() {
 
 activate_release() {
   write_release_env "$release_dir" || return 1
-  run_cancellable docker compose --project-directory "$root_dir" -f "$compose_file" \
+  release_writer_activation="$(
+    read_arena_room_writer_activation "$release_dir"
+  )" || return 1
+  run_cancellable env \
+    HONO_ARENA_ROOM_WRITER_ACTIVATION="$release_writer_activation" \
+    docker compose --project-directory "$root_dir" -f "$compose_file" \
     up -d --force-recreate hono || return 1
   wait_for_local_readiness
 }
@@ -841,6 +951,58 @@ verify_public_contract() {
   [ "$probe_status" = '400' ] || return 1
   grep -Fq '"error":"Name is required"' "$probe_body" || return 1
   grep -Fqi "Access-Control-Allow-Origin: $web_origin" "$probe_headers" || return 1
+
+  active_writer="$(read_arena_room_writer_activation "$release_dir")" || return 1
+  requested_state="$(read_runtime_env_value ARENA_MULTIPLAYER_ENABLED)" || return 1
+  room_runtime_active=false
+  case "$requested_state" in
+    ''|0|[Ff][Aa][Ll][Ss][Ee]|[Nn][Oo]|[Oo][Ff][Ff]) ;;
+    1|[Tt][Rr][Uu][Ee]|[Yy][Ee][Ss]|[Oo][Nn])
+      [ "$active_writer" = enabled ] && room_runtime_active=true
+      ;;
+    *) return 1 ;;
+  esac
+  if [ "$room_runtime_active" = true ]; then
+    room_logical_origin="$(read_runtime_env_value ARENA_ROOM_LOGICAL_ORIGIN)" || return 1
+    case "$room_logical_origin" in
+      https://*) room_logical_origin="${room_logical_origin%/}" ;;
+      *) return 1 ;;
+    esac
+    room_probe_origins="$web_origin"
+    if [ "$hosted_api_environment" = preview ]; then
+      room_probe_origins="$web_origin $preview_web_origin $preview_cloudflare_web_origin"
+    fi
+    for room_probe_origin in $room_probe_origins; do
+      if ! run_cancellable curl --silent --show-error --retry 6 --retry-delay 5 \
+        --connect-timeout 5 --max-time 15 \
+        --dump-header "$probe_headers" --output "$probe_body" \
+        --write-out '%{http_code}' \
+        --header "Origin: $room_probe_origin" \
+        "$room_logical_origin/api/arena/rooms/v1" > "$probe_status_file"; then
+        return 1
+      fi
+      probe_status="$(cat "$probe_status_file")"
+      [ "$probe_status" = '401' ] || return 1
+      grep -Fq '"code":"ROOM_AUTHENTICATION_REQUIRED"' "$probe_body" || return 1
+      grep -Fqi "Access-Control-Allow-Origin: $room_probe_origin" "$probe_headers" || return 1
+
+      if ! run_cancellable curl --silent --show-error --retry 6 --retry-delay 5 --http1.1 \
+        --connect-timeout 5 --max-time 15 \
+        --dump-header "$probe_headers" --output "$probe_body" \
+        --write-out '%{http_code}' \
+        --header "Origin: $room_probe_origin" \
+        --header 'Connection: Upgrade' \
+        --header 'Upgrade: websocket' \
+        --header 'Sec-WebSocket-Version: 13' \
+        --header 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' \
+        --header 'Sec-WebSocket-Protocol: mahoshojo.arena-room.v1' \
+        "$room_logical_origin/api/arena/rooms/v1/ws" > "$probe_status_file"; then
+        return 1
+      fi
+      probe_status="$(cat "$probe_status_file")"
+      [ "$probe_status" = '401' ] || return 1
+    done
+  fi
 }
 
 promote_release() {
@@ -936,9 +1098,11 @@ if [ "$deploy_mode" = rollback ]; then
 
   validate_release_compose "$rollback_current_release_dir"
   validate_release_runtime "$rollback_current_release_dir"
+  validate_arena_room_runtime_allowed_origins "$rollback_current_release_dir"
   validate_arena_room_release_gate_if_present "$release_dir"
   validate_release_compose "$release_dir"
   validate_release_runtime "$release_dir"
+  validate_arena_room_runtime_allowed_origins "$release_dir"
 
   if [ "$release_dir" = "$rollback_current_release_dir" ]; then
     verify_public_contract || {
@@ -950,6 +1114,8 @@ if [ "$deploy_mode" = rollback ]; then
     exit 0
   fi
 
+  verify_arena_room_explicit_rollback_start_gate \
+    "$rollback_current_release_dir" "$release_dir"
   verify_arena_room_rollback_gate \
     "$rollback_current_release_dir" "$release_dir"
   # target 激活后仍可能失败；写 journal 前先证明原 current 可安全恢复。
@@ -980,14 +1146,17 @@ validate_arena_room_release_gate \
     echo "candidate Arena Room release gate schema 校验失败" >&2
     exit 1
   }
+validate_arena_room_activation_attestations "$release_dir"
 validate_release_compose "$release_dir"
 validate_release_runtime "$release_dir"
+validate_arena_room_runtime_allowed_origins "$release_dir"
 resolve_previous_release
 if [ "$had_previous" = true ]; then
   verify_release_tuple "$previous_release_dir"
   verify_legacy_source_if_needed "$previous_release_dir"
   validate_release_compose "$previous_release_dir"
   validate_release_runtime "$previous_release_dir"
+  validate_arena_room_runtime_allowed_origins "$previous_release_dir"
   verify_arena_room_rollback_gate "$previous_release_dir" "$release_dir"
   # candidate 激活失败时也必须能安全恢复 current tuple。
   verify_arena_room_rollback_gate "$release_dir" "$previous_release_dir"

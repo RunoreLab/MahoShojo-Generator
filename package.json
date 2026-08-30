@@ -52,7 +52,7 @@
     "verify:hosted-dr:redis": "HOSTED_DR_LOCAL_FAULT_INJECTION=true pnpm --filter @mahoshojo/api run verify:hosted-dr:redis",
     "test:repo": "vitest run --config vitest.config.ts",
     "lint:repo": "eslint scripts tests drizzle.config.ts --config eslint.config.mjs",
-    "workspace:test": "pnpm --filter \"./packages/*\" --filter \"./apps/*\" --if-present run test",
+    "workspace:test": "pnpm --workspace-concurrency=1 --filter \"./packages/*\" --filter \"./apps/*\" --if-present run test",
     "workspace:lint": "pnpm --filter \"./packages/*\" --filter \"./apps/*\" --if-present run lint",
     "workspace:build": "pnpm --filter \"./packages/*\" --filter \"./apps/*\" --if-present run build",
     "workspace:verify": "pnpm run check:workspace:boundaries && pnpm run check:admin-inventory && pnpm run check:admin-boundary && pnpm run check:naming:workspace && pnpm run check:hosted-dr && pnpm run check:user-visible-contracts && pnpm run check:arena-room-origins && pnpm run check:arena-room-hardening && pnpm run workspace:test && pnpm run workspace:lint && pnpm run workspace:build",

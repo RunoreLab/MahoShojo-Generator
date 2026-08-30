@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 
 const script = resolve(process.cwd(), 'scripts/check-arena-room-release-gate.mjs');
 const schemaScript = resolve(process.cwd(), 'scripts/arena-room-release-gate-schema.mjs');
+const prepareScript = resolve(process.cwd(), 'scripts/prepare-arena-room-release-gate.mjs');
 const manifestPath = resolve(process.cwd(), 'config/arena-room-release-gate.json');
 
 const run = (args: string[], env: NodeJS.ProcessEnv = {}) => {
@@ -70,6 +71,33 @@ describe('Arena Room release gate', () => {
       ARENA_MULTIPLAYER_GENERATION_START_STATE: 'disabled',
       ARENA_ROOM_TARGET_READER_CONTRACT: 'arena-room-authority-v2-generation-payload-digest-v1',
     }).status).toBe(0);
+  });
+
+  it('prepares an immutable writer-enabled candidate only with exact attestations', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'arena-room-release-gate-prepare.'));
+    const output = join(directory, 'candidate.json');
+    const runPrepare = (env: NodeJS.ProcessEnv = {}) => spawnSync(
+      process.execPath,
+      [prepareScript, '--writer', 'enabled', '--output', output],
+      {
+        cwd: process.cwd(),
+        encoding: 'utf8',
+        env: { PATH: process.env.PATH, ...env },
+      },
+    );
+
+    expect(runPrepare().status).toBe(1);
+    const accepted = runPrepare({
+      ARENA_ROOM_READER_ROLLOUT_CONTRACT:
+        'arena-room-authority-v2-generation-payload-digest-v1',
+      ARENA_ROOM_PRODUCTION_GO_NO_GO: 'approved',
+    });
+    expect(accepted.status, accepted.stderr).toBe(0);
+    expect(JSON.parse(readFileSync(output, 'utf8'))).toMatchObject({
+      writerActivation: 'enabled',
+      checkpointContract: 'arena-room-authority-v2-generation-payload-digest-v1',
+    });
+    expect(readFileSync(manifestPath, 'utf8')).toContain('"writerActivation": "disabled"');
   });
 
   it('validates the complete release-gate JSON schema instead of matching nested text', () => {
