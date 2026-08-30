@@ -3,8 +3,8 @@
 `preview` 分支由 `.github/workflows/preview-deploy.yml` 发布到同一 VPS 上的独立实例：部署目录
 `/opt/mahoshojo-hono-preview`、容器 `mahoshojo-hono-preview`、回环端口 `8081`、公网域名
 `homura-preview.colanns.me`。首期允许与生产共用 Redis 网络，但由 `RedisRuntime` 统一施加
-`REDIS_KEY_PREFIX=preview`，不暴露 destructive Redis command；D1、R2 与 authority secret 在 preview
-资源未专用纳管前保持 fail-closed。完整初始化及回滚约束见 `docs/2026-08-26_223558_预览环境自动部署说明.md`。
+`REDIS_KEY_PREFIX=preview`，不暴露 destructive Redis command；D1、R2 与 authority secret 复用 production
+runtime 配置。完整初始化及回滚约束见 `docs/2026-08-26_223558_预览环境自动部署说明.md`。
 
 生产 Hono 使用 D1 Gateway 时，`D1_GATEWAY_URL` 必须是无凭据、路径、查询或片段的 HTTPS root origin，并要求
 HMAC 或 Bearer transport credential。loopback HTTP 只可在显式 `HOSTED_DR_LOCAL_FAULT_INJECTION=true` 的

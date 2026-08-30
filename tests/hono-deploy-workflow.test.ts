@@ -184,17 +184,18 @@ describe('Hono deployment workflow', () => {
       expect(job).toMatch(/^    if: github\.ref == 'refs\/heads\/preview'\s*$/m);
     }
     expect(workflow).toMatch(/branches:\s*\n\s*- preview/u);
-    expect(honoJob).toContain('HONO_DEPLOY_ROOT_DIR: /opt/mahoshojo-hono-preview');
+    expect(honoJob).toContain('HONO_DEPLOY_ROOT_DIR: ${{ vars.HONO_DEPLOY_ROOT }}');
     expect(honoJob).toContain('HONO_CONTAINER_NAME: mahoshojo-hono-preview');
-    expect(honoJob).toContain("HONO_BIND_PORT: '8081'");
-    expect(honoJob).toContain('HONO_REDIS_KEY_PREFIX: ${{ vars.PREVIEW_REDIS_KEY_PREFIX }}');
-    expect(honoJob).toContain('HONO_REDIS_NETWORK_NAME: ${{ vars.PREVIEW_REDIS_NETWORK_NAME }}');
-    expect(honoJob).toContain('PREVIEW_VPS_HOST: ${{ vars.PREVIEW_VPS_HOST }}');
-    expect(honoJob).toContain('PREVIEW_VPS_USER: ${{ vars.PREVIEW_VPS_USER }}');
-    expect(honoJob).toContain('PREVIEW_VPS_SSH_PRIVATE_KEY: ${{ secrets.PREVIEW_VPS_SSH_PRIVATE_KEY }}');
-    expect(honoJob).toContain('PREVIEW_VPS_HOST_KEY: ${{ secrets.PREVIEW_VPS_HOST_KEY }}');
-    expect(honoJob).toContain('check:preview:environment -- --require-provisioned');
-    expect(honoJob).toContain('https://homura-preview.colanns.me');
+    expect(honoJob).toContain('HONO_BIND_PORT: ${{ vars.HONO_BIND_PORT }}');
+    expect(honoJob).toContain('HONO_PUBLIC_ORIGIN: ${{ vars.HONO_PUBLIC_ORIGIN }}');
+    expect(honoJob).toContain('HONO_REDIS_KEY_PREFIX: preview');
+    expect(honoJob).toContain('VPS_HOST: ${{ vars.VPS_HOST }}');
+    expect(honoJob).toContain('VPS_USER: ${{ vars.VPS_USER }}');
+    expect(honoJob).toContain('VPS_SSH_PRIVATE_KEY: ${{ secrets.VPS_SSH_PRIVATE_KEY }}');
+    expect(honoJob).toContain('ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIARFAFVUCsUdVM8PtbbiOhkUD9zn5Q6MeK47hxEr/XuC');
+    expect(honoJob).toContain("'$HONO_PUBLIC_ORIGIN'");
+    expect(honoJob).not.toContain('PREVIEW_VPS_');
+    expect(honoJob).not.toContain('check:preview:environment');
     expect(cloudflareBuildJob).toContain('needs: verify-and-build-hono');
     expect(cloudflareBuildJob).toContain('run: pnpm --filter @mahoshojo/web run build:cf');
     expect(honoJob).toContain('- verify-and-build-hono');
@@ -204,30 +205,6 @@ describe('Hono deployment workflow', () => {
     expect(cloudflareJob).toContain(
       'NEXT_PUBLIC_HONO_API_ORIGIN: https://homura-preview.colanns.me',
     );
-  });
-
-  test('preview Hono deploy 在资源门禁前初始化 pnpm、Node.js 与依赖', () => {
-    const workflow = readFileSync(PREVIEW_WORKFLOW_PATH, 'utf8');
-    const honoJob = getJob(workflow, 'deploy-hono-preview');
-    const setupPnpmStep = getStep(honoJob, 'Setup pnpm');
-    const setupNodeStep = getStep(honoJob, 'Setup Node.js');
-    const installStep = getStep(honoJob, 'Install dependencies');
-
-    expect(setupPnpmStep).toContain('uses: pnpm/action-setup@v6');
-    expect(setupPnpmStep).toContain('version: 11.3.0');
-    expect(setupNodeStep).toContain('uses: actions/setup-node@v6');
-    expect(setupNodeStep).toContain('node-version: 22');
-    expect(setupNodeStep).toContain('cache: pnpm');
-    expect(installStep).toContain('run: pnpm install --frozen-lockfile');
-
-    const setupPnpmIndex = honoJob.indexOf('- name: Setup pnpm');
-    const setupNodeIndex = honoJob.indexOf('- name: Setup Node.js');
-    const installIndex = honoJob.indexOf('- name: Install dependencies');
-    const gateIndex = honoJob.indexOf('- name: Require preview resources and authority isolation');
-
-    expect(setupNodeIndex).toBeGreaterThan(setupPnpmIndex);
-    expect(installIndex).toBeGreaterThan(setupNodeIndex);
-    expect(gateIndex).toBeGreaterThan(installIndex);
   });
 
   test('builds the Hono container before assembling and uploading the deployment artifact', () => {
