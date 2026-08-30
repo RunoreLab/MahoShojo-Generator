@@ -8,6 +8,10 @@ const CLOUDFLARE_WORKFLOW_PATH = resolve(process.cwd(), '.github/workflows/cloud
 const PREVIEW_WORKFLOW_PATH = resolve(process.cwd(), '.github/workflows/preview-deploy.yml');
 const WEB_WRANGLER_PATH = resolve(process.cwd(), 'apps/web/wrangler.jsonc');
 const WEB_ENV_EXAMPLE_PATH = resolve(process.cwd(), 'apps/web/env.example');
+const HONO_DEPLOY_GUIDE_PATH = resolve(
+  process.cwd(),
+  'docs/2026-08-22_034220_Hono服务部署与自动发布指南.md',
+);
 const HONO_COMPOSE_PATH = resolve(process.cwd(), 'apps/api/deploy/compose.yml');
 const HONO_DEPLOY_SCRIPT_PATH = resolve(process.cwd(), 'apps/api/deploy/deploy-bundle.sh');
 const HONO_INSTALL_SCRIPT_PATH = resolve(process.cwd(), 'apps/api/deploy/install-bundle.sh');
@@ -345,6 +349,25 @@ describe('Hono deployment workflow', () => {
     expect(installer).toContain('mktemp -d "$releases_dir/.upload.XXXXXX"');
     expect(installer).toContain('mv -Tn "$staging_dir" "$final_dir"');
     expect(installer.match(/verify_uploaded_tuple "\$final_dir" "\$release_id"/gu)).toHaveLength(2);
+  });
+
+  test('手工发布指南生成并上传当前七文件 release tuple', () => {
+    const guide = readFileSync(HONO_DEPLOY_GUIDE_PATH, 'utf8');
+
+    expect(guide).toContain(
+      'cp config/arena-room-release-gate.json apps/api/dist/arena-room-release-gate.json',
+    );
+    expect(guide).toContain(
+      'cp scripts/arena-room-release-gate-schema.mjs apps/api/dist/arena-room-release-gate-schema.mjs',
+    );
+    expect(guide).toMatch(
+      /sha256sum index\.mjs compose\.yml deploy-bundle\.sh \\\s+arena-room-release-gate\.json arena-room-release-gate-schema\.mjs > release\.manifest/u,
+    );
+    expect(guide).toMatch(
+      /scp apps\/api\/dist\/index\.mjs[\s\S]*apps\/api\/dist\/arena-room-release-gate\.json[\s\S]*apps\/api\/dist\/arena-room-release-gate-schema\.mjs[\s\S]*apps\/api\/dist\/release\.sha256/u,
+    );
+    expect(guide).toContain('精确七文件 tuple');
+    expect(guide).not.toContain('精确五文件 tuple');
   });
 
   test('所有 Hono artifact 与部署生命周期都引用 apps/api owner', () => {
