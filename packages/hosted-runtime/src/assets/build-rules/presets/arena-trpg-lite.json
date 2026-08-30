@@ -1,0 +1,200 @@
+{
+  "id": "arena-trpg-lite",
+  "version": "1.0.0",
+  "title": "魔法少女竞技场 TRPG 简化角色卡",
+  "description": "基于《魔法少女竞技场 TRPG》核心属性、力量层级、基础能力模块与派生值的轻量车卡规则。",
+  "supportedTemplates": ["general", "magical-girl", "canshou"],
+  "allowStandalone": true,
+  "mainRuleEligible": true,
+  "projectionPolicy": "primary-structured",
+  "uiSummary": "适用于魔法少女世界观下的角色；包含力量层级、七维属性、基础能力专长与 HP/MP/光辉值派生。",
+  "aiPromptHint": "请把规则输入当作确定事实处理：力量层级、属性、派生值与已选专长不得被自由改写；freeformBrief 只调整风格和叙事重点。",
+  "budgets": {
+    "attributePointsByLevel": {
+      "seed": 280,
+      "sprout": 285,
+      "leaf": 290,
+      "bud": 300,
+      "flower": 310,
+      "gemScepter": 325,
+      "unlimited": null
+    },
+    "specialtyPointsByLevel": {
+      "seed": 4,
+      "sprout": 5,
+      "leaf": 6,
+      "bud": 8,
+      "flower": 10,
+      "gemScepter": 13,
+      "unlimited": null
+    }
+  },
+  "blocks": [
+    {
+      "id": "powerLevel",
+      "type": "select",
+      "label": "力量层级",
+      "description": "决定本角色当前所在的成长阶段，并影响属性预算与专长预算。",
+      "defaultValue": "seed",
+      "options": [
+        { "value": "seed", "label": "种（Seed）", "meta": { "attributePoints": 280, "specialtyPoints": 4 } },
+        { "value": "sprout", "label": "芽（Sprout）", "meta": { "attributePoints": 285, "specialtyPoints": 5 } },
+        { "value": "leaf", "label": "叶（Leaf）", "meta": { "attributePoints": 290, "specialtyPoints": 6 } },
+        { "value": "bud", "label": "蕾（Bud）", "meta": { "attributePoints": 300, "specialtyPoints": 8 } },
+        { "value": "flower", "label": "花（Flower）", "meta": { "attributePoints": 310, "specialtyPoints": 10 } },
+        { "value": "gemScepter", "label": "宝石权杖（Gem Scepter）", "meta": { "attributePoints": 325, "specialtyPoints": 13 } },
+        { "value": "unlimited", "label": "无限制（调试/自由创作）", "meta": { "attributePoints": null, "specialtyPoints": null } }
+      ]
+    },
+    {
+      "id": "coreAttributes",
+      "type": "point-buy",
+      "label": "核心属性",
+      "description": "分配七维核心属性。第一阶段默认保留单项 10-80 的约束。",
+      "minPerStat": 10,
+      "maxPerStat": 80,
+      "fields": [
+        { "id": "STR", "label": "力量", "description": "影响近战伤害、负重和破坏能力。" },
+        { "id": "CON", "label": "体质", "description": "影响生命值、对物理伤害和环境影响的承受能力。" },
+        { "id": "AGI", "label": "敏捷", "description": "影响闪避、机动、先攻与身体控制。" },
+        { "id": "MAG", "label": "魔力", "description": "影响魔力值、魔法强度与最大输出。" },
+        { "id": "WILL", "label": "意志", "description": "影响精神抗性、光辉稳定性与抵御阴影的能力。" },
+        { "id": "PER", "label": "感知", "description": "影响观察、侦查、直觉与环境读取能力。" },
+        { "id": "CHM", "label": "魅力", "description": "影响社交互动、鼓舞与领导表现。" }
+      ]
+    },
+    {
+      "id": "specialties",
+      "type": "multi-select",
+      "label": "基础能力专长",
+      "description": "从基础能力模块中选择专长，按成本消耗独立专长预算。",
+      "groups": [
+        {
+          "id": "magic-output",
+          "label": "魔力放出",
+          "items": [
+            {
+              "id": "magic-bullet",
+              "label": "魔弹",
+              "cost": 1,
+              "description": "基础远程魔力弹幕，稳定、低门槛、易于作为常用输出。"
+            },
+            {
+              "id": "mana-impact",
+              "label": "魔力冲击",
+              "cost": 1,
+              "description": "近中距离的纯粹魔力冲击，适合打断、击退或压制。"
+            },
+            {
+              "id": "magic-cannon",
+              "label": "魔炮",
+              "cost": 2,
+              "description": "高输出炮击，需要更高出力与更明确的战术窗口。"
+            }
+          ]
+        },
+        {
+          "id": "defense",
+          "label": "防御",
+          "items": [
+            {
+              "id": "magic-shield",
+              "label": "魔力护盾",
+              "cost": 2,
+              "description": "与对方魔力攻击相互抵消的护盾能力，不等同于高级防御术式。"
+            }
+          ]
+        },
+        {
+          "id": "enhancement",
+          "label": "强化",
+          "items": [
+            {
+              "id": "body-enhancement",
+              "label": "身体强化",
+              "cost": 1,
+              "description": "提高身体能力与近身战表现，是基础强化型能力。"
+            },
+            {
+              "id": "magic-attachment",
+              "label": "魔力附着",
+              "cost": 2,
+              "description": "为武器或工具附魔，提升强度、性质或稳定性。"
+            }
+          ]
+        },
+        {
+          "id": "mobility",
+          "label": "飞行与机动",
+          "items": [
+            {
+              "id": "hover",
+              "label": "悬浮",
+              "cost": 1,
+              "description": "基础的滞空与低速机动，适合作为空中行动入门。"
+            },
+            {
+              "id": "magic-ukemi",
+              "label": "魔力受身",
+              "cost": 2,
+              "description": "利用魔力缓冲冲击，提升着地、受击与失衡后的恢复能力。"
+            },
+            {
+              "id": "shell-launch",
+              "label": "炮弹起射",
+              "cost": 3,
+              "description": "利用高爆发推进完成极端位移，是明显改变战斗展开的机动方式。"
+            },
+            {
+              "id": "perpetual-flight",
+              "label": "永动飞行",
+              "cost": 3,
+              "description": "更稳定、更持续的空中行动能力，会显著改变战斗机动与追击方式。"
+            },
+            {
+              "id": "hypersonic-flash",
+              "label": "超速闪现",
+              "cost": 3,
+              "description": "以极高速度完成直角转向或瞬间闪避，属于高阶机动表现。"
+            }
+          ]
+        },
+        {
+          "id": "sensing",
+          "label": "魔力感知",
+          "items": [
+            {
+              "id": "enhanced-sensing",
+              "label": "感知强化",
+              "cost": 1,
+              "description": "提升对威胁、动向与细节变化的即时察觉能力。"
+            },
+            {
+              "id": "ambient-mana-detection",
+              "label": "环境魔力侦测",
+              "cost": 2,
+              "description": "读取周边魔力痕迹、异常流动与潜在干扰源。"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "derivedStats",
+      "type": "derived",
+      "label": "衍生值",
+      "description": "以下数值由规则运行时自动计算，不允许手动填写。",
+      "fields": [
+        { "id": "HP", "label": "生命值", "formula": "ceil((STR + CON) / 10)" },
+        { "id": "MP", "label": "魔力值", "formula": "ceil(MAG / 4)" },
+        { "id": "Radiance", "label": "光辉值", "formula": "ceil(WILL / 5)" }
+      ]
+    },
+    {
+      "id": "ruleNotice",
+      "type": "section",
+      "label": "规则说明",
+      "description": "本版只覆盖力量层级、核心属性、基础能力专长与 HP/MP/光辉值派生；不覆盖技能、PCP、魔装构筑、羁绊预算和完整 TRPG 角色卡编辑器。无限制模式只跳过总预算限制，不跳过字段合法性校验。"
+    }
+  ]
+}

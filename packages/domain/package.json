@@ -1,0 +1,70 @@
+{
+  "name": "@mahoshojo/domain",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./data-cards": {
+      "types": "./src/data-cards.ts",
+      "import": "./src/data-cards.ts",
+      "default": "./src/data-cards.ts"
+    },
+    "./game-card": {
+      "types": "./src/game-card.ts",
+      "import": "./src/game-card.ts",
+      "default": "./src/game-card.ts"
+    },
+    "./main-color": {
+      "types": "./src/main-color.ts",
+      "import": "./src/main-color.ts",
+      "default": "./src/main-color.ts"
+    },
+    "./questionnaire": {
+      "types": "./src/questionnaire.ts",
+      "import": "./src/questionnaire.ts",
+      "default": "./src/questionnaire.ts"
+    },
+    "./sublimation": {
+      "types": "./src/sublimation.ts",
+      "import": "./src/sublimation.ts",
+      "default": "./src/sublimation.ts"
+    },
+    "./arena-ranked-model-policy": {
+      "types": "./src/arena-ranked-model-policy.ts",
+      "import": "./src/arena-ranked-model-policy.ts",
+      "default": "./src/arena-ranked-model-policy.ts"
+    },
+    "./arena-reconciliation": {
+      "types": "./src/arena-reconciliation.ts",
+      "import": "./src/arena-reconciliation.ts",
+      "default": "./src/arena-reconciliation.ts"
+    },
+    "./arena-battle-story-session": {
+      "types": "./src/arena-battle-story-session.ts",
+      "import": "./src/arena-battle-story-session.ts",
+      "default": "./src/arena-battle-story-session.ts"
+    }
+  },
+  "scripts": {
+    "test": "vitest run --config vitest.config.ts",
+    "lint": "eslint src tests --config eslint.config.mjs",
+    "build": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@mahoshojo/contracts": "workspace:*",
+    "zod": "^4.1.13"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "@typescript-eslint/parser": "^8.50.0",
+    "esbuild": "^0.28.1",
+    "eslint": "^9",
+    "typescript": "^5",
+    "vitest": "^4.1.7"
+  }
+}

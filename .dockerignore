@@ -6,6 +6,9 @@
 .next
 .open-next
 .wrangler
+apps/*/.next
+apps/*/.open-next
+apps/*/.wrangler
 dist
 node_modules
 coverage

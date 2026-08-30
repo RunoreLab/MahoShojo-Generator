@@ -2,12 +2,17 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import ts from 'typescript';
 
-const ROOT = process.cwd();
-const INCLUDE_DIRS = ['app', 'pages', 'components', 'lib'];
-const BLOCK_EXCLUDE_PREFIXES = ['lib/vendor/'];
-const REPORT_ONLY_DIR_PREFIXES = ['lib/db/', 'lib/database/'];
+const WEB_INCLUDE_DIRS = ['apps/web/app', 'apps/web/pages', 'apps/web/components', 'apps/web/lib'];
+const WORKSPACE_INCLUDE_DIRS = ['apps', 'packages'];
+const IGNORED_DIRECTORIES = new Set(['.next', '.open-next', 'build', 'coverage', 'dist', 'node_modules', 'out']);
+const BLOCK_EXCLUDE_PREFIXES = [
+  'apps/web/lib/vendor/',
+  'packages/hosted-runtime/src/node-runtime/vendor/',
+];
+const REPORT_ONLY_DIR_PREFIXES = ['apps/web/lib/db/', 'apps/web/lib/database/'];
 const FILE_EXTS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs']);
 const MAX_BLOCK_REPORT_ITEMS = 80;
 const MAX_REPORT_ONLY_ITEMS = 20;
@@ -19,9 +24,6 @@ const RULE_LABELS = new Map([
   ['bracket', '方括号访问'],
   ['object-literal', '对象字面量写入'],
 ]);
-
-const args = new Set(process.argv.slice(2));
-const reportOnly = args.has('--report-only');
 
 const EXTERNAL_PROTOCOL_SNAKE_FIELDS = new Set([
   'arena_history',
@@ -117,17 +119,18 @@ const isTargetFile = (relativePath) => {
   return true;
 };
 
-const collectFiles = () => {
+const collectFiles = (root, includeDirs) => {
   const files = [];
 
   const walk = (dirRelative) => {
-    const fullDir = path.join(ROOT, dirRelative);
+    const fullDir = path.join(root, dirRelative);
     if (!fs.existsSync(fullDir)) return;
 
     const dirents = fs.readdirSync(fullDir, { withFileTypes: true });
     for (const dirent of dirents) {
       const nextRelative = toPosixPath(path.join(dirRelative, dirent.name));
       if (dirent.isDirectory()) {
+        if (IGNORED_DIRECTORIES.has(dirent.name)) continue;
         walk(nextRelative);
         continue;
       }
@@ -138,7 +141,7 @@ const collectFiles = () => {
     }
   };
 
-  for (const includeDir of INCLUDE_DIRS) {
+  for (const includeDir of includeDirs) {
     walk(includeDir);
   }
   return files.sort();
@@ -171,18 +174,20 @@ const getScriptKind = (filePath) => {
 
 const isSnakeField = (field) => SNAKE_CASE_RE.test(field);
 
-const isReportOnlyPath = (filePath) =>
-  REPORT_ONLY_DIR_PREFIXES.some((prefix) => filePath.startsWith(prefix));
+const isReportOnlyPath = (filePath, workspaceOnly) => (
+  (workspaceOnly && filePath.startsWith('apps/'))
+  || REPORT_ONLY_DIR_PREFIXES.some((prefix) => filePath.startsWith(prefix))
+);
 
 const shouldSkipField = (field) => EXTERNAL_PROTOCOL_SNAKE_FIELDS.has(field);
 
-const classifyScope = (filePath, kind) => {
-  if (isReportOnlyPath(filePath)) return 'report-only';
+const classifyScope = (filePath, kind, workspaceOnly) => {
+  if (isReportOnlyPath(filePath, workspaceOnly)) return 'report-only';
   if (REPORT_ONLY_RULE_KINDS.has(kind)) return 'report-only';
   return 'block';
 };
 
-const createEntry = ({ file, sourceFile, lines, field, kind, node }) => {
+const createEntry = ({ file, sourceFile, lines, field, kind, node, workspaceOnly }) => {
   if (!field || !isSnakeField(field) || shouldSkipField(field)) return null;
 
   const position = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile));
@@ -195,7 +200,7 @@ const createEntry = ({ file, sourceFile, lines, field, kind, node }) => {
     column: position.character + 1,
     field,
     kind,
-    scope: classifyScope(file, kind),
+    scope: classifyScope(file, kind, workspaceOnly),
     normalizedLine,
   };
   return {
@@ -217,12 +222,13 @@ const getObjectLiteralKey = (nameNode) => {
   return tryGetComputedStringName(nameNode);
 };
 
-const collectViolations = () => {
+const collectViolations = (root, workspaceOnly) => {
   const rows = [];
-  const files = collectFiles();
+  const includeDirs = workspaceOnly ? WORKSPACE_INCLUDE_DIRS : WEB_INCLUDE_DIRS;
+  const files = collectFiles(root, includeDirs);
 
   for (const file of files) {
-    const absolutePath = path.join(ROOT, file);
+    const absolutePath = path.join(root, file);
     const text = fs.readFileSync(absolutePath, 'utf8');
     const lines = text.split(/\r?\n/);
     const sourceFile = ts.createSourceFile(
@@ -243,6 +249,7 @@ const collectViolations = () => {
           field,
           kind: 'dot',
           node: node.name,
+          workspaceOnly,
         });
         if (entry) rows.push(entry);
       }
@@ -258,6 +265,7 @@ const collectViolations = () => {
             field,
             kind: 'bracket',
             node: arg,
+            workspaceOnly,
           });
           if (entry) rows.push(entry);
         }
@@ -272,6 +280,7 @@ const collectViolations = () => {
           field,
           kind: 'object-literal',
           node: node.name,
+          workspaceOnly,
         });
         if (entry) rows.push(entry);
       }
@@ -285,6 +294,7 @@ const collectViolations = () => {
           field,
           kind: 'object-literal',
           node: node.name,
+          workspaceOnly,
         });
         if (entry) rows.push(entry);
       }
@@ -370,12 +380,26 @@ const printViolations = (entries, title, maxItems) => {
   }
 };
 
-const main = () => {
-  const rows = collectViolations();
+export const checkNamingConventions = (
+  root = process.cwd(),
+  { workspaceOnly = false } = {},
+) => {
+  const rows = collectViolations(path.resolve(root), workspaceOnly);
   const currentMap = groupBySignature(rows);
   const violations = sortEntries([...currentMap.values()]);
   const blockingViolations = violations.filter((row) => row.scope === 'block');
   const reportOnlyViolations = violations.filter((row) => row.scope === 'report-only');
+  return { blockingViolations, reportOnlyViolations };
+};
+
+const main = () => {
+  const args = new Set(process.argv.slice(2));
+  const reportOnly = args.has('--report-only');
+  const workspaceOnly = args.has('--workspace-only');
+  const { blockingViolations, reportOnlyViolations } = checkNamingConventions(
+    process.cwd(),
+    { workspaceOnly },
+  );
 
   if (blockingViolations.length > 0) {
     printViolations(blockingViolations, '[check:naming] 检测到 snake_case 违规（阻断）', MAX_BLOCK_REPORT_ITEMS);
@@ -391,7 +415,8 @@ const main = () => {
       console.error('[check:naming] report-only 模式：本次不阻断。');
       process.exit(0);
     }
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
 
   if (reportOnlyViolations.length > 0) {
@@ -407,4 +432,8 @@ const main = () => {
   console.log('[check:naming] 通过（未发现 snake_case 命名违规）。');
 };
 
-main();
+const currentFile = fileURLToPath(import.meta.url);
+const invokedFile = process.argv[1] ? path.resolve(process.argv[1]) : null;
+if (invokedFile && pathToFileURL(invokedFile).href === pathToFileURL(currentFile).href) {
+  main();
+}

@@ -1,6 +1,6 @@
 # 决策记录
 
-更新时间：2026-08-22
+更新时间：2026-08-28
 状态：`active`
 
 `docs/decisions/` 用来保存稳定单点决策。每份 ADR 应聚焦一个决定，适合作为稳定链接长期引用，并在被替代时留下取代关系。
@@ -23,7 +23,10 @@
 
 - `accepted`：[本地优先与服务器权威边界决策](./2026-08-22_022100_本地优先与服务器权威边界决策.md)
 - `accepted`：[Monorepo 与应用边界决策](./2026-08-22_022200_Monorepo与应用边界决策.md)
-- `accepted`：[Arena Room 部署边界与实时权威决策](./2026-08-22_184800_ArenaRoom部署边界与实时权威决策.md)
+- `superseded`：[Arena Room 部署边界与实时权威决策](./2026-08-22_184800_ArenaRoom部署边界与实时权威决策.md)
+- `accepted + 部分 superseded`：[Arena Room 运行时可移植与 Hono + Redis 首发决策](./2026-08-25_104400_ArenaRoom运行时可移植与HonoRedis首发决策.md)
+- `accepted`：[Arena 多人 Redis-only Room Directory 决策](./2026-08-28_181500_Arena多人RedisOnly目录决策.md)
+- `accepted`：[Hosted 运行时容灾与 Cloudflare 灾备决策](./2026-08-23_104000_Hosted运行时容灾与Cloudflare灾备决策.md)
 - `accepted`：[本地库与数据所有权决策](./2026-08-22_022300_本地库与数据所有权决策.md)
 - `accepted`：[客户端运行时与发行决策](./2026-08-22_022400_客户端运行时与发行决策.md)
 

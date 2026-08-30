@@ -1,3 +1,24 @@
+packages:
+  - apps/*
+  - packages/*
+overrides:
+  # GHSA-3jxr-9vmj-r5cp: stay inside parent semver ranges.
+  brace-expansion@1: 1.1.18
+  # GHSA-rgw5-rvv9-x895: follow-up fix for the 2.x line.
+  brace-expansion@2: 2.1.4
+  # GHSA-rgw5-rvv9-x895: follow-up fix for the 5.x line.
+  brace-expansion@5: 5.0.9
+  # GHSA-m7jm-9gc2-mpf2: keep transitive AWS clients on the patched 4.x line.
+  fast-xml-parser@4: 4.5.5
+  # Patch-level transitive fixes within the parents' supported major lines.
+  # GHSA-4x5r-pxfx-6jf8: remain on Babel 7 while taking the arbitrary file read fix.
+  '@babel/core@7': 7.29.7
+  # GHSA-f88m-g3jw-g9cj: Next 15.5.24 explicitly supports the patched sharp 0.35 line.
+  'next@15.5.24>sharp': 0.35.4
+  body-parser@2: 2.3.0
+  path-to-regexp@8: 8.4.0
+  postcss@8: 8.5.23
+  vite@8: 8.0.16
 allowBuilds:
   better-sqlite3: true
   esbuild: true
@@ -7,5 +28,4 @@ allowBuilds:
   workerd: true
 peerDependencyRules:
   allowedVersions:
-    next: 15.3.8
-    vercel: 47.0.4
+    next: 15.5.24

@@ -1,0 +1,99 @@
+{
+  "name": "@mahoshojo/hosted-api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./deployment-target": {
+      "types": "./src/deployment-target.ts",
+      "import": "./src/deployment-target.ts",
+      "default": "./src/deployment-target.ts"
+    },
+    "./hosted-dr": {
+      "types": "./src/hosted-dr.ts",
+      "import": "./src/hosted-dr.ts",
+      "default": "./src/hosted-dr.ts"
+    },
+    "./arena-generation/service": {
+      "types": "./src/arena-generation/service.ts",
+      "import": "./src/arena-generation/service.ts",
+      "default": "./src/arena-generation/service.ts"
+    },
+    "./arena-generation/sse": {
+      "types": "./src/arena-generation/sse.ts",
+      "import": "./src/arena-generation/sse.ts",
+      "default": "./src/arena-generation/sse.ts"
+    },
+    "./arena-generation/memory-replay-store": {
+      "types": "./src/arena-generation/memory-replay-store.ts",
+      "import": "./src/arena-generation/memory-replay-store.ts",
+      "default": "./src/arena-generation/memory-replay-store.ts"
+    },
+    "./arena-generation/unavailable-replay-store": {
+      "types": "./src/arena-generation/unavailable-replay-store.ts",
+      "import": "./src/arena-generation/unavailable-replay-store.ts",
+      "default": "./src/arena-generation/unavailable-replay-store.ts"
+    },
+    "./generate-canshou": {
+      "types": "./src/generate-canshou.ts",
+      "import": "./src/generate-canshou.ts",
+      "default": "./src/generate-canshou.ts"
+    },
+    "./generate-creator": {
+      "types": "./src/generate-creator.ts",
+      "import": "./src/generate-creator.ts",
+      "default": "./src/generate-creator.ts"
+    },
+    "./generate-free": {
+      "types": "./src/generate-free.ts",
+      "import": "./src/generate-free.ts",
+      "default": "./src/generate-free.ts"
+    },
+    "./generate-game-card": {
+      "types": "./src/generate-game-card.ts",
+      "import": "./src/generate-game-card.ts",
+      "default": "./src/generate-game-card.ts"
+    },
+    "./generate-magical-girl": {
+      "types": "./src/generate-magical-girl.ts",
+      "import": "./src/generate-magical-girl.ts",
+      "default": "./src/generate-magical-girl.ts"
+    },
+    "./generate-magical-girl-details": {
+      "types": "./src/generate-magical-girl-details.ts",
+      "import": "./src/generate-magical-girl-details.ts",
+      "default": "./src/generate-magical-girl-details.ts"
+    },
+    "./generate-scenario": {
+      "types": "./src/generate-scenario.ts",
+      "import": "./src/generate-scenario.ts",
+      "default": "./src/generate-scenario.ts"
+    },
+    "./generate-sublimation": {
+      "types": "./src/generate-sublimation.ts",
+      "import": "./src/generate-sublimation.ts",
+      "default": "./src/generate-sublimation.ts"
+    },
+    "./regular-generation": {
+      "types": "./src/regular-generation.ts",
+      "import": "./src/regular-generation.ts",
+      "default": "./src/regular-generation.ts"
+    }
+  },
+  "scripts": {
+    "test": "vitest run --config vitest.config.ts",
+    "lint": "eslint src tests --config eslint.config.mjs",
+    "build": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "zod": "^4.1.13"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "@typescript-eslint/parser": "^8.50.0",
+    "esbuild": "^0.28.1",
+    "eslint": "^9",
+    "typescript": "^5",
+    "vitest": "^4.1.7"
+  }
+}

@@ -3,7 +3,7 @@ name: Deploy Hono
 on:
   push:
     branches:
-      - '**'
+      - feature/v0.2.0_Battle_Growth_MahoShojo
   workflow_dispatch:
 
 concurrency:
@@ -20,6 +20,16 @@ env:
 jobs:
   build:
     runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 12
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -36,34 +46,124 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Verify workspace and repository gates
+        run: pnpm run ci:verify
+
       - name: Verify Hono authentication and runtime
-        run: pnpm exec vitest run tests/server tests/auth-server.test.ts tests/auth-server-app.test.ts
+        run: |
+          pnpm --filter @mahoshojo/api run test
+          pnpm exec vitest run tests/apps-api-source-ownership.test.ts tests/hosted-runtime-ownership.test.ts tests/hono-deploy-workflow.test.ts tests/hono-deploy-release-contract.test.ts tests/hono-deploy-installer.test.ts tests/hono-deploy-script.test.ts
+
+      - name: Verify Hono container build
+        env:
+          HONO_RELEASE_DIR: /tmp/mahoshojo-hono-release
+          HONO_HOSTED_API_ENVIRONMENT: production
+          HONO_DEPLOY_CORS_ORIGINS: https://mahoshojo.colanns.me
+          COMPOSE_ENV_DIRECTORY: /opt/mahoshojo-hono
+          COMPOSE_ENV_FILE: /opt/mahoshojo-hono/.env.hono
+        run: |
+          set -euo pipefail
+          cleanup_compose_environment() {
+            sudo rm -f -- "$COMPOSE_ENV_FILE"
+            sudo rmdir -- "$COMPOSE_ENV_DIRECTORY"
+          }
+          sudo test ! -e "$COMPOSE_ENV_DIRECTORY"
+          sudo test ! -L "$COMPOSE_ENV_DIRECTORY"
+          sudo mkdir -m 700 -- "$COMPOSE_ENV_DIRECTORY"
+          trap cleanup_compose_environment EXIT
+          sudo install -m 600 /dev/null "$COMPOSE_ENV_FILE"
+          docker build --file apps/api/Dockerfile .
+          sudo --preserve-env=HONO_RELEASE_DIR,HONO_HOSTED_API_ENVIRONMENT docker compose -f apps/api/deploy/compose.yml config --no-env-resolution
 
       - name: Build single-file server
         run: |
-          pnpm run build:server
-          cd dist/server
-          sha256sum index.mjs > index.mjs.sha256
-          cp ../../deploy/hono/compose.yml compose.yml
-          cp ../../deploy/hono/deploy-bundle.sh deploy-bundle.sh
+          pnpm --filter @mahoshojo/api run deploy:prepare
+          cp apps/api/deploy/compose.yml apps/api/dist/compose.yml
+          cp apps/api/deploy/deploy-bundle.sh apps/api/dist/deploy-bundle.sh
+          cp config/arena-room-release-gate.json apps/api/dist/arena-room-release-gate.json
+          cp scripts/arena-room-release-gate-schema.mjs apps/api/dist/arena-room-release-gate-schema.mjs
+          cd apps/api/dist
+          sha256sum index.mjs compose.yml deploy-bundle.sh \
+            arena-room-release-gate.json arena-room-release-gate-schema.mjs > release.manifest
+          sha256sum release.manifest > release.sha256
+
+      - name: Verify Hono built runtime integration
+        env:
+          REDIS_URL: redis://127.0.0.1:6379
+          D1_GATEWAY_URL: http://127.0.0.1:8788
+          HOSTED_API_ENVIRONMENT: local
+          HOSTED_DR_LOCAL_FAULT_INJECTION: 'true'
+          D1_GATEWAY_HMAC_SECRET: g25c-ci-only-d1-gateway-hmac-secret
+          HONO_AUTH_MODE: bearer
+          HONO_CORS_ORIGINS: https://g25c-ci.example.invalid
+          AI_API_KEY: g25c-ci-only-provider-placeholder
+          SIGNATURE_SECRET_KEY: g25c-ci-only-signature-secret-value
+          ARENA_FINALIZATION_URL: https://g25r-ci.example.invalid
+          ARENA_FINALIZATION_HMAC_SECRET: g25r-ci-only-independent-finalization-secret
+          R2_ACCESS_KEY_ID: g25r-ci-only-r2-access-key
+          R2_SECRET_ACCESS_KEY: g25r-ci-only-r2-secret-key
+          R2_BUCKET_NAME: g25r-ci-only-r2-bucket
+          R2_ACCOUNT_ID: g25r-ci-only-r2-account
+        run: |
+          set -euo pipefail
+          gateway_log="$RUNNER_TEMP/d1-gateway.log"
+          pnpm --filter @mahoshojo/d1-gateway exec wrangler dev --local \
+            --ip 127.0.0.1 \
+            --port 8788 \
+            --persist-to "$RUNNER_TEMP/d1-gateway-state" \
+            --var "D1_GATEWAY_HMAC_SECRET:$D1_GATEWAY_HMAC_SECRET" \
+            --show-interactive-dev-session false \
+            >"$gateway_log" 2>&1 &
+          gateway_pid=$!
+          cleanup() {
+            kill "$gateway_pid" 2>/dev/null || true
+            wait "$gateway_pid" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+
+          gateway_ready=false
+          for _ in {1..100}; do
+            if curl --fail --silent --show-error "$D1_GATEWAY_URL/health" >/dev/null; then
+              gateway_ready=true
+              break
+            fi
+            if ! kill -0 "$gateway_pid" 2>/dev/null; then
+              break
+            fi
+            sleep 0.2
+          done
+          if [ "$gateway_ready" != true ]; then
+            cat "$gateway_log" >&2
+            exit 1
+          fi
+
+          pnpm --filter @mahoshojo/api run verify:arena-redis
+          pnpm run verify:server:runtime
 
       - name: Upload bundle
         uses: actions/upload-artifact@v4
         with:
           name: hono-server-${{ github.sha }}
           path: |
-            dist/server/index.mjs
-            dist/server/index.mjs.sha256
-            dist/server/compose.yml
-            dist/server/deploy-bundle.sh
+            apps/api/dist/index.mjs
+            apps/api/dist/compose.yml
+            apps/api/dist/deploy-bundle.sh
+            apps/api/dist/arena-room-release-gate.json
+            apps/api/dist/arena-room-release-gate-schema.mjs
+            apps/api/dist/release.manifest
+            apps/api/dist/release.sha256
           if-no-files-found: error
           retention-days: 7
 
   deploy:
     needs: build
+    if: github.ref == 'refs/heads/feature/v0.2.0_Battle_Growth_MahoShojo'
     runs-on: ubuntu-latest
     environment: hono-production
     steps:
+      - name: Checkout deployment installer
+        uses: actions/checkout@v6
+
       - name: Download bundle
         uses: actions/download-artifact@v5
         with:
@@ -81,20 +181,22 @@ jobs:
 
       - name: Upload release
         run: |
-          release_id="$(awk '{print $1}' artifact/index.mjs.sha256)"
-          ssh -i ~/.ssh/deploy_key "$VPS_USER@$VPS_HOST" "install -d -m 755 /opt/mahoshojo-hono/releases/$release_id"
-          scp -i ~/.ssh/deploy_key artifact/index.mjs artifact/index.mjs.sha256 "$VPS_USER@$VPS_HOST:/opt/mahoshojo-hono/releases/$release_id/"
-          scp -i ~/.ssh/deploy_key artifact/compose.yml "$VPS_USER@$VPS_HOST:/opt/mahoshojo-hono/compose.yml.next"
-          scp -i ~/.ssh/deploy_key artifact/deploy-bundle.sh "$VPS_USER@$VPS_HOST:/opt/mahoshojo-hono/deploy-bundle.sh.next"
-          ssh -i ~/.ssh/deploy_key "$VPS_USER@$VPS_HOST" "chmod 755 /opt/mahoshojo-hono/deploy-bundle.sh.next && mv /opt/mahoshojo-hono/compose.yml.next /opt/mahoshojo-hono/compose.yml && mv /opt/mahoshojo-hono/deploy-bundle.sh.next /opt/mahoshojo-hono/deploy-bundle.sh"
-          ssh -i ~/.ssh/deploy_key "$VPS_USER@$VPS_HOST" "/opt/mahoshojo-hono/deploy-bundle.sh $release_id"
-
-      - name: Verify public endpoint
-        run: |
-          curl --fail --show-error --retry 6 --retry-delay 5 https://homura.colanns.me/health/ready
-          curl --fail --show-error --dump-header /tmp/hono-cors-headers --output /dev/null \
-            --request OPTIONS https://homura.colanns.me/api/generate-battle-story \
-            --header 'Origin: https://mahoshojo.colanns.me' \
-            --header 'Access-Control-Request-Method: POST' \
-            --header 'Access-Control-Request-Headers: authorization,content-type,x-mahoshojo-activity-token,x-mahoshojo-user-id'
-          grep -Fqi 'Access-Control-Allow-Origin: https://mahoshojo.colanns.me' /tmp/hono-cors-headers
+          release_id="$(awk '{print $1}' artifact/release.sha256)"
+          case "$release_id" in
+            ''|*[!0-9a-f]*) echo "artifact release id 非法" >&2; exit 1 ;;
+          esac
+          test "${#release_id}" -eq 64
+          upload_dir="$(ssh -i ~/.ssh/deploy_key "$VPS_USER@$VPS_HOST" 'sh -s -- create' < apps/api/deploy/install-bundle.sh)"
+          case "$upload_dir" in
+            /opt/mahoshojo-hono/releases/.upload.*) ;;
+            *) echo "远端返回了非法 upload staging" >&2; exit 1 ;;
+          esac
+          upload_suffix="${upload_dir##*/.upload.}"
+          case "$upload_suffix" in
+            ''|*[!A-Za-z0-9]*) echo "远端 upload staging 后缀非法" >&2; exit 1 ;;
+          esac
+          scp -i ~/.ssh/deploy_key artifact/index.mjs artifact/compose.yml artifact/deploy-bundle.sh artifact/arena-room-release-gate.json artifact/arena-room-release-gate-schema.mjs artifact/release.manifest artifact/release.sha256 "$VPS_USER@$VPS_HOST:$upload_dir/"
+          installed_dir="$(ssh -i ~/.ssh/deploy_key "$VPS_USER@$VPS_HOST" "sh -s -- install '$release_id' '$upload_dir'" < apps/api/deploy/install-bundle.sh)"
+          expected_dir="/opt/mahoshojo-hono/releases/$release_id"
+          test "$installed_dir" = "$expected_dir"
+          ssh -i ~/.ssh/deploy_key "$VPS_USER@$VPS_HOST" "HONO_HOSTED_API_ENVIRONMENT=production '$installed_dir/deploy-bundle.sh' '$release_id' https://homura.colanns.me"

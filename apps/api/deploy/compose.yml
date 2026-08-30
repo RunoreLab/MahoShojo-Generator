@@ -1,0 +1,49 @@
+services:
+  hono:
+    image: node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32
+    container_name: ${HONO_CONTAINER_NAME:-mahoshojo-hono}
+    init: true
+    restart: unless-stopped
+    user: node
+    command: ["node", "/app/index.mjs"]
+    env_file:
+      - ${HONO_DEPLOY_ROOT_DIR:-/opt/mahoshojo-hono}/.env.hono
+    environment:
+      NODE_ENV: production
+      HOSTED_API_ENVIRONMENT: ${HONO_HOSTED_API_ENVIRONMENT:?HONO_HOSTED_API_ENVIRONMENT must be explicit}
+      HONO_HOST: 0.0.0.0
+      HONO_PORT: 8787
+      HONO_AUTH_MODE: bearer
+      HONO_CORS_ORIGINS: ${HONO_DEPLOY_CORS_ORIGINS:?HONO_DEPLOY_CORS_ORIGINS must be explicit}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_REQUIRED: "true"
+      REDIS_KEY_PREFIX: ${HONO_REDIS_KEY_PREFIX:-}
+      D1_REQUIRED: "true"
+    ports:
+      - "127.0.0.1:${HONO_BIND_PORT:-8080}:8787"
+    volumes:
+      - "${HONO_RELEASE_DIR:?HONO_RELEASE_DIR 未配置}/index.mjs:/app/index.mjs:ro"
+    logging:
+      driver: json-file
+      options:
+        max-size: "100m"
+        max-file: "25"
+    networks:
+      - default
+      - mahoshojo-redis
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8787/health/ready"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+
+networks:
+  mahoshojo-redis:
+    external: true
+    name: ${HONO_REDIS_NETWORK_NAME:-mahoshojo-redis}

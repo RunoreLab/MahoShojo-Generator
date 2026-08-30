@@ -1,0 +1,1272 @@
+{
+  "flowers": [
+    {
+      "name": "金合欢",
+      "meaning": "Secret love"
+    },
+    {
+      "name": "棘叶",
+      "meaning": "Art"
+    },
+    {
+      "name": "乌头",
+      "meaning": "Misanthropy"
+    },
+    {
+      "name": "龙牙",
+      "meaning": "Thankfulness"
+    },
+    {
+      "name": "芦荟",
+      "meaning": "Grief"
+    },
+    {
+      "name": "杏花",
+      "meaning": "Promise"
+    },
+    {
+      "name": "千日红",
+      "meaning": "Immortality"
+    },
+    {
+      "name": "孤挺",
+      "meaning": "Pride"
+    },
+    {
+      "name": "豚草",
+      "meaning": "Love is reciprocated"
+    },
+    {
+      "name": "银莲",
+      "meaning": "Forsaken, sickness (negative), anticipation, undying love"
+    },
+    {
+      "name": "风兰",
+      "meaning": "Royalty"
+    },
+    {
+      "name": "红掌",
+      "meaning": "Hospitality, happiness, abundance"
+    },
+    {
+      "name": "苹果",
+      "meaning": "Preference"
+    },
+    {
+      "name": "侧柏",
+      "meaning": "Everlasting friendship"
+    },
+    {
+      "name": "草莓",
+      "meaning": "You are the only one I love"
+    },
+    {
+      "name": "海芋",
+      "meaning": "Faith, purity"
+    },
+    {
+      "name": "水仙百合",
+      "meaning": "My regrets follow you to the grave"
+    },
+    {
+      "name": "紫菀",
+      "meaning": "Symbol of love, daintiness, talisman of love, trusting"
+    },
+    {
+      "name": "杜鹃",
+      "meaning": "Take care, temperance, fragile, gratitude, passion, Chinese symbols of womanhood"
+    },
+    {
+      "name": "满天星",
+      "meaning": "Innocence, purity of heart"
+    },
+    {
+      "name": "矢车菊",
+      "meaning": "Single blessedness, celibacy"
+    },
+    {
+      "name": "香脂草",
+      "meaning": "Social intercourse or sympathy"
+    },
+    {
+      "name": "凤仙",
+      "meaning": "Ardent love"
+    },
+    {
+      "name": "凤仙",
+      "meaning": "Impatience"
+    },
+    {
+      "name": "秋海棠",
+      "meaning": "Beware, a fanciful nature"
+    },
+    {
+      "name": "风铃",
+      "meaning": "Unwavering Love"
+    },
+    {
+      "name": "爱尔兰钟",
+      "meaning": "Luck"
+    },
+    {
+      "name": "鸟足三叶草",
+      "meaning": "Revenge"
+    },
+    {
+      "name": "天堂鸟",
+      "meaning": "Liberty, magnificence, good perspective, faithfulness (given by a man to a woman)"
+    },
+    {
+      "name": "黄杨",
+      "meaning": "Constancy"
+    },
+    {
+      "name": "琉璃苣",
+      "meaning": "Courage"
+    },
+    {
+      "name": "金雀",
+      "meaning": "Humility"
+    },
+    {
+      "name": "芦苇",
+      "meaning": "Docility"
+    },
+    {
+      "name": "蜂兰",
+      "meaning": "Industry"
+    },
+    {
+      "name": "毛茛",
+      "meaning": "Riches"
+    },
+    {
+      "name": "甘蓝",
+      "meaning": "Profit"
+    },
+    {
+      "name": "山茶",
+      "meaning": "Unpretending excellence"
+    },
+    {
+      "name": "风铃草",
+      "meaning": "Gratitude"
+    },
+    {
+      "name": "坎特伯雷钟",
+      "meaning": "Gratitude"
+    },
+    {
+      "name": "康乃馨",
+      "meaning": "Fascination; distinction; love"
+    },
+    {
+      "name": "白屈",
+      "meaning": "Joys to come"
+    },
+    {
+      "name": "樱",
+      "meaning": "A good education"
+    },
+    {
+      "name": "栗",
+      "meaning": "Do me justice, Chastity"
+    },
+    {
+      "name": "紫菀",
+      "meaning": "Love of variety, fidelity"
+    },
+    {
+      "name": "红菊",
+      "meaning": "I love"
+    },
+    {
+      "name": "波斯菊",
+      "meaning": "Always cheerful"
+    },
+    {
+      "name": "樱草",
+      "meaning": "Winning grace"
+    },
+    {
+      "name": "丁香",
+      "meaning": "Undying love"
+    },
+    {
+      "name": "红三叶",
+      "meaning": "Industry"
+    },
+    {
+      "name": "耧斗",
+      "meaning": "The emblem of deceived lovers, ingratitude, faithlessness"
+    },
+    {
+      "name": "芫荽",
+      "meaning": "Lust"
+    },
+    {
+      "name": "番红",
+      "meaning": "Youthful joy, love, abuse not, Lupercalia"
+    },
+    {
+      "name": "柏花",
+      "meaning": "Death, mourning, despair, sorrow."
+    },
+    {
+      "name": "水仙",
+      "meaning": "Uncertainty, chivalry, respect or unrequited love, return my affection; new beginnings"
+    },
+    {
+      "name": "大丽",
+      "meaning": "Elegance and dignity"
+    },
+    {
+      "name": "红大丽",
+      "meaning": "Betrayal and dishonesty"
+    },
+    {
+      "name": "雏菊",
+      "meaning": "Innocence, loyal love, purity, faith, cheer, simplicity; or, dissembling as in Shakespeare's Hamlet"
+    },
+    {
+      "name": "蒲公英",
+      "meaning": "overcoming hardship"
+    },
+    {
+      "name": "飞燕",
+      "meaning": "Levity, fun, big-hearted, ardent attachment, joy"
+    },
+    {
+      "name": "野玫",
+      "meaning": "A wound to heal"
+    },
+    {
+      "name": "接骨木",
+      "meaning": "Compassion"
+    },
+    {
+      "name": "茴香",
+      "meaning": "Strength or, as in Shakespeare's Hamlet, a Cuckold[2]"
+    },
+    {
+      "name": "勿忘我",
+      "meaning": "True love, don't forget me"
+    },
+    {
+      "name": "洋地黄",
+      "meaning": "Insecurity"
+    },
+    {
+      "name": "白蘑",
+      "meaning": "Resilience, loneliness, solitude, disgust"
+    },
+    {
+      "name": "栀子",
+      "meaning": "Secret love, joy, sweet love, good luck"
+    },
+    {
+      "name": "天竺葵",
+      "meaning": "Gentility, determination"
+    },
+    {
+      "name": "剑兰",
+      "meaning": "Strength of character, honor, conviction"
+    },
+    {
+      "name": "荆豆",
+      "meaning": "Love in all seasons"
+    },
+    {
+      "name": "紫石南",
+      "meaning": "Solitude, beauty, admiration"
+    },
+    {
+      "name": "向日葵",
+      "meaning": "Devotion"
+    },
+    {
+      "name": "木槿",
+      "meaning": "Rare and delicate beauty"
+    },
+    {
+      "name": "蜀葵",
+      "meaning": "Ambition"
+    },
+    {
+      "name": "金银",
+      "meaning": "Devoted affection, bonds of love"
+    },
+    {
+      "name": "长生草",
+      "meaning": "Domestic economy"
+    },
+    {
+      "name": "绣球",
+      "meaning": "Frigidness, heartlessness (negative), heartfelt gratitude for being understood"
+    },
+    {
+      "name": "伊莉丝",
+      "meaning": "Good news"
+    },
+    {
+      "name": "常春藤",
+      "meaning": "Dependence, endurance, faithfulness"
+    },
+    {
+      "name": "茉莉",
+      "meaning": "Unconditional and eternal love (in the Philippines and Hinduism)"
+    },
+    {
+      "name": "黄水仙",
+      "meaning": "Return my affection"
+    },
+    {
+      "name": "月桂",
+      "meaning": "Ambition, success, renown"
+    },
+    {
+      "name": "薰衣草",
+      "meaning": "Devotion, distrust"
+    },
+    {
+      "name": "柠檬",
+      "meaning": "Discretion"
+    },
+    {
+      "name": "紫丁香",
+      "meaning": "First emotion of love"
+    },
+    {
+      "name": "百合",
+      "meaning": "Purity"
+    },
+    {
+      "name": "白百合",
+      "meaning": "Purity"
+    },
+    {
+      "name": "铃兰",
+      "meaning": "Sweetness, humility, returning happiness, Trust"
+    },
+    {
+      "name": "柳穿",
+      "meaning": "Please notice my love/feelings for you"
+    },
+    {
+      "name": "酸橙",
+      "meaning": "Fornication"
+    },
+    {
+      "name": "半边莲",
+      "meaning": "Malevolence"
+    },
+    {
+      "name": "莲",
+      "meaning": "Purity, chastity and eloquence; rebirth"
+    },
+    {
+      "name": "鸡冠",
+      "meaning": "Hopelessness"
+    },
+    {
+      "name": "木兰",
+      "meaning": "Love of nature"
+    },
+    {
+      "name": "锦葵",
+      "meaning": "Consumed by love"
+    },
+    {
+      "name": "万寿菊",
+      "meaning": "Pain and grief"
+    },
+    {
+      "name": "五月",
+      "meaning": "Welcome"
+    },
+    {
+      "name": "木犀草",
+      "meaning": "Worth"
+    },
+    {
+      "name": "薄荷",
+      "meaning": "Suspicion"
+    },
+    {
+      "name": "夜来香",
+      "meaning": "Dreaming of love"
+    },
+    {
+      "name": "牵牛",
+      "meaning": "Love in vain"
+    },
+    {
+      "name": "朝颜",
+      "meaning": "Love in vain"
+    },
+    {
+      "name": "毛蕊",
+      "meaning": "Good-nature"
+    },
+    {
+      "name": "水仙",
+      "meaning": "Unrequited love, selfishness"
+    },
+    {
+      "name": "旱金莲",
+      "meaning": "Patriotism"
+    },
+    {
+      "name": "荨麻",
+      "meaning": "life and death, protection[4] as in Shakespeare's Hamlet"
+    },
+    {
+      "name": "橡",
+      "meaning": "Strength"
+    },
+    {
+      "name": "燕麦",
+      "meaning": "Music"
+    },
+    {
+      "name": "橄榄",
+      "meaning": "Peace"
+    },
+    {
+      "name": "兰",
+      "meaning": "Refined beauty"
+    },
+    {
+      "name": "牛眼菊",
+      "meaning": "Patience"
+    },
+    {
+      "name": "三色堇",
+      "meaning": "Thoughts (according to Ophelia of Hamlet) Sometimes referring to \"lover's thoughts\""
+    },
+    {
+      "name": "桃花",
+      "meaning": "Long-life, generosity, and bridal hope"
+    },
+    {
+      "name": "梨花",
+      "meaning": "Lasting friendship"
+    },
+    {
+      "name": "牡丹",
+      "meaning": "Shame, bashfulness, anger"
+    },
+    {
+      "name": "福禄考",
+      "meaning": "Harmony"
+    },
+    {
+      "name": "沥青松",
+      "meaning": "Philosophy"
+    },
+    {
+      "name": "梅",
+      "meaning": "Beauty and longevity"
+    },
+    {
+      "name": "鸡蛋花",
+      "meaning": "Perfection, springtime, new beginnings"
+    },
+    {
+      "name": "缅栀子",
+      "meaning": "Perfection, springtime, new beginnings"
+    },
+    {
+      "name": "报春",
+      "meaning": "Eternal love"
+    },
+    {
+      "name": "帝王花",
+      "meaning": "Courage"
+    },
+    {
+      "name": "罂粟",
+      "meaning": "Eternal sleep, oblivion, imagination"
+    },
+    {
+      "name": "莳萝",
+      "meaning": "Eternal sleep"
+    },
+    {
+      "name": "雨花",
+      "meaning": "I love you back, I must atone for my sins, I will never forget you"
+    },
+    {
+      "name": "迷迭香",
+      "meaning": "Remembrance"
+    },
+    {
+      "name": "芸香",
+      "meaning": "Regret, sorrow, repentance"
+    },
+    {
+      "name": "含羞草",
+      "meaning": "Sensitivity"
+    },
+    {
+      "name": "雪花莲",
+      "meaning": "Consolation or hope"
+    },
+    {
+      "name": "雪莲",
+      "meaning": "Consolation or hope"
+    },
+    {
+      "name": "圣诞星",
+      "meaning": "Atonement, reconciliation"
+    },
+    {
+      "name": "稻花",
+      "meaning": "United"
+    },
+    {
+      "name": "向日葵",
+      "meaning": "Pure and lofty thoughts, adoration, longevity, loyalty"
+    },
+    {
+      "name": "甜蔷",
+      "meaning": "Simplicity"
+    },
+    {
+      "name": "甜豌",
+      "meaning": "Gratitude"
+    },
+    {
+      "name": "曼陀罗",
+      "meaning": "Disguise"
+    },
+    {
+      "name": "蓟",
+      "meaning": "Nobility, Warning [5]"
+    },
+    {
+      "name": "百里香",
+      "meaning": "Thriftiness"
+    },
+    {
+      "name": "鹅掌楸",
+      "meaning": "Fame"
+    },
+    {
+      "name": "红郁金香",
+      "meaning": "Undying love, Passion, Perfect love"
+    },
+    {
+      "name": "紫罗兰",
+      "meaning": "Faithfulness"
+    },
+    {
+      "name": "柳花",
+      "meaning": "Love forsaken"
+    },
+    {
+      "name": "榆花",
+      "meaning": "Messengers"
+    },
+    {
+      "name": "紫藤",
+      "meaning": "Welcoming"
+    },
+    {
+      "name": "金缕梅",
+      "meaning": "A magic spell"
+    },
+    {
+      "name": "小麦",
+      "meaning": "Wealth and prosperity"
+    },
+    {
+      "name": "苦艾",
+      "meaning": "Absence, bitter sorrow"
+    },
+    {
+      "name": "依兰",
+      "meaning": "Never-Ending love"
+    },
+    {
+      "name": "康乃馨",
+      "meaning": "fascination, distinction, love"
+    },
+    {
+      "name": "雪花莲",
+      "meaning": "fascination, distinction, love"
+    },
+    {
+      "name": "报春",
+      "meaning": "modesty, distinction, virtue"
+    },
+    {
+      "name": "水仙",
+      "meaning": "spring, rebirth, domestic happiness, vanity"
+    },
+    {
+      "name": "山楂",
+      "meaning": "happiness, humility, sweetness"
+    },
+    {
+      "name": "金银花",
+      "meaning": "love, gratitude, appreciation"
+    },
+    {
+      "name": "飞燕草",
+      "meaning": "joyful, fickleness, sweet"
+    },
+    {
+      "name": "冬青",
+      "meaning": "sweetness, self-esteem, vanity"
+    },
+    {
+      "name": "贝母",
+      "meaning": "Love, curse"
+    },
+    {
+      "name": "樱",
+      "meaning": "Kind/Gentle/Transience of Life"
+    },
+    {
+      "name": "黄菊",
+      "meaning": "Imperial"
+    },
+    {
+      "name": "白菊",
+      "meaning": "Truth"
+    },
+    {
+      "name": "四叶草",
+      "meaning": "Lucky"
+    },
+    {
+      "name": "水仙",
+      "meaning": "Respect"
+    },
+    {
+      "name": "大丽",
+      "meaning": "Good taste"
+    },
+    {
+      "name": "雏菊",
+      "meaning": "Faith"
+    },
+    {
+      "name": "雪绒",
+      "meaning": "Courage/Power"
+    },
+    {
+      "name": "石南",
+      "meaning": "Solitude"
+    },
+    {
+      "name": "勿忘我",
+      "meaning": "True love"
+    },
+    {
+      "name": "小苍兰",
+      "meaning": "Childish/Immature"
+    },
+    {
+      "name": "栀子",
+      "meaning": "Secret love"
+    },
+    {
+      "name": "鹭草",
+      "meaning": "My thoughts will follow you into your dreams"
+    },
+    {
+      "name": "木槿",
+      "meaning": "Gentle"
+    },
+    {
+      "name": "鸢尾",
+      "meaning": "Good News/Glad tidings/loyalty"
+    },
+    {
+      "name": "虎百合",
+      "meaning": "Wealth"
+    },
+    {
+      "name": "曼珠沙华",
+      "meaning": "Never to meet again/Lost memory/Abandonment"
+    },
+    {
+      "name": "向日葵",
+      "meaning": "Respect, passionate love, radiance"
+    },
+    {
+      "name": "莲花",
+      "meaning": "Far from the one he loves/Purity/Chastity"
+    },
+    {
+      "name": "木兰",
+      "meaning": "Natural"
+    },
+    {
+      "name": "槲寄生",
+      "meaning": "Looking Single"
+    },
+    {
+      "name": "水仙",
+      "meaning": "Self-Esteem"
+    },
+    {
+      "name": "三色堇",
+      "meaning": "Thoughtful/Caring"
+    },
+    {
+      "name": "白玫",
+      "meaning": "Innocence/Silence/Devotion"
+    },
+    {
+      "name": "黄玫",
+      "meaning": "Jealousy"
+    },
+    {
+      "name": "粉玫",
+      "meaning": "Trust/Happiness/Confidence"
+    },
+    {
+      "name": "百日草",
+      "meaning": "Loyalty"
+    },
+    {
+      "name": "风信子",
+      "meaning": "sorrow, sport, rashness, or play"
+    },
+    {
+      "name": "火鹤",
+      "meaning": "Flame"
+    },
+    {
+      "name": "蓝雪",
+      "meaning": "Honesty"
+    },
+    {
+      "name": "米兰",
+      "meaning": "Love, beauty"
+    },
+    {
+      "name": "扶桑",
+      "meaning": "Delicate beauty"
+    },
+    {
+      "name": "龙胆",
+      "meaning": "Justice, victory"
+    },
+    {
+      "name": "凌霄",
+      "meaning": "Admiration, reputation"
+    },
+    {
+      "name": "翠云",
+      "meaning": "Elegance, noble"
+    },
+    {
+      "name": "唐菖蒲",
+      "meaning": "Strength of character, honor, conviction"
+    },
+    {
+      "name": "锦葵",
+      "meaning": "Consumed by love"
+    },
+    {
+      "name": "白鹃",
+      "meaning": "Restraint, temperance"
+    },
+    {
+      "name": "龙眼",
+      "meaning": "Wealth, prosperity"
+    },
+    {
+      "name": "香榧",
+      "meaning": "Longevity, persistence"
+    },
+    {
+      "name": "石蒜",
+      "meaning": "Passionate love, reunion"
+    },
+    {
+      "name": "珊瑚",
+      "meaning": "Delicacy, fascination"
+    },
+    {
+      "name": "昙",
+      "meaning": "Transient beauty, ephemeral"
+    },
+    {
+      "name": "忍冬",
+      "meaning": "Devoted affection, bonds of love"
+    },
+    {
+      "name": "桔梗",
+      "meaning": "Unchanging love, honesty"
+    },
+    {
+      "name": "翠雀",
+      "meaning": "Fickleness"
+    },
+    {
+      "name": "松花",
+      "meaning": "Pity"
+    },
+    {
+      "name": "艾草",
+      "meaning": "Safety, health"
+    },
+    {
+      "name": "金盏花",
+      "meaning": "Jealousy, disappointment"
+    },
+    {
+      "name": "胡椒",
+      "meaning": "Endurance"
+    },
+    {
+      "name": "狗尾草",
+      "meaning": "Secret love, unrequited love"
+    },
+    {
+      "name": "猫尾",
+      "meaning": "Gentle love, nostalgia"
+    },
+    {
+      "name": "葱花",
+      "meaning": "Power, wealth"
+    },
+    {
+      "name": "月见草",
+      "meaning": "Silent love"
+    },
+    {
+      "name": "红莲",
+      "meaning": "Love, passion, romance"
+    },
+    {
+      "name": "白莲",
+      "meaning": "Purity, elegance"
+    },
+    {
+      "name": "木棉",
+      "meaning": "Cherished love"
+    },
+    {
+      "name": "竹花",
+      "meaning": "Nobility, elegance"
+    },
+    {
+      "name": "密蒙花",
+      "meaning": "Faith, hope"
+    },
+    {
+      "name": "月季",
+      "meaning": "Love, beauty, enthusiasm"
+    },
+    {
+      "name": "樱桃",
+      "meaning": "Youth, vitality, good luck"
+    },
+    {
+      "name": "水仙",
+      "meaning": "Selfishness, unrequited love"
+    },
+    {
+      "name": "矮牵牛",
+      "meaning": "Your presence soothes me"
+    },
+    {
+      "name": "长春花",
+      "meaning": "Beautiful memories"
+    },
+    {
+      "name": "翠菊",
+      "meaning": "Patience, daintiness"
+    },
+    {
+      "name": "大丽花",
+      "meaning": "Good taste"
+    },
+    {
+      "name": "蝶豆花",
+      "meaning": "Starting a new journey"
+    },
+    {
+      "name": "非洲菊",
+      "meaning": "Cheerfulness"
+    },
+    {
+      "name": "火鹤花",
+      "meaning": "Flame"
+    },
+    {
+      "name": "鸡冠花",
+      "meaning": "Silliness, affectation"
+    },
+    {
+      "name": "金鱼草",
+      "meaning": "Gracious lady"
+    },
+    {
+      "name": "蓝花楹",
+      "meaning": "Wisdom, rebirth, wealth, and good luck"
+    },
+    {
+      "name": "马蹄莲",
+      "meaning": "Magnificent beauty"
+    },
+    {
+      "name": "美女樱",
+      "meaning": "Family unity"
+    },
+    {
+      "name": "茉莉花",
+      "meaning": "Attachment, modesty"
+    },
+    {
+      "name": "银莲",
+      "meaning": "Forsaken"
+    },
+    {
+      "name": "蔷薇",
+      "meaning": "Love, beauty, grace"
+    },
+    {
+      "name": "芍药",
+      "meaning": "Bashfulness and compassion"
+    },
+    {
+      "name": "石竹",
+      "meaning": "Boldness"
+    },
+    {
+      "name": "鼠尾草",
+      "meaning": "I think of you"
+    },
+    {
+      "name": "睡莲",
+      "meaning": "Purity of heart"
+    },
+    {
+      "name": "晚香玉",
+      "meaning": "Dangerous pleasure"
+    },
+    {
+      "name": "文心兰",
+      "meaning": "Shyness"
+    },
+    {
+      "name": "仙客来",
+      "meaning": "Resignation and good-bye"
+    },
+    {
+      "name": "一串红",
+      "meaning": "Honey, I'm yours"
+    },
+    {
+      "name": "虞美人",
+      "meaning": "Consolation"
+    },
+    {
+      "name": "长寿花",
+      "meaning": "Health and longevity"
+    },
+    {
+      "name": "玫瑰",
+      "meaning": "Love"
+    },
+    {
+      "name": "郁金香",
+      "meaning": "Declaration of love"
+    },
+    {
+      "name": "罗勒",
+      "meaning": "Best wishes"
+    },
+    {
+      "name": "牛至",
+      "meaning": "Joy and happiness"
+    },
+    {
+      "name": "欧芹",
+      "meaning": "Festivity"
+    },
+    {
+      "name": "龙蒿",
+      "meaning": "Lasting interest"
+    },
+    {
+      "name": "细香葱",
+      "meaning": "Usefulness"
+    },
+    {
+      "name": "橙香木",
+      "meaning": "Attraction"
+    },
+    {
+      "name": "当归",
+      "meaning": "Inspiration"
+    },
+    {
+      "name": "黄百合",
+      "meaning": "Gratitude and Happiness"
+    },
+    {
+      "name": "粉百合",
+      "meaning": "Prosperity and Motherly Love"
+    },
+    {
+      "name": "白紫罗兰",
+      "meaning": "Seize the opportunity for happiness"
+    },
+    {
+      "name": "白茉莉",
+      "meaning": "Sincerity, Respect"
+    },
+    {
+      "name": "黄茉莉",
+      "meaning": "Joy, Friendliness"
+    },
+    {
+      "name": "洋牡丹",
+      "meaning": "Wealth, Authority, Self-esteem"
+    },
+    {
+      "name": "蝴蝶兰",
+      "meaning": "Happiness, Blessings, Bright Future"
+    },
+    {
+      "name": "百子莲",
+      "meaning": "Secret Love"
+    },
+    {
+      "name": "大岩桐",
+      "meaning": "Love at First Sight"
+    },
+    {
+      "name": "牛膝草",
+      "meaning": "Sacrifice, Cleanliness"
+    },
+    {
+      "name": "朱槿",
+      "meaning": "Meditation"
+    },
+    {
+      "name": "蓍草",
+      "meaning": "State of war"
+    },
+    {
+      "name": "丝兰",
+      "meaning": "Best friends"
+    },
+    {
+      "name": "侧金盏花",
+      "meaning": "Patience, Humility, Sad memories"
+    },
+    {
+      "name": "水苏",
+      "meaning": "Surprise"
+    },
+    {
+      "name": "田旋花",
+      "meaning": "Perseverance"
+    },
+    {
+      "name": "白英",
+      "meaning": "Truth, Fact"
+    },
+    {
+      "name": "彼岸花",
+      "meaning": "Sorrowful memories"
+    },
+    {
+      "name": "红玫",
+      "meaning": "Love, Passion"
+    },
+    {
+      "name": "黑玫",
+      "meaning": "You are mine exclusively"
+    },
+    {
+      "name": "紫玫",
+      "meaning": "Romantic, unique and precious"
+    },
+    {
+      "name": "橙玫",
+      "meaning": "Enthusiasm, desire"
+    },
+    {
+      "name": "绿玫",
+      "meaning": "Innocence, youthfulness, I only love you"
+    },
+    {
+      "name": "蓝铃花",
+      "meaning": "Humility"
+    },
+    {
+      "name": "仙人掌",
+      "meaning": "Endurance"
+    },
+    {
+      "name": "金木犀",
+      "meaning": "高洁、谦虚"
+    },
+    {
+      "name": "石楠花",
+      "meaning": "庄严、孤独"
+    },
+    {
+      "name": "橘花",
+      "meaning": "高洁、隐逸、长寿、吉祥"
+    },
+    {
+      "name": "橙花",
+      "meaning": "纯真的爱"
+    },
+    {
+      "name": "荔枝",
+      "meaning": "美好的承诺"
+    },
+    {
+      "name": "桂花",
+      "meaning": "收获、高尚"
+    },
+    {
+      "name": "迎春花",
+      "meaning": "希望、新生"
+    },
+    {
+      "name": "龙舌兰",
+      "meaning": "为爱不惜一切"
+    },
+    {
+      "name": "菖蒲",
+      "meaning": "幸福"
+    },
+    {
+      "name": "酢浆草",
+      "meaning": "璀璨的心、绝不舍弃你"
+    },
+    {
+      "name": "茱萸",
+      "meaning": "Remembrance, Warding off evil"
+    },
+    {
+      "name": "杨柳",
+      "meaning": "Parting, Nostalgia"
+    },
+    {
+      "name": "红豆",
+      "meaning": "Acacia, Longing"
+    },
+    {
+      "name": "萱草",
+      "meaning": "Mother's love, Forgetting worries"
+    },
+    {
+      "name": "豆蔻",
+      "meaning": "Youthful beauty of a young girl"
+    },
+    {
+      "name": "芭蕉",
+      "meaning": "Sorrow of a lonely traveler"
+    },
+    {
+      "name": "梅花",
+      "meaning": "Perseverance and purity"
+    },
+    {
+      "name": "菊花",
+      "meaning": "Longevity and resilience"
+    },
+    {
+      "name": "兰花",
+      "meaning": "Elegance and virtue"
+    },
+    {
+      "name": "梧桐",
+      "meaning": "Sadness and sorrow"
+    },
+    {
+      "name": "松柏",
+      "meaning": "Integrity and perseverance"
+    },
+    {
+      "name": "胡杨",
+      "meaning": ""
+    },
+    {
+      "name": "青冈栎",
+      "meaning": ""
+    },
+    {
+      "name": "三角梅",
+      "meaning": ""
+    },
+    {
+      "name": "檀花",
+      "meaning": ""
+    },
+    {
+      "name": "金丝楠",
+      "meaning": ""
+    },
+    {
+      "name": "海桐",
+      "meaning": ""
+    },
+    {
+      "name": "石榴",
+      "meaning": ""
+    },
+    {
+      "name": "海棠",
+      "meaning": ""
+    },
+    {
+      "name": "云杉",
+      "meaning": ""
+    },
+    {
+      "name": "苏铁",
+      "meaning": ""
+    },
+    {
+      "name": "丹凤",
+      "meaning": ""
+    },
+    {
+      "name": "紫荆",
+      "meaning": ""
+    },
+    {
+      "name": "厚藤花",
+      "meaning": ""
+    },
+    {
+      "name": "蕹菜",
+      "meaning": ""
+    },
+    {
+      "name": "旋花",
+      "meaning": ""
+    },
+    {
+      "name": "五爪金龙",
+      "meaning": ""
+    },
+    {
+      "name": "茑萝",
+      "meaning": ""
+    },
+    {
+      "name": "沙葛",
+      "meaning": ""
+    },
+    {
+      "name": "田艾",
+      "meaning": ""
+    }
+  ]
+}

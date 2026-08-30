@@ -1,0 +1,96 @@
+{
+  "protocolVersion": 1,
+  "schemaVersion": 1,
+  "roomId": "room_01JARENAEXAMPLE",
+  "roomEpoch": "epoch_01JARENA",
+  "revision": 7,
+  "controlSeq": 24,
+  "sharedConfig": {
+    "battleMode": "scenario",
+    "combatants": [
+      {
+        "key": "data-card:character-001",
+        "ref": {
+          "id": "character-001",
+          "kind": "character",
+          "versionToken": "v2026-08-22-001"
+        },
+        "characterGuidance": "优先保护队友"
+      },
+      {
+        "key": "host-local:character-opaque-1",
+        "displayName": "房主本地角色",
+        "type": "magical-girl",
+        "source": "host-local",
+        "characterGuidance": "保持谨慎"
+      }
+    ],
+    "teams": [
+      {
+        "key": "team-alpha",
+        "displayName": "第一队",
+        "combatantKeys": ["data-card:character-001"]
+      }
+    ],
+    "scenario": {
+      "key": "data-card:scenario-001",
+      "ref": {
+        "id": "scenario-001",
+        "kind": "scenario",
+        "versionToken": "v2026-08-22-scenario-001"
+      }
+    },
+    "auxScenarios": [
+      {
+        "key": "data-card:scenario-aux-001",
+        "ref": {
+          "id": "scenario-aux-001",
+          "kind": "scenario",
+          "versionToken": "v2026-08-22-scenario-aux-001"
+        }
+      }
+    ],
+    "materials": [
+      {
+        "key": "data-card:material-001",
+        "ref": {
+          "id": "material-001",
+          "kind": "material",
+          "versionToken": "v2026-08-22-material-001"
+        }
+      }
+    ],
+    "userGuidance": "让叙事保持紧凑并突出选择后果。",
+    "storyLength": "standard",
+    "customStoryLength": null,
+    "selectedLanguage": "zh-CN",
+    "historySettings": {
+      "readArenaHistory": true,
+      "readArenaHistoryLimit": 3,
+      "isArenaHistoryUnlimited": false,
+      "writeArenaHistory": true,
+      "readCurrentState": true,
+      "writeCurrentState": true,
+      "readNarrativeHistory": false,
+      "readNarrativeHistoryLimit": 10,
+      "isNarrativeHistoryUnlimited": false,
+      "writeNarrativeHistory": false
+    }
+  },
+  "members": [
+    {
+      "userId": "user-host",
+      "role": "host",
+      "displayName": "房主",
+      "membershipState": "active"
+    },
+    {
+      "userId": "user-member",
+      "role": "member",
+      "displayName": "成员",
+      "membershipState": "active"
+    }
+  ],
+  "proposals": [],
+  "activeGeneration": null
+}

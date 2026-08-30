@@ -1,5 +1,15 @@
 # 竞技场多人协作模式 v1 实施计划
 
+状态：`业务语义有效 / 运行时与 D1 directory 部分 superseded`
+最近修订：2026-08-28
+
+> 本计划的产品、Proposal、generation、security 与资源控制语义继续有效。Phase B 以后 DO-first 运行时由
+> [Arena 多人 Hono + Redis 首发实施计划](./2026-08-25_104400_Arena多人HonoRedis首发实施计划.md) 取代；
+> D1 Room Directory、migration、orphan reconciliation 与对应验收由
+> [Arena 多人 Redis-only Room Directory 决策](../decisions/2026-08-28_181500_Arena多人RedisOnly目录决策.md) 和
+> [Redis-only directory 规范修订](../specs/2026-08-28_150500_Arena多人v1移除D1目录RedisOnly规范修订.md)
+> 取代。下文相关段落只保存实施历史，不是当前 v1 runtime/schema 目标。
+
 ## 1. 目标
 
 在不复制竞技场页面、不改变既有战报生成核心语义的前提下，为 `/arena` 增加注册用户多人房间、配置同步、Proposal、共享战报与低成本实时传输。
@@ -9,13 +19,37 @@
 关联规格：
 
 - `docs/specs/2026-08-21_arena-multiplayer-v1-spec.md`
+- 平台阶段门禁：`docs/plans/2026-08-22_022700_平台重整分阶段实施计划.md`
+
+### 1.1 当前执行状态与平台门禁（2026-08-23）
+
+Phase A 的 wire contract 与主要纯逻辑已经在 `packages/contracts`、`packages/multiplayer-core` 形成实现基础。该成果继续保留并作为后续 Room runtime 的公共边界，不回退到根目录重新实现。
+
+但本计划是 Arena 业务域实施计划，不覆盖平台重整关键路径。自 2026-08-23 起，在平台计划 **Phase 2.5 真实应用边界激活**退出前：
+
+允许继续：
+
+- 现有 Arena Web 状态到 `ArenaRoomNormalizedSource` 的真实 adapter；
+- Web 对 `@mahoshojo/contracts` / `@mahoshojo/multiplayer-core` 的 consumer integration；
+- v1 fixture、协议兼容、敏感字段、diff/apply/conflict 等测试；
+- 会阻塞平台 package/app 迁移的缺陷修复。
+
+暂不启动：
+
+- Room Worker / Durable Object runtime；
+- WebSocket / Hibernation / alarm；
+- D1 room directory、ticket/auth；
+- GenerationBridge runtime ingress；
+- 多人产品 UI 与完整 reconnect 流程。
+
+Phase 2.5 退出后从 Phase B 恢复，并优先直接落在目标 `apps/arena-room`；只有出现有记录的迁移阻塞时才使用临时路径。该门禁只调整开发时序，不改变 v1 已冻结的 DTO、Proposal、host-only authoritative generation、资源限制或恢复语义。
 
 ## 2. 总体策略
 
 采用分阶段交付：
 
 1. Phase A：共享配置契约与纯客户端 diff
-2. Phase B：Room sidecar Worker + Durable Object
+2. Phase B：Room sidecar Worker + Durable Object（受平台 Phase 2.5 退出门禁约束）
 3. Phase C：房间创建/加入/状态条
 4. Phase D：Proposal
 5. Phase E：战报单次生成与房间广播
@@ -73,7 +107,7 @@
 
 - `diffArenaSharedConfig(base, working)`
 - `validateProposalChanges()`
-- `detectProposalConflicts(base, current, changes)`
+- `detectProposalConflicts(current, changes)`；BASE 由每个 change 自带的 typed `expectedBase` 提供，不再传入独立 base snapshot
 
 先完全在浏览器/单元测试运行，不接后端。
 
@@ -95,6 +129,8 @@
 - old/new protocol fixture
 
 ## 4. Phase B：Room Worker / Durable Object 基础
+
+> 启动条件：平台重整计划 Phase 2.5 已通过；否则返回 Phase A consumer integration / compatibility 工作，不提前实现本节 runtime。
 
 ### 4.1 独立 Worker
 

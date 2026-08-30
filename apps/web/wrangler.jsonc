@@ -1,0 +1,212 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "mahoshojo-next",
+  "main": ".open-next/worker.js",
+  "compatibility_date": "2024-09-23",
+  "compatibility_flags": [
+    "nodejs_compat",
+    "global_fetch_strictly_public"
+  ],
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 0.1
+  },
+  "limits": {
+    "cpu_ms": 10000
+  },
+  "ratelimits": [
+    {
+      "name": "ARENA_RANKING_ACTOR_LIMITER",
+      "namespace_id": "73001",
+      "simple": { "limit": 12, "period": 60 }
+    },
+    {
+      "name": "ARENA_RANKING_IP_GENERATION_LIMITER",
+      "namespace_id": "73002",
+      "simple": { "limit": 12, "period": 60 }
+    },
+    {
+      "name": "ARENA_RANKING_IP_LIMITER",
+      "namespace_id": "73003",
+      "simple": { "limit": 120, "period": 60 }
+    }
+  ],
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  },
+  "services": [
+    {
+      "binding": "WORKER_SELF_REFERENCE",
+      "service": "mahoshojo-next"
+    }
+  ],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "mahoshojo",
+      "database_id": "8eb9b25c-5a00-4feb-b5cb-c5dd25cda1d3",
+      "migrations_dir": "../../drizzle"
+    }
+  ],
+  "env": {
+    "production": {
+      "name": "mahoshojo-next",
+      "compatibility_date": "2024-09-23",
+      "compatibility_flags": [
+        "nodejs_compat",
+        "global_fetch_strictly_public"
+      ],
+      "observability": {
+        "enabled": true,
+        "head_sampling_rate": 0.1
+      },
+      "limits": {
+        "cpu_ms": 10000
+      },
+      "secrets": {
+        "required": [
+          "ARENA_FINALIZATION_HMAC_SECRET"
+        ]
+      },
+      "ratelimits": [
+        {
+          "name": "ARENA_RANKING_ACTOR_LIMITER",
+          "namespace_id": "73001",
+          "simple": { "limit": 12, "period": 60 }
+        },
+        {
+          "name": "ARENA_RANKING_IP_GENERATION_LIMITER",
+          "namespace_id": "73002",
+          "simple": { "limit": 12, "period": 60 }
+        },
+        {
+          "name": "ARENA_RANKING_IP_LIMITER",
+          "namespace_id": "73003",
+          "simple": { "limit": 120, "period": 60 }
+        }
+      ],
+      "services": [
+        {
+          "binding": "WORKER_SELF_REFERENCE",
+          "service": "mahoshojo-next"
+        }
+      ],
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "mahoshojo",
+          "database_id": "8eb9b25c-5a00-4feb-b5cb-c5dd25cda1d3",
+          "migrations_dir": "../../drizzle"
+        }
+      ]
+    },
+    "preview": {
+      "name": "mahoshojo-next-preview",
+      "compatibility_date": "2024-09-23",
+      "compatibility_flags": [
+        "nodejs_compat",
+        "global_fetch_strictly_public"
+      ],
+      "observability": {
+        "enabled": true,
+        "head_sampling_rate": 1
+      },
+      "secrets": {
+        "required": [
+          "ARENA_FINALIZATION_HMAC_SECRET"
+        ]
+      },
+      "ratelimits": [
+        {
+          "name": "ARENA_RANKING_ACTOR_LIMITER",
+          "namespace_id": "73101",
+          "simple": { "limit": 12, "period": 60 }
+        },
+        {
+          "name": "ARENA_RANKING_IP_GENERATION_LIMITER",
+          "namespace_id": "73102",
+          "simple": { "limit": 12, "period": 60 }
+        },
+        {
+          "name": "ARENA_RANKING_IP_LIMITER",
+          "namespace_id": "73103",
+          "simple": { "limit": 120, "period": 60 }
+        }
+      ],
+      "services": [
+        {
+          "binding": "WORKER_SELF_REFERENCE",
+          "service": "mahoshojo-next-preview"
+        }
+      ],
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "mahoshojo",
+          "database_id": "8eb9b25c-5a00-4feb-b5cb-c5dd25cda1d3",
+          "migrations_dir": "../../drizzle"
+        }
+      ]
+    },
+    "dr-candidate": {
+      "name": "mahoshojo-next-dr-candidate",
+      "main": "activation-candidate-worker.ts",
+      "workers_dev": false,
+      "preview_urls": false,
+      "compatibility_date": "2024-09-23",
+      "compatibility_flags": [
+        "nodejs_compat",
+        "global_fetch_strictly_public"
+      ],
+      "observability": {
+        "enabled": true,
+        "head_sampling_rate": 1
+      },
+      "limits": {
+        "cpu_ms": 10000
+      },
+      "assets": {
+        "directory": ".open-next/assets",
+        "binding": "ASSETS",
+        "run_worker_first": true
+      },
+      "vars": {
+        "HONO_CORS_ORIGINS": "https://mahoshojo.colanns.me",
+        "HOSTED_DR_ACTIVATION_CANDIDATE": "true",
+        "NEXT_PUBLIC_HOSTED_API_ENVIRONMENT": "production"
+      },
+      "ratelimits": [
+        {
+          "name": "ARENA_RANKING_ACTOR_LIMITER",
+          "namespace_id": "73201",
+          "simple": { "limit": 12, "period": 60 }
+        },
+        {
+          "name": "ARENA_RANKING_IP_GENERATION_LIMITER",
+          "namespace_id": "73202",
+          "simple": { "limit": 12, "period": 60 }
+        },
+        {
+          "name": "ARENA_RANKING_IP_LIMITER",
+          "namespace_id": "73203",
+          "simple": { "limit": 120, "period": 60 }
+        }
+      ],
+      "services": [
+        {
+          "binding": "WORKER_SELF_REFERENCE",
+          "service": "mahoshojo-next-dr-candidate"
+        }
+      ],
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "mahoshojo",
+          "database_id": "8eb9b25c-5a00-4feb-b5cb-c5dd25cda1d3",
+          "migrations_dir": "../../drizzle"
+        }
+      ]
+    }
+  }
+}

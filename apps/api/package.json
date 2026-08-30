@@ -1,0 +1,48 @@
+{
+  "name": "@mahoshojo/api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "imports": {
+    "#/*": "./src/*.ts"
+  },
+  "scripts": {
+    "dev": "node scripts/generate-route-manifest.mjs && tsx watch src/index.ts",
+    "start": "node dist/index.mjs",
+    "test": "vitest run --config vitest.config.ts",
+    "lint": "eslint src tests scripts/room-verifier-safety.ts scripts/verify-room-redis.ts scripts/verify-room-generation-redis.ts scripts/verify-room-generation-process-recovery.ts scripts/verify-room-hardening-faults.ts scripts/verify-room-hardening-load.ts --config eslint.config.mjs",
+    "build": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.room-verifier.json",
+    "build:bundle": "node scripts/generate-route-manifest.mjs && node scripts/build.mjs",
+    "routes": "node scripts/generate-route-manifest.mjs",
+    "verify:runtime": "node scripts/verify-runtime.mjs",
+    "verify:arena-redis": "tsx scripts/verify-arena-redis.ts",
+    "verify:room-redis": "tsx scripts/verify-room-redis.ts",
+    "verify:room-generation-redis": "tsx scripts/verify-room-generation-redis.ts",
+    "verify:room-generation-process-recovery": "tsx scripts/verify-room-generation-process-recovery.ts",
+    "verify:room-hardening-faults": "tsx scripts/verify-room-hardening-faults.ts",
+    "verify:room-hardening-load": "node --import tsx scripts/verify-room-hardening-load.ts",
+    "verify:hosted-dr:redis": "tsx scripts/verify-hosted-dr-redis.ts",
+    "deploy:prepare": "pnpm --dir ../.. run check:arena-room-release -- --mode deploy && node scripts/generate-route-manifest.mjs && node scripts/build.mjs"
+  },
+  "dependencies": {
+    "@hono/node-server": "^2.1.1",
+    "@mahoshojo/contracts": "workspace:*",
+    "@mahoshojo/hosted-api": "workspace:*",
+    "@mahoshojo/hosted-runtime": "workspace:*",
+    "@mahoshojo/multiplayer-core": "workspace:*",
+    "dotenv": "^17.4.2",
+    "hono": "^4.13.3",
+    "redis": "^6.2.1",
+    "ws": "^8.21.3"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "@types/ws": "^8.18.1",
+    "@typescript-eslint/parser": "^8.50.0",
+    "esbuild": "^0.28.1",
+    "eslint": "^9",
+    "tsx": "^4.21.0",
+    "typescript": "^5",
+    "vitest": "^4.1.7"
+  }
+}

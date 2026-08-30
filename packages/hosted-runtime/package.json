@@ -1,0 +1,336 @@
+{
+  "name": "@mahoshojo/hosted-runtime",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./database-provider": {
+      "types": "./src/database-provider.ts",
+      "import": "./src/database-provider.ts",
+      "default": "./src/database-provider.ts"
+    },
+    "./arena-companion": {
+      "types": "./src/arena-companion/index.ts",
+      "import": "./src/arena-companion/index.ts",
+      "default": "./src/arena-companion/index.ts"
+    },
+    "./arena-generation": {
+      "types": "./src/arena-generation/index.ts",
+      "import": "./src/arena-generation/index.ts",
+      "default": "./src/arena-generation/index.ts"
+    },
+    "./d1-http-client": {
+      "types": "./src/d1-http-client.ts",
+      "import": "./src/d1-http-client.ts",
+      "default": "./src/d1-http-client.ts"
+    },
+    "./node-runtime": {
+      "types": "./src/node-runtime/index.ts",
+      "import": "./src/node-runtime/index.ts",
+      "default": "./src/node-runtime/index.ts"
+    },
+    "./node-runtime/default-services": {
+      "types": "./src/node-runtime/default-services.ts",
+      "import": "./src/node-runtime/default-services.ts",
+      "default": "./src/node-runtime/default-services.ts"
+    },
+    "./node-runtime/availability": {
+      "types": "./src/node-runtime/availability.ts",
+      "import": "./src/node-runtime/availability.ts",
+      "default": "./src/node-runtime/availability.ts"
+    },
+    "./node-runtime/error-extraction": {
+      "types": "./src/node-runtime/error-extraction.ts",
+      "import": "./src/node-runtime/error-extraction.ts",
+      "default": "./src/node-runtime/error-extraction.ts"
+    },
+    "./node-runtime/generation-settings": {
+      "types": "./src/node-runtime/generation-settings/index.ts",
+      "import": "./src/node-runtime/generation-settings/index.ts",
+      "default": "./src/node-runtime/generation-settings/index.ts"
+    },
+    "./node-runtime/meta-response": {
+      "types": "./src/node-runtime/meta-response.ts",
+      "import": "./src/node-runtime/meta-response.ts",
+      "default": "./src/node-runtime/meta-response.ts"
+    },
+    "./node-runtime/provider-fetch": {
+      "types": "./src/node-runtime/provider-fetch.ts",
+      "import": "./src/node-runtime/provider-fetch.ts",
+      "default": "./src/node-runtime/provider-fetch.ts"
+    },
+    "./node-runtime/providers": {
+      "types": "./src/node-runtime/providers.ts",
+      "import": "./src/node-runtime/providers.ts",
+      "default": "./src/node-runtime/providers.ts"
+    },
+    "./node-runtime/provider-catalog": {
+      "types": "./src/node-runtime/provider-catalog.ts",
+      "import": "./src/node-runtime/provider-catalog.ts",
+      "default": "./src/node-runtime/provider-catalog.ts"
+    },
+    "./node-runtime/activity-token": {
+      "types": "./src/node-runtime/activity-token.ts",
+      "import": "./src/node-runtime/activity-token.ts",
+      "default": "./src/node-runtime/activity-token.ts"
+    },
+    "./node-runtime/content-safety": {
+      "types": "./src/node-runtime/content-safety.ts",
+      "import": "./src/node-runtime/content-safety.ts",
+      "default": "./src/node-runtime/content-safety.ts"
+    },
+    "./node-runtime/d1-client": {
+      "types": "./src/node-runtime/d1-client.ts",
+      "import": "./src/node-runtime/d1-client.ts",
+      "default": "./src/node-runtime/d1-client.ts"
+    },
+    "./node-runtime/data-ports": {
+      "types": "./src/node-runtime/data-ports.ts",
+      "import": "./src/node-runtime/data-ports.ts",
+      "default": "./src/node-runtime/data-ports.ts"
+    },
+    "./node-runtime/static-assets": {
+      "types": "./src/node-runtime/static-assets.ts",
+      "import": "./src/node-runtime/static-assets.ts",
+      "default": "./src/node-runtime/static-assets.ts"
+    },
+    "./node-runtime/structured-ai": {
+      "types": "./src/node-runtime/structured-ai.ts",
+      "import": "./src/node-runtime/structured-ai.ts",
+      "default": "./src/node-runtime/structured-ai.ts"
+    },
+    "./node-runtime/raw-stream-ai": {
+      "types": "./src/node-runtime/raw-stream-ai.ts",
+      "import": "./src/node-runtime/raw-stream-ai.ts",
+      "default": "./src/node-runtime/raw-stream-ai.ts"
+    },
+    "./creator/build-rule-projection": {
+      "types": "./src/creator/build-rule-projection.ts",
+      "import": "./src/creator/build-rule-projection.ts",
+      "default": "./src/creator/build-rule-projection.ts"
+    },
+    "./creator/build-rule-request": {
+      "types": "./src/creator/build-rule-request.ts",
+      "import": "./src/creator/build-rule-request.ts",
+      "default": "./src/creator/build-rule-request.ts"
+    },
+    "./creator/build-rule-runtime": {
+      "types": "./src/creator/build-rule-runtime.ts",
+      "import": "./src/creator/build-rule-runtime.ts",
+      "default": "./src/creator/build-rule-runtime.ts"
+    },
+    "./creator/build-rules": {
+      "types": "./src/creator/build-rules.ts",
+      "import": "./src/creator/build-rules.ts",
+      "default": "./src/creator/build-rules.ts"
+    },
+    "./creator/card-metadata": {
+      "types": "./src/creator/card-metadata.ts",
+      "import": "./src/creator/card-metadata.ts",
+      "default": "./src/creator/card-metadata.ts"
+    },
+    "./creator/prompt": {
+      "types": "./src/creator/prompt.ts",
+      "import": "./src/creator/prompt.ts",
+      "default": "./src/creator/prompt.ts"
+    },
+    "./creator/server": {
+      "types": "./src/creator/server.ts",
+      "import": "./src/creator/server.ts",
+      "default": "./src/creator/server.ts"
+    },
+    "./creator/templates": {
+      "types": "./src/creator/templates.ts",
+      "import": "./src/creator/templates.ts",
+      "default": "./src/creator/templates.ts"
+    },
+    "./creator/types": {
+      "types": "./src/creator/types.ts",
+      "import": "./src/creator/types.ts",
+      "default": "./src/creator/types.ts"
+    },
+    "./canshou-lore": {
+      "types": "./src/canshou-lore.ts",
+      "import": "./src/canshou-lore.ts",
+      "default": "./src/canshou-lore.ts"
+    },
+    "./random-choose-hana-name": {
+      "types": "./src/random-choose-hana-name.ts",
+      "import": "./src/random-choose-hana-name.ts",
+      "default": "./src/random-choose-hana-name.ts"
+    },
+    "./node-runtime/env-signature": {
+      "types": "./src/node-runtime/env-signature.ts",
+      "import": "./src/node-runtime/env-signature.ts",
+      "default": "./src/node-runtime/env-signature.ts"
+    },
+    "./node-runtime/public-rate-limit": {
+      "types": "./src/node-runtime/public-rate-limit.ts",
+      "import": "./src/node-runtime/public-rate-limit.ts",
+      "default": "./src/node-runtime/public-rate-limit.ts"
+    },
+    "./node-runtime/sensitive-word-filter": {
+      "types": "./src/node-runtime/sensitive-word-filter.ts",
+      "import": "./src/node-runtime/sensitive-word-filter.ts",
+      "default": "./src/node-runtime/sensitive-word-filter.ts"
+    },
+    "./node-runtime/shield-word-filter": {
+      "types": "./src/node-runtime/shield-word-filter.ts",
+      "import": "./src/node-runtime/shield-word-filter.ts",
+      "default": "./src/node-runtime/shield-word-filter.ts"
+    },
+    "./node-runtime/game-card-content-safety": {
+      "types": "./src/node-runtime/game-card-content-safety.ts",
+      "import": "./src/node-runtime/game-card-content-safety.ts",
+      "default": "./src/node-runtime/game-card-content-safety.ts"
+    },
+    "./node-runtime/reasoning": {
+      "types": "./src/node-runtime/reasoning-normalizer.ts",
+      "import": "./src/node-runtime/reasoning-normalizer.ts",
+      "default": "./src/node-runtime/reasoning-normalizer.ts"
+    },
+    "./node-runtime/reasoning-sse": {
+      "types": "./src/node-runtime/reasoning-sse.ts",
+      "import": "./src/node-runtime/reasoning-sse.ts",
+      "default": "./src/node-runtime/reasoning-sse.ts"
+    },
+    "./node-runtime/stream-timeout": {
+      "types": "./src/node-runtime/stream-timeout.ts",
+      "import": "./src/node-runtime/stream-timeout.ts",
+      "default": "./src/node-runtime/stream-timeout.ts"
+    },
+    "./node-runtime/types": {
+      "types": "./src/node-runtime/types.ts",
+      "import": "./src/node-runtime/types.ts",
+      "default": "./src/node-runtime/types.ts"
+    },
+    "./node-runtime/usage": {
+      "types": "./src/node-runtime/usage.ts",
+      "import": "./src/node-runtime/usage.ts",
+      "default": "./src/node-runtime/usage.ts"
+    },
+    "./generate-magical-girl-runtime": {
+      "types": "./src/generate-magical-girl-runtime.ts",
+      "import": "./src/generate-magical-girl-runtime.ts",
+      "default": "./src/generate-magical-girl-runtime.ts"
+    },
+    "./generate-magical-girl-details-runtime": {
+      "types": "./src/generate-magical-girl-details-runtime.ts",
+      "import": "./src/generate-magical-girl-details-runtime.ts",
+      "default": "./src/generate-magical-girl-details-runtime.ts"
+    },
+    "./generate-magical-girl-details-stream-runtime": {
+      "types": "./src/generate-magical-girl-details-stream-runtime.ts",
+      "import": "./src/generate-magical-girl-details-stream-runtime.ts",
+      "default": "./src/generate-magical-girl-details-stream-runtime.ts"
+    },
+    "./generate-game-card-runtime": {
+      "types": "./src/generate-game-card-runtime.ts",
+      "import": "./src/generate-game-card-runtime.ts",
+      "default": "./src/generate-game-card-runtime.ts"
+    },
+    "./generate-free-runtime": {
+      "types": "./src/generate-free-runtime.ts",
+      "import": "./src/generate-free-runtime.ts",
+      "default": "./src/generate-free-runtime.ts"
+    },
+    "./generate-free-stream-runtime": {
+      "types": "./src/generate-free-stream-runtime.ts",
+      "import": "./src/generate-free-stream-runtime.ts",
+      "default": "./src/generate-free-stream-runtime.ts"
+    },
+    "./generate-scenario-runtime": {
+      "types": "./src/generate-scenario-runtime.ts",
+      "import": "./src/generate-scenario-runtime.ts",
+      "default": "./src/generate-scenario-runtime.ts"
+    },
+    "./generate-scenario-stream-runtime": {
+      "types": "./src/generate-scenario-stream-runtime.ts",
+      "import": "./src/generate-scenario-stream-runtime.ts",
+      "default": "./src/generate-scenario-stream-runtime.ts"
+    },
+    "./generate-sublimation-runtime": {
+      "types": "./src/generate-sublimation-runtime.ts",
+      "import": "./src/generate-sublimation-runtime.ts",
+      "default": "./src/generate-sublimation-runtime.ts"
+    },
+    "./generate-sublimation-stream-runtime": {
+      "types": "./src/generate-sublimation-stream-runtime.ts",
+      "import": "./src/generate-sublimation-stream-runtime.ts",
+      "default": "./src/generate-sublimation-stream-runtime.ts"
+    },
+    "./generate-creator-runtime": {
+      "types": "./src/generate-creator-runtime.ts",
+      "import": "./src/generate-creator-runtime.ts",
+      "default": "./src/generate-creator-runtime.ts"
+    },
+    "./generate-creator-stream-runtime": {
+      "types": "./src/generate-creator-stream-runtime.ts",
+      "import": "./src/generate-creator-stream-runtime.ts",
+      "default": "./src/generate-creator-stream-runtime.ts"
+    },
+    "./generate-canshou-runtime": {
+      "types": "./src/generate-canshou-runtime.ts",
+      "import": "./src/generate-canshou-runtime.ts",
+      "default": "./src/generate-canshou-runtime.ts"
+    },
+    "./generate-canshou-stream-runtime": {
+      "types": "./src/generate-canshou-stream-runtime.ts",
+      "import": "./src/generate-canshou-stream-runtime.ts",
+      "default": "./src/generate-canshou-stream-runtime.ts"
+    },
+    "./ai-upstream": {
+      "types": "./src/ai-upstream.ts",
+      "import": "./src/ai-upstream.ts",
+      "default": "./src/ai-upstream.ts"
+    },
+    "./signature": {
+      "types": "./src/signature.ts",
+      "import": "./src/signature.ts",
+      "default": "./src/signature.ts"
+    },
+    "./questionnaire-generation-runtime": {
+      "types": "./src/questionnaire-generation-runtime.ts",
+      "import": "./src/questionnaire-generation-runtime.ts",
+      "default": "./src/questionnaire-generation-runtime.ts"
+    },
+    "./telemetry": {
+      "types": "./src/telemetry.ts",
+      "import": "./src/telemetry.ts",
+      "default": "./src/telemetry.ts"
+    },
+    "./generation-lifecycle": {
+      "types": "./src/generation-lifecycle.ts",
+      "import": "./src/generation-lifecycle.ts",
+      "default": "./src/generation-lifecycle.ts"
+    }
+  },
+  "scripts": {
+    "assets:questionnaires": "node scripts/generate-questionnaire-assets.mjs",
+    "assets:questionnaires:check": "node scripts/generate-questionnaire-assets.mjs --check",
+    "test": "vitest run --config vitest.config.ts",
+    "lint": "eslint src tests --config eslint.config.mjs",
+    "build": "node scripts/generate-questionnaire-assets.mjs --check && tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@ai-sdk/deepseek": "^2.0.35",
+    "@ai-sdk/google": "^3.0.75",
+    "@ai-sdk/openai": "^3.0.64",
+    "@mahoshojo/ai-core": "workspace:*",
+    "@mahoshojo/contracts": "workspace:*",
+    "@mahoshojo/domain": "workspace:*",
+    "@mahoshojo/hosted-api": "workspace:*",
+    "ai": "^6.0.184",
+    "aws4fetch": "^1.0.20",
+    "pinyin-pro": "^3.27.0",
+    "zod": "^4.1.13"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "@typescript-eslint/parser": "^8.50.0",
+    "esbuild": "^0.28.1",
+    "eslint": "^9",
+    "typescript": "^5",
+    "vitest": "^4.1.7"
+  }
+}

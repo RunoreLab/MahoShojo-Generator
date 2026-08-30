@@ -1,0 +1,14 @@
+homura-admin.colanns.me {
+	encode zstd gzip
+	reverse_proxy 127.0.0.1:3552
+}
+
+homura.colanns.me {
+	encode zstd gzip
+	reverse_proxy 127.0.0.1:8080
+}
+
+homura-preview.colanns.me {
+	encode zstd gzip
+	reverse_proxy 127.0.0.1:8081
+}

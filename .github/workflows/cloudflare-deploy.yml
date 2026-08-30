@@ -3,7 +3,7 @@ name: Deploy to Cloudflare Workers
 on:
   push:
     branches:
-      - '**'
+      - feature/v0.2.0_Battle_Growth_MahoShojo
   workflow_dispatch:
 
 concurrency:
@@ -13,9 +13,10 @@ concurrency:
 jobs:
   deploy:
     name: Build and deploy
+    if: github.ref == 'refs/heads/feature/v0.2.0_Battle_Growth_MahoShojo'
     runs-on: ubuntu-latest
     environment:
-      name: ${{ github.ref == 'refs/heads/feature/v0.2.0_Battle_Growth_MahoShojo' && 'production' || 'preview' }}
+      name: production
     permissions:
       contents: read
       deployments: write
@@ -50,6 +51,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Verify workspace and repository gates
+        run: pnpm run ci:verify
+
       - name: Build Cloudflare bundle
         env:
           # NEXT_PUBLIC_* 变量在构建时被内联进客户端产物，必须在此步骤显式注入。
@@ -59,18 +63,11 @@ jobs:
           NEXT_PUBLIC_ENABLE_BUNDLE_SAFETY_CHECK: ${{ vars.NEXT_PUBLIC_ENABLE_BUNDLE_SAFETY_CHECK }}
           NEXT_PUBLIC_GA_ID: ${{ vars.NEXT_PUBLIC_GA_ID }}
           NEXT_PUBLIC_SAFETY_CHECK_POLICY: ${{ vars.NEXT_PUBLIC_SAFETY_CHECK_POLICY }}
-        run: pnpm run build:cf
+          NEXT_PUBLIC_HOSTED_API_ENVIRONMENT: production
+        run: pnpm --filter @mahoshojo/web run build:cf
 
       - name: Deploy production
-        if: github.ref == 'refs/heads/feature/v0.2.0_Battle_Growth_MahoShojo'
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: pnpm exec wrangler deploy --env production
-
-      - name: Deploy preview
-        if: github.ref != 'refs/heads/feature/v0.2.0_Battle_Growth_MahoShojo'
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: pnpm exec wrangler deploy --env preview
+        run: pnpm --filter @mahoshojo/web exec wrangler deploy --env production --keep-vars

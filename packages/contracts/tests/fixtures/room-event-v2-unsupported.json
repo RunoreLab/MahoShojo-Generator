@@ -1,0 +1,9 @@
+{
+  "protocolVersion": 2,
+  "type": "room.closing",
+  "roomId": "room-1",
+  "roomEpoch": "epoch-1",
+  "timestamp": "2026-08-22T00:00:00.000Z",
+  "controlSeq": 1,
+  "payload": { "reason": "done" }
+}

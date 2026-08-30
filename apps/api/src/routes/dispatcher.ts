@@ -1,0 +1,63 @@
+import type { Context } from 'hono';
+import {
+  NodeExecutionContextCoordinator,
+  nodeExecutionContextCoordinator,
+} from '#/runtime/execution-context';
+import type {
+  HttpMethod,
+  RouteContext,
+  RouteDefinition,
+} from '#/routes/types';
+
+const attachExecutionContext = (
+  request: Request,
+  routeId: string,
+  coordinator: NodeExecutionContextCoordinator,
+): Request => {
+  Object.defineProperty(request, 'context', {
+    configurable: true,
+    enumerable: false,
+    value: coordinator.createExecutionContext(routeId),
+  });
+  return request;
+};
+
+const buildRouteContext = (context: Context): RouteContext => ({
+  params: Promise.resolve(context.req.param()),
+});
+
+export const dispatchRoute = async (
+  context: Context,
+  definition: RouteDefinition,
+  coordinator: NodeExecutionContextCoordinator = nodeExecutionContextCoordinator,
+): Promise<Response> => {
+  const method = context.req.method.toUpperCase() as HttpMethod;
+  if (!definition.methods.includes(method)) {
+    return context.json(
+      {
+        error: 'Method not allowed',
+      },
+      405,
+      {
+        Allow: definition.methods.join(', '),
+      },
+    );
+  }
+  const routeModule = await definition.load();
+  const handler = routeModule[method];
+
+  if (typeof handler !== 'function') {
+    return context.json(
+      {
+        error: 'Method not allowed',
+      },
+      405,
+      {
+        Allow: Object.keys(routeModule).join(', '),
+      },
+    );
+  }
+
+  const request = attachExecutionContext(context.req.raw, definition.id, coordinator);
+  return handler(request, buildRouteContext(context));
+};

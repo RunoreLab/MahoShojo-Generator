@@ -1,0 +1,215 @@
+name: Deploy preview
+
+on:
+  push:
+    branches:
+      - preview
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-preview
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  verify-and-build-hono:
+    name: Verify and build Hono preview
+    if: github.ref == 'refs/heads/preview'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 11.3.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify workspace and repository gates
+        run: pnpm run ci:verify
+
+      - name: Build release tuple
+        run: |
+          pnpm --filter @mahoshojo/api run deploy:prepare
+          cp apps/api/deploy/compose.yml apps/api/dist/compose.yml
+          cp apps/api/deploy/deploy-bundle.sh apps/api/dist/deploy-bundle.sh
+          cp config/arena-room-release-gate.json apps/api/dist/arena-room-release-gate.json
+          cp scripts/arena-room-release-gate-schema.mjs apps/api/dist/arena-room-release-gate-schema.mjs
+          cd apps/api/dist
+          sha256sum index.mjs compose.yml deploy-bundle.sh \
+            arena-room-release-gate.json arena-room-release-gate-schema.mjs > release.manifest
+          sha256sum release.manifest > release.sha256
+
+      - name: Upload release tuple
+        uses: actions/upload-artifact@v4
+        with:
+          name: hono-preview-${{ github.sha }}
+          path: |
+            apps/api/dist/index.mjs
+            apps/api/dist/compose.yml
+            apps/api/dist/deploy-bundle.sh
+            apps/api/dist/arena-room-release-gate.json
+            apps/api/dist/arena-room-release-gate-schema.mjs
+            apps/api/dist/release.manifest
+            apps/api/dist/release.sha256
+          if-no-files-found: error
+          retention-days: 7
+
+  verify-and-build-cloudflare:
+    name: Verify and build Cloudflare preview
+    if: github.ref == 'refs/heads/preview'
+    needs: verify-and-build-hono
+    runs-on: ubuntu-latest
+    environment: preview
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 11.3.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build Cloudflare preview bundle
+        env:
+          NEXT_PUBLIC_TURNSTILE_SITE_KEY: ${{ secrets.NEXT_PUBLIC_TURNSTILE_SITE_KEY }}
+          NEXT_PUBLIC_AI_SAFETY_PROMPT_LEVEL: ${{ vars.NEXT_PUBLIC_AI_SAFETY_PROMPT_LEVEL }}
+          NEXT_PUBLIC_ENABLE_BUNDLE_SAFETY_CHECK: ${{ vars.NEXT_PUBLIC_ENABLE_BUNDLE_SAFETY_CHECK }}
+          NEXT_PUBLIC_GA_ID: ${{ vars.NEXT_PUBLIC_GA_ID }}
+          NEXT_PUBLIC_SAFETY_CHECK_POLICY: ${{ vars.NEXT_PUBLIC_SAFETY_CHECK_POLICY }}
+          NEXT_PUBLIC_HONO_API_ORIGIN: https://homura-preview.colanns.me
+          NEXT_PUBLIC_HOSTED_API_ENVIRONMENT: preview
+        run: pnpm --filter @mahoshojo/web run build:cf
+
+  deploy-hono-preview:
+    name: Deploy Hono preview
+    if: github.ref == 'refs/heads/preview'
+    needs:
+      - verify-and-build-hono
+      - verify-and-build-cloudflare
+    runs-on: ubuntu-latest
+    environment: hono-preview
+    env:
+      VPS_HOST: ${{ vars.VPS_HOST }}
+      VPS_USER: ${{ vars.VPS_USER }}
+      HONO_DEPLOY_ROOT_DIR: ${{ vars.HONO_DEPLOY_ROOT }}
+      HONO_CONTAINER_NAME: mahoshojo-hono-preview
+      HONO_BIND_PORT: ${{ vars.HONO_BIND_PORT }}
+      HONO_PUBLIC_ORIGIN: ${{ vars.HONO_PUBLIC_ORIGIN }}
+      HONO_REDIS_KEY_PREFIX: preview
+    steps:
+      - name: Checkout deployment installer
+        uses: actions/checkout@v6
+
+      - name: Download release tuple
+        uses: actions/download-artifact@v5
+        with:
+          name: hono-preview-${{ github.sha }}
+          path: artifact
+
+      - name: Configure SSH
+        env:
+          VPS_SSH_PRIVATE_KEY: ${{ secrets.VPS_SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$VPS_HOST"
+          test -n "$VPS_USER"
+          test -n "$HONO_DEPLOY_ROOT_DIR"
+          test -n "$HONO_BIND_PORT"
+          test -n "$HONO_PUBLIC_ORIGIN"
+          test -n "$VPS_SSH_PRIVATE_KEY"
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$VPS_SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          printf '%s %s\n' "$VPS_HOST" 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIARFAFVUCsUdVM8PtbbiOhkUD9zn5Q6MeK47hxEr/XuC' > ~/.ssh/known_hosts
+
+      - name: Upload and activate release
+        run: |
+          set -euo pipefail
+          release_id="$(awk '{print $1}' artifact/release.sha256)"
+          case "$release_id" in
+            ''|*[!0-9a-f]*) echo "artifact release id 非法" >&2; exit 1 ;;
+          esac
+          test "${#release_id}" -eq 64
+          upload_dir="$(ssh -i ~/.ssh/deploy_key "$VPS_USER@$VPS_HOST" "HONO_DEPLOY_ROOT_DIR='$HONO_DEPLOY_ROOT_DIR' sh -s -- create" < apps/api/deploy/install-bundle.sh)"
+          case "$upload_dir" in
+            "$HONO_DEPLOY_ROOT_DIR"/releases/.upload.*) ;;
+            *) echo "远端返回了非法 upload staging" >&2; exit 1 ;;
+          esac
+          upload_suffix="${upload_dir##*/.upload.}"
+          case "$upload_suffix" in
+            ''|*[!A-Za-z0-9]*) echo "远端 upload staging 后缀非法" >&2; exit 1 ;;
+          esac
+          scp -i ~/.ssh/deploy_key artifact/index.mjs artifact/compose.yml artifact/deploy-bundle.sh artifact/arena-room-release-gate.json artifact/arena-room-release-gate-schema.mjs artifact/release.manifest artifact/release.sha256 "$VPS_USER@$VPS_HOST:$upload_dir/"
+          installed_dir="$(ssh -i ~/.ssh/deploy_key "$VPS_USER@$VPS_HOST" "HONO_DEPLOY_ROOT_DIR='$HONO_DEPLOY_ROOT_DIR' sh -s -- install '$release_id' '$upload_dir'" < apps/api/deploy/install-bundle.sh)"
+          test "$installed_dir" = "$HONO_DEPLOY_ROOT_DIR/releases/$release_id"
+          ssh -i ~/.ssh/deploy_key "$VPS_USER@$VPS_HOST" "HONO_DEPLOY_ROOT_DIR='$HONO_DEPLOY_ROOT_DIR' HONO_CONTAINER_NAME='$HONO_CONTAINER_NAME' HONO_BIND_PORT='$HONO_BIND_PORT' HONO_REDIS_KEY_PREFIX='$HONO_REDIS_KEY_PREFIX' HONO_HOSTED_API_ENVIRONMENT=preview '$installed_dir/deploy-bundle.sh' '$release_id' '$HONO_PUBLIC_ORIGIN'"
+
+  deploy-cloudflare-preview:
+    name: Deploy Cloudflare preview
+    if: github.ref == 'refs/heads/preview'
+    needs:
+      - deploy-hono-preview
+      - verify-and-build-cloudflare
+    runs-on: ubuntu-latest
+    environment: preview
+    permissions:
+      contents: read
+      deployments: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 11.3.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build Cloudflare preview bundle
+        env:
+          NEXT_PUBLIC_TURNSTILE_SITE_KEY: ${{ secrets.NEXT_PUBLIC_TURNSTILE_SITE_KEY }}
+          NEXT_PUBLIC_AI_SAFETY_PROMPT_LEVEL: ${{ vars.NEXT_PUBLIC_AI_SAFETY_PROMPT_LEVEL }}
+          NEXT_PUBLIC_ENABLE_BUNDLE_SAFETY_CHECK: ${{ vars.NEXT_PUBLIC_ENABLE_BUNDLE_SAFETY_CHECK }}
+          NEXT_PUBLIC_GA_ID: ${{ vars.NEXT_PUBLIC_GA_ID }}
+          NEXT_PUBLIC_SAFETY_CHECK_POLICY: ${{ vars.NEXT_PUBLIC_SAFETY_CHECK_POLICY }}
+          NEXT_PUBLIC_HONO_API_ORIGIN: https://homura-preview.colanns.me
+          NEXT_PUBLIC_HOSTED_API_ENVIRONMENT: preview
+        run: pnpm --filter @mahoshojo/web run build:cf
+
+      - name: Deploy Cloudflare preview
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: pnpm --filter @mahoshojo/web exec wrangler deploy --env preview --keep-vars
+
+      - name: Verify preview Hono remains ready
+        run: curl --fail --show-error --retry 6 --retry-delay 5 https://homura-preview.colanns.me/api/health/ready

@@ -1,6 +1,7 @@
 import { mkdirSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const REQUIRED_AUTH_TABLES = [
   'ba_user',
@@ -13,6 +14,15 @@ const REQUIRED_AUTH_TABLES = [
 ];
 
 const REQUIRED_USERS_COLUMNS = ['is_admin', 'is_review_exempt'];
+const FORBIDDEN_REMOTE_MIGRATIONS = ['0014_arena_multiplayer_rooms.sql'];
+const FORBIDDEN_REMOTE_TABLES = ['arena_multiplayer_rooms'];
+const WRANGLER_WORKSPACE = '@mahoshojo/web';
+
+export const findForbiddenRemoteMigrations = (migrationNames) =>
+  migrationNames.filter((name) => FORBIDDEN_REMOTE_MIGRATIONS.includes(name));
+
+export const findForbiddenRemoteTables = (tableNames) =>
+  FORBIDDEN_REMOTE_TABLES.filter((name) => tableNames.has(name));
 
 const parseArgs = (argv) => {
   const args = {
@@ -88,25 +98,52 @@ const parseArgs = (argv) => {
   return args;
 };
 
-const parseJsonPayload = (stdout, stderr) => {
+const findFirstCompleteJson = (text) => {
+  for (let start = 0; start < text.length; start += 1) {
+    if (text[start] !== '[' && text[start] !== '{') continue;
+
+    const closingStack = [];
+    let inString = false;
+    let escaped = false;
+
+    for (let index = start; index < text.length; index += 1) {
+      const character = text[index];
+      if (inString) {
+        if (escaped) escaped = false;
+        else if (character === '\\') escaped = true;
+        else if (character === '"') inString = false;
+        continue;
+      }
+
+      if (character === '"') {
+        inString = true;
+      } else if (character === '[') {
+        closingStack.push(']');
+      } else if (character === '{') {
+        closingStack.push('}');
+      } else if (character === ']' || character === '}') {
+        if (closingStack.pop() !== character) break;
+        if (closingStack.length === 0) {
+          try {
+            return { found: true, value: JSON.parse(text.slice(start, index + 1)) };
+          } catch {
+            break;
+          }
+        }
+      }
+    }
+  }
+  return { found: false, value: null };
+};
+
+export const parseJsonPayload = (stdout, stderr) => {
+  for (const channel of [stdout ?? '', stderr ?? '']) {
+    const parsed = findFirstCompleteJson(channel);
+    if (parsed.found) return parsed.value;
+  }
+
   const fullText = `${stdout ?? ''}\n${stderr ?? ''}`;
-  const listStart = fullText.indexOf('[');
-  const objectStart = fullText.indexOf('{');
-  const candidates = [listStart, objectStart].filter((value) => value >= 0);
-  if (candidates.length === 0) {
-    throw new Error(`无法从 wrangler 输出中解析 JSON：\n${fullText}`.trim());
-  }
-
-  const start = Math.min(...candidates);
-  const listEnd = fullText.lastIndexOf(']');
-  const objectEnd = fullText.lastIndexOf('}');
-  const end = Math.max(listEnd, objectEnd);
-  if (end < start) {
-    throw new Error(`wrangler JSON 输出不完整：\n${fullText}`.trim());
-  }
-
-  const candidate = fullText.slice(start, end + 1);
-  return JSON.parse(candidate);
+  throw new Error(`无法从 wrangler 输出中解析 JSON：\n${fullText}`.trim());
 };
 
 const normalizeWranglerResponse = (payload) => {
@@ -135,16 +172,16 @@ const toInt = (value) => {
 };
 
 const buildWranglerCommandArgs = (options, sql) => {
-  const args = ['--yes', 'wrangler', 'd1', 'execute', options.database];
+  const args = ['--filter', WRANGLER_WORKSPACE, 'exec', 'wrangler', 'd1', 'execute', options.database];
 
   if (options.local) args.push('--local');
   if (options.remote) args.push('--remote');
   if (options.preview) args.push('--preview');
-  if (options.persistTo) args.push('--persist-to', options.persistTo);
-  if (options.config) args.push('--config', options.config);
+  if (options.persistTo) args.push('--persist-to', resolve(process.cwd(), options.persistTo));
+  if (options.config) args.push('--config', resolve(process.cwd(), options.config));
   if (options.env) args.push('--env', options.env);
   for (const envFile of options.envFiles) {
-    args.push('--env-file', envFile);
+    args.push('--env-file', resolve(process.cwd(), envFile));
   }
 
   args.push('--json', '--command', sql);
@@ -156,7 +193,7 @@ const executeSql = (options, sql) => {
   mkdirSync(xdgConfigHome, { recursive: true });
 
   const commandArgs = buildWranglerCommandArgs(options, sql);
-  const result = spawnSync('npx', commandArgs, {
+  const result = spawnSync('pnpm', commandArgs, {
     encoding: 'utf8',
     env: {
       ...process.env,
@@ -219,6 +256,16 @@ const getAuthTables = (options) => {
   );
 };
 
+const getForbiddenRemoteTables = (options) => {
+  const sql = `SELECT name FROM sqlite_master WHERE type = 'table' AND name IN (${quotedSqlList(FORBIDDEN_REMOTE_TABLES)}) ORDER BY name;`;
+  const rows = getRows(executeSql(options, sql));
+  return new Set(
+    rows
+      .map((row) => (row && typeof row === 'object' ? row.name : null))
+      .filter((value) => typeof value === 'string' && value.length > 0),
+  );
+};
+
 const getUsersColumns = (options) => {
   const rows = getRows(executeSql(options, 'PRAGMA table_info(users);'));
   return new Set(
@@ -268,6 +315,13 @@ const main = () => {
 
   const pendingMigrations = localMigrations.filter((name) => !appliedMigrationSet.has(name));
   const unknownAppliedMigrations = appliedMigrations.filter((name) => !localMigrationSet.has(name));
+  const enforcesRemoteSchemaGate = options.remote || options.preview;
+  const forbiddenRemoteMigrations = enforcesRemoteSchemaGate
+    ? findForbiddenRemoteMigrations(appliedMigrations)
+    : [];
+  const forbiddenRemoteTables = enforcesRemoteSchemaGate
+    ? findForbiddenRemoteTables(getForbiddenRemoteTables(options))
+    : [];
 
   const authTables = getAuthTables(options);
   const missingAuthTables = REQUIRED_AUTH_TABLES.filter((name) => !authTables.has(name));
@@ -295,6 +349,13 @@ const main = () => {
     for (const name of unknownAppliedMigrations) {
       console.log(`  - ${name}`);
     }
+  }
+
+  if (enforcesRemoteSchemaGate) {
+    console.log(
+      `[db:status] Redis-only 禁止迁移记录：${forbiddenRemoteMigrations.length} 个`,
+    );
+    console.log(`[db:status] Redis-only 禁止表：${forbiddenRemoteTables.length} 个`);
   }
 
   console.log(`[db:status] Auth 关键表覆盖：${REQUIRED_AUTH_TABLES.length - missingAuthTables.length}/${REQUIRED_AUTH_TABLES.length}`);
@@ -325,6 +386,12 @@ const main = () => {
   if (missingUsersColumns.length > 0) {
     failures.push(`缺失 users 列：${missingUsersColumns.join(', ')}`);
   }
+  if (forbiddenRemoteMigrations.length > 0) {
+    failures.push(`存在 Redis-only 禁止迁移记录：${forbiddenRemoteMigrations.join(', ')}`);
+  }
+  if (forbiddenRemoteTables.length > 0) {
+    failures.push(`存在 Redis-only 禁止表：${forbiddenRemoteTables.join(', ')}`);
+  }
 
   if (failures.length > 0) {
     console.error('[db:status] require-ready 失败：');
@@ -335,13 +402,17 @@ const main = () => {
     return;
   }
 
-  console.log('[db:status] require-ready 通过：数据库已满足 Auth + ORM 上线要求。');
+  console.log('[db:status] require-ready 通过：数据库已满足 Auth + ORM + Redis-only 上线要求。');
 };
 
-try {
-  main();
-} catch (error) {
-  const message = error instanceof Error ? error.message : String(error);
-  console.error(`[db:status] 失败: ${message}`);
-  process.exitCode = 1;
+const currentFile = fileURLToPath(import.meta.url);
+const invokedFile = process.argv[1] ? resolve(process.argv[1]) : null;
+if (invokedFile && pathToFileURL(invokedFile).href === pathToFileURL(currentFile).href) {
+  try {
+    main();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`[db:status] 失败: ${message}`);
+    process.exitCode = 1;
+  }
 }

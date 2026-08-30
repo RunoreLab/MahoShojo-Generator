@@ -1,0 +1,11 @@
+{
+  "bridgeVersion": 0,
+  "roomId": "room-1",
+  "generationRequestId": "request-1",
+  "generationId": "generation-1",
+  "attempt": 1,
+  "expiresAt": "2026-08-22T00:05:00.000Z",
+  "batchSeq": 1,
+  "type": "story.delta",
+  "payload": { "delta": "done" }
+}

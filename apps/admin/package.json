@@ -1,0 +1,26 @@
+{
+  "name": "@mahoshojo/admin",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "types": "wrangler types --include-runtime false --env-interface CloudflareBindings src/worker-configuration.d.ts",
+    "test": "vitest run --config vitest.config.ts",
+    "lint": "eslint src tests --config eslint.config.mjs",
+    "build": "wrangler types --check --include-runtime false --env-interface CloudflareBindings src/worker-configuration.d.ts && tsc --noEmit -p tsconfig.json && wrangler deploy --dry-run --outdir dist && node ../../scripts/check-admin-security-boundary.mjs",
+    "deploy": "wrangler deploy"
+  },
+  "dependencies": {
+    "hono": "^4.13.3",
+    "jose": "^6.2.10"
+  },
+  "devDependencies": {
+    "@typescript-eslint/parser": "^8.50.0",
+    "esbuild": "^0.28.1",
+    "eslint": "^9",
+    "typescript": "^5",
+    "vitest": "^4.1.7",
+    "wrangler": "^4.125.0"
+  }
+}

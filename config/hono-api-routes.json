@@ -1,7 +1,20 @@
 {
-  "routeIds": [
+  "exitedRouteIds": [
+    "magic-tavern/generate-choices",
+    "magic-tavern/generate-stream",
+    "magic-tea-party/generate-choices",
+    "magic-tea-party/generate-stream",
+    "magic-tea-party/generate-updates",
+    "me/battle-reports/[generationId]/regenerate"
+  ],
+  "legacyRouteIds": [],
+  "sharedRouteIds": [
     "arena/generate",
     "arena/generate-stream",
+    "arena/generation-requests/[generationRequestId]",
+    "arena/generations/[generationId]/cancel",
+    "arena/generations/[generationId]",
+    "arena/generations/[generationId]/stream",
     "arena/session/generate-next",
     "creator/generate",
     "creator/generate-stream",
@@ -18,11 +31,6 @@
     "generate-scenario-stream",
     "generate-sublimation",
     "generate-sublimation-stream",
-    "magic-tavern/generate-choices",
-    "magic-tavern/generate-stream",
-    "magic-tea-party/generate-choices",
-    "magic-tea-party/generate-stream",
-    "magic-tea-party/generate-updates",
-    "me/battle-reports/[generationId]/regenerate"
+    "hosted/dr-readiness"
   ]
 }

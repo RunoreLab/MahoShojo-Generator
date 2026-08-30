@@ -1,0 +1,64 @@
+{
+  "name": "@mahoshojo/contracts",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./arena-room": {
+      "types": "./src/arena-room.ts",
+      "import": "./src/arena-room.ts",
+      "default": "./src/arena-room.ts"
+    },
+    "./data-cards": {
+      "types": "./src/data-cards.ts",
+      "import": "./src/data-cards.ts",
+      "default": "./src/data-cards.ts"
+    },
+    "./game-card": {
+      "types": "./src/game-card.ts",
+      "import": "./src/game-card.ts",
+      "default": "./src/game-card.ts"
+    },
+    "./ai-execution": {
+      "types": "./src/ai-execution.ts",
+      "import": "./src/ai-execution.ts",
+      "default": "./src/ai-execution.ts"
+    },
+    "./provider-profile": {
+      "types": "./src/provider-profile.ts",
+      "import": "./src/provider-profile.ts",
+      "default": "./src/provider-profile.ts"
+    },
+    "./api": {
+      "types": "./src/api.ts",
+      "import": "./src/api.ts",
+      "default": "./src/api.ts"
+    },
+    "./json-value": {
+      "types": "./src/json-value.ts",
+      "import": "./src/json-value.ts",
+      "default": "./src/json-value.ts"
+    }
+  },
+  "scripts": {
+    "test": "vitest run --config vitest.config.ts",
+    "lint": "eslint src tests --config eslint.config.mjs",
+    "build": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "zod": "^4.1.13"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "@typescript-eslint/parser": "^8.50.0",
+    "esbuild": "^0.28.1",
+    "eslint": "^9",
+    "typescript": "^5",
+    "vitest": "^4.1.7"
+  }
+}
