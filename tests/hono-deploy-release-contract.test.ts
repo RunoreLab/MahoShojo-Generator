@@ -55,7 +55,7 @@ describe('Hono content-addressed release transaction', () => {
     expect(script).toMatch(/sha256sum\s+-c\s+["']?release\.manifest/);
   });
 
-  test('release tuple 对配置预检、Compose 与公网 contract 使用同一 canonical Web origin', () => {
+  test('release tuple 对 production 使用 canonical Web origin，并仅为 Preview 增加 colanns.me 子域规则', () => {
     const compose = readFileSync(composePath, 'utf8');
     const script = readDeployScript();
     if (!script) return;
@@ -68,8 +68,11 @@ describe('Hono content-addressed release transaction', () => {
     expect(compose).not.toMatch(/^\s+ARENA_ROOM_ALLOWED_ORIGINS:/mu);
     expect(script).toContain('--env-file "$runtime_env"');
     expect(script).toContain("web_origin='https://mahoshojo.colanns.me'");
-    expect(script).toContain('HONO_DEPLOY_CORS_ORIGINS="$web_origin"');
-    expect(script).toContain('-e HONO_CORS_ORIGINS="$web_origin"');
+    expect(script).toContain("preview_cors_origin='https://*.colanns.me'");
+    expect(script).toContain('cors_origins="$web_origin"');
+    expect(script).toMatch(/preview\)\s+cors_origins="\$web_origin,\$preview_cors_origin"/u);
+    expect(script).toContain('HONO_DEPLOY_CORS_ORIGINS="$cors_origins"');
+    expect(script).toContain('-e HONO_CORS_ORIGINS="$cors_origins"');
     expect(script).toContain('--header "Origin: $web_origin"');
     expect(script).toContain('"Access-Control-Allow-Origin: $web_origin"');
     expect(script).not.toMatch(/-e ARENA_ROOM_ALLOWED_ORIGINS=/u);

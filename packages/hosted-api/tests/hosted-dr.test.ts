@@ -39,7 +39,12 @@ describe('Hosted API cross-runtime CORS contract', () => {
     expect(resolveHostedApiCorsOrigin('https://mahoshojo.colanns.me', allowedOrigins)).toBe(
       'https://mahoshojo.colanns.me',
     );
+    expect(resolveHostedApiCorsOrigin('https://branch.preview.colanns.me', allowedOrigins)).toBe(
+      'https://branch.preview.colanns.me',
+    );
     expect(resolveHostedApiCorsOrigin('https://colanns.me', allowedOrigins)).toBe('');
+    expect(resolveHostedApiCorsOrigin('http://branch.preview.colanns.me', allowedOrigins)).toBe('');
+    expect(resolveHostedApiCorsOrigin('https://preview.example.com', allowedOrigins)).toBe('');
     expect(HOSTED_API_CORS_ALLOW_METHODS).toContain('POST');
     expect(HOSTED_API_CORS_ALLOW_HEADERS).toContain('Authorization');
     expect(hasValidHostedApiProductionCorsOrigins(allowedOrigins)).toBe(true);
@@ -55,14 +60,16 @@ describe('Hosted API cross-runtime CORS contract', () => {
       {
         method: 'OPTIONS',
         headers: {
-          Origin: 'https://app.example.test',
+          Origin: 'https://branch.preview.colanns.me',
           'Access-Control-Request-Method': 'POST',
         },
       },
     ), allowedOrigins);
 
     expect(response.status).toBe(204);
-    expect(response.headers.get('access-control-allow-origin')).toBe('https://app.example.test');
+    expect(response.headers.get('access-control-allow-origin')).toBe(
+      'https://branch.preview.colanns.me',
+    );
     expect(response.headers.get('access-control-allow-methods')).toContain('POST');
     expect(response.headers.get('access-control-allow-headers')).toContain('Authorization');
     expect(response.headers.get('access-control-allow-credentials')).toBeNull();
